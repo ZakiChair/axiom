@@ -7,13 +7,16 @@
  * graphe est mis à jour de façon impérative depuis Chart.tsx.
  */
 import { createStore } from "zustand/vanilla";
-import type { Candle, Timeframe } from "@axiom/types";
+import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
 
 export interface MarketState {
+  /** Source de marché courante (Binance par défaut). */
+  exchange: ExchangeId;
   symbol: string;
   timeframe: Timeframe;
   /** Buffer de bougies (source de vérité), non abonné dans le rendu React. */
   candles: Candle[];
+  setExchange: (exchange: ExchangeId) => void;
   setSymbol: (symbol: string) => void;
   setTimeframe: (timeframe: Timeframe) => void;
   /** Remplace le buffer (backfill REST). */
@@ -23,10 +26,12 @@ export interface MarketState {
 }
 
 export const marketStore = createStore<MarketState>((set, get) => ({
+  exchange: "binance",
   symbol: "BTCUSDT",
   timeframe: "1m",
   candles: [],
 
+  setExchange: (exchange) => set({ exchange }),
   setSymbol: (symbol) => set({ symbol: symbol.toUpperCase() }),
   setTimeframe: (timeframe) => set({ timeframe }),
   setCandles: (candles) => set({ candles }),

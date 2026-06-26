@@ -10,7 +10,7 @@
  * marketStore ne déclenche une sauvegarde que si symbole/timeframe changent — le
  * buffer de bougies change à chaque tick mais il est explicitement ignoré.
  */
-import type { ChartState, IndicatorInstance, Timeframe } from "@axiom/types";
+import type { ChartState, ExchangeId, IndicatorInstance, Timeframe } from "@axiom/types";
 import { getIndicator } from "@axiom/indicators";
 import { marketStore } from "./market";
 import { indicatorsStore, defaultParams } from "./indicators";
@@ -18,6 +18,9 @@ import { watchlistStore, DEFAULT_WATCHLIST } from "./watchlist";
 
 const CHART_KEY = "axiom:chartState:v1";
 const WATCH_KEY = "axiom:watchlist:v1";
+
+/** Sources câblées : seules valeurs d'exchange restaurables (cf. data/adapters.ts). */
+const RESTORABLE_EXCHANGES: ExchangeId[] = ["binance", "kraken", "coinbase"];
 
 /** Lecture JSON tolérante (localStorage indisponible / JSON corrompu => null). */
 function readJson<T>(key: string): T | null {
@@ -40,10 +43,10 @@ function writeJson(key: string, value: unknown): void {
 
 /** Construit le ChartState courant depuis les stores. */
 function currentChartState(): ChartState {
-  const { symbol, timeframe } = marketStore.getState();
+  const { exchange, symbol, timeframe } = marketStore.getState();
   return {
     symbol,
-    exchange: "binance",
+    exchange,
     timeframe,
     chartType: "candle_solid",
     indicators: indicatorsStore.getState().indicators,
@@ -69,6 +72,12 @@ export function hydrateStores(): void {
   const persisted = readJson<Partial<ChartState>>(CHART_KEY);
 
   if (persisted) {
+    if (
+      typeof persisted.exchange === "string" &&
+      RESTORABLE_EXCHANGES.includes(persisted.exchange)
+    ) {
+      marketStore.getState().setExchange(persisted.exchange);
+    }
     if (typeof persisted.symbol === "string" && persisted.symbol.length > 0) {
       marketStore.getState().setSymbol(persisted.symbol);
     }
@@ -111,7 +120,11 @@ export function hydrateStores(): void {
  */
 export function enablePersistence(): void {
   marketStore.subscribe((state, prev) => {
-    if (state.symbol !== prev.symbol || state.timeframe !== prev.timeframe) {
+    if (
+      state.exchange !== prev.exchange ||
+      state.symbol !== prev.symbol ||
+      state.timeframe !== prev.timeframe
+    ) {
       saveChartState();
     }
   });

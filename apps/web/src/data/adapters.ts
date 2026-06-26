@@ -1,0 +1,44 @@
+/**
+ * Registre des adaptateurs d'exchange + capacités de timeframe par source.
+ *
+ * - getAdapter(exchange) : renvoie l'IExchangeAdapter de la source demandée
+ *   (binance / kraken / coinbase). Repli sur Binance pour toute source non câblée
+ *   (bybit/okx/deribit présents dans ExchangeId mais sans adaptateur ici).
+ * - SUPPORTED_TIMEFRAMES : source de vérité des TF réellement honorés par CHAQUE
+ *   adaptateur (issu de leurs en-têtes). Sert au grisage des boutons TF et au repli
+ *   automatique quand on change de source vers un TF non supporté.
+ *
+ * Intersection sûre (commune aux trois) : 1m, 5m, 15m, 30m, 1h, 4h, 1d.
+ */
+import type { ExchangeId, IExchangeAdapter, Timeframe } from "@axiom/types";
+import { binanceAdapter } from "./binance";
+import { krakenAdapter } from "./kraken";
+import { coinbaseAdapter } from "./coinbase";
+
+/** Adaptateurs câblés dans le LOT 4 (les autres ExchangeId ne sont pas implémentés). */
+const ADAPTERS: Partial<Record<ExchangeId, IExchangeAdapter>> = {
+  binance: binanceAdapter,
+  kraken: krakenAdapter,
+  coinbase: coinbaseAdapter,
+};
+
+/** Adaptateur de la source demandée ; repli sur Binance si non câblée. */
+export function getAdapter(exchange: ExchangeId): IExchangeAdapter {
+  return ADAPTERS[exchange] ?? binanceAdapter;
+}
+
+/**
+ * TF supportés par source (cf. en-têtes des adaptateurs) :
+ *  - Binance : tout le natif (1m..1M) + 3M/6M/12M agrégés côté client depuis 1M.
+ *  - Kraken  : jusqu'à 1w (NI 2h/6h/12h, NI 3m/3d, NI 1M/3M+, NI secondes).
+ *  - Coinbase: jusqu'à 1d (1m..6h + 1d ; NI 1w/3d/12h, NI 1M/3M+, NI secondes).
+ */
+export const SUPPORTED_TIMEFRAMES: Partial<Record<ExchangeId, Timeframe[]>> = {
+  binance: [
+    "1s", "1m", "3m", "5m", "15m", "30m",
+    "1h", "2h", "4h", "6h", "12h",
+    "1d", "3d", "1w", "1M", "3M", "6M", "12M",
+  ],
+  kraken: ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"],
+  coinbase: ["1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "1d"],
+};

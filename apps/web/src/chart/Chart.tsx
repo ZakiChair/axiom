@@ -11,7 +11,7 @@ import { dispose, init } from "klinecharts";
 import type { KLineData } from "klinecharts";
 import { useStore } from "zustand";
 import type { Candle, Unsubscribe } from "@axiom/types";
-import { binanceAdapter } from "../data/binance";
+import { getAdapter } from "../data/adapters";
 import { marketStore } from "../store/market";
 import { indicatorsStore } from "../store/indicators";
 import { orderflowStore } from "../store/orderflow";
@@ -34,6 +34,7 @@ export function Chart() {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const exchange = useStore(marketStore, (s) => s.exchange);
   const symbol = useStore(marketStore, (s) => s.symbol);
   const timeframe = useStore(marketStore, (s) => s.timeframe);
 
@@ -77,8 +78,11 @@ export function Chart() {
     let cancelled = false;
     let unsubscribe: Unsubscribe | null = null;
 
+    // Adaptateur de la source courante (Binance/Kraken/Coinbase).
+    const adapter = getAdapter(exchange);
+
     // 1) Backfill REST, puis 2) live WS.
-    binanceAdapter
+    adapter
       .fetchKlines(symbol, timeframe, { limit: 500 })
       .then((candles) => {
         if (cancelled) return; // symbole/TF déjà changé : on abandonne ce backfill.
@@ -91,7 +95,7 @@ export function Chart() {
         // Backfill prêt : reseed le CVD et lance le flux de trades si actif.
         orderflow.onCandles();
 
-        unsubscribe = binanceAdapter.subscribeKline(symbol, timeframe, (candle) => {
+        unsubscribe = adapter.subscribeKline(symbol, timeframe, (candle) => {
           marketStore.getState().upsertCandle(candle);
           chart.updateData(toKLineData(candle)); // mise à jour impérative, pas de re-render.
 
@@ -119,7 +123,7 @@ export function Chart() {
       if (unsubscribe) unsubscribe();
       dispose(chart); // détruit panes + indicateurs ; pas de removeIndicator manuel.
     };
-  }, [symbol, timeframe]);
+  }, [exchange, symbol, timeframe]);
 
   return (
     // Conteneur relatif : le graphe le remplit (absolute inset-0), le canvas

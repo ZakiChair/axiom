@@ -65,6 +65,7 @@ function Metric({ label, value, color }: { label: string; value: string; color?:
 }
 
 export function DerivativesPanel() {
+  const exchange = useStore(marketStore, (s) => s.exchange);
   const symbol = useStore(marketStore, (s) => s.symbol);
   const hasKey = useStore(coinalyzeKeyStore, (s) => s.hasKey);
   const setKey = useStore(coinalyzeKeyStore, (s) => s.setKey);
@@ -81,9 +82,13 @@ export function DerivativesPanel() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Coinalyze mappe le symbole sur un perpétuel : pertinent uniquement pour Binance (M6).
+  const isBinance = exchange === "binance";
+
   useEffect(() => {
-    // Pas de clé : on n'appelle rien et on réinitialise l'affichage.
-    if (!hasKey) {
+    // Hors Binance ou sans clé : on n'appelle rien et on réinitialise l'affichage
+    // (aucun appel Coinalyze erroné pour un symbole d'une autre source).
+    if (!hasKey || !isBinance) {
       setOi(undefined);
       setFunding(undefined);
       setLs(undefined);
@@ -136,13 +141,28 @@ export function DerivativesPanel() {
       ignore = true;
       clearInterval(timer);
     };
-  }, [symbol, hasKey]);
+  }, [symbol, hasKey, isBinance]);
 
   const saveKey = () => {
     setKey(draftKey);
     setDraftKey("");
     setEditing(false);
   };
+
+  // Source non-Binance : panneau désactivé (Coinalyze = Binance-only dans ce MVP).
+  if (!isBinance) {
+    return (
+      <section className="flex shrink-0 flex-col border-t border-neutral-800">
+        <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">Dérivés</span>
+        </div>
+        <p className="px-3 py-3 text-[11px] leading-snug text-neutral-500">
+          Binance uniquement — Open Interest, funding, long/short et liquidations ne sont
+          disponibles que pour la source Binance.
+        </p>
+      </section>
+    );
+  }
 
   const coinalyzeSymbol = toCoinalyzeSymbol(symbol);
 

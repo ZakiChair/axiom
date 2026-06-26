@@ -1,13 +1,14 @@
 /**
- * Toolbar — sélecteurs symbole et timeframe, branchés sur le store marché vanilla.
- * Un changement re-déclenche backfill + souscription côté Chart (effet [symbol, tf]).
+ * Toolbar — sélecteurs source / symbole / timeframe, branchés sur le store marché vanilla.
+ * Un changement re-déclenche backfill + souscription côté Chart (effet [exchange, symbol, tf]).
  */
-import { useEffect, useState } from "react";
 import { useStore } from "zustand";
-import type { Timeframe } from "@axiom/types";
+import type { ExchangeId, Timeframe } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
+import { SUPPORTED_TIMEFRAMES } from "../data/adapters";
 import { IndicatorMenu } from "./IndicatorMenu";
+import { PairSearch } from "./PairSearch";
 
 const SYMBOL_PRESETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"] as const;
 // "m" = minute, "M" = mois (1M/3M/6M/12M). 1w & 1M sont natifs Binance ;
@@ -16,39 +17,62 @@ const TIMEFRAMES: Timeframe[] = [
   "1m", "5m", "15m", "1h", "4h", "1d", "1w", "1M", "3M", "6M", "12M",
 ];
 
+/** Sources câblées (LOT 4) + libellés affichés. */
+const EXCHANGES: { id: ExchangeId; label: string }[] = [
+  { id: "binance", label: "Binance" },
+  { id: "kraken", label: "Kraken" },
+  { id: "coinbase", label: "Coinbase" },
+];
+
+/** Libellé d'une source (pour les infobulles de grisage). */
+function exchangeLabel(id: ExchangeId): string {
+  return EXCHANGES.find((e) => e.id === id)?.label ?? id;
+}
+
 export function Toolbar() {
+  const exchange = useStore(marketStore, (s) => s.exchange);
   const symbol = useStore(marketStore, (s) => s.symbol);
   const timeframe = useStore(marketStore, (s) => s.timeframe);
+  const setExchange = useStore(marketStore, (s) => s.setExchange);
   const setSymbol = useStore(marketStore, (s) => s.setSymbol);
   const setTimeframe = useStore(marketStore, (s) => s.setTimeframe);
   const orderflowEnabled = useStore(orderflowStore, (s) => s.enabled);
   const toggleOrderflow = useStore(orderflowStore, (s) => s.toggle);
 
-  // Brouillon local du champ texte ; synchronisé si le symbole change ailleurs (presets).
-  const [draft, setDraft] = useState(symbol);
-  useEffect(() => setDraft(symbol), [symbol]);
+  const supportedTf = SUPPORTED_TIMEFRAMES[exchange] ?? [];
+  const isBinance = exchange === "binance";
 
-  const submitSymbol = () => {
-    const value = draft.trim();
-    if (value.length > 0) setSymbol(value);
+  /**
+   * Changement de source : si le TF courant n'est pas supporté par la nouvelle source,
+   * on retombe sur 1h (commun aux trois). L'orderflow (Binance-only) est coupé hors Binance.
+   */
+  const onChangeExchange = (next: ExchangeId) => {
+    setExchange(next);
+    const supported = SUPPORTED_TIMEFRAMES[next] ?? [];
+    if (!supported.includes(timeframe)) setTimeframe("1h");
+    if (next !== "binance") orderflowStore.getState().setEnabled(false);
   };
 
   return (
     <header className="flex flex-wrap items-center gap-3 border-b border-neutral-800 bg-neutral-950 px-4 py-2">
       <span className="font-semibold tracking-wide text-neutral-100">AXIOM</span>
 
-      {/* Champ symbole libre (validation à Entrée ou à la perte de focus). */}
-      <input
-        value={draft}
-        onChange={(e) => setDraft(e.target.value.toUpperCase())}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") submitSymbol();
-        }}
-        onBlur={submitSymbol}
-        spellCheck={false}
-        className="w-32 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-neutral-500"
-        aria-label="Symbole"
-      />
+      {/* Sélecteur de source. */}
+      <select
+        value={exchange}
+        onChange={(e) => onChangeExchange(e.target.value as ExchangeId)}
+        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-neutral-500"
+        aria-label="Source"
+      >
+        {EXCHANGES.map((ex) => (
+          <option key={ex.id} value={ex.id}>
+            {ex.label}
+          </option>
+        ))}
+      </select>
+
+      {/* Recherche de paires (catalogue de la source courante) + saisie libre. */}
+      <PairSearch />
 
       {/* Presets symbole. */}
       <div className="flex gap-1">
@@ -70,22 +94,29 @@ export function Toolbar() {
 
       <div className="mx-1 h-5 w-px bg-neutral-800" />
 
-      {/* Sélecteur de timeframe. */}
+      {/* Sélecteur de timeframe (grisé si non supporté par la source). */}
       <div className="flex gap-1">
-        {TIMEFRAMES.map((tf) => (
-          <button
-            key={tf}
-            type="button"
-            onClick={() => setTimeframe(tf)}
-            className={`rounded px-2 py-1 text-xs ${
-              timeframe === tf
-                ? "bg-emerald-500 text-neutral-950"
-                : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
-            }`}
-          >
-            {tf}
-          </button>
-        ))}
+        {TIMEFRAMES.map((tf) => {
+          const unsupported = !supportedTf.includes(tf);
+          return (
+            <button
+              key={tf}
+              type="button"
+              disabled={unsupported}
+              onClick={() => setTimeframe(tf)}
+              title={unsupported ? `non supporté par ${exchangeLabel(exchange)}` : undefined}
+              className={`rounded px-2 py-1 text-xs ${
+                unsupported
+                  ? "cursor-not-allowed bg-neutral-900 text-neutral-700"
+                  : timeframe === tf
+                    ? "bg-emerald-500 text-neutral-950"
+                    : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+              }`}
+            >
+              {tf}
+            </button>
+          );
+        })}
       </div>
 
       <div className="mx-1 h-5 w-px bg-neutral-800" />
@@ -93,15 +124,19 @@ export function Toolbar() {
       {/* Panneau des indicateurs @axiom (activer/désactiver). */}
       <IndicatorMenu />
 
-      {/* Orderflow (M5) : active/désactive CVD (sous-pane) + footprint (canvas). */}
+      {/* Orderflow (M5) : Binance uniquement (CVD + footprint via @aggTrade). */}
       <button
         type="button"
         onClick={toggleOrderflow}
+        disabled={!isBinance}
         aria-pressed={orderflowEnabled}
+        title={isBinance ? undefined : "Binance uniquement"}
         className={`rounded px-2 py-1 text-xs ${
-          orderflowEnabled
-            ? "bg-cyan-500 text-neutral-950"
-            : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+          !isBinance
+            ? "cursor-not-allowed bg-neutral-900 text-neutral-700"
+            : orderflowEnabled
+              ? "bg-cyan-500 text-neutral-950"
+              : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
         }`}
       >
         Orderflow

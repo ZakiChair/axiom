@@ -24,15 +24,10 @@
  *   - WS v2 OHLC  : https://docs.kraken.com/api/docs/websocket-v2/ohlc
  *   - WS v2 trade : https://docs.kraken.com/api/docs/websocket-v2/trade
  */
-import type { Candle, ExchangeId, IExchangeAdapter, Timeframe, Trade, Unsubscribe } from "@axiom/types";
+import type { Candle, IExchangeAdapter, Timeframe, Trade, Unsubscribe } from "@axiom/types";
 
 const REST_OHLC_URL = "https://api.kraken.com/0/public/OHLC";
 const WS_URL = "wss://ws.kraken.com/v2";
-
-// NOTE IMPORTANTE : ExchangeId (@axiom/types) ne liste PAS encore "kraken"
-// (binance|bybit|okx|deribit|coinbase). Le type est figé (cf. BUILD-CONTRACT, §propriété des
-// fichiers). On signale le manque à l'orchestrateur et on caste en attendant l'ajout de "kraken".
-const KRAKEN_ID = "kraken" as unknown as ExchangeId;
 
 /** Devises de cotation reconnues, suffixe le plus LONG d'abord (4 caractères avant 3). */
 const QUOTE_ASSETS = ["USDT", "USDC", "USDD", "TUSD", "DAI", "USD", "EUR", "GBP", "BTC", "ETH"];
@@ -174,7 +169,7 @@ function krakenWsTradeToTrade(t: KrakenWsTrade): Trade {
 }
 
 export const krakenAdapter: IExchangeAdapter = {
-  id: KRAKEN_ID,
+  id: "kraken",
 
   async fetchKlines(symbol, tf, opts) {
     const minutes = krakenInterval(tf);

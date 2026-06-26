@@ -1,0 +1,27 @@
+/**
+ * App — layout sombre plein écran : toolbar en haut, graphe sur le reste.
+ */
+import { Toolbar } from "./components/Toolbar";
+import { Chart } from "./chart/Chart";
+import { Watchlist } from "./components/Watchlist";
+import { DerivativesPanel } from "./components/DerivativesPanel";
+
+export function App() {
+  return (
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-neutral-950 text-neutral-200">
+      <Toolbar />
+      {/* min-h-0 indispensable pour que le graphe (flex-1) prenne une hauteur réelle. */}
+      <main className="flex min-h-0 flex-1">
+        {/* min-w-0 : le graphe peut rétrécir face au panneau latéral. */}
+        <div className="min-w-0 flex-1">
+          <Chart />
+        </div>
+        {/* Colonne droite : watchlist (haut, défilable) + panneau Dérivés (bas). */}
+        <aside className="flex w-60 shrink-0 flex-col border-l border-neutral-800 bg-neutral-950">
+          <Watchlist />
+          <DerivativesPanel />
+        </aside>
+      </main>
+    </div>
+  );
+}

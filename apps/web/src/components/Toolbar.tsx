@@ -10,7 +10,11 @@ import { orderflowStore } from "../store/orderflow";
 import { IndicatorMenu } from "./IndicatorMenu";
 
 const SYMBOL_PRESETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"] as const;
-const TIMEFRAMES: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1d"];
+// "m" = minute, "M" = mois (1M/3M/6M/12M). 1w & 1M sont natifs Binance ;
+// 3M/6M/12M sont agrégés côté client depuis le mensuel (voir binance.ts).
+const TIMEFRAMES: Timeframe[] = [
+  "1m", "5m", "15m", "1h", "4h", "1d", "1w", "1M", "3M", "6M", "12M",
+];
 
 export function Toolbar() {
   const symbol = useStore(marketStore, (s) => s.symbol);

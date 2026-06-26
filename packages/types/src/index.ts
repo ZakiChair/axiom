@@ -12,9 +12,12 @@ export type Timeframe =
   | "1s" | "5s" | "15s"
   | "1m" | "3m" | "5m" | "15m" | "30m"
   | "1h" | "2h" | "4h" | "6h" | "12h"
-  | "1d" | "3d" | "1w" | "1M";
+  | "1d" | "3d" | "1w" | "1M"
+  // Trimestriel / semestriel / annuel : non natifs chez la plupart des exchanges,
+  // agrégés côté client depuis le mensuel (1M). Convention : "M" = mois.
+  | "3M" | "6M" | "12M";
 
-export type ExchangeId = "binance" | "bybit" | "okx" | "deribit" | "coinbase";
+export type ExchangeId = "binance" | "bybit" | "okx" | "deribit" | "coinbase" | "kraken";
 
 export type MarketType = "spot" | "perp" | "futures" | "option";
 

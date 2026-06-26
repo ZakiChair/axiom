@@ -12,10 +12,22 @@ import { ema } from "./trend/ema";
 import { macd } from "./trend/macd";
 import { rsi } from "./momentum/rsi";
 import { bollinger } from "./volatility/bollinger";
+import { atr } from "./volatility/atr";
 import { volume } from "./volume/volume";
 import { vwap } from "./volume/vwap";
+import { anchoredVwap } from "./volume/anchored-vwap";
 
-export const INDICATORS: IndicatorDef[] = [sma, ema, macd, rsi, bollinger, volume, vwap];
+export const INDICATORS: IndicatorDef[] = [
+  sma,
+  ema,
+  macd,
+  rsi,
+  bollinger,
+  atr,
+  volume,
+  vwap,
+  anchoredVwap,
+];
 
 export function getIndicator(id: string): IndicatorDef | undefined {
   return INDICATORS.find((i) => i.id === id);

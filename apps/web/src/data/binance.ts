@@ -6,7 +6,7 @@
  * - subscribeTrades : flux WS @aggTrade (M5 orderflow : CVD + footprint).
  * - fetchSymbolInfo : tickSize du symbole (bucketisation du footprint).
  */
-import type { Candle, IExchangeAdapter, Trade, Unsubscribe } from "@axiom/types";
+import type { Candle, IExchangeAdapter, Timeframe, Trade, Unsubscribe } from "@axiom/types";
 
 const REST_KLINES_URL = "https://api.binance.com/api/v3/klines";
 const REST_EXCHANGE_INFO_URL = "https://api.binance.com/api/v3/exchangeInfo";
@@ -154,14 +154,111 @@ export async function fetchSymbolInfo(symbol: string): Promise<BinanceSymbolMeta
   return { tickSize, pricePrecision: decimalsFromTick(tickStr ?? "") };
 }
 
+/**
+ * Timeframes longs NON natifs chez Binance (intervalle le plus long natif = 1M).
+ * Agrégés côté client par buckets calendaires depuis le mensuel (1M) :
+ * 3M = trimestre, 6M = semestre, 12M = année civile.
+ */
+const MONTHLY_AGG: Partial<Record<Timeframe, { base: Timeframe; months: number }>> = {
+  "3M": { base: "1M", months: 3 },
+  "6M": { base: "1M", months: 6 },
+  "12M": { base: "1M", months: 12 },
+};
+
+/** Début (ms, UTC) du bucket calendaire de `months` mois contenant `openTimeMs`. */
+function bucketStartMs(openTimeMs: number, months: number): number {
+  const d = new Date(openTimeMs);
+  const startMonth = Math.floor(d.getUTCMonth() / months) * months;
+  return Date.UTC(d.getUTCFullYear(), startMonth, 1);
+}
+
+/** Agrège des bougies mensuelles (1M) en buckets calendaires de `months` mois. */
+function aggregateMonthly(monthly: Candle[], months: number): Candle[] {
+  const out: Candle[] = [];
+  let cur: Candle | undefined;
+  let curKey = Number.NaN;
+  for (const c of monthly) {
+    const key = bucketStartMs(c.time, months);
+    // Dernier mois du bucket calendaire (trimestre => mars/juin/sept/déc, etc.).
+    const lastOfBucket = new Date(c.time).getUTCMonth() % months === months - 1;
+    if (cur === undefined || key !== curKey) {
+      cur = { ...c, time: key, closed: c.closed === true && lastOfBucket };
+      curKey = key;
+      out.push(cur);
+    } else {
+      cur.high = Math.max(cur.high, c.high);
+      cur.low = Math.min(cur.low, c.low);
+      cur.close = c.close;
+      cur.volume += c.volume;
+      if (c.quoteVolume !== undefined) cur.quoteVolume = (cur.quoteVolume ?? 0) + c.quoteVolume;
+      if (c.buyVolume !== undefined) cur.buyVolume = (cur.buyVolume ?? 0) + c.buyVolume;
+      if (c.sellVolume !== undefined) cur.sellVolume = (cur.sellVolume ?? 0) + c.sellVolume;
+      if (c.trades !== undefined) cur.trades = (cur.trades ?? 0) + c.trades;
+      cur.closed = c.closed === true && lastOfBucket;
+    }
+  }
+  return out;
+}
+
+/** Souscription WS @kline_<interval> brute, pour un intervalle natif Binance. */
+function subscribeKlineStream(
+  symbol: string,
+  interval: string,
+  cb: (c: Candle) => void,
+): Unsubscribe {
+  const url = `${WS_BASE_URL}/${symbol.toLowerCase()}@kline_${interval}`;
+  let ws: WebSocket | null = null;
+  let closedByUser = false;
+  let attempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const connect = () => {
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      attempt = 0; // succès => on remet le backoff à zéro.
+    };
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data as string) as BinanceWsKlineMessage;
+        if (msg.k) cb(wsKlineToCandle(msg.k));
+      } catch (err) {
+        console.error("[AXIOM] Message WS Binance illisible", err);
+      }
+    };
+    ws.onerror = () => {
+      ws?.close();
+    };
+    ws.onclose = () => {
+      if (closedByUser) return;
+      const delay = Math.min(30_000, 1_000 * 2 ** attempt);
+      attempt += 1;
+      reconnectTimer = setTimeout(connect, delay);
+    };
+  };
+
+  connect();
+
+  return () => {
+    closedByUser = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    ws?.close();
+  };
+}
+
 export const binanceAdapter: IExchangeAdapter = {
   id: "binance",
 
   async fetchKlines(symbol, tf, opts) {
+    const agg = MONTHLY_AGG[tf];
+    const interval = agg ? agg.base : tf;
+    const wanted = opts?.limit ?? 500;
+    // En mode agrégé : récupérer assez de mensuelles, plafonné à la limite Binance (1000).
+    const limit = agg ? Math.min(1000, wanted * agg.months) : wanted;
+
     const params = new URLSearchParams({
       symbol: symbol.toUpperCase(),
-      interval: tf,
-      limit: String(opts?.limit ?? 500),
+      interval,
+      limit: String(limit),
     });
     if (opts?.endTime !== undefined) params.set("endTime", String(opts.endTime));
 
@@ -170,52 +267,56 @@ export const binanceAdapter: IExchangeAdapter = {
       throw new Error(`Binance REST ${res.status} ${res.statusText}`);
     }
     const raw = (await res.json()) as BinanceRestKline[];
-    return raw.map(restKlineToCandle);
+    const candles = raw.map(restKlineToCandle);
+    return agg ? aggregateMonthly(candles, agg.months) : candles;
   },
 
   subscribeKline(symbol, tf, cb) {
-    const url = `${WS_BASE_URL}/${symbol.toLowerCase()}@kline_${tf}`;
-    let ws: WebSocket | null = null;
-    let closedByUser = false;
-    let attempt = 0;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    const agg = MONTHLY_AGG[tf];
+    // Intervalle natif Binance (incl. 1w et 1M) : souscription directe.
+    if (!agg) return subscribeKlineStream(symbol, tf, cb);
 
-    const connect = () => {
-      ws = new WebSocket(url);
+    // Timeframe long NON natif (3M/6M/12M) : agrégé côté client depuis le mensuel.
+    // Le flux WS @kline_1M ne pousse que le mois courant ; on amorce les mois
+    // précédents du bucket via un backfill REST, puis on recompose le bucket en live.
+    const { base, months } = agg;
+    const monthMap = new Map<number, Candle>();
+    let currentBucketKey = Number.NaN;
+    let cancelled = false;
 
-      ws.onopen = () => {
-        attempt = 0; // succès => on remet le backoff à zéro.
-      };
-
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data as string) as BinanceWsKlineMessage;
-          if (msg.k) cb(wsKlineToCandle(msg.k));
-        } catch (err) {
-          console.error("[AXIOM] Message WS Binance illisible", err);
-        }
-      };
-
-      // Une erreur ferme la socket, ce qui déclenche onclose -> reconnexion.
-      ws.onerror = () => {
-        ws?.close();
-      };
-
-      ws.onclose = () => {
-        if (closedByUser) return;
-        // Backoff exponentiel plafonné à 30 s : 1s, 2s, 4s, 8s, ... 30s.
-        const delay = Math.min(30_000, 1_000 * 2 ** attempt);
-        attempt += 1;
-        reconnectTimer = setTimeout(connect, delay);
-      };
+    const emitBucket = () => {
+      const monthly = [...monthMap.values()].sort((a, b) => a.time - b.time);
+      const last = aggregateMonthly(monthly, months).at(-1);
+      if (last) cb(last);
     };
 
-    connect();
+    binanceAdapter
+      .fetchKlines(symbol, base, { limit: months + 1 })
+      .then((monthly) => {
+        if (cancelled) return;
+        const lastMonthly = monthly.at(-1);
+        if (!lastMonthly) return;
+        currentBucketKey = bucketStartMs(lastMonthly.time, months);
+        for (const c of monthly) {
+          if (bucketStartMs(c.time, months) === currentBucketKey) monthMap.set(c.time, c);
+        }
+        emitBucket();
+      })
+      .catch((err) => console.error("[AXIOM] amorce agrégation kline échouée", err));
+
+    const unsub = subscribeKlineStream(symbol, base, (c) => {
+      const key = bucketStartMs(c.time, months);
+      if (key !== currentBucketKey) {
+        monthMap.clear();
+        currentBucketKey = key;
+      }
+      monthMap.set(c.time, c);
+      emitBucket();
+    });
 
     return () => {
-      closedByUser = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      ws?.close();
+      cancelled = true;
+      unsub();
     };
   },
 

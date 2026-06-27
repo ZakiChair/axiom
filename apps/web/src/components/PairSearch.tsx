@@ -16,7 +16,20 @@ import { fetchPairs } from "../data/pairs";
 /** Nombre maximum de résultats affichés (perf + lisibilité de la liste). */
 const MAX_RESULTS = 30;
 
-export function PairSearch() {
+export interface PairSearchProps {
+  /**
+   * Validation d'un symbole (résultat cliqué / saisie brute). Par défaut : change
+   * le symbole du graphe PRINCIPAL ; surchargé (ex. ajout à la comparaison).
+   */
+  onPick?: (symbol: string) => void;
+  /** Placeholder du champ (et libellé d'accessibilité). */
+  placeholder?: string;
+}
+
+export function PairSearch({
+  onPick,
+  placeholder = "Rechercher une paire",
+}: PairSearchProps = {}) {
   const exchange = useStore(marketStore, (s) => s.exchange);
   const setSymbol = useStore(marketStore, (s) => s.setSymbol);
 
@@ -47,7 +60,8 @@ export function PairSearch() {
   const choose = (value: string) => {
     const v = value.trim();
     if (v.length === 0) return;
-    setSymbol(v);
+    if (onPick) onPick(v);
+    else setSymbol(v);
     setQuery("");
     setOpen(false);
   };
@@ -67,11 +81,11 @@ export function PairSearch() {
           if (e.key === "Enter") choose(matches[0] ?? query);
           else if (e.key === "Escape") setOpen(false);
         }}
-        placeholder="Rechercher une paire"
+        placeholder={placeholder}
         spellCheck={false}
         autoComplete="off"
         className="w-44 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-neutral-500"
-        aria-label="Rechercher une paire"
+        aria-label={placeholder}
       />
 
       {open && matches.length > 0 && (

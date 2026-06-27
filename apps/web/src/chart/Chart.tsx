@@ -15,9 +15,11 @@ import { getAdapter } from "../data/adapters";
 import { marketStore } from "../store/market";
 import { indicatorsStore } from "../store/indicators";
 import { orderflowStore } from "../store/orderflow";
+import { compareStore } from "../store/compare";
 import { themeStore } from "../store/theme";
 import { ChartIndicators } from "./indicators";
 import { OrderflowController } from "./orderflow";
+import { CompareController } from "./compare";
 import { bindChart, unbindChart } from "./drawing";
 
 /** Candle (@axiom/types) -> KLineData (KLineChart). */
@@ -152,6 +154,14 @@ export function Chart() {
       orderflow.setEnabled(state.enabled);
     });
 
+    // Contrôleur multi-courbes (comparaison base 100) : superpose le principal +
+    // les symboles comparés dans un sous-pane dédié. Re-synchronise sur ajout/retrait
+    // (impératif, hors render-loop React). Le backfill principal déclenche le 1er sync.
+    const compare = new CompareController(chart, exchange, timeframe);
+    const unsubscribeCompare = compareStore.subscribe((state) => {
+      compare.sync(state.symbols);
+    });
+
     let cancelled = false;
     let unsubscribe: Unsubscribe | null = null;
 
@@ -172,6 +182,10 @@ export function Chart() {
         // Backfill prêt : reseed le CVD et lance le flux de trades si actif.
         orderflow.onCandles();
 
+        // Backfill prêt : (re)trace les courbes de comparaison alignées sur le
+        // nouveau symbole/TF/source (fetch des comparés + ligne du principal).
+        compare.sync(compareStore.getState().symbols);
+
         unsubscribe = adapter.subscribeKline(symbol, timeframe, (candle) => {
           marketStore.getState().upsertCandle(candle);
           chart.updateData(toKLineData(candle)); // mise à jour impérative, pas de re-render.
@@ -185,6 +199,9 @@ export function Chart() {
               indicatorsStore.getState().indicators,
               marketStore.getState().candles
             );
+            // Réaligne la ligne base 100 du principal sur le buffer étendu (live,
+            // impératif, sans re-render). Les comparés gardent leur série fetchée.
+            compare.onCandles();
           }
         });
       })
@@ -197,6 +214,8 @@ export function Chart() {
       unsubscribeTheme();
       unsubscribeIndicators();
       unsubscribeOrderflow();
+      unsubscribeCompare();
+      compare.dispose(); // retire le sous-pane de comparaison AVANT dispose.
       orderflow.dispose(); // ferme le WS aggTrade + retire le pane CVD AVANT dispose.
       if (unsubscribe) unsubscribe();
       unbindChart(chart); // détache le pont de dessin avant de détruire l'instance.

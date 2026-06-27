@@ -5,6 +5,7 @@ import { Toolbar } from "./components/Toolbar";
 import { DrawingToolbar } from "./components/DrawingToolbar";
 import { Chart } from "./chart/Chart";
 import { Watchlist } from "./components/Watchlist";
+import { CompareControl } from "./components/CompareControl";
 import { DerivativesPanel } from "./components/DerivativesPanel";
 import { MacroPanel } from "./components/MacroPanel";
 
@@ -20,9 +21,10 @@ export function App() {
         <div className="min-w-0 flex-1">
           <Chart />
         </div>
-        {/* Colonne droite : watchlist (haut, défilable) + panneaux Dérivés & Macro (bas). */}
+        {/* Colonne droite : watchlist (haut, défilable) + comparaison + Dérivés & Macro (bas). */}
         <aside className="flex w-60 shrink-0 flex-col border-l border-neutral-800 bg-neutral-950">
           <Watchlist />
+          <CompareControl />
           <DerivativesPanel />
           <MacroPanel />
         </aside>

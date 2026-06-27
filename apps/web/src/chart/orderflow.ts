@@ -1,5 +1,6 @@
 /**
- * Orderflow (M5) — CVD + footprint mono-Binance, alimenté par @aggTrade.
+ * Orderflow (M5) — CVD + footprint, alimenté par le flux de trades de la
+ * source active (Binance @aggTrade, Kraken/Coinbase via leur adaptateur).
  *
  * Deux rendus, une seule source tick :
  *  - CVD : sous-pane KLineChart dédié. Cumulative Volume Delta = somme cumulée de
@@ -24,7 +25,8 @@ import {
 } from "klinecharts";
 import type { Chart, KLineData, Point } from "klinecharts";
 import type { Candle, FootprintBar, FootprintRow, Trade, Unsubscribe } from "@axiom/types";
-import { binanceAdapter, fetchSymbolInfo } from "../data/binance";
+import { fetchSymbolInfo } from "../data/binance";
+import { getAdapter } from "../data/adapters";
 import { marketStore } from "../store/market";
 
 /** Pane prix (id par défaut de KLineChart, vérifié dans le bundle v9.8.x). */
@@ -319,7 +321,11 @@ export class OrderflowController {
     if (this.unsubTrades) return; // déjà abonné
     void this.resolveTick().then(() => {
       if (!this.running || this.unsubTrades) return;
-      this.unsubTrades = binanceAdapter.subscribeTrades(this.symbol, (t) =>
+      // Flux de trades de la source active (Binance/Kraken/Coinbase) : chaque
+      // adaptateur fournit le côté agresseur normalisé (Coinbase est inversé en
+      // amont). Le footprint fonctionne donc sur les trois sources.
+      const adapter = getAdapter(marketStore.getState().exchange);
+      this.unsubTrades = adapter.subscribeTrades(this.symbol, (t) =>
         this.onTrade(t)
       );
     });

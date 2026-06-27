@@ -48,13 +48,14 @@ export function Toolbar() {
 
   /**
    * Changement de source : si le TF courant n'est pas supporté par la nouvelle source,
-   * on retombe sur 1h (commun aux trois). L'orderflow (Binance-only) est coupé hors Binance.
+   * on retombe sur 1h (commun aux trois). L'orderflow suit désormais la source active
+   * (le footprint marche partout ; le CVD-par-bougie est complet là où les klines
+   * portent le volume taker — Binance/Coinbase — et plat sur Kraken).
    */
   const onChangeExchange = (next: ExchangeId) => {
     setExchange(next);
     const supported = SUPPORTED_TIMEFRAMES[next] ?? [];
     if (!supported.includes(timeframe)) setTimeframe("1h");
-    if (next !== "binance") orderflowStore.getState().setEnabled(false);
   };
 
   return (
@@ -128,19 +129,22 @@ export function Toolbar() {
       {/* Panneau des indicateurs @axiom (activer/désactiver). */}
       <IndicatorMenu />
 
-      {/* Orderflow (M5) : Binance uniquement (CVD + footprint via @aggTrade). */}
+      {/* Orderflow (M5) : CVD + footprint, alimenté par le flux de trades de la
+          source active. Footprint sur les 3 sources ; CVD complet sur
+          Binance/Coinbase (klines à volume taker), plat sur Kraken. */}
       <button
         type="button"
         onClick={toggleOrderflow}
-        disabled={!isBinance}
         aria-pressed={orderflowEnabled}
-        title={isBinance ? undefined : "Binance uniquement"}
+        title={
+          isBinance
+            ? undefined
+            : "Footprint complet ; CVD limité hors Binance/Coinbase"
+        }
         className={`rounded px-2 py-1 text-xs ${
-          !isBinance
-            ? "cursor-not-allowed bg-neutral-900 text-neutral-700"
-            : orderflowEnabled
-              ? "bg-cyan-500 text-neutral-950"
-              : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+          orderflowEnabled
+            ? "bg-cyan-500 text-neutral-950"
+            : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
         }`}
       >
         Orderflow

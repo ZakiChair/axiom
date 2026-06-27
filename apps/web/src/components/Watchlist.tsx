@@ -11,6 +11,7 @@ import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { watchlistStore } from "../store/watchlist";
 import { subscribeTickers } from "../data/ticker";
+import { SidebarSection } from "./SidebarSection";
 
 /** Cellules DOM (prix + variation) d'une ligne, mises à jour impérativement. */
 interface RowCells {
@@ -75,11 +76,7 @@ export function Watchlist() {
   };
 
   return (
-    <aside className="flex min-h-0 flex-1 flex-col bg-neutral-950">
-      <div className="border-b border-neutral-800 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">
-        Watchlist
-      </div>
-
+    <SidebarSection title="Watchlist" grow>
       <div className="flex-1 overflow-y-auto">
         {symbols.map((sym) => (
           <div
@@ -133,6 +130,6 @@ export function Watchlist() {
           className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-neutral-500"
         />
       </div>
-    </aside>
+    </SidebarSection>
   );
 }

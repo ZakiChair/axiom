@@ -18,7 +18,9 @@ import { useStore } from "zustand";
 import type { FundingRate, Liquidation, LongShortRatio, OpenInterest } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { coinalyzeKeyStore } from "../store/coinalyze";
+import { settingsUiStore } from "../store/settings-ui";
 import { CoinalyzeError, coinalyzeProvider, toCoinalyzeSymbol } from "../data/coinalyze";
+import { SidebarSection } from "./SidebarSection";
 
 /** Période d'agrégation du long/short ratio et fenêtre des liquidations affichées. */
 const LS_PERIOD = "5min";
@@ -68,12 +70,8 @@ export function DerivativesPanel() {
   const exchange = useStore(marketStore, (s) => s.exchange);
   const symbol = useStore(marketStore, (s) => s.symbol);
   const hasKey = useStore(coinalyzeKeyStore, (s) => s.hasKey);
-  const setKey = useStore(coinalyzeKeyStore, (s) => s.setKey);
-  const clearKey = useStore(coinalyzeKeyStore, (s) => s.clearKey);
-
-  // Brouillon du champ clé (jamais loggé, jamais persisté dans le state global).
-  const [draftKey, setDraftKey] = useState("");
-  const [editing, setEditing] = useState(false);
+  // La saisie de la clé Coinalyze vit désormais dans le panneau Réglages dédié.
+  const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
 
   const [oi, setOi] = useState<OpenInterest | undefined>();
   const [funding, setFunding] = useState<FundingRate | undefined>();
@@ -143,24 +141,15 @@ export function DerivativesPanel() {
     };
   }, [symbol, hasKey, isBinance]);
 
-  const saveKey = () => {
-    setKey(draftKey);
-    setDraftKey("");
-    setEditing(false);
-  };
-
   // Source non-Binance : panneau désactivé (Coinalyze = Binance-only dans ce MVP).
   if (!isBinance) {
     return (
-      <section className="flex shrink-0 flex-col border-t border-neutral-800">
-        <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">Dérivés</span>
-        </div>
+      <SidebarSection title="Dérivés">
         <p className="px-3 py-3 text-[11px] leading-snug text-neutral-500">
           Binance uniquement — Open Interest, funding, long/short et liquidations ne sont
           disponibles que pour la source Binance.
         </p>
-      </section>
+      </SidebarSection>
     );
   }
 
@@ -170,76 +159,21 @@ export function DerivativesPanel() {
   const recentLiqs = liqs.slice(-MAX_LIQ_ROWS).reverse();
 
   return (
-    <section className="flex shrink-0 flex-col border-t border-neutral-800">
-      <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">Dérivés</span>
-        {hasKey && !editing && (
+    <SidebarSection title="Dérivés">
+      {!hasKey ? (
+        /* --- Sans clé : renvoi vers les Réglages (aucun appel, aucune erreur bloquante) --- */
+        <div className="space-y-2 px-3 py-3 text-xs text-neutral-500">
+          <p className="leading-snug">
+            Ajoutez une clé Coinalyze pour afficher Open Interest, funding, long/short et
+            liquidations.
+          </p>
           <button
             type="button"
-            onClick={() => setEditing(true)}
-            className="text-[10px] text-neutral-600 hover:text-neutral-300"
+            onClick={openSettings}
+            className="rounded border border-border bg-surface px-2.5 py-1.5 text-[11px] text-text-dim transition hover:text-text"
           >
-            clé ✓ · modifier
+            Configurer dans Réglages ⚙
           </button>
-        )}
-      </div>
-
-      {!hasKey || editing ? (
-        /* --- Réglage de la clé (aucune erreur bloquante sans clé) --- */
-        <div className="space-y-2 px-3 py-3 text-xs text-neutral-400">
-          <p>
-            Saisissez une clé API Coinalyze (gratuite, sur coinalyze.net) pour afficher Open Interest,
-            funding, long/short et liquidations.
-          </p>
-          <input
-            type="password"
-            value={draftKey}
-            onChange={(e) => setDraftKey(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") saveKey();
-            }}
-            placeholder="Clé API Coinalyze"
-            spellCheck={false}
-            autoComplete="off"
-            className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-neutral-500"
-          />
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={saveKey}
-              className="rounded bg-emerald-500 px-2 py-1 text-[11px] font-medium text-accent-ink hover:bg-emerald-400"
-            >
-              Enregistrer
-            </button>
-            {hasKey && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditing(false);
-                    setDraftKey("");
-                  }}
-                  className="rounded bg-neutral-800 px-2 py-1 text-[11px] text-neutral-300 hover:bg-neutral-700"
-                >
-                  Annuler
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearKey();
-                    setEditing(false);
-                    setDraftKey("");
-                  }}
-                  className="rounded bg-neutral-800 px-2 py-1 text-[11px] text-red-400 hover:bg-neutral-700"
-                >
-                  Supprimer
-                </button>
-              </>
-            )}
-          </div>
-          <p className="text-[10px] text-neutral-600">
-            Stockée localement (localStorage), envoyée uniquement à api.coinalyze.net.
-          </p>
         </div>
       ) : (
         /* --- Données dérivées --- */
@@ -303,6 +237,6 @@ export function DerivativesPanel() {
           </p>
         </div>
       )}
-    </section>
+    </SidebarSection>
   );
 }

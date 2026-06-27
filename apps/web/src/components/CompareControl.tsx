@@ -14,6 +14,7 @@ import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { compareStore, MAX_COMPARE, MAIN_COLOR } from "../store/compare";
 import { PairSearch } from "./PairSearch";
+import { SidebarSection } from "./SidebarSection";
 
 export function CompareControl() {
   const symbols = useStore(compareStore, (s) => s.symbols);
@@ -24,15 +25,15 @@ export function CompareControl() {
   const full = symbols.length >= MAX_COMPARE;
 
   return (
-    <div className="border-t border-neutral-800">
-      <div className="flex items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-neutral-400">
-        <span>Comparer (base 100)</span>
-        <span className="text-[10px] font-normal text-neutral-600">
+    <SidebarSection
+      title="Comparer (base 100)"
+      action={
+        <span className="text-[10px] font-normal text-text-dim">
           {symbols.length}/{MAX_COMPARE}
         </span>
-      </div>
-
-      <div className="px-2 pb-2">
+      }
+    >
+      <div className="px-2 pb-2 pt-2">
         {full ? (
           <p className="px-1 py-1 text-[11px] text-neutral-600">
             Maximum {MAX_COMPARE} symboles comparés.
@@ -79,6 +80,6 @@ export function CompareControl() {
           ))}
         </ul>
       )}
-    </div>
+    </SidebarSection>
   );
 }

@@ -19,6 +19,8 @@ import { useStore } from "zustand";
 import type { MacroSeries } from "../data/macro";
 import { coinGeckoTotalProvider, fredM2WeeklyProvider, stablecoinsSupplyProvider } from "../data/macro";
 import { fredKeyStore, getFredKey } from "../store/macro";
+import { settingsUiStore } from "../store/settings-ui";
+import { SidebarSection } from "./SidebarSection";
 
 /** Rafraîchissement large (donnée macro basse fréquence). */
 const REFRESH_MS = 15 * 60_000; // ~15 min.
@@ -147,12 +149,8 @@ function Measure({
 
 export function MacroPanel() {
   const hasKey = useStore(fredKeyStore, (s) => s.hasKey);
-  const setKey = useStore(fredKeyStore, (s) => s.setKey);
-  const clearKey = useStore(fredKeyStore, (s) => s.clearKey);
-
-  // Brouillon du champ clé (jamais loggé, jamais persisté dans le state global).
-  const [draftKey, setDraftKey] = useState("");
-  const [editingKey, setEditingKey] = useState(false);
+  // La saisie de la clé FRED vit désormais dans le panneau Réglages dédié.
+  const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
 
   const [total, setTotal] = useState<MacroSeries>([]);
   const [stables, setStables] = useState<MacroSeries>([]);
@@ -228,12 +226,6 @@ export function MacroPanel() {
     };
   }, [hasKey, refreshTick]);
 
-  const saveKey = () => {
-    setKey(draftKey);
-    setDraftKey("");
-    setEditingKey(false);
-  };
-
   // Valeurs dérivées des séries.
   const totalValue = lastValue(total);
   const stablesValue = lastValue(stables);
@@ -244,24 +236,20 @@ export function MacroPanel() {
   const m2Pct = changePct(m2, VARIATION_WINDOW_MS);
   const m2Spark = m2.slice(-SPARK_POINTS).map((p) => p.value);
 
-  const showM2Form = !hasKey || editingKey;
-
   return (
-    <section className="flex shrink-0 flex-col border-t border-neutral-800">
-      <div className="flex items-center justify-between border-b border-neutral-800 px-3 py-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">
-          Masse monétaire
-        </span>
+    <SidebarSection
+      title="Masse monétaire"
+      action={
         <button
           type="button"
           onClick={() => setRefreshTick((t) => t + 1)}
-          className="text-[10px] text-neutral-600 hover:text-neutral-300"
+          className="text-[10px] text-text-dim transition hover:text-text"
           title="Rafraîchir maintenant"
         >
           {loading ? "maj…" : `maj ${formatClock(updatedAt)} · ↻`}
         </button>
-      </div>
-
+      }
+    >
       {/* 1. Capitalisation totale crypto (instantané — pas d'historique en gratuit). */}
       <Measure
         label="Cap. totale crypto"
@@ -283,73 +271,17 @@ export function MacroPanel() {
       <div className="px-3 py-2">
         <div className="flex items-baseline justify-between">
           <span className="text-[11px] text-neutral-500">M2 (US · FRED)</span>
-          {hasKey && !editingKey && (
-            <button
-              type="button"
-              onClick={() => setEditingKey(true)}
-              className="text-[10px] text-neutral-600 hover:text-neutral-300"
-            >
-              clé ✓ · modifier
-            </button>
-          )}
         </div>
 
-        {showM2Form ? (
-          /* --- Réglage de la clé FRED (aucune erreur bloquante sans clé) --- */
-          <div className="mt-1 space-y-2 text-xs text-neutral-400">
-            <p>
-              Clé API FRED (gratuite, sur fredaccount.stlouisfed.org/apikeys) pour afficher le M2 US.
-            </p>
-            <input
-              type="password"
-              value={draftKey}
-              onChange={(e) => setDraftKey(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") saveKey();
-              }}
-              placeholder="Clé API FRED"
-              spellCheck={false}
-              autoComplete="off"
-              className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-neutral-500"
-            />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={saveKey}
-                className="rounded bg-emerald-500 px-2 py-1 text-[11px] font-medium text-accent-ink hover:bg-emerald-400"
-              >
-                Enregistrer
-              </button>
-              {hasKey && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingKey(false);
-                      setDraftKey("");
-                    }}
-                    className="rounded bg-neutral-800 px-2 py-1 text-[11px] text-neutral-300 hover:bg-neutral-700"
-                  >
-                    Annuler
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      clearKey();
-                      setEditingKey(false);
-                      setDraftKey("");
-                    }}
-                    className="rounded bg-neutral-800 px-2 py-1 text-[11px] text-red-400 hover:bg-neutral-700"
-                  >
-                    Supprimer
-                  </button>
-                </>
-              )}
-            </div>
-            <p className="text-[10px] text-neutral-600">
-              Stockée localement (localStorage), envoyée uniquement à api.stlouisfed.org.
-            </p>
-          </div>
+        {!hasKey ? (
+          /* --- Sans clé FRED : renvoi vers les Réglages (le M2 reste optionnel) --- */
+          <button
+            type="button"
+            onClick={openSettings}
+            className="mt-1 rounded border border-border bg-surface px-2.5 py-1.5 text-[11px] text-text-dim transition hover:text-text"
+          >
+            Configurer dans Réglages ⚙
+          </button>
         ) : (
           /* --- Valeur M2 (milliards $ → $ absolu pour la notation compacte) --- */
           <>
@@ -377,6 +309,6 @@ export function MacroPanel() {
         Sources : CoinGecko (cap. crypto, instantané), DefiLlama (stablecoins), FRED (M2 US,
         clé gratuite). Variation ~30 j. Données basse fréquence, maj ~15 min.
       </p>
-    </section>
+    </SidebarSection>
   );
 }

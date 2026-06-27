@@ -9,11 +9,13 @@
  * Calcul (n = période de normalisation, défaut 9) :
  *   median[i] = (high + low) / 2                                    (hl2)
  *   raw       = (median - min(median, n)) / (max(median, n) - min(median, n))
- *   value     = 0.66·(2·raw - 1) + 0.67·value[i-1]   puis clampé à [-0.999, 0.999]
+ *   value     = 0.33·(2·raw - 1) + 0.67·value[i-1]   puis clampé à [-0.999, 0.999]
  *   fisher    = 0.5·ln((1 + value) / (1 - value)) + 0.5·fisher[i-1]
  *   trigger   = fisher[i-1]                                         (ligne décalée)
  *
- * Le facteur 0.66 = 0.33·2 (forme d'Ehlers). Les états récursifs `value` et
+ * Forme canonique d'Ehlers : value = 0.33·2·((raw - 0.5)) + 0.67·value[-1] ;
+ * comme (2·raw - 1) = 2·(raw - 0.5), le coefficient sur (2·raw - 1) est 0.33.
+ * Les états récursifs `value` et
  * `fisher` sont amorcés à 0 sur la première fenêtre pleine (index n-1).
  *
  * Alignement : la première valeur apparaît à l'index `n - 1` (fenêtre haut/bas
@@ -60,7 +62,7 @@ export const fisher: IndicatorDef = {
       // Plage nulle (prix plat) -> position médiane (raw = 0.5).
       const raw = range === 0 ? 0.5 : (m - minL) / range;
 
-      let value = 0.66 * (2 * raw - 1) + 0.67 * valuePrev;
+      let value = 0.33 * (2 * raw - 1) + 0.67 * valuePrev;
       // Clamp anti-divergence du logarithme (|value| < 1 strict).
       if (value > 0.999) value = 0.999;
       else if (value < -0.999) value = -0.999;

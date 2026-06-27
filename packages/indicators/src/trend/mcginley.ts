@@ -31,8 +31,9 @@ export const mcginley: IndicatorDef = {
     if (n === 0) return { series: { mcginley: out } };
 
     // Amorce avec la première clôture.
-    let md = close[0];
-    if (md === undefined) return { series: { mcginley: out } };
+    const first = close[0];
+    if (first === undefined) return { series: { mcginley: out } };
+    let md: number = first;
     out[0] = md;
 
     for (let i = 1; i < n; i++) {

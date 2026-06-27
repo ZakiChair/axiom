@@ -39,9 +39,10 @@ describe("trix", () => {
     const { series } = trix.calc(candles, {}, emptyCtx);
     const out = series.trix ?? [];
     expect(out).toHaveLength(80);
-    // length=18 : 3 EMA enchaînées repoussent la première valeur bien après l'index 0.
+    // length=18 : 3 EMA enchaînées (seed à 17 chacune) -> première valeur à l'index 52.
     expect(out[0]).toBeUndefined();
-    expect(out[40]).toBeTypeOf("number");
+    expect(out[51]).toBeUndefined();
+    expect(out[52]).toBeTypeOf("number");
     for (const v of out) {
       if (v !== undefined) expect(Number.isFinite(v)).toBe(true);
     }

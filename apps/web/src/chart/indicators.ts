@@ -67,14 +67,17 @@ function ensureRegistered(def: IndicatorDef): void {
   const outputKeys = def.outputs.map((o) => o.key);
 
   const figures: Array<IndicatorFigure<AxiomPoint>> = def.outputs.map((o) => {
-    const isHistogram = o.style === "histogram";
-    return {
-      key: o.key,
-      title: `${o.name}: `,
-      // Histogramme -> barres (référence 0) ; tout le reste -> ligne.
-      type: isHistogram ? "bar" : "line",
-      ...(isHistogram ? { baseValue: 0 } : {}),
-    };
+    // Mapping déclaratif PlotStyle (@axiom/types) -> figure KLineChart :
+    //  - histogram -> barres (référence 0) ;
+    //  - points    -> marqueurs circulaires (SAR, fractals, pivotHighLow…) ;
+    //  - line/area/band et tout style inconnu -> ligne (dégradation propre, jamais cassante).
+    if (o.style === "histogram") {
+      return { key: o.key, title: `${o.name}: `, type: "bar", baseValue: 0 };
+    }
+    if (o.style === "points") {
+      return { key: o.key, title: `${o.name}: `, type: "circle" };
+    }
+    return { key: o.key, title: `${o.name}: `, type: "line" };
   });
 
   registerIndicator<AxiomPoint>({

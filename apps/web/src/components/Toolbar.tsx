@@ -7,6 +7,7 @@ import type { ExchangeId, Timeframe } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
 import { volumeProfileStore } from "../store/volumeProfile";
+import { revenueStore } from "../store/revenue";
 import { SUPPORTED_TIMEFRAMES } from "../data/adapters";
 import { IndicatorMenu } from "./IndicatorMenu";
 import { PairSearch } from "./PairSearch";
@@ -42,6 +43,8 @@ export function Toolbar() {
   const toggleOrderflow = useStore(orderflowStore, (s) => s.toggle);
   const vpEnabled = useStore(volumeProfileStore, (s) => s.enabled);
   const toggleVp = useStore(volumeProfileStore, (s) => s.toggle);
+  const revenueEnabled = useStore(revenueStore, (s) => s.enabled);
+  const toggleRevenue = useStore(revenueStore, (s) => s.toggle);
 
   const supportedTf = SUPPORTED_TIMEFRAMES[exchange] ?? [];
   const isBinance = exchange === "binance";
@@ -163,6 +166,23 @@ export function Toolbar() {
         }`}
       >
         Profil Vol
+      </button>
+
+      {/* Revenus on-chain du protocole de l'actif (DefiLlama, sous-pane dédié).
+          N'affiche une courbe que pour les actifs « protocole » (UNI, AAVE, GMX…) ;
+          dégradation propre (aucun pane) pour BTC/ETH/SOL et tokens sans données. */}
+      <button
+        type="button"
+        onClick={toggleRevenue}
+        aria-pressed={revenueEnabled}
+        title="Revenus on-chain du protocole (DefiLlama) — actifs de protocole uniquement"
+        className={`rounded px-2 py-1 text-xs ${
+          revenueEnabled
+            ? "bg-yellow-500 text-accent-ink"
+            : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+        }`}
+      >
+        Revenus
       </button>
 
       {/* Sélecteur de thème (poussé à droite). */}

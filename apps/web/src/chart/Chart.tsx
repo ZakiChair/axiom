@@ -17,11 +17,13 @@ import { indicatorsStore } from "../store/indicators";
 import { orderflowStore } from "../store/orderflow";
 import { compareStore } from "../store/compare";
 import { volumeProfileStore } from "../store/volumeProfile";
+import { revenueStore } from "../store/revenue";
 import { themeStore } from "../store/theme";
 import { ChartIndicators } from "./indicators";
 import { OrderflowController } from "./orderflow";
 import { CompareController } from "./compare";
 import { VolumeProfileController } from "./volumeProfile";
+import { RevenueController } from "./revenue";
 import { bindChart, unbindChart } from "./drawing";
 
 /**
@@ -196,6 +198,15 @@ export function Chart() {
       volumeProfile.setEnabled(state.enabled);
     });
 
+    // Contrôleur revenus du protocole (DefiLlama) : courbe d'évolution des revenus
+    // on-chain de l'actif analysé, sous-pane dédié. Données journalières (basse
+    // fréquence) ; dégradation propre pour les actifs sans protocole (BTC/ETH/SOL…).
+    const revenue = new RevenueController(chart, symbol);
+    revenue.setEnabled(revenueStore.getState().enabled);
+    const unsubscribeRevenue = revenueStore.subscribe((state) => {
+      revenue.setEnabled(state.enabled);
+    });
+
     let cancelled = false;
     let unsubscribe: Unsubscribe | null = null;
 
@@ -226,6 +237,10 @@ export function Chart() {
         // Backfill prêt : le profil de volume recalcule à la frame suivante.
         volumeProfile.onCandles();
 
+        // Backfill prêt : (re)trace la courbe de revenus alignée sur le buffer
+        // (le fetch DefiLlama, lancé à l'activation, se reconstruit ici quand prêt).
+        revenue.onCandles();
+
         unsubscribe = adapter.subscribeKline(symbol, timeframe, (candle) => {
           marketStore.getState().upsertCandle(candle);
           chart.updateData(toKLineData(candle)); // mise à jour impérative, pas de re-render.
@@ -243,6 +258,9 @@ export function Chart() {
             // impératif, sans re-render). Les comparés gardent leur série fetchée.
             compare.onCandles();
             volumeProfile.onCandles();
+            // Étend la ligne de revenus aux nouvelles bougies (forward-fill ; la
+            // série journalière est en cache, aucun refetch).
+            revenue.onCandles();
           }
         });
       })
@@ -257,6 +275,8 @@ export function Chart() {
       unsubscribeOrderflow();
       unsubscribeCompare();
       unsubscribeVolumeProfile();
+      unsubscribeRevenue();
+      revenue.dispose(); // annule le fetch + retire le sous-pane revenus AVANT dispose.
       volumeProfile.dispose(); // arrête le rAF + nettoie le canvas profil.
       compare.dispose(); // retire le sous-pane de comparaison AVANT dispose.
       orderflow.dispose(); // ferme le WS aggTrade + retire le pane CVD AVANT dispose.

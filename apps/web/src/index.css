@@ -9,16 +9,36 @@
  * posé sur <html> (document.documentElement) par `store/theme.ts`. Le moteur de
  * thème (store) écrit l'attribut au boot AVANT le premier rendu : pas de flash.
  *
- * Ces variables sont consommées de trois façons :
- *  - Tailwind : `theme.extend.colors` mappe des classes sémantiques (bg-bg,
- *    text-text, bg-surface, text-up, …) sur var(--…) — cf. tailwind.config.js ;
- *  - CSS direct : body / #root ci-dessous ;
- *  - Canvas : Chart.tsx résout ces tokens (getComputedStyle) puis les passe à
- *    KLineChart.setStyles — le canvas n'évalue pas var() lui-même.
+ * Trois familles de tokens, toutes redéfinies PAR THÈME :
  *
- * :root sans attribut == thème "dark" (défaut, identique au rendu historique :
- * fond #0a0a0a, texte #e5e5e5, grille #1f2937, axes #9ca3af).
+ *  1. Tokens SÉMANTIQUES (--bg/--surface/--border/--text/--text-dim/--up/--down/
+ *     --accent/--grid/--crosshair) : consommés par Tailwind (bg-bg, text-up, …),
+ *     par le CSS direct (body) et par le canvas (Chart.tsx les résout via
+ *     getComputedStyle puis les passe à KLineChart.setStyles).
+ *
+ *  2. RAMPE NEUTRE (--n-100 … --n-950) : Tailwind mappe la palette `neutral`
+ *     entière sur ces variables (cf. tailwind.config.js). Tout le « chrome »
+ *     historique (bg-neutral-950, border-neutral-800, hover:bg-neutral-700,
+ *     text-neutral-300…) suit donc le thème SANS toucher aux composants. Pour
+ *     les 4 thèmes sombres la rampe va du clair (100 = texte) au sombre
+ *     (950 = fond), comme le code l'attend. Pour « cute » (CLAIR), la rampe est
+ *     définie PAR RÔLE : les indices texte (100–600) restent foncés (lisibles
+ *     sur fond crème), les indices surface (700–950) deviennent des roses pâles.
+ *
+ *  3. ACCENTS d'INTERFACE (--ui-emerald/--ui-cyan/--ui-amber + leur encre
+ *     --accent-ink, + --ring focus) : les bascules de la toolbar (Timeframe
+ *     actif, Orderflow, Profil Vol, boutons « Enregistrer ») restent
+ *     fonctionnellement codées par couleur, mais chaque thème réinterprète ces
+ *     trois teintes (ambre terminal, vert phosphore, bonbon pastel, néon
+ *     nordique…) pour rester cohérent au premier coup d'œil.
+ *
+ * :root sans attribut == thème "dark" (défaut).
  */
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * DARK — sombre neutre « pro », accent bleu/cyan discret. RÉFÉRENCE sérieuse.
+ * Rampe neutre = hex littéraux de Tailwind v3 (rendu chrome inchangé).
+ * ────────────────────────────────────────────────────────────────────────── */
 :root,
 :root[data-theme="dark"] {
   --bg: #0a0a0a;
@@ -28,103 +48,228 @@
   --text-dim: #9ca3af;
   --up: #2dc08e;
   --down: #f92855;
-  --accent: #10b981;
+  --accent: #38bdf8; /* bleu/cyan discret (identité Dark) */
   --grid: #1f2937;
   --crosshair: #888888;
-  /* Atmosphère : police de caractères + voile de fond + lueur d'accent. */
-  --font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --atmos: radial-gradient(1200px 600px at 80% -10%, rgba(16, 185, 129, 0.06), transparent 60%);
-  --accent-glow: 0 0 0 rgba(0, 0, 0, 0);
-  --wordmark-shadow: none;
+
+  /* Rampe neutre (= palette Tailwind par défaut : chrome strictement identique). */
+  --n-100: #f5f5f5;
+  --n-200: #e5e5e5;
+  --n-300: #d4d4d4;
+  --n-400: #a3a3a3;
+  --n-500: #737373;
+  --n-600: #525252;
+  --n-700: #404040;
+  --n-800: #262626;
+  --n-900: #171717;
+  --n-950: #0a0a0a;
+
+  /* Bascules de la toolbar + encre sombre sur fond vif + anneau de focus. */
+  --ui-emerald: #10b981;
+  --ui-emerald-hover: #34d399;
+  --ui-cyan: #06b6d4;
+  --ui-amber: #f59e0b;
+  --accent-ink: #0a0a0a;
+  --ring: #38bdf8;
+
+  /* Atmosphère : typo propre + voile discret + lueurs. */
+  --font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --atmos:
+    radial-gradient(1100px 520px at 82% -12%, rgba(56, 189, 248, 0.05), transparent 60%),
+    radial-gradient(900px 600px at 10% 110%, rgba(56, 189, 248, 0.03), transparent 70%);
+  --accent-glow: 0 0 8px rgba(56, 189, 248, 0.35);
+  --wordmark-shadow: 0 0 6px rgba(56, 189, 248, 0.4);
   color-scheme: dark;
 }
 
-/* Bloomberg — noir profond + ambre/orange « terminal » mono. */
+/* ──────────────────────────────────────────────────────────────────────────
+ * BLOOMBERG — noir profond + ambre/orange « terminal », mono, grille ambrée
+ * très discrète, bougies chaudes (or / vermillon) sur halo ambré.
+ * ────────────────────────────────────────────────────────────────────────── */
 :root[data-theme="bloomberg"] {
   --bg: #000000;
-  --surface: #0d0a00;
-  --border: #3a2c00;
+  --surface: #0c0900;
+  --border: #1c1500;
   --text: #ffb000;
-  --text-dim: #9a7400;
-  --up: #18c964;
-  --down: #ff4d3d;
+  --text-dim: #b07d00;
+  --up: #ffc400; /* or */
+  --down: #ff5630; /* vermillon */
   --accent: #ff9e00;
-  --grid: #221900;
-  --crosshair: #ff9e00;
-  /* Police mono « Bloomberg Terminal » + lignes de balayage ambrées discrètes. */
-  --font-display: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
+  --grid: #1f1700; /* ambre quasi invisible */
+  --crosshair: #ffb000;
+
+  /* Rampe ambre-sur-noir (surfaces froides → texte ambré chaud). */
+  --n-100: #ffd060;
+  --n-200: #ffb000;
+  --n-300: #d99e00;
+  --n-400: #b5860c;
+  --n-500: #8a6a00;
+  --n-600: #6b5200;
+  --n-700: #2a2000;
+  --n-800: #1c1500;
+  --n-900: #0c0900;
+  --n-950: #000000;
+
+  /* Tout vire à l'ambre/orange terminal (monochrome chaud, nuances subtiles). */
+  --ui-emerald: #ffb000;
+  --ui-emerald-hover: #ffc740;
+  --ui-cyan: #ff7a00;
+  --ui-amber: #d98a00;
+  --accent-ink: #160f00;
+  --ring: #ff9e00;
+
+  /* Mono « terminal financier » + lignes de balayage ambrées + halo bas + vignette. */
+  --font-display: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --atmos:
-    repeating-linear-gradient(0deg, rgba(255, 158, 0, 0.035) 0 1px, transparent 1px 3px),
-    radial-gradient(900px 500px at 50% 120%, rgba(255, 158, 0, 0.08), transparent 70%);
+    repeating-linear-gradient(0deg, rgba(255, 158, 0, 0.045) 0 1px, transparent 1px 3px),
+    radial-gradient(900px 480px at 50% 124%, rgba(255, 158, 0, 0.1), transparent 70%),
+    radial-gradient(1200px 820px at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.55));
   --accent-glow: 0 0 10px rgba(255, 158, 0, 0.45);
-  --wordmark-shadow: 0 0 8px rgba(255, 158, 0, 0.55);
+  --wordmark-shadow: 0 0 8px rgba(255, 158, 0, 0.6);
   color-scheme: dark;
 }
 
-/* Matrix — noir + vert phosphore (#00ff41), scanlines CRT. */
+/* ──────────────────────────────────────────────────────────────────────────
+ * MATRIX — noir + vert phosphore (#00ff41), mono, scanlines CRT marquées,
+ * halo vert, bougies vert clair / vert foncé, texte DOM légèrement lumineux.
+ * ────────────────────────────────────────────────────────────────────────── */
 :root[data-theme="matrix"] {
   --bg: #000000;
-  --surface: #021206;
-  --border: #0a5a22;
+  --surface: #02110a;
+  --border: #06210f;
   --text: #00ff41;
-  --text-dim: #00a32a;
-  --up: #00ff41;
-  --down: #ff2e63;
+  --text-dim: #11a534;
+  --up: #5bff8f; /* vert clair */
+  --down: #019e34; /* vert foncé */
   --accent: #00ff41;
-  --grid: #06340f;
+  --grid: #053a12;
   --crosshair: #00ff41;
-  /* Police mono + scanlines vertes + halo phosphore bas. */
-  --font-display: ui-monospace, "Courier New", "Courier", monospace;
+
+  /* Rampe vert-sur-noir. */
+  --n-100: #aaffc0;
+  --n-200: #00ff41;
+  --n-300: #39ff7a;
+  --n-400: #1fd14c;
+  --n-500: #14a838;
+  --n-600: #0f7a2a;
+  --n-700: #0a3318;
+  --n-800: #06210f;
+  --n-900: #02110a;
+  --n-950: #000000;
+
+  /* Monochrome phosphore (trois verts à peine distincts). */
+  --ui-emerald: #00ff41;
+  --ui-emerald-hover: #5bff8f;
+  --ui-cyan: #00c853;
+  --ui-amber: #7cfc00;
+  --accent-ink: #00140a;
+  --ring: #00ff41;
+
+  /* Mono « console » + scanlines marquées + halo vert + vignette. */
+  --font-display: "Courier New", ui-monospace, Courier, "Liberation Mono", monospace;
   --atmos:
-    repeating-linear-gradient(0deg, rgba(0, 255, 65, 0.05) 0 1px, transparent 1px 3px),
-    radial-gradient(1000px 600px at 50% 130%, rgba(0, 255, 65, 0.1), transparent 70%);
+    repeating-linear-gradient(0deg, rgba(0, 255, 65, 0.07) 0 1px, transparent 1px 3px),
+    radial-gradient(1000px 560px at 50% 132%, rgba(0, 255, 65, 0.12), transparent 70%),
+    radial-gradient(1200px 840px at 50% 50%, transparent 50%, rgba(0, 0, 0, 0.6));
   --accent-glow: 0 0 12px rgba(0, 255, 65, 0.6);
-  --wordmark-shadow: 0 0 10px rgba(0, 255, 65, 0.8);
+  --wordmark-shadow: 0 0 10px rgba(0, 255, 65, 0.85);
   color-scheme: dark;
 }
 
-/* Cute — pastel clair rose/violet, fond clair, halos doux. */
+/* ──────────────────────────────────────────────────────────────────────────
+ * CUTE — CLAIR pastel (crème/rose), accents rose/violet/lavande, police
+ * arrondie, bougies pastel (menthe / corail), bulles douces, coins arrondis.
+ * Rampe définie PAR RÔLE (texte foncé lisible ; surfaces roses claires).
+ * ────────────────────────────────────────────────────────────────────────── */
 :root[data-theme="cute"] {
-  --bg: #fdf2f8;
-  --surface: #fce7f3;
-  --border: #f5b8d8;
-  --text: #6d28d9;
-  --text-dim: #9d5bb8;
-  --up: #14b8a6;
-  --down: #f43f5e;
+  --bg: #fff5fb;
+  --surface: #ffe1f1;
+  --border: #f9d2e8;
+  --text: #5b2a86;
+  --text-dim: #9a55c2;
+  --up: #20bfa0; /* menthe */
+  --down: #ff5d7e; /* corail */
   --accent: #d946ef;
-  --grid: #f6d6e8;
+  --grid: #f3d6e6;
   --crosshair: #c026d3;
-  /* Police arrondie + bulles pastel diffuses. */
-  --font-display: "Comic Sans MS", "Chalkboard SE", "Comic Neue", ui-rounded, system-ui, sans-serif;
+
+  /* Texte (100–600 foncés, lisibles sur crème) ; surfaces (700–950 roses pâles). */
+  --n-100: #45206a;
+  --n-200: #5b2a86;
+  --n-300: #6d28a8;
+  --n-400: #8a44b8;
+  --n-500: #9a55c2;
+  --n-600: #a767c9;
+  --n-700: #efbcdb;
+  --n-800: #f9d2e8;
+  --n-900: #ffe1f1;
+  --n-950: #fdeef7;
+
+  /* Bonbons vifs en état actif + encre BLANCHE (contraste sur pastel saturé). */
+  --ui-emerald: #c026d3; /* fuchsia */
+  --ui-emerald-hover: #d946ef;
+  --ui-cyan: #7c3aed; /* violet */
+  --ui-amber: #e11d6b; /* rose */
+  --accent-ink: #ffffff;
+  --ring: #d946ef;
+
+  /* Police arrondie + bulles pastel + dégradé tendre. */
+  --font-display: "Baloo 2", "Comic Sans MS", "Chalkboard SE", "Comic Neue", ui-rounded, "Segoe UI", system-ui, sans-serif;
   --atmos:
-    radial-gradient(600px 400px at 12% 8%, rgba(217, 70, 239, 0.12), transparent 60%),
-    radial-gradient(700px 500px at 88% 92%, rgba(45, 212, 191, 0.12), transparent 60%);
+    radial-gradient(560px 380px at 12% 8%, rgba(217, 70, 239, 0.1), transparent 60%),
+    radial-gradient(680px 480px at 88% 90%, rgba(45, 212, 191, 0.1), transparent 60%),
+    radial-gradient(420px 320px at 70% 18%, rgba(124, 58, 237, 0.08), transparent 60%),
+    linear-gradient(135deg, rgba(255, 240, 248, 0.5), rgba(236, 222, 255, 0.4));
   --accent-glow: 0 0 10px rgba(217, 70, 239, 0.35);
-  --wordmark-shadow: 0 1px 0 rgba(217, 70, 239, 0.35);
+  --wordmark-shadow: 0 1px 0 rgba(217, 70, 239, 0.4);
   color-scheme: light;
 }
 
-/* Aurora — bleu/violet/cyan profond, dégradé d'aurore animé. */
+/* ──────────────────────────────────────────────────────────────────────────
+ * AURORA — bleu nuit profond + dégradés cyan/violet/magenta animés, accents
+ * lumineux, bougies cyan/magenta, lueur nordique.
+ * ────────────────────────────────────────────────────────────────────────── */
 :root[data-theme="aurora"] {
-  --bg: #0b1026;
-  --surface: #141b3a;
-  --border: #2a3a73;
-  --text: #c7d2fe;
-  --text-dim: #7c89c4;
-  --up: #22d3ee;
-  --down: #fb7185;
+  --bg: #070b1f;
+  --surface: #0e1430;
+  --border: #243066;
+  --text: #d6e0ff;
+  --text-dim: #8a96cc;
+  --up: #22d3ee; /* cyan */
+  --down: #ff4d9d; /* magenta */
   --accent: #a78bfa;
-  --grid: #1c2752;
+  --grid: #18224d;
   --crosshair: #22d3ee;
-  /* Voile d'aurore (cyan/violet) en mouvement lent. */
-  --font-display: ui-sans-serif, "Inter", system-ui, -apple-system, sans-serif;
+
+  /* Rampe bleu nuit (surfaces profondes → texte glacé). */
+  --n-100: #e6ecff;
+  --n-200: #c7d2fe;
+  --n-300: #aab4e0;
+  --n-400: #8a96cc;
+  --n-500: #6b79b8;
+  --n-600: #4a5896;
+  --n-700: #28336b;
+  --n-800: #1a234d;
+  --n-900: #0e1430;
+  --n-950: #070b1f;
+
+  /* Trio lumineux nordique : cyan / indigo / magenta. */
+  --ui-emerald: #22d3ee;
+  --ui-emerald-hover: #67e8f9;
+  --ui-cyan: #818cf8;
+  --ui-amber: #e879f9;
+  --accent-ink: #050814;
+  --ring: #67e8f9;
+
+  /* Sans moderne + voile d'aurore (cyan/violet/magenta) en mouvement lent. */
+  --font-display: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --atmos:
     radial-gradient(900px 600px at 15% -10%, rgba(34, 211, 238, 0.16), transparent 60%),
     radial-gradient(900px 600px at 85% 110%, rgba(167, 139, 250, 0.18), transparent 60%),
+    radial-gradient(700px 520px at 60% 50%, rgba(232, 121, 249, 0.1), transparent 70%),
     radial-gradient(700px 500px at 50% 50%, rgba(99, 102, 241, 0.08), transparent 70%);
   --accent-glow: 0 0 12px rgba(167, 139, 250, 0.5);
-  --wordmark-shadow: 0 0 10px rgba(34, 211, 238, 0.5);
+  --wordmark-shadow: 0 0 10px rgba(34, 211, 238, 0.55);
   color-scheme: dark;
 }
 
@@ -141,6 +286,55 @@ body {
   color: var(--text);
   /* Police propre au thème (mono terminal, arrondie « cute », etc.). */
   font-family: var(--font-display, ui-sans-serif, system-ui, sans-serif);
+  /* Transition douce du fond/texte au changement de thème (le canvas, lui, est
+     repeint impérativement par Chart.tsx). */
+  transition:
+    background-color 0.4s ease,
+    color 0.4s ease;
+}
+
+/* Les contrôles de formulaire n'héritent PAS de font-family par défaut : on le
+   force pour que la typo du thème (mono, arrondie…) s'applique aux boutons,
+   champs et sélecteurs de la toolbar et des panneaux. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* Focus clavier visible et thématisé (a11y) — specificity 0 via :where pour ne
+   pas écraser les styles de focus locaux des composants. */
+:where(button, [role="button"], a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Cute : coins arrondis « doux » sur les contrôles (renforce l'identité). */
+:root[data-theme="cute"] :is(button, input, select) {
+  border-radius: 0.7rem;
+}
+
+/* Matrix : texte DOM légèrement lumineux (phosphore). N'affecte PAS le canvas
+   (le graphe dessine son propre texte) ; rendu subtil pour rester lisible. */
+:root[data-theme="matrix"] body {
+  text-shadow: 0 0 2px rgba(0, 255, 65, 0.25);
+}
+
+/* Barres de défilement thématisées (surface/bordure du thème courant). */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
 }
 
 /*
@@ -171,10 +365,15 @@ body::before {
   letter-spacing: 0.04em;
 }
 
-/* Dérive lente du voile Aurora (respiration du dégradé). */
+/* Animations d'ambiance (désactivées si l'utilisateur réduit les animations). */
 @media (prefers-reduced-motion: no-preference) {
+  /* Aurora : respiration lente du dégradé. */
   :root[data-theme="aurora"] body::before {
     animation: axiom-aurora-drift 18s ease-in-out infinite alternate;
+  }
+  /* Matrix : très léger scintillement CRT. */
+  :root[data-theme="matrix"] body::before {
+    animation: axiom-crt-flicker 4s steps(1, end) infinite;
   }
 }
 
@@ -184,5 +383,24 @@ body::before {
   }
   to {
     transform: translate3d(1.5%, 1%, 0) scale(1.08);
+  }
+}
+
+@keyframes axiom-crt-flicker {
+  0%,
+  96% {
+    opacity: 1;
+  }
+  97% {
+    opacity: 0.82;
+  }
+  98% {
+    opacity: 1;
+  }
+  99% {
+    opacity: 0.88;
+  }
+  100% {
+    opacity: 1;
   }
 }

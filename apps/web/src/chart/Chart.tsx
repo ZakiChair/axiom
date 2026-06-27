@@ -76,6 +76,10 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
   const grid = readToken("--grid");
   const crosshair = readToken("--crosshair");
   const atmos = readToken("--atmos");
+  // Police du thème (mono terminal, arrondie « cute »…) : appliquée AUSSI au
+  // texte dessiné par le canvas (axes, crosshair, marques de prix) pour que les
+  // chiffres du graphe partagent la typographie de l'interface.
+  const font = readToken("--font-display");
 
   // Le canvas KLineChart est transparent : on peint le conteneur. On y superpose
   // le voile d'ambiance du thème (--atmos : scanlines Matrix/Bloomberg, aurore,
@@ -101,29 +105,29 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
         noChangeWickColor: textDim,
       },
       priceMark: {
-        high: { color: textDim },
-        low: { color: textDim },
-        last: { upColor: up, downColor: down, noChangeColor: textDim },
+        high: { color: textDim, textFamily: font },
+        low: { color: textDim, textFamily: font },
+        last: { upColor: up, downColor: down, noChangeColor: textDim, text: { family: font } },
       },
     },
     xAxis: {
       axisLine: { color: border },
       tickLine: { color: border },
-      tickText: { color: textDim },
+      tickText: { color: textDim, family: font },
     },
     yAxis: {
       axisLine: { color: border },
       tickLine: { color: border },
-      tickText: { color: textDim },
+      tickText: { color: textDim, family: font },
     },
     crosshair: {
       horizontal: {
         line: { color: crosshair },
-        text: { color: text, backgroundColor: surface, borderColor: border },
+        text: { color: text, family: font, backgroundColor: surface, borderColor: border },
       },
       vertical: {
         line: { color: crosshair },
-        text: { color: text, backgroundColor: surface, borderColor: border },
+        text: { color: text, family: font, backgroundColor: surface, borderColor: border },
       },
     },
   });

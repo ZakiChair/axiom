@@ -9,13 +9,13 @@
 import { useStore } from "zustand";
 import { themeStore, THEMES, type ThemeId } from "../store/theme";
 
-/** Libellé + aperçu (dégradé représentatif fond -> accent) de chaque thème. */
+/** Libellé + aperçu (dégradé fond -> surface -> accent) de chaque thème. */
 const THEME_META: Record<ThemeId, { label: string; swatch: string }> = {
-  dark: { label: "Dark", swatch: "linear-gradient(135deg, #0a0a0a 0%, #10b981 100%)" },
-  bloomberg: { label: "Bloomberg", swatch: "linear-gradient(135deg, #000000 0%, #ff9e00 100%)" },
-  matrix: { label: "Matrix", swatch: "linear-gradient(135deg, #000000 0%, #00ff41 100%)" },
-  cute: { label: "Cute", swatch: "linear-gradient(135deg, #fce7f3 0%, #d946ef 100%)" },
-  aurora: { label: "Aurora", swatch: "linear-gradient(135deg, #22d3ee 0%, #a78bfa 100%)" },
+  dark: { label: "Dark", swatch: "linear-gradient(135deg, #0a0a0a 0%, #1f2937 55%, #38bdf8 100%)" },
+  bloomberg: { label: "Bloomberg", swatch: "linear-gradient(135deg, #000000 0%, #1c1500 50%, #ffb000 100%)" },
+  matrix: { label: "Matrix", swatch: "linear-gradient(135deg, #000000 0%, #06210f 50%, #00ff41 100%)" },
+  cute: { label: "Cute", swatch: "linear-gradient(135deg, #fff5fb 0%, #ffd6ee 55%, #d946ef 100%)" },
+  aurora: { label: "Aurora", swatch: "linear-gradient(135deg, #070b1f 0%, #22d3ee 55%, #a78bfa 100%)" },
 };
 
 export function ThemeSwitcher() {
@@ -36,7 +36,7 @@ export function ThemeSwitcher() {
             title={meta.label}
             className={`h-5 w-5 rounded border transition ${
               active
-                ? "border-neutral-100 ring-1 ring-neutral-100"
+                ? "border-accent ring-1 ring-accent"
                 : "border-neutral-700 hover:border-neutral-400"
             }`}
             style={{ backgroundImage: meta.swatch }}

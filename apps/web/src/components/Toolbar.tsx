@@ -114,7 +114,7 @@ export function Toolbar() {
                 unsupported
                   ? "cursor-not-allowed bg-neutral-900 text-neutral-700"
                   : timeframe === tf
-                    ? "bg-emerald-500 text-neutral-950"
+                    ? "bg-emerald-500 text-accent-ink"
                     : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
               }`}
             >
@@ -143,7 +143,7 @@ export function Toolbar() {
         }
         className={`rounded px-2 py-1 text-xs ${
           orderflowEnabled
-            ? "bg-cyan-500 text-neutral-950"
+            ? "bg-cyan-500 text-accent-ink"
             : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
         }`}
       >
@@ -158,7 +158,7 @@ export function Toolbar() {
         title="Volume par zone de prix (plage visible)"
         className={`rounded px-2 py-1 text-xs ${
           vpEnabled
-            ? "bg-amber-500 text-neutral-950"
+            ? "bg-amber-500 text-accent-ink"
             : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
         }`}
       >

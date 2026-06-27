@@ -316,7 +316,7 @@ export function MacroPanel() {
               <button
                 type="button"
                 onClick={saveKey}
-                className="rounded bg-emerald-500 px-2 py-1 text-[11px] font-medium text-neutral-950 hover:bg-emerald-400"
+                className="rounded bg-emerald-500 px-2 py-1 text-[11px] font-medium text-accent-ink hover:bg-emerald-400"
               >
                 Enregistrer
               </button>

@@ -9,6 +9,7 @@ import { orderflowStore } from "../store/orderflow";
 import { SUPPORTED_TIMEFRAMES } from "../data/adapters";
 import { IndicatorMenu } from "./IndicatorMenu";
 import { PairSearch } from "./PairSearch";
+import { ThemeSwitcher } from "./ThemeSwitcher";
 
 const SYMBOL_PRESETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"] as const;
 // "m" = minute, "M" = mois (1M/3M/6M/12M). 1w & 1M sont natifs Binance ;
@@ -141,6 +142,12 @@ export function Toolbar() {
       >
         Orderflow
       </button>
+
+      {/* Sélecteur de thème (poussé à droite). */}
+      <div className="ml-auto flex items-center gap-2">
+        <span className="text-xs text-neutral-500">Thème</span>
+        <ThemeSwitcher />
+      </div>
     </header>
   );
 }

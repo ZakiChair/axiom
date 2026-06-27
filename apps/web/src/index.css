@@ -2,7 +2,99 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Le terminal occupe tout le viewport ; fond sombre par défaut. */
+/*
+ * Système de thèmes AXIOM — tokens sémantiques pilotés par variables CSS.
+ *
+ * Un jeu de couleurs par thème, sélectionné via l'attribut [data-theme="..."]
+ * posé sur <html> (document.documentElement) par `store/theme.ts`. Le moteur de
+ * thème (store) écrit l'attribut au boot AVANT le premier rendu : pas de flash.
+ *
+ * Ces variables sont consommées de trois façons :
+ *  - Tailwind : `theme.extend.colors` mappe des classes sémantiques (bg-bg,
+ *    text-text, bg-surface, text-up, …) sur var(--…) — cf. tailwind.config.js ;
+ *  - CSS direct : body / #root ci-dessous ;
+ *  - Canvas : Chart.tsx résout ces tokens (getComputedStyle) puis les passe à
+ *    KLineChart.setStyles — le canvas n'évalue pas var() lui-même.
+ *
+ * :root sans attribut == thème "dark" (défaut, identique au rendu historique :
+ * fond #0a0a0a, texte #e5e5e5, grille #1f2937, axes #9ca3af).
+ */
+:root,
+:root[data-theme="dark"] {
+  --bg: #0a0a0a;
+  --surface: #171717;
+  --border: #262626;
+  --text: #e5e5e5;
+  --text-dim: #9ca3af;
+  --up: #2dc08e;
+  --down: #f92855;
+  --accent: #10b981;
+  --grid: #1f2937;
+  --crosshair: #888888;
+  color-scheme: dark;
+}
+
+/* Bloomberg — noir profond + ambre/orange « terminal ». */
+:root[data-theme="bloomberg"] {
+  --bg: #000000;
+  --surface: #0d0a00;
+  --border: #3a2c00;
+  --text: #ffb000;
+  --text-dim: #9a7400;
+  --up: #18c964;
+  --down: #ff4d3d;
+  --accent: #ff9e00;
+  --grid: #221900;
+  --crosshair: #ff9e00;
+  color-scheme: dark;
+}
+
+/* Matrix — noir + vert phosphore (#00ff41). */
+:root[data-theme="matrix"] {
+  --bg: #000000;
+  --surface: #021206;
+  --border: #0a5a22;
+  --text: #00ff41;
+  --text-dim: #00a32a;
+  --up: #00ff41;
+  --down: #ff2e63;
+  --accent: #00ff41;
+  --grid: #06340f;
+  --crosshair: #00ff41;
+  color-scheme: dark;
+}
+
+/* Cute — pastel clair rose/violet, fond clair. */
+:root[data-theme="cute"] {
+  --bg: #fdf2f8;
+  --surface: #fce7f3;
+  --border: #f5b8d8;
+  --text: #6d28d9;
+  --text-dim: #9d5bb8;
+  --up: #14b8a6;
+  --down: #f43f5e;
+  --accent: #d946ef;
+  --grid: #f6d6e8;
+  --crosshair: #c026d3;
+  color-scheme: light;
+}
+
+/* Aurora — bleu/violet/cyan profond, accents froids. */
+:root[data-theme="aurora"] {
+  --bg: #0b1026;
+  --surface: #141b3a;
+  --border: #2a3a73;
+  --text: #c7d2fe;
+  --text-dim: #7c89c4;
+  --up: #22d3ee;
+  --down: #fb7185;
+  --accent: #a78bfa;
+  --grid: #1c2752;
+  --crosshair: #22d3ee;
+  color-scheme: dark;
+}
+
+/* Le terminal occupe tout le viewport ; fond + texte pilotés par le thème. */
 html,
 body,
 #root {
@@ -11,7 +103,7 @@ body,
 
 body {
   margin: 0;
-  background-color: #0a0a0a;
-  color: #e5e5e5;
+  background-color: var(--bg);
+  color: var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }

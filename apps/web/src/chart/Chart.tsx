@@ -8,15 +8,17 @@
  */
 import { useEffect, useRef } from "react";
 import { dispose, init } from "klinecharts";
-import type { KLineData } from "klinecharts";
+import type { Chart as KLineChartInstance, KLineData } from "klinecharts";
 import { useStore } from "zustand";
 import type { Candle, Unsubscribe } from "@axiom/types";
 import { getAdapter } from "../data/adapters";
 import { marketStore } from "../store/market";
 import { indicatorsStore } from "../store/indicators";
 import { orderflowStore } from "../store/orderflow";
+import { themeStore } from "../store/theme";
 import { ChartIndicators } from "./indicators";
 import { OrderflowController } from "./orderflow";
+import { bindChart, unbindChart } from "./drawing";
 
 /** Candle (@axiom/types) -> KLineData (KLineChart). */
 function toKLineData(c: Candle): KLineData {
@@ -28,6 +30,81 @@ function toKLineData(c: Candle): KLineData {
     close: c.close,
     volume: c.volume,
   };
+}
+
+/**
+ * Lit un token CSS sémantique résolu (couleur concrète) depuis <html>, où vit
+ * l'attribut [data-theme]. Indispensable : le canvas KLineChart n'évalue PAS
+ * var(--…) (ctx.fillStyle ignore silencieusement une chaîne var()).
+ */
+function readToken(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/**
+ * Applique la palette du thème courant au graphe.
+ *  - bougies (up/down + bords + mèches), grille, axes, crosshair via setStyles
+ *    (merge PARTIEL : on ne touche pas la section `indicator` -> CVD orderflow et
+ *    indicateurs @axiom gardent leurs styles) ;
+ *  - « fond » : le canvas KLineChart est transparent -> on colore le conteneur.
+ */
+function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void {
+  const bg = readToken("--bg");
+  const surface = readToken("--surface");
+  const border = readToken("--border");
+  const text = readToken("--text");
+  const textDim = readToken("--text-dim");
+  const up = readToken("--up");
+  const down = readToken("--down");
+  const grid = readToken("--grid");
+  const crosshair = readToken("--crosshair");
+
+  chartDom.style.backgroundColor = bg;
+
+  chart.setStyles({
+    grid: {
+      horizontal: { color: grid },
+      vertical: { color: grid },
+    },
+    candle: {
+      bar: {
+        upColor: up,
+        downColor: down,
+        noChangeColor: textDim,
+        upBorderColor: up,
+        downBorderColor: down,
+        noChangeBorderColor: textDim,
+        upWickColor: up,
+        downWickColor: down,
+        noChangeWickColor: textDim,
+      },
+      priceMark: {
+        high: { color: textDim },
+        low: { color: textDim },
+        last: { upColor: up, downColor: down, noChangeColor: textDim },
+      },
+    },
+    xAxis: {
+      axisLine: { color: border },
+      tickLine: { color: border },
+      tickText: { color: textDim },
+    },
+    yAxis: {
+      axisLine: { color: border },
+      tickLine: { color: border },
+      tickText: { color: textDim },
+    },
+    crosshair: {
+      horizontal: {
+        line: { color: crosshair },
+        text: { color: text, backgroundColor: surface, borderColor: border },
+      },
+      vertical: {
+        line: { color: crosshair },
+        text: { color: text, backgroundColor: surface, borderColor: border },
+      },
+    },
+  });
 }
 
 export function Chart() {
@@ -47,16 +124,16 @@ export function Chart() {
     const chart = init(chartDom);
     if (!chart) return;
 
-    // Thème sombre minimal : la couleur de fond vient du conteneur (canvas transparent),
-    // on ajuste seulement la grille et le texte des axes pour la lisibilité.
-    chart.setStyles({
-      grid: {
-        horizontal: { color: "#1f2937" },
-        vertical: { color: "#1f2937" },
-      },
-      xAxis: { tickText: { color: "#9ca3af" } },
-      yAxis: { tickText: { color: "#9ca3af" } },
-    });
+    // Lie l'instance courante au pont des outils de dessin (la barre d'outils y
+    // déclenche createOverlay/removeOverlay). Déliée au cleanup avant dispose.
+    bindChart(chart);
+
+    // Applique la palette du thème courant (bougies/grille/axes/crosshair + fond),
+    // PUIS s'abonne pour réappliquer à chaque changement de thème. Le premier
+    // appel est obligatoire : le chart est recréé à chaque changement symbole/TF,
+    // un simple abonnement raterait la peinture initiale.
+    applyChartTheme(chart, chartDom);
+    const unsubscribeTheme = themeStore.subscribe(() => applyChartTheme(chart, chartDom));
 
     // Contrôleur d'indicateurs @axiom (source de vérité du calcul = @axiom/indicators).
     const indicators = new ChartIndicators(chart);
@@ -117,10 +194,12 @@ export function Chart() {
 
     return () => {
       cancelled = true;
+      unsubscribeTheme();
       unsubscribeIndicators();
       unsubscribeOrderflow();
       orderflow.dispose(); // ferme le WS aggTrade + retire le pane CVD AVANT dispose.
       if (unsubscribe) unsubscribe();
+      unbindChart(chart); // détache le pont de dessin avant de détruire l'instance.
       dispose(chart); // détruit panes + indicateurs ; pas de removeIndicator manuel.
     };
   }, [exchange, symbol, timeframe]);

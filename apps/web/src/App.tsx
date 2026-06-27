@@ -2,6 +2,7 @@
  * App — layout sombre plein écran : toolbar en haut, graphe sur le reste.
  */
 import { Toolbar } from "./components/Toolbar";
+import { DrawingToolbar } from "./components/DrawingToolbar";
 import { Chart } from "./chart/Chart";
 import { Watchlist } from "./components/Watchlist";
 import { DerivativesPanel } from "./components/DerivativesPanel";
@@ -9,11 +10,13 @@ import { MacroPanel } from "./components/MacroPanel";
 
 export function App() {
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-neutral-950 text-neutral-200">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg text-text">
       <Toolbar />
       {/* min-h-0 indispensable pour que le graphe (flex-1) prenne une hauteur réelle. */}
       <main className="flex min-h-0 flex-1">
-        {/* min-w-0 : le graphe peut rétrécir face au panneau latéral. */}
+        {/* Barre d'outils de dessin verticale, à gauche du graphe. */}
+        <DrawingToolbar />
+        {/* min-w-0 : le graphe peut rétrécir face aux panneaux latéraux. */}
         <div className="min-w-0 flex-1">
           <Chart />
         </div>

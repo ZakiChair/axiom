@@ -19,18 +19,38 @@ import { createStore } from "zustand/vanilla";
 import type { Chart as KLineChartInstance } from "klinecharts";
 
 /** Identifiants d'outils exposés par la barre (cursor = aucun overlay). */
-export type DrawingToolId = "cursor" | "trendLine" | "horizontalLine" | "rect" | "fib";
+export type DrawingToolId =
+  | "cursor"
+  | "trendLine"
+  | "ray"
+  | "extended"
+  | "horizontalLine"
+  | "horizontalRay"
+  | "verticalLine"
+  | "priceLine"
+  | "parallelChannel"
+  | "priceChannel"
+  | "rect"
+  | "fib";
 
 /**
  * Outil -> nom de l'overlay INTÉGRÉ KLineChart à dessiner (null pour le curseur).
- * Noms confirmés sur klinecharts 9.8.12.
+ * Tous ces templates sont natifs de klinecharts 9.8.12 (vérifié dans le bundle) :
+ * aucun `registerOverlay` custom requis.
  */
 const TOOL_OVERLAY: Record<DrawingToolId, string | null> = {
   cursor: null,
-  trendLine: "segment",
-  horizontalLine: "horizontalStraightLine",
-  rect: "rect",
-  fib: "fibonacciLine",
+  trendLine: "segment", // droite de tendance (2 points)
+  ray: "rayLine", // demi-droite (rayon) depuis un point
+  extended: "straightLine", // droite infinie (2 points)
+  horizontalLine: "horizontalStraightLine", // horizontale (1 point)
+  horizontalRay: "horizontalRayLine", // rayon horizontal (support/résistance directionnel)
+  verticalLine: "verticalStraightLine", // verticale (marqueur temporel)
+  priceLine: "priceLine", // ligne de prix annotée
+  parallelChannel: "parallelStraightLine", // canal parallèle (3 points)
+  priceChannel: "priceChannelLine", // canal de prix
+  rect: "rect", // rectangle (zone)
+  fib: "fibonacciLine", // retracement de Fibonacci
 };
 
 export interface DrawingState {

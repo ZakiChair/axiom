@@ -31,10 +31,15 @@
   --accent: #10b981;
   --grid: #1f2937;
   --crosshair: #888888;
+  /* Atmosphère : police de caractères + voile de fond + lueur d'accent. */
+  --font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --atmos: radial-gradient(1200px 600px at 80% -10%, rgba(16, 185, 129, 0.06), transparent 60%);
+  --accent-glow: 0 0 0 rgba(0, 0, 0, 0);
+  --wordmark-shadow: none;
   color-scheme: dark;
 }
 
-/* Bloomberg — noir profond + ambre/orange « terminal ». */
+/* Bloomberg — noir profond + ambre/orange « terminal » mono. */
 :root[data-theme="bloomberg"] {
   --bg: #000000;
   --surface: #0d0a00;
@@ -46,10 +51,17 @@
   --accent: #ff9e00;
   --grid: #221900;
   --crosshair: #ff9e00;
+  /* Police mono « Bloomberg Terminal » + lignes de balayage ambrées discrètes. */
+  --font-display: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
+  --atmos:
+    repeating-linear-gradient(0deg, rgba(255, 158, 0, 0.035) 0 1px, transparent 1px 3px),
+    radial-gradient(900px 500px at 50% 120%, rgba(255, 158, 0, 0.08), transparent 70%);
+  --accent-glow: 0 0 10px rgba(255, 158, 0, 0.45);
+  --wordmark-shadow: 0 0 8px rgba(255, 158, 0, 0.55);
   color-scheme: dark;
 }
 
-/* Matrix — noir + vert phosphore (#00ff41). */
+/* Matrix — noir + vert phosphore (#00ff41), scanlines CRT. */
 :root[data-theme="matrix"] {
   --bg: #000000;
   --surface: #021206;
@@ -61,10 +73,17 @@
   --accent: #00ff41;
   --grid: #06340f;
   --crosshair: #00ff41;
+  /* Police mono + scanlines vertes + halo phosphore bas. */
+  --font-display: ui-monospace, "Courier New", "Courier", monospace;
+  --atmos:
+    repeating-linear-gradient(0deg, rgba(0, 255, 65, 0.05) 0 1px, transparent 1px 3px),
+    radial-gradient(1000px 600px at 50% 130%, rgba(0, 255, 65, 0.1), transparent 70%);
+  --accent-glow: 0 0 12px rgba(0, 255, 65, 0.6);
+  --wordmark-shadow: 0 0 10px rgba(0, 255, 65, 0.8);
   color-scheme: dark;
 }
 
-/* Cute — pastel clair rose/violet, fond clair. */
+/* Cute — pastel clair rose/violet, fond clair, halos doux. */
 :root[data-theme="cute"] {
   --bg: #fdf2f8;
   --surface: #fce7f3;
@@ -76,10 +95,17 @@
   --accent: #d946ef;
   --grid: #f6d6e8;
   --crosshair: #c026d3;
+  /* Police arrondie + bulles pastel diffuses. */
+  --font-display: "Comic Sans MS", "Chalkboard SE", "Comic Neue", ui-rounded, system-ui, sans-serif;
+  --atmos:
+    radial-gradient(600px 400px at 12% 8%, rgba(217, 70, 239, 0.12), transparent 60%),
+    radial-gradient(700px 500px at 88% 92%, rgba(45, 212, 191, 0.12), transparent 60%);
+  --accent-glow: 0 0 10px rgba(217, 70, 239, 0.35);
+  --wordmark-shadow: 0 1px 0 rgba(217, 70, 239, 0.35);
   color-scheme: light;
 }
 
-/* Aurora — bleu/violet/cyan profond, accents froids. */
+/* Aurora — bleu/violet/cyan profond, dégradé d'aurore animé. */
 :root[data-theme="aurora"] {
   --bg: #0b1026;
   --surface: #141b3a;
@@ -91,6 +117,14 @@
   --accent: #a78bfa;
   --grid: #1c2752;
   --crosshair: #22d3ee;
+  /* Voile d'aurore (cyan/violet) en mouvement lent. */
+  --font-display: ui-sans-serif, "Inter", system-ui, -apple-system, sans-serif;
+  --atmos:
+    radial-gradient(900px 600px at 15% -10%, rgba(34, 211, 238, 0.16), transparent 60%),
+    radial-gradient(900px 600px at 85% 110%, rgba(167, 139, 250, 0.18), transparent 60%),
+    radial-gradient(700px 500px at 50% 50%, rgba(99, 102, 241, 0.08), transparent 70%);
+  --accent-glow: 0 0 12px rgba(167, 139, 250, 0.5);
+  --wordmark-shadow: 0 0 10px rgba(34, 211, 238, 0.5);
   color-scheme: dark;
 }
 
@@ -105,5 +139,50 @@ body {
   margin: 0;
   background-color: var(--bg);
   color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Police propre au thème (mono terminal, arrondie « cute », etc.). */
+  font-family: var(--font-display, ui-sans-serif, system-ui, sans-serif);
+}
+
+/*
+ * Voile d'ambiance par thème (textures/scanlines/dégradés via --atmos), posé en
+ * couche fixe DERRIÈRE l'app. pointer-events:none -> n'intercepte aucune
+ * interaction ; le canvas du graphe reste opaque par-dessus. Transition douce au
+ * changement de thème.
+ */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--atmos, none);
+  background-size: cover;
+  transition: background 0.4s ease;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* Le logotype AXIOM porte la lueur d'accent du thème (néon, halo ambré, etc.). */
+.axiom-wordmark {
+  text-shadow: var(--wordmark-shadow, none);
+  letter-spacing: 0.04em;
+}
+
+/* Dérive lente du voile Aurora (respiration du dégradé). */
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-theme="aurora"] body::before {
+    animation: axiom-aurora-drift 18s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes axiom-aurora-drift {
+  from {
+    transform: translate3d(-1.5%, -1%, 0) scale(1.04);
+  }
+  to {
+    transform: translate3d(1.5%, 1%, 0) scale(1.08);
+  }
 }

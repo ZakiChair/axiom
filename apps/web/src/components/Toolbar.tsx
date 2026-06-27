@@ -6,6 +6,7 @@ import { useStore } from "zustand";
 import type { ExchangeId, Timeframe } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
+import { volumeProfileStore } from "../store/volumeProfile";
 import { SUPPORTED_TIMEFRAMES } from "../data/adapters";
 import { IndicatorMenu } from "./IndicatorMenu";
 import { PairSearch } from "./PairSearch";
@@ -39,6 +40,8 @@ export function Toolbar() {
   const setTimeframe = useStore(marketStore, (s) => s.setTimeframe);
   const orderflowEnabled = useStore(orderflowStore, (s) => s.enabled);
   const toggleOrderflow = useStore(orderflowStore, (s) => s.toggle);
+  const vpEnabled = useStore(volumeProfileStore, (s) => s.enabled);
+  const toggleVp = useStore(volumeProfileStore, (s) => s.toggle);
 
   const supportedTf = SUPPORTED_TIMEFRAMES[exchange] ?? [];
   const isBinance = exchange === "binance";
@@ -56,7 +59,7 @@ export function Toolbar() {
 
   return (
     <header className="flex flex-wrap items-center gap-3 border-b border-neutral-800 bg-neutral-950 px-4 py-2">
-      <span className="font-semibold tracking-wide text-neutral-100">AXIOM</span>
+      <span className="axiom-wordmark font-semibold tracking-wide text-text">AXIOM</span>
 
       {/* Sélecteur de source. */}
       <select
@@ -141,6 +144,21 @@ export function Toolbar() {
         }`}
       >
         Orderflow
+      </button>
+
+      {/* Profil de volume par zone de prix (VPVR) — toutes sources. */}
+      <button
+        type="button"
+        onClick={toggleVp}
+        aria-pressed={vpEnabled}
+        title="Volume par zone de prix (plage visible)"
+        className={`rounded px-2 py-1 text-xs ${
+          vpEnabled
+            ? "bg-amber-500 text-neutral-950"
+            : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+        }`}
+      >
+        Profil Vol
       </button>
 
       {/* Sélecteur de thème (poussé à droite). */}

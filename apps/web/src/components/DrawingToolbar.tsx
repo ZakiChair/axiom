@@ -77,6 +77,74 @@ function FibIcon() {
   );
 }
 
+/** Rayon (demi-droite depuis une origine). */
+function RayIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <circle cx="4" cy="20" r="2" />
+      <line x1="4" y1="20" x2="21" y2="3" />
+    </svg>
+  );
+}
+
+/** Droite étendue (infinie dans les deux sens). */
+function ExtendedIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <line x1="2" y1="22" x2="22" y2="2" />
+    </svg>
+  );
+}
+
+/** Rayon horizontal (support/résistance directionnel). */
+function HorizontalRayIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <circle cx="4" cy="12" r="2" />
+      <line x1="4" y1="12" x2="21" y2="12" />
+    </svg>
+  );
+}
+
+/** Ligne verticale (marqueur temporel). */
+function VerticalLineIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <line x1="12" y1="3" x2="12" y2="21" />
+    </svg>
+  );
+}
+
+/** Ligne de prix annotée. */
+function PriceLineIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <line x1="3" y1="12" x2="15" y2="12" strokeDasharray="3 2" />
+      <rect x="16" y="9" width="6" height="6" rx="1" />
+    </svg>
+  );
+}
+
+/** Canal parallèle. */
+function ParallelChannelIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <line x1="4" y1="18" x2="20" y2="6" />
+      <line x1="4" y1="22" x2="20" y2="10" />
+    </svg>
+  );
+}
+
+/** Canal de prix (horizontal). */
+function PriceChannelIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <line x1="3" y1="8" x2="21" y2="8" />
+      <line x1="3" y1="16" x2="21" y2="16" />
+    </svg>
+  );
+}
+
 /** Corbeille (« Effacer tout »). */
 function TrashIcon() {
   return (
@@ -98,7 +166,14 @@ interface ToolDef {
 const TOOLS: ToolDef[] = [
   { id: "cursor", label: "Curseur", Icon: CursorIcon },
   { id: "trendLine", label: "Droite de tendance", Icon: TrendLineIcon },
+  { id: "ray", label: "Rayon", Icon: RayIcon },
+  { id: "extended", label: "Droite étendue", Icon: ExtendedIcon },
   { id: "horizontalLine", label: "Ligne horizontale", Icon: HorizontalLineIcon },
+  { id: "horizontalRay", label: "Rayon horizontal", Icon: HorizontalRayIcon },
+  { id: "verticalLine", label: "Ligne verticale", Icon: VerticalLineIcon },
+  { id: "priceLine", label: "Ligne de prix", Icon: PriceLineIcon },
+  { id: "parallelChannel", label: "Canal parallèle", Icon: ParallelChannelIcon },
+  { id: "priceChannel", label: "Canal de prix", Icon: PriceChannelIcon },
   { id: "rect", label: "Rectangle", Icon: RectIcon },
   { id: "fib", label: "Fib retracement", Icon: FibIcon },
 ];
@@ -108,7 +183,7 @@ export function DrawingToolbar() {
 
   return (
     <nav
-      className="flex w-10 shrink-0 flex-col items-center gap-1 border-r border-neutral-800 bg-neutral-950 py-2"
+      className="flex w-10 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-neutral-800 bg-neutral-950 py-2"
       aria-label="Outils de dessin"
     >
       {TOOLS.map(({ id, label, Icon }) => {

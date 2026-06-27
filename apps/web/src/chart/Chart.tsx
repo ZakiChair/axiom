@@ -16,11 +16,26 @@ import { marketStore } from "../store/market";
 import { indicatorsStore } from "../store/indicators";
 import { orderflowStore } from "../store/orderflow";
 import { compareStore } from "../store/compare";
+import { volumeProfileStore } from "../store/volumeProfile";
 import { themeStore } from "../store/theme";
 import { ChartIndicators } from "./indicators";
 import { OrderflowController } from "./orderflow";
 import { CompareController } from "./compare";
+import { VolumeProfileController } from "./volumeProfile";
 import { bindChart, unbindChart } from "./drawing";
+
+/**
+ * Précision d'affichage du prix dérivée de la magnitude (≈5 chiffres significatifs,
+ * bornée [2, 8]). Indispensable pour les tokens « sub-cent » : sans ça, un prix
+ * comme PUMPUSDT 0.0013 s'affiche « 0.00 ». KLineChart fige 2 décimales par défaut ;
+ * on calcule dynamiquement et on appelle setPriceVolumePrecision.
+ */
+function derivePricePrecision(candles: Candle[]): number {
+  const ref = candles.at(-1)?.close ?? candles[0]?.close ?? 0;
+  if (!(ref > 0)) return 2;
+  const p = 4 - Math.floor(Math.log10(ref));
+  return Math.min(8, Math.max(2, p));
+}
 
 /** Candle (@axiom/types) -> KLineData (KLineChart). */
 function toKLineData(c: Candle): KLineData {
@@ -60,8 +75,13 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
   const down = readToken("--down");
   const grid = readToken("--grid");
   const crosshair = readToken("--crosshair");
+  const atmos = readToken("--atmos");
 
+  // Le canvas KLineChart est transparent : on peint le conteneur. On y superpose
+  // le voile d'ambiance du thème (--atmos : scanlines Matrix/Bloomberg, aurore,
+  // bulles « cute »…) DERRIÈRE les bougies — c'est là que l'atmosphère se voit le plus.
   chartDom.style.backgroundColor = bg;
+  chartDom.style.backgroundImage = atmos && atmos !== "none" ? atmos : "";
 
   chart.setStyles({
     grid: {
@@ -113,6 +133,7 @@ export function Chart() {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const vpCanvasRef = useRef<HTMLCanvasElement>(null);
   const exchange = useStore(marketStore, (s) => s.exchange);
   const symbol = useStore(marketStore, (s) => s.symbol);
   const timeframe = useStore(marketStore, (s) => s.timeframe);
@@ -121,7 +142,8 @@ export function Chart() {
     const container = containerRef.current;
     const chartDom = chartRef.current;
     const canvas = canvasRef.current;
-    if (!container || !chartDom || !canvas) return;
+    const vpCanvas = vpCanvasRef.current;
+    if (!container || !chartDom || !canvas || !vpCanvas) return;
 
     const chart = init(chartDom);
     if (!chart) return;
@@ -162,6 +184,14 @@ export function Chart() {
       compare.sync(state.symbols);
     });
 
+    // Contrôleur Volume Profile (volume par zone de prix sur la plage visible).
+    // Calcul depuis les bougies OHLCV (toutes sources), rendu canvas dédié.
+    const volumeProfile = new VolumeProfileController(chart, container, vpCanvas);
+    volumeProfile.setEnabled(volumeProfileStore.getState().enabled);
+    const unsubscribeVolumeProfile = volumeProfileStore.subscribe((state) => {
+      volumeProfile.setEnabled(state.enabled);
+    });
+
     let cancelled = false;
     let unsubscribe: Unsubscribe | null = null;
 
@@ -174,6 +204,9 @@ export function Chart() {
       .then((candles) => {
         if (cancelled) return; // symbole/TF déjà changé : on abandonne ce backfill.
         marketStore.getState().setCandles(candles);
+        // Précision d'axe adaptée à la magnitude (corrige l'affichage « 0.00 »
+        // des tokens sub-cent type PUMPUSDT 0.0013). Volume en entiers (precision 0).
+        chart.setPriceVolumePrecision(derivePricePrecision(candles), 0);
         chart.applyNewData(candles.map(toKLineData));
 
         // Applique les indicateurs actifs (restaurés depuis localStorage) au graphe.
@@ -185,6 +218,9 @@ export function Chart() {
         // Backfill prêt : (re)trace les courbes de comparaison alignées sur le
         // nouveau symbole/TF/source (fetch des comparés + ligne du principal).
         compare.sync(compareStore.getState().symbols);
+
+        // Backfill prêt : le profil de volume recalcule à la frame suivante.
+        volumeProfile.onCandles();
 
         unsubscribe = adapter.subscribeKline(symbol, timeframe, (candle) => {
           marketStore.getState().upsertCandle(candle);
@@ -202,6 +238,7 @@ export function Chart() {
             // Réaligne la ligne base 100 du principal sur le buffer étendu (live,
             // impératif, sans re-render). Les comparés gardent leur série fetchée.
             compare.onCandles();
+            volumeProfile.onCandles();
           }
         });
       })
@@ -215,6 +252,8 @@ export function Chart() {
       unsubscribeIndicators();
       unsubscribeOrderflow();
       unsubscribeCompare();
+      unsubscribeVolumeProfile();
+      volumeProfile.dispose(); // arrête le rAF + nettoie le canvas profil.
       compare.dispose(); // retire le sous-pane de comparaison AVANT dispose.
       orderflow.dispose(); // ferme le WS aggTrade + retire le pane CVD AVANT dispose.
       if (unsubscribe) unsubscribe();
@@ -228,6 +267,13 @@ export function Chart() {
     // footprint se superpose (pointer-events:none -> pan/zoom passent au graphe).
     <div ref={containerRef} className="relative h-full w-full">
       <div ref={chartRef} className="absolute inset-0" />
+      {/* Canvas Volume Profile (sous le footprint dans l'ordre de pile). */}
+      <canvas
+        ref={vpCanvasRef}
+        className="pointer-events-none absolute inset-0"
+        style={{ display: "none" }}
+      />
+      {/* Canvas footprint (orderflow M5). */}
       <canvas
         ref={canvasRef}
         className="pointer-events-none absolute inset-0"

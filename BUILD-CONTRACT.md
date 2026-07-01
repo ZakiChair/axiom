@@ -5,7 +5,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 
 ## Décisions verrouillées (branche PERSO mono-utilisateur)
 - **Cible** : terminal pour UN utilisateur (ses propres clés). PAS de multi-tenant, PAS d'auth réseau, PAS de SaaS. Crypto d'abord (spot + perp) ; tradfi/commodités plus tard.
-- **Renderer-first** : le premier livrable à valeur est un graphe live à l'écran. **AUCUN backend / Docker / TimescaleDB / Redis pour le MVP.** Le front parle directement aux WS publics des exchanges (mode mono-utilisateur assumé).
+- **Renderer-first** : le premier livrable à valeur est un graphe live à l'écran. **AUCUN backend réseau/multi-tenant (Docker/TimescaleDB/Redis interdits). Un daemon localhost mono-process (`apps/daemon`, Bun + SQLite, port 8787) est autorisé depuis la Phase 2 — proxy/cache/persistance/alertes UNIQUEMENT, jamais sur le chemin chaud du renderer (les WS de marché du front restent directs).** Le front parle directement aux WS publics des exchanges (mode mono-utilisateur assumé) et reste **100 % fonctionnel SANS daemon** (feature-detect `/health` + repli localStorage/proxy Vite). Déviation assumée vs roadmap E1 : les proxys Vite restent en dev (dev sans daemon), le daemon est le chemin de PROD + services additionnels.
 - **Chart** : **KLineChart** figé (pas de lightweight-charts, pas d'abstraction `IChartRenderer` « swap de moteur »). L'overlay orderflow se synchronise sur le viewport de KLineChart.
 - **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique. PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
 - **Données dérivées (OI/funding/L-S/liquidations)** : **ACHETER** via un `IDerivedDataProvider` (Coinalyze gratuit visé en M6) — NE PAS construire d'AggregationEngine multi-exchange.
@@ -32,7 +32,16 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 - M3 watchlist+persistance locale, M4 spike sync WebGL, M5 CVD+footprint (aggTrade), M6 `IDerivedDataProvider`→Coinalyze : jalons suivants (pas dans ce premier workflow).
 
 ## Anti-objectifs (NE PAS faire)
-- Ne pas créer de backend, de docker-compose, de schéma DB.
+- Ne pas créer de backend **réseau/multi-tenant**, de docker-compose, de schéma DB serveur (le daemon localhost mono-process de la Phase 2 est la SEULE exception, cf. Décisions verrouillées).
 - Ne pas implémenter plus de 7 indicateurs dans ce lot.
 - Ne pas ajouter d'exchanges autres que Binance.
 - Ne pas « améliorer » `@axiom/types` ni les configs racine.
+
+### Garde-fous reportés de la roadmap (docs/research/03, §Anti-recommandations)
+Les anti-recommandations #2 (Docker/Redis/TimescaleDB), #3 (proxifier les WS via le daemon) et #6 (abstraction de moteur de chart) sont déjà couvertes ci-dessus et dans les Décisions verrouillées. Les 6 restantes, à respecter tout autant :
+- Ne pas empaqueter en **Electron** (150 Mo pour rien). Multi-fenêtres = `BroadcastChannel` + mode `--app` de Chrome ; Tauri seulement si un besoin est prouvé après usage.
+- Ne pas mutualiser les WS via un **SharedWorker** (complexité pour économiser des connexions non contraintes).
+- Ne pas construire de **recorder tick 24/7** multi-exchange (ce serait l'AggregationEngine interdit déguisé ; le replay télécharge les dumps `data.binance.vision` à la demande).
+- Ne pas **reconstruire maison la liquidation heatmap** (modèle propriétaire, gaté 699 $/mois chez CoinGlass → renoncer ou étiqueter toute estimation comme telle).
+- Ne pas intégrer **LunarCrush** (240 $/mois) ni **Santiment free** (données J-30).
+- Ne pas implémenter un **scripting Pine-like** complet.

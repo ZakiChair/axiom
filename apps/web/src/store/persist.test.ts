@@ -34,11 +34,14 @@ import {
   saveSessionUi,
   saveWatchlist,
   importerSauvegarde,
+  decisionsReconcile,
 } from "./persist";
+import type { SnapshotKv } from "../data/daemon";
 
 const CHART_KEY = "axiom:chartState:v1";
 const WATCH_KEY = "axiom:watchlist:v1";
 const SESSION_KEY = "axiom:sessionUi:v1";
+const META_KEY = "axiom:persistMeta:v1";
 
 /** Mock localStorage en mémoire (environnement de test Node, pas de DOM ici). */
 function installMockLocalStorage(): Storage {
@@ -338,5 +341,77 @@ describe("importerSauvegarde — remplacement des clés axiom:*", () => {
     expect(importerSauvegarde(JSON.stringify({ foo: "bar" }))).toBe(false);
 
     expect(localStorage.getItem("axiom:garde:v1")).toBe("intact"); // rien n'a bougé
+  });
+});
+
+describe("decisionsReconcile — arbitrage local ↔ daemon (last-write-wins)", () => {
+  // `valeur` d'un snapshot = JSON déjà parsé ; pour les clés persist c'est la CHAÎNE
+  // localStorage (double-encodée puis re-parsée → restituée telle quelle).
+  const chaine = (obj: unknown) => JSON.stringify(obj);
+
+  it("adopte la valeur du daemon quand le local est ABSENT (cache vidé)", () => {
+    const snap: SnapshotKv = { [CHART_KEY]: { valeur: chaine({ symbol: "ETHUSDT" }), majA: 500 } };
+    const decisions = decisionsReconcile([CHART_KEY], snap, () => null, {});
+    expect(decisions).toEqual([
+      { cle: CHART_KEY, action: "adopter", valeur: chaine({ symbol: "ETHUSDT" }), majA: 500 },
+    ]);
+  });
+
+  it("adopte le daemon quand son horodatage est strictement plus récent que la meta locale", () => {
+    const snap: SnapshotKv = { [CHART_KEY]: { valeur: chaine({ symbol: "SOL" }), majA: 900 } };
+    const local: Record<string, string> = { [CHART_KEY]: chaine({ symbol: "BTC" }) };
+    const decisions = decisionsReconcile([CHART_KEY], snap, (k) => local[k] ?? null, { [CHART_KEY]: 800 });
+    expect(decisions).toEqual([
+      { cle: CHART_KEY, action: "adopter", valeur: chaine({ symbol: "SOL" }), majA: 900 },
+    ]);
+  });
+
+  it("pousse le local quand sa meta est strictement plus récente que le daemon", () => {
+    const snap: SnapshotKv = { [CHART_KEY]: { valeur: chaine({ symbol: "SOL" }), majA: 700 } };
+    const local: Record<string, string> = { [CHART_KEY]: chaine({ symbol: "BTC" }) };
+    const decisions = decisionsReconcile([CHART_KEY], snap, (k) => local[k] ?? null, { [CHART_KEY]: 900 });
+    expect(decisions).toEqual([{ cle: CHART_KEY, action: "pousser", valeur: chaine({ symbol: "BTC" }) }]);
+  });
+
+  it("sème le local quand le daemon IGNORE la clé (durabilité première session)", () => {
+    const local: Record<string, string> = { [WATCH_KEY]: chaine(["BTCUSDT"]) };
+    const decisions = decisionsReconcile([WATCH_KEY], {}, (k) => local[k] ?? null, {});
+    expect(decisions).toEqual([{ cle: WATCH_KEY, action: "pousser", valeur: chaine(["BTCUSDT"]) }]);
+  });
+
+  it("préfère le local (pousse) quand il est présent SANS meta (utilisateur pré-feature)", () => {
+    const snap: SnapshotKv = { [CHART_KEY]: { valeur: chaine({ symbol: "SOL" }), majA: 700 } };
+    const local: Record<string, string> = { [CHART_KEY]: chaine({ symbol: "BTC" }) };
+    const decisions = decisionsReconcile([CHART_KEY], snap, (k) => local[k] ?? null, {});
+    expect(decisions).toEqual([{ cle: CHART_KEY, action: "pousser", valeur: chaine({ symbol: "BTC" }) }]);
+  });
+
+  it("ne fait rien à horodatage égal, ni si daemon et local sont tous deux absents", () => {
+    const snap: SnapshotKv = { [CHART_KEY]: { valeur: chaine({ symbol: "BTC" }), majA: 800 } };
+    const local: Record<string, string> = { [CHART_KEY]: chaine({ symbol: "BTC" }) };
+    expect(
+      decisionsReconcile([CHART_KEY], snap, (k) => local[k] ?? null, { [CHART_KEY]: 800 }),
+    ).toEqual([]);
+    // Daemon absent + local absent → aucune décision.
+    expect(decisionsReconcile([SESSION_KEY], {}, () => null, {})).toEqual([]);
+  });
+
+  it("ignore une entrée daemon dont la valeur n'est pas une chaîne (corrompue)", () => {
+    const snap = { [CHART_KEY]: { valeur: { pas: "une chaîne" }, majA: 999 } } as unknown as SnapshotKv;
+    expect(decisionsReconcile([CHART_KEY], snap, () => null, {})).toEqual([]);
+  });
+});
+
+describe("dual-write — aucune régression sans daemon", () => {
+  it("saveSessionUi écrit localStorage + horodatage local sans erreur ni réseau (daemon absent)", () => {
+    orderflowStore.getState().setEnabled(true);
+
+    expect(() => saveSessionUi()).not.toThrow();
+
+    // La session est bien persistée localement…
+    expect(JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null").orderflow).toBe(true);
+    // …et un horodatage local a été enregistré pour la clé gérée (arbitrage futur).
+    const meta = JSON.parse(localStorage.getItem(META_KEY) ?? "{}");
+    expect(typeof meta[SESSION_KEY]).toBe("number");
   });
 });

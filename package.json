@@ -9,7 +9,9 @@
     "dev": "pnpm --filter @axiom/web dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "daemon": "bun apps/daemon/src/index.ts",
+    "prod": "pnpm --filter @axiom/web build && bun apps/daemon/src/index.ts"
   },
   "devDependencies": {
     "@types/node": "^20.16.0",

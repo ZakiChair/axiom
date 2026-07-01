@@ -19,8 +19,9 @@
 import { evaluerAlertes, type AlertDef, type ContexteAlerte, type Declenchement } from "@axiom/alerts";
 import type { Unsubscribe } from "@axiom/types";
 import { marketStore } from "../store/market";
-import { alertsStore } from "../store/alerts";
+import { alertsStore, pousserDefsDaemon } from "../store/alerts";
 import { subscribeTickers, type TickerUpdate } from "../data/ticker";
+import { daemonPret, detectDaemon } from "../data/daemon";
 
 /** Types de condition évalués sur la clôture de bougie (nécessitent les bougies). */
 const TYPES_BOUGIE = new Set(["variation-pct", "indicateur-seuil", "indicateur-croisement"]);
@@ -116,10 +117,13 @@ function creerRuntime(): Unsubscribe {
   const unsubMarket = marketStore.subscribe(onMarket);
   onMarket(); // calibrage initial des conditions bougie sur le backfill présent
 
+  const stopHeartbeat = demarrerHeartbeat();
+
   return () => {
     unsubAlerts();
     unsubMarket();
     unsubTicker();
+    stopHeartbeat();
   };
 }
 
@@ -138,6 +142,53 @@ export function demarrerAlertes(): Unsubscribe {
     arreter = null;
   };
   return arreter;
+}
+
+// ───────── Heartbeat vers le daemon (anti-doublon onglet fermé) ─────────
+//
+// Tant que l'app est OUVERTE, elle POST /heartbeat toutes les 30 s. Le daemon ne
+// NOTIFIE (macOS/Telegram) un déclenchement que si le dernier heartbeat date de plus
+// de 90 s : app ouverte → le daemon reste silencieux (l'app a déjà notifié via la
+// Notification API), app fermée → le daemon prend le relais. Sans daemon détecté :
+// aucun POST (silencieux, zéro régression).
+
+/** Intervalle d'émission du heartbeat (ms). */
+const HEARTBEAT_MS = 30_000;
+
+/**
+ * Base d'URL du daemon (miroir de data/daemon.ts, non exporté là-bas) :
+ *  - DEV  : front sous Vite (5173), daemon sur 8787 → 127.0.0.1:8787 ;
+ *  - PROD : front servi par le daemon → même origine.
+ */
+function baseDaemon(): string {
+  if (import.meta.env.DEV) return "http://127.0.0.1:8787";
+  if (typeof window !== "undefined") return window.location.origin;
+  return "http://127.0.0.1:8787";
+}
+
+/** Envoie un heartbeat (best-effort, silencieux) si le daemon est détecté présent. */
+function envoyerHeartbeat(): void {
+  if (!daemonPret()) return;
+  try {
+    void fetch(baseDaemon() + "/heartbeat", { method: "POST" }).catch(() => {});
+  } catch {
+    /* best-effort */
+  }
+}
+
+/**
+ * Démarre le heartbeat périodique + un push initial des défs au daemon une fois
+ * celui-ci confirmé présent. Renvoie une fonction d'arrêt.
+ */
+function demarrerHeartbeat(): Unsubscribe {
+  // Détection (mémoïsée) : au succès, on sème les défs courantes et on bat le cœur.
+  void detectDaemon().then((present) => {
+    if (!present) return;
+    pousserDefsDaemon();
+    envoyerHeartbeat();
+  });
+  const timer = setInterval(envoyerHeartbeat, HEARTBEAT_MS);
+  return () => clearInterval(timer);
 }
 
 // ───────── Notification système + bip WebAudio (best-effort) ─────────

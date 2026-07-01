@@ -17,8 +17,14 @@
 import { createStore } from "zustand/vanilla";
 import type { AlertDef, Condition, Declenchement } from "@axiom/alerts";
 import type { ExchangeId } from "@axiom/types";
+import { daemonPret, kvPut } from "../data/daemon";
 
 const STORAGE_KEY = "axiom:alerts:v1";
+/** Namespace + clé KV où les défs sont miroitées vers le daemon (Phase 2.E3). */
+const NS_ALERTES = "alerts";
+const CLE_DEFS = "defs";
+/** Fenêtre de coalescence des envois de défs au daemon (ms). */
+const DEBOUNCE_SYNC_MS = 400;
 /** Borne du journal affiché/persisté (les entrées plus anciennes sont évincées). */
 const MAX_JOURNAL = 100;
 
@@ -129,5 +135,38 @@ export const alertsStore = createStore<AlertsState>((set, get) => ({
   viderJournal: () => set({ journal: [] }),
 }));
 
-// Persistance interne : sauvegarde à chaque changement (basse fréquence).
-alertsStore.subscribe((state) => sauvegarder(state));
+// ─────────────────────────── Sync vers le daemon (Phase 2.E3) ───────────────────────────
+//
+// DUAL-WRITE (même esprit qu'E2) : en plus de localStorage, les DÉFS sont poussées au
+// daemon (KV namespace « alerts », clé « defs ») pour l'évaluation « onglet fermé ». Le
+// daemon garde son PROPRE état de ré-armement ; il ne lit que la liste des défs. On ne
+// SONDE PAS le réseau (daemonPret est synchrone) : sans daemon détecté, aucun effet.
+
+/** Envoi debouncé en attente. */
+let minuteurSync: ReturnType<typeof setTimeout> | undefined;
+
+/** Programme (debounce) un envoi des défs courantes au daemon, si détecté. */
+function programmerSyncDaemon(defs: AlertDef[]): void {
+  if (!daemonPret()) return;
+  if (minuteurSync !== undefined) clearTimeout(minuteurSync);
+  minuteurSync = setTimeout(() => {
+    void kvPut(NS_ALERTES, CLE_DEFS, defs);
+  }, DEBOUNCE_SYNC_MS);
+}
+
+/**
+ * Pousse IMMÉDIATEMENT les défs courantes au daemon (si détecté). Appelé au démarrage
+ * du runtime une fois le daemon confirmé présent (les mutations ultérieures passent par
+ * le dual-write ci-dessous). Best-effort, silencieux sans daemon.
+ */
+export function pousserDefsDaemon(): void {
+  if (!daemonPret()) return;
+  void kvPut(NS_ALERTES, CLE_DEFS, alertsStore.getState().defs);
+}
+
+// Persistance interne : sauvegarde à chaque changement (basse fréquence) + miroir daemon
+// des défs uniquement (le journal reste local ; le daemon a le sien en SQLite).
+alertsStore.subscribe((state, prev) => {
+  sauvegarder(state);
+  if (state.defs !== prev.defs) programmerSyncDaemon(state.defs);
+});

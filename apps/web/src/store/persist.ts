@@ -8,6 +8,22 @@
  * Wiring (cf. main.tsx) : `hydrateStores()` AVANT le rendu (les stores prennent la
  * valeur persistée), puis `enablePersistence()` qui sauvegarde sur changement.
  *
+ * PERSISTANCE DURABLE (Phase 2.E2 — daemon axiomd, OPTIONNEL) : DUAL-WRITE. L'hydratation
+ * reste 100 % synchrone depuis localStorage (comportement inchangé) ; en plus, chaque
+ * écriture des clés gérées est DOUBLÉE d'un `kvPut` debouncé vers le daemon (namespace
+ * « persist », `cle` = clé localStorage) SI le daemon est détecté. Au boot, après
+ * l'hydratation locale, `enablePersistence()` déclenche une réconciliation asynchrone :
+ * on lit le snapshot du daemon et, par comparaison d'horodatage (SQLite = source de
+ * vérité quand le daemon est là), on ADOPTE ce qui est plus récent côté daemon (réappliqué
+ * À CHAUD via les hydrateurs par SETTERS ci-dessous — même mécanisme sans reload que
+ * `workspaces.applyContent`) et on POUSSE ce qui est plus récent côté local. Sans daemon :
+ * aucun effet, repli localStorage intégral (zéro régression).
+ *
+ * Portée du dual-write : SEULES les 3 clés gérées ici (chart / watchlist / session). Le
+ * thème (`store/theme`), les alertes (`store/alerts`) et les workspaces (`store/workspaces`)
+ * gèrent leur propre persistance localStorage et ne sont PAS (encore) miroités au daemon —
+ * ils restent locaux et ne transitent que par l'export/import de sauvegarde.
+ *
  * Garde anti-écriture-en-boucle : on N'ÉCRIT PAS sur tick. Les souscriptions ne visent
  * que des stores BASSE fréquence ; celle du marketStore ne sauvegarde que si
  * symbole/source/timeframe changent (le buffer de bougies, lui, est ignoré).
@@ -17,6 +33,13 @@
  * mais leurs clés `axiom:*` sont bien couvertes par l'export/import de sauvegarde.
  */
 import type { ChartState, ExchangeId, Timeframe } from "@axiom/types";
+import {
+  daemonPret,
+  detectDaemon,
+  kvPut,
+  kvSnapshot,
+  type SnapshotKv,
+} from "../data/daemon";
 import { defaultParams, migratePersistedIndicators, indicatorsStore } from "./indicators";
 import { marketStore } from "./market";
 import {
@@ -41,6 +64,21 @@ const SESSION_KEY = "axiom:sessionUi:v1";
 /** Préfixe commun de toutes les clés du terminal (export/import de sauvegarde). */
 const AXIOM_PREFIX = "axiom:";
 
+// ─────────────────────────── Dual-write daemon (Phase 2.E2) ───────────────────────────
+
+/** Namespace KV du daemon où sont miroitées les clés gérées ici. */
+const NS_PERSIST = "persist";
+/** Clés localStorage doublées vers le daemon (les 3 gérées par ce module). */
+const MANAGED_KEYS: readonly string[] = [CHART_KEY, WATCH_KEY, SESSION_KEY];
+/** Horodatages locaux (ms) par clé gérée — arbitre la réconciliation. NON miroité. */
+const META_KEY = "axiom:persistMeta:v1";
+/** Fenêtre de coalescence des kvPut par clé (ms). */
+const DEBOUNCE_MIROIR_MS = 400;
+
+/** Valeur sérialisée en attente d'envoi + minuteur de debounce, par clé. */
+const enAttenteMiroir = new Map<string, string>();
+const minuteursMiroir = new Map<string, ReturnType<typeof setTimeout>>();
+
 /** Sources câblées : seules valeurs d'exchange restaurables (cf. data/adapters.ts). */
 const RESTORABLE_EXCHANGES: ExchangeId[] = ["binance", "kraken", "coinbase", "twelvedata", "mexc"];
 
@@ -57,12 +95,81 @@ function readJson<T>(key: string): T | null {
   }
 }
 
-/** Écriture JSON tolérante (quota / mode privé => silencieux). */
-function writeJson(key: string, value: unknown): void {
+/** setItem tolérant (quota / mode privé => silencieux). */
+function setItemSafe(key: string, valeur: string): void {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    localStorage.setItem(key, valeur);
   } catch {
     /* ignore : la persistance est best-effort */
+  }
+}
+
+/**
+ * Écriture JSON tolérante. DUAL-WRITE : pour les clés gérées, on note l'horodatage
+ * local (arbitrage de réconciliation) et on DOUBLE l'écriture d'un `kvPut` debouncé
+ * vers le daemon (si détecté). L'hydratation, elle, reste 100 % synchrone (localStorage).
+ */
+function writeJson(key: string, value: unknown): void {
+  const serialise = JSON.stringify(value);
+  setItemSafe(key, serialise);
+  if (MANAGED_KEYS.includes(key)) {
+    noterMetaLocale(key);
+    programmerMiroir(key, serialise);
+  }
+}
+
+/** Lecture de la table d'horodatages locale (clé gérée → ms). Tolérante. */
+function lireMeta(): Record<string, number> {
+  const m = readJson<Record<string, number>>(META_KEY);
+  return m && typeof m === "object" && !Array.isArray(m) ? m : {};
+}
+
+/** Écrit la table d'horodatages (NON miroitée au daemon). */
+function ecrireMeta(meta: Record<string, number>): void {
+  setItemSafe(META_KEY, JSON.stringify(meta));
+}
+
+/**
+ * Note l'instant d'écriture LOCALE d'une clé (horloge murale). Persisté même daemon
+ * absent : c'est ce qui permet, au prochain démarrage avec daemon, de savoir qu'un
+ * changement local est plus récent que la copie du daemon (et de le pousser).
+ */
+function noterMetaLocale(cle: string): void {
+  const meta = lireMeta();
+  meta[cle] = Date.now();
+  ecrireMeta(meta);
+}
+
+/**
+ * Programme (debounce) l'envoi d'une valeur au daemon. NE SONDE PAS le réseau :
+ * si le daemon n'est pas déjà confirmé présent (`daemonPret`), on n'ordonnance rien
+ * (garde les tests hors-réseau ; la réconciliation au boot pousse de toute façon les
+ * changements locaux plus récents que le daemon).
+ */
+function programmerMiroir(cle: string, valeur: string): void {
+  if (!daemonPret()) return;
+  enAttenteMiroir.set(cle, valeur);
+  const existant = minuteursMiroir.get(cle);
+  if (existant !== undefined) clearTimeout(existant);
+  minuteursMiroir.set(
+    cle,
+    setTimeout(() => void viderMiroir(cle), DEBOUNCE_MIROIR_MS),
+  );
+}
+
+/** Envoie au daemon la dernière valeur en attente pour une clé ; met à jour la meta. */
+async function viderMiroir(cle: string): Promise<void> {
+  minuteursMiroir.delete(cle);
+  const valeur = enAttenteMiroir.get(cle);
+  enAttenteMiroir.delete(cle);
+  if (valeur === undefined || !daemonPret()) return;
+  // On envoie la CHAÎNE localStorage telle quelle : kvPut la re-sérialise (JSON string),
+  // ce qui la restitue octet pour octet au snapshot → réécriture localStorage fidèle.
+  const majA = await kvPut(NS_PERSIST, cle, valeur);
+  if (majA !== null) {
+    const meta = lireMeta();
+    meta[cle] = majA; // horodatage AUTORITAIRE du daemon → stabilise la comparaison
+    ecrireMeta(meta);
   }
 }
 
@@ -246,13 +353,14 @@ function hydrateSession(): void {
 // ─────────────────────────── Hydratation + activation ───────────────────────────
 
 /**
- * Restaure les stores depuis localStorage. À appeler AVANT le premier rendu.
+ * Restaure le ChartState (marché + indicateurs) depuis localStorage.
  *
  * Si aucun ChartState n'est persisté (première visite), on amorce le Volume @axiom
  * (pane séparé) par défaut : il remplace l'ancien VOL natif et fait de @axiom/indicators
- * la source unique (cf. BUILD-CONTRACT).
+ * la source unique (cf. BUILD-CONTRACT). Applique via les SETTERS des stores → utilisable
+ * aussi bien au boot (avant rendu) qu'À CHAUD lors de la réconciliation daemon.
  */
-export function hydrateStores(): void {
+function hydrateChart(): void {
   const persisted = readJson<Partial<ChartState>>(CHART_KEY);
 
   if (persisted) {
@@ -276,7 +384,13 @@ export function hydrateStores(): void {
       .getState()
       .setAll([{ defId: "volume", params: defaultParams("volume") }]);
   }
+}
 
+/**
+ * Restaure les stores depuis localStorage. À appeler AVANT le premier rendu.
+ */
+export function hydrateStores(): void {
+  hydrateChart();
   hydrateWatchlist();
   hydrateSession();
 }
@@ -307,6 +421,107 @@ export function enablePersistence(): void {
   macroOverlayStore.subscribe(saveSessionUi);
   uiSectionsStore.subscribe(saveSessionUi);
   priceScaleStore.subscribe(saveSessionUi);
+
+  // Persistance durable : réconciliation asynchrone avec le daemon (best-effort, silencieux
+  // s'il est absent). Déclenchée APRÈS l'hydratation locale déjà faite (hydrateStores).
+  void reconcilierDepuisDaemon();
+}
+
+// ─────────────────────────── Réconciliation daemon (Phase 2.E2) ───────────────────────────
+
+/** Hydrateur par clé gérée : réapplique À CHAUD (via setters) la valeur adoptée. */
+const HYDRATE_PAR_CLE: Record<string, () => void> = {
+  [CHART_KEY]: hydrateChart,
+  [WATCH_KEY]: hydrateWatchlist,
+  [SESSION_KEY]: hydrateSession,
+};
+
+/** Décision de réconciliation pour une clé (adopter le daemon, ou lui pousser le local). */
+export type DecisionReconcile =
+  | { cle: string; action: "adopter"; valeur: string; majA: number }
+  | { cle: string; action: "pousser"; valeur: string };
+
+/**
+ * Décide, pour chaque clé gérée, quoi faire au boot en comparant le snapshot du daemon,
+ * la présence/valeur LOCALE et la table d'horodatages `meta`. Last-write-wins :
+ *  - local absent OU daemon strictement plus récent  → ADOPTER (le daemon fait foi) ;
+ *  - daemon absent OU local strictement plus récent   → POUSSER (le local fait foi) ;
+ *  - à égalité d'horodatage                           → rien.
+ * Une clé locale présente mais SANS meta (utilisateur d'avant cette feature) est traitée
+ * comme « très récente » (on préfère ne pas écraser la vue courante → on la pousse).
+ * Fonction PURE (testée) : ne touche ni localStorage ni le réseau.
+ */
+export function decisionsReconcile(
+  clesGerees: readonly string[],
+  snapshot: SnapshotKv,
+  localGet: (cle: string) => string | null,
+  meta: Record<string, number>,
+): DecisionReconcile[] {
+  const decisions: DecisionReconcile[] = [];
+  for (const cle of clesGerees) {
+    const d = snapshot[cle];
+    const localVal = localGet(cle);
+    const localAbsent = localVal === null;
+
+    if (d && typeof d.valeur === "string") {
+      if (localAbsent) {
+        decisions.push({ cle, action: "adopter", valeur: d.valeur, majA: d.majA });
+        continue;
+      }
+      const ref = meta[cle] ?? Number.POSITIVE_INFINITY; // présent mais non horodaté → très récent
+      if (d.majA > ref) {
+        decisions.push({ cle, action: "adopter", valeur: d.valeur, majA: d.majA });
+      } else if (ref > d.majA) {
+        decisions.push({ cle, action: "pousser", valeur: localVal });
+      }
+      // ref === d.majA : déjà en phase, rien à faire.
+    } else if (!d && !localAbsent) {
+      // Le daemon ignore cette clé mais on l'a en local → on l'y sème (durabilité).
+      decisions.push({ cle, action: "pousser", valeur: localVal });
+    }
+  }
+  return decisions;
+}
+
+/**
+ * Réconcilie l'état persisté avec le daemon (si détecté). Adopte les valeurs plus
+ * récentes côté daemon (réappliquées à chaud) et pousse les valeurs locales plus
+ * récentes. Best-effort et TOTALEMENT silencieux si le daemon est absent (aucune
+ * régression : le front a déjà été hydraté depuis localStorage).
+ */
+async function reconcilierDepuisDaemon(): Promise<void> {
+  try {
+    if (!(await detectDaemon())) return;
+    const snapshot = await kvSnapshot(NS_PERSIST);
+    if (!snapshot) return;
+
+    const meta = lireMeta();
+    const decisions = decisionsReconcile(
+      MANAGED_KEYS,
+      snapshot,
+      (cle) => localStorage.getItem(cle),
+      meta,
+    );
+
+    const aReappliquer = new Set<string>();
+    for (const d of decisions) {
+      if (d.action === "adopter") {
+        setItemSafe(d.cle, d.valeur);
+        meta[d.cle] = d.majA;
+        aReappliquer.add(d.cle);
+      } else {
+        const majA = await kvPut(NS_PERSIST, d.cle, d.valeur);
+        if (majA !== null) meta[d.cle] = majA;
+      }
+    }
+    ecrireMeta(meta);
+
+    // Réapplication À CHAUD des clés adoptées : réutilise les hydrateurs (setters des
+    // stores → Chart/Toolbar/sidebar se reconfigurent en direct, sans reload).
+    for (const cle of aReappliquer) HYDRATE_PAR_CLE[cle]?.();
+  } catch {
+    /* réconciliation best-effort : jamais bloquante */
+  }
 }
 
 // ─────────────────────────── Sauvegarde complète (export / import JSON) ───────────────────────────

@@ -1,0 +1,21 @@
+{
+  "name": "@axiom/daemon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "axiomd — daemon localhost mono-process (Bun + SQLite) : proxy/cache des APIs à quota, service statique du build front. JAMAIS sur le chemin chaud du renderer (les WS de marché du front restent directs).",
+  "scripts": {
+    "start": "bun src/index.ts",
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@axiom/alerts": "workspace:*",
+    "@axiom/indicators": "workspace:*",
+    "@axiom/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14",
+    "typescript": "^5.6.0"
+  }
+}

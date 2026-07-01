@@ -9,3 +9,8 @@ coverage/
 .vite/
 .turbo/
 *.tsbuildinfo
+
+# Daemon axiomd — base SQLite locale (cache/persistance), jamais committée
+apps/daemon/axiom.db
+apps/daemon/axiom.db-shm
+apps/daemon/axiom.db-wal

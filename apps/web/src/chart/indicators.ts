@@ -2,33 +2,40 @@
  * Pont @axiom/indicators ↔ KLineChart.
  *
  * Principe (BUILD-CONTRACT) : @axiom/indicators est la SOURCE DE VÉRITÉ du calcul.
- * KLineChart ne refait AUCUNE math. Pour chaque `IndicatorDef`, on enregistre un
+ * KLineChart ne refait AUCUNE math. Pour chaque instance active, on enregistre un
  * indicateur KLineChart générique dont le `calc` se borne à MAPPER la série déjà
  * calculée par `computeIndicator(def, candles, params)` — stockée dans
  * `extendData` — sur les points du graphe, alignée par index.
  *
+ * MULTI-INSTANCES : l'identité d'un indicateur KLineChart est son `name` (par pane).
+ * Pour afficher EMA(20) ET EMA(50) simultanément (mêmes `def`/outputs, params
+ * différents), chaque INSTANCE reçoit donc un `name` KLineChart unique dérivé de
+ * son `instanceId`. Les indicateurs à pane séparé reçoivent en plus un `paneId`
+ * suffixé par l'instanceId. Le `shortName` du pane porte le libellé « EMA (20) ».
+ *
  * Cycle de vie :
- *  - activation        -> `createIndicator` (overlay sur le pane prix
- *    « candle_pane », ou pane séparé `axiom_<id>` pour RSI/MACD/Volume) ;
+ *  - activation        -> `createIndicator` (overlay sur `candle_pane`, ou pane
+ *    séparé `axiom_<instanceId>` pour RSI/MACD/Volume…) ;
  *  - backfill / clôture -> `computeIndicator` puis `overrideIndicator` avec un
  *    `extendData` NEUF (KLineChart compare extendData par référence => recalcul) ;
+ *  - édition des params -> `overrideIndicator` en place (instanceId stable) ;
  *  - désactivation      -> `removeIndicator`.
  *
- * Détails d'API vérifiés sur le bundle v9.8.12 (index.d.ts + ESM compilé) :
- *  - `extendData` comparé par RÉFÉRENCE -> un objet neuf force le recalcul ;
- *  - `addInstance` exécute `calc` immédiatement ;
- *  - `updateData` (tick live) relance `calc` de tous les indicateurs : notre
- *    `calc` se contente de relire `extendData` (aucune math, aucun re-render).
+ * API vérifiée sur le bundle v9.8.12 (index.d.ts) :
+ *  - `createIndicator(value, isStack?, paneOptions?) => string | null` ;
+ *  - `overrideIndicator(override, paneId?) => void` (cible par `override.name` + paneId) ;
+ *  - `removeIndicator(paneId, name?) => void` ;
+ *  - `extendData` comparé par RÉFÉRENCE -> un objet neuf force le recalcul.
  */
 import { registerIndicator, IndicatorSeries } from "klinecharts";
 import type { Chart, IndicatorFigure } from "klinecharts";
-import type {
-  Candle,
-  IndicatorDef,
-  IndicatorInstance,
-  IndicatorResult,
-} from "@axiom/types";
+import type { Candle, IndicatorDef, IndicatorResult } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
+import {
+  computeKey,
+  formatInstanceLabel,
+  type ActiveIndicator,
+} from "../store/indicators";
 
 /** Point d'indicateur côté KLineChart : clé d'output -> valeur finie. */
 type AxiomPoint = Record<string, number>;
@@ -36,14 +43,18 @@ type AxiomPoint = Record<string, number>;
 /** Id du pane prix (constante interne KLineChart, vérifiée dans le bundle). */
 const CANDLE_PANE_ID = "candle_pane";
 
-/** Nom KLineChart d'un indicateur AXIOM (préfixe = aucune collision avec les natifs). */
-function axiomName(defId: string): string {
-  return `AXIOM_${defId.toUpperCase()}`;
+/**
+ * Nom KLineChart d'une INSTANCE (identité par pane). Préfixe `AXIOM_` = aucune
+ * collision avec les indicateurs natifs (MA/BOLL/RSI…) ; `instanceId` (unique)
+ * garantit qu'EMA(20) et EMA(50) coexistent sur le même pane.
+ */
+function axiomName(instanceId: string): string {
+  return `AXIOM_${instanceId}`;
 }
 
-/** Id de pane séparé déterministe pour un indicateur non-overlay. */
-function axiomPaneId(defId: string): string {
-  return `axiom_${defId}`;
+/** Id de pane séparé déterministe pour une instance non-overlay. */
+function axiomPaneId(instanceId: string): string {
+  return `axiom_${instanceId}`;
 }
 
 /** Enregistrement idempotent (module-scope) : survit aux remounts StrictMode. */
@@ -57,11 +68,12 @@ function seriesFor(def: IndicatorDef): IndicatorSeries {
 }
 
 /**
- * Enregistre (une seule fois) un template KLineChart générique pour `def`.
+ * Enregistre (une seule fois par `name`) un template KLineChart générique pour `def`.
  * Le `calc` est clos sur les clés d'output et lit la série pré-calculée d'extendData.
+ * Chaque instance a son `name` propre : le template est donc réenregistré par
+ * instanceId, mais son contenu (figures + calc générique) ne dépend que de `def`.
  */
-function ensureRegistered(def: IndicatorDef): void {
-  const name = axiomName(def.id);
+function ensureRegistered(def: IndicatorDef, name: string): void {
   if (registered.has(name)) return;
 
   const outputKeys = def.outputs.map((o) => o.key);
@@ -82,7 +94,7 @@ function ensureRegistered(def: IndicatorDef): void {
 
   registerIndicator<AxiomPoint>({
     name,
-    shortName: def.name,
+    shortName: def.name, // repli ; le libellé « EMA (20) » est passé par instance à create/override.
     series: seriesFor(def),
     figures,
     // calc PUR de mapping : lit la série calculée par @axiom/indicators (extendData),
@@ -108,71 +120,117 @@ function ensureRegistered(def: IndicatorDef): void {
   registered.add(name);
 }
 
+/** Métadonnées d'une instance montée sur le graphe. */
+interface MountedIndicator {
+  /** Id du pane hôte (renvoyé par createIndicator). */
+  paneId: string;
+  /** Nom KLineChart unique de l'instance. */
+  name: string;
+  /** Dernière clé de calcul appliquée (defId::hashParams) — détecte une édition de params. */
+  key: string;
+}
+
 /**
  * Contrôleur d'indicateurs lié à UNE instance de Chart KLineChart.
- * Réconcilie la liste d'indicateurs actifs et pousse les recalculs.
+ * Réconcilie la liste d'instances actives et pousse les recalculs.
  */
 export class ChartIndicators {
   private readonly chart: Chart;
-  /** defId -> { paneId renvoyé par createIndicator, name KLineChart }. */
-  private readonly active = new Map<string, { paneId: string; name: string }>();
+  /** instanceId -> métadonnées de l'indicateur monté. */
+  private readonly active = new Map<string, MountedIndicator>();
+  /**
+   * Cache de calcul par config (defId::hashParams). Mémorise la RÉFÉRENCE des
+   * candles ayant produit le résultat : tant que les candles n'ont pas changé
+   * (même référence), on NE recalcule PAS — deux instances de config identique
+   * partagent le calcul, et un recompute redondant est un no-op.
+   */
+  private readonly computeCache = new Map<string, { candles: Candle[]; result: IndicatorResult }>();
 
   constructor(chart: Chart) {
     this.chart = chart;
   }
 
-  /**
-   * Réconcilie le graphe avec la liste voulue : retire les disparus, ajoute les
-   * nouveaux, et rafraîchit les présents (recalcul via @axiom/indicators).
-   */
-  sync(instances: IndicatorInstance[], candles: Candle[]): void {
-    const wanted = new Set(instances.map((i) => i.defId));
+  /** Calcul mémoïsé : recalcule seulement si la référence des candles a changé. */
+  private compute(def: IndicatorDef, params: ActiveIndicator["params"], candles: Candle[]): IndicatorResult {
+    const key = computeKey(def.id, params);
+    const cached = this.computeCache.get(key);
+    if (cached && cached.candles === candles) return cached.result;
+    const result = computeIndicator(def, candles, params);
+    this.computeCache.set(key, { candles, result });
+    return result;
+  }
 
-    // Retrait des indicateurs désactivés.
-    for (const [defId, info] of this.active) {
-      if (!wanted.has(defId)) {
-        this.chart.removeIndicator(info.paneId, info.name);
-        this.active.delete(defId);
-      }
-    }
-
-    // Ajout / mise à jour.
-    for (const inst of instances) {
-      const def = getIndicator(inst.defId);
-      if (!def) continue; // defId inconnu (ex. persistance obsolète) : ignoré.
-      ensureRegistered(def);
-
-      const result = computeIndicator(def, candles, inst.params);
-      const name = axiomName(def.id);
-      const existing = this.active.get(inst.defId);
-
-      if (existing) {
-        // Déjà présent : on rafraîchit seulement la série (référence neuve => recalc).
-        this.chart.overrideIndicator({ name, extendData: result }, existing.paneId);
-        continue;
-      }
-
-      const paneId = def.pane === "overlay" ? CANDLE_PANE_ID : axiomPaneId(def.id);
-      const created = this.chart.createIndicator(
-        { name, extendData: result },
-        true, // isStack : coexistence des overlays sur le pane prix.
-        { id: paneId }
-      );
-      if (created) this.active.set(inst.defId, { paneId: created, name });
+  /** Restreint le cache aux clés de calcul encore référencées (borne mémoire). */
+  private pruneCache(keep: Set<string>): void {
+    for (const key of this.computeCache.keys()) {
+      if (!keep.has(key)) this.computeCache.delete(key);
     }
   }
 
   /**
-   * Recalcule (via @axiom/indicators) tous les indicateurs actifs et pousse le
-   * résultat. Appelé au backfill et à CHAQUE bougie clôturée (cf. BUILD-CONTRACT).
+   * Réconcilie le graphe avec la liste voulue : retire les instances disparues,
+   * ajoute les nouvelles, ré-override celles dont les PARAMS ont changé (édition),
+   * et laisse intactes celles inchangées (aucun recalcul superflu).
    */
-  recompute(instances: IndicatorInstance[], candles: Candle[]): void {
+  sync(instances: ActiveIndicator[], candles: Candle[]): void {
+    const wanted = new Set(instances.map((i) => i.instanceId));
+
+    // Retrait des instances désactivées.
+    for (const [instanceId, info] of this.active) {
+      if (!wanted.has(instanceId)) {
+        this.chart.removeIndicator(info.paneId, info.name);
+        this.active.delete(instanceId);
+      }
+    }
+
     for (const inst of instances) {
-      const info = this.active.get(inst.defId);
+      const def = getIndicator(inst.defId);
+      if (!def) continue; // defId inconnu (persistance obsolète) : ignoré.
+
+      const name = axiomName(inst.instanceId);
+      const key = computeKey(inst.defId, inst.params);
+      const existing = this.active.get(inst.instanceId);
+
+      if (existing) {
+        if (existing.key === key) continue; // params inchangés : rien à faire.
+        // Édition des params (instanceId stable) : recalcul + override + libellé.
+        const result = this.compute(def, inst.params, candles);
+        this.chart.overrideIndicator(
+          { name, shortName: formatInstanceLabel(def, inst.params), extendData: result },
+          existing.paneId
+        );
+        existing.key = key;
+        continue;
+      }
+
+      // Nouvelle instance.
+      ensureRegistered(def, name);
+      const result = this.compute(def, inst.params, candles);
+      const paneId = def.pane === "overlay" ? CANDLE_PANE_ID : axiomPaneId(inst.instanceId);
+      const created = this.chart.createIndicator(
+        { name, shortName: formatInstanceLabel(def, inst.params), extendData: result },
+        true, // isStack : coexistence des overlays sur le pane prix.
+        { id: paneId }
+      );
+      if (created) this.active.set(inst.instanceId, { paneId: created, name, key });
+    }
+
+    this.pruneCache(new Set(instances.map((i) => computeKey(i.defId, i.params))));
+  }
+
+  /**
+   * Recalcule (via @axiom/indicators) toutes les instances actives et pousse le
+   * résultat. Appelé au backfill et à CHAQUE bougie clôturée (cf. BUILD-CONTRACT).
+   * Le cache mémoïse les configs identiques : une seule passe de calcul par
+   * (defId, params), même si plusieurs instances les partagent.
+   */
+  recompute(instances: ActiveIndicator[], candles: Candle[]): void {
+    for (const inst of instances) {
+      const info = this.active.get(inst.instanceId);
       if (!info) continue;
       const def = getIndicator(inst.defId);
       if (!def) continue;
-      const result = computeIndicator(def, candles, inst.params);
+      const result = this.compute(def, inst.params, candles);
       this.chart.overrideIndicator({ name: info.name, extendData: result }, info.paneId);
     }
   }

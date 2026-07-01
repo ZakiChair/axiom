@@ -11,6 +11,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@axiom/alerts": "workspace:*",
     "@axiom/indicators": "workspace:*",
     "@axiom/types": "workspace:*",
     "klinecharts": "^9.8.10",

@@ -7,10 +7,11 @@
  * changement symbole/TF ou au démontage : unsubscribe WS + dispose.
  */
 import { useEffect, useRef } from "react";
-import { dispose, init } from "klinecharts";
+import { dispose, init, LoadDataType, YAxisType } from "klinecharts";
 import type { Chart as KLineChartInstance, KLineData } from "klinecharts";
+import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
-import type { Candle, Timeframe, Unsubscribe } from "@axiom/types";
+import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { getAdapter } from "../data/adapters";
 import { mergeResyncCandles } from "../data/resync";
 import { marketStore } from "../store/market";
@@ -30,6 +31,50 @@ import { RevenueController } from "./revenue";
 import { MacroController } from "./macro";
 import { bindChart, unbindChart, redrawFibOverlays, restoreDrawings } from "./drawing";
 import { fibStore } from "./fibonacci";
+import { SymbolBanner } from "../components/SymbolBanner";
+
+/** Type d'échelle de l'axe prix (miroir de YAxisType klinecharts). */
+export type PriceScaleType = "normal" | "log" | "percentage";
+
+export interface PriceScaleState {
+  /** Échelle courante de l'axe prix : linéaire / logarithmique / pourcentage. */
+  type: PriceScaleType;
+  setType: (type: PriceScaleType) => void;
+}
+
+/**
+ * Store d'échelle de l'axe prix — Zustand VANILLA (hors render-loop). Réglé par la
+ * Toolbar, lu par le Chart (applique `setStyles({ yAxis: { type } })` + propage au
+ * footprint orderflow). Co-localisé ici pour éviter un import circulaire orderflow↔Chart.
+ */
+export const priceScaleStore = createStore<PriceScaleState>((set) => ({
+  type: "normal",
+  setType: (type) => set({ type }),
+}));
+
+/** Mappe l'échelle du store vers l'enum YAxisType attendu par `setStyles` de KLineChart. */
+const Y_AXIS_TYPE: Record<PriceScaleType, YAxisType> = {
+  normal: YAxisType.Normal,
+  log: YAxisType.Log,
+  percentage: YAxisType.Percentage,
+};
+
+/** Nombre de bougies récupérées par page d'historique (scroll gauche). */
+const PAGINATION_LIMIT = 500;
+/**
+ * Plafond du buffer marché au fil des paginations : au-delà, on cesse de charger plus
+ * d'historique (borne mémoire d'une session longue qui scrolle beaucoup vers le passé).
+ */
+const PAGINATION_MAX_CANDLES = 20_000;
+
+/**
+ * Dernier viewport connu (zoom + décalage droit), capturé AVANT `dispose()`. Sert à
+ * restaurer le cadrage best-effort au changement de symbole/TF SUR LA MÊME SOURCE
+ * (l'instance est recréée, mais on reproduit largeur de bougie + décalage). Réinitialisé
+ * au changement de source (`exchange` différent) → cadrage par défaut. Module-scope :
+ * survit au démontage/remontage de l'effet.
+ */
+let lastViewport: { exchange: ExchangeId; barSpace: number; offsetRight: number } | null = null;
 
 /**
  * Précision d'affichage du prix dérivée de la magnitude (≈5 chiffres significatifs,
@@ -203,6 +248,17 @@ export function Chart() {
       orderflow.setEnabled(state.enabled);
     });
 
+    // Échelle de l'axe prix (linéaire/log/pourcentage) : appliquée à l'instance via
+    // setStyles (merge partiel, la palette du thème n'est pas touchée) ET propagée au
+    // footprint orderflow (qui doit convertir prix→y par niveau en mode non linéaire).
+    // Réappliquée à chaque (re)création d'instance : une instance neuve démarre en 'normal'.
+    const applyPriceScale = (type: PriceScaleType): void => {
+      chart.setStyles({ yAxis: { type: Y_AXIS_TYPE[type] } });
+      orderflow.setAxisType(type);
+    };
+    applyPriceScale(priceScaleStore.getState().type);
+    const unsubscribePriceScale = priceScaleStore.subscribe((state) => applyPriceScale(state.type));
+
     // Contrôleur multi-courbes (comparaison base 100) : superpose le principal +
     // les symboles comparés dans un sous-pane dédié. Re-synchronise sur ajout/retrait
     // (impératif, hors render-loop React). Le backfill principal déclenche le 1er sync.
@@ -257,6 +313,19 @@ export function Chart() {
         chart.setPriceVolumePrecision(derivePricePrecision(candles), 0);
         chart.applyNewData(candles.map(toKLineData));
 
+        // Préservation best-effort du cadrage : au changement de symbole/TF SUR LA MÊME
+        // SOURCE, on reproduit la largeur de bougie (zoom) et le décalage droit capturés
+        // avant le dispose de l'ancienne instance. applyNewData ayant remis le décalage à
+        // zéro, on restaure APRÈS. Au changement de source, `exchange` diffère → cadrage neuf.
+        if (lastViewport && lastViewport.exchange === exchange) {
+          try {
+            chart.setBarSpace(lastViewport.barSpace);
+            chart.setOffsetRightDistance(lastViewport.offsetRight);
+          } catch {
+            /* best-effort : un échec de restauration ne doit pas casser l'affichage */
+          }
+        }
+
         // Rejoue les dessins sauvegardés de CE symbole (les bougies sont posées :
         // l'ancrage temporel des overlays est valide). Survit aux changements de TF/actif.
         restoreDrawings(symbol);
@@ -277,6 +346,58 @@ export function Chart() {
         // Backfill prêt : (re)trace les courbes basse fréquence alignées sur le buffer.
         revenue.onCandles();
         macro.onCandles();
+
+        // Pagination historique (scroll gauche) : KLineChart appelle ce callback avec
+        // `type: Forward` et la bougie la plus ANCIENNE affichée. On récupère un lot plus
+        // vieux (endTime = borne - 1) puis on le PRÉPEND au buffer marché ET au graphe.
+        //   - Le buffer marché est prolongé en MÊME temps que le graphe → l'alignement
+        //     index-par-index des indicateurs / CVD / volume profile reste correct.
+        //   - Sources sans `endTime` (Kraken, MEXC, tradfi) : le lot renvoyé ne contient
+        //     aucune bougie plus ancienne → filtre vide → `more:false` → arrêt propre
+        //     (dégradation silencieuse, pas de boucle ni de données fausses).
+        //   - On DOIT toujours rappeler `params.callback` (même vide / en erreur) sinon le
+        //     verrou interne `_loading` de KLineChart resterait bloqué.
+        chart.setLoadDataCallback((params) => {
+          const leftmost = params.data;
+          if (params.type !== LoadDataType.Forward || !leftmost) {
+            params.callback([], false);
+            return;
+          }
+          if (marketStore.getState().candles.length >= PAGINATION_MAX_CANDLES) {
+            params.callback([], false); // borne mémoire atteinte : on cesse de charger.
+            return;
+          }
+          adapter
+            .fetchKlines(symbol, timeframe, {
+              limit: PAGINATION_LIMIT,
+              endTime: leftmost.timestamp - 1,
+            })
+            .then((fetched) => {
+              if (cancelled) return; // instance en cours de destruction : ne rien appliquer.
+              const older = fetched.filter((c) => c.time < leftmost.timestamp);
+              if (older.length === 0) {
+                params.callback([], false); // début de l'historique (ou source sans endTime).
+                return;
+              }
+              const existing = marketStore.getState().candles;
+              const merged = older.concat(existing);
+              marketStore.getState().setCandles(merged);
+              // Re-drive les contrôleurs sur le buffer prolongé (extendData réaligné sur
+              // `merged`) AVANT de prépendre au graphe, pour que le recalcul final soit juste.
+              indicators.recompute(indicatorsStore.getState().indicators, merged);
+              orderflow.onCandles();
+              compare.onCandles();
+              volumeProfile.onCandles();
+              revenue.onCandles();
+              macro.onCandles();
+              // Prépend au graphe (déclenche le recalcul interne) ; le cadrage reste stable.
+              params.callback(older.map(toKLineData), true);
+            })
+            .catch((err) => {
+              if (!cancelled) params.callback([], true); // débloque _loading, autorise un retry.
+              console.error("[AXIOM] pagination historique échouée", err);
+            });
+        });
 
         const onKline = (candle: Candle) => {
           marketStore.getState().upsertCandle(candle);
@@ -332,6 +453,7 @@ export function Chart() {
     return () => {
       cancelled = true;
       unsubscribeTheme();
+      unsubscribePriceScale();
       unsubscribeIndicators();
       unsubscribeOrderflow();
       unsubscribeCompare();
@@ -346,6 +468,16 @@ export function Chart() {
       orderflow.dispose(); // ferme le WS aggTrade + retire le pane CVD AVANT dispose.
       if (unsubscribe) unsubscribe();
       unsubscribeFib();
+      // Capture le cadrage AVANT dispose : le prochain montage sur la MÊME source le restaure.
+      try {
+        lastViewport = {
+          exchange,
+          barSpace: chart.getBarSpace(),
+          offsetRight: chart.getOffsetRightDistance(),
+        };
+      } catch {
+        lastViewport = null;
+      }
       unbindChart(chart); // détache le pont de dessin avant de détruire l'instance.
       dispose(chart); // détruit panes + indicateurs ; pas de removeIndicator manuel.
     };
@@ -356,6 +488,10 @@ export function Chart() {
     // footprint se superpose (pointer-events:none -> pan/zoom passent au graphe).
     <div ref={containerRef} className="relative h-full w-full">
       <div ref={chartRef} className="absolute inset-0" />
+      {/* Bandeau symbole (prix / var 24h / H-L 24h / volume / compte à rebours de bougie),
+          superposé en haut à gauche du graphe. Écritures DOM impératives (aucun re-render
+          sur tick), abonné au ticker + au buffer marché. */}
+      <SymbolBanner />
       {/* Canvas Volume Profile (sous le footprint dans l'ordre de pile). */}
       <canvas
         ref={vpCanvasRef}

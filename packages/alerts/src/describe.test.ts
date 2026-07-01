@@ -1,0 +1,62 @@
+/**
+ * @axiom/alerts — describe.test.ts
+ *
+ * Vérifie les libellés français des conditions + le formatage de durée.
+ */
+import { describe, expect, it } from "vitest";
+import { decrireCondition, formaterDuree } from "./describe";
+
+describe("formaterDuree", () => {
+  it("choisit l'unité compacte selon l'ordre de grandeur", () => {
+    expect(formaterDuree(30_000)).toBe("30 s");
+    expect(formaterDuree(15 * 60_000)).toBe("15 min");
+    expect(formaterDuree(4 * 3_600_000)).toBe("4 h");
+    expect(formaterDuree(2 * 86_400_000)).toBe("2 j");
+  });
+});
+
+describe("decrireCondition", () => {
+  it("prix-croise selon le sens", () => {
+    expect(decrireCondition({ type: "prix-croise", niveau: 100, sens: "hausse" })).toBe(
+      "Prix franchit 100 à la hausse"
+    );
+    expect(decrireCondition({ type: "prix-croise", niveau: 100, sens: "baisse" })).toBe(
+      "Prix franchit 100 à la baisse"
+    );
+    expect(decrireCondition({ type: "prix-croise", niveau: 100, sens: "les-deux" })).toBe(
+      "Prix franchit 100"
+    );
+  });
+
+  it("variation-pct affiche le signe et la fenêtre", () => {
+    expect(decrireCondition({ type: "variation-pct", seuilPct: 5, fenetreMs: 15 * 60_000 })).toBe(
+      "Variation +5% sur 15 min"
+    );
+    expect(decrireCondition({ type: "variation-pct", seuilPct: -3, fenetreMs: 3_600_000 })).toBe(
+      "Variation -3% sur 1 h"
+    );
+  });
+
+  it("conditions d'indicateur", () => {
+    expect(
+      decrireCondition({
+        type: "indicateur-seuil",
+        indicateurId: "rsi",
+        params: { length: 14 },
+        output: "rsi",
+        comparateur: ">",
+        valeur: 70,
+      })
+    ).toBe("rsi(rsi) > 70");
+    expect(
+      decrireCondition({
+        type: "indicateur-croisement",
+        indicateurId: "macd",
+        params: {},
+        outputA: "macd",
+        outputB: "signal",
+        sens: "hausse",
+      })
+    ).toBe("macd : macd croise à la hausse signal");
+  });
+});

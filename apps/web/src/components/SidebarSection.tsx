@@ -11,9 +11,16 @@
  * repliés par défaut pour ne pas écraser les paires. Le slot `action` reste frère du
  * bouton de bascule (cliquer « rafraîchir » ne replie pas la section).
  *
+ * ÉTAT CONTRÔLÉ : le pli/dépli vit dans `uiSectionsStore` (indexé par `title`), et non
+ * plus dans un `useState` local — il devient ainsi PERSISTABLE (persist.ts) et capturé
+ * par les workspaces, tout en restant piloté par clic. `defaultOpen` sert de repli tant
+ * que la section n'a jamais été (dé)pliée manuellement.
+ *
  * Tokens sémantiques uniquement (border/text-dim) => cohérent avec tous les thèmes.
  */
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { useStore } from "zustand";
+import { uiSectionsStore } from "../store/ui-sections";
 
 interface SidebarSectionProps {
   /** Titre affiché en eyebrow (MAJUSCULES). */
@@ -44,7 +51,8 @@ export function SidebarSection({
   defaultOpen = true,
   badge,
 }: SidebarSectionProps) {
-  const [open, setOpen] = useState(defaultOpen);
+  // État de pli lu dans le store (clé = titre) ; retombe sur `defaultOpen` si jamais (dé)plié.
+  const open = useStore(uiSectionsStore, (s) => s.open[title] ?? defaultOpen);
   const isOpen = !collapsible || open;
 
   // Grandit/défile uniquement si OUVERTE et `grow` ; sinon épouse son contenu.
@@ -80,7 +88,7 @@ export function SidebarSection({
         {collapsible ? (
           <button
             type="button"
-            onClick={() => setOpen((o) => !o)}
+            onClick={() => uiSectionsStore.getState().toggle(title, defaultOpen)}
             aria-expanded={isOpen}
             className="flex flex-1 items-center text-left transition hover:opacity-80"
           >

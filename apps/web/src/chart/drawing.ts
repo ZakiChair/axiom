@@ -105,10 +105,17 @@ export function unbindChart(chart: KLineChartInstance): void {
 // PROBLÈME : Chart.tsx recrée l'instance (donc détruit les overlays) à chaque
 // changement de symbole/TF, et klinecharts n'expose pas d'énumération globale des
 // overlays. On TRACE donc nous-mêmes chaque dessin (id → {name, points}) et on le
-// REJOUE après le backfill via `restoreDrawings`. Stockage par SYMBOLE (localStorage)
-// → les dessins survivent au changement de TF, au changement d'actif et au rechargement.
+// REJOUE après le backfill via `restoreDrawings`. Stockage par « EXCHANGE:SYMBOLE »
+// (localStorage) → les dessins survivent au changement de TF, au changement d'actif
+// et au rechargement, SANS collision entre sources (un BTCUSDT Binance et un BTCUSDT
+// Coinbase ont désormais des jeux de dessins distincts).
 
 const DRAWINGS_KEY = "axiom:drawings:v1";
+
+/** Clé de stockage composite d'un actif : « exchange:symbole ». */
+function storageKey(exchange: string, symbol: string): string {
+  return `${exchange}:${symbol}`;
+}
 
 /** Point d'un overlay, ancré dans le temps (stable d'un TF à l'autre) + prix. */
 interface SavedPoint {
@@ -138,14 +145,19 @@ function readAll(): Record<string, SavedOverlay[]> {
   }
 }
 
-/** Persiste les overlays vivants sous le symbole courant (best-effort). */
+/** Écriture brute de la map complète (best-effort géré par l'appelant). */
+function writeAll(all: Record<string, SavedOverlay[]>): void {
+  localStorage.setItem(DRAWINGS_KEY, JSON.stringify(all));
+}
+
+/** Persiste les overlays vivants sous la clé « exchange:symbole » courante (best-effort). */
 function persist(): void {
   if (suppressPersist) return; // teardown en cours : ne pas écraser le stockage.
   try {
-    const symbol = marketStore.getState().symbol;
+    const { exchange, symbol } = marketStore.getState();
     const all = readAll();
-    all[symbol] = Array.from(liveOverlays.values());
-    localStorage.setItem(DRAWINGS_KEY, JSON.stringify(all));
+    all[storageKey(exchange, symbol)] = Array.from(liveOverlays.values());
+    writeAll(all);
   } catch {
     /* best-effort : la persistance des dessins n'est pas bloquante */
   }
@@ -222,7 +234,30 @@ export function deleteSelectedDrawing(): boolean {
  */
 export function restoreDrawings(symbol: string): void {
   liveOverlays.clear();
-  for (const ov of readAll()[symbol] ?? []) {
+  const exchange = marketStore.getState().exchange;
+  const all = readAll();
+  const key = storageKey(exchange, symbol);
+  let list = all[key];
+
+  // Migration douce du schéma v1 : l'ancien stockage indexait par SYMBOLE seul
+  // (implicitement Binance, seule source de dessins à l'époque). On REPREND UNE FOIS
+  // ces dessins vers la clé composite « binance:<symbol> », puis on retire l'entrée
+  // héritée. Un symbole ne contient jamais « : » → aucune ambiguïté avec une clé composite.
+  if (list === undefined && exchange === "binance") {
+    const legacy = all[symbol];
+    if (legacy !== undefined) {
+      list = legacy;
+      all[key] = legacy;
+      delete all[symbol];
+      try {
+        writeAll(all);
+      } catch {
+        /* best-effort : si l'écriture de reprise échoue, on rejoue quand même les dessins */
+      }
+    }
+  }
+
+  for (const ov of list ?? []) {
     const id = createTrackedOverlay(ov.name, ov.points);
     if (id) liveOverlays.set(id, ov);
   }
@@ -252,6 +287,25 @@ export function selectTool(tool: DrawingToolId): void {
 export function redrawFibOverlays(rev: number): void {
   activeChart?.overrideOverlay({ name: FIB_RETRACEMENT, extendData: rev });
   activeChart?.overrideOverlay({ name: FIB_TREND, extendData: rev });
+}
+
+/**
+ * Exporte le graphe courant en PNG et déclenche son téléchargement. Utilise l'instance
+ * KLineChart liée (`getConvertPictureUrl`, API v9.8 : includeOverlay/type/backgroundColor).
+ * Le canvas KLineChart étant transparent, on passe la couleur de fond du thème (--bg)
+ * pour que l'image ne soit pas sur fond blanc. Nom de fichier : « SYMBOLE-TF-AAAA-MM-JJ.png ».
+ */
+export function exportChartImage(symbol: string, tf: string): void {
+  if (activeChart === null) return;
+  const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#000000";
+  const url = activeChart.getConvertPictureUrl(true, "png", bg);
+  const date = new Date().toISOString().slice(0, 10); // AAAA-MM-JJ
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${symbol}-${tf}-${date}.png`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 /** « Effacer tout » : retire TOUS les overlays de dessin et repasse au curseur. */

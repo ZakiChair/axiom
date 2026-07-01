@@ -1,0 +1,257 @@
+/**
+ * @axiom/alerts — engine.ts
+ *
+ * Moteur d'évaluation des alertes : PUR et SANS I/O (aucune notification, aucun
+ * store, aucun accès temps). Il prend un lot de `defs` (filtrées en amont pour un
+ * même symbole) + un `ContexteAlerte`, et retourne les déclenchements + les defs
+ * mises à jour. Ce même moteur alimentera le daemon de Phase 2 (roadmap 03 §1.7).
+ *
+ * Modèle de ré-armement (anti-spam) — cf. `AlertDef.arme` :
+ *  - Chaque condition « à seuil » (prix hausse/baisse, variation, seuil d'indicateur)
+ *    est ramenée à un booléen `satisfaite`, et le moteur déclenche sur le FRONT
+ *    montant de ce booléen : armée + satisfaite → déclenche puis désarme ; le
+ *    ré-armement n'intervient qu'après retour à `!satisfaite` (re-franchissement
+ *    inverse). La toute PREMIÈRE évaluation calibre le côté sans déclencher.
+ *  - Les conditions BIDIRECTIONNELLES (prix `les-deux`, croisement d'indicateur)
+ *    détectent le front directement (prix précédent / deux dernières valeurs de
+ *    série), la première évaluation servant de calibrage.
+ */
+
+import type { Candle } from "@axiom/types";
+import { computeIndicator, getIndicator } from "@axiom/indicators";
+import { decrireCondition } from "./describe";
+import type {
+  AlertDef,
+  Comparateur,
+  Condition,
+  ContexteAlerte,
+  Declenchement,
+  ResultatEvaluation,
+} from "./types";
+
+/** Nombre max d'horodatages conservés par def (fenêtre glissante). */
+const MAX_DECLENCHEMENTS = 20;
+
+/** Résultat interne d'évaluation d'une condition : null = non évaluable dans ce contexte. */
+interface EvalCondition {
+  fire: boolean;
+  /** Nouvel état d'armement (peut être identique à l'ancien). */
+  arme: boolean | undefined;
+  /** Valeur ayant servi à la décision (rapportée dans le déclenchement). */
+  valeur: number;
+}
+
+/**
+ * Évalue un LOT de defs (supposées du même symbole) contre `ctx`.
+ * Les defs inactives ou non évaluables sont retournées telles quelles (référence conservée).
+ */
+export function evaluerAlertes(defs: AlertDef[], ctx: ContexteAlerte): ResultatEvaluation {
+  const declenchements: Declenchement[] = [];
+  let modifie = false;
+
+  const out = defs.map((def) => {
+    if (!def.actif) return def;
+    const ev = evaluerUne(def, ctx);
+    if (ev === null) return def; // condition non évaluable (données manquantes)
+    if (!ev.fire && ev.arme === def.arme) return def; // aucun changement
+
+    modifie = true;
+    if (ev.fire) {
+      declenchements.push({
+        alertId: def.id,
+        ts: ctx.maintenant,
+        valeur: ev.valeur,
+        message: def.message ?? decrireCondition(def.condition),
+      });
+    }
+    const declenchementsMaj = ev.fire
+      ? [...def.declenchements, ctx.maintenant].slice(-MAX_DECLENCHEMENTS)
+      : def.declenchements;
+    return { ...def, arme: ev.arme, declenchements: declenchementsMaj };
+  });
+
+  return { declenchements, defs: out, modifie };
+}
+
+/** Aiguille vers l'évaluateur de la condition. */
+function evaluerUne(def: AlertDef, ctx: ContexteAlerte): EvalCondition | null {
+  const c: Condition = def.condition;
+  switch (c.type) {
+    case "prix-croise":
+      return evalPrixCroise(def, c, ctx);
+    case "variation-pct":
+      return evalVariation(def, c, ctx);
+    case "indicateur-seuil":
+      return evalIndicateurSeuil(def, c, ctx);
+    case "indicateur-croisement":
+      return evalIndicateurCroisement(def, c, ctx);
+  }
+}
+
+/**
+ * Applique la logique de front armé → déclenché → ré-armé à un booléen `satisfaite`.
+ * `arme === undefined` (jamais évaluée) : calibrage du côté courant, aucun déclenchement.
+ */
+function frontArme(arme: boolean | undefined, satisfaite: boolean): { fire: boolean; arme: boolean } {
+  if (arme === undefined) return { fire: false, arme: !satisfaite };
+  if (satisfaite && arme) return { fire: true, arme: false };
+  if (!satisfaite && !arme) return { fire: false, arme: true }; // ré-armement
+  return { fire: false, arme };
+}
+
+function evalPrixCroise(
+  def: AlertDef,
+  c: Extract<Condition, { type: "prix-croise" }>,
+  ctx: ContexteAlerte
+): EvalCondition | null {
+  const p = ctx.dernierPrix;
+  if (!Number.isFinite(p)) return null;
+
+  if (c.sens === "les-deux") {
+    // Bidirectionnel : front détecté via le prix précédent (calibrage tant qu'absent).
+    const prev = ctx.prixPrecedent;
+    if (prev === undefined) return { fire: false, arme: def.arme, valeur: p };
+    const franchitHaut = prev < c.niveau && p >= c.niveau;
+    const franchitBas = prev > c.niveau && p <= c.niveau;
+    return { fire: franchitHaut || franchitBas, arme: def.arme, valeur: p };
+  }
+
+  const satisfaite = c.sens === "hausse" ? p >= c.niveau : p <= c.niveau;
+  const r = frontArme(def.arme, satisfaite);
+  return { fire: r.fire, arme: r.arme, valeur: p };
+}
+
+function evalVariation(
+  def: AlertDef,
+  c: Extract<Condition, { type: "variation-pct" }>,
+  ctx: ContexteAlerte
+): EvalCondition | null {
+  const candles = ctx.candles;
+  if (!candles || candles.length === 0) return null;
+  const p = ctx.dernierPrix;
+  if (!Number.isFinite(p)) return null;
+
+  // Prix de référence = clôture de la dernière bougie ouverte AVANT (maintenant - fenetreMs).
+  const cible = ctx.maintenant - c.fenetreMs;
+  const ref = clotureAvant(candles, cible);
+  if (ref === undefined || ref === 0) return null; // fenêtre pas encore couverte
+
+  const pct = ((p - ref) / ref) * 100;
+  const satisfaite = c.seuilPct >= 0 ? pct >= c.seuilPct : pct <= c.seuilPct;
+  const r = frontArme(def.arme, satisfaite);
+  return { fire: r.fire, arme: r.arme, valeur: pct };
+}
+
+function evalIndicateurSeuil(
+  def: AlertDef,
+  c: Extract<Condition, { type: "indicateur-seuil" }>,
+  ctx: ContexteAlerte
+): EvalCondition | null {
+  const serie = calculerSortie(c.indicateurId, c.params, c.output, ctx.candles);
+  if (!serie) return null;
+  const v = derniereValeurDefinie(serie);
+  if (v === undefined) return null;
+
+  const satisfaite = comparer(v, c.comparateur, c.valeur);
+  const r = frontArme(def.arme, satisfaite);
+  return { fire: r.fire, arme: r.arme, valeur: v };
+}
+
+function evalIndicateurCroisement(
+  def: AlertDef,
+  c: Extract<Condition, { type: "indicateur-croisement" }>,
+  ctx: ContexteAlerte
+): EvalCondition | null {
+  const candles = ctx.candles;
+  if (!candles || candles.length === 0) return null;
+  const idef = getIndicator(c.indicateurId);
+  if (!idef) return null;
+  const res = computeIndicator(idef, candles, c.params);
+  const a = res.series[c.outputA];
+  const b = res.series[c.outputB];
+  if (!a || !b) return null;
+
+  const paire = deuxDernieresPaires(a, b);
+  if (!paire) return null;
+  const { a0, b0, a1, b1 } = paire;
+
+  // Calibrage : on ignore le croisement éventuellement présent à la première évaluation.
+  if (def.arme === undefined) return { fire: false, arme: true, valeur: a1 };
+
+  const franchitHaut = a0 <= b0 && a1 > b1;
+  const franchitBas = a0 >= b0 && a1 < b1;
+  const fire =
+    c.sens === "hausse" ? franchitHaut : c.sens === "baisse" ? franchitBas : franchitHaut || franchitBas;
+  // Détection sur front (deux dernières valeurs) : l'armement reste true en permanence.
+  return { fire, arme: true, valeur: a1 };
+}
+
+// ───────── Helpers purs ─────────
+
+/** Clôture de la dernière bougie dont l'open time est <= `cible` (undefined si aucune). */
+function clotureAvant(candles: Candle[], cible: number): number | undefined {
+  for (let i = candles.length - 1; i >= 0; i--) {
+    const cd = candles[i];
+    if (cd && cd.time <= cible) return cd.close;
+  }
+  return undefined;
+}
+
+/** Calcule l'indicateur et retourne sa série de sortie `output` (undefined si introuvable). */
+function calculerSortie(
+  indicateurId: string,
+  params: Record<string, number | boolean | string>,
+  output: string,
+  candles: Candle[] | undefined
+): Array<number | undefined> | undefined {
+  if (!candles || candles.length === 0) return undefined;
+  const idef = getIndicator(indicateurId);
+  if (!idef) return undefined;
+  const res = computeIndicator(idef, candles, params);
+  return res.series[output];
+}
+
+/** Dernière valeur définie (non undefined) d'une série alignée sur les bougies. */
+function derniereValeurDefinie(serie: Array<number | undefined>): number | undefined {
+  for (let i = serie.length - 1; i >= 0; i--) {
+    const v = serie[i];
+    if (v !== undefined) return v;
+  }
+  return undefined;
+}
+
+/** Les deux dernières valeurs CONSÉCUTIVES où A et B sont toutes deux définies. */
+function deuxDernieresPaires(
+  a: Array<number | undefined>,
+  b: Array<number | undefined>
+): { a0: number; b0: number; a1: number; b1: number } | null {
+  const n = Math.min(a.length, b.length);
+  let i1 = -1;
+  for (let i = n - 1; i >= 0; i--) {
+    if (a[i] !== undefined && b[i] !== undefined) {
+      i1 = i;
+      break;
+    }
+  }
+  if (i1 < 1) return null;
+  const a1 = a[i1];
+  const b1 = b[i1];
+  const a0 = a[i1 - 1];
+  const b0 = b[i1 - 1];
+  if (a1 === undefined || b1 === undefined || a0 === undefined || b0 === undefined) return null;
+  return { a0, b0, a1, b1 };
+}
+
+/** Comparaison d'une valeur à un seuil selon un comparateur. */
+function comparer(v: number, op: Comparateur, seuil: number): boolean {
+  switch (op) {
+    case ">":
+      return v > seuil;
+    case ">=":
+      return v >= seuil;
+    case "<":
+      return v < seuil;
+    case "<=":
+      return v <= seuil;
+  }
+}

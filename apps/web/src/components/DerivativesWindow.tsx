@@ -1,5 +1,9 @@
 /**
- * Fenêtre « Produits dérivés » — slide-over dédié, hors sidebar.
+ * Panneau « Produits dérivés » — dockable à droite, NON MODAL (pas d'overlay).
+ *
+ * Contrairement à un slide-over modal, ce panneau ne capture PAS les clics : le graphe
+ * reste interactif pendant qu'on surveille OI/funding. Ouverture via le bouton de la
+ * Toolbar ou le mnémonique DES (toggle). Le polling reste conditionné à l'ouverture.
  *
  * Affiche, pour le symbole courant (mappé sur le perpétuel Binance Coinalyze) :
  * Open Interest, Funding rate, Long/Short ratio et les liquidations récentes.
@@ -9,7 +13,7 @@
  * Sans clé API : aucun appel, aucune erreur bloquante — la fenêtre invite à
  * saisir une clé dans les Réglages (stockée localement, jamais loggée).
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import type { FundingRate, Liquidation, LongShortRatio, OpenInterest } from "@axiom/types";
 import { marketStore } from "../store/market";
@@ -103,8 +107,6 @@ export function DerivativesWindow() {
   const hasKey = useStore(coinalyzeKeyStore, (s) => s.hasKey);
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
 
-  const panelRef = useRef<HTMLDivElement | null>(null);
-
   const [oi, setOi] = useState<OpenInterest | undefined>();
   const [funding, setFunding] = useState<FundingRate | undefined>();
   const [ls, setLs] = useState<LongShortRatio | undefined>();
@@ -118,16 +120,8 @@ export function DerivativesWindow() {
   const isBinance = exchange === "binance";
   const coinalyzeSymbol = isBinance ? toCoinalyzeSymbol(symbol) : "—";
 
-  // Échap ferme — écouteur actif UNIQUEMENT quand la fenêtre est ouverte.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeDerivatives();
-    };
-    window.addEventListener("keydown", onKey);
-    panelRef.current?.focus();
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, closeDerivatives]);
+  // Panneau NON MODAL : pas de capture de focus ni d'Échap global (le graphe reste
+  // pilotable au clavier). Fermeture via ✕, le bouton de la Toolbar ou le mnémonique DES.
 
   useEffect(() => {
     // Fenêtre fermée, hors Binance ou sans clé : aucun appel Coinalyze.
@@ -203,30 +197,19 @@ export function DerivativesWindow() {
   };
 
   return (
-    <div
-      className={`fixed inset-0 z-50 ${open ? "" : "pointer-events-none"}`}
+    // Panneau dockable à droite, NON MODAL : aucun overlay plein écran ne capture les
+    // clics. Fermé, il est translaté hors écran et rendu inerte (pointer-events-none)
+    // pour laisser toute la surface du graphe cliquable. z-40 : sous la palette (z-60)
+    // et le slide-over Réglages (z-50), au-dessus du graphe.
+    <aside
+      role="complementary"
+      aria-label="Produits dérivés"
       aria-hidden={!open}
+      className={`fixed right-0 top-0 z-40 flex h-full w-[min(420px,92vw)] flex-col border-l border-border bg-surface shadow-2xl transition-transform duration-200 ${
+        open ? "translate-x-0" : "pointer-events-none translate-x-full"
+      }`}
     >
-      {/* Overlay (clic = fermeture) — frère du panneau, pas de propagation à gérer. */}
-      <div
-        onClick={closeDerivatives}
-        className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-200 ${
-          open ? "opacity-100" : "opacity-0"
-        }`}
-      />
-
-      {/* Fenêtre glissante depuis la droite. */}
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Produits dérivés"
-        tabIndex={-1}
-        className={`absolute right-0 top-0 flex h-full w-[min(520px,94vw)] flex-col border-l border-border bg-surface shadow-2xl outline-none transition-transform duration-200 ${
-          open ? "translate-x-0" : "translate-x-full"
-        }`}
-      >
-        <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Produits dérivés</h2>
             <p className="mt-0.5 text-[11px] text-text-dim">
@@ -328,7 +311,6 @@ export function DerivativesWindow() {
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </aside>
   );
 }

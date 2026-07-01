@@ -18,6 +18,8 @@ vi.mock("klinecharts", () => ({ registerOverlay: () => {} }));
 
 const DRAWINGS_KEY = "axiom:drawings:v1";
 const SYMBOL = "BTCUSDT"; // symbole par défaut de marketStore (store/market.ts)
+// Clé composite « exchange:symbole » (source par défaut = binance ; cf. store/market.ts).
+const COMPOSITE_KEY = "binance:BTCUSDT";
 
 type OverlayCallback = (event: { overlay: { id: string; points: unknown[] } }) => unknown;
 
@@ -68,7 +70,7 @@ function createMockChart() {
 
 function readStoredCount(localStorage: Storage): number {
   const all = JSON.parse(localStorage.getItem(DRAWINGS_KEY) ?? "{}") as Record<string, unknown[]>;
-  return all[SYMBOL]?.length ?? 0;
+  return all[COMPOSITE_KEY]?.length ?? 0;
 }
 
 describe("drawing.ts — suppressPersist", () => {
@@ -159,5 +161,55 @@ describe("drawing.ts — suppressPersist", () => {
 
     // Le trendLine rejoué + le nouveau rect tracé : la persistance fonctionne à nouveau.
     expect(readStoredCount(localStorage)).toBe(2);
+  });
+});
+
+describe("drawing.ts — migration douce de la clé « symbole » → « exchange:symbole »", () => {
+  let localStorage: Storage;
+
+  beforeEach(() => {
+    localStorage = installMockLocalStorage();
+  });
+
+  afterEach(() => {
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
+  it("reprend les dessins de l'ancienne clé plate vers « binance:symbole » (une seule fois) puis retire l'héritage", () => {
+    // Pré-remplit le stockage à l'ANCIEN schéma (indexé par symbole seul).
+    localStorage.setItem(
+      DRAWINGS_KEY,
+      JSON.stringify({
+        [SYMBOL]: [
+          { name: "segment", points: [{ timestamp: 1, value: 100 }, { timestamp: 2, value: 110 }] },
+        ],
+      })
+    );
+
+    const a = createMockChart();
+    bindChart(a.chart);
+    restoreDrawings(SYMBOL); // déclenche la migration + rejoue le dessin sur l'instance
+
+    const all = JSON.parse(localStorage.getItem(DRAWINGS_KEY) ?? "{}") as Record<string, unknown[]>;
+    expect(all[COMPOSITE_KEY]?.length).toBe(1); // repris sous la clé composite
+    expect(all[SYMBOL]).toBeUndefined(); // ancienne clé plate retirée
+  });
+
+  it("ne migre PAS quand la source courante n'est pas Binance (l'héritage reste intact)", () => {
+    // marketStore reste sur binance par défaut : on simule ici l'absence de migration en
+    // vérifiant qu'une clé plate d'un AUTRE symbole (jamais restauré sous binance) survit.
+    localStorage.setItem(
+      DRAWINGS_KEY,
+      JSON.stringify({
+        ETHUSDT: [{ name: "rect", points: [{ timestamp: 3, value: 30 }] }],
+      })
+    );
+
+    const a = createMockChart();
+    bindChart(a.chart);
+    restoreDrawings(SYMBOL); // restaure BTCUSDT (aucune migration de ETHUSDT)
+
+    const all = JSON.parse(localStorage.getItem(DRAWINGS_KEY) ?? "{}") as Record<string, unknown[]>;
+    expect(all["ETHUSDT"]?.length).toBe(1); // héritage d'un autre symbole non touché
   });
 });

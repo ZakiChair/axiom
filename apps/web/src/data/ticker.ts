@@ -15,8 +15,9 @@
  *
  * Mises à jour : l'appelant les écrit IMPÉRATIVEMENT dans le DOM (aucun state React).
  */
-import type { Unsubscribe } from "@axiom/types";
+import type { Candle, Unsubscribe } from "@axiom/types";
 import { fetchQuotes } from "./twelvedata";
+import { binanceAdapter } from "./binance";
 import { TWELVEDATA_SYMBOLS } from "./pairs";
 import { pollLoop } from "./pollLoop";
 import { splitSymbol } from "./symbol";
@@ -114,7 +115,9 @@ function errText(err: unknown): string {
 export interface TickerUpdate {
   symbol: string; // ex. "BTCUSDT" ou "SPY"
   price: number; // dernier prix
-  changePercent: number; // variation en %
+  changePercent: number; // variation 24 h en %
+  /** Volume 24 h en devise de cotation (USD/USDT…), quand la source le fournit. */
+  quoteVolume?: number;
 }
 
 /** Payload @ticker (champs utiles uniquement). */
@@ -122,6 +125,7 @@ interface BinanceTicker {
   s: string; // symbole
   c: string; // dernier prix
   P: string; // variation 24 h en %
+  q: string; // volume 24 h en quote (devise de cotation)
 }
 
 interface BinanceStreamMessage {
@@ -156,7 +160,13 @@ function subscribeBinanceTickers(
         const msg = JSON.parse(ev.data as string) as BinanceStreamMessage;
         const d = msg.data;
         if (!d || typeof d.s !== "string") return;
-        cb({ symbol: d.s, price: Number(d.c), changePercent: Number(d.P) });
+        const quoteVolume = Number(d.q);
+        cb({
+          symbol: d.s,
+          price: Number(d.c),
+          changePercent: Number(d.P),
+          quoteVolume: Number.isFinite(quoteVolume) ? quoteVolume : undefined,
+        });
       } catch (err) {
         console.error("[AXIOM] Message ticker Binance illisible", err);
       }
@@ -268,11 +278,21 @@ async function fetchMexcTicker(symbol: string, signal?: AbortSignal): Promise<Ti
   const params = new URLSearchParams({ symbol: symbol.toUpperCase() });
   const res = await fetch(`${MEXC_TICKER_URL}?${params}`, { signal });
   if (!res.ok) return null; // 400 MEXC pour un symbole inconnu → pas de prix
-  const t = (await res.json()) as { lastPrice?: string; priceChangePercent?: string };
+  const t = (await res.json()) as {
+    lastPrice?: string;
+    priceChangePercent?: string;
+    quoteVolume?: string;
+  };
   const price = Number(t.lastPrice);
   if (!Number.isFinite(price)) return null;
   const pct = Number(t.priceChangePercent);
-  return { symbol, price, changePercent: Number.isFinite(pct) ? pct : 0 };
+  const quoteVolume = Number(t.quoteVolume);
+  return {
+    symbol,
+    price,
+    changePercent: Number.isFinite(pct) ? pct : 0,
+    quoteVolume: Number.isFinite(quoteVolume) ? quoteVolume : undefined,
+  };
 }
 
 /** Poller REST mutualisé (une boucle par source) pour les tickers crypto Kraken/Coinbase/MEXC. */
@@ -379,4 +399,99 @@ export function subscribeTickers(
   return () => {
     for (const u of unsubs) u();
   };
+}
+
+// ───────── Statistiques enrichies (Δ% 1h / 7j + sparkline 24 h) — refresh LENT ─────────
+//
+// Ces colonnes ne justifient PAS un flux temps réel par symbole : elles sont dérivées d'un
+// FETCH klines horaires léger, joué à l'ajout puis rafraîchi toutes les 5 min (roadmap 1.4).
+// Un seul appel `/klines?interval=1h&limit=169` par symbole Binance couvre les trois métriques :
+//   - Δ% 1h  = dernière clôture vs la clôture ~1 h avant (approximation à la bougie horaire) ;
+//   - Δ% 7j  = dernière clôture vs la clôture ~168 h avant ;
+//   - sparkline = les 24 dernières clôtures horaires.
+
+/** Nombre d'heures dans 7 jours (référence de la variation 7 j). */
+const HOURS_7D = 168;
+/** Points de la sparkline (dernières 24 h en horaire). */
+const SPARK_POINTS = 24;
+/** Limite du fetch horaire : 7 j d'historique + l'heure courante (poids Binance = 2). */
+const HOURLY_KLINE_LIMIT = HOURS_7D + 1;
+/** Cadence LENTE du rafraîchissement des statistiques enrichies (5 min). */
+const WATCHLIST_BARS_POLL_MS = 300_000;
+
+/** Statistiques enrichies d'un symbole, dérivées des klines horaires. */
+export interface BarStats {
+  /** Variation ~1 h en % (null si données insuffisantes). */
+  change1h: number | null;
+  /** Variation ~7 j en % (null si moins de 7 j d'historique). */
+  change7d: number | null;
+  /** Clôtures horaires récentes (≤ 24 points) pour la sparkline. */
+  spark: number[];
+}
+
+/** BarStats + le symbole concerné (payload émis par le poller). */
+export interface WatchlistBars extends BarStats {
+  symbol: string;
+}
+
+/** Variation en % de `ref` à `cur` (null si `ref` invalide/nul). PURE. */
+function pctChange(cur: number, ref: number | undefined): number | null {
+  if (ref === undefined || ref === 0 || !Number.isFinite(ref) || !Number.isFinite(cur)) return null;
+  return ((cur - ref) / ref) * 100;
+}
+
+/**
+ * Dérive Δ% 1h / 7j + les points de sparkline d'une série de bougies HORAIRES (chronologique).
+ * Renvoie null si moins de 2 bougies. `change7d` est null tant qu'il n'y a pas 7 j d'historique
+ * (actif récemment listé). PURE & testée (ticker.test.ts).
+ */
+export function computeBarStats(hourly: Candle[]): BarStats | null {
+  const closes = hourly.map((c) => c.close).filter((v) => Number.isFinite(v));
+  const n = closes.length;
+  if (n < 2) return null;
+  const last = closes[n - 1];
+  if (last === undefined) return null;
+  const idx7d = n - 1 - HOURS_7D;
+  return {
+    change1h: pctChange(last, closes[n - 2]),
+    change7d: pctChange(last, idx7d >= 0 ? closes[idx7d] : undefined),
+    spark: closes.slice(-SPARK_POINTS),
+  };
+}
+
+/**
+ * Souscrit au rafraîchissement LENT (5 min) des statistiques enrichies des `symbols` routés
+ * BINANCE (les seuls disposant ici de klines horaires spot ; un symbole à « / » est écarté,
+ * comme dans le stream ticker). `cb` est invoquée par symbole à chaque cycle. Renvoie une
+ * fonction de désabonnement. Les symboles non-Binance restent sans Δ% 1h/7j ni sparkline.
+ */
+export function subscribeWatchlistBars(
+  symbols: string[],
+  cb: (bars: WatchlistBars) => void
+): Unsubscribe {
+  const explicit = watchlistStore.getState().sources;
+  const binance = symbols.filter(
+    (s) => resolveTickerSource(s, explicit[s]) === "binance" && !s.includes("/")
+  );
+  if (binance.length === 0) return () => {};
+
+  return pollLoop(
+    async (_signal, isCancelled) => {
+      // Une erreur par symbole ne doit pas faire échouer tout le lot → catch individuel.
+      const results = await Promise.all(
+        binance.map((s) =>
+          binanceAdapter
+            .fetchKlines(s, "1h", { limit: HOURLY_KLINE_LIMIT })
+            .then((klines) => ({ symbol: s, stats: computeBarStats(klines) }))
+            .catch(() => null)
+        )
+      );
+      if (isCancelled()) return;
+      for (const r of results) {
+        if (r && r.stats) cb({ symbol: r.symbol, ...r.stats });
+      }
+    },
+    WATCHLIST_BARS_POLL_MS,
+    { immediate: true }
+  );
 }

@@ -5,8 +5,10 @@
  * Valeurs attendues justifiées en commentaire (heures UTC, jours de semaine explicités).
  */
 import { describe, expect, it } from "vitest";
+import type { Candle } from "@axiom/types";
 import {
   classifyTradfi,
+  computeBarStats,
   isMarketOpen,
   isTradfiSymbol,
   resolveTickerSource,
@@ -112,5 +114,50 @@ describe("isMarketOpen — forex (dim 22:00 UTC → ven 22:00 UTC)", () => {
     // Mercredi 2026-01-07 03:00 UTC : forex ouvert, actions fermées.
     expect(isMarketOpen("forex", new Date(Date.UTC(2026, 0, 7, 3, 0)))).toBe(true);
     expect(isMarketOpen("stock", new Date(Date.UTC(2026, 0, 7, 3, 0)))).toBe(false);
+  });
+});
+
+/** Fabrique une série de bougies HORAIRES à partir de clôtures (OHLC = close, volume nul). */
+function hourlyFromCloses(closes: number[]): Candle[] {
+  return closes.map((close, i) => ({
+    time: i * 3_600_000,
+    open: close,
+    high: close,
+    low: close,
+    close,
+    volume: 0,
+  }));
+}
+
+describe("computeBarStats — Δ% 1h/7j + sparkline depuis les klines horaires", () => {
+  it("renvoie null en deçà de 2 bougies exploitables", () => {
+    expect(computeBarStats([])).toBeNull();
+    expect(computeBarStats(hourlyFromCloses([100]))).toBeNull();
+  });
+
+  it("calcule Δ% 1h et laisse Δ% 7j à null sans 7 j d'historique", () => {
+    // 2 clôtures : 100 puis 110 → Δ1h = (110-100)/100 = +10 % ; pas assez pour Δ7j.
+    const stats = computeBarStats(hourlyFromCloses([100, 110]));
+    expect(stats?.change1h).toBeCloseTo(10, 6);
+    expect(stats?.change7d).toBeNull();
+    expect(stats?.spark).toEqual([100, 110]); // ≤ 24 points
+  });
+
+  it("calcule Δ% 7j sur 169 clôtures horaires et limite la sparkline à 24 points", () => {
+    // 169 clôtures 100,101,…,268 (7 j d'horaires + l'heure courante).
+    const closes = Array.from({ length: 169 }, (_, i) => 100 + i);
+    // last = closes[168] = 268 ; ref1h = closes[167] = 267 ; ref7d = closes[0] = 100.
+    const stats = computeBarStats(hourlyFromCloses(closes));
+    expect(stats?.change1h).toBeCloseTo(((268 - 267) / 267) * 100, 6); // ~0,3745 %
+    expect(stats?.change7d).toBeCloseTo(((268 - 100) / 100) * 100, 6); // +168 %
+    expect(stats?.spark).toHaveLength(24);
+    expect(stats?.spark.at(-1)).toBe(268); // dernier point = dernière clôture
+    expect(stats?.spark[0]).toBe(268 - 23); // 24 dernières clôtures : 245..268
+  });
+
+  it("filtre les clôtures non finies avant le calcul", () => {
+    // La clôture NaN médiane est écartée → série exploitable [100, 120] → Δ1h = +20 %.
+    const stats = computeBarStats(hourlyFromCloses([100, Number.NaN, 120]));
+    expect(stats?.change1h).toBeCloseTo(20, 6);
   });
 });

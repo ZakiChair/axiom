@@ -48,6 +48,23 @@ interface PixelXY {
   y?: number;
 }
 
+/** Type d'échelle de l'axe prix (miroir de YAxisType klinecharts, câblé par Chart.tsx). */
+type PriceAxisType = "normal" | "log" | "percentage";
+
+/** Palette du footprint lue depuis les tokens de thème (le canvas n'évalue pas var()). */
+interface FootprintPalette {
+  up: string;
+  down: string;
+  accent: string; // liseré du POC
+  text: string; // chiffres buy/sell
+  textDim: string; // bornes de la zone de valeur
+}
+
+/** Lit un token CSS sémantique concret depuis <html> (le canvas n'évalue pas var()). */
+function readToken(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
 /** Accumulateur buy/sell d'un niveau de prix. */
 interface FpCell {
   buy: number;
@@ -219,6 +236,13 @@ export class OrderflowController {
   private bucketSize = 0.01;
   private tickResolved = false;
 
+  /**
+   * Type d'échelle de l'axe prix. En mode NON linéaire (log/percentage), l'extrapolation
+   * linéaire prix→y (2 appels convertToPixel/frame) est fausse : on convertit alors chaque
+   * niveau via convertToPixel. Câblé par Chart.tsx (source = le sélecteur de la Toolbar).
+   */
+  private axisType: PriceAxisType = "normal";
+
   /** Buffer borné : open time de bougie -> niveaux de prix (footprint). */
   private readonly footprints = new Map<number, Map<number, FpCell>>();
 
@@ -299,6 +323,13 @@ export class OrderflowController {
   /** Tick kline : rafraîchit le CVD (fréquence kline basse, ~1/s). */
   onTick(): void {
     if (this.running) this.refreshCvd();
+  }
+
+  /** Change le type d'échelle de l'axe prix (redessine le footprint à la bonne échelle). */
+  setAxisType(type: PriceAxisType): void {
+    if (type === this.axisType) return;
+    this.axisType = type;
+    this.markDirty();
   }
 
   // --- CVD (sous-pane) ----------------------------------------------------
@@ -488,18 +519,35 @@ export class OrderflowController {
     if (!main) return;
     const { left, top, width, height } = main;
 
-    // Échelle prix->y linéaire : une seule paire convertToPixel par frame.
+    // Échelle prix->y. En mode LINÉAIRE ('normal') : une seule paire convertToPixel par
+    // frame puis extrapolation (rapide). En mode NON LINÉAIRE (log/percentage) : cette
+    // extrapolation est fausse -> on convertit CHAQUE niveau via convertToPixel (exact).
     const ref = marketStore.getState().candles.at(-1);
     const refPrice = ref?.close ?? 0;
-    const yBase = this.toPx({ value: refPrice }).y;
-    const yStep = this.toPx({ value: refPrice + this.bucketSize }).y;
-    if (yBase === undefined || yStep === undefined) return;
-    const pxPerBucket = yStep - yBase; // < 0 (prix plus haut => y plus petit)
-    const yOf = (price: number): number =>
-      yBase + ((price - refPrice) / this.bucketSize) * pxPerBucket;
+    let yOf: (price: number) => number;
+    if (this.axisType === "normal") {
+      const yBase = this.toPx({ value: refPrice }).y;
+      const yStep = this.toPx({ value: refPrice + this.bucketSize }).y;
+      if (yBase === undefined || yStep === undefined) return;
+      const pxPerBucket = yStep - yBase; // < 0 (prix plus haut => y plus petit)
+      yOf = (price: number): number =>
+        yBase + ((price - refPrice) / this.bucketSize) * pxPerBucket;
+    } else {
+      yOf = (price: number): number => this.toPx({ value: price }).y ?? Number.NaN;
+    }
 
     const colW = Math.max(1, this.chart.getBarSpace());
-    const rowH = Math.abs(pxPerBucket);
+    // Hauteur d'une ligne à hauteur du prix de référence (sert au seuil d'affichage du texte).
+    const rowH = Math.abs(yOf(refPrice + this.bucketSize) - yOf(refPrice));
+
+    // Palette du footprint lue une fois par frame depuis les tokens de thème.
+    const palette: FootprintPalette = {
+      up: readToken("--up") || "#10b981",
+      down: readToken("--down") || "#ef4444",
+      accent: readToken("--accent") || "#f5c518",
+      text: readToken("--text") || "#e5e7eb",
+      textDim: readToken("--text-dim") || "#94a3b8",
+    };
 
     ctx.save();
     ctx.beginPath();
@@ -521,7 +569,7 @@ export class OrderflowController {
       const xc = this.toPx({ timestamp: kd.timestamp }).x;
       if (xc === undefined) continue;
       const bar = buildFootprintBar(kd.timestamp, cells, this.bucketSize);
-      this.drawColumn(bar, xc, colW, rowH, yOf, top, height);
+      this.drawColumn(bar, xc, colW, rowH, yOf, top, height, palette);
     }
 
     ctx.restore();
@@ -534,7 +582,8 @@ export class OrderflowController {
     rowH: number,
     yOf: (price: number) => number,
     paneTop: number,
-    paneHeight: number
+    paneHeight: number,
+    palette: FootprintPalette
   ): void {
     const ctx = this.ctx;
     const cellW = Math.min(colW * 0.92, 180);
@@ -554,25 +603,28 @@ export class OrderflowController {
     for (const r of bar.rows) {
       const yTop = yOf(r.price + this.bucketSize);
       const yBot = yOf(r.price);
+      if (!Number.isFinite(yTop) || !Number.isFinite(yBot)) continue; // niveau hors échelle
       if (yBot < paneTop || yTop > paneBottom) continue; // hors aire visible
       const h = Math.max(1, yBot - yTop);
       const net = r.buyVol - r.sellVol;
       const intensity = Math.min(1, (r.buyVol + r.sellVol) / maxTot);
       const alpha = 0.12 + 0.5 * intensity;
-      ctx.fillStyle =
-        net >= 0 ? `rgba(16,185,129,${alpha})` : `rgba(239,68,68,${alpha})`;
+      // Teinte up/down du thème + intensité via globalAlpha (le canvas n'évalue pas var()).
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = net >= 0 ? palette.up : palette.down;
       ctx.fillRect(xLeft, yTop, cellW, h - 1);
+      ctx.globalAlpha = 1;
 
-      // POC : contour or.
+      // POC : contour accent.
       if (r.price === bar.poc) {
-        ctx.strokeStyle = "#f5c518";
+        ctx.strokeStyle = palette.accent;
         ctx.lineWidth = 1;
         ctx.strokeRect(xLeft + 0.5, yTop + 0.5, cellW - 1, Math.max(1, h - 1));
       }
 
       if (showText) {
         const yMid = yTop + h / 2;
-        ctx.fillStyle = "#e5e7eb";
+        ctx.fillStyle = palette.text;
         ctx.textAlign = "right";
         ctx.fillText(fmtVol(r.sellVol), xc - 3, yMid);
         ctx.textAlign = "left";
@@ -580,21 +632,25 @@ export class OrderflowController {
       }
     }
 
-    // Bornes de la zone de valeur 70 % : court trait gris à gauche de la colonne.
+    // Bornes de la zone de valeur 70 % : court trait atténué à gauche de la colonne.
     const yVAH = yOf(bar.vah + this.bucketSize);
     const yVAL = yOf(bar.val);
-    ctx.strokeStyle = "rgba(148,163,184,0.7)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(xLeft - 1.5, yVAH);
-    ctx.lineTo(xLeft - 1.5, yVAL);
-    ctx.stroke();
+    if (Number.isFinite(yVAH) && Number.isFinite(yVAL)) {
+      ctx.globalAlpha = 0.7;
+      ctx.strokeStyle = palette.textDim;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(xLeft - 1.5, yVAH);
+      ctx.lineTo(xLeft - 1.5, yVAL);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
 
     // Delta de la bougie, en haut de la colonne (masqué si trop étroit -> chevauchement).
     if (colW >= 22) {
       ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
       ctx.textAlign = "center";
-      ctx.fillStyle = bar.delta >= 0 ? "#34d399" : "#f87171";
+      ctx.fillStyle = bar.delta >= 0 ? palette.up : palette.down;
       ctx.fillText(fmtDelta(bar.delta), xc, paneTop + 8);
     }
   }

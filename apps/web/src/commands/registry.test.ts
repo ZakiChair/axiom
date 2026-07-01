@@ -1,0 +1,151 @@
+/**
+ * Tests des fonctions PURES du registre de commandes : parsing de navigation,
+ * score fuzzy et filtrage. Les valeurs attendues sont justifiées en commentaire.
+ *
+ * registry.ts importe deux modules à effet de bord non évaluables hors navigateur
+ * (store/theme pose [data-theme] sur <html> au chargement ; chart/drawing charge le
+ * build UMD de klinecharts qui exige `window`). On les neutralise via vi.mock — même
+ * approche que drawing.test.ts — pour pouvoir importer le module en environnement Node.
+ */
+import { describe, it, expect, vi } from "vitest";
+
+// Le thème : on n'a besoin que de la forme (THEMES + themeStore.getState().setTheme).
+vi.mock("../store/theme", () => ({
+  THEMES: ["dark", "bloomberg", "matrix", "cute", "aurora"] as const,
+  themeStore: { getState: () => ({ theme: "dark", setTheme: () => {} }) },
+}));
+// Le pont de dessin : stubs inertes (aucune de ces actions n'est exécutée ici).
+vi.mock("../chart/drawing", () => ({
+  exportChartImage: () => {},
+  clearAllOverlays: () => {},
+}));
+
+import {
+  parseNavigation,
+  scoreFuzzy,
+  rechercher,
+  construireRegistre,
+  type Commande,
+} from "./registry";
+
+describe("parseNavigation — symbole + timeframe + source, ordre libre", () => {
+  it("complète une base crypto nue en …USDT", () => {
+    // « BTC » → base sans cotation → complétée en BTCUSDT.
+    expect(parseNavigation("BTC")).toEqual({ symbol: "BTCUSDT" });
+  });
+
+  it("parse « SOL 4H » = symbole SOLUSDT + timeframe 4h", () => {
+    expect(parseNavigation("SOL 4H")).toEqual({ symbol: "SOLUSDT", timeframe: "4h" });
+  });
+
+  it("est insensible à l'ordre et à la casse (« 4h sol binance »)", () => {
+    expect(parseNavigation("4h sol binance")).toEqual({
+      symbol: "SOLUSDT",
+      timeframe: "4h",
+      source: "binance",
+    });
+  });
+
+  it("conserve un symbole déjà suffixé d'une cotation connue (BTCUSDT)", () => {
+    expect(parseNavigation("BTCUSDT")).toEqual({ symbol: "BTCUSDT" });
+  });
+
+  it("distingue minute (15M) et mois (1MO) via la convention M / MO", () => {
+    // 15M = 15 minutes ; 1MO = 1 mois (identifiant Timeframe « 1M »).
+    expect(parseNavigation("ETH 15M")).toEqual({ symbol: "ETHUSDT", timeframe: "15m" });
+    expect(parseNavigation("ETH 1MO")).toEqual({ symbol: "ETHUSDT", timeframe: "1M" });
+  });
+
+  it("n'ajoute pas de cotation en source tradfi (SPY reste SPY)", () => {
+    expect(parseNavigation("SPY TRADFI")).toEqual({ symbol: "SPY", source: "twelvedata" });
+  });
+
+  it("conserve un symbole au format à slash (EUR/USD)", () => {
+    expect(parseNavigation("EUR/USD TD")).toEqual({ symbol: "EUR/USD", source: "twelvedata" });
+  });
+
+  it("gère un préfixe numérique (1000PEPE → 1000PEPEUSDT)", () => {
+    expect(parseNavigation("1000PEPE")).toEqual({ symbol: "1000PEPEUSDT" });
+  });
+
+  it("renvoie null sur saisie vide", () => {
+    expect(parseNavigation("   ")).toBeNull();
+  });
+
+  it("timeframe seul (sans symbole) est valide", () => {
+    expect(parseNavigation("1d")).toEqual({ timeframe: "1d" });
+  });
+});
+
+describe("scoreFuzzy — sous-séquence + ordonnancement", () => {
+  it("renvoie null quand ce n'est pas une sous-séquence", () => {
+    // « xyz » n'est pas une sous-séquence de « rsi ».
+    expect(scoreFuzzy("xyz", "rsi")).toBeNull();
+  });
+
+  it("renvoie 0 pour une requête vide (tout correspond)", () => {
+    expect(scoreFuzzy("", "n'importe quoi")).toBe(0);
+  });
+
+  it("accepte une sous-séquence non contiguë", () => {
+    // « bb » est une sous-séquence de « bollinger bands ».
+    expect(scoreFuzzy("bb", "bollinger bands")).not.toBeNull();
+  });
+
+  it("score une correspondance contiguë en début de mot mieux qu'éparse", () => {
+    const contigu = scoreFuzzy("rsi", "rsi");
+    const epars = scoreFuzzy("rsi", "relative strength index");
+    expect(contigu).not.toBeNull();
+    expect(epars).not.toBeNull();
+    // Non-null garantis ci-dessus.
+    expect((contigu as number) > (epars as number)).toBe(true);
+  });
+});
+
+describe("rechercher — filtrage + tri par pertinence", () => {
+  const registre: Commande[] = [
+    { id: "a", mnemonique: "RSI", libelle: "RSI — activer", categorie: "indicateur", motsCles: ["momentum"], action: () => {} },
+    { id: "b", mnemonique: "DES", libelle: "Produits dérivés", categorie: "panneau", motsCles: ["funding"], action: () => {} },
+    { id: "c", libelle: "Timeframe 4h", categorie: "timeframe", motsCles: ["tf", "4h"], action: () => {} },
+  ];
+
+  it("renvoie le registre inchangé pour une requête vide", () => {
+    expect(rechercher(registre, "").map((c) => c.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("exclut les commandes sans correspondance", () => {
+    // « momentum » (mot-clé de a) n'est sous-séquence d'aucune autre commande.
+    expect(rechercher(registre, "momentum").map((c) => c.id)).toEqual(["a"]);
+  });
+
+  it("classe en tête la commande dont le mnémonique commence par la requête", () => {
+    // « des » démarre le mnémonique DES → bonus de tête.
+    const res = rechercher(registre, "des");
+    expect(res[0]?.id).toBe("b");
+  });
+
+  it("trouve via les mots-clés (funding → DES)", () => {
+    expect(rechercher(registre, "funding").map((c) => c.id)).toEqual(["b"]);
+  });
+});
+
+describe("construireRegistre — commandes attendues présentes", () => {
+  const registre = construireRegistre();
+  const ids = new Set(registre.map((c) => c.id));
+  const mnemos = new Set(registre.map((c) => c.mnemonique));
+
+  it("contient les mnémoniques de panneaux Bloomberg", () => {
+    for (const m of ["DES", "MON", "MACRO", "SANTE", "ALRT", "REGLAGES"]) {
+      expect(mnemos.has(m)).toBe(true);
+    }
+  });
+
+  it("expose une commande de bascule pour l'indicateur RSI", () => {
+    expect(ids.has("ind:rsi")).toBe(true);
+  });
+
+  it("expose les 11 timeframes et les 5 thèmes", () => {
+    expect(registre.filter((c) => c.categorie === "timeframe")).toHaveLength(11);
+    expect(registre.filter((c) => c.categorie === "theme")).toHaveLength(5);
+  });
+});

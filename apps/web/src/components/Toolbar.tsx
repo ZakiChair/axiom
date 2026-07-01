@@ -8,23 +8,33 @@ import { marketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
 import { volumeProfileStore } from "../store/volumeProfile";
 import { revenueStore } from "../store/revenue";
+import { derivativesUiStore } from "../store/derivatives-ui";
 import { SUPPORTED_TIMEFRAMES } from "../data/adapters";
 import { IndicatorMenu } from "./IndicatorMenu";
 import { PairSearch } from "./PairSearch";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
-const SYMBOL_PRESETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"] as const;
+/** Presets symbole selon le type de source (crypto / tradfi / MEXC tokenisé). */
+const CRYPTO_PRESETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
+const TRADFI_PRESETS = ["SPY", "GLD", "EUR/USD"]; // S&P500 (ETF), or (ETF), EUR/USD
+const MEXC_PRESETS = ["AAPLXUSDT", "TSLAONUSDT", "SPYXUSDT"]; // actions tokenisées
+/** Symbole par défaut au passage crypto ↔ tradfi. */
+const DEFAULT_CRYPTO_SYMBOL = "BTCUSDT";
+const DEFAULT_TRADFI_SYMBOL = "SPY";
+
 // "m" = minute, "M" = mois (1M/3M/6M/12M). 1w & 1M sont natifs Binance ;
 // 3M/6M/12M sont agrégés côté client depuis le mensuel (voir binance.ts).
 const TIMEFRAMES: Timeframe[] = [
   "1m", "5m", "15m", "1h", "4h", "1d", "1w", "1M", "3M", "6M", "12M",
 ];
 
-/** Sources câblées (LOT 4) + libellés affichés. */
+/** Sources câblées + libellés affichés (crypto + marchés traditionnels). */
 const EXCHANGES: { id: ExchangeId; label: string }[] = [
   { id: "binance", label: "Binance" },
   { id: "kraken", label: "Kraken" },
   { id: "coinbase", label: "Coinbase" },
+  { id: "twelvedata", label: "TradFi (Twelve Data)" },
+  { id: "mexc", label: "MEXC (crypto + actions tokenisées)" },
 ];
 
 /** Libellé d'une source (pour les infobulles de grisage). */
@@ -45,18 +55,32 @@ export function Toolbar() {
   const toggleVp = useStore(volumeProfileStore, (s) => s.toggle);
   const revenueEnabled = useStore(revenueStore, (s) => s.enabled);
   const toggleRevenue = useStore(revenueStore, (s) => s.toggle);
+  const openDerivatives = useStore(derivativesUiStore, (s) => s.openDerivatives);
 
   const supportedTf = SUPPORTED_TIMEFRAMES[exchange] ?? [];
   const isBinance = exchange === "binance";
+  const isTradfi = exchange === "twelvedata";
+  const isMexc = exchange === "mexc";
+  // MEXC = catalogue crypto + actions tokenisées → presets dédiés ; sinon crypto/tradfi.
+  const presets = isTradfi ? TRADFI_PRESETS : isMexc ? MEXC_PRESETS : CRYPTO_PRESETS;
+  // Sources SANS flux tick (polling REST) → orderflow/footprint indisponibles.
+  const noTradeStream = isTradfi || isMexc;
 
   /**
    * Changement de source : si le TF courant n'est pas supporté par la nouvelle source,
-   * on retombe sur 1h (commun aux trois). L'orderflow suit désormais la source active
-   * (le footprint marche partout ; le CVD-par-bougie est complet là où les klines
-   * portent le volume taker — Binance/Coinbase — et plat sur Kraken).
+   * on retombe sur 1h (commun à toutes). En FRANCHISSANT la frontière crypto ↔ tradfi,
+   * on réinitialise le symbole (un "BTCUSDT" n'existe pas en tradfi, et inversement).
+   * Idem en quittant MEXC avec un preset d'action tokenisée (AAPLXUSDT…) sélectionné :
+   * ce symbole n'existe sur AUCUNE autre source et casserait silencieusement le backfill.
    */
   const onChangeExchange = (next: ExchangeId) => {
+    const wasTradfi = exchange === "twelvedata";
+    const willBeTradfi = next === "twelvedata";
+    const wasMexcOnlySymbol =
+      exchange === "mexc" && next !== "mexc" && (MEXC_PRESETS as readonly string[]).includes(symbol);
     setExchange(next);
+    if (willBeTradfi && !wasTradfi) setSymbol(DEFAULT_TRADFI_SYMBOL);
+    else if (!willBeTradfi && (wasTradfi || wasMexcOnlySymbol)) setSymbol(DEFAULT_CRYPTO_SYMBOL);
     const supported = SUPPORTED_TIMEFRAMES[next] ?? [];
     if (!supported.includes(timeframe)) setTimeframe("1h");
   };
@@ -82,9 +106,9 @@ export function Toolbar() {
       {/* Recherche de paires (catalogue de la source courante) + saisie libre. */}
       <PairSearch />
 
-      {/* Presets symbole. */}
+      {/* Presets symbole (adaptés à la source : crypto ou tradfi). */}
       <div className="flex gap-1">
-        {SYMBOL_PRESETS.map((preset) => (
+        {presets.map((preset) => (
           <button
             key={preset}
             type="button"
@@ -139,15 +163,20 @@ export function Toolbar() {
         type="button"
         onClick={toggleOrderflow}
         aria-pressed={orderflowEnabled}
+        disabled={noTradeStream}
         title={
-          isBinance
-            ? undefined
-            : "Footprint complet ; CVD limité hors Binance/Coinbase"
+          noTradeStream
+            ? "Indisponible sur cette source (aucun flux de trades)"
+            : isBinance
+              ? undefined
+              : "Footprint complet ; CVD limité hors Binance/Coinbase"
         }
         className={`rounded px-2 py-1 text-xs ${
-          orderflowEnabled
-            ? "bg-cyan-500 text-accent-ink"
-            : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+          noTradeStream
+            ? "cursor-not-allowed bg-neutral-900 text-neutral-700"
+            : orderflowEnabled
+              ? "bg-cyan-500 text-accent-ink"
+              : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
         }`}
       >
         Orderflow
@@ -175,14 +204,31 @@ export function Toolbar() {
         type="button"
         onClick={toggleRevenue}
         aria-pressed={revenueEnabled}
-        title="Revenus on-chain du protocole (DefiLlama) — actifs de protocole uniquement"
+        disabled={isTradfi}
+        title={
+          isTradfi
+            ? "Indisponible en marchés traditionnels (revenus on-chain crypto uniquement)"
+            : "Revenus on-chain du protocole (DefiLlama) — actifs de protocole uniquement"
+        }
         className={`rounded px-2 py-1 text-xs ${
-          revenueEnabled
-            ? "bg-yellow-500 text-accent-ink"
-            : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+          isTradfi
+            ? "cursor-not-allowed bg-neutral-900 text-neutral-700"
+            : revenueEnabled
+              ? "bg-yellow-500 text-accent-ink"
+              : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
         }`}
       >
         Revenus
+      </button>
+
+      {/* Fenêtre dédiée aux produits dérivés (ouvre même sans clé pour guider vers Réglages). */}
+      <button
+        type="button"
+        onClick={openDerivatives}
+        title="Voir les produits dérivés Coinalyze"
+        className="rounded px-2 py-1 text-xs bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+      >
+        Produits dérivés
       </button>
 
       {/* Sélecteur de thème (poussé à droite). */}

@@ -1,20 +1,30 @@
 /**
  * DrawingToolbar — barre d'outils de dessin VERTICALE, à gauche du graphe.
  *
- * Boutons : Curseur (aucun overlay), Droite de tendance ('segment'), Ligne
- * horizontale ('horizontalStraightLine'), Rectangle ('rect'), Fib retracement
- * ('fibonacciLine'), puis « Effacer tout ». L'outil actif est mis en surbrillance
- * (lu depuis le `drawingStore` vanilla). Les clics délèguent à `selectTool` /
- * `clearAllOverlays`, qui pilotent l'instance KLineChart de façon impérative
- * (aucune donnée du moteur de rendu ne transite par le state React).
+ * Boutons : Curseur (aucun overlay) puis les outils d'analyse (droites, canaux,
+ * rectangle, Fibonacci, Fibonacci selon tendance), un bouton « Réglages Fibo » et
+ * « Effacer tout ». L'outil actif est mis en surbrillance (lu depuis `drawingStore`).
+ * Les clics délèguent à `selectTool` / `clearAllOverlays`, qui pilotent l'instance
+ * KLineChart de façon impérative (aucune donnée du moteur ne transite par React).
+ *
+ * INFOBULLE thémée : au survol d'un outil, un libellé précise sa fonction. Elle est
+ * positionnée en `fixed` (et non en absolute) pour échapper au `overflow` de la
+ * barre — sinon elle serait rognée dès que la liste défile.
  */
+import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import {
   drawingStore,
   selectTool,
   clearAllOverlays,
+  deleteSelectedDrawing,
   type DrawingToolId,
 } from "../chart/drawing";
+import {
+  fibStore,
+  COMMON_LEVELS,
+  COMMON_EXTENSIONS,
+} from "../chart/fibonacci";
 
 /** Props communes aux icônes (trait fin, hérite la couleur du bouton). */
 const ICON_PROPS = {
@@ -73,6 +83,19 @@ function FibIcon() {
       <line x1="4" y1="10" x2="20" y2="10" />
       <line x1="4" y1="15" x2="20" y2="15" />
       <line x1="4" y1="20" x2="20" y2="20" />
+    </svg>
+  );
+}
+
+/** Fibonacci selon tendance (niveaux + flèche directionnelle). */
+function FibTrendIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <line x1="3" y1="6" x2="14" y2="6" />
+      <line x1="3" y1="11" x2="14" y2="11" />
+      <line x1="3" y1="16" x2="14" y2="16" />
+      <path d="M15 19l5-13" />
+      <path d="M20 6l-3 1 1 3" />
     </svg>
   );
 }
@@ -145,6 +168,18 @@ function PriceChannelIcon() {
   );
 }
 
+/** Réglages Fibonacci (curseurs / sliders). */
+function SlidersIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <line x1="4" y1="8" x2="20" y2="8" />
+      <circle cx="9" cy="8" r="2" />
+      <line x1="4" y1="16" x2="20" y2="16" />
+      <circle cx="15" cy="16" r="2" />
+    </svg>
+  );
+}
+
 /** Corbeille (« Effacer tout »). */
 function TrashIcon() {
   return (
@@ -175,50 +210,228 @@ const TOOLS: ToolDef[] = [
   { id: "parallelChannel", label: "Canal parallèle", Icon: ParallelChannelIcon },
   { id: "priceChannel", label: "Canal de prix", Icon: PriceChannelIcon },
   { id: "rect", label: "Rectangle", Icon: RectIcon },
-  { id: "fib", label: "Fib retracement", Icon: FibIcon },
+  { id: "fib", label: "Retracement de Fibonacci", Icon: FibIcon },
+  { id: "fibTrend", label: "Fibonacci selon tendance", Icon: FibTrendIcon },
 ];
+
+/** Panneau de réglages Fibonacci (niveaux à cocher, zones, ajout libre, reset). */
+function FibSettingsPanel({ onClose }: { onClose: () => void }) {
+  const levels = useStore(fibStore, (s) => s.levels);
+  const extensions = useStore(fibStore, (s) => s.extensions);
+  const showZones = useStore(fibStore, (s) => s.showZones);
+  const toggleRatio = useStore(fibStore, (s) => s.toggleRatio);
+  const addRatio = useStore(fibStore, (s) => s.addRatio);
+  const setShowZones = useStore(fibStore, (s) => s.setShowZones);
+  const reset = useStore(fibStore, (s) => s.reset);
+
+  const [draft, setDraft] = useState("");
+
+  const submitAdd = () => {
+    const v = Number.parseFloat(draft.replace(",", "."));
+    if (Number.isFinite(v)) addRatio(v);
+    setDraft("");
+  };
+
+  const Chip = ({ r, active }: { r: number; active: boolean }) => (
+    <button
+      type="button"
+      onClick={() => toggleRatio(r)}
+      className={`rounded px-1.5 py-0.5 text-[11px] tabular-nums transition ${
+        active
+          ? "bg-accent text-accent-ink"
+          : "border border-border text-text-dim hover:text-text"
+      }`}
+    >
+      {String(r)}
+    </button>
+  );
+
+  return (
+    <>
+      {/* Fond cliquable : ferme le panneau. */}
+      <div onClick={onClose} className="fixed inset-0 z-40" aria-hidden />
+      <div
+        role="dialog"
+        aria-label="Réglages Fibonacci"
+        className="fixed bottom-3 left-12 z-50 max-h-[80vh] w-60 overflow-y-auto rounded-md border border-border bg-surface p-3 shadow-2xl"
+      >
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+            Fibonacci
+          </span>
+          <button
+            type="button"
+            onClick={reset}
+            className="text-[10px] text-text-dim transition hover:text-text"
+            title="Réinitialiser les niveaux par défaut"
+          >
+            réinitialiser
+          </button>
+        </div>
+
+        <label className="mt-3 flex items-center gap-2 text-[11px] text-text-dim">
+          <input
+            type="checkbox"
+            checked={showZones}
+            onChange={(e) => setShowZones(e.target.checked)}
+            className="h-3 w-3 accent-[var(--accent)]"
+          />
+          <span>Zones colorées entre niveaux</span>
+        </label>
+
+        <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-text-dim">
+          Niveaux de retracement
+        </p>
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {COMMON_LEVELS.map((r) => (
+            <Chip key={r} r={r} active={levels.includes(r)} />
+          ))}
+        </div>
+
+        <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-text-dim">
+          Projection (selon tendance)
+        </p>
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {COMMON_EXTENSIONS.map((r) => (
+            <Chip key={r} r={r} active={extensions.includes(r)} />
+          ))}
+        </div>
+
+        <div className="mt-3 flex gap-1.5">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submitAdd();
+            }}
+            placeholder="ex. 0.666"
+            inputMode="decimal"
+            spellCheck={false}
+            className="w-full rounded border border-border bg-bg px-2 py-1 text-[11px] text-text outline-none placeholder:text-text-dim focus:border-accent"
+          />
+          <button
+            type="button"
+            onClick={submitAdd}
+            className="shrink-0 rounded bg-accent px-2 py-1 text-[11px] font-medium text-accent-ink transition hover:opacity-90"
+          >
+            +
+          </button>
+        </div>
+
+        <p className="mt-2 text-[10px] leading-snug text-text-dim">
+          Les niveaux ≤ 1 s'appliquent au retracement ; &gt; 1 à la projection « selon
+          tendance ». Couleurs synchronisées avec le thème.
+        </p>
+      </div>
+    </>
+  );
+}
 
 export function DrawingToolbar() {
   const tool = useStore(drawingStore, (s) => s.tool);
+  // Infobulle survolée : libellé + position verticale (px viewport).
+  const [hover, setHover] = useState<{ label: string; y: number } | null>(null);
+  const [fibPanelOpen, setFibPanelOpen] = useState(false);
+
+  // Suppr/Backspace supprime le dessin sélectionné (clic gauche). Ignoré pendant la
+  // saisie dans un champ (watchlist, recherche, réglages Fibo…) pour ne pas avaler
+  // la frappe. Écouteur global monté une fois (la barre d'outils est toujours montée).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const el = document.activeElement;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
+      if (deleteSelectedDrawing()) e.preventDefault();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  const showTip = (label: string) => (e: { currentTarget: HTMLElement }) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setHover({ label, y: r.top + r.height / 2 });
+  };
+  const hideTip = () => setHover(null);
 
   return (
-    <nav
-      className="flex w-10 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-neutral-800 bg-neutral-950 py-2"
-      aria-label="Outils de dessin"
-    >
-      {TOOLS.map(({ id, label, Icon }) => {
-        const active = tool === id;
-        return (
-          <button
-            key={id}
-            type="button"
-            onClick={() => selectTool(id)}
-            aria-pressed={active}
-            title={label}
-            className={`flex h-8 w-8 items-center justify-center rounded transition ${
-              active
-                ? "bg-accent text-bg"
-                : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-            }`}
-          >
-            <Icon />
-            <span className="sr-only">{label}</span>
-          </button>
-        );
-      })}
-
-      {/* Séparateur avant l'action destructive. */}
-      <div className="my-1 h-px w-6 bg-neutral-800" />
-
-      <button
-        type="button"
-        onClick={clearAllOverlays}
-        title="Effacer tout"
-        className="flex h-8 w-8 items-center justify-center rounded text-neutral-400 transition hover:bg-neutral-800 hover:text-down"
+    <>
+      <nav
+        className="flex w-10 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-border bg-surface py-2"
+        aria-label="Outils de dessin"
       >
-        <TrashIcon />
-        <span className="sr-only">Effacer tout</span>
-      </button>
-    </nav>
+        {TOOLS.map(({ id, label, Icon }) => {
+          const active = tool === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => selectTool(id)}
+              onMouseEnter={showTip(label)}
+              onMouseLeave={hideTip}
+              onFocus={showTip(label)}
+              onBlur={hideTip}
+              aria-pressed={active}
+              aria-label={label}
+              className={`flex h-8 w-8 items-center justify-center rounded transition ${
+                active
+                  ? "bg-accent text-accent-ink shadow-[var(--accent-glow)]"
+                  : "text-text-dim hover:bg-bg hover:text-text"
+              }`}
+            >
+              <Icon />
+            </button>
+          );
+        })}
+
+        {/* Séparateur. */}
+        <div className="my-1 h-px w-6 bg-border" />
+
+        {/* Réglages Fibonacci. */}
+        <button
+          type="button"
+          onClick={() => setFibPanelOpen((o) => !o)}
+          onMouseEnter={showTip("Réglages Fibonacci")}
+          onMouseLeave={hideTip}
+          onFocus={showTip("Réglages Fibonacci")}
+          onBlur={hideTip}
+          aria-pressed={fibPanelOpen}
+          aria-label="Réglages Fibonacci"
+          className={`flex h-8 w-8 items-center justify-center rounded transition ${
+            fibPanelOpen
+              ? "bg-accent text-accent-ink shadow-[var(--accent-glow)]"
+              : "text-text-dim hover:bg-bg hover:text-text"
+          }`}
+        >
+          <SlidersIcon />
+        </button>
+
+        {/* Effacer tout. */}
+        <button
+          type="button"
+          onClick={clearAllOverlays}
+          onMouseEnter={showTip("Effacer tout")}
+          onMouseLeave={hideTip}
+          onFocus={showTip("Effacer tout")}
+          onBlur={hideTip}
+          aria-label="Effacer tout"
+          className="flex h-8 w-8 items-center justify-center rounded text-text-dim transition hover:bg-bg hover:text-down"
+        >
+          <TrashIcon />
+        </button>
+      </nav>
+
+      {/* Infobulle thémée (fixed → jamais rognée par le scroll de la barre). */}
+      {hover && (
+        <div
+          role="tooltip"
+          style={{ top: hover.y }}
+          className="pointer-events-none fixed left-11 z-50 -translate-y-1/2 whitespace-nowrap rounded border border-border bg-surface px-2 py-1 text-[11px] text-text shadow-lg"
+        >
+          {hover.label}
+        </div>
+      )}
+
+      {fibPanelOpen && <FibSettingsPanel onClose={() => setFibPanelOpen(false)} />}
+    </>
   );
 }

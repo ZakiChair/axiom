@@ -3,8 +3,10 @@
  *
  * « Revenus » = la part des frais conservée par le protocole (dataType=dailyRevenue),
  * série JOURNALIÈRE. Endpoints (gratuits, sans clé — cf. stablecoins.ts) :
- *   - résolution slug : GET https://api.llama.fi/overview/fees?excludeTotalDataChart=true
- *       → { protocols: [{ name, slug?, symbol? , ... }] }
+ *   - ticker → slug  : GET https://api.llama.fi/protocols
+ *       → [{ symbol, slug, ... }]  (le TICKER vit ICI, PAS dans overview/fees)
+ *   - slugs à revenus: GET https://api.llama.fi/overview/fees?excludeTotalDataChart=true
+ *       → { protocols: [{ slug, ... }] }  (AUCUN `symbol` ⇒ inutilisable seul pour le ticker)
  *   - série          : GET https://api.llama.fi/summary/fees/{slug}?dataType=dailyRevenue
  *       → { name, totalDataChart: [[tsSeconds, value], ...] }
  *   Doc : https://api-docs.defillama.com/  (section « fees and revenue »)
@@ -14,9 +16,9 @@
  * sens DefiLlama « fees ») ou un token sans données : dégradation propre → `null`.
  *
  * Stratégie de résolution symbole → slug DefiLlama (robuste + dégradée) :
- *   1. table curée (slugs sûrs) ;
- *   2. à défaut, résolution dynamique via la liste `overview/fees` (parse défensif,
- *      jamais bloquant) en faisant correspondre le ticker du token ;
+ *   1. table curée (slugs agrégés sûrs : « uniswap » plutôt que « uniswap-v3 ») ;
+ *   2. à défaut, résolution dynamique : jointure `/protocols` (ticker → slug) ∩
+ *      slugs porteurs de revenus (`overview/fees`). Parse défensif, jamais bloquant ;
  *   3. à défaut → `null` (« revenus indisponibles pour cet actif »).
  */
 
@@ -28,6 +30,8 @@ export interface RevenuePoint {
 
 const OVERVIEW_URL =
   "https://api.llama.fi/overview/fees?excludeTotalDataChart=true&excludeTotalDataChartBreakdown=true";
+/** Liste complète des protocoles DefiLlama — SEUL endpoint portant le `symbol` (ticker). */
+const PROTOCOLS_URL = "https://api.llama.fi/protocols";
 const summaryUrl = (slug: string) =>
   `https://api.llama.fi/summary/fees/${encodeURIComponent(slug)}?dataType=dailyRevenue`;
 
@@ -53,15 +57,16 @@ const TOKEN_TO_PROTOCOL: Record<string, string> = {
   SNX: "synthetix",
   DYDX: "dydx",
   PENDLE: "pendle",
-  COMP: "compound",
+  COMP: "compound-finance",
   BAL: "balancer",
   RPL: "rocket-pool",
   FXS: "frax",
   CVX: "convex-finance",
   GNS: "gains-network",
-  JOE: "trader-joe",
+  JOE: "lfj",
   VELO: "velodrome",
   AERO: "aerodrome",
+  PUMP: "pump.fun",
 };
 
 /** Isole le ticker du token (« UNIUSDT » → « UNI »). */
@@ -73,47 +78,65 @@ export function baseTicker(symbol: string): string {
   return s;
 }
 
-/** Slugify de repli (« Rocket Pool » → « rocket-pool ») pour le parse de l'overview. */
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
-
-/** Cache mémoire (session) de la résolution dynamique ticker → slug via l'overview. */
+/** Cache mémoire (session) de la résolution dynamique ticker → slug. */
 let overviewIndex: Map<string, string> | null = null;
 let overviewPromise: Promise<Map<string, string>> | null = null;
 
-/** Construit (une fois) l'index ticker → slug depuis la liste DefiLlama. Parse DÉFENSIF. */
-async function loadOverviewIndex(signal?: AbortSignal): Promise<Map<string, string>> {
+/**
+ * Construit (une fois) l'index ticker → slug DefiLlama. Parse DÉFENSIF, jamais bloquant.
+ *
+ * Le ticker (`symbol`) n'existe QUE sur `/protocols` ; `overview/fees` ne porte que des
+ * `slug`. On JOINT donc les deux : pour chaque protocole de `/protocols` ayant un ticker,
+ * on retient son slug s'il figure dans l'ensemble des slugs porteurs de revenus
+ * (`overview/fees`). `/protocols` est trié par TVL décroissant ⇒ le premier match d'un
+ * ticker = le protocole le plus important qui ait des revenus. Le slug retenu mène donc
+ * à une série réelle (la série reste dégradée proprement si vide/404 côté contrôleur).
+ */
+async function loadOverviewIndex(): Promise<Map<string, string>> {
   if (overviewIndex) return overviewIndex;
   if (!overviewPromise) {
     overviewPromise = (async () => {
       const index = new Map<string, string>();
       try {
-        const res = await fetch(OVERVIEW_URL, { signal });
-        if (res.ok) {
-          const raw = (await res.json()) as { protocols?: unknown };
-          const list = Array.isArray(raw.protocols) ? raw.protocols : [];
-          for (const item of list) {
+        // PAS de `signal` ici : cet index est partagé pour toute la session. Le lier au
+        // contrôleur courant l'empoisonnerait à vide si l'utilisateur change de symbole
+        // pendant ce fetch (gros payload `/protocols`) — la résolution dynamique
+        // re-casserait pour le reste de la session. La série par symbole, elle, reste
+        // bien annulable (cf. `fetchProtocolRevenue`).
+        const [protocolsRes, feesRes] = await Promise.all([
+          fetch(PROTOCOLS_URL),
+          fetch(OVERVIEW_URL),
+        ]);
+
+        // 1) Ensemble des slugs porteurs de revenus (overview/fees → { protocols: [...] }).
+        const revenueSlugs = new Set<string>();
+        if (feesRes.ok) {
+          const rawFees = (await feesRes.json()) as { protocols?: unknown };
+          const feesList = Array.isArray(rawFees.protocols) ? rawFees.protocols : [];
+          for (const item of feesList) {
             if (typeof item !== "object" || item === null) continue;
-            const p = item as { name?: unknown; slug?: unknown; symbol?: unknown };
+            const slug = (item as { slug?: unknown }).slug;
+            if (typeof slug === "string" && slug.length > 0) revenueSlugs.add(slug);
+          }
+        }
+
+        // 2) Jointure ticker → slug (/protocols → [{ symbol, slug, ... }], trié TVL desc).
+        if (protocolsRes.ok && revenueSlugs.size > 0) {
+          const rawProtocols = (await protocolsRes.json()) as unknown;
+          const protocolsList = Array.isArray(rawProtocols) ? rawProtocols : [];
+          for (const item of protocolsList) {
+            if (typeof item !== "object" || item === null) continue;
+            const p = item as { symbol?: unknown; slug?: unknown };
             const symbol = typeof p.symbol === "string" ? p.symbol.toUpperCase() : "";
-            const slug =
-              typeof p.slug === "string" && p.slug.length > 0
-                ? p.slug
-                : typeof p.name === "string"
-                  ? slugify(p.name)
-                  : "";
-            // « - » est le symbole DefiLlama pour « pas de token » : on l'ignore.
-            if (symbol && symbol !== "-" && slug && !index.has(symbol)) {
+            const slug = typeof p.slug === "string" ? p.slug : "";
+            // « - » = pas de token ; on ne mappe que vers un slug AVÉRÉ porteur de revenus.
+            if (symbol && symbol !== "-" && slug && revenueSlugs.has(slug) && !index.has(symbol)) {
               index.set(symbol, slug);
             }
           }
         }
       } catch {
-        // Réseau/format KO : index vide → on retombera sur la table curée uniquement.
+        // Réseau/format KO : index (partiel ou vide) → on retombe sur la table curée.
       }
       overviewIndex = index;
       return index;
@@ -126,14 +149,11 @@ async function loadOverviewIndex(signal?: AbortSignal): Promise<Map<string, stri
  * Résout le slug DefiLlama du protocole pour un symbole d'actif, ou `null` si aucun
  * protocole connu (BTC/ETH/SOL/L1, token sans données…). Curé d'abord, dynamique ensuite.
  */
-export async function resolveProtocolSlug(
-  symbol: string,
-  signal?: AbortSignal
-): Promise<string | null> {
+export async function resolveProtocolSlug(symbol: string): Promise<string | null> {
   const base = baseTicker(symbol);
   const curated = TOKEN_TO_PROTOCOL[base];
   if (curated) return curated;
-  const index = await loadOverviewIndex(signal);
+  const index = await loadOverviewIndex();
   return index.get(base) ?? null;
 }
 
@@ -149,9 +169,10 @@ export async function fetchProtocolRevenue(
   symbol: string,
   signal?: AbortSignal
 ): Promise<{ slug: string; series: RevenuePoint[] } | null> {
-  const slug = await resolveProtocolSlug(symbol, signal);
+  const slug = await resolveProtocolSlug(symbol);
   if (!slug) return null;
 
+  // La SÉRIE par symbole reste annulable (contrairement à l'index de slugs partagé).
   const res = await fetch(summaryUrl(slug), { signal });
   if (!res.ok) {
     // 404 = slug inconnu/sans revenus chez DefiLlama → indisponible (pas une erreur dure).

@@ -10,21 +10,26 @@ import { useEffect, useRef } from "react";
 import { dispose, init } from "klinecharts";
 import type { Chart as KLineChartInstance, KLineData } from "klinecharts";
 import { useStore } from "zustand";
-import type { Candle, Unsubscribe } from "@axiom/types";
+import type { Candle, Timeframe, Unsubscribe } from "@axiom/types";
 import { getAdapter } from "../data/adapters";
+import { mergeResyncCandles } from "../data/resync";
 import { marketStore } from "../store/market";
 import { indicatorsStore } from "../store/indicators";
 import { orderflowStore } from "../store/orderflow";
 import { compareStore } from "../store/compare";
 import { volumeProfileStore } from "../store/volumeProfile";
 import { revenueStore } from "../store/revenue";
+import { macroOverlayStore } from "../store/macro-overlays";
+import { macroHistoryStore } from "../store/macroHistory";
 import { themeStore } from "../store/theme";
 import { ChartIndicators } from "./indicators";
 import { OrderflowController } from "./orderflow";
 import { CompareController } from "./compare";
 import { VolumeProfileController } from "./volumeProfile";
 import { RevenueController } from "./revenue";
-import { bindChart, unbindChart } from "./drawing";
+import { MacroController } from "./macro";
+import { bindChart, unbindChart, redrawFibOverlays, restoreDrawings } from "./drawing";
+import { fibStore } from "./fibonacci";
 
 /**
  * Précision d'affichage du prix dérivée de la magnitude (≈5 chiffres significatifs,
@@ -50,6 +55,19 @@ function toKLineData(c: Candle): KLineData {
     volume: c.volume,
   };
 }
+
+/**
+ * `subscribeKline` enrichi d'un 4e argument `onResync` : rappelé par l'adaptateur
+ * après une reconnexion WS avec un lot de bougies REST fraîches à fusionner. Ce
+ * paramètre est ABSENT de `IExchangeAdapter` (contrat @axiom/types figé) ; on le
+ * type localement et on cast le point d'appel — les adaptateurs le supportent tous.
+ */
+type SubscribeKlineAvecResync = (
+  symbol: string,
+  tf: Timeframe,
+  cb: (c: Candle) => void,
+  onResync?: (candles: Candle[]) => void,
+) => Unsubscribe;
 
 /**
  * Lit un token CSS sémantique résolu (couleur concrète) depuis <html>, où vit
@@ -158,6 +176,9 @@ export function Chart() {
     // déclenche createOverlay/removeOverlay). Déliée au cleanup avant dispose.
     bindChart(chart);
 
+    // Réglages Fibonacci (niveaux/zones) : re-rend les overlays Fibo déjà tracés.
+    const unsubscribeFib = fibStore.subscribe((state) => redrawFibOverlays(state.rev));
+
     // Applique la palette du thème courant (bougies/grille/axes/crosshair + fond),
     // PUIS s'abonne pour réappliquer à chaque changement de thème. Le premier
     // appel est obligatoire : le chart est recréé à chaque changement symbole/TF,
@@ -207,6 +228,18 @@ export function Chart() {
       revenue.setEnabled(state.enabled);
     });
 
+    // Contrôleur macro (M2 / cap totale crypto / stablecoins) : séries externes
+    // basse fréquence, affichées dans un pane dédié quand elles sont cochées.
+    const macro = new MacroController(chart);
+    macro.sync(macroOverlayStore.getState().enabled);
+    const unsubscribeMacro = macroOverlayStore.subscribe((state) => {
+      macro.sync(state.enabled);
+    });
+    // Nouvel échantillon de cap. totale crypto (poller central) → réétend l'overlay.
+    const unsubscribeMacroHistory = macroHistoryStore.subscribe(() => {
+      macro.onCandles();
+    });
+
     let cancelled = false;
     let unsubscribe: Unsubscribe | null = null;
 
@@ -224,6 +257,10 @@ export function Chart() {
         chart.setPriceVolumePrecision(derivePricePrecision(candles), 0);
         chart.applyNewData(candles.map(toKLineData));
 
+        // Rejoue les dessins sauvegardés de CE symbole (les bougies sont posées :
+        // l'ancrage temporel des overlays est valide). Survit aux changements de TF/actif.
+        restoreDrawings(symbol);
+
         // Applique les indicateurs actifs (restaurés depuis localStorage) au graphe.
         indicators.sync(indicatorsStore.getState().indicators, candles);
 
@@ -237,11 +274,11 @@ export function Chart() {
         // Backfill prêt : le profil de volume recalcule à la frame suivante.
         volumeProfile.onCandles();
 
-        // Backfill prêt : (re)trace la courbe de revenus alignée sur le buffer
-        // (le fetch DefiLlama, lancé à l'activation, se reconstruit ici quand prêt).
+        // Backfill prêt : (re)trace les courbes basse fréquence alignées sur le buffer.
         revenue.onCandles();
+        macro.onCandles();
 
-        unsubscribe = adapter.subscribeKline(symbol, timeframe, (candle) => {
+        const onKline = (candle: Candle) => {
           marketStore.getState().upsertCandle(candle);
           chart.updateData(toKLineData(candle)); // mise à jour impérative, pas de re-render.
 
@@ -258,11 +295,35 @@ export function Chart() {
             // impératif, sans re-render). Les comparés gardent leur série fetchée.
             compare.onCandles();
             volumeProfile.onCandles();
-            // Étend la ligne de revenus aux nouvelles bougies (forward-fill ; la
-            // série journalière est en cache, aucun refetch).
+            // Étend les lignes basse fréquence aux nouvelles bougies (forward-fill ;
+            // les séries journalières/hebdo sont en cache, aucun refetch).
             revenue.onCandles();
+            macro.onCandles();
           }
-        });
+        };
+
+        // Resync post-reconnexion : l'adaptateur re-fetche un lot REST après une
+        // coupure ; on le fond au buffer (comble les bougies clôturées manquées) et,
+        // SI un trou a réellement été comblé, on ré-applique tout + re-seed complet
+        // (CVD, indicateurs, overlays). Sinon on laisse le live continuer sans à-coup.
+        const onResync = (fetched: Candle[]) => {
+          if (cancelled) return;
+          const existing = marketStore.getState().candles;
+          const merged = mergeResyncCandles(existing, fetched);
+          if (merged.length === existing.length) return; // aucun trou comblé
+          marketStore.getState().setCandles(merged);
+          chart.applyNewData(merged.map(toKLineData));
+          orderflow.onCandles(); // re-seed CVD sur le buffer corrigé
+          indicators.recompute(indicatorsStore.getState().indicators, merged);
+          compare.onCandles();
+          volumeProfile.onCandles();
+          revenue.onCandles();
+          macro.onCandles();
+        };
+
+        // Cast local : IExchangeAdapter (figé) n'expose pas onResync (cf. type ci-dessus).
+        const subscribeKline = adapter.subscribeKline as SubscribeKlineAvecResync;
+        unsubscribe = subscribeKline(symbol, timeframe, onKline, onResync);
       })
       .catch((err) => {
         console.error("[AXIOM] Échec du backfill Binance", err);
@@ -276,11 +337,15 @@ export function Chart() {
       unsubscribeCompare();
       unsubscribeVolumeProfile();
       unsubscribeRevenue();
+      unsubscribeMacro();
+      unsubscribeMacroHistory();
+      macro.dispose(); // annule les fetchs + retire le sous-pane macro AVANT dispose.
       revenue.dispose(); // annule le fetch + retire le sous-pane revenus AVANT dispose.
       volumeProfile.dispose(); // arrête le rAF + nettoie le canvas profil.
       compare.dispose(); // retire le sous-pane de comparaison AVANT dispose.
       orderflow.dispose(); // ferme le WS aggTrade + retire le pane CVD AVANT dispose.
       if (unsubscribe) unsubscribe();
+      unsubscribeFib();
       unbindChart(chart); // détache le pont de dessin avant de détruire l'instance.
       dispose(chart); // détruit panes + indicateurs ; pas de removeIndicator manuel.
     };

@@ -7,8 +7,9 @@ import { DrawingToolbar } from "./components/DrawingToolbar";
 import { Chart } from "./chart/Chart";
 import { Watchlist } from "./components/Watchlist";
 import { CompareControl } from "./components/CompareControl";
-import { DerivativesPanel } from "./components/DerivativesPanel";
 import { MacroPanel } from "./components/MacroPanel";
+import { DerivativesWindow } from "./components/DerivativesWindow";
+import { HealthPanel } from "./components/HealthPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { settingsUiStore } from "./store/settings-ui";
 
@@ -27,8 +28,8 @@ export function App() {
           <Chart />
         </div>
         {/* Colonne droite : en-tête (accès Réglages) + panneaux empilés, tous harmonisés
-            via SidebarSection (watchlist défilable en haut, puis comparer / dérivés / macro). */}
-        <aside className="flex w-60 shrink-0 flex-col border-l border-border bg-neutral-950">
+            via SidebarSection (watchlist défilable en haut, puis macro / comparer). */}
+        <aside className="flex w-60 shrink-0 flex-col border-l border-border bg-surface">
           <div className="flex shrink-0 items-center justify-between px-3 py-2">
             <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
               Panneaux
@@ -46,13 +47,14 @@ export function App() {
             </button>
           </div>
           <Watchlist />
-          <CompareControl />
-          <DerivativesPanel />
           <MacroPanel />
+          <CompareControl />
+          <HealthPanel />
         </aside>
       </main>
 
-      {/* Panneau Réglages (slide-over) monté au niveau racine, au-dessus du reste. */}
+      {/* Fenêtres globales (slide-over) montées au niveau racine, au-dessus du reste. */}
+      <DerivativesWindow />
       <SettingsPanel />
     </div>
   );

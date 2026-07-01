@@ -3,8 +3,10 @@
  * IDerivedDataProvider (@axiom/types). M6 « ACHETER » plutôt que construire un
  * AggregationEngine multi-exchange (cf. BUILD-CONTRACT).
  *
- * - REST : https://api.coinalyze.net/v1/ ; authentification par en-tête `api_key`
- *   (JAMAIS dans l'URL ni dans les logs — la clé voyage uniquement en header).
+ * - REST : https://api.coinalyze.net/v1/ ; authentification par `api_key` (accepté
+ *   en query param, cf. recherche §1). La clé PERSONNELLE (Réglages) part en query ;
+ *   sans clé personnelle, le proxy /coinalyzeapi injecte la clé de repli (.env),
+ *   jamais committée dans le source ni le bundle (cf. vite.config.ts).
  * - Débit : 40 requêtes / minute / clé → throttle à fenêtre glissante (ci-dessous).
  * - Symboles : un perpétuel Binance USDⓈ-M « BTCUSDT » s'écrit « BTCUSDT_PERP.A »
  *   côté Coinalyze (code exchange `.A` = Binance, confirmé via /exchanges et
@@ -22,8 +24,11 @@ import type {
   LongShortRatio,
   OpenInterest,
 } from "@axiom/types";
+import { healthStore } from "../store/health";
 
-const BASE_URL = "https://api.coinalyze.net/v1/";
+// Base SAME-ORIGIN via le proxy de dev Vite (cf. vite.config.ts). L'appel direct
+// à https://api.coinalyze.net/v1/ est bloqué par le navigateur (aucun en-tête CORS).
+const BASE_URL = "/coinalyzeapi/v1/";
 
 /** Intervalles d'agrégation acceptés par les endpoints `*-history` de Coinalyze. */
 const COINALYZE_INTERVALS = [
@@ -53,17 +58,9 @@ const LIQ_INTERVAL: CoinalyzeInterval = "5min";
 
 let apiKey: string | null = null;
 
-/** Injecte/retire la clé utilisée par le provider (appelée par le store de réglages). */
+/** Injecte/retire la clé PERSONNELLE utilisée par le provider (appelée par le store de réglages). */
 export function setCoinalyzeApiKey(key: string | null): void {
   apiKey = key !== null && key.length > 0 ? key : null;
-}
-
-/** Erreur levée quand aucune clé n'est configurée (l'UI invite alors à en saisir une). */
-export class MissingApiKeyError extends Error {
-  constructor() {
-    super("Clé API Coinalyze manquante");
-    this.name = "MissingApiKeyError";
-  }
 }
 
 /** Erreur HTTP Coinalyze (statut exposé pour distinguer 401 = clé refusée). */
@@ -81,8 +78,24 @@ export class CoinalyzeError extends Error {
 const requestTimes: number[] = [];
 let throttleChain: Promise<void> = Promise.resolve();
 
+/** Identifiant de source du registre santé (panneau « Santé sources »). */
+const HEALTH_SOURCE = "coinalyze";
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Publie la consommation courante du débit (fenêtre glissante 40/60 s) dans le registre
+ * santé, à chaque créneau acquis. `requestTimes.length` = requêtes dans la fenêtre après
+ * purge/ajout. N'affecte pas les données renvoyées (best-effort, jamais bloquant).
+ */
+function reportQuota(): void {
+  healthStore.getState().setQuota(HEALTH_SOURCE, {
+    utilise: requestTimes.length,
+    limite: RATE_LIMIT,
+    fenetre: "1min",
+  });
 }
 
 /**
@@ -102,6 +115,7 @@ function acquireSlot(): Promise<void> {
       }
       if (requestTimes.length < RATE_LIMIT) {
         requestTimes.push(now);
+        reportQuota();
         return;
       }
       const oldest = requestTimes[0];
@@ -120,17 +134,18 @@ function acquireSlot(): Promise<void> {
 // ---------- Requête REST ----------
 
 /**
- * GET authentifié + throttlé. La clé part UNIQUEMENT dans l'en-tête `api_key`.
- * On ne logge jamais la clé : seul le statut HTTP est rapporté en cas d'erreur.
+ * GET authentifié + throttlé. La clé PERSONNELLE part en query param `api_key` : le
+ * proxy détecte alors sa présence et n'injecte PAS la clé de repli (.env) → override
+ * utilisateur prioritaire. Sans clé personnelle, on n'envoie RIEN et le proxy injecte
+ * le repli. On ne logge jamais la clé : seul le statut HTTP est rapporté en cas d'erreur.
  */
 async function request<T>(path: string, params: Record<string, string>): Promise<T> {
-  const key = apiKey;
-  if (key === null) throw new MissingApiKeyError();
-
   await acquireSlot();
 
-  const url = `${BASE_URL}${path}?${new URLSearchParams(params).toString()}`;
-  const res = await fetch(url, { headers: { api_key: key } });
+  const search = new URLSearchParams(params);
+  if (apiKey !== null) search.set("api_key", apiKey);
+  const url = `${BASE_URL}${path}?${search.toString()}`;
+  const res = await fetch(url);
   if (!res.ok) throw new CoinalyzeError(res.status, res.statusText);
   return (await res.json()) as T;
 }
@@ -192,6 +207,15 @@ interface LiqHistoryPoint {
   t: number;
   l: number;
   s: number;
+}
+
+/** Point d'historique OHLC (open-interest-history, funding-rate-history) : agrégat par intervalle. */
+interface OhlcHistoryPoint {
+  t: number;
+  o: number;
+  h: number;
+  l: number;
+  c: number;
 }
 
 // ---------- Méthodes du provider ----------
@@ -285,6 +309,66 @@ async function fetchLiquidations(symbol: string, sinceMs: number): Promise<Liqui
   return out;
 }
 
+/**
+ * Historique Open Interest (USD), agrégé par intervalle (clôture de chaque bucket
+ * retenue comme valeur représentative — cf. /open-interest-history, même forme
+ * OHLC que funding-rate-history).
+ */
+async function fetchOpenInterestHistory(
+  symbol: string,
+  period: string,
+  sinceMs: number
+): Promise<OpenInterest[]> {
+  const cs = toCoinalyzeSymbol(symbol);
+  const interval = normalizeInterval(period);
+  const to = Math.floor(Date.now() / 1000);
+  const from = Math.floor(sinceMs / 1000);
+  const res = await request<HistoryResponse<OhlcHistoryPoint>[]>("open-interest-history", {
+    symbols: cs,
+    interval,
+    from: String(from),
+    to: String(to),
+    convert_to_usd: "true",
+  });
+  const series = res[0];
+  if (series === undefined) return [];
+  return series.history.map((p) => ({
+    time: toMs(p.t),
+    symbol: cs,
+    oi: NaN, // valeur native (contrats) non demandée ici (convert_to_usd:true)
+    oiUsd: p.c,
+  }));
+}
+
+/** Historique funding rate, agrégé par intervalle (clôture de chaque bucket). */
+async function fetchFundingRateHistory(
+  symbol: string,
+  period: string,
+  sinceMs: number
+): Promise<FundingRate[]> {
+  const cs = toCoinalyzeSymbol(symbol);
+  const interval = normalizeInterval(period);
+  const to = Math.floor(Date.now() / 1000);
+  const from = Math.floor(sinceMs / 1000);
+  const res = await request<HistoryResponse<OhlcHistoryPoint>[]>("funding-rate-history", {
+    symbols: cs,
+    interval,
+    from: String(from),
+    to: String(to),
+  });
+  const series = res[0];
+  if (series === undefined) return [];
+  return series.history.map((p) => ({
+    time: toMs(p.t),
+    symbol: cs,
+    rate: p.c,
+    // Comme fetchFundingRate (snapshot) : ni mark price ni heure du prochain funding
+    // sur cet endpoint.
+    nextFundingTime: 0,
+    markPrice: NaN,
+  }));
+}
+
 /** Provider Coinalyze (Build-vs-Buy : on ACHÈTE le dérivé lent). */
 export const coinalyzeProvider: IDerivedDataProvider = {
   id: "coinalyze",
@@ -292,4 +376,6 @@ export const coinalyzeProvider: IDerivedDataProvider = {
   fetchFundingRate,
   fetchLongShortRatio,
   fetchLiquidations,
+  fetchOpenInterestHistory,
+  fetchFundingRateHistory,
 };

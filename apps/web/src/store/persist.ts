@@ -20,7 +20,7 @@ const CHART_KEY = "axiom:chartState:v1";
 const WATCH_KEY = "axiom:watchlist:v1";
 
 /** Sources câblées : seules valeurs d'exchange restaurables (cf. data/adapters.ts). */
-const RESTORABLE_EXCHANGES: ExchangeId[] = ["binance", "kraken", "coinbase"];
+const RESTORABLE_EXCHANGES: ExchangeId[] = ["binance", "kraken", "coinbase", "twelvedata", "mexc"];
 
 /** Lecture JSON tolérante (localStorage indisponible / JSON corrompu => null). */
 function readJson<T>(key: string): T | null {

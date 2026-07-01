@@ -27,6 +27,8 @@ export function CompareControl() {
   return (
     <SidebarSection
       title="Comparer (base 100)"
+      collapsible
+      defaultOpen={false}
       action={
         <span className="text-[10px] font-normal text-text-dim">
           {symbols.length}/{MAX_COMPARE}

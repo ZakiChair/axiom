@@ -17,7 +17,19 @@ export type Timeframe =
   // agrégés côté client depuis le mensuel (1M). Convention : "M" = mois.
   | "3M" | "6M" | "12M";
 
-export type ExchangeId = "binance" | "bybit" | "okx" | "deribit" | "coinbase" | "kraken";
+export type ExchangeId =
+  | "binance"
+  | "bybit"
+  | "okx"
+  | "deribit"
+  | "coinbase"
+  | "kraken"
+  // Source MARCHÉS TRADITIONNELS (actions, forex ; indices & commodités via ETF) —
+  // Twelve Data (API à clé). Bougies OHLC ; polling (pas de WS gratuit) ; pas de tick.
+  | "twelvedata"
+  // Exchange crypto MEXC (spot v3, keyless) — inclut des ACTIONS TOKENISÉES
+  // (AAPLXUSDT, TSLAONUSDT…). Klines via proxy ; polling REST (WS spot = protobuf).
+  | "mexc";
 
 export type MarketType = "spot" | "perp" | "futures" | "option";
 
@@ -237,6 +249,10 @@ export interface IDerivedDataProvider {
   fetchFundingRate(symbol: string): Promise<FundingRate>;
   fetchLongShortRatio(symbol: string, period: string): Promise<LongShortRatio>;
   fetchLiquidations(symbol: string, sinceMs: number): Promise<Liquidation[]>;
+  /** Série historique d'Open Interest (pour superposition graphique). */
+  fetchOpenInterestHistory(symbol: string, period: string, sinceMs: number): Promise<OpenInterest[]>;
+  /** Série historique de funding rate (pour superposition graphique). */
+  fetchFundingRateHistory(symbol: string, period: string, sinceMs: number): Promise<FundingRate[]>;
 }
 
 // ---------- État persistable d'un graphique (§6.5) ----------

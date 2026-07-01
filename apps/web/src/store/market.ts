@@ -9,6 +9,13 @@
 import { createStore } from "zustand/vanilla";
 import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
 
+/**
+ * Fenêtre glissante max du buffer : sans borne, une session longue (terminal mono-
+ * utilisateur censé rester ouvert en continu) fait grossir `candles` indéfiniment,
+ * alors que upsertCandle copie tout le tableau à chaque tick (même non clôturé).
+ */
+const MAX_CANDLES = 5000;
+
 export interface MarketState {
   /** Source de marché courante (Binance par défaut). */
   exchange: ExchangeId;
@@ -45,8 +52,9 @@ export const marketStore = createStore<MarketState>((set, get) => ({
       next[next.length - 1] = candle;
       set({ candles: next });
     } else if (!last || candle.time > last.time) {
-      // Nouvelle bougie : on l'ajoute en fin de buffer.
-      set({ candles: [...candles, candle] });
+      // Nouvelle bougie : on l'ajoute en fin de buffer, borné à MAX_CANDLES.
+      const next = [...candles, candle];
+      set({ candles: next.length > MAX_CANDLES ? next.slice(next.length - MAX_CANDLES) : next });
     }
   },
 }));

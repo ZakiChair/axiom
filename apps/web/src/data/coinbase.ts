@@ -30,12 +30,14 @@
  *   - WS channels       : https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-channels
  */
 import type { Candle, IExchangeAdapter, Timeframe, Trade, Unsubscribe } from "@axiom/types";
+import { splitSymbol } from "./symbol";
+import { connectWsLoop } from "./wsLoop";
 
 const REST_CANDLES_BASE = "https://api.coinbase.com/api/v3/brokerage/market/products";
 const WS_URL = "wss://advanced-trade-ws.coinbase.com";
 
-/** Devises de cotation reconnues, suffixe le plus LONG d'abord (4 caractères avant 3). */
-const QUOTE_ASSETS = ["USDT", "USDC", "USDD", "TUSD", "DAI", "USD", "EUR", "GBP", "BTC", "ETH"];
+/** Fenêtre re-fetchée au resync post-reconnexion (bornée à 350 par l'API Coinbase). */
+const RESYNC_KLINE_LIMIT = 350;
 
 /** tf @axiom -> granularité Coinbase (enum string) + durée en secondes (sous-ensemble supporté). */
 const COINBASE_GRAN: Partial<Record<Timeframe, { gran: string; sec: number }>> = {
@@ -50,19 +52,9 @@ const COINBASE_GRAN: Partial<Record<Timeframe, { gran: string; sec: number }>> =
   "1d": { gran: "ONE_DAY", sec: 86400 },
 };
 
-/** Découpe "BTCUSDT" -> { base:"BTC", quote:"USDT" } (suffixe de cotation le plus long). */
-function splitSymbol(symbol: string): { base: string; quote: string } {
-  const s = symbol.toUpperCase();
-  const quote = QUOTE_ASSETS.find((q) => s.endsWith(q) && s.length > q.length);
-  if (quote === undefined) {
-    throw new Error(`Coinbase: format de symbole inattendu '${symbol}' (devise de cotation inconnue)`);
-  }
-  return { base: s.slice(0, s.length - quote.length), quote };
-}
-
 /** product_id Coinbase (ex. "BTCUSDT" -> "BTC-USDT"). */
 function coinbaseProduct(symbol: string): string {
-  const { base, quote } = splitSymbol(symbol);
+  const { base, quote } = splitSymbol(symbol, "Coinbase");
   return `${base}-${quote}`;
 }
 
@@ -90,7 +82,7 @@ interface CoinbaseCandlesResponse {
 }
 
 /** Trade du flux WS `market_trades`. `side` = côté du MAKER (BUY/SELL). */
-interface CoinbaseWsTrade {
+export interface CoinbaseWsTrade {
   trade_id: string;
   product_id: string;
   price: string;
@@ -130,8 +122,9 @@ function coinbaseRestCandleToCandle(c: CoinbaseRestCandle, granSec: number): Can
  *   side="BUY"  (maker acheteur) => agresseur VENDEUR  => "sell"
  *   side="SELL" (maker vendeur)  => agresseur ACHETEUR => "buy"
  * (Sémantique contestée dans l'écosystème ; on suit la doc officielle. Inverser ici si infirmé empiriquement.)
+ * PURE & testée (tradeMapping.test.ts) — fige la convention contre une régression silencieuse du signe.
  */
-function coinbaseWsTradeToTrade(t: CoinbaseWsTrade): Trade {
+export function coinbaseWsTradeToTrade(t: CoinbaseWsTrade): Trade {
   return {
     time: Date.parse(t.time),
     price: Number(t.price),
@@ -146,61 +139,40 @@ function coinbaseWsTradeToTrade(t: CoinbaseWsTrade): Trade {
  * On IGNORE le snapshot (replay d'historique) : seuls les trades LIVE comptent, pour ne pas
  * fausser le CVD/footprint (parité avec Binance @aggTrade / Kraken snapshot:false).
  */
-function subscribeMarketTrades(symbol: string, cb: (t: Trade) => void): Unsubscribe {
+function subscribeMarketTrades(
+  symbol: string,
+  cb: (t: Trade) => void,
+  opts?: { source?: string; onReconnected?: () => void },
+): Unsubscribe {
   const productId = coinbaseProduct(symbol);
   const sub = JSON.stringify({ type: "subscribe", product_ids: [productId], channel: "market_trades" });
 
-  let ws: WebSocket | null = null;
-  let closedByUser = false;
-  let attempt = 0;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const connect = () => {
-    ws = new WebSocket(WS_URL);
-
-    ws.onopen = () => {
-      attempt = 0; // succès => on remet le backoff à zéro.
-      ws?.send(sub);
-    };
-
-    ws.onmessage = (ev) => {
+  return connectWsLoop({
+    url: WS_URL,
+    source: opts?.source ?? "coinbase:trades",
+    onReconnected: opts?.onReconnected,
+    onOpen: (ws) => ws.send(sub),
+    onMessage: (data) => {
       try {
-        const msg = JSON.parse(ev.data as string) as CoinbaseWsEnvelope;
+        const msg = JSON.parse(data) as CoinbaseWsEnvelope;
         if (msg.channel === "market_trades" && msg.events) {
+          let emis = false;
           for (const e of msg.events) {
             if (e.type !== "update" || !e.trades) continue; // live uniquement (pas le snapshot)
             // Coinbase agrège ~250 ms de trades par message, ordre NON garanti (souvent récent->ancien).
             // Tri ascendant : indispensable pour que `close` (dépendant de l'ordre) reste correct.
             const batch = [...e.trades].sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
             for (const t of batch) cb(coinbaseWsTradeToTrade(t));
+            emis = true;
           }
+          return emis; // true seulement si des trades live ont été émis (≠ snapshot/ack)
         }
       } catch (err) {
         console.error("[AXIOM] Message WS Coinbase (market_trades) illisible", err);
       }
-    };
-
-    // Une erreur ferme la socket, ce qui déclenche onclose -> reconnexion.
-    ws.onerror = () => {
-      ws?.close();
-    };
-
-    ws.onclose = () => {
-      if (closedByUser) return;
-      // Backoff exponentiel plafonné à 30 s : 1s, 2s, 4s, 8s, ... 30s.
-      const delay = Math.min(30_000, 1_000 * 2 ** attempt);
-      attempt += 1;
-      reconnectTimer = setTimeout(connect, delay);
-    };
-  };
-
-  connect();
-
-  return () => {
-    closedByUser = true;
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    ws?.close();
-  };
+      return false;
+    },
+  });
 }
 
 export const coinbaseAdapter: IExchangeAdapter = {
@@ -230,7 +202,9 @@ export const coinbaseAdapter: IExchangeAdapter = {
   },
 
   // Le canal WS `candles` est FIXE à 5 min : on agrège le flux market_trades en bougies du tf demandé.
-  subscribeKline(symbol, tf, cb) {
+  // `onResync` (4e param optionnel, ABSENT de IExchangeAdapter figé) : rappelé après une reconnexion
+  // avec des bougies REST fraîches (comble les bougies clôturées manquées pendant la coupure).
+  subscribeKline(symbol, tf, cb, onResync?: (candles: Candle[]) => void) {
     const { sec } = coinbaseGran(tf); // valide le tf + fournit la largeur du bucket
     const tfMs = sec * 1000;
 
@@ -266,7 +240,16 @@ export const coinbaseAdapter: IExchangeAdapter = {
       cb({ ...cur }); // copie : on ne diffuse jamais la référence mutée en interne
     };
 
-    return subscribeMarketTrades(symbol, onTrade);
+    const onReconnected = onResync
+      ? () => {
+          coinbaseAdapter
+            .fetchKlines(symbol, tf, { limit: RESYNC_KLINE_LIMIT })
+            .then((candles) => onResync(candles))
+            .catch((err) => console.error("[AXIOM] resync kline Coinbase échoué", err));
+        }
+      : undefined;
+
+    return subscribeMarketTrades(symbol, onTrade, { source: "coinbase", onReconnected });
   },
 
   // Flux tick WS public `market_trades` (M5 orderflow : CVD + footprint).

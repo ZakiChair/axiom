@@ -14,7 +14,11 @@ import { createStore } from "zustand/vanilla";
 
 const STORAGE_KEY = "axiom:fred:key";
 
-/** Lecture tolérante (localStorage indisponible / mode privé => null). */
+/**
+ * Lecture tolérante de la clé PERSONNELLE : clé persistée, sinon `null`.
+ * `null` = aucune clé côté front → le proxy /fredapi fournit la clé de repli (.env).
+ * On ne committe plus de clé « par défaut » dans le source (cf. data/macro/fred.ts).
+ */
 function readKey(): string | null {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
@@ -43,29 +47,32 @@ export function getFredKey(): string | null {
 }
 
 export interface FredKeyState {
-  /** true si une clé FRED est configurée (l'UI affiche alors le M2 plutôt que le formulaire). */
+  /**
+   * true si une clé FRED est utilisable. TOUJOURS vrai : une clé de repli est
+   * fournie par le proxy (.env), donc l'UI affiche le M2 sans jamais bloquer sur un
+   * formulaire « clé requise ». Une clé personnelle saisie dans les Réglages remplace
+   * simplement le repli (le M2 se recharge alors avec elle).
+   */
   hasKey: boolean;
-  /** Enregistre une clé (localStorage). Vide => équivaut à clearKey. */
+  /** Enregistre une clé personnelle (localStorage). Vide => équivaut à clearKey. */
   setKey: (key: string) => void;
-  /** Supprime la clé configurée. */
+  /** Supprime la clé personnelle (retour au repli du proxy). */
   clearKey: () => void;
 }
 
-// Hydratation au chargement : `hasKey` reflète la présence d'une clé persistée.
-const initialKey = readKey();
-
 export const fredKeyStore = createStore<FredKeyState>((set) => ({
-  hasKey: initialKey !== null,
+  // Toujours vrai : cf. commentaire de `hasKey` ci-dessus.
+  hasKey: true,
 
   setKey: (key) => {
     const k = key.trim();
     const value = k.length > 0 ? k : null;
     writeKey(value);
-    set({ hasKey: value !== null });
+    set({ hasKey: true });
   },
 
   clearKey: () => {
     writeKey(null);
-    set({ hasKey: false });
+    set({ hasKey: true });
   },
 }));

@@ -20,6 +20,8 @@ import type { ExchangeId } from "@axiom/types";
 const BINANCE_EXCHANGE_INFO = "https://api.binance.com/api/v3/exchangeInfo";
 const KRAKEN_ASSET_PAIRS = "https://api.kraken.com/0/public/AssetPairs";
 const COINBASE_PRODUCTS = "https://api.coinbase.com/api/v3/brokerage/market/products";
+// MEXC : via le proxy (pas de CORS) ; inclut crypto + actions tokenisées (…X / …ON).
+const MEXC_EXCHANGE_INFO = "/mexcapi/api/v3/exchangeInfo";
 
 /**
  * Alias d'actif Kraken -> ticker courant (base ET quote). Le `wsname` REST emploie
@@ -53,10 +55,58 @@ function loadPairs(exchange: ExchangeId): Promise<string[]> {
       return loadKrakenPairs();
     case "coinbase":
       return loadCoinbasePairs();
+    case "twelvedata":
+      // Twelve Data n'a pas de listing global pratique → catalogue CURÉ. Saisie libre
+      // (cf. PairSearch) possible pour tout symbole Twelve Data (ex. "NVDA", "USD/SEK").
+      return Promise.resolve([...TWELVEDATA_SYMBOLS]);
+    case "mexc":
+      return loadMexcPairs();
     default:
       return loadBinancePairs();
   }
 }
+
+/**
+ * Catalogue MEXC (via proxy) : toutes les paires spot tradables, incluant les ACTIONS
+ * TOKENISÉES (familles `…X` ex. AAPLXUSDT, et `…ON` ex. TSLAONUSDT) — cherchables comme
+ * n'importe quelle paire. Format Binance concaténé, déjà compatible avec l'adaptateur.
+ */
+async function loadMexcPairs(): Promise<string[]> {
+  const res = await fetch(MEXC_EXCHANGE_INFO);
+  if (!res.ok) throw new Error(`MEXC exchangeInfo ${res.status} ${res.statusText}`);
+  const data = (await res.json()) as {
+    symbols?: Array<{ symbol?: string; status?: string; isSpotTradingAllowed?: boolean }>;
+  };
+  const out: string[] = [];
+  for (const s of data.symbols ?? []) {
+    // status "1" = en ligne ; isSpotTradingAllowed garantit une paire réellement tradable.
+    if (typeof s.symbol === "string" && s.status === "1" && s.isSpotTradingAllowed === true) {
+      out.push(s.symbol);
+    }
+  }
+  return out.sort();
+}
+
+/**
+ * Catalogue tradfi CURÉ (format Twelve Data). Indices & commodités sont servis par leurs
+ * ETF (le plan gratuit ne couvre pas les futures/indices bruts, mais l'ETF suit le
+ * sous-jacent de près). Forex au format "BASE/QUOTE". Non exhaustif — saisie libre OK.
+ */
+export const TWELVEDATA_SYMBOLS: string[] = [
+  // Indices via ETF (S&P500→SPY, Nasdaq100→QQQ, Dow→DIA, Russell2000→IWM, EAFE→EFA,
+  // émergents→EEM, Europe→VGK, Japon→EWJ).
+  "SPY", "QQQ", "DIA", "IWM", "EFA", "EEM", "VGK", "EWJ",
+  // Commodités via ETF (or→GLD, argent→SLV, pétrole WTI→USO, Brent→BNO, gaz→UNG,
+  // cuivre→CPER, platine→PPLT, palladium→PALL, agriculture→DBA, large→DBC, blé→WEAT,
+  // maïs→CORN, sucre→CANE).
+  "GLD", "SLV", "USO", "BNO", "UNG", "CPER", "PPLT", "PALL", "DBA", "DBC", "WEAT", "CORN", "CANE",
+  // Forex (BASE/QUOTE)
+  "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
+  "NZD/USD", "EUR/GBP", "EUR/JPY", "USD/CNY", "USD/MXN",
+  // Actions US
+  "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "NFLX", "AMD", "INTC",
+  "JPM", "V", "MA", "DIS", "KO", "PEP", "XOM", "BA", "WMT", "BABA",
+].sort();
 
 async function loadBinancePairs(): Promise<string[]> {
   const res = await fetch(BINANCE_EXCHANGE_INFO);

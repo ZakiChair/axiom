@@ -207,6 +207,13 @@ export class OrderflowController {
   private raf = 0;
   private unsubTrades: Unsubscribe | null = null;
   private cvdPaneId: string | null = null;
+  /** Redessine le footprint seulement si dirty : évite un recalcul complet à 60 fps au repos. */
+  private dirty = true;
+  private resizeObserver: ResizeObserver | null = null;
+
+  private readonly markDirty = (): void => {
+    this.dirty = true;
+  };
 
   private tickSize = 0.01;
   private bucketSize = 0.01;
@@ -240,10 +247,15 @@ export class OrderflowController {
 
   private start(): void {
     this.running = true;
+    this.dirty = true;
     this.canvas.style.display = "block";
     ensureCvdRegistered();
     this.createCvdPane();
     this.subscribeActions();
+    // Redimensionnement du conteneur (resize fenêtre, toggle sidebar…) : aucun
+    // scroll/zoom/trade ne le signale autrement, d'où l'observer dédié.
+    this.resizeObserver = new ResizeObserver(this.markDirty);
+    this.resizeObserver.observe(this.container);
     // Si le backfill est déjà présent, on lance les trades tout de suite ;
     // sinon onCandles() (appelé après backfill) déclenchera ensureTrades().
     if (marketStore.getState().candles.length > 0) this.ensureTrades();
@@ -256,6 +268,8 @@ export class OrderflowController {
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     this.unsubscribeActions();
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     if (this.unsubTrades) {
       this.unsubTrades();
       this.unsubTrades = null;
@@ -274,7 +288,8 @@ export class OrderflowController {
 
   /** Backfill terminé (ou changement de buffer) : reseed CVD + lance les trades. */
   onCandles(): void {
-    this.recomputeBucket();
+    this.recomputeBucket(); // peut changer le dimensionnement des lignes du footprint
+    this.markDirty();
     if (this.running) {
       this.refreshCvd();
       this.ensureTrades();
@@ -406,11 +421,15 @@ export class OrderflowController {
     }
     if (t.side === "buy") cell.buy += t.qty;
     else cell.sell += t.qty;
+    this.markDirty();
   }
 
   // --- Synchro viewport (technique du spike M4) --------------------------
 
-  private readonly onViewport = (): void => this.render();
+  private readonly onViewport = (): void => {
+    this.markDirty();
+    this.render();
+  };
 
   private subscribeActions(): void {
     this.chart.subscribeAction(ActionType.OnScroll, this.onViewport);
@@ -425,7 +444,7 @@ export class OrderflowController {
   }
 
   private readonly loop = (): void => {
-    this.render();
+    if (this.dirty) this.render();
     this.raf = requestAnimationFrame(this.loop);
   };
 
@@ -446,6 +465,7 @@ export class OrderflowController {
 
   private render(): void {
     if (!this.running) return;
+    this.dirty = false; // consommé : la prochaine frame ne refera rien tant que rien ne change.
     const ctx = this.ctx;
 
     // Backing-store en pixels physiques (DPR) ; dessin en px CSS (setTransform).

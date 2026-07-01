@@ -16,7 +16,10 @@
  * `createOverlay` sur l'instance liée.
  */
 import { createStore } from "zustand/vanilla";
-import type { Chart as KLineChartInstance } from "klinecharts";
+import type { Chart as KLineChartInstance, OverlayEvent } from "klinecharts";
+import { marketStore } from "../store/market";
+// Effet de bord : enregistre les overlays Fibonacci custom (fibCustom / fibTrend).
+import { FIB_RETRACEMENT, FIB_TREND } from "./fibonacci";
 
 /** Identifiants d'outils exposés par la barre (cursor = aucun overlay). */
 export type DrawingToolId =
@@ -31,7 +34,8 @@ export type DrawingToolId =
   | "parallelChannel"
   | "priceChannel"
   | "rect"
-  | "fib";
+  | "fib"
+  | "fibTrend";
 
 /**
  * Outil -> nom de l'overlay INTÉGRÉ KLineChart à dessiner (null pour le curseur).
@@ -50,7 +54,8 @@ const TOOL_OVERLAY: Record<DrawingToolId, string | null> = {
   parallelChannel: "parallelStraightLine", // canal parallèle (3 points)
   priceChannel: "priceChannelLine", // canal de prix
   rect: "rect", // rectangle (zone)
-  fib: "fibonacciLine", // retracement de Fibonacci
+  fib: FIB_RETRACEMENT, // retracement de Fibonacci (custom thémé + paramétrable)
+  fibTrend: FIB_TREND, // retracement + projection selon la tendance
 };
 
 export interface DrawingState {
@@ -70,17 +75,157 @@ export const drawingStore = createStore<DrawingState>((set) => ({
  */
 let activeChart: KLineChartInstance | null = null;
 
+/**
+ * Drapeau de teardown : `dispose()` (changement symbole/TF) déclenche `onRemoved`
+ * sur chaque overlay. Sans garde, on persisterait une liste VIDE et on effacerait
+ * les dessins sauvegardés. Posé à true à `unbindChart`, remis à false à `bindChart`.
+ */
+let suppressPersist = false;
+
 /** Lie l'instance courante (appelé par Chart.tsx juste après `init`). */
 export function bindChart(chart: KLineChartInstance): void {
   activeChart = chart;
+  suppressPersist = false; // nouvelle instance vivante : la persistance reprend.
 }
 
 /**
  * Délie une instance. Garde `chart === activeChart` : si une nouvelle instance a
  * déjà été liée (recréation symbole/TF), on n'écrase pas la référence à jour.
+ * Pose `suppressPersist` : le `dispose()` qui suit ne doit pas vider le stockage.
  */
 export function unbindChart(chart: KLineChartInstance): void {
-  if (activeChart === chart) activeChart = null;
+  if (activeChart === chart) {
+    activeChart = null;
+    suppressPersist = true;
+  }
+}
+
+// ───────────────────────── Persistance des dessins ─────────────────────────
+//
+// PROBLÈME : Chart.tsx recrée l'instance (donc détruit les overlays) à chaque
+// changement de symbole/TF, et klinecharts n'expose pas d'énumération globale des
+// overlays. On TRACE donc nous-mêmes chaque dessin (id → {name, points}) et on le
+// REJOUE après le backfill via `restoreDrawings`. Stockage par SYMBOLE (localStorage)
+// → les dessins survivent au changement de TF, au changement d'actif et au rechargement.
+
+const DRAWINGS_KEY = "axiom:drawings:v1";
+
+/** Point d'un overlay, ancré dans le temps (stable d'un TF à l'autre) + prix. */
+interface SavedPoint {
+  timestamp?: number;
+  value?: number;
+}
+/** Dessin persistable : nom d'overlay klinecharts + ses points. */
+interface SavedOverlay {
+  name: string;
+  points: SavedPoint[];
+}
+
+/** Overlays du graphe COURANT, par id d'overlay (source de vérité de la session). */
+const liveOverlays = new Map<string, SavedOverlay>();
+
+/** Id de l'overlay actuellement SÉLECTIONNÉ (clic gauche) — cible de la touche Suppr. */
+let selectedOverlayId: string | null = null;
+
+/** Lecture tolérante de la map symbole → dessins. */
+function readAll(): Record<string, SavedOverlay[]> {
+  try {
+    const raw = localStorage.getItem(DRAWINGS_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, SavedOverlay[]>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Persiste les overlays vivants sous le symbole courant (best-effort). */
+function persist(): void {
+  if (suppressPersist) return; // teardown en cours : ne pas écraser le stockage.
+  try {
+    const symbol = marketStore.getState().symbol;
+    const all = readAll();
+    all[symbol] = Array.from(liveOverlays.values());
+    localStorage.setItem(DRAWINGS_KEY, JSON.stringify(all));
+  } catch {
+    /* best-effort : la persistance des dessins n'est pas bloquante */
+  }
+}
+
+/** Ne garde que {timestamp, value} (ancrage stable, stockage léger). */
+function normalizePoints(points: ReadonlyArray<SavedPoint>): SavedPoint[] {
+  return points.map((p) => ({ timestamp: p.timestamp, value: p.value }));
+}
+
+/** Enregistre/maj un overlay dans la map vivante + persiste. */
+function captureOverlay(id: string, name: string, points: ReadonlyArray<SavedPoint>): void {
+  liveOverlays.set(id, { name, points: normalizePoints(points) });
+  persist();
+}
+
+/**
+ * Crée un overlay TRACÉ : mêmes callbacks pour tous (dessin interactif ET dessins
+ * restaurés). `onDrawEnd`/`onPressedMoveEnd` capturent les points ; `onRightClick`
+ * supprime le dessin visé ; `onRemoved` met à jour le stockage. `points` fourni =>
+ * overlay rejoué (pas de tracé interactif, `onDrawEnd` ne se déclenche pas).
+ */
+function createTrackedOverlay(name: string, points?: SavedPoint[]): string | null {
+  if (activeChart === null) return null;
+  const created = activeChart.createOverlay({
+    name,
+    ...(points ? { points } : {}),
+    onDrawEnd: (event: OverlayEvent) => {
+      captureOverlay(event.overlay.id, name, event.overlay.points);
+      drawingStore.getState().setTool("cursor"); // revient au curseur en fin de tracé.
+      return false;
+    },
+    onPressedMoveEnd: (event: OverlayEvent) => {
+      captureOverlay(event.overlay.id, name, event.overlay.points); // points édités (drag).
+      return false;
+    },
+    onRemoved: (event: OverlayEvent) => {
+      liveOverlays.delete(event.overlay.id);
+      if (selectedOverlayId === event.overlay.id) selectedOverlayId = null;
+      persist();
+      return false;
+    },
+    onSelected: (event: OverlayEvent) => {
+      selectedOverlayId = event.overlay.id; // cible de la touche Suppr.
+      return false;
+    },
+    onDeselected: (event: OverlayEvent) => {
+      if (selectedOverlayId === event.overlay.id) selectedOverlayId = null;
+      return false;
+    },
+    onRightClick: (event: OverlayEvent) => {
+      // Clic droit sur un dessin = le supprimer (déclenche onRemoved → stockage).
+      activeChart?.removeOverlay({ id: event.overlay.id });
+      return true; // consomme l'événement (pas de menu contextuel natif).
+    },
+  });
+  return typeof created === "string" ? created : null;
+}
+
+/**
+ * Supprime le dessin actuellement SÉLECTIONNÉ (clic gauche). Renvoie true si une
+ * suppression a eu lieu. Appelé par l'écouteur clavier (Suppr/Backspace) de la
+ * barre d'outils. La suppression déclenche `onRemoved` → nettoyage map + stockage.
+ */
+export function deleteSelectedDrawing(): boolean {
+  if (selectedOverlayId === null || activeChart === null) return false;
+  activeChart.removeOverlay({ id: selectedOverlayId });
+  return true;
+}
+
+/**
+ * Rejoue les dessins sauvegardés du `symbol` sur l'instance courante. Appelé par
+ * Chart.tsx APRÈS le backfill (les bougies sont posées : l'ancrage temporel est valide).
+ */
+export function restoreDrawings(symbol: string): void {
+  liveOverlays.clear();
+  for (const ov of readAll()[symbol] ?? []) {
+    const id = createTrackedOverlay(ov.name, ov.points);
+    if (id) liveOverlays.set(id, ov);
+  }
 }
 
 /**
@@ -93,13 +238,20 @@ export function selectTool(tool: DrawingToolId): void {
   drawingStore.getState().setTool(tool);
   const name = TOOL_OVERLAY[tool];
   if (name === null || activeChart === null) return;
-  activeChart.createOverlay({
-    name,
-    onDrawEnd: () => {
-      drawingStore.getState().setTool("cursor");
-      return false; // ne pas surcharger le comportement de fin de tracé KLineChart.
-    },
-  });
+  // Overlay TRACÉ : persisté par symbole (survit aux changements de TF/actif) et
+  // supprimable au clic droit (cf. createTrackedOverlay).
+  createTrackedOverlay(name);
+}
+
+/**
+ * Force le re-rendu des overlays Fibonacci déjà tracés (appelé quand la config
+ * `fibStore` change : niveaux/zones). `overrideOverlay` par nom retouche les
+ * instances existantes ; `createPointFigures` relit alors le store et le thème.
+ * Le `rev` (qui change) garantit une modification effective déclenchant le redraw.
+ */
+export function redrawFibOverlays(rev: number): void {
+  activeChart?.overrideOverlay({ name: FIB_RETRACEMENT, extendData: rev });
+  activeChart?.overrideOverlay({ name: FIB_TREND, extendData: rev });
 }
 
 /** « Effacer tout » : retire TOUS les overlays de dessin et repasse au curseur. */
@@ -108,5 +260,9 @@ export function clearAllOverlays(): void {
   // indicateurs @axiom et le CVD orderflow passent par `createIndicator` (système
   // distinct), jamais par `createOverlay` — ils ne sont donc pas affectés.
   activeChart?.removeOverlay();
+  // Vide aussi la map vivante + le stockage du symbole courant (au cas où des
+  // overlays n'auraient pas déclenché onRemoved).
+  liveOverlays.clear();
+  persist();
   drawingStore.getState().setTool("cursor");
 }

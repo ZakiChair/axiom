@@ -31,12 +31,17 @@
  *       harmonisation des fréquences/unités/définitions de M2. Hors périmètre d'un
  *       simple fournisseur : on livre le M2 US extensible et on documente le chemin.
  *
- * GRACIEUX SANS CLÉ : si aucune clé n'est trouvée (param/localStorage), on renvoie
- * une série VIDE + un avertissement console — jamais d'erreur bloquante.
+ * CLÉ : l'utilisateur peut saisir SA clé dans les Réglages (param `opts.apiKey` ou
+ * localStorage) ; elle est alors envoyée explicitement. Sinon on n'envoie AUCUNE clé
+ * et le proxy de dev (/fredapi) injecte la clé de repli lue dans .env (voir
+ * vite.config.ts) — la clé n'est donc jamais committée dans le source ni le bundle.
+ * Si le .env est vide, l'API renvoie 401 (erreur remontée à l'appelant).
  */
 import type { IMacroProvider, MacroFetchOptions, MacroPoint, MacroSeries } from "./types";
 
-const OBSERVATIONS_URL = "https://api.stlouisfed.org/fred/series/observations";
+// Base SAME-ORIGIN via le proxy de dev Vite (cf. vite.config.ts). L'API FRED ne
+// renvoie AUCUN en-tête CORS : un appel direct depuis le navigateur est bloqué.
+const OBSERVATIONS_URL = "/fredapi/fred/series/observations";
 const API_KEY_STORAGE = "axiom.fred.apiKey";
 
 /** Réponse partielle de fred/series/observations (champs utiles uniquement). */
@@ -44,15 +49,20 @@ interface FredObservationsResponse {
   observations: Array<{ date: string; value: string }>;
 }
 
-/** Lit la clé FRED : param explicite > localStorage > absente. */
+/**
+ * Lit la clé FRED PERSONNELLE : param explicite > localStorage > aucune.
+ * `undefined` = pas de clé côté front → le proxy /fredapi injectera la clé de repli
+ * (.env). On ne committe plus de clé « par défaut » dans le source.
+ */
 function resolveFredKey(opts?: MacroFetchOptions): string | undefined {
   if (opts?.apiKey) return opts.apiKey;
   try {
     if (typeof localStorage !== "undefined") {
-      return localStorage.getItem(API_KEY_STORAGE) ?? undefined;
+      const v = localStorage.getItem(API_KEY_STORAGE);
+      return v !== null && v.length > 0 ? v : undefined;
     }
   } catch {
-    // Accès localStorage interdit — on ignore (le fournisseur restera inactif).
+    // Accès localStorage interdit — on s'en remet à la clé injectée par le proxy.
   }
   return undefined;
 }
@@ -73,20 +83,13 @@ export function createFredM2Provider(seriesId = "WM2NS"): IMacroProvider {
 
     async fetchSeries(opts?: MacroFetchOptions): Promise<MacroSeries> {
       const key = resolveFredKey(opts);
-      if (!key) {
-        console.warn(
-          `[AXIOM] Clé FRED absente — fournisseur "${id}" inactif. ` +
-            `Renseigner opts.apiKey ou localStorage["${API_KEY_STORAGE}"] ` +
-            `(clé gratuite : https://fredaccount.stlouisfed.org/apikeys).`
-        );
-        return [];
-      }
-
       const params = new URLSearchParams({
         series_id: seriesId,
-        api_key: key,
         file_type: "json",
       });
+      // Clé personnelle → envoyée explicitement (le proxy la détecte et n'injecte
+      // PAS le repli). Sans clé, on n'envoie RIEN → le proxy injecte la clé .env.
+      if (key !== undefined) params.set("api_key", key);
       if (opts?.start !== undefined) params.set("observation_start", toFredDate(opts.start));
       if (opts?.end !== undefined) params.set("observation_end", toFredDate(opts.end));
 

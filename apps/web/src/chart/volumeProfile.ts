@@ -174,6 +174,14 @@ export class VolumeProfileController {
 
   private running = false;
   private raf = 0;
+  /** Reconstruit/redessine seulement si dirty : évite un recalcul complet à 60 fps au repos. */
+  private dirty = true;
+  private resizeObserver: ResizeObserver | null = null;
+  private unsubMarket: (() => void) | null = null;
+
+  private readonly markDirty = (): void => {
+    this.dirty = true;
+  };
 
   constructor(chart: Chart, container: HTMLElement, canvas: HTMLCanvasElement) {
     this.chart = chart;
@@ -192,7 +200,7 @@ export class VolumeProfileController {
 
   /** Backfill / bougie clôturée : rien à mémoriser (recalcul par frame), no-op utile pour la symétrie d'API. */
   onCandles(): void {
-    /* recalcul fait dans render() — pas d'état à reseed */
+    /* recalcul fait dans render() — l'abonnement marketStore (start()) marque déjà dirty */
   }
 
   dispose(): void {
@@ -201,8 +209,16 @@ export class VolumeProfileController {
 
   private start(): void {
     this.running = true;
+    this.dirty = true;
     this.canvas.style.display = "block";
     this.subscribeActions();
+    // Tick/clôture de bougie : aucun hook onTick câblé depuis Chart.tsx, donc on
+    // s'abonne directement au store (pattern établi du repo) pour marquer dirty.
+    this.unsubMarket = marketStore.subscribe(this.markDirty);
+    // Redimensionnement du conteneur (resize fenêtre, toggle sidebar…) : aucun
+    // scroll/zoom/tick ne le signale autrement, d'où l'observer dédié.
+    this.resizeObserver = new ResizeObserver(this.markDirty);
+    this.resizeObserver.observe(this.container);
     this.loop();
   }
 
@@ -212,10 +228,17 @@ export class VolumeProfileController {
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     this.unsubscribeActions();
+    this.unsubMarket?.();
+    this.unsubMarket = null;
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     this.clearCanvas();
   }
 
-  private readonly onViewport = (): void => this.render();
+  private readonly onViewport = (): void => {
+    this.markDirty();
+    this.render();
+  };
 
   private subscribeActions(): void {
     this.chart.subscribeAction(ActionType.OnScroll, this.onViewport);
@@ -230,7 +253,7 @@ export class VolumeProfileController {
   }
 
   private readonly loop = (): void => {
-    this.render();
+    if (this.dirty) this.render();
     this.raf = requestAnimationFrame(this.loop);
   };
 
@@ -249,6 +272,7 @@ export class VolumeProfileController {
 
   private render(): void {
     if (!this.running) return;
+    this.dirty = false; // consommé : la prochaine frame ne refera rien tant que rien ne change.
     const ctx = this.ctx;
 
     const dpr = Math.max(1, window.devicePixelRatio || 1);

@@ -17,8 +17,10 @@
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import type { MacroSeries } from "../data/macro";
-import { coinGeckoTotalProvider, fredM2WeeklyProvider, stablecoinsSupplyProvider } from "../data/macro";
+import { fredM2WeeklyProvider, stablecoinsSupplyProvider } from "../data/macro";
 import { fredKeyStore, getFredKey } from "../store/macro";
+import { macroHistoryStore, recordGlobalSnapshotNow } from "../store/macroHistory";
+import { macroOverlayStore, type MacroOverlayId } from "../store/macro-overlays";
 import { settingsUiStore } from "../store/settings-ui";
 import { SidebarSection } from "./SidebarSection";
 
@@ -115,6 +117,8 @@ function Measure({
   pct,
   spark,
   error,
+  active,
+  onToggle,
 }: {
   label: string;
   note?: string;
@@ -122,15 +126,27 @@ function Measure({
   pct?: number;
   spark?: number[];
   error?: string | null;
+  active?: boolean;
+  onToggle?: () => void;
 }) {
   return (
     <div className="px-3 py-2">
-      <div className="flex items-baseline justify-between">
-        <span className="text-[11px] text-neutral-500">{label}</span>
-        {note && <span className="text-[10px] text-neutral-600">{note}</span>}
+      <div className="flex items-baseline justify-between gap-2">
+        <label className="flex items-center gap-1.5 text-[11px] text-text-dim">
+          {onToggle && (
+            <input
+              type="checkbox"
+              checked={active ?? false}
+              onChange={onToggle}
+              className="h-3 w-3 accent-emerald-500"
+            />
+          )}
+          <span>{label}</span>
+        </label>
+        {note && <span className="text-[10px] text-text-dim/70">{note}</span>}
       </div>
       <div className="mt-0.5 flex items-end justify-between gap-2">
-        <span className="tabular-nums text-base text-neutral-100">{value}</span>
+        <span className="tabular-nums text-base text-text">{value}</span>
         <div className="flex items-center gap-2">
           {pct !== undefined && (
             <span className="tabular-nums text-[11px]" style={{ color: pctColor(pct) }}>
@@ -149,13 +165,19 @@ function Measure({
 
 export function MacroPanel() {
   const hasKey = useStore(fredKeyStore, (s) => s.hasKey);
+  const activeMacros = useStore(macroOverlayStore, (s) => s.enabled);
+  const toggleMacro = useStore(macroOverlayStore, (s) => s.toggle);
   // La saisie de la clé FRED vit désormais dans le panneau Réglages dédié.
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
+  const isMacroActive = (id: MacroOverlayId) => activeMacros.includes(id);
 
-  const [total, setTotal] = useState<MacroSeries>([]);
+  // Cap. totale crypto : série persistée (échantillonnée par le poller central),
+  // pas un fetch local — voir store/macroHistory.ts. Le composant se re-rend quand
+  // un nouvel échantillon arrive.
+  const snapshots = useStore(macroHistoryStore, (s) => s.snapshots);
+
   const [stables, setStables] = useState<MacroSeries>([]);
   const [m2, setM2] = useState<MacroSeries>([]);
-  const [errTotal, setErrTotal] = useState<string | null>(null);
   const [errStables, setErrStables] = useState<string | null>(null);
   const [errM2, setErrM2] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -175,21 +197,14 @@ export function MacroPanel() {
       const fredKey = hasKey ? (getFredKey() ?? undefined) : undefined;
 
       // Array LITTÉRAL passé directement à allSettled => type tuple précis (pas de | undefined).
-      const [tR, sR, mR] = await Promise.allSettled([
-        coinGeckoTotalProvider.fetchSeries({ signal: controller.signal }),
+      // (La cap. totale crypto est échantillonnée à part par le poller central.)
+      const [sR, mR] = await Promise.allSettled([
         stablecoinsSupplyProvider.fetchSeries({ start, signal: controller.signal }),
         hasKey
           ? fredM2WeeklyProvider.fetchSeries({ start, apiKey: fredKey, signal: controller.signal })
           : Promise.resolve<MacroSeries>([]),
       ]);
       if (ignore) return;
-
-      if (tR.status === "fulfilled") {
-        setTotal(tR.value);
-        setErrTotal(null);
-      } else {
-        setErrTotal("Indisponible");
-      }
 
       if (sR.status === "fulfilled") {
         setStables(sR.value);
@@ -227,7 +242,12 @@ export function MacroPanel() {
   }, [hasKey, refreshTick]);
 
   // Valeurs dérivées des séries.
-  const totalValue = lastValue(total);
+  // Cap. totale crypto : reconstruite depuis les snapshots persistés (évolution locale).
+  const totalSeries: MacroSeries = snapshots.map((s) => ({ time: s.t, value: s.total }));
+  const totalValue = lastValue(totalSeries);
+  const totalPct = changePct(totalSeries, VARIATION_WINDOW_MS);
+  const totalSpark = totalSeries.slice(-SPARK_POINTS).map((p) => p.value);
+
   const stablesValue = lastValue(stables);
   const stablesPct = changePct(stables, VARIATION_WINDOW_MS);
   const stablesSpark = stables.slice(-SPARK_POINTS).map((p) => p.value);
@@ -239,10 +259,15 @@ export function MacroPanel() {
   return (
     <SidebarSection
       title="Masse monétaire"
+      collapsible
+      defaultOpen={false}
       action={
         <button
           type="button"
-          onClick={() => setRefreshTick((t) => t + 1)}
+          onClick={() => {
+            setRefreshTick((t) => t + 1);
+            void recordGlobalSnapshotNow();
+          }}
           className="text-[10px] text-text-dim transition hover:text-text"
           title="Rafraîchir maintenant"
         >
@@ -250,12 +275,16 @@ export function MacroPanel() {
         </button>
       }
     >
-      {/* 1. Capitalisation totale crypto (instantané — pas d'historique en gratuit). */}
+      {/* 1. Cap. totale crypto — série échantillonnée localement (le gratuit ne donne
+            qu'un instantané) : variation ~30 j + mini-trend se construisent dans le temps. */}
       <Measure
         label="Cap. totale crypto"
-        note="instantané"
+        note={totalSeries.length < 2 ? "accumulation…" : "évolution locale"}
         value={formatUsdCompact(totalValue)}
-        error={errTotal}
+        pct={totalPct}
+        spark={totalSpark}
+        active={isMacroActive("crypto-total")}
+        onToggle={() => toggleMacro("crypto-total")}
       />
 
       {/* 2. Supply agrégée des stablecoins (DefiLlama). */}
@@ -265,12 +294,22 @@ export function MacroPanel() {
         pct={stablesPct}
         spark={stablesSpark}
         error={errStables}
+        active={isMacroActive("stablecoins")}
+        onToggle={() => toggleMacro("stablecoins")}
       />
 
       {/* 3. M2 US (FRED) — valeur native en milliards $, re-mise à l'échelle pour l'affichage compact. */}
       <div className="px-3 py-2">
         <div className="flex items-baseline justify-between">
-          <span className="text-[11px] text-neutral-500">M2 (US · FRED)</span>
+          <label className="flex items-center gap-1.5 text-[11px] text-text-dim">
+            <input
+              type="checkbox"
+              checked={isMacroActive("m2")}
+              onChange={() => toggleMacro("m2")}
+              className="h-3 w-3 accent-emerald-500"
+            />
+            <span>M2 (US · FRED)</span>
+          </label>
         </div>
 
         {!hasKey ? (
@@ -286,7 +325,7 @@ export function MacroPanel() {
           /* --- Valeur M2 (milliards $ → $ absolu pour la notation compacte) --- */
           <>
             <div className="mt-0.5 flex items-end justify-between gap-2">
-              <span className="tabular-nums text-base text-neutral-100">
+              <span className="tabular-nums text-base text-text">
                 {formatUsdCompact(m2Last === undefined ? undefined : m2Last * 1e9)}
               </span>
               <div className="flex items-center gap-2">
@@ -305,9 +344,10 @@ export function MacroPanel() {
         )}
       </div>
 
-      <p className="border-t border-neutral-900 px-3 py-2 text-[10px] leading-snug text-neutral-600">
-        Sources : CoinGecko (cap. crypto, instantané), DefiLlama (stablecoins), FRED (M2 US,
-        clé gratuite). Variation ~30 j. Données basse fréquence, maj ~15 min.
+      <p className="border-t border-border px-3 py-2 text-[10px] leading-snug text-text-dim">
+        Sources : CoinGecko (cap. crypto, échantillonnée localement — le gratuit n'a pas
+        d'historique, la courbe se construit dans le temps), DefiLlama (stablecoins), FRED
+        (M2 US). Variation ~30 j. Données basse fréquence, maj ~15 min.
       </p>
     </SidebarSection>
   );

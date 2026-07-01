@@ -14,7 +14,11 @@ import { setCoinalyzeApiKey } from "../data/coinalyze";
 
 const STORAGE_KEY = "axiom:coinalyze:key";
 
-/** Lecture tolérante (localStorage indisponible / mode privé => null). */
+/**
+ * Lecture tolérante de la clé PERSONNELLE : clé persistée, sinon `null`.
+ * `null` = aucune clé côté front → le proxy /coinalyzeapi fournit la clé de repli
+ * (.env). On ne committe plus de clé « par défaut » dans le source (cf. data/coinalyze.ts).
+ */
 function readKey(): string | null {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
@@ -35,32 +39,38 @@ function writeKey(key: string | null): void {
 }
 
 export interface CoinalyzeKeyState {
-  /** true si une clé est configurée (l'UI bascule alors du formulaire vers les données). */
+  /**
+   * true si une clé est utilisable. TOUJOURS vrai : une clé de repli est fournie par
+   * le proxy (.env), donc l'UI affiche les données dérivées sans jamais bloquer sur un
+   * formulaire « clé requise ». Une clé personnelle saisie dans les Réglages remplace
+   * simplement le repli. Si le .env est vide, l'API renvoie 401 (message clair dans l'UI).
+   */
   hasKey: boolean;
-  /** Enregistre une clé (localStorage + provider). Vide => équivaut à clearKey. */
+  /** Enregistre une clé personnelle (localStorage + provider). Vide => équivaut à clearKey. */
   setKey: (key: string) => void;
-  /** Supprime la clé configurée. */
+  /** Supprime la clé personnelle (retour au repli du proxy). */
   clearKey: () => void;
 }
 
-// Hydratation : injecte la clé persistée dans le provider dès le chargement du module.
-const initialKey = readKey();
-setCoinalyzeApiKey(initialKey);
+// Hydratation : injecte la clé personnelle persistée (ou null) dans le provider.
+// null => le provider n'envoie aucune clé et le proxy injecte le repli (.env).
+setCoinalyzeApiKey(readKey());
 
 export const coinalyzeKeyStore = createStore<CoinalyzeKeyState>((set) => ({
-  hasKey: initialKey !== null,
+  // Toujours vrai : cf. commentaire de `hasKey` ci-dessus.
+  hasKey: true,
 
   setKey: (key) => {
     const k = key.trim();
     const value = k.length > 0 ? k : null;
     writeKey(value);
     setCoinalyzeApiKey(value);
-    set({ hasKey: value !== null });
+    set({ hasKey: true });
   },
 
   clearKey: () => {
     writeKey(null);
     setCoinalyzeApiKey(null);
-    set({ hasKey: false });
+    set({ hasKey: true });
   },
 }));

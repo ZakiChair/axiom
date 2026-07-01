@@ -25,12 +25,14 @@
  *   - WS v2 trade : https://docs.kraken.com/api/docs/websocket-v2/trade
  */
 import type { Candle, IExchangeAdapter, Timeframe, Trade, Unsubscribe } from "@axiom/types";
+import { splitSymbol } from "./symbol";
+import { connectWsLoop } from "./wsLoop";
 
 const REST_OHLC_URL = "https://api.kraken.com/0/public/OHLC";
 const WS_URL = "wss://ws.kraken.com/v2";
 
-/** Devises de cotation reconnues, suffixe le plus LONG d'abord (4 caractères avant 3). */
-const QUOTE_ASSETS = ["USDT", "USDC", "USDD", "TUSD", "DAI", "USD", "EUR", "GBP", "BTC", "ETH"];
+/** Fenêtre re-fetchée au resync post-reconnexion (comble les bougies manquées). */
+const RESYNC_KLINE_LIMIT = 500;
 
 /** Bases dont l'altname REST Kraken diffère du ticker courant (Bitcoin=XBT, Dogecoin=XDG). */
 const KRAKEN_REST_BASE: Record<string, string> = { BTC: "XBT", DOGE: "XDG" };
@@ -47,25 +49,15 @@ const KRAKEN_INTERVAL: Partial<Record<Timeframe, number>> = {
   "1w": 10080,
 };
 
-/** Découpe "BTCUSDT" -> { base:"BTC", quote:"USDT" } (suffixe de cotation le plus long). */
-function splitSymbol(symbol: string): { base: string; quote: string } {
-  const s = symbol.toUpperCase();
-  const quote = QUOTE_ASSETS.find((q) => s.endsWith(q) && s.length > q.length);
-  if (quote === undefined) {
-    throw new Error(`Kraken: format de symbole inattendu '${symbol}' (devise de cotation inconnue)`);
-  }
-  return { base: s.slice(0, s.length - quote.length), quote };
-}
-
 /** Altname REST (ex. "BTCUSDT" -> "XBTUSDT"). */
 function krakenRestPair(symbol: string): string {
-  const { base, quote } = splitSymbol(symbol);
+  const { base, quote } = splitSymbol(symbol, "Kraken");
   return `${KRAKEN_REST_BASE[base] ?? base}${quote}`;
 }
 
 /** Symbole WS v2 (ex. "BTCUSDT" -> "BTC/USDT"). */
 function krakenWsSymbol(symbol: string): string {
-  const { base, quote } = splitSymbol(symbol);
+  const { base, quote } = splitSymbol(symbol, "Kraken");
   return `${base}/${quote}`;
 }
 
@@ -112,7 +104,7 @@ interface KrakenWsOhlc {
 }
 
 /** Trade issu du flux WS v2 `trade`. `side` = côté de l'AGRESSEUR (taker). */
-interface KrakenWsTrade {
+export interface KrakenWsTrade {
   symbol: string;
   side: "buy" | "sell";
   price: number;
@@ -158,8 +150,11 @@ function krakenWsOhlcToCandle(o: KrakenWsOhlc): Candle {
   };
 }
 
-/** WS trade -> Trade. `side` Kraken = agresseur (taker) -> mappage DIRECT, pas d'inversion. */
-function krakenWsTradeToTrade(t: KrakenWsTrade): Trade {
+/**
+ * WS trade -> Trade. `side` Kraken = agresseur (taker) -> mappage DIRECT, pas d'inversion.
+ * PURE & testée (tradeMapping.test.ts) — fige la convention contre une régression silencieuse du signe.
+ */
+export function krakenWsTradeToTrade(t: KrakenWsTrade): Trade {
   return {
     time: Date.parse(t.timestamp),
     price: t.price,
@@ -205,18 +200,15 @@ export const krakenAdapter: IExchangeAdapter = {
     return candles;
   },
 
-  subscribeKline(symbol, tf, cb) {
+  // `onResync` (4e param optionnel, ABSENT de IExchangeAdapter figé) : rappelé après
+  // une reconnexion avec des bougies REST fraîches, que Chart.tsx fusionne au buffer.
+  subscribeKline(symbol, tf, cb, onResync?: (candles: Candle[]) => void) {
     const interval = krakenInterval(tf); // lève tôt si tf non supporté
     const wsSymbol = krakenWsSymbol(symbol);
     const sub = JSON.stringify({
       method: "subscribe",
       params: { channel: "ohlc", symbol: [wsSymbol], interval },
     });
-
-    let ws: WebSocket | null = null;
-    let closedByUser = false;
-    let attempt = 0;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     // Kraken n'expose pas de drapeau "clôturée". On déduit la clôture au passage d'intervalle :
     // dès qu'une bougie d'un `interval_begin` plus récent arrive, la précédente est close.
@@ -231,50 +223,39 @@ export const krakenAdapter: IExchangeAdapter = {
       cb(c);
     };
 
-    const connect = () => {
-      ws = new WebSocket(WS_URL);
+    const onReconnected = onResync
+      ? () => {
+          krakenAdapter
+            .fetchKlines(symbol, tf, { limit: RESYNC_KLINE_LIMIT })
+            .then((candles) => onResync(candles))
+            .catch((err) => console.error("[AXIOM] resync kline Kraken échoué", err));
+        }
+      : undefined;
 
-      ws.onopen = () => {
-        attempt = 0; // succès => on remet le backoff à zéro.
-        ws?.send(sub);
-      };
-
-      ws.onmessage = (ev) => {
+    return connectWsLoop({
+      url: WS_URL,
+      source: "kraken",
+      onReconnected,
+      // Kraken exige la (re)souscription à chaque ouverture ; les heartbeats du canal
+      // comptent comme activité (gérés en amont par le watchdog de connectWsLoop).
+      onOpen: (ws) => ws.send(sub),
+      onMessage: (data) => {
         try {
-          const msg = JSON.parse(ev.data as string) as KrakenWsEnvelope<KrakenWsOhlc>;
+          const msg = JSON.parse(data) as KrakenWsEnvelope<KrakenWsOhlc>;
           if (msg.channel === "ohlc" && msg.data) {
             // Un snapshot peut livrer plusieurs bougies, ordre non garanti -> tri ascendant.
             const batch = [...msg.data].sort(
               (a, b) => Date.parse(a.interval_begin) - Date.parse(b.interval_begin),
             );
             for (const o of batch) emit(krakenWsOhlcToCandle(o));
+            return true; // message de données (≠ ack/heartbeat)
           }
         } catch (err) {
           console.error("[AXIOM] Message WS Kraken (ohlc) illisible", err);
         }
-      };
-
-      // Une erreur ferme la socket, ce qui déclenche onclose -> reconnexion.
-      ws.onerror = () => {
-        ws?.close();
-      };
-
-      ws.onclose = () => {
-        if (closedByUser) return;
-        // Backoff exponentiel plafonné à 30 s : 1s, 2s, 4s, 8s, ... 30s.
-        const delay = Math.min(30_000, 1_000 * 2 ** attempt);
-        attempt += 1;
-        reconnectTimer = setTimeout(connect, delay);
-      };
-    };
-
-    connect();
-
-    return () => {
-      closedByUser = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      ws?.close();
-    };
+        return false;
+      },
+    });
   },
 
   // Flux tick WS v2 `trade` (M5 orderflow : CVD + footprint). `snapshot:false` => pas de replay
@@ -286,50 +267,22 @@ export const krakenAdapter: IExchangeAdapter = {
       params: { channel: "trade", symbol: [wsSymbol], snapshot: false },
     });
 
-    let ws: WebSocket | null = null;
-    let closedByUser = false;
-    let attempt = 0;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const connect = () => {
-      ws = new WebSocket(WS_URL);
-
-      ws.onopen = () => {
-        attempt = 0; // succès => on remet le backoff à zéro.
-        ws?.send(sub);
-      };
-
-      ws.onmessage = (ev) => {
+    return connectWsLoop({
+      url: WS_URL,
+      source: "kraken:trades",
+      onOpen: (ws) => ws.send(sub),
+      onMessage: (data) => {
         try {
-          const msg = JSON.parse(ev.data as string) as KrakenWsEnvelope<KrakenWsTrade>;
+          const msg = JSON.parse(data) as KrakenWsEnvelope<KrakenWsTrade>;
           if (msg.channel === "trade" && msg.data) {
             for (const t of msg.data) cb(krakenWsTradeToTrade(t));
+            return true; // message de données (≠ ack/heartbeat)
           }
         } catch (err) {
           console.error("[AXIOM] Message WS Kraken (trade) illisible", err);
         }
-      };
-
-      // Une erreur ferme la socket, ce qui déclenche onclose -> reconnexion.
-      ws.onerror = () => {
-        ws?.close();
-      };
-
-      ws.onclose = () => {
-        if (closedByUser) return;
-        // Backoff exponentiel plafonné à 30 s : 1s, 2s, 4s, 8s, ... 30s.
-        const delay = Math.min(30_000, 1_000 * 2 ** attempt);
-        attempt += 1;
-        reconnectTimer = setTimeout(connect, delay);
-      };
-    };
-
-    connect();
-
-    return () => {
-      closedByUser = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      ws?.close();
-    };
+        return false;
+      },
+    });
   },
 };

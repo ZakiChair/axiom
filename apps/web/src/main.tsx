@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { WebGLSyncSpike } from "./spike/WebGLSyncSpike";
 import { enablePersistence, hydrateStores } from "./store/persist";
+import { startMacroHistoryPolling } from "./store/macroHistory";
 // Effet de bord du module : pose [data-theme] sur <html> dès l'import, AVANT le
 // premier rendu (pas de flash « dark -> thème persisté » au rechargement).
 import "./store/theme";
@@ -12,6 +13,11 @@ import "./index.css";
 // puis active la sauvegarde automatique sur changement.
 hydrateStores();
 enablePersistence();
+
+// Échantillonnage central de la capitalisation totale crypto (CoinGecko n'expose
+// pas l'historique en gratuit) : construit une série persistée VERS L'AVANT,
+// lue par le panneau Macro et l'overlay du graphe. Indépendant de l'UI.
+startMacroHistoryPolling();
 
 // Point d'entrée : monte <App/> dans #root.
 const rootElement = document.getElementById("root");

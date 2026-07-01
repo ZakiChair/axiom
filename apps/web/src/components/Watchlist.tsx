@@ -75,47 +75,63 @@ export function Watchlist() {
     setDraft("");
   };
 
+  const pairCount = `${symbols.length} paire${symbols.length > 1 ? "s" : ""}`;
+
   return (
-    <SidebarSection title="Watchlist" grow>
+    <SidebarSection title="Watchlist" grow collapsible badge={pairCount}>
       <div className="flex-1 overflow-y-auto">
-        {symbols.map((sym) => (
-          <div
-            key={sym}
-            className={`group flex items-center gap-2 px-3 py-2 text-sm ${
-              sym === currentSymbol ? "bg-neutral-900" : "hover:bg-neutral-900"
-            }`}
-          >
-            <button
-              type="button"
-              onClick={() => setSymbol(sym)}
-              className="flex flex-1 items-center justify-between gap-2 text-left"
+        {symbols.length === 0 && (
+          <p className="px-3 py-3 text-[11px] text-neutral-600">
+            Aucune paire. Ajoutez-en une ci-dessous.
+          </p>
+        )}
+        {symbols.map((sym) => {
+          const selected = sym === currentSymbol;
+          return (
+            <div
+              key={sym}
+              className={`group flex items-center gap-1 border-l-2 pr-2 text-sm ${
+                selected
+                  ? "border-accent bg-neutral-900"
+                  : "border-transparent hover:bg-neutral-900"
+              }`}
             >
-              <span className="font-medium text-neutral-100">{sym}</span>
-              <span className="flex flex-col items-end">
+              <button
+                type="button"
+                onClick={() => setSymbol(sym)}
+                className="flex flex-1 items-baseline justify-between gap-3 py-2 pl-3 text-left"
+              >
                 <span
-                  ref={(el) => registerCell(cells.current, sym, "price", el)}
-                  className="tabular-nums text-neutral-200"
+                  className={`truncate font-medium ${selected ? "text-neutral-100" : "text-neutral-200"}`}
                 >
-                  —
+                  {sym}
                 </span>
-                <span
-                  ref={(el) => registerCell(cells.current, sym, "change", el)}
-                  className="text-[11px] tabular-nums text-neutral-500"
-                >
-                  —
+                <span className="flex shrink-0 items-baseline gap-2">
+                  <span
+                    ref={(el) => registerCell(cells.current, sym, "price", el)}
+                    className="tabular-nums text-neutral-100"
+                  >
+                    —
+                  </span>
+                  <span
+                    ref={(el) => registerCell(cells.current, sym, "change", el)}
+                    className="w-14 text-right text-[11px] tabular-nums text-neutral-500"
+                  >
+                    —
+                  </span>
                 </span>
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => remove(sym)}
-              aria-label={`Retirer ${sym}`}
-              className="text-neutral-600 opacity-0 transition hover:text-neutral-300 group-hover:opacity-100"
-            >
-              ×
-            </button>
-          </div>
-        ))}
+              </button>
+              <button
+                type="button"
+                onClick={() => remove(sym)}
+                aria-label={`Retirer ${sym}`}
+                className="shrink-0 text-neutral-600 opacity-0 transition hover:text-neutral-300 group-hover:opacity-100"
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       <div className="border-t border-neutral-800 p-2">

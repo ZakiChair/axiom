@@ -1,0 +1,245 @@
+/**
+ * Gestionnaire de fenêtres flottantes AXIOM (« Launchpad ») — Zustand VANILLA, hors
+ * render-loop React. Source de vérité UNIQUE de la géométrie/état (position, taille,
+ * z-order, minimize, groupe de couleur) des 14 fenêtres Bloomberg non modales.
+ *
+ * Chaque fenêtre garde son propre store métier (`*UiStore`, ex. `derivativesUiStore`)
+ * pour sa logique interne ; ces stores DÉLÈGUENT `open`/`close`/`toggle` ici via
+ * `mirrorOpenState` (cf. store correspondant) pour rester 100% rétro-compatibles avec
+ * leurs consommateurs existants (`useStore(derivativesUiStore, s => s.open)` continue
+ * de fonctionner sans aucune modification des composants).
+ *
+ * Design des fonctions géométriques : PURES et exportées séparément des actions du
+ * store, pour rester testables sans DOM (cf. windowManager.test.ts). Les actions du
+ * store (qui lisent `window.innerWidth/innerHeight`) les appellent avec les dimensions
+ * réelles du viewport — même pattern que `isMarketOpen` (pur) + call site qui injecte
+ * `Date.now()`.
+ */
+import { createStore } from "zustand/vanilla";
+import { COMPARE_PALETTE } from "./compare";
+
+/** Palette des groupes liés — réutilise la palette de comparaison multi-symboles
+ * existante (déjà choisie pour être lisible sur les 5 thèmes du terminal). */
+export const GROUP_PALETTE: readonly string[] = COMPARE_PALETTE;
+
+/** Registre statique des 14 fenêtres Bloomberg : titre/mnémonique/taille par défaut
+ * (largeur = ancienne largeur fixe du dock, hauteur = valeur raisonnable par défaut,
+ * l'utilisateur redimensionne ensuite librement). Utilisé par `App.tsx` (montage),
+ * `TaskbarMinimized.tsx` (libellé des pastilles) et `openWindow` (taille initiale). */
+export const WINDOW_REGISTRY: readonly {
+  id: string;
+  title: string;
+  mnemonic: string;
+  defaultWidth: number;
+  defaultHeight: number;
+}[] = [
+  { id: "derivatives", title: "Produits dérivés", mnemonic: "DES", defaultWidth: 420, defaultHeight: 640 },
+  { id: "eco", title: "Calendrier économique", mnemonic: "ECO", defaultWidth: 440, defaultHeight: 640 },
+  { id: "news", title: "Actualités crypto", mnemonic: "NEWS", defaultWidth: 440, defaultHeight: 640 },
+  { id: "corr", title: "Corrélations", mnemonic: "CORR", defaultWidth: 480, defaultHeight: 640 },
+  { id: "onchain", title: "On-chain", mnemonic: "CHAIN", defaultWidth: 460, defaultHeight: 640 },
+  { id: "marketMap", title: "Vue marché (treemap)", mnemonic: "IMAP", defaultWidth: 1100, defaultHeight: 720 },
+  { id: "portfolio", title: "Portefeuille", mnemonic: "PORT", defaultWidth: 460, defaultHeight: 640 },
+  { id: "notes", title: "Notes / journal", mnemonic: "NOTE", defaultWidth: 440, defaultHeight: 640 },
+  { id: "screener", title: "Screener d'actifs", mnemonic: "EQS", defaultWidth: 680, defaultHeight: 680 },
+  { id: "termStructure", title: "Structure par terme", mnemonic: "TERM", defaultWidth: 480, defaultHeight: 640 },
+  { id: "options", title: "Options (smile IV, max pain)", mnemonic: "OMON", defaultWidth: 480, defaultHeight: 640 },
+  { id: "dom", title: "Carnet d'ordres (DOM / depth)", mnemonic: "DOM", defaultWidth: 560, defaultHeight: 680 },
+  { id: "backtest", title: "Backtest de stratégie", mnemonic: "BT", defaultWidth: 720, defaultHeight: 680 },
+  { id: "replay", title: "Replay de marché", mnemonic: "REPLAY", defaultWidth: 420, defaultHeight: 640 },
+] as const;
+
+/** Espace minimal toujours visible d'une fenêtre (pixels), pour le drag comme le resize. */
+export const MIN_WIDTH = 320;
+export const MIN_HEIGHT = 240;
+const VISIBLE_MARGIN = 40;
+
+export interface EtatFenetre {
+  id: string;
+  open: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  z: number;
+  minimized: boolean;
+  groupColor: string | null;
+}
+
+/** Position en cascade pour l'ouverture initiale d'une fenêtre (évite l'empilement
+ * exact au même endroit). `index` = nombre de fenêtres déjà ouvertes. */
+export function cascadePosition(
+  index: number,
+  viewportWidth: number,
+  viewportHeight: number,
+  width: number,
+  height: number
+): { x: number; y: number } {
+  const STEP = 28;
+  const MARGIN = 48;
+  const rawX = MARGIN + (index % 8) * STEP;
+  const rawY = MARGIN + (index % 8) * STEP;
+  const x = Math.min(rawX, Math.max(MARGIN, viewportWidth - width - MARGIN));
+  const y = Math.min(rawY, Math.max(MARGIN, viewportHeight - height - MARGIN));
+  return { x, y };
+}
+
+/** Contraint une position pour garder au moins `VISIBLE_MARGIN` px de l'en-tête
+ * visible à l'écran (utile après un redimensionnement de la fenêtre navigateur). */
+export function clampPosition(
+  x: number,
+  y: number,
+  width: number,
+  viewportWidth: number,
+  viewportHeight: number
+): { x: number; y: number } {
+  const minX = VISIBLE_MARGIN - width;
+  const maxX = viewportWidth - VISIBLE_MARGIN;
+  const clampedX = Math.min(Math.max(x, minX), maxX);
+  const clampedY = Math.min(Math.max(y, 0), Math.max(0, viewportHeight - VISIBLE_MARGIN));
+  return { x: clampedX, y: clampedY };
+}
+
+/** Contraint une taille entre les minimums et le viewport. */
+export function clampSize(
+  width: number,
+  height: number,
+  minWidth: number,
+  minHeight: number,
+  viewportWidth: number,
+  viewportHeight: number
+): { width: number; height: number } {
+  return {
+    width: Math.min(Math.max(width, minWidth), viewportWidth),
+    height: Math.min(Math.max(height, minHeight), viewportHeight),
+  };
+}
+
+export interface WindowManagerState {
+  windows: Record<string, EtatFenetre>;
+  /** Compteur global de z-index — incrémenté à chaque focus/ouverture/restore. */
+  nextZ: number;
+  /** Couleur de groupe -> dernier symbole diffusé aux fenêtres/composants de ce groupe. */
+  groupSymbols: Record<string, string>;
+
+  openWindow: (id: string) => void;
+  closeWindow: (id: string) => void;
+  toggleWindow: (id: string) => void;
+  focusWindow: (id: string) => void;
+  moveWindow: (id: string, x: number, y: number) => void;
+  resizeWindow: (id: string, width: number, height: number) => void;
+  minimizeWindow: (id: string) => void;
+  restoreWindow: (id: string) => void;
+  setGroup: (id: string, color: string | null) => void;
+  setGroupSymbol: (color: string, symbol: string) => void;
+  /** Restauration depuis la persistance (déjà validée par l'appelant). */
+  setAll: (windows: Record<string, EtatFenetre>) => void;
+}
+
+export const windowManagerStore = createStore<WindowManagerState>((set, get) => ({
+  windows: {},
+  nextZ: 1,
+  groupSymbols: {},
+
+  openWindow: (id) => {
+    const state = get();
+    const existing = state.windows[id];
+    const nextZ = state.nextZ;
+    if (existing) {
+      set({
+        windows: { ...state.windows, [id]: { ...existing, open: true, minimized: false, z: nextZ } },
+        nextZ: nextZ + 1,
+      });
+      return;
+    }
+    const entry = WINDOW_REGISTRY.find((w) => w.id === id);
+    const width = entry?.defaultWidth ?? 480;
+    const height = entry?.defaultHeight ?? 640;
+    const openCount = Object.values(state.windows).filter((w) => w.open).length;
+    const { x, y } = cascadePosition(openCount, window.innerWidth, window.innerHeight, width, height);
+    set({
+      windows: {
+        ...state.windows,
+        [id]: { id, open: true, x, y, width, height, z: nextZ, minimized: false, groupColor: null },
+      },
+      nextZ: nextZ + 1,
+    });
+  },
+
+  closeWindow: (id) => {
+    const existing = get().windows[id];
+    if (!existing) return;
+    set({ windows: { ...get().windows, [id]: { ...existing, open: false } } });
+  },
+
+  toggleWindow: (id) => {
+    const isOpen = get().windows[id]?.open ?? false;
+    if (isOpen) get().closeWindow(id);
+    else get().openWindow(id);
+  },
+
+  focusWindow: (id) => {
+    const existing = get().windows[id];
+    if (!existing) return;
+    const nextZ = get().nextZ;
+    set({ windows: { ...get().windows, [id]: { ...existing, z: nextZ } }, nextZ: nextZ + 1 });
+  },
+
+  moveWindow: (id, x, y) => {
+    const existing = get().windows[id];
+    if (!existing) return;
+    set({ windows: { ...get().windows, [id]: { ...existing, x, y } } });
+  },
+
+  resizeWindow: (id, width, height) => {
+    const existing = get().windows[id];
+    if (!existing) return;
+    set({ windows: { ...get().windows, [id]: { ...existing, width, height } } });
+  },
+
+  minimizeWindow: (id) => {
+    const existing = get().windows[id];
+    if (!existing) return;
+    set({ windows: { ...get().windows, [id]: { ...existing, minimized: true } } });
+  },
+
+  restoreWindow: (id) => {
+    const existing = get().windows[id];
+    if (!existing) return;
+    const nextZ = get().nextZ;
+    set({
+      windows: { ...get().windows, [id]: { ...existing, minimized: false, z: nextZ } },
+      nextZ: nextZ + 1,
+    });
+  },
+
+  setGroup: (id, color) => {
+    const existing = get().windows[id];
+    if (!existing) return;
+    set({ windows: { ...get().windows, [id]: { ...existing, groupColor: color } } });
+  },
+
+  setGroupSymbol: (color, symbol) => {
+    set({ groupSymbols: { ...get().groupSymbols, [color]: symbol } });
+  },
+
+  setAll: (windows) => set({ windows }),
+}));
+
+/**
+ * Synchronise le champ `open` d'un store `*UiStore` EXISTANT avec `windowManagerStore`
+ * (source de vérité). À appeler une fois au chargement du module du store concerné.
+ * Capte aussi bien les changements déclenchés par les commandes (`openEco()` etc.) que
+ * ceux déclenchés par le chrome `<FloatingWindow>` (croix, minimize, restore).
+ */
+export function mirrorOpenState(
+  id: string,
+  target: { getState: () => { open: boolean }; setState: (partial: { open: boolean }) => void }
+): void {
+  windowManagerStore.subscribe((state) => {
+    const isOpen = state.windows[id]?.open ?? false;
+    if (isOpen !== target.getState().open) {
+      target.setState({ open: isOpen });
+    }
+  });
+}

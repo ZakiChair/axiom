@@ -27,7 +27,8 @@ import type { Chart, KLineData, Point } from "klinecharts";
 import type { Candle, FootprintBar, FootprintRow, Trade, Unsubscribe } from "@axiom/types";
 import { fetchSymbolInfo } from "../data/binance";
 import { getAdapter } from "../data/adapters";
-import { marketStore } from "../store/market";
+import { adaptateurReplayActif } from "../data/replayFeed";
+import type { MarketStore } from "../store/market";
 
 /** Pane prix (id par défaut de KLineChart, vérifié dans le bundle v9.8.x). */
 const CANDLE_PANE_ID = "candle_pane";
@@ -219,6 +220,8 @@ export class OrderflowController {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly symbol: string;
+  /** Store marché du SLOT hôte (multi-chart) : le CVD/footprint lit CE buffer, pas le global. */
+  private readonly store: MarketStore;
 
   private running = false;
   private raf = 0;
@@ -250,7 +253,8 @@ export class OrderflowController {
     chart: Chart,
     container: HTMLElement,
     canvas: HTMLCanvasElement,
-    symbol: string
+    symbol: string,
+    store: MarketStore
   ) {
     this.chart = chart;
     this.container = container;
@@ -259,6 +263,7 @@ export class OrderflowController {
     if (!ctx) throw new Error("Contexte 2D du canvas footprint indisponible");
     this.ctx = ctx;
     this.symbol = symbol;
+    this.store = store;
   }
 
   // --- Cycle de vie -------------------------------------------------------
@@ -282,7 +287,7 @@ export class OrderflowController {
     this.resizeObserver.observe(this.container);
     // Si le backfill est déjà présent, on lance les trades tout de suite ;
     // sinon onCandles() (appelé après backfill) déclenchera ensureTrades().
-    if (marketStore.getState().candles.length > 0) this.ensureTrades();
+    if (this.store.getState().candles.length > 0) this.ensureTrades();
     this.loop();
   }
 
@@ -336,7 +341,7 @@ export class OrderflowController {
 
   private createCvdPane(): void {
     if (this.cvdPaneId) return;
-    const cvd = computeCvd(marketStore.getState().candles);
+    const cvd = computeCvd(this.store.getState().candles);
     const id = this.chart.createIndicator(
       { name: CVD_NAME, extendData: { cvd } },
       true,
@@ -353,7 +358,7 @@ export class OrderflowController {
 
   private refreshCvd(): void {
     if (!this.cvdPaneId) return;
-    const cvd = computeCvd(marketStore.getState().candles);
+    const cvd = computeCvd(this.store.getState().candles);
     this.chart.overrideIndicator(
       { name: CVD_NAME, extendData: { cvd } },
       this.cvdPaneId
@@ -369,8 +374,9 @@ export class OrderflowController {
       if (!this.running || this.unsubTrades) return;
       // Flux de trades de la source active (Binance/Kraken/Coinbase) : chaque
       // adaptateur fournit le côté agresseur normalisé (Coinbase est inversé en
-      // amont). Le footprint fonctionne donc sur les trois sources.
-      const adapter = getAdapter(marketStore.getState().exchange);
+      // amont). Le footprint fonctionne donc sur les trois sources. En REPLAY, on lit
+      // le moteur de rejeu (trades historiques) → footprint/CVD rejoués sans modification.
+      const adapter = adaptateurReplayActif() ?? getAdapter(this.store.getState().exchange);
       this.unsubTrades = adapter.subscribeTrades(this.symbol, (t) =>
         this.onTrade(t)
       );
@@ -384,7 +390,7 @@ export class OrderflowController {
       const meta = await fetchSymbolInfo(this.symbol);
       this.tickSize = meta.tickSize;
     } catch (err) {
-      const last = marketStore.getState().candles.at(-1);
+      const last = this.store.getState().candles.at(-1);
       this.tickSize = fallbackTick(last?.close ?? 0);
       console.warn("[AXIOM] tickSize indisponible, repli sur la magnitude", err);
     }
@@ -398,7 +404,7 @@ export class OrderflowController {
    * donc alignée au tickSize (cf. spec) tout en restant lisible/bornée en mémoire.
    */
   private recomputeBucket(): void {
-    const candles = marketStore.getState().candles;
+    const candles = this.store.getState().candles;
     const ranges: number[] = [];
     for (const c of candles) {
       const r = c.high - c.low;
@@ -417,7 +423,7 @@ export class OrderflowController {
 
   /** Accumulation O(1) d'un trade dans la bougie/niveau correspondants. */
   private onTrade(t: Trade): void {
-    const candles = marketStore.getState().candles;
+    const candles = this.store.getState().candles;
     const last = candles[candles.length - 1];
     if (last === undefined) return; // pas encore de bougie : on ignore (avant backfill)
 
@@ -522,7 +528,7 @@ export class OrderflowController {
     // Échelle prix->y. En mode LINÉAIRE ('normal') : une seule paire convertToPixel par
     // frame puis extrapolation (rapide). En mode NON LINÉAIRE (log/percentage) : cette
     // extrapolation est fausse -> on convertit CHAQUE niveau via convertToPixel (exact).
-    const ref = marketStore.getState().candles.at(-1);
+    const ref = this.store.getState().candles.at(-1);
     const refPrice = ref?.close ?? 0;
     let yOf: (price: number) => number;
     if (this.axisType === "normal") {

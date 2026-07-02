@@ -9,7 +9,7 @@ import { useEffect } from "react";
 import { useStore } from "zustand";
 import { Toolbar } from "./components/Toolbar";
 import { DrawingToolbar } from "./components/DrawingToolbar";
-import { Chart } from "./chart/Chart";
+import { ChartGrid } from "./chart/ChartGrid";
 import { Watchlist } from "./components/Watchlist";
 import { AlertsPanel } from "./components/AlertsPanel";
 import { CompareControl } from "./components/CompareControl";
@@ -35,6 +35,12 @@ import {
   commandes as termCommands,
 } from "./components/TermStructureWindow";
 import { OptionsWindow, optionsUiStore, commandes as optionsCommands } from "./components/OptionsWindow";
+// Fenêtres non modales de la Phase 4 (le multi-chart est déjà monté via ChartGrid) : dockées
+// à droite, montées en permanence (elles se cachent via translate-x quand fermées). Même
+// patron que les fenêtres de la Phase 3.
+import { DomWindow } from "./components/DomWindow";
+import { BacktestWindow } from "./components/BacktestWindow";
+import { ReplayWindow } from "./components/ReplayWindow";
 import { settingsUiStore } from "./store/settings-ui";
 import { derivativesUiStore } from "./store/derivatives-ui";
 import { ecoStore, ecoCommands } from "./store/eco";
@@ -45,9 +51,39 @@ import { portfolioUiStore, commandes as portfolioCommands } from "./store/portfo
 import { notesUiStore, commandes as notesCommands } from "./store/notes";
 import { screenerStore, commandesScreener } from "./store/screener";
 import { commandes as derivChartCommands } from "./store/derivatives-chart";
-import { enregistrerCommandes } from "./commands/registry";
+// Stores + commandes de palette des fenêtres de la Phase 4, et store de disposition grille.
+import { domUiStore, commandes as domCommands } from "./store/dom-ui";
+import { backtestStore, commandes as backtestCommands } from "./store/backtest";
+import { replayStore, commandes as replayCommands } from "./store/replay";
+import { chartLayoutStore, type ChartLayoutMode } from "./store/chart-layout";
+import { enregistrerCommandes, type Commande } from "./commands/registry";
 import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
 import { demarrerAlertes } from "./alerts/runtime";
+
+// ─────────────────────────── Commandes de disposition multi-chart (Phase 4) ───────────────────────────
+
+/**
+ * Commandes de palette pour la grille multi-chart. chart-layout n'exporte PAS ses propres
+ * commandes (à la différence des fenêtres DOM/BT/REPLAY) : on définit donc ici l'équivalent
+ * des mnémoniques GRID demandés. Elles pilotent le store vanilla `chartLayoutStore` (basse
+ * fréquence), lequel est déjà lu par la barre flottante de ChartGrid et le sélecteur Toolbar.
+ */
+const GRID_MODES: { mnemonique: string; mode: ChartLayoutMode; libelle: string; mots: string[] }[] = [
+  { mnemonique: "GRID1", mode: "1", libelle: "Disposition — 1 graphe", mots: ["un", "single", "solo"] },
+  { mnemonique: "GRID2", mode: "2h", libelle: "Disposition — 2 côte à côte", mots: ["deux", "horizontal", "cote"] },
+  { mnemonique: "GRID2V", mode: "2v", libelle: "Disposition — 2 empilés", mots: ["deux", "vertical", "empiles"] },
+  { mnemonique: "GRID4", mode: "2x2", libelle: "Disposition — 2×2 (4 graphes)", mots: ["quatre", "2x2", "grille"] },
+];
+
+const commandesGrille: Commande[] = GRID_MODES.map((g) => ({
+  id: `layout:${g.mode}`,
+  mnemonique: g.mnemonique,
+  libelle: g.libelle,
+  categorie: "action",
+  motsCles: ["disposition", "layout", "grille", "multi-chart", "chart", ...g.mots],
+  apercu: "Change la disposition de la grille de graphes",
+  action: () => chartLayoutStore.getState().setLayout(g.mode),
+}));
 
 // ─────────────────────────── Greffe des commandes de palette (Phase 3) ───────────────────────────
 
@@ -73,6 +109,11 @@ enregistrerCommandes([
   // Sous-panes OI/funding SUR le chart : le contrôleur (agent « deriv ») est DÉJÀ câblé
   // dans Chart.tsx ; ces bascules (OI / FUND) le rendent atteignable (sinon inerte).
   ...derivChartCommands,
+  // Fenêtres de la Phase 4 (DOM/TAPE, BT, REPLAY) + dispositions de la grille multi-chart.
+  ...domCommands,
+  ...backtestCommands,
+  ...replayCommands,
+  ...commandesGrille,
 ]);
 
 // ─────────────────────────── Exclusion mutuelle des panneaux dockés à droite ───────────────────────────
@@ -99,6 +140,10 @@ const PANNEAUX_DROITE: {
   { estOuvert: () => screenerStore.getState().open, fermer: () => screenerStore.getState().closeScreener(), sabonner: (cb) => screenerStore.subscribe(cb) },
   { estOuvert: () => termStructureUiStore.getState().open, fermer: () => termStructureUiStore.getState().closeTermStructure(), sabonner: (cb) => termStructureUiStore.subscribe(cb) },
   { estOuvert: () => optionsUiStore.getState().open, fermer: () => optionsUiStore.getState().closeOptions(), sabonner: (cb) => optionsUiStore.subscribe(cb) },
+  // Fenêtres de la Phase 4 (mêmes emplacement/z-index → soumises à l'exclusion mutuelle).
+  { estOuvert: () => domUiStore.getState().open, fermer: () => domUiStore.getState().closeDom(), sabonner: (cb) => domUiStore.subscribe(cb) },
+  { estOuvert: () => backtestStore.getState().open, fermer: () => backtestStore.getState().closeBacktest(), sabonner: (cb) => backtestStore.subscribe(cb) },
+  { estOuvert: () => replayStore.getState().open, fermer: () => replayStore.getState().closeReplay(), sabonner: (cb) => replayStore.subscribe(cb) },
 ];
 
 export function App() {
@@ -148,9 +193,9 @@ export function App() {
       <main className="flex min-h-0 flex-1">
         {/* Barre d'outils de dessin verticale, à gauche du graphe. */}
         {!plein && <DrawingToolbar />}
-        {/* min-w-0 : le graphe peut rétrécir face aux panneaux latéraux. */}
+        {/* min-w-0 : la grille de graphes peut rétrécir face aux panneaux latéraux. */}
         <div className="min-w-0 flex-1">
-          <Chart />
+          <ChartGrid />
         </div>
         {/* Colonne droite : en-tête (accès Réglages) + panneaux empilés, tous harmonisés
             via SidebarSection. Ordre : Watchlist, Alertes, Macro, Comparer, Santé. */}
@@ -203,6 +248,11 @@ export function App() {
       <ScreenerWindow />
       <TermStructureWindow />
       <OptionsWindow />
+      {/* Fenêtres non modales de la Phase 4 (carnet d'ordres, backtest, replay) : montées en
+          permanence, cachées via translate-x, soumises à la même exclusion mutuelle. */}
+      <DomWindow />
+      <BacktestWindow />
+      <ReplayWindow />
       <SettingsPanel />
       <CommandPalette />
     </div>

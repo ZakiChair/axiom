@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@axiom/alerts": "workspace:*",
+    "@axiom/backtest": "workspace:*",
     "@axiom/indicators": "workspace:*",
     "@axiom/types": "workspace:*",
     "klinecharts": "^9.8.10",

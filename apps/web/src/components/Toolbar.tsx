@@ -21,6 +21,11 @@ import { screenerStore } from "../store/screener";
 import { corrUiStore } from "./CorrWindow";
 import { termStructureUiStore } from "./TermStructureWindow";
 import { optionsUiStore } from "./OptionsWindow";
+// Stores UI des fenêtres de la Phase 4 (carnet d'ordres, backtest, replay) + disposition grille.
+import { domUiStore } from "../store/dom-ui";
+import { backtestStore } from "../store/backtest";
+import { replayStore } from "../store/replay";
+import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
 import { exporterSauvegarde, importerSauvegarde } from "../store/persist";
 import { enregistrerCommandes } from "../commands/registry";
@@ -141,6 +146,10 @@ const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] =
   { mnemonique: "EQS", libelle: "Screener d'actifs", ouvrir: () => screenerStore.getState().openScreener() },
   { mnemonique: "TERM", libelle: "Structure par terme", ouvrir: () => termStructureUiStore.getState().openTermStructure() },
   { mnemonique: "OMON", libelle: "Options (smile IV, max pain)", ouvrir: () => optionsUiStore.getState().openOptions() },
+  // Fenêtres de la Phase 4.
+  { mnemonique: "DOM", libelle: "Carnet d'ordres (DOM / depth)", ouvrir: () => domUiStore.getState().openDom() },
+  { mnemonique: "BT", libelle: "Backtest de stratégie", ouvrir: () => backtestStore.getState().openBacktest() },
+  { mnemonique: "REPLAY", libelle: "Replay de marché", ouvrir: () => replayStore.getState().openReplay() },
 ];
 
 /**
@@ -192,6 +201,44 @@ function FonctionsMenu() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** Modes de disposition de la grille multi-chart proposés dans la Toolbar (icônes compactes). */
+const LAYOUT_OPTIONS: { mode: ChartLayoutMode; label: string; title: string }[] = [
+  { mode: "1", label: "1", title: "Un seul graphe" },
+  { mode: "2h", label: "2h", title: "Deux côte à côte" },
+  { mode: "2v", label: "2v", title: "Deux empilés" },
+  { mode: "2x2", label: "4", title: "Grille 2×2" },
+];
+
+/**
+ * Sélecteur compact de disposition de la grille multi-chart (Phase 4). Pilote le MÊME store
+ * vanilla que la barre flottante de ChartGrid — les deux restent donc synchronisés. Basse
+ * fréquence (aucun re-render sur tick de marché).
+ */
+function LayoutSwitcher() {
+  const layout = useStore(chartLayoutStore, (s) => s.layout);
+  return (
+    <div className="flex items-center gap-1" role="group" aria-label="Disposition des graphes">
+      {LAYOUT_OPTIONS.map((o) => (
+        <button
+          key={o.mode}
+          type="button"
+          title={o.title}
+          aria-label={o.title}
+          aria-pressed={layout === o.mode}
+          onClick={() => chartLayoutStore.getState().setLayout(o.mode)}
+          className={`rounded px-2 py-1 font-mono text-xs ${
+            layout === o.mode
+              ? "bg-neutral-200 text-neutral-900"
+              : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -442,6 +489,9 @@ export function Toolbar() {
         <option value="log">Log</option>
         <option value="percentage">%</option>
       </select>
+
+      {/* Disposition de la grille multi-chart (1 / 2h / 2v / 4) — synchronisé avec ChartGrid. */}
+      <LayoutSwitcher />
 
       <div className="mx-1 h-5 w-px bg-neutral-800" />
 

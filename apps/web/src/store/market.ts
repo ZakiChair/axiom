@@ -7,6 +7,7 @@
  * graphe est mis à jour de façon impérative depuis Chart.tsx.
  */
 import { createStore } from "zustand/vanilla";
+import type { StoreApi } from "zustand/vanilla";
 import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
 
 /**
@@ -32,29 +33,58 @@ export interface MarketState {
   upsertCandle: (candle: Candle) => void;
 }
 
-export const marketStore = createStore<MarketState>((set, get) => ({
-  exchange: "binance",
-  symbol: "BTCUSDT",
-  timeframe: "1m",
-  candles: [],
+/** Type du store marché (une instance par slot de la grille multi-chart). */
+export type MarketStore = StoreApi<MarketState>;
 
-  setExchange: (exchange) => set({ exchange }),
-  setSymbol: (symbol) => set({ symbol: symbol.toUpperCase() }),
-  setTimeframe: (timeframe) => set({ timeframe }),
-  setCandles: (candles) => set({ candles }),
+/** Configuration initiale optionnelle d'une instance (slot secondaire de la grille). */
+export interface MarketStoreInit {
+  exchange?: ExchangeId;
+  symbol?: string;
+  timeframe?: Timeframe;
+}
 
-  upsertCandle: (candle) => {
-    const candles = get().candles;
-    const last = candles[candles.length - 1];
-    if (last && last.time === candle.time) {
-      // Bougie en cours : on remplace la dernière.
-      const next = candles.slice();
-      next[next.length - 1] = candle;
-      set({ candles: next });
-    } else if (!last || candle.time > last.time) {
-      // Nouvelle bougie : on l'ajoute en fin de buffer, borné à MAX_CANDLES.
-      const next = [...candles, candle];
-      set({ candles: next.length > MAX_CANDLES ? next.slice(next.length - MAX_CANDLES) : next });
-    }
-  },
-}));
+/**
+ * Fabrique un store marché INDÉPENDANT (buffer + symbole/TF/source propres).
+ *
+ * Multi-chart (Phase 4) : chaque slot de la grille possède SA propre instance —
+ * son buffer de bougies, son symbole, son timeframe et sa source sont isolés des
+ * autres slots. Le slot MAÎTRE (slot 0) réutilise l'instance globale `marketStore`
+ * exportée ci-dessous (rétro-compatibilité : toolbar, palette, alertes, persistance…
+ * la pilotent inchangée) ; les slots secondaires créent la leur via cette fabrique.
+ */
+export function createMarketStore(init: MarketStoreInit = {}): MarketStore {
+  return createStore<MarketState>((set, get) => ({
+    exchange: init.exchange ?? "binance",
+    symbol: (init.symbol ?? "BTCUSDT").toUpperCase(),
+    timeframe: init.timeframe ?? "1m",
+    candles: [],
+
+    setExchange: (exchange) => set({ exchange }),
+    setSymbol: (symbol) => set({ symbol: symbol.toUpperCase() }),
+    setTimeframe: (timeframe) => set({ timeframe }),
+    setCandles: (candles) => set({ candles }),
+
+    upsertCandle: (candle) => {
+      const candles = get().candles;
+      const last = candles[candles.length - 1];
+      if (last && last.time === candle.time) {
+        // Bougie en cours : on remplace la dernière.
+        const next = candles.slice();
+        next[next.length - 1] = candle;
+        set({ candles: next });
+      } else if (!last || candle.time > last.time) {
+        // Nouvelle bougie : on l'ajoute en fin de buffer, borné à MAX_CANDLES.
+        const next = [...candles, candle];
+        set({ candles: next.length > MAX_CANDLES ? next.slice(next.length - MAX_CANDLES) : next });
+      }
+    },
+  }));
+}
+
+/**
+ * Instance GLOBALE = slot MAÎTRE (slot 0) de la grille multi-chart. Reste l'unique
+ * store lu/écrit par toute l'app existante (toolbar, palette, watchlist, alertes,
+ * persistance, dérivés, orderflow…) : la Phase 4 n'y touche pas — elle ajoute
+ * seulement des instances secondaires via `createMarketStore`.
+ */
+export const marketStore: MarketStore = createMarketStore();

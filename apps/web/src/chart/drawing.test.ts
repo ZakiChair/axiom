@@ -1,13 +1,22 @@
 /**
- * Tests du garde `suppressPersist` (drawing.ts) — protège les dessins persistés
- * d'un écrasement par le `onRemoved` de teardown que klinecharts déclenche sur
- * CHAQUE overlay au `dispose()` de l'ancienne instance (changement symbole/TF).
- * Mock minimal de KLineChartInstance : seuls createOverlay/onDrawEnd/onRemoved
+ * Tests du registre de dessin multi-chart (drawing.ts) :
+ *  - garde `suppressPersist` : le `onRemoved` de teardown que klinecharts déclenche
+ *    sur CHAQUE overlay au `dispose()` ne doit pas écraser les dessins persistés ;
+ *  - migration douce de la clé « symbole » → « exchange:symbole » ;
+ *  - ISOLATION multi-chart : deux instances liées ont des dessins/persistances propres,
+ *    et les outils s'appliquent à l'instance FOCUS (setFocusChart).
+ * Mock minimal de KLineChartInstance : seuls createOverlay/onDrawEnd/onRemoved/removeOverlay
  * sont exercés par drawing.ts, pas besoin du vrai klinecharts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Chart as KLineChartInstance } from "klinecharts";
-import { bindChart, restoreDrawings, selectTool, unbindChart } from "./drawing";
+import {
+  bindChart,
+  restoreDrawings,
+  selectTool,
+  setFocusChart,
+  unbindChart,
+} from "./drawing";
 
 // fibonacci.ts (importé par drawing.ts) appelle `registerOverlay` au chargement du
 // module ; le build UMD de klinecharts ne s'évalue pas correctement hors navigateur
@@ -17,8 +26,8 @@ import { bindChart, restoreDrawings, selectTool, unbindChart } from "./drawing";
 vi.mock("klinecharts", () => ({ registerOverlay: () => {} }));
 
 const DRAWINGS_KEY = "axiom:drawings:v1";
-const SYMBOL = "BTCUSDT"; // symbole par défaut de marketStore (store/market.ts)
-// Clé composite « exchange:symbole » (source par défaut = binance ; cf. store/market.ts).
+const SYMBOL = "BTCUSDT";
+const EXCHANGE = "binance";
 const COMPOSITE_KEY = "binance:BTCUSDT";
 
 type OverlayCallback = (event: { overlay: { id: string; points: unknown[] } }) => unknown;
@@ -44,10 +53,11 @@ function installMockLocalStorage(): Storage {
 function createMockChart() {
   let counter = 0;
   const callbacks = new Map<string, Record<string, OverlayCallback>>();
+  let idPrefix = "";
 
   const chart = {
     createOverlay(opts: Record<string, unknown>) {
-      const id = `ov-${counter++}`;
+      const id = `${idPrefix}ov-${counter++}`;
       callbacks.set(id, opts as unknown as Record<string, OverlayCallback>);
       return id;
     },
@@ -57,20 +67,22 @@ function createMockChart() {
 
   return {
     chart,
-    /** Simule la fin d'un tracé interactif (l'utilisateur termine son dessin). */
+    /** Préfixe les ids d'overlay (distingue les instances dans les tests multi-chart). */
+    setIdPrefix(p: string) {
+      idPrefix = p;
+    },
     finishDraw(id: string, points: Array<{ timestamp?: number; value?: number }>) {
       callbacks.get(id)?.onDrawEnd?.({ overlay: { id, points } });
     },
-    /** Simule le `onRemoved` que klinecharts déclenche sur CET overlay au dispose(). */
     teardown(id: string, points: Array<{ timestamp?: number; value?: number }>) {
       callbacks.get(id)?.onRemoved?.({ overlay: { id, points } });
     },
   };
 }
 
-function readStoredCount(localStorage: Storage): number {
+function readStoredCount(localStorage: Storage, key = COMPOSITE_KEY): number {
   const all = JSON.parse(localStorage.getItem(DRAWINGS_KEY) ?? "{}") as Record<string, unknown[]>;
-  return all[COMPOSITE_KEY]?.length ?? 0;
+  return all[key]?.length ?? 0;
 }
 
 describe("drawing.ts — suppressPersist", () => {
@@ -86,8 +98,9 @@ describe("drawing.ts — suppressPersist", () => {
 
   it("persiste un dessin tracé normalement", () => {
     const a = createMockChart();
-    bindChart(a.chart);
-    restoreDrawings(SYMBOL); // réinitialise liveOverlays (storage vide ici)
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    setFocusChart(0);
+    restoreDrawings(a.chart, EXCHANGE, SYMBOL);
 
     selectTool("trendLine");
     a.finishDraw("ov-0", [
@@ -96,12 +109,14 @@ describe("drawing.ts — suppressPersist", () => {
     ]);
 
     expect(readStoredCount(localStorage)).toBe(1);
+    unbindChart(a.chart);
   });
 
   it("un onRemoved de teardown déclenché APRÈS unbindChart ne doit PAS écraser les dessins persistés", () => {
     const a = createMockChart();
-    bindChart(a.chart);
-    restoreDrawings(SYMBOL);
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    setFocusChart(0);
+    restoreDrawings(a.chart, EXCHANGE, SYMBOL);
 
     selectTool("trendLine");
     a.finishDraw("ov-0", [
@@ -110,7 +125,7 @@ describe("drawing.ts — suppressPersist", () => {
     ]);
     expect(readStoredCount(localStorage)).toBe(1);
 
-    // Changement de symbole/TF : Chart.tsx appelle unbindChart() PUIS dispose() sur
+    // Changement de symbole/TF : ChartInstance appelle unbindChart() PUIS dispose() sur
     // l'ANCIENNE instance, ce qui déclenche onRemoved pour chacun de ses overlays.
     unbindChart(a.chart);
     a.teardown("ov-0", [
@@ -121,10 +136,11 @@ describe("drawing.ts — suppressPersist", () => {
     expect(readStoredCount(localStorage)).toBe(1); // PAS écrasé à vide par le teardown
   });
 
-  it("sans le garde (onRemoved AVANT unbindChart), le teardown écraserait bien le stockage à vide — justifie suppressPersist", () => {
+  it("sans le garde (onRemoved AVANT unbindChart), le teardown écraserait bien le stockage à vide", () => {
     const a = createMockChart();
-    bindChart(a.chart);
-    restoreDrawings(SYMBOL);
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    setFocusChart(0);
+    restoreDrawings(a.chart, EXCHANGE, SYMBOL);
 
     selectTool("trendLine");
     a.finishDraw("ov-0", [{ timestamp: 1, value: 100 }]);
@@ -135,32 +151,84 @@ describe("drawing.ts — suppressPersist", () => {
     a.teardown("ov-0", [{ timestamp: 1, value: 100 }]);
 
     expect(readStoredCount(localStorage)).toBe(0);
+    unbindChart(a.chart);
   });
 
   it("bindChart d'une nouvelle instance réactive la persistance (nouvelle session de dessin)", () => {
     const a = createMockChart();
-    bindChart(a.chart);
-    restoreDrawings(SYMBOL);
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    setFocusChart(0);
+    restoreDrawings(a.chart, EXCHANGE, SYMBOL);
     selectTool("trendLine");
     a.finishDraw("ov-0", [{ timestamp: 1, value: 100 }]);
     unbindChart(a.chart);
     a.teardown("ov-0", [{ timestamp: 1, value: 100 }]);
-    expect(readStoredCount(localStorage)).toBe(1); // protégé par le garde (cf. test 2)
+    expect(readStoredCount(localStorage)).toBe(1); // protégé par le garde
 
-    // Nouvelle instance (recréée par Chart.tsx) : bindChart relève le garde et
-    // restoreDrawings rejoue le dessin existant sur la nouvelle instance.
+    // Nouvelle instance (recréée par ChartInstance) : bindChart + restoreDrawings
+    // rejoue le dessin existant sur la nouvelle instance.
     const b = createMockChart();
-    bindChart(b.chart);
-    restoreDrawings(SYMBOL);
+    b.setIdPrefix("b-");
+    bindChart(b.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    setFocusChart(0);
+    restoreDrawings(b.chart, EXCHANGE, SYMBOL);
 
     selectTool("rect");
-    b.finishDraw("ov-1", [
+    // restoreDrawings a déjà consommé "b-ov-0" (trendLine rejoué) → le rect neuf est "b-ov-1".
+    b.finishDraw("b-ov-1", [
       { timestamp: 5, value: 50 },
       { timestamp: 6, value: 60 },
     ]);
 
-    // Le trendLine rejoué + le nouveau rect tracé : la persistance fonctionne à nouveau.
-    expect(readStoredCount(localStorage)).toBe(2);
+    expect(readStoredCount(localStorage)).toBe(2); // trendLine rejoué + rect neuf
+    unbindChart(b.chart);
+  });
+});
+
+describe("drawing.ts — isolation multi-chart (focus)", () => {
+  let localStorage: Storage;
+
+  beforeEach(() => {
+    localStorage = installMockLocalStorage();
+  });
+
+  afterEach(() => {
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
+  it("les outils s'appliquent à l'instance FOCUS ; chaque slot persiste sous son propre symbole", () => {
+    const a = createMockChart(); // slot 0 = BTCUSDT
+    a.setIdPrefix("a-");
+    const b = createMockChart(); // slot 1 = ETHUSDT
+    b.setIdPrefix("b-");
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: "BTCUSDT" }, 0);
+    bindChart(b.chart, { exchange: EXCHANGE, symbol: "ETHUSDT" }, 1);
+    restoreDrawings(a.chart, EXCHANGE, "BTCUSDT");
+    restoreDrawings(b.chart, EXCHANGE, "ETHUSDT");
+
+    // Focus sur le slot 1 → l'outil trace sur l'instance b (ETHUSDT).
+    setFocusChart(1);
+    selectTool("trendLine");
+    b.finishDraw("b-ov-0", [
+      { timestamp: 1, value: 100 },
+      { timestamp: 2, value: 110 },
+    ]);
+
+    expect(readStoredCount(localStorage, "binance:ETHUSDT")).toBe(1);
+    expect(readStoredCount(localStorage, "binance:BTCUSDT")).toBe(0); // slot maître intact
+
+    // Bascule le focus sur le slot 0 → l'outil trace sur l'instance a (BTCUSDT).
+    setFocusChart(0);
+    selectTool("rect");
+    a.finishDraw("a-ov-0", [
+      { timestamp: 3, value: 30 },
+      { timestamp: 4, value: 40 },
+    ]);
+    expect(readStoredCount(localStorage, "binance:BTCUSDT")).toBe(1);
+    expect(readStoredCount(localStorage, "binance:ETHUSDT")).toBe(1); // inchangé
+
+    unbindChart(a.chart);
+    unbindChart(b.chart);
   });
 });
 
@@ -176,7 +244,6 @@ describe("drawing.ts — migration douce de la clé « symbole » → « exchang
   });
 
   it("reprend les dessins de l'ancienne clé plate vers « binance:symbole » (une seule fois) puis retire l'héritage", () => {
-    // Pré-remplit le stockage à l'ANCIEN schéma (indexé par symbole seul).
     localStorage.setItem(
       DRAWINGS_KEY,
       JSON.stringify({
@@ -187,17 +254,16 @@ describe("drawing.ts — migration douce de la clé « symbole » → « exchang
     );
 
     const a = createMockChart();
-    bindChart(a.chart);
-    restoreDrawings(SYMBOL); // déclenche la migration + rejoue le dessin sur l'instance
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    restoreDrawings(a.chart, EXCHANGE, SYMBOL); // déclenche la migration + rejoue le dessin
 
     const all = JSON.parse(localStorage.getItem(DRAWINGS_KEY) ?? "{}") as Record<string, unknown[]>;
     expect(all[COMPOSITE_KEY]?.length).toBe(1); // repris sous la clé composite
     expect(all[SYMBOL]).toBeUndefined(); // ancienne clé plate retirée
+    unbindChart(a.chart);
   });
 
   it("ne migre PAS quand la source courante n'est pas Binance (l'héritage reste intact)", () => {
-    // marketStore reste sur binance par défaut : on simule ici l'absence de migration en
-    // vérifiant qu'une clé plate d'un AUTRE symbole (jamais restauré sous binance) survit.
     localStorage.setItem(
       DRAWINGS_KEY,
       JSON.stringify({
@@ -206,10 +272,11 @@ describe("drawing.ts — migration douce de la clé « symbole » → « exchang
     );
 
     const a = createMockChart();
-    bindChart(a.chart);
-    restoreDrawings(SYMBOL); // restaure BTCUSDT (aucune migration de ETHUSDT)
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    restoreDrawings(a.chart, EXCHANGE, SYMBOL); // restaure BTCUSDT (aucune migration de ETHUSDT)
 
     const all = JSON.parse(localStorage.getItem(DRAWINGS_KEY) ?? "{}") as Record<string, unknown[]>;
     expect(all["ETHUSDT"]?.length).toBe(1); // héritage d'un autre symbole non touché
+    unbindChart(a.chart);
   });
 });

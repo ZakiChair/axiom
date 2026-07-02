@@ -24,6 +24,7 @@ import { entetesCors, reponsePreflight } from "./cors";
 import { chargerCles } from "./env";
 import { enregistrerKv } from "./kv";
 import { enregistrerProxy } from "./proxy";
+import { enregistrerReplay } from "./replay";
 import { Routeur } from "./router";
 import { distExiste, servirStatique } from "./static";
 
@@ -70,6 +71,9 @@ enregistrerCandles(routeur);
 
 // Alertes onglet fermé (Phase 2.E3) : routes GET /alerts/journal + POST /heartbeat.
 enregistrerAlertes(routeur);
+
+// Replay de marché (Phase 4.4) : téléchargement à la demande des dumps aggTrades.
+enregistrerReplay(routeur);
 
 // --- Gestionnaire principal ------------------------------------------------
 async function gestionnaire(req: Request): Promise<Response> {

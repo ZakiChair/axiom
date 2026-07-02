@@ -9,7 +9,7 @@
  * position FINALE (pointerup) déclenche un `set()` Zustand — les déplacements
  * intermédiaires manipulent `style.left/top/width/height` directement.
  */
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useStore } from "zustand";
 import {
   windowManagerStore,
@@ -18,7 +18,6 @@ import {
   MIN_WIDTH,
   MIN_HEIGHT,
   GROUP_PALETTE,
-  type EtatFenetre,
 } from "../store/windowManager";
 
 export interface FloatingWindowProps {
@@ -55,19 +54,21 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
     e.preventDefault();
     focus();
     const depart = { x: e.clientX, y: e.clientY, wx: etat.x, wy: etat.y };
+    let dernierePosition = { x: depart.wx, y: depart.wy };
     const onMove = (ev: PointerEvent): void => {
       const dx = ev.clientX - depart.x;
       const dy = ev.clientY - depart.y;
       const { x, y } = clampPosition(depart.wx + dx, depart.wy + dy, etat.width, window.innerWidth, window.innerHeight);
+      dernierePosition = { x, y };
       if (rootRef.current) {
         rootRef.current.style.left = `${x}px`;
         rootRef.current.style.top = `${y}px`;
       }
-      windowManagerStore.getState().moveWindow(id, x, y);
     };
     const onUp = (): void => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      windowManagerStore.getState().moveWindow(id, dernierePosition.x, dernierePosition.y);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -78,6 +79,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
     e.stopPropagation();
     focus();
     const depart = { x: e.clientX, y: e.clientY, w: etat.width, h: etat.height, wx: etat.x, wy: etat.y };
+    let dernierEtat = { width: depart.w, height: depart.h, x: depart.wx, y: depart.wy };
     const onMove = (ev: PointerEvent): void => {
       const dx = ev.clientX - depart.x;
       const dy = ev.clientY - depart.y;
@@ -93,18 +95,19 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
       );
       const x = poignee.dx ? depart.wx + (depart.w - width) : depart.wx;
       const y = poignee.dy ? depart.wy + (depart.h - height) : depart.wy;
+      dernierEtat = { width, height, x, y };
       if (rootRef.current) {
         rootRef.current.style.width = `${width}px`;
         rootRef.current.style.height = `${height}px`;
         rootRef.current.style.left = `${x}px`;
         rootRef.current.style.top = `${y}px`;
       }
-      windowManagerStore.getState().resizeWindow(id, width, height);
-      if (poignee.dx || poignee.dy) windowManagerStore.getState().moveWindow(id, x, y);
     };
     const onUp = (): void => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      windowManagerStore.getState().resizeWindow(id, dernierEtat.width, dernierEtat.height);
+      if (poignee.dx || poignee.dy) windowManagerStore.getState().moveWindow(id, dernierEtat.x, dernierEtat.y);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);

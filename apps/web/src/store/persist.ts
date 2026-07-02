@@ -71,7 +71,7 @@ const AXIOM_PREFIX = "axiom:";
 /** Namespace KV du daemon où sont miroitées les clés gérées ici. */
 const NS_PERSIST = "persist";
 /** Clés localStorage doublées vers le daemon (les 3 gérées par ce module). */
-const MANAGED_KEYS: readonly string[] = [CHART_KEY, WATCH_KEY, SESSION_KEY];
+const MANAGED_KEYS: readonly string[] = [CHART_KEY, WATCH_KEY, SESSION_KEY, WINDOW_MANAGER_KEY];
 /** Horodatages locaux (ms) par clé gérée — arbitre la réconciliation. NON miroité. */
 const META_KEY = "axiom:persistMeta:v1";
 /** Fenêtre de coalescence des kvPut par clé (ms). */
@@ -489,6 +489,7 @@ const HYDRATE_PAR_CLE: Record<string, () => void> = {
   [CHART_KEY]: hydrateChart,
   [WATCH_KEY]: hydrateWatchlist,
   [SESSION_KEY]: hydrateSession,
+  [WINDOW_MANAGER_KEY]: hydrateWindowManager,
 };
 
 /** Décision de réconciliation pour une clé (adopter le daemon, ou lui pousser le local). */

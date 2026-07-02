@@ -17,6 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import type { FundingRate, Liquidation, LongShortRatio, OpenInterest } from "@axiom/types";
 import { marketStore } from "../store/market";
+import { windowManagerStore } from "../store/windowManager";
 import { coinalyzeKeyStore } from "../store/coinalyze";
 import { settingsUiStore } from "../store/settings-ui";
 import { derivativesUiStore } from "../store/derivatives-ui";
@@ -216,7 +217,10 @@ export function DerivativesWindow() {
   const open = useStore(derivativesUiStore, (s) => s.open);
   const closeDerivatives = useStore(derivativesUiStore, (s) => s.closeDerivatives);
   const exchange = useStore(marketStore, (s) => s.exchange);
-  const symbol = useStore(marketStore, (s) => s.symbol);
+  const symbolGlobal = useStore(marketStore, (s) => s.symbol);
+  const groupColor = useStore(windowManagerStore, (s) => s.windows["derivatives"]?.groupColor ?? null);
+  const symbolGroupe = useStore(windowManagerStore, (s) => (groupColor ? s.groupSymbols[groupColor] : undefined));
+  const symbol = symbolGroupe ?? symbolGlobal;
   const hasKey = useStore(coinalyzeKeyStore, (s) => s.hasKey);
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
 

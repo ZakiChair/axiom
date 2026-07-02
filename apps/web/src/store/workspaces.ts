@@ -30,6 +30,7 @@ import { macroOverlayStore, MACRO_OVERLAYS, type MacroOverlayId } from "./macro-
 import { uiSectionsStore } from "./ui-sections";
 import { themeStore, THEMES, type ThemeId } from "./theme";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
+import { windowManagerStore, type EtatFenetre } from "./windowManager";
 
 const STORAGE_KEY = "axiom:workspaces:v1";
 /** Identifiant réservé du workspace « Défaut » (indestructible, auto-mis à jour). */
@@ -57,6 +58,9 @@ export interface WorkspaceContent {
   /** État replié des sections (clé = titre). */
   sections: Record<string, boolean>;
   priceScale: PriceScaleType;
+  /** Géométrie des fenêtres flottantes (position/taille/groupe) — toujours appliquée
+   * FERMÉE (cohérent avec `hydrateWindowManager`, cf. persist.ts). */
+  windowGeometry: Record<string, EtatFenetre>;
 }
 
 /** Un workspace nommé. */
@@ -86,6 +90,7 @@ function snapshot(): WorkspaceContent {
     theme: themeStore.getState().theme,
     sections: { ...uiSectionsStore.getState().open },
     priceScale: priceScaleStore.getState().type,
+    windowGeometry: windowManagerStore.getState().windows,
   };
 }
 
@@ -105,6 +110,7 @@ function applyContent(c: WorkspaceContent): void {
   themeStore.getState().setTheme(c.theme);
   uiSectionsStore.getState().setAll(c.sections);
   priceScaleStore.getState().setType(c.priceScale);
+  windowManagerStore.getState().setAll(c.windowGeometry);
 }
 
 /** Rafraîchit le contenu du workspace « Défaut » avec l'agencement courant. */
@@ -120,6 +126,42 @@ function isNonEmptyString(v: unknown): v is string {
 }
 function isBool(v: unknown): v is boolean {
   return typeof v === "boolean";
+}
+
+/**
+ * Valide une géométrie de fenêtres persistée (même esprit que `validateEtatFenetre` de
+ * persist.ts) : entrées corrompues écartées, `open`/`minimized` toujours réinitialisés à
+ * `false` (une fenêtre restaurée via un workspace ne doit jamais surgir à l'écran — cf.
+ * doc de `WorkspaceContent.windowGeometry`).
+ */
+function validateWindowGeometry(raw: unknown): Record<string, EtatFenetre> {
+  const windows: Record<string, EtatFenetre> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return windows;
+  for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!v || typeof v !== "object") continue;
+    const r = v as Partial<EtatFenetre>;
+    if (
+      typeof r.x !== "number" ||
+      typeof r.y !== "number" ||
+      typeof r.width !== "number" ||
+      typeof r.height !== "number" ||
+      typeof r.z !== "number"
+    ) {
+      continue;
+    }
+    windows[id] = {
+      id,
+      open: false,
+      x: r.x,
+      y: r.y,
+      width: r.width,
+      height: r.height,
+      z: r.z,
+      minimized: false,
+      groupColor: typeof r.groupColor === "string" ? r.groupColor : null,
+    };
+  }
+  return windows;
 }
 
 /**
@@ -161,6 +203,7 @@ function validateContent(raw: unknown): WorkspaceContent {
       typeof o.priceScale === "string" && (PRICE_SCALES as string[]).includes(o.priceScale)
         ? (o.priceScale as PriceScaleType)
         : "normal",
+    windowGeometry: validateWindowGeometry(o.windowGeometry),
   };
 }
 

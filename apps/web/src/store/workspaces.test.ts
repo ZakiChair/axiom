@@ -72,6 +72,7 @@ function contenuVierge(): WorkspaceContent {
     theme: "dark",
     sections: {},
     priceScale: "normal",
+    windowGeometry: {},
   };
 }
 

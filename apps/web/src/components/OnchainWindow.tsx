@@ -281,7 +281,7 @@ export function OnchainWindow() {
             Coin Metrics · BGeometrics · mempool.space {loading ? "· maj…" : ""}
           </p>
         </div>
-        {/* close button removed — FloatingWindow chrome provides one */}
+        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
       </header>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">

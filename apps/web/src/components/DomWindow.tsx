@@ -486,7 +486,7 @@ export function DomWindow() {
             {isBinance ? `${symbol} · Binance` : "Binance uniquement"}
           </p>
         </div>
-        {/* close button removed — FloatingWindow chrome provides one */}
+        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
       </header>
 
       {/* Onglets */}

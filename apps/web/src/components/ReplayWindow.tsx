@@ -55,7 +55,7 @@ export function ReplayWindow() {
             Dumps aggTrades officiels (data.binance.vision) · Binance spot
           </p>
         </div>
-        {/* close button removed — FloatingWindow chrome provides one */}
+        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
       </header>
 
       <div className="flex-1 overflow-y-auto">

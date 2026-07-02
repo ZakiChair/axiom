@@ -136,7 +136,7 @@ export function NotesWindow() {
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Notes / journal</h2>
           <p className="mt-0.5 text-[11px] text-text-dim">Annotations ancrées au marché</p>
         </div>
-        {/* close button removed — FloatingWindow chrome provides one */}
+        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
       </header>
 
       {/* Création rapide */}

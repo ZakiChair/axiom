@@ -402,7 +402,7 @@ export function MarketMapWindow() {
             {overview && <span className="text-text-dim">{loading ? "maj…" : formatAge(overview.fetchedAt)}</span>}
           </div>
         </div>
-        {/* close button removed — FloatingWindow chrome provides one */}
+        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
       </header>
 
       {/* Onglets */}

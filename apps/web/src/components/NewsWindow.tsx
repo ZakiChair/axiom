@@ -153,7 +153,7 @@ export function NewsWindow() {
                 } · maj ${tempsRelatif(derniereMaj, maintenant)}`}
           </p>
         </div>
-        {/* close button removed — FloatingWindow chrome provides one */}
+        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
       </header>
 
       <div className="flex items-center gap-2 border-b border-border px-3 py-2 font-mono">

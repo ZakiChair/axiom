@@ -1,0 +1,197 @@
+/**
+ * Chrome générique d'une fenêtre flottante (Launchpad) — enveloppe le contenu de
+ * chacune des 14 fenêtres Bloomberg (ECO, NEWS, CORR…). Gère position/taille/z-order/
+ * minimize/fermeture/groupe de couleur via `windowManagerStore` (source de vérité
+ * unique). Le contenu métier de chaque fenêtre reste inchangé (monté en enfant).
+ *
+ * Drag/resize en pointer events maison (aucune nouvelle dépendance). Écritures
+ * DOM impératives pendant le drag/resize (pas de state React à 60fps) : seule la
+ * position FINALE (pointerup) déclenche un `set()` Zustand — les déplacements
+ * intermédiaires manipulent `style.left/top/width/height` directement.
+ */
+import { useEffect, useRef, useState } from "react";
+import { useStore } from "zustand";
+import {
+  windowManagerStore,
+  clampPosition,
+  clampSize,
+  MIN_WIDTH,
+  MIN_HEIGHT,
+  GROUP_PALETTE,
+  type EtatFenetre,
+} from "../store/windowManager";
+
+export interface FloatingWindowProps {
+  id: string;
+  title: string;
+  mnemonic: string;
+  children: React.ReactNode;
+}
+
+type PoigneeResize = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+
+const POIGNEES: { id: PoigneeResize; className: string; dw: number; dh: number; dx: number; dy: number }[] = [
+  { id: "e", className: "right-0 top-2 bottom-2 w-1.5 cursor-ew-resize", dw: 1, dh: 0, dx: 0, dy: 0 },
+  { id: "w", className: "left-0 top-2 bottom-2 w-1.5 cursor-ew-resize", dw: -1, dh: 0, dx: 1, dy: 0 },
+  { id: "s", className: "bottom-0 left-2 right-2 h-1.5 cursor-ns-resize", dw: 0, dh: 1, dx: 0, dy: 0 },
+  { id: "n", className: "top-0 left-2 right-2 h-1.5 cursor-ns-resize", dw: 0, dh: -1, dx: 0, dy: 1 },
+  { id: "se", className: "right-0 bottom-0 h-3 w-3 cursor-nwse-resize", dw: 1, dh: 1, dx: 0, dy: 0 },
+  { id: "sw", className: "left-0 bottom-0 h-3 w-3 cursor-nesw-resize", dw: -1, dh: 1, dx: 1, dy: 0 },
+  { id: "ne", className: "right-0 top-0 h-3 w-3 cursor-nesw-resize", dw: 1, dh: -1, dx: 0, dy: 1 },
+  { id: "nw", className: "left-0 top-0 h-3 w-3 cursor-nwse-resize", dw: -1, dh: -1, dx: 1, dy: 1 },
+];
+
+export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindowProps) {
+  const etat = useStore(windowManagerStore, (s) => s.windows[id]);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [menuGroupeOuvert, setMenuGroupeOuvert] = useState(false);
+
+  if (!etat || !etat.open || etat.minimized) return null;
+
+  const focus = (): void => windowManagerStore.getState().focusWindow(id);
+
+  const demarrerDrag = (e: React.PointerEvent): void => {
+    if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
+    e.preventDefault();
+    focus();
+    const depart = { x: e.clientX, y: e.clientY, wx: etat.x, wy: etat.y };
+    const onMove = (ev: PointerEvent): void => {
+      const dx = ev.clientX - depart.x;
+      const dy = ev.clientY - depart.y;
+      const { x, y } = clampPosition(depart.wx + dx, depart.wy + dy, etat.width, window.innerWidth, window.innerHeight);
+      if (rootRef.current) {
+        rootRef.current.style.left = `${x}px`;
+        rootRef.current.style.top = `${y}px`;
+      }
+      windowManagerStore.getState().moveWindow(id, x, y);
+    };
+    const onUp = (): void => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  const demarrerResize = (poignee: (typeof POIGNEES)[number]): ((e: React.PointerEvent) => void) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    focus();
+    const depart = { x: e.clientX, y: e.clientY, w: etat.width, h: etat.height, wx: etat.x, wy: etat.y };
+    const onMove = (ev: PointerEvent): void => {
+      const dx = ev.clientX - depart.x;
+      const dy = ev.clientY - depart.y;
+      const largeurBrute = depart.w + poignee.dw * dx;
+      const hauteurBrute = depart.h + poignee.dh * dy;
+      const { width, height } = clampSize(
+        largeurBrute,
+        hauteurBrute,
+        MIN_WIDTH,
+        MIN_HEIGHT,
+        window.innerWidth,
+        window.innerHeight
+      );
+      const x = poignee.dx ? depart.wx + (depart.w - width) : depart.wx;
+      const y = poignee.dy ? depart.wy + (depart.h - height) : depart.wy;
+      if (rootRef.current) {
+        rootRef.current.style.width = `${width}px`;
+        rootRef.current.style.height = `${height}px`;
+        rootRef.current.style.left = `${x}px`;
+        rootRef.current.style.top = `${y}px`;
+      }
+      windowManagerStore.getState().resizeWindow(id, width, height);
+      if (poignee.dx || poignee.dy) windowManagerStore.getState().moveWindow(id, x, y);
+    };
+    const onUp = (): void => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
+
+  return (
+    <div
+      ref={rootRef}
+      role="complementary"
+      aria-label={title}
+      onPointerDownCapture={focus}
+      style={{
+        position: "fixed",
+        left: etat.x,
+        top: etat.y,
+        width: etat.width,
+        height: etat.height,
+        zIndex: etat.z,
+      }}
+      className="flex flex-col rounded border border-border bg-surface shadow-2xl"
+    >
+      <header
+        onPointerDown={demarrerDrag}
+        className="flex shrink-0 cursor-move items-center justify-between gap-2 rounded-t border-b border-border bg-bg px-2 py-1.5"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="w-14 shrink-0 text-[10px] font-semibold uppercase tracking-wider text-text-dim">
+            {mnemonic}
+          </span>
+          <span className="truncate text-xs font-medium text-text">{title}</span>
+        </div>
+        <div className="relative flex shrink-0 items-center gap-1" data-no-drag>
+          <button
+            type="button"
+            title="Couleur de groupe"
+            onClick={() => setMenuGroupeOuvert((o) => !o)}
+            className="h-3.5 w-3.5 rounded-full border border-border"
+            style={{ backgroundColor: etat.groupColor ?? "transparent" }}
+          />
+          {menuGroupeOuvert && (
+            <div className="absolute right-0 top-5 z-10 flex gap-1 rounded border border-border bg-surface p-1 shadow-xl">
+              <button
+                type="button"
+                title="Aucun groupe"
+                onClick={() => {
+                  windowManagerStore.getState().setGroup(id, null);
+                  setMenuGroupeOuvert(false);
+                }}
+                className="h-4 w-4 rounded-full border border-border"
+              />
+              {GROUP_PALETTE.map((couleur) => (
+                <button
+                  key={couleur}
+                  type="button"
+                  title={couleur}
+                  onClick={() => {
+                    windowManagerStore.getState().setGroup(id, couleur);
+                    setMenuGroupeOuvert(false);
+                  }}
+                  className="h-4 w-4 rounded-full"
+                  style={{ backgroundColor: couleur }}
+                />
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            title="Réduire"
+            onClick={() => windowManagerStore.getState().minimizeWindow(id)}
+            className="rounded px-1 text-xs leading-none text-text-dim hover:bg-bg hover:text-text"
+          >
+            —
+          </button>
+          <button
+            type="button"
+            title="Fermer"
+            onClick={() => windowManagerStore.getState().closeWindow(id)}
+            className="rounded px-1 text-xs leading-none text-text-dim hover:bg-bg hover:text-text"
+          >
+            ✕
+          </button>
+        </div>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+      {POIGNEES.map((p) => (
+        <div key={p.id} onPointerDown={demarrerResize(p)} className={`absolute ${p.className}`} />
+      ))}
+    </div>
+  );
+}

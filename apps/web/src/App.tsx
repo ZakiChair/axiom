@@ -23,18 +23,14 @@ import { CommandPalette } from "./components/CommandPalette";
 // effet de bord → doit rester monté pour que les marqueurs éco fonctionnent.
 import { EcoWindow } from "./components/EcoWindow";
 import { NewsWindow } from "./components/NewsWindow";
-import { CorrWindow, corrUiStore, commandes as corrCommands } from "./components/CorrWindow";
+import { CorrWindow, commandes as corrCommands } from "./components/CorrWindow";
 import { OnchainWindow } from "./components/OnchainWindow";
 import { MarketMapWindow, commandes as mapCommands } from "./components/MarketMapWindow";
 import { PortfolioWindow } from "./components/PortfolioWindow";
 import { NotesWindow } from "./components/NotesWindow";
 import { ScreenerWindow } from "./components/ScreenerWindow";
-import {
-  TermStructureWindow,
-  termStructureUiStore,
-  commandes as termCommands,
-} from "./components/TermStructureWindow";
-import { OptionsWindow, optionsUiStore, commandes as optionsCommands } from "./components/OptionsWindow";
+import { TermStructureWindow, commandes as termCommands } from "./components/TermStructureWindow";
+import { OptionsWindow, commandes as optionsCommands } from "./components/OptionsWindow";
 // Fenêtres non modales de la Phase 4 (le multi-chart est déjà monté via ChartGrid) : dockées
 // à droite, montées en permanence (elles se cachent via translate-x quand fermées). Même
 // patron que les fenêtres de la Phase 3.
@@ -42,23 +38,24 @@ import { DomWindow } from "./components/DomWindow";
 import { BacktestWindow } from "./components/BacktestWindow";
 import { ReplayWindow } from "./components/ReplayWindow";
 import { settingsUiStore } from "./store/settings-ui";
-import { derivativesUiStore } from "./store/derivatives-ui";
-import { ecoStore, ecoCommands } from "./store/eco";
-import { newsUiStore, commandes as newsCommands } from "./store/news";
-import { onchainUiStore, commandes as onchainCommands } from "./store/onchain";
-import { marketMapUiStore } from "./store/marketmap-ui";
-import { portfolioUiStore, commandes as portfolioCommands } from "./store/portfolio";
-import { notesUiStore, commandes as notesCommands } from "./store/notes";
-import { screenerStore, commandesScreener } from "./store/screener";
+import { ecoCommands } from "./store/eco";
+import { commandes as newsCommands } from "./store/news";
+import { commandes as onchainCommands } from "./store/onchain";
+import { commandes as portfolioCommands } from "./store/portfolio";
+import { commandes as notesCommands } from "./store/notes";
+import { commandesScreener } from "./store/screener";
 import { commandes as derivChartCommands } from "./store/derivatives-chart";
-// Stores + commandes de palette des fenêtres de la Phase 4, et store de disposition grille.
-import { domUiStore, commandes as domCommands } from "./store/dom-ui";
-import { backtestStore, commandes as backtestCommands } from "./store/backtest";
-import { replayStore, commandes as replayCommands } from "./store/replay";
+// Commandes de palette des fenêtres de la Phase 4, et store de disposition grille.
+import { commandes as domCommands } from "./store/dom-ui";
+import { commandes as backtestCommands } from "./store/backtest";
+import { commandes as replayCommands } from "./store/replay";
 import { chartLayoutStore, type ChartLayoutMode } from "./store/chart-layout";
 import { enregistrerCommandes, type Commande } from "./commands/registry";
 import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
 import { demarrerAlertes } from "./alerts/runtime";
+import { FloatingWindow } from "./components/FloatingWindow";
+import { TaskbarMinimized } from "./components/TaskbarMinimized";
+import { WINDOW_REGISTRY } from "./store/windowManager";
 
 // ─────────────────────────── Commandes de disposition multi-chart (Phase 4) ───────────────────────────
 
@@ -116,35 +113,28 @@ enregistrerCommandes([
   ...commandesGrille,
 ]);
 
-// ─────────────────────────── Exclusion mutuelle des panneaux dockés à droite ───────────────────────────
+// ─────────────────────────── Table composant↔id des fenêtres flottantes ───────────────────────────
 
-/**
- * Tous les panneaux non modaux partagent le MÊME emplacement (`fixed right-0 top-0 z-40`).
- * On n'en montre donc qu'UN à la fois : ouvrir l'un ferme les autres. Bénéfice double —
- * pas d'empilement visuel, et le polling des panneaux masqués s'arrête (leurs effets se
- * coupent sur `open === false`). Chaque store vanilla expose `open` + une méthode de fermeture.
- */
-const PANNEAUX_DROITE: {
-  estOuvert: () => boolean;
-  fermer: () => void;
-  sabonner: (cb: () => void) => () => void;
-}[] = [
-  { estOuvert: () => derivativesUiStore.getState().open, fermer: () => derivativesUiStore.getState().closeDerivatives(), sabonner: (cb) => derivativesUiStore.subscribe(cb) },
-  { estOuvert: () => ecoStore.getState().open, fermer: () => ecoStore.getState().closeEco(), sabonner: (cb) => ecoStore.subscribe(cb) },
-  { estOuvert: () => newsUiStore.getState().open, fermer: () => newsUiStore.getState().closeNews(), sabonner: (cb) => newsUiStore.subscribe(cb) },
-  { estOuvert: () => corrUiStore.getState().open, fermer: () => corrUiStore.getState().closeCorr(), sabonner: (cb) => corrUiStore.subscribe(cb) },
-  { estOuvert: () => onchainUiStore.getState().open, fermer: () => onchainUiStore.getState().closeOnchain(), sabonner: (cb) => onchainUiStore.subscribe(cb) },
-  { estOuvert: () => marketMapUiStore.getState().open, fermer: () => marketMapUiStore.getState().closeMarketMap(), sabonner: (cb) => marketMapUiStore.subscribe(cb) },
-  { estOuvert: () => portfolioUiStore.getState().open, fermer: () => portfolioUiStore.getState().closePortfolio(), sabonner: (cb) => portfolioUiStore.subscribe(cb) },
-  { estOuvert: () => notesUiStore.getState().open, fermer: () => notesUiStore.getState().closeNotes(), sabonner: (cb) => notesUiStore.subscribe(cb) },
-  { estOuvert: () => screenerStore.getState().open, fermer: () => screenerStore.getState().closeScreener(), sabonner: (cb) => screenerStore.subscribe(cb) },
-  { estOuvert: () => termStructureUiStore.getState().open, fermer: () => termStructureUiStore.getState().closeTermStructure(), sabonner: (cb) => termStructureUiStore.subscribe(cb) },
-  { estOuvert: () => optionsUiStore.getState().open, fermer: () => optionsUiStore.getState().closeOptions(), sabonner: (cb) => optionsUiStore.subscribe(cb) },
-  // Fenêtres de la Phase 4 (mêmes emplacement/z-index → soumises à l'exclusion mutuelle).
-  { estOuvert: () => domUiStore.getState().open, fermer: () => domUiStore.getState().closeDom(), sabonner: (cb) => domUiStore.subscribe(cb) },
-  { estOuvert: () => backtestStore.getState().open, fermer: () => backtestStore.getState().closeBacktest(), sabonner: (cb) => backtestStore.subscribe(cb) },
-  { estOuvert: () => replayStore.getState().open, fermer: () => replayStore.getState().closeReplay(), sabonner: (cb) => replayStore.subscribe(cb) },
-];
+/** Association id de fenêtre (WINDOW_REGISTRY) -> composant de contenu. Utilisé pour
+ * monter chaque fenêtre sous <FloatingWindow> de façon générique (au lieu de 14 JSX
+ * explicites) et pour retirer PANNEAUX_DROITE (l'exclusion mutuelle est remplacée par
+ * le z-order de windowManagerStore — plusieurs fenêtres peuvent désormais coexister). */
+const WINDOW_COMPONENTS: Record<string, () => JSX.Element> = {
+  derivatives: DerivativesWindow,
+  eco: EcoWindow,
+  news: NewsWindow,
+  corr: CorrWindow,
+  onchain: OnchainWindow,
+  marketMap: MarketMapWindow,
+  portfolio: PortfolioWindow,
+  notes: NotesWindow,
+  screener: ScreenerWindow,
+  termStructure: TermStructureWindow,
+  options: OptionsWindow,
+  dom: DomWindow,
+  backtest: BacktestWindow,
+  replay: ReplayWindow,
+};
 
 export function App() {
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
@@ -158,31 +148,6 @@ export function App() {
   useEffect(() => {
     const stop = demarrerAlertes();
     return () => stop();
-  }, []);
-
-  // Exclusion mutuelle des panneaux dockés à droite (cf. PANNEAUX_DROITE) : ils
-  // partagent tous le MÊME emplacement (fixed right-0 top-0), on n'en montre donc qu'UN.
-  // Dès qu'un panneau passe à « ouvert », on ferme les autres → règle « dernière ouverte
-  // devant » sans empilement ni cascade. Un abonnement par store, nettoyé au démontage ;
-  // la garde `enCascade` ignore les notifications déclenchées par nos propres fermetures.
-  useEffect(() => {
-    let precedents = PANNEAUX_DROITE.map((p) => p.estOuvert());
-    let enCascade = false;
-    const gerer = (): void => {
-      if (enCascade) return;
-      const maintenant = PANNEAUX_DROITE.map((p) => p.estOuvert());
-      const ouvrant = maintenant.findIndex((ouvert, i) => ouvert && !precedents[i]);
-      if (ouvrant !== -1) {
-        enCascade = true;
-        PANNEAUX_DROITE.forEach((p, k) => {
-          if (k !== ouvrant) p.fermer();
-        });
-        enCascade = false;
-      }
-      precedents = PANNEAUX_DROITE.map((p) => p.estOuvert());
-    };
-    const desabonnements = PANNEAUX_DROITE.map((p) => p.sabonner(gerer));
-    return () => desabonnements.forEach((off) => off());
   }, []);
 
   return (
@@ -233,26 +198,18 @@ export function App() {
         </div>
       )}
 
-      {/* Surfaces globales montées au niveau racine, au-dessus du reste. */}
-      <DerivativesWindow />
-      {/* Fenêtres non modales de la Phase 3 : montées en permanence (elles se cachent
-          elles-mêmes via translate-x quand fermées). L'exclusion mutuelle ci-dessus
-          garantit qu'une seule reste visible à la fois. */}
-      <EcoWindow />
-      <NewsWindow />
-      <CorrWindow />
-      <OnchainWindow />
-      <MarketMapWindow />
-      <PortfolioWindow />
-      <NotesWindow />
-      <ScreenerWindow />
-      <TermStructureWindow />
-      <OptionsWindow />
-      {/* Fenêtres non modales de la Phase 4 (carnet d'ordres, backtest, replay) : montées en
-          permanence, cachées via translate-x, soumises à la même exclusion mutuelle. */}
-      <DomWindow />
-      <BacktestWindow />
-      <ReplayWindow />
+      {/* Les 14 fenêtres Bloomberg non modales, montées génériquement sous <FloatingWindow>
+          via WINDOW_REGISTRY (géométrie/z-order/minimize gérés par windowManagerStore). */}
+      {WINDOW_REGISTRY.map((entry) => {
+        const Contenu = WINDOW_COMPONENTS[entry.id];
+        if (!Contenu) return null;
+        return (
+          <FloatingWindow key={entry.id} id={entry.id} title={entry.title} mnemonic={entry.mnemonic}>
+            <Contenu />
+          </FloatingWindow>
+        );
+      })}
+      <TaskbarMinimized />
       <SettingsPanel />
       <CommandPalette />
     </div>

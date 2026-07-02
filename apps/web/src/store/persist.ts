@@ -56,8 +56,10 @@ import { revenueStore } from "./revenue";
 import { macroOverlayStore, MACRO_OVERLAYS, type MacroOverlayId } from "./macro-overlays";
 import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
+import { windowManagerStore, WINDOW_REGISTRY, type EtatFenetre } from "./windowManager";
 
 const CHART_KEY = "axiom:chartState:v1";
+const WINDOW_MANAGER_KEY = "axiom:windowManager:v1";
 const WATCH_KEY = "axiom:watchlist:v1";
 const SESSION_KEY = "axiom:sessionUi:v1";
 
@@ -194,6 +196,57 @@ function currentChartState(): ChartState {
 
 export function saveChartState(): void {
   writeJson(CHART_KEY, currentChartState());
+}
+
+// ─────────────────────────── WindowManager (géométrie des fenêtres flottantes) ───────────────────────────
+
+/** Construit l'état persistable du gestionnaire de fenêtres. */
+function currentWindowManagerState(): Record<string, EtatFenetre> {
+  return windowManagerStore.getState().windows;
+}
+
+export function saveWindowManagerState(): void {
+  writeJson(WINDOW_MANAGER_KEY, currentWindowManagerState());
+}
+
+/** Validation légère d'une fenêtre persistée (repli sur des valeurs sûres si un champ
+ * est corrompu/manquant — même esprit que `migratePersistedIndicators`). */
+function validateEtatFenetre(id: string, raw: unknown): EtatFenetre | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const r = raw as Partial<EtatFenetre>;
+  if (
+    typeof r.x !== "number" ||
+    typeof r.y !== "number" ||
+    typeof r.width !== "number" ||
+    typeof r.height !== "number" ||
+    typeof r.z !== "number"
+  ) {
+    return null;
+  }
+  return {
+    id,
+    open: false, // toujours restauré FERMÉ (évite 14 fenêtres à l'écran au démarrage)
+    x: r.x,
+    y: r.y,
+    width: r.width,
+    height: r.height,
+    z: r.z,
+    minimized: false,
+    groupColor: typeof r.groupColor === "string" ? r.groupColor : null,
+  };
+}
+
+/** Restaure la géométrie des fenêtres depuis localStorage (position/taille/groupe —
+ * toujours restaurées FERMÉES, l'utilisateur les rouvre via la palette/Toolbar). */
+function hydrateWindowManager(): void {
+  const persisted = readJson<Record<string, unknown>>(WINDOW_MANAGER_KEY);
+  if (!persisted) return;
+  const windows: Record<string, EtatFenetre> = {};
+  for (const entry of WINDOW_REGISTRY) {
+    const validated = validateEtatFenetre(entry.id, persisted[entry.id]);
+    if (validated) windows[entry.id] = validated;
+  }
+  windowManagerStore.getState().setAll(windows);
 }
 
 // ─────────────────────────── Watchlist (groupes + sources) ───────────────────────────
@@ -391,6 +444,7 @@ function hydrateChart(): void {
  */
 export function hydrateStores(): void {
   hydrateChart();
+  hydrateWindowManager();
   hydrateWatchlist();
   hydrateSession();
 }
@@ -411,6 +465,7 @@ export function enablePersistence(): void {
     }
   });
   indicatorsStore.subscribe(() => saveChartState());
+  windowManagerStore.subscribe(() => saveWindowManagerState());
   watchlistStore.subscribe(() => saveWatchlist());
 
   // État de session : un seul enregistreur partagé, abonné à chaque store concerné.

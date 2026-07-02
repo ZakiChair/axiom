@@ -18,6 +18,7 @@ import type { ExchangeId } from "@axiom/types";
 import { daemonPret, kvPut } from "../data/daemon";
 // Import de TYPE uniquement (élidé au runtime) : la palette est câblée par l'intégrateur.
 import type { Commande } from "../commands/registry";
+import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
 const STORAGE_KEY = "axiom:notes:v1";
 /** Namespace + clé KV où les notes sont miroitées vers le daemon. */
@@ -222,15 +223,20 @@ export interface NotesUiState {
 }
 
 /** Ouverture du panneau Notes + brouillon post-mortem — VANILLA, éphémère. */
-export const notesUiStore = createStore<NotesUiState>((set, get) => ({
+export const notesUiStore = createStore<NotesUiState>((set) => ({
   open: false,
   brouillon: null,
-  openNotes: () => set({ open: true }),
-  closeNotes: () => set({ open: false }),
-  toggleNotes: () => set({ open: !get().open }),
-  proposerNote: (b) => set({ open: true, brouillon: b }),
+  openNotes: () => windowManagerStore.getState().openWindow("notes"),
+  closeNotes: () => windowManagerStore.getState().closeWindow("notes"),
+  toggleNotes: () => windowManagerStore.getState().toggleWindow("notes"),
+  proposerNote: (b) => {
+    set({ brouillon: b });
+    windowManagerStore.getState().openWindow("notes");
+  },
   consommerBrouillon: () => set({ brouillon: null }),
 }));
+
+mirrorOpenState("notes", notesUiStore);
 
 // ─────────────────────────── Commandes de palette (enregistrées par l'intégrateur) ───────────────────────────
 

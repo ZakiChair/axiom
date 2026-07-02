@@ -22,6 +22,7 @@ import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 import type { Commande } from "../commands/registry";
 import { watchlistStore } from "../store/watchlist";
+import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { QUOTE_ASSETS } from "../data/symbol";
 import {
   alignerSeries,
@@ -49,12 +50,14 @@ export interface CorrUiState {
   toggleCorr: () => void;
 }
 
-export const corrUiStore = createStore<CorrUiState>((set, get) => ({
+export const corrUiStore = createStore<CorrUiState>(() => ({
   open: false,
-  openCorr: () => set({ open: true }),
-  closeCorr: () => set({ open: false }),
-  toggleCorr: () => set({ open: !get().open }),
+  openCorr: () => windowManagerStore.getState().openWindow("corr"),
+  closeCorr: () => windowManagerStore.getState().closeWindow("corr"),
+  toggleCorr: () => windowManagerStore.getState().toggleWindow("corr"),
 }));
+
+mirrorOpenState("corr", corrUiStore);
 
 /**
  * Commandes exposées à la palette (l'intégrateur les enregistre via `enregistrerCommandes`).

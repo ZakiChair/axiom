@@ -14,6 +14,7 @@
  */
 import { createStore } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
+import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
 // ─────────────────────────── UI (ouverture de la fenêtre CHAIN) ───────────────────────────
 
@@ -26,12 +27,14 @@ export interface OnchainUiState {
   toggleOnchain: () => void;
 }
 
-export const onchainUiStore = createStore<OnchainUiState>((set, get) => ({
+export const onchainUiStore = createStore<OnchainUiState>(() => ({
   open: false,
-  openOnchain: () => set({ open: true }),
-  closeOnchain: () => set({ open: false }),
-  toggleOnchain: () => set({ open: !get().open }),
+  openOnchain: () => windowManagerStore.getState().openWindow("onchain"),
+  closeOnchain: () => windowManagerStore.getState().closeWindow("onchain"),
+  toggleOnchain: () => windowManagerStore.getState().toggleWindow("onchain"),
 }));
+
+mirrorOpenState("onchain", onchainUiStore);
 
 // ─────────────────────────── Clé BGeometrics (optionnelle) ───────────────────────────
 

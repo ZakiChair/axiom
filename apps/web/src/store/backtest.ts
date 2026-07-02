@@ -33,6 +33,7 @@ import {
   type ProgressionAccumulation,
 } from "../data/backtestData";
 import type { WorkerRequest, WorkerResponse } from "../workers/backtest.worker";
+import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
 export { BACKTEST_TIMEFRAMES };
 
@@ -321,9 +322,9 @@ function terminateWorker(): void {
 
 export const backtestStore = createStore<BacktestState>((set, get) => ({
   open: false,
-  openBacktest: () => set({ open: true }),
-  closeBacktest: () => set({ open: false }),
-  toggle: () => set({ open: !get().open }),
+  openBacktest: () => windowManagerStore.getState().openWindow("backtest"),
+  closeBacktest: () => windowManagerStore.getState().closeWindow("backtest"),
+  toggle: () => windowManagerStore.getState().toggleWindow("backtest"),
 
   symbol: "BTCUSDT",
   tf: "1h",
@@ -501,6 +502,8 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
     set({ phase: "idle" });
   },
 }));
+
+mirrorOpenState("backtest", backtestStore);
 
 // ─────────────────────────── Action dérivée ───────────────────────────
 

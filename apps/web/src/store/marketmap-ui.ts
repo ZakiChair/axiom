@@ -1,12 +1,11 @@
 /**
  * Store UI de la Vue marché (IMAP) — Zustand VANILLA (hors render-loop React).
  *
- * Tient UNIQUEMENT l'état d'ouverture du PANNEAU (dockable, non modal) de la treemap.
- * Volontairement éphémère : NON persisté (ne pas l'enregistrer dans persist.ts).
- * Les données CoinGecko vivent dans leur module dédié (data/marketOverview.ts).
- * Même pattern que store/derivatives-ui.ts.
+ * `open` MIROITE l'état de `windowManagerStore` — cf. `mirrorOpenState`. Les données
+ * CoinGecko vivent dans leur module dédié (data/marketOverview.ts).
  */
 import { createStore } from "zustand/vanilla";
+import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
 export interface MarketMapUiState {
   /** true quand le panneau Vue marché est ouvert. */
@@ -19,9 +18,11 @@ export interface MarketMapUiState {
   toggleMarketMap: () => void;
 }
 
-export const marketMapUiStore = createStore<MarketMapUiState>((set, get) => ({
+export const marketMapUiStore = createStore<MarketMapUiState>(() => ({
   open: false,
-  openMarketMap: () => set({ open: true }),
-  closeMarketMap: () => set({ open: false }),
-  toggleMarketMap: () => set({ open: !get().open }),
+  openMarketMap: () => windowManagerStore.getState().openWindow("marketMap"),
+  closeMarketMap: () => windowManagerStore.getState().closeWindow("marketMap"),
+  toggleMarketMap: () => windowManagerStore.getState().toggleWindow("marketMap"),
 }));
+
+mirrorOpenState("marketMap", marketMapUiStore);

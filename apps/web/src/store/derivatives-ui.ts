@@ -1,11 +1,12 @@
 /**
  * Store UI des Produits dérivés — Zustand VANILLA (hors render-loop React).
  *
- * Tient UNIQUEMENT l'état d'ouverture du PANNEAU (dockable, non modal) des dérivés.
- * Volontairement éphémère : NON persisté (ne pas l'enregistrer dans persist.ts).
- * Les données et clés Coinalyze restent dans leurs stores/providers dédiés.
+ * `open` MIROITE l'état de `windowManagerStore` (source de vérité géométrie/ouverture
+ * de toutes les fenêtres flottantes) — cf. `mirrorOpenState`. Les données et clés
+ * Coinalyze restent dans leurs stores/providers dédiés.
  */
 import { createStore } from "zustand/vanilla";
+import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
 export interface DerivativesUiState {
   /** true quand le panneau Produits dérivés est ouvert. */
@@ -18,9 +19,11 @@ export interface DerivativesUiState {
   toggleDerivatives: () => void;
 }
 
-export const derivativesUiStore = createStore<DerivativesUiState>((set, get) => ({
+export const derivativesUiStore = createStore<DerivativesUiState>(() => ({
   open: false,
-  openDerivatives: () => set({ open: true }),
-  closeDerivatives: () => set({ open: false }),
-  toggleDerivatives: () => set({ open: !get().open }),
+  openDerivatives: () => windowManagerStore.getState().openWindow("derivatives"),
+  closeDerivatives: () => windowManagerStore.getState().closeWindow("derivatives"),
+  toggleDerivatives: () => windowManagerStore.getState().toggleWindow("derivatives"),
 }));
+
+mirrorOpenState("derivatives", derivativesUiStore);

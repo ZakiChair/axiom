@@ -16,6 +16,7 @@
 import { createStore } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
 import type { FeedStatut, NewsItem, NewsSourceId } from "../data/news";
+import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
 // ─────────────────────────── Store UI (ouverture du panneau) ───────────────────────────
 
@@ -28,12 +29,14 @@ export interface NewsUiState {
   toggleNews: () => void;
 }
 
-export const newsUiStore = createStore<NewsUiState>((set, get) => ({
+export const newsUiStore = createStore<NewsUiState>(() => ({
   open: false,
-  openNews: () => set({ open: true }),
-  closeNews: () => set({ open: false }),
-  toggleNews: () => set({ open: !get().open }),
+  openNews: () => windowManagerStore.getState().openWindow("news"),
+  closeNews: () => windowManagerStore.getState().closeWindow("news"),
+  toggleNews: () => windowManagerStore.getState().toggleWindow("news"),
 }));
+
+mirrorOpenState("news", newsUiStore);
 
 // ─────────────────────────── Persistance « lu » (localStorage, léger) ───────────────────────────
 

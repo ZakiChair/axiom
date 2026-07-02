@@ -13,6 +13,7 @@
 import { createStore } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
 import { chargerEvenementsEco, type EcoEvent, type EcoImpact } from "../data/eco";
+import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
 /** Impacts affichables (ordre des filtres, fort → faible). */
 export const ECO_IMPACTS: readonly EcoImpact[] = ["high", "medium", "low", "holiday"];
@@ -65,9 +66,9 @@ export const ecoStore = createStore<EcoState>((set, get) => ({
   pays: null,
   markersEnabled: false,
 
-  openEco: () => set({ open: true }),
-  closeEco: () => set({ open: false }),
-  toggleEco: () => set({ open: !get().open }),
+  openEco: () => windowManagerStore.getState().openWindow("eco"),
+  closeEco: () => windowManagerStore.getState().closeWindow("eco"),
+  toggleEco: () => windowManagerStore.getState().toggleWindow("eco"),
 
   refresh: (force = false) => {
     if (get().status === "loading") return; // pas de fetch concurrent
@@ -88,6 +89,8 @@ export const ecoStore = createStore<EcoState>((set, get) => ({
   setPays: (p) => set({ pays: p }),
   toggleMarkers: () => set((s) => ({ markersEnabled: !s.markersEnabled })),
 }));
+
+mirrorOpenState("eco", ecoStore);
 
 /**
  * Commandes ECO pour la palette (⌘K). EXPORTÉ pour que l'agent intégrateur les

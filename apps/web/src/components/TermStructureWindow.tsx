@@ -22,6 +22,7 @@ import {
 } from "../data/binanceDapi";
 import { fetchDeribitTermStructure } from "../data/deribit";
 import { daemonPret, detectDaemon, kvGet, kvPut } from "../data/daemon";
+import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -32,12 +33,14 @@ export interface TermStructureUiState {
   toggleTermStructure: () => void;
 }
 
-export const termStructureUiStore = createStore<TermStructureUiState>((set, get) => ({
+export const termStructureUiStore = createStore<TermStructureUiState>(() => ({
   open: false,
-  openTermStructure: () => set({ open: true }),
-  closeTermStructure: () => set({ open: false }),
-  toggleTermStructure: () => set({ open: !get().open }),
+  openTermStructure: () => windowManagerStore.getState().openWindow("termStructure"),
+  closeTermStructure: () => windowManagerStore.getState().closeWindow("termStructure"),
+  toggleTermStructure: () => windowManagerStore.getState().toggleWindow("termStructure"),
 }));
+
+mirrorOpenState("termStructure", termStructureUiStore);
 
 // ─────────────────────────── Constantes ───────────────────────────
 

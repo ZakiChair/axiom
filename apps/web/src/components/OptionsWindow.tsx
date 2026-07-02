@@ -21,6 +21,7 @@ import {
   type OptionPoint,
   type StrikeOi,
 } from "../data/deribit";
+import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -31,12 +32,14 @@ export interface OptionsUiState {
   toggleOptions: () => void;
 }
 
-export const optionsUiStore = createStore<OptionsUiState>((set, get) => ({
+export const optionsUiStore = createStore<OptionsUiState>(() => ({
   open: false,
-  openOptions: () => set({ open: true }),
-  closeOptions: () => set({ open: false }),
-  toggleOptions: () => set({ open: !get().open }),
+  openOptions: () => windowManagerStore.getState().openWindow("options"),
+  closeOptions: () => windowManagerStore.getState().closeWindow("options"),
+  toggleOptions: () => windowManagerStore.getState().toggleWindow("options"),
 }));
+
+mirrorOpenState("options", optionsUiStore);
 
 // ─────────────────────────── Constantes ───────────────────────────
 

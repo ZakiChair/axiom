@@ -8,6 +8,7 @@
  */
 import { createStore } from "zustand/vanilla";
 import type { Commande } from "../commands/registry"; // type-only : aucune dépendance runtime croisée
+import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
 /** Onglets du panneau DOM. */
 export type DomTab = "ladder" | "depth" | "tape";
@@ -40,18 +41,23 @@ export interface DomUiState {
   setSeuilGrosTrade: (seuil: number) => void;
 }
 
-export const domUiStore = createStore<DomUiState>((set, get) => ({
+export const domUiStore = createStore<DomUiState>((set) => ({
   open: false,
   tab: "ladder",
   facteurPas: 1,
   seuilGrosTrade: 100_000,
-  openDom: (tab) => set(tab ? { open: true, tab } : { open: true }),
-  closeDom: () => set({ open: false }),
-  toggleDom: () => set({ open: !get().open }),
+  openDom: (tab) => {
+    if (tab) set({ tab });
+    windowManagerStore.getState().openWindow("dom");
+  },
+  closeDom: () => windowManagerStore.getState().closeWindow("dom"),
+  toggleDom: () => windowManagerStore.getState().toggleWindow("dom"),
   setTab: (tab) => set({ tab }),
   setFacteurPas: (facteur) => set({ facteurPas: facteur }),
   setSeuilGrosTrade: (seuil) => set({ seuilGrosTrade: seuil }),
 }));
+
+mirrorOpenState("dom", domUiStore);
 
 /**
  * Commandes de palette du DOM (à greffer par l'intégrateur via `enregistrerCommandes`).

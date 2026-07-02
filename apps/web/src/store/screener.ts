@@ -38,6 +38,7 @@ import {
   type ScreenerRow,
 } from "../data/screener";
 import type { WorkerRequest, WorkerResponse } from "../workers/screener.worker";
+import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
 const TICKER_24H_URL = "https://api.binance.com/api/v3/ticker/24hr";
 /** Nombre max de lignes affichées quand le run n'a PAS de filtre indicateur (table lisible). */
@@ -137,9 +138,9 @@ function terminateWorker(): void {
 
 export const screenerStore = createStore<ScreenerState>((set, get) => ({
   open: false,
-  openScreener: () => set({ open: true }),
-  closeScreener: () => set({ open: false }),
-  toggle: () => set({ open: !get().open }),
+  openScreener: () => windowManagerStore.getState().openWindow("screener"),
+  closeScreener: () => windowManagerStore.getState().closeWindow("screener"),
+  toggle: () => windowManagerStore.getState().toggleWindow("screener"),
 
   tf: "4h",
   baseConditions: [{ kind: "base", field: "volumeUsd24h", op: ">", value: 10_000_000 }],
@@ -321,6 +322,8 @@ export const screenerStore = createStore<ScreenerState>((set, get) => ({
     set({ runState: "idle" });
   },
 }));
+
+mirrorOpenState("screener", screenerStore);
 
 // ─────────────────────────── Actions dérivées (chart / watchlist) ───────────────────────────
 

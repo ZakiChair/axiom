@@ -21,6 +21,7 @@ import type { ExchangeId } from "@axiom/types";
 import { daemonPret, kvPut } from "../data/daemon";
 // Import de TYPE uniquement (élidé au runtime) : la palette est câblée par l'intégrateur.
 import type { Commande } from "../commands/registry";
+import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
 const STORAGE_KEY = "axiom:portfolio:v1";
 /** Namespace + clé KV où les positions sont miroitées vers le daemon. */
@@ -300,12 +301,14 @@ export interface PortfolioUiState {
 }
 
 /** Ouverture du panneau Portefeuille — VANILLA, éphémère (cf. derivatives-ui). */
-export const portfolioUiStore = createStore<PortfolioUiState>((set, get) => ({
+export const portfolioUiStore = createStore<PortfolioUiState>(() => ({
   open: false,
-  openPortfolio: () => set({ open: true }),
-  closePortfolio: () => set({ open: false }),
-  togglePortfolio: () => set({ open: !get().open }),
+  openPortfolio: () => windowManagerStore.getState().openWindow("portfolio"),
+  closePortfolio: () => windowManagerStore.getState().closeWindow("portfolio"),
+  togglePortfolio: () => windowManagerStore.getState().toggleWindow("portfolio"),
 }));
+
+mirrorOpenState("portfolio", portfolioUiStore);
 
 // ─────────────────────────── Commandes de palette (enregistrées par l'intégrateur) ───────────────────────────
 

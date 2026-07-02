@@ -36,6 +36,7 @@ import {
   type JobStatut,
   type JourStocke,
 } from "../data/replayFeed";
+import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
 export { REPLAY_TFS, VITESSES };
 
@@ -111,15 +112,15 @@ function arreterPoll(): void {
 export const replayStore = createStore<ReplayState>((set, get) => ({
   open: false,
   openReplay: () => {
-    set({ open: true });
+    windowManagerStore.getState().openWindow("replay");
     get().rafraichirJours();
     get().rafraichirStatut();
   },
-  closeReplay: () => set({ open: false }),
+  closeReplay: () => windowManagerStore.getState().closeWindow("replay"),
   toggle: () => {
-    const ouvrir = !get().open;
-    set({ open: ouvrir });
-    if (ouvrir) {
+    const etaitOuvert = windowManagerStore.getState().windows["replay"]?.open ?? false;
+    windowManagerStore.getState().toggleWindow("replay");
+    if (!etaitOuvert) {
       get().rafraichirJours();
       get().rafraichirStatut();
     }
@@ -274,6 +275,8 @@ export const replayStore = createStore<ReplayState>((set, get) => ({
     });
   },
 }));
+
+mirrorOpenState("replay", replayStore);
 
 // ─────────────────────────── Commande de palette (EXPORT pour l'intégrateur) ───────────────────────────
 

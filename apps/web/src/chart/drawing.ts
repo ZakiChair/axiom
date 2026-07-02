@@ -89,6 +89,15 @@ export function bindChart(chart: KLineChartInstance): void {
 }
 
 /**
+ * Renvoie l'instance KLineChart courante (liée par Chart.tsx), ou null si aucune.
+ * Ajout ADDITIF (Phase 3) : permet aux marqueurs éco (chart/ecoMarkers.ts) de poser
+ * leurs overlays sur l'instance active SANS que Chart.tsx ait à les connaître.
+ */
+export function getActiveChart(): KLineChartInstance | null {
+  return activeChart;
+}
+
+/**
  * Délie une instance. Garde `chart === activeChart` : si une nouvelle instance a
  * déjà été liée (recréation symbole/TF), on n'écrase pas la référence à jour.
  * Pose `suppressPersist` : le `dispose()` qui suit ne doit pas vider le stockage.

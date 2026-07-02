@@ -29,6 +29,7 @@ import { CompareController } from "./compare";
 import { VolumeProfileController } from "./volumeProfile";
 import { RevenueController } from "./revenue";
 import { MacroController } from "./macro";
+import { DerivativesChartController } from "./derivatives";
 import { bindChart, unbindChart, redrawFibOverlays, restoreDrawings } from "./drawing";
 import { fibStore } from "./fibonacci";
 import { SymbolBanner } from "../components/SymbolBanner";
@@ -296,6 +297,11 @@ export function Chart() {
       macro.onCandles();
     });
 
+    // Contrôleur dérivés SUR le chart (OI + funding en sous-panes). AUTONOME : il
+    // s'abonne lui-même aux stores toggles + marché (cf. derivatives.ts), donc aucun
+    // autre câblage ici (pattern MacroController, câblage minimal).
+    const derivativesChart = new DerivativesChartController(chart, symbol);
+
     let cancelled = false;
     let unsubscribe: Unsubscribe | null = null;
 
@@ -461,6 +467,7 @@ export function Chart() {
       unsubscribeRevenue();
       unsubscribeMacro();
       unsubscribeMacroHistory();
+      derivativesChart.dispose(); // désabonne + retire les sous-panes OI/funding AVANT dispose.
       macro.dispose(); // annule les fetchs + retire le sous-pane macro AVANT dispose.
       revenue.dispose(); // annule le fetch + retire le sous-pane revenus AVANT dispose.
       volumeProfile.dispose(); // arrête le rAF + nettoie le canvas profil.

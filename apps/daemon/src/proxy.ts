@@ -155,9 +155,146 @@ function reponseErreurAmont(err: unknown, cors: Record<string, string>): Respons
   });
 }
 
-/** Enregistre les 4 routes de proxy dans le routeur. */
+// ─────────────────────────── Proxy générique /extapi (Phase 3) ───────────────────────────
+//
+// Route unique `/extapi/<hote>/<chemin...>` → réécrit vers `https://<hote>/<chemin>`
+// UNIQUEMENT si `<hote>` figure dans EXTAPI_WHITELIST (sinon 403). GET only, User-Agent
+// navigateur standard, timeout 15 s. Sert les APIs sans CORS de la Phase 3 (RSS news,
+// calendriers éco, on-chain, Deribit, Binance fapi/dapi…) sans multiplier les préfixes.
+//
+// ⚠️ WHITELIST DUPLIQUÉE dans 3 fichiers (synchronisation MANUELLE) :
+//   1. apps/daemon/src/proxy.ts       (ici — proxy de PROD, frontière d'autorité 403)
+//   2. apps/web/vite.config.ts        (proxy de DEV — une entrée par hôte)
+//   3. apps/web/src/data/extapi.ts    (helper front + constante documentée)
+// Toute modification ici DOIT être répercutée dans les deux autres.
+
+/** Hôtes autorisés pour /extapi (voir commentaire croisé ci-dessus). */
+export const EXTAPI_WHITELIST: ReadonlySet<string> = new Set([
+  "nfs.faireconomy.media", // ForexFactory JSON (calendrier éco)
+  "www.coindesk.com", // RSS news
+  "cointelegraph.com", // RSS news
+  "www.theblock.co", // RSS news
+  "decrypt.co", // RSS news
+  "blockworks.co", // RSS news
+  "api.alternative.me", // Fear & Greed Index
+  "community-api.coinmetrics.io", // Coin Metrics Community (on-chain)
+  "bitcoin-data.com", // BGeometrics (MVRV-Z, SOPR, NUPL)
+  "api.llama.fi", // DefiLlama (ETF flows, TVL, fees)
+  "mempool.space", // mempool / frais on-chain
+  "blockchain.info", // stats on-chain
+  "www.deribit.com", // options / term structure (public, sans clé)
+  "dapi.binance.com", // Binance COIN-M (term structure)
+  "fapi.binance.com", // Binance USD-M (dérivés : funding, top trader L/S)
+  "api.coingecko.com", // CoinGecko (treemap, catégories)
+]);
+
+/** User-Agent navigateur standard : certains hôtes (RSS, Cloudflare) refusent un UA vide. */
+const EXTAPI_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+/** Délai maximum d'un fetch amont /extapi (ms). */
+const EXTAPI_TIMEOUT_MS = 15_000;
+
+/** TTL cache /extapi par défaut (RSS et calendriers sont lents). */
+const EXTAPI_TTL_DEFAUT_MS = 120_000;
+/** TTL cache réduit pour les dérivés Binance (données quasi temps réel). */
+const EXTAPI_TTL_DERIVES_MS = 30_000;
+
+/**
+ * TTL cache (ms) d'un hôte /extapi : 30 s pour fapi/dapi.binance.com (dérivés),
+ * 120 s sinon (RSS, calendriers, on-chain lents). Fonction PURE (testée).
+ * Réutilise le stockage de cache.ts, mais calcule le TTL ICI car cache.ts (hors
+ * périmètre de cet agent) ne connaît que les 4 préfixes historiques.
+ */
+export function ttlMsExtapi(hote: string): number {
+  if (hote === "fapi.binance.com" || hote === "dapi.binance.com") return EXTAPI_TTL_DERIVES_MS;
+  return EXTAPI_TTL_DEFAUT_MS;
+}
+
+/**
+ * Extrait l'hôte (1er segment après `/extapi/`) et le reste du chemin. Fonction PURE.
+ * Renvoie `null` si le chemin n'a pas la forme `/extapi/<hote>[/...]` (hôte manquant).
+ * `reste` commence par `/` (ou est vide si aucun sous-chemin).
+ */
+export function parseExtapiChemin(pathname: string): { hote: string; reste: string } | null {
+  if (pathname !== "/extapi" && !pathname.startsWith("/extapi/")) return null;
+  const apres = pathname.slice("/extapi".length); // "" | "/" | "/hote/reste…"
+  if (!apres.startsWith("/")) return null;
+  const sansSlash = apres.slice(1); // "hote/reste…"
+  const posSlash = sansSlash.indexOf("/");
+  const hote = posSlash === -1 ? sansSlash : sansSlash.slice(0, posSlash);
+  const reste = posSlash === -1 ? "" : sansSlash.slice(posSlash); // "/reste…" | ""
+  if (hote.length === 0) return null;
+  return { hote, reste };
+}
+
+/**
+ * Construit l'URL amont `https://<hote><reste><search>` pour une requête /extapi,
+ * ou `null` si l'hôte est absent / non whitelisté. Fonction PURE (testée).
+ */
+export function construireUrlAmontExtapi(pathname: string, search: string): string | null {
+  const parsed = parseExtapiChemin(pathname);
+  if (!parsed || !EXTAPI_WHITELIST.has(parsed.hote)) return null;
+  return `https://${parsed.hote}${parsed.reste}${search}`;
+}
+
+/**
+ * Traite une requête /extapi : whitelist (403 sinon), GET only (405 sinon), cache
+ * TTL, fetch amont avec User-Agent navigateur + timeout 15 s. En-têtes CORS +
+ * `X-Axiomd-Cache`. Dégradation gracieuse : amont injoignable → 502 propre.
+ */
+export async function traiterExtapi(req: Request, url: URL): Promise<Response> {
+  const cors = entetesCors(req);
+  const parsed = parseExtapiChemin(url.pathname);
+  if (!parsed || !EXTAPI_WHITELIST.has(parsed.hote)) {
+    return new Response(
+      JSON.stringify({ erreur: "hôte non autorisé", hote: parsed?.hote ?? null }),
+      { status: 403, headers: { "content-type": "application/json; charset=utf-8", ...cors } },
+    );
+  }
+  if (req.method !== "GET") {
+    return new Response(JSON.stringify({ erreur: "méthode non autorisée (GET uniquement)" }), {
+      status: 405,
+      headers: { "content-type": "application/json; charset=utf-8", allow: "GET", ...cors },
+    });
+  }
+
+  const cheminEntrant = url.pathname + url.search;
+  const cle = cleCache("GET", cheminEntrant);
+  const hit = lireCache(cle);
+  if (hit) {
+    return new Response(hit.corps, {
+      headers: { "content-type": hit.contentType, "x-axiomd-cache": "hit", ...cors },
+    });
+  }
+
+  const urlAmont = `https://${parsed.hote}${parsed.reste}${url.search}`;
+  let amont: Response;
+  try {
+    amont = await fetch(urlAmont, {
+      method: "GET",
+      headers: { "user-agent": EXTAPI_USER_AGENT, accept: "*/*" },
+      signal: AbortSignal.timeout(EXTAPI_TIMEOUT_MS),
+    });
+  } catch (err) {
+    return reponseErreurAmont(err, cors);
+  }
+  const corps = new Uint8Array(await amont.arrayBuffer());
+  const contentType = amont.headers.get("content-type") ?? "application/octet-stream";
+  // On ne met en cache que les réponses valides (évite de figer une erreur transitoire).
+  if (amont.ok) ecrireCache(cle, corps, contentType, ttlMsExtapi(parsed.hote));
+  return new Response(corps, {
+    status: amont.status,
+    headers: { "content-type": contentType, "x-axiomd-cache": "miss", ...cors },
+  });
+}
+
+/** Enregistre les 4 routes de proxy à clé + le proxy générique /extapi dans le routeur. */
 export function enregistrerProxy(routeur: Routeur, cles: ProxyKeys): void {
   for (const route of construireRoutesProxy(cles)) {
     routeur.enregistrerPrefixe(route.prefix, (req, url) => traiterProxy(req, url, route));
   }
+  // Proxy générique /extapi (Phase 3) : hôtes whitelistés, GET only, cache TTL.
+  routeur.enregistrerPrefixe("/extapi", (req, url) => traiterExtapi(req, url));
 }

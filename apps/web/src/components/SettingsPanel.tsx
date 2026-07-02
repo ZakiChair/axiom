@@ -19,6 +19,7 @@ import { useStore } from "zustand";
 import { settingsUiStore } from "../store/settings-ui";
 import { coinalyzeKeyStore } from "../store/coinalyze";
 import { fredKeyStore } from "../store/macro";
+import { bgeometricsKeyStore } from "../store/onchain";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
 /** Pastille d'état de configuration d'une clé. */
@@ -185,6 +186,10 @@ export function SettingsPanel() {
   const fredSetKey = useStore(fredKeyStore, (s) => s.setKey);
   const fredClearKey = useStore(fredKeyStore, (s) => s.clearKey);
 
+  const bgHasKey = useStore(bgeometricsKeyStore, (s) => s.hasKey);
+  const bgSetKey = useStore(bgeometricsKeyStore, (s) => s.setKey);
+  const bgClearKey = useStore(bgeometricsKeyStore, (s) => s.clearKey);
+
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Échap ferme — écouteur actif UNIQUEMENT quand le panneau est ouvert.
@@ -271,6 +276,17 @@ export function SettingsPanel() {
               hasKey={fredHasKey}
               onSave={fredSetKey}
               onClear={fredClearKey}
+            />
+            <ApiKeyField
+              name="BGeometrics (on-chain)"
+              purpose="Valorisation BTC — MVRV Z-Score, SOPR, NUPL. Optionnelle : la source marche sans clé (quota 15 req/jour) ; une clé relève ce quota."
+              domain="bitcoin-data.com"
+              signupUrl="https://bitcoin-data.com"
+              signupLabel="Clé gratuite"
+              placeholder="Clé API BGeometrics (optionnelle)"
+              hasKey={bgHasKey}
+              onSave={bgSetKey}
+              onClear={bgClearKey}
             />
           </div>
 

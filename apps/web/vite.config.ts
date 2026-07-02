@@ -1,6 +1,59 @@
 import { defineConfig, loadEnv } from "vite";
+import type { ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
 import { appendApiKeyIfAbsent } from "./src/data/apiKeyProxy";
+
+// PROXY GÉNÉRIQUE /extapi (Phase 3) — contournement CORS pour APIs sans clé.
+// Route `/extapi/<hote>/<chemin…>` → `https://<hote>/<chemin…>` pour les hôtes
+// whitelistés (RSS news, calendriers éco, on-chain, Deribit, Binance fapi/dapi…).
+// En DEV, Vite ne sait pas router dynamiquement une cible unique (node-http-proxy
+// n'a pas d'option `router`) → on génère UNE ENTRÉE PAR HÔTE depuis la whitelist.
+// Le vrai contrôle d'autorité (403 hors-liste) vit côté daemon (proxy de PROD).
+//
+// ⚠️ WHITELIST DUPLIQUÉE dans 3 fichiers (synchronisation MANUELLE) :
+//   1. apps/daemon/src/proxy.ts       (EXTAPI_WHITELIST — frontière d'autorité 403)
+//   2. apps/web/vite.config.ts        (ici — proxy de DEV, une entrée par hôte)
+//   3. apps/web/src/data/extapi.ts    (helper front + constante documentée)
+const EXTAPI_HOTES: readonly string[] = [
+  "nfs.faireconomy.media",
+  "www.coindesk.com",
+  "cointelegraph.com",
+  "www.theblock.co",
+  "decrypt.co",
+  "blockworks.co",
+  "api.alternative.me",
+  "community-api.coinmetrics.io",
+  "bitcoin-data.com",
+  "api.llama.fi",
+  "mempool.space",
+  "blockchain.info",
+  "www.deribit.com",
+  "dapi.binance.com",
+  "fapi.binance.com",
+  "api.coingecko.com",
+];
+
+// User-Agent navigateur standard : certains hôtes (RSS, Cloudflare) refusent un UA vide.
+const EXTAPI_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+// Génère les entrées de proxy Vite `/extapi/<hote>` → `https://<hote>` (strip du préfixe,
+// UA navigateur, timeout 15 s). Cache : seulement en PROD (daemon) — le proxy de dev ne
+// met rien en cache, comme les proxys /fredapi… existants.
+const extapiProxy: Record<string, ProxyOptions> = Object.fromEntries(
+  EXTAPI_HOTES.map((hote) => [
+    `/extapi/${hote}`,
+    {
+      target: `https://${hote}`,
+      changeOrigin: true,
+      rewrite: (chemin: string) => chemin.replace(`/extapi/${hote}`, ""),
+      headers: { "User-Agent": EXTAPI_USER_AGENT },
+      timeout: 15_000,
+      proxyTimeout: 15_000,
+    },
+  ]),
+);
 
 // Configuration Vite : plugin React (Fast Refresh + JSX) + proxy de dev.
 // La résolution des packages workspace (@axiom/types) passe par les symlinks pnpm.
@@ -62,6 +115,8 @@ export default defineConfig(({ mode }) => {
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/mexcapi/, ""),
       },
+      // Proxy générique /extapi (Phase 3) : une entrée par hôte whitelisté (cf. ci-dessus).
+      ...extapiProxy,
     },
   },
   };

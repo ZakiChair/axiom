@@ -173,6 +173,18 @@ function toMs(ts: number): number {
   return ts > 1e12 ? ts : ts * 1000;
 }
 
+/**
+ * Coinalyze exprime le funding rate en POURCENTAGE (ex. 0.007538 = 0.007538 %),
+ * là où la convention Binance ET le reste du code (cf. data/screener.ts) est une
+ * FRACTION (0.00007538). On NORMALISE en fraction À LA SOURCE pour que
+ * `FundingRate.rate` ait une unité cohérente partout — l'UI applique ×100 à
+ * l'affichage. Vérifié en réel : predicted 0.007538 % ↔ Binance lastFundingRate
+ * 0.00007538 (rapport ×100 exact).
+ */
+function pctToFraction(pct: number): number {
+  return pct / 100;
+}
+
 /** Valide la période demandée comme intervalle Coinalyze (repli « 5min »). */
 function normalizeInterval(period: string): CoinalyzeInterval {
   return (COINALYZE_INTERVALS as readonly string[]).includes(period)
@@ -248,7 +260,7 @@ async function fetchFundingRate(symbol: string): Promise<FundingRate> {
   return {
     time: toMs(p.update),
     symbol: cs,
-    rate: p.value,
+    rate: pctToFraction(p.value), // Coinalyze % → fraction (cf. pctToFraction).
     // Coinalyze (current funding-rate) n'expose ni mark price ni heure du
     // prochain funding → champs inconnus.
     nextFundingTime: 0,
@@ -361,7 +373,7 @@ async function fetchFundingRateHistory(
   return series.history.map((p) => ({
     time: toMs(p.t),
     symbol: cs,
-    rate: p.c,
+    rate: pctToFraction(p.c), // Coinalyze % → fraction (cf. pctToFraction).
     // Comme fetchFundingRate (snapshot) : ni mark price ni heure du prochain funding
     // sur cet endpoint.
     nextFundingTime: 0,
@@ -379,3 +391,96 @@ export const coinalyzeProvider: IDerivedDataProvider = {
   fetchOpenInterestHistory,
   fetchFundingRateHistory,
 };
+
+// ─────────────────────────── Extensions Phase 3 (endpoints non exploités) ───────────────────────────
+// Fonctions AU-DELÀ du contrat IDerivedDataProvider (figé) → exportées à part, pas
+// greffées sur `coinalyzeProvider`. Réutilisent le throttle/santé/mapping ci-dessus.
+
+/**
+ * Heure du prochain RÈGLEMENT de funding, en ms epoch. Coinalyze
+ * (predicted-funding-rate) ne l'expose pas → on calcule la prochaine frontière de
+ * 8 h UTC (00:00 / 08:00 / 16:00), cadence standard des perpétuels Binance USDⓈ-M.
+ * PURE & testée. ⚠️ Hypothèse 8 h : quelques perps règlent en 4 h/1 h — affiché
+ * comme estimation « prochain règlement (~8 h) » côté UI.
+ */
+export function prochainReglementFunding(nowMs: number): number {
+  const HUIT_H = 8 * 60 * 60 * 1000; // les multiples de 8 h depuis l'epoch tombent sur 00/08/16 UTC.
+  return (Math.floor(nowMs / HUIT_H) + 1) * HUIT_H;
+}
+
+/**
+ * Funding rate PRÉDIT (endpoint « current » predicted-funding-rate) : le taux qui
+ * sera appliqué au prochain règlement. `rate` normalisé en fraction (cf. pctToFraction) ;
+ * `nextFundingTime` estimé (prochaine frontière 8 h UTC).
+ */
+export async function fetchPredictedFundingRate(symbol: string): Promise<FundingRate> {
+  const cs = toCoinalyzeSymbol(symbol);
+  const res = await request<CurrentPoint[]>("predicted-funding-rate", { symbols: cs });
+  const p = res[0];
+  if (p === undefined) throw new CoinalyzeError(404, `Aucun funding prédit pour ${cs}`);
+  return {
+    time: toMs(p.update),
+    symbol: cs,
+    rate: pctToFraction(p.value),
+    nextFundingTime: prochainReglementFunding(Date.now()),
+    markPrice: NaN,
+  };
+}
+
+/**
+ * SÉRIE long/short ratio agrégé (comptes) — même endpoint que fetchLongShortRatio
+ * mais renvoie TOUT l'historique de la fenêtre (pour une sparkline), pas seulement
+ * le dernier point.
+ */
+export async function fetchLongShortRatioHistory(
+  symbol: string,
+  period: string,
+  sinceMs: number
+): Promise<LongShortRatio[]> {
+  const cs = toCoinalyzeSymbol(symbol);
+  const interval = normalizeInterval(period);
+  const to = Math.floor(Date.now() / 1000);
+  const from = Math.floor(sinceMs / 1000);
+  const res = await request<HistoryResponse<LsHistoryPoint>[]>("long-short-ratio-history", {
+    symbols: cs,
+    interval,
+    from: String(from),
+    to: String(to),
+  });
+  const series = res[0];
+  if (series === undefined) return [];
+  return series.history.map((p) => ({
+    time: toMs(p.t),
+    symbol: cs,
+    longAccount: p.l,
+    shortAccount: p.s,
+    ratio: p.r,
+    type: "account" as const,
+  }));
+}
+
+/** Total de liquidations long vs short d'un même bucket temporel (barres bicolores). */
+export interface LiquidationBucket {
+  time: number;
+  longUsd: number;
+  shortUsd: number;
+}
+
+/**
+ * Regroupe les liquidations (déjà séparées par côté par fetchLiquidations) en buckets
+ * temporels {longUsd, shortUsd}. PURE & testée : alimente le mini-histogramme bicolore.
+ */
+export function groupLiquidationBuckets(liqs: Liquidation[]): LiquidationBucket[] {
+  const byTime = new Map<number, LiquidationBucket>();
+  for (const l of liqs) {
+    let bucket = byTime.get(l.time);
+    if (bucket === undefined) {
+      bucket = { time: l.time, longUsd: 0, shortUsd: 0 };
+      byTime.set(l.time, bucket);
+    }
+    const usd = Number.isFinite(l.qtyUsd) ? l.qtyUsd : 0;
+    if (l.side === "long") bucket.longUsd += usd;
+    else bucket.shortUsd += usd;
+  }
+  return [...byTime.values()].sort((a, b) => a.time - b.time);
+}

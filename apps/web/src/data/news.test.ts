@@ -1,0 +1,201 @@
+/**
+ * Tests des fonctions PURES de data/news.ts : parseur RSS 2.0 + Atom (fixtures inline),
+ * fusion/dédup, mots-clés symbole, pertinence par mot entier, horodatage relatif.
+ * Aucun réseau, aucun DOM — l'extracteur XML est volontairement sans dépendance.
+ */
+import { describe, expect, it } from "vitest";
+import {
+  estPertinentPourSymbole,
+  fusionner,
+  parseDate,
+  parseFeed,
+  symbolKeywords,
+  tempsRelatif,
+  type NewsItem,
+} from "./news";
+
+// Fixture RSS 2.0 : item CDATA (titre + lien) avec atom:updated parasite, item à lien
+// entité (&amp;), et item SANS titre (doit être ignoré).
+const RSS = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<channel>
+  <title>Feed</title>
+  <atom:link href="https://ex.com/rss" rel="self"/>
+  <item>
+    <title>Bitcoin tops $60K: bull trap or $65K next? </title>
+    <pubDate>Wed, 01 Jul 2026 22:02:40 +0000</pubDate>
+    <atom:updated>Wed, 01 Jul 2026 22:27:50 +0000</atom:updated>
+    <guid isPermaLink="true">https://ct.com/guid-a</guid>
+    <link><![CDATA[https://ct.com/markets/a?utm_source=rss_feed&utm_medium=rss]]></link>
+    <description><![CDATA[<p><img src="x.jpg"></p><p>Bitcoin & Ethereum rally as <b>ETFs</b> land.</p>]]></description>
+  </item>
+  <item>
+    <title>Trump-backed miner sets reverse stock split</title>
+    <link>https://tb.co/post/1?utm_source=rss&amp;utm_medium=rss</link>
+    <pubDate>Wed, 01 Jul 2026 15:16:58 -0400</pubDate>
+    <guid isPermaLink="false">https://tb.co/post/1</guid>
+    <description>Plain summary about Solana staking.</description>
+  </item>
+  <item>
+    <link>https://no-title.example/x</link>
+    <pubDate>Wed, 01 Jul 2026 10:00:00 +0000</pubDate>
+  </item>
+</channel>
+</rss>`;
+
+// Fixture Atom : titre/résumé HTML en CDATA, lien en attribut href, dates ISO-8601.
+const ATOM = `<?xml version="1.0" encoding="utf-8" ?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Blockworks</title>
+  <link href="https://bw.com" rel="alternate"/>
+  <entry>
+    <title type="html"><![CDATA[Venezuela sanctions are stablecoins proof of concept]]></title>
+    <id>https://bw.com/news/venezuela</id>
+    <link href="https://bw.com/news/venezuela"/>
+    <updated>2026-07-01T15:00:00.000Z</updated>
+    <summary type="html"><![CDATA[Banned from the dollar system, the country uses digital dollars instead.]]></summary>
+    <published>2026-07-01T14:00:00.000Z</published>
+  </entry>
+</feed>`;
+
+describe("parseFeed — RSS 2.0", () => {
+  const items = parseFeed(RSS, "cointelegraph");
+
+  it("ignore les items sans titre", () => {
+    expect(items).toHaveLength(2);
+  });
+
+  it("nettoie le titre (trim, entités, HTML)", () => {
+    expect(items[0]?.title).toBe("Bitcoin tops $60K: bull trap or $65K next?");
+  });
+
+  it("prend le <link> (CDATA) et non <atom:updated>", () => {
+    expect(items[0]?.link).toBe("https://ct.com/markets/a?utm_source=rss_feed&utm_medium=rss");
+  });
+
+  it("décode les entités du lien plein texte (&amp; → &)", () => {
+    expect(items[1]?.link).toBe("https://tb.co/post/1?utm_source=rss&utm_medium=rss");
+  });
+
+  it("strippe le HTML du résumé et décode les entités", () => {
+    expect(items[0]?.summary).toBe("Bitcoin & Ethereum rally as ETFs land.");
+  });
+
+  it("parse la date en ms epoch (> 0)", () => {
+    expect(items[0]?.time).toBe(Date.parse("Wed, 01 Jul 2026 22:02:40 +0000"));
+    expect(items[1]?.time).toBeGreaterThan(0);
+  });
+
+  it("porte la source fournie", () => {
+    expect(items[0]?.source).toBe("cointelegraph");
+  });
+});
+
+describe("parseFeed — Atom", () => {
+  const items = parseFeed(ATOM, "blockworks");
+
+  it("extrait une entrée", () => {
+    expect(items).toHaveLength(1);
+  });
+
+  it("prend le href du <link/> auto-fermant", () => {
+    expect(items[0]?.link).toBe("https://bw.com/news/venezuela");
+  });
+
+  it("prend <published> comme date", () => {
+    expect(items[0]?.time).toBe(Date.parse("2026-07-01T14:00:00.000Z"));
+  });
+
+  it("extrait le résumé depuis <summary>", () => {
+    expect(items[0]?.summary).toBe("Banned from the dollar system, the country uses digital dollars instead.");
+  });
+
+  it("porte le titre et la source", () => {
+    expect(items[0]?.title).toBe("Venezuela sanctions are stablecoins proof of concept");
+    expect(items[0]?.source).toBe("blockworks");
+  });
+});
+
+describe("parseDate", () => {
+  it("parse RFC-822 et ISO-8601", () => {
+    expect(parseDate("Wed, 01 Jul 2026 15:16:58 -0400")).toBeGreaterThan(0);
+    expect(parseDate("2026-07-01T14:00:00.000Z")).toBe(Date.parse("2026-07-01T14:00:00.000Z"));
+  });
+  it("retourne 0 pour une date illisible ou vide", () => {
+    expect(parseDate("pas une date")).toBe(0);
+    expect(parseDate("")).toBe(0);
+  });
+});
+
+describe("fusionner", () => {
+  const item = (id: string, link: string, time: number, title = "T"): NewsItem => ({
+    id,
+    link,
+    time,
+    title,
+    source: "coindesk",
+    summary: "",
+  });
+
+  it("dédup par lien en gardant la plus récente, trie par date décroissante", () => {
+    const a = item("1", "https://x/1", 100, "A");
+    const aRecent = item("1b", "https://x/1", 200, "A-recent");
+    const b = item("2", "https://x/2", 150, "B");
+    const out = fusionner([[a, b], [aRecent]]);
+    expect(out).toHaveLength(2);
+    expect(out[0]?.time).toBe(200);
+    expect(out[0]?.title).toBe("A-recent");
+    expect(out[1]?.link).toBe("https://x/2");
+  });
+});
+
+describe("symbolKeywords", () => {
+  it("mappe les majors (nom + ticker)", () => {
+    expect(symbolKeywords("BTCUSDT")).toEqual(expect.arrayContaining(["bitcoin", "btc"]));
+    expect(symbolKeywords("ETHUSDT")).toContain("ethereum");
+    expect(symbolKeywords("SOL")).toContain("solana");
+  });
+  it("retombe sur le ticker de base si inconnu", () => {
+    expect(symbolKeywords("FOOUSDT")).toEqual(["foo"]);
+  });
+});
+
+describe("estPertinentPourSymbole", () => {
+  const news = (title: string, summary = ""): NewsItem => ({
+    id: title,
+    link: "",
+    time: 0,
+    title,
+    source: "coindesk",
+    summary,
+  });
+
+  it("matche un mot entier (titre ou résumé)", () => {
+    expect(estPertinentPourSymbole(news("Bitcoin ETF approved"), ["bitcoin", "btc"])).toBe(true);
+    expect(estPertinentPourSymbole(news("Rally continues", "btc breaks out"), ["bitcoin", "btc"])).toBe(true);
+  });
+
+  it("ne matche pas une sous-chaîne", () => {
+    expect(estPertinentPourSymbole(news("Bitcoinist rumor mill"), ["bitcoin"])).toBe(false);
+    expect(estPertinentPourSymbole(news("New workshop opens"), ["op"])).toBe(false);
+  });
+
+  it("est faux quand l'actif n'est pas concerné ou sans mots-clés", () => {
+    expect(estPertinentPourSymbole(news("Ethereum upgrade"), ["bitcoin", "btc"])).toBe(false);
+    expect(estPertinentPourSymbole(news("Anything"), [])).toBe(false);
+  });
+});
+
+describe("tempsRelatif", () => {
+  const now = 10_000_000_000_000;
+  it("formatte les tranches d'âge", () => {
+    expect(tempsRelatif(now, now)).toBe("à l'instant");
+    expect(tempsRelatif(now - 4 * 60_000, now)).toBe("il y a 4 min");
+    expect(tempsRelatif(now - 3 * 3_600_000, now)).toBe("il y a 3 h");
+    expect(tempsRelatif(now - 2 * 86_400_000, now)).toBe("il y a 2 j");
+    expect(tempsRelatif(now - 10 * 86_400_000, now)).toBe("il y a 1 sem");
+  });
+  it("retourne — pour une date absente", () => {
+    expect(tempsRelatif(0)).toBe("—");
+  });
+});

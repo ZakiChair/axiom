@@ -1,0 +1,403 @@
+/**
+ * Flux NEWS crypto agrégés — RSS 2.0 + Atom via le proxy générique /extapi.
+ *
+ * Les flux RSS des grands médias crypto n'exposent AUCUN en-tête CORS : un appel
+ * direct depuis le navigateur est bloqué. On les route donc en same-origin via
+ * `/extapi/<hote>/<chemin>` (cf. data/extapi.ts). Chaque flux est indépendant :
+ * un flux mort (404, redirection cross-origin, XML illisible) est marqué « erreur »
+ * SANS casser les autres (Promise.allSettled + dégradation par flux).
+ *
+ * Parsing : extracteur XML PUR (sans dépendance ni DOMParser). Motivation : les tests
+ * vitest tournent sous Node (pas de jsdom, aucune dépendance nouvelle autorisée) où
+ * `DOMParser` n'existe pas ; l'extracteur par balises est donc testable partout ET
+ * fonctionne à l'identique dans le navigateur. Il couvre les deux formats réels
+ * rencontrés (RSS `<item>` / Atom `<entry>`), CDATA et entités HTML incluses.
+ *
+ * Fusion multi-flux : dédup par lien, tri par date décroissante. Rafraîchissement
+ * périodique (3 min) via `pollLoop` (source « news » dans le registre santé).
+ */
+import type { Unsubscribe } from "@axiom/types";
+import { extUrl } from "./extapi";
+import { pollLoop } from "./pollLoop";
+import { newsStore } from "../store/news";
+
+// ─────────────────────────── Types & configuration des flux ───────────────────────────
+
+/** Identifiant stable d'une source de news (clé des statuts par flux + badge). */
+export type NewsSourceId = "coindesk" | "cointelegraph" | "theblock" | "decrypt" | "blockworks";
+
+/** Une news normalisée (issue d'un `<item>` RSS ou d'une `<entry>` Atom). */
+export interface NewsItem {
+  /** Clé stable : lien, sinon guid/id, sinon source+titre+date. Sert au dédup + « lu ». */
+  id: string;
+  /** Titre nettoyé (sans HTML ni entités). */
+  title: string;
+  /** Lien externe de l'article (chaîne vide si le flux n'en fournit aucun). */
+  link: string;
+  /** Horodatage ms epoch (0 si date absente/illisible → trié en fin de liste). */
+  time: number;
+  /** Source d'origine. */
+  source: NewsSourceId;
+  /** Résumé court, sans HTML (tronqué). */
+  summary: string;
+}
+
+/** Description d'un flux RSS/Atom à interroger. */
+export interface NewsFeed {
+  id: NewsSourceId;
+  /** Libellé affiché (badge). */
+  label: string;
+  /** Hôte whitelisté du proxy /extapi. */
+  host: string;
+  /** Chemin du flux (sans slash de tête). */
+  path: string;
+  /** Couleur du badge de source (accent visuel dense). */
+  color: string;
+}
+
+/**
+ * Flux interrogés. Chemins VÉRIFIÉS en réel (2026-07) :
+ *  - CoinDesk : `arc/outboundfeeds/rss` SANS slash final — la variante `.../rss/`
+ *    renvoie un 308 vers une Location relative que le proxy ne peut pas suivre.
+ *  - Cointelegraph / The Block / Decrypt : RSS 2.0 servi directement (200).
+ *  - Blockworks : `blockworks.co/feed` redirige (308) vers `blockworks.com/feed`
+ *    (changement d'HÔTE, hors whitelist) et sert de l'Atom → dégrade proprement en
+ *    « erreur » tant que l'hôte `blockworks.com` n'est pas ajouté au proxy. Conservé
+ *    dans la liste pour reprise automatique si la whitelist/redirection évolue.
+ */
+export const NEWS_FEEDS: readonly NewsFeed[] = [
+  { id: "coindesk", label: "CoinDesk", host: "www.coindesk.com", path: "arc/outboundfeeds/rss", color: "#f7a600" },
+  { id: "cointelegraph", label: "Cointelegraph", host: "cointelegraph.com", path: "rss", color: "#fab617" },
+  { id: "theblock", label: "The Block", host: "www.theblock.co", path: "rss.xml", color: "#4f8cff" },
+  { id: "decrypt", label: "Decrypt", host: "decrypt.co", path: "feed", color: "#22c55e" },
+  { id: "blockworks", label: "Blockworks", host: "blockworks.co", path: "feed", color: "#a855f7" },
+];
+
+/** Source du registre santé. */
+const HEALTH_SOURCE = "news";
+/** Intervalle de rafraîchissement (3 min). */
+const NEWS_POLL_MS = 180_000;
+/** Longueur max du résumé affiché. */
+const SUMMARY_MAX = 200;
+
+// ─────────────────────────── Extraction XML (pure, sans dépendance) ───────────────────────────
+
+/** Retire un éventuel enrobage `<![CDATA[ ... ]]>` (contenu conservé tel quel). */
+function retirerCData(s: string): string {
+  const m = /^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/.exec(s);
+  return m ? (m[1] ?? "") : s;
+}
+
+/** Table d'entités nommées usuelles des flux RSS/Atom. */
+const ENTITES: Record<string, string> = {
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+  "&apos;": "'",
+  "&#39;": "'",
+  "&nbsp;": " ",
+};
+
+/** Décode les entités HTML (nommées + numériques). `&amp;` traité en dernier (anti double-décodage). */
+function decoderEntites(s: string): string {
+  let out = s.replace(/&#x([0-9a-fA-F]+);/g, (_, h: string) => codePoint(parseInt(h, 16)));
+  out = out.replace(/&#(\d+);/g, (_, d: string) => codePoint(parseInt(d, 10)));
+  out = out.replace(/&lt;|&gt;|&quot;|&apos;|&#39;|&nbsp;/g, (e) => ENTITES[e] ?? e);
+  return out.replace(/&amp;/g, "&");
+}
+
+/** Code point → chaîne, en ignorant les valeurs invalides (jamais bloquant). */
+function codePoint(n: number): string {
+  if (!Number.isFinite(n) || n < 0 || n > 0x10ffff) return "";
+  try {
+    return String.fromCodePoint(n);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Contenu texte de la PREMIÈRE balise `<tag>…</tag>` du bloc (CDATA + entités décodés,
+ * espaces normalisés). Le lookahead `(?=[\s/>])` empêche de confondre un préfixe de
+ * namespace (`<content:encoded>` ne matche pas `content`). Chaîne vide si absente.
+ */
+function texteBalise(bloc: string, tag: string): string {
+  const re = new RegExp(`<${tag}(?=[\\s/>])[^>]*>([\\s\\S]*?)</${tag}>`, "i");
+  const m = re.exec(bloc);
+  if (!m) return "";
+  return normaliserEspaces(decoderEntites(retirerCData(m[1] ?? "")));
+}
+
+/** Retire les balises HTML d'un fragment, décode, tronque et normalise les espaces. */
+function texteResume(bloc: string, ...tags: string[]): string {
+  let brut = "";
+  for (const t of tags) {
+    brut = premierContenu(bloc, t);
+    if (brut) break;
+  }
+  const sansHtml = retirerCData(brut).replace(/<[^>]+>/g, " ");
+  const texte = normaliserEspaces(decoderEntites(sansHtml));
+  return texte.length > SUMMARY_MAX ? `${texte.slice(0, SUMMARY_MAX).trimEnd()}…` : texte;
+}
+
+/** Contenu BRUT (CDATA non retiré) de la première balise `<tag>` — utilisé par texteResume. */
+function premierContenu(bloc: string, tag: string): string {
+  const re = new RegExp(`<${tag}(?=[\\s/>])[^>]*>([\\s\\S]*?)</${tag}>`, "i");
+  const m = re.exec(bloc);
+  return m ? (m[1] ?? "") : "";
+}
+
+/** Effondre toute suite d'espaces/retours en un seul espace, puis trim. */
+function normaliserEspaces(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Lien d'une `<entry>` Atom : href de la balise `<link>` en préférant `rel="alternate"`
+ * (ou l'absence de rel) ; sinon le premier href rencontré. Chaîne vide si aucun.
+ */
+function hrefAtom(bloc: string): string {
+  let secours = "";
+  for (const l of bloc.matchAll(/<link\b([^>]*?)\/?>/gi)) {
+    const attrs = l[1] ?? "";
+    const href = /\bhref=["']([^"']+)["']/i.exec(attrs)?.[1];
+    if (!href) continue;
+    const rel = /\brel=["']([^"']+)["']/i.exec(attrs)?.[1];
+    if (rel === undefined || rel === "alternate") return decoderEntites(href.trim());
+    if (!secours) secours = href;
+  }
+  return secours ? decoderEntites(secours.trim()) : "";
+}
+
+/** Découpe le XML en blocs `<tag>…</tag>` (item RSS ou entry Atom). */
+function blocs(xml: string, tag: "item" | "entry"): string[] {
+  const re = new RegExp(`<${tag}(?=[\\s/>])[^>]*>([\\s\\S]*?)</${tag}>`, "gi");
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(xml)) !== null) out.push(m[1] ?? "");
+  return out;
+}
+
+/** Convertit une date RSS (RFC-822) ou Atom (ISO-8601) en ms epoch ; 0 si illisible. */
+export function parseDate(s: string): number {
+  if (!s) return 0;
+  const t = Date.parse(s.trim());
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** Parse un bloc `<item>` RSS 2.0. `null` si le titre manque (entrée inexploitable). */
+function parseItemRss(bloc: string, source: NewsSourceId): NewsItem | null {
+  const title = texteBalise(bloc, "title");
+  if (!title) return null;
+  const link = texteBalise(bloc, "link");
+  const guid = texteBalise(bloc, "guid");
+  const time = parseDate(texteBalise(bloc, "pubDate"));
+  const summary = texteResume(bloc, "description");
+  const id = link || guid || `${source}:${title}:${time}`;
+  return { id, title, link, time, source, summary };
+}
+
+/** Parse une `<entry>` Atom. `null` si le titre manque. */
+function parseEntreeAtom(bloc: string, source: NewsSourceId): NewsItem | null {
+  const title = texteBalise(bloc, "title");
+  if (!title) return null;
+  const link = hrefAtom(bloc) || texteBalise(bloc, "id");
+  const time = parseDate(texteBalise(bloc, "published") || texteBalise(bloc, "updated"));
+  const summary = texteResume(bloc, "summary", "content");
+  const id = link || `${source}:${title}:${time}`;
+  return { id, title, link, time, source, summary };
+}
+
+/**
+ * Parse un flux RSS 2.0 OU Atom en news normalisées. Détection par présence de blocs
+ * `<item>` (RSS) sinon `<entry>` (Atom). Fonction PURE (testée sur fixtures inline).
+ */
+export function parseFeed(xml: string, source: NewsSourceId): NewsItem[] {
+  const items = blocs(xml, "item");
+  if (items.length > 0) {
+    return items.map((b) => parseItemRss(b, source)).filter((n): n is NewsItem => n !== null);
+  }
+  const entries = blocs(xml, "entry");
+  return entries.map((b) => parseEntreeAtom(b, source)).filter((n): n is NewsItem => n !== null);
+}
+
+// ─────────────────────────── Fusion multi-flux (pure) ───────────────────────────
+
+/**
+ * Fusionne plusieurs listes de news : dédup par LIEN (à défaut par id), en gardant la
+ * plus récente en cas de doublon, puis tri par date décroissante. Fonction PURE.
+ */
+export function fusionner(listes: NewsItem[][]): NewsItem[] {
+  const parCle = new Map<string, NewsItem>();
+  for (const liste of listes) {
+    for (const it of liste) {
+      const cle = it.link || it.id;
+      const existant = parCle.get(cle);
+      if (existant === undefined || it.time > existant.time) parCle.set(cle, it);
+    }
+  }
+  return [...parCle.values()].sort((a, b) => b.time - a.time);
+}
+
+// ─────────────────────────── Filtre « symbole actif » (pur) ───────────────────────────
+
+/** Suffixes de cotation retirés pour isoler le ticker (du plus long au plus court). */
+const SUFFIXES_COTATION = ["USDT", "USDC", "FDUSD", "TUSD", "BUSD", "DAI", "USD", "EUR", "BTC", "ETH"];
+
+/** Isole le ticker de base d'un symbole (« BTCUSDT » → « BTC »). */
+function baseSymbole(symbol: string): string {
+  const s = symbol.trim().toUpperCase().replace("/", "");
+  for (const q of SUFFIXES_COTATION) {
+    if (s.length > q.length && s.endsWith(q)) return s.slice(0, -q.length);
+  }
+  return s;
+}
+
+/**
+ * Mots-clés (nom complet + ticker) associés aux 30+ actifs majeurs, pour filtrer les
+ * news pertinentes au symbole affiché. Volontairement conservateur (heuristique) :
+ * les tickers courts/ambigus s'appuient sur la correspondance par MOT ENTIER en aval.
+ */
+const MOTS_SYMBOLE: Record<string, string[]> = {
+  BTC: ["bitcoin", "btc"],
+  ETH: ["ethereum", "ether", "eth"],
+  SOL: ["solana", "sol"],
+  BNB: ["binance coin", "bnb"],
+  XRP: ["ripple", "xrp"],
+  ADA: ["cardano", "ada"],
+  DOGE: ["dogecoin", "doge"],
+  AVAX: ["avalanche", "avax"],
+  DOT: ["polkadot", "dot"],
+  LINK: ["chainlink", "link"],
+  MATIC: ["polygon", "matic"],
+  POL: ["polygon", "pol"],
+  TRX: ["tron", "trx"],
+  LTC: ["litecoin", "ltc"],
+  SHIB: ["shiba inu", "shib"],
+  UNI: ["uniswap", "uni"],
+  ATOM: ["cosmos", "atom"],
+  XLM: ["stellar", "xlm"],
+  NEAR: ["near protocol", "near"],
+  APT: ["aptos", "apt"],
+  ARB: ["arbitrum", "arb"],
+  OP: ["optimism", "op"],
+  FIL: ["filecoin", "fil"],
+  ICP: ["internet computer", "icp"],
+  HBAR: ["hedera", "hbar"],
+  INJ: ["injective", "inj"],
+  SUI: ["sui"],
+  SEI: ["sei"],
+  TIA: ["celestia", "tia"],
+  AAVE: ["aave"],
+  MKR: ["maker", "makerdao", "mkr"],
+  PEPE: ["pepe"],
+  WIF: ["dogwifhat", "wif"],
+};
+
+/**
+ * Mots-clés de recherche news dérivés d'un symbole (« ETHUSDT » → [ethereum, ether, eth]).
+ * Repli : le ticker de base seul si l'actif n'est pas cartographié. Fonction PURE.
+ */
+export function symbolKeywords(symbol: string): string[] {
+  const base = baseSymbole(symbol);
+  return MOTS_SYMBOLE[base] ?? (base.length >= 2 ? [base.toLowerCase()] : []);
+}
+
+/** Échappe une chaîne pour usage littéral dans une RegExp. */
+function echapperRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * La news matche-t-elle l'un des mots-clés ? Correspondance par MOT ENTIER (bornes de
+ * mot) sur titre + résumé, insensible à la casse — limite les faux positifs des tickers
+ * courts (ex. « op », « link »). Liste vide → toujours faux. Fonction PURE.
+ */
+export function estPertinentPourSymbole(item: NewsItem, motsCles: string[]): boolean {
+  if (motsCles.length === 0) return false;
+  const texte = `${item.title} ${item.summary}`.toLowerCase();
+  return motsCles.some((kw) => {
+    const k = kw.toLowerCase();
+    return new RegExp(`(^|[^a-z0-9])${echapperRegex(k)}([^a-z0-9]|$)`, "i").test(texte);
+  });
+}
+
+// ─────────────────────────── Horodatage relatif (pur) ───────────────────────────
+
+/** Formatte un âge en « à l'instant » / « il y a 4 min » / « il y a 2 h » / « il y a 3 j ». */
+export function tempsRelatif(ts: number, maintenant: number = Date.now()): string {
+  if (!Number.isFinite(ts) || ts <= 0) return "—";
+  const delta = Math.max(0, maintenant - ts);
+  const min = Math.floor(delta / 60_000);
+  if (min < 1) return "à l'instant";
+  if (min < 60) return `il y a ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `il y a ${h} h`;
+  const j = Math.floor(h / 24);
+  if (j < 7) return `il y a ${j} j`;
+  return `il y a ${Math.floor(j / 7)} sem`;
+}
+
+// ─────────────────────────── Récupération réseau + veille ───────────────────────────
+
+/** Récupère et parse un flux. Lève en cas d'échec réseau/HTTP (capté par allSettled). */
+async function fetchFlux(feed: NewsFeed, signal?: AbortSignal): Promise<NewsItem[]> {
+  const res = await fetch(extUrl(feed.host, feed.path), { signal });
+  if (!res.ok) throw new Error(`${feed.label} HTTP ${res.status}`);
+  const xml = await res.text();
+  return parseFeed(xml, feed.id);
+}
+
+/** Statut d'un flux après un cycle. */
+export type FeedStatut = "ok" | "vide" | "erreur";
+
+/** Résultat d'un cycle de récupération multi-flux. */
+export interface ResultatNews {
+  items: NewsItem[];
+  statuts: Partial<Record<NewsSourceId, FeedStatut>>;
+  toutEnErreur: boolean;
+}
+
+/** Interroge tous les flux en parallèle (dégradation par flux) puis fusionne. */
+export async function fetchToutesLesNews(signal?: AbortSignal): Promise<ResultatNews> {
+  const resultats = await Promise.allSettled(NEWS_FEEDS.map((f) => fetchFlux(f, signal)));
+  const listes: NewsItem[][] = [];
+  const statuts: Partial<Record<NewsSourceId, FeedStatut>> = {};
+  resultats.forEach((r, i) => {
+    const feed = NEWS_FEEDS[i];
+    if (feed === undefined) return;
+    if (r.status === "fulfilled") {
+      listes.push(r.value);
+      statuts[feed.id] = r.value.length > 0 ? "ok" : "vide";
+    } else {
+      statuts[feed.id] = "erreur";
+    }
+  });
+  return {
+    items: fusionner(listes),
+    statuts,
+    toutEnErreur: resultats.every((r) => r.status === "rejected"),
+  };
+}
+
+/**
+ * Démarre la veille news (poll 3 min, source « news » du registre santé). À appeler à
+ * l'ouverture du panneau ; l'`Unsubscribe` retourné coupe le polling à la fermeture.
+ * Si TOUS les flux échouent, on conserve les news précédentes (pas d'écrasement à vide)
+ * et on laisse pollLoop marquer la source en erreur (backoff).
+ */
+export function demarrerVeilleNews(): Unsubscribe {
+  return pollLoop(
+    async (signal, isCancelled) => {
+      const { items, statuts, toutEnErreur } = await fetchToutesLesNews(signal);
+      if (isCancelled()) return;
+      if (toutEnErreur) {
+        newsStore.getState().setStatuts(statuts);
+        throw new Error("Tous les flux news sont hors ligne");
+      }
+      newsStore.getState().appliquerResultat(items, statuts);
+    },
+    NEWS_POLL_MS,
+    { immediate: true, source: HEALTH_SOURCE }
+  );
+}

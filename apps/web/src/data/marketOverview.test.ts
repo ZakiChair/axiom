@@ -1,0 +1,135 @@
+import { describe, expect, it } from "vitest";
+import {
+  parseCategories,
+  parseFearGreed,
+  parseGlobal,
+  parseMarkets,
+  toBinanceUsdtPair,
+} from "./marketOverview";
+
+/** Accès indexé gardé (noUncheckedIndexedAccess actif). */
+function at<T>(arr: T[], i: number): T {
+  const v = arr[i];
+  if (v === undefined) throw new Error(`élément ${i} absent`);
+  return v;
+}
+
+describe("parseGlobal", () => {
+  it("extrait mcap total, volume, dominances et variation 24 h", () => {
+    const json = {
+      data: {
+        total_market_cap: { usd: 2_400_000_000_000 },
+        total_volume: { usd: 95_000_000_000 },
+        market_cap_percentage: { btc: 54.2, eth: 17.1 },
+        market_cap_change_percentage_24h_usd: -1.35,
+      },
+    };
+    const g = parseGlobal(json);
+    expect(g.totalMcapUsd).toBe(2_400_000_000_000);
+    expect(g.totalVolumeUsd).toBe(95_000_000_000);
+    expect(g.btcDominance).toBeCloseTo(54.2, 5);
+    expect(g.ethDominance).toBeCloseTo(17.1, 5);
+    expect(g.mcapChangePct24h).toBeCloseTo(-1.35, 5);
+  });
+
+  it("tolère des champs manquants (→ 0)", () => {
+    expect(parseGlobal({})).toEqual({
+      totalMcapUsd: 0,
+      totalVolumeUsd: 0,
+      btcDominance: 0,
+      ethDominance: 0,
+      mcapChangePct24h: 0,
+    });
+    expect(parseGlobal(null)).toMatchObject({ totalMcapUsd: 0 });
+  });
+});
+
+describe("parseMarkets", () => {
+  it("mappe les entrées, met le symbole en majuscules et trie par mcap décroissante", () => {
+    const json = [
+      { id: "ethereum", symbol: "eth", name: "Ethereum", current_price: 3400, market_cap: 410e9, price_change_percentage_24h: 2.1 },
+      { id: "bitcoin", symbol: "btc", name: "Bitcoin", current_price: 68000, market_cap: 1330e9, price_change_percentage_24h: -0.8 },
+    ];
+    const tiles = parseMarkets(json);
+    expect(tiles).toHaveLength(2);
+    // Trié : BTC (mcap plus grosse) d'abord.
+    expect(at(tiles, 0).symbol).toBe("BTC");
+    expect(at(tiles, 0).name).toBe("Bitcoin");
+    expect(at(tiles, 0).changePct24h).toBeCloseTo(-0.8, 5);
+    expect(at(tiles, 1).symbol).toBe("ETH");
+  });
+
+  it("ignore les entrées sans id/symbol ou de mcap ≤ 0", () => {
+    const json = [
+      { id: "bitcoin", symbol: "btc", name: "Bitcoin", market_cap: 1330e9 },
+      { id: "", symbol: "x", market_cap: 5 }, // id vide
+      { id: "y", symbol: "", market_cap: 5 }, // symbole vide
+      { id: "z", symbol: "z", market_cap: 0 }, // mcap nulle
+      { id: "w", symbol: "w", market_cap: -10 }, // mcap négative
+    ];
+    const tiles = parseMarkets(json);
+    expect(tiles).toHaveLength(1);
+    expect(at(tiles, 0).symbol).toBe("BTC");
+  });
+
+  it("price_change null → 0 (tuile neutre)", () => {
+    const tiles = parseMarkets([
+      { id: "a", symbol: "a", name: "A", market_cap: 100, price_change_percentage_24h: null },
+    ]);
+    expect(at(tiles, 0).changePct24h).toBe(0);
+  });
+
+  it("entrée non-tableau → liste vide", () => {
+    expect(parseMarkets({})).toEqual([]);
+    expect(parseMarkets(null)).toEqual([]);
+  });
+});
+
+describe("parseCategories", () => {
+  it("mappe les secteurs et trie par |Δ24 h| décroissant", () => {
+    const json = [
+      { id: "meme-token", name: "Meme", market_cap: 60e9, market_cap_change_24h: 1.2 },
+      { id: "ai-big-data", name: "AI", market_cap: 40e9, market_cap_change_24h: -8.5 },
+      { id: "layer-1", name: "Layer 1", market_cap: 900e9, market_cap_change_24h: 0.4 },
+    ];
+    const secteurs = parseCategories(json);
+    expect(secteurs).toHaveLength(3);
+    // |−8.5| > |1.2| > |0.4|
+    expect(at(secteurs, 0).name).toBe("AI");
+    expect(at(secteurs, 1).name).toBe("Meme");
+    expect(at(secteurs, 2).name).toBe("Layer 1");
+  });
+
+  it("market_cap_change_24h null → 0 ; ignore les entrées sans nom", () => {
+    const secteurs = parseCategories([
+      { id: "x", name: "X", market_cap: 1, market_cap_change_24h: null },
+      { id: "y", market_cap: 1 }, // pas de nom
+    ]);
+    expect(secteurs).toHaveLength(1);
+    expect(at(secteurs, 0).changePct24h).toBe(0);
+  });
+});
+
+describe("parseFearGreed", () => {
+  it("convertit value/timestamp (chaînes) en nombre + ms epoch", () => {
+    const json = { data: [{ value: "45", value_classification: "Fear", timestamp: "1710000000" }] };
+    const fng = parseFearGreed(json);
+    expect(fng).not.toBeNull();
+    expect(fng?.value).toBe(45);
+    expect(fng?.classification).toBe("Fear");
+    expect(fng?.time).toBe(1710000000 * 1000);
+  });
+
+  it("données vides/invalides → null", () => {
+    expect(parseFearGreed({ data: [] })).toBeNull();
+    expect(parseFearGreed({})).toBeNull();
+    expect(parseFearGreed({ data: [{ value: "abc" }] })).toBeNull();
+  });
+});
+
+describe("toBinanceUsdtPair", () => {
+  it("suffixe USDT et met en majuscules", () => {
+    expect(toBinanceUsdtPair("btc")).toBe("BTCUSDT");
+    expect(toBinanceUsdtPair(" eth ")).toBe("ETHUSDT");
+  });
+});

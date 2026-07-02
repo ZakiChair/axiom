@@ -18,9 +18,88 @@ import { DerivativesWindow } from "./components/DerivativesWindow";
 import { HealthPanel } from "./components/HealthPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { CommandPalette } from "./components/CommandPalette";
+// Fenêtres non modales de la Phase 3 (dockées à droite, montées en permanence : elles se
+// cachent elles-mêmes via translate-x quand fermées). EcoWindow importe chart/ecoMarkers en
+// effet de bord → doit rester monté pour que les marqueurs éco fonctionnent.
+import { EcoWindow } from "./components/EcoWindow";
+import { NewsWindow } from "./components/NewsWindow";
+import { CorrWindow, corrUiStore, commandes as corrCommands } from "./components/CorrWindow";
+import { OnchainWindow } from "./components/OnchainWindow";
+import { MarketMapWindow, commandes as mapCommands } from "./components/MarketMapWindow";
+import { PortfolioWindow } from "./components/PortfolioWindow";
+import { NotesWindow } from "./components/NotesWindow";
+import { ScreenerWindow } from "./components/ScreenerWindow";
+import {
+  TermStructureWindow,
+  termStructureUiStore,
+  commandes as termCommands,
+} from "./components/TermStructureWindow";
+import { OptionsWindow, optionsUiStore, commandes as optionsCommands } from "./components/OptionsWindow";
 import { settingsUiStore } from "./store/settings-ui";
+import { derivativesUiStore } from "./store/derivatives-ui";
+import { ecoStore, ecoCommands } from "./store/eco";
+import { newsUiStore, commandes as newsCommands } from "./store/news";
+import { onchainUiStore, commandes as onchainCommands } from "./store/onchain";
+import { marketMapUiStore } from "./store/marketmap-ui";
+import { portfolioUiStore, commandes as portfolioCommands } from "./store/portfolio";
+import { notesUiStore, commandes as notesCommands } from "./store/notes";
+import { screenerStore, commandesScreener } from "./store/screener";
+import { commandes as derivChartCommands } from "./store/derivatives-chart";
+import { enregistrerCommandes } from "./commands/registry";
 import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
 import { demarrerAlertes } from "./alerts/runtime";
+
+// ─────────────────────────── Greffe des commandes de palette (Phase 3) ───────────────────────────
+
+/**
+ * Enregistre les commandes de palette des fenêtres de la Phase 3 (point d'extension
+ * ADDITIF, idempotent par `id`). Fait à l'IMPORT — donc AVANT le premier rendu de la
+ * palette — comme le bloc Workspaces de Toolbar.tsx. Placé ici (et non dans registry.ts)
+ * pour NE PAS coupler le registre — ni son test unitaire — au graphe de dépendances lourd
+ * des panneaux (chart/canvas/fetchers). Mnémoniques : ECO, NEWS, CORR, CHAIN, IMAP, PORT,
+ * NOTE, EQS, TERM, OMON (DES est déjà dans le registre statique).
+ */
+enregistrerCommandes([
+  ...ecoCommands,
+  ...newsCommands,
+  ...corrCommands,
+  ...onchainCommands,
+  ...mapCommands,
+  ...portfolioCommands,
+  ...notesCommands,
+  ...commandesScreener,
+  ...termCommands,
+  ...optionsCommands,
+  // Sous-panes OI/funding SUR le chart : le contrôleur (agent « deriv ») est DÉJÀ câblé
+  // dans Chart.tsx ; ces bascules (OI / FUND) le rendent atteignable (sinon inerte).
+  ...derivChartCommands,
+]);
+
+// ─────────────────────────── Exclusion mutuelle des panneaux dockés à droite ───────────────────────────
+
+/**
+ * Tous les panneaux non modaux partagent le MÊME emplacement (`fixed right-0 top-0 z-40`).
+ * On n'en montre donc qu'UN à la fois : ouvrir l'un ferme les autres. Bénéfice double —
+ * pas d'empilement visuel, et le polling des panneaux masqués s'arrête (leurs effets se
+ * coupent sur `open === false`). Chaque store vanilla expose `open` + une méthode de fermeture.
+ */
+const PANNEAUX_DROITE: {
+  estOuvert: () => boolean;
+  fermer: () => void;
+  sabonner: (cb: () => void) => () => void;
+}[] = [
+  { estOuvert: () => derivativesUiStore.getState().open, fermer: () => derivativesUiStore.getState().closeDerivatives(), sabonner: (cb) => derivativesUiStore.subscribe(cb) },
+  { estOuvert: () => ecoStore.getState().open, fermer: () => ecoStore.getState().closeEco(), sabonner: (cb) => ecoStore.subscribe(cb) },
+  { estOuvert: () => newsUiStore.getState().open, fermer: () => newsUiStore.getState().closeNews(), sabonner: (cb) => newsUiStore.subscribe(cb) },
+  { estOuvert: () => corrUiStore.getState().open, fermer: () => corrUiStore.getState().closeCorr(), sabonner: (cb) => corrUiStore.subscribe(cb) },
+  { estOuvert: () => onchainUiStore.getState().open, fermer: () => onchainUiStore.getState().closeOnchain(), sabonner: (cb) => onchainUiStore.subscribe(cb) },
+  { estOuvert: () => marketMapUiStore.getState().open, fermer: () => marketMapUiStore.getState().closeMarketMap(), sabonner: (cb) => marketMapUiStore.subscribe(cb) },
+  { estOuvert: () => portfolioUiStore.getState().open, fermer: () => portfolioUiStore.getState().closePortfolio(), sabonner: (cb) => portfolioUiStore.subscribe(cb) },
+  { estOuvert: () => notesUiStore.getState().open, fermer: () => notesUiStore.getState().closeNotes(), sabonner: (cb) => notesUiStore.subscribe(cb) },
+  { estOuvert: () => screenerStore.getState().open, fermer: () => screenerStore.getState().closeScreener(), sabonner: (cb) => screenerStore.subscribe(cb) },
+  { estOuvert: () => termStructureUiStore.getState().open, fermer: () => termStructureUiStore.getState().closeTermStructure(), sabonner: (cb) => termStructureUiStore.subscribe(cb) },
+  { estOuvert: () => optionsUiStore.getState().open, fermer: () => optionsUiStore.getState().closeOptions(), sabonner: (cb) => optionsUiStore.subscribe(cb) },
+];
 
 export function App() {
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);

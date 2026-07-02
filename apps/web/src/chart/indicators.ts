@@ -52,8 +52,9 @@ function axiomName(instanceId: string): string {
   return `AXIOM_${instanceId}`;
 }
 
-/** Id de pane séparé déterministe pour une instance non-overlay. */
-function axiomPaneId(instanceId: string): string {
+/** Id de pane séparé déterministe pour une instance non-overlay. Exportée : réutilisée
+ * par `chart/paneHeaders.tsx` pour positionner l'en-tête de fermeture/réordonnancement. */
+export function axiomPaneId(instanceId: string): string {
   return `axiom_${instanceId}`;
 }
 
@@ -183,6 +184,28 @@ export class ChartIndicators {
       }
     }
 
+    // Détection d'un changement d'ORDRE des panes séparés (même jeu d'instanceId,
+    // position différente) : KLineChart n'a pas de setter d'ordre natif (PaneOptions
+    // n'a pas de champ `order` en v9.8.12) — seul l'ordre de CRÉATION détermine
+    // l'empilement visuel. On retire les panes concernés pour les laisser être
+    // recréés dans le bon ordre par la boucle ci-dessous (coût : recréation de pane,
+    // PAS recalcul — `computeCache` est conservé).
+    const ordreVoulu = instances
+      .filter((i) => getIndicator(i.defId)?.pane !== "overlay")
+      .map((i) => i.instanceId);
+    const ordreMonte = [...this.active.entries()]
+      .filter(([, info]) => info.paneId !== CANDLE_PANE_ID)
+      .map(([instanceId]) => instanceId);
+    if (ordreVoulu.length === ordreMonte.length && ordreVoulu.join(",") !== ordreMonte.join(",")) {
+      for (const instanceId of ordreVoulu) {
+        const info = this.active.get(instanceId);
+        if (info) {
+          this.chart.removeIndicator(info.paneId, info.name);
+          this.active.delete(instanceId);
+        }
+      }
+    }
+
     for (const inst of instances) {
       const def = getIndicator(inst.defId);
       if (!def) continue; // defId inconnu (persistance obsolète) : ignoré.
@@ -210,7 +233,7 @@ export class ChartIndicators {
       const created = this.chart.createIndicator(
         { name, shortName: formatInstanceLabel(def, inst.params), extendData: result },
         true, // isStack : coexistence des overlays sur le pane prix.
-        { id: paneId }
+        { id: paneId, dragEnabled: true, minHeight: 60 }
       );
       if (created) this.active.set(inst.instanceId, { paneId: created, name, key });
     }

@@ -9,9 +9,15 @@
  * menu Indicateurs.
  *
  * Positionnement : `chart.getSize(paneId)` renvoie un `Bounding { top, left, width,
- * height, ... }` (vérifié sur klinecharts@9.8.12/dist/index.d.ts). Recalculé sur
- * l'événement natif `onPaneDrag` (redimensionnement manuel d'un pane) ET à chaque
- * `sync()` (ajout/retrait/réordonnancement d'indicateur).
+ * height, ... }` (vérifié sur klinecharts@9.8.12/dist/index.d.ts) ou `null` tant que
+ * le pane n'existe pas encore dans le registre interne de KLineChart. Recalculé sur
+ * l'événement natif `onPaneDrag` (redimensionnement manuel d'un pane), sur
+ * `onDataReady` (layout replacé après tout ajout/retrait de pane — cf.
+ * klinecharts/dist/index.esm.js: `ChartStore.addData` exécute `OnDataReady` après
+ * `adjustPaneViewport`, seul filet de sécurité si un appelant crée des panes sans
+ * passer par `sync()`) ET à chaque `sync()` (ajout/retrait/réordonnancement
+ * d'indicateur — déclenché par `ChartInstance` après `ChartIndicators.sync()`,
+ * y compris au premier montage avec des indicateurs déjà persistés).
  *
  * Réordonnancement : PaneOptions n'a pas de champ `order` en v9.8.12 — le calcul du
  * nouvel ordre (`computeDropOrder`) est appliqué à `indicatorsStore.reorder(...)`,
@@ -49,11 +55,13 @@ export class PaneHeaders {
   private readonly els = new Map<string, HTMLDivElement>();
   private draggingId: string | null = null;
   private readonly onPaneDrag = (): void => this.repositionnerTout();
+  private readonly onDataReady = (): void => this.repositionnerTout();
 
   constructor(chart: Chart, container: HTMLElement) {
     this.chart = chart;
     this.container = container;
     this.chart.subscribeAction(ActionType.OnPaneDrag, this.onPaneDrag);
+    this.chart.subscribeAction(ActionType.OnDataReady, this.onDataReady);
   }
 
   /** Réconcilie les en-têtes avec la liste courante d'indicateurs à pane séparé. */
@@ -156,6 +164,7 @@ export class PaneHeaders {
 
   dispose(): void {
     this.chart.unsubscribeAction(ActionType.OnPaneDrag, this.onPaneDrag);
+    this.chart.unsubscribeAction(ActionType.OnDataReady, this.onDataReady);
     for (const el of this.els.values()) el.remove();
     this.els.clear();
   }

@@ -436,6 +436,14 @@ export function ChartInstance({
         restoreDrawings(chart, exchange, symbol);
         // Indicateurs actifs sur le buffer de CE slot.
         indicators.sync(indicatorsStore.getState().indicators, candles);
+        // `indicators.sync` ci-dessus est un appel DIRECT (pas une mutation
+        // `indicatorsStore`) : l'abonnement `unsubscribePaneHeaders` (ligne ~278) ne se
+        // déclenche donc pas ici. Pour des indicateurs déjà persistés au premier montage,
+        // c'est le SEUL moment où leurs panes séparés sont réellement créés — sans cet
+        // appel, `paneHeaders.sync()` n'a été exécuté qu'une fois (ligne ~279, avant que
+        // les panes n'existent) et ne l'est plus jamais tant que l'utilisateur ne modifie
+        // pas `indicatorsStore` lui-même (croix ✕/drag restent invisibles indéfiniment).
+        paneHeaders.sync();
         // Orderflow (si ce slot est focus + activé) : reseed CVD + trades.
         ensureOrderflow();
         orderflow?.onCandles();

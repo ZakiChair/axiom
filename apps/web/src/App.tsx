@@ -115,6 +115,31 @@ export function App() {
     return () => stop();
   }, []);
 
+  // Exclusion mutuelle des panneaux dockés à droite (cf. PANNEAUX_DROITE) : ils
+  // partagent tous le MÊME emplacement (fixed right-0 top-0), on n'en montre donc qu'UN.
+  // Dès qu'un panneau passe à « ouvert », on ferme les autres → règle « dernière ouverte
+  // devant » sans empilement ni cascade. Un abonnement par store, nettoyé au démontage ;
+  // la garde `enCascade` ignore les notifications déclenchées par nos propres fermetures.
+  useEffect(() => {
+    let precedents = PANNEAUX_DROITE.map((p) => p.estOuvert());
+    let enCascade = false;
+    const gerer = (): void => {
+      if (enCascade) return;
+      const maintenant = PANNEAUX_DROITE.map((p) => p.estOuvert());
+      const ouvrant = maintenant.findIndex((ouvert, i) => ouvert && !precedents[i]);
+      if (ouvrant !== -1) {
+        enCascade = true;
+        PANNEAUX_DROITE.forEach((p, k) => {
+          if (k !== ouvrant) p.fermer();
+        });
+        enCascade = false;
+      }
+      precedents = PANNEAUX_DROITE.map((p) => p.estOuvert());
+    };
+    const desabonnements = PANNEAUX_DROITE.map((p) => p.sabonner(gerer));
+    return () => desabonnements.forEach((off) => off());
+  }, []);
+
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg text-text">
       {/* Plein écran : toolbars et sidebar masquées, le graphe occupe tout l'écran. */}
@@ -165,6 +190,19 @@ export function App() {
 
       {/* Surfaces globales montées au niveau racine, au-dessus du reste. */}
       <DerivativesWindow />
+      {/* Fenêtres non modales de la Phase 3 : montées en permanence (elles se cachent
+          elles-mêmes via translate-x quand fermées). L'exclusion mutuelle ci-dessus
+          garantit qu'une seule reste visible à la fois. */}
+      <EcoWindow />
+      <NewsWindow />
+      <CorrWindow />
+      <OnchainWindow />
+      <MarketMapWindow />
+      <PortfolioWindow />
+      <NotesWindow />
+      <ScreenerWindow />
+      <TermStructureWindow />
+      <OptionsWindow />
       <SettingsPanel />
       <CommandPalette />
     </div>

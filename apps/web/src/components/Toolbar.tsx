@@ -10,6 +10,17 @@ import { orderflowStore } from "../store/orderflow";
 import { volumeProfileStore } from "../store/volumeProfile";
 import { revenueStore } from "../store/revenue";
 import { derivativesUiStore } from "../store/derivatives-ui";
+// Stores UI des fenêtres non modales (Phase 3), pour le menu déroulant « Fonctions ».
+import { ecoStore } from "../store/eco";
+import { newsUiStore } from "../store/news";
+import { onchainUiStore } from "../store/onchain";
+import { marketMapUiStore } from "../store/marketmap-ui";
+import { portfolioUiStore } from "../store/portfolio";
+import { notesUiStore } from "../store/notes";
+import { screenerStore } from "../store/screener";
+import { corrUiStore } from "./CorrWindow";
+import { termStructureUiStore } from "./TermStructureWindow";
+import { optionsUiStore } from "./OptionsWindow";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
 import { exporterSauvegarde, importerSauvegarde } from "../store/persist";
 import { enregistrerCommandes } from "../commands/registry";
@@ -110,6 +121,79 @@ const EXCHANGES: { id: ExchangeId; label: string }[] = [
 /** Libellé d'une source (pour les infobulles de grisage). */
 function exchangeLabel(id: ExchangeId): string {
   return EXCHANGES.find((e) => e.id === id)?.label ?? id;
+}
+
+/**
+ * Fenêtres non modales de la Phase 3 exposées dans le menu « Fonctions » : libellé +
+ * mnémonique Bloomberg + ouverture du panneau. L'exclusion mutuelle (App.tsx) ferme les
+ * autres panneaux dockés à droite au passage. Les mêmes mnémoniques restent tapables dans
+ * la palette (⌘K). DES (Produits dérivés) garde son bouton dédié ; OI/FUND sont des
+ * sous-panes du chart (pilotés depuis la fenêtre Produits dérivés), pas des fenêtres.
+ */
+const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] = [
+  { mnemonique: "ECO", libelle: "Calendrier économique", ouvrir: () => ecoStore.getState().openEco() },
+  { mnemonique: "NEWS", libelle: "Actualités crypto", ouvrir: () => newsUiStore.getState().openNews() },
+  { mnemonique: "CORR", libelle: "Corrélations", ouvrir: () => corrUiStore.getState().openCorr() },
+  { mnemonique: "CHAIN", libelle: "On-chain", ouvrir: () => onchainUiStore.getState().openOnchain() },
+  { mnemonique: "IMAP", libelle: "Vue marché (treemap)", ouvrir: () => marketMapUiStore.getState().openMarketMap() },
+  { mnemonique: "PORT", libelle: "Portefeuille", ouvrir: () => portfolioUiStore.getState().openPortfolio() },
+  { mnemonique: "NOTE", libelle: "Notes / journal", ouvrir: () => notesUiStore.getState().openNotes() },
+  { mnemonique: "EQS", libelle: "Screener d'actifs", ouvrir: () => screenerStore.getState().openScreener() },
+  { mnemonique: "TERM", libelle: "Structure par terme", ouvrir: () => termStructureUiStore.getState().openTermStructure() },
+  { mnemonique: "OMON", libelle: "Options (smile IV, max pain)", ouvrir: () => optionsUiStore.getState().openOptions() },
+];
+
+/**
+ * Menu déroulant compact « Fonctions » : liste les fenêtres non modales (libellé +
+ * mnémonique) plutôt que dix boutons dans la barre. Basse fréquence (aucun re-render sur
+ * tick) — les actions lisent les stores via getState(), sans abonnement.
+ */
+function FonctionsMenu() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Fonctions — ouvrir un panneau (mêmes mnémoniques dans ⌘K)"
+        className="flex items-center gap-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 hover:border-neutral-500"
+      >
+        <span>Fonctions</span>
+        <span aria-hidden className="text-[9px] text-neutral-500">▾</span>
+      </button>
+
+      {open && (
+        <>
+          {/* Zone de fermeture au clic extérieur. */}
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div
+            role="menu"
+            className="absolute left-0 z-50 mt-1 w-60 rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl"
+          >
+            {FONCTIONS.map((f) => (
+              <button
+                key={f.mnemonique}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  f.ouvrir();
+                  setOpen(false);
+                }}
+                className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs text-neutral-200 hover:bg-neutral-800"
+              >
+                <span className="w-12 shrink-0 font-semibold uppercase tracking-wider text-emerald-400">
+                  {f.mnemonique}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{f.libelle}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -438,6 +522,9 @@ export function Toolbar() {
       >
         Produits dérivés
       </button>
+
+      {/* Menu compact des fenêtres non modales de la Phase 3 (ECO, NEWS, CORR…). */}
+      <FonctionsMenu />
 
       {/* Export du graphe courant en PNG (téléchargement « SYMBOLE-TF-date.png »). */}
       <button

@@ -47,6 +47,11 @@ export const fullscreenStore = createStore<FullscreenState>((set, get) => ({
 export const RACCOURCIS_AIDE: { touche: string; description: string }[] = [
   { touche: "⌘K / Ctrl+K", description: "Ouvrir la palette de commandes" },
   { touche: "?", description: "Afficher cette aide" },
+  {
+    touche: "⌘K puis mnémo",
+    description:
+      "Fonctions (panneaux) : DES ECO NEWS CORR CHAIN IMAP PORT NOTE EQS TERM OMON · OI/FUND (chart)",
+  },
   { touche: "1 – 9", description: "Timeframes rapides (1m, 5m, 15m, 1h, 4h, 1d, 1w, 1M, 3M)" },
   { touche: "/", description: "Focus sur la recherche de paires" },
   { touche: "O", description: "Orderflow (activer / désactiver)" },

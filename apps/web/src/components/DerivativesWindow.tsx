@@ -20,6 +20,7 @@ import { marketStore } from "../store/market";
 import { coinalyzeKeyStore } from "../store/coinalyze";
 import { settingsUiStore } from "../store/settings-ui";
 import { derivativesUiStore } from "../store/derivatives-ui";
+import { derivativesChartStore } from "../store/derivatives-chart";
 import {
   CoinalyzeError,
   coinalyzeProvider,
@@ -180,6 +181,37 @@ function LiquidationBars({ buckets }: { buckets: LiquidationBucket[] }) {
   );
 }
 
+/**
+ * Bascule « Afficher sur le chart » d'un sous-pane dérivé (OI / funding). Actif, le
+ * bouton prend la COULEUR de la courbe correspondante tracée par chart/derivatives.ts
+ * (cyan OI / ambre funding) pour le lien visuel avec le sous-pane.
+ */
+function ChartToggle({
+  label,
+  active,
+  color,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  color: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded border px-2 py-1 text-[11px] font-medium transition ${
+        active ? "bg-bg" : "border-border bg-bg text-text-dim hover:text-text"
+      }`}
+      style={active ? { color, borderColor: color } : undefined}
+    >
+      {label}
+    </button>
+  );
+}
+
 export function DerivativesWindow() {
   const open = useStore(derivativesUiStore, (s) => s.open);
   const closeDerivatives = useStore(derivativesUiStore, (s) => s.closeDerivatives);
@@ -187,6 +219,13 @@ export function DerivativesWindow() {
   const symbol = useStore(marketStore, (s) => s.symbol);
   const hasKey = useStore(coinalyzeKeyStore, (s) => s.hasKey);
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
+
+  // Sous-panes dérivés sur le graphe (toggles basse fréquence → abonnement React OK,
+  // cf. BUILD-CONTRACT : seule la donnée HAUTE fréquence est proscrite du render React).
+  const showOiPane = useStore(derivativesChartStore, (s) => s.oi);
+  const showFundingPane = useStore(derivativesChartStore, (s) => s.funding);
+  const toggleOiPane = useStore(derivativesChartStore, (s) => s.toggleOi);
+  const toggleFundingPane = useStore(derivativesChartStore, (s) => s.toggleFunding);
 
   const [oi, setOi] = useState<OpenInterest | undefined>();
   const [funding, setFunding] = useState<FundingRate | undefined>();
@@ -438,6 +477,15 @@ export function DerivativesWindow() {
                   sparkValues={lsSpark}
                   color="#a78bfa"
                 />
+              </div>
+
+              {/* Bascules d'affichage des sous-panes OI / funding SUR le graphe (données
+                  Coinalyze déjà payées ci-dessus → les superposer au chart est le gain).
+                  Pilote derivativesChartStore, lu hors React par chart/derivatives.ts. */}
+              <div className="flex items-center gap-2 rounded-md border border-border bg-bg px-3 py-2">
+                <span className="mr-auto text-[11px] text-text-dim">Afficher sur le chart</span>
+                <ChartToggle label="OI" active={showOiPane} color="#22d3ee" onClick={toggleOiPane} />
+                <ChartToggle label="Funding" active={showFundingPane} color="#f59e0b" onClick={toggleFundingPane} />
               </div>
 
               <section className="rounded-md border border-border bg-bg">

@@ -153,3 +153,34 @@ describe("actions du store", () => {
     expect(new Set(list.map((i) => i.instanceId)).size).toBe(2);
   });
 });
+
+describe("reorder", () => {
+  it("réordonne selon la liste d'instanceId fournie", () => {
+    indicatorsStore.setState({
+      indicators: [
+        { instanceId: "a", defId: "rsi", params: {} },
+        { instanceId: "b", defId: "macd", params: {} },
+        { instanceId: "c", defId: "ema", params: {} },
+      ],
+    });
+    indicatorsStore.getState().reorder(["c", "a", "b"]);
+    expect(indicatorsStore.getState().indicators.map((i) => i.instanceId)).toEqual(["c", "a", "b"]);
+  });
+
+  it("ajoute en fin toute instance absente de l'ordre fourni (garde-fou)", () => {
+    indicatorsStore.setState({
+      indicators: [
+        { instanceId: "a", defId: "rsi", params: {} },
+        { instanceId: "b", defId: "macd", params: {} },
+      ],
+    });
+    indicatorsStore.getState().reorder(["b"]);
+    expect(indicatorsStore.getState().indicators.map((i) => i.instanceId)).toEqual(["b", "a"]);
+  });
+
+  it("ignore les ids inconnus dans l'ordre fourni", () => {
+    indicatorsStore.setState({ indicators: [{ instanceId: "a", defId: "rsi", params: {} }] });
+    indicatorsStore.getState().reorder(["inconnu", "a"]);
+    expect(indicatorsStore.getState().indicators.map((i) => i.instanceId)).toEqual(["a"]);
+  });
+});

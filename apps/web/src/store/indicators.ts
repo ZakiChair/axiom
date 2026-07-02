@@ -154,6 +154,10 @@ export interface IndicatorsState {
   toggle: (defId: string) => void;
   /** Remplace toute la liste (restauration depuis localStorage) ; réattribue les instanceId. */
   setAll: (indicators: IndicatorInstance[]) => void;
+  /** Réordonne les instances selon l'ordre d'instanceId fourni (drag des en-têtes de
+   * pane, cf. chart/paneHeaders.tsx). Toute instance absente de `order` est ajoutée
+   * en fin (garde-fou anti-perte). */
+  reorder: (order: string[]) => void;
 }
 
 export const indicatorsStore = createStore<IndicatorsState>((set, get) => ({
@@ -171,6 +175,16 @@ export const indicatorsStore = createStore<IndicatorsState>((set, get) => ({
 
   remove: (instanceId) => {
     set({ indicators: get().indicators.filter((i) => i.instanceId !== instanceId) });
+  },
+
+  reorder: (order) => {
+    const current = get().indicators;
+    const byId = new Map(current.map((i) => [i.instanceId, i]));
+    const reordered = order
+      .map((id) => byId.get(id))
+      .filter((i): i is ActiveIndicator => i !== undefined);
+    const missing = current.filter((i) => !order.includes(i.instanceId));
+    set({ indicators: [...reordered, ...missing] });
   },
 
   duplicate: (instanceId) => {

@@ -191,7 +191,10 @@ export class ChartIndicators {
     // recréés dans le bon ordre par la boucle ci-dessous (coût : recréation de pane,
     // PAS recalcul — `computeCache` est conservé).
     const ordreVoulu = instances
-      .filter((i) => getIndicator(i.defId)?.pane !== "overlay")
+      .filter((i) => {
+        const def = getIndicator(i.defId);
+        return def && def.pane !== "overlay";
+      })
       .map((i) => i.instanceId);
     const ordreMonte = [...this.active.entries()]
       .filter(([, info]) => info.paneId !== CANDLE_PANE_ID)

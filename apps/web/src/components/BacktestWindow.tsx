@@ -527,9 +527,6 @@ function StatsGrid({ resultat }: { resultat: ResultatBacktest }) {
 // ─────────────────────────── Panneau principal ───────────────────────────
 
 export function BacktestWindow() {
-  const open = useStore(backtestStore, (s) => s.open);
-  const close = useStore(backtestStore, (s) => s.closeBacktest);
-
   const symbol = useStore(backtestStore, (s) => s.symbol);
   const tf = useStore(backtestStore, (s) => s.tf);
   const plage = useStore(backtestStore, (s) => s.plage);
@@ -579,14 +576,7 @@ export function BacktestWindow() {
     progress.cible > 0 ? Math.min(100, (progress.recuperees / progress.cible) * 100) : 0;
 
   return (
-    <aside
-      role="complementary"
-      aria-label="Backtest de stratégie"
-      aria-hidden={!open}
-      className={`fixed right-0 top-0 z-40 flex h-full w-[min(720px,96vw)] flex-col border-l border-border bg-surface shadow-2xl transition-transform duration-200 ${
-        open ? "translate-x-0" : "pointer-events-none translate-x-full"
-      }`}
-    >
+    <>
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Backtest · BT</h2>
@@ -594,14 +584,7 @@ export function BacktestWindow() {
             Bougies clôturées · exécution open+1 · pas d'intrabar
           </p>
         </div>
-        <button
-          type="button"
-          onClick={close}
-          aria-label="Fermer le backtest"
-          className="rounded p-1 text-lg leading-none text-text-dim transition hover:bg-bg hover:text-text"
-        >
-          ✕
-        </button>
+        {/* close button removed — FloatingWindow chrome provides one */}
       </header>
 
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
@@ -886,6 +869,6 @@ export function BacktestWindow() {
           </div>
         )}
       </div>
-    </aside>
+    </>
   );
 }

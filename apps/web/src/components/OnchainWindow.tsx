@@ -222,7 +222,6 @@ const VIDE: EtatDonnees = { cm: null, bg: {}, mp: null, hr: null, etf: null };
 
 export function OnchainWindow() {
   const open = useStore(onchainUiStore, (s) => s.open);
-  const closeOnchain = useStore(onchainUiStore, (s) => s.closeOnchain);
   const bgHasKey = useStore(bgeometricsKeyStore, (s) => s.hasKey);
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
 
@@ -274,14 +273,7 @@ export function OnchainWindow() {
   const etf = donnees.etf;
 
   return (
-    <aside
-      role="complementary"
-      aria-label="On-chain"
-      aria-hidden={!open}
-      className={`fixed right-0 top-0 z-40 flex h-full w-[min(460px,94vw)] flex-col border-l border-border bg-surface shadow-2xl transition-transform duration-200 ${
-        open ? "translate-x-0" : "pointer-events-none translate-x-full"
-      }`}
-    >
+    <>
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">On-chain</h2>
@@ -289,14 +281,7 @@ export function OnchainWindow() {
             Coin Metrics · BGeometrics · mempool.space {loading ? "· maj…" : ""}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={closeOnchain}
-          aria-label="Fermer le panneau on-chain"
-          className="rounded p-1 text-lg leading-none text-text-dim transition hover:bg-bg hover:text-text"
-        >
-          ✕
-        </button>
+        {/* close button removed — FloatingWindow chrome provides one */}
       </header>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
@@ -466,6 +451,6 @@ export function OnchainWindow() {
           )}
         </section>
       </div>
-    </aside>
+    </>
   );
 }

@@ -45,14 +45,7 @@ export function ReplayWindow() {
   const enTelechargement = s.statut.etat === "en_cours";
 
   return (
-    <aside
-      role="complementary"
-      aria-label="Replay de marché"
-      aria-hidden={!s.open}
-      className={`fixed right-0 top-0 z-40 flex h-full w-[min(420px,94vw)] flex-col border-l border-border bg-surface shadow-2xl transition-transform duration-200 ${
-        s.open ? "translate-x-0" : "pointer-events-none translate-x-full"
-      }`}
-    >
+    <>
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">
@@ -62,14 +55,7 @@ export function ReplayWindow() {
             Dumps aggTrades officiels (data.binance.vision) · Binance spot
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => replayStore.getState().closeReplay()}
-          aria-label="Fermer le replay"
-          className="rounded p-1 text-lg leading-none text-text-dim transition hover:bg-bg hover:text-text"
-        >
-          ✕
-        </button>
+        {/* close button removed — FloatingWindow chrome provides one */}
       </header>
 
       <div className="flex-1 overflow-y-auto">
@@ -300,6 +286,6 @@ export function ReplayWindow() {
           )}
         </section>
       </div>
-    </aside>
+    </>
   );
 }

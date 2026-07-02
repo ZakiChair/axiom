@@ -220,7 +220,6 @@ function SectorsTab({ overview }: { overview: MarketOverview | null }) {
 
 export function MarketMapWindow() {
   const open = useStore(marketMapUiStore, (s) => s.open);
-  const closeMarketMap = useStore(marketMapUiStore, (s) => s.closeMarketMap);
   const themeId = useStore(themeStore, (s) => s.theme); // redessine au changement de thème
 
   const [tab, setTab] = useState<"carte" | "secteurs">("carte");
@@ -374,15 +373,7 @@ export function MarketMapWindow() {
   const g = overview?.global;
 
   return (
-    // Panneau dockable à droite, NON MODAL (cf. DerivativesWindow). z-40.
-    <aside
-      role="complementary"
-      aria-label="Vue marché"
-      aria-hidden={!open}
-      className={`fixed right-0 top-0 z-40 flex h-full w-[min(1100px,96vw)] flex-col border-l border-border bg-surface shadow-2xl transition-transform duration-200 ${
-        open ? "translate-x-0" : "pointer-events-none translate-x-full"
-      }`}
-    >
+    <>
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Vue marché</h2>
@@ -411,14 +402,7 @@ export function MarketMapWindow() {
             {overview && <span className="text-text-dim">{loading ? "maj…" : formatAge(overview.fetchedAt)}</span>}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={closeMarketMap}
-          aria-label="Fermer la vue marché"
-          className="rounded p-1 text-lg leading-none text-text-dim transition hover:bg-bg hover:text-text"
-        >
-          ✕
-        </button>
+        {/* close button removed — FloatingWindow chrome provides one */}
       </header>
 
       {/* Onglets */}
@@ -460,7 +444,7 @@ export function MarketMapWindow() {
           <SectorsTab overview={overview} />
         </div>
       )}
-    </aside>
+    </>
   );
 }
 

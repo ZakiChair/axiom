@@ -163,7 +163,6 @@ const FENETRES: readonly number[] = [30, 90, 180];
 
 export function CorrWindow() {
   const open = useStore(corrUiStore, (s) => s.open);
-  const closeCorr = useStore(corrUiStore, (s) => s.closeCorr);
   const watchSymbols = useStore(watchlistStore, (s) => s.symbols);
 
   const [methode, setMethode] = useState<MethodeCorr>("pearson");
@@ -419,14 +418,7 @@ export function CorrWindow() {
       : "";
 
   return (
-    <aside
-      role="complementary"
-      aria-label="Corrélations"
-      aria-hidden={!open}
-      className={`fixed right-0 top-0 z-40 flex h-full w-[min(480px,94vw)] flex-col border-l border-border bg-surface shadow-2xl transition-transform duration-200 ${
-        open ? "translate-x-0" : "pointer-events-none translate-x-full"
-      }`}
-    >
+    <>
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Corrélations</h2>
@@ -434,14 +426,7 @@ export function CorrWindow() {
             Log-rendements journaliers · {methode === "pearson" ? "Pearson" : "Spearman"} · {fenetreJours} j
           </p>
         </div>
-        <button
-          type="button"
-          onClick={closeCorr}
-          aria-label="Fermer les corrélations"
-          className="rounded p-1 text-lg leading-none text-text-dim transition hover:bg-bg hover:text-text"
-        >
-          ✕
-        </button>
+        {/* close button removed — FloatingWindow chrome provides one */}
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -583,6 +568,6 @@ export function CorrWindow() {
           (crypto 7j/7 vs bourse 5j/7). Klines réutilisées des sources existantes, en cache de session.
         </p>
       </div>
-    </aside>
+    </>
   );
 }

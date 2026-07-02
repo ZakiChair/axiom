@@ -265,7 +265,6 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>): 
 
 export function TermStructureWindow() {
   const open = useStore(termStructureUiStore, (s) => s.open);
-  const close = useStore(termStructureUiStore, (s) => s.closeTermStructure);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [courbes, setCourbes] = useState<Record<Actif, CourbeActif>>({
@@ -336,14 +335,7 @@ export function TermStructureWindow() {
   }, [open, courbes]);
 
   return (
-    <aside
-      role="complementary"
-      aria-label="Structure par terme"
-      aria-hidden={!open}
-      className={`fixed right-0 top-0 z-40 flex h-full w-[min(480px,94vw)] flex-col border-l border-border bg-surface shadow-2xl transition-transform duration-200 ${
-        open ? "translate-x-0" : "pointer-events-none translate-x-full"
-      }`}
-    >
+    <>
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">
@@ -353,14 +345,6 @@ export function TermStructureWindow() {
             Basis annualisé · Binance COIN-M + Deribit
           </p>
         </div>
-        <button
-          type="button"
-          onClick={close}
-          aria-label="Fermer la structure par terme"
-          className="rounded p-1 text-lg leading-none text-text-dim transition hover:bg-bg hover:text-text"
-        >
-          ✕
-        </button>
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -406,7 +390,7 @@ export function TermStructureWindow() {
           daemon /kv sinon localStorage). Sources Binance COIN-M + Deribit, ~1 min.
         </p>
       </div>
-    </aside>
+    </>
   );
 }
 

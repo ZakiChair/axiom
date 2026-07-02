@@ -97,7 +97,6 @@ function prixMarcheActif(): number | undefined {
 
 export function PortfolioWindow() {
   const open = useStore(portfolioUiStore, (s) => s.open);
-  const closePortfolio = useStore(portfolioUiStore, (s) => s.closePortfolio);
   const positions = useStore(portfolioStore, (s) => s.positions);
   const activeSymbol = useStore(marketStore, (s) => s.symbol);
   const activeExchange = useStore(marketStore, (s) => s.exchange);
@@ -235,27 +234,13 @@ export function PortfolioWindow() {
   };
 
   return (
-    <aside
-      role="complementary"
-      aria-label="Portefeuille"
-      aria-hidden={!open}
-      className={`fixed right-0 top-0 z-40 flex h-full w-[min(460px,94vw)] flex-col border-l border-border bg-surface shadow-2xl transition-transform duration-200 ${
-        open ? "translate-x-0" : "pointer-events-none translate-x-full"
-      }`}
-    >
+    <>
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Portefeuille</h2>
           <p className="mt-0.5 text-[11px] text-text-dim">Positions manuelles · PnL live</p>
         </div>
-        <button
-          type="button"
-          onClick={closePortfolio}
-          aria-label="Fermer le portefeuille"
-          className="rounded p-1 text-lg leading-none text-text-dim transition hover:bg-bg hover:text-text"
-        >
-          ✕
-        </button>
+        {/* close button removed — FloatingWindow chrome provides one */}
       </header>
 
       {/* Totaux (maj impérative sur tick) */}
@@ -531,6 +516,6 @@ export function PortfolioWindow() {
           )}
         </section>
       </div>
-    </aside>
+    </>
   );
 }

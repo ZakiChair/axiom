@@ -50,8 +50,6 @@ function formatDate(ts: number): string {
 }
 
 export function NotesWindow() {
-  const open = useStore(notesUiStore, (s) => s.open);
-  const closeNotes = useStore(notesUiStore, (s) => s.closeNotes);
   const brouillon = useStore(notesUiStore, (s) => s.brouillon);
   const notes = useStore(notesStore, (s) => s.notes);
   const activeSymbol = useStore(marketStore, (s) => s.symbol);
@@ -132,27 +130,13 @@ export function NotesWindow() {
   };
 
   return (
-    <aside
-      role="complementary"
-      aria-label="Notes"
-      aria-hidden={!open}
-      className={`fixed right-0 top-0 z-40 flex h-full w-[min(440px,94vw)] flex-col border-l border-border bg-surface shadow-2xl transition-transform duration-200 ${
-        open ? "translate-x-0" : "pointer-events-none translate-x-full"
-      }`}
-    >
+    <>
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Notes / journal</h2>
           <p className="mt-0.5 text-[11px] text-text-dim">Annotations ancrées au marché</p>
         </div>
-        <button
-          type="button"
-          onClick={closeNotes}
-          aria-label="Fermer les notes"
-          className="rounded p-1 text-lg leading-none text-text-dim transition hover:bg-bg hover:text-text"
-        >
-          ✕
-        </button>
+        {/* close button removed — FloatingWindow chrome provides one */}
       </header>
 
       {/* Création rapide */}
@@ -328,6 +312,6 @@ export function NotesWindow() {
           </div>
         )}
       </div>
-    </aside>
+    </>
   );
 }

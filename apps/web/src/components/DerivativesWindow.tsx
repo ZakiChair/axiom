@@ -383,14 +383,7 @@ export function DerivativesWindow() {
     // clics. Fermé, il est translaté hors écran et rendu inerte (pointer-events-none)
     // pour laisser toute la surface du graphe cliquable. z-40 : sous la palette (z-60)
     // et le slide-over Réglages (z-50), au-dessus du graphe.
-    <aside
-      role="complementary"
-      aria-label="Produits dérivés"
-      aria-hidden={!open}
-      className={`fixed right-0 top-0 z-40 flex h-full w-[min(420px,92vw)] flex-col border-l border-border bg-surface shadow-2xl transition-transform duration-200 ${
-        open ? "translate-x-0" : "pointer-events-none translate-x-full"
-      }`}
-    >
+    <>
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Produits dérivés</h2>
@@ -398,14 +391,6 @@ export function DerivativesWindow() {
               {isBinance ? `${coinalyzeSymbol} · Coinalyze` : "Coinalyze · Binance uniquement"}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={closeDerivatives}
-            aria-label="Fermer les produits dérivés"
-            className="rounded p-1 text-lg leading-none text-text-dim transition hover:bg-bg hover:text-text"
-          >
-            ✕
-          </button>
         </header>
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
@@ -569,6 +554,6 @@ export function DerivativesWindow() {
             </section>
           )}
         </div>
-    </aside>
+    </>
   );
 }

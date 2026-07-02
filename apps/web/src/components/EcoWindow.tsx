@@ -110,7 +110,6 @@ function Ligne({ ev, passe }: { ev: EcoEvent; passe: boolean }) {
 
 export function EcoWindow() {
   const open = useStore(ecoStore, (s) => s.open);
-  const closeEco = useStore(ecoStore, (s) => s.closeEco);
   const events = useStore(ecoStore, (s) => s.events);
   const status = useStore(ecoStore, (s) => s.status);
   const error = useStore(ecoStore, (s) => s.error);
@@ -138,14 +137,7 @@ export function EcoWindow() {
   return (
     // Panneau dockable à droite, NON MODAL (cf. DerivativesWindow). Fermé : translaté
     // hors écran + inerte (pointer-events-none). z-40 : au-dessus du graphe, sous la palette.
-    <aside
-      role="complementary"
-      aria-label="Calendrier économique"
-      aria-hidden={!open}
-      className={`fixed right-0 top-0 z-40 flex h-full w-[min(440px,94vw)] flex-col border-l border-border bg-surface shadow-2xl transition-transform duration-200 ${
-        open ? "translate-x-0" : "pointer-events-none translate-x-full"
-      }`}
-    >
+    <>
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">
@@ -165,14 +157,6 @@ export function EcoWindow() {
             className="rounded p-1 text-sm leading-none text-text-dim transition hover:bg-bg hover:text-text"
           >
             ⟳
-          </button>
-          <button
-            type="button"
-            onClick={closeEco}
-            aria-label="Fermer le calendrier"
-            className="rounded p-1 text-lg leading-none text-text-dim transition hover:bg-bg hover:text-text"
-          >
-            ✕
           </button>
         </div>
       </header>
@@ -239,6 +223,6 @@ export function EcoWindow() {
           filtres.map((ev) => <Ligne key={ev.id} ev={ev} passe={ev.time < now} />)
         )}
       </div>
-    </aside>
+    </>
   );
 }

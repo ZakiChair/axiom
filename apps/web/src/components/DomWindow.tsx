@@ -357,7 +357,6 @@ function dessinerTape(ctx: CanvasRenderingContext2D, w: number, h: number, trade
 
 export function DomWindow() {
   const open = useStore(domUiStore, (s) => s.open);
-  const closeDom = useStore(domUiStore, (s) => s.closeDom);
   const tab = useStore(domUiStore, (s) => s.tab);
   const setTab = useStore(domUiStore, (s) => s.setTab);
   const facteurPas = useStore(domUiStore, (s) => s.facteurPas);
@@ -479,14 +478,7 @@ export function DomWindow() {
 
   return (
     // Panneau dockable à droite, NON MODAL (cf. DerivativesWindow). z-40.
-    <aside
-      role="complementary"
-      aria-label="Carnet d'ordres"
-      aria-hidden={!open}
-      className={`fixed right-0 top-0 z-40 flex h-full w-[min(560px,94vw)] flex-col border-l border-border bg-surface shadow-2xl transition-transform duration-200 ${
-        open ? "translate-x-0" : "pointer-events-none translate-x-full"
-      }`}
-    >
+    <>
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Carnet d'ordres</h2>
@@ -494,14 +486,7 @@ export function DomWindow() {
             {isBinance ? `${symbol} · Binance` : "Binance uniquement"}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={closeDom}
-          aria-label="Fermer le carnet d'ordres"
-          className="rounded p-1 text-lg leading-none text-text-dim transition hover:bg-bg hover:text-text"
-        >
-          ✕
-        </button>
+        {/* close button removed — FloatingWindow chrome provides one */}
       </header>
 
       {/* Onglets */}
@@ -576,6 +561,6 @@ export function DomWindow() {
           </div>
         )}
       </div>
-    </aside>
+    </>
   );
 }

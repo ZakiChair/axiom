@@ -96,7 +96,6 @@ function LigneNews({
 
 export function NewsWindow() {
   const open = useStore(newsUiStore, (s) => s.open);
-  const closeNews = useStore(newsUiStore, (s) => s.closeNews);
   const items = useStore(newsStore, (s) => s.items);
   const statuts = useStore(newsStore, (s) => s.statuts);
   const derniereMaj = useStore(newsStore, (s) => s.derniereMaj);
@@ -142,17 +141,8 @@ export function NewsWindow() {
   const fluxHs = NEWS_FEEDS.filter((f) => statuts[f.id] === "erreur");
 
   return (
-    // Panneau dockable à droite, NON MODAL. z-40 comme DerivativesWindow (sous la palette
-    // et les Réglages, au-dessus du graphe). Fermé : translaté hors écran + inerte.
-    <aside
-      role="complementary"
-      aria-label="Actualités crypto"
-      aria-hidden={!open}
-      className={`fixed right-0 top-0 z-40 flex h-full w-[min(440px,94vw)] flex-col border-l border-border bg-surface font-mono shadow-2xl transition-transform duration-200 ${
-        open ? "translate-x-0" : "pointer-events-none translate-x-full"
-      }`}
-    >
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+    <>
+      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3 font-mono">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Actualités</h2>
           <p className="mt-0.5 text-[11px] text-text-dim">
@@ -163,17 +153,10 @@ export function NewsWindow() {
                 } · maj ${tempsRelatif(derniereMaj, maintenant)}`}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={closeNews}
-          aria-label="Fermer les actualités"
-          className="rounded p-1 text-lg leading-none text-text-dim transition hover:bg-bg hover:text-text"
-        >
-          ✕
-        </button>
+        {/* close button removed — FloatingWindow chrome provides one */}
       </header>
 
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2 font-mono">
         <input
           type="text"
           value={filtre}
@@ -204,7 +187,7 @@ export function NewsWindow() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto font-mono">
         {visibles.length === 0 ? (
           <div className="px-3 py-4 text-[11px] leading-snug text-text-dim">
             {derniereMaj === null
@@ -221,10 +204,10 @@ export function NewsWindow() {
       </div>
 
       {fluxHs.length > 0 && (
-        <p className="border-t border-border px-3 py-2 text-[10px] leading-snug text-text-dim">
+        <p className="border-t border-border px-3 py-2 text-[10px] leading-snug text-text-dim font-mono">
           Hors ligne : {fluxHs.map((f) => `${f.label} (${LABEL_STATUT[statuts[f.id] ?? "erreur"]})`).join(", ")}
         </p>
       )}
-    </aside>
+    </>
   );
 }

@@ -39,6 +39,7 @@ import { macroHistoryStore } from "../store/macroHistory";
 import { themeStore } from "../store/theme";
 import { chartLayoutStore } from "../store/chart-layout";
 import { ChartIndicators } from "./indicators";
+import { PaneHeaders } from "./paneHeaders";
 import { OrderflowController } from "./orderflow";
 import { CompareController } from "./compare";
 import { VolumeProfileController } from "./volumeProfile";
@@ -270,6 +271,12 @@ export function ChartInstance({
     const unsubscribeIndicators = indicatorsStore.subscribe((state) => {
       indicators.sync(state.indicators, store.getState().candles);
     });
+
+    // En-têtes overlay des panes séparés (croix + drag-reorder) : le contrôleur lit
+    // `indicatorsStore` lui-même (pas besoin de brancher `state` du subscribe ci-dessus).
+    const paneHeaders = new PaneHeaders(chart, container);
+    const unsubscribePaneHeaders = indicatorsStore.subscribe(() => paneHeaders.sync());
+    paneHeaders.sync();
 
     // Échelle de l'axe prix (partagée) : appliquée à l'instance + propagée au footprint.
     const applyPriceScale = (type: PriceScaleType): void => {
@@ -522,6 +529,8 @@ export function ChartInstance({
       unsubscribeTheme();
       unsubscribePriceScale();
       unsubscribeIndicators();
+      unsubscribePaneHeaders();
+      paneHeaders.dispose();
       unsubscribeFocusOf();
       unsubscribeOrderflow();
       unsubscribeCompare?.();

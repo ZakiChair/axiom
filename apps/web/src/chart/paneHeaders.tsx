@@ -12,10 +12,12 @@
  * height, ... }` (vérifié sur klinecharts@9.8.12/dist/index.d.ts) ou `null` tant que
  * le pane n'existe pas encore dans le registre interne de KLineChart. Recalculé sur
  * l'événement natif `onPaneDrag` (redimensionnement manuel d'un pane), sur
- * `onDataReady` (layout replacé après tout ajout/retrait de pane — cf.
- * klinecharts/dist/index.esm.js: `ChartStore.addData` exécute `OnDataReady` après
- * `adjustPaneViewport`, seul filet de sécurité si un appelant crée des panes sans
- * passer par `sync()`) ET à chaque `sync()` (ajout/retrait/réordonnancement
+ * `onDataReady` (cf. klinecharts/dist/index.esm.js ~L.6563 : `ChartStore.addData`
+ * exécute `OnDataReady` après `adjustPaneViewport` à CHAQUE `updateData`/`addData`,
+ * y compris le flux de ticks live — ce n'est PAS un filet de sécurité rare, ça tourne
+ * en pratique ~10×/s par instance de chart. Sans coût notable pour autant :
+ * `repositionnerTout()` ne fait que `getSize` + écritures `style.top` idempotentes,
+ * aucun re-render React) ET à chaque `sync()` (ajout/retrait/réordonnancement
  * d'indicateur — déclenché par `ChartInstance` après `ChartIndicators.sync()`,
  * y compris au premier montage avec des indicateurs déjà persistés).
  *

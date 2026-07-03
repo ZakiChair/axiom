@@ -297,6 +297,26 @@ describe("setAll", () => {
     // Remplacement, pas fusion : l'ancienne entrée "derivatives" a disparu.
     expect(windowManagerStore.getState().windows.derivatives).toBeUndefined();
   });
+
+  it("réconcilie nextZ pour qu'un focus/openWindow ultérieur dépasse le z le plus haut restauré", () => {
+    const nouveauxWindows: Record<string, EtatFenetre> = {
+      eco: {
+        id: "eco",
+        open: true,
+        x: 10,
+        y: 20,
+        width: 440,
+        height: 640,
+        z: 500, // très supérieur au nextZ courant (1) — cas non atteignable aujourd'hui.
+        minimized: false,
+        groupColor: null,
+      },
+    };
+    windowManagerStore.getState().setAll(nouveauxWindows);
+
+    windowManagerStore.getState().focusWindow("eco");
+    expect(windowManagerStore.getState().windows.eco!.z).toBeGreaterThan(500);
+  });
 });
 
 describe("mirrorOpenState", () => {

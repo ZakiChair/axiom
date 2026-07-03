@@ -12,8 +12,14 @@
  *
  * Sans clé API : aucun appel, aucune erreur bloquante — la fenêtre invite à
  * saisir une clé dans les Réglages (stockée localement, jamais loggée).
+ *
+ * Émetteur de symbole de groupe (v1, seule fenêtre à écrire) : le champ symbole de
+ * l'en-tête diffuse via `windowManagerStore.setGroupSymbol(groupColor, valeur)` quand
+ * la fenêtre est assignée à un groupe de couleur — les autres fenêtres du même groupe
+ * (dont cette fenêtre elle-même, via `symbolGroupe`) lisent `groupSymbols[groupColor]`.
+ * Désactivé (avec info-bulle) tant qu'aucun groupe n'est assigné.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { FundingRate, Liquidation, LongShortRatio, OpenInterest } from "@axiom/types";
 import { marketStore } from "../store/market";
@@ -224,6 +230,29 @@ export function DerivativesWindow() {
   const hasKey = useStore(coinalyzeKeyStore, (s) => s.hasKey);
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
 
+  // Champ symbole de l'en-tête : émet vers `groupSymbols[groupColor]` quand un groupe
+  // est assigné (seule fenêtre à écrire en v1, cf. doc de tête). État local pour ne
+  // committer qu'au blur/Entrée ; resynchronisé sur `symbol` tant que le champ n'a pas
+  // le focus (évite d'écraser une saisie en cours si le symbole change ailleurs).
+  const [symbolDraft, setSymbolDraft] = useState(symbol);
+  const symbolInputFocused = useRef(false);
+  useEffect(() => {
+    if (!symbolInputFocused.current) setSymbolDraft(symbol);
+  }, [symbol]);
+
+  /** Committe la saisie (normalisée comme PairSearch : trim + majuscules) vers le
+   * groupe — no-op si aucun groupe n'est assigné (le champ est alors désactivé). */
+  const commitSymbolGroupe = () => {
+    symbolInputFocused.current = false;
+    if (!groupColor) return;
+    const next = symbolDraft.trim().toUpperCase();
+    if (next.length === 0) {
+      setSymbolDraft(symbol);
+      return;
+    }
+    if (next !== symbol) windowManagerStore.getState().setGroupSymbol(groupColor, next);
+  };
+
   // Sous-panes dérivés sur le graphe (toggles basse fréquence → abonnement React OK,
   // cf. BUILD-CONTRACT : seule la donnée HAUTE fréquence est proscrite du render React).
   const showOiPane = useStore(derivativesChartStore, (s) => s.oi);
@@ -394,6 +423,38 @@ export function DerivativesWindow() {
             <p className="mt-0.5 text-[11px] text-text-dim">
               {isBinance ? `${coinalyzeSymbol} · Coinalyze` : "Coinalyze · Binance uniquement"}
             </p>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <label htmlFor="derivatives-symbol-groupe" className="text-[10px] text-text-dim">
+              Symbole groupe
+            </label>
+            <input
+              id="derivatives-symbol-groupe"
+              type="text"
+              value={symbolDraft}
+              disabled={!groupColor}
+              spellCheck={false}
+              autoComplete="off"
+              onFocus={() => {
+                symbolInputFocused.current = true;
+              }}
+              onChange={(e) => setSymbolDraft(e.target.value.toUpperCase())}
+              onBlur={commitSymbolGroupe}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                else if (e.key === "Escape") {
+                  setSymbolDraft(symbol);
+                  e.currentTarget.blur();
+                }
+              }}
+              title={
+                groupColor
+                  ? "Diffuse le symbole aux autres fenêtres du même groupe"
+                  : "Assigner un groupe pour lier le symbole"
+              }
+              aria-label="Symbole du groupe lié"
+              className="w-28 rounded border border-border bg-bg px-2 py-1 text-right text-[11px] text-text outline-none placeholder:text-text-dim focus:border-text-dim disabled:cursor-not-allowed disabled:opacity-50"
+            />
           </div>
         </header>
 

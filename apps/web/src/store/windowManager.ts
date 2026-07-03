@@ -223,7 +223,14 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
     set({ groupSymbols: { ...get().groupSymbols, [color]: symbol } });
   },
 
-  setAll: (windows) => set({ windows }),
+  setAll: (windows) =>
+    set({
+      windows,
+      // Ne recule jamais : garde le nextZ courant si aucune fenêtre restaurée ne le
+      // dépasse (pas atteignable aujourd'hui via workspaces/persist.ts, qui repartent
+      // toujours de z cohérents — filet défensif pour un futur appelant).
+      nextZ: Math.max(get().nextZ, ...Object.values(windows).map((w) => w.z), 0) + 1,
+    }),
 }));
 
 /**

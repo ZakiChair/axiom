@@ -115,6 +115,39 @@ export function clampSize(
   };
 }
 
+/** Zone de snap façon Aero — uniquement les bords (pas les coins/quarts dans ce lot). */
+export type SnapZone = "left" | "right" | "top";
+
+/** Distance au bord (px) déclenchant une zone de snap pendant un drag d'en-tête. */
+const SNAP_EDGE_PX = 8;
+
+/** Détecte la zone de snap active pour une position de curseur donnée. `null` hors zone.
+ * Le bord haut est prioritaire (testé en premier) : un curseur dans le coin haut-gauche
+ * déclenche "top" (plein écran), pas "left". */
+export function detectSnapZone(
+  cursorX: number,
+  cursorY: number,
+  viewportWidth: number,
+  viewportHeight: number
+): SnapZone | null {
+  if (cursorY < SNAP_EDGE_PX) return "top";
+  if (cursorX < SNAP_EDGE_PX) return "left";
+  if (cursorX > viewportWidth - SNAP_EDGE_PX) return "right";
+  return null;
+}
+
+/** Géométrie cible pour une zone de snap (moitié gauche/droite pleine hauteur, ou plein
+ * viewport pour "top" — équivalent maximize). */
+export function snapGeometry(
+  zone: SnapZone,
+  viewportWidth: number,
+  viewportHeight: number
+): { x: number; y: number; width: number; height: number } {
+  if (zone === "left") return { x: 0, y: 0, width: viewportWidth / 2, height: viewportHeight };
+  if (zone === "right") return { x: viewportWidth / 2, y: 0, width: viewportWidth / 2, height: viewportHeight };
+  return { x: 0, y: 0, width: viewportWidth, height: viewportHeight };
+}
+
 export interface WindowManagerState {
   windows: Record<string, EtatFenetre>;
   /** Compteur global de z-index — incrémenté à chaque focus/ouverture/restore. */

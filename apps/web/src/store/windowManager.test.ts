@@ -3,6 +3,8 @@ import {
   cascadePosition,
   clampPosition,
   clampSize,
+  detectSnapZone,
+  snapGeometry,
   windowManagerStore,
   mirrorOpenState,
   WINDOW_REGISTRY,
@@ -80,6 +82,38 @@ describe("clampSize", () => {
 
   it("laisse une taille valide inchangée", () => {
     expect(clampSize(600, 500, 320, 240, 1920, 1080)).toEqual({ width: 600, height: 500 });
+  });
+});
+
+describe("detectSnapZone", () => {
+  it("détecte le bord gauche (cursorX < 8)", () => {
+    expect(detectSnapZone(4, 500, 1920, 1080)).toBe("left");
+  });
+
+  it("détecte le bord droit (cursorX > viewportWidth - 8)", () => {
+    expect(detectSnapZone(1917, 500, 1920, 1080)).toBe("right");
+  });
+
+  it("détecte le bord haut (cursorY < 8), prioritaire sur gauche/droite", () => {
+    expect(detectSnapZone(4, 4, 1920, 1080)).toBe("top");
+  });
+
+  it("retourne null hors des zones de bord", () => {
+    expect(detectSnapZone(960, 500, 1920, 1080)).toBeNull();
+  });
+});
+
+describe("snapGeometry", () => {
+  it('"left" -> moitié gauche pleine hauteur', () => {
+    expect(snapGeometry("left", 1920, 1080)).toEqual({ x: 0, y: 0, width: 960, height: 1080 });
+  });
+
+  it('"right" -> moitié droite pleine hauteur', () => {
+    expect(snapGeometry("right", 1920, 1080)).toEqual({ x: 960, y: 0, width: 960, height: 1080 });
+  });
+
+  it('"top" -> plein viewport', () => {
+    expect(snapGeometry("top", 1920, 1080)).toEqual({ x: 0, y: 0, width: 1920, height: 1080 });
   });
 });
 

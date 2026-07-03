@@ -60,27 +60,26 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
     let dernierePosition = { x: depart.wx, y: depart.wy };
     let derniereZone: SnapZone | null = null;
     const onMove = (ev: PointerEvent): void => {
+      const workspace = windowManagerStore.getState().workspace;
       const dx = ev.clientX - depart.x;
       const dy = ev.clientY - depart.y;
-      const { x, y } = clampPosition(depart.wx + dx, depart.wy + dy, etat.width, window.innerWidth, window.innerHeight);
+      const { x, y } = clampPosition(depart.wx + dx, depart.wy + dy, etat.width, etat.height, workspace);
       dernierePosition = { x, y };
       if (rootRef.current) {
         rootRef.current.style.left = `${x}px`;
         rootRef.current.style.top = `${y}px`;
       }
-      const zone = detectSnapZone(ev.clientX, ev.clientY, window.innerWidth, window.innerHeight);
+      const zone = detectSnapZone(ev.clientX, ev.clientY, workspace);
       if (zone !== derniereZone) {
         derniereZone = zone;
-        windowManagerStore
-          .getState()
-          .setDragPreview(zone ? snapGeometry(zone, window.innerWidth, window.innerHeight) : null);
+        windowManagerStore.getState().setDragPreview(zone ? snapGeometry(zone, workspace) : null);
       }
     };
     const onUp = (): void => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       if (derniereZone) {
-        const geo = snapGeometry(derniereZone, window.innerWidth, window.innerHeight);
+        const geo = snapGeometry(derniereZone, windowManagerStore.getState().workspace);
         windowManagerStore.getState().moveWindow(id, geo.x, geo.y);
         windowManagerStore.getState().resizeWindow(id, geo.width, geo.height);
       } else {
@@ -99,20 +98,19 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
     const depart = { x: e.clientX, y: e.clientY, w: etat.width, h: etat.height, wx: etat.x, wy: etat.y };
     let dernierEtat = { width: depart.w, height: depart.h, x: depart.wx, y: depart.wy };
     const onMove = (ev: PointerEvent): void => {
+      const workspace = windowManagerStore.getState().workspace;
       const dx = ev.clientX - depart.x;
       const dy = ev.clientY - depart.y;
       const largeurBrute = depart.w + poignee.dw * dx;
       const hauteurBrute = depart.h + poignee.dh * dy;
-      const { width, height } = clampSize(
-        largeurBrute,
-        hauteurBrute,
-        MIN_WIDTH,
-        MIN_HEIGHT,
-        window.innerWidth,
-        window.innerHeight
-      );
-      const x = poignee.dx ? depart.wx + (depart.w - width) : depart.wx;
-      const y = poignee.dy ? depart.wy + (depart.h - height) : depart.wy;
+      const { width, height } = clampSize(largeurBrute, hauteurBrute, MIN_WIDTH, MIN_HEIGHT, workspace);
+      const xBrut = poignee.dx ? depart.wx + (depart.w - width) : depart.wx;
+      const yBrut = poignee.dy ? depart.wy + (depart.h - height) : depart.wy;
+      // Confinement strict : la poignée "w"/"n"/"nw"… peut recalculer x/y au-delà du
+      // bord du workspace quand la taille brute demandée dépasse ce qui est disponible
+      // de ce côté — clampPosition (appliqué à width/height déjà cohérents) referme
+      // systématiquement l'écart, quelle que soit la poignée utilisée.
+      const { x, y } = clampPosition(xBrut, yBrut, width, height, workspace);
       dernierEtat = { width, height, x, y };
       if (rootRef.current) {
         rootRef.current.style.width = `${width}px`;
@@ -125,7 +123,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       windowManagerStore.getState().resizeWindow(id, dernierEtat.width, dernierEtat.height);
-      if (poignee.dx || poignee.dy) windowManagerStore.getState().moveWindow(id, dernierEtat.x, dernierEtat.y);
+      windowManagerStore.getState().moveWindow(id, dernierEtat.x, dernierEtat.y);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);

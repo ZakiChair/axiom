@@ -10,6 +10,7 @@ import {
   WINDOW_REGISTRY,
   GROUP_PALETTE,
   type EtatFenetre,
+  type WorkspaceRect,
 } from "./windowManager";
 
 beforeEach(() => {
@@ -29,91 +30,122 @@ afterEach(() => {
 });
 
 describe("cascadePosition", () => {
-  it("place la 1ère fenêtre proche du coin haut-gauche (marge 48px)", () => {
-    expect(cascadePosition(0, 1920, 1080, 480, 640)).toEqual({ x: 48, y: 48 });
+  const workspace: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
+
+  it("place la 1ère fenêtre proche du coin haut-gauche du workspace (marge 48px)", () => {
+    expect(cascadePosition(0, workspace, 480, 640)).toEqual({ x: 48, y: 48 });
   });
 
   it("décale chaque fenêtre suivante de 28px en diagonale", () => {
-    expect(cascadePosition(1, 1920, 1080, 480, 640)).toEqual({ x: 76, y: 76 });
-    expect(cascadePosition(2, 1920, 1080, 480, 640)).toEqual({ x: 104, y: 104 });
+    expect(cascadePosition(1, workspace, 480, 640)).toEqual({ x: 76, y: 76 });
+    expect(cascadePosition(2, workspace, 480, 640)).toEqual({ x: 104, y: 104 });
   });
 
-  it("ne dépasse jamais le viewport moins la fenêtre et la marge", () => {
-    // Viewport étroit : la position brute (index=10 -> 48+10*28=328) dépasserait
-    // 1200 - 480 - 48 = 672 ? non ; on force un cas qui dépasse réellement.
-    const { x, y } = cascadePosition(50, 600, 400, 480, 300);
+  it("ne dépasse jamais le workspace moins la fenêtre et la marge", () => {
+    const etroit: WorkspaceRect = { x: 0, y: 0, width: 600, height: 400 };
+    const { x, y } = cascadePosition(50, etroit, 480, 300);
     expect(x).toBeLessThanOrEqual(600 - 480 - 48);
     expect(y).toBeLessThanOrEqual(400 - 300 - 48);
+  });
+
+  it("ancre la cascade à l'origine du workspace (x/y non nuls)", () => {
+    const decale: WorkspaceRect = { x: 200, y: 100, width: 1920, height: 1080 };
+    expect(cascadePosition(0, decale, 480, 640)).toEqual({ x: 248, y: 148 });
   });
 });
 
 describe("clampPosition", () => {
-  it("laisse une position déjà dans l'écran inchangée", () => {
-    expect(clampPosition(100, 100, 480, 1920, 1080)).toEqual({ x: 100, y: 100 });
+  const workspace: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
+
+  it("laisse une position déjà dans le workspace inchangée", () => {
+    expect(clampPosition(100, 100, 480, 640, workspace)).toEqual({ x: 100, y: 100 });
   });
 
-  it("empêche l'en-tête de sortir par la gauche au-delà de -width+40px visibles", () => {
-    // width=480, VISIBLE_MARGIN=40 -> minX = 40 - 480 = -440
-    expect(clampPosition(-1000, 100, 480, 1920, 1080).x).toBe(-440);
+  it("confinement strict : ramène le bord gauche à l'intérieur du workspace", () => {
+    expect(clampPosition(-1000, 100, 480, 640, workspace).x).toBe(0);
   });
 
-  it("empêche l'en-tête de sortir par la droite (garde 40px visibles)", () => {
-    // maxX = viewportWidth - 40 = 1880
-    expect(clampPosition(5000, 100, 480, 1920, 1080).x).toBe(1880);
+  it("confinement strict : ramène le bord droit à l'intérieur du workspace", () => {
+    // width=480 -> maxX = 1920 - 480 = 1440
+    expect(clampPosition(5000, 100, 480, 640, workspace).x).toBe(1440);
   });
 
-  it("empêche l'en-tête de sortir en haut (y >= 0)", () => {
-    expect(clampPosition(100, -500, 480, 1920, 1080).y).toBe(0);
+  it("confinement strict sur l'axe Y : bord haut et bord bas", () => {
+    expect(clampPosition(100, -500, 480, 640, workspace).y).toBe(0);
+    // height=640 -> maxY = 1080 - 640 = 440
+    expect(clampPosition(100, 5000, 480, 640, workspace).y).toBe(440);
   });
 
-  it("empêche l'en-tête de sortir en bas (garde 40px visibles)", () => {
-    expect(clampPosition(100, 5000, 480, 1920, 1080).y).toBe(1080 - 40);
+  it("respecte une origine de workspace non nulle (x/y > 0)", () => {
+    const decale: WorkspaceRect = { x: 200, y: 100, width: 800, height: 600 };
+    expect(clampPosition(0, 0, 300, 200, decale)).toEqual({ x: 200, y: 100 });
+    // maxX = 200+800-300=700 ; maxY = 100+600-200=500
+    expect(clampPosition(9999, 9999, 300, 200, decale)).toEqual({ x: 700, y: 500 });
   });
 });
 
 describe("clampSize", () => {
-  it("respecte les minimums", () => {
-    expect(clampSize(100, 50, 320, 240, 1920, 1080)).toEqual({ width: 320, height: 240 });
+  const workspace: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
+
+  it("laisse une taille déjà dans les bornes inchangée", () => {
+    expect(clampSize(480, 640, 320, 240, workspace)).toEqual({ width: 480, height: 640 });
   });
 
-  it("ne dépasse pas le viewport", () => {
-    expect(clampSize(5000, 5000, 320, 240, 1920, 1080)).toEqual({ width: 1920, height: 1080 });
+  it("remonte sous le minimum", () => {
+    expect(clampSize(100, 100, 320, 240, workspace)).toEqual({ width: 320, height: 240 });
   });
 
-  it("laisse une taille valide inchangée", () => {
-    expect(clampSize(600, 500, 320, 240, 1920, 1080)).toEqual({ width: 600, height: 500 });
+  it("plafonne à la largeur/hauteur du workspace (pas du viewport)", () => {
+    const etroit: WorkspaceRect = { x: 0, y: 0, width: 500, height: 300 };
+    expect(clampSize(2000, 2000, 320, 240, etroit)).toEqual({ width: 500, height: 300 });
   });
 });
 
 describe("detectSnapZone", () => {
-  it("détecte le bord gauche (cursorX < 8)", () => {
-    expect(detectSnapZone(4, 500, 1920, 1080)).toBe("left");
+  const workspace: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
+
+  it("détecte le bord gauche du workspace (cursorX < workspace.x + 8)", () => {
+    expect(detectSnapZone(4, 500, workspace)).toBe("left");
   });
 
-  it("détecte le bord droit (cursorX > viewportWidth - 8)", () => {
-    expect(detectSnapZone(1917, 500, 1920, 1080)).toBe("right");
+  it("détecte le bord droit du workspace (cursorX > workspace.x + workspace.width - 8)", () => {
+    expect(detectSnapZone(1917, 500, workspace)).toBe("right");
   });
 
-  it("détecte le bord haut (cursorY < 8), prioritaire sur gauche/droite", () => {
-    expect(detectSnapZone(4, 4, 1920, 1080)).toBe("top");
+  it("détecte le bord haut du workspace (cursorY < workspace.y + 8), prioritaire sur gauche/droite", () => {
+    expect(detectSnapZone(4, 4, workspace)).toBe("top");
   });
 
   it("retourne null hors des zones de bord", () => {
-    expect(detectSnapZone(960, 500, 1920, 1080)).toBeNull();
+    expect(detectSnapZone(960, 500, workspace)).toBeNull();
+  });
+
+  it("un curseur hors du workspace (au-delà du bord) compte quand même dans la zone (ex. survole la barre de dessin à gauche)", () => {
+    const decale: WorkspaceRect = { x: 200, y: 100, width: 800, height: 600 };
+    expect(detectSnapZone(50, 500, decale)).toBe("left"); // bien avant workspace.x=200, toujours "left"
+    expect(detectSnapZone(500, 500, decale)).toBeNull(); // au milieu du workspace
   });
 });
 
 describe("snapGeometry", () => {
-  it('"left" -> moitié gauche pleine hauteur', () => {
-    expect(snapGeometry("left", 1920, 1080)).toEqual({ x: 0, y: 0, width: 960, height: 1080 });
+  const workspace: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
+
+  it('"left" -> moitié gauche du workspace, pleine hauteur', () => {
+    expect(snapGeometry("left", workspace)).toEqual({ x: 0, y: 0, width: 960, height: 1080 });
   });
 
-  it('"right" -> moitié droite pleine hauteur', () => {
-    expect(snapGeometry("right", 1920, 1080)).toEqual({ x: 960, y: 0, width: 960, height: 1080 });
+  it('"right" -> moitié droite du workspace, pleine hauteur', () => {
+    expect(snapGeometry("right", workspace)).toEqual({ x: 960, y: 0, width: 960, height: 1080 });
   });
 
-  it('"top" -> plein viewport', () => {
-    expect(snapGeometry("top", 1920, 1080)).toEqual({ x: 0, y: 0, width: 1920, height: 1080 });
+  it('"top" -> workspace entier (pas le viewport)', () => {
+    expect(snapGeometry("top", workspace)).toEqual({ x: 0, y: 0, width: 1920, height: 1080 });
+  });
+
+  it("respecte l'origine d'un workspace décalé", () => {
+    const decale: WorkspaceRect = { x: 200, y: 100, width: 800, height: 600 };
+    expect(snapGeometry("left", decale)).toEqual({ x: 200, y: 100, width: 400, height: 600 });
+    expect(snapGeometry("right", decale)).toEqual({ x: 600, y: 100, width: 400, height: 600 });
   });
 });
 

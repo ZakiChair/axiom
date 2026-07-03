@@ -54,7 +54,6 @@ export const WINDOW_REGISTRY: readonly {
 /** Espace minimal toujours visible d'une fenêtre (pixels), pour le drag comme le resize. */
 export const MIN_WIDTH = 320;
 export const MIN_HEIGHT = 240;
-const VISIBLE_MARGIN = 40;
 
 export interface EtatFenetre {
   id: string;
@@ -68,52 +67,60 @@ export interface EtatFenetre {
   groupColor: string | null;
 }
 
+/** Rectangle de la zone de travail des fenêtres flottantes (le conteneur du graphe,
+ * PAS window.innerWidth/innerHeight) — exclut toolbar/barre de dessin/panneau latéral.
+ * Mesuré par App.tsx via ResizeObserver, injecté dans toutes les fonctions ci-dessous
+ * (elles restent pures, testables sans DOM). */
+export interface WorkspaceRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** Position en cascade pour l'ouverture initiale d'une fenêtre (évite l'empilement
  * exact au même endroit). `index` = nombre de fenêtres déjà ouvertes. */
 export function cascadePosition(
   index: number,
-  viewportWidth: number,
-  viewportHeight: number,
+  workspace: WorkspaceRect,
   width: number,
   height: number
 ): { x: number; y: number } {
   const STEP = 28;
   const MARGIN = 48;
-  const rawX = MARGIN + (index % 8) * STEP;
-  const rawY = MARGIN + (index % 8) * STEP;
-  const x = Math.min(rawX, Math.max(MARGIN, viewportWidth - width - MARGIN));
-  const y = Math.min(rawY, Math.max(MARGIN, viewportHeight - height - MARGIN));
+  const rawX = workspace.x + MARGIN + (index % 8) * STEP;
+  const rawY = workspace.y + MARGIN + (index % 8) * STEP;
+  const x = Math.min(rawX, Math.max(workspace.x + MARGIN, workspace.x + workspace.width - width - MARGIN));
+  const y = Math.min(rawY, Math.max(workspace.y + MARGIN, workspace.y + workspace.height - height - MARGIN));
   return { x, y };
 }
 
-/** Contraint une position pour garder au moins `VISIBLE_MARGIN` px de l'en-tête
- * visible à l'écran (utile après un redimensionnement de la fenêtre navigateur). */
+/** Confine une position au workspace — STRICTEMENT (la fenêtre entière, pas seulement
+ * un bord, doit rester dans le rect). Suppose `width`/`height` déjà plafonnés via
+ * `clampSize` contre le MÊME workspace (sinon le résultat peut légèrement déborder). */
 export function clampPosition(
   x: number,
   y: number,
   width: number,
-  viewportWidth: number,
-  viewportHeight: number
+  height: number,
+  workspace: WorkspaceRect
 ): { x: number; y: number } {
-  const minX = VISIBLE_MARGIN - width;
-  const maxX = viewportWidth - VISIBLE_MARGIN;
-  const clampedX = Math.min(Math.max(x, minX), maxX);
-  const clampedY = Math.min(Math.max(y, 0), Math.max(0, viewportHeight - VISIBLE_MARGIN));
+  const clampedX = Math.min(Math.max(x, workspace.x), workspace.x + workspace.width - width);
+  const clampedY = Math.min(Math.max(y, workspace.y), workspace.y + workspace.height - height);
   return { x: clampedX, y: clampedY };
 }
 
-/** Contraint une taille entre les minimums et le viewport. */
+/** Contraint une taille entre les minimums et les dimensions du workspace. */
 export function clampSize(
   width: number,
   height: number,
   minWidth: number,
   minHeight: number,
-  viewportWidth: number,
-  viewportHeight: number
+  workspace: WorkspaceRect
 ): { width: number; height: number } {
   return {
-    width: Math.min(Math.max(width, minWidth), viewportWidth),
-    height: Math.min(Math.max(height, minHeight), viewportHeight),
+    width: Math.min(Math.max(width, minWidth), workspace.width),
+    height: Math.min(Math.max(height, minHeight), workspace.height),
   };
 }
 
@@ -123,31 +130,41 @@ export type SnapZone = "left" | "right" | "top";
 /** Distance au bord (px) déclenchant une zone de snap pendant un drag d'en-tête. */
 const SNAP_EDGE_PX = 8;
 
-/** Détecte la zone de snap active pour une position de curseur donnée. `null` hors zone.
- * Le bord haut est prioritaire (testé en premier) : un curseur dans le coin haut-gauche
- * déclenche "top" (plein écran), pas "left". */
+/** Détecte la zone de snap active pour une position de curseur donnée, relative au
+ * workspace (pas au viewport). `null` hors zone. Le bord haut est prioritaire (testé
+ * en premier) : un curseur dans le coin haut-gauche déclenche "top", pas "left". Un
+ * curseur au-delà du bord du workspace (ex. sur la barre de dessin ou le panneau
+ * latéral) compte toujours dans la zone correspondante. */
 export function detectSnapZone(
   cursorX: number,
   cursorY: number,
-  viewportWidth: number,
-  viewportHeight: number
+  workspace: WorkspaceRect
 ): SnapZone | null {
-  if (cursorY < SNAP_EDGE_PX) return "top";
-  if (cursorX < SNAP_EDGE_PX) return "left";
-  if (cursorX > viewportWidth - SNAP_EDGE_PX) return "right";
+  if (cursorY < workspace.y + SNAP_EDGE_PX) return "top";
+  if (cursorX < workspace.x + SNAP_EDGE_PX) return "left";
+  if (cursorX > workspace.x + workspace.width - SNAP_EDGE_PX) return "right";
   return null;
 }
 
-/** Géométrie cible pour une zone de snap (moitié gauche/droite pleine hauteur, ou plein
- * viewport pour "top" — équivalent maximize). */
+/** Géométrie cible pour une zone de snap (moitié gauche/droite pleine hauteur, ou
+ * workspace entier pour "top" — maximise DANS la zone de travail, jamais par-dessus
+ * la toolbar/le panneau). */
 export function snapGeometry(
   zone: SnapZone,
-  viewportWidth: number,
-  viewportHeight: number
+  workspace: WorkspaceRect
 ): { x: number; y: number; width: number; height: number } {
-  if (zone === "left") return { x: 0, y: 0, width: viewportWidth / 2, height: viewportHeight };
-  if (zone === "right") return { x: viewportWidth / 2, y: 0, width: viewportWidth / 2, height: viewportHeight };
-  return { x: 0, y: 0, width: viewportWidth, height: viewportHeight };
+  if (zone === "left") {
+    return { x: workspace.x, y: workspace.y, width: workspace.width / 2, height: workspace.height };
+  }
+  if (zone === "right") {
+    return {
+      x: workspace.x + workspace.width / 2,
+      y: workspace.y,
+      width: workspace.width / 2,
+      height: workspace.height,
+    };
+  }
+  return { x: workspace.x, y: workspace.y, width: workspace.width, height: workspace.height };
 }
 
 export interface WindowManagerState {

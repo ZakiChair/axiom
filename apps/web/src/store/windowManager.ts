@@ -215,8 +215,10 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
     const existing = state.windows[id];
     const nextZ = state.nextZ;
     if (existing) {
+      const size = clampSize(existing.width, existing.height, MIN_WIDTH, MIN_HEIGHT, state.workspace);
+      const pos = clampPosition(existing.x, existing.y, size.width, size.height, state.workspace);
       set({
-        windows: { ...state.windows, [id]: { ...existing, open: true, minimized: false, z: nextZ } },
+        windows: { ...state.windows, [id]: { ...existing, ...pos, ...size, open: true, minimized: false, z: nextZ } },
         nextZ: nextZ + 1,
       });
       return;

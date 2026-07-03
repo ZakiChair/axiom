@@ -188,7 +188,10 @@ describe("openWindow — fenêtre jamais ouverte", () => {
 describe("openWindow — réouverture d'une fenêtre déjà fermée", () => {
   it("préserve la géométrie précédente au lieu de recalculer la cascade", () => {
     windowManagerStore.getState().openWindow("derivatives");
-    windowManagerStore.getState().moveWindow("derivatives", 900, 500);
+    // x=900,y=300,width=600,height=700 : intégralement dans le workspace 1920x1080 du
+    // beforeEach (900+600=1500<=1920 ; 300+700=1000<=1080) — ce test vérifie la
+    // PRÉSERVATION de la géométrie, pas le clamp (couvert séparément ci-dessous).
+    windowManagerStore.getState().moveWindow("derivatives", 900, 300);
     windowManagerStore.getState().resizeWindow("derivatives", 600, 700);
     windowManagerStore.getState().setGroup("derivatives", GROUP_COLOR);
     windowManagerStore.getState().closeWindow("derivatives");
@@ -198,10 +201,31 @@ describe("openWindow — réouverture d'une fenêtre déjà fermée", () => {
     expect(w.open).toBe(true);
     expect(w.minimized).toBe(false);
     expect(w.x).toBe(900);
-    expect(w.y).toBe(500);
+    expect(w.y).toBe(300);
     expect(w.width).toBe(600);
     expect(w.height).toBe(700);
     expect(w.groupColor).toBe(GROUP_COLOR);
+  });
+
+  it("confine la géométrie restaurée si le workspace a rétréci depuis la fermeture (ex. restauration localStorage sur un viewport plus petit)", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    // Position/taille valides pour le workspace large du beforeEach (1920x1080) :
+    // x+width = 1400+420 = 1820 <= 1920 ; y+height = 300+640 = 940 <= 1080.
+    windowManagerStore.getState().moveWindow("derivatives", 1400, 300);
+    windowManagerStore.getState().closeWindow("derivatives");
+
+    // setState direct (PAS setWorkspace) : on veut que la géométrie stockée reste
+    // périmée par rapport au workspace courant au moment où openWindow s'exécute,
+    // sans passer par reclampAll qui masquerait le bug.
+    const petit: WorkspaceRect = { x: 0, y: 0, width: 800, height: 600 };
+    windowManagerStore.setState({ workspace: petit });
+
+    windowManagerStore.getState().openWindow("derivatives");
+    const w = windowManagerStore.getState().windows.derivatives!;
+    expect(w.x).toBeGreaterThanOrEqual(petit.x);
+    expect(w.y).toBeGreaterThanOrEqual(petit.y);
+    expect(w.x + w.width).toBeLessThanOrEqual(petit.x + petit.width);
+    expect(w.y + w.height).toBeLessThanOrEqual(petit.y + petit.height);
   });
 });
 

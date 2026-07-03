@@ -367,4 +367,20 @@ describe("reclampAll", () => {
     const w = windowManagerStore.getState().windows.derivatives!;
     expect(w.x).toBe(5000);
   });
+
+  it("clampe la position avec la largeur POST-clamp quand le viewport rétrécit aussi la largeur", () => {
+    // Régression : clampPosition et clampSize étaient appelés indépendamment, chacun
+    // avec w.width (l'ancienne largeur). Si un resize rétrécit à la fois le viewport
+    // ET la largeur de la fenêtre, clampPosition calculait minX avec la largeur PÉRIMÉE
+    // (plus grande), laissant la fenêtre entièrement hors-écran après le recalage.
+    windowManagerStore.getState().openWindow("derivatives"); // width par défaut = 420
+    // x=-380 est une position de bordure valide pour width=420 : bord droit exactement
+    // à la marge visible de 40px (-380 + 420 = 40).
+    windowManagerStore.getState().moveWindow("derivatives", -380, 100);
+    windowManagerStore.getState().reclampAll(200, 800);
+    const w = windowManagerStore.getState().windows.derivatives!;
+    // La largeur finale (200, clampée) doit être utilisée pour clamper x, pas 420.
+    expect(w.width).toBe(200);
+    expect(w.x + w.width).toBeGreaterThanOrEqual(40);
+  });
 });

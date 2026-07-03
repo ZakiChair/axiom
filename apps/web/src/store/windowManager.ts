@@ -245,8 +245,8 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
         next[id] = w;
         continue;
       }
-      const pos = clampPosition(w.x, w.y, w.width, viewportWidth, viewportHeight);
       const size = clampSize(w.width, w.height, MIN_WIDTH, MIN_HEIGHT, viewportWidth, viewportHeight);
+      const pos = clampPosition(w.x, w.y, size.width, viewportWidth, viewportHeight);
       if (pos.x !== w.x || pos.y !== w.y || size.width !== w.width || size.height !== w.height) {
         changed = true;
         next[id] = { ...w, ...pos, ...size };

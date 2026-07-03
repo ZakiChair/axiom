@@ -25,6 +25,8 @@ import { optionsUiStore } from "./OptionsWindow";
 import { domUiStore } from "../store/dom-ui";
 import { backtestStore } from "../store/backtest";
 import { replayStore } from "../store/replay";
+import { macroRatesUiStore } from "./MacroRatesWindow";
+import { cotUiStore } from "./CotWindow";
 import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
 import { exporterSauvegarde, importerSauvegarde } from "../store/persist";
@@ -150,6 +152,9 @@ const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] =
   { mnemonique: "DOM", libelle: "Carnet d'ordres (DOM / depth)", ouvrir: () => domUiStore.getState().openDom() },
   { mnemonique: "BT", libelle: "Backtest de stratégie", ouvrir: () => backtestStore.getState().openBacktest() },
   { mnemonique: "REPLAY", libelle: "Replay de marché", ouvrir: () => replayStore.getState().openReplay() },
+  // Fenêtres de la Phase 5 (batch souverain / COT / GEX).
+  { mnemonique: "RATE", libelle: "Taux & Réserves souveraines", ouvrir: () => macroRatesUiStore.getState().openMacroRates() },
+  { mnemonique: "COT", libelle: "Rapport COT (CFTC)", ouvrir: () => cotUiStore.getState().openCot() },
 ];
 
 /**

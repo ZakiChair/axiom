@@ -55,6 +55,7 @@ import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
 import { demarrerAlertes } from "./alerts/runtime";
 import { FloatingWindow } from "./components/FloatingWindow";
 import { TaskbarMinimized } from "./components/TaskbarMinimized";
+import { SnapOverlay } from "./components/SnapOverlay";
 import { WINDOW_REGISTRY, windowManagerStore } from "./store/windowManager";
 
 // ─────────────────────────── Commandes de disposition multi-chart (Phase 4) ───────────────────────────
@@ -226,6 +227,7 @@ export function App() {
           </FloatingWindow>
         );
       })}
+      <SnapOverlay />
       <TaskbarMinimized />
       <SettingsPanel />
       <CommandPalette />

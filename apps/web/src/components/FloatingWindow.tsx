@@ -30,10 +30,10 @@ export interface FloatingWindowProps {
 type PoigneeResize = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
 const POIGNEES: { id: PoigneeResize; className: string; dw: number; dh: number; dx: number; dy: number }[] = [
-  { id: "e", className: "right-0 top-2 bottom-2 w-1.5 cursor-ew-resize", dw: 1, dh: 0, dx: 0, dy: 0 },
-  { id: "w", className: "left-0 top-2 bottom-2 w-1.5 cursor-ew-resize", dw: -1, dh: 0, dx: 1, dy: 0 },
-  { id: "s", className: "bottom-0 left-2 right-2 h-1.5 cursor-ns-resize", dw: 0, dh: 1, dx: 0, dy: 0 },
-  { id: "n", className: "top-0 left-2 right-2 h-1.5 cursor-ns-resize", dw: 0, dh: -1, dx: 0, dy: 1 },
+  { id: "e", className: "right-0 top-2 bottom-2 w-3 cursor-ew-resize", dw: 1, dh: 0, dx: 0, dy: 0 },
+  { id: "w", className: "left-0 top-2 bottom-2 w-3 cursor-ew-resize", dw: -1, dh: 0, dx: 1, dy: 0 },
+  { id: "s", className: "bottom-0 left-2 right-2 h-3 cursor-ns-resize", dw: 0, dh: 1, dx: 0, dy: 0 },
+  { id: "n", className: "top-0 left-2 right-2 h-3 cursor-ns-resize", dw: 0, dh: -1, dx: 0, dy: 1 },
   { id: "se", className: "right-0 bottom-0 h-3 w-3 cursor-nwse-resize", dw: 1, dh: 1, dx: 0, dy: 0 },
   { id: "sw", className: "left-0 bottom-0 h-3 w-3 cursor-nesw-resize", dw: -1, dh: 1, dx: 1, dy: 0 },
   { id: "ne", className: "right-0 top-0 h-3 w-3 cursor-nesw-resize", dw: 1, dh: -1, dx: 0, dy: 1 },

@@ -233,6 +233,9 @@ function validateEtatFenetre(id: string, raw: unknown): EtatFenetre | null {
     z: r.z,
     minimized: false,
     groupColor: typeof r.groupColor === "string" ? r.groupColor : null,
+    // Jamais persisté (état éphémère de drag) : toujours null à la restauration, même
+    // si un ancien enregistrement en contenait un d'une session précédente.
+    preSnapGeometry: null,
   };
 }
 

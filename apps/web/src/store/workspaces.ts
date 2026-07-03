@@ -159,6 +159,7 @@ function validateWindowGeometry(raw: unknown): Record<string, EtatFenetre> {
       z: r.z,
       minimized: false,
       groupColor: typeof r.groupColor === "string" ? r.groupColor : null,
+      preSnapGeometry: null,
     };
   }
   return windows;

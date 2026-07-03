@@ -182,6 +182,7 @@ describe("openWindow — fenêtre jamais ouverte", () => {
     expect(w.x).toBe(48);
     expect(w.y).toBe(48);
     expect(typeof w.z).toBe("number");
+    expect(w.preSnapGeometry).toBeNull();
   });
 });
 
@@ -362,6 +363,60 @@ describe("setGroupSymbol", () => {
   });
 });
 
+describe("snapWindow", () => {
+  it("sauvegarde la géométrie actuelle dans preSnapGeometry, puis applique la nouvelle", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().moveWindow("derivatives", 100, 100);
+    windowManagerStore.getState().resizeWindow("derivatives", 420, 640);
+
+    const geo = { x: 0, y: 0, width: 960, height: 1080 };
+    windowManagerStore.getState().snapWindow("derivatives", geo);
+
+    const w = windowManagerStore.getState().windows.derivatives!;
+    expect(w.x).toBe(geo.x);
+    expect(w.y).toBe(geo.y);
+    expect(w.width).toBe(geo.width);
+    expect(w.height).toBe(geo.height);
+    expect(w.preSnapGeometry).toEqual({ x: 100, y: 100, width: 420, height: 640 });
+  });
+
+  it("un second snap écrase preSnapGeometry avec la géométrie du snap précédent (pas la toute première)", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().moveWindow("derivatives", 100, 100);
+    windowManagerStore.getState().resizeWindow("derivatives", 420, 640);
+
+    windowManagerStore.getState().snapWindow("derivatives", { x: 0, y: 0, width: 960, height: 1080 });
+    windowManagerStore.getState().snapWindow("derivatives", { x: 0, y: 0, width: 1920, height: 1080 });
+
+    const w = windowManagerStore.getState().windows.derivatives!;
+    expect(w.preSnapGeometry).toEqual({ x: 0, y: 0, width: 960, height: 1080 });
+  });
+
+  it("no-op sur un id inconnu", () => {
+    expect(() =>
+      windowManagerStore.getState().snapWindow("inconnu", { x: 0, y: 0, width: 100, height: 100 }),
+    ).not.toThrow();
+    expect(windowManagerStore.getState().windows.inconnu).toBeUndefined();
+  });
+});
+
+describe("setPreSnapGeometry", () => {
+  it("définit puis efface preSnapGeometry indépendamment de la géométrie courante", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    const geo = { x: 10, y: 20, width: 300, height: 400 };
+
+    windowManagerStore.getState().setPreSnapGeometry("derivatives", geo);
+    expect(windowManagerStore.getState().windows.derivatives!.preSnapGeometry).toEqual(geo);
+
+    windowManagerStore.getState().setPreSnapGeometry("derivatives", null);
+    expect(windowManagerStore.getState().windows.derivatives!.preSnapGeometry).toBeNull();
+  });
+
+  it("no-op sur un id inconnu", () => {
+    expect(() => windowManagerStore.getState().setPreSnapGeometry("inconnu", null)).not.toThrow();
+  });
+});
+
 describe("setAll", () => {
   it("remplace intégralement le record windows (restauration workspace/persistance)", () => {
     windowManagerStore.getState().openWindow("derivatives");
@@ -377,6 +432,7 @@ describe("setAll", () => {
         z: 99,
         minimized: false,
         groupColor: null,
+        preSnapGeometry: null,
       },
     };
     windowManagerStore.getState().setAll(nouveauxWindows);
@@ -398,6 +454,7 @@ describe("setAll", () => {
         z: 500, // très supérieur au nextZ courant (1) — cas non atteignable aujourd'hui.
         minimized: false,
         groupColor: null,
+        preSnapGeometry: null,
       },
     };
     windowManagerStore.getState().setAll(nouveauxWindows);

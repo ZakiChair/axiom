@@ -56,14 +56,42 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
     if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
     e.preventDefault();
     focus();
-    const depart = { x: e.clientX, y: e.clientY, wx: etat.x, wy: etat.y };
+    // Si la fenêtre est actuellement issue d'un snap (maximisée/ancrée), le PREMIER
+    // pointermove la restaure immédiatement à sa taille d'avant, le curseur restant au
+    // même point relatif dans l'en-tête (comportement Windows/macOS standard) — sinon
+    // une fenêtre plein-workspace n'a AUCUNE position valide autre que la sienne
+    // (confinement strict) et le drag serait un no-op perpétuel.
+    const preSnap = etat.preSnapGeometry;
+    const depart = { x: e.clientX, y: e.clientY, wx: etat.x, wy: etat.y, w: etat.width, h: etat.height };
+    let refX = depart.wx;
+    let refY = depart.wy;
+    let refCursorX = depart.x;
+    let refCursorY = depart.y;
+    let largeurCourante = depart.w;
+    let hauteurCourante = depart.h;
     let dernierePosition = { x: depart.wx, y: depart.wy };
     let derniereZone: SnapZone | null = null;
+    let aRestaure = false;
     const onMove = (ev: PointerEvent): void => {
       const workspace = windowManagerStore.getState().workspace;
-      const dx = ev.clientX - depart.x;
-      const dy = ev.clientY - depart.y;
-      const { x, y } = clampPosition(depart.wx + dx, depart.wy + dy, etat.width, etat.height, workspace);
+      if (preSnap && !aRestaure) {
+        aRestaure = true;
+        const relX = (depart.x - depart.wx) / depart.w;
+        const relY = (depart.y - depart.wy) / depart.h;
+        largeurCourante = preSnap.width;
+        hauteurCourante = preSnap.height;
+        refX = ev.clientX - relX * largeurCourante;
+        refY = ev.clientY - relY * hauteurCourante;
+        refCursorX = ev.clientX;
+        refCursorY = ev.clientY;
+        if (rootRef.current) {
+          rootRef.current.style.width = `${largeurCourante}px`;
+          rootRef.current.style.height = `${hauteurCourante}px`;
+        }
+      }
+      const dx = ev.clientX - refCursorX;
+      const dy = ev.clientY - refCursorY;
+      const { x, y } = clampPosition(refX + dx, refY + dy, largeurCourante, hauteurCourante, workspace);
       dernierePosition = { x, y };
       if (rootRef.current) {
         rootRef.current.style.left = `${x}px`;
@@ -80,10 +108,13 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
       window.removeEventListener("pointerup", onUp);
       if (derniereZone) {
         const geo = snapGeometry(derniereZone, windowManagerStore.getState().workspace);
-        windowManagerStore.getState().moveWindow(id, geo.x, geo.y);
-        windowManagerStore.getState().resizeWindow(id, geo.width, geo.height);
+        windowManagerStore.getState().snapWindow(id, geo);
       } else {
         windowManagerStore.getState().moveWindow(id, dernierePosition.x, dernierePosition.y);
+        if (aRestaure) {
+          windowManagerStore.getState().resizeWindow(id, largeurCourante, hauteurCourante);
+          windowManagerStore.getState().setPreSnapGeometry(id, null);
+        }
       }
       windowManagerStore.getState().setDragPreview(null);
     };
@@ -124,6 +155,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
       window.removeEventListener("pointerup", onUp);
       windowManagerStore.getState().resizeWindow(id, dernierEtat.width, dernierEtat.height);
       windowManagerStore.getState().moveWindow(id, dernierEtat.x, dernierEtat.y);
+      windowManagerStore.getState().setPreSnapGeometry(id, null);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);

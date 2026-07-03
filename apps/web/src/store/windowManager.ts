@@ -65,6 +65,10 @@ export interface EtatFenetre {
   z: number;
   minimized: boolean;
   groupColor: string | null;
+  /** Géométrie d'avant le dernier snap Aero appliqué (gauche/droite/haut) — permet de
+   * restaurer en glissant l'en-tête depuis l'état maximisé/ancré, comme Windows/macOS.
+   * `null` si la fenêtre n'est pas actuellement dans un état issu d'un snap. */
+  preSnapGeometry: { x: number; y: number; width: number; height: number } | null;
 }
 
 /** Rectangle de la zone de travail des fenêtres flottantes (le conteneur du graphe,
@@ -193,6 +197,11 @@ export interface WindowManagerState {
   restoreWindow: (id: string) => void;
   setGroup: (id: string, color: string | null) => void;
   setGroupSymbol: (color: string, symbol: string) => void;
+  /** Applique une géométrie de snap Aero : sauvegarde la géométrie ACTUELLE dans
+   * `preSnapGeometry` (pour restaurer plus tard en glissant l'en-tête), puis applique
+   * la nouvelle géométrie. Remplace le couple moveWindow+resizeWindow pour un snap. */
+  snapWindow: (id: string, geometrie: { x: number; y: number; width: number; height: number }) => void;
+  setPreSnapGeometry: (id: string, preSnapGeometry: { x: number; y: number; width: number; height: number } | null) => void;
   setDragPreview: (preview: { x: number; y: number; width: number; height: number } | null) => void;
   /** Restauration depuis la persistance (déjà validée par l'appelant). */
   setAll: (windows: Record<string, EtatFenetre>) => void;
@@ -231,7 +240,18 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
     set({
       windows: {
         ...state.windows,
-        [id]: { id, open: true, x, y, width, height, z: nextZ, minimized: false, groupColor: null },
+        [id]: {
+          id,
+          open: true,
+          x,
+          y,
+          width,
+          height,
+          z: nextZ,
+          minimized: false,
+          groupColor: null,
+          preSnapGeometry: null,
+        },
       },
       nextZ: nextZ + 1,
     });
@@ -292,6 +312,27 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
 
   setGroupSymbol: (color, symbol) => {
     set({ groupSymbols: { ...get().groupSymbols, [color]: symbol } });
+  },
+
+  snapWindow: (id, geometrie) => {
+    const existing = get().windows[id];
+    if (!existing) return;
+    set({
+      windows: {
+        ...get().windows,
+        [id]: {
+          ...existing,
+          ...geometrie,
+          preSnapGeometry: { x: existing.x, y: existing.y, width: existing.width, height: existing.height },
+        },
+      },
+    });
+  },
+
+  setPreSnapGeometry: (id, preSnapGeometry) => {
+    const existing = get().windows[id];
+    if (!existing) return;
+    set({ windows: { ...get().windows, [id]: { ...existing, preSnapGeometry } } });
   },
 
   setDragPreview: (preview) => set({ dragPreview: preview }),

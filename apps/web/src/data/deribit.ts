@@ -238,6 +238,8 @@ export interface OptionPoint {
   openInterest: number;
   /** Prix du sous-jacent (index) au moment du résumé. */
   underlying: number;
+  /** Taux sans risque en fraction (Deribit `interest_rate`, souvent 0). Input Black-Scholes. */
+  interestRate: number;
 }
 
 /** Résumé de carnet d'une option (get_book_summary_by_currency, kind=option). */
@@ -246,6 +248,7 @@ interface DeribitOptionSummary {
   mark_iv: number | null;
   open_interest: number | null;
   underlying_price: number | null;
+  interest_rate: number | null;
 }
 
 /**
@@ -270,6 +273,7 @@ export async function fetchDeribitOptionChain(currency: "BTC" | "ETH"): Promise<
         markIv: r.mark_iv ?? NaN,
         openInterest: r.open_interest ?? 0,
         underlying: r.underlying_price ?? NaN,
+        interestRate: r.interest_rate ?? 0,
       });
     }
     healthStore.getState().setEtat(HEALTH_SOURCE, "connected", { dernierMessageTs: Date.now() });

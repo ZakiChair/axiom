@@ -37,6 +37,9 @@ import { OptionsWindow, commandes as optionsCommands } from "./components/Option
 import { DomWindow } from "./components/DomWindow";
 import { BacktestWindow } from "./components/BacktestWindow";
 import { ReplayWindow } from "./components/ReplayWindow";
+// Fenêtre non modale de la Phase 5 (batch souverain / COT / GEX) : même patron que les
+// fenêtres des Phases 3-4 (dockée à droite, montée en permanence, cachée via translate-x).
+import { CotWindow, commandes as cotCommands } from "./components/CotWindow";
 import { settingsUiStore } from "./store/settings-ui";
 import { ecoCommands } from "./store/eco";
 import { commandes as newsCommands } from "./store/news";
@@ -112,6 +115,8 @@ enregistrerCommandes([
   ...backtestCommands,
   ...replayCommands,
   ...commandesGrille,
+  // Fenêtre COT (Phase 5).
+  ...cotCommands,
 ]);
 
 // ─────────────────────────── Table composant↔id des fenêtres flottantes ───────────────────────────
@@ -135,6 +140,7 @@ const WINDOW_COMPONENTS: Record<string, () => JSX.Element> = {
   dom: DomWindow,
   backtest: BacktestWindow,
   replay: ReplayWindow,
+  cot: CotWindow,
 };
 
 export function App() {
@@ -216,7 +222,7 @@ export function App() {
         </div>
       )}
 
-      {/* Les 14 fenêtres Bloomberg non modales, montées génériquement sous <FloatingWindow>
+      {/* Les 15 fenêtres Bloomberg non modales, montées génériquement sous <FloatingWindow>
           via WINDOW_REGISTRY (géométrie/z-order/minimize gérés par windowManagerStore). */}
       {WINDOW_REGISTRY.map((entry) => {
         const Contenu = WINDOW_COMPONENTS[entry.id];

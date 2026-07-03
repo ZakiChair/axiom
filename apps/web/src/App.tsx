@@ -37,7 +37,10 @@ import { OptionsWindow, commandes as optionsCommands } from "./components/Option
 import { DomWindow } from "./components/DomWindow";
 import { BacktestWindow } from "./components/BacktestWindow";
 import { ReplayWindow } from "./components/ReplayWindow";
+// Fenêtres non modales de la Phase 5 (batch souverain / COT / GEX) : même patron que les
+// fenêtres des Phases 3-4 (dockées à droite, montées en permanence, cachées via translate-x).
 import { MacroRatesWindow, commandes as macroRatesCommands } from "./components/MacroRatesWindow";
+import { CotWindow, commandes as cotCommands } from "./components/CotWindow";
 import { settingsUiStore } from "./store/settings-ui";
 import { ecoCommands } from "./store/eco";
 import { commandes as newsCommands } from "./store/news";
@@ -114,6 +117,8 @@ enregistrerCommandes([
   ...replayCommands,
   ...macroRatesCommands,
   ...commandesGrille,
+  // Fenêtre COT (Phase 5).
+  ...cotCommands,
 ]);
 
 // ─────────────────────────── Table composant↔id des fenêtres flottantes ───────────────────────────
@@ -138,6 +143,7 @@ const WINDOW_COMPONENTS: Record<string, () => JSX.Element> = {
   backtest: BacktestWindow,
   replay: ReplayWindow,
   macroRates: MacroRatesWindow,
+  cot: CotWindow,
 };
 
 export function App() {

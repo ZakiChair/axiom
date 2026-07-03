@@ -14,3 +14,6 @@ coverage/
 apps/daemon/axiom.db
 apps/daemon/axiom.db-shm
 apps/daemon/axiom.db-wal
+
+# Scratch de suivi de progression (subagent-driven-development) — jamais committé
+.superpowers/

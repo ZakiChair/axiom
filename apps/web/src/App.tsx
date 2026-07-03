@@ -55,7 +55,7 @@ import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
 import { demarrerAlertes } from "./alerts/runtime";
 import { FloatingWindow } from "./components/FloatingWindow";
 import { TaskbarMinimized } from "./components/TaskbarMinimized";
-import { WINDOW_REGISTRY } from "./store/windowManager";
+import { WINDOW_REGISTRY, windowManagerStore } from "./store/windowManager";
 
 // ─────────────────────────── Commandes de disposition multi-chart (Phase 4) ───────────────────────────
 
@@ -148,6 +148,23 @@ export function App() {
   useEffect(() => {
     const stop = demarrerAlertes();
     return () => stop();
+  }, []);
+
+  // Recalage des fenêtres flottantes au resize du navigateur — débounce 150ms pour
+  // éviter un flot de set() pendant un drag continu de la bordure du navigateur.
+  useEffect(() => {
+    let minuteur: ReturnType<typeof setTimeout> | undefined;
+    const onResize = (): void => {
+      if (minuteur !== undefined) clearTimeout(minuteur);
+      minuteur = setTimeout(() => {
+        windowManagerStore.getState().reclampAll(window.innerWidth, window.innerHeight);
+      }, 150);
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      if (minuteur !== undefined) clearTimeout(minuteur);
+      window.removeEventListener("resize", onResize);
+    };
   }, []);
 
   return (

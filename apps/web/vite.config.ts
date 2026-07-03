@@ -31,6 +31,12 @@ const EXTAPI_HOTES: readonly string[] = [
   "dapi.binance.com",
   "fapi.binance.com",
   "api.coingecko.com",
+  "api.fiscaldata.treasury.gov",
+  "data-api.ecb.europa.eu",
+  "stats.bis.org",
+  "api.imf.org",
+  "publicreporting.cftc.gov",
+  "cdn.cboe.com",
 ];
 
 // User-Agent navigateur standard : certains hôtes (RSS, Cloudflare) refusent un UA vide.

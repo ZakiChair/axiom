@@ -37,6 +37,12 @@ export const EXTAPI_WHITELIST: readonly string[] = [
   "dapi.binance.com", // Binance COIN-M (term structure)
   "fapi.binance.com", // Binance USD-M (dérivés : funding, top trader L/S)
   "api.coingecko.com", // CoinGecko (treemap, catégories)
+  "api.fiscaldata.treasury.gov", // US Treasury Fiscal Data (rendements souverains US)
+  "data-api.ecb.europa.eu", // ECB SDMX (courbe zone euro + taux directeur BCE)
+  "stats.bis.org", // BIS SDMX WS_CBPOL (taux directeurs banques centrales)
+  "api.imf.org", // IMF SDMX 3.0 IRFCL (réserves d'or par pays)
+  "publicreporting.cftc.gov", // CFTC Socrata SODA (rapport COT)
+  "cdn.cboe.com", // CBOE delayed quotes (GEX/DEX indices actions)
 ];
 
 /** L'hôte est-il autorisé par le proxy /extapi ? (garde-fou dev côté appelant). */

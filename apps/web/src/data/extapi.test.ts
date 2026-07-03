@@ -22,7 +22,7 @@ describe("estHoteExtapiAutorise", () => {
   it("faux hors whitelist", () => {
     expect(estHoteExtapiAutorise("evil.com")).toBe(false);
   });
-  it("whitelist = 16 hôtes", () => {
-    expect(EXTAPI_WHITELIST.length).toBe(16);
+  it("whitelist = 22 hôtes", () => {
+    expect(EXTAPI_WHITELIST.length).toBe(22);
   });
 });

@@ -5,7 +5,7 @@
  * clavier globaux, runtime des alertes, et le mode plein écran (masque toolbars +
  * sidebar pour ne garder que le graphe).
  */
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import { Toolbar } from "./components/Toolbar";
 import { DrawingToolbar } from "./components/DrawingToolbar";
@@ -149,6 +149,7 @@ const WINDOW_COMPONENTS: Record<string, () => JSX.Element> = {
 export function App() {
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
   const plein = useStore(fullscreenStore, (s) => s.plein);
+  const chartAreaRef = useRef<HTMLDivElement>(null);
 
   // Écouteur clavier global unique (TF, toggles, plein écran, palette…).
   useRaccourcisGlobaux();
@@ -160,20 +161,29 @@ export function App() {
     return () => stop();
   }, []);
 
-  // Recalage des fenêtres flottantes au resize du navigateur — débounce 150ms pour
-  // éviter un flot de set() pendant un drag continu de la bordure du navigateur.
+  // Zone de travail des fenêtres flottantes = la zone du graphe (exclut toolbar/barre
+  // de dessin/panneau latéral) — mesurée sur ce div, PAS sur window.innerWidth/innerHeight.
+  // Un seul ResizeObserver capture aussi bien le resize du navigateur QUE le bascule
+  // plein écran (qui démonte/remonte la toolbar et le panneau, changeant la taille de
+  // ce div) — un seul point d'entrée au lieu d'un listener par déclencheur. Débounce
+  // 150ms conservé (même esprit que l'ancien listener resize).
   useEffect(() => {
+    const el = chartAreaRef.current;
+    if (!el) return;
     let minuteur: ReturnType<typeof setTimeout> | undefined;
-    const onResize = (): void => {
-      if (minuteur !== undefined) clearTimeout(minuteur);
-      minuteur = setTimeout(() => {
-        windowManagerStore.getState().reclampAll(window.innerWidth, window.innerHeight);
-      }, 150);
+    const mesurer = (): void => {
+      const rect = el.getBoundingClientRect();
+      windowManagerStore.getState().setWorkspace({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
     };
-    window.addEventListener("resize", onResize);
+    mesurer();
+    const observer = new ResizeObserver(() => {
+      if (minuteur !== undefined) clearTimeout(minuteur);
+      minuteur = setTimeout(mesurer, 150);
+    });
+    observer.observe(el);
     return () => {
       if (minuteur !== undefined) clearTimeout(minuteur);
-      window.removeEventListener("resize", onResize);
+      observer.disconnect();
     };
   }, []);
 
@@ -186,7 +196,7 @@ export function App() {
         {/* Barre d'outils de dessin verticale, à gauche du graphe. */}
         {!plein && <DrawingToolbar />}
         {/* min-w-0 : la grille de graphes peut rétrécir face aux panneaux latéraux. */}
-        <div className="min-w-0 flex-1">
+        <div ref={chartAreaRef} className="min-w-0 flex-1">
           <ChartGrid />
         </div>
         {/* Colonne droite : en-tête (accès Réglages) + panneaux empilés, tous harmonisés

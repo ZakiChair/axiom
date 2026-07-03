@@ -177,6 +177,11 @@ export interface WindowManagerState {
    * survolée) — état ÉPHÉMÈRE, jamais persisté (persist.ts construit explicitement
    * le sous-ensemble sauvegardé, ce champ n'y figure simplement pas). */
   dragPreview: { x: number; y: number; width: number; height: number } | null;
+  /** Zone de travail actuelle (rect du conteneur du graphe, exclut toolbar/barre de
+   * dessin/panneau latéral) — mesurée par App.tsx via ResizeObserver, jamais persistée
+   * (recalculée à chaque montage). Référentiel de TOUT le placement/redimensionnement/
+   * snap des fenêtres flottantes, à la place de window.innerWidth/innerHeight. */
+  workspace: WorkspaceRect;
 
   openWindow: (id: string) => void;
   closeWindow: (id: string) => void;
@@ -191,10 +196,11 @@ export interface WindowManagerState {
   setDragPreview: (preview: { x: number; y: number; width: number; height: number } | null) => void;
   /** Restauration depuis la persistance (déjà validée par l'appelant). */
   setAll: (windows: Record<string, EtatFenetre>) => void;
-  /** Recale position/taille de toutes les fenêtres OUVERTES contre un nouveau viewport
+  /** Recale position/taille de toutes les fenêtres OUVERTES contre un nouveau workspace
    * (déclenché par un resize du navigateur, cf. App.tsx) — même clamp pur que le
    * drag/resize interactif, appliqué en lot. */
-  reclampAll: (viewportWidth: number, viewportHeight: number) => void;
+  reclampAll: (workspace: WorkspaceRect) => void;
+  setWorkspace: (workspace: WorkspaceRect) => void;
 }
 
 export const windowManagerStore = createStore<WindowManagerState>((set, get) => ({
@@ -202,6 +208,7 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   nextZ: 1,
   groupSymbols: {},
   dragPreview: null,
+  workspace: { x: 0, y: 0, width: 1920, height: 1080 },
 
   openWindow: (id) => {
     const state = get();
@@ -218,7 +225,7 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
     const width = entry?.defaultWidth ?? 480;
     const height = entry?.defaultHeight ?? 640;
     const openCount = Object.values(state.windows).filter((w) => w.open).length;
-    const { x, y } = cascadePosition(openCount, window.innerWidth, window.innerHeight, width, height);
+    const { x, y } = cascadePosition(openCount, state.workspace, width, height);
     set({
       windows: {
         ...state.windows,
@@ -287,6 +294,11 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
 
   setDragPreview: (preview) => set({ dragPreview: preview }),
 
+  setWorkspace: (workspace) => {
+    set({ workspace });
+    get().reclampAll(workspace);
+  },
+
   setAll: (windows) =>
     set({
       windows,
@@ -296,7 +308,7 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
       nextZ: Math.max(get().nextZ, ...Object.values(windows).map((w) => w.z), 0) + 1,
     }),
 
-  reclampAll: (viewportWidth, viewportHeight) => {
+  reclampAll: (workspace) => {
     const state = get();
     const next: Record<string, EtatFenetre> = {};
     let changed = false;
@@ -305,8 +317,8 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
         next[id] = w;
         continue;
       }
-      const size = clampSize(w.width, w.height, MIN_WIDTH, MIN_HEIGHT, viewportWidth, viewportHeight);
-      const pos = clampPosition(w.x, w.y, size.width, viewportWidth, viewportHeight);
+      const size = clampSize(w.width, w.height, MIN_WIDTH, MIN_HEIGHT, workspace);
+      const pos = clampPosition(w.x, w.y, size.width, size.height, workspace);
       if (pos.x !== w.x || pos.y !== w.y || size.width !== w.width || size.height !== w.height) {
         changed = true;
         next[id] = { ...w, ...pos, ...size };

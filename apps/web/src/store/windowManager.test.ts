@@ -14,19 +14,13 @@ import {
 } from "./windowManager";
 
 beforeEach(() => {
-  windowManagerStore.setState({ windows: {}, nextZ: 1, groupSymbols: {}, dragPreview: null });
-});
-
-beforeEach(() => {
-  // openWindow lit window.innerWidth/innerHeight pour positionner la cascade initiale.
-  // Ce paquet tourne ses tests en environnement vitest "node" (pas de jsdom, cf.
-  // vite.config.ts — aucune option `test.environment`) → `window` est undefined sans
-  // stub. Même pattern que vi.stubGlobal("fetch", …) dans data/twelvedata.test.ts.
-  vi.stubGlobal("window", { innerWidth: 1920, innerHeight: 1080 });
-});
-
-afterEach(() => {
-  vi.unstubAllGlobals();
+  windowManagerStore.setState({
+    windows: {},
+    nextZ: 1,
+    groupSymbols: {},
+    dragPreview: null,
+    workspace: { x: 0, y: 0, width: 1920, height: 1080 },
+  });
 });
 
 describe("cascadePosition", () => {
@@ -412,19 +406,23 @@ describe("mirrorOpenState", () => {
 });
 
 describe("reclampAll", () => {
-  it("recale une fenêtre devenue hors-écran après rétrécissement du viewport", () => {
-    windowManagerStore.getState().openWindow("derivatives");
+  it("confinement strict : la fenêtre entière rentre dans le nouveau workspace (position ET taille)", () => {
+    windowManagerStore.getState().openWindow("derivatives"); // defaultWidth 420, defaultHeight 640
     windowManagerStore.getState().moveWindow("derivatives", 1800, 100);
-    windowManagerStore.getState().reclampAll(1000, 800);
+    const cible = { x: 0, y: 0, width: 500, height: 400 };
+    windowManagerStore.getState().reclampAll(cible);
     const w = windowManagerStore.getState().windows.derivatives!;
-    expect(w.x).toBeLessThanOrEqual(1000 - 40);
+    expect(w.x).toBeGreaterThanOrEqual(cible.x);
+    expect(w.y).toBeGreaterThanOrEqual(cible.y);
+    expect(w.x + w.width).toBeLessThanOrEqual(cible.x + cible.width);
+    expect(w.y + w.height).toBeLessThanOrEqual(cible.y + cible.height);
   });
 
   it("ne touche pas une fenêtre déjà dans les bornes", () => {
     windowManagerStore.getState().openWindow("derivatives");
     windowManagerStore.getState().moveWindow("derivatives", 100, 100);
     const before = windowManagerStore.getState().windows.derivatives!;
-    windowManagerStore.getState().reclampAll(1920, 1080);
+    windowManagerStore.getState().reclampAll({ x: 0, y: 0, width: 1920, height: 1080 });
     const after = windowManagerStore.getState().windows.derivatives!;
     expect(after).toEqual(before);
   });
@@ -433,25 +431,29 @@ describe("reclampAll", () => {
     windowManagerStore.getState().openWindow("derivatives");
     windowManagerStore.getState().moveWindow("derivatives", 5000, 100);
     windowManagerStore.getState().closeWindow("derivatives");
-    windowManagerStore.getState().reclampAll(800, 600);
+    windowManagerStore.getState().reclampAll({ x: 0, y: 0, width: 800, height: 600 });
     const w = windowManagerStore.getState().windows.derivatives!;
     expect(w.x).toBe(5000);
   });
 
-  it("clampe la position avec la largeur POST-clamp quand le viewport rétrécit aussi la largeur", () => {
-    // Régression : clampPosition et clampSize étaient appelés indépendamment, chacun
-    // avec w.width (l'ancienne largeur). Si un resize rétrécit à la fois le viewport
-    // ET la largeur de la fenêtre, clampPosition calculait minX avec la largeur PÉRIMÉE
-    // (plus grande), laissant la fenêtre entièrement hors-écran après le recalage.
-    windowManagerStore.getState().openWindow("derivatives"); // width par défaut = 420
-    // x=-380 est une position de bordure valide pour width=420 : bord droit exactement
-    // à la marge visible de 40px (-380 + 420 = 40).
-    windowManagerStore.getState().moveWindow("derivatives", -380, 100);
-    windowManagerStore.getState().reclampAll(200, 800);
+  it("recale contre une origine de workspace non nulle", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().moveWindow("derivatives", 0, 0);
+    windowManagerStore.getState().reclampAll({ x: 200, y: 100, width: 1000, height: 800 });
     const w = windowManagerStore.getState().windows.derivatives!;
-    // La largeur finale (200, clampée) doit être utilisée pour clamper x, pas 420.
-    expect(w.width).toBe(200);
-    expect(w.x + w.width).toBeGreaterThanOrEqual(40);
+    expect(w.x).toBeGreaterThanOrEqual(200);
+    expect(w.y).toBeGreaterThanOrEqual(100);
+  });
+});
+
+describe("setWorkspace", () => {
+  it("met à jour l'état workspace ET recale les fenêtres ouvertes", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().moveWindow("derivatives", 1800, 100);
+    windowManagerStore.getState().setWorkspace({ x: 0, y: 0, width: 500, height: 400 });
+    expect(windowManagerStore.getState().workspace).toEqual({ x: 0, y: 0, width: 500, height: 400 });
+    const w = windowManagerStore.getState().windows.derivatives!;
+    expect(w.x + w.width).toBeLessThanOrEqual(500);
   });
 });
 

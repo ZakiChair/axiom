@@ -15,9 +15,12 @@ import {
   windowManagerStore,
   clampPosition,
   clampSize,
+  detectSnapZone,
+  snapGeometry,
   MIN_WIDTH,
   MIN_HEIGHT,
   GROUP_PALETTE,
+  type SnapZone,
 } from "../store/windowManager";
 
 export interface FloatingWindowProps {
@@ -55,6 +58,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
     focus();
     const depart = { x: e.clientX, y: e.clientY, wx: etat.x, wy: etat.y };
     let dernierePosition = { x: depart.wx, y: depart.wy };
+    let derniereZone: SnapZone | null = null;
     const onMove = (ev: PointerEvent): void => {
       const dx = ev.clientX - depart.x;
       const dy = ev.clientY - depart.y;
@@ -64,11 +68,25 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
         rootRef.current.style.left = `${x}px`;
         rootRef.current.style.top = `${y}px`;
       }
+      const zone = detectSnapZone(ev.clientX, ev.clientY, window.innerWidth, window.innerHeight);
+      if (zone !== derniereZone) {
+        derniereZone = zone;
+        windowManagerStore
+          .getState()
+          .setDragPreview(zone ? snapGeometry(zone, window.innerWidth, window.innerHeight) : null);
+      }
     };
     const onUp = (): void => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      windowManagerStore.getState().moveWindow(id, dernierePosition.x, dernierePosition.y);
+      if (derniereZone) {
+        const geo = snapGeometry(derniereZone, window.innerWidth, window.innerHeight);
+        windowManagerStore.getState().moveWindow(id, geo.x, geo.y);
+        windowManagerStore.getState().resizeWindow(id, geo.width, geo.height);
+      } else {
+        windowManagerStore.getState().moveWindow(id, dernierePosition.x, dernierePosition.y);
+      }
+      windowManagerStore.getState().setDragPreview(null);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);

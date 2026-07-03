@@ -340,3 +340,31 @@ describe("mirrorOpenState", () => {
     expect(fakeUiStore.getState().open).toBe(false);
   });
 });
+
+describe("reclampAll", () => {
+  it("recale une fenêtre devenue hors-écran après rétrécissement du viewport", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().moveWindow("derivatives", 1800, 100);
+    windowManagerStore.getState().reclampAll(1000, 800);
+    const w = windowManagerStore.getState().windows.derivatives!;
+    expect(w.x).toBeLessThanOrEqual(1000 - 40);
+  });
+
+  it("ne touche pas une fenêtre déjà dans les bornes", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().moveWindow("derivatives", 100, 100);
+    const before = windowManagerStore.getState().windows.derivatives!;
+    windowManagerStore.getState().reclampAll(1920, 1080);
+    const after = windowManagerStore.getState().windows.derivatives!;
+    expect(after).toEqual(before);
+  });
+
+  it("ignore les fenêtres fermées (ne les recadre pas)", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().moveWindow("derivatives", 5000, 100);
+    windowManagerStore.getState().closeWindow("derivatives");
+    windowManagerStore.getState().reclampAll(800, 600);
+    const w = windowManagerStore.getState().windows.derivatives!;
+    expect(w.x).toBe(5000);
+  });
+});

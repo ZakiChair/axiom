@@ -134,6 +134,10 @@ export interface WindowManagerState {
   setGroupSymbol: (color: string, symbol: string) => void;
   /** Restauration depuis la persistance (déjà validée par l'appelant). */
   setAll: (windows: Record<string, EtatFenetre>) => void;
+  /** Recale position/taille de toutes les fenêtres OUVERTES contre un nouveau viewport
+   * (déclenché par un resize du navigateur, cf. App.tsx) — même clamp pur que le
+   * drag/resize interactif, appliqué en lot. */
+  reclampAll: (viewportWidth: number, viewportHeight: number) => void;
 }
 
 export const windowManagerStore = createStore<WindowManagerState>((set, get) => ({
@@ -231,6 +235,27 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
       // toujours de z cohérents — filet défensif pour un futur appelant).
       nextZ: Math.max(get().nextZ, ...Object.values(windows).map((w) => w.z), 0) + 1,
     }),
+
+  reclampAll: (viewportWidth, viewportHeight) => {
+    const state = get();
+    const next: Record<string, EtatFenetre> = {};
+    let changed = false;
+    for (const [id, w] of Object.entries(state.windows)) {
+      if (!w.open) {
+        next[id] = w;
+        continue;
+      }
+      const pos = clampPosition(w.x, w.y, w.width, viewportWidth, viewportHeight);
+      const size = clampSize(w.width, w.height, MIN_WIDTH, MIN_HEIGHT, viewportWidth, viewportHeight);
+      if (pos.x !== w.x || pos.y !== w.y || size.width !== w.width || size.height !== w.height) {
+        changed = true;
+        next[id] = { ...w, ...pos, ...size };
+      } else {
+        next[id] = w;
+      }
+    }
+    if (changed) set({ windows: next });
+  },
 }));
 
 /**

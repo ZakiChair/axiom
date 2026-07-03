@@ -154,6 +154,10 @@ export interface WindowManagerState {
   nextZ: number;
   /** Couleur de groupe -> dernier symbole diffusé aux fenêtres/composants de ce groupe. */
   groupSymbols: Record<string, string>;
+  /** Aperçu de snap actif pendant un drag d'en-tête (géométrie cible de la zone
+   * survolée) — état ÉPHÉMÈRE, jamais persisté (persist.ts construit explicitement
+   * le sous-ensemble sauvegardé, ce champ n'y figure simplement pas). */
+  dragPreview: { x: number; y: number; width: number; height: number } | null;
 
   openWindow: (id: string) => void;
   closeWindow: (id: string) => void;
@@ -165,6 +169,7 @@ export interface WindowManagerState {
   restoreWindow: (id: string) => void;
   setGroup: (id: string, color: string | null) => void;
   setGroupSymbol: (color: string, symbol: string) => void;
+  setDragPreview: (preview: { x: number; y: number; width: number; height: number } | null) => void;
   /** Restauration depuis la persistance (déjà validée par l'appelant). */
   setAll: (windows: Record<string, EtatFenetre>) => void;
   /** Recale position/taille de toutes les fenêtres OUVERTES contre un nouveau viewport
@@ -177,6 +182,7 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   windows: {},
   nextZ: 1,
   groupSymbols: {},
+  dragPreview: null,
 
   openWindow: (id) => {
     const state = get();
@@ -259,6 +265,8 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   setGroupSymbol: (color, symbol) => {
     set({ groupSymbols: { ...get().groupSymbols, [color]: symbol } });
   },
+
+  setDragPreview: (preview) => set({ dragPreview: preview }),
 
   setAll: (windows) =>
     set({

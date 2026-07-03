@@ -13,7 +13,7 @@ import {
 } from "./windowManager";
 
 beforeEach(() => {
-  windowManagerStore.setState({ windows: {}, nextZ: 1, groupSymbols: {} });
+  windowManagerStore.setState({ windows: {}, nextZ: 1, groupSymbols: {}, dragPreview: null });
 });
 
 beforeEach(() => {
@@ -416,5 +416,14 @@ describe("reclampAll", () => {
     // La largeur finale (200, clampée) doit être utilisée pour clamper x, pas 420.
     expect(w.width).toBe(200);
     expect(w.x + w.width).toBeGreaterThanOrEqual(40);
+  });
+});
+
+describe("setDragPreview", () => {
+  it("définit puis efface l'aperçu de snap", () => {
+    windowManagerStore.getState().setDragPreview({ x: 0, y: 0, width: 960, height: 1080 });
+    expect(windowManagerStore.getState().dragPreview).toEqual({ x: 0, y: 0, width: 960, height: 1080 });
+    windowManagerStore.getState().setDragPreview(null);
+    expect(windowManagerStore.getState().dragPreview).toBeNull();
   });
 });

@@ -118,12 +118,12 @@ describe("snapGeometry", () => {
 });
 
 describe("WINDOW_REGISTRY", () => {
-  it("contient exactement les 14 fenêtres attendues, sans doublon d'id ni de mnémonique", () => {
-    expect(WINDOW_REGISTRY).toHaveLength(14);
+  it("contient exactement les 15 fenêtres attendues, sans doublon d'id ni de mnémonique", () => {
+    expect(WINDOW_REGISTRY).toHaveLength(15);
     const ids = WINDOW_REGISTRY.map((w) => w.id);
     const mnemos = WINDOW_REGISTRY.map((w) => w.mnemonic);
-    expect(new Set(ids).size).toBe(14);
-    expect(new Set(mnemos).size).toBe(14);
+    expect(new Set(ids).size).toBe(15);
+    expect(new Set(mnemos).size).toBe(15);
   });
 });
 

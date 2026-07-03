@@ -37,6 +37,7 @@ import { OptionsWindow, commandes as optionsCommands } from "./components/Option
 import { DomWindow } from "./components/DomWindow";
 import { BacktestWindow } from "./components/BacktestWindow";
 import { ReplayWindow } from "./components/ReplayWindow";
+import { MacroRatesWindow, commandes as macroRatesCommands } from "./components/MacroRatesWindow";
 import { settingsUiStore } from "./store/settings-ui";
 import { ecoCommands } from "./store/eco";
 import { commandes as newsCommands } from "./store/news";
@@ -111,6 +112,7 @@ enregistrerCommandes([
   ...domCommands,
   ...backtestCommands,
   ...replayCommands,
+  ...macroRatesCommands,
   ...commandesGrille,
 ]);
 
@@ -135,6 +137,7 @@ const WINDOW_COMPONENTS: Record<string, () => JSX.Element> = {
   dom: DomWindow,
   backtest: BacktestWindow,
   replay: ReplayWindow,
+  macroRates: MacroRatesWindow,
 };
 
 export function App() {
@@ -216,7 +219,7 @@ export function App() {
         </div>
       )}
 
-      {/* Les 14 fenêtres Bloomberg non modales, montées génériquement sous <FloatingWindow>
+      {/* Les 15 fenêtres Bloomberg non modales, montées génériquement sous <FloatingWindow>
           via WINDOW_REGISTRY (géométrie/z-order/minimize gérés par windowManagerStore). */}
       {WINDOW_REGISTRY.map((entry) => {
         const Contenu = WINDOW_COMPONENTS[entry.id];

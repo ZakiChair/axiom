@@ -187,6 +187,7 @@ export const EXTAPI_WHITELIST: ReadonlySet<string> = new Set([
   "fapi.binance.com", // Binance USD-M (dérivés : funding, top trader L/S)
   "api.coingecko.com", // CoinGecko (treemap, catégories)
   "api.fiscaldata.treasury.gov", // US Treasury Fiscal Data (rendements souverains US)
+  "home.treasury.gov", // US Treasury Daily Par Yield Curve CSV (courbe des taux souverains US)
   "data-api.ecb.europa.eu", // ECB SDMX (courbe zone euro + taux directeur BCE)
   "stats.bis.org", // BIS SDMX WS_CBPOL (taux directeurs banques centrales)
   "api.imf.org", // IMF SDMX 3.0 IRFCL (réserves d'or par pays)

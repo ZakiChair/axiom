@@ -1,6 +1,6 @@
 /**
  * Chrome générique d'une fenêtre flottante (Launchpad) — enveloppe le contenu de
- * chacune des 14 fenêtres Bloomberg (ECO, NEWS, CORR…). Gère position/taille/z-order/
+ * chacune des 15 fenêtres Bloomberg (ECO, NEWS, CORR…). Gère position/taille/z-order/
  * minimize/fermeture/groupe de couleur via `windowManagerStore` (source de vérité
  * unique). Le contenu métier de chaque fenêtre reste inchangé (monté en enfant).
  *

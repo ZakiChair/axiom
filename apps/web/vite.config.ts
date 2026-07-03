@@ -32,6 +32,7 @@ const EXTAPI_HOTES: readonly string[] = [
   "fapi.binance.com",
   "api.coingecko.com",
   "api.fiscaldata.treasury.gov",
+  "home.treasury.gov",
   "data-api.ecb.europa.eu",
   "stats.bis.org",
   "api.imf.org",

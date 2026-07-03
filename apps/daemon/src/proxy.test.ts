@@ -83,8 +83,8 @@ describe("construireRoutesProxy — cibles et réécritures", () => {
 });
 
 describe("extapi — whitelist", () => {
-  test("contient les 22 hôtes attendus (dont Fear&Greed, Binance fapi/dapi, macro souverain/COT/GEX)", () => {
-    expect(EXTAPI_WHITELIST.size).toBe(22);
+  test("contient les 23 hôtes attendus (dont Fear&Greed, Binance fapi/dapi, macro souverain/COT/GEX)", () => {
+    expect(EXTAPI_WHITELIST.size).toBe(23);
     for (const hote of [
       "nfs.faireconomy.media",
       "www.coindesk.com",
@@ -103,6 +103,7 @@ describe("extapi — whitelist", () => {
       "fapi.binance.com",
       "api.coingecko.com",
       "api.fiscaldata.treasury.gov",
+      "home.treasury.gov",
       "data-api.ecb.europa.eu",
       "stats.bis.org",
       "api.imf.org",

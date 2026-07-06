@@ -24,8 +24,11 @@ volatilité (VOL), footprint analytique, volume profile à plage fixe (VPFR).
 - Nouvelle valeur `"synthetic"` dans `ExchangeId` (`packages/types/src/…`) — seule modification de
   `@axiom/types` du lot.
 - **Encodage du symbole** (source de vérité unique, aucune table annexe) :
-  `LEGA/LEGB@exA,exB` ou `LEGA-LEGB@exA,exB` — ex. `ETHUSDT/BTCUSDT@binance,binance`,
-  `BTCUSDT/DXY@binance,twelvedata`. Affichage court : « ETHUSDT/BTCUSDT ».
+  `exA:LEGA|op|exB:LEGB` — ex. `binance:ETHUSDT|/|binance:BTCUSDT`,
+  `binance:BTCUSDT|/|twelvedata:GLD`. Affichage court : « ETHUSDT / BTCUSDT ».
+  *(Révisé à l'écriture du plan : l'encodage initial `LEGA/LEGB@exA,exB` était ambigu —
+  les tickers Twelve Data contiennent eux-mêmes des « / », ex. `EUR/USD`. Le séparateur
+  `|` est interdit dans tous les catalogues de tickers → parse non ambigu.)*
 - Module pur `apps/web/src/data/synthetic.ts` :
   - `parseSyntheticSymbol(sym: string): { legA, legB, op, exA, exB } | null` (parse + validation) ;
   - `combineKlines(a: Candle[], b: Candle[], op): Candle[]` (alignement + composition) ;

@@ -58,6 +58,7 @@ import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
 import { windowManagerStore, WINDOW_REGISTRY, type EtatFenetre } from "./windowManager";
 import { syntheticsStore } from "./synthetics";
+import { parseSyntheticSymbol } from "../data/synthetic";
 
 const CHART_KEY = "axiom:chartState:v1";
 const WINDOW_MANAGER_KEY = "axiom:windowManager:v1";
@@ -431,13 +432,20 @@ function hydrateChart(): void {
   const persisted = readJson<Partial<ChartState>>(CHART_KEY);
 
   if (persisted) {
+    // Un état `synthetic` n'est cohérent qu'avec un symbole encodé parsable ;
+    // sinon (état corrompu), on ignore le couple exchange+symbol persisté
+    // (chart bloqué à chaque reload autrement : adapter synthétique × ticker normal).
+    const syntheticIncoherent =
+      persisted.exchange === "synthetic" &&
+      (typeof persisted.symbol !== "string" || parseSyntheticSymbol(persisted.symbol) === null);
     if (
+      !syntheticIncoherent &&
       typeof persisted.exchange === "string" &&
       RESTORABLE_EXCHANGES.includes(persisted.exchange)
     ) {
       marketStore.getState().setExchange(persisted.exchange);
     }
-    if (typeof persisted.symbol === "string" && persisted.symbol.length > 0) {
+    if (!syntheticIncoherent && typeof persisted.symbol === "string" && persisted.symbol.length > 0) {
       marketStore.getState().setSymbol(persisted.symbol);
     }
     if (typeof persisted.timeframe === "string") {

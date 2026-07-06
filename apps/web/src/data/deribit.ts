@@ -310,3 +310,32 @@ export async function fetchDvol(currency: "BTC" | "ETH"): Promise<number | null>
     return null;
   }
 }
+
+/**
+ * Historique DVOL (indice de volatilité implicite Deribit) en bougies QUOTIDIENNES
+ * (résolution 86400 s) sur les `days` derniers jours — alimente le cône de volatilité
+ * (lib/volCone.ts). Contrairement à `fetchDvol` (dernier point, échec silencieux), c'est
+ * l'historique complet qui est servi ici et les erreurs remontent à l'appelant.
+ */
+export async function fetchDvolHistory(
+  currency: "BTC" | "ETH",
+  days: number,
+): Promise<{ time: number; value: number }[]> {
+  const fin = Date.now();
+  const debut = fin - days * 24 * 60 * 60 * 1000;
+  const res = await appelDeribit<{ data: number[][] }>("get_volatility_index_data", {
+    currency,
+    start_timestamp: String(debut),
+    end_timestamp: String(fin),
+    resolution: "86400",
+  });
+  const out: { time: number; value: number }[] = [];
+  for (const bougie of res.data) {
+    const ts = bougie[0];
+    const close = bougie[4];
+    if (typeof ts === "number" && typeof close === "number" && Number.isFinite(ts) && Number.isFinite(close)) {
+      out.push({ time: ts, value: close });
+    }
+  }
+  return out;
+}

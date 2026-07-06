@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { computeMaxPain, parseOptionInstrument, putCallRatioOi, type StrikeOi } from "./deribit";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  computeMaxPain,
+  fetchDvolHistory,
+  parseOptionInstrument,
+  putCallRatioOi,
+  type StrikeOi,
+} from "./deribit";
 
 describe("parseOptionInstrument", () => {
   it("parse un put BTC daté (échéance à 08:00 UTC)", () => {
@@ -74,5 +80,83 @@ describe("putCallRatioOi", () => {
 
   it("renvoie NaN sans aucun call", () => {
     expect(Number.isNaN(putCallRatioOi([{ type: "put", openInterest: 5 }]))).toBe(true);
+  });
+});
+
+/**
+ * fetchDvolHistory : fetch global stubbé (pattern twelvedata.test.ts, PAS de vi.mock —
+ * fetchJsonExt appelle le `fetch` global directement, cf. binanceDapi.ts:120-130). La
+ * réponse simulée reprend l'enveloppe JSON-RPC Deribit ({ result: { data: [...] } }),
+ * même forme que `fetchDvol` (deribit.ts ligne 300 : `appelDeribit<{ data: number[][] }>`).
+ */
+describe("fetchDvolHistory", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("mappe chaque bougie [ts, o, h, l, c] en { time: ts, value: c }", async () => {
+    const json = {
+      result: {
+        data: [
+          [1_700_000_000_000, 50, 55, 45, 52],
+          [1_700_086_400_000, 52, 60, 50, 58],
+        ],
+      },
+    };
+    fetchMock.mockResolvedValue({ ok: true, json: () => Promise.resolve(json) });
+
+    const out = await fetchDvolHistory("BTC", 90);
+
+    expect(out).toEqual([
+      { time: 1_700_000_000_000, value: 52 },
+      { time: 1_700_086_400_000, value: 58 },
+    ]);
+  });
+
+  it("appelle get_volatility_index_data avec currency, résolution 86400 et un intervalle dérivé de `days`", async () => {
+    const json = { result: { data: [] } };
+    fetchMock.mockResolvedValue({ ok: true, json: () => Promise.resolve(json) });
+
+    const avant = Date.now();
+    await fetchDvolHistory("ETH", 30);
+    const apres = Date.now();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = fetchMock.mock.calls[0]?.[0] as string;
+    expect(url).toContain("get_volatility_index_data");
+    const params = new URL(url).searchParams;
+    expect(params.get("currency")).toBe("ETH");
+    expect(params.get("resolution")).toBe("86400");
+
+    const fin = Number(params.get("end_timestamp"));
+    const debut = Number(params.get("start_timestamp"));
+    // end_timestamp doit être "maintenant" (borné par l'exécution du test, pas figé).
+    expect(fin).toBeGreaterThanOrEqual(avant);
+    expect(fin).toBeLessThanOrEqual(apres);
+    // start_timestamp dérivé de `days` : exactement fin - 30 jours en ms.
+    expect(debut).toBe(fin - 30 * 24 * 60 * 60 * 1000);
+  });
+
+  it("écarte les lignes non numériques (ts ou close invalide)", async () => {
+    const json = {
+      result: {
+        data: [
+          [1_700_000_000_000, 50, 55, 45, 52],
+          [null, 52, 60, 50, 58], // ts invalide
+          [1_700_172_800_000, 58, 62, 54, NaN], // close non fini
+        ],
+      },
+    };
+    fetchMock.mockResolvedValue({ ok: true, json: () => Promise.resolve(json) });
+
+    const out = await fetchDvolHistory("BTC", 7);
+    expect(out).toEqual([{ time: 1_700_000_000_000, value: 52 }]);
   });
 });

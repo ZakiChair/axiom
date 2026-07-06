@@ -28,6 +28,7 @@ import { replayStore } from "../store/replay";
 import { macroRatesUiStore } from "./MacroRatesWindow";
 import { cotUiStore } from "./CotWindow";
 import { seasonalityUiStore } from "./SeasonalityWindow";
+import { volUiStore } from "./VolWindow";
 import { FootprintSettingsPanel } from "./FootprintSettingsPanel";
 import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
@@ -158,6 +159,7 @@ const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] =
   { mnemonique: "RATE", libelle: "Taux & Réserves souveraines", ouvrir: () => macroRatesUiStore.getState().openMacroRates() },
   { mnemonique: "COT", libelle: "Rapport COT (CFTC)", ouvrir: () => cotUiStore.getState().openCot() },
   { mnemonique: "SEAG", libelle: "Saisonnalité", ouvrir: () => seasonalityUiStore.getState().openSeasonality() },
+  { mnemonique: "VOL", libelle: "Volatilité (cône RV, VRP)", ouvrir: () => volUiStore.getState().openVol() },
 ];
 
 /**
@@ -448,7 +450,12 @@ export function Toolbar() {
           <button
             key={preset}
             type="button"
-            onClick={() => setSymbol(preset)}
+            onClick={() => {
+              // Un preset crypto est un ticker Binance : quitter la source virtuelle
+              // synthetic, sinon état incohérent (symbole normal × adapter synthétique).
+              if (isSynthetic) setExchange("binance");
+              setSymbol(preset);
+            }}
             className={`rounded px-2 py-1 text-xs ${
               symbol === preset
                 ? "bg-neutral-200 text-neutral-900"

@@ -49,6 +49,7 @@ export const WINDOW_REGISTRY: readonly {
   { id: "replay", title: "Replay de marché", mnemonic: "REPLAY", defaultWidth: 420, defaultHeight: 640 },
   { id: "macroRates", title: "Taux & Réserves souveraines", mnemonic: "RATE", defaultWidth: 560, defaultHeight: 680 },
   { id: "cot", title: "Rapport COT (CFTC)", mnemonic: "COT", defaultWidth: 520, defaultHeight: 680 },
+  { id: "seasonality", title: "Saisonnalité", mnemonic: "SEAG", defaultWidth: 760, defaultHeight: 560 },
 ] as const;
 
 /** Espace minimal toujours visible d'une fenêtre (pixels), pour le drag comme le resize. */

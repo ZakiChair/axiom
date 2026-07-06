@@ -27,11 +27,12 @@ import { backtestStore } from "../store/backtest";
 import { replayStore } from "../store/replay";
 import { macroRatesUiStore } from "./MacroRatesWindow";
 import { cotUiStore } from "./CotWindow";
+import { seasonalityUiStore } from "./SeasonalityWindow";
 import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
 import { exporterSauvegarde, importerSauvegarde } from "../store/persist";
 import { enregistrerCommandes } from "../commands/registry";
-import { SUPPORTED_TIMEFRAMES } from "../data/adapters";
+import { supportedTimeframesFor } from "../data/adapters";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
 import { exportChartImage } from "../chart/drawing";
 import { IndicatorMenu } from "./IndicatorMenu";
@@ -155,6 +156,7 @@ const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] =
   // Fenêtres de la Phase 5 (batch souverain / COT / GEX).
   { mnemonique: "RATE", libelle: "Taux & Réserves souveraines", ouvrir: () => macroRatesUiStore.getState().openMacroRates() },
   { mnemonique: "COT", libelle: "Rapport COT (CFTC)", ouvrir: () => cotUiStore.getState().openCot() },
+  { mnemonique: "SEAG", libelle: "Saisonnalité", ouvrir: () => seasonalityUiStore.getState().openSeasonality() },
 ];
 
 /**
@@ -386,14 +388,15 @@ export function Toolbar() {
   const priceScale = useStore(priceScaleStore, (s) => s.type);
   const setPriceScale = useStore(priceScaleStore, (s) => s.setType);
 
-  const supportedTf = SUPPORTED_TIMEFRAMES[exchange] ?? [];
+  const supportedTf = supportedTimeframesFor(exchange, symbol);
   const isBinance = exchange === "binance";
   const isTradfi = exchange === "twelvedata";
   const isMexc = exchange === "mexc";
+  const isSynthetic = exchange === "synthetic";
   // MEXC = catalogue crypto + actions tokenisées → presets dédiés ; sinon crypto/tradfi.
   const presets = isTradfi ? TRADFI_PRESETS : isMexc ? MEXC_PRESETS : CRYPTO_PRESETS;
   // Sources SANS flux tick (polling REST) → orderflow/footprint indisponibles.
-  const noTradeStream = isTradfi || isMexc;
+  const noTradeStream = isTradfi || isMexc || isSynthetic;
 
   /**
    * Changement de source : si le TF courant n'est pas supporté par la nouvelle source,
@@ -410,7 +413,7 @@ export function Toolbar() {
     setExchange(next);
     if (willBeTradfi && !wasTradfi) setSymbol(DEFAULT_TRADFI_SYMBOL);
     else if (!willBeTradfi && (wasTradfi || wasMexcOnlySymbol)) setSymbol(DEFAULT_CRYPTO_SYMBOL);
-    const supported = SUPPORTED_TIMEFRAMES[next] ?? [];
+    const supported = supportedTimeframesFor(next, next === "synthetic" ? symbol : "");
     if (!supported.includes(timeframe)) setTimeframe("1h");
   };
 
@@ -529,16 +532,23 @@ export function Toolbar() {
         Orderflow
       </button>
 
-      {/* Profil de volume par zone de prix (VPVR) — toutes sources. */}
+      {/* Profil de volume par zone de prix (VPVR) — toutes sources sauf synthétiques. */}
       <button
         type="button"
         onClick={toggleVp}
         aria-pressed={vpEnabled}
-        title="Volume par zone de prix (plage visible)"
+        disabled={isSynthetic}
+        title={
+          isSynthetic
+            ? "Indisponible sur une série synthétique (volume non défini)"
+            : "Volume par zone de prix (plage visible)"
+        }
         className={`rounded px-2 py-1 text-xs ${
-          vpEnabled
-            ? "bg-amber-500 text-accent-ink"
-            : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+          isSynthetic
+            ? "cursor-not-allowed bg-neutral-900 text-neutral-700"
+            : vpEnabled
+              ? "bg-amber-500 text-accent-ink"
+              : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
         }`}
       >
         Profil Vol
@@ -551,14 +561,16 @@ export function Toolbar() {
         type="button"
         onClick={toggleRevenue}
         aria-pressed={revenueEnabled}
-        disabled={isTradfi}
+        disabled={isTradfi || isSynthetic}
         title={
-          isTradfi
-            ? "Indisponible en marchés traditionnels (revenus on-chain crypto uniquement)"
-            : "Revenus on-chain du protocole (DefiLlama) — actifs de protocole uniquement"
+          isSynthetic
+            ? "Indisponible sur une série synthétique (volume non défini)"
+            : isTradfi
+              ? "Indisponible en marchés traditionnels (revenus on-chain crypto uniquement)"
+              : "Revenus on-chain du protocole (DefiLlama) — actifs de protocole uniquement"
         }
         className={`rounded px-2 py-1 text-xs ${
-          isTradfi
+          isTradfi || isSynthetic
             ? "cursor-not-allowed bg-neutral-900 text-neutral-700"
             : revenueEnabled
               ? "bg-yellow-500 text-accent-ink"

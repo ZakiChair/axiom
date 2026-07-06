@@ -41,6 +41,7 @@ import { ReplayWindow } from "./components/ReplayWindow";
 // fenêtres des Phases 3-4 (dockées à droite, montées en permanence, cachées via translate-x).
 import { MacroRatesWindow, commandes as macroRatesCommands } from "./components/MacroRatesWindow";
 import { CotWindow, commandes as cotCommands } from "./components/CotWindow";
+import { SeasonalityWindow, commandes as seasonalityCommands } from "./components/SeasonalityWindow";
 import { settingsUiStore } from "./store/settings-ui";
 import { ecoCommands } from "./store/eco";
 import { commandes as newsCommands } from "./store/news";
@@ -119,6 +120,8 @@ enregistrerCommandes([
   ...commandesGrille,
   // Fenêtre COT (Phase 5).
   ...cotCommands,
+  // Fenêtre Saisonnalité (Lot C1 analytics).
+  ...seasonalityCommands,
 ]);
 
 // ─────────────────────────── Table composant↔id des fenêtres flottantes ───────────────────────────
@@ -144,6 +147,7 @@ const WINDOW_COMPONENTS: Record<string, () => JSX.Element> = {
   replay: ReplayWindow,
   macroRates: MacroRatesWindow,
   cot: CotWindow,
+  seasonality: SeasonalityWindow,
 };
 
 export function App() {

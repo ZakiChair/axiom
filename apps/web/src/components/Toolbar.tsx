@@ -28,6 +28,7 @@ import { replayStore } from "../store/replay";
 import { macroRatesUiStore } from "./MacroRatesWindow";
 import { cotUiStore } from "./CotWindow";
 import { seasonalityUiStore } from "./SeasonalityWindow";
+import { FootprintSettingsPanel } from "./FootprintSettingsPanel";
 import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
 import { exporterSauvegarde, importerSauvegarde } from "../store/persist";
@@ -388,6 +389,8 @@ export function Toolbar() {
   const priceScale = useStore(priceScaleStore, (s) => s.type);
   const setPriceScale = useStore(priceScaleStore, (s) => s.setType);
 
+  const [footprintPanelOpen, setFootprintPanelOpen] = useState(false);
+
   const supportedTf = supportedTimeframesFor(exchange, symbol);
   const isBinance = exchange === "binance";
   const isTradfi = exchange === "twelvedata";
@@ -418,6 +421,7 @@ export function Toolbar() {
   };
 
   return (
+    <>
     <header className="flex flex-wrap items-center gap-3 border-b border-neutral-800 bg-neutral-950 px-4 py-2">
       <span className="axiom-wordmark font-semibold tracking-wide text-text">AXIOM</span>
 
@@ -512,6 +516,10 @@ export function Toolbar() {
       <button
         type="button"
         onClick={toggleOrderflow}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setFootprintPanelOpen((o) => !o);
+        }}
         aria-pressed={orderflowEnabled}
         disabled={noTradeStream}
         title={
@@ -610,5 +618,9 @@ export function Toolbar() {
         <ThemeSwitcher />
       </div>
     </header>
+
+    {/* Panneau de réglages footprint (cliquer droit sur Orderflow). */}
+    {footprintPanelOpen && <FootprintSettingsPanel onClose={() => setFootprintPanelOpen(false)} />}
+    </>
   );
 }

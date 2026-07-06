@@ -29,6 +29,8 @@ import { fetchSymbolInfo } from "../data/binance";
 import { getAdapter } from "../data/adapters";
 import { adaptateurReplayActif } from "../data/replayFeed";
 import type { MarketStore } from "../store/market";
+import { orderflowStore } from "../store/orderflow";
+import { detectImbalances, detectDeltaDivergences, type DivergenceFlag } from "./footprintAnalytics";
 
 /** Pane prix (id par défaut de KLineChart, vérifié dans le bundle v9.8.x). */
 const CANDLE_PANE_ID = "candle_pane";
@@ -546,6 +548,13 @@ export class OrderflowController {
     // Hauteur d'une ligne à hauteur du prix de référence (sert au seuil d'affichage du texte).
     const rowH = Math.abs(yOf(refPrice + this.bucketSize) - yOf(refPrice));
 
+    // Colonnes à dessiner = bougies visibles ayant des données footprint.
+    const range = this.chart.getVisibleRange();
+    const dataList = this.chart.getDataList();
+    const candles = this.store.getState().candles;
+    const start = Math.max(range.from, dataList.length - MAX_RENDER_COLUMNS, 0);
+    const end = Math.min(range.to, dataList.length);
+
     // Palette du footprint lue une fois par frame depuis les tokens de thème.
     const palette: FootprintPalette = {
       up: readToken("--up") || "#10b981",
@@ -555,18 +564,18 @@ export class OrderflowController {
       textDim: readToken("--text-dim") || "#94a3b8",
     };
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(left, top, width, height);
-    ctx.clip();
+    // Palette des imbalances (lue depuis les tokens dédiés, ou repli sur palette).
+    const imbPalette = {
+      ask: readToken("--of-imb-buy") || palette.up,
+      bid: readToken("--of-imb-sell") || palette.down,
+    };
 
-    // Colonnes à dessiner = bougies visibles ayant des données footprint.
-    const range = this.chart.getVisibleRange();
-    const dataList = this.chart.getDataList();
-    const start = Math.max(range.from, dataList.length - MAX_RENDER_COLUMNS, 0);
-    const end = Math.min(range.to, dataList.length);
+    // Collecte des données analytiques : candles + bars visibles, imbalances par bar, divergences.
+    const settings = orderflowStore.getState();
+    const visibleCandles: Candle[] = [];
+    const visibleBars: FootprintBar[] = [];
+    const barPositions: { xc: number; colW: number }[] = [];
 
-    ctx.textBaseline = "middle";
     for (let i = start; i < end; i++) {
       const kd: KLineData | undefined = dataList[i];
       if (kd === undefined) continue;
@@ -574,8 +583,52 @@ export class OrderflowController {
       if (cells === undefined || cells.size === 0) continue;
       const xc = this.toPx({ timestamp: kd.timestamp }).x;
       if (xc === undefined) continue;
+      const candle = candles[i];
+      if (candle === undefined) continue;
+      visibleCandles.push(candle);
       const bar = buildFootprintBar(kd.timestamp, cells, this.bucketSize);
-      this.drawColumn(bar, xc, colW, rowH, yOf, top, height, palette);
+      visibleBars.push(bar);
+      barPositions.push({ xc, colW });
+    }
+
+    // Divergences delta : calculées une fois sur toutes les bars visibles.
+    const divergences =
+      settings.showDivergences && visibleBars.length > 1
+        ? detectDeltaDivergences(visibleCandles, visibleBars)
+        : new Array(visibleBars.length).fill(null);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left, top, width, height);
+    ctx.clip();
+
+    ctx.textBaseline = "middle";
+    for (let i = 0; i < visibleBars.length; i++) {
+      const bar = visibleBars[i];
+      const pos = barPositions[i];
+      if (bar === undefined || pos === undefined) continue;
+
+      // Imbalances : calculées par bar au rendu seulement.
+      const imbFlags =
+        settings.showImbalances
+          ? detectImbalances(bar.rows, settings.imbalanceRatioPct, settings.imbalanceMinVol)
+          : null;
+
+      this.drawColumn(
+        bar,
+        pos.xc,
+        pos.colW,
+        rowH,
+        yOf,
+        top,
+        height,
+        palette,
+        imbPalette,
+        imbFlags,
+        settings.showBarPoc,
+        settings.showBarVa,
+        divergences[i]
+      );
     }
 
     ctx.restore();
@@ -589,7 +642,12 @@ export class OrderflowController {
     yOf: (price: number) => number,
     paneTop: number,
     paneHeight: number,
-    palette: FootprintPalette
+    palette: FootprintPalette,
+    imbPalette: { ask: string; bid: string },
+    imbFlags: ReturnType<typeof detectImbalances> | null,
+    showBarPoc: boolean,
+    showBarVa: boolean,
+    divergence: DivergenceFlag
   ): void {
     const ctx = this.ctx;
     const cellW = Math.min(colW * 0.92, 180);
@@ -615,17 +673,35 @@ export class OrderflowController {
       const net = r.buyVol - r.sellVol;
       const intensity = Math.min(1, (r.buyVol + r.sellVol) / maxTot);
       const alpha = 0.12 + 0.5 * intensity;
+
       // Teinte up/down du thème + intensité via globalAlpha (le canvas n'évalue pas var()).
       ctx.globalAlpha = alpha;
       ctx.fillStyle = net >= 0 ? palette.up : palette.down;
       ctx.fillRect(xLeft, yTop, cellW, h - 1);
       ctx.globalAlpha = 1;
 
-      // POC : contour accent.
-      if (r.price === bar.poc) {
+      // POC : contour accent (si activé).
+      if (showBarPoc && r.price === bar.poc) {
         ctx.strokeStyle = palette.accent;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1.5;
         ctx.strokeRect(xLeft + 0.5, yTop + 0.5, cellW - 1, Math.max(1, h - 1));
+      }
+
+      // Imbalances : liseré coloré sur la cellule concernée.
+      if (imbFlags !== null) {
+        const idx = bar.rows.indexOf(r);
+        if (idx >= 0) {
+          if (imbFlags.askImb[idx] || imbFlags.stackedAsk[idx]) {
+            ctx.strokeStyle = imbPalette.ask;
+            ctx.lineWidth = imbFlags.stackedAsk[idx] ? 2.5 : 1.5;
+            ctx.strokeRect(xLeft + 0.5, yTop + 0.5, cellW - 1, Math.max(1, h - 1));
+          }
+          if (imbFlags.bidImb[idx] || imbFlags.stackedBid[idx]) {
+            ctx.strokeStyle = imbPalette.bid;
+            ctx.lineWidth = imbFlags.stackedBid[idx] ? 2.5 : 1.5;
+            ctx.strokeRect(xLeft + 0.5, yTop + 0.5, cellW - 1, Math.max(1, h - 1));
+          }
+        }
       }
 
       if (showText) {
@@ -638,10 +714,17 @@ export class OrderflowController {
       }
     }
 
-    // Bornes de la zone de valeur 70 % : court trait atténué à gauche de la colonne.
+    // Bornes de la zone de valeur 70 % : bande translucide (si activé) OU trait atténué à gauche.
     const yVAH = yOf(bar.vah + this.bucketSize);
     const yVAL = yOf(bar.val);
-    if (Number.isFinite(yVAH) && Number.isFinite(yVAL)) {
+    if (showBarVa && Number.isFinite(yVAH) && Number.isFinite(yVAL)) {
+      // Bandeau VAL → VAH translucide.
+      ctx.globalAlpha = 0.08;
+      ctx.fillStyle = palette.textDim;
+      ctx.fillRect(xLeft, Math.min(yVAH, yVAL), cellW, Math.abs(yVAL - yVAH));
+      ctx.globalAlpha = 1;
+    } else if (Number.isFinite(yVAH) && Number.isFinite(yVAL)) {
+      // Trait atténué à gauche de la colonne (comportement par défaut).
       ctx.globalAlpha = 0.7;
       ctx.strokeStyle = palette.textDim;
       ctx.lineWidth = 1;
@@ -658,6 +741,29 @@ export class OrderflowController {
       ctx.textAlign = "center";
       ctx.fillStyle = bar.delta >= 0 ? palette.up : palette.down;
       ctx.fillText(fmtDelta(bar.delta), xc, paneTop + 8);
+    }
+
+    // Divergence delta : triangle 6 px au-dessus de la bougie.
+    if (divergence !== null && colW >= 22) {
+      const yDivTop = paneTop + 2;
+      const size = 6;
+      ctx.beginPath();
+      if (divergence === "bull") {
+        // Triangle pointant vers le bas (achat).
+        ctx.moveTo(xc, yDivTop + size);
+        ctx.lineTo(xc - size, yDivTop);
+        ctx.lineTo(xc + size, yDivTop);
+        ctx.closePath();
+        ctx.fillStyle = palette.up;
+      } else {
+        // Triangle pointant vers le haut (vente).
+        ctx.moveTo(xc, yDivTop);
+        ctx.lineTo(xc - size, yDivTop + size);
+        ctx.lineTo(xc + size, yDivTop + size);
+        ctx.closePath();
+        ctx.fillStyle = palette.down;
+      }
+      ctx.fill();
     }
   }
 }

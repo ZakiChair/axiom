@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 86 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 87 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -62,7 +62,7 @@ import { tsi } from "./momentum/tsi";
 import { ultimateOsc } from "./momentum/ultimateOsc";
 import { williamsR } from "./momentum/williamsR";
 
-// — volatility (13) —
+// — volatility (14) —
 import { atr } from "./volatility/atr";
 import { bbBandwidth } from "./volatility/bbBandwidth";
 import { bbPercentB } from "./volatility/bbPercentB";
@@ -74,6 +74,7 @@ import { historicalVol } from "./volatility/historicalVol";
 import { keltner } from "./volatility/keltner";
 import { massIndex } from "./volatility/massIndex";
 import { relativeVolatilityIndex } from "./volatility/relativeVolatilityIndex";
+import { rv } from "./volatility/rv";
 import { stdErrorBands } from "./volatility/stdErrorBands";
 import { stddev } from "./volatility/stddev";
 
@@ -171,6 +172,7 @@ export const INDICATORS: IndicatorDef[] = [
   keltner,
   massIndex,
   relativeVolatilityIndex,
+  rv,
   stdErrorBands,
   stddev,
   // volume

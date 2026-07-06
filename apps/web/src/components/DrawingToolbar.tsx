@@ -25,6 +25,7 @@ import {
   COMMON_LEVELS,
   COMMON_EXTENSIONS,
 } from "../chart/fibonacci";
+import { marketStore } from "../store/market";
 
 /** Props communes aux icônes (trait fin, hérite la couleur du bouton). */
 const ICON_PROPS = {
@@ -96,6 +97,17 @@ function FibTrendIcon() {
       <line x1="3" y1="16" x2="14" y2="16" />
       <path d="M15 19l5-13" />
       <path d="M20 6l-3 1 1 3" />
+    </svg>
+  );
+}
+
+/** Profil de volume à plage fixe (barres horizontales ancrées à droite). */
+function VolumeRangeIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <line x1="21" y1="6" x2="9" y2="6" />
+      <line x1="21" y1="12" x2="4" y2="12" />
+      <line x1="21" y1="18" x2="13" y2="18" />
     </svg>
   );
 }
@@ -212,6 +224,7 @@ const TOOLS: ToolDef[] = [
   { id: "rect", label: "Rectangle", Icon: RectIcon },
   { id: "fib", label: "Retracement de Fibonacci", Icon: FibIcon },
   { id: "fibTrend", label: "Fibonacci selon tendance", Icon: FibTrendIcon },
+  { id: "volumeRange", label: "Profil de volume (plage)", Icon: VolumeRangeIcon },
 ];
 
 /** Panneau de réglages Fibonacci (niveaux à cocher, zones, ajout libre, reset). */
@@ -329,6 +342,8 @@ function FibSettingsPanel({ onClose }: { onClose: () => void }) {
 
 export function DrawingToolbar() {
   const tool = useStore(drawingStore, (s) => s.tool);
+  // Le VPFR n'a pas de sens sur une série synthétique (volume composé = 0).
+  const exchange = useStore(marketStore, (s) => s.exchange);
   // Infobulle survolée : libellé + position verticale (px viewport).
   const [hover, setHover] = useState<{ label: string; y: number } | null>(null);
   const [fibPanelOpen, setFibPanelOpen] = useState(false);
@@ -361,21 +376,26 @@ export function DrawingToolbar() {
       >
         {TOOLS.map(({ id, label, Icon }) => {
           const active = tool === id;
+          const disabled = id === "volumeRange" && exchange === "synthetic";
+          const tip = disabled ? `${label} — indisponible sur une série synthétique` : label;
           return (
             <button
               key={id}
               type="button"
+              disabled={disabled}
               onClick={() => selectTool(id)}
-              onMouseEnter={showTip(label)}
+              onMouseEnter={showTip(tip)}
               onMouseLeave={hideTip}
-              onFocus={showTip(label)}
+              onFocus={showTip(tip)}
               onBlur={hideTip}
               aria-pressed={active}
-              aria-label={label}
+              aria-label={tip}
               className={`flex h-8 w-8 items-center justify-center rounded transition ${
-                active
-                  ? "bg-accent text-accent-ink shadow-[var(--accent-glow)]"
-                  : "text-text-dim hover:bg-bg hover:text-text"
+                disabled
+                  ? "cursor-not-allowed text-text-dim opacity-40"
+                  : active
+                    ? "bg-accent text-accent-ink shadow-[var(--accent-glow)]"
+                    : "text-text-dim hover:bg-bg hover:text-text"
               }`}
             >
               <Icon />

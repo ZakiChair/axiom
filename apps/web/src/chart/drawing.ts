@@ -26,6 +26,8 @@ import { createStore } from "zustand/vanilla";
 import type { Chart as KLineChartInstance, OverlayEvent } from "klinecharts";
 // Effet de bord : enregistre les overlays Fibonacci custom (fibCustom / fibTrend).
 import { FIB_RETRACEMENT, FIB_TREND } from "./fibonacci";
+// Effet de bord : enregistre l'overlay VPFR (volumeRange).
+import { VPFR_NAME } from "./volumeRangeOverlay";
 
 /** Identifiants d'outils exposés par la barre (cursor = aucun overlay). */
 export type DrawingToolId =
@@ -41,7 +43,8 @@ export type DrawingToolId =
   | "priceChannel"
   | "rect"
   | "fib"
-  | "fibTrend";
+  | "fibTrend"
+  | "volumeRange";
 
 /**
  * Outil -> nom de l'overlay INTÉGRÉ KLineChart à dessiner (null pour le curseur).
@@ -62,6 +65,7 @@ const TOOL_OVERLAY: Record<DrawingToolId, string | null> = {
   rect: "rect", // rectangle (zone)
   fib: FIB_RETRACEMENT, // retracement de Fibonacci (custom thémé + paramétrable)
   fibTrend: FIB_TREND, // retracement + projection selon la tendance
+  volumeRange: VPFR_NAME, // profil de volume à plage fixe (overlay custom)
 };
 
 export interface DrawingState {
@@ -239,6 +243,9 @@ function createTrackedOverlay(chart: KLineChartInstance, name: string, points?: 
   const created = chart.createOverlay({
     name,
     ...(points ? { points } : {}),
+    // L'overlay VPFR a besoin des bougies + de l'échelle prix du chart hôte :
+    // le chart est passé par extendData (par overlay → sûr en multi-chart).
+    ...(name === VPFR_NAME ? { extendData: chart } : {}),
     onDrawEnd: (event: OverlayEvent) => {
       capture(event.overlay.id, event.overlay.points);
       drawingStore.getState().setTool("cursor"); // revient au curseur en fin de tracé.

@@ -19,6 +19,7 @@ import {
   formatInstanceLabel,
   type ActiveIndicator,
 } from "../store/indicators";
+import { marketStore } from "../store/market";
 
 /** Libellés FR des catégories + ordre d'affichage. */
 const CATEGORY_LABELS: Partial<Record<IndicatorCategory, string>> = {
@@ -158,6 +159,7 @@ export function IndicatorMenu() {
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const active = useStore(indicatorsStore, (s) => s.indicators);
+  const exchange = useStore(marketStore, (s) => s.exchange);
   const add = useStore(indicatorsStore, (s) => s.add);
   const remove = useStore(indicatorsStore, (s) => s.remove);
   const duplicate = useStore(indicatorsStore, (s) => s.duplicate);
@@ -313,13 +315,21 @@ export function IndicatorMenu() {
                   {!isCollapsed &&
                     defs.map((def) => {
                       const count = countByDef.get(def.id) ?? 0;
+                      const disabled = exchange === "synthetic" && def.id === "volume";
                       return (
                         <button
                           key={def.id}
                           type="button"
-                          title="Ajouter une instance"
-                          onClick={() => add(def.id)}
-                          className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-sm text-neutral-200 hover:bg-neutral-800"
+                          title={disabled ? "Volume non défini sur une série synthétique" : "Ajouter une instance"}
+                          disabled={disabled}
+                          onClick={() => {
+                            if (!disabled) add(def.id);
+                          }}
+                          className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${
+                            disabled
+                              ? "cursor-not-allowed text-neutral-600"
+                              : "cursor-pointer text-neutral-200 hover:bg-neutral-800"
+                          }`}
                         >
                           <span className="text-emerald-500">＋</span>
                           <span className="flex-1 truncate">{def.name}</span>

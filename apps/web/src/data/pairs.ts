@@ -100,6 +100,8 @@ export const TWELVEDATA_SYMBOLS: string[] = [
   // cuivre→CPER, platine→PPLT, palladium→PALL, agriculture→DBA, large→DBC, blé→WEAT,
   // maïs→CORN, sucre→CANE).
   "GLD", "SLV", "USO", "BNO", "UNG", "CPER", "PPLT", "PALL", "DBA", "DBC", "WEAT", "CORN", "CANE",
+  // Dollar US via ETF (proxy DXY pour les synthétiques BTC/DXY).
+  "UUP",
   // Forex (BASE/QUOTE)
   "EUR/USD", "GBP/USD", "USD/JPY", "USD/CHF", "AUD/USD", "USD/CAD",
   "NZD/USD", "EUR/GBP", "EUR/JPY", "USD/CNY", "USD/MXN",

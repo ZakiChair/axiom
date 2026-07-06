@@ -14,7 +14,8 @@ import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import type { Candle, Timeframe } from "@axiom/types";
 import { marketStore } from "../store/market";
-import { subscribeTickers } from "../data/ticker";
+import { classifyTradfi, isMarketOpen, subscribeTickers } from "../data/ticker";
+import { formatSyntheticLabel, parseSyntheticSymbol } from "../data/synthetic";
 
 /** Durée (ms) d'une bougie pour les timeframes à pas FIXE. */
 export const TF_DURATION_MS: Partial<Record<Timeframe, number>> = {
@@ -113,8 +114,15 @@ export function formatPercent(p: number): string {
 }
 
 export function SymbolBanner() {
+  const exchange = useStore(marketStore, (s) => s.exchange);
   const symbol = useStore(marketStore, (s) => s.symbol);
   const timeframe = useStore(marketStore, (s) => s.timeframe);
+  const syntheticSpec = exchange === "synthetic" ? parseSyntheticSymbol(symbol) : null;
+  const bannerSymbol = syntheticSpec ? formatSyntheticLabel(syntheticSpec) : symbol;
+  const hasClosedTradfiLeg = syntheticSpec !== null && (
+    (syntheticSpec.exA === "twelvedata" && !isMarketOpen(classifyTradfi(syntheticSpec.legA), new Date())) ||
+    (syntheticSpec.exB === "twelvedata" && !isMarketOpen(classifyTradfi(syntheticSpec.legB), new Date()))
+  );
 
   const priceRef = useRef<HTMLSpanElement>(null);
   const changeRef = useRef<HTMLSpanElement>(null);
@@ -172,11 +180,15 @@ export function SymbolBanner() {
     updateCountdown();
 
     // Variation 24 h : ticker existant (routé par source dans data/ticker.ts).
-    const unsubTicker = subscribeTickers([symbol], (u) => {
-      changePct = u.changePercent;
-      if (changeRef.current) changeRef.current.textContent = formatPercent(u.changePercent);
-      applyColor();
-    });
+    // Une série synthétique n'a pas de ticker natif ; sa variation viendra d'une
+    // dérivation dédiée plus tard, pas du flux d'une jambe arbitraire.
+    const unsubTicker = exchange === "synthetic"
+      ? () => {}
+      : subscribeTickers([symbol], (u) => {
+          changePct = u.changePercent;
+          if (changeRef.current) changeRef.current.textContent = formatPercent(u.changePercent);
+          applyColor();
+        });
 
     // Prix / H-L / volume : chaque tick du buffer marché (haute fréquence, DOM impératif).
     const unsubMarket = marketStore.subscribe(updateFromCandles);
@@ -193,7 +205,10 @@ export function SymbolBanner() {
 
   return (
     <div className="pointer-events-none absolute left-2 top-2 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border bg-surface/80 px-2.5 py-1 font-mono text-xs text-text-dim backdrop-blur-sm">
-      <span className="font-semibold text-text">{symbol}</span>
+      <span className="font-semibold text-text">{bannerSymbol}</span>
+      {hasClosedTradfiLeg && (
+        <span className="text-text-dim">jambe tradfi : dernier close (marché fermé)</span>
+      )}
       <span className="text-text-dim">{timeframe}</span>
       <span ref={priceRef} className="font-semibold text-text">
         —

@@ -29,7 +29,10 @@ export type ExchangeId =
   | "twelvedata"
   // Exchange crypto MEXC (spot v3, keyless) — inclut des ACTIONS TOKENISÉES
   // (AAPLXUSDT, TSLAONUSDT…). Klines via proxy ; polling REST (WS spot = protobuf).
-  | "mexc";
+  | "mexc"
+  // Source VIRTUELLE : séries synthétiques ratio/spread à 2 jambes composées
+  // client-side (data/synthetic.ts). Jamais une jambe elle-même.
+  | "synthetic";
 
 export type MarketType = "spot" | "perp" | "futures" | "option";
 

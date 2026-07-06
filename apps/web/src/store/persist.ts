@@ -57,11 +57,13 @@ import { macroOverlayStore, MACRO_OVERLAYS, type MacroOverlayId } from "./macro-
 import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
 import { windowManagerStore, WINDOW_REGISTRY, type EtatFenetre } from "./windowManager";
+import { syntheticsStore } from "./synthetics";
 
 const CHART_KEY = "axiom:chartState:v1";
 const WINDOW_MANAGER_KEY = "axiom:windowManager:v1";
 const WATCH_KEY = "axiom:watchlist:v1";
 const SESSION_KEY = "axiom:sessionUi:v1";
+const SYNTHETIC_RECENTS_KEY = "axiom.synthetic.recents";
 
 /** Préfixe commun de toutes les clés du terminal (export/import de sauvegarde). */
 const AXIOM_PREFIX = "axiom:";
@@ -82,7 +84,7 @@ const enAttenteMiroir = new Map<string, string>();
 const minuteursMiroir = new Map<string, ReturnType<typeof setTimeout>>();
 
 /** Sources câblées : seules valeurs d'exchange restaurables (cf. data/adapters.ts). */
-const RESTORABLE_EXCHANGES: ExchangeId[] = ["binance", "kraken", "coinbase", "twelvedata", "mexc"];
+const RESTORABLE_EXCHANGES: ExchangeId[] = ["binance", "kraken", "coinbase", "twelvedata", "mexc", "synthetic"];
 
 /** Échelles d'axe prix valides (miroir de PriceScaleType). */
 const PRICE_SCALES: PriceScaleType[] = ["normal", "log", "percentage"];
@@ -267,6 +269,10 @@ export function saveWatchlist(): void {
   writeJson(WATCH_KEY, payload);
 }
 
+export function saveSyntheticRecents(): void {
+  writeJson(SYNTHETIC_RECENTS_KEY, syntheticsStore.getState().recents);
+}
+
 /** Source de watchlist valide (sous-ensemble des exchanges câblés). */
 function isWatchlistSource(v: unknown): v is WatchlistSource {
   return typeof v === "string" && (RESTORABLE_EXCHANGES as string[]).includes(v);
@@ -333,6 +339,11 @@ function hydrateWatchlist(): void {
       });
     }
   }
+}
+
+function hydrateSyntheticRecents(): void {
+  const raw = readJson<unknown>(SYNTHETIC_RECENTS_KEY);
+  if (Array.isArray(raw)) syntheticsStore.getState().setRecents(raw.filter(isNonEmptyString));
 }
 
 // ─────────────────────────── État de session (jusqu'ici volatil) ───────────────────────────
@@ -449,6 +460,7 @@ export function hydrateStores(): void {
   hydrateChart();
   hydrateWindowManager();
   hydrateWatchlist();
+  hydrateSyntheticRecents();
   hydrateSession();
 }
 
@@ -470,6 +482,7 @@ export function enablePersistence(): void {
   indicatorsStore.subscribe(() => saveChartState());
   windowManagerStore.subscribe(() => saveWindowManagerState());
   watchlistStore.subscribe(() => saveWatchlist());
+  syntheticsStore.subscribe(() => saveSyntheticRecents());
 
   // État de session : un seul enregistreur partagé, abonné à chaque store concerné.
   compareStore.subscribe(saveSessionUi);

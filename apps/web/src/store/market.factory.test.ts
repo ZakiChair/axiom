@@ -41,6 +41,14 @@ describe("createMarketStore", () => {
     expect(b.getState().symbol).toBe("BTCUSDT"); // défaut, inchangé
   });
 
+  it("préserve la casse des sources dans les symboles synthétiques", () => {
+    const store = createMarketStore({ exchange: "synthetic", symbol: "binance:ETHUSDT|/|twelvedata:GLD" });
+    expect(store.getState().symbol).toBe("binance:ETHUSDT|/|twelvedata:GLD");
+
+    store.getState().setSymbol("binance:BTCUSDT|/|twelvedata:UUP");
+    expect(store.getState().symbol).toBe("binance:BTCUSDT|/|twelvedata:UUP");
+  });
+
   it("marketStore global est une instance isolée des fabriquées", () => {
     const local = createMarketStore();
     local.getState().setSymbol("DOGEUSDT");

@@ -29,7 +29,7 @@
  */
 import { registerIndicator, IndicatorSeries } from "klinecharts";
 import type { Chart, IndicatorFigure } from "klinecharts";
-import type { Candle, IndicatorDef, IndicatorResult } from "@axiom/types";
+import type { Candle, ExchangeId, IndicatorDef, IndicatorResult } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
 import {
   computeKey,
@@ -173,8 +173,11 @@ export class ChartIndicators {
    * ajoute les nouvelles, ré-override celles dont les PARAMS ont changé (édition),
    * et laisse intactes celles inchangées (aucun recalcul superflu).
    */
-  sync(instances: ActiveIndicator[], candles: Candle[]): void {
-    const wanted = new Set(instances.map((i) => i.instanceId));
+  sync(instances: ActiveIndicator[], candles: Candle[], exchange: ExchangeId): void {
+    const effectiveInstances = exchange === "synthetic"
+      ? instances.filter((i) => i.defId !== "volume")
+      : instances;
+    const wanted = new Set(effectiveInstances.map((i) => i.instanceId));
 
     // Retrait des instances désactivées.
     for (const [instanceId, info] of this.active) {
@@ -190,7 +193,7 @@ export class ChartIndicators {
     // l'empilement visuel. On retire les panes concernés pour les laisser être
     // recréés dans le bon ordre par la boucle ci-dessous (coût : recréation de pane,
     // PAS recalcul — `computeCache` est conservé).
-    const ordreVoulu = instances
+    const ordreVoulu = effectiveInstances
       .filter((i) => {
         const def = getIndicator(i.defId);
         return def && def.pane !== "overlay";
@@ -209,7 +212,7 @@ export class ChartIndicators {
       }
     }
 
-    for (const inst of instances) {
+    for (const inst of effectiveInstances) {
       const def = getIndicator(inst.defId);
       if (!def) continue; // defId inconnu (persistance obsolète) : ignoré.
 
@@ -241,7 +244,7 @@ export class ChartIndicators {
       if (created) this.active.set(inst.instanceId, { paneId: created, name, key });
     }
 
-    this.pruneCache(new Set(instances.map((i) => computeKey(i.defId, i.params))));
+    this.pruneCache(new Set(effectiveInstances.map((i) => computeKey(i.defId, i.params))));
   }
 
   /**
@@ -250,8 +253,11 @@ export class ChartIndicators {
    * Le cache mémoïse les configs identiques : une seule passe de calcul par
    * (defId, params), même si plusieurs instances les partagent.
    */
-  recompute(instances: ActiveIndicator[], candles: Candle[]): void {
-    for (const inst of instances) {
+  recompute(instances: ActiveIndicator[], candles: Candle[], exchange: ExchangeId): void {
+    const effectiveInstances = exchange === "synthetic"
+      ? instances.filter((i) => i.defId !== "volume")
+      : instances;
+    for (const inst of effectiveInstances) {
       const info = this.active.get(inst.instanceId);
       if (!info) continue;
       const def = getIndicator(inst.defId);

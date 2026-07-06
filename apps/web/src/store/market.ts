@@ -52,15 +52,22 @@ export interface MarketStoreInit {
  * exportée ci-dessous (rétro-compatibilité : toolbar, palette, alertes, persistance…
  * la pilotent inchangée) ; les slots secondaires créent la leur via cette fabrique.
  */
+function normalizeSymbol(symbol: string): string {
+  const trimmed = symbol.trim();
+  // Les séries synthétiques encodent aussi les ids de source (`binance:...`) :
+  // uppercaser toute la chaîne rendrait le symbole impossible à parser.
+  return trimmed.includes("|") ? trimmed : trimmed.toUpperCase();
+}
+
 export function createMarketStore(init: MarketStoreInit = {}): MarketStore {
   return createStore<MarketState>((set, get) => ({
     exchange: init.exchange ?? "binance",
-    symbol: (init.symbol ?? "BTCUSDT").toUpperCase(),
+    symbol: normalizeSymbol(init.symbol ?? "BTCUSDT"),
     timeframe: init.timeframe ?? "1m",
     candles: [],
 
     setExchange: (exchange) => set({ exchange }),
-    setSymbol: (symbol) => set({ symbol: symbol.toUpperCase() }),
+    setSymbol: (symbol) => set({ symbol: normalizeSymbol(symbol) }),
     setTimeframe: (timeframe) => set({ timeframe }),
     setCandles: (candles) => set({ candles }),
 

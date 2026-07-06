@@ -19,6 +19,7 @@ import { krakenAdapter } from "./kraken";
 import { coinbaseAdapter } from "./coinbase";
 import { twelveDataAdapter } from "./twelvedata";
 import { mexcAdapter } from "./mexc";
+import { createSyntheticAdapter, parseSyntheticSymbol } from "./synthetic";
 
 /** Adaptateurs câblés (crypto : Binance/Kraken/Coinbase/MEXC ; tradfi : Twelve Data). */
 const ADAPTERS: Partial<Record<ExchangeId, IExchangeAdapter>> = {
@@ -27,6 +28,7 @@ const ADAPTERS: Partial<Record<ExchangeId, IExchangeAdapter>> = {
   coinbase: coinbaseAdapter,
   twelvedata: twelveDataAdapter,
   mexc: mexcAdapter,
+  synthetic: createSyntheticAdapter((ex) => getAdapter(ex)),
 };
 
 /** Adaptateur de la source demandée ; LÈVE si la source n'est pas câblée (pas de repli muet). */
@@ -60,3 +62,20 @@ export const SUPPORTED_TIMEFRAMES: Partial<Record<ExchangeId, Timeframe[]>> = {
   // MEXC : 1h→60m, 1w→1W mappés dans l'adaptateur (NI 2h/6h/12h/3m/3d/3M+, NI secondes).
   mexc: ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w", "1M"],
 };
+
+const SYNTHETIC_TIMEFRAME_ORDER = SUPPORTED_TIMEFRAMES.binance ?? [];
+
+/** TF d'un synthétique = intersection des 2 jambes, dans l'ordre de la liste Binance. */
+export function syntheticTimeframes(exA: ExchangeId, exB: ExchangeId): Timeframe[] {
+  const a = new Set(SUPPORTED_TIMEFRAMES[exA] ?? []);
+  const b = new Set(SUPPORTED_TIMEFRAMES[exB] ?? []);
+  return SYNTHETIC_TIMEFRAME_ORDER.filter((tf) => a.has(tf) && b.has(tf));
+}
+
+/** Point d'entrée unique du grisage TF : table statique, ou intersection si SYN. */
+export function supportedTimeframesFor(exchange: ExchangeId, symbol: string): Timeframe[] {
+  if (exchange !== "synthetic") return SUPPORTED_TIMEFRAMES[exchange] ?? [];
+  const spec = parseSyntheticSymbol(symbol);
+  if (spec === null) return [];
+  return syntheticTimeframes(spec.exA, spec.exB);
+}

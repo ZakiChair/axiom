@@ -269,7 +269,7 @@ export function ChartInstance({
     // chaque slot calcule sur SON buffer). Léger : recalcul à la clôture uniquement.
     const indicators = new ChartIndicators(chart);
     const unsubscribeIndicators = indicatorsStore.subscribe((state) => {
-      indicators.sync(state.indicators, store.getState().candles);
+      indicators.sync(state.indicators, store.getState().candles, exchange);
     });
 
     // En-têtes overlay des panes séparés (croix + drag-reorder) : le contrôleur lit
@@ -435,7 +435,7 @@ export function ChartInstance({
         // Rejoue les dessins sauvegardés de CE slot (bougies posées : ancrage valide).
         restoreDrawings(chart, exchange, symbol);
         // Indicateurs actifs sur le buffer de CE slot.
-        indicators.sync(indicatorsStore.getState().indicators, candles);
+        indicators.sync(indicatorsStore.getState().indicators, candles, exchange);
         // `indicators.sync` ci-dessus est un appel DIRECT (pas une mutation
         // `indicatorsStore`) : l'abonnement `unsubscribePaneHeaders` (ligne ~278) ne se
         // déclenche donc pas ici. Pour des indicateurs déjà persistés au premier montage,
@@ -478,7 +478,7 @@ export function ChartInstance({
               const existing = store.getState().candles;
               const merged = older.concat(existing);
               store.getState().setCandles(merged);
-              indicators.recompute(indicatorsStore.getState().indicators, merged);
+              indicators.recompute(indicatorsStore.getState().indicators, merged, exchange);
               orderflow?.onCandles();
               compare?.onCandles();
               volumeProfile?.onCandles();
@@ -502,7 +502,7 @@ export function ChartInstance({
           orderflow?.onTick();
 
           if (candle.closed) {
-            indicators.recompute(indicatorsStore.getState().indicators, store.getState().candles);
+            indicators.recompute(indicatorsStore.getState().indicators, store.getState().candles, exchange);
             compare?.onCandles();
             volumeProfile?.onCandles();
             revenue?.onCandles();
@@ -518,7 +518,7 @@ export function ChartInstance({
           store.getState().setCandles(merged);
           chart.applyNewData(merged.map(toKLineData));
           orderflow?.onCandles();
-          indicators.recompute(indicatorsStore.getState().indicators, merged);
+          indicators.recompute(indicatorsStore.getState().indicators, merged, exchange);
           compare?.onCandles();
           volumeProfile?.onCandles();
           revenue?.onCandles();

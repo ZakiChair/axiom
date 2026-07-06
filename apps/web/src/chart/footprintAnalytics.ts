@@ -50,8 +50,8 @@ export function detectImbalances(
 ): ImbalanceFlags {
   const askImb: boolean[] = new Array(rows.length);
   const bidImb: boolean[] = new Array(rows.length);
-  const stackedAsk: boolean[] = new Array(rows.length);
-  const stackedBid: boolean[] = new Array(rows.length);
+  const stackedAsk: boolean[] = new Array<boolean>(rows.length).fill(false);
+  const stackedBid: boolean[] = new Array<boolean>(rows.length).fill(false);
 
   // ── Pass 1 : flags bruts ──
   for (let i = 0; i < rows.length; i++) {
@@ -93,26 +93,29 @@ export function detectImbalances(
     }
   }
 
-  // ── Pass 2 : stacks (suites de ≥ 3 imbalances consécutives du même côté) ──
-  for (let i = 0; i < rows.length; i++) {
-    if (i < 1 || i >= rows.length - 1) {
-      stackedAsk[i] = false;
-      stackedBid[i] = false;
-      continue;
-    }
-    const prev = rows[i - 1];
-    const next = rows[i + 1];
-    if (prev === undefined || next === undefined) {
-      stackedAsk[i] = false;
-      stackedBid[i] = false;
-      continue;
-    }
-    // Ask stacked : i, i-1, i+1 tous askImb
-    stackedAsk[i] = askImb[i] && askImb[i - 1] && askImb[i + 1];
-    stackedBid[i] = bidImb[i] && bidImb[i - 1] && bidImb[i + 1];
-  }
+  // ── Pass 2 : stacks — TOUS les membres d'une suite de ≥ 3 imbalances
+  // consécutives du même côté sont marqués (pas seulement les points intérieurs).
+  markRuns(askImb, stackedAsk);
+  markRuns(bidImb, stackedBid);
 
   return { askImb, bidImb, stackedAsk, stackedBid };
+}
+
+/** Marque dans `out` chaque membre d'un run de ≥ 3 `true` consécutifs de `flags`. */
+function markRuns(flags: boolean[], out: boolean[]): void {
+  let start = 0;
+  while (start < flags.length) {
+    if (flags[start] !== true) {
+      start += 1;
+      continue;
+    }
+    let end = start;
+    while (end + 1 < flags.length && flags[end + 1] === true) end += 1;
+    if (end - start + 1 >= 3) {
+      for (let i = start; i <= end; i++) out[i] = true;
+    }
+    start = end + 1;
+  }
 }
 
 // ───────────────────────────── Détection divergences delta ─────────────────────

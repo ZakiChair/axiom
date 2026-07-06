@@ -15,21 +15,15 @@ import {
   detectImbalances,
   detectDeltaDivergences,
   type ImbalanceFlags,
-  type DivergenceFlag,
 } from "./footprintAnalytics";
 import type { FootprintRow } from "@axiom/types";
 import type { Candle, FootprintBar } from "@axiom/types";
 
 // ───────────────────────────── Helpers tests ─────────────────────────────
 
-/** Bougie compacte pour les tests. */
-function c(time: number, o: number, h: number, l: number, cl: number, d: number): Candle {
-  return { time, open: o, high: h, low: l, close: cl, volume: 100, delta: d };
-}
-
-/** Bougie sans champ delta (le type FootprintBar a delta, Candle peut en avoir). */
-function ck(time: number, h: number, l: number, d: number): Candle {
-  return { time, open: 0, high: h, low: l, close: 0, volume: 100, delta: d };
+/** Bougie compacte OHLC (le delta vit sur FootprintBar, pas sur Candle). */
+function ck(time: number, h: number, l: number, _d: number): Candle {
+  return { time, open: 0, high: h, low: l, close: 0, volume: 100 };
 }
 
 /** Rows de footprint triées par prix croissant. */
@@ -39,7 +33,9 @@ function rows(
 ): FootprintRow[] {
   const out: FootprintRow[] = [];
   for (let i = 0; i < buy.length; i++) {
-    out.push({ price: 100 + i, buyVol: buy[i], sellVol: sell[i] });
+    const b = buy[i] ?? 0;
+    const s = sell[i] ?? 0;
+    out.push({ price: 100 + i, buyVol: b, sellVol: s });
   }
   return out;
 }
@@ -67,9 +63,10 @@ describe("detectImbalances", () => {
   });
 
   it("diviseur 0 : imbalance ssi buyVol≥minVol ET buyVol>0", () => {
-    // sellVol[i-1]=0 → ask imbalance si buyVol[i]≥0 ET buyVol[i]>0
+    // sell=[100,0,10] → sellVol[i-1]=0 au niveau i=2 : buy=10>0 → imbalance.
+    // Au niveau i=1 : sellVol[0]=100, buy=5 < 300 → pas d'imbalance.
     const flags = detectImbalances(rows([10, 5, 10], [100, 0, 10]), 300, 0);
-    expect(flags.askImb).toEqual([false, true, false]);
+    expect(flags.askImb).toEqual([false, false, true]);
   });
 
   it("bord de tableau : i=0 pas d'ask imb (pas de i-1)", () => {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
-import type { Candle } from "@axiom/types";
+import type { Candle, ExchangeId } from "@axiom/types";
 import type { Commande } from "../commands/registry";
 import { getAdapter } from "../data/adapters";
 import { bucketReturns, monthlyMatrix, type SeasonCell, type SeasonMode, type MonthCell } from "../lib/seasonality";
@@ -59,8 +59,12 @@ function mixColor(neg: string, pos: string, value: number, scale: number): strin
   return `${src}${Math.round(alpha * 255).toString(16).padStart(2, "0")}`;
 }
 
-async function fetchHistory(mode: Onglet, signal: AbortSignal): Promise<Candle[]> {
-  const { exchange, symbol } = marketStore.getState();
+async function fetchHistory(
+  exchange: ExchangeId,
+  symbol: string,
+  mode: Onglet,
+  signal: AbortSignal,
+): Promise<Candle[]> {
   const adapter = getAdapter(exchange);
   if (mode === "hourly") {
     const pages: Candle[] = [];
@@ -214,8 +218,11 @@ function percentile(sortedAsc: number[], p: number): number {
 
 export function SeasonalityWindow() {
   const open = useStore(seasonalityUiStore, (s) => s.open);
-  const symbol = useStore(marketStore, (s) => s.symbol);
   const exchange = useStore(marketStore, (s) => s.exchange);
+  const symbolGlobal = useStore(marketStore, (s) => s.symbol);
+  const groupColor = useStore(windowManagerStore, (s) => s.windows["seasonality"]?.groupColor ?? null);
+  const symbolGroupe = useStore(windowManagerStore, (s) => (groupColor ? s.groupSymbols[groupColor] : undefined));
+  const symbol = symbolGroupe ?? symbolGlobal;
   const [onglet, setOnglet] = useState<Onglet>("monthly");
   const [statut, setStatut] = useState<Statut>("idle");
   const [candles, setCandles] = useState<Candle[]>([]);
@@ -227,7 +234,7 @@ export function SeasonalityWindow() {
     const ctrl = new AbortController();
     setStatut("loading");
     setHover("");
-    void fetchHistory(onglet, ctrl.signal)
+    void fetchHistory(exchange, symbol, onglet, ctrl.signal)
       .then((next) => {
         if (ctrl.signal.aborted) return;
         setCandles(next);
@@ -245,8 +252,14 @@ export function SeasonalityWindow() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || statut !== "ready") return;
-    if (onglet === "monthly") drawMonthly(canvas, monthlyMatrix(candles), setHover);
-    else drawBuckets(canvas, bucketReturns(candles, onglet), onglet, setHover);
+    const redraw = (): void => {
+      if (onglet === "monthly") drawMonthly(canvas, monthlyMatrix(candles), setHover);
+      else drawBuckets(canvas, bucketReturns(candles, onglet), onglet, setHover);
+    };
+    redraw();
+    const ro = new ResizeObserver(redraw);
+    ro.observe(canvas);
+    return () => ro.disconnect();
   }, [candles, onglet, statut]);
 
   return (

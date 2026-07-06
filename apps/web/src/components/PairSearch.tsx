@@ -35,8 +35,15 @@ function sourceLabel(source: ExchangeId): string {
   return source[0]?.toUpperCase() + source.slice(1);
 }
 
-function isBuilderQuery(query: string): boolean {
-  const q = query.trim();
+/**
+ * Vrai si la saisie ressemble à un symbole synthétique en construction (contient `/`
+ * ou `-`) — SAUF si elle correspond exactement à un résultat du catalogue courant (ex.
+ * "EUR/USD", ticker tradfi réel) : dans ce cas on reste sur le chemin de sélection
+ * normal, la présence du séparateur seule ne doit pas basculer le constructeur.
+ */
+export function isBuilderQuery(query: string, pairs: readonly string[]): boolean {
+  const q = query.trim().toUpperCase();
+  if (pairs.includes(q)) return false;
   return q.includes("/") || q.includes("-");
 }
 
@@ -113,7 +120,7 @@ export function PairSearch({
 
   const q = query.trim().toUpperCase();
   const matches = q.length === 0 ? [] : pairs.filter((p) => p.includes(q)).slice(0, MAX_RESULTS);
-  const showBuilder = syntheticOpen || (open && isBuilderQuery(query));
+  const showBuilder = syntheticOpen || (open && isBuilderQuery(query, pairs));
 
   const legAMatches = useMemo(() => {
     const needle = legA.trim().toUpperCase();

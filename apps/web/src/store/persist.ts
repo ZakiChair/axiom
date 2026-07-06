@@ -63,7 +63,7 @@ const CHART_KEY = "axiom:chartState:v1";
 const WINDOW_MANAGER_KEY = "axiom:windowManager:v1";
 const WATCH_KEY = "axiom:watchlist:v1";
 const SESSION_KEY = "axiom:sessionUi:v1";
-const SYNTHETIC_RECENTS_KEY = "axiom.synthetic.recents";
+const SYNTHETIC_RECENTS_KEY = "axiom:synthetic:recents:v1";
 
 /** Préfixe commun de toutes les clés du terminal (export/import de sauvegarde). */
 const AXIOM_PREFIX = "axiom:";
@@ -73,7 +73,7 @@ const AXIOM_PREFIX = "axiom:";
 /** Namespace KV du daemon où sont miroitées les clés gérées ici. */
 const NS_PERSIST = "persist";
 /** Clés localStorage doublées vers le daemon (les 3 gérées par ce module). */
-const MANAGED_KEYS: readonly string[] = [CHART_KEY, WATCH_KEY, SESSION_KEY, WINDOW_MANAGER_KEY];
+const MANAGED_KEYS: readonly string[] = [CHART_KEY, WATCH_KEY, SESSION_KEY, WINDOW_MANAGER_KEY, SYNTHETIC_RECENTS_KEY];
 /** Horodatages locaux (ms) par clé gérée — arbitre la réconciliation. NON miroité. */
 const META_KEY = "axiom:persistMeta:v1";
 /** Fenêtre de coalescence des kvPut par clé (ms). */

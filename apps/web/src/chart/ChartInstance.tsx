@@ -46,9 +46,9 @@ import { VolumeProfileController } from "./volumeProfile";
 import { RevenueController } from "./revenue";
 import { MacroController } from "./macro";
 import { DerivativesChartController } from "./derivatives";
-import { bindChart, unbindChart, setFocusChart, redrawFibOverlays, restoreDrawings } from "./drawing";
+import { bindChart, unbindChart, setFocusChart, redrawFibOverlays, restoreDrawings, purgeChartDrawings } from "./drawing";
 import { fibStore } from "./fibonacci";
-import { createRafThrottle } from "./rafThrottle";
+import { createRafThrottle, type RafThrottle } from "./rafThrottle";
 import { SymbolBanner } from "../components/SymbolBanner";
 
 /** Type d'échelle de l'axe prix (miroir de YAxisType klinecharts). */
@@ -204,6 +204,19 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
   });
 }
 
+/**
+ * Objets à VIE LONGUE d'un slot — créés par l'effet MONTAGE (deps `[slot]`), réutilisés
+ * par l'effet DONNÉES à chaque changement exchange/symbole/TF/replay. C'est le socle du
+ * fix « flash » : l'instance KLineChart (et son DOM) SURVIT à ces changements ; seule la
+ * série est rechargée. Partagés entre les deux effets via `mountRef`.
+ */
+interface SlotMount {
+  chart: KLineChartInstance;
+  indicators: ChartIndicators;
+  paneHeaders: PaneHeaders;
+  updateThrottle: RafThrottle;
+}
+
 export interface ChartInstanceProps {
   /** Store marché de CE slot (global pour le maître, local pour les secondaires). */
   store: MarketStore;
@@ -230,6 +243,13 @@ export function ChartInstance({
   const vpCanvasRef = useRef<HTMLCanvasElement>(null); // volume profile (maître)
   const xhairCanvasRef = useRef<HTMLCanvasElement>(null); // crosshair synchronisé inter-slots
 
+  // Objets à vie longue (instance KLineChart + indicateurs + en-têtes + throttle des ticks),
+  // partagés par l'effet MONTAGE vers l'effet DONNÉES. `teardownDataRef` expose le démontage
+  // de la couche données afin que le cleanup MONTAGE puisse l'invoquer AVANT `dispose(chart)`
+  // (voir l'effet MONTAGE pour la raison d'ordre React).
+  const mountRef = useRef<SlotMount | null>(null);
+  const teardownDataRef = useRef<(() => void) | null>(null);
+
   const exchange = useStore(store, (s) => s.exchange);
   const symbol = useStore(store, (s) => s.symbol);
   const timeframe = useStore(store, (s) => s.timeframe);
@@ -245,101 +265,34 @@ export function ChartInstance({
     s.active && s.slot === slot ? `${s.symbole} · ${s.jour} · ${s.tf}` : "",
   );
 
+  // ── Effet MONTAGE (deps `[slot]`) : cycle de vie de l'INSTANCE ────────────
+  // Crée l'instance KLineChart + les objets à vie longue (indicateurs, en-têtes de panes,
+  // throttle des ticks, crosshair synchronisé, thème) UNE fois par slot monté. Ces éléments
+  // SURVIVENT aux changements exchange/symbole/TF/replay (gérés par l'effet DONNÉES) : c'est
+  // ce qui supprime le « flash » au changement de TF (plus de dispose/init du chart).
   useEffect(() => {
     const container = containerRef.current;
     const chartDom = chartRef.current;
-    const canvas = canvasRef.current;
-    const vpCanvas = vpCanvasRef.current;
     const xhairCanvas = xhairCanvasRef.current;
-    if (!container || !chartDom || !canvas || !vpCanvas || !xhairCanvas) return;
+    if (!container || !chartDom || !xhairCanvas) return;
 
     const chart = init(chartDom);
     if (!chart) return;
-
-    // Lie l'instance au registre de dessin (avec méta actif + slot) ; le focus courant
-    // récupère la main sur les outils si ce slot est le focus.
-    bindChart(chart, { exchange, symbol }, slot);
-    if (chartLayoutStore.getState().focus === slot) setFocusChart(slot);
 
     // Thème (bougies/grille/axes/crosshair + fond) — appliqué puis réabonné.
     applyChartTheme(chart, chartDom);
     const unsubscribeTheme = themeStore.subscribe(() => applyChartTheme(chart, chartDom));
 
     // Contrôleur d'indicateurs @axiom (partagé : même sélection sur tous les slots ;
-    // chaque slot calcule sur SON buffer). Léger : recalcul à la clôture uniquement.
+    // chaque slot calcule sur SON buffer). L'abonnement `indicatorsStore` qui CAPTURE
+    // `exchange` vit dans l'effet DONNÉES (il doit lire la source courante).
     const indicators = new ChartIndicators(chart);
-    const unsubscribeIndicators = indicatorsStore.subscribe((state) => {
-      indicators.sync(state.indicators, store.getState().candles, exchange);
-    });
 
     // En-têtes overlay des panes séparés (croix + drag-reorder) : le contrôleur lit
-    // `indicatorsStore` lui-même (pas besoin de brancher `state` du subscribe ci-dessus).
+    // `indicatorsStore` lui-même (pas besoin de brancher `state`).
     const paneHeaders = new PaneHeaders(chart, container);
     const unsubscribePaneHeaders = indicatorsStore.subscribe(() => paneHeaders.sync());
     paneHeaders.sync();
-
-    // Échelle de l'axe prix (partagée) : appliquée à l'instance + propagée au footprint.
-    const applyPriceScale = (type: PriceScaleType): void => {
-      chart.setStyles({ yAxis: { type: Y_AXIS_TYPE[type] } });
-      orderflow?.setAxisType(type);
-    };
-    const unsubscribePriceScale = priceScaleStore.subscribe((state) => applyPriceScale(state.type));
-
-    // ── ORDERFLOW réservé au slot FOCUS (perf) ─────────────────────────────
-    // Créé/détruit selon (ce slot est focus) ET (toggle Orderflow global actif). Lit le
-    // buffer de CE slot (store injecté). Recréé au changement de focus/toggle, jamais par tick.
-    let orderflow: OrderflowController | null = null;
-    const ensureOrderflow = (): void => {
-      const want = chartLayoutStore.getState().focus === slot && orderflowStore.getState().enabled;
-      if (want && !orderflow) {
-        orderflow = new OrderflowController(chart, container, canvas, symbol, store);
-        orderflow.setAxisType(priceScaleStore.getState().type);
-        orderflow.setEnabled(true);
-        if (store.getState().candles.length > 0) orderflow.onCandles();
-      } else if (!want && orderflow) {
-        orderflow.dispose();
-        orderflow = null;
-      }
-    };
-    const unsubscribeFocusOf = chartLayoutStore.subscribe(ensureOrderflow);
-    const unsubscribeOrderflow = orderflowStore.subscribe(ensureOrderflow);
-
-    // ── Contrôleurs LOURDS : slot MAÎTRE uniquement (lisent les stores globaux) ──
-    let compare: CompareController | null = null;
-    let volumeProfile: VolumeProfileController | null = null;
-    let revenue: RevenueController | null = null;
-    let macro: MacroController | null = null;
-    let derivativesChart: DerivativesChartController | null = null;
-    let unsubscribeCompare: (() => void) | null = null;
-    let unsubscribeVolumeProfile: (() => void) | null = null;
-    let unsubscribeRevenue: (() => void) | null = null;
-    let unsubscribeMacro: (() => void) | null = null;
-    let unsubscribeMacroHistory: (() => void) | null = null;
-    let unsubscribeFib: (() => void) | null = null;
-
-    if (isMaster) {
-      compare = new CompareController(chart, exchange, timeframe);
-      unsubscribeCompare = compareStore.subscribe((state) => compare?.sync(state.symbols));
-
-      volumeProfile = new VolumeProfileController(chart, container, vpCanvas);
-      volumeProfile.setEnabled(volumeProfileStore.getState().enabled);
-      unsubscribeVolumeProfile = volumeProfileStore.subscribe((state) => volumeProfile?.setEnabled(state.enabled));
-
-      revenue = new RevenueController(chart, symbol);
-      revenue.setEnabled(revenueStore.getState().enabled);
-      unsubscribeRevenue = revenueStore.subscribe((state) => revenue?.setEnabled(state.enabled));
-
-      macro = new MacroController(chart);
-      macro.sync(macroOverlayStore.getState().enabled);
-      unsubscribeMacro = macroOverlayStore.subscribe((state) => macro?.sync(state.enabled));
-      unsubscribeMacroHistory = macroHistoryStore.subscribe(() => macro?.onCandles());
-
-      // Contrôleur dérivés SUR le chart (OI + funding), AUTONOME (s'abonne lui-même).
-      derivativesChart = new DerivativesChartController(chart, symbol);
-
-      // Réglages Fibonacci : re-rend les overlays Fibo tracés (toutes instances).
-      unsubscribeFib = fibStore.subscribe((state) => redrawFibOverlays(state.rev));
-    }
 
     // ── Crosshair synchronisé inter-slots ──────────────────────────────────
     const drawSyncedCrosshair = (): void => {
@@ -404,6 +357,124 @@ export function ChartInstance({
       { minIntervalMs: TICK_MIN_INTERVAL_MS },
     );
 
+    // Publie les objets à vie longue vers l'effet DONNÉES.
+    mountRef.current = { chart, indicators, paneHeaders, updateThrottle };
+
+    return () => {
+      // React exécute les cleanups dans l'ordre de DÉCLARATION (haut→bas) : ce cleanup
+      // MONTAGE part AVANT celui de l'effet DONNÉES. Or les contrôleurs (compare, revenue,
+      // dérivés, macro…) appellent `chart.removeIndicator` dans leur dispose() → ils DOIVENT
+      // partir AVANT `dispose(chart)`. On invoque donc EXPLICITEMENT le teardown données ici
+      // (idempotent) pendant que le chart est encore vivant, puis on démonte l'instance.
+      teardownDataRef.current?.();
+      unsubscribeTheme();
+      unsubscribePaneHeaders();
+      paneHeaders.dispose();
+      unsubscribeXhairStore();
+      chart.unsubscribeAction(ActionType.OnCrosshairChange, onCrosshair);
+      chart.unsubscribeAction(ActionType.OnScroll, onXhairViewport);
+      chart.unsubscribeAction(ActionType.OnZoom, onXhairViewport);
+      chart.unsubscribeAction(ActionType.OnVisibleRangeChange, onXhairViewport);
+      xhairThrottle.dispose();
+      updateThrottle.dispose();
+      unbindChart(chart);
+      dispose(chart);
+      mountRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slot]);
+
+  // ── Effet DONNÉES (deps `[exchange, symbol, timeframe, replayGen, isMaster]`) ──
+  // Recrée la couche DONNÉES (dessins, contrôleurs maîtres/orderflow, backfill + WS) à
+  // chaque changement d'identité de données, SANS toucher à l'instance KLineChart (partagée
+  // via `mountRef`). Au teardown : désabonne/dispose TOUT sauf le chart.
+  useEffect(() => {
+    const mount = mountRef.current;
+    if (!mount) return;
+    const { chart, indicators, paneHeaders, updateThrottle } = mount;
+    const container = containerRef.current;
+    const canvas = canvasRef.current;
+    const vpCanvas = vpCanvasRef.current;
+    if (!container || !canvas || !vpCanvas) return;
+
+    // Lie l'instance au registre de dessin (méta actif + slot). Re-`bindChart` sur un chart
+    // DÉJÀ lié REMPLACE proprement l'entrée du registre (`registry.set` écrase ; le focus,
+    // tracké par référence d'INSTANCE — inchangée — n'est pas perturbé) → aucun
+    // `updateChartMeta` dédié nécessaire. Le focus reprend la main si ce slot est le focus.
+    bindChart(chart, { exchange, symbol }, slot);
+    if (chartLayoutStore.getState().focus === slot) setFocusChart(slot);
+
+    // Indicateurs : abonnement qui CAPTURE `exchange` (recréé à chaque changement de données
+    // pour lire la bonne source). Chaque slot calcule sur SON buffer.
+    const unsubscribeIndicators = indicatorsStore.subscribe((state) => {
+      indicators.sync(state.indicators, store.getState().candles, exchange);
+    });
+
+    // Échelle de l'axe prix (partagée) : appliquée à l'instance + propagée au footprint.
+    const applyPriceScale = (type: PriceScaleType): void => {
+      chart.setStyles({ yAxis: { type: Y_AXIS_TYPE[type] } });
+      orderflow?.setAxisType(type);
+    };
+    const unsubscribePriceScale = priceScaleStore.subscribe((state) => applyPriceScale(state.type));
+
+    // ── ORDERFLOW réservé au slot FOCUS (perf) ─────────────────────────────
+    // Créé/détruit selon (ce slot est focus) ET (toggle Orderflow global actif). Lit le
+    // buffer de CE slot (store injecté). Recréé au changement de focus/toggle, jamais par tick.
+    let orderflow: OrderflowController | null = null;
+    const ensureOrderflow = (): void => {
+      const want = chartLayoutStore.getState().focus === slot && orderflowStore.getState().enabled;
+      if (want && !orderflow) {
+        orderflow = new OrderflowController(chart, container, canvas, symbol, store);
+        orderflow.setAxisType(priceScaleStore.getState().type);
+        orderflow.setEnabled(true);
+        if (store.getState().candles.length > 0) orderflow.onCandles();
+      } else if (!want && orderflow) {
+        orderflow.dispose();
+        orderflow = null;
+      }
+    };
+    const unsubscribeFocusOf = chartLayoutStore.subscribe(ensureOrderflow);
+    const unsubscribeOrderflow = orderflowStore.subscribe(ensureOrderflow);
+
+    // ── Contrôleurs LOURDS : slot MAÎTRE uniquement (lisent les stores globaux) ──
+    let compare: CompareController | null = null;
+    let volumeProfile: VolumeProfileController | null = null;
+    let revenue: RevenueController | null = null;
+    let macro: MacroController | null = null;
+    let derivativesChart: DerivativesChartController | null = null;
+    let unsubscribeCompare: (() => void) | null = null;
+    let unsubscribeVolumeProfile: (() => void) | null = null;
+    let unsubscribeRevenue: (() => void) | null = null;
+    let unsubscribeMacro: (() => void) | null = null;
+    let unsubscribeMacroHistory: (() => void) | null = null;
+    let unsubscribeFib: (() => void) | null = null;
+
+    if (isMaster) {
+      compare = new CompareController(chart, exchange, timeframe);
+      unsubscribeCompare = compareStore.subscribe((state) => compare?.sync(state.symbols));
+
+      volumeProfile = new VolumeProfileController(chart, container, vpCanvas);
+      volumeProfile.setEnabled(volumeProfileStore.getState().enabled);
+      unsubscribeVolumeProfile = volumeProfileStore.subscribe((state) => volumeProfile?.setEnabled(state.enabled));
+
+      revenue = new RevenueController(chart, symbol);
+      revenue.setEnabled(revenueStore.getState().enabled);
+      unsubscribeRevenue = revenueStore.subscribe((state) => revenue?.setEnabled(state.enabled));
+
+      macro = new MacroController(chart);
+      macro.sync(macroOverlayStore.getState().enabled);
+      unsubscribeMacro = macroOverlayStore.subscribe((state) => macro?.sync(state.enabled));
+      unsubscribeMacroHistory = macroHistoryStore.subscribe(() => macro?.onCandles());
+
+      // Contrôleur dérivés SUR le chart (OI + funding), AUTONOME (s'abonne lui-même).
+      derivativesChart = new DerivativesChartController(chart, symbol);
+
+      // Réglages Fibonacci : re-rend les overlays Fibo tracés (toutes instances).
+      unsubscribeFib = fibStore.subscribe((state) => redrawFibOverlays(state.rev));
+    }
+
+    // Garde anti-course : les callbacks asynchrones (backfill, pagination, resync) ne doivent
+    // rien faire après le teardown. Sert aussi de garde d'idempotence au teardown lui-même.
     let cancelled = false;
     let unsubscribe: Unsubscribe | null = null;
     // En replay, ce slot lit le MOTEUR de rejeu (même surface IExchangeAdapter → tout le
@@ -437,17 +508,16 @@ export function ChartInstance({
         // Indicateurs actifs sur le buffer de CE slot.
         indicators.sync(indicatorsStore.getState().indicators, candles, exchange);
         // `indicators.sync` ci-dessus est un appel DIRECT (pas une mutation
-        // `indicatorsStore`) : l'abonnement `unsubscribePaneHeaders` (ligne ~278) ne se
-        // déclenche donc pas ici. Pour des indicateurs déjà persistés au premier montage,
-        // c'est le SEUL moment où leurs panes séparés sont réellement créés — sans cet
-        // appel, `paneHeaders.sync()` n'a été exécuté qu'une fois (ligne ~279, avant que
-        // les panes n'existent) et ne l'est plus jamais tant que l'utilisateur ne modifie
-        // pas `indicatorsStore` lui-même (croix ✕/drag restent invisibles indéfiniment).
+        // `indicatorsStore`) : l'abonnement `unsubscribePaneHeaders` (effet MONTAGE) ne se
+        // déclenche donc pas ici. Pour des indicateurs déjà persistés, c'est le SEUL moment
+        // où leurs panes séparés sont réellement créés — sans cet appel, `paneHeaders.sync()`
+        // ne verrait pas les panes et les croix ✕/drag resteraient invisibles tant que
+        // l'utilisateur ne modifie pas `indicatorsStore` lui-même.
         paneHeaders.sync();
         // Orderflow (si ce slot est focus + activé) : reseed CVD + trades.
         ensureOrderflow();
         orderflow?.onCandles();
-        // Échelle d'axe (une instance neuve démarre en 'normal').
+        // Échelle d'axe : réapplique l'échelle partagée courante au nouveau jeu de données.
         applyPriceScale(priceScaleStore.getState().type);
         // Contrôleurs lourds (maître).
         compare?.sync(compareStore.getState().symbols);
@@ -532,13 +602,14 @@ export function ChartInstance({
         console.error("[AXIOM] Échec du backfill", err);
       });
 
-    return () => {
+    // Teardown de la couche DONNÉES : tout sauf le chart. Exposé via `teardownDataRef` pour
+    // que le cleanup MONTAGE puisse l'exécuter AVANT `dispose(chart)` au démontage. Le drapeau
+    // `cancelled` garantit l'idempotence (invoqué au plus une fois par run d'effet).
+    const teardownData = (): void => {
+      if (cancelled) return;
       cancelled = true;
-      unsubscribeTheme();
-      unsubscribePriceScale();
       unsubscribeIndicators();
-      unsubscribePaneHeaders();
-      paneHeaders.dispose();
+      unsubscribePriceScale();
       unsubscribeFocusOf();
       unsubscribeOrderflow();
       unsubscribeCompare?.();
@@ -547,13 +618,6 @@ export function ChartInstance({
       unsubscribeMacro?.();
       unsubscribeMacroHistory?.();
       unsubscribeFib?.();
-      unsubscribeXhairStore();
-      chart.unsubscribeAction(ActionType.OnCrosshairChange, onCrosshair);
-      chart.unsubscribeAction(ActionType.OnScroll, onXhairViewport);
-      chart.unsubscribeAction(ActionType.OnZoom, onXhairViewport);
-      chart.unsubscribeAction(ActionType.OnVisibleRangeChange, onXhairViewport);
-      xhairThrottle.dispose();
-      updateThrottle.dispose();
       derivativesChart?.dispose();
       macro?.dispose();
       revenue?.dispose();
@@ -561,7 +625,11 @@ export function ChartInstance({
       compare?.dispose();
       orderflow?.dispose();
       if (unsubscribe) unsubscribe();
-      // Capture le cadrage AVANT dispose (restauré au prochain montage même source).
+      // Purge les dessins de l'ANCIEN symbole sur CETTE instance réutilisée (persist-safe :
+      // le stockage n'est PAS écrasé ; marqueurs éco + indicateurs préservés). Rejoués par
+      // `restoreDrawings` au prochain run si on revient sur ce symbole.
+      purgeChartDrawings(chart);
+      // Capture le cadrage courant (restauré au prochain run/montage même source).
       try {
         lastViewport.set(slot, {
           exchange,
@@ -571,11 +639,11 @@ export function ChartInstance({
       } catch {
         lastViewport.delete(slot);
       }
-      unbindChart(chart);
-      dispose(chart);
     };
+    teardownDataRef.current = teardownData;
+    return teardownData;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exchange, symbol, timeframe, slot, isMaster, replayGen]);
+  }, [exchange, symbol, timeframe, replayGen, isMaster]);
 
   return (
     // Conteneur relatif : le graphe le remplit ; les canvases se superposent

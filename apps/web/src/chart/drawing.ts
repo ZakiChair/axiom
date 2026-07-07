@@ -381,6 +381,27 @@ export function exportChartImage(symbol: string, tf: string): void {
   a.remove();
 }
 
+/**
+ * Purge les dessins TRACÉS d'UNE instance RÉUTILISÉE au changement de symbole/TF (Lot D1 :
+ * l'instance KLineChart survit désormais à ces changements, cf. ChartInstance — elle n'est
+ * plus recréée). Retire UNIQUEMENT les overlays suivis du registre (par id) : les marqueurs
+ * éco, le CVD orderflow et les indicateurs @axiom (système `createIndicator` distinct) sont
+ * PRÉSERVÉS. À la DIFFÉRENCE de `clearAllOverlays` (action utilisateur « Effacer tout »),
+ * NE touche PAS au stockage : les dessins de l'ancien symbole doivent survivre pour être
+ * rejoués si on y revient (`restoreDrawings`). `suppressPersist` empêche les `onRemoved`
+ * déclenchés ici d'écraser à vide la clé « exchange:symbole » de l'ancien actif.
+ */
+export function purgeChartDrawings(chart: KLineChartInstance): void {
+  const entry = registry.get(chart);
+  if (!entry) return;
+  entry.suppressPersist = true;
+  // Instantané des ids : `onRemoved` mute `liveOverlays` pendant l'itération.
+  for (const id of [...entry.liveOverlays.keys()]) chart.removeOverlay({ id });
+  entry.liveOverlays.clear();
+  entry.selectedOverlayId = null;
+  entry.suppressPersist = false;
+}
+
 /** « Effacer tout » : retire TOUS les overlays de dessin de l'instance FOCUS. */
 export function clearAllOverlays(): void {
   if (activeChart === null) return;

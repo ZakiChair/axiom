@@ -51,8 +51,8 @@ VPVR coïncide avec celui d'un VPFR posé sur la même plage.
   liés au slot maître, avec un **badge UI explicite** « slot maître » (fin du silence).
 - Mnémonique treemap : `MAP` devient le mnémonique principal, `IMAP` conservé comme alias dans
   la palette ⌘K (mémoire musculaire).
-- Ticker watchlist multi-source : routage par source via les adapters (canaux ticker WS
-  Kraken/Coinbase), au lieu du Binance-only actuel même quand la source est Kraken/Coinbase.
+- ~~Ticker watchlist multi-source~~ — **RETIRÉ à l'écriture du plan (2026-07-07)** : déjà livré
+  en P0 (`data/ticker.ts` route kraken/coinbase/mexc en polling REST 30 s). Ne pas refaire.
 
 ### Volet indicateurs
 

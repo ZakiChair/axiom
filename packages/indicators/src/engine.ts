@@ -36,8 +36,9 @@ export function buildCalcContext(candles: Candle[]): CalcContext {
 /**
  * Résout les paramètres effectifs : part des valeurs par défaut déclarées dans
  * `def.inputs`, puis applique les surcharges fournies par l'appelant.
+ * Assainit les valeurs numériques : NaN/non-finis → défaut, sinon clamp [min, max].
  */
-function resolveParams(
+export function resolveParams(
   def: IndicatorDef,
   params?: Record<string, number | boolean | string>
 ): Record<string, number | boolean | string> {
@@ -49,6 +50,21 @@ function resolveParams(
     for (const key of Object.keys(params)) {
       const v = params[key];
       if (v !== undefined) resolved[key] = v;
+    }
+  }
+  // Assainissement des paramètres numériques : NaN/non-finis → défaut, sinon clamp [min, max]
+  for (const input of def.inputs) {
+    if (input.type === "number") {
+      const v = resolved[input.key];
+      if (typeof v !== "number" || !Number.isFinite(v)) {
+        resolved[input.key] = input.default;
+      } else {
+        // Clamp la valeur entre min et max
+        resolved[input.key] = Math.min(
+          input.max ?? v,
+          Math.max(input.min ?? v, v)
+        );
+      }
     }
   }
   return resolved;

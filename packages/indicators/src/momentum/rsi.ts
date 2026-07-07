@@ -24,7 +24,7 @@ import type {
   IndicatorDef,
   IndicatorResult,
 } from "@axiom/types";
-import { closeOf, rma } from "../utils";
+import { rma } from "../utils";
 
 export const rsi: IndicatorDef = {
   id: "rsi",
@@ -33,16 +33,23 @@ export const rsi: IndicatorDef = {
   pane: "separate",
   inputs: [
     { key: "length", name: "Longueur", type: "number", default: 14, min: 1 },
+    {
+      key: "source",
+      name: "Source",
+      type: "source",
+      default: "close",
+      options: ["open", "high", "low", "close", "hl2", "hlc3", "ohlc4"],
+    },
   ],
   outputs: [{ key: "rsi", name: "RSI", style: "line" }],
 
   calc(
     candles: Candle[],
     params: Record<string, number | boolean | string>,
-    _ctx: CalcContext
+    ctx: CalcContext
   ): IndicatorResult {
     const length = Number(params.length);
-    const closes = closeOf(candles);
+    const closes = ctx.source;
     const n = closes.length;
 
     const out: Array<number | undefined> = new Array(n).fill(undefined);

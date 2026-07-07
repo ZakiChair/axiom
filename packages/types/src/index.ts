@@ -218,6 +218,8 @@ export interface CalcContext {
   hl2: number[];
   hlc3: number[];
   ohlc4: number[];
+  /** Série résolue selon `params.source` (défaut "close") : la série mono-prix que les defs doivent lire. */
+  source: number[];
 }
 
 /** Définition déclarative d'un indicateur. Le moteur ne connaît que cette interface. */

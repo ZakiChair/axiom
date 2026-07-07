@@ -12,7 +12,7 @@ function candle(close: number, vol: number): Candle {
   return { time: 0, open: close, high: close, low: close, close, volume: vol };
 }
 
-const ctx = { hl2: [], hlc3: [], ohlc4: [] };
+const ctx = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 // closes : 100,200,150,150 ; vols : 10,5,5,20
 // i1 : vol 5<10 -> roc=(200-100)/100=1.0 -> 1000+1000=2000

@@ -48,6 +48,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Candle, CalcContext } from "@axiom/types";
+import { computeIndicator } from "../engine";
 import { macd } from "./macd";
 
 /** Construit des bougies à partir des seules clôtures (le calcul n'utilise que close). */
@@ -62,16 +63,19 @@ function candlesFromCloses(closes: number[]): Candle[] {
   }));
 }
 
-// Le calcul MACD n'utilise pas le contexte ; un contexte vide suffit.
-const emptyCtx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+/** Construit un contexte minimal avec source = close (fixtures à clôtures constantes O=H=L=C). */
+function ctxFromCloses(closes: number[]): CalcContext {
+  return { hl2: [], hlc3: [], ohlc4: [], source: closes };
+}
 
 describe("MACD", () => {
   it("calcule macd/signal/hist en régime établi et garde les undefined au démarrage", () => {
-    const candles = candlesFromCloses([2, 4, 6, 8, 4, 9, 3, 11]);
+    const closes = [2, 4, 6, 8, 4, 9, 3, 11];
+    const candles = candlesFromCloses(closes);
     const { series } = macd.calc(
       candles,
       { fast: 1, slow: 3, signal: 3 },
-      emptyCtx
+      ctxFromCloses(closes)
     );
 
     // Ligne MACD : undefined avant l'index 2, puis valeurs calculées à la main.
@@ -113,8 +117,9 @@ describe("MACD", () => {
 
   it("renvoie tout en undefined tant que la fenêtre n'est pas pleine (defaults 12/26/9)", () => {
     // 5 bougies < slow(26) : aucune EMA lente, donc aucune valeur MACD calculable.
-    const candles = candlesFromCloses([1, 2, 3, 4, 5]);
-    const { series } = macd.calc(candles, {}, emptyCtx);
+    const closes = [1, 2, 3, 4, 5];
+    const candles = candlesFromCloses(closes);
+    const { series } = macd.calc(candles, {}, ctxFromCloses(closes));
 
     const allUndef = (arr: Array<number | undefined>) =>
       arr.length === 5 && arr.every((v) => v === undefined);
@@ -122,5 +127,33 @@ describe("MACD", () => {
     expect(allUndef(series.macd ?? [])).toBe(true);
     expect(allUndef(series.signal ?? [])).toBe(true);
     expect(allUndef(series.hist ?? [])).toBe(true);
+  });
+
+  it("MACD sur hlc3 diffère de MACD sur close et correspond au calcul sur la série hlc3", () => {
+    const ohlcCandles: Candle[] = [
+      { time: 0, open: 10, high: 10, low: 10, close: 10, volume: 0 },
+      { time: 60_000, open: 10, high: 15, low: 9, close: 11, volume: 0 },
+      { time: 120_000, open: 11, high: 12, low: 8, close: 10, volume: 0 },
+      { time: 180_000, open: 10, high: 16, low: 11, close: 12, volume: 0 },
+      { time: 240_000, open: 12, high: 18, low: 10, close: 13, volume: 0 },
+      { time: 300_000, open: 13, high: 14, low: 9, close: 12, volume: 0 },
+      { time: 360_000, open: 12, high: 20, low: 11, close: 14, volume: 0 },
+    ];
+    const params = { fast: 1, slow: 3, signal: 3 };
+
+    const a = computeIndicator(macd, ohlcCandles, params);
+    const b = computeIndicator(macd, ohlcCandles, { ...params, source: "hlc3" });
+
+    expect(a.series.macd).not.toEqual(b.series.macd);
+
+    const hlc3 = ohlcCandles.map((c) => (c.high + c.low + c.close) / 3);
+    const expected = macd.calc(
+      ohlcCandles,
+      { ...params, source: "hlc3" },
+      { hl2: [], hlc3: [], ohlc4: [], source: hlc3 }
+    );
+    expect(b.series.macd).toEqual(expected.series.macd);
+    expect(b.series.signal).toEqual(expected.series.signal);
+    expect(b.series.hist).toEqual(expected.series.hist);
   });
 });

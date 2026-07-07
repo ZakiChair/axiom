@@ -10,7 +10,7 @@ import { describe, it, expect } from "vitest";
 import type { Candle, CalcContext } from "@axiom/types";
 import { massIndex } from "./massIndex";
 
-const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 describe("massIndex", () => {
   const candles: Candle[] = Array.from({ length: 60 }, (_, i) => {

@@ -10,7 +10,7 @@ import { describe, it, expect } from "vitest";
 import type { Candle, CalcContext } from "@axiom/types";
 import { chaikinVol } from "./chaikinVol";
 
-const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 describe("chaikinVol", () => {
   it("expose une série alignée et amorce en undefined", () => {

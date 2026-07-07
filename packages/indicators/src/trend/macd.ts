@@ -4,8 +4,8 @@
  * MACD (Moving Average Convergence Divergence) — indicateur de tendance/momentum
  * affiché dans un pane séparé.
  *
- * Calcul :
- *   macd[i]   = ema(close, fast)[i] - ema(close, slow)[i]   (undefined si l'une manque)
+ * Calcul (sur une série de prix configurable, input "source", défaut close) :
+ *   macd[i]   = ema(source, fast)[i] - ema(source, slow)[i]   (undefined si l'une manque)
  *   signal    = ema appliquée aux valeurs DÉFINIES de la ligne MACD, puis ré-alignée
  *               (les `undefined` du début de la ligne MACD sont reportés)
  *   hist[i]   = macd[i] - signal[i]                          (undefined si l'une manque)
@@ -15,7 +15,7 @@
  */
 
 import type { IndicatorDef } from "@axiom/types";
-import { closeOf, ema as emaOf } from "../utils";
+import { ema as emaOf } from "../utils";
 
 export const macd: IndicatorDef = {
   id: "macd",
@@ -26,19 +26,26 @@ export const macd: IndicatorDef = {
     { key: "fast", name: "Fast", type: "number", default: 12, min: 1 },
     { key: "slow", name: "Slow", type: "number", default: 26, min: 1 },
     { key: "signal", name: "Signal", type: "number", default: 9, min: 1 },
+    {
+      key: "source",
+      name: "Source",
+      type: "source",
+      default: "close",
+      options: ["open", "high", "low", "close", "hl2", "hlc3", "ohlc4"],
+    },
   ],
   outputs: [
     { key: "macd", name: "MACD", style: "line" },
     { key: "signal", name: "Signal", style: "line" },
     { key: "hist", name: "Histogram", style: "histogram" },
   ],
-  calc(candles, params) {
+  calc(candles, params, ctx) {
     // Paramètres garantis numériques par le contrat d'input (défauts 12/26/9).
     const fast = Number(params.fast ?? 12);
     const slow = Number(params.slow ?? 26);
     const signal = Number(params.signal ?? 9);
 
-    const close = closeOf(candles);
+    const close = ctx.source;
     const n = close.length;
 
     const fastEma = emaOf(close, fast);

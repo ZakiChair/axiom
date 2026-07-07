@@ -23,7 +23,7 @@ function candlesFromCloses(closes: number[]): Candle[] {
   }));
 }
 
-const emptyCtx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+const emptyCtx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 describe("trix", () => {
   it("length = 1 : triple EMA = close, TRIX = ROC1 en % (valeurs exactes)", () => {

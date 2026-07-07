@@ -21,7 +21,7 @@ function candlesFromCloses(closes: number[]): Candle[] {
   }));
 }
 
-const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 describe("relativeVolatilityIndex", () => {
   const closes = Array.from({ length: 50 }, (_, i) => 100 + 6 * Math.sin(i / 3) + i * 0.2);

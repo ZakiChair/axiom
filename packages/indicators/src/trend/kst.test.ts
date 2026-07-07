@@ -29,7 +29,7 @@ function candlesFromCloses(closes: number[]): Candle[] {
   }));
 }
 
-const emptyCtx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+const emptyCtx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 describe("kst", () => {
   it("série doublante : KST = 3200 constant à partir de l'index 3 (exact)", () => {

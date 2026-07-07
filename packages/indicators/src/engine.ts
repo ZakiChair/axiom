@@ -15,12 +15,20 @@ import type {
   IndicatorResult,
 } from "@axiom/types";
 
-/** Construit le contexte de calcul (sources de prix dérivées) à partir des bougies. */
-export function buildCalcContext(candles: Candle[]): CalcContext {
+/**
+ * Construit le contexte de calcul (sources de prix dérivées) à partir des bougies.
+ * `sourceKey` sélectionne la série mono-prix exposée en `ctx.source` (défaut "close") :
+ * c'est la série que les defs mono-source (SMA, EMA, WMA, RSI, MACD, Bollinger…) doivent lire.
+ */
+export function buildCalcContext(
+  candles: Candle[],
+  sourceKey: string = "close"
+): CalcContext {
   const n = candles.length;
   const hl2 = new Array<number>(n);
   const hlc3 = new Array<number>(n);
   const ohlc4 = new Array<number>(n);
+  const source = new Array<number>(n);
 
   for (let i = 0; i < n; i++) {
     const c = candles[i];
@@ -28,9 +36,34 @@ export function buildCalcContext(candles: Candle[]): CalcContext {
     hl2[i] = (c.high + c.low) / 2;
     hlc3[i] = (c.high + c.low + c.close) / 3;
     ohlc4[i] = (c.open + c.high + c.low + c.close) / 4;
+
+    switch (sourceKey) {
+      case "open":
+        source[i] = c.open;
+        break;
+      case "high":
+        source[i] = c.high;
+        break;
+      case "low":
+        source[i] = c.low;
+        break;
+      case "hl2":
+        source[i] = hl2[i]!;
+        break;
+      case "hlc3":
+        source[i] = hlc3[i]!;
+        break;
+      case "ohlc4":
+        source[i] = ohlc4[i]!;
+        break;
+      case "close":
+      default:
+        source[i] = c.close;
+        break;
+    }
   }
 
-  return { hl2, hlc3, ohlc4 };
+  return { hl2, hlc3, ohlc4, source };
 }
 
 /**
@@ -79,7 +112,10 @@ export function computeIndicator(
   candles: Candle[],
   params?: Record<string, number | boolean | string>
 ): IndicatorResult {
-  const ctx = buildCalcContext(candles);
   const resolved = resolveParams(def, params);
+  // `source` (si le def le déclare) pilote la série mono-prix exposée en ctx.source.
+  const sourceKey =
+    typeof resolved.source === "string" ? resolved.source : "close";
+  const ctx = buildCalcContext(candles, sourceKey);
   return def.calc(candles, resolved, ctx);
 }

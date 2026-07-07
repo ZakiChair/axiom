@@ -32,7 +32,7 @@ const candles: Candle[] = [
 ];
 
 // CalcContext factice : non utilisé par le Volume.
-const ctx = { hl2: [], hlc3: [], ohlc4: [] };
+const ctx = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 describe("volume (passthrough)", () => {
   it("recopie le volume de chaque bougie à l'identique", () => {

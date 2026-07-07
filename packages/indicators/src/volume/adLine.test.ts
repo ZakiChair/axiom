@@ -12,7 +12,7 @@ function candle(high: number, low: number, close: number, vol: number): Candle {
   return { time: 0, open: close, high, low, close, volume: vol };
 }
 
-const ctx = { hl2: [], hlc3: [], ohlc4: [] };
+const ctx = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 // CLV choisis pour être exacts : +1, -1, 0, puis range nul (garde).
 const candles: Candle[] = [

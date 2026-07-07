@@ -20,7 +20,7 @@ describe("rv — Realized Volatility (annualisée)", () => {
     ];
 
     const params = { length: 3, periodesParAn: 365 };
-    const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+    const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
     const result = rv.calc(candles, params, ctx);
     const rvOut = result.series.rv as Array<number | undefined>;
@@ -66,7 +66,7 @@ describe("rv — Realized Volatility (annualisée)", () => {
     ];
 
     const params = { length: 3, periodesParAn: 365 };
-    const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+    const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
     const result = rv.calc(candles, params, ctx);
     const rvOut = result.series.rv as Array<number | undefined>;
@@ -87,7 +87,7 @@ describe("rv — Realized Volatility (annualisée)", () => {
 
     const params365 = { length: 3, periodesParAn: 365 };
     const params252 = { length: 3, periodesParAn: 252 };
-    const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+    const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
     const result365 = rv.calc(candles, params365, ctx);
     const result252 = rv.calc(candles, params252, ctx);
@@ -117,7 +117,7 @@ describe("rv — Realized Volatility (annualisée)", () => {
     ];
 
     const params = { length: 5, periodesParAn: 365 };
-    const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+    const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
     const result = rv.calc(candles, params, ctx);
     const rvOut = result.series.rv as Array<number | undefined>;
@@ -149,7 +149,7 @@ describe("rv — Realized Volatility (annualisée)", () => {
 
     // Paramètres sans spécifier length ni periodesParAn (doivent utiliser les défauts)
     const params = { length: 30, periodesParAn: 365 };
-    const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+    const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
     const result = rv.calc(candles, params, ctx);
     const rvOut = result.series.rv as Array<number | undefined>;

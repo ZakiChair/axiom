@@ -12,7 +12,7 @@ function candle(vol: number): Candle {
   return { time: 0, open: 1, high: 1, low: 1, close: 1, volume: vol };
 }
 
-const ctx = { hl2: [], hlc3: [], ohlc4: [] };
+const ctx = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 const candles: Candle[] = [10, 20, 30, 40, 50].map(candle);
 
 describe("volumeMa", () => {

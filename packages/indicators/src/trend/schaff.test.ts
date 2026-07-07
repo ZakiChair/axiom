@@ -22,7 +22,7 @@ function candlesFromCloses(closes: number[]): Candle[] {
   }));
 }
 
-const emptyCtx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+const emptyCtx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 describe("schaff", () => {
   it("borné [0,100], fini, amorçage undefined, longueur conservée", () => {

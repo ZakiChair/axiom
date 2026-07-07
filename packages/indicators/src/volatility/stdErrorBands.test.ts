@@ -22,7 +22,7 @@ function candlesFromCloses(closes: number[]): Candle[] {
   }));
 }
 
-const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 describe("stdErrorBands", () => {
   const closes = Array.from({ length: 40 }, (_, i) => 100 + 4 * Math.sin(i / 2));

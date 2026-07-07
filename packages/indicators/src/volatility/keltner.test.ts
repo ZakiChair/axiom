@@ -27,7 +27,7 @@ function makeCandles(count: number): Candle[] {
   return out;
 }
 
-const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 describe("keltner", () => {
   const candles = makeCandles(60);

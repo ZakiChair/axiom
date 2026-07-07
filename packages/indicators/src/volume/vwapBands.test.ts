@@ -16,7 +16,7 @@ function candle(high: number, low: number, close: number, vol: number): Candle {
 // Construit le ctx avec hlc3 comme le ferait le moteur.
 function makeCtx(candles: Candle[]) {
   const hlc3 = candles.map((c) => (c.high + c.low + c.close) / 3);
-  return { hl2: [], hlc3, ohlc4: [] };
+  return { hl2: [], hlc3, ohlc4: [], source: [] };
 }
 
 const candles: Candle[] = [

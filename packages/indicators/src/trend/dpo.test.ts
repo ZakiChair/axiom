@@ -27,7 +27,7 @@ function candlesFromCloses(closes: number[]): Candle[] {
   }));
 }
 
-const emptyCtx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+const emptyCtx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 describe("dpo", () => {
   it("valeurs exactes (length = 4, shift = 3)", () => {

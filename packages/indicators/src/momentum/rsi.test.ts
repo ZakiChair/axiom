@@ -93,4 +93,33 @@ describe("RSI (Wilder)", () => {
     expect(out[3]).toBe(100);
     expect(out[4]).toBe(100);
   });
+
+  it("RSI sur hlc3 diffère de RSI sur close et correspond au calcul sur la série hlc3", () => {
+    // OHLC volontairement distincts (high/low asymétriques) pour que hlc3 ≠ close
+    // ET que les deltas de hlc3 diffèrent de ceux de close (pas un simple décalage constant).
+    const candles: Candle[] = [
+      { time: 0, open: 10, high: 10, low: 10, close: 10, volume: 0 },
+      { time: 60_000, open: 10, high: 15, low: 9, close: 11, volume: 0 },
+      { time: 120_000, open: 11, high: 12, low: 8, close: 10, volume: 0 },
+      { time: 180_000, open: 10, high: 16, low: 11, close: 12, volume: 0 },
+      { time: 240_000, open: 12, high: 18, low: 10, close: 13, volume: 0 },
+      { time: 300_000, open: 13, high: 14, low: 9, close: 12, volume: 0 },
+      { time: 360_000, open: 12, high: 20, low: 11, close: 14, volume: 0 },
+    ];
+
+    const a = computeIndicator(rsi, candles, { length: 3 });
+    const b = computeIndicator(rsi, candles, { length: 3, source: "hlc3" });
+
+    expect(a.series.rsi).not.toEqual(b.series.rsi);
+
+    // hlc3 calculée à la main depuis la fixture ci-dessus, injectée directement
+    // dans un contexte de calcul pour obtenir la valeur de référence attendue.
+    const hlc3 = candles.map((c) => (c.high + c.low + c.close) / 3);
+    const expected = rsi.calc(
+      candles,
+      { length: 3, source: "hlc3" },
+      { hl2: [], hlc3: [], ohlc4: [], source: hlc3 }
+    );
+    expect(b.series.rsi).toEqual(expected.series.rsi);
+  });
 });

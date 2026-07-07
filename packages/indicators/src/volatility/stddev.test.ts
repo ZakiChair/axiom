@@ -24,7 +24,7 @@ function candlesFromCloses(closes: number[]): Candle[] {
   }));
 }
 
-const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 describe("stddev", () => {
   const candles = candlesFromCloses([1, 2, 3, 4, 6]);

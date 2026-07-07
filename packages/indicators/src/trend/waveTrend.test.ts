@@ -24,7 +24,7 @@ function candlesOHLC(closes: number[]): Candle[] {
   }));
 }
 
-const emptyCtx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+const emptyCtx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 describe("waveTrend", () => {
   it("amorçage undefined, longueur, ordre wt1/wt2, valeurs finies (défauts n1=10 n2=21)", () => {

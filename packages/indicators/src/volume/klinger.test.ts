@@ -15,7 +15,7 @@ function candle(high: number, low: number, close: number, vol: number): Candle {
   return { time: 0, open: close, high, low, close, volume: vol };
 }
 
-const ctx = { hl2: [], hlc3: [], ohlc4: [] };
+const ctx = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 const candles: Candle[] = Array.from({ length: 90 }, (_, i) => {
   const base = 100 + Math.sin(i / 3) * 8;

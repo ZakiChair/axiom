@@ -30,7 +30,7 @@ function makeCandles(hl: Array<[number, number]>): Candle[] {
   }));
 }
 
-const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 describe("donchian", () => {
   const candles = makeCandles([

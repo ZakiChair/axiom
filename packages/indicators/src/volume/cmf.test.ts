@@ -13,7 +13,7 @@ function candle(high: number, low: number, close: number, vol: number): Candle {
   return { time: 0, open: close, high, low, close, volume: vol };
 }
 
-const ctx = { hl2: [], hlc3: [], ohlc4: [] };
+const ctx = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 // mfv = [5, -3, 0, 0] ; vol = [5, 3, 8, 100]
 const candles: Candle[] = [

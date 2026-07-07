@@ -24,7 +24,7 @@ function candles(closes: number[], volumes: number[]): Candle[] {
   }));
 }
 
-const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [] };
+const ctx: CalcContext = { hl2: [], hlc3: [], ohlc4: [], source: [] };
 
 describe("vwma (trend, overlay)", () => {
   const data = candles([10, 11, 12], [1, 2, 3]);

@@ -4,9 +4,10 @@
  * Bandes de Bollinger : une moyenne mobile simple (la « basis ») encadrée par
  * deux bandes situées à `mult` écarts-types de part et d'autre.
  *
- * Calcul (convention TradingView) :
- *   basis = sma(close, length)
- *   dev   = mult * stdev(close, length, population = true)   // divise par N
+ * Calcul (convention TradingView, sur une série de prix configurable — input
+ * "source", défaut close) :
+ *   basis = sma(source, length)
+ *   dev   = mult * stdev(source, length, population = true)   // divise par N
  *   upper = basis + dev
  *   lower = basis - dev
  *
@@ -15,7 +16,7 @@
  */
 
 import type { IndicatorDef } from "@axiom/types";
-import { closeOf, sma, stdev } from "../utils";
+import { sma, stdev } from "../utils";
 
 export const bollinger: IndicatorDef = {
   id: "bollinger",
@@ -25,17 +26,24 @@ export const bollinger: IndicatorDef = {
   inputs: [
     { key: "length", name: "Length", type: "number", default: 20, min: 1 },
     { key: "mult", name: "StdDev", type: "number", default: 2, min: 0 },
+    {
+      key: "source",
+      name: "Source",
+      type: "source",
+      default: "close",
+      options: ["open", "high", "low", "close", "hl2", "hlc3", "ohlc4"],
+    },
   ],
   outputs: [
     { key: "basis", name: "Basis", style: "line" },
     { key: "upper", name: "Upper", style: "line" },
     { key: "lower", name: "Lower", style: "line" },
   ],
-  calc(candles, params) {
+  calc(candles, params, ctx) {
     const length = Number(params.length);
     const mult = Number(params.mult);
 
-    const close = closeOf(candles);
+    const close = ctx.source;
     const basis = sma(close, length);
     const dev = stdev(close, length, true); // population = convention TradingView
 

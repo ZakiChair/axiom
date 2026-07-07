@@ -18,9 +18,10 @@ export function utcDayOf(timeMs: number): number {
   return Math.floor(timeMs / DAY_MS);
 }
 
-/** Agrégat H/L/C d'un jour UTC (bornes temporelles incluses pour référence). */
+/** Agrégat O/H/L/C d'un jour UTC (bornes temporelles incluses pour référence). */
 export interface SessionExtent {
   dayIdx: number;
+  open: number;
   high: number;
   low: number;
   close: number;
@@ -29,9 +30,10 @@ export interface SessionExtent {
 }
 
 /**
- * Agrège les bougies par jour UTC (High = max, Low = min, Close = clôture de
- * la dernière bougie du jour). Suppose `candles` trié par ordre chronologique
- * croissant. Résultat trié par `dayIdx` croissant (ordre chronologique).
+ * Agrège les bougies par jour UTC (Open = ouverture de la première bougie du
+ * jour, High = max, Low = min, Close = clôture de la dernière bougie du
+ * jour). Suppose `candles` trié par ordre chronologique croissant. Résultat
+ * trié par `dayIdx` croissant (ordre chronologique).
  */
 export function sessionExtents(candles: Candle[]): SessionExtent[] {
   const out: SessionExtent[] = [];
@@ -40,7 +42,15 @@ export function sessionExtents(candles: Candle[]): SessionExtent[] {
   for (const c of candles) {
     const dayIdx = utcDayOf(c.time);
     if (current === undefined || current.dayIdx !== dayIdx) {
-      current = { dayIdx, high: c.high, low: c.low, close: c.close, from: c.time, to: c.time };
+      current = {
+        dayIdx,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        from: c.time,
+        to: c.time,
+      };
       out.push(current);
     } else {
       if (c.high > current.high) current.high = c.high;

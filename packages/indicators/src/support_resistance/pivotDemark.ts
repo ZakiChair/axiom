@@ -15,11 +15,16 @@
  *
  * DeMark ne définit qu'un seul couple support/résistance (R1/S1) autour du pivot.
  *
- * SIMPLIFICATION ASSUMÉE (MVP) : O/H/L/C de la BOUGIE PRÉCÉDENTE (candles[i-1]),
- * pas de la session précédente. Bougie 0 -> `undefined`.
+ * O/H/L/C proviennent des EXTENTS AGRÉGÉS DU JOUR UTC PRÉCÉDENT (J-1), via
+ * `sessionExtents`/`utcDayOf` (utils-session.ts) — et non de la bougie
+ * précédente (`open` = ouverture de la première bougie du jour J-1). Les
+ * niveaux sont constants sur toute la durée d'une session (jour UTC
+ * courant). Les bougies du premier jour du buffer (pas de jour J-1
+ * disponible) restent `undefined`.
  */
 
 import type { IndicatorDef } from "@axiom/types";
+import { sessionExtents, utcDayOf, type SessionExtent } from "../utils-session";
 
 export const pivotDemark: IndicatorDef = {
   id: "pivotDemark",
@@ -39,13 +44,18 @@ export const pivotDemark: IndicatorDef = {
     const r1: Array<number | undefined> = new Array(n).fill(undefined);
     const s1: Array<number | undefined> = new Array(n).fill(undefined);
 
-    for (let i = 1; i < n; i++) {
-      const prev = candles[i - 1];
-      if (prev === undefined) continue; // garde explicite
-      const o = prev.open;
-      const h = prev.high;
-      const l = prev.low;
-      const c = prev.close;
+    const extentsByDay = new Map<number, SessionExtent>();
+    for (const e of sessionExtents(candles)) extentsByDay.set(e.dayIdx, e);
+
+    for (let i = 0; i < n; i++) {
+      const candle = candles[i];
+      if (candle === undefined) continue; // garde explicite (noUncheckedIndexedAccess)
+
+      const dayIdx = utcDayOf(candle.time);
+      const prevDay = extentsByDay.get(dayIdx - 1);
+      if (prevDay === undefined) continue; // pas de jour J-1 dans le buffer
+
+      const { open: o, high: h, low: l, close: c } = prevDay;
 
       let x: number;
       if (c < o) x = h + 2 * l + c;

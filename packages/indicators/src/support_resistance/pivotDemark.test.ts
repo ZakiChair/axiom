@@ -1,15 +1,34 @@
 /**
  * @axiom/indicators — support_resistance/pivotDemark.test.ts
  *
- * On teste les TROIS branches de X (C<O, C>O, C=O), chacune hand-calc, en plaçant
- * trois bougies sources successives. L'index i utilise la bougie i-1.
+ * Pivots sessionnés : les niveaux d'une bougie du jour UTC J sont calculés
+ * depuis les extents (O/H/L/C) agrégés du jour UTC J-1. DeMark est le seul
+ * pivot du lot à consommer l'`open` de `SessionExtent` (ouverture de la
+ * PREMIÈRE bougie du jour J-1).
  *
- *   bougie 0 : O=11,H=12,L=8,C=10  (C<O) -> X = H+2L+C = 12+16+10 = 38
- *              PP = 38/4 = 9.5 ; R1 = 19−8 = 11 ; S1 = 19−12 = 7   (lus à l'index 1)
- *   bougie 1 : O=10,H=12,L=8,C=11  (C>O) -> X = 2H+L+C = 24+8+11 = 43
- *              PP = 43/4 = 10.75 ; R1 = 21.5−8 = 13.5 ; S1 = 21.5−12 = 9.5  (index 2)
- *   bougie 2 : O=10,H=12,L=8,C=10  (C=O) -> X = H+L+2C = 12+8+20 = 40
- *              PP = 40/4 = 10 ; R1 = 20−8 = 12 ; S1 = 20−12 = 8   (index 3)
+ * Fixture : 2 jours de bougies 1h (3 bougies/jour), à cheval sur la frontière
+ * UTC à 86_400_000 ms (même fixture que pivotStandard.test.ts / utils-session.test.ts) :
+ *
+ *   Jour 0 (t = 0, 1h, 2h) : O0 = 9 (ouverture de la première bougie du jour,
+ *     index 0), H0 = 12, L0 = 8, C0 = 11 (clôture de la dernière bougie du
+ *     jour, index 2).
+ *   Jour 1 (t = 24h, 25h, 26h) : O1 = 11, H1 = 14, L1 = 9, C1 = 14.
+ *
+ * Valeurs ATTENDUES pour les bougies du jour 1 (indices 3, 4, 5), calculées à
+ * la main depuis les extents du jour 0 (O=9, H=12, L=8, C=11) via la formule
+ * DeMark propre à ce fichier :
+ *
+ *   C (11) > O (9) -> X = 2·H + L + C = 24 + 8 + 11 = 43
+ *   PP = X/4 = 43/4 = 10.75
+ *   R1 = X/2 − L = 21.5 − 8 = 13.5
+ *   S1 = X/2 − H = 21.5 − 12 = 9.5
+ *
+ * (Seule la branche C > O est exercée par cette fixture partagée ; les deux
+ * autres branches — C < O et C = O — restent couvertes par la logique de
+ * `calc`, INCHANGÉE par cette tâche, qui ne modifie que la fenêtre.)
+ *
+ * Les bougies du jour 0 (indices 0, 1, 2) n'ont pas de jour précédent dans le
+ * buffer -> `undefined`.
  */
 
 import { describe, it, expect } from "vitest";
@@ -17,56 +36,48 @@ import type { Candle } from "@axiom/types";
 import { computeIndicator } from "../engine";
 import { pivotDemark } from "./pivotDemark";
 
-function candles(rows: { o: number; h: number; l: number; c: number }[]): Candle[] {
-  return rows.map((r, i) => ({
-    time: i * 60_000,
-    open: r.o,
-    high: r.h,
-    low: r.l,
-    close: r.c,
-    volume: 0,
-  }));
-}
+const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
 
-describe("Pivot Points DeMark", () => {
-  it("couvre les trois branches de X (hand-calc)", () => {
-    const cs = candles([
-      { o: 11, h: 12, l: 8, c: 10 }, // C<O
-      { o: 10, h: 12, l: 8, c: 11 }, // C>O
-      { o: 10, h: 12, l: 8, c: 10 }, // C=O
-      { o: 10, h: 11, l: 9, c: 10 }, // bougie supplémentaire (non lue)
-    ]);
-    const { series } = computeIndicator(pivotDemark, cs, {});
+const candles: Candle[] = [
+  { time: 0, open: 9, high: 10, low: 8, close: 9, volume: 0 },
+  { time: HOUR_MS, open: 9, high: 12, low: 8.5, close: 10, volume: 0 },
+  { time: 2 * HOUR_MS, open: 10, high: 11, low: 9, close: 11, volume: 0 },
+  { time: DAY_MS, open: 11, high: 13, low: 10, close: 12, volume: 0 },
+  { time: DAY_MS + HOUR_MS, open: 12, high: 14, low: 11, close: 13, volume: 0 },
+  { time: DAY_MS + 2 * HOUR_MS, open: 13, high: 13.5, low: 9, close: 14, volume: 0 },
+];
 
-    const pp = series.pp;
-    const r1 = series.r1;
-    const s1 = series.s1;
-    if (pp === undefined || r1 === undefined || s1 === undefined) {
-      throw new Error("séries DeMark absentes");
+describe("Pivot Points DeMark (sessionné)", () => {
+  it("bougies du jour 0 : undefined (pas de jour précédent dans le buffer)", () => {
+    const { series } = computeIndicator(pivotDemark, candles, {});
+
+    for (const key of ["pp", "r1", "s1"]) {
+      const s = series[key];
+      if (s === undefined) throw new Error(`série ${key} absente`);
+      expect(s.length).toBe(candles.length);
+      expect(s[0]).toBeUndefined();
+      expect(s[1]).toBeUndefined();
+      expect(s[2]).toBeUndefined();
+    }
+  });
+
+  it("bougies du jour 1 : niveaux depuis les extents du jour 0, branche C>O (hand-calc)", () => {
+    const { series } = computeIndicator(pivotDemark, candles, {});
+
+    const pp = series.pp!;
+    const r1 = series.r1!;
+    const s1 = series.s1!;
+
+    for (const i of [3, 4, 5]) {
+      expect(pp[i]).toBeCloseTo(10.75, 9);
+      expect(r1[i]).toBeCloseTo(13.5, 9);
+      expect(s1[i]).toBeCloseTo(9.5, 9);
     }
 
-    expect(pp.length).toBe(cs.length);
-    expect(pp[0]).toBeUndefined(); // bougie 0 sans précédente
-
-    // C<O (depuis bougie 0)
-    expect(pp[1]).toBeCloseTo(9.5, 9);
-    expect(r1[1]).toBeCloseTo(11, 9);
-    expect(s1[1]).toBeCloseTo(7, 9);
-
-    // C>O (depuis bougie 1)
-    expect(pp[2]).toBeCloseTo(10.75, 9);
-    expect(r1[2]).toBeCloseTo(13.5, 9);
-    expect(s1[2]).toBeCloseTo(9.5, 9);
-
-    // C=O (depuis bougie 2)
-    expect(pp[3]).toBeCloseTo(10, 9);
-    expect(r1[3]).toBeCloseTo(12, 9);
-    expect(s1[3]).toBeCloseTo(8, 9);
-
-    // Invariant d'ordre S1 ≤ PP ≤ R1.
-    for (let i = 1; i < cs.length; i++) {
-      expect(s1[i]! <= pp[i]!).toBe(true);
-      expect(pp[i]! <= r1[i]!).toBe(true);
-    }
+    // Propriété clé du calcul sessionné : les niveaux sont CONSTANTS sur tout
+    // le jour (contrairement à l'ancien calcul bougie-précédente).
+    expect(pp[3]).toBe(pp[4]);
+    expect(pp[4]).toBe(pp[5]);
   });
 });

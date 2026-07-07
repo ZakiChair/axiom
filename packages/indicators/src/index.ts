@@ -4,5 +4,6 @@
  */
 
 export * from "./utils";
+export * from "./utils-session";
 export * from "./engine";
 export * from "./registry";

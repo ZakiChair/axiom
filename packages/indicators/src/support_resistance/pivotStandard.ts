@@ -1,7 +1,7 @@
 /**
  * @axiom/indicators — support_resistance/pivotStandard.ts
  *
- * Pivot Points Standard (« Floor pivots »).
+ * Pivot Points Standard (« Floor pivots »), SESSIONNÉS.
  * Source canonique : formules de pivots planchers classiques (TradingView
  * "Pivot Points Standard", méthode Traditional).
  *
@@ -10,14 +10,16 @@
  *   R2 = PP + (H − L)        S2 = PP − (H − L)
  *   R3 = H + 2·(PP − L)      S3 = L − 2·(H − PP)
  *
- * SIMPLIFICATION ASSUMÉE (MVP) : H/L/C proviennent de la BOUGIE PRÉCÉDENTE
- * (candles[i-1]), et NON de la session précédente (jour/semaine). Un vrai
- * découpage par session demanderait un regroupement temporel que le moteur
- * full-array actuel ne fournit pas. Conséquence : les niveaux changent à chaque
- * bougie. La bougie 0 (sans précédente) reste `undefined`.
+ * H/L/C proviennent des EXTENTS AGRÉGÉS DU JOUR UTC PRÉCÉDENT (J-1), via
+ * `sessionExtents`/`utcDayOf` (utils-session.ts) — et non de la bougie
+ * précédente. Conséquence : les niveaux sont constants sur toute la durée
+ * d'une session (jour UTC courant) et changent une fois par jour, à minuit
+ * UTC. Les bougies du premier jour du buffer (pas de jour J-1 disponible)
+ * restent `undefined`.
  */
 
 import type { IndicatorDef } from "@axiom/types";
+import { sessionExtents, utcDayOf, type SessionExtent } from "../utils-session";
 
 export const pivotStandard: IndicatorDef = {
   id: "pivotStandard",
@@ -45,12 +47,18 @@ export const pivotStandard: IndicatorDef = {
     const r3: Array<number | undefined> = new Array(n).fill(undefined);
     const s3: Array<number | undefined> = new Array(n).fill(undefined);
 
-    for (let i = 1; i < n; i++) {
-      const prev = candles[i - 1];
-      if (prev === undefined) continue; // garde explicite (noUncheckedIndexedAccess)
-      const h = prev.high;
-      const l = prev.low;
-      const c = prev.close;
+    const extentsByDay = new Map<number, SessionExtent>();
+    for (const e of sessionExtents(candles)) extentsByDay.set(e.dayIdx, e);
+
+    for (let i = 0; i < n; i++) {
+      const candle = candles[i];
+      if (candle === undefined) continue; // garde explicite (noUncheckedIndexedAccess)
+
+      const dayIdx = utcDayOf(candle.time);
+      const prevDay = extentsByDay.get(dayIdx - 1);
+      if (prevDay === undefined) continue; // pas de jour J-1 dans le buffer
+
+      const { high: h, low: l, close: c } = prevDay;
 
       const p = (h + l + c) / 3;
       pp[i] = p;

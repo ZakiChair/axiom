@@ -302,13 +302,6 @@ export class VolumeProfileController {
     const vp = computeVolumeProfile(candles, from, to, BIN_COUNT);
     if (vp === null) return;
 
-    // Échelle prix->y linéaire : 2 conversions par frame (cf. orderflow).
-    const yMin = this.toPx({ value: vp.priceMin }).y;
-    const yMax = this.toPx({ value: vp.priceMax }).y;
-    if (yMin === undefined || yMax === undefined) return;
-    const yOf = (price: number): number =>
-      yMin + ((price - vp.priceMin) / (vp.priceMax - vp.priceMin)) * (yMax - yMin);
-
     const up = readToken("--up") || "#10b981";
     const down = readToken("--down") || "#ef4444";
     const accent = readToken("--accent") || "#f5c518";
@@ -321,18 +314,35 @@ export class VolumeProfileController {
     ctx.rect(left, top, width, height);
     ctx.clip();
 
-    // Bandeau Value Area (léger voile sur la zone 70 %).
-    const yVAtop = yOf(vp.vaHigh);
-    const yVAbot = yOf(vp.vaLow);
-    ctx.fillStyle = "rgba(148,163,184,0.06)";
-    ctx.fillRect(left, Math.min(yVAtop, yVAbot), width, Math.abs(yVAbot - yVAtop));
+    // Bandeau Value Area (léger voile sur la zone 70 %) : conversion prix->y par
+    // valeur via convertToPixel (correcte en échelle log/%, pas seulement linéaire).
+    const yVAtop = this.toPx({ value: vp.vaHigh }).y;
+    const yVAbot = this.toPx({ value: vp.vaLow }).y;
+    if (
+      yVAtop !== undefined &&
+      yVAbot !== undefined &&
+      Number.isFinite(yVAtop) &&
+      Number.isFinite(yVAbot)
+    ) {
+      ctx.fillStyle = "rgba(148,163,184,0.06)";
+      ctx.fillRect(left, Math.min(yVAtop, yVAbot), width, Math.abs(yVAbot - yVAtop));
+    }
 
     // Barres horizontales : buy (teinte up) + sell (teinte down) empilées, ancrées à droite.
     for (let b = 0; b < vp.bins.length; b++) {
       const bin = vp.bins[b];
       if (bin === undefined || bin.volume <= 0) continue;
-      const yTop = yOf(bin.priceHigh);
-      const yBot = yOf(bin.priceLow);
+      // Conversion par bin (borne haute/basse) : ~2×BIN_COUNT appels/frame, négligeable (cf. VPFR).
+      const yTop = this.toPx({ value: bin.priceHigh }).y;
+      const yBot = this.toPx({ value: bin.priceLow }).y;
+      if (
+        yTop === undefined ||
+        yBot === undefined ||
+        !Number.isFinite(yTop) ||
+        !Number.isFinite(yBot)
+      ) {
+        continue;
+      }
       const h = Math.max(1, Math.abs(yBot - yTop) - 0.5);
       const total = (bin.volume / vp.maxVol) * maxBarW;
       const buyFrac = bin.volume > 0 ? bin.buyVol / bin.volume : 0;

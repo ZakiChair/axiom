@@ -38,7 +38,7 @@ export const WINDOW_REGISTRY: readonly {
   { id: "news", title: "Actualités crypto", mnemonic: "NEWS", defaultWidth: 440, defaultHeight: 640 },
   { id: "corr", title: "Corrélations", mnemonic: "CORR", defaultWidth: 480, defaultHeight: 640 },
   { id: "onchain", title: "On-chain", mnemonic: "CHAIN", defaultWidth: 460, defaultHeight: 640 },
-  { id: "marketMap", title: "Vue marché (treemap)", mnemonic: "IMAP", defaultWidth: 1100, defaultHeight: 720 },
+  { id: "marketMap", title: "Vue marché (treemap)", mnemonic: "MAP", defaultWidth: 1100, defaultHeight: 720 },
   { id: "portfolio", title: "Portefeuille", mnemonic: "PORT", defaultWidth: 460, defaultHeight: 640 },
   { id: "notes", title: "Notes / journal", mnemonic: "NOTE", defaultWidth: 440, defaultHeight: 640 },
   { id: "screener", title: "Screener d'actifs", mnemonic: "EQS", defaultWidth: 680, defaultHeight: 680 },

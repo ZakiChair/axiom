@@ -145,7 +145,7 @@ const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] =
   { mnemonique: "NEWS", libelle: "Actualités crypto", ouvrir: () => newsUiStore.getState().openNews() },
   { mnemonique: "CORR", libelle: "Corrélations", ouvrir: () => corrUiStore.getState().openCorr() },
   { mnemonique: "CHAIN", libelle: "On-chain", ouvrir: () => onchainUiStore.getState().openOnchain() },
-  { mnemonique: "IMAP", libelle: "Vue marché (treemap)", ouvrir: () => marketMapUiStore.getState().openMarketMap() },
+  { mnemonique: "MAP", libelle: "Vue marché (treemap)", ouvrir: () => marketMapUiStore.getState().openMarketMap() },
   { mnemonique: "PORT", libelle: "Portefeuille", ouvrir: () => portfolioUiStore.getState().openPortfolio() },
   { mnemonique: "NOTE", libelle: "Notes / journal", ouvrir: () => notesUiStore.getState().openNotes() },
   { mnemonique: "EQS", libelle: "Screener d'actifs", ouvrir: () => screenerStore.getState().openScreener() },

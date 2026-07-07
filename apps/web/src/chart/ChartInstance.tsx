@@ -254,6 +254,8 @@ export function ChartInstance({
   const symbol = useStore(store, (s) => s.symbol);
   const timeframe = useStore(store, (s) => s.timeframe);
   const focus = useStore(chartLayoutStore, (s) => s.focus);
+  const layout = useStore(chartLayoutStore, (s) => s.layout);
+  const orderflowEnabled = useStore(orderflowStore, (s) => s.enabled);
   const isMaster = role === "master";
   const isFocus = focus === slot;
   // Replay (roadmap 4.4) : ce slot est-il en rejeu ? `gen` (primitif) force le remontage
@@ -466,12 +468,15 @@ export function ChartInstance({
       unsubscribeMacro = macroOverlayStore.subscribe((state) => macro?.sync(state.enabled));
       unsubscribeMacroHistory = macroHistoryStore.subscribe(() => macro?.onCandles());
 
-      // Contrôleur dérivés SUR le chart (OI + funding), AUTONOME (s'abonne lui-même).
-      derivativesChart = new DerivativesChartController(chart, symbol);
-
       // Réglages Fibonacci : re-rend les overlays Fibo tracés (toutes instances).
       unsubscribeFib = fibStore.subscribe((state) => redrawFibOverlays(state.rev));
     }
+
+    // Contrôleur dérivés SUR le chart (OI + funding), AUTONOME (s'abonne lui-même) — sur
+    // TOUS les slots (plus seulement le maître) : un slot secondaire doit pouvoir afficher
+    // ses propres sous-panes OI/FUND. Le fetch Coinalyze est mémoïsé par symbole
+    // (derivatives.ts) pour ne pas doubler les appels quand deux slots partagent le même actif.
+    derivativesChart = new DerivativesChartController(chart, symbol);
 
     // Garde anti-course : les callbacks asynchrones (backfill, pagination, resync) ne doivent
     // rien faire après le teardown. Sert aussi de garde d'idempotence au teardown lui-même.
@@ -661,6 +666,14 @@ export function ChartInstance({
       {replayLabel !== "" && (
         <div className="pointer-events-none absolute left-1/2 top-1 z-20 -translate-x-1/2 rounded border border-accent/60 bg-surface/90 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-accent backdrop-blur">
           ⏵ REPLAY · {replayLabel}
+        </div>
+      )}
+      {/* Orderflow réservé au slot focus (perf) : badge explicite sur les AUTRES slots pour
+          rappeler pourquoi leur footprint/CVD est inactif. Masqué en mono-chart (un seul
+          slot = toujours le focus, le badge serait toujours absent de toute façon). */}
+      {orderflowEnabled && !isFocus && layout !== "1" && (
+        <div className="pointer-events-none absolute right-1 top-1 z-20 rounded border border-border bg-surface/80 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-text-dim">
+          Orderflow · slot focus
         </div>
       )}
       {isMaster ? (

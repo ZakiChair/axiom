@@ -452,16 +452,26 @@ export function MarketMapWindow() {
 
 /**
  * Commandes exposées à la palette (⌘K) — l'intégrateur les enregistre via
- * `enregistrerCommandes(commandes)`. Mnémonique IMAP (Bloomberg « heat map »).
+ * `enregistrerCommandes(commandes)`. Mnémonique MAP (Bloomberg « heat map »), avec
+ * un alias IMAP conservé (ancien mnémonique) pour ne pas casser les habitudes.
  */
 export const commandes: Commande[] = [
   {
     id: "panneau:vue-marche",
-    mnemonique: "IMAP",
+    mnemonique: "MAP",
     libelle: "Vue marché (treemap)",
     categorie: "panneau",
     motsCles: ["vue marche", "market map", "treemap", "heatmap", "carte", "secteurs", "capitalisation", "imap"],
     apercu: "Ouvre / ferme la treemap de capitalisation du marché",
+    action: () => marketMapUiStore.getState().toggleMarketMap(),
+  },
+  {
+    id: "panneau:vue-marche-imap",
+    mnemonique: "IMAP",
+    libelle: "Vue marché (treemap)",
+    categorie: "panneau",
+    motsCles: ["vue marche", "market map", "treemap", "heatmap", "alias map"],
+    apercu: "Alias de MAP — ouvre / ferme la treemap de capitalisation du marché",
     action: () => marketMapUiStore.getState().toggleMarketMap(),
   },
 ];

@@ -20,6 +20,7 @@
  */
 import { registerIndicator, IndicatorSeries } from "klinecharts";
 import type { Chart, IndicatorFigure } from "klinecharts";
+import type { FundingRate, OpenInterest } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { derivativesChartStore, type DerivativesChartState } from "../store/derivatives-chart";
 import { coinalyzeProvider } from "../data/coinalyze";
@@ -37,6 +38,35 @@ const FUNDING_COLOR = "#f59e0b"; // ambre
 const DERIV_INTERVAL = "1hour";
 /** Fenêtre glissante récupérée (30 j @ 1 h = 720 pts, sous la rétention gratuite ~1500-2000). */
 const DERIV_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Mémo module-scope PAR SYMBOLE (TTL 60 s) : plusieurs slots de grille sur le MÊME
+ * symbole (ex. 2× BTCUSDT) ne déclenchent qu'UN seul fetch Coinalyze — protège le
+ * quota 40 req/min (`coinalyzeProvider` n'a lui-même aucun cache, cf. data/coinalyze.ts,
+ * uniquement un throttle de débit partagé). Nécessaire depuis que `DerivativesChartController`
+ * est instancié sur TOUS les slots (plus seulement le maître).
+ */
+const DERIV_CACHE_TTL_MS = 60_000;
+
+interface CacheEntry<T> {
+  promise: Promise<T>;
+  fetchedAt: number;
+}
+
+const oiHistoryCache = new Map<string, CacheEntry<OpenInterest[]>>();
+const fundingHistoryCache = new Map<string, CacheEntry<FundingRate[]>>();
+
+/** Sert la promesse en cache si récente (< TTL), sinon relance et mémorise. Une erreur
+ * purge l'entrée immédiatement (pas d'attente du TTL avant de pouvoir réessayer). */
+function memoized<T>(cache: Map<string, CacheEntry<T>>, key: string, fetcher: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const hit = cache.get(key);
+  if (hit && now - hit.fetchedAt < DERIV_CACHE_TTL_MS) return hit.promise;
+  const promise = fetcher();
+  cache.set(key, { promise, fetchedAt: now });
+  promise.catch(() => cache.delete(key));
+  return promise;
+}
 
 interface CandleTime {
   time: number;
@@ -190,10 +220,8 @@ export class DerivativesChartController {
   private async loadOi(): Promise<void> {
     this.oiFetching = true;
     try {
-      const hist = await coinalyzeProvider.fetchOpenInterestHistory(
-        this.symbol,
-        DERIV_INTERVAL,
-        Date.now() - DERIV_LOOKBACK_MS
+      const hist = await memoized(oiHistoryCache, this.symbol, () =>
+        coinalyzeProvider.fetchOpenInterestHistory(this.symbol, DERIV_INTERVAL, Date.now() - DERIV_LOOKBACK_MS)
       );
       if (this.disposed) return;
       const series = hist
@@ -216,10 +244,8 @@ export class DerivativesChartController {
   private async loadFunding(): Promise<void> {
     this.fundingFetching = true;
     try {
-      const hist = await coinalyzeProvider.fetchFundingRateHistory(
-        this.symbol,
-        DERIV_INTERVAL,
-        Date.now() - DERIV_LOOKBACK_MS
+      const hist = await memoized(fundingHistoryCache, this.symbol, () =>
+        coinalyzeProvider.fetchFundingRateHistory(this.symbol, DERIV_INTERVAL, Date.now() - DERIV_LOOKBACK_MS)
       );
       if (this.disposed) return;
       // rate est une fraction (normalisée à la source) → ×100 pour l'affichage en %.

@@ -571,8 +571,15 @@ export function ChartInstance({
           store.getState().upsertCandle(candle);
           // Coalescence rAF des ticks intra-bougie ; flush IMMÉDIAT à la clôture pour
           // finaliser exactement la bougie fermée sur le graphe.
-          if (candle.closed) updateThrottle.flushNow();
-          else updateThrottle.trigger();
+          if (candle.closed) {
+            updateThrottle.flushNow();
+          } else {
+            updateThrottle.trigger();
+            // Recalcul indicateurs intra-bougie, throttlé 500 ms (leading+trailing) : la
+            // bougie en formation bouge, on veut le RSI/etc. à jour sans recalculer à
+            // chaque tick WS. La clôture (branche ci-dessus) garde `recompute` direct.
+            indicators.recomputeThrottled(indicatorsStore.getState().indicators, store.getState().candles, exchange);
+          }
 
           orderflow?.onTick();
 
@@ -613,6 +620,7 @@ export function ChartInstance({
     const teardownData = (): void => {
       if (cancelled) return;
       cancelled = true;
+      indicators.disposeThrottle();
       unsubscribeIndicators();
       unsubscribePriceScale();
       unsubscribeFocusOf();

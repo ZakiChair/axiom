@@ -43,6 +43,9 @@ type AxiomPoint = Record<string, number>;
 /** Id du pane prix (constante interne KLineChart, vérifiée dans le bundle). */
 const CANDLE_PANE_ID = "candle_pane";
 
+/** Période du throttle leading+trailing de `recomputeThrottled` (recalcul intra-bougie). */
+const RECOMPUTE_THROTTLE_MS = 500;
+
 /**
  * Nom KLineChart d'une INSTANCE (identité par pane). Préfixe `AXIOM_` = aucune
  * collision avec les indicateurs natifs (MA/BOLL/RSI…) ; `instanceId` (unique)
@@ -146,6 +149,16 @@ export class ChartIndicators {
    * partagent le calcul, et un recompute redondant est un no-op.
    */
   private readonly computeCache = new Map<string, { candles: Candle[]; result: IndicatorResult }>();
+
+  /**
+   * Throttle dédié de `recomputeThrottled` (leading+trailing, `RECOMPUTE_THROTTLE_MS`).
+   * PAS `createRafThrottle` (rafThrottle.ts) : ce helper ne transmet aucun argument au
+   * flush (adapté à `updateData`, qui relit le store) — ici `recompute` a besoin des
+   * DERNIERS `instances/candles/exchange` reçus, d'où des champs privés dédiés.
+   */
+  private lastRun = 0;
+  private pending: ReturnType<typeof setTimeout> | null = null;
+  private latestArgs: [ActiveIndicator[], Candle[], ExchangeId] | null = null;
 
   constructor(chart: Chart) {
     this.chart = chart;
@@ -264,6 +277,40 @@ export class ChartIndicators {
       if (!def) continue;
       const result = this.compute(def, inst.params, candles);
       this.chart.overrideIndicator({ name: info.name, extendData: result }, info.paneId);
+    }
+  }
+
+  /**
+   * Recalcule au FIL DE L'EAU (bougie en formation, ticks intra-bougie), throttlée
+   * leading+trailing sur `RECOMPUTE_THROTTLE_MS` : si la garde est expirée, exécute
+   * `recompute` tout de suite (leading) ; sinon programme un UNIQUE trailing à
+   * `lastRun + RECOMPUTE_THROTTLE_MS`, avec les DERNIERS arguments reçus (la bougie
+   * a pu bouger entre-temps). Complète `recompute`, appelé tel quel à la clôture
+   * (flush exact, hors throttle).
+   */
+  recomputeThrottled(instances: ActiveIndicator[], candles: Candle[], exchange: ExchangeId): void {
+    const now = Date.now();
+    this.latestArgs = [instances, candles, exchange];
+    if (now - this.lastRun >= RECOMPUTE_THROTTLE_MS) {
+      this.lastRun = now;
+      this.recompute(instances, candles, exchange);
+      return;
+    }
+    if (this.pending !== null) return; // un trailing est déjà programmé, il lira `latestArgs`
+    const delay = this.lastRun + RECOMPUTE_THROTTLE_MS - now;
+    this.pending = setTimeout(() => {
+      this.pending = null;
+      this.lastRun = Date.now();
+      const args = this.latestArgs;
+      if (args) this.recompute(args[0], args[1], args[2]);
+    }, delay);
+  }
+
+  /** Annule un trailing en attente (cleanup de l'effet DONNÉES, cf. `disposeThrottle`). */
+  disposeThrottle(): void {
+    if (this.pending !== null) {
+      clearTimeout(this.pending);
+      this.pending = null;
     }
   }
 }

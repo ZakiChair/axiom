@@ -87,21 +87,30 @@ describe("ChartIndicators.recomputeThrottled", () => {
     expect(recomputeSpy).toHaveBeenCalledTimes(1); // le trailing a été annulé, pas de 2e appel
   });
 
-  it("le trailing exécute recompute avec les DERNIERS arguments reçus, pas les premiers", () => {
+  it("le trailing exécute recompute avec les DERNIERS arguments reçus, pas ceux de l'appel qui a programmé le timer", () => {
+    // Ce test distingue explicitement l'appel qui PROGRAMME le trailing (B) de
+    // l'appel COALESCÉ ensuite (C), qui doit gagner. Une implémentation buguée
+    // qui fermerait sur les arguments de l'appel programmateur (le piège de
+    // `createRafThrottle`, explicitement rejeté par le plan) retournerait B ici
+    // et ferait échouer ce test.
     vi.useFakeTimers();
     vi.setSystemTime(1_000_000);
     const { indicators, recomputeSpy } = makeIndicators();
     const exchangeA: ExchangeId = "binance";
     const exchangeB: ExchangeId = "coinbase";
+    const exchangeC: ExchangeId = "okx";
 
     indicators.recomputeThrottled(instances, candles, exchangeA); // leading avec A
     expect(recomputeSpy).toHaveBeenLastCalledWith(instances, candles, exchangeA);
 
     vi.advanceTimersByTime(100);
-    indicators.recomputeThrottled(instances, candles, exchangeB); // programme un trailing avec B
+    indicators.recomputeThrottled(instances, candles, exchangeB); // programme le trailing (args = B)
 
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(100);
+    indicators.recomputeThrottled(instances, candles, exchangeC); // coalescé : doit remplacer les args par C
+
+    vi.advanceTimersByTime(300); // t = 1_000_500 : le trailing se déclenche
     expect(recomputeSpy).toHaveBeenCalledTimes(2);
-    expect(recomputeSpy).toHaveBeenLastCalledWith(instances, candles, exchangeB); // args du DERNIER appel
+    expect(recomputeSpy).toHaveBeenLastCalledWith(instances, candles, exchangeC); // args du DERNIER appel (C), pas B
   });
 });

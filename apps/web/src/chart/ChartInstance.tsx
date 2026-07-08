@@ -399,6 +399,10 @@ export function ChartInstance({
     const vpCanvas = vpCanvasRef.current;
     if (!container || !canvas || !vpCanvas) return;
 
+    // Symbole/TF courants (Task 14) : nécessaires à l'AuxProvider pour les indicateurs
+    // dérivés (`def.aux`) — renseignés AVANT tout sync/recompute de cet effet.
+    indicators.setMarket(symbol, timeframe);
+
     // Lie l'instance au registre de dessin (méta actif + slot). Re-`bindChart` sur un chart
     // DÉJÀ lié REMPLACE proprement l'entrée du registre (`registry.set` écrase ; le focus,
     // tracké par référence d'INSTANCE — inchangée — n'est pas perturbé) → aucun

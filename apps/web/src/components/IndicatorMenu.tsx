@@ -20,6 +20,7 @@ import {
   type ActiveIndicator,
 } from "../store/indicators";
 import { marketStore } from "../store/market";
+import { tfAtLeast } from "../chart/tfOrder";
 
 /** Libellés FR des catégories + ordre d'affichage. */
 const CATEGORY_LABELS: Partial<Record<IndicatorCategory, string>> = {
@@ -160,6 +161,7 @@ export function IndicatorMenu() {
 
   const active = useStore(indicatorsStore, (s) => s.indicators);
   const exchange = useStore(marketStore, (s) => s.exchange);
+  const timeframe = useStore(marketStore, (s) => s.timeframe);
   const add = useStore(indicatorsStore, (s) => s.add);
   const remove = useStore(indicatorsStore, (s) => s.remove);
   const duplicate = useStore(indicatorsStore, (s) => s.duplicate);
@@ -315,12 +317,22 @@ export function IndicatorMenu() {
                   {!isCollapsed &&
                     defs.map((def) => {
                       const count = countByDef.get(def.id) ?? 0;
-                      const disabled = exchange === "synthetic" && def.id === "volume";
+                      const disabledSynthetic = exchange === "synthetic" && def.id === "volume";
+                      // Grisage par TF minimal (Task 14) : def dérivé (OI/funding/NVT/MVRV…)
+                      // non pertinent en dessous de son `minTimeframe` (ex. données quotidiennes).
+                      const disabledTf =
+                        def.minTimeframe !== undefined && !tfAtLeast(timeframe, def.minTimeframe);
+                      const disabled = disabledSynthetic || disabledTf;
+                      const title = disabledSynthetic
+                        ? "Volume non défini sur une série synthétique"
+                        : disabledTf
+                          ? `Nécessite ≥ ${def.minTimeframe}`
+                          : "Ajouter une instance";
                       return (
                         <button
                           key={def.id}
                           type="button"
-                          title={disabled ? "Volume non défini sur une série synthétique" : "Ajouter une instance"}
+                          title={title}
                           disabled={disabled}
                           onClick={() => {
                             if (!disabled) add(def.id);

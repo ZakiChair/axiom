@@ -29,8 +29,9 @@
  */
 import { registerIndicator, IndicatorSeries } from "klinecharts";
 import type { Chart, IndicatorFigure } from "klinecharts";
-import type { Candle, ExchangeId, IndicatorDef, IndicatorResult } from "@axiom/types";
+import type { Candle, ExchangeId, IndicatorDef, IndicatorResult, Timeframe } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
+import { auxProvider } from "./auxProvider";
 import {
   computeKey,
   formatInstanceLabel,
@@ -160,8 +161,23 @@ export class ChartIndicators {
   private pending: ReturnType<typeof setTimeout> | null = null;
   private latestArgs: [ActiveIndicator[], Candle[], ExchangeId] | null = null;
 
+  /**
+   * Symbole/TF courants du slot (Task 14) — nécessaires à `auxProvider.getAligned`
+   * pour les defs déclarant `aux`. Renseignés par `setMarket`, appelé par
+   * `ChartInstance` à chaque run de l'effet DONNÉES ; indépendants du throttle
+   * (Task 6, signatures de `sync`/`recompute`/`recomputeThrottled` inchangées).
+   */
+  private symbol = "";
+  private timeframe: Timeframe | null = null;
+
   constructor(chart: Chart) {
     this.chart = chart;
+  }
+
+  /** Renseigne le symbole/TF courants (voir `symbol`/`timeframe` ci-dessus). */
+  setMarket(symbol: string, timeframe: Timeframe): void {
+    this.symbol = symbol;
+    this.timeframe = timeframe;
   }
 
   /** Calcul mémoïsé : recalcule seulement si la référence des candles a changé. */
@@ -172,6 +188,69 @@ export class ChartIndicators {
     const result = computeIndicator(def, candles, params);
     this.computeCache.set(key, { candles, result });
     return result;
+  }
+
+  /**
+   * Calcul d'UNE instance, aux-AWARE (Task 14) : si `def.aux` est vide, délègue au
+   * calcul mémoïsé `compute` (inchangé, non aux-aware). Sinon, résout le statut via
+   * `auxProvider.getAligned` (Task 12) — `onReady` re-déclenche UNIQUEMENT le
+   * recalcul de CETTE instance (`onAuxReady`), jamais un re-sync/re-création de
+   * pane. Pas de memoïsation ici (les 6 defs dérivés sont bon marché à recalculer ;
+   * l'objet `aux` renvoyé par `getAligned` est réaligné à CHAQUE appel — le mettre
+   * en clé de cache viderait le cache à chaque passage).
+   *
+   * Renvoie aussi le SUFFIXE de statut à ajouter au libellé du pane — même canal
+   * que le nom normal (`shortName`, cf. `formatInstanceLabel`) : "" (ready/aux
+   * absent), " …" (pending), " (indisponible)" (error).
+   */
+  private computeForInstance(
+    def: IndicatorDef,
+    inst: ActiveIndicator,
+    candles: Candle[],
+    exchange: ExchangeId
+  ): { result: IndicatorResult; suffix: string } {
+    if (!def.aux || def.aux.length === 0) {
+      return { result: this.compute(def, inst.params, candles), suffix: "" };
+    }
+    if (this.timeframe === null) {
+      // `setMarket` pas encore appelé : ne devrait pas arriver en pratique (l'effet
+      // DONNÉES l'appelle avant tout sync/recompute) — dégradation gracieuse.
+      return { result: computeIndicator(def, candles, inst.params), suffix: "" };
+    }
+    const candleTimes = candles.map((c) => c.time);
+    const status = auxProvider.getAligned(
+      { exchange, symbol: this.symbol, timeframe: this.timeframe, ids: def.aux, candleTimes },
+      () => this.onAuxReady(inst.instanceId)
+    );
+    if (status.status === "ready") {
+      return { result: computeIndicator(def, candles, inst.params, status.aux), suffix: "" };
+    }
+    // `pending`/`error` : aux absent -> le def dégrade en séries all-undefined (garde Task 13).
+    const result = computeIndicator(def, candles, inst.params);
+    return { result, suffix: status.status === "pending" ? " …" : " (indisponible)" };
+  }
+
+  /**
+   * Rappel de `auxProvider.getAligned` une fois le fetch aux résolu (ou en échec) :
+   * recalcule et pousse UNIQUEMENT cette instance via `overrideIndicator` — jamais
+   * `createIndicator`/`removeIndicator` (pas de re-création de pane). No-op si
+   * l'instance a été retirée entre-temps, ou si aucun sync/recompute n'a encore eu
+   * lieu (pas d'arguments connus).
+   */
+  private onAuxReady(instanceId: string): void {
+    const args = this.latestArgs;
+    const info = this.active.get(instanceId);
+    if (!info || !args) return;
+    const [instances, candles, exchange] = args;
+    const inst = instances.find((i) => i.instanceId === instanceId);
+    if (!inst) return;
+    const def = getIndicator(inst.defId);
+    if (!def) return;
+    const { result, suffix } = this.computeForInstance(def, inst, candles, exchange);
+    this.chart.overrideIndicator(
+      { name: info.name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result },
+      info.paneId
+    );
   }
 
   /** Restreint le cache aux clés de calcul encore référencées (borne mémoire). */
@@ -187,6 +266,9 @@ export class ChartIndicators {
    * et laisse intactes celles inchangées (aucun recalcul superflu).
    */
   sync(instances: ActiveIndicator[], candles: Candle[], exchange: ExchangeId): void {
+    // Dernier tuple connu (Task 14) : lu par `onAuxReady` pour retrouver l'instance,
+    // les candles et l'exchange lors d'une résolution aux asynchrone.
+    this.latestArgs = [instances, candles, exchange];
     const effectiveInstances = exchange === "synthetic"
       ? instances.filter((i) => i.defId !== "volume")
       : instances;
@@ -236,9 +318,9 @@ export class ChartIndicators {
       if (existing) {
         if (existing.key === key) continue; // params inchangés : rien à faire.
         // Édition des params (instanceId stable) : recalcul + override + libellé.
-        const result = this.compute(def, inst.params, candles);
+        const { result, suffix } = this.computeForInstance(def, inst, candles, exchange);
         this.chart.overrideIndicator(
-          { name, shortName: formatInstanceLabel(def, inst.params), extendData: result },
+          { name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result },
           existing.paneId
         );
         existing.key = key;
@@ -247,10 +329,10 @@ export class ChartIndicators {
 
       // Nouvelle instance.
       ensureRegistered(def, name);
-      const result = this.compute(def, inst.params, candles);
+      const { result, suffix } = this.computeForInstance(def, inst, candles, exchange);
       const paneId = def.pane === "overlay" ? CANDLE_PANE_ID : axiomPaneId(inst.instanceId);
       const created = this.chart.createIndicator(
-        { name, shortName: formatInstanceLabel(def, inst.params), extendData: result },
+        { name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result },
         true, // isStack : coexistence des overlays sur le pane prix.
         { id: paneId, dragEnabled: true, minHeight: 60 }
       );
@@ -267,6 +349,8 @@ export class ChartIndicators {
    * (defId, params), même si plusieurs instances les partagent.
    */
   recompute(instances: ActiveIndicator[], candles: Candle[], exchange: ExchangeId): void {
+    // Dernier tuple connu (Task 14) : lu par `onAuxReady`, cf. `sync`.
+    this.latestArgs = [instances, candles, exchange];
     const effectiveInstances = exchange === "synthetic"
       ? instances.filter((i) => i.defId !== "volume")
       : instances;
@@ -275,8 +359,14 @@ export class ChartIndicators {
       if (!info) continue;
       const def = getIndicator(inst.defId);
       if (!def) continue;
-      const result = this.compute(def, inst.params, candles);
-      this.chart.overrideIndicator({ name: info.name, extendData: result }, info.paneId);
+      const { result, suffix } = this.computeForInstance(def, inst, candles, exchange);
+      // Le libellé (shortName) n'est renvoyé que pour les defs aux-aware : leur suffixe
+      // d'état peut changer sans édition de params (résolution async) ; les autres defs
+      // gardent leur libellé déjà posé par `sync` (aucun changement de comportement).
+      const override = def.aux && def.aux.length > 0
+        ? { name: info.name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result }
+        : { name: info.name, extendData: result };
+      this.chart.overrideIndicator(override, info.paneId);
     }
   }
 

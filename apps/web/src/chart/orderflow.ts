@@ -31,6 +31,8 @@ import { adaptateurReplayActif } from "../data/replayFeed";
 import type { MarketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
 import { detectImbalances, detectDeltaDivergences, type DivergenceFlag } from "./footprintAnalytics";
+import { subscribePerpAggTrades } from "../data/binanceFutures";
+import { detectCvdDivergences, type CvdBucket, type CvdDivergence } from "./cvdSpotPerp";
 
 /** Pane prix (id par défaut de KLineChart, vérifié dans le bundle v9.8.x). */
 const CANDLE_PANE_ID = "candle_pane";
@@ -38,6 +40,14 @@ const CANDLE_PANE_ID = "candle_pane";
 const CVD_PANE_ID = "axiom_orderflow_cvd";
 /** Nom KLineChart de l'indicateur CVD. */
 const CVD_NAME = "AXIOM_CVD";
+/** Id du sous-pane CVD spot vs perp (Task 17). */
+const CVD_SP_PANE_ID = "axiom_orderflow_cvd_sp";
+/** Nom KLineChart de l'indicateur CVD spot vs perp. */
+const CVD_SP_NAME = "AXIOM_CVD_SP";
+/** Lookback (bougies) du détecteur de divergences CVD spot/perp (cf. brief Task 16). */
+const CVD_SP_LOOKBACK = 14;
+/** Borne mémoire du buffer de deltas perp par bougie (miroir du footprint). */
+const MAX_PERP_CANDLES = 500;
 /** Nombre maximum de bougies conservées dans le buffer footprint (borne mémoire). */
 const MAX_FOOTPRINT_CANDLES = 120;
 /** Nombre max de colonnes footprint dessinées (perf / lisibilité). */
@@ -95,6 +105,48 @@ export function computeCvd(candles: Candle[]): number[] {
     out[i] = acc;
   }
   return out;
+}
+
+/**
+ * Construit la série de buckets CVD spot vs perp (Task 17), RE-BASÉE à 0 sur la
+ * première bougie ayant reçu de l'activité perp (origine commune). Le CVD spot est
+ * dérivé des agrégats de bougie (`buyVolume`/`sellVolume`, complet & historique) ;
+ * le CVD perp est le cumul des deltas WS accumulés par bougie (post-souscription).
+ *
+ * Re-baser les DEUX séries à 0 au même point rend les courbes comparables à
+ * l'écran (le perp ne démarre qu'à la souscription, le spot est illimité). Le
+ * détecteur (`detectCvdDivergences`) ne travaille que sur des DIFFÉRENCES sur
+ * `lookback`, donc l'offset de base n'affecte jamais la détection — c'est un choix
+ * de RENDU. PURE : aucune dépendance KLineChart.
+ */
+export function buildCvdSpotPerpBuckets(
+  candles: Candle[],
+  perpDeltaByTime: Map<number, number>
+): CvdBucket[] {
+  // Origine = première bougie avec un delta perp connu.
+  let startIdx = -1;
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    if (c !== undefined && perpDeltaByTime.has(c.time)) {
+      startIdx = i;
+      break;
+    }
+  }
+  if (startIdx < 0) return [];
+
+  const buckets: CvdBucket[] = [];
+  let spot = 0;
+  let perp = 0;
+  for (let i = startIdx; i < candles.length; i++) {
+    const c = candles[i];
+    if (c === undefined) continue;
+    const buy = c.buyVolume ?? 0;
+    const sell = c.sellVolume ?? c.volume - buy;
+    spot += buy - sell;
+    perp += perpDeltaByTime.get(c.time) ?? 0;
+    buckets.push({ time: c.time, spot, perp });
+  }
+  return buckets;
 }
 
 /**
@@ -213,6 +265,89 @@ function ensureCvdRegistered(): void {
 }
 
 // ----------------------------------------------------------------------------
+// Enregistrement (idempotent) de l'indicateur CVD spot vs perp (Task 17)
+// ----------------------------------------------------------------------------
+
+/** Point CVD S/P côté KLineChart : deux courbes (spot, perp) par bougie. */
+interface CvdSpPoint {
+  spot?: number;
+  perp?: number;
+}
+
+/** Données injectées dans l'indicateur (indexées par timestamp de bougie). */
+interface CvdSpExtend {
+  spotByTime: Record<number, number>;
+  perpByTime: Record<number, number>;
+  divByTime: Record<number, CvdDivergence["kind"]>;
+}
+
+let cvdSpRegistered = false;
+
+function ensureCvdSpRegistered(): void {
+  if (cvdSpRegistered) return;
+  registerIndicator<CvdSpPoint>({
+    name: CVD_SP_NAME,
+    shortName: "CVD S/P",
+    series: IndicatorSeries.Normal,
+    // spot = token --up (vert), perp = token --accent (jaune). Lus au rendu → thème-aware.
+    figures: [
+      { key: "spot", title: "Spot: ", type: "line", styles: () => ({ color: readToken("--up") || "#10b981" }) },
+      { key: "perp", title: "Perp: ", type: "line", styles: () => ({ color: readToken("--accent") || "#f5c518" }) },
+    ],
+    // calc PUR de mapping : lit les séries pré-calculées (extendData) par timestamp.
+    calc: (dataList, indicator) => {
+      const ext = indicator.extendData as CvdSpExtend | undefined;
+      return dataList.map((kd) => {
+        const point: CvdSpPoint = {};
+        const s = ext?.spotByTime?.[kd.timestamp];
+        const p = ext?.perpByTime?.[kd.timestamp];
+        if (typeof s === "number" && Number.isFinite(s)) point.spot = s;
+        if (typeof p === "number" && Number.isFinite(p)) point.perp = p;
+        return point;
+      });
+    },
+    // Triangles de divergence au sommet du pane (même style que les divergences
+    // delta du footprint : 6 px, --up bas / --down haut). Rendu AVANT les courbes
+    // (retourne false → KLineChart dessine ensuite les lignes par-dessus).
+    draw: ({ ctx, kLineDataList, visibleRange, bounding, xAxis, indicator }) => {
+      const ext = indicator.extendData as CvdSpExtend | undefined;
+      const divByTime = ext?.divByTime;
+      if (!divByTime) return false;
+      const up = readToken("--up") || "#10b981";
+      const down = readToken("--down") || "#ef4444";
+      const size = 6;
+      const yTop = bounding.top + 2;
+      for (let i = visibleRange.from; i < visibleRange.to; i++) {
+        const kd = kLineDataList[i];
+        if (kd === undefined) continue;
+        const kind = divByTime[kd.timestamp];
+        if (kind === undefined) continue;
+        const x = xAxis.convertToPixel(i);
+        if (!Number.isFinite(x)) continue;
+        ctx.beginPath();
+        if (kind === "spotUp_perpDown") {
+          // Spot achète, perp vend : triangle vers le bas (biais achat spot).
+          ctx.moveTo(x, yTop + size);
+          ctx.lineTo(x - size, yTop);
+          ctx.lineTo(x + size, yTop);
+          ctx.fillStyle = up;
+        } else {
+          // Spot vend, perp achète : triangle vers le haut.
+          ctx.moveTo(x, yTop);
+          ctx.lineTo(x - size, yTop + size);
+          ctx.lineTo(x + size, yTop + size);
+          ctx.fillStyle = down;
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
+      return false;
+    },
+  });
+  cvdSpRegistered = true;
+}
+
+// ----------------------------------------------------------------------------
 // Contrôleur orderflow (lié à UNE instance Chart + un canvas overlay)
 // ----------------------------------------------------------------------------
 
@@ -251,6 +386,18 @@ export class OrderflowController {
   /** Buffer borné : open time de bougie -> niveaux de prix (footprint). */
   private readonly footprints = new Map<number, Map<number, FpCell>>();
 
+  // --- CVD spot vs perp (Task 17) : sous-feature auto-gérée du contrôleur ---
+  /** Id du sous-pane CVD S/P (null tant qu'inactif). */
+  private spCvdPaneId: string | null = null;
+  /** Désabonnement du flux WS perp (fstream) — null tant qu'inactif. */
+  private unsubPerp: Unsubscribe | null = null;
+  /** Abonnement au store orderflow pour réagir au toggle `cvdSpotPerp`. */
+  private unsubOrderflowStore: (() => void) | null = null;
+  /** Le sous-pane CVD S/P est-il actif (toggle + binance + hors replay) ? */
+  private spRunning = false;
+  /** Delta perp PAR bougie (open time -> somme buy−sell), depuis la souscription. */
+  private readonly perpDelta = new Map<number, number>();
+
   constructor(
     chart: Chart,
     container: HTMLElement,
@@ -283,6 +430,11 @@ export class OrderflowController {
     ensureCvdRegistered();
     this.createCvdPane();
     this.subscribeActions();
+    // CVD spot vs perp (Task 17) : sous-feature pilotée par son propre toggle. Le
+    // contrôleur s'abonne lui-même (comme DerivativesChartController) → aucun câblage
+    // supplémentaire dans ChartInstance. Init immédiate si le toggle est déjà actif.
+    this.unsubOrderflowStore = orderflowStore.subscribe(() => this.syncCvdSpotPerp());
+    this.syncCvdSpotPerp();
     // Redimensionnement du conteneur (resize fenêtre, toggle sidebar…) : aucun
     // scroll/zoom/trade ne le signale autrement, d'où l'observer dédié.
     this.resizeObserver = new ResizeObserver(this.markDirty);
@@ -305,6 +457,12 @@ export class OrderflowController {
       this.unsubTrades();
       this.unsubTrades = null;
     }
+    // CVD spot vs perp : désabonne le store PUIS démonte le sous-pane + le flux WS perp.
+    if (this.unsubOrderflowStore) {
+      this.unsubOrderflowStore();
+      this.unsubOrderflowStore = null;
+    }
+    this.teardownCvdSpotPerp();
     this.removeCvdPane();
     this.footprints.clear();
     this.clearCanvas();
@@ -324,12 +482,16 @@ export class OrderflowController {
     if (this.running) {
       this.refreshCvd();
       this.ensureTrades();
+      if (this.spRunning) this.refreshCvdSpotPerp();
     }
   }
 
   /** Tick kline : rafraîchit le CVD (fréquence kline basse, ~1/s). */
   onTick(): void {
-    if (this.running) this.refreshCvd();
+    if (this.running) {
+      this.refreshCvd();
+      if (this.spRunning) this.refreshCvdSpotPerp();
+    }
   }
 
   /** Change le type d'échelle de l'axe prix (redessine le footprint à la bonne échelle). */
@@ -365,6 +527,106 @@ export class OrderflowController {
       { name: CVD_NAME, extendData: { cvd } },
       this.cvdPaneId
     );
+  }
+
+  // --- CVD spot vs perp (sous-pane « CVD S/P » + triangles de divergence) --
+
+  /** Souhaité ssi : toggle activé ET source binance (flux perp Binance-only) ET hors replay
+   *  (pas de flux perp historique — on n'affiche pas de live perp sur des bougies rejouées). */
+  private wantCvdSpotPerp(): boolean {
+    return (
+      orderflowStore.getState().cvdSpotPerp &&
+      this.store.getState().exchange === "binance" &&
+      adaptateurReplayActif() === null
+    );
+  }
+
+  /** Réconcilie l'état du sous-pane avec le toggle (appelé au start + à chaque changement de store). */
+  private syncCvdSpotPerp(): void {
+    if (!this.running) return;
+    const want = this.wantCvdSpotPerp();
+    if (want && !this.spRunning) this.startCvdSpotPerp();
+    else if (!want && this.spRunning) this.teardownCvdSpotPerp();
+  }
+
+  private startCvdSpotPerp(): void {
+    this.spRunning = true;
+    ensureCvdSpRegistered();
+    // Flux WS aggTrade du perpétuel (fstream, Binance-only) → accumulation par bougie.
+    this.unsubPerp = subscribePerpAggTrades(this.symbol, (t) => this.onPerpTrade(t));
+    this.refreshCvdSpotPerp();
+  }
+
+  /** Démonte le sous-pane CVD S/P : ferme le flux WS perp, retire le pane, vide le buffer. */
+  private teardownCvdSpotPerp(): void {
+    this.spRunning = false;
+    if (this.unsubPerp) {
+      this.unsubPerp();
+      this.unsubPerp = null;
+    }
+    if (this.spCvdPaneId) {
+      this.chart.removeIndicator(this.spCvdPaneId, CVD_SP_NAME);
+      this.spCvdPaneId = null;
+    }
+    this.perpDelta.clear();
+  }
+
+  /** Accumulation O(1) d'un trade perp dans la bougie correspondante (delta signé). */
+  private onPerpTrade(t: Trade): void {
+    const candles = this.store.getState().candles;
+    const last = candles[candles.length - 1];
+    if (last === undefined) return; // pas encore de bougie : on ignore (avant backfill)
+
+    // Bougie cible = dernière bougie dont l'open time <= temps du trade (miroir onTrade).
+    let candleTime = last.time;
+    if (t.time < last.time) {
+      for (let i = candles.length - 1; i >= 0; i--) {
+        const c = candles[i];
+        if (c !== undefined && c.time <= t.time) {
+          candleTime = c.time;
+          break;
+        }
+      }
+    }
+
+    const signed = t.side === "buy" ? t.qty : -t.qty;
+    const prev = this.perpDelta.get(candleTime);
+    if (prev === undefined) {
+      this.perpDelta.set(candleTime, signed);
+      // Borne mémoire : évince la plus ancienne bougie (Map = ordre d'insertion).
+      if (this.perpDelta.size > MAX_PERP_CANDLES) {
+        const oldest = this.perpDelta.keys().next().value;
+        if (oldest !== undefined) this.perpDelta.delete(oldest);
+      }
+    } else {
+      this.perpDelta.set(candleTime, prev + signed);
+    }
+  }
+
+  /** Reconstruit les buckets (re-basés), détecte les divergences, pousse dans l'indicateur. */
+  private refreshCvdSpotPerp(): void {
+    if (!this.spRunning) return;
+    const candles = this.store.getState().candles;
+    const buckets = buildCvdSpotPerpBuckets(candles, this.perpDelta);
+    const spotByTime: Record<number, number> = {};
+    const perpByTime: Record<number, number> = {};
+    for (const b of buckets) {
+      spotByTime[b.time] = b.spot;
+      perpByTime[b.time] = b.perp;
+    }
+    const divByTime: Record<number, CvdDivergence["kind"]> = {};
+    for (const d of detectCvdDivergences(buckets, CVD_SP_LOOKBACK)) {
+      divByTime[d.time] = d.kind;
+    }
+    const extendData: CvdSpExtend = { spotByTime, perpByTime, divByTime };
+    if (this.spCvdPaneId) {
+      this.chart.overrideIndicator({ name: CVD_SP_NAME, extendData }, this.spCvdPaneId);
+    } else {
+      this.spCvdPaneId =
+        this.chart.createIndicator({ name: CVD_SP_NAME, extendData }, true, {
+          id: CVD_SP_PANE_ID,
+        }) ?? null;
+    }
   }
 
   // --- Footprint : flux de trades + accumulation -------------------------

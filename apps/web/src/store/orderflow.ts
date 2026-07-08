@@ -31,6 +31,10 @@ export interface OrderflowState {
   setShowBarVa: (v: boolean) => void;
   showDivergences: boolean;
   setShowDivergences: (v: boolean) => void;
+
+  /** Sous-pane « CVD S/P » (spot vs perp) — Binance only, slot focus (Task 17). */
+  cvdSpotPerp: boolean;
+  setCvdSpotPerp: (v: boolean) => void;
 }
 
 export const orderflowStore = createStore<OrderflowState>((set, get) => ({
@@ -52,4 +56,7 @@ export const orderflowStore = createStore<OrderflowState>((set, get) => ({
   setShowBarVa: (v) => set({ showBarVa: v }),
   showDivergences: true,
   setShowDivergences: (v) => set({ showDivergences: v }),
+
+  cvdSpotPerp: false,
+  setCvdSpotPerp: (v) => set({ cvdSpotPerp: v }),
 }));

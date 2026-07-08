@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { orderflowStore, type OrderflowState } from "../store/orderflow";
+import { marketStore } from "../store/market";
 
 interface FieldProps {
   label: string;
@@ -28,6 +29,10 @@ export function FootprintSettingsPanel({ onClose }: { onClose: () => void }) {
   const showBarPoc = useStore(orderflowStore, (s) => s.showBarPoc);
   const showBarVa = useStore(orderflowStore, (s) => s.showBarVa);
   const showDivergences = useStore(orderflowStore, (s) => s.showDivergences);
+  const cvdSpotPerp = useStore(orderflowStore, (s) => s.cvdSpotPerp);
+  // Flux perp Binance-only : le toggle CVD S/P est grisé sur toute autre source.
+  const exchange = useStore(marketStore, (s) => s.exchange);
+  const isBinance = exchange === "binance";
 
   const setShowImbalances = useStore(orderflowStore, (s) => s.setShowImbalances);
   const setRatioPct = useStore(orderflowStore, (s) => s.setImbalanceRatioPct);
@@ -35,6 +40,7 @@ export function FootprintSettingsPanel({ onClose }: { onClose: () => void }) {
   const setShowBarPoc = useStore(orderflowStore, (s) => s.setShowBarPoc);
   const setShowBarVa = useStore(orderflowStore, (s) => s.setShowBarVa);
   const setShowDivergences = useStore(orderflowStore, (s) => s.setShowDivergences);
+  const setCvdSpotPerp = useStore(orderflowStore, (s) => s.setCvdSpotPerp);
 
   const [draftRatio, setDraftRatio] = useState(String(ratioPct));
   const [draftMinVol, setDraftMinVol] = useState(String(minVol));
@@ -139,6 +145,23 @@ export function FootprintSettingsPanel({ onClose }: { onClose: () => void }) {
             className="h-3 w-3 accent-[var(--accent)]"
           />
         </Field>
+
+        {/* CVD spot vs perp (Task 17) : sous-pane dédié, slot focus, Binance only. */}
+        <label
+          className={`mt-2 flex items-center gap-2 text-[11px] ${
+            isBinance ? "text-text-dim" : "cursor-not-allowed text-text-dim/50"
+          }`}
+          title={isBinance ? undefined : "Flux perp disponible uniquement sur Binance"}
+        >
+          <input
+            type="checkbox"
+            checked={cvdSpotPerp && isBinance}
+            disabled={!isBinance}
+            onChange={(e) => setCvdSpotPerp(e.target.checked)}
+            className="h-3 w-3 accent-[var(--accent)] disabled:opacity-50"
+          />
+          <span>CVD spot vs perp</span>
+        </label>
       </div>
     </>
   );

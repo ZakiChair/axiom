@@ -1,7 +1,7 @@
 /**
  * Gestionnaire de fenêtres flottantes AXIOM (« Launchpad ») — Zustand VANILLA, hors
  * render-loop React. Source de vérité UNIQUE de la géométrie/état (position, taille,
- * z-order, minimize, groupe de couleur) des 16 fenêtres Bloomberg non modales.
+ * z-order, minimize, groupe de couleur) des 19 fenêtres Bloomberg non modales.
  *
  * Chaque fenêtre garde son propre store métier (`*UiStore`, ex. `derivativesUiStore`)
  * pour sa logique interne ; ces stores DÉLÈGUENT `open`/`close`/`toggle` ici via
@@ -22,7 +22,7 @@ import { COMPARE_PALETTE } from "./compare";
  * existante (déjà choisie pour être lisible sur les 5 thèmes du terminal). */
 export const GROUP_PALETTE: readonly string[] = COMPARE_PALETTE;
 
-/** Registre statique des 16 fenêtres Bloomberg : titre/mnémonique/taille par défaut
+/** Registre statique des 19 fenêtres Bloomberg : titre/mnémonique/taille par défaut
  * (largeur = ancienne largeur fixe du dock, hauteur = valeur raisonnable par défaut,
  * l'utilisateur redimensionne ensuite librement). Utilisé par `App.tsx` (montage),
  * `TaskbarMinimized.tsx` (libellé des pastilles) et `openWindow` (taille initiale). */
@@ -51,6 +51,7 @@ export const WINDOW_REGISTRY: readonly {
   { id: "cot", title: "Rapport COT (CFTC)", mnemonic: "COT", defaultWidth: 520, defaultHeight: 680 },
   { id: "seasonality", title: "Saisonnalité", mnemonic: "SEAG", defaultWidth: 760, defaultHeight: 560 },
   { id: "vol", title: "Volatilité (cône RV, VRP)", mnemonic: "VOL", defaultWidth: 760, defaultHeight: 560 },
+  { id: "fund", title: "Fiche société (FUND)", mnemonic: "FUND", defaultWidth: 480, defaultHeight: 640 },
 ] as const;
 
 /** Espace minimal toujours visible d'une fenêtre (pixels), pour le drag comme le resize. */

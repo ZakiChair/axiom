@@ -209,7 +209,7 @@ const EXTAPI_USER_AGENT =
  * passer le contrôle d'accès équitable de SEC. Un `fetch()` navigateur ne peut de toute
  * façon PAS surcharger `User-Agent` (en-tête interdit côté client) — ce proxy est le SEUL
  * endroit où l'injecter. */
-const EXTAPI_USER_AGENT_SEC = "AxiomTerminal/1.0 (contact: axiom-terminal@example.com — a remplacer par un contact reel si besoin)";
+const EXTAPI_USER_AGENT_SEC = "AxiomTerminal/1.0 (contact: axiom-terminal@example.com)";
 const EXTAPI_USER_AGENT_HOTES: ReadonlyMap<string, string> = new Map([
   ["data.sec.gov", EXTAPI_USER_AGENT_SEC],
   ["www.sec.gov", EXTAPI_USER_AGENT_SEC],

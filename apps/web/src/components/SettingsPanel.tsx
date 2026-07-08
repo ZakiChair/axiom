@@ -21,6 +21,7 @@ import { coinalyzeKeyStore } from "../store/coinalyze";
 import { fredKeyStore } from "../store/macro";
 import { bgeometricsKeyStore } from "../store/onchain";
 import { soSoValueKeyStore } from "../store/sosovalue";
+import { finnhubKeyStore } from "../store/finnhub";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
 /** Pastille d'état de configuration d'une clé. */
@@ -195,6 +196,10 @@ export function SettingsPanel() {
   const soSoSetKey = useStore(soSoValueKeyStore, (s) => s.setKey);
   const soSoClearKey = useStore(soSoValueKeyStore, (s) => s.clearKey);
 
+  const finnhubHasKey = useStore(finnhubKeyStore, (s) => s.hasKey);
+  const finnhubSetKey = useStore(finnhubKeyStore, (s) => s.setKey);
+  const finnhubClearKey = useStore(finnhubKeyStore, (s) => s.clearKey);
+
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Échap ferme — écouteur actif UNIQUEMENT quand le panneau est ouvert.
@@ -303,6 +308,17 @@ export function SettingsPanel() {
               hasKey={soSoHasKey}
               onSave={soSoSetKey}
               onClear={soSoClearKey}
+            />
+            <ApiKeyField
+              name="Finnhub"
+              purpose="Fondamentaux, earnings (FUND) et actualités générales (NEWS)."
+              domain="finnhub.io"
+              signupUrl="https://finnhub.io/register"
+              signupLabel="Obtenir une clé gratuite"
+              placeholder="Clé API Finnhub"
+              hasKey={finnhubHasKey}
+              onSave={finnhubSetKey}
+              onClear={finnhubClearKey}
             />
           </div>
 

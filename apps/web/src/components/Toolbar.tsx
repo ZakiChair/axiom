@@ -29,6 +29,7 @@ import { macroRatesUiStore } from "./MacroRatesWindow";
 import { cotUiStore } from "./CotWindow";
 import { seasonalityUiStore } from "./SeasonalityWindow";
 import { volUiStore } from "./VolWindow";
+import { fundUiStore } from "./FundWindow";
 import { FootprintSettingsPanel } from "./FootprintSettingsPanel";
 import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
@@ -160,6 +161,7 @@ const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] =
   { mnemonique: "COT", libelle: "Rapport COT (CFTC)", ouvrir: () => cotUiStore.getState().openCot() },
   { mnemonique: "SEAG", libelle: "Saisonnalité", ouvrir: () => seasonalityUiStore.getState().openSeasonality() },
   { mnemonique: "VOL", libelle: "Volatilité (cône RV, VRP)", ouvrir: () => volUiStore.getState().openVol() },
+  { mnemonique: "FUND", libelle: "Fiche société (FUND)", ouvrir: () => fundUiStore.getState().openFund() },
 ];
 
 /**

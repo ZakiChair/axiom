@@ -53,7 +53,7 @@ const EXTAPI_USER_AGENT =
 // token de contact (@). Le UA DOIT inclure un identifiant de contact (ex: email) pour
 // passer le contrôle d'accès équitable de SEC. COPIE VERBATIM de apps/daemon/src/proxy.ts
 // (interdiction d'import cross-package apps/daemon → apps/web ; source de vérité = ce commentaire).
-const EXTAPI_USER_AGENT_SEC = "AxiomTerminal/1.0 (contact: axiom-terminal@example.com — a remplacer par un contact reel si besoin)";
+const EXTAPI_USER_AGENT_SEC = "AxiomTerminal/1.0 (contact: axiom-terminal@example.com)";
 const EXTAPI_USER_AGENT_HOTES: Record<string, string> = {
   "data.sec.gov": EXTAPI_USER_AGENT_SEC,
   "www.sec.gov": EXTAPI_USER_AGENT_SEC,

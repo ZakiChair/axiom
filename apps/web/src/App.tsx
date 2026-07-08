@@ -43,6 +43,7 @@ import { MacroRatesWindow, commandes as macroRatesCommands } from "./components/
 import { CotWindow, commandes as cotCommands } from "./components/CotWindow";
 import { SeasonalityWindow, commandes as seasonalityCommands } from "./components/SeasonalityWindow";
 import { VolWindow, commandes as volCommands } from "./components/VolWindow";
+import { FundWindow, commandes as fundCommands } from "./components/FundWindow";
 import { settingsUiStore } from "./store/settings-ui";
 import { ecoCommands } from "./store/eco";
 import { commandes as newsCommands } from "./store/news";
@@ -124,6 +125,8 @@ enregistrerCommandes([
   // Fenêtres Saisonnalité et Volatilité (Lot C1 analytics).
   ...seasonalityCommands,
   ...volCommands,
+  // Fenêtre FUND (Lot E1 — fiche société tradfi, SEC EDGAR + Finnhub).
+  ...fundCommands,
 ]);
 
 // ─────────────────────────── Table composant↔id des fenêtres flottantes ───────────────────────────
@@ -151,6 +154,7 @@ const WINDOW_COMPONENTS: Record<string, () => JSX.Element> = {
   cot: CotWindow,
   seasonality: SeasonalityWindow,
   vol: VolWindow,
+  fund: FundWindow,
 };
 
 export function App() {
@@ -242,7 +246,7 @@ export function App() {
         </div>
       )}
 
-      {/* Les 15 fenêtres Bloomberg non modales, montées génériquement sous <FloatingWindow>
+      {/* Les 19 fenêtres Bloomberg non modales, montées génériquement sous <FloatingWindow>
           via WINDOW_REGISTRY (géométrie/z-order/minimize gérés par windowManagerStore). */}
       {WINDOW_REGISTRY.map((entry) => {
         const Contenu = WINDOW_COMPONENTS[entry.id];

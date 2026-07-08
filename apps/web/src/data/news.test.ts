@@ -216,6 +216,18 @@ describe("parseFinnhubNews", () => {
     expect(parseFinnhubNews(null)).toEqual([]);
     expect(parseFinnhubNews({})).toEqual([]);
   });
+  it("ignore un élément malformé sans perdre les valides", () => {
+    const json = [
+      { id: 1, headline: "Fed holds rates", url: "https://x.test/1", datetime: 1751970000 },
+      null,
+      "chaine-invalide",
+      42,
+      { id: 2, headline: "ETF flows surge", url: "https://x.test/2", datetime: 1751970100 },
+    ];
+    const items = parseFinnhubNews(json);
+    expect(items).toHaveLength(2);
+    expect(items.map((i) => i.title)).toEqual(["Fed holds rates", "ETF flows surge"]);
+  });
 });
 
 describe("parseGdeltNews", () => {
@@ -227,5 +239,24 @@ describe("parseGdeltNews", () => {
   });
   it("tableau vide sur forme inconnue", () => {
     expect(parseGdeltNews(null)).toEqual([]);
+  });
+  it("convertit un seendate ISO 8601 compact en ms epoch", () => {
+    const json = { articles: [{ title: "Bitcoin rallies", url: "https://x.test/2", seendate: "20260707T120000Z" }] };
+    const items = parseGdeltNews(json);
+    expect(items[0]!.time).toBe(Date.parse("2026-07-07T12:00:00Z"));
+  });
+  it("ignore un élément malformé sans perdre les valides", () => {
+    const json = {
+      articles: [
+        { title: "Bitcoin rallies", url: "https://x.test/2", seendate: "20260707T120000Z" },
+        null,
+        "chaine-invalide",
+        42,
+        { title: "Ethereum upgrade", url: "https://x.test/3", seendate: "20260708T080000Z" },
+      ],
+    };
+    const items = parseGdeltNews(json);
+    expect(items).toHaveLength(2);
+    expect(items.map((i) => i.title)).toEqual(["Bitcoin rallies", "Ethereum upgrade"]);
   });
 });

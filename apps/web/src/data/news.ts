@@ -235,6 +235,7 @@ export function parseFinnhubNews(json: unknown): NewsItem[] {
   if (!Array.isArray(json)) return [];
   const out: NewsItem[] = [];
   for (const brut of json) {
+    if (brut === null || typeof brut !== "object") continue; // élément non exploitable, on l'ignore
     const it = brut as { headline?: unknown; url?: unknown; datetime?: unknown; summary?: unknown; id?: unknown };
     if (typeof it.headline !== "string" || it.headline.length === 0) continue;
     const time = typeof it.datetime === "number" ? it.datetime * 1000 : 0;
@@ -271,6 +272,7 @@ export function parseGdeltNews(json: unknown): NewsItem[] {
   if (!Array.isArray(articles)) return [];
   const out: NewsItem[] = [];
   for (const brut of articles) {
+    if (brut === null || typeof brut !== "object") continue; // élément non exploitable, on l'ignore
     const it = brut as { title?: unknown; url?: unknown; seendate?: unknown };
     if (typeof it.title !== "string" || it.title.length === 0) continue;
     const link = typeof it.url === "string" ? it.url : "";

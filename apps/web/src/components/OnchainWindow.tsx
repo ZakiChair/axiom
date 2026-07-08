@@ -7,7 +7,8 @@
  * proprement (cache périmé étiqueté, jamais d'erreur console en boucle).
  *
  * Sources : Coin Metrics community (sans clé), BGeometrics/bitcoin-data.com (clé optionnelle),
- * mempool.space (direct). ETF : DefiLlama gratuit fermé → section « indisponible ».
+ * mempool.space (direct), SoSoValue/openapi.sosovalue.com (ETF spot BTC/ETH/SOL, clé
+ * OBLIGATOIRE — section « indisponible » sans clé configurée).
  *
  * Règle d'or (doc 02) : chaque widget porte une étiquette de fiabilité honnête
  * (« daily », « live », « estimation », « indisponible »).
@@ -15,6 +16,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { onchainUiStore, getBgeometricsKey, bgeometricsKeyStore } from "../store/onchain";
+import { getSoSoValueKey, soSoValueKeyStore } from "../store/sosovalue";
 import { settingsUiStore } from "../store/settings-ui";
 import {
   fetchCoinMetrics,
@@ -28,7 +30,9 @@ import {
   type MempoolReseau,
   type ResultatFrais,
 } from "../data/onchain/mempool";
-import { fetchEtfFlows, type EtfResultat } from "../data/onchain/etf";
+import { fetchEtfFlows, type ActifEtf, type EtfResultat } from "../data/onchain/etf";
+
+const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
 
 // ─────────────────────────── Formatage ───────────────────────────
 
@@ -215,18 +219,20 @@ interface EtatDonnees {
   bg: Record<string, BgResultat | null>;
   mp: ResultatFrais<MempoolReseau> | null;
   hr: ResultatFrais<SerieMetrique> | null;
-  etf: EtfResultat | null;
+  etf: Record<ActifEtf, EtfResultat | null>;
 }
 
-const VIDE: EtatDonnees = { cm: null, bg: {}, mp: null, hr: null, etf: null };
+const VIDE: EtatDonnees = { cm: null, bg: {}, mp: null, hr: null, etf: { btc: null, eth: null, sol: null } };
 
 export function OnchainWindow() {
   const open = useStore(onchainUiStore, (s) => s.open);
   const bgHasKey = useStore(bgeometricsKeyStore, (s) => s.hasKey);
+  const soSoHasKey = useStore(soSoValueKeyStore, (s) => s.hasKey);
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
 
   const [donnees, setDonnees] = useState<EtatDonnees>(VIDE);
   const [loading, setLoading] = useState(false);
+  const [actifEtf, setActifEtf] = useState<ActifEtf>("btc");
 
   useEffect(() => {
     if (!open) {
@@ -239,15 +245,18 @@ export function OnchainWindow() {
 
     const charger = async () => {
       setLoading(true);
-      const [cm, bg, mp, hr, etf] = await Promise.all([
+      const cleSoSo = getSoSoValueKey();
+      const [cm, bg, mp, hr, btcEtf, ethEtf, solEtf] = await Promise.all([
         fetchCoinMetrics("btc", ctrl.signal),
         fetchBgeometrics(getBgeometricsKey(), ctrl.signal),
         fetchMempoolReseau(ctrl.signal),
         fetchHashrate(ctrl.signal),
-        fetchEtfFlows(ctrl.signal),
+        fetchEtfFlows("btc", cleSoSo, ctrl.signal),
+        fetchEtfFlows("eth", cleSoSo, ctrl.signal),
+        fetchEtfFlows("sol", cleSoSo, ctrl.signal),
       ]);
       if (ignore) return;
-      setDonnees({ cm, bg, mp, hr, etf });
+      setDonnees({ cm, bg, mp, hr, etf: { btc: btcEtf, eth: ethEtf, sol: solEtf } });
       setLoading(false);
     };
 
@@ -256,8 +265,8 @@ export function OnchainWindow() {
       ignore = true;
       ctrl.abort();
     };
-    // bgHasKey en dépendance : re-fetch BGeometrics quand une clé est saisie/retirée.
-  }, [open, bgHasKey]);
+    // bgHasKey/soSoHasKey en dépendance : re-fetch quand une clé est saisie/retirée.
+  }, [open, bgHasKey, soSoHasKey]);
 
   const cm = donnees.cm;
   const adr = cm?.series["AdrActCnt"];
@@ -270,7 +279,7 @@ export function OnchainWindow() {
   const mp = donnees.mp?.donnee;
   const halving = mp?.halving;
   const hr = donnees.hr?.donnee;
-  const etf = donnees.etf;
+  const etf = donnees.etf[actifEtf];
 
   return (
     <>
@@ -420,9 +429,35 @@ export function OnchainWindow() {
 
         {/* ─────────── ETF ─────────── */}
         <section>
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
-            Flux ETF spot BTC
-          </h3>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+              Flux ETF spot
+            </h3>
+            {!soSoHasKey && (
+              <button
+                type="button"
+                onClick={openSettings}
+                className="text-[10px] text-accent hover:underline"
+                title="Clé gratuite sur sosovalue.com/developer — obligatoire (plan Demo)"
+              >
+                clé SoSoValue ⚙
+              </button>
+            )}
+          </div>
+          <div className="mb-2 flex gap-1">
+            {ACTIFS_ETF.map((a) => (
+              <button
+                key={a}
+                type="button"
+                onClick={() => setActifEtf(a)}
+                className={`rounded px-2 py-0.5 text-[10px] uppercase tracking-wide transition ${
+                  actifEtf === a ? "bg-surface text-text" : "text-text-dim hover:text-text"
+                }`}
+              >
+                {a}
+              </button>
+            ))}
+          </div>
           {etf && etf.disponible && etf.parEmetteur ? (
             <div className="space-y-1 rounded-md border border-border bg-bg px-3 py-2">
               {etf.parEmetteur.map((e) => (
@@ -444,7 +479,7 @@ export function OnchainWindow() {
           ) : (
             <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg px-3 py-3">
               <span className="text-[11px] leading-snug text-text-dim">
-                {etf?.raison ?? "Flux ETF indisponibles (source gratuite fermée). Pas de scraping en v1."}
+                {etf?.raison ?? "Flux ETF indisponibles."}
               </span>
               <FiabiliteTag f="indisponible" />
             </div>

@@ -1,91 +1,117 @@
 /**
- * Flux ETF spot BTC — tentative DefiLlama, sinon DÉGRADATION propre.
+ * Flux ETF spot BTC/ETH/SOL — SoSoValue (openapi.sosovalue.com).
  *
- * ⚠️ ÉTAT (vérifié en réel le 2026-07-02) : AUCUN endpoint DefiLlama gratuit ne sert
- * les flux ETF — `api.llama.fi/etfs`, `/etf/flows`, `/etfs/overview` renvoient 404, et
- * `/overview/etfs` renvoie 500 « Internal Error ». Conformément à la mission, on ne
- * SCRAPE PAS Farside en v1 : la section ETF affiche « source indisponible » proprement.
+ * Remplace l'ancien module DefiLlama (mort : tous les endpoints `/overview/etfs`
+ * renvoient 404/500, vérifié 2026-07-02). SoSoValue couvre BTC + ETH + SOL avec un
+ * seul provider (ETF spot Solana actifs depuis approbation SEC 10/2025).
  *
- * Ce module TENTE tout de même l'appel (au cas où l'endpoint réapparaîtrait) puis
- * dégrade en `disponible:false`. Le résultat négatif est mémoïsé en cache pour éviter
- * de marteler un endpoint cassé à chaque ouverture de la fenêtre.
+ * ⚠️ Endpoint RÉEL confirmé par curl direct le 2026-07-08 (la doc gitbook n'a pas pu
+ * être lue automatiquement) :
+ *   POST https://openapi.sosovalue.com/openapi/v2/etf/currentEtfDataMetrics
+ *   Headers : x-soso-api-key: <clé>, Content-Type: application/json
+ *   Body    : { "type": "us-btc-spot" | "us-eth-spot" | "us-sol-spot" }
+ *   → GET sur ce chemin renvoie 405 Method Not Allowed ; POST obligatoire.
+ *   Réponse : { code, msg, traceId, data: { dailyNetInflow:{value,lastUpdateDate,status},
+ *     …, list: [ { ticker, institute, dailyNetInflow:{value,lastUpdateDate,status}, … } ] } }
+ *   (`historicalInflowChart` existe aussi — historique multi-jours — mais
+ *   `currentEtfDataMetrics` suffit pour le flux du jour par émetteur voulu ici.)
+ * CORS confirmé ouvert (OPTIONS renvoie `access-control-allow-origin` + POST autorisé
+ * avec `x-soso-api-key`/`content-type`) → appel DIRECT, pas de proxy.
+ * Clé OBLIGATOIRE (plan Demo/Beta gratuit, 20 req/min, sosovalue.com/developer).
  */
 import { ecrireCache, estFrais, lireCache } from "./cache";
 
-/** Endpoint testé (le plus proche d'exister — renvoie 500 aujourd'hui). */
-const URL_TENTATIVE = "https://api.llama.fi/overview/etfs";
-/** TTL du résultat (négatif comme positif) : 6 h. */
+export type ActifEtf = "btc" | "eth" | "sol";
+
+const BASE = "https://openapi.sosovalue.com/openapi/v2/etf/currentEtfDataMetrics";
 export const ETF_TTL_MS = 6 * 60 * 60 * 1000;
 
-/** Flux d'un émetteur pour la journée. */
 export interface FluxEmetteur {
   emetteur: string;
-  /** Flux net du jour (USD ; + = entrées). */
   flux: number;
 }
 
-/** Résultat de la section ETF (dégradable). */
 export interface EtfResultat {
   disponible: boolean;
-  /** Raison de l'indisponibilité (affichée telle quelle). */
   raison?: string;
   jour?: string;
   parEmetteur?: FluxEmetteur[];
-  /** Cumul net du jour (USD). */
   total?: number;
 }
 
-/**
- * Parse une réponse ETF DefiLlama en flux par émetteur. DÉFENSIF : toute forme non
- * reconnue (null, chaîne d'erreur, tableau vide) → `disponible:false`. PURE.
- *
- * NB : la forme exacte n'étant pas documentée en gratuit, on ne reconnaît qu'un schéma
- * plausible `{ day, issuers:[{ name, flow }] }` ; l'endpoint réel ne le renvoie pas
- * aujourd'hui, mais ce parseur reste prêt si DefiLlama réexpose la donnée.
- */
+/** Lit un champ `{ value }` SoSoValue (chaîne décimale) en nombre fini, sinon `undefined`. */
+function lireValeur(champ: unknown): number | undefined {
+  if (champ === null || typeof champ !== "object") return undefined;
+  const v = (champ as { value?: unknown }).value;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** Parse une réponse SoSoValue `currentEtfDataMetrics` en flux par émetteur. PURE, défensive. */
 export function parseEtfFlows(json: unknown): EtfResultat {
-  const indisponible: EtfResultat = { disponible: false, raison: "Flux ETF indisponibles (source gratuite fermée)." };
+  const indisponible: EtfResultat = { disponible: false, raison: "Réponse SoSoValue non reconnue." };
   if (json === null || typeof json !== "object") return indisponible;
 
-  const obj = json as { day?: unknown; issuers?: unknown };
-  if (!Array.isArray(obj.issuers) || obj.issuers.length === 0) return indisponible;
+  const data = (json as { data?: unknown }).data;
+  if (data === null || typeof data !== "object") return indisponible;
+  const { list, dailyNetInflow } = data as { list?: unknown; dailyNetInflow?: unknown };
+  if (!Array.isArray(list) || list.length === 0) return indisponible;
 
   const parEmetteur: FluxEmetteur[] = [];
-  for (const brut of obj.issuers) {
-    const it = brut as { name?: unknown; flow?: unknown };
-    const emetteur = typeof it.name === "string" ? it.name : undefined;
-    const flux = typeof it.flow === "number" ? it.flow : Number(it.flow);
-    if (emetteur === undefined || !Number.isFinite(flux)) continue;
+  for (const brut of list) {
+    const it = brut as { ticker?: unknown; dailyNetInflow?: unknown };
+    const emetteur = typeof it.ticker === "string" ? it.ticker : undefined;
+    const flux = lireValeur(it.dailyNetInflow);
+    if (emetteur === undefined || flux === undefined) continue;
     parEmetteur.push({ emetteur, flux });
   }
   if (parEmetteur.length === 0) return indisponible;
 
-  const total = parEmetteur.reduce((s, e) => s + e.flux, 0);
+  const jourGlobal =
+    dailyNetInflow !== null && typeof dailyNetInflow === "object"
+      ? (dailyNetInflow as { lastUpdateDate?: unknown }).lastUpdateDate
+      : undefined;
+
   return {
     disponible: true,
-    jour: typeof obj.day === "string" ? obj.day : undefined,
+    jour: typeof jourGlobal === "string" ? jourGlobal : undefined,
     parEmetteur,
-    total,
+    total: parEmetteur.reduce((s, e) => s + e.flux, 0),
   };
 }
 
 /**
- * Tente de récupérer les flux ETF ; renvoie toujours un résultat exploitable
- * (`disponible:false` en cas d'échec). Le résultat est caché 6 h pour éviter de
- * re-tenter un endpoint cassé à chaque ouverture.
+ * Récupère les flux ETF pour un actif, avec cache 6 h et dégradation gracieuse.
+ * Renvoie `disponible:false` immédiatement (sans appel réseau) si aucune clé n'est
+ * configurée — la clé est OBLIGATOIRE chez SoSoValue, contrairement à BGeometrics.
  */
-export async function fetchEtfFlows(signal?: AbortSignal): Promise<EtfResultat> {
-  const cle = "etf:flows";
-  const cache = await lireCache<EtfResultat>(cle);
+export async function fetchEtfFlows(
+  actif: ActifEtf,
+  cle: string | null,
+  signal?: AbortSignal,
+): Promise<EtfResultat> {
+  if (cle === null) {
+    return { disponible: false, raison: "Clé SoSoValue non configurée (Réglages)." };
+  }
+
+  const cacheCle = `etf:${actif}`;
+  const cache = await lireCache<EtfResultat>(cacheCle);
   if (estFrais(cache, ETF_TTL_MS) && cache !== null) return cache.donnee;
 
   let resultat: EtfResultat;
   try {
-    const res = await fetch(URL_TENTATIVE, { signal });
-    resultat = res.ok ? parseEtfFlows((await res.json()) as unknown) : { disponible: false, raison: `Source ETF indisponible (HTTP ${res.status}).` };
+    const res = await fetch(BASE, {
+      method: "POST",
+      headers: { "x-soso-api-key": cle, "Content-Type": "application/json" },
+      body: JSON.stringify({ type: `us-${actif}-spot` }),
+      signal,
+    });
+    resultat = res.ok
+      ? parseEtfFlows((await res.json()) as unknown)
+      : { disponible: false, raison: `SoSoValue indisponible (HTTP ${res.status}).` };
   } catch {
-    resultat = { disponible: false, raison: "Flux ETF indisponibles (source gratuite fermée)." };
+    resultat = { disponible: false, raison: "SoSoValue injoignable." };
   }
-  await ecrireCache(cle, resultat);
+  await ecrireCache(cacheCle, resultat);
   return resultat;
 }

@@ -20,6 +20,7 @@ import { settingsUiStore } from "../store/settings-ui";
 import { coinalyzeKeyStore } from "../store/coinalyze";
 import { fredKeyStore } from "../store/macro";
 import { bgeometricsKeyStore } from "../store/onchain";
+import { soSoValueKeyStore } from "../store/sosovalue";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
 /** Pastille d'état de configuration d'une clé. */
@@ -190,6 +191,10 @@ export function SettingsPanel() {
   const bgSetKey = useStore(bgeometricsKeyStore, (s) => s.setKey);
   const bgClearKey = useStore(bgeometricsKeyStore, (s) => s.clearKey);
 
+  const soSoHasKey = useStore(soSoValueKeyStore, (s) => s.hasKey);
+  const soSoSetKey = useStore(soSoValueKeyStore, (s) => s.setKey);
+  const soSoClearKey = useStore(soSoValueKeyStore, (s) => s.clearKey);
+
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Échap ferme — écouteur actif UNIQUEMENT quand le panneau est ouvert.
@@ -287,6 +292,17 @@ export function SettingsPanel() {
               hasKey={bgHasKey}
               onSave={bgSetKey}
               onClear={bgClearKey}
+            />
+            <ApiKeyField
+              name="SoSoValue (ETF)"
+              purpose="Flux ETF spot BTC/ETH/SOL — obligatoire, plan Demo gratuit."
+              domain="openapi.sosovalue.com"
+              signupUrl="https://sosovalue.com/developer"
+              signupLabel="Obtenir une clé gratuite"
+              placeholder="Clé API SoSoValue"
+              hasKey={soSoHasKey}
+              onSave={soSoSetKey}
+              onClear={soSoClearKey}
             />
           </div>
 

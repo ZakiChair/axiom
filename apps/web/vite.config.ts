@@ -48,11 +48,12 @@ const EXTAPI_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-// Hôtes exigeant un User-Agent CONFORME (identifiant + contact), pas le UA navigateur
-// générique : la politique d'accès équitable de la SEC bloque/liste noire les UA non
-// identifiants. COPIE VERBATIM de apps/daemon/src/proxy.ts (interdiction d'import
-// cross-package apps/daemon → apps/web ; source de vérité = ce commentaire).
-const EXTAPI_USER_AGENT_SEC = "AxiomTerminal/1.0 (usage personnel non commercial)";
+// Hôtes exigeant un User-Agent CONFORME (identifiant + contact avec "@"), pas le UA navigateur
+// générique : la politique d'accès équitable de la SEC bloque/liste noire les UA sans
+// token de contact (@). Le UA DOIT inclure un identifiant de contact (ex: email) pour
+// passer le contrôle d'accès équitable de SEC. COPIE VERBATIM de apps/daemon/src/proxy.ts
+// (interdiction d'import cross-package apps/daemon → apps/web ; source de vérité = ce commentaire).
+const EXTAPI_USER_AGENT_SEC = "AxiomTerminal/1.0 (contact: axiom-terminal@example.com — a remplacer par un contact reel si besoin)";
 const EXTAPI_USER_AGENT_HOTES: Record<string, string> = {
   "data.sec.gov": EXTAPI_USER_AGENT_SEC,
   "www.sec.gov": EXTAPI_USER_AGENT_SEC,

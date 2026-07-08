@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 93 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 94 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -62,8 +62,9 @@ import { tsi } from "./momentum/tsi";
 import { ultimateOsc } from "./momentum/ultimateOsc";
 import { williamsR } from "./momentum/williamsR";
 
-// — volatility (14) —
+// — volatility (15) —
 import { atr } from "./volatility/atr";
+import { atrRegime } from "./volatility/atrRegime";
 import { bbBandwidth } from "./volatility/bbBandwidth";
 import { bbPercentB } from "./volatility/bbPercentB";
 import { bollinger } from "./volatility/bollinger";
@@ -170,6 +171,7 @@ export const INDICATORS: IndicatorDef[] = [
   williamsR,
   // volatility
   atr,
+  atrRegime,
   bbBandwidth,
   bbPercentB,
   bollinger,

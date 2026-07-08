@@ -7,6 +7,7 @@ import {
   parseExtapiChemin,
   traiterExtapi,
   ttlMsExtapi,
+  userAgentPourHote,
   type RouteProxy,
 } from "./proxy";
 import type { ProxyKeys } from "./env";
@@ -82,9 +83,32 @@ describe("construireRoutesProxy — cibles et réécritures", () => {
   });
 });
 
-describe("extapi — whitelist", () => {
+describe("extapi — User-Agent par hôte", () => {
+  test("SEC EDGAR reçoit un UA conforme (identifiant, pas le UA navigateur générique)", () => {
+    const ua = userAgentPourHote("data.sec.gov");
+    expect(ua).toContain("AxiomTerminal");
+    expect(ua).not.toContain("Mozilla");
+    expect(userAgentPourHote("www.sec.gov")).toBe(ua);
+  });
+
+  test("hôte non-SEC reçoit le UA navigateur générique inchangé", () => {
+    expect(userAgentPourHote("mempool.space")).toContain("Mozilla");
+  });
+});
+
+describe("extapi — whitelist (mise à jour Lot E1)", () => {
+  test("taille attendue après ajout SEC + GDELT", () => {
+    expect(EXTAPI_WHITELIST.size).toBe(26); // 23 existants + data.sec.gov + www.sec.gov + api.gdeltproject.org
+  });
+  test("nouveaux hôtes présents", () => {
+    expect(EXTAPI_WHITELIST.has("data.sec.gov")).toBe(true);
+    expect(EXTAPI_WHITELIST.has("www.sec.gov")).toBe(true);
+    expect(EXTAPI_WHITELIST.has("api.gdeltproject.org")).toBe(true);
+  });
+});
+
+describe("extapi — whitelist (présence des 23 hôtes existants)", () => {
   test("contient les 23 hôtes attendus (dont Fear&Greed, Binance fapi/dapi, macro souverain/COT/GEX)", () => {
-    expect(EXTAPI_WHITELIST.size).toBe(23);
     for (const hote of [
       "nfs.faireconomy.media",
       "www.coindesk.com",

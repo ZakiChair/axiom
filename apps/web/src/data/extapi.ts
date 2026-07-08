@@ -44,6 +44,9 @@ export const EXTAPI_WHITELIST: readonly string[] = [
   "api.imf.org", // IMF SDMX 3.0 IRFCL (réserves d'or par pays)
   "publicreporting.cftc.gov", // CFTC Socrata SODA (rapport COT)
   "cdn.cboe.com", // CBOE delayed quotes (GEX/DEX indices actions)
+  "data.sec.gov", // SEC EDGAR (submissions, XBRL companyfacts) — panneau FUND
+  "www.sec.gov", // SEC EDGAR (company_tickers.json, résolution ticker→CIK) — panneau FUND
+  "api.gdeltproject.org", // GDELT (recherche news ciblée par mot-clé) — NEWS enrichi
 ];
 
 /** L'hôte est-il autorisé par le proxy /extapi ? (garde-fou dev côté appelant). */

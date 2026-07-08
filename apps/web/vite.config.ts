@@ -38,6 +38,9 @@ const EXTAPI_HOTES: readonly string[] = [
   "api.imf.org",
   "publicreporting.cftc.gov",
   "cdn.cboe.com",
+  "data.sec.gov", // SEC EDGAR (submissions, XBRL companyfacts) — panneau FUND
+  "www.sec.gov", // SEC EDGAR (company_tickers.json, résolution ticker→CIK) — panneau FUND
+  "api.gdeltproject.org", // GDELT (recherche news ciblée par mot-clé) — NEWS enrichi
 ];
 
 // User-Agent navigateur standard : certains hôtes (RSS, Cloudflare) refusent un UA vide.
@@ -45,9 +48,19 @@ const EXTAPI_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+// Hôtes exigeant un User-Agent CONFORME (identifiant + contact), pas le UA navigateur
+// générique : la politique d'accès équitable de la SEC bloque/liste noire les UA non
+// identifiants. COPIE VERBATIM de apps/daemon/src/proxy.ts (interdiction d'import
+// cross-package apps/daemon → apps/web ; source de vérité = ce commentaire).
+const EXTAPI_USER_AGENT_SEC = "AxiomTerminal/1.0 (usage personnel non commercial)";
+const EXTAPI_USER_AGENT_HOTES: Record<string, string> = {
+  "data.sec.gov": EXTAPI_USER_AGENT_SEC,
+  "www.sec.gov": EXTAPI_USER_AGENT_SEC,
+};
+
 // Génère les entrées de proxy Vite `/extapi/<hote>` → `https://<hote>` (strip du préfixe,
-// UA navigateur, timeout 15 s). Cache : seulement en PROD (daemon) — le proxy de dev ne
-// met rien en cache, comme les proxys /fredapi… existants.
+// UA navigateur ou SEC-conforme par hôte, timeout 15 s). Cache : seulement en PROD (daemon) —
+// le proxy de dev ne met rien en cache, comme les proxys /fredapi… existants.
 const extapiProxy: Record<string, ProxyOptions> = Object.fromEntries(
   EXTAPI_HOTES.map((hote) => [
     `/extapi/${hote}`,
@@ -55,7 +68,7 @@ const extapiProxy: Record<string, ProxyOptions> = Object.fromEntries(
       target: `https://${hote}`,
       changeOrigin: true,
       rewrite: (chemin: string) => chemin.replace(`/extapi/${hote}`, ""),
-      headers: { "User-Agent": EXTAPI_USER_AGENT },
+      headers: { "User-Agent": EXTAPI_USER_AGENT_HOTES[hote] ?? EXTAPI_USER_AGENT },
       timeout: 15_000,
       proxyTimeout: 15_000,
     },

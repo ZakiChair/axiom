@@ -193,12 +193,30 @@ export const EXTAPI_WHITELIST: ReadonlySet<string> = new Set([
   "api.imf.org", // IMF SDMX 3.0 IRFCL (réserves d'or par pays)
   "publicreporting.cftc.gov", // CFTC Socrata SODA (rapport COT)
   "cdn.cboe.com", // CBOE delayed quotes (GEX/DEX indices actions)
+  "data.sec.gov", // SEC EDGAR (submissions, XBRL companyfacts) — panneau FUND
+  "www.sec.gov", // SEC EDGAR (company_tickers.json, résolution ticker→CIK) — panneau FUND
+  "api.gdeltproject.org", // GDELT (recherche news ciblée par mot-clé) — NEWS enrichi
 ]);
 
 /** User-Agent navigateur standard : certains hôtes (RSS, Cloudflare) refusent un UA vide. */
 const EXTAPI_USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
   "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+/** Hôtes exigeant un User-Agent CONFORME (identifiant + contact), pas le UA navigateur
+ * générique : la politique d'accès équitable de la SEC bloque/liste noire les UA non
+ * identifiants. Un `fetch()` navigateur ne peut de toute façon PAS surcharger `User-Agent`
+ * (en-tête interdit côté client) — ce proxy est le SEUL endroit où l'injecter. */
+const EXTAPI_USER_AGENT_SEC = "AxiomTerminal/1.0 (usage personnel non commercial)";
+const EXTAPI_USER_AGENT_HOTES: ReadonlyMap<string, string> = new Map([
+  ["data.sec.gov", EXTAPI_USER_AGENT_SEC],
+  ["www.sec.gov", EXTAPI_USER_AGENT_SEC],
+]);
+
+/** User-Agent à envoyer à l'amont pour un hôte /extapi donné. Fonction PURE (testée). */
+export function userAgentPourHote(hote: string): string {
+  return EXTAPI_USER_AGENT_HOTES.get(hote) ?? EXTAPI_USER_AGENT;
+}
 
 /** Délai maximum d'un fetch amont /extapi (ms). */
 const EXTAPI_TIMEOUT_MS = 15_000;
@@ -281,7 +299,7 @@ export async function traiterExtapi(req: Request, url: URL): Promise<Response> {
   try {
     amont = await fetch(urlAmont, {
       method: "GET",
-      headers: { "user-agent": EXTAPI_USER_AGENT, accept: "*/*" },
+      headers: { "user-agent": userAgentPourHote(parsed.hote), accept: "*/*" },
       signal: AbortSignal.timeout(EXTAPI_TIMEOUT_MS),
     });
   } catch (err) {

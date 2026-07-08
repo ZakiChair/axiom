@@ -22,6 +22,7 @@ import { fredKeyStore } from "../store/macro";
 import { bgeometricsKeyStore } from "../store/onchain";
 import { soSoValueKeyStore } from "../store/sosovalue";
 import { finnhubKeyStore } from "../store/finnhub";
+import { etherscanKeyStore } from "../store/etherscan";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
 /** Pastille d'état de configuration d'une clé. */
@@ -200,6 +201,10 @@ export function SettingsPanel() {
   const finnhubSetKey = useStore(finnhubKeyStore, (s) => s.setKey);
   const finnhubClearKey = useStore(finnhubKeyStore, (s) => s.clearKey);
 
+  const etherscanHasKey = useStore(etherscanKeyStore, (s) => s.hasKey);
+  const etherscanSetKey = useStore(etherscanKeyStore, (s) => s.setKey);
+  const etherscanClearKey = useStore(etherscanKeyStore, (s) => s.clearKey);
+
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Échap ferme — écouteur actif UNIQUEMENT quand le panneau est ouvert.
@@ -319,6 +324,17 @@ export function SettingsPanel() {
               hasKey={finnhubHasKey}
               onSave={finnhubSetKey}
               onClear={finnhubClearKey}
+            />
+            <ApiKeyField
+              name="Etherscan v2"
+              purpose="Réseau ETH — gas recommandé, supply, nombre de nœuds."
+              domain="api.etherscan.io"
+              signupUrl="https://etherscan.io/register"
+              signupLabel="Obtenir une clé gratuite"
+              placeholder="Clé API Etherscan"
+              hasKey={etherscanHasKey}
+              onSave={etherscanSetKey}
+              onClear={etherscanClearKey}
             />
           </div>
 

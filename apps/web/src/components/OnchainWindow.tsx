@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { onchainUiStore, getBgeometricsKey, bgeometricsKeyStore } from "../store/onchain";
 import { getSoSoValueKey, soSoValueKeyStore } from "../store/sosovalue";
+import { getEtherscanKey, etherscanKeyStore } from "../store/etherscan";
 import { settingsUiStore } from "../store/settings-ui";
 import {
   fetchCoinMetrics,
@@ -31,6 +32,7 @@ import {
   type ResultatFrais,
 } from "../data/onchain/mempool";
 import { fetchEtfFlows, type ActifEtf, type EtfResultat } from "../data/onchain/etf";
+import { fetchReseauEth, type ReseauEth } from "../data/onchain/etherscan";
 
 const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
 
@@ -62,6 +64,12 @@ function fmtDec(n: number | undefined, d = 2): string {
 function fmtHashrate(hps: number | undefined): string {
   if (hps === undefined || !Number.isFinite(hps)) return "—";
   return `${(hps / 1e18).toFixed(1)} EH/s`;
+}
+
+/** Prix de gas en Gwei (peut être < 1 en période calme → 2 décimales). */
+function fmtGwei(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  return `${n.toFixed(2)} Gwei`;
 }
 
 /** Date courte d'un ms epoch (ex. « 30 juin »). */
@@ -220,14 +228,23 @@ interface EtatDonnees {
   mp: ResultatFrais<MempoolReseau> | null;
   hr: ResultatFrais<SerieMetrique> | null;
   etf: Record<ActifEtf, EtfResultat | null>;
+  eth: ReseauEth | null;
 }
 
-const VIDE: EtatDonnees = { cm: null, bg: {}, mp: null, hr: null, etf: { btc: null, eth: null, sol: null } };
+const VIDE: EtatDonnees = {
+  cm: null,
+  bg: {},
+  mp: null,
+  hr: null,
+  etf: { btc: null, eth: null, sol: null },
+  eth: null,
+};
 
 export function OnchainWindow() {
   const open = useStore(onchainUiStore, (s) => s.open);
   const bgHasKey = useStore(bgeometricsKeyStore, (s) => s.hasKey);
   const soSoHasKey = useStore(soSoValueKeyStore, (s) => s.hasKey);
+  const etherscanHasKey = useStore(etherscanKeyStore, (s) => s.hasKey);
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
 
   const [donnees, setDonnees] = useState<EtatDonnees>(VIDE);
@@ -246,7 +263,7 @@ export function OnchainWindow() {
     const charger = async () => {
       setLoading(true);
       const cleSoSo = getSoSoValueKey();
-      const [cm, bg, mp, hr, btcEtf, ethEtf, solEtf] = await Promise.all([
+      const [cm, bg, mp, hr, btcEtf, ethEtf, solEtf, eth] = await Promise.all([
         fetchCoinMetrics("btc", ctrl.signal),
         fetchBgeometrics(getBgeometricsKey(), ctrl.signal),
         fetchMempoolReseau(ctrl.signal),
@@ -254,9 +271,10 @@ export function OnchainWindow() {
         fetchEtfFlows("btc", cleSoSo, ctrl.signal),
         fetchEtfFlows("eth", cleSoSo, ctrl.signal),
         fetchEtfFlows("sol", cleSoSo, ctrl.signal),
+        fetchReseauEth(getEtherscanKey(), ctrl.signal),
       ]);
       if (ignore) return;
-      setDonnees({ cm, bg, mp, hr, etf: { btc: btcEtf, eth: ethEtf, sol: solEtf } });
+      setDonnees({ cm, bg, mp, hr, etf: { btc: btcEtf, eth: ethEtf, sol: solEtf }, eth });
       setLoading(false);
     };
 
@@ -265,8 +283,8 @@ export function OnchainWindow() {
       ignore = true;
       ctrl.abort();
     };
-    // bgHasKey/soSoHasKey en dépendance : re-fetch quand une clé est saisie/retirée.
-  }, [open, bgHasKey, soSoHasKey]);
+    // bgHasKey/soSoHasKey/etherscanHasKey en dépendance : re-fetch quand une clé est saisie/retirée.
+  }, [open, bgHasKey, soSoHasKey, etherscanHasKey]);
 
   const cm = donnees.cm;
   const adr = cm?.series["AdrActCnt"];
@@ -280,6 +298,7 @@ export function OnchainWindow() {
   const halving = mp?.halving;
   const hr = donnees.hr?.donnee;
   const etf = donnees.etf[actifEtf];
+  const eth = donnees.eth;
 
   return (
     <>
@@ -480,6 +499,59 @@ export function OnchainWindow() {
             <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg px-3 py-3">
               <span className="text-[11px] leading-snug text-text-dim">
                 {etf?.raison ?? "Flux ETF indisponibles."}
+              </span>
+              <FiabiliteTag f="indisponible" />
+            </div>
+          )}
+        </section>
+
+        {/* ─────────── RÉSEAU ETH ─────────── */}
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+              Réseau ETH
+            </h3>
+            {!etherscanHasKey && (
+              <button
+                type="button"
+                onClick={openSettings}
+                className="text-[10px] text-accent hover:underline"
+                title="Clé gratuite sur etherscan.io/register — obligatoire"
+              >
+                clé Etherscan ⚙
+              </button>
+            )}
+          </div>
+          {etherscanHasKey ? (
+            <div className="grid grid-cols-2 gap-2">
+              <Widget
+                libelle="Gas recommandé"
+                valeur={fmtGwei(eth?.gasFast)}
+                fiabilite="live"
+                sousTexte={
+                  eth ? `sûr ${fmtGwei(eth.gasSafe)} · standard ${fmtGwei(eth.gasPropose)}` : undefined
+                }
+                color="#fbbf24"
+              />
+              <Widget
+                libelle="Supply ETH"
+                valeur={fmtCompact(eth?.supplyEth ?? undefined)}
+                fiabilite="live"
+                color="#60a5fa"
+              />
+              <div className="col-span-2">
+                <Widget
+                  libelle="Nombre de nœuds"
+                  valeur={eth?.nodeCount ? eth.nodeCount.toLocaleString("fr-FR") : "—"}
+                  fiabilite="daily"
+                  color="#34d399"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg px-3 py-3">
+              <span className="text-[11px] leading-snug text-text-dim">
+                Réseau ETH indisponible sans clé Etherscan.
               </span>
               <FiabiliteTag f="indisponible" />
             </div>

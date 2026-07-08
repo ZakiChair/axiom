@@ -2,13 +2,14 @@
  * Fenêtre « CHAIN » — panneau ON-CHAIN, dockable à droite, NON MODAL (pattern DerivativesWindow).
  *
  * Grille de widgets compacts (valeur + sparkline canvas + libellé + fraîcheur + étiquette
- * de fiabilité) en trois sections : RÉSEAU BTC, VALORISATION, ETF. Données LENTES (daily
- * pour l'essentiel) → récupérées à l'ouverture, mises en cache (6 h / 24 h), et redégradées
- * proprement (cache périmé étiqueté, jamais d'erreur console en boucle).
+ * de fiabilité) en quatre sections : RÉSEAU BTC, VALORISATION, ETF, RÉSEAU ETH. Données
+ * LENTES (daily pour l'essentiel) → récupérées à l'ouverture, mises en cache (6 h / 24 h),
+ * et redégradées proprement (cache périmé étiqueté, jamais d'erreur console en boucle).
  *
  * Sources : Coin Metrics community (sans clé), BGeometrics/bitcoin-data.com (clé optionnelle),
  * mempool.space (direct), SoSoValue/openapi.sosovalue.com (ETF spot BTC/ETH/SOL, clé
- * OBLIGATOIRE — section « indisponible » sans clé configurée).
+ * OBLIGATOIRE — section « indisponible » sans clé configurée), Etherscan v2 (réseau ETH,
+ * clé OBLIGATOIRE — section « indisponible » sans clé configurée).
  *
  * Règle d'or (doc 02) : chaque widget porte une étiquette de fiabilité honnête
  * (« daily », « live », « estimation », « indisponible »).
@@ -306,7 +307,7 @@ export function OnchainWindow() {
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">On-chain</h2>
           <p className="mt-0.5 text-[11px] text-text-dim">
-            Coin Metrics · BGeometrics · mempool.space {loading ? "· maj…" : ""}
+            Coin Metrics · BGeometrics · mempool.space · SoSoValue · Etherscan {loading ? "· maj…" : ""}
           </p>
         </div>
         {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}

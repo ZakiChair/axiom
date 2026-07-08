@@ -112,6 +112,8 @@ export async function fetchEtfFlows(
   } catch {
     resultat = { disponible: false, raison: "SoSoValue injoignable." };
   }
-  await ecrireCache(cacheCle, resultat);
+  // Ne jamais mettre en cache un échec (429/HTTP/réseau) : un rate-limit transitoire
+  // ne doit pas geler la donnée à "indisponible" pendant tout le TTL de 6 h.
+  if (resultat.disponible) await ecrireCache(cacheCle, resultat);
   return resultat;
 }

@@ -40,6 +40,12 @@ describe("finnhubKeyStore", () => {
     expect(getFinnhubKey()).toBe("xyz");
   });
 
+  it("setKey avec chaîne vide équivaut à clearKey", () => {
+    finnhubKeyStore.getState().setKey("xyz");
+    finnhubKeyStore.getState().setKey("");
+    expect(finnhubKeyStore.getState().hasKey).toBe(false);
+  });
+
   it("clearKey supprime la clé", () => {
     finnhubKeyStore.getState().setKey("xyz");
     finnhubKeyStore.getState().clearKey();

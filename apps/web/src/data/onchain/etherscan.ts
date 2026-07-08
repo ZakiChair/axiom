@@ -66,7 +66,10 @@ export async function fetchReseauEth(cle: string | null, signal?: AbortSignal): 
       gasPropose: gas?.propose ?? null,
       gasFast: gas?.fast ?? null,
     };
-    await ecrireCache(cacheCle, resultat);
+    // Ne pas mettre en cache un résultat entièrement dégradé (ex. rate-limit renvoyant
+    // HTTP 200 + status "0" sur les trois appels) : autant réessayer au prochain TTL.
+    const toutNul = resultat.supplyEth === null && resultat.nodeCount === null && resultat.gasSafe === null;
+    if (!toutNul) await ecrireCache(cacheCle, resultat);
     return resultat;
   } catch {
     return cache?.donnee ?? null;

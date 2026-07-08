@@ -99,6 +99,21 @@ function fmtEps(v: number | null): string {
   return v === null || !Number.isFinite(v) ? "—" : v.toFixed(2);
 }
 
+/**
+ * Valide qu'une URL est sûre à rendre en `href` (http/https uniquement). Le champ
+ * `weburl` de Finnhub est une donnée EXTERNE non fiable — sans ce garde-fou, une
+ * valeur `javascript:` renvoyée par l'API (ou un cache corrompu) s'exécuterait au
+ * clic. PURE, ne lève jamais.
+ */
+function urlHttpSure(url: string): string | null {
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Date ISO (YYYY-MM-DD) → format court fr-FR, robuste aux dates invalides. */
 function fmtDateCourte(iso: string): string {
   const d = new Date(iso);
@@ -148,6 +163,7 @@ function IndisponibleSansCle({ openSettings }: { openSettings: () => void }) {
 }
 
 function VueProfil({ data }: { data: ProfilFinnhub }) {
+  const siteWeb = urlHttpSure(data.description);
   return (
     <div className="space-y-3">
       <table className="w-full text-[11px]">
@@ -170,12 +186,15 @@ function VueProfil({ data }: { data: ProfilFinnhub }) {
       </table>
       {/* NOTE : le champ `description` de ProfilFinnhub est en réalité `weburl` côté
           Finnhub (une URL, pas un texte descriptif) — libellé « Site web », jamais
-          « Description », et rendu comme lien plutôt que comme prose. */}
+          « Description », et rendu comme lien plutôt que comme prose. `urlHttpSure`
+          re-valide le schéma (http/https) avant de le poser en `href` : c'est une
+          donnée externe non fiable, une valeur `javascript:` ne doit jamais devenir
+          un lien cliquable. */}
       <div className="flex items-center justify-between gap-2 text-[11px]">
         <span className="text-text-dim">Site web</span>
-        {data.description.length > 0 ? (
+        {siteWeb !== null ? (
           <a
-            href={data.description}
+            href={siteWeb}
             target="_blank"
             rel="noreferrer noopener"
             className="truncate text-accent hover:underline"

@@ -16,10 +16,16 @@
  * marque l'erreur dans le registre santé et on rejette — l'appelant (fenêtre Dérivés)
  * utilise Promise.allSettled et n'affiche simplement pas la section, sans spam console.
  */
+import type { Trade, Unsubscribe } from "@axiom/types";
 import { healthStore } from "../store/health";
+import { aggTradeToTrade, type BinanceAggTrade } from "./binance";
+import { connectWsLoop } from "./wsLoop";
 
 /** Base des endpoints publics de données dérivées Binance USDⓈ-M. */
 const BASE_URL = "https://fapi.binance.com/futures/data";
+
+/** Base du flux WS temps réel du perpétuel USDⓈ-M (fstream, distinct du REST fapi ci-dessus). */
+const WS_FUTURES_BASE_URL = "wss://fstream.binance.com/ws";
 
 /** Périodes d'agrégation acceptées par `/futures/data` (miroir de la doc Binance). */
 export type BinanceFuturesPeriod =
@@ -261,4 +267,33 @@ export async function fetchOpenInterestHist(
     limit: String(limit),
   });
   return parseOiHistory(raw);
+}
+
+/**
+ * Flux WS aggTrade du PERPÉTUEL (fstream, distinct des endpoints REST ci-dessus) —
+ * alimente le CVD perp (Task 17, en vis-à-vis du CVD spot existant). Même convention
+ * de mapping agresseur/taker que le spot (`aggTradeToTrade`, data/binance.ts, PURE
+ * & testée dans tradeMapping.test.ts) : m=true => agresseur VENDEUR => side="sell".
+ * Cycle de vie (backoff exponentiel, watchdog de staleness) délégué à `connectWsLoop`,
+ * copie exacte du pattern du flux spot `subscribeTrades` (data/binance.ts) — pas de
+ * resync (les trades ne se backfillent pas).
+ */
+export function subscribePerpAggTrades(symbol: string, cb: (t: Trade) => void): Unsubscribe {
+  const url = `${WS_FUTURES_BASE_URL}/${symbol.toLowerCase()}@aggTrade`;
+  return connectWsLoop({
+    url,
+    source: "binance:futures:trades",
+    onMessage: (data) => {
+      try {
+        const msg = JSON.parse(data) as BinanceAggTrade;
+        if (msg.e === "aggTrade") {
+          cb(aggTradeToTrade(msg));
+          return true;
+        }
+      } catch (err) {
+        console.error("[AXIOM] Message aggTrade perp Binance illisible", err);
+      }
+      return false;
+    },
+  });
 }

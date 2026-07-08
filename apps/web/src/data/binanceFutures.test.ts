@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseRatioHistory, parseTakerHistory, parseOiHistory } from "./binanceFutures";
+import { aggTradeToTrade, type BinanceAggTrade } from "./binance";
 
 /**
  * Fixtures = formes RÉELLES capturées sur fapi.binance.com/futures/data
@@ -65,5 +66,53 @@ describe("parseOiHistory", () => {
   it("écarte les points au notionnel non numérique", () => {
     const raw = [{ sumOpenInterest: "1", sumOpenInterestValue: "x", timestamp: 1 }];
     expect(parseOiHistory(raw)).toEqual([]);
+  });
+});
+
+/**
+ * `subscribePerpAggTrades` (flux WS fstream @aggTrade) réutilise TEL QUEL le mapping
+ * `aggTradeToTrade` du spot (data/binance.ts, déjà figé par tradeMapping.test.ts) :
+ * le schéma JSON de l'aggTrade perp (fstream) est identique à celui du spot sur les
+ * champs utilisés (e, p, q, T, m). On fige ici, avec une fixture RÉALISTE capturée
+ * sur le flux perp, que cette réutilisation produit bien le `Trade` attendu — même
+ * convention agresseur/taker : m=true => acheteur MAKER => agresseur VENDEUR => sell.
+ */
+describe("mapping aggTrade perp (fstream) — via aggTradeToTrade réutilisé", () => {
+  it("m=true (acheteur maker) => agresseur vendeur => side=sell", () => {
+    const trade: BinanceAggTrade = {
+      e: "aggTrade",
+      E: 1782951000123,
+      s: "BTCUSDT",
+      a: 987654321,
+      p: "67123.50",
+      q: "0.015",
+      T: 1782951000100,
+      m: true,
+    };
+    expect(aggTradeToTrade(trade)).toEqual({
+      time: 1782951000100,
+      price: 67123.5,
+      qty: 0.015,
+      side: "sell",
+    });
+  });
+
+  it("m=false (vendeur maker) => agresseur acheteur => side=buy", () => {
+    const trade: BinanceAggTrade = {
+      e: "aggTrade",
+      E: 1782951000456,
+      s: "BTCUSDT",
+      a: 987654322,
+      p: "67124.00",
+      q: "0.203",
+      T: 1782951000400,
+      m: false,
+    };
+    expect(aggTradeToTrade(trade)).toEqual({
+      time: 1782951000400,
+      price: 67124,
+      qty: 0.203,
+      side: "buy",
+    });
   });
 });

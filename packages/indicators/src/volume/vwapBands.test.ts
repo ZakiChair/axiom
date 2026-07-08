@@ -2,15 +2,24 @@
  * @axiom/indicators — volume/vwapBands.test.ts
  *
  * VWAP Bands : invariant d'ordre (upper ≥ basis ≥ lower), amorçage undefined
- * tant que le volume cumulé est nul, et basis = VWAP cumulée.
+ * tant que le volume cumulé de la session est nul, et basis = VWAP cumulée
+ * DEPUIS LE DÉBUT DE LA SESSION (reset à chaque changement de jour UTC).
  */
 
 import { describe, it, expect } from "vitest";
 import type { Candle } from "@axiom/types";
 import { vwapBands } from "./vwapBands";
 
-function candle(high: number, low: number, close: number, vol: number): Candle {
-  return { time: 0, open: close, high, low, close, volume: vol };
+const DAY_MS = 86_400_000;
+
+function candle(
+  high: number,
+  low: number,
+  close: number,
+  vol: number,
+  time = 0
+): Candle {
+  return { time, open: close, high, low, close, volume: vol };
 }
 
 // Construit le ctx avec hlc3 comme le ferait le moteur.
@@ -72,5 +81,53 @@ describe("vwapBands", () => {
     expect(vwapBands.category).toBe("volume");
     expect(vwapBands.pane).toBe("overlay");
     expect(vwapBands.outputs.map((o) => o.key)).toEqual(["basis", "upper", "lower"]);
+  });
+
+  // Fixture 2 jours : prouve le reset des 3 accumulateurs (cumTPV/cumVol/cumTP2V)
+  // à `utcDayOf` changeant, en phase avec vwap.ts.
+  //
+  //   jour | i | high low close | vol |  tp      | cumVol (session) | vwap (basis)
+  //   -----+---+----------------+-----+----------+-------------------+-------------
+  //    0   | 0 | 105  95  100   |  0  | 100      |   0                | undefined
+  //    0   | 1 | 110 100  108   | 50  | 106      |  50                | 106
+  //    0   | 2 | 112 104  106   | 30  | 107.33333|  80                | 8520/80=106.5
+  //    1   | 3 | 120 110  118   | 80  | 116      |  80 (RESET)        | 116  == tp[3]
+  //    1   | 4 | 115 108  110   | 20  | 111      | 100                | 11500/100=115
+  //
+  // Variance pondérée sur (jour 2, mult=1) :
+  //   moyenne pondérée = 115 ; var = [80*(116-115)² + 20*(111-115)²]/100
+  //                          = [80*1 + 20*16]/100 = 400/100 = 4 -> sd = 2
+  //   -> upper[4] = 117, lower[4] = 113
+  describe("reset de session à `utcDayOf` changeant", () => {
+    const twoDayCandles: Candle[] = [
+      candle(105, 95, 100, 0, 0),
+      candle(110, 100, 108, 50, 0),
+      candle(112, 104, 106, 30, 1_000),
+      candle(120, 110, 118, 80, DAY_MS), // 1re bougie du jour 2
+      candle(115, 108, 110, 20, DAY_MS + 1_000),
+    ];
+
+    it("basis de la 1re bougie du jour 2 == son propre prix typique (cumul reparti à zéro)", () => {
+      const res = vwapBands.calc(twoDayCandles, { mult: 1 }, makeCtx(twoDayCandles));
+      const tpDay2First = (120 + 110 + 118) / 3; // 116
+      expect(res.series.basis?.[3]).toBeCloseTo(tpDay2First, 10);
+      // Une seule observation pondérée dans la nouvelle session -> variance nulle.
+      expect(res.series.upper?.[3]).toBeCloseTo(tpDay2First, 10);
+      expect(res.series.lower?.[3]).toBeCloseTo(tpDay2First, 10);
+    });
+
+    it("basis diffère entre dernière bougie jour 1 et 1re bougie jour 2 (preuve du reset)", () => {
+      const res = vwapBands.calc(twoDayCandles, { mult: 1 }, makeCtx(twoDayCandles));
+      expect(res.series.basis?.[2]).toBeCloseTo(8520 / 80, 10); // 106.5
+      expect(res.series.basis?.[3]).toBeCloseTo(116, 10);
+      expect(res.series.basis?.[2]).not.toBeCloseTo(res.series.basis![3]!, 5);
+    });
+
+    it("les bandes se rouvrent normalement après le reset (2e bougie du jour 2)", () => {
+      const res = vwapBands.calc(twoDayCandles, { mult: 1 }, makeCtx(twoDayCandles));
+      expect(res.series.basis?.[4]).toBeCloseTo(115, 10);
+      expect(res.series.upper?.[4]).toBeCloseTo(117, 10);
+      expect(res.series.lower?.[4]).toBeCloseTo(113, 10);
+    });
   });
 });

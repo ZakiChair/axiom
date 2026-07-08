@@ -4,7 +4,11 @@
  * VWAP Bands — VWAP de session encadrée par ± k écarts-types pondérés volume.
  * Source : TradingView "VWAP with standard deviation bands".
  *
- * Formules cumulatives (session = intégralité du jeu fourni, MVP sans reset) :
+ * Session = jour UTC courant (`utcDayOf`, cf. utils-session.ts) : les trois
+ * accumulateurs repartent de zéro à chaque changement de jour UTC, en phase
+ * avec le reset de vwap.ts.
+ *
+ * Formules cumulatives (depuis le début de la session) :
  *   tp[i]     = hlc3 (fourni par ctx.hlc3)
  *   cumTPV    = Σ tp*vol ; cumVol = Σ vol ; cumTP2V = Σ tp²*vol
  *   vwap[i]   = cumTPV / cumVol
@@ -12,11 +16,12 @@
  *   upper[i]  = vwap + mult * sqrt(var)
  *   lower[i]  = vwap - mult * sqrt(var)
  *
- * Indéfini tant que le volume cumulé vaut 0 (cf. vwap.ts). Invariant garanti :
- * upper ≥ basis ≥ lower.
+ * Indéfini tant que le volume cumulé de la session vaut 0 (cf. vwap.ts).
+ * Invariant garanti : upper ≥ basis ≥ lower.
  */
 
 import type { IndicatorDef } from "@axiom/types";
+import { utcDayOf } from "../utils-session";
 
 export const vwapBands: IndicatorDef = {
   id: "vwapBands",
@@ -41,11 +46,21 @@ export const vwapBands: IndicatorDef = {
     let cumTPV = 0;
     let cumVol = 0;
     let cumTP2V = 0;
+    let prevDay: number | undefined; // jour UTC de la bougie précédente
 
     for (let i = 0; i < n; i++) {
       const c = candles[i];
       const tp = ctx.hlc3[i];
       if (c === undefined || tp === undefined) continue;
+
+      const day = utcDayOf(c.time);
+      if (prevDay !== undefined && day !== prevDay) {
+        // Nouveau jour UTC : reset des 3 accumulateurs (nouvelle session).
+        cumTPV = 0;
+        cumVol = 0;
+        cumTP2V = 0;
+      }
+      prevDay = day;
 
       cumTPV += tp * c.volume;
       cumTP2V += tp * tp * c.volume;

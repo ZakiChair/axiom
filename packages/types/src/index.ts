@@ -172,6 +172,17 @@ export interface VolumeProfileBin {
   sellVol: number;
 }
 
+// ---------- Séries auxiliaires (contrat pour indicateurs dérivés on-chain/derivs) ----------
+/** Identifiant d'une série auxiliaire fournie par l'appelant (jamais fetchée par le moteur). */
+export type AuxSeriesId = "oi" | "funding" | "stablecoins" | "nvt" | "mvrv";
+
+/**
+ * Séries auxiliaires DÉJÀ alignées sur les bougies (même longueur, même index).
+ * Fournies par l'appelant (ex. `AuxProvider`, Task 12) — le moteur `@axiom/indicators`
+ * reste pur et synchrone : aucun fetch, aucun accès réseau/DOM.
+ */
+export type AuxSeries = Partial<Record<AuxSeriesId, Array<number | undefined>>>;
+
 // ---------- Indicateurs ----------
 export type IndicatorCategory =
   | "trend"
@@ -220,6 +231,8 @@ export interface CalcContext {
   ohlc4: number[];
   /** Série résolue selon `params.source` (défaut "close") : la série mono-prix que les defs doivent lire. */
   source: number[];
+  /** Séries auxiliaires pré-alignées sur les bougies (fournies par l'appelant, voir `AuxSeries`). */
+  aux?: AuxSeries;
 }
 
 /** Définition déclarative d'un indicateur. Le moteur ne connaît que cette interface. */
@@ -230,6 +243,10 @@ export interface IndicatorDef {
   pane: IndicatorPane;
   inputs: IndicatorInput[];
   outputs: IndicatorOutput[];
+  /** Séries auxiliaires requises par ce def (ex. ["oi", "funding"]) — déclaratif, résolu par l'appelant. */
+  aux?: AuxSeriesId[];
+  /** Timeframe minimal en dessous duquel ce def n'est pas pertinent (ex. données on-chain journalières). */
+  minTimeframe?: Timeframe;
   calc: (
     candles: Candle[],
     params: Record<string, number | boolean | string>,

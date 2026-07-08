@@ -9,6 +9,7 @@
  */
 
 import type {
+  AuxSeries,
   Candle,
   CalcContext,
   IndicatorDef,
@@ -106,16 +107,20 @@ export function resolveParams(
 /**
  * Calcule un indicateur sur l'ensemble des bougies.
  * Les paramètres absents sont complétés par les valeurs par défaut des inputs.
+ * `aux` (optionnel) : séries auxiliaires DÉJÀ alignées sur `candles`, fournies par
+ * l'appelant (ex. `AuxProvider`, Task 12) — le moteur reste pur, il ne les fetch jamais.
  */
 export function computeIndicator(
   def: IndicatorDef,
   candles: Candle[],
-  params?: Record<string, number | boolean | string>
+  params?: Record<string, number | boolean | string>,
+  aux?: AuxSeries
 ): IndicatorResult {
   const resolved = resolveParams(def, params);
   // `source` (si le def le déclare) pilote la série mono-prix exposée en ctx.source.
   const sourceKey =
     typeof resolved.source === "string" ? resolved.source : "close";
   const ctx = buildCalcContext(candles, sourceKey);
+  if (aux !== undefined) ctx.aux = aux;
   return def.calc(candles, resolved, ctx);
 }

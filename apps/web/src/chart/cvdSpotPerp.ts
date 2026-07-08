@@ -17,10 +17,12 @@
  *    que i < 2×lookback−1, la fenêtre est plus courte que `lookback` (elle ne
  *    remonte jamais avant le premier indice valide).
  *  - kind = "spotUp_perpDown" si dSpot > 0 (donc dPerp < 0 par le mismatch),
- *    "spotDown_perpUp" si dSpot < 0. Cas dSpot === 0 : aucun des deux kinds ne
- *    s'applique littéralement au libellé du brief (qui ne définit que ces deux
- *    valeurs) → non signalé (choix documenté, cas dégénéré non couvert par les
- *    fixtures : un CVD spot parfaitement plat sur exactement `lookback` buckets).
+ *    "spotDown_perpUp" si dSpot < 0. GARDE SYMÉTRIQUE ZÉRO-DELTA : si dSpot === 0
+ *    OU dPerp === 0, jamais de divergence — un delta nul sur un côté ne
+ *    représente aucun mouvement directionnel (spot ou perp plat/figé), donc ne
+ *    peut jamais servir de preuve de divergence, quel que soit le mouvement de
+ *    l'autre côté (cf. revue Task 16 : un perp plat était auparavant signalé à
+ *    tort "spotUp_perpDown" sur chaque indice quand le spot montait).
  */
 
 /** Point CVD (spot et perp cumulés) à la clôture d'un bucket. */
@@ -65,6 +67,7 @@ export function detectCvdDivergences(buckets: CvdBucket[], lookback = 14): CvdDi
     const ds = dSpot[i] ?? 0;
     const dp = dPerp[i] ?? 0;
     if (Math.sign(ds) === Math.sign(dp)) continue; // même direction => pas de divergence
+    if (ds === 0 || dp === 0) continue; // garde symétrique : un côté plat n'est jamais une divergence
 
     // Fenêtre glissante des `lookback` derniers indices valides, i INCLUS.
     const windowStart = Math.max(lookback, i - lookback + 1);
@@ -82,7 +85,7 @@ export function detectCvdDivergences(buckets: CvdBucket[], lookback = 14): CvdDi
     } else if (ds < 0) {
       out.push({ time: buckets[i]?.time ?? 0, kind: "spotDown_perpUp" });
     }
-    // ds === 0 : cas dégénéré non signalé (cf. docstring).
+    // ds === 0 impossible ici : déjà exclu par la garde symétrique ci-dessus.
   }
   return out;
 }

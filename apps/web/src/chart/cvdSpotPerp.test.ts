@@ -85,3 +85,29 @@ describe("detectCvdDivergences — amplitude minuscule sous la médiane", () => 
     expect(detectCvdDivergences(buckets, 4)).toEqual([]);
   });
 });
+
+describe("detectCvdDivergences — garde symétrique zéro-delta (régression revue Task 16)", () => {
+  it("ne détecte AUCUNE divergence quand le perp est parfaitement plat (dPerp=0 partout) alors que le spot monte sans arrêt", () => {
+    // lookback=14, 40 buckets. spot = 10×i (monte constamment, dSpot=140>0
+    // pour tout i≥14). perp CONSTANT (feed figé/illiquide) → dPerp=0 pour
+    // tout i≥14. Un dPerp nul ne représente aucun mouvement directionnel :
+    // ça ne doit JAMAIS compter comme une divergence "spotUp_perpDown", même
+    // si sign(140) !== sign(0) et que médiane(|dPerp|)=0 laisse passer le
+    // filtre anti-bruit trivialement (0 >= 0).
+    const buckets: CvdBucket[] = [];
+    for (let i = 0; i < 40; i++) {
+      buckets.push({ time: i, spot: 10 * i, perp: 1000 });
+    }
+    expect(detectCvdDivergences(buckets, 14)).toEqual([]);
+  });
+
+  it("ne détecte AUCUNE divergence quand le spot est parfaitement plat (dSpot=0 partout) alors que le perp monte sans arrêt (cas symétrique, déjà correct — protection anti-régression)", () => {
+    // lookback=14, 40 buckets. spot CONSTANT → dSpot=0 pour tout i≥14.
+    // perp = 10×i (monte constamment, dPerp=140>0 pour tout i≥14).
+    const buckets: CvdBucket[] = [];
+    for (let i = 0; i < 40; i++) {
+      buckets.push({ time: i, spot: 1000, perp: 10 * i });
+    }
+    expect(detectCvdDivergences(buckets, 14)).toEqual([]);
+  });
+});

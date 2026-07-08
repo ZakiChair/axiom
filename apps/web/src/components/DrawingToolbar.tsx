@@ -112,6 +112,18 @@ function VolumeRangeIcon() {
   );
 }
 
+/** Ancrage VWAP (ancre — pose une AVWAP au clic sur une bougie). */
+function AnchorIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <circle cx="12" cy="5" r="2" />
+      <line x1="12" y1="7" x2="12" y2="21" />
+      <line x1="8" y1="10" x2="16" y2="10" />
+      <path d="M4 13a8 8 0 0 0 16 0" />
+    </svg>
+  );
+}
+
 /** Rayon (demi-droite depuis une origine). */
 function RayIcon() {
   return (
@@ -225,6 +237,7 @@ const TOOLS: ToolDef[] = [
   { id: "fib", label: "Retracement de Fibonacci", Icon: FibIcon },
   { id: "fibTrend", label: "Fibonacci selon tendance", Icon: FibTrendIcon },
   { id: "volumeRange", label: "Profil de volume (plage)", Icon: VolumeRangeIcon },
+  { id: "avwapAnchor", label: "Ancrage VWAP (clic sur une bougie)", Icon: AnchorIcon },
 ];
 
 /** Panneau de réglages Fibonacci (niveaux à cocher, zones, ajout libre, reset). */

@@ -17,6 +17,7 @@ import {
   setFocusChart,
   unbindChart,
 } from "./drawing";
+import { indicatorsStore } from "../store/indicators";
 
 // fibonacci.ts (importé par drawing.ts) appelle `registerOverlay` au chargement du
 // module ; le build UMD de klinecharts ne s'évalue pas correctement hors navigateur
@@ -229,6 +230,64 @@ describe("drawing.ts — isolation multi-chart (focus)", () => {
 
     unbindChart(a.chart);
     unbindChart(b.chart);
+  });
+});
+
+describe("drawing.ts — picker d'ancrage AVWAP", () => {
+  let localStorage: Storage;
+
+  beforeEach(() => {
+    localStorage = installMockLocalStorage();
+    indicatorsStore.getState().setAll([]); // isole l'état des indicateurs entre tests
+  });
+
+  afterEach(() => {
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+    indicatorsStore.getState().setAll([]);
+  });
+
+  it("au clic, ajoute une instance anchoredVwap ancrée au timestamp cliqué et retire l'overlay (rien ne persiste comme dessin)", async () => {
+    const a = createMockChart();
+    const removeSpy = vi.spyOn(a.chart, "removeOverlay");
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    setFocusChart(0);
+    restoreDrawings(a.chart, EXCHANGE, SYMBOL);
+
+    // Sélectionne le picker puis simule le clic (1 point) sur une bougie à t=1 700 000.
+    selectTool("avwapAnchor");
+    a.finishDraw("ov-0", [{ timestamp: 1_700_000, value: 42 }]);
+
+    // Une instance anchoredVwap ancrée au timestamp cliqué a été ajoutée.
+    const list = indicatorsStore.getState().indicators;
+    expect(list).toHaveLength(1);
+    expect(list[0]?.defId).toBe("anchoredVwap");
+    expect(list[0]?.params.anchorTime).toBe(1_700_000);
+
+    // Aucun DESSIN persisté (le picker n'est pas un overlay tracé).
+    expect(readStoredCount(localStorage)).toBe(0);
+
+    // L'overlay picker est retiré (retrait différé via queueMicrotask).
+    await Promise.resolve();
+    expect(removeSpy).toHaveBeenCalledWith({ id: "ov-0" });
+
+    unbindChart(a.chart);
+  });
+
+  it("un clic sans timestamp exploitable n'ajoute aucune instance mais retire quand même l'overlay", async () => {
+    const a = createMockChart();
+    const removeSpy = vi.spyOn(a.chart, "removeOverlay");
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    setFocusChart(0);
+    restoreDrawings(a.chart, EXCHANGE, SYMBOL);
+
+    selectTool("avwapAnchor");
+    a.finishDraw("ov-0", [{ value: 42 }]); // pas de timestamp
+
+    expect(indicatorsStore.getState().indicators).toHaveLength(0);
+    await Promise.resolve();
+    expect(removeSpy).toHaveBeenCalledWith({ id: "ov-0" });
+
+    unbindChart(a.chart);
   });
 });
 

@@ -23,11 +23,14 @@
  * `createOverlay` sur l'instance FOCUS.
  */
 import { createStore } from "zustand/vanilla";
+import { registerOverlay } from "klinecharts";
 import type { Chart as KLineChartInstance, OverlayEvent } from "klinecharts";
 // Effet de bord : enregistre les overlays Fibonacci custom (fibCustom / fibTrend).
 import { FIB_RETRACEMENT, FIB_TREND } from "./fibonacci";
 // Effet de bord : enregistre l'overlay VPFR (volumeRange).
 import { VPFR_NAME } from "./volumeRangeOverlay";
+// Store des indicateurs : le picker d'ancrage AVWAP y ajoute une instance.
+import { indicatorsStore } from "../store/indicators";
 
 /** Identifiants d'outils exposés par la barre (cursor = aucun overlay). */
 export type DrawingToolId =
@@ -44,7 +47,8 @@ export type DrawingToolId =
   | "rect"
   | "fib"
   | "fibTrend"
-  | "volumeRange";
+  | "volumeRange"
+  | "avwapAnchor";
 
 /**
  * Outil -> nom de l'overlay INTÉGRÉ KLineChart à dessiner (null pour le curseur).
@@ -66,7 +70,60 @@ const TOOL_OVERLAY: Record<DrawingToolId, string | null> = {
   fib: FIB_RETRACEMENT, // retracement de Fibonacci (custom thémé + paramétrable)
   fibTrend: FIB_TREND, // retracement + projection selon la tendance
   volumeRange: VPFR_NAME, // profil de volume à plage fixe (overlay custom)
+  avwapAnchor: null, // picker (pas un dessin) : géré à part dans selectTool, cf. startAvwapAnchor
 };
+
+// ───────────────────────── Picker d'ancrage AVWAP ─────────────────────────
+//
+// L'outil « ancrage VWAP » n'est PAS un dessin persistant : c'est un PICKER. On
+// pose un overlay INVISIBLE à 1 point (`totalStep: 2`) juste pour capter le clic
+// sur une bougie ; à la fin du tracé, on convertit son timestamp en une NOUVELLE
+// instance d'indicateur `anchoredVwap` (ancrée par temps) puis on retire l'overlay.
+// Seule l'instance d'indicateur persiste (store des indicateurs) — aucun dessin.
+
+const AVWAP_PICK = "avwapAnchorPick";
+let avwapPickerRegistered = false;
+
+/** Enregistre l'overlay picker invisible (idempotent). */
+function registerAvwapPicker(): void {
+  if (avwapPickerRegistered) return;
+  avwapPickerRegistered = true;
+  registerOverlay({
+    name: AVWAP_PICK,
+    totalStep: 2, // 1 seul point à poser
+    needDefaultPointFigure: false,
+    needDefaultXAxisFigure: false,
+    needDefaultYAxisFigure: false,
+    createPointFigures: () => [], // invisible : simple capteur de clic
+  });
+}
+registerAvwapPicker();
+
+/**
+ * Lance le picker d'ancrage AVWAP sur `chart`. Au clic (fin de tracé), lit le
+ * timestamp de la bougie visée, ajoute une instance `anchoredVwap` ancrée à ce temps
+ * (via `setAll`, l'API du store ne mutant que la sélection), puis retire l'overlay.
+ *
+ * Le retrait est DIFFÉRÉ (`queueMicrotask`) : klinecharts poursuit la chaîne du clic
+ * (sélection de la figure) juste après `onDrawEnd`, sur le même overlay — le retirer
+ * de façon synchrone laisserait ce traitement opérer sur un overlay déjà supprimé.
+ */
+function startAvwapAnchor(chart: KLineChartInstance): void {
+  chart.createOverlay({
+    name: AVWAP_PICK,
+    onDrawEnd: (event: OverlayEvent) => {
+      const anchorTime = event.overlay.points[0]?.timestamp;
+      if (typeof anchorTime === "number" && Number.isFinite(anchorTime)) {
+        const store = indicatorsStore.getState();
+        store.setAll([...store.indicators, { defId: "anchoredVwap", params: { anchorTime } }]);
+      }
+      const { id } = event.overlay;
+      queueMicrotask(() => chart.removeOverlay({ id }));
+      drawingStore.getState().setTool("cursor"); // picker éphémère : retour au curseur
+      return true; // clic consommé
+    },
+  });
+}
 
 export interface DrawingState {
   /** Outil courant (sert à la surbrillance du bouton actif). */
@@ -343,6 +400,11 @@ export function restoreDrawings(chart: KLineChartInstance, exchange: string, sym
  */
 export function selectTool(tool: DrawingToolId): void {
   drawingStore.getState().setTool(tool);
+  // Picker AVWAP : convertit un clic en instance d'indicateur (pas un dessin persistant).
+  if (tool === "avwapAnchor") {
+    if (activeChart !== null) startAvwapAnchor(activeChart);
+    return;
+  }
   const name = TOOL_OVERLAY[tool];
   if (name === null || activeChart === null) return;
   // Overlay TRACÉ : persisté par symbole (survit aux changements de TF/actif) et

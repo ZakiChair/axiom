@@ -9,6 +9,8 @@ import {
   fusionner,
   parseDate,
   parseFeed,
+  parseFinnhubNews,
+  parseGdeltNews,
   symbolKeywords,
   tempsRelatif,
   type NewsItem,
@@ -197,5 +199,33 @@ describe("tempsRelatif", () => {
   });
   it("retourne — pour une date absente", () => {
     expect(tempsRelatif(0)).toBe("—");
+  });
+});
+
+describe("parseFinnhubNews", () => {
+  it("parse une liste d'articles Finnhub", () => {
+    const json = [
+      { id: 1, headline: "Fed holds rates", summary: "The Fed...", url: "https://x.test/1", datetime: 1751970000 },
+    ];
+    const items = parseFinnhubNews(json);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ title: "Fed holds rates", link: "https://x.test/1", source: "finnhub" });
+    expect(items[0]!.time).toBe(1751970000 * 1000);
+  });
+  it("tableau vide sur forme inconnue", () => {
+    expect(parseFinnhubNews(null)).toEqual([]);
+    expect(parseFinnhubNews({})).toEqual([]);
+  });
+});
+
+describe("parseGdeltNews", () => {
+  it("parse la forme { articles: [...] }", () => {
+    const json = { articles: [{ title: "Bitcoin rallies", url: "https://x.test/2", seendate: "20260707T120000Z" }] };
+    const items = parseGdeltNews(json);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ title: "Bitcoin rallies", link: "https://x.test/2", source: "gdelt" });
+  });
+  it("tableau vide sur forme inconnue", () => {
+    expect(parseGdeltNews(null)).toEqual([]);
   });
 });

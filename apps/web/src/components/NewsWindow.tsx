@@ -2,13 +2,15 @@
  * Panneau « NEWS » — dockable à droite, NON MODAL (même pattern que DerivativesWindow).
  *
  * Liste dense horodatée des actualités crypto agrégées (CoinDesk, Cointelegraph, The
- * Block, Decrypt, Blockworks) via flux RSS/Atom (proxy /extapi). Le polling (3 min) n'est
- * actif que fenêtre OUVERTE. Ne capture pas les clics du graphe (panneau translaté hors
- * écran + pointer-events-none quand fermé).
+ * Block, Decrypt, Blockworks, Finnhub général) via flux RSS/Atom (proxy /extapi) + Finnhub
+ * (appel direct). Le polling (3 min) n'est actif que fenêtre OUVERTE. Ne capture pas les
+ * clics du graphe (panneau translaté hors écran + pointer-events-none quand fermé).
  *
- * Filtres : plein texte + « symbole actif » (mots-clés dérivés du symbole affiché).
- * Marquage lu/non-lu léger (persisté). Dégradation par flux : une source en panne est
- * affichée en pied de panneau, sans erreur console en boucle.
+ * Filtres : plein texte + « symbole actif » (mots-clés dérivés du symbole affiché) — ce
+ * dernier déclenche EN PLUS une recherche GDELT ciblée sur ces mots-clés (proxy /extapi,
+ * dégradation silencieuse si GDELT est indisponible). Marquage lu/non-lu léger (persisté).
+ * Dégradation par flux : une source en panne est affichée en pied de panneau, sans erreur
+ * console en boucle. Bandeau Fear & Greed en en-tête (cf. data/marketOverview).
  */
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
@@ -24,6 +26,40 @@ import {
   type NewsItem,
   type NewsSourceId,
 } from "../data/news";
+import { fetchFearGreed, type FearGreed } from "../data/marketOverview";
+
+/** Intervalle de rafraîchissement du bandeau Fear & Greed (l'indice évolue au plus 1×/jour). */
+const FNG_REFRESH_MS = 5 * 60_000;
+
+/**
+ * Valide qu'une URL est sûre à rendre en `href` (http/https uniquement). `item.link`
+ * provient de flux RSS/Atom/JSON EXTERNES non fiables — sans ce garde-fou, une valeur
+ * `javascript:` renvoyée par un flux (ou un cache corrompu) s'exécuterait au clic.
+ * PURE, ne lève jamais. (Même garde-fou que `FundWindow.tsx#urlHttpSure`, dupliqué ici
+ * par convention — petits helpers purs par fichier, cf. `readToken`.)
+ */
+function urlHttpSure(url: string): string | null {
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Bandeau compact de l'indice Fear & Greed (en-tête du panneau). */
+function BandeauFearGreed({ fng }: { fng: FearGreed | null }) {
+  if (fng === null) return null;
+  return (
+    <span
+      className="shrink-0 rounded border border-border px-2 py-1 text-[10px] uppercase tracking-wide text-text-dim"
+      title="Indice Fear & Greed (alternative.me)"
+    >
+      F&amp;G <span className="tabular-nums text-text">{fng.value}</span>
+      {fng.classification && <span className="ml-1">{fng.classification}</span>}
+    </span>
+  );
+}
 
 /** Métadonnées d'affichage par source (label + couleur du badge). */
 const META_SOURCE: Record<NewsSourceId, { label: string; color: string }> = Object.fromEntries(
@@ -77,11 +113,13 @@ function LigneNews({
     </>
   );
 
-  // Lien externe si disponible (nouvel onglet, rel de sécurité) ; sinon bloc non cliquable.
-  if (item.link) {
+  // Lien externe si disponible ET de schéma sûr (nouvel onglet, rel de sécurité) ; sinon
+  // bloc non cliquable (lien absent OU schéma non http/https, ex. `javascript:` malveillant).
+  const lien = urlHttpSure(item.link);
+  if (lien !== null) {
     return (
       <a
-        href={item.link}
+        href={lien}
         target="_blank"
         rel="noopener noreferrer"
         onClick={() => onOuvrir(item.id)}
@@ -108,20 +146,44 @@ export function NewsWindow() {
   const [filtreSymbole, setFiltreSymbole] = useState(false);
   // Tick léger (30 s) pour rafraîchir les horodatages relatifs, uniquement fenêtre ouverte.
   const [maintenant, setMaintenant] = useState(() => Date.now());
+  const [fng, setFng] = useState<FearGreed | null>(null);
+
+  const motsCles = useMemo(() => symbolKeywords(symbol), [symbol]);
 
   // Veille news + tick d'horloge conditionnés à l'ouverture (comme le polling des dérivés).
+  // La recherche GDELT ciblée n'est déclenchée QUE si le filtre symbole est actif (sinon
+  // `undefined` → fetchToutesLesNews se limite aux flux statiques, comportement inchangé).
+  // Redémarre (immediate: true) si le filtre ou le symbole change, pour repartir avec des
+  // mots-clés à jour.
   useEffect(() => {
     if (!open) return;
     setMaintenant(Date.now());
-    const stop = demarrerVeilleNews();
+    const stop = demarrerVeilleNews(filtreSymbole ? motsCles : undefined);
     const horloge = setInterval(() => setMaintenant(Date.now()), 30_000);
     return () => {
       stop();
       clearInterval(horloge);
     };
-  }, [open]);
+  }, [open, filtreSymbole, motsCles]);
 
-  const motsCles = useMemo(() => symbolKeywords(symbol), [symbol]);
+  // Bandeau Fear & Greed : réutilise `fetchFearGreed` (déjà appelé par MarketMapWindow),
+  // sans store partagé — la fonction a son propre cache localStorage 1 h, un second appelant
+  // ne duplique donc pas la requête réseau au-delà de la fenêtre de fraîcheur.
+  useEffect(() => {
+    if (!open) return;
+    let ignore = false;
+    const charger = () => {
+      void fetchFearGreed().then((v) => {
+        if (!ignore) setFng(v);
+      });
+    };
+    charger();
+    const timer = setInterval(charger, FNG_REFRESH_MS);
+    return () => {
+      ignore = true;
+      clearInterval(timer);
+    };
+  }, [open]);
 
   const visibles = useMemo(() => {
     const q = filtre.trim().toLowerCase();
@@ -153,6 +215,7 @@ export function NewsWindow() {
                 } · maj ${tempsRelatif(derniereMaj, maintenant)}`}
           </p>
         </div>
+        <BandeauFearGreed fng={fng} />
         {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
       </header>
 

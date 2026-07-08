@@ -20,11 +20,12 @@ import type { Unsubscribe } from "@axiom/types";
 import { extUrl } from "./extapi";
 import { pollLoop } from "./pollLoop";
 import { newsStore } from "../store/news";
+import { getFinnhubKey } from "../store/finnhub";
 
 // ─────────────────────────── Types & configuration des flux ───────────────────────────
 
 /** Identifiant stable d'une source de news (clé des statuts par flux + badge). */
-export type NewsSourceId = "coindesk" | "cointelegraph" | "theblock" | "decrypt" | "blockworks";
+export type NewsSourceId = "coindesk" | "cointelegraph" | "theblock" | "decrypt" | "blockworks" | "finnhub" | "gdelt";
 
 /** Une news normalisée (issue d'un `<item>` RSS ou d'une `<entry>` Atom). */
 export interface NewsItem {
@@ -53,6 +54,8 @@ export interface NewsFeed {
   path: string;
   /** Couleur du badge de source (accent visuel dense). */
   color: string;
+  /** Type de parsing/récupération. Absent = `"xml"` (RSS/Atom via /extapi, comportement historique). */
+  kind?: "xml" | "finnhub" | "gdelt";
 }
 
 /**
@@ -71,6 +74,10 @@ export const NEWS_FEEDS: readonly NewsFeed[] = [
   { id: "theblock", label: "The Block", host: "www.theblock.co", path: "rss.xml", color: "#4f8cff" },
   { id: "decrypt", label: "Decrypt", host: "decrypt.co", path: "feed", color: "#22c55e" },
   { id: "blockworks", label: "Blockworks", host: "blockworks.co", path: "feed", color: "#a855f7" },
+  // Finnhub `/news` (général) — appelé DIRECT (CORS ouvert), clé requise (cf. store/finnhub).
+  // host/path ignorés pour ce `kind` (l'URL est construite dans fetchFlux) — laissés vides
+  // plutôt que d'inventer une valeur trompeuse.
+  { id: "finnhub", label: "Finnhub", host: "", path: "", color: "#0ea5e9", kind: "finnhub" },
 ];
 
 /** Source du registre santé. */
@@ -221,6 +228,58 @@ export function parseFeed(xml: string, source: NewsSourceId): NewsItem[] {
   return entries.map((b) => parseEntreeAtom(b, source)).filter((n): n is NewsItem => n !== null);
 }
 
+// ─────────────────────────── Parseurs sources non-XML (pures) ───────────────────────────
+
+/** Parse la réponse Finnhub `/news` (tableau plat). PURE, défensive. */
+export function parseFinnhubNews(json: unknown): NewsItem[] {
+  if (!Array.isArray(json)) return [];
+  const out: NewsItem[] = [];
+  for (const brut of json) {
+    const it = brut as { headline?: unknown; url?: unknown; datetime?: unknown; summary?: unknown; id?: unknown };
+    if (typeof it.headline !== "string" || it.headline.length === 0) continue;
+    const time = typeof it.datetime === "number" ? it.datetime * 1000 : 0;
+    const link = typeof it.url === "string" ? it.url : "";
+    out.push({
+      id: link || `finnhub:${String(it.id)}`,
+      title: it.headline,
+      link,
+      time,
+      source: "finnhub",
+      summary: typeof it.summary === "string" ? it.summary.slice(0, SUMMARY_MAX) : "",
+    });
+  }
+  return out;
+}
+
+/**
+ * Convertit un `seendate` GDELT (ISO 8601 COMPACT sans séparateurs, ex.
+ * "20260707T120000Z") en ms epoch. `Date.parse` ne comprend PAS ce format compact
+ * (contrairement au RFC-822/ISO-8601 « standard » des flux RSS/Atom) : on réinsère les
+ * séparateurs avant délégation à `parseDate`. Repli sur `parseDate` brut si la forme
+ * diffère (robustesse si GDELT fait évoluer le format). PURE.
+ */
+function parseGdeltSeenDate(s: string): number {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(s.trim());
+  if (!m) return parseDate(s);
+  const [, y, mo, d, h, mi, se] = m;
+  return parseDate(`${y}-${mo}-${d}T${h}:${mi}:${se}Z`);
+}
+
+/** Parse la réponse GDELT DOC 2.0 (`{ articles: [...] }`). PURE, défensive. */
+export function parseGdeltNews(json: unknown): NewsItem[] {
+  const articles = (json as { articles?: unknown })?.articles;
+  if (!Array.isArray(articles)) return [];
+  const out: NewsItem[] = [];
+  for (const brut of articles) {
+    const it = brut as { title?: unknown; url?: unknown; seendate?: unknown };
+    if (typeof it.title !== "string" || it.title.length === 0) continue;
+    const link = typeof it.url === "string" ? it.url : "";
+    const time = typeof it.seendate === "string" ? parseGdeltSeenDate(it.seendate) : 0;
+    out.push({ id: link || `gdelt:${it.title}:${time}`, title: it.title, link, time, source: "gdelt", summary: "" });
+  }
+  return out;
+}
+
 // ─────────────────────────── Fusion multi-flux (pure) ───────────────────────────
 
 /**
@@ -340,12 +399,32 @@ export function tempsRelatif(ts: number, maintenant: number = Date.now()): strin
 
 // ─────────────────────────── Récupération réseau + veille ───────────────────────────
 
-/** Récupère et parse un flux. Lève en cas d'échec réseau/HTTP (capté par allSettled). */
+/**
+ * Récupère et parse un flux. Lève en cas d'échec réseau/HTTP (capté par allSettled).
+ * Ramifie sur `feed.kind` : Finnhub est appelé DIRECT (CORS ouvert, clé requise, hors
+ * proxy /extapi) ; l'absence de `kind` (5 flux RSS/Atom historiques) est INCHANGÉE.
+ */
 async function fetchFlux(feed: NewsFeed, signal?: AbortSignal): Promise<NewsItem[]> {
+  if (feed.kind === "finnhub") {
+    const cle = getFinnhubKey();
+    if (cle === null) throw new Error(`${feed.label} : clé absente`);
+    const res = await fetch(`https://finnhub.io/api/v1/news?category=general&token=${cle}`, { signal });
+    if (!res.ok) throw new Error(`${feed.label} HTTP ${res.status}`);
+    return parseFinnhubNews(await res.json());
+  }
   const res = await fetch(extUrl(feed.host, feed.path), { signal });
   if (!res.ok) throw new Error(`${feed.label} HTTP ${res.status}`);
   const xml = await res.text();
   return parseFeed(xml, feed.id);
+}
+
+/** Récupère et parse la recherche GDELT ciblée (mots-clés du symbole). Lève sur échec. */
+async function fetchGdelt(motsCles: string[], signal?: AbortSignal): Promise<NewsItem[]> {
+  const requete = encodeURIComponent(motsCles.join(" OR "));
+  const url = extUrl("api.gdeltproject.org", `api/v2/doc/doc?query=${requete}&mode=artlist&format=json&maxrecords=20`);
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw new Error(`GDELT HTTP ${res.status}`);
+  return parseGdeltNews(await res.json());
 }
 
 /** Statut d'un flux après un cycle. */
@@ -358,19 +437,28 @@ export interface ResultatNews {
   toutEnErreur: boolean;
 }
 
-/** Interroge tous les flux en parallèle (dégradation par flux) puis fusionne. */
-export async function fetchToutesLesNews(signal?: AbortSignal): Promise<ResultatNews> {
-  const resultats = await Promise.allSettled(NEWS_FEEDS.map((f) => fetchFlux(f, signal)));
+/**
+ * Interroge tous les flux en parallèle (dégradation par flux) puis fusionne. Si
+ * `motsClesGdelt` est fourni et non vide, une recherche GDELT ciblée est ajoutée
+ * DYNAMIQUEMENT à la volée (statut reporté sous la clé `"gdelt"`) ; absent/vide →
+ * comportement INCHANGÉ (seuls les flux statiques `NEWS_FEEDS`).
+ */
+export async function fetchToutesLesNews(signal?: AbortSignal, motsClesGdelt?: string[]): Promise<ResultatNews> {
+  const inclureGdelt = motsClesGdelt !== undefined && motsClesGdelt.length > 0;
+  const taches: Array<Promise<NewsItem[]>> = NEWS_FEEDS.map((f) => fetchFlux(f, signal));
+  if (inclureGdelt) taches.push(fetchGdelt(motsClesGdelt, signal));
+
+  const resultats = await Promise.allSettled(taches);
   const listes: NewsItem[][] = [];
   const statuts: Partial<Record<NewsSourceId, FeedStatut>> = {};
   resultats.forEach((r, i) => {
-    const feed = NEWS_FEEDS[i];
-    if (feed === undefined) return;
+    const id: NewsSourceId | undefined = i < NEWS_FEEDS.length ? NEWS_FEEDS[i]?.id : "gdelt";
+    if (id === undefined) return;
     if (r.status === "fulfilled") {
       listes.push(r.value);
-      statuts[feed.id] = r.value.length > 0 ? "ok" : "vide";
+      statuts[id] = r.value.length > 0 ? "ok" : "vide";
     } else {
-      statuts[feed.id] = "erreur";
+      statuts[id] = "erreur";
     }
   });
   return {
@@ -383,13 +471,16 @@ export async function fetchToutesLesNews(signal?: AbortSignal): Promise<Resultat
 /**
  * Démarre la veille news (poll 3 min, source « news » du registre santé). À appeler à
  * l'ouverture du panneau ; l'`Unsubscribe` retourné coupe le polling à la fermeture.
+ * `motsClesGdelt` (mots-clés du symbole, transmis UNIQUEMENT quand le filtre symbole est
+ * actif) est capturé à l'appel — l'appelant redémarre la veille (nouvel appel) si le
+ * symbole ou l'état du filtre change, pour repartir avec des mots-clés à jour.
  * Si TOUS les flux échouent, on conserve les news précédentes (pas d'écrasement à vide)
  * et on laisse pollLoop marquer la source en erreur (backoff).
  */
-export function demarrerVeilleNews(): Unsubscribe {
+export function demarrerVeilleNews(motsClesGdelt?: string[]): Unsubscribe {
   return pollLoop(
     async (signal, isCancelled) => {
-      const { items, statuts, toutEnErreur } = await fetchToutesLesNews(signal);
+      const { items, statuts, toutEnErreur } = await fetchToutesLesNews(signal, motsClesGdelt);
       if (isCancelled()) return;
       if (toutEnErreur) {
         newsStore.getState().setStatuts(statuts);

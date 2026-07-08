@@ -34,8 +34,27 @@ export interface CourbeRendements {
   rendements: Record<string, number>;
 }
 
-/** Maturités mises en avant dans le panneau (ordre d'affichage court → long). */
-export const MATURITES_US: readonly string[] = ["3 Mo", "2 Yr", "5 Yr", "10 Yr", "30 Yr"];
+/**
+ * Maturités mises en avant dans le panneau (ordre d'affichage court → long) — les 14
+ * colonnes déjà parsées par le CSV du Trésor US (élargi de 5 à 14 : la vue tableau ET
+ * la courbe CRVF s'appuient toutes deux sur cette liste, cf. `MacroRatesWindow.tsx`).
+ */
+export const MATURITES_US: readonly string[] = [
+  "1 Mo",
+  "1.5 Month",
+  "2 Mo",
+  "3 Mo",
+  "4 Mo",
+  "6 Mo",
+  "1 Yr",
+  "2 Yr",
+  "3 Yr",
+  "5 Yr",
+  "7 Yr",
+  "10 Yr",
+  "20 Yr",
+  "30 Yr",
+];
 
 // ─────────────────────────── Parsing PUR (US) ───────────────────────────
 

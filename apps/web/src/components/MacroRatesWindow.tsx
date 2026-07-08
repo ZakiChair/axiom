@@ -17,6 +17,7 @@ import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
+import { macroRatesViewStore, type VueRendementsMode } from "../store/macroRatesView";
 import {
   chargerRendementsSouverains,
   deltaJour,
@@ -26,6 +27,8 @@ import {
 } from "../data/macro/treasuryYields";
 import { chargerTauxDirecteurs, type TauxDirecteur } from "../data/macro/policyRates";
 import { chargerReservesOr, type ReserveOr } from "../data/macro/goldReserves";
+import { CourbeTaux, type PointCourbe } from "./CourbeTaux";
+import { anneesDeMaturite } from "./courbeTaux.util";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -71,6 +74,18 @@ export const commandes: Commande[] = [
     apercu: "Ouvre / ferme les taux souverains, directeurs et réserves d'or",
     action: () => macroRatesUiStore.getState().toggleMacroRates(),
   },
+  {
+    id: "panneau:macroRates:crvf",
+    mnemonique: "CRVF",
+    libelle: "Courbe des taux (CRVF)",
+    categorie: "panneau",
+    motsCles: ["crvf", "courbe", "yield curve", "taux", "shape of curve"],
+    apercu: "Ouvre RATE directement en vue courbe",
+    action: () => {
+      macroRatesViewStore.getState().demanderCourbe();
+      macroRatesUiStore.getState().openMacroRates();
+    },
+  },
 ];
 
 // ─────────────────────────── Helpers de format (purs) ───────────────────────────
@@ -108,7 +123,37 @@ const ONGLETS: ReadonlyArray<{ id: Onglet; label: string }> = [
 
 // ─────────────────────────── Sous-vues ───────────────────────────
 
-function VueRendements({ data, statut }: { data: RendementsSouverains | null; statut: Statut }) {
+/** Points de la courbe US : maturité → années (via `anneesDeMaturite`) + taux, en
+ * écartant les formes non reconnues et les valeurs absentes (dégradation gracieuse). */
+function pointsUs(derniere: { rendements: Record<string, number> } | undefined): PointCourbe[] {
+  if (derniere === undefined) return [];
+  const pts: PointCourbe[] = [];
+  for (const m of MATURITES_US) {
+    const taux = derniere.rendements[m];
+    const annees = anneesDeMaturite(m);
+    if (taux !== undefined && Number.isFinite(annees)) pts.push({ maturite: m, anneesTri: annees, taux });
+  }
+  return pts;
+}
+
+/** Points de la courbe zone euro (2/10/30 ans, déjà en années entières). */
+function pointsEuro(euro: Record<string, number>): PointCourbe[] {
+  return ["2 Yr", "10 Yr", "30 Yr"]
+    .filter((m) => euro[m] !== undefined)
+    .map((m) => ({ maturite: m, anneesTri: anneesDeMaturite(m), taux: euro[m]! }));
+}
+
+function VueRendements({
+  data,
+  statut,
+  vue,
+  setVue,
+}: {
+  data: RendementsSouverains | null;
+  statut: Statut;
+  vue: VueRendementsMode;
+  setVue: (v: VueRendementsMode) => void;
+}) {
   if (statut === "loading" && data === null) return <Chargement />;
   const us = data?.us ?? [];
   const euro = data?.euro ?? {};
@@ -121,58 +166,82 @@ function VueRendements({ data, statut }: { data: RendementsSouverains | null; st
 
   return (
     <div className="space-y-4">
-      {derniere !== undefined && (
-        <section>
-          <EnteteSection titre="Trésor américain" info={`au ${derniere.date}`} />
-          <table className="w-full text-[11px] tabular-nums">
-            <thead>
-              <tr className="text-text-dim">
-                <th className="py-1 text-left font-medium">Maturité</th>
-                <th className="py-1 text-right font-medium">Taux</th>
-                <th className="py-1 text-right font-medium">Δ jour</th>
-              </tr>
-            </thead>
-            <tbody>
-              {MATURITES_US.map((m) => {
-                const v = derniere.rendements[m];
-                const d = deltaJour(us, m);
-                return (
-                  <tr key={m} className="border-t border-border/60">
-                    <td className="py-1 text-left text-text">{m}</td>
-                    <td className="py-1 text-right text-text">{fmtPct(v)}</td>
-                    <td className={`py-1 text-right ${couleurDelta(d)}`}>{fmtDelta(d)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {spread !== null && (
-            <div className="mt-2 flex items-center justify-between rounded border border-border bg-bg px-2 py-1 text-[11px]">
-              <span className="text-text-dim">Écart 2 ans / 10 ans</span>
-              <span className={`tabular-nums ${couleurDelta(spread)}`}>
-                {fmtDelta(spread)} pt {spread < 0 ? "· courbe inversée" : ""}
-              </span>
-            </div>
-          )}
-        </section>
-      )}
+      <div className="flex justify-end gap-1">
+        {(["tableau", "courbe"] as const).map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setVue(v)}
+            className={`rounded px-2 py-0.5 text-[10px] capitalize transition ${
+              vue === v ? "bg-surface text-text" : "text-text-dim hover:text-text"
+            }`}
+          >
+            {v}
+          </button>
+        ))}
+      </div>
 
-      {Object.keys(euro).length > 0 && (
+      {vue === "courbe" ? (
         <section>
-          <EnteteSection titre="Zone euro (courbe AAA)" info="ECB SDMX" />
-          <table className="w-full text-[11px] tabular-nums">
-            <tbody>
-              {["2 Yr", "10 Yr", "30 Yr"].map((m) =>
-                euro[m] === undefined ? null : (
-                  <tr key={m} className="border-t border-border/60">
-                    <td className="py-1 text-left text-text">{m}</td>
-                    <td className="py-1 text-right text-text">{fmtPct(euro[m])}</td>
-                  </tr>
-                ),
-              )}
-            </tbody>
-          </table>
+          <EnteteSection titre="Courbe des taux" info={derniere !== undefined ? `au ${derniere.date}` : undefined} />
+          <CourbeTaux us={pointsUs(derniere)} euro={pointsEuro(euro)} />
         </section>
+      ) : (
+        <>
+          {derniere !== undefined && (
+            <section>
+              <EnteteSection titre="Trésor américain" info={`au ${derniere.date}`} />
+              <table className="w-full text-[11px] tabular-nums">
+                <thead>
+                  <tr className="text-text-dim">
+                    <th className="py-1 text-left font-medium">Maturité</th>
+                    <th className="py-1 text-right font-medium">Taux</th>
+                    <th className="py-1 text-right font-medium">Δ jour</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {MATURITES_US.map((m) => {
+                    const v = derniere.rendements[m];
+                    const d = deltaJour(us, m);
+                    return (
+                      <tr key={m} className="border-t border-border/60">
+                        <td className="py-1 text-left text-text">{m}</td>
+                        <td className="py-1 text-right text-text">{fmtPct(v)}</td>
+                        <td className={`py-1 text-right ${couleurDelta(d)}`}>{fmtDelta(d)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {spread !== null && (
+                <div className="mt-2 flex items-center justify-between rounded border border-border bg-bg px-2 py-1 text-[11px]">
+                  <span className="text-text-dim">Écart 2 ans / 10 ans</span>
+                  <span className={`tabular-nums ${couleurDelta(spread)}`}>
+                    {fmtDelta(spread)} pt {spread < 0 ? "· courbe inversée" : ""}
+                  </span>
+                </div>
+              )}
+            </section>
+          )}
+
+          {Object.keys(euro).length > 0 && (
+            <section>
+              <EnteteSection titre="Zone euro (courbe AAA)" info="ECB SDMX" />
+              <table className="w-full text-[11px] tabular-nums">
+                <tbody>
+                  {["2 Yr", "10 Yr", "30 Yr"].map((m) =>
+                    euro[m] === undefined ? null : (
+                      <tr key={m} className="border-t border-border/60">
+                        <td className="py-1 text-left text-text">{m}</td>
+                        <td className="py-1 text-right text-text">{fmtPct(euro[m])}</td>
+                      </tr>
+                    ),
+                  )}
+                </tbody>
+              </table>
+            </section>
+          )}
+        </>
       )}
     </div>
   );
@@ -268,6 +337,17 @@ function Indisponible({ libelle }: { libelle: string }) {
 export function MacroRatesWindow() {
   const open = useStore(macroRatesUiStore, (s) => s.open);
   const [onglet, setOnglet] = useState<Onglet>("rendements");
+  // Vue Tableau/Courbe de l'onglet « Rendements » — initialisée depuis le store partagé
+  // éphémère (macroRatesViewStore) pour honorer une commande CRVF déclenchée avant le
+  // (re)montage de la fenêtre. `requete` (bumped par CRVF) force la resynchronisation
+  // même si la fenêtre est déjà montée sur un autre onglet/vue.
+  const [vue, setVue] = useState<VueRendementsMode>(() => macroRatesViewStore.getState().vue);
+  const requeteCourbe = useStore(macroRatesViewStore, (s) => s.requete);
+  useEffect(() => {
+    if (requeteCourbe === 0) return; // état initial, déjà pris en compte par le lazy useState ci-dessus
+    setOnglet("rendements");
+    setVue("courbe");
+  }, [requeteCourbe]);
 
   const [rendements, setRendements] = useState<RendementsSouverains | null>(null);
   const [taux, setTaux] = useState<TauxDirecteur[] | null>(null);
@@ -363,7 +443,9 @@ export function MacroRatesWindow() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
-        {onglet === "rendements" && <VueRendements data={rendements} statut={statutR} />}
+        {onglet === "rendements" && (
+          <VueRendements data={rendements} statut={statutR} vue={vue} setVue={setVue} />
+        )}
         {onglet === "directeurs" && <VueDirecteurs data={taux} statut={statutD} />}
         {onglet === "or" && <VueOr data={reserves} statut={statutO} />}
       </div>

@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 87 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 93 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -109,6 +109,14 @@ import { pivotStandard } from "./support_resistance/pivotStandard";
 import { pivotWoodie } from "./support_resistance/pivotWoodie";
 import { zigzag } from "./support_resistance/zigzag";
 
+// — derivatives (6) —
+import { fundingRate } from "./derivatives/fundingRate";
+import { fundingZScore } from "./derivatives/fundingZScore";
+import { mvrv } from "./derivatives/mvrv";
+import { nvt } from "./derivatives/nvt";
+import { openInterest } from "./derivatives/openInterest";
+import { stablecoinSupply } from "./derivatives/stablecoinSupply";
+
 export const INDICATORS: IndicatorDef[] = [
   // trend
   adx,
@@ -203,6 +211,13 @@ export const INDICATORS: IndicatorDef[] = [
   pivotStandard,
   pivotWoodie,
   zigzag,
+  // derivatives
+  openInterest,
+  fundingRate,
+  stablecoinSupply,
+  nvt,
+  mvrv,
+  fundingZScore,
 ];
 
 export function getIndicator(id: string): IndicatorDef | undefined {

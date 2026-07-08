@@ -1,8 +1,8 @@
 /**
- * SEC EDGAR — résolution ticker→CIK, profil société, insiders (Form 4), 2-3 concepts
- * XBRL simples. Routé via /extapi (data.sec.gov + www.sec.gov n'ont pas de CORS
- * exploitable pour un User-Agent conforme — cf. spec Lot E1 §0). Gratuit, sans clé,
- * 10 req/s (largement suffisant en usage perso).
+ * SEC EDGAR — résolution ticker→CIK, profil société (nom + secteur). Routé via
+ * /extapi (data.sec.gov + www.sec.gov n'ont pas de CORS exploitable pour un
+ * User-Agent conforme — cf. spec Lot E1 §0). Gratuit, sans clé, 10 req/s
+ * (largement suffisant en usage perso).
  *
  * Schémas RÉELS confirmés par curl direct le 2026-07-08 (identiques aux placeholders
  * du plan) :
@@ -11,13 +11,18 @@
  *   - data.sec.gov/submissions/CIK##########.json → `{ name, sicDescription, ... }`
  *     (les Form 4 individuels ne sont PAS dans ce document — juste la liste des
  *     dépôts — cf. `parseProfilSec`).
+ *
+ * HORS SCOPE v1 (revue Task 2, 2026-07-08) : dépouillement des concepts XBRL
+ * (`data.sec.gov/api/xbrl/companyconcept/...`) et parseur Form 4 dédié pour les
+ * insiders — ni l'un ni l'autre n'est câblé ici ; `insiders` reste toujours `[]`.
+ * À reprendre dans un lot ultérieur si besoin, pas de constante de référence morte
+ * en attendant.
  */
 import { extUrl } from "../extapi";
 import { ecrireCache, estFrais, lireCache } from "../onchain/cache";
 
 const TTL_TICKERS_MS = 24 * 60 * 60 * 1000;
 const TTL_PROFIL_MS = 6 * 60 * 60 * 1000;
-const CONCEPTS_XBRL = ["Assets", "Liabilities", "NetIncomeLoss"] as const;
 
 export interface EntreeTicker {
   cik: string;
@@ -113,6 +118,3 @@ export async function chargerProfilSec(cik: string, signal?: AbortSignal): Promi
     return cache?.donnee ?? null;
   }
 }
-
-/** Concepts XBRL simples exposés (référence pour l'appelant — pas encore agrégés v1). */
-export const CONCEPTS_XBRL_DISPONIBLES = CONCEPTS_XBRL;

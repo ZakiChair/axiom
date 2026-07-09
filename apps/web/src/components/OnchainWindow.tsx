@@ -2,14 +2,16 @@
  * Fenêtre « CHAIN » — panneau ON-CHAIN, dockable à droite, NON MODAL (pattern DerivativesWindow).
  *
  * Grille de widgets compacts (valeur + sparkline canvas + libellé + fraîcheur + étiquette
- * de fiabilité) en quatre sections : RÉSEAU BTC, VALORISATION, ETF, RÉSEAU ETH. Données
- * LENTES (daily pour l'essentiel) → récupérées à l'ouverture, mises en cache (6 h / 24 h),
- * et redégradées proprement (cache périmé étiqueté, jamais d'erreur console en boucle).
+ * de fiabilité) en cinq sections : RÉSEAU BTC, VALORISATION, ETF, RÉSEAU ETH, RÉSEAU SOL.
+ * Données LENTES (daily pour l'essentiel) → récupérées à l'ouverture, mises en cache
+ * (6 h / 24 h), et redégradées proprement (cache périmé étiqueté, jamais d'erreur console
+ * en boucle).
  *
  * Sources : Coin Metrics community (sans clé), BGeometrics/bitcoin-data.com (clé optionnelle),
  * mempool.space (direct), SoSoValue/openapi.sosovalue.com (ETF spot BTC/ETH/SOL, clé
  * OBLIGATOIRE — section « indisponible » sans clé configurée), Etherscan v2 (réseau ETH,
- * clé OBLIGATOIRE — section « indisponible » sans clé configurée).
+ * clé OBLIGATOIRE — section « indisponible » sans clé configurée), réseau SOL SANS clé
+ * (RPC PublicNode + supply CoinGecko — cf. data/onchain/solana.ts).
  *
  * Règle d'or (doc 02) : chaque widget porte une étiquette de fiabilité honnête
  * (« daily », « live », « estimation », « indisponible »).
@@ -34,6 +36,7 @@ import {
 } from "../data/onchain/mempool";
 import { fetchEtfFlows, type ActifEtf, type EtfResultat } from "../data/onchain/etf";
 import { fetchReseauEth, type ReseauEth } from "../data/onchain/etherscan";
+import { fetchReseauSol, type ReseauSol } from "../data/onchain/solana";
 
 const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
 
@@ -71,6 +74,12 @@ function fmtHashrate(hps: number | undefined): string {
 function fmtGwei(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";
   return `${n.toFixed(2)} Gwei`;
+}
+
+/** Taux 0..1 → pourcentage (ex. 0.0375 → « 3.75 % »). */
+function fmtPct(x: number | null | undefined, d = 2): string {
+  if (x === null || x === undefined || !Number.isFinite(x)) return "—";
+  return `${(x * 100).toFixed(d)} %`;
 }
 
 /** Date courte d'un ms epoch (ex. « 30 juin »). */
@@ -230,6 +239,7 @@ interface EtatDonnees {
   hr: ResultatFrais<SerieMetrique> | null;
   etf: Record<ActifEtf, EtfResultat | null>;
   eth: ReseauEth | null;
+  sol: ResultatFrais<ReseauSol> | null;
 }
 
 const VIDE: EtatDonnees = {
@@ -239,6 +249,7 @@ const VIDE: EtatDonnees = {
   hr: null,
   etf: { btc: null, eth: null, sol: null },
   eth: null,
+  sol: null,
 };
 
 export function OnchainWindow() {
@@ -264,6 +275,12 @@ export function OnchainWindow() {
     const charger = async () => {
       setLoading(true);
       const cleSoSo = getSoSoValueKey();
+      // Le réseau SOL dépend d'un RPC public sans clé, à latence imprévisible : il
+      // alimente sa section seul, HORS de la barrière Promise.all, pour que ses aléas
+      // ne retardent jamais les autres sections.
+      void fetchReseauSol(ctrl.signal).then((sol) => {
+        if (!ignore) setDonnees((d) => ({ ...d, sol }));
+      });
       const [cm, bg, mp, hr, btcEtf, ethEtf, solEtf, eth] = await Promise.all([
         fetchCoinMetrics("btc", ctrl.signal),
         fetchBgeometrics(getBgeometricsKey(), ctrl.signal),
@@ -275,7 +292,7 @@ export function OnchainWindow() {
         fetchReseauEth(getEtherscanKey(), ctrl.signal),
       ]);
       if (ignore) return;
-      setDonnees({ cm, bg, mp, hr, etf: { btc: btcEtf, eth: ethEtf, sol: solEtf }, eth });
+      setDonnees((d) => ({ cm, bg, mp, hr, etf: { btc: btcEtf, eth: ethEtf, sol: solEtf }, eth, sol: d.sol }));
       setLoading(false);
     };
 
@@ -300,6 +317,9 @@ export function OnchainWindow() {
   const hr = donnees.hr?.donnee;
   const etf = donnees.etf[actifEtf];
   const eth = donnees.eth;
+  const sol = donnees.sol?.donnee;
+  const solFraicheur = fmtAge(donnees.sol?.ts);
+  const solPerime = donnees.sol?.perime;
 
   return (
     <>
@@ -307,7 +327,8 @@ export function OnchainWindow() {
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">On-chain</h2>
           <p className="mt-0.5 text-[11px] text-text-dim">
-            Coin Metrics · BGeometrics · mempool.space · SoSoValue · Etherscan {loading ? "· maj…" : ""}
+            Coin Metrics · BGeometrics · mempool.space · SoSoValue · Etherscan · RPC Solana ·
+            CoinGecko {loading ? "· maj…" : ""}
           </p>
         </div>
         {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
@@ -557,6 +578,75 @@ export function OnchainWindow() {
               <FiabiliteTag f="indisponible" />
             </div>
           )}
+        </section>
+
+        {/* ─────────── RÉSEAU SOL ─────────── */}
+        <section>
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+            Réseau SOL
+          </h3>
+          <div className="grid grid-cols-2 gap-2">
+            <Widget
+              libelle="TPS (hors votes)"
+              valeur={sol?.tpsHorsVotes != null ? Math.round(sol.tpsHorsVotes).toLocaleString("fr-FR") : "—"}
+              fiabilite="live"
+              sousTexte={
+                sol?.tps != null ? `total ${Math.round(sol.tps).toLocaleString("fr-FR")} tps (votes inclus)` : undefined
+              }
+              color="#fbbf24"
+              fraicheur={solFraicheur}
+              perime={solPerime}
+            />
+            <Widget
+              libelle="Époque"
+              valeur={sol?.epoque != null ? sol.epoque.toLocaleString("fr-FR") : "—"}
+              fiabilite="live"
+              sousTexte={sol?.progressionEpoque != null ? `avancée ${fmtPct(sol.progressionEpoque, 1)}` : undefined}
+              color="#a78bfa"
+              fraicheur={solFraicheur}
+              perime={solPerime}
+            />
+            <Widget
+              libelle="Supply circulante"
+              valeur={fmtCompact(sol?.supplySol ?? undefined)}
+              fiabilite="live"
+              color="#60a5fa"
+              fraicheur={solFraicheur}
+              perime={solPerime}
+            />
+            <Widget
+              libelle="Inflation annuelle"
+              valeur={fmtPct(sol?.inflation)}
+              fiabilite="daily"
+              color="#f472b6"
+              fraicheur={solFraicheur}
+              perime={solPerime}
+            />
+            <Widget
+              libelle="Validateurs actifs"
+              valeur={sol?.validateursActifs != null ? sol.validateursActifs.toLocaleString("fr-FR") : "—"}
+              fiabilite="live"
+              sousTexte={
+                sol?.validateursDelinquants != null ? `${sol.validateursDelinquants} délinquants` : undefined
+              }
+              color="#34d399"
+              fraicheur={solFraicheur}
+              perime={solPerime}
+            />
+            <Widget
+              libelle="SOL staké"
+              valeur={fmtCompact(sol?.stakeSol ?? undefined)}
+              fiabilite="live"
+              sousTexte={
+                sol?.stakeSol != null && sol.supplySol != null && sol.supplySol > 0
+                  ? `≈ ${fmtPct(sol.stakeSol / sol.supplySol, 1)} du circulant`
+                  : undefined
+              }
+              color="#38bdf8"
+              fraicheur={solFraicheur}
+              perime={solPerime}
+            />
+          </div>
         </section>
       </div>
     </>

@@ -44,6 +44,7 @@ import { CotWindow, commandes as cotCommands } from "./components/CotWindow";
 import { SeasonalityWindow, commandes as seasonalityCommands } from "./components/SeasonalityWindow";
 import { VolWindow, commandes as volCommands } from "./components/VolWindow";
 import { FundWindow, commandes as fundCommands } from "./components/FundWindow";
+import { BriefWindow, commandes as briefCommands } from "./components/BriefWindow";
 import { settingsUiStore } from "./store/settings-ui";
 import { ecoCommands } from "./store/eco";
 import { commandes as newsCommands } from "./store/news";
@@ -52,6 +53,9 @@ import { commandes as portfolioCommands } from "./store/portfolio";
 import { commandes as notesCommands } from "./store/notes";
 import { commandesScreener } from "./store/screener";
 import { commandes as derivChartCommands } from "./store/derivatives-chart";
+// Marqueurs de trades/notes SUR le chart : l'import démarre aussi le contrôleur
+// (effet de bord d'import, même chemin que chart/ecoMarkers via EcoWindow).
+import { commandes as marksCommands } from "./chart/tradeMarkers";
 // Commandes de palette des fenêtres de la Phase 4, et store de disposition grille.
 import { commandes as domCommands } from "./store/dom-ui";
 import { commandes as backtestCommands } from "./store/backtest";
@@ -97,7 +101,7 @@ const commandesGrille: Commande[] = GRID_MODES.map((g) => ({
  * ADDITIF, idempotent par `id`). Fait à l'IMPORT — donc AVANT le premier rendu de la
  * palette — comme le bloc Workspaces de Toolbar.tsx. Placé ici (et non dans registry.ts)
  * pour NE PAS coupler le registre — ni son test unitaire — au graphe de dépendances lourd
- * des panneaux (chart/canvas/fetchers). Mnémoniques : ECO, NEWS, CORR, CHAIN, IMAP, PORT,
+ * des panneaux (chart/canvas/fetchers). Mnémoniques : ECO, NEWS, CORR, CHAIN, MAP, PORT,
  * NOTE, EQS, TERM, OMON (DES est déjà dans le registre statique).
  */
 enregistrerCommandes([
@@ -114,6 +118,8 @@ enregistrerCommandes([
   // Sous-panes OI/funding SUR le chart : le contrôleur (agent « deriv ») est DÉJÀ câblé
   // dans Chart.tsx ; ces bascules (OI / FUND) le rendent atteignable (sinon inerte).
   ...derivChartCommands,
+  // Bascule des marqueurs de trades/notes du portefeuille sur le chart (MARKS).
+  ...marksCommands,
   // Fenêtres de la Phase 4 (DOM/TAPE, BT, REPLAY) + dispositions de la grille multi-chart.
   ...domCommands,
   ...backtestCommands,
@@ -127,13 +133,15 @@ enregistrerCommandes([
   ...volCommands,
   // Fenêtre FUND (Lot E1 — fiche société tradfi, SEC EDGAR + Finnhub).
   ...fundCommands,
+  // Fenêtre BRIEF (snapshot marché matinal, composition de sources existantes).
+  ...briefCommands,
 ]);
 
 // ─────────────────────────── Table composant↔id des fenêtres flottantes ───────────────────────────
 
 /** Association id de fenêtre (WINDOW_REGISTRY) -> composant de contenu. Utilisé pour
- * monter chaque fenêtre sous <FloatingWindow> de façon générique (au lieu de 14 JSX
- * explicites) et pour retirer PANNEAUX_DROITE (l'exclusion mutuelle est remplacée par
+ * monter chaque fenêtre sous <FloatingWindow> de façon générique (au lieu d'autant de JSX
+ * explicites que d'entrées du registre) et pour retirer PANNEAUX_DROITE (l'exclusion mutuelle est remplacée par
  * le z-order de windowManagerStore — plusieurs fenêtres peuvent désormais coexister). */
 const WINDOW_COMPONENTS: Record<string, () => JSX.Element> = {
   derivatives: DerivativesWindow,
@@ -155,6 +163,7 @@ const WINDOW_COMPONENTS: Record<string, () => JSX.Element> = {
   seasonality: SeasonalityWindow,
   vol: VolWindow,
   fund: FundWindow,
+  brief: BriefWindow,
 };
 
 export function App() {
@@ -246,8 +255,9 @@ export function App() {
         </div>
       )}
 
-      {/* Les 19 fenêtres Bloomberg non modales, montées génériquement sous <FloatingWindow>
-          via WINDOW_REGISTRY (géométrie/z-order/minimize gérés par windowManagerStore). */}
+      {/* Les fenêtres Bloomberg non modales (une par entrée de WINDOW_REGISTRY), montées
+          génériquement sous <FloatingWindow> (géométrie/z-order/minimize gérés par
+          windowManagerStore). */}
       {WINDOW_REGISTRY.map((entry) => {
         const Contenu = WINDOW_COMPONENTS[entry.id];
         if (!Contenu) return null;

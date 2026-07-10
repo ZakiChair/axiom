@@ -144,12 +144,12 @@ describe("snapGeometry", () => {
 });
 
 describe("WINDOW_REGISTRY", () => {
-  it("contient exactement les 19 fenêtres attendues, sans doublon d'id ni de mnémonique", () => {
-    expect(WINDOW_REGISTRY).toHaveLength(19);
+  it("contient exactement les 20 fenêtres attendues, sans doublon d'id ni de mnémonique", () => {
+    expect(WINDOW_REGISTRY).toHaveLength(20);
     const ids = WINDOW_REGISTRY.map((w) => w.id);
     const mnemos = WINDOW_REGISTRY.map((w) => w.mnemonic);
-    expect(new Set(ids).size).toBe(19);
-    expect(new Set(mnemos).size).toBe(19);
+    expect(new Set(ids).size).toBe(20);
+    expect(new Set(mnemos).size).toBe(20);
     expect(ids).toContain("macroRates");
     expect(mnemos).toContain("RATE");
     expect(ids).toContain("cot");
@@ -160,6 +160,8 @@ describe("WINDOW_REGISTRY", () => {
     expect(mnemos).toContain("VOL");
     expect(ids).toContain("fund");
     expect(mnemos).toContain("FUND");
+    expect(ids).toContain("brief");
+    expect(mnemos).toContain("BRIEF");
   });
 });
 

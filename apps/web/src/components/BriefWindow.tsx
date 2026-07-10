@@ -1,0 +1,435 @@
+/**
+ * Fenêtre « BRIEF » — Snapshot marché matinal. Non modale, montée génériquement sous
+ * <FloatingWindow> (comme FUND/VOL).
+ *
+ * POURQUOI : donner en UN écran le contexte d'ouverture de journée en composant des
+ * sources DÉJÀ intégrées (watchlist overnight, dérivés, flux ETF, éco du jour, actualités
+ * + Fear & Greed, DVOL). C'est un INSTANTANÉ, pas un flux : les données sont chargées au
+ * montage (et sur « Rafraîchir »), JAMAIS en polling continu. Chaque section se charge
+ * indépendamment (data/brief.ts délègue aux modules existants) : une source en panne
+ * affiche ErreurBloc/Vide sans casser l'écran. L'export « → Notes » sérialise l'instantané
+ * via la fonction PURE `briefEnMarkdown` et l'ajoute au journal (store notes existant).
+ *
+ * Fenêtre-vitrine du standard UI : primitives components/ui.tsx + helpers lib/format.ts,
+ * store UI vanilla éphémère + `mirrorOpenState`, aucun helper de formatage local dupliqué.
+ */
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useStore } from "zustand";
+import { createStore } from "zustand/vanilla";
+import type { Commande } from "../commands/registry";
+import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
+import { watchlistStore } from "../store/watchlist";
+import { marketStore } from "../store/market";
+import { notesStore } from "../store/notes";
+import {
+  briefEnMarkdown,
+  fetchDerivsBrief,
+  fetchDvolBrief,
+  fetchEcoBrief,
+  fetchEtfBrief,
+  fetchFearGreed,
+  fetchNewsBrief,
+  fetchWatchlistOvernight,
+  type DonneesBrief,
+  type DvolBrief,
+  type EtfBrief,
+  type EvenementBrief,
+  type FearGreed,
+  type LigneDeriv,
+  type LigneWatchlist,
+  type TitreNews,
+} from "../data/brief";
+import {
+  formatAge,
+  formatDelai,
+  formatHeureMinute,
+  formatPct,
+  formatPourcentage,
+  formatPrice,
+  formatUsd,
+  VALEUR_ABSENTE,
+} from "../lib/format";
+import { Badge, BTN_SECONDAIRE, Chargement, EnTeteFenetre, ErreurBloc, Metric, NoteSource, Vide } from "./ui";
+
+// ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
+
+export interface BriefUiState {
+  open: boolean;
+  openBrief: () => void;
+  closeBrief: () => void;
+  toggleBrief: () => void;
+}
+
+export const briefUiStore = createStore<BriefUiState>(() => ({
+  open: false,
+  openBrief: () => windowManagerStore.getState().openWindow("brief"),
+  closeBrief: () => windowManagerStore.getState().closeWindow("brief"),
+  toggleBrief: () => windowManagerStore.getState().toggleWindow("brief"),
+}));
+
+mirrorOpenState("brief", briefUiStore);
+
+/** Commandes exposées à la palette (⌘K) — greffées par App.tsx via `enregistrerCommandes`. */
+export const commandes: Commande[] = [
+  {
+    id: "panneau:brief",
+    mnemonique: "BRIEF",
+    libelle: "Point marché (BRIEF)",
+    categorie: "panneau",
+    motsCles: ["brief", "point marché", "snapshot", "matin", "morning", "overnight", "résumé", "ouverture"],
+    apercu: "Ouvre / ferme le snapshot marché matinal",
+    action: () => briefUiStore.getState().toggleBrief(),
+  },
+];
+
+// ─────────────────────────── État de chargement par section ───────────────────────────
+
+type Statut = "idle" | "loading" | "ready" | "error";
+
+/** État d'une section : statut de chargement + données (null tant qu'absentes). */
+interface Section<T> {
+  statut: Statut;
+  data: T | null;
+}
+
+const EN_ATTENTE = { statut: "loading" as Statut, data: null };
+
+// ─────────────────────────── Helpers d'affichage (locaux, purs) ───────────────────────────
+
+/** Couleur sémantique d'une variation (vert/rouge/neutre) — token CSS ou undefined. */
+function couleurVariation(v: number | null): string | undefined {
+  if (v === null || !Number.isFinite(v) || v === 0) return undefined;
+  return v > 0 ? "var(--up)" : "var(--down)";
+}
+
+/** Funding (fraction) → pourcentage signé 4 décimales (convention DERIV), ou « — ». */
+function fmtFunding(rate: number | null): string {
+  return rate === null ? VALEUR_ABSENTE : formatPct(rate * 100, 4);
+}
+
+/** Titre de bloc (petites capitales espacées, ton estompé). */
+function TitreBloc({ children }: { children: ReactNode }) {
+  return (
+    <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-dim">{children}</h3>
+  );
+}
+
+/**
+ * Rend le corps d'une section selon son statut : Chargement → ErreurBloc → contenu. Le
+ * cas « donnée présente mais vide » est décidé par `rendu` (qui peut renvoyer <Vide/>).
+ */
+function corps<T>(section: Section<T>, erreur: string, rendu: (data: T) => ReactNode): ReactNode {
+  if (section.statut === "idle" || section.statut === "loading") return <Chargement />;
+  if (section.statut === "error" || section.data === null) return <ErreurBloc>{erreur}</ErreurBloc>;
+  return rendu(section.data);
+}
+
+// ─────────────────────────── Composant principal ───────────────────────────
+
+export function BriefWindow() {
+  const open = useStore(briefUiStore, (s) => s.open);
+
+  // Horodatage du snapshot courant (fraîcheur affichée + référence des délais/âges).
+  const [chargeA, setChargeA] = useState<number | null>(null);
+  const [exporte, setExporte] = useState(false);
+  // Chargement en cours : désactive « Rafraîchir » (le ref garde le clic synchrone contre
+  // l'empilement de générations de fetchs — quota Coinalyze partagé avec DERIV).
+  const [enChargement, setEnChargement] = useState(false);
+
+  const [watchlist, setWatchlist] = useState<Section<LigneWatchlist[]>>(EN_ATTENTE);
+  const [derivs, setDerivs] = useState<Section<LigneDeriv[]>>(EN_ATTENTE);
+  const [etf, setEtf] = useState<Section<EtfBrief[]>>(EN_ATTENTE);
+  const [eco, setEco] = useState<Section<EvenementBrief[]>>(EN_ATTENTE);
+  const [news, setNews] = useState<Section<TitreNews[]>>(EN_ATTENTE);
+  const [fearGreed, setFearGreed] = useState<Section<FearGreed>>(EN_ATTENTE);
+  const [dvol, setDvol] = useState<Section<DvolBrief[]>>(EN_ATTENTE);
+
+  // Garde d'annulation : chaque `charger` incrémente la génération et remplace le
+  // contrôleur ; les callbacks des fetchs de la génération précédente sont ignorés
+  // (fermeture/démontage/refresh) — même esprit que l'`ignore` de FundWindow.
+  const genRef = useRef(0);
+  const ctrlRef = useRef<AbortController | null>(null);
+  // Miroir synchrone de `enChargement` : lisible dans le callback (mémoïsé `[]`) sans le
+  // rendre dépendant de l'état (sinon l'effet [open, charger] rechargerait en boucle).
+  const enCoursRef = useRef(false);
+
+  const charger = useCallback(() => {
+    // Un chargement est déjà en cours → on ignore ce déclenchement (clic répété).
+    if (enCoursRef.current) return;
+    enCoursRef.current = true;
+    setEnChargement(true);
+    ctrlRef.current?.abort();
+    const ctrl = new AbortController();
+    ctrlRef.current = ctrl;
+    const gen = ++genRef.current;
+    const vivant = (): boolean => genRef.current === gen && !ctrl.signal.aborted;
+
+    const now = Date.now();
+    setChargeA(now);
+    setWatchlist(EN_ATTENTE);
+    setDerivs(EN_ATTENTE);
+    setEtf(EN_ATTENTE);
+    setEco(EN_ATTENTE);
+    setNews(EN_ATTENTE);
+    setFearGreed(EN_ATTENTE);
+    setDvol(EN_ATTENTE);
+
+    /** Branche une promesse de section sur son setter, sous garde d'annulation. */
+    const lancer = <T,>(p: Promise<T>, set: (s: Section<T>) => void): Promise<void> => {
+      return p
+        .then((data) => {
+          if (vivant()) set({ statut: "ready", data });
+        })
+        .catch((err) => {
+          if (!vivant()) return;
+          console.error("[AXIOM] section brief indisponible", err);
+          set({ statut: "error", data: null });
+        });
+    };
+
+    const symboles = watchlistStore.getState().symbols;
+    const taches = [
+      lancer(fetchWatchlistOvernight(symboles, ctrl.signal), setWatchlist),
+      lancer(fetchDerivsBrief(), setDerivs),
+      lancer(fetchEtfBrief(ctrl.signal), setEtf),
+      lancer(fetchEcoBrief(now, ctrl.signal), setEco),
+      lancer(fetchNewsBrief(ctrl.signal), setNews),
+      lancer(
+        fetchFearGreed(ctrl.signal).then((v) => {
+          if (v === null) throw new Error("Fear & Greed indisponible");
+          return v;
+        }),
+        setFearGreed,
+      ),
+      lancer(fetchDvolBrief(), setDvol),
+    ];
+    // Toutes les sections réglées → on rouvre « Rafraîchir » (sauf génération périmée).
+    void Promise.allSettled(taches).then(() => {
+      if (!vivant()) return;
+      enCoursRef.current = false;
+      setEnChargement(false);
+    });
+  }, []);
+
+  // Charge au montage/ouverture ; annule les fetchs en vol à la fermeture/démontage.
+  useEffect(() => {
+    if (!open) return;
+    charger();
+    return () => {
+      ctrlRef.current?.abort();
+      genRef.current += 1;
+      // Fermeture/démontage : on lève la garde pour qu'une réouverture puisse recharger.
+      enCoursRef.current = false;
+      setEnChargement(false);
+    };
+  }, [open, charger]);
+
+  // Confirmation transitoire de l'export « → Notes ».
+  useEffect(() => {
+    if (!exporte) return;
+    const t = window.setTimeout(() => setExporte(false), 2000);
+    return () => window.clearTimeout(t);
+  }, [exporte]);
+
+  const exporterVersNotes = (): void => {
+    const donnees: DonneesBrief = {
+      watchlist: watchlist.data,
+      derivs: derivs.data,
+      etf: etf.data,
+      eco: eco.data,
+      news: news.data,
+      fearGreed: fearGreed.data,
+      dvol: dvol.data,
+    };
+    const now = chargeA ?? Date.now();
+    const { symbol, exchange } = marketStore.getState();
+    notesStore.getState().ajouter({ symbole: symbol, source: exchange, texte: briefEnMarkdown(donnees, now), tags: ["brief"] });
+    setExporte(true);
+  };
+
+  const instant = chargeA ?? Date.now();
+  const noteFraicheur = chargeA === null ? "maj…" : `maj ${formatHeureMinute(chargeA)}`;
+
+  return (
+    <>
+      <EnTeteFenetre
+        titre="BRIEF · Point marché"
+        sousTitre={`Snapshot d'ouverture · ${noteFraicheur}`}
+        actions={
+          <>
+            <button
+              type="button"
+              onClick={charger}
+              disabled={enChargement}
+              className={`${BTN_SECONDAIRE} disabled:cursor-not-allowed disabled:opacity-40`}
+            >
+              Rafraîchir
+            </button>
+            <button type="button" onClick={exporterVersNotes} className={BTN_SECONDAIRE}>
+              {exporte ? "✓ Notes" : "→ Notes"}
+            </button>
+          </>
+        }
+      />
+
+      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        {/* 1) Watchlist overnight (Binance REST). */}
+        <section className="space-y-2">
+          <TitreBloc>Watchlist · overnight</TitreBloc>
+          {corps(watchlist, "Prix overnight indisponibles.", (rows) =>
+            rows.length === 0 ? (
+              <Vide>Aucun symbole dans la watchlist.</Vide>
+            ) : (
+              <table className="w-full text-[11px] tabular-nums">
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.symbole} className="border-b border-border/60 last:border-0">
+                      <td className="py-1 text-text">{r.symbole}</td>
+                      <td className="py-1 text-right text-text">{formatPrice(r.prix)}</td>
+                      <td className="py-1 text-right" style={{ color: couleurVariation(r.variation24h) }}>
+                        {formatPct(r.variation24h)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ),
+          )}
+          <NoteSource>Données Binance (ticker 24 h) · {noteFraicheur}.</NoteSource>
+        </section>
+
+        {/* 2) Dérivés — funding + prochain règlement + ΔOI 24 h (BTC/ETH/SOL). */}
+        <section className="space-y-2">
+          <TitreBloc>Dérivés</TitreBloc>
+          {corps(derivs, "Dérivés indisponibles.", (lignes) => (
+            <div className="space-y-2">
+              {lignes.map((d) => (
+                <div key={d.symbole} className="rounded-md border border-border bg-bg px-3 py-2">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-sm font-medium text-text">{d.symbole}</span>
+                    <span className="text-[11px] tabular-nums" style={{ color: couleurVariation(d.deltaOiPct) }}>
+                      ΔOI 24 h {d.deltaOiPct === null ? VALEUR_ABSENTE : formatPct(d.deltaOiPct)}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-text-dim">
+                    <span>
+                      funding <span className="tabular-nums text-text">{fmtFunding(d.fundingActuel)}</span>
+                    </span>
+                    <span>
+                      prédit <span className="tabular-nums text-text">{fmtFunding(d.fundingPredit)}</span>
+                    </span>
+                    <span>
+                      prochain règlement{" "}
+                      <span className="text-text">
+                        {d.prochainReglement === null ? VALEUR_ABSENTE : formatDelai(d.prochainReglement, instant)}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+          <NoteSource>Funding Coinalyze · Open Interest Binance fapi · {noteFraicheur}.</NoteSource>
+        </section>
+
+        {/* 3) Flux ETF de la veille (SoSoValue). */}
+        <section className="space-y-2">
+          <TitreBloc>Flux ETF · veille</TitreBloc>
+          {corps(etf, "Flux ETF indisponibles.", (actifs) => (
+            <div className="space-y-1">
+              {actifs.map((e) => (
+                <div key={e.actif} className="flex items-baseline justify-between text-[11px]">
+                  <span className="uppercase text-text-dim">{e.actif}</span>
+                  {e.disponible && e.total !== null ? (
+                    <span className="tabular-nums" style={{ color: couleurVariation(e.total) }}>
+                      {formatUsd(e.total)}
+                      {e.jour !== null && <span className="ml-1 text-[10px] text-text-dim">({e.jour})</span>}
+                    </span>
+                  ) : (
+                    <span className="text-text-dim">indisponible</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+          <NoteSource>Données SoSoValue (flux nets quotidiens) · {noteFraicheur}.</NoteSource>
+        </section>
+
+        {/* 4) Événements éco du jour, fort impact. */}
+        <section className="space-y-2">
+          <TitreBloc>Événements éco du jour</TitreBloc>
+          {corps(eco, "Calendrier éco indisponible.", (evs) =>
+            evs.length === 0 ? (
+              <Vide>Aucun événement à fort impact aujourd'hui.</Vide>
+            ) : (
+              <div className="space-y-1">
+                {evs.map((ev, i) => (
+                  <div key={`${ev.time}-${i}`} className="flex items-baseline gap-2 text-[11px]">
+                    <span className="w-14 shrink-0 tabular-nums text-text-dim">
+                      {ev.timeApprox ? "~" : ""}
+                      {formatHeureMinute(ev.time)}
+                    </span>
+                    <span className="w-10 shrink-0 text-text-dim">{ev.pays}</span>
+                    <span className="min-w-0 flex-1 truncate text-text">{ev.titre}</span>
+                    <span className="shrink-0 text-[10px] text-text-dim">
+                      {ev.time <= instant ? "passé" : formatDelai(ev.time, instant)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ),
+          )}
+          <NoteSource>ForexFactory · FRED · FOMC (fort impact seulement) · {noteFraicheur}.</NoteSource>
+        </section>
+
+        {/* 5) Actualités + indice Fear & Greed. */}
+        <section className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <TitreBloc>Actualités</TitreBloc>
+            {fearGreed.statut === "ready" && fearGreed.data !== null && (
+              <Badge ton="accent" title="Indice Fear & Greed (alternative.me)">
+                F&G {fearGreed.data.value}
+                {fearGreed.data.classification ? ` · ${fearGreed.data.classification}` : ""}
+              </Badge>
+            )}
+          </div>
+          {corps(news, "Actualités indisponibles.", (titres) =>
+            titres.length === 0 ? (
+              <Vide>Aucune actualité.</Vide>
+            ) : (
+              <div className="space-y-1.5">
+                {titres.map((n) => (
+                  <div key={n.id} className="flex flex-col gap-0.5">
+                    <div className="flex items-center gap-2 text-[10px] text-text-dim">
+                      <span className="uppercase">{n.source}</span>
+                      <span className="tabular-nums">{formatAge(n.time, instant)}</span>
+                    </div>
+                    <span className="text-[11px] leading-snug text-text">{n.titre}</span>
+                  </div>
+                ))}
+              </div>
+            ),
+          )}
+          <NoteSource>Flux RSS/Finnhub · Fear &amp; Greed alternative.me · {noteFraicheur}.</NoteSource>
+        </section>
+
+        {/* 6) Volatilité — DVOL BTC/ETH (Deribit). */}
+        <section className="space-y-2">
+          <TitreBloc>Volatilité · DVOL</TitreBloc>
+          {corps(dvol, "DVOL indisponible.", (vals) => (
+            <div className="grid grid-cols-2 gap-2">
+              {vals.map((v) => (
+                <Metric
+                  key={v.devise}
+                  label={`DVOL ${v.devise}`}
+                  value={v.valeur === null ? VALEUR_ABSENTE : formatPourcentage(v.valeur, 1)}
+                />
+              ))}
+            </div>
+          ))}
+          <NoteSource>Données Deribit (indice DVOL) · {noteFraicheur}.</NoteSource>
+        </section>
+      </div>
+    </>
+  );
+}

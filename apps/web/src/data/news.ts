@@ -25,7 +25,17 @@ import { getFinnhubKey } from "../store/finnhub";
 // ─────────────────────────── Types & configuration des flux ───────────────────────────
 
 /** Identifiant stable d'une source de news (clé des statuts par flux + badge). */
-export type NewsSourceId = "coindesk" | "cointelegraph" | "theblock" | "decrypt" | "blockworks" | "finnhub" | "gdelt";
+export type NewsSourceId =
+  | "coindesk"
+  | "cointelegraph"
+  | "theblock"
+  | "decrypt"
+  | "blockworks"
+  | "finnhub"
+  | "finnhubfx"
+  | "bloomberg"
+  | "cnbc"
+  | "gdelt";
 
 /** Une news normalisée (issue d'un `<item>` RSS ou d'une `<entry>` Atom). */
 export interface NewsItem {
@@ -56,6 +66,8 @@ export interface NewsFeed {
   color: string;
   /** Type de parsing/récupération. Absent = `"xml"` (RSS/Atom via /extapi, comportement historique). */
   kind?: "xml" | "finnhub" | "gdelt";
+  /** Catégorie Finnhub `/news` (kind "finnhub" uniquement ; absent = "general"). */
+  category?: "general" | "forex" | "crypto" | "merger";
 }
 
 /**
@@ -66,6 +78,12 @@ export interface NewsFeed {
  *  - Blockworks : hôte `blockworks.com` (l'ancien `blockworks.co/feed` redirige
  *    en 308 vers ce domaine — hôte suivi + whitelists /extapi mises à jour
  *    2026-07-09) ; sert de l'Atom, couvert par parseFeed.
+ *  - Bloomberg : `feeds.bloomberg.com/economics/news.rss` — verticale macro « economics »
+ *    (vérifiée 200 le 2026-07-10, cf. docs/research/05) ; RSS 2.0 standard.
+ *  - CNBC : `id/20910258/device/rss/rss.html` — verticale « Economy » (vérifiée 200 ;
+ *    exige un UA navigateur, déjà envoyé par défaut par le proxy /extapi).
+ * Bloomberg/CNBC ne sont PAS des API documentées pérennes : enrichissement dégradable
+ * (un flux mort tombe en statut « erreur » sans casser les autres, cf. allSettled).
  */
 export const NEWS_FEEDS: readonly NewsFeed[] = [
   { id: "coindesk", label: "CoinDesk", host: "www.coindesk.com", path: "arc/outboundfeeds/rss", color: "#f7a600" },
@@ -73,10 +91,14 @@ export const NEWS_FEEDS: readonly NewsFeed[] = [
   { id: "theblock", label: "The Block", host: "www.theblock.co", path: "rss.xml", color: "#4f8cff" },
   { id: "decrypt", label: "Decrypt", host: "decrypt.co", path: "feed", color: "#22c55e" },
   { id: "blockworks", label: "Blockworks", host: "blockworks.com", path: "feed", color: "#a855f7" },
-  // Finnhub `/news` (général) — appelé DIRECT (CORS ouvert), clé requise (cf. store/finnhub).
+  { id: "bloomberg", label: "Bloomberg", host: "feeds.bloomberg.com", path: "economics/news.rss", color: "#6366f1" },
+  { id: "cnbc", label: "CNBC", host: "www.cnbc.com", path: "id/20910258/device/rss/rss.html", color: "#ef4444" },
+  // Finnhub `/news` — appelé DIRECT (CORS ouvert), clé requise (cf. store/finnhub).
   // host/path ignorés pour ce `kind` (l'URL est construite dans fetchFlux) — laissés vides
-  // plutôt que d'inventer une valeur trompeuse.
-  { id: "finnhub", label: "Finnhub", host: "", path: "", color: "#0ea5e9", kind: "finnhub" },
+  // plutôt que d'inventer une valeur trompeuse. Deux catégories du tier gratuit :
+  // `general` (marché/business, historique) et `forex` (macro/devises, ajout bandeau).
+  { id: "finnhub", label: "Finnhub", host: "", path: "", color: "#0ea5e9", kind: "finnhub", category: "general" },
+  { id: "finnhubfx", label: "Finnhub FX", host: "", path: "", color: "#14b8a6", kind: "finnhub", category: "forex" },
 ];
 
 /** Source du registre santé. */
@@ -229,8 +251,12 @@ export function parseFeed(xml: string, source: NewsSourceId): NewsItem[] {
 
 // ─────────────────────────── Parseurs sources non-XML (pures) ───────────────────────────
 
-/** Parse la réponse Finnhub `/news` (tableau plat). PURE, défensive. */
-export function parseFinnhubNews(json: unknown): NewsItem[] {
+/**
+ * Parse la réponse Finnhub `/news` (tableau plat). PURE, défensive. `source` distingue
+ * les catégories interrogées (general = "finnhub", forex = "finnhubfx") — défaut
+ * "finnhub" pour ne pas changer le contrat historique.
+ */
+export function parseFinnhubNews(json: unknown, source: NewsSourceId = "finnhub"): NewsItem[] {
   if (!Array.isArray(json)) return [];
   const out: NewsItem[] = [];
   for (const brut of json) {
@@ -240,11 +266,11 @@ export function parseFinnhubNews(json: unknown): NewsItem[] {
     const time = typeof it.datetime === "number" ? it.datetime * 1000 : 0;
     const link = typeof it.url === "string" ? it.url : "";
     out.push({
-      id: link || `finnhub:${String(it.id)}`,
+      id: link || `${source}:${String(it.id)}`,
       title: it.headline,
       link,
       time,
-      source: "finnhub",
+      source,
       summary: typeof it.summary === "string" ? it.summary.slice(0, SUMMARY_MAX) : "",
     });
   }
@@ -409,9 +435,10 @@ async function fetchFlux(feed: NewsFeed, signal?: AbortSignal): Promise<NewsItem
   if (feed.kind === "finnhub") {
     const cle = getFinnhubKey();
     if (cle === null) throw new Error(`${feed.label} : clé absente`);
-    const res = await fetch(`https://finnhub.io/api/v1/news?category=general&token=${cle}`, { signal });
+    const categorie = feed.category ?? "general";
+    const res = await fetch(`https://finnhub.io/api/v1/news?category=${categorie}&token=${cle}`, { signal });
     if (!res.ok) throw new Error(`${feed.label} HTTP ${res.status}`);
-    return parseFinnhubNews(await res.json());
+    return parseFinnhubNews(await res.json(), feed.id);
   }
   const res = await fetch(extUrl(feed.host, feed.path), { signal });
   if (!res.ok) throw new Error(`${feed.label} HTTP ${res.status}`);
@@ -470,18 +497,21 @@ export async function fetchToutesLesNews(signal?: AbortSignal, motsClesGdelt?: s
 }
 
 /**
- * Démarre la veille news (poll 3 min, source « news » du registre santé). À appeler à
- * l'ouverture du panneau ; l'`Unsubscribe` retourné coupe le polling à la fermeture.
- * `motsClesGdelt` (mots-clés du symbole, transmis UNIQUEMENT quand le filtre symbole est
- * actif) est capturé à l'appel — l'appelant redémarre la veille (nouvel appel) si le
- * symbole ou l'état du filtre change, pour repartir avec des mots-clés à jour.
- * Si TOUS les flux échouent, on conserve les news précédentes (pas d'écrasement à vide)
- * et on laisse pollLoop marquer la source en erreur (backoff).
+ * Mots-clés GDELT courants de la veille — ÉTAT du module, lu au début de chaque cycle
+ * (null = pas d'appel GDELT, flux statiques seuls). Posé via `definirMotsClesVeille`.
  */
-export function demarrerVeilleNews(motsClesGdelt?: string[]): Unsubscribe {
+let motsClesVeille: string[] | null = null;
+
+/** Boucle UNIQUE partagée entre TOUS les appelants (refcount, cf. demarrerVeilleNews). */
+let veillePartagee: { stop: Unsubscribe; abonnes: number } | null = null;
+
+/** Boucle de veille effective (un pollLoop). Interne — voir demarrerVeilleNews. */
+function creerBoucleVeille(): Unsubscribe {
   return pollLoop(
     async (signal, isCancelled) => {
-      const { items, statuts, toutEnErreur } = await fetchToutesLesNews(signal, motsClesGdelt);
+      // Mots-clés lus au DÉBUT du cycle : un changement pendant un fetch en vol est pris
+      // en compte au cycle suivant (ou via le cycle immédiat de definirMotsClesVeille).
+      const { items, statuts, toutEnErreur } = await fetchToutesLesNews(signal, motsClesVeille ?? undefined);
       if (isCancelled()) return;
       if (toutEnErreur) {
         newsStore.getState().setStatuts(statuts);
@@ -492,4 +522,75 @@ export function demarrerVeilleNews(motsClesGdelt?: string[]): Unsubscribe {
     NEWS_POLL_MS,
     { immediate: true, source: HEALTH_SOURCE }
   );
+}
+
+/** Normalise des mots-clés de veille : liste vide (ou null) → null. Fonction PURE. */
+export function normaliserMotsCles(motsCles: string[] | null): string[] | null {
+  return motsCles !== null && motsCles.length > 0 ? motsCles : null;
+}
+
+/**
+ * Égalité de deux jeux de mots-clés NORMALISÉS (élément par élément, ordre significatif —
+ * suffisant : ils proviennent de `symbolKeywords`, d'ordre stable). Fonction PURE.
+ */
+export function memesMotsCles(a: string[] | null, b: string[] | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/**
+ * Définit les mots-clés GDELT de la veille partagée (null ou liste vide = pas d'appel
+ * GDELT, comportement « sans filtre »). Pris en compte au cycle suivant ; la pose de
+ * NOUVEAUX mots-clés déclenche EN PLUS un cycle immédiat : le pollLoop partagé est
+ * remplacé par un neuf (`immediate: true`) — l'ancien est annulé (abort), son cycle en
+ * vol éventuel ne livre rien (isCancelled), donc pas de résultat obsolète ; au pire un
+ * statut santé « closed » transitoire. La remise à null est PARESSEUSE (prise en compte
+ * au cycle suivant : les items GDELT résiduels disparaissent en ≤ 3 min, comme quand
+ * l'ancienne boucle dédiée s'arrêtait) — pas de repoll complet inutile à la désactivation
+ * du filtre. Appel idempotent : mots-clés identiques → aucun redémarrage.
+ *
+ * DÉFENSIF — le DERNIER appel gagne : il n'y a qu'UN état de mots-clés (pas de refcount
+ * par appelant). Le cas réel est un seul consommateur GDELT (le panneau NEWS) ; si
+ * plusieurs coexistaient, le dernier appel définirait les mots-clés pour tous. Appelable
+ * aussi boucle arrêtée : l'état est mémorisé et lu au prochain démarrage.
+ */
+export function definirMotsClesVeille(motsCles: string[] | null): void {
+  const apres = normaliserMotsCles(motsCles);
+  if (memesMotsCles(motsClesVeille, apres)) return; // rien ne change : pas de cycle inutile
+  motsClesVeille = apres;
+  if (apres !== null && veillePartagee !== null) {
+    veillePartagee.stop();
+    veillePartagee.stop = creerBoucleVeille(); // refcount inchangé, les Unsubscribe restent valides
+  }
+}
+
+/**
+ * Démarre la veille news (poll 3 min, source « news » du registre santé). À appeler au
+ * montage d'un consommateur (panneau NEWS, bandeau ticker) ; l'`Unsubscribe` retourné
+ * (idempotent) libère l'abonnement au démontage.
+ *
+ * Boucle UNIQUE refcomptée, partagée par tous les appelants : bandeau ticker permanent +
+ * panneau NEWS ouverts ensemble ne font qu'UN polling (le second abonné réutilise les
+ * items ≤ 3 min du store, pas de refetch immédiat). La recherche GDELT ciblée (filtre
+ * symbole du panneau) n'est PLUS une boucle dédiée : c'est un ÉTAT de la veille, posé via
+ * `definirMotsClesVeille` — une seule boucle ⇒ plus d'écrasements croisés de `items`
+ * (flip-flop GDELT) ni de flux pollés en double.
+ *
+ * Si TOUS les flux échouent, on conserve les news précédentes (pas d'écrasement à vide)
+ * et on laisse pollLoop marquer la source en erreur (backoff).
+ */
+export function demarrerVeilleNews(): Unsubscribe {
+  if (veillePartagee === null) veillePartagee = { stop: creerBoucleVeille(), abonnes: 0 };
+  const partagee = veillePartagee;
+  partagee.abonnes += 1;
+  let libere = false;
+  return () => {
+    if (libere) return; // idempotent (StrictMode / double cleanup)
+    libere = true;
+    partagee.abonnes -= 1;
+    if (partagee.abonnes <= 0 && veillePartagee === partagee) {
+      partagee.stop();
+      veillePartagee = null;
+    }
+  };
 }

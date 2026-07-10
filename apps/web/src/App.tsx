@@ -8,6 +8,7 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import { Toolbar } from "./components/Toolbar";
+import { TickerBand } from "./components/TickerBand";
 import { DrawingToolbar } from "./components/DrawingToolbar";
 import { ChartGrid } from "./chart/ChartGrid";
 import { Watchlist } from "./components/Watchlist";
@@ -48,6 +49,7 @@ import { BriefWindow, commandes as briefCommands } from "./components/BriefWindo
 import { settingsUiStore } from "./store/settings-ui";
 import { ecoCommands } from "./store/eco";
 import { commandes as newsCommands } from "./store/news";
+import { commandes as tickerCommands } from "./store/tickerBand";
 import { commandes as onchainCommands } from "./store/onchain";
 import { commandes as portfolioCommands } from "./store/portfolio";
 import { commandes as notesCommands } from "./store/notes";
@@ -135,6 +137,8 @@ enregistrerCommandes([
   ...fundCommands,
   // Fenêtre BRIEF (snapshot marché matinal, composition de sources existantes).
   ...briefCommands,
+  // Bandeau ticker d'actualités (TICKER — affiche/masque, état persisté).
+  ...tickerCommands,
 ]);
 
 // ─────────────────────────── Table composant↔id des fenêtres flottantes ───────────────────────────
@@ -211,6 +215,9 @@ export function App() {
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg text-text">
       {/* Plein écran : toolbars et sidebar masquées, le graphe occupe tout l'écran. */}
       {!plein && <Toolbar />}
+      {/* Bandeau news défilant (enfant flex : le workspace mesuré par chartAreaRef se
+          rétrécit automatiquement). Se masque lui-même selon tickerBandStore (⌘K TICKER). */}
+      {!plein && <TickerBand />}
       {/* min-h-0 indispensable pour que le graphe (flex-1) prenne une hauteur réelle. */}
       <main className="flex min-h-0 flex-1">
         {/* Barre d'outils de dessin verticale, à gauche du graphe. */}

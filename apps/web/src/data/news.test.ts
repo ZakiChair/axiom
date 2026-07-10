@@ -7,6 +7,9 @@ import { describe, expect, it } from "vitest";
 import {
   estPertinentPourSymbole,
   fusionner,
+  memesMotsCles,
+  NEWS_FEEDS,
+  normaliserMotsCles,
   parseDate,
   parseFeed,
   parseFinnhubNews,
@@ -227,6 +230,60 @@ describe("parseFinnhubNews", () => {
     const items = parseFinnhubNews(json);
     expect(items).toHaveLength(2);
     expect(items.map((i) => i.title)).toEqual(["Fed holds rates", "ETF flows surge"]);
+  });
+
+  it("porte la source fournie (catégorie forex → finnhubfx), défaut finnhub", () => {
+    const json = [{ id: 7, headline: "EUR/USD slides on ECB", datetime: 1751970000 }];
+    const fx = parseFinnhubNews(json, "finnhubfx");
+    expect(fx[0]?.source).toBe("finnhubfx");
+    // Sans lien : l'id de repli est préfixé par la source (pas de collision inter-catégories).
+    expect(fx[0]?.id).toBe("finnhubfx:7");
+    expect(parseFinnhubNews(json)[0]?.source).toBe("finnhub");
+  });
+});
+
+describe("NEWS_FEEDS — invariants de configuration", () => {
+  it("a des ids uniques", () => {
+    const ids = NEWS_FEEDS.map((f) => f.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("tout flux XML (kind absent) a un hôte et un chemin", () => {
+    for (const f of NEWS_FEEDS.filter((f) => f.kind === undefined)) {
+      expect(f.host.length, f.id).toBeGreaterThan(0);
+      expect(f.path.length, f.id).toBeGreaterThan(0);
+    }
+  });
+
+  it("expose les flux macro/tradfi du bandeau (Bloomberg, CNBC, Finnhub forex)", () => {
+    const parId = new Map(NEWS_FEEDS.map((f) => [f.id, f]));
+    expect(parId.get("bloomberg")).toMatchObject({ host: "feeds.bloomberg.com", path: "economics/news.rss" });
+    expect(parId.get("cnbc")).toMatchObject({ host: "www.cnbc.com", path: "id/20910258/device/rss/rss.html" });
+    expect(parId.get("finnhubfx")).toMatchObject({ kind: "finnhub", category: "forex" });
+    expect(parId.get("finnhub")).toMatchObject({ kind: "finnhub", category: "general" });
+  });
+});
+
+describe("normaliserMotsCles — mots-clés de la veille", () => {
+  it("null et liste vide → null (cycle SANS appel GDELT)", () => {
+    expect(normaliserMotsCles(null)).toBeNull();
+    expect(normaliserMotsCles([])).toBeNull();
+  });
+  it("liste non vide conservée telle quelle (cycle AVEC recherche GDELT)", () => {
+    expect(normaliserMotsCles(["bitcoin", "btc"])).toEqual(["bitcoin", "btc"]);
+  });
+});
+
+describe("memesMotsCles", () => {
+  it("égalité élément par élément, ordre significatif", () => {
+    expect(memesMotsCles(["bitcoin", "btc"], ["bitcoin", "btc"])).toBe(true);
+    expect(memesMotsCles(["bitcoin", "btc"], ["btc", "bitcoin"])).toBe(false);
+    expect(memesMotsCles(["btc"], ["bitcoin", "btc"])).toBe(false);
+  });
+  it("null n'est égal qu'à null (une liste vide non normalisée en diffère)", () => {
+    expect(memesMotsCles(null, null)).toBe(true);
+    expect(memesMotsCles(null, [])).toBe(false);
+    expect(memesMotsCles(["btc"], null)).toBe(false);
   });
 });
 

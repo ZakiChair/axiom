@@ -13,6 +13,7 @@ import { derivativesUiStore } from "../store/derivatives-ui";
 // Stores UI des fenêtres non modales (Phase 3), pour le menu déroulant « Fonctions ».
 import { ecoStore } from "../store/eco";
 import { newsUiStore } from "../store/news";
+import { tickerBandStore } from "../store/tickerBand";
 import { onchainUiStore } from "../store/onchain";
 import { marketMapUiStore } from "../store/marketmap-ui";
 import { portfolioUiStore } from "../store/portfolio";
@@ -145,6 +146,8 @@ function exchangeLabel(id: ExchangeId): string {
 const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] = [
   { mnemonique: "ECO", libelle: "Calendrier économique", ouvrir: () => ecoStore.getState().openEco() },
   { mnemonique: "NEWS", libelle: "Actualités crypto", ouvrir: () => newsUiStore.getState().openNews() },
+  // TICKER bascule le bandeau news défilant (pas une fenêtre) — même action que la palette (⌘K).
+  { mnemonique: "TICKER", libelle: "Bandeau news défilant", ouvrir: () => tickerBandStore.getState().basculer() },
   { mnemonique: "CORR", libelle: "Corrélations", ouvrir: () => corrUiStore.getState().openCorr() },
   { mnemonique: "CHAIN", libelle: "On-chain", ouvrir: () => onchainUiStore.getState().openOnchain() },
   { mnemonique: "MAP", libelle: "Vue marché (treemap)", ouvrir: () => marketMapUiStore.getState().openMarketMap() },

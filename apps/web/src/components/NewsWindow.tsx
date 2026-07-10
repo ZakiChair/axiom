@@ -7,8 +7,9 @@
  * clics du graphe (panneau translaté hors écran + pointer-events-none quand fermé).
  *
  * Filtres : plein texte + « symbole actif » (mots-clés dérivés du symbole affiché) — ce
- * dernier déclenche EN PLUS une recherche GDELT ciblée sur ces mots-clés (proxy /extapi,
- * dégradation silencieuse si GDELT est indisponible). Marquage lu/non-lu léger (persisté).
+ * dernier pose EN PLUS les mots-clés GDELT de la veille PARTAGÉE (`definirMotsClesVeille`,
+ * cf. data/news.ts : une seule boucle, pas de veille dédiée ; dégradation silencieuse si
+ * GDELT est indisponible). Marquage lu/non-lu léger (persisté).
  * Dégradation par flux : une source en panne est affichée en pied de panneau, sans erreur
  * console en boucle. Bandeau Fear & Greed en en-tête (cf. data/marketOverview).
  */
@@ -18,6 +19,7 @@ import { marketStore } from "../store/market";
 import { newsStore, newsUiStore } from "../store/news";
 import { EnTeteFenetre } from "./ui";
 import {
+  definirMotsClesVeille,
   demarrerVeilleNews,
   estPertinentPourSymbole,
   NEWS_FEEDS,
@@ -164,21 +166,29 @@ export function NewsWindow() {
 
   const motsCles = useMemo(() => symbolKeywords(symbol), [symbol]);
 
-  // Veille news + tick d'horloge conditionnés à l'ouverture (comme le polling des dérivés).
-  // La recherche GDELT ciblée n'est déclenchée QUE si le filtre symbole est actif (sinon
-  // `undefined` → fetchToutesLesNews se limite aux flux statiques, comportement inchangé).
-  // Redémarre (immediate: true) si le filtre ou le symbole change, pour repartir avec des
-  // mots-clés à jour.
+  // Mots-clés GDELT de la veille PARTAGÉE : posés quand le filtre symbole est actif,
+  // remis à null sinon et à la fermeture/démontage (cleanup). Un changement de symbole ou
+  // du filtre repasse ici (deps) — definirMotsClesVeille déclenche alors un cycle immédiat
+  // côté veille (pas de boucle dédiée, cf. data/news.ts). Déclaré AVANT l'effet de veille
+  // pour que le premier cycle à l'ouverture parte déjà avec les bons mots-clés.
+  useEffect(() => {
+    if (!open) return;
+    definirMotsClesVeille(filtreSymbole ? motsCles : null);
+    return () => definirMotsClesVeille(null);
+  }, [open, filtreSymbole, motsCles]);
+
+  // Veille news partagée (refcomptée) + tick d'horloge, conditionnées à l'ouverture
+  // (comme le polling des dérivés).
   useEffect(() => {
     if (!open) return;
     setMaintenant(Date.now());
-    const stop = demarrerVeilleNews(filtreSymbole ? motsCles : undefined);
+    const stop = demarrerVeilleNews();
     const horloge = setInterval(() => setMaintenant(Date.now()), 30_000);
     return () => {
       stop();
       clearInterval(horloge);
     };
-  }, [open, filtreSymbole, motsCles]);
+  }, [open]);
 
   // Bandeau Fear & Greed : réutilise `fetchFearGreed` (déjà appelé par MarketMapWindow),
   // sans store partagé — la fonction a son propre cache localStorage 1 h, un second appelant

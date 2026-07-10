@@ -1,9 +1,11 @@
 /**
- * CourbeTaux — courbe des taux réelle (canvas), US (accent) superposée à la zone euro
- * (couleur secondaire). X = maturité convertie en années via `anneesDeMaturite`
- * (`courbeTaux.util.ts`, testée séparément), Y = taux en %. Composant de rendu PUR,
- * NON unit-testé (pattern `Sparkline`/`SeasonalityWindow` : les canvas React sont
- * vérifiés manuellement). Couleurs via `lireTokenCanvas` — jamais de couleur en dur.
+ * CourbeTaux — courbe des taux réelle (canvas), N séries superposées (US, zone euro,
+ * Japon, Canada, Australie…). X = maturité convertie en années via `anneesDeMaturite`
+ * (`courbeTaux.util.ts`, testée séparément — cf. `pointsDeCourbe`), Y = taux en %.
+ * Composant de rendu PUR, NON unit-testé (pattern `Sparkline`/`SeasonalityWindow` :
+ * les canvas React sont vérifiés manuellement). Couleur PAR SÉRIE via les tokens
+ * `--serie-1…6` (`lireTokenCanvas`) — jamais de couleur en dur ; légende générée
+ * depuis les libellés des séries non vides.
  */
 import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
@@ -18,7 +20,34 @@ export interface PointCourbe {
   taux: number;
 }
 
-function dessinerCourbe(canvas: HTMLCanvasElement, us: PointCourbe[], euro: PointCourbe[]): void {
+/** Une série nommée de la courbe (un pays / une zone). */
+export interface SerieCourbe {
+  /** Libellé de légende (« US », « Zone euro », « Japon »…). */
+  label: string;
+  /** Points déjà projetés en années (cf. `pointsDeCourbe`). */
+  points: PointCourbe[];
+  /** Index 1…6 du token de couleur `--serie-N` (palette réinterprétée par thème). */
+  couleurTokenIndex: number;
+}
+
+// Replis des tokens --serie-1…6 (valeurs du thème par défaut, cf. index.css) — même
+// pattern que les replis unitaires passés à `lireTokenCanvas` ailleurs.
+const REPLIS_SERIE: readonly string[] = [
+  "#38bdf8",
+  "#a78bfa",
+  "#f59e0b",
+  "#f472b6",
+  "#22d3ee",
+  "#60a5fa",
+];
+
+/** Couleur résolue d'une série : token `--serie-N` du thème courant, repli par défaut. */
+function couleurSerie(index: number): string {
+  const repli = REPLIS_SERIE[index - 1] ?? REPLIS_SERIE[0]!;
+  return lireTokenCanvas(`--serie-${index}`, repli);
+}
+
+function dessinerCourbe(canvas: HTMLCanvasElement, series: SerieCourbe[]): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -31,12 +60,9 @@ function dessinerCourbe(canvas: HTMLCanvasElement, us: PointCourbe[], euro: Poin
 
   const dim = lireTokenCanvas("--text-dim", "#94a3b8");
   const border = lireTokenCanvas("--border", "#334155");
-  const accent = lireTokenCanvas("--accent", "#38bdf8");
-  // Série secondaire (zone euro) : token de série dédié, pas le token sémantique --up.
-  const secondaire = lireTokenCanvas("--serie-2", "#a78bfa");
   ctx.font = "10px var(--font-display, monospace)";
 
-  const tous = [...us, ...euro];
+  const tous = series.flatMap((s) => s.points);
   // Cas < 2 points géré par le composant (état <Vide/> standard), sans texte canvas.
   if (tous.length < 2) return;
 
@@ -100,8 +126,7 @@ function dessinerCourbe(canvas: HTMLCanvasElement, us: PointCourbe[], euro: Poin
       ctx.fill();
     }
   };
-  tracer(us, accent);
-  tracer(euro, secondaire);
+  for (const s of series) tracer(s.points, couleurSerie(s.couleurTokenIndex));
 
   // Étiquettes de maturité en abscisse (dédupliquées, espacées pour éviter le chevauchement).
   ctx.fillStyle = dim;
@@ -119,30 +144,33 @@ function dessinerCourbe(canvas: HTMLCanvasElement, us: PointCourbe[], euro: Poin
     });
   ctx.textAlign = "left";
 
-  // Légende.
-  ctx.fillStyle = accent;
-  ctx.fillText("● US", left, 10);
-  if (euro.length > 0) {
-    ctx.fillStyle = secondaire;
-    ctx.fillText("● Zone euro", left + 36, 10);
+  // Légende générée : une pastille par série non vide, positionnée au fil de l'eau.
+  let legendeX = left;
+  for (const s of series) {
+    if (s.points.length === 0) continue;
+    const texte = `● ${s.label}`;
+    ctx.fillStyle = couleurSerie(s.couleurTokenIndex);
+    ctx.fillText(texte, legendeX, 10);
+    legendeX += ctx.measureText(texte).width + 10;
   }
 }
 
-export function CourbeTaux({ us, euro }: { us: PointCourbe[]; euro: PointCourbe[] }): JSX.Element {
+export function CourbeTaux({ series }: { series: SerieCourbe[] }): JSX.Element {
   const ref = useRef<HTMLCanvasElement>(null);
   const theme = useStore(themeStore, (s) => s.theme); // redessine au changement de thème (cf. MarketMapWindow)
 
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
-    const redraw = (): void => dessinerCourbe(canvas, us, euro);
+    const redraw = (): void => dessinerCourbe(canvas, series);
     redraw();
     const ro = new ResizeObserver(redraw);
     ro.observe(canvas);
     return () => ro.disconnect();
-  }, [us, euro, theme]);
+  }, [series, theme]);
 
   // Moins de 2 points : état « indisponible » standard (cf. Vide) plutôt qu'un texte canvas.
-  if (us.length + euro.length < 2) return <Vide>Courbe indisponible (pas assez de points).</Vide>;
+  const nbPoints = series.reduce((n, s) => n + s.points.length, 0);
+  if (nbPoints < 2) return <Vide>Courbe indisponible (pas assez de points).</Vide>;
   return <canvas ref={ref} className="h-[180px] w-full" aria-hidden="true" />;
 }

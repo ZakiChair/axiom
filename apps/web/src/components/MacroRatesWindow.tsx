@@ -3,8 +3,11 @@
  *
  * UN panneau unifié (décision produit : pas trois fenêtres séparées) à TROIS sections :
  *   1. Rendements obligataires souverains — courbe US (home.treasury.gov) + zone euro
- *      AAA (ECB SDMX), avec variation jour-sur-jour colorée et écart 2s10s (inversion).
- *   2. Taux directeurs — Fed / BCE / BoE / BoJ / BNS en un seul appel BIS WS_CBPOL.
+ *      AAA (ECB SDMX) + Japon (MOF) + Canada (BoC Valet) + Australie (RBA F2), avec
+ *      variation jour-sur-jour US colorée et écart 2s10s (inversion). Vue tableau
+ *      (US + matrice internationale) et vue courbe (N séries, bascules par pays).
+ *   2. Taux directeurs — 12 grandes banques centrales (Fed, BCE, BoE, BoJ, BNS, PBOC,
+ *      BoC, RBA, BCB, RBI, BoK, Banxico) en un seul appel BIS WS_CBPOL.
  *   3. Réserves d'or par pays — classement en tonnes (IMF SDMX 3.0 IRFCL).
  *
  * Données LENTES (quotidiennes/mensuelles) : elles vivent dans le state React et sont
@@ -18,19 +21,22 @@ import { createStore } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { macroRatesViewStore, type VueRendementsMode } from "../store/macroRatesView";
+import { deltaJour, MATURITES_US, spread2s10s } from "../data/macro/treasuryYields";
 import {
-  chargerRendementsSouverains,
-  deltaJour,
-  MATURITES_US,
-  spread2s10s,
-  type RendementsSouverains,
-} from "../data/macro/treasuryYields";
+  chargerRendementsSouverainsMulti,
+  MATURITE_AU_INDEXEE,
+  MATURITES_AU,
+  MATURITES_CA,
+  MATURITES_JP,
+  type RendementsSouverainsMulti,
+} from "../data/macro/sovereignYields";
 import { chargerTauxDirecteurs, type TauxDirecteur } from "../data/macro/policyRates";
 import { chargerReservesOr, type ReserveOr } from "../data/macro/goldReserves";
-import { CourbeTaux, type PointCourbe } from "./CourbeTaux";
-import { anneesDeMaturite } from "./courbeTaux.util";
+import { CourbeTaux, type SerieCourbe } from "./CourbeTaux";
+import { pointsDeCourbe } from "./courbeTaux.util";
+import { paysIndisponibles } from "./macroRatesWindow.util";
 import { formatPourcentage, formatEntier, formatDateComplete } from "../lib/format";
-import { EnTeteFenetre, Onglets, Chargement, Vide } from "./ui";
+import { EnTeteFenetre, Onglets, Chargement, NoteSource, Vide } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -150,25 +156,26 @@ const VUES_RENDEMENTS: ReadonlyArray<{ id: VueRendementsMode; label: string }> =
 
 // ─────────────────────────── Sous-vues ───────────────────────────
 
-/** Points de la courbe US : maturité → années (via `anneesDeMaturite`) + taux, en
- * écartant les formes non reconnues et les valeurs absentes (dégradation gracieuse). */
-function pointsUs(derniere: { rendements: Record<string, number> } | undefined): PointCourbe[] {
-  if (derniere === undefined) return [];
-  const pts: PointCourbe[] = [];
-  for (const m of MATURITES_US) {
-    const taux = derniere.rendements[m];
-    const annees = anneesDeMaturite(m);
-    if (taux !== undefined && Number.isFinite(annees)) pts.push({ maturite: m, anneesTri: annees, taux });
-  }
-  return pts;
-}
+/** Maturités zone euro affichées (déjà « N Yr », directement en années). */
+const MATURITES_EURO: readonly string[] = ["2 Yr", "10 Yr", "30 Yr"];
 
-/** Points de la courbe zone euro (2/10/30 ans, déjà en années entières). */
-function pointsEuro(euro: Record<string, number>): PointCourbe[] {
-  return ["2 Yr", "10 Yr", "30 Yr"]
-    .filter((m) => euro[m] !== undefined)
-    .map((m) => ({ maturite: m, anneesTri: anneesDeMaturite(m), taux: euro[m]! }));
-}
+/** Lignes du tableau « International » : union des maturités zone euro (2/10/30 Yr,
+ * incluses dans la liste JGB), Japon (1→40 Yr), Canada (2/3/5/7/10 Yr, incluses) et
+ * Australie (2/3/5/10 Yr + indexée). Les lignes sans aucune valeur sont masquées. */
+const MATURITES_INTL: readonly string[] = [...MATURITES_JP, MATURITE_AU_INDEXEE];
+
+/** Classes `text-serie-N` par index de token (littéraux STATIQUES pour le JIT Tailwind). */
+const CLASSES_SERIE: readonly string[] = [
+  "text-serie-1",
+  "text-serie-2",
+  "text-serie-3",
+  "text-serie-4",
+  "text-serie-5",
+  "text-serie-6",
+];
+
+/** Identifiants des pays affichables sur la courbe (bascules de visibilité). */
+type PaysCourbe = "us" | "euro" | "jp" | "ca" | "au";
 
 function VueRendements({
   data,
@@ -176,20 +183,86 @@ function VueRendements({
   vue,
   setVue,
 }: {
-  data: RendementsSouverains | null;
+  data: RendementsSouverainsMulti | null;
   statut: Statut;
   vue: VueRendementsMode;
   setVue: (v: VueRendementsMode) => void;
 }) {
+  // Pays masqués sur la courbe (bascules de lisibilité) — état local, non persisté.
+  const [masques, setMasques] = useState<ReadonlySet<PaysCourbe>>(new Set());
   if (statut === "loading" && data === null) return <Chargement />;
   const us = data?.us ?? [];
   const euro = data?.euro ?? {};
+  const jp = data?.jp ?? [];
+  const ca = data?.ca ?? [];
+  const au = data?.au ?? [];
   const derniere = us[0];
   const spread = spread2s10s(us);
 
-  if (derniere === undefined && Object.keys(euro).length === 0) {
+  if (
+    derniere === undefined &&
+    Object.keys(euro).length === 0 &&
+    jp.length === 0 &&
+    ca.length === 0 &&
+    au.length === 0
+  ) {
     return <Vide>Rendements souverains indisponibles pour le moment.</Vide>;
   }
+
+  // Une série par pays avec données (couleurs --serie-1…5, légende générée par CourbeTaux).
+  const toutesSeries: ReadonlyArray<{ id: PaysCourbe; serie: SerieCourbe }> = [
+    {
+      id: "us",
+      serie: {
+        label: "US",
+        points: pointsDeCourbe(derniere?.rendements, MATURITES_US),
+        couleurTokenIndex: 1,
+      },
+    },
+    {
+      id: "euro",
+      serie: { label: "Zone euro", points: pointsDeCourbe(euro, MATURITES_EURO), couleurTokenIndex: 2 },
+    },
+    {
+      id: "jp",
+      serie: {
+        label: "Japon",
+        points: pointsDeCourbe(jp[0]?.rendements, MATURITES_JP),
+        couleurTokenIndex: 3,
+      },
+    },
+    {
+      id: "ca",
+      serie: {
+        label: "Canada",
+        points: pointsDeCourbe(ca[0]?.rendements, MATURITES_CA),
+        couleurTokenIndex: 4,
+      },
+    },
+    {
+      id: "au",
+      serie: {
+        label: "Australie",
+        points: pointsDeCourbe(au[0]?.rendements, MATURITES_AU),
+        couleurTokenIndex: 5,
+      },
+    },
+  ];
+  const seriesDisponibles = toutesSeries.filter((p) => p.serie.points.length > 0);
+  // Séries restantes après bascules : distinguer « données présentes mais toutes
+  // masquées » (message dédié) de « pas assez de points » (message de CourbeTaux).
+  const seriesVisibles = seriesDisponibles.filter(({ id }) => !masques.has(id));
+  // Pays attendus sans aucune donnée (ex. RBA 403 Akamai) : note discrète en pied.
+  const indisponibles = paysIndisponibles(data);
+
+  // Colonnes de la matrice internationale (dernière observation par pays, si disponible).
+  const colonnesIntl: ReadonlyArray<{ id: string; titre: string; valeurs: Record<string, number> }> =
+    [
+      { id: "euro", titre: "Zone euro", valeurs: euro },
+      { id: "jp", titre: "Japon", valeurs: jp[0]?.rendements ?? {} },
+      { id: "ca", titre: "Canada", valeurs: ca[0]?.rendements ?? {} },
+      { id: "au", titre: "Australie", valeurs: au[0]?.rendements ?? {} },
+    ].filter((c) => Object.keys(c.valeurs).length > 0);
 
   return (
     <div className="space-y-4">
@@ -214,7 +287,42 @@ function VueRendements({
             titre="Courbe des taux"
             info={derniere !== undefined ? `au ${formatDateSource(derniere.date)}` : undefined}
           />
-          <CourbeTaux us={pointsUs(derniere)} euro={pointsEuro(euro)} />
+          {seriesDisponibles.length > 1 && (
+            <div className="mb-2 flex flex-wrap gap-1">
+              {seriesDisponibles.map(({ id, serie }) => {
+                const actif = !masques.has(id);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={actif}
+                    title={actif ? `Masquer ${serie.label}` : `Afficher ${serie.label}`}
+                    onClick={() =>
+                      setMasques((prev) => {
+                        const suivant = new Set(prev);
+                        if (suivant.has(id)) suivant.delete(id);
+                        else suivant.add(id);
+                        return suivant;
+                      })
+                    }
+                    className={`rounded px-2 py-0.5 text-[10px] transition ${
+                      actif ? "bg-surface text-text" : "text-text-dim opacity-60 hover:opacity-100"
+                    }`}
+                  >
+                    <span className={CLASSES_SERIE[serie.couleurTokenIndex - 1] ?? "text-serie-1"}>
+                      ●
+                    </span>{" "}
+                    {serie.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {seriesDisponibles.length > 0 && seriesVisibles.length === 0 ? (
+            <Vide>Toutes les séries sont masquées.</Vide>
+          ) : (
+            <CourbeTaux series={seriesVisibles.map(({ serie }) => serie)} />
+          )}
         </section>
       ) : (
         <>
@@ -254,24 +362,55 @@ function VueRendements({
             </section>
           )}
 
-          {Object.keys(euro).length > 0 && (
+          {colonnesIntl.length > 0 && (
             <section>
-              <EnteteSection titre="Zone euro (courbe AAA)" info="ECB SDMX" />
+              <EnteteSection titre="International" info="ECB · MOF · BoC · RBA" />
               <table className="w-full text-[11px] tabular-nums">
+                <thead>
+                  <tr className="text-text-dim">
+                    <th className="py-1 text-left font-medium">Maturité</th>
+                    {colonnesIntl.map((c) => (
+                      <th key={c.id} className="py-1 text-right font-medium">
+                        {c.titre}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
                 <tbody>
-                  {["2 Yr", "10 Yr", "30 Yr"].map((m) =>
-                    euro[m] === undefined ? null : (
-                      <tr key={m} className="border-t border-border/60">
-                        <td className="py-1 text-left text-text">{m}</td>
-                        <td className="py-1 text-right text-text">{formatPourcentage(euro[m])}</td>
-                      </tr>
-                    ),
-                  )}
+                  {MATURITES_INTL.filter((m) =>
+                    colonnesIntl.some((c) => c.valeurs[m] !== undefined),
+                  ).map((m) => (
+                    <tr key={m} className="border-t border-border/60">
+                      <td className="py-1 text-left text-text">{m}</td>
+                      {colonnesIntl.map((c) => (
+                        <td
+                          key={c.id}
+                          className={`py-1 text-right ${
+                            c.valeurs[m] === undefined ? "text-text-dim" : "text-text"
+                          }`}
+                        >
+                          {formatPourcentage(c.valeurs[m])}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
                 </tbody>
               </table>
+              <div className="mt-1">
+                <NoteSource>
+                  Zone euro : courbe AAA (taux spot) · « {MATURITE_AU_INDEXEE} » : rendement réel
+                  (obligation indexée australienne).
+                </NoteSource>
+              </div>
             </section>
           )}
         </>
+      )}
+
+      {/* Dégradation VISIBLE : pays attendus restés sans donnée (pattern « sources en
+          panne » de NewsWindow) — ex. RBA 403 Akamai, cf. sovereignYields.ts. */}
+      {indisponibles.length > 0 && (
+        <NoteSource>Indisponible : {indisponibles.join(" · ")}</NoteSource>
       )}
     </div>
   );
@@ -367,7 +506,7 @@ export function MacroRatesWindow() {
     setVue("courbe");
   }, [requeteCourbe]);
 
-  const [rendements, setRendements] = useState<RendementsSouverains | null>(null);
+  const [rendements, setRendements] = useState<RendementsSouverainsMulti | null>(null);
   const [taux, setTaux] = useState<TauxDirecteur[] | null>(null);
   const [reserves, setReserves] = useState<ReserveOr[] | null>(null);
 
@@ -387,7 +526,7 @@ export function MacroRatesWindow() {
     let ignore = false;
     if (onglet === "rendements" && statutR === "idle") {
       setStatutR("loading");
-      void chargerRendementsSouverains().then((r) => {
+      void chargerRendementsSouverainsMulti().then((r) => {
         if (ignore) return;
         setRendements(r);
         setStatutR("ready");
@@ -426,7 +565,7 @@ export function MacroRatesWindow() {
     <>
       <EnTeteFenetre
         titre="RATE · Taux & Réserves"
-        sousTitre="Trésor US · ECB · BIS · IMF"
+        sousTitre="Trésor US · ECB · MOF · BoC · RBA · BIS · IMF"
         actions={
           <button
             type="button"

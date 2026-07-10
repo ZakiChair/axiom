@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anneesDeMaturite } from "./courbeTaux.util";
+import { anneesDeMaturite, pointsDeCourbe } from "./courbeTaux.util";
 
 describe("anneesDeMaturite", () => {
   it("convertit les mois en fraction d'année", () => {
@@ -15,5 +15,27 @@ describe("anneesDeMaturite", () => {
   });
   it("NaN sur forme inconnue", () => {
     expect(Number.isNaN(anneesDeMaturite("???"))).toBe(true);
+    expect(Number.isNaN(anneesDeMaturite("10 Yr (indexée)"))).toBe(true);
+  });
+});
+
+describe("pointsDeCourbe", () => {
+  const rendements = { "2 Yr": 4.14, "10 Yr": 4.49, "10 Yr (indexée)": 2.5 };
+
+  it("projette les maturités présentes dans l'ordre demandé, avec les années", () => {
+    const pts = pointsDeCourbe(rendements, ["2 Yr", "10 Yr"]);
+    expect(pts).toEqual([
+      { maturite: "2 Yr", anneesTri: 2, taux: 4.14 },
+      { maturite: "10 Yr", anneesTri: 10, taux: 4.49 },
+    ]);
+  });
+
+  it("écarte les maturités absentes et les libellés non convertibles (indexée)", () => {
+    const pts = pointsDeCourbe(rendements, ["2 Yr", "30 Yr", "10 Yr (indexée)"]);
+    expect(pts).toEqual([{ maturite: "2 Yr", anneesTri: 2, taux: 4.14 }]);
+  });
+
+  it("observation absente → [] (dégradation gracieuse)", () => {
+    expect(pointsDeCourbe(undefined, ["2 Yr"])).toEqual([]);
   });
 });

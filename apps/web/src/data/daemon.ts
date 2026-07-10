@@ -152,6 +152,105 @@ export async function kvSnapshot(ns: string): Promise<SnapshotKv | null> {
   }
 }
 
+// ─────────────────────────── Snapshots KV (sauvegarde versionnée) ───────────────────────────
+
+/** Métadonnée d'un snapshot KV (liste des Réglages) : id, horodatage, taille du payload. */
+export interface MetaSnapshot {
+  id: number;
+  ts: number;
+  taille: number;
+}
+
+/** URL de base des snapshots KV du daemon. */
+function urlSnapshots(): string {
+  return `${baseDaemon()}/kv/snapshots`;
+}
+
+/**
+ * Liste les snapshots KV (plus récent en tête), ou `null` si le daemon est injoignable
+ * (la section Réglages affiche alors l'état indisponible). Échec silencieux.
+ */
+export async function listerSnapshots(): Promise<MetaSnapshot[] | null> {
+  try {
+    const res = await fetch(urlSnapshots());
+    if (!res.ok) return null;
+    const corps = (await res.json()) as { snapshots?: unknown };
+    if (!Array.isArray(corps.snapshots)) return null;
+    return corps.snapshots as MetaSnapshot[];
+  } catch {
+    return null;
+  }
+}
+
+/** Fige un snapshot immédiat ; renvoie sa méta, ou `null` en cas d'échec / daemon absent. */
+export async function creerSnapshot(): Promise<MetaSnapshot | null> {
+  try {
+    const res = await fetch(urlSnapshots(), { method: "POST" });
+    if (!res.ok) return null;
+    const corps = (await res.json()) as { id?: unknown; ts?: unknown; taille?: unknown };
+    if (typeof corps.id !== "number" || typeof corps.ts !== "number" || typeof corps.taille !== "number") {
+      return null;
+    }
+    return { id: corps.id, ts: corps.ts, taille: corps.taille };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Namespace KV dont les entrées mappent 1:1 sur des clés localStorage (`cle` EST la clé
+ * localStorage, `valeur` la chaîne localStorage) — cf. store/persist.ts. Les autres
+ * namespaces (alerts/notes/portfolio) sont miroités en écriture seule et ne sont pas
+ * ré-appliqués par la restauration.
+ */
+const NS_PERSIST = "persist";
+
+/** Entrée restaurée renvoyée par l'endpoint restore (valeur déjà JSON-parsée). */
+interface EntreeRestauree {
+  namespace: string;
+  cle: string;
+  valeur: unknown;
+}
+
+/**
+ * Restaure un snapshot par id. Côté daemon : un snapshot PRÉ-RESTAURATION est pris
+ * automatiquement AVANT le remplacement (destructif) et les entrées restaurées reçoivent
+ * un horodatage frais.
+ *
+ * PILOTÉ PAR LE FRONT : réécrire le seul KV daemon serait SANS EFFET — au rechargement le
+ * front hydrate depuis localStorage puis la réconciliation last-write-wins ré-écrase le KV
+ * (cf. store/persist.ts). On réécrit donc ici DIRECTEMENT dans localStorage les entrées du
+ * namespace « persist » (mêmes clés) : l'hydratation au reload repart de l'état restauré.
+ *
+ * Renvoie `true` si le remplacement a eu lieu, `false` sinon (id inconnu / daemon absent).
+ * L'appelant doit ensuite inviter à recharger la page (les stores hydratent au démarrage).
+ */
+export async function restaurerSnapshot(id: number): Promise<boolean> {
+  try {
+    const res = await fetch(`${urlSnapshots()}/${encodeURIComponent(String(id))}/restore`, {
+      method: "POST",
+    });
+    if (!res.ok) return false;
+    const corps = (await res.json()) as { entrees?: unknown };
+    if (Array.isArray(corps.entrees)) {
+      for (const e of corps.entrees) {
+        if (!e || typeof e !== "object") continue;
+        const { namespace, cle, valeur } = e as EntreeRestauree;
+        if (namespace === NS_PERSIST && typeof cle === "string" && typeof valeur === "string") {
+          try {
+            localStorage.setItem(cle, valeur);
+          } catch {
+            /* quota / mode privé : best-effort */
+          }
+        }
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ─────────────────────────── Candles (cache long terme) ───────────────────────────
 
 /** Bougie au format de fil compact du daemon. */

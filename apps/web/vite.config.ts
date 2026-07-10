@@ -94,6 +94,8 @@ export default defineConfig(({ mode }) => {
   const TWELVE_DATA_KEY = loadEnv(mode, process.cwd(), "").TWELVE_DATA_KEY ?? "";
   const FRED_API_KEY = loadEnv(mode, process.cwd(), "").FRED_API_KEY ?? "";
   const COINALYZE_API_KEY = loadEnv(mode, process.cwd(), "").COINALYZE_API_KEY ?? "";
+  const SOSOVALUE_API_KEY = loadEnv(mode, process.cwd(), "").SOSOVALUE_API_KEY ?? "";
+  const ETHERSCAN_API_KEY = loadEnv(mode, process.cwd(), "").ETHERSCAN_API_KEY ?? "";
 
   return {
   plugins: [react()],
@@ -127,6 +129,30 @@ export default defineConfig(({ mode }) => {
           const sep = stripped.includes("?") ? "&" : "?";
           return `${stripped}${sep}apikey=${TWELVE_DATA_KEY}`;
         },
+      },
+      // SoSoValue (flux ETF spot BTC/ETH/SOL — panneau ON-CHAIN). CORS ouvert, mais on
+      // proxifie pour fournir la clé de repli .env : SoSoValue s'authentifie par EN-TÊTE
+      // (x-soso-api-key), pas par query param → injection via l'évènement proxyReq,
+      // UNIQUEMENT si le front n'a pas déjà envoyé sa clé personnelle (Réglages).
+      "/sosoapi": {
+        target: "https://openapi.sosovalue.com",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/sosoapi/, ""),
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq) => {
+            if (SOSOVALUE_API_KEY.length > 0 && !proxyReq.getHeader("x-soso-api-key")) {
+              proxyReq.setHeader("x-soso-api-key", SOSOVALUE_API_KEY);
+            }
+          });
+        },
+      },
+      // Etherscan v2 (réseau ETH — panneau ON-CHAIN). CORS ouvert, mais on proxifie pour
+      // la clé de repli .env (query param apikey) ; clé personnelle du front prioritaire.
+      "/ethscanapi": {
+        target: "https://api.etherscan.io",
+        changeOrigin: true,
+        rewrite: (path) =>
+          appendApiKeyIfAbsent(path.replace(/^\/ethscanapi/, ""), "apikey", ETHERSCAN_API_KEY),
       },
       // MEXC (exchange crypto, inclut des ACTIONS TOKENISÉES : AAPLXUSDT, TSLAONUSDT…).
       // API spot v3 compatible Binance, KEYLESS pour les données publiques, mais SANS

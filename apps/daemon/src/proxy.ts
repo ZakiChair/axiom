@@ -1,10 +1,12 @@
 /**
- * Proxy des 4 APIs sans CORS / à clé, RÉPLIQUE EXACTE des proxys de dev Vite
+ * Proxy des APIs sans CORS / à clé, RÉPLIQUE EXACTE des proxys de dev Vite
  * (apps/web/vite.config.ts) pour que le chemin de PROD (daemon) soit iso au dev :
- *   /fredapi      → https://api.stlouisfed.org  (clé api_key si absente)
- *   /coinalyzeapi → https://api.coinalyze.net   (clé api_key si absente)
- *   /tdapi        → https://api.twelvedata.com  (apikey TOUJOURS ajoutée, cf. Vite)
- *   /mexcapi      → https://api.mexc.com        (keyless, simple réécriture de chemin)
+ *   /fredapi      → https://api.stlouisfed.org       (clé api_key si absente)
+ *   /coinalyzeapi → https://api.coinalyze.net        (clé api_key si absente)
+ *   /tdapi        → https://api.twelvedata.com       (apikey TOUJOURS ajoutée, cf. Vite)
+ *   /mexcapi      → https://api.mexc.com             (keyless, simple réécriture de chemin)
+ *   /sosoapi      → https://openapi.sosovalue.com    (EN-TÊTE x-soso-api-key si absent)
+ *   /ethscanapi   → https://api.etherscan.io         (clé apikey si absente)
  *
  * Rappel BUILD-CONTRACT : le daemon ne proxifie JAMAIS le chemin chaud (les WS de
  * marché du front restent DIRECTS). Ici, uniquement du REST à quota, mis en cache.
@@ -42,6 +44,12 @@ export interface RouteProxy {
   target: string;
   /** Réécriture : `chemin` = pathname+search commençant par `prefix` → chemin amont. */
   rewrite: (chemin: string) => string;
+  /**
+   * En-têtes à envoyer à l'amont, calculés depuis ceux du front (SoSoValue s'authentifie
+   * par EN-TÊTE, pas par query param) : clé personnelle du front prioritaire, sinon repli
+   * .env, sinon rien (l'amont répond 401). Absent → aucun en-tête particulier.
+   */
+  entetesAmont?: (entetesFront: Headers) => Record<string, string>;
 }
 
 /**
@@ -82,6 +90,25 @@ export function construireRoutesProxy(cles: ProxyKeys): RouteProxy[] {
       target: "https://api.mexc.com",
       rewrite: (chemin) => chemin.replace(/^\/mexcapi/, ""),
     },
+    {
+      // SoSoValue : authentification par EN-TÊTE x-soso-api-key (pas de query param) →
+      // réécriture = simple strip, l'injection de clé passe par `entetesAmont`.
+      prefix: "/sosoapi",
+      target: "https://openapi.sosovalue.com",
+      rewrite: (chemin) => chemin.replace(/^\/sosoapi/, ""),
+      entetesAmont: (entetesFront) => {
+        const cle = entetesFront.get("x-soso-api-key") ?? cles.SOSOVALUE_API_KEY;
+        const entetes: Record<string, string> = {};
+        if (cle.length > 0) entetes["x-soso-api-key"] = cle;
+        return entetes;
+      },
+    },
+    {
+      prefix: "/ethscanapi",
+      target: "https://api.etherscan.io",
+      rewrite: (chemin) =>
+        appendApiKeyIfAbsent(chemin.replace(/^\/ethscanapi/, ""), "apikey", cles.ETHERSCAN_API_KEY),
+    },
   ];
 }
 
@@ -94,6 +121,7 @@ export async function traiterProxy(req: Request, url: URL, route: RouteProxy): P
   const cheminEntrant = url.pathname + url.search;
   const urlAmont = route.target + route.rewrite(cheminEntrant);
   const cors = entetesCors(req);
+  const entetesAmont = route.entetesAmont?.(req.headers) ?? {};
 
   if (req.method === "GET") {
     const ttlMs = ttlMsPourChemin(url.pathname);
@@ -108,7 +136,7 @@ export async function traiterProxy(req: Request, url: URL, route: RouteProxy): P
     }
     let amont: Response;
     try {
-      amont = await fetch(urlAmont, { method: "GET" });
+      amont = await fetch(urlAmont, { method: "GET", headers: entetesAmont });
     } catch (err) {
       return reponseErreurAmont(err, cors);
     }
@@ -129,9 +157,12 @@ export async function traiterProxy(req: Request, url: URL, route: RouteProxy): P
     amont = await fetch(urlAmont, {
       method: req.method,
       body: corpsReq && corpsReq.byteLength > 0 ? corpsReq : undefined,
-      headers: req.headers.get("content-type")
-        ? { "content-type": req.headers.get("content-type") as string }
-        : undefined,
+      headers: {
+        ...(req.headers.get("content-type")
+          ? { "content-type": req.headers.get("content-type") as string }
+          : {}),
+        ...entetesAmont,
+      },
     });
   } catch (err) {
     return reponseErreurAmont(err, cors);
@@ -317,7 +348,7 @@ export async function traiterExtapi(req: Request, url: URL): Promise<Response> {
   });
 }
 
-/** Enregistre les 4 routes de proxy à clé + le proxy générique /extapi dans le routeur. */
+/** Enregistre les routes de proxy à clé + le proxy générique /extapi dans le routeur. */
 export function enregistrerProxy(routeur: Routeur, cles: ProxyKeys): void {
   for (const route of construireRoutesProxy(cles)) {
     routeur.enregistrerPrefixe(route.prefix, (req, url) => traiterProxy(req, url, route));

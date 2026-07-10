@@ -15,16 +15,28 @@
  *     …, list: [ { ticker, institute, dailyNetInflow:{value,lastUpdateDate,status}, … } ] } }
  *   (`historicalInflowChart` existe aussi — historique multi-jours — mais
  *   `currentEtfDataMetrics` suffit pour le flux du jour par émetteur voulu ici.)
- * CORS confirmé ouvert (OPTIONS renvoie `access-control-allow-origin` + POST autorisé
- * avec `x-soso-api-key`/`content-type`) → appel DIRECT, pas de proxy.
- * Clé OBLIGATOIRE (plan Demo/Beta gratuit, 20 req/min, sosovalue.com/developer).
+ * CORS ouvert, mais on route via le proxy /sosoapi (Vite en dev, daemon en prod) pour
+ * bénéficier de la clé de REPLI lue dans apps/web/.env (SOSOVALUE_API_KEY) : la clé
+ * personnelle des Réglages, si saisie, est envoyée en en-tête et reste PRIORITAIRE
+ * (le proxy n'écrase jamais un x-soso-api-key déjà présent). Sans clé nulle part,
+ * l'amont répond 401 → raison explicite affichée dans le panneau.
+ * Plan Demo/Beta gratuit, 20 req/min : sosovalue.com/developer.
  */
+import { healthStore } from "../../store/health";
 import { ecrireCache, estFrais, lireCache } from "./cache";
 
 export type ActifEtf = "btc" | "eth" | "sol";
 
-const BASE = "https://openapi.sosovalue.com/openapi/v2/etf/currentEtfDataMetrics";
+const BASE = "/sosoapi/openapi/v2/etf/currentEtfDataMetrics";
 export const ETF_TTL_MS = 6 * 60 * 60 * 1000;
+/** Identifiant dans le panneau « Santé sources » (même registre que coinmetrics/mempool). */
+const SOURCE_SANTE = "sosovalue";
+/**
+ * Raison renvoyée sur 401/403 — exportée pour que l'UI ne propose le CTA « clé
+ * SoSoValue ⚙ » QUE sur un échec effectivement lié à la clé (pas sur un 5xx/réseau).
+ */
+export const RAISON_CLE_SOSOVALUE =
+  "Clé SoSoValue absente ou invalide (Réglages ⚙ ou SOSOVALUE_API_KEY dans .env).";
 
 export interface FluxEmetteur {
   emetteur: string;
@@ -82,33 +94,37 @@ export function parseEtfFlows(json: unknown): EtfResultat {
 
 /**
  * Récupère les flux ETF pour un actif, avec cache 6 h et dégradation gracieuse.
- * Renvoie `disponible:false` immédiatement (sans appel réseau) si aucune clé n'est
- * configurée — la clé est OBLIGATOIRE chez SoSoValue, contrairement à BGeometrics.
+ * La clé des Réglages est OPTIONNELLE : envoyée en en-tête si présente (prioritaire),
+ * sinon le proxy /sosoapi injecte la clé de repli SOSOVALUE_API_KEY du .env. Sans clé
+ * nulle part, l'amont répond 401 → raison explicite (pas de crash, pas de cache).
  */
 export async function fetchEtfFlows(
   actif: ActifEtf,
   cle: string | null,
   signal?: AbortSignal,
 ): Promise<EtfResultat> {
-  if (cle === null) {
-    return { disponible: false, raison: "Clé SoSoValue non configurée (Réglages)." };
-  }
-
   const cacheCle = `etf:${actif}`;
   const cache = await lireCache<EtfResultat>(cacheCle);
   if (estFrais(cache, ETF_TTL_MS) && cache !== null) return cache.donnee;
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (cle !== null) headers["x-soso-api-key"] = cle;
 
   let resultat: EtfResultat;
   try {
     const res = await fetch(BASE, {
       method: "POST",
-      headers: { "x-soso-api-key": cle, "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ type: `us-${actif}-spot` }),
       signal,
     });
-    resultat = res.ok
-      ? parseEtfFlows((await res.json()) as unknown)
-      : { disponible: false, raison: `SoSoValue indisponible (HTTP ${res.status}).` };
+    if (res.ok) {
+      resultat = parseEtfFlows((await res.json()) as unknown);
+    } else if (res.status === 401 || res.status === 403) {
+      resultat = { disponible: false, raison: RAISON_CLE_SOSOVALUE };
+    } else {
+      resultat = { disponible: false, raison: `SoSoValue indisponible (HTTP ${res.status}).` };
+    }
   } catch {
     resultat = { disponible: false, raison: "SoSoValue injoignable." };
   }
@@ -116,4 +132,20 @@ export async function fetchEtfFlows(
   // ne doit pas geler la donnée à "indisponible" pendant tout le TTL de 6 h.
   if (resultat.disponible) await ecrireCache(cacheCle, resultat);
   return resultat;
+}
+
+/**
+ * Rapporte la santé « sosovalue » pour UN cycle de chargement (les 3 actifs).
+ * Une seule écriture par cycle — les 3 fetch parallèles écrivaient chacun le même id,
+ * et l'état final dépendait de l'ordre d'achèvement (dernier écrivain gagne). Règle :
+ * au moins un actif disponible → « polling » ; tous en échec → erreur (1re raison).
+ */
+export function rapporterSanteEtf(resultats: readonly EtfResultat[]): void {
+  if (resultats.length === 0) return;
+  const disponible = resultats.some((r) => r.disponible);
+  if (disponible) {
+    healthStore.getState().setEtat(SOURCE_SANTE, "polling", { dernierMessageTs: Date.now() });
+  } else {
+    healthStore.getState().marquerErreur(SOURCE_SANTE, resultats[0]?.raison ?? "échec");
+  }
 }

@@ -53,4 +53,13 @@ describe("etherscanKeyStore", () => {
     expect(etherscanKeyStore.getState().hasKey).toBe(false);
     expect(getEtherscanKey()).toBeNull();
   });
+
+  it("version s'incrémente à chaque setKey/clearKey — y compris en REMPLAÇANT une clé (hasKey reste true)", () => {
+    const v0 = etherscanKeyStore.getState().version;
+    etherscanKeyStore.getState().setKey("ancienne");
+    etherscanKeyStore.getState().setKey("nouvelle"); // hasKey true→true, seul version bouge
+    expect(etherscanKeyStore.getState().version).toBe(v0 + 2);
+    etherscanKeyStore.getState().clearKey();
+    expect(etherscanKeyStore.getState().version).toBe(v0 + 3);
+  });
 });

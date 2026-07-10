@@ -14,7 +14,7 @@
  * Chaque champ ne tient qu'un brouillon local transmis à `setKey`/`clearKey` des
  * stores existants (coinalyze, fred) — aucune duplication du stockage.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { settingsUiStore } from "../store/settings-ui";
 import { coinalyzeKeyStore } from "../store/coinalyze";
@@ -23,20 +23,15 @@ import { bgeometricsKeyStore } from "../store/onchain";
 import { soSoValueKeyStore } from "../store/sosovalue";
 import { finnhubKeyStore } from "../store/finnhub";
 import { etherscanKeyStore } from "../store/etherscan";
+import {
+  creerSnapshot,
+  listerSnapshots,
+  restaurerSnapshot,
+  type MetaSnapshot,
+} from "../data/daemon";
+import { formatCompact, formatDateHeure } from "../lib/format";
 import { ThemeSwitcher } from "./ThemeSwitcher";
-
-/** Pastille d'état de configuration d'une clé. */
-function StatusBadge({ configured }: { configured: boolean }) {
-  return (
-    <span
-      className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
-        configured ? "border-up text-up" : "border-border text-text-dim"
-      }`}
-    >
-      {configured ? "clé ✓ configurée" : "non configurée"}
-    </span>
-  );
-}
+import { Badge, BTN_SECONDAIRE, Chargement, Vide } from "./ui";
 
 interface ApiKeyFieldProps {
   /** Nom de la source (ex. « Coinalyze »). */
@@ -94,7 +89,9 @@ function ApiKeyField({
     <div className="rounded-md border border-border bg-bg p-3">
       <div className="flex items-start justify-between gap-2">
         <span className="text-sm font-medium text-text">{name}</span>
-        <StatusBadge configured={hasKey} />
+        <Badge ton={hasKey ? "up" : "neutre"}>
+          {hasKey ? "clé ✓ configurée" : "non configurée"}
+        </Badge>
       </div>
       <p className="mt-1 text-[11px] leading-snug text-text-dim">{purpose}</p>
 
@@ -110,7 +107,7 @@ function ApiKeyField({
             placeholder={placeholder}
             spellCheck={false}
             autoComplete="off"
-            className="w-full rounded border border-border bg-surface px-2 py-1.5 text-sm text-text outline-none placeholder:text-text-dim focus:border-accent"
+            className="w-full rounded border border-border bg-surface px-2 py-1 text-xs text-text outline-none placeholder:text-text-dim focus:border-accent"
           />
           <div className="flex flex-wrap gap-2">
             <button
@@ -174,6 +171,139 @@ function ApiKeyField({
         </a>
       </p>
     </div>
+  );
+}
+
+/**
+ * Section « Sauvegardes » : snapshots quotidiens versionnés du KV daemon. La restauration
+ * ré-applique l'espace de travail miroité au daemon (graphique, watchlist, disposition des
+ * fenêtres, état de session) — cf. store/persist.ts. Alertes, notes, portefeuille,
+ * workspaces, dessins, thème et clés API ne sont PAS ré-appliqués : pour une sauvegarde
+ * complète, utiliser l'export/import manuel de la Toolbar.
+ *
+ * Feature-detect : `listerSnapshots()` renvoie `null` si le daemon est absent → on
+ * affiche l'état indisponible (le front reste 100 % fonctionnel sans daemon). La
+ * restauration est DESTRUCTIVE : confirmation explicite en DEUX temps (1er clic arme,
+ * 2e restaure) ; le daemon fige un snapshot pré-restauration avant de remplacer.
+ */
+function SauvegardesSection({ open }: { open: boolean }) {
+  // undefined = pas encore chargé ; null = daemon indisponible ; tableau = liste.
+  const [snapshots, setSnapshots] = useState<MetaSnapshot[] | null | undefined>(undefined);
+  const [message, setMessage] = useState<string | null>(null);
+  // Snapshot armé pour restauration (confirmation en deux temps).
+  const [confirmId, setConfirmId] = useState<number | null>(null);
+
+  const rafraichir = useCallback(async () => {
+    setSnapshots(await listerSnapshots());
+  }, []);
+
+  // Charge la liste à l'ouverture du panneau ; réinitialise l'armement à la fermeture.
+  useEffect(() => {
+    if (open) {
+      void rafraichir();
+    } else {
+      setConfirmId(null);
+      setMessage(null);
+    }
+  }, [open, rafraichir]);
+
+  const snapshotImmediat = async () => {
+    setConfirmId(null);
+    const meta = await creerSnapshot();
+    setMessage(meta ? "Snapshot créé." : "Échec : daemon indisponible.");
+    if (meta) await rafraichir();
+  };
+
+  const restaurer = async (id: number) => {
+    // 1er clic : on ARME la confirmation ; 2e clic sur le même snapshot : on restaure.
+    if (confirmId !== id) {
+      setConfirmId(id);
+      return;
+    }
+    setConfirmId(null);
+    const ok = await restaurerSnapshot(id);
+    setMessage(
+      ok
+        ? "Restauré. Rechargez la page pour appliquer (les stores hydratent au démarrage)."
+        : "Échec de la restauration.",
+    );
+    await rafraichir();
+  };
+
+  return (
+    <>
+      <h3 className="mt-6 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+        Sauvegardes
+      </h3>
+      <p className="mt-1 text-[11px] leading-snug text-text-dim">
+        Snapshots quotidiens automatiques du KV daemon (conservés 30 jours). La restauration
+        ré-applique le graphique, la watchlist, la disposition des fenêtres et l'état de session.
+      </p>
+
+      {message !== null && <p className="mt-2 text-[11px] text-accent">{message}</p>}
+
+      {snapshots === undefined ? (
+        <div className="mt-3">
+          <Chargement libelle="Chargement des sauvegardes…" />
+        </div>
+      ) : snapshots === null ? (
+        <div className="mt-3">
+          <Vide>Sauvegardes indisponibles — le daemon axiomd n'est pas actif.</Vide>
+        </div>
+      ) : (
+        <>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" onClick={() => void snapshotImmediat()} className={BTN_SECONDAIRE}>
+              Snapshot immédiat
+            </button>
+            <button type="button" onClick={() => void rafraichir()} className={BTN_SECONDAIRE}>
+              Rafraîchir
+            </button>
+          </div>
+
+          {snapshots.length === 0 ? (
+            <div className="mt-3">
+              <Vide>Aucune sauvegarde pour l'instant.</Vide>
+            </div>
+          ) : (
+            <ul className="mt-3 space-y-1.5">
+              {snapshots.map((s) => (
+                <li
+                  key={s.id}
+                  className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg px-3 py-2"
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="tabular-nums text-[11px] text-text">{formatDateHeure(s.ts)}</span>
+                    <Badge title="taille du snapshot">{formatCompact(s.taille)}</Badge>
+                  </span>
+                  <span className="flex items-center gap-2">
+                    {confirmId === s.id && <Badge ton="down">écrase l'état actuel</Badge>}
+                    <button
+                      type="button"
+                      onClick={() => void restaurer(s.id)}
+                      className={
+                        confirmId === s.id
+                          ? "rounded border border-down bg-bg px-2 py-1 text-[11px] text-down transition hover:opacity-90"
+                          : BTN_SECONDAIRE
+                      }
+                    >
+                      {confirmId === s.id ? "Confirmer" : "Restaurer"}
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <p className="mt-2 text-[10px] leading-snug text-text-dim">
+            La restauration REMPLACE le graphique, la watchlist, la disposition et la session par
+            ce snapshot (l'état actuel est d'abord sauvegardé automatiquement) ; rechargez ensuite.
+            Alertes, notes, portefeuille, workspaces, dessins, thème et clés API ne sont PAS
+            couverts — utilisez l'export manuel de la Toolbar pour une sauvegarde complète.
+          </p>
+        </>
+      )}
+    </>
   );
 }
 
@@ -305,7 +435,7 @@ export function SettingsPanel() {
             />
             <ApiKeyField
               name="SoSoValue (ETF)"
-              purpose="Flux ETF spot BTC/ETH/SOL — obligatoire, plan Demo gratuit."
+              purpose="Flux ETF spot BTC/ETH/SOL — plan Demo gratuit. Optionnelle si SOSOVALUE_API_KEY est renseignée dans .env (repli proxy) ; une clé saisie ici reste prioritaire."
               domain="openapi.sosovalue.com"
               signupUrl="https://sosovalue.com/developer"
               signupLabel="Obtenir une clé gratuite"
@@ -327,7 +457,7 @@ export function SettingsPanel() {
             />
             <ApiKeyField
               name="Etherscan v2"
-              purpose="Réseau ETH — gas recommandé, supply, nombre de nœuds."
+              purpose="Réseau ETH — gas recommandé, supply, nombre de nœuds. Optionnelle si ETHERSCAN_API_KEY est renseignée dans .env (repli proxy) ; une clé saisie ici reste prioritaire."
               domain="api.etherscan.io"
               signupUrl="https://etherscan.io/register"
               signupLabel="Obtenir une clé gratuite"
@@ -346,6 +476,9 @@ export function SettingsPanel() {
             <span className="text-sm text-text">Thème</span>
             <ThemeSwitcher />
           </div>
+
+          {/* --- Sauvegardes (snapshots quotidiens du KV daemon) --- */}
+          <SauvegardesSection open={open} />
         </div>
       </div>
     </div>

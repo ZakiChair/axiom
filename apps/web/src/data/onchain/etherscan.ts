@@ -1,15 +1,21 @@
 /**
  * Etherscan v2 (API multichain) — réseau ETH : supply totale, nombre de nœuds, gas
- * recommandé. Appel DIRECT (CORS confirmé `*`, vérifié 2026-07-08). Clé requise.
+ * recommandé. Routé via le proxy /ethscanapi (Vite en dev, daemon en prod) : la clé
+ * personnelle des Réglages, si saisie, part en query param `apikey` et reste PRIORITAIRE ;
+ * sinon le proxy injecte la clé de repli ETHERSCAN_API_KEY du .env. Sans clé nulle part,
+ * l'API répond quand même en mode dégradé (rate-limit 1 req/5 s → widgets partiels).
  * ⚠️ Scope volontairement modeste : les métriques "adresses actives/jour" et "tx/jour"
  * historiques équivalentes à Coin Metrics BTC sont réservées au tier Pro d'Etherscan —
  * PAS disponibles gratuitement (cf. spec Lot E1 §5). Le gas recommandé est le pendant
  * direct du widget "Frais recommandés" déjà affiché côté BTC (mempool.space).
  */
+import { healthStore } from "../../store/health";
 import { ecrireCache, estFrais, lireCache } from "./cache";
 
-const BASE = "https://api.etherscan.io/v2/api?chainid=1";
+const BASE = "/ethscanapi/v2/api?chainid=1";
 const TTL_MS = 10 * 60 * 1000; // gas change vite, mais pas de temps réel non plus
+/** Identifiant dans le panneau « Santé sources » (même registre que coinmetrics/mempool). */
+const SOURCE_SANTE = "etherscan";
 
 export function parseEthSupply(json: unknown): number | null {
   const obj = json as { status?: unknown; result?: unknown };
@@ -45,13 +51,20 @@ export interface ReseauEth {
 }
 
 export async function fetchReseauEth(cle: string | null, signal?: AbortSignal): Promise<ReseauEth | null> {
-  if (cle === null) return null;
-  const cacheCle = "eth:reseau";
+  // Clé de cache distincte avec/sans clé API : un résultat PARTIEL obtenu sans clé
+  // (mode dégradé 1 req/5 s) ne doit pas court-circuiter pendant 10 min le premier
+  // fetch qui suit la saisie d'une clé dans les Réglages.
+  const cacheCle = cle !== null ? "eth:reseau" : "eth:reseau:sanscle";
   const cache = await lireCache<ReseauEth>(cacheCle);
   if (estFrais(cache, TTL_MS) && cache !== null) return cache.donnee;
 
   try {
-    const q = (params: string) => `${BASE}&${params}&apikey=${encodeURIComponent(cle)}`;
+    // Clé des Réglages en query si présente (prioritaire) ; sinon le proxy injecte
+    // la clé de repli .env via appendApiKeyIfAbsent (jamais d'écrasement).
+    const q = (params: string) =>
+      cle !== null
+        ? `${BASE}&${params}&apikey=${encodeURIComponent(cle)}`
+        : `${BASE}&${params}`;
     const [supplyRes, gasRes, nodeRes] = await Promise.all([
       fetch(q("module=stats&action=ethsupply"), { signal }),
       fetch(q("module=gastracker&action=gasoracle"), { signal }),
@@ -66,12 +79,26 @@ export async function fetchReseauEth(cle: string | null, signal?: AbortSignal): 
       gasPropose: gas?.propose ?? null,
       gasFast: gas?.fast ?? null,
     };
-    // Ne pas mettre en cache un résultat entièrement dégradé (ex. rate-limit renvoyant
-    // HTTP 200 + status "0" sur les trois appels) : autant réessayer au prochain TTL.
+    // Résultat entièrement dégradé (ex. clé .env invalide → HTTP 200 + status "0" sur
+    // les trois appels) : ni cache ni objet tout-null — on renvoie `null` (cache périmé
+    // en repli) pour que l'UI affiche le bloc « indisponible » + le CTA clé, au lieu
+    // d'une grille de « — » étiquetés live sans issue.
     const toutNul = resultat.supplyEth === null && resultat.nodeCount === null && resultat.gasSafe === null;
-    if (!toutNul) await ecrireCache(cacheCle, resultat);
+    if (toutNul) {
+      healthStore
+        .getState()
+        .marquerErreur(SOURCE_SANTE, "réponse dégradée (clé absente/invalide ou rate-limit)");
+      return cache?.donnee ?? null;
+    }
+    healthStore.getState().setEtat(SOURCE_SANTE, "polling", { dernierMessageTs: Date.now() });
+    await ecrireCache(cacheCle, resultat);
     return resultat;
-  } catch {
+  } catch (e) {
+    if (!signal?.aborted) {
+      healthStore
+        .getState()
+        .marquerErreur(SOURCE_SANTE, e instanceof Error ? e.message : "échec");
+    }
     return cache?.donnee ?? null;
   }
 }

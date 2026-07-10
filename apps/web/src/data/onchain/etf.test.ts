@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parseEtfFlows } from "./etf";
+import { healthStore } from "../../store/health";
+import { parseEtfFlows, rapporterSanteEtf } from "./etf";
 
 // Schéma RÉEL confirmé par curl direct (2026-07-08) sur
 // POST https://openapi.sosovalue.com/openapi/v2/etf/currentEtfDataMetrics
@@ -62,5 +63,32 @@ describe("parseEtfFlows (schéma réel SoSoValue currentEtfDataMetrics)", () => 
     expect(r.disponible).toBe(true);
     expect(r.parEmetteur).toEqual([{ emetteur: "IBIT", flux: 100 }]);
     expect(r.total).toBe(100);
+  });
+});
+
+describe("rapporterSanteEtf (agrégation d'un cycle btc/eth/sol)", () => {
+  it("au moins un actif disponible → polling (peu importe l'ordre des échecs)", () => {
+    rapporterSanteEtf([
+      { disponible: false, raison: "SoSoValue indisponible (HTTP 429)." },
+      { disponible: true, parEmetteur: [{ emetteur: "IBIT", flux: 1 }], total: 1 },
+      { disponible: false, raison: "SoSoValue injoignable." },
+    ]);
+    expect(healthStore.getState().sources["sosovalue"]?.etat).toBe("polling");
+  });
+
+  it("tous en échec → erreur avec la première raison", () => {
+    rapporterSanteEtf([
+      { disponible: false, raison: "SoSoValue injoignable." },
+      { disponible: false, raison: "SoSoValue indisponible (HTTP 500)." },
+    ]);
+    const sante = healthStore.getState().sources["sosovalue"];
+    expect(sante?.etat).toBe("error");
+    expect(sante?.derniereErreur).toBe("SoSoValue injoignable.");
+  });
+
+  it("cycle vide → aucune écriture (pas d'état fantôme)", () => {
+    healthStore.getState().retirer("sosovalue");
+    rapporterSanteEtf([]);
+    expect(healthStore.getState().sources["sosovalue"]).toBeUndefined();
   });
 });

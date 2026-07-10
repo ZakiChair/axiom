@@ -53,4 +53,13 @@ describe("soSoValueKeyStore", () => {
     expect(soSoValueKeyStore.getState().hasKey).toBe(false);
     expect(getSoSoValueKey()).toBeNull();
   });
+
+  it("version s'incrémente à chaque setKey/clearKey — y compris en REMPLAÇANT une clé (hasKey reste true)", () => {
+    const v0 = soSoValueKeyStore.getState().version;
+    soSoValueKeyStore.getState().setKey("ancienne");
+    soSoValueKeyStore.getState().setKey("nouvelle"); // hasKey true→true, seul version bouge
+    expect(soSoValueKeyStore.getState().version).toBe(v0 + 2);
+    soSoValueKeyStore.getState().clearKey();
+    expect(soSoValueKeyStore.getState().version).toBe(v0 + 3);
+  });
 });

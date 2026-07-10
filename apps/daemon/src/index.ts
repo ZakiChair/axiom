@@ -26,6 +26,7 @@ import { enregistrerKv } from "./kv";
 import { enregistrerProxy } from "./proxy";
 import { enregistrerReplay } from "./replay";
 import { Routeur } from "./router";
+import { demarrerBoucleSnapshots, enregistrerSnapshots } from "./snapshots";
 import { distExiste, servirStatique } from "./static";
 
 const HOSTNAME = "127.0.0.1";
@@ -66,6 +67,8 @@ routeur.enregistrerPrefixe("/health", (req) => {
 enregistrerProxy(routeur, cles);
 
 // Persistance durable (Phase 2.E2) : store clé/valeur + cache long terme des bougies.
+// Snapshots AVANT kv : `/kv/snapshots` doit primer sur le handler générique `/kv`.
+enregistrerSnapshots(routeur);
 enregistrerKv(routeur);
 enregistrerCandles(routeur);
 
@@ -98,6 +101,10 @@ const serveur = Bun.serve({
 // Boucle d'alertes onglet fermé : feed Binance (symboles à alerte active) + poll KV.
 // Inerte tant qu'aucune alerte binance active n'existe (aucune WS ouverte).
 demarrerBoucleAlertes();
+
+// Boucle de sauvegarde quotidienne : snapshot horodaté du KV + purge (rétention 30 j).
+// Vérification à froid (~1 h) — jamais sur le chemin chaud du renderer.
+demarrerBoucleSnapshots();
 
 console.log(
   `[axiomd] v${VERSION} écoute sur http://${serveur.hostname}:${serveur.port} ` +

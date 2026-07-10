@@ -18,12 +18,16 @@ import { getDb } from "./db";
  *  - /tdapi        :   60 s (tradfi, quota 8/min & ~800/jour → à ménager).
  *  - /mexcapi      :   10 s (spot temps réel, mais le chemin chaud passe par les
  *                            WS directs du front ; ici on ne sert que du REST ponctuel).
+ *  - /ethscanapi   :   60 s (gas/supply/nœuds ETH ; front cache déjà 10 min — ce TTL
+ *                            n'absorbe que les rafales. /sosoapi est en POST → jamais
+ *                            caché par le daemon, le front cache 6 h en IndexedDB).
  */
 export const TTL_SECONDES_PAR_PREFIXE: Readonly<Record<string, number>> = {
   "/fredapi": 3600,
   "/coinalyzeapi": 30,
   "/tdapi": 60,
   "/mexcapi": 10,
+  "/ethscanapi": 60,
 };
 
 /**
@@ -39,13 +43,26 @@ export function ttlMsPourChemin(pathname: string): number {
   return 0;
 }
 
+/** Paramètres de query porteurs d'un secret : leur VALEUR est expurgée de la clé de cache. */
+const PARAMS_SECRETS = ["apikey", "api_key"] as const;
+
 /**
- * Clé de cache = `<METHODE> <pathname+search>`. Le secret injecté par le proxy
- * n'apparaît PAS ici (il est ajouté après, au moment du fetch amont) → aucune clé
- * API stockée en clair dans la colonne `cle`. Fonction PURE.
+ * Clé de cache = `<METHODE> <pathname+search>`, avec les VALEURS des paramètres de
+ * clé API remplacées par `***`. Le secret injecté par le proxy n'apparaît jamais ici
+ * (ajouté après, au moment du fetch amont) ; une clé PERSONNELLE envoyée par le front
+ * en query (ex. `apikey=` Etherscan, `api_key=` FRED/Coinalyze) est expurgée — la
+ * PRÉSENCE du paramètre reste encodée pour ne pas confondre une réponse « avec clé »
+ * (complète) et « sans clé » (dégradée chez Etherscan) sous la même entrée. Résultat :
+ * aucune clé API stockée en clair dans la colonne `cle`. Fonction PURE.
  */
 export function cleCache(methode: string, cheminAvecQuery: string): string {
-  return `${methode} ${cheminAvecQuery}`;
+  const posQuery = cheminAvecQuery.indexOf("?");
+  if (posQuery === -1) return `${methode} ${cheminAvecQuery}`;
+  const params = new URLSearchParams(cheminAvecQuery.slice(posQuery + 1));
+  for (const nom of PARAMS_SECRETS) {
+    if (params.has(nom)) params.set(nom, "***");
+  }
+  return `${methode} ${cheminAvecQuery.slice(0, posQuery)}?${params.toString()}`;
 }
 
 // Note : les BLOB SQLite reviennent adossés à un ArrayBuffer classique (jamais

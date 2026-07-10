@@ -16,6 +16,8 @@ const CLES: ProxyKeys = {
   FRED_API_KEY: "fredkey",
   COINALYZE_API_KEY: "coinkey",
   TWELVE_DATA_KEY: "tdkey",
+  SOSOVALUE_API_KEY: "sosokey",
+  ETHERSCAN_API_KEY: "ethkey",
 };
 
 function routePar(prefix: string): RouteProxy {
@@ -48,6 +50,8 @@ describe("construireRoutesProxy — cibles et réécritures", () => {
     expect(routePar("/coinalyzeapi").target).toBe("https://api.coinalyze.net");
     expect(routePar("/tdapi").target).toBe("https://api.twelvedata.com");
     expect(routePar("/mexcapi").target).toBe("https://api.mexc.com");
+    expect(routePar("/sosoapi").target).toBe("https://openapi.sosovalue.com");
+    expect(routePar("/ethscanapi").target).toBe("https://api.etherscan.io");
   });
 
   test("/fredapi : strip préfixe + api_key si absent", () => {
@@ -80,6 +84,42 @@ describe("construireRoutesProxy — cibles et réécritures", () => {
     expect(routePar("/mexcapi").rewrite("/mexcapi/api/v3/klines?symbol=BTCUSDT")).toBe(
       "/api/v3/klines?symbol=BTCUSDT",
     );
+  });
+
+  test("/ethscanapi : strip préfixe + apikey si absent, clé perso conservée", () => {
+    expect(routePar("/ethscanapi").rewrite("/ethscanapi/v2/api?chainid=1&module=stats")).toBe(
+      "/v2/api?chainid=1&module=stats&apikey=ethkey",
+    );
+    expect(routePar("/ethscanapi").rewrite("/ethscanapi/v2/api?apikey=perso")).toBe(
+      "/v2/api?apikey=perso",
+    );
+  });
+
+  test("/sosoapi : strip préfixe (la clé passe par l'en-tête, pas la query)", () => {
+    expect(routePar("/sosoapi").rewrite("/sosoapi/openapi/v2/etf/currentEtfDataMetrics")).toBe(
+      "/openapi/v2/etf/currentEtfDataMetrics",
+    );
+  });
+});
+
+describe("/sosoapi — injection d'en-tête x-soso-api-key", () => {
+  const entetesAmont = routePar("/sosoapi").entetesAmont;
+  if (!entetesAmont) throw new Error("entetesAmont manquant sur /sosoapi");
+
+  test("repli .env quand le front n'envoie pas d'en-tête", () => {
+    expect(entetesAmont(new Headers())).toEqual({ "x-soso-api-key": "sosokey" });
+  });
+
+  test("clé personnelle du front prioritaire (jamais écrasée)", () => {
+    expect(entetesAmont(new Headers({ "x-soso-api-key": "perso" }))).toEqual({
+      "x-soso-api-key": "perso",
+    });
+  });
+
+  test("aucune clé nulle part → aucun en-tête (l'amont répond 401)", () => {
+    const routes = construireRoutesProxy({ ...CLES, SOSOVALUE_API_KEY: "" });
+    const route = routes.find((r) => r.prefix === "/sosoapi");
+    expect(route?.entetesAmont?.(new Headers())).toEqual({});
   });
 });
 
@@ -115,7 +155,7 @@ describe("extapi — whitelist (présence des 23 hôtes existants)", () => {
       "cointelegraph.com",
       "www.theblock.co",
       "decrypt.co",
-      "blockworks.co",
+      "blockworks.com",
       "api.alternative.me",
       "community-api.coinmetrics.io",
       "bitcoin-data.com",

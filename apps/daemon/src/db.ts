@@ -28,6 +28,13 @@ export function getDb(): Database {
     contentType TEXT NOT NULL,
     expireA INTEGER NOT NULL
   )`);
+  // Snapshots versionnés du KV (cf. snapshots.ts) : sauvegarde quotidienne horodatée
+  // de toutes les entrées KV, filet contre une mauvaise manip. Migration idempotente.
+  db.run(`CREATE TABLE IF NOT EXISTS kv_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    donnees TEXT NOT NULL
+  )`);
   _db = db;
   return db;
 }

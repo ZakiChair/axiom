@@ -7,6 +7,7 @@ describe("ttlMsPourChemin", () => {
     expect(ttlMsPourChemin("/coinalyzeapi/open-interest")).toBe(30 * 1000);
     expect(ttlMsPourChemin("/tdapi/time_series")).toBe(60 * 1000);
     expect(ttlMsPourChemin("/mexcapi/api/v3/ping")).toBe(10 * 1000);
+    expect(ttlMsPourChemin("/ethscanapi/v2/api")).toBe(60 * 1000);
   });
 
   test("préfixe exact (sans sous-chemin) matche aussi", () => {
@@ -24,6 +25,7 @@ describe("ttlMsPourChemin", () => {
       "/coinalyzeapi": 30,
       "/tdapi": 60,
       "/mexcapi": 10,
+      "/ethscanapi": 60,
     });
   });
 });
@@ -33,6 +35,23 @@ describe("cleCache", () => {
     expect(cleCache("GET", "/mexcapi/api/v3/ping")).toBe("GET /mexcapi/api/v3/ping");
     expect(cleCache("GET", "/tdapi/time_series?symbol=AAPL")).toBe(
       "GET /tdapi/time_series?symbol=AAPL",
+    );
+  });
+
+  test("expurge la VALEUR d'une clé perso (apikey/api_key) mais garde sa présence", () => {
+    expect(cleCache("GET", "/ethscanapi/v2/api?chainid=1&apikey=SECRET123")).toBe(
+      "GET /ethscanapi/v2/api?chainid=1&apikey=***",
+    );
+    expect(cleCache("GET", "/fredapi/series?api_key=PERSO&id=WM2NS")).toBe(
+      "GET /fredapi/series?api_key=***&id=WM2NS",
+    );
+    // Avec et sans clé → entrées DISTINCTES (réponse Etherscan complète vs dégradée).
+    expect(cleCache("GET", "/ethscanapi/v2/api?chainid=1&apikey=X")).not.toBe(
+      cleCache("GET", "/ethscanapi/v2/api?chainid=1"),
+    );
+    // Deux clés perso différentes → même entrée (même donnée amont, mono-utilisateur).
+    expect(cleCache("GET", "/ethscanapi/v2/api?apikey=A")).toBe(
+      cleCache("GET", "/ethscanapi/v2/api?apikey=B"),
     );
   });
 

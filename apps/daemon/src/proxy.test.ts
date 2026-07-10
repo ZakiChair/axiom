@@ -138,12 +138,24 @@ describe("extapi — User-Agent par hôte", () => {
 
 describe("extapi — whitelist (mise à jour Lot E1)", () => {
   test("taille attendue après ajout SEC + GDELT", () => {
-    expect(EXTAPI_WHITELIST.size).toBe(26); // 23 existants + data.sec.gov + www.sec.gov + api.gdeltproject.org
+    expect(EXTAPI_WHITELIST.size).toBe(30); // 23 existants + SEC ×2 + GDELT + JGB/RBA/Bloomberg/CNBC ×4
   });
   test("nouveaux hôtes présents", () => {
     expect(EXTAPI_WHITELIST.has("data.sec.gov")).toBe(true);
     expect(EXTAPI_WHITELIST.has("www.sec.gov")).toBe(true);
     expect(EXTAPI_WHITELIST.has("api.gdeltproject.org")).toBe(true);
+  });
+});
+
+describe("extapi — whitelist (ajout courbes JGB/RBA + bandeau news macro)", () => {
+  test("nouveaux hôtes présents", () => {
+    expect(EXTAPI_WHITELIST.has("www.mof.go.jp")).toBe(true); // CSV JGB (MOF Japon)
+    expect(EXTAPI_WHITELIST.has("www.rba.gov.au")).toBe(true); // CSV F2 (RBA Australie)
+    expect(EXTAPI_WHITELIST.has("feeds.bloomberg.com")).toBe(true); // RSS Bloomberg economics
+    expect(EXTAPI_WHITELIST.has("www.cnbc.com")).toBe(true); // RSS CNBC Economy
+  });
+  test("CNBC reçoit le UA navigateur par défaut (exigé par Akamai, aucun UA dédié)", () => {
+    expect(userAgentPourHote("www.cnbc.com")).toContain("Mozilla");
   });
 });
 

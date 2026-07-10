@@ -41,6 +41,10 @@ const EXTAPI_HOTES: readonly string[] = [
   "data.sec.gov", // SEC EDGAR (submissions, XBRL companyfacts) — panneau FUND
   "www.sec.gov", // SEC EDGAR (company_tickers.json, résolution ticker→CIK) — panneau FUND
   "api.gdeltproject.org", // GDELT (recherche news ciblée par mot-clé) — NEWS enrichi
+  "www.mof.go.jp", // MOF Japon — CSV JGB (courbe des taux souverains JP)
+  "www.rba.gov.au", // RBA Australie — CSV F2 (courbe des taux souverains AU)
+  "feeds.bloomberg.com", // RSS Bloomberg (news macro — verticale economics)
+  "www.cnbc.com", // RSS CNBC (news macro — Economy ; UA navigateur requis, défaut du proxy suffit)
 ];
 
 // User-Agent navigateur standard : certains hôtes (RSS, Cloudflare) refusent un UA vide.

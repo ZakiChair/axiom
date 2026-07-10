@@ -63,17 +63,16 @@ export interface NewsFeed {
  *  - CoinDesk : `arc/outboundfeeds/rss` SANS slash final — la variante `.../rss/`
  *    renvoie un 308 vers une Location relative que le proxy ne peut pas suivre.
  *  - Cointelegraph / The Block / Decrypt : RSS 2.0 servi directement (200).
- *  - Blockworks : `blockworks.co/feed` redirige (308) vers `blockworks.com/feed`
- *    (changement d'HÔTE, hors whitelist) et sert de l'Atom → dégrade proprement en
- *    « erreur » tant que l'hôte `blockworks.com` n'est pas ajouté au proxy. Conservé
- *    dans la liste pour reprise automatique si la whitelist/redirection évolue.
+ *  - Blockworks : hôte `blockworks.com` (l'ancien `blockworks.co/feed` redirige
+ *    en 308 vers ce domaine — hôte suivi + whitelists /extapi mises à jour
+ *    2026-07-09) ; sert de l'Atom, couvert par parseFeed.
  */
 export const NEWS_FEEDS: readonly NewsFeed[] = [
   { id: "coindesk", label: "CoinDesk", host: "www.coindesk.com", path: "arc/outboundfeeds/rss", color: "#f7a600" },
   { id: "cointelegraph", label: "Cointelegraph", host: "cointelegraph.com", path: "rss", color: "#fab617" },
   { id: "theblock", label: "The Block", host: "www.theblock.co", path: "rss.xml", color: "#4f8cff" },
   { id: "decrypt", label: "Decrypt", host: "decrypt.co", path: "feed", color: "#22c55e" },
-  { id: "blockworks", label: "Blockworks", host: "blockworks.co", path: "feed", color: "#a855f7" },
+  { id: "blockworks", label: "Blockworks", host: "blockworks.com", path: "feed", color: "#a855f7" },
   // Finnhub `/news` (général) — appelé DIRECT (CORS ouvert), clé requise (cf. store/finnhub).
   // host/path ignorés pour ce `kind` (l'URL est construite dans fetchFlux) — laissés vides
   // plutôt que d'inventer une valeur trompeuse.

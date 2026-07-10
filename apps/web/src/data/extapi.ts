@@ -26,7 +26,7 @@ export const EXTAPI_WHITELIST: readonly string[] = [
   "cointelegraph.com", // RSS news
   "www.theblock.co", // RSS news
   "decrypt.co", // RSS news
-  "blockworks.co", // RSS news
+  "blockworks.com", // RSS news
   "api.alternative.me", // Fear & Greed Index
   "community-api.coinmetrics.io", // Coin Metrics Community (on-chain)
   "bitcoin-data.com", // BGeometrics (MVRV-Z, SOPR, NUPL)

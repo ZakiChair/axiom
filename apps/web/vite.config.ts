@@ -20,7 +20,7 @@ const EXTAPI_HOTES: readonly string[] = [
   "cointelegraph.com",
   "www.theblock.co",
   "decrypt.co",
-  "blockworks.co",
+  "blockworks.com",
   "api.alternative.me",
   "community-api.coinmetrics.io",
   "bitcoin-data.com",

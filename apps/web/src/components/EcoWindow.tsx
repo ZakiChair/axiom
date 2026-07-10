@@ -17,6 +17,7 @@ import { useEffect } from "react";
 import { useStore } from "zustand";
 import { ecoStore, ECO_IMPACTS } from "../store/eco";
 import type { EcoEvent, EcoImpact } from "../data/eco";
+import { EnTeteFenetre } from "./ui";
 import "../chart/ecoMarkers";
 
 /** Libellé court FR d'un impact. */
@@ -27,12 +28,12 @@ const IMPACT_LABEL: Record<EcoImpact, string> = {
   holiday: "Férié",
 };
 
-/** Couleur du badge d'impact. */
+/** Couleur du badge d'impact — tokens de thème (var(--…)) pour suivre le thème courant. */
 const IMPACT_COLOR: Record<EcoImpact, string> = {
-  high: "#f87171",
-  medium: "#f59e0b",
-  low: "#9ca3af",
-  holiday: "#60a5fa",
+  high: "var(--down)",
+  medium: "var(--serie-3)",
+  low: "var(--text-dim)",
+  holiday: "var(--serie-6)",
 };
 
 /** Fenêtre de contexte passé conservée en tête de liste (6 h). */
@@ -138,17 +139,15 @@ export function EcoWindow() {
     // Panneau dockable à droite, NON MODAL (cf. DerivativesWindow). Fermé : translaté
     // hors écran + inerte (pointer-events-none). z-40 : au-dessus du graphe, sous la palette.
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">
-            ECO · Calendrier
-          </h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">
+      <EnTeteFenetre
+        titre="ECO · Calendrier"
+        sousTitre={
+          <>
             ForexFactory · FRED · FOMC
             {status === "loading" ? " · maj…" : ""}
-          </p>
-        </div>
-        <div className="flex items-center gap-1">
+          </>
+        }
+        actions={
           <button
             type="button"
             onClick={() => ecoStore.getState().refresh(true)}
@@ -158,8 +157,8 @@ export function EcoWindow() {
           >
             ⟳
           </button>
-        </div>
-      </header>
+        }
+      />
 
       {/* Barre de filtres + bascule marqueurs. */}
       <div className="space-y-2 border-b border-border px-4 py-2">
@@ -199,7 +198,7 @@ export function EcoWindow() {
               type="checkbox"
               checked={markersEnabled}
               onChange={() => ecoStore.getState().toggleMarkers()}
-              className="accent-[#f59e0b]"
+              className="accent-[color:var(--serie-3)]"
             />
             Marqueurs chart
           </label>

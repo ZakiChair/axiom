@@ -33,6 +33,9 @@ import {
   specParId,
   type PhaseBacktest,
 } from "../store/backtest";
+import { formatDateHeure, formatDec, formatPct, formatPrice } from "../lib/format";
+import { lireTokenCanvas } from "../lib/canvasTokens";
+import { BTN_SECONDAIRE, EnTeteFenetre, ErreurBloc, NoteSource, Vide } from "./ui";
 
 const inputClass =
   "rounded border border-border bg-bg px-1.5 py-1 text-[11px] text-text focus:border-text-dim focus:outline-none";
@@ -46,31 +49,13 @@ function operandeDefaut(): Operande {
 
 // ─────────────────────────── Formatage ───────────────────────────
 
-function formatNombre(n: number, dec = 2): string {
-  return n.toLocaleString("fr-FR", { minimumFractionDigits: dec, maximumFractionDigits: dec });
-}
-
-function formatPct(n: number, dec = 2): string {
-  const sign = n > 0 ? "+" : "";
-  return `${sign}${n.toFixed(dec)}%`;
-}
-
+/**
+ * Facteur de profit : « ∞ » quand il n'y a aucune perte (sémantique métier),
+ * sinon 2 décimales via le formateur partagé.
+ */
 function formatPF(n: number): string {
   if (!Number.isFinite(n)) return "∞";
-  return n.toFixed(2);
-}
-
-function formatPrix(n: number): string {
-  if (n >= 1000) return n.toFixed(1);
-  if (n >= 1) return n.toFixed(3);
-  return n.toPrecision(4);
-}
-
-/** Date compacte « jj/mm hh:mm » (UTC local du navigateur). */
-function formatDate(ms: number): string {
-  const d = new Date(ms);
-  const p = (x: number): string => String(x).padStart(2, "0");
-  return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return formatDec(n);
 }
 
 function phaseLabel(phase: PhaseBacktest): string {
@@ -277,12 +262,6 @@ function RulesSection({
 
 // ─────────────────────────── Equity curve (canvas) ───────────────────────────
 
-/** Lit une variable CSS de thème sur l'élément (repli si absente). */
-function cssVar(el: HTMLElement, nom: string, repli: string): string {
-  const v = getComputedStyle(el).getPropertyValue(nom).trim();
-  return v.length > 0 ? v : repli;
-}
-
 /** Dessine l'equity curve (haut) + le drawdown (bas) sur le canvas. */
 function dessinerEquity(canvas: HTMLCanvasElement, resultat: ResultatBacktest): void {
   const ctx = canvas.getContext("2d");
@@ -297,10 +276,10 @@ function dessinerEquity(canvas: HTMLCanvasElement, resultat: ResultatBacktest): 
   ctx.clearRect(0, 0, largeur, hauteur);
 
   const points = resultat.equity;
-  const colUp = cssVar(canvas, "--up", "#2dc08e");
-  const colDown = cssVar(canvas, "--down", "#f92855");
-  const colDim = cssVar(canvas, "--text-dim", "#9ca3af");
-  const colBorder = cssVar(canvas, "--border", "#262626");
+  const colUp = lireTokenCanvas("--up", "#2dc08e");
+  const colDown = lireTokenCanvas("--down", "#f92855");
+  const colDim = lireTokenCanvas("--text-dim", "#9ca3af");
+  const colBorder = lireTokenCanvas("--border", "#262626");
 
   if (points.length < 2) {
     ctx.fillStyle = colDim;
@@ -457,7 +436,7 @@ function TradesTable({ trades }: { trades: TradeResultat[] }) {
       </div>
       <div className="max-h-[34vh] overflow-y-auto">
         {sorted.length === 0 ? (
-          <div className="px-3 py-3 text-[11px] text-text-dim">Aucun trade.</div>
+          <Vide>Aucun trade.</Vide>
         ) : (
           sorted.map((tr, i) => (
             <div
@@ -468,17 +447,17 @@ function TradesTable({ trades }: { trades: TradeResultat[] }) {
                 {tr.sens === "long" ? "L" : "S"}
               </span>
               <span className="text-right tabular-nums text-text-dim">
-                {formatDate(tr.tempsEntree)}
-                <span className="ml-1 text-text">{formatPrix(tr.prixEntree)}</span>
+                {formatDateHeure(tr.tempsEntree)}
+                <span className="ml-1 text-text">{formatPrice(tr.prixEntree)}</span>
               </span>
               <span className="text-right tabular-nums text-text-dim">
-                {formatDate(tr.tempsSortie)}
-                <span className="ml-1 text-text">{formatPrix(tr.prixSortie)}</span>
+                {formatDateHeure(tr.tempsSortie)}
+                <span className="ml-1 text-text">{formatPrice(tr.prixSortie)}</span>
                 <span className="ml-1 text-[9px] uppercase">{RAISON_LABEL[tr.raison]}</span>
               </span>
               <span className="text-right tabular-nums text-text-dim">{tr.dureeBarres}</span>
               <span className={`text-right tabular-nums ${tr.pnl >= 0 ? "text-up" : "text-down"}`}>
-                {formatNombre(tr.pnl)}
+                {formatDec(tr.pnl)}
               </span>
               <span className={`text-right tabular-nums ${tr.pnlPct >= 0 ? "text-up" : "text-down"}`}>
                 {formatPct(tr.pnlPct)}
@@ -497,7 +476,7 @@ function StatCard({ label, value, ton }: { label: string; value: string; ton?: "
   const couleur = ton === "up" ? "text-up" : ton === "down" ? "text-down" : "text-text";
   return (
     <div className="rounded-md border border-border bg-bg px-2.5 py-1.5">
-      <div className="text-[9px] uppercase tracking-wide text-text-dim">{label}</div>
+      <div className="text-[10px] uppercase tracking-wider text-text-dim">{label}</div>
       <div className={`tabular-nums text-sm font-medium ${couleur}`}>{value}</div>
     </div>
   );
@@ -508,15 +487,15 @@ function StatsGrid({ resultat }: { resultat: ResultatBacktest }) {
   return (
     <section className="grid grid-cols-3 gap-1.5">
       <StatCard label="Trades" value={String(s.nbTrades)} />
-      <StatCard label="Win rate" value={`${s.winRatePct.toFixed(1)}%`} />
-      <StatCard label="Profit factor" value={formatPF(s.profitFactor)} />
+      <StatCard label="Taux de réussite" value={`${s.winRatePct.toFixed(1)}%`} />
+      <StatCard label="Facteur de profit" value={formatPF(s.profitFactor)} />
       <StatCard
         label="PnL net"
-        value={`${formatNombre(s.pnlTotal)} (${formatPct(s.pnlTotalPct)})`}
+        value={`${formatDec(s.pnlTotal)} (${formatPct(s.pnlTotalPct)})`}
         ton={s.pnlTotal >= 0 ? "up" : "down"}
       />
-      <StatCard label="Max drawdown" value={`${s.maxDrawdownPct.toFixed(1)}%`} ton="down" />
-      <StatCard label="Sharpe (annualisé)" value={formatNombre(s.sharpe)} />
+      <StatCard label="Drawdown max" value={`${s.maxDrawdownPct.toFixed(1)}%`} ton="down" />
+      <StatCard label="Sharpe (annualisé)" value={formatDec(s.sharpe)} />
       <StatCard label="Exposition" value={`${s.expositionPct.toFixed(0)}%`} />
       <StatCard label="Gain moyen" value={formatPct(s.gainMoyenPct)} ton="up" />
       <StatCard label="Perte moyenne" value={formatPct(s.perteMoyennePct)} ton="down" />
@@ -577,15 +556,10 @@ export function BacktestWindow() {
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Backtest · BT</h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">
-            Bougies clôturées · exécution open+1 · pas d'intrabar
-          </p>
-        </div>
-        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
-      </header>
+      <EnTeteFenetre
+        titre="Backtest · BT"
+        sousTitre="Bougies clôturées · exécution open+1 · pas d'intrabar"
+      />
 
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {/* Presets */}
@@ -597,7 +571,7 @@ export function BacktestWindow() {
                 key={p.id}
                 type="button"
                 onClick={() => loadPreset(p.id)}
-                className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text"
+                className={BTN_SECONDAIRE}
               >
                 {p.name}
               </button>
@@ -636,7 +610,7 @@ export function BacktestWindow() {
                 setPresetName("");
               }}
               disabled={presetName.trim().length === 0}
-              className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text disabled:opacity-40"
+              className={`${BTN_SECONDAIRE} disabled:opacity-40`}
             >
               Enregistrer
             </button>
@@ -831,7 +805,7 @@ export function BacktestWindow() {
               <button
                 type="button"
                 onClick={run}
-                className="rounded border border-up/50 bg-bg px-3 py-1.5 text-[11px] font-medium text-up transition hover:bg-up/10"
+                className="rounded bg-accent/20 px-3 py-1.5 text-[11px] font-medium text-text transition hover:bg-accent/30"
               >
                 Lancer le backtest
               </button>
@@ -851,13 +825,11 @@ export function BacktestWindow() {
           )}
 
           {note !== null && <p className="text-[10px] text-text-dim">{note}</p>}
-          {error !== null && (
-            <p className="rounded-md border border-down/40 px-2 py-1 text-[11px] text-down">{error}</p>
-          )}
-          <p className="text-[10px] leading-snug text-text-dim">
+          {error !== null && <ErreurBloc>{error}</ErreurBloc>}
+          <NoteSource>
             Honnêteté : signaux sur bougies CLÔTURÉES, exécution à l'OPEN de la bougie suivante,
             stop/objectif sur la clôture (pas d'intrabar). Frais et slippage appliqués aux deux côtés.
-          </p>
+          </NoteSource>
         </section>
 
         {/* Résultats */}

@@ -32,6 +32,8 @@ import {
   type Operator,
   type ScreenerRow,
 } from "../data/screener";
+import { formatPct, formatPrice, formatUsd } from "../lib/format";
+import { EnTeteFenetre, ErreurBloc } from "./ui";
 
 /** Colonnes triables de la table de résultats. */
 type SortKey = "symbol" | "lastPrice" | "priceChangePct24h" | "volumeUsd24h" | "fundingPct";
@@ -41,32 +43,6 @@ interface SortState {
 }
 
 // ─────────────────────────── Formatage ───────────────────────────
-
-function formatUsd(n: number): string {
-  const abs = Math.abs(n);
-  if (abs >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
-  return `$${n.toFixed(0)}`;
-}
-
-function formatPct(n: number): string {
-  const sign = n > 0 ? "+" : "";
-  return `${sign}${n.toFixed(2)}%`;
-}
-
-/** Prix avec un nombre de décimales adapté à la magnitude. */
-function formatPrice(n: number): string {
-  if (n >= 1000) return n.toFixed(0);
-  if (n >= 1) return n.toFixed(2);
-  return n.toPrecision(4);
-}
-
-function formatFunding(n: number | undefined): string {
-  if (n === undefined || !Number.isFinite(n)) return "—";
-  const sign = n > 0 ? "+" : "";
-  return `${sign}${n.toFixed(4)}%`;
-}
 
 /** Libellé humain de l'état du run. */
 function runStateLabel(state: RunState): string {
@@ -87,7 +63,7 @@ function runStateLabel(state: RunState): string {
 // ─────────────────────────── Sous-composants de filtres ───────────────────────────
 
 const inputClass =
-  "rounded border border-border bg-bg px-1.5 py-1 text-[11px] text-text focus:border-text-dim focus:outline-none";
+  "rounded border border-border bg-bg px-2 py-1 text-[11px] text-text focus:border-text-dim focus:outline-none";
 
 /** Ligne de condition de BASE : champ / opérateur / valeur / suppression. */
 function BaseConditionRow({ index, cond }: { index: number; cond: BaseCondition }) {
@@ -274,12 +250,7 @@ export function ScreenerWindow() {
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Screener · EQS</h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">Binance spot USDT/USDC · funding perp</p>
-        </div>
-      </header>
+      <EnTeteFenetre titre="Screener · EQS" sousTitre="Binance spot USDT/USDC · funding perp" />
 
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {/* Presets */}
@@ -433,9 +404,7 @@ export function ScreenerWindow() {
           )}
 
           {note !== null && <p className="text-[10px] text-text-dim">{note}</p>}
-          {error !== null && (
-            <p className="rounded-md border border-down/40 px-2 py-1 text-[11px] text-down">{error}</p>
-          )}
+          {error !== null && <ErreurBloc>{error}</ErreurBloc>}
         </section>
 
         {/* Résultats */}
@@ -484,7 +453,7 @@ export function ScreenerWindow() {
                       r.fundingPct === undefined ? "text-text-dim" : r.fundingPct >= 0 ? "text-up" : "text-down"
                     }`}
                   >
-                    {formatFunding(r.fundingPct)}
+                    {formatPct(r.fundingPct, 4)}
                   </span>
                   <button
                     type="button"

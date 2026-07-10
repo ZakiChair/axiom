@@ -1,21 +1,15 @@
 /**
  * Tests des fonctions PURES du bandeau symbole (SymbolBanner). Le rendu React n'est pas
- * testé (pas d'environnement DOM ici) : on couvre le calcul du compte à rebours de bougie,
- * la fenêtre 24 h et le formatage — seuls porteurs de régressions silencieuses.
+ * testé (pas d'environnement DOM ici) : on couvre le calcul de l'horodatage de clôture de
+ * bougie et la fenêtre 24 h — seuls porteurs de régressions silencieuses. Le formatage
+ * (prix/compact/%/rebours) est désormais partagé et testé dans lib/format.test.ts.
  *
  * `../data/ticker` est stubé : les helpers testés n'en dépendent pas, et le stub évite de
  * charger toute la chaîne réseau (WS/poll) à l'import du module component en environnement Node.
  */
 import { describe, it, expect, vi } from "vitest";
 import type { Candle } from "@axiom/types";
-import {
-  nextCloseTs,
-  formatCountdown,
-  rolling24h,
-  formatPrice,
-  formatCompact,
-  formatPercent,
-} from "./SymbolBanner";
+import { nextCloseTs, rolling24h } from "./SymbolBanner";
 
 vi.mock("../data/ticker", () => ({ subscribeTickers: () => () => {} }));
 
@@ -47,16 +41,6 @@ describe("nextCloseTs", () => {
   });
 });
 
-describe("formatCountdown", () => {
-  it("MM:SS sous une heure, H:MM:SS au-delà", () => {
-    expect(formatCountdown(65_000)).toBe("01:05"); // 1 min 5 s
-    expect(formatCountdown(3_665_000)).toBe("1:01:05"); // 1 h 1 min 5 s
-  });
-  it("borne un reste négatif à 00:00 (bougie déjà censée close)", () => {
-    expect(formatCountdown(-5_000)).toBe("00:00");
-  });
-});
-
 describe("rolling24h", () => {
   it("agrège haut/bas/volume sur la fenêtre des 24 h et s'arrête au-delà", () => {
     const ref = 100 * HOUR; // référence arbitraire
@@ -72,24 +56,5 @@ describe("rolling24h", () => {
     const ref = 100 * HOUR;
     expect(rolling24h([], ref)).toBeNull();
     expect(rolling24h([candle(ref - 30 * HOUR, 10, 1, 5)], ref)).toBeNull();
-  });
-});
-
-describe("formatage", () => {
-  it("formatPrice : décimales adaptées à la magnitude", () => {
-    expect(formatPrice(1234.5)).toBe("1,234.50");
-    expect(formatPrice(0.0013)).toBe("0.001300");
-    expect(formatPrice(0)).toBe("—"); // prix invalide/absent
-  });
-  it("formatCompact : notation K/M/B", () => {
-    expect(formatCompact(50)).toBe("50.00");
-    expect(formatCompact(1_500)).toBe("1.50K");
-    expect(formatCompact(2_500_000)).toBe("2.50M");
-    expect(formatCompact(3_200_000_000)).toBe("3.20B");
-  });
-  it("formatPercent : signe explicite, tiret si non fini", () => {
-    expect(formatPercent(2.345)).toBe("+2.35%");
-    expect(formatPercent(-1.2)).toBe("-1.20%");
-    expect(formatPercent(Number.NaN)).toBe("—");
   });
 });

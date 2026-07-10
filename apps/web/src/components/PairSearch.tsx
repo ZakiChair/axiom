@@ -60,6 +60,8 @@ export function PairSearch({
   const defaultLegSource: Exclude<ExchangeId, "synthetic"> = exchange === "synthetic" ? "binance" : exchange;
   const [query, setQuery] = useState("");
   const [pairs, setPairs] = useState<string[]>([]);
+  // Échec du chargement du catalogue courant : affiché discrètement (jamais muet).
+  const [pairsError, setPairsError] = useState(false);
   const [open, setOpen] = useState(false);
   const [syntheticOpen, setSyntheticOpen] = useState(false);
   const [legAExchange, setLegAExchange] = useState<Exclude<ExchangeId, "synthetic">>(defaultLegSource);
@@ -75,10 +77,16 @@ export function PairSearch({
     let ignore = false;
     fetchPairs(exchange === "synthetic" ? "binance" : exchange)
       .then((list) => {
-        if (!ignore) setPairs(list);
+        if (!ignore) {
+          setPairs(list);
+          setPairsError(false);
+        }
       })
       .catch((err) => {
-        if (!ignore) setPairs([]);
+        if (!ignore) {
+          setPairs([]);
+          setPairsError(true);
+        }
         console.error("[AXIOM] Échec du chargement des paires", err);
       });
     return () => {
@@ -92,8 +100,9 @@ export function PairSearch({
       .then((list) => {
         if (!ignore) setLegAPairs(list);
       })
-      .catch(() => {
+      .catch((err) => {
         if (!ignore) setLegAPairs([]);
+        console.error("[AXIOM] Échec du chargement des paires (jambe A)", err);
       });
     return () => {
       ignore = true;
@@ -106,8 +115,9 @@ export function PairSearch({
       .then((list) => {
         if (!ignore) setLegBPairs(list);
       })
-      .catch(() => {
+      .catch((err) => {
         if (!ignore) setLegBPairs([]);
+        console.error("[AXIOM] Échec du chargement des paires (jambe B)", err);
       });
     return () => {
       ignore = true;
@@ -183,7 +193,7 @@ export function PairSearch({
           placeholder={placeholder}
           spellCheck={false}
           autoComplete="off"
-          className="w-44 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-neutral-500"
+          className="w-44 rounded border border-border bg-bg px-2 py-1 text-xs text-text outline-none placeholder:text-text-dim focus:border-accent"
           aria-label={placeholder}
         />
         <button
@@ -224,12 +234,18 @@ export function PairSearch({
         </ul>
       )}
 
+      {open && pairsError && !showBuilder && (
+        <div className="absolute left-0 top-full z-20 mt-1 w-44 rounded border border-border bg-bg px-2 py-1 text-xs text-text-dim shadow-lg">
+          Catalogue indisponible
+        </div>
+      )}
+
       {showBuilder && (
         <div
           onMouseDown={(e) => e.preventDefault()}
           className="absolute left-0 top-full z-30 mt-1 w-[30rem] rounded border border-neutral-700 bg-neutral-900 p-2 shadow-xl"
         >
-          <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-wide text-neutral-500">
+          <div className="mb-2 flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
             <span>Synthétique</span>
             <span>ratio / spread</span>
           </div>
@@ -301,7 +317,7 @@ export function PairSearch({
             <button
               type="button"
               onClick={buildSynthetic}
-              className="mt-6 rounded bg-emerald-500 px-2 py-1 text-xs font-semibold text-accent-ink hover:bg-emerald-400"
+              className="mt-6 rounded bg-emerald-500 px-3 py-1.5 text-[11px] font-medium text-accent-ink transition hover:opacity-90"
             >
               Charger
             </button>
@@ -333,7 +349,7 @@ function LegEditor({
 
   return (
     <div className="min-w-0">
-      <div className="mb-1 text-[10px] uppercase tracking-wide text-neutral-500">{label}</div>
+      <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim">{label}</div>
       <div className="flex gap-1">
         <select
           value={exchange}

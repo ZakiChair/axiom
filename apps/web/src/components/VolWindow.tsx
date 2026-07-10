@@ -14,9 +14,12 @@ import type { Candle, ExchangeId } from "@axiom/types";
 import type { Commande } from "../commands/registry";
 import { getAdapter } from "../data/adapters";
 import { fetchDvolHistory } from "../data/deribit";
+import { lireTokenCanvas } from "../lib/canvasTokens";
+import { formatDec, formatPourcentage } from "../lib/format";
 import { realizedVolSeries, volCone, zScore, type VolConeRow } from "../lib/volCone";
 import { marketStore } from "../store/market";
 import { mirrorOpenState, windowManagerStore } from "../store/windowManager";
+import { Chargement, EnTeteFenetre, ErreurBloc } from "./ui";
 
 export interface VolUiState {
   open: boolean;
@@ -52,10 +55,6 @@ type Statut = "idle" | "loading" | "ready" | "error";
 const RV_WINDOW = 30;
 /** Convention d'annualisation daily crypto 24/7. */
 const PPA = 365;
-
-function readToken(name: string, fallback: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-}
 
 /** Devise DVOL Deribit du symbole, ou null (Deribit ne cote que BTC/ETH). */
 function deriveDvolCurrency(symbol: string): "BTC" | "ETH" | null {
@@ -107,12 +106,12 @@ interface Tokens {
 
 function lireTokens(): Tokens {
   return {
-    text: readToken("--text", "#e5e7eb"),
-    dim: readToken("--text-dim", "#94a3b8"),
-    up: readToken("--up", "#2dc08e"),
-    down: readToken("--down", "#f92855"),
-    accent: readToken("--accent", "#38bdf8"),
-    border: readToken("--border", "#334155"),
+    text: lireTokenCanvas("--text", "#e5e7eb"),
+    dim: lireTokenCanvas("--text-dim", "#94a3b8"),
+    up: lireTokenCanvas("--up", "#2dc08e"),
+    down: lireTokenCanvas("--down", "#f92855"),
+    accent: lireTokenCanvas("--accent", "#38bdf8"),
+    border: lireTokenCanvas("--border", "#334155"),
   };
 }
 
@@ -270,7 +269,8 @@ function draw(canvas: HTMLCanvasElement, data: VolData): void {
   ctx.clearRect(0, 0, w, h);
 
   const tk = lireTokens();
-  ctx.font = "11px var(--font-display, monospace)";
+  // Pile monospace unifiée pour les chiffres, cohérente avec les tabular-nums du DOM.
+  ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
 
   ctx.fillStyle = tk.dim;
   ctx.fillText("CÔNE RV (percentiles 5/25/50/75/95)", 8, 14);
@@ -349,35 +349,31 @@ export function VolWindow() {
     sansIv = dvolCourant === null;
     const morceaux: string[] = [];
     if (rvCourante !== null) {
-      morceaux.push(`RV${RV_WINDOW} ${rvCourante.toFixed(1)} %`);
+      morceaux.push(`RV${RV_WINDOW} ${formatPourcentage(rvCourante, 1)}`);
       const valeurs = data.rv30.filter((v): v is number => v !== null);
       const z = zScore(valeurs, rvCourante);
       if (dvolCourant !== null) {
-        morceaux.push(`DVOL ${dvolCourant.toFixed(1)} %`);
-        morceaux.push(`VRP ${(dvolCourant - rvCourante).toFixed(1)} pts`);
+        morceaux.push(`DVOL ${formatPourcentage(dvolCourant, 1)}`);
+        morceaux.push(`VRP ${formatDec(dvolCourant - rvCourante, 1)} pts`);
       }
-      if (z !== null) morceaux.push(`z-score RV ${z.toFixed(2)}`);
+      if (z !== null) morceaux.push(`z-score RV ${formatDec(z, 2)}`);
     }
     synthese = morceaux.join(" · ");
   }
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">VOL · Volatilité</h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">{symbol} · daily · annualisation √{PPA}</p>
-        </div>
-        <div className="max-w-[340px] truncate text-right text-[11px] tabular-nums text-text-dim">{synthese}</div>
-      </header>
+      <EnTeteFenetre
+        titre="Volatilité"
+        sousTitre={`${symbol} · daily · annualisation √${PPA}`}
+        actions={
+          <div className="max-w-[340px] truncate text-right text-[11px] tabular-nums text-text-dim">{synthese}</div>
+        }
+      />
 
       <div className="relative min-h-0 flex-1 p-3">
-        {statut === "loading" && <div className="py-12 text-center text-[11px] text-text-dim">Chargement…</div>}
-        {statut === "error" && (
-          <div className="rounded border border-border bg-bg px-3 py-4 text-center text-[11px] text-text-dim">
-            Volatilité indisponible pour ce symbole.
-          </div>
-        )}
+        {statut === "loading" && <Chargement />}
+        {statut === "error" && <ErreurBloc>Volatilité indisponible pour ce symbole.</ErreurBloc>}
         {statut === "ready" && sansIv && (
           <p className="mb-2 text-[11px] text-text-dim">IV indisponible — Deribit ne cote que BTC/ETH. Cône RV seul.</p>
         )}

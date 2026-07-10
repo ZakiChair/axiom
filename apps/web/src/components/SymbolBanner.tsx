@@ -16,6 +16,7 @@ import type { Candle, Timeframe } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { classifyTradfi, isMarketOpen, subscribeTickers } from "../data/ticker";
 import { formatSyntheticLabel, parseSyntheticSymbol } from "../data/synthetic";
+import { formatCompact, formatCountdown, formatPct, formatPrice } from "../lib/format";
 
 /** Durée (ms) d'une bougie pour les timeframes à pas FIXE. */
 export const TF_DURATION_MS: Partial<Record<Timeframe, number>> = {
@@ -42,16 +43,6 @@ export function nextCloseTs(openTime: number, tf: Timeframe): number {
     return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + months, 1);
   }
   return openTime; // timeframe inconnu : pas de rebours (rebours nul).
-}
-
-/** Formate un reste en ms → « H:MM:SS » (≥ 1 h) ou « MM:SS ». Négatif borné à 0. PURE & testée. */
-export function formatCountdown(remainingMs: number): string {
-  const s = Math.max(0, Math.floor(remainingMs / 1000));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  const pad = (n: number): string => String(n).padStart(2, "0");
-  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${pad(m)}:${pad(sec)}`;
 }
 
 /** Statistiques haut/bas/volume sur les 24 dernières heures. */
@@ -86,31 +77,6 @@ export function rolling24h(candles: Candle[], referenceMs: number): Rolling24h |
     count++;
   }
   return count === 0 ? null : { high, low, volume };
-}
-
-/** Formate un prix avec un nombre de décimales adapté à sa magnitude. PURE & testée. */
-export function formatPrice(p: number): string {
-  if (!Number.isFinite(p) || p <= 0) return "—";
-  const decimals = p >= 1 ? 2 : p >= 0.01 ? 4 : 6;
-  return p.toLocaleString("en-US", {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-}
-
-/** Formate un volume en notation compacte (K/M/B). PURE & testée. */
-export function formatCompact(v: number): string {
-  if (!Number.isFinite(v)) return "—";
-  if (v >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
-  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
-  if (v >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
-  return v.toFixed(2);
-}
-
-/** Formate une variation en pourcentage signé. PURE & testée. */
-export function formatPercent(p: number): string {
-  if (!Number.isFinite(p)) return "—";
-  return `${p >= 0 ? "+" : ""}${p.toFixed(2)}%`;
 }
 
 export function SymbolBanner() {
@@ -186,7 +152,7 @@ export function SymbolBanner() {
       ? () => {}
       : subscribeTickers([symbol], (u) => {
           changePct = u.changePercent;
-          if (changeRef.current) changeRef.current.textContent = formatPercent(u.changePercent);
+          if (changeRef.current) changeRef.current.textContent = formatPct(u.changePercent);
           applyColor();
         });
 
@@ -204,7 +170,7 @@ export function SymbolBanner() {
   }, [symbol, timeframe]);
 
   return (
-    <div className="pointer-events-none absolute left-2 top-2 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border bg-surface/80 px-2.5 py-1 font-mono text-xs text-text-dim backdrop-blur-sm">
+    <div className="pointer-events-none absolute left-2 top-2 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border bg-surface/80 px-2.5 py-1 text-xs tabular-nums text-text-dim backdrop-blur-sm">
       <span className="font-semibold text-text">{bannerSymbol}</span>
       {hasClosedTradfiLeg && (
         <span className="text-text-dim">jambe tradfi : dernier close (marché fermé)</span>

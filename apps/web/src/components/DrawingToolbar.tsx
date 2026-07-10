@@ -285,14 +285,25 @@ function FibSettingsPanel({ onClose }: { onClose: () => void }) {
           <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
             Fibonacci
           </span>
-          <button
-            type="button"
-            onClick={reset}
-            className="text-[10px] text-text-dim transition hover:text-text"
-            title="Réinitialiser les niveaux par défaut"
-          >
-            réinitialiser
-          </button>
+          {/* Réinitialiser + fermeture par icône ✕ (uniformisé avec les autres panneaux flottants). */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={reset}
+              className="text-[10px] text-text-dim transition hover:text-text"
+              title="Réinitialiser les niveaux par défaut"
+            >
+              Réinitialiser
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Fermer"
+              className="rounded px-1 text-xs leading-none text-text-dim transition hover:bg-bg hover:text-text"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
         <label className="mt-3 flex items-center gap-2 text-[11px] text-text-dim">
@@ -407,7 +418,7 @@ export function DrawingToolbar() {
                 disabled
                   ? "cursor-not-allowed text-text-dim opacity-40"
                   : active
-                    ? "bg-accent text-accent-ink shadow-[var(--accent-glow)]"
+                    ? "bg-accent text-accent-ink"
                     : "text-text-dim hover:bg-bg hover:text-text"
               }`}
             >
@@ -431,7 +442,7 @@ export function DrawingToolbar() {
           aria-label="Réglages Fibonacci"
           className={`flex h-8 w-8 items-center justify-center rounded transition ${
             fibPanelOpen
-              ? "bg-accent text-accent-ink shadow-[var(--accent-glow)]"
+              ? "bg-accent text-accent-ink"
               : "text-text-dim hover:bg-bg hover:text-text"
           }`}
         >

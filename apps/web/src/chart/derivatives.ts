@@ -28,11 +28,16 @@ import { coinalyzeProvider } from "../data/coinalyze";
 /** Sous-pane Open Interest (notionnel USD). */
 const OI_NAME = "AXIOM_DERIV_OI";
 const OI_PANE_ID = "axiom_deriv_oi";
-const OI_COLOR = "#22d3ee"; // cyan
+// Couleur de série du pane, figée à l'enregistrement de l'indicateur (KLineChart
+// enregistre les figures une fois, à l'import — pas de re-résolution au changement
+// de thème). EXPORTÉE pour que la bascule « OI » de DerivativesWindow garde le
+// lien visuel bouton↔courbe sur tous les thèmes (exception théméité assumée).
+export const OI_COLOR = "#22d3ee"; // cyan
 /** Sous-pane funding rate (affiché en %). */
 const FUNDING_NAME = "AXIOM_DERIV_FUNDING";
 const FUNDING_PANE_ID = "axiom_deriv_funding";
-const FUNDING_COLOR = "#f59e0b"; // ambre
+/** Couleur de série du pane funding — même exception que OI_COLOR. */
+export const FUNDING_COLOR = "#f59e0b"; // ambre
 
 /** Interval Coinalyze des séries dérivées (cadence lente, forward-fill ensuite). */
 const DERIV_INTERVAL = "1hour";

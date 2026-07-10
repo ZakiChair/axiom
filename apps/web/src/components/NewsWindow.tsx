@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { newsStore, newsUiStore } from "../store/news";
+import { EnTeteFenetre } from "./ui";
 import {
   demarrerVeilleNews,
   estPertinentPourSymbole,
@@ -65,7 +66,8 @@ function BandeauFearGreed({ fng }: { fng: FearGreed | null }) {
  * Métadonnées d'affichage par source (label + couleur du badge). GDELT est une source
  * DYNAMIQUE (ciblée par symbole, cf. en-tête du fichier) — volontairement absente de
  * `NEWS_FEEDS` — donc ajoutée à part ici, sinon `META_SOURCE["gdelt"]` est `undefined`
- * et fait planter `BadgeSource`/le filtre dès qu'un article GDELT est rendu.
+ * et fait planter `BadgeSource`/le filtre dès qu'un article GDELT est rendu. Les couleurs
+ * par source sont des couleurs de MARQUE, volontairement hors thème (badges de source).
  */
 const META_SOURCE: Record<NewsSourceId, { label: string; color: string }> = {
   ...(Object.fromEntries(NEWS_FEEDS.map((f) => [f.id, { label: f.label, color: f.color }])) as Record<
@@ -81,6 +83,9 @@ const LABEL_STATUT: Record<FeedStatut, string> = {
   vide: "vide",
   erreur: "hors ligne",
 };
+
+/** Attribution permanente des sources (pied de panneau), comme les autres fenêtres. */
+const SOURCES_LABEL = NEWS_FEEDS.map((f) => f.label).join(" · ");
 
 /** Badge coloré de la source. */
 function BadgeSource({ source }: { source: NewsSourceId }) {
@@ -213,38 +218,34 @@ export function NewsWindow() {
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3 font-mono">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Actualités</h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">
-            {derniereMaj === null
-              ? "chargement…"
-              : `${visibles.length} article${visibles.length > 1 ? "s" : ""} · ${nonLus} non lu${
-                  nonLus > 1 ? "s" : ""
-                } · maj ${tempsRelatif(derniereMaj, maintenant)}`}
-          </p>
-        </div>
-        <BandeauFearGreed fng={fng} />
-        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
-      </header>
+      {/* En-tête standard (croix de fermeture fournie par le chrome FloatingWindow). */}
+      <EnTeteFenetre
+        titre="NEWS · Actualités"
+        sousTitre={
+          derniereMaj === null
+            ? "Chargement…"
+            : `${visibles.length} article${visibles.length > 1 ? "s" : ""} · ${nonLus} non lu${
+                nonLus > 1 ? "s" : ""
+              } · maj ${tempsRelatif(derniereMaj, maintenant)}`
+        }
+        actions={<BandeauFearGreed fng={fng} />}
+      />
 
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2 font-mono">
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <input
           type="text"
           value={filtre}
           onChange={(e) => setFiltre(e.target.value)}
           placeholder="Filtrer…"
-          className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-[11px] text-text placeholder:text-text-dim focus:outline-none focus:ring-1 focus:ring-border"
+          className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-[11px] text-text placeholder:text-text-dim outline-none focus:border-accent"
         />
         <button
           type="button"
           onClick={() => setFiltreSymbole((v) => !v)}
           aria-pressed={filtreSymbole}
           title="Filtrer sur le symbole affiché"
-          className={`shrink-0 rounded border px-2 py-1 text-[10px] uppercase tracking-wide transition ${
-            filtreSymbole
-              ? "border-accent/60 text-accent"
-              : "border-border text-text-dim hover:text-text"
+          className={`shrink-0 rounded border border-border px-2 py-1 text-[10px] uppercase tracking-wide transition ${
+            filtreSymbole ? "bg-surface text-text" : "text-text-dim hover:text-text"
           }`}
         >
           {symbolKeywords(symbol).length > 0 ? `#${symbol}` : "symbole"}
@@ -259,11 +260,11 @@ export function NewsWindow() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto font-mono">
+      <div className="flex-1 overflow-y-auto">
         {visibles.length === 0 ? (
-          <div className="px-3 py-4 text-[11px] leading-snug text-text-dim">
+          <div className="px-3 py-6 text-center text-[11px] leading-snug text-text-dim">
             {derniereMaj === null
-              ? "Récupération des flux…"
+              ? "Chargement…"
               : filtreSymbole
                 ? `Aucune actualité pour ${symbol}.`
                 : "Aucune actualité (flux indisponibles ou filtre trop restrictif)."}
@@ -275,11 +276,15 @@ export function NewsWindow() {
         )}
       </div>
 
-      {fluxHs.length > 0 && (
-        <p className="border-t border-border px-3 py-2 text-[10px] leading-snug text-text-dim font-mono">
-          Hors ligne : {fluxHs.map((f) => `${f.label} (${LABEL_STATUT[statuts[f.id] ?? "erreur"]})`).join(", ")}
-        </p>
-      )}
+      {/* Attribution permanente des sources (comme les autres fenêtres) ; les flux hors
+          ligne éventuels sont signalés à la suite plutôt que dans un pied séparé. */}
+      <p className="border-t border-border px-3 py-2 text-[10px] leading-snug text-text-dim">
+        {SOURCES_LABEL}
+        {fluxHs.length > 0 &&
+          ` · Hors ligne : ${fluxHs
+            .map((f) => `${f.label} (${LABEL_STATUT[statuts[f.id] ?? "erreur"]})`)
+            .join(", ")}`}
+      </p>
     </>
   );
 }

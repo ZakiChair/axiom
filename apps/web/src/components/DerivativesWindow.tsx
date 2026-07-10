@@ -46,6 +46,17 @@ import {
   type BinanceRatioPoint,
   type BinanceTakerPoint,
 } from "../data/binanceFutures";
+import {
+  formatDec,
+  formatDelai,
+  formatHeure,
+  formatPct,
+  formatUsd,
+  VALEUR_ABSENTE,
+} from "../lib/format";
+import { EnTeteFenetre, ErreurBloc, Metric as MetricUI } from "./ui";
+// Couleurs de série des panes OI/funding (hex figés côté chart — cf. leur doc).
+import { OI_COLOR, FUNDING_COLOR } from "../chart/derivatives";
 
 /** Période d'agrégation du long/short ratio et fenêtre des liquidations affichées. */
 const LS_PERIOD = "5min";
@@ -62,52 +73,22 @@ const BIN_LIMIT = 30;
 /** Nombre de buckets de liquidations affichés dans le mini-histogramme bicolore. */
 const LIQ_BARS = 24;
 
-/** Formatte un notionnel USD de façon compacte ($1.23B / $4.5M / $678K). */
-function formatUsd(n: number | undefined): string {
-  if (n === undefined || !Number.isFinite(n)) return "—";
-  const abs = Math.abs(n);
-  if (abs >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
-  return `$${n.toFixed(0)}`;
-}
-
-/** Funding rate (fraction) -> pourcentage signé. */
+/** Funding rate (fraction) -> pourcentage signé 4 décimales (via formatPct partagé). */
 function formatFunding(rate: number | undefined): string {
-  if (rate === undefined || !Number.isFinite(rate)) return "—";
-  const pct = rate * 100;
-  const sign = pct >= 0 ? "+" : "";
-  return `${sign}${pct.toFixed(4)}%`;
-}
-
-/** HH:MM:SS local d'un horodatage ms. */
-function formatTime(ms: number): string {
-  if (!Number.isFinite(ms)) return "—";
-  return new Date(ms).toLocaleTimeString("fr-FR", { hour12: false });
-}
-
-/** Ratio long/short (ex. 1.87) sur 2 décimales. */
-function formatRatio(r: number | undefined): string {
-  return r !== undefined && Number.isFinite(r) ? r.toFixed(2) : "—";
+  if (rate === undefined) return VALEUR_ABSENTE;
+  return formatPct(rate * 100, 4);
 }
 
 /** Ratio L/S + part longue (« 1.87 · L 65% ») d'un point Binance (longAccount = fraction). */
 function formatRatioBreakdown(p: BinanceRatioPoint | undefined): string {
-  if (!p || !Number.isFinite(p.ratio)) return "—";
+  if (!p || !Number.isFinite(p.ratio)) return VALEUR_ABSENTE;
   return `${p.ratio.toFixed(2)} · L ${(p.longAccount * 100).toFixed(0)}%`;
 }
 
-/** Délai « dans 3 h 12 » jusqu'à un horodatage futur (heure du prochain règlement). */
-function formatDelai(targetMs: number, nowMs: number): string {
-  const diff = targetMs - nowMs;
-  if (!Number.isFinite(diff) || diff <= 0) return "imminent";
-  const totalMin = Math.round(diff / 60_000);
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  return h > 0 ? `dans ${h} h ${String(m).padStart(2, "0")}` : `dans ${m} min`;
-}
-
-/** Une ligne « libellé / valeur », avec sparkline optionnelle de tendance récente. */
+/**
+ * Tuile « libellé / valeur » : primitive partagée `Metric` (ui.tsx), enrichie de la
+ * sparkline de tendance récente propre à cette fenêtre (passée en `extra`).
+ */
 function Metric({
   label,
   value,
@@ -120,15 +101,16 @@ function Metric({
   sparkValues?: number[];
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 rounded-md border border-border bg-bg px-3 py-2">
-      <span className="text-[11px] text-text-dim">{label}</span>
-      <span className="flex items-center gap-2">
-        {sparkValues && sparkValues.length >= 2 && <Sparkline values={sparkValues} color={color ?? "#9ca3af"} />}
-        <span className="tabular-nums text-sm font-medium text-text" style={color ? { color } : undefined}>
-          {value}
-        </span>
-      </span>
-    </div>
+    <MetricUI
+      label={label}
+      value={value}
+      couleur={color}
+      extra={
+        sparkValues && sparkValues.length >= 2 ? (
+          <Sparkline values={sparkValues} color={color ?? "var(--text-dim)"} />
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -179,8 +161,8 @@ function LiquidationBars({ buckets }: { buckets: LiquidationBucket[] }) {
         const shortH = (b.shortUsd / max) * (mid - 1);
         return (
           <g key={b.time}>
-            {longH > 0 && <rect x={x} y={mid - longH} width={barW} height={longH} fill="#f87171" />}
-            {shortH > 0 && <rect x={x} y={mid} width={barW} height={shortH} fill="#34d399" />}
+            {longH > 0 && <rect x={x} y={mid - longH} width={barW} height={longH} fill="var(--down)" />}
+            {shortH > 0 && <rect x={x} y={mid} width={barW} height={shortH} fill="var(--up)" />}
           </g>
         );
       })}
@@ -270,6 +252,9 @@ export function DerivativesWindow() {
   const [fundingSpark, setFundingSpark] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Horodatage du dernier cycle de rafraîchissement Coinalyze : « — » tant qu'aucune
+  // donnée n'est arrivée (cohérent avec Options/TermStructure), « maj ~1 min » ensuite.
+  const [majTs, setMajTs] = useState<number | null>(null);
 
   // Sentiment perpétuel Binance (fapi /futures/data) — SANS clé Coinalyze : visible
   // même sans clé. Chaque tableau reste vide si la source est indisponible (dégradation).
@@ -298,6 +283,7 @@ export function DerivativesWindow() {
       setFundingSpark([]);
       setError(null);
       setLoading(false);
+      setMajTs(null);
       return;
     }
 
@@ -347,6 +333,7 @@ export function DerivativesWindow() {
       else if (allFailed) setError("Données dérivées indisponibles pour le moment.");
       else setError(null);
 
+      setMajTs(Date.now());
       setLoading(false);
     };
 
@@ -417,13 +404,10 @@ export function DerivativesWindow() {
     // pour laisser toute la surface du graphe cliquable. z-40 : sous la palette (z-60)
     // et le slide-over Réglages (z-50), au-dessus du graphe.
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-          <div>
-            <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Produits dérivés</h2>
-            <p className="mt-0.5 text-[11px] text-text-dim">
-              {isBinance ? `${coinalyzeSymbol} · Coinalyze` : "Coinalyze · Binance uniquement"}
-            </p>
-          </div>
+      <EnTeteFenetre
+        titre="Produits dérivés"
+        sousTitre={isBinance ? `${coinalyzeSymbol} · Coinalyze` : "Coinalyze · Binance uniquement"}
+        actions={
           <div className="flex flex-col items-end gap-1">
             <label htmlFor="derivatives-symbol-groupe" className="text-[10px] text-text-dim">
               Symbole groupe
@@ -456,7 +440,8 @@ export function DerivativesWindow() {
               className="w-28 rounded border border-border bg-bg px-2 py-1 text-right text-[11px] text-text outline-none placeholder:text-text-dim focus:border-text-dim disabled:cursor-not-allowed disabled:opacity-50"
             />
           </div>
-        </header>
+        }
+      />
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
           {!isBinance ? (
@@ -481,13 +466,13 @@ export function DerivativesWindow() {
             <div className="space-y-3">
               <div className="flex items-center justify-between rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-dim">
                 <span>{coinalyzeSymbol}</span>
-                <span>{loading ? "maj…" : "maj ~1 min"}</span>
+                <span>{loading ? "maj…" : majTs ? "maj ~1 min" : "—"}</span>
               </div>
 
-              {error && <div className="rounded-md border border-down/40 px-3 py-2 text-[11px] text-down">{error}</div>}
+              {error && <ErreurBloc>{error}</ErreurBloc>}
 
               <div className="space-y-2">
-                <Metric label="Open Interest" value={formatUsd(oi?.oiUsd)} sparkValues={oiSpark} color="#38bdf8" />
+                <Metric label="Open Interest" value={formatUsd(oi?.oiUsd)} sparkValues={oiSpark} color="var(--serie-1)" />
                 <Metric
                   label="Funding"
                   value={formatFunding(funding?.rate)}
@@ -495,8 +480,8 @@ export function DerivativesWindow() {
                   color={
                     funding && Number.isFinite(funding.rate)
                       ? funding.rate >= 0
-                        ? "#34d399"
-                        : "#f87171"
+                        ? "var(--up)"
+                        : "var(--down)"
                       : undefined
                   }
                 />
@@ -505,15 +490,16 @@ export function DerivativesWindow() {
                     <div className="flex items-baseline justify-between gap-3">
                       <span className="text-[11px] text-text-dim">Funding prédit</span>
                       <span
-                        className="tabular-nums text-sm font-medium"
-                        style={{ color: predicted.rate >= 0 ? "#34d399" : "#f87171" }}
+                        className={`tabular-nums text-sm font-medium ${
+                          predicted.rate >= 0 ? "text-up" : "text-down"
+                        }`}
                       >
                         {formatFunding(predicted.rate)}
                       </span>
                     </div>
                     <div className="mt-0.5 text-right text-[10px] text-text-dim">
                       prochain règlement (~8 h) {formatDelai(predicted.nextFundingTime, Date.now())} ·{" "}
-                      {formatTime(predicted.nextFundingTime)}
+                      {formatHeure(predicted.nextFundingTime)}
                     </div>
                   </div>
                 )}
@@ -522,10 +508,10 @@ export function DerivativesWindow() {
                   value={
                     ls && Number.isFinite(ls.ratio)
                       ? `${ls.ratio.toFixed(2)} · L ${ls.longAccount.toFixed(1)}% / S ${ls.shortAccount.toFixed(1)}%`
-                      : "—"
+                      : VALEUR_ABSENTE
                   }
                   sparkValues={lsSpark}
-                  color="#a78bfa"
+                  color="var(--serie-2)"
                 />
               </div>
 
@@ -534,23 +520,24 @@ export function DerivativesWindow() {
                   Pilote derivativesChartStore, lu hors React par chart/derivatives.ts. */}
               <div className="flex items-center gap-2 rounded-md border border-border bg-bg px-3 py-2">
                 <span className="mr-auto text-[11px] text-text-dim">Afficher sur le chart</span>
-                <ChartToggle label="OI" active={showOiPane} color="#22d3ee" onClick={toggleOiPane} />
-                <ChartToggle label="Funding" active={showFundingPane} color="#f59e0b" onClick={toggleFundingPane} />
+                <ChartToggle label="OI" active={showOiPane} color={OI_COLOR} onClick={toggleOiPane} />
+                <ChartToggle
+                  label="Funding"
+                  active={showFundingPane}
+                  color={FUNDING_COLOR}
+                  onClick={toggleFundingPane}
+                />
               </div>
 
               <section className="rounded-md border border-border bg-bg">
-                <div className="border-b border-border px-3 py-2 text-[11px] font-medium text-text-dim">
+                <div className="border-b border-border px-3 py-2 text-[10px] uppercase tracking-wide text-text-dim">
                   Liquidations récentes
                 </div>
                 {liqBuckets.length > 0 && (
                   <div className="border-b border-border px-3 py-2">
                     <div className="mb-1 flex items-baseline justify-between text-[11px]">
-                      <span className="tabular-nums" style={{ color: "#f87171" }}>
-                        Longs {formatUsd(totalLongLiq)}
-                      </span>
-                      <span className="tabular-nums" style={{ color: "#34d399" }}>
-                        Shorts {formatUsd(totalShortLiq)}
-                      </span>
+                      <span className="tabular-nums text-down">Longs {formatUsd(totalLongLiq)}</span>
+                      <span className="tabular-nums text-up">Shorts {formatUsd(totalShortLiq)}</span>
                     </div>
                     <LiquidationBars buckets={liqBuckets} />
                   </div>
@@ -564,10 +551,9 @@ export function DerivativesWindow() {
                         key={`${l.time}-${l.side}-${i}`}
                         className="grid grid-cols-[1fr_auto_1fr] items-baseline gap-3 px-3 py-1.5 text-[11px]"
                       >
-                        <span className="tabular-nums text-text-dim">{formatTime(l.time)}</span>
+                        <span className="tabular-nums text-text-dim">{formatHeure(l.time)}</span>
                         <span
-                          className="font-medium uppercase"
-                          style={{ color: l.side === "long" ? "#f87171" : "#34d399" }}
+                          className={`font-medium uppercase ${l.side === "long" ? "text-down" : "text-up"}`}
                         >
                           {l.side}
                         </span>
@@ -588,33 +574,33 @@ export function DerivativesWindow() {
               Affiché dès que la source est Binance ET qu'au moins un flux répond. */}
           {isBinance && hasBinanceSentiment && (
             <section className="mt-3 space-y-2">
-              <div className="flex items-center justify-between px-1 text-[11px] font-medium text-text-dim">
-                <span>Sentiment perp · Binance</span>
+              <div className="flex items-center justify-between px-1 text-text-dim">
+                <span className="text-[10px] uppercase tracking-wide">Sentiment perp · Binance</span>
                 <span className="text-[10px]">sans clé · {BIN_PERIOD}</span>
               </div>
               <Metric
                 label="Comptes globaux L/S"
                 value={formatRatioBreakdown(globalLs.at(-1))}
                 sparkValues={globalLsSpark}
-                color="#60a5fa"
+                color="var(--serie-6)"
               />
               <Metric
                 label="Top traders L/S"
                 value={formatRatioBreakdown(topLs.at(-1))}
                 sparkValues={topLsSpark}
-                color="#f472b6"
+                color="var(--serie-4)"
               />
               <Metric
                 label="Taker achat / vente"
-                value={formatRatio(lastTaker?.buySellRatio)}
+                value={formatDec(lastTaker?.buySellRatio, 2)}
                 sparkValues={takerSpark}
-                color={lastTaker && lastTaker.buySellRatio >= 1 ? "#34d399" : "#f87171"}
+                color={lastTaker && lastTaker.buySellRatio >= 1 ? "var(--up)" : "var(--down)"}
               />
               <Metric
                 label="Open Interest"
                 value={formatUsd(binOi.at(-1)?.oiUsd)}
                 sparkValues={binOiSpark}
-                color="#22d3ee"
+                color={OI_COLOR}
               />
             </section>
           )}

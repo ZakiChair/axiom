@@ -1,11 +1,12 @@
 /**
  * Tests des fonctions PURES du panneau « Santé sources » (HealthPanel).
  * Le rendu React n'est pas testé (pas d'environnement DOM/testing-library dans ce
- * projet) : on couvre le formatage et la logique de dégradation, seuls porteurs de
- * régressions silencieuses (âge/quota faux, badge d'alerte manqué).
+ * projet) : on couvre le formatage local et la logique de dégradation, seuls porteurs
+ * de régressions silencieuses (quota faux, badge d'alerte manqué). L'âge relatif est
+ * désormais partagé et testé dans lib/format.test.ts.
  */
 import { describe, it, expect } from "vitest";
-import { dotClass, sourceLabel, formatAge, formatQuota, degradedLevel } from "./HealthPanel";
+import { dotClass, sourceLabel, formatQuota, degradedLevel } from "./HealthPanel";
 import type { SanteSource } from "../store/health";
 
 /** Fabrique une SanteSource minimale pour les tests de degradedLevel. */
@@ -34,26 +35,6 @@ describe("sourceLabel", () => {
 
   it("retombe sur la base brute pour une source inconnue", () => {
     expect(sourceLabel("okx")).toBe("okx");
-  });
-});
-
-describe("formatAge", () => {
-  const now = 1_000_000_000_000;
-
-  it("« — » quand aucun message reçu (ts=0 ou invalide)", () => {
-    expect(formatAge(0, now)).toBe("—");
-    expect(formatAge(NaN, now)).toBe("—");
-  });
-
-  it("secondes / minutes / heures / jours", () => {
-    expect(formatAge(now - 12_000, now)).toBe("il y a 12 s");
-    expect(formatAge(now - 90_000, now)).toBe("il y a 1 min"); // 90 s → 1 min
-    expect(formatAge(now - 2 * 3_600_000, now)).toBe("il y a 2 h");
-    expect(formatAge(now - 25 * 3_600_000, now)).toBe("il y a 1 j"); // 25 h → 1 j
-  });
-
-  it("horloge légèrement en avance → 0 s (jamais de valeur négative)", () => {
-    expect(formatAge(now + 500, now)).toBe("il y a 0 s");
   });
 });
 

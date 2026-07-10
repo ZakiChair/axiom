@@ -9,7 +9,15 @@
 import { useStore } from "zustand";
 import { themeStore, THEMES, type ThemeId } from "../store/theme";
 
-/** Libellé + aperçu (dégradé fond -> surface -> accent) de chaque thème. */
+/**
+ * Libellé + aperçu (dégradé fond -> surface -> accent) de chaque thème.
+ *
+ * Ces hex sont INTENTIONNELLEMENT en dur et hors-thème : chaque pastille
+ * prévisualise SON thème (fond, teinte, accent), indépendamment du thème
+ * courant appliqué sur <html>. Les tokens CSS ne résolvent que le thème actif,
+ * ils ne peuvent donc pas servir ici. À garder synchronisé avec les palettes de
+ * chaque thème si l'une d'elles évolue.
+ */
 const THEME_META: Record<ThemeId, { label: string; swatch: string }> = {
   dark: { label: "Dark", swatch: "linear-gradient(135deg, #0a0a0a 0%, #1f2937 55%, #38bdf8 100%)" },
   bloomberg: { label: "Bloomberg", swatch: "linear-gradient(135deg, #000000 0%, #1c1500 50%, #ffb000 100%)" },

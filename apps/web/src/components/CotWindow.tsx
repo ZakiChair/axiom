@@ -25,6 +25,8 @@ import {
   type ResumeCot,
 } from "../data/cot";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
+import { formatDateComplete } from "../lib/format";
+import { EnTeteFenetre } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -46,13 +48,15 @@ mirrorOpenState("cot", cotUiStore);
 
 // ─────────────────────────── Format utilitaires ───────────────────────────
 
-/** Formate un entier de position de façon compacte (181339 → « 181k », 3524 → « 3.5k »). */
+/** Formate un entier de position de façon compacte (181339 → « 181K », 3524 → « 3.5K »).
+ * Helper LOCAL conservé : décimales adaptées aux lots (0/1) plus lisibles que les 2 déc.
+ * du `formatCompact` partagé ; casse du suffixe alignée sur le standard (K majuscule). */
 function formatCompact(v: number): string {
   const abs = Math.abs(v);
   if (!Number.isFinite(v)) return "—";
   if (abs >= 1000) {
     const k = abs / 1000;
-    return `${k >= 10 ? k.toFixed(0) : k.toFixed(1)}k`;
+    return `${k >= 10 ? k.toFixed(0) : k.toFixed(1)}K`;
   }
   return abs.toFixed(0);
 }
@@ -62,12 +66,6 @@ function formatSigned(v: number): string {
   if (!Number.isFinite(v)) return "—";
   const signe = v > 0 ? "+" : v < 0 ? "−" : "";
   return `${signe}${formatCompact(v)}`;
-}
-
-/** Date du rapport en format court FR (« 23 juin 2026 »). */
-function formatDateRapport(ms: number | null): string {
-  if (ms === null || !Number.isFinite(ms)) return "—";
-  return new Date(ms).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
 }
 
 // ─────────────────────────── Ligne d'instrument ───────────────────────────
@@ -149,24 +147,26 @@ export function CotWindow() {
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">COT · CFTC</h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">
-            Net spéculatif · {formatDateRapport(resume?.dateRapport ?? null)}
+      <EnTeteFenetre
+        titre="COT · CFTC"
+        sousTitre={
+          <>
+            Net spéculatif · {formatDateComplete(resume?.dateRapport ?? 0)}
             {loading ? " · maj…" : ""}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void charger(true)}
-          aria-label="Rafraîchir le rapport COT"
-          title="Rafraîchir"
-          className="rounded p-1 text-sm leading-none text-text-dim transition hover:bg-bg hover:text-text"
-        >
-          ⟳
-        </button>
-      </header>
+          </>
+        }
+        actions={
+          <button
+            type="button"
+            onClick={() => void charger(true)}
+            aria-label="Rafraîchir le rapport COT"
+            title="Rafraîchir"
+            className="rounded p-1 text-sm leading-none text-text-dim transition hover:bg-bg hover:text-text"
+          >
+            ⟳
+          </button>
+        }
+      />
 
       <div className="flex-1 overflow-y-auto">
         {erreur && (

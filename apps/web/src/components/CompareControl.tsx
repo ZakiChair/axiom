@@ -37,7 +37,7 @@ export function CompareControl() {
     >
       <div className="px-2 pb-2 pt-2">
         {full ? (
-          <p className="px-1 py-1 text-[11px] text-neutral-600">
+          <p className="px-1 py-1 text-[11px] text-text-dim">
             Maximum {MAX_COMPARE} symboles comparés.
           </p>
         ) : (
@@ -53,10 +53,10 @@ export function CompareControl() {
               className="h-2.5 w-2.5 shrink-0 rounded-full"
               style={{ backgroundColor: MAIN_COLOR }}
             />
-            <span className="flex-1 truncate font-medium text-neutral-200">
+            <span className="flex-1 truncate font-medium text-text">
               {mainSymbol}
             </span>
-            <span className="text-[10px] text-neutral-600">réf.</span>
+            <span className="text-[10px] text-text-dim">réf.</span>
           </li>
 
           {/* Comparés : pastille couleur + nom + retrait. */}
@@ -69,12 +69,12 @@ export function CompareControl() {
                 className="h-2.5 w-2.5 shrink-0 rounded-full"
                 style={{ backgroundColor: c.color }}
               />
-              <span className="flex-1 truncate text-neutral-200">{c.symbol}</span>
+              <span className="flex-1 truncate text-text">{c.symbol}</span>
               <button
                 type="button"
                 onClick={() => remove(c.symbol)}
                 aria-label={`Retirer ${c.symbol}`}
-                className="text-neutral-600 transition hover:text-neutral-300"
+                className="text-text-dim transition hover:text-text"
               >
                 ×
               </button>

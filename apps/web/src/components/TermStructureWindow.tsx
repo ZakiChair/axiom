@@ -23,6 +23,9 @@ import {
 import { fetchDeribitTermStructure } from "../data/deribit";
 import { daemonPret, detectDaemon, kvGet, kvPut } from "../data/daemon";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
+import { formatDateCourte, formatPourcentage } from "../lib/format";
+import { lireTokenCanvas } from "../lib/canvasTokens";
+import { EnTeteFenetre, ErreurBloc, NoteSource } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -47,7 +50,7 @@ mirrorOpenState("termStructure", termStructureUiStore);
 const REFRESH_MS = 60_000; // ~1 min (données lentes).
 const ACTIFS = ["BTC", "ETH"] as const;
 type Actif = (typeof ACTIFS)[number];
-/** Couleur de tracé par actif. */
+/** Couleur de tracé par actif — couleurs de marque BTC/ETH, volontairement hors thème. */
 const COULEUR: Record<Actif, string> = { BTC: "#f7931a", ETH: "#8b5cf6" };
 /** Seuil (fraction annualisée) au-delà duquel on qualifie contango/backwardation. */
 const SEUIL_REGIME = 0.005; // ±0,5 %/an
@@ -122,7 +125,7 @@ function basisMoyen(points: PointBasis[]): number {
 function phraseRegime(points: PointBasis[]): string {
   const moy = basisMoyen(points);
   if (!Number.isFinite(moy)) return "données indisponibles";
-  const pct = `${moy >= 0 ? "+" : ""}${(moy * 100).toFixed(1)} %/an`;
+  const pct = `${moy >= 0 ? "+" : ""}${formatPourcentage(moy * 100, 1)}/an`;
   if (moy > SEUIL_REGIME) return `contango (${pct}) — futures au-dessus du spot`;
   if (moy < -SEUIL_REGIME) return `backwardation (${pct}) — futures sous le spot`;
   return `courbe plate (${pct})`;
@@ -135,11 +138,6 @@ interface CourbeActif {
   live: PointBasis[];
   j1: PointSnap[] | null;
   j7: PointSnap[] | null;
-}
-
-/** Formatte une date d'échéance courte (JJ/MM). */
-function dateCourte(ms: number): string {
-  return new Date(ms).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
 }
 
 /**
@@ -157,6 +155,11 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>): 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
 
+  // Couleurs du thème courant, lues AU DESSIN (repeint avec les bonnes teintes
+  // au prochain rendu après un changement de thème). Cf. VolWindow.lireTokens.
+  const cTextDim = lireTokenCanvas("--text-dim", "#9ca3af");
+  const cBorder = lireTokenCanvas("--border", "#262626");
+
   const padL = 40;
   const padR = 10;
   const padT = 12;
@@ -167,7 +170,7 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>): 
   // Domaine X (échéances) et Y (basis %) à partir des points live des deux actifs.
   const liveTous = [...data.BTC.live, ...data.ETH.live];
   if (liveTous.length === 0) {
-    ctx.fillStyle = "#6b7280";
+    ctx.fillStyle = cTextDim;
     ctx.font = "11px system-ui, sans-serif";
     ctx.fillText("En attente de données…", padL, padT + plotH / 2);
     return;
@@ -188,8 +191,8 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>): 
   const py = (pct: number) => padT + (1 - (pct - yMin) / (yMax - yMin)) * plotH;
 
   // Grille Y + étiquettes (min / 0 / max).
-  ctx.strokeStyle = "rgba(148,163,184,0.15)";
-  ctx.fillStyle = "#6b7280";
+  ctx.strokeStyle = cBorder;
+  ctx.fillStyle = cTextDim;
   ctx.font = "10px system-ui, sans-serif";
   ctx.lineWidth = 1;
   for (const val of [yMin, (yMin + yMax) / 2, yMax]) {
@@ -202,7 +205,7 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>): 
   }
   // Ligne zéro (neutralité) accentuée.
   if (yMin < 0 && yMax > 0) {
-    ctx.strokeStyle = "rgba(148,163,184,0.5)";
+    ctx.strokeStyle = cTextDim;
     ctx.beginPath();
     ctx.moveTo(padL, py(0));
     ctx.lineTo(cssW - padR, py(0));
@@ -210,9 +213,9 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>): 
   }
 
   // Étiquettes X (première et dernière échéance).
-  ctx.fillStyle = "#6b7280";
-  ctx.fillText(dateCourte(xMin), padL, cssH - 6);
-  const txtFin = dateCourte(xMax);
+  ctx.fillStyle = cTextDim;
+  ctx.fillText(formatDateCourte(xMin), padL, cssH - 6);
+  const txtFin = formatDateCourte(xMax);
   ctx.fillText(txtFin, cssW - padR - ctx.measureText(txtFin).width, cssH - 6);
 
   /** Trace une polyligne + points, avec style de trait donné. */
@@ -336,16 +339,7 @@ export function TermStructureWindow() {
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">
-            Structure par terme
-          </h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">
-            Basis annualisé · Binance COIN-M + Deribit
-          </p>
-        </div>
-      </header>
+      <EnTeteFenetre titre="Structure par terme" sousTitre="Basis annualisé · Binance COIN-M + Deribit" />
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         <div className="mb-3 flex items-center justify-between rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-dim">
@@ -354,8 +348,8 @@ export function TermStructureWindow() {
         </div>
 
         {erreur && (
-          <div className="mb-3 rounded-md border border-down/40 px-3 py-2 text-[11px] text-down">
-            {erreur}
+          <div className="mb-3">
+            <ErreurBloc>{erreur}</ErreurBloc>
           </div>
         )}
 
@@ -385,10 +379,12 @@ export function TermStructureWindow() {
           ))}
         </div>
 
-        <p className="mt-3 text-[10px] leading-snug text-text-dim">
-          Trait plein = aujourd'hui · tirets = J-1 · pointillés = J-7 (instantanés locaux,
-          daemon /kv sinon localStorage). Sources Binance COIN-M + Deribit, ~1 min.
-        </p>
+        <div className="mt-3">
+          <NoteSource>
+            Trait plein = aujourd'hui · tirets = J-1 · pointillés = J-7 (instantanés locaux,
+            daemon /kv sinon localStorage). Sources Binance COIN-M + Deribit, ~1 min.
+          </NoteSource>
+        </div>
       </div>
     </>
   );

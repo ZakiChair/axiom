@@ -3,21 +3,19 @@
  * (couleur secondaire). X = maturité convertie en années via `anneesDeMaturite`
  * (`courbeTaux.util.ts`, testée séparément), Y = taux en %. Composant de rendu PUR,
  * NON unit-testé (pattern `Sparkline`/`SeasonalityWindow` : les canvas React sont
- * vérifiés manuellement). Couleurs via `readToken` — jamais de couleur en dur.
+ * vérifiés manuellement). Couleurs via `lireTokenCanvas` — jamais de couleur en dur.
  */
 import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import { themeStore } from "../store/theme";
+import { lireTokenCanvas } from "../lib/canvasTokens";
+import { Vide } from "./ui";
 
 /** Un point de la courbe, déjà projeté en années par l'appelant (`MacroRatesWindow`). */
 export interface PointCourbe {
   maturite: string;
   anneesTri: number;
   taux: number;
-}
-
-function readToken(name: string, fallback: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
 }
 
 function dessinerCourbe(canvas: HTMLCanvasElement, us: PointCourbe[], euro: PointCourbe[]): void {
@@ -31,18 +29,16 @@ function dessinerCourbe(canvas: HTMLCanvasElement, us: PointCourbe[], euro: Poin
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
 
-  const dim = readToken("--text-dim", "#94a3b8");
-  const border = readToken("--border", "#334155");
-  const accent = readToken("--accent", "#38bdf8");
-  const secondaire = readToken("--up", "#2dc08e");
+  const dim = lireTokenCanvas("--text-dim", "#94a3b8");
+  const border = lireTokenCanvas("--border", "#334155");
+  const accent = lireTokenCanvas("--accent", "#38bdf8");
+  // Série secondaire (zone euro) : token de série dédié, pas le token sémantique --up.
+  const secondaire = lireTokenCanvas("--serie-2", "#a78bfa");
   ctx.font = "10px var(--font-display, monospace)";
 
   const tous = [...us, ...euro];
-  if (tous.length < 2) {
-    ctx.fillStyle = dim;
-    ctx.fillText("Courbe indisponible (pas assez de points).", 8, h / 2);
-    return;
-  }
+  // Cas < 2 points géré par le composant (état <Vide/> standard), sans texte canvas.
+  if (tous.length < 2) return;
 
   const left = 34;
   const right = 8;
@@ -146,5 +142,7 @@ export function CourbeTaux({ us, euro }: { us: PointCourbe[]; euro: PointCourbe[
     return () => ro.disconnect();
   }, [us, euro, theme]);
 
+  // Moins de 2 points : état « indisponible » standard (cf. Vide) plutôt qu'un texte canvas.
+  if (us.length + euro.length < 2) return <Vide>Courbe indisponible (pas assez de points).</Vide>;
   return <canvas ref={ref} className="h-[180px] w-full" aria-hidden="true" />;
 }

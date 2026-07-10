@@ -37,6 +37,8 @@ import {
   type ProfilFinnhub,
   type EarningsEvent,
 } from "../data/fund/finnhub";
+import { formatUsd, formatDec, formatDateComplete, VALEUR_ABSENTE } from "../lib/format";
+import { EnTeteFenetre, Onglets, Chargement, Vide, SansCle } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -84,19 +86,10 @@ export const commandes: Commande[] = [
 
 // ─────────────────────────── Formatage (pur) ───────────────────────────
 
-/** Capitalisation Finnhub (en MILLIONS USD) → notation compacte $T/$B/$M. */
+/** Capitalisation Finnhub (en MILLIONS USD) → montant USD compact partagé ($T/$B/$M/$K). */
 function fmtCapitalisation(millions: number | null): string {
-  if (millions === null || !Number.isFinite(millions)) return "—";
-  const usd = millions * 1_000_000;
-  if (usd >= 1e12) return `$${(usd / 1e12).toFixed(2)}T`;
-  if (usd >= 1e9) return `$${(usd / 1e9).toFixed(2)}B`;
-  if (usd >= 1e6) return `$${(usd / 1e6).toFixed(2)}M`;
-  return `$${usd.toFixed(0)}`;
-}
-
-/** EPS (2 décimales) ou tiret. */
-function fmtEps(v: number | null): string {
-  return v === null || !Number.isFinite(v) ? "—" : v.toFixed(2);
+  if (millions === null || !Number.isFinite(millions)) return VALEUR_ABSENTE;
+  return formatUsd(millions * 1_000_000);
 }
 
 /**
@@ -114,11 +107,10 @@ function urlHttpSure(url: string): string | null {
   }
 }
 
-/** Date ISO (YYYY-MM-DD) → format court fr-FR, robuste aux dates invalides. */
+/** Date ISO (YYYY-MM-DD) → date complète fr-FR partagée, robuste aux dates invalides. */
 function fmtDateCourte(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+  const ms = new Date(iso).getTime();
+  return Number.isNaN(ms) ? iso : formatDateComplete(ms);
 }
 
 // ─────────────────────────── Onglets ───────────────────────────
@@ -128,39 +120,11 @@ type Statut = "idle" | "loading" | "ready";
 
 const ONGLETS: ReadonlyArray<{ id: Onglet; label: string }> = [
   { id: "profil", label: "Profil" },
-  { id: "insider", label: "Insider" },
-  { id: "earnings", label: "Earnings" },
+  { id: "insider", label: "Initiés" },
+  { id: "earnings", label: "Résultats" },
 ];
 
 // ─────────────────────────── Sous-vues ───────────────────────────
-
-function Chargement() {
-  return <div className="px-1 py-6 text-center text-[11px] text-text-dim">Chargement…</div>;
-}
-
-function Indisponible({ libelle }: { libelle: string }) {
-  return (
-    <div className="rounded border border-border bg-bg px-3 py-4 text-center text-[11px] text-text-dim">
-      {libelle}
-    </div>
-  );
-}
-
-/** Message affiché à la place d'un onglet dépendant de Finnhub quand aucune clé n'est configurée. */
-function IndisponibleSansCle({ openSettings }: { openSettings: () => void }) {
-  return (
-    <div className="rounded border border-border bg-bg px-3 py-4 text-center text-[11px] text-text-dim">
-      <p>Configurez une clé Finnhub pour afficher cette section.</p>
-      <button
-        type="button"
-        onClick={openSettings}
-        className="mt-2 text-accent hover:underline"
-      >
-        Ouvrir les réglages ⚙
-      </button>
-    </div>
-  );
-}
 
 function VueProfil({ data }: { data: ProfilFinnhub }) {
   const siteWeb = urlHttpSure(data.description);
@@ -223,8 +187,8 @@ function VueEarnings({ data }: { data: EarningsEvent[] }) {
         {data.map((e) => (
           <tr key={e.date} className="border-t border-border/60">
             <td className="py-1 text-left text-text">{fmtDateCourte(e.date)}</td>
-            <td className="py-1 text-right text-text-dim">{fmtEps(e.epsEstime)}</td>
-            <td className="py-1 text-right text-text">{fmtEps(e.epsReel)}</td>
+            <td className="py-1 text-right text-text-dim">{formatDec(e.epsEstime, 2)}</td>
+            <td className="py-1 text-right text-text">{formatDec(e.epsReel, 2)}</td>
           </tr>
         ))}
       </tbody>
@@ -338,12 +302,7 @@ export function FundWindow() {
 
   return (
     <>
-      <header className="border-b border-border px-4 py-3">
-        <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">
-          FUND · Fiche société
-        </h2>
-        <p className="mt-0.5 text-[11px] text-text-dim">SEC EDGAR · Finnhub</p>
-      </header>
+      <EnTeteFenetre titre="FUND · Fiche société" sousTitre="SEC EDGAR · Finnhub" />
 
       {/* Recherche — annuaire SEC EDGAR, aucune clé requise. */}
       <div className="relative border-b border-border px-4 py-2">
@@ -365,7 +324,7 @@ export function FundWindow() {
           aria-label="Rechercher une société"
         />
         {statutTickers === "loading" && (
-          <p className="mt-1 text-[10px] text-text-dim">Chargement de l'annuaire SEC…</p>
+          <p className="mt-1 text-[11px] text-text-dim">Chargement de l'annuaire SEC…</p>
         )}
         {dropdownOpen && resultats.length > 0 && (
           <ul className="absolute left-4 right-4 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded border border-border bg-surface py-1 shadow-xl">
@@ -409,44 +368,40 @@ export function FundWindow() {
           </div>
 
           {/* Onglets. */}
-          <div className="flex gap-1 border-b border-border px-3 py-2">
-            {ONGLETS.map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                onClick={() => setOnglet(o.id)}
-                className={`rounded px-2.5 py-1 text-[11px] transition ${
-                  onglet === o.id ? "bg-surface text-text" : "text-text-dim hover:text-text"
-                }`}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
+          <Onglets options={ONGLETS} actif={onglet} onChange={setOnglet} />
 
           <div className="flex-1 overflow-y-auto px-4 py-3">
             {onglet === "profil" &&
               (!hasKey ? (
-                <IndisponibleSansCle openSettings={openSettings} />
+                <SansCle
+                  message="Configurez une clé Finnhub pour afficher cette section."
+                  onOuvrirReglages={openSettings}
+                />
               ) : statutFinnhub === "loading" && profilFinnhub === null ? (
                 <Chargement />
               ) : profilFinnhub === null ? (
-                <Indisponible libelle="Profil Finnhub indisponible pour ce ticker." />
+                <Vide>Profil Finnhub indisponible pour ce ticker.</Vide>
               ) : (
                 <VueProfil data={profilFinnhub} />
               ))}
 
             {onglet === "insider" && (
-              <Indisponible libelle="Transactions d'initiés (Form 4) indisponibles dans cette version : l'endpoint SEC EDGAR utilisé ici ne fournit pas le détail par dépôt, seulement la liste des dépôts." />
+              <Vide>
+                Transactions d'initiés (Form 4) indisponibles dans cette version : l'endpoint SEC
+                EDGAR utilisé ici ne fournit pas le détail par dépôt, seulement la liste des dépôts.
+              </Vide>
             )}
 
             {onglet === "earnings" &&
               (!hasKey ? (
-                <IndisponibleSansCle openSettings={openSettings} />
+                <SansCle
+                  message="Configurez une clé Finnhub pour afficher cette section."
+                  onOuvrirReglages={openSettings}
+                />
               ) : statutEarnings === "loading" && earnings === null ? (
                 <Chargement />
               ) : earnings === null || earnings.length === 0 ? (
-                <Indisponible libelle="Aucun résultat trimestriel programmé trouvé." />
+                <Vide>Aucun résultat trimestriel programmé trouvé.</Vide>
               ) : (
                 <VueEarnings data={earnings} />
               ))}

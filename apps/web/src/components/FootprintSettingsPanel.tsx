@@ -5,7 +5,7 @@
  */
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
-import { orderflowStore, type OrderflowState } from "../store/orderflow";
+import { orderflowStore } from "../store/orderflow";
 import { marketStore } from "../store/market";
 
 interface FieldProps {
@@ -74,9 +74,10 @@ export function FootprintSettingsPanel({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={onClose}
-            className="text-[10px] text-text-dim transition hover:text-text"
+            aria-label="Fermer"
+            className="rounded px-1 text-xs leading-none text-text-dim transition hover:bg-bg hover:text-text"
           >
-            fermer
+            ✕
           </button>
         </div>
 

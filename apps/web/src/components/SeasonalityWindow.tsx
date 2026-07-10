@@ -5,8 +5,11 @@ import type { Candle, ExchangeId } from "@axiom/types";
 import type { Commande } from "../commands/registry";
 import { getAdapter } from "../data/adapters";
 import { bucketReturns, monthlyMatrix, type SeasonCell, type SeasonMode, type MonthCell } from "../lib/seasonality";
+import { formatPourcentage } from "../lib/format";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 import { marketStore } from "../store/market";
 import { mirrorOpenState, windowManagerStore } from "../store/windowManager";
+import { Chargement, EnTeteFenetre, ErreurBloc, Onglets, Vide } from "./ui";
 
 export interface SeasonalityUiState {
   open: boolean;
@@ -45,12 +48,9 @@ const ONGLETS: ReadonlyArray<{ id: Onglet; label: string }> = [
   { id: "hourly", label: "Heure" },
 ];
 
-function readToken(name: string, fallback: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-}
-
-function fmtPct(v: number): string {
-  return `${(v * 100).toFixed(1)} %`;
+/** Rendement en pourcentage « niveau » (ratio 0-1 → « x.x % »), 1 décimale. */
+function fmtPct(ratio: number): string {
+  return formatPourcentage(ratio * 100, 1);
 }
 
 function mixColor(neg: string, pos: string, value: number, scale: number): string {
@@ -104,11 +104,11 @@ function drawMonthly(canvas: HTMLCanvasElement, cells: MonthCell[], hover: (text
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
 
-  const text = readToken("--text", "#e5e7eb");
-  const dim = readToken("--text-dim", "#94a3b8");
-  const up = readToken("--up", "#2dc08e");
-  const down = readToken("--down", "#f92855");
-  const border = readToken("--border", "#334155");
+  const text = lireTokenCanvas("--text", "#e5e7eb");
+  const dim = lireTokenCanvas("--text-dim", "#94a3b8");
+  const up = lireTokenCanvas("--up", "#2dc08e");
+  const down = lireTokenCanvas("--down", "#f92855");
+  const border = lireTokenCanvas("--border", "#334155");
   const years = [...new Set(cells.map((c) => c.year))].sort((a, b) => a - b);
   const scale = percentile(cells.map((c) => Math.abs(c.ret)).sort((a, b) => a - b), 0.9) || 0.1;
   const left = 42;
@@ -159,11 +159,11 @@ function drawBuckets(canvas: HTMLCanvasElement, cells: SeasonCell[], mode: Seaso
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
 
-  const text = readToken("--text", "#e5e7eb");
-  const dim = readToken("--text-dim", "#94a3b8");
-  const up = readToken("--up", "#2dc08e");
-  const down = readToken("--down", "#f92855");
-  const border = readToken("--border", "#334155");
+  const text = lireTokenCanvas("--text", "#e5e7eb");
+  const dim = lireTokenCanvas("--text-dim", "#94a3b8");
+  const up = lireTokenCanvas("--up", "#2dc08e");
+  const down = lireTokenCanvas("--down", "#f92855");
+  const border = lireTokenCanvas("--border", "#334155");
   const labels = mode === "weekday" ? ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"] : Array.from({ length: 24 }, (_v, i) => `${i}h`);
   const scale = percentile(cells.map((c) => Math.abs(c.mean)).sort((a, b) => a - b), 0.9) || 0.02;
   const byBucket = new Map(cells.map((c) => [c.bucket, c]));
@@ -264,31 +264,22 @@ export function SeasonalityWindow() {
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">SEAG · Saisonnalité</h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">{symbol} · UTC · rendements simples</p>
-        </div>
-        <div className="max-w-[260px] truncate text-right text-[11px] text-text-dim">{hover || "Survoler une cellule"}</div>
-      </header>
+      <EnTeteFenetre
+        titre="SEAG · Saisonnalité"
+        sousTitre={`${symbol} · UTC · rendements simples`}
+        actions={
+          <div className="max-w-[260px] truncate text-right text-[11px] text-text-dim">
+            {hover || "Survoler une cellule"}
+          </div>
+        }
+      />
 
-      <div className="flex gap-1 border-b border-border px-3 py-2">
-        {ONGLETS.map((o) => (
-          <button
-            key={o.id}
-            type="button"
-            onClick={() => setOnglet(o.id)}
-            className={`rounded px-2.5 py-1 text-[11px] transition ${onglet === o.id ? "bg-surface text-text" : "text-text-dim hover:text-text"}`}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
+      <Onglets options={ONGLETS} actif={onglet} onChange={setOnglet} />
 
       <div className="relative min-h-0 flex-1 p-3">
-        {statut === "loading" && <div className="py-12 text-center text-[11px] text-text-dim">Chargement…</div>}
-        {statut === "error" && <div className="rounded border border-border bg-bg px-3 py-4 text-center text-[11px] text-text-dim">Saisonnalité indisponible pour ce symbole.</div>}
-        {statut === "ready" && candles.length < 2 && <div className="rounded border border-border bg-bg px-3 py-4 text-center text-[11px] text-text-dim">Historique insuffisant.</div>}
+        {statut === "loading" && <Chargement />}
+        {statut === "error" && <ErreurBloc>Saisonnalité indisponible pour ce symbole.</ErreurBloc>}
+        {statut === "ready" && candles.length < 2 && <Vide>Historique insuffisant.</Vide>}
         <canvas ref={canvasRef} className={statut === "ready" && candles.length >= 2 ? "h-full min-h-[360px] w-full" : "hidden"} />
       </div>
     </>

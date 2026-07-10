@@ -31,30 +31,14 @@ import {
   type Direction,
 } from "../store/portfolio";
 import { notesUiStore } from "../store/notes";
+import { formatPrice, formatUsd, formatPct } from "../lib/format";
+import { EnTeteFenetre, Vide } from "./ui";
 
 /** Cellules DOM d'une ligne, mises à jour impérativement (hors render-loop). */
 interface RowCells {
   prix: HTMLElement | null;
   pnl: HTMLElement | null;
   pct: HTMLElement | null;
-}
-
-/** Formatte un prix selon son ordre de grandeur. */
-function formatPrix(p: number): string {
-  if (!Number.isFinite(p)) return "—";
-  if (p >= 1000) return p.toLocaleString("en-US", { maximumFractionDigits: 2 });
-  if (p >= 1) return p.toFixed(2);
-  return p.toPrecision(4);
-}
-
-/** Formatte un montant USD (compact au-delà du million). */
-function formatMoney(n: number | undefined): string {
-  if (n === undefined || !Number.isFinite(n)) return "—";
-  const neg = n < 0 ? "−" : ""; // signe moins typographique
-  const abs = Math.abs(n);
-  if (abs >= 1e6) return `${neg}$${(abs / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `${neg}$${abs.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
-  return `${neg}$${abs.toFixed(2)}`;
 }
 
 /** Écrit un montant signé + coloré (tokens --up/--down) dans une cellule DOM. */
@@ -64,21 +48,16 @@ function writeMoney(el: HTMLElement, n: number | undefined): void {
     el.style.color = "";
     return;
   }
-  const plus = n > 0 ? "+" : ""; // le moins est déjà porté par formatMoney
-  el.textContent = `${plus}${formatMoney(n)}`;
+  const plus = n > 0 ? "+" : ""; // le moins est déjà porté par formatUsd
+  el.textContent = `${plus}${formatUsd(n)}`;
   el.style.color = n > 0 ? "var(--up)" : n < 0 ? "var(--down)" : "";
 }
 
 /** Écrit un pourcentage signé + coloré dans une cellule DOM. */
 function writePct(el: HTMLElement, pct: number | undefined): void {
-  if (pct === undefined || !Number.isFinite(pct)) {
-    el.textContent = "—";
-    el.style.color = "";
-    return;
-  }
-  const sign = pct >= 0 ? "+" : "";
-  el.textContent = `${sign}${pct.toFixed(2)}%`;
-  el.style.color = pct > 0 ? "var(--up)" : pct < 0 ? "var(--down)" : "";
+  el.textContent = formatPct(pct);
+  el.style.color =
+    pct === undefined || !Number.isFinite(pct) ? "" : pct > 0 ? "var(--up)" : pct < 0 ? "var(--down)" : "";
 }
 
 /** Enregistre/retire une cellule DOM dans la map (callback de ref). */
@@ -136,14 +115,14 @@ export function PortfolioWindow() {
       const row = cells.current.get(p.id);
       if (!row) continue;
       const px = latest.current.get(p.symbole);
-      if (row.prix) row.prix.textContent = px !== undefined ? formatPrix(px) : "—";
+      if (row.prix) row.prix.textContent = px !== undefined ? formatPrice(px) : "—";
       const pnl = px !== undefined ? pnlLatentPosition(p, px) : null;
       if (row.pnl) writeMoney(row.pnl, pnl?.net);
       if (row.pct) writePct(row.pct, pnl?.pct);
     }
     if (totalPnlRef.current) writeMoney(totalPnlRef.current, pnlLatentTotal(openRef.current, prix));
     const expo = calculerExposition(openRef.current, prix);
-    if (expoBruteRef.current) expoBruteRef.current.textContent = formatMoney(expo.brute);
+    if (expoBruteRef.current) expoBruteRef.current.textContent = formatUsd(expo.brute);
     if (expoNetteRef.current) writeMoney(expoNetteRef.current, expo.nette);
   }, []);
 
@@ -213,7 +192,7 @@ export function PortfolioWindow() {
     if (!pmPrompt) return;
     const { position: p, prixSortie } = pmPrompt;
     const pnl = pnlRealisePosition({ ...p, statut: "clos", prixSortie });
-    const netTxt = pnl ? `${pnl.net > 0 ? "+" : ""}${formatMoney(pnl.net)} (${pnl.pct.toFixed(2)}%)` : "—";
+    const netTxt = pnl ? `${pnl.net > 0 ? "+" : ""}${formatUsd(pnl.net)} (${pnl.pct.toFixed(2)}%)` : "—";
     const texte =
       `Post-mortem ${p.symbole} ${p.direction} — entrée ${p.prixEntree}, sortie ${prixSortie}, PnL net ${netTxt}.\n\n` +
       `Ce qui a marché :\n\nÀ améliorer :`;
@@ -235,13 +214,8 @@ export function PortfolioWindow() {
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Portefeuille</h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">Positions manuelles · PnL live</p>
-        </div>
-        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
-      </header>
+      {/* En-tête standard, sans croix de fermeture : celle-ci est fournie par le chrome FloatingWindow */}
+      <EnTeteFenetre titre="Portefeuille" sousTitre="Positions manuelles · PnL live" />
 
       {/* Totaux (maj impérative sur tick) */}
       <div className="grid shrink-0 grid-cols-3 gap-2 border-b border-border px-4 py-3 text-center">
@@ -291,9 +265,7 @@ export function PortfolioWindow() {
             <span>{openPositions.length}</span>
           </div>
           {openPositions.length === 0 ? (
-            <p className="rounded-md border border-border bg-bg px-3 py-3 text-[11px] text-text-dim">
-              Aucune position ouverte. Ajoutez-en une ci-dessous.
-            </p>
+            <Vide>Aucune position ouverte. Ajoutez-en une ci-dessous.</Vide>
           ) : (
             <div className="space-y-1">
               {openPositions.map((p) => (
@@ -307,8 +279,9 @@ export function PortfolioWindow() {
                     >
                       <span className="font-medium text-text">{p.symbole}</span>
                       <span
-                        className="rounded px-1 text-[9px] font-semibold uppercase"
-                        style={{ color: p.direction === "long" ? "var(--up)" : "var(--down)" }}
+                        className={`rounded px-1 text-[9px] font-semibold uppercase ${
+                          p.direction === "long" ? "text-up" : "text-down"
+                        }`}
                       >
                         {p.direction}
                       </span>
@@ -320,7 +293,7 @@ export function PortfolioWindow() {
                   </div>
                   <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-text-dim">
                     <span className="tabular-nums">
-                      {p.taille} @ {formatPrix(p.prixEntree)}
+                      {p.taille} @ {formatPrice(p.prixEntree)}
                       {p.fraisPct !== undefined ? ` · ${p.fraisPct}%` : ""}
                     </span>
                     <span className="flex items-center gap-2">
@@ -342,7 +315,7 @@ export function PortfolioWindow() {
                         aria-label={`Supprimer ${p.symbole}`}
                         className="text-text-dim transition hover:text-down"
                       >
-                        ×
+                        ✕
                       </button>
                     </span>
                   </div>
@@ -359,7 +332,7 @@ export function PortfolioWindow() {
                           if (e.key === "Escape") setClosing(null);
                         }}
                         inputMode="decimal"
-                        className="w-24 rounded border border-border bg-surface px-1.5 py-0.5 text-[11px] tabular-nums text-text outline-none focus:border-text-dim"
+                        className="w-24 rounded border border-border bg-bg px-1.5 py-0.5 text-[11px] tabular-nums text-text outline-none focus:border-text-dim"
                       />
                       <button
                         type="button"
@@ -392,7 +365,7 @@ export function PortfolioWindow() {
               onChange={(e) => setForm((f) => ({ ...f, symbole: e.target.value.toUpperCase() }))}
               placeholder="Symbole"
               spellCheck={false}
-              className="w-24 rounded border border-border bg-surface px-1.5 py-1 text-[11px] text-text outline-none focus:border-text-dim"
+              className="w-24 rounded border border-border bg-bg px-1.5 py-1 text-[11px] text-text outline-none focus:border-text-dim"
             />
             <div className="flex overflow-hidden rounded border border-border">
               {(["long", "short"] as Direction[]).map((d) => (
@@ -401,9 +374,10 @@ export function PortfolioWindow() {
                   type="button"
                   onClick={() => setForm((f) => ({ ...f, direction: d }))}
                   className={`px-2 py-1 text-[10px] font-semibold uppercase transition ${
-                    form.direction === d ? "bg-surface text-text" : "text-text-dim hover:text-text"
+                    form.direction === d
+                      ? `bg-surface ${d === "long" ? "text-up" : "text-down"}`
+                      : "text-text-dim hover:text-text"
                   }`}
-                  style={form.direction === d ? { color: d === "long" ? "var(--up)" : "var(--down)" } : undefined}
                 >
                   {d}
                 </button>
@@ -414,21 +388,21 @@ export function PortfolioWindow() {
               onChange={(e) => setForm((f) => ({ ...f, taille: e.target.value }))}
               placeholder="Taille"
               inputMode="decimal"
-              className="w-16 rounded border border-border bg-surface px-1.5 py-1 text-[11px] tabular-nums text-text outline-none focus:border-text-dim"
+              className="w-16 rounded border border-border bg-bg px-1.5 py-1 text-[11px] tabular-nums text-text outline-none focus:border-text-dim"
             />
             <input
               value={form.prixEntree}
               onChange={(e) => setForm((f) => ({ ...f, prixEntree: e.target.value }))}
               placeholder="Prix"
               inputMode="decimal"
-              className="w-20 rounded border border-border bg-surface px-1.5 py-1 text-[11px] tabular-nums text-text outline-none focus:border-text-dim"
+              className="w-20 rounded border border-border bg-bg px-1.5 py-1 text-[11px] tabular-nums text-text outline-none focus:border-text-dim"
             />
             <input
               value={form.fraisPct}
               onChange={(e) => setForm((f) => ({ ...f, fraisPct: e.target.value }))}
               placeholder="Frais %"
               inputMode="decimal"
-              className="w-16 rounded border border-border bg-surface px-1.5 py-1 text-[11px] tabular-nums text-text outline-none focus:border-text-dim"
+              className="w-16 rounded border border-border bg-bg px-1.5 py-1 text-[11px] tabular-nums text-text outline-none focus:border-text-dim"
             />
           </div>
           <div className="mt-1.5 flex items-center gap-1.5">
@@ -439,7 +413,7 @@ export function PortfolioWindow() {
                 if (e.key === "Enter") submitAdd();
               }}
               placeholder="Note (optionnel)"
-              className="min-w-0 flex-1 rounded border border-border bg-surface px-1.5 py-1 text-[11px] text-text outline-none focus:border-text-dim"
+              className="min-w-0 flex-1 rounded border border-border bg-bg px-1.5 py-1 text-[11px] text-text outline-none focus:border-text-dim"
             />
             <button
               type="button"
@@ -464,8 +438,8 @@ export function PortfolioWindow() {
               <span>
                 Win {stats.nombre > 0 ? `${stats.winRate.toFixed(0)}%` : "—"}
               </span>
-              <span style={{ color: stats.pnlCumule > 0 ? "var(--up)" : stats.pnlCumule < 0 ? "var(--down)" : undefined }}>
-                {stats.nombre > 0 ? `${stats.pnlCumule > 0 ? "+" : ""}${formatMoney(stats.pnlCumule)}` : "—"}
+              <span className={stats.pnlCumule > 0 ? "text-up" : stats.pnlCumule < 0 ? "text-down" : undefined}>
+                {stats.nombre > 0 ? `${stats.pnlCumule > 0 ? "+" : ""}${formatUsd(stats.pnlCumule)}` : "—"}
               </span>
               <span>{showClosed ? "▾" : "▸"}</span>
             </span>
@@ -474,12 +448,12 @@ export function PortfolioWindow() {
             <div className="mt-1 space-y-1">
               {stats.nombre > 0 && (
                 <div className="flex justify-between rounded-md border border-border bg-bg px-3 py-1.5 text-[10px] text-text-dim">
-                  <span>Meilleure <span className="tabular-nums" style={{ color: "var(--up)" }}>{formatMoney(stats.meilleure ?? undefined)}</span></span>
-                  <span>Pire <span className="tabular-nums" style={{ color: "var(--down)" }}>{formatMoney(stats.pire ?? undefined)}</span></span>
+                  <span>Meilleure <span className="tabular-nums text-up">{formatUsd(stats.meilleure ?? undefined)}</span></span>
+                  <span>Pire <span className="tabular-nums text-down">{formatUsd(stats.pire ?? undefined)}</span></span>
                 </div>
               )}
               {closedPositions.length === 0 ? (
-                <p className="rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-dim">Aucune position clôturée.</p>
+                <Vide>Aucune position clôturée.</Vide>
               ) : (
                 closedPositions.map((p) => {
                   const pnl = pnlRealisePosition(p);
@@ -487,17 +461,18 @@ export function PortfolioWindow() {
                     <div key={p.id} className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg px-2.5 py-1.5 text-[11px]">
                       <button type="button" onClick={() => voirSurChart(p)} className="flex items-center gap-1.5 text-left" title="Voir sur le chart">
                         <span className="font-medium text-text">{p.symbole}</span>
-                        <span className="text-[9px] font-semibold uppercase" style={{ color: p.direction === "long" ? "var(--up)" : "var(--down)" }}>
+                        <span className={`text-[9px] font-semibold uppercase ${p.direction === "long" ? "text-up" : "text-down"}`}>
                           {p.direction}
                         </span>
                       </button>
                       <span className="flex items-center gap-2 text-[10px] text-text-dim">
-                        <span className="tabular-nums">{formatPrix(p.prixEntree)} → {formatPrix(p.prixSortie ?? 0)}</span>
+                        <span className="tabular-nums">{formatPrice(p.prixEntree)} → {formatPrice(p.prixSortie ?? 0)}</span>
                         <span
-                          className="tabular-nums font-medium"
-                          style={{ color: pnl && pnl.net > 0 ? "var(--up)" : pnl && pnl.net < 0 ? "var(--down)" : undefined }}
+                          className={`tabular-nums font-medium ${
+                            pnl && pnl.net > 0 ? "text-up" : pnl && pnl.net < 0 ? "text-down" : ""
+                          }`}
                         >
-                          {pnl ? `${pnl.net > 0 ? "+" : ""}${formatMoney(pnl.net)}` : "—"}
+                          {pnl ? `${pnl.net > 0 ? "+" : ""}${formatUsd(pnl.net)}` : "—"}
                         </span>
                         <button
                           type="button"
@@ -505,7 +480,7 @@ export function PortfolioWindow() {
                           aria-label={`Supprimer ${p.symbole}`}
                           className="text-text-dim transition hover:text-down"
                         >
-                          ×
+                          ✕
                         </button>
                       </span>
                     </div>

@@ -17,6 +17,7 @@ import { decrireCondition, type Condition, type SensCroisement } from "@axiom/al
 import { marketStore } from "../store/market";
 import { alertsStore } from "../store/alerts";
 import { demanderPermissionNotifications } from "../alerts/runtime";
+import { formatHeure } from "../lib/format";
 import { SidebarSection } from "./SidebarSection";
 
 /** Types d'alerte proposés à la création (les conditions d'indicateur restent programmatiques). */
@@ -30,17 +31,11 @@ const FENETRES: Array<{ label: string; ms: number }> = [
   { label: "1 h", ms: 3_600_000 },
 ];
 
-/** Heure locale HH:MM:SS d'un horodatage ms (— si absent). */
-function formatHeure(ts: number | undefined): string {
-  if (ts === undefined) return "—";
-  return new Date(ts).toLocaleTimeString("fr-FR", { hour12: false });
-}
-
 /** Libellé + couleur de l'état d'armement d'une alerte. */
 function etatArmement(arme: boolean | undefined): { texte: string; classe: string } {
-  if (arme === undefined) return { texte: "calibrage", classe: "text-neutral-500" };
-  if (arme) return { texte: "armée", classe: "text-emerald-400" };
-  return { texte: "déclenchée", classe: "text-amber-400" };
+  if (arme === undefined) return { texte: "calibrage", classe: "text-text-dim" };
+  if (arme) return { texte: "armée", classe: "text-up" };
+  return { texte: "déclenchée", classe: "text-serie-3" };
 }
 
 export function AlertsPanel() {
@@ -94,16 +89,16 @@ export function AlertsPanel() {
           type="button"
           onClick={demanderPermissionNotifications}
           title="Autoriser les notifications système"
-          className="text-[10px] text-neutral-500 transition hover:text-neutral-300"
+          className="text-[10px] text-text-dim transition hover:text-text"
         >
-          Notifs
+          Notifications
         </button>
       }
     >
       {/* Liste des alertes */}
       <div className="max-h-64 overflow-y-auto">
         {defs.length === 0 && (
-          <p className="px-3 py-3 text-[11px] text-neutral-600">
+          <p className="px-3 py-3 text-[11px] text-text-dim">
             Aucune alerte. Créez-en une ci-dessous.
           </p>
         )}
@@ -113,27 +108,27 @@ export function AlertsPanel() {
           return (
             <div
               key={d.id}
-              className="group flex items-center gap-2 border-l-2 border-transparent px-3 py-1.5 text-sm hover:bg-neutral-900"
+              className="group flex items-center gap-2 border-l-2 border-transparent px-3 py-1.5 text-[11px] hover:bg-surface"
             >
               <button
                 type="button"
                 onClick={() => alertsStore.getState().basculerActif(d.id)}
                 title={d.actif ? "Désactiver" : "Activer"}
-                className={`shrink-0 text-[9px] leading-none ${d.actif ? "text-emerald-400" : "text-neutral-600"}`}
+                className={`shrink-0 text-[9px] leading-none ${d.actif ? "text-up" : "text-text-dim"}`}
               >
                 ●
               </button>
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="truncate font-medium text-neutral-200">{d.symbol}</span>
+                  <span className="truncate font-medium text-text">{d.symbol}</span>
                   <span className={`shrink-0 text-[10px] ${arm.classe}`}>{arm.texte}</span>
                 </div>
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="truncate text-[11px] text-neutral-500">
+                  <span className="truncate text-[11px] text-text-dim">
                     {decrireCondition(d.condition)}
                   </span>
-                  <span className="shrink-0 text-[10px] tabular-nums text-neutral-600">
-                    {formatHeure(derniere)}
+                  <span className="shrink-0 text-[10px] tabular-nums text-text-dim">
+                    {formatHeure(derniere ?? 0)}
                   </span>
                 </div>
               </div>
@@ -141,7 +136,7 @@ export function AlertsPanel() {
                 type="button"
                 onClick={() => alertsStore.getState().supprimer(d.id)}
                 aria-label={`Supprimer l'alerte ${d.symbol}`}
-                className="shrink-0 text-neutral-600 opacity-0 transition hover:text-neutral-300 group-hover:opacity-100"
+                className="shrink-0 text-text-dim opacity-0 transition hover:text-text group-hover:opacity-100"
               >
                 ×
               </button>
@@ -151,19 +146,19 @@ export function AlertsPanel() {
       </div>
 
       {/* Formulaire de création */}
-      <div className="space-y-1.5 border-t border-neutral-800 p-2">
+      <div className="space-y-1.5 border-t border-border p-2">
         <div className="flex gap-1.5">
           <input
             value={symbol}
             onChange={(e) => setSymbol(e.target.value.toUpperCase())}
             placeholder={symbolCourant}
             spellCheck={false}
-            className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-neutral-500"
+            className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-xs text-text outline-none placeholder:text-text-dim focus:border-text-dim"
           />
           <select
             value={type}
             onChange={(e) => setType(e.target.value as TypeAlerte)}
-            className="rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-xs text-neutral-100 outline-none focus:border-neutral-500"
+            className="rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
           >
             <option value="prix-croise">Prix</option>
             <option value="variation-pct">Variation %</option>
@@ -178,12 +173,12 @@ export function AlertsPanel() {
               onKeyDown={(e) => e.key === "Enter" && soumettre()}
               inputMode="decimal"
               placeholder="Niveau"
-              className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs tabular-nums text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-neutral-500"
+              className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-xs tabular-nums text-text outline-none placeholder:text-text-dim focus:border-text-dim"
             />
             <select
               value={sens}
               onChange={(e) => setSens(e.target.value as SensCroisement)}
-              className="rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-xs text-neutral-100 outline-none focus:border-neutral-500"
+              className="rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
             >
               <option value="hausse">↑ hausse</option>
               <option value="baisse">↓ baisse</option>
@@ -198,12 +193,12 @@ export function AlertsPanel() {
               onKeyDown={(e) => e.key === "Enter" && soumettre()}
               inputMode="decimal"
               placeholder="Seuil % (± signé)"
-              className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs tabular-nums text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-neutral-500"
+              className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-xs tabular-nums text-text outline-none placeholder:text-text-dim focus:border-text-dim"
             />
             <select
               value={fenetreMs}
               onChange={(e) => setFenetreMs(Number(e.target.value))}
-              className="rounded border border-neutral-700 bg-neutral-900 px-1 py-1 text-xs text-neutral-100 outline-none focus:border-neutral-500"
+              className="rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
             >
               {FENETRES.map((f) => (
                 <option key={f.ms} value={f.ms}>
@@ -217,36 +212,36 @@ export function AlertsPanel() {
         <button
           type="button"
           onClick={soumettre}
-          className="w-full rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 transition hover:border-neutral-500 hover:text-neutral-100"
+          className="w-full rounded border border-border bg-bg px-2 py-1 text-xs text-text-dim transition hover:border-text-dim hover:text-text"
         >
           Ajouter sur {symboleEffectif}
         </button>
       </div>
 
       {/* Journal repliable */}
-      <div className="border-t border-neutral-800">
+      <div className="border-t border-border">
         <button
           type="button"
           onClick={() => setJournalOuvert((o) => !o)}
-          className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] text-neutral-500 transition hover:text-neutral-300"
+          className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] text-text-dim transition hover:text-text"
         >
           <span aria-hidden className="w-2 text-[9px] leading-none">
-            {journalOuvert ? "▼" : "▶"}
+            {journalOuvert ? "▾" : "▸"}
           </span>
           Journal ({journal.length})
         </button>
         {journalOuvert && (
           <div className="max-h-40 overflow-y-auto px-3 pb-2">
             {journal.length === 0 ? (
-              <p className="py-1 text-[11px] text-neutral-600">Aucun déclenchement.</p>
+              <p className="py-1 text-[11px] text-text-dim">Aucun déclenchement.</p>
             ) : (
               journal.map((d, i) => (
                 <div
                   key={`${d.alertId}-${d.ts}-${i}`}
                   className="flex items-baseline justify-between gap-2 py-0.5 text-[11px]"
                 >
-                  <span className="truncate text-neutral-400">{d.message}</span>
-                  <span className="shrink-0 tabular-nums text-neutral-600">{formatHeure(d.ts)}</span>
+                  <span className="truncate text-text-dim">{d.message}</span>
+                  <span className="shrink-0 tabular-nums text-text-dim">{formatHeure(d.ts)}</span>
                 </div>
               ))
             )}

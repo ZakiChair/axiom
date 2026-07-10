@@ -8,10 +8,11 @@
  * en boucle).
  *
  * Sources : Coin Metrics community (sans clé), BGeometrics/bitcoin-data.com (clé optionnelle),
- * mempool.space (direct), SoSoValue/openapi.sosovalue.com (ETF spot BTC/ETH/SOL, clé
- * OBLIGATOIRE — section « indisponible » sans clé configurée), Etherscan v2 (réseau ETH,
- * clé OBLIGATOIRE — section « indisponible » sans clé configurée), réseau SOL SANS clé
- * (RPC PublicNode + supply CoinGecko — cf. data/onchain/solana.ts).
+ * mempool.space (direct), SoSoValue via proxy /sosoapi (ETF spot BTC/ETH/SOL — clé Réglages
+ * prioritaire, sinon repli SOSOVALUE_API_KEY du .env), Etherscan v2 via proxy /ethscanapi
+ * (réseau ETH — même régime, repli ETHERSCAN_API_KEY ; répond même sans clé en mode
+ * dégradé 1 req/5 s), réseau SOL SANS clé (RPC PublicNode + supply CoinGecko —
+ * cf. data/onchain/solana.ts).
  *
  * Règle d'or (doc 02) : chaque widget porte une étiquette de fiabilité honnête
  * (« daily », « live », « estimation », « indisponible »).
@@ -34,35 +35,34 @@ import {
   type MempoolReseau,
   type ResultatFrais,
 } from "../data/onchain/mempool";
-import { fetchEtfFlows, type ActifEtf, type EtfResultat } from "../data/onchain/etf";
+import {
+  fetchEtfFlows,
+  rapporterSanteEtf,
+  RAISON_CLE_SOSOVALUE,
+  type ActifEtf,
+  type EtfResultat,
+} from "../data/onchain/etf";
 import { fetchReseauEth, type ReseauEth } from "../data/onchain/etherscan";
 import { fetchReseauSol, type ReseauSol } from "../data/onchain/solana";
+import {
+  formatCompact,
+  formatUsd,
+  formatDec,
+  formatEntier,
+  formatPourcentage,
+  formatDateComplete,
+  formatAge,
+} from "../lib/format";
+import { lireTokenCanvas } from "../lib/canvasTokens";
+import { EnTeteFenetre } from "./ui";
 
 const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
 
 // ─────────────────────────── Formatage ───────────────────────────
-
-/** Nombre compact (1.2K / 3.4M / 5.6B). */
-function fmtCompact(n: number | undefined): string {
-  if (n === undefined || !Number.isFinite(n)) return "—";
-  const abs = Math.abs(n);
-  if (abs >= 1e12) return `${(n / 1e12).toFixed(2)}T`;
-  if (abs >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
-  return n.toFixed(0);
-}
-
-/** Montant USD compact. */
-function fmtUsd(n: number | undefined): string {
-  if (n === undefined || !Number.isFinite(n)) return "—";
-  return `$${fmtCompact(n)}`;
-}
-
-/** Nombre à N décimales, ou tiret. */
-function fmtDec(n: number | undefined, d = 2): string {
-  return n !== undefined && Number.isFinite(n) ? n.toFixed(d) : "—";
-}
+// Le formatage générique (compact, USD, décimales, entiers, pourcentage, date)
+// est délégué au module partagé src/lib/format. Ne restent LOCAUX que les
+// unités métier (hashrate EH/s, gas Gwei) et de fins adaptateurs (fraction → %,
+// ms optionnel, « maintenant » courant) qui s'appuient sur ces fonctions.
 
 /** Hashrate H/s → EH/s (1e18). */
 function fmtHashrate(hps: number | undefined): string {
@@ -76,33 +76,26 @@ function fmtGwei(n: number | null | undefined): string {
   return `${n.toFixed(2)} Gwei`;
 }
 
-/** Taux 0..1 → pourcentage (ex. 0.0375 → « 3.75 % »). */
+/** Taux 0..1 → pourcentage « niveau » (ex. 0.0375 → « 3.75 % »), format partagé. */
 function fmtPct(x: number | null | undefined, d = 2): string {
   if (x === null || x === undefined || !Number.isFinite(x)) return "—";
-  return `${(x * 100).toFixed(d)} %`;
+  return formatPourcentage(x * 100, d);
 }
 
-/** Date courte d'un ms epoch (ex. « 30 juin »). */
+/** Date courte d'un ms epoch, avec année (ex. « 30 juin 2026 »). */
 function fmtJour(ms: number | undefined): string {
-  if (ms === undefined || !Number.isFinite(ms)) return "—";
-  return new Date(ms).toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
+  return ms === undefined ? "—" : formatDateComplete(ms);
 }
 
-/** Âge relatif compact (« à l'instant », « il y a 12 min », « il y a 3 h »). */
+/** Âge relatif compact d'un ms epoch (« maintenant » courant, format partagé). */
 function fmtAge(ms: number | undefined): string {
-  if (ms === undefined || !Number.isFinite(ms)) return "—";
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "à l'instant";
-  if (diff < 3_600_000) return `il y a ${Math.floor(diff / 60_000)} min`;
-  if (diff < 86_400_000) return `il y a ${Math.floor(diff / 3_600_000)} h`;
-  return `il y a ${Math.floor(diff / 86_400_000)} j`;
+  return ms === undefined ? "—" : formatAge(ms, Date.now());
 }
 
 /** Durée en jours (compte à rebours halving). */
 function fmtJours(ms: number | undefined): string {
   if (ms === undefined || !Number.isFinite(ms)) return "—";
-  const j = Math.round(ms / 86_400_000);
-  return `≈ ${j.toLocaleString("fr-FR")} j`;
+  return `≈ ${formatEntier(ms / 86_400_000)} j`;
 }
 
 // ─────────────────────────── Sparkline canvas ───────────────────────────
@@ -110,7 +103,8 @@ function fmtJours(ms: number | undefined): string {
 const SPARK_W = 88;
 const SPARK_H = 26;
 
-/** Mini-courbe canvas (dessinée hors React à chaque changement de données). */
+/** Mini-courbe canvas (dessinée hors React à chaque changement de données).
+ *  `color` = nom de token CSS (ex. « --serie-1 »), résolu au moment du dessin. */
 function Sparkline({ values, color }: { values: number[]; color: string }) {
   const ref = useRef<HTMLCanvasElement | null>(null);
 
@@ -141,7 +135,9 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     });
-    ctx.strokeStyle = color;
+    // Résolution du token CSS (nom transmis par le widget) au moment du dessin :
+    // un changement de thème repeint la courbe avec la bonne couleur au prochain rendu.
+    ctx.strokeStyle = lireTokenCanvas(color, "#9ca3af");
     ctx.lineWidth = 1.2;
     ctx.lineJoin = "round";
     ctx.stroke();
@@ -168,13 +164,21 @@ const FIABILITE_STYLE: Record<Fiabilite, string> = {
   indisponible: "border-down/50 text-down",
 };
 
+// Libellés affichés en français ; les ids (« daily », « live ») restent techniques/EN.
+const FIABILITE_LABEL: Record<Fiabilite, string> = {
+  daily: "quotidien",
+  live: "direct",
+  estimation: "estimation",
+  indisponible: "indisponible",
+};
+
 /** Étiquette de fiabilité (honnête, cf. règle d'or doc 02). */
 function FiabiliteTag({ f }: { f: Fiabilite }) {
   return (
     <span
       className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${FIABILITE_STYLE[f]}`}
     >
-      {f}
+      {FIABILITE_LABEL[f]}
     </span>
   );
 }
@@ -194,7 +198,7 @@ function Widget({
   valeur: string;
   fiabilite: Fiabilite;
   spark?: number[];
-  color?: string;
+  color?: string; // nom de token CSS (« --serie-1 »…) appliqué à la valeur et à la sparkline
   sousTexte?: string;
   fraicheur?: string;
   perime?: boolean;
@@ -206,10 +210,13 @@ function Widget({
         <FiabiliteTag f={fiabilite} />
       </div>
       <div className="flex items-end justify-between gap-2">
-        <span className="tabular-nums text-base font-semibold text-text" style={color ? { color } : undefined}>
+        <span
+          className="tabular-nums text-base font-semibold text-text"
+          style={color ? { color: `var(${color})` } : undefined}
+        >
           {valeur}
         </span>
-        {spark && spark.length >= 2 && <Sparkline values={spark} color={color ?? "#9ca3af"} />}
+        {spark && spark.length >= 2 && <Sparkline values={spark} color={color ?? "--text-dim"} />}
       </div>
       {(sousTexte || fraicheur) && (
         <div className="flex items-center justify-between gap-2 text-[10px] text-text-dim">
@@ -257,6 +264,10 @@ export function OnchainWindow() {
   const bgHasKey = useStore(bgeometricsKeyStore, (s) => s.hasKey);
   const soSoHasKey = useStore(soSoValueKeyStore, (s) => s.hasKey);
   const etherscanHasKey = useStore(etherscanKeyStore, (s) => s.hasKey);
+  // `version` (et non `hasKey`) en dépendance d'effet : remplacer une clé existante
+  // laisse hasKey à true→true et ne déclencherait aucun re-fetch.
+  const soSoVersion = useStore(soSoValueKeyStore, (s) => s.version);
+  const etherscanVersion = useStore(etherscanKeyStore, (s) => s.version);
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
 
   const [donnees, setDonnees] = useState<EtatDonnees>(VIDE);
@@ -292,6 +303,9 @@ export function OnchainWindow() {
         fetchReseauEth(getEtherscanKey(), ctrl.signal),
       ]);
       if (ignore) return;
+      // Santé « sosovalue » agrégée sur le cycle complet (3 actifs) — une seule
+      // écriture, hors cycles annulés, pour un état déterministe dans le panneau Santé.
+      rapporterSanteEtf([btcEtf, ethEtf, solEtf]);
       setDonnees((d) => ({ cm, bg, mp, hr, etf: { btc: btcEtf, eth: ethEtf, sol: solEtf }, eth, sol: d.sol }));
       setLoading(false);
     };
@@ -301,8 +315,9 @@ export function OnchainWindow() {
       ignore = true;
       ctrl.abort();
     };
-    // bgHasKey/soSoHasKey/etherscanHasKey en dépendance : re-fetch quand une clé est saisie/retirée.
-  }, [open, bgHasKey, soSoHasKey, etherscanHasKey]);
+    // Versions de clé en dépendance : re-fetch quand une clé est saisie, REMPLACÉE ou
+    // retirée (hasKey seul raterait le remplacement d'une clé existante).
+  }, [open, bgHasKey, soSoVersion, etherscanVersion]);
 
   const cm = donnees.cm;
   const adr = cm?.series["AdrActCnt"];
@@ -317,22 +332,26 @@ export function OnchainWindow() {
   const hr = donnees.hr?.donnee;
   const etf = donnees.etf[actifEtf];
   const eth = donnees.eth;
+  // Mode dégradé sans clé Etherscan (1 req/5 s) : gas présent mais supply/nœuds null —
+  // le CTA « clé Etherscan ⚙ » doit rester proposé tant qu'un champ manque.
+  const ethIncomplet =
+    eth !== null && (eth.supplyEth === null || eth.nodeCount === null || eth.gasSafe === null);
   const sol = donnees.sol?.donnee;
   const solFraicheur = fmtAge(donnees.sol?.ts);
   const solPerime = donnees.sol?.perime;
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">On-chain</h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">
+      <EnTeteFenetre
+        titre="On-chain"
+        sousTitre={
+          <>
             Coin Metrics · BGeometrics · mempool.space · SoSoValue · Etherscan · RPC Solana ·
             CoinGecko {loading ? "· maj…" : ""}
-          </p>
-        </div>
-        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
-      </header>
+          </>
+        }
+      />
+      {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
         {/* ─────────── RÉSEAU BTC ─────────── */}
@@ -343,28 +362,28 @@ export function OnchainWindow() {
           <div className="grid grid-cols-2 gap-2">
             <Widget
               libelle="Adresses actives"
-              valeur={fmtCompact(adr?.dernier?.value)}
+              valeur={formatCompact(adr?.dernier?.value)}
               fiabilite="daily"
               spark={sparkDe(adr)}
-              color="#38bdf8"
+              color="--serie-1"
               fraicheur={cmDaily}
               perime={cm?.perime}
             />
             <Widget
               libelle="Transactions / j"
-              valeur={fmtCompact(tx?.dernier?.value)}
+              valeur={formatCompact(tx?.dernier?.value)}
               fiabilite="daily"
               spark={sparkDe(tx)}
-              color="#a78bfa"
+              color="--serie-2"
               fraicheur={cmDaily}
               perime={cm?.perime}
             />
             <Widget
               libelle="Frais totaux (BTC)"
-              valeur={fmtDec(feeNtv?.dernier?.value, 2)}
+              valeur={formatDec(feeNtv?.dernier?.value, 2)}
               fiabilite="daily"
               spark={sparkDe(feeNtv)}
-              color="#fbbf24"
+              color="--serie-3"
               fraicheur={cmDaily}
               perime={cm?.perime}
             />
@@ -373,33 +392,33 @@ export function OnchainWindow() {
               valeur={fmtHashrate(hr?.dernier?.value)}
               fiabilite="daily"
               spark={sparkDe(hr, 90)}
-              color="#34d399"
+              color="--up"
               fraicheur={fmtJour(hr?.dernier?.time)}
               perime={donnees.hr?.perime}
             />
             <Widget
               libelle="Frais recommandés"
-              valeur={mp ? `${fmtDec(mp.fees.fastestFee, 0)} sat/vB` : "—"}
+              valeur={mp ? `${formatDec(mp.fees.fastestFee, 0)} sat/vB` : "—"}
               fiabilite="live"
-              sousTexte={mp ? `1h ${fmtDec(mp.fees.hourFee, 0)} · éco ${fmtDec(mp.fees.economyFee, 0)}` : undefined}
+              sousTexte={mp ? `1h ${formatDec(mp.fees.hourFee, 0)} · éco ${formatDec(mp.fees.economyFee, 0)}` : undefined}
               fraicheur={fmtAge(donnees.mp?.ts)}
               perime={donnees.mp?.perime}
             />
             <Widget
               libelle="Hauteur de bloc"
-              valeur={mp ? mp.hauteur.toLocaleString("fr-FR") : "—"}
+              valeur={formatEntier(mp?.hauteur)}
               fiabilite="live"
               fraicheur={fmtAge(donnees.mp?.ts)}
               perime={donnees.mp?.perime}
             />
             <div className="col-span-2">
               <Widget
-                libelle={halving ? `Halving (bloc ${halving.prochainBloc.toLocaleString("fr-FR")})` : "Halving"}
+                libelle={halving ? `Halving (bloc ${formatEntier(halving.prochainBloc)})` : "Halving"}
                 valeur={fmtJours(halving?.msEstimes)}
                 fiabilite="estimation"
                 sousTexte={
                   halving
-                    ? `reste ${halving.blocsRestants.toLocaleString("fr-FR")} blocs → ${halving.recompenseApres} BTC`
+                    ? `reste ${formatEntier(halving.blocsRestants)} blocs → ${halving.recompenseApres} BTC`
                     : undefined
                 }
                 fraicheur={halving ? fmtJour(Date.now() + halving.msEstimes) : undefined}
@@ -432,10 +451,10 @@ export function OnchainWindow() {
                 <Widget
                   key={def.id}
                   libelle={def.libelle}
-                  valeur={fmtDec(r?.serie.dernier?.value, def.id === "mvrv" ? 2 : 4)}
+                  valeur={formatDec(r?.serie.dernier?.value, def.id === "mvrv" ? 2 : 4)}
                   fiabilite="daily"
                   spark={sparkDe(r?.serie)}
-                  color="#f472b6"
+                  color="--serie-4"
                   fraicheur={fmtJour(r?.serie.dernier?.time)}
                   perime={r?.perime}
                 />
@@ -443,19 +462,19 @@ export function OnchainWindow() {
             })}
             <Widget
               libelle="MVRV (ratio)"
-              valeur={fmtDec(mvrvRatio?.dernier?.value, 2)}
+              valeur={formatDec(mvrvRatio?.dernier?.value, 2)}
               fiabilite="daily"
               spark={sparkDe(mvrvRatio)}
-              color="#f472b6"
+              color="--serie-4"
               fraicheur={cmDaily}
               perime={cm?.perime}
             />
             <Widget
               libelle="Cap. marché BTC"
-              valeur={fmtUsd(mcap?.dernier?.value)}
+              valeur={formatUsd(mcap?.dernier?.value)}
               fiabilite="daily"
               spark={sparkDe(mcap)}
-              color="#60a5fa"
+              color="--serie-6"
               fraicheur={cmDaily}
               perime={cm?.perime}
             />
@@ -474,12 +493,14 @@ export function OnchainWindow() {
             <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
               Flux ETF spot
             </h3>
-            {!soSoHasKey && (
+            {/* Proposé seulement sur un échec effectivement lié à la clé (401/403) —
+                pas sur un 5xx/réseau où une clé ne changerait rien. */}
+            {!soSoHasKey && etf !== null && etf.raison === RAISON_CLE_SOSOVALUE && (
               <button
                 type="button"
                 onClick={openSettings}
                 className="text-[10px] text-accent hover:underline"
-                title="Clé gratuite sur sosovalue.com/developer — obligatoire (plan Demo)"
+                title="Clé gratuite sur sosovalue.com/developer (plan Demo) — ou SOSOVALUE_API_KEY dans .env"
               >
                 clé SoSoValue ⚙
               </button>
@@ -504,17 +525,14 @@ export function OnchainWindow() {
               {etf.parEmetteur.map((e) => (
                 <div key={e.emetteur} className="flex items-center justify-between text-[11px]">
                   <span className="text-text-dim">{e.emetteur}</span>
-                  <span
-                    className="tabular-nums"
-                    style={{ color: e.flux >= 0 ? "#34d399" : "#f87171" }}
-                  >
-                    {fmtUsd(e.flux)}
+                  <span className={`tabular-nums ${e.flux >= 0 ? "text-up" : "text-down"}`}>
+                    {formatUsd(e.flux)}
                   </span>
                 </div>
               ))}
               <div className="mt-1 flex items-center justify-between border-t border-border pt-1 text-[11px] font-medium">
                 <span className="text-text">Cumul {etf.jour ?? ""}</span>
-                <span className="tabular-nums text-text">{fmtUsd(etf.total)}</span>
+                <span className="tabular-nums text-text">{formatUsd(etf.total)}</span>
               </div>
             </div>
           ) : (
@@ -533,18 +551,20 @@ export function OnchainWindow() {
             <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
               Réseau ETH
             </h3>
-            {!etherscanHasKey && (
+            {/* Proposé dès que les données sont absentes OU incomplètes (mode dégradé
+                sans clé : gas seul) et qu'aucune clé Réglages n'est saisie. */}
+            {!etherscanHasKey && !loading && (eth === null || ethIncomplet) && (
               <button
                 type="button"
                 onClick={openSettings}
                 className="text-[10px] text-accent hover:underline"
-                title="Clé gratuite sur etherscan.io/register — obligatoire"
+                title="Clé gratuite sur etherscan.io/register — ou ETHERSCAN_API_KEY dans .env"
               >
                 clé Etherscan ⚙
               </button>
             )}
           </div>
-          {etherscanHasKey ? (
+          {eth !== null || loading ? (
             <div className="grid grid-cols-2 gap-2">
               <Widget
                 libelle="Gas recommandé"
@@ -553,27 +573,28 @@ export function OnchainWindow() {
                 sousTexte={
                   eth ? `sûr ${fmtGwei(eth.gasSafe)} · standard ${fmtGwei(eth.gasPropose)}` : undefined
                 }
-                color="#fbbf24"
+                color="--serie-3"
               />
               <Widget
                 libelle="Supply ETH"
-                valeur={fmtCompact(eth?.supplyEth ?? undefined)}
+                valeur={formatCompact(eth?.supplyEth ?? undefined)}
                 fiabilite="live"
-                color="#60a5fa"
+                color="--serie-6"
               />
               <div className="col-span-2">
                 <Widget
                   libelle="Nombre de nœuds"
-                  valeur={eth?.nodeCount ? eth.nodeCount.toLocaleString("fr-FR") : "—"}
+                  valeur={formatEntier(eth?.nodeCount)}
                   fiabilite="daily"
-                  color="#34d399"
+                  color="--up"
                 />
               </div>
             </div>
           ) : (
             <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg px-3 py-3">
               <span className="text-[11px] leading-snug text-text-dim">
-                Réseau ETH indisponible sans clé Etherscan.
+                Réseau ETH indisponible — Etherscan injoignable ou clé invalide
+                (Réglages ⚙ ou ETHERSCAN_API_KEY dans .env).
               </span>
               <FiabiliteTag f="indisponible" />
             </div>
@@ -588,29 +609,29 @@ export function OnchainWindow() {
           <div className="grid grid-cols-2 gap-2">
             <Widget
               libelle="TPS (hors votes)"
-              valeur={sol?.tpsHorsVotes != null ? Math.round(sol.tpsHorsVotes).toLocaleString("fr-FR") : "—"}
+              valeur={formatEntier(sol?.tpsHorsVotes)}
               fiabilite="live"
               sousTexte={
-                sol?.tps != null ? `total ${Math.round(sol.tps).toLocaleString("fr-FR")} tps (votes inclus)` : undefined
+                sol?.tps != null ? `total ${formatEntier(sol.tps)} tps (votes inclus)` : undefined
               }
-              color="#fbbf24"
+              color="--serie-3"
               fraicheur={solFraicheur}
               perime={solPerime}
             />
             <Widget
               libelle="Époque"
-              valeur={sol?.epoque != null ? sol.epoque.toLocaleString("fr-FR") : "—"}
+              valeur={formatEntier(sol?.epoque)}
               fiabilite="live"
               sousTexte={sol?.progressionEpoque != null ? `avancée ${fmtPct(sol.progressionEpoque, 1)}` : undefined}
-              color="#a78bfa"
+              color="--serie-2"
               fraicheur={solFraicheur}
               perime={solPerime}
             />
             <Widget
               libelle="Supply circulante"
-              valeur={fmtCompact(sol?.supplySol ?? undefined)}
+              valeur={formatCompact(sol?.supplySol ?? undefined)}
               fiabilite="live"
-              color="#60a5fa"
+              color="--serie-6"
               fraicheur={solFraicheur}
               perime={solPerime}
             />
@@ -618,31 +639,31 @@ export function OnchainWindow() {
               libelle="Inflation annuelle"
               valeur={fmtPct(sol?.inflation)}
               fiabilite="daily"
-              color="#f472b6"
+              color="--serie-4"
               fraicheur={solFraicheur}
               perime={solPerime}
             />
             <Widget
               libelle="Validateurs actifs"
-              valeur={sol?.validateursActifs != null ? sol.validateursActifs.toLocaleString("fr-FR") : "—"}
+              valeur={formatEntier(sol?.validateursActifs)}
               fiabilite="live"
               sousTexte={
                 sol?.validateursDelinquants != null ? `${sol.validateursDelinquants} délinquants` : undefined
               }
-              color="#34d399"
+              color="--up"
               fraicheur={solFraicheur}
               perime={solPerime}
             />
             <Widget
               libelle="SOL staké"
-              valeur={fmtCompact(sol?.stakeSol ?? undefined)}
+              valeur={formatCompact(sol?.stakeSol ?? undefined)}
               fiabilite="live"
               sousTexte={
                 sol?.stakeSol != null && sol.supplySol != null && sol.supplySol > 0
                   ? `≈ ${fmtPct(sol.stakeSol / sol.supplySol, 1)} du circulant`
                   : undefined
               }
-              color="#38bdf8"
+              color="--serie-1"
               fraicheur={solFraicheur}
               perime={solPerime}
             />

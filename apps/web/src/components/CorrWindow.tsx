@@ -35,6 +35,9 @@ import {
   type MethodeCorr,
   type SerieCloture,
 } from "../data/corr";
+import { formatDec } from "../lib/format";
+import { lireTokenCanvas } from "../lib/canvasTokens";
+import { Chargement, EnTeteFenetre, NoteSource, Vide } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère) ───────────────────────────
 
@@ -76,12 +79,6 @@ export const commandes: Commande[] = [
 ];
 
 // ─────────────────────────── Helpers couleur / libellé (purs) ───────────────────────────
-
-/** Lit une variable CSS de thème sur <html> (ex. « --up »). */
-function lireVar(nom: string): string {
-  if (typeof document === "undefined") return "";
-  return getComputedStyle(document.documentElement).getPropertyValue(nom).trim();
-}
 
 /** Convertit un hex (#rgb ou #rrggbb) en triplet RGB, ou null si non hex. */
 function hexRgb(hex: string): [number, number, number] | null {
@@ -135,12 +132,6 @@ function courtSymbole(s: string): string {
     if (s.endsWith(q) && s.length > q.length) return s.slice(0, -q.length);
   }
   return s;
-}
-
-/** Formatte une corrélation signée (2 décimales) ou « — » si indéfinie. */
-function fmtCorr(v: number | null | undefined): string {
-  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
-  return v.toFixed(2);
 }
 
 // ─────────────────────────── Géométrie de la matrice ───────────────────────────
@@ -234,12 +225,12 @@ export function CorrWindow() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
 
-    const up = hexRgb(lireVar("--up")) ?? [45, 192, 142];
-    const down = hexRgb(lireVar("--down")) ?? [249, 40, 85];
-    const neutre = hexRgb(lireVar("--surface")) ?? [23, 23, 23];
-    const vide = hexRgb(lireVar("--border")) ?? [38, 38, 38];
-    const dim = lireVar("--text-dim") || "#9ca3af";
-    const texte = lireVar("--text") || "#e5e7eb";
+    const up = hexRgb(lireTokenCanvas("--up", "#2dc08e")) ?? [45, 192, 142];
+    const down = hexRgb(lireTokenCanvas("--down", "#f92855")) ?? [249, 40, 85];
+    const neutre = hexRgb(lireTokenCanvas("--surface", "#171717")) ?? [23, 23, 23];
+    const vide = hexRgb(lireTokenCanvas("--border", "#262626")) ?? [38, 38, 38];
+    const dim = lireTokenCanvas("--text-dim", "#9ca3af");
+    const texte = lireTokenCanvas("--text", "#e5e7eb");
 
     // Étiquettes de colonnes (base des symboles, en haut).
     ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
@@ -271,6 +262,9 @@ export function CorrWindow() {
 
         // Valeur au centre quand la cellule est assez grande et la valeur définie.
         if (cell >= 34 && v !== null && Number.isFinite(v)) {
+          // Texte contrasté sur le fond CALCULÉ de la cellule : noir/blanc quasi purs,
+          // volontairement hors thème (le contraste suit la luminance de la cellule, pas
+          // le thème — dériver de --text inverserait le contraste en thème clair).
           ctx.fillStyle = luminance(rgb) > 0.55 ? "#0b0b0b" : "#f5f5f5";
           ctx.font = "10px ui-monospace, monospace";
           ctx.textAlign = "center";
@@ -287,7 +281,7 @@ export function CorrWindow() {
       ctx.strokeRect(GUTTER_L + c * cell + 0.5, GUTTER_T + r * cell + 0.5, cell - 2, cell - 2);
     };
     if (hover) cadre(hover.r, hover.c, texte, 1);
-    if (selection) cadre(selection.r, selection.c, lireVar("--accent") || texte, 2);
+    if (selection) cadre(selection.r, selection.c, lireTokenCanvas("--accent", texte), 2);
   }, [matrice, hover, selection]);
 
   // Dessin de la sparkline de corrélation glissante 30 j pour la cellule sélectionnée.
@@ -315,8 +309,8 @@ export function CorrWindow() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, Hp);
 
-    const dim = lireVar("--text-dim") || "#9ca3af";
-    const accent = lireVar("--accent") || lireVar("--text") || "#38bdf8";
+    const dim = lireTokenCanvas("--text-dim", "#9ca3af");
+    const accent = lireTokenCanvas("--accent", lireTokenCanvas("--text", "#38bdf8"));
     const pad = 6;
     const mid = Hp / 2;
     const half = mid - pad;
@@ -379,7 +373,7 @@ export function CorrWindow() {
     setTooltip({
       x: hit.localX,
       y: hit.localY,
-      text: `${sr} × ${sc} · r=${fmtCorr(cel?.valeur)} · n=${cel?.points ?? 0}`,
+      text: `${sr} × ${sc} · r=${formatDec(cel?.valeur)} · n=${cel?.points ?? 0}`,
     });
   };
 
@@ -419,15 +413,11 @@ export function CorrWindow() {
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Corrélations</h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">
-            Log-rendements journaliers · {methode === "pearson" ? "Pearson" : "Spearman"} · {fenetreJours} j
-          </p>
-        </div>
-        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
-      </header>
+      {/* En-tête standard ; croix de fermeture fournie par le chrome FloatingWindow. */}
+      <EnTeteFenetre
+        titre="CORR · Corrélations"
+        sousTitre={`Log-rendements journaliers · ${methode === "pearson" ? "Pearson" : "Spearman"} · ${fenetreJours} j`}
+      />
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {/* Contrôles : méthode, fenêtre, recalcul + fraîcheur. */}
@@ -439,6 +429,7 @@ export function CorrWindow() {
                   key={m}
                   type="button"
                   onClick={() => setMethode(m)}
+                  aria-pressed={methode === m}
                   className={`rounded px-2 py-1 transition ${
                     methode === m ? "bg-surface text-text" : "text-text-dim hover:text-text"
                   }`}
@@ -453,6 +444,7 @@ export function CorrWindow() {
                   key={f}
                   type="button"
                   onClick={() => setFenetreJours(f)}
+                  aria-pressed={fenetreJours === f}
                   className={`rounded px-2 py-1 transition ${
                     fenetreJours === f ? "bg-surface text-text" : "text-text-dim hover:text-text"
                   }`}
@@ -472,7 +464,7 @@ export function CorrWindow() {
             </button>
             <span className="tabular-nums">
               {loading
-                ? "calcul…"
+                ? "Calcul…"
                 : majTs
                   ? `maj ${new Date(majTs).toLocaleTimeString("fr-FR", { hour12: false })}`
                   : "—"}
@@ -518,11 +510,9 @@ export function CorrWindow() {
 
         {/* Matrice ou message d'état. */}
         {symbols.length < 2 ? (
-          <div className="rounded-md border border-border bg-bg px-3 py-3 text-xs leading-snug text-text-dim">
-            Au moins deux symboles sont nécessaires. Ajoutez-en à la watchlist ou via le champ ci-dessus.
-          </div>
+          <Vide>Au moins deux symboles sont nécessaires. Ajoutez-en à la watchlist ou via le champ ci-dessus.</Vide>
         ) : matrice === null ? (
-          <div className="rounded-md border border-border bg-bg px-3 py-3 text-xs text-text-dim">Calcul…</div>
+          <Chargement libelle="Calcul…" />
         ) : (
           <div className="relative">
             <div className="overflow-x-auto">
@@ -551,7 +541,7 @@ export function CorrWindow() {
             <div className="flex items-baseline justify-between border-b border-border px-3 py-2">
               <span className="text-[11px] font-medium text-text">{selLabel}</span>
               <span className="text-[11px] tabular-nums text-text-dim">
-                r={fmtCorr(selCellule?.valeur)} · n={selCellule?.points ?? 0}
+                r={formatDec(selCellule?.valeur)} · n={selCellule?.points ?? 0}
               </span>
             </div>
             <div className="px-3 py-2">
@@ -563,10 +553,12 @@ export function CorrWindow() {
           </section>
         )}
 
-        <p className="mt-3 text-[10px] leading-snug text-text-dim">
-          Corrélations sur log-rendements journaliers, alignés sur les jours calendaires UTC communs
-          (crypto 7j/7 vs bourse 5j/7). Klines réutilisées des sources existantes, en cache de session.
-        </p>
+        <div className="mt-3">
+          <NoteSource>
+            Corrélations sur log-rendements journaliers, alignés sur les jours calendaires UTC communs
+            (crypto 7j/7 vs bourse 5j/7). Klines réutilisées des sources existantes, en cache de session.
+          </NoteSource>
+        </div>
       </div>
     </>
   );

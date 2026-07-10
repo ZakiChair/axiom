@@ -31,6 +31,9 @@ import {
   type Niveau,
   type OrderBook,
 } from "../data/depth";
+import { formatUsd } from "../lib/format";
+import { lireTokensCanvas } from "../lib/canvasTokens";
+import { EnTeteFenetre, Vide } from "./ui";
 
 /** Nombre de niveaux affichés de chaque côté du mid (LADDER). */
 const LADDER_ROWS = 20;
@@ -70,16 +73,25 @@ function hexToRgb(hex: string): Rgb {
 
 /** Lit les tokens de couleur du thème courant (relu à chaque changement de thème). */
 function readTokens(): Tokens {
-  const s = getComputedStyle(document.documentElement);
-  const tok = (name: string) => hexToRgb(s.getPropertyValue(name));
+  // Lecture mutualisée des variables CSS ; hexToRgb reste local (le canvas a
+  // besoin de tuples RVB pour composer les alphas via rgba()).
+  const raw = lireTokensCanvas([
+    "--up",
+    "--down",
+    "--text",
+    "--text-dim",
+    "--border",
+    "--surface",
+    "--bg",
+  ] as const);
   return {
-    up: tok("--up"),
-    down: tok("--down"),
-    text: tok("--text"),
-    textDim: tok("--text-dim"),
-    border: tok("--border"),
-    surface: tok("--surface"),
-    bg: tok("--bg"),
+    up: hexToRgb(raw["--up"]),
+    down: hexToRgb(raw["--down"]),
+    text: hexToRgb(raw["--text"]),
+    textDim: hexToRgb(raw["--text-dim"]),
+    border: hexToRgb(raw["--border"]),
+    surface: hexToRgb(raw["--surface"]),
+    bg: hexToRgb(raw["--bg"]),
   };
 }
 
@@ -122,19 +134,18 @@ function formatQte(q: number): string {
   return q.toFixed(4);
 }
 
-/** Notionnel USD compact ($1.2M / $340K / $1.2K). */
-function formatUsd(n: number): string {
-  const abs = Math.abs(n);
-  if (abs >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
-  if (abs >= 1e3) return `$${(n / 1e3).toFixed(0)}K`;
-  return `$${n.toFixed(0)}`;
-}
+// Notionnel USD compact : migré vers lib/format (formatUsd partagé). L'heure du
+// tape reste locale (heureTape) : chemin chaud canvas, voir sa docstring.
 
-/** HH:MM:SS local d'un horodatage ms. */
-function formatHeure(ms: number): string {
+/**
+ * Heure « HH:MM:SS » construite à la main pour le canvas du tape : appelée par
+ * LIGNE À CHAQUE FRAME, là où formatHeure (Intl.toLocaleTimeString) serait trop
+ * coûteux. Rendu identique au format partagé (exception perf assumée).
+ */
+function heureTape(ms: number): string {
   const d = new Date(ms);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 // ─────────────────────────── Aides carnet ───────────────────────────
@@ -173,11 +184,11 @@ type LigneLadder = NiveauAgrege & { cote: "bid" | "ask" };
 /** LADDER : échelle verticale centrée sur le mid, barres bid/ask + murs surlignés. */
 function dessinerLadder(ctx: CanvasRenderingContext2D, w: number, h: number, livre: OrderBook, pas: number, tk: Tokens): void {
   const best = meilleurs(livre);
-  if (!best) return placeholder(ctx, w, h, tk, "En attente du carnet…");
+  if (!best) return placeholder(ctx, w, h, tk, "Chargement…");
 
   const bids = agregerNiveaux(niveauxDepuisMap(livre.bids), pas, "bid", LADDER_ROWS);
   const asks = agregerNiveaux(niveauxDepuisMap(livre.asks), pas, "ask", LADDER_ROWS);
-  if (bids.length === 0 && asks.length === 0) return placeholder(ctx, w, h, tk, "En attente du carnet…");
+  if (bids.length === 0 && asks.length === 0) return placeholder(ctx, w, h, tk, "Chargement…");
 
   ctx.clearRect(0, 0, w, h);
 
@@ -279,7 +290,7 @@ function tracerMarche(
 /** DEPTH : profondeur cumulée bid/ask en escalier autour du mid. */
 function dessinerDepth(ctx: CanvasRenderingContext2D, w: number, h: number, livre: OrderBook, tk: Tokens): void {
   const best = meilleurs(livre);
-  if (!best) return placeholder(ctx, w, h, tk, "En attente du carnet…");
+  if (!best) return placeholder(ctx, w, h, tk, "Chargement…");
 
   const { mid } = best;
   const pMin = mid * (1 - DEPTH_WINDOW_PCT);
@@ -344,7 +355,7 @@ function dessinerTape(ctx: CanvasRenderingContext2D, w: number, h: number, trade
     }
     ctx.fillStyle = rgbCss(tk.textDim);
     ctx.textAlign = "left";
-    ctx.fillText(formatHeure(t.time), 4, cy);
+    ctx.fillText(heureTape(t.time), 4, cy);
     ctx.fillStyle = rgbCss(coul);
     ctx.textAlign = "right";
     ctx.fillText(formatPrix(t.price, decimalesPrix(t.price)), xPrix, cy);
@@ -461,7 +472,7 @@ export function DomWindow() {
       if (tab === "tape") {
         dessinerTape(ctx, w, h, tradesRef.current, seuilGrosTrade, tk);
       } else if (!livre) {
-        placeholder(ctx, w, h, tk, "En attente du carnet…");
+        placeholder(ctx, w, h, tk, "Chargement…");
       } else if (tab === "ladder") {
         const pas = pasArrondi(meilleurs(livre)?.mid ?? 0) * facteurPas;
         dessinerLadder(ctx, w, h, livre, pas, tk);
@@ -479,15 +490,11 @@ export function DomWindow() {
   return (
     // Panneau dockable à droite, NON MODAL (cf. DerivativesWindow). z-40.
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Carnet d'ordres</h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">
-            {isBinance ? `${symbol} · Binance` : "Binance uniquement"}
-          </p>
-        </div>
-        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
-      </header>
+      {/* En-tête standard ; la croix de fermeture est fournie par le chrome FloatingWindow. */}
+      <EnTeteFenetre
+        titre="Carnet d'ordres"
+        sousTitre={isBinance ? `${symbol} · Binance` : "Binance uniquement"}
+      />
 
       {/* Onglets */}
       <div className="flex items-center gap-1 border-b border-border px-3 py-1.5">
@@ -522,7 +529,7 @@ export function DomWindow() {
                   onClick={() => setSeuilGrosTrade(s)}
                   aria-pressed={seuilGrosTrade === s}
                   className={`rounded border px-1.5 py-0.5 tabular-nums transition ${
-                    seuilGrosTrade === s ? "border-text text-text" : "border-border hover:text-text"
+                    seuilGrosTrade === s ? "border-border bg-bg text-text" : "border-border hover:text-text"
                   }`}
                 >
                   {formatUsd(s)}
@@ -539,7 +546,7 @@ export function DomWindow() {
                   onClick={() => setFacteurPas(f)}
                   aria-pressed={facteurPas === f}
                   className={`rounded border px-1.5 py-0.5 tabular-nums transition ${
-                    facteurPas === f ? "border-text text-text" : "border-border hover:text-text"
+                    facteurPas === f ? "border-border bg-bg text-text" : "border-border hover:text-text"
                   }`}
                 >
                   {f}
@@ -555,9 +562,11 @@ export function DomWindow() {
         {isBinance ? (
           <canvas ref={canvasRef} className="block h-full w-full" />
         ) : (
-          <div className="flex h-full items-center justify-center px-6 text-center text-xs leading-snug text-text-dim">
-            Carnet d'ordres non disponible pour cette source — DOM, depth chart et time &amp; sales sont
-            réservés à Binance.
+          <div className="px-4 py-4">
+            <Vide>
+              Carnet d'ordres non disponible pour cette source — DOM, depth chart et time &amp; sales sont
+              réservés à Binance.
+            </Vide>
           </div>
         )}
       </div>

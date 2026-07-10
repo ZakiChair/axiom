@@ -30,6 +30,7 @@ import { cotUiStore } from "./CotWindow";
 import { seasonalityUiStore } from "./SeasonalityWindow";
 import { volUiStore } from "./VolWindow";
 import { fundUiStore } from "./FundWindow";
+import { briefUiStore } from "./BriefWindow";
 import { FootprintSettingsPanel } from "./FootprintSettingsPanel";
 import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
@@ -162,6 +163,8 @@ const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] =
   { mnemonique: "SEAG", libelle: "Saisonnalité", ouvrir: () => seasonalityUiStore.getState().openSeasonality() },
   { mnemonique: "VOL", libelle: "Volatilité (cône RV, VRP)", ouvrir: () => volUiStore.getState().openVol() },
   { mnemonique: "FUND", libelle: "Fiche société (FUND)", ouvrir: () => fundUiStore.getState().openFund() },
+  // Fenêtre BRIEF (snapshot marché matinal — composition de sources existantes).
+  { mnemonique: "BRIEF", libelle: "Point marché (snapshot)", ouvrir: () => briefUiStore.getState().openBrief() },
 ];
 
 /**
@@ -334,7 +337,7 @@ function WorkspaceMenu() {
                       type="button"
                       onClick={() => onRemove(w.id, w.name)}
                       title="Supprimer"
-                      className="rounded px-1 py-1 text-xs text-neutral-500 hover:bg-neutral-800 hover:text-red-400"
+                      className="rounded px-1 py-1 text-xs text-neutral-500 hover:bg-neutral-800 hover:text-down"
                     >
                       ✕
                     </button>
@@ -433,7 +436,7 @@ export function Toolbar() {
       <select
         value={exchange}
         onChange={(e) => onChangeExchange(e.target.value as ExchangeId)}
-        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-sm text-neutral-100 outline-none focus:border-neutral-500"
+        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none focus:border-neutral-500"
         aria-label="Source"
       >
         {EXCHANGES.map((ex) => (
@@ -590,7 +593,7 @@ export function Toolbar() {
           isTradfi || isSynthetic
             ? "cursor-not-allowed bg-neutral-900 text-neutral-700"
             : revenueEnabled
-              ? "bg-yellow-500 text-accent-ink"
+              ? "bg-accent text-accent-ink"
               : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
         }`}
       >
@@ -617,7 +620,7 @@ export function Toolbar() {
         title="Exporter le graphe en image PNG"
         className="rounded px-2 py-1 text-xs bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
       >
-        Export PNG
+        Exporter PNG
       </button>
 
       {/* Workspaces + thème (poussés à droite). */}

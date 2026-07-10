@@ -19,6 +19,7 @@ import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import { healthStore, type EtatSource, type QuotaSource, type SanteSource } from "../store/health";
 import { SidebarSection } from "./SidebarSection";
+import { formatAge } from "../lib/format";
 
 /** Classe de fond (token de thème) de la pastille d'état. */
 const DOT_BY_ETAT: Record<EtatSource, string> = {
@@ -53,21 +54,6 @@ export function sourceLabel(source: string): string {
   const [base, canal] = source.split(":");
   const name = SOURCE_NAMES[base ?? ""] ?? base ?? source;
   return canal ? `${name} · ${canal}` : name;
-}
-
-/**
- * Âge lisible du dernier message (« il y a 12 s / 3 min / 2 h / 4 j »). PURE.
- * `ts` = ms epoch du dernier message (0/invalide → « — », jamais reçu).
- */
-export function formatAge(ts: number, now: number): string {
-  if (!Number.isFinite(ts) || ts <= 0) return "—";
-  const sec = Math.max(0, Math.floor((now - ts) / 1000));
-  if (sec < 60) return `il y a ${sec} s`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `il y a ${min} min`;
-  const h = Math.floor(min / 60);
-  if (h < 24) return `il y a ${h} h`;
-  return `il y a ${Math.floor(h / 24)} j`;
 }
 
 /** Abréviation d'affichage des fenêtres de quota. */

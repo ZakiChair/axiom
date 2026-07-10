@@ -25,6 +25,9 @@ import { themeStore } from "../store/theme";
 import { marketMapUiStore } from "../store/marketmap-ui";
 import { fetchPairs } from "../data/pairs";
 import { squarify, type Rect, type Tuile } from "../lib/treemap";
+import { formatAge, formatPct, formatUsd } from "../lib/format";
+import { lireTokensCanvas } from "../lib/canvasTokens";
+import { ErreurBloc, NoteSource, Onglets } from "./ui";
 import {
   fetchFearGreed,
   fetchMarketOverview,
@@ -43,34 +46,6 @@ const REFRESH_MS = 5 * 60_000;
 /** Amplitude de Δ24 h (%) saturant le dégradé de couleur. */
 const CHANGE_SATURATION = 8;
 
-// ─────────────────────────── Formatage ───────────────────────────
-
-/** Notionnel USD compact ($2.4T / $410B / $95.0B / $12M). */
-function formatUsd(n: number): string {
-  if (!Number.isFinite(n)) return "—";
-  const abs = Math.abs(n);
-  if (abs >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
-  if (abs >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
-  if (abs >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
-  if (abs >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
-  return `$${n.toFixed(0)}`;
-}
-
-/** Pourcentage signé (« +2.10% »). */
-function formatPct(n: number): string {
-  if (!Number.isFinite(n)) return "—";
-  return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
-}
-
-/** Âge lisible d'un horodatage (« il y a 3 min »). */
-function formatAge(ts: number): string {
-  const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (sec < 60) return `il y a ${sec} s`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `il y a ${min} min`;
-  return `il y a ${Math.floor(min / 60)} h`;
-}
-
 // ─────────────────────────── Couleurs (tokens de thème) ───────────────────────────
 
 /** Jeu de couleurs lu depuis les variables CSS du thème courant. */
@@ -79,6 +54,7 @@ interface Tokens {
   down: [number, number, number];
   neutral: [number, number, number];
   border: [number, number, number];
+  text: [number, number, number];
 }
 
 /** Parse « #rrggbb » (ou « #rgb ») en composantes RVB ; gris moyen par défaut. */
@@ -92,13 +68,13 @@ function hexToRgb(hex: string): [number, number, number] {
 
 /** Lit les tokens de couleur du thème (relu à chaque changement de thème). */
 function readTokens(): Tokens {
-  const s = getComputedStyle(document.documentElement);
-  const tok = (name: string) => hexToRgb(s.getPropertyValue(name));
+  const t = lireTokensCanvas(["--up", "--down", "--surface", "--border", "--text"]);
   return {
-    up: tok("--up"),
-    down: tok("--down"),
-    neutral: tok("--surface"),
-    border: tok("--border"),
+    up: hexToRgb(t["--up"]),
+    down: hexToRgb(t["--down"]),
+    neutral: hexToRgb(t["--surface"]),
+    border: hexToRgb(t["--border"]),
+    text: hexToRgb(t["--text"]),
   };
 }
 
@@ -135,7 +111,7 @@ function drawTile(ctx: CanvasRenderingContext2D, t: Tuile<CoinTile>, tok: Tokens
   ctx.fillStyle = rgbCss(rgb);
   ctx.fillRect(x, y, w, h);
 
-  ctx.strokeStyle = highlight ? "#f5f5f5" : `rgb(${tok.border[0]},${tok.border[1]},${tok.border[2]})`;
+  ctx.strokeStyle = highlight ? rgbCss(tok.text) : `rgb(${tok.border[0]},${tok.border[1]},${tok.border[2]})`;
   ctx.lineWidth = highlight ? 2 : 1;
   ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
 
@@ -161,6 +137,7 @@ function drawTooltip(
   my: number,
   cw: number,
   ch: number,
+  tok: Tokens,
 ): void {
   const lignes = [t.name, `${formatUsd(t.price)} · ${formatPct(t.changePct24h)}`, `Cap. ${formatUsd(t.mcapUsd)}`];
   ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
@@ -171,12 +148,13 @@ function drawTooltip(
   if (bx + wBox > cw) bx = cw - wBox - 2;
   if (by + hBox > ch) by = ch - hBox - 2;
 
-  ctx.fillStyle = "rgba(10,10,10,0.92)";
-  ctx.strokeStyle = "rgba(245,245,245,0.25)";
+  // Couleurs dérivées des tokens de thème (fond surface translucide, bordure/texte du thème).
+  ctx.fillStyle = `rgba(${tok.neutral[0]},${tok.neutral[1]},${tok.neutral[2]},0.95)`;
+  ctx.strokeStyle = rgbCss(tok.border);
   ctx.lineWidth = 1;
   ctx.fillRect(bx, by, wBox, hBox);
   ctx.strokeRect(bx + 0.5, by + 0.5, wBox, hBox);
-  ctx.fillStyle = "#f5f5f5";
+  ctx.fillStyle = rgbCss(tok.text);
   ctx.textBaseline = "top";
   lignes.forEach((l, i) => ctx.fillText(l, bx + 8, by + 6 + i * 15));
 }
@@ -187,7 +165,11 @@ function drawTooltip(
 function SectorsTab({ overview }: { overview: MarketOverview | null }) {
   const secteurs = (overview?.sectors ?? []).slice(0, MAX_SECTORS);
   if (secteurs.length === 0) {
-    return <div className="px-4 py-6 text-xs text-text-dim">Secteurs indisponibles.</div>;
+    return (
+      <div className="flex h-full items-center justify-center text-[11px] text-text-dim">
+        Secteurs indisponibles.
+      </div>
+    );
   }
   const maxAbs = Math.max(1, ...secteurs.map((s) => Math.abs(s.changePct24h)));
   return (
@@ -251,7 +233,10 @@ export function MarketMapWindow() {
         if (ignore) return;
         setOverview(ov);
         setFng(fg);
-        setError(ov.stale ? "Réseau indisponible — données en cache." : null);
+        // Le cache périmé (ov.stale) est un AVERTISSEMENT, pas une erreur : signalé
+        // discrètement dans l'en-tête (« · cache »), l'état `error` reste réservé
+        // aux échecs durs (catch) rendus dans un bloc d'erreur standard.
+        setError(null);
       } catch (err) {
         if (ignore) return;
         setError(err instanceof Error ? err.message : "Vue marché indisponible.");
@@ -317,7 +302,7 @@ export function MarketMapWindow() {
       const hover = hoverRef.current;
       layoutRef.current.forEach((t, i) => drawTile(ctx, t, tok, i === hover));
       const ht = hover >= 0 ? layoutRef.current[hover] : undefined;
-      if (ht) drawTooltip(ctx, ht.item, mouseRef.current.x, mouseRef.current.y, w, h);
+      if (ht) drawTooltip(ctx, ht.item, mouseRef.current.x, mouseRef.current.y, w, h, tok);
     };
     paintRef.current = paint;
     paint();
@@ -399,34 +384,38 @@ export function MarketMapWindow() {
                 <span className="text-text-dim">{fng.classification}</span>
               </span>
             )}
-            {overview && <span className="text-text-dim">{loading ? "maj…" : formatAge(overview.fetchedAt)}</span>}
+            {overview && (
+              <span className={overview.stale ? "text-amber-500" : "text-text-dim"}>
+                {loading
+                  ? "maj…"
+                  : `maj ${formatAge(overview.fetchedAt, Date.now())}${overview.stale ? " · cache" : ""}`}
+              </span>
+            )}
           </div>
         </div>
         {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
       </header>
 
       {/* Onglets */}
-      <div className="flex items-center gap-1 border-b border-border px-3 py-1.5">
-        {(["carte", "secteurs"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            className={`rounded px-2.5 py-1 text-[11px] uppercase tracking-wide transition ${
-              tab === t ? "bg-bg text-text" : "text-text-dim hover:text-text"
-            }`}
-          >
-            {t === "carte" ? "Carte" : "Secteurs"}
-          </button>
-        ))}
-        {error && <span className="ml-auto truncate text-[11px] text-down" title={error}>{error}</span>}
-      </div>
+      <Onglets
+        options={[
+          { id: "carte", label: "Carte" },
+          { id: "secteurs", label: "Secteurs" },
+        ]}
+        actif={tab}
+        onChange={setTab}
+      />
+      {error && (
+        <div className="px-3 pt-2">
+          <ErreurBloc>{error}</ErreurBloc>
+        </div>
+      )}
 
       {/* Corps */}
       {tab === "carte" ? (
         <div ref={containerRef} className="relative flex-1 overflow-hidden">
           {(overview?.coins.length ?? 0) === 0 ? (
-            <div className="flex h-full items-center justify-center text-xs text-text-dim">
+            <div className="flex h-full items-center justify-center text-[11px] text-text-dim">
               {loading ? "Chargement…" : "Carte indisponible."}
             </div>
           ) : (
@@ -444,6 +433,11 @@ export function MarketMapWindow() {
           <SectorsTab overview={overview} />
         </div>
       )}
+
+      {/* Source + cadence (note de bas de panneau standard) */}
+      <div className="shrink-0 border-t border-border px-4 py-1.5">
+        <NoteSource>Données CoinGecko + alternative.me, ~5 min.</NoteSource>
+      </div>
     </>
   );
 }

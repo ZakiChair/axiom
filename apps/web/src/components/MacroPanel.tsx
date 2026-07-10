@@ -16,6 +16,8 @@
  */
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
+import { lireTokensCanvas } from "../lib/canvasTokens";
+import { formatHeureMinute, formatPct, formatUsd } from "../lib/format";
 import type { MacroSeries } from "../data/macro";
 import { fredM2WeeklyProvider, stablecoinsSupplyProvider } from "../data/macro";
 import { fredKeyStore, getFredKey } from "../store/macro";
@@ -32,30 +34,6 @@ const FETCH_WINDOW_MS = 200 * 24 * 60 * 60 * 1000; // ~200 jours.
 const VARIATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000; // 30 jours.
 /** Nombre de points max du mini-trend (sparkline). */
 const SPARK_POINTS = 40;
-
-/** Formatte un montant USD de façon compacte ($2.41T / $162.3B / $4.5M). */
-function formatUsdCompact(n: number | undefined): string {
-  if (n === undefined || !Number.isFinite(n)) return "—";
-  const abs = Math.abs(n);
-  if (abs >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
-  if (abs >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
-  return `$${n.toFixed(0)}`;
-}
-
-/** Variation (déjà en pourcentage) -> texte signé. */
-function formatPct(pct: number | undefined): string {
-  if (pct === undefined || !Number.isFinite(pct)) return "—";
-  const sign = pct >= 0 ? "+" : "";
-  return `${sign}${pct.toFixed(2)}%`;
-}
-
-/** Heure locale HH:MM d'un horodatage ms (libellé « maj … »). */
-function formatClock(ms: number | null): string {
-  if (ms === null || !Number.isFinite(ms)) return "—";
-  return new Date(ms).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
-}
 
 /** Dernier point d'une série triée croissante (ou undefined si vide). */
 function lastValue(series: MacroSeries): number | undefined {
@@ -81,10 +59,19 @@ function changePct(series: MacroSeries, windowMs: number): number | undefined {
   return ((last.value - ref.value) / ref.value) * 100;
 }
 
-/** Couleur d'une variation (vert hausse / rouge baisse / neutre). */
-function pctColor(pct: number | undefined): string | undefined {
-  if (pct === undefined || !Number.isFinite(pct)) return undefined;
-  return pct >= 0 ? "#34d399" : "#f87171";
+/**
+ * Couleur JS d'un mini-trend, lue sur le thème courant AU RENDU (les SVG ne
+ * voient pas les classes Tailwind). Repli sur --text-dim quand la variation
+ * est absente ; les hex de repli couvrent le cas où un token serait vide.
+ */
+function couleurTrend(pct: number | undefined): string {
+  const { "--up": up, "--down": down, "--text-dim": dim } = lireTokensCanvas([
+    "--up",
+    "--down",
+    "--text-dim",
+  ]);
+  if (pct === undefined || !Number.isFinite(pct)) return dim || "#737373";
+  return pct >= 0 ? up || "#34d399" : down || "#f87171";
 }
 
 /** Mini-trend SVG (polyline) — rien si moins de 2 points. */
@@ -149,16 +136,16 @@ function Measure({
         <span className="tabular-nums text-base text-text">{value}</span>
         <div className="flex items-center gap-2">
           {pct !== undefined && (
-            <span className="tabular-nums text-[11px]" style={{ color: pctColor(pct) }}>
+            <span className={`tabular-nums text-[11px] ${pct >= 0 ? "text-up" : "text-down"}`}>
               {formatPct(pct)}
             </span>
           )}
           {spark && spark.length >= 2 && (
-            <Sparkline values={spark} color={pctColor(pct) ?? "#737373"} />
+            <Sparkline values={spark} color={couleurTrend(pct)} />
           )}
         </div>
       </div>
-      {error && <div className="mt-0.5 text-[11px] text-red-400">{error}</div>}
+      {error && <div className="mt-0.5 text-[11px] text-down">{error}</div>}
     </div>
   );
 }
@@ -210,15 +197,17 @@ export function MacroPanel() {
         setStables(sR.value);
         setErrStables(null);
       } else {
-        setErrStables("Indisponible");
+        setErrStables("Stablecoins indisponibles pour le moment.");
       }
 
       if (hasKey) {
         if (mR.status === "fulfilled") {
           setM2(mR.value);
-          setErrM2(mR.value.length === 0 ? "Série vide (clé invalide ?)" : null);
+          setErrM2(
+            mR.value.length === 0 ? "M2 indisponible pour le moment (clé FRED invalide ?)." : null,
+          );
         } else {
-          setErrM2("Indisponible");
+          setErrM2("M2 indisponible pour le moment.");
         }
       } else {
         setM2([]);
@@ -271,7 +260,7 @@ export function MacroPanel() {
           className="text-[10px] text-text-dim transition hover:text-text"
           title="Rafraîchir maintenant"
         >
-          {loading ? "maj…" : `maj ${formatClock(updatedAt)} · ↻`}
+          {loading ? "maj…" : `maj ${updatedAt ? formatHeureMinute(updatedAt) : "—"} · ↻`}
         </button>
       }
     >
@@ -280,7 +269,7 @@ export function MacroPanel() {
       <Measure
         label="Cap. totale crypto"
         note={totalSeries.length < 2 ? "accumulation…" : "évolution locale"}
-        value={formatUsdCompact(totalValue)}
+        value={formatUsd(totalValue)}
         pct={totalPct}
         spark={totalSpark}
         active={isMacroActive("crypto-total")}
@@ -290,7 +279,7 @@ export function MacroPanel() {
       {/* 2. Supply agrégée des stablecoins (DefiLlama). */}
       <Measure
         label="Stablecoins (supply)"
-        value={formatUsdCompact(stablesValue)}
+        value={formatUsd(stablesValue)}
         pct={stablesPct}
         spark={stablesSpark}
         error={errStables}
@@ -317,29 +306,31 @@ export function MacroPanel() {
           <button
             type="button"
             onClick={openSettings}
-            className="mt-1 rounded border border-border bg-surface px-2.5 py-1.5 text-[11px] text-text-dim transition hover:text-text"
+            className="mt-1 text-[11px] text-accent hover:underline"
           >
-            Configurer dans Réglages ⚙
+            Clé FRED — Réglages ⚙
           </button>
         ) : (
           /* --- Valeur M2 (milliards $ → $ absolu pour la notation compacte) --- */
           <>
             <div className="mt-0.5 flex items-end justify-between gap-2">
               <span className="tabular-nums text-base text-text">
-                {formatUsdCompact(m2Last === undefined ? undefined : m2Last * 1e9)}
+                {formatUsd(m2Last === undefined ? undefined : m2Last * 1e9)}
               </span>
               <div className="flex items-center gap-2">
                 {m2Pct !== undefined && (
-                  <span className="tabular-nums text-[11px]" style={{ color: pctColor(m2Pct) }}>
+                  <span
+                    className={`tabular-nums text-[11px] ${m2Pct >= 0 ? "text-up" : "text-down"}`}
+                  >
                     {formatPct(m2Pct)}
                   </span>
                 )}
                 {m2Spark.length >= 2 && (
-                  <Sparkline values={m2Spark} color={pctColor(m2Pct) ?? "#737373"} />
+                  <Sparkline values={m2Spark} color={couleurTrend(m2Pct)} />
                 )}
               </div>
             </div>
-            {errM2 && <div className="mt-0.5 text-[11px] text-red-400">{errM2}</div>}
+            {errM2 && <div className="mt-0.5 text-[11px] text-down">{errM2}</div>}
           </>
         )}
       </div>

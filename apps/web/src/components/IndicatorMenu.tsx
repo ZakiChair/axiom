@@ -92,7 +92,7 @@ function InstanceParamsEditor({
         <select
           value={String(value)}
           onChange={(e) => set(input.key, e.target.value)}
-          className="w-24 rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          className="w-24 rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-accent"
         >
           {input.options.map((opt) => (
             <option key={opt} value={opt}>
@@ -108,7 +108,7 @@ function InstanceParamsEditor({
           type="checkbox"
           checked={Boolean(value)}
           onChange={(e) => set(input.key, e.target.checked)}
-          className="accent-emerald-500"
+          className="accent-accent"
         />
       );
     }
@@ -124,7 +124,7 @@ function InstanceParamsEditor({
             // On ignore une saisie non finie (champ vidé transitoirement).
             if (Number.isFinite(n)) set(input.key, n);
           }}
-          className="w-20 rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          className="w-20 rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-accent"
         />
       );
     }
@@ -134,7 +134,7 @@ function InstanceParamsEditor({
         type="text"
         value={String(value)}
         onChange={(e) => set(input.key, e.target.value)}
-        className="w-24 rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+        className="w-24 rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-accent"
       />
     );
   };
@@ -208,11 +208,14 @@ export function IndicatorMenu() {
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 flex max-h-[70vh] w-72 flex-col rounded border border-neutral-800 bg-neutral-900 shadow-xl">
+        <>
+        {/* Zone de fermeture au clic extérieur (même mécanisme que les menus de la Toolbar). */}
+        <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+        <div className="absolute left-0 top-full z-50 mt-1 flex max-h-[70vh] w-72 flex-col rounded border border-neutral-800 bg-neutral-900 shadow-xl">
           {/* Section « Actifs » : les instances affichées, éditables par instance. */}
           {active.length > 0 && (
             <div className="border-b border-neutral-800 p-1">
-              <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+              <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
                 Actifs <span className="text-neutral-600">{active.length}</span>
               </div>
               {active.map((inst) => {
@@ -246,7 +249,7 @@ export function IndicatorMenu() {
                             setEditingId((cur) => (cur === inst.instanceId ? null : inst.instanceId))
                           }
                           className={`rounded px-1 hover:bg-neutral-700 hover:text-neutral-100 ${
-                            isEditing ? "text-emerald-400" : "text-neutral-400"
+                            isEditing ? "text-accent" : "text-neutral-400"
                           }`}
                         >
                           ✎
@@ -260,7 +263,7 @@ export function IndicatorMenu() {
                           if (editingId === inst.instanceId) setEditingId(null);
                           remove(inst.instanceId);
                         }}
-                        className="rounded px-1 text-neutral-400 hover:bg-neutral-700 hover:text-red-400"
+                        className="rounded px-1 text-neutral-400 hover:bg-neutral-700 hover:text-down"
                       >
                         ✕
                       </button>
@@ -285,14 +288,14 @@ export function IndicatorMenu() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Rechercher un indicateur…"
-              className="w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className="w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-accent"
             />
           </div>
 
           {/* Catalogue groupé scrollable — cliquer AJOUTE une instance. */}
           <div className="flex-1 overflow-y-auto p-1">
             {groups.length === 0 && (
-              <div className="px-2 py-3 text-center text-xs text-neutral-500">
+              <div className="px-2 py-6 text-center text-xs text-text-dim">
                 Aucun indicateur trouvé.
               </div>
             )}
@@ -305,7 +308,7 @@ export function IndicatorMenu() {
                   <button
                     type="button"
                     onClick={() => toggleSection(cat)}
-                    className="flex w-full items-center justify-between rounded px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-400 hover:bg-neutral-800"
+                    className="flex w-full items-center justify-between rounded px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim hover:bg-neutral-800"
                   >
                     <span>{CATEGORY_LABELS[cat] ?? cat}</span>
                     <span className="flex items-center gap-1 text-neutral-600">
@@ -343,10 +346,10 @@ export function IndicatorMenu() {
                               : "cursor-pointer text-neutral-200 hover:bg-neutral-800"
                           }`}
                         >
-                          <span className="text-emerald-500">＋</span>
+                          <span className="text-accent">＋</span>
                           <span className="flex-1 truncate">{def.name}</span>
                           {count > 0 && (
-                            <span className="rounded bg-emerald-900/60 px-1 text-[10px] text-emerald-300">
+                            <span className="rounded bg-accent/20 px-1 text-[10px] text-accent">
                               {count}
                             </span>
                           )}
@@ -361,6 +364,7 @@ export function IndicatorMenu() {
             })}
           </div>
         </div>
+        </>
       )}
     </div>
   );

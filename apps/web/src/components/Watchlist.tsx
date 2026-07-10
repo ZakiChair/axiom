@@ -23,6 +23,8 @@ import { watchlistStore } from "../store/watchlist";
 import { subscribeTickers, subscribeWatchlistBars } from "../data/ticker";
 import type { TickerUpdate, WatchlistBars } from "../data/ticker";
 import { SidebarSection } from "./SidebarSection";
+import { formatCompact, formatPct, formatPrice, VALEUR_ABSENTE } from "../lib/format";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 
 /** Colonnes métriques (hors prix, toujours affiché) : clés = champs de `RowCells` + snapshot. */
 type MetricKey = "change24h" | "change1h" | "change7d" | "volume";
@@ -84,42 +86,22 @@ const DEFAULT_COLS: VisibleCols = {
   spark: true,
 };
 
-/** Formatte un prix selon son ordre de grandeur. */
-function formatPrice(p: number): string {
-  if (!Number.isFinite(p)) return "—";
-  if (p >= 1000) return p.toLocaleString("en-US", { maximumFractionDigits: 2 });
-  if (p >= 1) return p.toFixed(2);
-  return p.toPrecision(4);
-}
-
-/** Formatte un volume en notation compacte (1.2B / 340.0M / 5.6K). */
-function formatCompact(n: number): string {
-  if (!Number.isFinite(n)) return "—";
-  const abs = Math.abs(n);
-  if (abs >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (abs >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
-  return n.toFixed(0);
-}
-
 /** Écrit une cellule de variation en % (couleur via tokens --up/--down ; « — » si absente). */
 function writePctCell(el: HTMLSpanElement, pct: number | null | undefined): void {
   if (pct === null || pct === undefined || !Number.isFinite(pct)) {
-    el.textContent = "—";
+    el.textContent = VALEUR_ABSENTE;
     el.style.color = ""; // couleur neutre héritée
     return;
   }
-  const sign = pct >= 0 ? "+" : "";
-  el.textContent = `${sign}${pct.toFixed(2)}%`;
+  el.textContent = formatPct(pct);
   el.style.color = pct >= 0 ? "var(--up)" : "var(--down)";
 }
 
 /** Couleurs up/down résolues depuis les tokens du thème courant (pour le canvas). */
 function readUpDownColors(): { up: string; down: string } {
-  const style = getComputedStyle(document.documentElement);
   return {
-    up: style.getPropertyValue("--up").trim() || "#2dc08e",
-    down: style.getPropertyValue("--down").trim() || "#f92855",
+    up: lireTokenCanvas("--up", "#2dc08e"),
+    down: lireTokenCanvas("--down", "#f92855"),
   };
 }
 
@@ -434,7 +416,7 @@ export function Watchlist() {
             }}
             placeholder="Nom"
             spellCheck={false}
-            className="w-16 shrink-0 rounded border border-border bg-bg px-1 py-0.5 text-[10px] text-text outline-none"
+            className="w-16 shrink-0 rounded border border-border bg-bg px-1 py-0.5 text-[10px] text-text outline-none focus:border-accent"
           />
         ) : (
           <button
@@ -567,7 +549,7 @@ export function Watchlist() {
           }}
           placeholder="Ajouter (ex. BNBUSDT)"
           spellCheck={false}
-          className="w-full rounded border border-border bg-bg px-2 py-1 text-xs text-text outline-none placeholder:text-text-dim focus:border-text-dim"
+          className="w-full rounded border border-border bg-bg px-2 py-1 text-xs text-text outline-none placeholder:text-text-dim focus:border-accent"
         />
       </div>
     </SidebarSection>

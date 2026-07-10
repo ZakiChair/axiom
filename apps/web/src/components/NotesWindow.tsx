@@ -24,29 +24,13 @@ import {
   type FiltreNotes,
 } from "../store/notes";
 import type { ExchangeId } from "@axiom/types";
+import { formatPrice, formatDateHeure } from "../lib/format";
+import { EnTeteFenetre } from "./ui";
 
 /** Prix courant de l'actif actif (dernière clôture du buffer marché), ou undefined. */
 function prixMarcheActif(): number | undefined {
   const c = marketStore.getState().candles.at(-1);
   return c ? c.close : undefined;
-}
-
-/** Formatte un prix ancré de façon lisible. */
-function formatPrix(p: number | undefined): string {
-  if (p === undefined || !Number.isFinite(p)) return "";
-  if (p >= 1000) return p.toLocaleString("en-US", { maximumFractionDigits: 2 });
-  if (p >= 1) return p.toFixed(2);
-  return p.toPrecision(4);
-}
-
-/** Horodatage court « JJ/MM HH:MM ». */
-function formatDate(ts: number): string {
-  return new Date(ts).toLocaleString("fr-FR", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 export function NotesWindow() {
@@ -131,20 +115,15 @@ export function NotesWindow() {
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Notes / journal</h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">Annotations ancrées au marché</p>
-        </div>
-        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
-      </header>
+      {/* Croix de fermeture fournie par le chrome FloatingWindow — pas d'action ici. */}
+      <EnTeteFenetre titre="Notes / journal" sousTitre="Annotations ancrées au marché" />
 
       {/* Création rapide */}
       <section className="shrink-0 border-b border-border px-4 py-3">
         <div className="mb-1.5 flex items-center justify-between text-[10px] text-text-dim">
           <span>
             Ancré : <span className="font-medium text-text">{ancreSymbole}</span>
-            {ancrePrix !== undefined ? <span className="tabular-nums"> @ {formatPrix(ancrePrix)}</span> : null}
+            {ancrePrix !== undefined ? <span className="tabular-nums"> @ {formatPrice(ancrePrix)}</span> : null}
             {ancre ? <span className="ml-1 text-accent">· post-mortem</span> : null}
           </span>
           {ancre && (
@@ -232,10 +211,10 @@ export function NotesWindow() {
                     title="Voir sur le chart"
                   >
                     <span className="font-medium text-text">{n.symbole}</span>
-                    {n.prix !== undefined ? <span className="tabular-nums">@ {formatPrix(n.prix)}</span> : null}
+                    {n.prix !== undefined ? <span className="tabular-nums">@ {formatPrice(n.prix)}</span> : null}
                   </button>
                   <span className="flex items-center gap-2">
-                    <span className="tabular-nums">{formatDate(n.timestamp)}</span>
+                    <span className="tabular-nums">{formatDateHeure(n.timestamp)}</span>
                     {editingId !== n.id && (
                       <>
                         <button

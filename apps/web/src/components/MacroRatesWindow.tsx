@@ -29,6 +29,8 @@ import { chargerTauxDirecteurs, type TauxDirecteur } from "../data/macro/policyR
 import { chargerReservesOr, type ReserveOr } from "../data/macro/goldReserves";
 import { CourbeTaux, type PointCourbe } from "./CourbeTaux";
 import { anneesDeMaturite } from "./courbeTaux.util";
+import { formatPourcentage, formatEntier, formatDateComplete } from "../lib/format";
+import { EnTeteFenetre, Onglets, Chargement, Vide } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -90,11 +92,30 @@ export const commandes: Commande[] = [
 
 // ─────────────────────────── Helpers de format (purs) ───────────────────────────
 
-const fmtTonnes = new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 0 });
-
-/** Taux en pourcent, 2 décimales (ou « — » si absent). */
-function fmtPct(v: number | undefined): string {
-  return v === undefined || !Number.isFinite(v) ? "—" : `${v.toFixed(2)} %`;
+/**
+ * Formate une date de source (Trésor « MM/JJ/AAAA » ou BIS « AAAA-MM-JJ ») en
+ * fr-FR « 2 juil. 2026 » via le formateur partagé. Les composants sont lus en
+ * heure locale (aucun décalage de fuseau) ; chaîne renvoyée telle quelle si le
+ * format n'est pas reconnu (dégradation gracieuse).
+ */
+function formatDateSource(brut: string): string {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(brut);
+  const us = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(brut);
+  let annee: number;
+  let mois: number;
+  let jour: number;
+  if (iso !== null) {
+    annee = Number(iso[1]);
+    mois = Number(iso[2]);
+    jour = Number(iso[3]);
+  } else if (us !== null) {
+    mois = Number(us[1]);
+    jour = Number(us[2]);
+    annee = Number(us[3]);
+  } else {
+    return brut;
+  }
+  return formatDateComplete(new Date(annee, mois - 1, jour).getTime());
 }
 
 /** Variation signée en points de base d'affichage (± 0.02), colorée par le caller. */
@@ -119,6 +140,12 @@ const ONGLETS: ReadonlyArray<{ id: Onglet; label: string }> = [
   { id: "rendements", label: "Rendements" },
   { id: "directeurs", label: "Taux directeurs" },
   { id: "or", label: "Réserves d'or" },
+];
+
+/** Bascule Tableau/Courbe de l'onglet Rendements (libellés explicites, style aligné sur les onglets). */
+const VUES_RENDEMENTS: ReadonlyArray<{ id: VueRendementsMode; label: string }> = [
+  { id: "tableau", label: "Tableau" },
+  { id: "courbe", label: "Courbe" },
 ];
 
 // ─────────────────────────── Sous-vues ───────────────────────────
@@ -161,36 +188,39 @@ function VueRendements({
   const spread = spread2s10s(us);
 
   if (derniere === undefined && Object.keys(euro).length === 0) {
-    return <Indisponible libelle="Rendements souverains indisponibles pour le moment." />;
+    return <Vide>Rendements souverains indisponibles pour le moment.</Vide>;
   }
 
   return (
     <div className="space-y-4">
       <div className="flex justify-end gap-1">
-        {(["tableau", "courbe"] as const).map((v) => (
+        {VUES_RENDEMENTS.map((v) => (
           <button
-            key={v}
+            key={v.id}
             type="button"
-            onClick={() => setVue(v)}
-            className={`rounded px-2 py-0.5 text-[10px] capitalize transition ${
-              vue === v ? "bg-surface text-text" : "text-text-dim hover:text-text"
+            onClick={() => setVue(v.id)}
+            className={`rounded px-2.5 py-1 text-[11px] transition ${
+              vue === v.id ? "bg-surface text-text" : "text-text-dim hover:text-text"
             }`}
           >
-            {v}
+            {v.label}
           </button>
         ))}
       </div>
 
       {vue === "courbe" ? (
         <section>
-          <EnteteSection titre="Courbe des taux" info={derniere !== undefined ? `au ${derniere.date}` : undefined} />
+          <EnteteSection
+            titre="Courbe des taux"
+            info={derniere !== undefined ? `au ${formatDateSource(derniere.date)}` : undefined}
+          />
           <CourbeTaux us={pointsUs(derniere)} euro={pointsEuro(euro)} />
         </section>
       ) : (
         <>
           {derniere !== undefined && (
             <section>
-              <EnteteSection titre="Trésor américain" info={`au ${derniere.date}`} />
+              <EnteteSection titre="Trésor américain" info={`au ${formatDateSource(derniere.date)}`} />
               <table className="w-full text-[11px] tabular-nums">
                 <thead>
                   <tr className="text-text-dim">
@@ -206,7 +236,7 @@ function VueRendements({
                     return (
                       <tr key={m} className="border-t border-border/60">
                         <td className="py-1 text-left text-text">{m}</td>
-                        <td className="py-1 text-right text-text">{fmtPct(v)}</td>
+                        <td className="py-1 text-right text-text">{formatPourcentage(v)}</td>
                         <td className={`py-1 text-right ${couleurDelta(d)}`}>{fmtDelta(d)}</td>
                       </tr>
                     );
@@ -233,7 +263,7 @@ function VueRendements({
                     euro[m] === undefined ? null : (
                       <tr key={m} className="border-t border-border/60">
                         <td className="py-1 text-left text-text">{m}</td>
-                        <td className="py-1 text-right text-text">{fmtPct(euro[m])}</td>
+                        <td className="py-1 text-right text-text">{formatPourcentage(euro[m])}</td>
                       </tr>
                     ),
                   )}
@@ -250,7 +280,7 @@ function VueRendements({
 function VueDirecteurs({ data, statut }: { data: TauxDirecteur[] | null; statut: Statut }) {
   if (statut === "loading" && data === null) return <Chargement />;
   if (data === null || data.length === 0) {
-    return <Indisponible libelle="Taux directeurs indisponibles pour le moment." />;
+    return <Vide>Taux directeurs indisponibles pour le moment.</Vide>;
   }
   return (
     <table className="w-full text-[11px] tabular-nums">
@@ -268,8 +298,8 @@ function VueDirecteurs({ data, statut }: { data: TauxDirecteur[] | null; statut:
               <span className="font-medium text-accent">{t.sigle}</span>{" "}
               <span className="text-text-dim">· {t.banque}</span>
             </td>
-            <td className="py-1 text-right text-text">{fmtPct(t.taux)}</td>
-            <td className="py-1 text-right text-text-dim">{t.date}</td>
+            <td className="py-1 text-right text-text">{formatPourcentage(t.taux)}</td>
+            <td className="py-1 text-right text-text-dim">{formatDateSource(t.date)}</td>
           </tr>
         ))}
       </tbody>
@@ -280,7 +310,7 @@ function VueDirecteurs({ data, statut }: { data: TauxDirecteur[] | null; statut:
 function VueOr({ data, statut }: { data: ReserveOr[] | null; statut: Statut }) {
   if (statut === "loading" && data === null) return <Chargement />;
   if (data === null || data.length === 0) {
-    return <Indisponible libelle="Réserves d'or indisponibles pour le moment." />;
+    return <Vide>Réserves d'or indisponibles pour le moment.</Vide>;
   }
   const top = data.slice(0, 15);
   const max = top[0]?.tonnes ?? 1;
@@ -299,7 +329,7 @@ function VueOr({ data, statut }: { data: ReserveOr[] | null; statut: Statut }) {
             />
           </div>
           <span className="w-16 shrink-0 text-right tabular-nums text-text">
-            {fmtTonnes.format(r.tonnes)} t
+            {formatEntier(r.tonnes)} t
           </span>
         </div>
       ))}
@@ -316,18 +346,6 @@ function EnteteSection({ titre, info }: { titre: string; info?: string }) {
     <div className="mb-1 flex items-baseline justify-between">
       <span className="text-[11px] font-semibold uppercase tracking-wide text-text">{titre}</span>
       {info !== undefined && <span className="text-[10px] text-text-dim">{info}</span>}
-    </div>
-  );
-}
-
-function Chargement() {
-  return <div className="px-1 py-6 text-center text-[11px] text-text-dim">Chargement…</div>;
-}
-
-function Indisponible({ libelle }: { libelle: string }) {
-  return (
-    <div className="rounded border border-border bg-bg px-3 py-4 text-center text-[11px] text-text-dim">
-      {libelle}
     </div>
   );
 }
@@ -406,41 +424,24 @@ export function MacroRatesWindow() {
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">
-            RATE · Taux & Réserves
-          </h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">Trésor US · ECB · BIS · IMF</p>
-        </div>
-        <button
-          type="button"
-          onClick={rafraichir}
-          aria-label="Rafraîchir la section active"
-          title="Rafraîchir"
-          className="rounded p-1 text-sm leading-none text-text-dim transition hover:bg-bg hover:text-text"
-        >
-          ⟳
-        </button>
-      </header>
+      <EnTeteFenetre
+        titre="RATE · Taux & Réserves"
+        sousTitre="Trésor US · ECB · BIS · IMF"
+        actions={
+          <button
+            type="button"
+            onClick={rafraichir}
+            aria-label="Rafraîchir la section active"
+            title="Rafraîchir"
+            className="rounded p-1 text-sm leading-none text-text-dim transition hover:bg-bg hover:text-text"
+          >
+            ⟳
+          </button>
+        }
+      />
 
       {/* Onglets. */}
-      <div className="flex gap-1 border-b border-border px-3 py-2">
-        {ONGLETS.map((o) => (
-          <button
-            key={o.id}
-            type="button"
-            onClick={() => setOnglet(o.id)}
-            className={`rounded px-2.5 py-1 text-[11px] transition ${
-              onglet === o.id
-                ? "bg-surface text-text"
-                : "text-text-dim hover:text-text"
-            }`}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
+      <Onglets options={ONGLETS} actif={onglet} onChange={setOnglet} />
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {onglet === "rendements" && (

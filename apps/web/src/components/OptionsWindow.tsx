@@ -36,6 +36,9 @@ import {
   type CboeTicker,
 } from "../data/cboe";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
+import { formatUsd } from "../lib/format";
+import { lireTokenCanvas } from "../lib/canvasTokens";
+import { Metric, EnTeteFenetre, ErreurBloc, NoteSource } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -60,8 +63,6 @@ mirrorOpenState("options", optionsUiStore);
 const REFRESH_MS = 60_000; // ~1 min.
 const DEVISES = ["BTC", "ETH"] as const;
 type Devise = (typeof DEVISES)[number];
-const COULEUR_CALL = "#34d399";
-const COULEUR_PUT = "#f87171";
 
 // ─────────────────────────── Agrégations dérivées (pures, hors réseau) ───────────────────────────
 
@@ -92,9 +93,20 @@ function agregerParStrike(points: OptionPoint[]): StrikeOi[] {
 
 // ─────────────────────────── Dessin du smile ───────────────────────────
 
-/** Formatte un strike de façon compacte (ex. 78 000 → 78k). */
+/**
+ * Montant USD EXACT (« $68,432 ») pour les strikes et prix spot des Metric : un
+ * strike est un identifiant de contrat, pas un ordre de grandeur — le compactage
+ * K/M de formatUsd rendrait indistincts deux strikes voisins (ex. 3 425 vs
+ * 3 430). Milliers en-US, sans décimales (grilles de strikes entières).
+ */
+function formatUsdExact(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
+  return `$${v.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+}
+
+/** Formatte un strike de façon compacte (ex. 78 000 → 78K). */
 function formatStrike(v: number): string {
-  if (v >= 1000) return `${(v / 1000).toFixed(0)}k`;
+  if (v >= 1000) return `${(v / 1000).toFixed(0)}K`;
   return v.toFixed(v < 10 ? 1 : 0);
 }
 
@@ -125,9 +137,16 @@ function dessinerSmile(
   const plotW = Math.max(1, cssW - padL - padR);
   const plotH = Math.max(1, cssH - padT - padB);
 
+  // Couleurs du thème (lues au dessin pour suivre le thème courant).
+  const couleurDim = lireTokenCanvas("--text-dim", "#9ca3af");
+  const couleurBordure = lireTokenCanvas("--border", "#262626");
+  const couleurSerie3 = lireTokenCanvas("--serie-3", "#f59e0b");
+  const couleurUp = lireTokenCanvas("--up", "#2dc08e");
+  const couleurDown = lireTokenCanvas("--down", "#f92855");
+
   const finies = points.filter((p) => Number.isFinite(p.markIv) && p.markIv > 0);
   if (finies.length === 0) {
-    ctx.fillStyle = "#6b7280";
+    ctx.fillStyle = couleurDim;
     ctx.font = "11px system-ui, sans-serif";
     ctx.fillText("Pas d'IV pour cette échéance…", padL, padT + plotH / 2);
     return;
@@ -148,8 +167,8 @@ function dessinerSmile(
   const py = (iv: number) => padT + (1 - (iv - yMin) / (yMax - yMin)) * plotH;
 
   // Grille + étiquettes Y (IV %).
-  ctx.strokeStyle = "rgba(148,163,184,0.15)";
-  ctx.fillStyle = "#6b7280";
+  ctx.strokeStyle = couleurBordure;
+  ctx.fillStyle = couleurDim;
   ctx.font = "10px system-ui, sans-serif";
   ctx.lineWidth = 1;
   for (const val of [yMin, (yMin + yMax) / 2, yMax]) {
@@ -180,8 +199,8 @@ function dessinerSmile(
     ctx.fillStyle = couleur;
     ctx.fillText(etiquette, Math.min(x + 3, cssW - padR - 30), padT + 9);
   };
-  repere(underlying, "rgba(148,163,184,0.8)", "sj");
-  if (maxPain !== null) repere(maxPain, "#eab308", "max pain");
+  repere(underlying, couleurDim, "sj");
+  if (maxPain !== null) repere(maxPain, couleurSerie3, "max pain");
 
   /** Trace une série (calls ou puts) : ligne + points. */
   const tracer = (serie: OptionPoint[], couleur: string) => {
@@ -202,29 +221,11 @@ function dessinerSmile(
       ctx.fill();
     }
   };
-  tracer(finies.filter((p) => p.type === "call"), COULEUR_CALL);
-  tracer(finies.filter((p) => p.type === "put"), COULEUR_PUT);
+  tracer(finies.filter((p) => p.type === "call"), couleurUp);
+  tracer(finies.filter((p) => p.type === "put"), couleurDown);
 }
 
 // ─────────────────────────── Dessin des barres GEX/DEX ───────────────────────────
-
-/** Lit un token de thème (CSS custom property) avec repli — pour les couleurs canvas. */
-function lireToken(nom: string, repli: string): string {
-  if (typeof window === "undefined") return repli;
-  const v = getComputedStyle(document.documentElement).getPropertyValue(nom).trim();
-  return v || repli;
-}
-
-/** Formatte une exposition ($) de façon compacte signée (ex. −1,3 Md, 420 M). */
-function formatExposition(v: number): string {
-  if (!Number.isFinite(v)) return "—";
-  const abs = Math.abs(v);
-  const signe = v < 0 ? "−" : "";
-  if (abs >= 1e9) return `${signe}$${(abs / 1e9).toFixed(2)} Md`;
-  if (abs >= 1e6) return `${signe}$${(abs / 1e6).toFixed(1)} M`;
-  if (abs >= 1e3) return `${signe}$${(abs / 1e3).toFixed(1)} k`;
-  return `${signe}$${abs.toFixed(0)}`;
-}
 
 /**
  * Dessine un histogramme d'exposition par strike (axe X = strike, barres pos./nég. depuis
@@ -254,9 +255,10 @@ function dessinerBarres(
   const plotW = Math.max(1, cssW - padL - padR);
   const plotH = Math.max(1, cssH - padT - padB);
 
-  const couleurDim = lireToken("--text-dim", "#9ca3af");
-  const couleurUp = lireToken("--up", "#2dc08e");
-  const couleurDown = lireToken("--down", "#f92855");
+  const couleurDim = lireTokenCanvas("--text-dim", "#9ca3af");
+  const couleurBordure = lireTokenCanvas("--border", "#262626");
+  const couleurUp = lireTokenCanvas("--up", "#2dc08e");
+  const couleurDown = lireTokenCanvas("--down", "#f92855");
 
   const val = (p: GexDexPoint) => (metrique === "gex" ? p.gex : p.dex);
   const maxAbs = points.reduce((m, p) => Math.max(m, Math.abs(val(p))), 0);
@@ -286,13 +288,13 @@ function dessinerBarres(
   ctx.lineWidth = 1;
   for (const v of [yHi, 0, yLo]) {
     const y = py(v);
-    ctx.strokeStyle = v === 0 ? "rgba(148,163,184,0.35)" : "rgba(148,163,184,0.12)";
+    ctx.strokeStyle = v === 0 ? couleurDim : couleurBordure;
     ctx.beginPath();
     ctx.moveTo(padL, y);
     ctx.lineTo(cssW - padR, y);
     ctx.stroke();
     ctx.fillStyle = couleurDim;
-    ctx.fillText(formatExposition(v), 2, y + 3);
+    ctx.fillText(formatUsd(v), 2, y + 3);
   }
   // Étiquettes X (strikes extrêmes).
   ctx.fillStyle = couleurDim;
@@ -314,7 +316,7 @@ function dessinerBarres(
   // Repère vertical du spot.
   if (Number.isFinite(spot) && spot >= xMin && spot <= xMax) {
     const x = px(spot);
-    ctx.strokeStyle = "rgba(148,163,184,0.8)";
+    ctx.strokeStyle = couleurDim;
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 3]);
     ctx.beginPath();
@@ -328,11 +330,6 @@ function dessinerBarres(
 }
 
 // ─────────────────────────── Format utilitaire ───────────────────────────
-
-function formatUsd(v: number): string {
-  if (!Number.isFinite(v)) return "—";
-  return `$${v.toLocaleString("fr-FR", { maximumFractionDigits: 0 })}`;
-}
 
 function joursAvant(expiryMs: number): string {
   const j = (expiryMs - Date.now()) / 86_400_000;
@@ -502,12 +499,7 @@ export function OptionsWindow() {
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Options</h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">Smile IV · max pain · GEX/DEX</p>
-        </div>
-      </header>
+      <EnTeteFenetre titre="Options" sousTitre="Smile IV · max pain · GEX/DEX" />
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {/* Bascule de vue : Smile ↔ GEX/DEX */}
@@ -645,8 +637,8 @@ export function OptionsWindow() {
             </div>
 
             {erreur && (
-              <div className="mb-3 rounded-md border border-down/40 px-3 py-2 text-[11px] text-down">
-                {erreur}
+              <div className="mb-3">
+                <ErreurBloc>{erreur}</ErreurBloc>
               </div>
             )}
 
@@ -655,30 +647,32 @@ export function OptionsWindow() {
             </div>
             <div className="mt-1 flex items-center gap-4 text-[10px] text-text-dim">
               <span className="flex items-center gap-1">
-                <span className="inline-block h-1.5 w-3 rounded" style={{ backgroundColor: COULEUR_CALL }} />
+                <span className="inline-block h-1.5 w-3 rounded bg-up" />
                 calls
               </span>
               <span className="flex items-center gap-1">
-                <span className="inline-block h-1.5 w-3 rounded" style={{ backgroundColor: COULEUR_PUT }} />
+                <span className="inline-block h-1.5 w-3 rounded bg-down" />
                 puts
               </span>
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <Metric label="Max pain" value={maxPain !== null ? formatUsd(maxPain) : "—"} />
-              <Metric label="Sous-jacent" value={formatUsd(underlying)} />
+              <Metric label="Max pain" value={formatUsdExact(maxPain)} />
+              <Metric label="Sous-jacent" value={formatUsdExact(underlying)} />
               <Metric
                 label="Put/Call (OI)"
                 value={Number.isFinite(pcRatio) ? pcRatio.toFixed(2) : "—"}
-                color={Number.isFinite(pcRatio) ? (pcRatio > 1 ? COULEUR_PUT : COULEUR_CALL) : undefined}
+                couleur={Number.isFinite(pcRatio) ? (pcRatio > 1 ? "var(--down)" : "var(--up)") : undefined}
               />
               <Metric label="DVOL" value={dvol !== null ? `${dvol.toFixed(1)}%` : "—"} />
             </div>
 
-            <p className="mt-3 text-[10px] leading-snug text-text-dim">
-              Max pain calculé côté client (min. de valeur intrinsèque versée aux détenteurs).
-              Données Deribit, ~1 min.
-            </p>
+            <div className="mt-3">
+              <NoteSource>
+                Max pain calculé côté client (min. de valeur intrinsèque versée aux détenteurs).
+                Données Deribit, ~1 min.
+              </NoteSource>
+            </div>
           </>
         )}
 
@@ -697,8 +691,8 @@ export function OptionsWindow() {
             )}
 
             {(classe === "crypto" ? erreur : cboeErreur) && (
-              <div className="mb-3 rounded-md border border-down/40 px-3 py-2 text-[11px] text-down">
-                {classe === "crypto" ? erreur : cboeErreur}
+              <div className="mb-3">
+                <ErreurBloc>{classe === "crypto" ? erreur : cboeErreur}</ErreurBloc>
               </div>
             )}
 
@@ -719,45 +713,32 @@ export function OptionsWindow() {
             <div className="mt-3 grid grid-cols-2 gap-2">
               <Metric
                 label="GEX net"
-                value={formatExposition(gexNet)}
-                color={gexNet !== 0 ? (gexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
+                value={formatUsd(gexNet)}
+                couleur={gexNet !== 0 ? (gexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
               />
               <Metric
                 label="DEX net"
-                value={formatExposition(dexNet)}
-                color={dexNet !== 0 ? (dexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
+                value={formatUsd(dexNet)}
+                couleur={dexNet !== 0 ? (dexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
               />
-              <Metric label="Spot" value={formatUsd(gexDexSpot)} />
+              <Metric label="Spot" value={formatUsdExact(gexDexSpot)} />
               <Metric
                 label="Strike |GEX| max"
-                value={strikePicGex !== null ? formatUsd(strikePicGex) : "—"}
+                value={formatUsdExact(strikePicGex)}
               />
             </div>
 
-            <p className="mt-3 text-[10px] leading-snug text-text-dim">
-              {classe === "crypto"
-                ? "GEX/DEX calculés côté client (Black-Scholes sur IV mark Deribit, OI en unités de base, multiplicateur 1). Une seule échéance."
-                : "Greeks pré-calculés CBOE (multiplicateur 100). GEX = Σ(Γc·OIc − Γp·OIp)·S²·0,01·mult ; DEX = Σ(Δ·OI)·S·mult."}
-            </p>
+            <div className="mt-3">
+              <NoteSource>
+                {classe === "crypto"
+                  ? "GEX/DEX calculés côté client (Black-Scholes sur IV mark Deribit, OI en unités de base, multiplicateur 1). Une seule échéance."
+                  : "Greeks pré-calculés CBOE (multiplicateur 100). GEX = Σ(Γc·OIc − Γp·OIp)·S²·0,01·mult ; DEX = Σ(Δ·OI)·S·mult."}
+              </NoteSource>
+            </div>
           </>
         )}
       </div>
     </>
-  );
-}
-
-/** Ligne « libellé / valeur » (mêmes tokens que le reste du terminal). */
-function Metric({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <div className="flex items-baseline justify-between gap-2 rounded-md border border-border bg-bg px-3 py-2">
-      <span className="text-[11px] text-text-dim">{label}</span>
-      <span
-        className="tabular-nums text-sm font-medium text-text"
-        style={color ? { color } : undefined}
-      >
-        {value}
-      </span>
-    </div>
   );
 }
 

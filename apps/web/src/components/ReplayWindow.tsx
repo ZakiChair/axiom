@@ -14,17 +14,14 @@ import { useState } from "react";
 import { useStore } from "zustand";
 import { replayStore, joursProposes, REPLAY_TFS, VITESSES } from "../store/replay";
 import { debutJour, JOUR_MS } from "../data/replayFeed";
+import { EnTeteFenetre, NoteSource } from "./ui";
+import { formatEntier } from "../lib/format";
 
 /** Formate un nombre d'octets en Ko/Mo. */
 function formatOctets(o: number): string {
   if (o >= 1_048_576) return `${(o / 1_048_576).toFixed(1)} Mo`;
   if (o >= 1024) return `${(o / 1024).toFixed(0)} Ko`;
   return `${o} o`;
-}
-
-/** Formate un nombre entier avec séparateurs de milliers (fr). */
-function formatEntier(n: number): string {
-  return n.toLocaleString("fr-FR");
 }
 
 /** Heure UTC (HH:MM:SS) d'un timestamp ms — le rejeu raisonne en jour UTC. */
@@ -46,23 +43,17 @@ export function ReplayWindow() {
 
   return (
     <>
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">
-            REPLAY · Rejeu de marché
-          </h2>
-          <p className="mt-0.5 text-[11px] text-text-dim">
-            Dumps aggTrades officiels (data.binance.vision) · Binance spot
-          </p>
-        </div>
-        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
-      </header>
+      {/* Pas d'actions : la croix de fermeture est fournie par le chrome FloatingWindow. */}
+      <EnTeteFenetre
+        titre="REPLAY · Rejeu de marché"
+        sousTitre="Dumps aggTrades officiels (data.binance.vision) · Binance spot"
+      />
 
       <div className="flex-1 overflow-y-auto">
         {s.daemonAbsent && (
-          <div className="m-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+          <div className="m-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-500">
             Le replay nécessite le daemon <span className="font-mono">axiomd</span> (port 8787).
-            Démarre-le puis rouvre ce panneau.
+            Démarrez-le puis rouvrez ce panneau.
           </div>
         )}
 
@@ -81,7 +72,7 @@ export function ReplayWindow() {
               }}
               onBlur={(e) => replayStore.getState().setSymbole(e.target.value)}
               disabled={s.active}
-              className="flex-1 rounded bg-bg px-2 py-1 font-mono text-xs uppercase text-text outline-none focus:ring-1 focus:ring-accent/60 disabled:opacity-50"
+              className="flex-1 rounded border border-border bg-bg px-1.5 py-1 font-mono text-[11px] uppercase text-text focus:border-text-dim focus:outline-none disabled:opacity-50"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -91,7 +82,7 @@ export function ReplayWindow() {
               value={s.jour}
               onChange={(e) => replayStore.getState().setJour(e.target.value)}
               disabled={s.active}
-              className="flex-1 rounded bg-bg px-2 py-1 text-xs text-text outline-none disabled:opacity-50"
+              className="flex-1 rounded border border-border bg-bg px-1.5 py-1 text-[11px] text-text focus:border-text-dim focus:outline-none disabled:opacity-50"
             >
               {joursProposes().map((j) => (
                 <option key={j} value={j}>
@@ -111,7 +102,7 @@ export function ReplayWindow() {
                   disabled={s.active}
                   aria-pressed={s.tf === tf}
                   className={`rounded px-2 py-1 font-mono text-[11px] transition disabled:opacity-50 ${
-                    s.tf === tf ? "bg-accent/25 text-text" : "bg-bg text-text-dim hover:text-text"
+                    s.tf === tf ? "bg-bg text-text" : "text-text-dim hover:text-text"
                   }`}
                 >
                   {tf}
@@ -149,13 +140,13 @@ export function ReplayWindow() {
               disabled={enTelechargement || s.daemonAbsent}
               className="rounded bg-accent/20 px-3 py-1 text-xs font-medium text-text transition hover:bg-accent/30 disabled:opacity-40"
             >
-              {enTelechargement ? "…" : statutPret ? "Re-télécharger" : "Télécharger"}
+              {enTelechargement ? "Téléchargement…" : statutPret ? "Re-télécharger" : "Télécharger"}
             </button>
           </div>
-          <p className="text-[10px] leading-snug text-text-dim">
+          <NoteSource>
             Un jour = un fichier zip officiel décompressé côté daemon. Les jours très liquides
             (BTC) peuvent peser plusieurs Mo et prendre un moment.
-          </p>
+          </NoteSource>
         </section>
 
         {/* 3. Lecture ------------------------------------------------------- */}
@@ -190,7 +181,7 @@ export function ReplayWindow() {
                       onClick={() => replayStore.getState().setVitesse(v)}
                       aria-pressed={s.vitesse === v}
                       className={`flex-1 rounded px-1 py-1 font-mono text-[11px] transition ${
-                        s.vitesse === v ? "bg-accent/25 text-text" : "bg-bg text-text-dim hover:text-text"
+                        s.vitesse === v ? "bg-bg text-text" : "text-text-dim hover:text-text"
                       }`}
                     >
                       ×{v}
@@ -219,7 +210,7 @@ export function ReplayWindow() {
                   }}
                   className="w-full accent-accent"
                 />
-                <div className="flex justify-between font-mono text-[10px] text-text-dim">
+                <div className="flex justify-between tabular-nums text-[10px] text-text-dim">
                   <span>{heureUtc(valeurCurseur)} UTC</span>
                   <span>{(s.progression * 100).toFixed(1)} %</span>
                 </div>
@@ -249,7 +240,7 @@ export function ReplayWindow() {
               title="Rafraîchir"
               className="rounded p-1 text-xs leading-none text-text-dim transition hover:bg-bg hover:text-text"
             >
-              ⟳
+              ↻
             </button>
           </div>
           {s.jours.length === 0 ? (

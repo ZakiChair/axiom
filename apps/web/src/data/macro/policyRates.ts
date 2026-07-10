@@ -1,10 +1,11 @@
 /**
  * Taux directeurs des banques centrales — source BIS SDMX, dataflow WS_CBPOL.
  *
- * UN SEUL appel récupère Fed + BCE + BoJ + BoE + BNS :
- *   GET https://stats.bis.org/api/v1/data/WS_CBPOL/D.US+XM+JP+GB+CH/all
+ * UN SEUL appel récupère les douze grandes banques curées (Fed, BCE, BoE, BoJ, BNS,
+ * PBOC, BoC, RBA, BCB, RBI, BoK, Banxico) :
+ *   GET https://stats.bis.org/api/v1/data/WS_CBPOL/D.<ZONES_BIS>/all
  *       ?format=csv&lastNObservations=1
- *   Colonnes utiles : REF_AREA (US/XM/JP/GB/CH), TIME_PERIOD (date), OBS_VALUE (taux
+ *   Colonnes utiles : REF_AREA (US/XM/JP/…), TIME_PERIOD (date), OBS_VALUE (taux
  *   en %, ex. 3.625), TITLE (libellé source). Sans clé, réponse « guest ». Routé via
  *   le proxy /extapi (hôte `stats.bis.org`, sans en-tête CORS).
  *
@@ -18,11 +19,11 @@ import { accesseurColonnes, parseCsv } from "./csv";
 
 /** Un taux directeur normalisé (une banque centrale). */
 export interface TauxDirecteur {
-  /** Code de zone BIS (US, XM, JP, GB, CH). */
+  /** Code de zone BIS (US, XM, JP, CN, …). */
   refArea: string;
   /** Nom d'affichage FR de la banque centrale. */
   banque: string;
-  /** Sigle court (Fed, BCE, BoJ, BoE, BNS). */
+  /** Sigle court (Fed, BCE, PBOC, Banxico, …). */
   sigle: string;
   /** Taux directeur en POURCENT. */
   taux: number;
@@ -32,8 +33,8 @@ export interface TauxDirecteur {
 
 /**
  * Zones BIS ciblées → identité de la banque centrale. L'ORDRE fixe l'affichage
- * (Fed en tête). Toute zone hors de cette table est ignorée (on ne surface que les
- * cinq grandes banques demandées).
+ * (les cinq grandes d'abord, Fed en tête, puis le reste du jeu curé). Toute zone
+ * hors de cette table est ignorée (on ne surface que les banques curées).
  */
 const BANQUES: ReadonlyArray<{ refArea: string; banque: string; sigle: string }> = [
   { refArea: "US", banque: "Réserve fédérale (US)", sigle: "Fed" },
@@ -41,16 +42,23 @@ const BANQUES: ReadonlyArray<{ refArea: string; banque: string; sigle: string }>
   { refArea: "GB", banque: "Bank of England", sigle: "BoE" },
   { refArea: "JP", banque: "Banque du Japon", sigle: "BoJ" },
   { refArea: "CH", banque: "Banque nationale suisse", sigle: "BNS" },
+  { refArea: "CN", banque: "Banque populaire de Chine", sigle: "PBOC" },
+  { refArea: "CA", banque: "Banque du Canada", sigle: "BoC" },
+  { refArea: "AU", banque: "Banque de réserve d'Australie", sigle: "RBA" },
+  { refArea: "BR", banque: "Banque centrale du Brésil", sigle: "BCB" },
+  { refArea: "IN", banque: "Banque de réserve de l'Inde", sigle: "RBI" },
+  { refArea: "KR", banque: "Banque de Corée", sigle: "BoK" },
+  { refArea: "MX", banque: "Banque du Mexique", sigle: "Banxico" },
 ];
 
-/** Codes des zones interrogées (clé BIS `D.US+XM+JP+GB+CH`). */
+/** Codes des zones interrogées (clé BIS `D.US+XM+GB+JP+CH+CN+…`). */
 export const ZONES_BIS = BANQUES.map((b) => b.refArea).join("+");
 
 // ─────────────────────────── Parsing PUR ───────────────────────────
 
 /**
  * Parse le CSV BIS WS_CBPOL en taux directeurs normalisés, dans l'ordre d'affichage
- * de `BANQUES` (Fed, BCE, BoE, BoJ, BNS). Ne retient qu'une observation par zone (la
+ * de `BANQUES` (Fed en tête). Ne retient qu'une observation par zone (la
  * dernière rencontrée, l'appel `lastNObservations=1` n'en renvoyant qu'une). Ignore
  * toute zone non ciblée ou toute valeur non numérique. Fonction PURE.
  */
@@ -83,8 +91,8 @@ export function parseBisPolicyRatesCsv(csv: string): TauxDirecteur[] {
 // ─────────────────────────── Chargement (effet de bord) ───────────────────────────
 
 /**
- * Charge les taux directeurs des cinq grandes banques centrales (effet de bord : fetch
- * CSV texte). Dégradation gracieuse : renvoie [] en cas d'échec réseau/HTTP.
+ * Charge les taux directeurs des grandes banques centrales curées (effet de bord :
+ * fetch CSV texte). Dégradation gracieuse : renvoie [] en cas d'échec réseau/HTTP.
  */
 export async function chargerTauxDirecteurs(signal?: AbortSignal): Promise<TauxDirecteur[]> {
   try {

@@ -25,6 +25,17 @@ export default {
         grid: "var(--grid)",
         crosshair: "var(--crosshair)",
 
+        // Couleurs de série (courbes/valeurs multi-séries non sémantiques),
+        // réinterprétées par thème : text-serie-1, bg-serie-3, …
+        serie: {
+          1: "var(--serie-1)",
+          2: "var(--serie-2)",
+          3: "var(--serie-3)",
+          4: "var(--serie-4)",
+          5: "var(--serie-5)",
+          6: "var(--serie-6)",
+        },
+
         // Rampe `neutral` repointée sur les variables de thème (--n-*) : tout le
         // chrome historique (bg-neutral-950, border-neutral-800,
         // hover:bg-neutral-700, text-neutral-300…) suit AUTOMATIQUEMENT le thème,

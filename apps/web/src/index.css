@@ -32,6 +32,12 @@
  *     trois teintes (ambre terminal, vert phosphore, bonbon pastel, néon
  *     nordique…) pour rester cohérent au premier coup d'œil.
  *
+ *
+ *  4. COULEURS de SÉRIE (--serie-1 … --serie-6) : palette des courbes/valeurs
+ *     multi-séries NON sémantiques (OI, L/S, basis, séries superposées…),
+ *     réinterprétée par thème. Consommées en JSX via var(--serie-N) ou les
+ *     classes text-serie-N/bg-serie-N, et sur canvas via lib/canvasTokens.
+ *
  * :root sans attribut == thème "dark" (défaut).
  */
 
@@ -71,6 +77,14 @@
   --ui-amber: #f59e0b;
   --accent-ink: #0a0a0a;
   --ring: #38bdf8;
+
+  /* Couleurs de série (courbes multi-séries non sémantiques). */
+  --serie-1: #38bdf8;
+  --serie-2: #a78bfa;
+  --serie-3: #f59e0b;
+  --serie-4: #f472b6;
+  --serie-5: #22d3ee;
+  --serie-6: #60a5fa;
 
   /* Atmosphère : typo propre + voile discret + lueurs. */
   --font-display: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -118,6 +132,14 @@
   --accent-ink: #160f00;
   --ring: #ff9e00;
 
+  /* Couleurs de série (courbes multi-séries non sémantiques). */
+  --serie-1: #ffb000;
+  --serie-2: #ff7a00;
+  --serie-3: #ffd060;
+  --serie-4: #ff5630;
+  --serie-5: #d98a00;
+  --serie-6: #ffe9a3;
+
   /* Mono « terminal financier » + lignes de balayage ambrées + halo bas + vignette. */
   --font-display: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --atmos:
@@ -164,6 +186,14 @@
   --ui-amber: #7cfc00;
   --accent-ink: #00140a;
   --ring: #00ff41;
+
+  /* Couleurs de série (courbes multi-séries non sémantiques). */
+  --serie-1: #00ff41;
+  --serie-2: #5bff8f;
+  --serie-3: #7cfc00;
+  --serie-4: #aaffc0;
+  --serie-5: #00c853;
+  --serie-6: #39ff7a;
 
   /* Mono « console » + scanlines marquées + halo vert + vignette. */
   --font-display: "Courier New", ui-monospace, Courier, "Liberation Mono", monospace;
@@ -213,6 +243,14 @@
   --accent-ink: #ffffff;
   --ring: #d946ef;
 
+  /* Couleurs de série (courbes multi-séries non sémantiques). */
+  --serie-1: #c026d3;
+  --serie-2: #7c3aed;
+  --serie-3: #e11d6b;
+  --serie-4: #0d9488;
+  --serie-5: #ea580c;
+  --serie-6: #2563eb;
+
   /* Police arrondie + bulles pastel + dégradé tendre. */
   --font-display: "Baloo 2", "Comic Sans MS", "Chalkboard SE", "Comic Neue", ui-rounded, "Segoe UI", system-ui, sans-serif;
   --atmos:
@@ -260,6 +298,14 @@
   --ui-amber: #e879f9;
   --accent-ink: #050814;
   --ring: #67e8f9;
+
+  /* Couleurs de série (courbes multi-séries non sémantiques). */
+  --serie-1: #22d3ee;
+  --serie-2: #a78bfa;
+  --serie-3: #e879f9;
+  --serie-4: #67e8f9;
+  --serie-5: #818cf8;
+  --serie-6: #ff4d9d;
 
   /* Sans moderne + voile d'aurore (cyan/violet/magenta) en mouvement lent. */
   --font-display: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;

@@ -76,9 +76,11 @@ export interface ResumeCot {
 
 /**
  * Watchlist CURÉE (noms `market_and_exchange_names` EXACTS, vérifiés en direct sur le
- * dataset `6dca-aqww` le 2026-07-03). On ne retient que le contrat de RÉFÉRENCE par sous-
- * jacent (pas les micros, les cross-rates, ni les variantes financières) pour un tableau
- * de bord scannable — même logique de curation que le jeu FRED de `data/eco.ts`.
+ * dataset `6dca-aqww` le 2026-07-10 — tous les 14 noms résolvent toujours, dernier rapport
+ * 2026-06-30 (inchangé depuis la vérification du 2026-07-08). On ne retient que le contrat
+ * de RÉFÉRENCE par sous-jacent (pas les micros, les cross-rates, ni les variantes
+ * financières) pour un tableau de bord scannable — même logique de curation que le jeu FRED
+ * de `data/eco.ts`.
  */
 export const WATCHLIST_COT: readonly InstrumentCot[] = [
   // Devises (majors CME + indice dollar ICE)

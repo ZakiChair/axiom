@@ -32,6 +32,7 @@ import { seasonalityUiStore } from "./SeasonalityWindow";
 import { volUiStore } from "./VolWindow";
 import { fundUiStore } from "./FundWindow";
 import { briefUiStore } from "./BriefWindow";
+import { globeUiStore } from "../store/globe-ui";
 import { FootprintSettingsPanel } from "./FootprintSettingsPanel";
 import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
@@ -168,6 +169,8 @@ const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] =
   { mnemonique: "FUND", libelle: "Fiche société (FUND)", ouvrir: () => fundUiStore.getState().openFund() },
   // Fenêtre BRIEF (snapshot marché matinal — composition de sources existantes).
   { mnemonique: "BRIEF", libelle: "Point marché (snapshot)", ouvrir: () => briefUiStore.getState().openBrief() },
+  // Fenêtre GLOBE (chokepoints maritimes PortWatch + trafic aérien OpenSky).
+  { mnemonique: "GLOBE", libelle: "Globe (chokepoints & trafic aérien)", ouvrir: () => globeUiStore.getState().openGlobe() },
 ];
 
 /**

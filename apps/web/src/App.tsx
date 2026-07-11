@@ -46,6 +46,9 @@ import { SeasonalityWindow, commandes as seasonalityCommands } from "./component
 import { VolWindow, commandes as volCommands } from "./components/VolWindow";
 import { FundWindow, commandes as fundCommands } from "./components/FundWindow";
 import { BriefWindow, commandes as briefCommands } from "./components/BriefWindow";
+// Fenêtre GLOBE (chokepoints maritimes PortWatch + trafic aérien OpenSky, d3-geo canvas).
+import { GlobeWindow } from "./components/GlobeWindow";
+import { commandes as globeCommands } from "./store/globe-ui";
 import { settingsUiStore } from "./store/settings-ui";
 import { ecoCommands } from "./store/eco";
 import { commandes as newsCommands } from "./store/news";
@@ -137,6 +140,8 @@ enregistrerCommandes([
   ...fundCommands,
   // Fenêtre BRIEF (snapshot marché matinal, composition de sources existantes).
   ...briefCommands,
+  // Fenêtre GLOBE (chokepoints maritimes + trafic aérien).
+  ...globeCommands,
   // Bandeau ticker d'actualités (TICKER — affiche/masque, état persisté).
   ...tickerCommands,
 ]);
@@ -168,6 +173,7 @@ const WINDOW_COMPONENTS: Record<string, () => JSX.Element> = {
   vol: VolWindow,
   fund: FundWindow,
   brief: BriefWindow,
+  globe: GlobeWindow,
 };
 
 export function App() {

@@ -231,6 +231,12 @@ export const EXTAPI_WHITELIST: ReadonlySet<string> = new Set([
   "www.rba.gov.au", // RBA Australie — CSV F2 (courbe des taux souverains AU)
   "feeds.bloomberg.com", // RSS Bloomberg (news macro — verticale economics)
   "www.cnbc.com", // RSS CNBC (news macro — Economy ; UA navigateur requis, défaut du proxy suffit)
+  // OpenSky /states/all (trafic aérien — globe). CORS vérifié 2026-07-10 : ACAO fixé à
+  // https://opensky-network.org (pas de reflet d'origine) → proxy OBLIGATOIRE. TTL cache
+  // 90 s (< INTERVALLE_POLL_MS 120 s, anti-aliasing — cf. EXTAPI_TTL_OPENSKY_MS).
+  // L'en-tête amont x-rate-limit-remaining est retransmis sur miss (creditsRestants ;
+  // absent sur hit — valeur indicative).
+  "opensky-network.org",
 ]);
 
 /** User-Agent navigateur standard : certains hôtes (RSS, Cloudflare) refusent un UA vide. */
@@ -262,15 +268,26 @@ const EXTAPI_TIMEOUT_MS = 15_000;
 const EXTAPI_TTL_DEFAUT_MS = 120_000;
 /** TTL cache réduit pour les dérivés Binance (données quasi temps réel). */
 const EXTAPI_TTL_DERIVES_MS = 30_000;
+/**
+ * TTL cache OpenSky : STRICTEMENT INFÉRIEUR à la cadence de poll du front
+ * (INTERVALLE_POLL_MS = 120 s, data/globe/opensky.ts). Un TTL égal au poll créait un
+ * aliasing : le cache étant écrit APRÈS la latence amont, le tick suivant tombait
+ * toujours sur un hit → un instantané sur deux était resservi tel quel (avions figés
+ * 4 min). À 90 s, chaque tick du front est un miss et repart à l'amont — la cadence
+ * amont réelle reste 1 appel/120 s (le budget crédits commenté côté front tient).
+ */
+const EXTAPI_TTL_OPENSKY_MS = 90_000;
 
 /**
  * TTL cache (ms) d'un hôte /extapi : 30 s pour fapi/dapi.binance.com (dérivés),
+ * 90 s pour opensky-network.org (anti-aliasing avec le poll front, cf. ci-dessus),
  * 120 s sinon (RSS, calendriers, on-chain lents). Fonction PURE (testée).
  * Réutilise le stockage de cache.ts, mais calcule le TTL ICI car cache.ts (hors
  * périmètre de cet agent) ne connaît que les 4 préfixes historiques.
  */
 export function ttlMsExtapi(hote: string): number {
   if (hote === "fapi.binance.com" || hote === "dapi.binance.com") return EXTAPI_TTL_DERIVES_MS;
+  if (hote === "opensky-network.org") return EXTAPI_TTL_OPENSKY_MS;
   return EXTAPI_TTL_DEFAUT_MS;
 }
 
@@ -346,9 +363,18 @@ export async function traiterExtapi(req: Request, url: URL): Promise<Response> {
   const contentType = amont.headers.get("content-type") ?? "application/octet-stream";
   // On ne met en cache que les réponses valides (évite de figer une erreur transitoire).
   if (amont.ok) ecrireCache(cle, corps, contentType, ttlMsExtapi(parsed.hote));
+  const entetes: Record<string, string> = {
+    "content-type": contentType,
+    "x-axiomd-cache": "miss",
+    ...cors,
+  };
+  // Quota OpenSky : retransmettre l'en-tête de crédits restants (absent sur un hit —
+  // le cache ne stocke que corps+content-type ; valeur indicative, miss uniquement).
+  const credits = amont.headers.get("x-rate-limit-remaining");
+  if (credits !== null) entetes["x-rate-limit-remaining"] = credits;
   return new Response(corps, {
     status: amont.status,
-    headers: { "content-type": contentType, "x-axiomd-cache": "miss", ...cors },
+    headers: entetes,
   });
 }
 

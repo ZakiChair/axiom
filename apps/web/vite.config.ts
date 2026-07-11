@@ -45,6 +45,7 @@ const EXTAPI_HOTES: readonly string[] = [
   "www.rba.gov.au", // RBA Australie — CSV F2 (courbe des taux souverains AU)
   "feeds.bloomberg.com", // RSS Bloomberg (news macro — verticale economics)
   "www.cnbc.com", // RSS CNBC (news macro — Economy ; UA navigateur requis, défaut du proxy suffit)
+  "opensky-network.org", // OpenSky /states/all (trafic aérien — globe ; CORS restreint à sa propre origine)
 ];
 
 // User-Agent navigateur standard : certains hôtes (RSS, Cloudflare) refusent un UA vide.

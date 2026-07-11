@@ -22,10 +22,13 @@ describe("estHoteExtapiAutorise", () => {
   it("faux hors whitelist", () => {
     expect(estHoteExtapiAutorise("evil.com")).toBe(false);
   });
-  it("whitelist = 30 hôtes", () => {
-    expect(EXTAPI_WHITELIST.length).toBe(30);
+  it("whitelist = 31 hôtes", () => {
+    expect(EXTAPI_WHITELIST.length).toBe(31);
   });
   it("inclut home.treasury.gov (courbe des taux US)", () => {
     expect(estHoteExtapiAutorise("home.treasury.gov")).toBe(true);
+  });
+  it("inclut opensky-network.org (trafic aérien — globe)", () => {
+    expect(estHoteExtapiAutorise("opensky-network.org")).toBe(true);
   });
 });

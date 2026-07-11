@@ -138,7 +138,7 @@ describe("extapi — User-Agent par hôte", () => {
 
 describe("extapi — whitelist (mise à jour Lot E1)", () => {
   test("taille attendue après ajout SEC + GDELT", () => {
-    expect(EXTAPI_WHITELIST.size).toBe(30); // 23 existants + SEC ×2 + GDELT + JGB/RBA/Bloomberg/CNBC ×4
+    expect(EXTAPI_WHITELIST.size).toBe(31); // 23 existants + SEC ×2 + GDELT + JGB/RBA/Bloomberg/CNBC ×4 + OpenSky
   });
   test("nouveaux hôtes présents", () => {
     expect(EXTAPI_WHITELIST.has("data.sec.gov")).toBe(true);
@@ -156,6 +156,18 @@ describe("extapi — whitelist (ajout courbes JGB/RBA + bandeau news macro)", ()
   });
   test("CNBC reçoit le UA navigateur par défaut (exigé par Akamai, aucun UA dédié)", () => {
     expect(userAgentPourHote("www.cnbc.com")).toContain("Mozilla");
+  });
+});
+
+describe("extapi — whitelist (ajout globe : OpenSky)", () => {
+  test("opensky-network.org présent (CORS restreint à sa propre origine → proxy obligatoire)", () => {
+    expect(EXTAPI_WHITELIST.has("opensky-network.org")).toBe(true);
+  });
+  test("services9.arcgis.com ABSENT (PortWatch : CORS « * » vérifié → appel direct, pas de proxy)", () => {
+    expect(EXTAPI_WHITELIST.has("services9.arcgis.com")).toBe(false);
+  });
+  test("TTL cache OpenSky = 90 s (< poll front 120 s — un TTL égal au poll resservait un instantané sur deux)", () => {
+    expect(ttlMsExtapi("opensky-network.org")).toBe(90_000);
   });
 });
 

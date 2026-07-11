@@ -51,6 +51,12 @@ export const EXTAPI_WHITELIST: readonly string[] = [
   "www.rba.gov.au", // RBA Australie — CSV F2 (courbe des taux souverains AU)
   "feeds.bloomberg.com", // RSS Bloomberg (news macro — verticale economics)
   "www.cnbc.com", // RSS CNBC (news macro — Economy ; UA navigateur requis, défaut du proxy suffit)
+  // OpenSky /states/all (trafic aérien — globe). CORS vérifié 2026-07-10 : l'API renvoie
+  // `access-control-allow-origin: https://opensky-network.org` (origine FIXE, pas de reflet)
+  // → un appel direct navigateur est bloqué, le proxy est OBLIGATOIRE. NB : ArcGIS PortWatch
+  // (services9.arcgis.com) renvoie lui `access-control-allow-origin: *` → appelé en DIRECT
+  // (data/globe/portwatch.ts), donc PAS whitelisté ici.
+  "opensky-network.org",
 ];
 
 /** L'hôte est-il autorisé par le proxy /extapi ? (garde-fou dev côté appelant). */

@@ -14,6 +14,9 @@ describe("parseCsv (RFC 4180)", () => {
   test("champs vides conservés", () => {
     expect(parseCsv("a,,c")).toEqual([["a", "", "c"]]);
   });
+  test("guillemet en MILIEU de champ non quoté = littéral (pas une ouverture de citation)", () => {
+    expect(parseCsv('a"b,c\nd,e')).toEqual([['a"b', "c"], ["d", "e"]]);
+  });
 });
 
 describe("choisirFichierCandidat", () => {

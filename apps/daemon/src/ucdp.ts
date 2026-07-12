@@ -21,7 +21,10 @@ export function parseCsv(texte: string): string[][] {
         if (texte[i + 1] === '"') { champ += '"'; i++; } else dansGuillemets = false;
       } else champ += ch;
     } else if (ch === '"') {
-      dansGuillemets = true;
+      // RFC 4180 : le guillemet n'ouvre une citation qu'en TÊTE de champ ;
+      // en milieu de champ non quoté, c'est un caractère littéral.
+      if (champ === "") dansGuillemets = true;
+      else champ += ch;
     } else if (ch === ",") {
       ligne.push(champ); champ = "";
     } else if (ch === "\n" || ch === "\r") {

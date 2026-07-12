@@ -293,7 +293,9 @@ export interface TokensGlobe {
   serie3: string;
   /** --down : conflits matériels GDELT, zones UCDP, front ISW (rouge sémantique danger). */
   down: string;
-  /** --serie-4 : coercition/répression GDELT. */
+  /** Couleur des événements GDELT « coercition » — --serie-4 normalement ; en thème
+   * dark, l'appelant (GlobeWindow) y substitue --serie-5 pour éviter la collision
+   * de teinte avec --down une fois les disques empilés (finding #41). */
   serie4: string;
 }
 
@@ -434,6 +436,14 @@ export function dessinerGlobe(ctx: CanvasRenderingContext2D, params: ParamsDessi
     ctx.fillStyle = tokens.border;
     ctx.globalAlpha = 0.55;
     ctx.fill();
+    // Liseré de côte discret (finding #47) : en dark, terres (--border) sur océan
+    // (--bg) quasi noir sur noir rendait les côtes indiscernables de l'eau. Le
+    // contour ancre les côtes/pays sans éclaircir toute la masse terrestre (même
+    // chemin que le remplissage, pas de rebuild).
+    ctx.strokeStyle = tokens.textDim;
+    ctx.lineWidth = 0.5;
+    ctx.globalAlpha = 0.3;
+    ctx.stroke();
     ctx.globalAlpha = 1;
   }
 
@@ -520,8 +530,15 @@ export function dessinerGlobe(ctx: CanvasRenderingContext2D, params: ParamsDessi
     ctx.beginPath();
     ctx.arc(point.x, point.y, r, 0, Math.PI * 2);
     ctx.fillStyle = couleur;
-    ctx.globalAlpha = survole ? 1 : 0.75;
+    ctx.globalAlpha = survole ? 1 : 0.55;
     ctx.fill();
+    // Liseré fin (finding #41) : sans lui, des disques adjacents de catégories
+    // proches (ex. matériel/coercition en dark) fusionnent en une masse indifférenciée
+    // dans les zones denses (Europe de l'Est/Moyen-Orient).
+    ctx.strokeStyle = couleur;
+    ctx.lineWidth = 0.75;
+    ctx.globalAlpha = 0.9;
+    ctx.stroke();
     ctx.globalAlpha = 1;
     cibles.push({ couche: "evenement", index, x: point.x, y: point.y, r });
   });

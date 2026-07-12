@@ -19,7 +19,7 @@ export function GlobeDetailPanel({ selection, evenements, onFermer }: {
       <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-1.5">
         <div className="min-w-0">
           <div className="truncate text-[12px] text-text">{titreSelection(selection)}</div>
-          <div className="truncate text-[10px] text-text-dim">{sousTitreSelection(selection, nowMs)}</div>
+          <div className="line-clamp-2 text-[10px] text-text-dim">{sousTitreSelection(selection, nowMs)}</div>
         </div>
         <button type="button" onClick={onFermer} aria-label="Fermer le détail" className="ml-2 shrink-0 text-text-dim transition hover:text-text">✕</button>
       </div>

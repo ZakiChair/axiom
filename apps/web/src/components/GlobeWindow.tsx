@@ -63,7 +63,22 @@ const INTERVALLE_RENDU_MS = 33;
 
 /** Lit les tokens du thème courant pour le canvas (à la demande, pas au montage). */
 function lireTokensGlobe(): TokensGlobe {
-  const t = lireTokensCanvas(["--bg", "--border", "--text-dim", "--serie-2", "--serie-3", "--down", "--serie-4"]);
+  const t = lireTokensCanvas([
+    "--bg",
+    "--border",
+    "--text-dim",
+    "--serie-2",
+    "--serie-3",
+    "--down",
+    "--serie-4",
+    "--serie-5",
+  ]);
+  // Thème dark UNIQUEMENT (finding #41) : --serie-4 (#f472b6 rose) est visuellement
+  // indiscernable de --down (#f92855 cramoisi) une fois les cellules GDELT empilées
+  // dans les zones denses (Europe de l'Est/Moyen-Orient). On y substitue --serie-5
+  // (cyan), déjà distinct du rouge dans ce thème — sans toucher aux autres thèmes,
+  // où --serie-4 mappe déjà correctement (teal en cute, etc.).
+  const themeSombre = document.documentElement.getAttribute("data-theme") === "dark";
   return {
     bg: t["--bg"],
     border: t["--border"],
@@ -71,7 +86,7 @@ function lireTokensGlobe(): TokensGlobe {
     serie2: t["--serie-2"],
     serie3: t["--serie-3"],
     down: t["--down"],
-    serie4: t["--serie-4"],
+    serie4: themeSombre ? t["--serie-5"] : t["--serie-4"],
   };
 }
 
@@ -352,6 +367,7 @@ export function GlobeWindow() {
   // — Pointeur : drag = rotation (refs + throttle, aucun state) ; sinon survol = hit-test. —
   const surPointerDown = (ev: React.PointerEvent<HTMLCanvasElement>): void => {
     ev.currentTarget.setPointerCapture(ev.pointerId);
+    ev.currentTarget.style.cursor = ""; // laisse active:cursor-grabbing reprendre la main pendant le drag
     dragRef.current = { x: ev.clientX, y: ev.clientY };
     clicDepartRef.current = { x: ev.clientX, y: ev.clientY }; // origine figée (dragRef, lui, avance à chaque move)
   };
@@ -370,6 +386,9 @@ export function GlobeWindow() {
     }
     const rect = canvas.getBoundingClientRect();
     const cible = hitTestCibles(ciblesRef.current, ev.clientX - rect.left, ev.clientY - rect.top);
+    // Affordance de clic (finding #25) : curseur pointer sur une cible hit-testée,
+    // sinon on retombe sur la classe Tailwind cursor-grab (style inline vidé).
+    canvas.style.cursor = cible !== null ? "pointer" : "";
     const survol = cible === null ? null : { couche: cible.couche, index: cible.index };
     if (survol?.couche !== survolRef.current?.couche || survol?.index !== survolRef.current?.index) {
       survolRef.current = survol;
@@ -413,8 +432,9 @@ export function GlobeWindow() {
     throttleRef.current?.trigger(); // relance la boucle si la rotation auto est active
   };
 
-  const surPointerLeave = (): void => {
+  const surPointerLeave = (ev: React.PointerEvent<HTMLCanvasElement>): void => {
     dragRef.current = null;
+    ev.currentTarget.style.cursor = "";
     if (survolRef.current !== null) {
       survolRef.current = null;
       throttleRef.current?.trigger();
@@ -506,7 +526,7 @@ export function GlobeWindow() {
         >
           ⟳ Rotation
         </button>
-        <span className="ml-auto">molette = zoom · glisser = tourner</span>
+        <span className="ml-auto">molette = zoom · glisser = tourner · clic = détails</span>
       </div>
 
       {(erreurChokepoints || erreurAvions) && (

@@ -30,6 +30,11 @@ function baseDaemon(): string {
   return "http://127.0.0.1:8787";
 }
 
+/** URL absolue d'un chemin daemon (DEV : cross-origin 127.0.0.1:8787 ; PROD : same-origin). */
+export function urlDaemon(chemin: string): string {
+  return `${baseDaemon()}${chemin}`;
+}
+
 // ─────────────────────────── Détection (feature-detect) ───────────────────────────
 
 /** Dernier résultat de sonde ; `null` = jamais sondé (→ health silencieux). */

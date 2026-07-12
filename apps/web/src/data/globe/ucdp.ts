@@ -1,0 +1,48 @@
+/**
+ * Conflits armés confirmés UCDP (Candidate GED, ~1 mois de retard) — servis par
+ * le daemon (/globe/conflits-ucdp, instantané 24 h + stale). Donnée mensuelle :
+ * un mémo module suffit, un seul fetch par session. Sans daemon → null.
+ */
+import { daemonPret, urlDaemon } from "../daemon";
+import type { EtatConflitsUcdp, ZoneConflitUcdp } from "./types";
+
+let memo: EtatConflitsUcdp | null = null;
+
+function estNombre(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
+}
+
+/** Parse défensif de la réponse /globe/conflits-ucdp. */
+export function parseConflitsUcdp(json: unknown): EtatConflitsUcdp | null {
+  if (typeof json !== "object" || json === null) return null;
+  const r = json as Record<string, unknown>;
+  if (!estNombre(r.majA) || typeof r.fichier !== "string" || !Array.isArray(r.zones)) return null;
+  const zones: ZoneConflitUcdp[] = [];
+  for (const brut of r.zones) {
+    if (typeof brut !== "object" || brut === null) continue;
+    const z = brut as Record<string, unknown>;
+    if (!estNombre(z.lat) || !estNombre(z.lon) || !estNombre(z.morts) || !estNombre(z.n) || !estNombre(z.dernierMs)) continue;
+    zones.push({
+      lat: z.lat, lon: z.lon, morts: z.morts, n: z.n,
+      sideA: typeof z.sideA === "string" ? z.sideA : null,
+      sideB: typeof z.sideB === "string" ? z.sideB : null,
+      dernierMs: z.dernierMs,
+    });
+  }
+  return { zones, majA: r.majA, fichier: r.fichier };
+}
+
+/** Charge (une fois par session) les zones UCDP. null = daemon absent/en échec. */
+export async function chargerConflitsUcdp(signal?: AbortSignal): Promise<EtatConflitsUcdp | null> {
+  if (memo !== null) return memo;
+  if (!daemonPret()) return null;
+  try {
+    const res = await fetch(urlDaemon("/globe/conflits-ucdp"), { signal });
+    if (!res.ok) return null;
+    const etat = parseConflitsUcdp((await res.json()) as unknown);
+    if (etat !== null) memo = etat;
+    return etat;
+  } catch {
+    return null;
+  }
+}

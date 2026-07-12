@@ -32,3 +32,66 @@ export interface EtatOpenSky {
   horodatage: number; // s epoch renvoyé par l'API
   creditsRestants: number | null; // en-tête x-rate-limit-remaining si présent
 }
+
+/** Catégorie d'un événement géopolitique (COPIE VERBATIM de apps/daemon/src/gdelt.ts —
+ *  interdiction d'import cross-package ; source de vérité = ce commentaire). */
+export type CategorieEvenement = "materiel" | "coercition" | "protestation";
+
+/** Cellule GDELT agrégée par le daemon (grille 0,5°, COPIE VERBATIM idem). */
+export interface CelluleEvenements {
+  lat: number;
+  lon: number;
+  categorie: CategorieEvenement;
+  n: number;
+  /** max de |GoldsteinScale| borné [0, 10] sur la cellule. */
+  intensite: number;
+  mentions: number;
+  dernierMs: number;
+}
+
+/** Réponse de GET /globe/evenements. */
+export interface EtatEvenements {
+  cellules: CelluleEvenements[];
+  /** Dernière ingestion daemon (epoch ms), null si base vide. */
+  majA: number | null;
+  /** Fenêtre réellement couverte par les données servies. */
+  couverture: { deMs: number; aMs: number } | null;
+}
+
+/** Un événement du panneau détail (GET /globe/evenements/zone). */
+export interface EvenementDetail {
+  dateMs: number;
+  categorie: CategorieEvenement;
+  codeCameo: string;
+  goldstein: number;
+  mentions: number;
+  acteur1: string | null;
+  acteur2: string | null;
+  url: string | null;
+}
+
+/** Zone UCDP agrégée (COPIE VERBATIM de apps/daemon/src/ucdp.ts). */
+export interface ZoneConflitUcdp {
+  lat: number;
+  lon: number;
+  morts: number;
+  n: number;
+  sideA: string | null;
+  sideB: string | null;
+  dernierMs: number;
+}
+
+/** Réponse de GET /globe/conflits-ucdp. */
+export interface EtatConflitsUcdp {
+  zones: ZoneConflitUcdp[];
+  majA: number;
+  fichier: string;
+}
+
+/** Front Ukraine ISW : FeatureCollection GeoJSON opaque côté data (assertion côté rendu, pattern TERRES). */
+export interface FrontUkraine {
+  collection: unknown;
+  /** EditDate ArcGIS le plus récent (epoch ms), null si absent. */
+  majMs: number | null;
+  n: number;
+}

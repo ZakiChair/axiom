@@ -62,8 +62,11 @@ interface VisibleCols {
 
 /** Largeur (classe Tailwind) partagée en-tête / cellules pour aligner les colonnes. */
 const COL_WIDTH: Record<"price" | MetricKey, string> = {
-  price: "w-14",
-  change24h: "w-14",
+  // Prix élargi à 68px (et rendu en text-xs côté cellule) pour contenir INTÉGRALEMENT un
+  // prix crypto à 6 chiffres (« 108,432.50 ») sans déborder sur la colonne suivante (audit
+  // vague 1, garde-fou). Les 12px repris viennent de la colonne 24h (moins contrainte).
+  price: "w-[68px]",
+  change24h: "w-11",
   change1h: "w-12",
   change7d: "w-12",
   volume: "w-14",
@@ -509,7 +512,7 @@ export function Watchlist() {
               </button>
               <span
                 ref={(el) => registerCell(cells.current, sym, "price", el)}
-                className={`${COL_WIDTH.price} shrink-0 text-right tabular-nums text-text`}
+                className={`${COL_WIDTH.price} shrink-0 overflow-hidden text-right text-xs tabular-nums text-text`}
               >
                 —
               </span>

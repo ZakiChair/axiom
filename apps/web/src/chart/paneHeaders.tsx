@@ -28,7 +28,7 @@
  * Task 4). `PaneHeaders` ne manipule donc jamais directement l'ordre des panes.
  */
 import type { Chart } from "klinecharts";
-import { ActionType } from "klinecharts";
+import { ActionType, DomPosition } from "klinecharts";
 import { getIndicator } from "@axiom/indicators";
 import { indicatorsStore, formatInstanceLabel } from "../store/indicators";
 import { axiomPaneId } from "./indicators";
@@ -83,8 +83,10 @@ export class PaneHeaders {
         this.els.set(pane.instanceId, el);
         this.container.appendChild(el);
       } else {
-        const label = el.querySelector<HTMLSpanElement>("[data-role=label]");
-        if (label) label.textContent = pane.label;
+        // Le nom n'est plus affiché (légende native) : on garde juste l'aria-label de la
+        // croix à jour si les paramètres de l'instance ont changé (édition).
+        const croix = el.querySelector<HTMLButtonElement>("[data-role=close]");
+        if (croix) croix.setAttribute("aria-label", `Fermer ${pane.label}`);
       }
     }
     this.repositionnerTout();
@@ -99,37 +101,45 @@ export class PaneHeaders {
 
   private creerElement(pane: EnTetePane): HTMLDivElement {
     const el = document.createElement("div");
+    // Ancré en haut à DROITE du pane (position calculée dans `positionner`) : la légende
+    // native (nom + valeur) occupe désormais le coin haut-GAUCHE, on décale donc les contrôles
+    // pour ne pas la chevaucher. Le nom n'est plus imprimé ici (audit #2/#10).
     el.className =
-      "pointer-events-auto absolute left-2 z-10 flex items-center gap-1.5 rounded bg-surface/90 px-1.5 py-0.5 text-[10px] text-text-dim shadow-sm";
+      "pointer-events-auto absolute z-10 flex items-center gap-1.5 rounded bg-surface/90 px-1.5 py-0.5 text-[10px] text-text-dim shadow-sm";
 
     const poignee = document.createElement("span");
     poignee.textContent = "⠿";
     poignee.className = "cursor-grab select-none";
+    poignee.setAttribute("aria-hidden", "true"); // affordance visuelle de drag (souris)
     poignee.addEventListener("pointerdown", (e) => this.demarrerDrag(e, pane.instanceId));
-
-    const label = document.createElement("span");
-    label.textContent = pane.label;
-    label.setAttribute("data-role", "label");
-    label.className = "max-w-[120px] truncate";
 
     const croix = document.createElement("button");
     croix.textContent = "✕";
     croix.type = "button";
+    croix.setAttribute("data-role", "close");
+    // Le nom n'étant plus visible dans l'en-tête, la croix porte l'indicateur ciblé.
+    croix.setAttribute("aria-label", `Fermer ${pane.label}`);
     croix.className = "leading-none text-text-dim hover:text-text";
     croix.addEventListener("click", () => indicatorsStore.getState().remove(pane.instanceId));
 
-    el.append(poignee, label, croix);
+    el.append(poignee, croix);
     return el;
   }
 
   private positionner(paneId: string, el: HTMLDivElement): void {
+    // `top` depuis le pane complet ; `right` depuis l'aire de tracé (main, hors axe Y) pour
+    // poser les contrôles juste avant l'axe Y, à droite de la légende native (coin gauche).
     const bounding = this.chart.getSize(paneId);
-    if (!bounding) {
+    const main = this.chart.getSize(paneId, DomPosition.Main);
+    if (!bounding || !main) {
       el.style.display = "none";
       return;
     }
     el.style.display = "";
     el.style.top = `${bounding.top + 2}px`;
+    // Bord droit de l'aire de tracé = `left + width` (le champ `right` de Bounding n'est PAS
+    // la coordonnée du bord droit en klinecharts@9.8.12 ; cf. ChartInstance crosshair sync).
+    el.style.left = `${Math.max(2, main.left + main.width - el.offsetWidth - 4)}px`;
   }
 
   private demarrerDrag(e: PointerEvent, instanceId: string): void {

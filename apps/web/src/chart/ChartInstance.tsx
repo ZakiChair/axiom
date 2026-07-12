@@ -171,11 +171,14 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
 
   chart.setStyles({
     grid: { horizontal: { color: grid }, vertical: { color: grid } },
-    // Légende native des panes d'indicateurs : on masque le NOM (et les params) pour ne
-    // garder que la ligne de valeur (« RSI: 44.4067 »). Le nom + la croix ✕ + la poignée
-    // de drag sont déjà fournis par l'en-tête overlay DOM (chart/paneHeaders.tsx) sur les
-    // panes séparés ; sans cela le nom s'imprimait DEUX fois, superposé (audit #2/#10).
-    indicator: { tooltip: { showName: false, showParams: false } },
+    // Légende native (nom + valeur) laissée aux défauts KLineChart (showName/showParams) :
+    // elle est désormais la SEULE source du NOM d'indicateur — panes séparés ET overlays.
+    // Indispensable pour les overlays (EMA/BOLL) qui n'ont AUCUN en-tête DOM : deux instances
+    // d'un même overlay (EMA(20)+EMA(50)) ne sont distinguables QUE par leurs paramètres dans
+    // cette légende. L'en-tête DOM (chart/paneHeaders.tsx) ne porte plus le nom (juste ⠿ + ✕,
+    // décalés en haut à DROITE du pane) : plus de double impression du nom (audit #2/#10).
+    // NB : la portée est forcément globale — klinecharts@9.8.12 lit showName depuis les styles
+    // GLOBAUX (getStyles().indicator.tooltip), un override par indicateur est ignoré.
     candle: {
       bar: {
         upColor: up,

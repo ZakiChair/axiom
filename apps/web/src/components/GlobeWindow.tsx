@@ -24,7 +24,7 @@ import { lireTokensCanvas } from "../lib/canvasTokens";
 import { formatAge, formatEntier } from "../lib/format";
 import { chargerChokepoints } from "../data/globe/portwatch";
 import { chargerEtatsAvions, INTERVALLE_POLL_MS } from "../data/globe/opensky";
-import { chargerEvenements, INTERVALLE_POLL_EVENEMENTS_MS } from "../data/globe/gdelt";
+import { chargerEvenements, chargerZoneEvenements, INTERVALLE_POLL_EVENEMENTS_MS } from "../data/globe/gdelt";
 import { chargerConflitsUcdp } from "../data/globe/ucdp";
 import { chargerFrontIsw } from "../data/globe/isw";
 import type {
@@ -34,6 +34,7 @@ import type {
   EtatConflitsUcdp,
   EtatEvenements,
   EtatOpenSky,
+  EvenementDetail,
   FrontUkraine,
   ZoneConflitUcdp,
 } from "../data/globe/types";
@@ -51,6 +52,8 @@ import {
   type VueGlobe,
 } from "../lib/globeRender";
 import { noteConflits, noteEvenements, noteUkraine } from "./globeWindow.util";
+import { GlobeDetailPanel } from "./GlobeDetailPanel";
+import type { SelectionGlobe } from "./globeDetail.util";
 import { Chargement, EnTeteFenetre, ErreurBloc, NoteSource, Vide } from "./ui";
 
 /** Vitesse de la rotation automatique (degrés de longitude par seconde — lente). */
@@ -87,6 +90,10 @@ export function GlobeWindow() {
   const [frontUkraine, setFrontUkraine] = useState<FrontUkraine | null>(null);
   const [daemonOk, setDaemonOk] = useState(false); // au moins un chargement daemon (GDELT/UCDP) réussi
 
+  // Panneau détail au clic (basse fréquence : UN setState par clic, jamais par frame).
+  const [selection, setSelection] = useState<SelectionGlobe | null>(null); // null = panneau fermé
+  const [detailZone, setDetailZone] = useState<EvenementDetail[] | "chargement" | null>(null);
+
   // Tout ce que la boucle de dessin consomme vit dans des refs (AUCUN state par frame).
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -103,6 +110,7 @@ export function GlobeWindow() {
   const ciblesRef = useRef<CibleGlobe[]>([]); // cibles écran du dernier dessin (hit-test)
   const survolRef = useRef<SurvolGlobe | null>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const clicDepartRef = useRef<{ x: number; y: number } | null>(null); // origine du pointerdown (discrimination clic/drag)
   const framePrecedenteRef = useRef<number>(0); // horodatage du dernier flush (dt rotation)
   const throttleRef = useRef<RafThrottle | null>(null);
 
@@ -306,6 +314,26 @@ export function GlobeWindow() {
     };
   }, [open, couches.ukraine]);
 
+  // — Détail de zone au clic sur une cellule GDELT : « chargement » puis liste (ou null
+  //   si daemon absent). Les couches agrégées (conflit/chokepoint) n'ont pas de liste. —
+  useEffect(() => {
+    if (selection === null || selection.type !== "evenement") {
+      setDetailZone(null);
+      return;
+    }
+    let ignore = false;
+    const ctrl = new AbortController();
+    setDetailZone("chargement");
+    void chargerZoneEvenements(selection.lat, selection.lon, ctrl.signal).then((res) => {
+      if (ignore) return;
+      setDetailZone(res);
+    });
+    return () => {
+      ignore = true;
+      ctrl.abort();
+    };
+  }, [selection]);
+
   // — Molette : zoom clampé. Listener NATIF non-passif (React attache wheel en passif
   //   depuis la v17 → preventDefault y serait ignoré et la page défilerait). —
   useEffect(() => {
@@ -325,6 +353,7 @@ export function GlobeWindow() {
   const surPointerDown = (ev: React.PointerEvent<HTMLCanvasElement>): void => {
     ev.currentTarget.setPointerCapture(ev.pointerId);
     dragRef.current = { x: ev.clientX, y: ev.clientY };
+    clicDepartRef.current = { x: ev.clientX, y: ev.clientY }; // origine figée (dragRef, lui, avance à chaque move)
   };
 
   const surPointerMove = (ev: React.PointerEvent<HTMLCanvasElement>): void => {
@@ -349,7 +378,36 @@ export function GlobeWindow() {
     }
   };
 
-  const surPointerUp = (): void => {
+  // Construit la sélection depuis une cible cliquée (null = clic dans le vide → ferme le panneau).
+  const selectionDepuisCible = (cible: CibleGlobe | null): SelectionGlobe | null => {
+    if (cible === null) return null;
+    if (cible.couche === "chokepoint") {
+      const chokepoint = chokepointsRef.current[cible.index];
+      return chokepoint === undefined ? null : { type: "chokepoint", chokepoint };
+    }
+    if (cible.couche === "evenement") {
+      const cellule = cellulesRef.current[cible.index];
+      return cellule === undefined ? null : { type: "evenement", lat: cellule.lat, lon: cellule.lon, cellule };
+    }
+    const zone = zonesRef.current[cible.index];
+    return zone === undefined ? null : { type: "conflit", zone };
+  };
+
+  const surPointerUp = (ev: React.PointerEvent<HTMLCanvasElement>): void => {
+    // Discrimination clic/drag : un pointerup dont le déplacement total depuis le
+    //   pointerdown reste < 5 px est traité comme un clic (hit-test → sélection). Le
+    //   pointercancel ne fait que réinitialiser (jamais de clic fantôme).
+    const depart = clicDepartRef.current;
+    const canvas = canvasRef.current;
+    if (ev.type === "pointerup" && depart !== null && canvas !== null) {
+      const deplacement = Math.hypot(ev.clientX - depart.x, ev.clientY - depart.y);
+      if (deplacement < 5) {
+        const rect = canvas.getBoundingClientRect();
+        const cible = hitTestCibles(ciblesRef.current, ev.clientX - rect.left, ev.clientY - rect.top);
+        setSelection(selectionDepuisCible(cible)); // UN setState par clic (autorisé)
+      }
+    }
+    clicDepartRef.current = null;
     dragRef.current = null;
     framePrecedenteRef.current = 0;
     throttleRef.current?.trigger(); // relance la boucle si la rotation auto est active
@@ -482,6 +540,11 @@ export function GlobeWindow() {
             <Vide>Toutes les couches sont masquées — réactivez une couche pour afficher des données.</Vide>
           </div>
         )}
+        {/* Panneau détail au clic : absolute DANS ce conteneur relatif → ses events
+            pointer/molette ciblent le panneau, jamais le canvas (pas de zoom parasite). */}
+        {selection !== null ? (
+          <GlobeDetailPanel selection={selection} evenements={detailZone} onFermer={() => setSelection(null)} />
+        ) : null}
       </div>
 
       {/* Fraîcheur des sources (note de bas de fenêtre standard). */}

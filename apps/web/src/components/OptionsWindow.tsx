@@ -143,6 +143,7 @@ function dessinerSmile(
   const couleurSerie3 = lireTokenCanvas("--serie-3", "#f59e0b");
   const couleurUp = lireTokenCanvas("--up", "#2dc08e");
   const couleurDown = lireTokenCanvas("--down", "#f92855");
+  const couleurBg = lireTokenCanvas("--bg", "#0a0a0a");
 
   const finies = points.filter((p) => Number.isFinite(p.markIv) && p.markIv > 0);
   if (finies.length === 0) {
@@ -184,23 +185,36 @@ function dessinerSmile(
   const txtMax = formatStrike(xMax);
   ctx.fillText(txtMax, cssW - padR - ctx.measureText(txtMax).width, cssH - 6);
 
-  /** Repère vertical (sous-jacent / max pain). */
-  const repere = (val: number, couleur: string, etiquette: string) => {
+  /**
+   * Repère vertical (sous-jacent / max pain). Le trait pointillé démarre SOUS la bande
+   * du libellé et un halo opaque (--bg) est peint derrière le texte : ainsi aucune
+   * pointillée (la sienne ni la voisine) ne barre les glyphes (audit #6/#13). yLibelle
+   * étage les deux libellés en hauteur quand ils sont proches en x.
+   */
+  const repere = (val: number, couleur: string, etiquette: string, yLibelle: number) => {
     if (!Number.isFinite(val) || val < xMin || val > xMax) return;
     const x = px(val);
     ctx.strokeStyle = couleur;
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 3]);
     ctx.beginPath();
-    ctx.moveTo(x, padT);
+    ctx.moveTo(x, yLibelle + 4);
     ctx.lineTo(x, padT + plotH);
     ctx.stroke();
     ctx.setLineDash([]);
+    const lx = Math.min(x + 3, cssW - padR - 30);
+    const larg = ctx.measureText(etiquette).width;
+    ctx.fillStyle = couleurBg;
+    ctx.fillRect(lx - 2, yLibelle - 8, larg + 4, 12);
     ctx.fillStyle = couleur;
-    ctx.fillText(etiquette, Math.min(x + 3, cssW - padR - 30), padT + 9);
+    ctx.fillText(etiquette, lx, yLibelle);
   };
-  repere(underlying, couleurDim, "sj");
-  if (maxPain !== null) repere(maxPain, couleurSerie3, "max pain");
+  // Étager les libellés quand max pain et sous-jacent sont proches (sinon ils se chevauchent).
+  const xSj = Number.isFinite(underlying) ? px(underlying) : NaN;
+  const xMp = maxPain !== null && Number.isFinite(maxPain) ? px(maxPain) : NaN;
+  const proches = Number.isFinite(xSj) && Number.isFinite(xMp) && Math.abs(xSj - xMp) < 42;
+  repere(underlying, couleurDim, "sj", padT + 9);
+  if (maxPain !== null) repere(maxPain, couleurSerie3, "max pain", proches ? padT + 22 : padT + 9);
 
   /** Trace une série (calls ou puts) : ligne + points. */
   const tracer = (serie: OptionPoint[], couleur: string) => {

@@ -225,7 +225,7 @@
   --surface: #ffe1f1;
   --border: #f9d2e8;
   --text: #5b2a86;
-  --text-dim: #9a55c2;
+  --text-dim: #6b2f92; /* assombri pour AA (7.06:1 sur --surface, 8.05:1 sur --bg) — audit #21 */
   /* Texte de variation ASSOMBRI pour atteindre AA sur crème/rose (audit #15/#19) :
      menthe #0a7360 (4.76:1 sur --surface, 5.42:1 sur --bg) et framboise #c8143f
      (4.77:1 / 5.43:1). Les BOUGIES conservent le pastel via --candle-up/-down. */

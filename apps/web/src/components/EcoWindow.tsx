@@ -52,13 +52,22 @@ function formatEcheance(time: number, approx: boolean | undefined): string {
   return approx ? `~${s}` : s;
 }
 
-/** Badge d'impact coloré. */
+/**
+ * Badge d'impact coloré. FORT est REMPLI (encre = var(--accent-ink)) pour être le plus
+ * proéminent à repérer et se distinguer nettement de MOYEN — de teinte voisine dans la
+ * famille rouge/rose, surtout en thème clair (audit #23). MOYEN/FAIBLE/FÉRIÉ : contour.
+ */
 function ImpactBadge({ impact }: { impact: EcoImpact }) {
   const color = IMPACT_COLOR[impact];
+  const rempli = impact === "high";
   return (
     <span
       className="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide"
-      style={{ color, borderColor: color, border: "1px solid" }}
+      style={
+        rempli
+          ? { color: "var(--accent-ink)", background: color, borderColor: color, border: "1px solid" }
+          : { color, borderColor: color, border: "1px solid" }
+      }
     >
       {IMPACT_LABEL[impact]}
     </span>

@@ -35,8 +35,11 @@ import { formatUsd } from "../lib/format";
 import { lireTokensCanvas } from "../lib/canvasTokens";
 import { EnTeteFenetre, Vide } from "./ui";
 
-/** Nombre de niveaux affichés de chaque côté du mid (LADDER). */
+/** Nombre MAX de niveaux affichés de chaque côté du mid (LADDER, fenêtre haute). */
 const LADDER_ROWS = 20;
+/** Hauteur de ligne plancher du ladder (px) : au-dessus de la police 11px pour
+ *  éviter le télescopage des prix/tailles sur fenêtre courte (audit #8). */
+const ROW_H_MIN = 13;
 /** Un niveau est un « mur » si sa taille dépasse ce facteur × la médiane visible. */
 const WALL_FACTOR = 4;
 /** Demi-fenêtre de prix du depth chart autour du mid (±1 %). */
@@ -60,6 +63,14 @@ interface Tokens {
   border: Rgb;
   surface: Rgb;
   bg: Rgb;
+  /** Thème clair (fond lumineux) : les barres de profondeur ont besoin de plus
+   *  d'opacité pour préserver la teinte bid/ask (audit #19). */
+  clair: boolean;
+}
+
+/** Luminance perçue (0–1) d'une couleur RVB. */
+function luminance(c: Rgb): number {
+  return (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255;
 }
 
 /** Parse « #rrggbb » (ou « #rgb ») en composantes RVB ; gris moyen par défaut. */
@@ -84,6 +95,7 @@ function readTokens(): Tokens {
     "--surface",
     "--bg",
   ] as const);
+  const bg = hexToRgb(raw["--bg"]);
   return {
     up: hexToRgb(raw["--up"]),
     down: hexToRgb(raw["--down"]),
@@ -91,7 +103,8 @@ function readTokens(): Tokens {
     textDim: hexToRgb(raw["--text-dim"]),
     border: hexToRgb(raw["--border"]),
     surface: hexToRgb(raw["--surface"]),
-    bg: hexToRgb(raw["--bg"]),
+    bg,
+    clair: luminance(bg) > 0.5,
   };
 }
 
@@ -186,8 +199,12 @@ function dessinerLadder(ctx: CanvasRenderingContext2D, w: number, h: number, liv
   const best = meilleurs(livre);
   if (!best) return placeholder(ctx, w, h, tk, "Chargement…");
 
-  const bids = agregerNiveaux(niveauxDepuisMap(livre.bids), pas, "bid", LADDER_ROWS);
-  const asks = agregerNiveaux(niveauxDepuisMap(livre.asks), pas, "ask", LADDER_ROWS);
+  // Nombre de niveaux par côté DÉRIVÉ de la hauteur réelle (plancher ROW_H_MIN),
+  // borné par LADDER_ROWS : sur fenêtre courte on affiche moins de niveaux plutôt
+  // que de tasser 40 lignes sous la police (audit #8).
+  const perSide = Math.max(2, Math.min(LADDER_ROWS, Math.floor(h / 2 / ROW_H_MIN)));
+  const bids = agregerNiveaux(niveauxDepuisMap(livre.bids), pas, "bid", perSide);
+  const asks = agregerNiveaux(niveauxDepuisMap(livre.asks), pas, "ask", perSide);
   if (bids.length === 0 && asks.length === 0) return placeholder(ctx, w, h, tk, "Chargement…");
 
   ctx.clearRect(0, 0, w, h);
@@ -217,7 +234,9 @@ function dessinerLadder(ctx: CanvasRenderingContext2D, w: number, h: number, liv
     const mur = med > 0 && r.qte >= seuilMur;
 
     const bw = (r.qte / maxQte) * barW;
-    ctx.fillStyle = rgba(coul, mur ? 0.5 : 0.22);
+    // Thème clair : barres plus opaques pour garder la teinte bid(vert)/ask(rouge)
+    // sur fond pastel où 0.22 se désature en gris (audit #19).
+    ctx.fillStyle = rgba(coul, mur ? (tk.clair ? 0.6 : 0.5) : tk.clair ? 0.4 : 0.22);
     ctx.fillRect(barX, y + 1, bw, rowH - 2);
     if (mur) {
       ctx.strokeStyle = rgbCss(coul);

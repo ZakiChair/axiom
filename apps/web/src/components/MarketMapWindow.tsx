@@ -69,12 +69,17 @@ function hexToRgb(hex: string): [number, number, number] {
 /** Lit les tokens de couleur du thème (relu à chaque changement de thème). */
 function readTokens(): Tokens {
   const t = lireTokensCanvas(["--up", "--down", "--surface", "--border", "--text"]);
+  const surface = hexToRgb(t["--surface"]);
+  const text = hexToRgb(t["--text"]);
   return {
     up: hexToRgb(t["--up"]),
     down: hexToRgb(t["--down"]),
-    neutral: hexToRgb(t["--surface"]),
+    // Tuile à ~0 % : gris moyen (--surface mêlé à --text, 32 %) plutôt que --surface
+    // brut, qui se confond avec le fond du panneau — surtout en « cute » quasi-blanc
+    // où les méga-caps disparaissaient (audit #20).
+    neutral: lerp(surface, text, 0.32),
     border: hexToRgb(t["--border"]),
-    text: hexToRgb(t["--text"]),
+    text,
   };
 }
 
@@ -111,7 +116,11 @@ function drawTile(ctx: CanvasRenderingContext2D, t: Tuile<CoinTile>, tok: Tokens
   ctx.fillStyle = rgbCss(rgb);
   ctx.fillRect(x, y, w, h);
 
-  ctx.strokeStyle = highlight ? rgbCss(tok.text) : `rgb(${tok.border[0]},${tok.border[1]},${tok.border[2]})`;
+  // Bord non-survolé : dérivé de --text (contraste garanti) plutôt que --border, quasi
+  // invisible en « cute » — pour toujours délimiter les tuiles (audit #20).
+  ctx.strokeStyle = highlight
+    ? rgbCss(tok.text)
+    : `rgba(${Math.round(tok.text[0])},${Math.round(tok.text[1])},${Math.round(tok.text[2])},0.3)`;
   ctx.lineWidth = highlight ? 2 : 1;
   ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
 

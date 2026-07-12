@@ -161,6 +161,9 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
   const textDim = readToken("--text-dim");
   const up = readToken("--up");
   const down = readToken("--down");
+  // Bougies : token dédié (pastel en « cute »), avec repli sur --up/--down si absent.
+  const candleUp = readToken("--candle-up") || up;
+  const candleDown = readToken("--candle-down") || down;
   const grid = readToken("--grid");
   const crosshair = readToken("--crosshair");
   const atmos = readToken("--atmos");
@@ -181,20 +184,20 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
     // GLOBAUX (getStyles().indicator.tooltip), un override par indicateur est ignoré.
     candle: {
       bar: {
-        upColor: up,
-        downColor: down,
+        upColor: candleUp,
+        downColor: candleDown,
         noChangeColor: textDim,
-        upBorderColor: up,
-        downBorderColor: down,
+        upBorderColor: candleUp,
+        downBorderColor: candleDown,
         noChangeBorderColor: textDim,
-        upWickColor: up,
-        downWickColor: down,
+        upWickColor: candleUp,
+        downWickColor: candleDown,
         noChangeWickColor: textDim,
       },
       priceMark: {
         high: { color: textDim, textFamily: font },
         low: { color: textDim, textFamily: font },
-        last: { upColor: up, downColor: down, noChangeColor: textDim, text: { family: font } },
+        last: { upColor: candleUp, downColor: candleDown, noChangeColor: textDim, text: { family: font } },
       },
     },
     xAxis: { axisLine: { color: border }, tickLine: { color: border }, tickText: { color: textDim, family: font } },

@@ -54,6 +54,11 @@
   --text-dim: #9ca3af;
   --up: #2dc08e;
   --down: #f92855;
+  /* Teinte des BOUGIES du chart, découplée de --up/--down. Sur les thèmes sombres
+     elle vaut --up/--down ; en « cute » (clair) --up/--down sont assombris pour la
+     lisibilité du TEXTE (audit #15/#19) tandis que les bougies restent pastel. */
+  --candle-up: #2dc08e;
+  --candle-down: #f92855;
   --accent: #38bdf8; /* bleu/cyan discret (identité Dark) */
   --grid: #1f2937;
   --crosshair: #888888;
@@ -108,6 +113,8 @@
   --text-dim: #b07d00;
   --up: #ffc400; /* or */
   --down: #ff5630; /* vermillon */
+  --candle-up: #ffc400;
+  --candle-down: #ff5630;
   --accent: #ff9e00;
   --grid: #1f1700; /* ambre quasi invisible */
   --crosshair: #ffb000;
@@ -163,6 +170,8 @@
   --text-dim: #11a534;
   --up: #5bff8f; /* vert clair */
   --down: #019e34; /* vert foncé */
+  --candle-up: #5bff8f;
+  --candle-down: #019e34;
   --accent: #00ff41;
   --grid: #053a12;
   --crosshair: #00ff41;
@@ -217,8 +226,13 @@
   --border: #f9d2e8;
   --text: #5b2a86;
   --text-dim: #9a55c2;
-  --up: #20bfa0; /* menthe */
-  --down: #ff5d7e; /* corail */
+  /* Texte de variation ASSOMBRI pour atteindre AA sur crème/rose (audit #15/#19) :
+     menthe #0a7360 (4.76:1 sur --surface, 5.42:1 sur --bg) et framboise #c8143f
+     (4.77:1 / 5.43:1). Les BOUGIES conservent le pastel via --candle-up/-down. */
+  --up: #0a7360; /* menthe foncée (texte lisible) */
+  --down: #c8143f; /* framboise foncée (texte lisible) */
+  --candle-up: #20bfa0; /* menthe pastel (bougies) */
+  --candle-down: #ff5d7e; /* corail pastel (bougies) */
   --accent: #d946ef;
   --grid: #f3d6e6;
   --crosshair: #c026d3;
@@ -275,6 +289,8 @@
   --text-dim: #8a96cc;
   --up: #22d3ee; /* cyan */
   --down: #ff4d9d; /* magenta */
+  --candle-up: #22d3ee;
+  --candle-down: #ff4d9d;
   --accent: #a78bfa;
   --grid: #18224d;
   --crosshair: #22d3ee;

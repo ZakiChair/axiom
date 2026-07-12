@@ -55,9 +55,12 @@ export function SidebarSection({
   const open = useStore(uiSectionsStore, (s) => s.open[title] ?? defaultOpen);
   const isOpen = !collapsible || open;
 
-  // Grandit/défile uniquement si OUVERTE et `grow` ; sinon épouse son contenu.
+  // Grandit pour remplir l'espace disponible si OUVERTE et `grow`, mais SANS jamais
+  // passer sous son min-content (chrome + liste à hauteur minimale) : `flex-1` seul (pas
+  // de `min-h-0`) garde ce plancher, donc le débordement part dans le scroll de l'aside
+  // au lieu d'écraser la Watchlist à 0 ligne. Sinon la section épouse son contenu.
   const sectionClass = `flex flex-col border-t border-border ${
-    isOpen && grow ? "min-h-0 flex-1" : "shrink-0"
+    isOpen && grow ? "flex-1" : "shrink-0"
   }`;
 
   const titleNode = (

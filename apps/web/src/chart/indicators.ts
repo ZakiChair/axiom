@@ -101,6 +101,9 @@ function ensureRegistered(def: IndicatorDef, name: string): void {
     name,
     shortName: def.name, // repli ; le libellé « EMA (20) » est passé par instance à create/override.
     series: seriesFor(def),
+    // Précision d'axe/légende par def (undefined => défaut KLineChart = 4) : évite les
+    // décimales absurdes des oscillateurs bornés comme le RSI « 66.0000 » (audit #9).
+    precision: def.precision,
     figures,
     // calc PUR de mapping : lit la série calculée par @axiom/indicators (extendData),
     // alignée index-par-index sur dataList. Aucune math n'est refaite ici.

@@ -62,7 +62,7 @@ interface VisibleCols {
 
 /** Largeur (classe Tailwind) partagée en-tête / cellules pour aligner les colonnes. */
 const COL_WIDTH: Record<"price" | MetricKey, string> = {
-  price: "w-16",
+  price: "w-14",
   change24h: "w-14",
   change1h: "w-12",
   change7d: "w-12",
@@ -111,7 +111,9 @@ function drawSparkline(
   points: number[],
   colors: { up: string; down: string }
 ): void {
-  const W = 60;
+  // Largeur réduite à 40px (au lieu de 60) pour tenir dans la sidebar w-60 sans clipper
+  // l'en-tête de colonnes (cf. audit #12) ; doit rester synchro avec la colonne « 24h ».
+  const W = 40;
   const H = 18;
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(W * dpr);
@@ -452,12 +454,14 @@ export function Watchlist() {
             {sortMark(col.key)}
           </button>
         ))}
-        {visibleCols.spark && <span className="w-[60px] shrink-0 text-right">24h</span>}
+        {visibleCols.spark && <span className="w-[40px] shrink-0 text-right">24h</span>}
         <span className="w-3.5 shrink-0" aria-hidden />
       </div>
 
-      {/* Lignes */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* Lignes — `min-h-[8rem]` (et non `min-h-0`) impose un plancher : la liste des
+          paires reste visible/défilable même quand « Santé sources » se déploie et que
+          l'aside doit défiler, tout en autorisant le scroll interne quand la place manque. */}
+      <div className="min-h-[8rem] flex-1 overflow-y-auto">
         {symbols.length === 0 && (
           <p className="px-3 py-3 text-[11px] text-text-dim">
             Aucune paire dans cet onglet. Ajoutez-en une ci-dessous.
@@ -521,9 +525,9 @@ export function Watchlist() {
               {visibleCols.spark && (
                 <canvas
                   ref={(el) => registerCell(cells.current, sym, "spark", el)}
-                  width={60}
+                  width={40}
                   height={18}
-                  className="h-[18px] w-[60px] shrink-0"
+                  className="h-[18px] w-[40px] shrink-0"
                 />
               )}
               <button

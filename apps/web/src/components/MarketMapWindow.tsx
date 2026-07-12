@@ -358,7 +358,10 @@ export function MarketMapWindow() {
   const g = overview?.global;
 
   return (
-    <>
+    // Conteneur pleine hauteur en colonne (calque sur GlobeWindow) : donne au corps `flex-1`
+    // un parent à hauteur définie, sinon le canvas treemap est mesuré à ~0px et s'ouvre
+    // écrasé en une seule bande (audit #28).
+    <div className="flex h-full min-h-0 flex-col">
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Vue marché</h2>
@@ -413,7 +416,7 @@ export function MarketMapWindow() {
 
       {/* Corps */}
       {tab === "carte" ? (
-        <div ref={containerRef} className="relative flex-1 overflow-hidden">
+        <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden">
           {(overview?.coins.length ?? 0) === 0 ? (
             <div className="flex h-full items-center justify-center text-[11px] text-text-dim">
               {loading ? "Chargement…" : "Carte indisponible."}
@@ -429,7 +432,7 @@ export function MarketMapWindow() {
           )}
         </div>
       ) : (
-        <div className="flex-1 overflow-hidden">
+        <div className="min-h-0 flex-1 overflow-hidden">
           <SectorsTab overview={overview} />
         </div>
       )}
@@ -438,7 +441,7 @@ export function MarketMapWindow() {
       <div className="shrink-0 border-t border-border px-4 py-1.5">
         <NoteSource>Données CoinGecko + alternative.me, ~5 min.</NoteSource>
       </div>
-    </>
+    </div>
   );
 }
 

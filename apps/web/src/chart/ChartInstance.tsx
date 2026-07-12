@@ -171,6 +171,11 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
 
   chart.setStyles({
     grid: { horizontal: { color: grid }, vertical: { color: grid } },
+    // Légende native des panes d'indicateurs : on masque le NOM (et les params) pour ne
+    // garder que la ligne de valeur (« RSI: 44.4067 »). Le nom + la croix ✕ + la poignée
+    // de drag sont déjà fournis par l'en-tête overlay DOM (chart/paneHeaders.tsx) sur les
+    // panes séparés ; sans cela le nom s'imprimait DEUX fois, superposé (audit #2/#10).
+    indicator: { tooltip: { showName: false, showParams: false } },
     candle: {
       bar: {
         upColor: up,

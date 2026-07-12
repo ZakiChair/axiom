@@ -245,6 +245,12 @@ export interface IndicatorDef {
   outputs: IndicatorOutput[];
   /** Séries auxiliaires requises par ce def (ex. ["oi", "funding"]) — déclaratif, résolu par l'appelant. */
   aux?: AuxSeriesId[];
+  /**
+   * Précision d'affichage (décimales) de l'axe/légende du pane, quand elle diffère de la
+   * valeur par défaut de KLineChart (4). Ex. 2 pour un oscillateur borné 0-100 (RSI) afin
+   * d'éviter « 66.0000 ». Non fixée => précision par défaut du moteur de graphe (audit #9).
+   */
+  precision?: number;
   /** Timeframe minimal en dessous duquel ce def n'est pas pertinent (ex. données on-chain journalières). */
   minTimeframe?: Timeframe;
   calc: (

@@ -31,6 +31,8 @@ export const rsi: IndicatorDef = {
   name: "RSI",
   category: "momentum",
   pane: "separate",
+  // Oscillateur borné 0-100 : 2 décimales suffisent (évite « 66.0000 » sur l'axe, audit #9).
+  precision: 2,
   inputs: [
     { key: "length", name: "Longueur", type: "number", default: 14, min: 1 },
     {

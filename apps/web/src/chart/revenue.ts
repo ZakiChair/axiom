@@ -59,6 +59,10 @@ function ensureRegistered(): void {
     name: REVENUE_NAME,
     shortName: "Revenus protocole ($/j)",
     series: IndicatorSeries.Normal, // sous-pane à part : n'écrase pas l'axe prix
+    // Revenus en USD/j (millions→milliards) : 0 décimale + notation compacte (441K, 1.1B)
+    // sur l'axe ET la légende, au lieu de « 1,100,000,000.0000 » (audit #9).
+    precision: 0,
+    shouldFormatBigNumber: true,
     figures,
     // calc PUR de mapping : relit le revenu forward-fill (extendData) par timestamp.
     calc: (dataList, indicator) => {

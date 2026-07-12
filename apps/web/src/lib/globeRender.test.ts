@@ -14,12 +14,10 @@ import {
   creerProjection,
   creerTestVisibilite,
   estVisible,
-  hitTestChokepoints,
   positionSoleil,
   projeterVisible,
   rayonBase,
   rayonChokepoint,
-  type CibleChokepoint,
   type VueGlobe,
 } from "./globeRender";
 
@@ -146,21 +144,21 @@ describe("rayonChokepoint", () => {
   });
 });
 
-describe("hitTestChokepoints", () => {
-  const cibles: CibleChokepoint[] = [
-    { index: 0, x: 100, y: 100, r: 6 },
-    { index: 3, x: 110, y: 100, r: 10 },
+describe("hitTestCibles (chokepoints)", () => {
+  const cibles: CibleGlobe[] = [
+    { couche: "chokepoint", index: 0, x: 100, y: 100, r: 6 },
+    { couche: "chokepoint", index: 3, x: 110, y: 100, r: 10 },
   ];
 
   it("renvoie la cible la plus PROCHE dont le disque (+marge) contient le curseur", () => {
-    expect(hitTestChokepoints(cibles, 101, 100)).toBe(0); // dans les deux, plus près de 0
-    expect(hitTestChokepoints(cibles, 109, 100)).toBe(3);
-    expect(hitTestChokepoints(cibles, 100, 109, 4)).toBe(0); // marge de tolérance
+    expect(hitTestCibles(cibles, 101, 100)?.index).toBe(0); // dans les deux, plus près de 0
+    expect(hitTestCibles(cibles, 109, 100)?.index).toBe(3);
+    expect(hitTestCibles(cibles, 100, 109, 4)?.index).toBe(0); // marge de tolérance
   });
 
-  it("renvoie -1 hors de toute cible ou sans cible", () => {
-    expect(hitTestChokepoints(cibles, 300, 300)).toBe(-1);
-    expect(hitTestChokepoints([], 100, 100)).toBe(-1);
+  it("renvoie null hors de toute cible ou sans cible", () => {
+    expect(hitTestCibles(cibles, 300, 300)).toBeNull();
+    expect(hitTestCibles([], 100, 100)).toBeNull();
   });
 });
 
@@ -178,7 +176,7 @@ describe("positionSoleil", () => {
   });
 });
 
-import { couleurCategorie, estRecent, hitTestCibles, rayonConflit, rayonEvenement, rayonHalo, type CibleGlobe, type TokensGlobe } from "./globeRender";
+import { contenuLibelle, couleurCategorie, estRecent, hitTestCibles, rayonConflit, rayonEvenement, rayonHalo, type CibleGlobe, type ParamsDessinGlobe, type TokensGlobe } from "./globeRender";
 
 const TOKENS: TokensGlobe = { bg: "#000", border: "#333", textDim: "#999", serie2: "#a78bfa", serie3: "#f59e0b", down: "#f92855", serie4: "#f472b6" };
 
@@ -220,5 +218,38 @@ describe("hitTestCibles (multi-couches)", () => {
   it("respecte la marge (4 px défaut) et renvoie null au-delà", () => {
     expect(hitTestCibles(cibles, 100, 108)).toEqual(cibles[0]); // r5 + marge 4
     expect(hitTestCibles(cibles, 100, 130)).toBeNull();
+  });
+});
+
+describe("contenuLibelle", () => {
+  const base: ParamsDessinGlobe = {
+    largeur: 400, hauteur: 300, vue: { lambda: 0, phi: 0, zoom: 1 }, tokens: TOKENS,
+    chokepoints: [{ id: "c6", nom: "Détroit d'Ormuz", lat: 26.3, lon: 56.9, nNavires: 34, nTankers: 17, nCargos: 17, date: "2026-07-05" }],
+    avions: [],
+    cellules: [{ lat: 48.5, lon: 35, categorie: "materiel", n: 12, intensite: 10, mentions: 40, dernierMs: Date.UTC(2026, 6, 12, 10) }],
+    zonesUcdp: [{ lat: 48.5, lon: 35, morts: 42, n: 2, sideA: "Armée A", sideB: "Milice C", dernierMs: Date.UTC(2026, 4, 20) }],
+    frontUkraine: null,
+    survol: null,
+    date: new Date(Date.UTC(2026, 6, 12, 12)),
+  };
+  it("chokepoint : nom + navires", () => {
+    const c = contenuLibelle({ couche: "chokepoint", index: 0 }, base);
+    expect(c?.titre).toBe("Détroit d'Ormuz");
+    expect(c?.lignes.join(" ")).toContain("34");
+  });
+  it("événement : catégorie, compte, intensité, fraîcheur", () => {
+    const c = contenuLibelle({ couche: "evenement", index: 0 }, base);
+    expect(c?.titre).toBe("Conflit armé");
+    expect(c?.lignes.join(" ")).toContain("12 évt");
+    expect(c?.lignes.join(" ")).toContain("10");
+  });
+  it("conflit UCDP : morts + acteurs", () => {
+    const c = contenuLibelle({ couche: "conflit", index: 0 }, base);
+    expect(c?.titre).toContain("UCDP");
+    expect(c?.lignes.join(" ")).toContain("42 morts");
+    expect(c?.lignes.join(" ")).toContain("Armée A");
+  });
+  it("index hors bornes → null", () => {
+    expect(contenuLibelle({ couche: "evenement", index: 9 }, base)).toBeNull();
   });
 });

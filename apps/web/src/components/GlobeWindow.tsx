@@ -26,10 +26,11 @@ import {
   appliquerDrag,
   appliquerMolette,
   dessinerGlobe,
-  hitTestChokepoints,
+  hitTestCibles,
   rayonBase,
   VUE_INITIALE,
-  type CibleChokepoint,
+  type CibleGlobe,
+  type SurvolGlobe,
   type TokensGlobe,
   type VueGlobe,
 } from "../lib/globeRender";
@@ -75,8 +76,8 @@ export function GlobeWindow() {
   const avionsRef = useRef<Avion[]>([]);
   const couchesRef = useRef<CouchesGlobe>(couches);
   const rotationAutoRef = useRef<boolean>(rotationAuto);
-  const ciblesRef = useRef<CibleChokepoint[]>([]); // cibles écran du dernier dessin (hit-test)
-  const survolRef = useRef<number>(-1);
+  const ciblesRef = useRef<CibleGlobe[]>([]); // cibles écran du dernier dessin (hit-test)
+  const survolRef = useRef<SurvolGlobe | null>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const framePrecedenteRef = useRef<number>(0); // horodatage du dernier flush (dt rotation)
   const throttleRef = useRef<RafThrottle | null>(null);
@@ -92,7 +93,7 @@ export function GlobeWindow() {
         const maintenant = performance.now();
         const precedente = framePrecedenteRef.current;
         framePrecedenteRef.current = maintenant;
-        if (rotationAutoRef.current && dragRef.current === null && survolRef.current === -1) {
+        if (rotationAutoRef.current && dragRef.current === null && survolRef.current === null) {
           // dt borné : au réveil après une pause, pas de saut de rotation.
           const dt = precedente === 0 ? 0 : Math.min(0.2, (maintenant - precedente) / 1000);
           vueRef.current = {
@@ -121,14 +122,17 @@ export function GlobeWindow() {
               tokens: tokensRef.current,
               chokepoints: couchesRef.current.chokepoints ? chokepointsRef.current : [],
               avions: couchesRef.current.avions ? avionsRef.current : [],
-              indexSurvol: survolRef.current,
+              cellules: [],
+              zonesUcdp: [],
+              frontUkraine: null,
+              survol: survolRef.current,
             });
           }
         }
         // Boucle rAF UNIQUEMENT quand une animation est active (le drag et le survol
         // d'un libellé mettent la rotation en pause → la boucle s'éteint aussi ; les
         // interactions la relancent via leurs propres trigger()).
-        if (rotationAutoRef.current && dragRef.current === null && survolRef.current === -1) {
+        if (rotationAutoRef.current && dragRef.current === null && survolRef.current === null) {
           throttle.trigger();
         }
       },
@@ -249,9 +253,10 @@ export function GlobeWindow() {
       return;
     }
     const rect = canvas.getBoundingClientRect();
-    const idx = hitTestChokepoints(ciblesRef.current, ev.clientX - rect.left, ev.clientY - rect.top);
-    if (idx !== survolRef.current) {
-      survolRef.current = idx;
+    const cible = hitTestCibles(ciblesRef.current, ev.clientX - rect.left, ev.clientY - rect.top);
+    const survol = cible === null ? null : { couche: cible.couche, index: cible.index };
+    if (survol?.couche !== survolRef.current?.couche || survol?.index !== survolRef.current?.index) {
+      survolRef.current = survol;
       framePrecedenteRef.current = 0; // le survol met la rotation en pause → pas de saut au départ
       throttleRef.current?.trigger();
     }
@@ -265,8 +270,8 @@ export function GlobeWindow() {
 
   const surPointerLeave = (): void => {
     dragRef.current = null;
-    if (survolRef.current !== -1) {
-      survolRef.current = -1;
+    if (survolRef.current !== null) {
+      survolRef.current = null;
       throttleRef.current?.trigger();
     }
   };

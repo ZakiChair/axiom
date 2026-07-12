@@ -12,8 +12,10 @@
  * les passe via `TokensGlobe` (--bg, --border, --text-dim, --serie-2, --serie-3).
  *
  * Couches dessinées (ordre) : sphère (océan) → graticule discret → terres (land-110m) →
- * terminateur jour/nuit → contour → avions (1 px, hémisphère visible) → chokepoints
- * (rayon ∝ √nNavires, sous-cercle pétroliers) → libellé du chokepoint survolé.
+ * terminateur jour/nuit → contour → front Ukraine ISW (polygones, sous les marqueurs) →
+ * avions (1 px, hémisphère visible) → zones UCDP (cercles conflits) → cellules GDELT
+ * (points événements, halo si récent) → chokepoints (rayon ∝ √nNavires, sous-cercle
+ * pétroliers) → libellé multi-couche du marqueur survolé.
  */
 import {
   geoCircle,
@@ -26,7 +28,14 @@ import {
 } from "d3-geo";
 import { feature } from "topojson-client";
 import landTopo from "world-atlas/land-110m.json";
-import type { Avion, CategorieEvenement, Chokepoint } from "../data/globe/types";
+import type {
+  Avion,
+  CategorieEvenement,
+  CelluleEvenements,
+  Chokepoint,
+  ZoneConflitUcdp,
+} from "../data/globe/types";
+import { formatAge, formatEntier } from "./format";
 
 // ─────────────────────────── Fond de carte (land-110m) ───────────────────────────
 
@@ -184,38 +193,6 @@ export function rayonChokepoint(nNavires: number | null): number {
   return Math.min(RAYON_CHOKEPOINT_MAX, Math.max(RAYON_CHOKEPOINT_MIN, 2 + Math.sqrt(nNavires)));
 }
 
-/** Cible de hit-test d'un chokepoint dessiné (coordonnées écran du dernier rendu). */
-export interface CibleChokepoint {
-  /** Index dans le tableau `chokepoints` passé au dessin. */
-  index: number;
-  x: number;
-  y: number;
-  /** Rayon dessiné (px). */
-  r: number;
-}
-
-/**
- * Hit-test par distance écran : index (dans `chokepoints`) de la cible la plus proche
- * dont le disque (+ marge de tolérance) contient (mx, my), sinon -1. Fonction PURE.
- */
-export function hitTestChokepoints(
-  cibles: readonly CibleChokepoint[],
-  mx: number,
-  my: number,
-  margePx = 4,
-): number {
-  let meilleur = -1;
-  let meilleureDistance = Number.POSITIVE_INFINITY;
-  for (const cible of cibles) {
-    const distance = Math.hypot(mx - cible.x, my - cible.y);
-    if (distance <= cible.r + margePx && distance < meilleureDistance) {
-      meilleureDistance = distance;
-      meilleur = cible.index;
-    }
-  }
-  return meilleur;
-}
-
 // ─────────────────────────── Cibles multi-couches (géopolitique) ───────────────────────────
 
 /** Couches porteuses de cibles de survol/clic. */
@@ -328,31 +305,78 @@ export interface ParamsDessinGlobe {
   chokepoints: readonly Chokepoint[];
   /** Avions à dessiner ([] si couche désactivée). */
   avions: readonly Avion[];
-  /** Index (dans `chokepoints`) du point survolé, -1 sinon. */
-  indexSurvol: number;
-  /** Horloge du terminateur (injectable — défaut : maintenant). */
+  /** Cellules d'événements GDELT ([] si couche désactivée ou daemon absent). */
+  cellules: readonly CelluleEvenements[];
+  /** Zones de conflit UCDP ([] si couche désactivée ou daemon absent). */
+  zonesUcdp: readonly ZoneConflitUcdp[];
+  /** Front Ukraine ISW (null si couche désactivée ou source en échec). */
+  frontUkraine: GeoPermissibleObjects | null;
+  /** Cible survolée (couche + index dans le tableau source), null sinon. */
+  survol: SurvolGlobe | null;
+  /** Horloge du terminateur ET du halo pulsant (injectable — défaut : maintenant). */
   date?: Date;
 }
 
-/** Libellé du chokepoint survolé : nom + trafic + date, boxé et borné au canvas. */
+/** Libellés humains des catégories (affichage libellé + légende + panneau). */
+export const LIBELLES_CATEGORIE: Readonly<Record<CategorieEvenement, string>> = {
+  materiel: "Conflit armé",
+  coercition: "Coercition / répression",
+  protestation: "Protestation / instabilité",
+};
+
+/**
+ * Contenu textuel du libellé survolé (titre + N lignes) — PUR, testable sans canvas,
+ * consommé par le `dessinerLibelle` privé. Renvoie null si l'index survolé ne pointe
+ * plus vers une cible (tableau source rétréci entre deux frames).
+ */
+export function contenuLibelle(
+  survol: SurvolGlobe,
+  params: ParamsDessinGlobe,
+): { titre: string; lignes: string[] } | null {
+  const nowMs = (params.date ?? new Date()).getTime();
+  if (survol.couche === "chokepoint") {
+    const c = params.chokepoints[survol.index];
+    if (c === undefined) return null;
+    const navires = c.nNavires !== null ? `${formatEntier(c.nNavires)} navires` : "trafic n/d";
+    const tankers = c.nTankers !== null ? ` · ${formatEntier(c.nTankers)} pétroliers` : "";
+    return { titre: c.nom, lignes: [`${navires}${tankers}`] };
+  }
+  if (survol.couche === "evenement") {
+    const cellule = params.cellules[survol.index];
+    if (cellule === undefined) return null;
+    return {
+      titre: LIBELLES_CATEGORIE[cellule.categorie],
+      lignes: [
+        `${formatEntier(cellule.n)} évt · intensité ${cellule.intensite.toFixed(1)}/10`,
+        `${formatEntier(cellule.mentions)} mentions · ${formatAge(cellule.dernierMs, nowMs)}`,
+      ],
+    };
+  }
+  const zone = params.zonesUcdp[survol.index];
+  if (zone === undefined) return null;
+  const acteurs =
+    zone.sideA !== null && zone.sideB !== null
+      ? `${zone.sideA} vs ${zone.sideB}`
+      : (zone.sideA ?? zone.sideB ?? "acteurs n/d");
+  return {
+    titre: `Conflit confirmé (UCDP)`,
+    lignes: [`${formatEntier(zone.morts)} morts · ${formatEntier(zone.n)} évt`, acteurs],
+  };
+}
+
+/** Libellé du marqueur survolé (toutes couches) : titre + N lignes, boxé et borné au canvas. */
 function dessinerLibelle(
   ctx: CanvasRenderingContext2D,
-  cible: CibleChokepoint,
-  chokepoint: Chokepoint,
+  cible: CibleGlobe,
+  contenu: { titre: string; lignes: string[] },
   tokens: TokensGlobe,
   largeur: number,
   hauteur: number,
 ): void {
-  const lignes: string[] = [chokepoint.nom];
-  if (chokepoint.nNavires !== null) {
-    const tankers = chokepoint.nTankers !== null ? ` · ${Math.round(chokepoint.nTankers)} pétroliers` : "";
-    lignes.push(`${Math.round(chokepoint.nNavires)} navires/j${tankers}`);
-  }
-  if (chokepoint.date !== null) lignes.push(`au ${chokepoint.date}`);
-
+  const toutes = [contenu.titre, ...contenu.lignes];
   ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
-  const largeurBoite = Math.max(...lignes.map((l) => ctx.measureText(l).width)) + 16;
-  const hauteurBoite = lignes.length * 15 + 10;
+  const largeurBoite = Math.max(...toutes.map((l) => ctx.measureText(l).width)) + 16;
+  const hauteurBoite = 14 + 12 * contenu.lignes.length;
   let bx = cible.x + cible.r + 8;
   let by = cible.y - hauteurBoite / 2;
   if (bx + largeurBoite > largeur) bx = cible.x - cible.r - 8 - largeurBoite;
@@ -366,18 +390,19 @@ function dessinerLibelle(
   ctx.lineWidth = 1;
   ctx.strokeRect(bx + 0.5, by + 0.5, largeurBoite, hauteurBoite);
   ctx.textBaseline = "top";
-  lignes.forEach((ligne, i) => {
+  toutes.forEach((ligne, i) => {
     ctx.fillStyle = i === 0 ? tokens.serie3 : tokens.textDim;
-    ctx.fillText(ligne, bx + 8, by + 6 + i * 15);
+    ctx.fillText(ligne, bx + 8, by + 3 + i * 12);
   });
 }
 
 /**
- * Dessine une frame complète du globe et renvoie les cibles écran des chokepoints
- * dessinés (pour le hit-test du survol par l'appelant). Le contexte est supposé déjà
- * transformé au DPR (setTransform côté appelant) ; largeur/hauteur en px CSS.
+ * Dessine une frame complète du globe et renvoie les cibles écran des marqueurs
+ * dessinés (chokepoints, cellules GDELT, zones UCDP) pour le hit-test du survol par
+ * l'appelant. Le contexte est supposé déjà transformé au DPR (setTransform côté
+ * appelant) ; largeur/hauteur en px CSS.
  */
-export function dessinerGlobe(ctx: CanvasRenderingContext2D, params: ParamsDessinGlobe): CibleChokepoint[] {
+export function dessinerGlobe(ctx: CanvasRenderingContext2D, params: ParamsDessinGlobe): CibleGlobe[] {
   const { largeur, hauteur, vue, tokens } = params;
   const projection = creerProjection(largeur, hauteur, vue);
   const chemin = geoPath(projection, ctx);
@@ -429,7 +454,25 @@ export function dessinerGlobe(ctx: CanvasRenderingContext2D, params: ParamsDessi
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // 6. Avions : 1 px chacun. Boucle CHAUDE (~11 000 vecteurs) → prédicat de
+  const nowMs = (params.date ?? new Date()).getTime();
+  const cibles: CibleGlobe[] = [];
+
+  // 6. Front Ukraine ISW : polygones sous tous les marqueurs (clippés gratuitement par
+  //    le clipAngle de la projection). Remplissage discret + contour --down.
+  if (params.frontUkraine !== null) {
+    ctx.beginPath();
+    chemin(params.frontUkraine);
+    ctx.fillStyle = tokens.down;
+    ctx.globalAlpha = 0.16;
+    ctx.fill();
+    ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = tokens.down;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // 7. Avions : 1 px chacun. Boucle CHAUDE (~11 000 vecteurs) → prédicat de
   //    visibilité pré-calculé (creerTestVisibilite, zéro allocation par point) au lieu
   //    de projeterVisible/geoDistance. Les aéronefs AU SOL sont exclus (amas 1 px
   //    agglutinés sur les aéroports, ~15-20 % des vecteurs, sans intérêt « trafic »).
@@ -441,17 +484,57 @@ export function dessinerGlobe(ctx: CanvasRenderingContext2D, params: ParamsDessi
     if (point !== null) ctx.fillRect(point[0] - 0.5, point[1] - 0.5, 1, 1);
   }
 
-  // 7. Chokepoints : disque --serie-3 (rayon ∝ √navires/j), sous-cercle pétroliers
-  //    --serie-2 quand il reste lisible.
-  const cibles: CibleChokepoint[] = [];
+  // 8. Zones de conflit UCDP : cercles NON remplis --down (sous les points GDELT).
+  params.zonesUcdp.forEach((zone, index) => {
+    const point = projeterVisible(projection, zone.lon, zone.lat);
+    if (point === null) return;
+    const r = rayonConflit(zone.morts);
+    const survole = params.survol?.couche === "conflit" && params.survol.index === index;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = tokens.down;
+    ctx.lineWidth = survole ? 2 : 1.25;
+    ctx.globalAlpha = survole ? 0.95 : 0.55;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    cibles.push({ couche: "conflit", index, x: point.x, y: point.y, r });
+  });
+
+  // 9. Cellules d'événements GDELT : points pleins colorés par catégorie, halo si < 1 h.
+  params.cellules.forEach((cellule, index) => {
+    const point = projeterVisible(projection, cellule.lon, cellule.lat);
+    if (point === null) return;
+    const r = rayonEvenement(cellule.intensite, cellule.n);
+    const couleur = couleurCategorie(cellule.categorie, tokens);
+    const survole = params.survol?.couche === "evenement" && params.survol.index === index;
+    if (estRecent(cellule.dernierMs, nowMs)) {
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, rayonHalo(r, nowMs), 0, Math.PI * 2);
+      ctx.strokeStyle = couleur;
+      ctx.globalAlpha = 0.35;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = couleur;
+    ctx.globalAlpha = survole ? 1 : 0.75;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    cibles.push({ couche: "evenement", index, x: point.x, y: point.y, r });
+  });
+
+  // 10. Chokepoints : disque --serie-3 (rayon ∝ √navires/j), sous-cercle pétroliers
+  //     --serie-2 quand il reste lisible.
   params.chokepoints.forEach((chokepoint, index) => {
     const point = projeterVisible(projection, chokepoint.lon, chokepoint.lat);
     if (point === null) return;
     const r = rayonChokepoint(chokepoint.nNavires);
+    const survole = params.survol?.couche === "chokepoint" && params.survol.index === index;
     ctx.beginPath();
     ctx.arc(point.x, point.y, r, 0, Math.PI * 2);
     ctx.fillStyle = tokens.serie3;
-    ctx.globalAlpha = index === params.indexSurvol ? 1 : 0.8;
+    ctx.globalAlpha = survole ? 1 : 0.8;
     ctx.fill();
     ctx.globalAlpha = 1;
     if (
@@ -468,15 +551,16 @@ export function dessinerGlobe(ctx: CanvasRenderingContext2D, params: ParamsDessi
         ctx.fill();
       }
     }
-    cibles.push({ index, x: point.x, y: point.y, r });
+    cibles.push({ couche: "chokepoint", index, x: point.x, y: point.y, r });
   });
 
-  // 8. Libellé du chokepoint survolé (au-dessus de tout).
-  if (params.indexSurvol >= 0) {
-    const cible = cibles.find((c) => c.index === params.indexSurvol);
-    const chokepoint = params.chokepoints[params.indexSurvol];
-    if (cible !== undefined && chokepoint !== undefined) {
-      dessinerLibelle(ctx, cible, chokepoint, tokens, largeur, hauteur);
+  // 11. Libellé du marqueur survolé (au-dessus de tout), toutes couches confondues.
+  if (params.survol !== null) {
+    const survol = params.survol;
+    const cible = cibles.find((c) => c.couche === survol.couche && c.index === survol.index);
+    const contenu = contenuLibelle(survol, params);
+    if (cible !== undefined && contenu !== null) {
+      dessinerLibelle(ctx, cible, contenu, tokens, largeur, hauteur);
     }
   }
 

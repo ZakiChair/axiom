@@ -30,6 +30,12 @@ describe("ingestion / purge", () => {
     ingererEvenements(d, [vieux]);
     expect(purgerEvenements(d, T0)).toBe(1); // rétention 48 h par défaut
   });
+  test("url non http(s) neutralisée à l'ingestion (défense en profondeur XSS)", () => {
+    const d = baseTest();
+    ingererEvenements(d, [evt({ idGdelt: "js", url: "javascript:alert(1)" })]);
+    const ligne = d.query("SELECT url FROM globe_evenements WHERE idGdelt = 'js'").get() as { url: string | null };
+    expect(ligne.url).toBeNull();
+  });
 });
 
 describe("meta (globe_instantanes)", () => {
@@ -153,6 +159,29 @@ describe("rafraichirGdelt (fetch stubé, zéro réseau)", () => {
     // Second appel : lastupdate inchangé → aucun travail.
     const r2 = await rafraichirGdelt(d, fetchStub, T0 + 1);
     expect(r2).toEqual({ tranches: 0, inseres: 0 });
+  });
+  test("échec de TOUTES les tranches → méta non écrite (fenêtre retentée au tick suivant)", async () => {
+    const d = new Database(":memory:");
+    assurerTablesGlobe(d);
+    const urlZip = "http://data.gdeltproject.org/gdeltv2/20260712001500.export.CSV.zip";
+    const fetchStub = (async (entree: RequestInfo | URL) => {
+      const u = String(entree);
+      if (u.endsWith("lastupdate.txt")) return new Response(`69666 abc ${urlZip}`);
+      return new Response("introuvable", { status: 404 }); // TOUTES les tranches échouent
+    }) as typeof fetch;
+    expect(await rafraichirGdelt(d, fetchStub, T0)).toEqual({ tranches: 0, inseres: 0 });
+    expect(lireMeta(d, "gdelt")).toBeNull(); // rien marqué « vu » : pas de perte silencieuse
+  });
+  test("SSRF : URL de tranche hors data.gdeltproject.org → rejet, aucun fetch de tranche", async () => {
+    const d = new Database(":memory:");
+    assurerTablesGlobe(d);
+    const appels: string[] = [];
+    const fetchStub = (async (entree: RequestInfo | URL) => {
+      appels.push(String(entree));
+      return new Response("69666 abc http://evil.example/x.export.CSV.zip");
+    }) as typeof fetch;
+    await expect(rafraichirGdelt(d, fetchStub, T0)).rejects.toThrow("URL de tranche inattendue");
+    expect(appels.length).toBe(1); // seul lastupdate.txt a été fetché
   });
 });
 

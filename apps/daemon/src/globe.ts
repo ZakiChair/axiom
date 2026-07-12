@@ -56,7 +56,10 @@ export function ingererEvenements(d: Database, evenements: readonly EvenementGde
   let inseres = 0;
   const tx = d.transaction(() => {
     for (const e of evenements) {
-      const info = stmt.run(e.idGdelt, e.dateMs, e.lat, e.lon, e.categorie, e.codeCameo, e.goldstein, e.mentions, e.acteur1, e.acteur2, e.url);
+      // Défense en profondeur (cf. XSS NewsWindow, lot E1) : SOURCEURL amont sera
+      // rendue en href côté front — seuls les schémas http(s) sont conservés.
+      const url = e.url !== null && (e.url.startsWith("http://") || e.url.startsWith("https://")) ? e.url : null;
+      const info = stmt.run(e.idGdelt, e.dateMs, e.lat, e.lon, e.categorie, e.codeCameo, e.goldstein, e.mentions, e.acteur1, e.acteur2, url);
       inseres += Number(info.changes);
     }
   });
@@ -178,6 +181,7 @@ const URL_INDEX_UCDP = "https://ucdp.uu.se/downloads/index.html";
 const BASE_UCDP = "https://ucdp.uu.se/downloads/candidateged/";
 const TIMEOUT_AMONT_MS = 15_000;
 const BACKFILL_TRANCHES = 12; // 3 h d'historique au premier démarrage
+const TAILLE_MAX_ZIP = 30 * 1024 * 1024; // bornage des corps amont (zip GDELT, CSV UCDP)
 const FRAICHEUR_UCDP_MS = 24 * 3_600_000;
 export const INTERVALLE_BOUCLE_GLOBE_MS = 15 * 60_000;
 
@@ -206,7 +210,8 @@ export function urlsTranches(urlDerniere: string, n: number): string[] {
  * Sinon ingère la tranche courante + backfill (premier démarrage : 12 tranches,
  * ensuite : celles publiées depuis la dernière vue, plafonné à 12). Un 404 sur
  * une tranche individuelle est toléré (tranche sautée). Purge la rétention puis
- * écrit la méta { url } sous la clé "gdelt" avec majA = now.
+ * écrit la méta { url } sous la clé "gdelt" avec majA = now — SEULEMENT si au
+ * moins une tranche a été ingérée : un échec total ne marque rien « vu ».
  */
 export async function rafraichirGdelt(
   d: Database,
@@ -219,6 +224,10 @@ export async function rafraichirGdelt(
   const premiereLigne = (await resIndex.text()).split("\n")[0] ?? "";
   const urlZip = premiereLigne.trim().split(/\s+/)[2] ?? "";
   if (!urlZip.endsWith(".export.CSV.zip")) throw new Error("lastupdate.txt : URL de tranche introuvable");
+  // Anti-SSRF : l'URL vient du CONTENU amont — ne fetcher que le motif GDELT exact.
+  if (!/^http:\/\/data\.gdeltproject\.org\/gdeltv2\/\d{14}\.export\.CSV\.zip$/.test(urlZip)) {
+    throw new Error("lastupdate.txt : URL de tranche inattendue");
+  }
   const meta = lireMeta(d, "gdelt");
   const derniereVue = meta === null ? null : (JSON.parse(meta.corps) as { url?: string }).url ?? null;
   if (derniereVue === urlZip) return { tranches: 0, inseres: 0 };
@@ -235,6 +244,7 @@ export async function rafraichirGdelt(
       const res = await fetchImpl(u, { headers: entetesAmont(), signal: AbortSignal.timeout(TIMEOUT_AMONT_MS) });
       if (!res.ok) continue; // tranche manquante/404 : tolérée
       const zip = new Uint8Array(await res.arrayBuffer());
+      if (zip.byteLength > TAILLE_MAX_ZIP) continue; // bornage : tranche anormalement grosse sautée
       inseres += ingererEvenements(d, parseTrancheGdelt(new TextDecoder().decode(extraireFichierZip(zip))));
       tranches += 1;
     } catch {
@@ -242,7 +252,9 @@ export async function rafraichirGdelt(
     }
   }
   purgerEvenements(d, now);
-  ecrireMeta(d, "gdelt", JSON.stringify({ url: urlZip }), now);
+  // Méta écrite SEULEMENT si au moins une tranche est passée : sur échec TOTAL,
+  // rien n'est marqué « vu » (pas de perte silencieuse) — retenté au tick suivant.
+  if (tranches > 0) ecrireMeta(d, "gdelt", JSON.stringify({ url: urlZip }), now);
   return { tranches, inseres };
 }
 
@@ -264,7 +276,9 @@ export async function rafraichirUcdp(
     if (fichier === null) return false;
     const resCsv = await fetchImpl(`${BASE_UCDP}${fichier}`, { headers: entetesAmont(), signal: AbortSignal.timeout(TIMEOUT_AMONT_MS * 4) });
     if (!resCsv.ok) return false;
-    const zones = agregerUcdp(parseCsv(await resCsv.text()));
+    const texte = await resCsv.text();
+    if (texte.length > TAILLE_MAX_ZIP) return false; // bornage : réponse anormalement grosse
+    const zones = agregerUcdp(parseCsv(texte));
     if (zones.length === 0) return false; // réponse vide/inattendue : ne pas écraser un bon instantané
     ecrireMeta(d, "ucdp", JSON.stringify({ fichier, zones }), now);
     return true;

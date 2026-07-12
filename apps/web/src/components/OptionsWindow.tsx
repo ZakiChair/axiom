@@ -36,7 +36,7 @@ import {
   type CboeTicker,
 } from "../data/cboe";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
-import { formatUsd } from "../lib/format";
+import { formatUsd, formatAge } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 import { Metric, EnTeteFenetre, ErreurBloc, NoteSource } from "./ui";
 
@@ -633,7 +633,7 @@ export function OptionsWindow() {
           <>
             <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
               <span>Smile IV mark (calls / puts)</span>
-              <span>{loading ? "maj…" : majTs ? "maj ~1 min" : "—"}</span>
+              <span>{loading ? "maj…" : majTs ? `maj ${formatAge(majTs, Date.now())}` : "—"}</span>
             </div>
 
             {erreur && (
@@ -681,7 +681,13 @@ export function OptionsWindow() {
           <>
             <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
               <span>{metrique === "gex" ? "Gamma exposure" : "Delta exposure"} par strike</span>
-              <span>{(classe === "crypto" ? loading : cboeLoading) ? "maj…" : "maj ~1 min"}</span>
+              <span>
+                {(classe === "crypto" ? loading : cboeLoading)
+                  ? "maj…"
+                  : majTs
+                    ? `maj ${formatAge(majTs, Date.now())}`
+                    : "—"}
+              </span>
             </div>
 
             {classe === "actions" && (

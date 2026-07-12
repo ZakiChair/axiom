@@ -25,7 +25,7 @@ import {
 } from "../store/notes";
 import type { ExchangeId } from "@axiom/types";
 import { formatPrice, formatDateHeure } from "../lib/format";
-import { EnTeteFenetre } from "./ui";
+import { EnTeteFenetre, Vide } from "./ui";
 
 /** Prix courant de l'actif actif (dernière clôture du buffer marché), ou undefined. */
 function prixMarcheActif(): number | undefined {
@@ -196,9 +196,9 @@ export function NotesWindow() {
       {/* Liste antichrono */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {visibles.length === 0 ? (
-          <p className="rounded-md border border-border bg-bg px-3 py-3 text-[11px] text-text-dim">
+          <Vide>
             {notes.length === 0 ? "Aucune note. Créez-en une ci-dessus." : "Aucune note ne correspond au filtre."}
-          </p>
+          </Vide>
         ) : (
           <div className="space-y-1.5">
             {visibles.map((n) => (

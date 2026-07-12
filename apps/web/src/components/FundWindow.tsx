@@ -349,8 +349,8 @@ export function FundWindow() {
       </div>
 
       {selected === null ? (
-        <div className="flex-1 px-4 py-6 text-center text-[11px] text-text-dim">
-          Recherchez une société ci-dessus (SEC EDGAR, aucune clé requise) pour afficher sa fiche.
+        <div className="flex-1 px-4 py-6">
+          <Vide>Recherchez une société ci-dessus (SEC EDGAR, aucune clé requise) pour afficher sa fiche.</Vide>
         </div>
       ) : (
         <>

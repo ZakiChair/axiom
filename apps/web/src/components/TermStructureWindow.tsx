@@ -23,7 +23,7 @@ import {
 import { fetchDeribitTermStructure } from "../data/deribit";
 import { daemonPret, detectDaemon, kvGet, kvPut } from "../data/daemon";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
-import { formatDateCourte, formatPourcentage } from "../lib/format";
+import { formatAge, formatDateCourte, formatPourcentage } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 import { EnTeteFenetre, ErreurBloc, NoteSource } from "./ui";
 
@@ -344,7 +344,7 @@ export function TermStructureWindow() {
       <div className="flex-1 overflow-y-auto px-4 py-4">
         <div className="mb-3 flex items-center justify-between rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-dim">
           <span>BTC / ETH · basis (future − spot)/spot p.a.</span>
-          <span>{loading ? "maj…" : majTs ? "maj ~1 min" : "—"}</span>
+          <span>{loading ? "maj…" : majTs ? `maj ${formatAge(majTs, Date.now())}` : "—"}</span>
         </div>
 
         {erreur && (

@@ -24,12 +24,12 @@ import {
   estPertinentPourSymbole,
   NEWS_FEEDS,
   symbolKeywords,
-  tempsRelatif,
   type FeedStatut,
   type NewsItem,
   type NewsSourceId,
 } from "../data/news";
 import { fetchFearGreed, type FearGreed } from "../data/marketOverview";
+import { formatAge } from "../lib/format";
 
 /** Intervalle de rafraîchissement du bandeau Fear & Greed (l'indice évolue au plus 1×/jour). */
 const FNG_REFRESH_MS = 5 * 60_000;
@@ -122,7 +122,7 @@ function LigneNews({
           className={`h-1.5 w-1.5 shrink-0 rounded-full ${lu ? "bg-transparent" : "bg-accent"}`}
         />
         <BadgeSource source={item.source} />
-        <span className="tabular-nums text-[10px] text-text-dim">{tempsRelatif(item.time, maintenant)}</span>
+        <span className="tabular-nums text-[10px] text-text-dim">{formatAge(item.time, maintenant)}</span>
       </span>
       <span className={`text-[12px] leading-snug ${lu ? "text-text-dim" : "text-text"}`}>{item.title}</span>
       {item.summary && <span className="text-[10px] leading-snug text-text-dim">{item.summary}</span>}
@@ -236,7 +236,7 @@ export function NewsWindow() {
             ? "Chargement…"
             : `${visibles.length} article${visibles.length > 1 ? "s" : ""} · ${nonLus} non lu${
                 nonLus > 1 ? "s" : ""
-              } · maj ${tempsRelatif(derniereMaj, maintenant)}`
+              } · maj ${formatAge(derniereMaj, maintenant)}`
         }
         actions={<BandeauFearGreed fng={fng} />}
       />

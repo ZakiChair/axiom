@@ -137,6 +137,27 @@ function couleurDelta(v: number | null): string {
   return v > 0 ? "text-up" : "text-down";
 }
 
+/**
+ * Libellé de maturité en français (AFFICHAGE seulement) — normalise les libellés
+ * bruts hétérogènes des sources (« 1 Mo », « 1.5 Month », « 2 Yr », « 10 Yr
+ * (indexée) ») en « 1 mois », « 1,5 mois », « 2 ans », « 10 ans (indexée) ». Les
+ * clés de données (MATURITES_US/JP…) restent INCHANGÉES : elles indexent
+ * `rendements[m]` et alimentent la courbe CRVF. Libellé inconnu rendu tel quel.
+ */
+function libelleMaturiteFr(m: string): string {
+  if (m === "1.5 Month") return "1,5 mois";
+  const mois = /^(\d+)\s*Mo$/.exec(m);
+  if (mois !== null && mois[1] !== undefined) return `${mois[1]} mois`;
+  const ans = /^(\d+)\s*Yr(.*)$/.exec(m);
+  if (ans !== null && ans[1] !== undefined) {
+    const n = Number(ans[1]);
+    const suffixe = (ans[2] ?? "").trim();
+    const unite = n > 1 ? "ans" : "an";
+    return suffixe.length > 0 ? `${n} ${unite} ${suffixe}` : `${n} ${unite}`;
+  }
+  return m;
+}
+
 // ─────────────────────────── Onglets ───────────────────────────
 
 type Onglet = "rendements" | "directeurs" | "or";
@@ -343,7 +364,7 @@ function VueRendements({
                     const d = deltaJour(us, m);
                     return (
                       <tr key={m} className="border-t border-border/60">
-                        <td className="py-1 text-left text-text">{m}</td>
+                        <td className="py-1 text-left text-text">{libelleMaturiteFr(m)}</td>
                         <td className="py-1 text-right text-text">{formatPourcentage(v)}</td>
                         <td className={`py-1 text-right ${couleurDelta(d)}`}>{fmtDelta(d)}</td>
                       </tr>
@@ -381,7 +402,7 @@ function VueRendements({
                     colonnesIntl.some((c) => c.valeurs[m] !== undefined),
                   ).map((m) => (
                     <tr key={m} className="border-t border-border/60">
-                      <td className="py-1 text-left text-text">{m}</td>
+                      <td className="py-1 text-left text-text">{libelleMaturiteFr(m)}</td>
                       {colonnesIntl.map((c) => (
                         <td
                           key={c.id}

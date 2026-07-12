@@ -365,7 +365,7 @@ export function VolWindow() {
     <>
       <EnTeteFenetre
         titre="Volatilité"
-        sousTitre={`${symbol} · daily · annualisation √${PPA}`}
+        sousTitre={`${symbol} · quotidien · annualisation √${PPA}`}
         actions={
           <div className="max-w-[340px] truncate text-right text-[11px] tabular-nums text-text-dim">{synthese}</div>
         }

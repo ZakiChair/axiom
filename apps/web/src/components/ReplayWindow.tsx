@@ -14,7 +14,7 @@ import { useState } from "react";
 import { useStore } from "zustand";
 import { replayStore, joursProposes, REPLAY_TFS, VITESSES } from "../store/replay";
 import { debutJour, JOUR_MS } from "../data/replayFeed";
-import { EnTeteFenetre, NoteSource } from "./ui";
+import { EnTeteFenetre, NoteSource, Vide } from "./ui";
 import { formatEntier } from "../lib/format";
 
 /** Formate un nombre d'octets en Ko/Mo. */
@@ -45,7 +45,7 @@ export function ReplayWindow() {
     <>
       {/* Pas d'actions : la croix de fermeture est fournie par le chrome FloatingWindow. */}
       <EnTeteFenetre
-        titre="REPLAY · Rejeu de marché"
+        titre="REPLAY · Replay de marché"
         sousTitre="Dumps aggTrades officiels (data.binance.vision) · Binance spot"
       />
 
@@ -244,7 +244,7 @@ export function ReplayWindow() {
             </button>
           </div>
           {s.jours.length === 0 ? (
-            <p className="text-[11px] text-text-dim">Aucun jour téléchargé.</p>
+            <Vide>Aucun jour téléchargé.</Vide>
           ) : (
             <ul className="space-y-1">
               {s.jours.map((j) => (

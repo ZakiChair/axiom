@@ -33,7 +33,7 @@ import {
   type ScreenerRow,
 } from "../data/screener";
 import { formatPct, formatPrice, formatUsd } from "../lib/format";
-import { EnTeteFenetre, ErreurBloc } from "./ui";
+import { EnTeteFenetre, ErreurBloc, Vide } from "./ui";
 
 /** Colonnes triables de la table de résultats. */
 type SortKey = "symbol" | "lastPrice" | "priceChangePct24h" | "volumeUsd24h" | "fundingPct";
@@ -250,7 +250,7 @@ export function ScreenerWindow() {
 
   return (
     <>
-      <EnTeteFenetre titre="Screener · EQS" sousTitre="Binance spot USDT/USDC · funding perp" />
+      <EnTeteFenetre titre="EQS · Screener" sousTitre="Binance spot USDT/USDC · funding perp" />
 
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {/* Presets */}
@@ -419,9 +419,9 @@ export function ScreenerWindow() {
           </div>
           <div className="max-h-[40vh] overflow-y-auto">
             {sortedRows.length === 0 ? (
-              <div className="px-3 py-3 text-[11px] text-text-dim">
+              <Vide>
                 {runState === "done" ? "Aucun résultat." : "Lancez un screen pour voir les résultats."}
-              </div>
+              </Vide>
             ) : (
               sortedRows.map((r) => (
                 <div

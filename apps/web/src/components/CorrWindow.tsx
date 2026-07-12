@@ -35,7 +35,7 @@ import {
   type MethodeCorr,
   type SerieCloture,
 } from "../data/corr";
-import { formatDec } from "../lib/format";
+import { formatDec, formatHeureMinute } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 import { Chargement, EnTeteFenetre, NoteSource, Vide } from "./ui";
 
@@ -466,7 +466,7 @@ export function CorrWindow() {
               {loading
                 ? "Calcul…"
                 : majTs
-                  ? `maj ${new Date(majTs).toLocaleTimeString("fr-FR", { hour12: false })}`
+                  ? `maj ${formatHeureMinute(majTs)}`
                   : "—"}
             </span>
           </div>

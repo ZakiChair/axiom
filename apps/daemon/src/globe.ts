@@ -117,8 +117,12 @@ function repondreEvenements(req: Request, url: URL, d: Database, now: number): R
 }
 
 function repondreZone(req: Request, url: URL, d: Database, now: number): Response {
-  const lat = Number(url.searchParams.get("lat"));
-  const lon = Number(url.searchParams.get("lon"));
+  const latBrut = url.searchParams.get("lat");
+  const lonBrut = url.searchParams.get("lon");
+  // Piège Number(null) === 0 : un paramètre ABSENT ne doit pas passer pour 0.
+  if (latBrut === null || lonBrut === null) return json({ erreur: "lat/lon requis" }, req, 400);
+  const lat = Number(latBrut);
+  const lon = Number(lonBrut);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return json({ erreur: "lat/lon requis" }, req, 400);
   const depuisMs = now - fenetreDepuisQuery(url) * 3_600_000;
   const lignes = d.query("SELECT * FROM globe_evenements WHERE dateMs >= ?").all(depuisMs) as LigneEvenement[];
@@ -140,9 +144,11 @@ export async function traiterGlobe(req: Request, url: URL, dInjecte?: Database, 
   if (chemin !== "/globe/evenements" && chemin !== "/globe/evenements/zone" && chemin !== "/globe/conflits-ucdp") {
     return json({ erreur: "chemin inconnu" }, req, 404);
   }
-  const d = dInjecte ?? getDb();
   const maintenant = now ?? Date.now();
   try {
+    // getDb() DANS le try : un échec d'ouverture disque doit répondre 500, pas
+    // remonter en throw nu vers Bun.serve.
+    const d = dInjecte ?? getDb();
     assurerTablesGlobe(d);
     if (chemin === "/globe/evenements") return repondreEvenements(req, url, d, maintenant);
     if (chemin === "/globe/evenements/zone") return repondreZone(req, url, d, maintenant);

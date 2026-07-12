@@ -89,5 +89,10 @@ describe("GET /globe/evenements/zone", () => {
     const url = new URL("http://x/globe/evenements/zone?lat=abc");
     const res = await traiterGlobe(new Request(url), url, baseTest(), T0);
     expect(res.status).toBe(400);
+    // Piège Number(null) === 0 : des paramètres ABSENTS ne valent pas (0,0).
+    const urlSans = new URL("http://x/globe/evenements/zone");
+    expect((await traiterGlobe(new Request(urlSans), urlSans, baseTest(), T0)).status).toBe(400);
+    const urlLonSeul = new URL("http://x/globe/evenements/zone?lon=35");
+    expect((await traiterGlobe(new Request(urlLonSeul), urlLonSeul, baseTest(), T0)).status).toBe(400);
   });
 });

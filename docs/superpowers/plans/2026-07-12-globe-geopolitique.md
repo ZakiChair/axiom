@@ -39,6 +39,8 @@
 4. **Panneau détail trié par mentions décroissantes** (importance médiatique), pas par « intensité » : Goldstein est une échelle de type d'acte, pas un score d'importance d'un événement donné.
 5. **Dédoublonnage par `GlobalEventID`** (clé primaire GDELT) plutôt que « position arrondie + racine » : plus fiable à l'ingestion ; l'agrégation par cellule fusionne de toute façon l'affichage.
 6. **« Légende avec toggles » = la rangée de chips existante étendue** (pastilles colorées + aria-pressed, pattern déjà en place) + pied `NoteSource` pour les âges — pas de nouvelle bande de légende redondante en pied.
+7. *(ajouté post-revue finale)* **Rayon GDELT = f(n, intensité)** et non f(intensité, mentions) comme le disait la spec, et **acteurs/date/source déplacés du tooltip survol vers le panneau clic** — conséquences directes de l'agrégation par cellule (un marqueur = N événements, pas un seul) ; les mentions restent affichées dans le libellé et le panneau.
+8. *(ajouté post-revue finale)* **Sémantique `majA` volontairement hétérogène** : GDELT/UCDP = heure d'ingestion daemon (fraîcheur du pipeline), ISW `majMs` = EditDate amont (fraîcheur de la donnée) — chaque note de pied qualifie sa source (« ~1 mois de lag », « 15 min ») pour rester honnête.
 
 ## Carte des fichiers
 

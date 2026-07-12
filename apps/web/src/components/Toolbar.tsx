@@ -169,8 +169,8 @@ const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] =
   { mnemonique: "FUND", libelle: "Fiche société (FUND)", ouvrir: () => fundUiStore.getState().openFund() },
   // Fenêtre BRIEF (snapshot marché matinal — composition de sources existantes).
   { mnemonique: "BRIEF", libelle: "Point marché (snapshot)", ouvrir: () => briefUiStore.getState().openBrief() },
-  // Fenêtre GLOBE (chokepoints maritimes PortWatch + trafic aérien OpenSky).
-  { mnemonique: "GLOBE", libelle: "Globe (chokepoints & trafic aérien)", ouvrir: () => globeUiStore.getState().openGlobe() },
+  // Fenêtre GLOBE (géopolitique GDELT/UCDP/ISW + chokepoints PortWatch + trafic aérien OpenSky).
+  { mnemonique: "GLOBE", libelle: "Globe (géopolitique, chokepoints & trafic aérien)", ouvrir: () => globeUiStore.getState().openGlobe() },
 ];
 
 /**

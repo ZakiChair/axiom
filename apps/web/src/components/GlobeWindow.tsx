@@ -1,8 +1,11 @@
 /**
- * Fenêtre GLOBE — globe orthographique d3-geo sur Canvas 2D, deux couches live :
+ * Fenêtre GLOBE — globe orthographique d3-geo sur Canvas 2D, cinq couches live :
  *   • Chokepoints maritimes IMF PortWatch (hebdo ~J-5, cache 6 h, chargés à l'ouverture).
  *   • Trafic aérien OpenSky (instantané ~10 s, poll INTERVALLE_POLL_MS UNIQUEMENT
  *     fenêtre ouverte ET couche active — budget 400 crédits/jour affiché en pied).
+ *   • Événements géopolitiques GDELT (15 min via daemon, poll gated par couche).
+ *   • Conflits armés confirmés UCDP (~1 mois de lag, via daemon, 1×/ouverture).
+ *   • Front Ukraine ISW (polygones, direct navigateur, cache 6 h, 1×/ouverture).
  *
  * Rendu IMPÉRATIF, pattern MarketMapWindow : canvas + refs + ResizeObserver (le chrome
  * FloatingWindow écrit le DOM directement pendant le drag/resize, les props React ne
@@ -360,7 +363,7 @@ export function GlobeWindow() {
     }
   };
 
-  // — Pied de fenêtre : fraîcheur des deux sources. —
+  // — Pied de fenêtre : fraîcheur des cinq sources. —
   const derniereDatePortWatch = chokepoints?.reduce<string | null>(
     (max, c) => (c.date !== null && (max === null || c.date > max) ? c.date : max),
     null,

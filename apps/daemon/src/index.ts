@@ -22,6 +22,7 @@ import { compterEntrees } from "./cache";
 import { enregistrerCandles } from "./candles";
 import { entetesCors, reponsePreflight } from "./cors";
 import { chargerCles } from "./env";
+import { demarrerBoucleGlobe, enregistrerGlobe } from "./globe";
 import { enregistrerKv } from "./kv";
 import { enregistrerProxy } from "./proxy";
 import { enregistrerReplay } from "./replay";
@@ -78,6 +79,9 @@ enregistrerAlertes(routeur);
 // Replay de marché (Phase 4.4) : téléchargement à la demande des dumps aggTrades.
 enregistrerReplay(routeur);
 
+// Données géopolitiques du globe (Phase F2) : cellules GDELT + zones de conflit UCDP.
+enregistrerGlobe(routeur);
+
 // --- Gestionnaire principal ------------------------------------------------
 async function gestionnaire(req: Request): Promise<Response> {
   const url = new URL(req.url);
@@ -105,6 +109,10 @@ demarrerBoucleAlertes();
 // Boucle de sauvegarde quotidienne : snapshot horodaté du KV + purge (rétention 30 j).
 // Vérification à froid (~1 h) — jamais sur le chemin chaud du renderer.
 demarrerBoucleSnapshots();
+
+// Boucle d'ingestion GDELT (~15 min) : cellules géopolitiques du globe.
+// Stockage à froid uniquement — jamais sur le chemin chaud du renderer.
+demarrerBoucleGlobe();
 
 console.log(
   `[axiomd] v${VERSION} écoute sur http://${serveur.hostname}:${serveur.port} ` +

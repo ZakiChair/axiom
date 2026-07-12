@@ -13,7 +13,10 @@
 import { Database } from "bun:sqlite";
 import { entetesCors } from "./cors";
 import { getDb } from "./db";
-import { agregerEvenements, cleGrille, type CategorieEvenement, type EvenementGdelt } from "./gdelt";
+import { agregerEvenements, cleGrille, parseDateGdelt, parseTrancheGdelt, type CategorieEvenement, type EvenementGdelt } from "./gdelt";
+import type { Routeur } from "./router";
+import { agregerUcdp, choisirFichierCandidat, parseCsv } from "./ucdp";
+import { extraireFichierZip } from "./zip";
 
 /** Rétention des événements GDELT (heures). */
 export const RETENTION_H = 48;
@@ -138,7 +141,13 @@ function repondreZone(req: Request, url: URL, d: Database, now: number): Respons
 }
 
 /** Gestionnaire des routes /globe/*. Gardes AVANT tout accès base (testables sans disque). */
-export async function traiterGlobe(req: Request, url: URL, dInjecte?: Database, now?: number): Promise<Response> {
+export async function traiterGlobe(
+  req: Request,
+  url: URL,
+  dInjecte?: Database,
+  now?: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
   if (req.method !== "GET") return json({ erreur: "méthode non autorisée" }, req, 405);
   const chemin = url.pathname;
   if (chemin !== "/globe/evenements" && chemin !== "/globe/evenements/zone" && chemin !== "/globe/conflits-ucdp") {
@@ -152,14 +161,163 @@ export async function traiterGlobe(req: Request, url: URL, dInjecte?: Database, 
     assurerTablesGlobe(d);
     if (chemin === "/globe/evenements") return repondreEvenements(req, url, d, maintenant);
     if (chemin === "/globe/evenements/zone") return repondreZone(req, url, d, maintenant);
-    return await repondreConflitsUcdp(req, d, maintenant); // implémentée en Task 5
+    return await repondreConflitsUcdp(req, d, maintenant, fetchImpl);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return json({ erreur: "erreur interne globe", detail }, req, 500);
   }
 }
 
-/** Placeholder Task 5 — la route UCDP répond 503 tant que le rafraîchissement n'existe pas. */
-async function repondreConflitsUcdp(req: Request, _d: Database, _now: number): Promise<Response> {
-  return json({ erreur: "non câblé (Task 5)" }, req, 503);
+// ————— Rafraîchissement amont (GDELT http-only, UCDP https) —————
+// data.gdeltproject.org ne répond QU'EN HTTP (vérifié 2026-07-12) : c'est le
+// premier amont http:// clair du daemon — impossible via /extapi (schéma https
+// imposé + whitelist). Trafic localhost → amont public, aucun secret transmis.
+
+const URL_LASTUPDATE = "http://data.gdeltproject.org/gdeltv2/lastupdate.txt";
+const URL_INDEX_UCDP = "https://ucdp.uu.se/downloads/index.html";
+const BASE_UCDP = "https://ucdp.uu.se/downloads/candidateged/";
+const TIMEOUT_AMONT_MS = 15_000;
+const BACKFILL_TRANCHES = 12; // 3 h d'historique au premier démarrage
+const FRAICHEUR_UCDP_MS = 24 * 3_600_000;
+export const INTERVALLE_BOUCLE_GLOBE_MS = 15 * 60_000;
+
+function entetesAmont(): Record<string, string> {
+  return { "user-agent": "axiom-daemon/1.0 (terminal perso)", accept: "*/*" };
+}
+
+/** URL de la tranche courante + les (n-1) précédentes, par pas de 15 min. Pure. */
+export function urlsTranches(urlDerniere: string, n: number): string[] {
+  const m = /^(.*\/)(\d{14})(\.export\.CSV\.zip)$/.exec(urlDerniere);
+  if (m === null) return [urlDerniere];
+  const [, base, horodatage, suffixe] = m;
+  const dateMs = parseDateGdelt(horodatage ?? "");
+  if (dateMs === null) return [urlDerniere];
+  const urls: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const d = new Date(dateMs - i * 15 * 60_000);
+    const p = (v: number, l = 2) => String(v).padStart(l, "0");
+    urls.push(`${base}${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}${suffixe}`);
+  }
+  return urls;
+}
+
+/**
+ * Ingestion GDELT : lit lastupdate.txt ; si la tranche a déjà été vue → no-op.
+ * Sinon ingère la tranche courante + backfill (premier démarrage : 12 tranches,
+ * ensuite : celles publiées depuis la dernière vue, plafonné à 12). Un 404 sur
+ * une tranche individuelle est toléré (tranche sautée). Purge la rétention puis
+ * écrit la méta { url } sous la clé "gdelt" avec majA = now.
+ */
+export async function rafraichirGdelt(
+  d: Database,
+  fetchImpl: typeof fetch = fetch,
+  now: number = Date.now(),
+): Promise<{ tranches: number; inseres: number }> {
+  assurerTablesGlobe(d);
+  const resIndex = await fetchImpl(URL_LASTUPDATE, { headers: entetesAmont(), signal: AbortSignal.timeout(TIMEOUT_AMONT_MS) });
+  if (!resIndex.ok) throw new Error(`lastupdate HTTP ${resIndex.status}`);
+  const premiereLigne = (await resIndex.text()).split("\n")[0] ?? "";
+  const urlZip = premiereLigne.trim().split(/\s+/)[2] ?? "";
+  if (!urlZip.endsWith(".export.CSV.zip")) throw new Error("lastupdate.txt : URL de tranche introuvable");
+  const meta = lireMeta(d, "gdelt");
+  const derniereVue = meta === null ? null : (JSON.parse(meta.corps) as { url?: string }).url ?? null;
+  if (derniereVue === urlZip) return { tranches: 0, inseres: 0 };
+  // Candidates : la courante + backfill ; on s'arrête à la dernière déjà vue.
+  const candidates: string[] = [];
+  for (const u of urlsTranches(urlZip, BACKFILL_TRANCHES)) {
+    if (u === derniereVue) break;
+    candidates.push(u);
+  }
+  let tranches = 0;
+  let inseres = 0;
+  for (const u of candidates) {
+    try {
+      const res = await fetchImpl(u, { headers: entetesAmont(), signal: AbortSignal.timeout(TIMEOUT_AMONT_MS) });
+      if (!res.ok) continue; // tranche manquante/404 : tolérée
+      const zip = new Uint8Array(await res.arrayBuffer());
+      inseres += ingererEvenements(d, parseTrancheGdelt(new TextDecoder().decode(extraireFichierZip(zip))));
+      tranches += 1;
+    } catch {
+      // Tranche individuelle en échec (réseau/zip corrompu) : sautée, les autres continuent.
+    }
+  }
+  purgerEvenements(d, now);
+  ecrireMeta(d, "gdelt", JSON.stringify({ url: urlZip }), now);
+  return { tranches, inseres };
+}
+
+/**
+ * Rafraîchit l'instantané UCDP : découvre le fichier candidat courant sur la
+ * page d'index, télécharge/parse/agrège, stocke le JSON sous la clé "ucdp".
+ * Renvoie false (sans jeter) si l'amont est injoignable — l'appelant décide
+ * de servir le périmé.
+ */
+export async function rafraichirUcdp(
+  d: Database,
+  fetchImpl: typeof fetch = fetch,
+  now: number = Date.now(),
+): Promise<boolean> {
+  try {
+    const resIndex = await fetchImpl(URL_INDEX_UCDP, { headers: entetesAmont(), signal: AbortSignal.timeout(TIMEOUT_AMONT_MS) });
+    if (!resIndex.ok) return false;
+    const fichier = choisirFichierCandidat(await resIndex.text());
+    if (fichier === null) return false;
+    const resCsv = await fetchImpl(`${BASE_UCDP}${fichier}`, { headers: entetesAmont(), signal: AbortSignal.timeout(TIMEOUT_AMONT_MS * 4) });
+    if (!resCsv.ok) return false;
+    const zones = agregerUcdp(parseCsv(await resCsv.text()));
+    if (zones.length === 0) return false; // réponse vide/inattendue : ne pas écraser un bon instantané
+    ecrireMeta(d, "ucdp", JSON.stringify({ fichier, zones }), now);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Sert l'instantané UCDP ; le rafraîchit d'abord s'il est absent ou > 24 h. */
+async function repondreConflitsUcdp(req: Request, d: Database, now: number, fetchImpl: typeof fetch): Promise<Response> {
+  let meta = lireMeta(d, "ucdp");
+  let stale = false;
+  if (meta === null || now - meta.majA > FRAICHEUR_UCDP_MS) {
+    const ok = await rafraichirUcdp(d, fetchImpl, now);
+    if (ok) meta = lireMeta(d, "ucdp");
+    else if (meta !== null) stale = true; // périmé servi quand même : jamais d'écran vide
+  }
+  if (meta === null) {
+    return new Response(JSON.stringify({ erreur: "amont injoignable", detail: "UCDP indisponible et aucun instantané" }), {
+      status: 502,
+      headers: { "content-type": "application/json; charset=utf-8", ...entetesCors(req) },
+    });
+  }
+  const { fichier, zones } = JSON.parse(meta.corps) as { fichier: string; zones: unknown[] };
+  return new Response(JSON.stringify({ majA: meta.majA, fichier, zones }), {
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "x-axiomd-cache": stale ? "stale" : "hit",
+      ...entetesCors(req),
+    },
+  });
+}
+
+/**
+ * Boucle d'ingestion GDELT (pattern demarrerBoucleSnapshots) : un tick immédiat
+ * non bloquant puis toutes les 15 min — UNIQUEMENT du stockage à froid, jamais
+ * sur le chemin chaud du renderer (BUILD-CONTRACT).
+ */
+export function demarrerBoucleGlobe(): () => void {
+  const tick = () => {
+    rafraichirGdelt(getDb()).catch((err: unknown) => {
+      console.error("[globe] rafraîchissement GDELT en échec :", err instanceof Error ? err.message : err);
+    });
+  };
+  const timerInitial = setTimeout(tick, 3_000); // léger différé : ne pas gêner le démarrage
+  const intervalle = setInterval(tick, INTERVALLE_BOUCLE_GLOBE_MS);
+  return () => {
+    clearTimeout(timerInitial);
+    clearInterval(intervalle);
+  };
+}
+
+/** Enregistre le préfixe /globe (modèle enregistrerReplay). */
+export function enregistrerGlobe(routeur: Routeur): void {
+  routeur.enregistrerPrefixe("/globe", (req, url) => traiterGlobe(req, url));
 }

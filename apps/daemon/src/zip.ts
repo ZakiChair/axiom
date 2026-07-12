@@ -11,6 +11,8 @@ import { inflateRawSync } from "node:zlib";
 const SIGNATURE_LOCALE = 0x04034b50;
 const METHODE_STOCKE = 0;
 const METHODE_DEFLATE = 8;
+/** Borne de sortie de la décompression (anti-bombe zip : l'amont GDELT est http-only, MITM-able). */
+const TAILLE_MAX_SORTIE = 64 * 1024 * 1024;
 
 /** Extrait (et décompresse si besoin) le premier fichier d'un .zip mono-fichier. */
 export function extraireFichierZip(zip: Uint8Array): Uint8Array {
@@ -28,5 +30,5 @@ export function extraireFichierZip(zip: Uint8Array): Uint8Array {
   const donnees = zip.slice(debut, debut + tailleComp);
   if (methode === METHODE_STOCKE) return donnees;
   if (methode !== METHODE_DEFLATE) throw new Error(`méthode de compression zip ${methode} non gérée`);
-  return new Uint8Array(inflateRawSync(donnees));
+  return new Uint8Array(inflateRawSync(donnees, { maxOutputLength: TAILLE_MAX_SORTIE }));
 }

@@ -3,7 +3,7 @@
  * le daemon (/globe/conflits-ucdp, instantané 24 h + stale). Donnée mensuelle :
  * un mémo module suffit, un seul fetch par session. Sans daemon → null.
  */
-import { daemonPret, urlDaemon } from "../daemon";
+import { detectDaemon, urlDaemon } from "../daemon";
 import type { EtatConflitsUcdp, ZoneConflitUcdp } from "./types";
 
 let memo: EtatConflitsUcdp | null = null;
@@ -35,7 +35,7 @@ export function parseConflitsUcdp(json: unknown): EtatConflitsUcdp | null {
 /** Charge (une fois par session) les zones UCDP. null = daemon absent/en échec. */
 export async function chargerConflitsUcdp(signal?: AbortSignal): Promise<EtatConflitsUcdp | null> {
   if (memo !== null) return memo;
-  if (!daemonPret()) return null;
+  if (!(await detectDaemon())) return null;
   try {
     const res = await fetch(urlDaemon("/globe/conflits-ucdp"), { signal });
     if (!res.ok) return null;

@@ -219,6 +219,15 @@ describe("hitTestCibles (multi-couches)", () => {
     expect(hitTestCibles(cibles, 100, 108)).toEqual(cibles[0]); // r5 + marge 4
     expect(hitTestCibles(cibles, 100, 130)).toBeNull();
   });
+  it("à distance ÉGALE (même x/y, couches superposées), la DERNIÈRE poussée gagne (aligné z-order)", () => {
+    // Grille UCDP/GDELT partagée → même centre projeté → même distance. Le point GDELT
+    // est dessiné AU-DESSUS du conflit ; le hit-test doit renvoyer ce dernier (dernier du tableau).
+    const superposees: CibleGlobe[] = [
+      { couche: "conflit", index: 0, x: 100, y: 100, r: 5 },
+      { couche: "evenement", index: 0, x: 100, y: 100, r: 5 },
+    ];
+    expect(hitTestCibles(superposees, 100, 100)).toEqual(superposees[1]);
+  });
 });
 
 describe("contenuLibelle", () => {

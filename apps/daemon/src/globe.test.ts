@@ -183,6 +183,29 @@ describe("rafraichirGdelt (fetch stubé, zéro réseau)", () => {
     await expect(rafraichirGdelt(d, fetchStub, T0)).rejects.toThrow("URL de tranche inattendue");
     expect(appels.length).toBe(1); // seul lastupdate.txt a été fetché
   });
+  test("tranche courante en échec mais backfill réussi → méta = tranche réussie, courante réingérée au tick suivant", async () => {
+    const d = new Database(":memory:");
+    assurerTablesGlobe(d);
+    const urlZip = "http://data.gdeltproject.org/gdeltv2/20260712001500.export.CSV.zip";
+    const urlPrec = "http://data.gdeltproject.org/gdeltv2/20260712000000.export.CSV.zip"; // T-15 min
+    let couranteOk = false; // la tranche courante échoue au 1er tick, réussit au 2e
+    const fetchStub = (async (entree: RequestInfo | URL) => {
+      const u = String(entree);
+      if (u.endsWith("lastupdate.txt")) return new Response(`69666 abc ${urlZip}`);
+      if (u === urlZip) return couranteOk ? new Response(zipDe(`${ligneGdeltBrute("20")}\n${ligneGdeltBrute("21")}\n`)) : new Response("introuvable", { status: 404 });
+      if (u === urlPrec) return new Response(zipDe(`${ligneGdeltBrute("10")}\n${ligneGdeltBrute("11")}\n`));
+      return new Response("introuvable", { status: 404 });
+    }) as typeof fetch;
+    // 1er tick : urlZip 404 → la méta doit pointer la tranche PRÉCÉDENTE réussie, pas urlZip.
+    const r1 = await rafraichirGdelt(d, fetchStub, T0);
+    expect(r1.inseres).toBe(2);
+    expect(JSON.parse(lireMeta(d, "gdelt")?.corps ?? "{}").url).toBe(urlPrec);
+    // 2e tick : urlZip réussit désormais → réingérée (jamais figée « vue » à tort).
+    couranteOk = true;
+    const r2 = await rafraichirGdelt(d, fetchStub, T0 + 1);
+    expect(r2.inseres).toBe(2); // les 2 événements de urlZip, jamais vus auparavant
+    expect(JSON.parse(lireMeta(d, "gdelt")?.corps ?? "{}").url).toBe(urlZip);
+  });
 });
 
 describe("rafraichirUcdp + GET /globe/conflits-ucdp", () => {

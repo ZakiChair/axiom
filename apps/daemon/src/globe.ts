@@ -210,8 +210,9 @@ export function urlsTranches(urlDerniere: string, n: number): string[] {
  * Sinon ingère la tranche courante + backfill (premier démarrage : 12 tranches,
  * ensuite : celles publiées depuis la dernière vue, plafonné à 12). Un 404 sur
  * une tranche individuelle est toléré (tranche sautée). Purge la rétention puis
- * écrit la méta { url } sous la clé "gdelt" avec majA = now — SEULEMENT si au
- * moins une tranche a été ingérée : un échec total ne marque rien « vu ».
+ * écrit la méta { url } (tranche RÉUSSIE la plus récente) sous la clé "gdelt" avec
+ * majA = now — SEULEMENT si au moins une tranche a été ingérée : un échec total ne
+ * marque rien « vu », et une courante en échec n'est pas figée « vue » à tort.
  */
 export async function rafraichirGdelt(
   d: Database,
@@ -239,22 +240,30 @@ export async function rafraichirGdelt(
   }
   let tranches = 0;
   let inseres = 0;
+  // URL de la tranche RÉUSSIE la plus récente. Les candidates sont ordonnées de la plus
+  // récente à la plus ancienne → la 1re réussie de la liste est la plus récente. C'est ELLE
+  // qu'on marque « vue » (pas urlZip) : si la courante a échoué, elle reste réingérable.
+  let urlPlusRecenteReussie: string | null = null;
   for (const u of candidates) {
     try {
       const res = await fetchImpl(u, { headers: entetesAmont(), signal: AbortSignal.timeout(TIMEOUT_AMONT_MS) });
       if (!res.ok) continue; // tranche manquante/404 : tolérée
+      // Pré-bornage sur l'en-tête (amont http-only, MITM-able) : corps annoncé trop gros → sauté.
+      const cl = res.headers.get("content-length");
+      if (cl !== null && Number(cl) > TAILLE_MAX_ZIP) continue;
       const zip = new Uint8Array(await res.arrayBuffer());
       if (zip.byteLength > TAILLE_MAX_ZIP) continue; // bornage : tranche anormalement grosse sautée
       inseres += ingererEvenements(d, parseTrancheGdelt(new TextDecoder().decode(extraireFichierZip(zip))));
       tranches += 1;
+      if (urlPlusRecenteReussie === null) urlPlusRecenteReussie = u;
     } catch {
       // Tranche individuelle en échec (réseau/zip corrompu) : sautée, les autres continuent.
     }
   }
   purgerEvenements(d, now);
-  // Méta écrite SEULEMENT si au moins une tranche est passée : sur échec TOTAL,
-  // rien n'est marqué « vu » (pas de perte silencieuse) — retenté au tick suivant.
-  if (tranches > 0) ecrireMeta(d, "gdelt", JSON.stringify({ url: urlZip }), now);
+  // Méta = tranche RÉUSSIE la plus récente : sur échec TOTAL rien n'est marqué « vu »
+  // (pas de perte silencieuse) ; si urlZip a échoué, elle n'est pas figée « vue » à tort.
+  if (urlPlusRecenteReussie !== null) ecrireMeta(d, "gdelt", JSON.stringify({ url: urlPlusRecenteReussie }), now);
   return { tranches, inseres };
 }
 
@@ -276,6 +285,9 @@ export async function rafraichirUcdp(
     if (fichier === null) return false;
     const resCsv = await fetchImpl(`${BASE_UCDP}${fichier}`, { headers: entetesAmont(), signal: AbortSignal.timeout(TIMEOUT_AMONT_MS * 4) });
     if (!resCsv.ok) return false;
+    // Pré-bornage sur l'en-tête avant lecture du corps : réponse annoncée trop grosse → abandon.
+    const clCsv = resCsv.headers.get("content-length");
+    if (clCsv !== null && Number(clCsv) > TAILLE_MAX_ZIP) return false;
     const texte = await resCsv.text();
     if (texte.length > TAILLE_MAX_ZIP) return false; // bornage : réponse anormalement grosse
     const zones = agregerUcdp(parseCsv(texte));

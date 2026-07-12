@@ -217,7 +217,9 @@ export function hitTestCibles(cibles: readonly CibleGlobe[], mx: number, my: num
   let meilleureDist = Number.POSITIVE_INFINITY;
   for (const cible of cibles) {
     const dist = Math.hypot(mx - cible.x, my - cible.y);
-    if (dist <= cible.r + margePx && dist < meilleureDist) {
+    // `<=` : à distance égale (couches superposées sur la grille 0,5° partagée), la
+    // DERNIÈRE cible poussée gagne — alignée sur le z-order de dessin (GDELT au-dessus d'UCDP).
+    if (dist <= cible.r + margePx && dist <= meilleureDist) {
       meilleure = cible;
       meilleureDist = dist;
     }

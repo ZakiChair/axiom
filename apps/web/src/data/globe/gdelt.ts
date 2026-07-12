@@ -5,7 +5,7 @@
  * dégrade en silence (null → note « daemon hors ligne » dans la fenêtre).
  * Pattern du repo : parse PUR testé / chargerXxx réseau non testé, jamais d'exception.
  */
-import { daemonPret, urlDaemon } from "../daemon";
+import { detectDaemon, urlDaemon } from "../daemon";
 import type { CategorieEvenement, CelluleEvenements, EtatEvenements, EvenementDetail } from "./types";
 
 /** Cadence de poll de la fenêtre (alignée sur la publication GDELT 15 min). */
@@ -75,7 +75,7 @@ export function parseZone(json: unknown): EvenementDetail[] | null {
 
 /** Charge la fenêtre agrégée. null = daemon absent/en échec (dégradation silencieuse). */
 export async function chargerEvenements(signal?: AbortSignal): Promise<EtatEvenements | null> {
-  if (!daemonPret()) return null;
+  if (!(await detectDaemon())) return null;
   try {
     const res = await fetch(urlDaemon("/globe/evenements?fenetreH=24"), { signal });
     if (!res.ok) return null;
@@ -87,7 +87,7 @@ export async function chargerEvenements(signal?: AbortSignal): Promise<EtatEvene
 
 /** Charge le détail d'une cellule (clic). null = daemon absent/en échec. */
 export async function chargerZoneEvenements(lat: number, lon: number, signal?: AbortSignal): Promise<EvenementDetail[] | null> {
-  if (!daemonPret()) return null;
+  if (!(await detectDaemon())) return null;
   try {
     const res = await fetch(urlDaemon(`/globe/evenements/zone?lat=${lat}&lon=${lon}&fenetreH=24`), { signal });
     if (!res.ok) return null;

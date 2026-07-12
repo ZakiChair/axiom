@@ -34,6 +34,21 @@ describe("extraireFichierZip", () => {
     expect(() => extraireFichierZip(new Uint8Array(10))).toThrow("tronqué");
   });
 
+  test("rejette une bombe de décompression (sortie > borne 64 Mio)", () => {
+    // 64 Mio + 1 octet de zéros → compresse en ~64 Kio (rapide), dépasse maxOutputLength.
+    const enorme = Buffer.alloc(64 * 1024 * 1024 + 1);
+    const donnees = new Uint8Array(deflateRawSync(enorme));
+    const entete = new Uint8Array(30);
+    const dv = new DataView(entete.buffer);
+    dv.setUint32(0, 0x04034b50, true); // signature en-tête local
+    dv.setUint16(8, 8, true); // méthode 8 = DEFLATE
+    dv.setUint32(18, donnees.length, true); // taille compressée
+    const zip = new Uint8Array(30 + donnees.length);
+    zip.set(entete, 0);
+    zip.set(donnees, 30);
+    expect(() => extraireFichierZip(zip)).toThrow();
+  });
+
   test("dézippe la vraie tranche GDELT (fixture du 2026-07-12)", async () => {
     const zip = new Uint8Array(
       await Bun.file(new URL("./fixtures/gdelt-tranche-20260712001500.export.CSV.zip", import.meta.url)).arrayBuffer(),

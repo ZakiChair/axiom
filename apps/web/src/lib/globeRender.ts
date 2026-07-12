@@ -26,7 +26,7 @@ import {
 } from "d3-geo";
 import { feature } from "topojson-client";
 import landTopo from "world-atlas/land-110m.json";
-import type { Avion, Chokepoint } from "../data/globe/types";
+import type { Avion, CategorieEvenement, Chokepoint } from "../data/globe/types";
 
 // ─────────────────────────── Fond de carte (land-110m) ───────────────────────────
 
@@ -216,6 +216,71 @@ export function hitTestChokepoints(
   return meilleur;
 }
 
+// ─────────────────────────── Cibles multi-couches (géopolitique) ───────────────────────────
+
+/** Couches porteuses de cibles de survol/clic. */
+export type CoucheCible = "chokepoint" | "evenement" | "conflit";
+
+/** Cible écran d'un marqueur dessiné (px CSS), toutes couches confondues. */
+export interface CibleGlobe {
+  couche: CoucheCible;
+  /** Index dans le tableau SOURCE de la couche (chokepoints/cellules/zones). */
+  index: number;
+  x: number;
+  y: number;
+  r: number;
+}
+
+/** Référence de survol stockée côté fenêtre (ref, jamais de state par frame). */
+export type SurvolGlobe = { couche: CoucheCible; index: number };
+
+/** Cible la plus proche dont le disque + marge contient le curseur, sinon null. */
+export function hitTestCibles(cibles: readonly CibleGlobe[], mx: number, my: number, margePx = 4): CibleGlobe | null {
+  let meilleure: CibleGlobe | null = null;
+  let meilleureDist = Number.POSITIVE_INFINITY;
+  for (const cible of cibles) {
+    const dist = Math.hypot(mx - cible.x, my - cible.y);
+    if (dist <= cible.r + margePx && dist < meilleureDist) {
+      meilleure = cible;
+      meilleureDist = dist;
+    }
+  }
+  return meilleure;
+}
+
+/** Bornes des rayons écran des marqueurs géopolitiques (px CSS, indépendants du zoom). */
+export const RAYON_EVENEMENT_MIN = 2;
+export const RAYON_EVENEMENT_MAX = 13;
+export const RAYON_CONFLIT_MIN = 3;
+export const RAYON_CONFLIT_MAX = 16;
+
+/** Rayon d'une cellule GDELT : base 2 px + √n + 0,4 px par point d'intensité. */
+export function rayonEvenement(intensite: number, n: number): number {
+  return Math.min(RAYON_EVENEMENT_MAX, Math.max(RAYON_EVENEMENT_MIN, 2 + Math.sqrt(Math.max(0, n)) + intensite * 0.4));
+}
+
+/** Rayon d'une zone UCDP : échelle racine des morts (6111 morts réels → clampé). */
+export function rayonConflit(morts: number): number {
+  return Math.min(RAYON_CONFLIT_MAX, Math.max(RAYON_CONFLIT_MIN, 3 + Math.sqrt(Math.max(0, morts)) * 0.35));
+}
+
+/** Couleur de catégorie — tokens sémantiques uniquement (--serie-3 réservé aux chokepoints). */
+export function couleurCategorie(categorie: CategorieEvenement, tokens: TokensGlobe): string {
+  if (categorie === "materiel") return tokens.down;
+  if (categorie === "coercition") return tokens.serie4;
+  return tokens.serie2;
+}
+
+/** Un événement de moins d'une heure mérite un halo « récent ». */
+export function estRecent(dernierMs: number, nowMs: number): boolean {
+  return nowMs - dernierMs < 3_600_000;
+}
+
+/** Rayon du halo pulsant (période ~1,9 s) ; statique si la boucle rAF dort (tMs figé). */
+export function rayonHalo(rayon: number, tMs: number): number {
+  return rayon + 2.5 + Math.sin(tMs / 300) * 1.5;
+}
+
 // ─────────────────────────── Terminateur jour/nuit ───────────────────────────
 
 /**
@@ -243,10 +308,14 @@ export interface TokensGlobe {
   border: string;
   /** --text-dim : avions (1 px) + texte des libellés. */
   textDim: string;
-  /** --serie-2 : sous-cercle pétroliers. */
+  /** --serie-2 : sous-cercle pétroliers + protestations GDELT. */
   serie2: string;
   /** --serie-3 : points chokepoints + nom dans le libellé. */
   serie3: string;
+  /** --down : conflits matériels GDELT, zones UCDP, front ISW (rouge sémantique danger). */
+  down: string;
+  /** --serie-4 : coercition/répression GDELT. */
+  serie4: string;
 }
 
 /** Paramètres d'une frame de dessin (l'appelant tient tout dans des refs). */

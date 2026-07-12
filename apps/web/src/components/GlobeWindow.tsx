@@ -42,13 +42,15 @@ const INTERVALLE_RENDU_MS = 33;
 
 /** Lit les tokens du thème courant pour le canvas (à la demande, pas au montage). */
 function lireTokensGlobe(): TokensGlobe {
-  const t = lireTokensCanvas(["--bg", "--border", "--text-dim", "--serie-2", "--serie-3"]);
+  const t = lireTokensCanvas(["--bg", "--border", "--text-dim", "--serie-2", "--serie-3", "--down", "--serie-4"]);
   return {
     bg: t["--bg"],
     border: t["--border"],
     textDim: t["--text-dim"],
     serie2: t["--serie-2"],
     serie3: t["--serie-3"],
+    down: t["--down"],
+    serie4: t["--serie-4"],
   };
 }
 

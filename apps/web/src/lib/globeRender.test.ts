@@ -177,3 +177,48 @@ describe("positionSoleil", () => {
     expect(Math.abs(lat + 23.44)).toBeLessThan(1);
   });
 });
+
+import { couleurCategorie, estRecent, hitTestCibles, rayonConflit, rayonEvenement, rayonHalo, type CibleGlobe, type TokensGlobe } from "./globeRender";
+
+const TOKENS: TokensGlobe = { bg: "#000", border: "#333", textDim: "#999", serie2: "#a78bfa", serie3: "#f59e0b", down: "#f92855", serie4: "#f472b6" };
+
+describe("briques géopolitiques", () => {
+  it("rayonEvenement croît avec n et l'intensité, clampé [2, 13]", () => {
+    expect(rayonEvenement(0, 0)).toBe(2);
+    expect(rayonEvenement(10, 4)).toBe(8); // 2 + 2 + 4
+    expect(rayonEvenement(10, 400)).toBe(13); // clampé
+  });
+  it("rayonConflit en racine des morts, clampé [3, 16]", () => {
+    expect(rayonConflit(0)).toBe(3);
+    expect(rayonConflit(100)).toBe(6.5); // 3 + 10×0,35
+    expect(rayonConflit(6111)).toBe(16); // top réel UCDP → clampé
+  });
+  it("couleurCategorie mappe vers les tokens sémantiques", () => {
+    expect(couleurCategorie("materiel", TOKENS)).toBe("#f92855");
+    expect(couleurCategorie("coercition", TOKENS)).toBe("#f472b6");
+    expect(couleurCategorie("protestation", TOKENS)).toBe("#a78bfa");
+  });
+  it("estRecent : strictement moins d'une heure", () => {
+    expect(estRecent(1000, 1000 + 3_599_000)).toBe(true);
+    expect(estRecent(1000, 1000 + 3_600_000)).toBe(false);
+  });
+  it("rayonHalo oscille autour de rayon + 2,5 (amplitude 1,5)", () => {
+    expect(rayonHalo(5, 0)).toBe(7.5);
+    expect(rayonHalo(5, Math.PI / 2 * 300)).toBeCloseTo(9, 5);
+  });
+});
+
+describe("hitTestCibles (multi-couches)", () => {
+  const cibles: CibleGlobe[] = [
+    { couche: "chokepoint", index: 0, x: 100, y: 100, r: 5 },
+    { couche: "evenement", index: 3, x: 104, y: 100, r: 6 },
+  ];
+  it("renvoie la cible la plus PROCHE en cas de chevauchement", () => {
+    expect(hitTestCibles(cibles, 103, 100)).toEqual(cibles[1]);
+    expect(hitTestCibles(cibles, 101, 100)).toEqual(cibles[0]);
+  });
+  it("respecte la marge (4 px défaut) et renvoie null au-delà", () => {
+    expect(hitTestCibles(cibles, 100, 108)).toEqual(cibles[0]); // r5 + marge 4
+    expect(hitTestCibles(cibles, 100, 130)).toBeNull();
+  });
+});

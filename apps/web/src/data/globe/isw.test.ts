@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseFrontIsw } from "./isw";
+import type { CacheEntree } from "../onchain/cache";
+import type { FrontUkraine } from "./types";
+import { frontDepuisCache, parseFrontIsw } from "./isw";
 
-// Forme VERBATIM d'une réponse ArcGIS f=geojson (vérifiée en direct le 2026-07-12 :
-// 10 features Polygon, propriété EditDate en epoch ms).
+// Forme VERBATIM d'une réponse ArcGIS f=geojson (forme vérifiée en direct le
+// 2026-07-12 ; extrait à 2 features, propriété EditDate en epoch ms).
 const GEOJSON = {
   type: "FeatureCollection",
   features: [
@@ -27,5 +29,23 @@ describe("parseFrontIsw", () => {
     expect(parseFrontIsw({ type: "Point" })).toBeNull();
     expect(parseFrontIsw({ type: "FeatureCollection" })).toBeNull();
     expect(parseFrontIsw({ type: "FeatureCollection", features: [] })).toBeNull();
+  });
+});
+
+describe("frontDepuisCache", () => {
+  it("renvoie la donnée d'un cache valide", () => {
+    const donnee = parseFrontIsw(GEOJSON);
+    expect(donnee).not.toBeNull();
+    expect(frontDepuisCache({ donnee: donnee as FrontUkraine, ts: 123 })).toBe(donnee);
+  });
+  it("donnee null (enregistrement corrompu) → null, sans jeter", () => {
+    expect(frontDepuisCache({ donnee: null, ts: 123 } as unknown as CacheEntree<FrontUkraine>)).toBeNull();
+  });
+  it("donnee sans collection valide → null", () => {
+    const corrompu = { donnee: { majMs: null, n: 0 }, ts: 123 } as unknown as CacheEntree<FrontUkraine>;
+    expect(frontDepuisCache(corrompu)).toBeNull();
+  });
+  it("cache absent → null", () => {
+    expect(frontDepuisCache(null)).toBeNull();
   });
 });

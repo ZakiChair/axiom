@@ -36,13 +36,27 @@ export function parseFrontIsw(json: unknown): FrontUkraine | null {
   return { collection: json, majMs, n: r.features.length };
 }
 
+/**
+ * Garde une lecture de cache : lireCache ne valide que l'ENVELOPPE {donnee, ts},
+ * pas la forme de `donnee` — un enregistrement corrompu (donnee null, collection
+ * absente…) ne doit produire aucun TypeError. Renvoie la donnée validée ou null.
+ */
+export function frontDepuisCache(cache: CacheEntree<FrontUkraine> | null): FrontUkraine | null {
+  if (typeof cache?.donnee !== "object" || cache.donnee === null) return null;
+  if (parseFrontIsw((cache.donnee as { collection?: unknown }).collection) === null) return null;
+  return cache.donnee;
+}
+
 /** Charge le front (cache 6 h → périmé → null). Jamais d'exception. */
 export async function chargerFrontIsw(signal?: AbortSignal): Promise<FrontUkraine | null> {
   if (memo !== null && estFrais(memo, ISW_TTL_MS)) return memo.donnee;
   const cache = await lireCache<FrontUkraine>(CLE_CACHE);
-  if (cache !== null && estFrais(cache, ISW_TTL_MS) && parseFrontIsw(cache.donnee.collection) !== null) {
-    memo = cache;
-    return cache.donnee;
+  if (cache !== null && estFrais(cache, ISW_TTL_MS)) {
+    const front = frontDepuisCache(cache);
+    if (front !== null) {
+      memo = cache;
+      return front;
+    }
   }
   try {
     const res = await fetch(URL_ISW, { signal });
@@ -53,7 +67,6 @@ export async function chargerFrontIsw(signal?: AbortSignal): Promise<FrontUkrain
     memo = { donnee: front, ts: Date.now() };
     return front;
   } catch {
-    if (cache !== null && parseFrontIsw(cache.donnee.collection) !== null) return cache.donnee; // périmé accepté
-    return null;
+    return frontDepuisCache(cache); // périmé accepté ; null si cache absent/corrompu
   }
 }

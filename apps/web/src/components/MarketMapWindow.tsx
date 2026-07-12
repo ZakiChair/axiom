@@ -55,6 +55,14 @@ interface Tokens {
   neutral: [number, number, number];
   border: [number, number, number];
   text: [number, number, number];
+  /** Thème clair (fond lumineux) : neutre assombri + bord dérivé de --text pour
+   *  délimiter les tuiles ; en dark on garde les valeurs d'origine (audit #20). */
+  clair: boolean;
+}
+
+/** Luminance perçue (0–1) d'une couleur RVB. */
+function luminance(c: [number, number, number]): number {
+  return (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255;
 }
 
 /** Parse « #rrggbb » (ou « #rgb ») en composantes RVB ; gris moyen par défaut. */
@@ -71,15 +79,18 @@ function readTokens(): Tokens {
   const t = lireTokensCanvas(["--up", "--down", "--surface", "--border", "--text"]);
   const surface = hexToRgb(t["--surface"]);
   const text = hexToRgb(t["--text"]);
+  const clair = luminance(surface) > 0.5;
   return {
     up: hexToRgb(t["--up"]),
     down: hexToRgb(t["--down"]),
-    // Tuile à ~0 % : gris moyen (--surface mêlé à --text, 32 %) plutôt que --surface
-    // brut, qui se confond avec le fond du panneau — surtout en « cute » quasi-blanc
-    // où les méga-caps disparaissaient (audit #20).
-    neutral: lerp(surface, text, 0.32),
+    // Tuile à ~0 % : en thème CLAIR (« cute » quasi-blanc), gris moyen (--surface mêlé
+    // à --text, 32 %) plutôt que --surface brut, qui se confondait avec le fond du
+    // panneau — les méga-caps disparaissaient (audit #20). En DARK on garde --surface
+    // brut d'origine (neutre sombre volontairement fondu au panneau : ne pas régresser).
+    neutral: clair ? lerp(surface, text, 0.32) : surface,
     border: hexToRgb(t["--border"]),
     text,
+    clair,
   };
 }
 
@@ -116,11 +127,14 @@ function drawTile(ctx: CanvasRenderingContext2D, t: Tuile<CoinTile>, tok: Tokens
   ctx.fillStyle = rgbCss(rgb);
   ctx.fillRect(x, y, w, h);
 
-  // Bord non-survolé : dérivé de --text (contraste garanti) plutôt que --border, quasi
-  // invisible en « cute » — pour toujours délimiter les tuiles (audit #20).
+  // Bord non-survolé : en thème CLAIR, dérivé de --text (rgba 0.3) car --border est
+  // quasi invisible en « cute » — pour toujours délimiter les tuiles (audit #20). En
+  // DARK on garde --border d'origine (contraste déjà correct : ne pas régresser).
   ctx.strokeStyle = highlight
     ? rgbCss(tok.text)
-    : `rgba(${Math.round(tok.text[0])},${Math.round(tok.text[1])},${Math.round(tok.text[2])},0.3)`;
+    : tok.clair
+      ? `rgba(${Math.round(tok.text[0])},${Math.round(tok.text[1])},${Math.round(tok.text[2])},0.3)`
+      : rgbCss(tok.border);
   ctx.lineWidth = highlight ? 2 : 1;
   ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
 

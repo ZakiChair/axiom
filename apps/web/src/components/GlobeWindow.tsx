@@ -21,7 +21,20 @@ import { lireTokensCanvas } from "../lib/canvasTokens";
 import { formatAge, formatEntier } from "../lib/format";
 import { chargerChokepoints } from "../data/globe/portwatch";
 import { chargerEtatsAvions, INTERVALLE_POLL_MS } from "../data/globe/opensky";
-import type { Avion, Chokepoint, EtatOpenSky } from "../data/globe/types";
+import { chargerEvenements, INTERVALLE_POLL_EVENEMENTS_MS } from "../data/globe/gdelt";
+import { chargerConflitsUcdp } from "../data/globe/ucdp";
+import { chargerFrontIsw } from "../data/globe/isw";
+import type {
+  Avion,
+  CelluleEvenements,
+  Chokepoint,
+  EtatConflitsUcdp,
+  EtatEvenements,
+  EtatOpenSky,
+  FrontUkraine,
+  ZoneConflitUcdp,
+} from "../data/globe/types";
+import type { GeoPermissibleObjects } from "d3-geo"; // assertion locale du front ISW (pattern TERRES)
 import {
   appliquerDrag,
   appliquerMolette,
@@ -34,6 +47,7 @@ import {
   type TokensGlobe,
   type VueGlobe,
 } from "../lib/globeRender";
+import { noteConflits, noteEvenements, noteUkraine } from "./globeWindow.util";
 import { Chargement, EnTeteFenetre, ErreurBloc, NoteSource, Vide } from "./ui";
 
 /** Vitesse de la rotation automatique (degrés de longitude par seconde — lente). */
@@ -65,6 +79,10 @@ export function GlobeWindow() {
   const [chokepoints, setChokepoints] = useState<Chokepoint[] | null>(null); // null = chargement
   const [etatAvions, setEtatAvions] = useState<EtatOpenSky | null>(null);
   const [echecAvions, setEchecAvions] = useState(false); // dernier appel OpenSky en échec
+  const [etatEvenements, setEtatEvenements] = useState<EtatEvenements | null>(null); // dernier instantané GDELT
+  const [conflitsUcdp, setConflitsUcdp] = useState<EtatConflitsUcdp | null>(null);
+  const [frontUkraine, setFrontUkraine] = useState<FrontUkraine | null>(null);
+  const [daemonOk, setDaemonOk] = useState(false); // au moins un chargement daemon (GDELT/UCDP) réussi
 
   // Tout ce que la boucle de dessin consomme vit dans des refs (AUCUN state par frame).
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -74,6 +92,9 @@ export function GlobeWindow() {
   const tokensRef = useRef<TokensGlobe | null>(null); // invalidé au changement de thème
   const chokepointsRef = useRef<Chokepoint[]>([]);
   const avionsRef = useRef<Avion[]>([]);
+  const cellulesRef = useRef<CelluleEvenements[]>([]);
+  const zonesRef = useRef<ZoneConflitUcdp[]>([]);
+  const frontRef = useRef<FrontUkraine | null>(null);
   const couchesRef = useRef<CouchesGlobe>(couches);
   const rotationAutoRef = useRef<boolean>(rotationAuto);
   const ciblesRef = useRef<CibleGlobe[]>([]); // cibles écran du dernier dessin (hit-test)
@@ -122,9 +143,13 @@ export function GlobeWindow() {
               tokens: tokensRef.current,
               chokepoints: couchesRef.current.chokepoints ? chokepointsRef.current : [],
               avions: couchesRef.current.avions ? avionsRef.current : [],
-              cellules: [],
-              zonesUcdp: [],
-              frontUkraine: null,
+              cellules: couchesRef.current.evenements ? cellulesRef.current : [],
+              zonesUcdp: couchesRef.current.conflits ? zonesRef.current : [],
+              // Assertion locale (pattern TERRES) : `collection` est opaque côté data,
+              // c'est un GeoPermissibleObjects (FeatureCollection) côté rendu.
+              frontUkraine: couchesRef.current.ukraine
+                ? (frontRef.current?.collection as GeoPermissibleObjects | null) ?? null
+                : null,
               survol: survolRef.current,
             });
           }
@@ -219,6 +244,65 @@ export function GlobeWindow() {
     };
   }, [open, couches.avions]);
 
+  // — GDELT : poll 15 min UNIQUEMENT fenêtre ouverte ET couche active. Le daemon est
+  //   la seule source (amont http-only) : un résultat non-null latche `daemonOk` ; en
+  //   cas d'échec ponctuel on garde le dernier instantané (pattern echecAvions). —
+  useEffect(() => {
+    if (!open || !couches.evenements) return;
+    let ignore = false;
+    const ctrl = new AbortController();
+    const charger = async (): Promise<void> => {
+      const etat = await chargerEvenements(ctrl.signal);
+      if (ignore || etat === null) return;
+      setDaemonOk(true);
+      setEtatEvenements(etat);
+      cellulesRef.current = etat.cellules;
+      throttleRef.current?.trigger();
+    };
+    void charger();
+    const timer = setInterval(() => void charger(), INTERVALLE_POLL_EVENEMENTS_MS);
+    return () => {
+      ignore = true;
+      ctrl.abort();
+      clearInterval(timer);
+    };
+  }, [open, couches.evenements]);
+
+  // — UCDP : instantané chargé UNE fois par ouverture (mémo module côté data). —
+  useEffect(() => {
+    if (!open || !couches.conflits) return;
+    let ignore = false;
+    const ctrl = new AbortController();
+    void chargerConflitsUcdp(ctrl.signal).then((etat) => {
+      if (ignore || etat === null) return;
+      setDaemonOk(true);
+      setConflitsUcdp(etat);
+      zonesRef.current = etat.zones;
+      throttleRef.current?.trigger();
+    });
+    return () => {
+      ignore = true;
+      ctrl.abort();
+    };
+  }, [open, couches.conflits]);
+
+  // — Front ISW : direct navigateur (cache 6 h côté data), chargé UNE fois par ouverture. —
+  useEffect(() => {
+    if (!open || !couches.ukraine) return;
+    let ignore = false;
+    const ctrl = new AbortController();
+    void chargerFrontIsw(ctrl.signal).then((front) => {
+      if (ignore || front === null) return;
+      setFrontUkraine(front);
+      frontRef.current = front;
+      throttleRef.current?.trigger();
+    });
+    return () => {
+      ignore = true;
+      ctrl.abort();
+    };
+  }, [open, couches.ukraine]);
+
   // — Molette : zoom clampé. Listener NATIF non-passif (React attache wheel en passif
   //   depuis la v17 → preventDefault y serait ignoré et la page défilerait). —
   useEffect(() => {
@@ -283,13 +367,14 @@ export function GlobeWindow() {
   );
   const erreurChokepoints = couches.chokepoints && chokepoints !== null && chokepoints.length === 0;
   const erreurAvions = couches.avions && echecAvions && etatAvions === null;
-  const aucuneCouche = !couches.chokepoints && !couches.avions;
+  const aucuneCouche =
+    !couches.chokepoints && !couches.avions && !couches.evenements && !couches.conflits && !couches.ukraine;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <EnTeteFenetre
         titre="Globe"
-        sousTitre="Chokepoints maritimes (IMF PortWatch) · trafic aérien (OpenSky)"
+        sousTitre="Conflits géopolitiques (GDELT · UCDP · ISW) · chokepoints (PortWatch) · trafic aérien (OpenSky)"
       />
 
       {/* Bascules de couches + rotation (chips, pattern MacroRatesWindow). */}
@@ -315,6 +400,39 @@ export function GlobeWindow() {
           }`}
         >
           <span>●</span> Avions
+        </button>
+        <button
+          type="button"
+          aria-pressed={couches.evenements}
+          title={couches.evenements ? "Masquer les événements GDELT" : "Afficher les événements GDELT"}
+          onClick={() => globeUiStore.getState().toggleCouche("evenements")}
+          className={`rounded border border-border px-2 py-0.5 transition ${
+            couches.evenements ? "bg-bg text-text" : "opacity-60 hover:opacity-100"
+          }`}
+        >
+          <span className="text-down">●</span> Événements
+        </button>
+        <button
+          type="button"
+          aria-pressed={couches.conflits}
+          title={couches.conflits ? "Masquer les conflits UCDP" : "Afficher les conflits UCDP"}
+          onClick={() => globeUiStore.getState().toggleCouche("conflits")}
+          className={`rounded border border-border px-2 py-0.5 transition ${
+            couches.conflits ? "bg-bg text-text" : "opacity-60 hover:opacity-100"
+          }`}
+        >
+          <span className="text-down">○</span> Conflits
+        </button>
+        <button
+          type="button"
+          aria-pressed={couches.ukraine}
+          title={couches.ukraine ? "Masquer le front Ukraine" : "Afficher le front Ukraine"}
+          onClick={() => globeUiStore.getState().toggleCouche("ukraine")}
+          className={`rounded border border-border px-2 py-0.5 transition ${
+            couches.ukraine ? "bg-bg text-text" : "opacity-60 hover:opacity-100"
+          }`}
+        >
+          <span className="text-down">▧</span> Ukraine
         </button>
         <button
           type="button"
@@ -358,7 +476,7 @@ export function GlobeWindow() {
         )}
         {aucuneCouche && (
           <div className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 px-8">
-            <Vide>Toutes les couches sont masquées — réactivez Chokepoints ou Avions.</Vide>
+            <Vide>Toutes les couches sont masquées — réactivez une couche pour afficher des données.</Vide>
           </div>
         )}
       </div>
@@ -382,6 +500,9 @@ export function GlobeWindow() {
               ? " en attente…"
               : " désactivé"}
           {echecAvions && etatAvions !== null ? " (dernier appel en échec — instantané conservé)" : ""}
+          {" "}· {noteEvenements(etatEvenements, couches.evenements, daemonOk, Date.now())} ·{" "}
+          {noteConflits(conflitsUcdp, couches.conflits, daemonOk, Date.now())} ·{" "}
+          {noteUkraine(frontUkraine, couches.ukraine, Date.now())}
         </NoteSource>
       </div>
     </div>

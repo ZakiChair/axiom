@@ -18,6 +18,12 @@ export interface CouchesGlobe {
   chokepoints: boolean;
   /** Trafic aérien OpenSky (instantané, poll ~2 min). */
   avions: boolean;
+  /** Événements géopolitiques GDELT (15 min, via daemon). */
+  evenements: boolean;
+  /** Conflits armés confirmés UCDP (~1 mois de lag, via daemon). */
+  conflits: boolean;
+  /** Front Ukraine ISW (polygones, direct navigateur). */
+  ukraine: boolean;
 }
 
 export interface GlobeUiState {
@@ -41,7 +47,7 @@ export interface GlobeUiState {
 
 export const globeUiStore = createStore<GlobeUiState>((set, get) => ({
   open: false,
-  couches: { chokepoints: true, avions: true },
+  couches: { chokepoints: true, avions: true, evenements: true, conflits: true, ukraine: true },
   rotationAuto: true,
   openGlobe: () => windowManagerStore.getState().openWindow("globe"),
   closeGlobe: () => windowManagerStore.getState().closeWindow("globe"),
@@ -63,7 +69,7 @@ export const commandes: Commande[] = [
   {
     id: "panneau:globe",
     mnemonique: "GLOBE",
-    libelle: "Globe (chokepoints & trafic aérien)",
+    libelle: "Globe (géopolitique, chokepoints & trafic aérien)",
     categorie: "panneau",
     motsCles: [
       "globe",
@@ -78,8 +84,17 @@ export const commandes: Commande[] = [
       "opensky",
       "portwatch",
       "geopolitique",
+      "conflits",
+      "guerre",
+      "coup d'etat",
+      "protestations",
+      "ukraine",
+      "gdelt",
+      "ucdp",
+      "isw",
+      "crises",
     ],
-    apercu: "Ouvre / ferme le globe des chokepoints maritimes et du trafic aérien",
+    apercu: "Ouvre / ferme le globe : conflits géopolitiques, chokepoints maritimes, trafic aérien",
     action: () => globeUiStore.getState().toggleGlobe(),
   },
 ];

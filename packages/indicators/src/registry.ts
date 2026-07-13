@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 112 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 118 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -42,6 +42,8 @@ import { linreg } from "./trend/linreg";
 import { efficiencyRatio } from "./trend/efficiencyRatio";
 import { sslChannel } from "./trend/sslChannel";
 import { halfTrend } from "./trend/halfTrend";
+import { waddahAttar } from "./trend/waddahAttar";
+import { heikinAshi } from "./trend/heikinAshi";
 
 // — momentum (21) —
 import { accelerator } from "./momentum/accelerator";
@@ -66,6 +68,7 @@ import { tsi } from "./momentum/tsi";
 import { ultimateOsc } from "./momentum/ultimateOsc";
 import { williamsR } from "./momentum/williamsR";
 import { qqe } from "./momentum/qqe";
+import { smi } from "./momentum/smi";
 
 // — volatility (15) —
 import { atr } from "./volatility/atr";
@@ -87,6 +90,7 @@ import { ttmSqueeze } from "./volatility/ttmSqueeze";
 import { atrPct } from "./volatility/atrPct";
 import { parkinsonVol } from "./volatility/parkinsonVol";
 import { choppiness } from "./volatility/choppiness";
+import { ulcerIndex } from "./volatility/ulcerIndex";
 
 // — volume + orderflow (fichiers sous volume/, catégorie UI distincte) —
 import { adLine } from "./volume/adLine";
@@ -109,6 +113,8 @@ import { takerBuyRatio } from "./volume/takerBuyRatio";
 import { relativeVolume } from "./volume/relativeVolume";
 import { volumeZScore } from "./volume/volumeZScore";
 import { netVolume } from "./volume/netVolume";
+import { twiggsMf } from "./volume/twiggsMf";
+import { vfi } from "./volume/vfi";
 
 // — billwilliams (4) —
 import { alligator } from "./billwilliams/alligator";
@@ -169,6 +175,8 @@ export const INDICATORS: IndicatorDef[] = [
   efficiencyRatio,
   sslChannel,
   halfTrend,
+  waddahAttar,
+  heikinAshi,
   // momentum
   accelerator,
   awesome,
@@ -192,6 +200,7 @@ export const INDICATORS: IndicatorDef[] = [
   ultimateOsc,
   williamsR,
   qqe,
+  smi,
   // volatility
   atr,
   atrRegime,
@@ -212,6 +221,7 @@ export const INDICATORS: IndicatorDef[] = [
   atrPct,
   parkinsonVol,
   choppiness,
+  ulcerIndex,
   // volume (classique)
   adLine,
   anchoredVwap,
@@ -229,6 +239,8 @@ export const INDICATORS: IndicatorDef[] = [
   vwapBands,
   relativeVolume,
   volumeZScore,
+  twiggsMf,
+  vfi,
   // orderflow (menu dédié — edge crypto)
   cvd,
   volumeDelta,

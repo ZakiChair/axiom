@@ -8,16 +8,23 @@ import type { Candle } from "@axiom/types";
 import {
   applyBaseFilters,
   applyFunding,
+  applyLongShortRatio,
+  applyOiChange,
   baseFieldValue,
+  BUILTIN_PRESETS,
   compareOp,
   deriveScalar,
   evalBaseCondition,
   INDICATOR_FIELDS,
   lastClose,
   lastDefined,
+  lastLongShortRatio,
+  needsPositionMetrics,
+  oiChangePctFromHist,
   parsePremiumIndex,
   parseTicker24h,
   selectCandidates,
+  splitBaseConditions,
   type BaseCondition,
   type IndicatorFieldSpec,
   type ScreenerRow,
@@ -131,6 +138,110 @@ describe("selectCandidates", () => {
       { symbol: "C", quote: "USDT", lastPrice: 1, priceChangePct24h: 0, volumeUsd24h: 20 },
     ];
     expect(selectCandidates(rows, 2).map((r) => r.symbol)).toEqual(["B", "C"]);
+  });
+});
+
+describe("positionnement OI / L-S (B2)", () => {
+  it("oiChangePctFromHist calcule le Δ% notionnel (premier → dernier)", () => {
+    expect(oiChangePctFromHist([{ oiUsd: 100 }, { oiUsd: 110 }])).toBeCloseTo(10, 10);
+    expect(oiChangePctFromHist([{ oiUsd: 200 }, { oiUsd: 100 }])).toBeCloseTo(-50, 10);
+    expect(oiChangePctFromHist([{ oiUsd: 100 }])).toBeUndefined();
+    expect(oiChangePctFromHist([])).toBeUndefined();
+    expect(oiChangePctFromHist([{ oiUsd: 0 }, { oiUsd: 10 }])).toBeUndefined();
+  });
+
+  it("lastLongShortRatio prend le dernier ratio fini", () => {
+    expect(lastLongShortRatio([{ ratio: 1.1 }, { ratio: 1.5 }])).toBeCloseTo(1.5, 10);
+    expect(lastLongShortRatio([{ ratio: 1.1 }, { ratio: NaN }])).toBeCloseTo(1.1, 10);
+    expect(lastLongShortRatio([])).toBeUndefined();
+  });
+
+  it("applyOiChange / applyLongShortRatio annotent par symbole", () => {
+    const rows: ScreenerRow[] = [
+      { symbol: "BTCUSDT", quote: "USDT", lastPrice: 1, priceChangePct24h: 0, volumeUsd24h: 1 },
+      { symbol: "ETHUSDT", quote: "USDT", lastPrice: 1, priceChangePct24h: 0, volumeUsd24h: 1 },
+    ];
+    applyOiChange(rows, new Map([["BTCUSDT", 5.5]]));
+    applyLongShortRatio(rows, new Map([["BTCUSDT", 1.8], ["ETHUSDT", 0.6]]));
+    expect(rows[0]?.oiChangePct).toBeCloseTo(5.5, 10);
+    expect(rows[0]?.longShortRatio).toBeCloseTo(1.8, 10);
+    expect(rows[1]?.oiChangePct).toBeUndefined();
+    expect(rows[1]?.longShortRatio).toBeCloseTo(0.6, 10);
+  });
+
+  it("baseFieldValue lit OI / L-S / |funding|", () => {
+    const row: ScreenerRow = {
+      symbol: "BTCUSDT",
+      quote: "USDT",
+      lastPrice: 1,
+      priceChangePct24h: 0,
+      volumeUsd24h: 1,
+      fundingPct: -0.04,
+      oiChangePct: 3,
+      longShortRatio: 1.2,
+    };
+    expect(baseFieldValue(row, "oiChangePct")).toBe(3);
+    expect(baseFieldValue(row, "longShortRatio")).toBeCloseTo(1.2, 10);
+    expect(baseFieldValue(row, "absFundingPct")).toBeCloseTo(0.04, 10);
+  });
+
+  it("filtre position échoue si métrique absente (échantillon non couvert)", () => {
+    const row: ScreenerRow = {
+      symbol: "X",
+      quote: "USDT",
+      lastPrice: 1,
+      priceChangePct24h: 0,
+      volumeUsd24h: 1e9,
+    };
+    const cond: BaseCondition = { kind: "base", field: "oiChangePct", op: ">", value: 0 };
+    expect(evalBaseCondition(row, cond)).toBe(false);
+  });
+
+  it("needsPositionMetrics / splitBaseConditions séparent OI/L-S", () => {
+    const conds: BaseCondition[] = [
+      { kind: "base", field: "volumeUsd24h", op: ">", value: 1 },
+      { kind: "base", field: "oiChangePct", op: ">", value: 2 },
+      { kind: "base", field: "longShortRatio", op: ">", value: 1.5 },
+      { kind: "base", field: "fundingPct", op: ">", value: 0 },
+    ];
+    expect(needsPositionMetrics(conds)).toBe(true);
+    expect(needsPositionMetrics([{ kind: "base", field: "volumeUsd24h", op: ">", value: 1 }])).toBe(
+      false,
+    );
+    const { pre, position } = splitBaseConditions(conds);
+    expect(pre.map((c) => c.field)).toEqual(["volumeUsd24h", "fundingPct"]);
+    expect(position.map((c) => c.field)).toEqual(["oiChangePct", "longShortRatio"]);
+  });
+
+  it("preset crowded-long = funding + ΔOI + L/S (ET logique)", () => {
+    const crowded = BUILTIN_PRESETS.find((p) => p.id === "builtin:crowded-long");
+    expect(crowded).toBeDefined();
+    const fields = crowded!.baseConditions.map((c) => c.field);
+    expect(fields).toContain("fundingPct");
+    expect(fields).toContain("oiChangePct");
+    expect(fields).toContain("longShortRatio");
+
+    const pass: ScreenerRow = {
+      symbol: "BTCUSDT",
+      quote: "USDT",
+      lastPrice: 60_000,
+      priceChangePct24h: 1,
+      volumeUsd24h: 50_000_000,
+      fundingPct: 0.02,
+      oiChangePct: 5,
+      longShortRatio: 1.8,
+    };
+    const failLs: ScreenerRow = { ...pass, longShortRatio: 1.0 };
+    expect(crowded!.baseConditions.every((c) => evalBaseCondition(pass, c))).toBe(true);
+    expect(crowded!.baseConditions.every((c) => evalBaseCondition(failLs, c))).toBe(false);
+  });
+
+  it("expose les 4 presets positionnement B2", () => {
+    const ids = BUILTIN_PRESETS.map((p) => p.id);
+    expect(ids).toContain("builtin:crowded-long");
+    expect(ids).toContain("builtin:crowded-short");
+    expect(ids).toContain("builtin:funding-extreme");
+    expect(ids).toContain("builtin:momentum-vol");
   });
 });
 

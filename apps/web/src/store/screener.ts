@@ -7,31 +7,44 @@
  *
  * Un run se déroule en deux temps :
  *  1. thread principal : 1 requête ticker 24h (univers) + 1 requête premiumIndex (funding),
- *     puis filtres de base PURS (data/screener.ts) → candidats ;
+ *     puis (si filtres OI/L-S) enrichissement position sur top N liquides via Binance
+ *     `/futures/data` (rate-limité, note de couverture honnête), puis filtres de base
+ *     PURS (data/screener.ts) → candidats ;
  *  2. Web Worker : évaluation des filtres indicateurs sur les candidats (plafonnés à
  *     SCREENER_CAP), avec progression au fil de l'eau. Le worker est instancié À LA DEMANDE
  *     (jamais à l'import) et relancé/terminé proprement à chaque run.
  *
  * Dégradation gracieuse : ticker en échec → état « error » (aucune boucle console) ;
  * premiumIndex en échec → funding absent (les filtres funding ne retiennent alors rien,
- * ce qui est honnête) + note. 100 % fonctionnel sans daemon (ticker en direct, funding
- * via le proxy /extapi présent en dev comme en prod).
+ * ce qui est honnête) + note ; OI/L-S en échec partiel → métriques absentes (filtres
+ * position échouent honnêtement) + note. 100 % fonctionnel sans daemon.
  */
 import { createStore } from "zustand/vanilla";
 import type { Timeframe } from "@axiom/types";
 import type { Commande } from "../commands/registry";
+import {
+  fetchGlobalLongShortAccountRatio,
+  fetchOpenInterestHist,
+} from "../data/binanceFutures";
 import { extUrl } from "../data/extapi";
 import { marketStore } from "./market";
 import { watchlistStore } from "./watchlist";
 import {
   applyBaseFilters,
   applyFunding,
+  applyLongShortRatio,
+  applyOiChange,
   BUILTIN_PRESETS,
+  lastLongShortRatio,
+  needsPositionMetrics,
+  oiChangePctFromHist,
   parsePremiumIndex,
   parseTicker24h,
   selectCandidates,
+  splitBaseConditions,
   SCREENER_CAP,
   SCREENER_KLINE_LIMIT,
+  SCREENER_POSITION_CAP,
   type BaseCondition,
   type IndicatorCondition,
   type ScreenerPreset,
@@ -45,6 +58,13 @@ const TICKER_24H_URL = "https://api.binance.com/api/v3/ticker/24hr";
 const DISPLAY_CAP = 100;
 /** Clé localStorage des presets UTILISATEUR (les livrés sont constants, non persistés). */
 const STORAGE_KEY = "axiom:screener:v1";
+/**
+ * Concurrence pour l'enrichissement OI + L/S (2 req/symbole). 6 en parallèle →
+ * 20 symboles ≈ quelques secondes, budget << 1000 req / 5 min Binance.
+ */
+const POSITION_CONCURRENCY = 6;
+/** Historique OI : 25 points 1h ≈ fenêtre 24 h pour le Δ%. */
+const OI_HIST_LIMIT = 25;
 
 /** Phases d'un run. */
 export type RunState = "idle" | "loading" | "running" | "done" | "error";
@@ -120,6 +140,60 @@ function writeUserPresets(presets: ScreenerPreset[]): void {
   } catch {
     /* quota / mode privé : la persistance est best-effort */
   }
+}
+
+/**
+ * Exécute `fn` sur chaque item avec un plafond de concurrence (pool simple).
+ * Préserve l'ordre des résultats. PURE sur le contrôle de flux (I/O via fn).
+ */
+async function mapPool<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      const item = items[i];
+      if (item === undefined) return;
+      results[i] = await fn(item);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+/**
+ * Enrichit un échantillon de lignes avec ΔOI % (≈24 h) et ratio L/S via Binance
+ * futures data (sans clé, 1 symbole / req). Best-effort par symbole : un échec
+ * laisse le champ absent (filtre position échouera pour cette ligne).
+ */
+async function enrichPositionSample(
+  sample: ScreenerRow[],
+): Promise<{ oiOk: number; lsOk: number }> {
+  const oiBySymbol = new Map<string, number>();
+  const lsBySymbol = new Map<string, number>();
+
+  await mapPool(sample, POSITION_CONCURRENCY, async (row) => {
+    const [oiRes, lsRes] = await Promise.allSettled([
+      fetchOpenInterestHist(row.symbol, "1h", OI_HIST_LIMIT),
+      fetchGlobalLongShortAccountRatio(row.symbol, "1h", 5),
+    ]);
+    if (oiRes.status === "fulfilled") {
+      const delta = oiChangePctFromHist(oiRes.value);
+      if (delta !== undefined) oiBySymbol.set(row.symbol, delta);
+    }
+    if (lsRes.status === "fulfilled") {
+      const ratio = lastLongShortRatio(lsRes.value);
+      if (ratio !== undefined) lsBySymbol.set(row.symbol, ratio);
+    }
+  });
+
+  applyOiChange(sample, oiBySymbol);
+  applyLongShortRatio(sample, lsBySymbol);
+  return { oiOk: oiBySymbol.size, lsOk: lsBySymbol.size };
 }
 
 // ─────────────────────────── Cycle de vie du worker ───────────────────────────
@@ -234,10 +308,39 @@ export const screenerStore = createStore<ScreenerState>((set, get) => ({
       }
       if (runId !== currentRunId) return;
 
-      // 2. Filtres de base (purs).
-      const baseFiltered = applyBaseFilters(rows, baseConditions);
+      // 2. Filtres de base (purs) — éventuel enrichissement position avant filtres OI/L-S.
       const notes: string[] = [];
       if (fundingIndisponible) notes.push("funding indisponible");
+
+      const { pre, position } = splitBaseConditions(baseConditions);
+      let working = applyBaseFilters(rows, pre);
+
+      if (needsPositionMetrics(baseConditions)) {
+        // Échantillon top N liquides : pas d'historique OI/L-S batch gratuit universel.
+        const sample = selectCandidates(working, SCREENER_POSITION_CAP);
+        if (working.length > SCREENER_POSITION_CAP) {
+          notes.push(
+            `OI/L-S : échantillon top ${SCREENER_POSITION_CAP} liquides (sur ${working.length})`,
+          );
+        } else {
+          notes.push(`OI/L-S : échantillon ${sample.length} symbole${sample.length > 1 ? "s" : ""}`);
+        }
+        set({
+          runState: "loading",
+          progress: { done: 0, total: sample.length },
+          note: notes.join(" · ") + " · enrichissement position…",
+        });
+        const { oiOk, lsOk } = await enrichPositionSample(sample);
+        if (runId !== currentRunId) return;
+        if (oiOk === 0 && lsOk === 0) {
+          notes.push("OI/L-S indisponibles (Binance futures data)");
+        } else if (oiOk < sample.length || lsOk < sample.length) {
+          notes.push(`OI ${oiOk}/${sample.length} · L/S ${lsOk}/${sample.length}`);
+        }
+        working = applyBaseFilters(sample, position);
+      }
+
+      const baseFiltered = working;
 
       // Sans filtre indicateur : résultats directs (triés par volume, plafond d'affichage).
       if (indicatorConditions.length === 0) {
@@ -327,7 +430,11 @@ mirrorOpenState("screener", screenerStore);
 
 // ─────────────────────────── Actions dérivées (chart / watchlist) ───────────────────────────
 
-/** Ouvre un résultat dans le graphe (source Binance + symbole + TF du run). */
+/**
+ * Ouvre un résultat dans le graphe (source Binance + symbole + TF du run).
+ * C2 navigateTo peut ne pas être merge : on utilise marketStore.setSymbol direct
+ * (équivalent appliquerNavigation pour symbole/TF/source).
+ */
 export function ouvrirDansChart(symbol: string): void {
   const m = marketStore.getState();
   m.setExchange("binance");
@@ -353,7 +460,20 @@ export const commandesScreener: Commande[] = [
     mnemonique: "EQS",
     libelle: "Screener d'actifs",
     categorie: "panneau",
-    motsCles: ["screener", "eqs", "scan", "filtre", "rsi", "funding", "volume", "survendu"],
+    motsCles: [
+      "screener",
+      "eqs",
+      "scan",
+      "filtre",
+      "rsi",
+      "funding",
+      "volume",
+      "survendu",
+      "crowded",
+      "squeeze",
+      "oi",
+      "positionnement",
+    ],
     apercu: "Ouvre / ferme le screener d'actifs",
     action: () => screenerStore.getState().toggle(),
   },

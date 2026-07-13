@@ -459,6 +459,104 @@ export async function fetchLongShortRatioHistory(
   }));
 }
 
+// ─────────────────────────── Batch multi-symboles (Lot B2) ───────────────────────────
+// L'API Coinalyze accepte `symbols` en liste CSV. Utile pour l'échantillon screener,
+// mais le free tier reste 40 req/min et l'historique OI multi-symboles peut être
+// tronqué — le store EQS préfère donc Binance `/futures/data` (sans clé, CORS *)
+// et n'utilise ces helpers qu'en option / extension.
+
+/** Taille max d'un batch symbols CSV (évite des URL trop longues côté proxy). */
+const BATCH_SYMBOLS_MAX = 25;
+
+/**
+ * Découpe une liste de symboles Binance en paquets mappés Coinalyze (`_PERP.A`),
+ * CSV par paquet. PURE (pas d'I/O).
+ */
+export function chunkCoinalyzeSymbols(
+  binanceSymbols: readonly string[],
+  maxPerChunk: number = BATCH_SYMBOLS_MAX,
+): string[][] {
+  const mapped = binanceSymbols.map(toCoinalyzeSymbol);
+  if (mapped.length === 0) return [];
+  const chunks: string[][] = [];
+  for (let i = 0; i < mapped.length; i += maxPerChunk) {
+    chunks.push(mapped.slice(i, i + maxPerChunk));
+  }
+  return chunks;
+}
+
+/**
+ * Open Interest courant (USD) pour plusieurs symboles en un (ou peu de) appel(s).
+ * Clés de la Map = symboles Binance d'entrée (pas l'id Coinalyze).
+ * Best-effort : symbole absent de la réponse → absent de la Map.
+ */
+export async function fetchOpenInterestBatch(
+  binanceSymbols: readonly string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (binanceSymbols.length === 0) return out;
+  // Table inverse Coinalyze → Binance pour re-mapper la réponse.
+  const coinaToBinance = new Map<string, string>();
+  for (const s of binanceSymbols) {
+    coinaToBinance.set(toCoinalyzeSymbol(s), s.trim().toUpperCase());
+  }
+  for (const chunk of chunkCoinalyzeSymbols(binanceSymbols)) {
+    const res = await request<CurrentPoint[]>("open-interest", {
+      symbols: chunk.join(","),
+      convert_to_usd: "true",
+    });
+    if (!Array.isArray(res)) continue;
+    for (const p of res) {
+      if (p === null || typeof p !== "object") continue;
+      const binance = coinaToBinance.get(p.symbol);
+      if (binance === undefined) continue;
+      if (Number.isFinite(p.value)) out.set(binance, p.value);
+    }
+  }
+  return out;
+}
+
+/**
+ * Historique OI (USD, clôture de bucket) multi-symboles pour une fenêtre [sinceMs, now].
+ * Clés Map = symbole Binance → points triés ascendant `{ oiUsd, time }`.
+ * Sert au calcul de ΔOI % (cf. `oiChangePctFromHist` dans data/screener.ts).
+ */
+export async function fetchOpenInterestHistoryBatch(
+  binanceSymbols: readonly string[],
+  period: string,
+  sinceMs: number,
+): Promise<Map<string, { time: number; oiUsd: number }[]>> {
+  const out = new Map<string, { time: number; oiUsd: number }[]>();
+  if (binanceSymbols.length === 0) return out;
+  const coinaToBinance = new Map<string, string>();
+  for (const s of binanceSymbols) {
+    coinaToBinance.set(toCoinalyzeSymbol(s), s.trim().toUpperCase());
+  }
+  const interval = normalizeInterval(period);
+  const to = Math.floor(Date.now() / 1000);
+  const from = Math.floor(sinceMs / 1000);
+  for (const chunk of chunkCoinalyzeSymbols(binanceSymbols)) {
+    const res = await request<HistoryResponse<OhlcHistoryPoint>[]>("open-interest-history", {
+      symbols: chunk.join(","),
+      interval,
+      from: String(from),
+      to: String(to),
+      convert_to_usd: "true",
+    });
+    if (!Array.isArray(res)) continue;
+    for (const series of res) {
+      const binance = coinaToBinance.get(series.symbol);
+      if (binance === undefined) continue;
+      const pts = series.history
+        .map((p) => ({ time: toMs(p.t), oiUsd: p.c }))
+        .filter((p) => Number.isFinite(p.oiUsd))
+        .sort((a, b) => a.time - b.time);
+      out.set(binance, pts);
+    }
+  }
+  return out;
+}
+
 /** Total de liquidations long vs short d'un même bucket temporel (barres bicolores). */
 export interface LiquidationBucket {
   time: number;

@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import type { Liquidation } from "@axiom/types";
-import { prochainReglementFunding, groupLiquidationBuckets } from "./coinalyze";
+import {
+  chunkCoinalyzeSymbols,
+  prochainReglementFunding,
+  groupLiquidationBuckets,
+  toCoinalyzeSymbol,
+} from "./coinalyze";
 
 describe("prochainReglementFunding", () => {
   const HUIT_H = 8 * 60 * 60 * 1000;
@@ -38,5 +43,20 @@ describe("groupLiquidationBuckets", () => {
   it("traite un notionnel NaN comme 0 (pas de propagation NaN)", () => {
     const withNan: Liquidation[] = [{ ...base, time: 300, side: "long", qtyUsd: NaN }];
     expect(groupLiquidationBuckets(withNan)).toEqual([{ time: 300, longUsd: 0, shortUsd: 0 }]);
+  });
+});
+
+describe("chunkCoinalyzeSymbols (batch B2)", () => {
+  it("mappe Binance → Coinalyze et découpe en paquets", () => {
+    expect(toCoinalyzeSymbol("btcusdt")).toBe("BTCUSDT_PERP.A");
+    const chunks = chunkCoinalyzeSymbols(["BTCUSDT", "ETHUSDT", "SOLUSDT"], 2);
+    expect(chunks).toEqual([
+      ["BTCUSDT_PERP.A", "ETHUSDT_PERP.A"],
+      ["SOLUSDT_PERP.A"],
+    ]);
+  });
+
+  it("renvoie [] pour une liste vide", () => {
+    expect(chunkCoinalyzeSymbols([])).toEqual([]);
   });
 });

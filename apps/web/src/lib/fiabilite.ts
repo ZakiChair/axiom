@@ -106,6 +106,14 @@ const CATALOGUE: Record<string, MetaFiabilite> = {
     label: "WS live · kline",
     detail: "Flux kline Binance + backfill REST.",
   },
+
+  // ─── Screener positionnement (OI Δ% / L-S, échantillon top N) ─────────────
+  "binance:futures:position": {
+    niveau: "partiel",
+    label: "échantillon top N · Binance",
+    detail:
+      "Δ OI et L/S via /futures/data (1 symbole/req, sans clé). Screener EQS : top N liquides seulement — pas d'univers complet en gratuit.",
+  },
 };
 
 /** Fallback pour toute source non catalogue. */

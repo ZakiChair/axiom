@@ -5,10 +5,11 @@
  * interactif. Ouverture via la commande EQS (toggle). Il expose un builder de filtres
  * compact (conditions de base + conditions indicateurs), des presets (livrés + perso),
  * un bouton de run avec progression, et une table de résultats triable (clic = ouvre le
- * chart, bouton = ajoute à la watchlist).
+ * chart via marketStore.setSymbol, bouton = ajoute à la watchlist).
  *
  * Toutes les limites sont affichées honnêtement : le TF ne s'applique qu'aux filtres
- * indicateurs, et l'étage indicateurs est plafonné à SCREENER_CAP symboles par run.
+ * indicateurs, l'étage indicateurs est plafonné à SCREENER_CAP, et OI/L-S (si demandés)
+ * ne couvrent qu'un échantillon top N liquides (badge de couverture).
  */
 import { useMemo, useState } from "react";
 import { useStore } from "zustand";
@@ -25,6 +26,7 @@ import {
   INDICATOR_FIELDS,
   OPERATORS,
   SCREENER_CAP,
+  SCREENER_POSITION_CAP,
   SCREENER_TIMEFRAMES,
   type BaseCondition,
   type BaseField,
@@ -33,10 +35,18 @@ import {
   type ScreenerRow,
 } from "../data/screener";
 import { formatPct, formatPrice, formatUsd } from "../lib/format";
-import { EnTeteFenetre, ErreurBloc, Vide } from "./ui";
+import { metaSource } from "../lib/fiabilite";
+import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, Vide } from "./ui";
 
 /** Colonnes triables de la table de résultats. */
-type SortKey = "symbol" | "lastPrice" | "priceChangePct24h" | "volumeUsd24h" | "fundingPct";
+type SortKey =
+  | "symbol"
+  | "lastPrice"
+  | "priceChangePct24h"
+  | "volumeUsd24h"
+  | "fundingPct"
+  | "oiChangePct"
+  | "longShortRatio";
 interface SortState {
   key: SortKey;
   dir: 1 | -1;
@@ -237,7 +247,7 @@ export function ScreenerWindow() {
     return [...rows].sort((a, b) => {
       const va = val(a, sort.key);
       const vb = val(b, sort.key);
-      // Valeurs manquantes (ex. funding) toujours en fin de tri.
+      // Valeurs manquantes (ex. funding / OI) toujours en fin de tri.
       if (va === undefined && vb === undefined) return 0;
       if (va === undefined) return 1;
       if (vb === undefined) return -1;
@@ -247,6 +257,20 @@ export function ScreenerWindow() {
       return (va - vb) * sort.dir;
     });
   }, [rows, sort]);
+
+  /** Colonnes OI / L-S uniquement si au moins une ligne les porte (échantillon enrichi). */
+  const showPositionCols = useMemo(
+    () => rows.some((r) => r.oiChangePct !== undefined || r.longShortRatio !== undefined),
+    [rows],
+  );
+
+  /** Badge de couverture si la note mentionne l'échantillon OI/L-S. */
+  const showPositionBadge =
+    note !== null && (note.includes("OI/L-S") || note.includes("échantillon"));
+
+  const gridCols = showPositionCols
+    ? "grid-cols-[1.3fr_0.8fr_0.7fr_0.8fr_0.75fr_0.7fr_0.7fr_auto]"
+    : "grid-cols-[1.4fr_0.9fr_0.8fr_0.9fr_0.9fr_auto]";
 
   return (
     <>
@@ -263,6 +287,11 @@ export function ScreenerWindow() {
                 type="button"
                 onClick={() => loadPreset(p.id)}
                 className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text"
+                title={
+                  p.id.startsWith("builtin:crowded") || p.id === "builtin:funding-extreme"
+                    ? `Positionnement · OI/L-S sur top ${SCREENER_POSITION_CAP} liquides`
+                    : undefined
+                }
               >
                 {p.name}
               </button>
@@ -403,18 +432,31 @@ export function ScreenerWindow() {
             </div>
           )}
 
-          {note !== null && <p className="text-[10px] text-text-dim">{note}</p>}
+          {note !== null && (
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-[10px] text-text-dim">{note}</p>
+              {showPositionBadge && (
+                <BadgeFiabilite meta={metaSource("binance:futures:position")} />
+              )}
+            </div>
+          )}
           {error !== null && <ErreurBloc>{error}</ErreurBloc>}
         </section>
 
         {/* Résultats */}
         <section className="rounded-md border border-border bg-bg">
-          <div className="grid grid-cols-[1.4fr_0.9fr_0.8fr_0.9fr_0.9fr_auto] items-center gap-2 border-b border-border px-3 py-1.5">
+          <div className={`grid ${gridCols} items-center gap-2 border-b border-border px-3 py-1.5`}>
             <SortHeader label="Symbole" colKey="symbol" sort={sort} setSort={setSort} />
             <SortHeader label="Prix" colKey="lastPrice" sort={sort} setSort={setSort} align="right" />
             <SortHeader label="Δ24h" colKey="priceChangePct24h" sort={sort} setSort={setSort} align="right" />
             <SortHeader label="Vol 24h" colKey="volumeUsd24h" sort={sort} setSort={setSort} align="right" />
             <SortHeader label="Funding" colKey="fundingPct" sort={sort} setSort={setSort} align="right" />
+            {showPositionCols && (
+              <>
+                <SortHeader label="Δ OI" colKey="oiChangePct" sort={sort} setSort={setSort} align="right" />
+                <SortHeader label="L/S" colKey="longShortRatio" sort={sort} setSort={setSort} align="right" />
+              </>
+            )}
             <span className="text-right text-[10px] uppercase tracking-wide text-text-dim">Wl</span>
           </div>
           <div className="max-h-[40vh] overflow-y-auto">
@@ -426,13 +468,13 @@ export function ScreenerWindow() {
               sortedRows.map((r) => (
                 <div
                   key={r.symbol}
-                  className="grid grid-cols-[1.4fr_0.9fr_0.8fr_0.9fr_0.9fr_auto] items-center gap-2 border-b border-border/50 px-3 py-1.5 text-[11px] last:border-b-0 hover:bg-surface"
+                  className={`grid ${gridCols} items-center gap-2 border-b border-border/50 px-3 py-1.5 text-[11px] last:border-b-0 hover:bg-surface`}
                 >
                   <button
                     type="button"
                     onClick={() => ouvrirDansChart(r.symbol)}
                     className="truncate text-left font-medium text-text transition hover:text-up"
-                    title={`Ouvrir ${r.symbol}`}
+                    title={`Ouvrir ${r.symbol} dans le chart`}
                   >
                     {r.symbol}
                     {r.indicatorValues && r.indicatorValues.length > 0 && (
@@ -455,6 +497,24 @@ export function ScreenerWindow() {
                   >
                     {formatPct(r.fundingPct, 4)}
                   </span>
+                  {showPositionCols && (
+                    <>
+                      <span
+                        className={`text-right tabular-nums ${
+                          r.oiChangePct === undefined
+                            ? "text-text-dim"
+                            : r.oiChangePct >= 0
+                              ? "text-up"
+                              : "text-down"
+                        }`}
+                      >
+                        {r.oiChangePct === undefined ? "—" : formatPct(r.oiChangePct)}
+                      </span>
+                      <span className="text-right tabular-nums text-text-dim">
+                        {r.longShortRatio === undefined ? "—" : r.longShortRatio.toFixed(2)}
+                      </span>
+                    </>
+                  )}
                   <button
                     type="button"
                     onClick={() => ajouterAWatchlist(r.symbol)}

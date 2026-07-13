@@ -50,8 +50,9 @@ export const RACCOURCIS_AIDE: { touche: string; description: string }[] = [
   {
     touche: "⌘K puis mnémo",
     description:
-      "Fonctions (panneaux) : DES ECO NEWS CORR CHAIN MAP PORT NOTE EQS TERM OMON DOM TAPE BT REPLAY RATE COT SEAG VOL FUND BRIEF GLOBE · OI/FUND MARKS (chart) · GRID1 GRID2 GRID2V GRID4 (disposition) · TICKER (bandeau news) · ONBOARD (rejouer l'accueil)",
+      "Fonctions (panneaux) : DES ECO NEWS CORR CHAIN MAP PORT NOTE EQS TERM OMON DOM TAPE BT REPLAY RATE COT SEAG VOL FUND BRIEF GLOBE · OI/FUND MARKS (chart) · GRID1 GRID2 GRID2V GRID4 (disposition) · TICKER (bandeau news) · PLAY PLAY-SCALP PLAY-FADE PLAY-FOMC PLAY-RISK PLAY-OPT (playbooks) · ONBOARD (rejouer l'accueil)",
   },
+  { touche: "⌘K → PLAY*", description: "Playbooks 1-clic (scalp, funding, FOMC, risk-off, options)" },
   { touche: "⌘K → ONBOARD", description: "Rejouer le parcours d'onboarding (3 étapes)" },
   { touche: "1 – 9", description: "Timeframes rapides (1m, 5m, 15m, 1h, 4h, 1d, 1w, 1M, 3M)" },
   { touche: "/", description: "Focus sur la recherche de paires" },

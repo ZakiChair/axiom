@@ -17,6 +17,10 @@
  *
  * Persistance : localStorage INTERNE au module (clé `axiom:workspaces:v1`, hydratée au
  * chargement, sauvegardée à chaque changement) — même pattern que `store/alerts`.
+ *
+ * Playbooks 1-clic (scénarios métier figés PLAY / PLAY-SCALP…) : module séparé
+ * `data/playbooks.ts`, greffés dans la palette depuis App.tsx — distincts des
+ * workspaces (snapshot libre renommable vs scénario métier figé).
  */
 import { createStore } from "zustand/vanilla";
 import type { ExchangeId, Timeframe } from "@axiom/types";

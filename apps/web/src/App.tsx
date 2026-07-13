@@ -44,6 +44,7 @@ import { commandes as replayCommands } from "./store/replay";
 import { chartLayoutStore, type ChartLayoutMode } from "./store/chart-layout";
 import { commandes as globeCommands } from "./store/globe-ui";
 import { commandesOnboarding } from "./store/onboarding";
+import { commandesPlaybooks } from "./data/playbooks";
 import { windowPanelCommands } from "./commands/windowPanels";
 import { enregistrerCommandes, type Commande } from "./commands/registry";
 import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
@@ -109,6 +110,8 @@ enregistrerCommandes([
   ...windowPanelCommands,
   // Onboarding premier lancement (⌘K → ONBOARD pour rejouer).
   ...commandesOnboarding,
+  // Playbooks 1-clic (⌘K → PLAY / PLAY-SCALP / PLAY-FADE / PLAY-FOMC / PLAY-RISK / PLAY-OPT).
+  ...commandesPlaybooks,
 ]);
 
 // ─────────────────────────── Fenêtres lazy (code-splitting) ───────────────────────────

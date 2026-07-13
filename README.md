@@ -37,11 +37,26 @@ pnpm install
 cp apps/web/.env.example apps/web/.env   # puis renseigner les clés utiles
 ```
 
+## Démarrage
+
+One-shot (recommandé) — cold-start en une commande :
+
+```bash
+pnpm up           # daemon + Vite dev → http://localhost:5173
+pnpm up:prod      # build front + daemon → http://127.0.0.1:8787
+```
+
+`pnpm up` vérifie `pnpm`/`bun`, lance `pnpm install` si besoin, démarre le daemon
+(log `logs/daemon.log`), attend `/health` (15 s), puis le front. Ctrl+C arrête
+les process lancés par le script.
+
 ## Commandes
 
 | Commande | Effet |
 |---|---|
-| `pnpm dev` | Front Vite (dev, proxys CORS intégrés) |
+| `pnpm up` | One-shot dev (daemon + Vite) |
+| `pnpm up:prod` | One-shot prod (build + daemon sert le dist) |
+| `pnpm dev` | Front Vite seul (dev, proxys CORS intégrés) |
 | `pnpm daemon` | Daemon localhost `127.0.0.1:8787` |
 | `pnpm prod` | Build front + sert le dist via le daemon |
 | `pnpm test` | Tests de tous les packages / apps |
@@ -49,14 +64,14 @@ cp apps/web/.env.example apps/web/.env   # puis renseigner les clés utiles
 | `pnpm build` | Build récursif |
 | `pnpm check` | Contrôle qualité local (typecheck + test + build web) |
 
-Dev typique (deux terminaux) :
+Fallback dual-terminal (si besoin de séparer les logs) :
 
 ```bash
-pnpm dev          # http://localhost:5173
 pnpm daemon       # http://127.0.0.1:8787  (optionnel en dev)
+pnpm dev          # http://localhost:5173
 ```
 
-Prod locale :
+Prod locale (équivalent manuel de `pnpm up:prod`) :
 
 ```bash
 pnpm prod

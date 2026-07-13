@@ -12,6 +12,8 @@
     "test": "pnpm -r test",
     "daemon": "bun apps/daemon/src/index.ts",
     "prod": "pnpm --filter @axiom/web build && bun apps/daemon/src/index.ts",
+    "up": "bash scripts/axiom-up.sh",
+    "up:prod": "bash scripts/axiom-up.sh --prod",
     "check": "bash scripts/ci.sh"
   },
   "devDependencies": {

@@ -30,6 +30,12 @@ import {
   type Position,
   type Direction,
 } from "../store/portfolio";
+import {
+  parsePortfolioCsv,
+  ligneCsvVersNouvelle,
+  telechargerPortfolioCsv,
+  type ResultatParseCsvPortfolio,
+} from "../store/portfolioCsv";
 import { notesUiStore } from "../store/notes";
 import { formatPrice, formatUsd, formatPct } from "../lib/format";
 import { EnTeteFenetre, Vide } from "./ui";
@@ -102,11 +108,14 @@ export function PortfolioWindow() {
   const expoBruteRef = useRef<HTMLSpanElement>(null);
   const expoNetteRef = useRef<HTMLSpanElement>(null);
 
-  // État d'ajout / clôture / proposition de post-mortem (basse fréquence, React admis).
+  // État d'ajout / clôture / proposition de post-mortem / import CSV (basse fréquence, React admis).
   const [form, setForm] = useState({ symbole: "", direction: "long" as Direction, taille: "", prixEntree: "", fraisPct: "", note: "" });
   const [closing, setClosing] = useState<{ id: string; prix: string } | null>(null);
   const [pmPrompt, setPmPrompt] = useState<{ position: Position; prixSortie: number } | null>(null);
   const [showClosed, setShowClosed] = useState(false);
+  /** Dry-run import CSV (null = panneau masqué). */
+  const [importDryRun, setImportDryRun] = useState<ResultatParseCsvPortfolio | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   /** Repeint toutes les lignes ouvertes + les totaux depuis les derniers prix connus. */
   const repaintAll = useCallback(() => {
@@ -212,10 +221,73 @@ export function PortfolioWindow() {
     marketStore.getState().setSymbol(p.symbole);
   };
 
+  /** Ouvre le sélecteur de fichier CSV (import dry-run). */
+  const declencherImportCsv = () => {
+    fileInputRef.current?.click();
+  };
+
+  /** Lit le fichier, parse en dry-run (aucune mutation store tant que non confirmé). */
+  const onFichierCsv = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const texte = typeof reader.result === "string" ? reader.result : "";
+      setImportDryRun(parsePortfolioCsv(texte));
+    };
+    reader.readAsText(file);
+    // Reset pour permettre de re-sélectionner le même fichier.
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  /** Confirme le dry-run : ajoute chaque ligne valide (source défaut = exchange actif). */
+  const confirmerImportCsv = () => {
+    if (!importDryRun || importDryRun.ok.length === 0) {
+      setImportDryRun(null);
+      return;
+    }
+    const ajouter = portfolioStore.getState().ajouter;
+    for (const l of importDryRun.ok) {
+      ajouter(ligneCsvVersNouvelle(l, activeExchange));
+    }
+    setImportDryRun(null);
+  };
+
   return (
     <>
+      {/* Input fichier hors flux (déclenché programmatiquement) */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="hidden"
+        aria-hidden
+        tabIndex={-1}
+        onChange={(e) => onFichierCsv(e.target.files?.[0])}
+      />
+
       {/* En-tête standard, sans croix de fermeture : celle-ci est fournie par le chrome FloatingWindow */}
       <EnTeteFenetre titre="Portefeuille" sousTitre="Positions manuelles · PnL live" />
+
+      {/* Barre import / export CSV */}
+      <div className="flex shrink-0 items-center justify-end gap-1.5 border-b border-border px-4 py-1.5">
+        <button
+          type="button"
+          onClick={declencherImportCsv}
+          className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] text-text-dim transition hover:text-accent"
+          title="Importer des positions depuis un CSV (dry-run)"
+        >
+          Import CSV
+        </button>
+        <button
+          type="button"
+          onClick={() => telechargerPortfolioCsv(positions)}
+          disabled={positions.length === 0}
+          className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] text-text-dim transition hover:text-accent disabled:opacity-40"
+          title="Exporter les positions en CSV"
+        >
+          Export CSV
+        </button>
+      </div>
 
       {/* Totaux (maj impérative sur tick) */}
       <div className="grid shrink-0 grid-cols-3 gap-2 border-b border-border px-4 py-3 text-center">
@@ -234,6 +306,73 @@ export function PortfolioWindow() {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+        {/* Dry-run import CSV : validation avant écriture store */}
+        {importDryRun && (
+          <div className="mb-3 rounded-md border border-accent/50 bg-bg px-3 py-2 text-[11px] text-text">
+            <div className="mb-1.5 font-medium">
+              Import CSV — dry-run
+            </div>
+            <div className="mb-1.5 flex gap-3 text-[10px] text-text-dim">
+              <span>
+                Valides :{" "}
+                <span className="tabular-nums text-up">{importDryRun.ok.length}</span>
+              </span>
+              <span>
+                Erreurs :{" "}
+                <span
+                  className={`tabular-nums ${
+                    importDryRun.erreurs.length > 0 ? "text-down" : ""
+                  }`}
+                >
+                  {importDryRun.erreurs.length}
+                </span>
+              </span>
+            </div>
+            {importDryRun.ok.length > 0 && (
+              <div className="mb-1.5 max-h-24 overflow-y-auto rounded border border-border bg-surface/40 px-2 py-1 text-[10px] text-text-dim">
+                {importDryRun.ok.slice(0, 12).map((l, i) => (
+                  <div key={`${l.symbole}-${i}`} className="tabular-nums">
+                    {l.symbole} {l.direction} {l.taille} @ {l.prixEntree}
+                    {l.source ? ` · ${l.source}` : " · (exchange actif)"}
+                  </div>
+                ))}
+                {importDryRun.ok.length > 12 && (
+                  <div>… +{importDryRun.ok.length - 12} autres</div>
+                )}
+              </div>
+            )}
+            {importDryRun.erreurs.length > 0 && (
+              <div className="mb-1.5 max-h-20 overflow-y-auto rounded border border-down/40 bg-surface/40 px-2 py-1 text-[10px] text-down">
+                {importDryRun.erreurs.slice(0, 8).map((e, i) => (
+                  <div key={`${e.ligne}-${i}`}>
+                    L{e.ligne}: {e.message}
+                  </div>
+                ))}
+                {importDryRun.erreurs.length > 8 && (
+                  <div>… +{importDryRun.erreurs.length - 8} autres</div>
+                )}
+              </div>
+            )}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={confirmerImportCsv}
+                disabled={importDryRun.ok.length === 0}
+                className="rounded border border-border bg-surface px-2 py-1 text-[10px] transition hover:text-accent disabled:opacity-40"
+              >
+                Importer {importDryRun.ok.length > 0 ? `(${importDryRun.ok.length})` : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => setImportDryRun(null)}
+                className="rounded px-2 py-1 text-[10px] text-text-dim transition hover:text-text"
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Proposition de post-mortem après clôture */}
         {pmPrompt && (
           <div className="mb-3 flex items-center justify-between gap-2 rounded-md border border-accent/50 bg-bg px-3 py-2 text-[11px] text-text">

@@ -1,19 +1,21 @@
 /**
- * Fenêtre « BRIEF » — Snapshot marché matinal. Non modale, montée génériquement sous
- * <FloatingWindow> (comme FUND/VOL).
+ * Fenêtre « BRIEF » — Snapshot marché (ouverture + review de session). Non modale,
+ * montée génériquement sous <FloatingWindow> (comme FUND/VOL).
  *
  * POURQUOI : donner en UN écran le contexte d'ouverture de journée en composant des
  * sources DÉJÀ intégrées (watchlist overnight, dérivés, flux ETF, éco du jour, actualités
- * + Fear & Greed, DVOL). C'est un INSTANTANÉ, pas un flux : les données sont chargées au
- * montage (et sur « Rafraîchir »), JAMAIS en polling continu. Chaque section se charge
- * indépendamment (data/brief.ts délègue aux modules existants) : une source en panne
- * affiche ErreurBloc/Vide sans casser l'écran. L'export « → Notes » sérialise l'instantané
+ * + Fear & Greed, DVOL) ET la review de session du soir (trades clos, PnL réalisé,
+ * alertes déclenchées, éco passés — stores portfolio/alertes locaux). C'est un
+ * INSTANTANÉ, pas un flux : les données marché sont chargées au montage (et sur
+ * « Rafraîchir »), JAMAIS en polling continu. Chaque section se charge indépendamment
+ * (data/brief.ts délègue aux modules existants) : une source en panne affiche
+ * ErreurBloc/Vide sans casser l'écran. L'export « → Notes » sérialise l'instantané
  * via la fonction PURE `briefEnMarkdown` et l'ajoute au journal (store notes existant).
  *
  * Fenêtre-vitrine du standard UI : primitives components/ui.tsx + helpers lib/format.ts,
  * store UI vanilla éphémère + `mirrorOpenState`, aucun helper de formatage local dupliqué.
  */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
@@ -21,7 +23,10 @@ import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { watchlistStore } from "../store/watchlist";
 import { marketStore } from "../store/market";
 import { notesStore } from "../store/notes";
+import { portfolioStore } from "../store/portfolio";
+import { alertsStore } from "../store/alerts";
 import {
+  assemblerSession,
   briefEnMarkdown,
   fetchDerivsBrief,
   fetchDvolBrief,
@@ -108,6 +113,12 @@ function fmtFunding(rate: number | null): string {
   return rate === null ? VALEUR_ABSENTE : formatPct(rate * 100, 4);
 }
 
+/** Montant USD avec « + » explicite si positif (review PnL). */
+function fmtUsdSigne(v: number): string {
+  const base = formatUsd(v);
+  return v > 0 ? `+${base}` : base;
+}
+
 /** Titre de bloc (petites capitales espacées, ton estompé). */
 function TitreBloc({ children }: { children: ReactNode }) {
   return (
@@ -129,6 +140,9 @@ function corps<T>(section: Section<T>, erreur: string, rendu: (data: T) => React
 
 export function BriefWindow() {
   const open = useStore(briefUiStore, (s) => s.open);
+  // Stores locaux pour la review de session (pas de fetch réseau).
+  const positions = useStore(portfolioStore, (s) => s.positions);
+  const journalAlertes = useStore(alertsStore, (s) => s.journal);
 
   // Horodatage du snapshot courant (fraîcheur affichée + référence des délais/âges).
   const [chargeA, setChargeA] = useState<number | null>(null);
@@ -232,8 +246,30 @@ export function BriefWindow() {
     return () => window.clearTimeout(t);
   }, [exporte]);
 
+  const instant = chargeA ?? Date.now();
+  const noteFraicheur = chargeA === null ? "maj…" : `maj ${formatHeureMinute(chargeA)}`;
+
+  // Session : pure, locale — re-calculée quand positions/journal/éco/horloge snapshot changent.
+  const session = useMemo(
+    () =>
+      assemblerSession(
+        positions,
+        journalAlertes,
+        eco.statut === "error" ? null : eco.data,
+        instant,
+      ),
+    [positions, journalAlertes, eco.statut, eco.data, instant],
+  );
+
   const exporterVersNotes = (): void => {
+    const now = chargeA ?? Date.now();
     const donnees: DonneesBrief = {
+      session: assemblerSession(
+        portfolioStore.getState().positions,
+        alertsStore.getState().journal,
+        eco.statut === "error" ? null : eco.data,
+        now,
+      ),
       watchlist: watchlist.data,
       derivs: derivs.data,
       etf: etf.data,
@@ -242,20 +278,21 @@ export function BriefWindow() {
       fearGreed: fearGreed.data,
       dvol: dvol.data,
     };
-    const now = chargeA ?? Date.now();
     const { symbol, exchange } = marketStore.getState();
-    notesStore.getState().ajouter({ symbole: symbol, source: exchange, texte: briefEnMarkdown(donnees, now), tags: ["brief"] });
+    notesStore.getState().ajouter({
+      symbole: symbol,
+      source: exchange,
+      texte: briefEnMarkdown(donnees, now),
+      tags: ["brief", "session"],
+    });
     setExporte(true);
   };
-
-  const instant = chargeA ?? Date.now();
-  const noteFraicheur = chargeA === null ? "maj…" : `maj ${formatHeureMinute(chargeA)}`;
 
   return (
     <>
       <EnTeteFenetre
         titre="BRIEF · Point marché"
-        sousTitre={`Snapshot d'ouverture · ${noteFraicheur}`}
+        sousTitre={`Ouverture + review de session · ${noteFraicheur}`}
         actions={
           <>
             <button
@@ -274,6 +311,121 @@ export function BriefWindow() {
       />
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        {/* 0) Review de session (soir) — stores locaux portfolio + alertes + éco passés. */}
+        <section className="space-y-2">
+          <TitreBloc>Session · review</TitreBloc>
+          <div className="grid grid-cols-3 gap-2">
+            <Metric
+              label="PnL réalisé"
+              value={fmtUsdSigne(session.pnlRealise)}
+              couleur={couleurVariation(session.pnlRealise)}
+            />
+            <Metric label="Trades clos" value={String(session.tradesClos.length)} />
+            <Metric label="W / L" value={`${session.gagnants} / ${session.perdants}`} />
+          </div>
+
+          <div className="space-y-1">
+            <p className="text-[10px] uppercase tracking-wide text-text-dim">Trades clos</p>
+            {session.tradesClos.length === 0 ? (
+              <Vide>Aucun trade clôturé aujourd&apos;hui.</Vide>
+            ) : (
+              <table className="w-full text-[11px] tabular-nums">
+                <tbody>
+                  {session.tradesClos.map((t, i) => (
+                    <tr
+                      key={`${t.symbole}-${t.dateSortie}-${i}`}
+                      className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-bg"
+                      onClick={() =>
+                        navigateTo({ symbol: t.symbole, exchange: "binance", source: "brief" })
+                      }
+                      title={`Ouvrir ${t.symbole} dans le chart`}
+                    >
+                      <td className="py-1 text-text-dim">{formatHeureMinute(t.dateSortie)}</td>
+                      <td className="py-1 text-text">{t.symbole}</td>
+                      <td className="py-1 text-text-dim">{t.direction}</td>
+                      <td
+                        className="py-1 text-right"
+                        style={{ color: couleurVariation(t.pnlNet) }}
+                      >
+                        {fmtUsdSigne(t.pnlNet)}
+                      </td>
+                      <td
+                        className="py-1 text-right"
+                        style={{ color: couleurVariation(t.pnlPct) }}
+                      >
+                        {formatPct(t.pnlPct)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <p className="text-[10px] uppercase tracking-wide text-text-dim">
+              Alertes déclenchées
+              {session.alertes.length > 0 ? ` · ${session.alertes.length}` : ""}
+            </p>
+            {session.alertes.length === 0 ? (
+              <Vide>Aucune alerte déclenchée aujourd&apos;hui.</Vide>
+            ) : (
+              <div className="space-y-1">
+                {session.alertes.map((a, i) => (
+                  <div
+                    key={`${a.alertId}-${a.ts}-${i}`}
+                    className="flex items-baseline gap-2 text-[11px]"
+                  >
+                    <span className="w-12 shrink-0 tabular-nums text-text-dim">
+                      {formatHeureMinute(a.ts)}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-text">{a.message}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <p className="text-[10px] uppercase tracking-wide text-text-dim">Éco passés</p>
+            {eco.statut === "idle" || eco.statut === "loading" ? (
+              <Chargement />
+            ) : session.ecoPasses === null ? (
+              <ErreurBloc>Calendrier éco indisponible.</ErreurBloc>
+            ) : session.ecoPasses.length === 0 ? (
+              <Vide>Aucun événement à fort impact écoulé aujourd&apos;hui.</Vide>
+            ) : (
+              <div className="space-y-1">
+                {session.ecoPasses.map((ev, i) => (
+                  <button
+                    key={`pass-${ev.time}-${i}`}
+                    type="button"
+                    onClick={() =>
+                      navigateTo({
+                        markTime: ev.time,
+                        markLabel: `${ev.pays} ${ev.titre}`,
+                        source: "brief",
+                      })
+                    }
+                    title="Marquer sur le chart"
+                    className="flex w-full items-baseline gap-2 text-left text-[11px] transition hover:bg-bg"
+                  >
+                    <span className="w-14 shrink-0 tabular-nums text-text-dim">
+                      {ev.timeApprox ? "~" : ""}
+                      {formatHeureMinute(ev.time)}
+                    </span>
+                    <span className="w-10 shrink-0 text-text-dim">{ev.pays}</span>
+                    <span className="min-w-0 flex-1 truncate text-text">{ev.titre}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <NoteSource>
+            Portefeuille local · journal alertes · calendrier éco (passés) · {noteFraicheur}.
+          </NoteSource>
+        </section>
+
         {/* 1) Watchlist overnight (Binance REST). */}
         <section className="space-y-2">
           <TitreBloc>Watchlist · overnight</TitreBloc>

@@ -1,15 +1,18 @@
 /**
- * BRIEF — assemblage du « point marché » matinal.
+ * BRIEF — assemblage du « point marché » (ouverture + review de session soir).
  *
  * POURQUOI ce module : la fenêtre BRIEF ne fait QUE composer, en un seul écran, des
  * sources DÉJÀ intégrées ailleurs dans le terminal (watchlist/tickers Binance, dérivés
- * Coinalyze/Binance, flux ETF SoSoValue, calendrier éco, veille news, DVOL Deribit).
- * Aucune source ni clé nouvelle. On centralise ici les FETCHERS par section — chacun
- * DÉLÈGUE aux modules data existants et se charge indépendamment (l'appelant les combine
- * en Promise.allSettled : une source en panne n'ébrèche pas les autres) — et la fonction
- * PURE `briefEnMarkdown`, testable sans DOM, qui sérialise l'instantané pour l'export
+ * Coinalyze/Binance, flux ETF SoSoValue, calendrier éco, veille news, DVOL Deribit) plus
+ * la review de session locale (trades clos du portefeuille, journal d'alertes, éco
+ * passés). Aucune source ni clé nouvelle. On centralise ici les FETCHERS par section —
+ * chacun DÉLÈGUE aux modules data existants et se charge indépendamment (l'appelant les
+ * combine en Promise.allSettled : une source en panne n'ébrèche pas les autres) — les
+ * assembleurs PURES de session (`assemblerSession`, …) et la fonction PURE
+ * `briefEnMarkdown`, testable sans DOM, qui sérialise l'instantané pour l'export
  * « → Notes ». Les seules fonctions à effet de bord sont les `fetch*` ; le reste est pur.
  */
+import type { Declenchement } from "@axiom/alerts";
 import { fetchOpenInterestHist } from "./binanceFutures";
 import { coinalyzeProvider, fetchPredictedFundingRate } from "./coinalyze";
 import { fetchEtfFlows, type ActifEtf } from "./onchain/etf";
@@ -20,6 +23,12 @@ import { fetchToutesLesNews, type NewsItem } from "./news";
 import { resolveTickerSource } from "./ticker";
 import { watchlistStore } from "../store/watchlist";
 import { getSoSoValueKey } from "../store/sosovalue";
+import {
+  debutJourLocalMs,
+  pnlRealisePosition,
+  type Direction,
+  type Position,
+} from "../store/portfolio";
 import {
   formatAge,
   formatDateComplete,
@@ -93,11 +102,52 @@ export interface DvolBrief {
   valeur: number | null;
 }
 
+/** Trade clôturé du jour civil local (review de session). */
+export interface TradeClosBrief {
+  symbole: string;
+  direction: Direction;
+  /** PnL net réalisé (devise de cotation). */
+  pnlNet: number;
+  /** Rendement net en % du notionnel d'entrée. */
+  pnlPct: number;
+  dateSortie: number;
+  prixEntree: number;
+  prixSortie: number;
+}
+
+/** Déclenchement d'alerte du jour civil local. */
+export interface AlerteDeclencheeBrief {
+  alertId: string;
+  ts: number;
+  message: string;
+  valeur: number;
+}
+
+/**
+ * Review de session (soir) : trades clos, PnL réalisé, alertes, éco passés.
+ * Assemblée localement (portfolio + journal alertes + calendrier déjà chargé).
+ */
+export interface SessionBrief {
+  tradesClos: TradeClosBrief[];
+  /** Somme des PnL nets des clôtures du jour. */
+  pnlRealise: number;
+  gagnants: number;
+  perdants: number;
+  alertes: AlerteDeclencheeBrief[];
+  /**
+   * Évènements éco fort impact du jour déjà écoulés.
+   * `null` = calendrier éco indisponible (section absente).
+   */
+  ecoPasses: EvenementBrief[] | null;
+}
+
 /**
  * Instantané complet du brief passé à `briefEnMarkdown`. `null` = section absente/en
  * échec (la fonction markdown tolère chaque section manquante indépendamment).
  */
 export interface DonneesBrief {
+  /** Review de session (local) — absente seulement si non assemblée. */
+  session: SessionBrief | null;
   watchlist: LigneWatchlist[] | null;
   derivs: LigneDeriv[] | null;
   etf: EtfBrief[] | null;
@@ -153,9 +203,100 @@ export function top5News(items: readonly NewsItem[]): TitreNews[] {
     .map((it) => ({ id: it.id, titre: it.title, source: it.source, time: it.time }));
 }
 
+/**
+ * Positions clôturées dont `dateSortie` tombe le jour civil local de `now`, triées
+ * chronologiquement. Ignore les clôtures sans PnL calculable. PURE.
+ */
+export function tradesClosDuJour(positions: readonly Position[], now: number): TradeClosBrief[] {
+  const debut = debutJourLocalMs(now);
+  const out: TradeClosBrief[] = [];
+  for (const p of positions) {
+    if (p.statut !== "clos") continue;
+    const sortie = p.dateSortie;
+    if (sortie === undefined || sortie < debut) continue;
+    // Hors du jour civil (horloge injectée) — évite d'inclure un futur saisi à la main.
+    if (sortie > now) continue;
+    const pnl = pnlRealisePosition(p);
+    if (pnl === null || p.prixSortie === undefined) continue;
+    out.push({
+      symbole: p.symbole,
+      direction: p.direction,
+      pnlNet: pnl.net,
+      pnlPct: pnl.pct,
+      dateSortie: sortie,
+      prixEntree: p.prixEntree,
+      prixSortie: p.prixSortie,
+    });
+  }
+  out.sort((a, b) => a.dateSortie - b.dateSortie);
+  return out;
+}
+
+/**
+ * Entrées du journal d'alertes dont `ts` tombe le jour civil local de `now`, triées
+ * chronologiquement (le journal store est plus-récent-en-tête). PURE.
+ */
+export function alertesDeclencheesDuJour(
+  journal: readonly Declenchement[],
+  now: number,
+): AlerteDeclencheeBrief[] {
+  const debut = debutJourLocalMs(now);
+  const out: AlerteDeclencheeBrief[] = [];
+  for (const d of journal) {
+    if (d.ts < debut || d.ts > now) continue;
+    out.push({ alertId: d.alertId, ts: d.ts, message: d.message, valeur: d.valeur });
+  }
+  out.sort((a, b) => a.ts - b.ts);
+  return out;
+}
+
+/** Évènements éco déjà écoulés à `now` (time ≤ now), ordre inchangé. PURE. */
+export function evenementsEcoPasses(
+  events: readonly EvenementBrief[],
+  now: number,
+): EvenementBrief[] {
+  return events.filter((e) => e.time <= now);
+}
+
+/**
+ * Assemble la section Session depuis le portefeuille, le journal d'alertes et les
+ * évènements éco du jour (déjà filtrés fort impact). `eco === null` → calendrier
+ * indisponible (ecoPasses null). PURE.
+ */
+export function assemblerSession(
+  positions: readonly Position[],
+  journal: readonly Declenchement[],
+  eco: readonly EvenementBrief[] | null,
+  now: number,
+): SessionBrief {
+  const tradesClos = tradesClosDuJour(positions, now);
+  let pnlRealise = 0;
+  let gagnants = 0;
+  let perdants = 0;
+  for (const t of tradesClos) {
+    pnlRealise += t.pnlNet;
+    if (t.pnlNet > 0) gagnants += 1;
+    else if (t.pnlNet < 0) perdants += 1;
+  }
+  return {
+    tradesClos,
+    pnlRealise,
+    gagnants,
+    perdants,
+    alertes: alertesDeclencheesDuJour(journal, now),
+    ecoPasses: eco === null ? null : evenementsEcoPasses(eco, now),
+  };
+}
+
 /** Funding (fraction) → pourcentage signé 4 décimales (convention DERIV), ou « — ». */
 function fmtFunding(rate: number | null): string {
   return rate === null ? VALEUR_ABSENTE : formatPct(rate * 100, 4);
+}
+
+/** Montant USD avec « + » explicite si positif (review PnL). */
+function fmtUsdSigne(v: number): string {
+  const base = formatUsd(v);
+  return v > 0 ? `+${base}` : base;
 }
 
 /**
@@ -165,6 +306,49 @@ function fmtFunding(rate: number | null): string {
 export function briefEnMarkdown(d: DonneesBrief, now: number): string {
   const l: string[] = [];
   l.push(`# BRIEF — Point marché · ${formatDateComplete(now)} ${formatHeureMinute(now)}`);
+  l.push("");
+
+  l.push("## Session (review)");
+  if (d.session === null) {
+    l.push("_Section indisponible._");
+  } else {
+    const s = d.session;
+    const n = s.tradesClos.length;
+    l.push(
+      `**PnL réalisé** ${fmtUsdSigne(s.pnlRealise)} · ${n} trade${n === 1 ? "" : "s"} · ` +
+        `${s.gagnants} gagnant${s.gagnants === 1 ? "" : "s"} / ${s.perdants} perdant${s.perdants === 1 ? "" : "s"}`,
+    );
+    l.push("");
+    l.push("### Trades clos");
+    if (s.tradesClos.length === 0) l.push("_Aucun trade clôturé aujourd'hui._");
+    else
+      for (const t of s.tradesClos) {
+        l.push(
+          `- ${formatHeureMinute(t.dateSortie)} · ${t.symbole} ${t.direction} · ` +
+            `${fmtUsdSigne(t.pnlNet)} (${formatPct(t.pnlPct)}) · ` +
+            `${formatPrice(t.prixEntree)} → ${formatPrice(t.prixSortie)}`,
+        );
+      }
+    l.push("");
+    l.push("### Alertes déclenchées");
+    if (s.alertes.length === 0) l.push("_Aucune alerte déclenchée aujourd'hui._");
+    else
+      for (const a of s.alertes) {
+        const val = Number.isFinite(a.valeur)
+          ? a.valeur.toLocaleString("en-US", { maximumFractionDigits: 6 })
+          : VALEUR_ABSENTE;
+        l.push(`- ${formatHeureMinute(a.ts)} · ${a.message} · valeur ${val}`);
+      }
+    l.push("");
+    l.push("### Événements éco passés");
+    if (s.ecoPasses === null) l.push("_Calendrier éco indisponible._");
+    else if (s.ecoPasses.length === 0) l.push("_Aucun événement à fort impact écoulé aujourd'hui._");
+    else
+      for (const ev of s.ecoPasses) {
+        const heure = `${ev.timeApprox ? "~" : ""}${formatHeureMinute(ev.time)}`;
+        l.push(`- ${heure} · ${ev.pays} · ${ev.titre}`);
+      }
+  }
   l.push("");
 
   l.push("## Watchlist (overnight)");

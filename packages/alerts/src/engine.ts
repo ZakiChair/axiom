@@ -85,6 +85,10 @@ function evaluerUne(def: AlertDef, ctx: ContexteAlerte): EvalCondition | null {
       return evalIndicateurSeuil(def, c, ctx);
     case "indicateur-croisement":
       return evalIndicateurCroisement(def, c, ctx);
+    case "funding-extreme":
+      return evalFundingExtreme(def, c, ctx);
+    case "cvd-spot-perp-div":
+      return evalCvdSpotPerpDiv(def, c, ctx);
   }
 }
 
@@ -184,6 +188,59 @@ function evalIndicateurCroisement(
     c.sens === "hausse" ? franchitHaut : c.sens === "baisse" ? franchitBas : franchitHaut || franchitBas;
   // Détection sur front (deux dernières valeurs) : l'armement reste true en permanence.
   return { fire, arme: true, valeur: a1 };
+}
+
+/**
+ * Funding extrême : extrême = (|z| ≥ zSeuil si z fourni) OU (|rate| ≥ seuilAbs si fourni).
+ * Au moins un critère doit être évaluable (sinon null). Sens filtre le signe du rate.
+ */
+function evalFundingExtreme(
+  def: AlertDef,
+  c: Extract<Condition, { type: "funding-extreme" }>,
+  ctx: ContexteAlerte
+): EvalCondition | null {
+  const rate = ctx.fundingRate;
+  if (rate === undefined || !Number.isFinite(rate)) return null;
+
+  const z = ctx.fundingZScore;
+  const hasAbs = c.seuilAbs !== undefined && Number.isFinite(c.seuilAbs);
+  const hasZ = z !== undefined && Number.isFinite(z);
+  if (!hasAbs && !hasZ) return null; // rien pour juger l'extrémité
+
+  const extremeAbs = hasAbs && Math.abs(rate) >= (c.seuilAbs as number);
+  const extremeZ = hasZ && Math.abs(z as number) >= (c.zSeuil ?? 2);
+  const extreme = Boolean(extremeAbs || extremeZ);
+
+  // Filtre de sens (signe du rate) : 0 n'est ni long ni short crowded.
+  let coteOk = false;
+  if (c.sens === "les-deux") coteOk = rate !== 0;
+  else if (c.sens === "long-crowded") coteOk = rate > 0;
+  else coteOk = rate < 0; // short-crowded
+
+  const satisfaite = extreme && coteOk;
+  const r = frontArme(def.arme, satisfaite);
+  // Valeur rapportée : z si dispo (plus interprétable pour l'extrême), sinon rate.
+  const valeur = hasZ ? (z as number) : rate;
+  return { fire: r.fire, arme: r.arme, valeur };
+}
+
+/**
+ * Divergence CVD spot/perp : satisfaite si le kind injecté matche la condition.
+ * `undefined` → non évaluable ; `null` → pas de divergence (ré-arme) ; kind → match.
+ */
+function evalCvdSpotPerpDiv(
+  def: AlertDef,
+  c: Extract<Condition, { type: "cvd-spot-perp-div" }>,
+  ctx: ContexteAlerte
+): EvalCondition | null {
+  if (ctx.cvdDivergenceKind === undefined) return null;
+  const kind = ctx.cvdDivergenceKind;
+  const satisfaite =
+    kind !== null && (c.kind === "les-deux" || kind === c.kind);
+  // Valeur codée pour le journal : +1 spot↑perp↓, -1 spot↓perp↑, 0 = aucune.
+  const valeur = kind === "spotUp_perpDown" ? 1 : kind === "spotDown_perpUp" ? -1 : 0;
+  const r = frontArme(def.arme, satisfaite);
+  return { fire: r.fire, arme: r.arme, valeur };
 }
 
 // ───────── Helpers purs ─────────

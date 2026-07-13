@@ -43,5 +43,30 @@ export function decrireCondition(condition: Condition): string {
         sens === "hausse" ? "croise à la hausse" : sens === "baisse" ? "croise à la baisse" : "croise";
       return `${indicateurId} : ${outputA} ${verbe} ${outputB}`;
     }
+    case "funding-extreme": {
+      const { sens, zSeuil, seuilAbs } = condition;
+      const cote =
+        sens === "long-crowded"
+          ? "long crowded"
+          : sens === "short-crowded"
+            ? "short crowded"
+            : "long/short crowded";
+      const parties: string[] = [];
+      if (seuilAbs !== undefined) {
+        // Affiche en % pour lisibilité (0.001 → 0.1 %).
+        const pct = seuilAbs * 100;
+        parties.push(`|rate|≥${pct}%`);
+      }
+      if (zSeuil !== undefined || seuilAbs === undefined) {
+        parties.push(`|z|≥${zSeuil ?? 2}`);
+      }
+      return `Funding extrême (${cote}${parties.length ? `, ${parties.join(" ou ")}` : ""})`;
+    }
+    case "cvd-spot-perp-div": {
+      const { kind } = condition;
+      if (kind === "spotUp_perpDown") return "CVD divergence spot↑ perp↓";
+      if (kind === "spotDown_perpUp") return "CVD divergence spot↓ perp↑";
+      return "CVD divergence spot/perp";
+    }
   }
 }

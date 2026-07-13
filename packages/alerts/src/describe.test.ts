@@ -59,4 +59,33 @@ describe("decrireCondition", () => {
       })
     ).toBe("macd : macd croise à la hausse signal");
   });
+
+  it("funding-extreme selon sens et seuils", () => {
+    expect(
+      decrireCondition({ type: "funding-extreme", sens: "long-crowded", seuilAbs: 0.001 })
+    ).toBe("Funding extrême (long crowded, |rate|≥0.1%)");
+    expect(decrireCondition({ type: "funding-extreme", sens: "les-deux", zSeuil: 2.5 })).toBe(
+      "Funding extrême (long/short crowded, |z|≥2.5)"
+    );
+    expect(
+      decrireCondition({
+        type: "funding-extreme",
+        sens: "short-crowded",
+        seuilAbs: 0.0005,
+        zSeuil: 3,
+      })
+    ).toBe("Funding extrême (short crowded, |rate|≥0.05% ou |z|≥3)");
+  });
+
+  it("cvd-spot-perp-div selon kind", () => {
+    expect(decrireCondition({ type: "cvd-spot-perp-div", kind: "spotUp_perpDown" })).toBe(
+      "CVD divergence spot↑ perp↓"
+    );
+    expect(decrireCondition({ type: "cvd-spot-perp-div", kind: "spotDown_perpUp" })).toBe(
+      "CVD divergence spot↓ perp↑"
+    );
+    expect(decrireCondition({ type: "cvd-spot-perp-div", kind: "les-deux" })).toBe(
+      "CVD divergence spot/perp"
+    );
+  });
 });

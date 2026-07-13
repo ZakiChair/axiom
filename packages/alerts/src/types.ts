@@ -67,12 +67,38 @@ export interface ConditionIndicateurCroisement {
   sens: SensCroisement;
 }
 
+/**
+ * Funding extrême via z-score ou seuil absolu (fraction).
+ * - long-crowded  : rate > 0 et extrême (longs paient / overcrowding long)
+ * - short-crowded : rate < 0 et extrême
+ * - les-deux      : extrême des deux côtés
+ */
+export interface ConditionFundingExtreme {
+  type: "funding-extreme";
+  /** |z| ≥ seuil (défaut 2) — utilisé si `fundingZScore` fourni dans le contexte. */
+  zSeuil?: number;
+  /** |rate| ≥ seuilAbs (fraction, ex. 0.001 = 0.1 %) — alternative ou complément au z. */
+  seuilAbs?: number;
+  sens: "long-crowded" | "short-crowded" | "les-deux";
+}
+
+/**
+ * Divergence CVD spot vs perp (réutilise le kind du détecteur chart).
+ * L'appelant injecte le kind courant dans le contexte ; le moteur reste pur.
+ */
+export interface ConditionCvdSpotPerpDiv {
+  type: "cvd-spot-perp-div";
+  kind: "spotUp_perpDown" | "spotDown_perpUp" | "les-deux";
+}
+
 /** Condition d'une alerte (union discriminée sur `type`). */
 export type Condition =
   | ConditionPrixCroise
   | ConditionVariationPct
   | ConditionIndicateurSeuil
-  | ConditionIndicateurCroisement;
+  | ConditionIndicateurCroisement
+  | ConditionFundingExtreme
+  | ConditionCvdSpotPerpDiv;
 
 /** Définition d'une alerte. */
 export interface AlertDef {
@@ -108,6 +134,23 @@ export interface ContexteAlerte {
   prixPrecedent?: number;
   /** Bougies du symbole — requises pour `variation-pct` et les conditions d'indicateur. */
   candles?: Candle[];
+  /**
+   * Funding rate courant en FRACTION (ex. 0.0001 = 0.01 %).
+   * Requis pour `funding-extreme` (seuilAbs) ; injecté par le runtime front (ou daemon D3).
+   */
+  fundingRate?: number;
+  /**
+   * Z-score du funding (fenêtre calculée par l'appelant). Optionnel :
+   * si absent, seule la branche `seuilAbs` de `funding-extreme` est évaluable.
+   */
+  fundingZScore?: number;
+  /**
+   * État CVD spot/perp pour `cvd-spot-perp-div` :
+   *  - `undefined` : pipeline indisponible (non évaluable) ;
+   *  - `null` : pipeline prêt, aucune divergence courante ;
+   *  - kind : divergence active sur le dernier bucket.
+   */
+  cvdDivergenceKind?: "spotUp_perpDown" | "spotDown_perpUp" | null;
 }
 
 /** Un déclenchement produit par le moteur. */

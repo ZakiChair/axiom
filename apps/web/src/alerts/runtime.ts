@@ -1,7 +1,7 @@
 /**
  * Runtime des alertes — pont entre le moteur PUR (`@axiom/alerts`) et les flux live.
  *
- * Deux sources d'évaluation, sans chevauchement de types de condition (donc aucun
+ * Sources d'évaluation, sans chevauchement de types de condition (donc aucun
  * double déclenchement) :
  *  - FLUX TICKER (`subscribeTickers`) sur les symboles des alertes prix : évalue les
  *    conditions `prix-croise` à chaque mise à jour de prix (tous symboles). Le prix
@@ -9,6 +9,15 @@
  *  - CLÔTURE DE BOUGIE (abonnement `marketStore`) sur le symbole affiché : évalue les
  *    conditions `variation-pct` et `indicateur-*` à chaque nouvelle bougie CLÔTURÉE
  *    (ces conditions requièrent les bougies, présentes uniquement pour le symbole affiché).
+ *  - POLL FUNDING (~60 s) pour les symboles ayant une alerte `funding-extreme` :
+ *    injecte `fundingRate` (+ `fundingZScore` si historique dispo) dans le contexte.
+ *
+ * CVD spot/perp-div : support moteur OK, injection runtime reportée v1.1 (données
+ * dans le contrôleur chart orderflow, hors store — cf. lot B1).
+ *
+ * DÉGRADATION ONGLET FERMÉ (B1.6) : le daemon n'a PAS encore de poll funding (lot D3).
+ * Avec l'app fermée, seules prix / var% / indicateur-seuil|croisement s'évaluent.
+ * Les alertes `funding-extreme` (et CVD) restent dormantes côté daemon jusqu'à D3.
  *
  * Un déclenchement → journal du store + notification système (Notification API) + bip
  * discret (WebAudio, aucun fichier binaire). AUCUNE donnée haute fréquence ne transite
@@ -22,9 +31,16 @@ import { marketStore } from "../store/market";
 import { alertsStore, pousserDefsDaemon } from "../store/alerts";
 import { subscribeTickers, type TickerUpdate } from "../data/ticker";
 import { daemonPret, detectDaemon } from "../data/daemon";
+import { coinalyzeProvider } from "../data/coinalyze";
+import { extUrl } from "../data/extapi";
 
 /** Types de condition évalués sur la clôture de bougie (nécessitent les bougies). */
 const TYPES_BOUGIE = new Set(["variation-pct", "indicateur-seuil", "indicateur-croisement"]);
+
+/** Période de poll funding (ms) — lent, hors chemin chaud. */
+const FUNDING_POLL_MS = 60_000;
+/** Fenêtre min. d'historique funding pour un z-score (points). */
+const FUNDING_Z_WINDOW = 30;
 
 /** Applique une passe d'évaluation : persiste les defs modifiées, journalise + notifie. */
 function appliquerResultat(lot: AlertDef[], ctx: ContexteAlerte): void {
@@ -111,9 +127,68 @@ function creerRuntime(): Unsubscribe {
     });
   };
 
+  // ── Poll funding : conditions funding-extreme ─────────────────────────────
+  // Cache par symbole : rate courant + z-score optionnel (historique Coinalyze).
+  const cacheFunding = new Map<string, { rate: number; z?: number; ts: number }>();
+
+  const evaluerFundingSymbol = (symbol: string): void => {
+    const snap = cacheFunding.get(symbol);
+    if (!snap) return;
+    const lot = alertsStore
+      .getState()
+      .defs.filter((d) => d.actif && d.symbol === symbol && d.condition.type === "funding-extreme");
+    if (lot.length === 0) return;
+    const mkt = marketStore.getState();
+    const lastCandle =
+      mkt.symbol === symbol ? mkt.candles[mkt.candles.length - 1] : undefined;
+    appliquerResultat(lot, {
+      maintenant: Date.now(),
+      dernierPrix: lastCandle?.close ?? 0,
+      fundingRate: snap.rate,
+      fundingZScore: snap.z,
+    });
+  };
+
+  const pollFunding = async (): Promise<void> => {
+    const symbols = [
+      ...new Set(
+        alertsStore
+          .getState()
+          .defs.filter((d) => d.actif && d.condition.type === "funding-extreme")
+          .map((d) => d.symbol)
+      ),
+    ];
+    for (const symbol of symbols) {
+      const snap = await chargerFunding(symbol);
+      if (!snap) continue;
+      cacheFunding.set(symbol, { ...snap, ts: Date.now() });
+      evaluerFundingSymbol(symbol);
+    }
+  };
+
+  let fundingTimer: ReturnType<typeof setInterval> | undefined;
+  const resyncFunding = (): void => {
+    const aDesFunding = alertsStore
+      .getState()
+      .defs.some((d) => d.actif && d.condition.type === "funding-extreme");
+    if (aDesFunding && fundingTimer === undefined) {
+      void pollFunding();
+      fundingTimer = setInterval(() => {
+        void pollFunding();
+      }, FUNDING_POLL_MS);
+    } else if (!aDesFunding && fundingTimer !== undefined) {
+      clearInterval(fundingTimer);
+      fundingTimer = undefined;
+    }
+  };
+
   // Démarrage : souscriptions + calibrage immédiat contre l'état courant.
   resyncTicker();
-  const unsubAlerts = alertsStore.subscribe(resyncTicker); // re-route si la liste des symboles change
+  resyncFunding();
+  const unsubAlerts = alertsStore.subscribe(() => {
+    resyncTicker(); // re-route si la liste des symboles change
+    resyncFunding();
+  });
   const unsubMarket = marketStore.subscribe(onMarket);
   onMarket(); // calibrage initial des conditions bougie sur le backfill présent
 
@@ -124,7 +199,68 @@ function creerRuntime(): Unsubscribe {
     unsubMarket();
     unsubTicker();
     stopHeartbeat();
+    if (fundingTimer !== undefined) clearInterval(fundingTimer);
   };
+}
+
+/**
+ * Charge le funding courant (Binance premiumIndex, fraction) + z-score optionnel
+ * depuis l'historique Coinalyze (best-effort : z omis si indisponible).
+ */
+async function chargerFunding(
+  symbol: string
+): Promise<{ rate: number; z?: number } | undefined> {
+  let rate: number | undefined;
+
+  // 1) Snapshot Binance fapi (gratuit, fiable) — fraction lastFundingRate.
+  try {
+    const res = await fetch(
+      extUrl("fapi.binance.com", `fapi/v1/premiumIndex?symbol=${encodeURIComponent(symbol)}`)
+    );
+    if (res.ok) {
+      const raw: unknown = await res.json();
+      const last =
+        raw !== null && typeof raw === "object"
+          ? Number((raw as { lastFundingRate?: unknown }).lastFundingRate)
+          : Number.NaN;
+      if (Number.isFinite(last)) rate = last;
+    }
+  } catch {
+    /* best-effort */
+  }
+
+  // 2) Repli Coinalyze si premiumIndex a échoué.
+  if (rate === undefined) {
+    try {
+      const fr = await coinalyzeProvider.fetchFundingRate(symbol);
+      if (Number.isFinite(fr.rate)) rate = fr.rate;
+    } catch {
+      /* best-effort */
+    }
+  }
+  if (rate === undefined) return undefined;
+
+  // 3) Z-score sur historique 8h Coinalyze (fenêtre FUNDING_Z_WINDOW).
+  let z: number | undefined;
+  try {
+    const since = Date.now() - FUNDING_Z_WINDOW * 8 * 3_600_000;
+    const hist = await coinalyzeProvider.fetchFundingRateHistory(symbol, "8hour", since);
+    const rates = hist.map((h) => h.rate).filter((v) => Number.isFinite(v));
+    // Inclut le rate courant s'il n'est pas déjà le dernier point.
+    const series =
+      rates.length > 0 && rates[rates.length - 1] === rate ? rates : [...rates, rate];
+    if (series.length >= Math.min(5, FUNDING_Z_WINDOW)) {
+      const win = series.slice(-FUNDING_Z_WINDOW);
+      const mean = win.reduce((a, b) => a + b, 0) / win.length;
+      const variance = win.reduce((a, b) => a + (b - mean) ** 2, 0) / win.length;
+      const sd = Math.sqrt(variance);
+      z = sd === 0 ? 0 : (rate - mean) / sd;
+    }
+  } catch {
+    /* z optionnel */
+  }
+
+  return { rate, z };
 }
 
 // Singleton : évite les doubles souscriptions (ex. double montage en React StrictMode).

@@ -36,6 +36,10 @@ export const TYPES_BOUGIE: ReadonlySet<string> = new Set([
   "indicateur-seuil",
   "indicateur-croisement",
 ]);
+// B1.6 DÉGRADATION onglet fermé : `funding-extreme` et `cvd-spot-perp-div` ne sont
+// PAS évalués ici — pas de poll funding daemon (prévu lot D3) ni de pipeline CVD
+// orderflow côté daemon. Avec l'app fermée : prix / var% / indicateurs bougie
+// seulement. Le front injecte funding quand l'onglet est ouvert (runtime poll 60 s).
 
 /** Seuil d'anti-doublon : on ne notifie que si le dernier heartbeat > 90 s. */
 export const SEUIL_HEARTBEAT_MS = 90_000;

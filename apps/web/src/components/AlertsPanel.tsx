@@ -2,26 +2,35 @@
  * AlertsPanel — section latérale des alertes (pattern SidebarSection).
  *
  * Liste dense des alertes (état actif, armement, dernière exécution, libellé de la
- * condition), création simple (symbole prérempli = actif courant ; type prix/variation),
- * suppression, bascule actif/inactif, et journal repliable des déclenchements.
+ * condition), création (symbole prérempli = actif courant ; types prix / var% /
+ * indicateur-seuil / funding-extreme), suppression, bascule actif/inactif, et
+ * journal repliable des déclenchements.
  *
  * Ce composant se re-rend uniquement sur ÉVÉNEMENT (création, bascule, déclenchement) :
  * aucune donnée haute fréquence n'y transite (le runtime écrit le store hors render-loop).
  *
- * NON MONTÉ pour l'instant : un agent ultérieur l'intègrera à App.tsx et câblera
- * `demarrerAlertes()` + `demanderPermissionNotifications()` (cf. alerts/runtime.ts).
+ * CVD spot/perp-div : support moteur (v1.1 UI) — données orderflow hors store.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useStore } from "zustand";
-import { decrireCondition, type Condition, type SensCroisement } from "@axiom/alerts";
+import {
+  decrireCondition,
+  type Comparateur,
+  type Condition,
+  type SensCroisement,
+} from "@axiom/alerts";
+import { INDICATORS, getIndicator } from "@axiom/indicators";
 import { marketStore } from "../store/market";
 import { alertsStore } from "../store/alerts";
 import { demanderPermissionNotifications } from "../alerts/runtime";
 import { formatHeure } from "../lib/format";
 import { SidebarSection } from "./SidebarSection";
 
-/** Types d'alerte proposés à la création (les conditions d'indicateur restent programmatiques). */
-type TypeAlerte = "prix-croise" | "variation-pct";
+/** Types d'alerte proposés à la création (CVD div en v1.1). */
+type TypeAlerte = "prix-croise" | "variation-pct" | "indicateur-seuil" | "funding-extreme";
+
+/** Sens funding (overcrowding). */
+type SensFunding = "long-crowded" | "short-crowded" | "les-deux";
 
 /** Fenêtres proposées pour la variation en %. */
 const FENETRES: Array<{ label: string; ms: number }> = [
@@ -30,6 +39,14 @@ const FENETRES: Array<{ label: string; ms: number }> = [
   { label: "15 min", ms: 900_000 },
   { label: "1 h", ms: 3_600_000 },
 ];
+
+const COMPARATEURS: Comparateur[] = [">", ">=", "<", "<="];
+
+/**
+ * Indicateurs utilisables pour `indicateur-seuil` : calculables sur bougies seules
+ * (pas de série aux `oi`/`funding`/on-chain — le runtime n'injecte pas d'aux).
+ */
+const INDICATEURS_SEUIL = INDICATORS.filter((d) => !d.aux || d.aux.length === 0);
 
 /** Libellé + couleur de l'état d'armement d'une alerte. */
 function etatArmement(arme: boolean | undefined): { texte: string; classe: string } {
@@ -50,9 +67,30 @@ export function AlertsPanel() {
   const [sens, setSens] = useState<SensCroisement>("hausse");
   const [seuilPct, setSeuilPct] = useState("");
   const [fenetreMs, setFenetreMs] = useState(FENETRES[0]?.ms ?? 60_000);
+  // indicateur-seuil
+  const [indicateurId, setIndicateurId] = useState(INDICATEURS_SEUIL[0]?.id ?? "rsi");
+  const [output, setOutput] = useState(INDICATEURS_SEUIL[0]?.outputs[0]?.key ?? "rsi");
+  const [comparateur, setComparateur] = useState<Comparateur>(">");
+  const [valeurInd, setValeurInd] = useState("");
+  // funding-extreme
+  const [sensFunding, setSensFunding] = useState<SensFunding>("les-deux");
+  const [seuilAbsPct, setSeuilAbsPct] = useState("0.1"); // saisie en % (0.1 = 0.1 %)
+  const [zSeuil, setZSeuil] = useState("2");
   const [journalOuvert, setJournalOuvert] = useState(false);
 
   const symboleEffectif = (symbol.trim() || symbolCourant).toUpperCase();
+
+  const outputsDispo = useMemo(() => {
+    const idef = getIndicator(indicateurId);
+    return idef?.outputs ?? [];
+  }, [indicateurId]);
+
+  const onChangeIndicateur = (id: string) => {
+    setIndicateurId(id);
+    const idef = getIndicator(id);
+    const firstOut = idef?.outputs[0]?.key;
+    if (firstOut) setOutput(firstOut);
+  };
 
   const soumettre = () => {
     let condition: Condition;
@@ -60,10 +98,35 @@ export function AlertsPanel() {
       const n = Number(niveau);
       if (!Number.isFinite(n)) return; // niveau requis
       condition = { type: "prix-croise", niveau: n, sens };
-    } else {
+    } else if (type === "variation-pct") {
       const s = Number(seuilPct);
       if (!Number.isFinite(s) || s === 0) return; // seuil non nul requis
       condition = { type: "variation-pct", seuilPct: s, fenetreMs };
+    } else if (type === "indicateur-seuil") {
+      const v = Number(valeurInd);
+      if (!Number.isFinite(v) || !indicateurId || !output) return;
+      // Params vides → défauts du registry côté moteur.
+      condition = {
+        type: "indicateur-seuil",
+        indicateurId,
+        params: {},
+        output,
+        comparateur,
+        valeur: v,
+      };
+    } else {
+      // funding-extreme : seuilAbs en fraction (saisie % → /100) ; z optionnel.
+      const absPct = Number(seuilAbsPct);
+      const z = Number(zSeuil);
+      const hasAbs = Number.isFinite(absPct) && absPct > 0;
+      const hasZ = Number.isFinite(z) && z > 0;
+      if (!hasAbs && !hasZ) return; // au moins un critère
+      condition = {
+        type: "funding-extreme",
+        sens: sensFunding,
+        ...(hasAbs ? { seuilAbs: absPct / 100 } : {}),
+        ...(hasZ ? { zSeuil: z } : {}),
+      };
     }
     alertsStore.getState().ajouter({
       symbol: symboleEffectif,
@@ -74,6 +137,7 @@ export function AlertsPanel() {
     setSymbol("");
     setNiveau("");
     setSeuilPct("");
+    setValeurInd("");
   };
 
   const badge = `${defs.length} alerte${defs.length > 1 ? "s" : ""}`;
@@ -158,14 +222,16 @@ export function AlertsPanel() {
           <select
             value={type}
             onChange={(e) => setType(e.target.value as TypeAlerte)}
-            className="rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+            className="max-w-[42%] rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
           >
             <option value="prix-croise">Prix</option>
-            <option value="variation-pct">Variation %</option>
+            <option value="variation-pct">Var %</option>
+            <option value="indicateur-seuil">Indicateur</option>
+            <option value="funding-extreme">Funding</option>
           </select>
         </div>
 
-        {type === "prix-croise" ? (
+        {type === "prix-croise" && (
           <div className="flex gap-1.5">
             <input
               value={niveau}
@@ -185,7 +251,9 @@ export function AlertsPanel() {
               <option value="les-deux">↕ les deux</option>
             </select>
           </div>
-        ) : (
+        )}
+
+        {type === "variation-pct" && (
           <div className="flex gap-1.5">
             <input
               value={seuilPct}
@@ -206,6 +274,93 @@ export function AlertsPanel() {
                 </option>
               ))}
             </select>
+          </div>
+        )}
+
+        {type === "indicateur-seuil" && (
+          <div className="space-y-1.5">
+            <div className="flex gap-1.5">
+              <select
+                value={indicateurId}
+                onChange={(e) => onChangeIndicateur(e.target.value)}
+                className="min-w-0 flex-1 rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+              >
+                {INDICATEURS_SEUIL.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={output}
+                onChange={(e) => setOutput(e.target.value)}
+                className="max-w-[30%] rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+              >
+                {outputsDispo.map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.key}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-1.5">
+              <select
+                value={comparateur}
+                onChange={(e) => setComparateur(e.target.value as Comparateur)}
+                className="rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+              >
+                {COMPARATEURS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={valeurInd}
+                onChange={(e) => setValeurInd(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && soumettre()}
+                inputMode="decimal"
+                placeholder="Seuil (ex. 70)"
+                className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-xs tabular-nums text-text outline-none placeholder:text-text-dim focus:border-text-dim"
+              />
+            </div>
+          </div>
+        )}
+
+        {type === "funding-extreme" && (
+          <div className="space-y-1.5">
+            <select
+              value={sensFunding}
+              onChange={(e) => setSensFunding(e.target.value as SensFunding)}
+              className="w-full rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+            >
+              <option value="les-deux">↕ long/short crowded</option>
+              <option value="long-crowded">Long crowded (rate +)</option>
+              <option value="short-crowded">Short crowded (rate −)</option>
+            </select>
+            <div className="flex gap-1.5">
+              <input
+                value={seuilAbsPct}
+                onChange={(e) => setSeuilAbsPct(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && soumettre()}
+                inputMode="decimal"
+                placeholder="|rate| % (ex. 0.1)"
+                title="Seuil absolu du funding en pourcent (0.1 = 0.1 %)"
+                className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-xs tabular-nums text-text outline-none placeholder:text-text-dim focus:border-text-dim"
+              />
+              <input
+                value={zSeuil}
+                onChange={(e) => setZSeuil(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && soumettre()}
+                inputMode="decimal"
+                placeholder="|z|"
+                title="Seuil |z-score| (défaut 2)"
+                className="w-16 rounded border border-border bg-bg px-2 py-1 text-xs tabular-nums text-text outline-none placeholder:text-text-dim focus:border-text-dim"
+              />
+            </div>
+            <p className="px-0.5 text-[10px] text-text-dim">
+              Extrême si |rate| ou |z| dépasse le seuil (onglet ouvert).
+            </p>
           </div>
         )}
 

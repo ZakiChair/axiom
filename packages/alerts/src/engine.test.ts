@@ -273,6 +273,114 @@ describe("indicateur-croisement (MACD macd × signal)", () => {
   });
 });
 
+describe("funding-extreme", () => {
+  function ctxFund(rate: number, z?: number): ContexteAlerte {
+    return {
+      maintenant: 1,
+      dernierPrix: 100,
+      fundingRate: rate,
+      fundingZScore: z,
+    };
+  }
+
+  it("calibre puis déclenche sur |rate| ≥ seuilAbs (long-crowded)", () => {
+    const cond: Condition = {
+      type: "funding-extreme",
+      seuilAbs: 0.001,
+      sens: "long-crowded",
+    };
+    const { fires } = piloter(def(cond), [
+      ctxFund(0.0001), // sous seuil → calibrage armé
+      ctxFund(0.002), // long extrême → DÉCLENCHE
+      ctxFund(0.003), // toujours extrême → rien
+      ctxFund(0.0001), // sous seuil → ré-arme
+      ctxFund(0.001), // bord exact → DÉCLENCHE
+    ]);
+    expect(fires).toEqual([false, true, false, false, true]);
+  });
+
+  it("filtre short-crowded (rate négatif) et ignore le côté opposé", () => {
+    const cond: Condition = {
+      type: "funding-extreme",
+      seuilAbs: 0.001,
+      sens: "short-crowded",
+    };
+    const { fires } = piloter(def(cond), [
+      ctxFund(0.0001), // positif non short → armé
+      ctxFund(0.002), // long extrême mais sens short → rien
+      ctxFund(-0.002), // short extrême → DÉCLENCHE
+    ]);
+    expect(fires).toEqual([false, false, true]);
+  });
+
+  it("déclenche via |z| ≥ zSeuil (défaut 2) sans seuilAbs", () => {
+    const cond: Condition = { type: "funding-extreme", sens: "les-deux" };
+    const { fires } = piloter(def(cond), [
+      ctxFund(0.0001, 0.5), // |z|<2 → calibrage
+      ctxFund(0.0001, 2.5), // |z|≥2 → DÉCLENCHE
+      ctxFund(-0.0001, -3), // toujours extrême → rien
+      ctxFund(0.0001, 0), // z retombe → ré-arme
+      ctxFund(0.0001, -2), // bord |z|=2 → DÉCLENCHE
+    ]);
+    expect(fires).toEqual([false, true, false, false, true]);
+  });
+
+  it("non évaluable sans rate, ou sans critère (ni z ni seuilAbs)", () => {
+    const cond: Condition = { type: "funding-extreme", sens: "les-deux" };
+    // pas de fundingRate
+    expect(evaluerAlertes([def(cond)], { maintenant: 0, dernierPrix: 1 }).modifie).toBe(false);
+    // rate sans z ni seuilAbs
+    expect(
+      evaluerAlertes([def(cond)], { maintenant: 0, dernierPrix: 1, fundingRate: 0.01 }).modifie
+    ).toBe(false);
+  });
+});
+
+describe("cvd-spot-perp-div", () => {
+  function ctxCvd(
+    kind: ContexteAlerte["cvdDivergenceKind"]
+  ): ContexteAlerte {
+    return { maintenant: 1, dernierPrix: 100, cvdDivergenceKind: kind };
+  }
+
+  it("calibre, déclenche sur kind match, se ré-arme quand null", () => {
+    const cond: Condition = { type: "cvd-spot-perp-div", kind: "spotUp_perpDown" };
+    const { fires } = piloter(def(cond), [
+      ctxCvd(null), // pas de div → calibrage armé
+      ctxCvd("spotUp_perpDown"), // match → DÉCLENCHE
+      ctxCvd("spotUp_perpDown"), // toujours → rien
+      ctxCvd(null), // claire → ré-arme
+      ctxCvd("spotUp_perpDown"), // → DÉCLENCHE
+    ]);
+    expect(fires).toEqual([false, true, false, false, true]);
+  });
+
+  it("les-deux accepte les deux kinds ; filtre l'autre kind", () => {
+    const filtre: Condition = { type: "cvd-spot-perp-div", kind: "spotDown_perpUp" };
+    const { fires: f1 } = piloter(def(filtre), [
+      ctxCvd(null),
+      ctxCvd("spotUp_perpDown"), // pas le bon kind
+      ctxCvd("spotDown_perpUp"), // match
+    ]);
+    expect(f1).toEqual([false, false, true]);
+
+    const lesDeux: Condition = { type: "cvd-spot-perp-div", kind: "les-deux" };
+    const { fires: f2 } = piloter(def(lesDeux), [
+      ctxCvd(null),
+      ctxCvd("spotUp_perpDown"),
+    ]);
+    expect(f2).toEqual([false, true]);
+  });
+
+  it("non évaluable si cvdDivergenceKind absent", () => {
+    const res = evaluerAlertes(
+      [def({ type: "cvd-spot-perp-div", kind: "les-deux" })],
+      { maintenant: 0, dernierPrix: 1 }
+    );
+    expect(res.modifie).toBe(false);
+  });
+});
+
 describe("filtrage du lot", () => {
   it("laisse les defs inactives inchangées (même référence)", () => {
     const inactive = def({ type: "prix-croise", niveau: 100, sens: "hausse" }, { actif: false });

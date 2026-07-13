@@ -77,7 +77,12 @@ export function parseZone(json: unknown): EvenementDetail[] | null {
 export async function chargerEvenements(signal?: AbortSignal): Promise<EtatEvenements | null> {
   if (!(await detectDaemon())) return null;
   try {
-    const res = await fetch(urlDaemon("/globe/evenements?fenetreH=24"), { signal });
+    const res = await fetch(urlDaemon("/globe/evenements?fenetreH=24"), {
+      signal,
+      headers: { Accept: "application/json" },
+    });
+    const ct = res.headers.get("content-type") ?? "";
+    if (!ct.includes("application/json")) return null;
     if (!res.ok) return null;
     return parseEvenements((await res.json()) as unknown);
   } catch {

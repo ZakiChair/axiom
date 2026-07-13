@@ -25,7 +25,7 @@ import { formatAge, formatEntier } from "../lib/format";
 import { chargerChokepoints } from "../data/globe/portwatch";
 import { chargerEtatsAvions, INTERVALLE_POLL_MS } from "../data/globe/opensky";
 import { chargerEvenements, chargerZoneEvenements, INTERVALLE_POLL_EVENEMENTS_MS } from "../data/globe/gdelt";
-import { chargerConflitsUcdp } from "../data/globe/ucdp";
+import { chargerConflitsUcdp, invaliderMemoUcdp } from "../data/globe/ucdp";
 import { chargerFrontIsw } from "../data/globe/isw";
 import type {
   Avion,
@@ -294,13 +294,22 @@ export function GlobeWindow() {
     };
   }, [open, couches.evenements]);
 
-  // — UCDP : instantané chargé UNE fois par ouverture (mémo module côté data). —
+  // — UCDP : re-fetch à chaque ouverture (invalide le mémo pour rattraper un
+  //   daemon redémarré / routes /globe fraîches après `pnpm run up`). —
   useEffect(() => {
     if (!open || !couches.conflits) return;
     let ignore = false;
     const ctrl = new AbortController();
+    invaliderMemoUcdp();
     void chargerConflitsUcdp(ctrl.signal).then((etat) => {
-      if (ignore || etat === null) return;
+      if (ignore) return;
+      if (etat === null) {
+        // Laisse le pied afficher « en attente… » / « daemon hors ligne ».
+        setConflitsUcdp(null);
+        zonesRef.current = [];
+        throttleRef.current?.trigger();
+        return;
+      }
       setDaemonOk(true);
       setConflitsUcdp(etat);
       zonesRef.current = etat.zones;

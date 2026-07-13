@@ -330,16 +330,28 @@ async function repondreConflitsUcdp(req: Request, d: Database, now: number, fetc
  * sur le chemin chaud du renderer (BUILD-CONTRACT).
  */
 export function demarrerBoucleGlobe(): () => void {
-  const tick = () => {
+  const tickGdelt = () => {
     rafraichirGdelt(getDb()).catch((err: unknown) => {
       console.error("[globe] rafraîchissement GDELT en échec :", err instanceof Error ? err.message : err);
     });
   };
-  const timerInitial = setTimeout(tick, 3_000); // léger différé : ne pas gêner le démarrage
-  const intervalle = setInterval(tick, INTERVALLE_BOUCLE_GLOBE_MS);
+  // UCDP : 1er seed au démarrage (sinon 502 tant que personne n'ouvre GLOBE) +
+  // re-check périodique (même cadence : rafraichirUcdp no-op si < 24 h).
+  const tickUcdp = () => {
+    rafraichirUcdp(getDb()).catch((err: unknown) => {
+      console.error("[globe] rafraîchissement UCDP en échec :", err instanceof Error ? err.message : err);
+    });
+  };
+  const timerGdelt = setTimeout(tickGdelt, 3_000);
+  const timerUcdp = setTimeout(tickUcdp, 5_000); // léger décalage vs GDELT
+  const intervalle = setInterval(tickGdelt, INTERVALLE_BOUCLE_GLOBE_MS);
+  // UCDP ~1×/jour suffit ; on re-vérifie toutes les 6 h (interne : skip si frais).
+  const intervalleUcdp = setInterval(tickUcdp, 6 * 3_600_000);
   return () => {
-    clearTimeout(timerInitial);
+    clearTimeout(timerGdelt);
+    clearTimeout(timerUcdp);
     clearInterval(intervalle);
+    clearInterval(intervalleUcdp);
   };
 }
 

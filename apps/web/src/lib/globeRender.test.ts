@@ -186,10 +186,10 @@ describe("briques géopolitiques", () => {
     expect(rayonEvenement(10, 4)).toBe(8); // 2 + 2 + 4
     expect(rayonEvenement(10, 400)).toBe(13); // clampé
   });
-  it("rayonConflit en racine des morts, clampé [3, 16]", () => {
-    expect(rayonConflit(0)).toBe(3);
-    expect(rayonConflit(100)).toBe(6.5); // 3 + 10×0,35
-    expect(rayonConflit(6111)).toBe(16); // top réel UCDP → clampé
+  it("rayonConflit en racine des morts, clampé [4, 18]", () => {
+    expect(rayonConflit(0)).toBe(4);
+    expect(rayonConflit(100)).toBe(8); // 4 + 10×0,4
+    expect(rayonConflit(6111)).toBe(18); // top réel UCDP → clampé
   });
   it("couleurCategorie mappe vers les tokens sémantiques", () => {
     expect(couleurCategorie("materiel", TOKENS)).toBe("#f92855");

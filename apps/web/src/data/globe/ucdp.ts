@@ -32,13 +32,30 @@ export function parseConflitsUcdp(json: unknown): EtatConflitsUcdp | null {
   return { zones, majA: r.majA, fichier: r.fichier };
 }
 
-/** Charge (une fois par session) les zones UCDP. null = daemon absent/en échec. */
+/**
+ * Invalide le mémo session (ex. après redémarrage daemon, ou forcer re-fetch
+ * à chaque ouverture de fenêtre).
+ */
+export function invaliderMemoUcdp(): void {
+  memo = null;
+}
+
+/**
+ * Charge les zones UCDP. Mémo session après succès.
+ * null = daemon absent / échec / réponse non-JSON (daemon périmé servant le SPA).
+ */
 export async function chargerConflitsUcdp(signal?: AbortSignal): Promise<EtatConflitsUcdp | null> {
   if (memo !== null) return memo;
   if (!(await detectDaemon())) return null;
   try {
-    const res = await fetch(urlDaemon("/globe/conflits-ucdp"), { signal });
+    const res = await fetch(urlDaemon("/globe/conflits-ucdp"), {
+      signal,
+      headers: { Accept: "application/json" },
+    });
     if (!res.ok) return null;
+    // Daemon trop vieux : /globe/* tombe dans le repli SPA → HTML 200.
+    const ct = res.headers.get("content-type") ?? "";
+    if (!ct.includes("application/json")) return null;
     const etat = parseConflitsUcdp((await res.json()) as unknown);
     if (etat !== null) memo = etat;
     return etat;

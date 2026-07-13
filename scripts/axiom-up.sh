@@ -97,16 +97,42 @@ if [[ "${PROD}" -eq 1 ]]; then
   pnpm --filter @axiom/web build
 fi
 
-if health_ok; then
-  echo "==> [up] daemon déjà up (${HEALTH_URL}) — réutilisation"
-else
+# Sonde « globe capable » : un daemon trop vieux (sans routes /globe) répond 200 HTML
+# (repli SPA) → les conflits UCDP/GDELT apparaissent « inexistants ». On exige du JSON.
+globe_ok() {
+  local body
+  body="$(curl -sf --connect-timeout 0.5 --max-time 2 \
+    -H "Accept: application/json" \
+    "http://127.0.0.1:${PORT}/globe/evenements?fenetreH=1" 2>/dev/null || true)"
+  # JSON objet (même vide / erreur métier) — pas de <!doctype html>.
+  [[ "${body}" == \{* ]]
+}
+
+demarrer_daemon() {
   echo "==> [up] démarrage daemon → logs/daemon.log"
-  # Pas de nohup : on garde le PID enfant pour le trap SIGINT.
   bun apps/daemon/src/index.ts >>logs/daemon.log 2>&1 &
   DAEMON_PID=$!
   DAEMON_OURS=1
   wait_health
   echo "==> [up] daemon OK (${HEALTH_URL}, pid ${DAEMON_PID})"
+}
+
+if health_ok; then
+  if globe_ok; then
+    echo "==> [up] daemon déjà up + routes /globe OK — réutilisation"
+  else
+    echo "==> [up] daemon up mais /globe absent ou périmé (SPA HTML) — redémarrage"
+    # Tue tout process écoute sur le port (daemon orphelin inclus).
+    if command -v lsof >/dev/null 2>&1; then
+      while read -r pid; do
+        [[ -n "${pid}" ]] && kill "${pid}" 2>/dev/null || true
+      done < <(lsof -tiTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null || true)
+      sleep 0.4
+    fi
+    demarrer_daemon
+  fi
+else
+  demarrer_daemon
 fi
 
 if [[ "${PROD}" -eq 1 ]]; then

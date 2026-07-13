@@ -230,17 +230,20 @@ export function hitTestCibles(cibles: readonly CibleGlobe[], mx: number, my: num
 /** Bornes des rayons écran des marqueurs géopolitiques (px CSS, indépendants du zoom). */
 export const RAYON_EVENEMENT_MIN = 2;
 export const RAYON_EVENEMENT_MAX = 13;
-export const RAYON_CONFLIT_MIN = 3;
-export const RAYON_CONFLIT_MAX = 16;
+export const RAYON_CONFLIT_MIN = 4;
+export const RAYON_CONFLIT_MAX = 18;
 
 /** Rayon d'une cellule GDELT : base 2 px + √n + 0,4 px par point d'intensité. */
 export function rayonEvenement(intensite: number, n: number): number {
   return Math.min(RAYON_EVENEMENT_MAX, Math.max(RAYON_EVENEMENT_MIN, 2 + Math.sqrt(Math.max(0, n)) + intensite * 0.4));
 }
 
-/** Rayon d'une zone UCDP : échelle racine des morts (6111 morts réels → clampé). */
+/**
+ * Rayon d'un conflit UCDP (px écran). Plancher relevé pour rester lisible à zoom
+ * large (centaines de zones mondiales). Échelle racine des morts.
+ */
 export function rayonConflit(morts: number): number {
-  return Math.min(RAYON_CONFLIT_MAX, Math.max(RAYON_CONFLIT_MIN, 3 + Math.sqrt(Math.max(0, morts)) * 0.35));
+  return Math.min(RAYON_CONFLIT_MAX, Math.max(RAYON_CONFLIT_MIN, 4 + Math.sqrt(Math.max(0, morts)) * 0.4));
 }
 
 /** Couleur de catégorie — tokens sémantiques uniquement (--serie-3 réservé aux chokepoints). */

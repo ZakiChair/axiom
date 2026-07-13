@@ -8,8 +8,10 @@ import type { EtatConflitsUcdp, EtatEvenements, FrontUkraine } from "../data/glo
 /** Note GDELT : « jamais du live » — âge d'ingestion + largeur de fenêtre réelle. */
 export function noteEvenements(etat: EtatEvenements | null, coucheActive: boolean, daemonOk: boolean, nowMs: number): string {
   if (!coucheActive) return "Événements : désactivé";
-  if (!daemonOk) return "Événements : daemon hors ligne";
-  if (etat === null || etat.majA === null) return "Événements : GDELT en attente…";
+  if (!daemonOk) return "Événements : daemon hors ligne (pnpm run up)";
+  if (etat === null || etat.majA === null) {
+    return "Événements : GDELT en attente… (daemon frais requis — routes /globe)";
+  }
   const fenetreH = etat.couverture === null ? 0 : Math.round((etat.couverture.aMs - etat.couverture.deMs) / 3_600_000);
   return `Événements : GDELT 15 min, ${formatEntier(etat.cellules.length)} zone${etat.cellules.length > 1 ? "s" : ""} sur ${formatEntier(fenetreH)} h, maj ${formatAge(etat.majA, nowMs)}`;
 }
@@ -17,8 +19,10 @@ export function noteEvenements(etat: EtatEvenements | null, coucheActive: boolea
 /** Note UCDP : fichier mensuel + âge de l'instantané daemon. */
 export function noteConflits(etat: EtatConflitsUcdp | null, coucheActive: boolean, daemonOk: boolean, nowMs: number): string {
   if (!coucheActive) return "Conflits : désactivé";
-  if (!daemonOk) return "Conflits : daemon hors ligne";
-  if (etat === null) return "Conflits : UCDP en attente…";
+  if (!daemonOk) return "Conflits : daemon hors ligne (pnpm run up)";
+  if (etat === null) {
+    return "Conflits : UCDP en attente… (si persiste : redémarrer daemon périmé)";
+  }
   const version = etat.fichier.replace(/^GEDEvent_|\.csv$/g, "");
   return `Conflits : UCDP ${version} (~1 mois de lag), ${formatEntier(etat.zones.length)} zones, maj ${formatAge(etat.majA, nowMs)}`;
 }

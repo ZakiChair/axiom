@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 94 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 99 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -38,6 +38,7 @@ import { vwma } from "./trend/vwma";
 import { waveTrend } from "./trend/waveTrend";
 import { wma } from "./trend/wma";
 import { zlema } from "./trend/zlema";
+import { linreg } from "./trend/linreg";
 
 // — momentum (21) —
 import { accelerator } from "./momentum/accelerator";
@@ -78,6 +79,7 @@ import { relativeVolatilityIndex } from "./volatility/relativeVolatilityIndex";
 import { rv } from "./volatility/rv";
 import { stdErrorBands } from "./volatility/stdErrorBands";
 import { stddev } from "./volatility/stddev";
+import { ttmSqueeze } from "./volatility/ttmSqueeze";
 
 // — volume (14) —
 import { adLine } from "./volume/adLine";
@@ -94,6 +96,9 @@ import { volumeMa } from "./volume/volumeMa";
 import { volumeOsc } from "./volume/volumeOsc";
 import { vwap } from "./volume/vwap";
 import { vwapBands } from "./volume/vwapBands";
+import { cvd } from "./volume/cvd";
+import { volumeDelta } from "./volume/volumeDelta";
+import { takerBuyRatio } from "./volume/takerBuyRatio";
 
 // — billwilliams (4) —
 import { alligator } from "./billwilliams/alligator";
@@ -147,6 +152,7 @@ export const INDICATORS: IndicatorDef[] = [
   waveTrend,
   wma,
   zlema,
+  linreg,
   // momentum
   accelerator,
   awesome,
@@ -185,6 +191,7 @@ export const INDICATORS: IndicatorDef[] = [
   rv,
   stdErrorBands,
   stddev,
+  ttmSqueeze,
   // volume
   adLine,
   anchoredVwap,
@@ -200,6 +207,9 @@ export const INDICATORS: IndicatorDef[] = [
   volumeOsc,
   vwap,
   vwapBands,
+  cvd,
+  volumeDelta,
+  takerBuyRatio,
   // billwilliams
   alligator,
   fractals,

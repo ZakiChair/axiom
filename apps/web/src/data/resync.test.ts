@@ -1,12 +1,13 @@
 /**
- * Tests de mergeResyncCandles (resync.ts) — seule logique de fusion post-reconnexion.
- * Une régression ici laisserait un trou permanent dans le graphe (bougies manquées
- * pendant une coupure WS) ou dupliquerait/désordonnerait le buffer, sans erreur de
- * compilation ni autre test rouge. Valeurs attendues justifiées en commentaire.
+ * Tests de mergeResyncCandles + prepareResyncApply (resync.ts).
+ * Une régression de fusion laisserait un trou permanent (bougies manquées pendant
+ * une coupure WS) ou dupliquerait/désordonnerait le buffer. Une régression de
+ * prepareResyncApply (early-return length-only) laisserait le CVD stale après
+ * reconnexion alors que le REST a corrigé buy/sell à open times égaux.
  */
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
-import { mergeResyncCandles } from "./resync";
+import { mergeResyncCandles, prepareResyncApply } from "./resync";
 
 /** Bougie minimale : `time` + `closed` (les seuls champs qui pilotent la fusion). */
 function candle(time: number, closed: boolean, close = time): Candle {
@@ -61,5 +62,42 @@ describe("mergeResyncCandles", () => {
   it("buffer vide + lot REST : renvoie simplement le lot trié (cas backfill dégénéré)", () => {
     const merged = mergeResyncCandles([], [candle(2, true), candle(1, true)]);
     expect(merged.map((c) => c.time)).toEqual([1, 2]);
+  });
+});
+
+describe("prepareResyncApply (règle onResync — pas length-only)", () => {
+  it("retourne null si le lot REST est vide (rien à appliquer)", () => {
+    const existing = [candle(1, true), candle(2, false)];
+    expect(prepareResyncApply(existing, [])).toBeNull();
+  });
+
+  it("applique même si merged.length === existing.length (anti-régression length-only)", () => {
+    // Cas critique A0.4 : REST corrige closed/contenu à open times déjà présents.
+    // Une régression `if (merged.length === existing.length) return` ferait
+    // retourner null ici et casserait le reseed CVD dans ChartInstance.onResync.
+    const existing = [candle(1, true), candle(2, false)];
+    const fetched = [candle(1, true), candle(2, true)]; // même cardinalité, contenu différent
+
+    const result = prepareResyncApply(existing, fetched);
+
+    expect(result).not.toBeNull();
+    expect(result).toHaveLength(existing.length);
+    expect(result!.find((c) => c.time === 2)?.closed).toBe(true);
+  });
+
+  it("applique et allonge le buffer quand le REST comble un trou", () => {
+    const existing = [candle(1, true)];
+    const fetched = [candle(1, true), candle(2, true)];
+
+    const result = prepareResyncApply(existing, fetched);
+
+    expect(result).not.toBeNull();
+    expect(result!.map((c) => c.time)).toEqual([1, 2]);
+  });
+
+  it("buffer existing vide + lot non vide : applique le lot trié", () => {
+    const result = prepareResyncApply([], [candle(2, true), candle(1, true)]);
+    expect(result).not.toBeNull();
+    expect(result!.map((c) => c.time)).toEqual([1, 2]);
   });
 });

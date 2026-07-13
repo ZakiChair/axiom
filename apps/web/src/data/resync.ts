@@ -20,3 +20,24 @@ export function mergeResyncCandles(existing: Candle[], fetched: Candle[]): Candl
   for (const c of fetched) parTemps.set(c.time, c); // le REST prime à open time égal
   return [...parTemps.values()].sort((a, b) => a.time - b.time);
 }
+
+/**
+ * Décide d'appliquer un lot REST de resync et prépare le buffer fusionné.
+ *
+ * Règle unique : appliquer si et seulement si `fetched.length > 0`.
+ * Intentionnellement indépendant de `existing.length` / de la longueur du merge —
+ * un lot REST peut corriger buy/sell/closed à open times déjà présents sans
+ * changer la cardinalité ; le CVD doit alors être reseedé (orderflow.onCandles).
+ *
+ * Ne PAS réintroduire d'early-return du type `merged.length === existing.length`.
+ *
+ * @returns le buffer fusionné à appliquer, ou `null` si rien à faire (lot vide).
+ */
+export function prepareResyncApply(
+  existing: Candle[],
+  fetched: Candle[],
+): Candle[] | null {
+  if (fetched.length === 0) return null;
+  // Toujours merger et appliquer — même si la longueur ne change pas.
+  return mergeResyncCandles(existing, fetched);
+}

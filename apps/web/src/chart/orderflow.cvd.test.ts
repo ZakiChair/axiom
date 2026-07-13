@@ -3,7 +3,7 @@
  *
  * Audit A0.1 (chemins onResync / backfill / pagination) :
  *  - ChartInstance backfill initial → orderflow.onCandles() → refreshCvd()
- *  - ChartInstance onResync → mergeResyncCandles → setCandles → orderflow.onCandles()
+ *  - ChartInstance onResync → prepareResyncApply → setCandles → orderflow.onCandles()
  *  - Pagination historique → orderflow.onCandles()
  *  - onTick kline → orderflow.onTick() → refreshCvd()
  *  - binance/kraken/coinbase subscribeKline : 4e arg onResync câblé (TF natifs)
@@ -11,13 +11,14 @@
  *    (échelle mensuelle — aucune bougie clôturée manquée sur coupure WS)
  *  - mexc/twelvedata : polling REST (pas de onResync ; le poll comble les trous)
  *
- * Ce test fige le pipeline PUR resync → recompute CVD : après fusion REST
+ * Ce test fige le pipeline PUR prepareResyncApply → computeCvd : après fusion REST
  * (même open times, contenu corrigé), computeCvd doit refléter les buy/sell
  * finalisés — c'est ce que refreshCvd() applique au sous-pane.
+ * La règle d'application (pas length-only) est verrouillée dans resync.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
-import { mergeResyncCandles } from "../data/resync";
+import { prepareResyncApply } from "../data/resync";
 import { computeCvd } from "./orderflow";
 
 function candle(
@@ -50,14 +51,14 @@ describe("CVD reseed après mergeResyncCandles (non-régression A0.4)", () => {
       candle(2_000, { buy: 20, sell: 8, closed: true }),
     ];
 
-    const merged = mergeResyncCandles(existing, fetched);
-    expect(merged).toHaveLength(2);
-    // Invariant critique : même cardinalité n'empêche PAS le reseed
-    // (ChartInstance ne doit plus early-return sur length seule).
-    expect(merged.length).toBe(existing.length);
+    const merged = prepareResyncApply(existing, fetched);
+    // prepareResyncApply ne doit PAS retourner null sur même length (règle A0.4).
+    expect(merged).not.toBeNull();
+    expect(merged!).toHaveLength(2);
+    expect(merged!.length).toBe(existing.length);
 
     const cvdAvant = computeCvd(existing);
-    const cvdApres = computeCvd(merged);
+    const cvdApres = computeCvd(merged!);
 
     // Avant : (10-5)=5 puis (1-0)=1 → [5, 6]
     expect(cvdAvant).toEqual([5, 6]);
@@ -72,8 +73,9 @@ describe("CVD reseed après mergeResyncCandles (non-régression A0.4)", () => {
       candle(1_000, { buy: 4, sell: 1 }),
       candle(2_000, { buy: 0, sell: 3 }), // bougie manquée pendant la coupure
     ];
-    const merged = mergeResyncCandles(existing, fetched);
-    expect(merged).toHaveLength(2);
-    expect(computeCvd(merged)).toEqual([3, 0]); // 3 puis 3-3=0
+    const merged = prepareResyncApply(existing, fetched);
+    expect(merged).not.toBeNull();
+    expect(merged!).toHaveLength(2);
+    expect(computeCvd(merged!)).toEqual([3, 0]); // 3 puis 3-3=0
   });
 });

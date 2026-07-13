@@ -25,7 +25,7 @@ import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { getAdapter } from "../data/adapters";
-import { mergeResyncCandles } from "../data/resync";
+import { prepareResyncApply } from "../data/resync";
 import { adaptateurReplayActif } from "../data/replayFeed";
 import { replayStore } from "../store/replay";
 import type { MarketStore } from "../store/market";
@@ -607,14 +607,14 @@ export function ChartInstance({
           }
         };
 
-        // Resync post-reconnexion WS : le REST prime à open time égal (clôture
-        // finalisée, buy/sell corrigés). Ne PAS early-return sur `length` seule —
-        // un buffer de même cardinalité peut avoir un contenu différent (CVD à
-        // reseed via orderflow.onCandles → refreshCvd). Lot A0.4.
+        // Resync post-reconnexion WS : prepareResyncApply encode la règle
+        // (appliquer si fetched.length > 0, jamais sur égalité de longueur seule).
+        // Buffer de même cardinalité peut avoir un contenu différent → CVD reseed
+        // via orderflow.onCandles → refreshCvd. Lot A0.4.
         const onResync = (fetched: Candle[]) => {
-          if (cancelled || fetched.length === 0) return;
-          const existing = store.getState().candles;
-          const merged = mergeResyncCandles(existing, fetched);
+          if (cancelled) return;
+          const merged = prepareResyncApply(store.getState().candles, fetched);
+          if (!merged) return;
           store.getState().setCandles(merged);
           chart.applyNewData(merged.map(toKLineData));
           orderflow?.onCandles();

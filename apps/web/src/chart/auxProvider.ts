@@ -1,6 +1,6 @@
 /**
  * AuxProvider — fetch, alignement, cache et notification des séries AUXILIAIRES
- * (OI, funding, stablecoins, NVT, MVRV) consommées par les indicateurs dérivés.
+ * (OI, funding, mark, stablecoins, NVT, MVRV) consommées par les indicateurs dérivés.
  *
  * Vit dans `apps/web` — la couche AUTORISÉE à fetcher — par opposition au moteur
  * `@axiom/indicators` qui reste pur/synchrone. L'AuxProvider récupère la donnée
@@ -29,6 +29,7 @@ import type { AuxSeries, AuxSeriesId, ExchangeId, Timeframe } from "@axiom/types
 import { coinalyzeProvider } from "../data/coinalyze";
 import { stablecoinsSupplyProvider } from "../data/macro/stablecoins";
 import { fetchCoinMetrics } from "../data/onchain/coinmetrics";
+import { extUrl } from "../data/extapi";
 
 /** État renvoyé par `getAligned` pour l'ensemble des `ids` demandés. */
 export type AuxStatus =
@@ -55,6 +56,7 @@ interface AuxPoint {
 const TTL_MS: Record<AuxSeriesId, number> = {
   oi: 60_000,
   funding: 60_000,
+  mark: 60_000, // mark price perp (Binance fapi markPriceKlines)
   stablecoins: 60 * 60_000,
   nvt: 60 * 60_000,
   mvrv: 60 * 60_000,
@@ -91,6 +93,51 @@ function symbolToAsset(symbol: string): string {
   return (base.length > 0 ? base : s).toLowerCase();
 }
 
+/** Symbole fapi (perp USDT) à partir d'un symbole chart (BTCUSDT, BTCUSDT_PERP…). */
+function toFuturesSymbol(symbol: string): string {
+  return symbol.trim().toUpperCase().replace(/_PERP$/i, "").replace(/PERP$/i, "");
+}
+
+/**
+ * Historique mark price 1h via Binance fapi (proxy /extapi). Paginé (limit 1500).
+ * PURE côté parse ; réseau dans cette fonction uniquement (couche web autorisée).
+ */
+async function fetchMarkPriceHistory(symbol: string, since: number): Promise<AuxPoint[]> {
+  const sym = toFuturesSymbol(symbol);
+  const out: AuxPoint[] = [];
+  let startTime = since;
+  const now = Date.now();
+  // Max ~2 pages pour 90 j × 1h (~2160 barres, plafond API 1500/req).
+  for (let page = 0; page < 3 && startTime < now; page++) {
+    const q = new URLSearchParams({
+      symbol: sym,
+      interval: "1h",
+      startTime: String(startTime),
+      limit: "1500",
+    });
+    const res = await fetch(extUrl("fapi.binance.com", `fapi/v1/markPriceKlines?${q}`));
+    if (!res.ok) {
+      if (out.length > 0) break; // partiel OK
+      throw new Error(`markPriceKlines HTTP ${res.status}`);
+    }
+    const raw: unknown = await res.json();
+    if (!Array.isArray(raw) || raw.length === 0) break;
+    let lastT = startTime;
+    for (const row of raw) {
+      if (!Array.isArray(row) || row.length < 5) continue;
+      const t = Number(row[0]);
+      const close = Number(row[4]); // close = mark à la fin de la bougie
+      if (!Number.isFinite(t) || !Number.isFinite(close)) continue;
+      out.push({ time: t, value: close });
+      lastT = t;
+    }
+    // Page suivante : juste après la dernière bougie reçue.
+    startTime = lastT + 1;
+    if (raw.length < 1500) break;
+  }
+  return toPoints(out);
+}
+
 /**
  * Récupère la série brute d'une famille auxiliaire pour un symbole, normalisée en
  * `AuxPoint[]` triés. Une exception (source injoignable) remonte → cache `error`.
@@ -105,6 +152,10 @@ async function rawFetch(id: AuxSeriesId, symbol: string): Promise<AuxPoint[]> {
     case "funding": {
       const h = await coinalyzeProvider.fetchFundingRateHistory(symbol, COINALYZE_INTERVAL, since);
       return toPoints(h.map((f) => ({ time: f.time, value: f.rate })));
+    }
+    case "mark": {
+      // Mark price perp Binance (gratuit, fapi markPriceKlines 1h) — pour basis spot-perp.
+      return fetchMarkPriceHistory(symbol, since);
     }
     case "stablecoins": {
       const s = await stablecoinsSupplyProvider.fetchSeries({ start: since });

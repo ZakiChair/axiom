@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 118 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 121 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -44,6 +44,7 @@ import { sslChannel } from "./trend/sslChannel";
 import { halfTrend } from "./trend/halfTrend";
 import { waddahAttar } from "./trend/waddahAttar";
 import { heikinAshi } from "./trend/heikinAshi";
+import { elderImpulse } from "./trend/elderImpulse";
 
 // — momentum (21) —
 import { accelerator } from "./momentum/accelerator";
@@ -69,6 +70,7 @@ import { ultimateOsc } from "./momentum/ultimateOsc";
 import { williamsR } from "./momentum/williamsR";
 import { qqe } from "./momentum/qqe";
 import { smi } from "./momentum/smi";
+import { randomWalk } from "./momentum/randomWalk";
 
 // — volatility (15) —
 import { atr } from "./volatility/atr";
@@ -141,6 +143,7 @@ import { openInterest } from "./derivatives/openInterest";
 import { stablecoinSupply } from "./derivatives/stablecoinSupply";
 import { fundingApr } from "./derivatives/fundingApr";
 import { oiChange } from "./derivatives/oiChange";
+import { basisPct } from "./derivatives/basisPct";
 
 export const INDICATORS: IndicatorDef[] = [
   // trend
@@ -177,6 +180,7 @@ export const INDICATORS: IndicatorDef[] = [
   halfTrend,
   waddahAttar,
   heikinAshi,
+  elderImpulse,
   // momentum
   accelerator,
   awesome,
@@ -201,6 +205,7 @@ export const INDICATORS: IndicatorDef[] = [
   williamsR,
   qqe,
   smi,
+  randomWalk,
   // volatility
   atr,
   atrRegime,
@@ -269,6 +274,7 @@ export const INDICATORS: IndicatorDef[] = [
   fundingZScore,
   fundingApr,
   oiChange,
+  basisPct,
 ];
 
 export function getIndicator(id: string): IndicatorDef | undefined {

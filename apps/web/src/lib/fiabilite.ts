@@ -72,6 +72,12 @@ const CATALOGUE: Record<string, MetaFiabilite> = {
     label: "WS live · Binance",
     detail: "Funding Binance mark price stream — live et complet.",
   },
+  "binance:mark": {
+    niveau: "fiable",
+    label: "fapi mark 1h · Binance",
+    detail:
+      "Mark price perp via markPriceKlines (1 h, public). Sert le basis spot-perp % (mark vs close chart).",
+  },
 
   // ─── On-chain community / daily ──────────────────────────────────────────
   "coinmetrics:nvt": {

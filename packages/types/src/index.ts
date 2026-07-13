@@ -174,7 +174,7 @@ export interface VolumeProfileBin {
 
 // ---------- Séries auxiliaires (contrat pour indicateurs dérivés on-chain/derivs) ----------
 /** Identifiant d'une série auxiliaire fournie par l'appelant (jamais fetchée par le moteur). */
-export type AuxSeriesId = "oi" | "funding" | "stablecoins" | "nvt" | "mvrv";
+export type AuxSeriesId = "oi" | "funding" | "mark" | "stablecoins" | "nvt" | "mvrv";
 
 /**
  * Séries auxiliaires DÉJÀ alignées sur les bougies (même longueur, même index).

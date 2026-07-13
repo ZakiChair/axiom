@@ -14,8 +14,8 @@
  * dégradé 1 req/5 s), réseau SOL SANS clé (RPC PublicNode + supply CoinGecko —
  * cf. data/onchain/solana.ts).
  *
- * Règle d'or (doc 02) : chaque widget porte une étiquette de fiabilité honnête
- * (« daily », « live », « estimation », « indisponible »).
+ * Règle d'or (doc 02) : chaque widget porte un BadgeFiabilite honnête via
+ * `metaSource` / métas partagées (fiable · partiel · estimation · indisponible).
  */
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
@@ -54,7 +54,8 @@ import {
   formatAge,
 } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
-import { EnTeteFenetre } from "./ui";
+import { metaSource, type MetaFiabilite } from "../lib/fiabilite";
+import { BadgeFiabilite, EnTeteFenetre } from "./ui";
 
 const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
 
@@ -155,39 +156,41 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
 
 // ─────────────────────────── Widget ───────────────────────────
 
-type Fiabilite = "daily" | "live" | "estimation" | "indisponible";
-
-const FIABILITE_STYLE: Record<Fiabilite, string> = {
-  daily: "border-border text-text-dim",
-  live: "border-up/50 text-up",
-  estimation: "border-border text-text-dim",
-  indisponible: "border-down/50 text-down",
+/**
+ * Métas réutilisées (lookup catalogue unique — dédup vs. tags locaux « daily/live »).
+ * Sources hors catalogue : `niveau` + `label` libres passés à `BadgeFiabilite`.
+ */
+const META_COINMETRICS = metaSource("coinmetrics");
+const META_BGEOMETRICS = metaSource("bgeometrics");
+/** Flux live hors catalogue (mempool, Etherscan gas, RPC Solana…). */
+const META_LIVE: MetaFiabilite = {
+  niveau: "fiable",
+  label: "direct",
+  detail: "Flux live ou quasi-temps réel (API publique / RPC).",
+};
+/** Daily / cache long hors catalogue (hashrate mempool, nœuds ETH, inflation SOL…). */
+const META_DAILY: MetaFiabilite = {
+  niveau: "partiel",
+  label: "quotidien",
+  detail: "Mise à jour quotidienne ou cache long — pas un tick live.",
+};
+/** Estimation structurelle (ex. compte à rebours halving). */
+const META_ESTIMATION: MetaFiabilite = {
+  niveau: "estimation",
+  label: "estimation",
+  detail: "Valeur modélisée ou extrapolée — pas une mesure brute.",
+};
+const META_INDISPONIBLE: MetaFiabilite = {
+  niveau: "indisponible",
+  label: "indisponible",
+  detail: "Source non câblée, en échec, ou clé manquante.",
 };
 
-// Libellés affichés en français ; les ids (« daily », « live ») restent techniques/EN.
-const FIABILITE_LABEL: Record<Fiabilite, string> = {
-  daily: "quotidien",
-  live: "direct",
-  estimation: "estimation",
-  indisponible: "indisponible",
-};
-
-/** Étiquette de fiabilité (honnête, cf. règle d'or doc 02). */
-function FiabiliteTag({ f }: { f: Fiabilite }) {
-  return (
-    <span
-      className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${FIABILITE_STYLE[f]}`}
-    >
-      {FIABILITE_LABEL[f]}
-    </span>
-  );
-}
-
-/** Un widget compact : libellé + étiquette, valeur + sparkline, sous-texte + fraîcheur. */
+/** Un widget compact : libellé + badge fiabilité, valeur + sparkline, sous-texte + fraîcheur. */
 function Widget({
   libelle,
   valeur,
-  fiabilite,
+  meta,
   spark,
   color,
   sousTexte,
@@ -196,7 +199,8 @@ function Widget({
 }: {
   libelle: string;
   valeur: string;
-  fiabilite: Fiabilite;
+  /** Métadonnées catalogue (`metaSource`) ou constantes locales ci-dessus. */
+  meta: MetaFiabilite;
   spark?: number[];
   color?: string; // nom de token CSS (« --serie-1 »…) appliqué à la valeur et à la sparkline
   sousTexte?: string;
@@ -207,7 +211,7 @@ function Widget({
     <div className="flex flex-col gap-1 rounded-md border border-border bg-bg px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-[11px] text-text-dim">{libelle}</span>
-        <FiabiliteTag f={fiabilite} />
+        <BadgeFiabilite meta={meta} />
       </div>
       <div className="flex items-end justify-between gap-2">
         <span
@@ -363,7 +367,7 @@ export function OnchainWindow() {
             <Widget
               libelle="Adresses actives"
               valeur={formatCompact(adr?.dernier?.value)}
-              fiabilite="daily"
+              meta={META_COINMETRICS}
               spark={sparkDe(adr)}
               color="--serie-1"
               fraicheur={cmDaily}
@@ -372,7 +376,7 @@ export function OnchainWindow() {
             <Widget
               libelle="Transactions / j"
               valeur={formatCompact(tx?.dernier?.value)}
-              fiabilite="daily"
+              meta={META_COINMETRICS}
               spark={sparkDe(tx)}
               color="--serie-2"
               fraicheur={cmDaily}
@@ -381,7 +385,7 @@ export function OnchainWindow() {
             <Widget
               libelle="Frais totaux (BTC)"
               valeur={formatDec(feeNtv?.dernier?.value, 2)}
-              fiabilite="daily"
+              meta={META_COINMETRICS}
               spark={sparkDe(feeNtv)}
               color="--serie-3"
               fraicheur={cmDaily}
@@ -390,7 +394,7 @@ export function OnchainWindow() {
             <Widget
               libelle="Hashrate (1 an)"
               valeur={fmtHashrate(hr?.dernier?.value)}
-              fiabilite="daily"
+              meta={META_DAILY}
               spark={sparkDe(hr, 90)}
               color="--up"
               fraicheur={fmtJour(hr?.dernier?.time)}
@@ -399,7 +403,7 @@ export function OnchainWindow() {
             <Widget
               libelle="Frais recommandés"
               valeur={mp ? `${formatDec(mp.fees.fastestFee, 0)} sat/vB` : "—"}
-              fiabilite="live"
+              meta={META_LIVE}
               sousTexte={mp ? `1h ${formatDec(mp.fees.hourFee, 0)} · éco ${formatDec(mp.fees.economyFee, 0)}` : undefined}
               fraicheur={fmtAge(donnees.mp?.ts)}
               perime={donnees.mp?.perime}
@@ -407,7 +411,7 @@ export function OnchainWindow() {
             <Widget
               libelle="Hauteur de bloc"
               valeur={formatEntier(mp?.hauteur)}
-              fiabilite="live"
+              meta={META_LIVE}
               fraicheur={fmtAge(donnees.mp?.ts)}
               perime={donnees.mp?.perime}
             />
@@ -415,7 +419,7 @@ export function OnchainWindow() {
               <Widget
                 libelle={halving ? `Halving (bloc ${formatEntier(halving.prochainBloc)})` : "Halving"}
                 valeur={fmtJours(halving?.msEstimes)}
-                fiabilite="estimation"
+                meta={META_ESTIMATION}
                 sousTexte={
                   halving
                     ? `reste ${formatEntier(halving.blocsRestants)} blocs → ${halving.recompenseApres} BTC`
@@ -452,7 +456,7 @@ export function OnchainWindow() {
                   key={def.id}
                   libelle={def.libelle}
                   valeur={formatDec(r?.serie.dernier?.value, def.id === "mvrv" ? 2 : 4)}
-                  fiabilite="daily"
+                  meta={def.id === "mvrv" ? metaSource("bgeometrics:mvrv") : META_BGEOMETRICS}
                   spark={sparkDe(r?.serie)}
                   color="--serie-4"
                   fraicheur={fmtJour(r?.serie.dernier?.time)}
@@ -463,7 +467,7 @@ export function OnchainWindow() {
             <Widget
               libelle="MVRV (ratio)"
               valeur={formatDec(mvrvRatio?.dernier?.value, 2)}
-              fiabilite="daily"
+              meta={META_COINMETRICS}
               spark={sparkDe(mvrvRatio)}
               color="--serie-4"
               fraicheur={cmDaily}
@@ -472,7 +476,7 @@ export function OnchainWindow() {
             <Widget
               libelle="Cap. marché BTC"
               valeur={formatUsd(mcap?.dernier?.value)}
-              fiabilite="daily"
+              meta={META_COINMETRICS}
               spark={sparkDe(mcap)}
               color="--serie-6"
               fraicheur={cmDaily}
@@ -540,7 +544,7 @@ export function OnchainWindow() {
               <span className="text-[11px] leading-snug text-text-dim">
                 {etf?.raison ?? "Flux ETF indisponibles."}
               </span>
-              <FiabiliteTag f="indisponible" />
+              <BadgeFiabilite meta={META_INDISPONIBLE} />
             </div>
           )}
         </section>
@@ -569,7 +573,7 @@ export function OnchainWindow() {
               <Widget
                 libelle="Gas recommandé"
                 valeur={fmtGwei(eth?.gasFast)}
-                fiabilite="live"
+                meta={META_LIVE}
                 sousTexte={
                   eth ? `sûr ${fmtGwei(eth.gasSafe)} · standard ${fmtGwei(eth.gasPropose)}` : undefined
                 }
@@ -578,14 +582,14 @@ export function OnchainWindow() {
               <Widget
                 libelle="Supply ETH"
                 valeur={formatCompact(eth?.supplyEth ?? undefined)}
-                fiabilite="live"
+                meta={META_LIVE}
                 color="--serie-6"
               />
               <div className="col-span-2">
                 <Widget
                   libelle="Nombre de nœuds"
                   valeur={formatEntier(eth?.nodeCount)}
-                  fiabilite="daily"
+                  meta={META_DAILY}
                   color="--up"
                 />
               </div>
@@ -596,7 +600,7 @@ export function OnchainWindow() {
                 Réseau ETH indisponible — Etherscan injoignable ou clé invalide
                 (Réglages ⚙ ou ETHERSCAN_API_KEY dans .env).
               </span>
-              <FiabiliteTag f="indisponible" />
+              <BadgeFiabilite meta={META_INDISPONIBLE} />
             </div>
           )}
         </section>
@@ -610,7 +614,7 @@ export function OnchainWindow() {
             <Widget
               libelle="TPS (hors votes)"
               valeur={formatEntier(sol?.tpsHorsVotes)}
-              fiabilite="live"
+              meta={META_LIVE}
               sousTexte={
                 sol?.tps != null ? `total ${formatEntier(sol.tps)} tps (votes inclus)` : undefined
               }
@@ -621,7 +625,7 @@ export function OnchainWindow() {
             <Widget
               libelle="Époque"
               valeur={formatEntier(sol?.epoque)}
-              fiabilite="live"
+              meta={META_LIVE}
               sousTexte={sol?.progressionEpoque != null ? `avancée ${fmtPct(sol.progressionEpoque, 1)}` : undefined}
               color="--serie-2"
               fraicheur={solFraicheur}
@@ -630,7 +634,7 @@ export function OnchainWindow() {
             <Widget
               libelle="Supply circulante"
               valeur={formatCompact(sol?.supplySol ?? undefined)}
-              fiabilite="live"
+              meta={META_LIVE}
               color="--serie-6"
               fraicheur={solFraicheur}
               perime={solPerime}
@@ -638,7 +642,7 @@ export function OnchainWindow() {
             <Widget
               libelle="Inflation annuelle"
               valeur={fmtPct(sol?.inflation)}
-              fiabilite="daily"
+              meta={META_DAILY}
               color="--serie-4"
               fraicheur={solFraicheur}
               perime={solPerime}
@@ -646,7 +650,7 @@ export function OnchainWindow() {
             <Widget
               libelle="Validateurs actifs"
               valeur={formatEntier(sol?.validateursActifs)}
-              fiabilite="live"
+              meta={META_LIVE}
               sousTexte={
                 sol?.validateursDelinquants != null ? `${sol.validateursDelinquants} délinquants` : undefined
               }
@@ -657,7 +661,7 @@ export function OnchainWindow() {
             <Widget
               libelle="SOL staké"
               valeur={formatCompact(sol?.stakeSol ?? undefined)}
-              fiabilite="live"
+              meta={META_LIVE}
               sousTexte={
                 sol?.stakeSol != null && sol.supplySol != null && sol.supplySol > 0
                   ? `≈ ${fmtPct(sol.stakeSol / sol.supplySol, 1)} du circulant`

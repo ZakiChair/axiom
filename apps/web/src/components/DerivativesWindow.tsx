@@ -54,7 +54,8 @@ import {
   formatUsd,
   VALEUR_ABSENTE,
 } from "../lib/format";
-import { EnTeteFenetre, ErreurBloc, Metric as MetricUI } from "./ui";
+import { metaSource } from "../lib/fiabilite";
+import { BadgeFiabilite, EnTeteFenetre, ErreurBloc } from "./ui";
 // Couleurs de série des panes OI/funding (hex figés côté chart — cf. leur doc).
 import { OI_COLOR, FUNDING_COLOR } from "../chart/derivatives";
 
@@ -86,31 +87,42 @@ function formatRatioBreakdown(p: BinanceRatioPoint | undefined): string {
 }
 
 /**
- * Tuile « libellé / valeur » : primitive partagée `Metric` (ui.tsx), enrichie de la
- * sparkline de tendance récente propre à cette fenêtre (passée en `extra`).
+ * Tuile « libellé / valeur » DES : sparkline de tendance + badge de fiabilité
+ * (catalogue `metaSource`, doctrine doc 02 — jamais de flux 🟡/🔴 sans pastille).
+ * Markup local (badge à côté du libellé) plutôt que `Metric` partagé.
  */
 function Metric({
   label,
   value,
   color,
   sparkValues,
+  /** Id catalogue (`coinalyze:oi`…) — affiche `BadgeFiabilite` si fourni. */
+  sourceId,
 }: {
   label: string;
   value: string;
   color?: string;
   sparkValues?: number[];
+  sourceId?: string;
 }) {
   return (
-    <MetricUI
-      label={label}
-      value={value}
-      couleur={color}
-      extra={
-        sparkValues && sparkValues.length >= 2 ? (
+    <div className="flex items-baseline justify-between gap-3 rounded-md border border-border bg-bg px-3 py-2">
+      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <span className="text-[11px] text-text-dim">{label}</span>
+        {sourceId !== undefined && <BadgeFiabilite meta={metaSource(sourceId)} />}
+      </span>
+      <span className="flex shrink-0 items-center gap-2">
+        {sparkValues !== undefined && sparkValues.length >= 2 ? (
           <Sparkline values={sparkValues} color={color ?? "var(--text-dim)"} />
-        ) : undefined
-      }
-    />
+        ) : null}
+        <span
+          className="tabular-nums text-sm font-medium text-text"
+          style={color !== undefined ? { color } : undefined}
+        >
+          {value}
+        </span>
+      </span>
+    </div>
   );
 }
 
@@ -472,11 +484,18 @@ export function DerivativesWindow() {
               {error && <ErreurBloc>{error}</ErreurBloc>}
 
               <div className="space-y-2">
-                <Metric label="Open Interest" value={formatUsd(oi?.oiUsd)} sparkValues={oiSpark} color="var(--serie-1)" />
+                <Metric
+                  label="Open Interest"
+                  value={formatUsd(oi?.oiUsd)}
+                  sparkValues={oiSpark}
+                  color="var(--serie-1)"
+                  sourceId="coinalyze:oi"
+                />
                 <Metric
                   label="Funding"
                   value={formatFunding(funding?.rate)}
                   sparkValues={fundingSpark}
+                  sourceId="coinalyze:funding"
                   color={
                     funding && Number.isFinite(funding.rate)
                       ? funding.rate >= 0
@@ -488,7 +507,10 @@ export function DerivativesWindow() {
                 {predicted && Number.isFinite(predicted.rate) && (
                   <div className="rounded-md border border-border bg-bg px-3 py-2">
                     <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-[11px] text-text-dim">Funding prédit</span>
+                      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] text-text-dim">Funding prédit</span>
+                        <BadgeFiabilite meta={metaSource("coinalyze:funding")} />
+                      </span>
                       <span
                         className={`tabular-nums text-sm font-medium ${
                           predicted.rate >= 0 ? "text-up" : "text-down"
@@ -512,6 +534,7 @@ export function DerivativesWindow() {
                   }
                   sparkValues={lsSpark}
                   color="var(--serie-2)"
+                  sourceId="coinalyze:ls"
                 />
               </div>
 
@@ -529,9 +552,16 @@ export function DerivativesWindow() {
                 />
               </div>
 
+              {/* Liq Coinalyze = partiel ≤1 min (🟡). Si un jour forceOrder Binance
+                  était branché ici : metaSource("binance:forceOrder") = estimation
+                  « flux throttlé (sous-estimé) » — jamais présenter un cumul forceOrder
+                  comme un fait complet (doctrine doc 02). */}
               <section className="rounded-md border border-border bg-bg">
-                <div className="border-b border-border px-3 py-2 text-[10px] uppercase tracking-wide text-text-dim">
-                  Liquidations récentes
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
+                  <span className="text-[10px] uppercase tracking-wide text-text-dim">
+                    Liquidations récentes
+                  </span>
+                  <BadgeFiabilite meta={metaSource("coinalyze:liq")} />
                 </div>
                 {liqBuckets.length > 0 && (
                   <div className="border-b border-border px-3 py-2">

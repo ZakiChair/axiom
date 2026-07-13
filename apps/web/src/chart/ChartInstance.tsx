@@ -607,11 +607,14 @@ export function ChartInstance({
           }
         };
 
+        // Resync post-reconnexion WS : le REST prime à open time égal (clôture
+        // finalisée, buy/sell corrigés). Ne PAS early-return sur `length` seule —
+        // un buffer de même cardinalité peut avoir un contenu différent (CVD à
+        // reseed via orderflow.onCandles → refreshCvd). Lot A0.4.
         const onResync = (fetched: Candle[]) => {
-          if (cancelled) return;
+          if (cancelled || fetched.length === 0) return;
           const existing = store.getState().candles;
           const merged = mergeResyncCandles(existing, fetched);
-          if (merged.length === existing.length) return;
           store.getState().setCandles(merged);
           chart.applyNewData(merged.map(toKLineData));
           orderflow?.onCandles();

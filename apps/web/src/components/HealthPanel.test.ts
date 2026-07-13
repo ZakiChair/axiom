@@ -6,7 +6,7 @@
  * désormais partagé et testé dans lib/format.test.ts.
  */
 import { describe, it, expect } from "vitest";
-import { dotClass, sourceLabel, formatQuota, degradedLevel } from "./HealthPanel";
+import { dotClass, sourceLabel, formatQuota, degradedLevel, etatLabel } from "./HealthPanel";
 import type { SanteSource } from "../store/health";
 
 /** Fabrique une SanteSource minimale pour les tests de degradedLevel. */
@@ -66,3 +66,15 @@ describe("degradedLevel", () => {
     expect(degradedLevel({ a: src("a", "reconnecting"), b: src("b", "error") })).toBe("error");
   });
 });
+
+describe("etatLabel (panneau détail A0.5)", () => {
+  it("libellés FR pour chaque état", () => {
+    expect(etatLabel("connected")).toMatch(/connect/i);
+    expect(etatLabel("stale")).toMatch(/stale/i);
+    expect(etatLabel("reconnecting")).toMatch(/reconnex/i);
+    expect(etatLabel("error")).toMatch(/erreur/i);
+    expect(etatLabel("polling")).toMatch(/poll/i);
+    expect(etatLabel("closed")).toMatch(/ferm/i);
+  });
+});
+

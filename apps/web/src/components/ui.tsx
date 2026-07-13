@@ -11,6 +11,11 @@
  * border-down/40…) : tout suit le thème courant sans travail supplémentaire.
  */
 import type { ReactNode } from "react";
+import {
+  LABEL_NIVEAU,
+  type MetaFiabilite,
+  type NiveauFiabilite,
+} from "../lib/fiabilite";
 
 /** Classes du bouton secondaire standard (recalculer, exporter, choisir…). */
 export const BTN_SECONDAIRE =
@@ -182,4 +187,46 @@ export function Onglets<T extends string>({
 /** Note de bas de section : source + cadence (« Données Deribit, ~1 min. »). */
 export function NoteSource({ children }: { children: ReactNode }) {
   return <p className="text-[10px] leading-snug text-text-dim">{children}</p>;
+}
+
+/**
+ * Classes de bordure/texte du badge de fiabilité (tokens sémantiques uniquement —
+ * jamais de hex). Aligné doctrine doc 02 : 🟢 up / 🟡 ambre / 🔴 dim|down.
+ */
+const TONS_FIABILITE: Record<NiveauFiabilite, string> = {
+  fiable: "border-up/50 text-up",
+  partiel: "border-amber-500/50 text-amber-500",
+  estimation: "border-border text-text-dim",
+  indisponible: "border-down/50 text-down",
+};
+
+/**
+ * Pastille de fiabilité centralisée (Lot A0).
+ * Accepte soit un `MetaFiabilite` (label catalogue), soit un `niveau` + `label`
+ * libre. `title` = tooltip long (detail).
+ */
+export function BadgeFiabilite({
+  meta,
+  niveau,
+  label,
+  title,
+}: {
+  /** Résultat de `metaSource(id)` — prioritaire si fourni. */
+  meta?: MetaFiabilite;
+  niveau?: NiveauFiabilite;
+  /** Court label ; défaut = libellé FR du niveau. */
+  label?: string;
+  title?: string;
+}) {
+  const n = meta?.niveau ?? niveau ?? "indisponible";
+  const texte = meta?.label ?? label ?? LABEL_NIVEAU[n];
+  const tip = title ?? meta?.detail;
+  return (
+    <span
+      title={tip}
+      className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${TONS_FIABILITE[n]}`}
+    >
+      {texte}
+    </span>
+  );
 }

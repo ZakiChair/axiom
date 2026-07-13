@@ -5,6 +5,10 @@
  * `healthStore`, alimenté par les adaptateurs WS et les pollers) : pastille d'état,
  * nom, âge du dernier message, quota si connu, dernière erreur en tooltip.
  *
+ * Clic sur une ligne → panneau détail (état, âge, quota, dernière erreur) sans
+ * re-render haute fréquence : l'âge du détail est aussi réécrit en DOM à 1 Hz
+ * (même pattern refs que la colonne âge des lignes). Lot A0.5.
+ *
  * Contraintes de perf (cf. BUILD-CONTRACT « pas de re-render sur tick ») :
  *  - le composant ne se re-rend QUE lorsque la composition / l'état / le quota des
  *    sources change (signature stable qui EXCLUT `dernierMessageTs`) ; jamais sur le
@@ -15,7 +19,7 @@
  * Sobre et dense (11px comme le reste de la sidebar) ; couleurs via tokens de thème
  * uniquement (aucun hex en dur).
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { healthStore, type EtatSource, type QuotaSource, type SanteSource } from "../store/health";
 import { SidebarSection } from "./SidebarSection";
@@ -31,9 +35,24 @@ const DOT_BY_ETAT: Record<EtatSource, string> = {
   closed: "bg-neutral-600", // gris éteint : désabonnée
 };
 
+/** Libellés FR des états (panneau détail). */
+const LABEL_ETAT: Record<EtatSource, string> = {
+  connected: "connecté",
+  stale: "stale (silencieux)",
+  reconnecting: "reconnexion…",
+  error: "erreur",
+  polling: "polling",
+  closed: "fermé",
+};
+
 /** Classe de la pastille pour un état donné. PURE. */
 export function dotClass(etat: EtatSource): string {
   return DOT_BY_ETAT[etat];
+}
+
+/** Libellé FR d'un état source. PURE. */
+export function etatLabel(etat: EtatSource): string {
+  return LABEL_ETAT[etat];
 }
 
 /** Noms lisibles des sources (préfixe = exchange/fournisseur). */
@@ -127,25 +146,43 @@ export function HealthPanel() {
   // Re-rendu piloté par la signature (hors `dernierMessageTs`) — cf. en-tête.
   const signature = useStore(healthStore, (s) => panelSignature(s.sources));
 
+  // Source sélectionnée pour le panneau détail (null = fermé). Changement
+  // uniquement au clic — jamais sur le flot de messages.
+  const [selected, setSelected] = useState<string | null>(null);
+
   // Cellules DOM « âge », mises à jour à 1 Hz sans re-render.
+  // Clé spéciale « __detail__ » pour l'âge du panneau détail.
   const ageCells = useRef(new Map<string, HTMLSpanElement>());
   useEffect(() => {
     const tick = (): void => {
       const now = Date.now();
       const { sources } = healthStore.getState();
-      for (const [source, el] of ageCells.current) {
-        el.textContent = formatAge(sources[source]?.dernierMessageTs ?? 0, now);
+      for (const [key, el] of ageCells.current) {
+        if (key === "__detail__") {
+          const src = selected ? sources[selected] : undefined;
+          el.textContent = formatAge(src?.dernierMessageTs ?? 0, now);
+        } else {
+          el.textContent = formatAge(sources[key]?.dernierMessageTs ?? 0, now);
+        }
       }
     };
     tick(); // valeur initiale immédiate (nouvelles lignes)
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [signature]); // re-arme quand la liste/état des sources change (refs renouvelées)
+  }, [signature, selected]); // re-arme quand liste/état ou sélection change
+
+  // Purge la sélection si la source a quitté le registre (évite un panneau fantôme).
+  useEffect(() => {
+    if (selected && !healthStore.getState().sources[selected]) {
+      setSelected(null);
+    }
+  }, [signature, selected]);
 
   // Lu frais à chaque rendu : le rendu est déclenché par la signature ci-dessus.
   const sources = healthStore.getState().sources;
   const rows = Object.values(sources).sort((a, b) => a.source.localeCompare(b.source));
   const badge = degradedLevel(sources);
+  const detail: SanteSource | undefined = selected ? sources[selected] : undefined;
 
   return (
     <SidebarSection
@@ -159,29 +196,80 @@ export function HealthPanel() {
           <p className="py-1 text-[11px] text-text-dim">Aucune source active.</p>
         ) : (
           <ul className="flex flex-col gap-1">
-            {rows.map((s) => (
-              <li
-                key={s.source}
-                title={s.derniereErreur ?? undefined}
-                className="flex items-center gap-2 text-[11px] leading-tight"
-              >
-                <span
-                  aria-hidden
-                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass(s.etat)}`}
-                />
-                <span className="min-w-0 flex-1 truncate text-text">{sourceLabel(s.source)}</span>
-                {s.quota && (
-                  <span className="shrink-0 tabular-nums text-text-dim">{formatQuota(s.quota)}</span>
-                )}
-                <span
-                  ref={(el) => registerAgeCell(ageCells.current, s.source, el)}
-                  className="shrink-0 tabular-nums text-text-dim"
-                >
-                  —
-                </span>
-              </li>
-            ))}
+            {rows.map((s) => {
+              const actif = selected === s.source;
+              return (
+                <li key={s.source}>
+                  <button
+                    type="button"
+                    onClick={() => setSelected((cur) => (cur === s.source ? null : s.source))}
+                    title={s.derniereErreur ?? "Voir le détail"}
+                    aria-pressed={actif}
+                    className={`flex w-full items-center gap-2 rounded px-0.5 py-0.5 text-left text-[11px] leading-tight transition hover:bg-surface ${
+                      actif ? "bg-surface" : ""
+                    }`}
+                  >
+                    <span
+                      aria-hidden
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${dotClass(s.etat)}`}
+                    />
+                    <span className="min-w-0 flex-1 truncate text-text">{sourceLabel(s.source)}</span>
+                    {s.quota && (
+                      <span className="shrink-0 tabular-nums text-text-dim">{formatQuota(s.quota)}</span>
+                    )}
+                    <span
+                      ref={(el) => registerAgeCell(ageCells.current, s.source, el)}
+                      className="shrink-0 tabular-nums text-text-dim"
+                    >
+                      —
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
           </ul>
+        )}
+
+        {/* Panneau détail (clic ligne) — bas fréquence, âge via ref 1 Hz. */}
+        {detail && (
+          <div
+            className="mt-2 rounded border border-border bg-bg px-2 py-1.5 text-[11px] leading-snug"
+            role="region"
+            aria-label={`Détail ${sourceLabel(detail.source)}`}
+          >
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="truncate font-medium text-text">{sourceLabel(detail.source)}</span>
+              <button
+                type="button"
+                onClick={() => setSelected(null)}
+                className="shrink-0 text-text-dim hover:text-text"
+                title="Fermer le détail"
+              >
+                ✕
+              </button>
+            </div>
+            <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-text-dim">
+              <dt>État</dt>
+              <dd className="text-text">{etatLabel(detail.etat)}</dd>
+              <dt>Âge</dt>
+              <dd
+                ref={(el) => registerAgeCell(ageCells.current, "__detail__", el)}
+                className="tabular-nums text-text"
+              >
+                —
+              </dd>
+              {detail.quota && (
+                <>
+                  <dt>Quota</dt>
+                  <dd className="tabular-nums text-text">{formatQuota(detail.quota)}</dd>
+                </>
+              )}
+              <dt>Erreur</dt>
+              <dd className={detail.derniereErreur ? "text-down" : "text-text-dim"}>
+                {detail.derniereErreur ?? "—"}
+              </dd>
+            </dl>
+          </div>
         )}
       </div>
     </SidebarSection>

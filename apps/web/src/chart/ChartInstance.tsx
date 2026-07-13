@@ -49,6 +49,7 @@ import { DerivativesChartController } from "./derivatives";
 import { bindChart, unbindChart, setFocusChart, redrawFibOverlays, restoreDrawings, purgeChartDrawings } from "./drawing";
 import { fibStore } from "./fibonacci";
 import { createRafThrottle, type RafThrottle } from "./rafThrottle";
+import { bindPriceAlertMenu } from "./priceAlertMenu";
 import { SymbolBanner } from "../components/SymbolBanner";
 
 /** Type d'échelle de l'axe prix (miroir de YAxisType klinecharts). */
@@ -370,6 +371,14 @@ export function ChartInstance({
       { minIntervalMs: TICK_MIN_INTERVAL_MS },
     );
 
+    // ── Clic-droit pane prix → alerte prix-croise (lot B4) ─────────────────
+    // getMarket lit le store injecté à chaque clic (symbole/source survivent au
+    // change d'actif sans remonter l'instance KLineChart).
+    const unbindPriceAlert = bindPriceAlertMenu(chart, chartDom, () => {
+      const s = store.getState();
+      return { symbol: s.symbol, source: s.exchange };
+    });
+
     // Publie les objets à vie longue vers l'effet DONNÉES.
     mountRef.current = { chart, indicators, paneHeaders, updateThrottle };
 
@@ -380,6 +389,7 @@ export function ChartInstance({
       // partir AVANT `dispose(chart)`. On invoque donc EXPLICITEMENT le teardown données ici
       // (idempotent) pendant que le chart est encore vivant, puis on démonte l'instance.
       teardownDataRef.current?.();
+      unbindPriceAlert();
       unsubscribeTheme();
       unsubscribePaneHeaders();
       paneHeaders.dispose();

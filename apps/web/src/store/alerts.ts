@@ -15,7 +15,7 @@
  * de Phase 2) ; ce store n'est qu'un conteneur d'état + un journal.
  */
 import { createStore } from "zustand/vanilla";
-import type { AlertDef, Condition, Declenchement } from "@axiom/alerts";
+import type { AlertDef, Condition, Declenchement, SensCroisement } from "@axiom/alerts";
 import type { ExchangeId } from "@axiom/types";
 import { daemonPret, kvPut } from "../data/daemon";
 
@@ -27,6 +27,8 @@ const CLE_DEFS = "defs";
 const DEBOUNCE_SYNC_MS = 400;
 /** Borne du journal affiché/persisté (les entrées plus anciennes sont évincées). */
 const MAX_JOURNAL = 100;
+/** Titre de section sidebar des alertes (clé `uiSectionsStore`). */
+export const SECTION_ALERTES = "Alertes";
 
 /** Champs requis pour créer une alerte (le reste est initialisé par le store). */
 export interface NouvelleAlerte {
@@ -34,6 +36,38 @@ export interface NouvelleAlerte {
   source: ExchangeId;
   condition: Condition;
   message?: string;
+}
+
+/**
+ * Construit une `NouvelleAlerte` prix-croise au niveau donné (clic-droit chart, lot B4).
+ * PURE — n'écrit pas le store (appeler `alertsStore.getState().ajouter(...)` ensuite).
+ */
+export function alertePrixAuNiveau(
+  symbol: string,
+  source: ExchangeId,
+  niveau: number,
+  sens: SensCroisement,
+  message?: string,
+): NouvelleAlerte {
+  return {
+    symbol: symbol.toUpperCase(),
+    source,
+    condition: { type: "prix-croise", niveau, sens },
+    ...(message !== undefined ? { message } : {}),
+  };
+}
+
+/**
+ * Arrondit un niveau de prix pour une alerte (~5 chiffres significatifs, 2–8 décimales).
+ * PURE — aligne le niveau capturé au pixel sur une valeur stable et lisible.
+ */
+export function arrondirNiveauAlerte(prix: number): number {
+  if (!Number.isFinite(prix)) return prix;
+  const abs = Math.abs(prix);
+  if (abs === 0) return 0;
+  const decimals = Math.min(8, Math.max(2, 4 - Math.floor(Math.log10(abs))));
+  const f = 10 ** decimals;
+  return Math.round(prix * f) / f;
 }
 
 export interface AlertsState {

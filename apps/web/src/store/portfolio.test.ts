@@ -11,6 +11,8 @@ import {
   calculerExposition,
   pnlLatentTotal,
   statsClotures,
+  debutJourLocalMs,
+  pnlSessionDepuis,
   type Position,
   type NouvellePosition,
 } from "./portfolio";
@@ -153,6 +155,82 @@ describe("statsClotures", () => {
     expect(s.winRate).toBe(0);
     expect(s.meilleure).toBeNull();
     expect(s.pire).toBeNull();
+  });
+});
+
+describe("debutJourLocalMs", () => {
+  it("renvoie 00:00:00.000 local pour l'instant donné", () => {
+    // 2026-03-15 14:30 locale (construit via Date local pour rester indépendant du TZ CI).
+    const maintenant = new Date(2026, 2, 15, 14, 30, 45, 123).getTime();
+    const debut = debutJourLocalMs(maintenant);
+    const d = new Date(debut);
+    expect(d.getFullYear()).toBe(2026);
+    expect(d.getMonth()).toBe(2);
+    expect(d.getDate()).toBe(15);
+    expect(d.getHours()).toBe(0);
+    expect(d.getMinutes()).toBe(0);
+    expect(d.getSeconds()).toBe(0);
+    expect(d.getMilliseconds()).toBe(0);
+  });
+});
+
+describe("pnlSessionDepuis", () => {
+  // Jour de session = 2026-03-15 00:00 locale.
+  const start = new Date(2026, 2, 15, 0, 0, 0, 0).getTime();
+  const pendant = start + 12 * 3_600_000; // midi du même jour
+  const avant = start - 3_600_000; // veille 23:00
+
+  it("latent = positions ouvertes valorisées ; realise = clôtures du jour", () => {
+    const positions = [
+      pos({ id: "open", symbole: "BTCUSDT", direction: "long", prixEntree: 100, taille: 1, statut: "ouvert" }),
+      // clôturée aujourd'hui : +20
+      pos({
+        id: "today",
+        symbole: "ETHUSDT",
+        direction: "long",
+        prixEntree: 100,
+        taille: 1,
+        statut: "clos",
+        prixSortie: 120,
+        dateSortie: pendant,
+      }),
+      // clôturée hier : ignorée du réalisé session
+      pos({
+        id: "hier",
+        symbole: "SOLUSDT",
+        direction: "long",
+        prixEntree: 100,
+        taille: 1,
+        statut: "clos",
+        prixSortie: 150,
+        dateSortie: avant,
+      }),
+    ];
+    const s = pnlSessionDepuis(positions, { BTCUSDT: 110 }, start);
+    expect(s.latent).toBe(10); // (110-100)*1
+    expect(s.realise).toBe(20); // clôture du jour uniquement
+    expect(s.total).toBe(30);
+  });
+
+  it("aucune position / prix manquant → zéros (latent ignore les symboles sans prix)", () => {
+    expect(pnlSessionDepuis([], {}, start)).toEqual({ latent: 0, realise: 0, total: 0 });
+    const openSansPrix = [pos({ statut: "ouvert", symbole: "BTCUSDT", prixEntree: 100, taille: 1 })];
+    expect(pnlSessionDepuis(openSansPrix, {}, start).latent).toBe(0);
+  });
+
+  it("clôture pile à startOfDayMs est incluse (borne inclusive)", () => {
+    const positions = [
+      pos({
+        id: "borne",
+        statut: "clos",
+        direction: "short",
+        prixEntree: 100,
+        taille: 2,
+        prixSortie: 90, // short +10 * 2 = +20
+        dateSortie: start,
+      }),
+    ];
+    expect(pnlSessionDepuis(positions, {}, start).realise).toBe(20);
   });
 });
 

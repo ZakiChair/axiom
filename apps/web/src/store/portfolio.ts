@@ -195,6 +195,51 @@ export function statsClotures(positions: Position[]): StatsClotures {
   return { nombre, gagnants, perdants, winRate, pnlCumule, meilleure, pire };
 }
 
+/** P&L de session (jour civil local, depuis `startOfDayMs`). */
+export interface PnLSession {
+  /** PnL latent net des positions ouvertes (prix manquants ignorés). */
+  latent: number;
+  /** PnL réalisé net des clôtures dont `dateSortie` ≥ `startOfDayMs`. */
+  realise: number;
+  /** latent + realise. */
+  total: number;
+}
+
+/**
+ * Début du jour civil LOCAL (00:00:00.000) pour l'instant `maintenant` (ms epoch).
+ * PURE — l'horloge est injectée (pas de `Date.now` interne).
+ */
+export function debutJourLocalMs(maintenant: number): number {
+  const d = new Date(maintenant);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * P&L de session depuis `startOfDayMs` :
+ *  - latent = somme des nets des positions **ouvertes** valorisées à `prix` ;
+ *  - realise = somme des nets des positions **clôturées** avec `dateSortie` ≥ borne ;
+ *  - total = latent + realise.
+ *
+ * `prix` = carte symbole → prix courant (même convention que `pnlLatentTotal`).
+ * PURE.
+ */
+export function pnlSessionDepuis(
+  positions: Position[],
+  prix: Record<string, number>,
+  startOfDayMs: number,
+): PnLSession {
+  const latent = pnlLatentTotal(positions, prix);
+  let realise = 0;
+  for (const p of positions) {
+    if (p.statut !== "clos") continue;
+    if ((p.dateSortie ?? 0) < startOfDayMs) continue;
+    const pnl = pnlRealisePosition(p);
+    if (pnl) realise += pnl.net;
+  }
+  return { latent, realise, total: latent + realise };
+}
+
 // ─────────────────────────── État & persistance ───────────────────────────
 
 export interface PortfolioState {

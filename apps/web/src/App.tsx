@@ -13,6 +13,7 @@
 import { lazy, Suspense, useEffect, useRef, type ComponentType, type LazyExoticComponent } from "react";
 import { useStore } from "zustand";
 import { Toolbar } from "./components/Toolbar";
+import { SessionStrip } from "./components/SessionStrip";
 import { TickerBand } from "./components/TickerBand";
 import { DrawingToolbar } from "./components/DrawingToolbar";
 import { ChartGrid } from "./chart/ChartGrid";
@@ -199,6 +200,8 @@ export function App() {
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg text-text">
       {/* Plein écran : toolbars et sidebar masquées, le graphe occupe tout l'écran. */}
       {!plein && <Toolbar />}
+      {/* Strip session (P&L jour · alertes · santé) — hors plein écran, dense 11px. */}
+      {!plein && <SessionStrip />}
       {/* Bandeau news défilant (enfant flex : le workspace mesuré par chartAreaRef se
           rétrécit automatiquement). Se masque lui-même selon tickerBandStore (⌘K TICKER). */}
       {!plein && <TickerBand />}

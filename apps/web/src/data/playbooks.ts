@@ -21,6 +21,7 @@ import { marketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
 import { volumeProfileStore } from "../store/volumeProfile";
 import { windowManagerStore } from "../store/windowManager";
+import { alertsStore } from "../store/alerts";
 
 // ─────────────────────────── Types ───────────────────────────
 
@@ -79,13 +80,45 @@ export function applyScalpBtc(): void {
   volumeProfileStore.getState().setEnabled(true);
 }
 
-/** Fade funding : 1 graphe, DES + EQS, sous-pane funding ON. */
+/** Fade funding : 1 graphe, DES + EQS, sous-pane funding ON + CVD S/P (edge). */
 export function applyFadeFunding(): void {
   setLayout("1");
   setMarche({ exchange: "binance", symbol: "BTCUSDT", timeframe: "15m" });
   ouvrirFenetres("derivatives", "screener");
   // setState : le store n'expose que toggle — on force ON de façon idempotente.
   derivativesChartStore.setState({ funding: true });
+  // Pipeline pour croiser funding crowded + divergence spot/perp.
+  orderflowStore.getState().setEnabled(true);
+  orderflowStore.getState().setCvdSpotPerp(true);
+}
+
+/**
+ * Edge CVD spot/perp : BTC 5m, orderflow + CVD S/P + DES, section alertes prête.
+ * Crée une alerte « toute divergence S/P » si aucune n'existe encore pour BTCUSDT.
+ */
+export function applyCvdEdge(): void {
+  setLayout("1");
+  setMarche({ exchange: "binance", symbol: "BTCUSDT", timeframe: "5m" });
+  ouvrirFenetres("derivatives");
+  orderflowStore.getState().setEnabled(true);
+  orderflowStore.getState().setCvdSpotPerp(true);
+  volumeProfileStore.getState().setEnabled(true);
+  // Alerte CVD seed (idempotent si déjà une cvd-spot-perp-div sur BTCUSDT).
+  const { defs, ajouter } = alertsStore.getState();
+  const deja = defs.some(
+    (d) =>
+      d.symbol === "BTCUSDT" &&
+      d.actif &&
+      d.condition.type === "cvd-spot-perp-div"
+  );
+  if (!deja) {
+    ajouter({
+      symbol: "BTCUSDT",
+      source: "binance",
+      condition: { type: "cvd-spot-perp-div", kind: "les-deux" },
+      message: "Divergence CVD spot vs perp (playbook PLAY-CVD)",
+    });
+  }
 }
 
 /** Macro FOMC : 2h, ECO + RATE + NEWS, overlays macro (M2 / stables / total). */
@@ -117,7 +150,7 @@ export function applyOptionsDeribit(): void {
 
 // ─────────────────────────── Catalogue ───────────────────────────
 
-/** Les 5 playbooks seed (ordre d'affichage palette / menu). */
+/** Playbooks seed (ordre d'affichage palette / menu). */
 export const PLAYBOOKS: readonly Playbook[] = [
   {
     id: "scalp-btc",
@@ -130,8 +163,15 @@ export const PLAYBOOKS: readonly Playbook[] = [
     id: "fade-funding",
     nom: "Fade funding",
     mnemonique: "PLAY-FADE",
-    description: "BTC 15m · DES + EQS · sous-pane funding",
+    description: "BTC 15m · DES + EQS · funding + CVD S/P",
     apply: applyFadeFunding,
+  },
+  {
+    id: "cvd-edge",
+    nom: "Edge CVD spot/perp",
+    mnemonique: "PLAY-CVD",
+    description: "BTC 5m · DES · orderflow CVD S/P · alerte divergence",
+    apply: applyCvdEdge,
   },
   {
     id: "macro-fomc",
@@ -201,7 +241,7 @@ export const commandesPlaybooks: Commande[] = [
       "risk",
       "options",
     ],
-    apercu: "PLAY-SCALP · PLAY-FADE · PLAY-FOMC · PLAY-RISK · PLAY-OPT",
+    apercu: "PLAY-SCALP · PLAY-FADE · PLAY-CVD · PLAY-FOMC · PLAY-RISK · PLAY-OPT",
     // Entrée générique : applique le playbook phare (scalp) — les autres via PLAY-*.
     action: () => playbookParId("scalp-btc")?.apply(),
   },

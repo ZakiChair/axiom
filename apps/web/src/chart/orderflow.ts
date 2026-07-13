@@ -30,6 +30,7 @@ import { getAdapter } from "../data/adapters";
 import { adaptateurReplayActif } from "../data/replayFeed";
 import type { MarketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
+import { cvdDivergenceStore } from "../store/cvd-divergence";
 import { detectImbalances, detectDeltaDivergences, type DivergenceFlag } from "./footprintAnalytics";
 import { subscribePerpAggTrades } from "../data/binanceFutures";
 import { detectCvdDivergences, type CvdBucket, type CvdDivergence } from "./cvdSpotPerp";
@@ -569,6 +570,8 @@ export class OrderflowController {
       this.spCvdPaneId = null;
     }
     this.perpDelta.clear();
+    // Pipeline off → alertes CVD non évaluables (undefined, pas null).
+    cvdDivergenceStore.getState().clear(this.symbol);
   }
 
   /** Accumulation O(1) d'un trade perp dans la bougie correspondante (delta signé). */
@@ -614,10 +617,14 @@ export class OrderflowController {
       spotByTime[b.time] = b.spot;
       perpByTime[b.time] = b.perp;
     }
+    const divergences = detectCvdDivergences(buckets, CVD_SP_LOOKBACK);
     const divByTime: Record<number, CvdDivergence["kind"]> = {};
-    for (const d of detectCvdDivergences(buckets, CVD_SP_LOOKBACK)) {
+    for (const d of divergences) {
       divByTime[d.time] = d.kind;
     }
+    // Pont alertes : dernière divergence détectée (ou null = pipeline prêt, pas de div).
+    const derniere = divergences[divergences.length - 1];
+    cvdDivergenceStore.getState().setKind(this.symbol, derniere?.kind ?? null);
     const extendData: CvdSpExtend = { spotByTime, perpByTime, divByTime };
     if (this.spCvdPaneId) {
       this.chart.overrideIndicator({ name: CVD_SP_NAME, extendData }, this.spCvdPaneId);

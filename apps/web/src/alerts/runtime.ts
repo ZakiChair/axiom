@@ -11,9 +11,9 @@
  *    (ces conditions requièrent les bougies, présentes uniquement pour le symbole affiché).
  *  - POLL FUNDING (~60 s) pour les symboles ayant une alerte `funding-extreme` :
  *    injecte `fundingRate` (+ `fundingZScore` si historique dispo) dans le contexte.
- *
- * CVD spot/perp-div : support moteur OK, injection runtime reportée v1.1 (données
- * dans le contrôleur chart orderflow, hors store — cf. lot B1).
+ *  - STORE CVD S/P (`cvdDivergenceStore`) : le contrôleur orderflow publie le kind
+ *    de divergence ; on évalue `cvd-spot-perp-div` (app ouverte uniquement — pas de
+ *    pipeline orderflow côté daemon).
  *
  * ONGLET FERMÉ : le daemon évalue aussi `funding-extreme` (poll premiumIndex ~60 s,
  * lot D3). CVD spot/perp-div reste dormant côté daemon (pas de pipeline orderflow).
@@ -28,6 +28,8 @@ import { evaluerAlertes, type AlertDef, type ContexteAlerte, type Declenchement 
 import type { Unsubscribe } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { alertsStore, pousserDefsDaemon } from "../store/alerts";
+import { cvdDivergenceStore } from "../store/cvd-divergence";
+import { orderflowStore } from "../store/orderflow";
 import { subscribeTickers, type TickerUpdate } from "../data/ticker";
 import { daemonPret, detectDaemon } from "../data/daemon";
 import { coinalyzeProvider } from "../data/coinalyze";
@@ -181,12 +183,55 @@ function creerRuntime(): Unsubscribe {
     }
   };
 
+  // ── CVD spot/perp-div : pont orderflow → moteur ─────────────────────────
+  const evaluerCvdSymbol = (symbol: string): void => {
+    const kind = cvdDivergenceStore.getState().bySymbol[symbol.toUpperCase()];
+    // Clé absente → undefined : non évaluable (pipeline off).
+    if (kind === undefined) return;
+    const lot = alertsStore
+      .getState()
+      .defs.filter((d) => d.actif && d.symbol === symbol && d.condition.type === "cvd-spot-perp-div");
+    if (lot.length === 0) return;
+    const mkt = marketStore.getState();
+    const lastCandle =
+      mkt.symbol === symbol ? mkt.candles[mkt.candles.length - 1] : undefined;
+    appliquerResultat(lot, {
+      maintenant: Date.now(),
+      dernierPrix: lastCandle?.close ?? 0,
+      cvdDivergenceKind: kind,
+    });
+  };
+
+  /** Active orderflow + CVD S/P si au moins une alerte CVD active (Binance). */
+  const assurerPipelineCvd = (): void => {
+    const aDesCvd = alertsStore
+      .getState()
+      .defs.some((d) => d.actif && d.condition.type === "cvd-spot-perp-div");
+    if (!aDesCvd) return;
+    const of = orderflowStore.getState();
+    if (!of.enabled) of.setEnabled(true);
+    if (!of.cvdSpotPerp) of.setCvdSpotPerp(true);
+  };
+
+  const unsubCvd = cvdDivergenceStore.subscribe((s, prev) => {
+    // Évalue seulement les symboles dont le kind a changé.
+    for (const [sym, kind] of Object.entries(s.bySymbol)) {
+      if (prev.bySymbol[sym] !== kind) evaluerCvdSymbol(sym);
+    }
+  });
+
   // Démarrage : souscriptions + calibrage immédiat contre l'état courant.
   resyncTicker();
   resyncFunding();
+  assurerPipelineCvd();
+  // Calibrage CVD sur l'état déjà publié (si orderflow déjà actif).
+  for (const sym of Object.keys(cvdDivergenceStore.getState().bySymbol)) {
+    evaluerCvdSymbol(sym);
+  }
   const unsubAlerts = alertsStore.subscribe(() => {
     resyncTicker(); // re-route si la liste des symboles change
     resyncFunding();
+    assurerPipelineCvd();
   });
   const unsubMarket = marketStore.subscribe(onMarket);
   onMarket(); // calibrage initial des conditions bougie sur le backfill présent
@@ -197,6 +242,7 @@ function creerRuntime(): Unsubscribe {
     unsubAlerts();
     unsubMarket();
     unsubTicker();
+    unsubCvd();
     stopHeartbeat();
     if (fundingTimer !== undefined) clearInterval(fundingTimer);
   };

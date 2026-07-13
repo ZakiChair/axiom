@@ -5,6 +5,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PLAYBOOKS,
+  applyCvdEdge,
   applyFadeFunding,
   applyMacroFomc,
   applyOptionsDeribit,
@@ -22,6 +23,7 @@ import { marketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
 import { volumeProfileStore } from "../store/volumeProfile";
 import { windowManagerStore } from "../store/windowManager";
+import { alertsStore } from "../store/alerts";
 
 /** Seed localStorage pour les stores qui hydratent au chargement. */
 function installMockLocalStorage(): void {
@@ -42,14 +44,15 @@ function installMockLocalStorage(): void {
 installMockLocalStorage();
 
 describe("playbooksMeta — catalogue seed", () => {
-  it("expose exactement 5 playbooks avec ids uniques", () => {
+  it("expose exactement 6 playbooks avec ids uniques", () => {
     const meta = playbooksMeta();
-    expect(meta).toHaveLength(5);
+    expect(meta).toHaveLength(6);
     const ids = meta.map((m) => m.id);
-    expect(new Set(ids).size).toBe(5);
+    expect(new Set(ids).size).toBe(6);
     expect(ids).toEqual([
       "scalp-btc",
       "fade-funding",
+      "cvd-edge",
       "macro-fomc",
       "risk-off",
       "options-deribit",
@@ -60,6 +63,7 @@ describe("playbooksMeta — catalogue seed", () => {
     const byId = Object.fromEntries(playbooksMeta().map((m) => [m.id, m.mnemonique]));
     expect(byId["scalp-btc"]).toBe("PLAY-SCALP");
     expect(byId["fade-funding"]).toBe("PLAY-FADE");
+    expect(byId["cvd-edge"]).toBe("PLAY-CVD");
     expect(byId["macro-fomc"]).toBe("PLAY-FOMC");
     expect(byId["risk-off"]).toBe("PLAY-RISK");
     expect(byId["options-deribit"]).toBe("PLAY-OPT");
@@ -125,12 +129,37 @@ describe("apply* — composition stores (spies)", () => {
     expect(open).toHaveBeenCalledWith("dom");
   });
 
-  it("applyFadeFunding : DES+EQS + funding pane ON", () => {
+  it("applyFadeFunding : DES+EQS + funding pane ON + CVD S/P", () => {
     const open = vi.spyOn(windowManagerStore.getState(), "openWindow");
     applyFadeFunding();
     expect(derivativesChartStore.getState().funding).toBe(true);
+    expect(orderflowStore.getState().enabled).toBe(true);
+    expect(orderflowStore.getState().cvdSpotPerp).toBe(true);
     expect(open).toHaveBeenCalledWith("derivatives");
     expect(open).toHaveBeenCalledWith("screener");
+  });
+
+  it("applyCvdEdge : OF+CVD S/P + alerte divergence seed (idempotent)", () => {
+    // Nettoie les alertes résiduelles (persist localStorage mock).
+    for (const d of [...alertsStore.getState().defs]) {
+      alertsStore.getState().supprimer(d.id);
+    }
+    const open = vi.spyOn(windowManagerStore.getState(), "openWindow");
+    applyCvdEdge();
+    expect(marketStore.getState().timeframe).toBe("5m");
+    expect(orderflowStore.getState().enabled).toBe(true);
+    expect(orderflowStore.getState().cvdSpotPerp).toBe(true);
+    expect(open).toHaveBeenCalledWith("derivatives");
+    const cvdDefs = alertsStore
+      .getState()
+      .defs.filter((d) => d.condition.type === "cvd-spot-perp-div" && d.symbol === "BTCUSDT");
+    expect(cvdDefs).toHaveLength(1);
+    applyCvdEdge(); // pas de doublon
+    expect(
+      alertsStore
+        .getState()
+        .defs.filter((d) => d.condition.type === "cvd-spot-perp-div" && d.symbol === "BTCUSDT")
+    ).toHaveLength(1);
   });
 
   it("applyMacroFomc : 2h, ECO+RATE+NEWS, overlays macro", () => {

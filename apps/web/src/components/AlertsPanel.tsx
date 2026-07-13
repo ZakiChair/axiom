@@ -9,7 +9,7 @@
  * Ce composant se re-rend uniquement sur ÉVÉNEMENT (création, bascule, déclenchement) :
  * aucune donnée haute fréquence n'y transite (le runtime écrit le store hors render-loop).
  *
- * CVD spot/perp-div : support moteur (v1.1 UI) — données orderflow hors store.
+ * CVD spot/perp-div : moteur + runtime (pont orderflow) + création UI.
  */
 import { useMemo, useState } from "react";
 import { useStore } from "zustand";
@@ -27,11 +27,19 @@ import { formatHeure } from "../lib/format";
 import { SidebarSection } from "./SidebarSection";
 import { Vide } from "./ui";
 
-/** Types d'alerte proposés à la création (CVD div en v1.1). */
-type TypeAlerte = "prix-croise" | "variation-pct" | "indicateur-seuil" | "funding-extreme";
+/** Types d'alerte proposés à la création. */
+type TypeAlerte =
+  | "prix-croise"
+  | "variation-pct"
+  | "indicateur-seuil"
+  | "funding-extreme"
+  | "cvd-spot-perp-div";
 
 /** Sens funding (overcrowding). */
 type SensFunding = "long-crowded" | "short-crowded" | "les-deux";
+
+/** Kind de divergence CVD spot/perp. */
+type KindCvd = "spotUp_perpDown" | "spotDown_perpUp" | "les-deux";
 
 /** Fenêtres proposées pour la variation en %. */
 const FENETRES: Array<{ label: string; ms: number }> = [
@@ -77,6 +85,8 @@ export function AlertsPanel() {
   const [sensFunding, setSensFunding] = useState<SensFunding>("les-deux");
   const [seuilAbsPct, setSeuilAbsPct] = useState("0.1"); // saisie en % (0.1 = 0.1 %)
   const [zSeuil, setZSeuil] = useState("2");
+  // cvd-spot-perp-div
+  const [kindCvd, setKindCvd] = useState<KindCvd>("les-deux");
   const [journalOuvert, setJournalOuvert] = useState(false);
 
   const symboleEffectif = (symbol.trim() || symbolCourant).toUpperCase();
@@ -115,7 +125,7 @@ export function AlertsPanel() {
         comparateur,
         valeur: v,
       };
-    } else {
+    } else if (type === "funding-extreme") {
       // funding-extreme : seuilAbs en fraction (saisie % → /100) ; z optionnel.
       const absPct = Number(seuilAbsPct);
       const z = Number(zSeuil);
@@ -128,6 +138,9 @@ export function AlertsPanel() {
         ...(hasAbs ? { seuilAbs: absPct / 100 } : {}),
         ...(hasZ ? { zSeuil: z } : {}),
       };
+    } else {
+      // cvd-spot-perp-div — active le pipeline orderflow via le runtime.
+      condition = { type: "cvd-spot-perp-div", kind: kindCvd };
     }
     alertsStore.getState().ajouter({
       symbol: symboleEffectif,
@@ -229,6 +242,7 @@ export function AlertsPanel() {
             <option value="variation-pct">Var %</option>
             <option value="indicateur-seuil">Indicateur</option>
             <option value="funding-extreme">Funding</option>
+            <option value="cvd-spot-perp-div">CVD S/P</option>
           </select>
         </div>
 
@@ -361,6 +375,23 @@ export function AlertsPanel() {
             </div>
             <p className="px-0.5 text-[10px] text-text-dim">
               Extrême si |rate| ou |z| dépasse le seuil (onglet ouvert).
+            </p>
+          </div>
+        )}
+
+        {type === "cvd-spot-perp-div" && (
+          <div className="space-y-1.5">
+            <select
+              value={kindCvd}
+              onChange={(e) => setKindCvd(e.target.value as KindCvd)}
+              className="w-full rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+            >
+              <option value="les-deux">Toute divergence S/P</option>
+              <option value="spotUp_perpDown">Spot↑ Perp↓ (cash mène)</option>
+              <option value="spotDown_perpUp">Spot↓ Perp↑ (levier mène)</option>
+            </select>
+            <p className="px-0.5 text-[10px] text-text-dim">
+              Active orderflow + CVD S/P (Binance). App ouverte uniquement.
             </p>
           </div>
         )}

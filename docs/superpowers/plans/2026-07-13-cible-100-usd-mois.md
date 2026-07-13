@@ -567,9 +567,9 @@ export function navigateTo(intent: NavIntent): void;
 
 **Tasks:**
 
-- [ ] **E1.1** Grep hex en dur hors tokens dans fenêtres touchées ; corriger.
-- [ ] **E1.2** États vides / retry uniformes (`ui.tsx`).
-- [ ] **E1.3** Commit `fix(ui): polish gate 100`.
+- [x] **E1.1** Grep hex en dur hors tokens dans fenêtres touchées ; corriger.
+- [x] **E1.2** États vides / retry uniformes (`ui.tsx`).
+- [x] **E1.3** Commit `fix(ui): polish gate 100`.
 
 ---
 
@@ -699,22 +699,28 @@ Deux modes d’exécution :
 
 ---
 
-## 14. Verdict gate (à remplir en E2)
+## 14. Verdict gate (provisoire E1 — à valider en E2)
 
-| Critère | Statut | Notes |
+Statuts : **code-complete** = livré en main (commits W0–W3) ; **manual QA** = non encore exécuté en conditions réelles. Aucun PASS/FAIL définitif avant E2.
+
+| Critère | Statut | Notes (commits / lots) |
 |---|---|---|
-| G1 | ⬜ | |
-| G2 | ⬜ | |
-| G3 | ⬜ | |
-| G4 | ⬜ | |
-| G5 | ⬜ | |
-| G6 | ⬜ | |
-| G7 | ⬜ | |
-| G8 | ⬜ | |
-| G9 | ⬜ | |
-| G10 | ⬜ | |
+| G1 | code-complete · **manual QA** | A0 `4cbbde3` resync CVD + health ; watch 30 min live à faire |
+| G2 | code-complete · **manual QA** | A0 `4cbbde3` + C1 `0051c8f` badges DES/CHAIN ; audit UI visuel à faire |
+| G3 | code-complete · **manual QA** | B3 `5a95c25` + `c587f04` playbooks PLAY* + Toolbar |
+| G4 | code-complete · **manual QA** | B1 `ce8c6b7` funding/ind UI ; B4 `913a0de` clic-droit prix |
+| G5 | code-complete · **manual QA** | D3 `e3fad26` poll funding daemon + journal/notify ; test onglet fermé à faire |
+| G6 | code-complete · **manual QA** | B2 `10d5364` presets crowded/squeeze EQS ; chrono ≤15 s à mesurer |
+| G7 | code-complete · **manual QA** | C2 `7507755` bus panneau→chart |
+| G8 | code-complete · **manual QA** | A3 `60b92e6` SessionStrip P&L + alertes + health |
+| G9 | code-complete · **manual QA** | A1 `13f5e4d` `pnpm up` documenté README |
+| G10 | code-complete · **manual QA** | A2 `144f186` onboarding 3 étapes + PLAY-SCALP |
 
-**Décision finale WTP 100 $ :** ⬜ NON / ⬜ OUI conditionnel / ⬜ OUI
+**Boucle trader (hors critères numérotés, livrée W3) :** D1 `0790b86` CSV port ; D2 `2849ba2` brief review session ; C3 `fd1ddfc` profondeur BT.
+
+**Polish E1 :** `fix(ui): polish gate 100` — états vides DES/ALERTS → `Vide`/`SansCle` ; hex résiduels = canvas/KLine exceptions documentées (pas de hex UI dans fenêtres G100).
+
+**Décision finale WTP 100 $ :** ⬜ NON / ⬜ OUI conditionnel / ⬜ OUI — **tranché en E2 après manual QA G1–G10**
 
 ---
 

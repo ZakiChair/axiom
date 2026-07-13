@@ -55,7 +55,7 @@ import {
   VALEUR_ABSENTE,
 } from "../lib/format";
 import { metaSource } from "../lib/fiabilite";
-import { BadgeFiabilite, EnTeteFenetre, ErreurBloc } from "./ui";
+import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, SansCle, Vide } from "./ui";
 // Couleurs de série des panes OI/funding (hex figés côté chart — cf. leur doc).
 import { OI_COLOR, FUNDING_COLOR } from "../chart/derivatives";
 
@@ -457,23 +457,15 @@ export function DerivativesWindow() {
 
         <div className="flex-1 overflow-y-auto px-4 py-4">
           {!isBinance ? (
-            <div className="rounded-md border border-border bg-bg px-3 py-3 text-xs leading-snug text-text-dim">
+            <Vide>
               Binance uniquement — Open Interest, funding, long/short et liquidations ne sont disponibles que
               pour la source Binance.
-            </div>
+            </Vide>
           ) : !hasKey ? (
-            <div className="space-y-3 rounded-md border border-border bg-bg px-3 py-3 text-xs text-text-dim">
-              <p className="leading-snug">
-                Ajoutez une clé Coinalyze pour afficher Open Interest, funding, long/short et liquidations.
-              </p>
-              <button
-                type="button"
-                onClick={openSettingsFromWindow}
-                className="rounded border border-border bg-surface px-2.5 py-1.5 text-[11px] text-text-dim transition hover:text-text"
-              >
-                Configurer dans Réglages ⚙
-              </button>
-            </div>
+            <SansCle
+              message="Ajoutez une clé Coinalyze pour afficher Open Interest, funding, long/short et liquidations."
+              onOuvrirReglages={openSettingsFromWindow}
+            />
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-between rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-dim">
@@ -574,7 +566,9 @@ export function DerivativesWindow() {
                 )}
                 <div className="max-h-60 overflow-y-auto">
                   {recentLiqs.length === 0 ? (
-                    <div className="px-3 py-2 text-[11px] text-text-dim">Aucune sur la dernière heure.</div>
+                    <div className="px-3 py-2">
+                      <Vide>Aucune sur la dernière heure.</Vide>
+                    </div>
                   ) : (
                     recentLiqs.map((l, i) => (
                       <div

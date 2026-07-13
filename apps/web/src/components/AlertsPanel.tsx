@@ -25,6 +25,7 @@ import { alertsStore } from "../store/alerts";
 import { demanderPermissionNotifications } from "../alerts/runtime";
 import { formatHeure } from "../lib/format";
 import { SidebarSection } from "./SidebarSection";
+import { Vide } from "./ui";
 
 /** Types d'alerte proposés à la création (CVD div en v1.1). */
 type TypeAlerte = "prix-croise" | "variation-pct" | "indicateur-seuil" | "funding-extreme";
@@ -162,9 +163,9 @@ export function AlertsPanel() {
       {/* Liste des alertes */}
       <div className="max-h-64 overflow-y-auto">
         {defs.length === 0 && (
-          <p className="px-3 py-3 text-[11px] text-text-dim">
-            Aucune alerte. Créez-en une ci-dessous.
-          </p>
+          <div className="px-3 py-2">
+            <Vide>Aucune alerte. Créez-en une ci-dessous.</Vide>
+          </div>
         )}
         {defs.map((d) => {
           const arm = etatArmement(d.arme);
@@ -388,7 +389,7 @@ export function AlertsPanel() {
         {journalOuvert && (
           <div className="max-h-40 overflow-y-auto px-3 pb-2">
             {journal.length === 0 ? (
-              <p className="py-1 text-[11px] text-text-dim">Aucun déclenchement.</p>
+              <Vide>Aucun déclenchement.</Vide>
             ) : (
               journal.map((d, i) => (
                 <div

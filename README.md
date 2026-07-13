@@ -87,6 +87,10 @@ pnpm prod
 - **Panneaux** : DES, ECO, NEWS, CORR, CHAIN, MAP, PORT, NOTE, EQS, TERM, OMON, DOM, BT, REPLAY, RATE, COT, SEAG, VOL, FUND, BRIEF, GLOBE
 - **Daemon** : proxy+cache, KV/candles SQLite, alertes (macOS + Telegram optionnel), replay dumps Binance, couches GDELT/UCDP
 
+### Programme G100 (WTP 100 $/mois) — W0–W3 landés
+
+Les vagues **W0–W3** du plan `docs/superpowers/plans/2026-07-13-cible-100-usd-mois.md` sont **mergées en main** (confiance CVD/badges, `pnpm up`, onboarding, session strip, alertes edge + funding daemon, playbooks, screener positionnement, bus panneau→chart, import CSV, brief review). **W4 / gate G100** (E1 polish + E2 QA checklist G1–G10) reste à valider manuellement — voir section 14 du plan (statut provisoire *code-complete · manual QA*).
+
 ## Secrets
 
 **Source unique** : `apps/web/.env` (gitignoré), lue par Vite **et** par le daemon. Les clés sont injectées côté proxy — elles ne partent pas dans le bundle navigateur.

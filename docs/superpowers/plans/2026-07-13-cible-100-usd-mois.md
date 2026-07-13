@@ -707,8 +707,8 @@ Statuts : **code-complete** = livré en main (commits W0–W3) ; **manual QA** =
 |---|---|---|
 | G1 | code-complete · **manual QA** | A0 `4cbbde3` resync CVD + health ; watch 30 min live à faire |
 | G2 | code-complete · **manual QA** | A0 `4cbbde3` + C1 `0051c8f` badges DES/CHAIN ; audit UI visuel à faire |
-| G3 | code-complete · **manual QA** | B3 `5a95c25` + `c587f04` playbooks PLAY* + Toolbar |
-| G4 | code-complete · **manual QA** | B1 `ce8c6b7` funding/ind UI ; B4 `913a0de` clic-droit prix |
+| G3 | code-complete · **manual QA** | B3 + F `821c12e` : 6 playbooks dont **PLAY-CVD** + Toolbar |
+| G4 | code-complete · **manual QA** | B1/B4 + F `821c12e` : funding/indics/prix **+ CVD S/P live** |
 | G5 | code-complete · **manual QA** | D3 `e3fad26` poll funding daemon + journal/notify ; test onglet fermé à faire |
 | G6 | code-complete · **manual QA** | B2 `10d5364` presets crowded/squeeze EQS ; chrono ≤15 s à mesurer |
 | G7 | code-complete · **manual QA** | C2 `7507755` bus panneau→chart |
@@ -719,6 +719,8 @@ Statuts : **code-complete** = livré en main (commits W0–W3) ; **manual QA** =
 **Boucle trader (hors critères numérotés, livrée W3) :** D1 `0790b86` CSV port ; D2 `2849ba2` brief review session ; C3 `fd1ddfc` profondeur BT.
 
 **Polish E1 :** `fix(ui): polish gate 100` — états vides DES/ALERTS → `Vide`/`SansCle` ; hex résiduels = canvas/KLine exceptions documentées (pas de hex UI dans fenêtres G100).
+
+**Vague F (post-E1) :** `821c12e` — pont `cvdDivergenceStore` (orderflow → runtime alertes), UI « CVD S/P », auto-enable OF+CVD S/P, playbook PLAY-CVD. Différenciateur edge crypto restant branché.
 
 **Décision finale WTP 100 $ :** ⬜ NON / ⬜ OUI conditionnel / ⬜ OUI — **tranché en E2 après manual QA G1–G10**
 

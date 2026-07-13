@@ -10,7 +10,7 @@ import type { IndicatorDef } from "@axiom/types";
 export const volumeDelta: IndicatorDef = {
   id: "volumeDelta",
   name: "Volume Delta",
-  category: "volume",
+  category: "orderflow",
   pane: "separate",
   inputs: [],
   outputs: [{ key: "delta", name: "Delta", style: "histogram" }],

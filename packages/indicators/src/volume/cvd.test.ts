@@ -26,6 +26,7 @@ describe("cvd", () => {
       source: candles.map((x) => x.close),
     });
     expect(series.cvd).toEqual([3, 0, 0]); // 3, 3-3=0, 0+0=0
+    expect(series.signal).toEqual([3, 0, 0]); // smooth=1 → même série
   });
 
   it("ignore les barres sans buy/sell (delta 0)", () => {

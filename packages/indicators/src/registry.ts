@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 99 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 107 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -39,6 +39,7 @@ import { waveTrend } from "./trend/waveTrend";
 import { wma } from "./trend/wma";
 import { zlema } from "./trend/zlema";
 import { linreg } from "./trend/linreg";
+import { efficiencyRatio } from "./trend/efficiencyRatio";
 
 // — momentum (21) —
 import { accelerator } from "./momentum/accelerator";
@@ -80,8 +81,11 @@ import { rv } from "./volatility/rv";
 import { stdErrorBands } from "./volatility/stdErrorBands";
 import { stddev } from "./volatility/stddev";
 import { ttmSqueeze } from "./volatility/ttmSqueeze";
+import { atrPct } from "./volatility/atrPct";
+import { parkinsonVol } from "./volatility/parkinsonVol";
+import { choppiness } from "./volatility/choppiness";
 
-// — volume (14) —
+// — volume + orderflow (fichiers sous volume/, catégorie UI distincte) —
 import { adLine } from "./volume/adLine";
 import { anchoredVwap } from "./volume/anchored-vwap";
 import { chaikinOsc } from "./volume/chaikinOsc";
@@ -99,6 +103,9 @@ import { vwapBands } from "./volume/vwapBands";
 import { cvd } from "./volume/cvd";
 import { volumeDelta } from "./volume/volumeDelta";
 import { takerBuyRatio } from "./volume/takerBuyRatio";
+import { relativeVolume } from "./volume/relativeVolume";
+import { volumeZScore } from "./volume/volumeZScore";
+import { netVolume } from "./volume/netVolume";
 
 // — billwilliams (4) —
 import { alligator } from "./billwilliams/alligator";
@@ -114,6 +121,7 @@ import { pivotHighLow } from "./support_resistance/pivotHighLow";
 import { pivotStandard } from "./support_resistance/pivotStandard";
 import { pivotWoodie } from "./support_resistance/pivotWoodie";
 import { zigzag } from "./support_resistance/zigzag";
+import { chandelierExit } from "./support_resistance/chandelierExit";
 
 // — derivatives (6) —
 import { fundingRate } from "./derivatives/fundingRate";
@@ -153,6 +161,7 @@ export const INDICATORS: IndicatorDef[] = [
   wma,
   zlema,
   linreg,
+  efficiencyRatio,
   // momentum
   accelerator,
   awesome,
@@ -192,7 +201,10 @@ export const INDICATORS: IndicatorDef[] = [
   stdErrorBands,
   stddev,
   ttmSqueeze,
-  // volume
+  atrPct,
+  parkinsonVol,
+  choppiness,
+  // volume (classique)
   adLine,
   anchoredVwap,
   chaikinOsc,
@@ -207,9 +219,13 @@ export const INDICATORS: IndicatorDef[] = [
   volumeOsc,
   vwap,
   vwapBands,
+  relativeVolume,
+  volumeZScore,
+  // orderflow (menu dédié — edge crypto)
   cvd,
   volumeDelta,
   takerBuyRatio,
+  netVolume,
   // billwilliams
   alligator,
   fractals,
@@ -223,6 +239,7 @@ export const INDICATORS: IndicatorDef[] = [
   pivotStandard,
   pivotWoodie,
   zigzag,
+  chandelierExit,
   // derivatives
   openInterest,
   fundingRate,

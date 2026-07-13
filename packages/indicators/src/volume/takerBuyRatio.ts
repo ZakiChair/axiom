@@ -10,7 +10,7 @@ import type { IndicatorDef } from "@axiom/types";
 export const takerBuyRatio: IndicatorDef = {
   id: "takerBuyRatio",
   name: "Taker Buy Ratio",
-  category: "volume",
+  category: "orderflow",
   pane: "separate",
   inputs: [],
   outputs: [{ key: "ratio", name: "Buy ratio", style: "line" }],

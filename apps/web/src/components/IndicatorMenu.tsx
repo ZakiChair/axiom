@@ -2,8 +2,9 @@
  * Menu « Indicateurs » — bouton de la toolbar ouvrant :
  *  1. une section « Actifs » en tête (les INSTANCES affichées, chacune avec ses
  *     params ; boutons dupliquer / éditer / retirer, éditeur de params inline) ;
- *  2. le CATALOGUE des indicateurs du registre @axiom/indicators (86 indicateurs),
+ *  2. le CATALOGUE des indicateurs du registre @axiom/indicators (compteur live),
  *     groupé par catégorie en sections repliables et filtrable par recherche.
+ *     Ordre des catégories orienté crypto : Order Flow → Volume → Dérivés d'abord.
  *
  * MULTI-INSTANCES : cliquer un indicateur du catalogue AJOUTE une nouvelle instance
  * aux params par défaut (EMA(20) puis EMA(50) coexistent). L'état vient du
@@ -24,26 +25,30 @@ import { tfAtLeast } from "../chart/tfOrder";
 
 /** Libellés FR des catégories + ordre d'affichage. */
 const CATEGORY_LABELS: Partial<Record<IndicatorCategory, string>> = {
+  orderflow: "Order Flow",
+  volume: "Volume",
+  derivatives: "Dérivés",
   trend: "Tendance",
   momentum: "Momentum",
   volatility: "Volatilité",
-  volume: "Volume",
-  billwilliams: "Bill Williams",
   support_resistance: "Support / Résistance",
-  orderflow: "Order Flow",
-  derivatives: "Dérivés",
+  billwilliams: "Bill Williams",
   custom: "Personnalisés",
 };
 
+/**
+ * Ordre DA crypto-first : l'edge (orderflow / volume / dérivés) avant le
+ * catalogue technique classique — cohérent avec le positionnement AXIOM.
+ */
 const CATEGORY_ORDER: IndicatorCategory[] = [
+  "orderflow",
+  "volume",
+  "derivatives",
   "trend",
   "momentum",
   "volatility",
-  "volume",
-  "billwilliams",
   "support_resistance",
-  "orderflow",
-  "derivatives",
+  "billwilliams",
   "custom",
 ];
 
@@ -177,9 +182,12 @@ export function IndicatorMenu() {
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => {
     if (!q) return INDICATORS;
-    return INDICATORS.filter(
-      (d) => d.name.toLowerCase().includes(q) || d.id.toLowerCase().includes(q)
-    );
+    return INDICATORS.filter((d) => {
+      if (d.name.toLowerCase().includes(q) || d.id.toLowerCase().includes(q)) return true;
+      // Recherche par libellé de catégorie (ex. « order », « dérivés »).
+      const catLabel = (CATEGORY_LABELS[d.category] ?? d.category).toLowerCase();
+      return catLabel.includes(q) || d.category.toLowerCase().includes(q);
+    });
   }, [q]);
 
   const groups = useMemo(() => groupByCategory(filtered), [filtered]);
@@ -198,13 +206,17 @@ export function IndicatorMenu() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={`rounded px-2 py-1 text-xs ${
+        title={`${INDICATORS.length} indicateurs · ${active.length} actif${active.length > 1 ? "s" : ""}`}
+        className={`rounded px-2 py-1 text-xs tabular-nums ${
           open
             ? "bg-neutral-200 text-neutral-900"
             : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
         }`}
       >
         Indicateurs
+        <span className="ml-1 text-[10px] opacity-70">
+          {active.length > 0 ? active.length : INDICATORS.length}
+        </span>
       </button>
 
       {open && (
@@ -287,9 +299,12 @@ export function IndicatorMenu() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Rechercher un indicateur…"
+              placeholder="Rechercher… (CVD, RVOL, orderflow…)"
               className="w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-accent"
             />
+            <p className="mt-1 px-0.5 text-[10px] text-text-dim">
+              {filtered.length}/{INDICATORS.length} · Order Flow en tête du catalogue
+            </p>
           </div>
 
           {/* Catalogue groupé scrollable — cliquer AJOUTE une instance. */}

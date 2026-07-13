@@ -5,7 +5,7 @@
  * interactif. Ouverture via la commande EQS (toggle). Il expose un builder de filtres
  * compact (conditions de base + conditions indicateurs), des presets (livrés + perso),
  * un bouton de run avec progression, et une table de résultats triable (clic = ouvre le
- * chart via marketStore.setSymbol, bouton = ajoute à la watchlist).
+ * chart via `navigateTo` / bus C2, bouton = ajoute à la watchlist).
  *
  * Toutes les limites sont affichées honnêtement : le TF ne s'applique qu'aux filtres
  * indicateurs, l'étage indicateurs est plafonné à SCREENER_CAP, et OI/L-S (si demandés)

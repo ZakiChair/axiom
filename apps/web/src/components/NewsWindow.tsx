@@ -30,6 +30,7 @@ import {
 } from "../data/news";
 import { fetchFearGreed, type FearGreed } from "../data/marketOverview";
 import { formatAge } from "../lib/format";
+import { navigateTo } from "../lib/navigation";
 
 /** Intervalle de rafraîchissement du bandeau Fear & Greed (l'indice évolue au plus 1×/jour). */
 const FNG_REFRESH_MS = 5 * 60_000;
@@ -102,6 +103,18 @@ function BadgeSource({ source }: { source: NewsSourceId }) {
   );
 }
 
+/** Pose un marqueur chart à l'horodatage de l'article (bus C2) + marque lu. */
+function ouvrirNews(item: NewsItem, onOuvrir: (id: string) => void): void {
+  onOuvrir(item.id);
+  if (item.time > 0) {
+    navigateTo({
+      markTime: item.time,
+      markLabel: item.title,
+      source: "news",
+    });
+  }
+}
+
 /** Une ligne de news : puce non-lu, badge source, titre-lien, horodatage relatif. */
 function LigneNews({
   item,
@@ -130,7 +143,7 @@ function LigneNews({
   );
 
   // Lien externe si disponible ET de schéma sûr (nouvel onglet, rel de sécurité) ; sinon
-  // bloc non cliquable (lien absent OU schéma non http/https, ex. `javascript:` malveillant).
+  // bouton qui marque le chart (lien absent OU schéma non http/https, ex. `javascript:`).
   const lien = urlHttpSure(item.link);
   if (lien !== null) {
     return (
@@ -138,14 +151,24 @@ function LigneNews({
         href={lien}
         target="_blank"
         rel="noopener noreferrer"
-        onClick={() => onOuvrir(item.id)}
+        onClick={() => ouvrirNews(item, onOuvrir)}
         className="flex flex-col gap-1 border-b border-border px-3 py-2 transition hover:bg-bg"
+        title="Ouvrir l'article + marquer sur le chart"
       >
         {contenu}
       </a>
     );
   }
-  return <div className="flex flex-col gap-1 border-b border-border px-3 py-2">{contenu}</div>;
+  return (
+    <button
+      type="button"
+      onClick={() => ouvrirNews(item, onOuvrir)}
+      className="flex w-full flex-col gap-1 border-b border-border px-3 py-2 text-left transition hover:bg-bg"
+      title="Marquer sur le chart"
+    >
+      {contenu}
+    </button>
+  );
 }
 
 export function NewsWindow() {

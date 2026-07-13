@@ -27,7 +27,7 @@ import {
   fetchOpenInterestHist,
 } from "../data/binanceFutures";
 import { extUrl } from "../data/extapi";
-import { marketStore } from "./market";
+import { navigateTo } from "../lib/navigation";
 import { watchlistStore } from "./watchlist";
 import {
   applyBaseFilters,
@@ -431,15 +431,16 @@ mirrorOpenState("screener", screenerStore);
 // ─────────────────────────── Actions dérivées (chart / watchlist) ───────────────────────────
 
 /**
- * Ouvre un résultat dans le graphe (source Binance + symbole + TF du run).
- * C2 navigateTo peut ne pas être merge : on utilise marketStore.setSymbol direct
- * (équivalent appliquerNavigation pour symbole/TF/source).
+ * Ouvre un résultat dans le graphe via le bus panneau→chart (Lot C2) :
+ * source Binance + symbole + TF du run.
  */
 export function ouvrirDansChart(symbol: string): void {
-  const m = marketStore.getState();
-  m.setExchange("binance");
-  m.setSymbol(symbol);
-  m.setTimeframe(screenerStore.getState().tf);
+  navigateTo({
+    symbol,
+    exchange: "binance",
+    timeframe: screenerStore.getState().tf,
+    source: "eqs",
+  });
 }
 
 /** Ajoute un résultat à la watchlist (groupe actif), source Binance figée. */

@@ -20,13 +20,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { Commande } from "../commands/registry"; // type-only : aucune dépendance runtime croisée
-import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
 import { marketMapUiStore } from "../store/marketmap-ui";
 import { fetchPairs } from "../data/pairs";
 import { squarify, type Rect, type Tuile } from "../lib/treemap";
 import { formatAge, formatPct, formatUsd } from "../lib/format";
 import { lireTokensCanvas } from "../lib/canvasTokens";
+import { navigateTo } from "../lib/navigation";
 import { ErreurBloc, NoteSource, Onglets } from "./ui";
 import {
   fetchFearGreed,
@@ -372,9 +372,7 @@ export function MarketMapWindow() {
     const pair = toBinanceUsdtPair(tuile.item.symbol);
     // « sinon rien » : on ne navigue que si la paire existe réellement chez Binance.
     if (binancePairsRef.current && binancePairsRef.current.has(pair)) {
-      const m = marketStore.getState();
-      m.setExchange("binance");
-      m.setSymbol(pair);
+      navigateTo({ symbol: pair, exchange: "binance", source: "map" });
     }
   };
 

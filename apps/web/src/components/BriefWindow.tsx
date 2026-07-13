@@ -49,6 +49,7 @@ import {
   formatUsd,
   VALEUR_ABSENTE,
 } from "../lib/format";
+import { navigateTo } from "../lib/navigation";
 import { Badge, BTN_SECONDAIRE, Chargement, EnTeteFenetre, ErreurBloc, Metric, NoteSource, Vide } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
@@ -283,7 +284,14 @@ export function BriefWindow() {
               <table className="w-full text-[11px] tabular-nums">
                 <tbody>
                   {rows.map((r) => (
-                    <tr key={r.symbole} className="border-b border-border/60 last:border-0">
+                    <tr
+                      key={r.symbole}
+                      className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-bg"
+                      onClick={() =>
+                        navigateTo({ symbol: r.symbole, exchange: "binance", source: "brief" })
+                      }
+                      title={`Ouvrir ${r.symbole} dans le chart`}
+                    >
                       <td className="py-1 text-text">{r.symbole}</td>
                       <td className="py-1 text-right text-text">{formatPrice(r.prix)}</td>
                       <td className="py-1 text-right" style={{ color: couleurVariation(r.variation24h) }}>
@@ -304,7 +312,19 @@ export function BriefWindow() {
           {corps(derivs, "Dérivés indisponibles.", (lignes) => (
             <div className="space-y-2">
               {lignes.map((d) => (
-                <div key={d.symbole} className="rounded-md border border-border bg-bg px-3 py-2">
+                <button
+                  key={d.symbole}
+                  type="button"
+                  onClick={() =>
+                    navigateTo({
+                      symbol: `${d.symbole}USDT`,
+                      exchange: "binance",
+                      source: "brief",
+                    })
+                  }
+                  title={`Ouvrir ${d.symbole}USDT dans le chart`}
+                  className="w-full rounded-md border border-border bg-bg px-3 py-2 text-left transition hover:border-text-dim"
+                >
                   <div className="flex items-baseline justify-between">
                     <span className="text-sm font-medium text-text">{d.symbole}</span>
                     <span className="text-[11px] tabular-nums" style={{ color: couleurVariation(d.deltaOiPct) }}>
@@ -325,7 +345,7 @@ export function BriefWindow() {
                       </span>
                     </span>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           ))}
@@ -364,7 +384,19 @@ export function BriefWindow() {
             ) : (
               <div className="space-y-1">
                 {evs.map((ev, i) => (
-                  <div key={`${ev.time}-${i}`} className="flex items-baseline gap-2 text-[11px]">
+                  <button
+                    key={`${ev.time}-${i}`}
+                    type="button"
+                    onClick={() =>
+                      navigateTo({
+                        markTime: ev.time,
+                        markLabel: `${ev.pays} ${ev.titre}`,
+                        source: "brief",
+                      })
+                    }
+                    title="Marquer sur le chart"
+                    className="flex w-full items-baseline gap-2 text-left text-[11px] transition hover:bg-bg"
+                  >
                     <span className="w-14 shrink-0 tabular-nums text-text-dim">
                       {ev.timeApprox ? "~" : ""}
                       {formatHeureMinute(ev.time)}
@@ -374,7 +406,7 @@ export function BriefWindow() {
                     <span className="shrink-0 text-[10px] text-text-dim">
                       {ev.time <= instant ? "passé" : formatDelai(ev.time, instant)}
                     </span>
-                  </div>
+                  </button>
                 ))}
               </div>
             ),
@@ -399,13 +431,25 @@ export function BriefWindow() {
             ) : (
               <div className="space-y-1.5">
                 {titres.map((n) => (
-                  <div key={n.id} className="flex flex-col gap-0.5">
+                  <button
+                    key={n.id}
+                    type="button"
+                    onClick={() =>
+                      navigateTo({
+                        markTime: n.time,
+                        markLabel: n.titre,
+                        source: "brief",
+                      })
+                    }
+                    title="Marquer sur le chart"
+                    className="flex w-full flex-col gap-0.5 text-left transition hover:bg-bg"
+                  >
                     <div className="flex items-center gap-2 text-[10px] text-text-dim">
                       <span className="uppercase">{n.source}</span>
                       <span className="tabular-nums">{formatAge(n.time, instant)}</span>
                     </div>
                     <span className="text-[11px] leading-snug text-text">{n.titre}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             ),

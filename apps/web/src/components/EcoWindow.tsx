@@ -17,6 +17,7 @@ import { useEffect } from "react";
 import { useStore } from "zustand";
 import { ecoStore, ECO_IMPACTS } from "../store/eco";
 import type { EcoEvent, EcoImpact } from "../data/eco";
+import { navigateTo } from "../lib/navigation";
 import { EnTeteFenetre } from "./ui";
 import "../chart/ecoMarkers";
 
@@ -85,11 +86,20 @@ function Valeur({ label, value, accent }: { label: string; value?: string; accen
   );
 }
 
-/** Une ligne d'évènement. */
+/** Une ligne d'évènement — clic = marqueur vertical sur le chart (bus C2). */
 function Ligne({ ev, passe }: { ev: EcoEvent; passe: boolean }) {
   return (
-    <div
-      className={`grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-b border-border px-3 py-2 ${
+    <button
+      type="button"
+      onClick={() =>
+        navigateTo({
+          markTime: ev.time,
+          markLabel: `${ev.country} ${ev.title}`,
+          source: "eco",
+        })
+      }
+      title="Marquer sur le chart"
+      className={`grid w-full grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-b border-border px-3 py-2 text-left transition hover:bg-bg ${
         passe ? "opacity-60" : ""
       }`}
     >
@@ -114,7 +124,7 @@ function Ligne({ ev, passe }: { ev: EcoEvent; passe: boolean }) {
           </div>
         )}
       </div>
-    </div>
+    </button>
   );
 }
 

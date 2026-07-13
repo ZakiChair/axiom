@@ -149,9 +149,9 @@ export function OnboardingOverlay() {
                 sans multi-tenant ni Electron.
               </p>
               <p>
-                <strong className="text-text">Étape 1 — layout Scalp :</strong> ouvre les
-                panneaux Dérivés (DES) et carnet (DOM), active l&apos;orderflow, bascule en{" "}
-                <span className="text-text">1m</span>.
+                <strong className="text-text">Étape 1 — playbook Scalp (PLAY-SCALP) :</strong>{" "}
+                BTC 1m, DES + DOM, orderflow + profil de volume (même scénario que le menu
+                Playbooks / palette).
               </p>
               <button
                 type="button"
@@ -161,8 +161,8 @@ export function OnboardingOverlay() {
                 {scalpApplique ? "Layout Scalp appliqué ✓" : "Appliquer le layout Scalp"}
               </button>
               <p className="text-[11px]">
-                Astuce : <kbd className="rounded border border-border px-1">⌘K</kbd> ouvre la
-                palette (mnémoniques DES, DOM, OF, ALRT…).
+                Astuce : <kbd className="rounded border border-border px-1">⌘K</kbd> →{" "}
+                <span className="text-text">PLAY-SCALP</span>, ou menu Toolbar « Playbooks ».
               </p>
             </>
           )}

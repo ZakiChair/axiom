@@ -4,7 +4,8 @@
  * Un playbook n'est PAS un workspace (snapshot libre renommable) : c'est un
  * scénario figé (scalp orderflow, fade funding, FOMC, risk-off, options) qui
  * bascule la grille, ouvre les fenêtres existantes et active les toggles utiles.
- * Plus riche que le mini-scalp d'onboarding ; découvrable via ⌘K (PLAY, PLAY-SCALP…).
+ * Plus riche que le mini-scalp d'onboarding ; découvrable via ⌘K (PLAY, PLAY-SCALP…)
+ * et le menu Toolbar « Playbooks » (à côté de Fonctions).
  *
  * Aucun type de fenêtre inventé — uniquement les ids de `WINDOW_REGISTRY`.
  * Commandes exportées ici ; greffe via `enregistrerCommandes` dans App.tsx
@@ -102,9 +103,14 @@ export function applyRiskOff(): void {
   ouvrirFenetres("globe", "marketMap", "corr");
 }
 
-/** Options Deribit : 1 graphe, OMON + TERM + VOL. */
+/**
+ * Options Deribit : 1 graphe, OMON + TERM + VOL.
+ * Le graphe maître reste Binance BTCUSDT — `deribit` n'a pas d'adaptateur OHLCV
+ * câblé (`getAdapter` lève) ; OMON/TERM/VOL tirent Deribit en propre (devise BTC/ETH UI).
+ */
 export function applyOptionsDeribit(): void {
   setLayout("1");
+  // Spot/perp chart : source câblée uniquement (pas d'exchange "deribit" pour le marketStore).
   setMarche({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h" });
   ouvrirFenetres("options", "termStructure", "vol");
 }
@@ -145,7 +151,8 @@ export const PLAYBOOKS: readonly Playbook[] = [
     id: "options-deribit",
     nom: "Options",
     mnemonique: "PLAY-OPT",
-    description: "OMON + TERM + VOL (smile, terme, cône)",
+    description:
+      "OMON + TERM + VOL (Deribit) · graphe reste Binance BTC (pas d'adaptateur OHLCV Deribit)",
     apply: applyOptionsDeribit,
   },
 ];

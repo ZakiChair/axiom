@@ -7,16 +7,15 @@
  * commande palette ONBOARD (ou `rejouer()`).
  *
  * Aucune clé API dans le state ; les actions composent les stores existants
- * (windowManager, orderflow, coinalyze, alerts, market).
+ * (playbooks PLAY-SCALP, alerts, market, coinalyze).
  */
 import { createStore } from "zustand/vanilla";
 import type { Candle, ExchangeId } from "@axiom/types";
 // Import de TYPE uniquement (élidé au runtime) : greffe via App.tsx / enregistrerCommandes.
 import type { Commande } from "../commands/registry";
+import { applyScalpBtc } from "../data/playbooks";
 import { alertsStore } from "./alerts";
 import { marketStore } from "./market";
-import { orderflowStore } from "./orderflow";
-import { windowManagerStore } from "./windowManager";
 
 /** Clé localStorage (export/import de sauvegarde via préfixe axiom:). */
 export const ONBOARDING_STORAGE_KEY = "axiom:onboarding:v1";
@@ -194,14 +193,11 @@ export const onboardingStore = createStore<OnboardingState>((set, get) => ({
 // ─────────────────────────── Actions composées (side-effects) ───────────────────────────
 
 /**
- * Playbook « Scalp » minimal (playbooks B3 pas encore là) : ouvre DES + DOM,
- * active l'orderflow, bascule le graphe en 1m.
+ * Playbook « Scalp » d'onboarding : délègue au catalogue B3 (`applyScalpBtc` /
+ * mnémonique PLAY-SCALP) — layout 1, BTC 1m, DES + DOM, orderflow + VP.
  */
 export function appliquerPlaybookScalp(): void {
-  windowManagerStore.getState().openWindow("derivatives");
-  windowManagerStore.getState().openWindow("dom");
-  orderflowStore.getState().setEnabled(true);
-  marketStore.getState().setTimeframe("1m");
+  applyScalpBtc();
 }
 
 /** Crée une alerte prix démo sur le symbole / source courants. */

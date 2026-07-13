@@ -19,6 +19,7 @@ import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
 import { exporterSauvegarde, importerSauvegarde } from "../store/persist";
 import { enregistrerCommandes } from "../commands/registry";
 import { supportedTimeframesFor } from "../data/adapters";
+import { PLAYBOOKS } from "../data/playbooks";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
 import { exportChartImage } from "../chart/drawing";
 import { IndicatorMenu } from "./IndicatorMenu";
@@ -191,6 +192,62 @@ function FonctionsMenu() {
                   {f.mnemonique}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{f.libelle}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Menu « Playbooks » : scénarios 1-clic (PLAY / PLAY-SCALP…). Même pattern que
+ * Fonctions — bas fréquence, actions via getState / apply() du catalogue.
+ * Découverte Toolbar (B3.3) en plus de la palette ⌘K.
+ */
+function PlaybooksMenu() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Playbooks 1-clic — mêmes mnémoniques PLAY* dans ⌘K"
+        className="flex items-center gap-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 hover:border-neutral-500"
+      >
+        <span>Playbooks</span>
+        <span aria-hidden className="text-[9px] text-neutral-500">▾</span>
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div
+            role="menu"
+            className="absolute left-0 z-50 mt-1 w-72 rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl"
+          >
+            {PLAYBOOKS.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                role="menuitem"
+                title={p.description}
+                onClick={() => {
+                  p.apply();
+                  setOpen(false);
+                }}
+                className="flex w-full flex-col gap-0.5 rounded px-2 py-1.5 text-left text-xs text-neutral-200 hover:bg-neutral-800"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="shrink-0 font-semibold uppercase tracking-wider text-sky-400">
+                    {p.mnemonique}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate font-medium">{p.nom}</span>
+                </span>
+                <span className="truncate pl-0 text-[10px] text-neutral-500">{p.description}</span>
               </button>
             ))}
           </div>
@@ -592,6 +649,8 @@ export function Toolbar() {
 
       {/* Menu compact des fenêtres non modales de la Phase 3 (ECO, NEWS, CORR…). */}
       <FonctionsMenu />
+      {/* Playbooks 1-clic (B3) — découverte Toolbar en plus de ⌘K PLAY*. */}
+      <PlaybooksMenu />
 
       {/* Export du graphe courant en PNG (téléchargement « SYMBOLE-TF-date.png »). */}
       <button

@@ -4,8 +4,13 @@
  * Monte aussi les surfaces transverses : palette de commandes (⌘K), raccourcis
  * clavier globaux, runtime des alertes, et le mode plein écran (masque toolbars +
  * sidebar pour ne garder que le graphe).
+ *
+ * Fenêtres Bloomberg : code-splitées via React.lazy (chargées à la première
+ * ouverture). Les commandes palette des panneaux à store co-localisé dans le
+ * composant passent par `commands/windowPanels.ts` (windowManager only) pour ne
+ * pas tirer le graphe chart/canvas au démarrage.
  */
-import { useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef, type ComponentType, type LazyExoticComponent } from "react";
 import { useStore } from "zustand";
 import { Toolbar } from "./components/Toolbar";
 import { TickerBand } from "./components/TickerBand";
@@ -15,40 +20,9 @@ import { Watchlist } from "./components/Watchlist";
 import { AlertsPanel } from "./components/AlertsPanel";
 import { CompareControl } from "./components/CompareControl";
 import { MacroPanel } from "./components/MacroPanel";
-import { DerivativesWindow } from "./components/DerivativesWindow";
 import { HealthPanel } from "./components/HealthPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { CommandPalette } from "./components/CommandPalette";
-// Fenêtres non modales de la Phase 3 (dockées à droite, montées en permanence : elles se
-// cachent elles-mêmes via translate-x quand fermées). EcoWindow importe chart/ecoMarkers en
-// effet de bord → doit rester monté pour que les marqueurs éco fonctionnent.
-import { EcoWindow } from "./components/EcoWindow";
-import { NewsWindow } from "./components/NewsWindow";
-import { CorrWindow, commandes as corrCommands } from "./components/CorrWindow";
-import { OnchainWindow } from "./components/OnchainWindow";
-import { MarketMapWindow, commandes as mapCommands } from "./components/MarketMapWindow";
-import { PortfolioWindow } from "./components/PortfolioWindow";
-import { NotesWindow } from "./components/NotesWindow";
-import { ScreenerWindow } from "./components/ScreenerWindow";
-import { TermStructureWindow, commandes as termCommands } from "./components/TermStructureWindow";
-import { OptionsWindow, commandes as optionsCommands } from "./components/OptionsWindow";
-// Fenêtres non modales de la Phase 4 (le multi-chart est déjà monté via ChartGrid) : dockées
-// à droite, montées en permanence (elles se cachent via translate-x quand fermées). Même
-// patron que les fenêtres de la Phase 3.
-import { DomWindow } from "./components/DomWindow";
-import { BacktestWindow } from "./components/BacktestWindow";
-import { ReplayWindow } from "./components/ReplayWindow";
-// Fenêtres non modales de la Phase 5 (batch souverain / COT / GEX) : même patron que les
-// fenêtres des Phases 3-4 (dockées à droite, montées en permanence, cachées via translate-x).
-import { MacroRatesWindow, commandes as macroRatesCommands } from "./components/MacroRatesWindow";
-import { CotWindow, commandes as cotCommands } from "./components/CotWindow";
-import { SeasonalityWindow, commandes as seasonalityCommands } from "./components/SeasonalityWindow";
-import { VolWindow, commandes as volCommands } from "./components/VolWindow";
-import { FundWindow, commandes as fundCommands } from "./components/FundWindow";
-import { BriefWindow, commandes as briefCommands } from "./components/BriefWindow";
-// Fenêtre GLOBE (chokepoints maritimes PortWatch + trafic aérien OpenSky, d3-geo canvas).
-import { GlobeWindow } from "./components/GlobeWindow";
-import { commandes as globeCommands } from "./store/globe-ui";
 import { settingsUiStore } from "./store/settings-ui";
 import { ecoCommands } from "./store/eco";
 import { commandes as newsCommands } from "./store/news";
@@ -59,13 +33,16 @@ import { commandes as notesCommands } from "./store/notes";
 import { commandesScreener } from "./store/screener";
 import { commandes as derivChartCommands } from "./store/derivatives-chart";
 // Marqueurs de trades/notes SUR le chart : l'import démarre aussi le contrôleur
-// (effet de bord d'import, même chemin que chart/ecoMarkers via EcoWindow).
+// (effet de bord d'import).
 import { commandes as marksCommands } from "./chart/tradeMarkers";
-// Commandes de palette des fenêtres de la Phase 4, et store de disposition grille.
+// Contrôleur marqueurs éco (effet de bord) — indépendant du lazy-load de EcoWindow.
+import "./chart/ecoMarkers";
 import { commandes as domCommands } from "./store/dom-ui";
 import { commandes as backtestCommands } from "./store/backtest";
 import { commandes as replayCommands } from "./store/replay";
 import { chartLayoutStore, type ChartLayoutMode } from "./store/chart-layout";
+import { commandes as globeCommands } from "./store/globe-ui";
+import { windowPanelCommands } from "./commands/windowPanels";
 import { enregistrerCommandes, type Commande } from "./commands/registry";
 import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
 import { demarrerAlertes } from "./alerts/runtime";
@@ -99,82 +76,87 @@ const commandesGrille: Commande[] = GRID_MODES.map((g) => ({
   action: () => chartLayoutStore.getState().setLayout(g.mode),
 }));
 
-// ─────────────────────────── Greffe des commandes de palette (Phase 3) ───────────────────────────
+// ─────────────────────────── Greffe des commandes de palette ───────────────────────────
 
 /**
- * Enregistre les commandes de palette des fenêtres de la Phase 3 (point d'extension
- * ADDITIF, idempotent par `id`). Fait à l'IMPORT — donc AVANT le premier rendu de la
- * palette — comme le bloc Workspaces de Toolbar.tsx. Placé ici (et non dans registry.ts)
- * pour NE PAS coupler le registre — ni son test unitaire — au graphe de dépendances lourd
- * des panneaux (chart/canvas/fetchers). Mnémoniques : ECO, NEWS, CORR, CHAIN, MAP, PORT,
- * NOTE, EQS, TERM, OMON (DES est déjà dans le registre statique).
+ * Enregistre les commandes de palette des fenêtres (point d'extension ADDITIF,
+ * idempotent par `id`). Fait à l'IMPORT — donc AVANT le premier rendu de la
+ * palette. Les panneaux à store co-localisé dans le composant passent par
+ * `windowPanelCommands` (pas d'import des fenêtres lourdes).
  */
 enregistrerCommandes([
   ...ecoCommands,
   ...newsCommands,
-  ...corrCommands,
   ...onchainCommands,
-  ...mapCommands,
   ...portfolioCommands,
   ...notesCommands,
   ...commandesScreener,
-  ...termCommands,
-  ...optionsCommands,
-  // Sous-panes OI/funding SUR le chart : le contrôleur (agent « deriv ») est DÉJÀ câblé
-  // dans Chart.tsx ; ces bascules (OI / FUND) le rendent atteignable (sinon inerte).
+  // Sous-panes OI/funding SUR le chart + marqueurs trades/notes.
   ...derivChartCommands,
-  // Bascule des marqueurs de trades/notes du portefeuille sur le chart (MARKS).
   ...marksCommands,
-  // Fenêtres de la Phase 4 (DOM/TAPE, BT, REPLAY) + dispositions de la grille multi-chart.
+  // Fenêtres Phase 4 (DOM/BT/REPLAY) + grille multi-chart.
   ...domCommands,
   ...backtestCommands,
   ...replayCommands,
-  ...macroRatesCommands,
   ...commandesGrille,
-  // Fenêtre COT (Phase 5).
-  ...cotCommands,
-  // Fenêtres Saisonnalité et Volatilité (Lot C1 analytics).
-  ...seasonalityCommands,
-  ...volCommands,
-  // Fenêtre FUND (Lot E1 — fiche société tradfi, SEC EDGAR + Finnhub).
-  ...fundCommands,
-  // Fenêtre BRIEF (snapshot marché matinal, composition de sources existantes).
-  ...briefCommands,
-  // Fenêtre GLOBE (chokepoints maritimes + trafic aérien).
+  // GLOBE + bandeau ticker.
   ...globeCommands,
-  // Bandeau ticker d'actualités (TICKER — affiche/masque, état persisté).
   ...tickerCommands,
+  // CORR / MAP / TERM / OMON / RATE / COT / SEAG / VOL / FUND / BRIEF via windowManager.
+  ...windowPanelCommands,
 ]);
 
-// ─────────────────────────── Table composant↔id des fenêtres flottantes ───────────────────────────
+// ─────────────────────────── Fenêtres lazy (code-splitting) ───────────────────────────
 
-/** Association id de fenêtre (WINDOW_REGISTRY) -> composant de contenu. Utilisé pour
- * monter chaque fenêtre sous <FloatingWindow> de façon générique (au lieu d'autant de JSX
- * explicites que d'entrées du registre) et pour retirer PANNEAUX_DROITE (l'exclusion mutuelle est remplacée par
- * le z-order de windowManagerStore — plusieurs fenêtres peuvent désormais coexister). */
-const WINDOW_COMPONENTS: Record<string, () => JSX.Element> = {
-  derivatives: DerivativesWindow,
-  eco: EcoWindow,
-  news: NewsWindow,
-  corr: CorrWindow,
-  onchain: OnchainWindow,
-  marketMap: MarketMapWindow,
-  portfolio: PortfolioWindow,
-  notes: NotesWindow,
-  screener: ScreenerWindow,
-  termStructure: TermStructureWindow,
-  options: OptionsWindow,
-  dom: DomWindow,
-  backtest: BacktestWindow,
-  replay: ReplayWindow,
-  macroRates: MacroRatesWindow,
-  cot: CotWindow,
-  seasonality: SeasonalityWindow,
-  vol: VolWindow,
-  fund: FundWindow,
-  brief: BriefWindow,
-  globe: GlobeWindow,
+type FenetreComp = ComponentType<Record<string, never>>;
+
+/** Chargeurs dynamiques : un chunk par fenêtre, chargé à la première ouverture. */
+const WINDOW_COMPONENTS: Record<string, LazyExoticComponent<FenetreComp>> = {
+  derivatives: lazy(() =>
+    import("./components/DerivativesWindow").then((m) => ({ default: m.DerivativesWindow })),
+  ),
+  eco: lazy(() => import("./components/EcoWindow").then((m) => ({ default: m.EcoWindow }))),
+  news: lazy(() => import("./components/NewsWindow").then((m) => ({ default: m.NewsWindow }))),
+  corr: lazy(() => import("./components/CorrWindow").then((m) => ({ default: m.CorrWindow }))),
+  onchain: lazy(() => import("./components/OnchainWindow").then((m) => ({ default: m.OnchainWindow }))),
+  marketMap: lazy(() =>
+    import("./components/MarketMapWindow").then((m) => ({ default: m.MarketMapWindow })),
+  ),
+  portfolio: lazy(() =>
+    import("./components/PortfolioWindow").then((m) => ({ default: m.PortfolioWindow })),
+  ),
+  notes: lazy(() => import("./components/NotesWindow").then((m) => ({ default: m.NotesWindow }))),
+  screener: lazy(() =>
+    import("./components/ScreenerWindow").then((m) => ({ default: m.ScreenerWindow })),
+  ),
+  termStructure: lazy(() =>
+    import("./components/TermStructureWindow").then((m) => ({ default: m.TermStructureWindow })),
+  ),
+  options: lazy(() =>
+    import("./components/OptionsWindow").then((m) => ({ default: m.OptionsWindow })),
+  ),
+  dom: lazy(() => import("./components/DomWindow").then((m) => ({ default: m.DomWindow }))),
+  backtest: lazy(() =>
+    import("./components/BacktestWindow").then((m) => ({ default: m.BacktestWindow })),
+  ),
+  replay: lazy(() => import("./components/ReplayWindow").then((m) => ({ default: m.ReplayWindow }))),
+  macroRates: lazy(() =>
+    import("./components/MacroRatesWindow").then((m) => ({ default: m.MacroRatesWindow })),
+  ),
+  cot: lazy(() => import("./components/CotWindow").then((m) => ({ default: m.CotWindow }))),
+  seasonality: lazy(() =>
+    import("./components/SeasonalityWindow").then((m) => ({ default: m.SeasonalityWindow })),
+  ),
+  vol: lazy(() => import("./components/VolWindow").then((m) => ({ default: m.VolWindow }))),
+  fund: lazy(() => import("./components/FundWindow").then((m) => ({ default: m.FundWindow }))),
+  brief: lazy(() => import("./components/BriefWindow").then((m) => ({ default: m.BriefWindow }))),
+  globe: lazy(() => import("./components/GlobeWindow").then((m) => ({ default: m.GlobeWindow }))),
 };
+
+/** Placeholder discret pendant le chargement du chunk de la fenêtre. */
+function FenetreFallback() {
+  return <div className="p-3 text-xs text-text-dim">Chargement…</div>;
+}
 
 export function App() {
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
@@ -193,10 +175,6 @@ export function App() {
 
   // Zone de travail des fenêtres flottantes = la zone du graphe (exclut toolbar/barre
   // de dessin/panneau latéral) — mesurée sur ce div, PAS sur window.innerWidth/innerHeight.
-  // Un seul ResizeObserver capture aussi bien le resize du navigateur QUE le bascule
-  // plein écran (qui démonte/remonte la toolbar et le panneau, changeant la taille de
-  // ce div) — un seul point d'entrée au lieu d'un listener par déclencheur. Débounce
-  // 150ms conservé (même esprit que l'ancien listener resize).
   useEffect(() => {
     const el = chartAreaRef.current;
     if (!el) return;
@@ -268,15 +246,16 @@ export function App() {
         </div>
       )}
 
-      {/* Les fenêtres Bloomberg non modales (une par entrée de WINDOW_REGISTRY), montées
-          génériquement sous <FloatingWindow> (géométrie/z-order/minimize gérés par
-          windowManagerStore). */}
+      {/* Fenêtres Bloomberg : chunk chargé à la première ouverture (FloatingWindow
+          ne monte les enfants que si open && !minimized). */}
       {WINDOW_REGISTRY.map((entry) => {
         const Contenu = WINDOW_COMPONENTS[entry.id];
         if (!Contenu) return null;
         return (
           <FloatingWindow key={entry.id} id={entry.id} title={entry.title} mnemonic={entry.mnemonic}>
-            <Contenu />
+            <Suspense fallback={<FenetreFallback />}>
+              <Contenu />
+            </Suspense>
           </FloatingWindow>
         );
       })}

@@ -11,7 +11,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "daemon": "bun apps/daemon/src/index.ts",
-    "prod": "pnpm --filter @axiom/web build && bun apps/daemon/src/index.ts"
+    "prod": "pnpm --filter @axiom/web build && bun apps/daemon/src/index.ts",
+    "check": "bash scripts/ci.sh"
   },
   "devDependencies": {
     "@types/node": "^20.16.0",

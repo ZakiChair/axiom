@@ -1,52 +1,14 @@
 import { defineConfig, loadEnv } from "vite";
 import type { ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
+import { EXTAPI_HOSTS } from "../../shared/extapi-hosts";
 import { appendApiKeyIfAbsent } from "./src/data/apiKeyProxy";
 
 // PROXY GÉNÉRIQUE /extapi (Phase 3) — contournement CORS pour APIs sans clé.
 // Route `/extapi/<hote>/<chemin…>` → `https://<hote>/<chemin…>` pour les hôtes
-// whitelistés (RSS news, calendriers éco, on-chain, Deribit, Binance fapi/dapi…).
-// En DEV, Vite ne sait pas router dynamiquement une cible unique (node-http-proxy
-// n'a pas d'option `router`) → on génère UNE ENTRÉE PAR HÔTE depuis la whitelist.
-// Le vrai contrôle d'autorité (403 hors-liste) vit côté daemon (proxy de PROD).
-//
-// ⚠️ WHITELIST DUPLIQUÉE dans 3 fichiers (synchronisation MANUELLE) :
-//   1. apps/daemon/src/proxy.ts       (EXTAPI_WHITELIST — frontière d'autorité 403)
-//   2. apps/web/vite.config.ts        (ici — proxy de DEV, une entrée par hôte)
-//   3. apps/web/src/data/extapi.ts    (helper front + constante documentée)
-const EXTAPI_HOTES: readonly string[] = [
-  "nfs.faireconomy.media",
-  "www.coindesk.com",
-  "cointelegraph.com",
-  "www.theblock.co",
-  "decrypt.co",
-  "blockworks.com",
-  "api.alternative.me",
-  "community-api.coinmetrics.io",
-  "bitcoin-data.com",
-  "api.llama.fi",
-  "mempool.space",
-  "blockchain.info",
-  "www.deribit.com",
-  "dapi.binance.com",
-  "fapi.binance.com",
-  "api.coingecko.com",
-  "api.fiscaldata.treasury.gov",
-  "home.treasury.gov",
-  "data-api.ecb.europa.eu",
-  "stats.bis.org",
-  "api.imf.org",
-  "publicreporting.cftc.gov",
-  "cdn.cboe.com",
-  "data.sec.gov", // SEC EDGAR (submissions, XBRL companyfacts) — panneau FUND
-  "www.sec.gov", // SEC EDGAR (company_tickers.json, résolution ticker→CIK) — panneau FUND
-  "api.gdeltproject.org", // GDELT (recherche news ciblée par mot-clé) — NEWS enrichi
-  "www.mof.go.jp", // MOF Japon — CSV JGB (courbe des taux souverains JP)
-  "www.rba.gov.au", // RBA Australie — CSV F2 (courbe des taux souverains AU)
-  "feeds.bloomberg.com", // RSS Bloomberg (news macro — verticale economics)
-  "www.cnbc.com", // RSS CNBC (news macro — Economy ; UA navigateur requis, défaut du proxy suffit)
-  "opensky-network.org", // OpenSky /states/all (trafic aérien — globe ; CORS restreint à sa propre origine)
-];
+// whitelistés. Source unique : shared/extapi-hosts.ts (daemon + extapi.ts + ici).
+// En DEV, une entrée proxy Vite par hôte ; l'autorité 403 vit côté daemon en PROD.
+const EXTAPI_HOTES: readonly string[] = EXTAPI_HOSTS;
 
 // User-Agent navigateur standard : certains hôtes (RSS, Cloudflare) refusent un UA vide.
 const EXTAPI_USER_AGENT =

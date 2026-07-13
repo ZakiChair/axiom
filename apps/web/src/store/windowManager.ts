@@ -383,15 +383,21 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
  * (source de vérité). À appeler une fois au chargement du module du store concerné.
  * Capte aussi bien les changements déclenchés par les commandes (`openEco()` etc.) que
  * ceux déclenchés par le chrome `<FloatingWindow>` (croix, minimize, restore).
+ *
+ * Sync IMMÉDIAT à l'enregistrement : indispensable pour le lazy-load des fenêtres
+ * (le module store se charge APRÈS `openWindow`, sans nouvel évènement subscribe).
  */
 export function mirrorOpenState(
   id: string,
   target: { getState: () => { open: boolean }; setState: (partial: { open: boolean }) => void }
 ): void {
-  windowManagerStore.subscribe((state) => {
-    const isOpen = state.windows[id]?.open ?? false;
+  const sync = (isOpen: boolean): void => {
     if (isOpen !== target.getState().open) {
       target.setState({ open: isOpen });
     }
+  };
+  sync(windowManagerStore.getState().windows[id]?.open ?? false);
+  windowManagerStore.subscribe((state) => {
+    sync(state.windows[id]?.open ?? false);
   });
 }

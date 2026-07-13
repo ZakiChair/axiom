@@ -494,6 +494,19 @@ describe("mirrorOpenState", () => {
     windowManagerStore.getState().closeWindow("mirror-test");
     expect(fakeUiStore.getState().open).toBe(false);
   });
+
+  it("sync immédiat à l'enregistrement (lazy-load : fenêtre déjà ouverte)", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    let open = false;
+    const fakeUiStore = {
+      getState: () => ({ open }),
+      setState: (partial: { open: boolean }) => {
+        open = partial.open;
+      },
+    };
+    mirrorOpenState("derivatives", fakeUiStore);
+    expect(fakeUiStore.getState().open).toBe(true);
+  });
 });
 
 describe("reclampAll", () => {

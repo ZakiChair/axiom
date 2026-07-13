@@ -10,54 +10,13 @@
  * Une URL RELATIVE suffit dans les deux cas (même origine que le front) — comme
  * les proxys /fredapi… existants. Le front reste donc fonctionnel SANS daemon en dev.
  *
- * ⚠️ WHITELIST DUPLIQUÉE dans 3 fichiers (synchronisation MANUELLE) :
- *   1. apps/daemon/src/proxy.ts       (EXTAPI_WHITELIST — frontière d'autorité 403)
- *   2. apps/web/vite.config.ts        (proxy de DEV, une entrée par hôte)
- *   3. apps/web/src/data/extapi.ts    (ici — helper front + constante documentée)
- * Toute modification ici DOIT être répercutée dans les deux autres.
- *
- * Un hôte hors whitelist renvoie 403 côté daemon (et n'a pas d'entrée côté Vite).
+ * Whitelist : source unique `shared/extapi-hosts.ts` (daemon + Vite + ce module).
  */
 
-/** Hôtes autorisés par le proxy /extapi (voir commentaire croisé ci-dessus). */
-export const EXTAPI_WHITELIST: readonly string[] = [
-  "nfs.faireconomy.media", // ForexFactory JSON (calendrier éco)
-  "www.coindesk.com", // RSS news
-  "cointelegraph.com", // RSS news
-  "www.theblock.co", // RSS news
-  "decrypt.co", // RSS news
-  "blockworks.com", // RSS news
-  "api.alternative.me", // Fear & Greed Index
-  "community-api.coinmetrics.io", // Coin Metrics Community (on-chain)
-  "bitcoin-data.com", // BGeometrics (MVRV-Z, SOPR, NUPL)
-  "api.llama.fi", // DefiLlama (ETF flows, TVL, fees)
-  "mempool.space", // mempool / frais on-chain
-  "blockchain.info", // stats on-chain
-  "www.deribit.com", // options / term structure (public, sans clé)
-  "dapi.binance.com", // Binance COIN-M (term structure)
-  "fapi.binance.com", // Binance USD-M (dérivés : funding, top trader L/S)
-  "api.coingecko.com", // CoinGecko (treemap, catégories)
-  "api.fiscaldata.treasury.gov", // US Treasury Fiscal Data (rendements souverains US)
-  "home.treasury.gov", // US Treasury Daily Par Yield Curve CSV (courbe des taux souverains US)
-  "data-api.ecb.europa.eu", // ECB SDMX (courbe zone euro + taux directeur BCE)
-  "stats.bis.org", // BIS SDMX WS_CBPOL (taux directeurs banques centrales)
-  "api.imf.org", // IMF SDMX 3.0 IRFCL (réserves d'or par pays)
-  "publicreporting.cftc.gov", // CFTC Socrata SODA (rapport COT)
-  "cdn.cboe.com", // CBOE delayed quotes (GEX/DEX indices actions)
-  "data.sec.gov", // SEC EDGAR (submissions, XBRL companyfacts) — panneau FUND
-  "www.sec.gov", // SEC EDGAR (company_tickers.json, résolution ticker→CIK) — panneau FUND
-  "api.gdeltproject.org", // GDELT (recherche news ciblée par mot-clé) — NEWS enrichi
-  "www.mof.go.jp", // MOF Japon — CSV JGB (courbe des taux souverains JP)
-  "www.rba.gov.au", // RBA Australie — CSV F2 (courbe des taux souverains AU)
-  "feeds.bloomberg.com", // RSS Bloomberg (news macro — verticale economics)
-  "www.cnbc.com", // RSS CNBC (news macro — Economy ; UA navigateur requis, défaut du proxy suffit)
-  // OpenSky /states/all (trafic aérien — globe). CORS vérifié 2026-07-10 : l'API renvoie
-  // `access-control-allow-origin: https://opensky-network.org` (origine FIXE, pas de reflet)
-  // → un appel direct navigateur est bloqué, le proxy est OBLIGATOIRE. NB : ArcGIS PortWatch
-  // (services9.arcgis.com) renvoie lui `access-control-allow-origin: *` → appelé en DIRECT
-  // (data/globe/portwatch.ts), donc PAS whitelisté ici.
-  "opensky-network.org",
-];
+import { EXTAPI_HOSTS } from "../../../../shared/extapi-hosts";
+
+/** Hôtes autorisés par le proxy /extapi. */
+export const EXTAPI_WHITELIST: readonly string[] = EXTAPI_HOSTS;
 
 /** L'hôte est-il autorisé par le proxy /extapi ? (garde-fou dev côté appelant). */
 export function estHoteExtapiAutorise(hote: string): boolean {

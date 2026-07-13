@@ -10,29 +10,9 @@ import { orderflowStore } from "../store/orderflow";
 import { volumeProfileStore } from "../store/volumeProfile";
 import { revenueStore } from "../store/revenue";
 import { derivativesUiStore } from "../store/derivatives-ui";
-// Stores UI des fenêtres non modales (Phase 3), pour le menu déroulant « Fonctions ».
-import { ecoStore } from "../store/eco";
-import { newsUiStore } from "../store/news";
+// Bandeau ticker (pas une fenêtre Launchpad) + disposition grille.
 import { tickerBandStore } from "../store/tickerBand";
-import { onchainUiStore } from "../store/onchain";
-import { marketMapUiStore } from "../store/marketmap-ui";
-import { portfolioUiStore } from "../store/portfolio";
-import { notesUiStore } from "../store/notes";
-import { screenerStore } from "../store/screener";
-import { corrUiStore } from "./CorrWindow";
-import { termStructureUiStore } from "./TermStructureWindow";
-import { optionsUiStore } from "./OptionsWindow";
-// Stores UI des fenêtres de la Phase 4 (carnet d'ordres, backtest, replay) + disposition grille.
-import { domUiStore } from "../store/dom-ui";
-import { backtestStore } from "../store/backtest";
-import { replayStore } from "../store/replay";
-import { macroRatesUiStore } from "./MacroRatesWindow";
-import { cotUiStore } from "./CotWindow";
-import { seasonalityUiStore } from "./SeasonalityWindow";
-import { volUiStore } from "./VolWindow";
-import { fundUiStore } from "./FundWindow";
-import { briefUiStore } from "./BriefWindow";
-import { globeUiStore } from "../store/globe-ui";
+import { windowManagerStore } from "../store/windowManager";
 import { FootprintSettingsPanel } from "./FootprintSettingsPanel";
 import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
@@ -138,39 +118,33 @@ function exchangeLabel(id: ExchangeId): string {
 }
 
 /**
- * Fenêtres non modales de la Phase 3 exposées dans le menu « Fonctions » : libellé +
- * mnémonique Bloomberg + ouverture du panneau. L'exclusion mutuelle (App.tsx) ferme les
- * autres panneaux dockés à droite au passage. Les mêmes mnémoniques restent tapables dans
- * la palette (⌘K). DES (Produits dérivés) garde son bouton dédié ; OI/FUND sont des
- * sous-panes du chart (pilotés depuis la fenêtre Produits dérivés), pas des fenêtres.
+ * Fenêtres non modales exposées dans le menu « Fonctions » : libellé + mnémonique
+ * Bloomberg + ouverture via `windowManagerStore` (évite d'importer les composants
+ * lourds / stores co-localisés — prérequis du lazy-load dans App.tsx).
+ * TICKER bascule le bandeau (pas une fenêtre). DES garde son bouton dédié.
  */
 const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] = [
-  { mnemonique: "ECO", libelle: "Calendrier économique", ouvrir: () => ecoStore.getState().openEco() },
-  { mnemonique: "NEWS", libelle: "Actualités crypto", ouvrir: () => newsUiStore.getState().openNews() },
-  // TICKER bascule le bandeau news défilant (pas une fenêtre) — même action que la palette (⌘K).
+  { mnemonique: "ECO", libelle: "Calendrier économique", ouvrir: () => windowManagerStore.getState().openWindow("eco") },
+  { mnemonique: "NEWS", libelle: "Actualités crypto", ouvrir: () => windowManagerStore.getState().openWindow("news") },
   { mnemonique: "TICKER", libelle: "Bandeau news défilant", ouvrir: () => tickerBandStore.getState().basculer() },
-  { mnemonique: "CORR", libelle: "Corrélations", ouvrir: () => corrUiStore.getState().openCorr() },
-  { mnemonique: "CHAIN", libelle: "On-chain", ouvrir: () => onchainUiStore.getState().openOnchain() },
-  { mnemonique: "MAP", libelle: "Vue marché (treemap)", ouvrir: () => marketMapUiStore.getState().openMarketMap() },
-  { mnemonique: "PORT", libelle: "Portefeuille", ouvrir: () => portfolioUiStore.getState().openPortfolio() },
-  { mnemonique: "NOTE", libelle: "Notes / journal", ouvrir: () => notesUiStore.getState().openNotes() },
-  { mnemonique: "EQS", libelle: "Screener d'actifs", ouvrir: () => screenerStore.getState().openScreener() },
-  { mnemonique: "TERM", libelle: "Structure par terme", ouvrir: () => termStructureUiStore.getState().openTermStructure() },
-  { mnemonique: "OMON", libelle: "Options (smile IV, max pain)", ouvrir: () => optionsUiStore.getState().openOptions() },
-  // Fenêtres de la Phase 4.
-  { mnemonique: "DOM", libelle: "Carnet d'ordres (DOM / depth)", ouvrir: () => domUiStore.getState().openDom() },
-  { mnemonique: "BT", libelle: "Backtest de stratégie", ouvrir: () => backtestStore.getState().openBacktest() },
-  { mnemonique: "REPLAY", libelle: "Replay de marché", ouvrir: () => replayStore.getState().openReplay() },
-  // Fenêtres de la Phase 5 (batch souverain / COT / GEX).
-  { mnemonique: "RATE", libelle: "Taux & Réserves souveraines", ouvrir: () => macroRatesUiStore.getState().openMacroRates() },
-  { mnemonique: "COT", libelle: "Rapport COT (CFTC)", ouvrir: () => cotUiStore.getState().openCot() },
-  { mnemonique: "SEAG", libelle: "Saisonnalité", ouvrir: () => seasonalityUiStore.getState().openSeasonality() },
-  { mnemonique: "VOL", libelle: "Volatilité (cône RV, VRP)", ouvrir: () => volUiStore.getState().openVol() },
-  { mnemonique: "FUND", libelle: "Fiche société (FUND)", ouvrir: () => fundUiStore.getState().openFund() },
-  // Fenêtre BRIEF (snapshot marché matinal — composition de sources existantes).
-  { mnemonique: "BRIEF", libelle: "Point marché (snapshot)", ouvrir: () => briefUiStore.getState().openBrief() },
-  // Fenêtre GLOBE (géopolitique GDELT/UCDP/ISW + chokepoints PortWatch + trafic aérien OpenSky).
-  { mnemonique: "GLOBE", libelle: "Globe (géopolitique, chokepoints & trafic aérien)", ouvrir: () => globeUiStore.getState().openGlobe() },
+  { mnemonique: "CORR", libelle: "Corrélations", ouvrir: () => windowManagerStore.getState().openWindow("corr") },
+  { mnemonique: "CHAIN", libelle: "On-chain", ouvrir: () => windowManagerStore.getState().openWindow("onchain") },
+  { mnemonique: "MAP", libelle: "Vue marché (treemap)", ouvrir: () => windowManagerStore.getState().openWindow("marketMap") },
+  { mnemonique: "PORT", libelle: "Portefeuille", ouvrir: () => windowManagerStore.getState().openWindow("portfolio") },
+  { mnemonique: "NOTE", libelle: "Notes / journal", ouvrir: () => windowManagerStore.getState().openWindow("notes") },
+  { mnemonique: "EQS", libelle: "Screener d'actifs", ouvrir: () => windowManagerStore.getState().openWindow("screener") },
+  { mnemonique: "TERM", libelle: "Structure par terme", ouvrir: () => windowManagerStore.getState().openWindow("termStructure") },
+  { mnemonique: "OMON", libelle: "Options (smile IV, max pain)", ouvrir: () => windowManagerStore.getState().openWindow("options") },
+  { mnemonique: "DOM", libelle: "Carnet d'ordres (DOM / depth)", ouvrir: () => windowManagerStore.getState().openWindow("dom") },
+  { mnemonique: "BT", libelle: "Backtest de stratégie", ouvrir: () => windowManagerStore.getState().openWindow("backtest") },
+  { mnemonique: "REPLAY", libelle: "Replay de marché", ouvrir: () => windowManagerStore.getState().openWindow("replay") },
+  { mnemonique: "RATE", libelle: "Taux & Réserves souveraines", ouvrir: () => windowManagerStore.getState().openWindow("macroRates") },
+  { mnemonique: "COT", libelle: "Rapport COT (CFTC)", ouvrir: () => windowManagerStore.getState().openWindow("cot") },
+  { mnemonique: "SEAG", libelle: "Saisonnalité", ouvrir: () => windowManagerStore.getState().openWindow("seasonality") },
+  { mnemonique: "VOL", libelle: "Volatilité (cône RV, VRP)", ouvrir: () => windowManagerStore.getState().openWindow("vol") },
+  { mnemonique: "FUND", libelle: "Fiche société (FUND)", ouvrir: () => windowManagerStore.getState().openWindow("fund") },
+  { mnemonique: "BRIEF", libelle: "Point marché (snapshot)", ouvrir: () => windowManagerStore.getState().openWindow("brief") },
+  { mnemonique: "GLOBE", libelle: "Globe (géopolitique, chokepoints & trafic aérien)", ouvrir: () => windowManagerStore.getState().openWindow("globe") },
 ];
 
 /**

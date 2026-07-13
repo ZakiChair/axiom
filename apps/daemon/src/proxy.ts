@@ -11,6 +11,7 @@
  * Rappel BUILD-CONTRACT : le daemon ne proxifie JAMAIS le chemin chaud (les WS de
  * marché du front restent DIRECTS). Ici, uniquement du REST à quota, mis en cache.
  */
+import { EXTAPI_HOSTS } from "../../../shared/extapi-hosts";
 import { cleCache, ecrireCache, lireCache, ttlMsPourChemin } from "./cache";
 import { entetesCors } from "./cors";
 import type { ProxyKeys } from "./env";
@@ -193,51 +194,9 @@ function reponseErreurAmont(err: unknown, cors: Record<string, string>): Respons
 // navigateur standard, timeout 15 s. Sert les APIs sans CORS de la Phase 3 (RSS news,
 // calendriers éco, on-chain, Deribit, Binance fapi/dapi…) sans multiplier les préfixes.
 //
-// ⚠️ WHITELIST DUPLIQUÉE dans 3 fichiers (synchronisation MANUELLE) :
-//   1. apps/daemon/src/proxy.ts       (ici — proxy de PROD, frontière d'autorité 403)
-//   2. apps/web/vite.config.ts        (proxy de DEV — une entrée par hôte)
-//   3. apps/web/src/data/extapi.ts    (helper front + constante documentée)
-// Toute modification ici DOIT être répercutée dans les deux autres.
-
-/** Hôtes autorisés pour /extapi (voir commentaire croisé ci-dessus). */
-export const EXTAPI_WHITELIST: ReadonlySet<string> = new Set([
-  "nfs.faireconomy.media", // ForexFactory JSON (calendrier éco)
-  "www.coindesk.com", // RSS news
-  "cointelegraph.com", // RSS news
-  "www.theblock.co", // RSS news
-  "decrypt.co", // RSS news
-  "blockworks.com", // RSS news
-  "api.alternative.me", // Fear & Greed Index
-  "community-api.coinmetrics.io", // Coin Metrics Community (on-chain)
-  "bitcoin-data.com", // BGeometrics (MVRV-Z, SOPR, NUPL)
-  "api.llama.fi", // DefiLlama (ETF flows, TVL, fees)
-  "mempool.space", // mempool / frais on-chain
-  "blockchain.info", // stats on-chain
-  "www.deribit.com", // options / term structure (public, sans clé)
-  "dapi.binance.com", // Binance COIN-M (term structure)
-  "fapi.binance.com", // Binance USD-M (dérivés : funding, top trader L/S)
-  "api.coingecko.com", // CoinGecko (treemap, catégories)
-  "api.fiscaldata.treasury.gov", // US Treasury Fiscal Data (rendements souverains US)
-  "home.treasury.gov", // US Treasury Daily Par Yield Curve CSV (courbe des taux souverains US)
-  "data-api.ecb.europa.eu", // ECB SDMX (courbe zone euro + taux directeur BCE)
-  "stats.bis.org", // BIS SDMX WS_CBPOL (taux directeurs banques centrales)
-  "api.imf.org", // IMF SDMX 3.0 IRFCL (réserves d'or par pays)
-  "publicreporting.cftc.gov", // CFTC Socrata SODA (rapport COT)
-  "cdn.cboe.com", // CBOE delayed quotes (GEX/DEX indices actions)
-  "data.sec.gov", // SEC EDGAR (submissions, XBRL companyfacts) — panneau FUND
-  "www.sec.gov", // SEC EDGAR (company_tickers.json, résolution ticker→CIK) — panneau FUND
-  "api.gdeltproject.org", // GDELT (recherche news ciblée par mot-clé) — NEWS enrichi
-  "www.mof.go.jp", // MOF Japon — CSV JGB (courbe des taux souverains JP)
-  "www.rba.gov.au", // RBA Australie — CSV F2 (courbe des taux souverains AU)
-  "feeds.bloomberg.com", // RSS Bloomberg (news macro — verticale economics)
-  "www.cnbc.com", // RSS CNBC (news macro — Economy ; UA navigateur requis, défaut du proxy suffit)
-  // OpenSky /states/all (trafic aérien — globe). CORS vérifié 2026-07-10 : ACAO fixé à
-  // https://opensky-network.org (pas de reflet d'origine) → proxy OBLIGATOIRE. TTL cache
-  // 90 s (< INTERVALLE_POLL_MS 120 s, anti-aliasing — cf. EXTAPI_TTL_OPENSKY_MS).
-  // L'en-tête amont x-rate-limit-remaining est retransmis sur miss (creditsRestants ;
-  // absent sur hit — valeur indicative).
-  "opensky-network.org",
-]);
+// Source unique : shared/extapi-hosts.ts (aussi importée par vite.config + extapi.ts).
+/** Hôtes autorisés pour /extapi (frontière d'autorité 403). */
+export const EXTAPI_WHITELIST: ReadonlySet<string> = new Set(EXTAPI_HOSTS);
 
 /** User-Agent navigateur standard : certains hôtes (RSS, Cloudflare) refusent un UA vide. */
 const EXTAPI_USER_AGENT =

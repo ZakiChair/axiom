@@ -5,6 +5,12 @@
 
 ---
 
+## Suite programme (2026-07-13) — Cible WTP 100 $/mois
+
+> **Plan multi-agent exécutable :** [`docs/superpowers/plans/2026-07-13-cible-100-usd-mois.md`](../superpowers/plans/2026-07-13-cible-100-usd-mois.md)
+>
+> Beaucoup des phases 0–2 de ce doc sont **déjà livrées** (resync, watchdog, health, ⌘K, workspaces, daemon, alertes moteur, 21 fenêtres…). Le programme G100 se concentre sur : confiance résiduelle, productisation de l’edge (alertes/screener/playbooks), liens inter-modules, boucle trader, packaging, gate binaire G1–G10.
+
 ## Verdict d'ensemble
 
 La base est **excellente** : architecture par interfaces (`IExchangeAdapter`/`IDerivedDataProvider`/`IMacroProvider`), 86 indicateurs testés (221 tests, hand-calc documentés), pattern contrôleur uniforme côté chart, discipline renderer-first respectée (zéro re-render React sur tick), persistance localStorage rigoureuse. AXIOM est déjà un très bon **outil de charting**.

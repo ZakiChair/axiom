@@ -10,6 +10,8 @@ import {
   fusionnerEtatArme,
   SEUIL_HEARTBEAT_MS,
   symbolesBinanceActifs,
+  symbolesFundingActifs,
+  TYPES_FUNDING,
   TYPES_PRIX,
 } from "./alerts";
 
@@ -20,6 +22,23 @@ function alertePrix(id: string, symbol: string, niveau: number, sens: "hausse" |
     symbol,
     source: "binance",
     condition: { type: "prix-croise", niveau, sens },
+    actif: true,
+    declenchements: [],
+  };
+}
+
+/** Def funding-extreme binance (seuilAbs fraction). */
+function alerteFunding(
+  id: string,
+  symbol: string,
+  seuilAbs = 0.001,
+  sens: "long-crowded" | "short-crowded" | "les-deux" = "long-crowded",
+): AlertDef {
+  return {
+    id,
+    symbol,
+    source: "binance",
+    condition: { type: "funding-extreme", seuilAbs, sens },
     actif: true,
     declenchements: [],
   };
@@ -48,6 +67,20 @@ describe("symbolesBinanceActifs", () => {
       { ...alertePrix("d", "SOLUSDT", 1), source: "kraken" }, // non-binance → exclu
     ];
     expect(symbolesBinanceActifs(defs)).toEqual(["BTCUSDT"]);
+  });
+});
+
+describe("symbolesFundingActifs", () => {
+  test("ne retient que binance actives funding-extreme", () => {
+    const defs: AlertDef[] = [
+      alerteFunding("f1", "btcusdt"),
+      alerteFunding("f2", "ETHUSDT"),
+      { ...alerteFunding("f3", "SOLUSDT"), actif: false },
+      { ...alerteFunding("f4", "XRPUSDT"), source: "kraken" },
+      alertePrix("p1", "BNBUSDT", 1), // prix → exclu
+      alerteFunding("f5", "BTCUSDT"), // doublon
+    ];
+    expect(symbolesFundingActifs(defs)).toEqual(["BTCUSDT", "ETHUSDT"]);
   });
 });
 
@@ -161,5 +194,54 @@ describe("evaluerEtPersister (démarrage complet en base)", () => {
     expect(journal).toHaveLength(1);
     expect(journal[0]?.notifie).toBe(0); // journalisé mais NON notifié
     expect(notifs).toHaveLength(0); // notifier jamais appelé
+  });
+
+  test("funding-extreme : calibre puis déclenche, journal + notify (heartbeat ancien)", () => {
+    const d = baseAvecAlerte(alerteFunding("f1", "BTCUSDT", 0.001, "long-crowded"));
+    const notifs: Array<{ symbol: string; decl: Declenchement }> = [];
+    const notifier = (symbol: string, decl: Declenchement): void => {
+      notifs.push({ symbol, decl });
+    };
+
+    // Sous seuil → calibrage (armé), aucun déclenchement.
+    const r1 = evaluerEtPersister(
+      "BTCUSDT",
+      TYPES_FUNDING,
+      { maintenant: 1_000_000, dernierPrix: 0, fundingRate: 0.0001 },
+      { db: d, notifier, dernierHeartbeat: 0 },
+    );
+    expect(r1).toHaveLength(0);
+    expect(chargerDefs(d).find((x) => x.id === "f1")?.arme).toBe(true);
+
+    // |rate| ≥ seuilAbs et long → DÉCLENCHE + journal notifié.
+    const r2 = evaluerEtPersister(
+      "BTCUSDT",
+      TYPES_FUNDING,
+      { maintenant: 2_000_000, dernierPrix: 0, fundingRate: 0.002 },
+      { db: d, notifier, dernierHeartbeat: 0 },
+    );
+    expect(r2).toHaveLength(1);
+    expect(r2[0]?.valeur).toBe(0.002);
+
+    const journal = d.query("SELECT alertId, valeur, notifie FROM alertes_journal").all() as Array<{
+      alertId: string;
+      valeur: number;
+      notifie: number;
+    }>;
+    expect(journal).toHaveLength(1);
+    expect(journal[0]).toMatchObject({ alertId: "f1", valeur: 0.002, notifie: 1 });
+    expect(notifs).toHaveLength(1);
+    expect(notifs[0]?.symbol).toBe("BTCUSDT");
+  });
+
+  test("funding-extreme ignoré si évalué avec TYPES_PRIX (pas de double fire)", () => {
+    const d = baseAvecAlerte(alerteFunding("f2", "BTCUSDT", 0.001));
+    const r = evaluerEtPersister(
+      "BTCUSDT",
+      TYPES_PRIX,
+      { maintenant: 1, dernierPrix: 100, fundingRate: 0.01 },
+      { db: d, notifier: () => {}, dernierHeartbeat: 0 },
+    );
+    expect(r).toHaveLength(0);
   });
 });

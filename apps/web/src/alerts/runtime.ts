@@ -15,9 +15,8 @@
  * CVD spot/perp-div : support moteur OK, injection runtime reportée v1.1 (données
  * dans le contrôleur chart orderflow, hors store — cf. lot B1).
  *
- * DÉGRADATION ONGLET FERMÉ (B1.6) : le daemon n'a PAS encore de poll funding (lot D3).
- * Avec l'app fermée, seules prix / var% / indicateur-seuil|croisement s'évaluent.
- * Les alertes `funding-extreme` (et CVD) restent dormantes côté daemon jusqu'à D3.
+ * ONGLET FERMÉ : le daemon évalue aussi `funding-extreme` (poll premiumIndex ~60 s,
+ * lot D3). CVD spot/perp-div reste dormant côté daemon (pas de pipeline orderflow).
  *
  * Un déclenchement → journal du store + notification système (Notification API) + bip
  * discret (WebAudio, aucun fichier binaire). AUCUNE donnée haute fréquence ne transite

@@ -12,6 +12,10 @@
  *   - `<sym>@kline_1m`   → bougies 1 min CLÔTURÉES (conditions variation/indicateur),
  *     en fenêtre glissante de 500 bougies max (backfill REST au démarrage).
  *
+ * Funding (lot D3) : poll REST `fapi/v1/premiumIndex` (tous symboles, 1 requête) pour
+ * injecter `fundingRate` (fraction) dans le contexte des conditions `funding-extreme`.
+ * Hors WS (funding ne change que toutes les ~8 h) — cadence gérée par alerts.ts.
+ *
  * Sources NON binance (kraken/coinbase/twelvedata/mexc) : NON couvertes en v1 — le
  * daemon n'évalue les alertes onglet fermé que pour `source === "binance"`. Les
  * autres restent évaluées par le runtime du front lorsqu'il est ouvert (cf. mission).
@@ -23,7 +27,14 @@
 import type { Candle } from "@axiom/types";
 
 const REST_KLINES_URL = "https://api.binance.com/api/v3/klines";
+/** Snapshot funding USDⓈ-M (tous symboles si `symbol` absent). */
+export const PREMIUM_INDEX_URL = "https://fapi.binance.com/fapi/v1/premiumIndex";
+/** Historique funding (fenêtre z-score, par symbole). */
+export const FUNDING_RATE_HIST_URL = "https://fapi.binance.com/fapi/v1/fundingRate";
 const WS_STREAM_BASE = "wss://stream.binance.com:9443/stream?streams=";
+
+/** Fenêtre glissante pour z-score funding (même ordre de grandeur que le runtime front). */
+export const FENETRE_Z_FUNDING = 30;
 
 /** Taille de la fenêtre glissante de bougies par symbole. */
 export const FENETRE_BOUGIES = 500;
@@ -252,6 +263,90 @@ async function backfill(symbol: string): Promise<Candle[]> {
   if (!res.ok) throw new Error(`Binance REST ${res.status} ${res.statusText}`);
   const brut = (await res.json()) as BinanceRestKline[];
   return brut.map(restKlineToCandle).filter((c) => c.closed === true);
+}
+
+// ─────────────────────────── Funding (premiumIndex + z) ───────────────────────────
+
+/**
+ * Parse la réponse `fapi/v1/premiumIndex` (objet unique OU tableau tous symboles)
+ * en table `symbole → lastFundingRate` (FRACTION, ex. 0.0001 = 0.01 %).
+ * Entrées invalides ignorées. Fonction PURE (testée).
+ */
+export function parserPremiumIndex(raw: unknown): Map<string, number> {
+  const map = new Map<string, number>();
+  const items: unknown[] = Array.isArray(raw)
+    ? raw
+    : raw !== null && typeof raw === "object"
+      ? [raw]
+      : [];
+  for (const entry of items) {
+    if (entry === null || typeof entry !== "object") continue;
+    const e = entry as { symbol?: unknown; lastFundingRate?: unknown };
+    if (typeof e.symbol !== "string" || e.symbol.length === 0) continue;
+    const rate = Number(e.lastFundingRate);
+    if (!Number.isFinite(rate)) continue;
+    map.set(e.symbol.toUpperCase(), rate);
+  }
+  return map;
+}
+
+/**
+ * Parse l'historique `fapi/v1/fundingRate` en série de rates (ordre chrono croissant).
+ * Fonction PURE (testée).
+ */
+export function parserHistoriqueFunding(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  const out: number[] = [];
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== "object") continue;
+    const rate = Number((entry as { fundingRate?: unknown }).fundingRate);
+    if (Number.isFinite(rate)) out.push(rate);
+  }
+  return out;
+}
+
+/**
+ * Z-score du dernier point d'une série (fenêtre glissante bornée).
+ * `undefined` si série trop courte (< 2) ou écart-type nul géré → z = 0.
+ * Fonction PURE (testée).
+ */
+export function zScoreFunding(series: readonly number[], fenetre = FENETRE_Z_FUNDING): number | undefined {
+  if (series.length < 2) return undefined;
+  const win = series.slice(-fenetre);
+  if (win.length < 2) return undefined;
+  const mean = win.reduce((a, b) => a + b, 0) / win.length;
+  const variance = win.reduce((a, b) => a + (b - mean) ** 2, 0) / win.length;
+  const sd = Math.sqrt(variance);
+  const last = win[win.length - 1];
+  if (last === undefined) return undefined;
+  return sd === 0 ? 0 : (last - mean) / sd;
+}
+
+/**
+ * Snapshot REST de TOUS les funding rates USDⓈ-M (1 requête weight ~10).
+ * Renvoie une Map symbole → rate (fraction). Lève en cas d'HTTP non-OK.
+ */
+export async function chargerFundingRates(): Promise<Map<string, number>> {
+  const res = await fetch(PREMIUM_INDEX_URL);
+  if (!res.ok) throw new Error(`Binance premiumIndex ${res.status} ${res.statusText}`);
+  return parserPremiumIndex(await res.json());
+}
+
+/**
+ * Historique funding d'un symbole (jusqu'à `limit` points, défaut = fenêtre z).
+ * Best-effort côté appelant : renvoie [] si échec HTTP / JSON.
+ */
+export async function chargerHistoriqueFunding(
+  symbol: string,
+  limit = FENETRE_Z_FUNDING,
+): Promise<number[]> {
+  const params = new URLSearchParams({
+    symbol: symbol.toUpperCase(),
+    limit: String(Math.min(1000, Math.max(1, limit))),
+  });
+  const res = await fetch(`${FUNDING_RATE_HIST_URL}?${params.toString()}`);
+  if (!res.ok) throw new Error(`Binance fundingRate ${res.status} ${res.statusText}`);
+  return parserHistoriqueFunding(await res.json());
 }
 
 /**

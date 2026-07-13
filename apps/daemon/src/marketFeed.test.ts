@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import type { Candle } from "@axiom/types";
-import { ajouterBougie, construireUrlFlux, FENETRE_BOUGIES } from "./marketFeed";
+import {
+  ajouterBougie,
+  construireUrlFlux,
+  FENETRE_BOUGIES,
+  parserHistoriqueFunding,
+  parserPremiumIndex,
+  zScoreFunding,
+} from "./marketFeed";
 
 /** Fabrique une bougie minimale à un temps donné. */
 function bougie(time: number, close = 1): Candle {
@@ -46,5 +53,67 @@ describe("ajouterBougie", () => {
     expect(f).toHaveLength(FENETRE_BOUGIES);
     // Les plus anciennes sont évincées : la 1re restante = index 50.
     expect(f[0]?.time).toBe(50 * 60_000);
+  });
+});
+
+describe("parserPremiumIndex", () => {
+  test("tableau multi-symboles → Map fraction majuscules", () => {
+    const map = parserPremiumIndex([
+      { symbol: "btcusdt", lastFundingRate: "0.0001" },
+      { symbol: "ETHUSDT", lastFundingRate: "-0.0005" },
+      { symbol: "XRPUSDT", lastFundingRate: "oops" }, // ignoré
+      { symbol: 42, lastFundingRate: "0.01" }, // symbole non string
+    ]);
+    expect(map.get("BTCUSDT")).toBe(0.0001);
+    expect(map.get("ETHUSDT")).toBe(-0.0005);
+    expect(map.has("XRPUSDT")).toBe(false);
+    expect(map.size).toBe(2);
+  });
+
+  test("objet unique (query ?symbol=) aussi accepté", () => {
+    const map = parserPremiumIndex({ symbol: "BTCUSDT", lastFundingRate: 0.001 });
+    expect(map.get("BTCUSDT")).toBe(0.001);
+  });
+
+  test("payload invalide → Map vide", () => {
+    expect(parserPremiumIndex(null).size).toBe(0);
+    expect(parserPremiumIndex("x").size).toBe(0);
+    expect(parserPremiumIndex([]).size).toBe(0);
+  });
+});
+
+describe("parserHistoriqueFunding", () => {
+  test("extrait les rates finis en ordre d'entrée", () => {
+    expect(
+      parserHistoriqueFunding([
+        { fundingRate: "0.0001" },
+        { fundingRate: -0.0002 },
+        { fundingRate: "nan" },
+        null,
+      ]),
+    ).toEqual([0.0001, -0.0002]);
+  });
+
+  test("non-tableau → []", () => {
+    expect(parserHistoriqueFunding({})).toEqual([]);
+  });
+});
+
+describe("zScoreFunding", () => {
+  test("undefined si série trop courte", () => {
+    expect(zScoreFunding([])).toBeUndefined();
+    expect(zScoreFunding([1])).toBeUndefined();
+  });
+
+  test("z = 0 si tous les points égaux (sd nul)", () => {
+    expect(zScoreFunding([0.001, 0.001, 0.001])).toBe(0);
+  });
+
+  test("dernier point extrême → |z| élevé", () => {
+    // 29 points à 0 puis un spike à 1 → z clairement > 2
+    const series = Array.from({ length: 29 }, () => 0).concat([1]);
+    const z = zScoreFunding(series);
+    expect(z).toBeDefined();
+    expect(Math.abs(z as number)).toBeGreaterThan(2);
   });
 });

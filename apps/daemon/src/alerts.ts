@@ -17,6 +17,10 @@
  * Sources : seul `source === "binance"` est couvert (cf. marketFeed.ts). Le feed ne
  * surveille que les symboles ayant une alerte binance active.
  *
+ * Funding (D3) : poll REST `premiumIndex` (~60 s) pour `funding-extreme` — rate en
+ * fraction + z-score best-effort via historique `/fundingRate`. CVD spot/perp-div
+ * reste hors daemon (pipeline orderflow chart, pas de feed daemon).
+ *
  * INVARIANT (BUILD-CONTRACT) : le feed du daemon est une connexion INDÉPENDANTE ;
  * il ne partage rien avec le chemin chaud du renderer (WS du front restent directs).
  */
@@ -24,7 +28,13 @@ import type { Database } from "bun:sqlite";
 import { evaluerAlertes, type AlertDef, type ContexteAlerte, type Declenchement } from "@axiom/alerts";
 import { entetesCors } from "./cors";
 import { getDb } from "./db";
-import { creerFeed, type Feed } from "./marketFeed";
+import {
+  chargerFundingRates,
+  chargerHistoriqueFunding,
+  creerFeed,
+  zScoreFunding,
+  type Feed,
+} from "./marketFeed";
 import { notifierDeclenchement } from "./notify";
 import type { Routeur } from "./router";
 
@@ -36,15 +46,16 @@ export const TYPES_BOUGIE: ReadonlySet<string> = new Set([
   "indicateur-seuil",
   "indicateur-croisement",
 ]);
-// B1.6 DÉGRADATION onglet fermé : `funding-extreme` et `cvd-spot-perp-div` ne sont
-// PAS évalués ici — pas de poll funding daemon (prévu lot D3) ni de pipeline CVD
-// orderflow côté daemon. Avec l'app fermée : prix / var% / indicateurs bougie
-// seulement. Le front injecte funding quand l'onglet est ouvert (runtime poll 60 s).
+/** Types de condition évalués sur un poll funding (premiumIndex). */
+export const TYPES_FUNDING: ReadonlySet<string> = new Set(["funding-extreme"]);
+// CVD `cvd-spot-perp-div` : hors daemon (pipeline orderflow chart uniquement).
 
 /** Seuil d'anti-doublon : on ne notifie que si le dernier heartbeat > 90 s. */
 export const SEUIL_HEARTBEAT_MS = 90_000;
 /** Période de poll du KV « alerts » (rafraîchit les défs + le jeu de symboles). */
 const PERIODE_POLL_MS = 5_000;
+/** Période de poll funding (alignée runtime front ~60 s). */
+export const PERIODE_FUNDING_MS = 60_000;
 /** Borne du journal renvoyé par GET /alerts/journal. */
 const LIMITE_JOURNAL = 200;
 
@@ -69,6 +80,20 @@ export function fusionnerEtatArme(
 export function symbolesBinanceActifs(defs: readonly AlertDef[]): string[] {
   return [
     ...new Set(defs.filter((d) => d.actif && d.source === "binance").map((d) => d.symbol.toUpperCase())),
+  ].sort();
+}
+
+/**
+ * Symboles (majuscules) ayant au moins une alerte binance active de type
+ * `funding-extreme`. Fonction PURE (testée).
+ */
+export function symbolesFundingActifs(defs: readonly AlertDef[]): string[] {
+  return [
+    ...new Set(
+      defs
+        .filter((d) => d.actif && d.source === "binance" && d.condition.type === "funding-extreme")
+        .map((d) => d.symbol.toUpperCase()),
+    ),
   ].sort();
 }
 
@@ -240,8 +265,9 @@ let feed: Feed | null = null;
 
 /**
  * Démarre la boucle d'alertes du daemon : crée le feed Binance, poll le KV toutes
- * les 5 s pour rafraîchir le jeu de symboles surveillés, et évalue à chaque tick /
- * bougie. Renvoie une fonction d'arrêt. À appeler UNE fois depuis index.ts.
+ * les 5 s pour rafraîchir le jeu de symboles surveillés, évalue à chaque tick /
+ * bougie, et poll le funding (~60 s) pour `funding-extreme`. Renvoie une fonction
+ * d'arrêt. À appeler UNE fois depuis index.ts.
  */
 export function demarrerBoucleAlertes(): () => void {
   assurerTablesAlertes(getDb());
@@ -282,8 +308,60 @@ export function demarrerBoucleAlertes(): () => void {
   rafraichir();
   const minuteur = setInterval(rafraichir, PERIODE_POLL_MS);
 
+  // Poll funding : 1× premiumIndex (tous symboles) + z-score best-effort par symbole alerté.
+  const pollFunding = async (): Promise<void> => {
+    let symboles: string[];
+    try {
+      symboles = symbolesFundingActifs(lireDefsKv(getDb()));
+    } catch (err) {
+      console.error("[axiomd] lecture defs funding échouée :", err);
+      return;
+    }
+    if (symboles.length === 0) return;
+
+    let rates: Map<string, number>;
+    try {
+      rates = await chargerFundingRates();
+    } catch (err) {
+      console.error("[axiomd] poll premiumIndex échoué :", err);
+      return;
+    }
+
+    for (const symbol of symboles) {
+      const rate = rates.get(symbol);
+      if (rate === undefined) continue;
+      // Z-score optionnel (historique Binance) : échec → rate seul (seuilAbs suffit).
+      let z: number | undefined;
+      try {
+        const hist = await chargerHistoriqueFunding(symbol);
+        // Inclut le rate courant s'il n'est pas déjà le dernier point.
+        const series =
+          hist.length > 0 && hist[hist.length - 1] === rate ? hist : [...hist, rate];
+        z = zScoreFunding(series);
+      } catch {
+        /* z best-effort */
+      }
+      try {
+        evaluerEtPersister(symbol, TYPES_FUNDING, {
+          maintenant: Date.now(),
+          dernierPrix: 0, // le moteur funding n'utilise pas le prix
+          fundingRate: rate,
+          fundingZScore: z,
+        });
+      } catch (err) {
+        console.error(`[axiomd] évaluation funding ${symbol} échouée :`, err);
+      }
+    }
+  };
+
+  void pollFunding();
+  const minuteurFunding = setInterval(() => {
+    void pollFunding();
+  }, PERIODE_FUNDING_MS);
+
   return () => {
     clearInterval(minuteur);
+    clearInterval(minuteurFunding);
     feed?.arreter();
     feed = null;
   };

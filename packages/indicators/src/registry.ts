@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 107 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 112 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -40,6 +40,8 @@ import { wma } from "./trend/wma";
 import { zlema } from "./trend/zlema";
 import { linreg } from "./trend/linreg";
 import { efficiencyRatio } from "./trend/efficiencyRatio";
+import { sslChannel } from "./trend/sslChannel";
+import { halfTrend } from "./trend/halfTrend";
 
 // — momentum (21) —
 import { accelerator } from "./momentum/accelerator";
@@ -63,6 +65,7 @@ import { stochastic } from "./momentum/stochastic";
 import { tsi } from "./momentum/tsi";
 import { ultimateOsc } from "./momentum/ultimateOsc";
 import { williamsR } from "./momentum/williamsR";
+import { qqe } from "./momentum/qqe";
 
 // — volatility (15) —
 import { atr } from "./volatility/atr";
@@ -130,6 +133,8 @@ import { mvrv } from "./derivatives/mvrv";
 import { nvt } from "./derivatives/nvt";
 import { openInterest } from "./derivatives/openInterest";
 import { stablecoinSupply } from "./derivatives/stablecoinSupply";
+import { fundingApr } from "./derivatives/fundingApr";
+import { oiChange } from "./derivatives/oiChange";
 
 export const INDICATORS: IndicatorDef[] = [
   // trend
@@ -162,6 +167,8 @@ export const INDICATORS: IndicatorDef[] = [
   zlema,
   linreg,
   efficiencyRatio,
+  sslChannel,
+  halfTrend,
   // momentum
   accelerator,
   awesome,
@@ -184,6 +191,7 @@ export const INDICATORS: IndicatorDef[] = [
   tsi,
   ultimateOsc,
   williamsR,
+  qqe,
   // volatility
   atr,
   atrRegime,
@@ -247,6 +255,8 @@ export const INDICATORS: IndicatorDef[] = [
   nvt,
   mvrv,
   fundingZScore,
+  fundingApr,
+  oiChange,
 ];
 
 export function getIndicator(id: string): IndicatorDef | undefined {

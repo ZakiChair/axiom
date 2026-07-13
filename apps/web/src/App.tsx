@@ -43,6 +43,7 @@ import { commandes as backtestCommands } from "./store/backtest";
 import { commandes as replayCommands } from "./store/replay";
 import { chartLayoutStore, type ChartLayoutMode } from "./store/chart-layout";
 import { commandes as globeCommands } from "./store/globe-ui";
+import { commandesOnboarding } from "./store/onboarding";
 import { windowPanelCommands } from "./commands/windowPanels";
 import { enregistrerCommandes, type Commande } from "./commands/registry";
 import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
@@ -50,6 +51,7 @@ import { demarrerAlertes } from "./alerts/runtime";
 import { FloatingWindow } from "./components/FloatingWindow";
 import { TaskbarMinimized } from "./components/TaskbarMinimized";
 import { SnapOverlay } from "./components/SnapOverlay";
+import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { WINDOW_REGISTRY, windowManagerStore } from "./store/windowManager";
 
 // ─────────────────────────── Commandes de disposition multi-chart (Phase 4) ───────────────────────────
@@ -105,6 +107,8 @@ enregistrerCommandes([
   ...tickerCommands,
   // CORR / MAP / TERM / OMON / RATE / COT / SEAG / VOL / FUND / BRIEF via windowManager.
   ...windowPanelCommands,
+  // Onboarding premier lancement (⌘K → ONBOARD pour rejouer).
+  ...commandesOnboarding,
 ]);
 
 // ─────────────────────────── Fenêtres lazy (code-splitting) ───────────────────────────
@@ -266,6 +270,8 @@ export function App() {
       <TaskbarMinimized />
       <SettingsPanel />
       <CommandPalette />
+      {/* Premier lancement : 3 étapes (masqué si completed ; ⌘K ONBOARD pour rejouer). */}
+      <OnboardingOverlay />
     </div>
   );
 }

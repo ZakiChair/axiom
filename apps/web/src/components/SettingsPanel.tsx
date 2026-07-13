@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { settingsUiStore } from "../store/settings-ui";
+import { onboardingStore } from "../store/onboarding";
 import { coinalyzeKeyStore } from "../store/coinalyze";
 import { fredKeyStore } from "../store/macro";
 import { bgeometricsKeyStore } from "../store/onchain";
@@ -475,6 +476,29 @@ export function SettingsPanel() {
           <div className="mt-3 flex items-center justify-between rounded-md border border-border bg-bg px-3 py-2.5">
             <span className="text-sm text-text">Thème</span>
             <ThemeSwitcher />
+          </div>
+
+          {/* --- Onboarding --- */}
+          <h3 className="mt-6 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+            Aide
+          </h3>
+          <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-border bg-bg px-3 py-2.5">
+            <div className="min-w-0">
+              <span className="text-sm text-text">Onboarding</span>
+              <p className="text-[11px] text-text-dim">
+                Parcours 3 étapes (Scalp · Coinalyze · alerte). Aussi via ⌘K → ONBOARD.
+              </p>
+            </div>
+            <button
+              type="button"
+              className={BTN_SECONDAIRE}
+              onClick={() => {
+                onboardingStore.getState().rejouer();
+                closeSettings();
+              }}
+            >
+              Relancer
+            </button>
           </div>
 
           {/* --- Sauvegardes (snapshots quotidiens du KV daemon) --- */}

@@ -50,8 +50,9 @@ export const RACCOURCIS_AIDE: { touche: string; description: string }[] = [
   {
     touche: "⌘K puis mnémo",
     description:
-      "Fonctions (panneaux) : DES ECO NEWS CORR CHAIN MAP PORT NOTE EQS TERM OMON DOM TAPE BT REPLAY RATE COT SEAG VOL FUND BRIEF GLOBE · OI/FUND MARKS (chart) · GRID1 GRID2 GRID2V GRID4 (disposition) · TICKER (bandeau news)",
+      "Fonctions (panneaux) : DES ECO NEWS CORR CHAIN MAP PORT NOTE EQS TERM OMON DOM TAPE BT REPLAY RATE COT SEAG VOL FUND BRIEF GLOBE · OI/FUND MARKS (chart) · GRID1 GRID2 GRID2V GRID4 (disposition) · TICKER (bandeau news) · ONBOARD (rejouer l'accueil)",
   },
+  { touche: "⌘K → ONBOARD", description: "Rejouer le parcours d'onboarding (3 étapes)" },
   { touche: "1 – 9", description: "Timeframes rapides (1m, 5m, 15m, 1h, 4h, 1d, 1w, 1M, 3M)" },
   { touche: "/", description: "Focus sur la recherche de paires" },
   { touche: "O", description: "Orderflow (activer / désactiver)" },
@@ -59,7 +60,7 @@ export const RACCOURCIS_AIDE: { touche: string; description: string }[] = [
   { touche: "R", description: "Revenus on-chain (activer / désactiver)" },
   { touche: "F", description: "Plein écran du graphe" },
   { touche: "T", description: "Thème suivant" },
-  { touche: "Échap", description: "Quitter le plein écran / fermer" },
+  { touche: "Échap", description: "Quitter le plein écran / fermer / passer l'onboarding" },
 ];
 
 // ─────────────────────────── Hook ───────────────────────────

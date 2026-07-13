@@ -30,17 +30,19 @@ import { marketStore } from "./market";
 import {
   accumulerKlines,
   BACKTEST_TIMEFRAMES,
+  precharger2ans1d,
+  SEUIL_PROFONDEUR_BT,
   type ProgressionAccumulation,
 } from "../data/backtestData";
 import type { WorkerRequest, WorkerResponse } from "../workers/backtest.worker";
 import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
-export { BACKTEST_TIMEFRAMES };
+export { BACKTEST_TIMEFRAMES, SEUIL_PROFONDEUR_BT };
 
 /** Clé localStorage des presets de stratégie UTILISATEUR. */
 const STORAGE_KEY = "axiom:backtest:v1";
 /** Minimum de bougies pour un run exploitable (amorce indicateurs + trades). */
-const MIN_BOUGIES = 30;
+export const MIN_BOUGIES = 30;
 
 // ─────────────────────────── Plages temporelles ───────────────────────────
 
@@ -303,7 +305,11 @@ export interface BacktestState {
   resultat: ResultatBacktest | null;
   error: string | null;
   note: string | null;
+  /** Dernier nombre de bougies accumulées (run ou précharge 2a/1d) ; null = jamais. */
+  nbBougiesChargees: number | null;
   run: () => void;
+  /** Précharge 2 ans de 1d pour le symbole courant (cache daemon + REST). */
+  charger2ans1d: () => void;
   cancel: () => void;
 }
 
@@ -406,6 +412,7 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
   resultat: null,
   error: null,
   note: null,
+  nbBougiesChargees: null,
 
   run: () => {
     // Un seul run à la fois : annuler l'accumulation + le worker précédents.
@@ -446,12 +453,23 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
       if (candles.length < MIN_BOUGIES) {
         set({
           phase: "error",
-          error: `Trop peu de bougies (${candles.length}). Élargis la plage ou change de TF.`,
+          nbBougiesChargees: candles.length,
+          error:
+            `Trop peu de bougies (${candles.length} < ${MIN_BOUGIES}). ` +
+            `Utilise « Charger 2 ans 1d », élargis la plage ou change de TF.`,
         });
         return;
       }
 
-      set({ phase: "calcul", note: `${candles.length} bougies · ${s.symbol} ${s.tf}` });
+      const profondeurFaible = candles.length < SEUIL_PROFONDEUR_BT;
+      const noteBase = `${candles.length} bougies · ${s.symbol} ${s.tf}`;
+      set({
+        phase: "calcul",
+        nbBougiesChargees: candles.length,
+        note: profondeurFaible
+          ? `${noteBase} · profondeur faible (< ${SEUIL_PROFONDEUR_BT}) — « Charger 2 ans 1d » recommandé`
+          : noteBase,
+      });
 
       // Instanciation À LA DEMANDE (jamais à l'import) → Vite bundle le worker en chunk.
       terminateWorker();
@@ -492,6 +510,56 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
       };
       const request: WorkerRequest = { type: "run", runId, candles, strat, params };
       w.postMessage(request);
+    })();
+  },
+
+  charger2ans1d: () => {
+    abort?.abort();
+    terminateWorker();
+    const runId = ++currentRunId;
+    const s = get();
+    // Figé le builder sur la config d'acceptation C3 (2a / 1d).
+    set({
+      tf: "1d",
+      plage: "2a",
+      phase: "chargement",
+      progress: { recuperees: 0, cible: 0 },
+      resultat: null,
+      error: null,
+      note: `Précharge 2 ans 1d · ${s.symbol}…`,
+    });
+
+    const ctrl = new AbortController();
+    abort = ctrl;
+    void (async () => {
+      let candles: Candle[];
+      try {
+        candles = await precharger2ans1d(s.symbol, {
+          signal: ctrl.signal,
+          onProgress: (p) => {
+            if (runId === currentRunId) set({ progress: p });
+          },
+        });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        if (runId !== currentRunId) return;
+        set({ phase: "error", error: "Précharge 2 ans 1d indisponible (Binance)." });
+        return;
+      }
+      if (runId !== currentRunId) return;
+      const ok = candles.length >= SEUIL_PROFONDEUR_BT;
+      set({
+        phase: ok ? "idle" : "error",
+        nbBougiesChargees: candles.length,
+        progress: { recuperees: candles.length, cible: candles.length },
+        note: ok
+          ? `${candles.length} bougies 1d en cache · ${s.symbol} (2 ans) — prêt pour le backtest`
+          : null,
+        error: ok
+          ? null
+          : `Série encore trop courte (${candles.length} < ${SEUIL_PROFONDEUR_BT}). ` +
+            `Vérifie le symbole ou relance « Charger 2 ans 1d ».`,
+      });
     })();
   },
 

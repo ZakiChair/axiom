@@ -11,6 +11,13 @@
  * (la bougie en formation, `closed === false`, est écartée — invariant « bougies
  * clôturées » du moteur). Progression rapportée au fil de l'eau.
  *
+ * Audit profondeur (G100 C3) :
+ *  - Chart : backfill 500, loadMore 500/req jusqu'à 20 000 bougies.
+ *  - BT : pagination jusqu'à CAP_BOUGIES (50 k) ; plages UI jusqu'à 2 ans.
+ *  - Daemon SQLite : GET limite max 50 k (store passif, pas de fetch autonome).
+ *  - Acceptation : BTCUSDT 1d ≥ 500 barres → couvert par plage 2a (~730 j) +
+ *    `precharger2ans1d` (pas d'endpoint daemon fetch dédié : profondeur déjà suffisante).
+ *
  * Ce module vit sur le THREAD PRINCIPAL (il touche au daemon, comme le reste de data/) :
  * il produit le tableau de bougies, que le store transmet ensuite au worker du moteur.
  */
@@ -20,6 +27,14 @@ import { candlesGet, candlesPush, daemonPret, detectDaemon } from "./daemon";
 
 /** Plafond dur de bougies accumulées (protège mémoire + temps de run). */
 export const CAP_BOUGIES = 50_000;
+/**
+ * Seuil d'acceptation G100 C3 / profondeur « utile » pour un BT journalier
+ * (BTCUSDT 1d ≥ 500 barres en local avec daemon). En dessous : message UI +
+ * invitation à précharger 2 ans 1d.
+ */
+export const SEUIL_PROFONDEUR_BT = 500;
+/** Durée de la plage « 2 ans » (ms) — alignée sur PLAGES du store backtest. */
+export const DEUX_ANS_MS = 730 * 86_400_000;
 /** Bougies par requête REST Binance (maximum autorisé). */
 const MAX_PAR_REQ = 1000;
 /** Intervalle mini entre deux requêtes (~8 req/s, marge sous les limites Binance). */
@@ -144,4 +159,18 @@ export async function accumulerKlines(
   const resultat = finaliser([...cache, ...nouvelles], depuis, jusqua);
   rapporter(resultat.length);
   return resultat;
+}
+
+/**
+ * Précharge ~2 ans de bougies journalières pour `symbol` (cache daemon + pagination
+ * REST Binance). Réutilise `accumulerKlines` — pas d'endpoint daemon dédié : la
+ * profondeur max (50 k / pagination 1000) suffit déjà pour ≥ 500 barres 1d.
+ * Les bougies fraîches sont repoussées au daemon (best-effort) pour les runs suivants.
+ */
+export async function precharger2ans1d(
+  symbol: string,
+  opts: OptionsAccumulation = {},
+): Promise<Candle[]> {
+  const jusqua = Date.now();
+  return accumulerKlines(symbol, "1d", jusqua - DEUX_ANS_MS, jusqua, opts);
 }

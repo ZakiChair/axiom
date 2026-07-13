@@ -29,7 +29,9 @@ import {
   CATALOGUE_OPERANDES,
   decrireOperande,
   importerDepuisChart,
+  MIN_BOUGIES,
   PLAGES,
+  SEUIL_PROFONDEUR_BT,
   specParId,
   type PhaseBacktest,
 } from "../store/backtest";
@@ -546,13 +548,18 @@ export function BacktestWindow() {
   const resultat = useStore(backtestStore, (s) => s.resultat);
   const error = useStore(backtestStore, (s) => s.error);
   const note = useStore(backtestStore, (s) => s.note);
+  const nbBougiesChargees = useStore(backtestStore, (s) => s.nbBougiesChargees);
   const run = useStore(backtestStore, (s) => s.run);
+  const charger2ans1d = useStore(backtestStore, (s) => s.charger2ans1d);
   const cancel = useStore(backtestStore, (s) => s.cancel);
 
   const [presetName, setPresetName] = useState("");
   const busy = phase === "chargement" || phase === "calcul";
   const pctProgress =
     progress.cible > 0 ? Math.min(100, (progress.recuperees / progress.cible) * 100) : 0;
+  /** Série trop courte pour un BT journalier fiable (seuil G100 C3). */
+  const profondeurInsuffisante =
+    nbBougiesChargees !== null && nbBougiesChargees < SEUIL_PROFONDEUR_BT;
 
   return (
     <>
@@ -668,7 +675,24 @@ export function BacktestWindow() {
                 ))}
               </select>
             </label>
+            <button
+              type="button"
+              onClick={charger2ans1d}
+              disabled={busy}
+              className={`${BTN_SECONDAIRE} disabled:opacity-40`}
+              title="Précharge ~2 ans de bougies journalières (Binance → cache daemon)"
+            >
+              Charger 2 ans 1d
+            </button>
           </div>
+          {profondeurInsuffisante && (
+            <p className="text-[11px] text-down" role="status">
+              Historique insuffisant : {nbBougiesChargees} bougie
+              {nbBougiesChargees === 1 ? "" : "s"} (minimum recommandé {SEUIL_PROFONDEUR_BT},
+              run possible dès {MIN_BOUGIES}). Clique « Charger 2 ans 1d » pour précharger ~730
+              barres journalières via Binance (cache daemon).
+            </p>
+          )}
         </section>
 
         {/* Règles */}

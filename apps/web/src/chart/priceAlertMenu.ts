@@ -74,6 +74,11 @@ export function formaterNiveauCourt(niveau: number): string {
 /**
  * Convertit des coordonnées client (souris) en prix sur le pane bougies.
  * Renvoie null si hors pane / conversion impossible.
+ *
+ * Échelle : `convertFromPixel` sur `candle_pane` uniquement (pas le pane volume).
+ * KLineChart renvoie la valeur de l'axe Y courant — en linéaire c'est le prix ;
+ * en log / % le `value` exposé suit l'échelle du pane (API KLineChart). On
+ * s'appuie dessus sans conversion manuelle supplémentaire.
  */
 export function prixAuClic(
   chart: KLineChartInstance,
@@ -93,6 +98,7 @@ export function prixAuClic(
   if (x < bound.left || x > bound.left + bound.width) return null;
 
   // absolute:true → y relatif à la racine du chart (comme convertToPixel croisé).
+  // Pane candle only : l'échelle prix (lin / log / %) est celle de ce pane.
   const raw = chart.convertFromPixel([{ x, y }], {
     paneId: CANDLE_PANE_ID,
     absolute: true,
@@ -117,14 +123,23 @@ export function creerAlerteDepuisMenu(
   uiSectionsStore.getState().setOpen(SECTION_ALERTES, true);
 }
 
-/** Retire le menu s'il est monté. */
+/**
+ * Teardown des listeners window du menu ouvert (mousedown / keydown / scroll).
+ * Module-level : `fermerMenu` doit toujours les retirer, y compris au choix d'item
+ * ou à l'unbind — sinon fuites de handlers orphelins.
+ */
+let detacherListenersMenu: (() => void) | null = null;
+
+/** Retire le menu s'il est monté + ses listeners window. */
 function fermerMenu(): void {
+  detacherListenersMenu?.();
+  detacherListenersMenu = null;
   document.getElementById(MENU_DOM_ID)?.remove();
 }
 
 /**
  * Affiche le menu flottant près du curseur (coordonnées viewport).
- * Remplace tout menu précédent.
+ * Remplace tout menu précédent (DOM + listeners).
  */
 function afficherMenu(
   clientX: number,
@@ -185,7 +200,7 @@ function afficherMenu(
       ev.preventDefault();
       ev.stopPropagation();
       creerAlerteDepuisMenu(market, niveau, item.sens);
-      fermerMenu();
+      fermerMenu(); // retire DOM + listeners window
     });
     menu.appendChild(btn);
   }
@@ -203,33 +218,38 @@ function afficherMenu(
     menu.style.top = `${Math.round(top)}px`;
   }
 
-  // Fermeture : clic extérieur, Escape, scroll.
+  // Fermeture : clic extérieur, Escape, scroll — toujours via fermerMenu (cleanup unifié).
   const onDown = (e: MouseEvent): void => {
     if (menu.contains(e.target as Node)) return;
     fermerMenu();
-    cleanup();
   };
   const onKey = (e: KeyboardEvent): void => {
-    if (e.key === "Escape") {
-      fermerMenu();
-      cleanup();
-    }
+    if (e.key === "Escape") fermerMenu();
   };
   const onScroll = (): void => {
     fermerMenu();
-    cleanup();
   };
-  const cleanup = (): void => {
-    window.removeEventListener("mousedown", onDown, true);
-    window.removeEventListener("keydown", onKey, true);
-    window.removeEventListener("scroll", onScroll, true);
-  };
+
   // rAF : évite de fermer immédiatement sur le même contextmenu/mousedown.
-  requestAnimationFrame(() => {
+  let attached = false;
+  const rafId = requestAnimationFrame(() => {
+    // Menu déjà fermé avant le rAF (unbind rapide / re-open) → ne pas attacher.
+    if (!document.getElementById(MENU_DOM_ID)) return;
     window.addEventListener("mousedown", onDown, true);
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("scroll", onScroll, true);
+    attached = true;
   });
+
+  detacherListenersMenu = () => {
+    cancelAnimationFrame(rafId);
+    if (attached) {
+      window.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("scroll", onScroll, true);
+      attached = false;
+    }
+  };
 }
 
 /**

@@ -146,6 +146,7 @@ const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] =
   { mnemonique: "FUND", libelle: "Fiche société (FUND)", ouvrir: () => windowManagerStore.getState().openWindow("fund") },
   { mnemonique: "BRIEF", libelle: "Point marché (snapshot)", ouvrir: () => windowManagerStore.getState().openWindow("brief") },
   { mnemonique: "GLOBE", libelle: "Globe (géopolitique, chokepoints & trafic aérien)", ouvrir: () => windowManagerStore.getState().openWindow("globe") },
+  { mnemonique: "STBL", libelle: "Stablecoins (supply, dominance, pegs)", ouvrir: () => windowManagerStore.getState().openWindow("stablecoins") },
 ];
 
 /**

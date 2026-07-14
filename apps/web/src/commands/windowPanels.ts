@@ -1,6 +1,6 @@
 /**
  * Commandes palette des fenêtres dont le store UI vit dans le fichier composant
- * (CORR, MAP, TERM, OMON, RATE, COT, SEAG, VOL, FUND, BRIEF).
+ * (CORR, MAP, TERM, OMON, RATE, COT, SEAG, VOL, FUND, BRIEF, STBL).
  *
  * Pilotage via `windowManagerStore` uniquement — **aucune** import des composants
  * lourds — pour permettre le code-splitting (React.lazy) des fenêtres dans App.tsx
@@ -182,5 +182,29 @@ export const windowPanelCommands: Commande[] = [
     motsCles: ["brief", "point marché", "snapshot", "matin", "morning", "overnight", "résumé", "ouverture"],
     apercu: "Ouvre / ferme le snapshot marché matinal",
     action: basculer("brief"),
+  },
+  {
+    id: "panneau:stablecoins",
+    mnemonique: "STBL",
+    libelle: "Stablecoins (supply, dominance, pegs)",
+    categorie: "panneau",
+    motsCles: [
+      "stablecoins",
+      "stable",
+      "usdt",
+      "usdc",
+      "dai",
+      "tether",
+      "circle",
+      "impression",
+      "mint",
+      "burn",
+      "dominance",
+      "peg",
+      "depeg",
+      "supply",
+    ],
+    apercu: "Ouvre / ferme l'analyse des stablecoins (DefiLlama)",
+    action: basculer("stablecoins"),
   },
 ];

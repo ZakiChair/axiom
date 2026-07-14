@@ -25,9 +25,12 @@ import {
   type PointSupply,
 } from "../data/macro/stablecoinsDetail";
 import {
+  bornes,
   calculerDominance,
   deltaPct,
   impressionNette,
+  serieImpressionQuotidienne,
+  tronquerSerie,
   type PartDominance,
 } from "./stablecoinsWindow.util";
 import { formatUsd, formatPct, formatPourcentage, VALEUR_ABSENTE } from "../lib/format";
@@ -250,6 +253,149 @@ function TableEmetteurs({
   );
 }
 
+// ─────────────────────────── Onglet Impression ───────────────────────────
+
+type Periode = 30 | 90 | 365 | null; // null = tout
+
+const PERIODES: ReadonlyArray<{ id: string; jours: Periode; label: string }> = [
+  { id: "30j", jours: 30, label: "30 j" },
+  { id: "90j", jours: 90, label: "90 j" },
+  { id: "1a", jours: 365, label: "1 a" },
+  { id: "tout", jours: null, label: "Tout" },
+];
+
+/**
+ * Chart combiné : ligne de supply agrégée (moitié haute) + barres de mint/burn net
+ * quotidien (moitié basse, zéro au centre). Impératif, tokens lus au dessin.
+ */
+function dessinerImpression(canvas: HTMLCanvasElement, serie: PointSupply[]): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+  const cssW = canvas.clientWidth || 400;
+  const cssH = canvas.clientHeight || 220;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+  if (serie.length < 2) return;
+
+  const cUp = lireTokenCanvas("--up", "#22c55e");
+  const cDown = lireTokenCanvas("--down", "#ef4444");
+  const cAccent = lireTokenCanvas("--accent", "#3b82f6");
+  const cGrid = lireTokenCanvas("--border", "#374151");
+
+  const t0 = serie[0]!.time;
+  const t1 = serie[serie.length - 1]!.time;
+  const x = (t: number) => ((t - t0) / Math.max(1, t1 - t0)) * cssW;
+
+  // Moitié haute : ligne de supply.
+  const hLigne = cssH * 0.55;
+  const bSupply = bornes(serie.map((p) => p.totalUsd));
+  if (bSupply) {
+    const y = (v: number) =>
+      hLigne - ((v - bSupply.min) / Math.max(1e-9, bSupply.max - bSupply.min)) * (hLigne - 8) - 4;
+    ctx.strokeStyle = cGrid;
+    ctx.strokeRect(0.5, 0.5, cssW - 1, hLigne - 1);
+    ctx.beginPath();
+    for (let i = 0; i < serie.length; i++) {
+      const p = serie[i]!;
+      if (i === 0) ctx.moveTo(x(p.time), y(p.totalUsd));
+      else ctx.lineTo(x(p.time), y(p.totalUsd));
+    }
+    ctx.strokeStyle = cAccent;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+
+  // Moitié basse : barres Δ quotidien (mint vert, burn rouge), zéro au centre.
+  const deltas = serieImpressionQuotidienne(serie);
+  const bDelta = bornes(deltas.map((d) => Math.abs(d.delta)));
+  if (bDelta && bDelta.max > 0) {
+    const y0 = hLigne + (cssH - hLigne) / 2;
+    const demiH = (cssH - hLigne) / 2 - 4;
+    ctx.strokeStyle = cGrid;
+    ctx.beginPath();
+    ctx.moveTo(0, y0 + 0.5);
+    ctx.lineTo(cssW, y0 + 0.5);
+    ctx.stroke();
+    const larg = Math.max(1, (cssW / deltas.length) * 0.7);
+    for (const d of deltas) {
+      const h = (Math.abs(d.delta) / bDelta.max) * demiH;
+      ctx.fillStyle = d.delta >= 0 ? cUp : cDown;
+      ctx.fillRect(x(d.time) - larg / 2, d.delta >= 0 ? y0 - h : y0, larg, h);
+    }
+  }
+}
+
+function VueImpression({
+  emetteurs,
+  historique,
+}: {
+  emetteurs: EmetteurStablecoin[];
+  historique: PointSupply[];
+}) {
+  const [periodeId, setPeriodeId] = useState("90j");
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const periode = PERIODES.find((p) => p.id === periodeId) ?? PERIODES[1]!;
+  const serie = tronquerSerie(historique, periode.jours);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas) dessinerImpression(canvas, serie);
+  }, [serie]);
+
+  // Top mints / burns 7 j par émetteur (Δ absolu USD, pas %) — qui imprime, qui brûle.
+  const avecDelta = emetteurs
+    .filter((e) => e.mcap7jUsd !== null)
+    .map((e) => ({ e, dUsd: e.mcapUsd - (e.mcap7jUsd ?? 0) }))
+    .sort((a, b) => b.dUsd - a.dUsd);
+  const mints = avecDelta.filter((x) => x.dUsd > 0).slice(0, 5);
+  const burns = avecDelta.filter((x) => x.dUsd < 0).slice(-5).reverse();
+
+  return (
+    <div className="flex flex-col gap-3">
+      <Onglets
+        options={PERIODES.map((p) => ({ id: p.id, label: p.label }))}
+        actif={periodeId}
+        onChange={setPeriodeId}
+      />
+      <canvas ref={canvasRef} className="h-56 w-full rounded-md border border-border" />
+      <div className="grid grid-cols-2 gap-3">
+        <ListeDeltas titre="Top mints 7 j" lignes={mints} />
+        <ListeDeltas titre="Top burns 7 j" lignes={burns} />
+      </div>
+      <NoteSource>
+        Impression nette = Δ de supply circulante (mint − burn), points journaliers DefiLlama.
+      </NoteSource>
+    </div>
+  );
+}
+
+function ListeDeltas({
+  titre,
+  lignes,
+}: {
+  titre: string;
+  lignes: { e: EmetteurStablecoin; dUsd: number }[];
+}) {
+  return (
+    <div className="rounded-md border border-border bg-bg px-3 py-2">
+      <p className="mb-1 text-[11px] text-text-dim">{titre}</p>
+      {lignes.length === 0 && <p className="text-[11px] text-text-dim">{VALEUR_ABSENTE}</p>}
+      {lignes.map(({ e, dUsd }) => (
+        <div key={e.id} className="flex justify-between text-[11px]">
+          <span className="text-text">{e.symbole}</span>
+          <span className="tabular-nums" style={{ color: couleurDelta(dUsd) }}>
+            {fmtDeltaUsd(dUsd)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─────────────────────────── Fenêtre ───────────────────────────
 
 export function StablecoinsWindow() {
@@ -306,7 +452,9 @@ export function StablecoinsWindow() {
             {onglet === "vue" && (
               <VueEnsemble emetteurs={emetteurs} historique={historique} onSelect={setEmetteurSelId} />
             )}
-            {onglet === "impression" && <Vide>Onglet Impression — Task 5.</Vide>}
+            {onglet === "impression" && (
+              <VueImpression emetteurs={emetteurs} historique={historique} />
+            )}
             {onglet === "chaines" && <Vide>Onglet Chaînes — Task 6.</Vide>}
             {onglet === "pegs" && <Vide>Onglet Pegs — Task 7.</Vide>}
           </>

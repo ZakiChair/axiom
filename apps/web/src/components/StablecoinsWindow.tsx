@@ -29,10 +29,13 @@ import {
   bornes,
   calculerDominance,
   deltaPct,
+  ecartPegBps,
+  etatPeg,
   impressionNette,
   repartitionChaines,
   serieImpressionQuotidienne,
   tronquerSerie,
+  type EtatPeg,
   type PartDominance,
 } from "./stablecoinsWindow.util";
 import { formatUsd, formatPct, formatPourcentage, VALEUR_ABSENTE } from "../lib/format";
@@ -40,11 +43,12 @@ import {
   EnTeteFenetre,
   Onglets,
   Metric,
+  Badge,
   Chargement,
   ErreurBloc,
-  Vide,
   NoteSource,
   BTN_SECONDAIRE,
+  type TonBadge,
 } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
@@ -488,6 +492,94 @@ function VueChaines({ emetteurs }: { emetteurs: EmetteurStablecoin[] }) {
   );
 }
 
+// ─────────────────────────── Onglet Pegs ───────────────────────────
+
+const TON_PEG: Record<EtatPeg, TonBadge> = { stable: "up", tension: "accent", depeg: "down" };
+const LIBELLE_PEG: Record<EtatPeg, string> = { stable: "Stable", tension: "Tension", depeg: "DEPEG" };
+
+function VuePegs({
+  emetteurs,
+  onSelect,
+}: {
+  emetteurs: EmetteurStablecoin[];
+  onSelect: (id: string) => void;
+}) {
+  // Pegs USD avec prix, triés par écart absolu décroissant (les problèmes d'abord).
+  const usd = emetteurs
+    .map((e) => ({ e, bps: ecartPegBps(e) }))
+    .filter((x): x is { e: EmetteurStablecoin; bps: number } => x.bps !== null)
+    .sort((a, b) => Math.abs(b.bps) - Math.abs(a.bps));
+  // Pegs non-USD : listés à part, prix brut sans bps (limite DefiLlama documentée au spec).
+  const autres = emetteurs.filter((e) => e.pegType !== "peggedUSD").slice(0, 10);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <table className="w-full text-[11px]">
+        <thead>
+          <tr className="border-b border-border text-left text-text-dim">
+            <th className="py-1 pr-2 font-normal">Émetteur</th>
+            <th className="py-1 pr-2 text-right font-normal">Prix</th>
+            <th className="py-1 pr-2 text-right font-normal">Écart</th>
+            <th className="py-1 pr-2 text-right font-normal">Supply</th>
+            <th className="py-1 font-normal">État</th>
+          </tr>
+        </thead>
+        <tbody>
+          {usd.slice(0, 30).map(({ e, bps }) => {
+            const etat = etatPeg(bps);
+            return (
+              <tr
+                key={e.id}
+                onClick={() => onSelect(e.id)}
+                className="cursor-pointer border-b border-border/50 hover:bg-bg"
+              >
+                <td className="py-1 pr-2 font-medium text-text">{e.symbole}</td>
+                <td className="py-1 pr-2 text-right tabular-nums">
+                  {e.prix === null ? VALEUR_ABSENTE : e.prix.toFixed(4)}
+                </td>
+                {/* Tout écart non nul est teinté "down" (un écart de peg n'est jamais
+                    « bon ») ; -0 || null garde le neutre à zéro exact. */}
+                <td
+                  className="py-1 pr-2 text-right tabular-nums"
+                  style={{ color: couleurDelta(-Math.abs(bps) || null) }}
+                >
+                  {bps >= 0 ? "+" : "−"}
+                  {Math.abs(bps).toFixed(1)} bps
+                </td>
+                <td className="py-1 pr-2 text-right tabular-nums">{formatUsd(e.mcapUsd)}</td>
+                <td className="py-1">
+                  <Badge ton={TON_PEG[etat]}>{LIBELLE_PEG[etat]}</Badge>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {autres.length > 0 && (
+        <div className="rounded-md border border-border bg-bg px-3 py-2">
+          <p className="mb-1 text-[11px] text-text-dim">
+            Pegs non-USD (prix USD brut — écart non calculé)
+          </p>
+          {autres.map((e) => (
+            <div key={e.id} className="flex justify-between text-[11px]">
+              <span className="text-text">
+                {e.symbole}{" "}
+                <span className="text-text-dim">({e.pegType.replace("pegged", "")})</span>
+              </span>
+              <span className="tabular-nums">
+                {e.prix === null ? VALEUR_ABSENTE : e.prix.toFixed(4)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      <NoteSource>
+        Seuils : stable &lt; 25 bps · tension &lt; 100 bps · depeg ≥ 100 bps (écart absolu vs 1,00 $).
+      </NoteSource>
+    </div>
+  );
+}
+
 // ─────────────────────────── Fenêtre ───────────────────────────
 
 export function StablecoinsWindow() {
@@ -548,7 +640,7 @@ export function StablecoinsWindow() {
               <VueImpression emetteurs={emetteurs} historique={historique} />
             )}
             {onglet === "chaines" && <VueChaines emetteurs={emetteurs} />}
-            {onglet === "pegs" && <Vide>Onglet Pegs — Task 7.</Vide>}
+            {onglet === "pegs" && <VuePegs emetteurs={emetteurs} onSelect={setEmetteurSelId} />}
           </>
         )}
       </div>

@@ -469,9 +469,11 @@ function VueChaines({ emetteurs }: { emetteurs: EmetteurStablecoin[] }) {
               </td>
               <td className="py-1">
                 {/* Barre de part relative — largeur en % de la part max (lisible même
-                    quand Ethereum/Tron écrasent la queue). */}
+                    quand Ethereum/Tron écrasent la queue). `bg-accent` + `opacity-60`
+                    et non `bg-accent/60` : les tokens thème sont des var() bruts, le
+                    modificateur d'opacité slash n'est pas généré par Tailwind. */}
                 <div
-                  className="h-1.5 rounded-sm bg-accent/60"
+                  className="h-1.5 rounded-sm bg-accent opacity-60"
                   style={{ width: `${Math.max(2, (p.partPct / partMax) * 100)}%` }}
                 />
               </td>
@@ -508,7 +510,11 @@ function VuePegs({
   onSelect: (id: string) => void;
 }) {
   // Pegs USD avec prix, triés par écart absolu décroissant (les problèmes d'abord).
+  // Filtre de matérialité ≥ $10M : sans lui, la liste est noyée de tokens morts
+  // (supply de quelques $, prix ~0, −10000 bps) sans aucun intérêt analytique.
+  const SUPPLY_MIN_USD = 10_000_000;
   const usd = emetteurs
+    .filter((e) => e.mcapUsd >= SUPPLY_MIN_USD)
     .map((e) => ({ e, bps: ecartPegBps(e) }))
     .filter((x): x is { e: EmetteurStablecoin; bps: number } => x.bps !== null)
     .sort((a, b) => Math.abs(b.bps) - Math.abs(a.bps));
@@ -578,6 +584,7 @@ function VuePegs({
       )}
       <NoteSource>
         Seuils : stable &lt; 25 bps · tension &lt; 100 bps · depeg ≥ 100 bps (écart absolu vs 1,00 $).
+        Émetteurs ≥ $10M de supply uniquement.
       </NoteSource>
     </div>
   );

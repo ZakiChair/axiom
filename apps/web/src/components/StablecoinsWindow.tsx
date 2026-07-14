@@ -13,16 +13,23 @@
  * Données : data/macro/stablecoinsDetail.ts (fetch direct + cache 5 min). Les calculs
  * vivent dans stablecoinsWindow.util.ts (purs, testés sans DOM).
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createStore } from "zustand/vanilla";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
+import { squarify, type Rect, type Tuile } from "../lib/treemap";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 import {
   chargerEmetteurs,
   chargerHistoriqueAgrege,
   type EmetteurStablecoin,
   type PointSupply,
 } from "../data/macro/stablecoinsDetail";
-import { calculerDominance, deltaPct, impressionNette } from "./stablecoinsWindow.util";
+import {
+  calculerDominance,
+  deltaPct,
+  impressionNette,
+  type PartDominance,
+} from "./stablecoinsWindow.util";
 import { formatUsd, formatPct, formatPourcentage, VALEUR_ABSENTE } from "../lib/format";
 import {
   EnTeteFenetre,
@@ -79,6 +86,85 @@ const ONGLETS: ReadonlyArray<{ id: Onglet; label: string }> = [
   { id: "pegs", label: "Pegs" },
 ];
 
+// ─────────────────────────── Treemap dominance (canvas, impératif) ───────────────────────────
+
+/** Dessine la treemap de dominance. PURE vis-à-vis de React (canvas + données seulement). */
+function dessinerTreemap(canvas: HTMLCanvasElement, parts: PartDominance[]): Tuile<PartDominance>[] {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return [];
+  const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+  const cssW = canvas.clientWidth || 400;
+  const cssH = canvas.clientHeight || 180;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const cAccent = lireTokenCanvas("--accent", "#3b82f6");
+  const cBorder = lireTokenCanvas("--border", "#374151");
+  const cText = lireTokenCanvas("--text", "#e5e7eb");
+
+  const conteneur: Rect = { x: 0, y: 0, w: cssW, h: cssH };
+  const tuiles = squarify(parts, (p) => p.mcapUsd, conteneur);
+  const partMax = parts[0]?.partPct ?? 100;
+
+  for (const t of tuiles) {
+    const { x, y, w, h } = t.rect;
+    // Teinte accent dont l'ALPHA suit la part (dominant opaque, queue discrète) —
+    // même famille de teinte sur les 5 thèmes, pas de palette en dur.
+    ctx.globalAlpha = 0.25 + 0.65 * (t.item.partPct / partMax);
+    ctx.fillStyle = cAccent;
+    ctx.fillRect(x, y, w, h);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = cBorder;
+    ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    if (w > 46 && h > 26) {
+      ctx.fillStyle = cText;
+      ctx.font = "10px ui-sans-serif, system-ui";
+      ctx.fillText(t.item.symbole, x + 5, y + 13, w - 10);
+      ctx.fillText(`${t.item.partPct.toFixed(1)} %`, x + 5, y + 24, w - 10);
+    }
+  }
+  return tuiles;
+}
+
+function TreemapDominance({
+  parts,
+  onSelect,
+}: {
+  parts: PartDominance[];
+  onSelect: (id: string) => void;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const tuilesRef = useRef<Tuile<PartDominance>[]>([]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas) tuilesRef.current = dessinerTreemap(canvas, parts);
+  }, [parts]);
+
+  /** Hit-test au clic → drill-down (l'agrégat « Autres », id vide, est ignoré). */
+  function surClic(ev: React.MouseEvent<HTMLCanvasElement>) {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const px = ev.clientX - rect.left;
+    const py = ev.clientY - rect.top;
+    const tuile = tuilesRef.current.find(
+      (t) => px >= t.rect.x && px <= t.rect.x + t.rect.w && py >= t.rect.y && py <= t.rect.y + t.rect.h,
+    );
+    if (tuile && tuile.item.id !== "") onSelect(tuile.item.id);
+  }
+
+  return (
+    <canvas
+      ref={canvasRef}
+      onClick={surClic}
+      className="h-44 w-full cursor-pointer rounded-md border border-border"
+    />
+  );
+}
+
 // ─────────────────────────── Vue d'ensemble ───────────────────────────
 
 function VueEnsemble({
@@ -106,7 +192,7 @@ function VueEnsemble({
         <Metric label="Δ 7 j" value={fmtDeltaUsd(d7j)} couleur={couleurDelta(d7j)} />
         <Metric label="Δ 30 j" value={fmtDeltaUsd(d30j)} couleur={couleurDelta(d30j)} />
       </div>
-      {/* Treemap de dominance — Task 4 */}
+      <TreemapDominance parts={dominance} onSelect={onSelect} />
       <TableEmetteurs emetteurs={emetteurs} onSelect={onSelect} />
       <NoteSource>Données DefiLlama (stablecoins.llama.fi), rafraîchies ~5 min.</NoteSource>
     </div>

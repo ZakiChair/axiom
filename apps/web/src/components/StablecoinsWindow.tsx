@@ -21,6 +21,7 @@ import { lireTokenCanvas } from "../lib/canvasTokens";
 import {
   chargerEmetteurs,
   chargerHistoriqueAgrege,
+  chargerHistoriqueChaine,
   type EmetteurStablecoin,
   type PointSupply,
 } from "../data/macro/stablecoinsDetail";
@@ -29,6 +30,7 @@ import {
   calculerDominance,
   deltaPct,
   impressionNette,
+  repartitionChaines,
   serieImpressionQuotidienne,
   tronquerSerie,
   type PartDominance,
@@ -396,6 +398,96 @@ function ListeDeltas({
   );
 }
 
+// ─────────────────────────── Onglet Chaînes ───────────────────────────
+
+function VueChaines({ emetteurs }: { emetteurs: EmetteurStablecoin[] }) {
+  const parts = repartitionChaines(emetteurs);
+  const [chaineSel, setChaineSel] = useState<string | null>(null);
+  const [serie, setSerie] = useState<PointSupply[] | null>(null);
+  const [statut, setStatut] = useState<"idle" | "loading" | "error">("idle");
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (chaineSel === null) return;
+    const ctrl = new AbortController();
+    let ignore = false;
+    setStatut("loading");
+    setSerie(null);
+    void chargerHistoriqueChaine(chaineSel, ctrl.signal)
+      .then((s) => {
+        if (ignore) return;
+        setSerie(s);
+        setStatut("idle");
+      })
+      .catch(() => {
+        if (!ignore) setStatut("error");
+      });
+    return () => {
+      ignore = true;
+      ctrl.abort();
+    };
+  }, [chaineSel]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas && serie !== null) dessinerImpression(canvas, tronquerSerie(serie, 365));
+  }, [serie]);
+
+  const partMax = parts[0]?.partPct ?? 100;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <table className="w-full text-[11px]">
+        <thead>
+          <tr className="border-b border-border text-left text-text-dim">
+            <th className="py-1 pr-2 font-normal">Chaîne</th>
+            <th className="py-1 pr-2 text-right font-normal">Supply</th>
+            <th className="py-1 pr-2 text-right font-normal">Part</th>
+            <th className="w-1/3 py-1 font-normal" />
+          </tr>
+        </thead>
+        <tbody>
+          {parts.slice(0, 15).map((p) => (
+            <tr
+              key={p.chaine}
+              onClick={() => setChaineSel(p.chaine)}
+              className={`cursor-pointer border-b border-border/50 hover:bg-bg ${
+                chaineSel === p.chaine ? "bg-bg" : ""
+              }`}
+            >
+              <td className="py-1 pr-2 font-medium text-text">{p.chaine}</td>
+              <td className="py-1 pr-2 text-right tabular-nums">{formatUsd(p.totalUsd)}</td>
+              <td className="py-1 pr-2 text-right tabular-nums text-text-dim">
+                {formatPourcentage(p.partPct, 1)}
+              </td>
+              <td className="py-1">
+                {/* Barre de part relative — largeur en % de la part max (lisible même
+                    quand Ethereum/Tron écrasent la queue). */}
+                <div
+                  className="h-1.5 rounded-sm bg-accent/60"
+                  style={{ width: `${Math.max(2, (p.partPct / partMax) * 100)}%` }}
+                />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {chaineSel !== null && (
+        <div className="flex flex-col gap-1">
+          <p className="text-[11px] text-text-dim">Historique 1 a — {chaineSel}</p>
+          {statut === "loading" && <Chargement />}
+          {statut === "error" && <ErreurBloc>Historique indisponible pour {chaineSel}.</ErreurBloc>}
+          <canvas
+            ref={canvasRef}
+            className={`h-48 w-full rounded-md border border-border ${serie === null ? "hidden" : ""}`}
+          />
+        </div>
+      )}
+      <NoteSource>Répartition courante par chaîne (tous émetteurs), DefiLlama.</NoteSource>
+    </div>
+  );
+}
+
 // ─────────────────────────── Fenêtre ───────────────────────────
 
 export function StablecoinsWindow() {
@@ -455,7 +547,7 @@ export function StablecoinsWindow() {
             {onglet === "impression" && (
               <VueImpression emetteurs={emetteurs} historique={historique} />
             )}
-            {onglet === "chaines" && <Vide>Onglet Chaînes — Task 6.</Vide>}
+            {onglet === "chaines" && <VueChaines emetteurs={emetteurs} />}
             {onglet === "pegs" && <Vide>Onglet Pegs — Task 7.</Vide>}
           </>
         )}

@@ -19,13 +19,16 @@ import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { squarify, type Rect, type Tuile } from "../lib/treemap";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 import {
+  chargerDetailEmetteur,
   chargerEmetteurs,
   chargerHistoriqueAgrege,
   chargerHistoriqueChaine,
+  type DetailEmetteur,
   type EmetteurStablecoin,
   type PointSupply,
 } from "../data/macro/stablecoinsDetail";
 import {
+  agregerHistoriqueEmetteur,
   bornes,
   calculerDominance,
   deltaPct,
@@ -580,6 +583,106 @@ function VuePegs({
   );
 }
 
+// ─────────────────────────── Drill-down émetteur ───────────────────────────
+
+function VueEmetteur({ id, onRetour }: { id: string; onRetour: () => void }) {
+  const [detail, setDetail] = useState<DetailEmetteur | null>(null);
+  const [statut, setStatut] = useState<"loading" | "ready" | "error">("loading");
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    let ignore = false;
+    setStatut("loading");
+    void chargerDetailEmetteur(id, ctrl.signal)
+      .then((d) => {
+        if (ignore) return;
+        setDetail(d);
+        setStatut("ready");
+      })
+      .catch(() => {
+        if (!ignore) setStatut("error");
+      });
+    return () => {
+      ignore = true;
+      ctrl.abort();
+    };
+  }, [id]);
+
+  const historique = detail !== null ? agregerHistoriqueEmetteur(detail) : [];
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas && historique.length > 0) dessinerImpression(canvas, tronquerSerie(historique, 365));
+    // historique est dérivé de detail — detail suffit comme dépendance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail]);
+
+  // Répartition par chaîne au DERNIER point de chaque série.
+  const chaines =
+    detail === null
+      ? []
+      : Object.entries(detail.historiqueParChaine)
+          .map(([chaine, serie]) => ({ chaine, usd: serie[serie.length - 1]?.totalUsd ?? 0 }))
+          .sort((a, b) => b.usd - a.usd);
+  const totalChaines = chaines.reduce((s, c) => s + c.usd, 0);
+  const d7 = impressionNette(historique, 7);
+  const d30 = impressionNette(historique, 30);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <button type="button" className={BTN_SECONDAIRE} onClick={onRetour}>
+          ← Retour
+        </button>
+        {detail !== null && (
+          <span className="text-[11px] text-text-dim">
+            {detail.nom} · {detail.pegMechanism || VALEUR_ABSENTE}
+          </span>
+        )}
+      </div>
+      {statut === "loading" && <Chargement />}
+      {statut === "error" && <ErreurBloc>Détail indisponible pour cet émetteur.</ErreurBloc>}
+      {statut === "ready" && detail !== null && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <Metric
+              label="Supply"
+              value={formatUsd(historique[historique.length - 1]?.totalUsd ?? null)}
+            />
+            <Metric
+              label="Prix"
+              value={detail.prix === null ? VALEUR_ABSENTE : detail.prix.toFixed(4)}
+            />
+            <Metric label="Δ 7 j" value={fmtDeltaUsd(d7)} couleur={couleurDelta(d7)} />
+            <Metric label="Δ 30 j" value={fmtDeltaUsd(d30)} couleur={couleurDelta(d30)} />
+          </div>
+          <p className="text-[11px] text-text-dim">Historique 1 a — {detail.symbole}</p>
+          <canvas ref={canvasRef} className="h-48 w-full rounded-md border border-border" />
+          <div className="rounded-md border border-border bg-bg px-3 py-2">
+            <p className="mb-1 text-[11px] text-text-dim">Répartition par chaîne</p>
+            {chaines.slice(0, 10).map((c) => (
+              <div key={c.chaine} className="flex justify-between text-[11px]">
+                <span className="text-text">{c.chaine}</span>
+                <span className="tabular-nums">
+                  {formatUsd(c.usd)}{" "}
+                  <span className="text-text-dim">
+                    (
+                    {totalChaines > 0
+                      ? formatPourcentage((c.usd / totalChaines) * 100, 1)
+                      : VALEUR_ABSENTE}
+                    )
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─────────────────────────── Fenêtre ───────────────────────────
 
 export function StablecoinsWindow() {
@@ -632,16 +735,20 @@ export function StablecoinsWindow() {
           </ErreurBloc>
         )}
         {statut === "ready" && emetteurs !== null && historique !== null && (
-          <>
-            {onglet === "vue" && (
-              <VueEnsemble emetteurs={emetteurs} historique={historique} onSelect={setEmetteurSelId} />
-            )}
-            {onglet === "impression" && (
-              <VueImpression emetteurs={emetteurs} historique={historique} />
-            )}
-            {onglet === "chaines" && <VueChaines emetteurs={emetteurs} />}
-            {onglet === "pegs" && <VuePegs emetteurs={emetteurs} onSelect={setEmetteurSelId} />}
-          </>
+          emetteurSelId !== null ? (
+            <VueEmetteur id={emetteurSelId} onRetour={() => setEmetteurSelId(null)} />
+          ) : (
+            <>
+              {onglet === "vue" && (
+                <VueEnsemble emetteurs={emetteurs} historique={historique} onSelect={setEmetteurSelId} />
+              )}
+              {onglet === "impression" && (
+                <VueImpression emetteurs={emetteurs} historique={historique} />
+              )}
+              {onglet === "chaines" && <VueChaines emetteurs={emetteurs} />}
+              {onglet === "pegs" && <VuePegs emetteurs={emetteurs} onSelect={setEmetteurSelId} />}
+            </>
+          )
         )}
       </div>
     </>

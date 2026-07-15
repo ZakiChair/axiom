@@ -1,6 +1,6 @@
 /**
  * Fenêtre « Liquidations » (mnémonique LIQ) — flux LIVE des liquidations forcées du
- * perpétuel Binance USDⓈ-M pour le symbole courant (data/liquidations.ts). Affiche les
+ * perpétuel Bybit pour le symbole courant (data/liquidations.ts). Affiche les
  * totaux notionnels long/short accumulés depuis la souscription, une barre de dominance,
  * et le feed des dernières liquidations. Échantillon (~1 msg/s côté Binance), pas exhaustif.
  *
@@ -59,7 +59,7 @@ export function LiquidationsWindow() {
     <div className="flex h-full flex-col">
       <EnTeteFenetre
         titre="Liquidations"
-        sousTitre={`${symbol} · perp Binance USDⓈ-M (échantillon)`}
+        sousTitre={`${symbol} · perp Bybit (live)`}
         actions={<ToggleChart />}
       />
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -121,8 +121,8 @@ export function LiquidationsWindow() {
 
         <div className="mt-3">
           <NoteSource>
-            Flux `@forceOrder` Binance (throttlé ~1/s/symbole) : échantillon, pas l'exhaustif.
-            Long = position longue fermée de force (vente). Cumul depuis l'ouverture de la fenêtre.
+            Flux `allLiquidation` Bybit (live). Long = position longue fermée de force (vente).
+            Cumul depuis l'ouverture de la fenêtre.
           </NoteSource>
         </div>
       </div>

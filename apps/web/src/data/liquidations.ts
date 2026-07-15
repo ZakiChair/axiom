@@ -1,23 +1,28 @@
 /**
- * Liquidations Binance USDⓈ-M — flux WS `<symbol>@forceOrder` (fstream), GRATUIT.
+ * Liquidations perp — flux WS `allLiquidation.<symbol>` de BYBIT (v5 linear), GRATUIT.
  *
- * Une liquidation forcée est un ordre au marché passé par le moteur de risque :
- *   - o.S = "SELL" → une position LONGUE est fermée de force (vente) → LONG liquidé ;
- *   - o.S = "BUY"  → une position COURTE est fermée de force (rachat) → SHORT liquidé.
- * Cette convention est fixée par un test (comme les côtés taker) : l'inverser
- * fausserait silencieusement l'affichage long/short.
+ * ⚠️ Historique : la 1re implémentation utilisait Binance `@forceOrder` (fstream), mais
+ * `fstream.binance.com` est GÉO-BLOQUÉ depuis certains réseaux (dont celui de Zaki) : le
+ * WebSocket s'ouvre mais Binance ne pousse AUCUNE donnée futures (ni trades ni
+ * liquidations) → la fenêtre restait vide « en attente ». Bybit est accessible (CORS `*`,
+ * même venue que l'adaptateur de charting) et délivre les liquidations en réel.
  *
- * ⚠️ Binance throttle le flux à ~1 message / s / symbole : c'est un ÉCHANTILLON des
- * liquidations, pas l'exhaustif (documenté à l'affichage). Flux LIVE only (aucun
- * historique) : on accumule depuis la souscription, comme le footprint/CVD.
+ * Format vérifié en réel :
+ *   { topic:"allLiquidation.BTCUSDT", data:[{ T:ms, s:"BTCUSDT", S:"Sell", v:"0.007", p:"65513.30" }] }
+ *   - S = côté TAKER de l'ordre de liquidation (convention Bybit, alignée sur Binance) :
+ *     "Sell" → une position LONGUE est fermée de force (vente) → LONG liquidé ;
+ *     "Buy"  → une position COURTE est fermée de force (rachat) → SHORT liquidé.
+ *   Cette convention est figée par un test (l'inverser fausserait long/short en silence).
  *
- * CORS : fstream est un WebSocket (pas soumis à CORS) → connexion directe, résilience
- * (backoff/watchdog) déléguée à connectWsLoop.
+ * Flux LIVE only (aucun historique) : on accumule depuis la souscription, comme footprint/CVD.
  */
 import type { Unsubscribe } from "@axiom/types";
 import { connectWsLoop } from "./wsLoop";
 
-const WS_FUTURES_BASE_URL = "wss://fstream.binance.com/ws";
+const WS_URL = "wss://stream.bybit.com/v5/public/linear";
+/** Staleness large : les liquidations sont sparses par nature (ne pas fermer une socket
+ *  saine faute de messages ; une socket morte lèvera `onclose` de toute façon). */
+const STALE_MS = 10 * 60_000;
 
 /** Une liquidation normalisée. `side` = côté de la POSITION liquidée. */
 export interface Liquidation {
@@ -25,39 +30,35 @@ export interface Liquidation {
   side: "long" | "short";
   qty: number; // quantité en actif de base
   price: number; // prix d'exécution
-  notionalUsd: number; // qty × price (USDT-M → notionnel ≈ USD)
+  notionalUsd: number; // qty × price (perp USDT → notionnel ≈ USD)
 }
 
-/** Objet `o` du message forceOrder (champs utiles). */
-interface ForceOrderPayload {
+/** Une entrée `data[]` du message allLiquidation Bybit. */
+interface BybitLiqEntry {
+  T?: number; // timestamp (ms)
   s?: string; // symbole
-  S?: string; // "BUY" | "SELL" (côté de l'ORDRE de liquidation)
-  q?: string; // quantité
+  S?: string; // "Buy" | "Sell" (côté taker de la liquidation)
+  v?: string; // volume (base)
   p?: string; // prix
-  ap?: string; // prix moyen d'exécution (préféré si présent)
-  T?: number; // tradeTime (ms)
 }
-interface ForceOrderMessage {
-  e?: string;
-  o?: ForceOrderPayload;
+interface BybitLiqMessage {
+  topic?: string;
+  data?: BybitLiqEntry[];
 }
 
 /**
- * Parse un message forceOrder en Liquidation, ou null si illisible. PURE & testée.
- * side : "SELL" (ordre) → "long" liquidé ; "BUY" (ordre) → "short" liquidé.
+ * Parse une entrée de liquidation Bybit en Liquidation, ou null si illisible. PURE & testée.
+ * S="Sell" (taker vend) → LONG liquidé ; S="Buy" (taker rachète) → SHORT liquidé.
  */
-export function parseForceOrder(raw: unknown): Liquidation | null {
-  const msg = raw as ForceOrderMessage;
-  const o = msg?.o;
-  if (!o || (msg.e !== undefined && msg.e !== "forceOrder")) return null;
-  const qty = Number(o.q);
-  const price = Number(o.ap ?? o.p);
-  const time = Number(o.T);
+export function parseBybitLiquidation(entry: BybitLiqEntry): Liquidation | null {
+  const qty = Number(entry?.v);
+  const price = Number(entry?.p);
+  const time = Number(entry?.T);
   if (!Number.isFinite(qty) || !Number.isFinite(price) || price <= 0) return null;
-  if (o.S !== "BUY" && o.S !== "SELL") return null;
+  if (entry.S !== "Buy" && entry.S !== "Sell") return null;
   return {
     time: Number.isFinite(time) ? time : Date.now(),
-    side: o.S === "SELL" ? "long" : "short",
+    side: entry.S === "Sell" ? "long" : "short",
     qty,
     price,
     notionalUsd: qty * price,
@@ -84,21 +85,31 @@ export function resumerLiquidations(liqs: Liquidation[]): ResumeLiquidations {
   return { longUsd, shortUsd, total, partLong: total > 0 ? longUsd / total : null };
 }
 
-/** S'abonne au flux de liquidations du perpétuel. `cb` reçoit chaque liquidation. */
+/** Symbole perp Bybit linear (BTCUSDT-style). Retire un éventuel suffixe PERP. */
+function bybitPerpSymbol(symbol: string): string {
+  return symbol.trim().toUpperCase().replace(/_PERP$/i, "").replace(/PERP$/i, "");
+}
+
+/** S'abonne au flux de liquidations perp Bybit du symbole. `cb` reçoit chaque liquidation. */
 export function subscribeLiquidations(symbol: string, cb: (l: Liquidation) => void): Unsubscribe {
-  const url = `${WS_FUTURES_BASE_URL}/${symbol.toLowerCase()}@forceOrder`;
+  const topic = `allLiquidation.${bybitPerpSymbol(symbol)}`;
   return connectWsLoop({
-    url,
-    source: "binance:liquidations",
+    url: WS_URL,
+    source: "bybit:liquidations",
+    staleMs: STALE_MS,
+    onOpen: (ws) => ws.send(JSON.stringify({ op: "subscribe", args: [topic] })),
     onMessage: (data) => {
       try {
-        const liq = parseForceOrder(JSON.parse(data));
-        if (liq) {
-          cb(liq);
-          return true;
+        const msg = JSON.parse(data) as BybitLiqMessage;
+        if (msg.topic === topic && Array.isArray(msg.data)) {
+          for (const entry of msg.data) {
+            const liq = parseBybitLiquidation(entry);
+            if (liq) cb(liq);
+          }
+          return true; // message de données (≠ ack de souscription)
         }
       } catch (err) {
-        console.error("[AXIOM] Message forceOrder Binance illisible", err);
+        console.error("[AXIOM] Message allLiquidation Bybit illisible", err);
       }
       return false;
     },

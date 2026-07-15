@@ -1,6 +1,6 @@
 /**
  * Marqueurs LIQUIDATIONS sur le chart — pose des pastilles au timestamp/prix de chaque
- * liquidation forcée du perpétuel Binance (flux `@forceOrder`), pour VOIR les cascades
+ * liquidation forcée du perpétuel (flux `allLiquidation` Bybit), pour VOIR les cascades
  * de liquidation dans leur contexte de prix (les mèches de liquidation).
  *
  * MODÈLE : calqué sur `chart/tradeMarkers.ts` (overlay custom `registerOverlay`,
@@ -297,7 +297,7 @@ export const commandes: Commande[] = [
     libelle: "Liquidations (chart) — activer / désactiver",
     categorie: "action",
     motsCles: ["liquidations", "liqmark", "chart", "cascade", "forceorder", "mèches", "wicks", "perp"],
-    apercu: "Épingle les liquidations perp Binance (bord live) sur le graphe",
+    apercu: "Épingle les liquidations perp Bybit (bord live) sur le graphe",
     action: () => liqMarksStore.getState().basculer(),
   },
 ];

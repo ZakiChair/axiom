@@ -8,6 +8,7 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -24,6 +25,7 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/d3-geo": "^3.1.0",
     "@types/react": "^18.3.10",
     "@types/react-dom": "^18.3.0",

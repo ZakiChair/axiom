@@ -21,5 +21,10 @@ apps/daemon/axiom.db-wal
 # Captures Chrome DevTools / Playwright MCP (vérifications runtime)
 .playwright-mcp/
 
+# Artefacts Playwright e2e (rapports, traces, résultats) — jamais committés
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/.playwright/
+
 # Venv Python de l'oracle golden (pandas-ta-classic) — jamais committé, voir scripts/golden/README.md
 scripts/golden/.venv/

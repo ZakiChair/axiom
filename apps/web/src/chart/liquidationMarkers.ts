@@ -349,15 +349,14 @@ async function amorcerSeed(symbol: string): Promise<void> {
 
 /** Ajoute une liquidation LIVE au buffer (FIFO), persiste (throttlé) et dual-write daemon. */
 function ajouterLive(l: Liquidation): void {
-  // venue « bybit » EN DUR : subscribeLiquidations n'expose pas encore le champ venue
-  // (il arrive en Tâche 8). Bybit est aujourd'hui le seul flux live branché.
+  // venue portée par la liquidation (Bybit ou OKX — l'agrégateur fusionne les deux flux).
   const ev: LiqEvent = {
     time: l.time,
     side: l.side,
     price: l.price,
     qty: l.qty,
     usd: l.notionalUsd,
-    venue: "bybit",
+    venue: l.venue,
   };
   evenements.push(ev);
   if (evenements.length > MAX_EVENTS) evenements.splice(0, evenements.length - MAX_EVENTS);

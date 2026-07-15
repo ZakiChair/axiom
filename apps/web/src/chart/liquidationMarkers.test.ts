@@ -1,12 +1,15 @@
 /**
  * Heatmap de liquidations — logique PURE : taille de bucket « jolie », index de bucket,
- * colormap viridis (interpolée + clampée). Le rendu KLineChart n'est pas testé.
+ * colormap viridis (interpolée + clampée), et le NOUVEAU modèle d'événements bruts
+ * (sérialisation v2, fusion/dédoublonnage, borne FIFO, seed Coinalyze). Le rendu
+ * KLineChart et le couplage aux stores ne sont pas testés.
  */
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 // liquidationMarkers.ts appelle registerOverlay + importe ./drawing (klinecharts) et
-// ../store/theme (pose [data-theme] au chargement) + s'abonne à un flux WS à l'import :
-// on stub le tout pour importer les fonctions PURES en environnement Node.
+// ../store/theme (pose [data-theme] au chargement) + s'abonne à des flux WS/daemon à
+// l'import : on stub le tout pour importer les fonctions PURES en environnement Node.
+import { vi } from "vitest";
 vi.mock("klinecharts", () => ({ registerOverlay: () => {} }));
 vi.mock("./drawing", () => ({ getActiveChart: () => null }));
 vi.mock("../store/theme", () => ({
@@ -14,16 +17,23 @@ vi.mock("../store/theme", () => ({
 }));
 vi.mock("../data/liquidations", () => ({ subscribeLiquidations: () => () => {} }));
 vi.mock("../data/coinalyze", () => ({ fetchLiquidationHistory: async () => [] }));
+vi.mock("../data/daemon", () => ({
+  liquidationsGet: async () => null,
+  liquidationsPush: async () => false,
+}));
 
 import type { Candle } from "@axiom/types";
 import {
+  bornerEvenements,
   bucketIndex,
   candleContenant,
-  construireSeed,
   couleurViridis,
-  deserialiserProfil,
-  serialiserProfil,
+  deserialiserEvenements,
+  fusionnerEvenements,
+  seedDepuisCoinalyze,
+  serialiserEvenements,
   tailleBucket,
+  type LiqEvent,
 } from "./liquidationMarkers";
 
 describe("tailleBucket", () => {
@@ -63,30 +73,116 @@ describe("couleurViridis", () => {
   });
 });
 
-describe("persistance du profil (serialiser/deserialiser)", () => {
-  it("aller-retour préservant taille + buckets", () => {
-    const acc = new Map<number, number>([[1300, 5000], [1301, 12000]]);
-    const round = deserialiserProfil(serialiserProfil(50, acc));
-    expect(round?.taille).toBe(50);
-    expect(round?.buckets.get(1300)).toBe(5000);
-    expect(round?.buckets.get(1301)).toBe(12000);
+describe("persistance des événements v2 (serialiser/deserialiser)", () => {
+  const evs: LiqEvent[] = [
+    { time: 1000, side: "long", price: 64000, qty: 0.5, usd: 32000, venue: "bybit" },
+    { time: 2000, side: "short", price: 65400, qty: 0.2, usd: 13080, venue: "binance" },
+  ];
+
+  it("aller-retour préservant les événements (side, prix, qty, usd, venue)", () => {
+    const round = deserialiserEvenements(serialiserEvenements(evs));
+    expect(round).toEqual(evs);
   });
 
-  it("tolère l'absent / corrompu → null", () => {
-    expect(deserialiserProfil(null)).toBeNull();
-    expect(deserialiserProfil("pas du json")).toBeNull();
-    expect(deserialiserProfil(JSON.stringify({ t: 0, b: [] }))).toBeNull(); // taille invalide
-    expect(deserialiserProfil(JSON.stringify({ t: 50 }))).toBeNull(); // buckets absents
+  it("ancien format v1 {t,b} → [] (jeté)", () => {
+    const v1 = JSON.stringify({ t: 50, b: [[1300, 5000], [1301, 12000]] });
+    expect(deserialiserEvenements(v1)).toEqual([]);
   });
 
-  it("écarte les entrées de bucket invalides (non entier / usd ≤ 0)", () => {
-    const raw = JSON.stringify({ t: 50, b: [[1300, 5000], [1.5, 100], [1301, -5], ["x", 10]] });
-    const d = deserialiserProfil(raw);
-    expect([...(d?.buckets.entries() ?? [])]).toEqual([[1300, 5000]]);
+  it("tolère l'absent / corrompu / mauvaise version → []", () => {
+    expect(deserialiserEvenements(null)).toEqual([]);
+    expect(deserialiserEvenements("pas du json")).toEqual([]);
+    expect(deserialiserEvenements(JSON.stringify({ v: 1, e: [] }))).toEqual([]);
+    expect(deserialiserEvenements(JSON.stringify({ v: 2 }))).toEqual([]); // e absent
+  });
+
+  it("écarte les tuples invalides (mauvaise longueur / side hors 0-1 / prix ≤ 0 / venue non-string)", () => {
+    const raw = JSON.stringify({
+      v: 2,
+      e: [
+        [1000, 0, 64000, 0.5, 32000, "bybit"], // valide
+        [1000, 2, 64000, 0.5, 32000, "bybit"], // side01 invalide
+        [1000, 0, -1, 0.5, 32000, "bybit"], // prix ≤ 0
+        [1000, 0, 64000, 0.5, 32000], // longueur ≠ 6
+        [1000, 0, 64000, 0.5, 32000, 42], // venue non-string
+      ],
+    });
+    expect(deserialiserEvenements(raw)).toEqual([
+      { time: 1000, side: "long", price: 64000, qty: 0.5, usd: 32000, venue: "bybit" },
+    ]);
+  });
+
+  it("exclut les événements approx (seed Coinalyze) de la persistance", () => {
+    // Le tuple v2 (6 champs, figé) ne porte pas `approx` : persister un événement approx le
+    // ferait réapparaître au reload comme événement réel (et bloquerait le re-seed). On ne
+    // persiste donc QUE les événements réels ; leur round-trip reste inchangé.
+    const mixte: LiqEvent[] = [
+      ...evs,
+      { time: 3000, side: "long", price: 63000, qty: NaN, usd: 5000, venue: "coinalyze", approx: true },
+    ];
+    expect(deserialiserEvenements(serialiserEvenements(mixte))).toEqual(evs);
+  });
+
+  it("ne persiste que les PERSIST_EVENTS derniers événements", () => {
+    // 4000 > PERSIST_EVENTS (3000) : on ne garde que les 3000 derniers (les plus récents).
+    const gros: LiqEvent[] = Array.from({ length: 4000 }, (_, i) => ({
+      time: i,
+      side: "long",
+      price: 100 + i,
+      qty: 1,
+      usd: 100,
+      venue: "bybit",
+    }));
+    const round = deserialiserEvenements(serialiserEvenements(gros));
+    expect(round.length).toBe(3000);
+    expect(round[0]?.time).toBe(1000); // le plus ancien conservé = index 1000
+    expect(round[round.length - 1]?.time).toBe(3999);
   });
 });
 
-describe("amorçage Coinalyze (candleContenant / construireSeed)", () => {
+describe("bornerEvenements (FIFO)", () => {
+  it("écarte les plus anciens quand la longueur dépasse la borne", () => {
+    const evs: LiqEvent[] = Array.from({ length: 5 }, (_, i) => ({
+      time: i,
+      side: "long",
+      price: 100,
+      qty: 1,
+      usd: 1,
+      venue: "bybit",
+    }));
+    const borne = bornerEvenements(evs, 3);
+    expect(borne.map((e) => e.time)).toEqual([2, 3, 4]); // 3 derniers
+  });
+
+  it("renvoie tel quel si sous la borne", () => {
+    const evs: LiqEvent[] = [{ time: 1, side: "long", price: 100, qty: 1, usd: 1, venue: "bybit" }];
+    expect(bornerEvenements(evs, 3)).toBe(evs);
+  });
+});
+
+describe("fusionnerEvenements (fusion + dédoublonnage)", () => {
+  it("dédoublonne par clé t|venue|price|qty et trie par temps croissant", () => {
+    const local: LiqEvent[] = [
+      { time: 2000, side: "long", price: 64000, qty: 0.5, usd: 32000, venue: "bybit" },
+      { time: 1000, side: "short", price: 65000, qty: 0.1, usd: 6500, venue: "bybit" },
+    ];
+    const daemon: LiqEvent[] = [
+      // Doublon exact du 1er événement local (même t|venue|price|qty) → écarté.
+      { time: 2000, side: "long", price: 64000, qty: 0.5, usd: 32000, venue: "bybit" },
+      { time: 1500, side: "long", price: 63000, qty: 0.2, usd: 12600, venue: "binance" },
+    ];
+    const fusion = fusionnerEvenements(local, daemon);
+    expect(fusion.map((e) => e.time)).toEqual([1000, 1500, 2000]); // trié, sans doublon
+  });
+
+  it("ne confond pas deux événements de même temps mais prix/venue différents", () => {
+    const a: LiqEvent[] = [{ time: 1000, side: "long", price: 64000, qty: 1, usd: 1, venue: "bybit" }];
+    const b: LiqEvent[] = [{ time: 1000, side: "long", price: 64000, qty: 1, usd: 1, venue: "binance" }];
+    expect(fusionnerEvenements(a, b)).toHaveLength(2);
+  });
+});
+
+describe("amorçage Coinalyze (candleContenant / seedDepuisCoinalyze)", () => {
   function candle(time: number, low: number, high: number): Candle {
     return { time, open: low, high, low, close: high, volume: 1 };
   }
@@ -99,30 +195,36 @@ describe("amorçage Coinalyze (candleContenant / construireSeed)", () => {
     expect(candleContenant(candles, 500)).toBeUndefined();
   });
 
-  it("construireSeed place le LONG au bas et le SHORT au haut de la bougie contenante", () => {
-    // taille=50. Intervalle t=1500 → bougie [64000,64200] : long au low 64000 (bucket 1280),
-    // short au high 64200 (bucket 1284). Intervalle t=2500 → bougie [65000,65400] : long 65000
-    // (1300), short 65400 (1308).
-    const seed = construireSeed(
+  it("place le LONG au bas et le SHORT au haut de la bougie contenante, avec approx:true", () => {
+    const seed = seedDepuisCoinalyze(
       [
         { time: 1500, longUsd: 3000, shortUsd: 1000 },
         { time: 2500, longUsd: 500, shortUsd: 2000 },
       ],
       candles,
-      50,
     );
-    expect(seed.get(bucketIndex(64000, 50))).toBe(3000); // long au low
-    expect(seed.get(bucketIndex(64200, 50))).toBe(1000); // short au high
-    expect(seed.get(bucketIndex(65000, 50))).toBe(500);
-    expect(seed.get(bucketIndex(65400, 50))).toBe(2000);
+    // Bougie [64000,64200] : long au low 64000, short au high 64200.
+    expect(seed).toContainEqual(
+      expect.objectContaining({ time: 1500, side: "long", price: 64000, usd: 3000, approx: true }),
+    );
+    expect(seed).toContainEqual(
+      expect.objectContaining({ time: 1500, side: "short", price: 64200, usd: 1000, approx: true }),
+    );
+    // Bougie [65000,65400] : long au low 65000, short au high 65400.
+    expect(seed).toContainEqual(
+      expect.objectContaining({ time: 2500, side: "long", price: 65000, usd: 500, approx: true }),
+    );
+    expect(seed).toContainEqual(
+      expect.objectContaining({ time: 2500, side: "short", price: 65400, usd: 2000, approx: true }),
+    );
+    expect(seed.every((e) => e.venue === "coinalyze")).toBe(true);
   });
 
   it("ignore les intervalles hors des bougies chargées et les volumes nuls", () => {
-    const seed = construireSeed(
+    const seed = seedDepuisCoinalyze(
       [{ time: 10, longUsd: 100, shortUsd: 100 }, { time: 1500, longUsd: 0, shortUsd: 0 }],
       candles,
-      50,
     );
-    expect(seed.size).toBe(0);
+    expect(seed).toHaveLength(0);
   });
 });

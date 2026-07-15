@@ -178,7 +178,9 @@ export interface VolumeProfileBin {
 export type AuxSeriesId =
   | "oi" | "funding" | "mark" | "stablecoins" | "nvt" | "mvrv" | "marketcap"
   // Métriques de cycle on-chain BTC (bitcoin-data.com / BGeometrics, journalier).
-  | "nupl" | "puell" | "sopr" | "reserveRisk";
+  | "nupl" | "puell" | "sopr" | "reserveRisk"
+  // Basis annualisé du future trimestriel courant (Binance COIN-M, BTC/ETH).
+  | "quarterlyBasis";
 
 /**
  * Séries auxiliaires DÉJÀ alignées sur les bougies (même longueur, même index).

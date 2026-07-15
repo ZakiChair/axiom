@@ -37,6 +37,7 @@ import {
   fetchBgeometricMetrique,
   type DefMetriqueBg,
 } from "../data/onchain/bgeometrics";
+import { fetchQuarterlyBasisHistory } from "../data/binanceDapi";
 import { extUrl } from "../data/extapi";
 
 /** État renvoyé par `getAligned` pour l'ensemble des `ids` demandés. */
@@ -76,6 +77,7 @@ const TTL_MS: Record<AuxSeriesId, number> = {
   puell: 60 * 60_000,
   sopr: 60 * 60_000,
   reserveRisk: 60 * 60_000,
+  quarterlyBasis: 5 * 60_000, // basis future trimestriel (klines 1h Binance COIN-M)
 };
 /** Durée de mémorisation d'un échec de fetch (anti retry-tempête). */
 const ERROR_TTL_MS = 30_000;
@@ -204,6 +206,13 @@ async function rawFetch(id: AuxSeriesId, symbol: string): Promise<AuxPoint[]> {
       const def = BG_DEF_PAR_AUX[id];
       const r = await fetchBgeometricMetrique(def);
       return toPoints((r?.serie.points ?? []).map((p) => ({ time: p.time, value: p.value })));
+    }
+    case "quarterlyBasis": {
+      // Basis annualisé du future trimestriel courant — BTC/ETH uniquement (COIN-M).
+      const asset = symbolToAsset(symbol);
+      if (asset !== "btc" && asset !== "eth") return [];
+      const pts = await fetchQuarterlyBasisHistory(asset === "btc" ? "BTC" : "ETH", since);
+      return toPoints(pts);
     }
   }
 }

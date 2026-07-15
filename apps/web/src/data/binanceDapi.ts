@@ -244,3 +244,82 @@ export async function fetchBinanceCoinMTermStructure(base: "BTC" | "ETH"): Promi
     throw err;
   }
 }
+
+// ─────────────────────────── Historique de basis (série temporelle) ───────────────────────────
+
+/** Point d'une série temporelle de basis annualisé (% p.a.). */
+export interface BasisTimePoint {
+  time: number; // ms epoch (open time de la bougie 1h)
+  value: number; // basis annualisé en POURCENTAGE p.a. (+ = contango, − = backwardation)
+}
+
+/**
+ * Joint deux séries de clôtures horaires (future daté × index spot) sur leurs open times
+ * communs et calcule le basis annualisé % p.a. de chaque point via `annualiserBasis`.
+ * PURE et testée : écarte les timestamps sans contrepartie et les basis non finis
+ * (échéance passée, spot ≤ 0). Trié par temps croissant.
+ */
+export function computeQuarterlyBasisPoints(
+  future: Map<number, number>,
+  index: Map<number, number>,
+  deliveryDate: number,
+): BasisTimePoint[] {
+  const out: BasisTimePoint[] = [];
+  for (const [t, f] of future) {
+    const s = index.get(t);
+    if (s === undefined) continue;
+    const basis = annualiserBasis(f, s, t, deliveryDate);
+    if (!Number.isFinite(basis)) continue;
+    out.push({ time: t, value: basis * 100 });
+  }
+  out.sort((a, b) => a.time - b.time);
+  return out;
+}
+
+/** Récupère des klines dapi (1h) en map openTime → clôture, paginé depuis `since`. */
+async function fetchDapiCloses(chemin: string, since: number): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  let startTime = since;
+  const now = Date.now();
+  // 90 j × 1h ≈ 2160 barres > 1500/req → jusqu'à 3 pages.
+  for (let page = 0; page < 3 && startTime < now; page++) {
+    const rows = (await fetchJsonExt(
+      "dapi.binance.com",
+      `${chemin}&startTime=${startTime}&limit=1500`,
+    )) as unknown[];
+    if (!Array.isArray(rows) || rows.length === 0) break;
+    for (const r of rows) {
+      if (!Array.isArray(r)) continue;
+      const t = Number(r[0]);
+      const c = Number(r[4]);
+      if (Number.isFinite(t) && Number.isFinite(c)) out.set(t, c);
+    }
+    const last = rows[rows.length - 1];
+    const lastT = Array.isArray(last) ? Number(last[0]) : NaN;
+    if (!Number.isFinite(lastT) || lastT <= startTime) break;
+    startTime = lastT + 1;
+  }
+  return out;
+}
+
+/**
+ * Série temporelle du basis annualisé (% p.a.) du contrat COIN-M TRIMESTRIEL LE PLUS
+ * PROCHE (front quarter) pour BTC/ETH, sur ~90 j. Joint les klines 1h du contrat daté et
+ * l'index spot Binance, puis annualise contre l'échéance fixe du contrat. Ne couvre que
+ * la vie du contrat courant (undefined avant sa cotation) : c'est volontaire et honnête.
+ */
+export async function fetchQuarterlyBasisHistory(
+  base: "BTC" | "ETH",
+  since: number,
+): Promise<BasisTimePoint[]> {
+  const pair = `${base}USD`;
+  const contrats = (await chargerContrats())[pair] ?? [];
+  // Front quarter = échéance la plus proche.
+  const front = contrats.slice().sort((a, b) => a.deliveryDate - b.deliveryDate)[0];
+  if (!front) return [];
+  const [future, index] = await Promise.all([
+    fetchDapiCloses(`dapi/v1/klines?symbol=${front.symbol}&interval=1h`, since),
+    fetchDapiCloses(`dapi/v1/indexPriceKlines?pair=${pair}&interval=1h`, since),
+  ]);
+  return computeQuarterlyBasisPoints(future, index, front.deliveryDate);
+}

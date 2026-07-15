@@ -6,6 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  okxCouvre,
   okxInstFamily,
   parseBybitLiquidation,
   parseOkxLiquidation,
@@ -46,6 +47,16 @@ describe("okxInstFamily", () => {
   });
   it("lève sur une cotation inconnue (mapping OKX impossible)", () => {
     expect(() => okxInstFamily("FOOZZZ")).toThrow();
+  });
+});
+
+describe("okxCouvre", () => {
+  it("true quand le symbole est mappable vers un instFamily OKX", () => {
+    expect(okxCouvre("BTCUSDT")).toBe(true);
+    expect(okxCouvre("ETHUSD")).toBe(true);
+  });
+  it("false quand la cotation est inconnue (okxInstFamily lève)", () => {
+    expect(okxCouvre("FOOZZZ")).toBe(false);
   });
 });
 

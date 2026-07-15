@@ -10,7 +10,8 @@
  * autorise le zoom/pan sur la densité et alimentera le contrôleur canvas (Tâche 6).
  *
  * MODÈLE de câblage : contrôleur singleton (données uniquement) → NE touche PAS
- * ChartInstance. Il gère l'abonnement WS (ouvert seulement si la bascule est ON,
+ * ChartInstance. Il gère l'abonnement WS (ouvert si la bascule est ON OU si un
+ * consommateur UI retient le flux via `retenirFluxLiq` — fenêtre LIQ, source UNIQUE,
  * refermé/rouvert au changement de symbole), le seed daemon/Coinalyze, le dual-write vers
  * le daemon et la persistance ; il PUBLIE les événements bruts dans `liqEventsStore`. Le
  * RENDU (heatmap 2D canvas) est assuré par `LiquidationHeatController` (liquidationHeat.ts),
@@ -421,9 +422,36 @@ function ajouterLive(l: Liquidation): void {
   }
 }
 
-/** Aligne l'abonnement WS sur l'état (bascule + symbole). Réinitialise le buffer au changement de symbole. */
+/**
+ * Compteur d'abonnés UI (fenêtre LIQ) : tant qu'il est > 0, le flux reste actif même
+ * heatmap OFF — le contrôleur canvas, lui, reste gaté sur `liqMarksStore.actif` et ne
+ * dessine rien (cf. liquidationHeat.ts).
+ */
+let retenteursUi = 0;
+
+/**
+ * Retient le flux de liquidations pour un consommateur UI : incrémente le refcount et
+ * aligne l'abonnement (`sync`). Renvoie la fonction de relâche, IDEMPOTENTE (un double
+ * appel ne décrémente qu'une fois). La fenêtre LIQ l'appelle dans un useEffect.
+ */
+export function retenirFluxLiq(): () => void {
+  retenteursUi += 1;
+  sync();
+  let relache = false;
+  return () => {
+    if (relache) return;
+    relache = true;
+    retenteursUi -= 1;
+    sync();
+  };
+}
+
+/**
+ * Aligne l'abonnement WS sur l'état (bascule OU reteneur UI, + symbole). Réinitialise le
+ * buffer au changement de symbole.
+ */
 function sync(): void {
-  const actif = liqMarksStore.getState().actif;
+  const actif = liqMarksStore.getState().actif || retenteursUi > 0;
   const symbol = marketStore.getState().symbol;
 
   if (!actif) {
@@ -455,7 +483,11 @@ function sync(): void {
     abonnement = subscribeLiquidations(symbol, (l) => ajouterLive(l));
     // Seed daemon (puis repli Coinalyze) — asynchrone, gardé anti-course.
     void amorcerSeed(symbol);
+    return;
   }
+  // Déjà abonné au bon symbole : re-publie pour recalculer `enAttente` (ex. heatmap
+  // activée alors que la fenêtre LIQ retenait déjà le flux sur un buffer vide).
+  publier();
 }
 
 let controllerStarted = false;

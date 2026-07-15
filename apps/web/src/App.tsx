@@ -127,6 +127,9 @@ const WINDOW_COMPONENTS: Record<WindowId, LazyExoticComponent<FenetreComp>> = {
   fundingMatrix: lazy(() =>
     import("./components/FundingMatrixWindow").then((m) => ({ default: m.FundingMatrixWindow })),
   ),
+  liquidations: lazy(() =>
+    import("./components/LiquidationsWindow").then((m) => ({ default: m.LiquidationsWindow })),
+  ),
   eco: lazy(() => import("./components/EcoWindow").then((m) => ({ default: m.EcoWindow }))),
   news: lazy(() => import("./components/NewsWindow").then((m) => ({ default: m.NewsWindow }))),
   corr: lazy(() => import("./components/CorrWindow").then((m) => ({ default: m.CorrWindow }))),

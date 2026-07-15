@@ -44,6 +44,7 @@ export interface DefinitionFenetre {
 export const WINDOW_REGISTRY = [
   { id: "derivatives", title: "Produits dérivés", mnemonic: "DES", defaultWidth: 420, defaultHeight: 640, menuHidden: true },
   { id: "fundingMatrix", title: "Funding cross-exchange", mnemonic: "FUNDX", defaultWidth: 460, defaultHeight: 420 },
+  { id: "liquidations", title: "Liquidations", mnemonic: "LIQ", defaultWidth: 460, defaultHeight: 520 },
   { id: "eco", title: "Calendrier économique", mnemonic: "ECO", defaultWidth: 440, defaultHeight: 640 },
   { id: "news", title: "Actualités crypto", mnemonic: "NEWS", defaultWidth: 440, defaultHeight: 640 },
   { id: "corr", title: "Corrélations", mnemonic: "CORR", defaultWidth: 480, defaultHeight: 640 },

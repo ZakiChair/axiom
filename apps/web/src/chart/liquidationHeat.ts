@@ -22,7 +22,12 @@ import {
   liqMarksStore,
   type LiqEvent,
 } from "./liquidationMarkers";
-import { liqEstStore, oiHistStore, calculerNiveauxEstimes } from "./liquidationEstimates";
+import {
+  liqEstStore,
+  oiHistStore,
+  calculerNiveauxEstimes,
+  type NiveauEstime,
+} from "./liquidationEstimates";
 import { marketStore } from "../store/market";
 import { formatHeureMinute, formatPrice, formatUsd } from "../lib/format";
 
@@ -200,6 +205,13 @@ export class LiquidationHeatController {
    */
   private grilleObsolete = true;
   private derniereGrille: LiqGrid | null = null;
+  /**
+   * Cache SYMÉTRIQUE à la grille pour les niveaux ESTIMÉS (calcul O(pointsOI × bougies)) :
+   * recalculé seulement sur les mêmes signaux que la grille (données/viewport/OI/symbole via
+   * `markDirty`), JAMAIS au survol — `onCrosshair` marque `dirty` sans marquer `niveauxObsoletes`.
+   */
+  private niveauxObsoletes = true;
+  private derniersNiveaux: NiveauEstime[] | null = null;
   /** Dernier crosshair reçu (position + bougie survolée) ; null quand le curseur quitte le graphe. */
   private dernierCrosshair: Crosshair | null = null;
   private resizeObserver: ResizeObserver | null = null;
@@ -213,6 +225,7 @@ export class LiquidationHeatController {
 
   private readonly markDirty = (): void => {
     this.grilleObsolete = true;
+    this.niveauxObsoletes = true;
     this.dirty = true;
   };
 
@@ -291,6 +304,9 @@ export class LiquidationHeatController {
     this.resizeObserver = null;
     this.dernierCrosshair = null;
     this.derniereGrille = null;
+    this.grilleObsolete = true;
+    this.derniersNiveaux = null;
+    this.niveauxObsoletes = true;
     this.clearCanvas();
   }
 
@@ -594,7 +610,14 @@ export class LiquidationHeatController {
     const candles = marketStore.getState().candles;
     const dernier = candles[candles.length - 1];
     if (dernier === undefined) return;
-    const niveaux = calculerNiveauxEstimes(oiHistStore.getState().hist, candles);
+    // Recalcul MÉMOÏSÉ (calcul O(pointsOI × bougies)) : seulement si obsolète (données/viewport/
+    // OI/symbole via `markDirty`) — au survol `onCrosshair` marque `dirty` sans marquer
+    // `niveauxObsoletes`, donc on réutilise le dernier résultat au lieu de tout recalculer.
+    if (this.niveauxObsoletes) {
+      this.derniersNiveaux = calculerNiveauxEstimes(oiHistStore.getState().hist, candles);
+      this.niveauxObsoletes = false;
+    }
+    const niveaux = this.derniersNiveaux ?? [];
     if (niveaux.length === 0) {
       // Couche active mais OI pas encore chargé (ou aucune hausse d'OI) : indice discret.
       ctx.fillStyle = orange(0.8);

@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 139 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 144 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -45,6 +45,8 @@ import { halfTrend } from "./trend/halfTrend";
 import { waddahAttar } from "./trend/waddahAttar";
 import { heikinAshi } from "./trend/heikinAshi";
 import { elderImpulse } from "./trend/elderImpulse";
+import { gmma } from "./trend/gmma";
+import { gannHilo } from "./trend/gannHilo";
 
 // — momentum (21) —
 import { accelerator } from "./momentum/accelerator";
@@ -72,6 +74,7 @@ import { qqe } from "./momentum/qqe";
 import { smi } from "./momentum/smi";
 import { randomWalk } from "./momentum/randomWalk";
 import { fearGreed } from "./momentum/fearGreed";
+import { disparity } from "./momentum/disparity";
 
 // — volatility (15) —
 import { atr } from "./volatility/atr";
@@ -95,6 +98,7 @@ import { parkinsonVol } from "./volatility/parkinsonVol";
 import { choppiness } from "./volatility/choppiness";
 import { ulcerIndex } from "./volatility/ulcerIndex";
 import { hurst } from "./volatility/hurst";
+import { vhf } from "./volatility/vhf";
 
 // — volume + orderflow (fichiers sous volume/, catégorie UI distincte) —
 import { adLine } from "./volume/adLine";
@@ -135,6 +139,7 @@ import { pivotStandard } from "./support_resistance/pivotStandard";
 import { pivotWoodie } from "./support_resistance/pivotWoodie";
 import { zigzag } from "./support_resistance/zigzag";
 import { chandelierExit } from "./support_resistance/chandelierExit";
+import { chandeKrollStop } from "./support_resistance/chandeKrollStop";
 
 // — derivatives (6) —
 import { fundingRate } from "./derivatives/fundingRate";
@@ -199,6 +204,8 @@ export const INDICATORS: IndicatorDef[] = [
   waddahAttar,
   heikinAshi,
   elderImpulse,
+  gmma,
+  gannHilo,
   // momentum
   accelerator,
   awesome,
@@ -225,6 +232,7 @@ export const INDICATORS: IndicatorDef[] = [
   smi,
   randomWalk,
   fearGreed,
+  disparity,
   // volatility
   atr,
   atrRegime,
@@ -247,6 +255,7 @@ export const INDICATORS: IndicatorDef[] = [
   choppiness,
   ulcerIndex,
   hurst,
+  vhf,
   // volume (classique)
   adLine,
   anchoredVwap,
@@ -285,6 +294,7 @@ export const INDICATORS: IndicatorDef[] = [
   pivotWoodie,
   zigzag,
   chandelierExit,
+  chandeKrollStop,
   // derivatives
   openInterest,
   fundingRate,

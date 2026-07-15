@@ -58,6 +58,34 @@ export function couleurLiquidation(side: Liquidation["side"]): "up" | "down" {
 }
 
 /**
+ * Cale un horodatage de liquidation sur la bougie qui le CONTIENT : renvoie le plus grand
+ * temps de bougie ≤ t (ou la 1re bougie si t est avant). PURE.
+ *
+ * POURQUOI : une liquidation est LIVE (t ≈ maintenant). Placée à son heure exacte, elle
+ * tombe APRÈS la dernière bougie (zone d'offset à droite) sur les TF élevés (1d…) → les
+ * marqueurs s'empilent hors des bougies, au bord droit. En calant sur la bougie
+ * contenante, le marqueur atterrit TOUJOURS sur une bougie : il s'étale en intraday et se
+ * regroupe sur la bougie courante en 1d. `candleTimes` est trié ascendant.
+ */
+export function snapToCandleTime(candleTimes: number[], t: number): number {
+  const n = candleTimes.length;
+  if (n === 0) return t;
+  const first = candleTimes[0] as number;
+  const last = candleTimes[n - 1] as number;
+  if (t <= first) return first;
+  if (t >= last) return last;
+  // Recherche dichotomique du plus grand temps ≤ t.
+  let lo = 0;
+  let hi = n - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if ((candleTimes[mid] as number) <= t) lo = mid;
+    else hi = mid - 1;
+  }
+  return candleTimes[lo] as number;
+}
+
+/**
  * Élague un buffer de liquidations : ne garde que celles dans [maintenant − fenetre, maintenant],
  * triées ANTICHRONO, bornées aux `max` plus récentes. PURE (base du rendu du bord live).
  */
@@ -157,7 +185,9 @@ function redraw(): void {
   if (!liqMarksStore.getState().actif) return;
   const chart = getActiveChart();
   if (chart === null) return;
-  if (marketStore.getState().candles.length === 0) return;
+  const candles = marketStore.getState().candles;
+  if (candles.length === 0) return;
+  const candleTimes = candles.map((c) => c.time);
 
   const palette = {
     up: lireTokenCanvas("--up", "#34d399"),
@@ -175,7 +205,9 @@ function redraw(): void {
       name: LIQ_MARKER,
       groupId: LIQ_GROUP,
       lock: true,
-      points: [{ timestamp: l.time, value: l.price }],
+      // Caler sur la bougie contenante : le marqueur tombe TOUJOURS sur une bougie
+      // (jamais dans la zone d'offset à droite), correct sur tous les timeframes.
+      points: [{ timestamp: snapToCandleTime(candleTimes, l.time), value: l.price }],
       extendData: extend,
     };
     const id = chart.createOverlay(overlay);

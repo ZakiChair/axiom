@@ -14,7 +14,7 @@ vi.mock("../store/theme", () => ({
 }));
 vi.mock("../data/liquidations", () => ({ subscribeLiquidations: () => () => {} }));
 
-import { couleurLiquidation, elaguerLiquidations, tierRayon } from "./liquidationMarkers";
+import { couleurLiquidation, elaguerLiquidations, snapToCandleTime, tierRayon } from "./liquidationMarkers";
 import type { Liquidation } from "../data/liquidations";
 
 function liq(time: number, notionalUsd: number, side: Liquidation["side"] = "long"): Liquidation {
@@ -38,6 +38,25 @@ describe("couleurLiquidation", () => {
   it("long liquidé → down ; short liquidé → up", () => {
     expect(couleurLiquidation("long")).toBe("down");
     expect(couleurLiquidation("short")).toBe("up");
+  });
+});
+
+describe("snapToCandleTime", () => {
+  const times = [100, 200, 300, 400]; // bougies trié ascendant
+
+  it("cale sur la bougie CONTENANTE (plus grand temps ≤ t)", () => {
+    expect(snapToCandleTime(times, 250)).toBe(200); // entre 200 et 300 → 200
+    expect(snapToCandleTime(times, 300)).toBe(300); // pile sur une bougie
+    expect(snapToCandleTime(times, 399)).toBe(300);
+  });
+
+  it("un t APRÈS la dernière bougie (liquidation live sur TF élevé) → dernière bougie", () => {
+    expect(snapToCandleTime(times, 999)).toBe(400); // ne part PAS dans la zone d'offset
+  });
+
+  it("un t avant la première bougie → première bougie ; liste vide → t inchangé", () => {
+    expect(snapToCandleTime(times, 50)).toBe(100);
+    expect(snapToCandleTime([], 123)).toBe(123);
   });
 });
 

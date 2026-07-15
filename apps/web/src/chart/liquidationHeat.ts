@@ -29,6 +29,7 @@ import {
   type NiveauEstime,
 } from "./liquidationEstimates";
 import { marketStore } from "../store/market";
+import { themeStore } from "../store/theme";
 import { formatHeureMinute, formatPrice, formatUsd } from "../lib/format";
 
 /** Cellule agrégée : une bougie × un bucket de prix. */
@@ -172,6 +173,14 @@ interface PixelXY {
   y?: number;
 }
 
+/** Tokens de couleur du thème, lus UNE fois par frame (getComputedStyle est coûteux). */
+interface Tokens {
+  textDim: string;
+  up: string;
+  down: string;
+  text: string;
+}
+
 /** Lit un token CSS sémantique concret depuis <html> (le canvas n'évalue pas var()). */
 function readToken(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -218,6 +227,7 @@ export class LiquidationHeatController {
   private unsubMarket: (() => void) | null = null;
   private unsubEvents: (() => void) | null = null;
   private unsubOi: (() => void) | null = null;
+  private unsubTheme: (() => void) | null = null;
   /** Activation demandée par la heatmap RÉELLE (bascule LIQMARK, via setEnabled). */
   private marksWanted = false;
   /** Abonnement permanent à la bascule des niveaux ESTIMÉS (LIQEST) — indépendant de LIQMARK. */
@@ -281,6 +291,9 @@ export class LiquidationHeatController {
     this.unsubEvents = liqEventsStore.subscribe(this.markDirty);
     // Nouvel historique OI (fetch au toggle / refresh 15 min) → recalcul des niveaux estimés.
     this.unsubOi = oiHistStore.subscribe(this.markDirty);
+    // Changement de thème : bandes/tooltip/lignes lisent des tokens CSS → repeindre pour
+    // adopter les nouvelles couleurs (un simple repaint suffit ; `markDirty` par symétrie).
+    this.unsubTheme = themeStore.subscribe(this.markDirty);
     // Redimensionnement du conteneur (resize fenêtre, toggle sidebar…) : aucun
     // scroll/zoom/tick ne le signale autrement, d'où l'observer dédié.
     this.resizeObserver = new ResizeObserver(this.markDirty);
@@ -300,6 +313,8 @@ export class LiquidationHeatController {
     this.unsubEvents = null;
     this.unsubOi?.();
     this.unsubOi = null;
+    this.unsubTheme?.();
+    this.unsubTheme = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.dernierCrosshair = null;
@@ -369,9 +384,18 @@ export class LiquidationHeatController {
     const main = this.chart.getSize(CANDLE_PANE_ID, DomPosition.Main);
     if (!main) return;
 
+    // Tokens de couleur lus UNE fois par frame (getComputedStyle est coûteux) et réutilisés
+    // par toutes les couches, comme le fait volumeProfile.ts.
+    const tokens: Tokens = {
+      textDim: readToken("--text-dim") || "#9ca3af",
+      up: readToken("--up") || "#10b981",
+      down: readToken("--down") || "#ef4444",
+      text: readToken("--text") || "#e5e7eb",
+    };
+
     // Deux couches INDÉPENDANTES sur le même canvas : heatmap RÉELLE (LIQMARK) et niveaux
     // ESTIMÉS (LIQEST). Chacune est activable seule (cf. reconcile()).
-    if (liqMarksStore.getState().actif) this.dessinerHeatmap(main);
+    if (liqMarksStore.getState().actif) this.dessinerHeatmap(main, tokens);
     if (liqEstStore.getState().actif) this.dessinerNiveauxEstimes(main);
   }
 
@@ -379,14 +403,13 @@ export class LiquidationHeatController {
    * Couche HEATMAP RÉELLE : grille temps×prix (viridis log) + profil latéral long/short +
    * tooltip de survol, depuis les liquidations RÉELLEMENT exécutées (liqEventsStore).
    */
-  private dessinerHeatmap(main: Bounding): void {
+  private dessinerHeatmap(main: Bounding, tokens: Tokens): void {
     const ctx = this.ctx;
     const { left, top, width, height } = main;
     const xRight = left + width;
 
     // Légende discrète (toujours affichée quand le heatmap est actif).
-    const dim = readToken("--text-dim") || "#9ca3af";
-    ctx.fillStyle = dim;
+    ctx.fillStyle = tokens.textDim;
     ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
     ctx.textAlign = "right";
     ctx.textBaseline = "top";
@@ -469,8 +492,8 @@ export class LiquidationHeatController {
     }
     if (maxProfil > 0) {
       const maxBandW = width * MAX_BAND_FRAC;
-      const up = readToken("--up") || "#10b981";
-      const down = readToken("--down") || "#ef4444";
+      const up = tokens.up;
+      const down = tokens.down;
       for (const [idx, agg] of profil) {
         const total = agg.longUsd + agg.shortUsd;
         if (total <= 0) continue;
@@ -499,7 +522,7 @@ export class LiquidationHeatController {
     ctx.restore();
 
     // Tooltip de survol : dessiné HORS clip (au-dessus de la heatmap), après restauration.
-    this.dessinerTooltip(grid, candles, main);
+    this.dessinerTooltip(grid, candles, main, tokens);
   }
 
   /**
@@ -509,7 +532,7 @@ export class LiquidationHeatController {
    * recalcul au mousemove). Décalé pour rester dans le pane (repli à gauche près du bord
    * droit, au-dessus près du bas). Ne dessine rien hors du pane prix ou sans cellule survolée.
    */
-  private dessinerTooltip(grid: LiqGrid, candles: Candle[], main: Bounding): void {
+  private dessinerTooltip(grid: LiqGrid, candles: Candle[], main: Bounding, tokens: Tokens): void {
     const cross = this.dernierCrosshair;
     if (cross === null || cross.paneId !== CANDLE_PANE_ID) return;
     const cx = cross.x;
@@ -535,7 +558,7 @@ export class LiquidationHeatController {
       return "▮".repeat(plein) + "▯".repeat(10 - plein);
     };
     const nb = `${cell.count} événement${cell.count > 1 ? "s" : ""}`;
-    const txt = readToken("--text") || "#e5e7eb";
+    const txt = tokens.text;
     const lignes: Array<{ texte: string; couleur: string }> = [
       {
         texte: `Liquidations ${formatHeureMinute(cell.candleTime)} · ${formatPrice(prixBas)}–${formatPrice(prixHaut)}`,
@@ -543,8 +566,8 @@ export class LiquidationHeatController {
       },
       { texte: `Total   ${formatUsd(total)}  (${nb})`, couleur: txt },
       // Longs liquidés = ventes forcées → teinte `--down` ; shorts → `--up` (cf. profil latéral).
-      { texte: `Longs   ${formatUsd(cell.longUsd)}  ${barre(cell.longUsd)}`, couleur: readToken("--down") || "#ef4444" },
-      { texte: `Shorts  ${formatUsd(cell.shortUsd)}  ${barre(cell.shortUsd)}`, couleur: readToken("--up") || "#10b981" },
+      { texte: `Longs   ${formatUsd(cell.longUsd)}  ${barre(cell.longUsd)}`, couleur: tokens.down },
+      { texte: `Shorts  ${formatUsd(cell.shortUsd)}  ${barre(cell.shortUsd)}`, couleur: tokens.up },
     ];
 
     const ctx = this.ctx;
@@ -599,8 +622,13 @@ export class LiquidationHeatController {
     const xRight = left + width;
     const orange = (a: number): string => `rgba(${ORANGE_EST},${a.toFixed(3)})`;
 
-    // Légende de couche — décalée sous la légende heatmap si les deux couches sont actives.
-    const yLegende = top + 4 + (liqMarksStore.getState().actif ? 14 : 0);
+    // Légende de couche — empilée SOUS les lignes de la heatmap actives pour éviter tout
+    // chevauchement : la heatmap occupe 1 ligne (légende) + 1 ligne supplémentaire quand elle
+    // affiche son indicateur « en attente du flux » (buffer vide). Chaque couche a sa ligne.
+    const heatActif = liqMarksStore.getState().actif;
+    const heatEnAttente = heatActif && liqEventsStore.getState().enAttente;
+    const lignesHeat = heatActif ? (heatEnAttente ? 2 : 1) : 0;
+    const yLegende = top + 4 + lignesHeat * 14;
     ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
     ctx.textAlign = "right";
     ctx.textBaseline = "top";

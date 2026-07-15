@@ -54,7 +54,7 @@ import { TaskbarMinimized } from "./components/TaskbarMinimized";
 import { SnapOverlay } from "./components/SnapOverlay";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { WINDOW_REGISTRY, windowManagerStore } from "./store/windowManager";
+import { WINDOW_REGISTRY, windowManagerStore, type WindowId } from "./store/windowManager";
 
 // ─────────────────────────── Commandes de disposition multi-chart (Phase 4) ───────────────────────────
 
@@ -120,7 +120,7 @@ enregistrerCommandes([
 type FenetreComp = ComponentType<Record<string, never>>;
 
 /** Chargeurs dynamiques : un chunk par fenêtre, chargé à la première ouverture. */
-const WINDOW_COMPONENTS: Record<string, LazyExoticComponent<FenetreComp>> = {
+const WINDOW_COMPONENTS: Record<WindowId, LazyExoticComponent<FenetreComp>> = {
   derivatives: lazy(() =>
     import("./components/DerivativesWindow").then((m) => ({ default: m.DerivativesWindow })),
   ),

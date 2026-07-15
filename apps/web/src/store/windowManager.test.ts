@@ -9,6 +9,7 @@ import {
   windowManagerStore,
   mirrorOpenState,
   WINDOW_REGISTRY,
+  menuWindows,
   WINDOW_Z_MAX,
   WINDOW_Z_MIN,
   GROUP_PALETTE,
@@ -169,6 +170,26 @@ describe("WINDOW_REGISTRY", () => {
     expect(mnemos).toContain("GLOBE");
     expect(ids).toContain("stablecoins");
     expect(mnemos).toContain("STBL");
+  });
+});
+
+describe("menuWindows (menu Fonctions dérivé du registre)", () => {
+  it("exclut les fenêtres menuHidden (derivatives → bouton DES dédié)", () => {
+    const ids = menuWindows().map((w) => w.id);
+    expect(ids).not.toContain("derivatives");
+    // Toutes les autres fenêtres du registre sont présentes, dans l'ordre.
+    const attendues = WINDOW_REGISTRY.map((w) => w.id).filter((id) => id !== "derivatives");
+    expect(ids).toEqual(attendues);
+    expect(ids).toHaveLength(21);
+  });
+
+  it("résout le libellé via menuLabel quand présent, sinon title", () => {
+    const parId = new Map(menuWindows().map((w) => [w.id, w.libelle]));
+    // brief/globe ont un menuLabel distinct du title.
+    expect(parId.get("brief")).toBe("Point marché (snapshot)");
+    expect(parId.get("globe")).toBe("Globe (géopolitique, chokepoints & trafic aérien)");
+    // eco n'a pas de menuLabel → title.
+    expect(parId.get("eco")).toBe("Calendrier économique");
   });
 });
 

@@ -22,18 +22,27 @@ import { COMPARE_PALETTE } from "./compare";
  * existante (déjà choisie pour être lisible sur les 5 thèmes du terminal). */
 export const GROUP_PALETTE: readonly string[] = COMPARE_PALETTE;
 
-/** Registre statique des 22 fenêtres Bloomberg : titre/mnémonique/taille par défaut
- * (largeur = ancienne largeur fixe du dock, hauteur = valeur raisonnable par défaut,
- * l'utilisateur redimensionne ensuite librement). Utilisé par `App.tsx` (montage),
- * `TaskbarMinimized.tsx` (libellé des pastilles) et `openWindow` (taille initiale). */
-export const WINDOW_REGISTRY: readonly {
-  id: string;
-  title: string;
-  mnemonic: string;
-  defaultWidth: number;
-  defaultHeight: number;
-}[] = [
-  { id: "derivatives", title: "Produits dérivés", mnemonic: "DES", defaultWidth: 420, defaultHeight: 640 },
+/** Définition d'une fenêtre du registre. Le libellé du menu Fonctions vaut `title`
+ *  sauf si `menuLabel` est fourni ; `menuHidden` exclut la fenêtre du menu (ex.
+ *  `derivatives` possède son bouton DES dédié dans la Toolbar). */
+export interface DefinitionFenetre {
+  readonly id: string;
+  readonly title: string;
+  readonly mnemonic: string;
+  readonly defaultWidth: number;
+  readonly defaultHeight: number;
+  readonly menuLabel?: string;
+  readonly menuHidden?: boolean;
+}
+
+/** Registre statique des 22 fenêtres Bloomberg — SOURCE UNIQUE : titre/mnémonique/
+ * taille par défaut + appartenance au menu Fonctions. Utilisé par `App.tsx` (montage,
+ * dont la map de composants est typée par `WindowId`), `TaskbarMinimized.tsx` (libellé
+ * des pastilles), `openWindow` (taille initiale), la Toolbar (menu Fonctions dérivé via
+ * `menuWindows`) et `persist`. Ajouter une fenêtre = 1 entrée ici + 1 composant dans
+ * `WINDOW_COMPONENTS` (App.tsx, sinon erreur de compilation) ; menu + montage en découlent. */
+export const WINDOW_REGISTRY = [
+  { id: "derivatives", title: "Produits dérivés", mnemonic: "DES", defaultWidth: 420, defaultHeight: 640, menuHidden: true },
   { id: "eco", title: "Calendrier économique", mnemonic: "ECO", defaultWidth: 440, defaultHeight: 640 },
   { id: "news", title: "Actualités crypto", mnemonic: "NEWS", defaultWidth: 440, defaultHeight: 640 },
   { id: "corr", title: "Corrélations", mnemonic: "CORR", defaultWidth: 480, defaultHeight: 640 },
@@ -52,10 +61,23 @@ export const WINDOW_REGISTRY: readonly {
   { id: "seasonality", title: "Saisonnalité", mnemonic: "SEAG", defaultWidth: 760, defaultHeight: 560 },
   { id: "vol", title: "Volatilité (cône RV, VRP)", mnemonic: "VOL", defaultWidth: 760, defaultHeight: 560 },
   { id: "fund", title: "Fiche société (FUND)", mnemonic: "FUND", defaultWidth: 480, defaultHeight: 640 },
-  { id: "brief", title: "Point marché", mnemonic: "BRIEF", defaultWidth: 480, defaultHeight: 720 },
-  { id: "globe", title: "Globe (chokepoints & trafic aérien)", mnemonic: "GLOBE", defaultWidth: 720, defaultHeight: 720 },
+  { id: "brief", title: "Point marché", mnemonic: "BRIEF", defaultWidth: 480, defaultHeight: 720, menuLabel: "Point marché (snapshot)" },
+  { id: "globe", title: "Globe (chokepoints & trafic aérien)", mnemonic: "GLOBE", defaultWidth: 720, defaultHeight: 720, menuLabel: "Globe (géopolitique, chokepoints & trafic aérien)" },
   { id: "stablecoins", title: "Stablecoins (supply, dominance, pegs)", mnemonic: "STBL", defaultWidth: 860, defaultHeight: 640 },
-] as const;
+] as const satisfies readonly DefinitionFenetre[];
+
+/** Union des ids de fenêtre — DÉRIVÉE du registre (source unique). Sert à typer la
+ *  map des composants dans App.tsx : un id sans composant devient une erreur de type. */
+export type WindowId = (typeof WINDOW_REGISTRY)[number]["id"];
+
+/** Fenêtres exposées dans le menu « Fonctions » (registre moins les `menuHidden`),
+ *  avec le libellé d'affichage résolu (`menuLabel ?? title`). PURE (sans DOM) : la
+ *  Toolbar y greffe l'action d'ouverture. Testée dans windowManager.test.ts. */
+export function menuWindows(): { id: WindowId; mnemonique: string; libelle: string }[] {
+  return (WINDOW_REGISTRY as readonly DefinitionFenetre[])
+    .filter((w) => !w.menuHidden)
+    .map((w) => ({ id: w.id as WindowId, mnemonique: w.mnemonic, libelle: w.menuLabel ?? w.title }));
+}
 
 /** Espace minimal toujours visible d'une fenêtre (pixels), pour le drag comme le resize. */
 export const MIN_WIDTH = 320;

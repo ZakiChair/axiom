@@ -12,7 +12,7 @@ import { revenueStore } from "../store/revenue";
 import { derivativesUiStore } from "../store/derivatives-ui";
 // Bandeau ticker (pas une fenêtre Launchpad) + disposition grille.
 import { tickerBandStore } from "../store/tickerBand";
-import { windowManagerStore } from "../store/windowManager";
+import { menuWindows, windowManagerStore } from "../store/windowManager";
 import { FootprintSettingsPanel } from "./FootprintSettingsPanel";
 import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
@@ -119,35 +119,26 @@ function exchangeLabel(id: ExchangeId): string {
 }
 
 /**
- * Fenêtres non modales exposées dans le menu « Fonctions » : libellé + mnémonique
+ * Fenêtres non modales exposées dans le menu « Fonctions » : DÉRIVÉES de
+ * `WINDOW_REGISTRY` (source unique) via `menuWindows()` — libellé + mnémonique
  * Bloomberg + ouverture via `windowManagerStore` (évite d'importer les composants
  * lourds / stores co-localisés — prérequis du lazy-load dans App.tsx).
- * TICKER bascule le bandeau (pas une fenêtre). DES garde son bouton dédié.
+ * TICKER bascule le bandeau (pas une fenêtre) : seule entrée spéciale, insérée
+ * après NEWS. DES (`derivatives`) est `menuHidden` (bouton dédié dans la barre).
  */
-const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] = [
-  { mnemonique: "ECO", libelle: "Calendrier économique", ouvrir: () => windowManagerStore.getState().openWindow("eco") },
-  { mnemonique: "NEWS", libelle: "Actualités crypto", ouvrir: () => windowManagerStore.getState().openWindow("news") },
-  { mnemonique: "TICKER", libelle: "Bandeau news défilant", ouvrir: () => tickerBandStore.getState().basculer() },
-  { mnemonique: "CORR", libelle: "Corrélations", ouvrir: () => windowManagerStore.getState().openWindow("corr") },
-  { mnemonique: "CHAIN", libelle: "On-chain", ouvrir: () => windowManagerStore.getState().openWindow("onchain") },
-  { mnemonique: "MAP", libelle: "Vue marché (treemap)", ouvrir: () => windowManagerStore.getState().openWindow("marketMap") },
-  { mnemonique: "PORT", libelle: "Portefeuille", ouvrir: () => windowManagerStore.getState().openWindow("portfolio") },
-  { mnemonique: "NOTE", libelle: "Notes / journal", ouvrir: () => windowManagerStore.getState().openWindow("notes") },
-  { mnemonique: "EQS", libelle: "Screener d'actifs", ouvrir: () => windowManagerStore.getState().openWindow("screener") },
-  { mnemonique: "TERM", libelle: "Structure par terme", ouvrir: () => windowManagerStore.getState().openWindow("termStructure") },
-  { mnemonique: "OMON", libelle: "Options (smile IV, max pain)", ouvrir: () => windowManagerStore.getState().openWindow("options") },
-  { mnemonique: "DOM", libelle: "Carnet d'ordres (DOM / depth)", ouvrir: () => windowManagerStore.getState().openWindow("dom") },
-  { mnemonique: "BT", libelle: "Backtest de stratégie", ouvrir: () => windowManagerStore.getState().openWindow("backtest") },
-  { mnemonique: "REPLAY", libelle: "Replay de marché", ouvrir: () => windowManagerStore.getState().openWindow("replay") },
-  { mnemonique: "RATE", libelle: "Taux & Réserves souveraines", ouvrir: () => windowManagerStore.getState().openWindow("macroRates") },
-  { mnemonique: "COT", libelle: "Rapport COT (CFTC)", ouvrir: () => windowManagerStore.getState().openWindow("cot") },
-  { mnemonique: "SEAG", libelle: "Saisonnalité", ouvrir: () => windowManagerStore.getState().openWindow("seasonality") },
-  { mnemonique: "VOL", libelle: "Volatilité (cône RV, VRP)", ouvrir: () => windowManagerStore.getState().openWindow("vol") },
-  { mnemonique: "FUND", libelle: "Fiche société (FUND)", ouvrir: () => windowManagerStore.getState().openWindow("fund") },
-  { mnemonique: "BRIEF", libelle: "Point marché (snapshot)", ouvrir: () => windowManagerStore.getState().openWindow("brief") },
-  { mnemonique: "GLOBE", libelle: "Globe (géopolitique, chokepoints & trafic aérien)", ouvrir: () => windowManagerStore.getState().openWindow("globe") },
-  { mnemonique: "STBL", libelle: "Stablecoins (supply, dominance, pegs)", ouvrir: () => windowManagerStore.getState().openWindow("stablecoins") },
-];
+const TICKER_ENTREE = {
+  mnemonique: "TICKER",
+  libelle: "Bandeau news défilant",
+  ouvrir: () => tickerBandStore.getState().basculer(),
+};
+const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] = menuWindows().flatMap((w) => {
+  const entree = {
+    mnemonique: w.mnemonique,
+    libelle: w.libelle,
+    ouvrir: () => windowManagerStore.getState().openWindow(w.id),
+  };
+  return w.id === "news" ? [entree, TICKER_ENTREE] : [entree];
+});
 
 /**
  * Menu déroulant compact « Fonctions » : liste les fenêtres non modales (libellé +

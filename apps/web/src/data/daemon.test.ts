@@ -109,6 +109,68 @@ describe("restaurerSnapshot (client daemon)", () => {
   });
 });
 
+describe("liquidations (client daemon)", () => {
+  let liquidationsGet: typeof import("./daemon").liquidationsGet;
+  let liquidationsPush: typeof import("./daemon").liquidationsPush;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ liquidationsGet, liquidationsPush } = await import("./daemon"));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("GET : sonde d'abord puis renvoie le tableau de la réponse {liquidations:[...]}", async () => {
+    const healthLiq = {
+      ...HEALTH_COMPLET,
+      capabilities: [...HEALTH_COMPLET.capabilities, "liquidations"],
+    };
+    const lignes = [
+      { t: 1000, venue: "binance", side: "long", price: 42000, qty: 0.5, usd: 21000 },
+      { t: 2000, venue: "bybit", side: "short", price: 41000, qty: 1, usd: 41000 },
+    ];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(healthLiq))
+      .mockResolvedValueOnce(jsonResponse({ symbole: "BTCUSDT", liquidations: lignes }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await liquidationsGet("BTCUSDT", { depuis: 500, limite: 10 })).toEqual(lignes);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/health");
+    const urlGet = String(fetchMock.mock.calls[1]?.[0]);
+    expect(urlGet).toContain("/liquidations/BTCUSDT");
+    expect(urlGet).toContain("depuis=500");
+    expect(urlGet).toContain("limite=10");
+  });
+
+  it("GET : renvoie null si le daemon est absent (sonde échoue)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ECONNREFUSED")));
+    expect(await liquidationsGet("BTCUSDT")).toBeNull();
+  });
+
+  it("GET : renvoie null si le daemon n'annonce pas la capability liquidations", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({ ...HEALTH_COMPLET, capabilities: ["kv"] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await liquidationsGet("BTCUSDT")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("PUSH : best-effort sans sonde, renvoie false si la réponse n'est pas ok", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({}, 500));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const lot = [{ t: 1, venue: "binance", side: "long" as const, price: 1, qty: 1, usd: 1 }];
+    expect(await liquidationsPush("BTCUSDT", lot)).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/liquidations/BTCUSDT");
+  });
+});
+
 describe("isAxiomHealth", () => {
   const valid = {
     ok: true,

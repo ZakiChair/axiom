@@ -1,8 +1,9 @@
 /**
- * Fenêtre « Liquidations » (mnémonique LIQ) — flux LIVE des liquidations forcées du
- * perpétuel Bybit pour le symbole courant (data/liquidations.ts). Affiche les
- * totaux notionnels long/short accumulés depuis la souscription, une barre de dominance,
- * et le feed des dernières liquidations. Échantillon (~1 msg/s côté Binance), pas exhaustif.
+ * Fenêtre « Liquidations » (mnémonique LIQ) — flux LIVE des liquidations forcées des
+ * perpétuels Bybit + OKX pour le symbole courant (data/liquidations.ts, agrégateur multi-
+ * exchange). Affiche les totaux notionnels long/short accumulés depuis la souscription, une
+ * barre de dominance, et le feed des dernières liquidations (badge de venue par ligne).
+ * Flux réel, mais pas exhaustif (seules Bybit + OKX sont branchées, live sans historique).
  *
  * Rendu par FloatingWindow (frame fournie par App.tsx). Reset au changement de symbole.
  */
@@ -11,11 +12,15 @@ import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { subscribeLiquidations, resumerLiquidations, type Liquidation } from "../data/liquidations";
 import { liqMarksStore } from "../chart/liquidationMarkers";
+import { liqEstStore } from "../chart/liquidationEstimates";
 import { EnTeteFenetre, Vide, NoteSource } from "./ui";
 import { formatUsd, formatHeure, formatPrice, formatPourcentage } from "../lib/format";
 
 /** Nombre max de liquidations conservées dans le feed (borne mémoire/affichage). */
 const MAX_FEED = 60;
+
+/** Libellé court de la venue pour le badge du feed (BYB / OKX). */
+const VENUE_BADGE: Record<Liquidation["venue"], string> = { bybit: "BYB", okx: "OKX" };
 
 /**
  * Bascule « Sur le graphe » : active/désactive les marqueurs de liquidation sur le
@@ -40,6 +45,30 @@ function ToggleChart() {
   );
 }
 
+/**
+ * Bascule « Niveaux estimés » : superpose des niveaux de liquidation ESTIMÉS (modèle de
+ * levier appliqué à l'OI, liqEstStore, cf. chart/liquidationEstimates.ts). Couche INDÉPENDANTE
+ * de la heatmap réelle. Étiquetée « EST. » à l'écran — approximation, PAS des liquidations
+ * réelles (garde-fou BUILD-CONTRACT).
+ */
+function ToggleEstimes() {
+  const actif = useStore(liqEstStore, (s) => s.actif);
+  const basculer = useStore(liqEstStore, (s) => s.basculer);
+  return (
+    <button
+      type="button"
+      onClick={basculer}
+      aria-pressed={actif}
+      title="Niveaux de liquidation ESTIMÉS depuis l'OI (modèle de levier — approximation, étiquetée EST.)"
+      className={`rounded border px-2 py-1 text-[11px] font-medium transition ${
+        actif ? "border-accent bg-bg text-accent" : "border-border bg-bg text-text-dim hover:text-text"
+      }`}
+    >
+      {actif ? "● Niveaux estimés" : "Niveaux estimés"}
+    </button>
+  );
+}
+
 export function LiquidationsWindow() {
   const symbol = useStore(marketStore, (s) => s.symbol);
   const [liqs, setLiqs] = useState<Liquidation[]>([]);
@@ -59,8 +88,13 @@ export function LiquidationsWindow() {
     <div className="flex h-full flex-col">
       <EnTeteFenetre
         titre="Liquidations"
-        sousTitre={`${symbol} · perp Bybit (live)`}
-        actions={<ToggleChart />}
+        sousTitre={`${symbol} · perp Bybit + OKX (live)`}
+        actions={
+          <div className="flex items-center gap-1.5">
+            <ToggleChart />
+            <ToggleEstimes />
+          </div>
+        }
       />
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {/* Totaux notionnels long/short depuis la souscription. */}
@@ -98,6 +132,7 @@ export function LiquidationsWindow() {
               <thead>
                 <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-text-dim">
                   <th className="pb-1 font-medium">Heure</th>
+                  <th className="pb-1 font-medium">Venue</th>
                   <th className="pb-1 font-medium">Côté</th>
                   <th className="pb-1 text-right font-medium">Notionnel</th>
                   <th className="pb-1 text-right font-medium">Prix</th>
@@ -107,6 +142,11 @@ export function LiquidationsWindow() {
                 {liqs.map((l, i) => (
                   <tr key={`${l.time}-${i}`} className="border-b border-border/40">
                     <td className="py-1 tabular-nums text-text-dim">{formatHeure(l.time)}</td>
+                    <td className="py-1">
+                      <span className="rounded border border-border px-1 py-0.5 text-[9px] font-medium tracking-wider text-text-dim">
+                        {VENUE_BADGE[l.venue]}
+                      </span>
+                    </td>
                     <td className={`py-1 font-medium ${l.side === "long" ? "text-down" : "text-up"}`}>
                       {l.side === "long" ? "Long" : "Short"}
                     </td>
@@ -121,8 +161,8 @@ export function LiquidationsWindow() {
 
         <div className="mt-3">
           <NoteSource>
-            Flux `allLiquidation` Bybit (live). Long = position longue fermée de force (vente).
-            Cumul depuis l'ouverture de la fenêtre.
+            Flux liquidations Bybit (`allLiquidation`) + OKX (`liquidation-orders`), live.
+            Long = position longue fermée de force (vente). Cumul depuis l'ouverture de la fenêtre.
           </NoteSource>
         </div>
       </div>

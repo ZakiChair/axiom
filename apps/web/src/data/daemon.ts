@@ -450,3 +450,77 @@ export async function candlesGet(
     return null;
   }
 }
+
+// ─────────────────────────── Liquidations (historique persistant) ───────────────────────────
+
+/**
+ * Une liquidation au format de fil du daemon — IDENTIQUE au stockage SQLite (LiqFil).
+ * Comme les champs coïncident, aucune traduction n'est nécessaire (contrairement aux
+ * bougies) : les lots sont poussés et relus tels quels.
+ */
+export interface LiqDaemon {
+  t: number;
+  venue: string;
+  side: "long" | "short";
+  price: number;
+  qty: number;
+  usd: number;
+}
+
+/** URL du fil de liquidations d'un symbole (symbole URL-encodé). */
+function urlLiquidations(symbole: string): string {
+  return `${baseDaemon()}/liquidations/${encodeURIComponent(symbole)}`;
+}
+
+/** Bornes optionnelles d'une lecture de liquidations. */
+export interface OptionsLiquidationsGet {
+  depuis?: number;
+  jusqua?: number;
+  limite?: number;
+}
+
+/**
+ * Lit le fil de liquidations persistées (triées par temps croissant). Sonde d'abord la
+ * capability `liquidations` (comme `listerSnapshots`) ; renvoie `null` si le daemon est
+ * absent / sans capability / en erreur — le front retombe alors sur le flux direct des
+ * exchanges.
+ */
+export async function liquidationsGet(
+  symbole: string,
+  opts: OptionsLiquidationsGet = {},
+): Promise<LiqDaemon[] | null> {
+  if (!(await detectDaemon("liquidations"))) return null;
+  try {
+    const params = new URLSearchParams();
+    if (opts.depuis !== undefined) params.set("depuis", String(opts.depuis));
+    if (opts.jusqua !== undefined) params.set("jusqua", String(opts.jusqua));
+    if (opts.limite !== undefined) params.set("limite", String(opts.limite));
+    const query = params.toString();
+    const res = await fetch(urlLiquidations(symbole) + (query ? `?${query}` : ""));
+    if (!res.ok) return null;
+    const corps = (await res.json()) as { liquidations?: LiqDaemon[] };
+    if (!Array.isArray(corps.liquidations)) return null;
+    return corps.liquidations;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pousse un lot de liquidations au daemon (insert idempotent). Best-effort SANS sonde
+ * (comme `candlesPush`) : renvoie `false` en cas d'échec silencieux. Le format de fil du
+ * daemon étant identique à `LiqDaemon`, le lot est envoyé tel quel.
+ */
+export async function liquidationsPush(symbole: string, lot: LiqDaemon[]): Promise<boolean> {
+  if (lot.length === 0) return true;
+  try {
+    const res = await fetch(urlLiquidations(symbole), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(lot),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

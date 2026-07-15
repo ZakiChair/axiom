@@ -50,6 +50,8 @@ import { PaneHeaders } from "./paneHeaders";
 import { OrderflowController } from "./orderflow";
 import { CompareController } from "./compare";
 import { VolumeProfileController } from "./volumeProfile";
+import { LiquidationHeatController } from "./liquidationHeat";
+import { liqMarksStore } from "./liquidationMarkers";
 import { RevenueController } from "./revenue";
 import { MacroController } from "./macro";
 import { DerivativesChartController } from "./derivatives";
@@ -283,6 +285,7 @@ export function ChartInstance({
   const chartRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null); // footprint (orderflow)
   const vpCanvasRef = useRef<HTMLCanvasElement>(null); // volume profile (maître)
+  const liqCanvasRef = useRef<HTMLCanvasElement>(null); // heatmap liquidations (maître)
   const xhairCanvasRef = useRef<HTMLCanvasElement>(null); // crosshair synchronisé inter-slots
 
   // Objets à vie longue (instance KLineChart + indicateurs + en-têtes + throttle des ticks),
@@ -459,7 +462,8 @@ export function ChartInstance({
     const container = containerRef.current;
     const canvas = canvasRef.current;
     const vpCanvas = vpCanvasRef.current;
-    if (!container || !canvas || !vpCanvas) return;
+    const liqCanvas = liqCanvasRef.current;
+    if (!container || !canvas || !vpCanvas || !liqCanvas) return;
 
     // Capture immuable de l'identité + révision de requête. Le store vide son buffer
     // AVANT tout appel réseau ; le chart impératif est vidé dans le même cycle. Une réponse,
@@ -521,11 +525,13 @@ export function ChartInstance({
     // ── Contrôleurs LOURDS : slot MAÎTRE uniquement (lisent les stores globaux) ──
     let compare: CompareController | null = null;
     let volumeProfile: VolumeProfileController | null = null;
+    let liqHeat: LiquidationHeatController | null = null;
     let revenue: RevenueController | null = null;
     let macro: MacroController | null = null;
     let derivativesChart: DerivativesChartController | null = null;
     let unsubscribeCompare: (() => void) | null = null;
     let unsubscribeVolumeProfile: (() => void) | null = null;
+    let unsubscribeLiqHeat: (() => void) | null = null;
     let unsubscribeRevenue: (() => void) | null = null;
     let unsubscribeMacro: (() => void) | null = null;
     let unsubscribeMacroHistory: (() => void) | null = null;
@@ -538,6 +544,12 @@ export function ChartInstance({
       volumeProfile = new VolumeProfileController(chart, container, vpCanvas);
       volumeProfile.setEnabled(volumeProfileStore.getState().enabled);
       unsubscribeVolumeProfile = volumeProfileStore.subscribe((state) => volumeProfile?.setEnabled(state.enabled));
+
+      // Heatmap liquidations 2D (canvas) : lit le buffer d'événements publié par le singleton
+      // WS de liquidationMarkers ; la bascule LIQMARK pilote son activation.
+      liqHeat = new LiquidationHeatController(chart, container, liqCanvas);
+      liqHeat.setEnabled(liqMarksStore.getState().actif);
+      unsubscribeLiqHeat = liqMarksStore.subscribe((state) => liqHeat?.setEnabled(state.actif));
 
       revenue = new RevenueController(chart, symbol);
       revenue.setEnabled(revenueStore.getState().enabled);
@@ -754,6 +766,7 @@ export function ChartInstance({
       unsubscribeOrderflow();
       unsubscribeCompare?.();
       unsubscribeVolumeProfile?.();
+      unsubscribeLiqHeat?.();
       unsubscribeRevenue?.();
       unsubscribeMacro?.();
       unsubscribeMacroHistory?.();
@@ -761,6 +774,7 @@ export function ChartInstance({
       derivativesChart?.dispose();
       macro?.dispose();
       revenue?.dispose();
+      liqHeat?.dispose();
       volumeProfile?.dispose();
       compare?.dispose();
       orderflow?.dispose();
@@ -825,6 +839,7 @@ export function ChartInstance({
         />
       )}
       <canvas ref={vpCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
+      <canvas ref={liqCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={xhairCanvasRef} className="pointer-events-none absolute inset-0" />
       <ChartDataStatusOverlay

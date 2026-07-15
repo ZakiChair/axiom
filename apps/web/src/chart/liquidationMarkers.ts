@@ -1,42 +1,51 @@
 /**
  * Heatmap de LIQUIDATIONS sur le chart — profil des liquidations RÉELLEMENT exécutées
- * (flux `allLiquidation` Bybit, cf. data/liquidations.ts), agrégées par NIVEAU DE PRIX
- * et peintes en bandes horizontales pleine largeur, d'intensité viridis proportionnelle
- * au notionnel liquidé à ce niveau (façon CoinGlass, mais données réelles — pas le
- * modèle de levier propriétaire).
+ * (flux `allLiquidation` Bybit, cf. data/liquidations.ts), peintes par NIVEAU DE PRIX
+ * en bandes horizontales d'intensité viridis proportionnelle au notionnel liquidé à ce
+ * niveau (façon CoinGlass, mais données réelles — pas le modèle de levier propriétaire).
  *
- * MODÈLE de câblage : overlay custom `registerOverlay` + contrôleur singleton via
- * `getActiveChart()` (comme tradeMarkers) → NE touche PAS ChartInstance. Différences :
- *   1. Source LIVE : le contrôleur gère l'abonnement WS (ouvert seulement si la bascule
- *      est ON, refermé/rouvert au changement de symbole).
- *   2. Accumulation par BUCKET DE PRIX (profil cumulatif depuis la souscription), pas
- *      des marqueurs individuels.
- *   3. Rendu = bandes pleine largeur ancrées à 2 points de prix (haut/bas du bucket) →
- *      repositionnées automatiquement au pan ET au zoom, sans redraw.
+ * MODÈLE de données : ÉVÉNEMENTS BRUTS bornés (buffer FIFO de `LiqEvent`) plutôt qu'un
+ * accumulateur agrégé. Chaque liquidation (live, seed daemon ou repli Coinalyze) est
+ * conservée telle quelle ; l'agrégation par bucket se fait à la volée au rendu. Ce modèle
+ * autorise le zoom/pan sur la densité et alimentera le contrôleur canvas (Tâche 6).
  *
- * Limites assumées : liquidations EXÉCUTÉES (pas estimées), accumulées en LIVE (le
- * heatmap se construit tant que c'est activé), Bybit uniquement.
+ * MODÈLE de câblage : contrôleur singleton (données uniquement) → NE touche PAS
+ * ChartInstance. Il gère l'abonnement WS (ouvert seulement si la bascule est ON,
+ * refermé/rouvert au changement de symbole), le seed daemon/Coinalyze, le dual-write vers
+ * le daemon et la persistance ; il PUBLIE les événements bruts dans `liqEventsStore`. Le
+ * RENDU (heatmap 2D canvas) est assuré par `LiquidationHeatController` (liquidationHeat.ts),
+ * câblé dans ChartInstance et abonné à ce store.
  *
- * Fonctions PURES (taille de bucket, index, colormap viridis) exportées et testées ;
- * couplage KLineChart non testé.
+ * Fonctions PURES (taille de bucket, index, colormap viridis, sérialisation v2, fusion,
+ * borne FIFO, seed Coinalyze) exportées et testées ; couplage KLineChart non testé.
  */
-import { registerOverlay } from "klinecharts";
-import type { OverlayCreate, OverlayFigure } from "klinecharts";
 import { createStore } from "zustand/vanilla";
+import type { StoreApi } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
-import { getActiveChart } from "./drawing";
 import { marketStore } from "../store/market";
-import { themeStore } from "../store/theme";
 import { subscribeLiquidations, type Liquidation } from "../data/liquidations";
 import { fetchLiquidationHistory, type LiquidationHistPoint } from "../data/coinalyze";
+import { liquidationsGet, liquidationsPush, type LiqDaemon } from "../data/daemon";
 import type { Candle, Unsubscribe } from "@axiom/types";
 
-const LIQ_HEAT = "liqHeat";
-const LIQ_HINT = "liqHint";
-const LIQ_GROUP = "axiomLiqHeat";
 const STORAGE_PREFIX = "axiom:liqheat:";
-/** Borne le nombre de buckets persistés (les plus gros) — limite la taille localStorage. */
-const MAX_BUCKETS_PERSIST = 600;
+
+/** Événement de liquidation normalisé côté chart. */
+export interface LiqEvent {
+  time: number;
+  side: "long" | "short";
+  price: number;
+  qty: number;
+  usd: number;
+  venue: string;
+  /** true si issu du seed Coinalyze (prix approximé low/high de bougie) — exclu du tooltip de détail. */
+  approx?: boolean;
+}
+
+/** FIFO : au-delà de cette borne, on écarte les événements les plus anciens du buffer. */
+export const MAX_EVENTS = 20_000;
+/** localStorage v2 : on ne persiste que les N derniers événements (limite la taille). */
+export const PERSIST_EVENTS = 3_000;
 
 // ─────────────────────────── Fonctions PURES (testées) ───────────────────────────
 
@@ -82,35 +91,85 @@ export function couleurViridis(t: number): [number, number, number] {
   ];
 }
 
-// ─────────────────────────── Persistance du profil (localStorage, par symbole) ───────────────────────────
+// ─────────────────────────── Persistance des événements v2 (localStorage, par symbole) ───────────────────────────
 
-/** Sérialise le profil (taille + `MAX_BUCKETS_PERSIST` plus gros buckets) en JSON. PURE. */
-export function serialiserProfil(t: number, acc: Map<number, number>): string {
-  const b = [...acc.entries()].sort((a, z) => z[1] - a[1]).slice(0, MAX_BUCKETS_PERSIST);
-  return JSON.stringify({ t, b });
+/**
+ * Sérialise les `PERSIST_EVENTS` derniers événements RÉELS au format compact v2 :
+ * `{v:2, e:[[t, side01, price, qty, usd, venue], ...]}` où side01 = 0 (long) / 1 (short).
+ * Les événements `approx` (seed Coinalyze) sont EXCLUS : le tuple à 6 champs (figé) ne
+ * porte pas `approx`, donc les persister les ferait réapparaître au reload comme des
+ * événements réels (avec `qty:NaN` → null en JSON), et un buffer non vide bloquerait le
+ * re-seed. PURE.
+ */
+export function serialiserEvenements(events: LiqEvent[]): string {
+  const derniers = events.filter((ev) => ev.approx !== true).slice(-PERSIST_EVENTS);
+  const e = derniers.map((ev) => [
+    ev.time,
+    ev.side === "long" ? 0 : 1,
+    ev.price,
+    ev.qty,
+    ev.usd,
+    ev.venue,
+  ]);
+  return JSON.stringify({ v: 2, e });
 }
 
-/** Désérialise un profil persisté (tolérant : null si absent/corrompu). PURE. */
-export function deserialiserProfil(
-  raw: string | null,
-): { taille: number; buckets: Map<number, number> } | null {
-  if (!raw) return null;
+/**
+ * Désérialise des événements persistés. TOLÉRANT : raw absent/corrompu/version ≠ 2 → [] ;
+ * l'ancien format v1 `{t,b}` (buckets agrégés) n'a pas de champ `v:2 + e[]` → [] (jeté).
+ * Chaque tuple invalide (longueur ≠ 6, side hors 0-1, prix ≤ 0, venue non-string…) est
+ * ignoré. PURE.
+ */
+export function deserialiserEvenements(raw: string | null): LiqEvent[] {
+  if (!raw) return [];
   try {
-    const o = JSON.parse(raw) as { t?: unknown; b?: unknown };
-    const t = Number(o.t);
-    if (!(t > 0) || !Array.isArray(o.b)) return null;
-    const buckets = new Map<number, number>();
-    for (const e of o.b) {
-      if (Array.isArray(e) && e.length === 2) {
-        const idx = Number(e[0]);
-        const usd = Number(e[1]);
-        if (Number.isInteger(idx) && Number.isFinite(usd) && usd > 0) buckets.set(idx, usd);
-      }
+    const o = JSON.parse(raw) as { v?: unknown; e?: unknown };
+    if (o.v !== 2 || !Array.isArray(o.e)) return [];
+    const out: LiqEvent[] = [];
+    for (const t of o.e) {
+      if (!Array.isArray(t) || t.length !== 6) continue;
+      const time = Number(t[0]);
+      const side01 = Number(t[1]);
+      const price = Number(t[2]);
+      const qty = Number(t[3]);
+      const usd = Number(t[4]);
+      const venue = t[5];
+      if (!Number.isFinite(time) || (side01 !== 0 && side01 !== 1)) continue;
+      if (!Number.isFinite(price) || price <= 0) continue;
+      if (!Number.isFinite(qty) || !Number.isFinite(usd)) continue;
+      if (typeof venue !== "string") continue;
+      out.push({ time, side: side01 === 0 ? "long" : "short", price, qty, usd, venue });
     }
-    return { taille: t, buckets };
+    return out;
   } catch {
-    return null;
+    return [];
   }
+}
+
+/** Clé d'unicité d'un événement pour le dédoublonnage de fusion. PURE. */
+function cleEvenement(ev: LiqEvent): string {
+  return `${ev.time}|${ev.venue}|${ev.price}|${ev.qty}`;
+}
+
+/**
+ * Fusionne plusieurs listes d'événements en dédoublonnant par clé `t|venue|price|qty`
+ * (1er vu conservé) et en triant par temps croissant. Sert à fusionner le buffer persisté
+ * avec le seed daemon sans recompter des événements identiques. PURE.
+ */
+export function fusionnerEvenements(...listes: LiqEvent[][]): LiqEvent[] {
+  const parCle = new Map<string, LiqEvent>();
+  for (const liste of listes) {
+    for (const ev of liste) {
+      const cle = cleEvenement(ev);
+      if (!parCle.has(cle)) parCle.set(cle, ev);
+    }
+  }
+  return [...parCle.values()].sort((a, b) => a.time - b.time);
+}
+
+/** Borne un buffer d'événements à `max` (FIFO : on écarte les plus anciens). PURE. */
+export function bornerEvenements(events: LiqEvent[], max: number): LiqEvent[] {
+  return events.length <= max ? events : events.slice(events.length - max);
 }
 
 // ─────────────────────────── Amorçage historique (Coinalyze) — fonctions pures ───────────────────────────
@@ -132,31 +191,29 @@ export function candleContenant(candles: Candle[], time: number): Candle | undef
 }
 
 /**
- * Construit un profil de seed par bucket de prix depuis l'historique Coinalyze : chaque
+ * Construit des événements de seed APPROCHÉS depuis l'historique Coinalyze : chaque
  * intervalle est mappé à la bougie qui le contient ; le volume LONG liquidé est placé au
  * BAS de la bougie (ventes forcées → mèches basses), le SHORT au HAUT (rachats forcés →
- * mèches hautes). Approximation assumée (Coinalyze donne le volume par temps, pas par
- * prix). PURE.
+ * mèches hautes). Événements marqués `approx:true`, venue `coinalyze`, `qty` inconnue
+ * (NaN — Coinalyze donne le volume USD par temps, pas la quantité ni le prix). PURE.
  */
-export function construireSeed(
+export function seedDepuisCoinalyze(
   history: LiquidationHistPoint[],
   candles: Candle[],
-  taille: number,
-): Map<number, number> {
-  const seed = new Map<number, number>();
-  if (taille <= 0 || candles.length === 0) return seed;
-  const ajouter = (prix: number, usd: number): void => {
-    if (!(usd > 0) || !Number.isFinite(prix) || prix <= 0) return;
-    const idx = bucketIndex(prix, taille);
-    seed.set(idx, (seed.get(idx) ?? 0) + usd);
-  };
+): LiqEvent[] {
+  const out: LiqEvent[] = [];
+  if (candles.length === 0) return out;
   for (const pt of history) {
     const c = candleContenant(candles, pt.time);
     if (c === undefined) continue;
-    ajouter(c.low, pt.longUsd);
-    ajouter(c.high, pt.shortUsd);
+    if (pt.longUsd > 0) {
+      out.push({ time: pt.time, side: "long", price: c.low, qty: NaN, usd: pt.longUsd, venue: "coinalyze", approx: true });
+    }
+    if (pt.shortUsd > 0) {
+      out.push({ time: pt.time, side: "short", price: c.high, qty: NaN, usd: pt.shortUsd, venue: "coinalyze", approx: true });
+    }
   }
-  return seed;
+  return out;
 }
 
 // ─────────────────────────── Bascule (store vanilla local) ───────────────────────────
@@ -171,203 +228,200 @@ export const liqMarksStore = createStore<LiqMarksState>((set, get) => ({
   basculer: () => set({ actif: !get().actif }),
 }));
 
-// ─────────────────────────── Rendu KLineChart (non testé) ───────────────────────────
+// ─────────────────────────── Store des événements (buffer borné, vanilla) ───────────────────────────
 
-interface DonneesBande {
-  couleur: string; // rgba déjà résolue
+/** État du buffer d'événements du symbole abonné (données HF → store vanilla, hors React). */
+export interface LiqEventsState {
+  events: LiqEvent[];
+  /** Compteur de révision (bumpé à chaque mutation) — les consommateurs comparent `rev`. */
+  rev: number;
+  /** Vrai quand le heatmap est actif mais le buffer encore vide (« en attente du flux »). */
+  enAttente: boolean;
 }
 
-let overlayRegistered = false;
-function ensureOverlayRegistered(): void {
-  if (overlayRegistered) return;
-  overlayRegistered = true;
-  registerOverlay({
-    name: LIQ_HEAT,
-    totalStep: 2, // 2 points : (t0, prixHaut) et (t1, prixBas) du bucket
-    lock: true,
-    needDefaultPointFigure: false,
-    needDefaultXAxisFigure: false,
-    needDefaultYAxisFigure: false,
-    createPointFigures: ({ overlay, coordinates }) => {
-      const c0 = coordinates[0];
-      const c1 = coordinates[1];
-      if (c0 === undefined || c1 === undefined) return [];
-      const d = overlay.extendData as DonneesBande | undefined;
-      if (d === undefined) return [];
-      const x = Math.min(c0.x, c1.x);
-      const y = Math.min(c0.y, c1.y);
-      const width = Math.abs(c1.x - c0.x);
-      const height = Math.max(1, Math.abs(c1.y - c0.y)); // au moins 1px de haut
-      const fig: OverlayFigure = {
-        type: "rect",
-        ignoreEvent: true,
-        attrs: { x, y, width, height },
-        styles: { style: "fill", color: d.couleur },
-      };
-      return [fig];
-    },
-  });
-  // Indicateur « en attente » (heatmap active mais profil vide) : un texte discret.
-  registerOverlay({
-    name: LIQ_HINT,
-    totalStep: 1,
-    lock: true,
-    needDefaultPointFigure: false,
-    needDefaultXAxisFigure: false,
-    needDefaultYAxisFigure: false,
-    createPointFigures: ({ coordinates }) => {
-      const c = coordinates[0];
-      if (c === undefined) return [];
-      const fig: OverlayFigure = {
-        type: "text",
-        ignoreEvent: true,
-        attrs: {
-          x: c.x - 10,
-          y: c.y - 14,
-          text: "⋯ Heatmap liquidations active — en attente du flux live",
-          align: "right",
-          baseline: "middle",
-        },
-        styles: { color: "rgba(130,130,150,0.95)", size: 11 },
-      };
-      return [fig];
-    },
-  });
-}
+export const liqEventsStore: StoreApi<LiqEventsState> = createStore<LiqEventsState>(() => ({
+  events: [],
+  rev: 0,
+  enAttente: false,
+}));
 
-// ─────────────────────────── Contrôleur singleton ───────────────────────────
+// ─────────────────────────── Contrôleur singleton (données uniquement) ───────────────────────────
 
-const overlaysSuivis = new Map<{ removeOverlay(f: { id: string }): void }, string[]>();
-/** Accumulateur notionnel par bucket de prix (profil, depuis la souscription). */
-let accumulateur = new Map<number, number>();
-/** Taille de bucket figée à la souscription (calculée sur le 1er prix vu). */
-let taille = 0;
+/** Buffer FIFO des événements bruts du symbole abonné (mirroité dans liqEventsStore). */
+let evenements: LiqEvent[] = [];
 let abonnement: Unsubscribe | null = null;
 let symboleAbonne: string | null = null;
-/** Évite un double amorçage Coinalyze par souscription. */
-let dejaSeed = false;
-/** Fenêtre d'historique demandée à Coinalyze pour l'amorçage (48 h). */
-const SEED_WINDOW_MS = 48 * 60 * 60 * 1000;
+/** Fenêtre d'historique demandée au daemon / à Coinalyze pour l'amorçage (7 j). */
+const SEED_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** Throttle de persistance localStorage : au plus 1 écriture / 5 s (les liq rafalent). */
+const SAVE_THROTTLE_MS = 5_000;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let savePending = false;
 
-function retirerOverlays(): void {
-  for (const [chart, ids] of overlaysSuivis) {
-    for (const id of ids) {
-      try {
-        chart.removeOverlay({ id });
-      } catch {
-        break;
-      }
-    }
-  }
-  overlaysSuivis.clear();
+/**
+ * File d'attente du dual-write daemon : les liquidations LIVE (jamais les seeds) sont
+ * accumulées ici puis POUSSÉES EN LOT sur le même rythme throttlé que la persistance (timer
+ * jumeau 5 s), au lieu d'un POST par liquidation — une cascade génère alors 1 seul POST par
+ * fenêtre au lieu d'une rafale (et un seul ECONNREFUSED si le daemon est absent).
+ */
+let enAttentePush: LiqEvent[] = [];
+let pushTimer: ReturnType<typeof setTimeout> | null = null;
+let pushPending = false;
+
+/** Pousse l'état courant du buffer dans le store vanilla (bump `rev`, calcule `enAttente`). */
+function publier(): void {
+  const enAttente = liqMarksStore.getState().actif && evenements.length === 0;
+  liqEventsStore.setState((s) => ({ events: evenements, rev: s.rev + 1, enAttente }));
 }
 
-/** Restaure le profil persisté du symbole dans l'accumulateur (best-effort). */
-function chargerProfil(symbol: string): void {
+/** Restaure les événements persistés v2 du symbole (best-effort → [] si absent/corrompu). */
+function chargerProfil(symbol: string): LiqEvent[] {
   try {
-    const d = deserialiserProfil(localStorage.getItem(STORAGE_PREFIX + symbol.toUpperCase()));
-    if (d) {
-      accumulateur = d.buckets;
-      taille = d.taille;
-    }
+    return deserialiserEvenements(localStorage.getItem(STORAGE_PREFIX + symbol.toUpperCase()));
   } catch {
-    /* best-effort */
+    return [];
   }
 }
 
-/** Persiste le profil courant du symbole (best-effort ; borné par serialiserProfil). */
+/** Persiste immédiatement le buffer courant du symbole (best-effort ; borné à PERSIST_EVENTS). */
 function sauverProfil(symbol: string): void {
   try {
-    if (taille > 0 && accumulateur.size > 0) {
-      localStorage.setItem(STORAGE_PREFIX + symbol.toUpperCase(), serialiserProfil(taille, accumulateur));
-    }
+    localStorage.setItem(STORAGE_PREFIX + symbol.toUpperCase(), serialiserEvenements(evenements));
   } catch {
     /* quota / mode privé : ignoré */
   }
 }
 
-function redraw(): void {
-  retirerOverlays();
-  if (!liqMarksStore.getState().actif) return;
-  const chart = getActiveChart();
-  if (chart === null) return;
-  const candles = marketStore.getState().candles;
-  if (candles.length === 0) return;
-
-  const premier = candles[0];
-  const dernier = candles[candles.length - 1];
-  if (premier === undefined || dernier === undefined) return;
-
-  // Profil vide (aucune liquidation encore accumulée) : indicateur « en attente » discret
-  // pour signaler que le heatmap est bien ACTIF (flux live sparse, se remplit avec le temps).
-  if (accumulateur.size === 0 || taille <= 0) {
-    const hint: OverlayCreate = {
-      name: LIQ_HINT,
-      groupId: LIQ_GROUP,
-      lock: true,
-      points: [{ timestamp: dernier.time, value: dernier.close }],
-      extendData: {},
-    };
-    const id = chart.createOverlay(hint);
-    if (typeof id === "string") overlaysSuivis.set(chart, [id]);
+/**
+ * Planifie une persistance THROTTLÉE (leading-edge) : écrit tout de suite si aucun timer
+ * en cours, puis bloque 5 s ; toute demande pendant le blocage est repoussée à une seule
+ * écriture en fin de fenêtre. Évite de marteler localStorage sur une cascade de liq.
+ */
+function planifierSauvegarde(): void {
+  if (symboleAbonne === null) return;
+  if (saveTimer !== null) {
+    savePending = true;
     return;
   }
+  sauverProfil(symboleAbonne);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    if (savePending) {
+      savePending = false;
+      planifierSauvegarde();
+    }
+  }, SAVE_THROTTLE_MS);
+}
 
-  let max = 0;
-  for (const v of accumulateur.values()) if (v > max) max = v;
-  if (max <= 0) return;
-
-  const ids: string[] = [];
-  for (const [idx, notionnel] of accumulateur) {
-    const t = notionnel / max;
-    const [r, g, b] = couleurViridis(t);
-    const alpha = 0.2 + 0.6 * t;
-    const overlay: OverlayCreate = {
-      name: LIQ_HEAT,
-      groupId: LIQ_GROUP,
-      lock: true,
-      points: [
-        { timestamp: premier.time, value: (idx + 1) * taille },
-        { timestamp: dernier.time, value: idx * taille },
-      ],
-      extendData: { couleur: `rgba(${r},${g},${b},${alpha.toFixed(3)})` } satisfies DonneesBande,
-    };
-    const id = chart.createOverlay(overlay);
-    if (typeof id === "string") ids.push(id);
+/** Vide le throttle et persiste l'état courant (flush au changement de symbole / arrêt). */
+function flushSauvegarde(symbol: string): void {
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
   }
-  if (ids.length > 0) overlaysSuivis.set(chart, ids);
+  savePending = false;
+  sauverProfil(symbol);
+}
+
+/** Pousse le lot accumulé en UN seul POST daemon (best-effort) et vide le timer/la file. */
+function flushPush(symbol: string): void {
+  if (pushTimer !== null) {
+    clearTimeout(pushTimer);
+    pushTimer = null;
+  }
+  pushPending = false;
+  if (enAttentePush.length === 0) return;
+  const lot = enAttentePush.map((ev) => ({
+    t: ev.time,
+    venue: ev.venue,
+    side: ev.side,
+    price: ev.price,
+    qty: ev.qty,
+    usd: ev.usd,
+  }));
+  enAttentePush = [];
+  void liquidationsPush(symbol, lot);
 }
 
 /**
- * Amorce le profil depuis l'historique Coinalyze (une seule fois par souscription).
- * Inerte sans clé Coinalyze (fetchLiquidationHistory renvoie [] → aucun effet). Le seed
- * historique est ADDITIF au profil ; on ne l'exécute qu'au 1er remplissage (profil vide)
- * pour éviter de recompter l'historique déjà accumulé/persisté.
+ * Planifie un push THROTTLÉ (leading-edge, même rythme que la persistance) : pousse tout de
+ * suite le lot courant si aucun timer en cours, puis bloque 5 s ; toute liq arrivée pendant le
+ * blocage est repoussée à un unique POST en fin de fenêtre. Collapse les cascades en 1 lot.
  */
-async function amorcerCoinalyze(symbol: string): Promise<void> {
-  if (dejaSeed) return;
-  dejaSeed = true;
+function planifierPush(): void {
+  if (symboleAbonne === null) return;
+  if (pushTimer !== null) {
+    pushPending = true;
+    return;
+  }
+  flushPush(symboleAbonne);
+  pushTimer = setTimeout(() => {
+    pushTimer = null;
+    if (pushPending) {
+      pushPending = false;
+      planifierPush();
+    }
+  }, SAVE_THROTTLE_MS);
+}
+
+/** Traduit une liquidation persistée du daemon en événement chart. PURE (locale). */
+function depuisDaemon(d: LiqDaemon): LiqEvent {
+  return { time: d.t, side: d.side, price: d.price, qty: d.qty, usd: d.usd, venue: d.venue };
+}
+
+/**
+ * Amorce le buffer au changement de symbole : d'abord le seed DAEMON (historique persistant
+ * 7 j), fusionné + dédoublonné avec le buffer localStorage déjà restauré. Si le daemon est
+ * ABSENT (`null`) ET le buffer vide, repli COINALYZE (événements approx, long→low/short→high).
+ * Garde anti-course : si le symbole change pendant l'attente async, on jette le résultat.
+ */
+async function amorcerSeed(symbol: string): Promise<void> {
+  const daemon = await liquidationsGet(symbol, { depuis: Date.now() - SEED_WINDOW_MS });
+  if (symboleAbonne !== symbol) return; // symbole changé pendant l'attente → jeté
+  if (daemon !== null) {
+    // Daemon présent : on fusionne son historique (même vide → pas de repli Coinalyze).
+    if (daemon.length > 0) {
+      evenements = bornerEvenements(fusionnerEvenements(evenements, daemon.map(depuisDaemon)), MAX_EVENTS);
+      publier();
+      sauverProfil(symbol);
+    }
+    return;
+  }
+  // Daemon absent ET buffer vide → repli Coinalyze (sinon on garde le buffer persisté).
+  if (evenements.length > 0) return;
   const history = await fetchLiquidationHistory(symbol, Date.now() - SEED_WINDOW_MS);
-  if (symboleAbonne !== symbol || history.length === 0) return; // symbole changé / rien
-  const candles = marketStore.getState().candles;
-  const dernier = candles[candles.length - 1];
-  if (dernier === undefined) return;
-  if (taille <= 0) taille = tailleBucket(dernier.close);
-  const seed = construireSeed(history, candles, taille);
-  for (const [idx, usd] of seed) accumulateur.set(idx, (accumulateur.get(idx) ?? 0) + usd);
+  if (symboleAbonne !== symbol || history.length === 0) return;
+  const seed = seedDepuisCoinalyze(history, marketStore.getState().candles);
+  if (seed.length === 0) return;
+  evenements = bornerEvenements(fusionnerEvenements(evenements, seed), MAX_EVENTS);
+  publier();
   sauverProfil(symbol);
-  redraw();
 }
 
-/** Accumule une liquidation dans le bucket de son prix (fige la taille au 1er appel) + persiste. */
-function accumuler(l: Liquidation): void {
-  if (taille <= 0) taille = tailleBucket(l.price);
-  const idx = bucketIndex(l.price, taille);
-  accumulateur.set(idx, (accumulateur.get(idx) ?? 0) + l.notionalUsd);
-  if (symboleAbonne !== null) sauverProfil(symboleAbonne);
+/** Ajoute une liquidation LIVE au buffer (FIFO), persiste (throttlé) et dual-write daemon. */
+function ajouterLive(l: Liquidation): void {
+  // venue portée par la liquidation (Bybit ou OKX — l'agrégateur fusionne les deux flux).
+  const ev: LiqEvent = {
+    time: l.time,
+    side: l.side,
+    price: l.price,
+    qty: l.qty,
+    usd: l.notionalUsd,
+    venue: l.venue,
+  };
+  evenements.push(ev);
+  if (evenements.length > MAX_EVENTS) evenements.splice(0, evenements.length - MAX_EVENTS);
+  publier();
+  planifierSauvegarde();
+  // Dual-write best-effort EN LOT : on n'accumule QUE le live (jamais le seed Coinalyze) et on
+  // pousse par fenêtre throttlée (cf. planifierPush) plutôt qu'un POST par liquidation.
+  if (symboleAbonne !== null) {
+    enAttentePush.push(ev);
+    planifierPush();
+  }
 }
 
-/** Aligne l'abonnement WS sur l'état (bascule + symbole). Réinitialise le profil au changement de symbole. */
+/** Aligne l'abonnement WS sur l'état (bascule + symbole). Réinitialise le buffer au changement de symbole. */
 function sync(): void {
   const actif = liqMarksStore.getState().actif;
   const symbol = marketStore.getState().symbol;
@@ -377,29 +431,30 @@ function sync(): void {
       abonnement();
       abonnement = null;
     }
+    // Flush du lot daemon (live en attente) AVANT de perdre le symbole abonné, puis persistance.
+    if (symboleAbonne !== null) {
+      flushPush(symboleAbonne);
+      flushSauvegarde(symboleAbonne);
+    }
     symboleAbonne = null;
-    accumulateur = new Map();
-    taille = 0;
-    redraw();
+    evenements = [];
+    publier();
     return;
   }
   if (symboleAbonne !== symbol) {
     if (abonnement) abonnement();
-    // Restaure le profil persisté du symbole (survit aux reloads / changements de symbole) ;
-    // les liquidations live s'y ajoutent. Vide si jamais accumulé.
-    accumulateur = new Map();
-    taille = 0;
-    dejaSeed = false;
+    if (symboleAbonne !== null) {
+      flushPush(symboleAbonne);
+      flushSauvegarde(symboleAbonne);
+    }
     symboleAbonne = symbol;
-    chargerProfil(symbol);
-    abonnement = subscribeLiquidations(symbol, (l) => {
-      accumuler(l);
-      redraw();
-    });
-    redraw();
-    // Amorçage historique Coinalyze UNIQUEMENT si aucun profil persisté (1re activation) :
-    // évite de recompter l'historique déjà présent. Inerte sans clé.
-    if (accumulateur.size === 0) void amorcerCoinalyze(symbol);
+    // Restaure les événements persistés v2 du symbole (survit aux reloads / changements de
+    // symbole) ; les liquidations live s'y ajoutent. Vide si jamais accumulé.
+    evenements = chargerProfil(symbol);
+    publier();
+    abonnement = subscribeLiquidations(symbol, (l) => ajouterLive(l));
+    // Seed daemon (puis repli Coinalyze) — asynchrone, gardé anti-course.
+    void amorcerSeed(symbol);
   }
 }
 
@@ -407,34 +462,20 @@ let controllerStarted = false;
 export function demarrerLiquidationMarkers(): void {
   if (controllerStarted) return;
   controllerStarted = true;
-  ensureOverlayRegistered();
 
+  // Réaligne l'abonnement WS (buffer + seed) sur le symbole/état de chargement du marché.
+  // Le RENDU suit le viewport côté canvas (LiquidationHeatController), donc plus besoin de
+  // pister l'instance de chart ni les bornes de bougies ici — seuls symbole et readiness
+  // (bougies chargées, pour le seed Coinalyze) déclenchent un resync des données.
   let prevSymbol = marketStore.getState().symbol;
-  let prevChart = getActiveChart();
   let prevReady = marketStore.getState().candles.length > 0;
-  const bornes = () => {
-    const c = marketStore.getState().candles;
-    return c.length === 0 ? "" : `${c[0]?.time}:${c[c.length - 1]?.time}`;
-  };
-  let prevBornes = bornes();
   marketStore.subscribe(() => {
-    const chart = getActiveChart();
     const { symbol, candles } = marketStore.getState();
     const ready = candles.length > 0;
-    if (symbol !== prevSymbol || chart !== prevChart || ready !== prevReady) {
+    if (symbol !== prevSymbol || ready !== prevReady) {
       prevSymbol = symbol;
-      prevChart = chart;
       prevReady = ready;
-      prevBornes = bornes();
       sync();
-      return;
-    }
-    // Plage de bougies étendue (historique chargé / nouvelle bougie) → réancrer les bandes
-    // pleine largeur, sans redessiner sur chaque tick de prix intra-bougie.
-    const b = bornes();
-    if (b !== prevBornes) {
-      prevBornes = b;
-      redraw();
     }
   });
 
@@ -443,16 +484,6 @@ export function demarrerLiquidationMarkers(): void {
     if (s.actif !== prevActif) {
       prevActif = s.actif;
       sync();
-    }
-  });
-
-  // Le heatmap viridis ne dépend pas du thème, mais un changement de thème peut
-  // reconstruire le chart : on redessine par sûreté.
-  let prevTheme = themeStore.getState().theme;
-  themeStore.subscribe((s) => {
-    if (s.theme !== prevTheme) {
-      prevTheme = s.theme;
-      redraw();
     }
   });
 }

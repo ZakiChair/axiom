@@ -68,6 +68,30 @@ export function requeteLocaleAutorisee(req: Request): boolean {
   return true;
 }
 
+/** Vrai si l'Origin est une origine loopback (localhost/127.0.0.1, port quelconque). */
+function origineLoopback(origin: string | null): boolean {
+  if (!origin) return false;
+  try {
+    const u = new URL(origin);
+    return (u.protocol === "http:" || u.protocol === "https:") && HOTES_LOCAUX.has(u.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * En-têtes CORS pour une réponse de REJET (403 de la garde locale). Reflète l'Origin
+ * UNIQUEMENT si elle est loopback (ex. Vite bascule sur un port inattendu 5176), afin
+ * que le front puisse LIRE et logger le 403 au lieu d'une erreur réseau opaque.
+ * Sûr : la réponse ne porte aucune donnée et aucun effet de bord n'a eu lieu ; une
+ * origine distante (attaquant cross-site) n'est JAMAIS reflétée.
+ */
+export function entetesCorsRejet(req: Request): Record<string, string> {
+  const origin = req.headers.get("origin");
+  if (!origineLoopback(origin)) return {};
+  return { "access-control-allow-origin": origin as string, vary: "origin" };
+}
+
 /** En-têtes CORS à greffer sur une réponse (vide si aucune origine autorisée). */
 export function entetesCors(req: Request): Record<string, string> {
   const origin = origineAutorisee(req.headers.get("origin"), req.headers.get("host"));

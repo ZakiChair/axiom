@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { demarrerBoucleAlertes, enregistrerAlertes } from "./alerts";
 import { compterEntrees } from "./cache";
 import { enregistrerCandles } from "./candles";
-import { entetesCors, reponsePreflight, requeteLocaleAutorisee } from "./cors";
+import { entetesCors, entetesCorsRejet, reponsePreflight, requeteLocaleAutorisee } from "./cors";
 import { chargerCles } from "./env";
 import { demarrerBoucleGlobe, enregistrerGlobe } from "./globe";
 import { enregistrerKv } from "./kv";
@@ -89,7 +89,12 @@ enregistrerGlobe(routeur);
 
 // --- Gestionnaire principal ------------------------------------------------
 async function gestionnaire(req: Request): Promise<Response> {
-  if (!requeteLocaleAutorisee(req)) return new Response("Requête locale refusée", { status: 403 });
+  if (!requeteLocaleAutorisee(req)) {
+    return new Response(JSON.stringify({ erreur: "requête locale refusée (origine ou host non autorisé)" }), {
+      status: 403,
+      headers: { "content-type": "application/json; charset=utf-8", ...entetesCorsRejet(req) },
+    });
+  }
   const url = new URL(req.url);
   if (req.method === "OPTIONS") return reponsePreflight(req);
   const reponse = await routeur.gerer(req, url);

@@ -9,34 +9,25 @@
  * conservée telle quelle ; l'agrégation par bucket se fait à la volée au rendu. Ce modèle
  * autorise le zoom/pan sur la densité et alimentera le contrôleur canvas (Tâche 6).
  *
- * MODÈLE de câblage : overlay custom `registerOverlay` + contrôleur singleton via
- * `getActiveChart()` (comme tradeMarkers) → NE touche PAS ChartInstance. Le contrôleur
- * gère l'abonnement WS (ouvert seulement si la bascule est ON, refermé/rouvert au
- * changement de symbole), le seed daemon/Coinalyze et le dual-write vers le daemon.
- *
- * ⚠️ Rendu overlay INTÉRIMAIRE : `redraw` agrège les événements en buckets à la volée et
- * dessine les mêmes bandes qu'avant. Il sera remplacé par un canvas en Tâche 6 — ne pas
- * le peaufiner.
+ * MODÈLE de câblage : contrôleur singleton (données uniquement) → NE touche PAS
+ * ChartInstance. Il gère l'abonnement WS (ouvert seulement si la bascule est ON,
+ * refermé/rouvert au changement de symbole), le seed daemon/Coinalyze, le dual-write vers
+ * le daemon et la persistance ; il PUBLIE les événements bruts dans `liqEventsStore`. Le
+ * RENDU (heatmap 2D canvas) est assuré par `LiquidationHeatController` (liquidationHeat.ts),
+ * câblé dans ChartInstance et abonné à ce store.
  *
  * Fonctions PURES (taille de bucket, index, colormap viridis, sérialisation v2, fusion,
  * borne FIFO, seed Coinalyze) exportées et testées ; couplage KLineChart non testé.
  */
-import { registerOverlay } from "klinecharts";
-import type { OverlayCreate, OverlayFigure } from "klinecharts";
 import { createStore } from "zustand/vanilla";
 import type { StoreApi } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
-import { getActiveChart } from "./drawing";
 import { marketStore } from "../store/market";
-import { themeStore } from "../store/theme";
 import { subscribeLiquidations, type Liquidation } from "../data/liquidations";
 import { fetchLiquidationHistory, type LiquidationHistPoint } from "../data/coinalyze";
 import { liquidationsGet, liquidationsPush, type LiqDaemon } from "../data/daemon";
 import type { Candle, Unsubscribe } from "@axiom/types";
 
-const LIQ_HEAT = "liqHeat";
-const LIQ_HINT = "liqHint";
-const LIQ_GROUP = "axiomLiqHeat";
 const STORAGE_PREFIX = "axiom:liqheat:";
 
 /** Événement de liquidation normalisé côté chart. */
@@ -254,73 +245,8 @@ export const liqEventsStore: StoreApi<LiqEventsState> = createStore<LiqEventsSta
   enAttente: false,
 }));
 
-// ─────────────────────────── Rendu KLineChart (non testé) ───────────────────────────
+// ─────────────────────────── Contrôleur singleton (données uniquement) ───────────────────────────
 
-interface DonneesBande {
-  couleur: string; // rgba déjà résolue
-}
-
-let overlayRegistered = false;
-function ensureOverlayRegistered(): void {
-  if (overlayRegistered) return;
-  overlayRegistered = true;
-  registerOverlay({
-    name: LIQ_HEAT,
-    totalStep: 2, // 2 points : (t0, prixHaut) et (t1, prixBas) du bucket
-    lock: true,
-    needDefaultPointFigure: false,
-    needDefaultXAxisFigure: false,
-    needDefaultYAxisFigure: false,
-    createPointFigures: ({ overlay, coordinates }) => {
-      const c0 = coordinates[0];
-      const c1 = coordinates[1];
-      if (c0 === undefined || c1 === undefined) return [];
-      const d = overlay.extendData as DonneesBande | undefined;
-      if (d === undefined) return [];
-      const x = Math.min(c0.x, c1.x);
-      const y = Math.min(c0.y, c1.y);
-      const width = Math.abs(c1.x - c0.x);
-      const height = Math.max(1, Math.abs(c1.y - c0.y)); // au moins 1px de haut
-      const fig: OverlayFigure = {
-        type: "rect",
-        ignoreEvent: true,
-        attrs: { x, y, width, height },
-        styles: { style: "fill", color: d.couleur },
-      };
-      return [fig];
-    },
-  });
-  // Indicateur « en attente » (heatmap active mais profil vide) : un texte discret.
-  registerOverlay({
-    name: LIQ_HINT,
-    totalStep: 1,
-    lock: true,
-    needDefaultPointFigure: false,
-    needDefaultXAxisFigure: false,
-    needDefaultYAxisFigure: false,
-    createPointFigures: ({ coordinates }) => {
-      const c = coordinates[0];
-      if (c === undefined) return [];
-      const fig: OverlayFigure = {
-        type: "text",
-        ignoreEvent: true,
-        attrs: {
-          x: c.x - 10,
-          y: c.y - 14,
-          text: "⋯ Heatmap liquidations active — en attente du flux live",
-          align: "right",
-          baseline: "middle",
-        },
-        styles: { color: "rgba(130,130,150,0.95)", size: 11 },
-      };
-      return [fig];
-    },
-  });
-}
-
-// ─────────────────────────── Contrôleur singleton ───────────────────────────
-
-const overlaysSuivis = new Map<{ removeOverlay(f: { id: string }): void }, string[]>();
 /** Buffer FIFO des événements bruts du symbole abonné (mirroité dans liqEventsStore). */
 let evenements: LiqEvent[] = [];
 let abonnement: Unsubscribe | null = null;
@@ -336,19 +262,6 @@ let savePending = false;
 function publier(): void {
   const enAttente = liqMarksStore.getState().actif && evenements.length === 0;
   liqEventsStore.setState((s) => ({ events: evenements, rev: s.rev + 1, enAttente }));
-}
-
-function retirerOverlays(): void {
-  for (const [chart, ids] of overlaysSuivis) {
-    for (const id of ids) {
-      try {
-        chart.removeOverlay({ id });
-      } catch {
-        break;
-      }
-    }
-  }
-  overlaysSuivis.clear();
 }
 
 /** Restaure les événements persistés v2 du symbole (best-effort → [] si absent/corrompu). */
@@ -400,74 +313,6 @@ function flushSauvegarde(symbol: string): void {
   sauverProfil(symbol);
 }
 
-/**
- * Rendu overlay INTÉRIMAIRE (remplacé par un canvas en Tâche 6) : agrège les événements
- * du buffer en buckets à la volée (taille dérivée du close de la dernière bougie) et peint
- * les mêmes bandes viridis pleine largeur qu'auparavant.
- */
-function redraw(): void {
-  retirerOverlays();
-  if (!liqMarksStore.getState().actif) return;
-  const chart = getActiveChart();
-  if (chart === null) return;
-  const candles = marketStore.getState().candles;
-  if (candles.length === 0) return;
-
-  const premier = candles[0];
-  const dernier = candles[candles.length - 1];
-  if (premier === undefined || dernier === undefined) return;
-
-  // Agrégation à la volée des événements en buckets de prix.
-  const taille = tailleBucket(dernier.close);
-  const buckets = new Map<number, number>();
-  if (taille > 0) {
-    for (const ev of evenements) {
-      if (!(ev.price > 0) || !(ev.usd > 0)) continue;
-      const idx = bucketIndex(ev.price, taille);
-      buckets.set(idx, (buckets.get(idx) ?? 0) + ev.usd);
-    }
-  }
-
-  // Buffer vide (aucune liquidation encore reçue) : indicateur « en attente » discret pour
-  // signaler que le heatmap est bien ACTIF (flux live sparse, se remplit avec le temps).
-  if (buckets.size === 0) {
-    const hint: OverlayCreate = {
-      name: LIQ_HINT,
-      groupId: LIQ_GROUP,
-      lock: true,
-      points: [{ timestamp: dernier.time, value: dernier.close }],
-      extendData: {},
-    };
-    const id = chart.createOverlay(hint);
-    if (typeof id === "string") overlaysSuivis.set(chart, [id]);
-    return;
-  }
-
-  let max = 0;
-  for (const v of buckets.values()) if (v > max) max = v;
-  if (max <= 0) return;
-
-  const ids: string[] = [];
-  for (const [idx, notionnel] of buckets) {
-    const t = notionnel / max;
-    const [r, g, b] = couleurViridis(t);
-    const alpha = 0.2 + 0.6 * t;
-    const overlay: OverlayCreate = {
-      name: LIQ_HEAT,
-      groupId: LIQ_GROUP,
-      lock: true,
-      points: [
-        { timestamp: premier.time, value: (idx + 1) * taille },
-        { timestamp: dernier.time, value: idx * taille },
-      ],
-      extendData: { couleur: `rgba(${r},${g},${b},${alpha.toFixed(3)})` } satisfies DonneesBande,
-    };
-    const id = chart.createOverlay(overlay);
-    if (typeof id === "string") ids.push(id);
-  }
-  if (ids.length > 0) overlaysSuivis.set(chart, ids);
-}
-
 /** Traduit une liquidation persistée du daemon en événement chart. PURE (locale). */
 function depuisDaemon(d: LiqDaemon): LiqEvent {
   return { time: d.t, side: d.side, price: d.price, qty: d.qty, usd: d.usd, venue: d.venue };
@@ -488,7 +333,6 @@ async function amorcerSeed(symbol: string): Promise<void> {
       evenements = bornerEvenements(fusionnerEvenements(evenements, daemon.map(depuisDaemon)), MAX_EVENTS);
       publier();
       sauverProfil(symbol);
-      redraw();
     }
     return;
   }
@@ -501,7 +345,6 @@ async function amorcerSeed(symbol: string): Promise<void> {
   evenements = bornerEvenements(fusionnerEvenements(evenements, seed), MAX_EVENTS);
   publier();
   sauverProfil(symbol);
-  redraw();
 }
 
 /** Ajoute une liquidation LIVE au buffer (FIFO), persiste (throttlé) et dual-write daemon. */
@@ -526,7 +369,6 @@ function ajouterLive(l: Liquidation): void {
       { t: ev.time, venue: ev.venue, side: ev.side, price: ev.price, qty: ev.qty, usd: ev.usd },
     ]);
   }
-  redraw();
 }
 
 /** Aligne l'abonnement WS sur l'état (bascule + symbole). Réinitialise le buffer au changement de symbole. */
@@ -543,7 +385,6 @@ function sync(): void {
     symboleAbonne = null;
     evenements = [];
     publier();
-    redraw();
     return;
   }
   if (symboleAbonne !== symbol) {
@@ -555,7 +396,6 @@ function sync(): void {
     evenements = chargerProfil(symbol);
     publier();
     abonnement = subscribeLiquidations(symbol, (l) => ajouterLive(l));
-    redraw();
     // Seed daemon (puis repli Coinalyze) — asynchrone, gardé anti-course.
     void amorcerSeed(symbol);
   }
@@ -565,34 +405,20 @@ let controllerStarted = false;
 export function demarrerLiquidationMarkers(): void {
   if (controllerStarted) return;
   controllerStarted = true;
-  ensureOverlayRegistered();
 
+  // Réaligne l'abonnement WS (buffer + seed) sur le symbole/état de chargement du marché.
+  // Le RENDU suit le viewport côté canvas (LiquidationHeatController), donc plus besoin de
+  // pister l'instance de chart ni les bornes de bougies ici — seuls symbole et readiness
+  // (bougies chargées, pour le seed Coinalyze) déclenchent un resync des données.
   let prevSymbol = marketStore.getState().symbol;
-  let prevChart = getActiveChart();
   let prevReady = marketStore.getState().candles.length > 0;
-  const bornes = () => {
-    const c = marketStore.getState().candles;
-    return c.length === 0 ? "" : `${c[0]?.time}:${c[c.length - 1]?.time}`;
-  };
-  let prevBornes = bornes();
   marketStore.subscribe(() => {
-    const chart = getActiveChart();
     const { symbol, candles } = marketStore.getState();
     const ready = candles.length > 0;
-    if (symbol !== prevSymbol || chart !== prevChart || ready !== prevReady) {
+    if (symbol !== prevSymbol || ready !== prevReady) {
       prevSymbol = symbol;
-      prevChart = chart;
       prevReady = ready;
-      prevBornes = bornes();
       sync();
-      return;
-    }
-    // Plage de bougies étendue (historique chargé / nouvelle bougie) → réancrer les bandes
-    // pleine largeur, sans redessiner sur chaque tick de prix intra-bougie.
-    const b = bornes();
-    if (b !== prevBornes) {
-      prevBornes = b;
-      redraw();
     }
   });
 
@@ -601,16 +427,6 @@ export function demarrerLiquidationMarkers(): void {
     if (s.actif !== prevActif) {
       prevActif = s.actif;
       sync();
-    }
-  });
-
-  // Le heatmap viridis ne dépend pas du thème, mais un changement de thème peut
-  // reconstruire le chart : on redessine par sûreté.
-  let prevTheme = themeStore.getState().theme;
-  themeStore.subscribe((s) => {
-    if (s.theme !== prevTheme) {
-      prevTheme = s.theme;
-      redraw();
     }
   });
 }

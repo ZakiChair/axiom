@@ -19,8 +19,10 @@ import {
   candleContenant,
   couleurViridis,
   liqEventsStore,
+  liqMarksStore,
   type LiqEvent,
 } from "./liquidationMarkers";
+import { liqEstStore, oiHistStore, calculerNiveauxEstimes } from "./liquidationEstimates";
 import { marketStore } from "../store/market";
 import { formatHeureMinute, formatPrice, formatUsd } from "../lib/format";
 
@@ -155,6 +157,10 @@ const CANDLE_PANE_ID = "candle_pane";
 const MAX_BAND_FRAC = 0.12;
 /** Largeur de repli d'une cellule quand la largeur de bougie n'est pas déductible. */
 const FALLBACK_CELL_W = 6;
+/** Teinte orange des niveaux ESTIMÉS (distincte du viridis de la heatmap réelle). */
+const ORANGE_EST = "245,158,11"; // #f59e0b (rgb)
+/** Nombre de buckets estimés étiquetés « EST. ×L » (les plus gros poids). */
+const NB_LABELS_EST = 5;
 
 interface PixelXY {
   x?: number;
@@ -199,6 +205,11 @@ export class LiquidationHeatController {
   private resizeObserver: ResizeObserver | null = null;
   private unsubMarket: (() => void) | null = null;
   private unsubEvents: (() => void) | null = null;
+  private unsubOi: (() => void) | null = null;
+  /** Activation demandée par la heatmap RÉELLE (bascule LIQMARK, via setEnabled). */
+  private marksWanted = false;
+  /** Abonnement permanent à la bascule des niveaux ESTIMÉS (LIQEST) — indépendant de LIQMARK. */
+  private readonly unsubLiqEst: () => void;
 
   private readonly markDirty = (): void => {
     this.grilleObsolete = true;
@@ -218,16 +229,31 @@ export class LiquidationHeatController {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Contexte 2D du canvas heatmap-liquidations indisponible");
     this.ctx = ctx;
+    // Les deux couches (heatmap RÉELLE + niveaux ESTIMÉS) partagent ce contrôleur canvas mais
+    // sont activables SÉPARÉMENT : on suit la bascule LIQEST en plus de setEnabled (LIQMARK).
+    this.unsubLiqEst = liqEstStore.subscribe(() => {
+      this.reconcile();
+      this.markDirty();
+    });
   }
 
+  /** setEnabled pilote la couche RÉELLE (LIQMARK, appelé par ChartInstance). */
   setEnabled(enabled: boolean): void {
-    if (enabled === this.running) return;
-    if (enabled) this.start();
+    this.marksWanted = enabled;
+    this.reconcile();
+  }
+
+  /** Le contrôleur tourne si AU MOINS une couche est active (RÉELLE ou ESTIMÉE). */
+  private reconcile(): void {
+    const want = this.marksWanted || liqEstStore.getState().actif;
+    if (want === this.running) return;
+    if (want) this.start();
     else this.stop();
   }
 
   dispose(): void {
     this.stop();
+    this.unsubLiqEst();
   }
 
   private start(): void {
@@ -240,6 +266,8 @@ export class LiquidationHeatController {
     // WS de liquidationMarkers : on suit sa révision pour repeindre au fil des liquidations.
     this.unsubMarket = marketStore.subscribe(this.markDirty);
     this.unsubEvents = liqEventsStore.subscribe(this.markDirty);
+    // Nouvel historique OI (fetch au toggle / refresh 15 min) → recalcul des niveaux estimés.
+    this.unsubOi = oiHistStore.subscribe(this.markDirty);
     // Redimensionnement du conteneur (resize fenêtre, toggle sidebar…) : aucun
     // scroll/zoom/tick ne le signale autrement, d'où l'observer dédié.
     this.resizeObserver = new ResizeObserver(this.markDirty);
@@ -257,6 +285,8 @@ export class LiquidationHeatController {
     this.unsubMarket = null;
     this.unsubEvents?.();
     this.unsubEvents = null;
+    this.unsubOi?.();
+    this.unsubOi = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.dernierCrosshair = null;
@@ -322,6 +352,19 @@ export class LiquidationHeatController {
 
     const main = this.chart.getSize(CANDLE_PANE_ID, DomPosition.Main);
     if (!main) return;
+
+    // Deux couches INDÉPENDANTES sur le même canvas : heatmap RÉELLE (LIQMARK) et niveaux
+    // ESTIMÉS (LIQEST). Chacune est activable seule (cf. reconcile()).
+    if (liqMarksStore.getState().actif) this.dessinerHeatmap(main);
+    if (liqEstStore.getState().actif) this.dessinerNiveauxEstimes(main);
+  }
+
+  /**
+   * Couche HEATMAP RÉELLE : grille temps×prix (viridis log) + profil latéral long/short +
+   * tooltip de survol, depuis les liquidations RÉELLEMENT exécutées (liqEventsStore).
+   */
+  private dessinerHeatmap(main: Bounding): void {
+    const ctx = this.ctx;
     const { left, top, width, height } = main;
     const xRight = left + width;
 
@@ -522,6 +565,105 @@ export class LiquidationHeatController {
       if (l === undefined) continue;
       ctx.fillStyle = l.couleur;
       ctx.fillText(l.texte, bx + pad, by + pad + i * lh);
+    }
+  }
+
+  /**
+   * Couche NIVEAUX ESTIMÉS (LIQEST) — lignes horizontales orange pointillées calculées par le
+   * modèle de levier appliqué à l'OI (calculerNiveauxEstimes). REGROUPÉES par bucket de prix
+   * (somme des poids) pour éviter des centaines de lignes ; alpha ∝ log du poids ; les
+   * `NB_LABELS_EST` buckets les plus lourds portent l'étiquette « EST. ×<levier dominant> ».
+   *
+   * ⚠️ APPROXIMATION (garde-fou BUILD-CONTRACT) : la légende « Niveaux ESTIMÉS … » et le préfixe
+   * « EST. » signalent explicitement qu'il ne s'agit PAS des liquidations réelles.
+   */
+  private dessinerNiveauxEstimes(main: Bounding): void {
+    const ctx = this.ctx;
+    const { left, top, width, height } = main;
+    const xRight = left + width;
+    const orange = (a: number): string => `rgba(${ORANGE_EST},${a.toFixed(3)})`;
+
+    // Légende de couche — décalée sous la légende heatmap si les deux couches sont actives.
+    const yLegende = top + 4 + (liqMarksStore.getState().actif ? 14 : 0);
+    ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = orange(0.95);
+    ctx.fillText("Niveaux ESTIMÉS (modèle levier — approximation)", xRight - 4, yLegende);
+
+    const candles = marketStore.getState().candles;
+    const dernier = candles[candles.length - 1];
+    if (dernier === undefined) return;
+    const niveaux = calculerNiveauxEstimes(oiHistStore.getState().hist, candles);
+    if (niveaux.length === 0) {
+      // Couche active mais OI pas encore chargé (ou aucune hausse d'OI) : indice discret.
+      ctx.fillStyle = orange(0.8);
+      ctx.fillText("⋯ Niveaux ESTIMÉS — en attente de l'Open Interest", xRight - 4, yLegende + 14);
+      return;
+    }
+
+    // Regroupement par bucket de prix : somme des poids + levier dominant du bucket.
+    const taille = tailleBucket(dernier.close);
+    if (!(taille > 0)) return;
+    const parBucket = new Map<number, { poids: number; parLevier: Map<number, number> }>();
+    let maxPoids = 0;
+    for (const n of niveaux) {
+      if (!(n.price > 0) || !Number.isFinite(n.poidsUsd)) continue;
+      const idx = bucketIndex(n.price, taille);
+      let b = parBucket.get(idx);
+      if (b === undefined) {
+        b = { poids: 0, parLevier: new Map() };
+        parBucket.set(idx, b);
+      }
+      b.poids += n.poidsUsd;
+      b.parLevier.set(n.levier, (b.parLevier.get(n.levier) ?? 0) + n.poidsUsd);
+      if (b.poids > maxPoids) maxPoids = b.poids;
+    }
+    if (maxPoids <= 0) return;
+
+    // Lignes pointillées orange, une par bucket (alpha ∝ intensité log du poids). Clip au pane.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left, top, width, height);
+    ctx.clip();
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1;
+    for (const [idx, b] of parBucket) {
+      const y = this.toPx({ value: (idx + 0.5) * taille }).y;
+      if (y === undefined || !Number.isFinite(y)) continue;
+      const t = intensiteLog(b.poids, maxPoids);
+      ctx.strokeStyle = orange(0.2 + 0.6 * t);
+      ctx.beginPath();
+      ctx.moveTo(left, y);
+      ctx.lineTo(xRight, y);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // Étiquettes « EST. ×L » sur les buckets les plus lourds (levier dominant du bucket).
+    const tops = [...parBucket.entries()].sort((a, b) => b[1].poids - a[1].poids).slice(0, NB_LABELS_EST);
+    ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    for (const [idx, b] of tops) {
+      const y = this.toPx({ value: (idx + 0.5) * taille }).y;
+      if (y === undefined || !Number.isFinite(y) || y < top || y > top + height) continue;
+      let levierDominant = 0;
+      let poidsDominant = -1;
+      for (const [L, p] of b.parLevier) {
+        if (p > poidsDominant) {
+          poidsDominant = p;
+          levierDominant = L;
+        }
+      }
+      const label = `EST. ×${levierDominant}`;
+      // Fond semi-opaque pour la lisibilité sur la heatmap éventuelle.
+      const w = ctx.measureText(label).width;
+      ctx.fillStyle = "rgba(10,12,20,0.72)";
+      ctx.fillRect(left + 3, y - 7, w + 6, 14);
+      ctx.fillStyle = orange(0.98);
+      ctx.fillText(label, left + 6, y);
     }
   }
 }

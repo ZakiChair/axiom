@@ -12,6 +12,7 @@ import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { subscribeLiquidations, resumerLiquidations, type Liquidation } from "../data/liquidations";
 import { liqMarksStore } from "../chart/liquidationMarkers";
+import { liqEstStore } from "../chart/liquidationEstimates";
 import { EnTeteFenetre, Vide, NoteSource } from "./ui";
 import { formatUsd, formatHeure, formatPrice, formatPourcentage } from "../lib/format";
 
@@ -44,6 +45,30 @@ function ToggleChart() {
   );
 }
 
+/**
+ * Bascule « Niveaux estimés » : superpose des niveaux de liquidation ESTIMÉS (modèle de
+ * levier appliqué à l'OI, liqEstStore, cf. chart/liquidationEstimates.ts). Couche INDÉPENDANTE
+ * de la heatmap réelle. Étiquetée « EST. » à l'écran — approximation, PAS des liquidations
+ * réelles (garde-fou BUILD-CONTRACT).
+ */
+function ToggleEstimes() {
+  const actif = useStore(liqEstStore, (s) => s.actif);
+  const basculer = useStore(liqEstStore, (s) => s.basculer);
+  return (
+    <button
+      type="button"
+      onClick={basculer}
+      aria-pressed={actif}
+      title="Niveaux de liquidation ESTIMÉS depuis l'OI (modèle de levier — approximation, étiquetée EST.)"
+      className={`rounded border px-2 py-1 text-[11px] font-medium transition ${
+        actif ? "border-accent bg-bg text-accent" : "border-border bg-bg text-text-dim hover:text-text"
+      }`}
+    >
+      {actif ? "● Niveaux estimés" : "Niveaux estimés"}
+    </button>
+  );
+}
+
 export function LiquidationsWindow() {
   const symbol = useStore(marketStore, (s) => s.symbol);
   const [liqs, setLiqs] = useState<Liquidation[]>([]);
@@ -64,7 +89,12 @@ export function LiquidationsWindow() {
       <EnTeteFenetre
         titre="Liquidations"
         sousTitre={`${symbol} · perp Bybit + OKX (live)`}
-        actions={<ToggleChart />}
+        actions={
+          <div className="flex items-center gap-1.5">
+            <ToggleChart />
+            <ToggleEstimes />
+          </div>
+        }
       />
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {/* Totaux notionnels long/short depuis la souscription. */}

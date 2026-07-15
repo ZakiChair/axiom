@@ -37,6 +37,9 @@ import { commandes as derivChartCommands } from "./store/derivatives-chart";
 // (effet de bord d'import).
 import { commandes as marksCommands } from "./chart/tradeMarkers";
 import { commandes as liqMarksCommands } from "./chart/liquidationMarkers";
+// Niveaux de liquidation ESTIMÉS (modèle levier sur l'OI) — l'import démarre le fetch OI
+// singleton (effet de bord) ; couche indépendante de la heatmap réelle.
+import { commandes as liqEstCommands } from "./chart/liquidationEstimates";
 // Contrôleur marqueurs éco (effet de bord) — indépendant du lazy-load de EcoWindow.
 import "./chart/ecoMarkers";
 import { commandes as domCommands } from "./store/dom-ui";
@@ -101,6 +104,7 @@ enregistrerCommandes([
   ...derivChartCommands,
   ...marksCommands,
   ...liqMarksCommands,
+  ...liqEstCommands,
   // Fenêtres Phase 4 (DOM/BT/REPLAY) + grille multi-chart.
   ...domCommands,
   ...backtestCommands,

@@ -8,19 +8,27 @@
  * scalaires basse fréquence (le curseur est poussé ~10/s pour la barre de progression).
  *
  * Mécanique de branchement (voir data/replayFeed.ts + chart/ChartInstance.tsx) :
- *  - `start()` capture le slot FOCUS, crée le moteur, le publie comme adaptateur actif,
- *    et incrémente `gen` → `ChartInstance` du slot se REMONTE et se branche sur le moteur
- *    (WS live suspendues via le cycle de démontage existant).
+ *  - `start()` capture le slot FOCUS ET son identité live, applique atomiquement l'identité
+ *    Binance/symbole/TF du rejeu, crée le moteur puis incrémente `gen`. Le slot ne peut donc
+ *    jamais attribuer des bougies de replay à l'ancien marché affiché.
  *  - `seek(t)` recrée le moteur à un nouveau curseur et incrémente `gen` → remontage +
  *    reseed instantané.
- *  - `stop()` efface l'adaptateur actif et passe `active=false` → remontage → live + resync.
+ *  - `stop()` efface l'adaptateur, restaure atomiquement l'identité live capturée, puis
+ *    remonte la couche données. Un changement manuel d'identité quitte plutôt le replay en
+ *    conservant la nouvelle sélection de l'utilisateur.
  *
  * 100 % dégradé si le daemon est absent (les appels échouent en silence, `daemonAbsent`).
  */
 import { createStore } from "zustand/vanilla";
 import type { Timeframe } from "@axiom/types";
 import type { Commande } from "../commands/registry";
-import { chartLayoutStore } from "./chart-layout";
+import { chartLayoutStore, visibleSlotCount } from "./chart-layout";
+import {
+  marketIdentity,
+  marketStore,
+  sameMarketIdentity,
+  type MarketIdentity,
+} from "./market";
 import {
   demanderTelechargement,
   definirMoteurActif,
@@ -85,6 +93,10 @@ export interface ReplayState {
   slot: number;
   /** Générations : incrémentée à chaque start/seek pour forcer le remontage du slot. */
   gen: number;
+  /** Identité live à restaurer à la sortie ; null si un changement utilisateur l'a remplacée. */
+  returnMarket: MarketIdentity | null;
+  /** Transition interne d'identité (évite propagation liée et auto-stop récursif). */
+  identityTransition: boolean;
   playing: boolean;
   vitesse: number;
   /** Position du curseur (ms epoch). */
@@ -101,12 +113,48 @@ export interface ReplayState {
 
 /** Minuteur de poll du statut (module-scope, un seul à la fois). */
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+/** Un seul poll par session : interdit les régressions `pret` → `en_cours` hors ordre. */
+let pollInFlightRequestId: number | null = null;
+/** Tokens monotones : une réponse réseau ancienne ne peut jamais écraser la sélection courante. */
+let statusRequestId = 0;
+let daysRequestId = 0;
 
 function arreterPoll(): void {
   if (pollTimer !== null) {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+}
+
+function replayIdentity(state: Pick<ReplayState, "symbole" | "tf">): MarketIdentity {
+  return { exchange: "binance", symbol: state.symbole, timeframe: state.tf };
+}
+
+function marketAtSlot(slot: number): MarketIdentity | null {
+  if (slot === 0) return marketIdentity(marketStore.getState());
+  const config = chartLayoutStore.getState().slots[slot - 1];
+  return config ? { ...config } : null;
+}
+
+function applyMarketAtSlot(slot: number, identity: MarketIdentity): void {
+  if (slot === 0) marketStore.getState().setMarket(identity);
+  else chartLayoutStore.getState().setSlotMarket(slot, identity);
+}
+
+function selectionMatches(
+  state: Pick<ReplayState, "symbole" | "jour">,
+  symbole: string,
+  jour: string,
+): boolean {
+  return state.symbole === symbole && state.jour === jour;
+}
+
+function statusMatchesSelection(state: Pick<ReplayState, "symbole" | "jour" | "statut">): boolean {
+  return (
+    state.statut.etat === "pret" &&
+    state.statut.symbole?.toUpperCase() === state.symbole &&
+    state.statut.jour === state.jour
+  );
 }
 
 export const replayStore = createStore<ReplayState>((set, get) => ({
@@ -130,14 +178,24 @@ export const replayStore = createStore<ReplayState>((set, get) => ({
   jour: jourDecale(-1),
   tf: "1m",
   setSymbole: (s) => {
-    set({ symbole: s.trim().toUpperCase() });
+    if (get().active) return;
+    const symbole = s.trim().toUpperCase();
+    if (symbole.length === 0 || symbole === get().symbole) return;
+    arreterPoll();
+    statusRequestId++;
+    set({ symbole, statut: { etat: "absent", symbole, jour: get().jour } });
     get().rafraichirStatut();
   },
   setJour: (j) => {
-    set({ jour: j });
+    if (get().active || j === get().jour) return;
+    arreterPoll();
+    statusRequestId++;
+    set({ jour: j, statut: { etat: "absent", symbole: get().symbole, jour: j } });
     get().rafraichirStatut();
   },
-  setTf: (tf) => set({ tf }),
+  setTf: (tf) => {
+    if (!get().active) set({ tf });
+  },
 
   statut: { etat: "absent" },
   jours: [],
@@ -145,9 +203,12 @@ export const replayStore = createStore<ReplayState>((set, get) => ({
 
   telecharger: () => {
     const { symbole, jour } = get();
+    arreterPoll();
+    const requestId = ++statusRequestId;
     set({ statut: { etat: "en_cours", symbole, jour, recus: 0 } });
     void demanderTelechargement(symbole, jour)
       .then((s) => {
+        if (requestId !== statusRequestId || !selectionMatches(get(), symbole, jour)) return;
         set({ statut: s, daemonAbsent: false });
         arreterPoll();
         // Poll tant que le job n'est pas terminé.
@@ -157,8 +218,11 @@ export const replayStore = createStore<ReplayState>((set, get) => ({
             arreterPoll();
             return;
           }
+          if (pollInFlightRequestId === requestId) return;
+          pollInFlightRequestId = requestId;
           void statutTelechargement(symbole, jour)
             .then((st) => {
+              if (requestId !== statusRequestId || !selectionMatches(get(), symbole, jour)) return;
               set({ statut: st });
               if (st.etat === "pret" || st.etat === "erreur" || st.etat === "absent") {
                 arreterPoll();
@@ -166,25 +230,64 @@ export const replayStore = createStore<ReplayState>((set, get) => ({
               }
             })
             .catch(() => {
-              set({ daemonAbsent: true });
+              if (requestId !== statusRequestId || !selectionMatches(get(), symbole, jour)) return;
+              set({
+                daemonAbsent: true,
+                statut: {
+                  etat: "erreur",
+                  symbole,
+                  jour,
+                  erreur: "Daemon AXIOM indisponible.",
+                },
+              });
               arreterPoll();
+            })
+            .finally(() => {
+              if (pollInFlightRequestId === requestId) pollInFlightRequestId = null;
             });
         }, POLL_MS);
       })
-      .catch(() => set({ daemonAbsent: true }));
+      .catch(() => {
+        if (requestId === statusRequestId && selectionMatches(get(), symbole, jour)) {
+          set({
+            daemonAbsent: true,
+            statut: {
+              etat: "erreur",
+              symbole,
+              jour,
+              erreur: "Daemon AXIOM indisponible.",
+            },
+          });
+        }
+      });
   },
 
   rafraichirStatut: () => {
     const { symbole, jour } = get();
+    arreterPoll();
+    const requestId = ++statusRequestId;
     void statutTelechargement(symbole, jour)
-      .then((s) => set({ statut: s, daemonAbsent: false }))
-      .catch(() => set({ daemonAbsent: true }));
+      .then((s) => {
+        if (requestId === statusRequestId && selectionMatches(get(), symbole, jour)) {
+          set({ statut: s, daemonAbsent: false });
+        }
+      })
+      .catch(() => {
+        if (requestId === statusRequestId && selectionMatches(get(), symbole, jour)) {
+          set({ daemonAbsent: true });
+        }
+      });
   },
 
   rafraichirJours: () => {
+    const requestId = ++daysRequestId;
     void listerJours()
-      .then((j) => set({ jours: j, daemonAbsent: false }))
-      .catch(() => set({ daemonAbsent: true }));
+      .then((j) => {
+        if (requestId === daysRequestId) set({ jours: j, daemonAbsent: false });
+      })
+      .catch(() => {
+        if (requestId === daysRequestId) set({ daemonAbsent: true });
+      });
   },
 
   purger: (symbole, jour) => {
@@ -197,16 +300,22 @@ export const replayStore = createStore<ReplayState>((set, get) => ({
   active: false,
   slot: 0,
   gen: 0,
+  returnMarket: null,
+  identityTransition: false,
   playing: false,
   vitesse: 1,
   curseur: 0,
   progression: 0,
 
   start: () => {
-    // Un seul rejeu à la fois : dispose le précédent.
-    moteurReplayActif()?.dispose();
-    const { symbole, jour, tf } = get();
+    if (get().active) get().stop();
+    const selection = get();
+    if (!statusMatchesSelection(selection)) return;
+    const { symbole, jour, tf } = selection;
     const slot = chartLayoutStore.getState().focus;
+    const returnMarket = marketAtSlot(slot);
+    if (returnMarket === null) return;
+    const targetMarket = replayIdentity(selection);
     const debut = debutJour(jour);
     const moteur = new MoteurReplay({
       symbole,
@@ -215,6 +324,17 @@ export const replayStore = createStore<ReplayState>((set, get) => ({
       onCurseur: (t) => set({ curseur: t, progression: (t - debut) / JOUR_MS }),
       onFin: () => set({ playing: false }),
     });
+
+    // La transition est publiée avant la mutation du store marché afin que les abonnements
+    // de liaison multi-chart et d'auto-stop reconnaissent ce changement comme interne.
+    set({ slot, returnMarket, identityTransition: true });
+    applyMarketAtSlot(slot, targetMarket);
+    if (!sameMarketIdentity(marketAtSlot(slot), targetMarket)) {
+      applyMarketAtSlot(slot, returnMarket);
+      set({ returnMarket: null, identityTransition: false });
+      moteur.dispose();
+      return;
+    }
     definirMoteurActif(moteur);
     set({
       active: true,
@@ -224,13 +344,24 @@ export const replayStore = createStore<ReplayState>((set, get) => ({
       vitesse: 1,
       curseur: moteur.position(),
       progression: (moteur.position() - debut) / JOUR_MS,
+      identityTransition: false,
     });
   },
 
   stop: () => {
+    const state = get();
+    if (!state.active && moteurReplayActif() === null) return;
+    const { slot, returnMarket } = state;
     moteurReplayActif()?.dispose();
     definirMoteurActif(null);
-    set({ active: false, playing: false, gen: get().gen + 1 });
+    set({
+      active: false,
+      playing: false,
+      gen: state.gen + 1,
+      identityTransition: true,
+    });
+    if (returnMarket !== null) applyMarketAtSlot(slot, returnMarket);
+    set({ returnMarket: null, identityTransition: false });
   },
 
   basculerLecture: () => {
@@ -242,7 +373,9 @@ export const replayStore = createStore<ReplayState>((set, get) => ({
     } else {
       moteur.setVitesse(get().vitesse);
       moteur.lecture();
-      set({ playing: true });
+      // À la fin du jour (ou après un seek au maximum), `lecture()` reste volontairement
+      // inactive : refléter l'état réel évite d'afficher ⏸ alors qu'aucun timer ne tourne.
+      set({ playing: moteur.estEnLecture() });
     }
   },
 
@@ -275,6 +408,26 @@ export const replayStore = createStore<ReplayState>((set, get) => ({
     });
   },
 }));
+
+/**
+ * Toute navigation marché explicite sur le slot rejoué signifie « revenir au live ».
+ * On ne restaure alors pas l'identité capturée : la nouvelle sélection de l'utilisateur
+ * doit gagner. Masquer le slot via un changement de layout arrête aussi proprement le moteur.
+ */
+function stopReplayIfTargetChanged(): void {
+  const state = replayStore.getState();
+  if (!state.active || state.identityTransition) return;
+  if (state.slot >= visibleSlotCount(chartLayoutStore.getState().layout)) {
+    state.stop();
+    return;
+  }
+  if (sameMarketIdentity(marketAtSlot(state.slot), replayIdentity(state))) return;
+  replayStore.setState({ returnMarket: null });
+  replayStore.getState().stop();
+}
+
+marketStore.subscribe(stopReplayIfTargetChanged);
+chartLayoutStore.subscribe(stopReplayIfTargetChanged);
 
 mirrorOpenState("replay", replayStore);
 

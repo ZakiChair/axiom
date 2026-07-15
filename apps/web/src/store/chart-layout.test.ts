@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   chartLayoutStore,
   linkedTargets,
+  sanitizeSlotConfig,
   visibleSlotCount,
 } from "./chart-layout";
 
@@ -84,9 +85,59 @@ describe("chartLayoutStore — slots secondaires", () => {
     expect(chartLayoutStore.getState().slots[1].exchange).toBe("kraken");
   });
 
+  it("remplace source, symbole et TF d'un slot en une seule mutation", () => {
+    chartLayoutStore.getState().setSlotMarket(1, {
+      exchange: "kraken",
+      symbol: "ethusd",
+      timeframe: "5m",
+    });
+    expect(chartLayoutStore.getState().slots[0]).toEqual({
+      exchange: "kraken",
+      symbol: "ETHUSD",
+      timeframe: "5m",
+    });
+  });
+
+  it("préserve les ids de source minuscules d'un symbole synthétique", () => {
+    chartLayoutStore.getState().setSlotMarket(1, {
+      exchange: "synthetic",
+      symbol: "binance:BTCUSDT|/|twelvedata:GLD",
+      timeframe: "1h",
+    });
+    expect(chartLayoutStore.getState().slots[0]).toEqual({
+      exchange: "synthetic",
+      symbol: "binance:BTCUSDT|/|twelvedata:GLD",
+      timeframe: "1h",
+    });
+  });
+
   it("ignore un symbole vide", () => {
     chartLayoutStore.getState().setSlotSymbol(1, "   ");
     expect(chartLayoutStore.getState().slots[0].symbol).toBe("ETHUSDT");
+  });
+});
+
+describe("sanitizeSlotConfig", () => {
+  const fallback = { exchange: "binance" as const, symbol: "ETHUSDT", timeframe: "1m" as const };
+
+  it("rejette une source injectée depuis un stockage corrompu", () => {
+    expect(sanitizeSlotConfig({ exchange: "evil", symbol: "BTCUSDT", timeframe: "1m" }, fallback)).toEqual(
+      fallback,
+    );
+  });
+
+  it("remplace une timeframe non supportée par la nouvelle source", () => {
+    expect(sanitizeSlotConfig({ exchange: "kraken", symbol: "BTCUSD", timeframe: "3d" }, fallback)).toEqual({
+      exchange: "kraken",
+      symbol: "BTCUSD",
+      timeframe: "1m",
+    });
+  });
+
+  it("rejette un symbole synthétique mal formé", () => {
+    expect(sanitizeSlotConfig({ exchange: "synthetic", symbol: "invalide|", timeframe: "1m" }, fallback)).toEqual(
+      fallback,
+    );
   });
 });
 

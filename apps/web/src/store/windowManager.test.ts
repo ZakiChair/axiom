@@ -4,10 +4,13 @@ import {
   clampPosition,
   clampSize,
   detectSnapZone,
+  normaliserOrdreZ,
   snapGeometry,
   windowManagerStore,
   mirrorOpenState,
   WINDOW_REGISTRY,
+  WINDOW_Z_MAX,
+  WINDOW_Z_MIN,
   GROUP_PALETTE,
   type EtatFenetre,
   type WorkspaceRect,
@@ -144,12 +147,12 @@ describe("snapGeometry", () => {
 });
 
 describe("WINDOW_REGISTRY", () => {
-  it("contient exactement les 21 fenêtres attendues, sans doublon d'id ni de mnémonique", () => {
-    expect(WINDOW_REGISTRY).toHaveLength(21);
+  it("contient exactement les 22 fenêtres attendues, sans doublon d'id ni de mnémonique", () => {
+    expect(WINDOW_REGISTRY).toHaveLength(22);
     const ids = WINDOW_REGISTRY.map((w) => w.id);
     const mnemos = WINDOW_REGISTRY.map((w) => w.mnemonic);
-    expect(new Set(ids).size).toBe(21);
-    expect(new Set(mnemos).size).toBe(21);
+    expect(new Set(ids).size).toBe(22);
+    expect(new Set(mnemos).size).toBe(22);
     expect(ids).toContain("macroRates");
     expect(mnemos).toContain("RATE");
     expect(ids).toContain("cot");
@@ -164,6 +167,8 @@ describe("WINDOW_REGISTRY", () => {
     expect(mnemos).toContain("BRIEF");
     expect(ids).toContain("globe");
     expect(mnemos).toContain("GLOBE");
+    expect(ids).toContain("stablecoins");
+    expect(mnemos).toContain("STBL");
   });
 });
 
@@ -177,6 +182,48 @@ describe("GROUP_PALETTE", () => {
 // palette a au moins 4 couleurs (garanti par le describe "GROUP_PALETTE" ci-dessus),
 // même convention que `bougies[0]!` dans data/replayFeed.test.ts (noUncheckedIndexedAccess).
 const GROUP_COLOR = GROUP_PALETTE[0]!;
+
+function fenetre(id: string, z: number, patch: Partial<EtatFenetre> = {}): EtatFenetre {
+  return {
+    id,
+    open: true,
+    x: 10,
+    y: 20,
+    width: 440,
+    height: 640,
+    z,
+    minimized: false,
+    groupColor: null,
+    preSnapGeometry: null,
+    ...patch,
+  };
+}
+
+describe("normaliserOrdreZ", () => {
+  it("migre les anciens z hors bande en conservant leur ordre relatif", () => {
+    const resultat = normaliserOrdreZ({
+      milieu: fenetre("milieu", 500, { x: 123 }),
+      bas: fenetre("bas", -20),
+      sommet: fenetre("sommet", 50_000),
+    });
+
+    expect(resultat.windows.bas!.z).toBe(WINDOW_Z_MIN);
+    expect(resultat.windows.milieu!.z).toBe(WINDOW_Z_MIN + 1);
+    expect(resultat.windows.sommet!.z).toBe(WINDOW_Z_MIN + 2);
+    expect(resultat.windows.milieu!.x).toBe(123); // aucun autre champ migré
+    expect(resultat.nextZ).toBe(WINDOW_Z_MIN + 3);
+  });
+
+  it("stabilise les z dupliqués selon l'ordre d'insertion", () => {
+    const resultat = normaliserOrdreZ({
+      premier: fenetre("premier", 900),
+      second: fenetre("second", 900),
+    });
+
+    expect(resultat.windows.premier!.z).toBe(WINDOW_Z_MIN);
+    expect(resultat.windows.second!.z).toBe(WINDOW_Z_MIN + 1);
+  });
+});
 
 describe("openWindow — fenêtre jamais ouverte", () => {
   it("crée l'entrée avec la taille par défaut du registre et la position en cascade", () => {
@@ -241,7 +288,7 @@ describe("openWindow — réouverture d'une fenêtre déjà fermée", () => {
 });
 
 describe("z-order — openWindow / focusWindow", () => {
-  it("bump z à une valeur strictement croissante à chaque ouverture puis à chaque focus", () => {
+  it("monte une autre fenêtre à une valeur strictement supérieure", () => {
     windowManagerStore.getState().openWindow("derivatives");
     const z1 = windowManagerStore.getState().windows.derivatives!.z;
 
@@ -252,6 +299,46 @@ describe("z-order — openWindow / focusWindow", () => {
     windowManagerStore.getState().focusWindow("derivatives");
     const z1Focused = windowManagerStore.getState().windows.derivatives!.z;
     expect(z1Focused).toBeGreaterThan(z2);
+  });
+
+  it("focusWindow est un vrai no-op si la fenêtre est déjà au sommet", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    const avant = windowManagerStore.getState();
+
+    windowManagerStore.getState().focusWindow("derivatives");
+    const apres = windowManagerStore.getState();
+
+    expect(apres.nextZ).toBe(avant.nextZ);
+    expect(apres.windows).toBe(avant.windows);
+    expect(apres.windows.derivatives!.z).toBe(avant.windows.derivatives!.z);
+  });
+
+  it("openWindow ne rebump pas une fenêtre déjà ouverte et déjà au sommet", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    const avant = windowManagerStore.getState();
+
+    windowManagerStore.getState().openWindow("derivatives");
+    const apres = windowManagerStore.getState();
+
+    expect(apres.nextZ).toBe(avant.nextZ);
+    expect(apres.windows).toBe(avant.windows);
+  });
+
+  it("reste dans la bande sous z-40 après de très nombreux changements de focus", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().openWindow("eco");
+
+    for (let i = 0; i < WINDOW_Z_MAX * 5; i += 1) {
+      windowManagerStore.getState().focusWindow(i % 2 === 0 ? "derivatives" : "eco");
+    }
+
+    const state = windowManagerStore.getState();
+    const valeurs = Object.values(state.windows).map((w) => w.z);
+    expect(Math.min(...valeurs)).toBeGreaterThanOrEqual(WINDOW_Z_MIN);
+    expect(Math.max(...valeurs)).toBeLessThanOrEqual(WINDOW_Z_MAX);
+    expect(state.nextZ).toBeLessThanOrEqual(WINDOW_Z_MAX + 1);
+    // La dernière itération (index pair : 194) cible derivatives.
+    expect(state.windows.derivatives!.z).toBe(Math.max(...valeurs));
   });
 
   it("focusWindow est un no-op sur un id inconnu", () => {
@@ -328,15 +415,31 @@ describe("minimizeWindow / restoreWindow", () => {
     expect(w.z).toBe(zBefore);
   });
 
-  it("restoreWindow passe minimized à false ET bump z", () => {
+  it("restoreWindow passe minimized à false sans bump si la fenêtre est déjà au sommet", () => {
     windowManagerStore.getState().openWindow("derivatives");
     windowManagerStore.getState().minimizeWindow("derivatives");
+    const nextZBefore = windowManagerStore.getState().nextZ;
     const zBeforeRestore = windowManagerStore.getState().windows.derivatives!.z;
 
     windowManagerStore.getState().restoreWindow("derivatives");
     const w = windowManagerStore.getState().windows.derivatives!;
     expect(w.minimized).toBe(false);
-    expect(w.z).toBeGreaterThan(zBeforeRestore);
+    expect(w.z).toBe(zBeforeRestore);
+    expect(windowManagerStore.getState().nextZ).toBe(nextZBefore);
+  });
+
+  it("restoreWindow remonte une fenêtre minimisée qui n'est plus au sommet", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().minimizeWindow("derivatives");
+    windowManagerStore.getState().openWindow("eco");
+    const zEco = windowManagerStore.getState().windows.eco!.z;
+
+    windowManagerStore.getState().restoreWindow("derivatives");
+
+    const w = windowManagerStore.getState().windows.derivatives!;
+    expect(w.minimized).toBe(false);
+    expect(w.z).toBeGreaterThan(zEco);
+    expect(w.z).toBeLessThanOrEqual(WINDOW_Z_MAX);
   });
 
   it("sont des no-op sur un id inconnu", () => {
@@ -428,49 +531,37 @@ describe("setPreSnapGeometry", () => {
 });
 
 describe("setAll", () => {
-  it("remplace intégralement le record windows (restauration workspace/persistance)", () => {
+  it("remplace intégralement le record et normalise les z restaurés", () => {
     windowManagerStore.getState().openWindow("derivatives");
 
     const nouveauxWindows: Record<string, EtatFenetre> = {
-      eco: {
-        id: "eco",
-        open: true,
-        x: 10,
-        y: 20,
-        width: 440,
-        height: 640,
-        z: 99,
-        minimized: false,
-        groupColor: null,
-        preSnapGeometry: null,
-      },
+      eco: fenetre("eco", 99),
     };
     windowManagerStore.getState().setAll(nouveauxWindows);
 
-    expect(windowManagerStore.getState().windows).toEqual(nouveauxWindows);
+    expect(windowManagerStore.getState().windows.eco).toEqual({
+      ...nouveauxWindows.eco,
+      z: WINDOW_Z_MIN,
+    });
     // Remplacement, pas fusion : l'ancienne entrée "derivatives" a disparu.
     expect(windowManagerStore.getState().windows.derivatives).toBeUndefined();
   });
 
-  it("réconcilie nextZ pour qu'un focus/openWindow ultérieur dépasse le z le plus haut restauré", () => {
+  it("préserve l'ordre d'un état historique puis permet une promotion bornée", () => {
     const nouveauxWindows: Record<string, EtatFenetre> = {
-      eco: {
-        id: "eco",
-        open: true,
-        x: 10,
-        y: 20,
-        width: 440,
-        height: 640,
-        z: 500, // très supérieur au nextZ courant (1) — cas non atteignable aujourd'hui.
-        minimized: false,
-        groupColor: null,
-        preSnapGeometry: null,
-      },
+      derivatives: fenetre("derivatives", 500),
+      eco: fenetre("eco", 900),
     };
     windowManagerStore.getState().setAll(nouveauxWindows);
 
-    windowManagerStore.getState().focusWindow("eco");
-    expect(windowManagerStore.getState().windows.eco!.z).toBeGreaterThan(500);
+    let state = windowManagerStore.getState();
+    expect(state.windows.derivatives!.z).toBeLessThan(state.windows.eco!.z);
+    expect(state.windows.eco!.z).toBeLessThanOrEqual(WINDOW_Z_MAX);
+
+    windowManagerStore.getState().focusWindow("derivatives");
+    state = windowManagerStore.getState();
+    expect(state.windows.derivatives!.z).toBeGreaterThan(state.windows.eco!.z);
+    expect(state.windows.derivatives!.z).toBeLessThanOrEqual(WINDOW_Z_MAX);
   });
 });
 

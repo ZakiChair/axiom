@@ -18,6 +18,8 @@
  */
 import { createStore } from "zustand/vanilla";
 import type { ExchangeId, Timeframe } from "@axiom/types";
+import { supportedTimeframesFor } from "../data/adapters";
+import { normalizeMarketSymbol } from "./market";
 
 /** Modes de disposition : 1 seul, 2 côte-à-côte, 2 empilés, 2×2. */
 export type ChartLayoutMode = "1" | "2h" | "2v" | "2x2";
@@ -74,6 +76,7 @@ export interface ChartLayoutState {
   setFocus: (slot: number) => void;
   toggleLinked: () => void;
   /** Modifie la config d'un slot SECONDAIRE (index de grille 1..3). */
+  setSlotMarket: (slot: number, config: SlotConfig) => void;
   setSlotSymbol: (slot: number, symbol: string) => void;
   setSlotTimeframe: (slot: number, timeframe: Timeframe) => void;
   setSlotExchange: (slot: number, exchange: ExchangeId) => void;
@@ -89,19 +92,49 @@ interface Persisted {
 }
 
 const LAYOUT_MODES: readonly ChartLayoutMode[] = ["1", "2h", "2v", "2x2"];
+const RESTORABLE_EXCHANGES: readonly ExchangeId[] = [
+  "binance",
+  "kraken",
+  "coinbase",
+  "twelvedata",
+  "mexc",
+  "synthetic",
+];
 
-/** Validation légère d'un SlotConfig persisté (repli sur le défaut par position). */
-function readSlot(raw: unknown, fallback: SlotConfig): SlotConfig {
+/**
+ * Valide intégralement une configuration issue du stockage. Une valeur TypeScript
+ * castée depuis JSON n'est pas une preuve runtime : une source inconnue faisait lever
+ * `getAdapter()` au montage et pouvait faire tomber toute la grille.
+ */
+export function sanitizeSlotConfig(raw: unknown, fallback: SlotConfig): SlotConfig {
   if (!raw || typeof raw !== "object") return fallback;
   const o = raw as Record<string, unknown>;
-  return {
-    exchange: typeof o.exchange === "string" ? (o.exchange as ExchangeId) : fallback.exchange,
-    symbol:
-      typeof o.symbol === "string" && o.symbol.length > 0
-        ? o.symbol.toUpperCase()
-        : fallback.symbol,
-    timeframe: typeof o.timeframe === "string" ? (o.timeframe as Timeframe) : fallback.timeframe,
-  };
+  if (
+    typeof o.exchange === "string" &&
+    !(RESTORABLE_EXCHANGES as readonly string[]).includes(o.exchange)
+  ) {
+    return fallback;
+  }
+  const exchange =
+    typeof o.exchange === "string" && (RESTORABLE_EXCHANGES as readonly string[]).includes(o.exchange)
+      ? (o.exchange as ExchangeId)
+      : fallback.exchange;
+  const rawSymbol = typeof o.symbol === "string" ? o.symbol.trim() : "";
+  const symbol =
+    rawSymbol.length > 0 && rawSymbol.length <= 200
+      ? normalizeMarketSymbol(rawSymbol)
+      : fallback.symbol;
+  const supported = supportedTimeframesFor(exchange, symbol);
+  // Un synthétique illisible (ou toute combinaison sans capacité) est rejeté en bloc.
+  if (supported.length === 0) return fallback;
+  const fallbackTimeframe = supported.includes(fallback.timeframe)
+    ? fallback.timeframe
+    : (supported[0] ?? "1m");
+  const timeframe =
+    typeof o.timeframe === "string" && (supported as readonly string[]).includes(o.timeframe)
+      ? (o.timeframe as Timeframe)
+      : fallbackTimeframe;
+  return { exchange, symbol, timeframe };
 }
 
 /** Lecture tolérante de l'état persisté (localStorage indispo / JSON corrompu → défauts). */
@@ -117,9 +150,9 @@ function hydrate(): Persisted {
         : "1";
     const slotsRaw = Array.isArray(p.slots) ? p.slots : [];
     const slots: [SlotConfig, SlotConfig, SlotConfig] = [
-      readSlot(slotsRaw[0], DEFAULT_SLOTS[0]),
-      readSlot(slotsRaw[1], DEFAULT_SLOTS[1]),
-      readSlot(slotsRaw[2], DEFAULT_SLOTS[2]),
+      sanitizeSlotConfig(slotsRaw[0], DEFAULT_SLOTS[0]),
+      sanitizeSlotConfig(slotsRaw[1], DEFAULT_SLOTS[1]),
+      sanitizeSlotConfig(slotsRaw[2], DEFAULT_SLOTS[2]),
     ];
     return { layout, slots, linked: p.linked === true };
   } catch {
@@ -160,11 +193,11 @@ function patchSlot(
   const cur = slots[i];
   if (cur === undefined) return slots;
   const next = slots.slice() as [SlotConfig, SlotConfig, SlotConfig];
-  next[i] = {
+  next[i] = sanitizeSlotConfig({
     exchange: patch.exchange ?? cur.exchange,
-    symbol: patch.symbol !== undefined ? patch.symbol.toUpperCase() : cur.symbol,
+    symbol: patch.symbol !== undefined ? normalizeMarketSymbol(patch.symbol) : cur.symbol,
     timeframe: patch.timeframe ?? cur.timeframe,
-  };
+  }, cur);
   return next;
 }
 
@@ -182,6 +215,9 @@ export const chartLayoutStore = createStore<ChartLayoutState>((set, get) => ({
   setFocus: (slot) => set((s) => ({ focus: clampFocus(slot, s.layout) })),
 
   toggleLinked: () => set((s) => ({ linked: !s.linked })),
+
+  setSlotMarket: (slot, config) =>
+    set((s) => ({ slots: patchSlot(s.slots, slot, config) })),
 
   setSlotSymbol: (slot, symbol) => {
     const s = get();

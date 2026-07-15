@@ -1,7 +1,7 @@
 /**
  * Gestionnaire de fenêtres flottantes AXIOM (« Launchpad ») — Zustand VANILLA, hors
  * render-loop React. Source de vérité UNIQUE de la géométrie/état (position, taille,
- * z-order, minimize, groupe de couleur) des 21 fenêtres Bloomberg non modales.
+ * z-order, minimize, groupe de couleur) des 22 fenêtres Bloomberg non modales.
  *
  * Chaque fenêtre garde son propre store métier (`*UiStore`, ex. `derivativesUiStore`)
  * pour sa logique interne ; ces stores DÉLÈGUENT `open`/`close`/`toggle` ici via
@@ -22,7 +22,7 @@ import { COMPARE_PALETTE } from "./compare";
  * existante (déjà choisie pour être lisible sur les 5 thèmes du terminal). */
 export const GROUP_PALETTE: readonly string[] = COMPARE_PALETTE;
 
-/** Registre statique des 21 fenêtres Bloomberg : titre/mnémonique/taille par défaut
+/** Registre statique des 22 fenêtres Bloomberg : titre/mnémonique/taille par défaut
  * (largeur = ancienne largeur fixe du dock, hauteur = valeur raisonnable par défaut,
  * l'utilisateur redimensionne ensuite librement). Utilisé par `App.tsx` (montage),
  * `TaskbarMinimized.tsx` (libellé des pastilles) et `openWindow` (taille initiale). */
@@ -54,11 +54,18 @@ export const WINDOW_REGISTRY: readonly {
   { id: "fund", title: "Fiche société (FUND)", mnemonic: "FUND", defaultWidth: 480, defaultHeight: 640 },
   { id: "brief", title: "Point marché", mnemonic: "BRIEF", defaultWidth: 480, defaultHeight: 720 },
   { id: "globe", title: "Globe (chokepoints & trafic aérien)", mnemonic: "GLOBE", defaultWidth: 720, defaultHeight: 720 },
+  { id: "stablecoins", title: "Stablecoins (supply, dominance, pegs)", mnemonic: "STBL", defaultWidth: 860, defaultHeight: 640 },
 ] as const;
 
 /** Espace minimal toujours visible d'une fenêtre (pixels), pour le drag comme le resize. */
 export const MIN_WIDTH = 320;
 export const MIN_HEIGHT = 240;
+
+/** Bande réservée aux fenêtres flottantes. Les overlays globaux/modal backdrops
+ * commencent à `z-40` (Toolbar, réglages, palette…) : une fenêtre ne doit donc
+ * JAMAIS atteindre cette strate, même après une très longue session. */
+export const WINDOW_Z_MIN = 1;
+export const WINDOW_Z_MAX = 39;
 
 export interface EtatFenetre {
   id: string;
@@ -74,6 +81,69 @@ export interface EtatFenetre {
    * restaurer en glissant l'en-tête depuis l'état maximisé/ancré, comme Windows/macOS.
    * `null` si la fenêtre n'est pas actuellement dans un état issu d'un snap. */
   preSnapGeometry: { x: number; y: number; width: number; height: number } | null;
+}
+
+/** Nombre de niveaux distincts disponibles sous la première strate modale (`z-40`). */
+const WINDOW_Z_CAPACITY = WINDOW_Z_MAX - WINDOW_Z_MIN + 1;
+
+/** Valeur de tri tolérante pour un ancien état persisté : on conserve son ordre
+ * relatif même si son z est négatif ou très supérieur à la bande actuelle. */
+function valeurZPourTri(z: number): number {
+  return Number.isFinite(z) ? z : WINDOW_Z_MIN - 1;
+}
+
+/** Compacte tous les z dans la bande réservée, sans changer l'ordre relatif des
+ * fenêtres. Les égalités sont stables selon l'ordre d'insertion du record — utile
+ * pour les anciens états persistés qui pouvaient contenir des doublons.
+ *
+ * Si un futur registre dépassait la capacité de la bande, seules les fenêtres les
+ * plus basses partageraient `WINDOW_Z_MIN`; le sommet reste distinct et borné. */
+export function normaliserOrdreZ(
+  windows: Record<string, EtatFenetre>
+): { windows: Record<string, EtatFenetre>; nextZ: number } {
+  const tries = Object.entries(windows)
+    .map(([id, fenetre], index) => ({ id, fenetre, index }))
+    .sort(
+      (a, b) =>
+        valeurZPourTri(a.fenetre.z) - valeurZPourTri(b.fenetre.z) || a.index - b.index
+    );
+  const debordement = Math.max(0, tries.length - WINDOW_Z_CAPACITY);
+  const normalises: Record<string, EtatFenetre> = {};
+  for (let rang = 0; rang < tries.length; rang += 1) {
+    const entree = tries[rang];
+    if (!entree) continue;
+    const z = WINDOW_Z_MIN + Math.max(0, rang - debordement);
+    normalises[entree.id] = { ...entree.fenetre, z };
+  }
+  const zSommet =
+    tries.length === 0
+      ? WINDOW_Z_MIN - 1
+      : Math.min(WINDOW_Z_MAX, WINDOW_Z_MIN + tries.length - 1);
+  return { windows: normalises, nextZ: Math.min(WINDOW_Z_MAX + 1, zSommet + 1) };
+}
+
+function maximumZ(windows: Record<string, EtatFenetre>): number {
+  let maximum = WINDOW_Z_MIN - 1;
+  for (const fenetre of Object.values(windows)) maximum = Math.max(maximum, fenetre.z);
+  return maximum;
+}
+
+/** Détecte les états injectés/restaurés qui doivent passer par la migration douce
+ * (hors bande, fractionnaires, non finis ou doublons ambigus). */
+function ordreZDoitEtreNormalise(windows: Record<string, EtatFenetre>): boolean {
+  const vus = new Set<number>();
+  for (const fenetre of Object.values(windows)) {
+    if (
+      !Number.isInteger(fenetre.z) ||
+      fenetre.z < WINDOW_Z_MIN ||
+      fenetre.z > WINDOW_Z_MAX ||
+      vus.has(fenetre.z)
+    ) {
+      return true;
+    }
+    vus.add(fenetre.z);
+  }
+  return false;
 }
 
 /** Rectangle de la zone de travail des fenêtres flottantes (le conteneur du graphe,
@@ -178,7 +248,9 @@ export function snapGeometry(
 
 export interface WindowManagerState {
   windows: Record<string, EtatFenetre>;
-  /** Compteur global de z-index — incrémenté à chaque focus/ouverture/restore. */
+  /** Prochain z disponible dans la bande des fenêtres. Peut valoir
+   * `WINDOW_Z_MAX + 1` comme sentinelle : la prochaine promotion compacte alors
+   * l'ordre avant d'allouer un nouveau sommet. */
   nextZ: number;
   /** Couleur de groupe -> dernier symbole diffusé aux fenêtres/composants de ce groupe. */
   groupSymbols: Record<string, string>;
@@ -217,6 +289,71 @@ export interface WindowManagerState {
   setWorkspace: (workspace: WorkspaceRect) => void;
 }
 
+interface EtatOrdreZ {
+  windows: Record<string, EtatFenetre>;
+  nextZ: number;
+}
+
+/** Prépare un z libre pour une nouvelle fenêtre. Un compteur périmé (ancien état,
+ * saturation de la bande ou injection directe en test) déclenche une compaction. */
+function allouerNouveauZ(state: EtatOrdreZ): EtatOrdreZ & { z: number } {
+  let windows = state.windows;
+  let nextZ = state.nextZ;
+  const max = ordreZDoitEtreNormalise(windows) ? Number.NaN : maximumZ(windows);
+  if (
+    !Number.isInteger(nextZ) ||
+    !Number.isFinite(max) ||
+    nextZ <= max ||
+    nextZ > WINDOW_Z_MAX
+  ) {
+    ({ windows, nextZ } = normaliserOrdreZ(windows));
+  }
+
+  // Le registre courant tient largement dans la bande. Ce repli défensif garde
+  // néanmoins un z rendu borné si un futur appelant crée plus de 39 ids dynamiques.
+  const z = Math.min(nextZ, WINDOW_Z_MAX);
+  return { windows, z, nextZ: Math.min(WINDOW_Z_MAX + 1, z + 1) };
+}
+
+/** Monte une fenêtre existante au sommet. Si elle y est déjà, renvoie exactement
+ * les références/compteur reçus : aucun bump, aucun write Zustand/persistance.
+ * Les anciens z hors bande sont d'abord normalisés en conservant leur ordre. */
+function mettreAuSommet(state: EtatOrdreZ, id: string): EtatOrdreZ {
+  let windows = state.windows;
+  let nextZ = state.nextZ;
+
+  if (ordreZDoitEtreNormalise(windows)) {
+    ({ windows, nextZ } = normaliserOrdreZ(windows));
+  }
+
+  let existing = windows[id];
+  if (!existing) return { windows, nextZ };
+  let max = maximumZ(windows);
+  if (existing.z === max) return { windows, nextZ };
+
+  if (!Number.isInteger(nextZ) || nextZ <= max || nextZ > WINDOW_Z_MAX) {
+    ({ windows, nextZ } = normaliserOrdreZ(windows));
+    existing = windows[id];
+    if (!existing) return { windows, nextZ };
+    max = maximumZ(windows);
+    if (existing.z === max) return { windows, nextZ };
+  }
+
+  // Bande saturée après compaction : place temporairement la cible au-dessus puis
+  // recompacte l'ensemble. Aucun z rendu ne franchit WINDOW_Z_MAX.
+  if (nextZ > WINDOW_Z_MAX) {
+    return normaliserOrdreZ({
+      ...windows,
+      [id]: { ...existing, z: WINDOW_Z_MAX + 1 },
+    });
+  }
+
+  return {
+    windows: { ...windows, [id]: { ...existing, z: nextZ } },
+    nextZ: nextZ + 1,
+  };
+}
+
 export const windowManagerStore = createStore<WindowManagerState>((set, get) => ({
   windows: {},
   nextZ: 1,
@@ -226,17 +363,29 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
 
   openWindow: (id) => {
     const state = get();
-    const existing = state.windows[id];
-    const nextZ = state.nextZ;
-    if (existing) {
+    if (state.windows[id]) {
+      const ordre = mettreAuSommet(state, id);
+      const existing = ordre.windows[id];
+      if (!existing) return;
       const size = clampSize(existing.width, existing.height, MIN_WIDTH, MIN_HEIGHT, state.workspace);
       const pos = clampPosition(existing.x, existing.y, size.width, size.height, state.workspace);
+      const etatInchange =
+        existing.open &&
+        !existing.minimized &&
+        existing.x === pos.x &&
+        existing.y === pos.y &&
+        existing.width === size.width &&
+        existing.height === size.height;
+      if (etatInchange && ordre.windows === state.windows && ordre.nextZ === state.nextZ) return;
       set({
-        windows: { ...state.windows, [id]: { ...existing, ...pos, ...size, open: true, minimized: false, z: nextZ } },
-        nextZ: nextZ + 1,
+        windows: etatInchange
+          ? ordre.windows
+          : { ...ordre.windows, [id]: { ...existing, ...pos, ...size, open: true, minimized: false } },
+        nextZ: ordre.nextZ,
       });
       return;
     }
+    const ordre = allouerNouveauZ(state);
     const entry = WINDOW_REGISTRY.find((w) => w.id === id);
     const width = entry?.defaultWidth ?? 480;
     const height = entry?.defaultHeight ?? 640;
@@ -244,7 +393,7 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
     const { x, y } = cascadePosition(openCount, state.workspace, width, height);
     set({
       windows: {
-        ...state.windows,
+        ...ordre.windows,
         [id]: {
           id,
           open: true,
@@ -252,13 +401,13 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
           y,
           width,
           height,
-          z: nextZ,
+          z: ordre.z,
           minimized: false,
           groupColor: null,
           preSnapGeometry: null,
         },
       },
-      nextZ: nextZ + 1,
+      nextZ: ordre.nextZ,
     });
   },
 
@@ -275,10 +424,11 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   },
 
   focusWindow: (id) => {
-    const existing = get().windows[id];
-    if (!existing) return;
-    const nextZ = get().nextZ;
-    set({ windows: { ...get().windows, [id]: { ...existing, z: nextZ } }, nextZ: nextZ + 1 });
+    const state = get();
+    if (!state.windows[id]) return;
+    const ordre = mettreAuSommet(state, id);
+    if (ordre.windows === state.windows && ordre.nextZ === state.nextZ) return;
+    set(ordre);
   },
 
   moveWindow: (id, x, y) => {
@@ -300,12 +450,17 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   },
 
   restoreWindow: (id) => {
-    const existing = get().windows[id];
+    const state = get();
+    if (!state.windows[id]) return;
+    const ordre = mettreAuSommet(state, id);
+    const existing = ordre.windows[id];
     if (!existing) return;
-    const nextZ = get().nextZ;
+    if (!existing.minimized && ordre.windows === state.windows && ordre.nextZ === state.nextZ) return;
     set({
-      windows: { ...get().windows, [id]: { ...existing, minimized: false, z: nextZ } },
-      nextZ: nextZ + 1,
+      windows: existing.minimized
+        ? { ...ordre.windows, [id]: { ...existing, minimized: false } }
+        : ordre.windows,
+      nextZ: ordre.nextZ,
     });
   },
 
@@ -347,14 +502,12 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
     get().reclampAll(workspace);
   },
 
-  setAll: (windows) =>
-    set({
-      windows,
-      // Ne recule jamais : garde le nextZ courant si aucune fenêtre restaurée ne le
-      // dépasse (pas atteignable aujourd'hui via workspaces/persist.ts, qui repartent
-      // toujours de z cohérents — filet défensif pour un futur appelant).
-      nextZ: Math.max(get().nextZ, ...Object.values(windows).map((w) => w.z), 0) + 1,
-    }),
+  setAll: (windows) => {
+    // Migration douce des sauvegardes/workspaces historiques : leurs z monotones
+    // peuvent être très supérieurs aux overlays actuels. On garde leur ordre relatif,
+    // mais on les réinjecte immédiatement dans la bande sûre.
+    set(normaliserOrdreZ(windows));
+  },
 
   reclampAll: (workspace) => {
     const state = get();

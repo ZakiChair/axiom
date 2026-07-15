@@ -571,7 +571,7 @@ export function decisionsReconcile(
  */
 async function reconcilierDepuisDaemon(): Promise<void> {
   try {
-    if (!(await detectDaemon())) return;
+    if (!(await detectDaemon("kv"))) return;
     const snapshot = await kvSnapshot(NS_PERSIST);
     if (!snapshot) return;
 

@@ -23,6 +23,7 @@
  */
 import type { Candle, IExchangeAdapter, Timeframe, Trade, Unsubscribe } from "@axiom/types";
 import { binanceAdapter } from "./binance";
+import { urlDaemon } from "./daemon";
 
 /** Timeframes proposés au replay (intraday ; natifs Binance). Ordre = ordre du sélecteur. */
 export const REPLAY_TFS: Timeframe[] = ["1m", "5m", "15m", "1h"];
@@ -51,16 +52,6 @@ const MARGE_CHARGE_MS = 5 * 60_000;
 const TRIM_SEUIL = 100_000;
 
 // ─────────────────────────── Accès daemon (HTTP) ───────────────────────────
-
-/**
- * Base d'URL du daemon (réplique la logique privée de data/daemon.ts, non exportée) :
- * DEV → 127.0.0.1:8787 ; PROD → même origine (front servi par le daemon).
- */
-function baseDaemon(): string {
-  if (import.meta.env.DEV) return "http://127.0.0.1:8787";
-  if (typeof window !== "undefined") return window.location.origin;
-  return "http://127.0.0.1:8787";
-}
 
 /** Trade rejoué au format de fil du daemon. */
 export interface TradeReplay {
@@ -91,7 +82,7 @@ export interface JourStocke {
 
 /** Demande le téléchargement d'un jour (idempotent). */
 export async function demanderTelechargement(symbole: string, jour: string): Promise<JobStatut> {
-  const res = await fetch(`${baseDaemon()}/replay/download`, {
+  const res = await fetch(urlDaemon("/replay/download"), {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ symbole, jour }),
@@ -102,14 +93,14 @@ export async function demanderTelechargement(symbole: string, jour: string): Pro
 /** Interroge l'état d'un job. */
 export async function statutTelechargement(symbole: string, jour: string): Promise<JobStatut> {
   const res = await fetch(
-    `${baseDaemon()}/replay/status/${encodeURIComponent(symbole)}/${encodeURIComponent(jour)}`,
+    urlDaemon(`/replay/status/${encodeURIComponent(symbole)}/${encodeURIComponent(jour)}`),
   );
   return (await res.json()) as JobStatut;
 }
 
 /** Liste les jours stockés. */
 export async function listerJours(): Promise<JourStocke[]> {
-  const res = await fetch(`${baseDaemon()}/replay/jours`);
+  const res = await fetch(urlDaemon("/replay/jours"));
   const corps = (await res.json()) as { jours?: JourStocke[] };
   return Array.isArray(corps.jours) ? corps.jours : [];
 }
@@ -117,7 +108,7 @@ export async function listerJours(): Promise<JourStocke[]> {
 /** Purge un jour stocké. */
 export async function purgerJour(symbole: string, jour: string): Promise<boolean> {
   const res = await fetch(
-    `${baseDaemon()}/replay/trades/${encodeURIComponent(symbole)}/${encodeURIComponent(jour)}`,
+    urlDaemon(`/replay/trades/${encodeURIComponent(symbole)}/${encodeURIComponent(jour)}`),
     { method: "DELETE" },
   );
   return res.ok;
@@ -130,8 +121,10 @@ export async function chargerPageTrades(
   depuis: number,
 ): Promise<TradeReplay[]> {
   const res = await fetch(
-    `${baseDaemon()}/replay/trades/${encodeURIComponent(symbole)}/${encodeURIComponent(jour)}` +
-      `?depuis=${depuis}&limite=${PAGE_TRADES}`,
+    urlDaemon(
+      `/replay/trades/${encodeURIComponent(symbole)}/${encodeURIComponent(jour)}` +
+        `?depuis=${depuis}&limite=${PAGE_TRADES}`,
+    ),
   );
   if (!res.ok) return [];
   const corps = (await res.json()) as { trades?: TradeReplay[] };
@@ -222,6 +215,7 @@ export class MoteurReplay {
   private curseur: number;
   private vitesse = 1;
   private enLecture = false;
+  private disposed = false;
   private timer: ReturnType<typeof setInterval> | null = null;
   private dernierTick = 0;
 
@@ -275,9 +269,11 @@ export class MoteurReplay {
    * En pagination (endTime fourni par le scroll gauche), délègue aux klines réelles.
    */
   async seed(endTime?: number): Promise<Candle[]> {
+    if (this.disposed) return [];
     if (endTime !== undefined) {
       try {
-        return await binanceAdapter.fetchKlines(this.symbole, this.tf, { limit: 500, endTime });
+        const candles = await binanceAdapter.fetchKlines(this.symbole, this.tf, { limit: 500, endTime });
+        return this.disposed ? [] : candles;
       } catch {
         return [];
       }
@@ -289,18 +285,20 @@ export class MoteurReplay {
         limit: 1000,
         endTime: bucket - 1,
       });
-      return klines.filter((c) => c.time >= this.jourDebut && c.time < bucket);
+      return this.disposed ? [] : klines.filter((c) => c.time >= this.jourDebut && c.time < bucket);
     } catch {
       return [];
     }
   }
 
   abonnerKline(cb: (c: Candle) => void): Unsubscribe {
+    if (this.disposed) return () => undefined;
     this.klineSubs.add(cb);
     return () => this.klineSubs.delete(cb);
   }
 
   abonnerTrades(cb: (t: Trade) => void): Unsubscribe {
+    if (this.disposed) return () => undefined;
     this.tradeSubs.add(cb);
     return () => this.tradeSubs.delete(cb);
   }
@@ -308,7 +306,7 @@ export class MoteurReplay {
   // --- Contrôles de lecture ---
 
   lecture(): void {
-    if (this.enLecture || this.curseur >= this.jourFin) return;
+    if (this.disposed || this.enLecture || this.curseur >= this.jourFin) return;
     this.enLecture = true;
     this.dernierTick = performance.now();
     this.timer = setInterval(this.tick, PERIODE_MS);
@@ -327,6 +325,7 @@ export class MoteurReplay {
   }
 
   dispose(): void {
+    this.disposed = true;
     this.pause();
     this.klineSubs.clear();
     this.tradeSubs.clear();
@@ -353,7 +352,7 @@ export class MoteurReplay {
 
   /** Charge les pages de trades tant que le buffer ne couvre pas `jusqua + marge`. */
   private async assurerCharge(jusqua: number): Promise<void> {
-    if (this.chargementComplet || this.enChargement) return;
+    if (this.disposed || this.chargementComplet || this.enChargement) return;
     const dernier = this.buffer[this.buffer.length - 1];
     if (dernier !== undefined && dernier.t >= jusqua + MARGE_CHARGE_MS) return;
     this.enChargement = true;
@@ -361,6 +360,7 @@ export class MoteurReplay {
       // depuis = dernierTCharge + 1 : évite de réémettre la borne (perte possible des
       // trades partageant l'exacte ms de coupe d'une page — négligeable pour un rejeu visuel).
       const page = await chargerPageTrades(this.symbole, this.jour, this.dernierTCharge + 1);
+      if (this.disposed) return;
       if (page.length === 0) {
         this.chargementComplet = true;
         return;
@@ -436,11 +436,32 @@ let _adaptateurActif: IExchangeAdapter | null = null;
 
 /** Façade IExchangeAdapter au-dessus d'un moteur (réutilise le pipeline chart existant). */
 function facade(moteur: MoteurReplay): IExchangeAdapter {
+  const assertKlineIdentity = (symbol: string, tf: Timeframe): void => {
+    if (symbol.toUpperCase() !== moteur.symbole || tf !== moteur.tf) {
+      throw new Error(
+        `Identité replay incohérente : demandé ${symbol}/${tf}, moteur ${moteur.symbole}/${moteur.tf}.`,
+      );
+    }
+  };
+  const assertSymbol = (symbol: string): void => {
+    if (symbol.toUpperCase() !== moteur.symbole) {
+      throw new Error(`Symbole replay incohérent : demandé ${symbol}, moteur ${moteur.symbole}.`);
+    }
+  };
   return {
     id: "binance",
-    fetchKlines: (_symbol, _tf, opts) => moteur.seed(opts?.endTime),
-    subscribeKline: (_symbol, _tf, cb) => moteur.abonnerKline(cb),
-    subscribeTrades: (_symbol, cb) => moteur.abonnerTrades(cb),
+    fetchKlines: async (symbol, tf, opts) => {
+      assertKlineIdentity(symbol, tf);
+      return moteur.seed(opts?.endTime);
+    },
+    subscribeKline: (symbol, tf, cb) => {
+      assertKlineIdentity(symbol, tf);
+      return moteur.abonnerKline(cb);
+    },
+    subscribeTrades: (symbol, cb) => {
+      assertSymbol(symbol);
+      return moteur.abonnerTrades(cb);
+    },
   };
 }
 

@@ -10,7 +10,7 @@
  * Stockage : liste des jours téléchargés + purge. Dégradation claire si le daemon est
  * absent (« le replay nécessite le daemon axiomd »).
  */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useStore } from "zustand";
 import { replayStore, joursProposes, REPLAY_TFS, VITESSES } from "../store/replay";
 import { debutJour, JOUR_MS } from "../data/replayFeed";
@@ -34,11 +34,26 @@ export function ReplayWindow() {
   const s = useStore(replayStore);
   // Valeur locale du curseur pendant un glissé (évite un seek à chaque frame du drag).
   const [scrub, setScrub] = useState<number | null>(null);
+  const scrubRef = useRef<number | null>(null);
+
+  const updateScrub = (value: number): void => {
+    scrubRef.current = value;
+    setScrub(value);
+  };
+  const commitScrub = (): void => {
+    const value = scrubRef.current;
+    scrubRef.current = null;
+    setScrub(null);
+    if (value !== null) replayStore.getState().seek(value);
+  };
 
   const debut = debutJour(s.jour);
   const valeurCurseur = scrub ?? s.curseur;
 
-  const statutPret = s.statut.etat === "pret";
+  const statutPret =
+    s.statut.etat === "pret" &&
+    s.statut.symbole?.toUpperCase() === s.symbole &&
+    s.statut.jour === s.jour;
   const enTelechargement = s.statut.etat === "en_cours";
 
   return (
@@ -199,15 +214,10 @@ export function ReplayWindow() {
                   max={debut + JOUR_MS}
                   step={1000}
                   value={valeurCurseur}
-                  onChange={(e) => setScrub(Number(e.target.value))}
-                  onPointerUp={() => {
-                    if (scrub !== null) replayStore.getState().seek(scrub);
-                    setScrub(null);
-                  }}
-                  onMouseUp={() => {
-                    if (scrub !== null) replayStore.getState().seek(scrub);
-                    setScrub(null);
-                  }}
+                  onChange={(e) => updateScrub(Number(e.target.value))}
+                  onPointerUp={commitScrub}
+                  onKeyUp={commitScrub}
+                  onBlur={commitScrub}
                   className="w-full accent-accent"
                 />
                 <div className="flex justify-between tabular-nums text-[10px] text-text-dim">

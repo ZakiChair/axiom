@@ -180,6 +180,8 @@ export type AuxSeriesId =
   // Métriques de cycle on-chain BTC (bitcoin-data.com / BGeometrics, journalier).
   // `mvrvZ` = vrai MVRV Z-Score (realized-cap) ; `realizedPrice` = prix on-chain moyen.
   | "nupl" | "puell" | "sopr" | "reserveRisk" | "mvrvZ" | "realizedPrice"
+  // Comportement des détenteurs (bitcoin-data.com) : SOPR ajusté / court / long terme, RHODL.
+  | "asopr" | "sthSopr" | "lthSopr" | "rhodl"
   // Basis annualisé du future trimestriel courant (Binance COIN-M, BTC/ETH).
   | "quarterlyBasis"
   // Positionnement Binance futures : comptes (foule), top traders, taker (flux agressif).

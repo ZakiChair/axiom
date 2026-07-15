@@ -31,7 +31,10 @@ export const BG_LIMITE_JOUR = 15;
 const FENETRE_JOURS = 120;
 
 /** Id interne d'une métrique BGeometrics (bitcoin-data.com, BTC uniquement). */
-export type BgMetriqueId = "mvrv" | "sopr" | "nupl" | "puell" | "reserveRisk" | "realizedPrice";
+export type BgMetriqueId =
+  | "mvrv" | "sopr" | "nupl" | "puell" | "reserveRisk" | "realizedPrice"
+  // Comportement des détenteurs (aux chart-only, hors panneau OnchainWindow).
+  | "asopr" | "sthSopr" | "lthSopr" | "rhodl";
 
 /** Définition d'une métrique BGeometrics (id interne, chemin API, champ JSON, libellé). */
 export interface DefMetriqueBg {
@@ -50,6 +53,12 @@ export const BG_RESERVE_RISK: DefMetriqueBg = { id: "reserveRisk", chemin: "rese
 // Realized Price : prix moyen d'acquisition on-chain (USD). Overlay prix — hors panneau
 // valorisation OnchainWindow (BG_METRIQUES), consommé uniquement par la couche aux.
 export const BG_REALIZED_PRICE: DefMetriqueBg = { id: "realizedPrice", chemin: "realized-price", champ: "realizedPrice", libelle: "Realized Price" };
+// Comportement des détenteurs — aux CHART-ONLY (hors BG_METRIQUES pour ne pas alourdir
+// le burst de fetch d'OnchainWindow ni le quota 10 req/h).
+export const BG_ASOPR: DefMetriqueBg = { id: "asopr", chemin: "asopr", champ: "asopr", libelle: "aSOPR" };
+export const BG_STH_SOPR: DefMetriqueBg = { id: "sthSopr", chemin: "sth-sopr", champ: "sthSopr", libelle: "STH-SOPR" };
+export const BG_LTH_SOPR: DefMetriqueBg = { id: "lthSopr", chemin: "lth-sopr", champ: "lthSopr", libelle: "LTH-SOPR" };
+export const BG_RHODL: DefMetriqueBg = { id: "rhodl", chemin: "rhodl-ratio", champ: "rhodlRatio", libelle: "RHODL Ratio" };
 
 export const BG_METRIQUES: readonly DefMetriqueBg[] = [
   BG_MVRV,

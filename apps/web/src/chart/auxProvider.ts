@@ -29,6 +29,14 @@ import type { AuxSeries, AuxSeriesId, ExchangeId, Timeframe } from "@axiom/types
 import { coinalyzeProvider } from "../data/coinalyze";
 import { stablecoinsSupplyProvider } from "../data/macro/stablecoins";
 import { fetchCoinMetrics } from "../data/onchain/coinmetrics";
+import {
+  BG_NUPL,
+  BG_PUELL,
+  BG_RESERVE_RISK,
+  BG_SOPR,
+  fetchBgeometricMetrique,
+  type DefMetriqueBg,
+} from "../data/onchain/bgeometrics";
 import { extUrl } from "../data/extapi";
 
 /** État renvoyé par `getAligned` pour l'ensemble des `ids` demandés. */
@@ -61,6 +69,13 @@ const TTL_MS: Record<AuxSeriesId, number> = {
   nvt: 60 * 60_000,
   mvrv: 60 * 60_000,
   marketcap: 60 * 60_000, // CapMrktCurUSD (Coin Metrics, journalier — BTC only en community)
+  // Cycle on-chain BTC (bitcoin-data.com, journalier) : le vrai anti-tempête est le
+  // cache 24h + quota interne de fetchBgeometricMetrique ; ce TTL aux évite juste des
+  // ré-alignements trop fréquents.
+  nupl: 60 * 60_000,
+  puell: 60 * 60_000,
+  sopr: 60 * 60_000,
+  reserveRisk: 60 * 60_000,
 };
 /** Durée de mémorisation d'un échec de fetch (anti retry-tempête). */
 const ERROR_TTL_MS = 30_000;
@@ -178,8 +193,28 @@ async function rawFetch(id: AuxSeriesId, symbol: string): Promise<AuxPoint[]> {
       const serie = r?.series.CapMrktCurUSD;
       return toPoints((serie?.points ?? []).map((p) => ({ time: p.time, value: p.value })));
     }
+    case "nupl":
+    case "puell":
+    case "sopr":
+    case "reserveRisk": {
+      // Métriques de cycle on-chain BTC (bitcoin-data.com). Réutilise le fetch dédié
+      // (cache 24h + quota partagés avec OnchainWindow → aucun appel réseau dupliqué).
+      // BTC uniquement : les autres actifs restent vides (dégradation gracieuse).
+      if (symbolToAsset(symbol) !== "btc") return [];
+      const def = BG_DEF_PAR_AUX[id];
+      const r = await fetchBgeometricMetrique(def);
+      return toPoints((r?.serie.points ?? []).map((p) => ({ time: p.time, value: p.value })));
+    }
   }
 }
+
+/** Aux id de cycle on-chain → définition BGeometrics correspondante. */
+const BG_DEF_PAR_AUX: Record<"nupl" | "puell" | "sopr" | "reserveRisk", DefMetriqueBg> = {
+  nupl: BG_NUPL,
+  puell: BG_PUELL,
+  sopr: BG_SOPR,
+  reserveRisk: BG_RESERVE_RISK,
+};
 
 export class AuxProvider {
   /** Cache brut partagé (singleton) : clé `${id}:${symbole}` → entrée. */

@@ -30,18 +30,30 @@ export const BG_LIMITE_JOUR = 15;
 /** Profondeur d'historique demandée (jours) pour la sparkline. */
 const FENETRE_JOURS = 120;
 
+/** Id interne d'une métrique BGeometrics (bitcoin-data.com, BTC uniquement). */
+export type BgMetriqueId = "mvrv" | "sopr" | "nupl" | "puell" | "reserveRisk";
+
 /** Définition d'une métrique BGeometrics (id interne, chemin API, champ JSON, libellé). */
 export interface DefMetriqueBg {
-  id: "mvrv" | "sopr" | "nupl";
+  id: BgMetriqueId;
   chemin: string;
   champ: string;
   libelle: string;
 }
 
+// Défs exportées individuellement (réutilisées par la couche aux du chart, cf. auxProvider).
+export const BG_MVRV: DefMetriqueBg = { id: "mvrv", chemin: "mvrv-zscore", champ: "mvrvZscore", libelle: "MVRV Z-Score" };
+export const BG_SOPR: DefMetriqueBg = { id: "sopr", chemin: "sopr", champ: "sopr", libelle: "SOPR" };
+export const BG_NUPL: DefMetriqueBg = { id: "nupl", chemin: "nupl", champ: "nupl", libelle: "NUPL" };
+export const BG_PUELL: DefMetriqueBg = { id: "puell", chemin: "puell-multiple", champ: "puellMultiple", libelle: "Puell Multiple" };
+export const BG_RESERVE_RISK: DefMetriqueBg = { id: "reserveRisk", chemin: "reserve-risk", champ: "reserveRisk", libelle: "Reserve Risk" };
+
 export const BG_METRIQUES: readonly DefMetriqueBg[] = [
-  { id: "mvrv", chemin: "mvrv-zscore", champ: "mvrvZscore", libelle: "MVRV Z-Score" },
-  { id: "sopr", chemin: "sopr", champ: "sopr", libelle: "SOPR" },
-  { id: "nupl", chemin: "nupl", champ: "nupl", libelle: "NUPL" },
+  BG_MVRV,
+  BG_SOPR,
+  BG_NUPL,
+  BG_PUELL,
+  BG_RESERVE_RISK,
 ];
 
 /** Résultat d'une métrique : série + fraîcheur + horodatage de la donnée. */

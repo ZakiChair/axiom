@@ -24,7 +24,7 @@ vi.mock("../data/daemon", () => ({
 
 import type { Candle } from "@axiom/types";
 import type { LiqEvent } from "./liquidationMarkers";
-import { construireGrille, intensiteLog, profilParPrix } from "./liquidationHeat";
+import { cellSousCurseur, construireGrille, intensiteLog, profilParPrix } from "./liquidationHeat";
 
 function candle(partial: Partial<Candle> & Pick<Candle, "time" | "close">): Candle {
   return { open: 0, high: 0, low: 0, volume: 0, ...partial };
@@ -106,6 +106,39 @@ describe("intensiteLog", () => {
     expect(intensiteLog(200, 100)).toBe(1); // usd > max → clampé à 1
     expect(intensiteLog(50, 0)).toBe(0); // max invalide → 0
     expect(intensiteLog(50, -10)).toBe(0);
+  });
+});
+
+describe("cellSousCurseur", () => {
+  // close 100 → taille de bucket 0,1 ; prix 100 → bucketIdx 1000. Deux liqs (long + short)
+  // dans la bougie 0 (time 0), aucune dans la bougie 1 (time 60000).
+  const candles = [candle({ time: 0, close: 100 }), candle({ time: 60000, close: 100 })];
+  const events = [
+    ev({ time: 1000, side: "long", price: 100, usd: 500 }),
+    ev({ time: 1500, side: "short", price: 100, usd: 200 }),
+  ];
+  const grid = construireGrille(events, candles, 0, 2)!;
+
+  it("retrouve la cellule pour un timestamp dans la bougie et une valeur dans le bucket", () => {
+    const cell = cellSousCurseur(grid, candles, 30000, 100);
+    expect(cell).not.toBeNull();
+    expect(cell?.candleTime).toBe(0);
+    expect(cell?.longUsd).toBe(500);
+    expect(cell?.shortUsd).toBe(200);
+    expect(cell?.count).toBe(2);
+  });
+
+  it("renvoie null hors grille (bougie ou bucket sans liquidation)", () => {
+    // Bougie 1 (time 60000) : aucune liquidation → pas de cellule.
+    expect(cellSousCurseur(grid, candles, 90000, 100)).toBeNull();
+    // Valeur dans un bucket vide (prix éloigné) → pas de cellule.
+    expect(cellSousCurseur(grid, candles, 30000, 200)).toBeNull();
+  });
+
+  it("renvoie null si timestamp/value indéfini ou timestamp hors des bougies", () => {
+    expect(cellSousCurseur(grid, candles, undefined, 100)).toBeNull();
+    expect(cellSousCurseur(grid, candles, 30000, undefined)).toBeNull();
+    expect(cellSousCurseur(grid, candles, -5, 100)).toBeNull(); // avant la 1re bougie
   });
 });
 

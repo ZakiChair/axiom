@@ -11,7 +11,7 @@
  * Toutes les fonctions ici sont PURES (aucun accès DOM/store/chart) et testées.
  */
 import { ActionType, DomPosition } from "klinecharts";
-import type { Chart, Point } from "klinecharts";
+import type { Bounding, Chart, Crosshair, Point } from "klinecharts";
 import type { Candle } from "@axiom/types";
 import {
   tailleBucket,
@@ -22,6 +22,7 @@ import {
   type LiqEvent,
 } from "./liquidationMarkers";
 import { marketStore } from "../store/market";
+import { formatHeureMinute, formatPrice, formatUsd } from "../lib/format";
 
 /** Cellule agrégée : une bougie × un bucket de prix. */
 export interface LiqCell {
@@ -121,6 +122,31 @@ export function profilParPrix(grid: LiqGrid): Map<number, { longUsd: number; sho
   return profil;
 }
 
+/**
+ * Hit-test PUR du survol : retrouve la cellule sous le curseur à partir d'un `timestamp`
+ * (converti en bougie CONTENANTE via `candleContenant`) et d'une valeur de prix (`value`,
+ * convertie en bucket via `bucketIndex`), puis lookup O(1) dans `grid.cells`. Renvoie `null`
+ * si l'un des deux est indéfini, si le timestamp tombe hors des bougies, ou si aucune
+ * liquidation n'occupe la cellule visée.
+ *
+ * NB : écart au brief (signature `cellSousCurseur(grid, timestamp, value)`) — `candles` est
+ * ajouté en paramètre car la grille seule ne connaît pas les bornes temporelles des bougies ;
+ * `candleContenant` en a besoin pour rattacher un timestamp à sa bougie. PURE.
+ */
+export function cellSousCurseur(
+  grid: LiqGrid,
+  candles: Candle[],
+  timestamp: number | undefined,
+  value: number | undefined,
+): LiqCell | null {
+  if (timestamp === undefined || value === undefined) return null;
+  if (!Number.isFinite(timestamp) || !Number.isFinite(value)) return null;
+  const c = candleContenant(candles, timestamp);
+  if (c === undefined) return null;
+  const bucketIdx = bucketIndex(value, grid.taille);
+  return grid.cells.get(`${c.time}:${bucketIdx}`) ?? null;
+}
+
 // ─────────────────────────── Contrôleur canvas (non testé — couplage KLineChart) ───────────────────────────
 
 /** Pane prix (id par défaut KLineChart). */
@@ -160,11 +186,28 @@ export class LiquidationHeatController {
   private raf = 0;
   /** Reconstruit/redessine seulement si dirty : évite un recalcul complet à 60 fps au repos. */
   private dirty = true;
+  /**
+   * La grille (agrégat coûteux sur tout le buffer d'événements) n'est reconstruite que sur
+   * changement de données/viewport/taille — PAS au survol : le crosshair marque `dirty`
+   * (repeindre) sans marquer `grilleObsolete`, de sorte que le hit-test réutilise la dernière
+   * grille rendue au lieu de la recalculer à chaque mouvement de souris.
+   */
+  private grilleObsolete = true;
+  private derniereGrille: LiqGrid | null = null;
+  /** Dernier crosshair reçu (position + bougie survolée) ; null quand le curseur quitte le graphe. */
+  private dernierCrosshair: Crosshair | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private unsubMarket: (() => void) | null = null;
   private unsubEvents: (() => void) | null = null;
 
   private readonly markDirty = (): void => {
+    this.grilleObsolete = true;
+    this.dirty = true;
+  };
+
+  /** Survol : mémorise le crosshair et demande un repaint (sans reconstruire la grille). */
+  private readonly onCrosshair = (data?: Crosshair): void => {
+    this.dernierCrosshair = data ?? null;
     this.dirty = true;
   };
 
@@ -216,6 +259,8 @@ export class LiquidationHeatController {
     this.unsubEvents = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.dernierCrosshair = null;
+    this.derniereGrille = null;
     this.clearCanvas();
   }
 
@@ -228,12 +273,14 @@ export class LiquidationHeatController {
     this.chart.subscribeAction(ActionType.OnScroll, this.onViewport);
     this.chart.subscribeAction(ActionType.OnZoom, this.onViewport);
     this.chart.subscribeAction(ActionType.OnVisibleRangeChange, this.onViewport);
+    this.chart.subscribeAction(ActionType.OnCrosshairChange, this.onCrosshair);
   }
 
   private unsubscribeActions(): void {
     this.chart.unsubscribeAction(ActionType.OnScroll, this.onViewport);
     this.chart.unsubscribeAction(ActionType.OnZoom, this.onViewport);
     this.chart.unsubscribeAction(ActionType.OnVisibleRangeChange, this.onViewport);
+    this.chart.unsubscribeAction(ActionType.OnCrosshairChange, this.onCrosshair);
   }
 
   private readonly loop = (): void => {
@@ -292,7 +339,14 @@ export class LiquidationHeatController {
     const from = Math.max(0, range.from);
     const to = Math.min(candles.length, range.to);
 
-    const grid = to - from >= 1 ? construireGrille(events, candles, from, to) : null;
+    // Reconstruction de la grille SEULEMENT si obsolète (données/viewport/resize) : au survol,
+    // `onCrosshair` marque `dirty` sans marquer `grilleObsolete`, donc on réutilise la dernière
+    // grille rendue pour le hit-test au lieu de ré-agréger tout le buffer à chaque mousemove.
+    if (this.grilleObsolete) {
+      this.derniereGrille = to - from >= 1 ? construireGrille(events, candles, from, to) : null;
+      this.grilleObsolete = false;
+    }
+    const grid = this.derniereGrille;
 
     // Buffer vide (heatmap actif mais aucune liquidation encore reçue) : indicateur « en
     // attente » discret, décalé SOUS la légende (remplace l'overlay `liqHint`).
@@ -384,5 +438,90 @@ export class LiquidationHeatController {
     }
 
     ctx.restore();
+
+    // Tooltip de survol : dessiné HORS clip (au-dessus de la heatmap), après restauration.
+    this.dessinerTooltip(grid, candles, main);
+  }
+
+  /**
+   * Tooltip de survol : détail de la cellule sous le curseur — heure de la bougie, plage de
+   * prix du bucket, total USD + nombre d'événements, split longs/shorts avec mini-barres
+   * proportionnelles. Hit-test O(1) via `cellSousCurseur` sur la dernière grille (aucun
+   * recalcul au mousemove). Décalé pour rester dans le pane (repli à gauche près du bord
+   * droit, au-dessus près du bas). Ne dessine rien hors du pane prix ou sans cellule survolée.
+   */
+  private dessinerTooltip(grid: LiqGrid, candles: Candle[], main: Bounding): void {
+    const cross = this.dernierCrosshair;
+    if (cross === null || cross.paneId !== CANDLE_PANE_ID) return;
+    const cx = cross.x;
+    const cy = cross.y;
+    if (cx === undefined || cy === undefined) return;
+
+    // Timestamp = bougie survolée (snap KLineChart) ; valeur = prix au curseur, absent du
+    // crosshair → reconstitué depuis y via convertFromPixel.
+    const timestamp = cross.kLineData?.timestamp;
+    const conv = this.chart.convertFromPixel([{ y: cy }], { paneId: CANDLE_PANE_ID });
+    const value = (Array.isArray(conv) ? conv[0] : conv)?.value;
+
+    const cell = cellSousCurseur(grid, candles, timestamp, value);
+    if (cell === null) return;
+
+    const total = cell.longUsd + cell.shortUsd;
+    const prixBas = cell.bucketIdx * grid.taille;
+    const prixHaut = (cell.bucketIdx + 1) * grid.taille;
+    // Mini-barre 10 crans, remplissage ∝ part du total.
+    const barre = (part: number): string => {
+      const n = total > 0 ? Math.round((part / total) * 10) : 0;
+      const plein = n < 0 ? 0 : n > 10 ? 10 : n;
+      return "▮".repeat(plein) + "▯".repeat(10 - plein);
+    };
+    const nb = `${cell.count} événement${cell.count > 1 ? "s" : ""}`;
+    const txt = readToken("--text") || "#e5e7eb";
+    const lignes: Array<{ texte: string; couleur: string }> = [
+      {
+        texte: `Liquidations ${formatHeureMinute(cell.candleTime)} · ${formatPrice(prixBas)}–${formatPrice(prixHaut)}`,
+        couleur: txt,
+      },
+      { texte: `Total   ${formatUsd(total)}  (${nb})`, couleur: txt },
+      // Longs liquidés = ventes forcées → teinte `--down` ; shorts → `--up` (cf. profil latéral).
+      { texte: `Longs   ${formatUsd(cell.longUsd)}  ${barre(cell.longUsd)}`, couleur: readToken("--down") || "#ef4444" },
+      { texte: `Shorts  ${formatUsd(cell.shortUsd)}  ${barre(cell.shortUsd)}`, couleur: readToken("--up") || "#10b981" },
+    ];
+
+    const ctx = this.ctx;
+    ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    const pad = 8;
+    const lh = 15;
+    let maxW = 0;
+    for (const l of lignes) maxW = Math.max(maxW, ctx.measureText(l.texte).width);
+    const boxW = maxW + pad * 2;
+    const boxH = lignes.length * lh + pad * 2;
+
+    // Position : à droite/en dessous du curseur, repliée pour ne pas déborder du pane.
+    const { left, top, width, height } = main;
+    const gap = 14;
+    let bx = cx + gap;
+    let by = cy + gap;
+    if (bx + boxW > left + width) bx = cx - gap - boxW;
+    if (by + boxH > top + height) by = cy - gap - boxH;
+    bx = Math.max(left + 2, Math.min(bx, left + width - boxW - 2));
+    by = Math.max(top + 2, Math.min(by, top + height - boxH - 2));
+
+    ctx.fillStyle = "rgba(10,12,20,0.92)";
+    ctx.beginPath();
+    ctx.roundRect(bx, by, boxW, boxH, 5);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    for (let i = 0; i < lignes.length; i++) {
+      const l = lignes[i];
+      if (l === undefined) continue;
+      ctx.fillStyle = l.couleur;
+      ctx.fillText(l.texte, bx + pad, by + pad + i * lh);
+    }
   }
 }

@@ -1,23 +1,24 @@
 /**
- * Marqueurs LIQUIDATIONS sur le chart — pose des pastilles au timestamp/prix de chaque
- * liquidation forcée du perpétuel (flux `allLiquidation` Bybit), pour VOIR les cascades
- * de liquidation dans leur contexte de prix (les mèches de liquidation).
+ * Heatmap de LIQUIDATIONS sur le chart — profil des liquidations RÉELLEMENT exécutées
+ * (flux `allLiquidation` Bybit, cf. data/liquidations.ts), agrégées par NIVEAU DE PRIX
+ * et peintes en bandes horizontales pleine largeur, d'intensité viridis proportionnelle
+ * au notionnel liquidé à ce niveau (façon CoinGlass, mais données réelles — pas le
+ * modèle de levier propriétaire).
  *
- * MODÈLE : calqué sur `chart/tradeMarkers.ts` (overlay custom `registerOverlay`,
- * contrôleur singleton, rejeu via `getActiveChart()`, cycle « efface puis recrée »,
- * couleurs de thème résolues au dessin). Ne touche PAS ChartInstance (god-file).
+ * MODÈLE de câblage : overlay custom `registerOverlay` + contrôleur singleton via
+ * `getActiveChart()` (comme tradeMarkers) → NE touche PAS ChartInstance. Différences :
+ *   1. Source LIVE : le contrôleur gère l'abonnement WS (ouvert seulement si la bascule
+ *      est ON, refermé/rouvert au changement de symbole).
+ *   2. Accumulation par BUCKET DE PRIX (profil cumulatif depuis la souscription), pas
+ *      des marqueurs individuels.
+ *   3. Rendu = bandes pleine largeur ancrées à 2 points de prix (haut/bas du bucket) →
+ *      repositionnées automatiquement au pan ET au zoom, sans redraw.
  *
- * DEUX différences vs tradeMarkers :
- *   1. Source LIVE (WebSocket) et non un store rejouable → le contrôleur GÈRE l'abonnement :
- *      il n'ouvre le flux que quand la bascule est ON (économe), et le referme/rouvre au
- *      changement de symbole. Le buffer n'accumule que du LIVE (pas d'historique de liq).
- *   2. Rendu = pastille dimensionnée par NOTIONNEL (grosses liquidations = gros points),
- *      couleur par côté (long liquidé = --down, short liquidé = --up).
+ * Limites assumées : liquidations EXÉCUTÉES (pas estimées), accumulées en LIVE (le
+ * heatmap se construit tant que c'est activé), Bybit uniquement.
  *
- * Limitation assumée (comme la fenêtre LIQ) : flux throttlé ~1/s/symbole = échantillon ;
- * les marqueurs n'apparaissent que sur le bord LIVE (aucune liquidation historique).
- *
- * Fonctions PURES (tri/élagage/tier) exportées et testées ; couplage KLineChart non testé.
+ * Fonctions PURES (taille de bucket, index, colormap viridis) exportées et testées ;
+ * couplage KLineChart non testé.
  */
 import { registerOverlay } from "klinecharts";
 import type { OverlayCreate, OverlayFigure } from "klinecharts";
@@ -28,77 +29,52 @@ import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
 import { subscribeLiquidations, type Liquidation } from "../data/liquidations";
 import type { Unsubscribe } from "@axiom/types";
-import { lireTokenCanvas } from "../lib/canvasTokens";
-import { formatUsd } from "../lib/format";
 
-const LIQ_MARKER = "liqMarker";
-const LIQ_GROUP = "axiomLiq";
-
-/** Fenêtre temporelle des marqueurs conservés (bord live) et cap défensif. */
-const FENETRE_MS = 30 * 60_000;
-const MAX_MARQUEURS = 150;
-/** Notionnel minimal ($) au-delà duquel une liquidation est étiquetée (grosses seulement). */
-const SEUIL_LABEL = 1_000_000;
+const LIQ_HEAT = "liqHeat";
+const LIQ_GROUP = "axiomLiqHeat";
 
 // ─────────────────────────── Fonctions PURES (testées) ───────────────────────────
 
-/** Rayon (px) d'une pastille selon le notionnel — paliers heuristiques. PURE. */
-export function tierRayon(notionalUsd: number): number {
-  if (!Number.isFinite(notionalUsd)) return 3;
-  if (notionalUsd >= 5_000_000) return 11;
-  if (notionalUsd >= 1_000_000) return 8;
-  if (notionalUsd >= 250_000) return 6;
-  if (notionalUsd >= 50_000) return 4;
-  return 3;
-}
-
-/** Couleur SÉMANTIQUE d'une liquidation : long liquidé = down, short liquidé = up. PURE. */
-export function couleurLiquidation(side: Liquidation["side"]): "up" | "down" {
-  return side === "long" ? "down" : "up";
-}
-
 /**
- * Cale un horodatage de liquidation sur la bougie qui le CONTIENT : renvoie le plus grand
- * temps de bougie ≤ t (ou la 1re bougie si t est avant). PURE.
- *
- * POURQUOI : une liquidation est LIVE (t ≈ maintenant). Placée à son heure exacte, elle
- * tombe APRÈS la dernière bougie (zone d'offset à droite) sur les TF élevés (1d…) → les
- * marqueurs s'empilent hors des bougies, au bord droit. En calant sur la bougie
- * contenante, le marqueur atterrit TOUJOURS sur une bougie : il s'étale en intraday et se
- * regroupe sur la bougie courante en 1d. `candleTimes` est trié ascendant.
+ * Taille « jolie » d'un bucket de prix (~0,1 % du prix, arrondi à 1/2/5 × 10ⁿ).
+ * Ex. BTC 65 000 → 50 ; ETH 1 900 → 2 ; token 0,001 → 1e-6. PURE.
  */
-export function snapToCandleTime(candleTimes: number[], t: number): number {
-  const n = candleTimes.length;
-  if (n === 0) return t;
-  const first = candleTimes[0] as number;
-  const last = candleTimes[n - 1] as number;
-  if (t <= first) return first;
-  if (t >= last) return last;
-  // Recherche dichotomique du plus grand temps ≤ t.
-  let lo = 0;
-  let hi = n - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if ((candleTimes[mid] as number) <= t) lo = mid;
-    else hi = mid - 1;
-  }
-  return candleTimes[lo] as number;
+export function tailleBucket(prix: number): number {
+  const brut = prix * 0.001;
+  if (!(brut > 0) || !Number.isFinite(brut)) return 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(brut)));
+  const norm = brut / mag;
+  const nice = norm < 1.5 ? 1 : norm < 3.5 ? 2 : norm < 7.5 ? 5 : 10;
+  return nice * mag;
 }
 
-/**
- * Élague un buffer de liquidations : ne garde que celles dans [maintenant − fenetre, maintenant],
- * triées ANTICHRONO, bornées aux `max` plus récentes. PURE (base du rendu du bord live).
- */
-export function elaguerLiquidations(
-  liqs: Liquidation[],
-  maintenant: number,
-  fenetreMs: number,
-  max: number,
-): Liquidation[] {
-  return liqs
-    .filter((l) => l.time >= maintenant - fenetreMs && l.time <= maintenant)
-    .sort((a, b) => b.time - a.time)
-    .slice(0, max);
+/** Index de bucket contenant `prix` pour une `taille` donnée (bande = [idx·t, (idx+1)·t]). PURE. */
+export function bucketIndex(prix: number, taille: number): number {
+  return Math.floor(prix / taille);
+}
+
+/** Arrêts de la colormap viridis (violet → bleu → teal → vert → jaune). */
+const VIRIDIS: ReadonlyArray<readonly [number, number, number]> = [
+  [68, 1, 84],
+  [59, 82, 139],
+  [33, 145, 140],
+  [94, 201, 98],
+  [253, 231, 37],
+];
+
+/** Couleur viridis pour une intensité t ∈ [0,1] → [r,g,b] (interpolation linéaire). PURE. */
+export function couleurViridis(t: number): [number, number, number] {
+  const c = t <= 0 ? 0 : t >= 1 ? 1 : t;
+  const seg = c * (VIRIDIS.length - 1);
+  const i = Math.min(Math.floor(seg), VIRIDIS.length - 2);
+  const f = seg - i;
+  const a = VIRIDIS[i] as readonly [number, number, number];
+  const b = VIRIDIS[i + 1] as readonly [number, number, number];
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * f),
+    Math.round(a[1] + (b[1] - a[1]) * f),
+    Math.round(a[2] + (b[2] - a[2]) * f),
+  ];
 }
 
 // ─────────────────────────── Bascule (store vanilla local) ───────────────────────────
@@ -115,10 +91,8 @@ export const liqMarksStore = createStore<LiqMarksState>((set, get) => ({
 
 // ─────────────────────────── Rendu KLineChart (non testé) ───────────────────────────
 
-interface DonneesLiq {
-  rayon: number;
-  couleur: string; // déjà résolue (hex/rgb du thème courant)
-  label: string; // "" sauf grosses liquidations
+interface DonneesBande {
+  couleur: string; // rgba déjà résolue
 }
 
 let overlayRegistered = false;
@@ -126,35 +100,29 @@ function ensureOverlayRegistered(): void {
   if (overlayRegistered) return;
   overlayRegistered = true;
   registerOverlay({
-    name: LIQ_MARKER,
-    totalStep: 1,
+    name: LIQ_HEAT,
+    totalStep: 2, // 2 points : (t0, prixHaut) et (t1, prixBas) du bucket
     lock: true,
     needDefaultPointFigure: false,
     needDefaultXAxisFigure: false,
     needDefaultYAxisFigure: false,
     createPointFigures: ({ overlay, coordinates }) => {
-      const c = coordinates[0];
-      if (c === undefined) return [];
-      const d = overlay.extendData as DonneesLiq | undefined;
+      const c0 = coordinates[0];
+      const c1 = coordinates[1];
+      if (c0 === undefined || c1 === undefined) return [];
+      const d = overlay.extendData as DonneesBande | undefined;
       if (d === undefined) return [];
-      const figures: OverlayFigure[] = [
-        {
-          type: "circle",
-          ignoreEvent: true,
-          attrs: { x: c.x, y: c.y, r: d.rayon },
-          // Pastille semi-transparente (remplissage) + contour net pour la lisibilité.
-          styles: { style: "fill", color: d.couleur },
-        },
-      ];
-      if (d.label !== "") {
-        figures.push({
-          type: "text",
-          ignoreEvent: true,
-          attrs: { x: c.x + d.rayon + 3, y: c.y, text: d.label, align: "left", baseline: "middle" },
-          styles: { color: d.couleur, size: 10 },
-        });
-      }
-      return figures;
+      const x = Math.min(c0.x, c1.x);
+      const y = Math.min(c0.y, c1.y);
+      const width = Math.abs(c1.x - c0.x);
+      const height = Math.max(1, Math.abs(c1.y - c0.y)); // au moins 1px de haut
+      const fig: OverlayFigure = {
+        type: "rect",
+        ignoreEvent: true,
+        attrs: { x, y, width, height },
+        styles: { style: "fill", color: d.couleur },
+      };
+      return [fig];
     },
   });
 }
@@ -162,11 +130,13 @@ function ensureOverlayRegistered(): void {
 // ─────────────────────────── Contrôleur singleton ───────────────────────────
 
 const overlaysSuivis = new Map<{ removeOverlay(f: { id: string }): void }, string[]>();
-let buffer: Liquidation[] = [];
+/** Accumulateur notionnel par bucket de prix (profil, depuis la souscription). */
+let accumulateur = new Map<number, number>();
+/** Taille de bucket figée à la souscription (calculée sur le 1er prix vu). */
+let taille = 0;
 let abonnement: Unsubscribe | null = null;
 let symboleAbonne: string | null = null;
 
-/** Retire les overlays de toutes les instances suivies (tolère une instance détruite). */
 function retirerOverlays(): void {
   for (const [chart, ids] of overlaysSuivis) {
     for (const id of ids) {
@@ -186,29 +156,30 @@ function redraw(): void {
   const chart = getActiveChart();
   if (chart === null) return;
   const candles = marketStore.getState().candles;
-  if (candles.length === 0) return;
-  const candleTimes = candles.map((c) => c.time);
+  if (candles.length === 0 || accumulateur.size === 0 || taille <= 0) return;
 
-  const palette = {
-    up: lireTokenCanvas("--up", "#34d399"),
-    down: lireTokenCanvas("--down", "#f87171"),
-  };
-  const marqueurs = elaguerLiquidations(buffer, Date.now(), FENETRE_MS, MAX_MARQUEURS);
+  const premier = candles[0];
+  const dernier = candles[candles.length - 1];
+  if (premier === undefined || dernier === undefined) return;
+
+  let max = 0;
+  for (const v of accumulateur.values()) if (v > max) max = v;
+  if (max <= 0) return;
+
   const ids: string[] = [];
-  for (const l of marqueurs) {
-    const extend: DonneesLiq = {
-      rayon: tierRayon(l.notionalUsd),
-      couleur: palette[couleurLiquidation(l.side)],
-      label: l.notionalUsd >= SEUIL_LABEL ? formatUsd(l.notionalUsd) : "",
-    };
+  for (const [idx, notionnel] of accumulateur) {
+    const t = notionnel / max;
+    const [r, g, b] = couleurViridis(t);
+    const alpha = 0.2 + 0.6 * t;
     const overlay: OverlayCreate = {
-      name: LIQ_MARKER,
+      name: LIQ_HEAT,
       groupId: LIQ_GROUP,
       lock: true,
-      // Caler sur la bougie contenante : le marqueur tombe TOUJOURS sur une bougie
-      // (jamais dans la zone d'offset à droite), correct sur tous les timeframes.
-      points: [{ timestamp: snapToCandleTime(candleTimes, l.time), value: l.price }],
-      extendData: extend,
+      points: [
+        { timestamp: premier.time, value: (idx + 1) * taille },
+        { timestamp: dernier.time, value: idx * taille },
+      ],
+      extendData: { couleur: `rgba(${r},${g},${b},${alpha.toFixed(3)})` } satisfies DonneesBande,
     };
     const id = chart.createOverlay(overlay);
     if (typeof id === "string") ids.push(id);
@@ -216,10 +187,14 @@ function redraw(): void {
   if (ids.length > 0) overlaysSuivis.set(chart, ids);
 }
 
-/**
- * Aligne l'abonnement WS sur l'état (bascule + symbole courant). N'ouvre le flux QUE si
- * la bascule est ON ; le referme/rouvre + vide le buffer au changement de symbole.
- */
+/** Accumule une liquidation dans le bucket de son prix (fige la taille au 1er appel). */
+function accumuler(l: Liquidation): void {
+  if (taille <= 0) taille = tailleBucket(l.price);
+  const idx = bucketIndex(l.price, taille);
+  accumulateur.set(idx, (accumulateur.get(idx) ?? 0) + l.notionalUsd);
+}
+
+/** Aligne l'abonnement WS sur l'état (bascule + symbole). Réinitialise le profil au changement de symbole. */
 function sync(): void {
   const actif = liqMarksStore.getState().actif;
   const symbol = marketStore.getState().symbol;
@@ -230,17 +205,18 @@ function sync(): void {
       abonnement = null;
     }
     symboleAbonne = null;
-    buffer = [];
+    accumulateur = new Map();
+    taille = 0;
     redraw();
     return;
   }
   if (symboleAbonne !== symbol) {
     if (abonnement) abonnement();
-    buffer = [];
+    accumulateur = new Map();
+    taille = 0;
     symboleAbonne = symbol;
     abonnement = subscribeLiquidations(symbol, (l) => {
-      buffer.push(l);
-      buffer = elaguerLiquidations(buffer, Date.now(), FENETRE_MS, MAX_MARQUEURS);
+      accumuler(l);
       redraw();
     });
     redraw();
@@ -253,10 +229,14 @@ export function demarrerLiquidationMarkers(): void {
   controllerStarted = true;
   ensureOverlayRegistered();
 
-  // Symbole/focus/axe prêt : réaligne l'abonnement et redessine.
   let prevSymbol = marketStore.getState().symbol;
   let prevChart = getActiveChart();
   let prevReady = marketStore.getState().candles.length > 0;
+  const bornes = () => {
+    const c = marketStore.getState().candles;
+    return c.length === 0 ? "" : `${c[0]?.time}:${c[c.length - 1]?.time}`;
+  };
+  let prevBornes = bornes();
   marketStore.subscribe(() => {
     const chart = getActiveChart();
     const { symbol, candles } = marketStore.getState();
@@ -265,11 +245,19 @@ export function demarrerLiquidationMarkers(): void {
       prevSymbol = symbol;
       prevChart = chart;
       prevReady = ready;
+      prevBornes = bornes();
       sync();
+      return;
+    }
+    // Plage de bougies étendue (historique chargé / nouvelle bougie) → réancrer les bandes
+    // pleine largeur, sans redessiner sur chaque tick de prix intra-bougie.
+    const b = bornes();
+    if (b !== prevBornes) {
+      prevBornes = b;
+      redraw();
     }
   });
 
-  // Bascule ON/OFF : ouvre/ferme le flux.
   let prevActif = liqMarksStore.getState().actif;
   liqMarksStore.subscribe((s) => {
     if (s.actif !== prevActif) {
@@ -278,7 +266,8 @@ export function demarrerLiquidationMarkers(): void {
     }
   });
 
-  // Thème : repeindre aux nouvelles couleurs.
+  // Le heatmap viridis ne dépend pas du thème, mais un changement de thème peut
+  // reconstruire le chart : on redessine par sûreté.
   let prevTheme = themeStore.getState().theme;
   themeStore.subscribe((s) => {
     if (s.theme !== prevTheme) {
@@ -294,10 +283,10 @@ export const commandes: Commande[] = [
   {
     id: "action:liqmarks",
     mnemonique: "LIQMARK",
-    libelle: "Liquidations (chart) — activer / désactiver",
+    libelle: "Heatmap liquidations (chart) — activer / désactiver",
     categorie: "action",
-    motsCles: ["liquidations", "liqmark", "chart", "cascade", "forceorder", "mèches", "wicks", "perp"],
-    apercu: "Épingle les liquidations perp Bybit (bord live) sur le graphe",
+    motsCles: ["liquidations", "heatmap", "liqmark", "chart", "profil", "niveaux", "clusters", "perp"],
+    apercu: "Peint le profil des liquidations perp (bandes par niveau de prix) sur le graphe",
     action: () => liqMarksStore.getState().basculer(),
   },
 ];

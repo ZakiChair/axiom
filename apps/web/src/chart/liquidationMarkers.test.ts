@@ -1,6 +1,6 @@
 /**
- * Marqueurs liquidations — logique PURE : palier de rayon par notionnel, couleur par
- * côté (long liquidé = down), élagage du buffer au bord live (fenêtre + cap + tri).
+ * Heatmap de liquidations — logique PURE : taille de bucket « jolie », index de bucket,
+ * colormap viridis (interpolée + clampée). Le rendu KLineChart n'est pas testé.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -14,67 +14,41 @@ vi.mock("../store/theme", () => ({
 }));
 vi.mock("../data/liquidations", () => ({ subscribeLiquidations: () => () => {} }));
 
-import { couleurLiquidation, elaguerLiquidations, snapToCandleTime, tierRayon } from "./liquidationMarkers";
-import type { Liquidation } from "../data/liquidations";
+import { bucketIndex, couleurViridis, tailleBucket } from "./liquidationMarkers";
 
-function liq(time: number, notionalUsd: number, side: Liquidation["side"] = "long"): Liquidation {
-  return { time, side, qty: 1, price: 100, notionalUsd };
-}
-
-describe("tierRayon", () => {
-  it("croît par paliers de notionnel", () => {
-    expect(tierRayon(10_000)).toBe(3);
-    expect(tierRayon(60_000)).toBe(4);
-    expect(tierRayon(300_000)).toBe(6);
-    expect(tierRayon(2_000_000)).toBe(8);
-    expect(tierRayon(9_000_000)).toBe(11);
+describe("tailleBucket", () => {
+  it("~0,1 % du prix arrondi à un pas joli (1/2/5 × 10ⁿ)", () => {
+    expect(tailleBucket(65000)).toBe(50); // 65 → 50
+    expect(tailleBucket(1900)).toBe(2); // 1.9 → 2
+    expect(tailleBucket(100)).toBe(0.1); // 0.1 → 0.1
+    expect(tailleBucket(0.001)).toBeCloseTo(1e-6, 12); // 1e-6 → 1e-6
   });
-  it("valeur non finie → rayon minimal", () => {
-    expect(tierRayon(NaN)).toBe(3);
+  it("prix nul/invalide → repli 1", () => {
+    expect(tailleBucket(0)).toBe(1);
+    expect(tailleBucket(NaN)).toBe(1);
   });
 });
 
-describe("couleurLiquidation", () => {
-  it("long liquidé → down ; short liquidé → up", () => {
-    expect(couleurLiquidation("long")).toBe("down");
-    expect(couleurLiquidation("short")).toBe("up");
+describe("bucketIndex", () => {
+  it("floor(prix/taille) — même bucket dans la bande [idx·t, (idx+1)·t)", () => {
+    expect(bucketIndex(65020, 50)).toBe(1300); // 65000..65050 → 1300
+    expect(bucketIndex(65049, 50)).toBe(1300);
+    expect(bucketIndex(65050, 50)).toBe(1301);
   });
 });
 
-describe("snapToCandleTime", () => {
-  const times = [100, 200, 300, 400]; // bougies trié ascendant
-
-  it("cale sur la bougie CONTENANTE (plus grand temps ≤ t)", () => {
-    expect(snapToCandleTime(times, 250)).toBe(200); // entre 200 et 300 → 200
-    expect(snapToCandleTime(times, 300)).toBe(300); // pile sur une bougie
-    expect(snapToCandleTime(times, 399)).toBe(300);
+describe("couleurViridis", () => {
+  it("arrêts exacts aux bornes et au milieu", () => {
+    expect(couleurViridis(0)).toEqual([68, 1, 84]); // violet
+    expect(couleurViridis(0.5)).toEqual([33, 145, 140]); // teal
+    expect(couleurViridis(1)).toEqual([253, 231, 37]); // jaune
   });
-
-  it("un t APRÈS la dernière bougie (liquidation live sur TF élevé) → dernière bougie", () => {
-    expect(snapToCandleTime(times, 999)).toBe(400); // ne part PAS dans la zone d'offset
+  it("clampe hors [0,1]", () => {
+    expect(couleurViridis(-2)).toEqual([68, 1, 84]);
+    expect(couleurViridis(5)).toEqual([253, 231, 37]);
   });
-
-  it("un t avant la première bougie → première bougie ; liste vide → t inchangé", () => {
-    expect(snapToCandleTime(times, 50)).toBe(100);
-    expect(snapToCandleTime([], 123)).toBe(123);
-  });
-});
-
-describe("elaguerLiquidations", () => {
-  const now = 1_000_000;
-  it("écarte hors fenêtre et futur, trie antichrono, borne au max", () => {
-    const liqs = [
-      liq(now - 40 * 60_000, 1), // hors fenêtre 30 min → écartée
-      liq(now - 10 * 60_000, 2),
-      liq(now - 1_000, 3),
-      liq(now + 5_000, 4), // futur → écartée
-    ];
-    const out = elaguerLiquidations(liqs, now, 30 * 60_000, 10);
-    expect(out.map((l) => l.notionalUsd)).toEqual([3, 2]); // antichrono, 2 gardées
-  });
-  it("borne au nombre max le plus récent", () => {
-    const liqs = [liq(now - 3, 1), liq(now - 2, 2), liq(now - 1, 3)];
-    const out = elaguerLiquidations(liqs, now, 60_000, 2);
-    expect(out.map((l) => l.notionalUsd)).toEqual([3, 2]);
+  it("interpole entre deux arrêts (t=0.125 → milieu violet↔bleu)", () => {
+    // seg=0.5 entre [68,1,84] et [59,82,139] → moyenne arrondie
+    expect(couleurViridis(0.125)).toEqual([64, 42, 112]);
   });
 });

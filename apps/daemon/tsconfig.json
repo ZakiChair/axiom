@@ -4,5 +4,5 @@
     "noEmit": true,
     "types": ["bun"]
   },
-  "include": ["src", "../../shared/extapi-hosts.ts"]
+  "include": ["src", "../../shared/extapi-hosts.ts", "../../shared/daemon-capabilities.ts"]
 }

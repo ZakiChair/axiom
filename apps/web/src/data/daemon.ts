@@ -16,6 +16,7 @@
  */
 import type { Candle } from "@axiom/types";
 import { healthStore } from "../store/health";
+import { DAEMON_CAPABILITIES, type DaemonCapability } from "../../../../shared/daemon-capabilities";
 
 /** Source santé du lien daemon (affichée dans le panneau « santé des sources »). */
 const SOURCE_SANTE = "axiomd";
@@ -26,16 +27,10 @@ const TTL_SONDE_MS = 60_000;
 const AXIOMD_API_VERSION = 1;
 export const URL_DAEMON_DEV_DEFAUT = "http://127.0.0.1:8787";
 
-export const AXIOMD_CAPABILITIES = [
-  "kv",
-  "candles",
-  "alerts",
-  "replay",
-  "globe",
-  "snapshots",
-  "proxy",
-] as const;
-export type AxiomCapability = (typeof AXIOMD_CAPABILITIES)[number];
+// Capabilities : SOURCE UNIQUE partagée avec le daemon (shared/daemon-capabilities.ts).
+// Ré-exportées sous les noms historiques pour les appelants de ce module.
+export const AXIOMD_CAPABILITIES = DAEMON_CAPABILITIES;
+export type AxiomCapability = DaemonCapability;
 
 export interface AxiomHealth {
   ok: true;

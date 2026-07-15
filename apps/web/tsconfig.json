@@ -5,5 +5,5 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "vite.config.ts", "../../shared/extapi-hosts.ts"]
+  "include": ["src", "vite.config.ts", "../../shared/extapi-hosts.ts", "../../shared/daemon-capabilities.ts"]
 }

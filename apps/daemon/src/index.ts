@@ -29,11 +29,12 @@ import { enregistrerReplay } from "./replay";
 import { Routeur } from "./router";
 import { demarrerBoucleSnapshots, enregistrerSnapshots } from "./snapshots";
 import { distExiste, servirStatique } from "./static";
+import { DAEMON_CAPABILITIES } from "../../../shared/daemon-capabilities";
 
 const HOSTNAME = "127.0.0.1";
 const PORT = Number(process.env.AXIOMD_PORT ?? 8787) || 8787;
 const API_VERSION = 1;
-const CAPABILITIES = ["kv", "candles", "alerts", "replay", "globe", "snapshots", "proxy"] as const;
+const CAPABILITIES = DAEMON_CAPABILITIES;
 
 /** Version lue à chaud depuis package.json (pas d'import JSON → pas de souci d'include tsc). */
 const VERSION: string = (() => {

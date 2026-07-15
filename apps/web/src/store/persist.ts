@@ -85,7 +85,7 @@ const enAttenteMiroir = new Map<string, string>();
 const minuteursMiroir = new Map<string, ReturnType<typeof setTimeout>>();
 
 /** Sources câblées : seules valeurs d'exchange restaurables (cf. data/adapters.ts). */
-const RESTORABLE_EXCHANGES: ExchangeId[] = ["binance", "kraken", "coinbase", "twelvedata", "mexc", "synthetic"];
+const RESTORABLE_EXCHANGES: ExchangeId[] = ["binance", "bybit", "okx", "hyperliquid", "kraken", "coinbase", "twelvedata", "mexc", "synthetic"];
 
 /** Échelles d'axe prix valides (miroir de PriceScaleType). */
 const PRICE_SCALES: PriceScaleType[] = ["normal", "log", "percentage"];

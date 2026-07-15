@@ -36,3 +36,15 @@ test("le menu Fonctions ouvre une fenêtre Launchpad (COT, sans data live)", asy
     timeout: 15_000,
   });
 });
+
+test("bascule vers Bybit (CORS-ouvert) et charge le chart via l'adaptateur", async ({ page }) => {
+  const erreurs: string[] = [];
+  page.on("pageerror", (e) => erreurs.push(String(e)));
+  await page.goto("/");
+  // Sélecteur de source (Toolbar) — Bybit est une option dérivée d'EXCHANGES.
+  await page.getByRole("combobox", { name: "Source" }).selectOption("bybit");
+  // Le chart se réinstancie sur la nouvelle source ; le canvas reste rendu.
+  await expect(page.locator("canvas").first()).toBeVisible({ timeout: 20_000 });
+  // Aucune exception non catchée au changement de source (câblage adaptateur sain).
+  expect(erreurs).toEqual([]);
+});

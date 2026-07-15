@@ -170,7 +170,7 @@ describe("hydrateStores — marché (exchange/symbole/timeframe)", () => {
   it("ignore un exchange non restaurable (absent de RESTORABLE_EXCHANGES)", () => {
     localStorage.setItem(
       CHART_KEY,
-      JSON.stringify({ symbol: "BTCUSDT", exchange: "bybit", timeframe: "1h", indicators: [] })
+      JSON.stringify({ symbol: "BTCUSDT", exchange: "deribit", timeframe: "1h", indicators: [] })
     );
 
     hydrateStores();

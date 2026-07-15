@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  getAdapter,
   SUPPORTED_TIMEFRAMES,
   supportedTimeframesFor,
   syntheticTimeframes,
 } from "./adapters";
+
+describe("getAdapter — nouvelles sources câblées", () => {
+  it("renvoie les adaptateurs Bybit / OKX / Hyperliquid avec le bon id", () => {
+    expect(getAdapter("bybit").id).toBe("bybit");
+    expect(getAdapter("okx").id).toBe("okx");
+    expect(getAdapter("hyperliquid").id).toBe("hyperliquid");
+  });
+});
 
 describe("syntheticTimeframes", () => {
   it("calcule l'intersection binance x twelvedata dans l'ordre de Binance", () => {

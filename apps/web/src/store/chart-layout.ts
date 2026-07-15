@@ -94,6 +94,9 @@ interface Persisted {
 const LAYOUT_MODES: readonly ChartLayoutMode[] = ["1", "2h", "2v", "2x2"];
 const RESTORABLE_EXCHANGES: readonly ExchangeId[] = [
   "binance",
+  "bybit",
+  "okx",
+  "hyperliquid",
   "kraken",
   "coinbase",
   "twelvedata",

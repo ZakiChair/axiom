@@ -15,15 +15,21 @@
  */
 import type { ExchangeId, IExchangeAdapter, Timeframe } from "@axiom/types";
 import { binanceAdapter } from "./binance";
+import { bybitAdapter } from "./bybit";
+import { okxAdapter } from "./okx";
+import { hyperliquidAdapter } from "./hyperliquid";
 import { krakenAdapter } from "./kraken";
 import { coinbaseAdapter } from "./coinbase";
 import { twelveDataAdapter } from "./twelvedata";
 import { mexcAdapter } from "./mexc";
 import { createSyntheticAdapter, parseSyntheticSymbol } from "./synthetic";
 
-/** Adaptateurs câblés (crypto : Binance/Kraken/Coinbase/MEXC ; tradfi : Twelve Data). */
+/** Adaptateurs câblés (crypto : Binance/Bybit/OKX/Hyperliquid/Kraken/Coinbase/MEXC ; tradfi : Twelve Data). */
 const ADAPTERS: Partial<Record<ExchangeId, IExchangeAdapter>> = {
   binance: binanceAdapter,
+  bybit: bybitAdapter,
+  okx: okxAdapter,
+  hyperliquid: hyperliquidAdapter,
   kraken: krakenAdapter,
   coinbase: coinbaseAdapter,
   twelvedata: twelveDataAdapter,
@@ -55,6 +61,12 @@ export const SUPPORTED_TIMEFRAMES: Partial<Record<ExchangeId, Timeframe[]>> = {
     "1h", "2h", "4h", "6h", "12h",
     "1d", "3d", "1w", "1M", "3M", "6M", "12M",
   ],
+  // Bybit v5 : natif court→long, INCLUANT 2h/6h/12h (NI secondes, 3m, 3d, 3M+).
+  bybit: ["1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"],
+  // OKX v5 : idem Bybit (NI secondes, 3m, 3d, 3M+).
+  okx: ["1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"],
+  // Hyperliquid : natif SANS 6h (a 8h à la place, non exposé) ni secondes/3m/3d/3M+.
+  hyperliquid: ["1m", "5m", "15m", "30m", "1h", "2h", "4h", "12h", "1d", "1w", "1M"],
   kraken: ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"],
   coinbase: ["1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "1d"],
   // Twelve Data : intervalles du plan gratuit (inclut 4h ; NI 3M/6M/12M, NI secondes).

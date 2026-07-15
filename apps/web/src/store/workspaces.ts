@@ -42,7 +42,7 @@ export const DEFAULT_WORKSPACE_ID = "defaut";
 const DEFAULT_WORKSPACE_NAME = "Défaut";
 
 /** Sources restaurables (miroir de persist.ts / adapters.ts). */
-const RESTORABLE_EXCHANGES: ExchangeId[] = ["binance", "kraken", "coinbase", "twelvedata", "mexc"];
+const RESTORABLE_EXCHANGES: ExchangeId[] = ["binance", "bybit", "okx", "hyperliquid", "kraken", "coinbase", "twelvedata", "mexc"];
 /** Échelles d'axe prix valides. */
 const PRICE_SCALES: PriceScaleType[] = ["normal", "log", "percentage"];
 

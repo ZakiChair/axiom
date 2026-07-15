@@ -11,6 +11,9 @@ import { describe, expect, it } from "vitest";
 import { aggTradeToTrade, type BinanceAggTrade } from "./binance";
 import { krakenWsTradeToTrade, type KrakenWsTrade } from "./kraken";
 import { coinbaseWsTradeToTrade, type CoinbaseWsTrade } from "./coinbase";
+import { bybitWsTradeToTrade, type BybitWsTrade } from "./bybit";
+import { okxWsTradeToTrade, type OkxWsTrade } from "./okx";
+import { hlWsTradeToTrade, type HlWsTrade } from "./hyperliquid";
 
 describe("aggTradeToTrade (Binance)", () => {
   it("m=true (acheteur maker) => agresseur vendeur => side=sell", () => {
@@ -75,5 +78,35 @@ describe("coinbaseWsTradeToTrade (Coinbase)", () => {
       time: "2024-01-01T00:00:00Z",
     };
     expect(coinbaseWsTradeToTrade(trade).side).toBe("buy");
+  });
+});
+
+describe("bybitWsTradeToTrade (Bybit)", () => {
+  const base: BybitWsTrade = { T: 1, s: "BTCUSDT", S: "Buy", v: "1", p: "100" };
+  it("S=Buy (agresseur acheteur) => mappage direct => side=buy", () => {
+    expect(bybitWsTradeToTrade({ ...base, S: "Buy" }).side).toBe("buy");
+  });
+  it("S=Sell (agresseur vendeur) => mappage direct => side=sell", () => {
+    expect(bybitWsTradeToTrade({ ...base, S: "Sell" }).side).toBe("sell");
+  });
+});
+
+describe("okxWsTradeToTrade (OKX)", () => {
+  const base: OkxWsTrade = { instId: "BTC-USDT", tradeId: "1", px: "100", sz: "1", side: "buy", ts: "1" };
+  it("side=buy (déjà l'agresseur) => mappage direct => side=buy", () => {
+    expect(okxWsTradeToTrade({ ...base, side: "buy" }).side).toBe("buy");
+  });
+  it("side=sell (déjà l'agresseur) => mappage direct => side=sell", () => {
+    expect(okxWsTradeToTrade({ ...base, side: "sell" }).side).toBe("sell");
+  });
+});
+
+describe("hlWsTradeToTrade (Hyperliquid)", () => {
+  const base: HlWsTrade = { coin: "BTC", side: "B", px: "100", sz: "1", time: 1 };
+  it("side=B (agresseur acheteur) => side=buy", () => {
+    expect(hlWsTradeToTrade({ ...base, side: "B" }).side).toBe("buy");
+  });
+  it("side=A (agresseur vendeur/ask) => side=sell", () => {
+    expect(hlWsTradeToTrade({ ...base, side: "A" }).side).toBe("sell");
   });
 });

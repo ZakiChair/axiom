@@ -107,6 +107,9 @@ const TIMEFRAMES: Timeframe[] = [
 /** Sources câblées + libellés affichés (crypto + marchés traditionnels). */
 const EXCHANGES: { id: ExchangeId; label: string }[] = [
   { id: "binance", label: "Binance" },
+  { id: "bybit", label: "Bybit" },
+  { id: "okx", label: "OKX" },
+  { id: "hyperliquid", label: "Hyperliquid (perp DEX)" },
   { id: "kraken", label: "Kraken" },
   { id: "coinbase", label: "Coinbase" },
   { id: "twelvedata", label: "TradFi (Twelve Data)" },

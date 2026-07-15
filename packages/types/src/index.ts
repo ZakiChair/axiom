@@ -21,7 +21,8 @@ export type ExchangeId =
   | "binance"
   | "bybit"
   | "okx"
-  | "deribit"
+  // Hyperliquid : DEX de perpétuels margés USDC, marchés désignés par nom de coin.
+  | "hyperliquid"
   | "coinbase"
   | "kraken"
   // Source MARCHÉS TRADITIONNELS (actions, forex ; indices & commodités via ETF) —

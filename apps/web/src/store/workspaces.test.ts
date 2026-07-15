@@ -226,7 +226,7 @@ describe("workspacesStore — validation au chargement", () => {
             id: "x",
             name: "X",
             content: {
-              exchange: "bybit", // source non câblée -> binance
+              exchange: "deribit", // source non câblée (retirée d'ExchangeId) -> binance
               symbol: "", // vide -> BTCUSDT
               priceScale: "diagonale", // -> normal
               theme: "neon", // inconnu -> dark

@@ -34,7 +34,9 @@ const FENETRE_JOURS = 120;
 export type BgMetriqueId =
   | "mvrv" | "sopr" | "nupl" | "puell" | "reserveRisk" | "realizedPrice"
   // Comportement des détenteurs (aux chart-only, hors panneau OnchainWindow).
-  | "asopr" | "sthSopr" | "lthSopr" | "rhodl";
+  | "asopr" | "sthSopr" | "lthSopr" | "rhodl"
+  // Modèles de plancher de prix (overlays).
+  | "cvdd" | "balancedPrice";
 
 /** Définition d'une métrique BGeometrics (id interne, chemin API, champ JSON, libellé). */
 export interface DefMetriqueBg {
@@ -59,6 +61,9 @@ export const BG_ASOPR: DefMetriqueBg = { id: "asopr", chemin: "asopr", champ: "a
 export const BG_STH_SOPR: DefMetriqueBg = { id: "sthSopr", chemin: "sth-sopr", champ: "sthSopr", libelle: "STH-SOPR" };
 export const BG_LTH_SOPR: DefMetriqueBg = { id: "lthSopr", chemin: "lth-sopr", champ: "lthSopr", libelle: "LTH-SOPR" };
 export const BG_RHODL: DefMetriqueBg = { id: "rhodl", chemin: "rhodl-ratio", champ: "rhodlRatio", libelle: "RHODL Ratio" };
+// Modèles de plancher de prix (USD) — overlays sur le prix.
+export const BG_CVDD: DefMetriqueBg = { id: "cvdd", chemin: "cvdd", champ: "cvdd", libelle: "CVDD" };
+export const BG_BALANCED_PRICE: DefMetriqueBg = { id: "balancedPrice", chemin: "balanced-price", champ: "balancedPrice", libelle: "Balanced Price" };
 
 export const BG_METRIQUES: readonly DefMetriqueBg[] = [
   BG_MVRV,

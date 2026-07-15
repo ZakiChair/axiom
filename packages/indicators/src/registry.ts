@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 144 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 146 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -167,6 +167,8 @@ import { asopr } from "./derivatives/asopr";
 import { sthSopr } from "./derivatives/sthSopr";
 import { lthSopr } from "./derivatives/lthSopr";
 import { rhodlRatio } from "./derivatives/rhodlRatio";
+import { cvdd } from "./derivatives/cvdd";
+import { balancedPrice } from "./derivatives/balancedPrice";
 
 export const INDICATORS: IndicatorDef[] = [
   // trend
@@ -321,6 +323,8 @@ export const INDICATORS: IndicatorDef[] = [
   sthSopr,
   lthSopr,
   rhodlRatio,
+  cvdd,
+  balancedPrice,
 ];
 
 export function getIndicator(id: string): IndicatorDef | undefined {

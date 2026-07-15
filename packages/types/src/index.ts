@@ -182,6 +182,8 @@ export type AuxSeriesId =
   | "nupl" | "puell" | "sopr" | "reserveRisk" | "mvrvZ" | "realizedPrice"
   // Comportement des détenteurs (bitcoin-data.com) : SOPR ajusté / court / long terme, RHODL.
   | "asopr" | "sthSopr" | "lthSopr" | "rhodl"
+  // Modèles de plancher de prix on-chain (bitcoin-data.com) : CVDD, Balanced Price.
+  | "cvdd" | "balancedPrice"
   // Basis annualisé du future trimestriel courant (Binance COIN-M, BTC/ETH).
   | "quarterlyBasis"
   // Positionnement Binance futures : comptes (foule), top traders, taker (flux agressif).

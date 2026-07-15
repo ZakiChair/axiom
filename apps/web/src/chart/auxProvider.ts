@@ -31,6 +31,8 @@ import { stablecoinsSupplyProvider } from "../data/macro/stablecoins";
 import { fetchCoinMetrics } from "../data/onchain/coinmetrics";
 import {
   BG_ASOPR,
+  BG_BALANCED_PRICE,
+  BG_CVDD,
   BG_LTH_SOPR,
   BG_MVRV,
   BG_NUPL,
@@ -91,6 +93,8 @@ const TTL_MS: Record<AuxSeriesId, number> = {
   sthSopr: 60 * 60_000,
   lthSopr: 60 * 60_000,
   rhodl: 60 * 60_000,
+  cvdd: 60 * 60_000,
+  balancedPrice: 60 * 60_000,
   quarterlyBasis: 5 * 60_000, // basis future trimestriel (klines 1h Binance COIN-M)
   lsAccount: 5 * 60_000, // ratio comptes long/short (Binance futures)
   lsTopTrader: 5 * 60_000, // ratio positions top traders
@@ -222,7 +226,9 @@ async function rawFetch(id: AuxSeriesId, symbol: string): Promise<AuxPoint[]> {
     case "asopr":
     case "sthSopr":
     case "lthSopr":
-    case "rhodl": {
+    case "rhodl":
+    case "cvdd":
+    case "balancedPrice": {
       // Métriques on-chain BTC (bitcoin-data.com). Réutilise le fetch dédié (cache 24h +
       // quota partagés avec OnchainWindow → aucun appel réseau dupliqué). BTC uniquement :
       // les autres actifs restent vides (dégradation gracieuse).
@@ -252,7 +258,8 @@ async function rawFetch(id: AuxSeriesId, symbol: string): Promise<AuxPoint[]> {
 
 /** Aux id on-chain → définition BGeometrics correspondante. */
 const BG_DEF_PAR_AUX: Record<
-  "nupl" | "puell" | "sopr" | "reserveRisk" | "mvrvZ" | "realizedPrice" | "asopr" | "sthSopr" | "lthSopr" | "rhodl",
+  | "nupl" | "puell" | "sopr" | "reserveRisk" | "mvrvZ" | "realizedPrice"
+  | "asopr" | "sthSopr" | "lthSopr" | "rhodl" | "cvdd" | "balancedPrice",
   DefMetriqueBg
 > = {
   nupl: BG_NUPL,
@@ -265,6 +272,8 @@ const BG_DEF_PAR_AUX: Record<
   sthSopr: BG_STH_SOPR,
   lthSopr: BG_LTH_SOPR,
   rhodl: BG_RHODL,
+  cvdd: BG_CVDD,
+  balancedPrice: BG_BALANCED_PRICE,
 };
 
 export class AuxProvider {

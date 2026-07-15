@@ -20,7 +20,7 @@ import { join } from "node:path";
 import { demarrerBoucleAlertes, enregistrerAlertes } from "./alerts";
 import { compterEntrees } from "./cache";
 import { enregistrerCandles } from "./candles";
-import { entetesCors, reponsePreflight } from "./cors";
+import { entetesCors, reponsePreflight, requeteLocaleAutorisee } from "./cors";
 import { chargerCles } from "./env";
 import { demarrerBoucleGlobe, enregistrerGlobe } from "./globe";
 import { enregistrerKv } from "./kv";
@@ -32,6 +32,8 @@ import { distExiste, servirStatique } from "./static";
 
 const HOSTNAME = "127.0.0.1";
 const PORT = Number(process.env.AXIOMD_PORT ?? 8787) || 8787;
+const API_VERSION = 1;
+const CAPABILITIES = ["kv", "candles", "alerts", "replay", "globe", "snapshots", "proxy"] as const;
 
 /** Version lue à chaud depuis package.json (pas d'import JSON → pas de souci d'include tsc). */
 const VERSION: string = (() => {
@@ -54,6 +56,9 @@ const routeur = new Routeur();
 routeur.enregistrerPrefixe("/health", (req) => {
   const corps = JSON.stringify({
     ok: true,
+    service: "axiomd",
+    apiVersion: API_VERSION,
+    capabilities: CAPABILITIES,
     version: VERSION,
     uptime: process.uptime(),
     cache: { entrees: compterEntrees() },
@@ -84,6 +89,7 @@ enregistrerGlobe(routeur);
 
 // --- Gestionnaire principal ------------------------------------------------
 async function gestionnaire(req: Request): Promise<Response> {
+  if (!requeteLocaleAutorisee(req)) return new Response("Requête locale refusée", { status: 403 });
   const url = new URL(req.url);
   if (req.method === "OPTIONS") return reponsePreflight(req);
   const reponse = await routeur.gerer(req, url);

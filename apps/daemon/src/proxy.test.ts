@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
+  adresseIpPublique,
   appendApiKeyIfAbsent,
   construireRoutesProxy,
   construireUrlAmontExtapi,
   EXTAPI_WHITELIST,
+  mimeExtapiAutorise,
   parseExtapiChemin,
+  recupererExtapiSecurise,
+  requeteNavigationExtapiInterdite,
   traiterExtapi,
   ttlMsExtapi,
   userAgentPourHote,
@@ -261,6 +265,230 @@ describe("ttlMsExtapi — TTL cache", () => {
   });
 });
 
+describe("extapi — politique réseau SSRF", () => {
+  test("accepte des IPv4/IPv6 publiques", () => {
+    expect(adresseIpPublique("8.8.8.8")).toBe(true);
+    expect(adresseIpPublique("2606:4700:4700::1111")).toBe(true);
+    expect(adresseIpPublique("::ffff:8.8.8.8")).toBe(true);
+  });
+
+  test("refuse loopback, privées, link-local, CGNAT, documentation et IPv4 mappée privée", () => {
+    for (const adresse of [
+      "127.0.0.1",
+      "10.0.0.1",
+      "169.254.169.254",
+      "172.16.0.1",
+      "192.168.1.1",
+      "100.64.0.1",
+      "192.0.2.1",
+      "::1",
+      "fe80::1",
+      "fc00::1",
+      "2001:db8::1",
+      "::ffff:127.0.0.1",
+      "64:ff9b::7f00:1",
+    ]) {
+      expect(adresseIpPublique(adresse)).toBe(false);
+    }
+  });
+});
+
+describe("extapi — politique MIME et contexte Fetch", () => {
+  test("accepte les formats de données utilisés par AXIOM", () => {
+    for (const mime of [
+      "application/json; charset=utf-8",
+      "application/problem+json",
+      "application/rss+xml",
+      "application/vnd.vendor+xml",
+      "text/csv",
+      "application/octet-stream",
+    ]) {
+      expect(mimeExtapiAutorise(mime)).toBe(true);
+    }
+  });
+
+  test("refuse les types actifs ou documentaires", () => {
+    for (const mime of ["text/html", "image/svg+xml", "text/javascript", "text/css", "application/pdf"]) {
+      expect(mimeExtapiAutorise(mime)).toBe(false);
+    }
+  });
+
+  test("refuse document, iframe, script et mode navigate, mais autorise fetch API", () => {
+    for (const destination of ["document", "iframe", "script", "worker"]) {
+      expect(
+        requeteNavigationExtapiInterdite(
+          new Request("http://localhost/extapi/data.sec.gov/x", {
+            headers: { "sec-fetch-dest": destination },
+          }),
+        ),
+      ).toBe(true);
+    }
+    expect(
+      requeteNavigationExtapiInterdite(
+        new Request("http://localhost/extapi/data.sec.gov/x", {
+          headers: { "sec-fetch-mode": "navigate" },
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      requeteNavigationExtapiInterdite(
+        new Request("http://localhost/extapi/data.sec.gov/x", {
+          headers: { "sec-fetch-dest": "empty", "sec-fetch-mode": "cors" },
+        }),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("recupererExtapiSecurise", () => {
+  const resoudrePublic = async (): Promise<readonly string[]> => ["93.184.216.34"];
+
+  test("suit manuellement un redirect whitelisté après revalidation", async () => {
+    const appels: Array<{ url: string; redirect?: RequestRedirect }> = [];
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      appels.push({ url: String(input), redirect: init?.redirect });
+      if (appels.length === 1) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://data.sec.gov/submissions/CIK.json" },
+        });
+      }
+      return new Response('{"ok":true}', {
+        status: 200,
+        headers: { "content-type": "application/json; charset=utf-8" },
+      });
+    });
+
+    const res = await recupererExtapiSecurise("https://www.sec.gov/files/company_tickers.json", {
+      fetchImpl,
+      resoudreHote: resoudrePublic,
+    });
+
+    expect(appels).toEqual([
+      { url: "https://www.sec.gov/files/company_tickers.json", redirect: "manual" },
+      { url: "https://data.sec.gov/submissions/CIK.json", redirect: "manual" },
+    ]);
+    expect(new TextDecoder().decode(res.corps)).toBe('{"ok":true}');
+  });
+
+  test("bloque un redirect vers un hôte hors whitelist avant le second fetch", async () => {
+    let appels = 0;
+    const fetchImpl = (async () => {
+      appels += 1;
+      return new Response(null, { status: 302, headers: { location: "https://evil.example/secret" } });
+    });
+
+    await expect(
+      recupererExtapiSecurise("https://www.sec.gov/start", {
+        fetchImpl,
+        resoudreHote: resoudrePublic,
+      }),
+    ).rejects.toThrow("hôte de redirection non autorisé");
+    expect(appels).toBe(1);
+  });
+
+  test("bloque un hôte whitelisté si sa résolution devient privée sur un redirect", async () => {
+    let appels = 0;
+    const fetchImpl = (async () => {
+      appels += 1;
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://data.sec.gov/private" },
+      });
+    });
+
+    await expect(
+      recupererExtapiSecurise("https://www.sec.gov/start", {
+        fetchImpl,
+        resoudreHote: async (hote) => (hote === "data.sec.gov" ? ["127.0.0.1"] : ["93.184.216.34"]),
+      }),
+    ).rejects.toThrow("destination DNS non publique refusée");
+    expect(appels).toBe(1);
+  });
+
+  test("bloque une résolution initiale privée avant tout fetch", async () => {
+    let appels = 0;
+    const fetchImpl = (async () => {
+      appels += 1;
+      return new Response("{}", { headers: { "content-type": "application/json" } });
+    });
+
+    await expect(
+      recupererExtapiSecurise("https://data.sec.gov/x", {
+        fetchImpl,
+        resoudreHote: async () => ["169.254.169.254"],
+      }),
+    ).rejects.toThrow("destination DNS non publique refusée");
+    expect(appels).toBe(0);
+  });
+
+  test("refuse HTML avant de matérialiser le corps", async () => {
+    const fetchImpl = async () =>
+      new Response("<h1>non</h1>", { headers: { "content-type": "text/html" } });
+    await expect(
+      recupererExtapiSecurise("https://data.sec.gov/x", {
+        fetchImpl,
+        resoudreHote: resoudrePublic,
+      }),
+    ).rejects.toThrow("type MIME amont refusé");
+  });
+
+  test("borne la taille réelle même sans Content-Length", async () => {
+    const flux = new ReadableStream<Uint8Array>({
+      start(controleur) {
+        controleur.enqueue(new TextEncoder().encode("123"));
+        controleur.enqueue(new TextEncoder().encode("456"));
+        controleur.close();
+      },
+    });
+    const fetchImpl = async () =>
+      new Response(flux, { headers: { "content-type": "application/octet-stream" } });
+    await expect(
+      recupererExtapiSecurise("https://data.sec.gov/x", {
+        fetchImpl,
+        resoudreHote: resoudrePublic,
+        tailleMaxCorps: 5,
+      }),
+    ).rejects.toThrow("corps amont trop volumineux");
+  });
+
+  test("applique un timeout global au fetch amont", async () => {
+    const fetchImpl = async (_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) return reject(new Error("signal absent"));
+        const refuser = () => reject(signal.reason);
+        if (signal.aborted) refuser();
+        else signal.addEventListener("abort", refuser, { once: true });
+      });
+
+    await expect(
+      recupererExtapiSecurise("https://data.sec.gov/x", {
+        fetchImpl,
+        resoudreHote: resoudrePublic,
+        timeoutMs: 5,
+      }),
+    ).rejects.toBeDefined();
+  });
+
+  test("applique aussi le timeout global à la résolution DNS", async () => {
+    let appelsFetch = 0;
+    const fetchImpl = (async () => {
+      appelsFetch += 1;
+      return new Response("{}", { headers: { "content-type": "application/json" } });
+    });
+
+    await expect(
+      recupererExtapiSecurise("https://data.sec.gov/x", {
+        fetchImpl,
+        resoudreHote: () => new Promise<readonly string[]>(() => {}),
+        timeoutMs: 5,
+      }),
+    ).rejects.toBeDefined();
+    expect(appelsFetch).toBe(0);
+  });
+});
+
 describe("traiterExtapi — gardes (hors réseau)", () => {
   test("hôte hors whitelist → 403 sans fetch", async () => {
     const url = new URL("http://127.0.0.1:8787/extapi/evil.com/x");
@@ -272,5 +500,32 @@ describe("traiterExtapi — gardes (hors réseau)", () => {
     const res = await traiterExtapi(new Request(url, { method: "POST" }), url);
     expect(res.status).toBe(405);
     expect(res.headers.get("allow")).toBe("GET");
+  });
+  test("navigation document → 403 avec nosniff, sans cache ni fetch", async () => {
+    const url = new URL("http://127.0.0.1:8787/extapi/data.sec.gov/x");
+    const res = await traiterExtapi(
+      new Request(url, { headers: { "sec-fetch-dest": "document" } }),
+      url,
+    );
+    expect(res.status).toBe(403);
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("content-security-policy")).toContain("sandbox");
+  });
+  test("un fetch API conserve le cache et reçoit les en-têtes de défense", async () => {
+    const url = new URL("http://127.0.0.1:8787/extapi/data.sec.gov/x");
+    const res = await traiterExtapi(
+      new Request(url, { headers: { "sec-fetch-dest": "empty", "sec-fetch-mode": "cors" } }),
+      url,
+      {
+        lireCacheImpl: () => ({
+          corps: new TextEncoder().encode('{"ok":true}'),
+          contentType: "application/json; charset=utf-8",
+        }),
+      },
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-axiomd-cache")).toBe("hit");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await res.json()).toEqual({ ok: true });
   });
 });

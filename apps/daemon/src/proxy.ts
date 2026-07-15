@@ -12,6 +12,8 @@
  * marché du front restent DIRECTS). Ici, uniquement du REST à quota, mis en cache.
  */
 import { EXTAPI_HOSTS } from "../../../shared/extapi-hosts";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { cleCache, ecrireCache, lireCache, ttlMsPourChemin } from "./cache";
 import { entetesCors } from "./cors";
 import type { ProxyKeys } from "./env";
@@ -223,6 +225,339 @@ export function userAgentPourHote(hote: string): string {
 /** Délai maximum d'un fetch amont /extapi (ms). */
 const EXTAPI_TIMEOUT_MS = 15_000;
 
+/** Nombre maximal de redirections suivies manuellement par /extapi. */
+export const EXTAPI_MAX_REDIRECTIONS = 5;
+
+/** Taille maximale d'un corps /extapi, APRÈS décompression HTTP éventuelle (32 Mio). */
+export const EXTAPI_TAILLE_MAX_CORPS = 32 * 1024 * 1024;
+
+/** En-têtes de défense en profondeur ajoutés à TOUTES les réponses /extapi. */
+const ENTETES_SECURITE_EXTAPI: Readonly<Record<string, string>> = {
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "content-security-policy": "sandbox; default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+};
+
+/** Destinations Fetch qui pourraient interpréter le corps proxifié comme contenu actif. */
+const DESTINATIONS_NAVIGATION_INTERDITES: ReadonlySet<string> = new Set([
+  "document",
+  "iframe",
+  "frame",
+  "script",
+  "worker",
+  "sharedworker",
+  "serviceworker",
+  "object",
+  "embed",
+  "style",
+]);
+
+/** MIME de données explicitement acceptés. HTML/SVG/JS/CSS/PDF restent refusés. */
+const MIME_EXTAPI_AUTORISES: ReadonlySet<string> = new Set([
+  "application/json",
+  "application/ld+json",
+  "application/geo+json",
+  "application/x-ndjson",
+  "application/ndjson",
+  "text/json",
+  "application/xml",
+  "text/xml",
+  "application/rss+xml",
+  "application/atom+xml",
+  "text/plain",
+  "text/csv",
+  "text/x-csv",
+  "text/tab-separated-values",
+  "application/csv",
+  "application/x-csv",
+  "application/vnd.ms-excel",
+  "application/octet-stream",
+  "application/zip",
+  "application/x-zip-compressed",
+  "application/gzip",
+]);
+
+/** Résolveur DNS injectable : renvoie toutes les adresses d'un hôte. */
+export type ResoudreHoteExtapi = (hote: string) => Promise<readonly string[]>;
+
+/** Sous-ensemble portable de fetch utilisé par /extapi (sans extensions statiques Bun). */
+export type FetchExtapi = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+/** Dépendances/options injectables des tests du proxy sécurisé. */
+export interface OptionsExtapi {
+  fetchImpl?: FetchExtapi;
+  resoudreHote?: ResoudreHoteExtapi;
+  lireCacheImpl?: typeof lireCache;
+  ecrireCacheImpl?: typeof ecrireCache;
+  timeoutMs?: number;
+  tailleMaxCorps?: number;
+  maxRedirections?: number;
+}
+
+/** Réponse amont matérialisée seulement après toutes les gardes de sécurité. */
+export interface ReponseAmontExtapi {
+  corps: Uint8Array<ArrayBuffer>;
+  contentType: string;
+  status: number;
+  headers: Headers;
+}
+
+/** Erreur de politique distincte d'une panne réseau ordinaire. */
+class ErreurPolitiqueExtapi extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ErreurPolitiqueExtapi";
+  }
+}
+
+/** Retire les crochets d'un littéral IPv6 tel que renvoyé par URL.hostname. */
+function sansCrochets(hote: string): string {
+  return hote.startsWith("[") && hote.endsWith("]") ? hote.slice(1, -1) : hote;
+}
+
+/** Parse une adresse IPv4 canonique en quatre octets. */
+function octetsIpv4(adresse: string): [number, number, number, number] | null {
+  if (isIP(adresse) !== 4) return null;
+  const p = adresse.split(".").map(Number);
+  if (p.length !== 4 || p.some((v) => !Number.isInteger(v) || v < 0 || v > 255)) return null;
+  return [p[0] as number, p[1] as number, p[2] as number, p[3] as number];
+}
+
+/** IPv4 publiquement routable (politique conservatrice : réservées/documentation refusées). */
+function ipv4Publique(adresse: string): boolean {
+  const o = octetsIpv4(adresse);
+  if (!o) return false;
+  const [a, b, c] = o;
+  if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
+  if (a === 100 && b >= 64 && b <= 127) return false; // CGNAT 100.64/10
+  if (a === 169 && b === 254) return false; // link-local
+  if (a === 172 && b >= 16 && b <= 31) return false;
+  if (a === 192 && b === 168) return false;
+  if (a === 192 && b === 0 && c === 0) return false;
+  if (a === 192 && b === 0 && c === 2) return false; // TEST-NET-1
+  if (a === 192 && b === 88 && c === 99) return false;
+  if (a === 198 && (b === 18 || b === 19)) return false; // benchmark
+  if (a === 198 && b === 51 && c === 100) return false; // TEST-NET-2
+  if (a === 203 && b === 0 && c === 113) return false; // TEST-NET-3
+  return true;
+}
+
+/** Parse une IPv6 (avec `::` et éventuelle queue IPv4) en entier 128 bits. */
+function valeurIpv6(adresseBrute: string): bigint | null {
+  let adresse = sansCrochets(adresseBrute).toLowerCase();
+  if (adresse.includes("%")) return null; // zone link-local (`%lo0`) jamais autorisée
+  const posDernierDeuxPoints = adresse.lastIndexOf(":");
+  const queue = posDernierDeuxPoints === -1 ? adresse : adresse.slice(posDernierDeuxPoints + 1);
+  if (queue.includes(".")) {
+    const octets = octetsIpv4(queue);
+    if (!octets) return null;
+    const [a, b, c, d] = octets;
+    adresse =
+      adresse.slice(0, posDernierDeuxPoints + 1) +
+      ((a << 8) | b).toString(16) +
+      ":" +
+      ((c << 8) | d).toString(16);
+  }
+  const morceaux = adresse.split("::");
+  if (morceaux.length > 2) return null;
+  const gauche = morceaux[0] ? morceaux[0].split(":") : [];
+  const droite = morceaux.length === 2 && morceaux[1] ? morceaux[1].split(":") : [];
+  if (morceaux.length === 1 && gauche.length !== 8) return null;
+  const manquants = 8 - gauche.length - droite.length;
+  if (manquants < (morceaux.length === 2 ? 1 : 0)) return null;
+  const groupes = [...gauche, ...Array<string>(manquants).fill("0"), ...droite];
+  if (groupes.length !== 8 || groupes.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  let valeur = 0n;
+  for (const groupe of groupes) valeur = (valeur << 16n) | BigInt(parseInt(groupe, 16));
+  return valeur;
+}
+
+function ipv6DansPrefixe(adresse: bigint, base: bigint, longueur: number): boolean {
+  const decalage = BigInt(128 - longueur);
+  return adresse >> decalage === base >> decalage;
+}
+
+const IPV6_MAPPED = valeurIpv6("::ffff:0:0") as bigint;
+const IPV6_NAT64 = valeurIpv6("64:ff9b::") as bigint;
+const IPV6_DOCUMENTATION = valeurIpv6("2001:db8::") as bigint;
+const IPV6_TEREDO = valeurIpv6("2001::") as bigint;
+const IPV6_BENCHMARK = valeurIpv6("2001:2::") as bigint;
+const IPV6_ORCHID = valeurIpv6("2001:10::") as bigint;
+const IPV6_ORCHID_V2 = valeurIpv6("2001:20::") as bigint;
+const IPV6_6TO4 = valeurIpv6("2002::") as bigint;
+const IPV6_6BONE = valeurIpv6("3ffe::") as bigint;
+
+/** IPv6 publiquement routable, en refusant aussi les plages tunnel/réservées ambiguës. */
+function ipv6Publique(adresse: string): boolean {
+  const valeur = valeurIpv6(adresse);
+  if (valeur === null || valeur === 0n || valeur === 1n) return false;
+
+  // IPv4 mappée / NAT64 : applique la politique IPv4 à la destination encapsulée.
+  if (ipv6DansPrefixe(valeur, IPV6_MAPPED, 96) || ipv6DansPrefixe(valeur, IPV6_NAT64, 96)) {
+    const v4 = Number(valeur & 0xffff_ffffn);
+    return ipv4Publique(`${(v4 >>> 24) & 255}.${(v4 >>> 16) & 255}.${(v4 >>> 8) & 255}.${v4 & 255}`);
+  }
+
+  // Global unicast actuel = 2000::/3 ; les exceptions ci-dessous restent non sûres.
+  if (valeur >> 125n !== 1n) return false;
+  if (ipv6DansPrefixe(valeur, IPV6_DOCUMENTATION, 32)) return false;
+  if (ipv6DansPrefixe(valeur, IPV6_TEREDO, 32)) return false;
+  if (ipv6DansPrefixe(valeur, IPV6_BENCHMARK, 48)) return false;
+  if (ipv6DansPrefixe(valeur, IPV6_ORCHID, 28)) return false;
+  if (ipv6DansPrefixe(valeur, IPV6_ORCHID_V2, 28)) return false;
+  if (ipv6DansPrefixe(valeur, IPV6_6TO4, 16)) return false;
+  if (ipv6DansPrefixe(valeur, IPV6_6BONE, 16)) return false;
+  return true;
+}
+
+/** Une adresse DNS/littérale est-elle publiquement routable ? Fonction PURE et testée. */
+export function adresseIpPublique(adresseBrute: string): boolean {
+  const adresse = sansCrochets(adresseBrute);
+  const famille = isIP(adresse);
+  return famille === 4 ? ipv4Publique(adresse) : famille === 6 ? ipv6Publique(adresse) : false;
+}
+
+/** Résolution DNS par défaut : toutes les réponses doivent être publiques. */
+async function resoudreHotePublic(hote: string): Promise<readonly string[]> {
+  const resultats = await lookup(hote, { all: true, verbatim: true });
+  return resultats.map((r) => r.address);
+}
+
+/** Borne aussi la phase DNS avec le même signal que le fetch et la lecture du corps. */
+function avecSignalExtapi<T>(promesse: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const interrompre = () => reject(signal.reason);
+    signal.addEventListener("abort", interrompre, { once: true });
+    promesse.then(
+      (valeur) => {
+        signal.removeEventListener("abort", interrompre);
+        resolve(valeur);
+      },
+      (err) => {
+        signal.removeEventListener("abort", interrompre);
+        reject(err);
+      },
+    );
+  });
+}
+
+/** Un type MIME amont est-il une donnée inerte acceptée par /extapi ? */
+export function mimeExtapiAutorise(contentType: string): boolean {
+  const mime = contentType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (MIME_EXTAPI_AUTORISES.has(mime)) return true;
+  return /^application\/[a-z0-9!#$&^_.+-]+\+(?:json|xml|csv)$/.test(mime);
+}
+
+/** Rejette les chargements capables d'interpréter le corps comme document/code actif. */
+export function requeteNavigationExtapiInterdite(req: Request): boolean {
+  const destination = (req.headers.get("sec-fetch-dest") ?? "").trim().toLowerCase();
+  const mode = (req.headers.get("sec-fetch-mode") ?? "").trim().toLowerCase();
+  return mode === "navigate" || DESTINATIONS_NAVIGATION_INTERDITES.has(destination);
+}
+
+/** Valide schéma, autorité et résolution DNS AVANT chaque fetch (initial et redirects). */
+async function validerDestinationExtapi(
+  url: URL,
+  resoudreHote: ResoudreHoteExtapi,
+  signal: AbortSignal,
+): Promise<void> {
+  if (url.protocol !== "https:") throw new ErreurPolitiqueExtapi("schéma amont refusé (HTTPS requis)");
+  if (url.username || url.password) throw new ErreurPolitiqueExtapi("identifiants dans l'URL refusés");
+  if (url.port && url.port !== "443") throw new ErreurPolitiqueExtapi("port amont refusé (443 requis)");
+  const hote = sansCrochets(url.hostname).toLowerCase();
+  if (!EXTAPI_WHITELIST.has(hote)) throw new ErreurPolitiqueExtapi(`hôte de redirection non autorisé : ${hote}`);
+  const adresses = isIP(hote) ? [hote] : await avecSignalExtapi(resoudreHote(hote), signal);
+  if (adresses.length === 0) throw new ErreurPolitiqueExtapi(`résolution DNS vide : ${hote}`);
+  if (adresses.some((adresse) => !adresseIpPublique(adresse))) {
+    throw new ErreurPolitiqueExtapi(`destination DNS non publique refusée : ${hote}`);
+  }
+}
+
+/** Lit un corps en flux avec pré-borne Content-Length ET borne réelle. */
+async function lireCorpsExtapiBorne(res: Response, tailleMax: number): Promise<Uint8Array<ArrayBuffer>> {
+  const longueur = res.headers.get("content-length");
+  if (longueur !== null) {
+    const annoncee = Number(longueur);
+    if (Number.isFinite(annoncee) && annoncee > tailleMax) {
+      await res.body?.cancel().catch(() => {});
+      throw new ErreurPolitiqueExtapi(`corps amont trop volumineux (> ${tailleMax} octets)`);
+    }
+  }
+  if (!res.body) return new Uint8Array();
+  const lecteur = res.body.getReader();
+  const morceaux: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await lecteur.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > tailleMax) {
+        await lecteur.cancel("corps /extapi trop volumineux").catch(() => {});
+        throw new ErreurPolitiqueExtapi(`corps amont trop volumineux (> ${tailleMax} octets)`);
+      }
+      morceaux.push(value);
+    }
+  } finally {
+    lecteur.releaseLock();
+  }
+  const corps = new Uint8Array(total);
+  let offset = 0;
+  for (const morceau of morceaux) {
+    corps.set(morceau, offset);
+    offset += morceau.byteLength;
+  }
+  return corps;
+}
+
+/**
+ * Fetch /extapi durci : timeout GLOBAL, redirects manuels, revalidation DNS à chaque
+ * saut, MIME inerte et lecture bornée. Exporté pour les tests d'intégration hors DB.
+ */
+export async function recupererExtapiSecurise(
+  urlInitiale: string,
+  options: OptionsExtapi = {},
+): Promise<ReponseAmontExtapi> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const resoudreHote = options.resoudreHote ?? resoudreHotePublic;
+  const tailleMax = Math.max(1, options.tailleMaxCorps ?? EXTAPI_TAILLE_MAX_CORPS);
+  const maxRedirections = Math.max(0, options.maxRedirections ?? EXTAPI_MAX_REDIRECTIONS);
+  const signal = AbortSignal.timeout(Math.max(1, options.timeoutMs ?? EXTAPI_TIMEOUT_MS));
+  let courante = new URL(urlInitiale);
+
+  for (let redirections = 0; ; redirections++) {
+    await validerDestinationExtapi(courante, resoudreHote, signal);
+    const hote = sansCrochets(courante.hostname).toLowerCase();
+    const amont = await fetchImpl(courante, {
+      method: "GET",
+      headers: { "user-agent": userAgentPourHote(hote), accept: "*/*" },
+      signal,
+      redirect: "manual",
+    });
+    if ([301, 302, 303, 307, 308].includes(amont.status)) {
+      const location = amont.headers.get("location");
+      await amont.body?.cancel().catch(() => {});
+      if (redirections >= maxRedirections) throw new ErreurPolitiqueExtapi("trop de redirections amont");
+      if (!location) throw new ErreurPolitiqueExtapi("redirection amont sans Location");
+      try {
+        courante = new URL(location, courante);
+      } catch {
+        throw new ErreurPolitiqueExtapi("Location de redirection amont invalide");
+      }
+      continue;
+    }
+    const contentType = amont.headers.get("content-type") ?? "application/octet-stream";
+    if (!mimeExtapiAutorise(contentType)) {
+      await amont.body?.cancel().catch(() => {});
+      throw new ErreurPolitiqueExtapi(`type MIME amont refusé : ${contentType.split(";", 1)[0] ?? "inconnu"}`);
+    }
+    const corps = await lireCorpsExtapiBorne(amont, tailleMax);
+    return { corps, contentType, status: amont.status, headers: amont.headers };
+  }
+}
+
 /** TTL cache /extapi par défaut (RSS et calendriers sont lents). */
 const EXTAPI_TTL_DEFAUT_MS = 120_000;
 /** TTL cache réduit pour les dérivés Binance (données quasi temps réel). */
@@ -282,56 +617,96 @@ export function construireUrlAmontExtapi(pathname: string, search: string): stri
  * TTL, fetch amont avec User-Agent navigateur + timeout 15 s. En-têtes CORS +
  * `X-Axiomd-Cache`. Dégradation gracieuse : amont injoignable → 502 propre.
  */
-export async function traiterExtapi(req: Request, url: URL): Promise<Response> {
+export async function traiterExtapi(req: Request, url: URL, options: OptionsExtapi = {}): Promise<Response> {
   const cors = entetesCors(req);
+  const securite = ENTETES_SECURITE_EXTAPI;
+  if (requeteNavigationExtapiInterdite(req)) {
+    return new Response(JSON.stringify({ erreur: "navigation /extapi interdite (API fetch uniquement)" }), {
+      status: 403,
+      headers: { "content-type": "application/json; charset=utf-8", ...securite, ...cors },
+    });
+  }
   const parsed = parseExtapiChemin(url.pathname);
   if (!parsed || !EXTAPI_WHITELIST.has(parsed.hote)) {
     return new Response(
       JSON.stringify({ erreur: "hôte non autorisé", hote: parsed?.hote ?? null }),
-      { status: 403, headers: { "content-type": "application/json; charset=utf-8", ...cors } },
+      { status: 403, headers: { "content-type": "application/json; charset=utf-8", ...securite, ...cors } },
     );
   }
   if (req.method !== "GET") {
     return new Response(JSON.stringify({ erreur: "méthode non autorisée (GET uniquement)" }), {
       status: 405,
-      headers: { "content-type": "application/json; charset=utf-8", allow: "GET", ...cors },
+      headers: { "content-type": "application/json; charset=utf-8", allow: "GET", ...securite, ...cors },
     });
   }
 
   const cheminEntrant = url.pathname + url.search;
   const cle = cleCache("GET", cheminEntrant);
-  const hit = lireCache(cle);
+  const lireCacheImpl = options.lireCacheImpl ?? lireCache;
+  const ecrireCacheImpl = options.ecrireCacheImpl ?? ecrireCache;
+  const tailleMax = Math.max(1, options.tailleMaxCorps ?? EXTAPI_TAILLE_MAX_CORPS);
+  let hit: ReturnType<typeof lireCache> = null;
+  try {
+    hit = lireCacheImpl(cle);
+  } catch (err) {
+    console.error("[axiomd] cache /extapi indisponible (miss forcé) :", err);
+  }
   if (hit) {
-    return new Response(hit.corps, {
-      headers: { "content-type": hit.contentType, "x-axiomd-cache": "hit", ...cors },
-    });
+    if (hit.corps.byteLength <= tailleMax && mimeExtapiAutorise(hit.contentType)) {
+      return new Response(hit.corps, {
+        headers: {
+          "content-type": hit.contentType,
+          "x-axiomd-cache": "hit",
+          "access-control-expose-headers": "x-axiomd-cache, x-rate-limit-remaining",
+          ...securite,
+          ...cors,
+        },
+      });
+    }
+    // Une ancienne entrée ne respectant plus la politique devient un miss ; une
+    // réponse amont saine l'écrasera, sans exposer le corps historique.
+    console.warn("[axiomd] entrée cache /extapi ignorée par la politique :", cle);
   }
 
   const urlAmont = `https://${parsed.hote}${parsed.reste}${url.search}`;
-  let amont: Response;
+  let amont: ReponseAmontExtapi;
   try {
-    amont = await fetch(urlAmont, {
-      method: "GET",
-      headers: { "user-agent": userAgentPourHote(parsed.hote), accept: "*/*" },
-      signal: AbortSignal.timeout(EXTAPI_TIMEOUT_MS),
-    });
+    amont = await recupererExtapiSecurise(urlAmont, options);
   } catch (err) {
-    return reponseErreurAmont(err, cors);
+    return new Response(
+      JSON.stringify({
+        erreur: err instanceof ErreurPolitiqueExtapi ? "amont refusé par la politique /extapi" : "amont injoignable",
+        detail: err instanceof Error ? err.message : String(err),
+      }),
+      {
+        status: 502,
+        headers: { "content-type": "application/json; charset=utf-8", ...securite, ...cors },
+      },
+    );
   }
-  const corps = new Uint8Array(await amont.arrayBuffer());
-  const contentType = amont.headers.get("content-type") ?? "application/octet-stream";
   // On ne met en cache que les réponses valides (évite de figer une erreur transitoire).
-  if (amont.ok) ecrireCache(cle, corps, contentType, ttlMsExtapi(parsed.hote));
+  // Le cache ne stocke pas le statut : uniquement 200, sinon un hit deviendrait 200 à tort.
+  if (amont.status === 200) {
+    try {
+      ecrireCacheImpl(cle, amont.corps, amont.contentType, ttlMsExtapi(parsed.hote));
+    } catch (err) {
+      // Le cache est une optimisation : une panne SQLite ne doit pas masquer une réponse saine.
+      console.error("[axiomd] écriture cache /extapi échouée :", err);
+    }
+  }
   const entetes: Record<string, string> = {
-    "content-type": contentType,
+    "content-type": amont.contentType,
     "x-axiomd-cache": "miss",
+    "access-control-expose-headers": "x-axiomd-cache, x-rate-limit-remaining",
+    ...securite,
     ...cors,
   };
   // Quota OpenSky : retransmettre l'en-tête de crédits restants (absent sur un hit —
   // le cache ne stocke que corps+content-type ; valeur indicative, miss uniquement).
   const credits = amont.headers.get("x-rate-limit-remaining");
   if (credits !== null) entetes["x-rate-limit-remaining"] = credits;
-  return new Response(corps, {
+  const statutSansCorps = amont.status === 204 || amont.status === 205 || amont.status === 304;
+  return new Response(statutSansCorps ? null : amont.corps, {
     status: amont.status,
     headers: entetes,
   });

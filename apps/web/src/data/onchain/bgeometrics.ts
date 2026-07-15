@@ -36,7 +36,9 @@ export type BgMetriqueId =
   // Comportement des détenteurs (aux chart-only, hors panneau OnchainWindow).
   | "asopr" | "sthSopr" | "lthSopr" | "rhodl"
   // Modèles de plancher de prix (overlays).
-  | "cvdd" | "balancedPrice";
+  | "cvdd" | "balancedPrice"
+  // Structure de marché : dominance BTC (%). GLOBAL (pas gaté sur l'actif affiché).
+  | "btcDominance";
 
 /** Définition d'une métrique BGeometrics (id interne, chemin API, champ JSON, libellé). */
 export interface DefMetriqueBg {
@@ -64,6 +66,8 @@ export const BG_RHODL: DefMetriqueBg = { id: "rhodl", chemin: "rhodl-ratio", cha
 // Modèles de plancher de prix (USD) — overlays sur le prix.
 export const BG_CVDD: DefMetriqueBg = { id: "cvdd", chemin: "cvdd", champ: "cvdd", libelle: "CVDD" };
 export const BG_BALANCED_PRICE: DefMetriqueBg = { id: "balancedPrice", chemin: "balanced-price", champ: "balancedPrice", libelle: "Balanced Price" };
+// Dominance BTC (% de la capitalisation crypto totale) — métrique GLOBALE de marché.
+export const BG_BTC_DOMINANCE: DefMetriqueBg = { id: "btcDominance", chemin: "bitcoin-dominance", champ: "bitcoinDominance", libelle: "Dominance BTC" };
 
 export const BG_METRIQUES: readonly DefMetriqueBg[] = [
   BG_MVRV,

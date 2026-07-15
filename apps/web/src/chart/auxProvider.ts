@@ -32,6 +32,7 @@ import { fetchCoinMetrics } from "../data/onchain/coinmetrics";
 import {
   BG_ASOPR,
   BG_BALANCED_PRICE,
+  BG_BTC_DOMINANCE,
   BG_CVDD,
   BG_LTH_SOPR,
   BG_MVRV,
@@ -95,6 +96,7 @@ const TTL_MS: Record<AuxSeriesId, number> = {
   rhodl: 60 * 60_000,
   cvdd: 60 * 60_000,
   balancedPrice: 60 * 60_000,
+  btcDominance: 60 * 60_000, // dominance BTC globale (bitcoin-data)
   quarterlyBasis: 5 * 60_000, // basis future trimestriel (klines 1h Binance COIN-M)
   lsAccount: 5 * 60_000, // ratio comptes long/short (Binance futures)
   lsTopTrader: 5 * 60_000, // ratio positions top traders
@@ -253,6 +255,11 @@ async function rawFetch(id: AuxSeriesId, symbol: string): Promise<AuxPoint[]> {
     case "fearGreed":
       // Sentiment GLOBAL crypto (pas par actif) — même série pour tous les symboles.
       return toPoints(await fetchFearGreedHistory(120));
+    case "btcDominance": {
+      // Dominance BTC GLOBALE (non gatée sur l'actif) — pertinente sur tout chart.
+      const r = await fetchBgeometricMetrique(BG_BTC_DOMINANCE);
+      return toPoints((r?.serie.points ?? []).map((p) => ({ time: p.time, value: p.value })));
+    }
   }
 }
 

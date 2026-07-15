@@ -184,6 +184,8 @@ export type AuxSeriesId =
   | "asopr" | "sthSopr" | "lthSopr" | "rhodl"
   // Modèles de plancher de prix on-chain (bitcoin-data.com) : CVDD, Balanced Price.
   | "cvdd" | "balancedPrice"
+  // Dominance BTC (%) — structure de marché globale (bitcoin-data.com).
+  | "btcDominance"
   // Basis annualisé du future trimestriel courant (Binance COIN-M, BTC/ETH).
   | "quarterlyBasis"
   // Positionnement Binance futures : comptes (foule), top traders, taker (flux agressif).

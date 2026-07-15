@@ -321,6 +321,41 @@ async function fetchLiquidations(symbol: string, sinceMs: number): Promise<Liqui
   return out;
 }
 
+/** Point d'historique de liquidations agrégé par intervalle (USD long/short). */
+export interface LiquidationHistPoint {
+  time: number; // ms epoch (début d'intervalle)
+  longUsd: number;
+  shortUsd: number;
+}
+
+/**
+ * Historique de liquidations (USD long/short par intervalle) depuis `sinceMs`, pour
+ * amorcer le heatmap de liquidations par prix. Requiert une clé Coinalyze (localStorage
+ * ou repli .env via le proxy) ; dégradation gracieuse : [] si indisponible/404.
+ */
+export async function fetchLiquidationHistory(
+  symbol: string,
+  sinceMs: number,
+): Promise<LiquidationHistPoint[]> {
+  try {
+    const cs = toCoinalyzeSymbol(symbol);
+    const to = Math.floor(Date.now() / 1000);
+    const from = Math.floor(sinceMs / 1000);
+    const res = await request<HistoryResponse<LiqHistoryPoint>[]>("liquidation-history", {
+      symbols: cs,
+      interval: LIQ_INTERVAL,
+      from: String(from),
+      to: String(to),
+      convert_to_usd: "true",
+    });
+    const series = res[0];
+    if (series === undefined) return [];
+    return series.history.map((pt) => ({ time: toMs(pt.t), longUsd: pt.l, shortUsd: pt.s }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Historique Open Interest (USD), agrégé par intervalle (clôture de chaque bucket
  * retenue comme valeur représentative — cf. /open-interest-history, même forme

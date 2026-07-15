@@ -28,7 +28,8 @@ import { getActiveChart } from "./drawing";
 import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
 import { subscribeLiquidations, type Liquidation } from "../data/liquidations";
-import type { Unsubscribe } from "@axiom/types";
+import { fetchLiquidationHistory, type LiquidationHistPoint } from "../data/coinalyze";
+import type { Candle, Unsubscribe } from "@axiom/types";
 
 const LIQ_HEAT = "liqHeat";
 const LIQ_HINT = "liqHint";
@@ -110,6 +111,52 @@ export function deserialiserProfil(
   } catch {
     return null;
   }
+}
+
+// ─────────────────────────── Amorçage historique (Coinalyze) — fonctions pures ───────────────────────────
+
+/** Bougie CONTENANT `time` (plus grand temps de bougie ≤ time), ou undefined. PURE. */
+export function candleContenant(candles: Candle[], time: number): Candle | undefined {
+  const n = candles.length;
+  const first = candles[0];
+  if (n === 0 || first === undefined || time < first.time) return undefined;
+  let lo = 0;
+  let hi = n - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    const c = candles[mid];
+    if (c !== undefined && c.time <= time) lo = mid;
+    else hi = mid - 1;
+  }
+  return candles[lo];
+}
+
+/**
+ * Construit un profil de seed par bucket de prix depuis l'historique Coinalyze : chaque
+ * intervalle est mappé à la bougie qui le contient ; le volume LONG liquidé est placé au
+ * BAS de la bougie (ventes forcées → mèches basses), le SHORT au HAUT (rachats forcés →
+ * mèches hautes). Approximation assumée (Coinalyze donne le volume par temps, pas par
+ * prix). PURE.
+ */
+export function construireSeed(
+  history: LiquidationHistPoint[],
+  candles: Candle[],
+  taille: number,
+): Map<number, number> {
+  const seed = new Map<number, number>();
+  if (taille <= 0 || candles.length === 0) return seed;
+  const ajouter = (prix: number, usd: number): void => {
+    if (!(usd > 0) || !Number.isFinite(prix) || prix <= 0) return;
+    const idx = bucketIndex(prix, taille);
+    seed.set(idx, (seed.get(idx) ?? 0) + usd);
+  };
+  for (const pt of history) {
+    const c = candleContenant(candles, pt.time);
+    if (c === undefined) continue;
+    ajouter(c.low, pt.longUsd);
+    ajouter(c.high, pt.shortUsd);
+  }
+  return seed;
 }
 
 // ─────────────────────────── Bascule (store vanilla local) ───────────────────────────
@@ -197,6 +244,10 @@ let accumulateur = new Map<number, number>();
 let taille = 0;
 let abonnement: Unsubscribe | null = null;
 let symboleAbonne: string | null = null;
+/** Évite un double amorçage Coinalyze par souscription. */
+let dejaSeed = false;
+/** Fenêtre d'historique demandée à Coinalyze pour l'amorçage (48 h). */
+const SEED_WINDOW_MS = 48 * 60 * 60 * 1000;
 
 function retirerOverlays(): void {
   for (const [chart, ids] of overlaysSuivis) {
@@ -287,6 +338,27 @@ function redraw(): void {
   if (ids.length > 0) overlaysSuivis.set(chart, ids);
 }
 
+/**
+ * Amorce le profil depuis l'historique Coinalyze (une seule fois par souscription).
+ * Inerte sans clé Coinalyze (fetchLiquidationHistory renvoie [] → aucun effet). Le seed
+ * historique est ADDITIF au profil ; on ne l'exécute qu'au 1er remplissage (profil vide)
+ * pour éviter de recompter l'historique déjà accumulé/persisté.
+ */
+async function amorcerCoinalyze(symbol: string): Promise<void> {
+  if (dejaSeed) return;
+  dejaSeed = true;
+  const history = await fetchLiquidationHistory(symbol, Date.now() - SEED_WINDOW_MS);
+  if (symboleAbonne !== symbol || history.length === 0) return; // symbole changé / rien
+  const candles = marketStore.getState().candles;
+  const dernier = candles[candles.length - 1];
+  if (dernier === undefined) return;
+  if (taille <= 0) taille = tailleBucket(dernier.close);
+  const seed = construireSeed(history, candles, taille);
+  for (const [idx, usd] of seed) accumulateur.set(idx, (accumulateur.get(idx) ?? 0) + usd);
+  sauverProfil(symbol);
+  redraw();
+}
+
 /** Accumule une liquidation dans le bucket de son prix (fige la taille au 1er appel) + persiste. */
 function accumuler(l: Liquidation): void {
   if (taille <= 0) taille = tailleBucket(l.price);
@@ -317,6 +389,7 @@ function sync(): void {
     // les liquidations live s'y ajoutent. Vide si jamais accumulé.
     accumulateur = new Map();
     taille = 0;
+    dejaSeed = false;
     symboleAbonne = symbol;
     chargerProfil(symbol);
     abonnement = subscribeLiquidations(symbol, (l) => {
@@ -324,6 +397,9 @@ function sync(): void {
       redraw();
     });
     redraw();
+    // Amorçage historique Coinalyze UNIQUEMENT si aucun profil persisté (1re activation) :
+    // évite de recompter l'historique déjà présent. Inerte sans clé.
+    if (accumulateur.size === 0) void amorcerCoinalyze(symbol);
   }
 }
 

@@ -37,6 +37,18 @@ test("le menu Fonctions ouvre une fenêtre Launchpad (COT, sans data live)", asy
   });
 });
 
+test("le menu Fonctions ouvre la fenêtre Funding cross-exchange (FUNDX)", async ({ page }) => {
+  const erreurs: string[] = [];
+  page.on("pageerror", (e) => erreurs.push(String(e)));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Fonctions" }).click();
+  await page.getByRole("menuitem", { name: /Funding cross-exchange/ }).click();
+  await expect(page.getByRole("complementary", { name: /Funding cross-exchange/ })).toBeVisible({
+    timeout: 15_000,
+  });
+  expect(erreurs).toEqual([]);
+});
+
 test("bascule vers Bybit (CORS-ouvert) et charge le chart via l'adaptateur", async ({ page }) => {
   const erreurs: string[] = [];
   page.on("pageerror", (e) => erreurs.push(String(e)));

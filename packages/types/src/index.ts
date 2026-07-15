@@ -181,7 +181,9 @@ export type AuxSeriesId =
   // `mvrvZ` = vrai MVRV Z-Score (realized-cap) ; `realizedPrice` = prix on-chain moyen.
   | "nupl" | "puell" | "sopr" | "reserveRisk" | "mvrvZ" | "realizedPrice"
   // Basis annualisé du future trimestriel courant (Binance COIN-M, BTC/ETH).
-  | "quarterlyBasis";
+  | "quarterlyBasis"
+  // Positionnement Binance futures : comptes (foule), top traders, taker (flux agressif).
+  | "lsAccount" | "lsTopTrader" | "lsTaker";
 
 /**
  * Séries auxiliaires DÉJÀ alignées sur les bougies (même longueur, même index).

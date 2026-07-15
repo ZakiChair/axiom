@@ -24,6 +24,7 @@ import { entetesCors, entetesCorsRejet, reponsePreflight, requeteLocaleAutorisee
 import { chargerCles } from "./env";
 import { demarrerBoucleGlobe, enregistrerGlobe } from "./globe";
 import { enregistrerKv } from "./kv";
+import { demarrerBoucleLiquidations } from "./liqFeed";
 import { enregistrerLiquidations } from "./liquidations";
 import { enregistrerProxy } from "./proxy";
 import { enregistrerReplay } from "./replay";
@@ -127,6 +128,9 @@ demarrerBoucleSnapshots();
 // Boucle d'ingestion GDELT (~15 min) : cellules géopolitiques du globe.
 // Stockage à froid uniquement — jamais sur le chemin chaud du renderer.
 demarrerBoucleGlobe();
+
+// Boucle d'ingestion liquidations (WS Bybit à froid) — jamais sur le chemin chaud du renderer.
+demarrerBoucleLiquidations();
 
 console.log(
   `[axiomd] v${VERSION} écoute sur http://${serveur.hostname}:${serveur.port} ` +

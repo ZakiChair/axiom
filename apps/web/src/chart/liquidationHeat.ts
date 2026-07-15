@@ -30,6 +30,7 @@ import {
 } from "./liquidationEstimates";
 import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
+import { volumeProfileStore } from "../store/volumeProfile";
 import { formatHeureMinute, formatPrice, formatUsd } from "../lib/format";
 
 /** Cellule agrégée : une bougie × un bucket de prix. */
@@ -155,18 +156,112 @@ export function cellSousCurseur(
   return grid.cells.get(`${c.time}:${bucketIdx}`) ?? null;
 }
 
+/**
+ * Parse une couleur CSS concrète (`#rgb`, `#rrggbb` ou `rgb()/rgba()`) en tuple RVB, ou
+ * `null` si la chaîne n'est pas reconnue. Le canvas ne reçoit que des tokens déjà résolus
+ * (jamais de `var()` ni d'`oklch()`), donc ces deux formes suffisent. PURE (locale).
+ */
+function parseCouleurRvb(css: string): [number, number, number] | null {
+  const s = css.trim();
+  if (s.startsWith("#")) {
+    const h = s.slice(1);
+    const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+    if (full.length !== 6 || !/^[0-9a-fA-F]{6}$/.test(full)) return null;
+    const int = Number.parseInt(full, 16);
+    return [(int >> 16) & 255, (int >> 8) & 255, int & 255];
+  }
+  const m = s.match(/rgba?\(([^)]+)\)/i);
+  const inner = m?.[1];
+  if (inner === undefined) return null;
+  const parts = inner.split(",").map((p) => Number.parseFloat(p.trim()));
+  const [r, g, b] = parts;
+  if (r === undefined || g === undefined || b === undefined) return null;
+  if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return null;
+  return [r, g, b];
+}
+
+/**
+ * Vrai si `bgCss` (couleur de fond du thème, `#hex` ou `rgb()`) est un fond CLAIR :
+ * luminance relative (coefficients Rec.709 0.2126/0.7152/0.0722, normalisée) > 0.5. Une
+ * chaîne non reconnue renvoie `false` (fond sombre par défaut — le cas majoritaire des
+ * thèmes). Sert à inverser la rampe de couleur sur thème clair (cf. `couleurRampe`). PURE.
+ */
+export function estFondClair(bgCss: string): boolean {
+  const rgb = parseCouleurRvb(bgCss);
+  if (rgb === null) return false;
+  const [r, g, b] = rgb;
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.5;
+}
+
+/**
+ * Rampe de couleur theme-aware pour une intensité `t ∈ [0,1]`. Sur fond SOMBRE : viridis
+ * direct (jaune = max, calibré fond noir). Sur fond CLAIR : viridis INVERSÉ `couleurViridis(1−t)`
+ * → le violet foncé devient le maximum (contraste rétabli, le jaune pâle illisible sur fond
+ * clair passe au minimum). La barre d'échelle et les cellules utilisent la MÊME rampe. PURE.
+ */
+export function couleurRampe(t: number, fondClair: boolean): [number, number, number] {
+  return couleurViridis(fondClair ? 1 - t : t);
+}
+
+/**
+ * Filtre les buckets pour n'en garder que les plus significatifs : ceux dont `poids` atteint
+ * `seuilFrac × max`, PLAFONNÉ aux `maxN` plus lourds (tri décroissant). Évite de tracer des
+ * centaines de niveaux estimés quasi nuls. Liste vide ou `max ≤ 0` → `[]`. PURE.
+ */
+export function filtrerNiveauxDenses<T extends { poids: number }>(
+  buckets: T[],
+  seuilFrac: number,
+  maxN: number,
+): T[] {
+  let max = 0;
+  for (const b of buckets) if (b.poids > max) max = b.poids;
+  if (!(max > 0)) return [];
+  const borne = seuilFrac * max;
+  return buckets
+    .filter((b) => b.poids >= borne)
+    .sort((a, b) => b.poids - a.poids)
+    .slice(0, maxN);
+}
+
+/**
+ * Dé-chevauchement vertical d'étiquettes : trie par `poids` décroissant (le plus lourd
+ * gagne) puis ne retient un item que si son `y` est à ≥ `minEcart` px de TOUS les items déjà
+ * retenus. Renvoie les items conservés (ordre poids décroissant). Réutilisé par les labels de
+ * clusters (profil réel) et les labels EST. PURE.
+ */
+export function dechevaucher<T extends { y: number; poids: number }>(
+  items: T[],
+  minEcart: number,
+): T[] {
+  const retenus: T[] = [];
+  for (const item of [...items].sort((a, b) => b.poids - a.poids)) {
+    if (retenus.every((r) => Math.abs(r.y - item.y) >= minEcart)) retenus.push(item);
+  }
+  return retenus;
+}
+
 // ─────────────────────────── Contrôleur canvas (non testé — couplage KLineChart) ───────────────────────────
 
 /** Pane prix (id par défaut KLineChart). */
 const CANDLE_PANE_ID = "candle_pane";
 /** Largeur max des bandes latérales du profil = fraction de la largeur du pane prix. */
 const MAX_BAND_FRAC = 0.12;
+/** Largeur du Volume Profile (fraction du pane) — miroir de `MAX_WIDTH_FRAC` de volumeProfile.ts :
+ *  quand le VP est actif, on décale l'ancre des bandes liq de cette largeur pour ne pas se mélanger. */
+const VP_WIDTH_FRAC = 0.32;
 /** Largeur de repli d'une cellule quand la largeur de bougie n'est pas déductible. */
 const FALLBACK_CELL_W = 6;
 /** Teinte orange des niveaux ESTIMÉS (distincte du viridis de la heatmap réelle). */
 const ORANGE_EST = "245,158,11"; // #f59e0b (rgb)
+/** Poids min (fraction du max) pour tracer un niveau ESTIMÉ + plafond de niveaux tracés.
+ *  Seuil bas (4 %) : la distribution des poids est très inégale (un pic d'OI domine) — un seuil
+ *  agressif ne laissait que 1-2 lignes (constat gate visuel) ; le plafond fait l'anti-bruit. */
+const EST_SEUIL_FRAC = 0.04;
+const EST_MAX_NIVEAUX = 30;
 /** Nombre de buckets estimés étiquetés « EST. ×L » (les plus gros poids). */
-const NB_LABELS_EST = 5;
+const NB_LABELS_EST = 4;
+/** Nombre de clusters du profil réel étiquetés (prix · USD) au bord droit. */
+const NB_LABELS_CLUSTER = 3;
 
 interface PixelXY {
   x?: number;
@@ -179,6 +274,10 @@ interface Tokens {
   up: string;
   down: string;
   text: string;
+  surface: string;
+  border: string;
+  /** true si le fond du thème est CLAIR (rampe de couleur inversée — cf. `couleurRampe`). */
+  fondClair: boolean;
 }
 
 /** Lit un token CSS sémantique concret depuis <html> (le canvas n'évalue pas var()). */
@@ -385,18 +484,29 @@ export class LiquidationHeatController {
     if (!main) return;
 
     // Tokens de couleur lus UNE fois par frame (getComputedStyle est coûteux) et réutilisés
-    // par toutes les couches, comme le fait volumeProfile.ts.
+    // par toutes les couches, comme le fait volumeProfile.ts. `--bg` sert à choisir le sens de
+    // la rampe de couleur (viridis direct sur fond sombre, inversé sur fond clair).
     const tokens: Tokens = {
       textDim: readToken("--text-dim") || "#9ca3af",
       up: readToken("--up") || "#10b981",
       down: readToken("--down") || "#ef4444",
       text: readToken("--text") || "#e5e7eb",
+      surface: readToken("--surface") || "#171717",
+      border: readToken("--border") || "#262626",
+      fondClair: estFondClair(readToken("--bg")),
     };
 
     // Deux couches INDÉPENDANTES sur le même canvas : heatmap RÉELLE (LIQMARK) et niveaux
     // ESTIMÉS (LIQEST). Chacune est activable seule (cf. reconcile()).
-    if (liqMarksStore.getState().actif) this.dessinerHeatmap(main, tokens);
-    if (liqEstStore.getState().actif) this.dessinerNiveauxEstimes(main);
+    const heatActif = liqMarksStore.getState().actif;
+    const estActif = liqEstStore.getState().actif;
+    if (heatActif) this.dessinerHeatmap(main, tokens);
+    if (estActif) this.dessinerNiveauxEstimes(main, tokens);
+    // Bloc de légendes UNIFIÉ en bas-droite (barre d'échelle USD, mini-légende profil, légende
+    // EST) : dessiné une fois par frame APRÈS les couches (la grille est alors en cache), empilé
+    // vers le haut au-dessus de l'axe temps — supprime les collisions avec les boutons de layout
+    // DOM et la légende du Volume Profile (restée en haut à droite).
+    this.dessinerLegendes(main, tokens, heatActif, estActif);
   }
 
   /**
@@ -407,13 +517,6 @@ export class LiquidationHeatController {
     const ctx = this.ctx;
     const { left, top, width, height } = main;
     const xRight = left + width;
-
-    // Légende discrète (toujours affichée quand le heatmap est actif).
-    ctx.fillStyle = tokens.textDim;
-    ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
-    ctx.textAlign = "right";
-    ctx.textBaseline = "top";
-    ctx.fillText("Liq heatmap (exécutées) · log", xRight - 4, top + 4);
 
     const { events, enAttente } = liqEventsStore.getState();
     const candles = marketStore.getState().candles;
@@ -431,18 +534,22 @@ export class LiquidationHeatController {
     const grid = this.derniereGrille;
 
     // Buffer vide (heatmap actif mais aucune liquidation encore reçue) : indicateur « en
-    // attente » discret, décalé SOUS la légende (remplace l'overlay `liqHint`).
+    // attente » discret, en haut à droite SOUS les boutons de layout DOM (top+2..22).
     if (grid === null) {
       if (enAttente) {
-        ctx.fillStyle = "rgba(130,130,150,0.95)";
-        ctx.fillText("⋯ Heatmap liquidations active — en attente du flux live", xRight - 4, top + 18);
+        ctx.fillStyle = tokens.textDim;
+        ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
+        ctx.textAlign = "right";
+        ctx.textBaseline = "top";
+        ctx.fillText("⋯ Heatmap liquidations active — en attente du flux live", xRight - 4, top + 22);
       }
       return;
     }
 
-    // Largeur de bougie par temps : x(bougie suivante) − x(bougie), min 1px ; la dernière
-    // bougie visible réutilise la largeur de l'avant-dernière (ou 6px). Cellule CENTRÉE sur x.
-    const largeurs = new Map<number, { x: number; w: number }>();
+    // Bords ENTIERS PARTAGÉS par colonne (x0/x1 arrondis) : deux cellules adjacentes partagent
+    // exactement le même bord entier → plus de couture d'anti-aliasing (fine grille sombre).
+    // La cellule est CENTRÉE sur x ; la dernière bougie réutilise la largeur de l'avant-dernière.
+    const largeurs = new Map<number, { x0: number; x1: number }>();
     let prevW = FALLBACK_CELL_W;
     for (let i = from; i < to; i++) {
       const c = candles[i];
@@ -456,7 +563,7 @@ export class LiquidationHeatController {
         if (xn !== undefined && Number.isFinite(xn)) w = Math.max(1, xn - x);
       }
       prevW = w;
-      largeurs.set(c.time, { x, w });
+      largeurs.set(c.time, { x0: Math.round(x - w / 2), x1: Math.round(x + w / 2) });
     }
 
     ctx.save();
@@ -464,7 +571,9 @@ export class LiquidationHeatController {
     ctx.rect(left, top, width, height);
     ctx.clip();
 
-    // Cellules : un rect par (bougie × bucket), couleur viridis d'intensité log, alpha croissant.
+    // Cellules : un rect par (bougie × bucket), rampe theme-aware d'intensité log. Alpha borné
+    // [0.15, 0.55] pour ne pas masquer le prix sous les cascades. Bords entiers (x0/x1 partagés
+    // par colonne ; yTop/yBot arrondis par bucket → mêmes bords que le bucket voisin).
     for (const cell of grid.cells.values()) {
       const col = largeurs.get(cell.candleTime);
       if (col === undefined) continue;
@@ -474,26 +583,31 @@ export class LiquidationHeatController {
         continue;
       }
       const t = intensiteLog(cell.longUsd + cell.shortUsd, grid.maxUsd);
-      const [r, g, b] = couleurViridis(t);
-      const yT = Math.min(yTop, yBot);
-      const h = Math.max(1, Math.abs(yBot - yTop));
-      ctx.fillStyle = `rgba(${r},${g},${b},${(0.25 + 0.55 * t).toFixed(3)})`;
-      ctx.fillRect(col.x - col.w / 2, yT, col.w, h);
+      const [r, g, b] = couleurRampe(t, tokens.fondClair);
+      const y0 = Math.round(Math.min(yTop, yBot));
+      const y1 = Math.round(Math.max(yTop, yBot));
+      ctx.fillStyle = `rgba(${r},${g},${b},${(0.15 + 0.4 * t).toFixed(3)})`;
+      ctx.fillRect(col.x0, y0, Math.max(1, col.x1 - col.x0), Math.max(1, y1 - y0));
     }
 
-    // Bandes latérales du profil par prix (bord droit) : largeur ∝ intensité log (max 12 %
-    // du pane), SPLIT proportionnel — shorts liquidés (rachats forcés) teinte `--up` à
-    // gauche, longs liquidés (ventes forcées) teinte `--down` collés au bord droit.
+    // Bandes latérales du profil par prix : largeur ∝ intensité log (max 12 % du pane), SPLIT
+    // proportionnel — shorts (rachats forcés) teinte `--up`, longs (ventes forcées) teinte
+    // `--down`. Ancre décalée vers l'intérieur de la largeur VP quand le Volume Profile est
+    // actif (sinon les deux histogrammes se mélangeraient au bord droit). Alpha 0.35 (les
+    // bandes masquaient les dernières bougies et l'étiquette de prix).
     const profil = profilParPrix(grid);
     let maxProfil = 0;
     for (const agg of profil.values()) {
       const total = agg.longUsd + agg.shortUsd;
       if (total > maxProfil) maxProfil = total;
     }
+    const vpActif = volumeProfileStore.getState().enabled;
+    const xAncre = xRight - (vpActif ? width * VP_WIDTH_FRAC : 0);
     if (maxProfil > 0) {
       const maxBandW = width * MAX_BAND_FRAC;
       const up = tokens.up;
       const down = tokens.down;
+      ctx.globalAlpha = 0.35;
       for (const [idx, agg] of profil) {
         const total = agg.longUsd + agg.shortUsd;
         if (total <= 0) continue;
@@ -502,27 +616,115 @@ export class LiquidationHeatController {
         if (yTop === undefined || yBot === undefined || !Number.isFinite(yTop) || !Number.isFinite(yBot)) {
           continue;
         }
-        const yT = Math.min(yTop, yBot);
-        const h = Math.max(1, Math.abs(yBot - yTop));
+        const y0 = Math.round(Math.min(yTop, yBot));
+        const y1 = Math.round(Math.max(yTop, yBot));
+        const h = Math.max(1, y1 - y0);
         const w = intensiteLog(total, maxProfil) * maxBandW;
-        const longW = w * (agg.longUsd / total);
-        const shortW = w - longW;
-        // longs (--down) collés au bord droit, shorts (--up) à leur gauche. globalAlpha
-        // plutôt qu'une couleur rgba pré-calculée : robuste quel que soit le format du token
-        // de thème (hex, rgb() ou oklch), comme le fait le Volume Profile.
-        ctx.globalAlpha = 0.6;
+        const longW = Math.round(w * (agg.longUsd / total));
+        const shortW = Math.round(w) - longW;
+        // longs (--down) collés à l'ancre, shorts (--up) à leur gauche. globalAlpha plutôt
+        // qu'une couleur rgba pré-calculée : robuste quel que soit le format du token de thème.
         ctx.fillStyle = down;
-        ctx.fillRect(xRight - longW, yT, longW, h);
+        ctx.fillRect(xAncre - longW, y0, longW, h);
         ctx.fillStyle = up;
-        ctx.fillRect(xRight - longW - shortW, yT, shortW, h);
+        ctx.fillRect(xAncre - longW - shortW, y0, shortW, h);
       }
       ctx.globalAlpha = 1;
+
+      // Étiquettes des top clusters : pilule « prix · USD » à gauche de la barre, pour les
+      // NB_LABELS_CLUSTER plus gros buckets (dé-chevauchement 14 px, le plus gros gagne, exclus
+      // sous la toolbar). Annonce du même coup la valeur USD du bucket max (le n°1).
+      this.dessinerLabelsClusters(profil, grid, maxProfil, xAncre, maxBandW, main, tokens);
+    }
+
+    // Surbrillance de la cellule survolée (contour 1.5 px tokens.text) — tracée seulement quand
+    // une cellule est sous le curseur (le tooltip est alors affiché).
+    const hover = this.cellSurvolee(grid, candles);
+    if (hover !== null) {
+      const col = largeurs.get(hover.candleTime);
+      const yTop = this.toPx({ value: (hover.bucketIdx + 1) * grid.taille }).y;
+      const yBot = this.toPx({ value: hover.bucketIdx * grid.taille }).y;
+      if (col !== undefined && yTop !== undefined && yBot !== undefined && Number.isFinite(yTop) && Number.isFinite(yBot)) {
+        const y0 = Math.round(Math.min(yTop, yBot));
+        const y1 = Math.round(Math.max(yTop, yBot));
+        ctx.strokeStyle = tokens.text;
+        ctx.globalAlpha = 0.85;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(col.x0 + 0.75, y0 + 0.75, Math.max(1, col.x1 - col.x0) - 1.5, Math.max(1, y1 - y0) - 1.5);
+        ctx.globalAlpha = 1;
+      }
     }
 
     ctx.restore();
 
     // Tooltip de survol : dessiné HORS clip (au-dessus de la heatmap), après restauration.
-    this.dessinerTooltip(grid, candles, main, tokens);
+    if (hover !== null) this.dessinerTooltip(hover, grid, main, tokens);
+  }
+
+  /**
+   * Étiquettes des clusters les plus lourds du profil latéral : pilule « <prix arrondi au
+   * bucket> · <total USD> » à gauche de la barre de chaque bucket (fond `--surface`, bord
+   * `--border`, texte `--text` 9 px). On ne garde que les `NB_LABELS_CLUSTER` plus gros, on
+   * les dé-chevauche verticalement (14 px, le plus gros gagne) et on exclut ceux qui passeraient
+   * sous la toolbar DOM (`y < top + 24`).
+   */
+  private dessinerLabelsClusters(
+    profil: Map<number, { longUsd: number; shortUsd: number }>,
+    grid: LiqGrid,
+    maxProfil: number,
+    xAncre: number,
+    maxBandW: number,
+    main: Bounding,
+    tokens: Tokens,
+  ): void {
+    const ctx = this.ctx;
+    const { top } = main;
+    // Candidats : centre pixel du bucket + total ; on ne trace que les plus lourds, dé-chevauchés.
+    const candidats: Array<{ y: number; poids: number; idx: number; total: number }> = [];
+    for (const [idx, agg] of profil) {
+      const total = agg.longUsd + agg.shortUsd;
+      if (total <= 0) continue;
+      const yTop = this.toPx({ value: (idx + 1) * grid.taille }).y;
+      const yBot = this.toPx({ value: idx * grid.taille }).y;
+      if (yTop === undefined || yBot === undefined || !Number.isFinite(yTop) || !Number.isFinite(yBot)) continue;
+      candidats.push({ y: (yTop + yBot) / 2, poids: total, idx, total });
+    }
+    const tops = candidats.sort((a, b) => b.poids - a.poids).slice(0, NB_LABELS_CLUSTER);
+    ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (const item of dechevaucher(tops, 14)) {
+      if (item.y < top + 24) continue;
+      const label = `${formatPrice(item.idx * grid.taille)} · ${formatUsd(item.total)}`;
+      const bandW = intensiteLog(item.total, maxProfil) * maxBandW;
+      const droite = xAncre - bandW - 4; // juste à gauche de la barre du bucket
+      const w = ctx.measureText(label).width;
+      ctx.fillStyle = tokens.surface;
+      ctx.globalAlpha = 0.96;
+      ctx.fillRect(droite - w - 6, item.y - 7, w + 6, 14);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = tokens.border;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(droite - w - 6, item.y - 7, w + 6, 14);
+      ctx.fillStyle = tokens.text;
+      ctx.fillText(label, droite - 3, item.y);
+    }
+  }
+
+  /**
+   * Cellule sous le curseur (hit-test O(1) via `cellSousCurseur` sur la dernière grille) —
+   * factorise l'extraction du crosshair pour la surbrillance ET le tooltip. `null` si le
+   * curseur est hors du pane prix ou si aucune liquidation n'occupe la cellule visée.
+   */
+  private cellSurvolee(grid: LiqGrid, candles: Candle[]): LiqCell | null {
+    const cross = this.dernierCrosshair;
+    if (cross === null || cross.paneId !== CANDLE_PANE_ID) return null;
+    const cy = cross.y;
+    if (cy === undefined) return null;
+    const timestamp = cross.kLineData?.timestamp;
+    const conv = this.chart.convertFromPixel([{ y: cy }], { paneId: CANDLE_PANE_ID });
+    const value = (Array.isArray(conv) ? conv[0] : conv)?.value;
+    return cellSousCurseur(grid, candles, timestamp, value);
   }
 
   /**
@@ -532,21 +734,12 @@ export class LiquidationHeatController {
    * recalcul au mousemove). Décalé pour rester dans le pane (repli à gauche près du bord
    * droit, au-dessus près du bas). Ne dessine rien hors du pane prix ou sans cellule survolée.
    */
-  private dessinerTooltip(grid: LiqGrid, candles: Candle[], main: Bounding, tokens: Tokens): void {
+  private dessinerTooltip(cell: LiqCell, grid: LiqGrid, main: Bounding, tokens: Tokens): void {
     const cross = this.dernierCrosshair;
-    if (cross === null || cross.paneId !== CANDLE_PANE_ID) return;
+    if (cross === null) return;
     const cx = cross.x;
     const cy = cross.y;
     if (cx === undefined || cy === undefined) return;
-
-    // Timestamp = bougie survolée (snap KLineChart) ; valeur = prix au curseur, absent du
-    // crosshair → reconstitué depuis y via convertFromPixel.
-    const timestamp = cross.kLineData?.timestamp;
-    const conv = this.chart.convertFromPixel([{ y: cy }], { paneId: CANDLE_PANE_ID });
-    const value = (Array.isArray(conv) ? conv[0] : conv)?.value;
-
-    const cell = cellSousCurseur(grid, candles, timestamp, value);
-    if (cell === null) return;
 
     const total = cell.longUsd + cell.shortUsd;
     const prixBas = cell.bucketIdx * grid.taille;
@@ -591,11 +784,14 @@ export class LiquidationHeatController {
     bx = Math.max(left + 2, Math.min(bx, left + width - boxW - 2));
     by = Math.max(top + 2, Math.min(by, top + height - boxH - 2));
 
-    ctx.fillStyle = "rgba(10,12,20,0.92)";
+    // Boîte aux tokens du thème (comme le reste de l'UI) : fond `--surface`, bord `--border`.
+    ctx.globalAlpha = 0.96;
+    ctx.fillStyle = tokens.surface;
     ctx.beginPath();
     ctx.roundRect(bx, by, boxW, boxH, 5);
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.12)";
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = tokens.border;
     ctx.lineWidth = 1;
     ctx.stroke();
 
@@ -616,24 +812,11 @@ export class LiquidationHeatController {
    * ⚠️ APPROXIMATION (garde-fou BUILD-CONTRACT) : la légende « Niveaux ESTIMÉS … » et le préfixe
    * « EST. » signalent explicitement qu'il ne s'agit PAS des liquidations réelles.
    */
-  private dessinerNiveauxEstimes(main: Bounding): void {
+  private dessinerNiveauxEstimes(main: Bounding, tokens: Tokens): void {
     const ctx = this.ctx;
     const { left, top, width, height } = main;
     const xRight = left + width;
     const orange = (a: number): string => `rgba(${ORANGE_EST},${a.toFixed(3)})`;
-
-    // Légende de couche — empilée SOUS les lignes de la heatmap actives pour éviter tout
-    // chevauchement : la heatmap occupe 1 ligne (légende) + 1 ligne supplémentaire quand elle
-    // affiche son indicateur « en attente du flux » (buffer vide). Chaque couche a sa ligne.
-    const heatActif = liqMarksStore.getState().actif;
-    const heatEnAttente = heatActif && liqEventsStore.getState().enAttente;
-    const lignesHeat = heatActif ? (heatEnAttente ? 2 : 1) : 0;
-    const yLegende = top + 4 + lignesHeat * 14;
-    ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
-    ctx.textAlign = "right";
-    ctx.textBaseline = "top";
-    ctx.fillStyle = orange(0.95);
-    ctx.fillText("Niveaux ESTIMÉS (modèle levier — approximation)", xRight - 4, yLegende);
 
     const candles = marketStore.getState().candles;
     const dernier = candles[candles.length - 1];
@@ -647,9 +830,21 @@ export class LiquidationHeatController {
     }
     const niveaux = this.derniersNiveaux ?? [];
     if (niveaux.length === 0) {
-      // Couche active mais OI pas encore chargé (ou aucune hausse d'OI) : indice discret.
+      // Couche active mais OI pas encore chargé (ou aucune hausse d'OI) : indice discret en haut
+      // à droite, sous l'éventuel indicateur « en attente » de la heatmap (top+22). La légende
+      // « Niveaux ESTIMÉS … » (garde-fou EST.) reste affichée par le bloc de légendes bas-droite.
+      const heatEnAttente = liqMarksStore.getState().actif && liqEventsStore.getState().enAttente;
+      ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "top";
       ctx.fillStyle = orange(0.8);
-      ctx.fillText("⋯ Niveaux ESTIMÉS — en attente de l'Open Interest", xRight - 4, yLegende + 14);
+      // Deux cas distincts : OI pas encore chargé (attente réseau) vs OI chargé mais tous les
+      // niveaux consommés par le prix (modèle purgé — fréquent sur TF court après un range).
+      const oiCharge = oiHistStore.getState().hist.length > 0;
+      const msg = oiCharge
+        ? "⋯ Niveaux ESTIMÉS — aucun niveau actif (tous consommés par le prix)"
+        : "⋯ Niveaux ESTIMÉS — en attente de l'Open Interest";
+      ctx.fillText(msg, xRight - 4, top + (heatEnAttente ? 36 : 22));
       return;
     }
 
@@ -657,7 +852,6 @@ export class LiquidationHeatController {
     const taille = tailleBucket(dernier.close);
     if (!(taille > 0)) return;
     const parBucket = new Map<number, { poids: number; parLevier: Map<number, number> }>();
-    let maxPoids = 0;
     for (const n of niveaux) {
       if (!(n.price > 0) || !Number.isFinite(n.poidsUsd)) continue;
       const idx = bucketIndex(n.price, taille);
@@ -668,38 +862,45 @@ export class LiquidationHeatController {
       }
       b.poids += n.poidsUsd;
       b.parLevier.set(n.levier, (b.parLevier.get(n.levier) ?? 0) + n.poidsUsd);
-      if (b.poids > maxPoids) maxPoids = b.poids;
     }
+    // Densité : ne garder que les buckets ≥ 15 % du max, plafonnés aux 30 plus lourds (évite des
+    // centaines de lignes quasi nulles). `filtrerNiveauxDenses` est pure et testée.
+    const denses = filtrerNiveauxDenses(
+      [...parBucket.entries()].map(([idx, b]) => ({ idx, poids: b.poids, parLevier: b.parLevier })),
+      EST_SEUIL_FRAC,
+      EST_MAX_NIVEAUX,
+    );
+    if (denses.length === 0) return;
+    let maxPoids = 0;
+    for (const b of denses) if (b.poids > maxPoids) maxPoids = b.poids;
     if (maxPoids <= 0) return;
 
-    // Lignes pointillées orange, une par bucket (alpha ∝ intensité log du poids). Clip au pane.
+    // Lignes pointillées orange, une par bucket dense (alpha ∝ intensité log du poids). Clip au pane.
     ctx.save();
     ctx.beginPath();
     ctx.rect(left, top, width, height);
     ctx.clip();
     ctx.setLineDash([4, 3]);
     ctx.lineWidth = 1;
-    for (const [idx, b] of parBucket) {
-      const y = this.toPx({ value: (idx + 0.5) * taille }).y;
+    for (const b of denses) {
+      const y = this.toPx({ value: (b.idx + 0.5) * taille }).y;
       if (y === undefined || !Number.isFinite(y)) continue;
       const t = intensiteLog(b.poids, maxPoids);
       ctx.strokeStyle = orange(0.2 + 0.6 * t);
       ctx.beginPath();
-      ctx.moveTo(left, y);
-      ctx.lineTo(xRight, y);
+      ctx.moveTo(left, Math.round(y) + 0.5);
+      ctx.lineTo(xRight, Math.round(y) + 0.5);
       ctx.stroke();
     }
     ctx.setLineDash([]);
     ctx.restore();
 
-    // Étiquettes « EST. ×L » sur les buckets les plus lourds (levier dominant du bucket).
-    const tops = [...parBucket.entries()].sort((a, b) => b[1].poids - a[1].poids).slice(0, NB_LABELS_EST);
-    ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    for (const [idx, b] of tops) {
-      const y = this.toPx({ value: (idx + 0.5) * taille }).y;
-      if (y === undefined || !Number.isFinite(y) || y < top || y > top + height) continue;
+    // Étiquettes « EST. ×L » : top NB_LABELS_EST buckets, dé-chevauchés (15 px, le plus gros
+    // gagne, `dechevaucher` pure et testée), exclus sous la toolbar DOM (y < top+24). Pilule
+    // fond `--surface` / bord orange (identité EST distincte du viridis).
+    const candidatsLabel = denses.slice(0, NB_LABELS_EST).flatMap((b) => {
+      const y = this.toPx({ value: (b.idx + 0.5) * taille }).y;
+      if (y === undefined || !Number.isFinite(y)) return [];
       let levierDominant = 0;
       let poidsDominant = -1;
       for (const [L, p] of b.parLevier) {
@@ -708,13 +909,106 @@ export class LiquidationHeatController {
           levierDominant = L;
         }
       }
-      const label = `EST. ×${levierDominant}`;
-      // Fond semi-opaque pour la lisibilité sur la heatmap éventuelle.
+      return [{ y, poids: b.poids, levierDominant }];
+    });
+    ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    for (const item of dechevaucher(candidatsLabel, 15)) {
+      if (item.y < top + 24 || item.y > top + height) continue;
+      const label = `EST. ×${item.levierDominant}`;
       const w = ctx.measureText(label).width;
-      ctx.fillStyle = "rgba(10,12,20,0.72)";
-      ctx.fillRect(left + 3, y - 7, w + 6, 14);
+      ctx.fillStyle = tokens.surface;
+      ctx.globalAlpha = 0.96;
+      ctx.fillRect(left + 3, item.y - 7, w + 6, 14);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = orange(0.9);
+      ctx.lineWidth = 1;
+      ctx.strokeRect(left + 3, item.y - 7, w + 6, 14);
       ctx.fillStyle = orange(0.98);
-      ctx.fillText(label, left + 6, y);
+      ctx.fillText(label, left + 6, item.y);
+    }
+  }
+
+  /**
+   * Bloc de légendes en BAS-DROITE du pane (au-dessus de l'axe temps), empilé vers le haut :
+   *  (a) barre d'échelle de couleur gradient (mêmes 24 crans que les cellules) « 0 … maxUsd » +
+   *      caption « Liq heatmap (exécutées) · log » — quand la heatmap est active et peuplée ;
+   *  (b) mini-légende du profil « ▮ shorts ▮ longs » (carrés teintes `--up`/`--down`) — idem ;
+   *  (c) légende « Niveaux ESTIMÉS (modèle levier — approximation) » — dès que la couche EST est
+   *      active (garde-fou BUILD-CONTRACT NON contournable).
+   * Emplacement jamais occupé par les boutons de layout ni la légende du Volume Profile.
+   */
+  private dessinerLegendes(main: Bounding, tokens: Tokens, heatActif: boolean, estActif: boolean): void {
+    const ctx = this.ctx;
+    const { left, top, width, height } = main;
+    const xRight = left + width;
+    const grid = heatActif ? this.derniereGrille : null;
+    let yb = top + height - 4; // bord bas du bloc, juste au-dessus de l'axe temps
+
+    // (a) + (b) : uniquement quand la heatmap est active ET a produit une grille (des liquidations).
+    if (grid !== null) {
+      // (a) barre d'échelle gradient 84×8 px, « 0 » à gauche, formatUsd(maxUsd) à droite.
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
+      const maxTxt = formatUsd(grid.maxUsd);
+      const wMax = ctx.measureText(maxTxt).width;
+      const barW = 84;
+      const barH = 8;
+      const barRight = xRight - 4 - wMax - 4;
+      const barLeft = barRight - barW;
+      const barTop = yb - barH;
+      for (let i = 0; i < 24; i++) {
+        const [r, g, b] = couleurRampe(i / 23, tokens.fondClair);
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(barLeft + (barW * i) / 24, barTop, barW / 24 + 1, barH); // +1 : pas de couture
+      }
+      ctx.fillStyle = tokens.textDim;
+      ctx.fillText(maxTxt, xRight - 4, yb); // borne haute à droite de la barre
+      ctx.fillText("0", barLeft - 4, yb); // borne basse à gauche de la barre
+      yb -= 13;
+      // caption
+      ctx.fillStyle = tokens.textDim;
+      ctx.fillText("Liq heatmap (exécutées) · log", xRight - 4, yb);
+      yb -= 14;
+
+      // (b) mini-légende profil « ▮ shorts ▮ longs » (shorts = --up, longs = --down).
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      const sq = 7;
+      const gap = 3;
+      const gap2 = 8;
+      const wSh = ctx.measureText("shorts").width;
+      const wLo = ctx.measureText("longs").width;
+      const totalW = sq + gap + wSh + gap2 + sq + gap + wLo;
+      let x = xRight - 4 - totalW;
+      const ymid = yb - 6;
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = tokens.up;
+      ctx.fillRect(x, ymid - sq / 2, sq, sq);
+      ctx.globalAlpha = 1;
+      x += sq + gap;
+      ctx.fillStyle = tokens.textDim;
+      ctx.fillText("shorts", x, ymid);
+      x += wSh + gap2;
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = tokens.down;
+      ctx.fillRect(x, ymid - sq / 2, sq, sq);
+      ctx.globalAlpha = 1;
+      x += sq + gap;
+      ctx.fillStyle = tokens.textDim;
+      ctx.fillText("longs", x, ymid);
+      yb -= 14;
+    }
+
+    // (c) légende EST — dessinée dès que la couche est active (étiquetage non contournable).
+    if (estActif) {
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
+      ctx.fillStyle = `rgba(${ORANGE_EST},0.95)`;
+      ctx.fillText("Niveaux ESTIMÉS (modèle levier — approximation)", xRight - 4, yb);
     }
   }
 }

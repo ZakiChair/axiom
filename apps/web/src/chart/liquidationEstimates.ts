@@ -99,11 +99,14 @@ export function calculerNiveauxEstimes(
 export interface LiqEstState {
   actif: boolean;
   basculer: () => void;
+  /** Force l'état ON/OFF (idempotent) — hydratation persistée (cf. store/persist.ts). */
+  setActif: (actif: boolean) => void;
 }
 
 export const liqEstStore: StoreApi<LiqEstState> = createStore<LiqEstState>((set, get) => ({
   actif: false,
   basculer: () => set({ actif: !get().actif }),
+  setActif: (actif) => set({ actif }),
 }));
 
 // ─────────────────────────── Store de l'historique OI (données, hors React) ───────────────────────────

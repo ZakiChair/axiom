@@ -188,6 +188,20 @@ export function okxInstFamily(symbol: string): string {
 }
 
 /**
+ * OKX couvre-t-il ce symbole ? true si le mapping vers un instFamily OKX est possible
+ * (`okxInstFamily` lève sur cotation inconnue → false). Sert au sous-titre honnête de la
+ * fenêtre LIQ (« perp Bybit + OKX » vs « perp Bybit »). PURE & testée.
+ */
+export function okxCouvre(symbol: string): boolean {
+  try {
+    okxInstFamily(symbol);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Côté de la POSITION liquidée depuis `posSide`/`side` OKX. posSide PRIORITAIRE
  * (long/short) ; sinon (net/absent) repli sur `side` : sell→long liquidé, buy→short
  * (même convention que Bybit). Renvoie `null` si indéterminé. PURE (locale).

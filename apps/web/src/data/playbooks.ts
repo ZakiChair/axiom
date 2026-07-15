@@ -22,6 +22,8 @@ import { orderflowStore } from "../store/orderflow";
 import { volumeProfileStore } from "../store/volumeProfile";
 import { windowManagerStore } from "../store/windowManager";
 import { alertsStore } from "../store/alerts";
+import { liqMarksStore } from "../chart/liquidationMarkers";
+import { liqEstStore } from "../chart/liquidationEstimates";
 
 // ─────────────────────────── Types ───────────────────────────
 
@@ -148,6 +150,18 @@ export function applyOptionsDeribit(): void {
   ouvrirFenetres("options", "termStructure", "vol");
 }
 
+/**
+ * Chasse aux liquidations : ouvre la fenêtre LIQ, active la heatmap des liquidations
+ * exécutées + les niveaux ESTIMÉS, passe le TF à 15m. `setActif(true)` est idempotent
+ * (n'a d'effet que si la couche est éteinte). Le symbole courant est conservé.
+ */
+export function applyChasseLiquidations(): void {
+  setMarche({ timeframe: "15m" });
+  ouvrirFenetres("liquidations");
+  liqMarksStore.getState().setActif(true);
+  liqEstStore.getState().setActif(true);
+}
+
 // ─────────────────────────── Catalogue ───────────────────────────
 
 /** Playbooks seed (ordre d'affichage palette / menu). */
@@ -195,6 +209,13 @@ export const PLAYBOOKS: readonly Playbook[] = [
       "OMON + TERM + VOL (Deribit) · graphe reste Binance BTC (pas d'adaptateur OHLCV Deribit)",
     apply: applyOptionsDeribit,
   },
+  {
+    id: "chasse-liquidations",
+    nom: "Chasse aux liquidations",
+    mnemonique: "PLAY-LIQ",
+    description: "LIQ · heatmap exécutées + niveaux estimés · 15m",
+    apply: applyChasseLiquidations,
+  },
 ];
 
 /** Métadonnées pures (sans `apply`) — utile aux tests unitaires. */
@@ -241,7 +262,7 @@ export const commandesPlaybooks: Commande[] = [
       "risk",
       "options",
     ],
-    apercu: "PLAY-SCALP · PLAY-FADE · PLAY-CVD · PLAY-FOMC · PLAY-RISK · PLAY-OPT",
+    apercu: "PLAY-SCALP · PLAY-FADE · PLAY-CVD · PLAY-FOMC · PLAY-RISK · PLAY-OPT · PLAY-LIQ",
     // Entrée générique : applique le playbook phare (scalp) — les autres via PLAY-*.
     action: () => playbookParId("scalp-btc")?.apply(),
   },

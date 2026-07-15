@@ -16,6 +16,7 @@ import { marketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
 import { volumeProfileStore } from "../store/volumeProfile";
 import { revenueStore } from "../store/revenue";
+import { liqMarksStore } from "../chart/liquidationMarkers";
 import { themeStore, THEMES } from "../store/theme";
 import { SUPPORTED_TIMEFRAMES } from "../data/adapters";
 import { paletteStore } from "./registry";
@@ -50,7 +51,7 @@ export const RACCOURCIS_AIDE: { touche: string; description: string }[] = [
   {
     touche: "⌘K puis mnémo",
     description:
-      "Fonctions (panneaux) : DES ECO NEWS CORR CHAIN MAP PORT NOTE EQS TERM OMON DOM TAPE BT REPLAY RATE COT SEAG VOL FUND BRIEF GLOBE · OI/FUND MARKS (chart) · GRID1 GRID2 GRID2V GRID4 (disposition) · TICKER (bandeau news) · PLAY PLAY-SCALP PLAY-FADE PLAY-CVD PLAY-FOMC PLAY-RISK PLAY-OPT (playbooks) · ONBOARD (rejouer l'accueil)",
+      "Fonctions (panneaux) : DES ECO NEWS CORR CHAIN MAP PORT NOTE EQS TERM OMON DOM TAPE BT REPLAY RATE COT SEAG VOL FUND BRIEF GLOBE · OI/FUND MARKS (chart) · GRID1 GRID2 GRID2V GRID4 (disposition) · TICKER (bandeau news) · PLAY PLAY-SCALP PLAY-FADE PLAY-CVD PLAY-FOMC PLAY-RISK PLAY-OPT PLAY-LIQ (playbooks) · ONBOARD (rejouer l'accueil)",
   },
   { touche: "⌘K → PLAY*", description: "Playbooks 1-clic (scalp, funding, CVD S/P, FOMC, risk-off, options)" },
   { touche: "⌘K → ONBOARD", description: "Rejouer le parcours d'onboarding (3 étapes)" },
@@ -59,6 +60,7 @@ export const RACCOURCIS_AIDE: { touche: string; description: string }[] = [
   { touche: "O", description: "Orderflow (activer / désactiver)" },
   { touche: "V", description: "Profil de volume (activer / désactiver)" },
   { touche: "R", description: "Revenus on-chain (activer / désactiver)" },
+  { touche: "L", description: "Heatmap liquidations (activer / désactiver)" },
   { touche: "F", description: "Plein écran du graphe" },
   { touche: "T", description: "Thème suivant" },
   { touche: "Échap", description: "Quitter le plein écran / fermer / passer l'onboarding" },
@@ -150,6 +152,14 @@ export function useRaccourcisGlobaux(): void {
         case "v":
           volumeProfileStore.getState().toggle();
           break;
+        case "l": {
+          // Heatmap liquidations : flux perp Bybit/OKX uniquement (indispo tradfi / synthétique).
+          const ex = marketStore.getState().exchange;
+          if (ex !== "twelvedata" && ex !== "synthetic") {
+            liqMarksStore.getState().basculer();
+          }
+          break;
+        }
         case "r": {
           // Revenus on-chain : indisponible en marchés traditionnels.
           if (marketStore.getState().exchange !== "twelvedata") {

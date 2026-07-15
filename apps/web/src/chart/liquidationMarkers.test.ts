@@ -15,7 +15,14 @@ vi.mock("./drawing", () => ({ getActiveChart: () => null }));
 vi.mock("../store/theme", () => ({
   themeStore: { getState: () => ({ theme: "dark" }), subscribe: () => () => {} },
 }));
-vi.mock("../data/liquidations", () => ({ subscribeLiquidations: () => () => {} }));
+// Espions hoistés : le refcount UI (retenirFluxLiq) est testé sur le VRAI sync() du
+// singleton — on observe l'ouverture/fermeture de l'abonnement via ces spies.
+const { subSpy, unsubSpy } = vi.hoisted(() => {
+  const unsubSpy = vi.fn();
+  const subSpy = vi.fn(() => unsubSpy);
+  return { subSpy, unsubSpy };
+});
+vi.mock("../data/liquidations", () => ({ subscribeLiquidations: subSpy }));
 vi.mock("../data/coinalyze", () => ({ fetchLiquidationHistory: async () => [] }));
 vi.mock("../data/daemon", () => ({
   liquidationsGet: async () => null,
@@ -30,6 +37,9 @@ import {
   couleurViridis,
   deserialiserEvenements,
   fusionnerEvenements,
+  liqEventsStore,
+  liqMarksStore,
+  retenirFluxLiq,
   seedDepuisCoinalyze,
   serialiserEvenements,
   tailleBucket,
@@ -226,5 +236,43 @@ describe("amorçage Coinalyze (candleContenant / seedDepuisCoinalyze)", () => {
       candles,
     );
     expect(seed).toHaveLength(0);
+  });
+});
+
+describe("retenirFluxLiq (refcount des consommateurs UI)", () => {
+  it("active l'abonnement quand SEULE la fenêtre retient le flux (heatmap OFF), le coupe à la relâche", () => {
+    expect(liqMarksStore.getState().actif).toBe(false);
+    subSpy.mockClear();
+    unsubSpy.mockClear();
+    const relacher = retenirFluxLiq();
+    expect(subSpy).toHaveBeenCalledTimes(1);
+    relacher();
+    expect(unsubSpy).toHaveBeenCalledTimes(1);
+    // Buffer vidé et publié à l'arrêt (état « inactif » propre).
+    expect(liqEventsStore.getState().events).toEqual([]);
+  });
+
+  it("refcount : un seul abonnement pour deux reteneurs ; relâche idempotente", () => {
+    subSpy.mockClear();
+    unsubSpy.mockClear();
+    const r1 = retenirFluxLiq();
+    const r2 = retenirFluxLiq();
+    expect(subSpy).toHaveBeenCalledTimes(1); // pas de 2e WS pour le 2e reteneur
+    r1();
+    r1(); // double relâche du même jeton → no-op (ne vole pas la retenue de r2)
+    expect(unsubSpy).not.toHaveBeenCalled();
+    r2();
+    expect(unsubSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("heatmap ON : l'abonnement survit à la relâche de la fenêtre, tombe à la bascule OFF", () => {
+    subSpy.mockClear();
+    unsubSpy.mockClear();
+    const relacher = retenirFluxLiq();
+    liqMarksStore.getState().basculer(); // heatmap ON
+    relacher();
+    expect(unsubSpy).not.toHaveBeenCalled(); // la bascule retient encore le flux
+    liqMarksStore.getState().basculer(); // heatmap OFF → plus aucun reteneur
+    expect(unsubSpy).toHaveBeenCalledTimes(1);
   });
 });

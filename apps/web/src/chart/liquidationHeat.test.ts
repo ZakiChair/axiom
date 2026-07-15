@@ -24,7 +24,17 @@ vi.mock("../data/daemon", () => ({
 
 import type { Candle } from "@axiom/types";
 import type { LiqEvent } from "./liquidationMarkers";
-import { cellSousCurseur, construireGrille, intensiteLog, profilParPrix } from "./liquidationHeat";
+import { couleurViridis } from "./liquidationMarkers";
+import {
+  cellSousCurseur,
+  construireGrille,
+  intensiteLog,
+  profilParPrix,
+  estFondClair,
+  couleurRampe,
+  filtrerNiveauxDenses,
+  dechevaucher,
+} from "./liquidationHeat";
 
 function candle(partial: Partial<Candle> & Pick<Candle, "time" | "close">): Candle {
   return { open: 0, high: 0, low: 0, volume: 0, ...partial };
@@ -157,5 +167,101 @@ describe("profilParPrix", () => {
     const [entree] = [...profil.values()];
     expect(entree?.longUsd).toBe(500);
     expect(entree?.shortUsd).toBe(200);
+  });
+});
+
+describe("estFondClair", () => {
+  it("détecte les fonds clairs vs sombres (#hex 6 et 3 chiffres)", () => {
+    expect(estFondClair("#fff5fb")).toBe(true); // thème Cute (rose quasi blanc)
+    expect(estFondClair("#fff")).toBe(true);
+    expect(estFondClair("#0a0a0a")).toBe(false); // thème Dark
+    expect(estFondClair("#000")).toBe(false);
+    expect(estFondClair("#070b1f")).toBe(false); // thème Midnight (bleu nuit)
+  });
+
+  it("parse la notation rgb()/rgba()", () => {
+    expect(estFondClair("rgb(255, 245, 251)")).toBe(true);
+    expect(estFondClair("rgba(10, 10, 10, 1)")).toBe(false);
+  });
+
+  it("chaîne absente/invalide → false (sombre par défaut, le cas majoritaire)", () => {
+    expect(estFondClair("")).toBe(false);
+    expect(estFondClair("bidon")).toBe(false);
+    expect(estFondClair("#12")).toBe(false);
+  });
+});
+
+describe("couleurRampe", () => {
+  it("fond sombre : rampe viridis directe (jaune = max)", () => {
+    expect(couleurRampe(0, false)).toEqual(couleurViridis(0));
+    expect(couleurRampe(0.3, false)).toEqual(couleurViridis(0.3));
+    expect(couleurRampe(1, false)).toEqual(couleurViridis(1));
+  });
+
+  it("fond clair : rampe inversée (violet foncé = max, contraste rétabli)", () => {
+    expect(couleurRampe(1, true)).toEqual(couleurViridis(0)); // max → violet foncé
+    expect(couleurRampe(0, true)).toEqual(couleurViridis(1)); // min → jaune pâle
+    expect(couleurRampe(0.25, true)).toEqual(couleurViridis(0.75));
+  });
+});
+
+describe("filtrerNiveauxDenses", () => {
+  it("ne garde que les buckets ≥ seuil × max, triés par poids décroissant", () => {
+    const b = [{ poids: 100 }, { poids: 20 }, { poids: 14 }, { poids: 5 }];
+    // max = 100, seuil 0.15 → borne 15 : 14 et 5 exclus.
+    expect(filtrerNiveauxDenses(b, 0.15, 30).map((x) => x.poids)).toEqual([100, 20]);
+  });
+
+  it("conserve le poids EXACTEMENT au seuil (>=)", () => {
+    const b = [{ poids: 100 }, { poids: 15 }];
+    expect(filtrerNiveauxDenses(b, 0.15, 30).map((x) => x.poids)).toEqual([100, 15]);
+  });
+
+  it("plafonne aux maxN plus lourds", () => {
+    const b = Array.from({ length: 40 }, (_, i) => ({ poids: 100 - i }));
+    const r = filtrerNiveauxDenses(b, 0, 30);
+    expect(r.length).toBe(30);
+    expect(r[0]?.poids).toBe(100);
+    expect(r[29]?.poids).toBe(71);
+  });
+
+  it("liste vide → vide", () => {
+    expect(filtrerNiveauxDenses([], 0.15, 30)).toEqual([]);
+  });
+});
+
+describe("dechevaucher", () => {
+  it("garde le plus lourd et écarte les voisins trop proches", () => {
+    const items = [
+      { y: 100, poids: 10 },
+      { y: 105, poids: 5 }, // trop proche de y=100 (Δ5 < 15) → écarté
+      { y: 200, poids: 8 },
+    ];
+    expect(dechevaucher(items, 15)).toEqual([
+      { y: 100, poids: 10 },
+      { y: 200, poids: 8 },
+    ]);
+  });
+
+  it("conserve les items suffisamment espacés (ordre poids décroissant)", () => {
+    const items = [
+      { y: 0, poids: 1 },
+      { y: 20, poids: 2 },
+      { y: 40, poids: 3 },
+    ];
+    expect(dechevaucher(items, 15).map((x) => x.y)).toEqual([40, 20, 0]);
+  });
+
+  it("compare à TOUS les retenus, pas seulement au précédent", () => {
+    const items = [
+      { y: 0, poids: 10 },
+      { y: 30, poids: 9 },
+      { y: 10, poids: 8 }, // Δ à y=0 vaut 10 < 15 → écarté même si Δ à y=30 = 20
+    ];
+    expect(dechevaucher(items, 15).map((x) => x.y)).toEqual([0, 30]);
+  });
+
+  it("liste vide → vide", () => {
+    expect(dechevaucher([], 15)).toEqual([]);
   });
 });

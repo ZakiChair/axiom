@@ -185,7 +185,9 @@ export type AuxSeriesId =
   // Basis annualisé du future trimestriel courant (Binance COIN-M, BTC/ETH).
   | "quarterlyBasis"
   // Positionnement Binance futures : comptes (foule), top traders, taker (flux agressif).
-  | "lsAccount" | "lsTopTrader" | "lsTaker";
+  | "lsAccount" | "lsTopTrader" | "lsTaker"
+  // Sentiment global crypto : Fear & Greed Index (Alternative.me, 0-100).
+  | "fearGreed";
 
 /**
  * Séries auxiliaires DÉJÀ alignées sur les bougies (même longueur, même index).

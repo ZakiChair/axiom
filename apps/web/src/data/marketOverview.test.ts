@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseCategories,
   parseFearGreed,
+  parseFearGreedHistory,
   parseGlobal,
   parseMarkets,
   toBinanceUsdtPair,
@@ -124,6 +125,26 @@ describe("parseFearGreed", () => {
     expect(parseFearGreed({ data: [] })).toBeNull();
     expect(parseFearGreed({})).toBeNull();
     expect(parseFearGreed({ data: [{ value: "abc" }] })).toBeNull();
+  });
+});
+
+describe("parseFearGreedHistory", () => {
+  it("mappe data[] en points {time ms, value} triés par temps croissant", () => {
+    const json = {
+      data: [
+        { value: "72", timestamp: "1710086400" },
+        { value: "45", timestamp: "1710000000" },
+      ],
+    };
+    expect(parseFearGreedHistory(json)).toEqual([
+      { time: 1710000000 * 1000, value: 45 },
+      { time: 1710086400 * 1000, value: 72 },
+    ]);
+  });
+
+  it("écarte le non-numérique et renvoie [] hors tableau", () => {
+    expect(parseFearGreedHistory({ data: [{ value: "x", timestamp: "1" }] })).toEqual([]);
+    expect(parseFearGreedHistory({})).toEqual([]);
   });
 });
 

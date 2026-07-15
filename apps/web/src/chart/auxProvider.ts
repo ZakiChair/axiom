@@ -45,6 +45,7 @@ import {
 } from "../data/onchain/bgeometrics";
 import { fetchQuarterlyBasisHistory } from "../data/binanceDapi";
 import { fetchLsAccountRatio, fetchLsTopTraderRatio, fetchTakerRatio } from "../data/positioning";
+import { fetchFearGreedHistory } from "../data/marketOverview";
 import { extUrl } from "../data/extapi";
 
 /** État renvoyé par `getAligned` pour l'ensemble des `ids` demandés. */
@@ -94,6 +95,7 @@ const TTL_MS: Record<AuxSeriesId, number> = {
   lsAccount: 5 * 60_000, // ratio comptes long/short (Binance futures)
   lsTopTrader: 5 * 60_000, // ratio positions top traders
   lsTaker: 5 * 60_000, // ratio taker acheteur/vendeur
+  fearGreed: 60 * 60_000, // Fear & Greed global (Alternative.me, journalier)
 };
 /** Durée de mémorisation d'un échec de fetch (anti retry-tempête). */
 const ERROR_TTL_MS = 30_000;
@@ -242,6 +244,9 @@ async function rawFetch(id: AuxSeriesId, symbol: string): Promise<AuxPoint[]> {
       return toPoints(await fetchLsTopTraderRatio(symbol));
     case "lsTaker":
       return toPoints(await fetchTakerRatio(symbol));
+    case "fearGreed":
+      // Sentiment GLOBAL crypto (pas par actif) — même série pour tous les symboles.
+      return toPoints(await fetchFearGreedHistory(120));
   }
 }
 

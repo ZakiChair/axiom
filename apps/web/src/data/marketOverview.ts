@@ -211,6 +211,29 @@ export function parseFearGreed(json: unknown): FearGreed | null {
   };
 }
 
+/** Point d'historique Fear & Greed {time ms, value 0-100}. */
+export interface FearGreedPoint {
+  time: number;
+  value: number;
+}
+
+/**
+ * Parse l'HISTORIQUE Fear & Greed (data[] chronologique, `value` chaîne 0-100,
+ * `timestamp` en secondes). PURE : écarte le non-numérique, trie par temps croissant.
+ */
+export function parseFearGreedHistory(json: unknown): FearGreedPoint[] {
+  const data = (json as FngRaw | null)?.data;
+  if (!Array.isArray(data)) return [];
+  const out: FearGreedPoint[] = [];
+  for (const d of data) {
+    const value = Number(d.value);
+    const tsSec = Number(d.timestamp);
+    if (Number.isFinite(value) && Number.isFinite(tsSec)) out.push({ time: tsSec * 1000, value });
+  }
+  out.sort((a, b) => a.time - b.time);
+  return out;
+}
+
 /**
  * Résolution best-effort d'un ticker CoinGecko vers une paire Binance USDT
  * (ex. "BTC" → "BTCUSDT"). PURE. L'appelant vérifie l'existence réelle de la paire
@@ -327,5 +350,18 @@ export async function fetchFearGreed(signal?: AbortSignal): Promise<FearGreed | 
     return parsed ?? cached?.data ?? null;
   } catch {
     return cached?.data ?? null;
+  }
+}
+
+/**
+ * Historique Fear & Greed (jusqu'à `limit` jours) pour l'indicateur de chart.
+ * Global crypto (pas par actif). Dégradation gracieuse : [] sur échec réseau.
+ */
+export async function fetchFearGreedHistory(limit = 120, signal?: AbortSignal): Promise<FearGreedPoint[]> {
+  try {
+    const json = await getJson(extUrl("api.alternative.me", `fng/?limit=${limit}`), signal);
+    return parseFearGreedHistory(json);
+  } catch {
+    return [];
   }
 }

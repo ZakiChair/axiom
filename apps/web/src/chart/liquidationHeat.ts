@@ -253,8 +253,10 @@ const VP_WIDTH_FRAC = 0.32;
 const FALLBACK_CELL_W = 6;
 /** Teinte orange des niveaux ESTIMÉS (distincte du viridis de la heatmap réelle). */
 const ORANGE_EST = "245,158,11"; // #f59e0b (rgb)
-/** Poids min (fraction du max) pour tracer un niveau ESTIMÉ + plafond de niveaux tracés. */
-const EST_SEUIL_FRAC = 0.15;
+/** Poids min (fraction du max) pour tracer un niveau ESTIMÉ + plafond de niveaux tracés.
+ *  Seuil bas (4 %) : la distribution des poids est très inégale (un pic d'OI domine) — un seuil
+ *  agressif ne laissait que 1-2 lignes (constat gate visuel) ; le plafond fait l'anti-bruit. */
+const EST_SEUIL_FRAC = 0.04;
 const EST_MAX_NIVEAUX = 30;
 /** Nombre de buckets estimés étiquetés « EST. ×L » (les plus gros poids). */
 const NB_LABELS_EST = 4;
@@ -836,7 +838,13 @@ export class LiquidationHeatController {
       ctx.textAlign = "right";
       ctx.textBaseline = "top";
       ctx.fillStyle = orange(0.8);
-      ctx.fillText("⋯ Niveaux ESTIMÉS — en attente de l'Open Interest", xRight - 4, top + (heatEnAttente ? 36 : 22));
+      // Deux cas distincts : OI pas encore chargé (attente réseau) vs OI chargé mais tous les
+      // niveaux consommés par le prix (modèle purgé — fréquent sur TF court après un range).
+      const oiCharge = oiHistStore.getState().hist.length > 0;
+      const msg = oiCharge
+        ? "⋯ Niveaux ESTIMÉS — aucun niveau actif (tous consommés par le prix)"
+        : "⋯ Niveaux ESTIMÉS — en attente de l'Open Interest";
+      ctx.fillText(msg, xRight - 4, top + (heatEnAttente ? 36 : 22));
       return;
     }
 

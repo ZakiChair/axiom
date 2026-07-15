@@ -258,6 +258,16 @@ const SAVE_THROTTLE_MS = 5_000;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let savePending = false;
 
+/**
+ * File d'attente du dual-write daemon : les liquidations LIVE (jamais les seeds) sont
+ * accumulées ici puis POUSSÉES EN LOT sur le même rythme throttlé que la persistance (timer
+ * jumeau 5 s), au lieu d'un POST par liquidation — une cascade génère alors 1 seul POST par
+ * fenêtre au lieu d'une rafale (et un seul ECONNREFUSED si le daemon est absent).
+ */
+let enAttentePush: LiqEvent[] = [];
+let pushTimer: ReturnType<typeof setTimeout> | null = null;
+let pushPending = false;
+
 /** Pousse l'état courant du buffer dans le store vanilla (bump `rev`, calcule `enAttente`). */
 function publier(): void {
   const enAttente = liqMarksStore.getState().actif && evenements.length === 0;
@@ -313,6 +323,47 @@ function flushSauvegarde(symbol: string): void {
   sauverProfil(symbol);
 }
 
+/** Pousse le lot accumulé en UN seul POST daemon (best-effort) et vide le timer/la file. */
+function flushPush(symbol: string): void {
+  if (pushTimer !== null) {
+    clearTimeout(pushTimer);
+    pushTimer = null;
+  }
+  pushPending = false;
+  if (enAttentePush.length === 0) return;
+  const lot = enAttentePush.map((ev) => ({
+    t: ev.time,
+    venue: ev.venue,
+    side: ev.side,
+    price: ev.price,
+    qty: ev.qty,
+    usd: ev.usd,
+  }));
+  enAttentePush = [];
+  void liquidationsPush(symbol, lot);
+}
+
+/**
+ * Planifie un push THROTTLÉ (leading-edge, même rythme que la persistance) : pousse tout de
+ * suite le lot courant si aucun timer en cours, puis bloque 5 s ; toute liq arrivée pendant le
+ * blocage est repoussée à un unique POST en fin de fenêtre. Collapse les cascades en 1 lot.
+ */
+function planifierPush(): void {
+  if (symboleAbonne === null) return;
+  if (pushTimer !== null) {
+    pushPending = true;
+    return;
+  }
+  flushPush(symboleAbonne);
+  pushTimer = setTimeout(() => {
+    pushTimer = null;
+    if (pushPending) {
+      pushPending = false;
+      planifierPush();
+    }
+  }, SAVE_THROTTLE_MS);
+}
+
 /** Traduit une liquidation persistée du daemon en événement chart. PURE (locale). */
 function depuisDaemon(d: LiqDaemon): LiqEvent {
   return { time: d.t, side: d.side, price: d.price, qty: d.qty, usd: d.usd, venue: d.venue };
@@ -362,11 +413,11 @@ function ajouterLive(l: Liquidation): void {
   if (evenements.length > MAX_EVENTS) evenements.splice(0, evenements.length - MAX_EVENTS);
   publier();
   planifierSauvegarde();
-  // Dual-write best-effort : on ne pousse QUE le live (pas le seed Coinalyze) au daemon.
+  // Dual-write best-effort EN LOT : on n'accumule QUE le live (jamais le seed Coinalyze) et on
+  // pousse par fenêtre throttlée (cf. planifierPush) plutôt qu'un POST par liquidation.
   if (symboleAbonne !== null) {
-    void liquidationsPush(symboleAbonne, [
-      { t: ev.time, venue: ev.venue, side: ev.side, price: ev.price, qty: ev.qty, usd: ev.usd },
-    ]);
+    enAttentePush.push(ev);
+    planifierPush();
   }
 }
 
@@ -380,7 +431,11 @@ function sync(): void {
       abonnement();
       abonnement = null;
     }
-    if (symboleAbonne !== null) flushSauvegarde(symboleAbonne);
+    // Flush du lot daemon (live en attente) AVANT de perdre le symbole abonné, puis persistance.
+    if (symboleAbonne !== null) {
+      flushPush(symboleAbonne);
+      flushSauvegarde(symboleAbonne);
+    }
     symboleAbonne = null;
     evenements = [];
     publier();
@@ -388,7 +443,10 @@ function sync(): void {
   }
   if (symboleAbonne !== symbol) {
     if (abonnement) abonnement();
-    if (symboleAbonne !== null) flushSauvegarde(symboleAbonne);
+    if (symboleAbonne !== null) {
+      flushPush(symboleAbonne);
+      flushSauvegarde(symboleAbonne);
+    }
     symboleAbonne = symbol;
     // Restaure les événements persistés v2 du symbole (survit aux reloads / changements de
     // symbole) ; les liquidations live s'y ajoutent. Vide si jamais accumulé.

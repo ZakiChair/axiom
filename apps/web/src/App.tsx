@@ -36,6 +36,7 @@ import { commandes as derivChartCommands } from "./store/derivatives-chart";
 // Marqueurs de trades/notes SUR le chart : l'import démarre aussi le contrôleur
 // (effet de bord d'import).
 import { commandes as marksCommands } from "./chart/tradeMarkers";
+import { commandes as liqMarksCommands } from "./chart/liquidationMarkers";
 // Contrôleur marqueurs éco (effet de bord) — indépendant du lazy-load de EcoWindow.
 import "./chart/ecoMarkers";
 import { commandes as domCommands } from "./store/dom-ui";
@@ -99,6 +100,7 @@ enregistrerCommandes([
   // Sous-panes OI/funding SUR le chart + marqueurs trades/notes.
   ...derivChartCommands,
   ...marksCommands,
+  ...liqMarksCommands,
   // Fenêtres Phase 4 (DOM/BT/REPLAY) + grille multi-chart.
   ...domCommands,
   ...backtestCommands,

@@ -10,7 +10,8 @@
  * renderer. Ici, uniquement du stockage à froid (kv/candles) et la sonde /health.
  *
  * Origine :
- *  - DEV  : le front tourne sous Vite (5173), le daemon sur un autre port → 127.0.0.1:8787.
+ *  - DEV  : `VITE_AXIOMD_URL`, injectée par `axiom-up.sh` depuis AXIOMD_PORT
+ *           (repli sûr : http://127.0.0.1:8787).
  *  - PROD : le front est SERVI PAR le daemon → même origine (window.location.origin).
  */
 import type { Candle } from "@axiom/types";
@@ -22,15 +23,87 @@ const SOURCE_SANTE = "axiomd";
 const TIMEOUT_SONDE_MS = 800;
 /** Fraîcheur du résultat mémoïsé de detectDaemon (ms). */
 const TTL_SONDE_MS = 60_000;
+const AXIOMD_API_VERSION = 1;
+export const URL_DAEMON_DEV_DEFAUT = "http://127.0.0.1:8787";
+
+export const AXIOMD_CAPABILITIES = [
+  "kv",
+  "candles",
+  "alerts",
+  "replay",
+  "globe",
+  "snapshots",
+  "proxy",
+] as const;
+export type AxiomCapability = (typeof AXIOMD_CAPABILITIES)[number];
+
+export interface AxiomHealth {
+  ok: true;
+  service: "axiomd";
+  apiVersion: number;
+  capabilities: string[];
+  version: string;
+}
+
+/** Valide l'identité du service avant de lui confier l'état local de l'utilisateur. */
+export function isAxiomHealth(
+  payload: unknown,
+  capabilitiesRequises: readonly AxiomCapability[] = [],
+): payload is AxiomHealth {
+  if (!payload || typeof payload !== "object") return false;
+  const value = payload as Record<string, unknown>;
+  const capabilities = value.capabilities;
+  return (
+    value.ok === true &&
+    value.service === "axiomd" &&
+    value.apiVersion === AXIOMD_API_VERSION &&
+    typeof value.version === "string" &&
+    Array.isArray(capabilities) &&
+    capabilities.every((capability) => typeof capability === "string") &&
+    capabilitiesRequises.every((capability) => capabilities.includes(capability))
+  );
+}
+
+/**
+ * Accepte seulement le daemon HTTP loopback attendu. Une variable Vite erronée ou
+ * hostile ne doit jamais transformer les dual-writes locaux en envoi réseau externe.
+ */
+export function normaliserUrlDaemonDev(candidate: unknown): string {
+  if (typeof candidate !== "string" || candidate.trim().length === 0) return URL_DAEMON_DEV_DEFAUT;
+  try {
+    const url = new URL(candidate.trim());
+    const hoteLocal = url.hostname === "127.0.0.1" || url.hostname === "localhost";
+    const port = url.port === "" ? 80 : Number(url.port);
+    if (
+      url.protocol !== "http:" ||
+      !hoteLocal ||
+      url.username !== "" ||
+      url.password !== "" ||
+      url.pathname !== "/" ||
+      url.search !== "" ||
+      url.hash !== "" ||
+      !Number.isInteger(port) ||
+      port < 1 ||
+      port > 65_535
+    ) {
+      return URL_DAEMON_DEV_DEFAUT;
+    }
+    return url.origin;
+  } catch {
+    return URL_DAEMON_DEV_DEFAUT;
+  }
+}
+
+const URL_DAEMON_DEV = normaliserUrlDaemonDev(import.meta.env.VITE_AXIOMD_URL);
 
 /** Base d'URL du daemon selon l'environnement (calcul paresseux, robuste hors navigateur). */
 function baseDaemon(): string {
-  if (import.meta.env.DEV) return "http://127.0.0.1:8787";
+  if (import.meta.env.DEV) return URL_DAEMON_DEV;
   if (typeof window !== "undefined") return window.location.origin;
-  return "http://127.0.0.1:8787";
+  return URL_DAEMON_DEV_DEFAUT;
 }
 
-/** URL absolue d'un chemin daemon (DEV : cross-origin 127.0.0.1:8787 ; PROD : same-origin). */
+/** URL absolue d'un chemin daemon (DEV : URL loopback configurée ; PROD : same-origin). */
 export function urlDaemon(chemin: string): string {
   return `${baseDaemon()}${chemin}`;
 }
@@ -40,6 +113,7 @@ export function urlDaemon(chemin: string): string {
 /** Dernier résultat de sonde ; `null` = jamais sondé (→ health silencieux). */
 let etatDaemon: boolean | null = null;
 let dernierSondageTs = 0;
+let capabilitiesDaemon: ReadonlySet<string> = new Set();
 /** Devient vrai à la 1re détection réussie : conditionne l'émission de « closed ». */
 let dejaDetecte = false;
 let intervalDemarre = false;
@@ -49,15 +123,26 @@ async function sonder(): Promise<boolean> {
   const ctrl = new AbortController();
   const minuteur = setTimeout(() => ctrl.abort(), TIMEOUT_SONDE_MS);
   let ok = false;
+  let health: AxiomHealth | null = null;
   try {
     const res = await fetch(baseDaemon() + "/health", { signal: ctrl.signal });
-    ok = res.ok;
+    if (res.ok) {
+      const contentType = res.headers.get("content-type") ?? "";
+      if (contentType.toLowerCase().includes("application/json")) {
+        const payload = (await res.json()) as unknown;
+        if (isAxiomHealth(payload)) {
+          health = payload;
+          ok = true;
+        }
+      }
+    }
   } catch {
     ok = false;
   } finally {
     clearTimeout(minuteur);
   }
   etatDaemon = ok;
+  capabilitiesDaemon = health ? new Set(health.capabilities) : new Set();
   dernierSondageTs = Date.now();
   if (ok) {
     dejaDetecte = true;
@@ -74,24 +159,34 @@ async function sonder(): Promise<boolean> {
  * Au premier appel, démarre aussi une re-sonde périodique (60 s) pour garder l'état
  * frais côté écritures (dual-write) même sans appel explicite.
  */
-export async function detectDaemon(): Promise<boolean> {
-  if (etatDaemon !== null && Date.now() - dernierSondageTs < TTL_SONDE_MS) return etatDaemon;
-  if (!intervalDemarre && typeof setInterval !== "undefined") {
-    intervalDemarre = true;
-    const id: ReturnType<typeof setInterval> = setInterval(() => void sonder(), TTL_SONDE_MS);
-    // Ne pas retenir la boucle d'évènements (Node) — no-op côté navigateur.
-    (id as unknown as { unref?: () => void }).unref?.();
+export async function detectDaemon(
+  exigence?: AxiomCapability | readonly AxiomCapability[],
+): Promise<boolean> {
+  let present: boolean;
+  if (etatDaemon !== null && Date.now() - dernierSondageTs < TTL_SONDE_MS) {
+    present = etatDaemon;
+  } else {
+    if (!intervalDemarre && typeof setInterval !== "undefined") {
+      intervalDemarre = true;
+      const id: ReturnType<typeof setInterval> = setInterval(() => void sonder(), TTL_SONDE_MS);
+      // Ne pas retenir la boucle d'évènements (Node) — no-op côté navigateur.
+      (id as unknown as { unref?: () => void }).unref?.();
+    }
+    present = await sonder();
   }
-  return sonder();
+  if (!present || exigence === undefined) return present;
+  const requises = typeof exigence === "string" ? [exigence] : exigence;
+  return requises.every((capability) => capabilitiesDaemon.has(capability));
 }
 
-/**
- * État connu SANS déclencher de sonde réseau (synchrone). Utilisé par le dual-write
- * pour décider d'un `kvPut` sans jamais initier de requête (crucial : garde les tests
- * unitaires 100 % hors-réseau tant que `detectDaemon` n'a pas été appelé).
- */
+/** État synchrone d'une fonctionnalité, sans déclencher de nouvelle sonde. */
+export function daemonSupporte(capability: AxiomCapability): boolean {
+  return etatDaemon === true && capabilitiesDaemon.has(capability);
+}
+
+/** Le dual-write KV est prêt seulement si le daemon annonce explicitement `kv`. */
 export function daemonPret(): boolean {
-  return etatDaemon === true;
+  return daemonSupporte("kv");
 }
 
 // ─────────────────────────── KV ───────────────────────────
@@ -176,6 +271,7 @@ function urlSnapshots(): string {
  * (la section Réglages affiche alors l'état indisponible). Échec silencieux.
  */
 export async function listerSnapshots(): Promise<MetaSnapshot[] | null> {
+  if (!(await detectDaemon("snapshots"))) return null;
   try {
     const res = await fetch(urlSnapshots());
     if (!res.ok) return null;
@@ -189,6 +285,7 @@ export async function listerSnapshots(): Promise<MetaSnapshot[] | null> {
 
 /** Fige un snapshot immédiat ; renvoie sa méta, ou `null` en cas d'échec / daemon absent. */
 export async function creerSnapshot(): Promise<MetaSnapshot | null> {
+  if (!(await detectDaemon("snapshots"))) return null;
   try {
     const res = await fetch(urlSnapshots(), { method: "POST" });
     if (!res.ok) return null;
@@ -209,6 +306,14 @@ export async function creerSnapshot(): Promise<MetaSnapshot | null> {
  * ré-appliqués par la restauration.
  */
 const NS_PERSIST = "persist";
+/** Seules les clés réellement miroitée par store/persist peuvent être réappliquées. */
+const RESTORABLE_PERSIST_KEYS: ReadonlySet<string> = new Set([
+  "axiom:chartState:v1",
+  "axiom:watchlist:v1",
+  "axiom:sessionUi:v1",
+  "axiom:windowManager:v1",
+  "axiom:synthetic:recents:v1",
+]);
 
 /** Entrée restaurée renvoyée par l'endpoint restore (valeur déjà JSON-parsée). */
 interface EntreeRestauree {
@@ -231,6 +336,7 @@ interface EntreeRestauree {
  * L'appelant doit ensuite inviter à recharger la page (les stores hydratent au démarrage).
  */
 export async function restaurerSnapshot(id: number): Promise<boolean> {
+  if (!(await detectDaemon("snapshots"))) return false;
   try {
     const res = await fetch(`${urlSnapshots()}/${encodeURIComponent(String(id))}/restore`, {
       method: "POST",
@@ -241,7 +347,12 @@ export async function restaurerSnapshot(id: number): Promise<boolean> {
       for (const e of corps.entrees) {
         if (!e || typeof e !== "object") continue;
         const { namespace, cle, valeur } = e as EntreeRestauree;
-        if (namespace === NS_PERSIST && typeof cle === "string" && typeof valeur === "string") {
+        if (
+          namespace === NS_PERSIST &&
+          typeof cle === "string" &&
+          RESTORABLE_PERSIST_KEYS.has(cle) &&
+          typeof valeur === "string"
+        ) {
           try {
             localStorage.setItem(cle, valeur);
           } catch {

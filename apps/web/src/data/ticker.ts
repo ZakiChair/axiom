@@ -70,6 +70,20 @@ export function resolveTickerSource(symbol: string, explicit?: WatchlistSource):
   return isTradfiSymbol(symbol) ? "twelvedata" : "binance";
 }
 
+/** Sources disposant réellement d'un flux ticker dans ce module. */
+const TICKER_SOURCES: ReadonlySet<string> = new Set<WatchlistSource>([
+  "binance",
+  "kraken",
+  "coinbase",
+  "mexc",
+  "twelvedata",
+]);
+
+/** Garde runtime utilisée par les consommateurs qui partent d'un `ExchangeId` plus large. */
+export function isTickerSource(source: string): source is WatchlistSource {
+  return TICKER_SOURCES.has(source);
+}
+
 /** Nature de marché d'un actif tradfi (heures d'ouverture distinctes). */
 export type TradfiMarketKind = "crypto" | "stock" | "forex";
 
@@ -362,18 +376,20 @@ function pollTradfiQuotes(symbols: string[], cb: (update: TickerUpdate) => void)
   );
 }
 
-/**
- * Souscrit aux tickers des `symbols`, en ROUTANT chacun vers sa source (résolue depuis le
- * store watchlist ou inférée). `cb` est invoquée à chaque mise à jour. Renvoie une fonction
- * de désabonnement qui stoppe tous les flux.
- */
-export function subscribeTickers(
-  symbols: string[],
-  cb: (update: TickerUpdate) => void
-): Unsubscribe {
-  if (symbols.length === 0) return () => {};
+export interface SubscribeTickersOptions {
+  /**
+   * Force tous les symboles de CET abonnement vers cette source. Sans valeur, le routage
+   * historique reste inchangé : provenance watchlist par symbole, puis inférence.
+   */
+  source?: WatchlistSource;
+}
 
-  const explicit = watchlistStore.getState().sources;
+/** Fabrique les groupes de routage sans effet de bord réseau (PURE, testée). */
+export function groupTickerSymbolsBySource(
+  symbols: readonly string[],
+  sourcesBySymbol: Readonly<Record<string, WatchlistSource>>,
+  forcedSource?: WatchlistSource,
+): Record<WatchlistSource, string[]> {
   const groups: Record<WatchlistSource, string[]> = {
     binance: [],
     kraken: [],
@@ -381,9 +397,27 @@ export function subscribeTickers(
     mexc: [],
     twelvedata: [],
   };
-  for (const s of symbols) {
-    groups[resolveTickerSource(s, explicit[s])].push(s);
+  for (const symbol of symbols) {
+    groups[resolveTickerSource(symbol, forcedSource ?? sourcesBySymbol[symbol])].push(symbol);
   }
+  return groups;
+}
+
+/**
+ * Souscrit aux tickers des `symbols`. Par défaut, chacun est routé depuis sa provenance
+ * watchlist ou par inférence. `options.source` permet à un consommateur lié à un marché
+ * précis (le bandeau du chart) de forcer exactement cette source sans dépendre de la watchlist.
+ * `cb` est invoquée à chaque mise à jour. Renvoie le désabonnement de tous les flux.
+ */
+export function subscribeTickers(
+  symbols: string[],
+  cb: (update: TickerUpdate) => void,
+  options: SubscribeTickersOptions = {},
+): Unsubscribe {
+  if (symbols.length === 0) return () => {};
+
+  const explicit = watchlistStore.getState().sources;
+  const groups = groupTickerSymbolsBySource(symbols, explicit, options.source);
 
   // Binance : WS combiné. On écarte tout symbole à « / » qui casserait l'URL du stream.
   const binanceWs = groups.binance.filter((s) => !s.includes("/"));

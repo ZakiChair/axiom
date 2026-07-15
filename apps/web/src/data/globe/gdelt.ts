@@ -75,7 +75,7 @@ export function parseZone(json: unknown): EvenementDetail[] | null {
 
 /** Charge la fenêtre agrégée. null = daemon absent/en échec (dégradation silencieuse). */
 export async function chargerEvenements(signal?: AbortSignal): Promise<EtatEvenements | null> {
-  if (!(await detectDaemon())) return null;
+  if (!(await detectDaemon("globe"))) return null;
   try {
     const res = await fetch(urlDaemon("/globe/evenements?fenetreH=24"), {
       signal,
@@ -92,7 +92,7 @@ export async function chargerEvenements(signal?: AbortSignal): Promise<EtatEvene
 
 /** Charge le détail d'une cellule (clic). null = daemon absent/en échec. */
 export async function chargerZoneEvenements(lat: number, lon: number, signal?: AbortSignal): Promise<EvenementDetail[] | null> {
-  if (!(await detectDaemon())) return null;
+  if (!(await detectDaemon("globe"))) return null;
   try {
     const res = await fetch(urlDaemon(`/globe/evenements/zone?lat=${lat}&lon=${lon}&fenetreH=24`), { signal });
     if (!res.ok) return null;

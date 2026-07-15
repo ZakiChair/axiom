@@ -9,7 +9,9 @@ import type { Candle } from "@axiom/types";
 import {
   classifyTradfi,
   computeBarStats,
+  groupTickerSymbolsBySource,
   isMarketOpen,
+  isTickerSource,
   isTradfiSymbol,
   resolveTickerSource,
 } from "./ticker";
@@ -56,6 +58,43 @@ describe("resolveTickerSource", () => {
     // "XBT/USD" non tradfi → binance (puis écarté du WS à cause du slash, en aval).
     expect(resolveTickerSource("XBT/USD")).toBe("binance");
   });
+});
+
+describe("routage explicite d'un abonnement ticker", () => {
+  it("reconnaît exactement les cinq sources ticker câblées", () => {
+    for (const source of ["binance", "kraken", "coinbase", "mexc", "twelvedata"]) {
+      expect(isTickerSource(source)).toBe(true);
+    }
+    expect(isTickerSource("synthetic")).toBe(false);
+    expect(isTickerSource("bybit")).toBe(false);
+  });
+
+  it("préserve le routage historique watchlist par symbole sans source forcée", () => {
+    const groups = groupTickerSymbolsBySource(
+      ["BTCUSD", "SPY", "ETHUSDT"],
+      { BTCUSD: "kraken" },
+    );
+
+    expect(groups.kraken).toEqual(["BTCUSD"]);
+    expect(groups.twelvedata).toEqual(["SPY"]); // inférence tradfi inchangée
+    expect(groups.binance).toEqual(["ETHUSDT"]); // inférence crypto inchangée
+  });
+
+  it.each(["binance", "kraken", "coinbase", "mexc", "twelvedata"] as const)(
+    "force exactement la source %s même si la watchlist ou l'inférence divergent",
+    (source) => {
+      const groups = groupTickerSymbolsBySource(
+        ["BTCUSD", "SPY"],
+        { BTCUSD: "kraken", SPY: "binance" },
+        source,
+      );
+
+      expect(groups[source]).toEqual(["BTCUSD", "SPY"]);
+      for (const [routedSource, symbols] of Object.entries(groups)) {
+        if (routedSource !== source) expect(symbols).toEqual([]);
+      }
+    },
+  );
 });
 
 describe("classifyTradfi", () => {

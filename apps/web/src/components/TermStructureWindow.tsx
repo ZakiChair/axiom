@@ -286,7 +286,7 @@ export function TermStructureWindow() {
     const charger = async () => {
       setLoading(true);
       // Sonde le daemon (mémoïsée 60 s) pour savoir si les instantanés /kv sont disponibles.
-      await detectDaemon();
+      await detectDaemon("kv");
       const resultat: Record<Actif, CourbeActif> = {
         BTC: { live: [], j1: null, j7: null },
         ETH: { live: [], j1: null, j7: null },

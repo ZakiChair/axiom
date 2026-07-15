@@ -7,11 +7,25 @@
  * `../data/ticker` est stubé : les helpers testés n'en dépendent pas, et le stub évite de
  * charger toute la chaîne réseau (WS/poll) à l'import du module component en environnement Node.
  */
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import type { Candle } from "@axiom/types";
-import { nextCloseTs, rolling24h } from "./SymbolBanner";
+import { nextCloseTs, rolling24h, subscribeSymbolBannerTicker } from "./SymbolBanner";
 
-vi.mock("../data/ticker", () => ({ subscribeTickers: () => () => {} }));
+const { subscribeTickersMock } = vi.hoisted(() => ({
+  subscribeTickersMock: vi.fn(() => () => {}),
+}));
+
+vi.mock("../data/ticker", () => ({
+  classifyTradfi: () => "stock",
+  isMarketOpen: () => true,
+  isTickerSource: (source: string) =>
+    ["binance", "kraken", "coinbase", "mexc", "twelvedata"].includes(source),
+  subscribeTickers: subscribeTickersMock,
+}));
+
+beforeEach(() => {
+  subscribeTickersMock.mockClear();
+});
 
 /** Fabrique une bougie minimale (seuls time/high/low/volume comptent pour rolling24h). */
 function candle(time: number, high: number, low: number, volume: number): Candle {
@@ -56,5 +70,24 @@ describe("rolling24h", () => {
     const ref = 100 * HOUR;
     expect(rolling24h([], ref)).toBeNull();
     expect(rolling24h([candle(ref - 30 * HOUR, 10, 1, 5)], ref)).toBeNull();
+  });
+});
+
+describe("subscribeSymbolBannerTicker", () => {
+  it.each(["binance", "kraken", "coinbase", "mexc", "twelvedata"] as const)(
+    "force la source affichée %s sans consulter la provenance watchlist",
+    (exchange) => {
+      const cb = vi.fn();
+
+      subscribeSymbolBannerTicker(exchange, "BTCUSD", cb);
+
+      expect(subscribeTickersMock).toHaveBeenCalledWith(["BTCUSD"], cb, { source: exchange });
+    },
+  );
+
+  it("ne crée aucun ticker pour une série synthétique", () => {
+    subscribeSymbolBannerTicker("synthetic", "binance:BTCUSDT|/|twelvedata:GLD", vi.fn());
+
+    expect(subscribeTickersMock).not.toHaveBeenCalled();
   });
 });

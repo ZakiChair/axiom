@@ -12,9 +12,15 @@
  */
 import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
-import type { Candle, Timeframe } from "@axiom/types";
+import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { marketStore } from "../store/market";
-import { classifyTradfi, isMarketOpen, subscribeTickers } from "../data/ticker";
+import {
+  classifyTradfi,
+  isMarketOpen,
+  isTickerSource,
+  subscribeTickers,
+  type TickerUpdate,
+} from "../data/ticker";
 import { formatSyntheticLabel, parseSyntheticSymbol } from "../data/synthetic";
 import { formatCompact, formatCountdown, formatPct, formatPrice } from "../lib/format";
 
@@ -77,6 +83,16 @@ export function rolling24h(candles: Candle[], referenceMs: number): Rolling24h |
     count++;
   }
   return count === 0 ? null : { high, low, volume };
+}
+
+/** Souscription ticker du bandeau, explicitement liée à la source du marché affiché. */
+export function subscribeSymbolBannerTicker(
+  exchange: ExchangeId,
+  symbol: string,
+  cb: (update: TickerUpdate) => void,
+): Unsubscribe {
+  if (!isTickerSource(exchange)) return () => {};
+  return subscribeTickers([symbol], cb, { source: exchange });
 }
 
 export function SymbolBanner() {
@@ -148,13 +164,11 @@ export function SymbolBanner() {
     // Variation 24 h : ticker existant (routé par source dans data/ticker.ts).
     // Une série synthétique n'a pas de ticker natif ; sa variation viendra d'une
     // dérivation dédiée plus tard, pas du flux d'une jambe arbitraire.
-    const unsubTicker = exchange === "synthetic"
-      ? () => {}
-      : subscribeTickers([symbol], (u) => {
-          changePct = u.changePercent;
-          if (changeRef.current) changeRef.current.textContent = formatPct(u.changePercent);
-          applyColor();
-        });
+    const unsubTicker = subscribeSymbolBannerTicker(exchange, symbol, (u) => {
+      changePct = u.changePercent;
+      if (changeRef.current) changeRef.current.textContent = formatPct(u.changePercent);
+      applyColor();
+    });
 
     // Prix / H-L / volume : chaque tick du buffer marché (haute fréquence, DOM impératif).
     const unsubMarket = marketStore.subscribe(updateFromCandles);
@@ -167,7 +181,9 @@ export function SymbolBanner() {
       unsubMarket();
       window.clearInterval(timer);
     };
-  }, [symbol, timeframe]);
+  // `exchange` est une partie de l'identité : un changement de source à symbole égal doit
+  // aussi remplacer l'abonnement ticker, sinon la variation 24 h resterait celle de l'ancienne.
+  }, [exchange, symbol, timeframe]);
 
   return (
     <div className="pointer-events-none absolute left-2 top-2 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border bg-surface/80 px-2.5 py-1 text-xs tabular-nums text-text-dim backdrop-blur-sm">

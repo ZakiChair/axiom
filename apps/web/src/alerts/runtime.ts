@@ -31,7 +31,7 @@ import { alertsStore, pousserDefsDaemon } from "../store/alerts";
 import { cvdDivergenceStore } from "../store/cvd-divergence";
 import { orderflowStore } from "../store/orderflow";
 import { subscribeTickers, type TickerUpdate } from "../data/ticker";
-import { daemonPret, detectDaemon } from "../data/daemon";
+import { daemonSupporte, detectDaemon, urlDaemon } from "../data/daemon";
 import { coinalyzeProvider } from "../data/coinalyze";
 import { extUrl } from "../data/extapi";
 
@@ -336,22 +336,11 @@ export function demarrerAlertes(): Unsubscribe {
 /** Intervalle d'émission du heartbeat (ms). */
 const HEARTBEAT_MS = 30_000;
 
-/**
- * Base d'URL du daemon (miroir de data/daemon.ts, non exporté là-bas) :
- *  - DEV  : front sous Vite (5173), daemon sur 8787 → 127.0.0.1:8787 ;
- *  - PROD : front servi par le daemon → même origine.
- */
-function baseDaemon(): string {
-  if (import.meta.env.DEV) return "http://127.0.0.1:8787";
-  if (typeof window !== "undefined") return window.location.origin;
-  return "http://127.0.0.1:8787";
-}
-
 /** Envoie un heartbeat (best-effort, silencieux) si le daemon est détecté présent. */
 function envoyerHeartbeat(): void {
-  if (!daemonPret()) return;
+  if (!daemonSupporte("alerts")) return;
   try {
-    void fetch(baseDaemon() + "/heartbeat", { method: "POST" }).catch(() => {});
+    void fetch(urlDaemon("/heartbeat"), { method: "POST" }).catch(() => {});
   } catch {
     /* best-effort */
   }
@@ -363,7 +352,7 @@ function envoyerHeartbeat(): void {
  */
 function demarrerHeartbeat(): Unsubscribe {
   // Détection (mémoïsée) : au succès, on sème les défs courantes et on bat le cœur.
-  void detectDaemon().then((present) => {
+  void detectDaemon(["alerts", "kv"]).then((present) => {
     if (!present) return;
     pousserDefsDaemon();
     envoyerHeartbeat();

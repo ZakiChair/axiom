@@ -23,7 +23,7 @@
  */
 import type { Candle, Timeframe } from "@axiom/types";
 import { binanceAdapter } from "./binance";
-import { candlesGet, candlesPush, daemonPret, detectDaemon } from "./daemon";
+import { candlesGet, candlesPush, daemonSupporte, detectDaemon } from "./daemon";
 
 /** Plafond dur de bougies accumulées (protège mémoire + temps de run). */
 export const CAP_BOUGIES = 50_000;
@@ -110,7 +110,7 @@ export async function accumulerKlines(
 
   // 1) Cache daemon (best-effort). Peut couvrir tout ou partie de la plage.
   let cache: Candle[] = [];
-  if (await detectDaemon()) {
+  if (await detectDaemon("candles")) {
     const c = await candlesGet(SOURCE, symbol, tf, { depuis, jusqua, limite: CAP_BOUGIES });
     if (c) cache = c;
   }
@@ -152,7 +152,7 @@ export async function accumulerKlines(
   }
 
   // 3) Repousser les bougies fraîches au daemon (best-effort, ne bloque pas).
-  if (daemonPret() && nouvelles.length > 0) {
+  if (daemonSupporte("candles") && nouvelles.length > 0) {
     void candlesPush(SOURCE, symbol, tf, nouvelles);
   }
 

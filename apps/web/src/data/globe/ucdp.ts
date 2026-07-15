@@ -46,7 +46,7 @@ export function invaliderMemoUcdp(): void {
  */
 export async function chargerConflitsUcdp(signal?: AbortSignal): Promise<EtatConflitsUcdp | null> {
   if (memo !== null) return memo;
-  if (!(await detectDaemon())) return null;
+  if (!(await detectDaemon("globe"))) return null;
   try {
     const res = await fetch(urlDaemon("/globe/conflits-ucdp"), {
       signal,

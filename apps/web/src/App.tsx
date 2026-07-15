@@ -53,6 +53,7 @@ import { FloatingWindow } from "./components/FloatingWindow";
 import { TaskbarMinimized } from "./components/TaskbarMinimized";
 import { SnapOverlay } from "./components/SnapOverlay";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { WINDOW_REGISTRY, windowManagerStore } from "./store/windowManager";
 
 // ─────────────────────────── Commandes de disposition multi-chart (Phase 4) ───────────────────────────
@@ -159,6 +160,9 @@ const WINDOW_COMPONENTS: Record<string, LazyExoticComponent<FenetreComp>> = {
   fund: lazy(() => import("./components/FundWindow").then((m) => ({ default: m.FundWindow }))),
   brief: lazy(() => import("./components/BriefWindow").then((m) => ({ default: m.BriefWindow }))),
   globe: lazy(() => import("./components/GlobeWindow").then((m) => ({ default: m.GlobeWindow }))),
+  stablecoins: lazy(() =>
+    import("./components/StablecoinsWindow").then((m) => ({ default: m.StablecoinsWindow })),
+  ),
 };
 
 /** Placeholder discret pendant le chargement du chunk de la fenêtre. */
@@ -217,8 +221,10 @@ export function App() {
         {/* Barre d'outils de dessin verticale, à gauche du graphe. */}
         {!plein && <DrawingToolbar />}
         {/* min-w-0 : la grille de graphes peut rétrécir face aux panneaux latéraux. */}
-        <div ref={chartAreaRef} className="min-w-0 flex-1">
-          <ChartGrid />
+        <div ref={chartAreaRef} className="relative isolate z-0 min-w-0 flex-1">
+          <ErrorBoundary scope="Graphiques">
+            <ChartGrid />
+          </ErrorBoundary>
         </div>
         {/* Colonne droite : en-tête (accès Réglages) + panneaux empilés, tous harmonisés
             via SidebarSection. Ordre : Watchlist, Alertes, Macro, Comparer, Santé. */}
@@ -263,9 +269,11 @@ export function App() {
         if (!Contenu) return null;
         return (
           <FloatingWindow key={entry.id} id={entry.id} title={entry.title} mnemonic={entry.mnemonic}>
-            <Suspense fallback={<FenetreFallback />}>
-              <Contenu />
-            </Suspense>
+            <ErrorBoundary scope={entry.title} compact recovery="reload">
+              <Suspense fallback={<FenetreFallback />}>
+                <Contenu />
+              </Suspense>
+            </ErrorBoundary>
           </FloatingWindow>
         );
       })}

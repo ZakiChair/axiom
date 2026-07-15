@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { WebGLSyncSpike } from "./spike/WebGLSyncSpike";
 import { enablePersistence, hydrateStores } from "./store/persist";
 import { startMacroHistoryPolling } from "./store/macroHistory";
@@ -28,5 +29,9 @@ if (!rootElement) throw new Error("Élément #root introuvable dans index.html")
 const isSpike = window.location.hash === "#spike";
 
 createRoot(rootElement).render(
-  <StrictMode>{isSpike ? <WebGLSyncSpike /> : <App />}</StrictMode>
+  <StrictMode>
+    <ErrorBoundary scope="AXIOM">
+      {isSpike ? <WebGLSyncSpike /> : <App />}
+    </ErrorBoundary>
+  </StrictMode>
 );

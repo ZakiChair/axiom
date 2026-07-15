@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 121 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 124 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -93,6 +93,7 @@ import { atrPct } from "./volatility/atrPct";
 import { parkinsonVol } from "./volatility/parkinsonVol";
 import { choppiness } from "./volatility/choppiness";
 import { ulcerIndex } from "./volatility/ulcerIndex";
+import { hurst } from "./volatility/hurst";
 
 // — volume + orderflow (fichiers sous volume/, catégorie UI distincte) —
 import { adLine } from "./volume/adLine";
@@ -144,6 +145,8 @@ import { stablecoinSupply } from "./derivatives/stablecoinSupply";
 import { fundingApr } from "./derivatives/fundingApr";
 import { oiChange } from "./derivatives/oiChange";
 import { basisPct } from "./derivatives/basisPct";
+import { mvrvZScore } from "./derivatives/mvrvZScore";
+import { fundingNotional } from "./derivatives/fundingNotional";
 
 export const INDICATORS: IndicatorDef[] = [
   // trend
@@ -227,6 +230,7 @@ export const INDICATORS: IndicatorDef[] = [
   parkinsonVol,
   choppiness,
   ulcerIndex,
+  hurst,
   // volume (classique)
   adLine,
   anchoredVwap,
@@ -275,6 +279,8 @@ export const INDICATORS: IndicatorDef[] = [
   fundingApr,
   oiChange,
   basisPct,
+  mvrvZScore,
+  fundingNotional,
 ];
 
 export function getIndicator(id: string): IndicatorDef | undefined {

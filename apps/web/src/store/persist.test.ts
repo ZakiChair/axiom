@@ -19,6 +19,15 @@ vi.mock("../chart/Chart", async () => {
   return { priceScaleStore };
 });
 
+// persist.ts importe désormais les stores de bascule liquidations (heatmap / niveaux
+// estimés) pour les persister. Leur hydratation ré-active les singletons (subscribe →
+// sync) : on stub les flux WS / OI pour garder ce test hors-réseau (aucun WebSocket réel).
+vi.mock("../data/liquidations", () => ({ subscribeLiquidations: () => () => {} }));
+vi.mock("../data/coinalyze", () => ({
+  fetchLiquidationHistory: async () => [],
+  fetchOpenInterestHistoryBatch: async () => new Map(),
+}));
+
 import { defaultParams, indicatorsStore } from "./indicators";
 import { marketStore } from "./market";
 import { DEFAULT_WATCHLIST, watchlistStore } from "./watchlist";
@@ -29,6 +38,8 @@ import { revenueStore } from "./revenue";
 import { macroOverlayStore } from "./macro-overlays";
 import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore } from "../chart/Chart";
+import { liqMarksStore } from "../chart/liquidationMarkers";
+import { liqEstStore } from "../chart/liquidationEstimates";
 import {
   hydrateStores,
   saveSessionUi,
@@ -73,6 +84,9 @@ beforeEach(() => {
   orderflowStore.getState().setEnabled(false);
   volumeProfileStore.getState().setEnabled(false);
   revenueStore.getState().setEnabled(false);
+  // setActif(false) coupe aussi le singleton (clearInterval OI) laissé actif par un test précédent.
+  liqMarksStore.getState().setActif(false);
+  liqEstStore.getState().setActif(false);
   macroOverlayStore.getState().setEnabled([]);
   uiSectionsStore.getState().setAll({});
   priceScaleStore.getState().setType("normal");
@@ -265,6 +279,8 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
         orderflow: true,
         volumeProfile: false,
         revenue: true,
+        liqHeatmap: true,
+        liqEstimates: true,
         macroOverlays: ["m2", "stablecoins"],
         sections: { Alertes: true, Watchlist: false },
         priceScale: "log",
@@ -276,6 +292,8 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(orderflowStore.getState().enabled).toBe(true);
     expect(volumeProfileStore.getState().enabled).toBe(false);
     expect(revenueStore.getState().enabled).toBe(true);
+    expect(liqMarksStore.getState().actif).toBe(true);
+    expect(liqEstStore.getState().actif).toBe(true);
     expect(compareStore.getState().symbols.map((c) => c.symbol)).toEqual(["ETHUSDT", "SOLUSDT"]);
     // setEnabled réordonne selon MACRO_OVERLAYS = ["crypto-total","stablecoins","m2"].
     expect(macroOverlayStore.getState().enabled).toEqual(["stablecoins", "m2"]);
@@ -304,6 +322,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
 
   it("saveSessionUi sérialise l'instantané courant des stores de session", () => {
     orderflowStore.getState().setEnabled(true);
+    liqMarksStore.getState().setActif(true);
     priceScaleStore.getState().setType("percentage");
     uiSectionsStore.getState().setOpen("Macro", false);
 
@@ -311,6 +330,8 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
 
     const raw = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null");
     expect(raw.orderflow).toBe(true);
+    expect(raw.liqHeatmap).toBe(true);
+    expect(raw.liqEstimates).toBe(false);
     expect(raw.priceScale).toBe("percentage");
     expect(raw.sections).toEqual({ Macro: false });
   });

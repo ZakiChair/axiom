@@ -222,11 +222,14 @@ export function seedDepuisCoinalyze(
 export interface LiqMarksState {
   actif: boolean;
   basculer: () => void;
+  /** Force l'état ON/OFF (idempotent) — hydratation persistée (cf. store/persist.ts). */
+  setActif: (actif: boolean) => void;
 }
 
 export const liqMarksStore = createStore<LiqMarksState>((set, get) => ({
   actif: false,
   basculer: () => set({ actif: !get().actif }),
+  setActif: (actif) => set({ actif }),
 }));
 
 // ─────────────────────────── Store des événements (buffer borné, vanilla) ───────────────────────────

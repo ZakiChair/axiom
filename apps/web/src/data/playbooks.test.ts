@@ -5,6 +5,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   PLAYBOOKS,
+  applyChasseLiquidations,
   applyCvdEdge,
   applyFadeFunding,
   applyMacroFomc,
@@ -24,6 +25,8 @@ import { orderflowStore } from "../store/orderflow";
 import { volumeProfileStore } from "../store/volumeProfile";
 import { windowManagerStore } from "../store/windowManager";
 import { alertsStore } from "../store/alerts";
+import { liqMarksStore } from "../chart/liquidationMarkers";
+import { liqEstStore } from "../chart/liquidationEstimates";
 
 /** Seed localStorage pour les stores qui hydratent au chargement. */
 function installMockLocalStorage(): void {
@@ -44,11 +47,11 @@ function installMockLocalStorage(): void {
 installMockLocalStorage();
 
 describe("playbooksMeta — catalogue seed", () => {
-  it("expose exactement 6 playbooks avec ids uniques", () => {
+  it("expose exactement 7 playbooks avec ids uniques", () => {
     const meta = playbooksMeta();
-    expect(meta).toHaveLength(6);
+    expect(meta).toHaveLength(7);
     const ids = meta.map((m) => m.id);
-    expect(new Set(ids).size).toBe(6);
+    expect(new Set(ids).size).toBe(7);
     expect(ids).toEqual([
       "scalp-btc",
       "fade-funding",
@@ -56,6 +59,7 @@ describe("playbooksMeta — catalogue seed", () => {
       "macro-fomc",
       "risk-off",
       "options-deribit",
+      "chasse-liquidations",
     ]);
   });
 
@@ -67,6 +71,7 @@ describe("playbooksMeta — catalogue seed", () => {
     expect(byId["macro-fomc"]).toBe("PLAY-FOMC");
     expect(byId["risk-off"]).toBe("PLAY-RISK");
     expect(byId["options-deribit"]).toBe("PLAY-OPT");
+    expect(byId["chasse-liquidations"]).toBe("PLAY-LIQ");
   });
 
   it("chaque entrée a nom + description non vides", () => {
@@ -188,5 +193,17 @@ describe("apply* — composition stores (spies)", () => {
     expect(open).toHaveBeenCalledWith("options");
     expect(open).toHaveBeenCalledWith("termStructure");
     expect(open).toHaveBeenCalledWith("vol");
+  });
+
+  it("applyChasseLiquidations : fenêtre LIQ, heatmap + niveaux estimés, TF 15m", () => {
+    const open = vi.spyOn(windowManagerStore.getState(), "openWindow");
+    // Setters des singletons liq stubés : on vérifie l'appel sans ouvrir de vrai flux WS / timer OI.
+    const setLiqMarks = vi.spyOn(liqMarksStore.getState(), "setActif").mockImplementation(() => {});
+    const setLiqEst = vi.spyOn(liqEstStore.getState(), "setActif").mockImplementation(() => {});
+    applyChasseLiquidations();
+    expect(marketStore.getState().timeframe).toBe("15m");
+    expect(open).toHaveBeenCalledWith("liquidations");
+    expect(setLiqMarks).toHaveBeenCalledWith(true);
+    expect(setLiqEst).toHaveBeenCalledWith(true);
   });
 });

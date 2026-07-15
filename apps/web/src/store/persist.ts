@@ -3,7 +3,8 @@
  *  - le `ChartState` (symbole, source, timeframe, indicateurs actifs + params) ;
  *  - la watchlist (GROUPES nommés, onglet actif, sources par symbole) ;
  *  - l'état de SESSION jusqu'ici volatil (comparaison, toggles orderflow / profil de
- *    volume / revenus, overlays macro, sections repliées de la sidebar, échelle de l'axe).
+ *    volume / revenus / liquidations, overlays macro, sections repliées de la sidebar,
+ *    échelle de l'axe).
  *
  * Wiring (cf. main.tsx) : `hydrateStores()` AVANT le rendu (les stores prennent la
  * valeur persistée), puis `enablePersistence()` qui sauvegarde sur changement.
@@ -56,6 +57,8 @@ import { revenueStore } from "./revenue";
 import { macroOverlayStore, MACRO_OVERLAYS, type MacroOverlayId } from "./macro-overlays";
 import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
+import { liqMarksStore } from "../chart/liquidationMarkers";
+import { liqEstStore } from "../chart/liquidationEstimates";
 import { windowManagerStore, WINDOW_REGISTRY, type EtatFenetre } from "./windowManager";
 import { syntheticsStore } from "./synthetics";
 import { parseSyntheticSymbol } from "../data/synthetic";
@@ -356,6 +359,10 @@ interface PersistedSession {
   orderflow: boolean;
   volumeProfile: boolean;
   revenue: boolean;
+  /** Bascule heatmap liquidations exécutées (chart/liquidationMarkers). */
+  liqHeatmap: boolean;
+  /** Bascule niveaux de liquidation estimés (chart/liquidationEstimates). */
+  liqEstimates: boolean;
   macroOverlays: MacroOverlayId[];
   /** État replié des sections de la sidebar (clé = titre ; carte creuse). */
   sections: Record<string, boolean>;
@@ -369,6 +376,8 @@ function currentSession(): PersistedSession {
     orderflow: orderflowStore.getState().enabled,
     volumeProfile: volumeProfileStore.getState().enabled,
     revenue: revenueStore.getState().enabled,
+    liqHeatmap: liqMarksStore.getState().actif,
+    liqEstimates: liqEstStore.getState().actif,
     macroOverlays: macroOverlayStore.getState().enabled,
     sections: uiSectionsStore.getState().open,
     priceScale: priceScaleStore.getState().type,
@@ -396,6 +405,10 @@ function hydrateSession(): void {
   if (typeof p.orderflow === "boolean") orderflowStore.getState().setEnabled(p.orderflow);
   if (typeof p.volumeProfile === "boolean") volumeProfileStore.getState().setEnabled(p.volumeProfile);
   if (typeof p.revenue === "boolean") revenueStore.getState().setEnabled(p.revenue);
+  // Liquidations : `setActif` fait passer la bascule via son subscribe → le singleton
+  // (re)démarre l'abonnement WS / le fetch OI si `true` est restauré (cf. demarrer*).
+  if (typeof p.liqHeatmap === "boolean") liqMarksStore.getState().setActif(p.liqHeatmap);
+  if (typeof p.liqEstimates === "boolean") liqEstStore.getState().setActif(p.liqEstimates);
 
   if (Array.isArray(p.macroOverlays)) {
     // setEnabled filtre lui-même les ids inconnus (unique()) — on borne malgré tout ici.
@@ -497,6 +510,8 @@ export function enablePersistence(): void {
   orderflowStore.subscribe(saveSessionUi);
   volumeProfileStore.subscribe(saveSessionUi);
   revenueStore.subscribe(saveSessionUi);
+  liqMarksStore.subscribe(saveSessionUi);
+  liqEstStore.subscribe(saveSessionUi);
   macroOverlayStore.subscribe(saveSessionUi);
   uiSectionsStore.subscribe(saveSessionUi);
   priceScaleStore.subscribe(saveSessionUi);

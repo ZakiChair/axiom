@@ -9,6 +9,7 @@ import { marketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
 import { volumeProfileStore } from "../store/volumeProfile";
 import { revenueStore } from "../store/revenue";
+import { liqMarksStore } from "../chart/liquidationMarkers";
 import { derivativesUiStore } from "../store/derivatives-ui";
 // Bandeau ticker (pas une fenêtre Launchpad) + disposition grille.
 import { tickerBandStore } from "../store/tickerBand";
@@ -424,6 +425,8 @@ export function Toolbar() {
   const toggleVp = useStore(volumeProfileStore, (s) => s.toggle);
   const revenueEnabled = useStore(revenueStore, (s) => s.enabled);
   const toggleRevenue = useStore(revenueStore, (s) => s.toggle);
+  const liqActif = useStore(liqMarksStore, (s) => s.actif);
+  const toggleLiq = useStore(liqMarksStore, (s) => s.basculer);
   const openDerivatives = useStore(derivativesUiStore, (s) => s.openDerivatives);
   const priceScale = useStore(priceScaleStore, (s) => s.type);
   const setPriceScale = useStore(priceScaleStore, (s) => s.setType);
@@ -604,6 +607,30 @@ export function Toolbar() {
         }`}
       >
         Profil Vol
+      </button>
+
+      {/* Heatmap des liquidations RÉELLEMENT exécutées (flux perp Bybit/OKX) — même
+          bascule que ⌘K LIQMARK / la fenêtre LIQ (les niveaux ESTIMÉS restent via
+          ⌘K LIQEST). Grisé hors perp (tradfi / synthétique : aucun flux de liquidations). */}
+      <button
+        type="button"
+        onClick={toggleLiq}
+        aria-pressed={liqActif}
+        disabled={isTradfi || isSynthetic}
+        title={
+          isTradfi || isSynthetic
+            ? "Indisponible sur cette source (liquidations perp Bybit/OKX uniquement)"
+            : "Heatmap liquidations (exécutées) — L"
+        }
+        className={`rounded px-2 py-1 text-xs ${
+          isTradfi || isSynthetic
+            ? "cursor-not-allowed bg-neutral-900 text-neutral-700"
+            : liqActif
+              ? "bg-violet-500 text-accent-ink"
+              : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
+        }`}
+      >
+        Liq
       </button>
 
       {/* Revenus on-chain du protocole de l'actif (DefiLlama, sous-pane dédié).

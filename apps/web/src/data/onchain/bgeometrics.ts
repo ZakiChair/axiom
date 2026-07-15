@@ -31,7 +31,7 @@ export const BG_LIMITE_JOUR = 15;
 const FENETRE_JOURS = 120;
 
 /** Id interne d'une métrique BGeometrics (bitcoin-data.com, BTC uniquement). */
-export type BgMetriqueId = "mvrv" | "sopr" | "nupl" | "puell" | "reserveRisk";
+export type BgMetriqueId = "mvrv" | "sopr" | "nupl" | "puell" | "reserveRisk" | "realizedPrice";
 
 /** Définition d'une métrique BGeometrics (id interne, chemin API, champ JSON, libellé). */
 export interface DefMetriqueBg {
@@ -47,6 +47,9 @@ export const BG_SOPR: DefMetriqueBg = { id: "sopr", chemin: "sopr", champ: "sopr
 export const BG_NUPL: DefMetriqueBg = { id: "nupl", chemin: "nupl", champ: "nupl", libelle: "NUPL" };
 export const BG_PUELL: DefMetriqueBg = { id: "puell", chemin: "puell-multiple", champ: "puellMultiple", libelle: "Puell Multiple" };
 export const BG_RESERVE_RISK: DefMetriqueBg = { id: "reserveRisk", chemin: "reserve-risk", champ: "reserveRisk", libelle: "Reserve Risk" };
+// Realized Price : prix moyen d'acquisition on-chain (USD). Overlay prix — hors panneau
+// valorisation OnchainWindow (BG_METRIQUES), consommé uniquement par la couche aux.
+export const BG_REALIZED_PRICE: DefMetriqueBg = { id: "realizedPrice", chemin: "realized-price", champ: "realizedPrice", libelle: "Realized Price" };
 
 export const BG_METRIQUES: readonly DefMetriqueBg[] = [
   BG_MVRV,

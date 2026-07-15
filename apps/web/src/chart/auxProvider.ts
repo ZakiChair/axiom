@@ -30,8 +30,10 @@ import { coinalyzeProvider } from "../data/coinalyze";
 import { stablecoinsSupplyProvider } from "../data/macro/stablecoins";
 import { fetchCoinMetrics } from "../data/onchain/coinmetrics";
 import {
+  BG_MVRV,
   BG_NUPL,
   BG_PUELL,
+  BG_REALIZED_PRICE,
   BG_RESERVE_RISK,
   BG_SOPR,
   fetchBgeometricMetrique,
@@ -77,6 +79,8 @@ const TTL_MS: Record<AuxSeriesId, number> = {
   puell: 60 * 60_000,
   sopr: 60 * 60_000,
   reserveRisk: 60 * 60_000,
+  mvrvZ: 60 * 60_000, // vrai MVRV Z-Score (realized-cap, bitcoin-data)
+  realizedPrice: 60 * 60_000, // prix on-chain moyen (bitcoin-data)
   quarterlyBasis: 5 * 60_000, // basis future trimestriel (klines 1h Binance COIN-M)
 };
 /** Durée de mémorisation d'un échec de fetch (anti retry-tempête). */
@@ -198,10 +202,12 @@ async function rawFetch(id: AuxSeriesId, symbol: string): Promise<AuxPoint[]> {
     case "nupl":
     case "puell":
     case "sopr":
-    case "reserveRisk": {
-      // Métriques de cycle on-chain BTC (bitcoin-data.com). Réutilise le fetch dédié
-      // (cache 24h + quota partagés avec OnchainWindow → aucun appel réseau dupliqué).
-      // BTC uniquement : les autres actifs restent vides (dégradation gracieuse).
+    case "reserveRisk":
+    case "mvrvZ":
+    case "realizedPrice": {
+      // Métriques on-chain BTC (bitcoin-data.com). Réutilise le fetch dédié (cache 24h +
+      // quota partagés avec OnchainWindow → aucun appel réseau dupliqué). BTC uniquement :
+      // les autres actifs restent vides (dégradation gracieuse).
       if (symbolToAsset(symbol) !== "btc") return [];
       const def = BG_DEF_PAR_AUX[id];
       const r = await fetchBgeometricMetrique(def);
@@ -217,12 +223,17 @@ async function rawFetch(id: AuxSeriesId, symbol: string): Promise<AuxPoint[]> {
   }
 }
 
-/** Aux id de cycle on-chain → définition BGeometrics correspondante. */
-const BG_DEF_PAR_AUX: Record<"nupl" | "puell" | "sopr" | "reserveRisk", DefMetriqueBg> = {
+/** Aux id on-chain → définition BGeometrics correspondante. */
+const BG_DEF_PAR_AUX: Record<
+  "nupl" | "puell" | "sopr" | "reserveRisk" | "mvrvZ" | "realizedPrice",
+  DefMetriqueBg
+> = {
   nupl: BG_NUPL,
   puell: BG_PUELL,
   sopr: BG_SOPR,
   reserveRisk: BG_RESERVE_RISK,
+  mvrvZ: BG_MVRV,
+  realizedPrice: BG_REALIZED_PRICE,
 };
 
 export class AuxProvider {

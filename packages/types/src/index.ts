@@ -178,7 +178,8 @@ export interface VolumeProfileBin {
 export type AuxSeriesId =
   | "oi" | "funding" | "mark" | "stablecoins" | "nvt" | "mvrv" | "marketcap"
   // Métriques de cycle on-chain BTC (bitcoin-data.com / BGeometrics, journalier).
-  | "nupl" | "puell" | "sopr" | "reserveRisk"
+  // `mvrvZ` = vrai MVRV Z-Score (realized-cap) ; `realizedPrice` = prix on-chain moyen.
+  | "nupl" | "puell" | "sopr" | "reserveRisk" | "mvrvZ" | "realizedPrice"
   // Basis annualisé du future trimestriel courant (Binance COIN-M, BTC/ETH).
   | "quarterlyBasis";
 

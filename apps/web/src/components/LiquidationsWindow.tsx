@@ -10,11 +10,35 @@ import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { subscribeLiquidations, resumerLiquidations, type Liquidation } from "../data/liquidations";
+import { liqMarksStore } from "../chart/liquidationMarkers";
 import { EnTeteFenetre, Vide, NoteSource } from "./ui";
 import { formatUsd, formatHeure, formatPrice, formatPourcentage } from "../lib/format";
 
 /** Nombre max de liquidations conservées dans le feed (borne mémoire/affichage). */
 const MAX_FEED = 60;
+
+/**
+ * Bascule « Sur le graphe » : active/désactive les marqueurs de liquidation sur le
+ * chart (liqMarksStore, cf. chart/liquidationMarkers.ts). Rend la feature découvrable
+ * depuis la fenêtre, sans passer par ⌘K LIQMARK.
+ */
+function ToggleChart() {
+  const actif = useStore(liqMarksStore, (s) => s.actif);
+  const basculer = useStore(liqMarksStore, (s) => s.basculer);
+  return (
+    <button
+      type="button"
+      onClick={basculer}
+      aria-pressed={actif}
+      title="Afficher les liquidations sur le graphe (marqueurs)"
+      className={`rounded border px-2 py-1 text-[11px] font-medium transition ${
+        actif ? "border-accent bg-bg text-accent" : "border-border bg-bg text-text-dim hover:text-text"
+      }`}
+    >
+      {actif ? "● Sur le graphe" : "Sur le graphe"}
+    </button>
+  );
+}
 
 export function LiquidationsWindow() {
   const symbol = useStore(marketStore, (s) => s.symbol);
@@ -33,7 +57,11 @@ export function LiquidationsWindow() {
 
   return (
     <div className="flex h-full flex-col">
-      <EnTeteFenetre titre="Liquidations" sousTitre={`${symbol} · perp Binance USDⓈ-M (échantillon)`} />
+      <EnTeteFenetre
+        titre="Liquidations"
+        sousTitre={`${symbol} · perp Binance USDⓈ-M (échantillon)`}
+        actions={<ToggleChart />}
+      />
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {/* Totaux notionnels long/short depuis la souscription. */}
         <div className="grid grid-cols-2 gap-3">

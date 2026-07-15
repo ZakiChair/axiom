@@ -60,6 +60,7 @@ const TTL_MS: Record<AuxSeriesId, number> = {
   stablecoins: 60 * 60_000,
   nvt: 60 * 60_000,
   mvrv: 60 * 60_000,
+  marketcap: 60 * 60_000, // CapMrktCurUSD (Coin Metrics, journalier — BTC only en community)
 };
 /** Durée de mémorisation d'un échec de fetch (anti retry-tempête). */
 const ERROR_TTL_MS = 30_000;
@@ -169,6 +170,12 @@ async function rawFetch(id: AuxSeriesId, symbol: string): Promise<AuxPoint[]> {
       const metric = id === "mvrv" ? "CapMVRVCur" : "NVTAdj";
       const r = await fetchCoinMetrics(symbolToAsset(symbol));
       const serie = r?.series[metric];
+      return toPoints((serie?.points ?? []).map((p) => ({ time: p.time, value: p.value })));
+    }
+    case "marketcap": {
+      // Capitalisation USD (CapMrktCurUSD) — déjà dans CM_METRIQUES. BTC only en community.
+      const r = await fetchCoinMetrics(symbolToAsset(symbol));
+      const serie = r?.series.CapMrktCurUSD;
       return toPoints((serie?.points ?? []).map((p) => ({ time: p.time, value: p.value })));
     }
   }

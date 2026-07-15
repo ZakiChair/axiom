@@ -14,7 +14,7 @@ vi.mock("../store/theme", () => ({
 }));
 vi.mock("../data/liquidations", () => ({ subscribeLiquidations: () => () => {} }));
 
-import { bucketIndex, couleurViridis, tailleBucket } from "./liquidationMarkers";
+import { bucketIndex, couleurViridis, deserialiserProfil, serialiserProfil, tailleBucket } from "./liquidationMarkers";
 
 describe("tailleBucket", () => {
   it("~0,1 % du prix arrondi à un pas joli (1/2/5 × 10ⁿ)", () => {
@@ -50,5 +50,28 @@ describe("couleurViridis", () => {
   it("interpole entre deux arrêts (t=0.125 → milieu violet↔bleu)", () => {
     // seg=0.5 entre [68,1,84] et [59,82,139] → moyenne arrondie
     expect(couleurViridis(0.125)).toEqual([64, 42, 112]);
+  });
+});
+
+describe("persistance du profil (serialiser/deserialiser)", () => {
+  it("aller-retour préservant taille + buckets", () => {
+    const acc = new Map<number, number>([[1300, 5000], [1301, 12000]]);
+    const round = deserialiserProfil(serialiserProfil(50, acc));
+    expect(round?.taille).toBe(50);
+    expect(round?.buckets.get(1300)).toBe(5000);
+    expect(round?.buckets.get(1301)).toBe(12000);
+  });
+
+  it("tolère l'absent / corrompu → null", () => {
+    expect(deserialiserProfil(null)).toBeNull();
+    expect(deserialiserProfil("pas du json")).toBeNull();
+    expect(deserialiserProfil(JSON.stringify({ t: 0, b: [] }))).toBeNull(); // taille invalide
+    expect(deserialiserProfil(JSON.stringify({ t: 50 }))).toBeNull(); // buckets absents
+  });
+
+  it("écarte les entrées de bucket invalides (non entier / usd ≤ 0)", () => {
+    const raw = JSON.stringify({ t: 50, b: [[1300, 5000], [1.5, 100], [1301, -5], ["x", 10]] });
+    const d = deserialiserProfil(raw);
+    expect([...(d?.buckets.entries() ?? [])]).toEqual([[1300, 5000]]);
   });
 });

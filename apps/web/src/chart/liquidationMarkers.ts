@@ -31,7 +31,11 @@ import { subscribeLiquidations, type Liquidation } from "../data/liquidations";
 import type { Unsubscribe } from "@axiom/types";
 
 const LIQ_HEAT = "liqHeat";
+const LIQ_HINT = "liqHint";
 const LIQ_GROUP = "axiomLiqHeat";
+const STORAGE_PREFIX = "axiom:liqheat:";
+/** Borne le nombre de buckets persistés (les plus gros) — limite la taille localStorage. */
+const MAX_BUCKETS_PERSIST = 600;
 
 // ─────────────────────────── Fonctions PURES (testées) ───────────────────────────
 
@@ -75,6 +79,37 @@ export function couleurViridis(t: number): [number, number, number] {
     Math.round(a[1] + (b[1] - a[1]) * f),
     Math.round(a[2] + (b[2] - a[2]) * f),
   ];
+}
+
+// ─────────────────────────── Persistance du profil (localStorage, par symbole) ───────────────────────────
+
+/** Sérialise le profil (taille + `MAX_BUCKETS_PERSIST` plus gros buckets) en JSON. PURE. */
+export function serialiserProfil(t: number, acc: Map<number, number>): string {
+  const b = [...acc.entries()].sort((a, z) => z[1] - a[1]).slice(0, MAX_BUCKETS_PERSIST);
+  return JSON.stringify({ t, b });
+}
+
+/** Désérialise un profil persisté (tolérant : null si absent/corrompu). PURE. */
+export function deserialiserProfil(
+  raw: string | null,
+): { taille: number; buckets: Map<number, number> } | null {
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw) as { t?: unknown; b?: unknown };
+    const t = Number(o.t);
+    if (!(t > 0) || !Array.isArray(o.b)) return null;
+    const buckets = new Map<number, number>();
+    for (const e of o.b) {
+      if (Array.isArray(e) && e.length === 2) {
+        const idx = Number(e[0]);
+        const usd = Number(e[1]);
+        if (Number.isInteger(idx) && Number.isFinite(usd) && usd > 0) buckets.set(idx, usd);
+      }
+    }
+    return { taille: t, buckets };
+  } catch {
+    return null;
+  }
 }
 
 // ─────────────────────────── Bascule (store vanilla local) ───────────────────────────
@@ -125,6 +160,32 @@ function ensureOverlayRegistered(): void {
       return [fig];
     },
   });
+  // Indicateur « en attente » (heatmap active mais profil vide) : un texte discret.
+  registerOverlay({
+    name: LIQ_HINT,
+    totalStep: 1,
+    lock: true,
+    needDefaultPointFigure: false,
+    needDefaultXAxisFigure: false,
+    needDefaultYAxisFigure: false,
+    createPointFigures: ({ coordinates }) => {
+      const c = coordinates[0];
+      if (c === undefined) return [];
+      const fig: OverlayFigure = {
+        type: "text",
+        ignoreEvent: true,
+        attrs: {
+          x: c.x - 10,
+          y: c.y - 14,
+          text: "⋯ Heatmap liquidations active — en attente du flux live",
+          align: "right",
+          baseline: "middle",
+        },
+        styles: { color: "rgba(130,130,150,0.95)", size: 11 },
+      };
+      return [fig];
+    },
+  });
 }
 
 // ─────────────────────────── Contrôleur singleton ───────────────────────────
@@ -150,17 +211,56 @@ function retirerOverlays(): void {
   overlaysSuivis.clear();
 }
 
+/** Restaure le profil persisté du symbole dans l'accumulateur (best-effort). */
+function chargerProfil(symbol: string): void {
+  try {
+    const d = deserialiserProfil(localStorage.getItem(STORAGE_PREFIX + symbol.toUpperCase()));
+    if (d) {
+      accumulateur = d.buckets;
+      taille = d.taille;
+    }
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Persiste le profil courant du symbole (best-effort ; borné par serialiserProfil). */
+function sauverProfil(symbol: string): void {
+  try {
+    if (taille > 0 && accumulateur.size > 0) {
+      localStorage.setItem(STORAGE_PREFIX + symbol.toUpperCase(), serialiserProfil(taille, accumulateur));
+    }
+  } catch {
+    /* quota / mode privé : ignoré */
+  }
+}
+
 function redraw(): void {
   retirerOverlays();
   if (!liqMarksStore.getState().actif) return;
   const chart = getActiveChart();
   if (chart === null) return;
   const candles = marketStore.getState().candles;
-  if (candles.length === 0 || accumulateur.size === 0 || taille <= 0) return;
+  if (candles.length === 0) return;
 
   const premier = candles[0];
   const dernier = candles[candles.length - 1];
   if (premier === undefined || dernier === undefined) return;
+
+  // Profil vide (aucune liquidation encore accumulée) : indicateur « en attente » discret
+  // pour signaler que le heatmap est bien ACTIF (flux live sparse, se remplit avec le temps).
+  if (accumulateur.size === 0 || taille <= 0) {
+    const hint: OverlayCreate = {
+      name: LIQ_HINT,
+      groupId: LIQ_GROUP,
+      lock: true,
+      points: [{ timestamp: dernier.time, value: dernier.close }],
+      extendData: {},
+    };
+    const id = chart.createOverlay(hint);
+    if (typeof id === "string") overlaysSuivis.set(chart, [id]);
+    return;
+  }
 
   let max = 0;
   for (const v of accumulateur.values()) if (v > max) max = v;
@@ -187,11 +287,12 @@ function redraw(): void {
   if (ids.length > 0) overlaysSuivis.set(chart, ids);
 }
 
-/** Accumule une liquidation dans le bucket de son prix (fige la taille au 1er appel). */
+/** Accumule une liquidation dans le bucket de son prix (fige la taille au 1er appel) + persiste. */
 function accumuler(l: Liquidation): void {
   if (taille <= 0) taille = tailleBucket(l.price);
   const idx = bucketIndex(l.price, taille);
   accumulateur.set(idx, (accumulateur.get(idx) ?? 0) + l.notionalUsd);
+  if (symboleAbonne !== null) sauverProfil(symboleAbonne);
 }
 
 /** Aligne l'abonnement WS sur l'état (bascule + symbole). Réinitialise le profil au changement de symbole. */
@@ -212,9 +313,12 @@ function sync(): void {
   }
   if (symboleAbonne !== symbol) {
     if (abonnement) abonnement();
+    // Restaure le profil persisté du symbole (survit aux reloads / changements de symbole) ;
+    // les liquidations live s'y ajoutent. Vide si jamais accumulé.
     accumulateur = new Map();
     taille = 0;
     symboleAbonne = symbol;
+    chargerProfil(symbol);
     abonnement = subscribeLiquidations(symbol, (l) => {
       accumuler(l);
       redraw();

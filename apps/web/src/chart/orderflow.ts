@@ -24,10 +24,9 @@ import {
   DomPosition,
 } from "klinecharts";
 import type { Chart, KLineData, Point } from "klinecharts";
-import type { Candle, FootprintBar, FootprintRow, Trade, Unsubscribe } from "@axiom/types";
+import type { Candle, FootprintBar, FootprintRow, IExchangeAdapter, Trade, Unsubscribe } from "@axiom/types";
 import { fetchSymbolInfo } from "../data/binance";
 import { getAdapter } from "../data/adapters";
-import { adaptateurReplayActif } from "../data/replayFeed";
 import type { MarketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
 import { cvdDivergenceStore } from "../store/cvd-divergence";
@@ -404,7 +403,9 @@ export class OrderflowController {
     container: HTMLElement,
     canvas: HTMLCanvasElement,
     symbol: string,
-    store: MarketStore
+    store: MarketStore,
+    /** Adaptateur propre à CE slot (replay), jamais l'adaptateur global d'un autre slot. */
+    private readonly replayAdapter: IExchangeAdapter | null = null,
   ) {
     this.chart = chart;
     this.container = container;
@@ -538,7 +539,7 @@ export class OrderflowController {
     return (
       orderflowStore.getState().cvdSpotPerp &&
       this.store.getState().exchange === "binance" &&
-      adaptateurReplayActif() === null
+      this.replayAdapter === null
     );
   }
 
@@ -647,7 +648,7 @@ export class OrderflowController {
       // adaptateur fournit le côté agresseur normalisé (Coinbase est inversé en
       // amont). Le footprint fonctionne donc sur les trois sources. En REPLAY, on lit
       // le moteur de rejeu (trades historiques) → footprint/CVD rejoués sans modification.
-      const adapter = adaptateurReplayActif() ?? getAdapter(this.store.getState().exchange);
+      const adapter = this.replayAdapter ?? getAdapter(this.store.getState().exchange);
       this.unsubTrades = adapter.subscribeTrades(this.symbol, (t) =>
         this.onTrade(t)
       );

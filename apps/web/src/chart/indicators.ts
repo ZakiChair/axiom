@@ -266,9 +266,21 @@ export class ChartIndicators {
   /**
    * Réconcilie le graphe avec la liste voulue : retire les instances disparues,
    * ajoute les nouvelles, ré-override celles dont les PARAMS ont changé (édition),
-   * et laisse intactes celles inchangées (aucun recalcul superflu).
+   * et laisse intactes celles inchangées (aucun recalcul superflu) — SAUF si
+   * `forceRecompute` (backfill/changement d'actif) : `candles` a alors changé de
+   * RÉFÉRENCE mais une instance à params inchangés serait sinon jamais recalculée
+   * (son `key` ne dépend que de defId/params, pas des candles) et garderait
+   * l'`extendData` calculée sur l'ANCIEN actif — valeurs à une échelle de prix
+   * totalement différente, qui faussent l'auto-scale de l'axe Y (`calcRange` inclut
+   * les figures de tout indicateur du pane prix), au point de rendre les nouvelles
+   * bougies invisibles.
    */
-  sync(instances: ActiveIndicator[], candles: Candle[], exchange: ExchangeId): void {
+  sync(
+    instances: ActiveIndicator[],
+    candles: Candle[],
+    exchange: ExchangeId,
+    forceRecompute = false,
+  ): void {
     // Dernier tuple connu (Task 14) : lu par `onAuxReady` pour retrouver l'instance,
     // les candles et l'exchange lors d'une résolution aux asynchrone.
     this.latestArgs = [instances, candles, exchange];
@@ -319,8 +331,9 @@ export class ChartIndicators {
       const existing = this.active.get(inst.instanceId);
 
       if (existing) {
-        if (existing.key === key) continue; // params inchangés : rien à faire.
-        // Édition des params (instanceId stable) : recalcul + override + libellé.
+        if (existing.key === key && !forceRecompute) continue; // params inchangés : rien à faire.
+        // Édition des params, OU backfill/changement d'actif forcé (instanceId
+        // stable) : recalcul + override + libellé.
         const { result, suffix } = this.computeForInstance(def, inst, candles, exchange);
         this.chart.overrideIndicator(
           { name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result },

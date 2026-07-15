@@ -18,7 +18,7 @@
  * Flux inchangé (par instance) : backfill REST → applyNewData, puis WS → updateData
  * IMPÉRATIF (aucun re-render React sur tick). API KLineChart v9.8.x confirmée.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { dispose, init, ActionType, DomPosition, LoadDataType, YAxisType } from "klinecharts";
 import type { Chart as KLineChartInstance, Crosshair, KLineData } from "klinecharts";
 import { createStore } from "zustand/vanilla";
@@ -28,7 +28,14 @@ import { getAdapter } from "../data/adapters";
 import { prepareResyncApply } from "../data/resync";
 import { adaptateurReplayActif } from "../data/replayFeed";
 import { replayStore } from "../store/replay";
-import type { MarketStore } from "../store/market";
+import {
+  isMarketDataReady,
+  marketIdentity,
+  sameMarketIdentity,
+  type MarketDataLoadState,
+  type MarketIdentity,
+  type MarketStore,
+} from "../store/market";
 import { indicatorsStore } from "../store/indicators";
 import { orderflowStore } from "../store/orderflow";
 import { compareStore } from "../store/compare";
@@ -110,15 +117,22 @@ const SECONDARY_SOURCES: { id: ExchangeId; label: string }[] = [
   { id: "kraken", label: "Kraken" },
   { id: "mexc", label: "MEXC" },
   { id: "twelvedata", label: "TwelveData" },
+  // Affiché seulement quand le slot porte déjà une série construite via la palette SYN.
+  { id: "synthetic", label: "Synthétique" },
 ];
 
 /**
  * Dernier viewport connu (zoom + décalage droit) PAR SLOT, capturé AVANT `dispose()`.
- * Restaure le cadrage best-effort au changement de symbole/TF SUR LA MÊME SOURCE. Clé =
- * slot (chaque instance a son propre historique de cadrage). Module-scope : survit au
+ * Restaure le cadrage best-effort au changement de TF SUR LE MÊME ACTIF (même source ET
+ * même symbole — `symbol` fait partie de la clé de garde, pas seulement `exchange` :
+ * sinon un vrai changement d'actif hérite du cadrage de l'actif précédent). Clé = slot
+ * (chaque instance a son propre historique de cadrage). Module-scope : survit au
  * démontage/remontage de l'effet.
  */
-const lastViewport = new Map<number, { exchange: ExchangeId; barSpace: number; offsetRight: number }>();
+const lastViewport = new Map<
+  number,
+  { exchange: ExchangeId; symbol: string; barSpace: number; offsetRight: number }
+>();
 
 /**
  * Précision d'affichage du prix dérivée de la magnitude (≈5 chiffres significatifs,
@@ -227,6 +241,13 @@ interface SlotMount {
   indicators: ChartIndicators;
   paneHeaders: PaneHeaders;
   updateThrottle: RafThrottle;
+  // Zoom/décalage de l'instance juste après `init()`, avant toute interaction utilisateur.
+  // klinecharts ne réinitialise JAMAIS barSpace/offsetRightDistance sur `applyNewData` (seul
+  // le range visible l'est) : au changement d'ACTIF (pas juste de TF), il faut revenir
+  // explicitement à ces valeurs plutôt que de laisser le cadrage de l'ancien actif fausser
+  // l'échelle Y du nouveau (bougies hors-cadre / axe qui ne s'adapte plus).
+  defaultBarSpace: number;
+  defaultOffsetRight: number;
 }
 
 export interface ChartInstanceProps {
@@ -239,6 +260,15 @@ export interface ChartInstanceProps {
   onChangeSymbol?: (symbol: string) => void;
   onChangeTimeframe?: (tf: Timeframe) => void;
   onChangeExchange?: (ex: ExchangeId) => void;
+}
+
+/** Message volontairement stable : le détail technique reste dans la console/Health. */
+function dataLoadErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.name === "AbortError") return "Chargement annulé.";
+  if (error instanceof Error && /timeout|timed out|délai/i.test(error.message)) {
+    return "La source n’a pas répondu dans le délai prévu.";
+  }
+  return "La source n’a pas pu fournir l’historique demandé.";
 }
 
 export function ChartInstance({
@@ -265,6 +295,10 @@ export function ChartInstance({
   const exchange = useStore(store, (s) => s.exchange);
   const symbol = useStore(store, (s) => s.symbol);
   const timeframe = useStore(store, (s) => s.timeframe);
+  // Seul ce petit objet basse fréquence déclenche un rendu React ; `candles` reste hors
+  // render-loop. Il porte la provenance du dernier succès et l'état de la requête courante.
+  const dataLoad = useStore(store, (s) => s.dataLoad);
+  const [retryRevision, setRetryRevision] = useState(0);
   const focus = useStore(chartLayoutStore, (s) => s.focus);
   const layout = useStore(chartLayoutStore, (s) => s.layout);
   const orderflowEnabled = useStore(orderflowStore, (s) => s.enabled);
@@ -380,7 +414,14 @@ export function ChartInstance({
     });
 
     // Publie les objets à vie longue vers l'effet DONNÉES.
-    mountRef.current = { chart, indicators, paneHeaders, updateThrottle };
+    mountRef.current = {
+      chart,
+      indicators,
+      paneHeaders,
+      updateThrottle,
+      defaultBarSpace: chart.getBarSpace(),
+      defaultOffsetRight: chart.getOffsetRightDistance(),
+    };
 
     return () => {
       // React exécute les cleanups dans l'ordre de DÉCLARATION (haut→bas) : ce cleanup
@@ -414,11 +455,25 @@ export function ChartInstance({
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
-    const { chart, indicators, paneHeaders, updateThrottle } = mount;
+    const { chart, indicators, paneHeaders, updateThrottle, defaultBarSpace, defaultOffsetRight } = mount;
     const container = containerRef.current;
     const canvas = canvasRef.current;
     const vpCanvas = vpCanvasRef.current;
     if (!container || !canvas || !vpCanvas) return;
+
+    // Capture immuable de l'identité + révision de requête. Le store vide son buffer
+    // AVANT tout appel réseau ; le chart impératif est vidé dans le même cycle. Une réponse,
+    // pagination ou tick d'un ancien flux devra présenter CE couple identité/révision pour
+    // pouvoir réécrire les données.
+    const requestedIdentity: MarketIdentity = { exchange, symbol, timeframe };
+    const requestId = store.getState().startDataLoad(requestedIdentity);
+    if (requestId === null) return;
+    // Capture par slot : un focus déplacé ne doit jamais brancher le moteur replay
+    // global sur l'orderflow d'un autre graphique.
+    const replayAdapter = replayGen !== 0 ? adaptateurReplayActif() : null;
+    chart.clearData();
+    // Neutralise le callback de pagination de l'identité précédente pendant le backfill.
+    chart.setLoadDataCallback((params) => params.callback([], false));
 
     // Symbole/TF courants (Task 14) : nécessaires à l'AuxProvider pour les indicateurs
     // dérivés (`def.aux`) — renseignés AVANT tout sync/recompute de cet effet.
@@ -451,7 +506,7 @@ export function ChartInstance({
     const ensureOrderflow = (): void => {
       const want = chartLayoutStore.getState().focus === slot && orderflowStore.getState().enabled;
       if (want && !orderflow) {
-        orderflow = new OrderflowController(chart, container, canvas, symbol, store);
+        orderflow = new OrderflowController(chart, container, canvas, symbol, store, replayAdapter);
         orderflow.setAxisType(priceScaleStore.getState().type);
         orderflow.setEnabled(true);
         if (store.getState().candles.length > 0) orderflow.onCandles();
@@ -501,7 +556,7 @@ export function ChartInstance({
     // TOUS les slots (plus seulement le maître) : un slot secondaire doit pouvoir afficher
     // ses propres sous-panes OI/FUND. Le fetch Coinalyze est mémoïsé par symbole
     // (derivatives.ts) pour ne pas doubler les appels quand deux slots partagent le même actif.
-    derivativesChart = new DerivativesChartController(chart, symbol);
+    derivativesChart = new DerivativesChartController(chart, symbol, store);
 
     // Garde anti-course : les callbacks asynchrones (backfill, pagination, resync) ne doivent
     // rien faire après le teardown. Sert aussi de garde d'idempotence au teardown lui-même.
@@ -510,33 +565,58 @@ export function ChartInstance({
     // En replay, ce slot lit le MOTEUR de rejeu (même surface IExchangeAdapter → tout le
     // pipeline live fonctionne inchangé) au lieu du flux WS de l'exchange ; sinon la source
     // du slot. Le footprint/CVD (OrderflowController) résout le même adaptateur de son côté.
-    const replayAdapter = replayGen !== 0 ? adaptateurReplayActif() : null;
-    const adapter = replayAdapter ?? getAdapter(exchange);
-
     // 1) Backfill REST, puis 2) live WS.
-    adapter
-      .fetchKlines(symbol, timeframe, { limit: 500 })
-      .then((candles) => {
+    // La résolution de l'adaptateur passe elle aussi dans la chaîne Promise : une source
+    // persistée invalide qui ferait lever `getAdapter` devient un état d'erreur récupérable.
+    Promise.resolve()
+      .then(() => replayAdapter ?? getAdapter(exchange))
+      .then((adapter) =>
+        adapter.fetchKlines(symbol, timeframe, { limit: 500 }).then((candles) => ({ adapter, candles })),
+      )
+      .then(({ adapter, candles }) => {
         if (cancelled) return;
-        store.getState().setCandles(candles);
+        const current = store.getState();
+        if (
+          current.dataLoad.requestId !== requestId ||
+          !sameMarketIdentity(marketIdentity(current), requestedIdentity)
+        ) return;
+
         chart.setPriceVolumePrecision(derivePricePrecision(candles), 0);
         chart.applyNewData(candles.map(toKLineData));
+        // Le store et la série deviennent « ready » dans le même tour JS. Si l'identité
+        // a changé depuis la garde ci-dessus, le commit est refusé et le chart est repurgé.
+        if (!store.getState().completeDataLoad(requestedIdentity, requestId, candles)) {
+          chart.clearData();
+          return;
+        }
 
-        // Préservation best-effort du cadrage (même source seulement).
+        // Préservation best-effort du cadrage (même source ET même actif — un changement
+        // de TF conserve le zoom relatif). Sur un vrai changement d'actif, klinecharts ne
+        // réinitialise jamais lui-même barSpace/offsetRightDistance (seul le range visible
+        // l'est) : sans ce `else`, le cadrage de l'actif précédent reste appliqué tel quel
+        // et peut produire un range visible dégénéré sur la nouvelle série (axe qui ne
+        // s'adapte plus, bougies minuscules ou disparues).
         const vp = lastViewport.get(slot);
-        if (vp && vp.exchange === exchange) {
-          try {
+        try {
+          if (vp && vp.exchange === exchange && vp.symbol === symbol) {
             chart.setBarSpace(vp.barSpace);
             chart.setOffsetRightDistance(vp.offsetRight);
-          } catch {
-            /* best-effort */
+          } else {
+            chart.setBarSpace(defaultBarSpace);
+            chart.setOffsetRightDistance(defaultOffsetRight);
           }
+        } catch {
+          /* best-effort */
         }
 
         // Rejoue les dessins sauvegardés de CE slot (bougies posées : ancrage valide).
         restoreDrawings(chart, exchange, symbol);
-        // Indicateurs actifs sur le buffer de CE slot.
-        indicators.sync(indicatorsStore.getState().indicators, candles, exchange);
+        // Indicateurs actifs sur le buffer de CE slot. `forceRecompute` : un backfill
+        // charge un TOUT NOUVEAU buffer (nouvel actif/TF/source) — une instance à
+        // params inchangés doit être recalculée quand même, sinon elle garde
+        // l'`extendData` de l'ANCIEN actif (échelle de prix potentiellement sans
+        // rapport) et fausse l'auto-scale de l'axe Y du pane prix.
+        indicators.sync(indicatorsStore.getState().indicators, candles, exchange, true);
         // `indicators.sync` ci-dessus est un appel DIRECT (pas une mutation
         // `indicatorsStore`) : l'abonnement `unsubscribePaneHeaders` (effet MONTAGE) ne se
         // déclenche donc pas ici. Pour des indicateurs déjà persistés, c'est le SEUL moment
@@ -562,14 +642,21 @@ export function ChartInstance({
             params.callback([], false);
             return;
           }
-          if (store.getState().candles.length >= PAGINATION_MAX_CANDLES) {
+          const beforeFetch = store.getState();
+          if (
+            !isMarketDataReady(beforeFetch, requestedIdentity, requestId) ||
+            beforeFetch.candles.length >= PAGINATION_MAX_CANDLES
+          ) {
             params.callback([], false);
             return;
           }
           adapter
             .fetchKlines(symbol, timeframe, { limit: PAGINATION_LIMIT, endTime: leftmost.timestamp - 1 })
             .then((fetched) => {
-              if (cancelled) return;
+              if (cancelled || !isMarketDataReady(store.getState(), requestedIdentity, requestId)) {
+                params.callback([], false);
+                return;
+              }
               const older = fetched.filter((c) => c.time < leftmost.timestamp);
               if (older.length === 0) {
                 params.callback([], false);
@@ -593,7 +680,9 @@ export function ChartInstance({
         });
 
         const onKline = (candle: Candle) => {
-          store.getState().upsertCandle(candle);
+          // Un callback WS peut être déjà en file lors du changement de symbole. La garde
+          // identité+révision empêche ce dernier tick de repeupler le buffer invalidé.
+          if (!store.getState().upsertCandleFor(requestedIdentity, requestId, candle)) return;
           // Coalescence rAF des ticks intra-bougie ; flush IMMÉDIAT à la clôture pour
           // finaliser exactement la bougie fermée sur le graphe.
           if (candle.closed) {
@@ -622,7 +711,7 @@ export function ChartInstance({
         // Buffer de même cardinalité peut avoir un contenu différent → CVD reseed
         // via orderflow.onCandles → refreshCvd. Lot A0.4.
         const onResync = (fetched: Candle[]) => {
-          if (cancelled) return;
+          if (cancelled || !isMarketDataReady(store.getState(), requestedIdentity, requestId)) return;
           const merged = prepareResyncApply(store.getState().candles, fetched);
           if (!merged) return;
           store.getState().setCandles(merged);
@@ -639,6 +728,16 @@ export function ChartInstance({
         unsubscribe = subscribeKline(symbol, timeframe, onKline, onResync);
       })
       .catch((err) => {
+        if (cancelled) return;
+        const failed = store.getState().failDataLoad(
+          requestedIdentity,
+          requestId,
+          dataLoadErrorMessage(err),
+        );
+        if (failed) {
+          chart.clearData();
+          chart.setLoadDataCallback((params) => params.callback([], false));
+        }
         console.error("[AXIOM] Échec du backfill", err);
       });
 
@@ -674,6 +773,7 @@ export function ChartInstance({
       try {
         lastViewport.set(slot, {
           exchange,
+          symbol,
           barSpace: chart.getBarSpace(),
           offsetRight: chart.getOffsetRightDistance(),
         });
@@ -684,7 +784,7 @@ export function ChartInstance({
     teardownDataRef.current = teardownData;
     return teardownData;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exchange, symbol, timeframe, replayGen, isMaster]);
+  }, [exchange, symbol, timeframe, replayGen, isMaster, retryRevision]);
 
   return (
     // Conteneur relatif : le graphe le remplit ; les canvases se superposent
@@ -727,6 +827,80 @@ export function ChartInstance({
       <canvas ref={vpCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={xhairCanvasRef} className="pointer-events-none absolute inset-0" />
+      <ChartDataStatusOverlay
+        state={dataLoad}
+        requested={{ exchange, symbol, timeframe }}
+        onRetry={() => setRetryRevision((revision) => revision + 1)}
+      />
+    </div>
+  );
+}
+
+function identityLabel(identity: MarketIdentity): string {
+  return `${identity.symbol} · ${identity.timeframe} · ${identity.exchange}`;
+}
+
+/**
+ * Cache intégralement la série impérative tant que son identité n'est pas confirmée.
+ * L'opacité est volontairement totale : même le frame précédant le cleanup de l'ancien
+ * effet ne peut pas présenter ses bougies sous le nouvel en-tête React.
+ */
+function ChartDataStatusOverlay({
+  state,
+  requested,
+  onRetry,
+}: {
+  state: MarketDataLoadState;
+  requested: MarketIdentity;
+  onRetry: () => void;
+}) {
+  const requestMatches = sameMarketIdentity(state.requested, requested);
+  const status = requestMatches && state.status !== "idle" ? state.status : "loading";
+  if (status === "ready" && sameMarketIdentity(state.loaded, requested)) return null;
+
+  const hiddenSnapshot = state.loaded;
+  const isError = status === "error";
+
+  return (
+    <div
+      className="absolute inset-0 z-10 flex items-center justify-center bg-bg px-4"
+      data-chart-status={status}
+      data-stale={hiddenSnapshot !== null ? "true" : "false"}
+      role={isError ? "alert" : "status"}
+      aria-live={isError ? "assertive" : "polite"}
+      aria-busy={!isError}
+    >
+      <div className="max-w-sm rounded border border-border bg-surface px-4 py-3 text-center shadow-lg">
+        <p className="font-mono text-[11px] font-semibold uppercase tracking-wider text-text">
+          {isError ? "Données indisponibles" : "Chargement des bougies…"}
+        </p>
+        <p className="mt-1 break-all font-mono text-[10px] text-text-dim">
+          {identityLabel(requested)}
+        </p>
+        {isError && (
+          <p className="mt-2 text-[11px] text-down">
+            {requestMatches && state.status === "error"
+              ? state.error
+              : "La source n’a pas pu fournir l’historique demandé."}
+          </p>
+        )}
+        {hiddenSnapshot !== null && (
+          <p className="mt-2 text-[10px] text-text-dim">
+            {sameMarketIdentity(hiddenSnapshot, requested)
+              ? "Le dernier jeu chargé est masqué pendant ce rafraîchissement."
+              : `Anciennes données masquées : ${identityLabel(hiddenSnapshot)}.`}
+          </p>
+        )}
+        {isError && (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-3 rounded border border-accent/60 bg-accent/15 px-3 py-1 text-[11px] font-semibold text-accent transition hover:bg-accent/25"
+          >
+            Réessayer
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -748,16 +922,16 @@ function SecondaryHeader({
   onChangeExchange?: (ex: ExchangeId) => void;
 }) {
   return (
-    <div className="pointer-events-auto absolute left-1 top-1 z-10 flex items-center gap-1 rounded bg-surface/80 px-1 py-0.5 text-[10px] backdrop-blur">
+    <div className="pointer-events-auto absolute left-1 top-1 z-20 flex items-center gap-1 rounded bg-surface/80 px-1 py-0.5 text-[10px] backdrop-blur">
       <input
         aria-label="Symbole du slot"
         defaultValue={symbol}
         key={symbol}
         onKeyDown={(e) => {
-          if (e.key === "Enter") onChangeSymbol?.((e.target as HTMLInputElement).value.trim().toUpperCase());
+          if (e.key === "Enter") onChangeSymbol?.((e.target as HTMLInputElement).value.trim());
         }}
-        onBlur={(e) => onChangeSymbol?.(e.target.value.trim().toUpperCase())}
-        className="w-20 rounded bg-bg px-1 py-0.5 font-mono uppercase text-text outline-none focus:ring-1 focus:ring-accent/60"
+        onBlur={(e) => onChangeSymbol?.(e.target.value.trim())}
+        className={`w-20 rounded bg-bg px-1 py-0.5 font-mono text-text outline-none focus:ring-1 focus:ring-accent/60 ${exchange === "synthetic" ? "" : "uppercase"}`}
       />
       <select
         aria-label="Timeframe du slot"
@@ -777,7 +951,7 @@ function SecondaryHeader({
         onChange={(e) => onChangeExchange?.(e.target.value as ExchangeId)}
         className="rounded bg-bg px-0.5 py-0.5 text-text outline-none"
       >
-        {SECONDARY_SOURCES.map((s) => (
+        {SECONDARY_SOURCES.filter((s) => s.id !== "synthetic" || exchange === "synthetic").map((s) => (
           <option key={s.id} value={s.id}>
             {s.label}
           </option>

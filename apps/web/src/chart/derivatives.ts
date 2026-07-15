@@ -21,7 +21,7 @@
 import { registerIndicator, IndicatorSeries } from "klinecharts";
 import type { Chart, IndicatorFigure } from "klinecharts";
 import type { FundingRate, OpenInterest } from "@axiom/types";
-import { marketStore } from "../store/market";
+import type { MarketStore } from "../store/market";
 import { derivativesChartStore, type DerivativesChartState } from "../store/derivatives-chart";
 import { coinalyzeProvider } from "../data/coinalyze";
 
@@ -164,6 +164,7 @@ function ensureRegistered(): void {
 export class DerivativesChartController {
   private readonly chart: Chart;
   private readonly symbol: string;
+  private readonly market: MarketStore;
   private readonly unsubStore: () => void;
   private readonly unsubMarket: () => void;
 
@@ -181,14 +182,15 @@ export class DerivativesChartController {
   private fundingFetching = false;
   private fundingPaneId: string | null = null;
 
-  constructor(chart: Chart, symbol: string) {
+  constructor(chart: Chart, symbol: string, market: MarketStore) {
     this.chart = chart;
     this.symbol = symbol;
+    this.market = market;
     ensureRegistered();
     this.state = derivativesChartStore.getState();
     // Auto-pilotage : toggles + changements de bougies (garde O(1)) sans câblage Chart.tsx.
     this.unsubStore = derivativesChartStore.subscribe((s) => this.onToggle(s));
-    this.unsubMarket = marketStore.subscribe(() => this.onMarketChange());
+    this.unsubMarket = this.market.subscribe(() => this.onMarketChange());
     this.onToggle(this.state);
   }
 
@@ -215,7 +217,7 @@ export class DerivativesChartController {
   /** Reconstruit uniquement si le buffer de bougies a réellement changé (pas à chaque tick). */
   private onMarketChange(): void {
     if (this.disposed) return;
-    const candles = marketStore.getState().candles;
+    const candles = this.market.getState().candles;
     const sig = `${candles.length}:${candles[0]?.time ?? 0}:${candles.at(-1)?.time ?? 0}`;
     if (sig === this.lastCandleSig) return;
     this.lastCandleSig = sig;
@@ -273,7 +275,7 @@ export class DerivativesChartController {
 
   private rebuild(): void {
     if (this.disposed) return;
-    const candles = marketStore.getState().candles;
+    const candles = this.market.getState().candles;
     this.oiPaneId = this.syncPane(this.state.oi, this.oiSeries, OI_NAME, OI_PANE_ID, this.oiPaneId, candles);
     this.fundingPaneId = this.syncPane(
       this.state.funding,

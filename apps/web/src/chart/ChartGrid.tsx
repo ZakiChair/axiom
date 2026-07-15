@@ -17,13 +17,19 @@
 import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import type { ExchangeId, Timeframe } from "@axiom/types";
-import { createMarketStore, marketStore, type MarketStore } from "../store/market";
+import {
+  createMarketStore,
+  marketIdentity,
+  marketStore,
+  type MarketStore,
+} from "../store/market";
 import {
   chartLayoutStore,
-  linkedTargets,
   visibleSlotCount,
   type ChartLayoutMode,
 } from "../store/chart-layout";
+import { replayStore } from "../store/replay";
+import { masterLinkSource, propagerMarche } from "../store/chart-linking";
 import { demarrerSyncFenetres } from "../store/sync";
 import { setFocusChart } from "./drawing";
 import { Chart } from "./Chart";
@@ -44,26 +50,6 @@ const LAYOUT_BUTTONS: { mode: ChartLayoutMode; label: string; title: string }[] 
   { mode: "2v", label: "1—1", title: "Deux empilés" },
   { mode: "2x2", label: "2×2", title: "Grille 2×2" },
 ];
-
-/**
- * Propage un symbole aux AUTRES slots visibles quand la liaison est active. Cible 0 =
- * store global (maître) ; cibles 1..3 = config des secondaires. Garde « ne (re)pose que
- * si différent » → aucune boucle même quand la mise à jour d'un maître re-notifie.
- */
-function propagerSymbole(source: number, symbol: string): void {
-  const { linked, layout } = chartLayoutStore.getState();
-  if (!linked) return;
-  const up = symbol.trim().toUpperCase();
-  if (up.length === 0) return;
-  for (const t of linkedTargets(source, layout)) {
-    if (t === 0) {
-      if (marketStore.getState().symbol !== up) marketStore.getState().setSymbol(up);
-    } else {
-      const cfg = chartLayoutStore.getState().slots[t - 1];
-      if (cfg && cfg.symbol !== up) chartLayoutStore.getState().setSlotSymbol(t, up);
-    }
-  }
-}
 
 export function ChartGrid() {
   const layout = useStore(chartLayoutStore, (s) => s.layout);
@@ -88,9 +74,11 @@ export function ChartGrid() {
         const st = stores[i];
         if (!cfg || !st) continue;
         const cur = st.getState();
-        if (cur.exchange !== cfg.exchange) cur.setExchange(cfg.exchange);
-        if (cur.symbol !== cfg.symbol) cur.setSymbol(cfg.symbol);
-        if (cur.timeframe !== cfg.timeframe) cur.setTimeframe(cfg.timeframe);
+        if (
+          cur.exchange !== cfg.exchange ||
+          cur.symbol !== cfg.symbol ||
+          cur.timeframe !== cfg.timeframe
+        ) cur.setMarket(cfg);
       }
     };
     sync();
@@ -109,7 +97,10 @@ export function ChartGrid() {
   // secondaires liés. La propagation depuis un secondaire passe par ses handlers d'en-tête.
   useEffect(() => {
     return marketStore.subscribe((state, prev) => {
-      if (state.symbol !== prev.symbol) propagerSymbole(0, state.symbol);
+      if (
+        (state.exchange !== prev.exchange || state.symbol !== prev.symbol) &&
+        !(replayStore.getState().identityTransition && replayStore.getState().slot === 0)
+      ) propagerMarche(0, marketIdentity(state));
     });
   }, []);
 
@@ -118,17 +109,31 @@ export function ChartGrid() {
 
   const makeHandlers = (slot: number) => ({
     onChangeSymbol: (symbol: string) => {
-      chartLayoutStore.getState().setSlotSymbol(slot, symbol);
-      propagerSymbole(slot, symbol);
+      const cfg = chartLayoutStore.getState().slots[slot - 1];
+      if (!cfg) return;
+      chartLayoutStore.getState().setSlotMarket(slot, { ...cfg, symbol });
+      const next = chartLayoutStore.getState().slots[slot - 1];
+      if (next) propagerMarche(slot, next);
     },
     onChangeTimeframe: (tf: Timeframe) => chartLayoutStore.getState().setSlotTimeframe(slot, tf),
-    onChangeExchange: (ex: ExchangeId) => chartLayoutStore.getState().setSlotExchange(slot, ex),
+    onChangeExchange: (ex: ExchangeId) => {
+      const cfg = chartLayoutStore.getState().slots[slot - 1];
+      if (!cfg) return;
+      chartLayoutStore.getState().setSlotMarket(slot, { ...cfg, exchange: ex });
+      const next = chartLayoutStore.getState().slots[slot - 1];
+      if (next) propagerMarche(slot, next);
+    },
   });
 
   const onToggleLink = (): void => {
     chartLayoutStore.getState().toggleLinked();
-    // En activant la liaison, on aligne les secondaires sur le symbole du maître.
-    if (chartLayoutStore.getState().linked) propagerSymbole(0, marketStore.getState().symbol);
+    if (chartLayoutStore.getState().linked) {
+      const replay = replayStore.getState();
+      // Pendant un replay du maître, les autres slots s'alignent sur son identité LIVE
+      // capturée. À la sortie, le maître restauré reste ainsi cohérent avec la liaison.
+      const source = masterLinkSource(marketIdentity(marketStore.getState()), replay);
+      propagerMarche(0, source);
+    }
   };
 
   return (

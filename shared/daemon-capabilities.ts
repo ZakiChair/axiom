@@ -10,6 +10,7 @@
 export const DAEMON_CAPABILITIES = [
   "kv",
   "candles",
+  "liquidations",
   "alerts",
   "replay",
   "globe",

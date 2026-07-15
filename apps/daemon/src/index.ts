@@ -24,6 +24,7 @@ import { entetesCors, entetesCorsRejet, reponsePreflight, requeteLocaleAutorisee
 import { chargerCles } from "./env";
 import { demarrerBoucleGlobe, enregistrerGlobe } from "./globe";
 import { enregistrerKv } from "./kv";
+import { enregistrerLiquidations } from "./liquidations";
 import { enregistrerProxy } from "./proxy";
 import { enregistrerReplay } from "./replay";
 import { Routeur } from "./router";
@@ -78,6 +79,7 @@ enregistrerProxy(routeur, cles);
 enregistrerSnapshots(routeur);
 enregistrerKv(routeur);
 enregistrerCandles(routeur);
+enregistrerLiquidations(routeur);
 
 // Alertes onglet fermé (Phase 2.E3) : routes GET /alerts/journal + POST /heartbeat.
 enregistrerAlertes(routeur);

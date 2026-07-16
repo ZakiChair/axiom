@@ -10,7 +10,7 @@
  * Couleurs exclusivement via les tokens sémantiques (bg-bg, text-text-dim,
  * border-down/40…) : tout suit le thème courant sans travail supplémentaire.
  */
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   LABEL_NIVEAU,
   type MetaFiabilite,
@@ -20,6 +20,130 @@ import {
 /** Classes du bouton secondaire standard (recalculer, exporter, choisir…). */
 export const BTN_SECONDAIRE =
   "rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text";
+
+/**
+ * Calcule l'index de l'élément à focaliser lors d'une navigation clavier « roving »
+ * dans un menu de `nb` éléments, depuis l'index `courant` (-1 = aucun focus).
+ * ↑/↓ bouclent aux extrémités ; Home/End sautent aux bords. Fonction PURE (le
+ * MenuDeroulant est ainsi testable sans DOM — convention vitest node du repo).
+ */
+export function indexRoving(
+  nb: number,
+  courant: number,
+  touche: "ArrowDown" | "ArrowUp" | "Home" | "End",
+): number {
+  if (nb <= 0) return -1;
+  switch (touche) {
+    case "ArrowDown":
+      return courant < 0 ? 0 : (courant + 1) % nb;
+    case "ArrowUp":
+      return courant < 0 ? nb - 1 : (courant - 1 + nb) % nb;
+    case "Home":
+      return 0;
+    case "End":
+      return nb - 1;
+  }
+}
+
+/**
+ * Menu déroulant contrôlé et unifié de la Toolbar (remplace les copies locales
+ * divergentes relevées par l'audit). Comportements standard : ouverture au clic,
+ * fermeture sur Échap, clic extérieur (mousedown document) et sélection (via
+ * `fermer`), navigation clavier ↑/↓/Home/End en focus roving sur les
+ * [role=menuitem], panneau borné `max-h-[70vh]` scrollable (corrige le
+ * débordement du menu Fonctions hors écran sur laptop). AUCUNE dépendance :
+ * positionnement absolu simple sous le déclencheur, comme les menus d'origine.
+ *
+ * Le déclencheur (bouton + chevron ▾) est rendu par la primitive pour un rendu
+ * uniforme ; `declencheur` en fournit uniquement le libellé. Le contenu métier
+ * passe par un render-prop recevant `fermer`, à appeler après une sélection.
+ */
+export function MenuDeroulant({
+  declencheur,
+  titre,
+  align = "left",
+  classePanneau = "w-60",
+  children,
+}: {
+  /** Contenu du bouton déclencheur (libellé) — le chevron ▾ est ajouté par la primitive. */
+  declencheur: ReactNode;
+  /** Infobulle (attribut `title`) du bouton déclencheur. */
+  titre?: string;
+  /** Bord d'alignement du panneau sous le déclencheur. */
+  align?: "left" | "right";
+  /** Classe de largeur du panneau (défaut `w-60`). */
+  classePanneau?: string;
+  /** Contenu du menu ; reçoit `fermer` à appeler après une sélection. */
+  children: (fermer: () => void) => ReactNode;
+}) {
+  const [ouvert, setOuvert] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const declencheurRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const fermer = () => setOuvert(false);
+
+  // Fermeture globale (quel que soit le focus) : clic extérieur (mousedown document)
+  // et touche Échap — Échap rend le focus au déclencheur.
+  useEffect(() => {
+    if (!ouvert) return;
+    const surClicExterieur = (e: MouseEvent) => {
+      if (!wrapperRef.current?.contains(e.target as Node)) setOuvert(false);
+    };
+    const surEchap = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOuvert(false);
+        declencheurRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", surClicExterieur);
+    document.addEventListener("keydown", surEchap);
+    return () => {
+      document.removeEventListener("mousedown", surClicExterieur);
+      document.removeEventListener("keydown", surEchap);
+    };
+  }, [ouvert]);
+
+  // Navigation clavier ↑/↓/Home/End en focus roving sur les [role=menuitem] du panneau.
+  const surTouche = (e: React.KeyboardEvent) => {
+    if (!ouvert) return;
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+    const menu = menuRef.current;
+    if (!menu) return;
+    const items = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])'));
+    if (items.length === 0) return;
+    e.preventDefault();
+    const courant = items.findIndex((el) => el === document.activeElement);
+    items[indexRoving(items.length, courant, e.key)]?.focus();
+  };
+
+  return (
+    <div className="relative" ref={wrapperRef} onKeyDown={surTouche}>
+      <button
+        type="button"
+        ref={declencheurRef}
+        onClick={() => setOuvert((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={ouvert}
+        title={titre}
+        className="flex items-center gap-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 hover:border-neutral-500"
+      >
+        {declencheur}
+        <span aria-hidden className="text-[9px] text-neutral-500">▾</span>
+      </button>
+
+      {ouvert && (
+        <div
+          role="menu"
+          ref={menuRef}
+          className={`absolute ${align === "right" ? "right-0" : "left-0"} z-50 mt-1 ${classePanneau} max-h-[70vh] overflow-y-auto rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl`}
+        >
+          {children(fermer)}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /**
  * En-tête interne standard d'une fenêtre flottante : titre en capitales

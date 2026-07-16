@@ -15,6 +15,22 @@ export function TaskbarMinimized() {
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 flex gap-1 border-t border-border bg-surface px-2 py-1">
+      <button
+        type="button"
+        title="Restaurer toutes les fenêtres réduites"
+        onClick={() => windowManagerStore.getState().restoreAll()}
+        className="rounded border border-border bg-bg px-2 py-1 text-[11px] font-medium text-text-dim hover:text-text"
+      >
+        Tout restaurer
+      </button>
+      <button
+        type="button"
+        title="Disposer les fenêtres ouvertes en mosaïque"
+        onClick={() => windowManagerStore.getState().tileOpenWindows()}
+        className="rounded border border-border bg-bg px-2 py-1 text-[11px] font-medium text-text-dim hover:text-text"
+      >
+        Mosaïque
+      </button>
       {reduites.map((w) => {
         const entry = WINDOW_REGISTRY.find((r) => r.id === w.id);
         return (

@@ -13,7 +13,7 @@ import { liqMarksStore } from "../chart/liquidationMarkers";
 import { derivativesUiStore } from "../store/derivatives-ui";
 // Bandeau ticker (pas une fenêtre Launchpad) + disposition grille.
 import { tickerBandStore } from "../store/tickerBand";
-import { menuWindows, windowManagerStore } from "../store/windowManager";
+import { estNouvelle, menuWindows, windowManagerStore, type WindowId } from "../store/windowManager";
 import { FootprintSettingsPanel } from "./FootprintSettingsPanel";
 import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
@@ -23,13 +23,18 @@ import { supportedTimeframesFor } from "../data/adapters";
 import { PLAYBOOKS } from "../data/playbooks";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
 import { exportChartImage } from "../chart/drawing";
+import { pousserToast } from "../store/toasts";
+import { raccourciPour, raccourciTimeframe } from "../commands/hotkeys";
 import { IndicatorMenu } from "./IndicatorMenu";
 import { PairSearch } from "./PairSearch";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import { Badge, MenuDeroulant } from "./ui";
 
 /**
  * Ouvre un sélecteur de fichier, valide et REMPLACE tout l'état `axiom:*` du terminal par
- * la sauvegarde, puis recharge la page (ré-hydratation propre). Confirmation avant écrasement.
+ * la sauvegarde. Confirmation destructive avant écrasement (conservée). Le résultat est
+ * signalé par un toast : succès invite à recharger (les stores hydratent au démarrage),
+ * échec = message d'erreur — plus de `window.alert` ni de rechargement automatique.
  */
 function declencherImportSauvegarde(): void {
   const input = document.createElement("input");
@@ -48,13 +53,47 @@ function declencherImportSauvegarde(): void {
       ) {
         return;
       }
-      if (importerSauvegarde(texte)) window.location.reload();
-      else window.alert("Sauvegarde invalide : aucun changement effectué.");
+      if (importerSauvegarde(texte)) {
+        // localStorage vient d'être réécrit : continuer sans recharger laisserait
+        // l'état en mémoire incohérent. On recharge (toast visible ~1,2 s avant).
+        pousserToast("Sauvegarde importée — rechargement…");
+        setTimeout(() => window.location.reload(), 1200);
+      } else {
+        pousserToast("Sauvegarde invalide : aucun changement effectué.");
+      }
     };
     reader.readAsText(file);
   };
   input.click();
 }
+
+/** Demande un nom et enregistre l'agencement courant sous ce workspace + toast de feedback. */
+function enregistrerWorkspaceAvecNom(): void {
+  const nom = window.prompt("Nom du workspace :");
+  const label = nom?.trim();
+  if (label && label.length > 0) {
+    workspacesStore.getState().saveAs(label);
+    pousserToast(`Workspace « ${label} » enregistré`);
+  }
+}
+
+/** Exporte la sauvegarde complète (téléchargement) + toast de feedback. */
+function exporterSauvegardeAvecFeedback(): void {
+  exporterSauvegarde();
+  pousserToast("Sauvegarde exportée");
+}
+
+/** Suffixe « — <touche> » ajouté à une infobulle quand un raccourci existe. */
+function avecRaccourci(titre: string, touche: string | null): string {
+  return touche === null ? titre : `${titre} — ${touche}`;
+}
+
+// Touches des toggles (constantes : dérivées de RACCOURCIS_AIDE, source unique).
+const RC_ORDERFLOW = raccourciPour("Orderflow");
+const RC_PROFIL_VOL = raccourciPour("Profil Vol");
+const RC_LIQ = raccourciPour("Liq");
+const RC_REVENUS = raccourciPour("Revenus");
+const RC_THEME = raccourciPour("Thème");
 
 // Greffe les commandes Workspaces / sauvegarde dans la palette (⌘K). Enregistrement à
 // l'IMPORT (avant le premier rendu de la palette) via le point d'extension du registre.
@@ -66,10 +105,7 @@ enregistrerCommandes([
     categorie: "action",
     motsCles: ["workspace", "preset", "enregistrer", "sauver", "layout", "espace de travail"],
     apercu: "Sauvegarde l'agencement courant sous un nom",
-    action: () => {
-      const nom = window.prompt("Nom du workspace :");
-      if (nom && nom.trim().length > 0) workspacesStore.getState().saveAs(nom.trim());
-    },
+    action: () => enregistrerWorkspaceAvecNom(),
   },
   {
     id: "workspace:exporter",
@@ -78,7 +114,7 @@ enregistrerCommandes([
     categorie: "action",
     motsCles: ["backup", "sauvegarde", "export", "json", "exporter", "telecharger"],
     apercu: "Télécharge une sauvegarde de tout le terminal",
-    action: () => exporterSauvegarde(),
+    action: () => exporterSauvegardeAvecFeedback(),
   },
   {
     id: "workspace:importer",
@@ -135,14 +171,17 @@ const TICKER_ENTREE = {
   libelle: "Bandeau news défilant",
   ouvrir: () => tickerBandStore.getState().basculer(),
 };
-const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] = menuWindows().flatMap((w) => {
-  const entree = {
-    mnemonique: w.mnemonique,
-    libelle: w.libelle,
-    ouvrir: () => windowManagerStore.getState().openWindow(w.id),
-  };
-  return w.id === "news" ? [entree, TICKER_ENTREE] : [entree];
-});
+const FONCTIONS: { id?: WindowId; mnemonique: string; libelle: string; nouveau?: boolean; ouvrir: () => void }[] =
+  menuWindows().flatMap((w) => {
+    const entree = {
+      id: w.id,
+      mnemonique: w.mnemonique,
+      libelle: w.libelle,
+      nouveau: w.nouveau,
+      ouvrir: () => windowManagerStore.getState().openWindow(w.id),
+    };
+    return w.id === "news" ? [entree, TICKER_ENTREE] : [entree];
+  });
 
 /**
  * Menu déroulant compact « Fonctions » : liste les fenêtres non modales (libellé +
@@ -150,50 +189,33 @@ const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] =
  * tick) — les actions lisent les stores via getState(), sans abonnement.
  */
 function FonctionsMenu() {
-  const [open, setOpen] = useState(false);
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Fonctions — ouvrir un panneau (mêmes mnémoniques dans ⌘K)"
-        className="flex items-center gap-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 hover:border-neutral-500"
-      >
-        <span>Fonctions</span>
-        <span aria-hidden className="text-[9px] text-neutral-500">▾</span>
-      </button>
-
-      {open && (
-        <>
-          {/* Zone de fermeture au clic extérieur. */}
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div
-            role="menu"
-            className="absolute left-0 z-50 mt-1 w-60 rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl"
+    <MenuDeroulant
+      declencheur={<span>Fonctions</span>}
+      titre="Fonctions — ouvrir un panneau (mêmes mnémoniques dans ⌘K)"
+    >
+      {(fermer) =>
+        FONCTIONS.map((f) => (
+          <button
+            key={f.mnemonique}
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              f.ouvrir();
+              fermer();
+            }}
+            className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs text-neutral-200 hover:bg-neutral-800"
           >
-            {FONCTIONS.map((f) => (
-              <button
-                key={f.mnemonique}
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  f.ouvrir();
-                  setOpen(false);
-                }}
-                className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs text-neutral-200 hover:bg-neutral-800"
-              >
-                <span className="w-12 shrink-0 font-semibold uppercase tracking-wider text-emerald-400">
-                  {f.mnemonique}
-                </span>
-                <span className="min-w-0 flex-1 truncate">{f.libelle}</span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
+            <span className="w-12 shrink-0 font-semibold uppercase tracking-wider text-emerald-400">
+              {f.mnemonique}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{f.libelle}</span>
+            {/* Badge « nouveau » (fenêtres récentes) jusqu'à la 1ère ouverture. */}
+            {f.nouveau && f.id !== undefined && estNouvelle(f.id) && <Badge ton="accent">nouveau</Badge>}
+          </button>
+        ))
+      }
+    </MenuDeroulant>
   );
 }
 
@@ -203,53 +225,37 @@ function FonctionsMenu() {
  * Découverte Toolbar (B3.3) en plus de la palette ⌘K.
  */
 function PlaybooksMenu() {
-  const [open, setOpen] = useState(false);
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Playbooks 1-clic — mêmes mnémoniques PLAY* dans ⌘K"
-        className="flex items-center gap-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 hover:border-neutral-500"
-      >
-        <span>Playbooks</span>
-        <span aria-hidden className="text-[9px] text-neutral-500">▾</span>
-      </button>
-
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div
-            role="menu"
-            className="absolute left-0 z-50 mt-1 w-72 rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl"
+    <MenuDeroulant
+      declencheur={<span>Playbooks</span>}
+      titre="Playbooks 1-clic — mêmes mnémoniques PLAY* dans ⌘K"
+      classePanneau="w-72"
+    >
+      {(fermer) =>
+        PLAYBOOKS.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            role="menuitem"
+            title={p.description}
+            onClick={() => {
+              p.apply();
+              pousserToast(`Playbook ${p.nom} appliqué`);
+              fermer();
+            }}
+            className="flex w-full flex-col gap-0.5 rounded px-2 py-1.5 text-left text-xs text-neutral-200 hover:bg-neutral-800"
           >
-            {PLAYBOOKS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                role="menuitem"
-                title={p.description}
-                onClick={() => {
-                  p.apply();
-                  setOpen(false);
-                }}
-                className="flex w-full flex-col gap-0.5 rounded px-2 py-1.5 text-left text-xs text-neutral-200 hover:bg-neutral-800"
-              >
-                <span className="flex items-center gap-2">
-                  <span className="shrink-0 font-semibold uppercase tracking-wider text-sky-400">
-                    {p.mnemonique}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate font-medium">{p.nom}</span>
-                </span>
-                <span className="truncate pl-0 text-[10px] text-neutral-500">{p.description}</span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
+            <span className="flex items-center gap-2">
+              <span className="shrink-0 font-semibold uppercase tracking-wider text-sky-400">
+                {p.mnemonique}
+              </span>
+              <span className="min-w-0 flex-1 truncate font-medium">{p.nom}</span>
+            </span>
+            <span className="truncate pl-0 text-[10px] text-neutral-500">{p.description}</span>
+          </button>
+        ))
+      }
+    </MenuDeroulant>
   );
 }
 
@@ -297,57 +303,46 @@ function LayoutSwitcher() {
  * de la sauvegarde complète. Basse fréquence (aucun re-render sur tick).
  */
 function WorkspaceMenu() {
-  const [open, setOpen] = useState(false);
   const workspaces = useStore(workspacesStore, (s) => s.workspaces);
   const currentId = useStore(workspacesStore, (s) => s.currentId);
   const currentName = workspaces.find((w) => w.id === currentId)?.name ?? "Défaut";
-
-  const onSaveAs = () => {
-    const nom = window.prompt("Nom du workspace :");
-    if (nom && nom.trim().length > 0) workspacesStore.getState().saveAs(nom.trim());
-    setOpen(false);
-  };
-  const onRename = (id: string, name: string) => {
-    const nom = window.prompt("Nouveau nom :", name);
-    if (nom && nom.trim().length > 0) workspacesStore.getState().rename(id, nom.trim());
-  };
-  const onRemove = (id: string, name: string) => {
-    if (window.confirm(`Supprimer le workspace « ${name} » ?`)) workspacesStore.getState().remove(id);
-  };
 
   const itemClass =
     "w-full rounded px-2 py-1 text-left text-xs text-neutral-200 hover:bg-neutral-800";
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Workspaces (agencements enregistrés)"
-        className="flex items-center gap-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 hover:border-neutral-500"
-      >
-        <span className="text-neutral-500">WS</span>
-        <span className="max-w-[120px] truncate">{currentName}</span>
-        <span aria-hidden className="text-[9px] text-neutral-500">▾</span>
-      </button>
-
-      {open && (
+    <MenuDeroulant
+      align="right"
+      titre="Workspaces (agencements enregistrés)"
+      declencheur={
         <>
-          {/* Zone de fermeture au clic extérieur. */}
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div
-            role="menu"
-            className="absolute right-0 z-50 mt-1 w-60 rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl"
-          >
+          <span className="text-neutral-500">WS</span>
+          <span className="max-w-[120px] truncate">{currentName}</span>
+        </>
+      }
+    >
+      {(fermer) => {
+        const onSaveAs = () => {
+          enregistrerWorkspaceAvecNom();
+          fermer();
+        };
+        const onRename = (id: string, name: string) => {
+          const nom = window.prompt("Nouveau nom :", name);
+          if (nom && nom.trim().length > 0) workspacesStore.getState().rename(id, nom.trim());
+        };
+        const onRemove = (id: string, name: string) => {
+          if (window.confirm(`Supprimer le workspace « ${name} » ?`)) workspacesStore.getState().remove(id);
+        };
+        return (
+          <>
             {workspaces.map((w) => (
               <div key={w.id} className="flex items-center gap-1">
                 <button
                   type="button"
+                  role="menuitem"
                   onClick={() => {
                     workspacesStore.getState().apply(w.id);
-                    setOpen(false);
+                    fermer();
                   }}
                   className={`min-w-0 flex-1 truncate rounded px-2 py-1 text-left text-xs hover:bg-neutral-800 ${
                     w.id === currentId ? "text-emerald-400" : "text-neutral-200"
@@ -380,16 +375,17 @@ function WorkspaceMenu() {
             ))}
 
             <div className="my-1 h-px bg-neutral-800" />
-            <button type="button" onClick={onSaveAs} className={itemClass}>
+            <button type="button" role="menuitem" onClick={onSaveAs} className={itemClass}>
               Enregistrer sous…
             </button>
 
             <div className="my-1 h-px bg-neutral-800" />
             <button
               type="button"
+              role="menuitem"
               onClick={() => {
-                exporterSauvegarde();
-                setOpen(false);
+                exporterSauvegardeAvecFeedback();
+                fermer();
               }}
               className={itemClass}
             >
@@ -397,18 +393,19 @@ function WorkspaceMenu() {
             </button>
             <button
               type="button"
+              role="menuitem"
               onClick={() => {
                 declencherImportSauvegarde();
-                setOpen(false);
+                fermer();
               }}
               className={itemClass}
             >
               Importer une sauvegarde…
             </button>
-          </div>
-        </>
-      )}
-    </div>
+          </>
+        );
+      }}
+    </MenuDeroulant>
   );
 }
 
@@ -513,13 +510,20 @@ export function Toolbar() {
       <div className="flex gap-1">
         {TIMEFRAMES.map((tf) => {
           const unsupported = !supportedTf.includes(tf);
+          const rcTf = raccourciTimeframe(tf);
           return (
             <button
               key={tf}
               type="button"
               disabled={unsupported}
               onClick={() => setTimeframe(tf)}
-              title={unsupported ? `non supporté par ${exchangeLabel(exchange)}` : undefined}
+              title={
+                unsupported
+                  ? `non supporté par ${exchangeLabel(exchange)}`
+                  : rcTf
+                    ? `${tf} — ${rcTf}`
+                    : undefined
+              }
               className={`rounded px-2 py-1 text-xs ${
                 unsupported
                   ? "cursor-not-allowed bg-neutral-900 text-neutral-700"
@@ -572,9 +576,10 @@ export function Toolbar() {
         title={
           noTradeStream
             ? "Indisponible sur cette source (aucun flux de trades)"
-            : isBinance
-              ? undefined
-              : "Footprint complet ; CVD limité hors Binance/Coinbase"
+            : avecRaccourci(
+                isBinance ? "Orderflow" : "Footprint complet ; CVD limité hors Binance/Coinbase",
+                RC_ORDERFLOW,
+              )
         }
         className={`rounded px-2 py-1 text-xs ${
           noTradeStream
@@ -596,7 +601,7 @@ export function Toolbar() {
         title={
           isSynthetic
             ? "Indisponible sur une série synthétique (volume non défini)"
-            : "Volume par zone de prix (plage visible)"
+            : avecRaccourci("Volume par zone de prix (plage visible)", RC_PROFIL_VOL)
         }
         className={`rounded px-2 py-1 text-xs ${
           isSynthetic
@@ -620,7 +625,7 @@ export function Toolbar() {
         title={
           isTradfi || isSynthetic
             ? "Indisponible sur cette source (liquidations perp Bybit/OKX uniquement)"
-            : "Heatmap liquidations (exécutées) — L"
+            : avecRaccourci("Heatmap liquidations (exécutées)", RC_LIQ)
         }
         className={`rounded px-2 py-1 text-xs ${
           isTradfi || isSynthetic
@@ -646,7 +651,10 @@ export function Toolbar() {
             ? "Indisponible sur une série synthétique (volume non défini)"
             : isTradfi
               ? "Indisponible en marchés traditionnels (revenus on-chain crypto uniquement)"
-              : "Revenus on-chain du protocole (DefiLlama) — actifs de protocole uniquement"
+              : avecRaccourci(
+                  "Revenus on-chain du protocole (DefiLlama) — actifs de protocole uniquement",
+                  RC_REVENUS,
+                )
         }
         className={`rounded px-2 py-1 text-xs ${
           isTradfi || isSynthetic
@@ -677,7 +685,10 @@ export function Toolbar() {
       {/* Export du graphe courant en PNG (téléchargement « SYMBOLE-TF-date.png »). */}
       <button
         type="button"
-        onClick={() => exportChartImage(symbol, timeframe)}
+        onClick={() => {
+          exportChartImage(symbol, timeframe);
+          pousserToast("PNG exporté");
+        }}
         title="Exporter le graphe en image PNG"
         className="rounded px-2 py-1 text-xs bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
       >
@@ -687,7 +698,9 @@ export function Toolbar() {
       {/* Workspaces + thème (poussés à droite). */}
       <div className="ml-auto flex items-center gap-2">
         <WorkspaceMenu />
-        <span className="text-xs text-neutral-500">Thème</span>
+        <span className="text-xs text-neutral-500" title={avecRaccourci("Thème suivant", RC_THEME)}>
+          Thème
+        </span>
         <ThemeSwitcher />
       </div>
     </header>

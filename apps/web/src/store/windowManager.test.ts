@@ -1,9 +1,12 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, beforeEach } from "vitest";
 import {
   cascadePosition,
   clampPosition,
   clampSize,
   detectSnapZone,
+  estNouvelle,
+  grilleMosaique,
+  marquerVue,
   normaliserOrdreZ,
   snapGeometry,
   windowManagerStore,
@@ -12,6 +15,8 @@ import {
   menuWindows,
   WINDOW_Z_MAX,
   WINDOW_Z_MIN,
+  MIN_WIDTH,
+  MIN_HEIGHT,
   GROUP_PALETTE,
   type EtatFenetre,
   type WorkspaceRect,
@@ -147,6 +152,87 @@ describe("snapGeometry", () => {
   });
 });
 
+describe("grilleMosaique", () => {
+  const viewport: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
+  const MARGE = 8;
+
+  /** Toutes les cellules tiennent dans le viewport et ne se chevauchent pas. */
+  function verifierGrille(rects: { x: number; y: number; width: number; height: number }[]): void {
+    for (const r of rects) {
+      expect(r.x).toBeGreaterThanOrEqual(viewport.x);
+      expect(r.y).toBeGreaterThanOrEqual(viewport.y);
+      expect(r.x + r.width).toBeLessThanOrEqual(viewport.x + viewport.width + 1e-6);
+      expect(r.y + r.height).toBeLessThanOrEqual(viewport.y + viewport.height + 1e-6);
+      expect(r.width).toBeGreaterThan(0);
+      expect(r.height).toBeGreaterThan(0);
+    }
+  }
+
+  it("n=1 : une seule cellule couvrant le viewport moins la marge", () => {
+    const rects = grilleMosaique(1, viewport);
+    expect(rects).toHaveLength(1);
+    expect(rects[0]).toEqual({ x: MARGE, y: MARGE, width: 1920 - 2 * MARGE, height: 1080 - 2 * MARGE });
+    verifierGrille(rects);
+  });
+
+  it("n=2 : 2 colonnes × 1 ligne (côte à côte)", () => {
+    const rects = grilleMosaique(2, viewport);
+    expect(rects).toHaveLength(2);
+    // cols=ceil(sqrt(2))=2, rows=1 -> même y/hauteur, x qui progresse
+    expect(rects[0]!.y).toBe(MARGE);
+    expect(rects[1]!.y).toBe(MARGE);
+    expect(rects[1]!.x).toBeGreaterThan(rects[0]!.x);
+    expect(rects[0]!.width).toBeCloseTo((1920 - 3 * MARGE) / 2);
+    verifierGrille(rects);
+  });
+
+  it("n=4 : grille 2×2", () => {
+    const rects = grilleMosaique(4, viewport);
+    expect(rects).toHaveLength(4);
+    // cols=2, rows=2 : (0,1) sur la 1ère ligne, (2,3) sur la 2ème
+    expect(rects[0]!.y).toBe(rects[1]!.y);
+    expect(rects[2]!.y).toBe(rects[3]!.y);
+    expect(rects[2]!.y).toBeGreaterThan(rects[0]!.y);
+    expect(rects[0]!.x).toBe(rects[2]!.x);
+    verifierGrille(rects);
+  });
+
+  it("n=5 : 3 colonnes × 2 lignes, dernière ligne incomplète (2 cellules)", () => {
+    const rects = grilleMosaique(5, viewport);
+    expect(rects).toHaveLength(5);
+    // cols=ceil(sqrt(5))=3, rows=ceil(5/3)=2 : indices 0,1,2 en ligne 0 ; 3,4 en ligne 1
+    expect(rects[0]!.y).toBe(rects[1]!.y);
+    expect(rects[1]!.y).toBe(rects[2]!.y);
+    expect(rects[3]!.y).toBe(rects[4]!.y);
+    expect(rects[3]!.y).toBeGreaterThan(rects[0]!.y);
+    // La 5ème cellule (ligne 1, col 1) s'aligne sous la 2ème (ligne 0, col 1).
+    expect(rects[4]!.x).toBe(rects[1]!.x);
+    verifierGrille(rects);
+  });
+
+  it("n=0 : grille vide", () => {
+    expect(grilleMosaique(0, viewport)).toEqual([]);
+  });
+
+  it("n=24 : plancher de taille — aucune cellule sous MIN_WIDTH/MIN_HEIGHT", () => {
+    const rects = grilleMosaique(24, viewport);
+    expect(rects).toHaveLength(24);
+    for (const r of rects) {
+      expect(r.width).toBeGreaterThanOrEqual(MIN_WIDTH);
+      expect(r.height).toBeGreaterThanOrEqual(MIN_HEIGHT);
+    }
+    // À n=24 (grille 5×5) la hauteur brute (~206px) passe sous MIN_HEIGHT : elle est
+    // bornée à 240 (léger chevauchement vertical accepté).
+    expect(rects[0]!.height).toBe(MIN_HEIGHT);
+  });
+
+  it("respecte une origine de viewport non nulle", () => {
+    const decale: WorkspaceRect = { x: 200, y: 100, width: 800, height: 600 };
+    const rects = grilleMosaique(1, decale);
+    expect(rects[0]).toEqual({ x: 200 + MARGE, y: 100 + MARGE, width: 800 - 2 * MARGE, height: 600 - 2 * MARGE });
+  });
+});
+
 describe("WINDOW_REGISTRY", () => {
   it("contient exactement les 24 fenêtres attendues, sans doublon d'id ni de mnémonique", () => {
     expect(WINDOW_REGISTRY).toHaveLength(24);
@@ -190,6 +276,48 @@ describe("menuWindows (menu Fonctions dérivé du registre)", () => {
     expect(parId.get("globe")).toBe("Globe (géopolitique, chokepoints & trafic aérien)");
     // eco n'a pas de menuLabel → title.
     expect(parId.get("eco")).toBe("Calendrier économique");
+  });
+
+  it("expose le drapeau `nouveau` (liquidations/globe/stablecoins marquées, eco non)", () => {
+    const parId = new Map(menuWindows().map((w) => [w.id, w.nouveau]));
+    expect(parId.get("liquidations")).toBe(true);
+    expect(parId.get("globe")).toBe(true);
+    expect(parId.get("stablecoins")).toBe(true);
+    expect(parId.get("eco")).toBe(false);
+  });
+});
+
+describe("estNouvelle / marquerVue (badge « nouveau »)", () => {
+  // localStorage absent en Node : on installe un mock mémoire (même pattern que persist.test).
+  beforeEach(() => {
+    const data = new Map<string, string>();
+    (globalThis as { localStorage?: Storage }).localStorage = {
+      getItem: (k) => data.get(k) ?? null,
+      setItem: (k, v) => void data.set(k, v),
+      removeItem: (k) => void data.delete(k),
+      clear: () => data.clear(),
+      key: (i) => Array.from(data.keys())[i] ?? null,
+      get length() {
+        return data.size;
+      },
+    };
+  });
+  afterEach(() => {
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
+  it("une fenêtre jamais ouverte est nouvelle ; marquerVue la rend non nouvelle", () => {
+    expect(estNouvelle("globe")).toBe(true);
+    marquerVue("globe");
+    expect(estNouvelle("globe")).toBe(false);
+    // Indépendant par id : marquer globe ne touche pas stablecoins.
+    expect(estNouvelle("stablecoins")).toBe(true);
+  });
+
+  it("openWindow marque la fenêtre comme vue (le badge disparaît après 1ère ouverture)", () => {
+    expect(estNouvelle("liquidations")).toBe(true);
+    windowManagerStore.getState().openWindow("liquidations");
+    expect(estNouvelle("liquidations")).toBe(false);
   });
 });
 
@@ -679,5 +807,101 @@ describe("setDragPreview", () => {
     expect(windowManagerStore.getState().dragPreview).toEqual({ x: 0, y: 0, width: 960, height: 1080 });
     windowManagerStore.getState().setDragPreview(null);
     expect(windowManagerStore.getState().dragPreview).toBeNull();
+  });
+});
+
+describe("minimizeAll / restoreAll", () => {
+  it("réduit toutes les fenêtres ouvertes, puis les restaure toutes", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().openWindow("eco");
+
+    windowManagerStore.getState().minimizeAll();
+    expect(windowManagerStore.getState().windows.derivatives!.minimized).toBe(true);
+    expect(windowManagerStore.getState().windows.eco!.minimized).toBe(true);
+
+    windowManagerStore.getState().restoreAll();
+    expect(windowManagerStore.getState().windows.derivatives!.minimized).toBe(false);
+    expect(windowManagerStore.getState().windows.eco!.minimized).toBe(false);
+  });
+
+  it("minimizeAll ignore les fenêtres fermées (ne les réduit pas)", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().closeWindow("derivatives");
+    windowManagerStore.getState().minimizeAll();
+    // Fenêtre fermée : reste non réduite (rien à afficher dans la taskbar).
+    expect(windowManagerStore.getState().windows.derivatives!.minimized).toBe(false);
+  });
+
+  it("minimizeAll est un no-op référentiel si aucune fenêtre ouverte non réduite", () => {
+    const avant = windowManagerStore.getState().windows;
+    windowManagerStore.getState().minimizeAll();
+    expect(windowManagerStore.getState().windows).toBe(avant);
+  });
+});
+
+describe("closeAll", () => {
+  it("ferme toutes les fenêtres ouvertes en conservant leur géométrie", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().moveWindow("derivatives", 300, 200);
+    windowManagerStore.getState().openWindow("eco");
+
+    windowManagerStore.getState().closeAll();
+    expect(windowManagerStore.getState().windows.derivatives!.open).toBe(false);
+    expect(windowManagerStore.getState().windows.eco!.open).toBe(false);
+    // Géométrie préservée (réouverture ultérieure au même endroit).
+    expect(windowManagerStore.getState().windows.derivatives!.x).toBe(300);
+  });
+});
+
+describe("tileOpenWindows", () => {
+  it("dispose les fenêtres ouvertes non réduites en mosaïque (2 → côte à côte)", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().openWindow("eco");
+    const viewport: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
+
+    // Le store lit son propre workspace (identique au viewport via le beforeEach).
+    windowManagerStore.getState().tileOpenWindows();
+    const cells = grilleMosaique(2, viewport);
+    // Ordre par z ascendant : derivatives ouverte en 1er (z plus bas) -> cellule 0.
+    const d = windowManagerStore.getState().windows.derivatives!;
+    const e = windowManagerStore.getState().windows.eco!;
+    expect({ x: d.x, y: d.y, width: d.width, height: d.height }).toEqual(cells[0]);
+    expect({ x: e.x, y: e.y, width: e.width, height: e.height }).toEqual(cells[1]);
+    expect(d.preSnapGeometry).toBeNull();
+  });
+
+  it("ignore les fenêtres réduites et fermées", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().openWindow("eco");
+    windowManagerStore.getState().minimizeWindow("eco");
+    const viewport: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
+
+    windowManagerStore.getState().tileOpenWindows();
+    // Une seule fenêtre visible -> occupe tout le workspace moins la marge.
+    const seule = grilleMosaique(1, viewport)[0]!;
+    const d = windowManagerStore.getState().windows.derivatives!;
+    expect({ x: d.x, y: d.y, width: d.width, height: d.height }).toEqual(seule);
+  });
+
+  it("est un no-op si aucune fenêtre ouverte non réduite", () => {
+    const avant = windowManagerStore.getState().windows;
+    windowManagerStore.getState().tileOpenWindows();
+    expect(windowManagerStore.getState().windows).toBe(avant);
+  });
+});
+
+describe("cascadeAll", () => {
+  it("réempile les fenêtres ouvertes en cascade sans changer leur taille", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().openWindow("eco");
+    windowManagerStore.getState().moveWindow("derivatives", 900, 500);
+    const largeurAvant = windowManagerStore.getState().windows.derivatives!.width;
+    const viewport: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
+
+    windowManagerStore.getState().cascadeAll();
+    const d = windowManagerStore.getState().windows.derivatives!;
+    // 1ère fenêtre (z bas) -> cascade index 0 -> coin haut-gauche (marge 48px).
+    expect({ x: d.x, y: d.y }).toEqual(cascadePosition(0, viewport, d.width, d.height));
+    expect(d.width).toBe(largeurAvant);
   });
 });

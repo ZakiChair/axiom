@@ -9,7 +9,7 @@
  * position FINALE (pointerup) déclenche un `set()` Zustand — les déplacements
  * intermédiaires manipulent `style.left/top/width/height` directement.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import {
   windowManagerStore,
@@ -47,10 +47,55 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
   const etat = useStore(windowManagerStore, (s) => s.windows[id]);
   const rootRef = useRef<HTMLDivElement>(null);
   const [menuGroupeOuvert, setMenuGroupeOuvert] = useState(false);
+  const groupeRef = useRef<HTMLDivElement>(null);
+
+  // Menu « couleur de groupe » : fermeture sur Échap + clic extérieur (mêmes
+  // gestes que les menus déroulants de la Toolbar — cf. MenuDeroulant).
+  useEffect(() => {
+    if (!menuGroupeOuvert) return;
+    const surClic = (e: MouseEvent) => {
+      if (!groupeRef.current?.contains(e.target as Node)) setMenuGroupeOuvert(false);
+    };
+    const surEchap = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuGroupeOuvert(false);
+    };
+    document.addEventListener("mousedown", surClic);
+    document.addEventListener("keydown", surEchap);
+    return () => {
+      document.removeEventListener("mousedown", surClic);
+      document.removeEventListener("keydown", surEchap);
+    };
+  }, [menuGroupeOuvert]);
 
   if (!etat || !etat.open || etat.minimized) return null;
 
   const focus = (): void => windowManagerStore.getState().focusWindow(id);
+
+  /** Bascule maximiser ↔ restaurer en RÉUTILISANT le mécanisme de snap Aero existant :
+   * si la fenêtre est actuellement issue d'un snap/maximisation (`preSnapGeometry` non
+   * nul), on restaure la géométrie mémorisée ; sinon on maximise plein workspace
+   * (`snapGeometry("top")`), `snapWindow` sauvegardant la géométrie courante au passage. */
+  const basculerMaximiser = (): void => {
+    const store = windowManagerStore.getState();
+    const courant = store.windows[id];
+    if (!courant) return;
+    const preSnap = courant.preSnapGeometry;
+    if (preSnap) {
+      store.moveWindow(id, preSnap.x, preSnap.y);
+      store.resizeWindow(id, preSnap.width, preSnap.height);
+      store.setPreSnapGeometry(id, null);
+    } else {
+      store.snapWindow(id, snapGeometry("top", store.workspace));
+    }
+  };
+
+  /** Double-clic sur l'en-tête = maximiser/restaurer, comme Windows/macOS. Ignoré sur la
+   * zone des boutons (`data-no-drag`) pour ne pas se déclencher lors d'un double-clic
+   * rapide sur —/▢/✕ ou le sélecteur de couleur. */
+  const doubleClicEntete = (e: React.MouseEvent): void => {
+    if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
+    basculerMaximiser();
+  };
 
   const demarrerDrag = (e: React.PointerEvent): void => {
     if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
@@ -179,6 +224,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
     >
       <header
         onPointerDown={demarrerDrag}
+        onDoubleClick={doubleClicEntete}
         className="flex shrink-0 cursor-move items-center justify-between gap-2 rounded-t border-b border-border bg-bg px-2 py-1.5"
       >
         <div className="flex min-w-0 items-center gap-2">
@@ -187,7 +233,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
           </span>
           <span className="truncate text-xs font-medium text-text">{title}</span>
         </div>
-        <div className="relative flex shrink-0 items-center gap-1" data-no-drag>
+        <div ref={groupeRef} className="relative flex shrink-0 items-center gap-1" data-no-drag>
           <button
             type="button"
             title="Couleur de groupe"
@@ -228,6 +274,14 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
             className="rounded px-1 text-xs leading-none text-text-dim hover:bg-bg hover:text-text"
           >
             —
+          </button>
+          <button
+            type="button"
+            title="Maximiser / Restaurer"
+            onClick={basculerMaximiser}
+            className="rounded px-1 text-xs leading-none text-text-dim hover:bg-bg hover:text-text"
+          >
+            ▢
           </button>
           <button
             type="button"

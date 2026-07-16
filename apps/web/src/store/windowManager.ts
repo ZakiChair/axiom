@@ -24,7 +24,8 @@ export const GROUP_PALETTE: readonly string[] = COMPARE_PALETTE;
 
 /** Définition d'une fenêtre du registre. Le libellé du menu Fonctions vaut `title`
  *  sauf si `menuLabel` est fourni ; `menuHidden` exclut la fenêtre du menu (ex.
- *  `derivatives` possède son bouton DES dédié dans la Toolbar). */
+ *  `derivatives` possède son bouton DES dédié dans la Toolbar). `nouveau` marque une
+ *  fenêtre récente : badge « nouveau » dans le menu Fonctions jusqu'à sa 1ère ouverture. */
 export interface DefinitionFenetre {
   readonly id: string;
   readonly title: string;
@@ -33,6 +34,7 @@ export interface DefinitionFenetre {
   readonly defaultHeight: number;
   readonly menuLabel?: string;
   readonly menuHidden?: boolean;
+  readonly nouveau?: boolean;
 }
 
 /** Registre statique des 22 fenêtres Bloomberg — SOURCE UNIQUE : titre/mnémonique/
@@ -44,7 +46,7 @@ export interface DefinitionFenetre {
 export const WINDOW_REGISTRY = [
   { id: "derivatives", title: "Produits dérivés", mnemonic: "DES", defaultWidth: 420, defaultHeight: 640, menuHidden: true },
   { id: "fundingMatrix", title: "Funding cross-exchange", mnemonic: "FUNDX", defaultWidth: 460, defaultHeight: 420 },
-  { id: "liquidations", title: "Liquidations", mnemonic: "LIQ", defaultWidth: 460, defaultHeight: 520 },
+  { id: "liquidations", title: "Liquidations", mnemonic: "LIQ", defaultWidth: 460, defaultHeight: 520, nouveau: true },
   { id: "eco", title: "Calendrier économique", mnemonic: "ECO", defaultWidth: 440, defaultHeight: 640 },
   { id: "news", title: "Actualités crypto", mnemonic: "NEWS", defaultWidth: 440, defaultHeight: 640 },
   { id: "corr", title: "Corrélations", mnemonic: "CORR", defaultWidth: 480, defaultHeight: 640 },
@@ -64,8 +66,8 @@ export const WINDOW_REGISTRY = [
   { id: "vol", title: "Volatilité (cône RV, VRP)", mnemonic: "VOL", defaultWidth: 760, defaultHeight: 560 },
   { id: "fund", title: "Fiche société (FUND)", mnemonic: "FUND", defaultWidth: 480, defaultHeight: 640 },
   { id: "brief", title: "Point marché", mnemonic: "BRIEF", defaultWidth: 480, defaultHeight: 720, menuLabel: "Point marché (snapshot)" },
-  { id: "globe", title: "Globe (chokepoints & trafic aérien)", mnemonic: "GLOBE", defaultWidth: 720, defaultHeight: 720, menuLabel: "Globe (géopolitique, chokepoints & trafic aérien)" },
-  { id: "stablecoins", title: "Stablecoins (supply, dominance, pegs)", mnemonic: "STBL", defaultWidth: 860, defaultHeight: 640 },
+  { id: "globe", title: "Globe (chokepoints & trafic aérien)", mnemonic: "GLOBE", defaultWidth: 720, defaultHeight: 720, menuLabel: "Globe (géopolitique, chokepoints & trafic aérien)", nouveau: true },
+  { id: "stablecoins", title: "Stablecoins (supply, dominance, pegs)", mnemonic: "STBL", defaultWidth: 860, defaultHeight: 640, nouveau: true },
 ] as const satisfies readonly DefinitionFenetre[];
 
 /** Union des ids de fenêtre — DÉRIVÉE du registre (source unique). Sert à typer la
@@ -73,12 +75,41 @@ export const WINDOW_REGISTRY = [
 export type WindowId = (typeof WINDOW_REGISTRY)[number]["id"];
 
 /** Fenêtres exposées dans le menu « Fonctions » (registre moins les `menuHidden`),
- *  avec le libellé d'affichage résolu (`menuLabel ?? title`). PURE (sans DOM) : la
- *  Toolbar y greffe l'action d'ouverture. Testée dans windowManager.test.ts. */
-export function menuWindows(): { id: WindowId; mnemonique: string; libelle: string }[] {
+ *  avec le libellé d'affichage résolu (`menuLabel ?? title`) et le drapeau `nouveau`
+ *  (badge de découvrabilité). PURE (sans DOM) : la Toolbar y greffe l'action
+ *  d'ouverture. Testée dans windowManager.test.ts. */
+export function menuWindows(): { id: WindowId; mnemonique: string; libelle: string; nouveau: boolean }[] {
   return (WINDOW_REGISTRY as readonly DefinitionFenetre[])
     .filter((w) => !w.menuHidden)
-    .map((w) => ({ id: w.id as WindowId, mnemonique: w.mnemonic, libelle: w.menuLabel ?? w.title }));
+    .map((w) => ({
+      id: w.id as WindowId,
+      mnemonique: w.mnemonic,
+      libelle: w.menuLabel ?? w.title,
+      nouveau: w.nouveau ?? false,
+    }));
+}
+
+/** Préfixe localStorage marquant qu'une fenêtre « nouveau » a déjà été ouverte (badge). */
+const SEEN_PREFIX = "axiom:seen:";
+
+/** Marque une fenêtre comme VUE (best-effort) : son badge « nouveau » disparaît ensuite.
+ *  Même pattern localStorage tolérant que le reste du repo (mode privé / Node : no-op). */
+export function marquerVue(id: string): void {
+  try {
+    localStorage.setItem(SEEN_PREFIX + id, "1");
+  } catch {
+    /* localStorage indisponible : best-effort */
+  }
+}
+
+/** true si la fenêtre n'a jamais été ouverte (aucun flag « vu » en localStorage). En cas
+ *  d'indisponibilité du stockage, renvoie false (pas de badge parasite permanent). */
+export function estNouvelle(id: string): boolean {
+  try {
+    return localStorage.getItem(SEEN_PREFIX + id) === null;
+  } catch {
+    return false;
+  }
 }
 
 /** Espace minimal toujours visible d'une fenêtre (pixels), pour le drag comme le resize. */
@@ -198,6 +229,41 @@ export function cascadePosition(
   return { x, y };
 }
 
+/** Grille de mosaïque pour disposer `n` fenêtres dans un rectangle sans recouvrement :
+ * `cols = ceil(sqrt(n))`, `rows = ceil(n / cols)`, marge de 8px autour et ENTRE les
+ * cellules. Renvoie `n` rectangles rangés ligne par ligne (la dernière ligne peut être
+ * incomplète, ex. n=5 → 3 colonnes × 2 lignes, dernière ligne à 2). PURE (sans DOM),
+ * testée dans windowManager.test.ts. */
+export function grilleMosaique(
+  n: number,
+  viewport: WorkspaceRect
+): { x: number; y: number; width: number; height: number }[] {
+  if (n <= 0) return [];
+  const MARGE = 8;
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  const largeurCellule = (viewport.width - MARGE * (cols + 1)) / cols;
+  const hauteurCellule = (viewport.height - MARGE * (rows + 1)) / rows;
+  // Plancher de taille : à fort n, une cellule peut passer sous les minima d'une
+  // fenêtre. On borne la taille ÉMISE aux minima du store (le pas de la grille reste
+  // sur la taille brute) → les fenêtres se chevauchent légèrement, comportement
+  // cohérent avec le clamp du drag/resize.
+  const largeurCase = Math.max(largeurCellule, MIN_WIDTH);
+  const hauteurCase = Math.max(hauteurCellule, MIN_HEIGHT);
+  const rects: { x: number; y: number; width: number; height: number }[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const col = i % cols;
+    const ligne = Math.floor(i / cols);
+    rects.push({
+      x: viewport.x + MARGE + col * (largeurCellule + MARGE),
+      y: viewport.y + MARGE + ligne * (hauteurCellule + MARGE),
+      width: largeurCase,
+      height: hauteurCase,
+    });
+  }
+  return rects;
+}
+
 /** Confine une position au workspace — STRICTEMENT (la fenêtre entière, pas seulement
  * un bord, doit rester dans le rect). Suppose `width`/`height` déjà plafonnés via
  * `clampSize` contre le MÊME workspace (sinon le résultat peut légèrement déborder). */
@@ -311,6 +377,20 @@ export interface WindowManagerState {
    * drag/resize interactif, appliqué en lot. */
   reclampAll: (workspace: WorkspaceRect) => void;
   setWorkspace: (workspace: WorkspaceRect) => void;
+
+  /** Réduit d'un coup toutes les fenêtres ouvertes et non déjà réduites. */
+  minimizeAll: () => void;
+  /** Restaure d'un coup toutes les fenêtres ouvertes et réduites. */
+  restoreAll: () => void;
+  /** Ferme d'un coup toutes les fenêtres ouvertes (géométrie conservée). */
+  closeAll: () => void;
+  /** Dispose les fenêtres ouvertes non réduites en mosaïque (cf. `grilleMosaique`),
+   *  ordonnées par z ascendant, DANS le workspace du store (cadré sous la toolbar/le
+   *  panneau, pas le viewport plein écran). Efface le preSnap des fenêtres retuilées. */
+  tileOpenWindows: () => void;
+  /** Réempile les fenêtres ouvertes non réduites en cascade (cf. `cascadePosition`),
+   *  ordonnées par z ascendant, sans changer leur taille, DANS le workspace du store. */
+  cascadeAll: () => void;
 }
 
 interface EtatOrdreZ {
@@ -386,6 +466,8 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   workspace: { x: 0, y: 0, width: 1920, height: 1080 },
 
   openWindow: (id) => {
+    // Marque la fenêtre comme vue : son badge « nouveau » (menu Fonctions) disparaît.
+    marquerVue(id);
     const state = get();
     if (state.windows[id]) {
       const ordre = mettreAuSommet(state, id);
@@ -552,6 +634,84 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
       }
     }
     if (changed) set({ windows: next });
+  },
+
+  minimizeAll: () => {
+    const windows = get().windows;
+    const next: Record<string, EtatFenetre> = {};
+    let changed = false;
+    for (const [id, w] of Object.entries(windows)) {
+      if (w.open && !w.minimized) {
+        changed = true;
+        next[id] = { ...w, minimized: true };
+      } else {
+        next[id] = w;
+      }
+    }
+    if (changed) set({ windows: next });
+  },
+
+  restoreAll: () => {
+    const windows = get().windows;
+    const next: Record<string, EtatFenetre> = {};
+    let changed = false;
+    for (const [id, w] of Object.entries(windows)) {
+      if (w.open && w.minimized) {
+        changed = true;
+        next[id] = { ...w, minimized: false };
+      } else {
+        next[id] = w;
+      }
+    }
+    if (changed) set({ windows: next });
+  },
+
+  closeAll: () => {
+    const windows = get().windows;
+    const next: Record<string, EtatFenetre> = {};
+    let changed = false;
+    for (const [id, w] of Object.entries(windows)) {
+      if (w.open) {
+        changed = true;
+        next[id] = { ...w, open: false };
+      } else {
+        next[id] = w;
+      }
+    }
+    if (changed) set({ windows: next });
+  },
+
+  tileOpenWindows: () => {
+    const { windows, workspace } = get();
+    const ouvertes = Object.values(windows)
+      .filter((w) => w.open && !w.minimized)
+      .sort((a, b) => a.z - b.z);
+    if (ouvertes.length === 0) return;
+    const grille = grilleMosaique(ouvertes.length, workspace);
+    const next = { ...windows };
+    for (let i = 0; i < ouvertes.length; i += 1) {
+      const fenetre = ouvertes[i];
+      const cellule = grille[i];
+      if (!fenetre || !cellule) continue;
+      next[fenetre.id] = { ...fenetre, ...cellule, preSnapGeometry: null };
+    }
+    set({ windows: next });
+  },
+
+  cascadeAll: () => {
+    const { windows, workspace } = get();
+    const ouvertes = Object.values(windows)
+      .filter((w) => w.open && !w.minimized)
+      .sort((a, b) => a.z - b.z);
+    if (ouvertes.length === 0) return;
+    const next = { ...windows };
+    for (let i = 0; i < ouvertes.length; i += 1) {
+      const fenetre = ouvertes[i];
+      if (!fenetre) continue;
+      const { x, y } = cascadePosition(i, workspace, fenetre.width, fenetre.height);
+      next[fenetre.id] = { ...fenetre, x, y, preSnapGeometry: null };
+    }
+    set({ windows: next });
   },
 }));
 

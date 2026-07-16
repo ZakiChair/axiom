@@ -466,3 +466,13 @@ body::before {
     opacity: 1;
   }
 }
+
+/* Apparition discrète des toasts de feedback (fade-in opacity). */
+@keyframes axiom-toast-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

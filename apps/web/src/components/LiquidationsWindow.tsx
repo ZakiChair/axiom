@@ -10,7 +10,9 @@
  *    mini-histogramme temporel (shorts ↑ / longs ↓), et le feed des ~60 dernières liq du
  *    buffer avec hiérarchie de magnitude (barre de fond log, ≥ $1M en gras) ; les
  *    cascades (liq consécutives de même côté espacées de < 2 s) y sont GROUPÉES en une
- *    ligne « ×N » cliquable qui déplie/replie le détail (cf. grouperCascades) ;
+ *    ligne « ×N » cliquable qui déplie/replie le détail (cf. grouperCascades) ; un clic
+ *    sur une ligne simple ou de détail navigue le graphe vers la liquidation (heatmap
+ *    allumée au besoin, recentrage + flash de la bande de prix — cf. voirSurGraphe) ;
  *  • « Historique » — lecture PONCTUELLE de l'historique persistant du daemon axiomd
  *    (SQLite, rétention 30 j) sur 1h/24h/7j/30j : totaux, dominance, histogramme
  *    48 buckets, top 10 des plus grosses liq. Replis honnêtes (daemon absent vs fenêtre
@@ -35,6 +37,8 @@ import {
   type Granularite,
 } from "../chart/liquidationMarkers";
 import { liqEstStore, LEVIERS } from "../chart/liquidationEstimates";
+import { flasherNiveau } from "../chart/liquidationHeat";
+import { getActiveChart } from "../chart/drawing";
 import { liquidationsGet, type LiqDaemon } from "../data/daemon";
 import {
   EnTeteFenetre,
@@ -103,6 +107,19 @@ function venueInfo(venue: string): { court: string; long: string; ton: TonBadge 
 
 /** Grille partagée en-tête/lignes du feed (colonnes alignées). */
 const GRILLE_FEED = "grid grid-cols-[60px_52px_42px_1fr_88px] items-center gap-2";
+
+/**
+ * Lien feed→chart : navigue le graphe vers une liquidation du feed — allume la heatmap si
+ * elle est éteinte (setActif, relayé au contrôleur par ChartInstance), recentre le chart
+ * FOCUS sur le timestamp de la liquidation (`scrollToTimestamp`, API klinecharts 9.8) puis
+ * flashe la bande de prix correspondante 1,5 s (cf. chart/liquidationHeat.ts).
+ */
+function voirSurGraphe(ev: LiqEvent): void {
+  const marks = liqMarksStore.getState();
+  if (!marks.actif) marks.setActif(true);
+  getActiveChart()?.scrollToTimestamp(ev.time);
+  flasherNiveau(ev.price);
+}
 
 /**
  * Bascule « Sur le graphe » : active/désactive les marqueurs de liquidation sur le
@@ -347,14 +364,20 @@ function Histogramme({ buckets }: { buckets: BucketTemporel[] }) {
  * Ligne du feed : barre de fond proportionnelle à la magnitude LOG de la liquidation
  * (teinte du côté), montant en gras dès SEUIL_GRAS_USD. L'opacité passe par une classe
  * séparée (`opacity-15`) : les modificateurs slash (bg-down/15) ne sont PAS générés sur
- * les tokens var() par le Tailwind du repo.
+ * les tokens var() par le Tailwind du repo. CLIQUABLE (événements isolés ET lignes de
+ * détail dépliées d'un groupe) : navigue le graphe vers la liquidation (cf. voirSurGraphe).
  */
 function LigneFeed({ ev, maxUsd }: { ev: LiqEvent; maxUsd: number }) {
   const venue = venueInfo(ev.venue);
   const grosse = ev.usd >= SEUIL_GRAS_USD;
   const part = magnitudeRelative(ev.usd, maxUsd);
   return (
-    <div className="relative border-b border-border/40">
+    <button
+      type="button"
+      onClick={() => voirSurGraphe(ev)}
+      title="Voir sur le graphe"
+      className="relative block w-full cursor-pointer border-b border-border/40 text-left transition hover:bg-bg"
+    >
       <div
         className={`absolute inset-y-0 left-0 opacity-15 ${ev.side === "long" ? "bg-down" : "bg-up"}`}
         style={{ width: `${part * 100}%` }}
@@ -372,7 +395,7 @@ function LigneFeed({ ev, maxUsd }: { ev: LiqEvent; maxUsd: number }) {
         </span>
         <span className="text-right tabular-nums text-text-dim">{formatPrice(ev.price)}</span>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -631,6 +654,7 @@ function ContenuLive() {
             la heatmap du graphe. Long = position longue fermée de force (vente). Totaux et stats
             sur la fenêtre glissante choisie ; feed = dernières liquidations du buffer (cascades
             de même côté espacées de moins de 2 s groupées en ×N — cliquer pour le détail).
+            Cliquer une liquidation la montre sur le graphe (recentrage + flash de la bande).
           </NoteSource>
         </div>
       </div>

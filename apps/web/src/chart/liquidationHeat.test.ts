@@ -36,8 +36,13 @@ import {
   estFondClair,
   parseCssColor,
   couleurRampe,
+  couleurRampeArrets,
+  rampePourTheme,
+  alphaFadeIn,
   filtrerNiveauxDenses,
   dechevaucher,
+  liqFlashStore,
+  flasherNiveau,
   type LiqGrid,
 } from "./liquidationHeat";
 
@@ -128,6 +133,18 @@ describe("construireGrille", () => {
     const fin = construireGrille(events, candles, 0, 2, 0.5);
     expect(fin?.taille).toBeCloseTo(0.05, 9);
     expect(fin?.cells.size).toBe(2); // buckets toujours distincts (encore plus fins)
+  });
+
+  it("renseigne dernierTime = max des time des événements de la cellule", () => {
+    // 3 events même bougie/bucket, temps désordonnés → dernierTime = le plus grand (fade-in).
+    const candles = [candle({ time: 0, close: 100 }), candle({ time: 60000, close: 100 })];
+    const events = [
+      ev({ time: 1000, side: "long", price: 100, usd: 500 }),
+      ev({ time: 1500, side: "long", price: 100, usd: 300 }),
+      ev({ time: 1200, side: "short", price: 100, usd: 100 }),
+    ];
+    const cell = [...(construireGrille(events, candles, 0, 2)?.cells.values() ?? [])][0];
+    expect(cell?.dernierTime).toBe(1500);
   });
 });
 
@@ -352,6 +369,88 @@ describe("couleurRampe", () => {
   });
 });
 
+describe("couleurRampeArrets", () => {
+  const R: ReadonlyArray<readonly [number, number, number]> = [
+    [0, 0, 0],
+    [10, 20, 30],
+    [100, 200, 255],
+  ];
+  it("interpole linéairement entre arrêts (extrêmes + arrêt du milieu)", () => {
+    expect(couleurRampeArrets(0, R)).toEqual([0, 0, 0]);
+    expect(couleurRampeArrets(1, R)).toEqual([100, 200, 255]);
+    expect(couleurRampeArrets(0.5, R)).toEqual([10, 20, 30]); // arrêt central pile
+    expect(couleurRampeArrets(0.25, R)).toEqual([5, 10, 15]); // mi-chemin arrêt 0 → 1
+  });
+  it("clampe t hors [0,1]", () => {
+    expect(couleurRampeArrets(-1, R)).toEqual([0, 0, 0]);
+    expect(couleurRampeArrets(2, R)).toEqual([100, 200, 255]);
+  });
+  it("sur les arrêts VIRIDIS, équivaut à couleurViridis", () => {
+    const V = rampePourTheme("dark", false); // = VIRIDIS
+    for (const t of [0, 0.3, 0.5, 0.75, 1]) {
+      expect(couleurRampeArrets(t, V)).toEqual(couleurViridis(t));
+    }
+  });
+});
+
+describe("rampePourTheme", () => {
+  it("dark et aurora → viridis direct (jaune = max)", () => {
+    for (const th of ["dark", "aurora"]) {
+      expect(couleurRampeArrets(0, rampePourTheme(th, false))).toEqual(couleurViridis(0));
+      expect(couleurRampeArrets(1, rampePourTheme(th, false))).toEqual(couleurViridis(1));
+    }
+  });
+  it("cute et tout thème à fond clair → viridis inversé", () => {
+    expect(couleurRampeArrets(1, rampePourTheme("cute", false))).toEqual(couleurViridis(0)); // max → violet
+    expect(couleurRampeArrets(0, rampePourTheme("cute", false))).toEqual(couleurViridis(1)); // min → jaune
+    // thème inconnu à fond clair : même repli inversé.
+    expect(couleurRampeArrets(1, rampePourTheme("inconnu", true))).toEqual(couleurViridis(0));
+  });
+  it("thème inconnu à fond sombre → viridis direct (repli)", () => {
+    expect(couleurRampeArrets(1, rampePourTheme("inconnu", false))).toEqual(couleurViridis(1));
+  });
+  it("bloomberg → brun sombre (distinct du fond) vers ambre saturé", () => {
+    const r = rampePourTheme("bloomberg", false);
+    expect(couleurRampeArrets(0, r)).toEqual([36, 28, 14]); // arrêt 0 éclairci (distinct du noir pur)
+    expect(couleurRampeArrets(1, r)).toEqual([255, 196, 0]); // ambre saturé
+  });
+  it("matrix → vert sombre (distinct du fond) vers vert néon", () => {
+    const r = rampePourTheme("matrix", false);
+    expect(couleurRampeArrets(0, r)).toEqual([14, 36, 20]); // arrêt 0 éclairci (distinct du noir pur)
+    expect(couleurRampeArrets(1, r)).toEqual([91, 255, 143]);
+  });
+});
+
+describe("alphaFadeIn", () => {
+  // Signature : (alphaNominal, dernierTime, tsDemarrage, bumpTs, now).
+  it("cellule fraîche à age local 0 → flash plein (alpha ≈ 1)", () => {
+    // dernierTime 1000 > tsDemarrage 500 et dans la fenêtre du bump ; now = bumpTs → age 0.
+    expect(alphaFadeIn(0.2, 1000, 500, 1000, 1000)).toBeCloseTo(1, 9);
+  });
+  it("fondu linéaire sur l'horloge LOCALE (now − bumpTs) puis retour au nominal à DUREE_FADE (400 ms)", () => {
+    expect(alphaFadeIn(0.2, 1000, 500, 1000, 1200)).toBeCloseTo(0.6, 9); // age local 200 → 0.2 + 0.8×0.5
+    expect(alphaFadeIn(0.2, 1000, 500, 1000, 1400)).toBe(0.2); // age local 400 → nominal (borne exclue)
+    expect(alphaFadeIn(0.2, 1000, 500, 1000, 2000)).toBe(0.2); // bien après → nominal
+  });
+  it("tolère la latence WS : événement en retard de 2 s (< fenêtre 5 s) flashe quand même", () => {
+    // dernierTime 8000 mais bumpTs 10000 (2 s de latence) : l'âge EXCHANGE (2 s) dépasserait
+    // DUREE_FADE — le bug corrigé — mais l'animation suit bumpTs → flash plein à now = bumpTs.
+    expect(alphaFadeIn(0.2, 8000, 500, 10000, 10000)).toBeCloseTo(1, 9);
+    // Le fondu retombe sur l'horloge locale, indépendamment de l'âge exchange.
+    expect(alphaFadeIn(0.2, 8000, 500, 10000, 10200)).toBeCloseTo(0.6, 9);
+  });
+  it("hors fenêtre de fraîcheur (latence > 5 s) → aucun boost", () => {
+    // dernierTime 4000 <= bumpTs 10000 − 5000 : trop vieux pour être « du » bump → nominal.
+    expect(alphaFadeIn(0.2, 4000, 500, 10000, 10000)).toBe(0.2);
+  });
+  it("événement antérieur au démarrage (seed) → aucun boost", () => {
+    expect(alphaFadeIn(0.2, 400, 500, 450, 450)).toBe(0.2); // dernierTime <= tsDemarrage
+  });
+  it("cellule sans dernierTime → nominal", () => {
+    expect(alphaFadeIn(0.2, undefined, 500, 1000, 1000)).toBe(0.2);
+  });
+});
+
 describe("filtrerNiveauxDenses", () => {
   it("ne garde que les buckets ≥ seuil × max, triés par poids décroissant", () => {
     const b = [{ poids: 100 }, { poids: 20 }, { poids: 14 }, { poids: 5 }];
@@ -410,5 +509,37 @@ describe("dechevaucher", () => {
 
   it("liste vide → vide", () => {
     expect(dechevaucher([], 15)).toEqual([]);
+  });
+});
+
+describe("liqFlashStore / flasherNiveau (lien feed→chart)", () => {
+  it("pose le prix et l'échéance à Date.now() + 1500 ms", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(10_000);
+      flasherNiveau(123.45);
+      expect(liqFlashStore.getState()).toMatchObject({ price: 123.45, jusqua: 11_500 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("expire après 1,5 s (Date.now() ≥ jusqua) et un nouveau clic re-pose le flash", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(10_000);
+      flasherNiveau(100);
+      // Juste avant l'échéance : le flash est encore actif (même prédicat que le rendu).
+      vi.setSystemTime(11_499);
+      expect(Date.now() < liqFlashStore.getState().jusqua).toBe(true);
+      // À l'échéance : expiré (le rendu ne dessine plus rien).
+      vi.setSystemTime(11_500);
+      expect(Date.now() < liqFlashStore.getState().jusqua).toBe(false);
+      // Nouveau clic : le prix et l'échéance sont remplacés.
+      flasherNiveau(200);
+      expect(liqFlashStore.getState()).toMatchObject({ price: 200, jusqua: 13_000 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

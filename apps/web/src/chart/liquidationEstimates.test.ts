@@ -28,7 +28,7 @@ vi.mock("../data/daemon", () => ({
 }));
 
 import type { Candle } from "@axiom/types";
-import { calculerNiveauxEstimes, LEVIERS } from "./liquidationEstimates";
+import { calculerNiveauxEstimes, calculerNiveauxEstimesDetail, LEVIERS } from "./liquidationEstimates";
 
 function candle(partial: Partial<Candle> & Pick<Candle, "time" | "close">): Candle {
   return { open: partial.close, high: partial.close, low: partial.close, volume: 0, ...partial };
@@ -153,5 +153,61 @@ describe("calculerNiveauxEstimes", () => {
       { time: 1500, oiUsd: 2000 },
     ];
     expect(calculerNiveauxEstimes(oiHist, candles, [])).toEqual([]);
+  });
+});
+
+describe("calculerNiveauxEstimesDetail", () => {
+  it("niveau traversé → dans consommes avec le time de la PREMIÈRE bougie traversante", () => {
+    // Bougie A (time 1000) = entrée close=100 ; bougie B (time 2000) low=95.5 traverse 96/98/99.
+    const candles = [
+      candle({ time: 1000, close: 100 }),
+      candle({ time: 2000, close: 98, high: 100, low: 95.5 }),
+    ];
+    const oiHist = [
+      { time: 1000, oiUsd: 1000 },
+      { time: 1500, oiUsd: 2000 },
+    ];
+    const { actifs, consommes } = calculerNiveauxEstimesDetail(oiHist, candles);
+
+    // 96, 98, 99 (longs) traversés → dans consommes, tsConsommation = 2000 (bougie B).
+    for (const p of [96, 98, 99]) {
+      const c = consommes.find((n) => n.side === "long" && Math.abs(n.price - p) < 1e-6);
+      expect(c).toBeDefined();
+      expect(c?.tsConsommation).toBe(2000);
+    }
+    // 90 (long) jamais traversé (low 95.5 > 90) → dans actifs, absent des consommes.
+    expect(actifs.some((n) => n.side === "long" && Math.abs(n.price - 90) < 1e-6)).toBe(true);
+    expect(consommes.some((n) => n.side === "long" && Math.abs(n.price - 90) < 1e-6)).toBe(false);
+    // Shorts (high 100 < 101) jamais traversés → tous dans actifs, aucun consommé.
+    expect(consommes.some((n) => n.side === "short")).toBe(false);
+  });
+
+  it("aucune traversée → tout dans actifs, consommes vide", () => {
+    const candles = [candle({ time: 1000, close: 100 })]; // pas de bougie ultérieure
+    const oiHist = [
+      { time: 1000, oiUsd: 1000 },
+      { time: 1500, oiUsd: 2000 },
+    ];
+    const { actifs, consommes } = calculerNiveauxEstimesDetail(oiHist, candles);
+    expect(actifs.length).toBe(8);
+    expect(consommes).toEqual([]);
+  });
+
+  it("detail.actifs === retour de calculerNiveauxEstimes (comportement identique)", () => {
+    const candles = [
+      candle({ time: 1000, close: 100 }),
+      candle({ time: 2000, close: 98, high: 100, low: 95.5 }),
+    ];
+    const oiHist = [
+      { time: 1000, oiUsd: 1000 },
+      { time: 1500, oiUsd: 2000 },
+    ];
+    expect(calculerNiveauxEstimesDetail(oiHist, candles).actifs).toEqual(
+      calculerNiveauxEstimes(oiHist, candles),
+    );
+    // Idem avec un sous-ensemble de leviers.
+    expect(calculerNiveauxEstimesDetail(oiHist, candles, [10, 50]).actifs).toEqual(
+      calculerNiveauxEstimes(oiHist, candles, [10, 50]),
+    );
   });
 });

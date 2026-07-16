@@ -10,6 +10,8 @@
  *
  * Toutes les fonctions ici sont PURES (aucun accès DOM/store/chart) et testées.
  */
+import { createStore } from "zustand/vanilla";
+import type { StoreApi } from "zustand/vanilla";
 import { ActionType, DomPosition } from "klinecharts";
 import type { Bounding, Chart, Crosshair, Point } from "klinecharts";
 import type { Candle } from "@axiom/types";
@@ -18,6 +20,7 @@ import {
   bucketIndex,
   candleContenant,
   couleurViridis,
+  VIRIDIS,
   liqEventsStore,
   liqMarksStore,
   type LiqEvent,
@@ -26,8 +29,9 @@ import {
 import {
   liqEstStore,
   oiHistStore,
-  calculerNiveauxEstimes,
+  calculerNiveauxEstimesDetail,
   type NiveauEstime,
+  type NiveauConsomme,
 } from "./liquidationEstimates";
 import type { Commande } from "../commands/registry";
 import { marketStore } from "../store/market";
@@ -42,6 +46,9 @@ export interface LiqCell {
   longUsd: number;
   shortUsd: number;
   count: number;
+  /** Temps du dernier événement agrégé dans la cellule (max des `time`) — pilote le fade-in
+   *  des cellules fraîches au RENDER (cf. `alphaFadeIn`) ; absent si la cellule est vide. */
+  dernierTime?: number;
 }
 
 /** Grille complète : cellules indexées par `${candleTime}:${bucketIdx}` + méta. */
@@ -94,6 +101,8 @@ export function construireGrille(
     if (ev.side === "long") cell.longUsd += ev.usd;
     else cell.shortUsd += ev.usd;
     cell.count += 1;
+    // Temps du dernier événement de la cellule (max) : sert au fade-in des cellules fraîches.
+    if (cell.dernierTime === undefined || ev.time > cell.dernierTime) cell.dernierTime = ev.time;
   }
 
   if (cells.size === 0) return null;
@@ -275,6 +284,104 @@ export function couleurRampe(t: number, fondClair: boolean): [number, number, nu
   return couleurViridis(fondClair ? 1 - t : t);
 }
 
+/** Rampe ambre du thème Bloomberg (brun sombre → ambre saturé — identité « terminal »). L'arrêt 0
+ *  reste sombre mais DISTINCT du fond noir pur (à alpha 0.15, [12,10,6] disparaissait). */
+const RAMPE_BLOOMBERG: ReadonlyArray<readonly [number, number, number]> = [
+  [36, 28, 14],
+  [80, 50, 10],
+  [160, 110, 10],
+  [230, 170, 0],
+  [255, 196, 0],
+];
+/** Rampe vert néon du thème Matrix (vert sombre → vert phosphore). L'arrêt 0 reste sombre mais
+ *  DISTINCT du fond noir pur (à alpha 0.15, [4,12,6] disparaissait). */
+const RAMPE_MATRIX: ReadonlyArray<readonly [number, number, number]> = [
+  [14, 36, 20],
+  [16, 60, 32],
+  [34, 120, 60],
+  [60, 190, 100],
+  [91, 255, 143],
+];
+/** Viridis INVERSÉ (arrêts renversés) : le violet foncé devient le maximum — thèmes à fond clair. */
+const VIRIDIS_INVERSE: ReadonlyArray<readonly [number, number, number]> = [...VIRIDIS].reverse();
+
+/**
+ * Arrêts RVB (5 crans comme VIRIDIS) de la rampe de couleur ESTHÉTIQUE du thème actif — c'est
+ * un choix par thème, PAS un réglage utilisateur : `bloomberg` → noir→ambre, `matrix` →
+ * noir→vert néon, `dark`/`aurora` → viridis direct, `cute` (et tout thème à FOND CLAIR) →
+ * viridis inversé (contraste rétabli). Thème inconnu → repli sur la logique fond : inversé si
+ * `fondClair`, viridis direct sinon. Lue 1×/frame par le contrôleur ; interpolée par
+ * `couleurRampeArrets`. PURE.
+ */
+export function rampePourTheme(
+  theme: string,
+  fondClair: boolean,
+): ReadonlyArray<readonly [number, number, number]> {
+  if (theme === "bloomberg") return RAMPE_BLOOMBERG;
+  if (theme === "matrix") return RAMPE_MATRIX;
+  if (theme === "dark" || theme === "aurora") return VIRIDIS;
+  // cute et tout thème à fond clair : viridis inversé (comportement historique de couleurRampe).
+  if (theme === "cute" || fondClair) return VIRIDIS_INVERSE;
+  // Thème sombre inconnu : repli viridis direct.
+  return VIRIDIS;
+}
+
+/**
+ * Interpolation linéaire générique d'une rampe de couleur (mêmes maths que `couleurViridis`,
+ * mais sur des arrêts quelconques) : `t ∈ [0,1]` clampé, `arrets.length ≥ 2`. Sert à peindre
+ * cellules, canvas lissé ET barre d'échelle avec LA MÊME rampe du thème actif. PURE.
+ */
+export function couleurRampeArrets(
+  t: number,
+  arrets: ReadonlyArray<readonly [number, number, number]>,
+): [number, number, number] {
+  const c = t <= 0 ? 0 : t >= 1 ? 1 : t;
+  const seg = c * (arrets.length - 1);
+  const i = Math.min(Math.floor(seg), arrets.length - 2);
+  const f = seg - i;
+  const a = arrets[i] as readonly [number, number, number];
+  const b = arrets[i + 1] as readonly [number, number, number];
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * f),
+    Math.round(a[1] + (b[1] - a[1]) * f),
+    Math.round(a[2] + (b[2] - a[2]) * f),
+  ];
+}
+
+/** Durée (ms) du fade-in d'une cellule fraîche : flash plein puis retour à l'alpha nominal. */
+const DUREE_FADE_MS = 400;
+/** Fenêtre (ms) de tolérance latence WS + skew NTP : une cellule reste « fraîche » si l'horodatage
+ *  EXCHANGE de son dernier événement tombe dans ces dernières secondes avant le bump local. */
+const FENETRE_FRAICHEUR_MS = 5000;
+
+/**
+ * Boost d'alpha du FADE-IN d'une cellule fraîche (live). Deux horloges sont dissociées pour que la
+ * latence WS / le skew NTP ne tronquent plus le flash :
+ *  • SÉLECTION (horloge EXCHANGE, tolérante) : la cellule flashe si `dernierTime` (dernier événement
+ *    de la cellule) est POSTÉRIEUR à `tsDemarrage` (démarrage du contrôleur — exclut le seed initial)
+ *    ET tombe dans la fenêtre `FENETRE_FRAICHEUR_MS` avant `bumpTs` (l'événement peut être en retard
+ *    de plusieurs secondes sans perdre son flash) ;
+ *  • ANIMATION (horloge LOCALE) : le fondu suit `age = now − bumpTs` (instant local du dernier rev
+ *    bump), donc insensible à la latence — `alpha = nominal + (1 − nominal) × (1 − age/DUREE_FADE_MS)`
+ *    (pleine à age 0, retombe au nominal à DUREE_FADE_MS). Sinon renvoie l'alpha nominal. PURE.
+ */
+export function alphaFadeIn(
+  alphaNominal: number,
+  dernierTime: number | undefined,
+  tsDemarrage: number,
+  bumpTs: number,
+  now: number,
+): number {
+  // Sélection tolérante à la latence (horloge exchange) : postérieur au démarrage (pas le seed) ET
+  // dans la fenêtre de fraîcheur avant le bump local (tolère latence WS + skew NTP).
+  if (dernierTime === undefined || dernierTime <= tsDemarrage) return alphaNominal;
+  if (dernierTime <= bumpTs - FENETRE_FRAICHEUR_MS) return alphaNominal;
+  // Animation indexée sur l'horloge LOCALE du bump : le fondu ignore l'âge exchange.
+  const age = now - bumpTs;
+  if (!(age >= 0) || age >= DUREE_FADE_MS) return alphaNominal;
+  return alphaNominal + (1 - alphaNominal) * (1 - age / DUREE_FADE_MS);
+}
+
 /**
  * Filtre les buckets pour n'en garder que les plus significatifs : ceux dont `poids` atteint
  * `seuilFrac × max`, PLAFONNÉ aux `maxN` plus lourds (tri décroissant). Évite de tracer des
@@ -310,6 +417,32 @@ export function dechevaucher<T extends { y: number; poids: number }>(
     if (retenus.every((r) => Math.abs(r.y - item.y) >= minEcart)) retenus.push(item);
   }
   return retenus;
+}
+
+// ─────────────────────────── Flash de bande (lien feed→chart) ───────────────────────────
+
+/** Durée (ms) du flash de bande déclenché par un clic dans le feed LIQ. */
+const FLASH_DUREE_MS = 1500;
+
+/** État du flash : prix à surligner + échéance (Date.now() ≥ jusqua ⇒ flash expiré). */
+export interface LiqFlashState {
+  price: number | null;
+  jusqua: number;
+}
+
+/**
+ * Mini-store vanilla du flash de bande : la fenêtre LIQ (clic sur une liquidation du feed)
+ * pose un prix via `flasherNiveau` ; le contrôleur s'y abonne (start/stop) et surligne la
+ * bande de prix correspondante pendant FLASH_DUREE_MS (fade linéaire, cf. dessinerFlash).
+ */
+export const liqFlashStore: StoreApi<LiqFlashState> = createStore<LiqFlashState>(() => ({
+  price: null,
+  jusqua: 0,
+}));
+
+/** Déclenche le flash de la bande contenant `price` pour FLASH_DUREE_MS (re-pose l'échéance). */
+export function flasherNiveau(price: number): void {
+  liqFlashStore.setState({ price, jusqua: Date.now() + FLASH_DUREE_MS });
 }
 
 // ─────────────────────────── Contrôleur canvas (non testé — couplage KLineChart) ───────────────────────────
@@ -353,8 +486,9 @@ interface Tokens {
   text: string;
   surface: string;
   border: string;
-  /** true si le fond du thème est CLAIR (rampe de couleur inversée — cf. `couleurRampe`). */
-  fondClair: boolean;
+  /** Arrêts RVB de la rampe ESTHÉTIQUE du thème actif (cf. `rampePourTheme`), résolus 1×/frame ;
+   *  partagés par les cellules rects, le canvas lissé ET la barre d'échelle. */
+  rampe: ReadonlyArray<readonly [number, number, number]>;
   /** Teintes up/down PARSÉES en RVB une fois par frame (mode dominance : rgba par cellule). */
   upRgb: [number, number, number];
   downRgb: [number, number, number];
@@ -363,6 +497,8 @@ interface Tokens {
 /** Replis RVB des teintes up/down si le token du thème n'est pas parsable (#10b981 / #ef4444). */
 const UP_RGB_FALLBACK: [number, number, number] = [16, 185, 129];
 const DOWN_RGB_FALLBACK: [number, number, number] = [239, 68, 68];
+/** Repli RVB de `--accent` (flash de bande) si le token n'est pas parsable (#38bdf8). */
+const ACCENT_RGB_FALLBACK: [number, number, number] = [56, 189, 248];
 
 /** Lit un token CSS sémantique concret depuis <html> (le canvas n'évalue pas var()). */
 function readToken(name: string): string {
@@ -389,6 +525,15 @@ export class LiquidationHeatController {
   private raf = 0;
   /** Reconstruit/redessine seulement si dirty : évite un recalcul complet à 60 fps au repos. */
   private dirty = true;
+  /** Date de démarrage (start) : une cellule n'est « fraîche » que si son dernier événement est
+   *  postérieur — exclut le seed initial du fade-in (cf. alphaFadeIn). */
+  private tsDemarrage = 0;
+  /** Échéance (ms) jusqu'à laquelle la boucle rAF force le repaint pour animer le fade-in des
+   *  cellules fraîches ; posée au rev bump de liqEventsStore (nouvelle liquidation live). */
+  private animeJusqua = 0;
+  /** Instant LOCAL (Date.now()) du dernier rev bump de liqEventsStore : indexe l'ANIMATION du
+   *  fade-in sur l'horloge locale (insensible à la latence WS / skew NTP), cf. alphaFadeIn. */
+  private dernierBumpTs = 0;
   /**
    * La grille (agrégat coûteux sur tout le buffer d'événements) n'est reconstruite que sur
    * changement de données/viewport/taille — PAS au survol : le crosshair marque `dirty`
@@ -404,6 +549,9 @@ export class LiquidationHeatController {
    */
   private niveauxObsoletes = true;
   private derniersNiveaux: NiveauEstime[] | null = null;
+  /** Niveaux estimés CONSOMMÉS mémoïsés (mêmes invalidations que `derniersNiveaux`) : source de
+   *  la trace grisée éphémère (fade ~10 bougies). Recalculés en même temps (calculerNiveauxEstimesDetail). */
+  private derniersConsommes: NiveauConsomme[] | null = null;
   /**
    * Petit canvas DÉTACHÉ du rendu lissé « CoinGlass » (1 cellule de la grille = 1 pixel),
    * membre RÉUTILISÉ entre frames : créé paresseusement au premier rendu lissé, redimensionné
@@ -422,6 +570,8 @@ export class LiquidationHeatController {
   private resizeObserver: ResizeObserver | null = null;
   private unsubMarket: (() => void) | null = null;
   private unsubEvents: (() => void) | null = null;
+  /** Flash de bande (clic feed LIQ, cf. liqFlashStore) : repaint animé, sans toucher la grille. */
+  private unsubFlash: (() => void) | null = null;
   private unsubOi: (() => void) | null = null;
   private unsubTheme: (() => void) | null = null;
   /** Changement de MODE (intensité/dominance) : repaint SEUL — ne touche ni grille ni niveaux. */
@@ -440,6 +590,31 @@ export class LiquidationHeatController {
   /** Survol : mémorise le crosshair et demande un repaint (sans reconstruire la grille). */
   private readonly onCrosshair = (data?: Crosshair): void => {
     this.dernierCrosshair = data ?? null;
+    this.dirty = true;
+  };
+
+  /**
+   * Rev bump de liqEventsStore (liquidation(s) reçue(s)) : mémorise `dernierBumpTs` (horloge
+   * LOCALE qui indexe l'animation du fade-in) et ouvre une fenêtre d'animation de ~450 ms
+   * (> DUREE_FADE_MS pour couvrir la retombée) pendant laquelle la boucle rAF force le repaint,
+   * puis invalide la grille (nouveau `dernierTime`) via markDirty. Le seed initial pose aussi la
+   * fenêtre mais ne flashe rien (aucune cellule n'a `dernierTime > tsDemarrage`).
+   */
+  private readonly onEventsBump = (): void => {
+    const now = Date.now();
+    this.dernierBumpTs = now;
+    this.animeJusqua = now + 450;
+    this.markDirty();
+  };
+
+  /**
+   * Flash posé (`flasherNiveau`, clic feed LIQ) : étend la fenêtre d'animation jusqu'à
+   * l'échéance du flash — la boucle rAF repeint alors chaque frame (fade linéaire) — et
+   * demande un repaint SANS invalider la grille (le flash est une couche de rendu pure).
+   */
+  private readonly onFlash = (): void => {
+    const { jusqua } = liqFlashStore.getState();
+    if (jusqua > this.animeJusqua) this.animeJusqua = jusqua;
     this.dirty = true;
   };
 
@@ -480,13 +655,19 @@ export class LiquidationHeatController {
   private start(): void {
     this.running = true;
     this.dirty = true;
+    // Référence temporelle du fade-in : seules les liquidations reçues APRÈS ce start flashent
+    // (le seed initial, antérieur, est exclu — cf. alphaFadeIn / onEventsBump).
+    this.tsDemarrage = Date.now();
     this.canvas.style.display = "block";
     this.subscribeActions();
     // Nouvelle bougie / backfill : le buffer marché change → recalcul. Le flux de
     // liquidations (buffer d'événements) est publié dans `liqEventsStore` par le singleton
-    // WS de liquidationMarkers : on suit sa révision pour repeindre au fil des liquidations.
+    // WS de liquidationMarkers : on suit sa révision pour repeindre au fil des liquidations
+    // (onEventsBump ouvre en plus la fenêtre d'animation du fade-in).
     this.unsubMarket = marketStore.subscribe(this.markDirty);
-    this.unsubEvents = liqEventsStore.subscribe(this.markDirty);
+    this.unsubEvents = liqEventsStore.subscribe(this.onEventsBump);
+    // Flash de bande (clic feed LIQ) : ouvre la fenêtre d'animation jusqu'à son échéance.
+    this.unsubFlash = liqFlashStore.subscribe(this.onFlash);
     // Nouvel historique OI (fetch au toggle / refresh 15 min) → recalcul des niveaux estimés.
     this.unsubOi = oiHistStore.subscribe(this.markDirty);
     // Changement de thème : bandes/tooltip/lignes lisent des tokens CSS → repeindre pour
@@ -522,6 +703,8 @@ export class LiquidationHeatController {
     this.unsubMarket = null;
     this.unsubEvents?.();
     this.unsubEvents = null;
+    this.unsubFlash?.();
+    this.unsubFlash = null;
     this.unsubOi?.();
     this.unsubOi = null;
     this.unsubTheme?.();
@@ -530,10 +713,13 @@ export class LiquidationHeatController {
     this.unsubMode = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.animeJusqua = 0;
+    this.dernierBumpTs = 0;
     this.dernierCrosshair = null;
     this.derniereGrille = null;
     this.grilleObsolete = true;
     this.derniersNiveaux = null;
+    this.derniersConsommes = null;
     this.niveauxObsoletes = true;
     this.imageDataLissage = null;
     this.clearCanvas();
@@ -559,6 +745,9 @@ export class LiquidationHeatController {
   }
 
   private readonly loop = (): void => {
+    // Fenêtre d'animation du fade-in en cours : forcer le repaint pour faire retomber l'alpha
+    // des cellules fraîches frame après frame (sinon un seul rendu figerait le flash).
+    if (this.animeJusqua > Date.now()) this.dirty = true;
     if (this.dirty) this.render();
     this.raf = requestAnimationFrame(this.loop);
   };
@@ -599,10 +788,12 @@ export class LiquidationHeatController {
     if (!main) return;
 
     // Tokens de couleur lus UNE fois par frame (getComputedStyle est coûteux) et réutilisés
-    // par toutes les couches, comme le fait volumeProfile.ts. `--bg` sert à choisir le sens de
-    // la rampe de couleur (viridis direct sur fond sombre, inversé sur fond clair).
+    // par toutes les couches, comme le fait volumeProfile.ts. La rampe ESTHÉTIQUE de la heatmap
+    // est choisie par le THÈME actif (Bloomberg ambre, Matrix vert, dark/aurora viridis…), avec
+    // repli fond clair/sombre via `--bg` pour un thème inconnu (cf. rampePourTheme).
     const up = readToken("--up") || "#10b981";
     const down = readToken("--down") || "#ef4444";
+    const fondClair = estFondClair(readToken("--bg"));
     const tokens: Tokens = {
       textDim: readToken("--text-dim") || "#9ca3af",
       up,
@@ -610,7 +801,7 @@ export class LiquidationHeatController {
       text: readToken("--text") || "#e5e7eb",
       surface: readToken("--surface") || "#171717",
       border: readToken("--border") || "#262626",
-      fondClair: estFondClair(readToken("--bg")),
+      rampe: rampePourTheme(themeStore.getState().theme, fondClair),
       // Parse UNE fois par frame (le mode dominance compose un rgba PAR cellule).
       upRgb: parseCssColor(up) ?? UP_RGB_FALLBACK,
       downRgb: parseCssColor(down) ?? DOWN_RGB_FALLBACK,
@@ -664,6 +855,9 @@ export class LiquidationHeatController {
         ctx.textBaseline = "top";
         ctx.fillText("⋯ Heatmap liquidations active — en attente du flux live", xRight - 4, top + 22);
       }
+      // Le flash de bande reste rendu même sans grille (clic feed juste après l'allumage) :
+      // il matérialise le niveau de prix de la liquidation cliquée.
+      this.dessinerFlash(main);
       return;
     }
 
@@ -704,9 +898,12 @@ export class LiquidationHeatController {
     // Repli sur les rects si le lissé ne peut pas se dessiner (bornes non convertibles…).
     // Le mode ne change QUE la couleur des cellules (grille mémoïsée intacte).
     const mode = liqMarksStore.getState().mode;
+    // Horodatage unique de la frame : sert au fade-in des cellules fraîches (même `now` pour
+    // les deux chemins de rendu, cohérence de l'animation).
+    const now = Date.now();
     const lissage = prevW < SEUIL_LISSAGE_PX;
-    if (!lissage || !this.dessinerCellulesLissees(grid, candles, from, to, largeurs, colonneParTime, mode, tokens)) {
-      this.dessinerCellulesRects(grid, largeurs, mode, tokens);
+    if (!lissage || !this.dessinerCellulesLissees(grid, candles, from, to, largeurs, colonneParTime, mode, tokens, now)) {
+      this.dessinerCellulesRects(grid, largeurs, mode, tokens, now);
     }
 
     // Bandes latérales du profil par prix : largeur ∝ intensité log (max 12 % du pane), SPLIT
@@ -776,6 +973,9 @@ export class LiquidationHeatController {
 
     ctx.restore();
 
+    // Flash de bande (clic feed LIQ) : AU-DESSUS des cellules et du profil, SOUS le tooltip.
+    this.dessinerFlash(main);
+
     // Tooltip de survol : dessiné HORS clip (au-dessus de la heatmap), après restauration.
     if (hover !== null) this.dessinerTooltip(hover, grid, main, tokens);
   }
@@ -785,16 +985,17 @@ export class LiquidationHeatController {
    * rampe theme-aware d'intensité log. Alpha borné [0.15, 0.55] pour ne pas masquer le prix
    * sous les cascades. Bords entiers (x0/x1 partagés par colonne ; yTop/yBot arrondis par
    * bucket → mêmes bords que le bucket voisin).
-   * Mode « dominance » : la teinte remplace la rampe viridis — shorts liquidés dominants =
+   * Mode « dominance » : la teinte remplace la rampe du thème — shorts liquidés dominants =
    * `--up` (rachats forcés), longs = `--down` (ventes forcées), même sémantique que le profil
    * latéral — et l'alpha d'intensité est modulé par |deseq| (cellule équilibrée pâle, cellule
-   * très déséquilibrée franche).
+   * très déséquilibrée franche). `now` : fade-in des cellules fraîches (cf. alphaFadeIn).
    */
   private dessinerCellulesRects(
     grid: LiqGrid,
     largeurs: Map<number, { x0: number; x1: number }>,
     mode: LiqHeatMode,
     tokens: Tokens,
+    now: number,
   ): void {
     const ctx = this.ctx;
     for (const cell of grid.cells.values()) {
@@ -808,15 +1009,18 @@ export class LiquidationHeatController {
       const t = intensiteLog(cell.longUsd + cell.shortUsd, grid.maxUsd);
       const y0 = Math.round(Math.min(yTop, yBot));
       const y1 = Math.round(Math.max(yTop, yBot));
+      let rgb: [number, number, number];
+      let alpha: number;
       if (mode === "dominance") {
         const d = desequilibre(cell.longUsd, cell.shortUsd);
-        const [r, g, b] = d >= 0 ? tokens.upRgb : tokens.downRgb;
-        const alpha = (0.15 + 0.4 * t) * (0.35 + 0.65 * Math.abs(d));
-        ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
+        rgb = d >= 0 ? tokens.upRgb : tokens.downRgb;
+        alpha = (0.15 + 0.4 * t) * (0.35 + 0.65 * Math.abs(d));
       } else {
-        const [r, g, b] = couleurRampe(t, tokens.fondClair);
-        ctx.fillStyle = `rgba(${r},${g},${b},${(0.15 + 0.4 * t).toFixed(3)})`;
+        rgb = couleurRampeArrets(t, tokens.rampe);
+        alpha = 0.15 + 0.4 * t;
       }
+      alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, this.dernierBumpTs, now);
+      ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha.toFixed(3)})`;
       ctx.fillRect(col.x0, y0, Math.max(1, col.x1 - col.x0), Math.max(1, y1 - y0));
     }
   }
@@ -846,6 +1050,7 @@ export class LiquidationHeatController {
     colonneParTime: Map<number, number>,
     mode: LiqHeatMode,
     tokens: Tokens,
+    now: number,
   ): boolean {
     const dims = dimensionsGrilleVisible(grid, from, to);
     if (dims === null) return false;
@@ -902,9 +1107,10 @@ export class LiquidationHeatController {
         rgb = d >= 0 ? tokens.upRgb : tokens.downRgb;
         alpha = (0.15 + 0.4 * t) * (0.35 + 0.65 * Math.abs(d));
       } else {
-        rgb = couleurRampe(t, tokens.fondClair);
+        rgb = couleurRampeArrets(t, tokens.rampe);
         alpha = 0.15 + 0.4 * t;
       }
+      alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, this.dernierBumpTs, now);
       const o = (ligne * colonnes + colonne) * 4;
       px[o] = rgb[0];
       px[o + 1] = rgb[1];
@@ -988,6 +1194,51 @@ export class LiquidationHeatController {
     const conv = this.chart.convertFromPixel([{ y: cy }], { paneId: CANDLE_PANE_ID });
     const value = (Array.isArray(conv) ? conv[0] : conv)?.value;
     return cellSousCurseur(grid, candles, timestamp, value);
+  }
+
+  /**
+   * FLASH de bande (lien feed→chart, cf. liqFlashStore/flasherNiveau) : rect pleine largeur
+   * du pane sur la bande de prix contenant `price` — même taille de bucket (× granularité)
+   * que la grille —, couleur `--accent`, alpha `0.28 × (restant / FLASH_DUREE_MS)` (fade
+   * linéaire vers 0). Dessiné AU-DESSUS des cellules et du profil, SOUS le tooltip. Sans
+   * grille (buffer vide au moment du clic), la taille de bucket est recalculée comme le
+   * ferait `construireGrille` (close de la dernière bougie × granularité). Ne dessine rien
+   * si le flash est expiré ou si la bande n'est pas convertible en pixels.
+   */
+  private dessinerFlash(main: Bounding): void {
+    const { price, jusqua } = liqFlashStore.getState();
+    if (price === null) return;
+    const restant = jusqua - Date.now();
+    if (restant <= 0) return;
+
+    let taille = this.derniereGrille?.taille ?? 0;
+    if (!(taille > 0)) {
+      const candles = marketStore.getState().candles;
+      const dernier = candles[candles.length - 1];
+      if (dernier === undefined) return;
+      taille = tailleBucket(dernier.close) * liqMarksStore.getState().granularite;
+    }
+    if (!(taille > 0)) return;
+
+    const idx = bucketIndex(price, taille);
+    const yTop = this.toPx({ value: (idx + 1) * taille }).y;
+    const yBot = this.toPx({ value: idx * taille }).y;
+    if (yTop === undefined || yBot === undefined || !Number.isFinite(yTop) || !Number.isFinite(yBot)) {
+      return;
+    }
+    const y0 = Math.round(Math.min(yTop, yBot));
+    const y1 = Math.round(Math.max(yTop, yBot));
+
+    const rgb = parseCssColor(readToken("--accent")) ?? ACCENT_RGB_FALLBACK;
+    const alpha = 0.28 * (restant / FLASH_DUREE_MS);
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(main.left, main.top, main.width, main.height);
+    ctx.clip();
+    ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha.toFixed(3)})`;
+    ctx.fillRect(main.left, y0, main.width, Math.max(1, y1 - y0));
+    ctx.restore();
   }
 
   /**
@@ -1090,15 +1341,26 @@ export class LiquidationHeatController {
     if (this.niveauxObsoletes) {
       // Leviers cochés par l'utilisateur (sous-ensemble de LEVIERS) — cf. liqEstStore. Le
       // recalcul est réinvalidé par l'abonnement permanent à liqEstStore (unsubLiqEst → markDirty),
-      // donc décocher/cocher un levier recalcule bien les niveaux.
-      this.derniersNiveaux = calculerNiveauxEstimes(
+      // donc décocher/cocher un levier recalcule bien les niveaux. On mémoïse en un seul calcul
+      // les niveaux ACTIFS et les niveaux CONSOMMÉS (trace grisée éphémère).
+      const detail = calculerNiveauxEstimesDetail(
         oiHistStore.getState().hist,
         candles,
         liqEstStore.getState().leviers,
       );
+      this.derniersNiveaux = detail.actifs;
+      this.derniersConsommes = detail.consommes;
       this.niveauxObsoletes = false;
     }
     const niveaux = this.derniersNiveaux ?? [];
+
+    // Taille de bucket (granularité utilisateur) partagée par la trace consommée ET les niveaux
+    // actifs — même bucketing que la heatmap réelle (choix de RENDU, indépendant du calcul).
+    const taille = tailleBucket(dernier.close) * liqMarksStore.getState().granularite;
+
+    // Trace grisée ÉPHÉMÈRE des consommés récents, dessinée SOUS les niveaux actifs (fond discret).
+    if (taille > 0) this.dessinerTraceConsommes(this.derniersConsommes ?? [], candles, taille, main, tokens);
+
     if (niveaux.length === 0) {
       // Couche active mais OI pas encore chargé (ou aucune hausse d'OI) : indice discret en haut
       // à droite, sous l'éventuel indicateur « en attente » de la heatmap (top+22). La légende
@@ -1118,11 +1380,10 @@ export class LiquidationHeatController {
       return;
     }
 
-    // Regroupement par bucket de prix : somme des poids + levier dominant du bucket. La taille de
-    // bucket suit la GRANULARITÉ utilisateur (facteur ×½/×1/×2), comme la heatmap réelle — c'est
-    // un choix de RENDU (les niveaux mémoïsés, eux, ne dépendent pas de la taille de bucket).
-    const taille = tailleBucket(dernier.close) * liqMarksStore.getState().granularite;
     if (!(taille > 0)) return;
+    // Regroupement par bucket de prix : somme des poids + levier dominant du bucket (la taille de
+    // bucket, calculée plus haut, suit la GRANULARITÉ utilisateur comme la heatmap réelle — un
+    // choix de RENDU ; les niveaux mémoïsés, eux, ne dépendent pas de la taille de bucket).
     const parBucket = new Map<number, { poids: number; parLevier: Map<number, number> }>();
     for (const n of niveaux) {
       if (!(n.price > 0) || !Number.isFinite(n.poidsUsd)) continue;
@@ -1203,6 +1464,75 @@ export class LiquidationHeatController {
   }
 
   /**
+   * Trace grisée ÉPHÉMÈRE des niveaux estimés CONSOMMÉS (traversés par le prix) : lignes
+   * pointillées `tokens.textDim` dessinées SOUS les niveaux actifs, SANS étiquette. Plafonnée aux
+   * 15 consommés LES PLUS RÉCENTS, regroupés par bucket de prix comme les actifs (une ligne par
+   * bucket, l'horodatage retenu étant le `tsConsommation` le plus RÉCENT du bucket). Alpha
+   * décroissant `0.35 × max(0, 1 − age/10)` où `age` = nombre de bougies visibles entre
+   * `tsConsommation` et la dernière bougie (≈ `(dernierTime − tsConsommation) / dureeBougie`,
+   * `dureeBougie` = écart moyen entre bougies visibles) → la trace s'efface au bout de ~10 bougies.
+   */
+  private dessinerTraceConsommes(
+    consommes: NiveauConsomme[],
+    candles: Candle[],
+    taille: number,
+    main: Bounding,
+    tokens: Tokens,
+  ): void {
+    if (consommes.length === 0) return;
+    const ctx = this.ctx;
+    const { left, top, width, height } = main;
+    const xRight = left + width;
+
+    const dernier = candles[candles.length - 1];
+    if (dernier === undefined) return;
+
+    // Durée d'une bougie ≈ écart moyen entre bougies VISIBLES : (time[to−1] − time[from]) / (to − from − 1).
+    const range = this.chart.getVisibleRange();
+    const from = Math.max(0, range.from);
+    const to = Math.min(candles.length, range.to);
+    const premierVis = candles[from];
+    const dernierVis = candles[to - 1];
+    if (premierVis === undefined || dernierVis === undefined || to - from < 2) return;
+    const dureeBougie = (dernierVis.time - premierVis.time) / (to - from - 1);
+    if (!(dureeBougie > 0)) return;
+
+    // 15 consommés les plus récents (tsConsommation décroissant), puis regroupés par bucket : une
+    // ligne par bucket, on retient le tsConsommation le PLUS RÉCENT du bucket (pilote l'alpha).
+    const parBucket = new Map<number, number>(); // idx bucket → tsConsommation le plus récent
+    for (const c of [...consommes].sort((a, b) => b.tsConsommation - a.tsConsommation).slice(0, 15)) {
+      if (!(c.price > 0)) continue;
+      const idx = bucketIndex(c.price, taille);
+      const prev = parBucket.get(idx);
+      if (prev === undefined || c.tsConsommation > prev) parBucket.set(idx, c.tsConsommation);
+    }
+    if (parBucket.size === 0) return;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left, top, width, height);
+    ctx.clip();
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = tokens.textDim;
+    for (const [idx, ts] of parBucket) {
+      const age = (dernier.time - ts) / dureeBougie;
+      const alpha = 0.35 * Math.max(0, 1 - age / 10);
+      if (!(alpha > 0)) continue; // au-delà de ~10 bougies, la trace est effacée
+      const y = this.toPx({ value: (idx + 0.5) * taille }).y;
+      if (y === undefined || !Number.isFinite(y)) continue;
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.moveTo(left, Math.round(y) + 0.5);
+      ctx.lineTo(xRight, Math.round(y) + 0.5);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  /**
    * Bloc de légendes en BAS-DROITE du pane (au-dessus de l'axe temps), empilé vers le haut :
    *  (a) barre d'échelle de couleur gradient (mêmes 24 crans que les cellules) « 0 … maxUsd » +
    *      caption « Liq heatmap (exécutées) · log » — quand la heatmap est active et peuplée ;
@@ -1243,7 +1573,7 @@ export class LiquidationHeatController {
           const [r, g, b] = d >= 0 ? tokens.upRgb : tokens.downRgb;
           ctx.fillStyle = `rgba(${r},${g},${b},${(0.35 + 0.65 * Math.abs(d)).toFixed(3)})`;
         } else {
-          const [r, g, b] = couleurRampe(i / 23, tokens.fondClair);
+          const [r, g, b] = couleurRampeArrets(i / 23, tokens.rampe);
           ctx.fillStyle = `rgb(${r},${g},${b})`;
         }
         ctx.fillRect(barLeft + (barW * i) / 24, barTop, barW / 24 + 1, barH); // +1 : pas de couture

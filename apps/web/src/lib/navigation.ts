@@ -17,6 +17,7 @@ import { createStore } from "zustand/vanilla";
 import { getActiveChart, setFocusChart } from "../chart/drawing";
 import { chartLayoutStore } from "../store/chart-layout";
 import { marketStore } from "../store/market";
+import { lireTokenCanvas } from "./canvasTokens";
 
 // ─────────────────────────── Contrat public ───────────────────────────
 
@@ -122,12 +123,9 @@ export const navMarkStore = createStore<NavMarkState>((set) => ({
 
 const NAV_MARKER = "navMarker";
 const NAV_GROUP = "axiomNav";
-/** Accent cyan : se distingue de l'ambre ECO et des triangles trade. */
-const NAV_COLOR = "#38bdf8";
 
 interface NavMarkerExtend {
   label: string;
-  color: string;
 }
 
 let overlayRegistered = false;
@@ -147,7 +145,7 @@ function ensureOverlayRegistered(): void {
       const c = coordinates[0];
       if (c === undefined) return [];
       const ext = overlay.extendData as NavMarkerExtend | undefined;
-      const color = ext?.color ?? NAV_COLOR;
+      const color = lireTokenCanvas("--accent", "#38bdf8");
       const label = ext?.label ?? "";
       return [
         {
@@ -187,7 +185,7 @@ function redrawNavMarker(): void {
   if (time === null) return;
   if (marketStore.getState().candles.length === 0) return;
 
-  const extend: NavMarkerExtend = { label, color: NAV_COLOR };
+  const extend: NavMarkerExtend = { label };
   const overlay: OverlayCreate = {
     name: NAV_MARKER,
     groupId: NAV_GROUP,

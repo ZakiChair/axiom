@@ -21,10 +21,17 @@ vi.mock("../chart/liquidationMarkers", () => ({
   liqMarksStore: { getState: () => ({ basculer: () => {} }) },
 }));
 
-import { construireRegistre } from "./registry";
+import { construireRegistre, enregistrerCommandes } from "./registry";
 import { raccourciPour, raccourciTimeframe, lignesMnemoniques } from "./hotkeys";
-import "../store/derivatives-chart";
-import "./windowPanels";
+// Les deux sources externes n'exportent qu'un tableau `Commande[]` — c'est App.tsx qui les
+// greffe dans le registre via `enregistrerCommandes([...])`. Un simple import side-effect ne
+// greffe donc RIEN dans `commandesExternes` (même remarque que registry.test.ts). On reproduit
+// ici l'appel d'`enregistrerCommandes` pour que la dérivation ci-dessous couvre aussi ces deux
+// sources injectables sans DOM (les ~17 autres, greffées par App.tsx, restent hors scope).
+import { commandes as derivChartCommandes } from "../store/derivatives-chart";
+import { windowPanelCommands } from "./windowPanels";
+
+enregistrerCommandes([...derivChartCommandes, ...windowPanelCommands]);
 
 describe("raccourciPour", () => {
   it("mappe les libellés de boutons vers leur touche (dérivé de RACCOURCIS_AIDE)", () => {

@@ -1149,7 +1149,7 @@ describe("lectures", () => {
       fundingPercentile: 48,
       dvolPercentile: 81,
     });
-    expect(l[0]).toBe("Nuit baissière (BTC −2.1%), funding neutre (p48), vol élevée (p81).");
+    expect(l[0]).toBe("Nuit baissière (BTC -2.1%), funding neutre (p48), vol élevée (p81).");
   });
   it("nuit seule, haussière puis calme", () => {
     expect(lectures({ ...VIDE, nuitBtcPct: 1.4 })[0]).toBe("Nuit haussière (BTC +1.4%).");
@@ -1158,8 +1158,8 @@ describe("lectures", () => {
   it("positionnement long tendu : funding ≥ p90 ET ΔOI ≥ +3 %", () => {
     const l = lectures({ ...VIDE, fundingPercentile: 95, deltaOi24hPct: 6 });
     expect(l).toContain("Funding p95 avec ΔOI +6.0% sur 24 h : positionnement long tendu.");
-    // Sous le seuil, pas de phrase de positionnement.
-    expect(lectures({ ...VIDE, fundingPercentile: 95, deltaOi24hPct: 1 })).toHaveLength(1);
+    // Sous le seuil de ΔOI, pas de phrase de positionnement (et pas de nuit → pas de contexte).
+    expect(lectures({ ...VIDE, fundingPercentile: 95, deltaOi24hPct: 1 })).toEqual([]);
   });
   it("sentiment aux extrêmes seulement", () => {
     expect(lectures({ ...VIDE, fearGreed: 80 })).toEqual(["Sentiment en zone avidité (F&G 80)."]);
@@ -1176,7 +1176,8 @@ describe("lectures", () => {
     });
     expect(l.length).toBeLessThanOrEqual(3);
     for (const phrase of l) {
-      expect(phrase.toLowerCase()).not.toMatch(/acheter|vendre|long |short |conseil/);
+      // « positionnement long tendu » est DESCRIPTIF (état du marché), pas prescriptif.
+      expect(phrase.toLowerCase()).not.toMatch(/acheter|vendre|conseil|prendre position/);
     }
   });
 });
@@ -1254,7 +1255,7 @@ export function lectures(entrees: EntreesLecture): string[] {
 }
 ```
 
-⚠️ `formatPct` rend « −2.1% » avec le MOINS TYPOGRAPHIQUE U+2212 (`−`, standard `lib/format`) — les chaînes attendues des tests du Step 1 utilisent bien U+2212, pas le tiret ASCII. Vérifier l'implémentation réelle de `formatPct` avant d'ajuster les attendus.
+⚠️ Vérifié en exécution : `formatPct` émet le moins ASCII (« -2.1% »), PAS U+2212 — les chaînes attendues des tests suivent le vrai `formatPct` (moins ASCII). Ne jamais modifier `lib/format.ts` dans cette tâche.
 
 - [ ] **Step 4 : vérifier le vert** — `pnpm --filter @axiom/web test -- lecturesBrief` → PASS ; `typecheck`.
 

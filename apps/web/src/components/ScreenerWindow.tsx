@@ -34,9 +34,10 @@ import {
   type Operator,
   type ScreenerRow,
 } from "../data/screener";
+import { estExtremeColonne, seuilDecile } from "../lib/extremesColonne";
 import { formatPct, formatPrice, formatUsd } from "../lib/format";
 import { metaSource } from "../lib/fiabilite";
-import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, Vide } from "./ui";
+import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, NoteSource, Vide } from "./ui";
 
 /** Colonnes triables de la table de résultats. */
 type SortKey =
@@ -262,6 +263,15 @@ export function ScreenerWindow() {
   const showPositionCols = useMemo(
     () => rows.some((r) => r.oiChangePct !== undefined || r.longShortRatio !== undefined),
     [rows],
+  );
+
+  // Extrêmes cross-sectionnels : 9e décile des |valeurs| de l'univers affiché.
+  const seuils = useMemo(
+    () => ({
+      funding: seuilDecile(sortedRows.map((r) => Math.abs(r.fundingPct ?? Number.NaN)), 0.9),
+      deltaOi: seuilDecile(sortedRows.map((r) => Math.abs(r.oiChangePct ?? Number.NaN)), 0.9),
+    }),
+    [sortedRows],
   );
 
   /** Badge de couverture si la note mentionne l'échantillon OI/L-S. */
@@ -492,7 +502,13 @@ export function ScreenerWindow() {
                   <span className="text-right tabular-nums text-text-dim">{formatUsd(r.volumeUsd24h)}</span>
                   <span
                     className={`text-right tabular-nums ${
-                      r.fundingPct === undefined ? "text-text-dim" : r.fundingPct >= 0 ? "text-up" : "text-down"
+                      estExtremeColonne(r.fundingPct, seuils.funding)
+                        ? "font-semibold text-warn"
+                        : r.fundingPct === undefined
+                          ? "text-text-dim"
+                          : r.fundingPct >= 0
+                            ? "text-up"
+                            : "text-down"
                     }`}
                   >
                     {formatPct(r.fundingPct, 4)}
@@ -501,11 +517,13 @@ export function ScreenerWindow() {
                     <>
                       <span
                         className={`text-right tabular-nums ${
-                          r.oiChangePct === undefined
-                            ? "text-text-dim"
-                            : r.oiChangePct >= 0
-                              ? "text-up"
-                              : "text-down"
+                          estExtremeColonne(r.oiChangePct, seuils.deltaOi)
+                            ? "font-semibold text-warn"
+                            : r.oiChangePct === undefined
+                              ? "text-text-dim"
+                              : r.oiChangePct >= 0
+                                ? "text-up"
+                                : "text-down"
                         }`}
                       >
                         {r.oiChangePct === undefined ? "—" : formatPct(r.oiChangePct)}
@@ -528,6 +546,13 @@ export function ScreenerWindow() {
               ))
             )}
           </div>
+          {(seuils.funding !== null || seuils.deltaOi !== null) && (
+            <div className="border-t border-border/50 px-3 py-1.5">
+              <NoteSource>
+                En orange : 10 % les plus extrêmes de l'univers affiché (|funding|, |Δ OI|).
+              </NoteSource>
+            </div>
+          )}
         </section>
       </div>
     </>

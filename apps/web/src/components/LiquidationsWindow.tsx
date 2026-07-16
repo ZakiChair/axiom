@@ -38,8 +38,11 @@ import {
 } from "../chart/liquidationMarkers";
 import { liqEstStore, LEVIERS } from "../chart/liquidationEstimates";
 import { flasherNiveau } from "../chart/liquidationHeat";
+import { orderflowStore } from "../store/orderflow";
 import { getActiveChart } from "../chart/drawing";
 import { liquidationsGet, type LiqDaemon } from "../data/daemon";
+import { histLiqParHeure } from "../data/referentiels";
+import { referentiel, type PointSerie } from "../lib/referentiel";
 import {
   EnTeteFenetre,
   Vide,
@@ -48,6 +51,7 @@ import {
   Badge,
   Chargement,
   Onglets,
+  RefBadge,
   type TonBadge,
 } from "./ui";
 import {
@@ -129,18 +133,26 @@ function voirSurGraphe(ev: LiqEvent): void {
 function ToggleChart() {
   const actif = useStore(liqMarksStore, (s) => s.actif);
   const basculer = useStore(liqMarksStore, (s) => s.basculer);
+  // Footprint actif : la heatmap est atténuée ×0.5 (cf. chart/liquidationHeat.ts) — on le
+  // signale d'une ligne pour expliquer la couleur plus pâle quand les deux couches coexistent.
+  const footprintActif = useStore(orderflowStore, (s) => s.enabled);
   return (
-    <button
-      type="button"
-      onClick={basculer}
-      aria-pressed={actif}
-      title="Afficher les liquidations sur le graphe (marqueurs)"
-      className={`rounded border px-2 py-1 text-[11px] font-medium transition ${
-        actif ? "border-accent bg-bg text-accent" : "border-border bg-bg text-text-dim hover:text-text"
-      }`}
-    >
-      {actif ? "● Sur le graphe" : "Sur le graphe"}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={basculer}
+        aria-pressed={actif}
+        title="Afficher les liquidations sur le graphe (marqueurs)"
+        className={`rounded border px-2 py-1 text-[11px] font-medium transition ${
+          actif ? "border-accent bg-bg text-accent" : "border-border bg-bg text-text-dim hover:text-text"
+        }`}
+      >
+        {actif ? "● Sur le graphe" : "Sur le graphe"}
+      </button>
+      {actif && footprintActif && (
+        <p className="text-[10px] text-text-dim">Heatmap atténuée : footprint actif.</p>
+      )}
+    </>
   );
 }
 
@@ -526,6 +538,27 @@ function ContenuLive() {
     // `rev` et `horloge` pilotent le recalcul (le store vanilla mute hors React).
   }, [rev, horloge, fenetre, symbol]);
 
+  // Baseline : USD liquidé/heure sur 30 j (daemon). Null si daemon absent → pas de badge.
+  const [serieHeure, setSerieHeure] = useState<PointSerie[] | null>(null);
+  useEffect(() => {
+    let vivant = true;
+    setSerieHeure(null);
+    void histLiqParHeure(symbol).then((s) => {
+      if (vivant) setSerieHeure(s);
+    });
+    return () => {
+      vivant = false;
+    };
+  }, [symbol]);
+
+  const baseline = useMemo(() => {
+    if (serieHeure === null) return null;
+    const nowMs = Date.now();
+    const reels = liqEventsStore.getState().events.filter((ev) => ev.approx !== true);
+    const total1h = statsLiquidations(filtrerFenetre(reels, nowMs - 3_600_000)).total;
+    return { total1h, ref: referentiel(serieHeure, total1h, nowMs) };
+  }, [serieHeure, rev, horloge, symbol]);
+
   /** Déplie/replie un groupe cascade du feed (clé `debut-side`). */
   const basculerGroupe = (cle: string): void => {
     setDeplies((prev) => {
@@ -560,6 +593,14 @@ function ContenuLive() {
           <Metric label={`Longs liquidés (${fenetre})`} value={formatUsd(stats.longUsd)} couleur="var(--down)" />
           <Metric label={`Shorts liquidés (${fenetre})`} value={formatUsd(stats.shortUsd)} couleur="var(--up)" />
         </div>
+
+        {/* Baseline USD/heure vs 30 j (daemon) : rien si le daemon est absent. */}
+        {baseline !== null && (
+          <div className="mt-2 flex items-center gap-2 text-[11px] tabular-nums text-text-dim">
+            <span>1 h : {formatUsd(baseline.total1h)}</span>
+            <RefBadge referentiel={baseline.ref} sens="hausse-chaud" />
+          </div>
+        )}
 
         {/* Barre de dominance long/short (part du notionnel de la fenêtre). */}
         {partLongPct !== null && (

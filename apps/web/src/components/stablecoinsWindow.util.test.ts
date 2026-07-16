@@ -10,7 +10,9 @@ import {
   etatPeg,
   impressionNette,
   repartitionChaines,
+  resumePegs,
   serieImpressionQuotidienne,
+  SUPPLY_MIN_USD,
   tronquerSerie,
 } from "./stablecoinsWindow.util";
 
@@ -172,5 +174,29 @@ describe("bornes", () => {
   it("aucune valeur finie → null", () => {
     expect(bornes([])).toBeNull();
     expect(bornes([Number.NaN])).toBeNull();
+  });
+});
+
+describe("resumePegs", () => {
+  it("compte les stables, remonte tension/depeg triés par |bps| décroissant", () => {
+    const r = resumePegs([
+      emetteur({ id: "1", symbole: "USDT", prix: 1.0005, mcapUsd: SUPPLY_MIN_USD }),
+      emetteur({ id: "2", symbole: "USDX", prix: 0.9962, mcapUsd: SUPPLY_MIN_USD }),
+      emetteur({ id: "3", symbole: "USDY", prix: 0.9788, mcapUsd: SUPPLY_MIN_USD }),
+    ]);
+    expect(r.stables).toBe(1);
+    expect(r.alertes.map((a) => a.symbole)).toEqual(["USDY", "USDX"]);
+    expect(r.alertes[0]?.etat).toBe("depeg");
+    expect(r.alertes[1]?.etat).toBe("tension");
+  });
+
+  it("ignore les non-USD, prix null et sous le seuil de matérialité", () => {
+    const r = resumePegs([
+      emetteur({ id: "1", pegType: "peggedEUR", prix: 0.9, mcapUsd: SUPPLY_MIN_USD }),
+      emetteur({ id: "2", prix: null, mcapUsd: SUPPLY_MIN_USD }),
+      emetteur({ id: "3", prix: 0.97, mcapUsd: SUPPLY_MIN_USD - 1 }),
+    ]);
+    expect(r.stables).toBe(0);
+    expect(r.alertes).toEqual([]);
   });
 });

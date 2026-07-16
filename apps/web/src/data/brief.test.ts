@@ -252,6 +252,20 @@ function sessionVide(): SessionBrief {
   };
 }
 
+/** DonneesBrief minimal (toutes sections absentes) pour les tests markdown. */
+function donneesMinimales(): DonneesBrief {
+  return {
+    session: null,
+    watchlist: null,
+    derivs: null,
+    etf: null,
+    eco: null,
+    news: null,
+    fearGreed: null,
+    dvol: null,
+  };
+}
+
 describe("briefEnMarkdown", () => {
   const now = new Date(2026, 6, 9, 8, 30, 0).getTime();
 
@@ -377,5 +391,22 @@ describe("briefEnMarkdown", () => {
     expect(md).toContain("_Aucun symbole dans la watchlist._");
     expect(md).toContain("_Aucun événement à fort impact aujourd'hui._");
     expect(md).toContain("_Aucune actualité._");
+  });
+});
+
+describe("briefEnMarkdown — section Lecture", () => {
+  it("insère ## Lecture en tête quand des phrases sont fournies", () => {
+    const md = briefEnMarkdown(donneesMinimales(), 1_700_000_000_000, [
+      "Nuit calme (BTC +0.2%).",
+    ]);
+    const iLecture = md.indexOf("## Lecture");
+    const iSession = md.indexOf("## Session");
+    expect(iLecture).toBeGreaterThan(-1);
+    expect(iLecture).toBeLessThan(iSession);
+    expect(md).toContain("Nuit calme (BTC +0.2%).");
+  });
+  it("aucune section quand lecture absente ou vide", () => {
+    expect(briefEnMarkdown(donneesMinimales(), 1_700_000_000_000)).not.toContain("## Lecture");
+    expect(briefEnMarkdown(donneesMinimales(), 1_700_000_000_000, [])).not.toContain("## Lecture");
   });
 });

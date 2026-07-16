@@ -25,6 +25,9 @@ import { marketStore } from "../store/market";
 import { notesStore } from "../store/notes";
 import { portfolioStore } from "../store/portfolio";
 import { alertsStore } from "../store/alerts";
+import { regimeStore } from "../store/regime";
+import { tonRegime } from "../data/regime";
+import { lectures } from "../data/lecturesBrief";
 import {
   assemblerSession,
   briefEnMarkdown,
@@ -47,6 +50,7 @@ import {
 import {
   formatAge,
   formatDelai,
+  formatDec,
   formatFunding,
   formatHeureMinute,
   formatPct,
@@ -57,7 +61,17 @@ import {
   VALEUR_ABSENTE,
 } from "../lib/format";
 import { navigateTo } from "../lib/navigation";
-import { Badge, BTN_SECONDAIRE, Chargement, EnTeteFenetre, ErreurBloc, Metric, NoteSource, Vide } from "./ui";
+import {
+  Badge,
+  BTN_SECONDAIRE,
+  Chargement,
+  EnTeteFenetre,
+  ErreurBloc,
+  Metric,
+  NoteSource,
+  RefBadge,
+  Vide,
+} from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -134,6 +148,21 @@ export function BriefWindow() {
   // Stores locaux pour la review de session (pas de fetch réseau).
   const positions = useStore(portfolioStore, (s) => s.positions);
   const journalAlertes = useStore(alertsStore, (s) => s.journal);
+  // Chapeau AUTONOME : régime + valeurs courantes viennent du store regime (poller 15 min),
+  // indépendants des sections réseau de la fenêtre (qui peuvent être en erreur séparément).
+  const regime = useStore(regimeStore, (s) => s.regime);
+  const chapeau = useStore(regimeStore, (s) => s.chapeau);
+
+  const phrasesLecture = useMemo(() => {
+    if (chapeau === null) return [];
+    return lectures({
+      nuitBtcPct: chapeau.nuitBtcPct,
+      fundingPercentile: chapeau.fundingRef?.percentile ?? null,
+      dvolPercentile: chapeau.dvolRef?.percentile ?? null,
+      deltaOi24hPct: chapeau.deltaOi24hPct,
+      fearGreed: chapeau.fearGreed,
+    });
+  }, [chapeau]);
 
   // Horodatage du snapshot courant (fraîcheur affichée + référence des délais/âges).
   const [chargeA, setChargeA] = useState<number | null>(null);
@@ -273,7 +302,7 @@ export function BriefWindow() {
     notesStore.getState().ajouter({
       symbole: symbol,
       source: exchange,
-      texte: briefEnMarkdown(donnees, now),
+      texte: briefEnMarkdown(donnees, now, phrasesLecture),
       tags: ["brief", "session"],
     });
     setExporte(true);
@@ -303,6 +332,73 @@ export function BriefWindow() {
       />
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        {/* Chapeau interprété (H16) : régime + nuit + funding + vol, puis lecture générée. */}
+        <section className="flex flex-col gap-2">
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            <Metric
+              label="Régime"
+              value={
+                regime === null || regime.libelle === "indéterminé"
+                  ? "—"
+                  : `${regime.libelle} ${regime.score >= 0 ? "+" : ""}${formatDec(regime.score, 1)}`
+              }
+              couleur={
+                regime === null
+                  ? undefined
+                  : tonRegime(regime.libelle) === "up"
+                    ? "var(--up)"
+                    : tonRegime(regime.libelle) === "down"
+                      ? "var(--down)"
+                      : undefined
+              }
+            />
+            <Metric
+              label="Nuit"
+              value={chapeau?.nuitBtcPct !== null && chapeau !== null ? formatPct(chapeau.nuitBtcPct, 1) : "—"}
+              couleur={
+                chapeau?.nuitBtcPct != null
+                  ? chapeau.nuitBtcPct >= 0
+                    ? "var(--up)"
+                    : "var(--down)"
+                  : undefined
+              }
+              extra={
+                chapeau?.nuitEthPct != null ? (
+                  <span className="text-[10px] tabular-nums text-text-dim">ETH {formatPct(chapeau.nuitEthPct, 1)}</span>
+                ) : undefined
+              }
+            />
+            <Metric
+              label="Funding BTC"
+              value={formatFunding(chapeau?.fundingBtcRate)}
+              labelExtra={<RefBadge referentiel={chapeau?.fundingRef ?? null} sens="hausse-chaud" />}
+            />
+            {/* Convention couleur Vol : DVOL en HAUSSE = stress → --down ; en baisse → --up. */}
+            <Metric
+              label="Vol (DVOL)"
+              value={chapeau?.dvolCourant != null ? formatPourcentage(chapeau.dvolCourant, 1) : "—"}
+              couleur={
+                chapeau?.dvolDeltaPts != null
+                  ? chapeau.dvolDeltaPts >= 0
+                    ? "var(--down)"
+                    : "var(--up)"
+                  : undefined
+              }
+              extra={
+                chapeau?.dvolDeltaPts != null ? (
+                  <span className="text-[10px] tabular-nums text-text-dim">
+                    {chapeau.dvolDeltaPts >= 0 ? "+" : ""}
+                    {formatDec(chapeau.dvolDeltaPts, 1)} pts vs veille
+                  </span>
+                ) : undefined
+              }
+            />
+          </div>
+          {phrasesLecture.length > 0 && (
+            <p className="text-[12px] leading-snug text-text">{phrasesLecture.join(" ")}</p>
+          )}
+        </section>
+
         {/* 0) Review de session (soir) — stores locaux portfolio + alertes + éco passés. */}
         <section className="space-y-2">
           <TitreBloc>Session · review</TitreBloc>

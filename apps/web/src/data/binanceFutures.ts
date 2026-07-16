@@ -209,7 +209,7 @@ export function parseOiHistory(raw: unknown): BinanceOiHistPoint[] {
 // ---------- Méthodes publiques ----------
 
 /** Symbole perpétuel USDⓈ-M (identique au symbole spot pour les paires USDT/USDC). */
-function futuresSymbol(symbol: string): string {
+export function futuresSymbol(symbol: string): string {
   return symbol.trim().toUpperCase();
 }
 

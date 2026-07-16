@@ -5,6 +5,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { WebGLSyncSpike } from "./spike/WebGLSyncSpike";
 import { enablePersistence, hydrateStores } from "./store/persist";
 import { startMacroHistoryPolling } from "./store/macroHistory";
+import { startRegimePolling } from "./store/regime";
 // Effet de bord du module : pose [data-theme] sur <html> dès l'import, AVANT le
 // premier rendu (pas de flash « dark -> thème persisté » au rechargement).
 import "./store/theme";
@@ -19,6 +20,10 @@ enablePersistence();
 // pas l'historique en gratuit) : construit une série persistée VERS L'AVANT,
 // lue par le panneau Macro et l'overlay du graphe. Indépendant de l'UI.
 startMacroHistoryPolling();
+
+// Score de régime composite (pastille SessionStrip + chapeau BRIEF) : tick 15 min,
+// les historiques sous-jacents sont cachés 1 h (data/referentiels.ts).
+startRegimePolling();
 
 // Point d'entrée : monte <App/> dans #root.
 const rootElement = document.getElementById("root");

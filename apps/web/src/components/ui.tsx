@@ -17,6 +17,11 @@ import {
   type NiveauFiabilite,
 } from "../lib/fiabilite";
 import { formatAge, VALEUR_ABSENTE } from "../lib/format";
+import {
+  type Referentiel,
+  texteRef,
+  estExtreme,
+} from "../lib/referentiel";
 
 /** Classes du bouton secondaire standard (recalculer, exporter, choisir…). */
 export const BTN_SECONDAIRE =
@@ -270,13 +275,14 @@ export function Metric({
 }
 
 /** Tons disponibles pour la pastille Badge (tokens sémantiques uniquement). */
-export type TonBadge = "neutre" | "up" | "down" | "accent";
+export type TonBadge = "neutre" | "up" | "down" | "accent" | "warn";
 
 const TONS_BADGE: Record<TonBadge, string> = {
   neutre: "border-border text-text-dim",
   up: "border-up text-up",
   down: "border-down text-down",
   accent: "border-accent text-accent",
+  warn: "border-warn text-warn",
 };
 
 /** Pastille d'état standard (ex-StatusBadge des Réglages, généralisée). */
@@ -296,6 +302,43 @@ export function Badge({
     >
       {children}
     </span>
+  );
+}
+
+/** Orientation d'un référentiel : quelle queue de distribution est « chaude » (warn). */
+export type SensRef = "hausse-chaud" | "hausse-froid";
+
+/** Ton du RefBadge — pur, testé (défaut : les deux extrêmes sont chauds). */
+export function tonRef(refe: Referentiel, sens?: SensRef): TonBadge {
+  if (!estExtreme(refe)) return "neutre";
+  if (sens === "hausse-chaud") return refe.percentile >= 90 ? "warn" : "neutre";
+  if (sens === "hausse-froid") return refe.percentile <= 10 ? "warn" : "neutre";
+  return "warn";
+}
+
+/**
+ * Badge de référentiel : « p97 · 90 j » (warn si extrême), ou « réf. en construction »
+ * quand l'historique est trop court/absent. `referentiel` (PAS `ref` : prop React réservé).
+ */
+export function RefBadge({
+  referentiel: refe,
+  sens,
+}: {
+  referentiel: Referentiel | null;
+  sens?: SensRef;
+}) {
+  if (refe === null) {
+    return (
+      <Badge ton="neutre" title="Référentiel indisponible : historique trop court (moins de 5 jours) ou source en échec.">
+        réf. en construction
+      </Badge>
+    );
+  }
+  const titre = `${Math.round(refe.percentile)}e percentile sur ${Math.round(refe.profondeurJours)} j de données (${refe.n} points)`;
+  return (
+    <Badge ton={tonRef(refe, sens)} title={titre}>
+      {texteRef(refe)}
+    </Badge>
   );
 }
 

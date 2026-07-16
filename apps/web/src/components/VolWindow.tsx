@@ -19,7 +19,7 @@ import { formatDec, formatPourcentage } from "../lib/format";
 import { realizedVolSeries, volCone, zScore, type VolConeRow } from "../lib/volCone";
 import { marketStore } from "../store/market";
 import { mirrorOpenState, windowManagerStore } from "../store/windowManager";
-import { Chargement, EnTeteFenetre, ErreurBloc } from "./ui";
+import { Chargement, EnTeteFenetre, ErreurBloc, Metric } from "./ui";
 
 export interface VolUiState {
   open: boolean;
@@ -340,25 +340,20 @@ export function VolWindow() {
     return () => ro.disconnect();
   }, [data, statut]);
 
-  // Ligne de synthèse : RV30 · DVOL · VRP (IV − RV) · z-score RV30.
-  let synthese = "";
+  // Synthèse : RV30 · DVOL · VRP (IV − RV) · z-score RV30 — en tête du corps (H19 hiérarchie).
+  let synthese: { rv: number | null; dvol: number | null; vrp: number | null; z: number | null } | null = null;
   let sansIv = false;
   if (statut === "ready" && data !== null) {
     const rvCourante = derniereRv(data.rv30);
     const dvolCourant = data.dvol !== null && data.dvol.length > 0 ? (data.dvol[data.dvol.length - 1]?.value ?? null) : null;
     sansIv = dvolCourant === null;
-    const morceaux: string[] = [];
-    if (rvCourante !== null) {
-      morceaux.push(`RV${RV_WINDOW} ${formatPourcentage(rvCourante, 1)}`);
-      const valeurs = data.rv30.filter((v): v is number => v !== null);
-      const z = zScore(valeurs, rvCourante);
-      if (dvolCourant !== null) {
-        morceaux.push(`DVOL ${formatPourcentage(dvolCourant, 1)}`);
-        morceaux.push(`VRP ${formatDec(dvolCourant - rvCourante, 1)} pts`);
-      }
-      if (z !== null) morceaux.push(`z-score RV ${formatDec(z, 2)}`);
-    }
-    synthese = morceaux.join(" · ");
+    const z = rvCourante !== null ? zScore(data.rv30.filter((v): v is number => v !== null), rvCourante) : null;
+    synthese = {
+      rv: rvCourante,
+      dvol: dvolCourant,
+      vrp: rvCourante !== null && dvolCourant !== null ? dvolCourant - rvCourante : null,
+      z,
+    };
   }
 
   return (
@@ -367,18 +362,27 @@ export function VolWindow() {
         mnemo="VOL"
         titre="Volatilité"
         sousTitre={`${symbol} · quotidien · annualisation √${PPA}`}
-        actions={
-          <div className="max-w-[340px] truncate text-right text-[11px] tabular-nums text-text-dim">{synthese}</div>
-        }
       />
 
-      <div className="relative min-h-0 flex-1 p-3">
+      <div className="relative flex min-h-0 flex-1 flex-col p-3">
         {statut === "loading" && <Chargement />}
         {statut === "error" && <ErreurBloc>Volatilité indisponible pour ce symbole.</ErreurBloc>}
+        {statut === "ready" && synthese !== null && (
+          <div className="mb-2 grid grid-cols-2 gap-2 md:grid-cols-4">
+            <Metric label={`RV${RV_WINDOW}`} value={synthese.rv !== null ? formatPourcentage(synthese.rv, 1) : "—"} />
+            <Metric label="DVOL" value={synthese.dvol !== null ? formatPourcentage(synthese.dvol, 1) : "—"} />
+            <Metric
+              label="VRP"
+              value={synthese.vrp !== null ? `${formatDec(synthese.vrp, 1)} pts` : "—"}
+              couleur={synthese.vrp !== null ? (synthese.vrp >= 0 ? "var(--up)" : "var(--down)") : undefined}
+            />
+            <Metric label="z-score RV" value={synthese.z !== null ? formatDec(synthese.z, 2) : "—"} />
+          </div>
+        )}
         {statut === "ready" && sansIv && (
           <p className="mb-2 text-[11px] text-text-dim">IV indisponible — Deribit ne cote que BTC/ETH. Cône RV seul.</p>
         )}
-        <canvas ref={canvasRef} className={statut === "ready" ? "h-full min-h-[320px] w-full" : "hidden"} />
+        <canvas ref={canvasRef} className={statut === "ready" ? "min-h-0 w-full flex-1" : "hidden"} />
       </div>
     </>
   );

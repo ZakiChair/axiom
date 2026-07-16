@@ -11,7 +11,7 @@
  * `indicatorsStore` (vanilla) ; le Chart réagit à ses changements de façon
  * impérative (aucun re-render du canvas).
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { INDICATORS, getIndicator } from "@axiom/indicators";
 import type { IndicatorCategory, IndicatorDef, IndicatorInput } from "@axiom/types";
@@ -22,6 +22,7 @@ import {
 } from "../store/indicators";
 import { marketStore } from "../store/market";
 import { tfAtLeast } from "../chart/tfOrder";
+import { indexRoving } from "./ui";
 
 /** Libellés FR des catégories + ordre d'affichage. */
 const CATEGORY_LABELS: Partial<Record<IndicatorCategory, string>> = {
@@ -201,6 +202,34 @@ export function IndicatorMenu() {
     });
   };
 
+  // Navigation clavier du panneau : ↑/↓/Home/End en focus roving sur les
+  // boutons d'ajout du catalogue ; Échap ferme le menu.
+  const rechercheRef = useRef<HTMLInputElement | null>(null);
+  const panneauRef = useRef<HTMLDivElement | null>(null);
+
+  function itemsAjout(): HTMLButtonElement[] {
+    return Array.from(
+      panneauRef.current?.querySelectorAll<HTMLButtonElement>("button[data-item-indicateur]:not(:disabled)") ?? [],
+    );
+  }
+
+  function onKeyDownPanneau(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+      return;
+    }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+    // Home/End réservés au champ de recherche : n'intercepter que hors input.
+    if ((e.key === "Home" || e.key === "End") && document.activeElement === rechercheRef.current) return;
+    const items = itemsAjout();
+    if (items.length === 0) return;
+    e.preventDefault();
+    const courant = items.findIndex((b) => b === document.activeElement);
+    const cible = items[indexRoving(items.length, courant, e.key)];
+    cible?.focus();
+  }
+
   return (
     <div className="relative">
       <button
@@ -223,7 +252,11 @@ export function IndicatorMenu() {
         <>
         {/* Zone de fermeture au clic extérieur (même mécanisme que les menus de la Toolbar). */}
         <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-        <div className="absolute left-0 top-full z-50 mt-1 flex max-h-[70vh] w-72 flex-col rounded border border-neutral-800 bg-neutral-900 shadow-xl">
+        <div
+          ref={panneauRef}
+          onKeyDown={onKeyDownPanneau}
+          className="absolute left-0 top-full z-50 mt-1 flex max-h-[70vh] w-72 flex-col rounded border border-neutral-800 bg-neutral-900 shadow-xl"
+        >
           {/* Section « Actifs » : les instances affichées, éditables par instance. */}
           {active.length > 0 && (
             <div className="border-b border-neutral-800 p-1">
@@ -296,10 +329,12 @@ export function IndicatorMenu() {
           {/* Recherche */}
           <div className="border-b border-neutral-800 p-2">
             <input
+              ref={rechercheRef}
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Rechercher… (CVD, RVOL, orderflow…)"
+              autoFocus
               className="w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-accent"
             />
             <p className="mt-1 px-0.5 text-[10px] text-text-dim">
@@ -350,6 +385,7 @@ export function IndicatorMenu() {
                         <button
                           key={def.id}
                           type="button"
+                          data-item-indicateur=""
                           title={title}
                           disabled={disabled}
                           onClick={() => {

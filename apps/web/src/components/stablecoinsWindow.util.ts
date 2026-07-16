@@ -64,6 +64,32 @@ export function etatPeg(bps: number): EtatPeg {
   return "depeg";
 }
 
+/** Seuil de matérialité : sous ~10 M$ de supply, les tokens morts noient la lecture des pegs. */
+export const SUPPLY_MIN_USD = 10_000_000;
+
+export interface ResumePegs {
+  /** Nombre d'émetteurs USD matériels au peg stable (< 25 bps). */
+  stables: number;
+  /** Écarts significatifs (tension/depeg), triés par |bps| décroissant. */
+  alertes: { symbole: string; bps: number; etat: EtatPeg }[];
+}
+
+/** État global des pegs USD matériels — alimente le bandeau de la Vue d'ensemble. */
+export function resumePegs(emetteurs: readonly EmetteurStablecoin[]): ResumePegs {
+  let stables = 0;
+  const alertes: ResumePegs["alertes"] = [];
+  for (const e of emetteurs) {
+    if (e.mcapUsd < SUPPLY_MIN_USD) continue;
+    const bps = ecartPegBps(e);
+    if (bps === null) continue;
+    const etat = etatPeg(bps);
+    if (etat === "stable") stables += 1;
+    else alertes.push({ symbole: e.symbole, bps, etat });
+  }
+  alertes.sort((a, b) => Math.abs(b.bps) - Math.abs(a.bps));
+  return { stables, alertes };
+}
+
 // ─────────────────────────── Impression (Δ supply) ───────────────────────────
 
 /**

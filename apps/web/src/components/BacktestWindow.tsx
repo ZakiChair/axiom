@@ -332,15 +332,18 @@ function dessinerEquity(canvas: HTMLCanvasElement, resultat: ResultatBacktest): 
   for (const p of points) if (p.drawdownPct > maxDd) maxDd = p.drawdownPct;
   const spanDd = maxDd || 1;
   const yDd = (dd: number): number => hEquity + (dd / spanDd) * (hDd - pad);
-  ctx.fillStyle = colDown + "33"; // aire semi-transparente
-  ctx.strokeStyle = colDown;
-  ctx.lineWidth = 1;
+  ctx.save();
+  ctx.globalAlpha = 0.2; // aire semi-transparente
+  ctx.fillStyle = colDown;
   ctx.beginPath();
   ctx.moveTo(xAt(0), hEquity);
   points.forEach((p, i) => ctx.lineTo(xAt(i), yDd(p.drawdownPct)));
   ctx.lineTo(xAt(n - 1), hEquity);
   ctx.closePath();
   ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = colDown;
+  ctx.lineWidth = 1;
   ctx.beginPath();
   points.forEach((p, i) => {
     const x = xAt(i);

@@ -60,7 +60,8 @@ function dessinerCourbe(canvas: HTMLCanvasElement, series: SerieCourbe[]): void 
 
   const dim = lireTokenCanvas("--text-dim", "#94a3b8");
   const border = lireTokenCanvas("--border", "#334155");
-  ctx.font = "10px var(--font-display, monospace)";
+  const police = lireTokenCanvas("--font-display", "monospace");
+  ctx.font = `10px ${police}`;
 
   const tous = series.flatMap((s) => s.points);
   // Cas < 2 points géré par le composant (état <Vide/> standard), sans texte canvas.

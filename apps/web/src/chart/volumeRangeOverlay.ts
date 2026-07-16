@@ -18,7 +18,7 @@ import type {
 } from "klinecharts";
 import type { Candle } from "@axiom/types";
 import { computeVolumeProfile } from "./volumeProfile";
-import { lireTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 
 export const VPFR_NAME = "volumeRange";
 
@@ -168,8 +168,6 @@ function buildFigures(params: OverlayCreateFiguresCallbackParams): OverlayFigure
   const maxBarW = Math.min(endX - startX, 300);
   if (maxBarW <= 0) return [];
 
-  const up = lireTokenCanvas("--up", "#2dc08e");
-  const down = lireTokenCanvas("--down", "#f92855");
   const accent = lireTokenCanvas("--accent", "#38bdf8");
   const textDim = lireTokenCanvas("--text-dim", "#9ca3af");
   const pricePrecision = Number.isFinite(precision.price) ? precision.price : 2;
@@ -223,7 +221,7 @@ function buildFigures(params: OverlayCreateFiguresCallbackParams): OverlayFigure
           { x: endX - sellW, y: yB },
         ],
       },
-      styles: { style: "fill", color: down },
+      styles: { style: "fill", color: rgbaTokenCanvas("--down", 0.55, "#f92855") },
     });
     figures.push({
       type: "polygon",
@@ -236,7 +234,7 @@ function buildFigures(params: OverlayCreateFiguresCallbackParams): OverlayFigure
           { x: endX - total, y: yB },
         ],
       },
-      styles: { style: "fill", color: up },
+      styles: { style: "fill", color: rgbaTokenCanvas("--up", 0.55, "#2dc08e") },
     });
   }
 

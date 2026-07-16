@@ -32,6 +32,7 @@ import {
   type NewsItem,
   type NewsSourceId,
 } from "../data/news";
+import { META_SOURCE } from "../data/newsMeta";
 
 /** Nombre max de headlines dans la piste (borne le DOM ; les items sont triés récents d'abord). */
 const MAX_ITEMS = 30;
@@ -94,20 +95,6 @@ function urlHttpSure(url: string): string | null {
     return null;
   }
 }
-
-/**
- * Métadonnées d'affichage par source (label + couleur du badge) — même construction
- * que NewsWindow (GDELT ajouté à part : source dynamique absente de NEWS_FEEDS, des
- * items gdelt peuvent transiter par le store quand le filtre symbole du panneau est
- * actif). Couleurs de MARQUE, volontairement hors thème (badges de source).
- */
-const META_SOURCE: Record<NewsSourceId, { label: string; color: string }> = {
-  ...(Object.fromEntries(NEWS_FEEDS.map((f) => [f.id, { label: f.label, color: f.color }])) as Record<
-    NewsSourceId,
-    { label: string; color: string }
-  >),
-  gdelt: { label: "GDELT", color: "#ec4899" },
-};
 
 /**
  * CSS du défilement — injecté localement (cf. en-tête). Boucle infinie : la piste

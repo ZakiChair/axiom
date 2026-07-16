@@ -29,6 +29,7 @@ import {
   type NewsSourceId,
 } from "../data/news";
 import { fetchFearGreed, type FearGreed } from "../data/marketOverview";
+import { META_SOURCE } from "../data/newsMeta";
 import { formatAge } from "../lib/format";
 import { navigateTo } from "../lib/navigation";
 
@@ -64,21 +65,6 @@ function BandeauFearGreed({ fng }: { fng: FearGreed | null }) {
     </span>
   );
 }
-
-/**
- * Métadonnées d'affichage par source (label + couleur du badge). GDELT est une source
- * DYNAMIQUE (ciblée par symbole, cf. en-tête du fichier) — volontairement absente de
- * `NEWS_FEEDS` — donc ajoutée à part ici, sinon `META_SOURCE["gdelt"]` est `undefined`
- * et fait planter `BadgeSource`/le filtre dès qu'un article GDELT est rendu. Les couleurs
- * par source sont des couleurs de MARQUE, volontairement hors thème (badges de source).
- */
-const META_SOURCE: Record<NewsSourceId, { label: string; color: string }> = {
-  ...(Object.fromEntries(NEWS_FEEDS.map((f) => [f.id, { label: f.label, color: f.color }])) as Record<
-    NewsSourceId,
-    { label: string; color: string }
-  >),
-  gdelt: { label: "GDELT", color: "#ec4899" },
-};
 
 /** Libellé humain d'un statut de flux (pied de panneau). */
 const LABEL_STATUT: Record<FeedStatut, string> = {

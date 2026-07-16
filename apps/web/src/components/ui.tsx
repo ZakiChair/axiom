@@ -230,15 +230,21 @@ export function Metric({
   value,
   couleur,
   extra,
+  labelExtra,
 }: {
   label: string;
   value: string;
   couleur?: string;
   extra?: ReactNode;
+  /** Élément accolé au libellé (ex. BadgeFiabilite de DERIV). */
+  labelExtra?: ReactNode;
 }) {
   return (
     <div className="flex items-baseline justify-between gap-3 rounded-md border border-border bg-bg px-3 py-2">
-      <span className="text-[11px] text-text-dim">{label}</span>
+      <span className="flex items-center gap-1.5 text-[11px] text-text-dim">
+        {label}
+        {labelExtra}
+      </span>
       <span className="flex items-center gap-2">
         {extra}
         <span

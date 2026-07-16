@@ -36,7 +36,7 @@ import {
   type CboeTicker,
 } from "../data/cboe";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
-import { formatUsd, formatAge, formatDec, formatPourcentage } from "../lib/format";
+import { formatUsd, formatDec, formatPourcentage } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 import { Metric, EnTeteFenetre, ErreurBloc, NoteSource, Fraicheur } from "./ui";
 
@@ -695,13 +695,7 @@ export function OptionsWindow() {
           <>
             <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
               <span>{metrique === "gex" ? "Gamma exposure" : "Delta exposure"} par strike</span>
-              <span>
-                {(classe === "crypto" ? loading : cboeLoading)
-                  ? "maj…"
-                  : majTs
-                    ? `maj ${formatAge(majTs, Date.now())}`
-                    : "—"}
-              </span>
+              <Fraicheur loading={classe === "crypto" ? loading : cboeLoading} majTs={majTs} />
             </div>
 
             {classe === "actions" && (

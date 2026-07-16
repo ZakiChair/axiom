@@ -319,7 +319,7 @@ export function NoteSource({ children }: { children: ReactNode }) {
  */
 const TONS_FIABILITE: Record<NiveauFiabilite, string> = {
   fiable: "border-up/50 text-up",
-  partiel: "border-amber-500/50 text-amber-500",
+  partiel: "border-warn/50 text-warn",
   estimation: "border-border text-text-dim",
   indisponible: "border-down/50 text-down",
 };

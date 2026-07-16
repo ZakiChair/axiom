@@ -28,8 +28,8 @@ import { formatAge } from "../lib/format";
 /** Classe de fond (token de thème) de la pastille d'état. */
 const DOT_BY_ETAT: Record<EtatSource, string> = {
   connected: "bg-up", // vert : flux normal
-  stale: "bg-amber-500", // orange : silencieux (watchdog)
-  reconnecting: "bg-amber-500", // orange : (re)connexion en cours
+  stale: "bg-warn", // avertissement : silencieux (watchdog)
+  reconnecting: "bg-warn", // avertissement : (re)connexion en cours
   error: "bg-down", // rouge : dernier cycle/évènement en erreur
   polling: "bg-text-dim", // bleu-gris : source REST pollée
   closed: "bg-neutral-600", // gris éteint : désabonnée
@@ -136,7 +136,7 @@ function BadgeDot({ level }: { level: "error" | "warn" }) {
       aria-hidden
       title={level === "error" ? "Une source en erreur" : "Une source dégradée"}
       className={`inline-block h-1.5 w-1.5 rounded-full align-middle ${
-        level === "error" ? "bg-down" : "bg-amber-500"
+        level === "error" ? "bg-down" : "bg-warn"
       }`}
     />
   );

@@ -108,7 +108,7 @@ export function SessionStrip() {
     healthLevel === "error"
       ? "bg-down"
       : healthLevel === "warn"
-        ? "bg-amber-500"
+        ? "bg-warn"
         : "bg-up";
   const pastilleTitle =
     healthLevel === "error"

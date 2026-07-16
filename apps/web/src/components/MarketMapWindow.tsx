@@ -409,7 +409,7 @@ export function MarketMapWindow() {
               </span>
             )}
             {overview && (
-              <span className={overview.stale ? "text-amber-500" : "text-text-dim"}>
+              <span className={overview.stale ? "text-warn" : "text-text-dim"}>
                 {loading
                   ? "maj…"
                   : `maj ${formatAge(overview.fetchedAt, Date.now())}${overview.stale ? " · cache" : ""}`}

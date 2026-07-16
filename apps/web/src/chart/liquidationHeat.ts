@@ -462,8 +462,15 @@ const FALLBACK_CELL_W = 6;
  *  (1 cellule = 1 pixel) upscalé avec interpolation — rendu continu, 1 seul drawImage par
  *  frame. Au-dessus (zoom serré), les rects précis restent : lecture cellule à cellule. */
 const SEUIL_LISSAGE_PX = 6;
-/** Teinte orange des niveaux ESTIMÉS (distincte du viridis de la heatmap réelle). */
-const ORANGE_EST = "245,158,11"; // #f59e0b (rgb)
+/**
+ * Teinte RVB des niveaux ESTIMÉS, choisie PAR THÈME pour contraster avec la rampe
+ * réelle (garde-fou « estimation ≠ donnée » — sur bloomberg la rampe est ambre,
+ * l'orange y était indiscernable ; revue v2, H7).
+ */
+export function teinteEstPourTheme(theme: string): readonly [number, number, number] {
+  if (theme === "bloomberg") return [96, 165, 250]; // bleu clair vs rampe ambre
+  return [245, 158, 11]; // orange vs viridis / rampe verte matrix
+}
 /** Poids min (fraction du max) pour tracer un niveau ESTIMÉ + plafond de niveaux tracés.
  *  Seuil bas (4 %) : la distribution des poids est très inégale (un pic d'OI domine) — un seuil
  *  agressif ne laissait que 1-2 lignes (constat gate visuel) ; le plafond fait l'anti-bruit. */
@@ -493,6 +500,8 @@ interface Tokens {
   /** Teintes up/down PARSÉES en RVB une fois par frame (mode dominance : rgba par cellule). */
   upRgb: [number, number, number];
   downRgb: [number, number, number];
+  /** Teinte EST du thème, résolue 1×/frame (cf. `teinteEstPourTheme`). */
+  estRgb: readonly [number, number, number];
 }
 
 /** Replis RVB des teintes up/down si le token du thème n'est pas parsable (#10b981 / #ef4444). */
@@ -801,6 +810,7 @@ export class LiquidationHeatController {
       // Parse UNE fois par frame (le mode dominance compose un rgba PAR cellule).
       upRgb: parseCssColor(up) ?? UP_RGB_FALLBACK,
       downRgb: parseCssColor(down) ?? DOWN_RGB_FALLBACK,
+      estRgb: teinteEstPourTheme(themeStore.getState().theme),
     };
 
     // Deux couches INDÉPENDANTES sur le même canvas : heatmap RÉELLE (LIQMARK) et niveaux
@@ -1326,7 +1336,7 @@ export class LiquidationHeatController {
     const ctx = this.ctx;
     const { left, top, width, height } = main;
     const xRight = left + width;
-    const orange = (a: number): string => `rgba(${ORANGE_EST},${a.toFixed(3)})`;
+    const est = (a: number): string => `rgba(${tokens.estRgb.join(",")},${a.toFixed(3)})`;
 
     const candles = marketStore.getState().candles;
     const dernier = candles[candles.length - 1];
@@ -1365,7 +1375,7 @@ export class LiquidationHeatController {
       ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
       ctx.textAlign = "right";
       ctx.textBaseline = "top";
-      ctx.fillStyle = orange(0.8);
+      ctx.fillStyle = est(0.8);
       // Deux cas distincts : OI pas encore chargé (attente réseau) vs OI chargé mais tous les
       // niveaux consommés par le prix (modèle purgé — fréquent sur TF court après un range).
       const oiCharge = oiHistStore.getState().hist.length > 0;
@@ -1415,7 +1425,7 @@ export class LiquidationHeatController {
       const y = this.toPx({ value: (b.idx + 0.5) * taille }).y;
       if (y === undefined || !Number.isFinite(y)) continue;
       const t = intensiteLog(b.poids, maxPoids);
-      ctx.strokeStyle = orange(0.2 + 0.6 * t);
+      ctx.strokeStyle = est(0.2 + 0.6 * t);
       ctx.beginPath();
       ctx.moveTo(left, Math.round(y) + 0.5);
       ctx.lineTo(xRight, Math.round(y) + 0.5);
@@ -1451,10 +1461,10 @@ export class LiquidationHeatController {
       ctx.globalAlpha = 0.96;
       ctx.fillRect(left + 3, item.y - 7, w + 6, 14);
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = orange(0.9);
+      ctx.strokeStyle = est(0.9);
       ctx.lineWidth = 1;
       ctx.strokeRect(left + 3, item.y - 7, w + 6, 14);
-      ctx.fillStyle = orange(0.98);
+      ctx.fillStyle = est(0.98);
       ctx.fillText(label, left + 6, item.y);
     }
   }
@@ -1617,7 +1627,7 @@ export class LiquidationHeatController {
       ctx.textAlign = "right";
       ctx.textBaseline = "bottom";
       ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
-      ctx.fillStyle = `rgba(${ORANGE_EST},0.95)`;
+      ctx.fillStyle = `rgba(${tokens.estRgb.join(",")},0.95)`;
       ctx.fillText("Niveaux ESTIMÉS (modèle levier — approximation)", xRight - 4, yb);
       yb -= 14;
     }
@@ -1654,7 +1664,7 @@ export class LiquidationHeatController {
         ctx.fillStyle = tokens.text;
         ctx.fillText(gauche, x, yb);
         if (droite !== "") {
-          ctx.fillStyle = `rgba(${ORANGE_EST},0.95)`;
+          ctx.fillStyle = `rgba(${tokens.estRgb.join(",")},0.95)`;
           ctx.fillText(droite, x + wGauche, yb);
         }
         yb -= 14;

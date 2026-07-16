@@ -38,6 +38,7 @@ import {
   couleurRampe,
   couleurRampeArrets,
   rampePourTheme,
+  teinteEstPourTheme,
   alphaFadeIn,
   filtrerNiveauxDenses,
   dechevaucher,
@@ -418,6 +419,17 @@ describe("rampePourTheme", () => {
     const r = rampePourTheme("matrix", false);
     expect(couleurRampeArrets(0, r)).toEqual([14, 36, 20]); // arrêt 0 éclairci (distinct du noir pur)
     expect(couleurRampeArrets(1, r)).toEqual([91, 255, 143]);
+  });
+});
+
+describe("teinteEstPourTheme — la teinte EST contraste avec la rampe du thème", () => {
+  it("bloomberg (rampe ambre) : teinte froide, PAS l'orange", () => {
+    expect(teinteEstPourTheme("bloomberg")).toEqual([96, 165, 250]);
+  });
+  it("matrix (rampe verte) et défaut (viridis) : orange", () => {
+    expect(teinteEstPourTheme("matrix")).toEqual([245, 158, 11]);
+    expect(teinteEstPourTheme("dark")).toEqual([245, 158, 11]);
+    expect(teinteEstPourTheme("aurora")).toEqual([245, 158, 11]);
   });
 });
 

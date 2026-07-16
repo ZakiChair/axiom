@@ -274,7 +274,7 @@ export function ScreenerWindow() {
 
   return (
     <>
-      <EnTeteFenetre titre="EQS · Screener" sousTitre="Binance spot USDT/USDC · funding perp" />
+      <EnTeteFenetre mnemo="EQS" titre="Screener" sousTitre="Binance spot USDT/USDC · funding perp" />
 
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {/* Presets */}

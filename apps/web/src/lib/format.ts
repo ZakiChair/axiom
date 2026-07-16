@@ -157,6 +157,19 @@ export function formatDelai(targetMs: number, now: number): string {
   return `dans ${Math.floor(h / 24)} j`;
 }
 
+/** Funding (fraction, ex. 0.0001) → pourcentage signé 4 décimales : « +0.0100% ». */
+export function formatFunding(rate: number | null | undefined): string {
+  if (rate === null || rate === undefined || !Number.isFinite(rate)) return VALEUR_ABSENTE;
+  return formatPct(rate * 100, 4);
+}
+
+/** Montant USD avec « + » explicite si positif (PnL, deltas) : « +$12.34M ». */
+export function formatUsdSigne(v: number | null | undefined): string {
+  if (v === null || v === undefined || !Number.isFinite(v)) return VALEUR_ABSENTE;
+  const base = formatUsd(v);
+  return v > 0 ? `+${base}` : base;
+}
+
 /** Compte à rebours « H:MM:SS » (≥ 1 h) ou « MM:SS ». Négatif borné à 0. */
 export function formatCountdown(msRestant: number): string {
   if (!Number.isFinite(msRestant)) return VALEUR_ABSENTE;

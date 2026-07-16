@@ -22,6 +22,7 @@ import {
   GROUP_PALETTE,
   type SnapZone,
 } from "../store/windowManager";
+import { couleurAffichable } from "../store/compare";
 
 export interface FloatingWindowProps {
   id: string;
@@ -239,7 +240,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
             title="Couleur de groupe"
             onClick={() => setMenuGroupeOuvert((o) => !o)}
             className="h-3.5 w-3.5 rounded-full border border-border"
-            style={{ backgroundColor: etat.groupColor ?? "transparent" }}
+            style={{ backgroundColor: etat.groupColor ? couleurAffichable(etat.groupColor) : "transparent" }}
           />
           {menuGroupeOuvert && (
             <div className="absolute right-0 top-5 z-10 flex gap-1 rounded border border-border bg-surface p-1 shadow-xl">
@@ -256,13 +257,12 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
                 <button
                   key={couleur}
                   type="button"
-                  title={couleur}
                   onClick={() => {
                     windowManagerStore.getState().setGroup(id, couleur);
                     setMenuGroupeOuvert(false);
                   }}
                   className="h-4 w-4 rounded-full"
-                  style={{ backgroundColor: couleur }}
+                  style={{ backgroundColor: couleurAffichable(couleur) }}
                 />
               ))}
             </div>

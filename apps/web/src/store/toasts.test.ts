@@ -73,4 +73,27 @@ describe("pousserToast / retirerToast", () => {
     retirerToast(id);
     expect(toastsStore.getState().toasts).toHaveLength(0);
   });
+
+  it("un toast peut porter une action (Annuler)", () => {
+    let annule = false;
+    pousserToast("Paire changée → DERIVUSDT", {
+      libelle: "Annuler",
+      executer: () => {
+        annule = true;
+      },
+    });
+    const t2 = toastsStore.getState().toasts.at(-1);
+    expect(t2?.action?.libelle).toBe("Annuler");
+    t2?.action?.executer();
+    expect(annule).toBe(true);
+    if (t2) retirerToast(t2.id);
+  });
+
+  it("un toast avec action reste affiché 6000 ms (pas 2500)", () => {
+    pousserToast("Paire changée → DERIVUSDT", { libelle: "Annuler", executer: () => {} });
+    vi.advanceTimersByTime(2500);
+    expect(toastsStore.getState().toasts).toHaveLength(1);
+    vi.advanceTimersByTime(3500);
+    expect(toastsStore.getState().toasts).toHaveLength(0);
+  });
 });

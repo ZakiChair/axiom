@@ -6,6 +6,7 @@ import { getFredKey } from "../store/macro";
 import { macroHistorySeries, recordGlobalSnapshotNow } from "../store/macroHistory";
 import type { MacroOverlayId } from "../store/macro-overlays";
 import { marketStore } from "../store/market";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 
 const MACRO_NAME = "AXIOM_MACRO";
 const MACRO_PANE_ID = "axiom_macro";
@@ -36,14 +37,15 @@ interface MacroDef {
   id: MacroOverlayId;
   key: string;
   title: string;
-  color: string;
+  token: string;
+  repli: string;
   scale: number;
 }
 
 const MACRO_DEFS: MacroDef[] = [
-  { id: "crypto-total", key: "cryptoTotal", title: "Cap crypto: ", color: "#38bdf8", scale: 1 },
-  { id: "stablecoins", key: "stablecoins", title: "Stablecoins: ", color: "#10b981", scale: 1 },
-  { id: "m2", key: "m2", title: "M2: ", color: "#eab308", scale: 1e9 },
+  { id: "crypto-total", key: "cryptoTotal", title: "Cap crypto: ", token: "--serie-1", repli: "#38bdf8", scale: 1 },
+  { id: "stablecoins", key: "stablecoins", title: "Stablecoins: ", token: "--serie-2", repli: "#a78bfa", scale: 1 },
+  { id: "m2", key: "m2", title: "M2: ", token: "--serie-3", repli: "#eab308", scale: 1e9 },
 ];
 
 function macroDef(id: MacroOverlayId): MacroDef {
@@ -91,13 +93,17 @@ function ensureRegistered(): void {
     key: def.key,
     title: def.title,
     type: "line",
-    styles: () => ({ color: def.color, size: 1.5 }),
+    styles: () => ({ color: lireTokenCanvas(def.token, def.repli), size: 1.5 }),
   }));
 
   registerIndicator<MacroPointOut>({
     name: MACRO_NAME,
     shortName: "Macro",
     series: IndicatorSeries.Normal,
+    // Cap crypto / M2 en milliards : 0 décimale + notation compacte sur l'axe et
+    // la légende, au lieu de « Cap crypto: 2,293,577,001,928.3072 » (constaté à l'écran).
+    precision: 0,
+    shouldFormatBigNumber: true,
     figures,
     calc: (dataList, indicator) => {
       const ext = indicator.extendData as MacroExtend | undefined;

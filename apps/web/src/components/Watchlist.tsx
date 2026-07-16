@@ -23,6 +23,7 @@ import { watchlistStore } from "../store/watchlist";
 import { subscribeTickers, subscribeWatchlistBars } from "../data/ticker";
 import type { TickerUpdate, WatchlistBars } from "../data/ticker";
 import { SidebarSection } from "./SidebarSection";
+import { MenuDeroulant } from "./ui";
 import { formatCompact, formatPct, formatPrice, VALEUR_ABSENTE } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 
@@ -191,13 +192,11 @@ export function Watchlist() {
   const [addingGroup, setAddingGroup] = useState(false);
   const [groupDraft, setGroupDraft] = useState("");
   const [visibleCols, setVisibleCols] = useState<VisibleCols>(DEFAULT_COLS);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" } | null>(null);
 
   // Cellules DOM (maj impérative) + dernières valeurs connues (tri par instantané + repaint).
   const cells = useRef(new Map<string, RowCells>());
   const latest = useRef(new Map<string, Snapshot>());
-  const menuRef = useRef<HTMLDivElement | null>(null);
 
   /** Renvoie (en la créant au besoin) l'entrée de snapshot d'un symbole. */
   const snapOf = (symbol: string): Snapshot => {
@@ -291,16 +290,6 @@ export function Watchlist() {
     });
   }, [displayOrder, metricCols, visibleCols.spark]);
 
-  // Fermeture du menu ⚙ au clic hors de son conteneur.
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [menuOpen]);
-
   const submitAdd = () => {
     add(draft);
     setDraft("");
@@ -336,43 +325,43 @@ export function Watchlist() {
   const manual = sort === null;
   const pairCount = `${symbols.length} paire${symbols.length > 1 ? "s" : ""}`;
 
-  // Menu ⚙ des colonnes, placé dans le slot d'action de la section.
+  // Menu ⚙ des colonnes — primitive MenuDeroulant (Échap, clic extérieur, ↑/↓).
   const columnsMenu = (
-    <div ref={menuRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setMenuOpen((o) => !o)}
-        aria-label="Colonnes"
-        aria-expanded={menuOpen}
-        className="text-text-dim transition hover:text-text"
-      >
-        ⚙
-      </button>
-      {menuOpen && (
-        <div className="absolute right-0 top-5 z-20 w-36 rounded border border-border bg-surface p-1 shadow-lg">
-          {[
+    <MenuDeroulant
+      declencheur="⚙"
+      titre="Colonnes"
+      align="right"
+      classePanneau="w-36"
+      chevron={false}
+      declencheurClasse="text-text-dim transition hover:text-text"
+    >
+      {() =>
+        (
+          [
             { key: "change24h" as const, label: "Δ% 24h" },
             { key: "change1h" as const, label: "Δ% 1h" },
             { key: "change7d" as const, label: "Δ% 7j" },
             { key: "volume" as const, label: "Volume 24h" },
             { key: "spark" as const, label: "Sparkline" },
-          ].map((c) => (
-            <label
-              key={c.key}
-              className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-[11px] text-text hover:bg-bg"
-            >
-              <input
-                type="checkbox"
-                checked={visibleCols[c.key]}
-                onChange={() => setVisibleCols((v) => ({ ...v, [c.key]: !v[c.key] }))}
-                className="accent-accent"
-              />
-              {c.label}
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
+          ] as const
+        ).map((c) => (
+          <label
+            key={c.key}
+            role="menuitem"
+            tabIndex={-1}
+            className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-[11px] text-text hover:bg-bg"
+          >
+            <input
+              type="checkbox"
+              checked={visibleCols[c.key]}
+              onChange={() => setVisibleCols((v) => ({ ...v, [c.key]: !v[c.key] }))}
+              className="accent-accent"
+            />
+            {c.label}
+          </label>
+        ))
+      }
+    </MenuDeroulant>
   );
 
   return (

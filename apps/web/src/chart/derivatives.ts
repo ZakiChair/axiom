@@ -24,20 +24,21 @@ import type { FundingRate, OpenInterest } from "@axiom/types";
 import type { MarketStore } from "../store/market";
 import { derivativesChartStore, type DerivativesChartState } from "../store/derivatives-chart";
 import { coinalyzeProvider } from "../data/coinalyze";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 
 /** Sous-pane Open Interest (notionnel USD). */
 const OI_NAME = "AXIOM_DERIV_OI";
 const OI_PANE_ID = "axiom_deriv_oi";
-// Couleur de série du pane, figée à l'enregistrement de l'indicateur (KLineChart
-// enregistre les figures une fois, à l'import — pas de re-résolution au changement
-// de thème). EXPORTÉE pour que la bascule « OI » de DerivativesWindow garde le
-// lien visuel bouton↔courbe sur tous les thèmes (exception théméité assumée).
-export const OI_COLOR = "#22d3ee"; // cyan
+// Tokens de série des panes — lus AU RENDU (callback styles) : suivent le thème.
+// Côté DerivativesWindow, le lien visuel bouton↔courbe utilise les MÊMES tokens
+// via `var(--serie-5)` / `var(--serie-3)` en style inline.
+const OI_TOKEN = "--serie-5"; // cyan sur dark (repli : OI_REPLI)
+const OI_REPLI = "#22d3ee";
 /** Sous-pane funding rate (affiché en %). */
 const FUNDING_NAME = "AXIOM_DERIV_FUNDING";
 const FUNDING_PANE_ID = "axiom_deriv_funding";
-/** Couleur de série du pane funding — même exception que OI_COLOR. */
-export const FUNDING_COLOR = "#f59e0b"; // ambre
+const FUNDING_TOKEN = "--serie-3"; // ambre sur dark (repli : FUNDING_REPLI)
+const FUNDING_REPLI = "#f59e0b";
 
 /** Interval Coinalyze des séries dérivées (cadence lente, forward-fill ensuite). */
 const DERIV_INTERVAL = "1hour";
@@ -126,8 +127,12 @@ let registered = false;
 function ensureRegistered(): void {
   if (registered) return;
 
-  const makeFigures = (title: string, color: string): Array<IndicatorFigure<DerivPointOut>> => [
-    { key: "value", title, type: "line", styles: () => ({ color, size: 1.5 }) },
+  const makeFigures = (
+    title: string,
+    token: string,
+    repli: string
+  ): Array<IndicatorFigure<DerivPointOut>> => [
+    { key: "value", title, type: "line", styles: () => ({ color: lireTokenCanvas(token, repli), size: 1.5 }) },
   ];
 
   const calc = (dataList: readonly { timestamp: number }[], indicator: { extendData?: unknown }) => {
@@ -147,14 +152,19 @@ function ensureRegistered(): void {
     name: OI_NAME,
     shortName: "OI ($)",
     series: IndicatorSeries.Normal,
-    figures: makeFigures("OI $: ", OI_COLOR),
+    // OI en notionnel USD (milliards) : 0 décimale + notation compacte sur l'axe
+    // et la légende, au lieu de « 1,100,000,000.0000 » (revue v2, H8).
+    precision: 0,
+    shouldFormatBigNumber: true,
+    figures: makeFigures("OI $: ", OI_TOKEN, OI_REPLI),
     calc,
   });
   registerIndicator<DerivPointOut>({
     name: FUNDING_NAME,
     shortName: "Funding (%)",
     series: IndicatorSeries.Normal,
-    figures: makeFigures("Funding %: ", FUNDING_COLOR),
+    precision: 4, // convention funding du standard
+    figures: makeFigures("Funding %: ", FUNDING_TOKEN, FUNDING_REPLI),
     calc,
   });
 

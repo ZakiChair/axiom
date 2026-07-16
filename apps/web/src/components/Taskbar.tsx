@@ -21,6 +21,8 @@ import {
   etatPastille,
   zFenetreFocalisee,
 } from "../store/windowManager";
+import { couleurAffichable } from "../store/compare";
+import { BTN_SECONDAIRE } from "./ui";
 
 /** Classes d'une pastille selon son état visuel. `opacity-60` en utilitaire d'élément
  *  (PAS de slash `/60` sur un token de thème — non fiable avec ces couleurs pilotées par
@@ -50,12 +52,12 @@ export function Taskbar() {
   const zFocus = zFenetreFocalisee(windows);
 
   return (
-    <div className="flex shrink-0 gap-1 border-t border-border bg-surface px-2 py-1">
+    <div className="flex shrink-0 flex-wrap gap-1 border-t border-border bg-surface px-2 py-1">
       <button
         type="button"
         title="Restaurer toutes les fenêtres réduites"
         onClick={() => windowManagerStore.getState().restoreAll()}
-        className="rounded border border-border bg-bg px-2 py-1 text-[11px] font-medium text-text-dim hover:text-text"
+        className={BTN_SECONDAIRE}
       >
         Tout restaurer
       </button>
@@ -63,7 +65,7 @@ export function Taskbar() {
         type="button"
         title="Disposer les fenêtres ouvertes en mosaïque"
         onClick={() => windowManagerStore.getState().tileOpenWindows()}
-        className="rounded border border-border bg-bg px-2 py-1 text-[11px] font-medium text-text-dim hover:text-text"
+        className={BTN_SECONDAIRE}
       >
         Mosaïque
       </button>
@@ -83,7 +85,7 @@ export function Taskbar() {
                 <span
                   aria-hidden
                   className="h-2 w-2 shrink-0 rounded-full"
-                  style={{ backgroundColor: w.groupColor }}
+                  style={{ backgroundColor: couleurAffichable(w.groupColor) }}
                 />
               )}
               <span className="font-semibold uppercase tracking-wider">{entry.mnemonic}</span>
@@ -94,7 +96,7 @@ export function Taskbar() {
               type="button"
               title="Fermer"
               onClick={() => windowManagerStore.getState().closeWindow(entry.id)}
-              className="absolute right-0.5 top-1/2 z-10 hidden h-4 w-4 -translate-y-1/2 items-center justify-center rounded-sm bg-surface text-[10px] leading-none text-text-dim hover:text-down group-hover:flex"
+              className="absolute right-0.5 top-1/2 z-10 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-sm bg-surface text-[10px] leading-none text-text-dim opacity-0 transition hover:text-down focus-visible:opacity-100 group-hover:opacity-100"
             >
               ✕
             </button>

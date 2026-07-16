@@ -16,6 +16,7 @@ import {
   type MetaFiabilite,
   type NiveauFiabilite,
 } from "../lib/fiabilite";
+import { formatAge, VALEUR_ABSENTE } from "../lib/format";
 
 /** Classes du bouton secondaire standard (recalculer, exporter, choisir…). */
 export const BTN_SECONDAIRE =
@@ -63,6 +64,8 @@ export function MenuDeroulant({
   titre,
   align = "left",
   classePanneau = "w-60",
+  declencheurClasse = "flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs text-text hover:border-text-dim",
+  chevron = true,
   children,
 }: {
   /** Contenu du bouton déclencheur (libellé) — le chevron ▾ est ajouté par la primitive. */
@@ -73,7 +76,10 @@ export function MenuDeroulant({
   align?: "left" | "right";
   /** Classe de largeur du panneau (défaut `w-60`). */
   classePanneau?: string;
-  /** Contenu du menu ; reçoit `fermer` à appeler après une sélection. */
+  /** Classes du bouton déclencheur (défaut : bouton bordé standard). */
+  declencheurClasse?: string;
+  /** Affiche le chevron ▾ (désactivable pour un déclencheur-icône). */
+  chevron?: boolean;
   children: (fermer: () => void) => ReactNode;
 }) {
   const [ouvert, setOuvert] = useState(false);
@@ -126,17 +132,17 @@ export function MenuDeroulant({
         aria-haspopup="menu"
         aria-expanded={ouvert}
         title={titre}
-        className="flex items-center gap-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 hover:border-neutral-500"
+        className={declencheurClasse}
       >
         {declencheur}
-        <span aria-hidden className="text-[9px] text-neutral-500">▾</span>
+        {chevron && <span aria-hidden className="text-[9px] text-text-dim">▾</span>}
       </button>
 
       {ouvert && (
         <div
           role="menu"
           ref={menuRef}
-          className={`absolute ${align === "right" ? "right-0" : "left-0"} z-50 mt-1 ${classePanneau} max-h-[70vh] overflow-y-auto rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl`}
+          className={`absolute ${align === "right" ? "right-0" : "left-0"} z-50 mt-1 ${classePanneau} max-h-[70vh] overflow-y-auto rounded border border-border bg-surface p-1 shadow-xl`}
         >
           {children(fermer)}
         </div>
@@ -154,15 +160,26 @@ export function EnTeteFenetre({
   titre,
   sousTitre,
   actions,
+  mnemo,
 }: {
   titre: string;
   sousTitre?: ReactNode;
   actions?: ReactNode;
+  /** Mnémonique ⌘K de la fenêtre — affiché « MNEMO · Titre » (convention terminal, revue v2). */
+  mnemo?: string;
 }) {
   return (
     <header className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3">
       <div className="min-w-0">
-        <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">{titre}</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">
+          {mnemo !== undefined && (
+            <>
+              <span className="text-accent">{mnemo}</span>
+              <span className="text-text-dim"> · </span>
+            </>
+          )}
+          {titre}
+        </h2>
         {sousTitre !== undefined && <p className="mt-0.5 text-[11px] text-text-dim">{sousTitre}</p>}
       </div>
       {actions !== undefined && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
@@ -224,15 +241,21 @@ export function Metric({
   value,
   couleur,
   extra,
+  labelExtra,
 }: {
   label: string;
   value: string;
   couleur?: string;
   extra?: ReactNode;
+  /** Élément accolé au libellé (ex. BadgeFiabilite de DERIV). */
+  labelExtra?: ReactNode;
 }) {
   return (
     <div className="flex items-baseline justify-between gap-3 rounded-md border border-border bg-bg px-3 py-2">
-      <span className="text-[11px] text-text-dim">{label}</span>
+      <span className="flex items-center gap-1.5 text-[11px] text-text-dim">
+        {label}
+        {labelExtra}
+      </span>
       <span className="flex items-center gap-2">
         {extra}
         <span
@@ -308,6 +331,39 @@ export function Onglets<T extends string>({
   );
 }
 
+/**
+ * Groupe segmenté standard (bascule exclusive) : conteneur bordé arrondi,
+ * segment actif `bg-bg text-text` (standard §2 — jamais bg-surface, invisible
+ * sur le corps bg-surface des fenêtres). Consacre le pattern d'OptionsWindow.
+ */
+export function Segmente<T extends string>({
+  options,
+  actif,
+  onChange,
+}: {
+  options: ReadonlyArray<{ id: T; label: string }>;
+  actif: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div className="flex overflow-hidden rounded-md border border-border text-[11px]">
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          onClick={() => onChange(o.id)}
+          aria-pressed={actif === o.id}
+          className={`flex-1 px-3 py-1.5 transition ${
+            actif === o.id ? "bg-bg text-text" : "text-text-dim hover:text-text"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Note de bas de section : source + cadence (« Données Deribit, ~1 min. »). */
 export function NoteSource({ children }: { children: ReactNode }) {
   return <p className="text-[10px] leading-snug text-text-dim">{children}</p>;
@@ -319,7 +375,7 @@ export function NoteSource({ children }: { children: ReactNode }) {
  */
 const TONS_FIABILITE: Record<NiveauFiabilite, string> = {
   fiable: "border-up/50 text-up",
-  partiel: "border-amber-500/50 text-amber-500",
+  partiel: "border-warn/50 text-warn",
   estimation: "border-border text-text-dim",
   indisponible: "border-down/50 text-down",
 };
@@ -353,4 +409,29 @@ export function BadgeFiabilite({
       {texte}
     </span>
   );
+}
+
+/** Texte de fraîcheur standard (pur, testé) — forme canonique de la revue v2 (H11). */
+export function texteFraicheur(
+  loading: boolean,
+  majTs: number | null,
+  now: number,
+  cadence?: string,
+): string {
+  if (loading) return "maj…";
+  if (majTs !== null && Number.isFinite(majTs)) return `maj ${formatAge(majTs, now)}`;
+  return cadence !== undefined ? `maj ~${cadence}` : VALEUR_ABSENTE;
+}
+
+/** Ligne de fraîcheur standard — remplace les 4 variantes divergentes des fenêtres. */
+export function Fraicheur({
+  loading,
+  majTs,
+  cadence,
+}: {
+  loading: boolean;
+  majTs?: number | null;
+  cadence?: string;
+}) {
+  return <span className="tabular-nums">{texteFraicheur(loading, majTs ?? null, Date.now(), cadence)}</span>;
 }

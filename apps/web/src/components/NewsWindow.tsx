@@ -29,6 +29,7 @@ import {
   type NewsSourceId,
 } from "../data/news";
 import { fetchFearGreed, type FearGreed } from "../data/marketOverview";
+import { META_SOURCE, bordureSource } from "../data/newsMeta";
 import { formatAge } from "../lib/format";
 import { navigateTo } from "../lib/navigation";
 
@@ -65,21 +66,6 @@ function BandeauFearGreed({ fng }: { fng: FearGreed | null }) {
   );
 }
 
-/**
- * Métadonnées d'affichage par source (label + couleur du badge). GDELT est une source
- * DYNAMIQUE (ciblée par symbole, cf. en-tête du fichier) — volontairement absente de
- * `NEWS_FEEDS` — donc ajoutée à part ici, sinon `META_SOURCE["gdelt"]` est `undefined`
- * et fait planter `BadgeSource`/le filtre dès qu'un article GDELT est rendu. Les couleurs
- * par source sont des couleurs de MARQUE, volontairement hors thème (badges de source).
- */
-const META_SOURCE: Record<NewsSourceId, { label: string; color: string }> = {
-  ...(Object.fromEntries(NEWS_FEEDS.map((f) => [f.id, { label: f.label, color: f.color }])) as Record<
-    NewsSourceId,
-    { label: string; color: string }
-  >),
-  gdelt: { label: "GDELT", color: "#ec4899" },
-};
-
 /** Libellé humain d'un statut de flux (pied de panneau). */
 const LABEL_STATUT: Record<FeedStatut, string> = {
   ok: "ok",
@@ -96,7 +82,7 @@ function BadgeSource({ source }: { source: NewsSourceId }) {
   return (
     <span
       className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide"
-      style={{ color: meta.color, border: `1px solid ${meta.color}55` }}
+      style={{ color: meta.color, border: `1px solid ${bordureSource(meta.color)}` }}
     >
       {meta.label}
     </span>
@@ -253,7 +239,8 @@ export function NewsWindow() {
     <>
       {/* En-tête standard (croix de fermeture fournie par le chrome FloatingWindow). */}
       <EnTeteFenetre
-        titre="NEWS · Actualités"
+        mnemo="NEWS"
+        titre="Actualités"
         sousTitre={
           derniereMaj === null
             ? "Chargement…"
@@ -278,7 +265,7 @@ export function NewsWindow() {
           aria-pressed={filtreSymbole}
           title="Filtrer sur le symbole affiché"
           className={`shrink-0 rounded border border-border px-2 py-1 text-[10px] uppercase tracking-wide transition ${
-            filtreSymbole ? "bg-surface text-text" : "text-text-dim hover:text-text"
+            filtreSymbole ? "bg-bg text-text" : "text-text-dim hover:text-text"
           }`}
         >
           {symbolKeywords(symbol).length > 0 ? `#${symbol}` : "symbole"}

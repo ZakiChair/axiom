@@ -91,6 +91,9 @@ export function AlertsPanel() {
   // liq-cascade : seuil de notionnel liquidé par minute glissante (USD/min).
   const [seuilCascade, setSeuilCascade] = useState("5000000");
   const [journalOuvert, setJournalOuvert] = useState(false);
+  const [erreurForm, setErreurForm] = useState<string | null>(null);
+  // Suppression armée (pattern SettingsPanel.restaurer) : id de l'alerte à confirmer.
+  const [confirmSuppr, setConfirmSuppr] = useState<string | null>(null);
 
   const symboleEffectif = (symbol.trim() || symbolCourant).toUpperCase();
 
@@ -110,15 +113,24 @@ export function AlertsPanel() {
     let condition: Condition;
     if (type === "prix-croise") {
       const n = Number(niveau);
-      if (!Number.isFinite(n)) return; // niveau requis
+      if (!Number.isFinite(n)) {
+        setErreurForm("Niveau requis.");
+        return;
+      }
       condition = { type: "prix-croise", niveau: n, sens };
     } else if (type === "variation-pct") {
       const s = Number(seuilPct);
-      if (!Number.isFinite(s) || s === 0) return; // seuil non nul requis
+      if (!Number.isFinite(s) || s === 0) {
+        setErreurForm("Seuil non nul requis.");
+        return;
+      }
       condition = { type: "variation-pct", seuilPct: s, fenetreMs };
     } else if (type === "indicateur-seuil") {
       const v = Number(valeurInd);
-      if (!Number.isFinite(v) || !indicateurId || !output) return;
+      if (!Number.isFinite(v) || !indicateurId || !output) {
+        setErreurForm("Indicateur, sortie et valeur requis.");
+        return;
+      }
       // Params vides → défauts du registry côté moteur.
       condition = {
         type: "indicateur-seuil",
@@ -134,7 +146,10 @@ export function AlertsPanel() {
       const z = Number(zSeuil);
       const hasAbs = Number.isFinite(absPct) && absPct > 0;
       const hasZ = Number.isFinite(z) && z > 0;
-      if (!hasAbs && !hasZ) return; // au moins un critère
+      if (!hasAbs && !hasZ) {
+        setErreurForm("Au moins un critère (seuil absolu ou z-score) requis.");
+        return;
+      }
       condition = {
         type: "funding-extreme",
         sens: sensFunding,
@@ -144,12 +159,16 @@ export function AlertsPanel() {
     } else if (type === "liq-cascade") {
       // liq-cascade : seuil USD/min strictement positif requis.
       const s = Number(seuilCascade);
-      if (!Number.isFinite(s) || s <= 0) return;
+      if (!Number.isFinite(s) || s <= 0) {
+        setErreurForm("Seuil de cascade (> 0) requis.");
+        return;
+      }
       condition = { type: "liq-cascade", seuilUsdParMin: s };
     } else {
       // cvd-spot-perp-div — active le pipeline orderflow via le runtime.
       condition = { type: "cvd-spot-perp-div", kind: kindCvd };
     }
+    setErreurForm(null);
     alertsStore.getState().ajouter({
       symbol: symboleEffectif,
       source: marketStore.getState().exchange,
@@ -220,11 +239,24 @@ export function AlertsPanel() {
               </div>
               <button
                 type="button"
-                onClick={() => alertsStore.getState().supprimer(d.id)}
+                onClick={() => {
+                  // 1er clic : arme la confirmation ; 2e clic : supprime (pattern SettingsPanel.restaurer).
+                  if (confirmSuppr !== d.id) {
+                    setConfirmSuppr(d.id);
+                    return;
+                  }
+                  setConfirmSuppr(null);
+                  alertsStore.getState().supprimer(d.id);
+                }}
+                onBlur={() => setConfirmSuppr((c) => (c === d.id ? null : c))}
                 aria-label={`Supprimer l'alerte ${d.symbol}`}
-                className="shrink-0 text-text-dim opacity-0 transition hover:text-text group-hover:opacity-100"
+                className={`shrink-0 opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 ${
+                  confirmSuppr === d.id
+                    ? "text-[10px] font-semibold uppercase text-down"
+                    : "text-text-dim hover:text-text"
+                }`}
               >
-                ×
+                {confirmSuppr === d.id ? "confirmer ?" : "×"}
               </button>
             </div>
           );
@@ -431,6 +463,7 @@ export function AlertsPanel() {
         >
           Ajouter sur {symboleEffectif}
         </button>
+        {erreurForm !== null && <p className="text-[10px] text-down">{erreurForm}</p>}
       </div>
 
       {/* Journal repliable */}

@@ -18,10 +18,10 @@ import {
   parseNavigation,
   commandeNavigation,
   rechercher,
+  CATEGORIE_LABEL,
   type Commande,
-  type CategorieCommande,
 } from "../commands/registry";
-import { RACCOURCIS_AIDE } from "../commands/hotkeys";
+import { RACCOURCIS_AIDE, lignesMnemoniques } from "../commands/hotkeys";
 
 /** Entrée d'historique persistée (id de commande + texte de saisie pour rejouer la navigation). */
 interface EntreeHistorique {
@@ -40,16 +40,6 @@ interface Item {
 const CLE_HISTO = "axiom:paletteHistory:v1";
 /** Nombre maximum d'entrées d'historique conservées. */
 const MAX_HISTO = 20;
-
-/** Libellés courts de catégorie (colonne de droite). */
-const CATEGORIE_LABEL: Record<CategorieCommande, string> = {
-  navigation: "nav",
-  timeframe: "tf",
-  indicateur: "ind",
-  theme: "thème",
-  panneau: "panneau",
-  action: "action",
-};
 
 /** Garde de type d'une entrée d'historique restaurée. */
 function estEntree(x: unknown): x is EntreeHistorique {
@@ -208,9 +198,9 @@ export function CommandPalette() {
               Aide — raccourcis clavier
             </div>
             <div className="max-h-[60vh] overflow-y-auto p-2">
-              {RACCOURCIS_AIDE.map((r) => (
+              {[...RACCOURCIS_AIDE, ...lignesMnemoniques(registre)].map((r) => (
                 <div
-                  key={r.touche}
+                  key={r.description}
                   className="flex items-center gap-3 px-2 py-1.5 text-sm"
                 >
                   <kbd className="w-32 shrink-0 rounded border border-border bg-bg px-2 py-0.5 text-center text-[11px] text-accent">
@@ -246,7 +236,12 @@ export function CommandPalette() {
             </div>
 
             {/* Résultats. */}
-            <div ref={listeRef} className="max-h-[52vh] overflow-y-auto py-1">
+            <div
+              ref={listeRef}
+              role="listbox"
+              aria-activedescendant={items.length > 0 && indexSel >= 0 ? `palette-item-${indexSel}` : undefined}
+              className="max-h-[52vh] overflow-y-auto py-1"
+            >
               {items.length === 0 ? (
                 <div className="px-4 py-6 text-center text-sm text-text-dim">
                   Aucune commande. Essayez « RSI », « SOL 4H », « DES »…
@@ -255,16 +250,19 @@ export function CommandPalette() {
                 items.map((it, i) => (
                   <button
                     key={`${it.cmd.id}:${it.texte}:${i}`}
+                    id={`palette-item-${i}`}
                     data-idx={i}
                     type="button"
+                    role="option"
+                    aria-selected={i === indexSel}
                     onMouseEnter={() => setIndexSel(i)}
                     onClick={() => executer(it)}
                     className={`flex w-full items-center gap-3 px-4 py-1.5 text-left ${
-                      i === indexSel ? "bg-accent/15" : "hover:bg-bg"
-                    }`}
+                      it.cmd.id === "nav" ? "border-l-2 border-accent " : ""
+                    }${i === indexSel ? "bg-accent/15" : "hover:bg-bg"}`}
                   >
                     <span className="w-24 shrink-0 truncate text-[11px] font-semibold uppercase tracking-wider text-accent">
-                      {it.cmd.mnemonique ?? ""}
+                      {it.cmd.id === "nav" ? "→" : (it.cmd.mnemonique ?? "")}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm text-text">{it.cmd.libelle}</span>
                     <span className="shrink-0 text-[10px] uppercase tracking-wider text-text-dim">

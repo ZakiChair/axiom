@@ -392,6 +392,14 @@ describe("openWindow — fenêtre jamais ouverte", () => {
     expect(typeof w.z).toBe("number");
     expect(w.preSnapGeometry).toBeNull();
   });
+
+  it("la taille par défaut est plafonnée au workspace courant", () => {
+    windowManagerStore.getState().setWorkspace({ x: 0, y: 0, width: 800, height: 600 });
+    windowManagerStore.getState().openWindow("marketMap"); // defaultWidth 1100 > 800
+    const w = windowManagerStore.getState().windows.marketMap;
+    expect(w !== undefined && w.width <= 800).toBe(true);
+    expect(w !== undefined && w.height <= 600).toBe(true);
+  });
 });
 
 describe("openWindow — réouverture d'une fenêtre déjà fermée", () => {
@@ -528,6 +536,16 @@ describe("toggleWindow", () => {
     windowManagerStore.getState().openWindow("derivatives");
     windowManagerStore.getState().toggleWindow("derivatives");
     expect(windowManagerStore.getState().windows.derivatives!.open).toBe(false);
+  });
+
+  it("toggleWindow restaure une fenêtre minimisée au lieu de la fermer", () => {
+    const s = windowManagerStore.getState();
+    s.openWindow("derivatives");
+    s.minimizeWindow("derivatives");
+    s.toggleWindow("derivatives");
+    const w = windowManagerStore.getState().windows.derivatives;
+    expect(w?.open).toBe(true);
+    expect(w?.minimized).toBe(false);
   });
 });
 

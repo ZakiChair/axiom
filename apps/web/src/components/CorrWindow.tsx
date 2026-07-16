@@ -35,9 +35,9 @@ import {
   type MethodeCorr,
   type SerieCloture,
 } from "../data/corr";
-import { formatDec, formatHeureMinute } from "../lib/format";
+import { formatDec } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
-import { Chargement, EnTeteFenetre, NoteSource, Vide } from "./ui";
+import { Chargement, EnTeteFenetre, Fraicheur, NoteSource, Segmente, Vide } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère) ───────────────────────────
 
@@ -415,7 +415,8 @@ export function CorrWindow() {
     <>
       {/* En-tête standard ; croix de fermeture fournie par le chrome FloatingWindow. */}
       <EnTeteFenetre
-        titre="CORR · Corrélations"
+        mnemo="CORR"
+        titre="Corrélations"
         sousTitre={`Log-rendements journaliers · ${methode === "pearson" ? "Pearson" : "Spearman"} · ${fenetreJours} j`}
       />
 
@@ -423,21 +424,15 @@ export function CorrWindow() {
         {/* Contrôles : méthode, fenêtre, recalcul + fraîcheur. */}
         <div className="mb-3 space-y-2">
           <div className="flex items-center gap-2">
-            <div className="flex rounded-md border border-border bg-bg p-0.5 text-[11px]">
-              {(["pearson", "spearman"] as MethodeCorr[]).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMethode(m)}
-                  aria-pressed={methode === m}
-                  className={`rounded px-2 py-1 transition ${
-                    methode === m ? "bg-surface text-text" : "text-text-dim hover:text-text"
-                  }`}
-                >
-                  {m === "pearson" ? "Pearson" : "Spearman"}
-                </button>
-              ))}
-            </div>
+            <Segmente
+              options={[
+                { id: "pearson", label: "Pearson" },
+                { id: "spearman", label: "Spearman" },
+              ] as const}
+              actif={methode}
+              onChange={setMethode}
+            />
+            {/* Ids numériques (30/90/180 j) : Segmente exige T extends string, boutons manuscrits conservés — actif corrigé en bg-bg (standard §2). */}
             <div className="flex rounded-md border border-border bg-bg p-0.5 text-[11px]">
               {FENETRES.map((f) => (
                 <button
@@ -446,7 +441,7 @@ export function CorrWindow() {
                   onClick={() => setFenetreJours(f)}
                   aria-pressed={fenetreJours === f}
                   className={`rounded px-2 py-1 transition ${
-                    fenetreJours === f ? "bg-surface text-text" : "text-text-dim hover:text-text"
+                    fenetreJours === f ? "bg-bg text-text" : "text-text-dim hover:text-text"
                   }`}
                 >
                   {f}j
@@ -462,13 +457,7 @@ export function CorrWindow() {
             >
               ↻ Recalculer
             </button>
-            <span className="tabular-nums">
-              {loading
-                ? "Calcul…"
-                : majTs
-                  ? `maj ${formatHeureMinute(majTs)}`
-                  : "—"}
-            </span>
+            <Fraicheur loading={loading} majTs={majTs} />
           </div>
         </div>
 

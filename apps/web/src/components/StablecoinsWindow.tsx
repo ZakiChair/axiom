@@ -698,7 +698,6 @@ export function StablecoinsWindow() {
   const [emetteurs, setEmetteurs] = useState<EmetteurStablecoin[] | null>(null);
   const [historique, setHistorique] = useState<PointSupply[] | null>(null);
   const [emetteurSelId, setEmetteurSelId] = useState<string | null>(null);
-  const [essai, setEssai] = useState(0); // bouton « Réessayer »
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -718,11 +717,11 @@ export function StablecoinsWindow() {
       ignore = true;
       ctrl.abort();
     };
-  }, [essai]);
+  }, []);
 
   return (
     <>
-      <EnTeteFenetre titre="Stablecoins" sousTitre="Supply, impression, dominance, pegs · DefiLlama" />
+      <EnTeteFenetre mnemo="STBL" titre="Stablecoins" sousTitre="Supply, impression, dominance, pegs · DefiLlama" />
       <Onglets
         options={ONGLETS}
         actif={onglet}
@@ -733,14 +732,7 @@ export function StablecoinsWindow() {
       />
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {statut === "loading" && <Chargement />}
-        {statut === "error" && (
-          <ErreurBloc>
-            Impossible de charger les données DefiLlama.{" "}
-            <button type="button" className={BTN_SECONDAIRE} onClick={() => setEssai((n) => n + 1)}>
-              Réessayer
-            </button>
-          </ErreurBloc>
-        )}
+        {statut === "error" && <ErreurBloc>Impossible de charger les données DefiLlama.</ErreurBloc>}
         {statut === "ready" && emetteurs !== null && historique !== null && (
           emetteurSelId !== null ? (
             <VueEmetteur id={emetteurSelId} onRetour={() => setEmetteurSelId(null)} />

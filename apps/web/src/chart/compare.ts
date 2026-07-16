@@ -28,11 +28,15 @@ import type { Chart, IndicatorFigure } from "klinecharts";
 import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
 import { getAdapter } from "../data/adapters";
 import { marketStore } from "../store/market";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 import {
   MAIN_COLOR,
   MAX_COMPARE,
   type CompareSymbol,
 } from "../store/compare";
+
+/** Repli hex si le token n'est pas encore résolvable (thème pas encore appliqué). */
+const REPLI_COULEUR = "#94a3b8";
 
 /** Profondeur du backfill des comparés (aligné sur le backfill principal). */
 const BACKFILL_LIMIT = 500;
@@ -99,10 +103,15 @@ function ensureRegistered(): void {
       type: "line",
       // Couleur dynamique lue dans extendData (slot i) ; fusionnée par-dessus la
       // couleur par défaut de la ligne (cf. eachFigures du bundle v9.8.12).
+      // Résolution du token AU DESSIN (thème-aware) ; hex hérité passe tel quel.
       styles: (_data, indicator) => {
         const ext = indicator.extendData as CompareExtend | undefined;
         const slot = ext?.slots[i];
-        return slot ? { color: slot.color, size: 1.5 } : {};
+        if (!slot) return {};
+        const color = slot.color.startsWith("--")
+          ? lireTokenCanvas(slot.color, REPLI_COULEUR)
+          : slot.color;
+        return { color, size: 1.5 };
       },
     });
   }

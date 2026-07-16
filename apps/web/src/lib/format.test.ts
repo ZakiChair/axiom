@@ -10,12 +10,14 @@ import {
   formatDec,
   formatDelai,
   formatEntier,
+  formatFunding,
   formatHeure,
   formatHeureMinute,
   formatPct,
   formatPourcentage,
   formatPrice,
   formatUsd,
+  formatUsdSigne,
 } from "./format";
 
 describe("formatPrice", () => {
@@ -154,6 +156,27 @@ describe("formatDelai", () => {
   it("échéance passée : « imminent » (borne basse), invalide : « — »", () => {
     expect(formatDelai(now - 1_000, now)).toBe("imminent");
     expect(formatDelai(0, now)).toBe(VALEUR_ABSENTE);
+  });
+});
+
+describe("formatFunding", () => {
+  it("fraction → % signé 4 décimales (convention funding)", () => {
+    expect(formatFunding(0.0001)).toBe("+0.0100%");
+    expect(formatFunding(-0.0025)).toBe("-0.2500%");
+  });
+  it("absent → —", () => {
+    expect(formatFunding(null)).toBe(VALEUR_ABSENTE);
+    expect(formatFunding(undefined)).toBe(VALEUR_ABSENTE);
+  });
+});
+
+describe("formatUsdSigne", () => {
+  it("« + » explicite sur les gains", () => {
+    expect(formatUsdSigne(12_340_000)).toBe("+$12.34M");
+  });
+  it("négatif et zéro passent par formatUsd tel quel", () => {
+    expect(formatUsdSigne(-1_300_000_000)).toBe(formatUsd(-1_300_000_000));
+    expect(formatUsdSigne(0)).toBe(formatUsd(0));
   });
 });
 

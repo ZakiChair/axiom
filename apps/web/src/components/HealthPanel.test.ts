@@ -17,11 +17,11 @@ function src(source: string, etat: SanteSource["etat"]): SanteSource {
 describe("dotClass", () => {
   it("mappe chaque état sur un token de thème (jamais de hex en dur)", () => {
     expect(dotClass("connected")).toBe("bg-up"); // vert
-    expect(dotClass("stale")).toBe("bg-amber-500"); // orange
-    expect(dotClass("reconnecting")).toBe("bg-amber-500"); // orange
+    expect(dotClass("stale")).toBe("bg-warn"); // avertissement (thémé --ui-amber)
+    expect(dotClass("reconnecting")).toBe("bg-warn");
     expect(dotClass("error")).toBe("bg-down"); // rouge
     expect(dotClass("polling")).toBe("bg-text-dim"); // bleu-gris
-    expect(dotClass("closed")).toBe("bg-neutral-600"); // gris éteint
+    expect(dotClass("closed")).toBe("bg-neutral-600"); // gris éteint (rampe --n-*)
   });
 });
 

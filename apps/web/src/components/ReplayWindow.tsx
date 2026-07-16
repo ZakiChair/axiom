@@ -60,15 +60,18 @@ export function ReplayWindow() {
     <>
       {/* Pas d'actions : la croix de fermeture est fournie par le chrome FloatingWindow. */}
       <EnTeteFenetre
-        titre="REPLAY · Replay de marché"
+        mnemo="REPLAY"
+        titre="Replay de marché"
         sousTitre="Dumps aggTrades officiels (data.binance.vision) · Binance spot"
       />
 
       <div className="flex-1 overflow-y-auto">
         {s.daemonAbsent && (
-          <div className="m-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-500">
-            Le replay nécessite le daemon <span className="font-mono">axiomd</span> (port 8787).
-            Démarrez-le puis rouvrez ce panneau.
+          <div className="m-3">
+            <Vide>
+              Le replay nécessite le daemon <span className="font-mono">axiomd</span> (port 8787).
+              Démarrez-le puis rouvrez ce panneau.
+            </Vide>
           </div>
         )}
 

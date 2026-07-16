@@ -33,7 +33,7 @@ import {
 } from "../data/depth";
 import { formatUsd } from "../lib/format";
 import { lireTokensCanvas } from "../lib/canvasTokens";
-import { EnTeteFenetre, Vide } from "./ui";
+import { EnTeteFenetre, Onglets, Vide } from "./ui";
 
 /** Nombre MAX de niveaux affichés de chaque côté du mid (LADDER, fenêtre haute). */
 const LADDER_ROWS = 20;
@@ -511,29 +511,20 @@ export function DomWindow() {
     <>
       {/* En-tête standard ; la croix de fermeture est fournie par le chrome FloatingWindow. */}
       <EnTeteFenetre
+        mnemo="DOM"
         titre="Carnet d'ordres"
         sousTitre={isBinance ? `${symbol} · Binance` : "Binance uniquement"}
       />
 
-      {/* Onglets */}
-      <div className="flex items-center gap-1 border-b border-border px-3 py-1.5">
-        {([
-          ["ladder", "Ladder"],
-          ["depth", "Depth"],
-          ["tape", "Tape"],
-        ] as const).map(([id, libelle]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={`rounded px-2.5 py-1 text-[11px] uppercase tracking-wide transition ${
-              tab === id ? "bg-bg text-text" : "text-text-dim hover:text-text"
-            }`}
-          >
-            {libelle}
-          </button>
-        ))}
-      </div>
+      <Onglets
+        options={[
+          { id: "ladder", label: "Ladder" },
+          { id: "depth", label: "Depth" },
+          { id: "tape", label: "Tape" },
+        ] as const}
+        actif={tab}
+        onChange={setTab}
+      />
 
       {/* Réglages contextuels : pas d'agrégation (ladder/depth) ou seuil gros trade (tape). */}
       {isBinance && (

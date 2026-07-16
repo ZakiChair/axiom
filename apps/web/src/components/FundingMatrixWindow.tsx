@@ -11,8 +11,8 @@ import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { fetchFundingMatrix, fundingSpreadApr, type FundingVenue } from "../data/fundingCrossExchange";
-import { EnTeteFenetre, Chargement, Vide, NoteSource } from "./ui";
-import { formatDec } from "../lib/format";
+import { EnTeteFenetre, Chargement, Vide, NoteSource, Fraicheur } from "./ui";
+import { formatPct } from "../lib/format";
 
 const RAFRAICHISSEMENT_MS = 60_000;
 
@@ -27,6 +27,7 @@ export function FundingMatrixWindow() {
   const symbol = useStore(marketStore, (s) => s.symbol);
   const [venues, setVenues] = useState<FundingVenue[] | null>(null);
   const [chargement, setChargement] = useState(true);
+  const [majTs, setMajTs] = useState<number | null>(null);
 
   useEffect(() => {
     let annule = false;
@@ -36,6 +37,7 @@ export function FundingMatrixWindow() {
       if (annule) return;
       setVenues(v);
       setChargement(false);
+      setMajTs(Date.now());
     };
     void charger();
     const id = setInterval(() => void charger(), RAFRAICHISSEMENT_MS);
@@ -50,6 +52,7 @@ export function FundingMatrixWindow() {
   return (
     <div className="flex h-full flex-col">
       <EnTeteFenetre
+        mnemo="FUNDX"
         titre="Funding cross-exchange"
         sousTitre={
           <>
@@ -57,9 +60,13 @@ export function FundingMatrixWindow() {
             {spread !== null && (
               <>
                 {" · écart "}
-                <span className="font-semibold text-text">{formatDec(spread, 2)} %</span>
+                <span className="font-semibold text-text">
+                  {formatPct(spread, 2, { signe: false })}
+                </span>
               </>
             )}
+            {" · "}
+            <Fraicheur loading={chargement} majTs={majTs} />
           </>
         }
       />
@@ -80,10 +87,10 @@ export function FundingMatrixWindow() {
                 <tr key={v.exchange} className="border-b border-border/50">
                   <td className="py-2 text-text">{v.label}</td>
                   <td className={`py-2 text-right tabular-nums ${couleurSigne(v.ratePct)}`}>
-                    {formatDec(v.ratePct, 4)} % <span className="text-text-dim">/ {v.intervalHours}h</span>
+                    {formatPct(v.ratePct, 4)} <span className="text-text-dim">/ {v.intervalHours}h</span>
                   </td>
                   <td className={`py-2 text-right font-semibold tabular-nums ${couleurSigne(v.apr)}`}>
-                    {formatDec(v.apr, 2)} %
+                    {formatPct(v.apr, 2)}
                   </td>
                 </tr>
               ))}

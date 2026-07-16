@@ -22,13 +22,11 @@ import { getActiveChart } from "./drawing";
 import { marketStore } from "../store/market";
 import { ecoStore } from "../store/eco";
 import type { EcoEvent } from "../data/eco";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 
 /** Nom de l'overlay custom + groupe (permet un removeOverlay ciblé). */
 const ECO_MARKER = "ecoMarker";
 const ECO_GROUP = "axiomEco";
-
-/** Couleur des marqueurs (ambre : convention « évènement » d'un calendrier éco). */
-const ECO_COLOR = "#f59e0b";
 
 /** Nombre maximum de marqueurs tracés (borne défensive). */
 const MAX_MARKERS = 80;
@@ -36,7 +34,6 @@ const MAX_MARKERS = 80;
 /** Données portées par chaque instance d'overlay (lues dans createPointFigures). */
 interface EcoMarkerExtend {
   label: string;
-  color: string;
 }
 
 /** Tronque un label à `n` caractères (… si coupé). */
@@ -61,7 +58,7 @@ function ensureOverlayRegistered(): void {
       const c = coordinates[0];
       if (c === undefined) return [];
       const ext = overlay.extendData as EcoMarkerExtend | undefined;
-      const color = ext?.color ?? ECO_COLOR;
+      const color = lireTokenCanvas("--serie-3", "#f59e0b");
       const label = ext?.label ?? "";
       return [
         {
@@ -110,7 +107,6 @@ function redraw(): void {
   for (const ev of marqueurs(events)) {
     const extend: EcoMarkerExtend = {
       label: tronquer(`${ev.country} ${ev.title}`, 18),
-      color: ECO_COLOR,
     };
     const overlay: OverlayCreate = {
       name: ECO_MARKER,

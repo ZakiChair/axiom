@@ -135,20 +135,150 @@ describe("extraireTokensDefinis — fonction pure (fixtures)", () => {
   });
 });
 
-describe("index.css — chaque thème définit l'intégralité des tokens consommés par le canvas", () => {
-  // Sélecteurs RÉELS du fichier (vérifiés par lecture directe d'index.css,
-  // cf. son commentaire d'en-tête : ":root sans attribut == thème dark").
-  const SELECTEURS_THEMES: readonly string[] = [
-    ":root",
-    ':root[data-theme="bloomberg"]',
-    ':root[data-theme="matrix"]',
-    ':root[data-theme="cute"]',
-    ':root[data-theme="aurora"]',
-  ];
+/**
+ * Tokens consommés par tailwind.config.js en `rgb(var(--x-rgb) / <alpha-value>)` :
+ * chaque thème doit définir le triplet jumeau, sinon les classes /NN retombent
+ * silencieusement sur du CSS invalide (l'audit v2 a montré 15+ fichiers touchés).
+ */
+const TOKENS_RGB_REQUIS: readonly string[] = [
+  "--bg-rgb",
+  "--surface-rgb",
+  "--border-rgb",
+  "--text-rgb",
+  "--text-dim-rgb",
+  "--up-rgb",
+  "--down-rgb",
+  "--accent-rgb",
+  "--accent-ink-rgb",
+  "--grid-rgb",
+  "--crosshair-rgb",
+  "--serie-1-rgb",
+  "--serie-2-rgb",
+  "--serie-3-rgb",
+  "--serie-4-rgb",
+  "--serie-5-rgb",
+  "--serie-6-rgb",
+  "--n-100-rgb",
+  "--n-200-rgb",
+  "--n-300-rgb",
+  "--n-400-rgb",
+  "--n-500-rgb",
+  "--n-600-rgb",
+  "--n-700-rgb",
+  "--n-800-rgb",
+  "--n-900-rgb",
+  "--n-950-rgb",
+  "--ui-emerald-rgb",
+  "--ui-emerald-hover-rgb",
+  "--ui-cyan-rgb",
+  "--ui-amber-rgb",
+];
 
+// Sélecteurs RÉELS du fichier (vérifiés par lecture directe d'index.css, cf. son
+// commentaire d'en-tête : ":root sans attribut == thème dark"). Hissé au niveau
+// module : réutilisé par le garde-fou de cohérence hex↔triplet ci-dessous.
+const SELECTEURS_THEMES: readonly string[] = [
+  ":root",
+  ':root[data-theme="bloomberg"]',
+  ':root[data-theme="matrix"]',
+  ':root[data-theme="cute"]',
+  ':root[data-theme="aurora"]',
+];
+
+describe("index.css — chaque thème définit l'intégralité des tokens consommés par le canvas", () => {
   it.each(SELECTEURS_THEMES)("le thème %s définit tous les tokens requis", (selecteur) => {
     const definis = extraireTokensDefinis(cssIndex, selecteur);
     const manquants = TOKENS_REQUIS.filter((t) => !definis.has(t));
     expect(manquants).toEqual([]);
   });
+
+  it.each(SELECTEURS_THEMES)("le thème %s définit tous les triplets --*-rgb", (selecteur) => {
+    const definis = extraireTokensDefinis(cssIndex, selecteur);
+    const manquants = TOKENS_RGB_REQUIS.filter((t) => !definis.has(t));
+    expect(manquants).toEqual([]);
+  });
+});
+
+/**
+ * Extrait la valeur brute déclarée pour `token` dans le(s) bloc(s) dont la liste de
+ * sélecteurs contient EXACTEMENT `selecteur` — même mécanique de repérage de bloc
+ * qu'`extraireTokensDefinis` (retrait des commentaires, découpage sur le dernier ";"
+ * pour ignorer les règles sans accolade type `@tailwind base;`). `null` si le token
+ * ou le sélecteur est absent.
+ */
+export function extraireValeur(css: string, selecteur: string, token: string): string | null {
+  const cssSansCommentaires = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const blocRegex = /([^{}]+)\{([^{}]*)\}/g;
+  let bloc: RegExpExecArray | null;
+  while ((bloc = blocRegex.exec(cssSansCommentaires)) !== null) {
+    const listeSelecteurs = bloc[1];
+    const declarations = bloc[2];
+    if (listeSelecteurs === undefined || declarations === undefined) continue;
+    const dernierPointVirgule = listeSelecteurs.lastIndexOf(";");
+    const texteSelecteurs =
+      dernierPointVirgule === -1 ? listeSelecteurs : listeSelecteurs.slice(dernierPointVirgule + 1);
+    const selecteurs = texteSelecteurs.split(",").map((s) => s.trim());
+    if (!selecteurs.includes(selecteur)) continue;
+    // `token` suivi d'un ":" (à un espace près) — pas d'un "-" (évite qu'une
+    // recherche de "--serie-1" ne capture la déclaration de "--serie-1-rgb").
+    const tokenEchappe = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const tokenRegex = new RegExp(`(?:^|;)\\s*${tokenEchappe}\\s*:\\s*([^;]+);?`);
+    const jeton = tokenRegex.exec(declarations);
+    if (jeton?.[1] !== undefined) return jeton[1].trim();
+  }
+  return null;
+}
+
+/** Convertit une couleur hex (#rgb ou #rrggbb) en triplet décimal "R G B" — même
+ *  format que les valeurs `--x-rgb` d'index.css. `null` si `hex` n'est pas une
+ *  notation hexadécimale reconnue (ex. `rgb(...)`, `hsl(...)`). */
+export function hexVersTriplet(hex: string): string | null {
+  const correspondance = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!correspondance) return null;
+  const h = correspondance[1]!;
+  const composantes =
+    h.length === 3
+      ? [h[0]! + h[0]!, h[1]! + h[1]!, h[2]! + h[2]!]
+      : [h.slice(0, 2), h.slice(2, 4), h.slice(4, 6)];
+  return composantes.map((c) => parseInt(c, 16)).join(" ");
+}
+
+describe("extraireValeur / hexVersTriplet — fonctions pures (fixtures)", () => {
+  it("extrait la valeur d'un token dans le bon bloc", () => {
+    const css = `:root[data-theme="x"] { --a: #112233; --a-rgb: 17 34 51; }`;
+    expect(extraireValeur(css, ':root[data-theme="x"]', "--a")).toBe("#112233");
+    expect(extraireValeur(css, ':root[data-theme="x"]', "--a-rgb")).toBe("17 34 51");
+  });
+
+  it("ne confond pas un token avec un autre dont il est le préfixe", () => {
+    const css = `:root { --serie-1: #abcdef; --serie-1-rgb: 171 205 239; }`;
+    expect(extraireValeur(css, ":root", "--serie-1")).toBe("#abcdef");
+  });
+
+  it("hexVersTriplet convertit #rrggbb et #rgb, renvoie null sinon", () => {
+    expect(hexVersTriplet("#38bdf8")).toBe("56 189 248");
+    expect(hexVersTriplet("#fff")).toBe("255 255 255");
+    expect(hexVersTriplet("rgb(1, 2, 3)")).toBeNull();
+  });
+});
+
+describe("index.css — cohérence entre chaque --x-rgb et son jumeau hex --x", () => {
+  it.each(SELECTEURS_THEMES)(
+    "le thème %s a des triplets --x-rgb identiques à la conversion de leur --x hex",
+    (selecteur) => {
+      for (const tokenRgb of TOKENS_RGB_REQUIS) {
+        const tokenHex = tokenRgb.slice(0, -"-rgb".length);
+        const valeurHex = extraireValeur(cssIndex, selecteur, tokenHex);
+        const valeurRgb = extraireValeur(cssIndex, selecteur, tokenRgb);
+        expect(valeurHex, `${tokenHex} manquant pour ${selecteur}`).not.toBeNull();
+        expect(valeurRgb, `${tokenRgb} manquant pour ${selecteur}`).not.toBeNull();
+        // D'après T1, tous les tokens jumeaux d'index.css sont en notation hex — si
+        // ce n'était plus le cas, le test échoue ici explicitement (pas de skip
+        // silencieux) plutôt que de comparer un triplet non défini.
+        const triplet = hexVersTriplet(valeurHex ?? "");
+        expect(triplet, `${tokenHex} n'est pas en notation hex (#rgb/#rrggbb) : ${valeurHex}`).not.toBeNull();
+        expect(valeurRgb).toBe(triplet);
+      }
+    }
+  );
 });

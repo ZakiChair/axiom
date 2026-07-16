@@ -364,6 +364,7 @@ export function VolWindow() {
   return (
     <>
       <EnTeteFenetre
+        mnemo="VOL"
         titre="Volatilité"
         sousTitre={`${symbol} · quotidien · annualisation √${PPA}`}
         actions={

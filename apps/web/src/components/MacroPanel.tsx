@@ -125,7 +125,7 @@ function Measure({
               type="checkbox"
               checked={active ?? false}
               onChange={onToggle}
-              className="h-3 w-3 accent-emerald-500"
+              className="h-3 w-3 accent-accent"
             />
           )}
           <span>{label}</span>
@@ -295,7 +295,7 @@ export function MacroPanel() {
               type="checkbox"
               checked={isMacroActive("m2")}
               onChange={() => toggleMacro("m2")}
-              className="h-3 w-3 accent-emerald-500"
+              className="h-3 w-3 accent-accent"
             />
             <span>M2 (US · FRED)</span>
           </label>

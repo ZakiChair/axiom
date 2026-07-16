@@ -24,10 +24,10 @@ import { themeStore } from "../store/theme";
 import { marketMapUiStore } from "../store/marketmap-ui";
 import { fetchPairs } from "../data/pairs";
 import { squarify, type Rect, type Tuile } from "../lib/treemap";
-import { formatAge, formatPct, formatUsd } from "../lib/format";
+import { formatPct, formatPourcentage, formatUsd } from "../lib/format";
 import { lireTokensCanvas } from "../lib/canvasTokens";
 import { navigateTo } from "../lib/navigation";
-import { ErreurBloc, NoteSource, Onglets } from "./ui";
+import { EnTeteFenetre, ErreurBloc, Fraicheur, NoteSource, Onglets } from "./ui";
 import {
   fetchFearGreed,
   fetchMarketOverview,
@@ -383,10 +383,12 @@ export function MarketMapWindow() {
     // un parent à hauteur définie, sinon le canvas treemap est mesuré à ~0px et s'ouvre
     // écrasé en une seule bande (audit #28).
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">Vue marché</h2>
-          <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-text-dim">
+      {/* Pas d'actions à droite : croix de fermeture fournie par le chrome FloatingWindow */}
+      <EnTeteFenetre
+        mnemo="MAP"
+        titre="Vue marché"
+        sousTitre={
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <span>
               Cap. <span className="tabular-nums text-text">{formatUsd(g?.totalMcapUsd ?? NaN)}</span>{" "}
               {g && (
@@ -396,8 +398,9 @@ export function MarketMapWindow() {
               )}
             </span>
             <span>
-              BTC <span className="tabular-nums text-text">{g ? `${g.btcDominance.toFixed(1)}%` : "—"}</span> · ETH{" "}
-              <span className="tabular-nums text-text">{g ? `${g.ethDominance.toFixed(1)}%` : "—"}</span>
+              BTC <span className="tabular-nums text-text">{g ? formatPourcentage(g.btcDominance, 1) : "—"}</span> ·
+              ETH{" "}
+              <span className="tabular-nums text-text">{g ? formatPourcentage(g.ethDominance, 1) : "—"}</span>
             </span>
             <span>
               Vol 24h <span className="tabular-nums text-text">{formatUsd(g?.totalVolumeUsd ?? NaN)}</span>
@@ -409,16 +412,14 @@ export function MarketMapWindow() {
               </span>
             )}
             {overview && (
-              <span className={overview.stale ? "text-amber-500" : "text-text-dim"}>
-                {loading
-                  ? "maj…"
-                  : `maj ${formatAge(overview.fetchedAt, Date.now())}${overview.stale ? " · cache" : ""}`}
+              <span className={overview.stale ? "text-warn" : "text-text-dim"}>
+                <Fraicheur loading={loading} majTs={overview.fetchedAt} />
+                {overview.stale ? " · cache" : ""}
               </span>
             )}
-          </div>
-        </div>
-        {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
-      </header>
+          </span>
+        }
+      />
 
       {/* Onglets */}
       <Onglets

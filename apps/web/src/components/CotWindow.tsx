@@ -148,7 +148,8 @@ export function CotWindow() {
   return (
     <>
       <EnTeteFenetre
-        titre="COT · CFTC"
+        mnemo="COT"
+        titre="CFTC"
         sousTitre={
           <>
             Net spéculatif · {formatDateComplete(resume?.dateRapport ?? 0)}

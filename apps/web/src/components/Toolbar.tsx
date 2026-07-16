@@ -246,7 +246,7 @@ function PlaybooksMenu() {
             className="flex w-full flex-col gap-0.5 rounded px-2 py-1.5 text-left text-xs text-neutral-200 hover:bg-neutral-800"
           >
             <span className="flex items-center gap-2">
-              <span className="shrink-0 font-semibold uppercase tracking-wider text-sky-400">
+              <span className="shrink-0 font-semibold uppercase tracking-wider text-accent">
                 {p.mnemonique}
               </span>
               <span className="min-w-0 flex-1 truncate font-medium">{p.nom}</span>
@@ -631,7 +631,7 @@ export function Toolbar() {
           isTradfi || isSynthetic
             ? "cursor-not-allowed bg-neutral-900 text-neutral-700"
             : liqActif
-              ? "bg-violet-500 text-accent-ink"
+              ? "bg-accent text-accent-ink"
               : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
         }`}
       >

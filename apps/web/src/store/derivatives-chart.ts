@@ -46,10 +46,12 @@ export const commandes: Commande[] = [
   },
   {
     id: "action:deriv-funding-pane",
-    mnemonique: "FUND",
+    // « FUND » entrait en collision avec le mnémonique de la fenêtre Fiche société
+    // (panneau:fund, commands/windowPanels.ts) — recherche libre conservée via motsCles.
+    mnemonique: "FRATE",
     libelle: "Funding rate (sous-pane) — activer / désactiver",
     categorie: "action",
-    motsCles: ["funding", "taux", "derives", "sous-pane", "coinalyze"],
+    motsCles: ["funding", "fund", "taux", "derives", "sous-pane", "coinalyze"],
     apercu: "Affiche le funding du perp actif sous le graphe",
     action: () => derivativesChartStore.getState().toggleFunding(),
   },

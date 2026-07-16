@@ -39,6 +39,7 @@ import { macroOverlayStore } from "./macro-overlays";
 import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore } from "../chart/Chart";
 import { themeStore } from "../store/theme";
+import { windowManagerStore } from "./windowManager";
 import { workspacesStore, DEFAULT_WORKSPACE_ID, type WorkspaceContent } from "./workspaces";
 
 /** Mock localStorage en mémoire (la persistance interne du store écrit dessus). */
@@ -253,5 +254,61 @@ describe("workspacesStore — validation au chargement", () => {
     expect(wsX?.content.macroOverlays).toEqual(["m2"]);
     expect(wsX?.content.sections).toEqual({});
     expect(wsX?.content.indicators).toEqual([]);
+  });
+
+  it("un workspace relu depuis localStorage conserve l'état ouvert des fenêtres (sémantique unique, revue v2 H15)", async () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    workspacesStore.getState().saveAs("plan");
+
+    // Simule un reload : ré-exécute la lecture initiale (module frais) sur le JSON
+    // réellement persisté par la sauvegarde ci-dessus — même mécanique que le test de
+    // corruption ci-dessus (vi.resetModules() + réimport lit `axiom:workspaces:v1`).
+    vi.resetModules();
+    const mod = await import("./workspaces");
+    const plan = mod.workspacesStore.getState().workspaces.find((w) => w.name === "plan");
+
+    expect(plan?.content.windowGeometry["derivatives"]?.open).toBe(true);
+  });
+});
+
+describe("workspacesStore — re-clamp de la géométrie à l'apply", () => {
+  it("une fenêtre ouverte sauvegardée hors du workspace courant est re-clampée dans ses bornes (revue whole-branch #1)", () => {
+    const workspace = { x: 0, y: 0, width: 1920, height: 1080 };
+    windowManagerStore.setState({ windows: {}, workspace });
+
+    // Contenu « grand écran » : une fenêtre ouverte positionnée bien au-delà du
+    // workspace courant (ex. sauvegardée sur un moniteur plus large).
+    const contenu: WorkspaceContent = {
+      ...contenuVierge(),
+      windowGeometry: {
+        derivatives: {
+          id: "derivatives",
+          open: true,
+          x: 5000,
+          y: 5000,
+          width: 420,
+          height: 640,
+          z: 1,
+          minimized: false,
+          groupColor: null,
+          preSnapGeometry: null,
+        },
+      },
+    };
+    workspacesStore.setState({
+      workspaces: [
+        { id: DEFAULT_WORKSPACE_ID, name: "Défaut", content: contenuVierge() },
+        { id: "grand-ecran", name: "Grand écran", content: contenu },
+      ],
+      currentId: DEFAULT_WORKSPACE_ID,
+    });
+
+    workspacesStore.getState().apply("grand-ecran");
+
+    const fenetre = windowManagerStore.getState().windows["derivatives"];
+    expect(fenetre?.open).toBe(true);
+    // Re-clampée : entièrement contenue dans le workspace courant, pas seulement un bord.
+    expect(fenetre?.x).toBeLessThanOrEqual(workspace.x + workspace.width - (fenetre?.width ?? 0));
+    expect(fenetre?.y).toBeLessThanOrEqual(workspace.y + workspace.height - (fenetre?.height ?? 0));
   });
 });

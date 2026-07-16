@@ -12,7 +12,7 @@
  */
 import { useStore } from "zustand";
 import { marketStore } from "../store/market";
-import { compareStore, MAX_COMPARE, MAIN_COLOR } from "../store/compare";
+import { compareStore, MAX_COMPARE, MAIN_COLOR, couleurAffichable } from "../store/compare";
 import { PairSearch } from "./PairSearch";
 import { SidebarSection } from "./SidebarSection";
 
@@ -51,7 +51,7 @@ export function CompareControl() {
           <li className="flex items-center gap-2 px-1 py-1 text-xs">
             <span
               className="h-2.5 w-2.5 shrink-0 rounded-full"
-              style={{ backgroundColor: MAIN_COLOR }}
+              style={{ backgroundColor: couleurAffichable(MAIN_COLOR) }}
             />
             <span className="flex-1 truncate font-medium text-text">
               {mainSymbol}
@@ -67,7 +67,7 @@ export function CompareControl() {
             >
               <span
                 className="h-2.5 w-2.5 shrink-0 rounded-full"
-                style={{ backgroundColor: c.color }}
+                style={{ backgroundColor: couleurAffichable(c.color) }}
               />
               <span className="flex-1 truncate text-text">{c.symbol}</span>
               <button

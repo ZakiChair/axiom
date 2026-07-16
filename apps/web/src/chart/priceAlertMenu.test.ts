@@ -38,10 +38,10 @@ describe("itemsMenuAlertePrix", () => {
 });
 
 describe("formaterNiveauCourt", () => {
-  it("formate grands / moyens / petits prix", () => {
-    expect(formaterNiveauCourt(42150.12)).toMatch(/42/);
-    expect(formaterNiveauCourt(1.2345)).toMatch(/1\.2345/);
-    expect(formaterNiveauCourt(0.001234)).toMatch(/0\.001/);
+  it("délègue à formatPrice : décimales adaptées à la magnitude (2/4/6)", () => {
+    expect(formaterNiveauCourt(42150.12)).toBe("42,150.12");
+    expect(formaterNiveauCourt(0.2345)).toBe("0.2345");
+    expect(formaterNiveauCourt(0.0013)).toBe("0.001300");
   });
 });
 

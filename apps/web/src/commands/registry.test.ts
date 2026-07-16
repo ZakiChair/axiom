@@ -25,8 +25,33 @@ import {
   scoreFuzzy,
   rechercher,
   construireRegistre,
+  enregistrerCommandes,
+  commandeNavigation,
+  appliquerNavigation,
   type Commande,
+  type NavCommande,
 } from "./registry";
+import { marketStore } from "../store/market";
+import { toastsStore, retirerToast } from "../store/toasts";
+// Les deux sources connues pour leurs collisions greffent leurs commandes dans le
+// registre PAR SIDE-EFFECT d'import dans App.tsx
+// (`enregistrerCommandes([...derivChartCommands, ...windowPanelCommands])`), jamais
+// elles-mêmes — elles se contentent d'exporter un tableau `Commande[]`. Un simple
+// `import "./windowPanels"` ne greffe donc RIEN dans `commandesExternes`. Comme les deux
+// modules sont des stores Zustand vanilla (aucune dépendance DOM à l'import, contrairement
+// à store/theme ou chart/drawing ci-dessus), on les importe pour leurs valeurs et on
+// reproduit ici l'appel d'`enregistrerCommandes` fait par App.tsx.
+// Portée du test ci-dessous : registre statique + ces deux sources externes (celles de
+// la collision FUND). Les ~17 autres sources greffées par App.tsx (eco, news, onchain,
+// portfolio, notes, screener, dom, backtest, replay, globe, ticker, onboarding,
+// playbooks, marqueurs chart…) n'y sont PAS importées — sonde manuelle (hors suite,
+// non committée) : les greffer toutes (sauf tradeMarkers, qui exige un mock DOM, et
+// commandesGrille, défini inline dans App.tsx) donne 220 commandes et ZÉRO doublon
+// après ce correctif, donc le risque résiduel est faible mais non nul.
+import { commandes as derivChartCommandes } from "../store/derivatives-chart";
+import { windowPanelCommands } from "./windowPanels";
+
+enregistrerCommandes([...derivChartCommandes, ...windowPanelCommands]);
 
 describe("parseNavigation — symbole + timeframe + source, ordre libre", () => {
   it("complète une base crypto nue en …USDT", () => {
@@ -74,6 +99,68 @@ describe("parseNavigation — symbole + timeframe + source, ordre libre", () => 
 
   it("timeframe seul (sans symbole) est valide", () => {
     expect(parseNavigation("1d")).toEqual({ timeframe: "1d" });
+  });
+});
+
+describe("commandeNavigation — libellé explicite quand la paire change", () => {
+  it("un changement de paire s'annonce explicitement dans la palette", () => {
+    const cmd = commandeNavigation({ symbol: "DERIVUSDT" });
+    expect(cmd.libelle).toBe("Changer la paire → DERIVUSDT");
+    const tf = commandeNavigation({ timeframe: "4h" });
+    expect(tf.libelle).toBe("Aller à 4h");
+  });
+});
+
+describe("appliquerNavigation — garde du toast de changement de paire", () => {
+  it("ne pousse AUCUN toast si le symbole ne change pas", () => {
+    const avant = marketStore.getState();
+    const identiteAvant = { exchange: avant.exchange, symbol: avant.symbol, timeframe: avant.timeframe };
+    const toastsAvant = toastsStore.getState().toasts;
+
+    appliquerNavigation({ symbol: identiteAvant.symbol });
+
+    // Aucun setState : références inchangées (marché ET toasts).
+    expect(toastsStore.getState().toasts).toBe(toastsAvant);
+    const apres = marketStore.getState();
+    expect({ exchange: apres.exchange, symbol: apres.symbol, timeframe: apres.timeframe }).toEqual(
+      identiteAvant,
+    );
+  });
+
+  it("pousse un toast avec Annuler si la paire change, et Annuler restaure exchange+symbol+timeframe", () => {
+    vi.useFakeTimers();
+    try {
+      const avant = marketStore.getState();
+      const identiteAvant = { exchange: avant.exchange, symbol: avant.symbol, timeframe: avant.timeframe };
+      const nav: NavCommande =
+        identiteAvant.exchange === "kraken"
+          ? { source: "binance", symbol: "ETHUSDT", timeframe: "4h" }
+          : { source: "kraken", symbol: "ETHUSDT", timeframe: "4h" };
+
+      appliquerNavigation(nav);
+
+      // La paire a bien changé, et un toast Annuler a été poussé.
+      const apresChangement = marketStore.getState();
+      expect(apresChangement.symbol).toBe("ETHUSDT");
+      const toasts = toastsStore.getState().toasts;
+      const dernier = toasts[toasts.length - 1];
+      expect(dernier?.action?.libelle).toBe("Annuler");
+
+      dernier?.action?.executer();
+
+      // Annuler restaure l'identité exacte d'avant (exchange + symbole + timeframe).
+      const apresAnnuler = marketStore.getState();
+      expect({
+        exchange: apresAnnuler.exchange,
+        symbol: apresAnnuler.symbol,
+        timeframe: apresAnnuler.timeframe,
+      }).toEqual(identiteAvant);
+    } finally {
+      // Nettoyage : purge tout toast résiduel et ses minuteurs avant de rendre la main.
+      for (const t of toastsStore.getState().toasts) retirerToast(t.id);
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -147,5 +234,15 @@ describe("construireRegistre — commandes attendues présentes", () => {
   it("expose les 11 timeframes et les 5 thèmes", () => {
     expect(registre.filter((c) => c.categorie === "timeframe")).toHaveLength(11);
     expect(registre.filter((c) => c.categorie === "theme")).toHaveLength(5);
+  });
+
+  it("aucun mnémonique dupliqué dans le registre complet (insensible à la casse)", () => {
+    const vus = new Map<string, string>();
+    for (const c of registre) {
+      if (c.mnemonique === undefined) continue;
+      const cle = c.mnemonique.toLowerCase();
+      expect(vus.get(cle), `« ${c.mnemonique} » dupliqué entre ${vus.get(cle)} et ${c.id}`).toBeUndefined();
+      vus.set(cle, c.id);
+    }
   });
 });

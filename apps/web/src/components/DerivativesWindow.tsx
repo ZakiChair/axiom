@@ -49,15 +49,13 @@ import {
 import {
   formatDec,
   formatDelai,
+  formatFunding,
   formatHeure,
-  formatPct,
   formatUsd,
   VALEUR_ABSENTE,
 } from "../lib/format";
 import { metaSource } from "../lib/fiabilite";
-import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, SansCle, Vide } from "./ui";
-// Couleurs de série des panes OI/funding (hex figés côté chart — cf. leur doc).
-import { OI_COLOR, FUNDING_COLOR } from "../chart/derivatives";
+import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, Fraicheur, Metric, SansCle, Vide } from "./ui";
 
 /** Période d'agrégation du long/short ratio et fenêtre des liquidations affichées. */
 const LS_PERIOD = "5min";
@@ -74,56 +72,10 @@ const BIN_LIMIT = 30;
 /** Nombre de buckets de liquidations affichés dans le mini-histogramme bicolore. */
 const LIQ_BARS = 24;
 
-/** Funding rate (fraction) -> pourcentage signé 4 décimales (via formatPct partagé). */
-function formatFunding(rate: number | undefined): string {
-  if (rate === undefined) return VALEUR_ABSENTE;
-  return formatPct(rate * 100, 4);
-}
-
 /** Ratio L/S + part longue (« 1.87 · L 65% ») d'un point Binance (longAccount = fraction). */
 function formatRatioBreakdown(p: BinanceRatioPoint | undefined): string {
   if (!p || !Number.isFinite(p.ratio)) return VALEUR_ABSENTE;
   return `${p.ratio.toFixed(2)} · L ${(p.longAccount * 100).toFixed(0)}%`;
-}
-
-/**
- * Tuile « libellé / valeur » DES : sparkline de tendance + badge de fiabilité
- * (catalogue `metaSource`, doctrine doc 02 — jamais de flux 🟡/🔴 sans pastille).
- * Markup local (badge à côté du libellé) plutôt que `Metric` partagé.
- */
-function Metric({
-  label,
-  value,
-  color,
-  sparkValues,
-  /** Id catalogue (`coinalyze:oi`…) — affiche `BadgeFiabilite` si fourni. */
-  sourceId,
-}: {
-  label: string;
-  value: string;
-  color?: string;
-  sparkValues?: number[];
-  sourceId?: string;
-}) {
-  return (
-    <div className="flex items-baseline justify-between gap-3 rounded-md border border-border bg-bg px-3 py-2">
-      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-        <span className="text-[11px] text-text-dim">{label}</span>
-        {sourceId !== undefined && <BadgeFiabilite meta={metaSource(sourceId)} />}
-      </span>
-      <span className="flex shrink-0 items-center gap-2">
-        {sparkValues !== undefined && sparkValues.length >= 2 ? (
-          <Sparkline values={sparkValues} color={color ?? "var(--text-dim)"} />
-        ) : null}
-        <span
-          className="tabular-nums text-sm font-medium text-text"
-          style={color !== undefined ? { color } : undefined}
-        >
-          {value}
-        </span>
-      </span>
-    </div>
-  );
 }
 
 /** Mini-courbe de tendance récente (SVG inline, sans dépendance). */
@@ -402,6 +354,9 @@ export function DerivativesWindow() {
   const takerSpark = taker.map((p) => p.buySellRatio);
   const binOiSpark = binOi.map((p) => p.oiUsd);
   const lastTaker = taker.at(-1);
+  const takerColor = lastTaker && lastTaker.buySellRatio >= 1 ? "var(--up)" : "var(--down)";
+  const fundingColor =
+    funding && Number.isFinite(funding.rate) ? (funding.rate >= 0 ? "var(--up)" : "var(--down)") : undefined;
   const hasBinanceSentiment =
     globalLs.length > 0 || topLs.length > 0 || taker.length > 0 || binOi.length > 0;
 
@@ -417,6 +372,7 @@ export function DerivativesWindow() {
     // et le slide-over Réglages (z-50), au-dessus du graphe.
     <>
       <EnTeteFenetre
+        mnemo="DES"
         titre="Produits dérivés"
         sousTitre={isBinance ? `${coinalyzeSymbol} · Coinalyze` : "Coinalyze · Binance uniquement"}
         actions={
@@ -470,7 +426,7 @@ export function DerivativesWindow() {
             <div className="space-y-3">
               <div className="flex items-center justify-between rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-dim">
                 <span>{coinalyzeSymbol}</span>
-                <span>{loading ? "maj…" : majTs ? "maj ~1 min" : "—"}</span>
+                <Fraicheur loading={loading} majTs={majTs} cadence="1 min" />
               </div>
 
               {error && <ErreurBloc>{error}</ErreurBloc>}
@@ -479,22 +435,20 @@ export function DerivativesWindow() {
                 <Metric
                   label="Open Interest"
                   value={formatUsd(oi?.oiUsd)}
-                  sparkValues={oiSpark}
-                  color="var(--serie-1)"
-                  sourceId="coinalyze:oi"
+                  couleur="var(--serie-1)"
+                  extra={oiSpark.length >= 2 && <Sparkline values={oiSpark} color="var(--serie-1)" />}
+                  labelExtra={<BadgeFiabilite meta={metaSource("coinalyze:oi")} />}
                 />
                 <Metric
                   label="Funding"
                   value={formatFunding(funding?.rate)}
-                  sparkValues={fundingSpark}
-                  sourceId="coinalyze:funding"
-                  color={
-                    funding && Number.isFinite(funding.rate)
-                      ? funding.rate >= 0
-                        ? "var(--up)"
-                        : "var(--down)"
-                      : undefined
+                  couleur={fundingColor}
+                  extra={
+                    fundingSpark.length >= 2 && (
+                      <Sparkline values={fundingSpark} color={fundingColor ?? "var(--text-dim)"} />
+                    )
                   }
+                  labelExtra={<BadgeFiabilite meta={metaSource("coinalyze:funding")} />}
                 />
                 {predicted && Number.isFinite(predicted.rate) && (
                   <div className="rounded-md border border-border bg-bg px-3 py-2">
@@ -524,9 +478,9 @@ export function DerivativesWindow() {
                       ? `${ls.ratio.toFixed(2)} · L ${ls.longAccount.toFixed(1)}% / S ${ls.shortAccount.toFixed(1)}%`
                       : VALEUR_ABSENTE
                   }
-                  sparkValues={lsSpark}
-                  color="var(--serie-2)"
-                  sourceId="coinalyze:ls"
+                  couleur="var(--serie-2)"
+                  extra={lsSpark.length >= 2 && <Sparkline values={lsSpark} color="var(--serie-2)" />}
+                  labelExtra={<BadgeFiabilite meta={metaSource("coinalyze:ls")} />}
                 />
               </div>
 
@@ -535,11 +489,11 @@ export function DerivativesWindow() {
                   Pilote derivativesChartStore, lu hors React par chart/derivatives.ts. */}
               <div className="flex items-center gap-2 rounded-md border border-border bg-bg px-3 py-2">
                 <span className="mr-auto text-[11px] text-text-dim">Afficher sur le chart</span>
-                <ChartToggle label="OI" active={showOiPane} color={OI_COLOR} onClick={toggleOiPane} />
+                <ChartToggle label="OI" active={showOiPane} color="var(--serie-5)" onClick={toggleOiPane} />
                 <ChartToggle
                   label="Funding"
                   active={showFundingPane}
-                  color={FUNDING_COLOR}
+                  color="var(--serie-3)"
                   onClick={toggleFundingPane}
                 />
               </div>
@@ -605,26 +559,26 @@ export function DerivativesWindow() {
               <Metric
                 label="Comptes globaux L/S"
                 value={formatRatioBreakdown(globalLs.at(-1))}
-                sparkValues={globalLsSpark}
-                color="var(--serie-6)"
+                couleur="var(--serie-6)"
+                extra={globalLsSpark.length >= 2 && <Sparkline values={globalLsSpark} color="var(--serie-6)" />}
               />
               <Metric
                 label="Top traders L/S"
                 value={formatRatioBreakdown(topLs.at(-1))}
-                sparkValues={topLsSpark}
-                color="var(--serie-4)"
+                couleur="var(--serie-4)"
+                extra={topLsSpark.length >= 2 && <Sparkline values={topLsSpark} color="var(--serie-4)" />}
               />
               <Metric
                 label="Taker achat / vente"
                 value={formatDec(lastTaker?.buySellRatio, 2)}
-                sparkValues={takerSpark}
-                color={lastTaker && lastTaker.buySellRatio >= 1 ? "var(--up)" : "var(--down)"}
+                couleur={takerColor}
+                extra={takerSpark.length >= 2 && <Sparkline values={takerSpark} color={takerColor} />}
               />
               <Metric
                 label="Open Interest"
                 value={formatUsd(binOi.at(-1)?.oiUsd)}
-                sparkValues={binOiSpark}
-                color={OI_COLOR}
+                couleur="var(--serie-1)"
+                extra={binOiSpark.length >= 2 && <Sparkline values={binOiSpark} color="var(--serie-1)" />}
               />
             </section>
           )}

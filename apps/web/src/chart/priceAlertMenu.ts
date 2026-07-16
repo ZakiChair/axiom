@@ -20,6 +20,7 @@ import {
   SECTION_ALERTES,
 } from "../store/alerts";
 import { uiSectionsStore } from "../store/ui-sections";
+import { formatPrice } from "../lib/format";
 
 /** Pane prix (id par défaut KLineChart). */
 const CANDLE_PANE_ID = "candle_pane";
@@ -62,13 +63,10 @@ export function itemsMenuAlertePrix(niveau: number): ItemMenuAlertePrix[] {
   ];
 }
 
-/** PURE — format compact d'un niveau (sans notation scientifique pour prix usuels). */
+/** PURE — niveau de prix au format standard du terminal (délègue à lib/format). */
 export function formaterNiveauCourt(niveau: number): string {
   if (!Number.isFinite(niveau)) return String(niveau);
-  const abs = Math.abs(niveau);
-  if (abs >= 1000) return niveau.toLocaleString("en-US", { maximumFractionDigits: 2 });
-  if (abs >= 1) return niveau.toLocaleString("en-US", { maximumFractionDigits: 4 });
-  return niveau.toLocaleString("en-US", { maximumFractionDigits: 8 });
+  return formatPrice(niveau);
 }
 
 /**

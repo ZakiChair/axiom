@@ -31,6 +31,7 @@ import { registerIndicator, IndicatorSeries } from "klinecharts";
 import type { Chart, IndicatorFigure } from "klinecharts";
 import type { Candle, ExchangeId, IndicatorDef, IndicatorResult, Timeframe } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
+import { serieCanvas } from "../lib/canvasTokens";
 import { auxProvider } from "./auxProvider";
 import {
   computeKey,
@@ -83,18 +84,22 @@ function ensureRegistered(def: IndicatorDef, name: string): void {
 
   const outputKeys = def.outputs.map((o) => o.key);
 
-  const figures: Array<IndicatorFigure<AxiomPoint>> = def.outputs.map((o) => {
+  const figures: Array<IndicatorFigure<AxiomPoint>> = def.outputs.map((o, i) => {
+    // Couleur de série lue AU RENDU (callback rappelé par KLineChart) : les ~98
+    // indicateurs suivent les tokens --serie-1…6 du thème actif, sans re-registration
+    // (pattern prouvé par orderflow.ts CVD S/P).
+    const styles = () => ({ color: serieCanvas(i) });
     // Mapping déclaratif PlotStyle (@axiom/types) -> figure KLineChart :
     //  - histogram -> barres (référence 0) ;
     //  - points    -> marqueurs circulaires (SAR, fractals, pivotHighLow…) ;
     //  - line/area/band et tout style inconnu -> ligne (dégradation propre, jamais cassante).
     if (o.style === "histogram") {
-      return { key: o.key, title: `${o.name}: `, type: "bar", baseValue: 0 };
+      return { key: o.key, title: `${o.name}: `, type: "bar", baseValue: 0, styles };
     }
     if (o.style === "points") {
-      return { key: o.key, title: `${o.name}: `, type: "circle" };
+      return { key: o.key, title: `${o.name}: `, type: "circle", styles };
     }
-    return { key: o.key, title: `${o.name}: `, type: "line" };
+    return { key: o.key, title: `${o.name}: `, type: "line", styles };
   });
 
   registerIndicator<AxiomPoint>({

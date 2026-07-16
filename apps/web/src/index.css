@@ -98,6 +98,39 @@
     radial-gradient(900px 600px at 10% 110%, rgba(56, 189, 248, 0.03), transparent 70%);
   --accent-glow: 0 0 8px rgba(56, 189, 248, 0.35);
   --wordmark-shadow: 0 0 6px rgba(56, 189, 248, 0.4);
+
+  /* Triplets RVB (jumeaux Tailwind <alpha-value>) — cf. tailwind.config.js. */
+  --bg-rgb: 10 10 10;
+  --surface-rgb: 23 23 23;
+  --border-rgb: 38 38 38;
+  --text-rgb: 229 229 229;
+  --text-dim-rgb: 156 163 175;
+  --up-rgb: 45 192 142;
+  --down-rgb: 249 40 85;
+  --accent-rgb: 56 189 248;
+  --accent-ink-rgb: 10 10 10;
+  --grid-rgb: 31 41 55;
+  --crosshair-rgb: 136 136 136;
+  --serie-1-rgb: 56 189 248;
+  --serie-2-rgb: 167 139 250;
+  --serie-3-rgb: 245 158 11;
+  --serie-4-rgb: 244 114 182;
+  --serie-5-rgb: 34 211 238;
+  --serie-6-rgb: 96 165 250;
+  --n-100-rgb: 245 245 245;
+  --n-200-rgb: 229 229 229;
+  --n-300-rgb: 212 212 212;
+  --n-400-rgb: 163 163 163;
+  --n-500-rgb: 115 115 115;
+  --n-600-rgb: 82 82 82;
+  --n-700-rgb: 64 64 64;
+  --n-800-rgb: 38 38 38;
+  --n-900-rgb: 23 23 23;
+  --n-950-rgb: 10 10 10;
+  --ui-emerald-rgb: 16 185 129;
+  --ui-emerald-hover-rgb: 52 211 153;
+  --ui-cyan-rgb: 6 182 212;
+  --ui-amber-rgb: 245 158 11;
   color-scheme: dark;
 }
 
@@ -155,6 +188,39 @@
     radial-gradient(1200px 820px at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.55));
   --accent-glow: 0 0 10px rgba(255, 158, 0, 0.45);
   --wordmark-shadow: 0 0 8px rgba(255, 158, 0, 0.6);
+
+  /* Triplets RVB (jumeaux Tailwind <alpha-value>) — cf. tailwind.config.js. */
+  --bg-rgb: 0 0 0;
+  --surface-rgb: 12 9 0;
+  --border-rgb: 28 21 0;
+  --text-rgb: 255 176 0;
+  --text-dim-rgb: 176 125 0;
+  --up-rgb: 255 196 0;
+  --down-rgb: 255 86 48;
+  --accent-rgb: 255 158 0;
+  --accent-ink-rgb: 22 15 0;
+  --grid-rgb: 31 23 0;
+  --crosshair-rgb: 255 176 0;
+  --serie-1-rgb: 255 176 0;
+  --serie-2-rgb: 255 122 0;
+  --serie-3-rgb: 255 208 96;
+  --serie-4-rgb: 255 86 48;
+  --serie-5-rgb: 217 138 0;
+  --serie-6-rgb: 255 233 163;
+  --n-100-rgb: 255 208 96;
+  --n-200-rgb: 255 176 0;
+  --n-300-rgb: 217 158 0;
+  --n-400-rgb: 181 134 12;
+  --n-500-rgb: 138 106 0;
+  --n-600-rgb: 107 82 0;
+  --n-700-rgb: 42 32 0;
+  --n-800-rgb: 28 21 0;
+  --n-900-rgb: 12 9 0;
+  --n-950-rgb: 0 0 0;
+  --ui-emerald-rgb: 255 176 0;
+  --ui-emerald-hover-rgb: 255 199 64;
+  --ui-cyan-rgb: 255 122 0;
+  --ui-amber-rgb: 217 138 0;
   color-scheme: dark;
 }
 
@@ -212,6 +278,39 @@
     radial-gradient(1200px 840px at 50% 50%, transparent 50%, rgba(0, 0, 0, 0.6));
   --accent-glow: 0 0 12px rgba(0, 255, 65, 0.6);
   --wordmark-shadow: 0 0 10px rgba(0, 255, 65, 0.85);
+
+  /* Triplets RVB (jumeaux Tailwind <alpha-value>) — cf. tailwind.config.js. */
+  --bg-rgb: 0 0 0;
+  --surface-rgb: 2 17 10;
+  --border-rgb: 6 33 15;
+  --text-rgb: 0 255 65;
+  --text-dim-rgb: 17 165 52;
+  --up-rgb: 91 255 143;
+  --down-rgb: 1 158 52;
+  --accent-rgb: 0 255 65;
+  --accent-ink-rgb: 0 20 10;
+  --grid-rgb: 5 58 18;
+  --crosshair-rgb: 0 255 65;
+  --serie-1-rgb: 0 255 65;
+  --serie-2-rgb: 91 255 143;
+  --serie-3-rgb: 124 252 0;
+  --serie-4-rgb: 170 255 192;
+  --serie-5-rgb: 0 200 83;
+  --serie-6-rgb: 57 255 122;
+  --n-100-rgb: 170 255 192;
+  --n-200-rgb: 0 255 65;
+  --n-300-rgb: 57 255 122;
+  --n-400-rgb: 31 209 76;
+  --n-500-rgb: 20 168 56;
+  --n-600-rgb: 15 122 42;
+  --n-700-rgb: 10 51 24;
+  --n-800-rgb: 6 33 15;
+  --n-900-rgb: 2 17 10;
+  --n-950-rgb: 0 0 0;
+  --ui-emerald-rgb: 0 255 65;
+  --ui-emerald-hover-rgb: 91 255 143;
+  --ui-cyan-rgb: 0 200 83;
+  --ui-amber-rgb: 124 252 0;
   color-scheme: dark;
 }
 
@@ -274,6 +373,39 @@
     linear-gradient(135deg, rgba(255, 240, 248, 0.5), rgba(236, 222, 255, 0.4));
   --accent-glow: 0 0 10px rgba(217, 70, 239, 0.35);
   --wordmark-shadow: 0 1px 0 rgba(217, 70, 239, 0.4);
+
+  /* Triplets RVB (jumeaux Tailwind <alpha-value>) — cf. tailwind.config.js. */
+  --bg-rgb: 255 245 251;
+  --surface-rgb: 255 225 241;
+  --border-rgb: 249 210 232;
+  --text-rgb: 91 42 134;
+  --text-dim-rgb: 107 47 146;
+  --up-rgb: 10 115 96;
+  --down-rgb: 200 20 63;
+  --accent-rgb: 217 70 239;
+  --accent-ink-rgb: 255 255 255;
+  --grid-rgb: 243 214 230;
+  --crosshair-rgb: 192 38 211;
+  --serie-1-rgb: 192 38 211;
+  --serie-2-rgb: 124 58 237;
+  --serie-3-rgb: 225 29 107;
+  --serie-4-rgb: 13 148 136;
+  --serie-5-rgb: 234 88 12;
+  --serie-6-rgb: 37 99 235;
+  --n-100-rgb: 69 32 106;
+  --n-200-rgb: 91 42 134;
+  --n-300-rgb: 109 40 168;
+  --n-400-rgb: 138 68 184;
+  --n-500-rgb: 154 85 194;
+  --n-600-rgb: 167 103 201;
+  --n-700-rgb: 239 188 219;
+  --n-800-rgb: 249 210 232;
+  --n-900-rgb: 255 225 241;
+  --n-950-rgb: 253 238 247;
+  --ui-emerald-rgb: 192 38 211;
+  --ui-emerald-hover-rgb: 217 70 239;
+  --ui-cyan-rgb: 124 58 237;
+  --ui-amber-rgb: 225 29 107;
   color-scheme: light;
 }
 
@@ -332,6 +464,39 @@
     radial-gradient(700px 500px at 50% 50%, rgba(99, 102, 241, 0.08), transparent 70%);
   --accent-glow: 0 0 12px rgba(167, 139, 250, 0.5);
   --wordmark-shadow: 0 0 10px rgba(34, 211, 238, 0.55);
+
+  /* Triplets RVB (jumeaux Tailwind <alpha-value>) — cf. tailwind.config.js. */
+  --bg-rgb: 7 11 31;
+  --surface-rgb: 14 20 48;
+  --border-rgb: 36 48 102;
+  --text-rgb: 214 224 255;
+  --text-dim-rgb: 138 150 204;
+  --up-rgb: 34 211 238;
+  --down-rgb: 255 77 157;
+  --accent-rgb: 167 139 250;
+  --accent-ink-rgb: 5 8 20;
+  --grid-rgb: 24 34 77;
+  --crosshair-rgb: 34 211 238;
+  --serie-1-rgb: 34 211 238;
+  --serie-2-rgb: 167 139 250;
+  --serie-3-rgb: 232 121 249;
+  --serie-4-rgb: 103 232 249;
+  --serie-5-rgb: 129 140 248;
+  --serie-6-rgb: 255 77 157;
+  --n-100-rgb: 230 236 255;
+  --n-200-rgb: 199 210 254;
+  --n-300-rgb: 170 180 224;
+  --n-400-rgb: 138 150 204;
+  --n-500-rgb: 107 121 184;
+  --n-600-rgb: 74 88 150;
+  --n-700-rgb: 40 51 107;
+  --n-800-rgb: 26 35 77;
+  --n-900-rgb: 14 20 48;
+  --n-950-rgb: 7 11 31;
+  --ui-emerald-rgb: 34 211 238;
+  --ui-emerald-hover-rgb: 103 232 249;
+  --ui-cyan-rgb: 129 140 248;
+  --ui-amber-rgb: 232 121 249;
   color-scheme: dark;
 }
 

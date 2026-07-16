@@ -231,13 +231,15 @@ function validateEtatFenetre(id: string, raw: unknown): EtatFenetre | null {
   }
   return {
     id,
-    open: false, // toujours restauré FERMÉ (évite 14 fenêtres à l'écran au démarrage)
+    // Sémantique unique (revue v2, H15) : l'état ouvert/minimisé est restauré — le plan
+    // de travail survit au reload.
+    open: r.open === true,
     x: r.x,
     y: r.y,
     width: r.width,
     height: r.height,
     z: r.z,
-    minimized: false,
+    minimized: r.minimized === true,
     groupColor: typeof r.groupColor === "string" ? r.groupColor : null,
     // Jamais persisté (état éphémère de drag) : toujours null à la restauration, même
     // si un ancien enregistrement en contenait un d'une session précédente.
@@ -246,7 +248,7 @@ function validateEtatFenetre(id: string, raw: unknown): EtatFenetre | null {
 }
 
 /** Restaure la géométrie des fenêtres depuis localStorage (position/taille/groupe —
- * toujours restaurées FERMÉES, l'utilisateur les rouvre via la palette/Toolbar). */
+ * l'état ouvert/minimisé est restauré — le plan de travail survit au reload, revue v2). */
 function hydrateWindowManager(): void {
   const persisted = readJson<Record<string, unknown>>(WINDOW_MANAGER_KEY);
   if (!persisted) return;

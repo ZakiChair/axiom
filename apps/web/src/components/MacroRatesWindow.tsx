@@ -294,7 +294,7 @@ function VueRendements({
             type="button"
             onClick={() => setVue(v.id)}
             className={`rounded px-2.5 py-1 text-[11px] transition ${
-              vue === v.id ? "bg-surface text-text" : "text-text-dim hover:text-text"
+              vue === v.id ? "bg-bg text-text" : "text-text-dim hover:text-text"
             }`}
           >
             {v.label}
@@ -327,7 +327,7 @@ function VueRendements({
                       })
                     }
                     className={`rounded px-2 py-0.5 text-[10px] transition ${
-                      actif ? "bg-surface text-text" : "text-text-dim opacity-60 hover:opacity-100"
+                      actif ? "bg-bg text-text" : "text-text-dim opacity-60 hover:opacity-100"
                     }`}
                   >
                     <span className={CLASSES_SERIE[serie.couleurTokenIndex - 1] ?? "text-serie-1"}>
@@ -585,7 +585,8 @@ export function MacroRatesWindow() {
   return (
     <>
       <EnTeteFenetre
-        titre="RATE · Taux & Réserves"
+        mnemo="RATE"
+        titre="Taux & Réserves"
         sousTitre="Trésor US · ECB · MOF · BoC · RBA · BIS · IMF"
         actions={
           <button

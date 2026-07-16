@@ -17,6 +17,13 @@ function basculer(id: string): () => void {
   return () => windowManagerStore.getState().toggleWindow(id);
 }
 
+/** Viewport courant (fenêtre du navigateur) pour les commandes de disposition globale.
+ *  Résolu À L'EXÉCUTION dans l'action (les commandes sont des closures) — window n'existe
+ *  donc pas au moment de la construction du module. */
+function viewportCourant(): { x: number; y: number; width: number; height: number } {
+  return { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
+}
+
 /** Commandes panneau pilotées par le gestionnaire de fenêtres. */
 export const windowPanelCommands: Commande[] = [
   {
@@ -250,5 +257,52 @@ export const windowPanelCommands: Commande[] = [
     ],
     apercu: "Ouvre / ferme le flux de liquidations perp Binance (long/short)",
     action: basculer("liquidations"),
+  },
+
+  // ─── Gestion globale des fenêtres (agit sur toutes les fenêtres à la fois) ───
+  {
+    id: "panneau:wmin",
+    mnemonique: "WMIN",
+    libelle: "Réduire toutes les fenêtres",
+    categorie: "panneau",
+    motsCles: ["fenetres", "windows", "reduire", "minimiser", "minimize", "tout reduire", "wmin"],
+    apercu: "Réduit d'un coup toutes les fenêtres ouvertes dans la barre de tâches",
+    action: () => windowManagerStore.getState().minimizeAll(),
+  },
+  {
+    id: "panneau:wall",
+    mnemonique: "WALL",
+    libelle: "Restaurer toutes les fenêtres",
+    categorie: "panneau",
+    motsCles: ["fenetres", "windows", "restaurer", "restore", "tout restaurer", "afficher", "wall"],
+    apercu: "Restaure d'un coup toutes les fenêtres réduites",
+    action: () => windowManagerStore.getState().restoreAll(),
+  },
+  {
+    id: "panneau:wtile",
+    mnemonique: "WTILE",
+    libelle: "Mosaïque des fenêtres",
+    categorie: "panneau",
+    motsCles: ["fenetres", "windows", "mosaique", "tile", "grille", "tuiles", "disposer", "wtile"],
+    apercu: "Dispose les fenêtres ouvertes en mosaïque plein écran",
+    action: () => windowManagerStore.getState().tileOpenWindows(viewportCourant()),
+  },
+  {
+    id: "panneau:wcasc",
+    mnemonique: "WCASC",
+    libelle: "Cascade des fenêtres",
+    categorie: "panneau",
+    motsCles: ["fenetres", "windows", "cascade", "empiler", "escalier", "wcasc"],
+    apercu: "Réempile les fenêtres ouvertes en cascade",
+    action: () => windowManagerStore.getState().cascadeAll(viewportCourant()),
+  },
+  {
+    id: "panneau:wclose",
+    mnemonique: "WCLOSE",
+    libelle: "Fermer TOUTES les fenêtres",
+    categorie: "panneau",
+    motsCles: ["fenetres", "windows", "fermer", "close", "tout fermer", "fermer toutes", "wclose"],
+    apercu: "Ferme d'un coup toutes les fenêtres ouvertes (géométrie conservée)",
+    action: () => windowManagerStore.getState().closeAll(),
   },
 ];

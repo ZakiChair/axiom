@@ -4,6 +4,7 @@ import {
   clampPosition,
   clampSize,
   detectSnapZone,
+  grilleMosaique,
   normaliserOrdreZ,
   snapGeometry,
   windowManagerStore,
@@ -144,6 +145,75 @@ describe("snapGeometry", () => {
     const decale: WorkspaceRect = { x: 200, y: 100, width: 800, height: 600 };
     expect(snapGeometry("left", decale)).toEqual({ x: 200, y: 100, width: 400, height: 600 });
     expect(snapGeometry("right", decale)).toEqual({ x: 600, y: 100, width: 400, height: 600 });
+  });
+});
+
+describe("grilleMosaique", () => {
+  const viewport: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
+  const MARGE = 8;
+
+  /** Toutes les cellules tiennent dans le viewport et ne se chevauchent pas. */
+  function verifierGrille(rects: { x: number; y: number; width: number; height: number }[]): void {
+    for (const r of rects) {
+      expect(r.x).toBeGreaterThanOrEqual(viewport.x);
+      expect(r.y).toBeGreaterThanOrEqual(viewport.y);
+      expect(r.x + r.width).toBeLessThanOrEqual(viewport.x + viewport.width + 1e-6);
+      expect(r.y + r.height).toBeLessThanOrEqual(viewport.y + viewport.height + 1e-6);
+      expect(r.width).toBeGreaterThan(0);
+      expect(r.height).toBeGreaterThan(0);
+    }
+  }
+
+  it("n=1 : une seule cellule couvrant le viewport moins la marge", () => {
+    const rects = grilleMosaique(1, viewport);
+    expect(rects).toHaveLength(1);
+    expect(rects[0]).toEqual({ x: MARGE, y: MARGE, width: 1920 - 2 * MARGE, height: 1080 - 2 * MARGE });
+    verifierGrille(rects);
+  });
+
+  it("n=2 : 2 colonnes × 1 ligne (côte à côte)", () => {
+    const rects = grilleMosaique(2, viewport);
+    expect(rects).toHaveLength(2);
+    // cols=ceil(sqrt(2))=2, rows=1 -> même y/hauteur, x qui progresse
+    expect(rects[0]!.y).toBe(MARGE);
+    expect(rects[1]!.y).toBe(MARGE);
+    expect(rects[1]!.x).toBeGreaterThan(rects[0]!.x);
+    expect(rects[0]!.width).toBeCloseTo((1920 - 3 * MARGE) / 2);
+    verifierGrille(rects);
+  });
+
+  it("n=4 : grille 2×2", () => {
+    const rects = grilleMosaique(4, viewport);
+    expect(rects).toHaveLength(4);
+    // cols=2, rows=2 : (0,1) sur la 1ère ligne, (2,3) sur la 2ème
+    expect(rects[0]!.y).toBe(rects[1]!.y);
+    expect(rects[2]!.y).toBe(rects[3]!.y);
+    expect(rects[2]!.y).toBeGreaterThan(rects[0]!.y);
+    expect(rects[0]!.x).toBe(rects[2]!.x);
+    verifierGrille(rects);
+  });
+
+  it("n=5 : 3 colonnes × 2 lignes, dernière ligne incomplète (2 cellules)", () => {
+    const rects = grilleMosaique(5, viewport);
+    expect(rects).toHaveLength(5);
+    // cols=ceil(sqrt(5))=3, rows=ceil(5/3)=2 : indices 0,1,2 en ligne 0 ; 3,4 en ligne 1
+    expect(rects[0]!.y).toBe(rects[1]!.y);
+    expect(rects[1]!.y).toBe(rects[2]!.y);
+    expect(rects[3]!.y).toBe(rects[4]!.y);
+    expect(rects[3]!.y).toBeGreaterThan(rects[0]!.y);
+    // La 5ème cellule (ligne 1, col 1) s'aligne sous la 2ème (ligne 0, col 1).
+    expect(rects[4]!.x).toBe(rects[1]!.x);
+    verifierGrille(rects);
+  });
+
+  it("n=0 : grille vide", () => {
+    expect(grilleMosaique(0, viewport)).toEqual([]);
+  });
+
+  it("respecte une origine de viewport non nulle", () => {
+    const decale: WorkspaceRect = { x: 200, y: 100, width: 800, height: 600 };
+    const rects = grilleMosaique(1, decale);
+    expect(rects[0]).toEqual({ x: 200 + MARGE, y: 100 + MARGE, width: 800 - 2 * MARGE, height: 600 - 2 * MARGE });
   });
 });
 
@@ -679,5 +749,100 @@ describe("setDragPreview", () => {
     expect(windowManagerStore.getState().dragPreview).toEqual({ x: 0, y: 0, width: 960, height: 1080 });
     windowManagerStore.getState().setDragPreview(null);
     expect(windowManagerStore.getState().dragPreview).toBeNull();
+  });
+});
+
+describe("minimizeAll / restoreAll", () => {
+  it("réduit toutes les fenêtres ouvertes, puis les restaure toutes", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().openWindow("eco");
+
+    windowManagerStore.getState().minimizeAll();
+    expect(windowManagerStore.getState().windows.derivatives!.minimized).toBe(true);
+    expect(windowManagerStore.getState().windows.eco!.minimized).toBe(true);
+
+    windowManagerStore.getState().restoreAll();
+    expect(windowManagerStore.getState().windows.derivatives!.minimized).toBe(false);
+    expect(windowManagerStore.getState().windows.eco!.minimized).toBe(false);
+  });
+
+  it("minimizeAll ignore les fenêtres fermées (ne les réduit pas)", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().closeWindow("derivatives");
+    windowManagerStore.getState().minimizeAll();
+    // Fenêtre fermée : reste non réduite (rien à afficher dans la taskbar).
+    expect(windowManagerStore.getState().windows.derivatives!.minimized).toBe(false);
+  });
+
+  it("minimizeAll est un no-op référentiel si aucune fenêtre ouverte non réduite", () => {
+    const avant = windowManagerStore.getState().windows;
+    windowManagerStore.getState().minimizeAll();
+    expect(windowManagerStore.getState().windows).toBe(avant);
+  });
+});
+
+describe("closeAll", () => {
+  it("ferme toutes les fenêtres ouvertes en conservant leur géométrie", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().moveWindow("derivatives", 300, 200);
+    windowManagerStore.getState().openWindow("eco");
+
+    windowManagerStore.getState().closeAll();
+    expect(windowManagerStore.getState().windows.derivatives!.open).toBe(false);
+    expect(windowManagerStore.getState().windows.eco!.open).toBe(false);
+    // Géométrie préservée (réouverture ultérieure au même endroit).
+    expect(windowManagerStore.getState().windows.derivatives!.x).toBe(300);
+  });
+});
+
+describe("tileOpenWindows", () => {
+  it("dispose les fenêtres ouvertes non réduites en mosaïque (2 → côte à côte)", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().openWindow("eco");
+    const viewport: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
+
+    windowManagerStore.getState().tileOpenWindows(viewport);
+    const cells = grilleMosaique(2, viewport);
+    // Ordre par z ascendant : derivatives ouverte en 1er (z plus bas) -> cellule 0.
+    const d = windowManagerStore.getState().windows.derivatives!;
+    const e = windowManagerStore.getState().windows.eco!;
+    expect({ x: d.x, y: d.y, width: d.width, height: d.height }).toEqual(cells[0]);
+    expect({ x: e.x, y: e.y, width: e.width, height: e.height }).toEqual(cells[1]);
+    expect(d.preSnapGeometry).toBeNull();
+  });
+
+  it("ignore les fenêtres réduites et fermées", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().openWindow("eco");
+    windowManagerStore.getState().minimizeWindow("eco");
+    const viewport: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
+
+    windowManagerStore.getState().tileOpenWindows(viewport);
+    // Une seule fenêtre visible -> occupe tout le viewport moins la marge.
+    const seule = grilleMosaique(1, viewport)[0]!;
+    const d = windowManagerStore.getState().windows.derivatives!;
+    expect({ x: d.x, y: d.y, width: d.width, height: d.height }).toEqual(seule);
+  });
+
+  it("est un no-op si aucune fenêtre ouverte non réduite", () => {
+    const avant = windowManagerStore.getState().windows;
+    windowManagerStore.getState().tileOpenWindows({ x: 0, y: 0, width: 800, height: 600 });
+    expect(windowManagerStore.getState().windows).toBe(avant);
+  });
+});
+
+describe("cascadeAll", () => {
+  it("réempile les fenêtres ouvertes en cascade sans changer leur taille", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().openWindow("eco");
+    windowManagerStore.getState().moveWindow("derivatives", 900, 500);
+    const largeurAvant = windowManagerStore.getState().windows.derivatives!.width;
+    const viewport: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
+
+    windowManagerStore.getState().cascadeAll(viewport);
+    const d = windowManagerStore.getState().windows.derivatives!;
+    // 1ère fenêtre (z bas) -> cascade index 0 -> coin haut-gauche (marge 48px).
+    expect({ x: d.x, y: d.y }).toEqual(cascadePosition(0, viewport, d.width, d.height));
+    expect(d.width).toBe(largeurAvant);
   });
 });

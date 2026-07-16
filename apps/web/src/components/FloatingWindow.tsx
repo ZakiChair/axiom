@@ -52,6 +52,32 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
 
   const focus = (): void => windowManagerStore.getState().focusWindow(id);
 
+  /** Bascule maximiser ↔ restaurer en RÉUTILISANT le mécanisme de snap Aero existant :
+   * si la fenêtre est actuellement issue d'un snap/maximisation (`preSnapGeometry` non
+   * nul), on restaure la géométrie mémorisée ; sinon on maximise plein workspace
+   * (`snapGeometry("top")`), `snapWindow` sauvegardant la géométrie courante au passage. */
+  const basculerMaximiser = (): void => {
+    const store = windowManagerStore.getState();
+    const courant = store.windows[id];
+    if (!courant) return;
+    const preSnap = courant.preSnapGeometry;
+    if (preSnap) {
+      store.moveWindow(id, preSnap.x, preSnap.y);
+      store.resizeWindow(id, preSnap.width, preSnap.height);
+      store.setPreSnapGeometry(id, null);
+    } else {
+      store.snapWindow(id, snapGeometry("top", store.workspace));
+    }
+  };
+
+  /** Double-clic sur l'en-tête = maximiser/restaurer, comme Windows/macOS. Ignoré sur la
+   * zone des boutons (`data-no-drag`) pour ne pas se déclencher lors d'un double-clic
+   * rapide sur —/▢/✕ ou le sélecteur de couleur. */
+  const doubleClicEntete = (e: React.MouseEvent): void => {
+    if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
+    basculerMaximiser();
+  };
+
   const demarrerDrag = (e: React.PointerEvent): void => {
     if ((e.target as HTMLElement).closest("[data-no-drag]")) return;
     e.preventDefault();
@@ -179,6 +205,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
     >
       <header
         onPointerDown={demarrerDrag}
+        onDoubleClick={doubleClicEntete}
         className="flex shrink-0 cursor-move items-center justify-between gap-2 rounded-t border-b border-border bg-bg px-2 py-1.5"
       >
         <div className="flex min-w-0 items-center gap-2">
@@ -228,6 +255,14 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
             className="rounded px-1 text-xs leading-none text-text-dim hover:bg-bg hover:text-text"
           >
             —
+          </button>
+          <button
+            type="button"
+            title="Maximiser / Restaurer"
+            onClick={basculerMaximiser}
+            className="rounded px-1 text-xs leading-none text-text-dim hover:bg-bg hover:text-text"
+          >
+            ▢
           </button>
           <button
             type="button"

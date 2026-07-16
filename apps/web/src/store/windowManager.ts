@@ -198,6 +198,35 @@ export function cascadePosition(
   return { x, y };
 }
 
+/** Grille de mosaïque pour disposer `n` fenêtres dans un rectangle sans recouvrement :
+ * `cols = ceil(sqrt(n))`, `rows = ceil(n / cols)`, marge de 8px autour et ENTRE les
+ * cellules. Renvoie `n` rectangles rangés ligne par ligne (la dernière ligne peut être
+ * incomplète, ex. n=5 → 3 colonnes × 2 lignes, dernière ligne à 2). PURE (sans DOM),
+ * testée dans windowManager.test.ts. */
+export function grilleMosaique(
+  n: number,
+  viewport: WorkspaceRect
+): { x: number; y: number; width: number; height: number }[] {
+  if (n <= 0) return [];
+  const MARGE = 8;
+  const cols = Math.ceil(Math.sqrt(n));
+  const rows = Math.ceil(n / cols);
+  const largeurCellule = (viewport.width - MARGE * (cols + 1)) / cols;
+  const hauteurCellule = (viewport.height - MARGE * (rows + 1)) / rows;
+  const rects: { x: number; y: number; width: number; height: number }[] = [];
+  for (let i = 0; i < n; i += 1) {
+    const col = i % cols;
+    const ligne = Math.floor(i / cols);
+    rects.push({
+      x: viewport.x + MARGE + col * (largeurCellule + MARGE),
+      y: viewport.y + MARGE + ligne * (hauteurCellule + MARGE),
+      width: largeurCellule,
+      height: hauteurCellule,
+    });
+  }
+  return rects;
+}
+
 /** Confine une position au workspace — STRICTEMENT (la fenêtre entière, pas seulement
  * un bord, doit rester dans le rect). Suppose `width`/`height` déjà plafonnés via
  * `clampSize` contre le MÊME workspace (sinon le résultat peut légèrement déborder). */
@@ -311,6 +340,20 @@ export interface WindowManagerState {
    * drag/resize interactif, appliqué en lot. */
   reclampAll: (workspace: WorkspaceRect) => void;
   setWorkspace: (workspace: WorkspaceRect) => void;
+
+  /** Réduit d'un coup toutes les fenêtres ouvertes et non déjà réduites. */
+  minimizeAll: () => void;
+  /** Restaure d'un coup toutes les fenêtres ouvertes et réduites. */
+  restoreAll: () => void;
+  /** Ferme d'un coup toutes les fenêtres ouvertes (géométrie conservée). */
+  closeAll: () => void;
+  /** Dispose les fenêtres ouvertes non réduites en mosaïque (cf. `grilleMosaique`),
+   *  ordonnées par z ascendant. `viewport` injecté par l'appelant (les commandes
+   *  passent window.innerWidth/innerHeight). Efface le preSnap des fenêtres retuilées. */
+  tileOpenWindows: (viewport: WorkspaceRect) => void;
+  /** Réempile les fenêtres ouvertes non réduites en cascade (cf. `cascadePosition`),
+   *  ordonnées par z ascendant, sans changer leur taille. */
+  cascadeAll: (viewport: WorkspaceRect) => void;
 }
 
 interface EtatOrdreZ {
@@ -552,6 +595,84 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
       }
     }
     if (changed) set({ windows: next });
+  },
+
+  minimizeAll: () => {
+    const windows = get().windows;
+    const next: Record<string, EtatFenetre> = {};
+    let changed = false;
+    for (const [id, w] of Object.entries(windows)) {
+      if (w.open && !w.minimized) {
+        changed = true;
+        next[id] = { ...w, minimized: true };
+      } else {
+        next[id] = w;
+      }
+    }
+    if (changed) set({ windows: next });
+  },
+
+  restoreAll: () => {
+    const windows = get().windows;
+    const next: Record<string, EtatFenetre> = {};
+    let changed = false;
+    for (const [id, w] of Object.entries(windows)) {
+      if (w.open && w.minimized) {
+        changed = true;
+        next[id] = { ...w, minimized: false };
+      } else {
+        next[id] = w;
+      }
+    }
+    if (changed) set({ windows: next });
+  },
+
+  closeAll: () => {
+    const windows = get().windows;
+    const next: Record<string, EtatFenetre> = {};
+    let changed = false;
+    for (const [id, w] of Object.entries(windows)) {
+      if (w.open) {
+        changed = true;
+        next[id] = { ...w, open: false };
+      } else {
+        next[id] = w;
+      }
+    }
+    if (changed) set({ windows: next });
+  },
+
+  tileOpenWindows: (viewport) => {
+    const windows = get().windows;
+    const ouvertes = Object.values(windows)
+      .filter((w) => w.open && !w.minimized)
+      .sort((a, b) => a.z - b.z);
+    if (ouvertes.length === 0) return;
+    const grille = grilleMosaique(ouvertes.length, viewport);
+    const next = { ...windows };
+    for (let i = 0; i < ouvertes.length; i += 1) {
+      const fenetre = ouvertes[i];
+      const cellule = grille[i];
+      if (!fenetre || !cellule) continue;
+      next[fenetre.id] = { ...fenetre, ...cellule, preSnapGeometry: null };
+    }
+    set({ windows: next });
+  },
+
+  cascadeAll: (viewport) => {
+    const windows = get().windows;
+    const ouvertes = Object.values(windows)
+      .filter((w) => w.open && !w.minimized)
+      .sort((a, b) => a.z - b.z);
+    if (ouvertes.length === 0) return;
+    const next = { ...windows };
+    for (let i = 0; i < ouvertes.length; i += 1) {
+      const fenetre = ouvertes[i];
+      if (!fenetre) continue;
+      const { x, y } = cascadePosition(i, viewport, fenetre.width, fenetre.height);
+      next[fenetre.id] = { ...fenetre, x, y, preSnapGeometry: null };
+    }
+    set({ windows: next });
   },
 }));
 

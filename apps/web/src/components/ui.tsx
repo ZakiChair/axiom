@@ -63,6 +63,8 @@ export function MenuDeroulant({
   titre,
   align = "left",
   classePanneau = "w-60",
+  declencheurClasse = "flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs text-text hover:border-text-dim",
+  chevron = true,
   children,
 }: {
   /** Contenu du bouton déclencheur (libellé) — le chevron ▾ est ajouté par la primitive. */
@@ -73,7 +75,10 @@ export function MenuDeroulant({
   align?: "left" | "right";
   /** Classe de largeur du panneau (défaut `w-60`). */
   classePanneau?: string;
-  /** Contenu du menu ; reçoit `fermer` à appeler après une sélection. */
+  /** Classes du bouton déclencheur (défaut : bouton bordé standard). */
+  declencheurClasse?: string;
+  /** Affiche le chevron ▾ (désactivable pour un déclencheur-icône). */
+  chevron?: boolean;
   children: (fermer: () => void) => ReactNode;
 }) {
   const [ouvert, setOuvert] = useState(false);
@@ -126,17 +131,17 @@ export function MenuDeroulant({
         aria-haspopup="menu"
         aria-expanded={ouvert}
         title={titre}
-        className="flex items-center gap-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 hover:border-neutral-500"
+        className={declencheurClasse}
       >
         {declencheur}
-        <span aria-hidden className="text-[9px] text-neutral-500">▾</span>
+        {chevron && <span aria-hidden className="text-[9px] text-text-dim">▾</span>}
       </button>
 
       {ouvert && (
         <div
           role="menu"
           ref={menuRef}
-          className={`absolute ${align === "right" ? "right-0" : "left-0"} z-50 mt-1 ${classePanneau} max-h-[70vh] overflow-y-auto rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl`}
+          className={`absolute ${align === "right" ? "right-0" : "left-0"} z-50 mt-1 ${classePanneau} max-h-[70vh] overflow-y-auto rounded border border-border bg-surface p-1 shadow-xl`}
         >
           {children(fermer)}
         </div>

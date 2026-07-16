@@ -294,10 +294,22 @@ export function assemblerSession(
  * Sérialise l'instantané en markdown court (l'export « → Notes »). Tolère chaque
  * section absente (null) indépendamment. `now` injecté → fonction PURE.
  */
-export function briefEnMarkdown(d: DonneesBrief, now: number): string {
+export function briefEnMarkdown(
+  d: DonneesBrief,
+  now: number,
+  lecture?: readonly string[],
+): string {
   const l: string[] = [];
   l.push(`# BRIEF — Point marché · ${formatDateComplete(now)} ${formatHeureMinute(now)}`);
   l.push("");
+
+  // Lecture générée (chapeau) — en tête, avant les sections factuelles.
+  if (lecture !== undefined && lecture.length > 0) {
+    l.push("## Lecture");
+    l.push("");
+    for (const phrase of lecture) l.push(`- ${phrase}`);
+    l.push("");
+  }
 
   l.push("## Session (review)");
   if (d.session === null) {

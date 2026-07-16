@@ -883,7 +883,7 @@ function ContenuHistorique() {
                 <div
                   className={`border-b border-border pb-1 text-[10px] uppercase tracking-wider text-text-dim ${GRILLE_TOP}`}
                 >
-                  <span>Heure</span>
+                  <span>Date · heure</span>
                   <span>Venue</span>
                   <span>Côté</span>
                   <span className="text-right">Notionnel</span>

@@ -411,6 +411,12 @@ export class LiquidationHeatController {
    */
   private offscreen: HTMLCanvasElement | null = null;
   private offscreenCtx: CanvasRenderingContext2D | null = null;
+  /**
+   * ImageData du rendu lissé, membre RÉUTILISÉ entre frames : le survol déclenche un repaint,
+   * donc une allocation par frame mettait le GC sous pression. Recréée seulement si les
+   * dimensions de la grille visible changent, sinon vidée en tête de frame (cf. dessinerCellulesLissees).
+   */
+  private imageDataLissage: ImageData | null = null;
   /** Dernier crosshair reçu (position + bougie survolée) ; null quand le curseur quitte le graphe. */
   private dernierCrosshair: Crosshair | null = null;
   private resizeObserver: ResizeObserver | null = null;
@@ -529,6 +535,7 @@ export class LiquidationHeatController {
     this.grilleObsolete = true;
     this.derniersNiveaux = null;
     this.niveauxObsoletes = true;
+    this.imageDataLissage = null;
     this.clearCanvas();
   }
 
@@ -873,10 +880,16 @@ export class LiquidationHeatController {
       off.height = nbBuckets;
     }
 
-    // 1 cellule = 1 pixel. L'ImageData neuve est zéro-remplie (transparent) : les cellules
-    // vides restent invisibles sans clearRect préalable.
-    const img = offCtx.createImageData(colonnes, nbBuckets);
+    // 1 cellule = 1 pixel. ImageData membre RÉUTILISÉE entre frames (évite une alloc par frame
+    // au survol) : recréée seulement si les dimensions changent, sinon vidée par `px.fill(0)`
+    // en tête de frame → les cellules vides restent transparentes sans clearRect préalable.
+    let img = this.imageDataLissage;
+    if (img === null || img.width !== colonnes || img.height !== nbBuckets) {
+      img = offCtx.createImageData(colonnes, nbBuckets);
+      this.imageDataLissage = img;
+    }
     const px = img.data;
+    px.fill(0);
     for (const cell of grid.cells.values()) {
       const colonne = colonneParTime.get(cell.candleTime);
       if (colonne === undefined) continue;
@@ -1122,8 +1135,8 @@ export class LiquidationHeatController {
       b.poids += n.poidsUsd;
       b.parLevier.set(n.levier, (b.parLevier.get(n.levier) ?? 0) + n.poidsUsd);
     }
-    // Densité : ne garder que les buckets ≥ 15 % du max, plafonnés aux 30 plus lourds (évite des
-    // centaines de lignes quasi nulles). `filtrerNiveauxDenses` est pure et testée.
+    // Densité : ne garder que les buckets ≥ EST_SEUIL_FRAC du max, plafonnés aux EST_MAX_NIVEAUX
+    // plus lourds (évite des centaines de lignes quasi nulles). `filtrerNiveauxDenses` est pure et testée.
     const denses = filtrerNiveauxDenses(
       [...parBucket.entries()].map(([idx, b]) => ({ idx, poids: b.poids, parLevier: b.parLevier })),
       EST_SEUIL_FRAC,

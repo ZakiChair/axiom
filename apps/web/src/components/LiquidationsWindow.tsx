@@ -541,12 +541,6 @@ function ContenuLive() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <EnTeteFenetre
-        mnemo="LIQ"
-        titre="Liquidations"
-        sousTitre={`${symbol} · ${okxCouvre(symbol) ? "perp Bybit + OKX (live)" : "perp Bybit (live)"}`}
-      />
-
       {/* Contrôles sur leur propre rangée (wrap) : 4 contrôles dans `actions` de l'en-tête
           écrasaient le titre à la largeur par défaut de la fenêtre (460 px). */}
       <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-4 pt-2">
@@ -607,6 +601,9 @@ function ContenuLive() {
 
       {/* Feed des dernières liquidations du buffer (scrollable, en-tête sticky). */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-3">
+        <div className="mb-1 text-[10px] uppercase tracking-wider text-text-dim">
+          Dernières liquidations ({MAX_FEED} max · indépendant de la fenêtre 5m/1h/24h)
+        </div>
         {feed.length === 0 ? (
           <Vide>
             En attente de liquidations… (flux live ; l'historique local — daemon/navigateur —
@@ -789,9 +786,8 @@ function LigneTop({ ev, maxUsd }: { ev: LiqEvent; maxUsd: number }) {
  * via les mêmes pures que l'onglet Live. Replis honnêtes : daemon absent (null) vs
  * fenêtre vide ([]) — le daemon n'enregistre que depuis son démarrage.
  */
-function ContenuHistorique() {
+function ContenuHistorique({ fenetre }: { fenetre: FenetreHistoId }) {
   const symbol = useStore(marketStore, (s) => s.symbol);
-  const [fenetre, setFenetre] = useState<FenetreHistoId>("24h");
   const [etat, setEtat] = useState<EtatHisto>({ statut: "chargement" });
 
   // Lecture à l'activation de l'onglet et à chaque changement fenêtre/symbole (cache 60 s ;
@@ -832,13 +828,6 @@ function ContenuHistorique() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <EnTeteFenetre
-        mnemo="LIQ"
-        titre="Liquidations"
-        sousTitre={`${symbol} · historique daemon (rétention 30 j)`}
-        actions={<SelecteurFenetreHisto fenetre={fenetre} onChange={setFenetre} />}
-      />
-
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {etat.statut === "chargement" && <Chargement libelle="Lecture de l'historique daemon…" />}
 
@@ -947,6 +936,10 @@ const ONGLETS: ReadonlyArray<{ id: OngletId; label: string }> = [
 
 export function LiquidationsWindow() {
   const [onglet, setOnglet] = useState<OngletId>("live");
+  const symbol = useStore(marketStore, (s) => s.symbol);
+  // Fenêtre de l'onglet Historique, levée ici pour rester visible dans l'en-tête unique
+  // quand on bascule sur l'onglet Live (cf. SelecteurFenetreHisto, actions de l'en-tête).
+  const [fenetre, setFenetre] = useState<FenetreHistoId>("24h");
 
   // Retient le flux du singleton (refcount) TANT QUE la fenêtre est ouverte, quel que soit
   // l'onglet affiché : source unique fenêtre + heatmap. Le changement de symbole est géré
@@ -955,8 +948,22 @@ export function LiquidationsWindow() {
 
   return (
     <div className="flex h-full flex-col">
+      <EnTeteFenetre
+        mnemo="LIQ"
+        titre="Liquidations"
+        sousTitre={
+          onglet === "live"
+            ? `${symbol} · ${okxCouvre(symbol) ? "perp Bybit + OKX (live)" : "perp Bybit (live)"}`
+            : `${symbol} · historique daemon (rétention 30 j)`
+        }
+        actions={
+          onglet === "historique" ? (
+            <SelecteurFenetreHisto fenetre={fenetre} onChange={setFenetre} />
+          ) : undefined
+        }
+      />
       <Onglets options={ONGLETS} actif={onglet} onChange={setOnglet} />
-      {onglet === "live" ? <ContenuLive /> : <ContenuHistorique />}
+      {onglet === "live" ? <ContenuLive /> : <ContenuHistorique fenetre={fenetre} />}
     </div>
   );
 }

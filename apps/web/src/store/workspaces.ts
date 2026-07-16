@@ -62,8 +62,8 @@ export interface WorkspaceContent {
   /** État replié des sections (clé = titre). */
   sections: Record<string, boolean>;
   priceScale: PriceScaleType;
-  /** Géométrie des fenêtres flottantes (position/taille/groupe) — toujours appliquée
-   * FERMÉE (cohérent avec `hydrateWindowManager`, cf. persist.ts). */
+  /** Géométrie ET état ouvert/minimisé des fenêtres flottantes — restaurés à
+   * l'application, y compris après reload (sémantique unique, revue v2 H15). */
   windowGeometry: Record<string, EtatFenetre>;
 }
 
@@ -134,9 +134,9 @@ function isBool(v: unknown): v is boolean {
 
 /**
  * Valide une géométrie de fenêtres persistée (même esprit que `validateEtatFenetre` de
- * persist.ts) : entrées corrompues écartées, `open`/`minimized` toujours réinitialisés à
- * `false` (une fenêtre restaurée via un workspace ne doit jamais surgir à l'écran — cf.
- * doc de `WorkspaceContent.windowGeometry`).
+ * persist.ts) : entrées corrompues écartées ; `open`/`minimized` sont conservés depuis la
+ * sauvegarde (sémantique unique, revue v2 H15 — un workspace restaure aussi son plan de
+ * fenêtres), avec repli sûr sur `false` si absents (compat sauvegardes existantes).
  */
 function validateWindowGeometry(raw: unknown): Record<string, EtatFenetre> {
   const windows: Record<string, EtatFenetre> = {};
@@ -155,13 +155,15 @@ function validateWindowGeometry(raw: unknown): Record<string, EtatFenetre> {
     }
     windows[id] = {
       id,
-      open: false,
+      // Sémantique unique (revue v2, H15) : l'état ouvert/minimisé fait partie du
+      // workspace — un preset restaure son plan de fenêtres, en session COMME après reload.
+      open: r.open === true,
       x: r.x,
       y: r.y,
       width: r.width,
       height: r.height,
       z: r.z,
-      minimized: false,
+      minimized: r.minimized === true,
       groupColor: typeof r.groupColor === "string" ? r.groupColor : null,
       preSnapGeometry: null,
     };

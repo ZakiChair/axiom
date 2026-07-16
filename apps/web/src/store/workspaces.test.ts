@@ -39,6 +39,7 @@ import { macroOverlayStore } from "./macro-overlays";
 import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore } from "../chart/Chart";
 import { themeStore } from "../store/theme";
+import { windowManagerStore } from "./windowManager";
 import { workspacesStore, DEFAULT_WORKSPACE_ID, type WorkspaceContent } from "./workspaces";
 
 /** Mock localStorage en mémoire (la persistance interne du store écrit dessus). */
@@ -253,5 +254,19 @@ describe("workspacesStore — validation au chargement", () => {
     expect(wsX?.content.macroOverlays).toEqual(["m2"]);
     expect(wsX?.content.sections).toEqual({});
     expect(wsX?.content.indicators).toEqual([]);
+  });
+
+  it("un workspace relu depuis localStorage conserve l'état ouvert des fenêtres (sémantique unique, revue v2 H15)", async () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    workspacesStore.getState().saveAs("plan");
+
+    // Simule un reload : ré-exécute la lecture initiale (module frais) sur le JSON
+    // réellement persisté par la sauvegarde ci-dessus — même mécanique que le test de
+    // corruption ci-dessus (vi.resetModules() + réimport lit `axiom:workspaces:v1`).
+    vi.resetModules();
+    const mod = await import("./workspaces");
+    const plan = mod.workspacesStore.getState().workspaces.find((w) => w.name === "plan");
+
+    expect(plan?.content.windowGeometry["derivatives"]?.open).toBe(true);
   });
 });

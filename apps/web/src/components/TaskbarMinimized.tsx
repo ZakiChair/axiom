@@ -26,11 +26,7 @@ export function TaskbarMinimized() {
       <button
         type="button"
         title="Disposer les fenêtres ouvertes en mosaïque"
-        onClick={() =>
-          windowManagerStore
-            .getState()
-            .tileOpenWindows({ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight })
-        }
+        onClick={() => windowManagerStore.getState().tileOpenWindows()}
         className="rounded border border-border bg-bg px-2 py-1 text-[11px] font-medium text-text-dim hover:text-text"
       >
         Mosaïque

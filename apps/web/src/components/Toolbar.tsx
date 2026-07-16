@@ -53,8 +53,14 @@ function declencherImportSauvegarde(): void {
       ) {
         return;
       }
-      if (importerSauvegarde(texte)) pousserToast("Sauvegarde importée — rechargez la page");
-      else pousserToast("Sauvegarde invalide : aucun changement effectué.");
+      if (importerSauvegarde(texte)) {
+        // localStorage vient d'être réécrit : continuer sans recharger laisserait
+        // l'état en mémoire incohérent. On recharge (toast visible ~1,2 s avant).
+        pousserToast("Sauvegarde importée — rechargement…");
+        setTimeout(() => window.location.reload(), 1200);
+      } else {
+        pousserToast("Sauvegarde invalide : aucun changement effectué.");
+      }
     };
     reader.readAsText(file);
   };

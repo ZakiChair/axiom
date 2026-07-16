@@ -17,13 +17,6 @@ function basculer(id: string): () => void {
   return () => windowManagerStore.getState().toggleWindow(id);
 }
 
-/** Viewport courant (fenêtre du navigateur) pour les commandes de disposition globale.
- *  Résolu À L'EXÉCUTION dans l'action (les commandes sont des closures) — window n'existe
- *  donc pas au moment de la construction du module. */
-function viewportCourant(): { x: number; y: number; width: number; height: number } {
-  return { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
-}
-
 /** Commandes panneau pilotées par le gestionnaire de fenêtres. */
 export const windowPanelCommands: Commande[] = [
   {
@@ -285,7 +278,7 @@ export const windowPanelCommands: Commande[] = [
     categorie: "panneau",
     motsCles: ["fenetres", "windows", "mosaique", "tile", "grille", "tuiles", "disposer", "wtile"],
     apercu: "Dispose les fenêtres ouvertes en mosaïque plein écran",
-    action: () => windowManagerStore.getState().tileOpenWindows(viewportCourant()),
+    action: () => windowManagerStore.getState().tileOpenWindows(),
   },
   {
     id: "panneau:wcasc",
@@ -294,7 +287,7 @@ export const windowPanelCommands: Commande[] = [
     categorie: "panneau",
     motsCles: ["fenetres", "windows", "cascade", "empiler", "escalier", "wcasc"],
     apercu: "Réempile les fenêtres ouvertes en cascade",
-    action: () => windowManagerStore.getState().cascadeAll(viewportCourant()),
+    action: () => windowManagerStore.getState().cascadeAll(),
   },
   {
     id: "panneau:wclose",

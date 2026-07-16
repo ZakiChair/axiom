@@ -15,6 +15,8 @@ import {
   menuWindows,
   WINDOW_Z_MAX,
   WINDOW_Z_MIN,
+  MIN_WIDTH,
+  MIN_HEIGHT,
   GROUP_PALETTE,
   type EtatFenetre,
   type WorkspaceRect,
@@ -210,6 +212,18 @@ describe("grilleMosaique", () => {
 
   it("n=0 : grille vide", () => {
     expect(grilleMosaique(0, viewport)).toEqual([]);
+  });
+
+  it("n=24 : plancher de taille — aucune cellule sous MIN_WIDTH/MIN_HEIGHT", () => {
+    const rects = grilleMosaique(24, viewport);
+    expect(rects).toHaveLength(24);
+    for (const r of rects) {
+      expect(r.width).toBeGreaterThanOrEqual(MIN_WIDTH);
+      expect(r.height).toBeGreaterThanOrEqual(MIN_HEIGHT);
+    }
+    // À n=24 (grille 5×5) la hauteur brute (~206px) passe sous MIN_HEIGHT : elle est
+    // bornée à 240 (léger chevauchement vertical accepté).
+    expect(rects[0]!.height).toBe(MIN_HEIGHT);
   });
 
   it("respecte une origine de viewport non nulle", () => {
@@ -845,7 +859,8 @@ describe("tileOpenWindows", () => {
     windowManagerStore.getState().openWindow("eco");
     const viewport: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
 
-    windowManagerStore.getState().tileOpenWindows(viewport);
+    // Le store lit son propre workspace (identique au viewport via le beforeEach).
+    windowManagerStore.getState().tileOpenWindows();
     const cells = grilleMosaique(2, viewport);
     // Ordre par z ascendant : derivatives ouverte en 1er (z plus bas) -> cellule 0.
     const d = windowManagerStore.getState().windows.derivatives!;
@@ -861,8 +876,8 @@ describe("tileOpenWindows", () => {
     windowManagerStore.getState().minimizeWindow("eco");
     const viewport: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
 
-    windowManagerStore.getState().tileOpenWindows(viewport);
-    // Une seule fenêtre visible -> occupe tout le viewport moins la marge.
+    windowManagerStore.getState().tileOpenWindows();
+    // Une seule fenêtre visible -> occupe tout le workspace moins la marge.
     const seule = grilleMosaique(1, viewport)[0]!;
     const d = windowManagerStore.getState().windows.derivatives!;
     expect({ x: d.x, y: d.y, width: d.width, height: d.height }).toEqual(seule);
@@ -870,7 +885,7 @@ describe("tileOpenWindows", () => {
 
   it("est un no-op si aucune fenêtre ouverte non réduite", () => {
     const avant = windowManagerStore.getState().windows;
-    windowManagerStore.getState().tileOpenWindows({ x: 0, y: 0, width: 800, height: 600 });
+    windowManagerStore.getState().tileOpenWindows();
     expect(windowManagerStore.getState().windows).toBe(avant);
   });
 });
@@ -883,7 +898,7 @@ describe("cascadeAll", () => {
     const largeurAvant = windowManagerStore.getState().windows.derivatives!.width;
     const viewport: WorkspaceRect = { x: 0, y: 0, width: 1920, height: 1080 };
 
-    windowManagerStore.getState().cascadeAll(viewport);
+    windowManagerStore.getState().cascadeAll();
     const d = windowManagerStore.getState().windows.derivatives!;
     // 1ère fenêtre (z bas) -> cascade index 0 -> coin haut-gauche (marge 48px).
     expect({ x: d.x, y: d.y }).toEqual(cascadePosition(0, viewport, d.width, d.height));

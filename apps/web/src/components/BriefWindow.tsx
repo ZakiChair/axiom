@@ -47,11 +47,13 @@ import {
 import {
   formatAge,
   formatDelai,
+  formatFunding,
   formatHeureMinute,
   formatPct,
   formatPourcentage,
   formatPrice,
   formatUsd,
+  formatUsdSigne,
   VALEUR_ABSENTE,
 } from "../lib/format";
 import { navigateTo } from "../lib/navigation";
@@ -106,17 +108,6 @@ const EN_ATTENTE = { statut: "loading" as Statut, data: null };
 function couleurVariation(v: number | null): string | undefined {
   if (v === null || !Number.isFinite(v) || v === 0) return undefined;
   return v > 0 ? "var(--up)" : "var(--down)";
-}
-
-/** Funding (fraction) → pourcentage signé 4 décimales (convention DERIV), ou « — ». */
-function fmtFunding(rate: number | null): string {
-  return rate === null ? VALEUR_ABSENTE : formatPct(rate * 100, 4);
-}
-
-/** Montant USD avec « + » explicite si positif (review PnL). */
-function fmtUsdSigne(v: number): string {
-  const base = formatUsd(v);
-  return v > 0 ? `+${base}` : base;
 }
 
 /** Titre de bloc (petites capitales espacées, ton estompé). */
@@ -317,7 +308,7 @@ export function BriefWindow() {
           <div className="grid grid-cols-3 gap-2">
             <Metric
               label="PnL réalisé"
-              value={fmtUsdSigne(session.pnlRealise)}
+              value={formatUsdSigne(session.pnlRealise)}
               couleur={couleurVariation(session.pnlRealise)}
             />
             <Metric label="Trades clos" value={String(session.tradesClos.length)} />
@@ -347,7 +338,7 @@ export function BriefWindow() {
                         className="py-1 text-right"
                         style={{ color: couleurVariation(t.pnlNet) }}
                       >
-                        {fmtUsdSigne(t.pnlNet)}
+                        {formatUsdSigne(t.pnlNet)}
                       </td>
                       <td
                         className="py-1 text-right"
@@ -485,10 +476,10 @@ export function BriefWindow() {
                   </div>
                   <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-text-dim">
                     <span>
-                      funding <span className="tabular-nums text-text">{fmtFunding(d.fundingActuel)}</span>
+                      funding <span className="tabular-nums text-text">{formatFunding(d.fundingActuel)}</span>
                     </span>
                     <span>
-                      prédit <span className="tabular-nums text-text">{fmtFunding(d.fundingPredit)}</span>
+                      prédit <span className="tabular-nums text-text">{formatFunding(d.fundingPredit)}</span>
                     </span>
                     <span>
                       prochain règlement{" "}

@@ -33,11 +33,13 @@ import {
   formatAge,
   formatDateComplete,
   formatDelai,
+  formatFunding,
   formatHeureMinute,
   formatPct,
   formatPourcentage,
   formatPrice,
   formatUsd,
+  formatUsdSigne,
   VALEUR_ABSENTE,
 } from "../lib/format";
 
@@ -288,17 +290,6 @@ export function assemblerSession(
   };
 }
 
-/** Funding (fraction) → pourcentage signé 4 décimales (convention DERIV), ou « — ». */
-function fmtFunding(rate: number | null): string {
-  return rate === null ? VALEUR_ABSENTE : formatPct(rate * 100, 4);
-}
-
-/** Montant USD avec « + » explicite si positif (review PnL). */
-function fmtUsdSigne(v: number): string {
-  const base = formatUsd(v);
-  return v > 0 ? `+${base}` : base;
-}
-
 /**
  * Sérialise l'instantané en markdown court (l'export « → Notes »). Tolère chaque
  * section absente (null) indépendamment. `now` injecté → fonction PURE.
@@ -315,7 +306,7 @@ export function briefEnMarkdown(d: DonneesBrief, now: number): string {
     const s = d.session;
     const n = s.tradesClos.length;
     l.push(
-      `**PnL réalisé** ${fmtUsdSigne(s.pnlRealise)} · ${n} trade${n === 1 ? "" : "s"} · ` +
+      `**PnL réalisé** ${formatUsdSigne(s.pnlRealise)} · ${n} trade${n === 1 ? "" : "s"} · ` +
         `${s.gagnants} gagnant${s.gagnants === 1 ? "" : "s"} / ${s.perdants} perdant${s.perdants === 1 ? "" : "s"}`,
     );
     l.push("");
@@ -325,7 +316,7 @@ export function briefEnMarkdown(d: DonneesBrief, now: number): string {
       for (const t of s.tradesClos) {
         l.push(
           `- ${formatHeureMinute(t.dateSortie)} · ${t.symbole} ${t.direction} · ` +
-            `${fmtUsdSigne(t.pnlNet)} (${formatPct(t.pnlPct)}) · ` +
+            `${formatUsdSigne(t.pnlNet)} (${formatPct(t.pnlPct)}) · ` +
             `${formatPrice(t.prixEntree)} → ${formatPrice(t.prixSortie)}`,
         );
       }
@@ -365,7 +356,7 @@ export function briefEnMarkdown(d: DonneesBrief, now: number): string {
       const prochain = r.prochainReglement === null ? VALEUR_ABSENTE : formatDelai(r.prochainReglement, now);
       const oi = r.deltaOiPct === null ? VALEUR_ABSENTE : formatPct(r.deltaOiPct);
       l.push(
-        `- ${r.symbole} · funding ${fmtFunding(r.fundingActuel)} · prédit ${fmtFunding(r.fundingPredit)} · ` +
+        `- ${r.symbole} · funding ${formatFunding(r.fundingActuel)} · prédit ${formatFunding(r.fundingPredit)} · ` +
           `prochain règlement ${prochain} · ΔOI 24 h ${oi}`,
       );
     }

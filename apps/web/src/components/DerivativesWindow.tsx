@@ -49,8 +49,8 @@ import {
 import {
   formatDec,
   formatDelai,
+  formatFunding,
   formatHeure,
-  formatPct,
   formatUsd,
   VALEUR_ABSENTE,
 } from "../lib/format";
@@ -71,12 +71,6 @@ const BIN_PERIOD = "5m" as const;
 const BIN_LIMIT = 30;
 /** Nombre de buckets de liquidations affichés dans le mini-histogramme bicolore. */
 const LIQ_BARS = 24;
-
-/** Funding rate (fraction) -> pourcentage signé 4 décimales (via formatPct partagé). */
-function formatFunding(rate: number | undefined): string {
-  if (rate === undefined) return VALEUR_ABSENTE;
-  return formatPct(rate * 100, 4);
-}
 
 /** Ratio L/S + part longue (« 1.87 · L 65% ») d'un point Binance (longAccount = fraction). */
 function formatRatioBreakdown(p: BinanceRatioPoint | undefined): string {

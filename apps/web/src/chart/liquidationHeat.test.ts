@@ -409,33 +409,45 @@ describe("rampePourTheme", () => {
   it("thème inconnu à fond sombre → viridis direct (repli)", () => {
     expect(couleurRampeArrets(1, rampePourTheme("inconnu", false))).toEqual(couleurViridis(1));
   });
-  it("bloomberg → noir profond vers ambre saturé", () => {
+  it("bloomberg → brun sombre (distinct du fond) vers ambre saturé", () => {
     const r = rampePourTheme("bloomberg", false);
-    expect(couleurRampeArrets(0, r)).toEqual([12, 10, 6]); // noir profond
+    expect(couleurRampeArrets(0, r)).toEqual([36, 28, 14]); // arrêt 0 éclairci (distinct du noir pur)
     expect(couleurRampeArrets(1, r)).toEqual([255, 196, 0]); // ambre saturé
   });
-  it("matrix → noir vers vert néon", () => {
+  it("matrix → vert sombre (distinct du fond) vers vert néon", () => {
     const r = rampePourTheme("matrix", false);
-    expect(couleurRampeArrets(0, r)).toEqual([4, 12, 6]);
+    expect(couleurRampeArrets(0, r)).toEqual([14, 36, 20]); // arrêt 0 éclairci (distinct du noir pur)
     expect(couleurRampeArrets(1, r)).toEqual([91, 255, 143]);
   });
 });
 
 describe("alphaFadeIn", () => {
-  it("cellule fraîche à age 0 → flash plein (alpha ≈ 1)", () => {
-    // dernierTime 1000 > tsDemarrage 500 ; now 1000 → age 0 → alpha = nominal + (1-nominal).
-    expect(alphaFadeIn(0.2, 1000, 500, 1000)).toBeCloseTo(1, 9);
+  // Signature : (alphaNominal, dernierTime, tsDemarrage, bumpTs, now).
+  it("cellule fraîche à age local 0 → flash plein (alpha ≈ 1)", () => {
+    // dernierTime 1000 > tsDemarrage 500 et dans la fenêtre du bump ; now = bumpTs → age 0.
+    expect(alphaFadeIn(0.2, 1000, 500, 1000, 1000)).toBeCloseTo(1, 9);
   });
-  it("fondu linéaire puis retour au nominal à DUREE_FADE (400 ms)", () => {
-    expect(alphaFadeIn(0.2, 1000, 500, 1200)).toBeCloseTo(0.6, 9); // age 200 (moitié) → 0.2 + 0.8×0.5
-    expect(alphaFadeIn(0.2, 1000, 500, 1400)).toBe(0.2); // age 400 → nominal (borne exclue)
-    expect(alphaFadeIn(0.2, 1000, 500, 2000)).toBe(0.2); // bien après → nominal
+  it("fondu linéaire sur l'horloge LOCALE (now − bumpTs) puis retour au nominal à DUREE_FADE (400 ms)", () => {
+    expect(alphaFadeIn(0.2, 1000, 500, 1000, 1200)).toBeCloseTo(0.6, 9); // age local 200 → 0.2 + 0.8×0.5
+    expect(alphaFadeIn(0.2, 1000, 500, 1000, 1400)).toBe(0.2); // age local 400 → nominal (borne exclue)
+    expect(alphaFadeIn(0.2, 1000, 500, 1000, 2000)).toBe(0.2); // bien après → nominal
+  });
+  it("tolère la latence WS : événement en retard de 2 s (< fenêtre 5 s) flashe quand même", () => {
+    // dernierTime 8000 mais bumpTs 10000 (2 s de latence) : l'âge EXCHANGE (2 s) dépasserait
+    // DUREE_FADE — le bug corrigé — mais l'animation suit bumpTs → flash plein à now = bumpTs.
+    expect(alphaFadeIn(0.2, 8000, 500, 10000, 10000)).toBeCloseTo(1, 9);
+    // Le fondu retombe sur l'horloge locale, indépendamment de l'âge exchange.
+    expect(alphaFadeIn(0.2, 8000, 500, 10000, 10200)).toBeCloseTo(0.6, 9);
+  });
+  it("hors fenêtre de fraîcheur (latence > 5 s) → aucun boost", () => {
+    // dernierTime 4000 <= bumpTs 10000 − 5000 : trop vieux pour être « du » bump → nominal.
+    expect(alphaFadeIn(0.2, 4000, 500, 10000, 10000)).toBe(0.2);
   });
   it("événement antérieur au démarrage (seed) → aucun boost", () => {
-    expect(alphaFadeIn(0.2, 400, 500, 450)).toBe(0.2); // dernierTime <= tsDemarrage
+    expect(alphaFadeIn(0.2, 400, 500, 450, 450)).toBe(0.2); // dernierTime <= tsDemarrage
   });
   it("cellule sans dernierTime → nominal", () => {
-    expect(alphaFadeIn(0.2, undefined, 500, 1000)).toBe(0.2);
+    expect(alphaFadeIn(0.2, undefined, 500, 1000, 1000)).toBe(0.2);
   });
 });
 

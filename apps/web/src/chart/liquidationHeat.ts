@@ -284,17 +284,19 @@ export function couleurRampe(t: number, fondClair: boolean): [number, number, nu
   return couleurViridis(fondClair ? 1 - t : t);
 }
 
-/** Rampe ambre du thème Bloomberg (noir profond → ambre saturé — identité « terminal »). */
+/** Rampe ambre du thème Bloomberg (brun sombre → ambre saturé — identité « terminal »). L'arrêt 0
+ *  reste sombre mais DISTINCT du fond noir pur (à alpha 0.15, [12,10,6] disparaissait). */
 const RAMPE_BLOOMBERG: ReadonlyArray<readonly [number, number, number]> = [
-  [12, 10, 6],
+  [36, 28, 14],
   [80, 50, 10],
   [160, 110, 10],
   [230, 170, 0],
   [255, 196, 0],
 ];
-/** Rampe vert néon du thème Matrix (noir → vert phosphore). */
+/** Rampe vert néon du thème Matrix (vert sombre → vert phosphore). L'arrêt 0 reste sombre mais
+ *  DISTINCT du fond noir pur (à alpha 0.15, [4,12,6] disparaissait). */
 const RAMPE_MATRIX: ReadonlyArray<readonly [number, number, number]> = [
-  [4, 12, 6],
+  [14, 36, 20],
   [16, 60, 32],
   [34, 120, 60],
   [60, 190, 100],
@@ -348,22 +350,34 @@ export function couleurRampeArrets(
 
 /** Durée (ms) du fade-in d'une cellule fraîche : flash plein puis retour à l'alpha nominal. */
 const DUREE_FADE_MS = 400;
+/** Fenêtre (ms) de tolérance latence WS + skew NTP : une cellule reste « fraîche » si l'horodatage
+ *  EXCHANGE de son dernier événement tombe dans ces dernières secondes avant le bump local. */
+const FENETRE_FRAICHEUR_MS = 5000;
 
 /**
- * Boost d'alpha du FADE-IN d'une cellule fraîche (live) : si `dernierTime` (dernier événement
- * de la cellule) est POSTÉRIEUR à `tsDemarrage` (démarrage du contrôleur — exclut le seed
- * initial) ET récent (`age = now − dernierTime < DUREE_FADE_MS`), la cellule flashe :
- * `alpha = nominal + (1 − nominal) × (1 − age/DUREE_FADE_MS)` (pleine à age 0, retombe au
- * nominal à DUREE_FADE_MS). Sinon renvoie l'alpha nominal inchangé. PURE.
+ * Boost d'alpha du FADE-IN d'une cellule fraîche (live). Deux horloges sont dissociées pour que la
+ * latence WS / le skew NTP ne tronquent plus le flash :
+ *  • SÉLECTION (horloge EXCHANGE, tolérante) : la cellule flashe si `dernierTime` (dernier événement
+ *    de la cellule) est POSTÉRIEUR à `tsDemarrage` (démarrage du contrôleur — exclut le seed initial)
+ *    ET tombe dans la fenêtre `FENETRE_FRAICHEUR_MS` avant `bumpTs` (l'événement peut être en retard
+ *    de plusieurs secondes sans perdre son flash) ;
+ *  • ANIMATION (horloge LOCALE) : le fondu suit `age = now − bumpTs` (instant local du dernier rev
+ *    bump), donc insensible à la latence — `alpha = nominal + (1 − nominal) × (1 − age/DUREE_FADE_MS)`
+ *    (pleine à age 0, retombe au nominal à DUREE_FADE_MS). Sinon renvoie l'alpha nominal. PURE.
  */
 export function alphaFadeIn(
   alphaNominal: number,
   dernierTime: number | undefined,
   tsDemarrage: number,
+  bumpTs: number,
   now: number,
 ): number {
+  // Sélection tolérante à la latence (horloge exchange) : postérieur au démarrage (pas le seed) ET
+  // dans la fenêtre de fraîcheur avant le bump local (tolère latence WS + skew NTP).
   if (dernierTime === undefined || dernierTime <= tsDemarrage) return alphaNominal;
-  const age = now - dernierTime;
+  if (dernierTime <= bumpTs - FENETRE_FRAICHEUR_MS) return alphaNominal;
+  // Animation indexée sur l'horloge LOCALE du bump : le fondu ignore l'âge exchange.
+  const age = now - bumpTs;
   if (!(age >= 0) || age >= DUREE_FADE_MS) return alphaNominal;
   return alphaNominal + (1 - alphaNominal) * (1 - age / DUREE_FADE_MS);
 }
@@ -517,6 +531,9 @@ export class LiquidationHeatController {
   /** Échéance (ms) jusqu'à laquelle la boucle rAF force le repaint pour animer le fade-in des
    *  cellules fraîches ; posée au rev bump de liqEventsStore (nouvelle liquidation live). */
   private animeJusqua = 0;
+  /** Instant LOCAL (Date.now()) du dernier rev bump de liqEventsStore : indexe l'ANIMATION du
+   *  fade-in sur l'horloge locale (insensible à la latence WS / skew NTP), cf. alphaFadeIn. */
+  private dernierBumpTs = 0;
   /**
    * La grille (agrégat coûteux sur tout le buffer d'événements) n'est reconstruite que sur
    * changement de données/viewport/taille — PAS au survol : le crosshair marque `dirty`
@@ -577,13 +594,16 @@ export class LiquidationHeatController {
   };
 
   /**
-   * Rev bump de liqEventsStore (liquidation(s) reçue(s)) : ouvre une fenêtre d'animation de
-   * ~450 ms (> DUREE_FADE_MS pour couvrir la retombée) pendant laquelle la boucle rAF force le
-   * repaint, puis invalide la grille (nouveau `dernierTime`) via markDirty. Le seed initial pose
-   * aussi la fenêtre mais ne flashe rien (aucune cellule n'a `dernierTime > tsDemarrage`).
+   * Rev bump de liqEventsStore (liquidation(s) reçue(s)) : mémorise `dernierBumpTs` (horloge
+   * LOCALE qui indexe l'animation du fade-in) et ouvre une fenêtre d'animation de ~450 ms
+   * (> DUREE_FADE_MS pour couvrir la retombée) pendant laquelle la boucle rAF force le repaint,
+   * puis invalide la grille (nouveau `dernierTime`) via markDirty. Le seed initial pose aussi la
+   * fenêtre mais ne flashe rien (aucune cellule n'a `dernierTime > tsDemarrage`).
    */
   private readonly onEventsBump = (): void => {
-    this.animeJusqua = Date.now() + 450;
+    const now = Date.now();
+    this.dernierBumpTs = now;
+    this.animeJusqua = now + 450;
     this.markDirty();
   };
 
@@ -694,6 +714,7 @@ export class LiquidationHeatController {
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.animeJusqua = 0;
+    this.dernierBumpTs = 0;
     this.dernierCrosshair = null;
     this.derniereGrille = null;
     this.grilleObsolete = true;
@@ -998,7 +1019,7 @@ export class LiquidationHeatController {
         rgb = couleurRampeArrets(t, tokens.rampe);
         alpha = 0.15 + 0.4 * t;
       }
-      alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, now);
+      alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, this.dernierBumpTs, now);
       ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha.toFixed(3)})`;
       ctx.fillRect(col.x0, y0, Math.max(1, col.x1 - col.x0), Math.max(1, y1 - y0));
     }
@@ -1089,7 +1110,7 @@ export class LiquidationHeatController {
         rgb = couleurRampeArrets(t, tokens.rampe);
         alpha = 0.15 + 0.4 * t;
       }
-      alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, now);
+      alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, this.dernierBumpTs, now);
       const o = (ligne * colonnes + colonne) * 4;
       px[o] = rgb[0];
       px[o + 1] = rgb[1];

@@ -40,6 +40,7 @@ import {
   rampePourTheme,
   teinteEstPourTheme,
   alphaFadeIn,
+  attenuationFootprint,
   filtrerNiveauxDenses,
   dechevaucher,
   liqFlashStore,
@@ -460,6 +461,17 @@ describe("alphaFadeIn", () => {
   });
   it("cellule sans dernierTime → nominal", () => {
     expect(alphaFadeIn(0.2, undefined, 500, 1000, 1000)).toBe(0.2);
+  });
+});
+
+describe("attenuationFootprint", () => {
+  it("divise l'alpha par 2 quand le footprint est actif", () => {
+    expect(attenuationFootprint(0.4, true)).toBeCloseTo(0.2, 6);
+    expect(attenuationFootprint(0.4, false)).toBe(0.4);
+  });
+  it("renvoie l'alpha intact quand le footprint est inactif (identité)", () => {
+    expect(attenuationFootprint(0.15, false)).toBe(0.15);
+    expect(attenuationFootprint(0.55, false)).toBe(0.55);
   });
 });
 

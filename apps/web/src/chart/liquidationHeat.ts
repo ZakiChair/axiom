@@ -36,6 +36,7 @@ import {
 import type { Commande } from "../commands/registry";
 import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
+import { orderflowStore } from "../store/orderflow";
 import { volumeProfileStore } from "../store/volumeProfile";
 import { formatHeureMinute, formatPrice, formatUsd } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
@@ -384,6 +385,16 @@ export function alphaFadeIn(
 }
 
 /**
+ * Sous footprint actif, la heatmap s'efface à moitié : les deux couches se superposent sur
+ * les mêmes bougies, l'orderflow garde la priorité de lecture. Appliquée AVANT `alphaFadeIn`
+ * (l'atténuation abaisse l'alpha au repos, mais une cellule fraîche flashe toujours à plein
+ * pendant le fondu). PURE.
+ */
+export function attenuationFootprint(alpha: number, footprintActif: boolean): number {
+  return footprintActif ? alpha * 0.5 : alpha;
+}
+
+/**
  * Filtre les buckets pour n'en garder que les plus significatifs : ceux dont `poids` atteint
  * `seuilFrac × max`, PLAFONNÉ aux `maxN` plus lourds (tri décroissant). Évite de tracer des
  * centaines de niveaux estimés quasi nuls. Liste vide ou `max ≤ 0` → `[]`. PURE.
@@ -581,6 +592,9 @@ export class LiquidationHeatController {
   private unsubTheme: (() => void) | null = null;
   /** Changement de MODE (intensité/dominance) : repaint SEUL — ne touche ni grille ni niveaux. */
   private unsubMode: (() => void) | null = null;
+  /** Bascule du footprint (orderflowStore.enabled) : repaint SEUL pour (dés)atténuer la heatmap
+   *  — l'atténuation est au rendu, la grille agrégée est indépendante (comme le MODE). */
+  private unsubOrderflow: (() => void) | null = null;
   /** Activation demandée par la heatmap RÉELLE (bascule LIQMARK, via setEnabled). */
   private marksWanted = false;
   /** Abonnement permanent à la bascule des niveaux ESTIMÉS (LIQEST) — indépendant de LIQMARK. */
@@ -691,6 +705,11 @@ export class LiquidationHeatController {
         this.dirty = true;
       }
     });
+    // Bascule du footprint (orderflowStore.enabled) : l'atténuation ×0.5 est appliquée au
+    // RENDU, donc un simple repaint (`dirty`) — la grille agrégée reste valide (comme le MODE).
+    this.unsubOrderflow = orderflowStore.subscribe((s, prev) => {
+      if (s.enabled !== prev.enabled) this.dirty = true;
+    });
     // Redimensionnement du conteneur (resize fenêtre, toggle sidebar…) : aucun
     // scroll/zoom/tick ne le signale autrement, d'où l'observer dédié.
     this.resizeObserver = new ResizeObserver(this.markDirty);
@@ -716,6 +735,8 @@ export class LiquidationHeatController {
     this.unsubTheme = null;
     this.unsubMode?.();
     this.unsubMode = null;
+    this.unsubOrderflow?.();
+    this.unsubOrderflow = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.animeJusqua = 0;
@@ -1004,6 +1025,9 @@ export class LiquidationHeatController {
     now: number,
   ): void {
     const ctx = this.ctx;
+    // Atténuation ×0.5 si le footprint est actif : lue 1×/frame (les deux couches se
+    // superposent sur les mêmes bougies — cf. attenuationFootprint).
+    const footprintActif = orderflowStore.getState().enabled;
     for (const cell of grid.cells.values()) {
       const col = largeurs.get(cell.candleTime);
       if (col === undefined) continue;
@@ -1025,6 +1049,7 @@ export class LiquidationHeatController {
         rgb = couleurRampeArrets(t, tokens.rampe);
         alpha = 0.15 + 0.4 * t;
       }
+      alpha = attenuationFootprint(alpha, footprintActif);
       alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, this.dernierBumpTs, now);
       ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha.toFixed(3)})`;
       ctx.fillRect(col.x0, y0, Math.max(1, col.x1 - col.x0), Math.max(1, y1 - y0));
@@ -1101,6 +1126,9 @@ export class LiquidationHeatController {
     }
     const px = img.data;
     px.fill(0);
+    // Atténuation ×0.5 si le footprint est actif : lue 1×/frame (l'atténuation est encodée
+    // dans le canal alpha du pixel, pas au globalAlpha du blit — cf. attenuationFootprint).
+    const footprintActif = orderflowStore.getState().enabled;
     for (const cell of grid.cells.values()) {
       const colonne = colonneParTime.get(cell.candleTime);
       if (colonne === undefined) continue;
@@ -1116,6 +1144,7 @@ export class LiquidationHeatController {
         rgb = couleurRampeArrets(t, tokens.rampe);
         alpha = 0.15 + 0.4 * t;
       }
+      alpha = attenuationFootprint(alpha, footprintActif);
       alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, this.dernierBumpTs, now);
       const o = (ligne * colonnes + colonne) * 4;
       px[o] = rgb[0];

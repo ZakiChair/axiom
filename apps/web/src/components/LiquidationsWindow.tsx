@@ -38,6 +38,7 @@ import {
 } from "../chart/liquidationMarkers";
 import { liqEstStore, LEVIERS } from "../chart/liquidationEstimates";
 import { flasherNiveau } from "../chart/liquidationHeat";
+import { orderflowStore } from "../store/orderflow";
 import { getActiveChart } from "../chart/drawing";
 import { liquidationsGet, type LiqDaemon } from "../data/daemon";
 import { histLiqParHeure } from "../data/referentiels";
@@ -132,18 +133,26 @@ function voirSurGraphe(ev: LiqEvent): void {
 function ToggleChart() {
   const actif = useStore(liqMarksStore, (s) => s.actif);
   const basculer = useStore(liqMarksStore, (s) => s.basculer);
+  // Footprint actif : la heatmap est atténuée ×0.5 (cf. chart/liquidationHeat.ts) — on le
+  // signale d'une ligne pour expliquer la couleur plus pâle quand les deux couches coexistent.
+  const footprintActif = useStore(orderflowStore, (s) => s.enabled);
   return (
-    <button
-      type="button"
-      onClick={basculer}
-      aria-pressed={actif}
-      title="Afficher les liquidations sur le graphe (marqueurs)"
-      className={`rounded border px-2 py-1 text-[11px] font-medium transition ${
-        actif ? "border-accent bg-bg text-accent" : "border-border bg-bg text-text-dim hover:text-text"
-      }`}
-    >
-      {actif ? "● Sur le graphe" : "Sur le graphe"}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={basculer}
+        aria-pressed={actif}
+        title="Afficher les liquidations sur le graphe (marqueurs)"
+        className={`rounded border px-2 py-1 text-[11px] font-medium transition ${
+          actif ? "border-accent bg-bg text-accent" : "border-border bg-bg text-text-dim hover:text-text"
+        }`}
+      >
+        {actif ? "● Sur le graphe" : "Sur le graphe"}
+      </button>
+      {actif && footprintActif && (
+        <p className="text-[10px] text-text-dim">Heatmap atténuée : footprint actif.</p>
+      )}
+    </>
   );
 }
 

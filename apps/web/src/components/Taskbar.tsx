@@ -3,6 +3,12 @@
  * Taskbar permanente des fenêtres OUVERTES — une pastille par fenêtre `open` (réduite ou
  * non), dans l'ordre stable du registre. Visible dès qu'au moins une fenêtre est ouverte.
  *
+ * Intégrée au FLUX du layout racine (dernier enfant du flex-col d'App) : quand elle est
+ * rendue, elle réserve sa hauteur et le workspace (mesuré par `chartAreaRef`) se rétrécit
+ * d'autant via le ResizeObserver — l'axe temporel du chart n'est donc plus masqué. Les
+ * fenêtres flottantes (position `fixed`) passeront visuellement AU-DESSUS si elles la
+ * chevauchent, comme pour la toolbar.
+ *
  * Clic sur une pastille = toggle standard (`toggleFocusMinimize`, testé côté store) :
  * réduite → restaure au premier plan ; focalisée → réduit ; sinon → passe au premier plan.
  * Croix ✕ au survol = ferme la fenêtre. Deux actions globales en tête (« Tout restaurer »,
@@ -44,7 +50,7 @@ export function Taskbar() {
   const zFocus = zFenetreFocalisee(windows);
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 flex gap-1 border-t border-border bg-surface px-2 py-1">
+    <div className="flex shrink-0 gap-1 border-t border-border bg-surface px-2 py-1">
       <button
         type="button"
         title="Restaurer toutes les fenêtres réduites"

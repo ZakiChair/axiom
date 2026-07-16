@@ -270,6 +270,11 @@ export function App() {
         )}
       </main>
 
+      {/* Taskbar des fenêtres ouvertes — DANS LE FLUX (dernier enfant du flex-col) : elle
+          réserve sa hauteur, donc le workspace mesuré par chartAreaRef se rétrécit et l'axe
+          temporel du chart n'est plus masqué. Rien quand aucune fenêtre n'est ouverte. */}
+      <Taskbar />
+
       {/* Indice discret pour sortir du plein écran (aucune toolbar visible alors). */}
       {plein && (
         <div className="pointer-events-none fixed bottom-3 left-3 z-30 rounded border border-border bg-surface/80 px-2 py-1 text-[10px] text-text-dim">
@@ -293,7 +298,6 @@ export function App() {
         );
       })}
       <SnapOverlay />
-      <Taskbar />
       <SettingsPanel />
       <CommandPalette />
       {/* Premier lancement : 3 étapes (masqué si completed ; ⌘K ONBOARD pour rejouer). */}

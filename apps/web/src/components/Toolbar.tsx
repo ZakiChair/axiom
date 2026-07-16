@@ -26,6 +26,7 @@ import { exportChartImage } from "../chart/drawing";
 import { IndicatorMenu } from "./IndicatorMenu";
 import { PairSearch } from "./PairSearch";
 import { ThemeSwitcher } from "./ThemeSwitcher";
+import { MenuDeroulant } from "./ui";
 
 /**
  * Ouvre un sélecteur de fichier, valide et REMPLACE tout l'état `axiom:*` du terminal par
@@ -150,50 +151,31 @@ const FONCTIONS: { mnemonique: string; libelle: string; ouvrir: () => void }[] =
  * tick) — les actions lisent les stores via getState(), sans abonnement.
  */
 function FonctionsMenu() {
-  const [open, setOpen] = useState(false);
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Fonctions — ouvrir un panneau (mêmes mnémoniques dans ⌘K)"
-        className="flex items-center gap-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 hover:border-neutral-500"
-      >
-        <span>Fonctions</span>
-        <span aria-hidden className="text-[9px] text-neutral-500">▾</span>
-      </button>
-
-      {open && (
-        <>
-          {/* Zone de fermeture au clic extérieur. */}
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div
-            role="menu"
-            className="absolute left-0 z-50 mt-1 w-60 rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl"
+    <MenuDeroulant
+      declencheur={<span>Fonctions</span>}
+      titre="Fonctions — ouvrir un panneau (mêmes mnémoniques dans ⌘K)"
+    >
+      {(fermer) =>
+        FONCTIONS.map((f) => (
+          <button
+            key={f.mnemonique}
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              f.ouvrir();
+              fermer();
+            }}
+            className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs text-neutral-200 hover:bg-neutral-800"
           >
-            {FONCTIONS.map((f) => (
-              <button
-                key={f.mnemonique}
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  f.ouvrir();
-                  setOpen(false);
-                }}
-                className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs text-neutral-200 hover:bg-neutral-800"
-              >
-                <span className="w-12 shrink-0 font-semibold uppercase tracking-wider text-emerald-400">
-                  {f.mnemonique}
-                </span>
-                <span className="min-w-0 flex-1 truncate">{f.libelle}</span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
+            <span className="w-12 shrink-0 font-semibold uppercase tracking-wider text-emerald-400">
+              {f.mnemonique}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{f.libelle}</span>
+          </button>
+        ))
+      }
+    </MenuDeroulant>
   );
 }
 
@@ -203,53 +185,36 @@ function FonctionsMenu() {
  * Découverte Toolbar (B3.3) en plus de la palette ⌘K.
  */
 function PlaybooksMenu() {
-  const [open, setOpen] = useState(false);
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Playbooks 1-clic — mêmes mnémoniques PLAY* dans ⌘K"
-        className="flex items-center gap-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 hover:border-neutral-500"
-      >
-        <span>Playbooks</span>
-        <span aria-hidden className="text-[9px] text-neutral-500">▾</span>
-      </button>
-
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div
-            role="menu"
-            className="absolute left-0 z-50 mt-1 w-72 rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl"
+    <MenuDeroulant
+      declencheur={<span>Playbooks</span>}
+      titre="Playbooks 1-clic — mêmes mnémoniques PLAY* dans ⌘K"
+      classePanneau="w-72"
+    >
+      {(fermer) =>
+        PLAYBOOKS.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            role="menuitem"
+            title={p.description}
+            onClick={() => {
+              p.apply();
+              fermer();
+            }}
+            className="flex w-full flex-col gap-0.5 rounded px-2 py-1.5 text-left text-xs text-neutral-200 hover:bg-neutral-800"
           >
-            {PLAYBOOKS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                role="menuitem"
-                title={p.description}
-                onClick={() => {
-                  p.apply();
-                  setOpen(false);
-                }}
-                className="flex w-full flex-col gap-0.5 rounded px-2 py-1.5 text-left text-xs text-neutral-200 hover:bg-neutral-800"
-              >
-                <span className="flex items-center gap-2">
-                  <span className="shrink-0 font-semibold uppercase tracking-wider text-sky-400">
-                    {p.mnemonique}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate font-medium">{p.nom}</span>
-                </span>
-                <span className="truncate pl-0 text-[10px] text-neutral-500">{p.description}</span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
+            <span className="flex items-center gap-2">
+              <span className="shrink-0 font-semibold uppercase tracking-wider text-sky-400">
+                {p.mnemonique}
+              </span>
+              <span className="min-w-0 flex-1 truncate font-medium">{p.nom}</span>
+            </span>
+            <span className="truncate pl-0 text-[10px] text-neutral-500">{p.description}</span>
+          </button>
+        ))
+      }
+    </MenuDeroulant>
   );
 }
 
@@ -297,57 +262,47 @@ function LayoutSwitcher() {
  * de la sauvegarde complète. Basse fréquence (aucun re-render sur tick).
  */
 function WorkspaceMenu() {
-  const [open, setOpen] = useState(false);
   const workspaces = useStore(workspacesStore, (s) => s.workspaces);
   const currentId = useStore(workspacesStore, (s) => s.currentId);
   const currentName = workspaces.find((w) => w.id === currentId)?.name ?? "Défaut";
-
-  const onSaveAs = () => {
-    const nom = window.prompt("Nom du workspace :");
-    if (nom && nom.trim().length > 0) workspacesStore.getState().saveAs(nom.trim());
-    setOpen(false);
-  };
-  const onRename = (id: string, name: string) => {
-    const nom = window.prompt("Nouveau nom :", name);
-    if (nom && nom.trim().length > 0) workspacesStore.getState().rename(id, nom.trim());
-  };
-  const onRemove = (id: string, name: string) => {
-    if (window.confirm(`Supprimer le workspace « ${name} » ?`)) workspacesStore.getState().remove(id);
-  };
 
   const itemClass =
     "w-full rounded px-2 py-1 text-left text-xs text-neutral-200 hover:bg-neutral-800";
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Workspaces (agencements enregistrés)"
-        className="flex items-center gap-1 rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 hover:border-neutral-500"
-      >
-        <span className="text-neutral-500">WS</span>
-        <span className="max-w-[120px] truncate">{currentName}</span>
-        <span aria-hidden className="text-[9px] text-neutral-500">▾</span>
-      </button>
-
-      {open && (
+    <MenuDeroulant
+      align="right"
+      titre="Workspaces (agencements enregistrés)"
+      declencheur={
         <>
-          {/* Zone de fermeture au clic extérieur. */}
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div
-            role="menu"
-            className="absolute right-0 z-50 mt-1 w-60 rounded border border-neutral-700 bg-neutral-900 p-1 shadow-xl"
-          >
+          <span className="text-neutral-500">WS</span>
+          <span className="max-w-[120px] truncate">{currentName}</span>
+        </>
+      }
+    >
+      {(fermer) => {
+        const onSaveAs = () => {
+          const nom = window.prompt("Nom du workspace :");
+          if (nom && nom.trim().length > 0) workspacesStore.getState().saveAs(nom.trim());
+          fermer();
+        };
+        const onRename = (id: string, name: string) => {
+          const nom = window.prompt("Nouveau nom :", name);
+          if (nom && nom.trim().length > 0) workspacesStore.getState().rename(id, nom.trim());
+        };
+        const onRemove = (id: string, name: string) => {
+          if (window.confirm(`Supprimer le workspace « ${name} » ?`)) workspacesStore.getState().remove(id);
+        };
+        return (
+          <>
             {workspaces.map((w) => (
               <div key={w.id} className="flex items-center gap-1">
                 <button
                   type="button"
+                  role="menuitem"
                   onClick={() => {
                     workspacesStore.getState().apply(w.id);
-                    setOpen(false);
+                    fermer();
                   }}
                   className={`min-w-0 flex-1 truncate rounded px-2 py-1 text-left text-xs hover:bg-neutral-800 ${
                     w.id === currentId ? "text-emerald-400" : "text-neutral-200"
@@ -380,16 +335,17 @@ function WorkspaceMenu() {
             ))}
 
             <div className="my-1 h-px bg-neutral-800" />
-            <button type="button" onClick={onSaveAs} className={itemClass}>
+            <button type="button" role="menuitem" onClick={onSaveAs} className={itemClass}>
               Enregistrer sous…
             </button>
 
             <div className="my-1 h-px bg-neutral-800" />
             <button
               type="button"
+              role="menuitem"
               onClick={() => {
                 exporterSauvegarde();
-                setOpen(false);
+                fermer();
               }}
               className={itemClass}
             >
@@ -397,18 +353,19 @@ function WorkspaceMenu() {
             </button>
             <button
               type="button"
+              role="menuitem"
               onClick={() => {
                 declencherImportSauvegarde();
-                setOpen(false);
+                fermer();
               }}
               className={itemClass}
             >
               Importer une sauvegarde…
             </button>
-          </div>
-        </>
-      )}
-    </div>
+          </>
+        );
+      }}
+    </MenuDeroulant>
   );
 }
 

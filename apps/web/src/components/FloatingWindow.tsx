@@ -9,7 +9,7 @@
  * position FINALE (pointerup) déclenche un `set()` Zustand — les déplacements
  * intermédiaires manipulent `style.left/top/width/height` directement.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import {
   windowManagerStore,
@@ -47,6 +47,25 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
   const etat = useStore(windowManagerStore, (s) => s.windows[id]);
   const rootRef = useRef<HTMLDivElement>(null);
   const [menuGroupeOuvert, setMenuGroupeOuvert] = useState(false);
+  const groupeRef = useRef<HTMLDivElement>(null);
+
+  // Menu « couleur de groupe » : fermeture sur Échap + clic extérieur (mêmes
+  // gestes que les menus déroulants de la Toolbar — cf. MenuDeroulant).
+  useEffect(() => {
+    if (!menuGroupeOuvert) return;
+    const surClic = (e: MouseEvent) => {
+      if (!groupeRef.current?.contains(e.target as Node)) setMenuGroupeOuvert(false);
+    };
+    const surEchap = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuGroupeOuvert(false);
+    };
+    document.addEventListener("mousedown", surClic);
+    document.addEventListener("keydown", surEchap);
+    return () => {
+      document.removeEventListener("mousedown", surClic);
+      document.removeEventListener("keydown", surEchap);
+    };
+  }, [menuGroupeOuvert]);
 
   if (!etat || !etat.open || etat.minimized) return null;
 
@@ -214,7 +233,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
           </span>
           <span className="truncate text-xs font-medium text-text">{title}</span>
         </div>
-        <div className="relative flex shrink-0 items-center gap-1" data-no-drag>
+        <div ref={groupeRef} className="relative flex shrink-0 items-center gap-1" data-no-drag>
           <button
             type="button"
             title="Couleur de groupe"

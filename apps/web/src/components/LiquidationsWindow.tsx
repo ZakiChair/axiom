@@ -24,6 +24,7 @@ import {
   liqMarksStore,
   retenirFluxLiq,
   type LiqEvent,
+  type LiqHeatMode,
 } from "../chart/liquidationMarkers";
 import { liqEstStore } from "../chart/liquidationEstimates";
 import { EnTeteFenetre, Vide, NoteSource, Metric, Badge, type TonBadge } from "./ui";
@@ -94,6 +95,46 @@ function ToggleChart() {
     >
       {actif ? "● Sur le graphe" : "Sur le graphe"}
     </button>
+  );
+}
+
+/** Modes de coloration des cellules de la heatmap (segmented compact pour l'en-tête). */
+const MODES_HEATMAP: ReadonlyArray<{ id: LiqHeatMode; label: string; title: string }> = [
+  { id: "intensite", label: "Intensité", title: "Cellules colorées par intensité totale (rampe viridis, échelle log)" },
+  { id: "dominance", label: "L-S", title: "Cellules teintées par dominance long/short (longs = teinte baissière, shorts = haussière)" },
+];
+
+/**
+ * Sélecteur segmenté du mode de coloration de la heatmap (intensité / dominance L-S).
+ * Visible SEULEMENT quand « Sur le graphe » est actif (le mode ne s'applique qu'aux
+ * cellules de la heatmap — cf. chart/liquidationHeat.ts, commande ⌘K LIQMODE).
+ */
+function SelecteurMode() {
+  const actif = useStore(liqMarksStore, (s) => s.actif);
+  const mode = useStore(liqMarksStore, (s) => s.mode);
+  const setMode = useStore(liqMarksStore, (s) => s.setMode);
+  if (!actif) return null;
+  return (
+    <div
+      role="group"
+      aria-label="Mode de coloration de la heatmap"
+      className="flex items-center gap-0.5 rounded border border-border p-0.5"
+    >
+      {MODES_HEATMAP.map((m) => (
+        <button
+          key={m.id}
+          type="button"
+          onClick={() => setMode(m.id)}
+          aria-pressed={mode === m.id}
+          title={m.title}
+          className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
+            mode === m.id ? "bg-bg text-text" : "text-text-dim hover:text-text"
+          }`}
+        >
+          {m.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -282,6 +323,7 @@ export function LiquidationsWindow() {
           <div className="flex items-center gap-1.5">
             <SelecteurFenetre fenetre={fenetre} onChange={setFenetre} />
             <ToggleChart />
+            <SelecteurMode />
             <ToggleEstimes />
           </div>
         }

@@ -239,6 +239,20 @@ describe("amorçage Coinalyze (candleContenant / seedDepuisCoinalyze)", () => {
   });
 });
 
+describe("liqMarksStore — mode de coloration (intensité / dominance)", () => {
+  it("défaut « intensite » ; setMode force, basculerMode alterne", () => {
+    expect(liqMarksStore.getState().mode).toBe("intensite");
+    liqMarksStore.getState().basculerMode();
+    expect(liqMarksStore.getState().mode).toBe("dominance");
+    liqMarksStore.getState().basculerMode();
+    expect(liqMarksStore.getState().mode).toBe("intensite");
+    liqMarksStore.getState().setMode("dominance");
+    expect(liqMarksStore.getState().mode).toBe("dominance");
+    liqMarksStore.getState().setMode("intensite"); // remise à l'état par défaut
+    expect(liqMarksStore.getState().mode).toBe("intensite");
+  });
+});
+
 describe("retenirFluxLiq (refcount des consommateurs UI)", () => {
   it("active l'abonnement quand SEULE la fenêtre retient le flux (heatmap OFF), le coupe à la relâche", () => {
     expect(liqMarksStore.getState().actif).toBe(false);

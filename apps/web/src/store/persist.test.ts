@@ -86,6 +86,7 @@ beforeEach(() => {
   revenueStore.getState().setEnabled(false);
   // setActif(false) coupe aussi le singleton (clearInterval OI) laissé actif par un test précédent.
   liqMarksStore.getState().setActif(false);
+  liqMarksStore.getState().setMode("intensite");
   liqEstStore.getState().setActif(false);
   macroOverlayStore.getState().setEnabled([]);
   uiSectionsStore.getState().setAll({});
@@ -280,6 +281,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
         volumeProfile: false,
         revenue: true,
         liqHeatmap: true,
+        liqHeatmapMode: "dominance",
         liqEstimates: true,
         macroOverlays: ["m2", "stablecoins"],
         sections: { Alertes: true, Watchlist: false },
@@ -293,6 +295,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(volumeProfileStore.getState().enabled).toBe(false);
     expect(revenueStore.getState().enabled).toBe(true);
     expect(liqMarksStore.getState().actif).toBe(true);
+    expect(liqMarksStore.getState().mode).toBe("dominance");
     expect(liqEstStore.getState().actif).toBe(true);
     expect(compareStore.getState().symbols.map((c) => c.symbol)).toEqual(["ETHUSDT", "SOLUSDT"]);
     // setEnabled réordonne selon MACRO_OVERLAYS = ["crypto-total","stablecoins","m2"].
@@ -306,6 +309,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
       SESSION_KEY,
       JSON.stringify({
         orderflow: "oui", // pas un booléen -> ignoré (reste false)
+        liqHeatmapMode: "arc-en-ciel", // mode inconnu -> ignoré (reste intensite)
         priceScale: "diagonale", // échelle inconnue -> ignorée (reste normal)
         macroOverlays: ["m2", "inexistant"], // "inexistant" filtré
         sections: { A: 1 }, // valeur non booléenne -> écartée
@@ -315,6 +319,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     hydrateStores();
 
     expect(orderflowStore.getState().enabled).toBe(false);
+    expect(liqMarksStore.getState().mode).toBe("intensite");
     expect(priceScaleStore.getState().type).toBe("normal");
     expect(macroOverlayStore.getState().enabled).toEqual(["m2"]);
     expect(uiSectionsStore.getState().open).toEqual({});
@@ -323,6 +328,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
   it("saveSessionUi sérialise l'instantané courant des stores de session", () => {
     orderflowStore.getState().setEnabled(true);
     liqMarksStore.getState().setActif(true);
+    liqMarksStore.getState().setMode("dominance");
     priceScaleStore.getState().setType("percentage");
     uiSectionsStore.getState().setOpen("Macro", false);
 
@@ -331,6 +337,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     const raw = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null");
     expect(raw.orderflow).toBe(true);
     expect(raw.liqHeatmap).toBe(true);
+    expect(raw.liqHeatmapMode).toBe("dominance");
     expect(raw.liqEstimates).toBe(false);
     expect(raw.priceScale).toBe("percentage");
     expect(raw.sections).toEqual({ Macro: false });

@@ -28,6 +28,7 @@ import {
   calculerNiveauxEstimes,
   type NiveauEstime,
 } from "./liquidationEstimates";
+import type { Commande } from "../commands/registry";
 import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
 import { volumeProfileStore } from "../store/volumeProfile";
@@ -114,6 +115,18 @@ export function intensiteLog(usd: number, maxUsd: number): number {
 }
 
 /**
+ * Déséquilibre long/short d'une cellule ∈ [-1, +1] : `(short − long) / (short + long)`.
+ * +1 = 100 % de shorts liquidés, −1 = 100 % de longs liquidés, 0 à l'équilibre ou si le
+ * total est nul/invalide. Pilote la teinte et la franchise des cellules en mode
+ * « dominance » (cf. dessinerHeatmap). PURE.
+ */
+export function desequilibre(longUsd: number, shortUsd: number): number {
+  const total = longUsd + shortUsd;
+  if (!(total > 0)) return 0;
+  return (shortUsd - longUsd) / total;
+}
+
+/**
  * Profil latéral par bucket de prix : somme long/short de toutes les bougies pour chaque
  * bucketIdx (alimente les bandes du bord droit). PURE.
  */
@@ -159,9 +172,10 @@ export function cellSousCurseur(
 /**
  * Parse une couleur CSS concrète (`#rgb`, `#rrggbb` ou `rgb()/rgba()`) en tuple RVB, ou
  * `null` si la chaîne n'est pas reconnue. Le canvas ne reçoit que des tokens déjà résolus
- * (jamais de `var()` ni d'`oklch()`), donc ces deux formes suffisent. PURE (locale).
+ * (jamais de `var()` ni d'`oklch()`), donc ces deux formes suffisent. Sert à `estFondClair`
+ * et aux teintes up/down du mode « dominance » (parsées UNE fois par frame). PURE.
  */
-function parseCouleurRvb(css: string): [number, number, number] | null {
+export function parseCssColor(css: string): [number, number, number] | null {
   const s = css.trim();
   if (s.startsWith("#")) {
     const h = s.slice(1);
@@ -187,7 +201,7 @@ function parseCouleurRvb(css: string): [number, number, number] | null {
  * thèmes). Sert à inverser la rampe de couleur sur thème clair (cf. `couleurRampe`). PURE.
  */
 export function estFondClair(bgCss: string): boolean {
-  const rgb = parseCouleurRvb(bgCss);
+  const rgb = parseCssColor(bgCss);
   if (rgb === null) return false;
   const [r, g, b] = rgb;
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.5;
@@ -278,7 +292,14 @@ interface Tokens {
   border: string;
   /** true si le fond du thème est CLAIR (rampe de couleur inversée — cf. `couleurRampe`). */
   fondClair: boolean;
+  /** Teintes up/down PARSÉES en RVB une fois par frame (mode dominance : rgba par cellule). */
+  upRgb: [number, number, number];
+  downRgb: [number, number, number];
 }
+
+/** Replis RVB des teintes up/down si le token du thème n'est pas parsable (#10b981 / #ef4444). */
+const UP_RGB_FALLBACK: [number, number, number] = [16, 185, 129];
+const DOWN_RGB_FALLBACK: [number, number, number] = [239, 68, 68];
 
 /** Lit un token CSS sémantique concret depuis <html> (le canvas n'évalue pas var()). */
 function readToken(name: string): string {
@@ -327,6 +348,8 @@ export class LiquidationHeatController {
   private unsubEvents: (() => void) | null = null;
   private unsubOi: (() => void) | null = null;
   private unsubTheme: (() => void) | null = null;
+  /** Changement de MODE (intensité/dominance) : repaint SEUL — ne touche ni grille ni niveaux. */
+  private unsubMode: (() => void) | null = null;
   /** Activation demandée par la heatmap RÉELLE (bascule LIQMARK, via setEnabled). */
   private marksWanted = false;
   /** Abonnement permanent à la bascule des niveaux ESTIMÉS (LIQEST) — indépendant de LIQMARK. */
@@ -393,6 +416,12 @@ export class LiquidationHeatController {
     // Changement de thème : bandes/tooltip/lignes lisent des tokens CSS → repeindre pour
     // adopter les nouvelles couleurs (un simple repaint suffit ; `markDirty` par symétrie).
     this.unsubTheme = themeStore.subscribe(this.markDirty);
+    // Changement de MODE de coloration (LIQMODE) : le mode ne change QUE le fillStyle des
+    // cellules → simple repaint (`dirty`), SANS invalider la grille ni les niveaux mémoïsés.
+    // (ChartInstance ne relaie que `actif` via setEnabled — le mode est suivi ici.)
+    this.unsubMode = liqMarksStore.subscribe((s, prev) => {
+      if (s.mode !== prev.mode) this.dirty = true;
+    });
     // Redimensionnement du conteneur (resize fenêtre, toggle sidebar…) : aucun
     // scroll/zoom/tick ne le signale autrement, d'où l'observer dédié.
     this.resizeObserver = new ResizeObserver(this.markDirty);
@@ -414,6 +443,8 @@ export class LiquidationHeatController {
     this.unsubOi = null;
     this.unsubTheme?.();
     this.unsubTheme = null;
+    this.unsubMode?.();
+    this.unsubMode = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.dernierCrosshair = null;
@@ -486,14 +517,19 @@ export class LiquidationHeatController {
     // Tokens de couleur lus UNE fois par frame (getComputedStyle est coûteux) et réutilisés
     // par toutes les couches, comme le fait volumeProfile.ts. `--bg` sert à choisir le sens de
     // la rampe de couleur (viridis direct sur fond sombre, inversé sur fond clair).
+    const up = readToken("--up") || "#10b981";
+    const down = readToken("--down") || "#ef4444";
     const tokens: Tokens = {
       textDim: readToken("--text-dim") || "#9ca3af",
-      up: readToken("--up") || "#10b981",
-      down: readToken("--down") || "#ef4444",
+      up,
+      down,
       text: readToken("--text") || "#e5e7eb",
       surface: readToken("--surface") || "#171717",
       border: readToken("--border") || "#262626",
       fondClair: estFondClair(readToken("--bg")),
+      // Parse UNE fois par frame (le mode dominance compose un rgba PAR cellule).
+      upRgb: parseCssColor(up) ?? UP_RGB_FALLBACK,
+      downRgb: parseCssColor(down) ?? DOWN_RGB_FALLBACK,
     };
 
     // Deux couches INDÉPENDANTES sur le même canvas : heatmap RÉELLE (LIQMARK) et niveaux
@@ -574,6 +610,11 @@ export class LiquidationHeatController {
     // Cellules : un rect par (bougie × bucket), rampe theme-aware d'intensité log. Alpha borné
     // [0.15, 0.55] pour ne pas masquer le prix sous les cascades. Bords entiers (x0/x1 partagés
     // par colonne ; yTop/yBot arrondis par bucket → mêmes bords que le bucket voisin).
+    // Mode « dominance » : la teinte remplace la rampe viridis — shorts liquidés dominants =
+    // `--up` (rachats forcés), longs = `--down` (ventes forcées), même sémantique que le profil
+    // latéral — et l'alpha d'intensité est modulé par |deseq| (cellule équilibrée pâle, cellule
+    // très déséquilibrée franche). Le mode ne change QUE le fillStyle (grille mémoïsée intacte).
+    const mode = liqMarksStore.getState().mode;
     for (const cell of grid.cells.values()) {
       const col = largeurs.get(cell.candleTime);
       if (col === undefined) continue;
@@ -583,10 +624,17 @@ export class LiquidationHeatController {
         continue;
       }
       const t = intensiteLog(cell.longUsd + cell.shortUsd, grid.maxUsd);
-      const [r, g, b] = couleurRampe(t, tokens.fondClair);
       const y0 = Math.round(Math.min(yTop, yBot));
       const y1 = Math.round(Math.max(yTop, yBot));
-      ctx.fillStyle = `rgba(${r},${g},${b},${(0.15 + 0.4 * t).toFixed(3)})`;
+      if (mode === "dominance") {
+        const d = desequilibre(cell.longUsd, cell.shortUsd);
+        const [r, g, b] = d >= 0 ? tokens.upRgb : tokens.downRgb;
+        const alpha = (0.15 + 0.4 * t) * (0.35 + 0.65 * Math.abs(d));
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
+      } else {
+        const [r, g, b] = couleurRampe(t, tokens.fondClair);
+        ctx.fillStyle = `rgba(${r},${g},${b},${(0.15 + 0.4 * t).toFixed(3)})`;
+      }
       ctx.fillRect(col.x0, y0, Math.max(1, col.x1 - col.x0), Math.max(1, y1 - y0));
     }
 
@@ -948,11 +996,15 @@ export class LiquidationHeatController {
 
     // (a) + (b) : uniquement quand la heatmap est active ET a produit une grille (des liquidations).
     if (grid !== null) {
-      // (a) barre d'échelle gradient 84×8 px, « 0 » à gauche, formatUsd(maxUsd) à droite.
+      // (a) barre d'échelle gradient 84×8 px (mêmes 24 crans que les cellules). Mode intensité :
+      // rampe viridis, « 0 » à gauche, formatUsd(maxUsd) à droite. Mode dominance : gradient
+      // DIVERGENT down → (mélange pâle au centre) → up — mêmes teintes/alphas que les cellules
+      // (0.35 + 0.65×|deseq|) —, extrémités étiquetées « longs » / « shorts ».
+      const dominance = liqMarksStore.getState().mode === "dominance";
       ctx.textAlign = "right";
       ctx.textBaseline = "bottom";
       ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
-      const maxTxt = formatUsd(grid.maxUsd);
+      const maxTxt = dominance ? "shorts" : formatUsd(grid.maxUsd);
       const wMax = ctx.measureText(maxTxt).width;
       const barW = 84;
       const barH = 8;
@@ -960,17 +1012,23 @@ export class LiquidationHeatController {
       const barLeft = barRight - barW;
       const barTop = yb - barH;
       for (let i = 0; i < 24; i++) {
-        const [r, g, b] = couleurRampe(i / 23, tokens.fondClair);
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        if (dominance) {
+          const d = (2 * i) / 23 - 1; // cran → deseq ∈ [-1, +1] (longs → shorts)
+          const [r, g, b] = d >= 0 ? tokens.upRgb : tokens.downRgb;
+          ctx.fillStyle = `rgba(${r},${g},${b},${(0.35 + 0.65 * Math.abs(d)).toFixed(3)})`;
+        } else {
+          const [r, g, b] = couleurRampe(i / 23, tokens.fondClair);
+          ctx.fillStyle = `rgb(${r},${g},${b})`;
+        }
         ctx.fillRect(barLeft + (barW * i) / 24, barTop, barW / 24 + 1, barH); // +1 : pas de couture
       }
       ctx.fillStyle = tokens.textDim;
-      ctx.fillText(maxTxt, xRight - 4, yb); // borne haute à droite de la barre
-      ctx.fillText("0", barLeft - 4, yb); // borne basse à gauche de la barre
+      ctx.fillText(maxTxt, xRight - 4, yb); // borne haute (maxUsd / « shorts ») à droite de la barre
+      ctx.fillText(dominance ? "longs" : "0", barLeft - 4, yb); // borne basse à gauche de la barre
       yb -= 13;
       // caption
       ctx.fillStyle = tokens.textDim;
-      ctx.fillText("Liq heatmap (exécutées) · log", xRight - 4, yb);
+      ctx.fillText(`Liq heatmap (exécutées) · ${dominance ? "dominance" : "log"}`, xRight - 4, yb);
       yb -= 14;
 
       // (b) mini-légende profil « ▮ shorts ▮ longs » (shorts = --up, longs = --down).
@@ -1012,3 +1070,17 @@ export class LiquidationHeatController {
     }
   }
 }
+
+// ─────────────────────────── Commande de palette ───────────────────────────
+
+export const commandes: Commande[] = [
+  {
+    id: "action:liqmode",
+    mnemonique: "LIQMODE",
+    libelle: "Heatmap liquidations — mode intensité / dominance",
+    categorie: "action",
+    motsCles: ["liquidations", "heatmap", "dominance", "long", "short", "mode", "intensite", "liqmode"],
+    apercu: "Bascule la coloration des cellules : intensité totale (viridis) ou dominance long/short",
+    action: () => liqMarksStore.getState().basculerMode(),
+  },
+];

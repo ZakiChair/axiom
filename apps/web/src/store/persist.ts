@@ -57,7 +57,7 @@ import { revenueStore } from "./revenue";
 import { macroOverlayStore, MACRO_OVERLAYS, type MacroOverlayId } from "./macro-overlays";
 import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
-import { liqMarksStore } from "../chart/liquidationMarkers";
+import { liqMarksStore, type LiqHeatMode } from "../chart/liquidationMarkers";
 import { liqEstStore } from "../chart/liquidationEstimates";
 import { windowManagerStore, WINDOW_REGISTRY, type EtatFenetre } from "./windowManager";
 import { syntheticsStore } from "./synthetics";
@@ -361,6 +361,8 @@ interface PersistedSession {
   revenue: boolean;
   /** Bascule heatmap liquidations exécutées (chart/liquidationMarkers). */
   liqHeatmap: boolean;
+  /** Mode de coloration des cellules de la heatmap (intensité / dominance long-short). */
+  liqHeatmapMode: LiqHeatMode;
   /** Bascule niveaux de liquidation estimés (chart/liquidationEstimates). */
   liqEstimates: boolean;
   macroOverlays: MacroOverlayId[];
@@ -377,6 +379,7 @@ function currentSession(): PersistedSession {
     volumeProfile: volumeProfileStore.getState().enabled,
     revenue: revenueStore.getState().enabled,
     liqHeatmap: liqMarksStore.getState().actif,
+    liqHeatmapMode: liqMarksStore.getState().mode,
     liqEstimates: liqEstStore.getState().actif,
     macroOverlays: macroOverlayStore.getState().enabled,
     sections: uiSectionsStore.getState().open,
@@ -408,6 +411,10 @@ function hydrateSession(): void {
   // Liquidations : `setActif` fait passer la bascule via son subscribe → le singleton
   // (re)démarre l'abonnement WS / le fetch OI si `true` est restauré (cf. demarrer*).
   if (typeof p.liqHeatmap === "boolean") liqMarksStore.getState().setActif(p.liqHeatmap);
+  // Mode de coloration : union de chaînes — la garde d'égalité filtre toute valeur inconnue.
+  if (p.liqHeatmapMode === "intensite" || p.liqHeatmapMode === "dominance") {
+    liqMarksStore.getState().setMode(p.liqHeatmapMode);
+  }
   if (typeof p.liqEstimates === "boolean") liqEstStore.getState().setActif(p.liqEstimates);
 
   if (Array.isArray(p.macroOverlays)) {

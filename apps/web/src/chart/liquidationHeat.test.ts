@@ -29,8 +29,10 @@ import {
   cellSousCurseur,
   construireGrille,
   intensiteLog,
+  desequilibre,
   profilParPrix,
   estFondClair,
+  parseCssColor,
   couleurRampe,
   filtrerNiveauxDenses,
   dechevaucher,
@@ -119,6 +121,25 @@ describe("intensiteLog", () => {
   });
 });
 
+describe("desequilibre", () => {
+  it("+1 = 100 % shorts, -1 = 100 % longs, 0 à l'équilibre", () => {
+    expect(desequilibre(0, 100)).toBe(1);
+    expect(desequilibre(100, 0)).toBe(-1);
+    expect(desequilibre(50, 50)).toBe(0);
+  });
+
+  it("proportionnel à la part dominante (∈ [-1, +1])", () => {
+    expect(desequilibre(25, 75)).toBe(0.5); // shorts dominants aux 3/4
+    expect(desequilibre(75, 25)).toBe(-0.5); // longs dominants aux 3/4
+    expect(desequilibre(90, 10)).toBeCloseTo(-0.8, 10);
+  });
+
+  it("total nul ou invalide → 0 (cellule neutre)", () => {
+    expect(desequilibre(0, 0)).toBe(0);
+    expect(desequilibre(NaN, 100)).toBe(0);
+  });
+});
+
 describe("cellSousCurseur", () => {
   // close 100 → taille de bucket 0,1 ; prix 100 → bucketIdx 1000. Deux liqs (long + short)
   // dans la bougie 0 (time 0), aucune dans la bougie 1 (time 60000).
@@ -167,6 +188,26 @@ describe("profilParPrix", () => {
     const [entree] = [...profil.values()];
     expect(entree?.longUsd).toBe(500);
     expect(entree?.shortUsd).toBe(200);
+  });
+});
+
+describe("parseCssColor", () => {
+  it("parse #rrggbb et #rgb en tuple RVB", () => {
+    expect(parseCssColor("#ef4444")).toEqual([239, 68, 68]);
+    expect(parseCssColor("#fff")).toEqual([255, 255, 255]);
+    expect(parseCssColor("#0a0a0a")).toEqual([10, 10, 10]);
+  });
+
+  it("parse rgb()/rgba() (espaces et alpha tolérés)", () => {
+    expect(parseCssColor("rgb(16, 185, 129)")).toEqual([16, 185, 129]);
+    expect(parseCssColor("rgba(239,68,68,0.5)")).toEqual([239, 68, 68]);
+  });
+
+  it("chaîne non reconnue → null (var() non résolu, hex invalide, vide)", () => {
+    expect(parseCssColor("")).toBeNull();
+    expect(parseCssColor("bidon")).toBeNull();
+    expect(parseCssColor("#12")).toBeNull();
+    expect(parseCssColor("var(--up)")).toBeNull();
   });
 });
 

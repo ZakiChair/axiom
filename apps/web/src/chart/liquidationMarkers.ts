@@ -219,17 +219,30 @@ export function seedDepuisCoinalyze(
 
 // ─────────────────────────── Bascule (store vanilla local) ───────────────────────────
 
+/** Mode de coloration des CELLULES de la heatmap : intensité totale (viridis) ou
+ *  dominance long/short (teintes --down/--up — le profil latéral montre déjà le split). */
+export type LiqHeatMode = "intensite" | "dominance";
+
 export interface LiqMarksState {
   actif: boolean;
+  /** Mode de coloration des cellules (cf. LiqHeatMode) — persisté (store/persist.ts). */
+  mode: LiqHeatMode;
   basculer: () => void;
   /** Force l'état ON/OFF (idempotent) — hydratation persistée (cf. store/persist.ts). */
   setActif: (actif: boolean) => void;
+  /** Force le mode (idempotent) — hydratation persistée (cf. store/persist.ts). */
+  setMode: (mode: LiqHeatMode) => void;
+  /** Alterne intensité ↔ dominance (commande ⌘K LIQMODE). */
+  basculerMode: () => void;
 }
 
 export const liqMarksStore = createStore<LiqMarksState>((set, get) => ({
   actif: false,
+  mode: "intensite",
   basculer: () => set({ actif: !get().actif }),
   setActif: (actif) => set({ actif }),
+  setMode: (mode) => set({ mode }),
+  basculerMode: () => set({ mode: get().mode === "intensite" ? "dominance" : "intensite" }),
 }));
 
 // ─────────────────────────── Store des événements (buffer borné, vanilla) ───────────────────────────

@@ -146,6 +146,38 @@ export function profilParPrix(grid: LiqGrid): Map<number, { longUsd: number; sho
 }
 
 /**
+ * Mini-CLLD : totaux de liquidations CUMULÉS de part et d'autre du prix spot, en séparant
+ * réel (profil par bucket, cf. `profilParPrix` — montant = longUsd + shortUsd) et estimé
+ * (niveaux du modèle levier, pondérés par `poidsUsd`). Un bucket réel est « au-dessus » si
+ * son prix CENTRE ((idx + 0.5) × taille) est STRICTEMENT supérieur au spot (centre exactement
+ * sur le spot → en-dessous) ; un niveau estimé suit la même convention sur son `price`. Les
+ * niveaux au poids non fini sont ignorés (même garde que leur tracé). Entrées vides → zéros.
+ * PURE.
+ */
+export function cumulsAutourSpot(
+  profil: Map<number, { longUsd: number; shortUsd: number }>,
+  taille: number,
+  niveaux: Array<{ price: number; poidsUsd: number }>,
+  spot: number,
+): { reelAuDessus: number; reelEnDessous: number; estAuDessus: number; estEnDessous: number } {
+  let reelAuDessus = 0;
+  let reelEnDessous = 0;
+  let estAuDessus = 0;
+  let estEnDessous = 0;
+  for (const [idx, agg] of profil) {
+    const montant = agg.longUsd + agg.shortUsd;
+    if ((idx + 0.5) * taille > spot) reelAuDessus += montant;
+    else reelEnDessous += montant;
+  }
+  for (const n of niveaux) {
+    if (!Number.isFinite(n.poidsUsd)) continue;
+    if (n.price > spot) estAuDessus += n.poidsUsd;
+    else estEnDessous += n.poidsUsd;
+  }
+  return { reelAuDessus, reelEnDessous, estAuDessus, estEnDessous };
+}
+
+/**
  * Dimensions de la grille VISIBLE pour le rendu offscreen basse résolution : nombre de
  * colonnes (`to − from`, une par bougie de la plage) et bornes [bucketMin, bucketMax] des
  * buckets réellement PRÉSENTS dans les cellules (le petit canvas ne couvre que cette bande
@@ -1144,7 +1176,9 @@ export class LiquidationHeatController {
    *      caption « Liq heatmap (exécutées) · log » — quand la heatmap est active et peuplée ;
    *  (b) mini-légende du profil « ▮ shorts ▮ longs » (carrés teintes `--up`/`--down`) — idem ;
    *  (c) légende « Niveaux ESTIMÉS (modèle levier — approximation) » — dès que la couche EST est
-   *      active (garde-fou BUILD-CONTRACT NON contournable).
+   *      active (garde-fou BUILD-CONTRACT NON contournable) ;
+   *  (d) mini-CLLD : cumuls de liquidations « ↑ » (au-dessus du spot) / « ↓ » (en-dessous),
+   *      réel (tokens.text) et « EST. » (orange) séparés — au SOMMET de la pile.
    * Emplacement jamais occupé par les boutons de layout ni la légende du Volume Profile.
    */
   private dessinerLegendes(main: Bounding, tokens: Tokens, heatActif: boolean, estActif: boolean): void {
@@ -1227,6 +1261,49 @@ export class LiquidationHeatController {
       ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
       ctx.fillStyle = `rgba(${ORANGE_EST},0.95)`;
       ctx.fillText("Niveaux ESTIMÉS (modèle levier — approximation)", xRight - 4, yb);
+      yb -= 14;
+    }
+
+    // (d) mini-CLLD : cumuls au-dessus/en-dessous du SPOT (close de la dernière bougie
+    // visible — même source que la taille de bucket de la grille), scope = plage visible.
+    // Partie réelle depuis le profil de la grille en cache (recalcul O(buckets) par frame
+    // dirty), partie « EST. » depuis les niveaux estimés mémoïsés — chacune affichée
+    // SEULEMENT si sa couche est active/peuplée. Ligne ↓ tracée d'abord (empilement vers le
+    // haut) : la ligne ↑ finit au sommet de la pile, comme au-dessus/en-dessous à l'écran.
+    const niveaux = estActif ? this.derniersNiveaux ?? [] : [];
+    if (grid !== null || niveaux.length > 0) {
+      const candles = marketStore.getState().candles;
+      const range = this.chart.getVisibleRange();
+      const derniereVisible = candles[Math.min(candles.length, range.to) - 1];
+      if (derniereVisible === undefined) return;
+      const cumuls = cumulsAutourSpot(
+        grid !== null ? profilParPrix(grid) : new Map(),
+        grid?.taille ?? 0,
+        niveaux,
+        derniereVisible.close,
+      );
+      ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "bottom";
+      const ligne = (prefixe: string, reel: number | null, est: number | null): void => {
+        // La ligne n'apparaît que si au moins un des montants AFFICHÉS est > 0.
+        if (!((reel ?? 0) > 0 || (est ?? 0) > 0)) return;
+        let gauche = reel !== null ? `${prefixe} ${formatUsd(reel)}` : prefixe;
+        if (est !== null) gauche += reel !== null ? " · " : " ";
+        const droite = est !== null ? `EST. ${formatUsd(est)}` : "";
+        const wGauche = ctx.measureText(gauche).width;
+        const x = xRight - 4 - wGauche - ctx.measureText(droite).width;
+        ctx.fillStyle = tokens.text;
+        ctx.fillText(gauche, x, yb);
+        if (droite !== "") {
+          ctx.fillStyle = `rgba(${ORANGE_EST},0.95)`;
+          ctx.fillText(droite, x + wGauche, yb);
+        }
+        yb -= 14;
+      };
+      const reelAffiche = grid !== null;
+      ligne("↓", reelAffiche ? cumuls.reelEnDessous : null, estActif ? cumuls.estEnDessous : null);
+      ligne("↑", reelAffiche ? cumuls.reelAuDessus : null, estActif ? cumuls.estAuDessus : null);
     }
   }
 }

@@ -32,6 +32,7 @@ import {
   intensiteLog,
   desequilibre,
   profilParPrix,
+  cumulsAutourSpot,
   estFondClair,
   parseCssColor,
   couleurRampe,
@@ -222,6 +223,56 @@ describe("profilParPrix", () => {
     const [entree] = [...profil.values()];
     expect(entree?.longUsd).toBe(500);
     expect(entree?.shortUsd).toBe(200);
+  });
+});
+
+describe("cumulsAutourSpot", () => {
+  it("répartit buckets réels (par prix centre) et niveaux estimés (par price) de part et d'autre du spot", () => {
+    // taille 10, spot 100 : bucket 12 (centre 125) au-dessus, bucket 5 (centre 55) en-dessous ;
+    // niveau 130 au-dessus, niveau 80 en-dessous, niveau exactement à 100 → en-dessous (<=).
+    const profil = new Map([
+      [12, { longUsd: 300, shortUsd: 100 }],
+      [5, { longUsd: 50, shortUsd: 150 }],
+    ]);
+    const niveaux = [
+      { price: 130, poidsUsd: 1000 },
+      { price: 80, poidsUsd: 700 },
+      { price: 100, poidsUsd: 5 },
+    ];
+    expect(cumulsAutourSpot(profil, 10, niveaux, 100)).toEqual({
+      reelAuDessus: 400,
+      reelEnDessous: 200,
+      estAuDessus: 1000,
+      estEnDessous: 705,
+    });
+  });
+
+  it("spot exactement sur un centre de bucket → le bucket compte en-dessous (<=)", () => {
+    // Bucket 10 : centre (10 + 0.5) × 10 = 105 = spot → en-dessous.
+    const profil = new Map([[10, { longUsd: 100, shortUsd: 0 }]]);
+    expect(cumulsAutourSpot(profil, 10, [], 105)).toEqual({
+      reelAuDessus: 0,
+      reelEnDessous: 100,
+      estAuDessus: 0,
+      estEnDessous: 0,
+    });
+  });
+
+  it("profil et niveaux vides → zéros", () => {
+    expect(cumulsAutourSpot(new Map(), 10, [], 100)).toEqual({
+      reelAuDessus: 0,
+      reelEnDessous: 0,
+      estAuDessus: 0,
+      estEnDessous: 0,
+    });
+  });
+
+  it("ignore les niveaux estimés au poids non fini (même garde que le tracé)", () => {
+    const niveaux = [
+      { price: 130, poidsUsd: Number.NaN },
+      { price: 130, poidsUsd: 1000 },
+    ];
+    expect(cumulsAutourSpot(new Map(), 10, niveaux, 100).estAuDessus).toBe(1000);
   });
 });
 

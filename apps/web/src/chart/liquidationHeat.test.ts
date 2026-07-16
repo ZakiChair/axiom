@@ -28,6 +28,7 @@ import { couleurViridis } from "./liquidationMarkers";
 import {
   cellSousCurseur,
   construireGrille,
+  dimensionsGrilleVisible,
   intensiteLog,
   desequilibre,
   profilParPrix,
@@ -36,6 +37,7 @@ import {
   couleurRampe,
   filtrerNiveauxDenses,
   dechevaucher,
+  type LiqGrid,
 } from "./liquidationHeat";
 
 function candle(partial: Partial<Candle> & Pick<Candle, "time" | "close">): Candle {
@@ -104,6 +106,38 @@ describe("construireGrille", () => {
     expect(construireGrille([], candles, 1, 1)).toBeNull();
     // Aucun événement → 0 cellule → null.
     expect(construireGrille([], candles, 0, 2)).toBeNull();
+  });
+});
+
+describe("dimensionsGrilleVisible", () => {
+  /** Grille factice : une cellule par bucketIdx demandé (le temps/USD n'importe pas ici). */
+  function grille(bucketIdxs: number[]): LiqGrid {
+    const cells = new Map();
+    for (const idx of bucketIdxs) {
+      cells.set(`0:${idx}`, { candleTime: 0, bucketIdx: idx, longUsd: 1, shortUsd: 0, count: 1 });
+    }
+    return { cells, taille: 1, maxUsd: 1 };
+  }
+
+  it("renvoie colonnes = to − from et les bornes min/max des buckets présents", () => {
+    expect(dimensionsGrilleVisible(grille([9, 5, 7]), 2, 5)).toEqual({
+      colonnes: 3,
+      bucketMin: 5,
+      bucketMax: 9,
+    });
+  });
+
+  it("bucket unique : bornes confondues", () => {
+    expect(dimensionsGrilleVisible(grille([3]), 0, 1)).toEqual({
+      colonnes: 1,
+      bucketMin: 3,
+      bucketMax: 3,
+    });
+  });
+
+  it("null si plage vide ou grille sans cellule", () => {
+    expect(dimensionsGrilleVisible(grille([1]), 3, 3)).toBeNull(); // to − from < 1
+    expect(dimensionsGrilleVisible(grille([]), 0, 2)).toBeNull(); // aucune cellule
   });
 });
 

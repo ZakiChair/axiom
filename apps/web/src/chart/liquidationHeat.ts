@@ -21,6 +21,7 @@ import {
   liqEventsStore,
   liqMarksStore,
   type LiqEvent,
+  type LiqHeatMode,
 } from "./liquidationMarkers";
 import {
   liqEstStore,
@@ -145,6 +146,29 @@ export function profilParPrix(grid: LiqGrid): Map<number, { longUsd: number; sho
 }
 
 /**
+ * Dimensions de la grille VISIBLE pour le rendu offscreen basse résolution : nombre de
+ * colonnes (`to − from`, une par bougie de la plage) et bornes [bucketMin, bucketMax] des
+ * buckets réellement PRÉSENTS dans les cellules (le petit canvas ne couvre que cette bande
+ * de prix, pas tout l'axe). Renvoie `null` si la plage est vide ou la grille sans cellule.
+ * PURE.
+ */
+export function dimensionsGrilleVisible(
+  grid: LiqGrid,
+  from: number,
+  to: number,
+): { colonnes: number; bucketMin: number; bucketMax: number } | null {
+  const colonnes = to - from;
+  if (colonnes < 1 || grid.cells.size === 0) return null;
+  let bucketMin = Infinity;
+  let bucketMax = -Infinity;
+  for (const cell of grid.cells.values()) {
+    if (cell.bucketIdx < bucketMin) bucketMin = cell.bucketIdx;
+    if (cell.bucketIdx > bucketMax) bucketMax = cell.bucketIdx;
+  }
+  return { colonnes, bucketMin, bucketMax };
+}
+
+/**
  * Hit-test PUR du survol : retrouve la cellule sous le curseur à partir d'un `timestamp`
  * (converti en bougie CONTENANTE via `candleContenant`) et d'une valeur de prix (`value`,
  * convertie en bucket via `bucketIndex`), puis lookup O(1) dans `grid.cells`. Renvoie `null`
@@ -265,6 +289,11 @@ const MAX_BAND_FRAC = 0.12;
 const VP_WIDTH_FRAC = 0.32;
 /** Largeur de repli d'une cellule quand la largeur de bougie n'est pas déductible. */
 const FALLBACK_CELL_W = 6;
+/** Seuil de LISSAGE « CoinGlass » (px) : sous cette largeur de bougie (zoom large), le rendu
+ *  cellule à cellule (un fillRect par cellule) est remplacé par un offscreen basse résolution
+ *  (1 cellule = 1 pixel) upscalé avec interpolation — rendu continu, 1 seul drawImage par
+ *  frame. Au-dessus (zoom serré), les rects précis restent : lecture cellule à cellule. */
+const SEUIL_LISSAGE_PX = 6;
 /** Teinte orange des niveaux ESTIMÉS (distincte du viridis de la heatmap réelle). */
 const ORANGE_EST = "245,158,11"; // #f59e0b (rgb)
 /** Poids min (fraction du max) pour tracer un niveau ESTIMÉ + plafond de niveaux tracés.
@@ -341,6 +370,13 @@ export class LiquidationHeatController {
    */
   private niveauxObsoletes = true;
   private derniersNiveaux: NiveauEstime[] | null = null;
+  /**
+   * Petit canvas DÉTACHÉ du rendu lissé « CoinGlass » (1 cellule de la grille = 1 pixel),
+   * membre RÉUTILISÉ entre frames : créé paresseusement au premier rendu lissé, redimensionné
+   * seulement quand les dimensions de la grille visible changent (cf. dessinerCellulesLissees).
+   */
+  private offscreen: HTMLCanvasElement | null = null;
+  private offscreenCtx: CanvasRenderingContext2D | null = null;
   /** Dernier crosshair reçu (position + bougie survolée) ; null quand le curseur quitte le graphe. */
   private dernierCrosshair: Crosshair | null = null;
   private resizeObserver: ResizeObserver | null = null;
@@ -585,11 +621,15 @@ export class LiquidationHeatController {
     // Bords ENTIERS PARTAGÉS par colonne (x0/x1 arrondis) : deux cellules adjacentes partagent
     // exactement le même bord entier → plus de couture d'anti-aliasing (fine grille sombre).
     // La cellule est CENTRÉE sur x ; la dernière bougie réutilise la largeur de l'avant-dernière.
+    // On note au passage l'index de COLONNE de chaque bougie (0..n-1 dans la plage visible) pour
+    // le rendu lissé offscreen (1 colonne = 1 pixel du petit canvas).
     const largeurs = new Map<number, { x0: number; x1: number }>();
+    const colonneParTime = new Map<number, number>();
     let prevW = FALLBACK_CELL_W;
     for (let i = from; i < to; i++) {
       const c = candles[i];
       if (c === undefined) continue;
+      colonneParTime.set(c.time, i - from);
       const x = this.toPx({ timestamp: c.time }).x;
       if (x === undefined || !Number.isFinite(x)) continue;
       const suivant = i + 1 < to ? candles[i + 1] : undefined;
@@ -607,35 +647,17 @@ export class LiquidationHeatController {
     ctx.rect(left, top, width, height);
     ctx.clip();
 
-    // Cellules : un rect par (bougie × bucket), rampe theme-aware d'intensité log. Alpha borné
-    // [0.15, 0.55] pour ne pas masquer le prix sous les cascades. Bords entiers (x0/x1 partagés
-    // par colonne ; yTop/yBot arrondis par bucket → mêmes bords que le bucket voisin).
-    // Mode « dominance » : la teinte remplace la rampe viridis — shorts liquidés dominants =
-    // `--up` (rachats forcés), longs = `--down` (ventes forcées), même sémantique que le profil
-    // latéral — et l'alpha d'intensité est modulé par |deseq| (cellule équilibrée pâle, cellule
-    // très déséquilibrée franche). Le mode ne change QUE le fillStyle (grille mémoïsée intacte).
+    // Deux RENDUS de cellules selon la largeur de bougie (l'espacement klinecharts est uniforme,
+    // `prevW` — dernier espacement mesuré — en est représentatif) :
+    //  • bougies FINES (< SEUIL_LISSAGE_PX, zoom large) : offscreen basse résolution upscalé
+    //    (« CoinGlass ») — rendu continu, 1 drawImage au lieu de centaines de fillRect ;
+    //  • bougies LARGES (zoom serré) : rects précis, lecture cellule à cellule.
+    // Repli sur les rects si le lissé ne peut pas se dessiner (bornes non convertibles…).
+    // Le mode ne change QUE la couleur des cellules (grille mémoïsée intacte).
     const mode = liqMarksStore.getState().mode;
-    for (const cell of grid.cells.values()) {
-      const col = largeurs.get(cell.candleTime);
-      if (col === undefined) continue;
-      const yTop = this.toPx({ value: (cell.bucketIdx + 1) * grid.taille }).y;
-      const yBot = this.toPx({ value: cell.bucketIdx * grid.taille }).y;
-      if (yTop === undefined || yBot === undefined || !Number.isFinite(yTop) || !Number.isFinite(yBot)) {
-        continue;
-      }
-      const t = intensiteLog(cell.longUsd + cell.shortUsd, grid.maxUsd);
-      const y0 = Math.round(Math.min(yTop, yBot));
-      const y1 = Math.round(Math.max(yTop, yBot));
-      if (mode === "dominance") {
-        const d = desequilibre(cell.longUsd, cell.shortUsd);
-        const [r, g, b] = d >= 0 ? tokens.upRgb : tokens.downRgb;
-        const alpha = (0.15 + 0.4 * t) * (0.35 + 0.65 * Math.abs(d));
-        ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
-      } else {
-        const [r, g, b] = couleurRampe(t, tokens.fondClair);
-        ctx.fillStyle = `rgba(${r},${g},${b},${(0.15 + 0.4 * t).toFixed(3)})`;
-      }
-      ctx.fillRect(col.x0, y0, Math.max(1, col.x1 - col.x0), Math.max(1, y1 - y0));
+    const lissage = prevW < SEUIL_LISSAGE_PX;
+    if (!lissage || !this.dessinerCellulesLissees(grid, candles, from, to, largeurs, colonneParTime, mode, tokens)) {
+      this.dessinerCellulesRects(grid, largeurs, mode, tokens);
     }
 
     // Bandes latérales du profil par prix : largeur ∝ intensité log (max 12 % du pane), SPLIT
@@ -707,6 +729,144 @@ export class LiquidationHeatController {
 
     // Tooltip de survol : dessiné HORS clip (au-dessus de la heatmap), après restauration.
     if (hover !== null) this.dessinerTooltip(hover, grid, main, tokens);
+  }
+
+  /**
+   * Rendu CELLULE À CELLULE (bougies larges ≥ SEUIL_LISSAGE_PX) : un fillRect par cellule,
+   * rampe theme-aware d'intensité log. Alpha borné [0.15, 0.55] pour ne pas masquer le prix
+   * sous les cascades. Bords entiers (x0/x1 partagés par colonne ; yTop/yBot arrondis par
+   * bucket → mêmes bords que le bucket voisin).
+   * Mode « dominance » : la teinte remplace la rampe viridis — shorts liquidés dominants =
+   * `--up` (rachats forcés), longs = `--down` (ventes forcées), même sémantique que le profil
+   * latéral — et l'alpha d'intensité est modulé par |deseq| (cellule équilibrée pâle, cellule
+   * très déséquilibrée franche).
+   */
+  private dessinerCellulesRects(
+    grid: LiqGrid,
+    largeurs: Map<number, { x0: number; x1: number }>,
+    mode: LiqHeatMode,
+    tokens: Tokens,
+  ): void {
+    const ctx = this.ctx;
+    for (const cell of grid.cells.values()) {
+      const col = largeurs.get(cell.candleTime);
+      if (col === undefined) continue;
+      const yTop = this.toPx({ value: (cell.bucketIdx + 1) * grid.taille }).y;
+      const yBot = this.toPx({ value: cell.bucketIdx * grid.taille }).y;
+      if (yTop === undefined || yBot === undefined || !Number.isFinite(yTop) || !Number.isFinite(yBot)) {
+        continue;
+      }
+      const t = intensiteLog(cell.longUsd + cell.shortUsd, grid.maxUsd);
+      const y0 = Math.round(Math.min(yTop, yBot));
+      const y1 = Math.round(Math.max(yTop, yBot));
+      if (mode === "dominance") {
+        const d = desequilibre(cell.longUsd, cell.shortUsd);
+        const [r, g, b] = d >= 0 ? tokens.upRgb : tokens.downRgb;
+        const alpha = (0.15 + 0.4 * t) * (0.35 + 0.65 * Math.abs(d));
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
+      } else {
+        const [r, g, b] = couleurRampe(t, tokens.fondClair);
+        ctx.fillStyle = `rgba(${r},${g},${b},${(0.15 + 0.4 * t).toFixed(3)})`;
+      }
+      ctx.fillRect(col.x0, y0, Math.max(1, col.x1 - col.x0), Math.max(1, y1 - y0));
+    }
+  }
+
+  /**
+   * Rendu LISSÉ « CoinGlass » (bougies fines < SEUIL_LISSAGE_PX) : le petit canvas détaché
+   * (`offscreen`, 1 cellule = 1 pixel, dimensions colonnes × buckets couverts) est peint via
+   * ImageData — couleur PLEINE du mode courant, intensité encodée dans le canal ALPHA du pixel
+   * (mêmes formules que les rects : 0.15 + 0.40t, × (0.35 + 0.65|deseq|) en dominance) — puis
+   * upscalé en UN drawImage interpolé vers le rect englobant de la grille visible (bornes
+   * converties par convertToPixel, comme les cellules rects). PAS de globalAlpha au drawImage :
+   * l'atténuation est déjà dans les pixels (sinon double atténuation).
+   *
+   * AXE Y INVERSÉ : le prix croît vers le HAUT à l'écran alors que y canvas croît vers le BAS —
+   * le bucket le plus HAUT en prix (bucketMax) occupe donc la ligne 0 (haut du petit canvas) :
+   * ligne = bucketMax − bucketIdx.
+   *
+   * Renvoie `false` si le rendu lissé est impossible (bornes non convertibles, contexte 2D
+   * indisponible…) — l'appelant se replie alors sur les rects.
+   */
+  private dessinerCellulesLissees(
+    grid: LiqGrid,
+    candles: Candle[],
+    from: number,
+    to: number,
+    largeurs: Map<number, { x0: number; x1: number }>,
+    colonneParTime: Map<number, number>,
+    mode: LiqHeatMode,
+    tokens: Tokens,
+  ): boolean {
+    const dims = dimensionsGrilleVisible(grid, from, to);
+    if (dims === null) return false;
+    const { colonnes, bucketMin, bucketMax } = dims;
+    const nbBuckets = bucketMax - bucketMin + 1;
+
+    // Rect cible ENGLOBANT : bords x des colonnes extrêmes (mêmes bords entiers partagés que
+    // les rects) + y des bornes de prix [bucketMin, bucketMax+1] convertis par convertToPixel.
+    const premier = candles[from];
+    const dernier = candles[to - 1];
+    if (premier === undefined || dernier === undefined) return false;
+    const colPremiere = largeurs.get(premier.time);
+    const colDerniere = largeurs.get(dernier.time);
+    if (colPremiere === undefined || colDerniere === undefined) return false;
+    const yHaut = this.toPx({ value: (bucketMax + 1) * grid.taille }).y;
+    const yBas = this.toPx({ value: bucketMin * grid.taille }).y;
+    if (yHaut === undefined || yBas === undefined || !Number.isFinite(yHaut) || !Number.isFinite(yBas)) {
+      return false;
+    }
+
+    // Petit canvas membre, créé paresseusement et RÉUTILISÉ entre frames ; redimensionné
+    // seulement si les dimensions de la grille visible changent (resize = réallocation).
+    if (this.offscreen === null) {
+      this.offscreen = document.createElement("canvas");
+      this.offscreenCtx = this.offscreen.getContext("2d");
+    }
+    const off = this.offscreen;
+    const offCtx = this.offscreenCtx;
+    if (offCtx === null) return false;
+    if (off.width !== colonnes || off.height !== nbBuckets) {
+      off.width = colonnes;
+      off.height = nbBuckets;
+    }
+
+    // 1 cellule = 1 pixel. L'ImageData neuve est zéro-remplie (transparent) : les cellules
+    // vides restent invisibles sans clearRect préalable.
+    const img = offCtx.createImageData(colonnes, nbBuckets);
+    const px = img.data;
+    for (const cell of grid.cells.values()) {
+      const colonne = colonneParTime.get(cell.candleTime);
+      if (colonne === undefined) continue;
+      const ligne = bucketMax - cell.bucketIdx; // axe Y inversé (cf. docstring)
+      const t = intensiteLog(cell.longUsd + cell.shortUsd, grid.maxUsd);
+      let rgb: [number, number, number];
+      let alpha: number;
+      if (mode === "dominance") {
+        const d = desequilibre(cell.longUsd, cell.shortUsd);
+        rgb = d >= 0 ? tokens.upRgb : tokens.downRgb;
+        alpha = (0.15 + 0.4 * t) * (0.35 + 0.65 * Math.abs(d));
+      } else {
+        rgb = couleurRampe(t, tokens.fondClair);
+        alpha = 0.15 + 0.4 * t;
+      }
+      const o = (ligne * colonnes + colonne) * 4;
+      px[o] = rgb[0];
+      px[o + 1] = rgb[1];
+      px[o + 2] = rgb[2];
+      px[o + 3] = Math.round(alpha * 255);
+    }
+    offCtx.putImageData(img, 0, 0);
+
+    // Upscale INTERPOLÉ vers le pane : un seul drawImage par frame. L'état du contexte
+    // (imageSmoothing…) est restauré par le ctx.restore() du clip de l'appelant.
+    const ctx = this.ctx;
+    const y0 = Math.round(Math.min(yHaut, yBas));
+    const y1 = Math.round(Math.max(yHaut, yBas));
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high"; // bicubique : c'est lui qui donne le rendu continu
+    ctx.drawImage(off, colPremiere.x0, y0, Math.max(1, colDerniere.x1 - colPremiere.x0), Math.max(1, y1 - y0));
+    return true;
   }
 
   /**

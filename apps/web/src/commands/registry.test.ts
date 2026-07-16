@@ -26,6 +26,7 @@ import {
   rechercher,
   construireRegistre,
   enregistrerCommandes,
+  commandeNavigation,
   type Commande,
 } from "./registry";
 // Les deux sources connues pour leurs collisions greffent leurs commandes dans le
@@ -94,6 +95,15 @@ describe("parseNavigation — symbole + timeframe + source, ordre libre", () => 
 
   it("timeframe seul (sans symbole) est valide", () => {
     expect(parseNavigation("1d")).toEqual({ timeframe: "1d" });
+  });
+});
+
+describe("commandeNavigation — libellé explicite quand la paire change", () => {
+  it("un changement de paire s'annonce explicitement dans la palette", () => {
+    const cmd = commandeNavigation({ symbol: "DERIVUSDT" });
+    expect(cmd.libelle).toBe("Changer la paire → DERIVUSDT");
+    const tf = commandeNavigation({ timeframe: "4h" });
+    expect(tf.libelle).toBe("Aller à 4h");
   });
 });
 

@@ -1,10 +1,11 @@
 /**
  * Store des TOASTS — notifications éphémères de feedback (Zustand VANILLA, hors render-loop).
  *
- * `pousserToast(texte)` empile un toast (id incrémental), le retire automatiquement après
- * 2500 ms, et borne la pile à 3 (le plus ancien saute au-delà). La logique d'empilement/
- * coupe est isolée dans la pure `empilerToast` (testée sans DOM). Le composant `Toasts`
- * (monté une fois dans App) lit ce store ; un clic appelle `retirerToast(id)`.
+ * `pousserToast(texte, action?)` empile un toast (id incrémental), le retire automatiquement
+ * après 2500 ms (6000 ms si une `action` — ex. « Annuler » — est fournie), et borne la pile
+ * à 3 (le plus ancien saute au-delà). La logique d'empilement/coupe est isolée dans la pure
+ * `empilerToast` (testée sans DOM). Le composant `Toasts` (monté une fois dans App) lit ce
+ * store ; un clic appelle `retirerToast(id)`.
  */
 import { createStore } from "zustand/vanilla";
 
@@ -12,12 +13,16 @@ import { createStore } from "zustand/vanilla";
 export interface Toast {
   id: number;
   texte: string;
+  /** Action optionnelle (ex. « Annuler ») — le toast reste affiché plus longtemps. */
+  action?: { libelle: string; executer: () => void };
 }
 
 /** Nombre maximum de toasts empilés simultanément. */
 const MAX_TOASTS = 3;
 /** Durée d'affichage avant retrait automatique (ms). */
 const DUREE_MS = 2500;
+/** Durée d'affichage d'un toast actionnable — laisse le temps de cliquer (ms). */
+const DUREE_ACTION_MS = 6000;
 
 export interface ToastsState {
   toasts: Toast[];
@@ -46,11 +51,11 @@ export function retirerToast(id: number): void {
 
 /**
  * Pousse un toast de feedback : id incrémental, empilé (max 3, le plus ancien saute),
- * auto-retiré après 2500 ms.
+ * auto-retiré après 2500 ms (6000 ms si `action` fournie — le temps de cliquer).
  */
-export function pousserToast(texte: string): void {
+export function pousserToast(texte: string, action?: Toast["action"]): void {
   const id = prochainId;
   prochainId += 1;
-  toastsStore.setState((s) => ({ toasts: empilerToast(s.toasts, { id, texte }, MAX_TOASTS) }));
-  setTimeout(() => retirerToast(id), DUREE_MS);
+  toastsStore.setState((s) => ({ toasts: empilerToast(s.toasts, { id, texte, action }, MAX_TOASTS) }));
+  setTimeout(() => retirerToast(id), action !== undefined ? DUREE_ACTION_MS : DUREE_MS);
 }

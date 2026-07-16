@@ -24,6 +24,7 @@ import { derivativesUiStore } from "../store/derivatives-ui";
 import { settingsUiStore } from "../store/settings-ui";
 import { exportChartImage, clearAllOverlays } from "../chart/drawing";
 import { QUOTE_ASSETS } from "../data/symbol";
+import { pousserToast } from "../store/toasts";
 
 // ─────────────────────────── Types ───────────────────────────
 
@@ -175,24 +176,45 @@ export function parseNavigation(input: string): NavCommande | null {
   return nav;
 }
 
-/** Applique une intention de navigation au store marché (source → symbole → TF). */
+/**
+ * Applique une intention de navigation au store marché (source → symbole → TF).
+ * Un changement de PAIRE bascule tout le terminal : toast annulable (revue v2 —
+ * « DERIV » tapé dans ⌘K avait changé la paire globale silencieusement).
+ */
 export function appliquerNavigation(nav: NavCommande): void {
   const m = marketStore.getState();
+  const avant = { exchange: m.exchange, symbol: m.symbol, timeframe: m.timeframe };
   if (nav.source !== undefined) m.setExchange(nav.source);
   if (nav.symbol !== undefined) m.setSymbol(nav.symbol);
   if (nav.timeframe !== undefined) m.setTimeframe(nav.timeframe);
+  if (nav.symbol !== undefined && nav.symbol !== avant.symbol) {
+    pousserToast(`Paire changée → ${nav.symbol}`, {
+      libelle: "Annuler",
+      executer: () => {
+        const s = marketStore.getState();
+        s.setExchange(avant.exchange);
+        s.setSymbol(avant.symbol);
+        s.setTimeframe(avant.timeframe);
+      },
+    });
+  }
 }
 
-/** Construit la commande « Aller à … » à partir d'une intention de navigation. */
+/**
+ * Construit la commande de navigation à partir d'une intention. Le libellé annonce
+ * explicitement un changement de PAIRE (« Changer la paire → X ») — les autres
+ * navigations (timeframe/source seuls) restent « Aller à … » (revue v2).
+ */
 export function commandeNavigation(nav: NavCommande): Commande {
   const parts: string[] = [];
   if (nav.symbol !== undefined) parts.push(nav.symbol);
   if (nav.timeframe !== undefined) parts.push(nav.timeframe);
   if (nav.source !== undefined) parts.push(SOURCE_LABEL[nav.source] ?? nav.source);
   const cible = parts.join(" · ");
+  const libelle = nav.symbol !== undefined ? `Changer la paire → ${cible}` : `Aller à ${cible}`;
   return {
     id: "nav",
-    libelle: `Aller à ${cible}`,
+    libelle,
     categorie: "navigation",
     motsCles: parts,
     apercu: "Change le graphe (symbole / timeframe / source)",

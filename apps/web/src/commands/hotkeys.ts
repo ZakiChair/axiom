@@ -19,6 +19,7 @@ import { revenueStore } from "../store/revenue";
 import { liqMarksStore } from "../chart/liquidationMarkers";
 import { themeStore, THEMES } from "../store/theme";
 import { SUPPORTED_TIMEFRAMES } from "../data/adapters";
+import { pousserToast } from "../store/toasts";
 import { paletteStore, CATEGORIE_LABEL, type Commande, type CategorieCommande } from "./registry";
 
 // ─────────────────────────── Store plein écran ───────────────────────────
@@ -123,6 +124,14 @@ export function raccourciTimeframe(tf: string): string | null {
   return i >= 0 && i < 9 ? String(i + 1) : null;
 }
 
+/** Code physique (Digit1/Numpad1…) → timeframe rapide — indépendant de la disposition
+ * clavier : sur AZERTY, e.key des chiffres non shiftés vaut « & é " … » (revue v2). */
+export function timeframePourCode(code: string): Timeframe | null {
+  const m = /^(?:Digit|Numpad)([1-9])$/.exec(code);
+  if (m === null || m[1] === undefined) return null;
+  return TF_CHIFFRES[Number(m[1]) - 1] ?? null;
+}
+
 /** Sources disposant d'un flux de trades (orderflow pertinent uniquement là). */
 const SOURCES_FLUX_TRADES = new Set(["binance", "kraken", "coinbase"]);
 
@@ -181,14 +190,12 @@ export function useRaccourcisGlobaux(): void {
         return;
       }
 
-      // Chiffres 1 à 9 : timeframes rapides (uniquement si supporté par la source).
-      if (e.key >= "1" && e.key <= "9") {
-        const tf = TF_CHIFFRES[Number(e.key) - 1];
-        if (tf !== undefined) {
-          const exchange = marketStore.getState().exchange;
-          const supportes = SUPPORTED_TIMEFRAMES[exchange] ?? [];
-          if (supportes.includes(tf)) marketStore.getState().setTimeframe(tf);
-        }
+      // Timeframes rapides par code PHYSIQUE (AZERTY : e.key vaudrait & é " …).
+      const tfCode = timeframePourCode(e.code);
+      if (tfCode !== null) {
+        const exchange = marketStore.getState().exchange;
+        const supportes = SUPPORTED_TIMEFRAMES[exchange] ?? [];
+        if (supportes.includes(tfCode)) marketStore.getState().setTimeframe(tfCode);
         return;
       }
 
@@ -198,6 +205,8 @@ export function useRaccourcisGlobaux(): void {
           // Orderflow : pertinent uniquement sur les sources à flux de trades.
           if (SOURCES_FLUX_TRADES.has(marketStore.getState().exchange)) {
             orderflowStore.getState().toggle();
+          } else {
+            pousserToast("Orderflow indisponible sur cette source (flux de trades requis)");
           }
           break;
         }
@@ -209,6 +218,8 @@ export function useRaccourcisGlobaux(): void {
           const ex = marketStore.getState().exchange;
           if (ex !== "twelvedata" && ex !== "synthetic") {
             liqMarksStore.getState().basculer();
+          } else {
+            pousserToast("Heatmap liquidations indisponible sur cette source (perp Bybit/OKX requis)");
           }
           break;
         }
@@ -216,6 +227,8 @@ export function useRaccourcisGlobaux(): void {
           // Revenus on-chain : indisponible en marchés traditionnels.
           if (marketStore.getState().exchange !== "twelvedata") {
             revenueStore.getState().toggle();
+          } else {
+            pousserToast("Revenus on-chain indisponibles en marchés traditionnels");
           }
           break;
         }

@@ -22,7 +22,7 @@ vi.mock("../chart/liquidationMarkers", () => ({
 }));
 
 import { construireRegistre, enregistrerCommandes } from "./registry";
-import { raccourciPour, raccourciTimeframe, lignesMnemoniques } from "./hotkeys";
+import { raccourciPour, raccourciTimeframe, lignesMnemoniques, timeframePourCode } from "./hotkeys";
 // Les deux sources externes n'exportent qu'un tableau `Commande[]` — c'est App.tsx qui les
 // greffe dans le registre via `enregistrerCommandes([...])`. Un simple import side-effect ne
 // greffe donc RIEN dans `commandesExternes` (même remarque que registry.test.ts). On reproduit
@@ -64,6 +64,15 @@ describe("raccourciTimeframe", () => {
 
   it("renvoie null pour un timeframe inconnu", () => {
     expect(raccourciTimeframe("42x")).toBeNull();
+  });
+});
+
+describe("timeframePourCode", () => {
+  it("mappe les codes physiques Digit/Numpad vers les timeframes (AZERTY inclus)", () => {
+    expect(timeframePourCode("Digit1")).toBe("1m");
+    expect(timeframePourCode("Numpad4")).toBe("1h");
+    expect(timeframePourCode("Digit9")).toBe("3M");
+    expect(timeframePourCode("KeyA")).toBeNull();
   });
 });
 

@@ -520,8 +520,10 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
     }
     const ordre = allouerNouveauZ(state);
     const entry = WINDOW_REGISTRY.find((w) => w.id === id);
-    const width = entry?.defaultWidth ?? 480;
-    const height = entry?.defaultHeight ?? 640;
+    // Taille par défaut plafonnée au workspace : MAP (1100) ou STBL (860) débordaient
+    // sur laptop (revue v2). Marge 24 px pour garder la poignée accessible.
+    const width = Math.min(entry?.defaultWidth ?? 480, Math.max(MIN_WIDTH, state.workspace.width - 24));
+    const height = Math.min(entry?.defaultHeight ?? 640, Math.max(MIN_HEIGHT, state.workspace.height - 24));
     const openCount = Object.values(state.windows).filter((w) => w.open).length;
     const { x, y } = cascadePosition(openCount, state.workspace, width, height);
     set({
@@ -551,8 +553,13 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   },
 
   toggleWindow: (id) => {
-    const isOpen = get().windows[id]?.open ?? false;
-    if (isOpen) get().closeWindow(id);
+    const w = get().windows[id];
+    // Une fenêtre minimisée se RESTAURE (⌘K la faisait disparaître — revue v2).
+    if (w?.open && w.minimized) {
+      get().restoreWindow(id);
+      return;
+    }
+    if (w?.open) get().closeWindow(id);
     else get().openWindow(id);
   },
 

@@ -35,9 +35,9 @@ import {
   type MethodeCorr,
   type SerieCloture,
 } from "../data/corr";
-import { formatDec, formatHeureMinute } from "../lib/format";
+import { formatDec } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
-import { Chargement, EnTeteFenetre, NoteSource, Vide } from "./ui";
+import { Chargement, EnTeteFenetre, Fraicheur, NoteSource, Vide } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère) ───────────────────────────
 
@@ -462,13 +462,7 @@ export function CorrWindow() {
             >
               ↻ Recalculer
             </button>
-            <span className="tabular-nums">
-              {loading
-                ? "Calcul…"
-                : majTs
-                  ? `maj ${formatHeureMinute(majTs)}`
-                  : "—"}
-            </span>
+            <Fraicheur loading={loading} majTs={majTs} />
           </div>
         </div>
 

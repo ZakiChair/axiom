@@ -55,7 +55,7 @@ import {
   VALEUR_ABSENTE,
 } from "../lib/format";
 import { metaSource } from "../lib/fiabilite";
-import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, SansCle, Vide } from "./ui";
+import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, Fraicheur, SansCle, Vide } from "./ui";
 
 /** Période d'agrégation du long/short ratio et fenêtre des liquidations affichées. */
 const LS_PERIOD = "5min";
@@ -462,7 +462,7 @@ export function DerivativesWindow() {
             <div className="space-y-3">
               <div className="flex items-center justify-between rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-dim">
                 <span>{coinalyzeSymbol}</span>
-                <span>{loading ? "maj…" : majTs ? "maj ~1 min" : "—"}</span>
+                <Fraicheur loading={loading} majTs={majTs} cadence="1 min" />
               </div>
 
               {error && <ErreurBloc>{error}</ErreurBloc>}

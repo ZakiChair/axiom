@@ -36,9 +36,9 @@ import {
   type CboeTicker,
 } from "../data/cboe";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
-import { formatUsd, formatAge } from "../lib/format";
+import { formatUsd, formatAge, formatDec, formatPourcentage } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
-import { Metric, EnTeteFenetre, ErreurBloc, NoteSource } from "./ui";
+import { Metric, EnTeteFenetre, ErreurBloc, NoteSource, Fraicheur } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -647,7 +647,7 @@ export function OptionsWindow() {
           <>
             <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
               <span>Smile IV mark (calls / puts)</span>
-              <span>{loading ? "maj…" : majTs ? `maj ${formatAge(majTs, Date.now())}` : "—"}</span>
+              <Fraicheur loading={loading} majTs={majTs} />
             </div>
 
             {erreur && (
@@ -675,10 +675,10 @@ export function OptionsWindow() {
               <Metric label="Sous-jacent" value={formatUsdExact(underlying)} />
               <Metric
                 label="Put/Call (OI)"
-                value={Number.isFinite(pcRatio) ? pcRatio.toFixed(2) : "—"}
+                value={formatDec(pcRatio, 2)}
                 couleur={Number.isFinite(pcRatio) ? (pcRatio > 1 ? "var(--down)" : "var(--up)") : undefined}
               />
-              <Metric label="DVOL" value={dvol !== null ? `${dvol.toFixed(1)}%` : "—"} />
+              <Metric label="DVOL" value={formatPourcentage(dvol, 1)} />
             </div>
 
             <div className="mt-3">

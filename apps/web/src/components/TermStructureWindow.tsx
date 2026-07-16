@@ -23,9 +23,9 @@ import {
 import { fetchDeribitTermStructure } from "../data/deribit";
 import { daemonPret, detectDaemon, kvGet, kvPut } from "../data/daemon";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
-import { formatAge, formatDateCourte, formatPourcentage } from "../lib/format";
+import { formatDateCourte, formatPct } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
-import { EnTeteFenetre, ErreurBloc, NoteSource } from "./ui";
+import { EnTeteFenetre, ErreurBloc, NoteSource, Fraicheur } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -125,7 +125,7 @@ function basisMoyen(points: PointBasis[]): number {
 function phraseRegime(points: PointBasis[]): string {
   const moy = basisMoyen(points);
   if (!Number.isFinite(moy)) return "données indisponibles";
-  const pct = `${moy >= 0 ? "+" : ""}${formatPourcentage(moy * 100, 1)}/an`;
+  const pct = `${formatPct(moy * 100, 1)}/an`;
   if (moy > SEUIL_REGIME) return `contango (${pct}) — futures au-dessus du spot`;
   if (moy < -SEUIL_REGIME) return `backwardation (${pct}) — futures sous le spot`;
   return `courbe plate (${pct})`;
@@ -344,7 +344,7 @@ export function TermStructureWindow() {
       <div className="flex-1 overflow-y-auto px-4 py-4">
         <div className="mb-3 flex items-center justify-between rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-dim">
           <span>BTC / ETH · basis (future − spot)/spot p.a.</span>
-          <span>{loading ? "maj…" : majTs ? `maj ${formatAge(majTs, Date.now())}` : "—"}</span>
+          <Fraicheur loading={loading} majTs={majTs} />
         </div>
 
         {erreur && (

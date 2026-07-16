@@ -35,7 +35,7 @@ import {
   specParId,
   type PhaseBacktest,
 } from "../store/backtest";
-import { formatDateHeure, formatDec, formatPct, formatPrice } from "../lib/format";
+import { formatDateHeure, formatDec, formatPct, formatPourcentage, formatPrice } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 import { BTN_SECONDAIRE, EnTeteFenetre, ErreurBloc, NoteSource, Vide } from "./ui";
 
@@ -492,16 +492,16 @@ function StatsGrid({ resultat }: { resultat: ResultatBacktest }) {
   return (
     <section className="grid grid-cols-3 gap-1.5">
       <StatCard label="Trades" value={String(s.nbTrades)} />
-      <StatCard label="Taux de réussite" value={`${s.winRatePct.toFixed(1)}%`} />
+      <StatCard label="Taux de réussite" value={formatPourcentage(s.winRatePct, 1)} />
       <StatCard label="Facteur de profit" value={formatPF(s.profitFactor)} />
       <StatCard
         label="PnL net"
         value={`${formatDec(s.pnlTotal)} (${formatPct(s.pnlTotalPct)})`}
         ton={s.pnlTotal >= 0 ? "up" : "down"}
       />
-      <StatCard label="Drawdown max" value={`${s.maxDrawdownPct.toFixed(1)}%`} ton="down" />
+      <StatCard label="Drawdown max" value={formatPourcentage(s.maxDrawdownPct, 1)} ton="down" />
       <StatCard label="Sharpe (annualisé)" value={formatDec(s.sharpe)} />
-      <StatCard label="Exposition" value={`${s.expositionPct.toFixed(0)}%`} />
+      <StatCard label="Exposition" value={formatPourcentage(s.expositionPct, 0)} />
       <StatCard label="Gain moyen" value={formatPct(s.gainMoyenPct)} ton="up" />
       <StatCard label="Perte moyenne" value={formatPct(s.perteMoyennePct)} ton="down" />
     </section>

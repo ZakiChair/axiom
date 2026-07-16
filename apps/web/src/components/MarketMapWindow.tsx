@@ -24,10 +24,10 @@ import { themeStore } from "../store/theme";
 import { marketMapUiStore } from "../store/marketmap-ui";
 import { fetchPairs } from "../data/pairs";
 import { squarify, type Rect, type Tuile } from "../lib/treemap";
-import { formatAge, formatPct, formatUsd } from "../lib/format";
+import { formatPct, formatUsd } from "../lib/format";
 import { lireTokensCanvas } from "../lib/canvasTokens";
 import { navigateTo } from "../lib/navigation";
-import { ErreurBloc, NoteSource, Onglets } from "./ui";
+import { ErreurBloc, Fraicheur, NoteSource, Onglets } from "./ui";
 import {
   fetchFearGreed,
   fetchMarketOverview,
@@ -410,9 +410,8 @@ export function MarketMapWindow() {
             )}
             {overview && (
               <span className={overview.stale ? "text-warn" : "text-text-dim"}>
-                {loading
-                  ? "maj…"
-                  : `maj ${formatAge(overview.fetchedAt, Date.now())}${overview.stale ? " · cache" : ""}`}
+                <Fraicheur loading={loading} majTs={overview.fetchedAt} />
+                {overview.stale ? " · cache" : ""}
               </span>
             )}
           </div>

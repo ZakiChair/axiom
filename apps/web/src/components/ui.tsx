@@ -16,6 +16,7 @@ import {
   type MetaFiabilite,
   type NiveauFiabilite,
 } from "../lib/fiabilite";
+import { formatAge, VALEUR_ABSENTE } from "../lib/format";
 
 /** Classes du bouton secondaire standard (recalculer, exporter, choisir…). */
 export const BTN_SECONDAIRE =
@@ -358,4 +359,29 @@ export function BadgeFiabilite({
       {texte}
     </span>
   );
+}
+
+/** Texte de fraîcheur standard (pur, testé) — forme canonique de la revue v2 (H11). */
+export function texteFraicheur(
+  loading: boolean,
+  majTs: number | null,
+  now: number,
+  cadence?: string,
+): string {
+  if (loading) return "maj…";
+  if (majTs !== null && Number.isFinite(majTs)) return `maj ${formatAge(majTs, now)}`;
+  return cadence !== undefined ? `maj ~${cadence}` : VALEUR_ABSENTE;
+}
+
+/** Ligne de fraîcheur standard — remplace les 4 variantes divergentes des fenêtres. */
+export function Fraicheur({
+  loading,
+  majTs,
+  cadence,
+}: {
+  loading: boolean;
+  majTs?: number | null;
+  cadence?: string;
+}) {
+  return <span>{texteFraicheur(loading, majTs ?? null, Date.now(), cadence)}</span>;
 }

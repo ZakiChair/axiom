@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { fetchFundingMatrix, fundingSpreadApr, type FundingVenue } from "../data/fundingCrossExchange";
-import { EnTeteFenetre, Chargement, Vide, NoteSource, Fraicheur } from "./ui";
+import { EnTeteFenetre, Chargement, Vide, NoteSource, Fraicheur, Metric } from "./ui";
 import { formatPct } from "../lib/format";
 
 const RAFRAICHISSEMENT_MS = 60_000;
@@ -57,20 +57,21 @@ export function FundingMatrixWindow() {
         sousTitre={
           <>
             {symbol} · funding annualisé (APR)
-            {spread !== null && (
-              <>
-                {" · écart "}
-                <span className="font-semibold text-text">
-                  {formatPct(spread, 2, { signe: false })}
-                </span>
-              </>
-            )}
             {" · "}
             <Fraicheur loading={chargement} majTs={majTs} />
           </>
         }
       />
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {spread !== null && (
+          <div className="mb-3">
+            <Metric
+              label="Écart CEX/DEX (APR)"
+              value={formatPct(spread, 2, { signe: false })}
+              couleur={spread >= 10 ? "var(--ui-amber)" : undefined}
+            />
+          </div>
+        )}
         {chargement && venues === null ? (
           <Chargement />
         ) : venues && venues.length > 0 ? (
@@ -83,9 +84,17 @@ export function FundingMatrixWindow() {
               </tr>
             </thead>
             <tbody>
-              {venues.map((v) => (
+              {venues.map((v, i) => (
                 <tr key={v.exchange} className="border-b border-border/50">
-                  <td className="py-2 text-text">{v.label}</td>
+                  <td className="py-2 text-text">
+                    {venues.length >= 2 && i === 0 && (
+                      <span aria-hidden className="mr-1 text-up" title="APR le plus élevé">●</span>
+                    )}
+                    {venues.length >= 2 && i === venues.length - 1 && (
+                      <span aria-hidden className="mr-1 text-down" title="APR le plus bas">●</span>
+                    )}
+                    {v.label}
+                  </td>
                   <td className={`py-2 text-right tabular-nums ${couleurSigne(v.ratePct)}`}>
                     {formatPct(v.ratePct, 4)} <span className="text-text-dim">/ {v.intervalHours}h</span>
                   </td>
@@ -102,6 +111,8 @@ export function FundingMatrixWindow() {
         <div className="mt-3">
           <NoteSource>
             APR = taux × (24 / intervalle) × 365. Binance/Bybit/OKX règlent /8 h, Hyperliquid /1 h.
+            Écart = APR max − APR min entre venues ; ≥ 10 points d'APR = tension de financement
+            inter-venues (arbitrage/positionnement asymétrique). ● vert = APR max, ● rouge = APR min.
           </NoteSource>
         </div>
       </div>

@@ -51,11 +51,15 @@ import {
   formatDelai,
   formatFunding,
   formatHeure,
+  formatPct,
   formatUsd,
   VALEUR_ABSENTE,
 } from "../lib/format";
 import { metaSource } from "../lib/fiabilite";
-import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, Fraicheur, Metric, SansCle, Vide } from "./ui";
+import { annualiserFunding } from "../data/fundingCrossExchange";
+import { histFunding } from "../data/referentiels";
+import { referentiel, type Referentiel } from "../lib/referentiel";
+import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, Fraicheur, Metric, RefBadge, SansCle, Vide } from "./ui";
 
 /** Période d'agrégation du long/short ratio et fenêtre des liquidations affichées. */
 const LS_PERIOD = "5min";
@@ -216,6 +220,21 @@ export function DerivativesWindow() {
   const [fundingSpark, setFundingSpark] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Référentiel du funding : historique ~90 j (cache 1 h), situe le taux courant.
+  const [refFunding, setRefFunding] = useState<Referentiel | null>(null);
+  useEffect(() => {
+    let vivant = true;
+    setRefFunding(null);
+    const rate = funding?.rate;
+    if (rate === undefined || !Number.isFinite(rate)) return undefined;
+    void histFunding(symbol).then((serie) => {
+      if (!vivant || serie === null) return;
+      setRefFunding(referentiel(serie, rate, Date.now()));
+    });
+    return () => {
+      vivant = false;
+    };
+  }, [symbol, funding?.rate]);
   // Horodatage du dernier cycle de rafraîchissement Coinalyze : « — » tant qu'aucune
   // donnée n'est arrivée (cohérent avec Options/TermStructure), « maj ~1 min » ensuite.
   const [majTs, setMajTs] = useState<number | null>(null);
@@ -450,6 +469,12 @@ export function DerivativesWindow() {
                   }
                   labelExtra={<BadgeFiabilite meta={metaSource("coinalyze:funding")} />}
                 />
+                {funding !== undefined && Number.isFinite(funding.rate) && (
+                  <div className="flex items-center gap-2 px-3 text-[11px] tabular-nums text-text-dim">
+                    <span>APR {formatPct(annualiserFunding(funding.rate, 8), 2)}</span>
+                    <RefBadge referentiel={refFunding} sens="hausse-chaud" />
+                  </div>
+                )}
                 {predicted && Number.isFinite(predicted.rate) && (
                   <div className="rounded-md border border-border bg-bg px-3 py-2">
                     <div className="flex items-baseline justify-between gap-3">

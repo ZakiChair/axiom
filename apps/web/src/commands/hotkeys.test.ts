@@ -1,9 +1,11 @@
 /**
  * Tests des helpers PURS de raccourcis in-situ (`raccourciPour`, `raccourciTimeframe`)
- * dérivés de RACCOURCIS_AIDE. hotkeys.ts tire des modules à effet de bord non évaluables
- * hors navigateur (store/theme pose [data-theme] ; registry → chart/drawing charge
- * klinecharts ; chart/liquidationMarkers idem). On les neutralise via vi.mock — même
- * approche que registry.test.ts — pour importer le module en environnement Node.
+ * dérivés de RACCOURCIS_AIDE, et de `lignesMnemoniques` (aide dérivée du registre réel).
+ * hotkeys.ts (et registry.ts, importé ici pour construireRegistre) tirent des modules à
+ * effet de bord non évaluables hors navigateur (store/theme pose [data-theme] ;
+ * chart/drawing charge klinecharts ; chart/liquidationMarkers idem). On les neutralise
+ * via vi.mock — même approche que registry.test.ts — pour importer les modules réels en
+ * environnement Node.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -11,14 +13,18 @@ vi.mock("../store/theme", () => ({
   THEMES: ["dark", "bloomberg", "matrix", "cute", "aurora"] as const,
   themeStore: { getState: () => ({ theme: "dark", setTheme: () => {} }) },
 }));
-vi.mock("./registry", () => ({
-  paletteStore: { getState: () => ({ ouvert: false, ouvrir: () => {} }) },
+vi.mock("../chart/drawing", () => ({
+  exportChartImage: () => {},
+  clearAllOverlays: () => {},
 }));
 vi.mock("../chart/liquidationMarkers", () => ({
   liqMarksStore: { getState: () => ({ basculer: () => {} }) },
 }));
 
-import { raccourciPour, raccourciTimeframe } from "./hotkeys";
+import { construireRegistre } from "./registry";
+import { raccourciPour, raccourciTimeframe, lignesMnemoniques } from "./hotkeys";
+import "../store/derivatives-chart";
+import "./windowPanels";
 
 describe("raccourciPour", () => {
   it("mappe les libellés de boutons vers leur touche (dérivé de RACCOURCIS_AIDE)", () => {
@@ -51,5 +57,15 @@ describe("raccourciTimeframe", () => {
 
   it("renvoie null pour un timeframe inconnu", () => {
     expect(raccourciTimeframe("42x")).toBeNull();
+  });
+});
+
+describe("lignesMnemoniques", () => {
+  it("chaque mnémonique du registre apparaît dans l'aide dérivée (l'aide ne peut plus se périmer)", () => {
+    const registre = construireRegistre();
+    const texte = lignesMnemoniques(registre).map((l) => l.description).join(" ");
+    for (const c of registre) {
+      if (c.mnemonique !== undefined) expect(texte).toContain(c.mnemonique);
+    }
   });
 });

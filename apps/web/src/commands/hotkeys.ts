@@ -19,7 +19,7 @@ import { revenueStore } from "../store/revenue";
 import { liqMarksStore } from "../chart/liquidationMarkers";
 import { themeStore, THEMES } from "../store/theme";
 import { SUPPORTED_TIMEFRAMES } from "../data/adapters";
-import { paletteStore } from "./registry";
+import { paletteStore, CATEGORIE_LABEL, type Commande, type CategorieCommande } from "./registry";
 
 // ─────────────────────────── Store plein écran ───────────────────────────
 
@@ -48,12 +48,6 @@ export const fullscreenStore = createStore<FullscreenState>((set, get) => ({
 export const RACCOURCIS_AIDE: { touche: string; description: string }[] = [
   { touche: "⌘K / Ctrl+K", description: "Ouvrir la palette de commandes" },
   { touche: "?", description: "Afficher cette aide" },
-  {
-    touche: "⌘K puis mnémo",
-    description:
-      "Fonctions (panneaux) : DES ECO NEWS CORR CHAIN MAP PORT NOTE EQS TERM OMON DOM TAPE BT REPLAY RATE COT SEAG VOL FUND BRIEF GLOBE · OI/FRATE MARKS (chart) · GRID1 GRID2 GRID2V GRID4 (disposition) · TICKER (bandeau news) · PLAY PLAY-SCALP PLAY-FADE PLAY-CVD PLAY-FOMC PLAY-RISK PLAY-OPT PLAY-LIQ (playbooks) · ONBOARD (rejouer l'accueil)",
-  },
-  { touche: "⌘K → PLAY*", description: "Playbooks 1-clic (scalp, funding, CVD S/P, FOMC, risk-off, options)" },
   { touche: "⌘K → ONBOARD", description: "Rejouer le parcours d'onboarding (3 étapes)" },
   { touche: "1 – 9", description: "Timeframes rapides (1m, 5m, 15m, 1h, 4h, 1d, 1w, 1M, 3M)" },
   { touche: "/", description: "Focus sur la recherche de paires" },
@@ -65,6 +59,26 @@ export const RACCOURCIS_AIDE: { touche: string; description: string }[] = [
   { touche: "T", description: "Thème suivant" },
   { touche: "Échap", description: "Quitter le plein écran / fermer / passer l'onboarding" },
 ];
+
+/**
+ * Lignes d'aide des mnémoniques, DÉRIVÉES du registre réel — remplace la chaîne
+ * maintenue à la main (périmée dès le lot suivant : LIQ, STBL, WTILE… manquaient).
+ */
+export function lignesMnemoniques(
+  registre: readonly Commande[],
+): { touche: string; description: string }[] {
+  const parCategorie = new Map<string, string[]>();
+  for (const c of registre) {
+    if (c.mnemonique === undefined) continue;
+    const liste = parCategorie.get(c.categorie) ?? [];
+    liste.push(c.mnemonique);
+    parCategorie.set(c.categorie, liste);
+  }
+  return [...parCategorie.entries()].map(([categorie, mnemos]) => ({
+    touche: "⌘K",
+    description: `${CATEGORIE_LABEL[categorie as CategorieCommande] ?? categorie} : ${mnemos.join(" ")}`,
+  }));
+}
 
 // ─────────────────────────── Hook ───────────────────────────
 

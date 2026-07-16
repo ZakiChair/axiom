@@ -18,10 +18,10 @@ import {
   parseNavigation,
   commandeNavigation,
   rechercher,
+  CATEGORIE_LABEL,
   type Commande,
-  type CategorieCommande,
 } from "../commands/registry";
-import { RACCOURCIS_AIDE } from "../commands/hotkeys";
+import { RACCOURCIS_AIDE, lignesMnemoniques } from "../commands/hotkeys";
 
 /** Entrée d'historique persistée (id de commande + texte de saisie pour rejouer la navigation). */
 interface EntreeHistorique {
@@ -40,16 +40,6 @@ interface Item {
 const CLE_HISTO = "axiom:paletteHistory:v1";
 /** Nombre maximum d'entrées d'historique conservées. */
 const MAX_HISTO = 20;
-
-/** Libellés courts de catégorie (colonne de droite). */
-const CATEGORIE_LABEL: Record<CategorieCommande, string> = {
-  navigation: "nav",
-  timeframe: "tf",
-  indicateur: "ind",
-  theme: "thème",
-  panneau: "panneau",
-  action: "action",
-};
 
 /** Garde de type d'une entrée d'historique restaurée. */
 function estEntree(x: unknown): x is EntreeHistorique {
@@ -208,9 +198,9 @@ export function CommandPalette() {
               Aide — raccourcis clavier
             </div>
             <div className="max-h-[60vh] overflow-y-auto p-2">
-              {RACCOURCIS_AIDE.map((r) => (
+              {[...RACCOURCIS_AIDE, ...lignesMnemoniques(registre)].map((r) => (
                 <div
-                  key={r.touche}
+                  key={r.description}
                   className="flex items-center gap-3 px-2 py-1.5 text-sm"
                 >
                   <kbd className="w-32 shrink-0 rounded border border-border bg-bg px-2 py-0.5 text-center text-[11px] text-accent">

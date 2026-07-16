@@ -52,6 +52,7 @@ export function FundingMatrixWindow() {
   return (
     <div className="flex h-full flex-col">
       <EnTeteFenetre
+        mnemo="FUNDX"
         titre="Funding cross-exchange"
         sousTitre={
           <>

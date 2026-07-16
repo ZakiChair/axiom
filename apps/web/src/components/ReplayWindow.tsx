@@ -60,7 +60,8 @@ export function ReplayWindow() {
     <>
       {/* Pas d'actions : la croix de fermeture est fournie par le chrome FloatingWindow. */}
       <EnTeteFenetre
-        titre="REPLAY · Replay de marché"
+        mnemo="REPLAY"
+        titre="Replay de marché"
         sousTitre="Dumps aggTrades officiels (data.binance.vision) · Binance spot"
       />
 

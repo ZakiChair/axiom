@@ -302,7 +302,7 @@ export function FundWindow() {
 
   return (
     <>
-      <EnTeteFenetre titre="FUND · Fiche société" sousTitre="SEC EDGAR · Finnhub" />
+      <EnTeteFenetre mnemo="FUND" titre="Fiche société" sousTitre="SEC EDGAR · Finnhub" />
 
       {/* Recherche — annuaire SEC EDGAR, aucune clé requise. */}
       <div className="relative border-b border-border px-4 py-2">

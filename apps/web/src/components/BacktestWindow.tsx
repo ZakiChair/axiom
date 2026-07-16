@@ -567,7 +567,8 @@ export function BacktestWindow() {
   return (
     <>
       <EnTeteFenetre
-        titre="BT · Backtest"
+        mnemo="BT"
+        titre="Backtest"
         sousTitre="Bougies clôturées · exécution open+1 · pas d'intrabar"
       />
 

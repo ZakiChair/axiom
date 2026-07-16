@@ -239,7 +239,8 @@ export function NewsWindow() {
     <>
       {/* En-tête standard (croix de fermeture fournie par le chrome FloatingWindow). */}
       <EnTeteFenetre
-        titre="NEWS · Actualités"
+        mnemo="NEWS"
+        titre="Actualités"
         sousTitre={
           derniereMaj === null
             ? "Chargement…"

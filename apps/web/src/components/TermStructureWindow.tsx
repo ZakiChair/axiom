@@ -339,7 +339,7 @@ export function TermStructureWindow() {
 
   return (
     <>
-      <EnTeteFenetre titre="Structure par terme" sousTitre="Basis annualisé · Binance COIN-M + Deribit" />
+      <EnTeteFenetre mnemo="TERM" titre="Structure par terme" sousTitre="Basis annualisé · Binance COIN-M + Deribit" />
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         <div className="mb-3 flex items-center justify-between rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-dim">

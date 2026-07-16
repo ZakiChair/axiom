@@ -265,7 +265,8 @@ export function SeasonalityWindow() {
   return (
     <>
       <EnTeteFenetre
-        titre="SEAG · Saisonnalité"
+        mnemo="SEAG"
+        titre="Saisonnalité"
         sousTitre={`${symbol} · UTC · rendements simples`}
         actions={
           <div className="max-w-[260px] truncate text-right text-[11px] text-text-dim">

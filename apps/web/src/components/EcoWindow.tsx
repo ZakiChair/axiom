@@ -159,7 +159,8 @@ export function EcoWindow() {
     // hors écran + inerte (pointer-events-none). z-40 : au-dessus du graphe, sous la palette.
     <>
       <EnTeteFenetre
-        titre="ECO · Calendrier"
+        mnemo="ECO"
+        titre="Calendrier"
         sousTitre={
           <>
             ForexFactory · FRED · FOMC

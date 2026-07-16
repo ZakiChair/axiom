@@ -372,6 +372,7 @@ export function DerivativesWindow() {
     // et le slide-over Réglages (z-50), au-dessus du graphe.
     <>
       <EnTeteFenetre
+        mnemo="DES"
         titre="Produits dérivés"
         sousTitre={isBinance ? `${coinalyzeSymbol} · Coinalyze` : "Coinalyze · Binance uniquement"}
         actions={

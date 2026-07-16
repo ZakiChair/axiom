@@ -347,6 +347,7 @@ export function OnchainWindow() {
   return (
     <>
       <EnTeteFenetre
+        mnemo="CHAIN"
         titre="On-chain"
         sousTitre={
           <>

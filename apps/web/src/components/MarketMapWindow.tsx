@@ -385,6 +385,7 @@ export function MarketMapWindow() {
     <div className="flex h-full min-h-0 flex-col">
       {/* Pas d'actions à droite : croix de fermeture fournie par le chrome FloatingWindow */}
       <EnTeteFenetre
+        mnemo="MAP"
         titre="Vue marché"
         sousTitre={
           <span className="flex flex-wrap items-center gap-x-4 gap-y-1">

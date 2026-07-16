@@ -511,6 +511,7 @@ export function DomWindow() {
     <>
       {/* En-tête standard ; la croix de fermeture est fournie par le chrome FloatingWindow. */}
       <EnTeteFenetre
+        mnemo="DOM"
         titre="Carnet d'ordres"
         sousTitre={isBinance ? `${symbol} · Binance` : "Binance uniquement"}
       />

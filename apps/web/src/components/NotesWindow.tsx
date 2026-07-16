@@ -116,7 +116,7 @@ export function NotesWindow() {
   return (
     <>
       {/* Croix de fermeture fournie par le chrome FloatingWindow — pas d'action ici. */}
-      <EnTeteFenetre titre="Notes / journal" sousTitre="Annotations ancrées au marché" />
+      <EnTeteFenetre mnemo="NOTE" titre="Notes / journal" sousTitre="Annotations ancrées au marché" />
 
       {/* Création rapide */}
       <section className="shrink-0 border-b border-border px-4 py-3">

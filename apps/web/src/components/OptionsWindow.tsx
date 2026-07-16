@@ -513,7 +513,7 @@ export function OptionsWindow() {
 
   return (
     <>
-      <EnTeteFenetre titre="Options" sousTitre="Smile IV · max pain · GEX/DEX" />
+      <EnTeteFenetre mnemo="OMON" titre="Options" sousTitre="Smile IV · max pain · GEX/DEX" />
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {/* Bascule de vue : Smile ↔ GEX/DEX */}

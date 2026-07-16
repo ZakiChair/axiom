@@ -415,7 +415,8 @@ export function CorrWindow() {
     <>
       {/* En-tête standard ; croix de fermeture fournie par le chrome FloatingWindow. */}
       <EnTeteFenetre
-        titre="CORR · Corrélations"
+        mnemo="CORR"
+        titre="Corrélations"
         sousTitre={`Log-rendements journaliers · ${methode === "pearson" ? "Pearson" : "Spearman"} · ${fenetreJours} j`}
       />
 

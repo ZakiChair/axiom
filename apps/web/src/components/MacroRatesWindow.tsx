@@ -585,7 +585,8 @@ export function MacroRatesWindow() {
   return (
     <>
       <EnTeteFenetre
-        titre="RATE · Taux & Réserves"
+        mnemo="RATE"
+        titre="Taux & Réserves"
         sousTitre="Trésor US · ECB · MOF · BoC · RBA · BIS · IMF"
         actions={
           <button

@@ -266,7 +266,7 @@ export function PortfolioWindow() {
       />
 
       {/* En-tête standard, sans croix de fermeture : celle-ci est fournie par le chrome FloatingWindow */}
-      <EnTeteFenetre titre="Portefeuille" sousTitre="Positions manuelles · PnL live" />
+      <EnTeteFenetre mnemo="PORT" titre="Portefeuille" sousTitre="Positions manuelles · PnL live" />
 
       {/* Barre import / export CSV */}
       <div className="flex shrink-0 items-center justify-end gap-1.5 border-b border-border px-4 py-1.5">

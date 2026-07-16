@@ -721,7 +721,7 @@ export function StablecoinsWindow() {
 
   return (
     <>
-      <EnTeteFenetre titre="Stablecoins" sousTitre="Supply, impression, dominance, pegs · DefiLlama" />
+      <EnTeteFenetre mnemo="STBL" titre="Stablecoins" sousTitre="Supply, impression, dominance, pegs · DefiLlama" />
       <Onglets
         options={ONGLETS}
         actif={onglet}

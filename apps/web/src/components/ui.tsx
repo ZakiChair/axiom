@@ -160,15 +160,26 @@ export function EnTeteFenetre({
   titre,
   sousTitre,
   actions,
+  mnemo,
 }: {
   titre: string;
   sousTitre?: ReactNode;
   actions?: ReactNode;
+  /** Mnémonique ⌘K de la fenêtre — affiché « MNEMO · Titre » (convention terminal, revue v2). */
+  mnemo?: string;
 }) {
   return (
     <header className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3">
       <div className="min-w-0">
-        <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">{titre}</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-text">
+          {mnemo !== undefined && (
+            <>
+              <span className="text-accent">{mnemo}</span>
+              <span className="text-text-dim"> · </span>
+            </>
+          )}
+          {titre}
+        </h2>
         {sousTitre !== undefined && <p className="mt-0.5 text-[11px] text-text-dim">{sousTitre}</p>}
       </div>
       {actions !== undefined && <div className="flex shrink-0 items-center gap-2">{actions}</div>}

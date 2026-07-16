@@ -542,6 +542,7 @@ function ContenuLive() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <EnTeteFenetre
+        mnemo="LIQ"
         titre="Liquidations"
         sousTitre={`${symbol} · ${okxCouvre(symbol) ? "perp Bybit + OKX (live)" : "perp Bybit (live)"}`}
       />
@@ -832,6 +833,7 @@ function ContenuHistorique() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <EnTeteFenetre
+        mnemo="LIQ"
         titre="Liquidations"
         sousTitre={`${symbol} · historique daemon (rétention 30 j)`}
         actions={<SelecteurFenetreHisto fenetre={fenetre} onChange={setFenetre} />}

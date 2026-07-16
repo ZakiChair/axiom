@@ -36,7 +36,9 @@ import {
   etatPeg,
   impressionNette,
   repartitionChaines,
+  resumePegs,
   serieImpressionQuotidienne,
+  SUPPLY_MIN_USD,
   tronquerSerie,
   type EtatPeg,
   type PartDominance,
@@ -183,10 +185,12 @@ function VueEnsemble({
   emetteurs,
   historique,
   onSelect,
+  onVoirPegs,
 }: {
   emetteurs: EmetteurStablecoin[];
   historique: PointSupply[];
   onSelect: (id: string) => void;
+  onVoirPegs: () => void;
 }) {
   const totalUsd = emetteurs.reduce((s, e) => s + e.mcapUsd, 0);
   const dominance = calculerDominance(emetteurs, 12);
@@ -197,6 +201,24 @@ function VueEnsemble({
 
   return (
     <div className="flex flex-col gap-3">
+      {(() => {
+        const pegs = resumePegs(emetteurs);
+        if (pegs.alertes.length === 0) {
+          return <p className="text-[11px] text-text-dim">Pegs : {pegs.stables} stables</p>;
+        }
+        return (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {pegs.alertes.map((a) => (
+              <button key={a.symbole} type="button" onClick={onVoirPegs} title="Voir l'onglet Pegs">
+                <Badge ton={a.etat === "depeg" ? "down" : "warn"}>
+                  {a.etat} {a.symbole} {a.bps >= 0 ? "+" : "−"}
+                  {Math.abs(Math.round(a.bps))} bps
+                </Badge>
+              </button>
+            ))}
+          </div>
+        );
+      })()}
       <div className="grid grid-cols-2 gap-2">
         <Metric label="Supply totale" value={formatUsd(totalUsd)} />
         <Metric label="Dominance USDT" value={formatPourcentage(partUsdt)} />
@@ -512,7 +534,6 @@ function VuePegs({
   // Pegs USD avec prix, triés par écart absolu décroissant (les problèmes d'abord).
   // Filtre de matérialité ≥ $10M : sans lui, la liste est noyée de tokens morts
   // (supply de quelques $, prix ~0, −10000 bps) sans aucun intérêt analytique.
-  const SUPPLY_MIN_USD = 10_000_000;
   const usd = emetteurs
     .filter((e) => e.mcapUsd >= SUPPLY_MIN_USD)
     .map((e) => ({ e, bps: ecartPegBps(e) }))
@@ -739,7 +760,15 @@ export function StablecoinsWindow() {
           ) : (
             <>
               {onglet === "vue" && (
-                <VueEnsemble emetteurs={emetteurs} historique={historique} onSelect={setEmetteurSelId} />
+                <VueEnsemble
+                  emetteurs={emetteurs}
+                  historique={historique}
+                  onSelect={setEmetteurSelId}
+                  onVoirPegs={() => {
+                    setEmetteurSelId(null);
+                    setOnglet("pegs");
+                  }}
+                />
               )}
               {onglet === "impression" && (
                 <VueImpression emetteurs={emetteurs} historique={historique} />

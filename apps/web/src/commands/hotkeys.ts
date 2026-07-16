@@ -71,6 +71,44 @@ export const RACCOURCIS_AIDE: { touche: string; description: string }[] = [
 /** Timeframes associés aux chiffres 1 à 9 (dans l'ordre). */
 const TF_CHIFFRES: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1d", "1w", "1M", "3M"];
 
+// ─────────────────────── Raccourcis in-situ (dérivés de RACCOURCIS_AIDE) ───────────────────────
+
+/**
+ * Associe le libellé COURT d'un bouton Toolbar au fragment identifiant sa ligne dans
+ * `RACCOURCIS_AIDE` (source UNIQUE des touches). On ne duplique jamais la touche : elle
+ * est relue depuis la table d'aide, donc un changement de raccourci s'y propage seul.
+ */
+const ASSOCIATIONS_RACCOURCI: readonly { libelle: string; fragment: string }[] = [
+  { libelle: "Orderflow", fragment: "Orderflow" },
+  { libelle: "Profil Vol", fragment: "Profil de volume" },
+  { libelle: "Revenus", fragment: "Revenus on-chain" },
+  { libelle: "Liq", fragment: "Heatmap liquidations" },
+  { libelle: "Plein écran", fragment: "Plein écran" },
+  { libelle: "Thème", fragment: "Thème suivant" },
+];
+
+/**
+ * Touche associée à un libellé de bouton (ex. "Orderflow" → "O"), `null` si aucune.
+ * PURE : dérivée de `RACCOURCIS_AIDE` (source unique), testée sans DOM. La Toolbar
+ * s'en sert pour enrichir les `title` des boutons d'un suffixe « — <touche> ».
+ */
+export function raccourciPour(libelleCourt: string): string | null {
+  const assoc = ASSOCIATIONS_RACCOURCI.find((a) => a.libelle === libelleCourt);
+  if (!assoc) return null;
+  const ligne = RACCOURCIS_AIDE.find((r) => r.description.includes(assoc.fragment));
+  return ligne ? ligne.touche : null;
+}
+
+/**
+ * Chiffre (1-9) associé à un timeframe, `null` s'il n'en a pas OU si l'aide ne documente
+ * pas les raccourcis chiffrés. PURE : dérivée de `TF_CHIFFRES` + `RACCOURCIS_AIDE`.
+ */
+export function raccourciTimeframe(tf: string): string | null {
+  if (!RACCOURCIS_AIDE.some((r) => r.description.startsWith("Timeframes rapides"))) return null;
+  const i = TF_CHIFFRES.indexOf(tf as Timeframe);
+  return i >= 0 && i < 9 ? String(i + 1) : null;
+}
+
 /** Sources disposant d'un flux de trades (orderflow pertinent uniquement là). */
 const SOURCES_FLUX_TRADES = new Set(["binance", "kraken", "coinbase"]);
 

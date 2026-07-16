@@ -1,10 +1,12 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { afterEach, describe, expect, it, beforeEach } from "vitest";
 import {
   cascadePosition,
   clampPosition,
   clampSize,
   detectSnapZone,
+  estNouvelle,
   grilleMosaique,
+  marquerVue,
   normaliserOrdreZ,
   snapGeometry,
   windowManagerStore,
@@ -260,6 +262,48 @@ describe("menuWindows (menu Fonctions dérivé du registre)", () => {
     expect(parId.get("globe")).toBe("Globe (géopolitique, chokepoints & trafic aérien)");
     // eco n'a pas de menuLabel → title.
     expect(parId.get("eco")).toBe("Calendrier économique");
+  });
+
+  it("expose le drapeau `nouveau` (liquidations/globe/stablecoins marquées, eco non)", () => {
+    const parId = new Map(menuWindows().map((w) => [w.id, w.nouveau]));
+    expect(parId.get("liquidations")).toBe(true);
+    expect(parId.get("globe")).toBe(true);
+    expect(parId.get("stablecoins")).toBe(true);
+    expect(parId.get("eco")).toBe(false);
+  });
+});
+
+describe("estNouvelle / marquerVue (badge « nouveau »)", () => {
+  // localStorage absent en Node : on installe un mock mémoire (même pattern que persist.test).
+  beforeEach(() => {
+    const data = new Map<string, string>();
+    (globalThis as { localStorage?: Storage }).localStorage = {
+      getItem: (k) => data.get(k) ?? null,
+      setItem: (k, v) => void data.set(k, v),
+      removeItem: (k) => void data.delete(k),
+      clear: () => data.clear(),
+      key: (i) => Array.from(data.keys())[i] ?? null,
+      get length() {
+        return data.size;
+      },
+    };
+  });
+  afterEach(() => {
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
+  it("une fenêtre jamais ouverte est nouvelle ; marquerVue la rend non nouvelle", () => {
+    expect(estNouvelle("globe")).toBe(true);
+    marquerVue("globe");
+    expect(estNouvelle("globe")).toBe(false);
+    // Indépendant par id : marquer globe ne touche pas stablecoins.
+    expect(estNouvelle("stablecoins")).toBe(true);
+  });
+
+  it("openWindow marque la fenêtre comme vue (le badge disparaît après 1ère ouverture)", () => {
+    expect(estNouvelle("liquidations")).toBe(true);
+    windowManagerStore.getState().openWindow("liquidations");
+    expect(estNouvelle("liquidations")).toBe(false);
   });
 });
 

@@ -24,7 +24,8 @@ export const GROUP_PALETTE: readonly string[] = COMPARE_PALETTE;
 
 /** Définition d'une fenêtre du registre. Le libellé du menu Fonctions vaut `title`
  *  sauf si `menuLabel` est fourni ; `menuHidden` exclut la fenêtre du menu (ex.
- *  `derivatives` possède son bouton DES dédié dans la Toolbar). */
+ *  `derivatives` possède son bouton DES dédié dans la Toolbar). `nouveau` marque une
+ *  fenêtre récente : badge « nouveau » dans le menu Fonctions jusqu'à sa 1ère ouverture. */
 export interface DefinitionFenetre {
   readonly id: string;
   readonly title: string;
@@ -33,6 +34,7 @@ export interface DefinitionFenetre {
   readonly defaultHeight: number;
   readonly menuLabel?: string;
   readonly menuHidden?: boolean;
+  readonly nouveau?: boolean;
 }
 
 /** Registre statique des 22 fenêtres Bloomberg — SOURCE UNIQUE : titre/mnémonique/
@@ -44,7 +46,7 @@ export interface DefinitionFenetre {
 export const WINDOW_REGISTRY = [
   { id: "derivatives", title: "Produits dérivés", mnemonic: "DES", defaultWidth: 420, defaultHeight: 640, menuHidden: true },
   { id: "fundingMatrix", title: "Funding cross-exchange", mnemonic: "FUNDX", defaultWidth: 460, defaultHeight: 420 },
-  { id: "liquidations", title: "Liquidations", mnemonic: "LIQ", defaultWidth: 460, defaultHeight: 520 },
+  { id: "liquidations", title: "Liquidations", mnemonic: "LIQ", defaultWidth: 460, defaultHeight: 520, nouveau: true },
   { id: "eco", title: "Calendrier économique", mnemonic: "ECO", defaultWidth: 440, defaultHeight: 640 },
   { id: "news", title: "Actualités crypto", mnemonic: "NEWS", defaultWidth: 440, defaultHeight: 640 },
   { id: "corr", title: "Corrélations", mnemonic: "CORR", defaultWidth: 480, defaultHeight: 640 },
@@ -64,8 +66,8 @@ export const WINDOW_REGISTRY = [
   { id: "vol", title: "Volatilité (cône RV, VRP)", mnemonic: "VOL", defaultWidth: 760, defaultHeight: 560 },
   { id: "fund", title: "Fiche société (FUND)", mnemonic: "FUND", defaultWidth: 480, defaultHeight: 640 },
   { id: "brief", title: "Point marché", mnemonic: "BRIEF", defaultWidth: 480, defaultHeight: 720, menuLabel: "Point marché (snapshot)" },
-  { id: "globe", title: "Globe (chokepoints & trafic aérien)", mnemonic: "GLOBE", defaultWidth: 720, defaultHeight: 720, menuLabel: "Globe (géopolitique, chokepoints & trafic aérien)" },
-  { id: "stablecoins", title: "Stablecoins (supply, dominance, pegs)", mnemonic: "STBL", defaultWidth: 860, defaultHeight: 640 },
+  { id: "globe", title: "Globe (chokepoints & trafic aérien)", mnemonic: "GLOBE", defaultWidth: 720, defaultHeight: 720, menuLabel: "Globe (géopolitique, chokepoints & trafic aérien)", nouveau: true },
+  { id: "stablecoins", title: "Stablecoins (supply, dominance, pegs)", mnemonic: "STBL", defaultWidth: 860, defaultHeight: 640, nouveau: true },
 ] as const satisfies readonly DefinitionFenetre[];
 
 /** Union des ids de fenêtre — DÉRIVÉE du registre (source unique). Sert à typer la
@@ -73,12 +75,41 @@ export const WINDOW_REGISTRY = [
 export type WindowId = (typeof WINDOW_REGISTRY)[number]["id"];
 
 /** Fenêtres exposées dans le menu « Fonctions » (registre moins les `menuHidden`),
- *  avec le libellé d'affichage résolu (`menuLabel ?? title`). PURE (sans DOM) : la
- *  Toolbar y greffe l'action d'ouverture. Testée dans windowManager.test.ts. */
-export function menuWindows(): { id: WindowId; mnemonique: string; libelle: string }[] {
+ *  avec le libellé d'affichage résolu (`menuLabel ?? title`) et le drapeau `nouveau`
+ *  (badge de découvrabilité). PURE (sans DOM) : la Toolbar y greffe l'action
+ *  d'ouverture. Testée dans windowManager.test.ts. */
+export function menuWindows(): { id: WindowId; mnemonique: string; libelle: string; nouveau: boolean }[] {
   return (WINDOW_REGISTRY as readonly DefinitionFenetre[])
     .filter((w) => !w.menuHidden)
-    .map((w) => ({ id: w.id as WindowId, mnemonique: w.mnemonic, libelle: w.menuLabel ?? w.title }));
+    .map((w) => ({
+      id: w.id as WindowId,
+      mnemonique: w.mnemonic,
+      libelle: w.menuLabel ?? w.title,
+      nouveau: w.nouveau ?? false,
+    }));
+}
+
+/** Préfixe localStorage marquant qu'une fenêtre « nouveau » a déjà été ouverte (badge). */
+const SEEN_PREFIX = "axiom:seen:";
+
+/** Marque une fenêtre comme VUE (best-effort) : son badge « nouveau » disparaît ensuite.
+ *  Même pattern localStorage tolérant que le reste du repo (mode privé / Node : no-op). */
+export function marquerVue(id: string): void {
+  try {
+    localStorage.setItem(SEEN_PREFIX + id, "1");
+  } catch {
+    /* localStorage indisponible : best-effort */
+  }
+}
+
+/** true si la fenêtre n'a jamais été ouverte (aucun flag « vu » en localStorage). En cas
+ *  d'indisponibilité du stockage, renvoie false (pas de badge parasite permanent). */
+export function estNouvelle(id: string): boolean {
+  try {
+    return localStorage.getItem(SEEN_PREFIX + id) === null;
+  } catch {
+    return false;
+  }
 }
 
 /** Espace minimal toujours visible d'une fenêtre (pixels), pour le drag comme le resize. */
@@ -429,6 +460,8 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   workspace: { x: 0, y: 0, width: 1920, height: 1080 },
 
   openWindow: (id) => {
+    // Marque la fenêtre comme vue : son badge « nouveau » (menu Fonctions) disparaît.
+    marquerVue(id);
     const state = get();
     if (state.windows[id]) {
       const ordre = mettreAuSommet(state, id);

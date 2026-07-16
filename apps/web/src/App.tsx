@@ -57,6 +57,7 @@ import { FloatingWindow } from "./components/FloatingWindow";
 import { TaskbarMinimized } from "./components/TaskbarMinimized";
 import { SnapOverlay } from "./components/SnapOverlay";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
+import { Toasts } from "./components/Toasts";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { WINDOW_REGISTRY, windowManagerStore, type WindowId } from "./store/windowManager";
 
@@ -295,6 +296,8 @@ export function App() {
       <CommandPalette />
       {/* Premier lancement : 3 étapes (masqué si completed ; ⌘K ONBOARD pour rejouer). */}
       <OnboardingOverlay />
+      {/* Toasts de feedback (export PNG, workspace, playbook, sauvegarde) — coin bas-droit. */}
+      <Toasts />
     </div>
   );
 }

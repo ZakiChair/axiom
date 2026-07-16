@@ -27,8 +27,9 @@ import {
 import {
   liqEstStore,
   oiHistStore,
-  calculerNiveauxEstimes,
+  calculerNiveauxEstimesDetail,
   type NiveauEstime,
+  type NiveauConsomme,
 } from "./liquidationEstimates";
 import type { Commande } from "../commands/registry";
 import { marketStore } from "../store/market";
@@ -501,6 +502,9 @@ export class LiquidationHeatController {
    */
   private niveauxObsoletes = true;
   private derniersNiveaux: NiveauEstime[] | null = null;
+  /** Niveaux estimés CONSOMMÉS mémoïsés (mêmes invalidations que `derniersNiveaux`) : source de
+   *  la trace grisée éphémère (fade ~10 bougies). Recalculés en même temps (calculerNiveauxEstimesDetail). */
+  private derniersConsommes: NiveauConsomme[] | null = null;
   /**
    * Petit canvas DÉTACHÉ du rendu lissé « CoinGlass » (1 cellule de la grille = 1 pixel),
    * membre RÉUTILISÉ entre frames : créé paresseusement au premier rendu lissé, redimensionné
@@ -647,6 +651,7 @@ export class LiquidationHeatController {
     this.derniereGrille = null;
     this.grilleObsolete = true;
     this.derniersNiveaux = null;
+    this.derniersConsommes = null;
     this.niveauxObsoletes = true;
     this.imageDataLissage = null;
     this.clearCanvas();
@@ -1217,15 +1222,26 @@ export class LiquidationHeatController {
     if (this.niveauxObsoletes) {
       // Leviers cochés par l'utilisateur (sous-ensemble de LEVIERS) — cf. liqEstStore. Le
       // recalcul est réinvalidé par l'abonnement permanent à liqEstStore (unsubLiqEst → markDirty),
-      // donc décocher/cocher un levier recalcule bien les niveaux.
-      this.derniersNiveaux = calculerNiveauxEstimes(
+      // donc décocher/cocher un levier recalcule bien les niveaux. On mémoïse en un seul calcul
+      // les niveaux ACTIFS et les niveaux CONSOMMÉS (trace grisée éphémère).
+      const detail = calculerNiveauxEstimesDetail(
         oiHistStore.getState().hist,
         candles,
         liqEstStore.getState().leviers,
       );
+      this.derniersNiveaux = detail.actifs;
+      this.derniersConsommes = detail.consommes;
       this.niveauxObsoletes = false;
     }
     const niveaux = this.derniersNiveaux ?? [];
+
+    // Taille de bucket (granularité utilisateur) partagée par la trace consommée ET les niveaux
+    // actifs — même bucketing que la heatmap réelle (choix de RENDU, indépendant du calcul).
+    const taille = tailleBucket(dernier.close) * liqMarksStore.getState().granularite;
+
+    // Trace grisée ÉPHÉMÈRE des consommés récents, dessinée SOUS les niveaux actifs (fond discret).
+    if (taille > 0) this.dessinerTraceConsommes(this.derniersConsommes ?? [], candles, taille, main, tokens);
+
     if (niveaux.length === 0) {
       // Couche active mais OI pas encore chargé (ou aucune hausse d'OI) : indice discret en haut
       // à droite, sous l'éventuel indicateur « en attente » de la heatmap (top+22). La légende
@@ -1245,11 +1261,10 @@ export class LiquidationHeatController {
       return;
     }
 
-    // Regroupement par bucket de prix : somme des poids + levier dominant du bucket. La taille de
-    // bucket suit la GRANULARITÉ utilisateur (facteur ×½/×1/×2), comme la heatmap réelle — c'est
-    // un choix de RENDU (les niveaux mémoïsés, eux, ne dépendent pas de la taille de bucket).
-    const taille = tailleBucket(dernier.close) * liqMarksStore.getState().granularite;
     if (!(taille > 0)) return;
+    // Regroupement par bucket de prix : somme des poids + levier dominant du bucket (la taille de
+    // bucket, calculée plus haut, suit la GRANULARITÉ utilisateur comme la heatmap réelle — un
+    // choix de RENDU ; les niveaux mémoïsés, eux, ne dépendent pas de la taille de bucket).
     const parBucket = new Map<number, { poids: number; parLevier: Map<number, number> }>();
     for (const n of niveaux) {
       if (!(n.price > 0) || !Number.isFinite(n.poidsUsd)) continue;
@@ -1327,6 +1342,75 @@ export class LiquidationHeatController {
       ctx.fillStyle = orange(0.98);
       ctx.fillText(label, left + 6, item.y);
     }
+  }
+
+  /**
+   * Trace grisée ÉPHÉMÈRE des niveaux estimés CONSOMMÉS (traversés par le prix) : lignes
+   * pointillées `tokens.textDim` dessinées SOUS les niveaux actifs, SANS étiquette. Plafonnée aux
+   * 15 consommés LES PLUS RÉCENTS, regroupés par bucket de prix comme les actifs (une ligne par
+   * bucket, l'horodatage retenu étant le `tsConsommation` le plus RÉCENT du bucket). Alpha
+   * décroissant `0.35 × max(0, 1 − age/10)` où `age` = nombre de bougies visibles entre
+   * `tsConsommation` et la dernière bougie (≈ `(dernierTime − tsConsommation) / dureeBougie`,
+   * `dureeBougie` = écart moyen entre bougies visibles) → la trace s'efface au bout de ~10 bougies.
+   */
+  private dessinerTraceConsommes(
+    consommes: NiveauConsomme[],
+    candles: Candle[],
+    taille: number,
+    main: Bounding,
+    tokens: Tokens,
+  ): void {
+    if (consommes.length === 0) return;
+    const ctx = this.ctx;
+    const { left, top, width, height } = main;
+    const xRight = left + width;
+
+    const dernier = candles[candles.length - 1];
+    if (dernier === undefined) return;
+
+    // Durée d'une bougie ≈ écart moyen entre bougies VISIBLES : (time[to−1] − time[from]) / (to − from − 1).
+    const range = this.chart.getVisibleRange();
+    const from = Math.max(0, range.from);
+    const to = Math.min(candles.length, range.to);
+    const premierVis = candles[from];
+    const dernierVis = candles[to - 1];
+    if (premierVis === undefined || dernierVis === undefined || to - from < 2) return;
+    const dureeBougie = (dernierVis.time - premierVis.time) / (to - from - 1);
+    if (!(dureeBougie > 0)) return;
+
+    // 15 consommés les plus récents (tsConsommation décroissant), puis regroupés par bucket : une
+    // ligne par bucket, on retient le tsConsommation le PLUS RÉCENT du bucket (pilote l'alpha).
+    const parBucket = new Map<number, number>(); // idx bucket → tsConsommation le plus récent
+    for (const c of [...consommes].sort((a, b) => b.tsConsommation - a.tsConsommation).slice(0, 15)) {
+      if (!(c.price > 0)) continue;
+      const idx = bucketIndex(c.price, taille);
+      const prev = parBucket.get(idx);
+      if (prev === undefined || c.tsConsommation > prev) parBucket.set(idx, c.tsConsommation);
+    }
+    if (parBucket.size === 0) return;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left, top, width, height);
+    ctx.clip();
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = tokens.textDim;
+    for (const [idx, ts] of parBucket) {
+      const age = (dernier.time - ts) / dureeBougie;
+      const alpha = 0.35 * Math.max(0, 1 - age / 10);
+      if (!(alpha > 0)) continue; // au-delà de ~10 bougies, la trace est effacée
+      const y = this.toPx({ value: (idx + 0.5) * taille }).y;
+      if (y === undefined || !Number.isFinite(y)) continue;
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.moveTo(left, Math.round(y) + 0.5);
+      ctx.lineTo(xRight, Math.round(y) + 0.5);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+    ctx.restore();
   }
 
   /**

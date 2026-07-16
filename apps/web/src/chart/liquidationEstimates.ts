@@ -35,40 +35,64 @@ export interface NiveauEstime {
   poidsUsd: number;
 }
 
+/**
+ * Un niveau estimé déjà CONSOMMÉ (traversé par une bougie ultérieure à son ouverture). Même
+ * forme qu'un `NiveauEstime`, plus `tsConsommation` = `time` de la PREMIÈRE bougie traversante.
+ * Sert à tracer la trace grisée éphémère (fade sur ~10 bougies) des niveaux récemment purgés.
+ */
+export interface NiveauConsomme extends NiveauEstime {
+  /** `time` de la première bougie qui a traversé le niveau (long : `low ≤ prix` ; short : `high ≥ prix`). */
+  tsConsommation: number;
+}
+
+/** Résultat DÉTAILLÉ du modèle : niveaux encore actifs + niveaux consommés (avec leur horodatage). */
+export interface NiveauxEstimesDetail {
+  actifs: NiveauEstime[];
+  consommes: NiveauConsomme[];
+}
+
 /** Leviers modélisés (ΔOI réparti uniformément entre eux, et 50/50 long/short). */
 export const LEVIERS = [10, 25, 50, 100] as const;
 
 // ─────────────────────────── Fonction PURE (testée) ───────────────────────────
 
 /**
- * Vrai si une bougie ULTÉRIEURE à `apresTime` traverse `niveau` du bon côté
- * (long : `low ≤ niveau` ; short : `high ≥ niveau`). PURE (locale).
+ * `time` de la PREMIÈRE bougie ULTÉRIEURE à `apresTime` qui traverse `niveau` du bon côté
+ * (long : `low ≤ niveau` ; short : `high ≥ niveau`), ou `undefined` si aucune. Les bougies étant
+ * chronologiques, la première rencontrée en itération est la plus ancienne traversante. PURE (locale).
  */
-function niveauTraverse(candles: Candle[], apresTime: number, niveau: number, side: "long" | "short"): boolean {
+function premiereTraversee(
+  candles: Candle[],
+  apresTime: number,
+  niveau: number,
+  side: "long" | "short",
+): number | undefined {
   for (const c of candles) {
     if (c.time <= apresTime) continue; // strictement ultérieure à l'ouverture du niveau
-    if (side === "long" ? c.low <= niveau : c.high >= niveau) return true;
+    if (side === "long" ? c.low <= niveau : c.high >= niveau) return c.time;
   }
-  return false;
+  return undefined;
 }
 
 /**
- * Calcule les niveaux de liquidation ESTIMÉS depuis l'historique d'OI et les bougies.
- * Chaque hausse d'OI ouvre `ΔOI` au close de la bougie contenante, réparti 50/50 long/short
- * et uniformément sur `leviers` (poids = ΔOI/(2×nb leviers)) ; les niveaux déjà traversés par
- * une bougie ultérieure sont retirés (consommés). Baisse/égalité d'OI → aucun niveau.
+ * Variante DÉTAILLÉE (source de vérité, PURE et testée) : renvoie les niveaux encore ACTIFS
+ * ET les niveaux CONSOMMÉS (avec `tsConsommation` = `time` de la première bougie traversante).
+ * Chaque hausse d'OI ouvre `ΔOI` au close de la bougie contenante, réparti 50/50 long/short et
+ * uniformément sur `leviers` (poids = ΔOI/(2×nb leviers)) ; un niveau traversé par une bougie
+ * ultérieure part dans `consommes`, sinon dans `actifs`. Baisse/égalité d'OI → aucun niveau.
  *
- * `leviers` est OPTIONNEL (défaut = `LEVIERS`, tous cochés) : l'utilisateur peut restreindre
- * le modèle à un sous-ensemble via la fenêtre LIQ (cf. `liqEstStore.leviers`). Liste vide →
- * aucun niveau (garde anti-division-par-zéro). PURE.
+ * `leviers` est OPTIONNEL (défaut = `LEVIERS`, tous cochés) : l'utilisateur peut restreindre le
+ * modèle à un sous-ensemble via la fenêtre LIQ (cf. `liqEstStore.leviers`). Liste vide → rien
+ * (garde anti-division-par-zéro).
  */
-export function calculerNiveauxEstimes(
+export function calculerNiveauxEstimesDetail(
   oiHist: { time: number; oiUsd: number }[],
   candles: Candle[],
   leviers: readonly number[] = LEVIERS,
-): NiveauEstime[] {
-  const out: NiveauEstime[] = [];
-  if (oiHist.length < 2 || candles.length === 0 || leviers.length === 0) return out;
+): NiveauxEstimesDetail {
+  const actifs: NiveauEstime[] = [];
+  const consommes: NiveauConsomme[] = [];
+  if (oiHist.length < 2 || candles.length === 0 || leviers.length === 0) return { actifs, consommes };
 
   const poidsParNiveau = (delta: number): number => delta / (2 * leviers.length);
 
@@ -88,15 +112,35 @@ export function calculerNiveauxEstimes(
     for (const L of leviers) {
       const niveauLong = entry * (1 - 1 / L);
       const niveauShort = entry * (1 + 1 / L);
-      if (!niveauTraverse(candles, bougie.time, niveauLong, "long")) {
-        out.push({ price: niveauLong, side: "long", levier: L, poidsUsd: poids });
+      const tsLong = premiereTraversee(candles, bougie.time, niveauLong, "long");
+      if (tsLong === undefined) {
+        actifs.push({ price: niveauLong, side: "long", levier: L, poidsUsd: poids });
+      } else {
+        consommes.push({ price: niveauLong, side: "long", levier: L, poidsUsd: poids, tsConsommation: tsLong });
       }
-      if (!niveauTraverse(candles, bougie.time, niveauShort, "short")) {
-        out.push({ price: niveauShort, side: "short", levier: L, poidsUsd: poids });
+      const tsShort = premiereTraversee(candles, bougie.time, niveauShort, "short");
+      if (tsShort === undefined) {
+        actifs.push({ price: niveauShort, side: "short", levier: L, poidsUsd: poids });
+      } else {
+        consommes.push({ price: niveauShort, side: "short", levier: L, poidsUsd: poids, tsConsommation: tsShort });
       }
     }
   }
-  return out;
+  return { actifs, consommes };
+}
+
+/**
+ * Calcule les niveaux de liquidation ESTIMÉS encore ACTIFS depuis l'historique d'OI et les
+ * bougies — WRAPPER de `calculerNiveauxEstimesDetail` (renvoie son `.actifs`, comportement
+ * historique inchangé). Les niveaux consommés sont écartés silencieusement (cf. la variante
+ * détaillée pour les récupérer). PURE.
+ */
+export function calculerNiveauxEstimes(
+  oiHist: { time: number; oiUsd: number }[],
+  candles: Candle[],
+  leviers: readonly number[] = LEVIERS,
+): NiveauEstime[] {
+  return calculerNiveauxEstimesDetail(oiHist, candles, leviers).actifs;
 }
 
 // ─────────────────────────── Bascule (store vanilla local) ───────────────────────────

@@ -8,7 +8,9 @@
  * Deux onglets (primitive `Onglets`) :
  *  • « Live » — totaux/stats sur FENÊTRE GLISSANTE (5m/1h/24h), barre de dominance,
  *    mini-histogramme temporel (shorts ↑ / longs ↓), et le feed des ~60 dernières liq du
- *    buffer avec hiérarchie de magnitude (barre de fond log, ≥ $1M en gras) ;
+ *    buffer avec hiérarchie de magnitude (barre de fond log, ≥ $1M en gras) ; les
+ *    cascades (liq consécutives de même côté espacées de < 2 s) y sont GROUPÉES en une
+ *    ligne « ×N » cliquable qui déplie/replie le détail (cf. grouperCascades) ;
  *  • « Historique » — lecture PONCTUELLE de l'historique persistant du daemon axiomd
  *    (SQLite, rétention 30 j) sur 1h/24h/7j/30j : totaux, dominance, histogramme
  *    48 buckets, top 10 des plus grosses liq. Replis honnêtes (daemon absent vs fenêtre
@@ -47,6 +49,7 @@ import {
 import {
   formatUsd,
   formatHeure,
+  formatHeureMinute,
   formatDateHeure,
   formatPrice,
   formatPourcentage,
@@ -55,10 +58,12 @@ import {
   bucketsTemporels,
   daemonVersEvenements,
   filtrerFenetre,
+  grouperCascades,
   magnitudeRelative,
   statsLiquidations,
   topLiquidations,
   type BucketTemporel,
+  type GroupeCascade,
 } from "./liquidationsWindow.util";
 
 /** Nombre max de liquidations affichées dans le feed (dernières du buffer). */
@@ -371,6 +376,80 @@ function LigneFeed({ ev, maxUsd }: { ev: LiqEvent; maxUsd: number }) {
   );
 }
 
+/**
+ * Ligne de GROUPE du feed (cascade) : « ×N » + côté, SOMME notionnelle (gras dès
+ * SEUIL_GRAS_USD), fourchette de prix, venues cumulées (badges) et barre de fond de
+ * magnitude calculée sur la somme. CLIQUABLE : déplie/replie les lignes détail en
+ * dessous (état porté par le parent, clé `debut-side`). Heure compacte HH:MM (du plus
+ * récent événement) pour laisser la place au chevron dans la colonne.
+ */
+function LigneGroupe({
+  g,
+  maxUsd,
+  ouvert,
+  onToggle,
+}: {
+  g: GroupeCascade;
+  maxUsd: number;
+  ouvert: boolean;
+  onToggle: () => void;
+}) {
+  const grosse = g.sommeUsd >= SEUIL_GRAS_USD;
+  const part = magnitudeRelative(g.sommeUsd, maxUsd);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={ouvert}
+        title={`Cascade ${g.side} ×${g.events.length} — cliquer pour ${ouvert ? "replier" : "déplier"} le détail`}
+        className="relative block w-full border-b border-border/40 text-left transition hover:bg-bg"
+      >
+        <div
+          className={`absolute inset-y-0 left-0 opacity-15 ${g.side === "long" ? "bg-down" : "bg-up"}`}
+          style={{ width: `${part * 100}%` }}
+        />
+        <div className={`relative py-1 text-xs ${GRILLE_FEED}`}>
+          <span className="tabular-nums text-text-dim">
+            <span aria-hidden className="mr-1 inline-block w-2 text-[9px]">
+              {ouvert ? "▾" : "▸"}
+            </span>
+            {formatHeureMinute(g.fin)}
+          </span>
+          <span className="flex flex-wrap items-center gap-0.5">
+            {g.venues.map((venue) => {
+              const info = venueInfo(venue);
+              return (
+                <Badge key={venue} ton={info.ton} title={info.long}>
+                  {info.court}
+                </Badge>
+              );
+            })}
+          </span>
+          <span className={`font-medium ${g.side === "long" ? "text-down" : "text-up"}`}>
+            {g.side === "long" ? "Long" : "Short"}
+          </span>
+          <span className={`text-right tabular-nums text-text ${grosse ? "font-bold" : ""}`}>
+            ×{g.events.length} · {formatUsd(g.sommeUsd)}
+          </span>
+          <span className="text-right text-[10px] tabular-nums text-text-dim">
+            {g.prixMin === g.prixMax
+              ? formatPrice(g.prixMin)
+              : `${formatPrice(g.prixMin)}–${formatPrice(g.prixMax)}`}
+          </span>
+        </div>
+      </button>
+      {ouvert && (
+        <div className="border-l-2 border-border pl-1">
+          {g.events.map((ev) => (
+            <LigneFeed key={`${ev.time}-${ev.venue}-${ev.price}-${ev.qty}`} ev={ev} maxUsd={maxUsd} />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 /** Onglet « Live » : TOUT le contenu temps réel de la fenêtre (source : liqEventsStore). */
 function ContenuLive() {
   const symbol = useStore(marketStore, (s) => s.symbol);
@@ -379,6 +458,8 @@ function ContenuLive() {
   const [rev, setRev] = useState(() => liqEventsStore.getState().rev);
   // Horloge lente : force un recalcul périodique pour faire glisser la fenêtre.
   const [horloge, setHorloge] = useState(0);
+  // Groupes cascade dépliés dans le feed (clé stable `debut-side`).
+  const [deplies, setDeplies] = useState<Set<string>>(() => new Set());
 
   // Rafraîchissement throttlé sur publication du store (trailing edge ~500 ms).
   useEffect(() => {
@@ -409,13 +490,27 @@ function ContenuLive() {
     const filtres = filtrerFenetre(reels, depuisMs);
     const stats = statsLiquidations(filtres);
     const buckets = bucketsTemporels(filtres, depuisMs, nowMs, N_BUCKETS);
-    // Feed : les MAX_FEED dernières liq du buffer (indépendant de la fenêtre choisie).
-    const feed = reels.slice(-MAX_FEED).reverse();
+    // Feed : les MAX_FEED dernières liq du buffer (indépendant de la fenêtre choisie),
+    // cascades groupées (liq consécutives de même côté espacées de < 2 s → ligne ×N).
+    const feed = grouperCascades(reels.slice(-MAX_FEED).reverse());
+    // Barre de magnitude à l'échelle des ITEMS : la somme d'un groupe compte comme un tout.
     let feedMaxUsd = 0;
-    for (const ev of feed) if (ev.usd > feedMaxUsd) feedMaxUsd = ev.usd;
+    for (const item of feed) {
+      const usd = item.type === "groupe" ? item.sommeUsd : item.ev.usd;
+      if (usd > feedMaxUsd) feedMaxUsd = usd;
+    }
     return { stats, buckets, feed, feedMaxUsd };
     // `rev` et `horloge` pilotent le recalcul (le store vanilla mute hors React).
   }, [rev, horloge, fenetre, symbol]);
+
+  /** Déplie/replie un groupe cascade du feed (clé `debut-side`). */
+  const basculerGroupe = (cle: string): void => {
+    setDeplies((prev) => {
+      const suivant = new Set(prev);
+      if (!suivant.delete(cle)) suivant.add(cle);
+      return suivant;
+    });
+  };
 
   const partLongPct = stats.partLong === null ? null : stats.partLong * 100;
   // Répartition venues triée par notionnel décroissant (ordre d'affichage stable).
@@ -503,9 +598,28 @@ function ContenuLive() {
               <span className="text-right">Notionnel</span>
               <span className="text-right">Prix</span>
             </div>
-            {feed.map((ev) => (
-              <LigneFeed key={`${ev.time}-${ev.venue}-${ev.price}-${ev.qty}`} ev={ev} maxUsd={feedMaxUsd} />
-            ))}
+            {feed.map((item) => {
+              if (item.type === "seul") {
+                const { ev } = item;
+                return (
+                  <LigneFeed
+                    key={`${ev.time}-${ev.venue}-${ev.price}-${ev.qty}`}
+                    ev={ev}
+                    maxUsd={feedMaxUsd}
+                  />
+                );
+              }
+              const cle = `${item.debut}-${item.side}`;
+              return (
+                <LigneGroupe
+                  key={cle}
+                  g={item}
+                  maxUsd={feedMaxUsd}
+                  ouvert={deplies.has(cle)}
+                  onToggle={() => basculerGroupe(cle)}
+                />
+              );
+            })}
           </div>
         )}
 
@@ -514,7 +628,8 @@ function ContenuLive() {
             Flux de liquidations Bybit (canal allLiquidation) et OKX (canal liquidation-orders) en
             direct, complétés par l'historique local quand il existe — même source de données que
             la heatmap du graphe. Long = position longue fermée de force (vente). Totaux et stats
-            sur la fenêtre glissante choisie ; feed = dernières liquidations du buffer.
+            sur la fenêtre glissante choisie ; feed = dernières liquidations du buffer (cascades
+            de même côté espacées de moins de 2 s groupées en ×N — cliquer pour le détail).
           </NoteSource>
         </div>
       </div>

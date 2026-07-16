@@ -10,9 +10,11 @@ import {
   bucketsTemporels,
   daemonVersEvenements,
   filtrerFenetre,
+  grouperCascades,
   magnitudeRelative,
   statsLiquidations,
   topLiquidations,
+  usdParMinute,
 } from "./liquidationsWindow.util";
 
 /** Fabrique un LiqEvent avec défauts raisonnables. */
@@ -112,6 +114,93 @@ describe("topLiquidations", () => {
   it("n ≤ 0 ou liste vide → []", () => {
     expect(topLiquidations([ev({})], 0)).toEqual([]);
     expect(topLiquidations([], 5)).toEqual([]);
+  });
+});
+
+describe("grouperCascades", () => {
+  // Entrée en ordre ANTÉ-CHRONOLOGIQUE (du plus récent au plus ancien), comme le feed.
+
+  it("fusionne les liq consécutives de même côté espacées de < ecartMs et agrège", () => {
+    const events = [
+      ev({ time: 5_000, side: "long", usd: 300, price: 105, venue: "bybit" }),
+      ev({ time: 4_000, side: "long", usd: 200, price: 95, venue: "okx" }),
+      ev({ time: 3_000, side: "long", usd: 100, price: 100, venue: "bybit" }),
+    ];
+    const items = grouperCascades(events);
+    expect(items).toHaveLength(1);
+    const g = items[0];
+    if (g?.type !== "groupe") throw new Error("groupe attendu");
+    expect(g.events.map((e) => e.time)).toEqual([5_000, 4_000, 3_000]); // ordre feed conservé
+    expect(g.sommeUsd).toBe(600);
+    expect(g.prixMin).toBe(95);
+    expect(g.prixMax).toBe(105);
+    expect(g.side).toBe("long");
+    expect(g.venues).toEqual(["bybit", "okx"]); // uniques, ordre d'apparition
+    expect(g.debut).toBe(3_000);
+    expect(g.fin).toBe(5_000);
+  });
+
+  it("coupe le groupe sur changement de côté (liq consécutives uniquement)", () => {
+    const events = [
+      ev({ time: 3_000, side: "long" }),
+      ev({ time: 2_500, side: "short" }),
+      ev({ time: 2_000, side: "long" }),
+    ];
+    const items = grouperCascades(events);
+    expect(items.map((i) => i.type)).toEqual(["seul", "seul", "seul"]);
+  });
+
+  it("coupe le groupe quand l'écart atteint ecartMs (borne exclue)", () => {
+    const events = [
+      ev({ time: 10_000, side: "short" }),
+      ev({ time: 8_000, side: "short" }), // écart = 2 000 = ecartMs → PAS groupé
+      ev({ time: 6_001, side: "short" }), // écart = 1 999 < ecartMs → groupé avec 8 000
+    ];
+    const items = grouperCascades(events, 2_000);
+    expect(items.map((i) => i.type)).toEqual(["seul", "groupe"]);
+    const g = items[1];
+    if (g?.type !== "groupe") throw new Error("groupe attendu");
+    expect(g.events.map((e) => e.time)).toEqual([8_000, 6_001]);
+  });
+
+  it("une liq isolée reste une ligne seule (référence conservée)", () => {
+    const seul = ev({ time: 1_000 });
+    const items = grouperCascades([seul]);
+    expect(items).toEqual([{ type: "seul", ev: seul }]);
+  });
+
+  it("conserve l'ordre anté-chronologique des items du feed", () => {
+    const events = [
+      ev({ time: 9_000, side: "long" }),
+      ev({ time: 5_000, side: "short", usd: 10 }),
+      ev({ time: 4_500, side: "short", usd: 20 }),
+      ev({ time: 1_000, side: "long" }),
+    ];
+    const items = grouperCascades(events);
+    expect(items.map((i) => i.type)).toEqual(["seul", "groupe", "seul"]);
+    expect(items[0]?.type === "seul" && items[0].ev.time).toBe(9_000);
+    expect(items[2]?.type === "seul" && items[2].ev.time).toBe(1_000);
+  });
+
+  it("liste vide → []", () => {
+    expect(grouperCascades([])).toEqual([]);
+  });
+});
+
+describe("usdParMinute", () => {
+  it("somme les usd des événements de la dernière minute glissante (borne incluse)", () => {
+    const now = 100_000;
+    const events = [
+      ev({ time: now - 60_001, usd: 1 }), // hors fenêtre
+      ev({ time: now - 60_000, usd: 10 }), // borne incluse
+      ev({ time: now - 1_000, usd: 100 }),
+      ev({ time: now, usd: 1_000 }),
+    ];
+    expect(usdParMinute(events, now)).toBe(1_110);
+  });
+
+  it("liste vide → 0", () => {
+    expect(usdParMinute([], 1_000_000)).toBe(0);
   });
 });
 

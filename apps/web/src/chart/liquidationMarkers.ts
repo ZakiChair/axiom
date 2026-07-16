@@ -473,6 +473,15 @@ export function retenirFluxLiq(): () => void {
 }
 
 /**
+ * Vrai si le flux liq est actuellement RETENU (heatmap ON ou consommateur UI, ex.
+ * fenêtre LIQ ouverte) : le buffer `liqEventsStore` est alors alimenté en live.
+ * Lecture seule — utilisée par le runtime des alertes pour gater `liq-cascade`.
+ */
+export function fluxLiqRetenu(): boolean {
+  return liqMarksStore.getState().actif || retenteursUi > 0;
+}
+
+/**
  * Aligne l'abonnement WS sur l'état (bascule OU reteneur UI, + symbole). Réinitialise le
  * buffer au changement de symbole.
  */

@@ -517,7 +517,7 @@ export function OnchainWindow() {
                 type="button"
                 onClick={() => setActifEtf(a)}
                 className={`rounded px-2 py-0.5 text-[10px] uppercase tracking-wide transition ${
-                  actifEtf === a ? "bg-surface text-text" : "text-text-dim hover:text-text"
+                  actifEtf === a ? "bg-bg text-text" : "text-text-dim hover:text-text"
                 }`}
               >
                 {a}

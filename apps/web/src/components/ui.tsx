@@ -314,6 +314,39 @@ export function Onglets<T extends string>({
   );
 }
 
+/**
+ * Groupe segmenté standard (bascule exclusive) : conteneur bordé arrondi,
+ * segment actif `bg-bg text-text` (standard §2 — jamais bg-surface, invisible
+ * sur le corps bg-surface des fenêtres). Consacre le pattern d'OptionsWindow.
+ */
+export function Segmente<T extends string>({
+  options,
+  actif,
+  onChange,
+}: {
+  options: ReadonlyArray<{ id: T; label: string }>;
+  actif: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div className="flex overflow-hidden rounded-md border border-border text-[11px]">
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          onClick={() => onChange(o.id)}
+          aria-pressed={actif === o.id}
+          className={`flex-1 px-3 py-1.5 transition ${
+            actif === o.id ? "bg-bg text-text" : "text-text-dim hover:text-text"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Note de bas de section : source + cadence (« Données Deribit, ~1 min. »). */
 export function NoteSource({ children }: { children: ReactNode }) {
   return <p className="text-[10px] leading-snug text-text-dim">{children}</p>;

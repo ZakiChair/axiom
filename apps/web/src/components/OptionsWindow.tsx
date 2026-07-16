@@ -38,7 +38,7 @@ import {
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { formatUsd, formatDec, formatPourcentage } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
-import { Metric, EnTeteFenetre, ErreurBloc, NoteSource, Fraicheur } from "./ui";
+import { Metric, EnTeteFenetre, ErreurBloc, NoteSource, Fraicheur, Segmente } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -517,72 +517,47 @@ export function OptionsWindow() {
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {/* Bascule de vue : Smile ↔ GEX/DEX */}
-        <div className="mb-3 flex overflow-hidden rounded-md border border-border text-[11px]">
-          {(["smile", "gexdex"] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => setVue(v)}
-              className={`flex-1 px-3 py-1.5 transition ${
-                vue === v ? "bg-bg text-text" : "text-text-dim hover:text-text"
-              }`}
-            >
-              {v === "smile" ? "Smile" : "GEX/DEX"}
-            </button>
-          ))}
+        <div className="mb-3">
+          <Segmente
+            options={[
+              { id: "smile", label: "Smile" },
+              { id: "gexdex", label: "GEX/DEX" },
+            ] as const}
+            actif={vue}
+            onChange={setVue}
+          />
         </div>
 
         {/* En GEX/DEX : bascules classe (crypto/actions) + métrique (GEX/DEX) */}
         {vue === "gexdex" && (
           <div className="mb-3 flex items-center gap-2">
-            <div className="flex overflow-hidden rounded-md border border-border">
-              {(["crypto", "actions"] as const).map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setClasse(c)}
-                  className={`px-3 py-1.5 text-[11px] transition ${
-                    classe === c ? "bg-bg text-text" : "text-text-dim hover:text-text"
-                  }`}
-                >
-                  {c === "crypto" ? "Crypto" : "Actions"}
-                </button>
-              ))}
-            </div>
-            <div className="flex overflow-hidden rounded-md border border-border">
-              {(["gex", "dex"] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMetrique(m)}
-                  className={`px-3 py-1.5 text-[11px] uppercase transition ${
-                    metrique === m ? "bg-bg text-text" : "text-text-dim hover:text-text"
-                  }`}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
+            <Segmente
+              options={[
+                { id: "crypto", label: "Crypto" },
+                { id: "actions", label: "Actions" },
+              ] as const}
+              actif={classe}
+              onChange={setClasse}
+            />
+            <Segmente
+              options={[
+                { id: "gex", label: "GEX" },
+                { id: "dex", label: "DEX" },
+              ] as const}
+              actif={metrique}
+              onChange={setMetrique}
+            />
           </div>
         )}
 
         {/* Sélecteurs devise + échéance Deribit (smile ET gex/dex crypto) */}
         {(vue === "smile" || classe === "crypto") && (
           <div className="mb-3 flex items-center gap-2">
-            <div className="flex overflow-hidden rounded-md border border-border">
-              {DEVISES.map((d) => (
-                <button
-                  key={d}
-                  type="button"
-                  onClick={() => setDevise(d)}
-                  className={`px-3 py-1.5 text-[11px] transition ${
-                    devise === d ? "bg-bg text-text" : "text-text-dim hover:text-text"
-                  }`}
-                >
-                  {d}
-                </button>
-              ))}
-            </div>
+            <Segmente
+              options={DEVISES.map((d) => ({ id: d, label: d }))}
+              actif={devise}
+              onChange={setDevise}
+            />
             <select
               value={expiry ?? ""}
               onChange={(e) => setExpiry(Number(e.target.value))}
@@ -607,20 +582,11 @@ export function OptionsWindow() {
         {/* Sélecteurs ticker + échéance CBOE (gex/dex actions) */}
         {vue === "gexdex" && classe === "actions" && (
           <div className="mb-3 flex items-center gap-2">
-            <div className="flex overflow-hidden rounded-md border border-border">
-              {CBOE_TICKERS.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setCboeTicker(t)}
-                  className={`px-3 py-1.5 text-[11px] transition ${
-                    cboeTicker === t ? "bg-bg text-text" : "text-text-dim hover:text-text"
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
+            <Segmente
+              options={CBOE_TICKERS.map((t) => ({ id: t, label: t }))}
+              actif={cboeTicker}
+              onChange={setCboeTicker}
+            />
             <select
               value={cboeExpiry ?? ""}
               onChange={(e) => setCboeExpiry(Number(e.target.value))}

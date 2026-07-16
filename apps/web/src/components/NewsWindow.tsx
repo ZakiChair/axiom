@@ -278,7 +278,7 @@ export function NewsWindow() {
           aria-pressed={filtreSymbole}
           title="Filtrer sur le symbole affiché"
           className={`shrink-0 rounded border border-border px-2 py-1 text-[10px] uppercase tracking-wide transition ${
-            filtreSymbole ? "bg-surface text-text" : "text-text-dim hover:text-text"
+            filtreSymbole ? "bg-bg text-text" : "text-text-dim hover:text-text"
           }`}
         >
           {symbolKeywords(symbol).length > 0 ? `#${symbol}` : "symbole"}

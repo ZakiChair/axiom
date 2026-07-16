@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Chart as KLineChartInstance } from "klinecharts";
 import {
   bindChart,
+  coinsRectangle,
   exportChartImage,
   restoreDrawings,
   selectTool,
@@ -25,7 +26,14 @@ import { indicatorsStore } from "../store/indicators";
 // (pas de `window`), donc on stub l'unique export runtime utilisé pour pouvoir
 // importer drawing.ts dans cet environnement de test Node. (vi.mock est hissé par
 // Vitest avant les imports statiques ci-dessus, peu importe l'ordre dans le fichier.)
-vi.mock("klinecharts", () => ({ registerOverlay: () => {} }));
+// `registeredOverlayNames` capture les noms enregistrés au chargement du module (fib
+// custom, VPFR, picker AVWAP, rect) pour vérifier que « rect » y figure bien.
+const { registeredOverlayNames } = vi.hoisted(() => ({ registeredOverlayNames: [] as string[] }));
+vi.mock("klinecharts", () => ({
+  registerOverlay: (opts: { name: string }) => {
+    registeredOverlayNames.push(opts.name);
+  },
+}));
 
 const DRAWINGS_KEY = "axiom:drawings:v1";
 const SYMBOL = "BTCUSDT";
@@ -297,6 +305,28 @@ describe("drawing.ts — picker d'ancrage AVWAP", () => {
     expect(removeSpy).toHaveBeenCalledWith({ id: "ov-0" });
 
     unbindChart(a.chart);
+  });
+});
+
+describe("coinsRectangle — rectangle 2 points", () => {
+  it("dérive les 4 coins de la diagonale", () => {
+    expect(coinsRectangle([{ x: 10, y: 20 }, { x: 30, y: 5 }])).toEqual([
+      { x: 10, y: 20 }, { x: 30, y: 20 }, { x: 30, y: 5 }, { x: 10, y: 5 },
+    ]);
+  });
+  it("null tant que les 2 points ne sont pas posés", () => {
+    expect(coinsRectangle([])).toBeNull();
+    expect(coinsRectangle([{ x: 1, y: 1 }])).toBeNull();
+  });
+});
+
+describe("drawing.ts — enregistrement de l'overlay custom « rect »", () => {
+  // klinecharts 9.8.12 n'a PAS de template intégré « rect » (seulement la FIGURE
+  // rect) : sans cet enregistrement au chargement du module, createOverlay renvoie
+  // null et l'outil Rectangle ne trace rien (cf. registerAvwapPicker, même pattern).
+  it("« rect » est enregistré au chargement du module, comme le picker AVWAP", () => {
+    expect(registeredOverlayNames).toContain("rect");
+    expect(registeredOverlayNames).toContain("avwapAnchorPick");
   });
 });
 

@@ -9,13 +9,15 @@
  * un slot le met au focus (`setFocusChart`). Chaque instance persiste ses propres
  * dessins sous « exchange:symbole » — les slots ne se marchent pas dessus.
  *
- * KLineChart fournit nativement TOUS les overlays requis (vérifié sur la v9.8.12
- * via `getSupportedOverlays` / `index.d.ts` + docs context7 v9) :
+ * KLineChart fournit nativement la plupart des overlays requis (vérifié sur la
+ * v9.8.12 via `getSupportedOverlays` / `index.d.ts` + docs context7 v9) :
  *  - 'segment'                -> droite de tendance (2 points) ;
- *  - 'horizontalStraightLine' -> ligne horizontale (1 point) ;
- *  - 'rect'                   -> rectangle (2 points) ;
- *  - 'fibonacciLine'          -> retracement de Fibonacci (2 points).
- * Le rectangle étant INTÉGRÉ, AUCUN `registerOverlay` custom n'est nécessaire.
+ *  - 'horizontalStraightLine' -> ligne horizontale (1 point).
+ * Le rectangle, en revanche, n'existe QUE comme FIGURE (primitive de dessin), pas
+ * comme template d'overlay : `createOverlay({name:"rect"})` renvoie null en
+ * silence. Comme fibCustom/fibTrend/VPFR, « rect » est donc un `registerOverlay`
+ * CUSTOM (cf. `registerRectOverlay` ci-dessous) — le nom est conservé pour ne pas
+ * changer TOOL_OVERLAY ni la persistance des dessins existants.
  *
  * Cycle de vie : chaque ChartInstance (re)crée son instance à chaque changement
  * symbole/TF et appelle `bindChart` / `unbindChart`. La barre d'outils lit l'outil
@@ -31,7 +33,7 @@ import { FIB_RETRACEMENT, FIB_TREND } from "./fibonacci";
 import { VPFR_NAME } from "./volumeRangeOverlay";
 // Store des indicateurs : le picker d'ancrage AVWAP y ajoute une instance.
 import { indicatorsStore } from "../store/indicators";
-import { lireTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 
 /** Identifiants d'outils exposés par la barre (cursor = aucun overlay). */
 export type DrawingToolId =
@@ -52,9 +54,10 @@ export type DrawingToolId =
   | "avwapAnchor";
 
 /**
- * Outil -> nom de l'overlay INTÉGRÉ KLineChart à dessiner (null pour le curseur).
- * Tous ces templates sont natifs de klinecharts 9.8.12 (vérifié dans le bundle) :
- * aucun `registerOverlay` custom requis.
+ * Outil -> nom du template d'overlay KLineChart à dessiner (null pour le curseur).
+ * « rect », « fib », « fibTrend » et « volumeRange » sont des templates CUSTOM
+ * (`registerOverlay`, cf. `registerRectOverlay` / fibonacci.ts / volumeRangeOverlay.ts) ;
+ * les autres sont natifs de klinecharts 9.8.12 (vérifié dans le bundle).
  */
 const TOOL_OVERLAY: Record<DrawingToolId, string | null> = {
   cursor: null,
@@ -73,6 +76,69 @@ const TOOL_OVERLAY: Record<DrawingToolId, string | null> = {
   volumeRange: VPFR_NAME, // profil de volume à plage fixe (overlay custom)
   avwapAnchor: null, // picker (pas un dessin) : géré à part dans selectTool, cf. startAvwapAnchor
 };
+
+// ───────────────────────── Overlay rectangle (custom) ─────────────────────────
+//
+// klinecharts 9.8.12 n'a PAS de template d'overlay intégré « rect » (seulement la
+// FIGURE `rect`, une primitive de dessin) : sans cet enregistrement, `createOverlay`
+// renvoie null en silence et l'outil Rectangle ne trace rien (vérifié au runtime :
+// rectId null vs segmentId OK, et dans le bundle : templates = fibonacciLine,
+// segment, rayLine, priceLine, … mais pas rect). On GARDE le nom « rect » : TOOL_OVERLAY
+// et la persistance des dessins par nom restent inchangés.
+
+/** Coins du rectangle défini par 2 points diagonaux (null si < 2 points) — pur, testé. */
+export function coinsRectangle(
+  coordinates: ReadonlyArray<{ x: number; y: number }>
+): Array<{ x: number; y: number }> | null {
+  const a = coordinates[0];
+  const b = coordinates[1];
+  if (a === undefined || b === undefined) return null;
+  return [
+    { x: a.x, y: a.y },
+    { x: b.x, y: a.y },
+    { x: b.x, y: b.y },
+    { x: a.x, y: b.y },
+  ];
+}
+
+let rectOverlayRegistered = false;
+
+/**
+ * Enregistre le template custom « rect » (idempotent, même pattern que
+ * `registerAvwapPicker`). Couleurs lues AU RENDU (`createPointFigures` est rappelé
+ * à chaque frame) : thème-aware, convention canvasTokens du lot A.
+ */
+function registerRectOverlay(): void {
+  if (rectOverlayRegistered) return;
+  rectOverlayRegistered = true;
+  registerOverlay({
+    name: "rect",
+    totalStep: 3, // 2 points à poser
+    needDefaultPointFigure: true,
+    needDefaultXAxisFigure: true,
+    needDefaultYAxisFigure: true,
+    createPointFigures: ({ coordinates }) => {
+      const coins = coinsRectangle(coordinates);
+      if (coins === null) return [];
+      return [
+        {
+          type: "polygon",
+          // Comme les zones du fib (fibonacci.ts) : un fill qui capte le mouseMove
+          // casserait le crosshair/pan fluides sous le rectangle.
+          ignoreEvent: ["mouseMoveEvent", "touchMoveEvent"],
+          attrs: { coordinates: coins },
+          styles: {
+            style: "stroke_fill",
+            color: rgbaTokenCanvas("--accent", 0.12, "#38bdf8"),
+            borderColor: lireTokenCanvas("--accent", "#38bdf8"),
+            borderSize: 1,
+          },
+        },
+      ];
+    },
+  });
+}
+registerRectOverlay();
 
 // ───────────────────────── Picker d'ancrage AVWAP ─────────────────────────
 //

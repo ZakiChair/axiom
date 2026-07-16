@@ -17,7 +17,8 @@
  *    mappable. `sz` OKX est en CONTRATS → qty = sz × ctVal (fetch REST au démarrage +
  *    refresh 24 h, mémoïsé par instId).
  *
- * La liste des symboles vient du KV (namespace « liq », clé « symboles »), pollée toutes
+ * La liste des symboles = KV (namespace « liq », clé « symboles ») ∪ symboles des alertes
+ * `liq-cascade` ACTIVES (KV « alerts »/« defs », cf. fusionnerSymbolesLiq), pollée toutes
  * les 60 s. Chaque message valide → parseur → `insererLiquidations`. Une purge quotidienne
  * borne la taille du .db (rétention 30 j).
  *
@@ -31,6 +32,8 @@
  *   - Bybit : S="Sell" (taker vend) → LONG liquidé ; S="Buy" (taker rachète) → SHORT liquidé.
  *   - OKX   : posSide (long/short) PRIORITAIRE ; repli side (sell→long, buy→short liquidé).
  */
+import type { AlertDef } from "@axiom/alerts";
+import { lireDefsKv, symbolesLiqCascadeActifs } from "./alerts";
 import { getDb } from "./db";
 import { insererLiquidations, purgerLiquidations, type LiqFil } from "./liquidations";
 
@@ -178,22 +181,33 @@ export function symbolesSurveilles(kvBrut: unknown): string[] {
   return out.length > 0 ? out : [...SYMBOLES_DEFAUT];
 }
 
+/**
+ * Fusionne l'ensemble surveillé : symboles du KV `liq/symboles` (repli défaut inclus,
+ * via `symbolesSurveilles`) ∪ symboles des alertes `liq-cascade` ACTIVES. Ainsi, créer
+ * une alerte cascade sur un symbole hors liste déclenche son ingestion au prochain
+ * poll du KV (≤60 s) — le tick daemon (alerts.ts) a alors des données à sommer.
+ * Fonction PURE (testée).
+ */
+export function fusionnerSymbolesLiq(kvBrut: unknown, defs: readonly AlertDef[]): string[] {
+  return [...new Set([...symbolesSurveilles(kvBrut), ...symbolesLiqCascadeActifs(defs)])].sort();
+}
+
 // ─────────────────────────── Lecture KV (pattern lireDefsKv de alerts.ts) ───────────────────────────
 
 /**
- * Lit la liste des symboles surveillés depuis le KV (namespace « liq », clé
- * « symboles »). Tolérant : table absente (le front n'a jamais écrit) ou JSON corrompu
- * → repli sur le défaut. Même pattern que `lireDefsKv` (alerts.ts).
+ * Lit la valeur BRUTE du KV `liq/symboles` (JSON parsé, non normalisé). Tolérant :
+ * table absente (le front n'a jamais écrit) ou JSON corrompu → `undefined` (le repli
+ * défaut est appliqué par `symbolesSurveilles`). Même pattern que `lireDefsKv`.
  */
-export function lireSymbolesKv(): string[] {
+function lireKvLiqBrut(): unknown {
   try {
     const ligne = getDb()
       .query("SELECT valeur FROM kv WHERE namespace = ? AND cle = ?")
       .get("liq", "symboles") as { valeur: string } | null;
-    if (!ligne) return [...SYMBOLES_DEFAUT];
-    return symbolesSurveilles(JSON.parse(ligne.valeur));
+    if (!ligne) return undefined;
+    return JSON.parse(ligne.valeur) as unknown;
   } catch {
-    return [...SYMBOLES_DEFAUT];
+    return undefined;
   }
 }
 
@@ -529,7 +543,8 @@ export function demarrerBoucleLiquidations(): () => void {
 
   const rafraichir = (): void => {
     try {
-      const symboles = lireSymbolesKv();
+      // KV `liq/symboles` ∪ symboles des alertes liq-cascade actives (KV `alerts/defs`).
+      const symboles = fusionnerSymbolesLiq(lireKvLiqBrut(), lireDefsKv(getDb()));
       feed.setSymboles(symboles);
       feedOkx.setSymboles(symboles);
     } catch (err) {

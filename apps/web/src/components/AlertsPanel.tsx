@@ -417,8 +417,9 @@ export function AlertsPanel() {
               className="w-full rounded border border-border bg-bg px-2 py-1 text-xs tabular-nums text-text outline-none placeholder:text-text-dim focus:border-text-dim"
             />
             <p className="px-0.5 text-[10px] text-text-dim">
-              Symbole affiché uniquement, flux liq actif requis (heatmap ou fenêtre LIQ ouverte).
-              Non évaluée onglet fermé.
+              Front : symbole affiché, flux liq actif (heatmap ou fenêtre LIQ ouverte).
+              Daemon onglet fermé : tous les symboles d&apos;alerte (tick 10 s, nouveau
+              symbole ingéré en ≤60 s).
             </p>
           </div>
         )}

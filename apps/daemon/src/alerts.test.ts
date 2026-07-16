@@ -6,14 +6,19 @@ import {
   chargerDefs,
   doitNotifier,
   evaluerEtPersister,
+  evaluerLiqCascadeTick,
   evaluerTick,
+  FENETRE_LIQ_MS,
   fusionnerEtatArme,
   SEUIL_HEARTBEAT_MS,
+  sommeLiqUsdParMin,
   symbolesBinanceActifs,
   symbolesFundingActifs,
+  symbolesLiqCascadeActifs,
   TYPES_FUNDING,
   TYPES_PRIX,
 } from "./alerts";
+import { assurerTableLiquidations } from "./liquidations";
 
 /** Def d'alerte prix-croise binance, réutilisée dans plusieurs cas. */
 function alertePrix(id: string, symbol: string, niveau: number, sens: "hausse" | "baisse" = "hausse"): AlertDef {
@@ -39,6 +44,18 @@ function alerteFunding(
     symbol,
     source: "binance",
     condition: { type: "funding-extreme", seuilAbs, sens },
+    actif: true,
+    declenchements: [],
+  };
+}
+
+/** Def liq-cascade binance (seuil USD/min). */
+function alerteCascade(id: string, symbol: string, seuilUsdParMin = 1_000_000): AlertDef {
+  return {
+    id,
+    symbol,
+    source: "binance",
+    condition: { type: "liq-cascade", seuilUsdParMin },
     actif: true,
     declenchements: [],
   };
@@ -81,6 +98,42 @@ describe("symbolesFundingActifs", () => {
       alerteFunding("f5", "BTCUSDT"), // doublon
     ];
     expect(symbolesFundingActifs(defs)).toEqual(["BTCUSDT", "ETHUSDT"]);
+  });
+});
+
+describe("symbolesLiqCascadeActifs", () => {
+  test("ne retient que binance actives liq-cascade (uniques, majuscules, triées)", () => {
+    const defs: AlertDef[] = [
+      alerteCascade("l1", "dogeusdt"),
+      alerteCascade("l2", "BTCUSDT"),
+      { ...alerteCascade("l3", "SOLUSDT"), actif: false }, // inactive → exclue
+      { ...alerteCascade("l4", "XRPUSDT"), source: "kraken" }, // non-binance → exclue
+      alerteFunding("f1", "ETHUSDT"), // autre type → exclue
+      alerteCascade("l5", "BTCUSDT"), // doublon symbole
+    ];
+    expect(symbolesLiqCascadeActifs(defs)).toEqual(["BTCUSDT", "DOGEUSDT"]);
+  });
+});
+
+describe("sommeLiqUsdParMin", () => {
+  test("somme les usd du symbole sur la fenêtre glissante d'une minute", () => {
+    const d = new Database(":memory:");
+    assurerTableLiquidations(d);
+    const maintenant = 10_000_000;
+    const inserer = d.query(
+      "INSERT INTO liquidations (symbole, venue, t, side, price, qty, usd) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    );
+    inserer.run("BTCUSDT", "bybit", maintenant - 59_000, "long", 100, 1, 100); // dans la fenêtre
+    inserer.run("BTCUSDT", "okx", maintenant - FENETRE_LIQ_MS, "short", 25, 1, 25); // borne incluse
+    inserer.run("BTCUSDT", "bybit", maintenant - FENETRE_LIQ_MS - 1, "long", 999, 1, 999); // hors fenêtre
+    inserer.run("ETHUSDT", "bybit", maintenant, "long", 50, 1, 50); // autre symbole
+    expect(sommeLiqUsdParMin(d, "BTCUSDT", maintenant)).toBe(125);
+  });
+
+  test("table vide ou symbole absent → 0", () => {
+    const d = new Database(":memory:");
+    assurerTableLiquidations(d);
+    expect(sommeLiqUsdParMin(d, "XRPUSDT", 1_000_000)).toBe(0);
   });
 });
 
@@ -243,5 +296,77 @@ describe("evaluerEtPersister (démarrage complet en base)", () => {
       { db: d, notifier: () => {}, dernierHeartbeat: 0 },
     );
     expect(r).toHaveLength(0);
+  });
+});
+
+describe("evaluerLiqCascadeTick (tick complet en base)", () => {
+  test("inerte sans def liq-cascade active (aucune table liquidations requise)", () => {
+    const d = baseAvecAlerte(alertePrix("p1", "BTCUSDT", 100)); // aucune def liq-cascade
+    const notifier = (): void => {
+      throw new Error("ne doit pas notifier");
+    };
+    evaluerLiqCascadeTick(1_000_000, { db: d, notifier, dernierHeartbeat: 0 });
+    // Inerte : la table liquidations n'a même pas été créée.
+    const tables = d
+      .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'liquidations'")
+      .all();
+    expect(tables).toHaveLength(0);
+  });
+
+  test("calibre sous le seuil puis déclenche quand la minute glissante le dépasse", () => {
+    const d = baseAvecAlerte(alerteCascade("l1", "BTCUSDT", 1_000_000));
+    const notifs: Array<{ symbol: string; decl: Declenchement }> = [];
+    const notifier = (symbol: string, decl: Declenchement): void => {
+      notifs.push({ symbol, decl });
+    };
+    const opts = { db: d, notifier, dernierHeartbeat: 0 }; // heartbeat ancien → notifie
+
+    // Tick 1 : table vide → 0 USD/min → calibrage (armée), aucun déclenchement.
+    evaluerLiqCascadeTick(1_000_000, opts);
+    expect(chargerDefs(d).find((x) => x.id === "l1")?.arme).toBe(true);
+    expect(notifs).toHaveLength(0);
+
+    // 1,2 M$ dans la fenêtre du tick 2 + 5 M$ HORS fenêtre (ignorés).
+    const inserer = d.query(
+      "INSERT INTO liquidations (symbole, venue, t, side, price, qty, usd) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    );
+    inserer.run("BTCUSDT", "bybit", 1_050_000, "long", 100, 7_000, 700_000);
+    inserer.run("BTCUSDT", "okx", 1_055_000, "short", 100, 5_000, 500_000);
+    inserer.run("BTCUSDT", "bybit", 900_000, "long", 100, 50_000, 5_000_000); // hors fenêtre
+
+    // Tick 2 : 1,2 M$ ≥ seuil → déclenche, journalise et notifie (heartbeat ancien).
+    evaluerLiqCascadeTick(1_060_000, opts);
+    const journal = d
+      .query("SELECT alertId, symbol, valeur, notifie FROM alertes_journal")
+      .all() as Array<{ alertId: string; symbol: string; valeur: number; notifie: number }>;
+    expect(journal).toHaveLength(1);
+    expect(journal[0]).toMatchObject({ alertId: "l1", symbol: "BTCUSDT", valeur: 1_200_000, notifie: 1 });
+    expect(notifs).toHaveLength(1);
+    expect(notifs[0]?.symbol).toBe("BTCUSDT");
+
+    // Tick 3 : la fenêtre a glissé (débit retombé sous le seuil) → ré-armement, pas de re-fire.
+    evaluerLiqCascadeTick(2_000_000, opts);
+    expect(chargerDefs(d).find((x) => x.id === "l1")?.arme).toBe(true);
+    expect(notifs).toHaveLength(1);
+  });
+
+  test("app ouverte (heartbeat récent) : journalise mais NE notifie PAS", () => {
+    const d = baseAvecAlerte(alerteCascade("l2", "BTCUSDT", 1_000));
+    const notifs: Declenchement[] = [];
+    const notifier = (_symbol: string, decl: Declenchement): void => {
+      notifs.push(decl);
+    };
+    const opts = { db: d, notifier, dernierHeartbeat: 999_990 }; // heartbeat il y a 10 ms
+
+    evaluerLiqCascadeTick(1_000_000, opts); // calibrage à 0 (armée)
+    d.query(
+      "INSERT INTO liquidations (symbole, venue, t, side, price, qty, usd) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).run("BTCUSDT", "bybit", 1_005_000, "long", 100, 20, 2_000);
+    evaluerLiqCascadeTick(1_010_000, opts);
+
+    const journal = d.query("SELECT notifie FROM alertes_journal").all() as Array<{ notifie: number }>;
+    expect(journal).toHaveLength(1);
+    expect(journal[0]?.notifie).toBe(0); // journalisé mais NON notifié (front actif)
+    expect(notifs).toHaveLength(0);
   });
 });

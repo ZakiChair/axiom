@@ -15,14 +15,16 @@
  *    de divergence ; on évalue `cvd-spot-perp-div` (app ouverte uniquement — pas de
  *    pipeline orderflow côté daemon).
  *  - POLL LIQ-CASCADE (~5 s) : injecte `liqUsdParMin` (notionnel liquidé sur la dernière
- *    minute glissante, pure `usdParMinute` sur le buffer `liqEventsStore`). LIMITE
- *    ASSUMÉE : évaluée uniquement pour le SYMBOLE COURANT du chart et seulement quand
- *    le flux liq est retenu (heatmap ON ou fenêtre LIQ ouverte — cf. fluxLiqRetenu) ;
- *    flux non retenu ou autre symbole → non évaluable (armement figé, pas de faux 0).
+ *    minute glissante, pure `usdParMinute` sur le buffer `liqEventsStore`). Côté FRONT :
+ *    évaluée uniquement pour le SYMBOLE COURANT du chart et seulement quand le flux liq
+ *    est retenu (heatmap ON ou fenêtre LIQ ouverte — cf. fluxLiqRetenu) ; flux non retenu
+ *    ou autre symbole → non évaluable ici (armement figé, pas de faux 0) — le daemon
+ *    couvre TOUS les symboles d'alerte onglet fermé (cf. ci-dessous).
  *
  * ONGLET FERMÉ : le daemon évalue aussi `funding-extreme` (poll premiumIndex ~60 s,
- * lot D3). CVD spot/perp-div ET liq-cascade restent dormants côté daemon (pas de
- * pipeline orderflow ni de flux liq).
+ * lot D3) ET `liq-cascade` (tick 10 s sur sa table `liquidations` ingérée Bybit+OKX,
+ * tous les symboles d'alerte — ingestion d'un nouveau symbole ≤60 s). Seul CVD
+ * spot/perp-div reste dormant côté daemon (pas de pipeline orderflow).
  *
  * Un déclenchement → journal du store + notification système (Notification API) + bip
  * discret (WebAudio, aucun fichier binaire). AUCUNE donnée haute fréquence ne transite
@@ -195,10 +197,12 @@ function creerRuntime(): Unsubscribe {
   };
 
   // ── Poll liq-cascade : buffer liq du chart → moteur ───────────────────────
-  // LIMITE ASSUMÉE (cf. en-tête) : le buffer `liqEventsStore` ne couvre que le symbole
+  // Côté FRONT (cf. en-tête) : le buffer `liqEventsStore` ne couvre que le symbole
   // COURANT du chart et n'est alimenté que si le flux est retenu (heatmap ON ou fenêtre
   // LIQ ouverte). Flux non retenu → on n'évalue PAS (non évaluable : l'armement reste
-  // figé, on n'injecte pas un 0 trompeur). Le daemon onglet fermé n'évalue pas ce type.
+  // figé, on n'injecte pas un 0 trompeur). Le daemon évalue AUSSI ce type onglet fermé
+  // (tick 10 s, tous les symboles d'alerte) — l'anti-doublon heartbeat (>90 s) évite la
+  // double notification quand l'app est ouverte.
   const evaluerLiqCascade = (): void => {
     if (!fluxLiqRetenu()) return; // flux inactif → non évaluable
     const symbol = marketStore.getState().symbol;

@@ -282,7 +282,8 @@ export function BriefWindow() {
   return (
     <>
       <EnTeteFenetre
-        titre="BRIEF · Point marché"
+        mnemo="BRIEF"
+        titre="Point marché"
         sousTitre={`Ouverture + review de session · ${noteFraicheur}`}
         actions={
           <>

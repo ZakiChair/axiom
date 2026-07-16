@@ -433,5 +433,5 @@ export function Fraicheur({
   majTs?: number | null;
   cadence?: string;
 }) {
-  return <span>{texteFraicheur(loading, majTs ?? null, Date.now(), cadence)}</span>;
+  return <span className="tabular-nums">{texteFraicheur(loading, majTs ?? null, Date.now(), cadence)}</span>;
 }

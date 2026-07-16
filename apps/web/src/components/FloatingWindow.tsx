@@ -257,7 +257,6 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
                 <button
                   key={couleur}
                   type="button"
-                  title={couleur}
                   onClick={() => {
                     windowManagerStore.getState().setGroup(id, couleur);
                     setMenuGroupeOuvert(false);

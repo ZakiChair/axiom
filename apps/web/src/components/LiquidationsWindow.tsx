@@ -521,15 +521,16 @@ function ContenuLive() {
       <EnTeteFenetre
         titre="Liquidations"
         sousTitre={`${symbol} · ${okxCouvre(symbol) ? "perp Bybit + OKX (live)" : "perp Bybit (live)"}`}
-        actions={
-          <div className="flex items-center gap-1.5">
-            <SelecteurFenetre fenetre={fenetre} onChange={setFenetre} />
-            <ToggleChart />
-            <SelecteurMode />
-            <ToggleEstimes />
-          </div>
-        }
       />
+
+      {/* Contrôles sur leur propre rangée (wrap) : 4 contrôles dans `actions` de l'en-tête
+          écrasaient le titre à la largeur par défaut de la fenêtre (460 px). */}
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-4 pt-2">
+        <SelecteurFenetre fenetre={fenetre} onChange={setFenetre} />
+        <ToggleChart />
+        <SelecteurMode />
+        <ToggleEstimes />
+      </div>
 
       {/* Ligne « Réglages » (leviers estimés + granularité), sous les toggles ; masquée si
           aucune couche liquidations n'est active. */}

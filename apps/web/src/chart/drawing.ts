@@ -31,6 +31,7 @@ import { FIB_RETRACEMENT, FIB_TREND } from "./fibonacci";
 import { VPFR_NAME } from "./volumeRangeOverlay";
 // Store des indicateurs : le picker d'ancrage AVWAP y ajoute une instance.
 import { indicatorsStore } from "../store/indicators";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 
 /** Identifiants d'outils exposés par la barre (cursor = aucun overlay). */
 export type DrawingToolId =
@@ -434,7 +435,7 @@ export function redrawFibOverlays(rev: number): void {
  */
 export function exportChartImage(symbol: string, tf: string): boolean {
   if (activeChart === null) return false;
-  const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#000000";
+  const bg = lireTokenCanvas("--bg", "#000000");
   const url = activeChart.getConvertPictureUrl(true, "png", bg);
   const date = new Date().toISOString().slice(0, 10); // AAAA-MM-JJ
   const a = document.createElement("a");

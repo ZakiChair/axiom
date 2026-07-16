@@ -60,6 +60,7 @@ import { fibStore } from "./fibonacci";
 import { createRafThrottle, type RafThrottle } from "./rafThrottle";
 import { bindPriceAlertMenu } from "./priceAlertMenu";
 import { SymbolBanner } from "../components/SymbolBanner";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 
 /** Type d'échelle de l'axe prix (miroir de YAxisType klinecharts). */
 export type PriceScaleType = "normal" | "log" | "percentage";
@@ -164,27 +165,22 @@ type SubscribeKlineAvecResync = (
   onResync?: (candles: Candle[]) => void,
 ) => Unsubscribe;
 
-/** Lit un token CSS sémantique résolu depuis <html> (le canvas n'évalue pas var()). */
-function readToken(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
 /** Applique la palette du thème courant au graphe (bougies/grille/axes/crosshair + fond). */
 function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void {
-  const bg = readToken("--bg");
-  const surface = readToken("--surface");
-  const border = readToken("--border");
-  const text = readToken("--text");
-  const textDim = readToken("--text-dim");
-  const up = readToken("--up");
-  const down = readToken("--down");
+  const bg = lireTokenCanvas("--bg", "");
+  const surface = lireTokenCanvas("--surface", "");
+  const border = lireTokenCanvas("--border", "");
+  const text = lireTokenCanvas("--text", "");
+  const textDim = lireTokenCanvas("--text-dim", "");
+  const up = lireTokenCanvas("--up", "");
+  const down = lireTokenCanvas("--down", "");
   // Bougies : token dédié (pastel en « cute »), avec repli sur --up/--down si absent.
-  const candleUp = readToken("--candle-up") || up;
-  const candleDown = readToken("--candle-down") || down;
-  const grid = readToken("--grid");
-  const crosshair = readToken("--crosshair");
-  const atmos = readToken("--atmos");
-  const font = readToken("--font-display");
+  const candleUp = lireTokenCanvas("--candle-up", up);
+  const candleDown = lireTokenCanvas("--candle-down", down);
+  const grid = lireTokenCanvas("--grid", "");
+  const crosshair = lireTokenCanvas("--crosshair", "");
+  const atmos = lireTokenCanvas("--atmos", "");
+  const font = lireTokenCanvas("--font-display", "");
 
   chartDom.style.backgroundColor = bg;
   chartDom.style.backgroundImage = atmos && atmos !== "none" ? atmos : "";
@@ -373,7 +369,7 @@ export function ChartInstance({
       if (x === undefined || !Number.isFinite(x)) return;
       const main = chart.getSize(CANDLE_PANE_ID, DomPosition.Main);
       if (!main || x < main.left || x > main.left + main.width) return;
-      ctx.strokeStyle = readToken("--crosshair") || "#8892a6";
+      ctx.strokeStyle = lireTokenCanvas("--crosshair", "#8892a6");
       ctx.globalAlpha = 0.55;
       ctx.setLineDash([4, 3]);
       ctx.lineWidth = 1;

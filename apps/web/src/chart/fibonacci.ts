@@ -24,6 +24,7 @@ import type {
   OverlayFigureIgnoreEventType,
 } from "klinecharts";
 import { createStore } from "zustand/vanilla";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 
 /**
  * Les figures du fib ignorent UNIQUEMENT le survol (crosshair/pan fluides), mais
@@ -141,16 +142,6 @@ export const fibStore = createStore<FibState>((set, get) => ({
 
 // ---------- Rendu thémé ----------
 
-/** Lit une variable CSS de thème sur <html> (repli si indisponible). */
-function cssVar(name: string, fallback: string): string {
-  try {
-    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return v.length > 0 ? v : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 /** Ajoute un canal alpha à une couleur hex #rrggbb (sinon renvoie tel quel). */
 function withAlpha(hex: string, alpha: string): string {
   return /^#[0-9a-fA-F]{6}$/.test(hex) ? `${hex}${alpha}` : hex;
@@ -165,10 +156,10 @@ interface ThemeColors {
 
 function themeColors(): ThemeColors {
   return {
-    accent: cssVar("--accent", "#38bdf8"),
-    up: cssVar("--up", "#2dc08e"),
-    down: cssVar("--down", "#f92855"),
-    textDim: cssVar("--text-dim", "#9ca3af"),
+    accent: lireTokenCanvas("--accent", "#38bdf8"),
+    up: lireTokenCanvas("--up", "#2dc08e"),
+    down: lireTokenCanvas("--down", "#f92855"),
+    textDim: lireTokenCanvas("--text-dim", "#9ca3af"),
   };
 }
 

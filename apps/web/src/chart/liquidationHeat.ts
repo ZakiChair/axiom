@@ -38,6 +38,7 @@ import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
 import { volumeProfileStore } from "../store/volumeProfile";
 import { formatHeureMinute, formatPrice, formatUsd } from "../lib/format";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 
 /** Cellule agrégée : une bougie × un bucket de prix. */
 export interface LiqCell {
@@ -500,11 +501,6 @@ const DOWN_RGB_FALLBACK: [number, number, number] = [239, 68, 68];
 /** Repli RVB de `--accent` (flash de bande) si le token n'est pas parsable (#38bdf8). */
 const ACCENT_RGB_FALLBACK: [number, number, number] = [56, 189, 248];
 
-/** Lit un token CSS sémantique concret depuis <html> (le canvas n'évalue pas var()). */
-function readToken(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
 /**
  * Contrôleur canvas de la HEATMAP de liquidations (bougie × bucket de prix). Remplace le
  * rendu overlay intérimaire : peint une grille 2D temps×prix (intensité log viridis) plus
@@ -791,16 +787,16 @@ export class LiquidationHeatController {
     // par toutes les couches, comme le fait volumeProfile.ts. La rampe ESTHÉTIQUE de la heatmap
     // est choisie par le THÈME actif (Bloomberg ambre, Matrix vert, dark/aurora viridis…), avec
     // repli fond clair/sombre via `--bg` pour un thème inconnu (cf. rampePourTheme).
-    const up = readToken("--up") || "#10b981";
-    const down = readToken("--down") || "#ef4444";
-    const fondClair = estFondClair(readToken("--bg"));
+    const up = lireTokenCanvas("--up", "#10b981");
+    const down = lireTokenCanvas("--down", "#ef4444");
+    const fondClair = estFondClair(lireTokenCanvas("--bg", ""));
     const tokens: Tokens = {
-      textDim: readToken("--text-dim") || "#9ca3af",
+      textDim: lireTokenCanvas("--text-dim", "#9ca3af"),
       up,
       down,
-      text: readToken("--text") || "#e5e7eb",
-      surface: readToken("--surface") || "#171717",
-      border: readToken("--border") || "#262626",
+      text: lireTokenCanvas("--text", "#e5e7eb"),
+      surface: lireTokenCanvas("--surface", "#171717"),
+      border: lireTokenCanvas("--border", "#262626"),
       rampe: rampePourTheme(themeStore.getState().theme, fondClair),
       // Parse UNE fois par frame (le mode dominance compose un rgba PAR cellule).
       upRgb: parseCssColor(up) ?? UP_RGB_FALLBACK,
@@ -1229,7 +1225,7 @@ export class LiquidationHeatController {
     const y0 = Math.round(Math.min(yTop, yBot));
     const y1 = Math.round(Math.max(yTop, yBot));
 
-    const rgb = parseCssColor(readToken("--accent")) ?? ACCENT_RGB_FALLBACK;
+    const rgb = parseCssColor(lireTokenCanvas("--accent", "")) ?? ACCENT_RGB_FALLBACK;
     const alpha = 0.28 * (restant / FLASH_DUREE_MS);
     const ctx = this.ctx;
     ctx.save();

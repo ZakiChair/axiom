@@ -33,6 +33,7 @@ import { cvdDivergenceStore } from "../store/cvd-divergence";
 import { detectImbalances, detectDeltaDivergences, type DivergenceFlag } from "./footprintAnalytics";
 import { subscribePerpAggTrades } from "../data/binanceFutures";
 import { detectCvdDivergences, type CvdDivergence } from "./cvdSpotPerp";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 // Calcul pur (CVD, footprint, formatteurs) — cf. ./orderflow.calc.
 import {
   buildCvdSpotPerpBuckets,
@@ -81,11 +82,6 @@ interface FootprintPalette {
   accent: string; // liseré du POC
   text: string; // chiffres buy/sell
   textDim: string; // bornes de la zone de valeur
-}
-
-/** Lit un token CSS sémantique concret depuis <html> (le canvas n'évalue pas var()). */
-function readToken(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
 // Cœur de calcul PUR extrait dans ./orderflow.calc (CVD, footprint, formatteurs).
@@ -151,8 +147,8 @@ function ensureCvdSpRegistered(): void {
     series: IndicatorSeries.Normal,
     // spot = token --up (vert), perp = token --accent (jaune). Lus au rendu → thème-aware.
     figures: [
-      { key: "spot", title: "Spot: ", type: "line", styles: () => ({ color: readToken("--up") || "#10b981" }) },
-      { key: "perp", title: "Perp: ", type: "line", styles: () => ({ color: readToken("--accent") || "#f5c518" }) },
+      { key: "spot", title: "Spot: ", type: "line", styles: () => ({ color: lireTokenCanvas("--up", "#10b981") }) },
+      { key: "perp", title: "Perp: ", type: "line", styles: () => ({ color: lireTokenCanvas("--accent", "#f5c518") }) },
     ],
     // calc PUR de mapping : lit les séries pré-calculées (extendData) par timestamp.
     calc: (dataList, indicator) => {
@@ -173,8 +169,8 @@ function ensureCvdSpRegistered(): void {
       const ext = indicator.extendData as CvdSpExtend | undefined;
       const divByTime = ext?.divByTime;
       if (!divByTime) return false;
-      const up = readToken("--up") || "#10b981";
-      const down = readToken("--down") || "#ef4444";
+      const up = lireTokenCanvas("--up", "#10b981");
+      const down = lireTokenCanvas("--down", "#ef4444");
       const size = 6;
       const yTop = bounding.top + 2;
       for (let i = visibleRange.from; i < visibleRange.to; i++) {
@@ -687,17 +683,17 @@ export class OrderflowController {
 
     // Palette du footprint lue une fois par frame depuis les tokens de thème.
     const palette: FootprintPalette = {
-      up: readToken("--up") || "#10b981",
-      down: readToken("--down") || "#ef4444",
-      accent: readToken("--accent") || "#f5c518",
-      text: readToken("--text") || "#e5e7eb",
-      textDim: readToken("--text-dim") || "#94a3b8",
+      up: lireTokenCanvas("--up", "#10b981"),
+      down: lireTokenCanvas("--down", "#ef4444"),
+      accent: lireTokenCanvas("--accent", "#f5c518"),
+      text: lireTokenCanvas("--text", "#e5e7eb"),
+      textDim: lireTokenCanvas("--text-dim", "#94a3b8"),
     };
 
     // Palette des imbalances (lue depuis les tokens dédiés, ou repli sur palette).
     const imbPalette = {
-      ask: readToken("--of-imb-buy") || palette.up,
-      bid: readToken("--of-imb-sell") || palette.down,
+      ask: lireTokenCanvas("--of-imb-buy", palette.up),
+      bid: lireTokenCanvas("--of-imb-sell", palette.down),
     };
 
     // Collecte des données analytiques : candles + bars visibles, imbalances par bar, divergences.

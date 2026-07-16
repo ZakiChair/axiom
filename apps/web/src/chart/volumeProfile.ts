@@ -17,6 +17,7 @@ import { ActionType, DomPosition } from "klinecharts";
 import type { Chart, Point } from "klinecharts";
 import type { Candle } from "@axiom/types";
 import { marketStore } from "../store/market";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 
 /** Pane prix (id par défaut KLineChart). */
 const CANDLE_PANE_ID = "candle_pane";
@@ -154,11 +155,6 @@ export function computeVolumeProfile(
     vaLow: bins[lo]?.priceLow ?? priceMin,
     vaHigh: bins[hi]?.priceHigh ?? priceMax,
   };
-}
-
-/** Lit un token CSS sémantique concret depuis <html> (le canvas n'évalue pas var()). */
-function readToken(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
 /**
@@ -302,9 +298,9 @@ export class VolumeProfileController {
     const vp = computeVolumeProfile(candles, from, to, BIN_COUNT);
     if (vp === null) return;
 
-    const up = readToken("--up") || "#10b981";
-    const down = readToken("--down") || "#ef4444";
-    const accent = readToken("--accent") || "#f5c518";
+    const up = lireTokenCanvas("--up", "#10b981");
+    const down = lireTokenCanvas("--down", "#ef4444");
+    const accent = lireTokenCanvas("--accent", "#f5c518");
 
     const maxBarW = width * MAX_WIDTH_FRAC;
     const xRight = left + width; // histogramme ancré au bord droit du pane
@@ -368,7 +364,7 @@ export class VolumeProfileController {
     ctx.restore();
 
     // Légende discrète.
-    ctx.fillStyle = readToken("--text-dim") || "#9ca3af";
+    ctx.fillStyle = lireTokenCanvas("--text-dim", "#9ca3af");
     ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
     ctx.textAlign = "right";
     ctx.textBaseline = "top";

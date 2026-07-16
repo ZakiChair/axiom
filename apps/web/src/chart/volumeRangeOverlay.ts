@@ -18,6 +18,7 @@ import type {
 } from "klinecharts";
 import type { Candle } from "@axiom/types";
 import { computeVolumeProfile } from "./volumeProfile";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 
 export const VPFR_NAME = "volumeRange";
 
@@ -70,15 +71,6 @@ function lastIndexLE(times: readonly number[], t: number): number {
 }
 
 // ───────────────────────────── Couleurs thémées ─────────────────────────────
-
-function cssVar(name: string, fallback: string): string {
-  try {
-    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-    return v.length > 0 ? v : fallback;
-  } catch {
-    return fallback;
-  }
-}
 
 // ───────────────────────────── Accès chart (extendData) ─────────────────────
 
@@ -176,10 +168,10 @@ function buildFigures(params: OverlayCreateFiguresCallbackParams): OverlayFigure
   const maxBarW = Math.min(endX - startX, 300);
   if (maxBarW <= 0) return [];
 
-  const up = cssVar("--up", "#2dc08e");
-  const down = cssVar("--down", "#f92855");
-  const accent = cssVar("--accent", "#38bdf8");
-  const textDim = cssVar("--text-dim", "#9ca3af");
+  const up = lireTokenCanvas("--up", "#2dc08e");
+  const down = lireTokenCanvas("--down", "#f92855");
+  const accent = lireTokenCanvas("--accent", "#38bdf8");
+  const textDim = lireTokenCanvas("--text-dim", "#9ca3af");
   const pricePrecision = Number.isFinite(precision.price) ? precision.price : 2;
 
   const figures: OverlayFigure[] = [];

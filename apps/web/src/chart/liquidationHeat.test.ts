@@ -36,6 +36,9 @@ import {
   estFondClair,
   parseCssColor,
   couleurRampe,
+  couleurRampeArrets,
+  rampePourTheme,
+  alphaFadeIn,
   filtrerNiveauxDenses,
   dechevaucher,
   type LiqGrid,
@@ -128,6 +131,18 @@ describe("construireGrille", () => {
     const fin = construireGrille(events, candles, 0, 2, 0.5);
     expect(fin?.taille).toBeCloseTo(0.05, 9);
     expect(fin?.cells.size).toBe(2); // buckets toujours distincts (encore plus fins)
+  });
+
+  it("renseigne dernierTime = max des time des événements de la cellule", () => {
+    // 3 events même bougie/bucket, temps désordonnés → dernierTime = le plus grand (fade-in).
+    const candles = [candle({ time: 0, close: 100 }), candle({ time: 60000, close: 100 })];
+    const events = [
+      ev({ time: 1000, side: "long", price: 100, usd: 500 }),
+      ev({ time: 1500, side: "long", price: 100, usd: 300 }),
+      ev({ time: 1200, side: "short", price: 100, usd: 100 }),
+    ];
+    const cell = [...(construireGrille(events, candles, 0, 2)?.cells.values() ?? [])][0];
+    expect(cell?.dernierTime).toBe(1500);
   });
 });
 
@@ -349,6 +364,76 @@ describe("couleurRampe", () => {
     expect(couleurRampe(1, true)).toEqual(couleurViridis(0)); // max → violet foncé
     expect(couleurRampe(0, true)).toEqual(couleurViridis(1)); // min → jaune pâle
     expect(couleurRampe(0.25, true)).toEqual(couleurViridis(0.75));
+  });
+});
+
+describe("couleurRampeArrets", () => {
+  const R: ReadonlyArray<readonly [number, number, number]> = [
+    [0, 0, 0],
+    [10, 20, 30],
+    [100, 200, 255],
+  ];
+  it("interpole linéairement entre arrêts (extrêmes + arrêt du milieu)", () => {
+    expect(couleurRampeArrets(0, R)).toEqual([0, 0, 0]);
+    expect(couleurRampeArrets(1, R)).toEqual([100, 200, 255]);
+    expect(couleurRampeArrets(0.5, R)).toEqual([10, 20, 30]); // arrêt central pile
+    expect(couleurRampeArrets(0.25, R)).toEqual([5, 10, 15]); // mi-chemin arrêt 0 → 1
+  });
+  it("clampe t hors [0,1]", () => {
+    expect(couleurRampeArrets(-1, R)).toEqual([0, 0, 0]);
+    expect(couleurRampeArrets(2, R)).toEqual([100, 200, 255]);
+  });
+  it("sur les arrêts VIRIDIS, équivaut à couleurViridis", () => {
+    const V = rampePourTheme("dark", false); // = VIRIDIS
+    for (const t of [0, 0.3, 0.5, 0.75, 1]) {
+      expect(couleurRampeArrets(t, V)).toEqual(couleurViridis(t));
+    }
+  });
+});
+
+describe("rampePourTheme", () => {
+  it("dark et aurora → viridis direct (jaune = max)", () => {
+    for (const th of ["dark", "aurora"]) {
+      expect(couleurRampeArrets(0, rampePourTheme(th, false))).toEqual(couleurViridis(0));
+      expect(couleurRampeArrets(1, rampePourTheme(th, false))).toEqual(couleurViridis(1));
+    }
+  });
+  it("cute et tout thème à fond clair → viridis inversé", () => {
+    expect(couleurRampeArrets(1, rampePourTheme("cute", false))).toEqual(couleurViridis(0)); // max → violet
+    expect(couleurRampeArrets(0, rampePourTheme("cute", false))).toEqual(couleurViridis(1)); // min → jaune
+    // thème inconnu à fond clair : même repli inversé.
+    expect(couleurRampeArrets(1, rampePourTheme("inconnu", true))).toEqual(couleurViridis(0));
+  });
+  it("thème inconnu à fond sombre → viridis direct (repli)", () => {
+    expect(couleurRampeArrets(1, rampePourTheme("inconnu", false))).toEqual(couleurViridis(1));
+  });
+  it("bloomberg → noir profond vers ambre saturé", () => {
+    const r = rampePourTheme("bloomberg", false);
+    expect(couleurRampeArrets(0, r)).toEqual([12, 10, 6]); // noir profond
+    expect(couleurRampeArrets(1, r)).toEqual([255, 196, 0]); // ambre saturé
+  });
+  it("matrix → noir vers vert néon", () => {
+    const r = rampePourTheme("matrix", false);
+    expect(couleurRampeArrets(0, r)).toEqual([4, 12, 6]);
+    expect(couleurRampeArrets(1, r)).toEqual([91, 255, 143]);
+  });
+});
+
+describe("alphaFadeIn", () => {
+  it("cellule fraîche à age 0 → flash plein (alpha ≈ 1)", () => {
+    // dernierTime 1000 > tsDemarrage 500 ; now 1000 → age 0 → alpha = nominal + (1-nominal).
+    expect(alphaFadeIn(0.2, 1000, 500, 1000)).toBeCloseTo(1, 9);
+  });
+  it("fondu linéaire puis retour au nominal à DUREE_FADE (400 ms)", () => {
+    expect(alphaFadeIn(0.2, 1000, 500, 1200)).toBeCloseTo(0.6, 9); // age 200 (moitié) → 0.2 + 0.8×0.5
+    expect(alphaFadeIn(0.2, 1000, 500, 1400)).toBe(0.2); // age 400 → nominal (borne exclue)
+    expect(alphaFadeIn(0.2, 1000, 500, 2000)).toBe(0.2); // bien après → nominal
+  });
+  it("événement antérieur au démarrage (seed) → aucun boost", () => {
+    expect(alphaFadeIn(0.2, 400, 500, 450)).toBe(0.2); // dernierTime <= tsDemarrage
+  });
+  it("cellule sans dernierTime → nominal", () => {
+    expect(alphaFadeIn(0.2, undefined, 500, 1000)).toBe(0.2);
   });
 });
 

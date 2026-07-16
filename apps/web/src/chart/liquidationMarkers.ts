@@ -68,8 +68,9 @@ export function bucketIndex(prix: number, taille: number): number {
   return Math.floor(prix / taille);
 }
 
-/** Arrêts de la colormap viridis (violet → bleu → teal → vert → jaune). */
-const VIRIDIS: ReadonlyArray<readonly [number, number, number]> = [
+/** Arrêts de la colormap viridis (violet → bleu → teal → vert → jaune). Exporté : les rampes
+ *  theme-aware de la heatmap (dark/aurora = viridis direct, fond clair = viridis inversé) s'en servent. */
+export const VIRIDIS: ReadonlyArray<readonly [number, number, number]> = [
   [68, 1, 84],
   [59, 82, 139],
   [33, 145, 140],

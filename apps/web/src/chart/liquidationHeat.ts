@@ -18,6 +18,7 @@ import {
   bucketIndex,
   candleContenant,
   couleurViridis,
+  VIRIDIS,
   liqEventsStore,
   liqMarksStore,
   type LiqEvent,
@@ -42,6 +43,9 @@ export interface LiqCell {
   longUsd: number;
   shortUsd: number;
   count: number;
+  /** Temps du dernier événement agrégé dans la cellule (max des `time`) — pilote le fade-in
+   *  des cellules fraîches au RENDER (cf. `alphaFadeIn`) ; absent si la cellule est vide. */
+  dernierTime?: number;
 }
 
 /** Grille complète : cellules indexées par `${candleTime}:${bucketIdx}` + méta. */
@@ -94,6 +98,8 @@ export function construireGrille(
     if (ev.side === "long") cell.longUsd += ev.usd;
     else cell.shortUsd += ev.usd;
     cell.count += 1;
+    // Temps du dernier événement de la cellule (max) : sert au fade-in des cellules fraîches.
+    if (cell.dernierTime === undefined || ev.time > cell.dernierTime) cell.dernierTime = ev.time;
   }
 
   if (cells.size === 0) return null;
@@ -275,6 +281,90 @@ export function couleurRampe(t: number, fondClair: boolean): [number, number, nu
   return couleurViridis(fondClair ? 1 - t : t);
 }
 
+/** Rampe ambre du thème Bloomberg (noir profond → ambre saturé — identité « terminal »). */
+const RAMPE_BLOOMBERG: ReadonlyArray<readonly [number, number, number]> = [
+  [12, 10, 6],
+  [80, 50, 10],
+  [160, 110, 10],
+  [230, 170, 0],
+  [255, 196, 0],
+];
+/** Rampe vert néon du thème Matrix (noir → vert phosphore). */
+const RAMPE_MATRIX: ReadonlyArray<readonly [number, number, number]> = [
+  [4, 12, 6],
+  [16, 60, 32],
+  [34, 120, 60],
+  [60, 190, 100],
+  [91, 255, 143],
+];
+/** Viridis INVERSÉ (arrêts renversés) : le violet foncé devient le maximum — thèmes à fond clair. */
+const VIRIDIS_INVERSE: ReadonlyArray<readonly [number, number, number]> = [...VIRIDIS].reverse();
+
+/**
+ * Arrêts RVB (5 crans comme VIRIDIS) de la rampe de couleur ESTHÉTIQUE du thème actif — c'est
+ * un choix par thème, PAS un réglage utilisateur : `bloomberg` → noir→ambre, `matrix` →
+ * noir→vert néon, `dark`/`aurora` → viridis direct, `cute` (et tout thème à FOND CLAIR) →
+ * viridis inversé (contraste rétabli). Thème inconnu → repli sur la logique fond : inversé si
+ * `fondClair`, viridis direct sinon. Lue 1×/frame par le contrôleur ; interpolée par
+ * `couleurRampeArrets`. PURE.
+ */
+export function rampePourTheme(
+  theme: string,
+  fondClair: boolean,
+): ReadonlyArray<readonly [number, number, number]> {
+  if (theme === "bloomberg") return RAMPE_BLOOMBERG;
+  if (theme === "matrix") return RAMPE_MATRIX;
+  if (theme === "dark" || theme === "aurora") return VIRIDIS;
+  // cute et tout thème à fond clair : viridis inversé (comportement historique de couleurRampe).
+  if (theme === "cute" || fondClair) return VIRIDIS_INVERSE;
+  // Thème sombre inconnu : repli viridis direct.
+  return VIRIDIS;
+}
+
+/**
+ * Interpolation linéaire générique d'une rampe de couleur (mêmes maths que `couleurViridis`,
+ * mais sur des arrêts quelconques) : `t ∈ [0,1]` clampé, `arrets.length ≥ 2`. Sert à peindre
+ * cellules, canvas lissé ET barre d'échelle avec LA MÊME rampe du thème actif. PURE.
+ */
+export function couleurRampeArrets(
+  t: number,
+  arrets: ReadonlyArray<readonly [number, number, number]>,
+): [number, number, number] {
+  const c = t <= 0 ? 0 : t >= 1 ? 1 : t;
+  const seg = c * (arrets.length - 1);
+  const i = Math.min(Math.floor(seg), arrets.length - 2);
+  const f = seg - i;
+  const a = arrets[i] as readonly [number, number, number];
+  const b = arrets[i + 1] as readonly [number, number, number];
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * f),
+    Math.round(a[1] + (b[1] - a[1]) * f),
+    Math.round(a[2] + (b[2] - a[2]) * f),
+  ];
+}
+
+/** Durée (ms) du fade-in d'une cellule fraîche : flash plein puis retour à l'alpha nominal. */
+const DUREE_FADE_MS = 400;
+
+/**
+ * Boost d'alpha du FADE-IN d'une cellule fraîche (live) : si `dernierTime` (dernier événement
+ * de la cellule) est POSTÉRIEUR à `tsDemarrage` (démarrage du contrôleur — exclut le seed
+ * initial) ET récent (`age = now − dernierTime < DUREE_FADE_MS`), la cellule flashe :
+ * `alpha = nominal + (1 − nominal) × (1 − age/DUREE_FADE_MS)` (pleine à age 0, retombe au
+ * nominal à DUREE_FADE_MS). Sinon renvoie l'alpha nominal inchangé. PURE.
+ */
+export function alphaFadeIn(
+  alphaNominal: number,
+  dernierTime: number | undefined,
+  tsDemarrage: number,
+  now: number,
+): number {
+  if (dernierTime === undefined || dernierTime <= tsDemarrage) return alphaNominal;
+  const age = now - dernierTime;
+  if (!(age >= 0) || age >= DUREE_FADE_MS) return alphaNominal;
+  return alphaNominal + (1 - alphaNominal) * (1 - age / DUREE_FADE_MS);
+}
+
 /**
  * Filtre les buckets pour n'en garder que les plus significatifs : ceux dont `poids` atteint
  * `seuilFrac × max`, PLAFONNÉ aux `maxN` plus lourds (tri décroissant). Évite de tracer des
@@ -353,8 +443,9 @@ interface Tokens {
   text: string;
   surface: string;
   border: string;
-  /** true si le fond du thème est CLAIR (rampe de couleur inversée — cf. `couleurRampe`). */
-  fondClair: boolean;
+  /** Arrêts RVB de la rampe ESTHÉTIQUE du thème actif (cf. `rampePourTheme`), résolus 1×/frame ;
+   *  partagés par les cellules rects, le canvas lissé ET la barre d'échelle. */
+  rampe: ReadonlyArray<readonly [number, number, number]>;
   /** Teintes up/down PARSÉES en RVB une fois par frame (mode dominance : rgba par cellule). */
   upRgb: [number, number, number];
   downRgb: [number, number, number];
@@ -389,6 +480,12 @@ export class LiquidationHeatController {
   private raf = 0;
   /** Reconstruit/redessine seulement si dirty : évite un recalcul complet à 60 fps au repos. */
   private dirty = true;
+  /** Date de démarrage (start) : une cellule n'est « fraîche » que si son dernier événement est
+   *  postérieur — exclut le seed initial du fade-in (cf. alphaFadeIn). */
+  private tsDemarrage = 0;
+  /** Échéance (ms) jusqu'à laquelle la boucle rAF force le repaint pour animer le fade-in des
+   *  cellules fraîches ; posée au rev bump de liqEventsStore (nouvelle liquidation live). */
+  private animeJusqua = 0;
   /**
    * La grille (agrégat coûteux sur tout le buffer d'événements) n'est reconstruite que sur
    * changement de données/viewport/taille — PAS au survol : le crosshair marque `dirty`
@@ -443,6 +540,17 @@ export class LiquidationHeatController {
     this.dirty = true;
   };
 
+  /**
+   * Rev bump de liqEventsStore (liquidation(s) reçue(s)) : ouvre une fenêtre d'animation de
+   * ~450 ms (> DUREE_FADE_MS pour couvrir la retombée) pendant laquelle la boucle rAF force le
+   * repaint, puis invalide la grille (nouveau `dernierTime`) via markDirty. Le seed initial pose
+   * aussi la fenêtre mais ne flashe rien (aucune cellule n'a `dernierTime > tsDemarrage`).
+   */
+  private readonly onEventsBump = (): void => {
+    this.animeJusqua = Date.now() + 450;
+    this.markDirty();
+  };
+
   constructor(chart: Chart, container: HTMLElement, canvas: HTMLCanvasElement) {
     this.chart = chart;
     this.container = container;
@@ -480,13 +588,17 @@ export class LiquidationHeatController {
   private start(): void {
     this.running = true;
     this.dirty = true;
+    // Référence temporelle du fade-in : seules les liquidations reçues APRÈS ce start flashent
+    // (le seed initial, antérieur, est exclu — cf. alphaFadeIn / onEventsBump).
+    this.tsDemarrage = Date.now();
     this.canvas.style.display = "block";
     this.subscribeActions();
     // Nouvelle bougie / backfill : le buffer marché change → recalcul. Le flux de
     // liquidations (buffer d'événements) est publié dans `liqEventsStore` par le singleton
-    // WS de liquidationMarkers : on suit sa révision pour repeindre au fil des liquidations.
+    // WS de liquidationMarkers : on suit sa révision pour repeindre au fil des liquidations
+    // (onEventsBump ouvre en plus la fenêtre d'animation du fade-in).
     this.unsubMarket = marketStore.subscribe(this.markDirty);
-    this.unsubEvents = liqEventsStore.subscribe(this.markDirty);
+    this.unsubEvents = liqEventsStore.subscribe(this.onEventsBump);
     // Nouvel historique OI (fetch au toggle / refresh 15 min) → recalcul des niveaux estimés.
     this.unsubOi = oiHistStore.subscribe(this.markDirty);
     // Changement de thème : bandes/tooltip/lignes lisent des tokens CSS → repeindre pour
@@ -530,6 +642,7 @@ export class LiquidationHeatController {
     this.unsubMode = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.animeJusqua = 0;
     this.dernierCrosshair = null;
     this.derniereGrille = null;
     this.grilleObsolete = true;
@@ -559,6 +672,9 @@ export class LiquidationHeatController {
   }
 
   private readonly loop = (): void => {
+    // Fenêtre d'animation du fade-in en cours : forcer le repaint pour faire retomber l'alpha
+    // des cellules fraîches frame après frame (sinon un seul rendu figerait le flash).
+    if (this.animeJusqua > Date.now()) this.dirty = true;
     if (this.dirty) this.render();
     this.raf = requestAnimationFrame(this.loop);
   };
@@ -599,10 +715,12 @@ export class LiquidationHeatController {
     if (!main) return;
 
     // Tokens de couleur lus UNE fois par frame (getComputedStyle est coûteux) et réutilisés
-    // par toutes les couches, comme le fait volumeProfile.ts. `--bg` sert à choisir le sens de
-    // la rampe de couleur (viridis direct sur fond sombre, inversé sur fond clair).
+    // par toutes les couches, comme le fait volumeProfile.ts. La rampe ESTHÉTIQUE de la heatmap
+    // est choisie par le THÈME actif (Bloomberg ambre, Matrix vert, dark/aurora viridis…), avec
+    // repli fond clair/sombre via `--bg` pour un thème inconnu (cf. rampePourTheme).
     const up = readToken("--up") || "#10b981";
     const down = readToken("--down") || "#ef4444";
+    const fondClair = estFondClair(readToken("--bg"));
     const tokens: Tokens = {
       textDim: readToken("--text-dim") || "#9ca3af",
       up,
@@ -610,7 +728,7 @@ export class LiquidationHeatController {
       text: readToken("--text") || "#e5e7eb",
       surface: readToken("--surface") || "#171717",
       border: readToken("--border") || "#262626",
-      fondClair: estFondClair(readToken("--bg")),
+      rampe: rampePourTheme(themeStore.getState().theme, fondClair),
       // Parse UNE fois par frame (le mode dominance compose un rgba PAR cellule).
       upRgb: parseCssColor(up) ?? UP_RGB_FALLBACK,
       downRgb: parseCssColor(down) ?? DOWN_RGB_FALLBACK,
@@ -704,9 +822,12 @@ export class LiquidationHeatController {
     // Repli sur les rects si le lissé ne peut pas se dessiner (bornes non convertibles…).
     // Le mode ne change QUE la couleur des cellules (grille mémoïsée intacte).
     const mode = liqMarksStore.getState().mode;
+    // Horodatage unique de la frame : sert au fade-in des cellules fraîches (même `now` pour
+    // les deux chemins de rendu, cohérence de l'animation).
+    const now = Date.now();
     const lissage = prevW < SEUIL_LISSAGE_PX;
-    if (!lissage || !this.dessinerCellulesLissees(grid, candles, from, to, largeurs, colonneParTime, mode, tokens)) {
-      this.dessinerCellulesRects(grid, largeurs, mode, tokens);
+    if (!lissage || !this.dessinerCellulesLissees(grid, candles, from, to, largeurs, colonneParTime, mode, tokens, now)) {
+      this.dessinerCellulesRects(grid, largeurs, mode, tokens, now);
     }
 
     // Bandes latérales du profil par prix : largeur ∝ intensité log (max 12 % du pane), SPLIT
@@ -785,16 +906,17 @@ export class LiquidationHeatController {
    * rampe theme-aware d'intensité log. Alpha borné [0.15, 0.55] pour ne pas masquer le prix
    * sous les cascades. Bords entiers (x0/x1 partagés par colonne ; yTop/yBot arrondis par
    * bucket → mêmes bords que le bucket voisin).
-   * Mode « dominance » : la teinte remplace la rampe viridis — shorts liquidés dominants =
+   * Mode « dominance » : la teinte remplace la rampe du thème — shorts liquidés dominants =
    * `--up` (rachats forcés), longs = `--down` (ventes forcées), même sémantique que le profil
    * latéral — et l'alpha d'intensité est modulé par |deseq| (cellule équilibrée pâle, cellule
-   * très déséquilibrée franche).
+   * très déséquilibrée franche). `now` : fade-in des cellules fraîches (cf. alphaFadeIn).
    */
   private dessinerCellulesRects(
     grid: LiqGrid,
     largeurs: Map<number, { x0: number; x1: number }>,
     mode: LiqHeatMode,
     tokens: Tokens,
+    now: number,
   ): void {
     const ctx = this.ctx;
     for (const cell of grid.cells.values()) {
@@ -808,15 +930,18 @@ export class LiquidationHeatController {
       const t = intensiteLog(cell.longUsd + cell.shortUsd, grid.maxUsd);
       const y0 = Math.round(Math.min(yTop, yBot));
       const y1 = Math.round(Math.max(yTop, yBot));
+      let rgb: [number, number, number];
+      let alpha: number;
       if (mode === "dominance") {
         const d = desequilibre(cell.longUsd, cell.shortUsd);
-        const [r, g, b] = d >= 0 ? tokens.upRgb : tokens.downRgb;
-        const alpha = (0.15 + 0.4 * t) * (0.35 + 0.65 * Math.abs(d));
-        ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
+        rgb = d >= 0 ? tokens.upRgb : tokens.downRgb;
+        alpha = (0.15 + 0.4 * t) * (0.35 + 0.65 * Math.abs(d));
       } else {
-        const [r, g, b] = couleurRampe(t, tokens.fondClair);
-        ctx.fillStyle = `rgba(${r},${g},${b},${(0.15 + 0.4 * t).toFixed(3)})`;
+        rgb = couleurRampeArrets(t, tokens.rampe);
+        alpha = 0.15 + 0.4 * t;
       }
+      alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, now);
+      ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha.toFixed(3)})`;
       ctx.fillRect(col.x0, y0, Math.max(1, col.x1 - col.x0), Math.max(1, y1 - y0));
     }
   }
@@ -846,6 +971,7 @@ export class LiquidationHeatController {
     colonneParTime: Map<number, number>,
     mode: LiqHeatMode,
     tokens: Tokens,
+    now: number,
   ): boolean {
     const dims = dimensionsGrilleVisible(grid, from, to);
     if (dims === null) return false;
@@ -902,9 +1028,10 @@ export class LiquidationHeatController {
         rgb = d >= 0 ? tokens.upRgb : tokens.downRgb;
         alpha = (0.15 + 0.4 * t) * (0.35 + 0.65 * Math.abs(d));
       } else {
-        rgb = couleurRampe(t, tokens.fondClair);
+        rgb = couleurRampeArrets(t, tokens.rampe);
         alpha = 0.15 + 0.4 * t;
       }
+      alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, now);
       const o = (ligne * colonnes + colonne) * 4;
       px[o] = rgb[0];
       px[o + 1] = rgb[1];
@@ -1243,7 +1370,7 @@ export class LiquidationHeatController {
           const [r, g, b] = d >= 0 ? tokens.upRgb : tokens.downRgb;
           ctx.fillStyle = `rgba(${r},${g},${b},${(0.35 + 0.65 * Math.abs(d)).toFixed(3)})`;
         } else {
-          const [r, g, b] = couleurRampe(i / 23, tokens.fondClair);
+          const [r, g, b] = couleurRampeArrets(i / 23, tokens.rampe);
           ctx.fillStyle = `rgb(${r},${g},${b})`;
         }
         ctx.fillRect(barLeft + (barW * i) / 24, barTop, barW / 24 + 1, barH); // +1 : pas de couture

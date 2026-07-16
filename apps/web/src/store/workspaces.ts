@@ -115,6 +115,10 @@ function applyContent(c: WorkspaceContent): void {
   uiSectionsStore.getState().setAll(c.sections);
   priceScaleStore.getState().setType(c.priceScale);
   windowManagerStore.getState().setAll(c.windowGeometry);
+  // Re-clamp contre le workspace COURANT (même protection que le boot, cf. App.tsx /
+  // setWorkspace) : une géométrie sauvegardée sur un grand écran ne doit pas rouvrir
+  // hors du workspace actuel (revue whole-branch, finding #1).
+  windowManagerStore.getState().reclampAll(windowManagerStore.getState().workspace);
 }
 
 /** Rafraîchit le contenu du workspace « Défaut » avec l'agencement courant. */

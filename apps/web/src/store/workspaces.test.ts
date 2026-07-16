@@ -270,3 +270,45 @@ describe("workspacesStore — validation au chargement", () => {
     expect(plan?.content.windowGeometry["derivatives"]?.open).toBe(true);
   });
 });
+
+describe("workspacesStore — re-clamp de la géométrie à l'apply", () => {
+  it("une fenêtre ouverte sauvegardée hors du workspace courant est re-clampée dans ses bornes (revue whole-branch #1)", () => {
+    const workspace = { x: 0, y: 0, width: 1920, height: 1080 };
+    windowManagerStore.setState({ windows: {}, workspace });
+
+    // Contenu « grand écran » : une fenêtre ouverte positionnée bien au-delà du
+    // workspace courant (ex. sauvegardée sur un moniteur plus large).
+    const contenu: WorkspaceContent = {
+      ...contenuVierge(),
+      windowGeometry: {
+        derivatives: {
+          id: "derivatives",
+          open: true,
+          x: 5000,
+          y: 5000,
+          width: 420,
+          height: 640,
+          z: 1,
+          minimized: false,
+          groupColor: null,
+          preSnapGeometry: null,
+        },
+      },
+    };
+    workspacesStore.setState({
+      workspaces: [
+        { id: DEFAULT_WORKSPACE_ID, name: "Défaut", content: contenuVierge() },
+        { id: "grand-ecran", name: "Grand écran", content: contenu },
+      ],
+      currentId: DEFAULT_WORKSPACE_ID,
+    });
+
+    workspacesStore.getState().apply("grand-ecran");
+
+    const fenetre = windowManagerStore.getState().windows["derivatives"];
+    expect(fenetre?.open).toBe(true);
+    // Re-clampée : entièrement contenue dans le workspace courant, pas seulement un bord.
+    expect(fenetre?.x).toBeLessThanOrEqual(workspace.x + workspace.width - (fenetre?.width ?? 0));
+    expect(fenetre?.y).toBeLessThanOrEqual(workspace.y + workspace.height - (fenetre?.height ?? 0));
+  });
+});

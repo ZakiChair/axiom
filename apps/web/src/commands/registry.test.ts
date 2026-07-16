@@ -27,8 +27,12 @@ import {
   construireRegistre,
   enregistrerCommandes,
   commandeNavigation,
+  appliquerNavigation,
   type Commande,
+  type NavCommande,
 } from "./registry";
+import { marketStore } from "../store/market";
+import { toastsStore, retirerToast } from "../store/toasts";
 // Les deux sources connues pour leurs collisions greffent leurs commandes dans le
 // registre PAR SIDE-EFFECT d'import dans App.tsx
 // (`enregistrerCommandes([...derivChartCommands, ...windowPanelCommands])`), jamais
@@ -104,6 +108,59 @@ describe("commandeNavigation — libellé explicite quand la paire change", () =
     expect(cmd.libelle).toBe("Changer la paire → DERIVUSDT");
     const tf = commandeNavigation({ timeframe: "4h" });
     expect(tf.libelle).toBe("Aller à 4h");
+  });
+});
+
+describe("appliquerNavigation — garde du toast de changement de paire", () => {
+  it("ne pousse AUCUN toast si le symbole ne change pas", () => {
+    const avant = marketStore.getState();
+    const identiteAvant = { exchange: avant.exchange, symbol: avant.symbol, timeframe: avant.timeframe };
+    const toastsAvant = toastsStore.getState().toasts;
+
+    appliquerNavigation({ symbol: identiteAvant.symbol });
+
+    // Aucun setState : références inchangées (marché ET toasts).
+    expect(toastsStore.getState().toasts).toBe(toastsAvant);
+    const apres = marketStore.getState();
+    expect({ exchange: apres.exchange, symbol: apres.symbol, timeframe: apres.timeframe }).toEqual(
+      identiteAvant,
+    );
+  });
+
+  it("pousse un toast avec Annuler si la paire change, et Annuler restaure exchange+symbol+timeframe", () => {
+    vi.useFakeTimers();
+    try {
+      const avant = marketStore.getState();
+      const identiteAvant = { exchange: avant.exchange, symbol: avant.symbol, timeframe: avant.timeframe };
+      const nav: NavCommande =
+        identiteAvant.exchange === "kraken"
+          ? { source: "binance", symbol: "ETHUSDT", timeframe: "4h" }
+          : { source: "kraken", symbol: "ETHUSDT", timeframe: "4h" };
+
+      appliquerNavigation(nav);
+
+      // La paire a bien changé, et un toast Annuler a été poussé.
+      const apresChangement = marketStore.getState();
+      expect(apresChangement.symbol).toBe("ETHUSDT");
+      const toasts = toastsStore.getState().toasts;
+      const dernier = toasts[toasts.length - 1];
+      expect(dernier?.action?.libelle).toBe("Annuler");
+
+      dernier?.action?.executer();
+
+      // Annuler restaure l'identité exacte d'avant (exchange + symbole + timeframe).
+      const apresAnnuler = marketStore.getState();
+      expect({
+        exchange: apresAnnuler.exchange,
+        symbol: apresAnnuler.symbol,
+        timeframe: apresAnnuler.timeframe,
+      }).toEqual(identiteAvant);
+    } finally {
+      // Nettoyage : purge tout toast résiduel et ses minuteurs avant de rendre la main.
+      for (const t of toastsStore.getState().toasts) retirerToast(t.id);
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
   });
 });
 

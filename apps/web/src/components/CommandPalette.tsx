@@ -249,7 +249,7 @@ export function CommandPalette() {
             <div
               ref={listeRef}
               role="listbox"
-              aria-activedescendant={`palette-item-${indexSel}`}
+              aria-activedescendant={items.length > 0 && indexSel >= 0 ? `palette-item-${indexSel}` : undefined}
               className="max-h-[52vh] overflow-y-auto py-1"
             >
               {items.length === 0 ? (

@@ -190,12 +190,7 @@ export function appliquerNavigation(nav: NavCommande): void {
   if (nav.symbol !== undefined && nav.symbol !== avant.symbol) {
     pousserToast(`Paire changée → ${nav.symbol}`, {
       libelle: "Annuler",
-      executer: () => {
-        const s = marketStore.getState();
-        s.setExchange(avant.exchange);
-        s.setSymbol(avant.symbol);
-        s.setTimeframe(avant.timeframe);
-      },
+      executer: () => marketStore.getState().setMarket(avant),
     });
   }
 }

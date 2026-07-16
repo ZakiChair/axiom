@@ -28,6 +28,7 @@ export function Toasts() {
           tabIndex={0}
           onClick={() => retirerToast(toast.id)}
           onKeyDown={(e) => {
+            if (e.target !== e.currentTarget) return;
             if (e.key === "Enter" || e.key === " ") retirerToast(toast.id);
           }}
           style={{ animation: "axiom-toast-in 160ms ease-out" }}

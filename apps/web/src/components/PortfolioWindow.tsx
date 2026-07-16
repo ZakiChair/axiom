@@ -634,11 +634,25 @@ export function PortfolioWindow() {
                         </span>
                         <button
                           type="button"
-                          onClick={() => portfolioStore.getState().supprimer(p.id)}
+                          onClick={() => {
+                            // 1er clic : arme la confirmation ; 2e clic : supprime (pattern SettingsPanel.restaurer).
+                            // Position close = historique irrécupérable → confirmation obligatoire.
+                            if (confirmSuppr !== p.id) {
+                              setConfirmSuppr(p.id);
+                              return;
+                            }
+                            setConfirmSuppr(null);
+                            portfolioStore.getState().supprimer(p.id);
+                          }}
+                          onBlur={() => setConfirmSuppr((c) => (c === p.id ? null : c))}
                           aria-label={`Supprimer ${p.symbole}`}
-                          className="text-text-dim transition hover:text-down"
+                          className={
+                            confirmSuppr === p.id
+                              ? "text-[10px] font-semibold uppercase text-down"
+                              : "text-text-dim transition hover:text-down"
+                          }
                         >
-                          ✕
+                          {confirmSuppr === p.id ? "confirmer ?" : "✕"}
                         </button>
                       </span>
                     </div>

@@ -32,12 +32,12 @@ const OI_PANE_ID = "axiom_deriv_oi";
 // Tokens de série des panes — lus AU RENDU (callback styles) : suivent le thème.
 // Côté DerivativesWindow, le lien visuel bouton↔courbe utilise les MÊMES tokens
 // via `var(--serie-5)` / `var(--serie-3)` en style inline.
-const OI_TOKEN = "--serie-5"; // cyan sur dark (ex-#22d3ee)
+const OI_TOKEN = "--serie-5"; // cyan sur dark (repli : OI_REPLI)
 const OI_REPLI = "#22d3ee";
 /** Sous-pane funding rate (affiché en %). */
 const FUNDING_NAME = "AXIOM_DERIV_FUNDING";
 const FUNDING_PANE_ID = "axiom_deriv_funding";
-const FUNDING_TOKEN = "--serie-3"; // ambre sur dark (ex-#f59e0b)
+const FUNDING_TOKEN = "--serie-3"; // ambre sur dark (repli : FUNDING_REPLI)
 const FUNDING_REPLI = "#f59e0b";
 
 /** Interval Coinalyze des séries dérivées (cadence lente, forward-fill ensuite). */

@@ -504,10 +504,10 @@ interface Tokens {
   estRgb: readonly [number, number, number];
 }
 
-/** Replis RVB des teintes up/down si le token du thème n'est pas parsable (#10b981 / #ef4444). */
+/** Constantes de repli RVB pour les teintes up/down si le token du thème n'est pas parsable (#10b981 / #ef4444). */
 const UP_RGB_FALLBACK: [number, number, number] = [16, 185, 129];
 const DOWN_RGB_FALLBACK: [number, number, number] = [239, 68, 68];
-/** Repli RVB de `--accent` (flash de bande) si le token n'est pas parsable (#38bdf8). */
+/** Constante de repli RVB pour `--accent` (flash de bande) si le token n'est pas parsable (#38bdf8). */
 const ACCENT_RGB_FALLBACK: [number, number, number] = [56, 189, 248];
 
 /**

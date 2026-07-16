@@ -32,7 +32,7 @@ import {
   type NewsItem,
   type NewsSourceId,
 } from "../data/news";
-import { META_SOURCE } from "../data/newsMeta";
+import { META_SOURCE, bordureSource } from "../data/newsMeta";
 
 /** Nombre max de headlines dans la piste (borne le DOM ; les items sont triés récents d'abord). */
 const MAX_ITEMS = 30;
@@ -125,7 +125,7 @@ function ItemTicker({ item, maintenant }: { item: NewsItem; maintenant: number }
     <>
       <span
         className="shrink-0 rounded px-1 text-[9px] font-semibold uppercase tracking-wide"
-        style={{ color: meta.color, border: `1px solid ${meta.color}55` }}
+        style={{ color: meta.color, border: `1px solid ${bordureSource(meta.color)}` }}
       >
         {meta.label}
       </span>

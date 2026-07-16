@@ -12,3 +12,13 @@ export const META_SOURCE: Record<NewsSourceId, { label: string; color: string }>
   >),
   gdelt: { label: "GDELT", color: "var(--serie-4)" },
 };
+
+/**
+ * Bordure adoucie (~33 %) pour la couleur d'un badge de source : les hex prennent
+ * un suffixe alpha, les tokens var(--x) passent par leur triplet --x-rgb
+ * (déclarés pour les 5 thèmes — garde-fou themeTokens).
+ */
+export function bordureSource(color: string): string {
+  const m = /^var\((--[\w-]+)\)$/.exec(color);
+  return m !== null && m[1] !== undefined ? `rgb(var(${m[1]}-rgb) / 0.33)` : `${color}55`;
+}

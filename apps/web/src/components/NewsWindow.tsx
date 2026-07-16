@@ -29,7 +29,7 @@ import {
   type NewsSourceId,
 } from "../data/news";
 import { fetchFearGreed, type FearGreed } from "../data/marketOverview";
-import { META_SOURCE } from "../data/newsMeta";
+import { META_SOURCE, bordureSource } from "../data/newsMeta";
 import { formatAge } from "../lib/format";
 import { navigateTo } from "../lib/navigation";
 
@@ -82,7 +82,7 @@ function BadgeSource({ source }: { source: NewsSourceId }) {
   return (
     <span
       className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide"
-      style={{ color: meta.color, border: `1px solid ${meta.color}55` }}
+      style={{ color: meta.color, border: `1px solid ${bordureSource(meta.color)}` }}
     >
       {meta.label}
     </span>

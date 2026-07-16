@@ -10,6 +10,8 @@
  *
  * Toutes les fonctions ici sont PURES (aucun accès DOM/store/chart) et testées.
  */
+import { createStore } from "zustand/vanilla";
+import type { StoreApi } from "zustand/vanilla";
 import { ActionType, DomPosition } from "klinecharts";
 import type { Bounding, Chart, Crosshair, Point } from "klinecharts";
 import type { Candle } from "@axiom/types";
@@ -403,6 +405,32 @@ export function dechevaucher<T extends { y: number; poids: number }>(
   return retenus;
 }
 
+// ─────────────────────────── Flash de bande (lien feed→chart) ───────────────────────────
+
+/** Durée (ms) du flash de bande déclenché par un clic dans le feed LIQ. */
+const FLASH_DUREE_MS = 1500;
+
+/** État du flash : prix à surligner + échéance (Date.now() ≥ jusqua ⇒ flash expiré). */
+export interface LiqFlashState {
+  price: number | null;
+  jusqua: number;
+}
+
+/**
+ * Mini-store vanilla du flash de bande : la fenêtre LIQ (clic sur une liquidation du feed)
+ * pose un prix via `flasherNiveau` ; le contrôleur s'y abonne (start/stop) et surligne la
+ * bande de prix correspondante pendant FLASH_DUREE_MS (fade linéaire, cf. dessinerFlash).
+ */
+export const liqFlashStore: StoreApi<LiqFlashState> = createStore<LiqFlashState>(() => ({
+  price: null,
+  jusqua: 0,
+}));
+
+/** Déclenche le flash de la bande contenant `price` pour FLASH_DUREE_MS (re-pose l'échéance). */
+export function flasherNiveau(price: number): void {
+  liqFlashStore.setState({ price, jusqua: Date.now() + FLASH_DUREE_MS });
+}
+
 // ─────────────────────────── Contrôleur canvas (non testé — couplage KLineChart) ───────────────────────────
 
 /** Pane prix (id par défaut KLineChart). */
@@ -455,6 +483,8 @@ interface Tokens {
 /** Replis RVB des teintes up/down si le token du thème n'est pas parsable (#10b981 / #ef4444). */
 const UP_RGB_FALLBACK: [number, number, number] = [16, 185, 129];
 const DOWN_RGB_FALLBACK: [number, number, number] = [239, 68, 68];
+/** Repli RVB de `--accent` (flash de bande) si le token n'est pas parsable (#38bdf8). */
+const ACCENT_RGB_FALLBACK: [number, number, number] = [56, 189, 248];
 
 /** Lit un token CSS sémantique concret depuis <html> (le canvas n'évalue pas var()). */
 function readToken(name: string): string {
@@ -523,6 +553,8 @@ export class LiquidationHeatController {
   private resizeObserver: ResizeObserver | null = null;
   private unsubMarket: (() => void) | null = null;
   private unsubEvents: (() => void) | null = null;
+  /** Flash de bande (clic feed LIQ, cf. liqFlashStore) : repaint animé, sans toucher la grille. */
+  private unsubFlash: (() => void) | null = null;
   private unsubOi: (() => void) | null = null;
   private unsubTheme: (() => void) | null = null;
   /** Changement de MODE (intensité/dominance) : repaint SEUL — ne touche ni grille ni niveaux. */
@@ -553,6 +585,17 @@ export class LiquidationHeatController {
   private readonly onEventsBump = (): void => {
     this.animeJusqua = Date.now() + 450;
     this.markDirty();
+  };
+
+  /**
+   * Flash posé (`flasherNiveau`, clic feed LIQ) : étend la fenêtre d'animation jusqu'à
+   * l'échéance du flash — la boucle rAF repeint alors chaque frame (fade linéaire) — et
+   * demande un repaint SANS invalider la grille (le flash est une couche de rendu pure).
+   */
+  private readonly onFlash = (): void => {
+    const { jusqua } = liqFlashStore.getState();
+    if (jusqua > this.animeJusqua) this.animeJusqua = jusqua;
+    this.dirty = true;
   };
 
   constructor(chart: Chart, container: HTMLElement, canvas: HTMLCanvasElement) {
@@ -603,6 +646,8 @@ export class LiquidationHeatController {
     // (onEventsBump ouvre en plus la fenêtre d'animation du fade-in).
     this.unsubMarket = marketStore.subscribe(this.markDirty);
     this.unsubEvents = liqEventsStore.subscribe(this.onEventsBump);
+    // Flash de bande (clic feed LIQ) : ouvre la fenêtre d'animation jusqu'à son échéance.
+    this.unsubFlash = liqFlashStore.subscribe(this.onFlash);
     // Nouvel historique OI (fetch au toggle / refresh 15 min) → recalcul des niveaux estimés.
     this.unsubOi = oiHistStore.subscribe(this.markDirty);
     // Changement de thème : bandes/tooltip/lignes lisent des tokens CSS → repeindre pour
@@ -638,6 +683,8 @@ export class LiquidationHeatController {
     this.unsubMarket = null;
     this.unsubEvents?.();
     this.unsubEvents = null;
+    this.unsubFlash?.();
+    this.unsubFlash = null;
     this.unsubOi?.();
     this.unsubOi = null;
     this.unsubTheme?.();
@@ -787,6 +834,9 @@ export class LiquidationHeatController {
         ctx.textBaseline = "top";
         ctx.fillText("⋯ Heatmap liquidations active — en attente du flux live", xRight - 4, top + 22);
       }
+      // Le flash de bande reste rendu même sans grille (clic feed juste après l'allumage) :
+      // il matérialise le niveau de prix de la liquidation cliquée.
+      this.dessinerFlash(main);
       return;
     }
 
@@ -901,6 +951,9 @@ export class LiquidationHeatController {
     }
 
     ctx.restore();
+
+    // Flash de bande (clic feed LIQ) : AU-DESSUS des cellules et du profil, SOUS le tooltip.
+    this.dessinerFlash(main);
 
     // Tooltip de survol : dessiné HORS clip (au-dessus de la heatmap), après restauration.
     if (hover !== null) this.dessinerTooltip(hover, grid, main, tokens);
@@ -1120,6 +1173,51 @@ export class LiquidationHeatController {
     const conv = this.chart.convertFromPixel([{ y: cy }], { paneId: CANDLE_PANE_ID });
     const value = (Array.isArray(conv) ? conv[0] : conv)?.value;
     return cellSousCurseur(grid, candles, timestamp, value);
+  }
+
+  /**
+   * FLASH de bande (lien feed→chart, cf. liqFlashStore/flasherNiveau) : rect pleine largeur
+   * du pane sur la bande de prix contenant `price` — même taille de bucket (× granularité)
+   * que la grille —, couleur `--accent`, alpha `0.28 × (restant / FLASH_DUREE_MS)` (fade
+   * linéaire vers 0). Dessiné AU-DESSUS des cellules et du profil, SOUS le tooltip. Sans
+   * grille (buffer vide au moment du clic), la taille de bucket est recalculée comme le
+   * ferait `construireGrille` (close de la dernière bougie × granularité). Ne dessine rien
+   * si le flash est expiré ou si la bande n'est pas convertible en pixels.
+   */
+  private dessinerFlash(main: Bounding): void {
+    const { price, jusqua } = liqFlashStore.getState();
+    if (price === null) return;
+    const restant = jusqua - Date.now();
+    if (restant <= 0) return;
+
+    let taille = this.derniereGrille?.taille ?? 0;
+    if (!(taille > 0)) {
+      const candles = marketStore.getState().candles;
+      const dernier = candles[candles.length - 1];
+      if (dernier === undefined) return;
+      taille = tailleBucket(dernier.close) * liqMarksStore.getState().granularite;
+    }
+    if (!(taille > 0)) return;
+
+    const idx = bucketIndex(price, taille);
+    const yTop = this.toPx({ value: (idx + 1) * taille }).y;
+    const yBot = this.toPx({ value: idx * taille }).y;
+    if (yTop === undefined || yBot === undefined || !Number.isFinite(yTop) || !Number.isFinite(yBot)) {
+      return;
+    }
+    const y0 = Math.round(Math.min(yTop, yBot));
+    const y1 = Math.round(Math.max(yTop, yBot));
+
+    const rgb = parseCssColor(readToken("--accent")) ?? ACCENT_RGB_FALLBACK;
+    const alpha = 0.28 * (restant / FLASH_DUREE_MS);
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(main.left, main.top, main.width, main.height);
+    ctx.clip();
+    ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha.toFixed(3)})`;
+    ctx.fillRect(main.left, y0, main.width, Math.max(1, y1 - y0));
+    ctx.restore();
   }
 
   /**

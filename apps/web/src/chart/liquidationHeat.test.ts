@@ -41,6 +41,8 @@ import {
   alphaFadeIn,
   filtrerNiveauxDenses,
   dechevaucher,
+  liqFlashStore,
+  flasherNiveau,
   type LiqGrid,
 } from "./liquidationHeat";
 
@@ -495,5 +497,37 @@ describe("dechevaucher", () => {
 
   it("liste vide → vide", () => {
     expect(dechevaucher([], 15)).toEqual([]);
+  });
+});
+
+describe("liqFlashStore / flasherNiveau (lien feed→chart)", () => {
+  it("pose le prix et l'échéance à Date.now() + 1500 ms", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(10_000);
+      flasherNiveau(123.45);
+      expect(liqFlashStore.getState()).toMatchObject({ price: 123.45, jusqua: 11_500 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("expire après 1,5 s (Date.now() ≥ jusqua) et un nouveau clic re-pose le flash", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(10_000);
+      flasherNiveau(100);
+      // Juste avant l'échéance : le flash est encore actif (même prédicat que le rendu).
+      vi.setSystemTime(11_499);
+      expect(Date.now() < liqFlashStore.getState().jusqua).toBe(true);
+      // À l'échéance : expiré (le rendu ne dessine plus rien).
+      vi.setSystemTime(11_500);
+      expect(Date.now() < liqFlashStore.getState().jusqua).toBe(false);
+      // Nouveau clic : le prix et l'échéance sont remplacés.
+      flasherNiveau(200);
+      expect(liqFlashStore.getState()).toMatchObject({ price: 200, jusqua: 13_000 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

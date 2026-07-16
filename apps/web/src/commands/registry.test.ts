@@ -25,8 +25,28 @@ import {
   scoreFuzzy,
   rechercher,
   construireRegistre,
+  enregistrerCommandes,
   type Commande,
 } from "./registry";
+// Les deux sources connues pour leurs collisions greffent leurs commandes dans le
+// registre PAR SIDE-EFFECT d'import dans App.tsx
+// (`enregistrerCommandes([...derivChartCommands, ...windowPanelCommands])`), jamais
+// elles-mêmes — elles se contentent d'exporter un tableau `Commande[]`. Un simple
+// `import "./windowPanels"` ne greffe donc RIEN dans `commandesExternes`. Comme les deux
+// modules sont des stores Zustand vanilla (aucune dépendance DOM à l'import, contrairement
+// à store/theme ou chart/drawing ci-dessus), on les importe pour leurs valeurs et on
+// reproduit ici l'appel d'`enregistrerCommandes` fait par App.tsx.
+// Portée du test ci-dessous : registre statique + ces deux sources externes (celles de
+// la collision FUND). Les ~17 autres sources greffées par App.tsx (eco, news, onchain,
+// portfolio, notes, screener, dom, backtest, replay, globe, ticker, onboarding,
+// playbooks, marqueurs chart…) n'y sont PAS importées — sonde manuelle (hors suite,
+// non committée) : les greffer toutes (sauf tradeMarkers, qui exige un mock DOM, et
+// commandesGrille, défini inline dans App.tsx) donne 220 commandes et ZÉRO doublon
+// après ce correctif, donc le risque résiduel est faible mais non nul.
+import { commandes as derivChartCommandes } from "../store/derivatives-chart";
+import { windowPanelCommands } from "./windowPanels";
+
+enregistrerCommandes([...derivChartCommandes, ...windowPanelCommands]);
 
 describe("parseNavigation — symbole + timeframe + source, ordre libre", () => {
   it("complète une base crypto nue en …USDT", () => {
@@ -147,5 +167,15 @@ describe("construireRegistre — commandes attendues présentes", () => {
   it("expose les 11 timeframes et les 5 thèmes", () => {
     expect(registre.filter((c) => c.categorie === "timeframe")).toHaveLength(11);
     expect(registre.filter((c) => c.categorie === "theme")).toHaveLength(5);
+  });
+
+  it("aucun mnémonique dupliqué dans le registre complet (insensible à la casse)", () => {
+    const vus = new Map<string, string>();
+    for (const c of registre) {
+      if (c.mnemonique === undefined) continue;
+      const cle = c.mnemonique.toLowerCase();
+      expect(vus.get(cle), `« ${c.mnemonique} » dupliqué entre ${vus.get(cle)} et ${c.id}`).toBeUndefined();
+      vus.set(cle, c.id);
+    }
   });
 });

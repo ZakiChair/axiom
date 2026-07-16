@@ -337,10 +337,13 @@ export function construireRegistre(): Commande[] {
 
   // — Timeframes —
   for (const tf of TF_COMMANDES) {
+    // « 1M » (mois) entrait en collision insensible à la casse avec « 1m » (minute) :
+    // les timeframes mensuels prennent le suffixe MO (1MO, 3MO, 6MO, 12MO).
+    const mois = tf.endsWith("M");
     commandes.push({
       id: `tf:${tf}`,
-      mnemonique: tf.toUpperCase(),
-      libelle: `Timeframe ${tf}`,
+      mnemonique: mois ? `${tf.slice(0, -1)}MO` : tf.toUpperCase(),
+      libelle: `Timeframe ${tf}${mois ? " (mois)" : ""}`,
       categorie: "timeframe",
       motsCles: ["timeframe", "tf", "intervalle", tf],
       apercu: `Bascule le graphe en ${tf}`,

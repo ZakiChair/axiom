@@ -91,6 +91,19 @@ export interface ConditionCvdSpotPerpDiv {
   kind: "spotUp_perpDown" | "spotDown_perpUp" | "les-deux";
 }
 
+/**
+ * Cascade de liquidations : notionnel liquidé (USD, tous côtés confondus) sur la
+ * dernière minute GLISSANTE ≥ `seuilUsdParMin`.
+ * LIMITE ASSUMÉE : évaluée par le runtime FRONT uniquement, pour le SYMBOLE COURANT
+ * du chart et seulement quand le flux liq est retenu (heatmap ON ou fenêtre LIQ
+ * ouverte) — NON évaluée par le daemon onglet fermé (pas de flux liq côté daemon).
+ */
+export interface ConditionLiqCascade {
+  type: "liq-cascade";
+  /** Seuil de notionnel liquidé par minute glissante (USD/min). */
+  seuilUsdParMin: number;
+}
+
 /** Condition d'une alerte (union discriminée sur `type`). */
 export type Condition =
   | ConditionPrixCroise
@@ -98,7 +111,8 @@ export type Condition =
   | ConditionIndicateurSeuil
   | ConditionIndicateurCroisement
   | ConditionFundingExtreme
-  | ConditionCvdSpotPerpDiv;
+  | ConditionCvdSpotPerpDiv
+  | ConditionLiqCascade;
 
 /** Définition d'une alerte. */
 export interface AlertDef {
@@ -151,6 +165,12 @@ export interface ContexteAlerte {
    *  - kind : divergence active sur le dernier bucket.
    */
   cvdDivergenceKind?: "spotUp_perpDown" | "spotDown_perpUp" | null;
+  /**
+   * Notionnel liquidé (USD, tous côtés) sur la dernière minute glissante — requis
+   * pour `liq-cascade`. Injecté par le runtime front depuis le buffer liq du chart
+   * (symbole courant, flux retenu) ; jamais fourni par le daemon.
+   */
+  liqUsdParMin?: number;
 }
 
 /** Un déclenchement produit par le moteur. */

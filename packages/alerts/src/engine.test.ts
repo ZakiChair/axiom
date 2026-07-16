@@ -381,6 +381,42 @@ describe("cvd-spot-perp-div", () => {
   });
 });
 
+describe("liq-cascade", () => {
+  const cond: Condition = { type: "liq-cascade", seuilUsdParMin: 5_000_000 };
+  function ctxLiq(liqUsdParMin: number): ContexteAlerte {
+    return { maintenant: 1, dernierPrix: 100, liqUsdParMin };
+  }
+
+  it("calibre puis déclenche au franchissement du seuil, se ré-arme sous le seuil", () => {
+    const { fires, defFinale } = piloter(def(cond), [
+      ctxLiq(0), // calme → calibrage armé
+      ctxLiq(6_000_000), // cascade → DÉCLENCHE
+      ctxLiq(9_000_000), // toujours au-dessus → rien (désarmée)
+      ctxLiq(100_000), // retombe → ré-armement
+      ctxLiq(5_000_000), // bord exact (≥) → DÉCLENCHE
+    ]);
+    expect(fires).toEqual([false, true, false, false, true]);
+    expect(defFinale.declenchements).toHaveLength(2);
+  });
+
+  it("ne déclenche PAS immédiatement si une cascade est déjà en cours à la création", () => {
+    const { fires } = piloter(def(cond), [
+      ctxLiq(8_000_000), // déjà ≥ seuil → calibrage désarmé, PAS de déclenchement
+      ctxLiq(7_000_000), // toujours au-dessus → rien
+      ctxLiq(1_000_000), // repasse dessous → ré-armement
+      ctxLiq(6_000_000), // nouvelle cascade → DÉCLENCHE
+    ]);
+    expect(fires).toEqual([false, false, false, true]);
+  });
+
+  it("non évaluable si liqUsdParMin absent (def inchangée, référence conservée)", () => {
+    const d = def(cond);
+    const res = evaluerAlertes([d], { maintenant: 0, dernierPrix: 1 });
+    expect(res.defs[0]).toBe(d);
+    expect(res.modifie).toBe(false);
+  });
+});
+
 describe("filtrage du lot", () => {
   it("laisse les defs inactives inchangées (même référence)", () => {
     const inactive = def({ type: "prix-croise", niveau: 100, sens: "hausse" }, { actif: false });

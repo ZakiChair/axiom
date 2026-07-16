@@ -36,6 +36,19 @@ divergé au fil des lots :
 - Fraîcheur : ligne `{loading ? "maj…" : "maj ~1 min"}` + note de source
   `text-[10px] leading-snug text-text-dim` (« Données X, ~1 min. »).
 
+Amendements (Lot A, 2026-07-16) :
+- Les variantes d'opacité sur tokens (`border-down/40`, `bg-accent/15`…) sont légitimes et
+  FONCTIONNELLES : chaque token couleur a un triplet jumeau `--x-rgb` consommé par
+  tailwind.config.js en `rgb(var(--x-rgb) / <alpha-value>)`. Tout nouveau token couleur doit
+  définir son `-rgb` dans les 5 thèmes (test themeTokens).
+- Fraîcheur : primitive `<Fraicheur>` de ui.tsx — « maj… » (chargement), « maj il y a X »
+  (timestamp connu), « maj ~cadence » (cadence seule), « — ». La forme « maj HH:MM » est abandonnée.
+- Titres de fenêtres : « MNEMO · Libellé » via le prop `mnemo` d'EnTeteFenetre (mnémonique en accent).
+- Rôle « avertissement » : classes `warn` (bg-warn, text-warn, border-warn/50) — alias thémé de --ui-amber.
+- Couleurs de série côté chart : `serieCanvas(i)` / `lireTokenCanvas` au RENDU (callback styles),
+  jamais d'hex figé à l'enregistrement (tests gardeFous).
+- Groupes segmentés : primitive `Segmente` (actif bg-bg) ; onglets : primitive `Onglets`.
+
 ## 3. Fondations (nouveaux modules)
 
 1. **`apps/web/src/lib/format.ts`** (+ tests) — promotion des versions les plus abouties

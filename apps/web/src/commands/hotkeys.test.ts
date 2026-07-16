@@ -70,6 +70,10 @@ describe("raccourciTimeframe", () => {
 describe("lignesMnemoniques", () => {
   it("chaque mnémonique du registre apparaît dans l'aide dérivée (l'aide ne peut plus se périmer)", () => {
     const registre = construireRegistre();
+    // Ancrage anti-régression : si l'enregistrement des commandes externes disparaît,
+    // le registre perd FRATE/STBL et ce test doit rougir (il serait sinon auto-référentiel).
+    expect(registre.some((c) => c.mnemonique === "FRATE")).toBe(true);
+    expect(registre.some((c) => c.mnemonique === "STBL")).toBe(true);
     const texte = lignesMnemoniques(registre).map((l) => l.description).join(" ");
     for (const c of registre) {
       if (c.mnemonique !== undefined) expect(texte).toContain(c.mnemonique);

@@ -17,7 +17,7 @@
  * Règle d'or (doc 02) : chaque widget porte un BadgeFiabilite honnête via
  * `metaSource` / métas partagées (fiable · partiel · estimation · indisponible).
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { onchainUiStore, getBgeometricsKey, bgeometricsKeyStore } from "../store/onchain";
 import { getSoSoValueKey, soSoValueKeyStore } from "../store/sosovalue";
@@ -55,7 +55,8 @@ import {
 } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 import { metaSource, type MetaFiabilite } from "../lib/fiabilite";
-import { BadgeFiabilite, EnTeteFenetre } from "./ui";
+import { zonePourMetrique } from "../lib/zonesOnchain";
+import { Badge, BadgeFiabilite, EnTeteFenetre, NoteSource } from "./ui";
 
 const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
 
@@ -196,6 +197,7 @@ function Widget({
   sousTexte,
   fraicheur,
   perime,
+  badge,
 }: {
   libelle: string;
   valeur: string;
@@ -206,12 +208,17 @@ function Widget({
   sousTexte?: string;
   fraicheur?: string;
   perime?: boolean;
+  /** Badge de zone (ex. MVRV-Z « chaud »), rendu entre le libellé et BadgeFiabilite. */
+  badge?: ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-1 rounded-md border border-border bg-bg px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-[11px] text-text-dim">{libelle}</span>
-        <BadgeFiabilite meta={meta} />
+        <span className="flex shrink-0 items-center gap-1">
+          {badge}
+          <BadgeFiabilite meta={meta} />
+        </span>
       </div>
       <div className="flex items-end justify-between gap-2">
         <span
@@ -452,6 +459,7 @@ export function OnchainWindow() {
           <div className="grid grid-cols-2 gap-2">
             {BG_METRIQUES.map((def) => {
               const r = donnees.bg[def.id] ?? null;
+              const zone = zonePourMetrique(def.id, r?.serie.dernier?.value);
               return (
                 <Widget
                   key={def.id}
@@ -462,6 +470,7 @@ export function OnchainWindow() {
                   color="--serie-4"
                   fraicheur={fmtJour(r?.serie.dernier?.time)}
                   perime={r?.perime}
+                  badge={zone !== null ? <Badge ton={zone.ton}>{zone.libelle}</Badge> : undefined}
                 />
               );
             })}
@@ -490,6 +499,10 @@ export function OnchainWindow() {
               Une clé gratuite sur bitcoin-data.com relève le quota.
             </p>
           )}
+          <NoteSource>
+            Zones : MVRV-Z &lt; 0 froid · ≥ 3 chaud · ≥ 7 surchauffe ; SOPR &lt; 1 capitulation ;
+            NUPL ≥ 0.5 croyance · ≥ 0.75 euphorie. Seuils canoniques, source bitcoin-data.com.
+          </NoteSource>
         </section>
 
         {/* ─────────── ETF ─────────── */}

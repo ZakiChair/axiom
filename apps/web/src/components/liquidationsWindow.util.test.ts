@@ -5,11 +5,14 @@
  */
 import { describe, expect, it } from "vitest";
 import type { LiqEvent } from "../chart/liquidationMarkers";
+import type { LiqDaemon } from "../data/daemon";
 import {
   bucketsTemporels,
+  daemonVersEvenements,
   filtrerFenetre,
   magnitudeRelative,
   statsLiquidations,
+  topLiquidations,
 } from "./liquidationsWindow.util";
 
 /** Fabrique un LiqEvent avec défauts raisonnables. */
@@ -76,6 +79,39 @@ describe("bucketsTemporels", () => {
   it("paramètres dégénérés (nBuckets < 1 ou fenêtre vide) → []", () => {
     expect(bucketsTemporels([ev({})], 0, 100, 0)).toEqual([]);
     expect(bucketsTemporels([ev({})], 100, 100, 4)).toEqual([]);
+  });
+});
+
+describe("daemonVersEvenements", () => {
+  it("traduit t → time et copie side/price/qty/usd/venue (jamais de flag approx)", () => {
+    const rows: LiqDaemon[] = [
+      { t: 1_000, venue: "okx", side: "short", price: 200, qty: 2, usd: 400 },
+      { t: 2_000, venue: "bybit", side: "long", price: 100, qty: 3, usd: 300 },
+    ];
+    expect(daemonVersEvenements(rows)).toEqual([
+      { time: 1_000, side: "short", price: 200, qty: 2, usd: 400, venue: "okx" },
+      { time: 2_000, side: "long", price: 100, qty: 3, usd: 300, venue: "bybit" },
+    ]);
+  });
+  it("liste vide → liste vide", () => {
+    expect(daemonVersEvenements([])).toEqual([]);
+  });
+});
+
+describe("topLiquidations", () => {
+  it("renvoie les n plus grosses liquidations, triées par notionnel décroissant", () => {
+    const events = [ev({ usd: 100 }), ev({ usd: 500 }), ev({ usd: 300 }), ev({ usd: 200 })];
+    const copie = [...events];
+    expect(topLiquidations(events, 2).map((e) => e.usd)).toEqual([500, 300]);
+    // L'entrée n'est pas mutée (tri sur copie).
+    expect(events).toEqual(copie);
+  });
+  it("n plus grand que la liste → toute la liste triée", () => {
+    expect(topLiquidations([ev({ usd: 1 }), ev({ usd: 2 })], 10).map((e) => e.usd)).toEqual([2, 1]);
+  });
+  it("n ≤ 0 ou liste vide → []", () => {
+    expect(topLiquidations([ev({})], 0)).toEqual([]);
+    expect(topLiquidations([], 5)).toEqual([]);
   });
 });
 

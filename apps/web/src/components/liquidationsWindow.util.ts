@@ -2,10 +2,12 @@
  * Fenêtre LIQ — calculs PURS sur le buffer d'événements du singleton
  * (`liqEventsStore`, cf. chart/liquidationMarkers.ts) : filtre de fenêtre glissante,
  * stats agrégées (totaux long/short, dominance, max, répartition par venue), buckets
- * temporels du mini-histogramme et magnitude log des lignes du feed.
+ * temporels du mini-histogramme, magnitude log des lignes du feed, traduction du fil
+ * daemon (onglet Historique) et top des plus grosses liquidations.
  * Aucun accès store/DOM : tout est injecté (events, bornes de temps), tout est testé.
  */
 import type { LiqEvent } from "../chart/liquidationMarkers";
+import type { LiqDaemon } from "../data/daemon";
 
 /** Ne garde que les événements de la fenêtre glissante (time ≥ depuisMs). PURE. */
 export function filtrerFenetre(events: LiqEvent[], depuisMs: number): LiqEvent[] {
@@ -89,6 +91,31 @@ export function bucketsTemporels(
     else b.shortUsd += ev.usd;
   }
   return out;
+}
+
+/**
+ * Traduit le fil de liquidations persistées du daemon (`LiqDaemon`, champ `t`) en
+ * événements au format chart (`LiqEvent`, champ `time`) : mêmes valeurs, jamais de flag
+ * `approx` (le daemon n'enregistre que des liquidations réelles). PURE.
+ */
+export function daemonVersEvenements(rows: LiqDaemon[]): LiqEvent[] {
+  return rows.map((d) => ({
+    time: d.t,
+    side: d.side,
+    price: d.price,
+    qty: d.qty,
+    usd: d.usd,
+    venue: d.venue,
+  }));
+}
+
+/**
+ * Les `n` plus grosses liquidations d'un lot, triées par notionnel décroissant
+ * (l'entrée n'est pas mutée). Renvoie [] si n < 1. PURE.
+ */
+export function topLiquidations(events: LiqEvent[], n: number): LiqEvent[] {
+  if (!(n >= 1)) return [];
+  return [...events].sort((a, b) => b.usd - a.usd).slice(0, n);
 }
 
 /**

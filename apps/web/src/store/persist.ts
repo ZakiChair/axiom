@@ -57,8 +57,8 @@ import { revenueStore } from "./revenue";
 import { macroOverlayStore, MACRO_OVERLAYS, type MacroOverlayId } from "./macro-overlays";
 import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
-import { liqMarksStore } from "../chart/liquidationMarkers";
-import { liqEstStore } from "../chart/liquidationEstimates";
+import { liqMarksStore, type LiqHeatMode, type Granularite } from "../chart/liquidationMarkers";
+import { liqEstStore, LEVIERS } from "../chart/liquidationEstimates";
 import { windowManagerStore, WINDOW_REGISTRY, type EtatFenetre } from "./windowManager";
 import { syntheticsStore } from "./synthetics";
 import { parseSyntheticSymbol } from "../data/synthetic";
@@ -361,8 +361,14 @@ interface PersistedSession {
   revenue: boolean;
   /** Bascule heatmap liquidations exécutées (chart/liquidationMarkers). */
   liqHeatmap: boolean;
+  /** Mode de coloration des cellules de la heatmap (intensité / dominance long-short). */
+  liqHeatmapMode: LiqHeatMode;
+  /** Granularité des buckets de prix de la heatmap (½× / 1× / 2× — facteur de tailleBucket). */
+  liqGranularite: Granularite;
   /** Bascule niveaux de liquidation estimés (chart/liquidationEstimates). */
   liqEstimates: boolean;
+  /** Leviers cochés du modèle de niveaux estimés (sous-ensemble NON VIDE de LEVIERS). */
+  liqLeviers: number[];
   macroOverlays: MacroOverlayId[];
   /** État replié des sections de la sidebar (clé = titre ; carte creuse). */
   sections: Record<string, boolean>;
@@ -377,7 +383,10 @@ function currentSession(): PersistedSession {
     volumeProfile: volumeProfileStore.getState().enabled,
     revenue: revenueStore.getState().enabled,
     liqHeatmap: liqMarksStore.getState().actif,
+    liqHeatmapMode: liqMarksStore.getState().mode,
+    liqGranularite: liqMarksStore.getState().granularite,
     liqEstimates: liqEstStore.getState().actif,
+    liqLeviers: liqEstStore.getState().leviers,
     macroOverlays: macroOverlayStore.getState().enabled,
     sections: uiSectionsStore.getState().open,
     priceScale: priceScaleStore.getState().type,
@@ -408,7 +417,23 @@ function hydrateSession(): void {
   // Liquidations : `setActif` fait passer la bascule via son subscribe → le singleton
   // (re)démarre l'abonnement WS / le fetch OI si `true` est restauré (cf. demarrer*).
   if (typeof p.liqHeatmap === "boolean") liqMarksStore.getState().setActif(p.liqHeatmap);
+  // Mode de coloration : union de chaînes — la garde d'égalité filtre toute valeur inconnue.
+  if (p.liqHeatmapMode === "intensite" || p.liqHeatmapMode === "dominance") {
+    liqMarksStore.getState().setMode(p.liqHeatmapMode);
+  }
+  // Granularité : union 0.5|1|2 — la garde d'égalité filtre toute valeur inconnue.
+  if (p.liqGranularite === 0.5 || p.liqGranularite === 1 || p.liqGranularite === 2) {
+    liqMarksStore.getState().setGranularite(p.liqGranularite);
+  }
   if (typeof p.liqEstimates === "boolean") liqEstStore.getState().setActif(p.liqEstimates);
+  // Leviers estimés : garder les nombres ∈ LEVIERS ; non vide (le setter réordonne
+  // canoniquement et ignore une liste vide/invalide — garde : au moins un levier reste).
+  if (Array.isArray(p.liqLeviers)) {
+    const valides = p.liqLeviers.filter(
+      (L): L is number => typeof L === "number" && (LEVIERS as readonly number[]).includes(L),
+    );
+    if (valides.length > 0) liqEstStore.getState().setLeviers(valides);
+  }
 
   if (Array.isArray(p.macroOverlays)) {
     // setEnabled filtre lui-même les ids inconnus (unique()) — on borne malgré tout ici.

@@ -14,9 +14,15 @@
  *  - STORE CVD S/P (`cvdDivergenceStore`) : le contrôleur orderflow publie le kind
  *    de divergence ; on évalue `cvd-spot-perp-div` (app ouverte uniquement — pas de
  *    pipeline orderflow côté daemon).
+ *  - POLL LIQ-CASCADE (~5 s) : injecte `liqUsdParMin` (notionnel liquidé sur la dernière
+ *    minute glissante, pure `usdParMinute` sur le buffer `liqEventsStore`). LIMITE
+ *    ASSUMÉE : évaluée uniquement pour le SYMBOLE COURANT du chart et seulement quand
+ *    le flux liq est retenu (heatmap ON ou fenêtre LIQ ouverte — cf. fluxLiqRetenu) ;
+ *    flux non retenu ou autre symbole → non évaluable (armement figé, pas de faux 0).
  *
  * ONGLET FERMÉ : le daemon évalue aussi `funding-extreme` (poll premiumIndex ~60 s,
- * lot D3). CVD spot/perp-div reste dormant côté daemon (pas de pipeline orderflow).
+ * lot D3). CVD spot/perp-div ET liq-cascade restent dormants côté daemon (pas de
+ * pipeline orderflow ni de flux liq).
  *
  * Un déclenchement → journal du store + notification système (Notification API) + bip
  * discret (WebAudio, aucun fichier binaire). AUCUNE donnée haute fréquence ne transite
@@ -27,6 +33,8 @@
 import { evaluerAlertes, type AlertDef, type ContexteAlerte, type Declenchement } from "@axiom/alerts";
 import type { Unsubscribe } from "@axiom/types";
 import { marketStore } from "../store/market";
+import { fluxLiqRetenu, liqEventsStore } from "../chart/liquidationMarkers";
+import { usdParMinute } from "../components/liquidationsWindow.util";
 import { alertsStore, pousserDefsDaemon } from "../store/alerts";
 import { cvdDivergenceStore } from "../store/cvd-divergence";
 import { orderflowStore } from "../store/orderflow";
@@ -40,6 +48,9 @@ const TYPES_BOUGIE = new Set(["variation-pct", "indicateur-seuil", "indicateur-c
 
 /** Période de poll funding (ms) — lent, hors chemin chaud. */
 const FUNDING_POLL_MS = 60_000;
+/** Période d'évaluation de `liq-cascade` (ms) — le poll fait aussi RETOMBER la fenêtre
+ *  glissante sous le seuil (ré-armement) quand le flux se calme. */
+const LIQ_CASCADE_POLL_MS = 5_000;
 /** Fenêtre min. d'historique funding pour un z-score (points). */
 const FUNDING_Z_WINDOW = 30;
 
@@ -183,6 +194,45 @@ function creerRuntime(): Unsubscribe {
     }
   };
 
+  // ── Poll liq-cascade : buffer liq du chart → moteur ───────────────────────
+  // LIMITE ASSUMÉE (cf. en-tête) : le buffer `liqEventsStore` ne couvre que le symbole
+  // COURANT du chart et n'est alimenté que si le flux est retenu (heatmap ON ou fenêtre
+  // LIQ ouverte). Flux non retenu → on n'évalue PAS (non évaluable : l'armement reste
+  // figé, on n'injecte pas un 0 trompeur). Le daemon onglet fermé n'évalue pas ce type.
+  const evaluerLiqCascade = (): void => {
+    if (!fluxLiqRetenu()) return; // flux inactif → non évaluable
+    const symbol = marketStore.getState().symbol;
+    const lot = alertsStore
+      .getState()
+      .defs.filter((d) => d.actif && d.symbol === symbol && d.condition.type === "liq-cascade");
+    if (lot.length === 0) return;
+    // Événements RÉELS uniquement : le seed Coinalyze (`approx`) est agrégé par bougie
+    // et gonflerait artificiellement la minute glissante.
+    const reels = liqEventsStore.getState().events.filter((ev) => ev.approx !== true);
+    const nowMs = Date.now();
+    const mkt = marketStore.getState();
+    const lastCandle = mkt.candles[mkt.candles.length - 1];
+    appliquerResultat(lot, {
+      maintenant: nowMs,
+      dernierPrix: lastCandle?.close ?? 0,
+      liqUsdParMin: usdParMinute(reels, nowMs),
+    });
+  };
+
+  let liqCascadeTimer: ReturnType<typeof setInterval> | undefined;
+  const resyncLiqCascade = (): void => {
+    const aDesCascade = alertsStore
+      .getState()
+      .defs.some((d) => d.actif && d.condition.type === "liq-cascade");
+    if (aDesCascade && liqCascadeTimer === undefined) {
+      evaluerLiqCascade();
+      liqCascadeTimer = setInterval(evaluerLiqCascade, LIQ_CASCADE_POLL_MS);
+    } else if (!aDesCascade && liqCascadeTimer !== undefined) {
+      clearInterval(liqCascadeTimer);
+      liqCascadeTimer = undefined;
+    }
+  };
+
   // ── CVD spot/perp-div : pont orderflow → moteur ─────────────────────────
   const evaluerCvdSymbol = (symbol: string): void => {
     const kind = cvdDivergenceStore.getState().bySymbol[symbol.toUpperCase()];
@@ -223,6 +273,7 @@ function creerRuntime(): Unsubscribe {
   // Démarrage : souscriptions + calibrage immédiat contre l'état courant.
   resyncTicker();
   resyncFunding();
+  resyncLiqCascade();
   assurerPipelineCvd();
   // Calibrage CVD sur l'état déjà publié (si orderflow déjà actif).
   for (const sym of Object.keys(cvdDivergenceStore.getState().bySymbol)) {
@@ -231,6 +282,7 @@ function creerRuntime(): Unsubscribe {
   const unsubAlerts = alertsStore.subscribe(() => {
     resyncTicker(); // re-route si la liste des symboles change
     resyncFunding();
+    resyncLiqCascade();
     assurerPipelineCvd();
   });
   const unsubMarket = marketStore.subscribe(onMarket);
@@ -245,6 +297,7 @@ function creerRuntime(): Unsubscribe {
     unsubCvd();
     stopHeartbeat();
     if (fundingTimer !== undefined) clearInterval(fundingTimer);
+    if (liqCascadeTimer !== undefined) clearInterval(liqCascadeTimer);
   };
 }
 

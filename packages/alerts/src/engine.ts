@@ -89,6 +89,8 @@ function evaluerUne(def: AlertDef, ctx: ContexteAlerte): EvalCondition | null {
       return evalFundingExtreme(def, c, ctx);
     case "cvd-spot-perp-div":
       return evalCvdSpotPerpDiv(def, c, ctx);
+    case "liq-cascade":
+      return evalLiqCascade(def, c, ctx);
   }
 }
 
@@ -241,6 +243,23 @@ function evalCvdSpotPerpDiv(
   const valeur = kind === "spotUp_perpDown" ? 1 : kind === "spotDown_perpUp" ? -1 : 0;
   const r = frontArme(def.arme, satisfaite);
   return { fire: r.fire, arme: r.arme, valeur };
+}
+
+/**
+ * Cascade de liquidations : `liqUsdParMin` (notionnel liquidé sur la dernière minute
+ * glissante, tous côtés — injecté par l'appelant) ≥ seuil. Ré-armement standard : le
+ * débit doit repasser SOUS le seuil avant de pouvoir re-déclencher.
+ */
+function evalLiqCascade(
+  def: AlertDef,
+  c: Extract<Condition, { type: "liq-cascade" }>,
+  ctx: ContexteAlerte
+): EvalCondition | null {
+  const v = ctx.liqUsdParMin;
+  if (v === undefined || !Number.isFinite(v)) return null;
+  const satisfaite = v >= c.seuilUsdParMin;
+  const r = frontArme(def.arme, satisfaite);
+  return { fire: r.fire, arme: r.arme, valeur: v };
 }
 
 // ───────── Helpers purs ─────────

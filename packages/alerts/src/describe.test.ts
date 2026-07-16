@@ -77,6 +77,21 @@ describe("decrireCondition", () => {
     ).toBe("Funding extrême (short crowded, |rate|≥0.05% ou |z|≥3)");
   });
 
+  it("liq-cascade en montant compact $/min", () => {
+    expect(decrireCondition({ type: "liq-cascade", seuilUsdParMin: 5_000_000 })).toBe(
+      "Cascade de liquidations ≥ 5M $/min"
+    );
+    expect(decrireCondition({ type: "liq-cascade", seuilUsdParMin: 2_500_000 })).toBe(
+      "Cascade de liquidations ≥ 2.5M $/min"
+    );
+    expect(decrireCondition({ type: "liq-cascade", seuilUsdParMin: 750_000 })).toBe(
+      "Cascade de liquidations ≥ 750K $/min"
+    );
+    expect(decrireCondition({ type: "liq-cascade", seuilUsdParMin: 500 })).toBe(
+      "Cascade de liquidations ≥ 500 $/min"
+    );
+  });
+
   it("cvd-spot-perp-div selon kind", () => {
     expect(decrireCondition({ type: "cvd-spot-perp-div", kind: "spotUp_perpDown" })).toBe(
       "CVD divergence spot↑ perp↓"

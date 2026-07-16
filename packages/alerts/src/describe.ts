@@ -19,6 +19,14 @@ export function formaterDuree(ms: number): string {
   return `${j} j`;
 }
 
+/** Montant USD compact (« 5M », « 2.5M », « 750K ») — 1 décimale max, pas de dépendance. */
+function formaterMontant(usd: number): string {
+  const abs = Math.abs(usd);
+  const [suffixe, diviseur] =
+    abs >= 1e9 ? ["B", 1e9] : abs >= 1e6 ? ["M", 1e6] : abs >= 1e3 ? ["K", 1e3] : ["", 1];
+  return `${Math.round((usd / diviseur) * 10) / 10}${suffixe}`;
+}
+
 /** Description française d'une condition (courte, dense). */
 export function decrireCondition(condition: Condition): string {
   switch (condition.type) {
@@ -68,5 +76,8 @@ export function decrireCondition(condition: Condition): string {
       if (kind === "spotDown_perpUp") return "CVD divergence spot↓ perp↑";
       return "CVD divergence spot/perp";
     }
+    case "liq-cascade":
+      // Limite d'évaluation (flux liq actif requis) documentée côté runtime + UI.
+      return `Cascade de liquidations ≥ ${formaterMontant(condition.seuilUsdParMin)} $/min`;
   }
 }

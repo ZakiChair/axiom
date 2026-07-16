@@ -28,12 +28,17 @@ import { couleurViridis } from "./liquidationMarkers";
 import {
   cellSousCurseur,
   construireGrille,
+  dimensionsGrilleVisible,
   intensiteLog,
+  desequilibre,
   profilParPrix,
+  cumulsAutourSpot,
   estFondClair,
+  parseCssColor,
   couleurRampe,
   filtrerNiveauxDenses,
   dechevaucher,
+  type LiqGrid,
 } from "./liquidationHeat";
 
 function candle(partial: Partial<Candle> & Pick<Candle, "time" | "close">): Candle {
@@ -103,6 +108,59 @@ describe("construireGrille", () => {
     // Aucun événement → 0 cellule → null.
     expect(construireGrille([], candles, 0, 2)).toBeNull();
   });
+
+  it("facteur de taille (granularité) multiplie la taille de bucket", () => {
+    // close 100 → tailleBucket = 0,1. Deux prix (100,00 et 100,15) tombent dans des buckets
+    // DISTINCTS à 0,1 (facteur 1) mais le MÊME à 0,2 (facteur 2 → regroupement plus grossier).
+    const candles = [candle({ time: 0, close: 100 }), candle({ time: 60000, close: 100 })];
+    const events = [
+      ev({ time: 1000, side: "long", price: 100.0, usd: 100 }),
+      ev({ time: 1500, side: "long", price: 100.15, usd: 100 }),
+    ];
+    const base = construireGrille(events, candles, 0, 2); // facteur par défaut = 1
+    expect(base?.taille).toBeCloseTo(0.1, 9);
+    expect(base?.cells.size).toBe(2);
+
+    const grossier = construireGrille(events, candles, 0, 2, 2);
+    expect(grossier?.taille).toBeCloseTo(0.2, 9);
+    expect(grossier?.cells.size).toBe(1); // les deux prix fusionnent dans un bucket 0,2
+
+    const fin = construireGrille(events, candles, 0, 2, 0.5);
+    expect(fin?.taille).toBeCloseTo(0.05, 9);
+    expect(fin?.cells.size).toBe(2); // buckets toujours distincts (encore plus fins)
+  });
+});
+
+describe("dimensionsGrilleVisible", () => {
+  /** Grille factice : une cellule par bucketIdx demandé (le temps/USD n'importe pas ici). */
+  function grille(bucketIdxs: number[]): LiqGrid {
+    const cells = new Map();
+    for (const idx of bucketIdxs) {
+      cells.set(`0:${idx}`, { candleTime: 0, bucketIdx: idx, longUsd: 1, shortUsd: 0, count: 1 });
+    }
+    return { cells, taille: 1, maxUsd: 1 };
+  }
+
+  it("renvoie colonnes = to − from et les bornes min/max des buckets présents", () => {
+    expect(dimensionsGrilleVisible(grille([9, 5, 7]), 2, 5)).toEqual({
+      colonnes: 3,
+      bucketMin: 5,
+      bucketMax: 9,
+    });
+  });
+
+  it("bucket unique : bornes confondues", () => {
+    expect(dimensionsGrilleVisible(grille([3]), 0, 1)).toEqual({
+      colonnes: 1,
+      bucketMin: 3,
+      bucketMax: 3,
+    });
+  });
+
+  it("null si plage vide ou grille sans cellule", () => {
+    expect(dimensionsGrilleVisible(grille([1]), 3, 3)).toBeNull(); // to − from < 1
+    expect(dimensionsGrilleVisible(grille([]), 0, 2)).toBeNull(); // aucune cellule
+  });
 });
 
 describe("intensiteLog", () => {
@@ -116,6 +174,25 @@ describe("intensiteLog", () => {
     expect(intensiteLog(200, 100)).toBe(1); // usd > max → clampé à 1
     expect(intensiteLog(50, 0)).toBe(0); // max invalide → 0
     expect(intensiteLog(50, -10)).toBe(0);
+  });
+});
+
+describe("desequilibre", () => {
+  it("+1 = 100 % shorts, -1 = 100 % longs, 0 à l'équilibre", () => {
+    expect(desequilibre(0, 100)).toBe(1);
+    expect(desequilibre(100, 0)).toBe(-1);
+    expect(desequilibre(50, 50)).toBe(0);
+  });
+
+  it("proportionnel à la part dominante (∈ [-1, +1])", () => {
+    expect(desequilibre(25, 75)).toBe(0.5); // shorts dominants aux 3/4
+    expect(desequilibre(75, 25)).toBe(-0.5); // longs dominants aux 3/4
+    expect(desequilibre(90, 10)).toBeCloseTo(-0.8, 10);
+  });
+
+  it("total nul ou invalide → 0 (cellule neutre)", () => {
+    expect(desequilibre(0, 0)).toBe(0);
+    expect(desequilibre(NaN, 100)).toBe(0);
   });
 });
 
@@ -167,6 +244,76 @@ describe("profilParPrix", () => {
     const [entree] = [...profil.values()];
     expect(entree?.longUsd).toBe(500);
     expect(entree?.shortUsd).toBe(200);
+  });
+});
+
+describe("cumulsAutourSpot", () => {
+  it("répartit buckets réels (par prix centre) et niveaux estimés (par price) de part et d'autre du spot", () => {
+    // taille 10, spot 100 : bucket 12 (centre 125) au-dessus, bucket 5 (centre 55) en-dessous ;
+    // niveau 130 au-dessus, niveau 80 en-dessous, niveau exactement à 100 → en-dessous (<=).
+    const profil = new Map([
+      [12, { longUsd: 300, shortUsd: 100 }],
+      [5, { longUsd: 50, shortUsd: 150 }],
+    ]);
+    const niveaux = [
+      { price: 130, poidsUsd: 1000 },
+      { price: 80, poidsUsd: 700 },
+      { price: 100, poidsUsd: 5 },
+    ];
+    expect(cumulsAutourSpot(profil, 10, niveaux, 100)).toEqual({
+      reelAuDessus: 400,
+      reelEnDessous: 200,
+      estAuDessus: 1000,
+      estEnDessous: 705,
+    });
+  });
+
+  it("spot exactement sur un centre de bucket → le bucket compte en-dessous (<=)", () => {
+    // Bucket 10 : centre (10 + 0.5) × 10 = 105 = spot → en-dessous.
+    const profil = new Map([[10, { longUsd: 100, shortUsd: 0 }]]);
+    expect(cumulsAutourSpot(profil, 10, [], 105)).toEqual({
+      reelAuDessus: 0,
+      reelEnDessous: 100,
+      estAuDessus: 0,
+      estEnDessous: 0,
+    });
+  });
+
+  it("profil et niveaux vides → zéros", () => {
+    expect(cumulsAutourSpot(new Map(), 10, [], 100)).toEqual({
+      reelAuDessus: 0,
+      reelEnDessous: 0,
+      estAuDessus: 0,
+      estEnDessous: 0,
+    });
+  });
+
+  it("ignore les niveaux estimés au poids non fini (même garde que le tracé)", () => {
+    const niveaux = [
+      { price: 130, poidsUsd: Number.NaN },
+      { price: 130, poidsUsd: 1000 },
+    ];
+    expect(cumulsAutourSpot(new Map(), 10, niveaux, 100).estAuDessus).toBe(1000);
+  });
+});
+
+describe("parseCssColor", () => {
+  it("parse #rrggbb et #rgb en tuple RVB", () => {
+    expect(parseCssColor("#ef4444")).toEqual([239, 68, 68]);
+    expect(parseCssColor("#fff")).toEqual([255, 255, 255]);
+    expect(parseCssColor("#0a0a0a")).toEqual([10, 10, 10]);
+  });
+
+  it("parse rgb()/rgba() (espaces et alpha tolérés)", () => {
+    expect(parseCssColor("rgb(16, 185, 129)")).toEqual([16, 185, 129]);
+    expect(parseCssColor("rgba(239,68,68,0.5)")).toEqual([239, 68, 68]);
+  });
+
+  it("chaîne non reconnue → null (var() non résolu, hex invalide, vide)", () => {
+    expect(parseCssColor("")).toBeNull();
+    expect(parseCssColor("bidon")).toBeNull();
+    expect(parseCssColor("#12")).toBeNull();
+    expect(parseCssColor("var(--up)")).toBeNull();
   });
 });
 

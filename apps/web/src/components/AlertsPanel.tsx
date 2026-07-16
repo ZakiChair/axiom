@@ -3,8 +3,8 @@
  *
  * Liste dense des alertes (état actif, armement, dernière exécution, libellé de la
  * condition), création (symbole prérempli = actif courant ; types prix / var% /
- * indicateur-seuil / funding-extreme), suppression, bascule actif/inactif, et
- * journal repliable des déclenchements.
+ * indicateur-seuil / funding-extreme / cascade liq), suppression, bascule
+ * actif/inactif, et journal repliable des déclenchements.
  *
  * Ce composant se re-rend uniquement sur ÉVÉNEMENT (création, bascule, déclenchement) :
  * aucune donnée haute fréquence n'y transite (le runtime écrit le store hors render-loop).
@@ -33,7 +33,8 @@ type TypeAlerte =
   | "variation-pct"
   | "indicateur-seuil"
   | "funding-extreme"
-  | "cvd-spot-perp-div";
+  | "cvd-spot-perp-div"
+  | "liq-cascade";
 
 /** Sens funding (overcrowding). */
 type SensFunding = "long-crowded" | "short-crowded" | "les-deux";
@@ -87,6 +88,8 @@ export function AlertsPanel() {
   const [zSeuil, setZSeuil] = useState("2");
   // cvd-spot-perp-div
   const [kindCvd, setKindCvd] = useState<KindCvd>("les-deux");
+  // liq-cascade : seuil de notionnel liquidé par minute glissante (USD/min).
+  const [seuilCascade, setSeuilCascade] = useState("5000000");
   const [journalOuvert, setJournalOuvert] = useState(false);
 
   const symboleEffectif = (symbol.trim() || symbolCourant).toUpperCase();
@@ -138,6 +141,11 @@ export function AlertsPanel() {
         ...(hasAbs ? { seuilAbs: absPct / 100 } : {}),
         ...(hasZ ? { zSeuil: z } : {}),
       };
+    } else if (type === "liq-cascade") {
+      // liq-cascade : seuil USD/min strictement positif requis.
+      const s = Number(seuilCascade);
+      if (!Number.isFinite(s) || s <= 0) return;
+      condition = { type: "liq-cascade", seuilUsdParMin: s };
     } else {
       // cvd-spot-perp-div — active le pipeline orderflow via le runtime.
       condition = { type: "cvd-spot-perp-div", kind: kindCvd };
@@ -243,6 +251,7 @@ export function AlertsPanel() {
             <option value="indicateur-seuil">Indicateur</option>
             <option value="funding-extreme">Funding</option>
             <option value="cvd-spot-perp-div">CVD S/P</option>
+            <option value="liq-cascade">Cascade liq</option>
           </select>
         </div>
 
@@ -392,6 +401,24 @@ export function AlertsPanel() {
             </select>
             <p className="px-0.5 text-[10px] text-text-dim">
               Active orderflow + CVD S/P (Binance). App ouverte uniquement.
+            </p>
+          </div>
+        )}
+
+        {type === "liq-cascade" && (
+          <div className="space-y-1.5">
+            <input
+              value={seuilCascade}
+              onChange={(e) => setSeuilCascade(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && soumettre()}
+              inputMode="numeric"
+              placeholder="Seuil $/min (ex. 5000000)"
+              title="Notionnel liquidé par minute glissante (USD/min, tous côtés)"
+              className="w-full rounded border border-border bg-bg px-2 py-1 text-xs tabular-nums text-text outline-none placeholder:text-text-dim focus:border-text-dim"
+            />
+            <p className="px-0.5 text-[10px] text-text-dim">
+              Symbole affiché uniquement, flux liq actif requis (heatmap ou fenêtre LIQ ouverte).
+              Non évaluée onglet fermé.
             </p>
           </div>
         )}

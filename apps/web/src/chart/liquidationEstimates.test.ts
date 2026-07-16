@@ -111,4 +111,47 @@ describe("calculerNiveauxEstimes", () => {
     expect(calculerNiveauxEstimes([{ time: 1000, oiUsd: 1000 }], [candle({ time: 1000, close: 100 })])).toEqual([]);
     expect(calculerNiveauxEstimes([{ time: 1000, oiUsd: 1000 }, { time: 1500, oiUsd: 2000 }], [])).toEqual([]);
   });
+
+  it("leviers custom (sous-ensemble) → poids = ΔOI/(2×nb leviers), seuls les leviers demandés", () => {
+    const candles = [candle({ time: 1000, close: 100 })];
+    const oiHist = [
+      { time: 1000, oiUsd: 1000 },
+      { time: 1500, oiUsd: 2000 }, // ΔOI = 1000
+    ];
+    // 2 leviers → 2 côtés × 2 leviers = 4 niveaux ; poids = 1000/(2×2) = 250.
+    const niveaux = calculerNiveauxEstimes(oiHist, candles, [10, 50]);
+    expect(niveaux.length).toBe(4);
+    for (const n of niveaux) expect(n.poidsUsd).toBeCloseTo(250, 6);
+    expect(new Set(niveaux.map((n) => n.levier))).toEqual(new Set([10, 50]));
+    // entry 100 → longs ×10 = 90, ×50 = 98 ; shorts ×10 = 110, ×50 = 102.
+    const longs = niveaux.filter((n) => n.side === "long").map((n) => n.price).sort((a, b) => a - b);
+    const shorts = niveaux.filter((n) => n.side === "short").map((n) => n.price).sort((a, b) => a - b);
+    expect(longs[0]).toBeCloseTo(90, 6);
+    expect(longs[1]).toBeCloseTo(98, 6);
+    expect(shorts[0]).toBeCloseTo(102, 6);
+    expect(shorts[1]).toBeCloseTo(110, 6);
+  });
+
+  it("un seul levier → 2 niveaux (long+short) au poids ΔOI/2", () => {
+    const candles = [candle({ time: 1000, close: 100 })];
+    const oiHist = [
+      { time: 1000, oiUsd: 1000 },
+      { time: 1500, oiUsd: 2000 }, // ΔOI = 1000 → poids = 1000/(2×1) = 500
+    ];
+    const niveaux = calculerNiveauxEstimes(oiHist, candles, [25]);
+    expect(niveaux.length).toBe(2);
+    for (const n of niveaux) {
+      expect(n.levier).toBe(25);
+      expect(n.poidsUsd).toBeCloseTo(500, 6);
+    }
+  });
+
+  it("leviers vides → aucun niveau (garde anti-division-par-zéro)", () => {
+    const candles = [candle({ time: 1000, close: 100 })];
+    const oiHist = [
+      { time: 1000, oiUsd: 1000 },
+      { time: 1500, oiUsd: 2000 },
+    ];
+    expect(calculerNiveauxEstimes(oiHist, candles, [])).toEqual([]);
+  });
 });

@@ -21,6 +21,7 @@ import {
   liqEventsStore,
   liqMarksStore,
   type LiqEvent,
+  type LiqHeatMode,
 } from "./liquidationMarkers";
 import {
   liqEstStore,
@@ -28,6 +29,7 @@ import {
   calculerNiveauxEstimes,
   type NiveauEstime,
 } from "./liquidationEstimates";
+import type { Commande } from "../commands/registry";
 import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
 import { volumeProfileStore } from "../store/volumeProfile";
@@ -52,23 +54,25 @@ export interface LiqGrid {
 /**
  * Agrège les `events` en cellules (bougie × bucket) sur la plage de bougies [from, to)
  * (INDEX de bougies, convention `getVisibleRange`). La taille de bucket est dérivée du close
- * de la DERNIÈRE bougie de la plage ; chaque événement est rattaché à sa bougie contenante
- * (`candleContenant`), et les événements hors de [candles[from].time, candles[to-1].time]
- * sont écartés. Renvoie `null` si la plage contient < 1 bougie ou ne produit aucune cellule.
- * PURE.
+ * de la DERNIÈRE bougie de la plage, MULTIPLIÉE par `facteurTaille` (granularité utilisateur :
+ * ½× / 1× / 2× — cf. `liqMarksStore.granularite`) ; chaque événement est rattaché à sa bougie
+ * contenante (`candleContenant`), et les événements hors de [candles[from].time,
+ * candles[to-1].time] sont écartés. Renvoie `null` si la plage contient < 1 bougie ou ne
+ * produit aucune cellule. PURE.
  */
 export function construireGrille(
   events: LiqEvent[],
   candles: Candle[],
   from: number,
   to: number,
+  facteurTaille = 1,
 ): LiqGrid | null {
   if (to - from < 1) return null;
   const premier = candles[from];
   const dernier = candles[to - 1];
   if (premier === undefined || dernier === undefined) return null;
 
-  const taille = tailleBucket(dernier.close);
+  const taille = tailleBucket(dernier.close) * facteurTaille;
   if (!(taille > 0)) return null;
 
   const cells = new Map<string, LiqCell>();
@@ -114,6 +118,18 @@ export function intensiteLog(usd: number, maxUsd: number): number {
 }
 
 /**
+ * Déséquilibre long/short d'une cellule ∈ [-1, +1] : `(short − long) / (short + long)`.
+ * +1 = 100 % de shorts liquidés, −1 = 100 % de longs liquidés, 0 à l'équilibre ou si le
+ * total est nul/invalide. Pilote la teinte et la franchise des cellules en mode
+ * « dominance » (cf. dessinerHeatmap). PURE.
+ */
+export function desequilibre(longUsd: number, shortUsd: number): number {
+  const total = longUsd + shortUsd;
+  if (!(total > 0)) return 0;
+  return (shortUsd - longUsd) / total;
+}
+
+/**
  * Profil latéral par bucket de prix : somme long/short de toutes les bougies pour chaque
  * bucketIdx (alimente les bandes du bord droit). PURE.
  */
@@ -129,6 +145,61 @@ export function profilParPrix(grid: LiqGrid): Map<number, { longUsd: number; sho
     agg.shortUsd += cell.shortUsd;
   }
   return profil;
+}
+
+/**
+ * Mini-CLLD : totaux de liquidations CUMULÉS de part et d'autre du prix spot, en séparant
+ * réel (profil par bucket, cf. `profilParPrix` — montant = longUsd + shortUsd) et estimé
+ * (niveaux du modèle levier, pondérés par `poidsUsd`). Un bucket réel est « au-dessus » si
+ * son prix CENTRE ((idx + 0.5) × taille) est STRICTEMENT supérieur au spot (centre exactement
+ * sur le spot → en-dessous) ; un niveau estimé suit la même convention sur son `price`. Les
+ * niveaux au poids non fini sont ignorés (même garde que leur tracé). Entrées vides → zéros.
+ * PURE.
+ */
+export function cumulsAutourSpot(
+  profil: Map<number, { longUsd: number; shortUsd: number }>,
+  taille: number,
+  niveaux: Array<{ price: number; poidsUsd: number }>,
+  spot: number,
+): { reelAuDessus: number; reelEnDessous: number; estAuDessus: number; estEnDessous: number } {
+  let reelAuDessus = 0;
+  let reelEnDessous = 0;
+  let estAuDessus = 0;
+  let estEnDessous = 0;
+  for (const [idx, agg] of profil) {
+    const montant = agg.longUsd + agg.shortUsd;
+    if ((idx + 0.5) * taille > spot) reelAuDessus += montant;
+    else reelEnDessous += montant;
+  }
+  for (const n of niveaux) {
+    if (!Number.isFinite(n.poidsUsd)) continue;
+    if (n.price > spot) estAuDessus += n.poidsUsd;
+    else estEnDessous += n.poidsUsd;
+  }
+  return { reelAuDessus, reelEnDessous, estAuDessus, estEnDessous };
+}
+
+/**
+ * Dimensions de la grille VISIBLE pour le rendu offscreen basse résolution : nombre de
+ * colonnes (`to − from`, une par bougie de la plage) et bornes [bucketMin, bucketMax] des
+ * buckets réellement PRÉSENTS dans les cellules (le petit canvas ne couvre que cette bande
+ * de prix, pas tout l'axe). Renvoie `null` si la plage est vide ou la grille sans cellule.
+ * PURE.
+ */
+export function dimensionsGrilleVisible(
+  grid: LiqGrid,
+  from: number,
+  to: number,
+): { colonnes: number; bucketMin: number; bucketMax: number } | null {
+  const colonnes = to - from;
+  if (colonnes < 1 || grid.cells.size === 0) return null;
+  let bucketMin = Infinity;
+  let bucketMax = -Infinity;
+  for (const cell of grid.cells.values()) {
+    if (cell.bucketIdx < bucketMin) bucketMin = cell.bucketIdx;
+    if (cell.bucketIdx > bucketMax) bucketMax = cell.bucketIdx;
+  }
+  return { colonnes, bucketMin, bucketMax };
 }
 
 /**
@@ -159,9 +230,10 @@ export function cellSousCurseur(
 /**
  * Parse une couleur CSS concrète (`#rgb`, `#rrggbb` ou `rgb()/rgba()`) en tuple RVB, ou
  * `null` si la chaîne n'est pas reconnue. Le canvas ne reçoit que des tokens déjà résolus
- * (jamais de `var()` ni d'`oklch()`), donc ces deux formes suffisent. PURE (locale).
+ * (jamais de `var()` ni d'`oklch()`), donc ces deux formes suffisent. Sert à `estFondClair`
+ * et aux teintes up/down du mode « dominance » (parsées UNE fois par frame). PURE.
  */
-function parseCouleurRvb(css: string): [number, number, number] | null {
+export function parseCssColor(css: string): [number, number, number] | null {
   const s = css.trim();
   if (s.startsWith("#")) {
     const h = s.slice(1);
@@ -187,7 +259,7 @@ function parseCouleurRvb(css: string): [number, number, number] | null {
  * thèmes). Sert à inverser la rampe de couleur sur thème clair (cf. `couleurRampe`). PURE.
  */
 export function estFondClair(bgCss: string): boolean {
-  const rgb = parseCouleurRvb(bgCss);
+  const rgb = parseCssColor(bgCss);
   if (rgb === null) return false;
   const [r, g, b] = rgb;
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.5;
@@ -251,6 +323,11 @@ const MAX_BAND_FRAC = 0.12;
 const VP_WIDTH_FRAC = 0.32;
 /** Largeur de repli d'une cellule quand la largeur de bougie n'est pas déductible. */
 const FALLBACK_CELL_W = 6;
+/** Seuil de LISSAGE « CoinGlass » (px) : sous cette largeur de bougie (zoom large), le rendu
+ *  cellule à cellule (un fillRect par cellule) est remplacé par un offscreen basse résolution
+ *  (1 cellule = 1 pixel) upscalé avec interpolation — rendu continu, 1 seul drawImage par
+ *  frame. Au-dessus (zoom serré), les rects précis restent : lecture cellule à cellule. */
+const SEUIL_LISSAGE_PX = 6;
 /** Teinte orange des niveaux ESTIMÉS (distincte du viridis de la heatmap réelle). */
 const ORANGE_EST = "245,158,11"; // #f59e0b (rgb)
 /** Poids min (fraction du max) pour tracer un niveau ESTIMÉ + plafond de niveaux tracés.
@@ -278,7 +355,14 @@ interface Tokens {
   border: string;
   /** true si le fond du thème est CLAIR (rampe de couleur inversée — cf. `couleurRampe`). */
   fondClair: boolean;
+  /** Teintes up/down PARSÉES en RVB une fois par frame (mode dominance : rgba par cellule). */
+  upRgb: [number, number, number];
+  downRgb: [number, number, number];
 }
+
+/** Replis RVB des teintes up/down si le token du thème n'est pas parsable (#10b981 / #ef4444). */
+const UP_RGB_FALLBACK: [number, number, number] = [16, 185, 129];
+const DOWN_RGB_FALLBACK: [number, number, number] = [239, 68, 68];
 
 /** Lit un token CSS sémantique concret depuis <html> (le canvas n'évalue pas var()). */
 function readToken(name: string): string {
@@ -320,6 +404,19 @@ export class LiquidationHeatController {
    */
   private niveauxObsoletes = true;
   private derniersNiveaux: NiveauEstime[] | null = null;
+  /**
+   * Petit canvas DÉTACHÉ du rendu lissé « CoinGlass » (1 cellule de la grille = 1 pixel),
+   * membre RÉUTILISÉ entre frames : créé paresseusement au premier rendu lissé, redimensionné
+   * seulement quand les dimensions de la grille visible changent (cf. dessinerCellulesLissees).
+   */
+  private offscreen: HTMLCanvasElement | null = null;
+  private offscreenCtx: CanvasRenderingContext2D | null = null;
+  /**
+   * ImageData du rendu lissé, membre RÉUTILISÉ entre frames : le survol déclenche un repaint,
+   * donc une allocation par frame mettait le GC sous pression. Recréée seulement si les
+   * dimensions de la grille visible changent, sinon vidée en tête de frame (cf. dessinerCellulesLissees).
+   */
+  private imageDataLissage: ImageData | null = null;
   /** Dernier crosshair reçu (position + bougie survolée) ; null quand le curseur quitte le graphe. */
   private dernierCrosshair: Crosshair | null = null;
   private resizeObserver: ResizeObserver | null = null;
@@ -327,6 +424,8 @@ export class LiquidationHeatController {
   private unsubEvents: (() => void) | null = null;
   private unsubOi: (() => void) | null = null;
   private unsubTheme: (() => void) | null = null;
+  /** Changement de MODE (intensité/dominance) : repaint SEUL — ne touche ni grille ni niveaux. */
+  private unsubMode: (() => void) | null = null;
   /** Activation demandée par la heatmap RÉELLE (bascule LIQMARK, via setEnabled). */
   private marksWanted = false;
   /** Abonnement permanent à la bascule des niveaux ESTIMÉS (LIQEST) — indépendant de LIQMARK. */
@@ -393,6 +492,19 @@ export class LiquidationHeatController {
     // Changement de thème : bandes/tooltip/lignes lisent des tokens CSS → repeindre pour
     // adopter les nouvelles couleurs (un simple repaint suffit ; `markDirty` par symétrie).
     this.unsubTheme = themeStore.subscribe(this.markDirty);
+    // Changements de liqMarksStore hors `actif` (relayé par setEnabled) :
+    //  • MODE de coloration (LIQMODE) : ne change QUE le fillStyle des cellules → simple repaint
+    //    (`dirty`), SANS invalider la grille ni les niveaux mémoïsés ;
+    //  • GRANULARITÉ des buckets : change la taille de bucket → la GRILLE (agrégat par bucket) est
+    //    à reconstruire (`grilleObsolete`) ; les niveaux ESTIMÉS restent valides — leur CALCUL ne
+    //    dépend pas de la taille (le regroupement se fait au rendu), d'où pas de `niveauxObsoletes`.
+    this.unsubMode = liqMarksStore.subscribe((s, prev) => {
+      if (s.mode !== prev.mode) this.dirty = true;
+      if (s.granularite !== prev.granularite) {
+        this.grilleObsolete = true;
+        this.dirty = true;
+      }
+    });
     // Redimensionnement du conteneur (resize fenêtre, toggle sidebar…) : aucun
     // scroll/zoom/tick ne le signale autrement, d'où l'observer dédié.
     this.resizeObserver = new ResizeObserver(this.markDirty);
@@ -414,6 +526,8 @@ export class LiquidationHeatController {
     this.unsubOi = null;
     this.unsubTheme?.();
     this.unsubTheme = null;
+    this.unsubMode?.();
+    this.unsubMode = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.dernierCrosshair = null;
@@ -421,6 +535,7 @@ export class LiquidationHeatController {
     this.grilleObsolete = true;
     this.derniersNiveaux = null;
     this.niveauxObsoletes = true;
+    this.imageDataLissage = null;
     this.clearCanvas();
   }
 
@@ -486,14 +601,19 @@ export class LiquidationHeatController {
     // Tokens de couleur lus UNE fois par frame (getComputedStyle est coûteux) et réutilisés
     // par toutes les couches, comme le fait volumeProfile.ts. `--bg` sert à choisir le sens de
     // la rampe de couleur (viridis direct sur fond sombre, inversé sur fond clair).
+    const up = readToken("--up") || "#10b981";
+    const down = readToken("--down") || "#ef4444";
     const tokens: Tokens = {
       textDim: readToken("--text-dim") || "#9ca3af",
-      up: readToken("--up") || "#10b981",
-      down: readToken("--down") || "#ef4444",
+      up,
+      down,
       text: readToken("--text") || "#e5e7eb",
       surface: readToken("--surface") || "#171717",
       border: readToken("--border") || "#262626",
       fondClair: estFondClair(readToken("--bg")),
+      // Parse UNE fois par frame (le mode dominance compose un rgba PAR cellule).
+      upRgb: parseCssColor(up) ?? UP_RGB_FALLBACK,
+      downRgb: parseCssColor(down) ?? DOWN_RGB_FALLBACK,
     };
 
     // Deux couches INDÉPENDANTES sur le même canvas : heatmap RÉELLE (LIQMARK) et niveaux
@@ -528,7 +648,8 @@ export class LiquidationHeatController {
     // `onCrosshair` marque `dirty` sans marquer `grilleObsolete`, donc on réutilise la dernière
     // grille rendue pour le hit-test au lieu de ré-agréger tout le buffer à chaque mousemove.
     if (this.grilleObsolete) {
-      this.derniereGrille = to - from >= 1 ? construireGrille(events, candles, from, to) : null;
+      const facteur = liqMarksStore.getState().granularite;
+      this.derniereGrille = to - from >= 1 ? construireGrille(events, candles, from, to, facteur) : null;
       this.grilleObsolete = false;
     }
     const grid = this.derniereGrille;
@@ -549,11 +670,15 @@ export class LiquidationHeatController {
     // Bords ENTIERS PARTAGÉS par colonne (x0/x1 arrondis) : deux cellules adjacentes partagent
     // exactement le même bord entier → plus de couture d'anti-aliasing (fine grille sombre).
     // La cellule est CENTRÉE sur x ; la dernière bougie réutilise la largeur de l'avant-dernière.
+    // On note au passage l'index de COLONNE de chaque bougie (0..n-1 dans la plage visible) pour
+    // le rendu lissé offscreen (1 colonne = 1 pixel du petit canvas).
     const largeurs = new Map<number, { x0: number; x1: number }>();
+    const colonneParTime = new Map<number, number>();
     let prevW = FALLBACK_CELL_W;
     for (let i = from; i < to; i++) {
       const c = candles[i];
       if (c === undefined) continue;
+      colonneParTime.set(c.time, i - from);
       const x = this.toPx({ timestamp: c.time }).x;
       if (x === undefined || !Number.isFinite(x)) continue;
       const suivant = i + 1 < to ? candles[i + 1] : undefined;
@@ -571,23 +696,17 @@ export class LiquidationHeatController {
     ctx.rect(left, top, width, height);
     ctx.clip();
 
-    // Cellules : un rect par (bougie × bucket), rampe theme-aware d'intensité log. Alpha borné
-    // [0.15, 0.55] pour ne pas masquer le prix sous les cascades. Bords entiers (x0/x1 partagés
-    // par colonne ; yTop/yBot arrondis par bucket → mêmes bords que le bucket voisin).
-    for (const cell of grid.cells.values()) {
-      const col = largeurs.get(cell.candleTime);
-      if (col === undefined) continue;
-      const yTop = this.toPx({ value: (cell.bucketIdx + 1) * grid.taille }).y;
-      const yBot = this.toPx({ value: cell.bucketIdx * grid.taille }).y;
-      if (yTop === undefined || yBot === undefined || !Number.isFinite(yTop) || !Number.isFinite(yBot)) {
-        continue;
-      }
-      const t = intensiteLog(cell.longUsd + cell.shortUsd, grid.maxUsd);
-      const [r, g, b] = couleurRampe(t, tokens.fondClair);
-      const y0 = Math.round(Math.min(yTop, yBot));
-      const y1 = Math.round(Math.max(yTop, yBot));
-      ctx.fillStyle = `rgba(${r},${g},${b},${(0.15 + 0.4 * t).toFixed(3)})`;
-      ctx.fillRect(col.x0, y0, Math.max(1, col.x1 - col.x0), Math.max(1, y1 - y0));
+    // Deux RENDUS de cellules selon la largeur de bougie (l'espacement klinecharts est uniforme,
+    // `prevW` — dernier espacement mesuré — en est représentatif) :
+    //  • bougies FINES (< SEUIL_LISSAGE_PX, zoom large) : offscreen basse résolution upscalé
+    //    (« CoinGlass ») — rendu continu, 1 drawImage au lieu de centaines de fillRect ;
+    //  • bougies LARGES (zoom serré) : rects précis, lecture cellule à cellule.
+    // Repli sur les rects si le lissé ne peut pas se dessiner (bornes non convertibles…).
+    // Le mode ne change QUE la couleur des cellules (grille mémoïsée intacte).
+    const mode = liqMarksStore.getState().mode;
+    const lissage = prevW < SEUIL_LISSAGE_PX;
+    if (!lissage || !this.dessinerCellulesLissees(grid, candles, from, to, largeurs, colonneParTime, mode, tokens)) {
+      this.dessinerCellulesRects(grid, largeurs, mode, tokens);
     }
 
     // Bandes latérales du profil par prix : largeur ∝ intensité log (max 12 % du pane), SPLIT
@@ -659,6 +778,150 @@ export class LiquidationHeatController {
 
     // Tooltip de survol : dessiné HORS clip (au-dessus de la heatmap), après restauration.
     if (hover !== null) this.dessinerTooltip(hover, grid, main, tokens);
+  }
+
+  /**
+   * Rendu CELLULE À CELLULE (bougies larges ≥ SEUIL_LISSAGE_PX) : un fillRect par cellule,
+   * rampe theme-aware d'intensité log. Alpha borné [0.15, 0.55] pour ne pas masquer le prix
+   * sous les cascades. Bords entiers (x0/x1 partagés par colonne ; yTop/yBot arrondis par
+   * bucket → mêmes bords que le bucket voisin).
+   * Mode « dominance » : la teinte remplace la rampe viridis — shorts liquidés dominants =
+   * `--up` (rachats forcés), longs = `--down` (ventes forcées), même sémantique que le profil
+   * latéral — et l'alpha d'intensité est modulé par |deseq| (cellule équilibrée pâle, cellule
+   * très déséquilibrée franche).
+   */
+  private dessinerCellulesRects(
+    grid: LiqGrid,
+    largeurs: Map<number, { x0: number; x1: number }>,
+    mode: LiqHeatMode,
+    tokens: Tokens,
+  ): void {
+    const ctx = this.ctx;
+    for (const cell of grid.cells.values()) {
+      const col = largeurs.get(cell.candleTime);
+      if (col === undefined) continue;
+      const yTop = this.toPx({ value: (cell.bucketIdx + 1) * grid.taille }).y;
+      const yBot = this.toPx({ value: cell.bucketIdx * grid.taille }).y;
+      if (yTop === undefined || yBot === undefined || !Number.isFinite(yTop) || !Number.isFinite(yBot)) {
+        continue;
+      }
+      const t = intensiteLog(cell.longUsd + cell.shortUsd, grid.maxUsd);
+      const y0 = Math.round(Math.min(yTop, yBot));
+      const y1 = Math.round(Math.max(yTop, yBot));
+      if (mode === "dominance") {
+        const d = desequilibre(cell.longUsd, cell.shortUsd);
+        const [r, g, b] = d >= 0 ? tokens.upRgb : tokens.downRgb;
+        const alpha = (0.15 + 0.4 * t) * (0.35 + 0.65 * Math.abs(d));
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
+      } else {
+        const [r, g, b] = couleurRampe(t, tokens.fondClair);
+        ctx.fillStyle = `rgba(${r},${g},${b},${(0.15 + 0.4 * t).toFixed(3)})`;
+      }
+      ctx.fillRect(col.x0, y0, Math.max(1, col.x1 - col.x0), Math.max(1, y1 - y0));
+    }
+  }
+
+  /**
+   * Rendu LISSÉ « CoinGlass » (bougies fines < SEUIL_LISSAGE_PX) : le petit canvas détaché
+   * (`offscreen`, 1 cellule = 1 pixel, dimensions colonnes × buckets couverts) est peint via
+   * ImageData — couleur PLEINE du mode courant, intensité encodée dans le canal ALPHA du pixel
+   * (mêmes formules que les rects : 0.15 + 0.40t, × (0.35 + 0.65|deseq|) en dominance) — puis
+   * upscalé en UN drawImage interpolé vers le rect englobant de la grille visible (bornes
+   * converties par convertToPixel, comme les cellules rects). PAS de globalAlpha au drawImage :
+   * l'atténuation est déjà dans les pixels (sinon double atténuation).
+   *
+   * AXE Y INVERSÉ : le prix croît vers le HAUT à l'écran alors que y canvas croît vers le BAS —
+   * le bucket le plus HAUT en prix (bucketMax) occupe donc la ligne 0 (haut du petit canvas) :
+   * ligne = bucketMax − bucketIdx.
+   *
+   * Renvoie `false` si le rendu lissé est impossible (bornes non convertibles, contexte 2D
+   * indisponible…) — l'appelant se replie alors sur les rects.
+   */
+  private dessinerCellulesLissees(
+    grid: LiqGrid,
+    candles: Candle[],
+    from: number,
+    to: number,
+    largeurs: Map<number, { x0: number; x1: number }>,
+    colonneParTime: Map<number, number>,
+    mode: LiqHeatMode,
+    tokens: Tokens,
+  ): boolean {
+    const dims = dimensionsGrilleVisible(grid, from, to);
+    if (dims === null) return false;
+    const { colonnes, bucketMin, bucketMax } = dims;
+    const nbBuckets = bucketMax - bucketMin + 1;
+
+    // Rect cible ENGLOBANT : bords x des colonnes extrêmes (mêmes bords entiers partagés que
+    // les rects) + y des bornes de prix [bucketMin, bucketMax+1] convertis par convertToPixel.
+    const premier = candles[from];
+    const dernier = candles[to - 1];
+    if (premier === undefined || dernier === undefined) return false;
+    const colPremiere = largeurs.get(premier.time);
+    const colDerniere = largeurs.get(dernier.time);
+    if (colPremiere === undefined || colDerniere === undefined) return false;
+    const yHaut = this.toPx({ value: (bucketMax + 1) * grid.taille }).y;
+    const yBas = this.toPx({ value: bucketMin * grid.taille }).y;
+    if (yHaut === undefined || yBas === undefined || !Number.isFinite(yHaut) || !Number.isFinite(yBas)) {
+      return false;
+    }
+
+    // Petit canvas membre, créé paresseusement et RÉUTILISÉ entre frames ; redimensionné
+    // seulement si les dimensions de la grille visible changent (resize = réallocation).
+    if (this.offscreen === null) {
+      this.offscreen = document.createElement("canvas");
+      this.offscreenCtx = this.offscreen.getContext("2d");
+    }
+    const off = this.offscreen;
+    const offCtx = this.offscreenCtx;
+    if (offCtx === null) return false;
+    if (off.width !== colonnes || off.height !== nbBuckets) {
+      off.width = colonnes;
+      off.height = nbBuckets;
+    }
+
+    // 1 cellule = 1 pixel. ImageData membre RÉUTILISÉE entre frames (évite une alloc par frame
+    // au survol) : recréée seulement si les dimensions changent, sinon vidée par `px.fill(0)`
+    // en tête de frame → les cellules vides restent transparentes sans clearRect préalable.
+    let img = this.imageDataLissage;
+    if (img === null || img.width !== colonnes || img.height !== nbBuckets) {
+      img = offCtx.createImageData(colonnes, nbBuckets);
+      this.imageDataLissage = img;
+    }
+    const px = img.data;
+    px.fill(0);
+    for (const cell of grid.cells.values()) {
+      const colonne = colonneParTime.get(cell.candleTime);
+      if (colonne === undefined) continue;
+      const ligne = bucketMax - cell.bucketIdx; // axe Y inversé (cf. docstring)
+      const t = intensiteLog(cell.longUsd + cell.shortUsd, grid.maxUsd);
+      let rgb: [number, number, number];
+      let alpha: number;
+      if (mode === "dominance") {
+        const d = desequilibre(cell.longUsd, cell.shortUsd);
+        rgb = d >= 0 ? tokens.upRgb : tokens.downRgb;
+        alpha = (0.15 + 0.4 * t) * (0.35 + 0.65 * Math.abs(d));
+      } else {
+        rgb = couleurRampe(t, tokens.fondClair);
+        alpha = 0.15 + 0.4 * t;
+      }
+      const o = (ligne * colonnes + colonne) * 4;
+      px[o] = rgb[0];
+      px[o + 1] = rgb[1];
+      px[o + 2] = rgb[2];
+      px[o + 3] = Math.round(alpha * 255);
+    }
+    offCtx.putImageData(img, 0, 0);
+
+    // Upscale INTERPOLÉ vers le pane : un seul drawImage par frame. L'état du contexte
+    // (imageSmoothing…) est restauré par le ctx.restore() du clip de l'appelant.
+    const ctx = this.ctx;
+    const y0 = Math.round(Math.min(yHaut, yBas));
+    const y1 = Math.round(Math.max(yHaut, yBas));
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high"; // bicubique : c'est lui qui donne le rendu continu
+    ctx.drawImage(off, colPremiere.x0, y0, Math.max(1, colDerniere.x1 - colPremiere.x0), Math.max(1, y1 - y0));
+    return true;
   }
 
   /**
@@ -825,7 +1088,14 @@ export class LiquidationHeatController {
     // OI/symbole via `markDirty`) — au survol `onCrosshair` marque `dirty` sans marquer
     // `niveauxObsoletes`, donc on réutilise le dernier résultat au lieu de tout recalculer.
     if (this.niveauxObsoletes) {
-      this.derniersNiveaux = calculerNiveauxEstimes(oiHistStore.getState().hist, candles);
+      // Leviers cochés par l'utilisateur (sous-ensemble de LEVIERS) — cf. liqEstStore. Le
+      // recalcul est réinvalidé par l'abonnement permanent à liqEstStore (unsubLiqEst → markDirty),
+      // donc décocher/cocher un levier recalcule bien les niveaux.
+      this.derniersNiveaux = calculerNiveauxEstimes(
+        oiHistStore.getState().hist,
+        candles,
+        liqEstStore.getState().leviers,
+      );
       this.niveauxObsoletes = false;
     }
     const niveaux = this.derniersNiveaux ?? [];
@@ -848,8 +1118,10 @@ export class LiquidationHeatController {
       return;
     }
 
-    // Regroupement par bucket de prix : somme des poids + levier dominant du bucket.
-    const taille = tailleBucket(dernier.close);
+    // Regroupement par bucket de prix : somme des poids + levier dominant du bucket. La taille de
+    // bucket suit la GRANULARITÉ utilisateur (facteur ×½/×1/×2), comme la heatmap réelle — c'est
+    // un choix de RENDU (les niveaux mémoïsés, eux, ne dépendent pas de la taille de bucket).
+    const taille = tailleBucket(dernier.close) * liqMarksStore.getState().granularite;
     if (!(taille > 0)) return;
     const parBucket = new Map<number, { poids: number; parLevier: Map<number, number> }>();
     for (const n of niveaux) {
@@ -863,8 +1135,8 @@ export class LiquidationHeatController {
       b.poids += n.poidsUsd;
       b.parLevier.set(n.levier, (b.parLevier.get(n.levier) ?? 0) + n.poidsUsd);
     }
-    // Densité : ne garder que les buckets ≥ 15 % du max, plafonnés aux 30 plus lourds (évite des
-    // centaines de lignes quasi nulles). `filtrerNiveauxDenses` est pure et testée.
+    // Densité : ne garder que les buckets ≥ EST_SEUIL_FRAC du max, plafonnés aux EST_MAX_NIVEAUX
+    // plus lourds (évite des centaines de lignes quasi nulles). `filtrerNiveauxDenses` est pure et testée.
     const denses = filtrerNiveauxDenses(
       [...parBucket.entries()].map(([idx, b]) => ({ idx, poids: b.poids, parLevier: b.parLevier })),
       EST_SEUIL_FRAC,
@@ -936,7 +1208,9 @@ export class LiquidationHeatController {
    *      caption « Liq heatmap (exécutées) · log » — quand la heatmap est active et peuplée ;
    *  (b) mini-légende du profil « ▮ shorts ▮ longs » (carrés teintes `--up`/`--down`) — idem ;
    *  (c) légende « Niveaux ESTIMÉS (modèle levier — approximation) » — dès que la couche EST est
-   *      active (garde-fou BUILD-CONTRACT NON contournable).
+   *      active (garde-fou BUILD-CONTRACT NON contournable) ;
+   *  (d) mini-CLLD : cumuls de liquidations « ↑ » (au-dessus du spot) / « ↓ » (en-dessous),
+   *      réel (tokens.text) et « EST. » (orange) séparés — au SOMMET de la pile.
    * Emplacement jamais occupé par les boutons de layout ni la légende du Volume Profile.
    */
   private dessinerLegendes(main: Bounding, tokens: Tokens, heatActif: boolean, estActif: boolean): void {
@@ -948,11 +1222,15 @@ export class LiquidationHeatController {
 
     // (a) + (b) : uniquement quand la heatmap est active ET a produit une grille (des liquidations).
     if (grid !== null) {
-      // (a) barre d'échelle gradient 84×8 px, « 0 » à gauche, formatUsd(maxUsd) à droite.
+      // (a) barre d'échelle gradient 84×8 px (mêmes 24 crans que les cellules). Mode intensité :
+      // rampe viridis, « 0 » à gauche, formatUsd(maxUsd) à droite. Mode dominance : gradient
+      // DIVERGENT down → (mélange pâle au centre) → up — mêmes teintes/alphas que les cellules
+      // (0.35 + 0.65×|deseq|) —, extrémités étiquetées « longs » / « shorts ».
+      const dominance = liqMarksStore.getState().mode === "dominance";
       ctx.textAlign = "right";
       ctx.textBaseline = "bottom";
       ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
-      const maxTxt = formatUsd(grid.maxUsd);
+      const maxTxt = dominance ? "shorts" : formatUsd(grid.maxUsd);
       const wMax = ctx.measureText(maxTxt).width;
       const barW = 84;
       const barH = 8;
@@ -960,17 +1238,23 @@ export class LiquidationHeatController {
       const barLeft = barRight - barW;
       const barTop = yb - barH;
       for (let i = 0; i < 24; i++) {
-        const [r, g, b] = couleurRampe(i / 23, tokens.fondClair);
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        if (dominance) {
+          const d = (2 * i) / 23 - 1; // cran → deseq ∈ [-1, +1] (longs → shorts)
+          const [r, g, b] = d >= 0 ? tokens.upRgb : tokens.downRgb;
+          ctx.fillStyle = `rgba(${r},${g},${b},${(0.35 + 0.65 * Math.abs(d)).toFixed(3)})`;
+        } else {
+          const [r, g, b] = couleurRampe(i / 23, tokens.fondClair);
+          ctx.fillStyle = `rgb(${r},${g},${b})`;
+        }
         ctx.fillRect(barLeft + (barW * i) / 24, barTop, barW / 24 + 1, barH); // +1 : pas de couture
       }
       ctx.fillStyle = tokens.textDim;
-      ctx.fillText(maxTxt, xRight - 4, yb); // borne haute à droite de la barre
-      ctx.fillText("0", barLeft - 4, yb); // borne basse à gauche de la barre
+      ctx.fillText(maxTxt, xRight - 4, yb); // borne haute (maxUsd / « shorts ») à droite de la barre
+      ctx.fillText(dominance ? "longs" : "0", barLeft - 4, yb); // borne basse à gauche de la barre
       yb -= 13;
       // caption
       ctx.fillStyle = tokens.textDim;
-      ctx.fillText("Liq heatmap (exécutées) · log", xRight - 4, yb);
+      ctx.fillText(`Liq heatmap (exécutées) · ${dominance ? "dominance" : "log"}`, xRight - 4, yb);
       yb -= 14;
 
       // (b) mini-légende profil « ▮ shorts ▮ longs » (shorts = --up, longs = --down).
@@ -1009,6 +1293,63 @@ export class LiquidationHeatController {
       ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
       ctx.fillStyle = `rgba(${ORANGE_EST},0.95)`;
       ctx.fillText("Niveaux ESTIMÉS (modèle levier — approximation)", xRight - 4, yb);
+      yb -= 14;
+    }
+
+    // (d) mini-CLLD : cumuls au-dessus/en-dessous du SPOT (close de la dernière bougie
+    // visible — même source que la taille de bucket de la grille), scope = plage visible.
+    // Partie réelle depuis le profil de la grille en cache (recalcul O(buckets) par frame
+    // dirty), partie « EST. » depuis les niveaux estimés mémoïsés — chacune affichée
+    // SEULEMENT si sa couche est active/peuplée. Ligne ↓ tracée d'abord (empilement vers le
+    // haut) : la ligne ↑ finit au sommet de la pile, comme au-dessus/en-dessous à l'écran.
+    const niveaux = estActif ? this.derniersNiveaux ?? [] : [];
+    if (grid !== null || niveaux.length > 0) {
+      const candles = marketStore.getState().candles;
+      const range = this.chart.getVisibleRange();
+      const derniereVisible = candles[Math.min(candles.length, range.to) - 1];
+      if (derniereVisible === undefined) return;
+      const cumuls = cumulsAutourSpot(
+        grid !== null ? profilParPrix(grid) : new Map(),
+        grid?.taille ?? 0,
+        niveaux,
+        derniereVisible.close,
+      );
+      ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "bottom";
+      const ligne = (prefixe: string, reel: number | null, est: number | null): void => {
+        // La ligne n'apparaît que si au moins un des montants AFFICHÉS est > 0.
+        if (!((reel ?? 0) > 0 || (est ?? 0) > 0)) return;
+        let gauche = reel !== null ? `${prefixe} ${formatUsd(reel)}` : prefixe;
+        if (est !== null) gauche += reel !== null ? " · " : " ";
+        const droite = est !== null ? `EST. ${formatUsd(est)}` : "";
+        const wGauche = ctx.measureText(gauche).width;
+        const x = xRight - 4 - wGauche - ctx.measureText(droite).width;
+        ctx.fillStyle = tokens.text;
+        ctx.fillText(gauche, x, yb);
+        if (droite !== "") {
+          ctx.fillStyle = `rgba(${ORANGE_EST},0.95)`;
+          ctx.fillText(droite, x + wGauche, yb);
+        }
+        yb -= 14;
+      };
+      const reelAffiche = grid !== null;
+      ligne("↓", reelAffiche ? cumuls.reelEnDessous : null, estActif ? cumuls.estEnDessous : null);
+      ligne("↑", reelAffiche ? cumuls.reelAuDessus : null, estActif ? cumuls.estAuDessus : null);
     }
   }
 }
+
+// ─────────────────────────── Commande de palette ───────────────────────────
+
+export const commandes: Commande[] = [
+  {
+    id: "action:liqmode",
+    mnemonique: "LIQMODE",
+    libelle: "Heatmap liquidations — mode intensité / dominance",
+    categorie: "action",
+    motsCles: ["liquidations", "heatmap", "dominance", "long", "short", "mode", "intensite", "liqmode"],
+    apercu: "Bascule la coloration des cellules : intensité totale (viridis) ou dominance long/short",
+    action: () => liqMarksStore.getState().basculerMode(),
+  },
+];

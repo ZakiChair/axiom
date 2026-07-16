@@ -55,7 +55,7 @@ import { enregistrerCommandes, type Commande } from "./commands/registry";
 import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
 import { demarrerAlertes } from "./alerts/runtime";
 import { FloatingWindow } from "./components/FloatingWindow";
-import { TaskbarMinimized } from "./components/TaskbarMinimized";
+import { Taskbar } from "./components/Taskbar";
 import { SnapOverlay } from "./components/SnapOverlay";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { Toasts } from "./components/Toasts";
@@ -293,7 +293,7 @@ export function App() {
         );
       })}
       <SnapOverlay />
-      <TaskbarMinimized />
+      <Taskbar />
       <SettingsPanel />
       <CommandPalette />
       {/* Premier lancement : 3 étapes (masqué si completed ; ⌘K ONBOARD pour rejouer). */}

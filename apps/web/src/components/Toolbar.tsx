@@ -686,8 +686,7 @@ export function Toolbar() {
       <button
         type="button"
         onClick={() => {
-          exportChartImage(symbol, timeframe);
-          pousserToast("PNG exporté");
+          pousserToast(exportChartImage(symbol, timeframe) ? "PNG exporté" : "Aucun graphe à exporter");
         }}
         title="Exporter le graphe en image PNG"
         className="rounded px-2 py-1 text-xs bg-neutral-800 text-neutral-300 hover:bg-neutral-700"

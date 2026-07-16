@@ -429,9 +429,11 @@ export function redrawFibOverlays(rev: number): void {
  * Exporte l'instance FOCUS en PNG et déclenche son téléchargement (`getConvertPictureUrl`,
  * API v9.8 : includeOverlay/type/backgroundColor). Le canvas KLineChart étant transparent,
  * on passe la couleur de fond du thème (--bg). Nom : « SYMBOLE-TF-AAAA-MM-JJ.png ».
+ * Renvoie `false` (sans rien télécharger) s'il n'y a pas de graphe actif, `true` sinon —
+ * l'appelant conditionne son toast de feedback à ce retour.
  */
-export function exportChartImage(symbol: string, tf: string): void {
-  if (activeChart === null) return;
+export function exportChartImage(symbol: string, tf: string): boolean {
+  if (activeChart === null) return false;
   const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg").trim() || "#000000";
   const url = activeChart.getConvertPictureUrl(true, "png", bg);
   const date = new Date().toISOString().slice(0, 10); // AAAA-MM-JJ
@@ -441,6 +443,7 @@ export function exportChartImage(symbol: string, tf: string): void {
   document.body.appendChild(a);
   a.click();
   a.remove();
+  return true;
 }
 
 /**

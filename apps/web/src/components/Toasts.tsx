@@ -4,13 +4,16 @@
  * vanilla `toastsStore` ; l'empilement (max 3) et l'auto-retrait (2500 ms) vivent dans
  * le store. Clic sur un toast = fermeture immédiate. `aria-live="polite"` pour les
  * lecteurs d'écran ; apparition discrète (fade-in opacity, keyframe `axiom-toast-in`).
+ * Le conteneur `aria-live` reste monté EN PERMANENCE (même pile vide) : un lecteur d'écran
+ * ne peut annoncer un ajout que si la région est déjà présente à l'insertion. Vide, il est
+ * transparent et inerte (`pointer-events-none`, aucun toast) ; seuls les toasts captent les
+ * clics (`pointer-events-auto`).
  */
 import { useStore } from "zustand";
 import { retirerToast, toastsStore } from "../store/toasts";
 
 export function Toasts() {
   const toasts = useStore(toastsStore, (s) => s.toasts);
-  if (toasts.length === 0) return null;
   return (
     <div
       aria-live="polite"

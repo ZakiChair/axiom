@@ -9,6 +9,8 @@ import {
   marquerVue,
   normaliserOrdreZ,
   snapGeometry,
+  zFenetreFocalisee,
+  etatPastille,
   windowManagerStore,
   mirrorOpenState,
   WINDOW_REGISTRY,
@@ -595,6 +597,100 @@ describe("minimizeWindow / restoreWindow", () => {
     expect(() => windowManagerStore.getState().minimizeWindow("inconnu")).not.toThrow();
     expect(() => windowManagerStore.getState().restoreWindow("inconnu")).not.toThrow();
     expect(windowManagerStore.getState().windows.inconnu).toBeUndefined();
+  });
+});
+
+describe("zFenetreFocalisee (fenêtre au premier plan pour la taskbar)", () => {
+  it("renvoie le z le plus haut parmi les fenêtres ouvertes non réduites", () => {
+    const windows = {
+      a: fenetre("a", 3),
+      b: fenetre("b", 7),
+      c: fenetre("c", 5),
+    };
+    expect(zFenetreFocalisee(windows)).toBe(7);
+  });
+
+  it("ignore les fenêtres réduites (jamais focalisées) et fermées", () => {
+    const windows = {
+      a: fenetre("a", 9, { minimized: true }),
+      b: fenetre("b", 4, { open: false }),
+      c: fenetre("c", 2),
+    };
+    expect(zFenetreFocalisee(windows)).toBe(2);
+  });
+
+  it("renvoie null si toutes les fenêtres sont réduites ou fermées", () => {
+    const windows = {
+      a: fenetre("a", 9, { minimized: true }),
+      b: fenetre("b", 4, { open: false }),
+    };
+    expect(zFenetreFocalisee(windows)).toBeNull();
+  });
+
+  it("renvoie null sur un ensemble vide", () => {
+    expect(zFenetreFocalisee({})).toBeNull();
+  });
+});
+
+describe("etatPastille (état visuel d'une pastille de taskbar)", () => {
+  it("« minimisee » pour une fenêtre réduite (même si son z égale zFocus)", () => {
+    expect(etatPastille(fenetre("a", 7, { minimized: true }), 7)).toBe("minimisee");
+  });
+
+  it("« focus » quand le z de la fenêtre égale zFocus", () => {
+    expect(etatPastille(fenetre("a", 7), 7)).toBe("focus");
+  });
+
+  it("« normale » quand le z diffère de zFocus", () => {
+    expect(etatPastille(fenetre("a", 3), 7)).toBe("normale");
+  });
+
+  it("« normale » quand zFocus est null (aucune fenêtre focalisée)", () => {
+    expect(etatPastille(fenetre("a", 3), null)).toBe("normale");
+  });
+});
+
+describe("toggleFocusMinimize (clic sur une pastille de taskbar)", () => {
+  it("réduit la fenêtre focalisée (z le plus haut) au clic", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().openWindow("eco"); // eco devient focalisée (au sommet)
+
+    windowManagerStore.getState().toggleFocusMinimize("eco");
+
+    expect(windowManagerStore.getState().windows.eco!.minimized).toBe(true);
+  });
+
+  it("remonte au premier plan une fenêtre ouverte non focalisée (sans la réduire)", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().openWindow("eco"); // eco au sommet, derivatives en dessous
+    const zEco = windowManagerStore.getState().windows.eco!.z;
+
+    windowManagerStore.getState().toggleFocusMinimize("derivatives");
+
+    const w = windowManagerStore.getState().windows.derivatives!;
+    expect(w.minimized).toBe(false);
+    expect(w.z).toBeGreaterThan(zEco);
+  });
+
+  it("restaure au premier plan une fenêtre réduite", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().openWindow("eco");
+    windowManagerStore.getState().minimizeWindow("derivatives");
+    const zEco = windowManagerStore.getState().windows.eco!.z;
+
+    windowManagerStore.getState().toggleFocusMinimize("derivatives");
+
+    const w = windowManagerStore.getState().windows.derivatives!;
+    expect(w.minimized).toBe(false);
+    expect(w.z).toBeGreaterThan(zEco);
+  });
+
+  it("est un no-op sur un id inconnu ou une fenêtre fermée", () => {
+    windowManagerStore.getState().openWindow("derivatives");
+    windowManagerStore.getState().closeWindow("derivatives");
+    expect(() => windowManagerStore.getState().toggleFocusMinimize("inconnu")).not.toThrow();
+    expect(() => windowManagerStore.getState().toggleFocusMinimize("derivatives")).not.toThrow();
+    expect(windowManagerStore.getState().windows.derivatives!.minimized).toBe(false);
   });
 });
 

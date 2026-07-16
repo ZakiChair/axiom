@@ -39,7 +39,7 @@ export interface DefinitionFenetre {
 
 /** Registre statique des 22 fenêtres Bloomberg — SOURCE UNIQUE : titre/mnémonique/
  * taille par défaut + appartenance au menu Fonctions. Utilisé par `App.tsx` (montage,
- * dont la map de composants est typée par `WindowId`), `TaskbarMinimized.tsx` (libellé
+ * dont la map de composants est typée par `WindowId`), `Taskbar.tsx` (libellé
  * des pastilles), `openWindow` (taille initiale), la Toolbar (menu Fonctions dérivé via
  * `menuWindows`) et `persist`. Ajouter une fenêtre = 1 entrée ici + 1 composant dans
  * `WINDOW_COMPONENTS` (App.tsx, sinon erreur de compilation) ; menu + montage en découlent. */
@@ -336,6 +336,29 @@ export function snapGeometry(
   return { x: workspace.x, y: workspace.y, width: workspace.width, height: workspace.height };
 }
 
+/** z de la fenêtre FOCALISÉE = z le plus haut parmi les fenêtres OUVERTES et NON
+ *  réduites (une fenêtre réduite n'a jamais le focus). `null` si aucune n'est éligible
+ *  (toutes réduites ou aucune ouverte). PURE (sans DOM), testée : sert à la taskbar pour
+ *  marquer la pastille active et à `toggleFocusMinimize` pour son toggle. */
+export function zFenetreFocalisee(windows: Record<string, EtatFenetre>): number | null {
+  let max: number | null = null;
+  for (const w of Object.values(windows)) {
+    if (w.open && !w.minimized && (max === null || w.z > max)) max = w.z;
+  }
+  return max;
+}
+
+/** État visuel d'une pastille de la taskbar : « minimisee » (fenêtre réduite, atténuée),
+ *  « focus » (fenêtre au premier plan = z égal à `zFocus`), sinon « normale ». PURE, testée. */
+export function etatPastille(
+  win: EtatFenetre,
+  zFocus: number | null
+): "focus" | "minimisee" | "normale" {
+  if (win.minimized) return "minimisee";
+  if (zFocus !== null && win.z === zFocus) return "focus";
+  return "normale";
+}
+
 export interface WindowManagerState {
   windows: Record<string, EtatFenetre>;
   /** Prochain z disponible dans la bande des fenêtres. Peut valoir
@@ -362,6 +385,10 @@ export interface WindowManagerState {
   resizeWindow: (id: string, width: number, height: number) => void;
   minimizeWindow: (id: string) => void;
   restoreWindow: (id: string) => void;
+  /** Clic sur une pastille de la taskbar (toggle standard type Windows/macOS) :
+   *  fenêtre réduite → restaure au premier plan ; fenêtre focalisée (z le plus haut
+   *  parmi les non-réduites) → réduit ; sinon → passe au premier plan. */
+  toggleFocusMinimize: (id: string) => void;
   setGroup: (id: string, color: string | null) => void;
   setGroupSymbol: (color: string, symbol: string) => void;
   /** Applique une géométrie de snap Aero : sauvegarde la géométrie ACTUELLE dans
@@ -568,6 +595,22 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
         : ordre.windows,
       nextZ: ordre.nextZ,
     });
+  },
+
+  toggleFocusMinimize: (id) => {
+    const state = get();
+    const w = state.windows[id];
+    if (!w || !w.open) return;
+    if (w.minimized) {
+      get().restoreWindow(id);
+      return;
+    }
+    // Fenêtre au premier plan → on la réduit ; sinon on la remonte au sommet.
+    if (w.z === zFenetreFocalisee(state.windows)) {
+      get().minimizeWindow(id);
+    } else {
+      get().focusWindow(id);
+    }
   },
 
   setGroup: (id, color) => {

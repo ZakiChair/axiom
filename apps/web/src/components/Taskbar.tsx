@@ -21,6 +21,7 @@ import {
   etatPastille,
   zFenetreFocalisee,
 } from "../store/windowManager";
+import { couleurAffichable } from "../store/compare";
 
 /** Classes d'une pastille selon son état visuel. `opacity-60` en utilitaire d'élément
  *  (PAS de slash `/60` sur un token de thème — non fiable avec ces couleurs pilotées par
@@ -83,7 +84,7 @@ export function Taskbar() {
                 <span
                   aria-hidden
                   className="h-2 w-2 shrink-0 rounded-full"
-                  style={{ backgroundColor: w.groupColor }}
+                  style={{ backgroundColor: couleurAffichable(w.groupColor) }}
                 />
               )}
               <span className="font-semibold uppercase tracking-wider">{entry.mnemonic}</span>

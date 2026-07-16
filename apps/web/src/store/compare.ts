@@ -16,17 +16,19 @@ import { createStore } from "zustand/vanilla";
 export const MAX_COMPARE = 4;
 
 /**
- * Palette des courbes comparées : 4 teintes vives DISTINCTES des bougies up/down
- * (jamais de vert/rouge pur, pour ne pas évoquer la hausse/baisse) et entre elles.
+ * Palette des courbes comparées : TOKENS de série du thème (jamais de vert/rouge
+ * pur — pas de confusion avec up/down). Les couleurs hex héritées d'anciennes
+ * persistances restent acceptées (cf. couleurAffichable).
  */
-export const COMPARE_PALETTE = ["#f59e0b", "#3b82f6", "#a855f7", "#ec4899"] as const;
+export const COMPARE_PALETTE = ["--serie-3", "--serie-6", "--serie-2", "--serie-4"] as const;
 
-/**
- * Couleur de la ligne du symbole PRINCIPAL (référence base 100). Gris neutre :
- * lisible sur tous les thèmes et distinct de la palette des comparés. Partagé
- * entre le contrôleur (ligne) et la légende (pastille) -> garantit leur cohérence.
- */
-export const MAIN_COLOR = "#94a3b8";
+/** Couleur du symbole PRINCIPAL (référence base 100) : gris neutre du thème. */
+export const MAIN_COLOR = "--text-dim";
+
+/** Token CSS (--x) → `var(--x)` pour les styles inline ; hex hérité inchangé. */
+export function couleurAffichable(c: string): string {
+  return c.startsWith("--") ? `var(${c})` : c;
+}
 
 /** Un symbole comparé + sa couleur (assignée à l'ajout, stable jusqu'au retrait). */
 export interface CompareSymbol {

@@ -55,17 +55,22 @@ function niveauTraverse(candles: Candle[], apresTime: number, niveau: number, si
 /**
  * Calcule les niveaux de liquidation ESTIMÉS depuis l'historique d'OI et les bougies.
  * Chaque hausse d'OI ouvre `ΔOI` au close de la bougie contenante, réparti 50/50 long/short
- * et uniformément sur `LEVIERS` (poids = ΔOI/8) ; les niveaux déjà traversés par une bougie
- * ultérieure sont retirés (consommés). Baisse/égalité d'OI → aucun niveau. PURE.
+ * et uniformément sur `leviers` (poids = ΔOI/(2×nb leviers)) ; les niveaux déjà traversés par
+ * une bougie ultérieure sont retirés (consommés). Baisse/égalité d'OI → aucun niveau.
+ *
+ * `leviers` est OPTIONNEL (défaut = `LEVIERS`, tous cochés) : l'utilisateur peut restreindre
+ * le modèle à un sous-ensemble via la fenêtre LIQ (cf. `liqEstStore.leviers`). Liste vide →
+ * aucun niveau (garde anti-division-par-zéro). PURE.
  */
 export function calculerNiveauxEstimes(
   oiHist: { time: number; oiUsd: number }[],
   candles: Candle[],
+  leviers: readonly number[] = LEVIERS,
 ): NiveauEstime[] {
   const out: NiveauEstime[] = [];
-  if (oiHist.length < 2 || candles.length === 0) return out;
+  if (oiHist.length < 2 || candles.length === 0 || leviers.length === 0) return out;
 
-  const poidsParNiveau = (delta: number): number => delta / (2 * LEVIERS.length);
+  const poidsParNiveau = (delta: number): number => delta / (2 * leviers.length);
 
   for (let i = 1; i < oiHist.length; i++) {
     const prev = oiHist[i - 1];
@@ -80,7 +85,7 @@ export function calculerNiveauxEstimes(
     if (!(entry > 0)) continue;
 
     const poids = poidsParNiveau(delta);
-    for (const L of LEVIERS) {
+    for (const L of leviers) {
       const niveauLong = entry * (1 - 1 / L);
       const niveauShort = entry * (1 + 1 / L);
       if (!niveauTraverse(candles, bougie.time, niveauLong, "long")) {
@@ -98,15 +103,34 @@ export function calculerNiveauxEstimes(
 
 export interface LiqEstState {
   actif: boolean;
+  /** Leviers cochés du modèle (sous-ensemble NON VIDE de `LEVIERS`) — persisté (store/persist.ts). */
+  leviers: number[];
   basculer: () => void;
   /** Force l'état ON/OFF (idempotent) — hydratation persistée (cf. store/persist.ts). */
   setActif: (actif: boolean) => void;
+  /** Coche/décoche un levier. GARDE : ne jamais vider (le dernier coché reste, no-op). */
+  basculerLevier: (L: number) => void;
+  /** Force la liste des leviers (filtrée/réordonnée sur `LEVIERS`) — hydratation persistée. */
+  setLeviers: (leviers: number[]) => void;
 }
 
 export const liqEstStore: StoreApi<LiqEstState> = createStore<LiqEstState>((set, get) => ({
   actif: false,
+  leviers: [...LEVIERS],
   basculer: () => set({ actif: !get().actif }),
   setActif: (actif) => set({ actif }),
+  basculerLevier: (L) => {
+    const coche = get().leviers.includes(L);
+    // Reconstruit en ORDRE CANONIQUE (ordre de LEVIERS) : L bascule, les autres gardent leur état.
+    const next = LEVIERS.filter((x) => (x === L ? !coche : get().leviers.includes(x)));
+    if (next.length === 0) return; // garde : le dernier levier coché n'est pas décochable
+    set({ leviers: next });
+  },
+  setLeviers: (leviers) => {
+    const next = LEVIERS.filter((x) => leviers.includes(x));
+    if (next.length === 0) return; // liste vide/invalide ignorée (garde : jamais vide)
+    set({ leviers: next });
+  },
 }));
 
 // ─────────────────────────── Store de l'historique OI (données, hors React) ───────────────────────────

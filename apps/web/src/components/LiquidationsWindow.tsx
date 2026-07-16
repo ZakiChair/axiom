@@ -25,8 +25,9 @@ import {
   retenirFluxLiq,
   type LiqEvent,
   type LiqHeatMode,
+  type Granularite,
 } from "../chart/liquidationMarkers";
-import { liqEstStore } from "../chart/liquidationEstimates";
+import { liqEstStore, LEVIERS } from "../chart/liquidationEstimates";
 import { EnTeteFenetre, Vide, NoteSource, Metric, Badge, type TonBadge } from "./ui";
 import { formatUsd, formatHeure, formatPrice, formatPourcentage } from "../lib/format";
 import {
@@ -159,6 +160,92 @@ function ToggleEstimes() {
     >
       {actif ? "● Niveaux estimés" : "Niveaux estimés"}
     </button>
+  );
+}
+
+/** Granularités proposées : facteur multiplicatif de la taille de bucket de prix. */
+const GRANULARITES: ReadonlyArray<{ id: Granularite; label: string }> = [
+  { id: 0.5, label: "½×" },
+  { id: 1, label: "1×" },
+  { id: 2, label: "2×" },
+];
+
+/**
+ * Ligne « Réglages » compacte de la couche liquidations, visible dès que « Sur le graphe »
+ * OU « Niveaux estimés » est actif :
+ *  • cases cochables des LEVIERS du modèle de niveaux estimés (liqEstStore) — la DERNIÈRE
+ *    cochée est verrouillée (le store refuse de tout décocher) ;
+ *  • segmented de granularité des buckets de prix (½× / 1× / 2×, liqMarksStore) — applique un
+ *    facteur à la taille de bucket de la heatmap RÉELLE ET des niveaux estimés.
+ * Stores vanilla lus directement : aucun re-render implicite hors ces sélecteurs.
+ */
+function ReglagesLiq() {
+  const heatActif = useStore(liqMarksStore, (s) => s.actif);
+  const estActif = useStore(liqEstStore, (s) => s.actif);
+  const leviers = useStore(liqEstStore, (s) => s.leviers);
+  const basculerLevier = useStore(liqEstStore, (s) => s.basculerLevier);
+  const granularite = useStore(liqMarksStore, (s) => s.granularite);
+  const setGranularite = useStore(liqMarksStore, (s) => s.setGranularite);
+  if (!heatActif && !estActif) return null;
+
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border px-4 py-2">
+      <span className="text-[10px] uppercase tracking-wider text-text-dim">Réglages</span>
+
+      {/* Leviers du modèle estimé : cases cochables, dernier coché non-décochable. */}
+      <div
+        role="group"
+        aria-label="Leviers du modèle de niveaux estimés"
+        className="flex items-center gap-0.5 rounded border border-border p-0.5"
+      >
+        {LEVIERS.map((L) => {
+          const coche = leviers.includes(L);
+          const verrou = coche && leviers.length === 1; // dernier coché : non-décochable
+          return (
+            <button
+              key={L}
+              type="button"
+              onClick={() => basculerLevier(L)}
+              aria-pressed={coche}
+              disabled={verrou}
+              title={
+                verrou
+                  ? `Levier ×${L} — au moins un levier doit rester coché`
+                  : `${coche ? "Retirer" : "Inclure"} le levier ×${L} du modèle de niveaux estimés`
+              }
+              className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
+                coche ? "bg-bg text-text" : "text-text-dim hover:text-text"
+              } ${verrou ? "cursor-not-allowed" : ""}`}
+            >
+              ×{L}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Granularité des buckets de prix (facteur de tailleBucket). */}
+      <div
+        role="group"
+        aria-label="Granularité des buckets de prix"
+        title="Granularité des buckets de prix"
+        className="flex items-center gap-0.5 rounded border border-border p-0.5"
+      >
+        {GRANULARITES.map((g) => (
+          <button
+            key={g.id}
+            type="button"
+            onClick={() => setGranularite(g.id)}
+            aria-pressed={granularite === g.id}
+            title={`Granularité des buckets de prix — ${g.label}`}
+            className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
+              granularite === g.id ? "bg-bg text-text" : "text-text-dim hover:text-text"
+            }`}
+          >
+            {g.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -328,6 +415,10 @@ export function LiquidationsWindow() {
           </div>
         }
       />
+
+      {/* Ligne « Réglages » (leviers estimés + granularité), sous les toggles ; masquée si
+          aucune couche liquidations n'est active. */}
+      <ReglagesLiq />
 
       {/* Bloc totaux/stats FIXE (seul le feed défile). Fenêtre glissante sélectionnée. */}
       <div className="shrink-0 px-4 pt-4">

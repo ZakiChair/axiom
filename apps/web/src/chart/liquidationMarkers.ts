@@ -223,10 +223,16 @@ export function seedDepuisCoinalyze(
  *  dominance long/short (teintes --down/--up — le profil latéral montre déjà le split). */
 export type LiqHeatMode = "intensite" | "dominance";
 
+/** Granularité des buckets de prix : facteur multiplicatif de `tailleBucket` (½× / 1× / 2×).
+ *  Applique à la heatmap RÉELLE (construireGrille) ET au regroupement des niveaux ESTIMÉS. */
+export type Granularite = 0.5 | 1 | 2;
+
 export interface LiqMarksState {
   actif: boolean;
   /** Mode de coloration des cellules (cf. LiqHeatMode) — persisté (store/persist.ts). */
   mode: LiqHeatMode;
+  /** Granularité des buckets de prix (multiplie `tailleBucket`) — persistée (store/persist.ts). */
+  granularite: Granularite;
   basculer: () => void;
   /** Force l'état ON/OFF (idempotent) — hydratation persistée (cf. store/persist.ts). */
   setActif: (actif: boolean) => void;
@@ -234,15 +240,19 @@ export interface LiqMarksState {
   setMode: (mode: LiqHeatMode) => void;
   /** Alterne intensité ↔ dominance (commande ⌘K LIQMODE). */
   basculerMode: () => void;
+  /** Force la granularité (idempotent) — hydratation persistée (cf. store/persist.ts). */
+  setGranularite: (granularite: Granularite) => void;
 }
 
 export const liqMarksStore = createStore<LiqMarksState>((set, get) => ({
   actif: false,
   mode: "intensite",
+  granularite: 1,
   basculer: () => set({ actif: !get().actif }),
   setActif: (actif) => set({ actif }),
   setMode: (mode) => set({ mode }),
   basculerMode: () => set({ mode: get().mode === "intensite" ? "dominance" : "intensite" }),
+  setGranularite: (granularite) => set({ granularite }),
 }));
 
 // ─────────────────────────── Store des événements (buffer borné, vanilla) ───────────────────────────

@@ -108,6 +108,27 @@ describe("construireGrille", () => {
     // Aucun événement → 0 cellule → null.
     expect(construireGrille([], candles, 0, 2)).toBeNull();
   });
+
+  it("facteur de taille (granularité) multiplie la taille de bucket", () => {
+    // close 100 → tailleBucket = 0,1. Deux prix (100,00 et 100,15) tombent dans des buckets
+    // DISTINCTS à 0,1 (facteur 1) mais le MÊME à 0,2 (facteur 2 → regroupement plus grossier).
+    const candles = [candle({ time: 0, close: 100 }), candle({ time: 60000, close: 100 })];
+    const events = [
+      ev({ time: 1000, side: "long", price: 100.0, usd: 100 }),
+      ev({ time: 1500, side: "long", price: 100.15, usd: 100 }),
+    ];
+    const base = construireGrille(events, candles, 0, 2); // facteur par défaut = 1
+    expect(base?.taille).toBeCloseTo(0.1, 9);
+    expect(base?.cells.size).toBe(2);
+
+    const grossier = construireGrille(events, candles, 0, 2, 2);
+    expect(grossier?.taille).toBeCloseTo(0.2, 9);
+    expect(grossier?.cells.size).toBe(1); // les deux prix fusionnent dans un bucket 0,2
+
+    const fin = construireGrille(events, candles, 0, 2, 0.5);
+    expect(fin?.taille).toBeCloseTo(0.05, 9);
+    expect(fin?.cells.size).toBe(2); // buckets toujours distincts (encore plus fins)
+  });
 });
 
 describe("dimensionsGrilleVisible", () => {

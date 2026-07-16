@@ -54,23 +54,25 @@ export interface LiqGrid {
 /**
  * Agrège les `events` en cellules (bougie × bucket) sur la plage de bougies [from, to)
  * (INDEX de bougies, convention `getVisibleRange`). La taille de bucket est dérivée du close
- * de la DERNIÈRE bougie de la plage ; chaque événement est rattaché à sa bougie contenante
- * (`candleContenant`), et les événements hors de [candles[from].time, candles[to-1].time]
- * sont écartés. Renvoie `null` si la plage contient < 1 bougie ou ne produit aucune cellule.
- * PURE.
+ * de la DERNIÈRE bougie de la plage, MULTIPLIÉE par `facteurTaille` (granularité utilisateur :
+ * ½× / 1× / 2× — cf. `liqMarksStore.granularite`) ; chaque événement est rattaché à sa bougie
+ * contenante (`candleContenant`), et les événements hors de [candles[from].time,
+ * candles[to-1].time] sont écartés. Renvoie `null` si la plage contient < 1 bougie ou ne
+ * produit aucune cellule. PURE.
  */
 export function construireGrille(
   events: LiqEvent[],
   candles: Candle[],
   from: number,
   to: number,
+  facteurTaille = 1,
 ): LiqGrid | null {
   if (to - from < 1) return null;
   const premier = candles[from];
   const dernier = candles[to - 1];
   if (premier === undefined || dernier === undefined) return null;
 
-  const taille = tailleBucket(dernier.close);
+  const taille = tailleBucket(dernier.close) * facteurTaille;
   if (!(taille > 0)) return null;
 
   const cells = new Map<string, LiqCell>();
@@ -484,11 +486,18 @@ export class LiquidationHeatController {
     // Changement de thème : bandes/tooltip/lignes lisent des tokens CSS → repeindre pour
     // adopter les nouvelles couleurs (un simple repaint suffit ; `markDirty` par symétrie).
     this.unsubTheme = themeStore.subscribe(this.markDirty);
-    // Changement de MODE de coloration (LIQMODE) : le mode ne change QUE le fillStyle des
-    // cellules → simple repaint (`dirty`), SANS invalider la grille ni les niveaux mémoïsés.
-    // (ChartInstance ne relaie que `actif` via setEnabled — le mode est suivi ici.)
+    // Changements de liqMarksStore hors `actif` (relayé par setEnabled) :
+    //  • MODE de coloration (LIQMODE) : ne change QUE le fillStyle des cellules → simple repaint
+    //    (`dirty`), SANS invalider la grille ni les niveaux mémoïsés ;
+    //  • GRANULARITÉ des buckets : change la taille de bucket → la GRILLE (agrégat par bucket) est
+    //    à reconstruire (`grilleObsolete`) ; les niveaux ESTIMÉS restent valides — leur CALCUL ne
+    //    dépend pas de la taille (le regroupement se fait au rendu), d'où pas de `niveauxObsoletes`.
     this.unsubMode = liqMarksStore.subscribe((s, prev) => {
       if (s.mode !== prev.mode) this.dirty = true;
+      if (s.granularite !== prev.granularite) {
+        this.grilleObsolete = true;
+        this.dirty = true;
+      }
     });
     // Redimensionnement du conteneur (resize fenêtre, toggle sidebar…) : aucun
     // scroll/zoom/tick ne le signale autrement, d'où l'observer dédié.
@@ -632,7 +641,8 @@ export class LiquidationHeatController {
     // `onCrosshair` marque `dirty` sans marquer `grilleObsolete`, donc on réutilise la dernière
     // grille rendue pour le hit-test au lieu de ré-agréger tout le buffer à chaque mousemove.
     if (this.grilleObsolete) {
-      this.derniereGrille = to - from >= 1 ? construireGrille(events, candles, from, to) : null;
+      const facteur = liqMarksStore.getState().granularite;
+      this.derniereGrille = to - from >= 1 ? construireGrille(events, candles, from, to, facteur) : null;
       this.grilleObsolete = false;
     }
     const grid = this.derniereGrille;
@@ -1065,7 +1075,14 @@ export class LiquidationHeatController {
     // OI/symbole via `markDirty`) — au survol `onCrosshair` marque `dirty` sans marquer
     // `niveauxObsoletes`, donc on réutilise le dernier résultat au lieu de tout recalculer.
     if (this.niveauxObsoletes) {
-      this.derniersNiveaux = calculerNiveauxEstimes(oiHistStore.getState().hist, candles);
+      // Leviers cochés par l'utilisateur (sous-ensemble de LEVIERS) — cf. liqEstStore. Le
+      // recalcul est réinvalidé par l'abonnement permanent à liqEstStore (unsubLiqEst → markDirty),
+      // donc décocher/cocher un levier recalcule bien les niveaux.
+      this.derniersNiveaux = calculerNiveauxEstimes(
+        oiHistStore.getState().hist,
+        candles,
+        liqEstStore.getState().leviers,
+      );
       this.niveauxObsoletes = false;
     }
     const niveaux = this.derniersNiveaux ?? [];
@@ -1088,8 +1105,10 @@ export class LiquidationHeatController {
       return;
     }
 
-    // Regroupement par bucket de prix : somme des poids + levier dominant du bucket.
-    const taille = tailleBucket(dernier.close);
+    // Regroupement par bucket de prix : somme des poids + levier dominant du bucket. La taille de
+    // bucket suit la GRANULARITÉ utilisateur (facteur ×½/×1/×2), comme la heatmap réelle — c'est
+    // un choix de RENDU (les niveaux mémoïsés, eux, ne dépendent pas de la taille de bucket).
+    const taille = tailleBucket(dernier.close) * liqMarksStore.getState().granularite;
     if (!(taille > 0)) return;
     const parBucket = new Map<number, { poids: number; parLevier: Map<number, number> }>();
     for (const n of niveaux) {

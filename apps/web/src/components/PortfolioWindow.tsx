@@ -110,7 +110,10 @@ export function PortfolioWindow() {
 
   // État d'ajout / clôture / proposition de post-mortem / import CSV (basse fréquence, React admis).
   const [form, setForm] = useState({ symbole: "", direction: "long" as Direction, taille: "", prixEntree: "", fraisPct: "", note: "" });
+  const [erreurForm, setErreurForm] = useState<string | null>(null);
   const [closing, setClosing] = useState<{ id: string; prix: string } | null>(null);
+  // Suppression armée (pattern SettingsPanel.restaurer) : id de la position à confirmer.
+  const [confirmSuppr, setConfirmSuppr] = useState<string | null>(null);
   const [pmPrompt, setPmPrompt] = useState<{ position: Position; prixSortie: number } | null>(null);
   const [showClosed, setShowClosed] = useState(false);
   /** Dry-run import CSV (null = panneau masqué). */
@@ -167,8 +170,10 @@ export function PortfolioWindow() {
     const taille = Number(form.taille);
     const prixEntree = Number(form.prixEntree);
     if (!form.symbole.trim() || !Number.isFinite(taille) || taille <= 0 || !Number.isFinite(prixEntree) || prixEntree <= 0) {
-      return; // saisie invalide : on ignore (dégradation silencieuse)
+      setErreurForm("Symbole, taille et prix d'entrée (> 0) requis.");
+      return;
     }
+    setErreurForm(null);
     const fraisNum = form.fraisPct.trim() ? Number(form.fraisPct) : undefined;
     portfolioStore.getState().ajouter({
       symbole: form.symbole.trim(),
@@ -450,11 +455,24 @@ export function PortfolioWindow() {
                       )}
                       <button
                         type="button"
-                        onClick={() => portfolioStore.getState().supprimer(p.id)}
+                        onClick={() => {
+                          // 1er clic : arme la confirmation ; 2e clic : supprime (pattern SettingsPanel.restaurer).
+                          if (confirmSuppr !== p.id) {
+                            setConfirmSuppr(p.id);
+                            return;
+                          }
+                          setConfirmSuppr(null);
+                          portfolioStore.getState().supprimer(p.id);
+                        }}
+                        onBlur={() => setConfirmSuppr((c) => (c === p.id ? null : c))}
                         aria-label={`Supprimer ${p.symbole}`}
-                        className="text-text-dim transition hover:text-down"
+                        className={
+                          confirmSuppr === p.id
+                            ? "text-[10px] font-semibold uppercase text-down"
+                            : "text-text-dim transition hover:text-down"
+                        }
                       >
-                        ✕
+                        {confirmSuppr === p.id ? "confirmer ?" : "✕"}
                       </button>
                     </span>
                   </div>
@@ -562,6 +580,7 @@ export function PortfolioWindow() {
               Ajouter
             </button>
           </div>
+          {erreurForm !== null && <p className="mt-1.5 text-[10px] text-down">{erreurForm}</p>}
         </section>
 
         {/* Section « Clos » repliée + stats */}

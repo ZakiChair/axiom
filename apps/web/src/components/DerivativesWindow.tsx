@@ -56,8 +56,6 @@ import {
 } from "../lib/format";
 import { metaSource } from "../lib/fiabilite";
 import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, SansCle, Vide } from "./ui";
-// Couleurs de série des panes OI/funding (hex figés côté chart — cf. leur doc).
-import { OI_COLOR, FUNDING_COLOR } from "../chart/derivatives";
 
 /** Période d'agrégation du long/short ratio et fenêtre des liquidations affichées. */
 const LS_PERIOD = "5min";
@@ -535,11 +533,11 @@ export function DerivativesWindow() {
                   Pilote derivativesChartStore, lu hors React par chart/derivatives.ts. */}
               <div className="flex items-center gap-2 rounded-md border border-border bg-bg px-3 py-2">
                 <span className="mr-auto text-[11px] text-text-dim">Afficher sur le chart</span>
-                <ChartToggle label="OI" active={showOiPane} color={OI_COLOR} onClick={toggleOiPane} />
+                <ChartToggle label="OI" active={showOiPane} color="var(--serie-5)" onClick={toggleOiPane} />
                 <ChartToggle
                   label="Funding"
                   active={showFundingPane}
-                  color={FUNDING_COLOR}
+                  color="var(--serie-3)"
                   onClick={toggleFundingPane}
                 />
               </div>
@@ -624,7 +622,7 @@ export function DerivativesWindow() {
                 label="Open Interest"
                 value={formatUsd(binOi.at(-1)?.oiUsd)}
                 sparkValues={binOiSpark}
-                color={OI_COLOR}
+                color="var(--serie-1)"
               />
             </section>
           )}

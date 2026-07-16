@@ -103,7 +103,13 @@ function ensureCvdRegistered(): void {
     name: CVD_NAME,
     shortName: "CVD",
     series: IndicatorSeries.Normal,
-    figures: [{ key: "cvd", title: "CVD: ", type: "line" }],
+    // CVD en volume cumulé (potentiellement des milliers/millions d'unités) : 0 décimale
+    // + notation compacte sur l'axe et la légende, au lieu de « CVD: -20,795.1812 ».
+    precision: 0,
+    shouldFormatBigNumber: true,
+    figures: [
+      { key: "cvd", title: "CVD: ", type: "line", styles: () => ({ color: lireTokenCanvas("--serie-1", "#38bdf8") }) },
+    ],
     // calc PUR de mapping : lit la série pré-calculée (extendData.cvd), alignée
     // index-par-index sur dataList. Aucune math refaite ici, aucun re-render.
     calc: (dataList, indicator) => {

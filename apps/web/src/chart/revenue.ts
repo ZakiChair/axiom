@@ -22,13 +22,12 @@ import { registerIndicator, IndicatorSeries } from "klinecharts";
 import type { Chart, IndicatorFigure } from "klinecharts";
 import { marketStore } from "../store/market";
 import { fetchProtocolRevenue, type RevenuePoint } from "../data/protocolRevenue";
+import { lireTokenCanvas } from "../lib/canvasTokens";
 
 /** Nom KLineChart de l'indicateur de revenus (préfixe = aucune collision). */
 const REVENUE_NAME = "AXIOM_REVENUE";
 /** Id du sous-pane dédié (déterministe). */
 const REVENUE_PANE_ID = "axiom_revenue";
-/** Couleur de la ligne : or (≈ « revenus »), distincte des bougies up/down et du CVD cyan. */
-const REVENUE_COLOR = "#eab308";
 
 /** Point de l'indicateur côté KLineChart : revenu (USD/j) forward-fill de la bougie. */
 interface RevenuePointOut {
@@ -51,7 +50,7 @@ function ensureRegistered(): void {
       key: "revenue",
       title: "Revenus $/j: ",
       type: "line",
-      styles: () => ({ color: REVENUE_COLOR, size: 1.5 }),
+      styles: () => ({ color: lireTokenCanvas("--serie-3", "#eab308"), size: 1.5 }),
     },
   ];
 

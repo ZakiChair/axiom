@@ -329,7 +329,7 @@ export function RefBadge({
 }) {
   if (refe === null) {
     return (
-      <Badge ton="neutre" title="Historique insuffisant (moins de 5 jours de données) : le percentile serait trompeur.">
+      <Badge ton="neutre" title="Référentiel indisponible : historique trop court (moins de 5 jours) ou source en échec.">
         réf. en construction
       </Badge>
     );

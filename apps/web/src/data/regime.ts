@@ -84,7 +84,7 @@ export function calculerRegime(entrees: EntreesRegime): Regime {
     let note: number | null = null;
     if (p !== null && Number.isFinite(p)) {
       // Contrarien léger : funding tendu = positionnement long chargé (risque de purge).
-      note = p > 90 ? -1 : p < 10 ? 1 : 0;
+      note = p >= 90 ? -1 : p <= 10 ? 1 : 0;
     }
     composants.push({
       id: "funding",

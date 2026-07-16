@@ -6,7 +6,7 @@
  */
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { calculerRegime, type Regime } from "../data/regime";
-import { rangPercentile, referentiel, type Referentiel, type PointSerie } from "../lib/referentiel";
+import { referentiel, type Referentiel, type PointSerie } from "../lib/referentiel";
 import { deltasFenetre, histDvol, histFearGreed, histFunding, histOiUsd } from "../data/referentiels";
 import { fetchEtfBrief, fetchWatchlistOvernight } from "../data/brief";
 import { chargerEmetteurs } from "../data/macro/stablecoinsDetail";
@@ -85,7 +85,11 @@ export async function rafraichirRegime(): Promise<void> {
       : null;
 
   const dvolCourant = dernier(serieDvol);
-  const avantDernierDvol = serieDvol?.[serieDvol.length - 2]?.v ?? null;
+  const avantDernierDvolBrut = serieDvol?.[serieDvol.length - 2]?.v;
+  const avantDernierDvol =
+    avantDernierDvolBrut !== undefined && Number.isFinite(avantDernierDvolBrut)
+      ? avantDernierDvolBrut
+      : null;
   const dvolDeltaPts =
     dvolCourant !== null && avantDernierDvol !== null ? dvolCourant - avantDernierDvol : null;
   const dvolRef =
@@ -109,7 +113,12 @@ export async function rafraichirRegime(): Promise<void> {
     let tot = 0;
     let tot7 = 0;
     for (const e of emetteurs.value) {
-      if (e.mcap7jUsd !== null && Number.isFinite(e.mcap7jUsd) && e.mcap7jUsd > 0) {
+      if (
+        e.mcap7jUsd !== null &&
+        Number.isFinite(e.mcap7jUsd) &&
+        e.mcap7jUsd > 0 &&
+        Number.isFinite(e.mcapUsd)
+      ) {
         tot += e.mcapUsd;
         tot7 += e.mcap7jUsd;
       }

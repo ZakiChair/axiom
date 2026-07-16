@@ -222,9 +222,14 @@ export function DerivativesWindow() {
   const [loading, setLoading] = useState(false);
   // Référentiel du funding : historique ~90 j (cache 1 h), situe le taux courant.
   const [refFunding, setRefFunding] = useState<Referentiel | null>(null);
+  // Reset UNIQUEMENT au changement de symbole : le cache 1 h rend la valeur quasi
+  // immédiate à chaque re-render sur funding?.rate, donc on garde l'ancien
+  // référentiel affiché pendant le recalcul plutôt que de flicker vers null.
+  useEffect(() => {
+    setRefFunding(null);
+  }, [symbol]);
   useEffect(() => {
     let vivant = true;
-    setRefFunding(null);
     const rate = funding?.rate;
     if (rate === undefined || !Number.isFinite(rate)) return undefined;
     void histFunding(symbol).then((serie) => {

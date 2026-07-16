@@ -33,7 +33,9 @@ describe("calculerRegime — notes par composant", () => {
     const note = (p: number) =>
       calculerRegime({ ...VIDE, fundingBtcPercentile: p }).composants.find((c) => c.id === "funding")?.note;
     expect(note(95)).toBe(-1);
+    expect(note(90)).toBe(-1);
     expect(note(50)).toBe(0);
+    expect(note(10)).toBe(1);
     expect(note(5)).toBe(1);
   });
   it("dvol : calme +1, stress −2", () => {

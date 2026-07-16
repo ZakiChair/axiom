@@ -55,7 +55,7 @@ import { enregistrerCommandes, type Commande } from "./commands/registry";
 import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
 import { demarrerAlertes } from "./alerts/runtime";
 import { FloatingWindow } from "./components/FloatingWindow";
-import { TaskbarMinimized } from "./components/TaskbarMinimized";
+import { Taskbar } from "./components/Taskbar";
 import { SnapOverlay } from "./components/SnapOverlay";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { Toasts } from "./components/Toasts";
@@ -270,6 +270,11 @@ export function App() {
         )}
       </main>
 
+      {/* Taskbar des fenêtres ouvertes — DANS LE FLUX (dernier enfant du flex-col) : elle
+          réserve sa hauteur, donc le workspace mesuré par chartAreaRef se rétrécit et l'axe
+          temporel du chart n'est plus masqué. Rien quand aucune fenêtre n'est ouverte. */}
+      <Taskbar />
+
       {/* Indice discret pour sortir du plein écran (aucune toolbar visible alors). */}
       {plein && (
         <div className="pointer-events-none fixed bottom-3 left-3 z-30 rounded border border-border bg-surface/80 px-2 py-1 text-[10px] text-text-dim">
@@ -293,7 +298,6 @@ export function App() {
         );
       })}
       <SnapOverlay />
-      <TaskbarMinimized />
       <SettingsPanel />
       <CommandPalette />
       {/* Premier lancement : 3 étapes (masqué si completed ; ⌘K ONBOARD pour rejouer). */}

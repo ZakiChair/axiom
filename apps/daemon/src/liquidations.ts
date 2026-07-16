@@ -18,6 +18,7 @@
  *   POST /liquidations/:symbole                         → lot insert idempotent (corps = JSON [{t,venue,side,price,qty,usd}])
  *   GET  /liquidations/:symbole?depuis&jusqua&limite     → liquidations triées par t croissant
  */
+import type { Database } from "bun:sqlite";
 import { entetesCors } from "./cors";
 import { getDb } from "./db";
 import type { Routeur } from "./router";
@@ -28,22 +29,31 @@ export const LIMITE_MAX = 100_000;
 
 let tableAssuree = false;
 
+/**
+ * Crée la table `liquidations` + ses index (idempotent). Exportée pour le tick
+ * `liq-cascade` du daemon (alerts.ts), qui peut lire la table AVANT que la boucle
+ * d'ingestion ne l'ait créée (ordre de démarrage) — et pour les tests (base injectée).
+ */
+export function assurerTableLiquidations(d: Database): void {
+  d.run(`CREATE TABLE IF NOT EXISTS liquidations (
+    symbole TEXT NOT NULL,
+    venue   TEXT NOT NULL,
+    t       INTEGER NOT NULL,
+    side    TEXT NOT NULL,
+    price   REAL NOT NULL,
+    qty     REAL NOT NULL,
+    usd     REAL NOT NULL
+  )`);
+  d.run(`CREATE UNIQUE INDEX IF NOT EXISTS liq_unique
+    ON liquidations (symbole, venue, t, side, price, qty)`);
+  d.run("CREATE INDEX IF NOT EXISTS liq_lookup ON liquidations (symbole, t)");
+}
+
 /** Renvoie la base en garantissant (une fois) l'existence de la table `liquidations`. */
 function db() {
   const d = getDb();
   if (!tableAssuree) {
-    d.run(`CREATE TABLE IF NOT EXISTS liquidations (
-      symbole TEXT NOT NULL,
-      venue   TEXT NOT NULL,
-      t       INTEGER NOT NULL,
-      side    TEXT NOT NULL,
-      price   REAL NOT NULL,
-      qty     REAL NOT NULL,
-      usd     REAL NOT NULL
-    )`);
-    d.run(`CREATE UNIQUE INDEX IF NOT EXISTS liq_unique
-      ON liquidations (symbole, venue, t, side, price, qty)`);
-    d.run("CREATE INDEX IF NOT EXISTS liq_lookup ON liquidations (symbole, t)");
+    assurerTableLiquidations(d);
     tableAssuree = true;
   }
   return d;

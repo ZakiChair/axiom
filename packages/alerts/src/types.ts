@@ -94,9 +94,9 @@ export interface ConditionCvdSpotPerpDiv {
 /**
  * Cascade de liquidations : notionnel liquidé (USD, tous côtés confondus) sur la
  * dernière minute GLISSANTE ≥ `seuilUsdParMin`.
- * LIMITE ASSUMÉE : évaluée par le runtime FRONT uniquement, pour le SYMBOLE COURANT
- * du chart et seulement quand le flux liq est retenu (heatmap ON ou fenêtre LIQ
- * ouverte) — NON évaluée par le daemon onglet fermé (pas de flux liq côté daemon).
+ * Évaluée par le runtime FRONT (symbole COURANT du chart, flux liq retenu : heatmap ON
+ * ou fenêtre LIQ ouverte) ET par le daemon onglet fermé (tick 10 s sur sa table
+ * `liquidations` ingérée Bybit+OKX, tous les symboles d'alerte).
  */
 export interface ConditionLiqCascade {
   type: "liq-cascade";
@@ -168,7 +168,8 @@ export interface ContexteAlerte {
   /**
    * Notionnel liquidé (USD, tous côtés) sur la dernière minute glissante — requis
    * pour `liq-cascade`. Injecté par le runtime front depuis le buffer liq du chart
-   * (symbole courant, flux retenu) ; jamais fourni par le daemon.
+   * (symbole courant, flux retenu), et par le daemon via une somme SQL de sa table
+   * `liquidations` sur la même fenêtre.
    */
   liqUsdParMin?: number;
 }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import type { AlertDef } from "@axiom/alerts";
 import {
+  fusionnerSymbolesLiq,
   okxInstIdDaemon,
   parseBybitLiqDaemon,
   parseOkxLiqDaemon,
@@ -83,5 +85,38 @@ describe("symbolesSurveilles", () => {
   it("normalise la liste KV en majuscules (dédoublonnée)", () => {
     expect(symbolesSurveilles(["dogeusdt"])).toEqual(["DOGEUSDT"]);
     expect(symbolesSurveilles(["btcusdt", "BTCUSDT", " ethusdt "])).toEqual(["BTCUSDT", "ETHUSDT"]);
+  });
+});
+
+/** Def liq-cascade binance minimale pour les tests de fusion. */
+function defCascade(symbol: string, actif = true): AlertDef {
+  return {
+    id: `liq-${symbol}`,
+    symbol,
+    source: "binance",
+    condition: { type: "liq-cascade", seuilUsdParMin: 1_000_000 },
+    actif,
+    declenchements: [],
+  };
+}
+
+describe("fusionnerSymbolesLiq", () => {
+  it("union KV ∪ alertes liq-cascade actives, dédoublonnée et triée", () => {
+    const defs = [defCascade("dogeusdt"), defCascade("BTCUSDT"), defCascade("XRPUSDT", false)];
+    expect(fusionnerSymbolesLiq(["BTCUSDT", "ETHUSDT"], defs)).toEqual([
+      "BTCUSDT",
+      "DOGEUSDT",
+      "ETHUSDT",
+    ]);
+  });
+
+  it("KV absent/invalide → repli défaut ∪ alertes actives", () => {
+    expect(fusionnerSymbolesLiq(undefined, [defCascade("DOGEUSDT")])).toEqual(
+      [...SYMBOLES_DEFAUT, "DOGEUSDT"].sort(),
+    );
+  });
+
+  it("aucune alerte liq-cascade → symboles KV seuls", () => {
+    expect(fusionnerSymbolesLiq(["solusdt"], [])).toEqual(["SOLUSDT"]);
   });
 });

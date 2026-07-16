@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Chart as KLineChartInstance } from "klinecharts";
 import {
   bindChart,
+  exportChartImage,
   restoreDrawings,
   selectTool,
   setFocusChart,
@@ -85,6 +86,14 @@ function readStoredCount(localStorage: Storage, key = COMPOSITE_KEY): number {
   const all = JSON.parse(localStorage.getItem(DRAWINGS_KEY) ?? "{}") as Record<string, unknown[]>;
   return all[key]?.length ?? 0;
 }
+
+describe("drawing.ts — exportChartImage sans graphe actif", () => {
+  // Aucun chart lié (état initial du module, `activeChart === null`) : l'export sort
+  // en amont avec `false` SANS toucher au DOM (pas de `document` en env. Node de test).
+  it("renvoie false quand aucun graphe n'est actif", () => {
+    expect(exportChartImage("BTCUSDT", "1h")).toBe(false);
+  });
+});
 
 describe("drawing.ts — suppressPersist", () => {
   let localStorage: Storage;

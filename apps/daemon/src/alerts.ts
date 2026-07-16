@@ -21,6 +21,11 @@
  * fraction + z-score best-effort via historique `/fundingRate`. CVD spot/perp-div
  * reste hors daemon (pipeline orderflow chart, pas de feed daemon).
  *
+ * Liq-cascade (B′-T4) : tick 10 s (inerte sans def active) — `liqUsdParMin` = somme
+ * SQL de la table `liquidations` (ingérée par liqFeed.ts Bybit+OKX) sur la dernière
+ * minute glissante, par symbole d'alerte. liqFeed fusionne son jeu surveillé avec les
+ * symboles d'alerte actifs (cf. fusionnerSymbolesLiq) → nouveau symbole ingéré ≤60 s.
+ *
  * INVARIANT (BUILD-CONTRACT) : le feed du daemon est une connexion INDÉPENDANTE ;
  * il ne partage rien avec le chemin chaud du renderer (WS du front restent directs).
  */
@@ -35,6 +40,7 @@ import {
   zScoreFunding,
   type Feed,
 } from "./marketFeed";
+import { assurerTableLiquidations } from "./liquidations";
 import { notifierDeclenchement } from "./notify";
 import type { Routeur } from "./router";
 
@@ -48,6 +54,8 @@ export const TYPES_BOUGIE: ReadonlySet<string> = new Set([
 ]);
 /** Types de condition évalués sur un poll funding (premiumIndex). */
 export const TYPES_FUNDING: ReadonlySet<string> = new Set(["funding-extreme"]);
+/** Types de condition évalués sur le tick liquidations (table `liquidations`). */
+export const TYPES_LIQ: ReadonlySet<string> = new Set(["liq-cascade"]);
 // CVD `cvd-spot-perp-div` : hors daemon (pipeline orderflow chart uniquement).
 
 /** Seuil d'anti-doublon : on ne notifie que si le dernier heartbeat > 90 s. */
@@ -56,6 +64,10 @@ export const SEUIL_HEARTBEAT_MS = 90_000;
 const PERIODE_POLL_MS = 5_000;
 /** Période de poll funding (alignée runtime front ~60 s). */
 export const PERIODE_FUNDING_MS = 60_000;
+/** Période du tick liq-cascade (inerte sans def liq-cascade active). */
+export const PERIODE_LIQ_MS = 10_000;
+/** Fenêtre glissante de `liq-cascade` (1 min — même convention que `usdParMinute` front). */
+export const FENETRE_LIQ_MS = 60_000;
 /** Borne du journal renvoyé par GET /alerts/journal. */
 const LIMITE_JOURNAL = 200;
 
@@ -92,6 +104,20 @@ export function symbolesFundingActifs(defs: readonly AlertDef[]): string[] {
     ...new Set(
       defs
         .filter((d) => d.actif && d.source === "binance" && d.condition.type === "funding-extreme")
+        .map((d) => d.symbol.toUpperCase()),
+    ),
+  ].sort();
+}
+
+/**
+ * Symboles (majuscules) ayant au moins une alerte binance active de type
+ * `liq-cascade`. Fonction PURE (testée) — pattern `symbolesFundingActifs`.
+ */
+export function symbolesLiqCascadeActifs(defs: readonly AlertDef[]): string[] {
+  return [
+    ...new Set(
+      defs
+        .filter((d) => d.actif && d.source === "binance" && d.condition.type === "liq-cascade")
         .map((d) => d.symbol.toUpperCase()),
     ),
   ].sort();
@@ -259,6 +285,42 @@ export function evaluerEtPersister(
   return res.declenchements;
 }
 
+// ─────────────────────────── Tick liq-cascade (table `liquidations`) ───────────────────────────
+
+/**
+ * Notionnel liquidé (USD, tous côtés/venues confondus) de `symbole` sur la dernière
+ * minute glissante `[maintenant - FENETRE_LIQ_MS, maintenant]` — somme SQL paramétrée
+ * de la table `liquidations` (ingérée par liqFeed.ts). Table vide ou symbole absent
+ * → 0 (le feed tourne : « aucune liquidation » est un vrai zéro, pas une absence de
+ * donnée). Testée sur base :memory:.
+ */
+export function sommeLiqUsdParMin(d: Database, symbole: string, maintenant: number): number {
+  const ligne = d
+    .query("SELECT COALESCE(SUM(usd), 0) AS total FROM liquidations WHERE symbole = ? AND t >= ?")
+    .get(symbole, maintenant - FENETRE_LIQ_MS) as { total: number } | null;
+  return ligne?.total ?? 0;
+}
+
+/**
+ * Un tick d'évaluation `liq-cascade` : pour chaque symbole ayant une alerte
+ * liq-cascade active, somme le notionnel liquidé de la dernière minute glissante
+ * (table `liquidations`) et évalue via le mécanisme standard (journal TOUJOURS,
+ * notification via l'anti-doublon heartbeat de `evaluerEtPersister`). INERTE si
+ * aucune def liq-cascade active (aucun accès à la table). Testable via `opts`.
+ */
+export function evaluerLiqCascadeTick(maintenant: number = Date.now(), opts: OptionsEval = {}): void {
+  const d = opts.db ?? getDb();
+  const symboles = symbolesLiqCascadeActifs(lireDefsKv(d));
+  if (symboles.length === 0) return; // inerte : aucune alerte liq-cascade active
+  // Le tick peut précéder la création de la table par la boucle d'ingestion (démarrage).
+  assurerTableLiquidations(d);
+  for (const symbole of symboles) {
+    const liqUsdParMin = sommeLiqUsdParMin(d, symbole, maintenant);
+    // dernierPrix: 0 — le moteur liq-cascade n'utilise pas le prix (comme funding).
+    evaluerEtPersister(symbole, TYPES_LIQ, { maintenant, dernierPrix: 0, liqUsdParMin }, opts);
+  }
+}
+
 // ─────────────────────────── Boucle de vie ───────────────────────────
 
 let feed: Feed | null = null;
@@ -359,9 +421,22 @@ export function demarrerBoucleAlertes(): () => void {
     void pollFunding();
   }, PERIODE_FUNDING_MS);
 
+  // Tick liq-cascade (10 s) : somme de la table `liquidations` (ingérée par liqFeed)
+  // sur la dernière minute glissante — inerte sans def liq-cascade active.
+  const tickLiq = (): void => {
+    try {
+      evaluerLiqCascadeTick();
+    } catch (err) {
+      console.error("[axiomd] évaluation liq-cascade échouée :", err);
+    }
+  };
+  tickLiq();
+  const minuteurLiq = setInterval(tickLiq, PERIODE_LIQ_MS);
+
   return () => {
     clearInterval(minuteur);
     clearInterval(minuteurFunding);
+    clearInterval(minuteurLiq);
     feed?.arreter();
     feed = null;
   };

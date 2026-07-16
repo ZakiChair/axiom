@@ -23,7 +23,10 @@ import {
 import { alertsStore } from "../store/alerts";
 import { healthStore, type SanteSource } from "../store/health";
 import { degradedLevel } from "./HealthPanel";
-import { formatUsd } from "../lib/format";
+import { regimeStore } from "../store/regime";
+import { tonRegime } from "../data/regime";
+import { windowManagerStore } from "../store/windowManager";
+import { formatDec, formatUsd } from "../lib/format";
 
 /** Écrit un montant signé + coloré (tokens --up/--down) dans une cellule DOM. */
 function writeMoney(el: HTMLElement, n: number | undefined): void {
@@ -58,6 +61,7 @@ export function SessionStrip() {
   // Abonnement bas-fréquence : ne change que si le niveau de dégradation bascule.
   const healthSig = useStore(healthStore, (s) => healthLevelSignature(s.sources));
   const healthLevel = healthSig === "ok" ? null : (healthSig as "error" | "warn");
+  const regime = useStore(regimeStore, (s) => s.regime);
 
   const openPositions = useMemo(() => positions.filter((p) => p.statut === "ouvert"), [positions]);
   const openSymbolsKey = useMemo(
@@ -163,6 +167,44 @@ export function SessionStrip() {
         <span className="uppercase tracking-[0.08em]">Santé</span>
         <span className="sr-only">{pastilleTitle}</span>
       </div>
+
+      <span aria-hidden className="text-border">
+        |
+      </span>
+
+      {/* Régime de marché composite (data/regime.ts) — clic : détail dans le BRIEF. */}
+      <button
+        type="button"
+        onClick={() => windowManagerStore.getState().openWindow("brief")}
+        title={
+          regime === null
+            ? "Régime de marché : en cours de calcul…"
+            : regime.composants.map((c) => c.detail).join(" · ")
+        }
+        className="flex items-center gap-1.5 transition hover:text-text"
+      >
+        <span
+          aria-hidden
+          className={
+            regime === null || tonRegime(regime.libelle) === "neutre"
+              ? "text-text-dim"
+              : tonRegime(regime.libelle) === "up"
+                ? "text-up"
+                : "text-down"
+          }
+        >
+          ◆
+        </span>
+        <span className="uppercase tracking-[0.08em]">
+          {regime === null || regime.libelle === "indéterminé" ? "Régime —" : regime.libelle}
+        </span>
+        {regime !== null && regime.libelle !== "indéterminé" && (
+          <span className="tabular-nums">
+            {regime.score >= 0 ? "+" : ""}
+            {formatDec(regime.score, 1)}
+          </span>
+        )}
+      </button>
     </div>
   );
 }

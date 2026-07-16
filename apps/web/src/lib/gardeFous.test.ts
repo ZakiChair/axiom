@@ -34,15 +34,26 @@ describe("garde-fous couleurs (revue v2)", () => {
   });
 
   it("components/ : aucune classe Tailwind de palette brute non thémée", () => {
-    // Seules neutral/emerald/cyan/amber sont remappées par thème (tailwind.config.js).
-    // Toute autre teinte de la palette Tailwind ignore les 5 skins.
-    const BRUTE =
-      /\b(?:bg|text|border|ring|accent|from|to|via)-(?:red|orange|yellow|lime|green|teal|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|stone)-[0-9]{2,3}\b/;
+    // Toute classe de la palette Tailwind par défaut est suspecte, y compris les
+    // familles partiellement remappées : seules les NUANCES réellement déclarées
+    // dans tailwind.config.js (var(--n-*)/var(--ui-*)) suivent les 5 thèmes.
+    const CLASSE_PALETTE =
+      /\b(?:bg|text|border|ring|accent|from|to|via)-((?:red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-[0-9]{2,3})\b/g;
+    const NUANCES_THEMEES = new Set([
+      "neutral-100", "neutral-200", "neutral-300", "neutral-400", "neutral-500",
+      "neutral-600", "neutral-700", "neutral-800", "neutral-900", "neutral-950",
+      "emerald-400", "emerald-500", "cyan-500", "amber-500",
+    ]);
     const infractions: string[] = [];
     for (const f of fichiersTs("components")) {
       const lignes = readFileSync(join(SRC, f), "utf-8").split("\n");
       lignes.forEach((l, i) => {
-        if (BRUTE.test(l)) infractions.push(`${f}:${i + 1} ${l.trim()}`);
+        for (const m of l.matchAll(CLASSE_PALETTE)) {
+          const nuance = m[1];
+          if (nuance !== undefined && !NUANCES_THEMEES.has(nuance)) {
+            infractions.push(`${f}:${i + 1} ${nuance}`);
+          }
+        }
       });
     }
     expect(infractions).toEqual([]);

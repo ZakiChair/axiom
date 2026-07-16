@@ -10,30 +10,30 @@ export default {
       // de NOUVELLES utilitaires : bg-bg, bg-surface, border-border, text-text,
       // text-text-dim, text-up, text-down, text-accent, bg-accent, …
       colors: {
-        bg: "var(--bg)",
-        surface: "var(--surface)",
-        border: "var(--border)",
+        bg: "rgb(var(--bg-rgb) / <alpha-value>)",
+        surface: "rgb(var(--surface-rgb) / <alpha-value>)",
+        border: "rgb(var(--border-rgb) / <alpha-value>)",
         text: {
-          DEFAULT: "var(--text)",
-          dim: "var(--text-dim)",
+          DEFAULT: "rgb(var(--text-rgb) / <alpha-value>)",
+          dim: "rgb(var(--text-dim-rgb) / <alpha-value>)",
         },
-        up: "var(--up)",
-        down: "var(--down)",
-        accent: "var(--accent)",
+        up: "rgb(var(--up-rgb) / <alpha-value>)",
+        down: "rgb(var(--down-rgb) / <alpha-value>)",
+        accent: "rgb(var(--accent-rgb) / <alpha-value>)",
         // Encre sombre/claire posée SUR un fond d'accent vif (boutons actifs).
-        "accent-ink": "var(--accent-ink)",
-        grid: "var(--grid)",
-        crosshair: "var(--crosshair)",
+        "accent-ink": "rgb(var(--accent-ink-rgb) / <alpha-value>)",
+        grid: "rgb(var(--grid-rgb) / <alpha-value>)",
+        crosshair: "rgb(var(--crosshair-rgb) / <alpha-value>)",
 
         // Couleurs de série (courbes/valeurs multi-séries non sémantiques),
         // réinterprétées par thème : text-serie-1, bg-serie-3, …
         serie: {
-          1: "var(--serie-1)",
-          2: "var(--serie-2)",
-          3: "var(--serie-3)",
-          4: "var(--serie-4)",
-          5: "var(--serie-5)",
-          6: "var(--serie-6)",
+          1: "rgb(var(--serie-1-rgb) / <alpha-value>)",
+          2: "rgb(var(--serie-2-rgb) / <alpha-value>)",
+          3: "rgb(var(--serie-3-rgb) / <alpha-value>)",
+          4: "rgb(var(--serie-4-rgb) / <alpha-value>)",
+          5: "rgb(var(--serie-5-rgb) / <alpha-value>)",
+          6: "rgb(var(--serie-6-rgb) / <alpha-value>)",
         },
 
         // Rampe `neutral` repointée sur les variables de thème (--n-*) : tout le
@@ -42,30 +42,33 @@ export default {
         // sans toucher aux composants. Merge partiel : la nuance 50 (inutilisée)
         // garde la valeur Tailwind par défaut.
         neutral: {
-          100: "var(--n-100)",
-          200: "var(--n-200)",
-          300: "var(--n-300)",
-          400: "var(--n-400)",
-          500: "var(--n-500)",
-          600: "var(--n-600)",
-          700: "var(--n-700)",
-          800: "var(--n-800)",
-          900: "var(--n-900)",
-          950: "var(--n-950)",
+          100: "rgb(var(--n-100-rgb) / <alpha-value>)",
+          200: "rgb(var(--n-200-rgb) / <alpha-value>)",
+          300: "rgb(var(--n-300-rgb) / <alpha-value>)",
+          400: "rgb(var(--n-400-rgb) / <alpha-value>)",
+          500: "rgb(var(--n-500-rgb) / <alpha-value>)",
+          600: "rgb(var(--n-600-rgb) / <alpha-value>)",
+          700: "rgb(var(--n-700-rgb) / <alpha-value>)",
+          800: "rgb(var(--n-800-rgb) / <alpha-value>)",
+          900: "rgb(var(--n-900-rgb) / <alpha-value>)",
+          950: "rgb(var(--n-950-rgb) / <alpha-value>)",
         },
         // Accents fonctionnels des bascules toolbar, réinterprétés par thème :
         // emerald = Timeframe actif / boutons « Enregistrer », cyan = Orderflow,
         // amber = Profil Vol. (Seules les nuances réellement utilisées.)
         emerald: {
-          400: "var(--ui-emerald-hover)",
-          500: "var(--ui-emerald)",
+          400: "rgb(var(--ui-emerald-hover-rgb) / <alpha-value>)",
+          500: "rgb(var(--ui-emerald-rgb) / <alpha-value>)",
         },
         cyan: {
-          500: "var(--ui-cyan)",
+          500: "rgb(var(--ui-cyan-rgb) / <alpha-value>)",
         },
         amber: {
-          500: "var(--ui-amber)",
+          500: "rgb(var(--ui-amber-rgb) / <alpha-value>)",
         },
+        // Rôle sémantique « avertissement » (daemon dégradé, cache, partiel) :
+        // alias de l'accent ambre thémé — voir Task 2.
+        warn: "rgb(var(--ui-amber-rgb) / <alpha-value>)",
       },
     },
   },

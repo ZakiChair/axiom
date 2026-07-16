@@ -135,6 +135,45 @@ describe("extraireTokensDefinis — fonction pure (fixtures)", () => {
   });
 });
 
+/**
+ * Tokens consommés par tailwind.config.js en `rgb(var(--x-rgb) / <alpha-value>)` :
+ * chaque thème doit définir le triplet jumeau, sinon les classes /NN retombent
+ * silencieusement sur du CSS invalide (l'audit v2 a montré 15+ fichiers touchés).
+ */
+const TOKENS_RGB_REQUIS: readonly string[] = [
+  "--bg-rgb",
+  "--surface-rgb",
+  "--border-rgb",
+  "--text-rgb",
+  "--text-dim-rgb",
+  "--up-rgb",
+  "--down-rgb",
+  "--accent-rgb",
+  "--accent-ink-rgb",
+  "--grid-rgb",
+  "--crosshair-rgb",
+  "--serie-1-rgb",
+  "--serie-2-rgb",
+  "--serie-3-rgb",
+  "--serie-4-rgb",
+  "--serie-5-rgb",
+  "--serie-6-rgb",
+  "--n-100-rgb",
+  "--n-200-rgb",
+  "--n-300-rgb",
+  "--n-400-rgb",
+  "--n-500-rgb",
+  "--n-600-rgb",
+  "--n-700-rgb",
+  "--n-800-rgb",
+  "--n-900-rgb",
+  "--n-950-rgb",
+  "--ui-emerald-rgb",
+  "--ui-emerald-hover-rgb",
+  "--ui-cyan-rgb",
+  "--ui-amber-rgb",
+];
+
 describe("index.css — chaque thème définit l'intégralité des tokens consommés par le canvas", () => {
   // Sélecteurs RÉELS du fichier (vérifiés par lecture directe d'index.css,
   // cf. son commentaire d'en-tête : ":root sans attribut == thème dark").
@@ -149,6 +188,12 @@ describe("index.css — chaque thème définit l'intégralité des tokens consom
   it.each(SELECTEURS_THEMES)("le thème %s définit tous les tokens requis", (selecteur) => {
     const definis = extraireTokensDefinis(cssIndex, selecteur);
     const manquants = TOKENS_REQUIS.filter((t) => !definis.has(t));
+    expect(manquants).toEqual([]);
+  });
+
+  it.each(SELECTEURS_THEMES)("le thème %s définit tous les triplets --*-rgb", (selecteur) => {
+    const definis = extraireTokensDefinis(cssIndex, selecteur);
+    const manquants = TOKENS_RGB_REQUIS.filter((t) => !definis.has(t));
     expect(manquants).toEqual([]);
   });
 });

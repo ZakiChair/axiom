@@ -1,8 +1,10 @@
 /**
  * Régime de marché : score composite −2..+2 sur 6 composants publics.
- * PUR — l'assemblage des entrées vit dans store/regime.ts. Ton factuel,
+ * PUR — l'assemblage des entrées vit dans store/regime.ts. Seule dépendance :
+ * les formateurs purs de lib/format (montants signés du détail). Ton factuel,
  * jamais prescriptif : le score DÉCRIT l'environnement, il ne conseille pas.
  */
+import { formatUsdSigne } from "../lib/format";
 
 export interface EntreesRegime {
   /** Variation BTC 24 h en % (ticker Binance), ou null. */
@@ -116,7 +118,7 @@ export function calculerRegime(entrees: EntreesRegime): Regime {
       id: "etf",
       libelle: "Flux ETF veille",
       note,
-      detail: note === null ? "ETF —" : `ETF ${(v ?? 0) >= 0 ? "+" : "−"}$${Math.abs((v ?? 0) / 1e6).toFixed(0)}M (${fmtNote(note)})`,
+      detail: note === null ? "ETF —" : `ETF ${formatUsdSigne(v)} (${fmtNote(note)})`,
     });
   }
   {

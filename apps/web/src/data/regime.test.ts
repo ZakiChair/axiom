@@ -51,6 +51,10 @@ describe("calculerRegime — notes par composant", () => {
     expect(calculerRegime({ ...VIDE, impressionStablecoins7jPct: 0.6 }).composants.find((c) => c.id === "stables")?.note).toBe(1);
     expect(calculerRegime({ ...VIDE, impressionStablecoins7jPct: -0.6 }).composants.find((c) => c.id === "stables")?.note).toBe(-1);
   });
+  it("detail ETF via le formateur standard (montant signé)", () => {
+    const etf = calculerRegime({ ...VIDE, fluxEtfJourUsd: 161_000_000 }).composants.find((c) => c.id === "etf");
+    expect(etf?.detail).toContain("+$161");
+  });
 });
 
 describe("calculerRegime — score et libellé", () => {

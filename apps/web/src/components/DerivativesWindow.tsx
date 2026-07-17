@@ -476,7 +476,7 @@ export function DerivativesWindow() {
                 />
                 {funding !== undefined && Number.isFinite(funding.rate) && (
                   <div className="flex items-center gap-2 px-3 text-[11px] tabular-nums text-text-dim">
-                    <span>APR {formatPct(annualiserFunding(funding.rate, 8), 2)}</span>
+                    <span>APR (base 8 h) {formatPct(annualiserFunding(funding.rate, 8), 2)}</span>
                     <RefBadge referentiel={refFunding} sens="hausse-chaud" />
                   </div>
                 )}

@@ -26,7 +26,6 @@ export interface Chapeau {
   dvolRef: Referentiel | null;
   /** ΔOI BTC ~24 h en %. */
   deltaOi24hPct: number | null;
-  deltaOiRef: Referentiel | null;
 }
 
 export interface RegimeState {
@@ -97,10 +96,6 @@ export async function rafraichirRegime(): Promise<void> {
 
   const deltas24h = serieOi !== null ? deltasFenetre(serieOi, JOUR_MS) : [];
   const deltaOi24hPct = dernier(deltas24h.length > 0 ? deltas24h : null);
-  const deltaOiRef =
-    deltas24h.length > 0 && deltaOi24hPct !== null
-      ? referentiel(deltas24h, deltaOi24hPct, now)
-      : null;
 
   let fluxEtfJourUsd: number | null = null;
   if (etf.status === "fulfilled") {
@@ -147,7 +142,6 @@ export async function rafraichirRegime(): Promise<void> {
       dvolDeltaPts,
       dvolRef,
       deltaOi24hPct,
-      deltaOiRef,
     },
     majTs: now,
   });

@@ -120,17 +120,6 @@ export async function histOiUsd(symbol: string): Promise<PointSerie[] | null> {
   });
 }
 
-/** Variations % d'OI sur `fenetreMs` glissants (défaut 1 h). */
-export async function histDeltaOi(
-  symbol: string,
-  fenetreMs = H_MS,
-): Promise<PointSerie[] | null> {
-  const brut = await histOiUsd(symbol);
-  if (brut === null) return null;
-  const deltas = deltasFenetre(brut, fenetreMs);
-  return deltas.length > 0 ? deltas : null;
-}
-
 /** DVOL Deribit quotidien 90 j (BTC/ETH seulement). */
 export async function histDvol(devise: "BTC" | "ETH"): Promise<PointSerie[] | null> {
   return memo(`dvol:${devise}`, async () => {

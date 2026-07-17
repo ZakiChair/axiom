@@ -18,11 +18,13 @@ function serieLineaire(n: number, fin: number): PointSerie[] {
 }
 
 describe("rangPercentile", () => {
-  it("compte la part des valeurs ≤ valeur (ties inclus)", () => {
-    expect(rangPercentile([1, 2, 3, 4], 4)).toBe(100);
-    expect(rangPercentile([1, 2, 3, 4], 1)).toBe(25);
+  it("rang mi-distance : (strictement sous + ties / 2) / n", () => {
+    expect(rangPercentile([1, 2, 3, 4], 4)).toBe(87.5);
+    expect(rangPercentile([1, 2, 3, 4], 1)).toBe(12.5);
     expect(rangPercentile([1, 2, 3, 4], 0)).toBe(0);
-    expect(rangPercentile([1, 2, 2, 4], 2)).toBe(75);
+    expect(rangPercentile([1, 2, 2, 4], 2)).toBe(50);
+    // Masse d'égalités (funding clampé) = neutre, plus jamais p100.
+    expect(rangPercentile([5, 5, 5, 5, 5], 5)).toBe(50);
   });
   it("renvoie NaN sous 2 valeurs", () => {
     expect(rangPercentile([], 1)).toBeNaN();
@@ -40,7 +42,7 @@ describe("referentiel", () => {
     const serie = serieLineaire(241, now); // 240 h = 10 j
     const ref = referentiel(serie, 241, now);
     expect(ref).not.toBeNull();
-    expect(ref?.percentile).toBe(100);
+    expect(ref?.percentile).toBeCloseTo((240.5 / 241) * 100, 6);
     expect(ref?.profondeurJours).toBe(10);
     expect(ref?.n).toBe(241);
   });

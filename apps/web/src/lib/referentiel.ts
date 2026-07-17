@@ -25,12 +25,21 @@ export const PROFONDEUR_MIN_JOURS = 5;
 
 const JOUR_MS = 86_400_000;
 
-/** Rang percentile : part des valeurs ≤ valeur (ties inclus), 0..100. NaN sous 2 valeurs. */
+/**
+ * Rang percentile MI-DISTANCE : (strictement sous + ties / 2) / n × 100, 0..100.
+ * NaN sous 2 valeurs. La convention mi-distance neutralise les masses d'égalités —
+ * un funding scotché au clamp Binance (des dizaines de points identiques) lit p50,
+ * pas p100. `strictementSous` = valeurs < valeur ; `ties` = valeurs === valeur.
+ */
 export function rangPercentile(valeurs: readonly number[], valeur: number): number {
   if (valeurs.length < 2) return Number.NaN;
-  let sous = 0;
-  for (const v of valeurs) if (v <= valeur) sous += 1;
-  return (sous / valeurs.length) * 100;
+  let strictementSous = 0;
+  let ties = 0;
+  for (const v of valeurs) {
+    if (v < valeur) strictementSous += 1;
+    else if (v === valeur) ties += 1;
+  }
+  return ((strictementSous + ties / 2) / valeurs.length) * 100;
 }
 
 /**

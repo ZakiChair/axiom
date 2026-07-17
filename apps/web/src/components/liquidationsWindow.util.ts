@@ -15,6 +15,11 @@ export function filtrerFenetre(events: LiqEvent[], depuisMs: number): LiqEvent[]
   return events.filter((ev) => ev.time >= depuisMs);
 }
 
+/** Le buffer couvre-t-il TOUTE la fenêtre ? (au moins un événement plus vieux que now − fenetreMs) */
+export function couvreFenetre(events: readonly LiqEvent[], fenetreMs: number, now: number): boolean {
+  return events.some((ev) => ev.time < now - fenetreMs);
+}
+
 /** Stats agrégées d'un lot d'événements (fenêtre glissante de la fenêtre LIQ). */
 export interface StatsLiquidations {
   longUsd: number;

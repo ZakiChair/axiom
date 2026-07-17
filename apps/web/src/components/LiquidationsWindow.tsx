@@ -64,6 +64,7 @@ import {
 } from "../lib/format";
 import {
   bucketsTemporels,
+  couvreFenetre,
   daemonVersEvenements,
   filtrerFenetre,
   grouperCascades,
@@ -555,6 +556,9 @@ function ContenuLive() {
     if (serieHeure === null) return null;
     const nowMs = Date.now();
     const reels = liqEventsStore.getState().events.filter((ev) => ev.approx !== true);
+    // Tant que le flux ne couvre pas une heure pleine, `total1h` sous-estime (fenêtre
+    // partielle) et lirait « calme » à tort → pas de baseline.
+    if (!couvreFenetre(reels, 3_600_000, nowMs)) return null;
     const total1h = statsLiquidations(filtrerFenetre(reels, nowMs - 3_600_000)).total;
     return { total1h, ref: referentiel(serieHeure, total1h, nowMs) };
   }, [serieHeure, rev, horloge, symbol]);

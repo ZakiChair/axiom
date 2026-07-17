@@ -8,6 +8,7 @@ import type { LiqEvent } from "../chart/liquidationMarkers";
 import type { LiqDaemon } from "../data/daemon";
 import {
   bucketsTemporels,
+  couvreFenetre,
   daemonVersEvenements,
   filtrerFenetre,
   grouperCascades,
@@ -201,6 +202,19 @@ describe("usdParMinute", () => {
 
   it("liste vide → 0", () => {
     expect(usdParMinute([], 1_000_000)).toBe(0);
+  });
+});
+
+describe("couvreFenetre", () => {
+  const now = 10_000_000;
+  it("buffer vide → false", () => {
+    expect(couvreFenetre([], 3_600_000, now)).toBe(false);
+  });
+  it("un seul événement récent (now − 60 s) ne couvre pas l'heure → false", () => {
+    expect(couvreFenetre([ev({ time: now - 60_000 })], 3_600_000, now)).toBe(false);
+  });
+  it("un événement plus vieux que la fenêtre (now − 2 h) → true", () => {
+    expect(couvreFenetre([ev({ time: now - 2 * 3_600_000 })], 3_600_000, now)).toBe(true);
   });
 });
 

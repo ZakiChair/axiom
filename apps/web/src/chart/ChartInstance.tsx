@@ -47,6 +47,7 @@ import { themeStore } from "../store/theme";
 import { chartLayoutStore } from "../store/chart-layout";
 import { ChartIndicators } from "./indicators";
 import { PaneHeaders } from "./paneHeaders";
+import { OverlayLegend } from "./overlayLegend";
 import { OrderflowController } from "./orderflow";
 import { CompareController } from "./compare";
 import { VolumeProfileController } from "./volumeProfile";
@@ -240,6 +241,7 @@ interface SlotMount {
   chart: KLineChartInstance;
   indicators: ChartIndicators;
   paneHeaders: PaneHeaders;
+  overlayLegend: OverlayLegend;
   updateThrottle: RafThrottle;
   // Zoom/décalage de l'instance juste après `init()`, avant toute interaction utilisateur.
   // klinecharts ne réinitialise JAMAIS barSpace/offsetRightDistance sur `applyNewData` (seul
@@ -340,8 +342,15 @@ export function ChartInstance({
     // En-têtes overlay des panes séparés (croix + drag-reorder) : le contrôleur lit
     // `indicatorsStore` lui-même (pas besoin de brancher `state`).
     const paneHeaders = new PaneHeaders(chart, container);
-    const unsubscribePaneHeaders = indicatorsStore.subscribe(() => paneHeaders.sync());
+    // Légende des indicateurs overlay (EMA/BOLL/VWAP ancré…) sur le pane prix : croix ✕
+    // de suppression directe, même cycle de vie que paneHeaders (cf. chart/overlayLegend.ts).
+    const overlayLegend = new OverlayLegend(chart, container);
+    const unsubscribePaneHeaders = indicatorsStore.subscribe(() => {
+      paneHeaders.sync();
+      overlayLegend.sync();
+    });
     paneHeaders.sync();
+    overlayLegend.sync();
 
     // Outils d'analyse de prix (contrôleurs impératifs, overlays DOM propres à ce slot) :
     //  - measureTool : règle Shift+glisser transitoire (écart %/Δ/bougies/durée).
@@ -431,6 +440,7 @@ export function ChartInstance({
       chart,
       indicators,
       paneHeaders,
+      overlayLegend,
       updateThrottle,
       defaultBarSpace: chart.getBarSpace(),
       defaultOffsetRight: chart.getOffsetRightDistance(),
@@ -447,6 +457,7 @@ export function ChartInstance({
       unsubscribeTheme();
       unsubscribePaneHeaders();
       paneHeaders.dispose();
+      overlayLegend.dispose();
       measureTool.dispose();
       candleReadout.dispose();
       unsubscribeXhairStore();
@@ -470,7 +481,8 @@ export function ChartInstance({
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
-    const { chart, indicators, paneHeaders, updateThrottle, defaultBarSpace, defaultOffsetRight } = mount;
+    const { chart, indicators, paneHeaders, overlayLegend, updateThrottle, defaultBarSpace, defaultOffsetRight } =
+      mount;
     const container = containerRef.current;
     const canvas = canvasRef.current;
     const vpCanvas = vpCanvasRef.current;
@@ -648,6 +660,7 @@ export function ChartInstance({
         // ne verrait pas les panes et les croix ✕/drag resteraient invisibles tant que
         // l'utilisateur ne modifie pas `indicatorsStore` lui-même.
         paneHeaders.sync();
+        overlayLegend.sync();
         // Orderflow (si ce slot est focus + activé) : reseed CVD + trades.
         ensureOrderflow();
         orderflow?.onCandles();

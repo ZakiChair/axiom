@@ -26,6 +26,7 @@ import { settingsUiStore } from "../store/settings-ui";
 import {
   fetchCoinMetrics,
   type CoinMetricsResultat,
+  type PointMetrique,
   type SerieMetrique,
 } from "../data/onchain/coinmetrics";
 import { fetchBgeometrics, BG_METRIQUES, type BgResultat } from "../data/onchain/bgeometrics";
@@ -53,7 +54,7 @@ import {
   formatDateComplete,
   formatAge,
 } from "../lib/format";
-import { lireTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { metaSource, type MetaFiabilite } from "../lib/fiabilite";
 import { zonePourMetrique } from "../lib/zonesOnchain";
 import { Badge, BadgeFiabilite, EnTeteFenetre, NoteSource } from "./ui";
@@ -248,6 +249,135 @@ function sparkDe(serie: SerieMetrique | undefined, n = 60): number[] {
   return serie.points.slice(-n).map((p) => p.value);
 }
 
+// ─────────────────────────── Courbe pleine largeur ───────────────────────────
+
+const COURBE_H = 96;
+
+/**
+ * Courbe d'évolution pleine largeur (canvas responsive), trait + aire remplie.
+ * Contrairement à la sparkline (largeur codée en dur à 88 px), elle MESURE son
+ * conteneur via ResizeObserver pour rester lisible quand le panneau est docké ou
+ * redimensionné. Couleurs résolues au dessin (token `--up`) → correctes sur les
+ * deux thèmes.
+ */
+function CourbeHashrate({ points }: { points: PointMetrique[] }) {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const cvsRef = useRef<HTMLCanvasElement | null>(null);
+  const [largeur, setLargeur] = useState(0);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (wrap === null) return;
+    setLargeur(wrap.clientWidth);
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) setLargeur(e.contentRect.width);
+    });
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const cvs = cvsRef.current;
+    if (cvs === null || largeur <= 0) return;
+    const ctx = cvs.getContext("2d");
+    if (ctx === null) return;
+
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    cvs.width = largeur * dpr;
+    cvs.height = COURBE_H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, largeur, COURBE_H);
+    if (points.length < 2) return;
+
+    const values = points.map((p) => p.value);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const span = max - min || 1;
+    const padTop = 6;
+    const padBottom = 6;
+    const h = COURBE_H - padTop - padBottom;
+    const step = largeur / (points.length - 1);
+    const yDe = (v: number) => padTop + (h - ((v - min) / span) * h);
+
+    // Aire sous la courbe (remplissage semi-transparent), même token que le trait.
+    ctx.beginPath();
+    points.forEach((p, i) => {
+      const x = i * step;
+      const y = yDe(p.value);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.lineTo((points.length - 1) * step, COURBE_H);
+    ctx.lineTo(0, COURBE_H);
+    ctx.closePath();
+    ctx.fillStyle = rgbaTokenCanvas("--up", 0.12, "#22c55e");
+    ctx.fill();
+
+    // Trait de la courbe.
+    ctx.beginPath();
+    points.forEach((p, i) => {
+      const x = i * step;
+      const y = yDe(p.value);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = lireTokenCanvas("--up", "#22c55e");
+    ctx.lineWidth = 1.4;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+  }, [points, largeur]);
+
+  return (
+    <div ref={wrapRef} className="w-full">
+      <canvas ref={cvsRef} style={{ width: "100%", height: COURBE_H }} aria-hidden="true" />
+    </div>
+  );
+}
+
+/**
+ * Carte pleine largeur du hashrate : en-tête (valeur courante + fiabilité + fraîcheur)
+ * au-dessus de la courbe d'évolution 1 an, avec échelle min/max en EH/s et bornes
+ * temporelles — de quoi juger l'AMPLEUR des variations, pas seulement la forme.
+ */
+function CarteHashrate({ hr }: { hr: ResultatFrais<SerieMetrique> | null }) {
+  const serie = hr?.donnee;
+  const points = serie?.points ?? [];
+  const values = points.map((p) => p.value);
+  const min = values.length > 0 ? Math.min(...values) : undefined;
+  const max = values.length > 0 ? Math.max(...values) : undefined;
+  return (
+    <div className="col-span-2 flex flex-col gap-1 rounded-md border border-border bg-bg px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-[11px] text-text-dim">Évolution du hashrate (1 an)</span>
+        <BadgeFiabilite meta={META_DAILY} />
+      </div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="tabular-nums text-base font-semibold" style={{ color: "var(--up)" }}>
+          {fmtHashrate(serie?.dernier?.value)}
+        </span>
+        <span className="shrink-0 text-[10px] text-text-dim">
+          {hr?.perime ? "cache périmé · " : ""}
+          {fmtJour(serie?.dernier?.time)}
+        </span>
+      </div>
+      {points.length >= 2 ? (
+        <>
+          <CourbeHashrate points={points} />
+          <div className="flex items-center justify-between gap-2 text-[9px] tabular-nums text-text-dim">
+            <span>{fmtJour(points[0]?.time)}</span>
+            <span className="text-text-dim">
+              min {fmtHashrate(min)} · max {fmtHashrate(max)}
+            </span>
+            <span>{fmtJour(points[points.length - 1]?.time)}</span>
+          </div>
+        </>
+      ) : (
+        <div className="py-4 text-center text-[10px] text-text-dim">Hashrate indisponible</div>
+      )}
+    </div>
+  );
+}
+
 // ─────────────────────────── Fenêtre ───────────────────────────
 
 interface EtatDonnees {
@@ -340,7 +470,6 @@ export function OnchainWindow() {
 
   const mp = donnees.mp?.donnee;
   const halving = mp?.halving;
-  const hr = donnees.hr?.donnee;
   const etf = donnees.etf[actifEtf];
   const eth = donnees.eth;
   // Mode dégradé sans clé Etherscan (1 req/5 s) : gas présent mais supply/nœuds null —
@@ -372,6 +501,7 @@ export function OnchainWindow() {
             Réseau BTC
           </h3>
           <div className="grid grid-cols-2 gap-2">
+            <CarteHashrate hr={donnees.hr} />
             <Widget
               libelle="Adresses actives"
               valeur={formatCompact(adr?.dernier?.value)}
@@ -398,15 +528,6 @@ export function OnchainWindow() {
               color="--serie-3"
               fraicheur={cmDaily}
               perime={cm?.perime}
-            />
-            <Widget
-              libelle="Hashrate (1 an)"
-              valeur={fmtHashrate(hr?.dernier?.value)}
-              meta={META_DAILY}
-              spark={sparkDe(hr, 90)}
-              color="--up"
-              fraicheur={fmtJour(hr?.dernier?.time)}
-              perime={donnees.hr?.perime}
             />
             <Widget
               libelle="Frais recommandés"

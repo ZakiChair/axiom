@@ -47,6 +47,19 @@ function CursorIcon() {
   );
 }
 
+/** Règle de mesure (barre à graduations). */
+function RulerIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <rect x="3" y="9" width="18" height="6" rx="1" />
+      <line x1="7" y1="9" x2="7" y2="12" />
+      <line x1="11" y1="9" x2="11" y2="12" />
+      <line x1="15" y1="9" x2="15" y2="12" />
+      <line x1="19" y1="9" x2="19" y2="12" />
+    </svg>
+  );
+}
+
 /** Droite de tendance (segment diagonal à deux poignées). */
 function TrendLineIcon() {
   return (
@@ -224,6 +237,11 @@ interface ToolDef {
 
 const TOOLS: ToolDef[] = [
   { id: "cursor", label: "Curseur", Icon: CursorIcon },
+  {
+    id: "measure",
+    label: "Règle de mesure — clic-glisser (raccourci : Shift+glisser, marche avec n'importe quel outil)",
+    Icon: RulerIcon,
+  },
   { id: "trendLine", label: "Droite de tendance", Icon: TrendLineIcon },
   { id: "ray", label: "Rayon", Icon: RayIcon },
   { id: "extended", label: "Droite étendue", Icon: ExtendedIcon },

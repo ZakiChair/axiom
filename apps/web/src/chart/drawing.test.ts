@@ -13,6 +13,7 @@ import type { Chart as KLineChartInstance } from "klinecharts";
 import {
   bindChart,
   coinsRectangle,
+  drawingStore,
   exportChartImage,
   restoreDrawings,
   selectTool,
@@ -303,6 +304,22 @@ describe("drawing.ts — picker d'ancrage AVWAP", () => {
     expect(indicatorsStore.getState().indicators).toHaveLength(0);
     await Promise.resolve();
     expect(removeSpy).toHaveBeenCalledWith({ id: "ov-0" });
+
+    unbindChart(a.chart);
+  });
+});
+
+describe("drawing.ts — outil « measure »", () => {
+  it("selectTool(\"measure\") met à jour drawingStore sans créer d'overlay", () => {
+    const a = createMockChart();
+    const createSpy = vi.spyOn(a.chart, "createOverlay");
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    setFocusChart(0);
+
+    selectTool("measure");
+
+    expect(drawingStore.getState().tool).toBe("measure");
+    expect(createSpy).not.toHaveBeenCalled();
 
     unbindChart(a.chart);
   });

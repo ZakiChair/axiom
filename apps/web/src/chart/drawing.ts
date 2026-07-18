@@ -38,6 +38,7 @@ import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 /** Identifiants d'outils exposés par la barre (cursor = aucun overlay). */
 export type DrawingToolId =
   | "cursor"
+  | "measure"
   | "trendLine"
   | "ray"
   | "extended"
@@ -61,6 +62,7 @@ export type DrawingToolId =
  */
 const TOOL_OVERLAY: Record<DrawingToolId, string | null> = {
   cursor: null,
+  measure: null, // règle transitoire (MeasureTool) : pas d'overlay createOverlay, cf. chart/measureTool.ts
   trendLine: "segment", // droite de tendance (2 points)
   ray: "rayLine", // demi-droite (rayon) depuis un point
   extended: "straightLine", // droite infinie (2 points)

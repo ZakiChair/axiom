@@ -19,6 +19,7 @@
  */
 import type { Chart as KLineChartInstance } from "klinecharts";
 import { formatPct, formatPrice } from "../lib/format";
+import { drawingStore } from "./drawing";
 
 const CANDLE_PANE_ID = "candle_pane";
 
@@ -80,6 +81,8 @@ interface DragEnCours {
   debut: PointMesure;
   startRelX: number;
   startRelY: number;
+  /** true si déclenché par le mode armé (bouton « Règle »), false si Shift+glisser. */
+  viaToolbar: boolean;
 }
 
 /** Contrôleur impératif de l'outil de mesure, attaché à UNE instance de graphe. */
@@ -87,6 +90,7 @@ export class MeasureTool {
   private readonly rect: HTMLDivElement;
   private readonly label: HTMLDivElement;
   private drag: DragEnCours | null = null;
+  private readonly unsubscribeDrawingStore: () => void;
 
   constructor(
     private readonly chart: KLineChartInstance,
@@ -107,12 +111,19 @@ export class MeasureTool {
     // Capture sur window : fiable même si un ancêtre stoppe la propagation plus bas,
     // et permet de bloquer le mousedown AVANT que KLineChart ne l'intercepte.
     window.addEventListener("mousedown", this.onMouseDown, { capture: true });
+    // Mode armé (bouton « Règle ») : si l'utilisateur change d'outil PENDANT un glissement
+    // déclenché sans Shift, on l'annule proprement. Un Shift-drag en cours n'est jamais
+    // affecté (il ne dépend pas de l'outil sélectionné, cf. onMouseDown).
+    this.unsubscribeDrawingStore = drawingStore.subscribe((state) => {
+      if (state.tool !== "measure" && this.drag?.viaToolbar) this.annuler();
+    });
   }
 
   dispose(): void {
     window.removeEventListener("mousedown", this.onMouseDown, {
       capture: true,
     } as EventListenerOptions);
+    this.unsubscribeDrawingStore();
     this.annuler();
     this.rect.remove();
     this.label.remove();
@@ -140,8 +151,11 @@ export class MeasureTool {
   }
 
   private onMouseDown = (e: MouseEvent): void => {
-    // Seulement Shift + clic gauche, et uniquement sur CE graphe (target dans chartDom).
-    if (!e.shiftKey || e.button !== 0) return;
+    // Shift + clic gauche (raccourci global, marche avec n'importe quel outil actif) OU
+    // clic gauche seul quand l'outil « Règle » est armé depuis la barre de dessin — et
+    // uniquement sur CE graphe (target dans chartDom).
+    const arme = drawingStore.getState().tool === "measure";
+    if (!(e.shiftKey || arme) || e.button !== 0) return;
     if (!(e.target instanceof Node) || !this.chartDom.contains(e.target)) return;
     const bound = this.chart.getSize(CANDLE_PANE_ID);
     if (!bound) return;
@@ -154,7 +168,9 @@ export class MeasureTool {
     // démarre aucun pan pendant que l'on mesure.
     e.preventDefault();
     e.stopPropagation();
-    this.drag = { debut, startRelX: x, startRelY: y };
+    // Shift prioritaire sur le mode armé : un Shift-drag reste un Shift-drag même si
+    // l'outil « Règle » est sélectionné (jamais annulé par un changement d'outil).
+    this.drag = { debut, startRelX: x, startRelY: y, viaToolbar: arme && !e.shiftKey };
     this.container.style.userSelect = "none";
     window.addEventListener("mousemove", this.onMouseMove, { capture: true });
     window.addEventListener("mouseup", this.onMouseUp, { capture: true });

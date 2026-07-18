@@ -2,8 +2,17 @@
  * Tests des fonctions PURES de l'outil de mesure « Shift + glisser » :
  * `calculerMesure` (écart %, Δ prix, nb bougies, durée, sens) et `formaterDuree`
  * (durée compacte). Le contrôleur DOM/événements est vérifié par rendu réel.
+ *
+ * REMARQUE : measureTool.ts importe drawingStore (pour le mode armé), qui importe
+ * drawing.ts, qui appelle registerOverlay à la chargement. Sans ce mock, l'import
+ * échoue en environnement Node (pas de klinecharts).
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("klinecharts", () => ({
+  registerOverlay: vi.fn(),
+}));
+
 import { calculerMesure, formaterDuree } from "./measureTool";
 
 describe("calculerMesure", () => {

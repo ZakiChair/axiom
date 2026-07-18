@@ -82,6 +82,7 @@ export class OverlayLegend {
     croix.type = "button";
     croix.setAttribute("data-role", "close");
     croix.setAttribute("aria-label", `Fermer ${entry.label}`);
+    croix.title = entry.label;
     croix.className = "leading-none text-text-dim hover:text-text";
     croix.addEventListener("click", () => indicatorsStore.getState().remove(entry.instanceId));
 

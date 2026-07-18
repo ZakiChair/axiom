@@ -192,7 +192,7 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
     grid: { horizontal: { color: grid }, vertical: { color: grid } },
     // Légende native (nom + valeur) laissée aux défauts KLineChart (showName/showParams) :
     // elle est désormais la SEULE source du NOM d'indicateur — panes séparés ET overlays.
-    // Indispensable pour les overlays (EMA/BOLL) qui n'ont AUCUN en-tête DOM : deux instances
+    // Indispensable pour les overlays (EMA/BOLL) avec OverlayLegend (✕ seul) : NOM visible QUE ici. Deux instances
     // d'un même overlay (EMA(20)+EMA(50)) ne sont distinguables QUE par leurs paramètres dans
     // cette légende. L'en-tête DOM (chart/paneHeaders.tsx) ne porte plus le nom (juste ⠿ + ✕,
     // décalés en haut à DROITE du pane) : plus de double impression du nom (audit #2/#10).

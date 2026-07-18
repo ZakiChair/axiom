@@ -59,6 +59,8 @@ import { bindChart, unbindChart, setFocusChart, redrawFibOverlays, restoreDrawin
 import { fibStore } from "./fibonacci";
 import { createRafThrottle, type RafThrottle } from "./rafThrottle";
 import { bindPriceAlertMenu } from "./priceAlertMenu";
+import { MeasureTool } from "./measureTool";
+import { CandleReadout } from "./candleReadout";
 import { SymbolBanner } from "../components/SymbolBanner";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 
@@ -341,6 +343,12 @@ export function ChartInstance({
     const unsubscribePaneHeaders = indicatorsStore.subscribe(() => paneHeaders.sync());
     paneHeaders.sync();
 
+    // Outils d'analyse de prix (contrôleurs impératifs, overlays DOM propres à ce slot) :
+    //  - measureTool : règle Shift+glisser transitoire (écart %/Δ/bougies/durée).
+    //  - candleReadout : encart O/H/L/C + variation % + amplitude qui suit le crosshair.
+    const measureTool = new MeasureTool(chart, chartDom, container);
+    const candleReadout = new CandleReadout(chart, container);
+
     // ── Crosshair synchronisé inter-slots ──────────────────────────────────
     const drawSyncedCrosshair = (): void => {
       const ctx = xhairCanvas.getContext("2d");
@@ -385,6 +393,12 @@ export function ChartInstance({
     const onCrosshair = (data?: Crosshair): void => {
       const t = data?.kLineData?.timestamp;
       crosshairSyncStore.setState({ time: typeof t === "number" ? t : null, source: slot });
+      // Encart de lecture : bougie pointée + pixel du curseur (masqué hors survol).
+      if (data?.kLineData && typeof data.x === "number" && typeof data.y === "number") {
+        candleReadout.montrer(data.kLineData, data.x, data.y);
+      } else {
+        candleReadout.cacher();
+      }
     };
     chart.subscribeAction(ActionType.OnCrosshairChange, onCrosshair);
     // Redessine la ligne synchronisée quand le crosshair partagé change OU quand le
@@ -433,6 +447,8 @@ export function ChartInstance({
       unsubscribeTheme();
       unsubscribePaneHeaders();
       paneHeaders.dispose();
+      measureTool.dispose();
+      candleReadout.dispose();
       unsubscribeXhairStore();
       chart.unsubscribeAction(ActionType.OnCrosshairChange, onCrosshair);
       chart.unsubscribeAction(ActionType.OnScroll, onXhairViewport);

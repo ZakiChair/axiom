@@ -7,7 +7,7 @@
  * symboles, cône seul + message). Moteurs purs dans lib/volCone.ts (Task 8).
  * Rendu impératif canvas (aucune donnée haute fréquence dans React).
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { Candle, ExchangeId } from "@axiom/types";
@@ -15,11 +15,19 @@ import type { Commande } from "../commands/registry";
 import { getAdapter } from "../data/adapters";
 import { fetchDvolHistory } from "../data/deribit";
 import { lireTokenCanvas } from "../lib/canvasTokens";
-import { formatDec, formatPourcentage } from "../lib/format";
+import { formatDateComplete, formatDateCourte, formatDec, formatPourcentage, VALEUR_ABSENTE } from "../lib/format";
 import { realizedVolSeries, volCone, zScore, type VolConeRow } from "../lib/volCone";
 import { marketStore } from "../store/market";
 import { mirrorOpenState, windowManagerStore } from "../store/windowManager";
-import { Chargement, EnTeteFenetre, ErreurBloc, Metric } from "./ui";
+import { BarrePeriodes, Chargement, EnTeteFenetre, ErreurBloc, InfobulleGraphe, Metric, PERIODES_STANDARD } from "./ui";
+import {
+  domainePourPreset,
+  indicesVisibles,
+  pixelVersValeur,
+  valeurVersPixel,
+  type Domaine,
+} from "../lib/domaineAxe";
+import { useDomaineZoom } from "../hooks/useDomaineZoom";
 
 export interface VolUiState {
   open: boolean;
@@ -186,7 +194,23 @@ function drawCone(ctx: CanvasRenderingContext2D, rows: VolConeRow[], x0: number,
   ctx.fillText(`${vMin.toFixed(0)} %`, x0, bottom + 4);
 }
 
-/** Séries RV30 et DVOL superposées sur 1 an (2 polylignes, échelle commune). */
+/** RV30 en série {time, value}, nulls filtrés (window incomplète en tête d'historique). */
+function serieRv(data: VolData): { time: number; value: number }[] {
+  const rv: { time: number; value: number }[] = [];
+  data.times.forEach((t, i) => {
+    const v = data.rv30[i];
+    if (v !== null && v !== undefined) rv.push({ time: t, value: v });
+  });
+  return rv;
+}
+
+/** Géométrie du panneau séries (moitié droite du canvas, quand IV disponible) — partagée
+ *  entre `draw` (rendu) et le survol du composant hôte (conversion pixel↔temps identique). */
+function panneauSeries(largeurCanvas: number): { x0: number; w: number } {
+  return { x0: largeurCanvas / 2 + 4, w: largeurCanvas / 2 - 8 };
+}
+
+/** Séries RV30 et DVOL superposées sur le domaine visible (2 polylignes, échelle commune). */
 function drawSeries(
   ctx: CanvasRenderingContext2D,
   data: VolData,
@@ -195,28 +219,24 @@ function drawSeries(
   w: number,
   h: number,
   tk: Tokens,
+  domaine: Domaine,
 ): void {
-  const depuis = Date.now() - 365 * 24 * 60 * 60 * 1000;
-  const rv: { time: number; value: number }[] = [];
-  data.times.forEach((t, i) => {
-    const v = data.rv30[i];
-    if (t >= depuis && v !== null && v !== undefined) rv.push({ time: t, value: v });
-  });
-  const dvol = (data.dvol ?? []).filter((p) => p.time >= depuis);
-  const tout = [...rv, ...dvol];
+  const rv = serieRv(data);
+  const rvIdx = indicesVisibles(rv, (p) => p.time, domaine);
+  const rvVis = rv.slice(rvIdx.debut, rvIdx.fin + 1);
+  const dvolTous = data.dvol ?? [];
+  const dvIdx = indicesVisibles(dvolTous, (p) => p.time, domaine);
+  const dvolVis = dvolTous.slice(dvIdx.debut, dvIdx.fin + 1);
+  const tout = [...rvVis, ...dvolVis];
   if (tout.length < 2) {
     ctx.fillStyle = tk.dim;
     ctx.fillText("Séries indisponibles.", x0 + 8, y0 + 20);
     return;
   }
 
-  let tMin = Infinity;
-  let tMax = -Infinity;
   let vMin = Infinity;
   let vMax = -Infinity;
   for (const p of tout) {
-    tMin = Math.min(tMin, p.time);
-    tMax = Math.max(tMax, p.time);
     vMin = Math.min(vMin, p.value);
     vMax = Math.max(vMax, p.value);
   }
@@ -228,7 +248,7 @@ function drawSeries(
   const bottom = y0 + h - 18;
   const plotW = w - 42;
   const plotH = h - 40;
-  const xAt = (t: number): number => left + ((t - tMin) / Math.max(1, tMax - tMin)) * plotW;
+  const xAt = (t: number): number => left + valeurVersPixel(domaine, t, plotW);
   const yAt = (v: number): number => bottom - ((v - vMin) / (vMax - vMin)) * plotH;
 
   const ligne = (pts: { time: number; value: number }[], couleur: string): void => {
@@ -242,8 +262,8 @@ function drawSeries(
     ctx.lineWidth = 1.2;
     ctx.stroke();
   };
-  ligne(rv, tk.up);
-  ligne(dvol, tk.accent);
+  ligne(rvVis, tk.up);
+  ligne(dvolVis, tk.accent);
 
   ctx.fillStyle = tk.dim;
   ctx.fillText(`${vMax.toFixed(0)} %`, x0, y0 + 12);
@@ -251,13 +271,18 @@ function drawSeries(
   // Légende.
   ctx.fillStyle = tk.up;
   ctx.fillText(`RV${RV_WINDOW}`, left, y0 + 12);
-  if (dvol.length > 0) {
+  if (dvolVis.length > 0) {
     ctx.fillStyle = tk.accent;
     ctx.fillText("DVOL", left + 44, y0 + 12);
   }
+  // Repères de dates (bornes du domaine visible).
+  ctx.fillStyle = tk.dim;
+  ctx.fillText(formatDateCourte(domaine.min), left, bottom + 14);
+  const finTxt = formatDateCourte(domaine.max);
+  ctx.fillText(finTxt, left + plotW - ctx.measureText(finTxt).width, bottom + 14);
 }
 
-function draw(canvas: HTMLCanvasElement, data: VolData): void {
+function draw(canvas: HTMLCanvasElement, data: VolData, domaine: Domaine): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -283,7 +308,8 @@ function draw(canvas: HTMLCanvasElement, data: VolData): void {
     ctx.moveTo(w / 2, 8);
     ctx.lineTo(w / 2, h - 8);
     ctx.stroke();
-    drawSeries(ctx, data, w / 2 + 4, 22, w / 2 - 8, h - 26, tk);
+    const sp = panneauSeries(w);
+    drawSeries(ctx, data, sp.x0, 22, sp.w, h - 26, tk, domaine);
   } else {
     drawCone(ctx, data.cone, 0, 22, w - 8, h - 26, tk);
   }
@@ -300,6 +326,36 @@ function derniereRv(rv: (number | null)[]): number | null {
   return null;
 }
 
+/** Bornes temporelles de l'axe : union des temps RV30 (non nuls) et DVOL. */
+function bornesDonnees(data: VolData): Domaine | null {
+  const temps = [...serieRv(data).map((p) => p.time), ...(data.dvol ?? []).map((p) => p.time)];
+  if (temps.length < 2) return null;
+  let min = temps[0]!;
+  let max = temps[0]!;
+  for (const t of temps) {
+    if (t < min) min = t;
+    if (t > max) max = t;
+  }
+  return { min, max };
+}
+
+/** Point le plus proche de `t` dans une série {time, value} triée ; null si vide. */
+function pointProche(pts: { time: number; value: number }[], t: number): { time: number; value: number } | null {
+  if (pts.length === 0) return null;
+  let meilleur = pts[0]!;
+  for (const p of pts) if (Math.abs(p.time - t) < Math.abs(meilleur.time - t)) meilleur = p;
+  return meilleur;
+}
+
+/** Infos du point survolé par le curseur du panneau séries (tooltip). */
+interface Survol {
+  xPix: number;
+  largeur: number;
+  t: number;
+  rv: { time: number; value: number } | null;
+  dvol: { time: number; value: number } | null;
+}
+
 export function VolWindow() {
   const open = useStore(volUiStore, (s) => s.open);
   const exchange = useStore(marketStore, (s) => s.exchange);
@@ -309,7 +365,12 @@ export function VolWindow() {
   const symbol = symbolGroupe ?? symbolGlobal;
   const [statut, setStatut] = useState<Statut>("idle");
   const [data, setData] = useState<VolData | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const avecIv = data !== null && data.dvol !== null && data.dvol.length > 0;
+  const bornes = useMemo<Domaine | null>(() => (data !== null ? bornesDonnees(data) : null), [data]);
+  const [presetId, setPresetId] = useState<string | null>("1a");
+  const { refCanvas, domaine, setDomaine } = useDomaineZoom(bornes, () => setPresetId(null));
+  const [survol, setSurvol] = useState<Survol | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -330,15 +391,51 @@ export function VolWindow() {
     return () => ctrl.abort();
   }, [open, symbol, exchange]);
 
+  // (Ré)applique le préréglage actif quand les bornes arrivent ou changent — les données
+  // VOL peuvent se recharger (changement de symbole) et le hook réinitialise le domaine
+  // au tout ; on le resserre sur le preset courant.
   useEffect(() => {
-    const canvas = canvasRef.current;
+    if (bornes === null || presetId === null) return;
+    const jours = PERIODES_STANDARD.find((p) => p.id === presetId)?.jours ?? null;
+    setDomaine(domainePourPreset(bornes, jours));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bornes?.min, bornes?.max]);
+
+  useEffect(() => {
+    const canvas = refCanvas.current;
     if (!canvas || statut !== "ready" || data === null) return;
-    const redraw = (): void => draw(canvas, data);
+    // Le cône n'est pas temporel : il doit rester rendu même si `domaine` n'est pas
+    // encore disponible (données trop courtes pour une plage RV/DVOL exploitable).
+    const domaineRendu = domaine ?? { min: 0, max: 1 };
+    const redraw = (): void => draw(canvas, data, domaineRendu);
     redraw();
     const ro = new ResizeObserver(redraw);
     ro.observe(canvas);
     return () => ro.disconnect();
-  }, [data, statut]);
+  }, [data, statut, domaine]);
+
+  // Survol du panneau séries uniquement (moitié droite du canvas) — le cône n'est pas
+  // temporel et ne réagit pas au curseur.
+  const onSurvol = (e: React.MouseEvent<HTMLCanvasElement>): void => {
+    if (!avecIv || domaine === null || data === null) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const sp = panneauSeries(rect.width);
+    const xLocal = e.clientX - rect.left;
+    if (xLocal < sp.x0 || xLocal > sp.x0 + sp.w) {
+      setSurvol(null);
+      return;
+    }
+    const left = sp.x0 + 34;
+    const plotW = sp.w - 42;
+    const t = pixelVersValeur(domaine, xLocal - left, plotW);
+    setSurvol({
+      xPix: xLocal,
+      largeur: rect.width,
+      t,
+      rv: pointProche(serieRv(data), t),
+      dvol: pointProche(data.dvol ?? [], t),
+    });
+  };
 
   // Synthèse : RV30 · DVOL · VRP (IV − RV) · z-score RV30 — en tête du corps (H19 hiérarchie).
   let synthese: { rv: number | null; dvol: number | null; vrp: number | null; z: number | null } | null = null;
@@ -382,7 +479,42 @@ export function VolWindow() {
         {statut === "ready" && sansIv && (
           <p className="mb-2 text-[11px] text-text-dim">IV indisponible — Deribit ne cote que BTC/ETH. Cône RV seul.</p>
         )}
-        <canvas ref={canvasRef} className={statut === "ready" ? "min-h-0 w-full flex-1" : "hidden"} />
+        {statut === "ready" && avecIv && (
+          <BarrePeriodes
+            actif={presetId}
+            onChange={(p) => {
+              setPresetId(p.id);
+              if (bornes) setDomaine(domainePourPreset(bornes, p.jours));
+            }}
+          />
+        )}
+        <div className={statut === "ready" ? "relative min-h-0 w-full flex-1" : "hidden"}>
+          <canvas
+            ref={refCanvas}
+            className="h-full w-full"
+            onMouseMove={onSurvol}
+            onMouseLeave={() => setSurvol(null)}
+          />
+          {survol && (
+            <InfobulleGraphe
+              xPix={survol.xPix}
+              largeurGraphe={survol.largeur}
+              titre={formatDateComplete(survol.t)}
+              lignes={[
+                {
+                  label: `RV${RV_WINDOW}`,
+                  valeur: survol.rv !== null ? formatPourcentage(survol.rv.value, 1) : VALEUR_ABSENTE,
+                  couleur: lireTokenCanvas("--up", "#2dc08e"),
+                },
+                {
+                  label: "DVOL",
+                  valeur: survol.dvol !== null ? formatPourcentage(survol.dvol.value, 1) : VALEUR_ABSENTE,
+                  couleur: lireTokenCanvas("--accent", "#38bdf8"),
+                },
+              ]}
+            />
+          )}
+        </div>
       </div>
     </>
   );

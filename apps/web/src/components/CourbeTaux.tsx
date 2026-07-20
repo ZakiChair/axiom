@@ -146,7 +146,10 @@ function dessinerCourbe(canvas: HTMLCanvasElement, series: SerieCourbe[], domain
   ctx.fillStyle = dim;
   ctx.textAlign = "center";
   const parLabel = new Map<string, number>();
-  for (const s of seriesVisibles) for (const p of s.visibles) parLabel.set(p.maturite, p.anneesTri);
+  for (const s of seriesVisibles) for (const p of s.visibles) {
+    if (p.anneesTri < domaine.min || p.anneesTri > domaine.max) continue; // labels : domaine strict (les points-tampons servent au tracé, pas à l'axe)
+    parLabel.set(p.maturite, p.anneesTri);
+  }
   let dernierX = -Infinity;
   [...parLabel.entries()]
     .sort((a, b) => a[1] - b[1])

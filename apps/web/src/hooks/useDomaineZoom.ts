@@ -22,11 +22,11 @@ export function useDomaineZoom(
   bornes: Domaine | null,
   onGeste?: () => void,
 ): {
-  refCanvas: React.RefObject<HTMLCanvasElement | null>;
+  refCanvas: React.RefObject<HTMLCanvasElement>;
   domaine: Domaine | null;
   setDomaine: (d: Domaine) => void;
 } {
-  const refCanvas = useRef<HTMLCanvasElement | null>(null);
+  const refCanvas = useRef<HTMLCanvasElement>(null);
   const [domaine, setDomaine] = useState<Domaine | null>(bornes);
 
   // Miroirs en refs : les listeners natifs (attachés une fois) lisent l'état courant.

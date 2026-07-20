@@ -162,6 +162,22 @@ export function agregerHistoriqueEmetteur(detail: DetailEmetteur): PointSupply[]
     .sort((a, b) => a.time - b.time);
 }
 
+// ─────────────────────────── Curseur (survol) ───────────────────────────
+
+/** Point de `serie` le plus proche en temps de `t` ; null si `serie` est vide. */
+export function pointLePlusProche(serie: PointSupply[], t: number): PointSupply | null {
+  let meilleur: PointSupply | null = null;
+  let ecart = Number.POSITIVE_INFINITY;
+  for (const p of serie) {
+    const e = Math.abs(p.time - t);
+    if (e < ecart) {
+      ecart = e;
+      meilleur = p;
+    }
+  }
+  return meilleur;
+}
+
 // ─────────────────────────── Échelles canvas ───────────────────────────
 
 /** Min/max des valeurs finies — null si aucune (évite les échelles NaN au dessin). */

@@ -13,7 +13,7 @@
  * Données : data/macro/stablecoinsDetail.ts (fetch direct + cache 5 min). Les calculs
  * vivent dans stablecoinsWindow.util.ts (purs, testés sans DOM).
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createStore } from "zustand/vanilla";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { squarify, type Rect, type Tuile } from "../lib/treemap";
@@ -35,6 +35,7 @@ import {
   ecartPegBps,
   etatPeg,
   impressionNette,
+  pointLePlusProche,
   repartitionChaines,
   resumePegs,
   serieImpressionQuotidienne,
@@ -43,7 +44,14 @@ import {
   type EtatPeg,
   type PartDominance,
 } from "./stablecoinsWindow.util";
-import { formatUsd, formatPct, formatPourcentage, VALEUR_ABSENTE } from "../lib/format";
+import {
+  formatUsd,
+  formatPct,
+  formatPourcentage,
+  formatDateCourte,
+  formatDateComplete,
+  VALEUR_ABSENTE,
+} from "../lib/format";
 import {
   EnTeteFenetre,
   Onglets,
@@ -288,6 +296,11 @@ function TableEmetteurs({
 
 type Periode = 30 | 90 | 365 | null; // null = tout
 
+// IDs DefiLlama (cf. GET /stablecoins?includePrices=true) des 2 plus gros émetteurs —
+// utilisés pour la part USDT/USDC affichée par le curseur du chart Impression.
+const ID_USDT = "1";
+const ID_USDC = "2";
+
 const PERIODES: ReadonlyArray<{ id: string; jours: Periode; label: string }> = [
   { id: "30j", jours: 30, label: "30 j" },
   { id: "90j", jours: 90, label: "90 j" },
@@ -315,13 +328,18 @@ function dessinerImpression(canvas: HTMLCanvasElement, serie: PointSupply[]): vo
   const cDown = lireTokenCanvas("--down", "#ef4444");
   const cAccent = lireTokenCanvas("--accent", "#3b82f6");
   const cGrid = lireTokenCanvas("--border", "#374151");
+  const cTextDim = lireTokenCanvas("--text-dim", "#9ca3af");
 
   const t0 = serie[0]!.time;
   const t1 = serie[serie.length - 1]!.time;
   const x = (t: number) => ((t - t0) / Math.max(1, t1 - t0)) * cssW;
 
+  // Marge basse réservée aux repères de dates (sinon les barres du bas les recouvrent).
+  const padB = 14;
+  const plotH = Math.max(1, cssH - padB);
+
   // Moitié haute : ligne de supply.
-  const hLigne = cssH * 0.55;
+  const hLigne = plotH * 0.55;
   const bSupply = bornes(serie.map((p) => p.totalUsd));
   if (bSupply) {
     const y = (v: number) =>
@@ -344,8 +362,8 @@ function dessinerImpression(canvas: HTMLCanvasElement, serie: PointSupply[]): vo
   const deltas = serieImpressionQuotidienne(serie);
   const bDelta = bornes(deltas.map((d) => Math.abs(d.delta)));
   if (bDelta && bDelta.max > 0) {
-    const y0 = hLigne + (cssH - hLigne) / 2;
-    const demiH = (cssH - hLigne) / 2 - 4;
+    const y0 = hLigne + (plotH - hLigne) / 2;
+    const demiH = (plotH - hLigne) / 2 - 4;
     ctx.strokeStyle = cGrid;
     ctx.beginPath();
     ctx.moveTo(0, y0 + 0.5);
@@ -358,6 +376,30 @@ function dessinerImpression(canvas: HTMLCanvasElement, serie: PointSupply[]): vo
       ctx.fillRect(x(d.time) - larg / 2, d.delta >= 0 ? y0 - h : y0, larg, h);
     }
   }
+
+  // Repères de dates (début / milieu / fin) — sans eux, impossible de savoir à quel
+  // jour correspond une barre de mint/burn.
+  ctx.fillStyle = cTextDim;
+  ctx.font = "10px system-ui, sans-serif";
+  const yLabel = cssH - 3;
+  ctx.fillText(formatDateCourte(t0), 2, yLabel);
+  if (serie.length > 2) {
+    const milieu = serie[Math.floor(serie.length / 2)]!;
+    const texteMilieu = formatDateCourte(milieu.time);
+    ctx.fillText(texteMilieu, x(milieu.time) - ctx.measureText(texteMilieu).width / 2, yLabel);
+  }
+  const texteFin = formatDateCourte(t1);
+  ctx.fillText(texteFin, cssW - 2 - ctx.measureText(texteFin).width, yLabel);
+}
+
+/** Infos du point survolé par le curseur du chart Impression (tooltip). */
+interface Survol {
+  xPix: number;
+  largeur: number;
+  point: PointSupply;
+  delta: number | null;
+  partUsdt: number | null;
+  partUsdc: number | null;
 }
 
 function VueImpression({
@@ -371,11 +413,59 @@ function VueImpression({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const periode = PERIODES.find((p) => p.id === periodeId) ?? PERIODES[1]!;
   const serie = tronquerSerie(historique, periode.jours);
+  const deltas = useMemo(() => serieImpressionQuotidienne(serie), [serie]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas) dessinerImpression(canvas, serie);
   }, [serie]);
+
+  // Historiques USDT/USDC (indépendants de la période affichée) pour la part du curseur.
+  // Passe par /stablecoin/{id} (chargerDetailEmetteur, déjà utilisé par le drill-down) et
+  // PAS par /stablecoincharts/all?stablecoin={id} : ce dernier renvoie un en-tête
+  // Access-Control-Allow-Origin dupliqué (« *, * ») que les navigateurs rejettent — bug
+  // côté DefiLlama constaté seulement avec la query string, invisible en curl.
+  const [histUsdt, setHistUsdt] = useState<PointSupply[] | null>(null);
+  const [histUsdc, setHistUsdc] = useState<PointSupply[] | null>(null);
+  useEffect(() => {
+    let ignore = false;
+    const ctrl = new AbortController();
+    chargerDetailEmetteur(ID_USDT, ctrl.signal)
+      .then((d) => {
+        if (!ignore) setHistUsdt(agregerHistoriqueEmetteur(d));
+      })
+      .catch(() => {});
+    chargerDetailEmetteur(ID_USDC, ctrl.signal)
+      .then((d) => {
+        if (!ignore) setHistUsdc(agregerHistoriqueEmetteur(d));
+      })
+      .catch(() => {});
+    return () => {
+      ignore = true;
+      ctrl.abort();
+    };
+  }, []);
+
+  const [survol, setSurvol] = useState<Survol | null>(null);
+  const onSurvol = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (serie.length < 2) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const t0 = serie[0]!.time;
+    const t1 = serie[serie.length - 1]!.time;
+    const t = t0 + ((e.clientX - rect.left) / rect.width) * (t1 - t0);
+    const point = pointLePlusProche(serie, t);
+    if (!point) return;
+    const ptUsdt = histUsdt && pointLePlusProche(histUsdt, point.time);
+    const ptUsdc = histUsdc && pointLePlusProche(histUsdc, point.time);
+    setSurvol({
+      xPix: ((point.time - t0) / Math.max(1, t1 - t0)) * rect.width,
+      largeur: rect.width,
+      point,
+      delta: deltas.find((d) => d.time === point.time)?.delta ?? null,
+      partUsdt: ptUsdt && point.totalUsd > 0 ? (ptUsdt.totalUsd / point.totalUsd) * 100 : null,
+      partUsdc: ptUsdc && point.totalUsd > 0 ? (ptUsdc.totalUsd / point.totalUsd) * 100 : null,
+    });
+  };
 
   // Top mints / burns 7 j par émetteur (Δ absolu USD, pas %) — qui imprime, qui brûle.
   const avecDelta = emetteurs
@@ -392,7 +482,34 @@ function VueImpression({
         actif={periodeId}
         onChange={setPeriodeId}
       />
-      <canvas ref={canvasRef} className="h-56 w-full rounded-md border border-border" />
+      <div className="relative">
+        <canvas
+          ref={canvasRef}
+          className="h-56 w-full rounded-md border border-border"
+          onMouseMove={onSurvol}
+          onMouseLeave={() => setSurvol(null)}
+        />
+        {survol && (
+          <>
+            <div
+              className="pointer-events-none absolute inset-y-0 w-px bg-text-dim/60"
+              style={{ left: survol.xPix }}
+            />
+            <div
+              className="pointer-events-none absolute z-10 whitespace-nowrap rounded border border-border bg-surface px-2 py-1 text-[11px] tabular-nums text-text shadow-lg"
+              style={{ left: Math.min(survol.xPix + 10, Math.max(0, survol.largeur - 150)), top: 6 }}
+            >
+              <div className="text-text-dim">{formatDateComplete(survol.point.time)}</div>
+              <div>Supply : {formatUsd(survol.point.totalUsd)}</div>
+              <div style={{ color: couleurDelta(survol.delta) }}>
+                Δ jour : {fmtDeltaUsd(survol.delta)}
+              </div>
+              <div>USDT : {formatPourcentage(survol.partUsdt)}</div>
+              <div>USDC : {formatPourcentage(survol.partUsdc)}</div>
+            </div>
+          </>
+        )}
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <ListeDeltas titre="Top mints 7 j" lignes={mints} />
         <ListeDeltas titre="Top burns 7 j" lignes={burns} />

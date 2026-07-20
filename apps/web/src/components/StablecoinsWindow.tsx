@@ -590,7 +590,15 @@ function VueChaines({ emetteurs }: { emetteurs: EmetteurStablecoin[] }) {
     const canvas = canvasRef.current;
     if (canvas === null || serie === null) return;
     const serieTronquee = tronquerSerie(serie, 365);
-    if (serieTronquee.length < 2) return;
+    if (serieTronquee.length < 2) {
+      // Série trop courte : on efface l'ancien tracé (sinon le graphe du précédent reste).
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      return;
+    }
     dessinerImpression(canvas, serieTronquee, {
       min: serieTronquee[0]!.time,
       max: serieTronquee[serieTronquee.length - 1]!.time,
@@ -778,7 +786,15 @@ function VueEmetteur({ id, onRetour }: { id: string; onRetour: () => void }) {
     const canvas = canvasRef.current;
     if (canvas === null) return;
     const serieTronquee = tronquerSerie(historique, 365);
-    if (serieTronquee.length < 2) return;
+    if (serieTronquee.length < 2) {
+      // Série trop courte : on efface l'ancien tracé (sinon le graphe du précédent reste).
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      return;
+    }
     dessinerImpression(canvas, serieTronquee, {
       min: serieTronquee[0]!.time,
       max: serieTronquee[serieTronquee.length - 1]!.time,

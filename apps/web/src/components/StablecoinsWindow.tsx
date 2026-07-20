@@ -61,8 +61,19 @@ import {
   ErreurBloc,
   NoteSource,
   BTN_SECONDAIRE,
+  BarrePeriodes,
+  InfobulleGraphe,
+  PERIODES_STANDARD,
   type TonBadge,
 } from "./ui";
+import {
+  indicesVisibles,
+  valeurVersPixel,
+  pixelVersValeur,
+  domainePourPreset,
+  type Domaine,
+} from "../lib/domaineAxe";
+import { useDomaineZoom } from "../hooks/useDomaineZoom";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -294,25 +305,17 @@ function TableEmetteurs({
 
 // ─────────────────────────── Onglet Impression ───────────────────────────
 
-type Periode = 30 | 90 | 365 | null; // null = tout
-
 // IDs DefiLlama (cf. GET /stablecoins?includePrices=true) des 2 plus gros émetteurs —
 // utilisés pour la part USDT/USDC affichée par le curseur du chart Impression.
 const ID_USDT = "1";
 const ID_USDC = "2";
 
-const PERIODES: ReadonlyArray<{ id: string; jours: Periode; label: string }> = [
-  { id: "30j", jours: 30, label: "30 j" },
-  { id: "90j", jours: 90, label: "90 j" },
-  { id: "1a", jours: 365, label: "1 a" },
-  { id: "tout", jours: null, label: "Tout" },
-];
-
 /**
  * Chart combiné : ligne de supply agrégée (moitié haute) + barres de mint/burn net
  * quotidien (moitié basse, zéro au centre). Impératif, tokens lus au dessin.
+ * `domaine` fixe la fenêtre visible sur l'axe X (zoom/pan/préréglage).
  */
-function dessinerImpression(canvas: HTMLCanvasElement, serie: PointSupply[]): void {
+function dessinerImpression(canvas: HTMLCanvasElement, serie: PointSupply[], domaine: Domaine): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
@@ -322,7 +325,10 @@ function dessinerImpression(canvas: HTMLCanvasElement, serie: PointSupply[]): vo
   canvas.height = Math.round(cssH * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
-  if (serie.length < 2) return;
+
+  const { debut, fin } = indicesVisibles(serie, (p) => p.time, domaine);
+  const visibles = serie.slice(debut, fin + 1);
+  if (visibles.length < 2) return;
 
   const cUp = lireTokenCanvas("--up", "#22c55e");
   const cDown = lireTokenCanvas("--down", "#ef4444");
@@ -330,9 +336,7 @@ function dessinerImpression(canvas: HTMLCanvasElement, serie: PointSupply[]): vo
   const cGrid = lireTokenCanvas("--border", "#374151");
   const cTextDim = lireTokenCanvas("--text-dim", "#9ca3af");
 
-  const t0 = serie[0]!.time;
-  const t1 = serie[serie.length - 1]!.time;
-  const x = (t: number) => ((t - t0) / Math.max(1, t1 - t0)) * cssW;
+  const x = (t: number) => valeurVersPixel(domaine, t, cssW);
 
   // Marge basse réservée aux repères de dates (sinon les barres du bas les recouvrent).
   const padB = 14;
@@ -340,15 +344,15 @@ function dessinerImpression(canvas: HTMLCanvasElement, serie: PointSupply[]): vo
 
   // Moitié haute : ligne de supply.
   const hLigne = plotH * 0.55;
-  const bSupply = bornes(serie.map((p) => p.totalUsd));
+  const bSupply = bornes(visibles.map((p) => p.totalUsd));
   if (bSupply) {
     const y = (v: number) =>
       hLigne - ((v - bSupply.min) / Math.max(1e-9, bSupply.max - bSupply.min)) * (hLigne - 8) - 4;
     ctx.strokeStyle = cGrid;
     ctx.strokeRect(0.5, 0.5, cssW - 1, hLigne - 1);
     ctx.beginPath();
-    for (let i = 0; i < serie.length; i++) {
-      const p = serie[i]!;
+    for (let i = 0; i < visibles.length; i++) {
+      const p = visibles[i]!;
       if (i === 0) ctx.moveTo(x(p.time), y(p.totalUsd));
       else ctx.lineTo(x(p.time), y(p.totalUsd));
     }
@@ -359,7 +363,7 @@ function dessinerImpression(canvas: HTMLCanvasElement, serie: PointSupply[]): vo
   }
 
   // Moitié basse : barres Δ quotidien (mint vert, burn rouge), zéro au centre.
-  const deltas = serieImpressionQuotidienne(serie);
+  const deltas = serieImpressionQuotidienne(visibles);
   const bDelta = bornes(deltas.map((d) => Math.abs(d.delta)));
   if (bDelta && bDelta.max > 0) {
     const y0 = hLigne + (plotH - hLigne) / 2;
@@ -377,18 +381,18 @@ function dessinerImpression(canvas: HTMLCanvasElement, serie: PointSupply[]): vo
     }
   }
 
-  // Repères de dates (début / milieu / fin) — sans eux, impossible de savoir à quel
-  // jour correspond une barre de mint/burn.
+  // Repères de dates (début / milieu / fin du domaine) — sans eux, impossible de
+  // savoir à quel jour correspond une barre de mint/burn.
   ctx.fillStyle = cTextDim;
   ctx.font = "10px system-ui, sans-serif";
   const yLabel = cssH - 3;
-  ctx.fillText(formatDateCourte(t0), 2, yLabel);
-  if (serie.length > 2) {
-    const milieu = serie[Math.floor(serie.length / 2)]!;
-    const texteMilieu = formatDateCourte(milieu.time);
-    ctx.fillText(texteMilieu, x(milieu.time) - ctx.measureText(texteMilieu).width / 2, yLabel);
+  ctx.fillText(formatDateCourte(domaine.min), 2, yLabel);
+  if (visibles.length > 2) {
+    const milieu = (domaine.min + domaine.max) / 2;
+    const texteMilieu = formatDateCourte(milieu);
+    ctx.fillText(texteMilieu, x(milieu) - ctx.measureText(texteMilieu).width / 2, yLabel);
   }
-  const texteFin = formatDateCourte(t1);
+  const texteFin = formatDateCourte(domaine.max);
   ctx.fillText(texteFin, cssW - 2 - ctx.measureText(texteFin).width, yLabel);
 }
 
@@ -409,16 +413,31 @@ function VueImpression({
   emetteurs: EmetteurStablecoin[];
   historique: PointSupply[];
 }) {
-  const [periodeId, setPeriodeId] = useState("90j");
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const periode = PERIODES.find((p) => p.id === periodeId) ?? PERIODES[1]!;
-  const serie = tronquerSerie(historique, periode.jours);
-  const deltas = useMemo(() => serieImpressionQuotidienne(serie), [serie]);
+  const bornesAxe = useMemo<Domaine | null>(
+    () =>
+      historique.length >= 2
+        ? { min: historique[0]!.time, max: historique[historique.length - 1]!.time }
+        : null,
+    [historique],
+  );
+  const [presetId, setPresetId] = useState<string | null>("90j");
+  const { refCanvas, domaine, setDomaine } = useDomaineZoom(bornesAxe, () => setPresetId(null));
+
+  // (Ré)applique le préréglage actif quand les bornes arrivent ou changent — le hook
+  // vient de réinitialiser le domaine au tout, on le resserre sur le preset courant.
+  useEffect(() => {
+    if (bornesAxe === null || presetId === null) return;
+    const jours = PERIODES_STANDARD.find((p) => p.id === presetId)?.jours ?? null;
+    setDomaine(domainePourPreset(bornesAxe, jours));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bornesAxe?.min, bornesAxe?.max]);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (canvas) dessinerImpression(canvas, serie);
-  }, [serie]);
+    const canvas = refCanvas.current;
+    if (canvas && domaine !== null) dessinerImpression(canvas, historique, domaine);
+  }, [historique, domaine]);
+
+  const deltas = useMemo(() => serieImpressionQuotidienne(historique), [historique]);
 
   // Historiques USDT/USDC (indépendants de la période affichée) pour la part du curseur.
   // Passe par /stablecoin/{id} (chargerDetailEmetteur, déjà utilisé par le drill-down) et
@@ -448,17 +467,15 @@ function VueImpression({
 
   const [survol, setSurvol] = useState<Survol | null>(null);
   const onSurvol = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (serie.length < 2) return;
+    if (domaine === null || historique.length < 2) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const t0 = serie[0]!.time;
-    const t1 = serie[serie.length - 1]!.time;
-    const t = t0 + ((e.clientX - rect.left) / rect.width) * (t1 - t0);
-    const point = pointLePlusProche(serie, t);
+    const t = pixelVersValeur(domaine, e.clientX - rect.left, rect.width);
+    const point = pointLePlusProche(historique, t);
     if (!point) return;
     const ptUsdt = histUsdt && pointLePlusProche(histUsdt, point.time);
     const ptUsdc = histUsdc && pointLePlusProche(histUsdc, point.time);
     setSurvol({
-      xPix: ((point.time - t0) / Math.max(1, t1 - t0)) * rect.width,
+      xPix: valeurVersPixel(domaine, point.time, rect.width),
       largeur: rect.width,
       point,
       delta: deltas.find((d) => d.time === point.time)?.delta ?? null,
@@ -477,37 +494,32 @@ function VueImpression({
 
   return (
     <div className="flex flex-col gap-3">
-      <Onglets
-        options={PERIODES.map((p) => ({ id: p.id, label: p.label }))}
-        actif={periodeId}
-        onChange={setPeriodeId}
+      <BarrePeriodes
+        actif={presetId}
+        onChange={(p) => {
+          setPresetId(p.id);
+          if (bornesAxe) setDomaine(domainePourPreset(bornesAxe, p.jours));
+        }}
       />
       <div className="relative">
         <canvas
-          ref={canvasRef}
+          ref={refCanvas}
           className="h-56 w-full rounded-md border border-border"
           onMouseMove={onSurvol}
           onMouseLeave={() => setSurvol(null)}
         />
         {survol && (
-          <>
-            <div
-              className="pointer-events-none absolute inset-y-0 w-px bg-text-dim/60"
-              style={{ left: survol.xPix }}
-            />
-            <div
-              className="pointer-events-none absolute z-10 whitespace-nowrap rounded border border-border bg-surface px-2 py-1 text-[11px] tabular-nums text-text shadow-lg"
-              style={{ left: Math.min(survol.xPix + 10, Math.max(0, survol.largeur - 150)), top: 6 }}
-            >
-              <div className="text-text-dim">{formatDateComplete(survol.point.time)}</div>
-              <div>Supply : {formatUsd(survol.point.totalUsd)}</div>
-              <div style={{ color: couleurDelta(survol.delta) }}>
-                Δ jour : {fmtDeltaUsd(survol.delta)}
-              </div>
-              <div>USDT : {formatPourcentage(survol.partUsdt)}</div>
-              <div>USDC : {formatPourcentage(survol.partUsdc)}</div>
-            </div>
-          </>
+          <InfobulleGraphe
+            xPix={survol.xPix}
+            largeurGraphe={survol.largeur}
+            titre={formatDateComplete(survol.point.time)}
+            lignes={[
+              { label: "Supply", valeur: formatUsd(survol.point.totalUsd) },
+              { label: "Δ jour", valeur: fmtDeltaUsd(survol.delta), couleur: couleurDelta(survol.delta) },
+              { label: "USDT", valeur: formatPourcentage(survol.partUsdt) },
+              { label: "USDC", valeur: formatPourcentage(survol.partUsdc) },
+            ]}
+          />
         )}
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -576,7 +588,13 @@ function VueChaines({ emetteurs }: { emetteurs: EmetteurStablecoin[] }) {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (canvas && serie !== null) dessinerImpression(canvas, tronquerSerie(serie, 365));
+    if (canvas === null || serie === null) return;
+    const serieTronquee = tronquerSerie(serie, 365);
+    if (serieTronquee.length < 2) return;
+    dessinerImpression(canvas, serieTronquee, {
+      min: serieTronquee[0]!.time,
+      max: serieTronquee[serieTronquee.length - 1]!.time,
+    });
   }, [serie]);
 
   const partMax = parts[0]?.partPct ?? 100;
@@ -758,7 +776,13 @@ function VueEmetteur({ id, onRetour }: { id: string; onRetour: () => void }) {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (canvas && historique.length > 0) dessinerImpression(canvas, tronquerSerie(historique, 365));
+    if (canvas === null) return;
+    const serieTronquee = tronquerSerie(historique, 365);
+    if (serieTronquee.length < 2) return;
+    dessinerImpression(canvas, serieTronquee, {
+      min: serieTronquee[0]!.time,
+      max: serieTronquee[serieTronquee.length - 1]!.time,
+    });
     // historique est dérivé de detail — detail suffit comme dépendance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail]);

@@ -43,7 +43,10 @@ export function useDomaineZoom(
   }, [bornes?.min, bornes?.max]);
 
   // Attache les listeners quand le canvas existe (il apparaît avec les données).
+  // Le canvas peut monter une render après les bornes (conditionné au domaine),
+  // donc l'effet doit aussi se re-déclencher quand domaine devient non-null.
   const actif = bornes !== null;
+  const domaineMonte = domaine !== null;
   useEffect(() => {
     const cvs = refCanvas.current;
     if (cvs === null || !actif) return;
@@ -102,7 +105,7 @@ export function useDomaineZoom(
       cvs.removeEventListener("pointercancel", surPointerFin);
       cvs.removeEventListener("dblclick", surDoubleClic);
     };
-  }, [actif]);
+  }, [actif, domaineMonte]);
 
   return { refCanvas, domaine, setDomaine };
 }

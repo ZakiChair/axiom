@@ -369,8 +369,13 @@ export function VolWindow() {
   const avecIv = data !== null && data.dvol !== null && data.dvol.length > 0;
   const bornes = useMemo<Domaine | null>(() => (data !== null ? bornesDonnees(data) : null), [data]);
   const [presetId, setPresetId] = useState<string | null>("1a");
-  const { refCanvas, domaine, setDomaine } = useDomaineZoom(bornes, () => setPresetId(null));
+  // Déclaré avant useDomaineZoom : son setter est référencé par l'onGeste qui vide le
+  // survol après un zoom/pan/double-clic (sinon le trait reste figé sur l'ancien point).
   const [survol, setSurvol] = useState<Survol | null>(null);
+  const { refCanvas, domaine, setDomaine } = useDomaineZoom(bornes, () => {
+    setPresetId(null);
+    setSurvol(null);
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -484,6 +489,7 @@ export function VolWindow() {
             actif={presetId}
             onChange={(p) => {
               setPresetId(p.id);
+              setSurvol(null);
               if (bornes) setDomaine(domainePourPreset(bornes, p.jours));
             }}
           />

@@ -299,8 +299,13 @@ function CourbeHashrate({ points }: { points: PointMetrique[] }) {
     [points],
   );
   const [presetId, setPresetId] = useState<string | null>("1a");
-  const { refCanvas, domaine, setDomaine } = useDomaineZoom(bornes, () => setPresetId(null));
+  // Déclaré avant useDomaineZoom : son setter est référencé par l'onGeste qui vide le
+  // survol après un zoom/pan/double-clic (sinon le trait reste figé sur l'ancien point).
   const [survol, setSurvol] = useState<{ xPix: number; point: PointMetrique } | null>(null);
+  const { refCanvas, domaine, setDomaine } = useDomaineZoom(bornes, () => {
+    setPresetId(null);
+    setSurvol(null);
+  });
 
   useEffect(() => {
     const cvs = refCanvas.current;
@@ -378,28 +383,31 @@ function CourbeHashrate({ points }: { points: PointMetrique[] }) {
   };
 
   return (
-    <div ref={wrapRef} className="relative w-full">
+    <div ref={wrapRef} className="w-full">
       <BarrePeriodes
         actif={presetId}
         onChange={(p) => {
           setPresetId(p.id);
+          setSurvol(null);
           if (bornes) setDomaine(domainePourPreset(bornes, p.jours));
         }}
       />
-      <canvas
-        ref={refCanvas}
-        style={{ width: "100%", height: COURBE_H }}
-        onMouseMove={surSurvol}
-        onMouseLeave={() => setSurvol(null)}
-      />
-      {survol && (
-        <InfobulleGraphe
-          xPix={survol.xPix}
-          largeurGraphe={largeur}
-          titre={formatDateComplete(survol.point.time)}
-          lignes={[{ label: "Hashrate", valeur: fmtHashrate(survol.point.value) }]}
+      <div className="relative">
+        <canvas
+          ref={refCanvas}
+          style={{ width: "100%", height: COURBE_H }}
+          onMouseMove={surSurvol}
+          onMouseLeave={() => setSurvol(null)}
         />
-      )}
+        {survol && (
+          <InfobulleGraphe
+            xPix={survol.xPix}
+            largeurGraphe={largeur}
+            titre={formatDateComplete(survol.point.time)}
+            lignes={[{ label: "Hashrate", valeur: fmtHashrate(survol.point.value) }]}
+          />
+        )}
+      </div>
     </div>
   );
 }

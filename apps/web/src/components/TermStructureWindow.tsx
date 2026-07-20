@@ -302,9 +302,9 @@ export function TermStructureWindow() {
     if (max === min) max = min + 86_400_000;
     return { min, max };
   }, [courbes]);
-  const { refCanvas, domaine } = useDomaineZoom(bornes);
-
-  // Curseur (survol) : échéance la plus proche, basis BTC/ETH à cette échéance.
+  // Curseur (survol) : échéance la plus proche, basis BTC/ETH à cette échéance. Déclaré
+  // avant useDomaineZoom : son setter est référencé par l'onGeste qui vide le survol après
+  // un zoom/pan/double-clic (sinon le trait reste figé sur l'ancien point).
   const [survol, setSurvol] = useState<{
     xPix: number;
     largeur: number;
@@ -312,6 +312,7 @@ export function TermStructureWindow() {
     btc: number | null;
     eth: number | null;
   } | null>(null);
+  const { refCanvas, domaine } = useDomaineZoom(bornes, () => setSurvol(null));
   const onSurvol = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (domaine === null) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -414,32 +415,34 @@ export function TermStructureWindow() {
           </div>
         )}
 
-        <div className="relative rounded-md border border-border bg-bg p-2">
-          <canvas
-            ref={refCanvas}
-            className="h-[200px] w-full"
-            onMouseMove={onSurvol}
-            onMouseLeave={() => setSurvol(null)}
-          />
-          {survol && (
-            <InfobulleGraphe
-              xPix={survol.xPix}
-              largeurGraphe={survol.largeur}
-              titre={formatDateCourte(survol.echeance)}
-              lignes={[
-                {
-                  label: "BTC",
-                  valeur: survol.btc !== null ? formatPct(survol.btc * 100, 2) : VALEUR_ABSENTE,
-                  couleur: COULEUR.BTC,
-                },
-                {
-                  label: "ETH",
-                  valeur: survol.eth !== null ? formatPct(survol.eth * 100, 2) : VALEUR_ABSENTE,
-                  couleur: COULEUR.ETH,
-                },
-              ]}
+        <div className="rounded-md border border-border bg-bg p-2">
+          <div className="relative">
+            <canvas
+              ref={refCanvas}
+              className="h-[200px] w-full"
+              onMouseMove={onSurvol}
+              onMouseLeave={() => setSurvol(null)}
             />
-          )}
+            {survol && (
+              <InfobulleGraphe
+                xPix={survol.xPix}
+                largeurGraphe={survol.largeur}
+                titre={formatDateCourte(survol.echeance)}
+                lignes={[
+                  {
+                    label: "BTC",
+                    valeur: survol.btc !== null ? formatPct(survol.btc * 100, 2) : VALEUR_ABSENTE,
+                    couleur: COULEUR.BTC,
+                  },
+                  {
+                    label: "ETH",
+                    valeur: survol.eth !== null ? formatPct(survol.eth * 100, 2) : VALEUR_ABSENTE,
+                    couleur: COULEUR.ETH,
+                  },
+                ]}
+              />
+            )}
+          </div>
         </div>
 
         <div className="mt-3 space-y-2">

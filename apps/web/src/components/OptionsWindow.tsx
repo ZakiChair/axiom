@@ -265,6 +265,14 @@ function dessinerSmile(
 
 // ─────────────────────────── Dessin des barres GEX/DEX ───────────────────────────
 
+/** Sous-ensemble des points dont l'exposition |gex ou dex| dépasse 0,5 % du max — même
+ * base pour le tracé (dessinerBarres) et le domaine de l'axe (domaineActionsGexDex). */
+function filtrerAuSeuil(points: GexDexPoint[], metrique: "gex" | "dex"): GexDexPoint[] {
+  const val = (p: GexDexPoint) => (metrique === "gex" ? p.gex : p.dex);
+  const maxAbs = points.reduce((m, p) => Math.max(m, Math.abs(val(p))), 0);
+  return maxAbs > 0 ? points.filter((p) => Math.abs(val(p)) >= maxAbs * 0.005) : [];
+}
+
 /**
  * Dessine un histogramme d'exposition par strike (axe X = strike, barres pos./nég. depuis
  * la ligne zéro, couleurs --up/--down du thème). Repère vertical sur le spot. Ne montre que
@@ -299,11 +307,12 @@ function dessinerBarres(
   const couleurUp = lireTokenCanvas("--up", "#2dc08e");
   const couleurDown = lireTokenCanvas("--down", "#f92855");
 
+  // Accesseur de la métrique active — réutilisé plus bas pour l'échelle Y et le tracé des barres.
+  const val = (p: GexDexPoint) => (metrique === "gex" ? p.gex : p.dex);
+
   // Ne garde que les strikes dont l'exposition dépasse 0,5 % du max (déjà triés par strike
   // croissant — aggregateGexDex/computeCryptoGexDex le garantissent, filter préserve l'ordre).
-  const val = (p: GexDexPoint) => (metrique === "gex" ? p.gex : p.dex);
-  const maxAbs = points.reduce((m, p) => Math.max(m, Math.abs(val(p))), 0);
-  const seuil = maxAbs > 0 ? points.filter((p) => Math.abs(val(p)) >= maxAbs * 0.005) : [];
+  const seuil = filtrerAuSeuil(points, metrique);
 
   if (seuil.length === 0) {
     ctx.fillStyle = couleurDim;
@@ -471,7 +480,20 @@ export function OptionsWindow() {
     if (max === min) max = min + 1;
     return { min, max };
   }, [pointsEcheance]);
-  const { refCanvas, domaine } = useDomaineZoom(strikesBornes);
+  // Curseur du smile : point (strike, IV/OI call+put) survolé — calls et puts sont deux
+  // OptionPoint séparés (pas deux champs d'un même point), d'où jusqu'à 4 lignes. Déclaré
+  // avant useDomaineZoom : son setter est référencé par l'onGeste qui vide le survol après
+  // un zoom/pan/double-clic (sinon le trait reste figé sur l'ancien point, cf. lot revue finale).
+  const [survolSmile, setSurvolSmile] = useState<{
+    xPix: number;
+    largeur: number;
+    strike: number;
+    ivCall: number | null;
+    ivPut: number | null;
+    oiCall: number | null;
+    oiPut: number | null;
+  } | null>(null);
+  const { refCanvas, domaine } = useDomaineZoom(strikesBornes, () => setSurvolSmile(null));
 
   // Chaîne CBOE : chargée + pollée UNIQUEMENT en vue GEX/DEX « Actions » (dégradation gracieuse
   // totale — fetchCboeChain renvoie null en cas d'échec, jamais d'exception).
@@ -541,11 +563,9 @@ export function OptionsWindow() {
   const domaineActionsGexDex = useMemo<Domaine | null>(() => {
     if (classe !== "actions" || gexDexPoints.length === 0) return null;
 
-    // Domaine basé sur le sous-ensemble filtré au seuil 0,5 % (même base que dessinerBarres,
-    // l. 304-306 : ne montre que les strikes dont l'exposition dépasse 0,5 % du maximum).
-    const val = (p: GexDexPoint) => (metrique === "gex" ? p.gex : p.dex);
-    const maxAbs = gexDexPoints.reduce((m, p) => Math.max(m, Math.abs(val(p))), 0);
-    const seuil = maxAbs > 0 ? gexDexPoints.filter((p) => Math.abs(val(p)) >= maxAbs * 0.005) : [];
+    // Domaine basé sur le sous-ensemble filtré au seuil (même base que le tracé, via
+    // filtrerAuSeuil, partagée avec dessinerBarres).
+    const seuil = filtrerAuSeuil(gexDexPoints, metrique);
 
     // Fallback à tous les points si le sous-ensemble filtré est vide.
     const pointsUtiles = seuil.length > 0 ? seuil : gexDexPoints;
@@ -571,17 +591,6 @@ export function OptionsWindow() {
     if (canvas && domaineBarres) dessinerBarres(canvas, gexDexPoints, gexDexSpot, metrique, domaineBarres);
   }, [open, vue, gexDexPoints, gexDexSpot, metrique, domaineBarres]);
 
-  // Curseur du smile : point (strike, IV/OI call+put) survolé — calls et puts sont deux
-  // OptionPoint séparés (pas deux champs d'un même point), d'où jusqu'à 4 lignes.
-  const [survolSmile, setSurvolSmile] = useState<{
-    xPix: number;
-    largeur: number;
-    strike: number;
-    ivCall: number | null;
-    ivPut: number | null;
-    oiCall: number | null;
-    oiPut: number | null;
-  } | null>(null);
   const onSurvolSmile = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (domaine === null || pointsEcheance.length === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -719,26 +728,28 @@ export function OptionsWindow() {
             </div>
           )}
 
-          <div className="relative rounded-md border border-border bg-bg p-2">
-            <canvas
-              ref={refCanvas}
-              className="h-[200px] w-full"
-              onMouseMove={onSurvolSmile}
-              onMouseLeave={() => setSurvolSmile(null)}
-            />
-            {survolSmile && (
-              <InfobulleGraphe
-                xPix={survolSmile.xPix}
-                largeurGraphe={survolSmile.largeur}
-                titre={`Strike ${formatStrike(survolSmile.strike)}`}
-                lignes={[
-                  { label: "IV call", valeur: formatPourcentage(survolSmile.ivCall, 1), couleur: "var(--up)" },
-                  { label: "IV put", valeur: formatPourcentage(survolSmile.ivPut, 1), couleur: "var(--down)" },
-                  { label: "OI call", valeur: formatDec(survolSmile.oiCall, 2) },
-                  { label: "OI put", valeur: formatDec(survolSmile.oiPut, 2) },
-                ]}
+          <div className="rounded-md border border-border bg-bg p-2">
+            <div className="relative">
+              <canvas
+                ref={refCanvas}
+                className="h-[200px] w-full"
+                onMouseMove={onSurvolSmile}
+                onMouseLeave={() => setSurvolSmile(null)}
               />
-            )}
+              {survolSmile && (
+                <InfobulleGraphe
+                  xPix={survolSmile.xPix}
+                  largeurGraphe={survolSmile.largeur}
+                  titre={`Strike ${formatStrike(survolSmile.strike)}`}
+                  lignes={[
+                    { label: "IV call", valeur: formatPourcentage(survolSmile.ivCall, 1), couleur: "var(--up)" },
+                    { label: "IV put", valeur: formatPourcentage(survolSmile.ivPut, 1), couleur: "var(--down)" },
+                    { label: "OI call", valeur: formatDec(survolSmile.oiCall, 2) },
+                    { label: "OI put", valeur: formatDec(survolSmile.oiPut, 2) },
+                  ]}
+                />
+              )}
+            </div>
           </div>
           <div className="mt-1 flex items-center gap-4 text-[10px] text-text-dim">
             <span className="flex items-center gap-1">

@@ -433,7 +433,13 @@ function EquityCanvas({ resultat }: { resultat: ResultatBacktest }) {
   // "tout" par défaut : un backtest peut être court, un préréglage plus étroit
   // laisserait souvent trop peu de points visibles.
   const [presetId, setPresetId] = useState<string | null>("tout");
-  const { refCanvas, domaine, setDomaine } = useDomaineZoom(bornes, () => setPresetId(null));
+  // Déclaré avant useDomaineZoom : son setter est référencé par l'onGeste qui vide le
+  // survol après un zoom/pan/double-clic (sinon le trait reste figé sur l'ancien point).
+  const [survol, setSurvol] = useState<SurvolEquity | null>(null);
+  const { refCanvas, domaine, setDomaine } = useDomaineZoom(bornes, () => {
+    setPresetId(null);
+    setSurvol(null);
+  });
 
   // (Ré)applique le préréglage actif à chaque nouveau run (bornes changent) — le hook
   // vient de réinitialiser le domaine au tout, on le resserre sur le preset courant.
@@ -458,7 +464,6 @@ function EquityCanvas({ resultat }: { resultat: ResultatBacktest }) {
     return () => ro.disconnect();
   }, [resultat, domaine]);
 
-  const [survol, setSurvol] = useState<SurvolEquity | null>(null);
   const onSurvol = (e: React.MouseEvent<HTMLCanvasElement>): void => {
     if (domaine === null || points.length < 2) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -479,6 +484,7 @@ function EquityCanvas({ resultat }: { resultat: ResultatBacktest }) {
         actif={presetId}
         onChange={(p) => {
           setPresetId(p.id);
+          setSurvol(null);
           if (bornes) setDomaine(domainePourPreset(bornes, p.jours));
         }}
       />

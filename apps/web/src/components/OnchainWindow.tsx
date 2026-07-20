@@ -17,7 +17,7 @@
  * Règle d'or (doc 02) : chaque widget porte un BadgeFiabilite honnête via
  * `metaSource` / métas partagées (fiable · partiel · estimation · indisponible).
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useStore } from "zustand";
 import { onchainUiStore, getBgeometricsKey, bgeometricsKeyStore } from "../store/onchain";
 import { getSoSoValueKey, soSoValueKeyStore } from "../store/sosovalue";
@@ -51,13 +51,29 @@ import {
   formatDec,
   formatEntier,
   formatPourcentage,
+  formatDateCourte,
   formatDateComplete,
   formatAge,
 } from "../lib/format";
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { metaSource, type MetaFiabilite } from "../lib/fiabilite";
 import { zonePourMetrique } from "../lib/zonesOnchain";
-import { Badge, BadgeFiabilite, EnTeteFenetre, NoteSource } from "./ui";
+import {
+  Badge,
+  BadgeFiabilite,
+  BarrePeriodes,
+  EnTeteFenetre,
+  InfobulleGraphe,
+  NoteSource,
+} from "./ui";
+import {
+  domainePourPreset,
+  indicesVisibles,
+  pixelVersValeur,
+  valeurVersPixel,
+  type Domaine,
+} from "../lib/domaineAxe";
+import { useDomaineZoom } from "../hooks/useDomaineZoom";
 
 const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
 
@@ -262,7 +278,6 @@ const COURBE_H = 96;
  */
 function CourbeHashrate({ points }: { points: PointMetrique[] }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const cvsRef = useRef<HTMLCanvasElement | null>(null);
   const [largeur, setLargeur] = useState(0);
 
   useEffect(() => {
@@ -276,9 +291,20 @@ function CourbeHashrate({ points }: { points: PointMetrique[] }) {
     return () => ro.disconnect();
   }, []);
 
+  const bornes = useMemo<Domaine | null>(
+    () =>
+      points.length >= 2
+        ? { min: points[0]!.time, max: points[points.length - 1]!.time }
+        : null,
+    [points],
+  );
+  const [presetId, setPresetId] = useState<string | null>("1a");
+  const { refCanvas, domaine, setDomaine } = useDomaineZoom(bornes, () => setPresetId(null));
+  const [survol, setSurvol] = useState<{ xPix: number; point: PointMetrique } | null>(null);
+
   useEffect(() => {
-    const cvs = cvsRef.current;
-    if (cvs === null || largeur <= 0) return;
+    const cvs = refCanvas.current;
+    if (cvs === null || largeur <= 0 || domaine === null) return;
     const ctx = cvs.getContext("2d");
     if (ctx === null) return;
 
@@ -287,36 +313,40 @@ function CourbeHashrate({ points }: { points: PointMetrique[] }) {
     cvs.height = COURBE_H * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, largeur, COURBE_H);
-    if (points.length < 2) return;
 
-    const values = points.map((p) => p.value);
+    const { debut, fin } = indicesVisibles(points, (p) => p.time, domaine);
+    const visibles = points.slice(debut, fin + 1);
+    if (visibles.length < 2) return;
+
+    const PAD_B = 14; // marge basse pour les repères de dates
+    const padTop = 6;
+    const h = COURBE_H - padTop - 6 - PAD_B;
+    const xDe = (t: number) => valeurVersPixel(domaine, t, largeur);
+
+    const values = visibles.map((p) => p.value);
     const min = Math.min(...values);
     const max = Math.max(...values);
     const span = max - min || 1;
-    const padTop = 6;
-    const padBottom = 6;
-    const h = COURBE_H - padTop - padBottom;
-    const step = largeur / (points.length - 1);
     const yDe = (v: number) => padTop + (h - ((v - min) / span) * h);
 
     // Aire sous la courbe (remplissage semi-transparent), même token que le trait.
     ctx.beginPath();
-    points.forEach((p, i) => {
-      const x = i * step;
+    visibles.forEach((p, i) => {
+      const x = xDe(p.time);
       const y = yDe(p.value);
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     });
-    ctx.lineTo((points.length - 1) * step, COURBE_H);
-    ctx.lineTo(0, COURBE_H);
+    ctx.lineTo(xDe(visibles[visibles.length - 1]!.time), COURBE_H - PAD_B);
+    ctx.lineTo(xDe(visibles[0]!.time), COURBE_H - PAD_B);
     ctx.closePath();
     ctx.fillStyle = rgbaTokenCanvas("--up", 0.12, "#22c55e");
     ctx.fill();
 
     // Trait de la courbe.
     ctx.beginPath();
-    points.forEach((p, i) => {
-      const x = i * step;
+    visibles.forEach((p, i) => {
+      const x = xDe(p.time);
       const y = yDe(p.value);
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
@@ -325,11 +355,51 @@ function CourbeHashrate({ points }: { points: PointMetrique[] }) {
     ctx.lineWidth = 1.4;
     ctx.lineJoin = "round";
     ctx.stroke();
-  }, [points, largeur]);
+
+    // Repères de dates (début / milieu / fin du domaine).
+    const cDim = lireTokenCanvas("--text-dim", "#9ca3af");
+    ctx.fillStyle = cDim;
+    ctx.font = "10px system-ui, sans-serif";
+    const yLabel = COURBE_H - 3;
+    ctx.fillText(formatDateCourte(domaine.min), 2, yLabel);
+    const milieu = formatDateCourte((domaine.min + domaine.max) / 2);
+    ctx.fillText(milieu, largeur / 2 - ctx.measureText(milieu).width / 2, yLabel);
+    const finTxt = formatDateCourte(domaine.max);
+    ctx.fillText(finTxt, largeur - 2 - ctx.measureText(finTxt).width, yLabel);
+  }, [points, largeur, domaine]);
+
+  const surSurvol = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (domaine === null || points.length < 2) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const t = pixelVersValeur(domaine, e.clientX - rect.left, rect.width);
+    let point = points[0]!;
+    for (const p of points) if (Math.abs(p.time - t) < Math.abs(point.time - t)) point = p;
+    setSurvol({ xPix: valeurVersPixel(domaine, point.time, rect.width), point });
+  };
 
   return (
-    <div ref={wrapRef} className="w-full">
-      <canvas ref={cvsRef} style={{ width: "100%", height: COURBE_H }} aria-hidden="true" />
+    <div ref={wrapRef} className="relative w-full">
+      <BarrePeriodes
+        actif={presetId}
+        onChange={(p) => {
+          setPresetId(p.id);
+          if (bornes) setDomaine(domainePourPreset(bornes, p.jours));
+        }}
+      />
+      <canvas
+        ref={refCanvas}
+        style={{ width: "100%", height: COURBE_H }}
+        onMouseMove={surSurvol}
+        onMouseLeave={() => setSurvol(null)}
+      />
+      {survol && (
+        <InfobulleGraphe
+          xPix={survol.xPix}
+          largeurGraphe={largeur}
+          titre={formatDateComplete(survol.point.time)}
+          lignes={[{ label: "Hashrate", valeur: fmtHashrate(survol.point.value) }]}
+        />
+      )}
     </div>
   );
 }
@@ -363,12 +433,8 @@ function CarteHashrate({ hr }: { hr: ResultatFrais<SerieMetrique> | null }) {
       {points.length >= 2 ? (
         <>
           <CourbeHashrate points={points} />
-          <div className="flex items-center justify-between gap-2 text-[9px] tabular-nums text-text-dim">
-            <span>{fmtJour(points[0]?.time)}</span>
-            <span className="text-text-dim">
-              min {fmtHashrate(min)} · max {fmtHashrate(max)}
-            </span>
-            <span>{fmtJour(points[points.length - 1]?.time)}</span>
+          <div className="text-center text-[9px] tabular-nums text-text-dim">
+            min {fmtHashrate(min)} · max {fmtHashrate(max)}
           </div>
         </>
       ) : (

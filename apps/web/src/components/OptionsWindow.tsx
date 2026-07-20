@@ -126,6 +126,11 @@ function strikePlusProche(points: OptionPoint[], cible: number): number | null {
   return best;
 }
 
+// Marges du plot du smile — partagées avec le curseur du composant hôte (onSurvolSmile) pour
+// que la conversion pixel↔strike du survol retombe EXACTEMENT sur la zone tracée par px(s).
+const SMILE_PAD_L = 40;
+const SMILE_PAD_R = 10;
+
 /**
  * Dessine le smile IV (axe X = strike, axe Y = IV mark %). Calls et puts en deux séries
  * (ligne + points). Repères verticaux : prix du sous-jacent et max pain.
@@ -147,8 +152,8 @@ function dessinerSmile(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
 
-  const padL = 40;
-  const padR = 10;
+  const padL = SMILE_PAD_L;
+  const padR = SMILE_PAD_R;
   const padT = 12;
   const padB = 22;
   const plotW = Math.max(1, cssW - padL - padR);
@@ -571,13 +576,16 @@ export function OptionsWindow() {
   const onSurvolSmile = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (domaine === null || pointsEcheance.length === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const cible = pixelVersValeur(domaine, e.clientX - rect.left, rect.width);
+    // Reproduit le repère de dessinerSmile (px = padL + valeurVersPixel(domaine, s, plotW)) :
+    // sans ça, le trait/point survolé dérive de padL par rapport à la courbe tracée.
+    const plotW = Math.max(1, rect.width - SMILE_PAD_L - SMILE_PAD_R);
+    const cible = pixelVersValeur(domaine, e.clientX - rect.left - SMILE_PAD_L, plotW);
     const strike = strikePlusProche(pointsEcheance, cible);
     if (strike === null) return;
     const call = pointsEcheance.find((p) => p.strike === strike && p.type === "call") ?? null;
     const put = pointsEcheance.find((p) => p.strike === strike && p.type === "put") ?? null;
     setSurvolSmile({
-      xPix: valeurVersPixel(domaine, strike, rect.width),
+      xPix: SMILE_PAD_L + valeurVersPixel(domaine, strike, plotW),
       largeur: rect.width,
       strike,
       ivCall: call && Number.isFinite(call.markIv) && call.markIv > 0 ? call.markIv : null,
@@ -684,71 +692,74 @@ export function OptionsWindow() {
           </div>
         )}
 
-        {/* ─────────── Vue SMILE (existante) ─────────── */}
-        {vue === "smile" && (
-          <>
-            <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
-              <span>Smile IV mark (calls / puts)</span>
-              <Fraicheur loading={loading} majTs={majTs} />
-            </div>
+        {/* ─────────── Vue SMILE (existante) ───────────
+            Bloc TOUJOURS monté (visibilité en CSS, pas en unmount JSX conditionnel) : le canvas
+            porte les listeners natifs de useDomaineZoom (molette/drag/dblclic), qui ne se
+            rattachent qu'au montage (effet clés [actif, domaineMonte]) — un unmount/remount au
+            changement d'onglet Smile↔GEX/DEX les perdrait silencieusement (cf. SeasonalityWindow/
+            VolWindow, même pattern canvas-hidden). */}
+        <div className={vue === "smile" ? undefined : "hidden"}>
+          <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
+            <span>Smile IV mark (calls / puts)</span>
+            <Fraicheur loading={loading} majTs={majTs} />
+          </div>
 
-            {erreur && (
-              <div className="mb-3">
-                <ErreurBloc>{erreur}</ErreurBloc>
-              </div>
+          {erreur && (
+            <div className="mb-3">
+              <ErreurBloc>{erreur}</ErreurBloc>
+            </div>
+          )}
+
+          <div className="relative rounded-md border border-border bg-bg p-2">
+            <canvas
+              ref={refCanvas}
+              className="h-[200px] w-full"
+              onMouseMove={onSurvolSmile}
+              onMouseLeave={() => setSurvolSmile(null)}
+            />
+            {survolSmile && (
+              <InfobulleGraphe
+                xPix={survolSmile.xPix}
+                largeurGraphe={survolSmile.largeur}
+                titre={`Strike ${formatStrike(survolSmile.strike)}`}
+                lignes={[
+                  { label: "IV call", valeur: formatPourcentage(survolSmile.ivCall, 1), couleur: "var(--up)" },
+                  { label: "IV put", valeur: formatPourcentage(survolSmile.ivPut, 1), couleur: "var(--down)" },
+                  { label: "OI call", valeur: formatDec(survolSmile.oiCall, 2) },
+                  { label: "OI put", valeur: formatDec(survolSmile.oiPut, 2) },
+                ]}
+              />
             )}
+          </div>
+          <div className="mt-1 flex items-center gap-4 text-[10px] text-text-dim">
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-1.5 w-3 rounded bg-up" />
+              calls
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-1.5 w-3 rounded bg-down" />
+              puts
+            </span>
+          </div>
 
-            <div className="relative rounded-md border border-border bg-bg p-2">
-              <canvas
-                ref={refCanvas}
-                className="h-[200px] w-full"
-                onMouseMove={onSurvolSmile}
-                onMouseLeave={() => setSurvolSmile(null)}
-              />
-              {survolSmile && (
-                <InfobulleGraphe
-                  xPix={survolSmile.xPix}
-                  largeurGraphe={survolSmile.largeur}
-                  titre={`Strike ${formatStrike(survolSmile.strike)}`}
-                  lignes={[
-                    { label: "IV call", valeur: formatPourcentage(survolSmile.ivCall, 1), couleur: "var(--up)" },
-                    { label: "IV put", valeur: formatPourcentage(survolSmile.ivPut, 1), couleur: "var(--down)" },
-                    { label: "OI call", valeur: formatDec(survolSmile.oiCall, 2) },
-                    { label: "OI put", valeur: formatDec(survolSmile.oiPut, 2) },
-                  ]}
-                />
-              )}
-            </div>
-            <div className="mt-1 flex items-center gap-4 text-[10px] text-text-dim">
-              <span className="flex items-center gap-1">
-                <span className="inline-block h-1.5 w-3 rounded bg-up" />
-                calls
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="inline-block h-1.5 w-3 rounded bg-down" />
-                puts
-              </span>
-            </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Metric label="Max pain" value={formatUsdExact(maxPain)} />
+            <Metric label="Sous-jacent" value={formatUsdExact(underlying)} />
+            <Metric
+              label="Put/Call (OI)"
+              value={formatDec(pcRatio, 2)}
+              couleur={Number.isFinite(pcRatio) ? (pcRatio > 1 ? "var(--down)" : "var(--up)") : undefined}
+            />
+            <Metric label="DVOL" value={formatPourcentage(dvol, 1)} />
+          </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <Metric label="Max pain" value={formatUsdExact(maxPain)} />
-              <Metric label="Sous-jacent" value={formatUsdExact(underlying)} />
-              <Metric
-                label="Put/Call (OI)"
-                value={formatDec(pcRatio, 2)}
-                couleur={Number.isFinite(pcRatio) ? (pcRatio > 1 ? "var(--down)" : "var(--up)") : undefined}
-              />
-              <Metric label="DVOL" value={formatPourcentage(dvol, 1)} />
-            </div>
-
-            <div className="mt-3">
-              <NoteSource>
-                Max pain calculé côté client (min. de valeur intrinsèque versée aux détenteurs).
-                Données Deribit, ~1 min.
-              </NoteSource>
-            </div>
-          </>
-        )}
+          <div className="mt-3">
+            <NoteSource>
+              Max pain calculé côté client (min. de valeur intrinsèque versée aux détenteurs).
+              Données Deribit, ~1 min.
+            </NoteSource>
+          </div>
+        </div>
 
         {/* ─────────── Vue GEX/DEX ─────────── */}
         {vue === "gexdex" && (

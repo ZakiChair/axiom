@@ -540,12 +540,21 @@ export function OptionsWindow() {
   // vis-à-vis du comportement d'avant cette tâche.
   const domaineActionsGexDex = useMemo<Domaine | null>(() => {
     if (classe !== "actions" || gexDexPoints.length === 0) return null;
-    const strikes = gexDexPoints.map((p) => p.strike);
+
+    // Domaine basé sur le sous-ensemble filtré au seuil 0,5 % (même base que dessinerBarres,
+    // l. 304-306 : ne montre que les strikes dont l'exposition dépasse 0,5 % du maximum).
+    const val = (p: GexDexPoint) => (metrique === "gex" ? p.gex : p.dex);
+    const maxAbs = gexDexPoints.reduce((m, p) => Math.max(m, Math.abs(val(p))), 0);
+    const seuil = maxAbs > 0 ? gexDexPoints.filter((p) => Math.abs(val(p)) >= maxAbs * 0.005) : [];
+
+    // Fallback à tous les points si le sous-ensemble filtré est vide.
+    const pointsUtiles = seuil.length > 0 ? seuil : gexDexPoints;
+    const strikes = pointsUtiles.map((p) => p.strike);
     let min = Math.min(...strikes, Number.isFinite(gexDexSpot) ? gexDexSpot : Infinity);
     let max = Math.max(...strikes, Number.isFinite(gexDexSpot) ? gexDexSpot : -Infinity);
     if (max === min) max = min + 1;
     return { min, max };
-  }, [classe, gexDexPoints, gexDexSpot]);
+  }, [classe, gexDexPoints, gexDexSpot, metrique]);
   const domaineBarres = classe === "crypto" ? domaine : domaineActionsGexDex;
 
   // Redessine le smile à chaque changement de données (fenêtre ouverte, vue smile).

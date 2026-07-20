@@ -38,7 +38,9 @@ import {
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { formatUsd, formatDec, formatPourcentage } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
-import { Metric, EnTeteFenetre, ErreurBloc, NoteSource, Fraicheur, Segmente } from "./ui";
+import { indicesVisibles, valeurVersPixel, pixelVersValeur, type Domaine } from "../lib/domaineAxe";
+import { useDomaineZoom } from "../hooks/useDomaineZoom";
+import { Metric, EnTeteFenetre, ErreurBloc, NoteSource, Fraicheur, Segmente, InfobulleGraphe } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -110,6 +112,25 @@ function formatStrike(v: number): string {
   return v.toFixed(v < 10 ? 1 : 0);
 }
 
+/** Strike réel le plus proche de `cible` parmi `points` (calls et puts confondus). */
+function strikePlusProche(points: OptionPoint[], cible: number): number | null {
+  let best: number | null = null;
+  let bestDist = Infinity;
+  for (const p of points) {
+    const d = Math.abs(p.strike - cible);
+    if (d < bestDist) {
+      bestDist = d;
+      best = p.strike;
+    }
+  }
+  return best;
+}
+
+// Marges du plot du smile — partagées avec le curseur du composant hôte (onSurvolSmile) pour
+// que la conversion pixel↔strike du survol retombe EXACTEMENT sur la zone tracée par px(s).
+const SMILE_PAD_L = 40;
+const SMILE_PAD_R = 10;
+
 /**
  * Dessine le smile IV (axe X = strike, axe Y = IV mark %). Calls et puts en deux séries
  * (ligne + points). Repères verticaux : prix du sous-jacent et max pain.
@@ -119,6 +140,7 @@ function dessinerSmile(
   points: OptionPoint[],
   underlying: number,
   maxPain: number | null,
+  domaine: Domaine,
 ): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -130,8 +152,8 @@ function dessinerSmile(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
 
-  const padL = 40;
-  const padR = 10;
+  const padL = SMILE_PAD_L;
+  const padR = SMILE_PAD_R;
   const padT = 12;
   const padB = 22;
   const plotW = Math.max(1, cssW - padL - padR);
@@ -145,18 +167,20 @@ function dessinerSmile(
   const couleurDown = lireTokenCanvas("--down", "#f92855");
   const couleurBg = lireTokenCanvas("--bg", "#0a0a0a");
 
-  const finies = points.filter((p) => Number.isFinite(p.markIv) && p.markIv > 0);
-  if (finies.length === 0) {
+  // Triées par strike croissant : contrat requis par indicesVisibles (fenêtre de zoom).
+  const finiesTri = points
+    .filter((p) => Number.isFinite(p.markIv) && p.markIv > 0)
+    .sort((a, b) => a.strike - b.strike);
+  if (finiesTri.length === 0) {
     ctx.fillStyle = couleurDim;
     ctx.font = "11px system-ui, sans-serif";
     ctx.fillText("Pas d'IV pour cette échéance…", padL, padT + plotH / 2);
     return;
   }
-  const strikes = finies.map((p) => p.strike);
+  const { debut, fin } = indicesVisibles(finiesTri, (p) => p.strike, domaine);
+  const finies = finiesTri.slice(debut, fin + 1);
+
   const ivs = finies.map((p) => p.markIv);
-  let xMin = Math.min(...strikes);
-  let xMax = Math.max(...strikes);
-  if (xMax === xMin) xMax = xMin + 1;
   let yMin = Math.min(...ivs);
   let yMax = Math.max(...ivs);
   if (yMax === yMin) yMax = yMin + 1;
@@ -164,7 +188,7 @@ function dessinerSmile(
   yMin = Math.max(0, yMin - marge);
   yMax += marge;
 
-  const px = (s: number) => padL + ((s - xMin) / (xMax - xMin)) * plotW;
+  const px = (s: number) => padL + valeurVersPixel(domaine, s, plotW);
   const py = (iv: number) => padT + (1 - (iv - yMin) / (yMax - yMin)) * plotH;
 
   // Grille + étiquettes Y (IV %).
@@ -180,9 +204,9 @@ function dessinerSmile(
     ctx.stroke();
     ctx.fillText(`${val.toFixed(0)}%`, 4, y + 3);
   }
-  // Étiquettes X (strike min / max).
-  ctx.fillText(formatStrike(xMin), padL, cssH - 6);
-  const txtMax = formatStrike(xMax);
+  // Étiquettes X (strike min / max du domaine visible).
+  ctx.fillText(formatStrike(domaine.min), padL, cssH - 6);
+  const txtMax = formatStrike(domaine.max);
   ctx.fillText(txtMax, cssW - padR - ctx.measureText(txtMax).width, cssH - 6);
 
   /**
@@ -192,7 +216,7 @@ function dessinerSmile(
    * étage les deux libellés en hauteur quand ils sont proches en x.
    */
   const repere = (val: number, couleur: string, etiquette: string, yLibelle: number) => {
-    if (!Number.isFinite(val) || val < xMin || val > xMax) return;
+    if (!Number.isFinite(val) || val < domaine.min || val > domaine.max) return;
     const x = px(val);
     ctx.strokeStyle = couleur;
     ctx.lineWidth = 1;
@@ -241,6 +265,14 @@ function dessinerSmile(
 
 // ─────────────────────────── Dessin des barres GEX/DEX ───────────────────────────
 
+/** Sous-ensemble des points dont l'exposition |gex ou dex| dépasse 0,5 % du max — même
+ * base pour le tracé (dessinerBarres) et le domaine de l'axe (domaineActionsGexDex). */
+function filtrerAuSeuil(points: GexDexPoint[], metrique: "gex" | "dex"): GexDexPoint[] {
+  const val = (p: GexDexPoint) => (metrique === "gex" ? p.gex : p.dex);
+  const maxAbs = points.reduce((m, p) => Math.max(m, Math.abs(val(p))), 0);
+  return maxAbs > 0 ? points.filter((p) => Math.abs(val(p)) >= maxAbs * 0.005) : [];
+}
+
 /**
  * Dessine un histogramme d'exposition par strike (axe X = strike, barres pos./nég. depuis
  * la ligne zéro, couleurs --up/--down du thème). Repère vertical sur le spot. Ne montre que
@@ -251,6 +283,7 @@ function dessinerBarres(
   points: GexDexPoint[],
   spot: number,
   metrique: "gex" | "dex",
+  domaine: Domaine,
 ): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -274,27 +307,29 @@ function dessinerBarres(
   const couleurUp = lireTokenCanvas("--up", "#2dc08e");
   const couleurDown = lireTokenCanvas("--down", "#f92855");
 
+  // Accesseur de la métrique active — réutilisé plus bas pour l'échelle Y et le tracé des barres.
   const val = (p: GexDexPoint) => (metrique === "gex" ? p.gex : p.dex);
-  const maxAbs = points.reduce((m, p) => Math.max(m, Math.abs(val(p))), 0);
-  const visibles = maxAbs > 0 ? points.filter((p) => Math.abs(val(p)) >= maxAbs * 0.005) : [];
 
-  if (visibles.length === 0) {
+  // Ne garde que les strikes dont l'exposition dépasse 0,5 % du max (déjà triés par strike
+  // croissant — aggregateGexDex/computeCryptoGexDex le garantissent, filter préserve l'ordre).
+  const seuil = filtrerAuSeuil(points, metrique);
+
+  if (seuil.length === 0) {
     ctx.fillStyle = couleurDim;
     ctx.font = "11px system-ui, sans-serif";
     ctx.fillText("Pas d'exposition pour cette échéance…", padL, padT + plotH / 2);
     return;
   }
 
-  const strikes = visibles.map((p) => p.strike);
-  let xMin = Math.min(...strikes, Number.isFinite(spot) ? spot : Infinity);
-  let xMax = Math.max(...strikes, Number.isFinite(spot) ? spot : -Infinity);
-  if (xMax === xMin) xMax = xMin + 1;
+  // Fenêtre de zoom (même domaine que le smile) : rescale Y sur le sous-ensemble visible.
+  const { debut, fin } = indicesVisibles(seuil, (p) => p.strike, domaine);
+  const visibles = seuil.slice(debut, fin + 1);
   const vals = visibles.map(val);
   const yHi = Math.max(0, ...vals);
   const yLo = Math.min(0, ...vals);
   const yRange = yHi - yLo || 1;
 
-  const px = (s: number) => padL + ((s - xMin) / (xMax - xMin)) * plotW;
+  const px = (s: number) => padL + valeurVersPixel(domaine, s, plotW);
   const py = (v: number) => padT + (1 - (v - yLo) / yRange) * plotH;
 
   // Grille + étiquettes Y (exposition compacte).
@@ -310,10 +345,10 @@ function dessinerBarres(
     ctx.fillStyle = couleurDim;
     ctx.fillText(formatUsd(v), 2, y + 3);
   }
-  // Étiquettes X (strikes extrêmes).
+  // Étiquettes X (bornes du domaine visible).
   ctx.fillStyle = couleurDim;
-  ctx.fillText(formatStrike(xMin), padL, cssH - 6);
-  const txtMax = formatStrike(xMax);
+  ctx.fillText(formatStrike(domaine.min), padL, cssH - 6);
+  const txtMax = formatStrike(domaine.max);
   ctx.fillText(txtMax, cssW - padR - ctx.measureText(txtMax).width, cssH - 6);
 
   // Barres (largeur fixe centrée sur le strike).
@@ -328,7 +363,7 @@ function dessinerBarres(
   }
 
   // Repère vertical du spot.
-  if (Number.isFinite(spot) && spot >= xMin && spot <= xMax) {
+  if (Number.isFinite(spot) && spot >= domaine.min && spot <= domaine.max) {
     const x = px(spot);
     ctx.strokeStyle = couleurDim;
     ctx.lineWidth = 1;
@@ -356,7 +391,6 @@ function joursAvant(expiryMs: number): string {
 export function OptionsWindow() {
   const open = useStore(optionsUiStore, (s) => s.open);
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const barCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [devise, setDevise] = useState<Devise>("BTC");
   const [chain, setChain] = useState<OptionPoint[]>([]);
@@ -436,6 +470,31 @@ export function OptionsWindow() {
     return u ?? NaN;
   }, [pointsEcheance]);
 
+  // Domaine d'axe strike (smile) : bornes = min/max des strikes de l'échéance sélectionnée —
+  // se réinitialise automatiquement quand devise/échéance changent (pointsEcheance en dépend).
+  const strikesBornes = useMemo<Domaine | null>(() => {
+    if (pointsEcheance.length === 0) return null;
+    const strikes = pointsEcheance.map((p) => p.strike);
+    let min = Math.min(...strikes);
+    let max = Math.max(...strikes);
+    if (max === min) max = min + 1;
+    return { min, max };
+  }, [pointsEcheance]);
+  // Curseur du smile : point (strike, IV/OI call+put) survolé — calls et puts sont deux
+  // OptionPoint séparés (pas deux champs d'un même point), d'où jusqu'à 4 lignes. Déclaré
+  // avant useDomaineZoom : son setter est référencé par l'onGeste qui vide le survol après
+  // un zoom/pan/double-clic (sinon le trait reste figé sur l'ancien point, cf. lot revue finale).
+  const [survolSmile, setSurvolSmile] = useState<{
+    xPix: number;
+    largeur: number;
+    strike: number;
+    ivCall: number | null;
+    ivPut: number | null;
+    oiCall: number | null;
+    oiPut: number | null;
+  } | null>(null);
+  const { refCanvas, domaine } = useDomaineZoom(strikesBornes, () => setSurvolSmile(null));
+
   // Chaîne CBOE : chargée + pollée UNIQUEMENT en vue GEX/DEX « Actions » (dégradation gracieuse
   // totale — fetchCboeChain renvoie null en cas d'échec, jamais d'exception).
   useEffect(() => {
@@ -497,19 +556,62 @@ export function OptionsWindow() {
     return best?.strike ?? null;
   }, [gexDexPoints]);
 
+  // Domaine de l'histogramme GEX/DEX : en crypto, MÊME domaine que le smile (même univers de
+  // strikes Deribit — zoom/pan du smile pilote les deux). En actions (CBOE, strikes SPX/NDX/VIX
+  // sans rapport avec les strikes crypto), domaine local plein cadre non zoomable — inchangé
+  // vis-à-vis du comportement d'avant cette tâche.
+  const domaineActionsGexDex = useMemo<Domaine | null>(() => {
+    if (classe !== "actions" || gexDexPoints.length === 0) return null;
+
+    // Domaine basé sur le sous-ensemble filtré au seuil (même base que le tracé, via
+    // filtrerAuSeuil, partagée avec dessinerBarres).
+    const seuil = filtrerAuSeuil(gexDexPoints, metrique);
+
+    // Fallback à tous les points si le sous-ensemble filtré est vide.
+    const pointsUtiles = seuil.length > 0 ? seuil : gexDexPoints;
+    const strikes = pointsUtiles.map((p) => p.strike);
+    let min = Math.min(...strikes, Number.isFinite(gexDexSpot) ? gexDexSpot : Infinity);
+    let max = Math.max(...strikes, Number.isFinite(gexDexSpot) ? gexDexSpot : -Infinity);
+    if (max === min) max = min + 1;
+    return { min, max };
+  }, [classe, gexDexPoints, gexDexSpot, metrique]);
+  const domaineBarres = classe === "crypto" ? domaine : domaineActionsGexDex;
+
   // Redessine le smile à chaque changement de données (fenêtre ouverte, vue smile).
   useEffect(() => {
     if (!open || vue !== "smile") return;
-    const canvas = canvasRef.current;
-    if (canvas) dessinerSmile(canvas, pointsEcheance, underlying, maxPain);
-  }, [open, vue, pointsEcheance, underlying, maxPain]);
+    const canvas = refCanvas.current;
+    if (canvas && domaine) dessinerSmile(canvas, pointsEcheance, underlying, maxPain, domaine);
+  }, [open, vue, pointsEcheance, underlying, maxPain, domaine]);
 
   // Redessine l'histogramme GEX/DEX (fenêtre ouverte, vue gexdex).
   useEffect(() => {
     if (!open || vue !== "gexdex") return;
     const canvas = barCanvasRef.current;
-    if (canvas) dessinerBarres(canvas, gexDexPoints, gexDexSpot, metrique);
-  }, [open, vue, gexDexPoints, gexDexSpot, metrique]);
+    if (canvas && domaineBarres) dessinerBarres(canvas, gexDexPoints, gexDexSpot, metrique, domaineBarres);
+  }, [open, vue, gexDexPoints, gexDexSpot, metrique, domaineBarres]);
+
+  const onSurvolSmile = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (domaine === null || pointsEcheance.length === 0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    // Reproduit le repère de dessinerSmile (px = padL + valeurVersPixel(domaine, s, plotW)) :
+    // sans ça, le trait/point survolé dérive de padL par rapport à la courbe tracée.
+    const plotW = Math.max(1, rect.width - SMILE_PAD_L - SMILE_PAD_R);
+    const cible = pixelVersValeur(domaine, e.clientX - rect.left - SMILE_PAD_L, plotW);
+    const strike = strikePlusProche(pointsEcheance, cible);
+    if (strike === null) return;
+    const call = pointsEcheance.find((p) => p.strike === strike && p.type === "call") ?? null;
+    const put = pointsEcheance.find((p) => p.strike === strike && p.type === "put") ?? null;
+    setSurvolSmile({
+      xPix: SMILE_PAD_L + valeurVersPixel(domaine, strike, plotW),
+      largeur: rect.width,
+      strike,
+      ivCall: call && Number.isFinite(call.markIv) && call.markIv > 0 ? call.markIv : null,
+      ivPut: put && Number.isFinite(put.markIv) && put.markIv > 0 ? put.markIv : null,
+      oiCall: call ? call.openInterest : null,
+      oiPut: put ? put.openInterest : null,
+    });
+  };
 
   return (
     <>
@@ -608,53 +710,76 @@ export function OptionsWindow() {
           </div>
         )}
 
-        {/* ─────────── Vue SMILE (existante) ─────────── */}
-        {vue === "smile" && (
-          <>
-            <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
-              <span>Smile IV mark (calls / puts)</span>
-              <Fraicheur loading={loading} majTs={majTs} />
-            </div>
+        {/* ─────────── Vue SMILE (existante) ───────────
+            Bloc TOUJOURS monté (visibilité en CSS, pas en unmount JSX conditionnel) : le canvas
+            porte les listeners natifs de useDomaineZoom (molette/drag/dblclic), qui ne se
+            rattachent qu'au montage (effet clés [actif, domaineMonte]) — un unmount/remount au
+            changement d'onglet Smile↔GEX/DEX les perdrait silencieusement (cf. SeasonalityWindow/
+            VolWindow, même pattern canvas-hidden). */}
+        <div className={vue === "smile" ? undefined : "hidden"}>
+          <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
+            <span>Smile IV mark (calls / puts)</span>
+            <Fraicheur loading={loading} majTs={majTs} />
+          </div>
 
-            {erreur && (
-              <div className="mb-3">
-                <ErreurBloc>{erreur}</ErreurBloc>
-              </div>
-            )}
-
-            <div className="rounded-md border border-border bg-bg p-2">
-              <canvas ref={canvasRef} className="h-[200px] w-full" />
+          {erreur && (
+            <div className="mb-3">
+              <ErreurBloc>{erreur}</ErreurBloc>
             </div>
-            <div className="mt-1 flex items-center gap-4 text-[10px] text-text-dim">
-              <span className="flex items-center gap-1">
-                <span className="inline-block h-1.5 w-3 rounded bg-up" />
-                calls
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="inline-block h-1.5 w-3 rounded bg-down" />
-                puts
-              </span>
-            </div>
+          )}
 
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <Metric label="Max pain" value={formatUsdExact(maxPain)} />
-              <Metric label="Sous-jacent" value={formatUsdExact(underlying)} />
-              <Metric
-                label="Put/Call (OI)"
-                value={formatDec(pcRatio, 2)}
-                couleur={Number.isFinite(pcRatio) ? (pcRatio > 1 ? "var(--down)" : "var(--up)") : undefined}
+          <div className="rounded-md border border-border bg-bg p-2">
+            <div className="relative">
+              <canvas
+                ref={refCanvas}
+                className="h-[200px] w-full"
+                onMouseMove={onSurvolSmile}
+                onMouseLeave={() => setSurvolSmile(null)}
               />
-              <Metric label="DVOL" value={formatPourcentage(dvol, 1)} />
+              {survolSmile && (
+                <InfobulleGraphe
+                  xPix={survolSmile.xPix}
+                  largeurGraphe={survolSmile.largeur}
+                  titre={`Strike ${formatStrike(survolSmile.strike)}`}
+                  lignes={[
+                    { label: "IV call", valeur: formatPourcentage(survolSmile.ivCall, 1), couleur: "var(--up)" },
+                    { label: "IV put", valeur: formatPourcentage(survolSmile.ivPut, 1), couleur: "var(--down)" },
+                    { label: "OI call", valeur: formatDec(survolSmile.oiCall, 2) },
+                    { label: "OI put", valeur: formatDec(survolSmile.oiPut, 2) },
+                  ]}
+                />
+              )}
             </div>
+          </div>
+          <div className="mt-1 flex items-center gap-4 text-[10px] text-text-dim">
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-1.5 w-3 rounded bg-up" />
+              calls
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-1.5 w-3 rounded bg-down" />
+              puts
+            </span>
+          </div>
 
-            <div className="mt-3">
-              <NoteSource>
-                Max pain calculé côté client (min. de valeur intrinsèque versée aux détenteurs).
-                Données Deribit, ~1 min.
-              </NoteSource>
-            </div>
-          </>
-        )}
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Metric label="Max pain" value={formatUsdExact(maxPain)} />
+            <Metric label="Sous-jacent" value={formatUsdExact(underlying)} />
+            <Metric
+              label="Put/Call (OI)"
+              value={formatDec(pcRatio, 2)}
+              couleur={Number.isFinite(pcRatio) ? (pcRatio > 1 ? "var(--down)" : "var(--up)") : undefined}
+            />
+            <Metric label="DVOL" value={formatPourcentage(dvol, 1)} />
+          </div>
+
+          <div className="mt-3">
+            <NoteSource>
+              Max pain calculé côté client (min. de valeur intrinsèque versée aux détenteurs).
+              Données Deribit, ~1 min.
+            </NoteSource>
+          </div>
+        </div>
 
         {/* ─────────── Vue GEX/DEX ─────────── */}
         {vue === "gexdex" && (

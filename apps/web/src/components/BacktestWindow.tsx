@@ -11,13 +11,14 @@
  * Étiquette d'honnêteté affichée en permanence : « bougies clôturées, exécution open+1,
  * pas d'intrabar » (cf. le contrat du moteur @axiom/backtest/engine.ts).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import type {
   Comparateur,
   Condition,
   Direction,
   Operande,
+  PointEquity,
   ResultatBacktest,
   SensCroisement,
   TradeResultat,
@@ -35,9 +36,35 @@ import {
   specParId,
   type PhaseBacktest,
 } from "../store/backtest";
-import { formatDateHeure, formatDec, formatPct, formatPourcentage, formatPrice } from "../lib/format";
+import {
+  formatDateComplete,
+  formatDateCourte,
+  formatDateHeure,
+  formatDec,
+  formatPct,
+  formatPourcentage,
+  formatPrice,
+  formatUsd,
+} from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
-import { BTN_SECONDAIRE, EnTeteFenetre, ErreurBloc, NoteSource, Vide } from "./ui";
+import {
+  domainePourPreset,
+  indicesVisibles,
+  pixelVersValeur,
+  valeurVersPixel,
+  type Domaine,
+} from "../lib/domaineAxe";
+import { useDomaineZoom } from "../hooks/useDomaineZoom";
+import {
+  BarrePeriodes,
+  BTN_SECONDAIRE,
+  EnTeteFenetre,
+  ErreurBloc,
+  InfobulleGraphe,
+  NoteSource,
+  PERIODES_STANDARD,
+  Vide,
+} from "./ui";
 
 const inputClass =
   "rounded border border-border bg-bg px-1.5 py-1 text-[11px] text-text focus:border-text-dim focus:outline-none";
@@ -264,8 +291,12 @@ function RulesSection({
 
 // ─────────────────────────── Equity curve (canvas) ───────────────────────────
 
-/** Dessine l'equity curve (haut) + le drawdown (bas) sur le canvas. */
-function dessinerEquity(canvas: HTMLCanvasElement, resultat: ResultatBacktest): void {
+/** Marge horizontale de tracé (gauche/droite) — partagée entre `dessinerEquity` (xAt)
+ * et le curseur de survol pour que le trait tombe exactement sur la courbe. */
+const PAD_X = 6;
+
+/** Dessine l'equity curve (haut) + le drawdown (bas) sur le canvas, fenêtrés sur `domaine`. */
+function dessinerEquity(canvas: HTMLCanvasElement, resultat: ResultatBacktest, domaine: Domaine): void {
   const ctx = canvas.getContext("2d");
   if (ctx === null) return;
   const dpr = window.devicePixelRatio || 1;
@@ -290,63 +321,78 @@ function dessinerEquity(canvas: HTMLCanvasElement, resultat: ResultatBacktest): 
     return;
   }
 
-  const pad = 6;
-  const hEquity = Math.round(hauteur * 0.72);
-  const hDd = hauteur - hEquity;
-  const n = points.length;
-  const xAt = (i: number): number => pad + (i / (n - 1)) * (largeur - 2 * pad);
+  const { debut, fin } = indicesVisibles(points, (p) => p.temps, domaine);
+  const visibles = points.slice(debut, fin + 1);
+  if (visibles.length < 2) {
+    ctx.fillStyle = colDim;
+    ctx.font = "11px sans-serif";
+    ctx.fillText("Equity : trop peu de points (aucun trade).", 8, hauteur / 2);
+    return;
+  }
 
-  // — Equity (haut) —
+  const pad = PAD_X;
+  const padB = 14; // marge basse réservée aux labels de dates (pattern STBL/CHAIN)
+  const plotH = hauteur - padB;
+  const hEquity = Math.round(plotH * 0.72);
+  const hDd = plotH - hEquity;
+  const n = visibles.length;
+  const xAt = (t: number): number => pad + valeurVersPixel(domaine, t, largeur - 2 * pad);
+
+  // — Equity (haut) — auto-scale sur les points VISIBLES.
   let minE = Infinity;
   let maxE = -Infinity;
-  for (const p of points) {
+  for (const p of visibles) {
     if (p.equity < minE) minE = p.equity;
     if (p.equity > maxE) maxE = p.equity;
   }
   const spanE = maxE - minE || 1;
   const yEquity = (v: number): number => pad + (1 - (v - minE) / spanE) * (hEquity - 2 * pad);
 
-  // Ligne de capital initial (référence).
+  // Ligne de capital initial (référence) — points[0] GLOBAL : le capital de départ ne
+  // bouge pas avec le zoom, contrairement à l'auto-scale equity/drawdown. Clampée dans
+  // la zone equity (jamais dans la zone drawdown) si le zoom cadre une fenêtre qui ne
+  // recroise pas le capital initial.
   const capital = points[0]?.equity ?? minE;
+  const yCapital = Math.min(Math.max(yEquity(capital), pad), hEquity - pad);
   ctx.strokeStyle = colBorder;
   ctx.setLineDash([3, 3]);
   ctx.beginPath();
-  ctx.moveTo(pad, yEquity(capital));
-  ctx.lineTo(largeur - pad, yEquity(capital));
+  ctx.moveTo(pad, yCapital);
+  ctx.lineTo(largeur - pad, yCapital);
   ctx.stroke();
   ctx.setLineDash([]);
 
   ctx.strokeStyle = colUp;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  points.forEach((p, i) => {
-    const x = xAt(i);
+  visibles.forEach((p, i) => {
+    const x = xAt(p.temps);
     const y = yEquity(p.equity);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
   ctx.stroke();
 
-  // — Drawdown (bas, aire rouge, 0 en haut de la zone) —
+  // — Drawdown (bas, aire rouge, 0 en haut de la zone) — auto-scale sur les VISIBLES.
   let maxDd = 0;
-  for (const p of points) if (p.drawdownPct > maxDd) maxDd = p.drawdownPct;
+  for (const p of visibles) if (p.drawdownPct > maxDd) maxDd = p.drawdownPct;
   const spanDd = maxDd || 1;
   const yDd = (dd: number): number => hEquity + (dd / spanDd) * (hDd - pad);
   ctx.save();
   ctx.globalAlpha = 0.2; // aire semi-transparente
   ctx.fillStyle = colDown;
   ctx.beginPath();
-  ctx.moveTo(xAt(0), hEquity);
-  points.forEach((p, i) => ctx.lineTo(xAt(i), yDd(p.drawdownPct)));
-  ctx.lineTo(xAt(n - 1), hEquity);
+  ctx.moveTo(xAt(visibles[0]!.temps), hEquity);
+  visibles.forEach((p) => ctx.lineTo(xAt(p.temps), yDd(p.drawdownPct)));
+  ctx.lineTo(xAt(visibles[n - 1]!.temps), hEquity);
   ctx.closePath();
   ctx.fill();
   ctx.restore();
   ctx.strokeStyle = colDown;
   ctx.lineWidth = 1;
   ctx.beginPath();
-  points.forEach((p, i) => {
-    const x = xAt(i);
+  visibles.forEach((p, i) => {
+    const x = xAt(p.temps);
     const y = yDd(p.drawdownPct);
     if (i === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
@@ -359,27 +405,115 @@ function dessinerEquity(canvas: HTMLCanvasElement, resultat: ResultatBacktest): 
   ctx.moveTo(0, hEquity);
   ctx.lineTo(largeur, hEquity);
   ctx.stroke();
+
+  // Labels dates domaine.min/max en bas — dans la marge padB, sans chevaucher le drawdown.
+  ctx.fillStyle = colDim;
+  ctx.font = "10px system-ui, sans-serif";
+  const yLabel = hauteur - 3;
+  ctx.fillText(formatDateCourte(domaine.min), 2, yLabel);
+  const texteFin = formatDateCourte(domaine.max);
+  ctx.fillText(texteFin, largeur - 2 - ctx.measureText(texteFin).width, yLabel);
 }
 
-/** Canvas de l'equity curve, redessiné au changement de résultat ou de taille. */
+/** Infos du point de l'equity curve survolé par le curseur (tooltip). */
+interface SurvolEquity {
+  xPix: number;
+  largeur: number;
+  point: PointEquity;
+}
+
+/** Canvas de l'equity curve : zoom/pan/périodes/curseur via le kit domaineAxe. */
 function EquityCanvas({ resultat }: { resultat: ResultatBacktest }) {
-  const ref = useRef<HTMLCanvasElement>(null);
+  const points = resultat.equity;
+  const bornes = useMemo<Domaine | null>(
+    () =>
+      points.length >= 2 ? { min: points[0]!.temps, max: points[points.length - 1]!.temps } : null,
+    [points],
+  );
+  // "tout" par défaut : un backtest peut être court, un préréglage plus étroit
+  // laisserait souvent trop peu de points visibles.
+  const [presetId, setPresetId] = useState<string | null>("tout");
+  // Déclaré avant useDomaineZoom : son setter est référencé par l'onGeste qui vide le
+  // survol après un zoom/pan/double-clic (sinon le trait reste figé sur l'ancien point).
+  const [survol, setSurvol] = useState<SurvolEquity | null>(null);
+  const { refCanvas, domaine, setDomaine } = useDomaineZoom(bornes, () => {
+    setPresetId(null);
+    setSurvol(null);
+  });
+
+  // (Ré)applique le préréglage actif à chaque nouveau run (bornes changent) — le hook
+  // vient de réinitialiser le domaine au tout, on le resserre sur le preset courant.
   useEffect(() => {
-    const canvas = ref.current;
+    if (bornes === null || presetId === null) return;
+    const jours = PERIODES_STANDARD.find((p) => p.id === presetId)?.jours ?? null;
+    setDomaine(domainePourPreset(bornes, jours));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bornes?.min, bornes?.max]);
+
+  useEffect(() => {
+    const canvas = refCanvas.current;
     if (canvas === null) return;
-    const redraw = (): void => dessinerEquity(canvas, resultat);
+    // Moins de 2 points (0 trade) → bornes/domaine restent null, mais dessinerEquity doit
+    // quand même tourner pour afficher son message « trop peu de points » (le domaine de
+    // repli n'est jamais lu : le early-return de la fonction survient avant tout usage).
+    const d = domaine ?? { min: 0, max: 1 };
+    const redraw = (): void => dessinerEquity(canvas, resultat, d);
     redraw();
     const ro = new ResizeObserver(redraw);
     ro.observe(canvas);
     return () => ro.disconnect();
-  }, [resultat]);
+  }, [resultat, domaine]);
+
+  const onSurvol = (e: React.MouseEvent<HTMLCanvasElement>): void => {
+    if (domaine === null || points.length < 2) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const largeurTrace = Math.max(1, rect.width - 2 * PAD_X);
+    const t = pixelVersValeur(domaine, e.clientX - rect.left - PAD_X, largeurTrace);
+    let point = points[0]!;
+    for (const p of points) if (Math.abs(p.temps - t) < Math.abs(point.temps - t)) point = p;
+    setSurvol({
+      xPix: PAD_X + valeurVersPixel(domaine, point.temps, largeurTrace),
+      largeur: rect.width,
+      point,
+    });
+  };
+
   return (
-    <canvas
-      ref={ref}
-      className="h-40 w-full rounded-md border border-border bg-bg"
-      role="img"
-      aria-label="Courbe d'équité et drawdown"
-    />
+    <div className="space-y-1.5">
+      <BarrePeriodes
+        actif={presetId}
+        onChange={(p) => {
+          setPresetId(p.id);
+          setSurvol(null);
+          if (bornes) setDomaine(domainePourPreset(bornes, p.jours));
+        }}
+      />
+      <div className="relative">
+        <canvas
+          ref={refCanvas}
+          className="h-40 w-full rounded-md border border-border bg-bg"
+          role="img"
+          aria-label="Courbe d'équité et drawdown"
+          onMouseMove={onSurvol}
+          onMouseLeave={() => setSurvol(null)}
+        />
+        {survol && (
+          <InfobulleGraphe
+            xPix={survol.xPix}
+            largeurGraphe={survol.largeur}
+            titre={formatDateComplete(survol.point.temps)}
+            lignes={[
+              { label: "Equity", valeur: formatUsd(survol.point.equity) },
+              {
+                label: "Drawdown",
+                valeur: formatPct(-survol.point.drawdownPct),
+                couleur: survol.point.drawdownPct > 0 ? lireTokenCanvas("--down", "#f92855") : undefined,
+              },
+            ]}
+          />
+        )}
+      </div>
+    </div>
   );
 }
 

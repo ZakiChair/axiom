@@ -12,7 +12,7 @@
  * Dégradation gracieuse : chaque source est récupérée indépendamment (Promise.allSettled) ;
  * une source en panne n'affiche rien pour elle, sans erreur console en boucle.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
@@ -23,9 +23,11 @@ import {
 import { fetchDeribitTermStructure } from "../data/deribit";
 import { daemonPret, detectDaemon, kvGet, kvPut } from "../data/daemon";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
-import { formatDateCourte, formatPct } from "../lib/format";
+import { formatDateCourte, formatPct, VALEUR_ABSENTE } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
-import { EnTeteFenetre, ErreurBloc, NoteSource, Fraicheur } from "./ui";
+import { type Domaine, indicesVisibles, pixelVersValeur, valeurVersPixel } from "../lib/domaineAxe";
+import { useDomaineZoom } from "../hooks/useDomaineZoom";
+import { EnTeteFenetre, ErreurBloc, NoteSource, Fraicheur, InfobulleGraphe } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -57,6 +59,10 @@ const SEUIL_REGIME = 0.005; // ±0,5 %/an
 const NS_SNAPSHOT = "termstructure";
 /** Préfixe des clés localStorage de repli des instantanés. */
 const PREFIXE_LS = "axiom:termstructure:";
+/** Marges horizontales du plot — partagées avec le curseur de survol (même conversion
+ * pixel↔échéance que px(ms), sinon le trait/tooltip survolé dérive de la courbe tracée). */
+const TERM_PAD_L = 40;
+const TERM_PAD_R = 10;
 
 // ─────────────────────────── Instantané J-1 / J-7 ───────────────────────────
 
@@ -141,10 +147,11 @@ interface CourbeActif {
 }
 
 /**
- * Dessine les courbes de basis (axe X = date d'échéance, axe Y = basis annualisé %). Points
- * live en trait plein, J-1 en tirets, J-7 en pointillés fins. Ligne zéro repère de neutralité.
+ * Dessine les courbes de basis (axe X = date d'échéance zoomable, axe Y = basis annualisé %).
+ * Points live en trait plein, J-1 en tirets, J-7 en pointillés fins. Ligne zéro repère de
+ * neutralité. `domaine` = fenêtre d'échéances visible (zoom/pan `useDomaineZoom` côté hôte).
  */
-function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>): void {
+function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>, domaine: Domaine): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
@@ -160,14 +167,13 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>): 
   const cTextDim = lireTokenCanvas("--text-dim", "#9ca3af");
   const cBorder = lireTokenCanvas("--border", "#262626");
 
-  const padL = 40;
-  const padR = 10;
+  const padL = TERM_PAD_L;
+  const padR = TERM_PAD_R;
   const padT = 12;
   const padB = 22;
   const plotW = Math.max(1, cssW - padL - padR);
   const plotH = Math.max(1, cssH - padT - padB);
 
-  // Domaine X (échéances) et Y (basis %) à partir des points live des deux actifs.
   const liveTous = [...data.BTC.live, ...data.ETH.live];
   if (liveTous.length === 0) {
     ctx.fillStyle = cTextDim;
@@ -175,19 +181,25 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>): 
     ctx.fillText("En attente de données…", padL, padT + plotH / 2);
     return;
   }
-  const xs = liveTous.map((p) => p.expiryMs);
-  const ys = liveTous.map((p) => p.basisAnnualise * 100);
-  let xMin = Math.min(...xs);
-  let xMax = Math.max(...xs);
-  if (xMax === xMin) xMax = xMin + 86_400_000;
-  let yMin = Math.min(0, ...ys);
-  let yMax = Math.max(0, ...ys);
+
+  // Sous-ensemble visible dans le domaine (fenêtre de zoom), par actif — points déjà triés
+  // par expiryMs croissant (garanti au chargement, l.306). L'échelle Y ne porte QUE sur ces
+  // points visibles, comme les autres graphes du kit (BacktestWindow, VolWindow, OMON…).
+  const visiblesDe = (live: PointBasis[]): PointBasis[] => {
+    const { debut, fin } = indicesVisibles(live, (p) => p.expiryMs, domaine);
+    return live.slice(debut, fin + 1);
+  };
+  const visiblesBTC = visiblesDe(data.BTC.live);
+  const visiblesETH = visiblesDe(data.ETH.live);
+  const ysVisibles = [...visiblesBTC, ...visiblesETH].map((p) => p.basisAnnualise * 100);
+  let yMin = Math.min(0, ...ysVisibles);
+  let yMax = Math.max(0, ...ysVisibles);
   if (yMax === yMin) yMax = yMin + 1;
   const marge = (yMax - yMin) * 0.1;
   yMin -= marge;
   yMax += marge;
 
-  const px = (ms: number) => padL + ((ms - xMin) / (xMax - xMin)) * plotW;
+  const px = (ms: number) => padL + valeurVersPixel(domaine, ms, plotW);
   const py = (pct: number) => padT + (1 - (pct - yMin) / (yMax - yMin)) * plotH;
 
   // Grille Y + étiquettes (min / 0 / max).
@@ -212,10 +224,10 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>): 
     ctx.stroke();
   }
 
-  // Étiquettes X (première et dernière échéance).
+  // Étiquettes X (bornes du domaine visible, pas de toute la série — cohérent avec le zoom).
   ctx.fillStyle = cTextDim;
-  ctx.fillText(formatDateCourte(xMin), padL, cssH - 6);
-  const txtFin = formatDateCourte(xMax);
+  ctx.fillText(formatDateCourte(domaine.min), padL, cssH - 6);
+  const txtFin = formatDateCourte(domaine.max);
   ctx.fillText(txtFin, cssW - padR - ctx.measureText(txtFin).width, cssH - 6);
 
   /** Trace une polyligne + points, avec style de trait donné. */
@@ -250,16 +262,20 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>): 
   const clampY = (pct: number) => Math.min(yMax, Math.max(yMin, pct));
   const projSnap = (snap: PointSnap[]) =>
     snap
-      .filter((s) => s.e >= xMin && s.e <= xMax && Number.isFinite(s.b))
+      .filter((s) => s.e >= domaine.min && s.e <= domaine.max && Number.isFinite(s.b))
       .sort((a, b) => a.e - b.e)
       .map((s) => ({ x: px(s.e), y: py(clampY(s.b * 100)) }));
 
+  const visiblesParActif: Record<Actif, PointBasis[]> = { BTC: visiblesBTC, ETH: visiblesETH };
   for (const actif of ACTIFS) {
     const c = data[actif];
     const couleur = COULEUR[actif];
     if (c.j7) tracer(projSnap(c.j7), couleur, 1, [2, 3], 0.35, false); // J-7 pointillés fins
     if (c.j1) tracer(projSnap(c.j1), couleur, 1.2, [5, 4], 0.55, false); // J-1 tirets
-    const liveProj = c.live.map((p) => ({ x: px(p.expiryMs), y: py(clampY(p.basisAnnualise * 100)) }));
+    const liveProj = visiblesParActif[actif].map((p) => ({
+      x: px(p.expiryMs),
+      y: py(clampY(p.basisAnnualise * 100)),
+    }));
     tracer(liveProj, couleur, 1.8, [], 1, true); // live plein + points
   }
 }
@@ -269,7 +285,6 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>): 
 export function TermStructureWindow() {
   const open = useStore(termStructureUiStore, (s) => s.open);
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [courbes, setCourbes] = useState<Record<Actif, CourbeActif>>({
     BTC: { live: [], j1: null, j7: null },
     ETH: { live: [], j1: null, j7: null },
@@ -277,6 +292,53 @@ export function TermStructureWindow() {
   const [loading, setLoading] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
   const [majTs, setMajTs] = useState<number | null>(null);
+
+  // Bornes de l'axe X (échéances) = min/max des expiryMs des DEUX actifs live.
+  const bornes = useMemo<Domaine | null>(() => {
+    const tous = [...courbes.BTC.live, ...courbes.ETH.live];
+    if (tous.length === 0) return null;
+    let min = Math.min(...tous.map((p) => p.expiryMs));
+    let max = Math.max(...tous.map((p) => p.expiryMs));
+    if (max === min) max = min + 86_400_000;
+    return { min, max };
+  }, [courbes]);
+  // Curseur (survol) : échéance la plus proche, basis BTC/ETH à cette échéance. Déclaré
+  // avant useDomaineZoom : son setter est référencé par l'onGeste qui vide le survol après
+  // un zoom/pan/double-clic (sinon le trait reste figé sur l'ancien point).
+  const [survol, setSurvol] = useState<{
+    xPix: number;
+    largeur: number;
+    echeance: number;
+    btc: number | null;
+    eth: number | null;
+  } | null>(null);
+  const { refCanvas, domaine } = useDomaineZoom(bornes, () => setSurvol(null));
+  const onSurvol = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (domaine === null) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const plotW = Math.max(1, rect.width - TERM_PAD_L - TERM_PAD_R);
+    const cible = pixelVersValeur(domaine, e.clientX - rect.left - TERM_PAD_L, plotW);
+    const union = [...courbes.BTC.live, ...courbes.ETH.live];
+    let echeance: number | null = null;
+    let ecart = Number.POSITIVE_INFINITY;
+    for (const p of union) {
+      const d = Math.abs(p.expiryMs - cible);
+      if (d < ecart) {
+        ecart = d;
+        echeance = p.expiryMs;
+      }
+    }
+    if (echeance === null) return;
+    const btc = courbes.BTC.live.find((p) => p.expiryMs === echeance) ?? null;
+    const eth = courbes.ETH.live.find((p) => p.expiryMs === echeance) ?? null;
+    setSurvol({
+      xPix: TERM_PAD_L + valeurVersPixel(domaine, echeance, plotW),
+      largeur: rect.width,
+      echeance,
+      btc: btc ? btc.basisAnnualise : null,
+      eth: eth ? eth.basisAnnualise : null,
+    });
+  };
 
   // Chargement + polling conditionnés à l'ouverture.
   useEffect(() => {
@@ -330,12 +392,12 @@ export function TermStructureWindow() {
     };
   }, [open]);
 
-  // Redessine le canvas à chaque mise à jour des courbes (fenêtre ouverte).
+  // Redessine le canvas à chaque mise à jour des courbes ou du domaine (fenêtre ouverte).
   useEffect(() => {
     if (!open) return;
-    const canvas = canvasRef.current;
-    if (canvas) dessiner(canvas, courbes);
-  }, [open, courbes]);
+    const canvas = refCanvas.current;
+    if (canvas && domaine) dessiner(canvas, courbes, domaine);
+  }, [open, courbes, domaine]);
 
   return (
     <>
@@ -354,7 +416,33 @@ export function TermStructureWindow() {
         )}
 
         <div className="rounded-md border border-border bg-bg p-2">
-          <canvas ref={canvasRef} className="h-[200px] w-full" />
+          <div className="relative">
+            <canvas
+              ref={refCanvas}
+              className="h-[200px] w-full"
+              onMouseMove={onSurvol}
+              onMouseLeave={() => setSurvol(null)}
+            />
+            {survol && (
+              <InfobulleGraphe
+                xPix={survol.xPix}
+                largeurGraphe={survol.largeur}
+                titre={formatDateCourte(survol.echeance)}
+                lignes={[
+                  {
+                    label: "BTC",
+                    valeur: survol.btc !== null ? formatPct(survol.btc * 100, 2) : VALEUR_ABSENTE,
+                    couleur: COULEUR.BTC,
+                  },
+                  {
+                    label: "ETH",
+                    valeur: survol.eth !== null ? formatPct(survol.eth * 100, 2) : VALEUR_ABSENTE,
+                    couleur: COULEUR.ETH,
+                  },
+                ]}
+              />
+            )}
+          </div>
         </div>
 
         <div className="mt-3 space-y-2">

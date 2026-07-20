@@ -478,3 +478,79 @@ export function Fraicheur({
 }) {
   return <span className="tabular-nums">{texteFraicheur(loading, majTs ?? null, Date.now(), cadence)}</span>;
 }
+
+// ─────────────────────────── Graphes : périodes & infobulle ───────────────────────────
+
+/** Préréglages de plage temporelle communs aux graphes canvas (STBL, CHAIN, VOL, BT). */
+export const PERIODES_STANDARD: ReadonlyArray<{ id: string; jours: number | null; label: string }> = [
+  { id: "30j", jours: 30, label: "30 j" },
+  { id: "90j", jours: 90, label: "90 j" },
+  { id: "1a", jours: 365, label: "1 a" },
+  { id: "tout", jours: null, label: "Tout" },
+];
+
+/**
+ * Boutons de période uniformes. `actif = null` → aucun bouton allumé (l'utilisateur a
+ * zoomé/panné manuellement : plage personnalisée).
+ */
+export function BarrePeriodes({
+  actif,
+  onChange,
+}: {
+  actif: string | null;
+  onChange: (p: { id: string; jours: number | null }) => void;
+}) {
+  return (
+    <Onglets
+      options={PERIODES_STANDARD.map((p) => ({ id: p.id, label: p.label }))}
+      actif={actif ?? ""}
+      onChange={(id) => {
+        const p = PERIODES_STANDARD.find((x) => x.id === id);
+        if (p) onChange(p);
+      }}
+    />
+  );
+}
+
+export interface LigneInfobulle {
+  label: string;
+  valeur: string;
+  couleur?: string;
+}
+
+/**
+ * Curseur de graphe : trait vertical + infobulle overlay. À rendre dans un parent
+ * `relative` qui contient le canvas. `xPix` en pixels CSS relatifs au graphe ;
+ * l'infobulle bascule à gauche du trait près du bord droit.
+ */
+export function InfobulleGraphe({
+  xPix,
+  largeurGraphe,
+  titre,
+  lignes,
+}: {
+  xPix: number;
+  largeurGraphe: number;
+  titre: string;
+  lignes: LigneInfobulle[];
+}) {
+  return (
+    <>
+      <div
+        className="pointer-events-none absolute inset-y-0 w-px bg-text-dim/60"
+        style={{ left: xPix }}
+      />
+      <div
+        className="pointer-events-none absolute z-10 whitespace-nowrap rounded border border-border bg-surface px-2 py-1 text-[11px] tabular-nums text-text shadow-lg"
+        style={{ left: Math.min(xPix + 10, Math.max(0, largeurGraphe - 150)), top: 6 }}
+      >
+        <div className="text-text-dim">{titre}</div>
+        {lignes.map((l, i) => (
+          <div key={i} style={l.couleur !== undefined ? { color: l.couleur } : undefined}>
+            {l.label} : {l.valeur}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}

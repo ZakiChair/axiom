@@ -9,6 +9,7 @@ import {
   ecartPegBps,
   etatPeg,
   impressionNette,
+  pointLePlusProche,
   repartitionChaines,
   resumePegs,
   serieImpressionQuotidienne,
@@ -174,6 +175,24 @@ describe("bornes", () => {
   it("aucune valeur finie → null", () => {
     expect(bornes([])).toBeNull();
     expect(bornes([Number.NaN])).toBeNull();
+  });
+});
+
+describe("pointLePlusProche", () => {
+  const serie = [
+    { time: 1000, totalUsd: 10 },
+    { time: 2000, totalUsd: 20 },
+    { time: 4000, totalUsd: 40 },
+  ];
+  it("renvoie le point exact quand `t` correspond", () => {
+    expect(pointLePlusProche(serie, 2000)).toEqual({ time: 2000, totalUsd: 20 });
+  });
+  it("renvoie le point le plus proche quand `t` tombe entre deux points", () => {
+    expect(pointLePlusProche(serie, 2900)).toEqual({ time: 2000, totalUsd: 20 });
+    expect(pointLePlusProche(serie, 3100)).toEqual({ time: 4000, totalUsd: 40 });
+  });
+  it("série vide → null", () => {
+    expect(pointLePlusProche([], 1000)).toBeNull();
   });
 });
 

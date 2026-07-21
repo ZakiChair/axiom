@@ -57,7 +57,7 @@ import {
 } from "../lib/format";
 import { metaSource } from "../lib/fiabilite";
 import { annualiserFunding } from "../data/fundingCrossExchange";
-import { histFunding } from "../data/referentiels";
+import { histFunding, histOiUsd } from "../data/referentiels";
 import { referentiel, type Referentiel } from "../lib/referentiel";
 import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, Fraicheur, Metric, RefBadge, SansCle, Vide } from "./ui";
 
@@ -225,9 +225,25 @@ export function DerivativesWindow() {
   // Reset UNIQUEMENT au changement de symbole : le cache 1 h rend la valeur quasi
   // immédiate à chaque re-render sur funding?.rate, donc on garde l'ancien
   // référentiel affiché pendant le recalcul plutôt que de flicker vers null.
+  // Référentiel de l'OI : un OI nu ne dit pas si le positionnement est tendu —
+  // 12 Md$ est un plancher sur un marché, un sommet sur un autre. Même cache 1 h.
+  const [refOi, setRefOi] = useState<Referentiel | null>(null);
   useEffect(() => {
     setRefFunding(null);
+    setRefOi(null);
   }, [symbol]);
+  useEffect(() => {
+    let vivant = true;
+    const oiUsd = oi?.oiUsd;
+    if (oiUsd === undefined || !Number.isFinite(oiUsd)) return undefined;
+    void histOiUsd(symbol).then((serie) => {
+      if (!vivant || serie === null) return;
+      setRefOi(referentiel(serie, oiUsd, Date.now()));
+    });
+    return () => {
+      vivant = false;
+    };
+  }, [symbol, oi?.oiUsd]);
   useEffect(() => {
     let vivant = true;
     const rate = funding?.rate;
@@ -463,6 +479,12 @@ export function DerivativesWindow() {
                   extra={oiSpark.length >= 2 && <Sparkline values={oiSpark} color="var(--serie-1)" />}
                   labelExtra={<BadgeFiabilite meta={metaSource("coinalyze:oi")} />}
                 />
+                {oi !== undefined && Number.isFinite(oi.oiUsd) && (
+                  <div className="flex items-center gap-2 px-3 text-[11px] tabular-nums text-text-dim">
+                    <span>vs historique</span>
+                    <RefBadge referentiel={refOi} sens="hausse-chaud" />
+                  </div>
+                )}
                 <Metric
                   label="Funding"
                   value={formatFunding(funding?.rate)}

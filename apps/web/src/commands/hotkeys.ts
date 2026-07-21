@@ -10,7 +10,7 @@
  * « ? » (rendue par CommandPalette en mode aide).
  */
 import { useEffect } from "react";
-import type { Timeframe } from "@axiom/types";
+import type { ExchangeId, Timeframe } from "@axiom/types";
 import { createStore } from "zustand/vanilla";
 import { marketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
@@ -20,6 +20,17 @@ import { liqMarksStore } from "../chart/liquidationMarkers";
 import { themeStore, THEMES } from "../store/theme";
 import { SUPPORTED_TIMEFRAMES } from "../data/adapters";
 import { pousserToast } from "../store/toasts";
+import { watchlistStore } from "../store/watchlist";
+import { navigateTo } from "../lib/navigation";
+import {
+  avancer,
+  HISTORIQUE_VIDE,
+  pousserSymbole,
+  reculer,
+  symboleVoisin,
+  timeframeVoisin,
+  type EtatHistorique,
+} from "../lib/navigationClavier";
 import { paletteStore, CATEGORIE_LABEL, type Commande, type CategorieCommande } from "./registry";
 
 // ─────────────────────────── Store plein écran ───────────────────────────
@@ -43,6 +54,39 @@ export const fullscreenStore = createStore<FullscreenState>((set, get) => ({
   definir: (plein) => set({ plein }),
 }));
 
+// ─────────────────────────── Store historique de symboles ───────────────────────────
+
+export interface SymbolHistoryState {
+  etat: EtatHistorique;
+  /** Enregistre un symbole visité (no-op si déjà courant). */
+  visiter: (symbole: string) => void;
+  /** Recule d'un cran ; retourne le symbole à charger, ou null. */
+  reculer: () => string | null;
+  /** Avance d'un cran ; retourne le symbole à charger, ou null. */
+  avancer: () => string | null;
+}
+
+/**
+ * Store historique symbole — VANILLA (hors render-loop), ÉPHÉMÈRE (non persisté :
+ * un historique de navigation restauré au démarrage n'aurait aucun sens).
+ * Alimenté par un abonnement à `marketStore` (cf. useRaccourcisGlobaux), donc TOUTE
+ * navigation compte — palette, watchlist, EQS, NEWS — pas seulement le clavier.
+ */
+export const symbolHistoryStore = createStore<SymbolHistoryState>((set, get) => ({
+  etat: HISTORIQUE_VIDE,
+  visiter: (symbole) => set({ etat: pousserSymbole(get().etat, symbole) }),
+  reculer: () => {
+    const r = reculer(get().etat);
+    if (r.symbole !== null) set({ etat: r.etat });
+    return r.symbole;
+  },
+  avancer: () => {
+    const a = avancer(get().etat);
+    if (a.symbole !== null) set({ etat: a.etat });
+    return a.symbole;
+  },
+}));
+
 // ─────────────────────────── Table des raccourcis (aide) ───────────────────────────
 
 /** Table des raccourcis clavier — miroir documentaire de la logique ci-dessous. */
@@ -51,6 +95,9 @@ export const RACCOURCIS_AIDE: { touche: string; description: string }[] = [
   { touche: "?", description: "Afficher cette aide" },
   { touche: "⌘K → ONBOARD", description: "Rejouer le parcours d'onboarding (3 étapes)" },
   { touche: "1 – 9", description: "Timeframes rapides (1m, 5m, 15m, 1h, 4h, 1d, 1w, 1M, 3M)" },
+  { touche: "↑ / ↓", description: "Symbole précédent / suivant dans la watchlist" },
+  { touche: "[ / ]", description: "Timeframe plus bas / plus haut" },
+  { touche: "⌘[ / ⌘]", description: "Symbole précédent / suivant dans l'historique de navigation" },
   { touche: "/", description: "Focus sur la recherche de paires" },
   { touche: "O", description: "Orderflow (activer / désactiver)" },
   { touche: "V", description: "Profil de volume (activer / désactiver)" },
@@ -135,6 +182,27 @@ export function timeframePourCode(code: string): Timeframe | null {
 /** Sources disposant d'un flux de trades (orderflow pertinent uniquement là). */
 const SOURCES_FLUX_TRADES = new Set(["binance", "kraken", "coinbase"]);
 
+/**
+ * Vrai PENDANT une navigation déclenchée par l'historique lui-même (⌘[ / ⌘]).
+ * L'abonnement à `marketStore` s'en sert pour ne PAS ré-empiler le symbole qu'il
+ * vient de restaurer — sans ce garde-fou, reculer d'un cran empilerait aussitôt
+ * ce cran et l'historique n'avancerait jamais.
+ */
+let navigationHistorique = false;
+
+/**
+ * Charge un symbole via le bus de navigation, en restaurant sa source d'origine
+ * quand la watchlist en connaît une (sinon on laisse l'inférence côté ticker).
+ */
+function allerAuSymbole(symbole: string): void {
+  const source = watchlistStore.getState().sources[symbole];
+  navigateTo({
+    symbol: symbole,
+    ...(source !== undefined ? { exchange: source as ExchangeId } : {}),
+    source: "clavier",
+  });
+}
+
 /** true si l'événement vient d'un champ éditable (on n'intercepte alors pas les touches nues). */
 function estChampEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -153,6 +221,19 @@ export function useRaccourcisGlobaux(): void {
       if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
         e.preventDefault();
         paletteStore.getState().ouvrir("commandes");
+        return;
+      }
+      // ⌘[ / ⌘] : historique de navigation entre symboles. On preventDefault car ces
+      // touches sont le « précédent/suivant » du navigateur — ici on reste dans l'app.
+      if ((e.metaKey || e.ctrlKey) && (e.key === "[" || e.key === "]")) {
+        e.preventDefault();
+        const h = symbolHistoryStore.getState();
+        const cible = e.key === "[" ? h.reculer() : h.avancer();
+        if (cible !== null) {
+          navigationHistorique = true;
+          allerAuSymbole(cible);
+          navigationHistorique = false;
+        }
         return;
       }
       // Tout autre raccourci navigateur (Cmd/Ctrl/Alt) : laissé au navigateur.
@@ -175,6 +256,29 @@ export function useRaccourcisGlobaux(): void {
       if (e.key === "?") {
         paletteStore.getState().ouvrir("aide");
         e.preventDefault();
+        return;
+      }
+
+      // ↑ / ↓ : symbole précédent / suivant dans la watchlist (liste CIRCULAIRE).
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        const { symbols } = watchlistStore.getState();
+        const cible = symboleVoisin(symbols, marketStore.getState().symbol, e.key === "ArrowUp" ? -1 : 1);
+        if (cible !== null) {
+          allerAuSymbole(cible);
+          e.preventDefault();
+        }
+        return;
+      }
+
+      // [ / ] : timeframe plus bas / plus haut (NON circulaire, borné aux TF supportés).
+      if (e.key === "[" || e.key === "]") {
+        const { exchange, timeframe } = marketStore.getState();
+        const supportes = SUPPORTED_TIMEFRAMES[exchange] ?? [];
+        const cible = timeframeVoisin(supportes, timeframe, e.key === "[" ? -1 : 1);
+        if (cible !== null) {
+          marketStore.getState().setTimeframe(cible);
+          e.preventDefault();
+        }
         return;
       }
 
@@ -246,6 +350,20 @@ export function useRaccourcisGlobaux(): void {
     };
 
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+
+    // Alimente l'historique depuis le marché lui-même : toute navigation compte
+    // (palette, watchlist, EQS, NEWS…), sauf celles issues de l'historique.
+    symbolHistoryStore.getState().visiter(marketStore.getState().symbol);
+    let precedent = marketStore.getState().symbol;
+    const desabonner = marketStore.subscribe((s) => {
+      if (s.symbol === precedent) return;
+      precedent = s.symbol;
+      if (!navigationHistorique) symbolHistoryStore.getState().visiter(s.symbol);
+    });
+
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      desabonner();
+    };
   }, []);
 }

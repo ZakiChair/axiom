@@ -24,6 +24,7 @@ import { bgeometricsKeyStore } from "../store/onchain";
 import { soSoValueKeyStore } from "../store/sosovalue";
 import { finnhubKeyStore } from "../store/finnhub";
 import { etherscanKeyStore } from "../store/etherscan";
+import { risqueStore } from "../store/risque";
 import {
   creerSnapshot,
   listerSnapshots,
@@ -187,6 +188,76 @@ function ApiKeyField({
  * restauration est DESTRUCTIVE : confirmation explicite en DEUX temps (1er clic arme,
  * 2e restaure) ; le daemon fige un snapshot pré-restauration avant de remplacer.
  */
+/**
+ * Section RISQUE — capital de référence et risque toléré par trade, utilisés par
+ * l'outil position (chart/position.ts) pour afficher une taille de position.
+ *
+ * Capital vide = NON PARAMÉTRÉ : l'outil affiche alors « capital non paramétré »
+ * plutôt qu'une taille calculée sur une valeur inventée.
+ */
+function RisqueSection() {
+  const capital = useStore(risqueStore, (s) => s.capital);
+  const risquePct = useStore(risqueStore, (s) => s.risquePct);
+
+  return (
+    <>
+      <h3 className="mt-6 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+        Risque
+      </h3>
+      <p className="mt-1 text-[11px] leading-snug text-text-dim">
+        Sert au dimensionnement affiché par l'outil position. Aucun ordre n'est passé,
+        aucune position réelle n'est lue.
+      </p>
+      <div className="mt-3 space-y-2">
+        <label className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg px-3 py-2.5">
+          <span className="min-w-0">
+            <span className="text-sm text-text">Capital de référence</span>
+            <span className="block text-[11px] text-text-dim">
+              En USD. Vide = taille de position non affichée.
+            </span>
+          </span>
+          <input
+            type="number"
+            min="0"
+            step="any"
+            inputMode="decimal"
+            aria-label="Capital de référence en USD"
+            className="w-28 shrink-0 rounded border border-border bg-panel px-2 py-1 text-right text-sm tabular-nums text-text"
+            value={capital ?? ""}
+            placeholder="—"
+            onChange={(e) => {
+              const v = e.target.value.trim();
+              risqueStore.getState().setCapital(v === "" ? null : Number(v));
+            }}
+          />
+        </label>
+        <label className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg px-3 py-2.5">
+          <span className="min-w-0">
+            <span className="text-sm text-text">Risque par trade</span>
+            <span className="block text-[11px] text-text-dim">
+              En % du capital, perdu si le stop est touché.
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1">
+            <input
+              type="number"
+              min="0.1"
+              max="100"
+              step="0.1"
+              inputMode="decimal"
+              aria-label="Risque par trade en pourcent"
+              className="w-16 rounded border border-border bg-panel px-2 py-1 text-right text-sm tabular-nums text-text"
+              value={risquePct}
+              onChange={(e) => risqueStore.getState().setRisquePct(Number(e.target.value))}
+            />
+            <span className="text-sm text-text-dim">%</span>
+          </span>
+        </label>
+      </div>
+    </>
+  );
+}
+
 function SauvegardesSection({ open }: { open: boolean }) {
   // undefined = pas encore chargé ; null = daemon indisponible ; tableau = liste.
   const [snapshots, setSnapshots] = useState<MetaSnapshot[] | null | undefined>(undefined);
@@ -477,6 +548,9 @@ export function SettingsPanel() {
             <span className="text-sm text-text">Thème</span>
             <ThemeSwitcher />
           </div>
+
+          {/* --- Risque (dimensionnement de l'outil position) --- */}
+          <RisqueSection />
 
           {/* --- Onboarding --- */}
           <h3 className="mt-6 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">

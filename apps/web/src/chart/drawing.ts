@@ -31,6 +31,9 @@ import type { Chart as KLineChartInstance, OverlayEvent } from "klinecharts";
 import { FIB_RETRACEMENT, FIB_TREND } from "./fibonacci";
 // Effet de bord : enregistre l'overlay VPFR (volumeRange).
 import { VPFR_NAME } from "./volumeRangeOverlay";
+// Effet de bord : enregistre l'overlay « position » (entrée/stop/cible + R:R).
+import { POSITION_NAME, redrawPositionOverlays } from "./position";
+import { risqueStore } from "../store/risque";
 // Store des indicateurs : le picker d'ancrage AVWAP y ajoute une instance.
 import { indicatorsStore } from "../store/indicators";
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
@@ -52,6 +55,7 @@ export type DrawingToolId =
   | "fib"
   | "fibTrend"
   | "volumeRange"
+  | "position"
   | "avwapAnchor";
 
 /**
@@ -76,6 +80,7 @@ const TOOL_OVERLAY: Record<DrawingToolId, string | null> = {
   fib: FIB_RETRACEMENT, // retracement de Fibonacci (custom thémé + paramétrable)
   fibTrend: FIB_TREND, // retracement + projection selon la tendance
   volumeRange: VPFR_NAME, // profil de volume à plage fixe (overlay custom)
+  position: POSITION_NAME, // setup entrée/stop/cible + R:R (overlay custom, 3 points)
   avwapAnchor: null, // picker (pas un dessin) : géré à part dans selectTool, cf. startAvwapAnchor
 };
 
@@ -487,6 +492,21 @@ export function selectTool(tool: DrawingToolId): void {
  * retouche les instances existantes ; `createPointFigures` relit alors le store et le
  * thème. Le `rev` (qui change) garantit une modification effective déclenchant le redraw.
  */
+/**
+ * Rejoue les overlays « position » de TOUTES les instances quand le capital ou le
+ * risque toléré change : la taille affichée dans l'étiquette dépend du store risque,
+ * or `createPointFigures` ne se rappelle pas tout seul sur un changement de store.
+ * `rev` croissant garantit une modification effective (cf. redrawFibOverlays).
+ */
+let revPosition = 0;
+risqueStore.subscribe(() => {
+  revPosition += 1;
+  redrawPositionOverlays(
+    [...registry.values()].map((e) => e.chart),
+    revPosition,
+  );
+});
+
 export function redrawFibOverlays(rev: number): void {
   for (const entry of registry.values()) {
     entry.chart.overrideOverlay({ name: FIB_RETRACEMENT, extendData: rev });

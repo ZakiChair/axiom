@@ -185,6 +185,17 @@ function PriceLineIcon() {
   );
 }
 
+/** Position : zone de gain au-dessus, zone de risque en dessous, entrée au milieu. */
+function PositionIcon() {
+  return (
+    <svg {...ICON_PROPS}>
+      <rect x="4" y="5" width="16" height="7" rx="1" />
+      <rect x="4" y="12" width="16" height="5" rx="1" />
+      <line x1="2" y1="12" x2="22" y2="12" strokeDasharray="3 2" />
+    </svg>
+  );
+}
+
 /** Canal parallèle. */
 function ParallelChannelIcon() {
   return (
@@ -252,6 +263,7 @@ const TOOLS: ToolDef[] = [
   { id: "parallelChannel", label: "Canal parallèle", Icon: ParallelChannelIcon },
   { id: "priceChannel", label: "Canal de prix", Icon: PriceChannelIcon },
   { id: "rect", label: "Rectangle", Icon: RectIcon },
+  { id: "position", label: "Position (entrée, stop, cible)", Icon: PositionIcon },
   { id: "fib", label: "Retracement de Fibonacci", Icon: FibIcon },
   { id: "fibTrend", label: "Fibonacci selon tendance", Icon: FibTrendIcon },
   { id: "volumeRange", label: "Profil de volume (plage)", Icon: VolumeRangeIcon },

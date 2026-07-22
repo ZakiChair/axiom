@@ -4,11 +4,12 @@
  * Récupère (et met en cache, cf. data/pairs.ts) le catalogue de la source, le filtre
  * EN DIRECT pendant la saisie, et change le symbole du graphe au clic sur un résultat.
  *
- * Surensemble du champ symbole libre : Entrée valide la saisie BRUTE telle quelle
- * (permet d'ouvrir un symbole absent du catalogue ou si le fetch a échoué), tandis
- * que la liste déroulante ajoute la découverte. Basse fréquence : aucun re-render sur tick.
+ * Surensemble du champ symbole libre : ↑/↓ déplacent l'item actif de la liste
+ * (combobox ARIA, convention CommandPalette), Entrée l'ouvre — ou valide la saisie
+ * BRUTE s'il n'y a aucun résultat (permet d'ouvrir un symbole absent du catalogue
+ * ou si le fetch a échoué). Basse fréquence : aucun re-render sur tick.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { ExchangeId } from "@axiom/types";
 import { marketStore } from "../store/market";
@@ -63,6 +64,11 @@ export function PairSearch({
   // Échec du chargement du catalogue courant : affiché discrètement (jamais muet).
   const [pairsError, setPairsError] = useState(false);
   const [open, setOpen] = useState(false);
+  // Item ACTIF de la liste de résultats (navigation ↑/↓, convention CommandPalette : borné).
+  const [indexActif, setIndexActif] = useState(0);
+  const listeRef = useRef<HTMLUListElement>(null);
+  // Id unique par instance (plusieurs PairSearch coexistent : toolbar, comparaison, dérivés).
+  const idListe = useId();
   const [syntheticOpen, setSyntheticOpen] = useState(false);
   const [legAExchange, setLegAExchange] = useState<Exclude<ExchangeId, "synthetic">>(defaultLegSource);
   const [legBExchange, setLegBExchange] = useState<Exclude<ExchangeId, "synthetic">>("twelvedata");
@@ -131,6 +137,13 @@ export function PairSearch({
   const q = query.trim().toUpperCase();
   const matches = q.length === 0 ? [] : pairs.filter((p) => p.includes(q)).slice(0, MAX_RESULTS);
   const showBuilder = syntheticOpen || (open && isBuilderQuery(query, pairs));
+  const listeVisible = open && matches.length > 0 && !showBuilder;
+
+  // Fait défiler l'item actif dans la vue (aussi quand la saisie recompose la liste).
+  useEffect(() => {
+    const el = listeRef.current?.querySelector<HTMLElement>(`[data-idx="${indexActif}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [indexActif, query]);
 
   const legAMatches = useMemo(() => {
     const needle = legA.trim().toUpperCase();
@@ -181,18 +194,33 @@ export function PairSearch({
           value={query}
           onChange={(e) => {
             setQuery(e.target.value.toUpperCase());
+            // Toute évolution de la saisie réinitialise la sélection en tête.
+            setIndexActif(0);
             setOpen(true);
           }}
           onFocus={() => setOpen(true)}
           onBlur={() => window.setTimeout(() => setOpen(false), 150)}
           onKeyDown={(e) => {
-            // Entrée : si un résultat existe on prend le 1er, sinon on valide la saisie brute.
-            if (e.key === "Enter") choose(matches[0] ?? query);
-            else if (e.key === "Escape") setOpen(false);
+            // ↑/↓ : déplacement BORNÉ de l'item actif (convention CommandPalette).
+            if (e.key === "ArrowDown" && listeVisible) {
+              e.preventDefault();
+              setIndexActif((i) => Math.min(matches.length - 1, i + 1));
+            } else if (e.key === "ArrowUp" && listeVisible) {
+              e.preventDefault();
+              setIndexActif((i) => Math.max(0, i - 1));
+            } else if (e.key === "Enter") {
+              // Entrée : l'item ACTIF s'il existe, sinon la saisie brute (symbole hors catalogue).
+              choose(matches[indexActif] ?? query);
+            } else if (e.key === "Escape") setOpen(false);
           }}
           placeholder={placeholder}
           spellCheck={false}
           autoComplete="off"
+          role="combobox"
+          aria-expanded={listeVisible}
+          aria-autocomplete="list"
+          aria-controls={listeVisible ? idListe : undefined}
+          aria-activedescendant={listeVisible ? `${idListe}-opt-${indexActif}` : undefined}
           className="w-44 rounded border border-border bg-bg px-2 py-1 text-xs text-text outline-none placeholder:text-text-dim focus:border-accent"
           aria-label={placeholder}
         />
@@ -214,18 +242,31 @@ export function PairSearch({
         </button>
       </div>
 
-      {open && matches.length > 0 && !showBuilder && (
-        <ul className="absolute left-0 top-full z-20 mt-1 max-h-72 w-44 overflow-y-auto rounded border border-neutral-700 bg-neutral-900 py-1 shadow-lg">
-          {matches.map((p) => (
-            <li key={p}>
+      {listeVisible && (
+        <ul
+          ref={listeRef}
+          id={idListe}
+          role="listbox"
+          aria-label="Résultats de paires"
+          className="absolute left-0 top-full z-20 mt-1 max-h-72 w-44 overflow-y-auto rounded border border-neutral-700 bg-neutral-900 py-1 shadow-lg"
+        >
+          {matches.map((p, i) => (
+            <li key={p} role="none">
               <button
+                id={`${idListe}-opt-${i}`}
+                data-idx={i}
                 type="button"
+                role="option"
+                aria-selected={i === indexActif}
                 // onMouseDown (avant le blur du champ) : le clic est pris en compte.
                 onMouseDown={(e) => {
                   e.preventDefault();
                   choose(p);
                 }}
-                className="block w-full px-2 py-1 text-left text-xs text-neutral-200 hover:bg-neutral-800"
+                onMouseEnter={() => setIndexActif(i)}
+                className={`block w-full px-2 py-1 text-left text-xs text-neutral-200 ${
+                  i === indexActif ? "bg-neutral-800" : "hover:bg-neutral-800"
+                }`}
               >
                 {p}
               </button>

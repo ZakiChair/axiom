@@ -330,6 +330,7 @@ export function Watchlist() {
     <MenuDeroulant
       declencheur="⚙"
       titre="Colonnes"
+      ariaLabel="Colonnes de la watchlist"
       align="right"
       classePanneau="w-36"
       chevron={false}

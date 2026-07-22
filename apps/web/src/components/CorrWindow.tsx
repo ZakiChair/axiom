@@ -432,22 +432,11 @@ export function CorrWindow() {
               actif={methode}
               onChange={setMethode}
             />
-            {/* Ids numériques (30/90/180 j) : Segmente exige T extends string, boutons manuscrits conservés — actif corrigé en bg-bg (standard §2). */}
-            <div className="flex rounded-md border border-border bg-bg p-0.5 text-[11px]">
-              {FENETRES.map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setFenetreJours(f)}
-                  aria-pressed={fenetreJours === f}
-                  className={`rounded px-2 py-1 transition ${
-                    fenetreJours === f ? "bg-bg text-text" : "text-text-dim hover:text-text"
-                  }`}
-                >
-                  {f}j
-                </button>
-              ))}
-            </div>
+            <Segmente
+              options={FENETRES.map((f) => ({ id: f, label: `${f}j` }))}
+              actif={fenetreJours}
+              onChange={setFenetreJours}
+            />
           </div>
           <div className="flex items-center justify-between text-[11px] text-text-dim">
             <button

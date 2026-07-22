@@ -475,8 +475,8 @@ export function DerivativesWindow() {
                 <Metric
                   label="Open Interest"
                   value={formatUsd(oi?.oiUsd)}
-                  couleur="var(--serie-1)"
-                  extra={oiSpark.length >= 2 && <Sparkline values={oiSpark} color="var(--serie-1)" />}
+                  couleur="var(--serie-5)"
+                  extra={oiSpark.length >= 2 && <Sparkline values={oiSpark} color="var(--serie-5)" />}
                   labelExtra={<BadgeFiabilite meta={metaSource("coinalyze:oi")} />}
                 />
                 {oi !== undefined && Number.isFinite(oi.oiUsd) && (
@@ -629,8 +629,8 @@ export function DerivativesWindow() {
               <Metric
                 label="Open Interest"
                 value={formatUsd(binOi.at(-1)?.oiUsd)}
-                couleur="var(--serie-1)"
-                extra={binOiSpark.length >= 2 && <Sparkline values={binOiSpark} color="var(--serie-1)" />}
+                couleur="var(--serie-5)"
+                extra={binOiSpark.length >= 2 && <Sparkline values={binOiSpark} color="var(--serie-5)" />}
               />
             </section>
           )}

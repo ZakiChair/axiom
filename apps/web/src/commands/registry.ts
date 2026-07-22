@@ -37,7 +37,7 @@ export type CategorieCommande =
   | "panneau"
   | "action";
 
-/** Libellés FR courts des catégories (colonne de droite de la palette + aide dérivée). */
+/** Libellés FR courts des catégories (colonne de droite de la palette). */
 export const CATEGORIE_LABEL: Record<CategorieCommande, string> = {
   navigation: "nav",
   timeframe: "tf",
@@ -45,6 +45,16 @@ export const CATEGORIE_LABEL: Record<CategorieCommande, string> = {
   theme: "thème",
   panneau: "panneau",
   action: "action",
+};
+
+/** Libellés FR longs des catégories (aide « ? » — les clés courtes y étaient cryptiques). */
+export const CATEGORIE_LABEL_LONG: Record<CategorieCommande, string> = {
+  navigation: "Navigation",
+  timeframe: "Timeframes",
+  indicateur: "Indicateurs",
+  theme: "Thèmes",
+  panneau: "Panneaux",
+  action: "Actions",
 };
 
 /** Une commande de la palette. `action` s'exécute hors React (stores vanilla). */

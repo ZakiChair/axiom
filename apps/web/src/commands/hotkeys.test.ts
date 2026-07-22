@@ -74,6 +74,17 @@ describe("timeframePourCode", () => {
     expect(timeframePourCode("Digit9")).toBe("3M");
     expect(timeframePourCode("KeyA")).toBeNull();
   });
+
+  it("ignore Shift+chiffre quand la touche produit un symbole (QWERTY : Shift+5 = %)", () => {
+    // Sur QWERTY, Shift+5 tape « % » — une saisie délibérée de symbole, pas un TF.
+    expect(timeframePourCode("Digit5", { shiftKey: true, key: "%" })).toBeNull();
+  });
+
+  it("accepte Shift+chiffre quand la touche produit le chiffre (AZERTY : Shift requis)", () => {
+    // Sur AZERTY, les chiffres EXIGENT Shift : e.key vaut bien « 5 » → TF légitime.
+    expect(timeframePourCode("Digit5", { shiftKey: true, key: "5" })).toBe("4h");
+    expect(timeframePourCode("Digit5", { shiftKey: false, key: "(" })).toBe("4h");
+  });
 });
 
 describe("lignesMnemoniques", () => {

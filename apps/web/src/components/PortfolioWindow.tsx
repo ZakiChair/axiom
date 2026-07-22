@@ -465,7 +465,11 @@ export function PortfolioWindow() {
                           portfolioStore.getState().supprimer(p.id);
                         }}
                         onBlur={() => setConfirmSuppr((c) => (c === p.id ? null : c))}
-                        aria-label={`Supprimer ${p.symbole}`}
+                        aria-label={
+                          confirmSuppr === p.id
+                            ? `Confirmer la suppression de ${p.symbole}`
+                            : `Supprimer ${p.symbole}`
+                        }
                         className={
                           confirmSuppr === p.id
                             ? "text-[10px] font-semibold uppercase text-down"
@@ -645,7 +649,11 @@ export function PortfolioWindow() {
                             portfolioStore.getState().supprimer(p.id);
                           }}
                           onBlur={() => setConfirmSuppr((c) => (c === p.id ? null : c))}
-                          aria-label={`Supprimer ${p.symbole}`}
+                          aria-label={
+                            confirmSuppr === p.id
+                              ? `Confirmer la suppression de ${p.symbole}`
+                              : `Supprimer ${p.symbole}`
+                          }
                           className={
                             confirmSuppr === p.id
                               ? "text-[10px] font-semibold uppercase text-down"

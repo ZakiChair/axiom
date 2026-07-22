@@ -62,6 +62,43 @@ export interface StatsEtude {
   baselineMoyennePct: number;
 }
 
+// ─────────────────────────── Univers de validation ───────────────────────────
+
+/**
+ * Univers sur lequel porte la validation. Le top-volume du jour est dominé par des
+ * listings frais au funding structurellement extrême (biais de sélection observé au
+ * premier run) — pouvoir valider sur les majors ou sa watchlist isole ce biais.
+ */
+export type UniversValidation = "echantillon" | "majors" | "watchlist";
+
+/** Libellés UI des univers (ordre = ordre du Segmente). */
+export const UNIVERS_VALIDATION: { id: UniversValidation; label: string }[] = [
+  { id: "echantillon", label: "Échantillon scanné" },
+  { id: "majors", label: "Majors" },
+  { id: "watchlist", label: "Watchlist" },
+];
+
+/** Majors : grosses capitalisations à perp Binance ancien (funding profond, pas de listing frais). */
+export const MAJORS_VALIDATION: readonly string[] = [
+  "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT",
+  "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT", "LTCUSDT",
+];
+
+/**
+ * Résout la liste de symboles d'un univers. Dédoublonne en préservant l'ordre.
+ * Une liste vide signale un prérequis manquant (scan non lancé / watchlist vide) —
+ * le message est du ressort de l'appelant. PURE.
+ */
+export function symbolesUnivers(
+  univers: UniversValidation,
+  echantillon: readonly string[],
+  watchlist: readonly string[],
+): string[] {
+  const source =
+    univers === "majors" ? MAJORS_VALIDATION : univers === "watchlist" ? watchlist : echantillon;
+  return [...new Set(source)];
+}
+
 // ─────────────────────────── Génération des événements ───────────────────────────
 
 /**

@@ -49,8 +49,10 @@ import {
   finaliserEtude,
   fusionnerEtudes,
   HORIZONS_VALIDATION,
+  symbolesUnivers,
   type SommesEtude,
   type StatsEtude,
+  type UniversValidation,
 } from "../data/validationSignaux";
 import type { PointSerie } from "../lib/referentiel";
 import { futuresSymbol } from "../data/binanceFutures";
@@ -94,7 +96,9 @@ export interface SignauxState {
   run: () => void;
   cancel: () => void;
 
-  // — Validation historique (event study sur l'échantillon du dernier scan) —
+  // — Validation historique (event study sur l'univers choisi) —
+  validationUnivers: UniversValidation;
+  setValidationUnivers: (univers: UniversValidation) => void;
   validationState: SignauxRunState;
   validationProgress: { done: number; total: number };
   validation: ResultatValidation | null;
@@ -297,16 +301,14 @@ export const signauxStore = createStore<SignauxState>((set) => ({
         set({ runState: "done", lignes: [], note: "Aucun symbole à perp dans l'univers." });
         return;
       }
-      // Nouveau scan → l'ancienne validation ne décrit plus l'échantillon affiché.
+      // Nouveau scan : une validation portant sur l'ANCIEN échantillon ne décrit plus
+      // ce qui est affiché — on l'invalide. Les univers fixes (majors/watchlist) restent valides.
       dernierEchantillon = echantillon;
-      validationRunId++;
-      set({
-        runState: "running",
-        progress: { done: 0, total: echantillon.length },
-        validationState: "idle",
-        validation: null,
-        validationError: null,
-      });
+      if (signauxStore.getState().validationUnivers === "echantillon") {
+        validationRunId++;
+        set({ validationState: "idle", validation: null, validationError: null });
+      }
+      set({ runState: "running", progress: { done: 0, total: echantillon.length } });
 
       // 3. Détection par symbole (pool) — la progression avance au fil de l'eau.
       const lignes = (
@@ -340,29 +342,44 @@ export const signauxStore = createStore<SignauxState>((set) => ({
     set({ runState: "idle", validationState: "idle" });
   },
 
+  validationUnivers: "echantillon",
+  setValidationUnivers: (univers) =>
+    // Changer d'univers invalide le résultat affiché (il décrirait l'ancien univers).
+    set({ validationUnivers: univers, validation: null, validationState: "idle", validationError: null }),
   validationState: "idle",
   validationProgress: { done: 0, total: 0 },
   validation: null,
   validationError: null,
 
   validerSignaux: () => {
-    if (dernierEchantillon.length === 0) {
-      set({ validationState: "error", validationError: "Lancez d'abord un scan : la validation porte sur l'échantillon scanné." });
+    const univers = signauxStore.getState().validationUnivers;
+    const symboles = symbolesUnivers(
+      univers,
+      dernierEchantillon.map((r) => r.symbol),
+      watchlistStore.getState().symbols,
+    );
+    if (symboles.length === 0) {
+      set({
+        validationState: "error",
+        validationError:
+          univers === "watchlist"
+            ? "Watchlist vide : rien à valider sur cet univers."
+            : "Lancez d'abord un scan : cet univers est l'échantillon scanné.",
+      });
       return;
     }
     const runId = ++validationRunId;
-    const echantillon = dernierEchantillon;
     set({
       validationState: "running",
-      validationProgress: { done: 0, total: echantillon.length },
+      validationProgress: { done: 0, total: symboles.length },
       validation: null,
       validationError: null,
     });
 
     void (async () => {
       const parSymbole = (
-        await mapPool(echantillon, SIGNAUX_CONCURRENCY, async (row) => {
-          const sommes = await validerSymbole(row.symbol);
+        await mapPool(symboles, SIGNAUX_CONCURRENCY, async (symbol) => {
+          const sommes = await validerSymbole(symbol);
           if (runId === validationRunId) {
             set((s) => ({
               validationProgress: { done: s.validationProgress.done + 1, total: s.validationProgress.total },
@@ -378,6 +395,8 @@ export const signauxStore = createStore<SignauxState>((set) => ({
       const horizons = (type: "funding" | "divergence") =>
         HORIZONS_VALIDATION.map((h, i) => ({ id: h.id, libelle: h.libelle, stats: cellule(type, i) }));
 
+      const libelleUnivers =
+        univers === "majors" ? "majors" : univers === "watchlist" ? "watchlist" : "échantillon scanné";
       set({
         validationState: "done",
         validation: {
@@ -386,7 +405,7 @@ export const signauxStore = createStore<SignauxState>((set) => ({
             { id: "divergence-rsi", libelle: "Divergence RSI", horizons: horizons("divergence") },
           ],
           note:
-            `event study sur ${echantillon.length} symboles · ~333 j de funding réglé, ~166 j de klines 4 h · ` +
+            `event study · univers ${libelleUnivers} (${symboles.length} symboles) · ~333 j de funding réglé, ~166 j de klines 4 h · ` +
             "rendements signés par la direction, sans frais ni slippage — mesure du signal, pas d'une stratégie exécutable · " +
             "quadrant OI×prix et positionnement non validables (historiques OI/L-S gratuits ≈ 20-30 j)",
         },

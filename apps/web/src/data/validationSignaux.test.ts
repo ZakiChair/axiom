@@ -11,6 +11,8 @@ import {
   finaliserEtude,
   fusionnerEtudes,
   indexEntree,
+  MAJORS_VALIDATION,
+  symbolesUnivers,
 } from "./validationSignaux";
 
 // ─────────────────────────── Funding : hystérésis ───────────────────────────
@@ -132,5 +134,25 @@ describe("fusionnerEtudes / finaliserEtude", () => {
 
   it("aucun événement : null (cellule non affichable)", () => {
     expect(finaliserEtude({ n: 0, reussites: 0, sommePct: 0, sommeBaselinePct: 0 })).toBeNull();
+  });
+});
+
+// ─────────────────────────── Univers ───────────────────────────
+
+describe("symbolesUnivers", () => {
+  it("échantillon : les symboles scannés, dédoublonnés en préservant l'ordre", () => {
+    expect(symbolesUnivers("echantillon", ["AUSDT", "BUSDT", "AUSDT"], ["WL"])).toEqual([
+      "AUSDT",
+      "BUSDT",
+    ]);
+  });
+
+  it("majors : la liste curée, indépendante du scan et de la watchlist", () => {
+    expect(symbolesUnivers("majors", [], [])).toEqual([...MAJORS_VALIDATION]);
+  });
+
+  it("watchlist : les symboles de la watchlist (vide = prérequis manquant)", () => {
+    expect(symbolesUnivers("watchlist", ["AUSDT"], ["BTCUSDT", "SPY"])).toEqual(["BTCUSDT", "SPY"]);
+    expect(symbolesUnivers("watchlist", ["AUSDT"], [])).toEqual([]);
   });
 });

@@ -17,6 +17,7 @@ export interface Chapeau {
   nuitEthPct: number | null;
   /** Fear & Greed courant 0..100 (dernier point de l'historique). */
   fearGreed: number | null;
+  fearGreedRef: Referentiel | null;
   /** Dernier funding réglé BTC, en fraction. */
   fundingBtcRate: number | null;
   fundingRef: Referentiel | null;
@@ -77,6 +78,12 @@ export async function rafraichirRegime(): Promise<void> {
   const serieDvol = dvol.status === "fulfilled" ? dvol.value : null;
   const serieOi = oi.status === "fulfilled" ? oi.value : null;
 
+  const fearGreedCourant = dernier(serieFg);
+  const fearGreedRef =
+    serieFg !== null && fearGreedCourant !== null
+      ? referentiel(serieFg, fearGreedCourant, now)
+      : null;
+
   const fundingBtcRate = dernier(serieFunding);
   const fundingRef =
     serieFunding !== null && fundingBtcRate !== null
@@ -123,7 +130,7 @@ export async function rafraichirRegime(): Promise<void> {
 
   const regime = calculerRegime({
     directionBtc24hPct: nuitBtcPct,
-    fearGreed: dernier(serieFg),
+    fearGreed: fearGreedCourant,
     fundingBtcPercentile: percentileCourant(serieFunding, now),
     dvolBtcPercentile: percentileCourant(serieDvol, now),
     fluxEtfJourUsd,
@@ -135,7 +142,8 @@ export async function rafraichirRegime(): Promise<void> {
     chapeau: {
       nuitBtcPct,
       nuitEthPct,
-      fearGreed: dernier(serieFg),
+      fearGreed: fearGreedCourant,
+      fearGreedRef,
       fundingBtcRate,
       fundingRef,
       dvolCourant,

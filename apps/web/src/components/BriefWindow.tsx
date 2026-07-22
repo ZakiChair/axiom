@@ -376,6 +376,7 @@ export function BriefWindow() {
             {/* Convention couleur Vol : DVOL en HAUSSE = stress → --down ; en baisse → --up. */}
             <Metric
               label="Vol (DVOL)"
+              labelExtra={<RefBadge referentiel={chapeau?.dvolRef ?? null} sens="hausse-chaud" />}
               value={chapeau?.dvolCourant != null ? formatPourcentage(chapeau.dvolCourant, 1) : "—"}
               couleur={
                 chapeau?.dvolDeltaPts != null
@@ -659,10 +660,15 @@ export function BriefWindow() {
           <div className="flex items-center justify-between gap-2">
             <TitreBloc>Actualités</TitreBloc>
             {fearGreed.statut === "ready" && fearGreed.data !== null && (
-              <Badge ton="accent" title="Indice Fear & Greed (alternative.me)">
-                F&G {fearGreed.data.value}
-                {fearGreed.data.classification ? ` · ${fearGreed.data.classification}` : ""}
-              </Badge>
+              <div className="flex items-center gap-1.5">
+                <Badge ton="accent" title="Indice Fear & Greed (alternative.me)">
+                  F&G {fearGreed.data.value}
+                  {fearGreed.data.classification ? ` · ${fearGreed.data.classification}` : ""}
+                </Badge>
+                {/* Un F&G nu ne dit pas s'il est extrême : 72 en marché euphorique
+                    n'est qu'un p40. Le référentiel situe la valeur dans ~90 j. */}
+                <RefBadge referentiel={chapeau?.fearGreedRef ?? null} sens="hausse-chaud" />
+              </div>
             )}
           </div>
           {corps(news, "Actualités indisponibles.", (titres) =>

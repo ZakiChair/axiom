@@ -34,10 +34,16 @@ import {
   type Operator,
   type ScreenerRow,
 } from "../data/screener";
+import {
+  ouvrirSetupDansChart,
+  signauxStore,
+  type SignauxRunState,
+} from "../store/signaux";
+import type { LigneSignaux, SignalDetecte } from "../data/signaux";
 import { estExtremeColonne, seuilDecile } from "../lib/extremesColonne";
 import { formatPct, formatPrice, formatUsd } from "../lib/format";
 import { metaSource } from "../lib/fiabilite";
-import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, NoteSource, Vide } from "./ui";
+import { Badge, BadgeFiabilite, EnTeteFenetre, ErreurBloc, NoteSource, Segmente, Vide } from "./ui";
 
 /** Colonnes triables de la table de résultats. */
 type SortKey =
@@ -219,6 +225,153 @@ function SortHeader({
 
 // ─────────────────────────── Panneau principal ───────────────────────────
 
+// ─────────────────────────── Vue « Signaux » (inbox de setups) ───────────────────────────
+
+/** Libellé humain de l'état d'un run signaux. */
+function signauxStateLabel(state: SignauxRunState): string {
+  switch (state) {
+    case "idle":
+      return "Prêt";
+    case "loading":
+      return "Chargement de l'univers…";
+    case "running":
+      return "Détection des setups…";
+    case "done":
+      return "Terminé";
+    case "error":
+      return "Erreur";
+  }
+}
+
+/** Ton du badge selon la direction d'un signal / d'une ligne. */
+function tonDirection(direction: SignalDetecte["direction"] | "mixte"): "up" | "down" | "neutre" {
+  return direction === "haussier" ? "up" : direction === "baissier" ? "down" : "neutre";
+}
+
+/** Une ligne de l'inbox : en-tête (symbole, Δ24h, direction, score) + badges de signaux. */
+function LigneSetup({ ligne }: { ligne: LigneSignaux }) {
+  const fleche = ligne.direction === "haussier" ? "▲" : ligne.direction === "baissier" ? "▼" : "◆";
+  return (
+    <div className="space-y-1.5 border-b border-border/50 px-3 py-2 last:border-b-0 hover:bg-surface">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => ouvrirSetupDansChart(ligne.symbol)}
+          className="truncate text-left text-[11px] font-medium text-text transition hover:text-up"
+          title={`Ouvrir ${ligne.symbol} dans le chart (4h)`}
+        >
+          {ligne.symbol}
+        </button>
+        <span
+          className={`tabular-nums text-[11px] ${ligne.priceChangePct24h >= 0 ? "text-up" : "text-down"}`}
+        >
+          {formatPct(ligne.priceChangePct24h)}
+        </span>
+        <span className="flex-1" />
+        <Badge ton={tonDirection(ligne.direction)} title="Direction agrégée des signaux (somme pondérée)">
+          {fleche} {ligne.direction}
+        </Badge>
+        <span
+          className="tabular-nums text-[11px] font-semibold text-text"
+          title="Score de confluence (somme des poids des signaux)"
+        >
+          {ligne.score}
+        </span>
+        <button
+          type="button"
+          onClick={() => ajouterAWatchlist(ligne.symbol)}
+          aria-label={`Ajouter ${ligne.symbol} à la watchlist`}
+          className="rounded px-1 text-text-dim transition hover:text-up"
+          title="Ajouter à la watchlist"
+        >
+          ＋
+        </button>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {ligne.signaux.map((s) => (
+          <Badge key={s.id} ton={tonDirection(s.direction)} title={`${s.detail} · fiabilité : ${s.fiabilite}`}>
+            {s.libelle}
+          </Badge>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Vue Signaux : un bouton de scan, la progression et l'inbox triée par confluence. */
+function VueSignaux() {
+  const runState = useStore(signauxStore, (s) => s.runState);
+  const progress = useStore(signauxStore, (s) => s.progress);
+  const lignes = useStore(signauxStore, (s) => s.lignes);
+  const note = useStore(signauxStore, (s) => s.note);
+  const error = useStore(signauxStore, (s) => s.error);
+  const run = useStore(signauxStore, (s) => s.run);
+  const cancel = useStore(signauxStore, (s) => s.cancel);
+  const busy = runState === "loading" || runState === "running";
+
+  return (
+    <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      <section className="space-y-2">
+        <div className="flex items-center gap-2">
+          {busy ? (
+            <button
+              type="button"
+              onClick={cancel}
+              className="rounded border border-border bg-bg px-3 py-1.5 text-[11px] text-text-dim transition hover:text-down"
+            >
+              Annuler
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={run}
+              className="rounded border border-up/50 bg-bg px-3 py-1.5 text-[11px] font-medium text-up transition hover:bg-up/10"
+            >
+              Scanner les setups
+            </button>
+          )}
+          <span className="text-[11px] text-text-dim">{signauxStateLabel(runState)}</span>
+          {runState === "running" && (
+            <span className="tabular-nums text-[11px] text-text-dim">
+              {progress.done}/{progress.total}
+            </span>
+          )}
+        </div>
+        {runState === "running" && progress.total > 0 && (
+          <div className="h-1 w-full overflow-hidden rounded bg-bg">
+            <div
+              className="h-full bg-up transition-all"
+              style={{ width: `${(progress.done / progress.total) * 100}%` }}
+            />
+          </div>
+        )}
+        {note !== null && <p className="text-[10px] text-text-dim">{note}</p>}
+        {error !== null && <ErreurBloc>{error}</ErreurBloc>}
+      </section>
+
+      <section className="rounded-md border border-border bg-bg">
+        {lignes.length === 0 ? (
+          <Vide>
+            {runState === "done"
+              ? "Aucun setup détecté sur l'échantillon."
+              : "Scannez pour détecter les setups (quadrant OI×prix, funding extrême, divergence RSI, positionnement)."}
+          </Vide>
+        ) : (
+          lignes.map((l) => <LigneSetup key={l.symbol} ligne={l} />)
+        )}
+        {lignes.length > 0 && (
+          <div className="border-t border-border/50 px-3 py-1.5">
+            <NoteSource>
+              Survolez un badge pour la lecture complète et sa fiabilité. Lectures heuristiques —
+              pas des recommandations.
+            </NoteSource>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
 export function ScreenerWindow() {
   const tf = useStore(screenerStore, (s) => s.tf);
   const setTf = useStore(screenerStore, (s) => s.setTf);
@@ -237,6 +390,9 @@ export function ScreenerWindow() {
   const note = useStore(screenerStore, (s) => s.note);
   const run = useStore(screenerStore, (s) => s.run);
   const cancel = useStore(screenerStore, (s) => s.cancel);
+
+  const vue = useStore(signauxStore, (s) => s.vue);
+  const setVue = useStore(signauxStore, (s) => s.setVue);
 
   const [presetName, setPresetName] = useState("");
   const [sort, setSort] = useState<SortState>({ key: "volumeUsd24h", dir: -1 });
@@ -284,8 +440,31 @@ export function ScreenerWindow() {
 
   return (
     <>
-      <EnTeteFenetre mnemo="EQS" titre="Screener" sousTitre="Binance spot USDT/USDC · funding perp" />
+      <EnTeteFenetre
+        mnemo="EQS"
+        titre="Screener"
+        sousTitre={
+          vue === "signaux"
+            ? "Setups par confluence · perp Binance"
+            : "Binance spot USDT/USDC · funding perp"
+        }
+      />
 
+      {/* Bascule Filtres / Signaux — l'état vit dans signauxStore (la commande SIG le force). */}
+      <div className="px-4 pt-3">
+        <Segmente
+          options={[
+            { id: "filtres", label: "Filtres" },
+            { id: "signaux", label: "Signaux" },
+          ] as const}
+          actif={vue}
+          onChange={setVue}
+        />
+      </div>
+
+      {vue === "signaux" ? (
+        <VueSignaux />
+      ) : (
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {/* Presets */}
         <section className="space-y-2">
@@ -555,6 +734,7 @@ export function ScreenerWindow() {
           )}
         </section>
       </div>
+      )}
     </>
   );
 }

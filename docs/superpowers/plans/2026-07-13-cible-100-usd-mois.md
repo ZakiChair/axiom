@@ -703,6 +703,11 @@ Deux modes d’exécution :
 
 Statuts : **code-complete** = livré en main (commits W0–W3) ; **manual QA** = non encore exécuté en conditions réelles. Aucun PASS/FAIL définitif avant E2.
 
+> **2026-07-22 — automatisation E2 livrée** : specs Playwright `apps/web/e2e/gate-*.e2e.ts`
+> (16 tests, G2/G3/G4/G6/G7/G8/G10) + `scripts/gate/g5-daemon-journal.sh` +
+> `scripts/gate/g9-up-smoke.sh`, premiers runs verts. Protocole complet (partie
+> automatisée + noyau manuel + clôture) : [`2026-07-22-gate-g100-qa.md`](2026-07-22-gate-g100-qa.md).
+
 | Critère | Statut | Notes (commits / lots) |
 |---|---|---|
 | G1 | code-complete · **manual QA** | A0 `4cbbde3` resync CVD + health ; watch 30 min live à faire |

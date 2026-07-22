@@ -2,8 +2,9 @@
  * Fenêtre « Options » (mnémonique OMON) — dockable à droite, NON MODALE. Source Deribit.
  *
  * Par échéance sélectionnée : SMILE de volatilité implicite (IV mark par strike, calls et
- * puts), MAX PAIN calculé côté client (fonction pure), PUT/CALL ratio sur l'open interest et
- * DVOL (indice de volatilité implicite) si disponible. Sélecteurs devise (BTC/ETH) + échéance.
+ * puts), MAX PAIN calculé côté client (fonction pure), PUT/CALL ratio sur l'open interest,
+ * SKEW 25Δ (risk reversal — fonction pure, data/skew.ts) et DVOL (indice de volatilité
+ * implicite) si disponible. Sélecteurs devise (BTC/ETH) + échéance.
  *
  * Données LENTES (~1 min) : elles vivent dans le state React ; le smile est redessiné
  * impérativement au canvas. Le polling ne tourne QUE fenêtre ouverte. Dégradation gracieuse :
@@ -27,6 +28,7 @@ import {
   EQUITY_CONTRACT_MULTIPLIER,
   type GexDexPoint,
 } from "../data/gexDex";
+import { calculerSkew25d } from "../data/skew";
 import {
   CBOE_TICKERS,
   cboeExpiries,
@@ -36,7 +38,7 @@ import {
   type CboeTicker,
 } from "../data/cboe";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
-import { formatUsd, formatDec, formatPourcentage } from "../lib/format";
+import { formatUsd, formatDec, formatPct, formatPourcentage } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 import { indicesVisibles, valeurVersPixel, pixelVersValeur, type Domaine } from "../lib/domaineAxe";
 import { useDomaineZoom } from "../hooks/useDomaineZoom";
@@ -469,6 +471,12 @@ export function OptionsWindow() {
     const u = pointsEcheance.map((p) => p.underlying).find((v) => Number.isFinite(v) && v > 0);
     return u ?? NaN;
   }, [pointsEcheance]);
+  // Skew 25Δ (risk reversal) de l'échéance sélectionnée — deltas Black-Scholes côté client
+  // (même injection du temps que computeCryptoGexDex). Null si pas de jambe proche de 25Δ.
+  const skew25 = useMemo(
+    () => calculerSkew25d(pointsEcheance, underlying, Date.now()),
+    [pointsEcheance, underlying],
+  );
 
   // Domaine d'axe strike (smile) : bornes = min/max des strikes de l'échéance sélectionnée —
   // se réinitialise automatiquement quand devise/échéance changent (pointsEcheance en dépend).
@@ -771,12 +779,24 @@ export function OptionsWindow() {
               couleur={Number.isFinite(pcRatio) ? (pcRatio > 1 ? "var(--down)" : "var(--up)") : undefined}
             />
             <Metric label="DVOL" value={formatPourcentage(dvol, 1)} />
+            <Metric
+              label="Skew 25Δ (RR)"
+              value={formatPct(skew25?.rr25 ?? null, 1)}
+              couleur={
+                skew25 && skew25.rr25 !== 0
+                  ? skew25.rr25 > 0
+                    ? "var(--up)"
+                    : "var(--down)"
+                  : undefined
+              }
+            />
           </div>
 
           <div className="mt-3">
             <NoteSource>
               Max pain calculé côté client (min. de valeur intrinsèque versée aux détenteurs).
-              Données Deribit, ~1 min.
+              Skew 25Δ = IV(call 25Δ) − IV(put 25Δ), deltas Black-Scholes côté client
+              (négatif = puts chers). Données Deribit, ~1 min.
             </NoteSource>
           </div>
         </div>
@@ -864,6 +884,9 @@ export const commandes: Commande[] = [
       "max pain",
       "put call ratio",
       "dvol",
+      "skew",
+      "risk reversal",
+      "rr25",
       "deribit",
       "gex",
       "dex",

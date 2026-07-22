@@ -2,8 +2,9 @@
 # One-shot AXIOM : daemon + front (dev) ou daemon servant le build (prod).
 #
 # Usage (racine du repo) :
-#   pnpm up              # daemon + Vite dev (http://localhost:5173)
-#   pnpm up:prod         # build front + daemon (http://127.0.0.1:8787)
+#   pnpm run up          # daemon + Vite dev (http://localhost:5173)
+#   pnpm run up:prod     # build front + daemon (http://127.0.0.1:8787)
+#   (`run` obligatoire : `pnpm up` nu = builtin pnpm `update`, alias réservé)
 #   ./scripts/axiom-up.sh [--prod]
 #
 # Prérequis : pnpm, bun, curl. `pnpm install` auto si node_modules absent.
@@ -29,7 +30,7 @@ done
 
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "erreur: \`$1\` introuvable — installez-le avant \`pnpm up\`." >&2
+    echo "erreur: \`$1\` introuvable — installez-le avant \`pnpm run up\`." >&2
     exit 1
   fi
 }

@@ -42,11 +42,14 @@ cp apps/web/.env.example apps/web/.env   # puis renseigner les clés utiles
 One-shot (recommandé) — cold-start en une commande :
 
 ```bash
-pnpm up           # daemon + Vite dev → http://localhost:5173
-pnpm up:prod      # build front + daemon → http://127.0.0.1:8787
+pnpm run up       # daemon + Vite dev → http://localhost:5173
+pnpm run up:prod  # build front + daemon → http://127.0.0.1:8787
 ```
 
-`pnpm up` vérifie `pnpm`/`bun`, lance `pnpm install` si besoin, démarre le daemon
+> ⚠️ `run` obligatoire : `pnpm up` **nu** résout vers le builtin pnpm `update`
+> (alias réservé `up`) — il ne lance pas le stack et peut muter le lockfile.
+
+`pnpm run up` vérifie `pnpm`/`bun`, lance `pnpm install` si besoin, démarre le daemon
 (log `logs/daemon.log`), attend `/health` (15 s), puis le front. Ctrl+C arrête
 les process lancés par le script.
 
@@ -54,8 +57,8 @@ les process lancés par le script.
 
 | Commande | Effet |
 |---|---|
-| `pnpm up` | One-shot dev (daemon + Vite) |
-| `pnpm up:prod` | One-shot prod (build + daemon sert le dist) |
+| `pnpm run up` | One-shot dev (daemon + Vite) |
+| `pnpm run up:prod` | One-shot prod (build + daemon sert le dist) |
 | `pnpm dev` | Front Vite seul (dev, proxys CORS intégrés) |
 | `pnpm daemon` | Daemon localhost `127.0.0.1:8787` |
 | `pnpm prod` | Build front + sert le dist via le daemon |
@@ -71,7 +74,7 @@ pnpm daemon       # http://127.0.0.1:8787  (optionnel en dev)
 pnpm dev          # http://localhost:5173
 ```
 
-Prod locale (équivalent manuel de `pnpm up:prod`) :
+Prod locale (équivalent manuel de `pnpm run up:prod`) :
 
 ```bash
 pnpm prod
@@ -89,7 +92,7 @@ pnpm prod
 
 ### Programme G100 (WTP 100 $/mois) — W0–W3 landés
 
-Les vagues **W0–W3** du plan `docs/superpowers/plans/2026-07-13-cible-100-usd-mois.md` sont **mergées en main** (confiance CVD/badges, `pnpm up`, onboarding, session strip, alertes edge + funding daemon, playbooks, screener positionnement, bus panneau→chart, import CSV, brief review). **W4 / gate G100** (E1 polish + E2 QA checklist G1–G10) reste à valider manuellement — voir section 14 du plan (statut provisoire *code-complete · manual QA*).
+Les vagues **W0–W3** du plan `docs/superpowers/plans/2026-07-13-cible-100-usd-mois.md` sont **mergées en main** (confiance CVD/badges, `pnpm run up`, onboarding, session strip, alertes edge + funding daemon, playbooks, screener positionnement, bus panneau→chart, import CSV, brief review). **W4 / gate G100** (E1 polish + E2 QA checklist G1–G10) reste à valider manuellement — voir section 14 du plan (statut provisoire *code-complete · manual QA*).
 
 ## Secrets
 

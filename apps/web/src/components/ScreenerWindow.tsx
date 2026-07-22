@@ -298,6 +298,75 @@ function LigneSetup({ ligne }: { ligne: LigneSignaux }) {
   );
 }
 
+/** Cellule de stats d'une validation : n · taux de réussite · moyenne vs référence. */
+function CelluleValidation({ stats }: { stats: { n: number; tauxReussitePct: number; moyennePct: number; baselineMoyennePct: number } | null }) {
+  if (stats === null) return <span className="text-right text-[11px] text-text-dim">—</span>;
+  const bat = stats.moyennePct > stats.baselineMoyennePct;
+  return (
+    <span className="text-right tabular-nums text-[11px]">
+      <span className="text-text-dim">{stats.n}× · </span>
+      <span className={stats.tauxReussitePct >= 50 ? "text-up" : "text-down"}>
+        {stats.tauxReussitePct.toFixed(0)} %
+      </span>
+      <span className={`ml-1 ${bat ? "text-up" : "text-down"}`}>
+        {stats.moyennePct >= 0 ? "+" : ""}
+        {stats.moyennePct.toFixed(2)} %
+      </span>
+      <span className="text-text-dim"> (réf {stats.baselineMoyennePct >= 0 ? "+" : ""}{stats.baselineMoyennePct.toFixed(2)} %)</span>
+    </span>
+  );
+}
+
+/** Section « Validation historique » : event study des signaux sur l'échantillon scanné. */
+function SectionValidation() {
+  const etat = useStore(signauxStore, (s) => s.validationState);
+  const progres = useStore(signauxStore, (s) => s.validationProgress);
+  const resultat = useStore(signauxStore, (s) => s.validation);
+  const erreur = useStore(signauxStore, (s) => s.validationError);
+  const valider = useStore(signauxStore, (s) => s.validerSignaux);
+
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center gap-2">
+        <div className="text-[10px] uppercase tracking-wide text-text-dim">Validation historique</div>
+        <button
+          type="button"
+          onClick={valider}
+          disabled={etat === "running"}
+          className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text disabled:opacity-40"
+        >
+          {etat === "running" ? `Mesure… ${progres.done}/${progres.total}` : "Valider sur l'historique"}
+        </button>
+      </div>
+      {erreur !== null && <p className="text-[10px] text-warn">{erreur}</p>}
+      {resultat !== null && (
+        <div className="rounded-md border border-border bg-bg">
+          <div className="grid grid-cols-[1.2fr_1fr_1fr] items-center gap-2 border-b border-border px-3 py-1.5 text-[10px] uppercase tracking-wide text-text-dim">
+            <span>Signal</span>
+            <span className="text-right">24 h</span>
+            <span className="text-right">72 h</span>
+          </div>
+          {resultat.parSignal.map((s) => (
+            <div
+              key={s.id}
+              className="grid grid-cols-[1.2fr_1fr_1fr] items-center gap-2 border-b border-border/50 px-3 py-1.5 last:border-b-0"
+              title="n événements · taux de réussite (rendement signé > 0) · rendement signé moyen vs référence (drift inconditionnel signé)"
+            >
+              <span className="text-[11px] text-text">{s.libelle}</span>
+              {s.horizons.map((h) => (
+                <CelluleValidation key={h.id} stats={h.stats} />
+              ))}
+            </div>
+          ))}
+          <div className="border-t border-border/50 px-3 py-1.5">
+            <NoteSource>{resultat.note}</NoteSource>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** Vue Signaux : un bouton de scan, la progression et l'inbox triée par confluence. */
 function VueSignaux() {
   const runState = useStore(signauxStore, (s) => s.runState);
@@ -368,6 +437,8 @@ function VueSignaux() {
           </div>
         )}
       </section>
+
+      {runState === "done" && <SectionValidation />}
     </div>
   );
 }

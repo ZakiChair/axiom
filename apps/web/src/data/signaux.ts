@@ -113,16 +113,15 @@ export function signalQuadrantOiPrix(
 // ─────────────────────────── Funding extrême (B2, z-score temporel) ───────────────────────────
 
 /**
- * Z-score du DERNIER funding réglé vs la fenêtre des `FENETRE_Z_FUNDING` points
- * précédents. Lecture CONTRARIAN : funding très positif = longs crowded = baissier.
- * `hist` = fractions (série `histFunding`), triées croissantes. null si fenêtre
- * incomplète, écart-type nul, ou |z| < seuil. PURE.
+ * Z-score du funding à l'index `i` vs la fenêtre des `FENETRE_Z_FUNDING` points
+ * précédents (i exclu). null si fenêtre incomplète, valeur non finie ou écart-type
+ * nul. PURE — réutilisé par la validation historique à tout index.
  */
-export function signalFundingExtreme(hist: readonly number[]): SignalDetecte | null {
-  if (hist.length < FENETRE_Z_FUNDING + 1) return null;
-  const dernier = hist[hist.length - 1];
-  if (dernier === undefined || !Number.isFinite(dernier)) return null;
-  const fenetre = hist.slice(-(FENETRE_Z_FUNDING + 1), -1);
+export function zScoreFunding(hist: readonly number[], i: number): number | null {
+  if (i < FENETRE_Z_FUNDING || i >= hist.length) return null;
+  const valeur = hist[i];
+  if (valeur === undefined || !Number.isFinite(valeur)) return null;
+  const fenetre = hist.slice(i - FENETRE_Z_FUNDING, i);
 
   let somme = 0;
   for (const v of fenetre) somme += v;
@@ -131,9 +130,18 @@ export function signalFundingExtreme(hist: readonly number[]): SignalDetecte | n
   for (const v of fenetre) variance += (v - moyenne) ** 2;
   const ecartType = Math.sqrt(variance / fenetre.length);
   if (ecartType === 0) return null;
+  return (valeur - moyenne) / ecartType;
+}
 
-  const z = (dernier - moyenne) / ecartType;
-  if (Math.abs(z) < SEUIL_Z_FUNDING) return null;
+/**
+ * Signal « funding extrême » sur le DERNIER funding réglé. Lecture CONTRARIAN :
+ * funding très positif = longs crowded = baissier. `hist` = fractions (série
+ * `histFunding`), triées croissantes. null si |z| < seuil ou z incalculable. PURE.
+ */
+export function signalFundingExtreme(hist: readonly number[]): SignalDetecte | null {
+  const z = zScoreFunding(hist, hist.length - 1);
+  if (z === null || Math.abs(z) < SEUIL_Z_FUNDING) return null;
+  const dernier = hist[hist.length - 1] as number;
 
   const crowdedLong = z > 0;
   const pct8h = (dernier * 100).toFixed(4);
@@ -187,25 +195,36 @@ export function pivotsLocaux(
   return out;
 }
 
+/** Divergence détectée : direction + pivots (indices ABSOLUS dans la série passée). */
+export interface DivergenceRsi {
+  direction: DirectionSignal;
+  /** Index absolu du pivot de prix final — clé de dédoublonnage de la validation. */
+  indexPivotFinal: number;
+  prix1: number;
+  prix2: number;
+  rsi1: number;
+  rsi2: number;
+}
+
 /**
- * Divergence classique prix/RSI sur les `FENETRE_DIVERGENCE` dernières bougies :
+ * CŒUR de la divergence prix/RSI sur les `FENETRE_DIVERGENCE` dernières bougies :
  *  - baissière : le prix fait un plus-haut plus haut, le RSI un plus-haut plus bas ;
  *  - haussière : le prix fait un plus-bas plus bas, le RSI un plus-bas plus haut.
  * Le pivot le plus récent doit dater de ≤ FRAICHEUR_DIVERGENCE bougies (setup
  * actionnable, pas de l'archéologie). Si les deux existent, la plus récente gagne.
  * `closes` et `rsi` sont alignés index à index. PURE, heuristique assumée.
  */
-export function signalDivergenceRsi(
+export function detecterDivergenceRsi(
   closes: ReadonlyArray<number>,
   rsi: ReadonlyArray<number | undefined>,
-): SignalDetecte | null {
+): DivergenceRsi | null {
   const n = closes.length;
   if (n < PIVOT_K * 2 + 2) return null;
   const debut = Math.max(0, n - FENETRE_DIVERGENCE);
   const fenetreCloses = closes.slice(debut);
   const fenetreRsi = rsi.slice(debut);
 
-  const construire = (sens: "haut" | "bas"): { signal: SignalDetecte; recence: number } | null => {
+  const construire = (sens: "haut" | "bas"): DivergenceRsi | null => {
     const pivots = pivotsLocaux(fenetreCloses, sens);
     if (pivots.length < 2) return null;
     const p1 = pivots[pivots.length - 2];
@@ -222,28 +241,43 @@ export function signalDivergenceRsi(
     if (!prixDiverge || !rsiDiverge) return null;
 
     return {
-      recence: p2.index,
-      signal: {
-        id: "divergence-rsi",
-        direction: baissiere ? "baissier" : "haussier",
-        libelle: baissiere ? "Divergence RSI baissière" : "Divergence RSI haussière",
-        detail:
-          (baissiere
-            ? `prix en plus-haut (${p1.value.toPrecision(5)} → ${p2.value.toPrecision(5)}), RSI en retrait (${r1.toFixed(0)} → ${r2.toFixed(0)})`
-            : `prix en plus-bas (${p1.value.toPrecision(5)} → ${p2.value.toPrecision(5)}), RSI en reprise (${r1.toFixed(0)} → ${r2.toFixed(0)})`) +
-          " · pivots 4 h — heuristique, pas une donnée",
-        fiabilite: "heuristique",
-        poids: 2,
-      },
+      direction: baissiere ? "baissier" : "haussier",
+      indexPivotFinal: debut + p2.index,
+      prix1: p1.value,
+      prix2: p2.value,
+      rsi1: r1,
+      rsi2: r2,
     };
   };
 
   const baissiere = construire("haut");
   const haussiere = construire("bas");
   if (baissiere !== null && haussiere !== null) {
-    return baissiere.recence >= haussiere.recence ? baissiere.signal : haussiere.signal;
+    return baissiere.indexPivotFinal >= haussiere.indexPivotFinal ? baissiere : haussiere;
   }
-  return baissiere?.signal ?? haussiere?.signal ?? null;
+  return baissiere ?? haussiere;
+}
+
+/** Habillage SignalDetecte de `detecterDivergenceRsi` (libellés + fiabilité). */
+export function signalDivergenceRsi(
+  closes: ReadonlyArray<number>,
+  rsi: ReadonlyArray<number | undefined>,
+): SignalDetecte | null {
+  const d = detecterDivergenceRsi(closes, rsi);
+  if (d === null) return null;
+  const baissiere = d.direction === "baissier";
+  return {
+    id: "divergence-rsi",
+    direction: d.direction,
+    libelle: baissiere ? "Divergence RSI baissière" : "Divergence RSI haussière",
+    detail:
+      (baissiere
+        ? `prix en plus-haut (${d.prix1.toPrecision(5)} → ${d.prix2.toPrecision(5)}), RSI en retrait (${d.rsi1.toFixed(0)} → ${d.rsi2.toFixed(0)})`
+        : `prix en plus-bas (${d.prix1.toPrecision(5)} → ${d.prix2.toPrecision(5)}), RSI en reprise (${d.rsi1.toFixed(0)} → ${d.rsi2.toFixed(0)})`) +
+      " · pivots 4 h — heuristique, pas une donnée",
+    fiabilite: "heuristique",
+    poids: 2,
+  };
 }
 
 // ─────────────────────────── Positionnement top traders vs foule (B6) ───────────────────────────

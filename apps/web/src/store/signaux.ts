@@ -42,6 +42,18 @@ import {
   SIGNAUX_CAP,
   type LigneSignaux,
 } from "../data/signaux";
+import {
+  etudeEvenements,
+  evenementsDivergenceRsi,
+  evenementsFundingExtreme,
+  finaliserEtude,
+  fusionnerEtudes,
+  HORIZONS_VALIDATION,
+  type SommesEtude,
+  type StatsEtude,
+} from "../data/validationSignaux";
+import type { PointSerie } from "../lib/referentiel";
+import { futuresSymbol } from "../data/binanceFutures";
 import { mapPool } from "./screener";
 import { watchlistStore } from "./watchlist";
 import { windowManagerStore } from "./windowManager";
@@ -59,6 +71,16 @@ const DIVERGENCE_KLINE_LIMIT = 200;
 export type VueScreener = "filtres" | "signaux";
 export type SignauxRunState = "idle" | "loading" | "running" | "done" | "error";
 
+/** Résultats de la validation historique, par type de signal validable × horizon. */
+export interface ResultatValidation {
+  parSignal: {
+    id: "funding" | "divergence-rsi";
+    libelle: string;
+    horizons: { id: string; libelle: string; stats: StatsEtude | null }[];
+  }[];
+  note: string;
+}
+
 export interface SignauxState {
   /** Vue affichée par la fenêtre EQS (la commande SIG force « signaux »). */
   vue: VueScreener;
@@ -71,10 +93,21 @@ export interface SignauxState {
   error: string | null;
   run: () => void;
   cancel: () => void;
+
+  // — Validation historique (event study sur l'échantillon du dernier scan) —
+  validationState: SignauxRunState;
+  validationProgress: { done: number; total: number };
+  validation: ResultatValidation | null;
+  validationError: string | null;
+  validerSignaux: () => void;
 }
 
 /** Identifiant du run courant : les résultats d'un run périmé sont ignorés. */
 let currentRunId = 0;
+/** Identifiant du run de validation courant (annulation / relance). */
+let validationRunId = 0;
+/** Échantillon du dernier scan — la validation porte sur CE qui a été scanné. */
+let dernierEchantillon: ScreenerRow[] = [];
 
 /** Télécharge et convertit les klines spot d'un symbole (même parsing que le worker EQS). */
 async function fetchCandles(symbol: string, interval: string, limit: number): Promise<Candle[]> {
@@ -150,6 +183,76 @@ async function evaluerSymbole(row: ScreenerRow): Promise<LigneSignaux | null> {
   return agregerSignaux(row, [funding, quadrant, positionnement, divergence]);
 }
 
+// ─────────────────────────── Validation historique (event study) ───────────────────────────
+
+/** Durée d'une bougie 4 h (ms) — grille d'entrée de l'event study. */
+const DUREE_4H_MS = 4 * 3_600_000;
+/** Profondeur klines de la validation (max 1 requête Binance) : 1000 × 4 h ≈ 166 j. */
+const VALIDATION_KLINE_LIMIT = 1000;
+/** Profondeur funding de la validation (max API) : 1000 règlements 8 h ≈ 333 j. */
+const VALIDATION_FUNDING_LIMIT = 1000;
+
+/**
+ * Funding réglé PROFOND (fetch direct, sans le cache 270 points de histFunding —
+ * la validation est ponctuelle et veut le maximum d'événements). Fractions, trié.
+ */
+async function fetchFundingProfond(symbol: string): Promise<PointSerie[]> {
+  const url = extUrl(
+    "fapi.binance.com",
+    `fapi/v1/fundingRate?symbol=${encodeURIComponent(futuresSymbol(symbol))}&limit=${VALIDATION_FUNDING_LIMIT}`,
+  );
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`fundingRate ${res.status}`);
+  const brut: unknown = await res.json();
+  if (!Array.isArray(brut)) return [];
+  const points: PointSerie[] = [];
+  for (const item of brut) {
+    const o = item as { fundingTime?: unknown; fundingRate?: unknown };
+    const t = Number(o.fundingTime);
+    const v = Number(o.fundingRate);
+    if (Number.isFinite(t) && Number.isFinite(v)) points.push({ t, v });
+  }
+  points.sort((a, b) => a.t - b.t);
+  return points;
+}
+
+/** Sommes d'étude d'UN symbole, indexées comme HORIZONS_VALIDATION. */
+interface SommesSymbole {
+  funding: SommesEtude[];
+  divergence: SommesEtude[];
+}
+
+const sommesVides = (): SommesEtude => ({ n: 0, reussites: 0, sommePct: 0, sommeBaselinePct: 0 });
+
+/** Rejoue les deux signaux validables d'un symbole et mesure leurs événements. */
+async function validerSymbole(symbol: string): Promise<SommesSymbole> {
+  const [fundingRes, klinesRes] = await Promise.allSettled([
+    fetchFundingProfond(symbol),
+    fetchCandles(symbol, DIVERGENCE_TF, VALIDATION_KLINE_LIMIT),
+  ]);
+  // Sans klines, rien n'est mesurable (les rendements forward viennent de là).
+  if (klinesRes.status !== "fulfilled" || klinesRes.value.length === 0) {
+    return {
+      funding: HORIZONS_VALIDATION.map(sommesVides),
+      divergence: HORIZONS_VALIDATION.map(sommesVides),
+    };
+  }
+  const candles = klinesRes.value;
+  const closes = candles.map((c) => c.close);
+  const times = candles.map((c) => c.time);
+  const evDivergence = evenementsDivergenceRsi(closes, serieRsi(candles), times, DUREE_4H_MS);
+  const evFunding =
+    fundingRes.status === "fulfilled" ? evenementsFundingExtreme(fundingRes.value) : [];
+  return {
+    funding: HORIZONS_VALIDATION.map((h) =>
+      etudeEvenements(evFunding, times, closes, h.bougies, DUREE_4H_MS),
+    ),
+    divergence: HORIZONS_VALIDATION.map((h) =>
+      etudeEvenements(evDivergence, times, closes, h.bougies, DUREE_4H_MS),
+    ),
+  };
+}
+
 export const signauxStore = createStore<SignauxState>((set) => ({
   vue: "filtres",
   setVue: (vue) => set({ vue }),
@@ -194,7 +297,16 @@ export const signauxStore = createStore<SignauxState>((set) => ({
         set({ runState: "done", lignes: [], note: "Aucun symbole à perp dans l'univers." });
         return;
       }
-      set({ runState: "running", progress: { done: 0, total: echantillon.length } });
+      // Nouveau scan → l'ancienne validation ne décrit plus l'échantillon affiché.
+      dernierEchantillon = echantillon;
+      validationRunId++;
+      set({
+        runState: "running",
+        progress: { done: 0, total: echantillon.length },
+        validationState: "idle",
+        validation: null,
+        validationError: null,
+      });
 
       // 3. Détection par symbole (pool) — la progression avance au fil de l'eau.
       const lignes = (
@@ -224,7 +336,62 @@ export const signauxStore = createStore<SignauxState>((set) => ({
 
   cancel: () => {
     currentRunId++; // invalide les résultats en vol
-    set({ runState: "idle" });
+    validationRunId++;
+    set({ runState: "idle", validationState: "idle" });
+  },
+
+  validationState: "idle",
+  validationProgress: { done: 0, total: 0 },
+  validation: null,
+  validationError: null,
+
+  validerSignaux: () => {
+    if (dernierEchantillon.length === 0) {
+      set({ validationState: "error", validationError: "Lancez d'abord un scan : la validation porte sur l'échantillon scanné." });
+      return;
+    }
+    const runId = ++validationRunId;
+    const echantillon = dernierEchantillon;
+    set({
+      validationState: "running",
+      validationProgress: { done: 0, total: echantillon.length },
+      validation: null,
+      validationError: null,
+    });
+
+    void (async () => {
+      const parSymbole = (
+        await mapPool(echantillon, SIGNAUX_CONCURRENCY, async (row) => {
+          const sommes = await validerSymbole(row.symbol);
+          if (runId === validationRunId) {
+            set((s) => ({
+              validationProgress: { done: s.validationProgress.done + 1, total: s.validationProgress.total },
+            }));
+          }
+          return sommes;
+        })
+      ).filter((s): s is SommesSymbole => s !== null && s !== undefined);
+      if (runId !== validationRunId) return;
+
+      const cellule = (type: "funding" | "divergence", i: number) =>
+        finaliserEtude(fusionnerEtudes(parSymbole.map((s) => s[type][i] ?? sommesVides())));
+      const horizons = (type: "funding" | "divergence") =>
+        HORIZONS_VALIDATION.map((h, i) => ({ id: h.id, libelle: h.libelle, stats: cellule(type, i) }));
+
+      set({
+        validationState: "done",
+        validation: {
+          parSignal: [
+            { id: "funding", libelle: "Funding extrême (contrarian)", horizons: horizons("funding") },
+            { id: "divergence-rsi", libelle: "Divergence RSI", horizons: horizons("divergence") },
+          ],
+          note:
+            `event study sur ${echantillon.length} symboles · ~333 j de funding réglé, ~166 j de klines 4 h · ` +
+            "rendements signés par la direction, sans frais ni slippage — mesure du signal, pas d'une stratégie exécutable · " +
+            "quadrant OI×prix et positionnement non validables (historiques OI/L-S gratuits ≈ 20-30 j)",
+        },
+      });
+    })();
   },
 }));
 

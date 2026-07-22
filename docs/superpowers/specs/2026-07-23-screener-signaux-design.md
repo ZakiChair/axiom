@@ -44,6 +44,30 @@ Lot B (lectures interprétées) : le terminal détecte et nomme les setups.
   signaux. Source greffée `store/signaux.ts`, enregistrée dans App.tsx et couverte
   par le test d'unicité (SOURCES_GREFFEES).
 
+## Extension (même jour) — Validation historique (event study)
+
+Mesurer l'edge réel des signaux au lieu de citer le doc 02 :
+
+- **Méthode : event study, PAS le moteur @axiom/backtest** — les détecteurs (pivots,
+  z-score sur série auxiliaire) ne s'expriment pas dans le modèle
+  comparaison/croisement du moteur, et surtout un backtest exécutable (sorties, stop,
+  sizing, frais) mesurerait la stratégie, pas le signal. On mesure : rendements
+  forward à horizon fixe (24 h / 72 h) après chaque déclenchement historique, signés
+  par la direction du signal, vs référence inconditionnelle (drift du sous-jacent
+  signé par le même mix de directions).
+- **Périmètre = les deux signaux de poids 2** : funding extrême (fundingRate
+  `limit=1000` ≈ 333 j, ~1000 règlements) et divergence RSI (klines 4 h ×1000 ≈
+  166 j). Quadrant et positionnement NON validables (OI/L-S gratuits limités à
+  ~20-30 j → trop peu d'événements) — affiché honnêtement dans l'UI.
+- **Anti-double-comptage** : funding = hystérésis (un franchissement de seuil = UN
+  événement, réarmé quand |z| repasse sous le seuil) ; divergence = détection
+  incrémentale barre par barre, dédoublonnée par (direction, pivot final).
+- **Pas de look-ahead** : une divergence est datée de la barre où elle devient
+  détectable (pivot final + k bougies de confirmation), pas du pivot.
+- Agrégation sur l'échantillon du run (sommes poolées par type de signal), UI dans
+  la vue Signaux (« Valider sur l'historique »), note : période couverte, sans
+  frais/slippage, event study ≠ stratégie exécutable.
+
 ## Vérification
 
 - TDD sur `data/signaux.ts` (détecteurs, pivots, confluence, sélection échantillon).

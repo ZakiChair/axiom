@@ -111,8 +111,8 @@ const SOURCES_GREFFEES: Record<string, readonly Commande[]> = {
  *  - `workspace:*` : défini inline dans Toolbar.tsx (importe chart/Chart → klinecharts
  *    et des composants React non évaluables hors navigateur).
  * Le miroir verrouille les sources IMPORTÉES contre une collision avec ces mnémoniques
- * connus ; il ne détectera PAS une commande inline AJOUTÉE plus tard à App.tsx ou
- * Toolbar.tsx (exclusion résiduelle assumée).
+ * connus. Une commande inline AJOUTÉE plus tard à App.tsx ou Toolbar.tsx est détectée
+ * par le test « aucun mnémonique inline inconnu » (scan des sources) plus bas.
  */
 const MIROIR_COMMANDES_INLINE: { id: string; mnemonique: string; source: string }[] = [
   { id: "layout:1", mnemonique: "GRID1", source: "App.tsx (inline)" },
@@ -356,5 +356,28 @@ describe("unicité globale — ids et mnémoniques de TOUTES les sources", () =>
       ).toBeUndefined();
       vus.set(cle, `${c.id} (${c.source})`);
     }
+  });
+
+  it("aucun mnémonique inline inconnu dans App.tsx / Toolbar.tsx (scan des sources)", async () => {
+    // Ferme la limite du miroir statique : tout littéral `mnemonique: "X"` écrit dans
+    // ces deux fichiers doit exister dans l'union (miroir inline, source greffée ou
+    // registre statique — les entrées de MENU réutilisent le mnémonique de leur
+    // commande, ex. TICKER). Une commande inline ajoutée avec un mnémonique NEUF fait
+    // donc échouer ce test tant que MIROIR_COMMANDES_INLINE n'est pas mis à jour.
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const connus = new Set(
+      union.filter((c) => c.mnemonique !== undefined).map((c) => c.mnemonique!.toLowerCase()),
+    );
+    const FICHIERS = ["../App.tsx", "../components/Toolbar.tsx"];
+    const inconnus: string[] = [];
+    for (const rel of FICHIERS) {
+      const source = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf-8");
+      for (const m of source.matchAll(/\bmnemonique\s*:\s*"([^"]+)"/g)) {
+        const mnemo = m[1] as string;
+        if (!connus.has(mnemo.toLowerCase())) inconnus.push(`${rel} : « ${mnemo} »`);
+      }
+    }
+    expect(inconnus, "mnémonique(s) inline hors miroir — mettre à jour MIROIR_COMMANDES_INLINE").toEqual([]);
   });
 });

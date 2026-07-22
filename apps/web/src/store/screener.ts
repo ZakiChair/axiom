@@ -145,8 +145,9 @@ function writeUserPresets(presets: ScreenerPreset[]): void {
 /**
  * Exécute `fn` sur chaque item avec un plafond de concurrence (pool simple).
  * Préserve l'ordre des résultats. PURE sur le contrôle de flux (I/O via fn).
+ * Exporté : réutilisé par le run de la vue Signaux (store/signaux.ts).
  */
-async function mapPool<T, R>(
+export async function mapPool<T, R>(
   items: readonly T[],
   concurrency: number,
   fn: (item: T) => Promise<R>,

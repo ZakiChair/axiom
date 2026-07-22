@@ -63,6 +63,7 @@ import { commandes as onchainCommandes } from "../store/onchain";
 import { commandes as portfolioCommandes } from "../store/portfolio";
 import { commandes as notesCommandes } from "../store/notes";
 import { commandesScreener } from "../store/screener";
+import { commandesSignaux } from "../store/signaux";
 import { commandes as derivChartCommandes } from "../store/derivatives-chart";
 import { commandes as marksCommandes } from "../chart/tradeMarkers";
 import { commandes as liqMarksCommandes } from "../chart/liquidationMarkers";
@@ -88,6 +89,7 @@ const SOURCES_GREFFEES: Record<string, readonly Commande[]> = {
   "store/portfolio": portfolioCommandes,
   "store/notes": notesCommandes,
   "store/screener": commandesScreener,
+  "store/signaux": commandesSignaux,
   "store/derivatives-chart": derivChartCommandes,
   "chart/tradeMarkers": marksCommandes,
   "chart/liquidationMarkers": liqMarksCommandes,

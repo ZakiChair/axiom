@@ -43,6 +43,14 @@ describe("formaterNiveauCourt", () => {
     expect(formaterNiveauCourt(0.2345)).toBe("0.2345");
     expect(formaterNiveauCourt(0.0013)).toBe("0.001300");
   });
+
+  it("niveau ≤ 0 (échelle percentage) : format signé, jamais « — »", () => {
+    // En échelle %, convertFromPixel renvoie un pourcentage — un clic sous 0 est
+    // légitime et l'alerte créée est correcte : le libellé doit suivre.
+    expect(formaterNiveauCourt(-2.34)).toBe("−2.34");
+    expect(formaterNiveauCourt(0)).toBe("0.00");
+    expect(formaterNiveauCourt(-0.0013)).toBe("−0.001300");
+  });
 });
 
 describe("pipeline clic → NouvelleAlerte", () => {

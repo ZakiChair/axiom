@@ -33,6 +33,7 @@ import { cvdDivergenceStore } from "../store/cvd-divergence";
 import { detectImbalances, detectDeltaDivergences, type DivergenceFlag } from "./footprintAnalytics";
 import { subscribePerpAggTrades } from "../data/binanceFutures";
 import { detectCvdDivergences, type CvdDivergence } from "./cvdSpotPerp";
+import { precisionCvd } from "./cvdPrecision";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 // Calcul pur (CVD, footprint, formatteurs) — cf. ./orderflow.calc.
 import {
@@ -371,7 +372,7 @@ export class OrderflowController {
     if (this.cvdPaneId) return;
     const cvd = computeCvd(this.store.getState().candles);
     const id = this.chart.createIndicator(
-      { name: CVD_NAME, extendData: { cvd } },
+      { name: CVD_NAME, extendData: { cvd }, precision: precisionCvd(cvd) },
       true,
       { id: CVD_PANE_ID }
     );
@@ -388,7 +389,7 @@ export class OrderflowController {
     if (!this.cvdPaneId) return;
     const cvd = computeCvd(this.store.getState().candles);
     this.chart.overrideIndicator(
-      { name: CVD_NAME, extendData: { cvd } },
+      { name: CVD_NAME, extendData: { cvd }, precision: precisionCvd(cvd) },
       this.cvdPaneId
     );
   }

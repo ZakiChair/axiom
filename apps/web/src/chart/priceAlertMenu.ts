@@ -63,10 +63,20 @@ export function itemsMenuAlertePrix(niveau: number): ItemMenuAlertePrix[] {
   ];
 }
 
-/** PURE — niveau de prix au format standard du terminal (délègue à lib/format). */
+/** PURE — niveau de prix au format standard du terminal (délègue à lib/format).
+ * En échelle percentage un niveau ≤ 0 est légitime (backlog lot A) : formatPrice le
+ * traiterait en « valeur absente » (—) — on formate donc localement, signé. */
 export function formaterNiveauCourt(niveau: number): string {
   if (!Number.isFinite(niveau)) return String(niveau);
-  return formatPrice(niveau);
+  if (niveau > 0) return formatPrice(niveau);
+  const abs = Math.abs(niveau);
+  // Mêmes paliers de décimales que formatPrice (2/4/6) ; zéro → 2.
+  const decimals = abs >= 1 || abs === 0 ? 2 : abs >= 0.01 ? 4 : 6;
+  const txt = abs.toLocaleString("en-US", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return niveau < 0 ? `−${txt}` : txt;
 }
 
 /**

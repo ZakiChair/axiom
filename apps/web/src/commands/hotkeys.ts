@@ -31,7 +31,7 @@ import {
   timeframeVoisin,
   type EtatHistorique,
 } from "../lib/navigationClavier";
-import { paletteStore, CATEGORIE_LABEL, type Commande, type CategorieCommande } from "./registry";
+import { paletteStore, CATEGORIE_LABEL_LONG, type Commande, type CategorieCommande } from "./registry";
 
 // ─────────────────────────── Store plein écran ───────────────────────────
 
@@ -124,7 +124,7 @@ export function lignesMnemoniques(
   }
   return [...parCategorie.entries()].map(([categorie, mnemos]) => ({
     touche: "⌘K",
-    description: `${CATEGORIE_LABEL[categorie as CategorieCommande] ?? categorie} : ${mnemos.join(" ")}`,
+    description: `${CATEGORIE_LABEL_LONG[categorie as CategorieCommande] ?? categorie} : ${mnemos.join(" ")}`,
   }));
 }
 
@@ -172,10 +172,16 @@ export function raccourciTimeframe(tf: string): string | null {
 }
 
 /** Code physique (Digit1/Numpad1…) → timeframe rapide — indépendant de la disposition
- * clavier : sur AZERTY, e.key des chiffres non shiftés vaut « & é " … » (revue v2). */
-export function timeframePourCode(code: string): Timeframe | null {
+ * clavier : sur AZERTY, e.key des chiffres non shiftés vaut « & é " … » (revue v2).
+ * Shift+chiffre n'est un TF que si la touche PRODUIT le chiffre (AZERTY) — sur QWERTY,
+ * Shift+5 tape « % » : saisie délibérée de symbole, à ne pas intercepter. */
+export function timeframePourCode(
+  code: string,
+  ev?: { shiftKey: boolean; key: string },
+): Timeframe | null {
   const m = /^(?:Digit|Numpad)([1-9])$/.exec(code);
   if (m === null || m[1] === undefined) return null;
+  if (ev !== undefined && ev.shiftKey && ev.key !== m[1]) return null;
   return TF_CHIFFRES[Number(m[1]) - 1] ?? null;
 }
 
@@ -295,7 +301,7 @@ export function useRaccourcisGlobaux(): void {
       }
 
       // Timeframes rapides par code PHYSIQUE (AZERTY : e.key vaudrait & é " …).
-      const tfCode = timeframePourCode(e.code);
+      const tfCode = timeframePourCode(e.code, e);
       if (tfCode !== null) {
         const exchange = marketStore.getState().exchange;
         const supportes = SUPPORTED_TIMEFRAMES[exchange] ?? [];
@@ -323,7 +329,9 @@ export function useRaccourcisGlobaux(): void {
           if (ex !== "twelvedata" && ex !== "synthetic") {
             liqMarksStore.getState().basculer();
           } else {
-            pousserToast("Heatmap liquidations indisponible sur cette source (perp Bybit/OKX requis)");
+            // Wording aligné sur la garde réelle (tradfi / synthétique exclus) — le flux
+            // vient des perps Bybit/OKX quel que soit l'exchange crypto affiché.
+            pousserToast("Heatmap liquidations indisponible en marchés traditionnels / synthétiques");
           }
           break;
         }

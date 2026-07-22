@@ -249,11 +249,15 @@ export function AlertsPanel() {
                   alertsStore.getState().supprimer(d.id);
                 }}
                 onBlur={() => setConfirmSuppr((c) => (c === d.id ? null : c))}
-                aria-label={`Supprimer l'alerte ${d.symbol}`}
-                className={`shrink-0 opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 ${
+                aria-label={
                   confirmSuppr === d.id
-                    ? "text-[10px] font-semibold uppercase text-down"
-                    : "text-text-dim hover:text-text"
+                    ? `Confirmer la suppression de l'alerte ${d.symbol}`
+                    : `Supprimer l'alerte ${d.symbol}`
+                }
+                className={`shrink-0 transition ${
+                  confirmSuppr === d.id
+                    ? "text-[10px] font-semibold uppercase text-down opacity-100"
+                    : "text-text-dim opacity-0 hover:text-text group-hover:opacity-100 focus-visible:opacity-100"
                 }`}
               >
                 {confirmSuppr === d.id ? "confirmer ?" : "×"}

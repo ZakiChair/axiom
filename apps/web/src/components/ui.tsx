@@ -67,6 +67,7 @@ export function indexRoving(
 export function MenuDeroulant({
   declencheur,
   titre,
+  ariaLabel,
   align = "left",
   classePanneau = "w-60",
   declencheurClasse = "flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs text-text hover:border-text-dim",
@@ -77,6 +78,8 @@ export function MenuDeroulant({
   declencheur: ReactNode;
   /** Infobulle (attribut `title`) du bouton déclencheur. */
   titre?: string;
+  /** Nom accessible du déclencheur — requis quand `declencheur` est une icône seule (⚙). */
+  ariaLabel?: string;
   /** Bord d'alignement du panneau sous le déclencheur. */
   align?: "left" | "right";
   /** Classe de largeur du panneau (défaut `w-60`). */
@@ -136,6 +139,7 @@ export function MenuDeroulant({
         onClick={() => setOuvert((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={ouvert}
+        aria-label={ariaLabel}
         title={titre}
         className={declencheurClasse}
       >
@@ -257,11 +261,13 @@ export function Metric({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-3 rounded-md border border-border bg-bg px-3 py-2">
-      <span className="flex items-center gap-1.5 text-[11px] text-text-dim">
+      {/* min-w-0 + flex-wrap : un libellé long accompagné d'un badge se replie au
+          lieu de pousser la valeur hors de la tuile (backlog lot A). */}
+      <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-text-dim">
         {label}
         {labelExtra}
       </span>
-      <span className="flex items-center gap-2">
+      <span className="flex shrink-0 items-center gap-2">
         {extra}
         <span
           className="tabular-nums text-sm font-medium text-text"
@@ -379,7 +385,7 @@ export function Onglets<T extends string>({
  * segment actif `bg-bg text-text` (standard §2 — jamais bg-surface, invisible
  * sur le corps bg-surface des fenêtres). Consacre le pattern d'OptionsWindow.
  */
-export function Segmente<T extends string>({
+export function Segmente<T extends string | number>({
   options,
   actif,
   onChange,

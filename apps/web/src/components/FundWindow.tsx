@@ -20,7 +20,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
-import type { Commande } from "../commands/registry";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { settingsUiStore } from "../store/settings-ui";
 import { finnhubKeyStore, getFinnhubKey } from "../store/finnhub";
@@ -57,32 +56,6 @@ export const fundUiStore = createStore<FundUiState>(() => ({
 }));
 
 mirrorOpenState("fund", fundUiStore);
-
-/** Commandes exposées à la palette (⌘K) — greffées par App.tsx via `enregistrerCommandes`. */
-export const commandes: Commande[] = [
-  {
-    id: "panneau:fund",
-    mnemonique: "FUND",
-    libelle: "Fiche société (FUND)",
-    categorie: "panneau",
-    motsCles: [
-      "fondamentaux",
-      "societe",
-      "action",
-      "equity",
-      "profil",
-      "earnings",
-      "resultats",
-      "sec",
-      "edgar",
-      "finnhub",
-      "insider",
-      "ticker",
-    ],
-    apercu: "Ouvre / ferme la fiche société (SEC EDGAR + Finnhub)",
-    action: () => fundUiStore.getState().toggleFund(),
-  },
-];
 
 // ─────────────────────────── Formatage (pur) ───────────────────────────
 

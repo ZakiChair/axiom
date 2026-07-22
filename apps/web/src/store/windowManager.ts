@@ -1,7 +1,7 @@
 /**
  * Gestionnaire de fenêtres flottantes AXIOM (« Launchpad ») — Zustand VANILLA, hors
  * render-loop React. Source de vérité UNIQUE de la géométrie/état (position, taille,
- * z-order, minimize, groupe de couleur) des 22 fenêtres Bloomberg non modales.
+ * z-order, minimize, groupe de couleur) des fenêtres Bloomberg non modales du registre.
  *
  * Chaque fenêtre garde son propre store métier (`*UiStore`, ex. `derivativesUiStore`)
  * pour sa logique interne ; ces stores DÉLÈGUENT `open`/`close`/`toggle` ici via
@@ -37,7 +37,7 @@ export interface DefinitionFenetre {
   readonly nouveau?: boolean;
 }
 
-/** Registre statique des 22 fenêtres Bloomberg — SOURCE UNIQUE : titre/mnémonique/
+/** Registre statique des fenêtres Bloomberg — SOURCE UNIQUE : titre/mnémonique/
  * taille par défaut + appartenance au menu Fonctions. Utilisé par `App.tsx` (montage,
  * dont la map de composants est typée par `WindowId`), `Taskbar.tsx` (libellé
  * des pastilles), `openWindow` (taille initiale), la Toolbar (menu Fonctions dérivé via

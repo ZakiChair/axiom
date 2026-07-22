@@ -1353,8 +1353,9 @@ export class LiquidationHeatController {
   }
 
   /**
-   * Couche NIVEAUX ESTIMÉS (LIQEST) — lignes horizontales orange pointillées calculées par le
-   * modèle de levier appliqué à l'OI (calculerNiveauxEstimes). REGROUPÉES par bucket de prix
+   * Couche NIVEAUX ESTIMÉS (LIQEST) — lignes horizontales pointillées (teinte EST par thème,
+   * cf. `teinteEstPourTheme`) calculées par le modèle de levier appliqué à l'OI
+   * (calculerNiveauxEstimes). REGROUPÉES par bucket de prix
    * (somme des poids) pour éviter des centaines de lignes ; alpha ∝ log du poids ; les
    * `NB_LABELS_EST` buckets les plus lourds portent l'étiquette « EST. ×<levier dominant> ».
    *
@@ -1443,7 +1444,7 @@ export class LiquidationHeatController {
     for (const b of denses) if (b.poids > maxPoids) maxPoids = b.poids;
     if (maxPoids <= 0) return;
 
-    // Lignes pointillées orange, une par bucket dense (alpha ∝ intensité log du poids). Clip au pane.
+    // Lignes pointillées (teinte EST du thème), une par bucket dense (alpha ∝ intensité log du poids). Clip au pane.
     ctx.save();
     ctx.beginPath();
     ctx.rect(left, top, width, height);
@@ -1465,7 +1466,7 @@ export class LiquidationHeatController {
 
     // Étiquettes « EST. ×L » : top NB_LABELS_EST buckets, dé-chevauchés (15 px, le plus gros
     // gagne, `dechevaucher` pure et testée), exclus sous la toolbar DOM (y < top+24). Pilule
-    // fond `--surface` / bord orange (identité EST distincte du viridis).
+    // fond `--surface` / bord teinte EST (identité distincte de la rampe réelle).
     const candidatsLabel = denses.slice(0, NB_LABELS_EST).flatMap((b) => {
       const y = this.toPx({ value: (b.idx + 0.5) * taille }).y;
       if (y === undefined || !Number.isFinite(y)) return [];
@@ -1575,7 +1576,7 @@ export class LiquidationHeatController {
    *  (c) légende « Niveaux ESTIMÉS (modèle levier — approximation) » — dès que la couche EST est
    *      active (garde-fou BUILD-CONTRACT NON contournable) ;
    *  (d) mini-CLLD : cumuls de liquidations « ↑ » (au-dessus du spot) / « ↓ » (en-dessous),
-   *      réel (tokens.text) et « EST. » (orange) séparés — au SOMMET de la pile.
+   *      réel (tokens.text) et « EST. » (teinte EST du thème) séparés — au SOMMET de la pile.
    * Emplacement jamais occupé par les boutons de layout ni la légende du Volume Profile.
    */
   private dessinerLegendes(main: Bounding, tokens: Tokens, heatActif: boolean, estActif: boolean): void {

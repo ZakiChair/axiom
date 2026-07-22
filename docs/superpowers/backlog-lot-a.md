@@ -4,19 +4,13 @@ Findings Minor tracés par les reviews du lot (aucun bloquant — triés par la 
 Source : revue UI v2 (`docs/superpowers/audits/2026-07-16-revue-ui-v2.md`) + reviews de tâches.
 
 ## Garde-fous (priorité)
-- **Test d'unicité des mnémoniques : 3/19 sources couvertes** (registry.test.ts) — étendre aux
-  sources externes restantes (eco, news, portfolio, dom, playbooks…). Sonde ponctuelle : 220
-  commandes, 0 doublon. Le plus gros trou restant de la spec §8.
 - Allowlist anti-hex ligne-scopée (gardeFous.test.ts) : un hex de dérive co-localisé avec
   `lireTokenCanvas` sur la même ligne passerait — durcissement par expression possible.
 - `fichiersTs` des garde-fous non récursif : si `chart/`/`components/` gagnent des sous-dossiers,
   les étendre (ou asserter l'absence de sous-dossiers).
-
-## Doc sweep (commentaires périmés, 1 commit)
-- liquidationHeat.ts l.~1327/1417/1439/1549 : la couche EST est dite « orange » (faux sur bloomberg).
-- ChartInstance.tsx:565 : « sous-panes OI/FUND » → FRATE.
-- Docstring MenuDeroulant (ui.tsx) : chevron désormais conditionnel.
-- Export `commandes` MORT dans FundWindow.tsx:62-67 (id dédupliqué, inerte) : à supprimer.
+- Unicité mnémoniques : les commandes INLINE de App.tsx (GRID*) et Toolbar.tsx (WS/BACKUP/
+  RESTORE) ne sont couvertes que par un miroir statique dans registry.test.ts — une nouvelle
+  commande inline ajoutée à ces deux composants échapperait au test (limite documentée).
 
 ## UX/a11y (non bloquants)
 - Bouton « confirmer ? » (PORT/ALRT) peut redevenir invisible hors survol (opacity group-hover) ;
@@ -37,3 +31,9 @@ Source : revue UI v2 (`docs/superpowers/audits/2026-07-16-revue-ui-v2.md`) + rev
 ## Reporté (décision documentée)
 - GlobeWindow : substitution serie-5/serie-4 locale au composant (la remonter dans les tokens
   exigerait de redéfinir --serie-4 du thème dark pour tous ses consommateurs — risque > gain).
+
+## Résolu (2026-07-22)
+- Test d'unicité des mnémoniques étendu à 22 sources (`45bde7f`) — reste la limite « inline »
+  ci-dessus.
+- Doc sweep intégral : commentaires EST/FRATE/compteurs + export mort FundWindow (`58548b5`) ;
+  la docstring MenuDeroulant avait déjà été corrigée en amont (chevron conditionnel documenté).

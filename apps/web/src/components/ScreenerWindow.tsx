@@ -40,6 +40,7 @@ import {
   type SignauxRunState,
 } from "../store/signaux";
 import type { LigneSignaux, SignalDetecte } from "../data/signaux";
+import { UNIVERS_VALIDATION } from "../data/validationSignaux";
 import { estExtremeColonne, seuilDecile } from "../lib/extremesColonne";
 import { formatPct, formatPrice, formatUsd } from "../lib/format";
 import { metaSource } from "../lib/fiabilite";
@@ -317,18 +318,27 @@ function CelluleValidation({ stats }: { stats: { n: number; tauxReussitePct: num
   );
 }
 
-/** Section « Validation historique » : event study des signaux sur l'échantillon scanné. */
+/** Section « Validation historique » : event study des signaux sur l'univers choisi. */
 function SectionValidation() {
   const etat = useStore(signauxStore, (s) => s.validationState);
   const progres = useStore(signauxStore, (s) => s.validationProgress);
   const resultat = useStore(signauxStore, (s) => s.validation);
   const erreur = useStore(signauxStore, (s) => s.validationError);
   const valider = useStore(signauxStore, (s) => s.validerSignaux);
+  const univers = useStore(signauxStore, (s) => s.validationUnivers);
+  const setUnivers = useStore(signauxStore, (s) => s.setValidationUnivers);
 
   return (
     <section className="space-y-2">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <div className="text-[10px] uppercase tracking-wide text-text-dim">Validation historique</div>
+        {/* Univers : le top-volume du jour est biaisé memecoins (funding structurellement
+            extrême) — majors / watchlist isolent ce biais de sélection. */}
+        <Segmente
+          options={UNIVERS_VALIDATION.map((u) => ({ id: u.id, label: u.label }))}
+          actif={univers}
+          onChange={setUnivers}
+        />
         <button
           type="button"
           onClick={valider}
@@ -438,7 +448,8 @@ function VueSignaux() {
         )}
       </section>
 
-      {runState === "done" && <SectionValidation />}
+      {/* Toujours visible : les univers majors/watchlist ne dépendent pas d'un scan. */}
+      <SectionValidation />
     </div>
   );
 }

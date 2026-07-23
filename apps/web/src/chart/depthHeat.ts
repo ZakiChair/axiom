@@ -22,7 +22,7 @@
 import { createStore } from "zustand/vanilla";
 import type { StoreApi } from "zustand/vanilla";
 import { ActionType, DomPosition } from "klinecharts";
-import type { Bounding, Chart } from "klinecharts";
+import type { Chart } from "klinecharts";
 import type { ExchangeId, Unsubscribe } from "@axiom/types";
 import { agregerNiveaux, pasArrondi, souscrireDepth, type NiveauAgrege, type OrderBook } from "../data/depth";
 import { marketStore } from "../store/market";
@@ -349,10 +349,10 @@ function clamp(v: number, min: number, max: number): number {
  * sur `lireColonnes()`), sans hit-test — d'où pas de cache `grilleObsolete` (le rendu ne se
  * déclenche que sur un vrai changement : viewport, rev ≤1/s, resize, thème).
  *
- * Placement X : chaque colonne est ancrée à SON horodatage réel via `convertToPixel({timestamp})`
- * (comme les cellules liq à leur bougie) — PAS étalée uniformément sur le pane : le buffer ne
- * couvre que le temps écoulé depuis l'activation de BOOK, donc un étalement uniforme collerait
- * quelques secondes de murs sur toute la fenêtre visible et désalignerait la liquidité du prix.
+ * Placement X : chaque colonne est ancrée à la bougie contenant/la plus proche de son horodatage
+ * via `convertToPixel({timestamp})` (précision ≤ 1 bougie). PAS étalée uniformément sur le pane :
+ * le buffer ne couvre que le temps écoulé depuis l'activation de BOOK, donc un étalement uniforme
+ * collerait quelques secondes de murs sur toute la fenêtre visible et désalignerait la liquidité du prix.
  */
 export class DepthHeatController {
   private readonly chart: Chart;

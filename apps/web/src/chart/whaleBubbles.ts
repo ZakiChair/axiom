@@ -38,6 +38,7 @@ import { orderflowStore } from "../store/orderflow";
 import { themeStore } from "../store/theme";
 import { formatUsd } from "../lib/format";
 import { rgbaTokenCanvas } from "../lib/canvasTokens";
+import type { Commande } from "../commands/registry";
 
 /** Cap défensif du buffer de prints : au-delà, on garde les PLUS RÉCENTS (FIFO). */
 export const WHALE_MAX_PRINTS = 500;
@@ -403,5 +404,20 @@ export function demarrerWhaleBubbles(): void {
   });
 }
 
-// Auto-démarrage à l'import (l'intégrateur importera `commandes` en Task 4 → déclenche cet effet).
+// ─────────────────────────── Commande de palette (enregistrée par l'intégrateur) ───────────────────────────
+
+/** Commande à greffer dans la palette (via `enregistrerCommandes`), cf. tradeMarkers. */
+export const commandes: Commande[] = [
+  {
+    id: "action:whale-bubbles",
+    mnemonique: "WHALE",
+    libelle: "Bulles de prints baleines — activer / désactiver",
+    categorie: "action",
+    motsCles: ["whale", "baleines", "prints", "bulles", "trades", "notionnel", "agressif"],
+    apercu: "Épingle les gros trades agressifs sur le chart, en bulles proportionnelles au notionnel",
+    action: () => whaleBubblesStore.getState().basculer(),
+  },
+];
+
+// Auto-démarrage à l'import (l'intégrateur importe `commandes` → déclenche cet effet).
 demarrerWhaleBubbles();

@@ -167,7 +167,9 @@ export function DistWindow() {
         <div className="mt-3 flex items-center justify-between">
           <NoteSource>
             Distribution empirique des {calcul.nCloses} dernières bougies {timeframe} du chart
-            (horizons {HORIZONS.join(" / ")} b) — PAS une prévision.
+            MAÎTRE (horizons {HORIZONS.join(" / ")} b, fenêtres chevauchantes,
+            {calcul.niveaux?.map((n) => n.nEchantillons).join(" / ") ?? "—"} échantillons) — PAS
+            une prévision.
           </NoteSource>
           <Fraicheur loading={enChargement} majTs={majTs} />
         </div>

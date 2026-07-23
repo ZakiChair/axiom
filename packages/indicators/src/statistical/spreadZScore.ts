@@ -25,13 +25,7 @@
  */
 
 import type { IndicatorDef } from "@axiom/types";
-
-/** Borne un entier de paramètre dans [min, max], repli sur `def` si non fini. */
-function clampInt(v: unknown, def: number, min: number, max: number): number {
-  const n = Math.floor(Number(v));
-  if (!Number.isFinite(n)) return def;
-  return Math.min(max, Math.max(min, n));
-}
+import { clampInt } from "../utils";
 
 /**
  * Spread log en niveaux, aligné sur les bougies.

@@ -22,50 +22,27 @@
 import { createStore } from "zustand/vanilla";
 import type { Timeframe } from "@axiom/types";
 import type { Commande } from "../commands/registry";
-import {
-  fetchGlobalLongShortAccountRatio,
-  fetchOpenInterestHist,
-} from "../data/binanceFutures";
-import { extUrl } from "../data/extapi";
 import { navigateTo } from "../lib/navigation";
 import { watchlistStore } from "./watchlist";
 import {
-  applyBaseFilters,
-  applyFunding,
-  applyLongShortRatio,
-  applyOiChange,
   BUILTIN_PRESETS,
-  lastLongShortRatio,
-  needsPositionMetrics,
-  oiChangePctFromHist,
-  parsePremiumIndex,
-  parseTicker24h,
-  selectCandidates,
-  splitBaseConditions,
   SCREENER_CAP,
-  SCREENER_KLINE_LIMIT,
   SCREENER_POSITION_CAP,
   type BaseCondition,
   type IndicatorCondition,
   type ScreenerPreset,
   type ScreenerRow,
 } from "../data/screener";
-import type { WorkerRequest, WorkerResponse } from "../workers/screener.worker";
+import { executerScreener } from "../data/screenerRun";
 import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
-/** URL ticker 24 h Binance (univers spot commun screener / signaux / squeeze). */
-export const TICKER_24H_URL = "https://api.binance.com/api/v3/ticker/24hr";
-/** Nombre max de lignes affichées quand le run n'a PAS de filtre indicateur (table lisible). */
-const DISPLAY_CAP = 100;
+// Utilitaires du pipeline déplacés vers data/screenerRun.ts ; ré-exportés ici pour
+// les consommateurs existants (store/signaux.ts, store/squeeze.ts) — aucun cycle
+// (screenerRun n'importe rien du store).
+export { mapPool, TICKER_24H_URL, OI_HIST_LIMIT } from "../data/screenerRun";
+
 /** Clé localStorage des presets UTILISATEUR (les livrés sont constants, non persistés). */
 const STORAGE_KEY = "axiom:screener:v1";
-/**
- * Concurrence pour l'enrichissement OI + L/S (2 req/symbole). 6 en parallèle →
- * 20 symboles ≈ quelques secondes, budget << 1000 req / 5 min Binance.
- */
-const POSITION_CONCURRENCY = 6;
-/** Historique OI : 25 points 1h ≈ fenêtre 24 h pour le Δ%. */
-export const OI_HIST_LIMIT = 25;
 
 /** Phases d'un run. */
 export type RunState = "idle" | "loading" | "running" | "done" | "error";
@@ -91,6 +68,12 @@ export interface ScreenerState {
 
   // — Presets (livrés + utilisateur) —
   userPresets: ScreenerPreset[];
+  /**
+   * Id du dernier preset chargé, ou `null` si le builder a été modifié à la main depuis
+   * (chaque setter du builder le remet à null). Sert au bouton « ⏰ Alerte » : une alerte
+   * de scan n'est créable qu'à partir d'un preset chargé et intact.
+   */
+  dernierPresetCharge: string | null;
   loadPreset: (id: string) => void;
   savePreset: (name: string) => void;
   deletePreset: (id: string) => void;
@@ -143,74 +126,16 @@ function writeUserPresets(presets: ScreenerPreset[]): void {
   }
 }
 
-/**
- * Exécute `fn` sur chaque item avec un plafond de concurrence (pool simple).
- * Préserve l'ordre des résultats. PURE sur le contrôle de flux (I/O via fn).
- * Exporté : réutilisé par le run de la vue Signaux (store/signaux.ts).
- */
-export async function mapPool<T, R>(
-  items: readonly T[],
-  concurrency: number,
-  fn: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (next < items.length) {
-      const i = next++;
-      const item = items[i];
-      if (item === undefined) return;
-      results[i] = await fn(item);
-    }
-  });
-  await Promise.all(workers);
-  return results;
-}
+// ─────────────────────────── Suivi du run courant ───────────────────────────
 
 /**
- * Enrichit un échantillon de lignes avec ΔOI % (≈24 h) et ratio L/S via Binance
- * futures data (sans clé, 1 symbole / req). Best-effort par symbole : un échec
- * laisse le champ absent (filtre position échouera pour cette ligne).
+ * Identifiant du run courant. Le worker vit désormais DANS `executerScreener` ; le
+ * store ne peut plus le terminer directement. `cancel` / un nouveau run incrémente cet
+ * id et les callbacks (onProgress / résultat) d'un run périmé sont ignorés à l'arrivée
+ * — comportement UI identique (état « idle », plus aucune écriture), le run périmé
+ * s'achève en arrière-plan sans effet visible.
  */
-async function enrichPositionSample(
-  sample: ScreenerRow[],
-): Promise<{ oiOk: number; lsOk: number }> {
-  const oiBySymbol = new Map<string, number>();
-  const lsBySymbol = new Map<string, number>();
-
-  await mapPool(sample, POSITION_CONCURRENCY, async (row) => {
-    const [oiRes, lsRes] = await Promise.allSettled([
-      fetchOpenInterestHist(row.symbol, "1h", OI_HIST_LIMIT),
-      fetchGlobalLongShortAccountRatio(row.symbol, "1h", 5),
-    ]);
-    if (oiRes.status === "fulfilled") {
-      const delta = oiChangePctFromHist(oiRes.value);
-      if (delta !== undefined) oiBySymbol.set(row.symbol, delta);
-    }
-    if (lsRes.status === "fulfilled") {
-      const ratio = lastLongShortRatio(lsRes.value);
-      if (ratio !== undefined) lsBySymbol.set(row.symbol, ratio);
-    }
-  });
-
-  applyOiChange(sample, oiBySymbol);
-  applyLongShortRatio(sample, lsBySymbol);
-  return { oiOk: oiBySymbol.size, lsOk: lsBySymbol.size };
-}
-
-// ─────────────────────────── Cycle de vie du worker ───────────────────────────
-
-let worker: Worker | null = null;
-/** Identifiant du run courant : les messages d'un run périmé sont ignorés. */
 let currentRunId = 0;
-
-/** Termine le worker courant s'il existe (annulation / relance). */
-function terminateWorker(): void {
-  if (worker !== null) {
-    worker.terminate();
-    worker = null;
-  }
-}
 
 export const screenerStore = createStore<ScreenerState>((set, get) => ({
   open: false,
@@ -222,24 +147,36 @@ export const screenerStore = createStore<ScreenerState>((set, get) => ({
   baseConditions: [{ kind: "base", field: "volumeUsd24h", op: ">", value: 10_000_000 }],
   indicatorConditions: [{ kind: "indicator", fieldId: "rsi", param: 14, op: "<", value: 30 }],
 
-  setTf: (tf) => set({ tf }),
-  addBaseCondition: () => set((s) => ({ baseConditions: [...s.baseConditions, defaultBaseCondition()] })),
+  // Toute édition MANUELLE du builder invalide le preset chargé (dernierPresetCharge → null) :
+  // l'alerte de scan fige les conditions du PRESET, pas un builder retouché à la main.
+  setTf: (tf) => set({ tf, dernierPresetCharge: null }),
+  addBaseCondition: () =>
+    set((s) => ({ baseConditions: [...s.baseConditions, defaultBaseCondition()], dernierPresetCharge: null })),
   updateBaseCondition: (index, patch) =>
     set((s) => ({
       baseConditions: s.baseConditions.map((c, i) => (i === index ? { ...c, ...patch } : c)),
+      dernierPresetCharge: null,
     })),
   removeBaseCondition: (index) =>
-    set((s) => ({ baseConditions: s.baseConditions.filter((_, i) => i !== index) })),
+    set((s) => ({ baseConditions: s.baseConditions.filter((_, i) => i !== index), dernierPresetCharge: null })),
   addIndicatorCondition: () =>
-    set((s) => ({ indicatorConditions: [...s.indicatorConditions, defaultIndicatorCondition()] })),
+    set((s) => ({
+      indicatorConditions: [...s.indicatorConditions, defaultIndicatorCondition()],
+      dernierPresetCharge: null,
+    })),
   updateIndicatorCondition: (index, patch) =>
     set((s) => ({
       indicatorConditions: s.indicatorConditions.map((c, i) => (i === index ? { ...c, ...patch } : c)),
+      dernierPresetCharge: null,
     })),
   removeIndicatorCondition: (index) =>
-    set((s) => ({ indicatorConditions: s.indicatorConditions.filter((_, i) => i !== index) })),
+    set((s) => ({
+      indicatorConditions: s.indicatorConditions.filter((_, i) => i !== index),
+      dernierPresetCharge: null,
+    })),
 
   userPresets: readUserPresets(),
+  dernierPresetCharge: null,
 
   loadPreset: (id) => {
     const preset = [...BUILTIN_PRESETS, ...get().userPresets].find((p) => p.id === id);
@@ -249,6 +186,7 @@ export const screenerStore = createStore<ScreenerState>((set, get) => ({
       tf: preset.tf,
       baseConditions: preset.baseConditions.map((c) => ({ ...c })),
       indicatorConditions: preset.indicatorConditions.map((c) => ({ ...c })),
+      dernierPresetCharge: preset.id,
     });
   },
   savePreset: (name) => {
@@ -279,151 +217,39 @@ export const screenerStore = createStore<ScreenerState>((set, get) => ({
   note: null,
 
   run: () => {
-    // Un seul run à la fois : on annule le précédent.
-    terminateWorker();
+    // Un seul run à la fois : on invalide le précédent (ses callbacks seront ignorés).
     const runId = ++currentRunId;
     const { tf, baseConditions, indicatorConditions } = get();
     set({ runState: "loading", progress: { done: 0, total: 0 }, rows: [], error: null, note: null });
 
-    void (async () => {
-      // 1. Univers (ticker 24h en direct, CORS *) + funding (premiumIndex via /extapi).
-      let rows: ScreenerRow[];
-      try {
-        const res = await fetch(TICKER_24H_URL);
-        if (!res.ok) throw new Error(`ticker24h ${res.status}`);
-        rows = parseTicker24h(await res.json());
-      } catch {
+    // Pipeline extrait (aucune écriture de store) : la progression du worker fait passer
+    // l'état en « running » (le premier appel avec total figé, comme avant), le résultat
+    // final porte les notes de couverture prêtes à afficher.
+    void executerScreener(baseConditions, indicatorConditions, tf, {
+      capIndicateurs: SCREENER_CAP,
+      capPosition: SCREENER_POSITION_CAP,
+      onProgress: (done, total) => {
         if (runId !== currentRunId) return;
-        set({ runState: "error", error: "Univers indisponible (Binance ticker 24h)." });
-        return;
-      }
-      if (runId !== currentRunId) return;
-
-      // Funding : best-effort (une panne ne bloque pas le run, mais est signalée).
-      let fundingIndisponible = false;
-      try {
-        const res = await fetch(extUrl("fapi.binance.com", "fapi/v1/premiumIndex"));
-        if (!res.ok) throw new Error(`premiumIndex ${res.status}`);
-        applyFunding(rows, parsePremiumIndex(await res.json()));
-      } catch {
-        fundingIndisponible = true;
-      }
-      if (runId !== currentRunId) return;
-
-      // 2. Filtres de base (purs) — éventuel enrichissement position avant filtres OI/L-S.
-      const notes: string[] = [];
-      if (fundingIndisponible) notes.push("funding indisponible");
-
-      const { pre, position } = splitBaseConditions(baseConditions);
-      let working = applyBaseFilters(rows, pre);
-
-      if (needsPositionMetrics(baseConditions)) {
-        // Échantillon top N liquides : pas d'historique OI/L-S batch gratuit universel.
-        const sample = selectCandidates(working, SCREENER_POSITION_CAP);
-        if (working.length > SCREENER_POSITION_CAP) {
-          notes.push(
-            `OI/L-S : échantillon top ${SCREENER_POSITION_CAP} liquides (sur ${working.length})`,
-          );
-        } else {
-          notes.push(`OI/L-S : échantillon ${sample.length} symbole${sample.length > 1 ? "s" : ""}`);
-        }
-        set({
-          runState: "loading",
-          progress: { done: 0, total: sample.length },
-          note: notes.join(" · ") + " · enrichissement position…",
-        });
-        const { oiOk, lsOk } = await enrichPositionSample(sample);
+        set({ runState: "running", progress: { done, total } });
+      },
+    })
+      .then((res) => {
         if (runId !== currentRunId) return;
-        if (oiOk === 0 && lsOk === 0) {
-          notes.push("OI/L-S indisponibles (Binance futures data)");
-        } else if (oiOk < sample.length || lsOk < sample.length) {
-          notes.push(`OI ${oiOk}/${sample.length} · L/S ${lsOk}/${sample.length}`);
-        }
-        working = applyBaseFilters(sample, position);
-      }
-
-      const baseFiltered = working;
-
-      // Sans filtre indicateur : résultats directs (triés par volume, plafond d'affichage).
-      if (indicatorConditions.length === 0) {
-        const sorted = selectCandidates(baseFiltered, DISPLAY_CAP);
-        if (baseFiltered.length > DISPLAY_CAP) {
-          notes.push(`${baseFiltered.length} résultats, ${DISPLAY_CAP} affichés (plus liquides)`);
-        }
         set({
           runState: "done",
-          rows: sorted,
-          progress: { done: sorted.length, total: sorted.length },
-          note: notes.length > 0 ? notes.join(" · ") : `${baseFiltered.length} résultats`,
+          rows: res.rows,
+          progress: { done: res.rows.length, total: res.rows.length },
+          note: res.notes.length > 0 ? res.notes.join(" · ") : null,
         });
-        return;
-      }
-
-      // Avec filtres indicateurs : cap 60 candidats les plus liquides → worker.
-      const candidates = selectCandidates(baseFiltered, SCREENER_CAP);
-      if (baseFiltered.length > SCREENER_CAP) {
-        notes.push(`${baseFiltered.length} filtrés, ${SCREENER_CAP} évalués (plus liquides)`);
-      }
-      if (candidates.length === 0) {
-        set({
-          runState: "done",
-          rows: [],
-          progress: { done: 0, total: 0 },
-          note: notes.length > 0 ? notes.join(" · ") : "Aucun candidat après filtres de base",
-        });
-        return;
-      }
-
-      set({
-        runState: "running",
-        progress: { done: 0, total: candidates.length },
-        note: notes.length > 0 ? notes.join(" · ") : null,
-      });
-
-      // Instanciation À LA DEMANDE (jamais à l'import) → Vite bundle le worker en chunk.
-      terminateWorker();
-      const w = new Worker(new URL("../workers/screener.worker.ts", import.meta.url), {
-        type: "module",
-      });
-      worker = w;
-      w.onmessage = (event: MessageEvent) => {
+      })
+      .catch((err: unknown) => {
         if (runId !== currentRunId) return;
-        const msg = event.data as WorkerResponse;
-        if (msg.type === "progress") {
-          set({ progress: { done: msg.done, total: msg.total } });
-        } else if (msg.type === "result") {
-          set((s) => ({
-            runState: "done",
-            rows: msg.rows,
-            note:
-              s.note !== null ? `${s.note} · ${msg.rows.length} résultats` : `${msg.rows.length} résultats`,
-          }));
-          terminateWorker();
-        } else if (msg.type === "error") {
-          set({ runState: "error", error: `Étage indicateurs : ${msg.message}` });
-          terminateWorker();
-        }
-      };
-      w.onerror = () => {
-        if (runId !== currentRunId) return;
-        set({ runState: "error", error: "Worker du screener en échec." });
-        terminateWorker();
-      };
-      const request: WorkerRequest = {
-        type: "run",
-        runId,
-        candidates,
-        tf,
-        klineLimit: SCREENER_KLINE_LIMIT,
-        indicatorConditions,
-      };
-      w.postMessage(request);
-    })();
+        set({ runState: "error", error: err instanceof Error ? err.message : String(err) });
+      });
   },
 
   cancel: () => {
-    currentRunId++; // invalide les messages en vol
-    terminateWorker();
+    currentRunId++; // invalide les callbacks en vol (le run périmé s'achève sans effet)
     set({ runState: "idle" });
   },
 }));

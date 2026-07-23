@@ -22,6 +22,7 @@ import {
 import { INDICATORS, getIndicator } from "@axiom/indicators";
 import { marketStore } from "../store/market";
 import { alertsStore } from "../store/alerts";
+import { presetAlertsStore } from "../store/presetAlerts";
 import { demanderPermissionNotifications } from "../alerts/runtime";
 import { formatHeure } from "../lib/format";
 import { SidebarSection } from "./SidebarSection";
@@ -69,6 +70,16 @@ export function AlertsPanel() {
   const defs = useStore(alertsStore, (s) => s.defs);
   const journal = useStore(alertsStore, (s) => s.journal);
   const symbolCourant = useStore(marketStore, (s) => s.symbol);
+  // Alertes de scan (EQS) : liste réactive + message discret sur refus de reprise (limite).
+  const alertesScan = useStore(presetAlertsStore, (s) => s.alertes);
+  const [msgScan, setMsgScan] = useState<string | null>(null);
+
+  const basculerScan = (id: string) => {
+    if (presetAlertsStore.getState().basculer(id) === "limite") {
+      setMsgScan("4 alertes de scan max");
+      setTimeout(() => setMsgScan(null), 4000);
+    }
+  };
 
   // Formulaire de création (état local React).
   const [symbol, setSymbol] = useState("");
@@ -184,6 +195,7 @@ export function AlertsPanel() {
   const badge = `${defs.length} alerte${defs.length > 1 ? "s" : ""}`;
 
   return (
+    <>
     <SidebarSection
       title="Alertes"
       collapsible
@@ -501,5 +513,51 @@ export function AlertsPanel() {
         )}
       </div>
     </SidebarSection>
+
+    {/* Alertes de scan (EQS) : présente seulement s'il en existe (créées depuis le screener). */}
+    {alertesScan.length > 0 && (
+      <SidebarSection
+        title="Alertes de scan"
+        collapsible
+        defaultOpen={false}
+        badge={`${alertesScan.length}`}
+      >
+        <div className="max-h-64 overflow-y-auto">
+          {alertesScan.map((a) => (
+            <div
+              key={a.id}
+              className="group flex items-center gap-2 border-l-2 border-transparent px-3 py-1.5 text-[11px] hover:bg-surface"
+            >
+              <button
+                type="button"
+                onClick={() => basculerScan(a.id)}
+                title={a.actif ? "Mettre en pause" : "Reprendre"}
+                className={`shrink-0 text-[9px] leading-none ${a.actif ? "text-up" : "text-text-dim"}`}
+              >
+                ●
+              </button>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="truncate font-medium text-text">{a.nom}</span>
+                  <span className="shrink-0 text-[10px] tabular-nums text-text-dim">
+                    toutes les {a.periodeMin} min
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => presetAlertsStore.getState().retirer(a.id)}
+                aria-label={`Supprimer l'alerte de scan ${a.nom}`}
+                className="shrink-0 text-text-dim opacity-0 transition hover:text-down group-hover:opacity-100 focus-visible:opacity-100"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {msgScan !== null && <p className="px-3 py-1 text-[10px] text-warn">{msgScan}</p>}
+        </div>
+      </SidebarSection>
+    )}
+    </>
   );
 }

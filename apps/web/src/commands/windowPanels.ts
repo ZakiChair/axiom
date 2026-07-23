@@ -1,6 +1,6 @@
 /**
  * Commandes palette des fenêtres dont le store UI vit dans le fichier composant
- * (CORR, MAP, TERM, OMON, RATE, COT, SEAG, VOL, FUND, BRIEF, STBL, SQZ).
+ * (CORR, MAP, TERM, OMON, RATE, COT, SEAG, VOL, FUND, BRIEF, STBL, SQZ, CBPREM).
  *
  * Pilotage via `windowManagerStore` uniquement — **aucune** import des composants
  * lourds — pour permettre le code-splitting (React.lazy) des fenêtres dans App.tsx
@@ -227,6 +227,25 @@ export const windowPanelCommands: Commande[] = [
     ],
     apercu: "Ouvre / ferme le radar de squeeze (funding × ΔOI par quadrant)",
     action: basculer("squeeze"),
+  },
+  {
+    id: "panneau:cbprem",
+    mnemonique: "CBPREM",
+    libelle: "Coinbase premium",
+    categorie: "panneau",
+    motsCles: [
+      "cbprem",
+      "coinbase premium",
+      "premium",
+      "coinbase",
+      "binance",
+      "spot",
+      "gap",
+      "demande institutionnelle",
+      "arbitrage",
+    ],
+    apercu: "Ouvre / ferme le premium spot Coinbase vs Binance (demande institutionnelle US)",
+    action: basculer("cbprem"),
   },
   {
     id: "panneau:funding-matrix",

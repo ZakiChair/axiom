@@ -127,6 +127,20 @@ export function appliquerDiffLive(livre: OrderBook, diff: DepthDiff): LiveResult
   return "ok";
 }
 
+/**
+ * Meilleur bid (clé max des bids), meilleur ask (clé min des asks) et mid d'un carnet.
+ * Renvoie `null` si un côté est vide (aucun best des deux → mid indéfini). Fonction PURE.
+ * Forme partagée par le DOM (`DomWindow`) et la heatmap de liquidité (`depthHeat`).
+ */
+export function meilleursNiveaux(livre: OrderBook): { bestBid: number; bestAsk: number; mid: number } | null {
+  let bestBid = -Infinity;
+  for (const prix of livre.bids.keys()) if (prix > bestBid) bestBid = prix;
+  let bestAsk = Infinity;
+  for (const prix of livre.asks.keys()) if (prix < bestAsk) bestAsk = prix;
+  if (!Number.isFinite(bestBid) || !Number.isFinite(bestAsk)) return null;
+  return { bestBid, bestAsk, mid: (bestBid + bestAsk) / 2 };
+}
+
 // ─────────────────────────── Agrégation par pas de prix (pur) ───────────────────────────
 
 /**
@@ -389,6 +403,8 @@ export interface MultiplexeurDepth {
 export function creerMultiplexeurDepth(ouvrir: OuvreurDepth): MultiplexeurDepth {
   interface Entree {
     abonnes: Set<(livre: OrderBook) => void>;
+    /** Dernier carnet diffusé sur cette connexion (caché pour le réplay aux abonnés tardifs). */
+    dernier: OrderBook | null;
     fermer: Unsubscribe;
   }
   const parSymbole = new Map<string, Entree>();
@@ -396,16 +412,24 @@ export function creerMultiplexeurDepth(ouvrir: OuvreurDepth): MultiplexeurDepth 
   const souscrire = (symbol: string, onLivre: (livre: OrderBook) => void): Unsubscribe => {
     let entree = parSymbole.get(symbol);
     if (entree === undefined) {
-      const abonnes = new Set<(livre: OrderBook) => void>();
-      // Le diffuseur capture ce Set d'abonnés ; itération sur une COPIE pour tolérer un
-      // désabonnement déclenché depuis un callback pendant la diffusion.
-      const fermer = ouvrir(symbol, (livre) => {
-        for (const cb of [...abonnes]) cb(livre);
+      // Créée AVANT le diffuseur pour que celui-ci puisse cacher `dernier` dans l'entrée.
+      const nouvelle: Entree = { abonnes: new Set(), dernier: null, fermer: () => {} };
+      // Le diffuseur capture l'entrée : il mémorise le dernier carnet PUIS le relaie ; itération
+      // sur une COPIE du Set pour tolérer un désabonnement déclenché depuis un callback pendant
+      // la diffusion.
+      nouvelle.fermer = ouvrir(symbol, (livre) => {
+        nouvelle.dernier = livre;
+        for (const cb of [...nouvelle.abonnes]) cb(livre);
       });
-      entree = { abonnes, fermer };
+      entree = nouvelle;
       parSymbole.set(symbol, entree);
     }
     entree.abonnes.add(onLivre);
+    // Abonné tardif d'une connexion déjà vivante : lui REJOUER synchronement le dernier carnet
+    // (sinon il n'aurait rien avant le prochain diff — ~100 ms BTC, plusieurs s sur illiquide).
+    // Réplay CIBLÉ (onLivre seul, pas le fan-out) → n'impacte pas les abonnés déjà présents. Le
+    // 1er abonné d'une connexion neuve a `dernier === null` → aucun réplay.
+    if (entree.dernier !== null) onLivre(entree.dernier);
 
     let annule = false;
     return () => {

@@ -24,7 +24,7 @@ import type { StoreApi } from "zustand/vanilla";
 import { ActionType, DomPosition } from "klinecharts";
 import type { Chart } from "klinecharts";
 import type { ExchangeId, Unsubscribe } from "@axiom/types";
-import { agregerNiveaux, pasArrondi, souscrireDepth, type NiveauAgrege, type OrderBook } from "../data/depth";
+import { agregerNiveaux, meilleursNiveaux, pasArrondi, souscrireDepth, type NiveauAgrege, type OrderBook } from "../data/depth";
 import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
 import { lireTokenCanvas } from "../lib/canvasTokens";
@@ -50,16 +50,6 @@ export const MAX_COLONNES = 1800;
 /** Cadence d'échantillonnage visée (informatif — le contrôleur décide quand appeler). */
 export const INTERVALLE_COLONNE_MS = 1000;
 
-/** Meilleur bid / meilleur ask d'un carnet (clé max des bids, clé min des asks). PURE. */
-function meilleurs(livre: OrderBook): { bestBid: number; bestAsk: number } | null {
-  let bestBid = -Infinity;
-  for (const prix of livre.bids.keys()) if (prix > bestBid) bestBid = prix;
-  let bestAsk = Infinity;
-  for (const prix of livre.asks.keys()) if (prix < bestAsk) bestAsk = prix;
-  if (bestBid === -Infinity || bestAsk === Infinity) return null;
-  return { bestBid, bestAsk };
-}
-
 /**
  * Échantillonne une colonne du carnet à `nowMs` : pas dérivé du mid (`pasArrondi`), bids/asks
  * agrégés par ce pas (`agregerNiveaux`, bornés à `LIMITE_NIVEAUX` par côté). Carnet sans
@@ -67,8 +57,8 @@ function meilleurs(livre: OrderBook): { bestBid: number; bestAsk: number } | nul
  * (agregerNiveaux sur des Maps vides renvoie `[]`). PURE.
  */
 export function echantillonnerColonne(livre: OrderBook, nowMs: number): ColonneDepth {
-  const best = meilleurs(livre);
-  const mid = best === null ? 0 : (best.bestBid + best.bestAsk) / 2;
+  const best = meilleursNiveaux(livre);
+  const mid = best === null ? 0 : best.mid;
   const pas = pasArrondi(mid);
   const bids = agregerNiveaux([...livre.bids.entries()], pas, "bid", LIMITE_NIVEAUX);
   const asks = agregerNiveaux([...livre.asks.entries()], pas, "ask", LIMITE_NIVEAUX);
@@ -80,6 +70,24 @@ export function echantillonnerColonne(livre: OrderBook, nowMs: number): ColonneD
 export function ajouterColonne(colonnes: ColonneDepth[], c: ColonneDepth, max: number = MAX_COLONNES): ColonneDepth[] {
   const next = [...colonnes, c];
   return next.length <= max ? next : next.slice(next.length - max);
+}
+
+/** Seuil de TROU d'échantillonnage : écart max toléré entre la dernière colonne et le prochain
+ *  échantillon (3× la cadence nominale). POURQUOI : un onglet en arrière-plan fait throttler le
+ *  `setInterval` (les navigateurs le plafonnent à ~1/s, parfois bien moins), produisant des
+ *  colonnes clairsemées. Le chemin de rendu lissé étale les colonnes UNIFORMÉMENT entre x0 et xN
+ *  (échantillonnage supposé régulier) : des colonnes séparées par un long trou seraient donc
+ *  collées côte à côte, désalignant la liquidité de l'axe temps réel. Au-delà du seuil on PURGE le
+ *  buffer : le ruban repart honnêtement de zéro plutôt que de mentir sur l'axe temps. */
+export const SEUIL_TROU_ECHANTILLONNAGE_MS = 3 * INTERVALLE_COLONNE_MS;
+
+/** Décide s'il faut purger le buffer avant d'ajouter l'échantillon de `nowMs` : purge ssi le
+ *  buffer n'est pas vide ET l'écart depuis la dernière colonne dépasse `SEUIL_TROU_ECHANTILLONNAGE_MS`
+ *  (trou d'échantillonnage, cf. constante). Buffer vide → jamais de purge. PURE. */
+export function purgeAvantEchantillon(colonnes: ColonneDepth[], nowMs: number): boolean {
+  const derniere = colonnes[colonnes.length - 1];
+  if (derniere === undefined) return false;
+  return nowMs - derniere.t > SEUIL_TROU_ECHANTILLONNAGE_MS;
 }
 
 /** Résultat de la projection en grille : cellules aplaties (colonne-major), nombre de
@@ -207,10 +215,13 @@ function publier(): void {
   depthHeatStore.setState((s) => ({ rev: s.rev + 1 }));
 }
 
-/** Échantillonne le carnet courant (si déjà reçu) et l'ajoute au FIFO borné ; bump `rev`. */
+/** Échantillonne le carnet courant (si déjà reçu) et l'ajoute au FIFO borné ; bump `rev`. Après un
+ *  trou d'échantillonnage (onglet throttlé), purge le buffer avant d'ajouter la colonne. */
 function echantillonner(): void {
   if (dernierLivre === null) return; // aucun carnet reçu encore sur cette souscription
-  colonnes = ajouterColonne(colonnes, echantillonnerColonne(dernierLivre, Date.now()));
+  const now = Date.now();
+  if (purgeAvantEchantillon(colonnes, now)) colonnes = [];
+  colonnes = ajouterColonne(colonnes, echantillonnerColonne(dernierLivre, now));
   publier();
 }
 
@@ -440,7 +451,11 @@ export class DepthHeatController {
     this.unsubTheme = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    // Relâche les buffers du rendu lissé (offscreen ~nCols×nLignes + imageData ~2,3 Mo) : ils
+    // seront recréés paresseusement au prochain start (cf. `dessinerLisse`).
     this.imageData = null;
+    this.offscreen = null;
+    this.offscreenCtx = null;
     this.clearCanvas();
   }
 

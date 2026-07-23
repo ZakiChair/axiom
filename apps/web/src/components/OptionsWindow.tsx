@@ -29,6 +29,7 @@ import {
   type GexDexPoint,
 } from "../data/gexDex";
 import { calculerSkew25d } from "../data/skew";
+import { termStructureIv, type PointTermIv } from "../data/termIv";
 import { bandeStrikes, construireGrilleOi, intensiteCellule, type GrilleOi } from "../data/oiHeatmap";
 import {
   CBOE_TICKERS,
@@ -39,7 +40,7 @@ import {
   type CboeTicker,
 } from "../data/cboe";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
-import { formatUsd, formatDec, formatPct, formatPourcentage } from "../lib/format";
+import { formatUsd, formatDec, formatPct, formatPourcentage, formatEntier } from "../lib/format";
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { indicesVisibles, valeurVersPixel, pixelVersValeur, type Domaine } from "../lib/domaineAxe";
 import { useDomaineZoom } from "../hooks/useDomaineZoom";
@@ -562,6 +563,209 @@ function dessinerHeatmapOi(
   }
 }
 
+// ─────────────────────────── Dessin de la term structure IV ───────────────────────────
+
+// Marges du plot de la term structure — axe IV à gauche, axe RR25 à droite (d'où padR large) ;
+// partagées entre le dessin (dessinerTermIv), l'inversion pixel→échéance du survol (onSurvolTermIv)
+// et le positionnement de l'infobulle (leçon HEATMAP_PAD : même géométrie des deux côtés).
+const TERMIV_PAD_L = 40;
+const TERMIV_PAD_R = 42;
+const TERMIV_PAD_T = 14;
+const TERMIV_PAD_B = 22;
+
+/**
+ * Dessine la term structure IV : axe X ordinal = échéances (étiquettes « j »/« h » courtes),
+ * ligne IV ATM (accent) sur l'échelle de gauche, ligne RR25 (segments/points up si ≥ 0, down
+ * sinon) sur une échelle PROPRE à droite, ligne horizontale pointillée du DVOL (sur l'échelle IV,
+ * libellée) et annotation de pente contango/backwardation (premier vs dernier point). DPR, tokens
+ * lus au dessin. `survol` = index du point survolé (anneau d'emphase), ou null.
+ */
+function dessinerTermIv(
+  canvas: HTMLCanvasElement,
+  points: PointTermIv[],
+  dvol: number | null,
+  survol: number | null,
+): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+  const cssW = canvas.clientWidth || 380;
+  const cssH = canvas.clientHeight || 200;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const padL = TERMIV_PAD_L;
+  const padR = TERMIV_PAD_R;
+  const padT = TERMIV_PAD_T;
+  const padB = TERMIV_PAD_B;
+  const plotW = Math.max(1, cssW - padL - padR);
+  const plotH = Math.max(1, cssH - padT - padB);
+
+  const couleurDim = lireTokenCanvas("--text-dim", "#9ca3af");
+  const couleurBordure = lireTokenCanvas("--border", "#262626");
+  const couleurAccent = lireTokenCanvas("--accent", "#38bdf8");
+  const couleurUp = lireTokenCanvas("--up", "#2dc08e");
+  const couleurDown = lireTokenCanvas("--down", "#f92855");
+  const couleurBg = lireTokenCanvas("--bg", "#0a0a0a");
+
+  ctx.font = "10px system-ui, sans-serif";
+
+  if (points.length === 0) {
+    ctx.fillStyle = couleurDim;
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.fillText("Pas de données de term structure…", padL, padT + plotH / 2);
+    return;
+  }
+
+  // Échelle IV (gauche) : bornes = ATM de tous les points (toujours finies, garanties par
+  // termStructureIv), ÉLARGIES au DVOL seulement si fini (sinon NaN empoisonnerait la plage).
+  const ivs = points.map((p) => p.ivAtm);
+  let ivMin = Math.min(...ivs);
+  let ivMax = Math.max(...ivs);
+  if (Number.isFinite(dvol)) {
+    ivMin = Math.min(ivMin, dvol as number);
+    ivMax = Math.max(ivMax, dvol as number);
+  }
+  if (ivMax === ivMin) ivMax = ivMin + 1;
+  const margeIv = (ivMax - ivMin) * 0.1;
+  ivMin = Math.max(0, ivMin - margeIv);
+  ivMax += margeIv;
+
+  // Échelle RR25 (droite) : bornes sur les rr25 FINIS uniquement, 0 inclus (repère du signe).
+  // Si AUCUN rr25 fini (chaîne illiquide/début de session), l'axe droit ne s'affiche pas.
+  const rrs = points.map((p) => p.rr25).filter((v): v is number => Number.isFinite(v));
+  const aRr25 = rrs.length > 0;
+  let rrMin = 0;
+  let rrMax = 0;
+  if (aRr25) {
+    rrMin = Math.min(0, ...rrs);
+    rrMax = Math.max(0, ...rrs);
+    if (rrMax === rrMin) rrMax = rrMin + 1;
+    const margeRr = (rrMax - rrMin) * 0.1;
+    rrMin -= margeRr;
+    rrMax += margeRr;
+  }
+
+  const n = points.length;
+  const colW = plotW / n;
+  const px = (i: number) => padL + (i + 0.5) * colW;
+  const pyIv = (v: number) => padT + (1 - (v - ivMin) / (ivMax - ivMin)) * plotH;
+  const pyRr = (v: number) => padT + (1 - (v - rrMin) / (rrMax - rrMin)) * plotH;
+
+  // Grille + étiquettes Y : IV (%) à gauche, RR25 (pts, signés) à droite aux mêmes 3 hauteurs.
+  ctx.lineWidth = 1;
+  const niveaux = [
+    { frac: 0, iv: ivMax, rr: rrMax },
+    { frac: 0.5, iv: (ivMin + ivMax) / 2, rr: (rrMin + rrMax) / 2 },
+    { frac: 1, iv: ivMin, rr: rrMin },
+  ];
+  for (const niv of niveaux) {
+    const y = padT + niv.frac * plotH;
+    ctx.strokeStyle = couleurBordure;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(cssW - padR, y);
+    ctx.stroke();
+    ctx.fillStyle = couleurDim;
+    ctx.fillText(`${niv.iv.toFixed(0)}%`, 4, y + 3);
+    if (aRr25) {
+      const txt = `${niv.rr >= 0 ? "+" : ""}${niv.rr.toFixed(1)}`;
+      ctx.fillStyle = couleurUp;
+      ctx.fillText(txt, cssW - padR + 3, y + 3);
+    }
+  }
+
+  // Ligne horizontale pointillée du DVOL (sur l'échelle IV), libellée. Rien si DVOL non fini.
+  if (Number.isFinite(dvol)) {
+    const y = pyIv(dvol as number);
+    ctx.strokeStyle = couleurDim;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(cssW - padR, y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const etiquette = `DVOL ${(dvol as number).toFixed(0)}%`;
+    const larg = ctx.measureText(etiquette).width;
+    const lx = padL + 4;
+    ctx.fillStyle = couleurBg;
+    ctx.fillRect(lx - 2, y - 10, larg + 4, 11);
+    ctx.fillStyle = couleurDim;
+    ctx.fillText(etiquette, lx, y - 2);
+  }
+
+  // Ligne RR25 (échelle droite) : segments et points colorés par le signe (up si ≥ 0, down sinon).
+  // Les points null coupent la ligne (segment tracé seulement entre voisins finis consécutifs).
+  if (aRr25) {
+    for (let i = 0; i < n - 1; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      if (!a || !b || a.rr25 === null || b.rr25 === null) continue;
+      ctx.strokeStyle = a.rr25 >= 0 ? couleurUp : couleurDown;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(px(i), pyRr(a.rr25));
+      ctx.lineTo(px(i + 1), pyRr(b.rr25));
+      ctx.stroke();
+    }
+    for (let i = 0; i < n; i++) {
+      const p = points[i];
+      if (!p || p.rr25 === null) continue;
+      ctx.fillStyle = p.rr25 >= 0 ? couleurUp : couleurDown;
+      ctx.beginPath();
+      ctx.arc(px(i), pyRr(p.rr25), 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Ligne IV ATM (échelle gauche, accent) : ligne pleine + points. Anneau d'emphase sur le survol.
+  ctx.strokeStyle = couleurAccent;
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  points.forEach((p, i) => (i === 0 ? ctx.moveTo(px(i), pyIv(p.ivAtm)) : ctx.lineTo(px(i), pyIv(p.ivAtm))));
+  ctx.stroke();
+  for (let i = 0; i < n; i++) {
+    const p = points[i];
+    if (!p) continue;
+    ctx.fillStyle = couleurAccent;
+    ctx.beginPath();
+    ctx.arc(px(i), pyIv(p.ivAtm), 2.2, 0, Math.PI * 2);
+    ctx.fill();
+    if (survol === i) {
+      ctx.strokeStyle = couleurAccent;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(px(i), pyIv(p.ivAtm), 4.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  // Annotation de pente : premier vs dernier ATM (contango si l'IV monte avec l'échéance).
+  if (n >= 2) {
+    const premier = points[0]?.ivAtm ?? NaN;
+    const dernier = points[n - 1]?.ivAtm ?? NaN;
+    if (Number.isFinite(premier) && Number.isFinite(dernier)) {
+      const txt = dernier >= premier ? "contango IV" : "backwardation IV";
+      ctx.fillStyle = couleurDim;
+      ctx.fillText(txt, padL, padT - 2);
+    }
+  }
+
+  // Étiquettes X (échéances) — sous-échantillonnées si les colonnes sont étroites.
+  ctx.fillStyle = couleurDim;
+  const pasX = colW < 34 ? 2 : 1;
+  for (let i = 0; i < n; i += pasX) {
+    const p = points[i];
+    if (!p) continue;
+    const txt = joursAvant(p.expiryMs);
+    const cx = px(i) - ctx.measureText(txt).width / 2;
+    ctx.fillText(txt, Math.max(padL, Math.min(cx, cssW - padR - ctx.measureText(txt).width)), cssH - 6);
+  }
+}
+
 // ─────────────────────────── Format utilitaire ───────────────────────────
 
 function joursAvant(expiryMs: number): string {
@@ -577,6 +781,7 @@ export function OptionsWindow() {
 
   const barCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const heatmapCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const termIvCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [devise, setDevise] = useState<Devise>("BTC");
   const [chain, setChain] = useState<OptionPoint[]>([]);
   const [dvol, setDvol] = useState<number | null>(null);
@@ -587,12 +792,14 @@ export function OptionsWindow() {
 
   // Vue : smile IV (existant), GEX/DEX, ou heatmap OI strike×échéance. En GEX/DEX : classe crypto
   // (Deribit) ou actions (CBOE).
-  const [vue, setVue] = useState<"smile" | "gexdex" | "heatmap">("smile");
+  const [vue, setVue] = useState<"smile" | "gexdex" | "heatmap" | "termiv">("smile");
   const [classe, setClasse] = useState<"crypto" | "actions">("crypto");
   const [metrique, setMetrique] = useState<"gex" | "dex">("gex");
   // Métrique de la heatmap : open interest, |GEX| (murs de gamma) OU volume 24h. État dédié à la vue heatmap.
   const [heatmapMetrique, setHeatmapMetrique] = useState<"oi" | "gex" | "volume">("oi");
   const [survolHeatmap, setSurvolHeatmap] = useState<SurvolHeatmap | null>(null);
+  // Index du point de term structure survolé (null = aucun) — pilote l'infobulle et l'anneau.
+  const [survolTermIv, setSurvolTermIv] = useState<number | null>(null);
   // Chaîne CBOE (indices actions) — chargée seulement en GEX/DEX « Actions ».
   const [cboeTicker, setCboeTicker] = useState<CboeTicker>("SPX");
   const [cboeChaine, setCboeChaine] = useState<CboeChain | null>(null);
@@ -891,6 +1098,40 @@ export function OptionsWindow() {
     return auMoinsUn ? somme : null;
   }, [survolHeatmap, chain, spotChaine]);
 
+  // ─────────────────────────── Term structure IV (toutes échéances) ───────────────────────────
+
+  // Points de la term structure — recalculés seulement quand la vue est active (fonction pure de
+  // data/termIv, nowMs injecté au bord comme grilleOi/gexDexPoints). Spot commun à la chaîne.
+  const termIvPoints = useMemo<PointTermIv[]>(
+    () => (vue === "termiv" ? termStructureIv(chain, spotChaine, Date.now()) : []),
+    [vue, chain, spotChaine],
+  );
+
+  // Redessine la term structure (données/vue/DVOL/survol ; thème repeint via majTs, tokens lus au dessin).
+  useEffect(() => {
+    if (!open || vue !== "termiv") return;
+    const canvas = termIvCanvasRef.current;
+    if (canvas) dessinerTermIv(canvas, termIvPoints, dvol, survolTermIv);
+  }, [open, vue, termIvPoints, dvol, survolTermIv, majTs]);
+
+  // Point survolé : inverse la géométrie (colonne ordinale depuis les pixels) — MÊMES paddings que
+  // le dessin (TERMIV_PAD_*), leçon HEATMAP_PAD.
+  const onSurvolTermIv = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (termIvPoints.length === 0) {
+      setSurvolTermIv(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const plotW = Math.max(1, rect.width - TERMIV_PAD_L - TERMIV_PAD_R);
+    const x = e.clientX - rect.left - TERMIV_PAD_L;
+    if (x < 0 || x >= plotW) {
+      setSurvolTermIv(null);
+      return;
+    }
+    const i = Math.min(termIvPoints.length - 1, Math.floor((x / plotW) * termIvPoints.length));
+    setSurvolTermIv(i);
+  };
+
   const onSurvolSmile = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (domaine === null || pointsEcheance.length === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -915,7 +1156,7 @@ export function OptionsWindow() {
 
   return (
     <>
-      <EnTeteFenetre mnemo="OMON" titre="Options" sousTitre="Smile IV · max pain · GEX/DEX · heatmap OI" />
+      <EnTeteFenetre mnemo="OMON" titre="Options" sousTitre="Smile IV · max pain · GEX/DEX · heatmap OI · term IV" />
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {/* Bascule de vue : Smile ↔ GEX/DEX ↔ Heatmap OI */}
@@ -925,6 +1166,7 @@ export function OptionsWindow() {
               { id: "smile", label: "Smile" },
               { id: "gexdex", label: "GEX/DEX" },
               { id: "heatmap", label: "Heatmap OI" },
+              { id: "termiv", label: "Term IV" },
             ] as const}
             actif={vue}
             onChange={setVue}
@@ -970,6 +1212,17 @@ export function OptionsWindow() {
               ] as const}
               actif={heatmapMetrique}
               onChange={setHeatmapMetrique}
+            />
+          </div>
+        )}
+
+        {/* En Term IV : bascule devise seule (pas d'échéance — la courbe couvre toutes les échéances) */}
+        {vue === "termiv" && (
+          <div className="mb-3 flex items-center gap-2">
+            <Segmente
+              options={DEVISES.map((d) => ({ id: d, label: d }))}
+              actif={devise}
+              onChange={setDevise}
             />
           </div>
         )}
@@ -1105,13 +1358,13 @@ export function OptionsWindow() {
               }
             />
             <Metric
-              label="P/C (Vol)"
+              label="P/C (Vol) (toutes éch.)"
               value={formatDec(pcVolRatio, 2)}
               couleur={
                 Number.isFinite(pcVolRatio) ? (pcVolRatio > 1 ? "var(--down)" : "var(--up)") : undefined
               }
             />
-            <Metric label="Notionnel OI" value={formatUsd(notionnelOi)} />
+            <Metric label="Notionnel OI (toutes éch.)" value={formatUsd(notionnelOi)} />
           </div>
 
           <div className="mt-3">
@@ -1282,6 +1535,84 @@ export function OptionsWindow() {
               Carte des positions options (toutes échéances). Couleur = open interest, |GEX|
               (murs de gamma, teinte up/down selon le signe) OU volume 24h, échelle log. ◆ = max
               pain par échéance, pointillé = spot. Données Deribit, ~1 min.
+            </NoteSource>
+          </div>
+        </div>
+
+        {/* ─────────── Vue TERM IV (IV ATM + RR25 par échéance) ───────────
+            Bloc TOUJOURS monté, masqué en CSS quand la vue n'est pas active — convention de
+            montage des canvases d'OMON (cf. blocs smile / heatmap). */}
+        <div className={vue === "termiv" ? undefined : "hidden"}>
+          <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
+            <span>IV ATM &amp; RR25 par échéance</span>
+            <Fraicheur loading={loading} majTs={majTs} />
+          </div>
+
+          {erreur && (
+            <div className="mb-3">
+              <ErreurBloc>{erreur}</ErreurBloc>
+            </div>
+          )}
+
+          <div className="rounded-md border border-border bg-bg p-2">
+            <div className="relative">
+              <canvas
+                ref={termIvCanvasRef}
+                className="h-[220px] w-full"
+                onMouseMove={onSurvolTermIv}
+                onMouseLeave={() => setSurvolTermIv(null)}
+              />
+              {survolTermIv !== null && termIvPoints[survolTermIv] && (
+                <InfobulleGraphe
+                  xPix={
+                    TERMIV_PAD_L +
+                    ((survolTermIv + 0.5) / Math.max(1, termIvPoints.length)) *
+                      Math.max(1, (termIvCanvasRef.current?.clientWidth ?? 0) - TERMIV_PAD_L - TERMIV_PAD_R)
+                  }
+                  largeurGraphe={termIvCanvasRef.current?.clientWidth ?? 0}
+                  titre={joursAvant(termIvPoints[survolTermIv]!.expiryMs)}
+                  lignes={[
+                    {
+                      label: "IV ATM",
+                      valeur: formatPourcentage(termIvPoints[survolTermIv]!.ivAtm, 1),
+                      couleur: "var(--accent)",
+                    },
+                    {
+                      label: "RR25",
+                      valeur: formatPct(termIvPoints[survolTermIv]!.rr25, 1),
+                      couleur:
+                        termIvPoints[survolTermIv]!.rr25 !== null
+                          ? termIvPoints[survolTermIv]!.rr25! >= 0
+                            ? "var(--up)"
+                            : "var(--down)"
+                          : undefined,
+                    },
+                    { label: "Nb strikes", valeur: formatEntier(termIvPoints[survolTermIv]!.nbStrikes) },
+                  ]}
+                />
+              )}
+            </div>
+          </div>
+          <div className="mt-1 flex items-center gap-4 text-[10px] text-text-dim">
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-1.5 w-3 rounded bg-accent" />
+              IV ATM
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-1.5 w-3 rounded bg-up" />
+              RR25 ≥ 0
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block h-1.5 w-3 rounded bg-down" />
+              RR25 &lt; 0
+            </span>
+          </div>
+
+          <div className="mt-3">
+            <NoteSource>
+              Term structure de la volatilité : IV ATM (strike le plus proche du spot, moyenne
+              call/put) et RR25 (skew 25Δ) par échéance. Pointillé = DVOL (indice de vol). Pente
+              montante = contango, descendante = backwardation. Données Deribit, ~1 min.
             </NoteSource>
           </div>
         </div>

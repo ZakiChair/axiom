@@ -20,7 +20,7 @@ import {
 } from "../data/screener";
 import { selectionEchantillon } from "../data/signaux";
 import { construirePoints, fusionnerSources, type PointRadar } from "../data/squeeze";
-import { mapPool } from "./screener";
+import { mapPool, OI_HIST_LIMIT } from "./screener";
 import { watchlistStore } from "./watchlist";
 
 const TICKER_24H_URL = "https://api.binance.com/api/v3/ticker/24hr";
@@ -79,17 +79,22 @@ export const squeezeStore = createStore<SqueezeState>((set) => ({
     applyFunding(tickers, fundingParSymbole);
     const echantillon = selectionEchantillon(tickers, watchlistStore.getState().symbols);
 
-    // 3. ΔOI par symbole (pool best-effort : un fetch en échec — histOiUsd rejette sur
-    //    HTTP/CORS — laisse le symbole sans ΔOI → exclu par construirePoints, jamais le run).
+    // 3. ΔOI par symbole (pool best-effort : histOiUsd ne rejette jamais — memo() catche
+    //    tout et résout null — donc un échec HTTP/CORS renvoie pts === null ; le try/catch
+    //    reste en défense). histOiUsd renvoie ~20 j de points 1h (cache TTL 1h partagé) ;
+    //    on ne garde que les OI_HIST_LIMIT derniers pour un ΔOI ~24 h (même convention que
+    //    le screener / la vue Signaux), cohérent avec les quadrants et SEUIL_DOI_PCT.
     const oiParSymbole = new Map<string, number>();
     await mapPool(echantillon, SQZ_CONCURRENCY, async (row) => {
       try {
         const pts = await histOiUsd(row.symbol);
         if (pts === null) return;
-        const delta = oiChangePctFromHist(pts.map((p) => ({ oiUsd: p.v })));
+        const delta = oiChangePctFromHist(
+          pts.slice(-OI_HIST_LIMIT).map((p) => ({ oiUsd: p.v })),
+        );
         if (delta !== undefined) oiParSymbole.set(row.symbol, delta);
       } catch {
-        /* ΔOI indisponible pour ce symbole : dégradation gracieuse */
+        /* défense : histOiUsd ne rejette pas, mais un défaut futur ne doit pas casser le run */
       }
     });
     if (runId !== currentRunId) return;

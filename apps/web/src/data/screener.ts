@@ -269,8 +269,9 @@ export interface BaseCondition {
 /**
  * Champ screené par un filtre INDICATEUR : rattaché à un `IndicatorDef` de
  * @axiom/indicators, avec la clé de sortie lue et la manière d'en dériver un scalaire.
- *  - "last"    : dernière valeur définie de la série (RSI, histogramme MACD…) ;
- *  - "distPct" : écart en % entre le dernier close et la valeur (prix vs EMA).
+ *  - "last"    : dernière valeur définie de la série (RSI, histogramme MACD, ADX…) ;
+ *  - "distPct" : écart en % entre le dernier close et la valeur (prix vs EMA) ;
+ *  - "lastPct" : dernière valeur définie × 100 (ratio brut exposé en %, ex. BB bandwidth).
  */
 export interface IndicatorFieldSpec {
   id: string;
@@ -282,7 +283,7 @@ export interface IndicatorFieldSpec {
   /** input principal configurable (ex. « length »), s'il existe. */
   paramKey?: string;
   defaultParam?: number;
-  derive: "last" | "distPct";
+  derive: "last" | "distPct" | "lastPct";
   unit: string;
 }
 
@@ -314,6 +315,26 @@ export const INDICATOR_FIELDS: IndicatorFieldSpec[] = [
     paramKey: "length",
     defaultParam: 20,
     derive: "distPct",
+    unit: "%",
+  },
+  {
+    id: "adx",
+    label: "ADX",
+    indicatorId: "adx",
+    output: "adx",
+    paramKey: "length",
+    defaultParam: 14,
+    derive: "last",
+    unit: "",
+  },
+  {
+    id: "bbw",
+    label: "BB bandwidth",
+    indicatorId: "bbBandwidth",
+    output: "bandwidth",
+    paramKey: "length",
+    defaultParam: 20,
+    derive: "lastPct",
     unit: "%",
   },
 ];
@@ -412,7 +433,8 @@ export function lastDefined(series: ReadonlyArray<number | undefined>): number |
 /**
  * Dérive le scalaire comparé d'un champ indicateur à partir de sa série de sortie :
  *  - "last"    : dernière valeur définie ;
- *  - "distPct" : 100·(close − valeur)/valeur (écart signé du prix à l'indicateur).
+ *  - "distPct" : 100·(close − valeur)/valeur (écart signé du prix à l'indicateur) ;
+ *  - "lastPct" : dernière valeur définie × 100 (ratio brut exposé en %).
  * Renvoie undefined si la série est vide ou le dernier close manquant. PURE.
  */
 export function deriveScalar(
@@ -426,6 +448,7 @@ export function deriveScalar(
     if (lastClose === undefined || !Number.isFinite(lastClose) || v === 0) return undefined;
     return (100 * (lastClose - v)) / v;
   }
+  if (spec.derive === "lastPct") return v * 100;
   return v;
 }
 
@@ -454,6 +477,8 @@ export interface ScreenerPreset {
   indicatorConditions: IndicatorCondition[];
   /** true pour les presets livrés (non supprimables) ; absent pour ceux de l'utilisateur. */
   builtin?: boolean;
+  /** Phrase expliquant la logique du scénario (affichée en `title` natif au survol). */
+  description?: string;
 }
 
 /**
@@ -539,5 +564,60 @@ export const BUILTIN_PRESETS: ScreenerPreset[] = [
     ],
     indicatorConditions: [],
     builtin: true,
+  },
+  // ── Presets « scénario de trade » (v1.5) : glyphe directionnel dans le nom, ──
+  // ── tf 4h, description = logique reprise de la spec §2. Seuils = valeurs de ──
+  // ── départ (calibrage = gate contrôleur), à ne pas « améliorer » ici. ────────
+  {
+    id: "builtin:long-potentiel",
+    name: "▲ Long potentiel (rebond)",
+    tf: "4h",
+    baseConditions: [
+      { kind: "base", field: "volumeUsd24h", op: ">", value: 10_000_000 },
+      { kind: "base", field: "fundingPct", op: "<", value: 0 },
+      { kind: "base", field: "oiChangePct", op: ">", value: 0 },
+    ],
+    indicatorConditions: [{ kind: "indicator", fieldId: "rsi", param: 14, op: "<", value: 35 }],
+    builtin: true,
+    description:
+      "les shorts paient ET s'accumulent sur un actif survendu = carburant à squeeze haussier.",
+  },
+  {
+    id: "builtin:short-potentiel",
+    name: "▼ Short potentiel (euphorie)",
+    tf: "4h",
+    baseConditions: [
+      { kind: "base", field: "volumeUsd24h", op: ">", value: 20_000_000 },
+      { kind: "base", field: "fundingPct", op: ">", value: 0.03 },
+      { kind: "base", field: "oiChangePct", op: ">", value: 2 },
+      { kind: "base", field: "longShortRatio", op: ">", value: 1.5 },
+    ],
+    indicatorConditions: [{ kind: "indicator", fieldId: "rsi", param: 14, op: ">", value: 70 }],
+    builtin: true,
+    description: "longs euphoriques, crowded, surachetés.",
+  },
+  {
+    id: "builtin:range",
+    name: "↔ Range / mean-reversion",
+    tf: "4h",
+    baseConditions: [
+      { kind: "base", field: "volumeUsd24h", op: ">", value: 5_000_000 },
+      { kind: "base", field: "absPriceChangePct24h", op: "<", value: 2 },
+    ],
+    indicatorConditions: [
+      { kind: "indicator", fieldId: "adx", param: 14, op: "<", value: 20 },
+      { kind: "indicator", fieldId: "bbw", param: 20, op: "<", value: 6 },
+    ],
+    builtin: true,
+    description: "pas de tendance, volatilité contenue.",
+  },
+  {
+    id: "builtin:compression",
+    name: "◆ Compression (breakout)",
+    tf: "4h",
+    baseConditions: [{ kind: "base", field: "volumeUsd24h", op: ">", value: 5_000_000 }],
+    indicatorConditions: [{ kind: "indicator", fieldId: "bbw", param: 20, op: "<", value: 3 }],
+    builtin: true,
+    description: "volatilité comprimée, cassure imminente, direction non préjugée.",
   },
 ];

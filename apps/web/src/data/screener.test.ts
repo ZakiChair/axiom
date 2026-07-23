@@ -5,16 +5,19 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
+import { getIndicator } from "@axiom/indicators";
 import {
   applyBaseFilters,
   applyFunding,
   applyLongShortRatio,
   applyOiChange,
+  BASE_FIELDS,
   baseFieldValue,
   BUILTIN_PRESETS,
   compareOp,
   deriveScalar,
   evalBaseCondition,
+  getIndicatorField,
   INDICATOR_FIELDS,
   lastClose,
   lastDefined,
@@ -268,6 +271,14 @@ describe("lastDefined / deriveScalar / lastClose", () => {
     expect(deriveScalar(spec, [100], undefined)).toBeUndefined();
   });
 
+  it("derive « lastPct » = dernière valeur définie × 100", () => {
+    const spec = INDICATOR_FIELDS.find((f) => f.id === "bbw") as IndicatorFieldSpec;
+    // ratio brut 0.042 → 4.2 % (indépendant du close).
+    expect(deriveScalar(spec, [undefined, 0.03, 0.042], 100)).toBeCloseTo(4.2, 10);
+    // série vide → indéfini.
+    expect(deriveScalar(spec, [], 100)).toBeUndefined();
+  });
+
   it("lastClose renvoie le close de la dernière bougie", () => {
     const candles: Candle[] = [
       { time: 1, open: 1, high: 2, low: 0.5, close: 1.5, volume: 10 },
@@ -275,5 +286,62 @@ describe("lastDefined / deriveScalar / lastClose", () => {
     ];
     expect(lastClose(candles)).toBe(2.8);
     expect(lastClose([])).toBeUndefined();
+  });
+});
+
+describe("catalogue INDICATOR_FIELDS (ADX / BB bandwidth)", () => {
+  it("résout ADX et BB bandwidth par id", () => {
+    const adx = getIndicatorField("adx");
+    expect(adx?.indicatorId).toBe("adx");
+    expect(adx?.output).toBe("adx");
+    expect(adx?.derive).toBe("last");
+
+    const bbw = getIndicatorField("bbw");
+    expect(bbw?.indicatorId).toBe("bbBandwidth");
+    expect(bbw?.output).toBe("bandwidth");
+    expect(bbw?.derive).toBe("lastPct");
+  });
+
+  it("intégrité registre : chaque champ pointe un output existant du def @axiom/indicators", () => {
+    for (const spec of INDICATOR_FIELDS) {
+      const def = getIndicator(spec.indicatorId);
+      expect(def, `def « ${spec.indicatorId} » introuvable`).toBeDefined();
+      expect(
+        def?.outputs.some((o) => o.key === spec.output),
+        `output « ${spec.output} » absent du def « ${spec.indicatorId} »`,
+      ).toBe(true);
+    }
+  });
+});
+
+describe("presets scénario (v1.5)", () => {
+  it("expose les 4 presets scénario avec glyphe et description", () => {
+    for (const id of [
+      "builtin:long-potentiel",
+      "builtin:short-potentiel",
+      "builtin:range",
+      "builtin:compression",
+    ]) {
+      const p = BUILTIN_PRESETS.find((preset) => preset.id === id);
+      expect(p, `preset « ${id} » absent`).toBeDefined();
+      expect(p!.tf).toBe("4h");
+      expect(p!.description, `description manquante pour « ${id} »`).toBeTruthy();
+      expect(p!.name).toMatch(/^[▲▼↔◆] /);
+    }
+  });
+
+  it("intégrité structurelle : chaque champ de condition existe au catalogue", () => {
+    const baseIds = new Set(BASE_FIELDS.map((f) => f.id));
+    for (const p of BUILTIN_PRESETS) {
+      for (const c of p.baseConditions) {
+        expect(baseIds.has(c.field), `champ base « ${c.field} » (${p.id}) inconnu`).toBe(true);
+      }
+      for (const c of p.indicatorConditions) {
+        expect(
+          getIndicatorField(c.fieldId),
+          `champ indicateur « ${c.fieldId} » (${p.id}) inconnu`,
+        ).toBeDefined();
+      }
+    }
   });
 });

@@ -64,7 +64,7 @@ const STORAGE_KEY = "axiom:screener:v1";
  */
 const POSITION_CONCURRENCY = 6;
 /** Historique OI : 25 points 1h ≈ fenêtre 24 h pour le Δ%. */
-const OI_HIST_LIMIT = 25;
+export const OI_HIST_LIMIT = 25;
 
 /** Phases d'un run. */
 export type RunState = "idle" | "loading" | "running" | "done" | "error";

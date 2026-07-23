@@ -1,6 +1,6 @@
 /**
  * Commandes palette des fenêtres dont le store UI vit dans le fichier composant
- * (CORR, MAP, TERM, OMON, RATE, COT, SEAG, VOL, FUND, BRIEF, STBL).
+ * (CORR, MAP, TERM, OMON, RATE, COT, SEAG, VOL, FUND, BRIEF, STBL, SQZ).
  *
  * Pilotage via `windowManagerStore` uniquement — **aucune** import des composants
  * lourds — pour permettre le code-splitting (React.lazy) des fenêtres dans App.tsx
@@ -206,6 +206,27 @@ export const windowPanelCommands: Commande[] = [
     ],
     apercu: "Ouvre / ferme l'analyse des stablecoins (DefiLlama)",
     action: basculer("stablecoins"),
+  },
+  {
+    id: "panneau:squeeze",
+    mnemonique: "SQZ",
+    libelle: "Radar squeeze",
+    categorie: "panneau",
+    motsCles: [
+      "squeeze",
+      "radar",
+      "funding",
+      "oi",
+      "open interest",
+      "delta oi",
+      "quadrant",
+      "long squeeze",
+      "short squeeze",
+      "crowded",
+      "sqz",
+    ],
+    apercu: "Ouvre / ferme le radar de squeeze (funding × ΔOI par quadrant)",
+    action: basculer("squeeze"),
   },
   {
     id: "panneau:funding-matrix",

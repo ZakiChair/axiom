@@ -68,6 +68,7 @@ export const WINDOW_REGISTRY = [
   { id: "brief", title: "Point marché", mnemonic: "BRIEF", defaultWidth: 480, defaultHeight: 720, menuLabel: "Point marché (snapshot)" },
   { id: "globe", title: "Globe (chokepoints & trafic aérien)", mnemonic: "GLOBE", defaultWidth: 720, defaultHeight: 720, menuLabel: "Globe (géopolitique, chokepoints & trafic aérien)", nouveau: true },
   { id: "stablecoins", title: "Stablecoins (supply, dominance, pegs)", mnemonic: "STBL", defaultWidth: 860, defaultHeight: 640, nouveau: true },
+  { id: "squeeze", title: "Radar squeeze", mnemonic: "SQZ", defaultWidth: 640, defaultHeight: 560, nouveau: true },
 ] as const satisfies readonly DefinitionFenetre[];
 
 /** Union des ids de fenêtre — DÉRIVÉE du registre (source unique). Sert à typer la

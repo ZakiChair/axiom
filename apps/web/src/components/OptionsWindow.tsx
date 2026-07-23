@@ -400,15 +400,15 @@ const HEATMAP_PAD_B = 22;
 /**
  * Dessine la heatmap OI/GEX : axe X ordinal = échéances (triées), axe Y ordinal = strikes de la
  * bande utile (ordonnés DÉCROISSANT, strike haut en haut, spot au milieu). Chaque cellule est un
- * `fillRect` teinté par `intensiteCellule` — métrique OI : rampe neutre → `--accent` ; métrique
- * GEX : signe porté par la teinte `--up`/`--down`, intensité = |gex|. Marqueur ◆ du max pain par
- * colonne, ligne horizontale pointillée du spot. Calqué sur `dessinerBarres` (DPR, tokens au dessin).
+ * `fillRect` teinté par `intensiteCellule` — métriques OI et Volume : rampe neutre → `--accent` ;
+ * métrique GEX : signe porté par la teinte `--up`/`--down`, intensité = |gex|. Marqueur ◆ du max pain
+ * par colonne, ligne horizontale pointillée du spot. Calqué sur `dessinerBarres` (DPR, tokens au dessin).
  */
 function dessinerHeatmapOi(
   canvas: HTMLCanvasElement,
   grille: GrilleOi,
   bandeDesc: number[],
-  metrique: "oi" | "gex",
+  metrique: "oi" | "gex" | "volume",
   spot: number,
   survol: SurvolHeatmap | null,
 ): void {
@@ -449,19 +449,21 @@ function dessinerHeatmapOi(
   const indexEcheance = new Map(echeances.map((e, i) => [e, i]));
   const indexBande = new Map(bandeDesc.map((s, i) => [s, i]));
 
-  const vMax = metrique === "oi" ? grille.oiMax : grille.gexAbsMax;
+  const vMax =
+    metrique === "oi" ? grille.oiMax : metrique === "gex" ? grille.gexAbsMax : grille.volumeMax;
 
   // Cellules teintées par intensité.
   for (const c of grille.cellules) {
     const ci = indexEcheance.get(c.expiryMs);
     const ri = indexBande.get(c.strike);
     if (ci === undefined || ri === undefined) continue;
-    const valeur = metrique === "oi" ? c.oiTotal : Math.abs(c.gex);
+    const valeur = metrique === "oi" ? c.oiTotal : metrique === "gex" ? Math.abs(c.gex) : c.volume24h;
     const intensite = intensiteCellule(valeur, vMax);
     if (intensite <= 0) continue;
     const alpha = 0.1 + 0.85 * intensite; // plancher visible pour les petites tailles.
-    const token = metrique === "oi" ? "--accent" : c.gex >= 0 ? "--up" : "--down";
-    const repli = metrique === "oi" ? "#38bdf8" : c.gex >= 0 ? "#2dc08e" : "#f92855";
+    // GEX : teinte selon le signe. OI et Volume : rampe accent.
+    const token = metrique === "gex" ? (c.gex >= 0 ? "--up" : "--down") : "--accent";
+    const repli = metrique === "gex" ? (c.gex >= 0 ? "#2dc08e" : "#f92855") : "#38bdf8";
     ctx.fillStyle = rgbaTokenCanvas(token, alpha, repli);
     ctx.fillRect(padL + ci * colW, padT + ri * rowH, colW, rowH);
   }
@@ -588,8 +590,8 @@ export function OptionsWindow() {
   const [vue, setVue] = useState<"smile" | "gexdex" | "heatmap">("smile");
   const [classe, setClasse] = useState<"crypto" | "actions">("crypto");
   const [metrique, setMetrique] = useState<"gex" | "dex">("gex");
-  // Métrique de la heatmap : open interest OU |GEX| (murs de gamma). État dédié à la vue heatmap.
-  const [heatmapMetrique, setHeatmapMetrique] = useState<"oi" | "gex">("oi");
+  // Métrique de la heatmap : open interest, |GEX| (murs de gamma) OU volume 24h. État dédié à la vue heatmap.
+  const [heatmapMetrique, setHeatmapMetrique] = useState<"oi" | "gex" | "volume">("oi");
   const [survolHeatmap, setSurvolHeatmap] = useState<SurvolHeatmap | null>(null);
   // Chaîne CBOE (indices actions) — chargée seulement en GEX/DEX « Actions ».
   const [cboeTicker, setCboeTicker] = useState<CboeTicker>("SPX");
@@ -793,6 +795,30 @@ export function OptionsWindow() {
     return u ?? NaN;
   }, [chain]);
 
+  // Flux du jour (métriques d'en-tête Smile, agrégées sur TOUTE la chaîne — lecture globale du
+  // marché, indépendante de l'échéance sélectionnée). P/C (Vol) : ratio put/call sur le volume
+  // 24h (même patron que putCallRatioOi, appliqué à volume24h). NaN si aucun volume call.
+  const pcVolRatio = useMemo(() => {
+    let call = 0;
+    let put = 0;
+    for (const p of chain) {
+      if (!Number.isFinite(p.volume24h)) continue;
+      if (p.type === "call") call += p.volume24h;
+      else put += p.volume24h;
+    }
+    return call > 0 ? put / call : NaN;
+  }, [chain]);
+  // Notionnel OI : Σ(OI × spot) sur toute la chaîne, en USD. NaN si spot indisponible.
+  const notionnelOi = useMemo(() => {
+    if (!Number.isFinite(spotChaine)) return NaN;
+    let somme = 0;
+    for (const p of chain) {
+      if (!Number.isFinite(p.openInterest)) continue;
+      somme += p.openInterest * spotChaine;
+    }
+    return somme;
+  }, [chain, spotChaine]);
+
   // Grille OI/GEX (toutes échéances) — recalculée quand la vue heatmap est active. Date.now() au
   // bord du composant (comme gexDexPoints/skew25) ; la logique pure reçoit nowMs injecté.
   const grilleOi = useMemo<GrilleOi | null>(
@@ -847,6 +873,23 @@ export function OptionsWindow() {
       ) ?? null
     );
   }, [survolHeatmap, grilleOi]);
+
+  // Prime de la cellule survolée = Σ(OI × markPrice × spot) sur call+put (en USD) — la prime
+  // markPrice est en unités de base, ×spot la convertit en USD. markPrice non fini exclu de la
+  // somme (convention Number.isFinite) ; null si AUCUN côté n'a de markPrice fini → « — ».
+  const primeCellule = useMemo(() => {
+    if (!survolHeatmap) return null;
+    let somme = 0;
+    let auMoinsUn = false;
+    for (const p of chain) {
+      if (p.expiryMs !== survolHeatmap.expiryMs || p.strike !== survolHeatmap.strike) continue;
+      if (!Number.isFinite(p.markPrice)) continue;
+      const oi = Number.isFinite(p.openInterest) ? p.openInterest : 0;
+      somme += oi * p.markPrice * spotChaine;
+      auMoinsUn = true;
+    }
+    return auMoinsUn ? somme : null;
+  }, [survolHeatmap, chain, spotChaine]);
 
   const onSurvolSmile = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (domaine === null || pointsEcheance.length === 0) return;
@@ -923,6 +966,7 @@ export function OptionsWindow() {
               options={[
                 { id: "oi", label: "OI" },
                 { id: "gex", label: "|GEX|" },
+                { id: "volume", label: "Volume" },
               ] as const}
               actif={heatmapMetrique}
               onChange={setHeatmapMetrique}
@@ -1060,6 +1104,14 @@ export function OptionsWindow() {
                   : undefined
               }
             />
+            <Metric
+              label="P/C (Vol)"
+              value={formatDec(pcVolRatio, 2)}
+              couleur={
+                Number.isFinite(pcVolRatio) ? (pcVolRatio > 1 ? "var(--down)" : "var(--up)") : undefined
+              }
+            />
+            <Metric label="Notionnel OI" value={formatUsd(notionnelOi)} />
           </div>
 
           <div className="mt-3">
@@ -1138,7 +1190,14 @@ export function OptionsWindow() {
             montage des canvases d'OMON (cf. bloc smile). */}
         <div className={vue === "heatmap" ? undefined : "hidden"}>
           <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
-            <span>{heatmapMetrique === "oi" ? "Open interest" : "|GEX| (murs de gamma)"} par strike × échéance</span>
+            <span>
+              {heatmapMetrique === "oi"
+                ? "Open interest"
+                : heatmapMetrique === "gex"
+                  ? "|GEX| (murs de gamma)"
+                  : "Volume 24h"}{" "}
+              par strike × échéance
+            </span>
             <Fraicheur loading={loading} majTs={majTs} />
           </div>
 
@@ -1173,23 +1232,29 @@ export function OptionsWindow() {
                     { label: "OI call", valeur: formatDec(celluleSurvol.callOi, 2), couleur: "var(--up)" },
                     { label: "OI put", valeur: formatDec(celluleSurvol.putOi, 2), couleur: "var(--down)" },
                     { label: "OI total", valeur: formatDec(celluleSurvol.oiTotal, 2) },
+                    { label: "Vol 24h", valeur: formatDec(celluleSurvol.volume24h, 2) },
+                    {
+                      label: "V/OI",
+                      valeur: formatDec(
+                        celluleSurvol.oiTotal > 0 ? celluleSurvol.volume24h / celluleSurvol.oiTotal : null,
+                        2,
+                      ),
+                    },
                     { label: "GEX", valeur: formatUsd(celluleSurvol.gex) },
                     {
                       label: "Max pain",
                       valeur: formatUsdExact(grilleOi.maxPainParEcheance.get(survolHeatmap.expiryMs) ?? null),
                     },
+                    ...(heatmapMetrique === "volume"
+                      ? [{ label: "Prime OI", valeur: formatUsd(primeCellule) }]
+                      : []),
                   ]}
                 />
               )}
             </div>
           </div>
           <div className="mt-1 flex items-center gap-4 text-[10px] text-text-dim">
-            {heatmapMetrique === "oi" ? (
-              <span className="flex items-center gap-1">
-                <span className="inline-block h-1.5 w-3 rounded bg-accent" />
-                open interest (log)
-              </span>
-            ) : (
+            {heatmapMetrique === "gex" ? (
               <>
                 <span className="flex items-center gap-1">
                   <span className="inline-block h-1.5 w-3 rounded bg-up" />
@@ -1200,6 +1265,11 @@ export function OptionsWindow() {
                   GEX négatif
                 </span>
               </>
+            ) : (
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-1.5 w-3 rounded bg-accent" />
+                {heatmapMetrique === "oi" ? "open interest (log)" : "volume 24h (log)"}
+              </span>
             )}
             <span className="flex items-center gap-1">
               <span className="text-accent">◆</span>
@@ -1209,9 +1279,9 @@ export function OptionsWindow() {
 
           <div className="mt-3">
             <NoteSource>
-              Carte des positions options (toutes échéances). Couleur = open interest OU |GEX|
-              (murs de gamma, teinte up/down selon le signe), échelle log. ◆ = max pain par
-              échéance, pointillé = spot. Données Deribit, ~1 min.
+              Carte des positions options (toutes échéances). Couleur = open interest, |GEX|
+              (murs de gamma, teinte up/down selon le signe) OU volume 24h, échelle log. ◆ = max
+              pain par échéance, pointillé = spot. Données Deribit, ~1 min.
             </NoteSource>
           </div>
         </div>

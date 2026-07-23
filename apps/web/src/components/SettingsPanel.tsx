@@ -25,6 +25,7 @@ import { soSoValueKeyStore } from "../store/sosovalue";
 import { finnhubKeyStore } from "../store/finnhub";
 import { etherscanKeyStore } from "../store/etherscan";
 import { risqueStore } from "../store/risque";
+import { refSymbolStore } from "../store/refSymbol";
 import {
   creerSnapshot,
   listerSnapshots,
@@ -195,6 +196,58 @@ function ApiKeyField({
  * Capital vide = NON PARAMÉTRÉ : l'outil affiche alors « capital non paramétré »
  * plutôt qu'une taille calculée sur une valeur inventée.
  */
+/**
+ * Section « Indicateurs croisés » : le symbole de référence (refSymbol) dont la
+ * close alimente corrélation / bêta / spread z-score. Brouillon LOCAL (saisie en
+ * MAJUSCULES, patron de l'input watchlist), commité au store sur Entrée / blur —
+ * une saisie vide retombe sur la valeur courante (le store ignore le vide).
+ */
+function RefSymbolSection() {
+  const refSymbol = useStore(refSymbolStore, (s) => s.refSymbol);
+  const [draft, setDraft] = useState(refSymbol);
+
+  // Le store peut changer ailleurs (restauration de session) : on resynchronise
+  // le brouillon quand la valeur committée bouge.
+  useEffect(() => setDraft(refSymbol), [refSymbol]);
+
+  const commit = () => {
+    refSymbolStore.getState().setRefSymbol(draft);
+    // Le store a pu normaliser ou ignorer : on réaligne le brouillon sur la vérité.
+    setDraft(refSymbolStore.getState().refSymbol);
+  };
+
+  return (
+    <>
+      <h3 className="mt-6 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+        Indicateurs croisés
+      </h3>
+      <p className="mt-1 text-[11px] leading-snug text-text-dim">
+        Symbole de référence commun aux indicateurs statistiques (corrélation, bêta,
+        spread z-score). Sa close est alignée sur les bougies du chart.
+      </p>
+      <div className="mt-3">
+        <label className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg px-3 py-2.5">
+          <span className="min-w-0">
+            <span className="text-sm text-text">Symbole de référence (indicateurs croisés)</span>
+            <span className="block text-[11px] text-text-dim">Spot Binance, ex. BTCUSDT.</span>
+          </span>
+          <input
+            aria-label="Symbole de référence des indicateurs croisés"
+            className="w-28 shrink-0 rounded border border-border bg-panel px-2 py-1 text-right text-sm text-text outline-none placeholder:text-text-dim focus:border-accent"
+            value={draft}
+            placeholder="BTCUSDT"
+            onChange={(e) => setDraft(e.target.value.toUpperCase())}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+            }}
+          />
+        </label>
+      </div>
+    </>
+  );
+}
+
 function RisqueSection() {
   const capital = useStore(risqueStore, (s) => s.capital);
   const risquePct = useStore(risqueStore, (s) => s.risquePct);
@@ -548,6 +601,9 @@ export function SettingsPanel() {
             <span className="text-sm text-text">Thème</span>
             <ThemeSwitcher />
           </div>
+
+          {/* --- Indicateurs croisés (symbole de référence) --- */}
+          <RefSymbolSection />
 
           {/* --- Risque (dimensionnement de l'outil position) --- */}
           <RisqueSection />

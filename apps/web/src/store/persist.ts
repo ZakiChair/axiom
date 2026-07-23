@@ -52,6 +52,7 @@ import {
 } from "./watchlist";
 import { compareStore } from "./compare";
 import { orderflowStore } from "./orderflow";
+import { refSymbolStore } from "./refSymbol";
 import { volumeProfileStore } from "./volumeProfile";
 import { revenueStore } from "./revenue";
 import { macroOverlayStore, MACRO_OVERLAYS, type MacroOverlayId } from "./macro-overlays";
@@ -360,6 +361,8 @@ interface PersistedSession {
   /** Symboles comparés (ordre = ordre d'ajout ; les couleurs sont ré-attribuées à l'identique). */
   compare: string[];
   orderflow: boolean;
+  /** Symbole de référence des indicateurs croisés (refSymbolStore). */
+  refSymbol: string;
   volumeProfile: boolean;
   revenue: boolean;
   /** Bascule heatmap liquidations exécutées (chart/liquidationMarkers). */
@@ -383,6 +386,7 @@ function currentSession(): PersistedSession {
   return {
     compare: compareStore.getState().symbols.map((c) => c.symbol),
     orderflow: orderflowStore.getState().enabled,
+    refSymbol: refSymbolStore.getState().refSymbol,
     volumeProfile: volumeProfileStore.getState().enabled,
     revenue: revenueStore.getState().enabled,
     liqHeatmap: liqMarksStore.getState().actif,
@@ -415,6 +419,9 @@ function hydrateSession(): void {
   }
 
   if (typeof p.orderflow === "boolean") orderflowStore.getState().setEnabled(p.orderflow);
+  // refSymbol : passe par le setter → normalisation (une valeur éditée à la main en
+  // minuscules est remise en MAJUSCULES, une chaîne vide est ignorée).
+  if (isNonEmptyString(p.refSymbol)) refSymbolStore.getState().setRefSymbol(p.refSymbol);
   if (typeof p.volumeProfile === "boolean") volumeProfileStore.getState().setEnabled(p.volumeProfile);
   if (typeof p.revenue === "boolean") revenueStore.getState().setEnabled(p.revenue);
   // Liquidations : `setActif` fait passer la bascule via son subscribe → le singleton
@@ -536,6 +543,7 @@ export function enablePersistence(): void {
   // État de session : un seul enregistreur partagé, abonné à chaque store concerné.
   compareStore.subscribe(saveSessionUi);
   orderflowStore.subscribe(saveSessionUi);
+  refSymbolStore.subscribe(saveSessionUi);
   volumeProfileStore.subscribe(saveSessionUi);
   revenueStore.subscribe(saveSessionUi);
   liqMarksStore.subscribe(saveSessionUi);

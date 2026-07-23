@@ -302,3 +302,31 @@ export function rollingSum(
   }
   return out;
 }
+
+/** Borne un entier de paramètre dans [min, max], repli sur `def` si non fini. */
+export function clampInt(v: unknown, def: number, min: number, max: number): number {
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n)) return def;
+  return Math.min(max, Math.max(min, n));
+}
+
+/**
+ * Rendements log d'une série de prix, alignés sur les bougies.
+ * out[i] = ln(v[i]/v[i-1]) si v[i] et v[i-1] sont finis et > 0 ; sinon undefined
+ * (out[0] toujours undefined : pas de borne précédente).
+ */
+export function rendementsLog(
+  values: Array<number | undefined>,
+  n: number
+): Array<number | undefined> {
+  const out: Array<number | undefined> = new Array(n).fill(undefined);
+  for (let i = 1; i < n; i++) {
+    const cur = values[i];
+    const prev = values[i - 1];
+    if (cur === undefined || prev === undefined) continue;
+    if (!Number.isFinite(cur) || !Number.isFinite(prev)) continue;
+    if (cur <= 0 || prev <= 0) continue;
+    out[i] = Math.log(cur / prev);
+  }
+  return out;
+}

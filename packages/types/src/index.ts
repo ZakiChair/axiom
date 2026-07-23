@@ -200,6 +200,10 @@ export type AuxSeriesId =
   | "lsAccount" | "lsTopTrader" | "lsTaker"
   // Delta agresseur du perp par bougie (Binance fapi klines) — jambe perp du CVD spot vs perp.
   | "perpDelta"
+  // Close du symbole de RÉFÉRENCE (spot, choisi via le réglage global refSymbol),
+  // aligné LOCF sur les bougies du chart — jambe « croisée » des indicateurs statistiques
+  // (corrélation, bêta, spread z-score vs référence).
+  | "refClose"
   // Sentiment global crypto : Fear & Greed Index (Alternative.me, 0-100).
   | "fearGreed";
 
@@ -220,6 +224,8 @@ export type IndicatorCategory =
   | "billwilliams"
   | "support_resistance"
   | "derivatives"
+  // Indicateurs cross-asset (rendements log vs symbole de référence) : corrélation, bêta, spread z-score.
+  | "statistical"
   | "custom";
 
 export type IndicatorPane = "overlay" | "separate";

@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 150 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 153 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -102,6 +102,11 @@ import { ulcerIndex } from "./volatility/ulcerIndex";
 import { hurst } from "./volatility/hurst";
 import { vhf } from "./volatility/vhf";
 import { priceZScore } from "./volatility/priceZScore";
+
+// — statistical —
+import { rollingCorrelation } from "./statistical/rollingCorrelation";
+import { betaRef } from "./statistical/betaRef";
+import { spreadZScore } from "./statistical/spreadZScore";
 
 // — volume + orderflow (fichiers sous volume/ ou orderflow/ selon la catégorie UI) —
 import { adLine } from "./volume/adLine";
@@ -265,6 +270,10 @@ export const INDICATORS: IndicatorDef[] = [
   hurst,
   vhf,
   priceZScore,
+  // statistical (cross-asset vs symbole de référence)
+  rollingCorrelation,
+  betaRef,
+  spreadZScore,
   // volume (classique)
   adLine,
   anchoredVwap,

@@ -1,9 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   CATEGORIES_COT,
   DATASETS_COT,
   WATCHLIST_COT,
-  chargerRapportCot,
   construireRequete,
   construireRequeteDataset,
   cotIndex,
@@ -291,64 +290,6 @@ describe("netSurOi", () => {
   it("OI négatif ou NaN → null", () => {
     expect(netSurOi(5000, -100)).toBeNull();
     expect(netSurOi(5000, Number.NaN)).toBeNull();
-  });
-});
-
-describe("chargerRapportCot — normalisation du cache (fix revue Task 1)", () => {
-  /** Mock localStorage en mémoire (environnement de test Node, pas de DOM ici). */
-  function installMockLocalStorage(): Storage {
-    const data = new Map<string, string>();
-    const mock: Storage = {
-      getItem: (k) => data.get(k) ?? null,
-      setItem: (k, v) => void data.set(k, v),
-      removeItem: (k) => void data.delete(k),
-      clear: () => data.clear(),
-      key: (i) => Array.from(data.keys())[i] ?? null,
-      get length() {
-        return data.size;
-      },
-    };
-    (globalThis as { localStorage?: Storage }).localStorage = mock;
-    return mock;
-  }
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    delete (globalThis as { localStorage?: Storage }).localStorage;
-  });
-
-  it("un OI absent (NaN) survit au round-trip localStorage sans devenir null", async () => {
-    installMockLocalStorage();
-    const BTC = "BITCOIN - CHICAGO MERCANTILE EXCHANGE";
-    const records = [
-      {
-        market_and_exchange_names: BTC,
-        report_date_as_yyyy_mm_dd: "2026-06-23T00:00:00.000",
-        noncomm_positions_long_all: "16348",
-        noncomm_positions_short_all: "12824",
-        open_interest_all: "", // ⇒ OI = NaN (convention nombreCot)
-      },
-    ];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, json: async () => records }),
-    );
-
-    // 1) premier chargement réseau : écrit le cache (JSON.stringify(NaN) → "null" dans le blob).
-    const premier = await chargerRapportCot({ force: true });
-    const btc1 = premier.resume.lignes.find((l) => l.nom === BTC);
-    expect(Number.isNaN(btc1?.openInterest)).toBe(true);
-    expect(Number.isNaN(btc1?.serie[0]?.oi)).toBe(true);
-
-    // 2) relecture pure cache (frais, aucun fetch nécessaire) : sans le fix, oi/openInterest
-    //    reviendraient `null` (violation du contrat `number`) au lieu de NaN.
-    const second = await chargerRapportCot();
-    expect(second.depuisCache).toBe(true);
-    const btc2 = second.resume.lignes.find((l) => l.nom === BTC);
-    expect(btc2?.openInterest).not.toBeNull();
-    expect(Number.isNaN(btc2?.openInterest)).toBe(true);
-    expect(btc2?.serie[0]?.oi).not.toBeNull();
-    expect(Number.isNaN(btc2?.serie[0]?.oi)).toBe(true);
   });
 });
 

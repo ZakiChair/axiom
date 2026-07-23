@@ -14,14 +14,10 @@
  * DEUX derniers rapports par instrument (net_dernier − net_précédent) — cohérent avec les
  * champs `change_in_*` officiels du CFTC, mais recalculé côté client pour rester robuste.
  *
- * Ce module est PUR pour tout le parsing / la synthèse (testé dans cot.test.ts). Il expose
- * en plus un orchestrateur `chargerRapportCot` (fetch + cache + santé) — seul effet de bord.
- *
- * Dégradation gracieuse : source en panne ⇒ on préfère le dernier cache (localStorage) à un
- * résultat vide ; jamais d'exception propagée qui casserait l'UI.
+ * Ce module est PUR : parsing, synthèse et construction des requêtes Socrata (testé dans
+ * cot.test.ts). L'orchestration (fetch + cache par dataset + santé) vit désormais dans
+ * `store/cot.ts` ; ce module n'a plus aucun effet de bord.
  */
-import { extUrl } from "./extapi";
-import { healthStore } from "../store/health";
 
 // ─────────────────────────── Types ───────────────────────────
 
@@ -384,17 +380,7 @@ export function netSurOi(net: number, oi: number): number | null {
   return (net / oi) * 100;
 }
 
-// ─────────────────────────── Orchestrateur (effet de bord) ───────────────────────────
-
-const HOTE = "publicreporting.cftc.gov";
-const DATASET = "6dca-aqww"; // Legacy Futures Only
-const HEALTH_SOURCE = "cot:cftc";
-
-// Clé v2 : la synthèse conserve désormais la SÉRIE 3 ans par instrument (forme incompatible
-// avec le cache v1, qui ne gardait que 2 rapports) ⇒ nouvelle clé pour éviter les faux hits.
-const CACHE_KEY = "axiom:cot:cache:v2";
-/** TTL du cache : 12 h (rapport publié une fois par semaine, le vendredi). */
-const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+// ─────────────────────────── Construction des requêtes Socrata (PURE) ───────────────────────────
 
 /**
  * Limite de lignes récupérées. ~14 instruments × ~156 rapports hebdo sur 3 ans ≈ 2184 lignes ;
@@ -459,106 +445,4 @@ export function construireRequeteDataset(
     ["market_and_exchange_names", "report_date_as_yyyy_mm_dd", ...net1, ...net2, "open_interest_all"].join(","),
   );
   return params.toString();
-}
-
-interface CacheCot {
-  ts: number;
-  resume: ResumeCot;
-}
-
-/**
- * `JSON.stringify(NaN)` produit `null` (NaN n'est pas représentable en JSON) : un `oi` ou un
- * `openInterest` absent (NaN par convention `nombreCot`) revient donc `null` après un aller-retour
- * localStorage, en violation du contrat `oi: number` / `openInterest: number`. On renormalise ici
- * à la LECTURE (toute valeur non finie ⇒ NaN) plutôt qu'à l'écriture, pour rester robuste même à
- * un cache écrit par une version antérieure du code. Fonction PURE.
- */
-function normaliserResumeCache(resume: ResumeCot): ResumeCot {
-  return {
-    ...resume,
-    lignes: resume.lignes.map((ligne) => ({
-      ...ligne,
-      openInterest: Number.isFinite(ligne.openInterest) ? ligne.openInterest : NaN,
-      serie: ligne.serie.map((pt) => (Number.isFinite(pt.oi) ? pt : { ...pt, oi: NaN })),
-    })),
-  };
-}
-
-/** Lecture tolérante du cache (localStorage absent / JSON corrompu → null). */
-function lireCache(): CacheCot | null {
-  try {
-    if (typeof localStorage === "undefined") return null;
-    // Purge best-effort du cache v1 (clé obsolète après migration vers série 3 ans).
-    // Blob orphelin, pas de failure si absent ou localStorage readonly.
-    try {
-      localStorage.removeItem("axiom:cot:cache:v1");
-    } catch {
-      /* silencieux */
-    }
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
-    const p = JSON.parse(raw) as Partial<CacheCot> | null;
-    if (!p || typeof p.ts !== "number" || !p.resume || !Array.isArray(p.resume.lignes)) return null;
-    return { ts: p.ts, resume: normaliserResumeCache(p.resume as ResumeCot) };
-  } catch {
-    return null;
-  }
-}
-
-/** Écriture tolérante du cache (best-effort). */
-function ecrireCache(resume: ResumeCot): void {
-  try {
-    if (typeof localStorage === "undefined") return;
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), resume }));
-  } catch {
-    /* best-effort : la série 3 ans × 14 instruments peut dépasser le quota localStorage
-       (QuotaExceededError) ; on avale silencieusement l'exception — pas de cache vaut mieux
-       qu'une UI cassée, et le prochain chargement repartira du réseau. */
-  }
-}
-
-/** Résultat de `chargerRapportCot`. */
-export interface ChargementCot {
-  resume: ResumeCot;
-  /** Vrai si servi depuis le cache (aucune requête réseau émise ou repli sur cache). */
-  depuisCache: boolean;
-}
-
-/**
- * Charge le rapport COT synthétisé (effet de bord : fetch + cache + santé).
- *  - cache frais (< 12 h) et pas de `force` → renvoyé tel quel, aucun réseau ;
- *  - sinon : 1 requête Socrata agrégée, synthèse, mise en cache.
- * Dégradation gracieuse : sur échec réseau/HTTP ou résultat vide, on renvoie le dernier
- * cache s'il existe (sinon un résumé vide) — jamais d'exception propagée.
- */
-export async function chargerRapportCot(opts?: {
-  force?: boolean;
-  signal?: AbortSignal;
-}): Promise<ChargementCot> {
-  const cache = lireCache();
-  if (!opts?.force && cache && Date.now() - cache.ts < CACHE_TTL_MS) {
-    return { resume: cache.resume, depuisCache: true };
-  }
-
-  try {
-    const qs = construireRequete(WATCHLIST_COT, Date.now());
-    const res = await fetch(extUrl(HOTE, `resource/${DATASET}.json?${qs}`), { signal: opts?.signal });
-    if (!res.ok) throw new Error(`CFTC ${res.status}`);
-    const json = (await res.json()) as unknown;
-    const resume = resumerCot(json);
-
-    // Réponse vide alors qu'un cache existe : on préfère le cache (échec probable en amont).
-    if (resume.lignes.length === 0 && cache) {
-      return { resume: cache.resume, depuisCache: true };
-    }
-
-    ecrireCache(resume);
-    healthStore.getState().setEtat(HEALTH_SOURCE, "polling", { dernierMessageTs: Date.now() });
-    return { resume, depuisCache: false };
-  } catch (err) {
-    if (typeof err !== "object" || err === null || (err as { name?: unknown }).name !== "AbortError") {
-      healthStore.getState().marquerErreur(HEALTH_SOURCE, "Rapport COT (CFTC) indisponible");
-    }
-    return { resume: cache?.resume ?? { lignes: [], dateRapport: null }, depuisCache: true };
-  }
 }

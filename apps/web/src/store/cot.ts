@@ -208,16 +208,12 @@ function ecrireCacheDataset(dataset: DatasetCot, records: unknown[], ts: number)
 }
 
 /** Fetch d'un dataset (records bruts). Rejette sur échec réseau/HTTP. */
-async function fetchDataset(dataset: DatasetCot, signal?: AbortSignal): Promise<unknown[]> {
+async function fetchDataset(dataset: DatasetCot): Promise<unknown[]> {
   const qs = construireRequeteDataset(dataset, WATCHLIST_COT, Date.now());
-  const res = await fetch(extUrl(HOTE, `resource/${DATASETS_COT[dataset].id}.json?${qs}`), { signal });
+  const res = await fetch(extUrl(HOTE, `resource/${DATASETS_COT[dataset].id}.json?${qs}`));
   if (!res.ok) throw new Error(`CFTC ${res.status}`);
   const json = (await res.json()) as unknown;
   return Array.isArray(json) ? json : [];
-}
-
-function estAbort(err: unknown): boolean {
-  return typeof err === "object" && err !== null && (err as { name?: unknown }).name === "AbortError";
 }
 
 // Records en mémoire par dataset (miroir du cache localStorage, évite de re-parser le JSON à chaque
@@ -294,8 +290,8 @@ async function assurerDatasets(
       recordsMem[dataset] = records;
       recordsTs[dataset] = ts;
       ecrireCacheDataset(dataset, records, ts);
-    } catch (err) {
-      if (!estAbort(err)) echec = true;
+    } catch {
+      echec = true;
       const stale = cache ?? lireCacheDataset(dataset);
       if (stale) {
         recordsMem[dataset] = stale.records;

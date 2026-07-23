@@ -81,6 +81,7 @@ const TTL_MS: Record<AuxSeriesId, number> = {
   funding: 60_000,
   mark: 60_000, // mark price perp (Binance fapi markPriceKlines)
   perpDelta: 60_000, // delta agresseur perp par bougie (Binance fapi klines)
+  refClose: 60_000, // close du symbole de référence, fetch à l'interval du chart (câblage : Task 2)
   stablecoins: 60 * 60_000,
   nvt: 60 * 60_000,
   mvrv: 60 * 60_000,
@@ -266,6 +267,12 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
       const interval = timeframeToFapiInterval(timeframe);
       if (interval === undefined) return [];
       return fetchPerpDeltaHistory(symbol, since, interval);
+    }
+    case "refClose": {
+      // Close du symbole de référence (refSymbolStore) — jambe « croisée » des
+      // indicateurs statistiques. Câblage du fetch spot à l'interval du chart en
+      // Task 2 ; pour l'instant série vide (dégradation gracieuse : outputs undefined).
+      return [];
     }
     case "stablecoins": {
       const s = await stablecoinsSupplyProvider.fetchSeries({ start: since });

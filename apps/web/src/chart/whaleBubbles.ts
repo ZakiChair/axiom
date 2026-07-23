@@ -25,6 +25,11 @@
  * La PROJECTION des trades en prints, l'échelle de rayon et le nettoyage des overlays
  * sont des fonctions PURES exportées et testées (whaleBubbles.test.ts) ; le couplage
  * KLineChart reste dans le contrôleur non testé (comme tradeMarkers / ecoMarkers).
+ *
+ * Comme tradeMarkers : v1 = slot FOCUS uniquement (`getActiveChart`) + symbole du store
+ * marché GLOBAL (slot maître). En grille multi-chart, si le focus est un slot secondaire
+ * montrant un autre actif, les bulles suivent le symbole du slot maître — limitation v1
+ * acceptée (le cas mono-graphe, très majoritaire, est correct).
  */
 import { registerOverlay } from "klinecharts";
 import type { OverlayCreate, OverlayFigure } from "klinecharts";
@@ -37,7 +42,7 @@ import { marketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
 import { themeStore } from "../store/theme";
 import { formatUsd } from "../lib/format";
-import { rgbaTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import type { Commande } from "../commands/registry";
 
 /** Cap défensif du buffer de prints : au-delà, on garde les PLUS RÉCENTS (FIFO). */
@@ -68,6 +73,9 @@ export interface WhalePrint {
  */
 export function versWhalePrint(t: Trade, seuil: number): WhalePrint | null {
   const notionnel = t.price * t.qty;
+  // Garde de finitude : un price/qty NaN produit un notionnel NaN, qui passerait le
+  // filtre `< seuil` (toujours faux pour NaN) sans cette vérification explicite.
+  if (!Number.isFinite(notionnel)) return null;
   if (notionnel < seuil) return null;
   return { time: t.time, price: t.price, notionnel, side: t.side };
 }
@@ -168,6 +176,8 @@ interface DonneesBulle {
   rayon: number;
   /** Couleur de remplissage déjà RÉSOLUE (rgba du thème courant, lue au redraw). */
   couleur: string;
+  /** Couleur OPAQUE de l'étiquette (même token que `couleur` mais sans alpha — lisibilité du texte). */
+  couleurLabel: string;
   /** Étiquette du montant (très gros prints) ou null (rayon seul). */
   label: string | null;
 }
@@ -203,7 +213,7 @@ function ensureOverlayRegistered(): void {
           type: "text",
           ignoreEvent: true,
           attrs: { x: c.x + d.rayon + 4, y: c.y, text: d.label, align: "left", baseline: "middle" },
-          styles: { color: d.couleur, size: 10 },
+          styles: { color: d.couleurLabel, size: 10 },
         });
       }
       return figures;
@@ -262,6 +272,10 @@ function redraw(): void {
   // Couleurs résolues AU DESSIN (thème-aware) : remplissage semi-transparent up/down.
   const couleurAchat = rgbaTokenCanvas("--up", ALPHA_BULLE, "#34d399");
   const couleurVente = rgbaTokenCanvas("--down", ALPHA_BULLE, "#f87171");
+  // Variante OPAQUE des mêmes tokens pour l'étiquette de montant : le fill à alpha 0.35
+  // rendrait le texte illisible (cf. tradeMarkers.ts qui résout ses couleurs de la même façon).
+  const couleurAchatLabel = lireTokenCanvas("--up", "#34d399");
+  const couleurVenteLabel = lireTokenCanvas("--down", "#f87171");
 
   // Prints dans la plage, cap aux plus récents (le buffer est déjà chronologique).
   const aPoser = buffer.filter((p) => p.time >= tMin).slice(-MAX_BULLES);
@@ -271,6 +285,7 @@ function redraw(): void {
     const extend: DonneesBulle = {
       rayon: rayonBulle(p.notionnel, seuil),
       couleur: p.side === "buy" ? couleurAchat : couleurVente,
+      couleurLabel: p.side === "buy" ? couleurAchatLabel : couleurVenteLabel,
       label: labelPourPrint(p, seuil),
     };
     const overlay: OverlayCreate = {
@@ -317,6 +332,7 @@ function abonnerTrades(): void {
   unsubSpot = getAdapter(exchange).subscribeTrades(symbol, onTrade);
   // Couche perp uniquement sur Binance (flux fstream) — même convention agresseur.
   if (exchange === "binance") {
+    // Ouvert pour tout symbole Binance même sans listing perp (connexion fstream stale-cyclée par le watchdog) — même comportement assumé que OrderflowController.startCvdSpotPerp (orderflow.ts).
     unsubPerp = subscribePerpAggTrades(symbol, onTrade);
   }
 }
@@ -333,6 +349,11 @@ function syncTrades(): void {
   } else if (!actif && unsubSpot !== null) {
     desabonnerTrades();
     buffer = [];
+    // Annule un redraw planifié : plus de flux, plus de buffer, réveil inutile.
+    if (redrawTimer !== null) {
+      clearTimeout(redrawTimer);
+      redrawTimer = null;
+    }
   }
 }
 

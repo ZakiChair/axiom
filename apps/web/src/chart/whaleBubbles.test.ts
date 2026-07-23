@@ -53,6 +53,11 @@ describe("versWhalePrint — filtre par seuil + notionnel", () => {
     expect(versWhalePrint(buy, 100_000)?.side).toBe("buy");
     expect(versWhalePrint(sell, 100_000)?.side).toBe("sell");
   });
+
+  it("rejette un trade malformé (price/qty NaN) au lieu de laisser passer un notionnel NaN", () => {
+    const t: Trade = { time: 5, price: NaN, qty: 3, side: "buy" };
+    expect(versWhalePrint(t, 100_000)).toBeNull();
+  });
 });
 
 describe("ajouterPrint — FIFO borné", () => {
@@ -80,6 +85,10 @@ describe("rayonBulle — √notionnel, monotone et borné", () => {
     expect(rayonBulle(100_000, 100_000)).toBe(4); // R_MIN
     expect(rayonBulle(400_000, 100_000)).toBe(8); // ×4 notionnel → ×2 rayon
     expect(rayonBulle(1e9, 100_000)).toBe(18); // plafonné à R_MAX
+  });
+
+  it("clampe à R_MIN sous le seuil (print bufferisé avant relèvement du seuil)", () => {
+    expect(rayonBulle(1_000, 100_000)).toBe(4); // R_MIN
   });
 });
 

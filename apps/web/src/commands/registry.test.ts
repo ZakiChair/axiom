@@ -69,6 +69,7 @@ import { commandes as marksCommandes } from "../chart/tradeMarkers";
 import { commandes as liqMarksCommandes } from "../chart/liquidationMarkers";
 import { commandes as liqModeCommandes } from "../chart/liquidationHeat";
 import { commandes as liqEstCommandes } from "../chart/liquidationEstimates";
+import { commandes as whaleCommandes } from "../chart/whaleBubbles";
 import { commandes as domCommandes } from "../store/dom-ui";
 import { commandes as backtestCommandes } from "../store/backtest";
 import { commandes as replayCommandes } from "../store/replay";
@@ -95,6 +96,7 @@ const SOURCES_GREFFEES: Record<string, readonly Commande[]> = {
   "chart/liquidationMarkers": liqMarksCommandes,
   "chart/liquidationHeat": liqModeCommandes,
   "chart/liquidationEstimates": liqEstCommandes,
+  "chart/whaleBubbles": whaleCommandes,
   "store/dom-ui": domCommandes,
   "store/backtest": backtestCommandes,
   "store/replay": replayCommandes,

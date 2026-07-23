@@ -30,6 +30,7 @@ export function FootprintSettingsPanel({ onClose }: { onClose: () => void }) {
   const showBarVa = useStore(orderflowStore, (s) => s.showBarVa);
   const showDivergences = useStore(orderflowStore, (s) => s.showDivergences);
   const cvdSpotPerp = useStore(orderflowStore, (s) => s.cvdSpotPerp);
+  const whaleNotionalMin = useStore(orderflowStore, (s) => s.whaleNotionalMin);
   // Flux perp Binance-only : le toggle CVD S/P est grisé sur toute autre source.
   const exchange = useStore(marketStore, (s) => s.exchange);
   const isBinance = exchange === "binance";
@@ -41,13 +42,16 @@ export function FootprintSettingsPanel({ onClose }: { onClose: () => void }) {
   const setShowBarVa = useStore(orderflowStore, (s) => s.setShowBarVa);
   const setShowDivergences = useStore(orderflowStore, (s) => s.setShowDivergences);
   const setCvdSpotPerp = useStore(orderflowStore, (s) => s.setCvdSpotPerp);
+  const setWhaleNotionalMin = useStore(orderflowStore, (s) => s.setWhaleNotionalMin);
 
   const [draftRatio, setDraftRatio] = useState(String(ratioPct));
   const [draftMinVol, setDraftMinVol] = useState(String(minVol));
+  const [draftWhale, setDraftWhale] = useState(String(whaleNotionalMin));
 
   // Synchroniser le draft quand le store change (ex. via un autre onglet).
   useEffect(() => { setDraftRatio(String(ratioPct)); }, [ratioPct]);
   useEffect(() => { setDraftMinVol(String(minVol)); }, [minVol]);
+  useEffect(() => { setDraftWhale(String(whaleNotionalMin)); }, [whaleNotionalMin]);
 
   const submitRatio = () => {
     const v = Number.parseInt(draftRatio, 10);
@@ -56,6 +60,10 @@ export function FootprintSettingsPanel({ onClose }: { onClose: () => void }) {
   const submitMinVol = () => {
     const v = Number.parseInt(draftMinVol, 10);
     if (Number.isFinite(v) && v >= 0) setMinVol(v);
+  };
+  const submitWhale = () => {
+    const v = Number.parseInt(draftWhale, 10);
+    if (Number.isFinite(v) && v > 0) setWhaleNotionalMin(v);
   };
 
   return (
@@ -163,6 +171,21 @@ export function FootprintSettingsPanel({ onClose }: { onClose: () => void }) {
           />
           <span>CVD spot vs perp</span>
         </label>
+
+        {/* Seuil des bulles baleines (WHALE) : trades agressifs ≥ ce notionnel affichés
+            en bulles sur les bougies. Le seuil s'applique aux NOUVEAUX prints. */}
+        <div className="mt-2 flex items-center gap-2 text-[11px] text-text-dim">
+          <span>Seuil baleine ($)</span>
+          <input
+            value={draftWhale}
+            onChange={(e) => setDraftWhale(e.target.value)}
+            onBlur={submitWhale}
+            onKeyDown={(e) => { if (e.key === "Enter") submitWhale(); }}
+            inputMode="numeric"
+            spellCheck={false}
+            className="w-20 rounded border border-border bg-bg px-2 py-0.5 text-[11px] text-text outline-none placeholder:text-text-dim focus:border-accent"
+          />
+        </div>
       </div>
     </>
   );

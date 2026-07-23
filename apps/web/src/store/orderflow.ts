@@ -35,6 +35,10 @@ export interface OrderflowState {
   /** Sous-pane « CVD S/P » (spot vs perp) — Binance only, slot focus (Task 17). */
   cvdSpotPerp: boolean;
   setCvdSpotPerp: (v: boolean) => void;
+
+  /** Seuil notionnel ($) des bulles baleines sur le chart (WHALE) — session-only. */
+  whaleNotionalMin: number;
+  setWhaleNotionalMin: (v: number) => void;
 }
 
 export const orderflowStore = createStore<OrderflowState>((set, get) => ({
@@ -59,4 +63,7 @@ export const orderflowStore = createStore<OrderflowState>((set, get) => ({
 
   cvdSpotPerp: false,
   setCvdSpotPerp: (v) => set({ cvdSpotPerp: v }),
+
+  whaleNotionalMin: 100_000,
+  setWhaleNotionalMin: (v) => set({ whaleNotionalMin: v }),
 }));

@@ -269,8 +269,9 @@ export interface BaseCondition {
 /**
  * Champ screené par un filtre INDICATEUR : rattaché à un `IndicatorDef` de
  * @axiom/indicators, avec la clé de sortie lue et la manière d'en dériver un scalaire.
- *  - "last"    : dernière valeur définie de la série (RSI, histogramme MACD…) ;
- *  - "distPct" : écart en % entre le dernier close et la valeur (prix vs EMA).
+ *  - "last"    : dernière valeur définie de la série (RSI, histogramme MACD, ADX…) ;
+ *  - "distPct" : écart en % entre le dernier close et la valeur (prix vs EMA) ;
+ *  - "lastPct" : dernière valeur définie × 100 (ratio brut exposé en %, ex. BB bandwidth).
  */
 export interface IndicatorFieldSpec {
   id: string;
@@ -282,7 +283,7 @@ export interface IndicatorFieldSpec {
   /** input principal configurable (ex. « length »), s'il existe. */
   paramKey?: string;
   defaultParam?: number;
-  derive: "last" | "distPct";
+  derive: "last" | "distPct" | "lastPct";
   unit: string;
 }
 
@@ -314,6 +315,26 @@ export const INDICATOR_FIELDS: IndicatorFieldSpec[] = [
     paramKey: "length",
     defaultParam: 20,
     derive: "distPct",
+    unit: "%",
+  },
+  {
+    id: "adx",
+    label: "ADX",
+    indicatorId: "adx",
+    output: "adx",
+    paramKey: "length",
+    defaultParam: 14,
+    derive: "last",
+    unit: "",
+  },
+  {
+    id: "bbw",
+    label: "BB bandwidth",
+    indicatorId: "bbBandwidth",
+    output: "bandwidth",
+    paramKey: "length",
+    defaultParam: 20,
+    derive: "lastPct",
     unit: "%",
   },
 ];
@@ -412,7 +433,8 @@ export function lastDefined(series: ReadonlyArray<number | undefined>): number |
 /**
  * Dérive le scalaire comparé d'un champ indicateur à partir de sa série de sortie :
  *  - "last"    : dernière valeur définie ;
- *  - "distPct" : 100·(close − valeur)/valeur (écart signé du prix à l'indicateur).
+ *  - "distPct" : 100·(close − valeur)/valeur (écart signé du prix à l'indicateur) ;
+ *  - "lastPct" : dernière valeur définie × 100 (ratio brut exposé en %).
  * Renvoie undefined si la série est vide ou le dernier close manquant. PURE.
  */
 export function deriveScalar(
@@ -426,6 +448,7 @@ export function deriveScalar(
     if (lastClose === undefined || !Number.isFinite(lastClose) || v === 0) return undefined;
     return (100 * (lastClose - v)) / v;
   }
+  if (spec.derive === "lastPct") return v * 100;
   return v;
 }
 

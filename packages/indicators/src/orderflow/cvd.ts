@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — volume/cvd.ts (catégorie UI : orderflow)
+ * @axiom/indicators — orderflow/cvd.ts
  *
  * CVD (Cumulative Volume Delta) par bougie — somme cumulée de
  * (buyVolume − sellVolume). Exige les champs taker buy/sell sur la Candle

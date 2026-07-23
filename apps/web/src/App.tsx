@@ -192,6 +192,9 @@ const WINDOW_COMPONENTS: Record<WindowId, LazyExoticComponent<FenetreComp>> = {
   squeeze: lazy(() =>
     import("./components/SqueezeWindow").then((m) => ({ default: m.SqueezeWindow })),
   ),
+  cbprem: lazy(() =>
+    import("./components/CbpremWindow").then((m) => ({ default: m.CbpremWindow })),
+  ),
 };
 
 /** Placeholder discret pendant le chargement du chunk de la fenêtre. */

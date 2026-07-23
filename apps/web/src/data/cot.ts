@@ -39,7 +39,7 @@ export interface InstrumentCot {
 }
 
 /** Un point brut normalisé (une ligne de rapport pour un instrument, une semaine). */
-export interface PointCot {
+export interface PointBrutCot {
   nom: string;
   /** Date du rapport (ms epoch). */
   dateRapport: number;
@@ -49,7 +49,20 @@ export interface PointCot {
   openInterest: number;
 }
 
-/** Ligne de synthèse d'un instrument : dernier net + variation hebdo. */
+/**
+ * Un point de la SÉRIE historique d'un instrument (forme compacte destinée aux calculs purs
+ * de Task 2 — COT Index, deltas — et aux sparklines de Task 3). `t` = date de rapport en ms.
+ */
+export interface PointCot {
+  /** Date du rapport (ms epoch). */
+  t: number;
+  /** Position nette spéculative = longs − shorts (non-commercial). */
+  net: number;
+  /** Open interest total du contrat (NaN si absent). */
+  oi: number;
+}
+
+/** Ligne de synthèse d'un instrument : dernier net + variation hebdo + série 3 ans. */
 export interface LigneCot {
   nom: string;
   libelle: string;
@@ -62,6 +75,8 @@ export interface LigneCot {
   openInterest: number;
   /** Date du dernier rapport de cet instrument (ms epoch). */
   dateRapport: number;
+  /** Série historique complète (~3 ans), triée chrono CROISSANTE. */
+  serie: PointCot[];
 }
 
 /** Résultat synthétisé complet, prêt à afficher. */
@@ -142,7 +157,7 @@ interface EnregistrementCot {
  * si le nom, la date, ou les positions long/short sont inexploitables. Fonction PURE (c'est
  * la « response-to-net-position transform »).
  */
-export function pointCot(rec: unknown): PointCot | null {
+export function pointCot(rec: unknown): PointBrutCot | null {
   const r = rec as EnregistrementCot | null;
   const nom = typeof r?.market_and_exchange_names === "string" ? r.market_and_exchange_names : null;
   if (nom === null || nom.length === 0) return null;
@@ -163,7 +178,7 @@ export function pointCot(rec: unknown): PointCot | null {
 
 /**
  * Synthétise la réponse brute en lignes prêtes à afficher : filtre à la watchlist, regroupe
- * par instrument, retient les DEUX derniers rapports (tri date décroissante) et calcule le
+ * par instrument, conserve la SÉRIE historique complète triée chrono croissante et calcule le
  * net du dernier + la variation hebdo (dernier − précédent, null si une seule semaine).
  * L'ordre de sortie SUIT la watchlist (regroupement par famille contigu). Fonction PURE.
  */
@@ -175,7 +190,7 @@ export function resumerCot(
   const suivis = new Set(watchlist.map((i) => i.nom));
 
   // Regroupe les points par nom (uniquement les instruments suivis).
-  const parNom = new Map<string, PointCot[]>();
+  const parNom = new Map<string, PointBrutCot[]>();
   for (const rec of liste) {
     const pt = pointCot(rec);
     if (pt === null || !suivis.has(pt.nom)) continue;
@@ -188,9 +203,12 @@ export function resumerCot(
   for (const inst of watchlist) {
     const pts = parNom.get(inst.nom);
     if (pts === undefined || pts.length === 0) continue;
-    pts.sort((a, b) => b.dateRapport - a.dateRapport);
-    const dernier = pts[0]!;
-    const precedent = pts[1];
+    // Tri chrono CROISSANT : la série (et ses consommateurs Task 2/3) l'attend ASC ; le dernier
+    // rapport est donc en fin de tableau.
+    pts.sort((a, b) => a.dateRapport - b.dateRapport);
+    const serie: PointCot[] = pts.map((p) => ({ t: p.dateRapport, net: p.net, oi: p.openInterest }));
+    const dernier = pts[pts.length - 1]!;
+    const precedent = pts[pts.length - 2];
     lignes.push({
       nom: inst.nom,
       libelle: inst.libelle,
@@ -199,6 +217,7 @@ export function resumerCot(
       delta: precedent ? dernier.net - precedent.net : null,
       openInterest: dernier.openInterest,
       dateRapport: dernier.dateRapport,
+      serie,
     });
   }
 
@@ -212,26 +231,43 @@ const HOTE = "publicreporting.cftc.gov";
 const DATASET = "6dca-aqww"; // Legacy Futures Only
 const HEALTH_SOURCE = "cot:cftc";
 
-const CACHE_KEY = "axiom:cot:cache:v1";
+// Clé v2 : la synthèse conserve désormais la SÉRIE 3 ans par instrument (forme incompatible
+// avec le cache v1, qui ne gardait que 2 rapports) ⇒ nouvelle clé pour éviter les faux hits.
+const CACHE_KEY = "axiom:cot:cache:v2";
 /** TTL du cache : 12 h (rapport publié une fois par semaine, le vendredi). */
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 /**
- * Limite de lignes récupérées. La watchlist compte ~14 instruments partageant les MÊMES
- * dates de rapport hebdo ; tri par date décroissante ⇒ les 14 premières lignes = dernier
- * rapport, les 14 suivantes = précédent. 80 couvre confortablement ≥ 2 semaines (marge).
+ * Limite de lignes récupérées. ~14 instruments × ~156 rapports hebdo sur 3 ans ≈ 2184 lignes ;
+ * 3000 couvre l'historique complet borné par le `$where` avec une marge confortable.
  */
-const LIMITE = 80;
+const LIMITE = 3000;
 
-/** Construit le query string Socrata (encodage via URLSearchParams : `$`→%24, espaces→+). */
-function construireRequete(watchlist: readonly InstrumentCot[]): string {
+/** Profondeur d'historique conservée : 3 ans (fenêtre du COT Index de Task 2). */
+const HISTORIQUE_ANS = 3;
+
+/**
+ * Construit le query string Socrata (encodage via URLSearchParams : `$`→%24, espaces→+).
+ * `nowMs` est INJECTÉ (pas de `Date.now()` interne) pour rendre la borne temporelle testable :
+ * `$where report_date >= now − 3 ans` (calendaire) filtre server-side l'historique récupéré.
+ */
+export function construireRequete(watchlist: readonly InstrumentCot[], nowMs: number): string {
   const inList = watchlist.map((i) => `'${i.nom}'`).join(",");
+  // Calcul en UTC de bout en bout (setUTC* + toISOString) : la borne est ainsi déterministe,
+  // indépendante du fuseau de la machine. Socrata « floating timestamp » attend
+  // `YYYY-MM-DDThh:mm:ss.sss` (sans suffixe Z), d'où le slice(0, 23).
+  const borne = new Date(nowMs);
+  borne.setUTCFullYear(borne.getUTCFullYear() - HISTORIQUE_ANS);
+  const borneStr = borne.toISOString().slice(0, 23);
   const params = new URLSearchParams();
   params.set(
     "$select",
     "market_and_exchange_names,report_date_as_yyyy_mm_dd,noncomm_positions_long_all,noncomm_positions_short_all,open_interest_all",
   );
-  params.set("$where", `market_and_exchange_names in(${inList})`);
+  params.set(
+    "$where",
+    `market_and_exchange_names in(${inList}) AND report_date_as_yyyy_mm_dd >= '${borneStr}'`,
+  );
   params.set("$order", "report_date_as_yyyy_mm_dd DESC");
   params.set("$limit", String(LIMITE));
   return params.toString();
@@ -262,7 +298,9 @@ function ecrireCache(resume: ResumeCot): void {
     if (typeof localStorage === "undefined") return;
     localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), resume }));
   } catch {
-    /* best-effort : la persistance du COT n'est pas bloquante */
+    /* best-effort : la série 3 ans × 14 instruments peut dépasser le quota localStorage
+       (QuotaExceededError) ; on avale silencieusement l'exception — pas de cache vaut mieux
+       qu'une UI cassée, et le prochain chargement repartira du réseau. */
   }
 }
 
@@ -290,7 +328,7 @@ export async function chargerRapportCot(opts?: {
   }
 
   try {
-    const qs = construireRequete(WATCHLIST_COT);
+    const qs = construireRequete(WATCHLIST_COT, Date.now());
     const res = await fetch(extUrl(HOTE, `resource/${DATASET}.json?${qs}`), { signal: opts?.signal });
     if (!res.ok) throw new Error(`CFTC ${res.status}`);
     const json = (await res.json()) as unknown;

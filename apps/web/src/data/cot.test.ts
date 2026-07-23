@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CATEGORIES_COT,
   WATCHLIST_COT,
+  construireRequete,
   nombreCot,
   pointCot,
   resumerCot,
@@ -148,6 +149,81 @@ describe("resumerCot", () => {
   it("renvoie un résumé vide (dateRapport null) sur entrée non-tableau ou vide", () => {
     expect(resumerCot(null)).toEqual({ lignes: [], dateRapport: null });
     expect(resumerCot([])).toEqual({ lignes: [], dateRapport: null });
+  });
+
+  it("conserve la série complète triée chrono CROISSANTE par instrument (t, net, oi)", () => {
+    // records mélange l'ordre DESC de l'API et entrelace OR/BTC ⇒ la série doit ressortir
+    // ASC par date, indépendamment par instrument.
+    const { lignes } = resumerCot(records);
+    const or = lignes.find((l) => l.nom === OR);
+    expect(or?.serie).toEqual([
+      { t: Date.parse("2026-06-16T00:00:00.000"), net: 211127 - 30907, oi: 339330 },
+      { t: Date.parse("2026-06-23T00:00:00.000"), net: 217028 - 35689, oi: 352167 },
+    ]);
+    const btc = lignes.find((l) => l.nom === BTC);
+    expect(btc?.serie).toEqual([
+      { t: Date.parse("2026-06-16T00:00:00.000"), net: 17727 - 14252, oi: 21000 },
+      { t: Date.parse("2026-06-23T00:00:00.000"), net: 16348 - 12824, oi: 20554 },
+    ]);
+  });
+
+  it("exclut de la série les points à long/short vide (mais garde un OI vide → NaN)", () => {
+    const avecTrous = [
+      rec(BTC, "2026-06-09T00:00:00.000", 100, 40, 5000), // valide
+      { // long vide ⇒ point ignoré
+        market_and_exchange_names: BTC,
+        report_date_as_yyyy_mm_dd: "2026-06-16T00:00:00.000",
+        noncomm_positions_long_all: "",
+        noncomm_positions_short_all: "50",
+        open_interest_all: "6000",
+      },
+      { // OI vide ⇒ point conservé, oi = NaN
+        market_and_exchange_names: BTC,
+        report_date_as_yyyy_mm_dd: "2026-06-23T00:00:00.000",
+        noncomm_positions_long_all: "120",
+        noncomm_positions_short_all: "30",
+        open_interest_all: "",
+      },
+    ];
+    const { lignes } = resumerCot(avecTrous);
+    const btc = lignes.find((l) => l.nom === BTC);
+    expect(btc?.serie).toHaveLength(2);
+    expect(btc?.serie[0]).toEqual({ t: Date.parse("2026-06-09T00:00:00.000"), net: 60, oi: 5000 });
+    expect(btc?.serie[1]?.t).toBe(Date.parse("2026-06-23T00:00:00.000"));
+    expect(btc?.serie[1]?.net).toBe(90);
+    expect(btc?.serie[1]?.oi).toBeNaN();
+  });
+});
+
+describe("construireRequete", () => {
+  // Instant UTC (suffixe Z) : la borne est calculée en UTC, donc le test est déterministe
+  // quel que soit le fuseau de la machine.
+  const nowMs = Date.parse("2026-07-23T00:00:00.000Z");
+  const watchlist: InstrumentCot[] = [
+    { nom: "GOLD - COMMODITY EXCHANGE INC.", libelle: "Or", categorie: "metal" },
+    { nom: "BITCOIN - CHICAGO MERCANTILE EXCHANGE", libelle: "Bitcoin", categorie: "crypto" },
+  ];
+
+  it("récupère 3000 lignes", () => {
+    const params = new URLSearchParams(construireRequete(watchlist, nowMs));
+    expect(params.get("$limit")).toBe("3000");
+  });
+
+  it("borne le $where à 3 ans (nowMs injecté) EN PLUS du filtre watchlist", () => {
+    const params = new URLSearchParams(construireRequete(watchlist, nowMs));
+    const where = params.get("$where") ?? "";
+    // Filtre instruments conservé.
+    expect(where).toContain("market_and_exchange_names in(");
+    expect(where).toContain("'GOLD - COMMODITY EXCHANGE INC.'");
+    // Borne temporelle : now − 3 ans calendaires ⇒ 2023-07-23.
+    expect(where).toContain("report_date_as_yyyy_mm_dd >= '2023-07-23T00:00:00.000'");
+  });
+
+  it("sélectionne toujours les mêmes 5 champs", () => {
+    const params = new URLSearchParams(construireRequete(watchlist, nowMs));
+    expect(params.get("$select")).toBe(
+      "market_and_exchange_names,report_date_as_yyyy_mm_dd,noncomm_positions_long_all,noncomm_positions_short_all,open_interest_all",
+    );
   });
 });
 

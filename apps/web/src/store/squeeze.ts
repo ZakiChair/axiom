@@ -20,15 +20,18 @@ import {
 } from "../data/screener";
 import { selectionEchantillon } from "../data/signaux";
 import { construirePoints, fusionnerSources, type PointRadar } from "../data/squeeze";
-import { mapPool, OI_HIST_LIMIT } from "./screener";
+import { mapPool, OI_HIST_LIMIT, TICKER_24H_URL } from "./screener";
 import { watchlistStore } from "./watchlist";
 
-const TICKER_24H_URL = "https://api.binance.com/api/v3/ticker/24hr";
 /** Concurrence du pool ΔOI (1 requête histOiUsd par symbole, budget très en deçà des limites). */
 const SQZ_CONCURRENCY = 5;
 
 export interface SqueezeState {
-  /** true quand la fenêtre est ouverte (Task 3 : run à l'ouverture, pas de polling). */
+  /**
+   * true quand la fenêtre est ouverte (run à l'ouverture, pas de polling). Écrit par la
+   * fenêtre mais lu par personne pour l'instant : champ RÉSERVÉ par contrat du plan (gating
+   * d'un éventuel refresh périodique futur) — ne pas le prendre pour du code mort.
+   */
   open: boolean;
   /** true pendant un run (désactive le bouton Rafraîchir). */
   enCours: boolean;

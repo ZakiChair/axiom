@@ -56,11 +56,10 @@ import {
 } from "../data/validationSignaux";
 import type { PointSerie } from "../lib/referentiel";
 import { futuresSymbol } from "../data/binanceFutures";
-import { mapPool } from "./screener";
+import { mapPool, TICKER_24H_URL } from "./screener";
 import { watchlistStore } from "./watchlist";
 import { windowManagerStore } from "./windowManager";
 
-const TICKER_24H_URL = "https://api.binance.com/api/v3/ticker/24hr";
 const KLINES_URL = "https://api.binance.com/api/v3/klines";
 /** Concurrence du pool par symbole (4-5 requêtes chacun, budget très en deçà des limites). */
 const SIGNAUX_CONCURRENCY = 4;

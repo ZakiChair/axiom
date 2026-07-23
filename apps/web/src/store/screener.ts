@@ -53,7 +53,8 @@ import {
 import type { WorkerRequest, WorkerResponse } from "../workers/screener.worker";
 import { windowManagerStore, mirrorOpenState } from "./windowManager";
 
-const TICKER_24H_URL = "https://api.binance.com/api/v3/ticker/24hr";
+/** URL ticker 24 h Binance (univers spot commun screener / signaux / squeeze). */
+export const TICKER_24H_URL = "https://api.binance.com/api/v3/ticker/24hr";
 /** Nombre max de lignes affichées quand le run n'a PAS de filtre indicateur (table lisible). */
 const DISPLAY_CAP = 100;
 /** Clé localStorage des presets UTILISATEUR (les livrés sont constants, non persistés). */

@@ -25,6 +25,8 @@ import {
 import {
   aggregateGexDex,
   computeCryptoGexDex,
+  gexParStrikeToutesEcheances,
+  gammaFlip,
   EQUITY_CONTRACT_MULTIPLIER,
   type GexDexPoint,
 } from "../data/gexDex";
@@ -288,6 +290,7 @@ function dessinerBarres(
   spot: number,
   metrique: "gex" | "dex",
   domaine: Domaine,
+  flip: number | null,
 ): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -310,6 +313,7 @@ function dessinerBarres(
   const couleurBordure = lireTokenCanvas("--border", "#262626");
   const couleurUp = lireTokenCanvas("--up", "#2dc08e");
   const couleurDown = lireTokenCanvas("--down", "#f92855");
+  const couleurAccent = lireTokenCanvas("--accent", "#38bdf8");
 
   // Accesseur de la métrique active — réutilisé plus bas pour l'échelle Y et le tracé des barres.
   const val = (p: GexDexPoint) => (metrique === "gex" ? p.gex : p.dex);
@@ -379,6 +383,22 @@ function dessinerBarres(
     ctx.setLineDash([]);
     ctx.fillStyle = couleurDim;
     ctx.fillText("spot", Math.min(x + 3, cssW - padR - 24), padT + 9);
+  }
+
+  // Repère vertical du gamma flip (accent) — même projection que les barres (px). Tracé
+  // seulement quand le niveau tombe dans la plage de strikes affichée.
+  if (flip !== null && Number.isFinite(flip) && flip >= domaine.min && flip <= domaine.max) {
+    const x = px(flip);
+    ctx.strokeStyle = couleurAccent;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, padT);
+    ctx.lineTo(x, padT + plotH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = couleurAccent;
+    ctx.fillText("γ flip", Math.min(x + 3, cssW - padR - 30), padT + 20);
   }
 }
 
@@ -672,7 +692,7 @@ function dessinerTermIv(
     ctx.fillText(`${niv.iv.toFixed(0)}%`, 4, y + 3);
     if (aRr25) {
       const txt = `${niv.rr >= 0 ? "+" : ""}${niv.rr.toFixed(1)}`;
-      ctx.fillStyle = couleurUp;
+      ctx.fillStyle = niv.rr >= 0 ? couleurUp : couleurDown;
       ctx.fillText(txt, cssW - padR + 3, y + 3);
     }
   }
@@ -950,8 +970,22 @@ export function OptionsWindow() {
     );
   }, [vue, classe, pointsEcheance, underlying, cboeChaine, cboeExpiry]);
 
-  const gexNet = useMemo(() => gexDexPoints.reduce((s, p) => s + p.gex, 0), [gexDexPoints]);
-  const dexNet = useMemo(() => gexDexPoints.reduce((s, p) => s + p.dex, 0), [gexDexPoints]);
+  // GEX/DEX crypto agrégé sur TOUTES les échéances (Task 4) — alimente le net et le gamma flip
+  // « toutes éch. ». Crypto seulement : le CBOE reste mono-échéance (cf. NoteSource « Une seule
+  // échéance »). Date.now() au bord comme gexDexPoints/grilleOi ; la logique pure reçoit nowMs.
+  const gexDexTout = useMemo<GexDexPoint[]>(() => {
+    if (vue !== "gexdex" || classe !== "crypto") return [];
+    if (!Number.isFinite(underlying)) return [];
+    return gexParStrikeToutesEcheances(chain, underlying, Date.now());
+  }, [vue, classe, chain, underlying]);
+
+  // Source des métriques nettes + du gamma flip : toutes échéances en crypto, mono-échéance en
+  // actions (le CBOE n'a pas d'agrégation toutes échéances). L'histogramme et le pic |GEX| restent
+  // sur gexDexPoints (mono) — le net « toutes éch. » côtoie donc volontairement le pic mono.
+  const sourceNet = classe === "crypto" ? gexDexTout : gexDexPoints;
+  const gexNet = useMemo(() => sourceNet.reduce((s, p) => s + p.gex, 0), [sourceNet]);
+  const dexNet = useMemo(() => sourceNet.reduce((s, p) => s + p.dex, 0), [sourceNet]);
+  const flip = useMemo(() => gammaFlip(sourceNet), [sourceNet]);
   const strikePicGex = useMemo(() => {
     let best: GexDexPoint | null = null;
     for (const p of gexDexPoints) if (!best || Math.abs(p.gex) > Math.abs(best.gex)) best = p;
@@ -990,8 +1024,9 @@ export function OptionsWindow() {
   useEffect(() => {
     if (!open || vue !== "gexdex") return;
     const canvas = barCanvasRef.current;
-    if (canvas && domaineBarres) dessinerBarres(canvas, gexDexPoints, gexDexSpot, metrique, domaineBarres);
-  }, [open, vue, gexDexPoints, gexDexSpot, metrique, domaineBarres]);
+    if (canvas && domaineBarres)
+      dessinerBarres(canvas, gexDexPoints, gexDexSpot, metrique, domaineBarres, flip);
+  }, [open, vue, gexDexPoints, gexDexSpot, metrique, domaineBarres, flip]);
 
   // ─────────────────────────── Heatmap OI strike × échéance ───────────────────────────
 
@@ -1412,16 +1447,17 @@ export function OptionsWindow() {
 
             <div className="mt-3 grid grid-cols-2 gap-2">
               <Metric
-                label="GEX net"
+                label={classe === "crypto" ? "GEX net (toutes éch.)" : "GEX net"}
                 value={formatUsd(gexNet)}
                 couleur={gexNet !== 0 ? (gexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
               />
               <Metric
-                label="DEX net"
+                label={classe === "crypto" ? "DEX net (toutes éch.)" : "DEX net"}
                 value={formatUsd(dexNet)}
                 couleur={dexNet !== 0 ? (dexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
               />
               <Metric label="Spot" value={formatUsdExact(gexDexSpot)} />
+              <Metric label="Gamma flip" value={formatUsdExact(flip)} />
               <Metric
                 label="Strike |GEX| max"
                 value={formatUsdExact(strikePicGex)}

@@ -17,12 +17,14 @@
  * courbe accent et deux repères min/max 2 ans en pointillés. Le teinté up/down ne concerne
  * QUE le badge de delta 4 semaines.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { netliqStore } from "../store/netliq";
 import type { PointNetliq } from "../data/netliq";
+import { binanceAdapter } from "../data/binance";
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
-import { formatDateCourte, formatEntier, VALEUR_ABSENTE } from "../lib/format";
+import { formatDateCourte, formatEntier, formatUsd, VALEUR_ABSENTE } from "../lib/format";
+import { normaliserSerieOverlay, ticksMd } from "./netliqWindow.util";
 import {
   Badge,
   Chargement,
@@ -56,10 +58,31 @@ function tonDelta(delta: number | null): TonBadge {
   return delta > 0 ? "up" : "down";
 }
 
+/** Jour calendaire ISO "YYYY-MM-DD" (UTC) d'un horodatage ms — clé de jointure overlay/netliq. */
+function versJourIso(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/** Étiquette d'axe X abrégée fr « août 25 » (mois court + année 2 chiffres). */
+function formatMoisAnnee(ms: number): string {
+  return new Date(ms).toLocaleDateString("fr-FR", { month: "short", year: "2-digit" });
+}
+
+/** Couleur (token thème) d'un Δ tooltip : up en hausse, down en baisse, dim si nul. */
+function couleurDelta(delta: number): string {
+  if (delta > 0) return lireTokenCanvas("--up", "#2dc08e");
+  if (delta < 0) return lireTokenCanvas("--down", "#f92855");
+  return lireTokenCanvas("--text-dim", "#9ca3af");
+}
+
 // ─────────────────────────── Géométrie de tracé (partagée dessin / survol) ───────────────────────────
 
-/** Marges intérieures du canvas (px CSS). Droite élargie : étiquettes min/max des repères. */
-const PAD_L = 12;
+/**
+ * Marges intérieures du canvas (px CSS). Gauche élargie : étiquettes Y de la grille
+ * (« 6 000 ») ; droite élargie : étiquettes min/max des repères. CONSTANTES PARTAGÉES
+ * dessin/survol (invariant de la fenêtre) — modifier ici, jamais un seul côté.
+ */
+const PAD_L = 40;
 const PAD_R = 56;
 const PAD_T = 14;
 const PAD_B = 20;
@@ -129,7 +152,11 @@ function yAt(g: Geometrie, v: number, dom: DomaineY): number {
 
 // ─────────────────────────── Dessin ───────────────────────────
 
-function dessiner(canvas: HTMLCanvasElement, serie: readonly PointNetliq[]): void {
+function dessiner(
+  canvas: HTMLCanvasElement,
+  serie: readonly PointNetliq[],
+  btcRaw: readonly { t: number; close: number }[] | null,
+): void {
   const ctx = canvas.getContext("2d");
   if (ctx === null) return;
   const dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -147,22 +174,41 @@ function dessiner(canvas: HTMLCanvasElement, serie: readonly PointNetliq[]): voi
   // Tokens lus au dessin (suit le thème courant).
   const dim = lireTokenCanvas("--text-dim", "#94a3b8");
   const accent = lireTokenCanvas("--accent", "#38bdf8");
+  const grille = lireTokenCanvas("--grid", "#1f2937");
 
   const g = geometrie(w, h);
   const dom = domaineY(serie);
 
   ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
 
-  // Aire discrète sous la courbe jusqu'au plancher du cadre (accent très léger).
+  // Aire dégradée sous la courbe : accent alpha 0.10 (haut du cadre) → 0 (plancher).
   ctx.save();
   ctx.beginPath();
   ctx.moveTo(xAt(g, 0, n), g.bottom);
   serie.forEach((p, i) => ctx.lineTo(xAt(g, i, n), yAt(g, p.netliq, dom)));
   ctx.lineTo(xAt(g, n - 1, n), g.bottom);
   ctx.closePath();
-  ctx.fillStyle = rgbaTokenCanvas("--accent", 0.1, "#38bdf8");
+  const grad = ctx.createLinearGradient(0, g.top, 0, g.bottom);
+  grad.addColorStop(0, rgbaTokenCanvas("--accent", 0.1, "#38bdf8"));
+  grad.addColorStop(1, rgbaTokenCanvas("--accent", 0, "#38bdf8"));
+  ctx.fillStyle = grad;
   ctx.fill();
   ctx.restore();
+
+  // Grille horizontale : 3-4 lignes aux ticks ronds Md$ + étiquettes Y à gauche.
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (const t of ticksMd(dom.vMin, dom.vMax, 4)) {
+    const y = yAt(g, t, dom);
+    ctx.strokeStyle = grille;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(g.left, y);
+    ctx.lineTo(g.right, y);
+    ctx.stroke();
+    ctx.fillStyle = dim;
+    ctx.fillText(formatEntier(t), g.left - 4, y);
+  }
 
   // Repères min/max 2 ans : lignes pointillées discrètes + étiquettes à droite.
   const repere = (valeur: number, prefixe: string, dessous: boolean): void => {
@@ -184,7 +230,36 @@ function dessiner(canvas: HTMLCanvasElement, serie: readonly PointNetliq[]): voi
   repere(dom.maxData, "max", false);
   repere(dom.minData, "min", true);
 
-  // Courbe de liquidité nette.
+  // Overlay BTC (échelle propre) : jointure par JOUR calendaire sur l'axe netliq —
+  // les jours sans point BTC (week-ends, fériés) sont omis, la ligne reste continue
+  // entre points existants. Normalisation sur la FENÊTRE visible (jours joints).
+  if (btcRaw !== null) {
+    const jours = new Set(serie.map((p) => p.date));
+    const btcFenetre = btcRaw.filter((c) => jours.has(versJourIso(c.t)));
+    const normalise = normaliserSerieOverlay(btcFenetre);
+    if (normalise.length >= 2) {
+      const parJour = new Map(normalise.map((o) => [versJourIso(o.t), o.y01]));
+      ctx.beginPath();
+      let trace = false;
+      serie.forEach((p, i) => {
+        const y01 = parJour.get(p.date);
+        if (y01 === undefined) return;
+        const x = xAt(g, i, n);
+        const y = g.bottom - y01 * g.plotH;
+        if (!trace) {
+          ctx.moveTo(x, y);
+          trace = true;
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.strokeStyle = lireTokenCanvas("--serie-1", "#38bdf8");
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  // Courbe de liquidité nette — dessinée EN DERNIER (au-dessus de l'overlay), série principale.
   ctx.beginPath();
   serie.forEach((p, i) => {
     const x = xAt(g, i, n);
@@ -196,7 +271,7 @@ function dessiner(canvas: HTMLCanvasElement, serie: readonly PointNetliq[]): voi
   ctx.lineWidth = 1.4;
   ctx.stroke();
 
-  // Étiquettes X : dates sous-échantillonnées (~CIBLE_LABELS_X points régulièrement espacés).
+  // Étiquettes X : dates abrégées « août 25 » sous-échantillonnées (~CIBLE_LABELS_X).
   ctx.fillStyle = dim;
   ctx.textBaseline = "top";
   const pas = Math.max(1, Math.ceil(n / CIBLE_LABELS_X));
@@ -205,7 +280,7 @@ function dessiner(canvas: HTMLCanvasElement, serie: readonly PointNetliq[]): voi
     if (p === undefined) continue;
     const x = xAt(g, i, n);
     ctx.textAlign = i === 0 ? "left" : "center";
-    ctx.fillText(formatDateCourte(Date.parse(p.date)), x, g.bottom + 5);
+    ctx.fillText(formatMoisAnnee(Date.parse(p.date)), x, g.bottom + 5);
   }
 }
 
@@ -215,6 +290,10 @@ interface Survol {
   xPix: number;
   largeur: number;
   point: PointNetliq;
+  /** Clôture BTC du jour survolé (si overlay actif et point disponible), sinon null. */
+  btcClose: number | null;
+  /** Variation netliq vs point précédent (teintée), null au premier point. */
+  delta: number | null;
 }
 
 export function NetliqWindow() {
@@ -227,6 +306,20 @@ export function NetliqWindow() {
   const [survol, setSurvol] = useState<Survol | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  // Overlay BTC : toggle local (défaut ON) + série fetchée UNE fois. La garde `ref`
+  // « tenté » rend le fetch StrictMode-safe (même instance sur le double-effet, le ref
+  // persiste) et garantit que le toggle ne re-fetch JAMAIS. Échec → série reste null,
+  // overlay silencieusement absent (le cœur NETLIQ n'en dépend pas).
+  const [overlayBtc, setOverlayBtc] = useState(true);
+  const [btcSerie, setBtcSerie] = useState<{ t: number; close: number }[] | null>(null);
+  const btcTenteRef = useRef(false);
+
+  // Index BTC par jour ISO (clôtures $) — sert au tooltip ; mémoïsé sur la série fetchée.
+  const btcParJour = useMemo(
+    () => new Map((btcSerie ?? []).map((c) => [versJourIso(c.t), c.close])),
+    [btcSerie],
+  );
+
   // Run auto au PREMIER open (FloatingWindow ne monte l'enfant que si ouvert). La garde
   // `majTs === null` (aucun run terminé) + `!enCours` + pas d'erreur évite un double run —
   // StrictMode-safe : `run()` pose `enCours:true` de façon synchrone avant son premier await,
@@ -236,16 +329,30 @@ export function NetliqWindow() {
     if (!s.enCours && s.majTs === null && s.erreur === null) void s.run();
   }, []);
 
-  // Dessin — redessine sur nouvelle série et au redimensionnement.
+  // Fetch BTC UNE fois au premier affichage de l'overlay (défaut ON → au montage).
+  // 1 appel klines Binance (patron store cbprem) ; jamais rejoué au toggle (garde ref).
+  useEffect(() => {
+    if (!overlayBtc || btcTenteRef.current) return;
+    btcTenteRef.current = true;
+    binanceAdapter
+      .fetchKlines("BTCUSDT", "1d", { limit: 730 })
+      .then((candles) => setBtcSerie(candles.map((c) => ({ t: c.time, close: c.close }))))
+      .catch(() => {
+        /* overlay silencieusement absent — le cœur NETLIQ n'en dépend pas */
+      });
+  }, [overlayBtc]);
+
+  // Dessin — redessine sur nouvelle série, overlay BTC (dispo/toggle) et redimensionnement.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas === null || serie.length === 0) return;
-    const redraw = (): void => dessiner(canvas, serie);
+    const btc = overlayBtc ? btcSerie : null;
+    const redraw = (): void => dessiner(canvas, serie, btc);
     redraw();
     const ro = new ResizeObserver(redraw);
     ro.observe(canvas);
     return () => ro.disconnect();
-  }, [serie]);
+  }, [serie, btcSerie, overlayBtc]);
 
   // Survol : indice le plus proche → trait + infobulle (mêmes paddings que le dessin).
   const onMove = (e: React.MouseEvent<HTMLCanvasElement>): void => {
@@ -263,7 +370,11 @@ export function NetliqWindow() {
       setSurvol(null);
       return;
     }
-    setSurvol({ xPix: xAt(g, idx, serie.length), largeur: rect.width, point });
+    const precedent = serie[idx - 1];
+    const delta = precedent === undefined ? null : point.netliq - precedent.netliq;
+    const btcClose =
+      overlayBtc && btcSerie !== null ? (btcParJour.get(point.date) ?? null) : null;
+    setSurvol({ xPix: xAt(g, idx, serie.length), largeur: rect.width, point, btcClose, delta });
   };
 
   const onLeave = (): void => setSurvol(null);
@@ -282,14 +393,29 @@ export function NetliqWindow() {
         titre="Liquidité nette Fed"
         sousTitre="WALCL − TGA − RRP · réserves nettes du système sur 2 ans"
         actions={
-          <button
-            type="button"
-            onClick={rafraichir}
-            disabled={enCours}
-            className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            ↻ Rafraîchir
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setOverlayBtc((v) => !v)}
+              aria-pressed={overlayBtc}
+              title="Superposer le cours BTC (échelle propre)"
+              className={`rounded border px-2 py-1 text-[11px] transition ${
+                overlayBtc
+                  ? "border-accent/60 bg-accent/10 text-accent"
+                  : "border-border bg-bg text-text-dim hover:text-text"
+              }`}
+            >
+              ₿ BTC
+            </button>
+            <button
+              type="button"
+              onClick={rafraichir}
+              disabled={enCours}
+              className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              ↻ Rafraîchir
+            </button>
+          </div>
         }
       />
 
@@ -338,6 +464,24 @@ export function NetliqWindow() {
                     valeur: formatMd(survol.point.netliq),
                     couleur: lireTokenCanvas("--accent", "#38bdf8"),
                   },
+                  ...(survol.btcClose !== null
+                    ? [
+                        {
+                          label: "BTC",
+                          valeur: formatUsd(survol.btcClose),
+                          couleur: lireTokenCanvas("--serie-1", "#38bdf8"),
+                        },
+                      ]
+                    : []),
+                  ...(survol.delta !== null
+                    ? [
+                        {
+                          label: "Δ",
+                          valeur: formatMdSigne(survol.delta),
+                          couleur: couleurDelta(survol.delta),
+                        },
+                      ]
+                    : []),
                 ]}
               />
             )}
@@ -345,7 +489,10 @@ export function NetliqWindow() {
         )}
 
         <div className="mt-3 flex items-center justify-between">
-          <NoteSource>FRED · WALCL − TGA − RRP · quotidien</NoteSource>
+          <NoteSource>
+            FRED · WALCL − TGA − RRP · quotidien
+            {overlayBtc && btcSerie !== null && " · BTC superposé (échelle propre)"}
+          </NoteSource>
           <Fraicheur loading={enCours} majTs={majTs} />
         </div>
       </div>

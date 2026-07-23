@@ -516,12 +516,21 @@ export class DepthHeatController {
     // convertibles ou dégénérées) → on ne peint rien plutôt que de nourrir la grille de garbage.
     const prixMax = this.fromPxValue(top);
     const prixMin = this.fromPxValue(top + height);
-    const deMs = this.fromPxTimestamp(left);
-    const aMs = this.fromPxTimestamp(left + width);
+    const colonnes = lireColonnes();
+    let deMs = this.fromPxTimestamp(left);
+    let aMs = this.fromPxTimestamp(left + width);
+    // POURQUOI ce repli : `convertFromPixel` ne renvoie AUCUN timestamp pour un x situé au-delà
+    // de la dernière bougie (la marge droite — et symétriquement avant la première — du pane
+    // n'est pas dans la plage que KLineChart sait convertir ; vérifié en live : sur un pane de
+    // 750px, x=650 convertit mais x≥680 renvoie null). Sans repli, `aMs`/`deMs` restent
+    // `undefined` et la garde ci-dessous fait `return` à CHAQUE frame → canvas jamais peint,
+    // même avec un buffer de colonnes plein. Le buffer étant trié chronologiquement, ses bornes
+    // (± un intervalle d'échantillonnage) couvrent cette marge non convertible.
+    if (aMs === undefined && colonnes.length > 0) aMs = colonnes[colonnes.length - 1]!.t + INTERVALLE_COLONNE_MS;
+    if (deMs === undefined && colonnes.length > 0) deMs = colonnes[0]!.t - INTERVALLE_COLONNE_MS;
     if (prixMax === undefined || prixMin === undefined || deMs === undefined || aMs === undefined) return;
     if (!(prixMax > prixMin) || !(aMs > deMs)) return;
 
-    const colonnes = lireColonnes();
     const nLignes = clamp(Math.round(height / HAUTEUR_LIGNE_PX), 1, NB_LIGNES_MAX);
     const grille = grilleDepuisColonnes(colonnes, deMs, aMs, prixMin, prixMax, nLignes);
     if (grille.nCols === 0 || !(grille.qtyMax > 0)) return; // buffer vide ou hors fenêtre

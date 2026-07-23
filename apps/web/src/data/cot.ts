@@ -245,7 +245,9 @@ export function cotIndex(serie: PointCot[], fenetreSem = 156): number | null {
 
 /**
  * Variation du net sur `n` semaines : net du dernier point − net du point `n` positions plus tôt
- * dans la série. `null` si la série est trop courte pour reculer de `n` points. Fonction PURE.
+ * dans la série. `null` si la série est trop courte pour reculer de `n` points. `n` compte les
+ * POINTS de série (rapports publiés), pas les semaines calendaires — si la CFTC saute une
+ * publication, la dérive peut être > 7 jours. Fonction PURE.
  */
 export function deltaSemaines(serie: PointCot[], n: number): number | null {
   if (serie.length <= n) return null;
@@ -339,6 +341,13 @@ function normaliserResumeCache(resume: ResumeCot): ResumeCot {
 function lireCache(): CacheCot | null {
   try {
     if (typeof localStorage === "undefined") return null;
+    // Purge best-effort du cache v1 (clé obsolète après migration vers série 3 ans).
+    // Blob orphelin, pas de failure si absent ou localStorage readonly.
+    try {
+      localStorage.removeItem("axiom:cot:cache:v1");
+    } catch {
+      /* silencieux */
+    }
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     const p = JSON.parse(raw) as Partial<CacheCot> | null;

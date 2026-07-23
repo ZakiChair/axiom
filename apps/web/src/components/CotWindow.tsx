@@ -2,11 +2,11 @@
  * Fenêtre « Rapport COT » (mnémonique COT) — dockable à droite, NON MODALE. Source CFTC.
  *
  * Résumé SYNTHÉTIQUE et VISUEL du dernier rapport hebdomadaire « Commitments of Traders »
- * (CFTC, dataset Legacy Futures Only). Pour une watchlist curée (majors FX, indices actions,
- * or/argent, pétrole, BTC/ETH CME) : POSITION NETTE SPÉCULATIVE (longs − shorts des « non-
- * commercials ») en barre divergente centrée sur zéro (vert = net long, rouge = net short,
- * longueur ∝ |net|), la VARIATION HEBDO (flèche + delta) et l'open interest. Regroupé par
- * famille pour une lecture au coup d'œil — ce n'est pas un dump de table brute.
+ * (CFTC, dataset Legacy Futures Only). Pour chaque instrument d'une watchlist curée (majors FX,
+ * indices actions, or/argent, pétrole, BTC/ETH CME) : sparkline 52 sem du net spéculatif
+ * (longs − shorts non-commercial), badge COT Index (position du net dans son amplitude 3 ans),
+ * barre divergente net/OI sur échelle fixe ±50 % (vert = net long, rouge = net short) et
+ * VARIATION HEBDO (flèche + delta). Regroupé par famille pour une lecture au coup d'œil.
  *
  * Données TRÈS lentes (publication hebdo le vendredi) : elles vivent dans le state React et
  * sont mises en cache 12 h par data/cot.ts. Chargement à l'ouverture (servi du cache si

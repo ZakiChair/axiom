@@ -389,6 +389,14 @@ interface SurvolHeatmap {
   strike: number;
 }
 
+// Marges du plot de la heatmap — partagées entre le dessin (dessinerHeatmapOi) et l'inversion
+// pixel→cellule du survol (onSurvolHeatmap) : même modèle que SMILE_PAD_L/R, pour que les deux
+// retombent EXACTEMENT sur la même géométrie (sinon le tooltip dérive du tracé).
+const HEATMAP_PAD_L = 46;
+const HEATMAP_PAD_R = 10;
+const HEATMAP_PAD_T = 12;
+const HEATMAP_PAD_B = 22;
+
 /**
  * Dessine la heatmap OI/GEX : axe X ordinal = échéances (triées), axe Y ordinal = strikes de la
  * bande utile (ordonnés DÉCROISSANT, strike haut en haut, spot au milieu). Chaque cellule est un
@@ -399,7 +407,7 @@ interface SurvolHeatmap {
 function dessinerHeatmapOi(
   canvas: HTMLCanvasElement,
   grille: GrilleOi,
-  bande: number[],
+  bandeDesc: number[],
   metrique: "oi" | "gex",
   spot: number,
   survol: SurvolHeatmap | null,
@@ -414,10 +422,10 @@ function dessinerHeatmapOi(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
 
-  const padL = 46;
-  const padR = 10;
-  const padT = 12;
-  const padB = 22;
+  const padL = HEATMAP_PAD_L;
+  const padR = HEATMAP_PAD_R;
+  const padT = HEATMAP_PAD_T;
+  const padB = HEATMAP_PAD_B;
   const plotW = Math.max(1, cssW - padL - padR);
   const plotH = Math.max(1, cssH - padT - padB);
 
@@ -427,7 +435,8 @@ function dessinerHeatmapOi(
   ctx.font = "10px system-ui, sans-serif";
 
   const echeances = grille.echeances;
-  const bandeDesc = [...bande].sort((a, b) => b - a); // strike haut en haut.
+  // bandeDesc arrive déjà triée décroissant (strike haut en haut) — hoistée dans le useMemo
+  // du composant hôte, partagée avec onSurvolHeatmap.
   if (echeances.length === 0 || bandeDesc.length === 0) {
     ctx.fillStyle = couleurDim;
     ctx.font = "11px system-ui, sans-serif";
@@ -794,6 +803,10 @@ export function OptionsWindow() {
     () => (grilleOi ? bandeStrikes(grilleOi.strikes, spotChaine) : []),
     [grilleOi, spotChaine],
   );
+  // Bande triée décroissante (strike haut en haut) — hoistée ici pour éviter de retrier à
+  // chaque mousemove et pour que dessin (dessinerHeatmapOi) et survol (onSurvolHeatmap)
+  // consomment EXACTEMENT le même ordre.
+  const bandeOiDesc = useMemo(() => [...bandeOi].sort((a, b) => b - a), [bandeOi]);
 
   // Redessine la heatmap (données/vue/métrique/thème/survol). Le thème repeint via majTs (les
   // tokens sont lus au dessin) ; survol pilote le liseré.
@@ -801,31 +814,26 @@ export function OptionsWindow() {
     if (!open || vue !== "heatmap") return;
     const canvas = heatmapCanvasRef.current;
     if (canvas && grilleOi) {
-      dessinerHeatmapOi(canvas, grilleOi, bandeOi, heatmapMetrique, spotChaine, survolHeatmap);
+      dessinerHeatmapOi(canvas, grilleOi, bandeOiDesc, heatmapMetrique, spotChaine, survolHeatmap);
     }
-  }, [open, vue, grilleOi, bandeOi, heatmapMetrique, spotChaine, survolHeatmap, majTs]);
+  }, [open, vue, grilleOi, bandeOiDesc, heatmapMetrique, spotChaine, survolHeatmap, majTs]);
 
   // Cellule survolée : inverse la géométrie (colonne/ligne depuis les pixels) vers échéance/strike.
   const onSurvolHeatmap = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!grilleOi || grilleOi.echeances.length === 0 || bandeOi.length === 0) return;
+    if (!grilleOi || grilleOi.echeances.length === 0 || bandeOiDesc.length === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const padL = 46;
-    const padR = 10;
-    const padT = 12;
-    const padB = 22;
-    const plotW = Math.max(1, rect.width - padL - padR);
-    const plotH = Math.max(1, rect.height - padT - padB);
-    const x = e.clientX - rect.left - padL;
-    const y = e.clientY - rect.top - padT;
+    const plotW = Math.max(1, rect.width - HEATMAP_PAD_L - HEATMAP_PAD_R);
+    const plotH = Math.max(1, rect.height - HEATMAP_PAD_T - HEATMAP_PAD_B);
+    const x = e.clientX - rect.left - HEATMAP_PAD_L;
+    const y = e.clientY - rect.top - HEATMAP_PAD_T;
     if (x < 0 || y < 0 || x >= plotW || y >= plotH) {
       setSurvolHeatmap(null);
       return;
     }
-    const bandeDesc = [...bandeOi].sort((a, b) => b - a);
     const ci = Math.min(grilleOi.echeances.length - 1, Math.floor((x / plotW) * grilleOi.echeances.length));
-    const ri = Math.min(bandeDesc.length - 1, Math.floor((y / plotH) * bandeDesc.length));
+    const ri = Math.min(bandeOiDesc.length - 1, Math.floor((y / plotH) * bandeOiDesc.length));
     const exp = grilleOi.echeances[ci];
-    const strike = bandeDesc[ri];
+    const strike = bandeOiDesc[ri];
     if (exp === undefined || strike === undefined) return;
     setSurvolHeatmap({ expiryMs: exp, strike });
   };
@@ -864,10 +872,10 @@ export function OptionsWindow() {
 
   return (
     <>
-      <EnTeteFenetre mnemo="OMON" titre="Options" sousTitre="Smile IV · max pain · GEX/DEX" />
+      <EnTeteFenetre mnemo="OMON" titre="Options" sousTitre="Smile IV · max pain · GEX/DEX · heatmap OI" />
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
-        {/* Bascule de vue : Smile ↔ GEX/DEX */}
+        {/* Bascule de vue : Smile ↔ GEX/DEX ↔ Heatmap OI */}
         <div className="mb-3">
           <Segmente
             options={[
@@ -1151,9 +1159,13 @@ export function OptionsWindow() {
               {survolHeatmap && celluleSurvol && grilleOi && (
                 <InfobulleGraphe
                   xPix={
+                    HEATMAP_PAD_L +
                     ((grilleOi.echeances.indexOf(survolHeatmap.expiryMs) + 0.5) /
                       Math.max(1, grilleOi.echeances.length)) *
-                    (heatmapCanvasRef.current?.clientWidth ?? 0)
+                      Math.max(
+                        1,
+                        (heatmapCanvasRef.current?.clientWidth ?? 0) - HEATMAP_PAD_L - HEATMAP_PAD_R,
+                      )
                   }
                   largeurGraphe={heatmapCanvasRef.current?.clientWidth ?? 0}
                   titre={`${joursAvant(survolHeatmap.expiryMs)} · Strike ${formatStrike(survolHeatmap.strike)}`}

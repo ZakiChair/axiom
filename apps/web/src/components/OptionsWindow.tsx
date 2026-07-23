@@ -29,6 +29,7 @@ import {
   type GexDexPoint,
 } from "../data/gexDex";
 import { calculerSkew25d } from "../data/skew";
+import { bandeStrikes, construireGrilleOi, intensiteCellule, type GrilleOi } from "../data/oiHeatmap";
 import {
   CBOE_TICKERS,
   cboeExpiries,
@@ -39,7 +40,7 @@ import {
 } from "../data/cboe";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { formatUsd, formatDec, formatPct, formatPourcentage } from "../lib/format";
-import { lireTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { indicesVisibles, valeurVersPixel, pixelVersValeur, type Domaine } from "../lib/domaineAxe";
 import { useDomaineZoom } from "../hooks/useDomaineZoom";
 import { Metric, EnTeteFenetre, ErreurBloc, NoteSource, Fraicheur, Segmente, InfobulleGraphe } from "./ui";
@@ -380,6 +381,185 @@ function dessinerBarres(
   }
 }
 
+// ─────────────────────────── Dessin de la heatmap OI strike × échéance ───────────────────────────
+
+/** Cellule survolée (repérée par échéance + strike) — pilote l'infobulle et le liseré. */
+interface SurvolHeatmap {
+  expiryMs: number;
+  strike: number;
+}
+
+// Marges du plot de la heatmap — partagées entre le dessin (dessinerHeatmapOi) et l'inversion
+// pixel→cellule du survol (onSurvolHeatmap) : même modèle que SMILE_PAD_L/R, pour que les deux
+// retombent EXACTEMENT sur la même géométrie (sinon le tooltip dérive du tracé).
+const HEATMAP_PAD_L = 46;
+const HEATMAP_PAD_R = 10;
+const HEATMAP_PAD_T = 12;
+const HEATMAP_PAD_B = 22;
+
+/**
+ * Dessine la heatmap OI/GEX : axe X ordinal = échéances (triées), axe Y ordinal = strikes de la
+ * bande utile (ordonnés DÉCROISSANT, strike haut en haut, spot au milieu). Chaque cellule est un
+ * `fillRect` teinté par `intensiteCellule` — métrique OI : rampe neutre → `--accent` ; métrique
+ * GEX : signe porté par la teinte `--up`/`--down`, intensité = |gex|. Marqueur ◆ du max pain par
+ * colonne, ligne horizontale pointillée du spot. Calqué sur `dessinerBarres` (DPR, tokens au dessin).
+ */
+function dessinerHeatmapOi(
+  canvas: HTMLCanvasElement,
+  grille: GrilleOi,
+  bandeDesc: number[],
+  metrique: "oi" | "gex",
+  spot: number,
+  survol: SurvolHeatmap | null,
+): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+  const cssW = canvas.clientWidth || 380;
+  const cssH = canvas.clientHeight || 300;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const padL = HEATMAP_PAD_L;
+  const padR = HEATMAP_PAD_R;
+  const padT = HEATMAP_PAD_T;
+  const padB = HEATMAP_PAD_B;
+  const plotW = Math.max(1, cssW - padL - padR);
+  const plotH = Math.max(1, cssH - padT - padB);
+
+  const couleurDim = lireTokenCanvas("--text-dim", "#9ca3af");
+  const couleurAccent = lireTokenCanvas("--accent", "#38bdf8");
+
+  ctx.font = "10px system-ui, sans-serif";
+
+  const echeances = grille.echeances;
+  // bandeDesc arrive déjà triée décroissant (strike haut en haut) — hoistée dans le useMemo
+  // du composant hôte, partagée avec onSurvolHeatmap.
+  if (echeances.length === 0 || bandeDesc.length === 0) {
+    ctx.fillStyle = couleurDim;
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.fillText("Pas d'open interest à afficher…", padL, padT + plotH / 2);
+    return;
+  }
+
+  const colW = plotW / echeances.length;
+  const rowH = plotH / bandeDesc.length;
+  const indexEcheance = new Map(echeances.map((e, i) => [e, i]));
+  const indexBande = new Map(bandeDesc.map((s, i) => [s, i]));
+
+  const vMax = metrique === "oi" ? grille.oiMax : grille.gexAbsMax;
+
+  // Cellules teintées par intensité.
+  for (const c of grille.cellules) {
+    const ci = indexEcheance.get(c.expiryMs);
+    const ri = indexBande.get(c.strike);
+    if (ci === undefined || ri === undefined) continue;
+    const valeur = metrique === "oi" ? c.oiTotal : Math.abs(c.gex);
+    const intensite = intensiteCellule(valeur, vMax);
+    if (intensite <= 0) continue;
+    const alpha = 0.1 + 0.85 * intensite; // plancher visible pour les petites tailles.
+    const token = metrique === "oi" ? "--accent" : c.gex >= 0 ? "--up" : "--down";
+    const repli = metrique === "oi" ? "#38bdf8" : c.gex >= 0 ? "#2dc08e" : "#f92855";
+    ctx.fillStyle = rgbaTokenCanvas(token, alpha, repli);
+    ctx.fillRect(padL + ci * colW, padT + ri * rowH, colW, rowH);
+  }
+
+  // Marqueur ◆ du max pain par colonne (strike de bande le plus proche du max pain de l'échéance).
+  ctx.fillStyle = couleurAccent;
+  for (let ci = 0; ci < echeances.length; ci++) {
+    const exp = echeances[ci];
+    if (exp === undefined) continue;
+    const mp = grille.maxPainParEcheance.get(exp);
+    if (mp === undefined || !Number.isFinite(mp)) continue;
+    let ri = 0;
+    let best = Infinity;
+    for (let i = 0; i < bandeDesc.length; i++) {
+      const s = bandeDesc[i];
+      if (s === undefined) continue;
+      const d = Math.abs(s - mp);
+      if (d < best) {
+        best = d;
+        ri = i;
+      }
+    }
+    const cx = padL + (ci + 0.5) * colW;
+    const cy = padT + (ri + 0.5) * rowH;
+    const r = Math.min(4, colW / 3, rowH / 2);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - r);
+    ctx.lineTo(cx + r, cy);
+    ctx.lineTo(cx, cy + r);
+    ctx.lineTo(cx - r, cy);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Ligne horizontale pointillée du spot (interpolée sur l'axe ordinal des strikes).
+  if (Number.isFinite(spot)) {
+    const premier = bandeDesc[0] ?? NaN;
+    const dernier = bandeDesc[bandeDesc.length - 1] ?? NaN;
+    let ySpot: number | null = null;
+    if (spot >= premier) ySpot = padT + 0.5 * rowH;
+    else if (spot <= dernier) ySpot = padT + (bandeDesc.length - 0.5) * rowH;
+    else {
+      for (let i = 0; i < bandeDesc.length - 1; i++) {
+        const hi = bandeDesc[i];
+        const lo = bandeDesc[i + 1];
+        if (hi === undefined || lo === undefined) continue;
+        if (spot <= hi && spot >= lo) {
+          const frac = hi === lo ? 0 : (hi - spot) / (hi - lo);
+          ySpot = padT + (i + 0.5) * rowH + frac * rowH;
+          break;
+        }
+      }
+    }
+    if (ySpot !== null) {
+      ctx.strokeStyle = couleurDim;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(padL, ySpot);
+      ctx.lineTo(cssW - padR, ySpot);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = couleurDim;
+      ctx.fillText("spot", cssW - padR - 24, Math.max(padT + 8, ySpot - 2));
+    }
+  }
+
+  // Liseré de la cellule survolée.
+  if (survol) {
+    const ci = indexEcheance.get(survol.expiryMs);
+    const ri = indexBande.get(survol.strike);
+    if (ci !== undefined && ri !== undefined) {
+      ctx.strokeStyle = couleurAccent;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(padL + ci * colW + 0.5, padT + ri * rowH + 0.5, colW - 1, rowH - 1);
+    }
+  }
+
+  // Étiquettes Y (strikes) — sous-échantillonnées pour rester lisibles.
+  ctx.fillStyle = couleurDim;
+  const pasY = Math.max(1, Math.ceil(bandeDesc.length / 12));
+  for (let i = 0; i < bandeDesc.length; i += pasY) {
+    const s = bandeDesc[i];
+    if (s === undefined) continue;
+    ctx.fillText(formatStrike(s), 2, padT + (i + 0.5) * rowH + 3);
+  }
+
+  // Étiquettes X (échéances, jours restants) — sous-échantillonnées si les colonnes sont étroites.
+  const pasX = colW < 34 ? 2 : 1;
+  for (let ci = 0; ci < echeances.length; ci += pasX) {
+    const exp = echeances[ci];
+    if (exp === undefined) continue;
+    const txt = joursAvant(exp);
+    const cx = padL + (ci + 0.5) * colW - ctx.measureText(txt).width / 2;
+    ctx.fillText(txt, Math.max(padL, cx), cssH - 6);
+  }
+}
+
 // ─────────────────────────── Format utilitaire ───────────────────────────
 
 function joursAvant(expiryMs: number): string {
@@ -394,6 +574,7 @@ export function OptionsWindow() {
   const open = useStore(optionsUiStore, (s) => s.open);
 
   const barCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const heatmapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [devise, setDevise] = useState<Devise>("BTC");
   const [chain, setChain] = useState<OptionPoint[]>([]);
   const [dvol, setDvol] = useState<number | null>(null);
@@ -402,10 +583,14 @@ export function OptionsWindow() {
   const [erreur, setErreur] = useState<string | null>(null);
   const [majTs, setMajTs] = useState<number | null>(null);
 
-  // Vue : smile IV (existant) OU GEX/DEX. En GEX/DEX : classe crypto (Deribit) ou actions (CBOE).
-  const [vue, setVue] = useState<"smile" | "gexdex">("smile");
+  // Vue : smile IV (existant), GEX/DEX, ou heatmap OI strike×échéance. En GEX/DEX : classe crypto
+  // (Deribit) ou actions (CBOE).
+  const [vue, setVue] = useState<"smile" | "gexdex" | "heatmap">("smile");
   const [classe, setClasse] = useState<"crypto" | "actions">("crypto");
   const [metrique, setMetrique] = useState<"gex" | "dex">("gex");
+  // Métrique de la heatmap : open interest OU |GEX| (murs de gamma). État dédié à la vue heatmap.
+  const [heatmapMetrique, setHeatmapMetrique] = useState<"oi" | "gex">("oi");
+  const [survolHeatmap, setSurvolHeatmap] = useState<SurvolHeatmap | null>(null);
   // Chaîne CBOE (indices actions) — chargée seulement en GEX/DEX « Actions ».
   const [cboeTicker, setCboeTicker] = useState<CboeTicker>("SPX");
   const [cboeChaine, setCboeChaine] = useState<CboeChain | null>(null);
@@ -599,6 +784,70 @@ export function OptionsWindow() {
     if (canvas && domaineBarres) dessinerBarres(canvas, gexDexPoints, gexDexSpot, metrique, domaineBarres);
   }, [open, vue, gexDexPoints, gexDexSpot, metrique, domaineBarres]);
 
+  // ─────────────────────────── Heatmap OI strike × échéance ───────────────────────────
+
+  // Spot valable pour TOUTES les échéances (le sous-jacent est indépendant de l'échéance) : pris
+  // sur la chaîne complète, pas sur `pointsEcheance` (limité à l'échéance sélectionnée).
+  const spotChaine = useMemo(() => {
+    const u = chain.map((p) => p.underlying).find((v) => Number.isFinite(v) && v > 0);
+    return u ?? NaN;
+  }, [chain]);
+
+  // Grille OI/GEX (toutes échéances) — recalculée quand la vue heatmap est active. Date.now() au
+  // bord du composant (comme gexDexPoints/skew25) ; la logique pure reçoit nowMs injecté.
+  const grilleOi = useMemo<GrilleOi | null>(
+    () => (vue === "heatmap" ? construireGrilleOi(chain, spotChaine, Date.now()) : null),
+    [vue, chain, spotChaine],
+  );
+  const bandeOi = useMemo(
+    () => (grilleOi ? bandeStrikes(grilleOi.strikes, spotChaine) : []),
+    [grilleOi, spotChaine],
+  );
+  // Bande triée décroissante (strike haut en haut) — hoistée ici pour éviter de retrier à
+  // chaque mousemove et pour que dessin (dessinerHeatmapOi) et survol (onSurvolHeatmap)
+  // consomment EXACTEMENT le même ordre.
+  const bandeOiDesc = useMemo(() => [...bandeOi].sort((a, b) => b - a), [bandeOi]);
+
+  // Redessine la heatmap (données/vue/métrique/thème/survol). Le thème repeint via majTs (les
+  // tokens sont lus au dessin) ; survol pilote le liseré.
+  useEffect(() => {
+    if (!open || vue !== "heatmap") return;
+    const canvas = heatmapCanvasRef.current;
+    if (canvas && grilleOi) {
+      dessinerHeatmapOi(canvas, grilleOi, bandeOiDesc, heatmapMetrique, spotChaine, survolHeatmap);
+    }
+  }, [open, vue, grilleOi, bandeOiDesc, heatmapMetrique, spotChaine, survolHeatmap, majTs]);
+
+  // Cellule survolée : inverse la géométrie (colonne/ligne depuis les pixels) vers échéance/strike.
+  const onSurvolHeatmap = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!grilleOi || grilleOi.echeances.length === 0 || bandeOiDesc.length === 0) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const plotW = Math.max(1, rect.width - HEATMAP_PAD_L - HEATMAP_PAD_R);
+    const plotH = Math.max(1, rect.height - HEATMAP_PAD_T - HEATMAP_PAD_B);
+    const x = e.clientX - rect.left - HEATMAP_PAD_L;
+    const y = e.clientY - rect.top - HEATMAP_PAD_T;
+    if (x < 0 || y < 0 || x >= plotW || y >= plotH) {
+      setSurvolHeatmap(null);
+      return;
+    }
+    const ci = Math.min(grilleOi.echeances.length - 1, Math.floor((x / plotW) * grilleOi.echeances.length));
+    const ri = Math.min(bandeOiDesc.length - 1, Math.floor((y / plotH) * bandeOiDesc.length));
+    const exp = grilleOi.echeances[ci];
+    const strike = bandeOiDesc[ri];
+    if (exp === undefined || strike === undefined) return;
+    setSurvolHeatmap({ expiryMs: exp, strike });
+  };
+
+  // Cellule + max pain de l'échéance survolée (pour l'infobulle).
+  const celluleSurvol = useMemo(() => {
+    if (!survolHeatmap || !grilleOi) return null;
+    return (
+      grilleOi.cellules.find(
+        (c) => c.expiryMs === survolHeatmap.expiryMs && c.strike === survolHeatmap.strike,
+      ) ?? null
+    );
+  }, [survolHeatmap, grilleOi]);
+
   const onSurvolSmile = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (domaine === null || pointsEcheance.length === 0) return;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -623,15 +872,16 @@ export function OptionsWindow() {
 
   return (
     <>
-      <EnTeteFenetre mnemo="OMON" titre="Options" sousTitre="Smile IV · max pain · GEX/DEX" />
+      <EnTeteFenetre mnemo="OMON" titre="Options" sousTitre="Smile IV · max pain · GEX/DEX · heatmap OI" />
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
-        {/* Bascule de vue : Smile ↔ GEX/DEX */}
+        {/* Bascule de vue : Smile ↔ GEX/DEX ↔ Heatmap OI */}
         <div className="mb-3">
           <Segmente
             options={[
               { id: "smile", label: "Smile" },
               { id: "gexdex", label: "GEX/DEX" },
+              { id: "heatmap", label: "Heatmap OI" },
             ] as const}
             actif={vue}
             onChange={setVue}
@@ -660,8 +910,28 @@ export function OptionsWindow() {
           </div>
         )}
 
+        {/* En heatmap : bascule devise + métrique OI ↔ |GEX| (pas de sélecteur d'échéance —
+            la heatmap couvre toutes les échéances) */}
+        {vue === "heatmap" && (
+          <div className="mb-3 flex items-center gap-2">
+            <Segmente
+              options={DEVISES.map((d) => ({ id: d, label: d }))}
+              actif={devise}
+              onChange={setDevise}
+            />
+            <Segmente
+              options={[
+                { id: "oi", label: "OI" },
+                { id: "gex", label: "|GEX|" },
+              ] as const}
+              actif={heatmapMetrique}
+              onChange={setHeatmapMetrique}
+            />
+          </div>
+        )}
+
         {/* Sélecteurs devise + échéance Deribit (smile ET gex/dex crypto) */}
-        {(vue === "smile" || classe === "crypto") && (
+        {(vue === "smile" || (vue === "gexdex" && classe === "crypto")) && (
           <div className="mb-3 flex items-center gap-2">
             <Segmente
               options={DEVISES.map((d) => ({ id: d, label: d }))}
@@ -862,6 +1132,89 @@ export function OptionsWindow() {
             </div>
           </>
         )}
+
+        {/* ─────────── Vue HEATMAP OI (strike × échéance) ───────────
+            Bloc TOUJOURS monté, masqué en CSS quand la vue n'est pas active — convention de
+            montage des canvases d'OMON (cf. bloc smile). */}
+        <div className={vue === "heatmap" ? undefined : "hidden"}>
+          <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
+            <span>{heatmapMetrique === "oi" ? "Open interest" : "|GEX| (murs de gamma)"} par strike × échéance</span>
+            <Fraicheur loading={loading} majTs={majTs} />
+          </div>
+
+          {erreur && (
+            <div className="mb-3">
+              <ErreurBloc>{erreur}</ErreurBloc>
+            </div>
+          )}
+
+          <div className="rounded-md border border-border bg-bg p-2">
+            <div className="relative">
+              <canvas
+                ref={heatmapCanvasRef}
+                className="h-[300px] w-full"
+                onMouseMove={onSurvolHeatmap}
+                onMouseLeave={() => setSurvolHeatmap(null)}
+              />
+              {survolHeatmap && celluleSurvol && grilleOi && (
+                <InfobulleGraphe
+                  xPix={
+                    HEATMAP_PAD_L +
+                    ((grilleOi.echeances.indexOf(survolHeatmap.expiryMs) + 0.5) /
+                      Math.max(1, grilleOi.echeances.length)) *
+                      Math.max(
+                        1,
+                        (heatmapCanvasRef.current?.clientWidth ?? 0) - HEATMAP_PAD_L - HEATMAP_PAD_R,
+                      )
+                  }
+                  largeurGraphe={heatmapCanvasRef.current?.clientWidth ?? 0}
+                  titre={`${joursAvant(survolHeatmap.expiryMs)} · Strike ${formatStrike(survolHeatmap.strike)}`}
+                  lignes={[
+                    { label: "OI call", valeur: formatDec(celluleSurvol.callOi, 2), couleur: "var(--up)" },
+                    { label: "OI put", valeur: formatDec(celluleSurvol.putOi, 2), couleur: "var(--down)" },
+                    { label: "OI total", valeur: formatDec(celluleSurvol.oiTotal, 2) },
+                    { label: "GEX", valeur: formatUsd(celluleSurvol.gex) },
+                    {
+                      label: "Max pain",
+                      valeur: formatUsdExact(grilleOi.maxPainParEcheance.get(survolHeatmap.expiryMs) ?? null),
+                    },
+                  ]}
+                />
+              )}
+            </div>
+          </div>
+          <div className="mt-1 flex items-center gap-4 text-[10px] text-text-dim">
+            {heatmapMetrique === "oi" ? (
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-1.5 w-3 rounded bg-accent" />
+                open interest (log)
+              </span>
+            ) : (
+              <>
+                <span className="flex items-center gap-1">
+                  <span className="inline-block h-1.5 w-3 rounded bg-up" />
+                  GEX positif
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="inline-block h-1.5 w-3 rounded bg-down" />
+                  GEX négatif
+                </span>
+              </>
+            )}
+            <span className="flex items-center gap-1">
+              <span className="text-accent">◆</span>
+              max pain
+            </span>
+          </div>
+
+          <div className="mt-3">
+            <NoteSource>
+              Carte des positions options (toutes échéances). Couleur = open interest OU |GEX|
+              (murs de gamma, teinte up/down selon le signe), échelle log. ◆ = max pain par
+              échéance, pointillé = spot. Données Deribit, ~1 min.
+            </NoteSource>
+          </div>
+        </div>
       </div>
     </>
   );

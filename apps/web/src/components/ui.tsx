@@ -390,7 +390,7 @@ export function Segmente<T extends string | number>({
   actif,
   onChange,
 }: {
-  options: ReadonlyArray<{ id: T; label: string }>;
+  options: ReadonlyArray<{ id: T; label: string; title?: string }>;
   actif: T;
   onChange: (id: T) => void;
 }) {
@@ -401,6 +401,7 @@ export function Segmente<T extends string | number>({
           key={o.id}
           type="button"
           onClick={() => onChange(o.id)}
+          title={o.title}
           aria-pressed={actif === o.id}
           className={`flex-1 px-3 py-1.5 transition ${
             actif === o.id ? "bg-bg text-text" : "text-text-dim hover:text-text"

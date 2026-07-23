@@ -21,6 +21,11 @@
  *    ou autre symbole → non évaluable ici (armement figé, pas de faux 0) — le daemon
  *    couvre TOUS les symboles d'alerte onglet fermé (cf. ci-dessous).
  *
+ *  - ALERTES DE PRESET (`presetAlertsStore`) : un timer par alerte active (période 15 ou
+ *    60 min) relance `executerScreener` (snapshot des filtres) ; les symboles ENTRANT dans
+ *    l'ensemble scanné (diff, hors cooldown 6 h) sont journalisés + notifiés. Scan LOURD →
+ *    garde de visibilité en tête de tick. Front-only (pas de couverture daemon).
+ *
  * ONGLET FERMÉ : le daemon évalue aussi `funding-extreme` (poll premiumIndex ~60 s,
  * lot D3) ET `liq-cascade` (tick 10 s sur sa table `liquidations` ingérée Bybit+OKX,
  * tous les symboles d'alerte — ingestion d'un nouveau symbole ≤60 s). Seul CVD
@@ -40,9 +45,12 @@ import { usdParMinute } from "../components/liquidationsWindow.util";
 import { alertsStore, pousserDefsDaemon } from "../store/alerts";
 import { cvdDivergenceStore } from "../store/cvd-divergence";
 import { orderflowStore } from "../store/orderflow";
+import { presetAlertsStore, diffEntrants, filtrerCooldown } from "../store/presetAlerts";
 import { subscribeTickers, type TickerUpdate } from "../data/ticker";
 import { daemonSupporte, detectDaemon, urlDaemon } from "../data/daemon";
 import { coinalyzeProvider } from "../data/coinalyze";
+import { executerScreener } from "../data/screenerRun";
+import { SCREENER_POSITION_CAP } from "../data/screener";
 import { extUrl } from "../data/extapi";
 
 /** Types de condition évalués sur la clôture de bougie (nécessitent les bougies). */
@@ -55,6 +63,11 @@ const FUNDING_POLL_MS = 60_000;
 const LIQ_CASCADE_POLL_MS = 5_000;
 /** Fenêtre min. d'historique funding pour un z-score (points). */
 const FUNDING_Z_WINDOW = 30;
+
+/** Cooldown par (alerte, symbole) d'une alerte de preset (ms) : anti-spam sur un aller-retour. */
+const PRESET_COOLDOWN_MS = 6 * 3_600_000;
+/** Cap indicateurs réduit pour un scan d'alerte (échantillon plus léger que le run UI). */
+const PRESET_CAP_INDICATEURS = 30;
 
 /** Applique une passe d'évaluation : persiste les defs modifiées, journalise + notifie. */
 function appliquerResultat(lot: AlertDef[], ctx: ContexteAlerte): void {
@@ -274,10 +287,85 @@ function creerRuntime(): Unsubscribe {
     }
   });
 
+  // ── Alertes de PRESET : scan périodique + diff d'entrée dans l'ensemble ────
+  // Chaque alerte active relance `executerScreener` (snapshot de ses filtres) à sa
+  // période propre ; les symboles ENTRANTS (absents du scan précédent) hors cooldown
+  // sont journalisés + notifiés. État par alerte (baseline + cooldown) en Maps de
+  // closure, nettoyé au retrait/désactivation ; jamais deux ticks concurrents d'une
+  // même alerte (garde `enCours`). Aucune écriture du screenerStore (run isolé).
+  const timersPreset = new Map<string, ReturnType<typeof setInterval>>();
+  /** Dernier ensemble de symboles scannés par alerte (absent = amorce → pas de déclenchement). */
+  const dernierEnsemble = new Map<string, Set<string>>();
+  /** Cooldown par alerte : symbole → ms epoch du dernier déclenchement. */
+  const cooldownsPreset = new Map<string, Map<string, number>>();
+  /** Alertes dont un tick est en cours (anti-chevauchement). */
+  const ticksEnCours = new Set<string>();
+
+  const tickPreset = async (id: string): Promise<void> => {
+    // Garde visibilité en tête : un scan est LOURD (réseau + worker), inutile onglet caché.
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    if (ticksEnCours.has(id)) return; // tick précédent encore en vol
+    const alerte = presetAlertsStore.getState().alertes.find((a) => a.id === id);
+    if (!alerte || !alerte.actif) return; // retirée/désactivée entre-temps
+    ticksEnCours.add(id);
+    try {
+      const res = await executerScreener(alerte.baseConditions, alerte.indicatorConditions, alerte.tf, {
+        capIndicateurs: PRESET_CAP_INDICATEURS,
+        capPosition: SCREENER_POSITION_CAP,
+      });
+      const courant = res.rows.map((r) => r.symbol);
+      const precedent = dernierEnsemble.get(id) ?? null;
+      const entrants = diffEntrants(precedent, courant);
+      dernierEnsemble.set(id, new Set(courant));
+      if (precedent === null) return; // amorce : baseline mémorisée, aucun déclenchement
+      const cd = cooldownsPreset.get(id) ?? new Map<string, number>();
+      const nowMs = Date.now();
+      const retenus = filtrerCooldown(entrants, cd, nowMs, PRESET_COOLDOWN_MS);
+      for (const sym of retenus) {
+        cd.set(sym, nowMs);
+        const d: Declenchement = {
+          alertId: id,
+          ts: nowMs,
+          valeur: 0, // pas de valeur numérique : c'est une entrée dans un ensemble
+          message: `EQS ${alerte.nom} : ${sym} entre dans le scan`,
+        };
+        alertsStore.getState().ajouterJournal(d);
+        notifier(d);
+      }
+      cooldownsPreset.set(id, cd);
+    } catch {
+      // Scan best-effort : un échec réseau ne casse ni la baseline ni le timer.
+    } finally {
+      ticksEnCours.delete(id);
+    }
+  };
+
+  const resyncPreset = (): void => {
+    const actives = presetAlertsStore.getState().alertes.filter((a) => a.actif);
+    const idsActifs = new Set(actives.map((a) => a.id));
+    // Alertes disparues/désactivées : on stoppe le timer et on purge leur état.
+    for (const [id, timer] of timersPreset) {
+      if (idsActifs.has(id)) continue;
+      clearInterval(timer);
+      timersPreset.delete(id);
+      dernierEnsemble.delete(id);
+      cooldownsPreset.delete(id);
+      ticksEnCours.delete(id);
+    }
+    // Nouvelles alertes actives : tick d'amorce immédiat (baseline) puis timer périodique.
+    for (const a of actives) {
+      if (timersPreset.has(a.id)) continue;
+      void tickPreset(a.id);
+      const periodeMs = a.periodeMin * 60_000;
+      timersPreset.set(a.id, setInterval(() => void tickPreset(a.id), periodeMs));
+    }
+  };
+
   // Démarrage : souscriptions + calibrage immédiat contre l'état courant.
   resyncTicker();
   resyncFunding();
   resyncLiqCascade();
+  resyncPreset();
   assurerPipelineCvd();
   // Calibrage CVD sur l'état déjà publié (si orderflow déjà actif).
   for (const sym of Object.keys(cvdDivergenceStore.getState().bySymbol)) {
@@ -292,6 +380,9 @@ function creerRuntime(): Unsubscribe {
   const unsubMarket = marketStore.subscribe(onMarket);
   onMarket(); // calibrage initial des conditions bougie sur le backfill présent
 
+  // Ajout/retrait/bascule d'une alerte de preset → re-cadre les timers de scan.
+  const unsubPreset = presetAlertsStore.subscribe(resyncPreset);
+
   const stopHeartbeat = demarrerHeartbeat();
 
   return () => {
@@ -299,9 +390,15 @@ function creerRuntime(): Unsubscribe {
     unsubMarket();
     unsubTicker();
     unsubCvd();
+    unsubPreset();
     stopHeartbeat();
     if (fundingTimer !== undefined) clearInterval(fundingTimer);
     if (liqCascadeTimer !== undefined) clearInterval(liqCascadeTimer);
+    for (const timer of timersPreset.values()) clearInterval(timer);
+    timersPreset.clear();
+    dernierEnsemble.clear();
+    cooldownsPreset.clear();
+    ticksEnCours.clear();
   };
 }
 
@@ -435,7 +532,7 @@ export function demanderPermissionNotifications(): void {
 }
 
 /** Notifie un déclenchement : notification système (si accordée) + bip discret. */
-function notifier(d: Declenchement): void {
+export function notifier(d: Declenchement): void {
   try {
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       new Notification("AXIOM — alerte", { body: d.message });

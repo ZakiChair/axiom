@@ -52,6 +52,8 @@ import {
   intensiteLogDepth,
   lireColonnes,
   MAX_COLONNES,
+  purgeAvantEchantillon,
+  SEUIL_TROU_ECHANTILLONNAGE_MS,
   type ColonneDepth,
 } from "./depthHeat";
 
@@ -118,6 +120,27 @@ describe("ajouterColonne (FIFO borné)", () => {
     const colonnes = ajouterColonne([], col(1));
     expect(colonnes.length).toBe(1);
     expect(MAX_COLONNES).toBe(1800);
+  });
+});
+
+describe("purgeAvantEchantillon (trou d'échantillonnage)", () => {
+  it("buffer vide → pas de purge", () => {
+    expect(purgeAvantEchantillon([], 10_000)).toBe(false);
+  });
+
+  it("écart normal (~1× l'intervalle) → pas de purge", () => {
+    const colonnes = [col(10_000)];
+    expect(purgeAvantEchantillon(colonnes, 10_000 + INTERVALLE_COLONNE_MS)).toBe(false);
+  });
+
+  it("écart au seuil exact (3×) → pas de purge (strictement supérieur requis)", () => {
+    const colonnes = [col(10_000)];
+    expect(purgeAvantEchantillon(colonnes, 10_000 + SEUIL_TROU_ECHANTILLONNAGE_MS)).toBe(false);
+  });
+
+  it("écart > seuil (onglet en arrière-plan throttlé) → purge", () => {
+    const colonnes = [col(10_000)];
+    expect(purgeAvantEchantillon(colonnes, 10_000 + SEUIL_TROU_ECHANTILLONNAGE_MS + 1)).toBe(true);
   });
 });
 

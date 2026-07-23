@@ -18,6 +18,15 @@
  * `undefined` tant que moins de 20 deltas lissés définis y figurent, ou si leur
  * écart-type est nul (évite la division par zéro). Le plancher de 20 est fixe,
  * indépendant de `fenetre` (warm-up minimal), cf. spec.
+ *
+ * LECTURE (utilisateur) : jambe perp disponible sur les timeframes 1m-1M
+ * (Binance USDT-M) ; ailleurs (autre exchange, autre marché), CVD spot seul.
+ * Séries normalisées en écarts-types de flux — lire croisements et signe de
+ * l'histogramme, pas les niveaux.
+ *
+ * NB : aucun canal UI n'expose de description de def aujourd'hui (`IndicatorDef`
+ * n'a pas de champ `description`) — cette note vit ici jusqu'à ce qu'un tel
+ * canal existe (hors périmètre, cf. rapport de tâche).
  */
 
 import type { IndicatorDef } from "@axiom/types";

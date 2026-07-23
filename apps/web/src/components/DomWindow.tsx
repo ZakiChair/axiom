@@ -24,6 +24,7 @@ import { binanceAdapter } from "../data/binance";
 import {
   agregerNiveaux,
   mediane,
+  meilleursNiveaux,
   pasArrondi,
   profondeurCumulee,
   souscrireDepth,
@@ -170,16 +171,6 @@ function niveauxDepuisMap(map: Map<number, number>): Niveau[] {
   return out;
 }
 
-/** Meilleur bid/ask + mid du carnet (null si un côté est vide). */
-function meilleurs(livre: OrderBook): { bestBid: number; bestAsk: number; mid: number } | null {
-  let bestBid = -Infinity;
-  let bestAsk = Infinity;
-  for (const p of livre.bids.keys()) if (p > bestBid) bestBid = p;
-  for (const p of livre.asks.keys()) if (p < bestAsk) bestAsk = p;
-  if (!Number.isFinite(bestBid) || !Number.isFinite(bestAsk)) return null;
-  return { bestBid, bestAsk, mid: (bestBid + bestAsk) / 2 };
-}
-
 // ─────────────────────────── Dessin ───────────────────────────
 
 /** Message centré (canvas vide : en attente / indisponible). */
@@ -196,7 +187,7 @@ type LigneLadder = NiveauAgrege & { cote: "bid" | "ask" };
 
 /** LADDER : échelle verticale centrée sur le mid, barres bid/ask + murs surlignés. */
 function dessinerLadder(ctx: CanvasRenderingContext2D, w: number, h: number, livre: OrderBook, pas: number, tk: Tokens): void {
-  const best = meilleurs(livre);
+  const best = meilleursNiveaux(livre);
   if (!best) return placeholder(ctx, w, h, tk, "Chargement…");
 
   // Nombre de niveaux par côté DÉRIVÉ de la hauteur réelle (plancher ROW_H_MIN),
@@ -308,7 +299,7 @@ function tracerMarche(
 
 /** DEPTH : profondeur cumulée bid/ask en escalier autour du mid. */
 function dessinerDepth(ctx: CanvasRenderingContext2D, w: number, h: number, livre: OrderBook, tk: Tokens): void {
-  const best = meilleurs(livre);
+  const best = meilleursNiveaux(livre);
   if (!best) return placeholder(ctx, w, h, tk, "Chargement…");
 
   const { mid } = best;
@@ -493,7 +484,7 @@ export function DomWindow() {
       } else if (!livre) {
         placeholder(ctx, w, h, tk, "Chargement…");
       } else if (tab === "ladder") {
-        const pas = pasArrondi(meilleurs(livre)?.mid ?? 0) * facteurPas;
+        const pas = pasArrondi(meilleursNiveaux(livre)?.mid ?? 0) * facteurPas;
         dessinerLadder(ctx, w, h, livre, pas, tk);
       } else {
         dessinerDepth(ctx, w, h, livre, tk);

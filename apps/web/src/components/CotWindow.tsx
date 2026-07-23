@@ -2,35 +2,37 @@
  * Fenêtre « Rapport COT » (mnémonique COT) — dockable à droite, NON MODALE. Source CFTC.
  *
  * Résumé SYNTHÉTIQUE et VISUEL du dernier rapport hebdomadaire « Commitments of Traders »
- * (CFTC, dataset Legacy Futures Only). Pour chaque instrument d'une watchlist curée (majors FX,
- * indices actions, or/argent, pétrole, BTC/ETH CME) : sparkline 52 sem du net spéculatif
- * (longs − shorts non-commercial), badge COT Index (position du net dans son amplitude 3 ans),
- * barre divergente net/OI sur échelle fixe ±50 % (vert = net long, rouge = net short) et
- * VARIATION HEBDO (flèche + delta). Regroupé par famille pour une lecture au coup d'œil.
+ * (CFTC). Un SÉLECTEUR de catégorie de positionnement en tête (Spéculatif / Fonds / Commerciaux)
+ * route chaque instrument d'une watchlist curée (majors FX, indices actions, or/argent, pétrole,
+ * BTC/ETH CME) vers son dataset — legacy, Disaggregated ou TFF (cf. store/cot.ts). Pour chaque
+ * instrument couvert : sparkline 52 sem du net, badge COT Index (position du net dans son
+ * amplitude 3 ans), barre divergente net/OI sur échelle fixe ±50 % (vert = net long, rouge = net
+ * short) et VARIATION HEBDO (flèche + delta). Regroupé par famille pour une lecture au coup d'œil.
  *
- * Données TRÈS lentes (publication hebdo le vendredi) : elles vivent dans le state React et
- * sont mises en cache 12 h par data/cot.ts. Chargement à l'ouverture (servi du cache si
- * frais) + rafraîchissement manuel. Dégradation gracieuse : sur échec, on garde le dernier
- * cache et on affiche un état clair, jamais d'erreur bloquante.
+ * L'état de données vit dans `cotStore` (fetch lazy + cache 12 h PAR dataset). La fenêtre est de la
+ * présentation PURE : `charger()` à l'ouverture, `setCategorie` au clic du sélecteur, `rafraichir()`
+ * au bouton. Les instruments non couverts par le dataset routé (stubs `nonCouvert`) sont masqués,
+ * avec une note discrète. Dégradation gracieuse : sur échec, on garde le dernier cache et on affiche
+ * un état clair, jamais d'erreur bloquante.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
 import {
   CATEGORIES_COT,
-  chargerRapportCot,
   cotIndex,
   deltaSemaines,
   netSurOi,
+  type CategoriePositionnement,
   type CotCategorie,
   type LigneCot,
   type PointCot,
-  type ResumeCot,
 } from "../data/cot";
+import { cotStore } from "../store/cot";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { formatDateComplete } from "../lib/format";
-import { Chargement, EnTeteFenetre, ErreurBloc, NoteSource } from "./ui";
+import { Chargement, EnTeteFenetre, ErreurBloc, NoteSource, Segmente } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -208,29 +210,73 @@ function Ligne({ ligne }: { ligne: LigneCot }) {
   );
 }
 
+// ─────────────────────────── Métadonnées des catégories de positionnement ───────────────────────────
+
+/**
+ * Une entrée par catégorie de positionnement (`legacy`/`fonds`/`commerciaux`) : segment du
+ * sélecteur (label + title natif), libellé SÉMANTIQUE du net affiché (« spéculatif » n'est vrai
+ * QUE pour legacy — Producer/Asset Manager sont des hedgers) et dataset(s) source cité(s) dans la
+ * NoteSource. L'ordre est celui du sélecteur.
+ */
+const CATEGORIES_POSITIONNEMENT: readonly {
+  id: CategoriePositionnement;
+  label: string;
+  title: string;
+  semantique: string;
+  source: string;
+}[] = [
+  {
+    id: "legacy",
+    label: "Spéculatif",
+    title: "Non-commercial (legacy)",
+    semantique: "Net spéculatif (non-commercial)",
+    source: "CFTC legacy",
+  },
+  {
+    id: "fonds",
+    label: "Fonds",
+    title: "Managed Money / Leveraged Funds",
+    semantique: "Net des fonds (Managed Money / Leveraged Funds)",
+    source: "CFTC Disaggregated + TFF",
+  },
+  {
+    id: "commerciaux",
+    label: "Commerciaux",
+    title: "Producer / Asset Manager",
+    semantique: "Net commercial (Producer / Asset Manager)",
+    source: "CFTC Disaggregated + TFF",
+  },
+];
+
 // ─────────────────────────── Composant ───────────────────────────
 
 export function CotWindow() {
-  const open = useStore(cotUiStore, (s) => s.open);
+  // État piloté par le store de catégories (data/cot.ts + store/cot.ts). L'ancien orchestrateur
+  // interne (chargerRapportCot / clé de cache plate) est abandonné : le store route chaque
+  // instrument vers son dataset selon la catégorie choisie.
+  const categorie = useStore(cotStore, (s) => s.categorie);
+  const resume = useStore(cotStore, (s) => s.resume);
+  const enCours = useStore(cotStore, (s) => s.enCours);
+  const erreur = useStore(cotStore, (s) => s.erreur);
 
-  const [resume, setResume] = useState<ResumeCot | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [erreur, setErreur] = useState<string | null>(null);
-
-  const charger = useCallback(async (force: boolean) => {
-    setLoading(true);
-    const { resume } = await chargerRapportCot({ force });
-    setResume(resume);
-    setErreur(resume.lignes.length === 0 ? "Rapport COT indisponible pour le moment." : null);
-    setLoading(false);
+  // Chargement au PREMIER montage (FloatingWindow ne monte l'enfant qu'à l'ouverture). Garde
+  // `dateMaj === null` + `!enCours` : StrictMode-safe (charger() pose `enCours:true` de façon
+  // synchrone avant son premier await) et pas de re-fetch aux ouvertures suivantes. La catégorie
+  // n'est PAS en dépendance : `setCategorie` relance déjà `charger()` dans le store (l'ajouter
+  // ici double-runnerait — même écueil que CBPREM).
+  useEffect(() => {
+    const s = cotStore.getState();
+    if (!s.enCours && s.dateMaj === null) void s.charger();
   }, []);
 
-  // Chargement à l'ouverture (idempotent : servi du cache 12 h sans requête si frais).
-  useEffect(() => {
-    if (open && resume === null) void charger(false);
-  }, [open, resume, charger]);
+  const meta =
+    CATEGORIES_POSITIONNEMENT.find((c) => c.id === categorie) ?? CATEGORIES_POSITIONNEMENT[0]!;
 
-  const lignes = resume?.lignes ?? [];
+  // Lignes réellement couvertes par le dataset routé : les stubs `nonCouvert` sont MASQUÉS et leur
+  // net/OI (NaN) ne doit JAMAIS alimenter cotIndex/netSurOi — d'où le filtre AVANT tout rendu.
+  const lignesVisibles = resume.lignes.filter((l) => !l.nonCouvert);
+  const nbNonCouvert = resume.lignes.length - lignesVisibles.length;
+  const aucuneVisible = lignesVisibles.length === 0;
 
   return (
     <>
@@ -239,64 +285,91 @@ export function CotWindow() {
         titre="CFTC"
         sousTitre={
           <>
-            Net spéculatif · {formatDateComplete(resume?.dateRapport ?? 0)}
-            {loading ? " · maj…" : ""}
+            {meta.semantique} · {formatDateComplete(resume.dateRapport ?? 0)}
+            {enCours ? " · maj…" : ""}
           </>
         }
         actions={
-          <button
-            type="button"
-            onClick={() => void charger(true)}
-            aria-label="Rafraîchir le rapport COT"
-            title="Rafraîchir"
-            className="rounded p-1 text-sm leading-none text-text-dim transition hover:bg-bg hover:text-text"
-          >
-            ⟳
-          </button>
+          <>
+            <Segmente
+              options={CATEGORIES_POSITIONNEMENT.map((c) => ({
+                id: c.id,
+                label: c.label,
+                title: c.title,
+              }))}
+              actif={categorie}
+              onChange={(id) => void cotStore.getState().setCategorie(id)}
+            />
+            <button
+              type="button"
+              onClick={() => void cotStore.getState().rafraichir()}
+              aria-label="Rafraîchir le rapport COT"
+              title="Rafraîchir"
+              className="rounded p-1 text-sm leading-none text-text-dim transition hover:bg-bg hover:text-text"
+            >
+              ⟳
+            </button>
+          </>
         }
       />
 
       <div className="flex-1 overflow-y-auto">
-        {erreur && (
-          <div className="px-3 py-2">
-            <ErreurBloc>{erreur}</ErreurBloc>
-          </div>
-        )}
-
-        {lignes.length === 0 ? (
-          loading ? (
+        {/* Signal « indisponible » : jamais tiré de la longueur (une ligne par instrument, stubs
+            inclus), mais de enCours/erreur/aucune-ligne-couverte. Ordre : enCours d'abord (pas de
+            faux « non couvert » pendant un chargement), puis erreur, puis vide. */}
+        {aucuneVisible ? (
+          enCours ? (
             <Chargement />
+          ) : erreur ? (
+            <div className="px-3 py-2">
+              <ErreurBloc>{erreur}</ErreurBloc>
+            </div>
           ) : (
             <div className="px-3 py-6 text-center text-[11px] text-text-dim">
-              Aucune donnée COT disponible.
+              Aucun marché couvert par ce rapport.
             </div>
           )
         ) : (
-          CATEGORIES_COT.map((cat: { id: CotCategorie; libelle: string }) => {
-            const duGroupe = lignes.filter((l) => l.categorie === cat.id);
-            if (duGroupe.length === 0) return null;
-            return (
-              <section key={cat.id} className="border-b border-border last:border-b-0">
-                <h3 className="bg-bg/40 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-dim">
-                  {cat.libelle}
-                </h3>
-                {duGroupe.map((l) => (
-                  <Ligne key={l.nom} ligne={l} />
-                ))}
-              </section>
-            );
-          })
-        )}
+          <>
+            {/* Dégradation non destructive : sur échec de refetch avec données conservées, un
+                bandeau discret plutôt qu'un remplacement de la liste. */}
+            {erreur && (
+              <div className="px-3 pt-2">
+                <ErreurBloc>{erreur}</ErreurBloc>
+              </div>
+            )}
 
-        {lignes.length > 0 && (
-          <div className="px-3 py-3">
-            <NoteSource>
-              Position nette spéculative (« non-commercial ») = longs − shorts. Barre = net
-              rapporté à l'open interest (échelle ±50 %) ; flèche = variation vs semaine
-              précédente. COT Index = position du net spéculatif dans son amplitude 3 ans (0 =
-              extrême short, 100 = extrême long). Source CFTC, publication hebdomadaire.
-            </NoteSource>
-          </div>
+            {CATEGORIES_COT.map((cat: { id: CotCategorie; libelle: string }) => {
+              const duGroupe = lignesVisibles.filter((l) => l.categorie === cat.id);
+              if (duGroupe.length === 0) return null;
+              return (
+                <section key={cat.id} className="border-b border-border last:border-b-0">
+                  <h3 className="bg-bg/40 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-dim">
+                    {cat.libelle}
+                  </h3>
+                  {duGroupe.map((l) => (
+                    <Ligne key={l.nom} ligne={l} />
+                  ))}
+                </section>
+              );
+            })}
+
+            {nbNonCouvert > 0 && (
+              <div className="px-3 py-2 text-[10px] text-text-dim">
+                {nbNonCouvert} marché{nbNonCouvert > 1 ? "s" : ""} non couvert
+                {nbNonCouvert > 1 ? "s" : ""} par ce rapport.
+              </div>
+            )}
+
+            <div className="px-3 py-3">
+              <NoteSource>
+                {meta.semantique} = longs − shorts. Barre = net rapporté à l'open interest (échelle
+                ±50 %) ; flèche = variation vs semaine précédente. COT Index = position du net dans
+                son amplitude 3 ans (0 = extrême short, 100 = extrême long). Source {meta.source},
+                publication hebdomadaire.
+              </NoteSource>
+            </div>
+          </>
         )}
       </div>
     </>

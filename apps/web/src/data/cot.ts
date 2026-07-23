@@ -14,14 +14,10 @@
  * DEUX derniers rapports par instrument (net_dernier − net_précédent) — cohérent avec les
  * champs `change_in_*` officiels du CFTC, mais recalculé côté client pour rester robuste.
  *
- * Ce module est PUR pour tout le parsing / la synthèse (testé dans cot.test.ts). Il expose
- * en plus un orchestrateur `chargerRapportCot` (fetch + cache + santé) — seul effet de bord.
- *
- * Dégradation gracieuse : source en panne ⇒ on préfère le dernier cache (localStorage) à un
- * résultat vide ; jamais d'exception propagée qui casserait l'UI.
+ * Ce module est PUR : parsing, synthèse et construction des requêtes Socrata (testé dans
+ * cot.test.ts). L'orchestration (fetch + cache par dataset + santé) vit désormais dans
+ * `store/cot.ts` ; ce module n'a plus aucun effet de bord.
  */
-import { extUrl } from "./extapi";
-import { healthStore } from "../store/health";
 
 // ─────────────────────────── Types ───────────────────────────
 
@@ -128,6 +124,88 @@ export const CATEGORIES_COT: readonly { id: CotCategorie; libelle: string }[] = 
   { id: "crypto", libelle: "Crypto (CME)" },
 ] as const;
 
+// ─────────────────────────── Routage des datasets de positionnement ───────────────────────────
+
+/**
+ * Catégorie de positionnement affichée dans la fenêtre COT :
+ *  - `legacy` : agrégat historique « non-commercial » (dataset Legacy, toutes familles) ;
+ *  - `fonds` : spéculateurs fins (Managed Money en matières premières / Leveraged Funds en
+ *    financiers) — la « net1 » du dataset ciblé ;
+ *  - `commerciaux` : contrepartie (Producer/Merchant en matières premières / Asset Manager en
+ *    financiers) — la « net2 » du dataset ciblé.
+ * La sélection net1/net2 par catégorie est faite en Task 2 ; ici on ne route que le DATASET.
+ */
+export type CategoriePositionnement = "legacy" | "fonds" | "commerciaux";
+
+/** Dataset Socrata CFTC (« futures only ») source des positions. */
+export type DatasetCot = "legacy" | "disaggregated" | "tff";
+
+/**
+ * Route (famille d'instrument, catégorie de positionnement) → dataset source.
+ *  - catégorie `legacy` → `legacy` pour TOUTES les familles ;
+ *  - `fonds`/`commerciaux` → matières premières (metal, energie) → `disaggregated` ;
+ *    financiers (fx, indice, crypto) → `tff`.
+ * Ne renvoie JAMAIS `null` : le routage est exhaustif sur les 5 familles × 3 catégories. La
+ * non-couverture réelle (ex. un instrument absent de son dataset) se constate AU FETCH, pas ici.
+ * Le type de retour `| null` fige juste le contrat pour les consommateurs (Tasks 2-3). Fonction PURE.
+ */
+export function datasetPour(
+  famille: CotCategorie,
+  categorie: CategoriePositionnement,
+): DatasetCot | null {
+  if (categorie === "legacy") return "legacy";
+  // fonds | commerciaux : routage par famille d'instrument.
+  switch (famille) {
+    case "metal":
+    case "energie":
+      return "disaggregated";
+    case "fx":
+    case "indice":
+    case "crypto":
+      return "tff";
+  }
+}
+
+/**
+ * Table des datasets Socrata (`publicreporting.cftc.gov`, variantes « Futures Only ») avec leurs
+ * paires de champs (long, short) par catégorie de positionnement. `net1` = catégorie « fonds »,
+ * `net2` = catégorie « commerciaux ». Le net d'une catégorie = long − short de sa paire (Task 2).
+ *
+ * ⚠️ ids ET noms de champs VÉRIFIÉS EN DIRECT le 2026-07-23 (rapport
+ * `.superpowers/sdd/v14-cotdis-task-1-report.md`, section PREUVES). NE PAS deviner : chaque
+ * chaîne provient d'une réponse Socrata réelle. Noter l'asymétrie des suffixes `_all` — présents
+ * pour `m_money` et les champs legacy, ABSENTS pour `prod_merc`, `lev_money` et `asset_mgr`.
+ */
+export const DATASETS_COT: Record<
+  DatasetCot,
+  { id: string; champs: { net1: [string, string]; net2: [string, string] } }
+> = {
+  // Legacy - Futures Only : net1 = non-commercial (spéculatif), net2 = commercial (hedgers).
+  legacy: {
+    id: "6dca-aqww",
+    champs: {
+      net1: ["noncomm_positions_long_all", "noncomm_positions_short_all"],
+      net2: ["comm_positions_long_all", "comm_positions_short_all"],
+    },
+  },
+  // Disaggregated - Futures Only : net1 = Managed Money, net2 = Producer/Merchant.
+  disaggregated: {
+    id: "72hh-3qpy",
+    champs: {
+      net1: ["m_money_positions_long_all", "m_money_positions_short_all"],
+      net2: ["prod_merc_positions_long", "prod_merc_positions_short"],
+    },
+  },
+  // TFF - Futures Only : net1 = Leveraged Funds, net2 = Asset Manager.
+  tff: {
+    id: "gpe5-46if",
+    champs: {
+      net1: ["lev_money_positions_long", "lev_money_positions_short"],
+      net2: ["asset_mgr_positions_long", "asset_mgr_positions_short"],
+    },
+  },
+};
+
 // ─────────────────────────── Fonctions PURES : parsing & synthèse ───────────────────────────
 
 /**
@@ -166,6 +244,42 @@ export function pointCot(rec: unknown): PointBrutCot | null {
   if (!Number.isFinite(dateRapport)) return null;
   const longs = nombreCot(r?.noncomm_positions_long_all);
   const shorts = nombreCot(r?.noncomm_positions_short_all);
+  if (!Number.isFinite(longs) || !Number.isFinite(shorts)) return null;
+  const oi = nombreCot(r?.open_interest_all);
+  return {
+    nom,
+    dateRapport,
+    net: longs - shorts,
+    openInterest: Number.isFinite(oi) ? oi : NaN,
+  };
+}
+
+/**
+ * Variante GÉNÉRIQUE de `pointCot` : parse un enregistrement d'un dataset DONNÉ pour la CATÉGORIE
+ * de positionnement demandée. Le net = long − short de la paire de la catégorie :
+ *  - `commerciaux` → `net2` (Producer/Merchant, Asset Manager, ou commercial legacy) ;
+ *  - `legacy` et `fonds` → `net1` (non-commercial legacy, Managed Money, ou Leveraged Funds).
+ * Les noms de champs viennent de `DATASETS_COT` (asymétrie `_all` préservée) ; réutilise `nombreCot`.
+ * Renvoie null si le nom, la date, ou l'une des positions de la paire sont inexploitables (champ
+ * absent/vide ⇒ null). `legacy`/`legacy` reproduit EXACTEMENT `pointCot`. Fonction PURE.
+ */
+export function pointCotDataset(
+  dataset: DatasetCot,
+  categorie: CategoriePositionnement,
+  rec: unknown,
+): PointBrutCot | null {
+  const r = rec as Record<string, unknown> | null;
+  const nom = typeof r?.market_and_exchange_names === "string" ? r.market_and_exchange_names : null;
+  if (nom === null || nom.length === 0) return null;
+  const dateStr = typeof r?.report_date_as_yyyy_mm_dd === "string" ? r.report_date_as_yyyy_mm_dd : "";
+  const dateRapport = Date.parse(dateStr);
+  if (!Number.isFinite(dateRapport)) return null;
+  const [champLong, champShort] =
+    categorie === "commerciaux"
+      ? DATASETS_COT[dataset].champs.net2
+      : DATASETS_COT[dataset].champs.net1;
+  const longs = nombreCot(r?.[champLong]);
+  const shorts = nombreCot(r?.[champShort]);
   if (!Number.isFinite(longs) || !Number.isFinite(shorts)) return null;
   const oi = nombreCot(r?.open_interest_all);
   return {
@@ -266,17 +380,7 @@ export function netSurOi(net: number, oi: number): number | null {
   return (net / oi) * 100;
 }
 
-// ─────────────────────────── Orchestrateur (effet de bord) ───────────────────────────
-
-const HOTE = "publicreporting.cftc.gov";
-const DATASET = "6dca-aqww"; // Legacy Futures Only
-const HEALTH_SOURCE = "cot:cftc";
-
-// Clé v2 : la synthèse conserve désormais la SÉRIE 3 ans par instrument (forme incompatible
-// avec le cache v1, qui ne gardait que 2 rapports) ⇒ nouvelle clé pour éviter les faux hits.
-const CACHE_KEY = "axiom:cot:cache:v2";
-/** TTL du cache : 12 h (rapport publié une fois par semaine, le vendredi). */
-const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+// ─────────────────────────── Construction des requêtes Socrata (PURE) ───────────────────────────
 
 /**
  * Limite de lignes récupérées. ~14 instruments × ~156 rapports hebdo sur 3 ans ≈ 2184 lignes ;
@@ -314,104 +418,31 @@ export function construireRequete(watchlist: readonly InstrumentCot[], nowMs: nu
   return params.toString();
 }
 
-interface CacheCot {
-  ts: number;
-  resume: ResumeCot;
-}
-
 /**
- * `JSON.stringify(NaN)` produit `null` (NaN n'est pas représentable en JSON) : un `oi` ou un
- * `openInterest` absent (NaN par convention `nombreCot`) revient donc `null` après un aller-retour
- * localStorage, en violation du contrat `oi: number` / `openInterest: number`. On renormalise ici
- * à la LECTURE (toute valeur non finie ⇒ NaN) plutôt qu'à l'écriture, pour rester robuste même à
- * un cache écrit par une version antérieure du code. Fonction PURE.
+ * Variante GÉNÉRIQUE de `construireRequete` pour un dataset DONNÉ. Réutilise la mécanique legacy
+ * (fenêtre 3 ans UTC, `$where` instruments + date, `$order`, `$limit`) via délégation interne, puis
+ * SUBSTITUE le `$select` par les champs du dataset. La watchlist est RESTREINTE aux instruments dont
+ * la famille route vers ce dataset pour au moins une catégorie de positionnement (`datasetPour`) :
+ * legacy incluse ⇒ dataset `legacy` = watchlist complète ; `disaggregated` ⇒ metal/energie ; `tff` ⇒
+ * fx/indice/crypto. Les 4 champs de position (`net1` + `net2`) sont sélectionnés ENSEMBLE : un seul
+ * fetch par dataset sert les DEUX catégories fines (`pointCotDataset` choisit la paire au parse).
+ * Les chaînes de champs proviennent de `DATASETS_COT` (asymétrie `_all` préservée). Fonction PURE.
  */
-function normaliserResumeCache(resume: ResumeCot): ResumeCot {
-  return {
-    ...resume,
-    lignes: resume.lignes.map((ligne) => ({
-      ...ligne,
-      openInterest: Number.isFinite(ligne.openInterest) ? ligne.openInterest : NaN,
-      serie: ligne.serie.map((pt) => (Number.isFinite(pt.oi) ? pt : { ...pt, oi: NaN })),
-    })),
-  };
-}
-
-/** Lecture tolérante du cache (localStorage absent / JSON corrompu → null). */
-function lireCache(): CacheCot | null {
-  try {
-    if (typeof localStorage === "undefined") return null;
-    // Purge best-effort du cache v1 (clé obsolète après migration vers série 3 ans).
-    // Blob orphelin, pas de failure si absent ou localStorage readonly.
-    try {
-      localStorage.removeItem("axiom:cot:cache:v1");
-    } catch {
-      /* silencieux */
-    }
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
-    const p = JSON.parse(raw) as Partial<CacheCot> | null;
-    if (!p || typeof p.ts !== "number" || !p.resume || !Array.isArray(p.resume.lignes)) return null;
-    return { ts: p.ts, resume: normaliserResumeCache(p.resume as ResumeCot) };
-  } catch {
-    return null;
-  }
-}
-
-/** Écriture tolérante du cache (best-effort). */
-function ecrireCache(resume: ResumeCot): void {
-  try {
-    if (typeof localStorage === "undefined") return;
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), resume }));
-  } catch {
-    /* best-effort : la série 3 ans × 14 instruments peut dépasser le quota localStorage
-       (QuotaExceededError) ; on avale silencieusement l'exception — pas de cache vaut mieux
-       qu'une UI cassée, et le prochain chargement repartira du réseau. */
-  }
-}
-
-/** Résultat de `chargerRapportCot`. */
-export interface ChargementCot {
-  resume: ResumeCot;
-  /** Vrai si servi depuis le cache (aucune requête réseau émise ou repli sur cache). */
-  depuisCache: boolean;
-}
-
-/**
- * Charge le rapport COT synthétisé (effet de bord : fetch + cache + santé).
- *  - cache frais (< 12 h) et pas de `force` → renvoyé tel quel, aucun réseau ;
- *  - sinon : 1 requête Socrata agrégée, synthèse, mise en cache.
- * Dégradation gracieuse : sur échec réseau/HTTP ou résultat vide, on renvoie le dernier
- * cache s'il existe (sinon un résumé vide) — jamais d'exception propagée.
- */
-export async function chargerRapportCot(opts?: {
-  force?: boolean;
-  signal?: AbortSignal;
-}): Promise<ChargementCot> {
-  const cache = lireCache();
-  if (!opts?.force && cache && Date.now() - cache.ts < CACHE_TTL_MS) {
-    return { resume: cache.resume, depuisCache: true };
-  }
-
-  try {
-    const qs = construireRequete(WATCHLIST_COT, Date.now());
-    const res = await fetch(extUrl(HOTE, `resource/${DATASET}.json?${qs}`), { signal: opts?.signal });
-    if (!res.ok) throw new Error(`CFTC ${res.status}`);
-    const json = (await res.json()) as unknown;
-    const resume = resumerCot(json);
-
-    // Réponse vide alors qu'un cache existe : on préfère le cache (échec probable en amont).
-    if (resume.lignes.length === 0 && cache) {
-      return { resume: cache.resume, depuisCache: true };
-    }
-
-    ecrireCache(resume);
-    healthStore.getState().setEtat(HEALTH_SOURCE, "polling", { dernierMessageTs: Date.now() });
-    return { resume, depuisCache: false };
-  } catch (err) {
-    if (typeof err !== "object" || err === null || (err as { name?: unknown }).name !== "AbortError") {
-      healthStore.getState().marquerErreur(HEALTH_SOURCE, "Rapport COT (CFTC) indisponible");
-    }
-    return { resume: cache?.resume ?? { lignes: [], dateRapport: null }, depuisCache: true };
-  }
+export function construireRequeteDataset(
+  dataset: DatasetCot,
+  watchlist: readonly InstrumentCot[],
+  nowMs: number,
+): string {
+  const restreinte = watchlist.filter((inst) =>
+    (["legacy", "fonds", "commerciaux"] as CategoriePositionnement[]).some(
+      (cat) => datasetPour(inst.categorie, cat) === dataset,
+    ),
+  );
+  const params = new URLSearchParams(construireRequete(restreinte, nowMs));
+  const { net1, net2 } = DATASETS_COT[dataset].champs;
+  params.set(
+    "$select",
+    ["market_and_exchange_names", "report_date_as_yyyy_mm_dd", ...net1, ...net2, "open_interest_all"].join(","),
+  );
+  return params.toString();
 }

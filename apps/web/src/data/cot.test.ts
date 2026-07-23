@@ -1,15 +1,21 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   CATEGORIES_COT,
+  DATASETS_COT,
   WATCHLIST_COT,
-  chargerRapportCot,
   construireRequete,
+  construireRequeteDataset,
   cotIndex,
+  datasetPour,
   deltaSemaines,
   netSurOi,
   nombreCot,
   pointCot,
+  pointCotDataset,
   resumerCot,
+  type CategoriePositionnement,
+  type CotCategorie,
+  type DatasetCot,
   type InstrumentCot,
   type PointCot,
 } from "./cot";
@@ -287,64 +293,6 @@ describe("netSurOi", () => {
   });
 });
 
-describe("chargerRapportCot — normalisation du cache (fix revue Task 1)", () => {
-  /** Mock localStorage en mémoire (environnement de test Node, pas de DOM ici). */
-  function installMockLocalStorage(): Storage {
-    const data = new Map<string, string>();
-    const mock: Storage = {
-      getItem: (k) => data.get(k) ?? null,
-      setItem: (k, v) => void data.set(k, v),
-      removeItem: (k) => void data.delete(k),
-      clear: () => data.clear(),
-      key: (i) => Array.from(data.keys())[i] ?? null,
-      get length() {
-        return data.size;
-      },
-    };
-    (globalThis as { localStorage?: Storage }).localStorage = mock;
-    return mock;
-  }
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    delete (globalThis as { localStorage?: Storage }).localStorage;
-  });
-
-  it("un OI absent (NaN) survit au round-trip localStorage sans devenir null", async () => {
-    installMockLocalStorage();
-    const BTC = "BITCOIN - CHICAGO MERCANTILE EXCHANGE";
-    const records = [
-      {
-        market_and_exchange_names: BTC,
-        report_date_as_yyyy_mm_dd: "2026-06-23T00:00:00.000",
-        noncomm_positions_long_all: "16348",
-        noncomm_positions_short_all: "12824",
-        open_interest_all: "", // ⇒ OI = NaN (convention nombreCot)
-      },
-    ];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, json: async () => records }),
-    );
-
-    // 1) premier chargement réseau : écrit le cache (JSON.stringify(NaN) → "null" dans le blob).
-    const premier = await chargerRapportCot({ force: true });
-    const btc1 = premier.resume.lignes.find((l) => l.nom === BTC);
-    expect(Number.isNaN(btc1?.openInterest)).toBe(true);
-    expect(Number.isNaN(btc1?.serie[0]?.oi)).toBe(true);
-
-    // 2) relecture pure cache (frais, aucun fetch nécessaire) : sans le fix, oi/openInterest
-    //    reviendraient `null` (violation du contrat `number`) au lieu de NaN.
-    const second = await chargerRapportCot();
-    expect(second.depuisCache).toBe(true);
-    const btc2 = second.resume.lignes.find((l) => l.nom === BTC);
-    expect(btc2?.openInterest).not.toBeNull();
-    expect(Number.isNaN(btc2?.openInterest)).toBe(true);
-    expect(btc2?.serie[0]?.oi).not.toBeNull();
-    expect(Number.isNaN(btc2?.serie[0]?.oi)).toBe(true);
-  });
-});
-
 describe("construireRequete", () => {
   // Instant UTC (suffixe Z) : la borne est calculée en UTC, donc le test est déterministe
   // quel que soit le fuseau de la machine.
@@ -374,6 +322,256 @@ describe("construireRequete", () => {
     expect(params.get("$select")).toBe(
       "market_and_exchange_names,report_date_as_yyyy_mm_dd,noncomm_positions_long_all,noncomm_positions_short_all,open_interest_all",
     );
+  });
+});
+
+describe("construireRequeteDataset (requête générique par dataset)", () => {
+  // Instant UTC (suffixe Z) : borne calculée en UTC ⇒ déterministe quel que soit le fuseau.
+  const nowMs = Date.parse("2026-07-23T00:00:00.000Z");
+  // Un instrument par famille : permet de vérifier la RESTRICTION de watchlist par dataset.
+  const OR = "GOLD - COMMODITY EXCHANGE INC.";
+  const WTI = "WTI FINANCIAL CRUDE OIL - NEW YORK MERCANTILE EXCHANGE";
+  const EUR = "EURO FX - CHICAGO MERCANTILE EXCHANGE";
+  const SP = "E-MINI S&P 500 - CHICAGO MERCANTILE EXCHANGE";
+  const BTC = "BITCOIN - CHICAGO MERCANTILE EXCHANGE";
+  const watchlistMixte: InstrumentCot[] = [
+    { nom: OR, libelle: "Or", categorie: "metal" },
+    { nom: WTI, libelle: "WTI", categorie: "energie" },
+    { nom: EUR, libelle: "EUR", categorie: "fx" },
+    { nom: SP, libelle: "S&P 500", categorie: "indice" },
+    { nom: BTC, libelle: "Bitcoin", categorie: "crypto" },
+  ];
+
+  it("réutilise la mécanique legacy : $limit 3000, $order DESC, borne 3 ans (nowMs injecté)", () => {
+    const params = new URLSearchParams(construireRequeteDataset("disaggregated", watchlistMixte, nowMs));
+    expect(params.get("$limit")).toBe("3000");
+    expect(params.get("$order")).toBe("report_date_as_yyyy_mm_dd DESC");
+    expect(params.get("$where")).toContain("report_date_as_yyyy_mm_dd >= '2023-07-23T00:00:00.000'");
+  });
+
+  it("disaggregated : $select = champs MM + Prod/Merch (asymétrie _all préservée) + OI", () => {
+    const params = new URLSearchParams(construireRequeteDataset("disaggregated", watchlistMixte, nowMs));
+    expect(params.get("$select")).toBe(
+      "market_and_exchange_names,report_date_as_yyyy_mm_dd,m_money_positions_long_all,m_money_positions_short_all,prod_merc_positions_long,prod_merc_positions_short,open_interest_all",
+    );
+  });
+
+  it("disaggregated : watchlist RESTREINTE aux matières premières (metal/energie)", () => {
+    const where = new URLSearchParams(construireRequeteDataset("disaggregated", watchlistMixte, nowMs)).get("$where") ?? "";
+    expect(where).toContain(`'${OR}'`);
+    expect(where).toContain(`'${WTI}'`);
+    expect(where).not.toContain(`'${EUR}'`);
+    expect(where).not.toContain(`'${SP}'`);
+    expect(where).not.toContain(`'${BTC}'`);
+  });
+
+  it("tff : $select = champs Leveraged + Asset Manager + OI", () => {
+    const params = new URLSearchParams(construireRequeteDataset("tff", watchlistMixte, nowMs));
+    expect(params.get("$select")).toBe(
+      "market_and_exchange_names,report_date_as_yyyy_mm_dd,lev_money_positions_long,lev_money_positions_short,asset_mgr_positions_long,asset_mgr_positions_short,open_interest_all",
+    );
+  });
+
+  it("tff : watchlist RESTREINTE aux financiers (fx/indice/crypto)", () => {
+    const where = new URLSearchParams(construireRequeteDataset("tff", watchlistMixte, nowMs)).get("$where") ?? "";
+    expect(where).toContain(`'${EUR}'`);
+    expect(where).toContain(`'${SP}'`);
+    expect(where).toContain(`'${BTC}'`);
+    expect(where).not.toContain(`'${OR}'`);
+    expect(where).not.toContain(`'${WTI}'`);
+  });
+
+  it("legacy : $select = champs non-commercial + commercial + OI, watchlist COMPLÈTE", () => {
+    const params = new URLSearchParams(construireRequeteDataset("legacy", watchlistMixte, nowMs));
+    expect(params.get("$select")).toBe(
+      "market_and_exchange_names,report_date_as_yyyy_mm_dd,noncomm_positions_long_all,noncomm_positions_short_all,comm_positions_long_all,comm_positions_short_all,open_interest_all",
+    );
+    const where = params.get("$where") ?? "";
+    // Toutes les familles routent vers legacy (catégorie "legacy") ⇒ aucun instrument exclu.
+    for (const nom of [OR, WTI, EUR, SP, BTC]) expect(where).toContain(`'${nom}'`);
+  });
+});
+
+describe("pointCotDataset (net par catégorie de positionnement)", () => {
+  // Fixture disaggregated : noms de champs LITTÉRAUX du dataset 72hh-3qpy (asymétrie _all réelle).
+  const brutDisagg = {
+    market_and_exchange_names: "GOLD - COMMODITY EXCHANGE INC.",
+    report_date_as_yyyy_mm_dd: "2026-06-23T00:00:00.000",
+    m_money_positions_long_all: "180000", // Managed Money long
+    m_money_positions_short_all: "40000", // Managed Money short
+    prod_merc_positions_long: "90000", // Producer/Merchant long
+    prod_merc_positions_short: "150000", // Producer/Merchant short
+    open_interest_all: "500000",
+    // champ superflu ignoré
+    noncomm_positions_long_all: "999999",
+  };
+
+  // Fixture TFF : noms de champs LITTÉRAUX du dataset gpe5-46if.
+  const brutTff = {
+    market_and_exchange_names: "EURO FX - CHICAGO MERCANTILE EXCHANGE",
+    report_date_as_yyyy_mm_dd: "2026-06-23T00:00:00.000",
+    lev_money_positions_long: "120000", // Leveraged Funds long
+    lev_money_positions_short: "90000", // Leveraged Funds short
+    asset_mgr_positions_long: "200000", // Asset Manager long
+    asset_mgr_positions_short: "50000", // Asset Manager short
+    open_interest_all: "700000",
+  };
+
+  it("disaggregated / fonds : net = Managed Money long − short", () => {
+    const pt = pointCotDataset("disaggregated", "fonds", brutDisagg);
+    expect(pt?.net).toBe(180000 - 40000); // = 140000
+    expect(pt?.openInterest).toBe(500000);
+    expect(pt?.dateRapport).toBe(Date.parse("2026-06-23T00:00:00.000"));
+  });
+
+  it("disaggregated / commerciaux : net = Producer/Merchant long − short", () => {
+    const pt = pointCotDataset("disaggregated", "commerciaux", brutDisagg);
+    expect(pt?.net).toBe(90000 - 150000); // = -60000
+  });
+
+  it("tff / fonds : net = Leveraged Funds long − short", () => {
+    const pt = pointCotDataset("tff", "fonds", brutTff);
+    expect(pt?.net).toBe(120000 - 90000); // = 30000
+  });
+
+  it("tff / commerciaux : net = Asset Manager long − short", () => {
+    const pt = pointCotDataset("tff", "commerciaux", brutTff);
+    expect(pt?.net).toBe(200000 - 50000); // = 150000
+  });
+
+  it("champ de position absent pour la catégorie ciblée → null", () => {
+    // fonds lit m_money_* : sans le long, le point est inexploitable.
+    const { m_money_positions_long_all: _omit, ...sansMmLong } = brutDisagg;
+    expect(pointCotDataset("disaggregated", "fonds", sansMmLong)).toBeNull();
+    // idem TFF Asset Manager pour commerciaux.
+    const { asset_mgr_positions_short: _omit2, ...sansAmShort } = brutTff;
+    expect(pointCotDataset("tff", "commerciaux", sansAmShort)).toBeNull();
+  });
+
+  it("champ présent mais vide → null (« » ne devient PAS 0)", () => {
+    expect(pointCotDataset("tff", "fonds", { ...brutTff, lev_money_positions_long: "" })).toBeNull();
+  });
+
+  it("renvoie null si nom / date inexploitables, ou entrée non-objet", () => {
+    expect(pointCotDataset("disaggregated", "fonds", { ...brutDisagg, market_and_exchange_names: "" })).toBeNull();
+    expect(pointCotDataset("disaggregated", "fonds", { ...brutDisagg, report_date_as_yyyy_mm_dd: "nope" })).toBeNull();
+    expect(pointCotDataset("disaggregated", "fonds", null)).toBeNull();
+    expect(pointCotDataset("disaggregated", "fonds", "nope")).toBeNull();
+  });
+
+  it("bridge non-régression : legacy/legacy == pointCot (comportement actuel, même fixture)", () => {
+    const brutLegacy = {
+      market_and_exchange_names: "BITCOIN - CHICAGO MERCANTILE EXCHANGE",
+      report_date_as_yyyy_mm_dd: "2026-06-23T00:00:00.000",
+      noncomm_positions_long_all: "16348", // non-commercial long (net1 legacy)
+      noncomm_positions_short_all: "12824", // non-commercial short
+      comm_positions_long_all: "5000", // commercial long (net2 legacy)
+      comm_positions_short_all: "8000", // commercial short
+      open_interest_all: "20554",
+    };
+    // "legacy = comportement actuel" : net1 du dataset legacy = non-commercial = pointCot.
+    expect(pointCotDataset("legacy", "legacy", brutLegacy)).toEqual(pointCot(brutLegacy));
+    // commerciaux sur legacy → net2 = commercial.
+    expect(pointCotDataset("legacy", "commerciaux", brutLegacy)?.net).toBe(5000 - 8000); // = -3000
+  });
+});
+
+describe("datasetPour (routage famille × catégorie → dataset)", () => {
+  const FAMILLES: CotCategorie[] = ["fx", "indice", "metal", "energie", "crypto"];
+
+  // Table de vérité EXHAUSTIVE : 3 catégories × 5 familles = 15 combinaisons.
+  // - catégorie "legacy" → "legacy" pour TOUTES les familles ;
+  // - "fonds"/"commerciaux" → metal|energie → "disaggregated" ; fx|indice|crypto → "tff".
+  const attendu: Record<CategoriePositionnement, Record<CotCategorie, DatasetCot>> = {
+    legacy: { fx: "legacy", indice: "legacy", metal: "legacy", energie: "legacy", crypto: "legacy" },
+    fonds: { fx: "tff", indice: "tff", metal: "disaggregated", energie: "disaggregated", crypto: "tff" },
+    commerciaux: {
+      fx: "tff",
+      indice: "tff",
+      metal: "disaggregated",
+      energie: "disaggregated",
+      crypto: "tff",
+    },
+  };
+
+  for (const categorie of ["legacy", "fonds", "commerciaux"] as CategoriePositionnement[]) {
+    for (const famille of FAMILLES) {
+      it(`${categorie} × ${famille} → ${attendu[categorie][famille]}`, () => {
+        expect(datasetPour(famille, categorie)).toBe(attendu[categorie][famille]);
+      });
+    }
+  }
+
+  it("ne renvoie jamais null (routage exhaustif sur les 15 combinaisons)", () => {
+    for (const categorie of ["legacy", "fonds", "commerciaux"] as CategoriePositionnement[]) {
+      for (const famille of FAMILLES) {
+        expect(datasetPour(famille, categorie)).not.toBeNull();
+      }
+    }
+  });
+});
+
+describe("DATASETS_COT (ids Socrata vérifiés live + paires de champs)", () => {
+  const CLES: DatasetCot[] = ["legacy", "disaggregated", "tff"];
+
+  it("expose les trois datasets avec un id Socrata non vide", () => {
+    for (const cle of CLES) {
+      expect(DATASETS_COT[cle].id).toMatch(/^[a-z0-9]{4}-[a-z0-9]{4}$/);
+    }
+  });
+
+  it("ids vérifiés live (legacy=6dca-aqww, disaggregated=72hh-3qpy, tff=gpe5-46if)", () => {
+    expect(DATASETS_COT.legacy.id).toBe("6dca-aqww");
+    expect(DATASETS_COT.disaggregated.id).toBe("72hh-3qpy");
+    expect(DATASETS_COT.tff.id).toBe("gpe5-46if");
+  });
+
+  it("chaque paire (long, short) a deux champs distincts et non vides", () => {
+    for (const cle of CLES) {
+      for (const paire of [DATASETS_COT[cle].champs.net1, DATASETS_COT[cle].champs.net2]) {
+        const [long, short] = paire;
+        expect(long.length).toBeGreaterThan(0);
+        expect(short.length).toBeGreaterThan(0);
+        expect(long).not.toBe(short);
+      }
+    }
+  });
+
+  it("net1 et net2 désignent des catégories DISTINCTES (jamais la même paire)", () => {
+    for (const cle of CLES) {
+      const { net1, net2 } = DATASETS_COT[cle].champs;
+      // Aucun des 4 champs ne se répète : les deux catégories sont bien indépendantes.
+      const tous = [...net1, ...net2];
+      expect(new Set(tous).size).toBe(4);
+    }
+  });
+
+  it("champs de position exacts (transcrits des réponses live)", () => {
+    expect(DATASETS_COT.legacy.champs.net1).toEqual([
+      "noncomm_positions_long_all",
+      "noncomm_positions_short_all",
+    ]);
+    expect(DATASETS_COT.legacy.champs.net2).toEqual([
+      "comm_positions_long_all",
+      "comm_positions_short_all",
+    ]);
+    // ⚠️ asymétrie live : m_money a le suffixe _all, prod_merc ne l'a PAS.
+    expect(DATASETS_COT.disaggregated.champs.net1).toEqual([
+      "m_money_positions_long_all",
+      "m_money_positions_short_all",
+    ]);
+    expect(DATASETS_COT.disaggregated.champs.net2).toEqual([
+      "prod_merc_positions_long",
+      "prod_merc_positions_short",
+    ]);
+    expect(DATASETS_COT.tff.champs.net1).toEqual([
+      "lev_money_positions_long",
+      "lev_money_positions_short",
+    ]);
+    expect(DATASETS_COT.tff.champs.net2).toEqual([
+      "asset_mgr_positions_long",
+      "asset_mgr_positions_short",
+    ]);
   });
 });
 

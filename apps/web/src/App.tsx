@@ -198,6 +198,7 @@ const WINDOW_COMPONENTS: Record<WindowId, LazyExoticComponent<FenetreComp>> = {
   netliq: lazy(() =>
     import("./components/NetliqWindow").then((m) => ({ default: m.NetliqWindow })),
   ),
+  data: lazy(() => import("./components/DataWindow").then((m) => ({ default: m.DataWindow }))),
 };
 
 /** Placeholder discret pendant le chargement du chunk de la fenêtre. */

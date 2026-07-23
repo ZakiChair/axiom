@@ -47,6 +47,30 @@ export function serieCbprem(
 }
 
 /**
+ * Moyenne et écart-type POPULATION du premium sur TOUTE la série — support des
+ * bandes ±2σ du tracé et du z-score. `null` si moins de 30 points (z non porteur
+ * de sens) ou si σ == 0 (série constante : bandes dégénérées, z indéfini). PURE.
+ */
+export function bandesPremium(
+  serie: readonly PointPremium[],
+): { moyenne: number; sigma: number } | null {
+  if (serie.length < MIN_POINTS_Z) return null;
+  let somme = 0;
+  for (const p of serie) somme += p.premiumPct;
+  const moyenne = somme / serie.length;
+  let variance = 0;
+  for (const p of serie) variance += (p.premiumPct - moyenne) ** 2;
+  const sigma = Math.sqrt(variance / serie.length);
+  if (sigma === 0) return null;
+  return { moyenne, sigma };
+}
+
+/** z-score d'un premium `p` relatif aux bandes (moyenne/σ population). PURE. */
+export function zPoint(p: number, bandes: { moyenne: number; sigma: number }): number {
+  return (p - bandes.moyenne) / bandes.sigma;
+}
+
+/**
  * Stats dérivées de la série (déjà triée chrono — précondition garantie par
  * `serieCbprem`) : courant (dernier point), moyenne des 7 jours relatifs au
  * DERNIER point (pas « maintenant »), z-score du courant vs TOUTE la série
@@ -72,16 +96,9 @@ export function statsPremium(
   }
   const moyenne7j = n7 > 0 ? somme7 / n7 : null;
 
-  let z30j: number | null = null;
-  if (serie.length >= MIN_POINTS_Z) {
-    let somme = 0;
-    for (const p of serie) somme += p.premiumPct;
-    const moyenne = somme / serie.length;
-    let variance = 0;
-    for (const p of serie) variance += (p.premiumPct - moyenne) ** 2;
-    const ecartType = Math.sqrt(variance / serie.length);
-    if (ecartType !== 0) z30j = (courant - moyenne) / ecartType;
-  }
+  // z30j réutilise les mêmes bandes que le tracé (mêmes conditions : ≥30 pts, σ≠0).
+  const bandes = bandesPremium(serie);
+  const z30j = bandes === null ? null : zPoint(courant, bandes);
 
   return { courant, moyenne7j, z30j };
 }

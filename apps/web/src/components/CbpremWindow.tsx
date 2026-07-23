@@ -12,10 +12,10 @@
  * trait du curseur ne coïnciderait pas avec le point tracé. L'enregistrement (registry /
  * commande palette) est hors périmètre ici — c'est la Task 4.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { cbpremStore } from "../store/cbprem";
-import type { PointPremium } from "../data/cbprem";
+import { bandesPremium, zPoint, type PointPremium } from "../data/cbprem";
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { formatDateCourte, formatDateHeure, formatDec, formatPct } from "../lib/format";
 import {
@@ -40,6 +40,40 @@ const PAD_T = 14;
 const PAD_B = 20;
 /** Nombre cible d'étiquettes X (sous-échantillonnage temporel). */
 const CIBLE_LABELS_X = 6;
+
+/** Bandes statistiques (moyenne / σ population) — cf. data/cbprem.ts. */
+type Bandes = { moyenne: number; sigma: number };
+
+/** Pas « ronds » autorisés en % pour la grille Y, du plus FIN au plus GROSSIER. */
+const PAS_PCT = [0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5] as const;
+
+/**
+ * Ticks ronds (multiples d'un `PAS_PCT`) contenus dans `[min, max]`, visant ~`n`
+ * lignes. Logique DUPLIQUÉE localement de la grille NETLIQ (décision spec : pas de
+ * module commun pour deux fenêtres). À nombre de multiples égal, le pas plus
+ * GROSSIER l'emporte (grille plus aérée). `[]` si bornes invalides ou `n ≤ 0`.
+ */
+function ticksPct(min: number, max: number, n: number): number[] {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min || n <= 0) return [];
+
+  let meilleurPas: number = PAS_PCT[0];
+  let meilleurEcart = Infinity;
+  for (const pas of PAS_PCT) {
+    const count = Math.floor(max / pas) - Math.ceil(min / pas) + 1;
+    if (count <= 0) continue;
+    const ecart = Math.abs(count - n);
+    if (ecart <= meilleurEcart) {
+      meilleurEcart = ecart;
+      meilleurPas = pas;
+    }
+  }
+
+  const ticks: number[] = [];
+  for (let v = Math.ceil(min / meilleurPas) * meilleurPas; v <= max; v += meilleurPas) {
+    ticks.push(v);
+  }
+  return ticks;
+}
 
 interface Geometrie {
   left: number;
@@ -80,9 +114,11 @@ interface DomaineY {
 /**
  * Domaine vertical : bornes des premiums ÉLARGIES pour toujours contenir 0 (sinon la
  * ligne de zéro et les remplissages up/dessus / down/dessous seraient incohérents quand
- * toute la série partage un signe), puis une marge de respiration.
+ * toute la série partage un signe) PUIS, si des bandes sont fournies, pour contenir
+ * moyenne ± 2σ (sinon les bandes sortiraient du cadre et seraient invisibles), enfin
+ * une marge de respiration.
  */
-function domaineY(serie: readonly PointPremium[]): DomaineY {
+function domaineY(serie: readonly PointPremium[], bandes: Bandes | null): DomaineY {
   let vMin = Infinity;
   let vMax = -Infinity;
   for (const p of serie) {
@@ -91,6 +127,10 @@ function domaineY(serie: readonly PointPremium[]): DomaineY {
   }
   vMin = Math.min(vMin, 0);
   vMax = Math.max(vMax, 0);
+  if (bandes !== null) {
+    vMin = Math.min(vMin, bandes.moyenne - 2 * bandes.sigma);
+    vMax = Math.max(vMax, bandes.moyenne + 2 * bandes.sigma);
+  }
   const marge = (vMax - vMin) * 0.08 || 1;
   return { vMin: vMin - marge, vMax: vMax + marge };
 }
@@ -102,7 +142,12 @@ function yAt(g: Geometrie, v: number, dom: DomaineY): number {
 
 // ─────────────────────────── Dessin ───────────────────────────
 
-function dessiner(canvas: HTMLCanvasElement, serie: readonly PointPremium[]): void {
+function dessiner(
+  canvas: HTMLCanvasElement,
+  serie: readonly PointPremium[],
+  bandes: Bandes | null,
+  moyenne7j: number | null,
+): void {
   const ctx = canvas.getContext("2d");
   if (ctx === null) return;
   const dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -120,9 +165,10 @@ function dessiner(canvas: HTMLCanvasElement, serie: readonly PointPremium[]): vo
   // Tokens lus au dessin (suit le thème courant).
   const dim = lireTokenCanvas("--text-dim", "#94a3b8");
   const accent = lireTokenCanvas("--accent", "#38bdf8");
+  const grille = lireTokenCanvas("--grid", "#1f2937");
 
   const g = geometrie(w, h);
-  const dom = domaineY(serie);
+  const dom = domaineY(serie, bandes);
   const yZero = yAt(g, 0, dom);
 
   ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
@@ -155,18 +201,72 @@ function dessiner(canvas: HTMLCanvasElement, serie: readonly PointPremium[]): vo
   ctx.fill();
   ctx.restore();
 
-  // Ligne de zéro : pointillé discret.
+  // Bandes ±2σ : remplissage très faible entre elles (repère de dispersion en fond).
+  if (bandes !== null) {
+    const yHaut = yAt(g, bandes.moyenne + 2 * bandes.sigma, dom);
+    const yBas = yAt(g, bandes.moyenne - 2 * bandes.sigma, dom);
+    ctx.fillStyle = rgbaTokenCanvas("--text-dim", 0.04, "#94a3b8");
+    ctx.fillRect(g.left, yHaut, g.plotW, yBas - yHaut);
+  }
+
+  // Grille horizontale : 3-4 lignes aux ticks ronds % + étiquettes Y à gauche.
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (const t of ticksPct(dom.vMin, dom.vMax, 4)) {
+    const y = yAt(g, t, dom);
+    ctx.strokeStyle = grille;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(g.left, y);
+    ctx.lineTo(g.right, y);
+    ctx.stroke();
+    ctx.fillStyle = dim;
+    // Tolérance : `ticksPct` accumule par flottant, le tick zéro peut valoir ~1e-17
+    // (sinon affiché « -0.00% » — signe parasite sur l'axe).
+    ctx.fillText(Math.abs(t) < 1e-9 ? "0.00%" : formatPct(t, 2), g.left - 4, y);
+  }
+
+  // Lignes ±2σ : pointillé discret token dim (bornes de la bande de dispersion).
+  if (bandes !== null) {
+    ctx.save();
+    ctx.strokeStyle = dim;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    for (const v of [bandes.moyenne + 2 * bandes.sigma, bandes.moyenne - 2 * bandes.sigma]) {
+      const y = yAt(g, v, dom);
+      ctx.beginPath();
+      ctx.moveTo(g.left, y);
+      ctx.lineTo(g.right, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Ligne « moyenne 7 j » : pointillé token accent (tendance courte).
+  if (moyenne7j !== null && Number.isFinite(moyenne7j)) {
+    const yM = yAt(g, moyenne7j, dom);
+    ctx.save();
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([2, 3]);
+    ctx.beginPath();
+    ctx.moveTo(g.left, yM);
+    ctx.lineTo(g.right, yM);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Ligne de zéro : trait PLEIN — référence principale, distincte des bandes pointillées.
   ctx.save();
   ctx.strokeStyle = dim;
   ctx.lineWidth = 1;
-  ctx.setLineDash([4, 4]);
   ctx.beginPath();
   ctx.moveTo(g.left, yZero);
   ctx.lineTo(g.right, yZero);
   ctx.stroke();
   ctx.restore();
 
-  // Courbe du premium.
+  // Courbe du premium — dessinée EN DERNIER, au-dessus des bandes et de la grille.
   ctx.beginPath();
   serie.forEach((p, i) => {
     const x = xAt(g, i, n);
@@ -178,15 +278,7 @@ function dessiner(canvas: HTMLCanvasElement, serie: readonly PointPremium[]): vo
   ctx.lineWidth = 1.4;
   ctx.stroke();
 
-  // Étiquettes Y : max (haut), 0, min (bas).
-  ctx.fillStyle = dim;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.fillText(formatPct(dom.vMax, 2), 4, g.top + 4);
-  ctx.fillText(formatPct(0, 2, { signe: false }), 4, yZero);
-  ctx.fillText(formatPct(dom.vMin, 2), 4, g.bottom - 4);
-
-  // Étiquettes X : dates sous-échantillonnées (~CIBLE_LABELS_X points régulièrement espacés).
+  // Étiquettes X : dates abrégées fr « JJ/MM » sous-échantillonnées (~CIBLE_LABELS_X).
   ctx.fillStyle = dim;
   ctx.textBaseline = "top";
   const pas = Math.max(1, Math.ceil(n / CIBLE_LABELS_X));
@@ -211,6 +303,8 @@ interface Survol {
   xPix: number;
   largeur: number;
   point: PointPremium;
+  /** z-score du point survolé vs les bandes (null si moins de 30 pts ou σ nul). */
+  z: number | null;
 }
 
 export function CbpremWindow() {
@@ -223,6 +317,11 @@ export function CbpremWindow() {
 
   const [survol, setSurvol] = useState<Survol | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Bandes moyenne/σ (population, toute la série) : partagées entre le tracé des
+  // bandes ±2σ et le z-score du survol. Mémoïsées sur la série (même source que z30j).
+  const bandes = useMemo(() => bandesPremium(serie), [serie]);
+  const moyenne7j = stats?.moyenne7j ?? null;
 
   // Run auto au PREMIER open (FloatingWindow ne monte l'enfant que si ouvert). La garde
   // `majTs === null` (aucun run terminé) + `!enCours` + pas d'erreur évite un double run —
@@ -238,12 +337,12 @@ export function CbpremWindow() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (canvas === null || serie.length === 0) return;
-    const redraw = (): void => dessiner(canvas, serie);
+    const redraw = (): void => dessiner(canvas, serie, bandes, moyenne7j);
     redraw();
     const ro = new ResizeObserver(redraw);
     ro.observe(canvas);
     return () => ro.disconnect();
-  }, [serie]);
+  }, [serie, bandes, moyenne7j]);
 
   // Survol : indice le plus proche → trait + infobulle (mêmes paddings que le dessin).
   const onMove = (e: React.MouseEvent<HTMLCanvasElement>): void => {
@@ -261,7 +360,8 @@ export function CbpremWindow() {
       setSurvol(null);
       return;
     }
-    setSurvol({ xPix: xAt(g, idx, serie.length), largeur: rect.width, point });
+    const z = bandes === null ? null : zPoint(point.premiumPct, bandes);
+    setSurvol({ xPix: xAt(g, idx, serie.length), largeur: rect.width, point, z });
   };
 
   const onLeave = (): void => setSurvol(null);
@@ -350,6 +450,19 @@ export function CbpremWindow() {
                       survol.point.premiumPct >= 0 ? "#2dc08e" : "#f92855",
                     ),
                   },
+                  // z du point : teinté down si extrême (|z| ≥ 2), sinon discret.
+                  ...(survol.z !== null
+                    ? [
+                        {
+                          label: "z",
+                          valeur: formatDec(survol.z, 2),
+                          couleur: lireTokenCanvas(
+                            Math.abs(survol.z) >= 2 ? "--down" : "--text-dim",
+                            Math.abs(survol.z) >= 2 ? "#f92855" : "#94a3b8",
+                          ),
+                        },
+                      ]
+                    : []),
                 ]}
               />
             )}

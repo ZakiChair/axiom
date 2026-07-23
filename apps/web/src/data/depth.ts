@@ -252,15 +252,16 @@ export async function recupererSnapshotDepth(symbol: string): Promise<OrderBookS
 }
 
 /**
- * Souscrit au carnet d'ordres live d'un symbole (Binance spot). `onLivre` est appelé
+ * Ouvre UNE connexion carnet live pour un symbole (Binance spot). `onLivre` est appelé
  * à chaque mise à jour appliquée (~10/s) avec le carnet À JOUR (même instance mutée) —
  * l'appelant stocke la référence et repeint en rAF throttlé (aucun re-render React).
  *
  * La procédure officielle est (re)démarrée à CHAQUE (ré)ouverture du WS (onOpen) et à
  * chaque trou détecté en live. Un compteur de génération invalide les snapshots périmés
- * par une reconnexion/resync survenue entre-temps. UNE connexion WS au total.
+ * par une reconnexion/resync survenue entre-temps. UNE connexion WS par appel — la
+ * mutualisation par symbole est assurée en amont par `creerMultiplexeurDepth`.
  */
-export function souscrireDepth(symbol: string, onLivre: (livre: OrderBook) => void): Unsubscribe {
+function ouvrirConnexionDepth(symbol: string, onLivre: (livre: OrderBook) => void): Unsubscribe {
   const url = `${WS_DEPTH_BASE}/${symbol.toLowerCase()}@depth@100ms`;
   let generation = 0;
   let phase: "sync" | "live" = "sync";
@@ -361,4 +362,77 @@ export function souscrireDepth(symbol: string, onLivre: (livre: OrderBook) => vo
     clearRetry();
     unsub();
   };
+}
+
+// ─────────────────────────── Mutualisation de la connexion (ref-counting, pur) ───────────────────────────
+
+/** Ouvreur d'une connexion depth réelle (injecté → testable sans WS). */
+export type OuvreurDepth = (symbol: string, diffuser: (livre: OrderBook) => void) => Unsubscribe;
+
+/** Façade du multiplexeur : `souscrire` partage la connexion par symbole (signature de `souscrireDepth`). */
+export interface MultiplexeurDepth {
+  souscrire: (symbol: string, onLivre: (livre: OrderBook) => void) => Unsubscribe;
+}
+
+/**
+ * Multiplexeur de connexions depth (ref-counting par symbole). POURQUOI : le budget projet
+ * est « UNE connexion depth » ; plusieurs consommateurs (DOM, heatmap BOOK…) du MÊME symbole
+ * doivent donc partager la même connexion WS. Le 1er abonné d'un symbole déclenche `ouvrir` ;
+ * les suivants s'ajoutent au fan-out sans rouvrir ; la connexion se ferme au DERNIER
+ * désabonnement. Le `diffuser` passé à `ouvrir` relaie chaque carnet à jour vers tous les
+ * abonnés courants (copie du Set : un désabonnement pendant la diffusion est toléré).
+ *
+ * Fonction USINE PURE (aucun WS) : en injectant un `ouvrir` factice, tout le comptage
+ * (ouvrir/fermer, fan-out, idempotence) se teste en Node. En production, `ouvrir` est
+ * `ouvrirConnexionDepth` (la vraie connexion). PURE.
+ */
+export function creerMultiplexeurDepth(ouvrir: OuvreurDepth): MultiplexeurDepth {
+  interface Entree {
+    abonnes: Set<(livre: OrderBook) => void>;
+    fermer: Unsubscribe;
+  }
+  const parSymbole = new Map<string, Entree>();
+
+  const souscrire = (symbol: string, onLivre: (livre: OrderBook) => void): Unsubscribe => {
+    let entree = parSymbole.get(symbol);
+    if (entree === undefined) {
+      const abonnes = new Set<(livre: OrderBook) => void>();
+      // Le diffuseur capture ce Set d'abonnés ; itération sur une COPIE pour tolérer un
+      // désabonnement déclenché depuis un callback pendant la diffusion.
+      const fermer = ouvrir(symbol, (livre) => {
+        for (const cb of [...abonnes]) cb(livre);
+      });
+      entree = { abonnes, fermer };
+      parSymbole.set(symbol, entree);
+    }
+    entree.abonnes.add(onLivre);
+
+    let annule = false;
+    return () => {
+      if (annule) return; // idempotent : un double appel ne décrémente qu'une fois
+      annule = true;
+      const e = parSymbole.get(symbol);
+      if (e === undefined) return;
+      e.abonnes.delete(onLivre);
+      if (e.abonnes.size === 0) {
+        parSymbole.delete(symbol);
+        e.fermer(); // dernier abonné parti → on ferme la connexion
+      }
+    };
+  };
+
+  return { souscrire };
+}
+
+/** Multiplexeur module (singleton) adossé à la vraie connexion Binance. */
+const multiplexeurDepth = creerMultiplexeurDepth(ouvrirConnexionDepth);
+
+/**
+ * Souscrit au carnet d'ordres live d'un symbole (Binance spot). N abonnés au même symbole
+ * PARTAGENT une connexion (cf. `creerMultiplexeurDepth`), fermée au dernier désabonnement.
+ * Signature INCHANGÉE : `onLivre` reçoit le carnet à jour (même instance mutée), l'appelant
+ * repeint en rAF throttlé.
+ */
+export function souscrireDepth(symbol: string, onLivre: (livre: OrderBook) => void): Unsubscribe {
+  return multiplexeurDepth.souscrire(symbol, onLivre);
 }

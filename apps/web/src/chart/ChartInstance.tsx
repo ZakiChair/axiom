@@ -53,6 +53,7 @@ import { CompareController } from "./compare";
 import { VolumeProfileController } from "./volumeProfile";
 import { LiquidationHeatController } from "./liquidationHeat";
 import { liqMarksStore } from "./liquidationMarkers";
+import { DepthHeatController, depthHeatStore } from "./depthHeat";
 import { RevenueController } from "./revenue";
 import { MacroController } from "./macro";
 import { DerivativesChartController } from "./derivatives";
@@ -288,6 +289,7 @@ export function ChartInstance({
   const canvasRef = useRef<HTMLCanvasElement>(null); // footprint (orderflow)
   const vpCanvasRef = useRef<HTMLCanvasElement>(null); // volume profile (maître)
   const liqCanvasRef = useRef<HTMLCanvasElement>(null); // heatmap liquidations (maître)
+  const depthHeatCanvasRef = useRef<HTMLCanvasElement>(null); // heatmap carnet BOOK (maître)
   const xhairCanvasRef = useRef<HTMLCanvasElement>(null); // crosshair synchronisé inter-slots
 
   // Objets à vie longue (instance KLineChart + indicateurs + en-têtes + throttle des ticks),
@@ -489,7 +491,8 @@ export function ChartInstance({
     const canvas = canvasRef.current;
     const vpCanvas = vpCanvasRef.current;
     const liqCanvas = liqCanvasRef.current;
-    if (!container || !canvas || !vpCanvas || !liqCanvas) return;
+    const depthHeatCanvas = depthHeatCanvasRef.current;
+    if (!container || !canvas || !vpCanvas || !liqCanvas || !depthHeatCanvas) return;
 
     // Capture immuable de l'identité + révision de requête. Le store vide son buffer
     // AVANT tout appel réseau ; le chart impératif est vidé dans le même cycle. Une réponse,
@@ -552,12 +555,14 @@ export function ChartInstance({
     let compare: CompareController | null = null;
     let volumeProfile: VolumeProfileController | null = null;
     let liqHeat: LiquidationHeatController | null = null;
+    let depthHeat: DepthHeatController | null = null;
     let revenue: RevenueController | null = null;
     let macro: MacroController | null = null;
     let derivativesChart: DerivativesChartController | null = null;
     let unsubscribeCompare: (() => void) | null = null;
     let unsubscribeVolumeProfile: (() => void) | null = null;
     let unsubscribeLiqHeat: (() => void) | null = null;
+    let unsubscribeDepthHeat: (() => void) | null = null;
     let unsubscribeRevenue: (() => void) | null = null;
     let unsubscribeMacro: (() => void) | null = null;
     let unsubscribeMacroHistory: (() => void) | null = null;
@@ -576,6 +581,12 @@ export function ChartInstance({
       liqHeat = new LiquidationHeatController(chart, container, liqCanvas);
       liqHeat.setEnabled(liqMarksStore.getState().actif);
       unsubscribeLiqHeat = liqMarksStore.subscribe((state) => liqHeat?.setEnabled(state.actif));
+
+      // Heatmap de liquidité du carnet (BOOK) : lit le buffer de colonnes échantillonnées
+      // (demarrerDepthHeat, greffé ailleurs) ; la bascule `depthHeatStore.actif` pilote l'affichage.
+      depthHeat = new DepthHeatController(chart, container, depthHeatCanvas);
+      depthHeat.setEnabled(depthHeatStore.getState().actif);
+      unsubscribeDepthHeat = depthHeatStore.subscribe((state) => depthHeat?.setEnabled(state.actif));
 
       revenue = new RevenueController(chart, symbol);
       revenue.setEnabled(revenueStore.getState().enabled);
@@ -794,6 +805,7 @@ export function ChartInstance({
       unsubscribeCompare?.();
       unsubscribeVolumeProfile?.();
       unsubscribeLiqHeat?.();
+      unsubscribeDepthHeat?.();
       unsubscribeRevenue?.();
       unsubscribeMacro?.();
       unsubscribeMacroHistory?.();
@@ -802,6 +814,7 @@ export function ChartInstance({
       macro?.dispose();
       revenue?.dispose();
       liqHeat?.dispose();
+      depthHeat?.dispose();
       volumeProfile?.dispose();
       compare?.dispose();
       orderflow?.dispose();
@@ -867,6 +880,7 @@ export function ChartInstance({
       )}
       <canvas ref={vpCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={liqCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
+      <canvas ref={depthHeatCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={xhairCanvasRef} className="pointer-events-none absolute inset-0" />
       <ChartDataStatusOverlay

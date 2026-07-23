@@ -588,7 +588,10 @@ export const BUILTIN_PRESETS: ScreenerPreset[] = [
     tf: "4h",
     baseConditions: [
       { kind: "base", field: "volumeUsd24h", op: ">", value: 20_000_000 },
-      { kind: "base", field: "fundingPct", op: ">", value: 0.03 },
+      // Calibré au gate v1.5 : 0.03 %/8 h ne laissait que ~6 symboles illiquides sur 849
+      // (marché calme) → 0 candidat systématique. 0.01 = au-dessus du funding par défaut
+      // Binance, même seuil que le radar SQZ et « Crowded long ».
+      { kind: "base", field: "fundingPct", op: ">", value: 0.01 },
       { kind: "base", field: "oiChangePct", op: ">", value: 2 },
       { kind: "base", field: "longShortRatio", op: ">", value: 1.5 },
     ],
@@ -616,7 +619,12 @@ export const BUILTIN_PRESETS: ScreenerPreset[] = [
     name: "◆ Compression (breakout)",
     tf: "4h",
     baseConditions: [{ kind: "base", field: "volumeUsd24h", op: ">", value: 5_000_000 }],
-    indicatorConditions: [{ kind: "indicator", fieldId: "bbw", param: 20, op: "<", value: 3 }],
+    // Calibré au gate v1.5 : plancher BBW > 0.3 % — sans lui les stablecoins (peg ≈ 0.04 %)
+    // trustent le classement alors qu'ils ne casseront jamais.
+    indicatorConditions: [
+      { kind: "indicator", fieldId: "bbw", param: 20, op: "<", value: 3 },
+      { kind: "indicator", fieldId: "bbw", param: 20, op: ">", value: 0.3 },
+    ],
     builtin: true,
     description: "volatilité comprimée, cassure imminente, direction non préjugée.",
   },

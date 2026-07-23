@@ -71,6 +71,7 @@ export const WINDOW_REGISTRY = [
   { id: "squeeze", title: "Radar squeeze", mnemonic: "SQZ", defaultWidth: 640, defaultHeight: 560, nouveau: true },
   { id: "cbprem", title: "Coinbase premium", mnemonic: "CBPREM", defaultWidth: 640, defaultHeight: 560, nouveau: true },
   { id: "netliq", title: "Liquidité nette Fed", mnemonic: "NETLIQ", defaultWidth: 640, defaultHeight: 560, nouveau: true },
+  { id: "data", title: "Sources de données", mnemonic: "DATA", defaultWidth: 640, defaultHeight: 560, nouveau: true },
 ] as const satisfies readonly DefinitionFenetre[];
 
 /** Union des ids de fenêtre — DÉRIVÉE du registre (source unique). Sert à typer la

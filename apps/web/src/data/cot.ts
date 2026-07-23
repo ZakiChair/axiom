@@ -128,6 +128,88 @@ export const CATEGORIES_COT: readonly { id: CotCategorie; libelle: string }[] = 
   { id: "crypto", libelle: "Crypto (CME)" },
 ] as const;
 
+// ─────────────────────────── Routage des datasets de positionnement ───────────────────────────
+
+/**
+ * Catégorie de positionnement affichée dans la fenêtre COT :
+ *  - `legacy` : agrégat historique « non-commercial » (dataset Legacy, toutes familles) ;
+ *  - `fonds` : spéculateurs fins (Managed Money en matières premières / Leveraged Funds en
+ *    financiers) — la « net1 » du dataset ciblé ;
+ *  - `commerciaux` : contrepartie (Producer/Merchant en matières premières / Asset Manager en
+ *    financiers) — la « net2 » du dataset ciblé.
+ * La sélection net1/net2 par catégorie est faite en Task 2 ; ici on ne route que le DATASET.
+ */
+export type CategoriePositionnement = "legacy" | "fonds" | "commerciaux";
+
+/** Dataset Socrata CFTC (« futures only ») source des positions. */
+export type DatasetCot = "legacy" | "disaggregated" | "tff";
+
+/**
+ * Route (famille d'instrument, catégorie de positionnement) → dataset source.
+ *  - catégorie `legacy` → `legacy` pour TOUTES les familles ;
+ *  - `fonds`/`commerciaux` → matières premières (metal, energie) → `disaggregated` ;
+ *    financiers (fx, indice, crypto) → `tff`.
+ * Ne renvoie JAMAIS `null` : le routage est exhaustif sur les 5 familles × 3 catégories. La
+ * non-couverture réelle (ex. un instrument absent de son dataset) se constate AU FETCH, pas ici.
+ * Le type de retour `| null` fige juste le contrat pour les consommateurs (Tasks 2-3). Fonction PURE.
+ */
+export function datasetPour(
+  famille: CotCategorie,
+  categorie: CategoriePositionnement,
+): DatasetCot | null {
+  if (categorie === "legacy") return "legacy";
+  // fonds | commerciaux : routage par famille d'instrument.
+  switch (famille) {
+    case "metal":
+    case "energie":
+      return "disaggregated";
+    case "fx":
+    case "indice":
+    case "crypto":
+      return "tff";
+  }
+}
+
+/**
+ * Table des datasets Socrata (`publicreporting.cftc.gov`, variantes « Futures Only ») avec leurs
+ * paires de champs (long, short) par catégorie de positionnement. `net1` = catégorie « fonds »,
+ * `net2` = catégorie « commerciaux ». Le net d'une catégorie = long − short de sa paire (Task 2).
+ *
+ * ⚠️ ids ET noms de champs VÉRIFIÉS EN DIRECT le 2026-07-23 (rapport
+ * `.superpowers/sdd/v14-cotdis-task-1-report.md`, section PREUVES). NE PAS deviner : chaque
+ * chaîne provient d'une réponse Socrata réelle. Noter l'asymétrie des suffixes `_all` — présents
+ * pour `m_money` et les champs legacy, ABSENTS pour `prod_merc`, `lev_money` et `asset_mgr`.
+ */
+export const DATASETS_COT: Record<
+  DatasetCot,
+  { id: string; champs: { net1: [string, string]; net2: [string, string] } }
+> = {
+  // Legacy - Futures Only : net1 = non-commercial (spéculatif), net2 = commercial (hedgers).
+  legacy: {
+    id: "6dca-aqww",
+    champs: {
+      net1: ["noncomm_positions_long_all", "noncomm_positions_short_all"],
+      net2: ["comm_positions_long_all", "comm_positions_short_all"],
+    },
+  },
+  // Disaggregated - Futures Only : net1 = Managed Money, net2 = Producer/Merchant.
+  disaggregated: {
+    id: "72hh-3qpy",
+    champs: {
+      net1: ["m_money_positions_long_all", "m_money_positions_short_all"],
+      net2: ["prod_merc_positions_long", "prod_merc_positions_short"],
+    },
+  },
+  // TFF - Futures Only : net1 = Leveraged Funds, net2 = Asset Manager.
+  tff: {
+    id: "gpe5-46if",
+    champs: {
+      net1: ["lev_money_positions_long", "lev_money_positions_short"],
+      net2: ["asset_mgr_positions_long", "asset_mgr_positions_short"],
+    },
+  },
+};
+
 // ─────────────────────────── Fonctions PURES : parsing & synthèse ───────────────────────────
 
 /**

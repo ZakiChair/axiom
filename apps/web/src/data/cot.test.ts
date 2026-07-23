@@ -1,15 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CATEGORIES_COT,
+  DATASETS_COT,
   WATCHLIST_COT,
   chargerRapportCot,
   construireRequete,
   cotIndex,
+  datasetPour,
   deltaSemaines,
   netSurOi,
   nombreCot,
   pointCot,
   resumerCot,
+  type CategoriePositionnement,
+  type CotCategorie,
+  type DatasetCot,
   type InstrumentCot,
   type PointCot,
 } from "./cot";
@@ -374,6 +379,105 @@ describe("construireRequete", () => {
     expect(params.get("$select")).toBe(
       "market_and_exchange_names,report_date_as_yyyy_mm_dd,noncomm_positions_long_all,noncomm_positions_short_all,open_interest_all",
     );
+  });
+});
+
+describe("datasetPour (routage famille × catégorie → dataset)", () => {
+  const FAMILLES: CotCategorie[] = ["fx", "indice", "metal", "energie", "crypto"];
+
+  // Table de vérité EXHAUSTIVE : 3 catégories × 5 familles = 15 combinaisons.
+  // - catégorie "legacy" → "legacy" pour TOUTES les familles ;
+  // - "fonds"/"commerciaux" → metal|energie → "disaggregated" ; fx|indice|crypto → "tff".
+  const attendu: Record<CategoriePositionnement, Record<CotCategorie, DatasetCot>> = {
+    legacy: { fx: "legacy", indice: "legacy", metal: "legacy", energie: "legacy", crypto: "legacy" },
+    fonds: { fx: "tff", indice: "tff", metal: "disaggregated", energie: "disaggregated", crypto: "tff" },
+    commerciaux: {
+      fx: "tff",
+      indice: "tff",
+      metal: "disaggregated",
+      energie: "disaggregated",
+      crypto: "tff",
+    },
+  };
+
+  for (const categorie of ["legacy", "fonds", "commerciaux"] as CategoriePositionnement[]) {
+    for (const famille of FAMILLES) {
+      it(`${categorie} × ${famille} → ${attendu[categorie][famille]}`, () => {
+        expect(datasetPour(famille, categorie)).toBe(attendu[categorie][famille]);
+      });
+    }
+  }
+
+  it("ne renvoie jamais null (routage exhaustif sur les 15 combinaisons)", () => {
+    for (const categorie of ["legacy", "fonds", "commerciaux"] as CategoriePositionnement[]) {
+      for (const famille of FAMILLES) {
+        expect(datasetPour(famille, categorie)).not.toBeNull();
+      }
+    }
+  });
+});
+
+describe("DATASETS_COT (ids Socrata vérifiés live + paires de champs)", () => {
+  const CLES: DatasetCot[] = ["legacy", "disaggregated", "tff"];
+
+  it("expose les trois datasets avec un id Socrata non vide", () => {
+    for (const cle of CLES) {
+      expect(DATASETS_COT[cle].id).toMatch(/^[a-z0-9]{4}-[a-z0-9]{4}$/);
+    }
+  });
+
+  it("ids vérifiés live (legacy=6dca-aqww, disaggregated=72hh-3qpy, tff=gpe5-46if)", () => {
+    expect(DATASETS_COT.legacy.id).toBe("6dca-aqww");
+    expect(DATASETS_COT.disaggregated.id).toBe("72hh-3qpy");
+    expect(DATASETS_COT.tff.id).toBe("gpe5-46if");
+  });
+
+  it("chaque paire (long, short) a deux champs distincts et non vides", () => {
+    for (const cle of CLES) {
+      for (const paire of [DATASETS_COT[cle].champs.net1, DATASETS_COT[cle].champs.net2]) {
+        const [long, short] = paire;
+        expect(long.length).toBeGreaterThan(0);
+        expect(short.length).toBeGreaterThan(0);
+        expect(long).not.toBe(short);
+      }
+    }
+  });
+
+  it("net1 et net2 désignent des catégories DISTINCTES (jamais la même paire)", () => {
+    for (const cle of CLES) {
+      const { net1, net2 } = DATASETS_COT[cle].champs;
+      // Aucun des 4 champs ne se répète : les deux catégories sont bien indépendantes.
+      const tous = [...net1, ...net2];
+      expect(new Set(tous).size).toBe(4);
+    }
+  });
+
+  it("champs de position exacts (transcrits des réponses live)", () => {
+    expect(DATASETS_COT.legacy.champs.net1).toEqual([
+      "noncomm_positions_long_all",
+      "noncomm_positions_short_all",
+    ]);
+    expect(DATASETS_COT.legacy.champs.net2).toEqual([
+      "comm_positions_long_all",
+      "comm_positions_short_all",
+    ]);
+    // ⚠️ asymétrie live : m_money a le suffixe _all, prod_merc ne l'a PAS.
+    expect(DATASETS_COT.disaggregated.champs.net1).toEqual([
+      "m_money_positions_long_all",
+      "m_money_positions_short_all",
+    ]);
+    expect(DATASETS_COT.disaggregated.champs.net2).toEqual([
+      "prod_merc_positions_long",
+      "prod_merc_positions_short",
+    ]);
+    expect(DATASETS_COT.tff.champs.net1).toEqual([
+      "lev_money_positions_long",
+      "lev_money_positions_short",
+    ]);
+    expect(DATASETS_COT.tff.champs.net2).toEqual([
+      "asset_mgr_positions_long",
+      "asset_mgr_positions_short",
+    ]);
   });
 });
 

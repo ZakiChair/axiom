@@ -970,14 +970,26 @@ export function OptionsWindow() {
     );
   }, [vue, classe, pointsEcheance, underlying, cboeChaine, cboeExpiry]);
 
+  // Spot valable pour TOUTES les échéances (le sous-jacent est indépendant de l'échéance) : pris
+  // sur la chaîne complète, pas sur `pointsEcheance` (limité à l'échéance sélectionnée). Remonté
+  // ici (revue finale) car gexDexTout, qui agrège aussi TOUTE la chaîne, doit s'ancrer dessus —
+  // pas sur `underlying`, qui ne vaut que pour l'échéance sélectionnée et peut être NaN tant
+  // qu'elle n'est pas chargée, faisant disparaître à tort le net/gamma flip toutes-éch.
+  // NB revue : quasi-duplication avec `underlying` (spot mono-échéance, cf. plus haut) — à
+  // envisager de fusionner si un troisième usage apparaît.
+  const spotChaine = useMemo(() => {
+    const u = chain.map((p) => p.underlying).find((v) => Number.isFinite(v) && v > 0);
+    return u ?? NaN;
+  }, [chain]);
+
   // GEX/DEX crypto agrégé sur TOUTES les échéances (Task 4) — alimente le net et le gamma flip
   // « toutes éch. ». Crypto seulement : le CBOE reste mono-échéance (cf. NoteSource « Une seule
   // échéance »). Date.now() au bord comme gexDexPoints/grilleOi ; la logique pure reçoit nowMs.
   const gexDexTout = useMemo<GexDexPoint[]>(() => {
     if (vue !== "gexdex" || classe !== "crypto") return [];
-    if (!Number.isFinite(underlying)) return [];
-    return gexParStrikeToutesEcheances(chain, underlying, Date.now());
-  }, [vue, classe, chain, underlying]);
+    if (!Number.isFinite(spotChaine)) return [];
+    return gexParStrikeToutesEcheances(chain, spotChaine, Date.now());
+  }, [vue, classe, chain, spotChaine]);
 
   // Source des métriques nettes + du gamma flip : toutes échéances en crypto, mono-échéance en
   // actions (le CBOE n'a pas d'agrégation toutes échéances). L'histogramme et le pic |GEX| restent
@@ -1030,12 +1042,7 @@ export function OptionsWindow() {
 
   // ─────────────────────────── Heatmap OI strike × échéance ───────────────────────────
 
-  // Spot valable pour TOUTES les échéances (le sous-jacent est indépendant de l'échéance) : pris
-  // sur la chaîne complète, pas sur `pointsEcheance` (limité à l'échéance sélectionnée).
-  const spotChaine = useMemo(() => {
-    const u = chain.map((p) => p.underlying).find((v) => Number.isFinite(v) && v > 0);
-    return u ?? NaN;
-  }, [chain]);
+  // spotChaine défini plus haut (remonté au-dessus de gexDexTout, revue finale).
 
   // Flux du jour (métriques d'en-tête Smile, agrégées sur TOUTE la chaîne — lecture globale du
   // marché, indépendante de l'échéance sélectionnée). P/C (Vol) : ratio put/call sur le volume

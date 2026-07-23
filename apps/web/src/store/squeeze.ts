@@ -52,7 +52,9 @@ export const squeezeStore = createStore<SqueezeState>((set) => ({
 
   run: async () => {
     const runId = ++currentRunId;
-    set({ enCours: true, erreur: null });
+    // On ne remet PAS `erreur` à null ici : un éventuel bandeau reste visible pendant le
+    // retry et n'est effacé qu'en cas de succès (ci-dessous), donc pas de clignotement.
+    set({ enCours: true });
 
     // 1. Univers + funding (mêmes sources que le screener ; funding = marqueur perp).
     let tickers: ReturnType<typeof parseTicker24h>;
@@ -105,10 +107,12 @@ export const squeezeStore = createStore<SqueezeState>((set) => ({
     // Note honnête (même esprit qu'EQS) : les symboles dont le ΔOI a échoué n'ont pas
     // de point — on rapporte donc le ratio effectif, pas la taille de l'échantillon visé.
     const nbAvecOi = oiParSymbole.size;
+    // Succès : points/couverture mis à jour (jamais vidés par un échec) et `erreur` effacée.
     set({
       enCours: false,
       points,
       couverture: `ΔOI sur ${nbAvecOi}/${echantillon.length} symboles (top liquides ∪ watchlist)`,
+      erreur: null,
     });
   },
 }));

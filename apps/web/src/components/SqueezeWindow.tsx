@@ -231,7 +231,7 @@ export function SqueezeWindow() {
       />
 
       <div className="flex flex-1 flex-col overflow-hidden px-4 py-4">
-        {erreur !== null ? (
+        {erreur !== null && points.length === 0 ? (
           <ErreurBloc>{erreur}</ErreurBloc>
         ) : enCours && points.length === 0 ? (
           <Chargement libelle="Collecte funding / ΔOI…" />
@@ -239,6 +239,13 @@ export function SqueezeWindow() {
           <Vide>Aucun symbole exploitable (funding et ΔOI requis). Réessayez avec Rafraîchir.</Vide>
         ) : (
           <div className="relative min-h-0 flex-1">
+            {/* Refresh non destructif : un nuage valide n'est jamais remplacé par un bloc
+                d'erreur ; en cas d'échec du retry, seul un bandeau discret le signale. */}
+            {erreur !== null && (
+              <div className="pointer-events-none absolute inset-x-0 top-0 z-20 rounded border border-down/40 bg-surface/90 px-2 py-1 text-[10px] text-down">
+                {erreur}
+              </div>
+            )}
             <canvas
               ref={canvasRef}
               onMouseMove={onMove}

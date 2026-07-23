@@ -236,12 +236,13 @@ describe("grilleMosaique", () => {
 });
 
 describe("WINDOW_REGISTRY", () => {
-  it("contient exactement les 29 fenêtres attendues, sans doublon d'id ni de mnémonique", () => {
-    expect(WINDOW_REGISTRY).toHaveLength(29);
+  it("contient exactement les 30 fenêtres attendues, sans doublon d'id ni de mnémonique", () => {
+    expect(WINDOW_REGISTRY).toHaveLength(30);
     const ids = WINDOW_REGISTRY.map((w) => w.id);
     const mnemos = WINDOW_REGISTRY.map((w) => w.mnemonic);
-    expect(new Set(ids).size).toBe(29);
-    expect(new Set(mnemos).size).toBe(29);
+    expect(new Set(ids).size).toBe(30);
+    expect(new Set(mnemos).size).toBe(30);
+
     expect(ids).toContain("macroRates");
     expect(mnemos).toContain("RATE");
     expect(ids).toContain("cot");
@@ -268,6 +269,8 @@ describe("WINDOW_REGISTRY", () => {
     expect(mnemos).toContain("DATA");
     expect(ids).toContain("dist");
     expect(mnemos).toContain("DIST");
+    expect(ids).toContain("expy");
+    expect(mnemos).toContain("EXPY");
   });
 });
 
@@ -278,7 +281,7 @@ describe("menuWindows (menu Fonctions dérivé du registre)", () => {
     // Toutes les autres fenêtres du registre sont présentes, dans l'ordre.
     const attendues = WINDOW_REGISTRY.map((w) => w.id).filter((id) => id !== "derivatives");
     expect(ids).toEqual(attendues);
-    expect(ids).toHaveLength(28);
+    expect(ids).toHaveLength(29);
   });
 
   it("résout le libellé via menuLabel quand présent, sinon title", () => {

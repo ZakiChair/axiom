@@ -73,6 +73,7 @@ export const WINDOW_REGISTRY = [
   { id: "netliq", title: "Liquidité nette Fed", mnemonic: "NETLIQ", defaultWidth: 640, defaultHeight: 560, nouveau: true },
   { id: "data", title: "Sources de données", mnemonic: "DATA", defaultWidth: 640, defaultHeight: 560, nouveau: true },
   { id: "dist", title: "Distribution des rendements (VaR)", mnemonic: "DIST", defaultWidth: 560, defaultHeight: 480, nouveau: true },
+  { id: "expy", title: "Journal de trades", mnemonic: "EXPY", defaultWidth: 680, defaultHeight: 700, nouveau: true },
 ] as const satisfies readonly DefinitionFenetre[];
 
 /** Union des ids de fenêtre — DÉRIVÉE du registre (source unique). Sert à typer la

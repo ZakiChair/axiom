@@ -2,7 +2,7 @@
 
 Date : 2026-07-23 · Statut : périmètre validé par Zaki (AskUser — tout sélectionné + clé/.env et périodes NETLIQ commandés). Cinq branches indépendantes.
 
-## Faits vérifiés live (2026-07-23, clé `xuldL5mpoV`)
+## Faits vérifiés live (2026-07-23, clé `<clé — voir apps/web/.env>`)
 
 - Auth bitcoin-data.com : SEUL `Authorization: Bearer <clé>` est reconnu (réponse 429 `RATE_LIMIT_HOUR_EXCEEDED` = quota propre de la clé, ~10 req/h) ; les autres formats (`Authorization` nu — CE QUE LE CODE ACTUEL ENVOIE —, x-api-key, query) retombent sur la limite IP `RATE_LIMIT_DAY_EXCEEDED` 15/j. → le format actuel de `bgeometrics.ts` est INOPÉRANT, à corriger en `Bearer`.
 - Endpoints 200 vérifiés : `etf-flow-btc` → `[{d, unixTs: "…", etfFlow: "2738.489…"}]` (CHAÎNES, flux ETF spot BTC quotidien net) ; `hashrate` → `{d, unixTs, hashrate: 9.17e8}` ; `open-interest-futures` → `{d, unixTs, binance: "9045…", bybit: "…", okx: "…", …}` (OI $ par exchange, champs chaînes). 404 : difficulty, funding-rates, miner-revenue. La clé est dans `apps/web/.env` (`BGEOMETRICS_API_KEY`), `.env.example` documenté.

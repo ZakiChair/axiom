@@ -5,12 +5,13 @@
  * détecté, niveaux mal fusionnés) sans erreur de compilation. Valeurs justifiées en
  * commentaire d'après la procédure officielle Binance.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   agregerNiveaux,
   appliquerDiffLive,
   construireLivre,
   coudre,
+  creerMultiplexeurDepth,
   mediane,
   pasArrondi,
   profondeurCumulee,
@@ -18,6 +19,7 @@ import {
   type Niveau,
   type OrderBook,
   type OrderBookSnapshot,
+  type OuvreurDepth,
 } from "./depth";
 
 function snap(lastUpdateId: number, bids: Niveau[], asks: Niveau[]): OrderBookSnapshot {
@@ -178,6 +180,109 @@ describe("mediane", () => {
   });
   it("série vide → 0", () => {
     expect(mediane([])).toBe(0);
+  });
+});
+
+describe("creerMultiplexeurDepth", () => {
+  /** Carnet factice minimal (l'identité suffit : on teste le fan-out, pas le contenu). */
+  function livre(lastUpdateId: number): OrderBook {
+    return { lastUpdateId, bids: new Map(), asks: new Map() };
+  }
+
+  /**
+   * Ouvreur FACTICE : enregistre chaque ouverture (symbole + diffuseur + spy de fermeture),
+   * sans aucun WS — c'est ce qui rend le comptage testable en Node.
+   */
+  function faireOuvreur() {
+    const ouvertures: Array<{
+      symbol: string;
+      diffuser: (l: OrderBook) => void;
+      fermer: ReturnType<typeof vi.fn>;
+    }> = [];
+    const ouvrir: OuvreurDepth = (symbol, diffuser) => {
+      const fermer = vi.fn();
+      ouvertures.push({ symbol, diffuser, fermer });
+      return fermer;
+    };
+    return { ouvrir, ouvertures };
+  }
+
+  it("n'ouvre qu'UNE connexion pour N abonnés au même symbole", () => {
+    const { ouvrir, ouvertures } = faireOuvreur();
+    const mux = creerMultiplexeurDepth(ouvrir);
+    mux.souscrire("BTCUSDT", () => {});
+    mux.souscrire("BTCUSDT", () => {});
+    expect(ouvertures).toHaveLength(1); // 2e abonné → pas de nouvelle ouverture
+  });
+
+  it("garde la connexion vivante sur un désabonnement PARTIEL", () => {
+    const { ouvrir, ouvertures } = faireOuvreur();
+    const mux = creerMultiplexeurDepth(ouvrir);
+    const off1 = mux.souscrire("BTCUSDT", () => {});
+    mux.souscrire("BTCUSDT", () => {});
+    off1();
+    expect(ouvertures[0]?.fermer).not.toHaveBeenCalled(); // un abonné reste
+  });
+
+  it("ferme la connexion au DERNIER désabonnement", () => {
+    const { ouvrir, ouvertures } = faireOuvreur();
+    const mux = creerMultiplexeurDepth(ouvrir);
+    const off1 = mux.souscrire("BTCUSDT", () => {});
+    const off2 = mux.souscrire("BTCUSDT", () => {});
+    off1();
+    off2();
+    expect(ouvertures[0]?.fermer).toHaveBeenCalledTimes(1);
+  });
+
+  it("diffuse chaque mise à jour à TOUS les abonnés du symbole", () => {
+    const { ouvrir, ouvertures } = faireOuvreur();
+    const mux = creerMultiplexeurDepth(ouvrir);
+    const recu1: number[] = [];
+    const recu2: number[] = [];
+    mux.souscrire("BTCUSDT", (l) => recu1.push(l.lastUpdateId));
+    mux.souscrire("BTCUSDT", (l) => recu2.push(l.lastUpdateId));
+    ouvertures[0]?.diffuser(livre(7));
+    expect(recu1).toEqual([7]);
+    expect(recu2).toEqual([7]);
+  });
+
+  it("cesse de livrer à un abonné désabonné (les autres continuent)", () => {
+    const { ouvrir, ouvertures } = faireOuvreur();
+    const mux = creerMultiplexeurDepth(ouvrir);
+    const recu1: number[] = [];
+    const recu2: number[] = [];
+    const off1 = mux.souscrire("BTCUSDT", (l) => recu1.push(l.lastUpdateId));
+    mux.souscrire("BTCUSDT", (l) => recu2.push(l.lastUpdateId));
+    off1();
+    ouvertures[0]?.diffuser(livre(9));
+    expect(recu1).toEqual([]); // désabonné → plus rien
+    expect(recu2).toEqual([9]); // l'autre reçoit toujours
+  });
+
+  it("ouvre des connexions SÉPARÉES pour des symboles différents", () => {
+    const { ouvrir, ouvertures } = faireOuvreur();
+    const mux = creerMultiplexeurDepth(ouvrir);
+    mux.souscrire("BTCUSDT", () => {});
+    mux.souscrire("ETHUSDT", () => {});
+    expect(ouvertures.map((o) => o.symbol)).toEqual(["BTCUSDT", "ETHUSDT"]);
+  });
+
+  it("ré-ouvre après fermeture complète (nouvelle connexion)", () => {
+    const { ouvrir, ouvertures } = faireOuvreur();
+    const mux = creerMultiplexeurDepth(ouvrir);
+    const off = mux.souscrire("BTCUSDT", () => {});
+    off();
+    mux.souscrire("BTCUSDT", () => {});
+    expect(ouvertures).toHaveLength(2); // 1re fermée, 2de rouverte
+  });
+
+  it("est idempotent sur un double désabonnement (ne ferme qu'une fois)", () => {
+    const { ouvrir, ouvertures } = faireOuvreur();
+    const mux = creerMultiplexeurDepth(ouvrir);
+    const off = mux.souscrire("BTCUSDT", () => {});
+    off();
+    off(); // 2e appel : sans effet
+    expect(ouvertures[0]?.fermer).toHaveBeenCalledTimes(1);
   });
 });
 

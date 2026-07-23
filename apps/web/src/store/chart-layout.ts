@@ -17,7 +17,7 @@
  * `store/persist.ts` (hors périmètre). Pas de flux haute fréquence ici (BASSE fréq.).
  */
 import { createStore } from "zustand/vanilla";
-import type { ExchangeId, Timeframe } from "@axiom/types";
+import { EXCHANGE_IDS, type ExchangeId, type Timeframe } from "@axiom/types";
 import { supportedTimeframesFor } from "../data/adapters";
 import { normalizeMarketSymbol } from "./market";
 
@@ -92,17 +92,8 @@ interface Persisted {
 }
 
 const LAYOUT_MODES: readonly ChartLayoutMode[] = ["1", "2h", "2v", "2x2"];
-const RESTORABLE_EXCHANGES: readonly ExchangeId[] = [
-  "binance",
-  "bybit",
-  "okx",
-  "hyperliquid",
-  "kraken",
-  "coinbase",
-  "twelvedata",
-  "mexc",
-  "synthetic",
-];
+/** Sources restaurables. Dérivé de la source de vérité unique `EXCHANGE_IDS` (@axiom/types) — plus de copie locale. */
+const RESTORABLE_EXCHANGES: readonly ExchangeId[] = [...EXCHANGE_IDS];
 
 /**
  * Valide intégralement une configuration issue du stockage. Une valeur TypeScript

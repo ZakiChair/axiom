@@ -23,7 +23,7 @@
  * workspaces (snapshot libre renommable vs scénario métier figé).
  */
 import { createStore } from "zustand/vanilla";
-import type { ExchangeId, Timeframe } from "@axiom/types";
+import { EXCHANGE_IDS, type ExchangeId, type Timeframe } from "@axiom/types";
 import { marketStore } from "./market";
 import { indicatorsStore, migratePersistedIndicators, type ActiveIndicator } from "./indicators";
 import { compareStore } from "./compare";
@@ -41,8 +41,8 @@ const STORAGE_KEY = "axiom:workspaces:v1";
 export const DEFAULT_WORKSPACE_ID = "defaut";
 const DEFAULT_WORKSPACE_NAME = "Défaut";
 
-/** Sources restaurables (miroir de persist.ts / adapters.ts). */
-const RESTORABLE_EXCHANGES: ExchangeId[] = ["binance", "bybit", "okx", "hyperliquid", "kraken", "coinbase", "twelvedata", "mexc"];
+/** Sources restaurables. Dérivé de la source de vérité unique `EXCHANGE_IDS` (@axiom/types) — plus de copie locale. */
+const RESTORABLE_EXCHANGES: ExchangeId[] = [...EXCHANGE_IDS];
 /** Échelles d'axe prix valides. */
 const PRICE_SCALES: PriceScaleType[] = ["normal", "log", "percentage"];
 

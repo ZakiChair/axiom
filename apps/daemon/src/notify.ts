@@ -80,6 +80,16 @@ export function formaterTexteTelegram(symbol: string, decl: Declenchement): stri
   return `🔔 AXIOM — ${symbol}\n${decl.message}`;
 }
 
+/**
+ * Expurge un éventuel jeton de bot Telegram d'un message d'erreur avant journalisation :
+ * l'URL de l'API (`api.telegram.org/bot<TOKEN>/…`) fuiterait le secret dans les logs.
+ * Remplace le segment `/bot<...>` par `/bot***`. Fonction PURE (testée) ; accepte tout
+ * (Error, chaîne, valeur inconnue) via `String()`.
+ */
+export function redigerErreurTelegram(err: unknown): string {
+  return String(err).replace(/\/bot[^/\s]+/g, "/bot***");
+}
+
 /** Délai max d'un appel Telegram (ms). */
 const TIMEOUT_TELEGRAM_MS = 5000;
 
@@ -103,7 +113,8 @@ export async function envoyerTelegram(
     });
     return res.ok;
   } catch (err) {
-    console.error("[axiomd] envoi Telegram échoué :", err);
+    // Rédaction du jeton : l'URL de l'API (bot<TOKEN>) ne doit jamais atterrir dans les logs.
+    console.error("[axiomd] envoi Telegram échoué :", redigerErreurTelegram(err));
     return false;
   } finally {
     clearTimeout(minuteur);

@@ -15,7 +15,7 @@
  * synchronisé entre SLOTS d'une même fenêtre est géré dans ChartInstance) : diffuser un
  * flux crosshair haute fréquence entre fenêtres n'apporte pas assez pour son coût.
  */
-import type { ExchangeId } from "@axiom/types";
+import { EXCHANGE_IDS, type ExchangeId } from "@axiom/types";
 import { marketStore } from "./market";
 import { themeStore, THEMES, type ThemeId } from "./theme";
 
@@ -25,14 +25,9 @@ const CHANNEL_NAME = "axiom:sync";
 /** Identité de CETTE fenêtre (anti-écho). Stable pour la session. */
 export const WINDOW_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-/** Sources reconnues (garde de validation d'un message distant). */
-const ALLOWED_EXCHANGES: readonly ExchangeId[] = [
-  "binance",
-  "kraken",
-  "coinbase",
-  "twelvedata",
-  "mexc",
-];
+/** Sources reconnues (garde de validation d'un message distant) — source de vérité
+ * unique partagée avec la persistance (cf. `EXCHANGE_IDS` dans @axiom/types). */
+const ALLOWED_EXCHANGES: readonly ExchangeId[] = EXCHANGE_IDS;
 
 /** Messages diffusés entre fenêtres. */
 export type SyncMessage =

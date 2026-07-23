@@ -7,6 +7,7 @@ import {
   chargerTelegram,
   echapperAppleScript,
   formaterTexteTelegram,
+  redigerErreurTelegram,
   scriptNotification,
 } from "./notify";
 
@@ -35,6 +36,24 @@ describe("formaterTexteTelegram", () => {
   test("titre + message sur deux lignes", () => {
     const decl: Declenchement = { alertId: "a1", ts: 1, valeur: 100, message: "Prix franchit 100 à la hausse" };
     expect(formaterTexteTelegram("BTCUSDT", decl)).toBe("🔔 AXIOM — BTCUSDT\nPrix franchit 100 à la hausse");
+  });
+});
+
+describe("redigerErreurTelegram", () => {
+  test("masque le jeton du bot dans une URL d'API Telegram (fuite de secret)", () => {
+    const err = new Error("fetch failed: https://api.telegram.org/bot123:ABC/sendMessage");
+    const out = redigerErreurTelegram(err);
+    expect(out).not.toContain("123:ABC");
+    expect(out).toContain("/bot***/sendMessage");
+  });
+
+  test("stringifie une erreur non-Error", () => {
+    expect(redigerErreurTelegram({ toString: () => "boom" })).toBe("boom");
+    expect(redigerErreurTelegram("réseau indisponible")).toBe("réseau indisponible");
+  });
+
+  test("message sans jeton inchangé", () => {
+    expect(redigerErreurTelegram(new Error("délai dépassé"))).toBe("Error: délai dépassé");
   });
 });
 

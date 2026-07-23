@@ -206,6 +206,35 @@ export function parseOiHistory(raw: unknown): BinanceOiHistPoint[] {
   return out.sort((a, b) => a.time - b.time);
 }
 
+/** Delta agresseur d'une bougie perp {t: open time ms, delta: buyVol − sellVol}. */
+export interface PerpDeltaPoint {
+  t: number;
+  delta: number;
+}
+
+/**
+ * Delta agresseur par bougie depuis les lignes brutes de `fapi/v1/klines`. Chaque
+ * ligne suit les 12 champs officiels (identiques au spot, cf. `restKlineToCandle`,
+ * data/binance.ts) : indice 0 = open time, 5 = volume base, 9 = taker buy base volume.
+ * Les champs numériques arrivent en CHAÎNES → `Number()`. Le delta agresseur vaut
+ * `buyVol − sellVol` = `takerBuyBase − (volume − takerBuyBase)` = `2 × takerBuyBase −
+ * volume`. Fonction PURE : lignes malformées (non-tableau, trop courtes, temps/volume/
+ * takerBuy non finis) IGNORÉES, jamais de throw. Ordre d'entrée préservé.
+ */
+export function deltaDepuisKlinesPerp(rows: unknown[][]): PerpDeltaPoint[] {
+  if (!isArray(rows)) return [];
+  const out: PerpDeltaPoint[] = [];
+  for (const row of rows) {
+    if (!isArray(row) || row.length < 10) continue;
+    const t = Number(row[0]);
+    const volume = Number(row[5]);
+    const takerBuyBase = Number(row[9]);
+    if (!Number.isFinite(t) || !Number.isFinite(volume) || !Number.isFinite(takerBuyBase)) continue;
+    out.push({ t, delta: 2 * takerBuyBase - volume });
+  }
+  return out;
+}
+
 // ---------- Méthodes publiques ----------
 
 /** Symbole perpétuel USDⓈ-M (identique au symbole spot pour les paires USDT/USDC). */

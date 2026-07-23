@@ -49,6 +49,7 @@ import {
 import { fetchQuarterlyBasisHistory } from "../data/binanceDapi";
 import { fetchLsAccountRatio, fetchLsTopTraderRatio, fetchTakerRatio } from "../data/positioning";
 import { fetchFearGreedHistory } from "../data/marketOverview";
+import { deltaDepuisKlinesPerp } from "../data/binanceFutures";
 import { extUrl } from "../data/extapi";
 
 /** État renvoyé par `getAligned` pour l'ensemble des `ids` demandés. */
@@ -77,6 +78,7 @@ const TTL_MS: Record<AuxSeriesId, number> = {
   oi: 60_000,
   funding: 60_000,
   mark: 60_000, // mark price perp (Binance fapi markPriceKlines)
+  perpDelta: 60_000, // delta agresseur perp par bougie (Binance fapi klines)
   stablecoins: 60 * 60_000,
   nvt: 60 * 60_000,
   mvrv: 60 * 60_000,
@@ -181,6 +183,46 @@ async function fetchMarkPriceHistory(symbol: string, since: number): Promise<Aux
 }
 
 /**
+ * Historique du delta agresseur perp par bougie via Binance fapi klines (proxy
+ * /extapi). Même pagination que `fetchMarkPriceHistory` (limit 1500), mais parse via
+ * `deltaDepuisKlinesPerp` (PURE, testée) : delta = 2 × takerBuyBase − volume.
+ * Dégradation gracieuse propre à cette série (contrat Task 1) : pas de perp / symbole
+ * non listé en futures / échec réseau → SÉRIE VIDE (jamais de throw ni d'état `error`),
+ * de sorte que la jambe perp du def `cvdSpotPerp` disparaisse sans masquer le CVD spot.
+ */
+async function fetchPerpDeltaHistory(symbol: string, since: number): Promise<AuxPoint[]> {
+  const sym = toFuturesSymbol(symbol);
+  const out: AuxPoint[] = [];
+  let startTime = since;
+  const now = Date.now();
+  try {
+    // Max ~2 pages pour 90 j × 1h (~2160 barres, plafond API 1500/req).
+    for (let page = 0; page < 3 && startTime < now; page++) {
+      const q = new URLSearchParams({
+        symbol: sym,
+        interval: "1h",
+        startTime: String(startTime),
+        limit: "1500",
+      });
+      const res = await fetch(extUrl("fapi.binance.com", `fapi/v1/klines?${q}`));
+      if (!res.ok) break; // partiel OK ; symbole non listé / échec → vide.
+      const raw: unknown = await res.json();
+      if (!Array.isArray(raw) || raw.length === 0) break;
+      const points = deltaDepuisKlinesPerp(raw as unknown[][]);
+      for (const p of points) out.push({ time: p.t, value: p.delta });
+      // Page suivante : juste après la dernière bougie reçue.
+      const lastT = points.length > 0 ? (points[points.length - 1]?.t ?? startTime) : startTime;
+      startTime = lastT + 1;
+      if (raw.length < 1500) break;
+    }
+  } catch {
+    // Réseau/CORS/blocage régional : jambe perp absente, dégradation → série vide.
+    return [];
+  }
+  return toPoints(out);
+}
+
+/**
  * Récupère la série brute d'une famille auxiliaire pour un symbole, normalisée en
  * `AuxPoint[]` triés. Une exception (source injoignable) remonte → cache `error`.
  */
@@ -198,6 +240,11 @@ async function rawFetch(id: AuxSeriesId, symbol: string): Promise<AuxPoint[]> {
     case "mark": {
       // Mark price perp Binance (gratuit, fapi markPriceKlines 1h) — pour basis spot-perp.
       return fetchMarkPriceHistory(symbol, since);
+    }
+    case "perpDelta": {
+      // Delta agresseur perp par bougie (gratuit, fapi klines 1h) — jambe perp du CVD
+      // spot vs perp. Toujours ciblé Binance USDT-M ; échec/pas de perp → série vide.
+      return fetchPerpDeltaHistory(symbol, since);
     }
     case "stablecoins": {
       const s = await stablecoinsSupplyProvider.fetchSeries({ start: since });

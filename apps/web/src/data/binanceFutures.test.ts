@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { parseRatioHistory, parseTakerHistory, parseOiHistory } from "./binanceFutures";
+import {
+  parseRatioHistory,
+  parseTakerHistory,
+  parseOiHistory,
+  deltaDepuisKlinesPerp,
+} from "./binanceFutures";
 import { aggTradeToTrade, type BinanceAggTrade } from "./binance";
 
 /**
@@ -66,6 +71,43 @@ describe("parseOiHistory", () => {
   it("écarte les points au notionnel non numérique", () => {
     const raw = [{ sumOpenInterest: "1", sumOpenInterestValue: "x", timestamp: 1 }];
     expect(parseOiHistory(raw)).toEqual([]);
+  });
+});
+
+/**
+ * `deltaDepuisKlinesPerp` : delta agresseur par bougie depuis les lignes brutes de
+ * `fapi/v1/klines` (mêmes 12 champs que le spot — cf. `restKlineToCandle`, binance.ts) :
+ * indice 0 = open time, 5 = volume base, 9 = taker buy base. Champs numériques en
+ * CHAÎNES → `Number()`. delta = 2 × takerBuyBase − volume (= buyVol − sellVol).
+ */
+describe("deltaDepuisKlinesPerp", () => {
+  it("calcule le delta agresseur par bougie (achat dominant => positif)", () => {
+    const rows = [
+      // volume 100, takerBuy 70 => sell 30 => delta = 140 - 100 = +40 (achat dominant)
+      [1782950400000, "67000.0", "67100.0", "66950.0", "67080.0", "100", 1782950699999, "6.7e6", 500, "70", "4.7e6", "0"],
+      // volume 200, takerBuy 80 => sell 120 => delta = 160 - 200 = -40 (vente dominante)
+      [1782950700000, "67080.0", "67120.0", "67000.0", "67010.0", "200", 1782950999999, "1.3e7", 900, "80", "5.3e6", "0"],
+    ];
+    const out = deltaDepuisKlinesPerp(rows);
+    expect(out).toEqual([
+      { t: 1782950400000, delta: 40 },
+      { t: 1782950700000, delta: -40 },
+    ]);
+  });
+
+  it("ignore les lignes malformées (trop courtes, temps/volume/takerBuy non numériques)", () => {
+    const rows = [
+      [1782950400000, "6", "6", "6", "6", "100", 1, "0", 1, "70", "0", "0"], // valide => +40
+      [1782950700000, "6", "6", "6", "6", "100"], // trop courte (pas d'indice 9)
+      ["oops", "6", "6", "6", "6", "100", 1, "0", 1, "70", "0", "0"], // temps non numérique
+      [1782951000000, "6", "6", "6", "6", "x", 1, "0", 1, "70", "0", "0"], // volume non numérique
+      [1782951300000, "6", "6", "6", "6", "100", 1, "0", 1, "y", "0", "0"], // takerBuy non numérique
+    ];
+    expect(deltaDepuisKlinesPerp(rows)).toEqual([{ t: 1782950400000, delta: 40 }]);
+  });
+
+  it("renvoie [] pour un tableau vide", () => {
+    expect(deltaDepuisKlinesPerp([])).toEqual([]);
   });
 });
 

@@ -11,7 +11,7 @@
  * Étiquette d'honnêteté affichée en permanence : « bougies clôturées, exécution open+1,
  * pas d'intrabar » (cf. le contrat du moteur @axiom/backtest/engine.ts).
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type {
   Comparateur,
@@ -20,9 +20,11 @@ import type {
   Operande,
   PointEquity,
   ResultatBacktest,
+  ResultatMonteCarlo,
   SensCroisement,
   TradeResultat,
 } from "@axiom/backtest";
+import { monteCarloTrades, mulberry32 } from "@axiom/backtest";
 import {
   backtestStore,
   BACKTEST_TIMEFRAMES,
@@ -46,7 +48,7 @@ import {
   formatPrice,
   formatUsd,
 } from "../lib/format";
-import { lireTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import {
   domainePourPreset,
   indicesVisibles,
@@ -514,6 +516,229 @@ function EquityCanvas({ resultat }: { resultat: ResultatBacktest }) {
         )}
       </div>
     </div>
+  );
+}
+
+// ─────────────────────────── Section Monte-Carlo ───────────────────────────
+
+/** Seed fixe du RNG : à seed constant, un même backtest donne un cône reproductible. */
+const MC_SEED = 42;
+/** Nombre de chemins bootstrap simulés (décision contrôleur). */
+const MC_CHEMINS = 500;
+/** Minimum de trades exigé par `monteCarloTrades` (renvoie null en deçà). */
+const MC_MIN_TRADES = 10;
+/** Marge horizontale du tracé du cône (aligne avec le patron de l'equity). */
+const PAD_CONE = 6;
+
+/**
+ * Dessine le cône de percentiles Monte-Carlo : bande p5–p95 translucide + ligne p50,
+ * indexé par NUMÉRO DE TRADE (pas par temps → pane dédié, distinct de l'equity temporelle).
+ * Le capital initial est préfixé au pas 0 pour ancrer le cône au point de départ.
+ */
+function dessinerCone(canvas: HTMLCanvasElement, mc: ResultatMonteCarlo, capital: number): void {
+  const ctx = canvas.getContext("2d");
+  if (ctx === null) return;
+  const dpr = window.devicePixelRatio || 1;
+  const largeur = canvas.clientWidth;
+  const hauteur = canvas.clientHeight;
+  if (largeur === 0 || hauteur === 0) return;
+  canvas.width = Math.round(largeur * dpr);
+  canvas.height = Math.round(hauteur * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, largeur, hauteur);
+
+  // Capital préfixé au pas 0 → le cône démarre au capital initial (largeur = nb trades + 1).
+  const p5 = [capital, ...mc.cheminsPercentiles.p5];
+  const p50 = [capital, ...mc.cheminsPercentiles.p50];
+  const p95 = [capital, ...mc.cheminsPercentiles.p95];
+  const n = p5.length;
+
+  const colAccent = lireTokenCanvas("--accent", "#38bdf8");
+  const colBande = rgbaTokenCanvas("--accent", 0.15, "#38bdf8");
+  const colDim = lireTokenCanvas("--text-dim", "#9ca3af");
+  const colBorder = lireTokenCanvas("--border", "#262626");
+
+  const pad = PAD_CONE;
+  const padB = 14; // marge basse réservée aux labels d'index de trade
+  const plotH = hauteur - padB;
+
+  // Échelle Y auto sur les enveloppes p5 (bas) / p95 (haut), capital inclus.
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const v of p5) if (v < minY) minY = v;
+  for (const v of p95) if (v > maxY) maxY = v;
+  if (capital < minY) minY = capital;
+  if (capital > maxY) maxY = capital;
+  const spanY = maxY - minY || 1;
+  const xAt = (i: number): number => pad + (i / (n - 1)) * (largeur - 2 * pad);
+  const yAt = (v: number): number => pad + (1 - (v - minY) / spanY) * (plotH - 2 * pad);
+
+  // Ligne de capital initial (référence).
+  const yCap = Math.min(Math.max(yAt(capital), pad), plotH - pad);
+  ctx.strokeStyle = colBorder;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  ctx.moveTo(pad, yCap);
+  ctx.lineTo(largeur - pad, yCap);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Bande p5–p95 (aller sur p95, retour sur p5).
+  ctx.fillStyle = colBande;
+  ctx.beginPath();
+  p95.forEach((v, i) => {
+    const x = xAt(i);
+    const y = yAt(v);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  for (let i = n - 1; i >= 0; i--) ctx.lineTo(xAt(i), yAt(p5[i]!));
+  ctx.closePath();
+  ctx.fill();
+
+  // Ligne médiane p50.
+  ctx.strokeStyle = colAccent;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  p50.forEach((v, i) => {
+    const x = xAt(i);
+    const y = yAt(v);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  // Labels d'index de trade (extrémités).
+  ctx.fillStyle = colDim;
+  ctx.font = "10px system-ui, sans-serif";
+  const yLabel = hauteur - 3;
+  ctx.fillText("0", 2, yLabel);
+  const texteFin = `${n - 1} trades`;
+  ctx.fillText(texteFin, largeur - 2 - ctx.measureText(texteFin).width, yLabel);
+}
+
+/** Canvas du cône Monte-Carlo (DPR + ResizeObserver, patron `dessinerEquity`). */
+function ConeCanvas({ mc, capital }: { mc: ResultatMonteCarlo; capital: number }) {
+  const refCanvas = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    const canvas = refCanvas.current;
+    if (canvas === null) return;
+    const redraw = (): void => dessinerCone(canvas, mc, capital);
+    redraw();
+    const ro = new ResizeObserver(redraw);
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, [mc, capital]);
+  return (
+    <canvas
+      ref={refCanvas}
+      className="h-40 w-full rounded-md border border-border bg-bg"
+      role="img"
+      aria-label="Cône Monte-Carlo des percentiles d'équité par numéro de trade"
+    />
+  );
+}
+
+/** Cellule de statistique de risque MC (teinte optionnelle + title explicatif). */
+function StatMC({
+  label,
+  value,
+  ton,
+  title,
+}: {
+  label: string;
+  value: string;
+  ton?: "up" | "down";
+  title: string;
+}) {
+  const couleur = ton === "up" ? "text-up" : ton === "down" ? "text-down" : "text-text";
+  return (
+    <div className="rounded-md border border-border bg-bg px-2.5 py-1.5" title={title}>
+      <div className="text-[10px] uppercase tracking-wider text-text-dim">{label}</div>
+      <div className={`tabular-nums text-sm font-medium ${couleur}`}>{value}</div>
+    </div>
+  );
+}
+
+/**
+ * Section Monte-Carlo sous l'equity : bouton de run (synchrone au clic — mesuré ~25 ms
+ * pour 500 trades × 500 chemins, donc pas de Segmente/worker), cône p5/p50/p95 et
+ * tableau de stats de risque. État LOCAL (convention de la fenêtre) ; l'invalidation à
+ * chaque nouveau run est automatique : le bloc résultats est démonté (resultat → null),
+ * ce qui détruit l'état MC local, puis remonté à neuf sur le run suivant.
+ */
+function MonteCarloSection({ resultat, busy }: { resultat: ResultatBacktest; busy: boolean }) {
+  const [mc, setMc] = useState<ResultatMonteCarlo | null>(null);
+  const trades = resultat.trades;
+  // Capital effectif du run (equity[0]) — pas le champ store, éditable après coup.
+  const capital = resultat.equity[0]?.equity ?? 0;
+  const assezDeTrades = trades.length >= MC_MIN_TRADES;
+  const desactive = !assezDeTrades || busy;
+
+  const lancer = (): void => {
+    const pnls = trades.map((t) => t.pnl);
+    setMc(monteCarloTrades(pnls, MC_CHEMINS, mulberry32(MC_SEED), capital));
+  };
+
+  return (
+    <section className="space-y-2 rounded-md border border-border bg-bg px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] uppercase tracking-wide text-text-dim">
+          Monte-Carlo · rééchantillonnage des PnL
+        </span>
+        <button
+          type="button"
+          onClick={lancer}
+          disabled={desactive}
+          title={
+            assezDeTrades
+              ? `Simule ${MC_CHEMINS} réordonnancements des ${trades.length} trades (seed ${MC_SEED})`
+              : `Au moins ${MC_MIN_TRADES} trades requis (${trades.length} disponibles)`
+          }
+          className={`${BTN_SECONDAIRE} disabled:opacity-40`}
+        >
+          {assezDeTrades ? `Monte-Carlo (${MC_CHEMINS})` : `Monte-Carlo (≥ ${MC_MIN_TRADES} trades)`}
+        </button>
+      </div>
+
+      {mc !== null && (
+        <div className="space-y-2">
+          <ConeCanvas mc={mc} capital={capital} />
+          <div className="grid grid-cols-3 gap-1.5">
+            <StatMC
+              label="Equity p5"
+              value={formatUsd(mc.equityFinale.p5)}
+              ton={mc.equityFinale.p5 >= capital ? "up" : "down"}
+              title="5e percentile de l'equity finale (scénario défavorable)"
+            />
+            <StatMC
+              label="Equity p50"
+              value={formatUsd(mc.equityFinale.p50)}
+              ton={mc.equityFinale.p50 >= capital ? "up" : "down"}
+              title="Médiane de l'equity finale sur tous les chemins"
+            />
+            <StatMC
+              label="Equity p95"
+              value={formatUsd(mc.equityFinale.p95)}
+              ton={mc.equityFinale.p95 >= capital ? "up" : "down"}
+              title="95e percentile de l'equity finale (scénario favorable)"
+            />
+            <StatMC
+              label="Max DD p95"
+              value={formatPourcentage(mc.maxDrawdown.p95 * 100, 1)}
+              ton="down"
+              title="95e percentile du drawdown maximal, en % du capital initial"
+            />
+            <StatMC
+              label="Prob. ruine"
+              value={formatPourcentage(mc.probRuine * 100, 1)}
+              ton={mc.probRuine > 0 ? "down" : undefined}
+              title="Part des chemins finissant avec une equity négative"
+            />
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -999,6 +1224,7 @@ export function BacktestWindow() {
           <div className="space-y-3">
             <StatsGrid resultat={resultat} />
             <EquityCanvas resultat={resultat} />
+            <MonteCarloSection resultat={resultat} busy={busy} />
             <TradesTable trades={resultat.trades} />
           </div>
         )}

@@ -39,6 +39,7 @@ import {
   signauxStore,
   type SignauxRunState,
 } from "../store/signaux";
+import { presetAlertsStore } from "../store/presetAlerts";
 import type { LigneSignaux, SignalDetecte } from "../data/signaux";
 import { UNIVERS_VALIDATION } from "../data/validationSignaux";
 import { estExtremeColonne, seuilDecile } from "../lib/extremesColonne";
@@ -477,6 +478,7 @@ export function ScreenerWindow() {
   const addBase = useStore(screenerStore, (s) => s.addBaseCondition);
   const addIndicator = useStore(screenerStore, (s) => s.addIndicatorCondition);
   const userPresets = useStore(screenerStore, (s) => s.userPresets);
+  const dernierPresetCharge = useStore(screenerStore, (s) => s.dernierPresetCharge);
   const loadPreset = useStore(screenerStore, (s) => s.loadPreset);
   const savePreset = useStore(screenerStore, (s) => s.savePreset);
   const deletePreset = useStore(screenerStore, (s) => s.deletePreset);
@@ -493,8 +495,35 @@ export function ScreenerWindow() {
 
   const [presetName, setPresetName] = useState("");
   const [sort, setSort] = useState<SortState>({ key: "volumeUsd24h", dir: -1 });
+  // Message discret du bouton « Alerte » (confirmation période / refus limite), auto-effacé.
+  const [msgAlerte, setMsgAlerte] = useState<{ ton: "ok" | "limite"; texte: string } | null>(null);
 
   const busy = runState === "loading" || runState === "running";
+
+  /**
+   * Crée une alerte de scan à partir du preset chargé + conditions COURANTES du builder.
+   * Le snapshot est figé côté store. Retour "limite" → message discret (4 max).
+   */
+  const creerAlerte = () => {
+    if (dernierPresetCharge === null) return;
+    const preset = [...BUILTIN_PRESETS, ...userPresets].find((p) => p.id === dernierPresetCharge);
+    if (preset === undefined) return;
+    const res = presetAlertsStore.getState().ajouter({
+      presetId: preset.id,
+      nom: preset.name,
+      tf,
+      baseConditions,
+      indicatorConditions,
+    });
+    if (res === "limite") {
+      setMsgAlerte({ ton: "limite", texte: "4 alertes de scan max" });
+    } else {
+      // Période identique à la dérivation du store (15 sans filtre indicateur, sinon 60).
+      const periode = indicatorConditions.length === 0 ? 15 : 60;
+      setMsgAlerte({ ton: "ok", texte: `Alerte créée · vérifié toutes les ${periode} min` });
+    }
+    setTimeout(() => setMsgAlerte(null), 4000);
+  };
 
   const sortedRows = useMemo(() => {
     const val = (r: ScreenerRow, k: SortKey): number | string | undefined => r[k];
@@ -659,6 +688,29 @@ export function ScreenerWindow() {
             >
               Enregistrer
             </button>
+          </div>
+
+          {/* Alerte de scan : rescanne périodiquement le preset chargé, notifie les symboles
+              ENTRANTS. Actif seulement sur un preset chargé et intact (édition manuelle → null). */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={creerAlerte}
+              disabled={dernierPresetCharge === null}
+              title={
+                dernierPresetCharge === null
+                  ? "Chargez un preset pour créer une alerte de scan"
+                  : "Fige les conditions courantes et rescanne périodiquement (notifie les symboles entrants)"
+              }
+              className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text disabled:opacity-40"
+            >
+              ⏰ Alerte
+            </button>
+            {msgAlerte !== null && (
+              <span className={`text-[10px] ${msgAlerte.ton === "limite" ? "text-warn" : "text-text-dim"}`}>
+                {msgAlerte.texte}
+              </span>
+            )}
           </div>
         </section>
 

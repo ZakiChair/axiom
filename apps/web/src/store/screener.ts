@@ -68,6 +68,12 @@ export interface ScreenerState {
 
   // — Presets (livrés + utilisateur) —
   userPresets: ScreenerPreset[];
+  /**
+   * Id du dernier preset chargé, ou `null` si le builder a été modifié à la main depuis
+   * (chaque setter du builder le remet à null). Sert au bouton « ⏰ Alerte » : une alerte
+   * de scan n'est créable qu'à partir d'un preset chargé et intact.
+   */
+  dernierPresetCharge: string | null;
   loadPreset: (id: string) => void;
   savePreset: (name: string) => void;
   deletePreset: (id: string) => void;
@@ -141,24 +147,36 @@ export const screenerStore = createStore<ScreenerState>((set, get) => ({
   baseConditions: [{ kind: "base", field: "volumeUsd24h", op: ">", value: 10_000_000 }],
   indicatorConditions: [{ kind: "indicator", fieldId: "rsi", param: 14, op: "<", value: 30 }],
 
-  setTf: (tf) => set({ tf }),
-  addBaseCondition: () => set((s) => ({ baseConditions: [...s.baseConditions, defaultBaseCondition()] })),
+  // Toute édition MANUELLE du builder invalide le preset chargé (dernierPresetCharge → null) :
+  // l'alerte de scan fige les conditions du PRESET, pas un builder retouché à la main.
+  setTf: (tf) => set({ tf, dernierPresetCharge: null }),
+  addBaseCondition: () =>
+    set((s) => ({ baseConditions: [...s.baseConditions, defaultBaseCondition()], dernierPresetCharge: null })),
   updateBaseCondition: (index, patch) =>
     set((s) => ({
       baseConditions: s.baseConditions.map((c, i) => (i === index ? { ...c, ...patch } : c)),
+      dernierPresetCharge: null,
     })),
   removeBaseCondition: (index) =>
-    set((s) => ({ baseConditions: s.baseConditions.filter((_, i) => i !== index) })),
+    set((s) => ({ baseConditions: s.baseConditions.filter((_, i) => i !== index), dernierPresetCharge: null })),
   addIndicatorCondition: () =>
-    set((s) => ({ indicatorConditions: [...s.indicatorConditions, defaultIndicatorCondition()] })),
+    set((s) => ({
+      indicatorConditions: [...s.indicatorConditions, defaultIndicatorCondition()],
+      dernierPresetCharge: null,
+    })),
   updateIndicatorCondition: (index, patch) =>
     set((s) => ({
       indicatorConditions: s.indicatorConditions.map((c, i) => (i === index ? { ...c, ...patch } : c)),
+      dernierPresetCharge: null,
     })),
   removeIndicatorCondition: (index) =>
-    set((s) => ({ indicatorConditions: s.indicatorConditions.filter((_, i) => i !== index) })),
+    set((s) => ({
+      indicatorConditions: s.indicatorConditions.filter((_, i) => i !== index),
+      dernierPresetCharge: null,
+    })),
 
   userPresets: readUserPresets(),
+  dernierPresetCharge: null,
 
   loadPreset: (id) => {
     const preset = [...BUILTIN_PRESETS, ...get().userPresets].find((p) => p.id === id);
@@ -168,6 +186,7 @@ export const screenerStore = createStore<ScreenerState>((set, get) => ({
       tf: preset.tf,
       baseConditions: preset.baseConditions.map((c) => ({ ...c })),
       indicatorConditions: preset.indicatorConditions.map((c) => ({ ...c })),
+      dernierPresetCharge: preset.id,
     });
   },
   savePreset: (name) => {

@@ -70,7 +70,12 @@ export interface PresetAlertsState {
    */
   ajouter: (b: DepuisBuilderAlerte) => "ok" | "limite";
   retirer: (id: string) => void;
-  basculer: (id: string) => void;
+  /**
+   * Bascule l'état actif. La DÉSACTIVATION est toujours acceptée ; la RÉ-ACTIVATION
+   * est refusée (`"limite"`, sans rien changer) si MAX_ALERTES_ACTIVES est déjà atteint
+   * — chaque active fait tourner un scan périodique, la garde tient donc aussi ici.
+   */
+  basculer: (id: string) => "ok" | "limite";
 }
 
 /** Identifiant d'alerte (crypto.randomUUID si dispo, repli horodaté). */
@@ -135,9 +140,17 @@ export const presetAlertsStore = createStore<PresetAlertsState>((set, get) => ({
   },
 
   basculer: (id) => {
+    const cible = get().alertes.find((a) => a.id === id);
+    if (cible === undefined) return "ok"; // rien à basculer
+    // Ré-activation (inactive → active) : refuser au-delà de la limite d'actives.
+    if (!cible.actif) {
+      const actives = get().alertes.filter((a) => a.actif).length;
+      if (actives >= MAX_ALERTES_ACTIVES) return "limite";
+    }
     const alertes = get().alertes.map((a) => (a.id === id ? { ...a, actif: !a.actif } : a));
     ecrirePresetAlerts(alertes);
     set({ alertes });
+    return "ok";
   },
 }));
 

@@ -147,6 +147,16 @@ describe("presetAlertsStore", () => {
     expect(presetAlertsStore.getState().alertes).toHaveLength(5);
   });
 
+  it("ré-activer via basculer est refusé au-delà de 4 actives → 'limite'", () => {
+    // 4 actives + 1 désactivée : ré-activer la 5e doit être refusé (limite déjà atteinte).
+    for (let i = 0; i < 4; i++) presetAlertsStore.getState().ajouter(builder(`a${i}`));
+    const premier = presetAlertsStore.getState().alertes[0]!;
+    presetAlertsStore.getState().basculer(premier.id); // désactive → 3 actives
+    presetAlertsStore.getState().ajouter(builder("a5")); // → 4 actives, 1 inactive (premier)
+    expect(presetAlertsStore.getState().basculer(premier.id)).toBe("limite");
+    expect(presetAlertsStore.getState().alertes.find((a) => a.id === premier.id)?.actif).toBe(false);
+  });
+
   it("basculer inverse l'état actif", () => {
     presetAlertsStore.getState().ajouter(builder("x"));
     const id = presetAlertsStore.getState().alertes[0]!.id;

@@ -313,6 +313,12 @@ function creerRuntime(): Unsubscribe {
         capIndicateurs: PRESET_CAP_INDICATEURS,
         capPosition: SCREENER_POSITION_CAP,
       });
+      // Ré-validation POST-await : l'alerte a pu être retirée/désactivée pendant le scan en
+      // vol — `resyncPreset` a alors déjà purgé son état. Sans ce contrôle, la ligne
+      // `dernierEnsemble.set` ci-dessous RESSUSCITERAIT sa baseline (et pourrait déclencher
+      // pour une alerte disparue).
+      const encoreActive = presetAlertsStore.getState().alertes.find((a) => a.id === id);
+      if (!encoreActive || !encoreActive.actif) return;
       const courant = res.rows.map((r) => r.symbol);
       const precedent = dernierEnsemble.get(id) ?? null;
       const entrants = diffEntrants(precedent, courant);

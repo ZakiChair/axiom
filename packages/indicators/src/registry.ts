@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 147 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 149 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -76,6 +76,7 @@ import { randomWalk } from "./momentum/randomWalk";
 import { fearGreed } from "./momentum/fearGreed";
 import { disparity } from "./momentum/disparity";
 import { btcDominance } from "./momentum/btcDominance";
+import { kdj } from "./momentum/kdj";
 
 // — volatility (15) —
 import { atr } from "./volatility/atr";
@@ -100,6 +101,7 @@ import { choppiness } from "./volatility/choppiness";
 import { ulcerIndex } from "./volatility/ulcerIndex";
 import { hurst } from "./volatility/hurst";
 import { vhf } from "./volatility/vhf";
+import { priceZScore } from "./volatility/priceZScore";
 
 // — volume + orderflow (fichiers sous volume/, catégorie UI distincte) —
 import { adLine } from "./volume/adLine";
@@ -237,6 +239,7 @@ export const INDICATORS: IndicatorDef[] = [
   fearGreed,
   disparity,
   btcDominance,
+  kdj,
   // volatility
   atr,
   atrRegime,
@@ -260,6 +263,7 @@ export const INDICATORS: IndicatorDef[] = [
   ulcerIndex,
   hurst,
   vhf,
+  priceZScore,
   // volume (classique)
   adLine,
   anchoredVwap,

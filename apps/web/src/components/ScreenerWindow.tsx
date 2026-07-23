@@ -46,6 +46,21 @@ import { formatPct, formatPrice, formatUsd } from "../lib/format";
 import { metaSource } from "../lib/fiabilite";
 import { Badge, BadgeFiabilite, EnTeteFenetre, ErreurBloc, NoteSource, Segmente, Vide } from "./ui";
 
+/**
+ * Presets « scénario » : teinte du glyphe directionnel (▲▼↔◆), portée par le premier
+ * caractère du nom. Les clés définissent aussi l'appartenance au groupe « Scénarios ».
+ */
+const SCENARIO_TINT: Record<string, string> = {
+  "builtin:long-potentiel": "text-up",
+  "builtin:short-potentiel": "text-down",
+  "builtin:range": "text-text-dim",
+  "builtin:compression": "text-accent",
+};
+
+/** Presets livrés, séparés en « Scénarios » (glyphe teinté) et « Filtres » (les autres). */
+const SCENARIO_PRESETS = BUILTIN_PRESETS.filter((p) => p.id in SCENARIO_TINT);
+const FILTER_PRESETS = BUILTIN_PRESETS.filter((p) => !(p.id in SCENARIO_TINT));
+
 /** Colonnes triables de la table de résultats. */
 type SortKey =
   | "symbol"
@@ -548,44 +563,83 @@ export function ScreenerWindow() {
         <VueSignaux />
       ) : (
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
-        {/* Presets */}
+        {/* Presets — groupés : Scénarios (glyphe teinté) / Filtres / Mes presets */}
         <section className="space-y-2">
           <div className="text-[10px] uppercase tracking-wide text-text-dim">Presets</div>
+
+          {/* Scénarios : glyphe directionnel teinté, `title` = logique du scénario. */}
+          <div className="text-[9px] uppercase tracking-wide text-text-dim/70">Scénarios</div>
           <div className="flex flex-wrap gap-1.5">
-            {BUILTIN_PRESETS.map((p) => (
+            {SCENARIO_PRESETS.map((p) => {
+              // Le premier caractère du nom est le glyphe (▲▼↔◆), teinté à part.
+              const glyph = p.name.slice(0, 1);
+              const rest = p.name.slice(1);
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => loadPreset(p.id)}
+                  className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text"
+                  title={p.description}
+                >
+                  <span className={SCENARIO_TINT[p.id]}>{glyph}</span>
+                  {rest}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Filtres : les presets livrés « historiques » (comportement inchangé). */}
+          <div className="text-[9px] uppercase tracking-wide text-text-dim/70">Filtres</div>
+          <div className="flex flex-wrap gap-1.5">
+            {FILTER_PRESETS.map((p) => (
               <button
                 key={p.id}
                 type="button"
                 onClick={() => loadPreset(p.id)}
                 className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text"
                 title={
-                  p.id.startsWith("builtin:crowded") || p.id === "builtin:funding-extreme"
+                  p.description ??
+                  (p.id.startsWith("builtin:crowded") || p.id === "builtin:funding-extreme"
                     ? `Positionnement · OI/L-S sur top ${SCREENER_POSITION_CAP} liquides`
-                    : undefined
+                    : undefined)
                 }
               >
                 {p.name}
               </button>
             ))}
-            {userPresets.map((p) => (
-              <span
-                key={p.id}
-                className="flex items-center gap-1 rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim"
-              >
-                <button type="button" onClick={() => loadPreset(p.id)} className="transition hover:text-text">
-                  {p.name}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => deletePreset(p.id)}
-                  aria-label={`Supprimer le preset ${p.name}`}
-                  className="text-text-dim transition hover:text-down"
-                >
-                  ✕
-                </button>
-              </span>
-            ))}
           </div>
+
+          {/* Mes presets : seulement si l'utilisateur en a enregistré (comportement conservé). */}
+          {userPresets.length > 0 && (
+            <>
+              <div className="text-[9px] uppercase tracking-wide text-text-dim/70">Mes presets</div>
+              <div className="flex flex-wrap gap-1.5">
+                {userPresets.map((p) => (
+                  <span
+                    key={p.id}
+                    className="flex items-center gap-1 rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => loadPreset(p.id)}
+                      className="transition hover:text-text"
+                    >
+                      {p.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deletePreset(p.id)}
+                      aria-label={`Supprimer le preset ${p.name}`}
+                      className="text-text-dim transition hover:text-down"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
           <div className="flex items-center gap-1.5">
             <input
               type="text"

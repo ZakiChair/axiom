@@ -11,6 +11,7 @@ import {
   applyFunding,
   applyLongShortRatio,
   applyOiChange,
+  BASE_FIELDS,
   baseFieldValue,
   BUILTIN_PRESETS,
   compareOp,
@@ -309,6 +310,38 @@ describe("catalogue INDICATOR_FIELDS (ADX / BB bandwidth)", () => {
         def?.outputs.some((o) => o.key === spec.output),
         `output « ${spec.output} » absent du def « ${spec.indicatorId} »`,
       ).toBe(true);
+    }
+  });
+});
+
+describe("presets scénario (v1.5)", () => {
+  it("expose les 4 presets scénario avec glyphe et description", () => {
+    for (const id of [
+      "builtin:long-potentiel",
+      "builtin:short-potentiel",
+      "builtin:range",
+      "builtin:compression",
+    ]) {
+      const p = BUILTIN_PRESETS.find((preset) => preset.id === id);
+      expect(p, `preset « ${id} » absent`).toBeDefined();
+      expect(p!.tf).toBe("4h");
+      expect(p!.description, `description manquante pour « ${id} »`).toBeTruthy();
+      expect(p!.name).toMatch(/^[▲▼↔◆] /);
+    }
+  });
+
+  it("intégrité structurelle : chaque champ de condition existe au catalogue", () => {
+    const baseIds = new Set(BASE_FIELDS.map((f) => f.id));
+    for (const p of BUILTIN_PRESETS) {
+      for (const c of p.baseConditions) {
+        expect(baseIds.has(c.field), `champ base « ${c.field} » (${p.id}) inconnu`).toBe(true);
+      }
+      for (const c of p.indicatorConditions) {
+        expect(
+          getIndicatorField(c.fieldId),
+          `champ indicateur « ${c.fieldId} » (${p.id}) inconnu`,
+        ).toBeDefined();
+      }
     }
   });
 });

@@ -477,6 +477,8 @@ export interface ScreenerPreset {
   indicatorConditions: IndicatorCondition[];
   /** true pour les presets livrés (non supprimables) ; absent pour ceux de l'utilisateur. */
   builtin?: boolean;
+  /** Phrase expliquant la logique du scénario (affichée en `title` natif au survol). */
+  description?: string;
 }
 
 /**
@@ -562,5 +564,60 @@ export const BUILTIN_PRESETS: ScreenerPreset[] = [
     ],
     indicatorConditions: [],
     builtin: true,
+  },
+  // ── Presets « scénario de trade » (v1.5) : glyphe directionnel dans le nom, ──
+  // ── tf 4h, description = logique reprise de la spec §2. Seuils = valeurs de ──
+  // ── départ (calibrage = gate contrôleur), à ne pas « améliorer » ici. ────────
+  {
+    id: "builtin:long-potentiel",
+    name: "▲ Long potentiel (rebond)",
+    tf: "4h",
+    baseConditions: [
+      { kind: "base", field: "volumeUsd24h", op: ">", value: 10_000_000 },
+      { kind: "base", field: "fundingPct", op: "<", value: 0 },
+      { kind: "base", field: "oiChangePct", op: ">", value: 0 },
+    ],
+    indicatorConditions: [{ kind: "indicator", fieldId: "rsi", param: 14, op: "<", value: 35 }],
+    builtin: true,
+    description:
+      "les shorts paient ET s'accumulent sur un actif survendu = carburant à squeeze haussier.",
+  },
+  {
+    id: "builtin:short-potentiel",
+    name: "▼ Short potentiel (euphorie)",
+    tf: "4h",
+    baseConditions: [
+      { kind: "base", field: "volumeUsd24h", op: ">", value: 20_000_000 },
+      { kind: "base", field: "fundingPct", op: ">", value: 0.03 },
+      { kind: "base", field: "oiChangePct", op: ">", value: 2 },
+      { kind: "base", field: "longShortRatio", op: ">", value: 1.5 },
+    ],
+    indicatorConditions: [{ kind: "indicator", fieldId: "rsi", param: 14, op: ">", value: 70 }],
+    builtin: true,
+    description: "longs euphoriques, crowded, surachetés.",
+  },
+  {
+    id: "builtin:range",
+    name: "↔ Range / mean-reversion",
+    tf: "4h",
+    baseConditions: [
+      { kind: "base", field: "volumeUsd24h", op: ">", value: 5_000_000 },
+      { kind: "base", field: "absPriceChangePct24h", op: "<", value: 2 },
+    ],
+    indicatorConditions: [
+      { kind: "indicator", fieldId: "adx", param: 14, op: "<", value: 20 },
+      { kind: "indicator", fieldId: "bbw", param: 20, op: "<", value: 6 },
+    ],
+    builtin: true,
+    description: "pas de tendance, volatilité contenue.",
+  },
+  {
+    id: "builtin:compression",
+    name: "◆ Compression (breakout)",
+    tf: "4h",
+    baseConditions: [{ kind: "base", field: "volumeUsd24h", op: ">", value: 5_000_000 }],
+    indicatorConditions: [{ kind: "indicator", fieldId: "bbw", param: 20, op: "<", value: 3 }],
+    builtin: true,
+    description: "volatilité comprimée, cassure imminente, direction non préjugée.",
   },
 ];

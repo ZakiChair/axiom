@@ -4,7 +4,7 @@
  * Les valeurs attendues sont justifiées en commentaire.
  */
 import { describe, it, expect } from "vitest";
-import { serieCbprem, statsPremium, type PointPremium } from "./cbprem";
+import { bandesPremium, serieCbprem, statsPremium, zPoint, type PointPremium } from "./cbprem";
 
 const JOUR_MS = 24 * 3_600_000;
 
@@ -128,5 +128,47 @@ describe("statsPremium", () => {
     const stats = statsPremium(serie);
     expect(stats.courant).toBe(30);
     expect(stats.z30j).toBeCloseTo(1.6752467319482305, 9);
+  });
+});
+
+describe("bandesPremium — moyenne / écart-type population de toute la série", () => {
+  it("moins de 30 points → null", () => {
+    const serie: PointPremium[] = Array.from({ length: 29 }, (_, k) => ({
+      t: k,
+      premiumPct: k,
+    }));
+    expect(bandesPremium(serie)).toBeNull();
+  });
+
+  it("écart-type nul (série constante) → null, même avec >=30 points", () => {
+    const serie: PointPremium[] = Array.from({ length: 30 }, (_, k) => ({
+      t: k,
+      premiumPct: 3.5,
+    }));
+    expect(bandesPremium(serie)).toBeNull();
+  });
+
+  it("moyenne et σ population exacts sur 30 points (série 1..30)", () => {
+    // Mêmes valeurs consacrées que le test z30j : moyenne=15.5,
+    // stdev POPULATION = 8.65544144839919.
+    const serie: PointPremium[] = Array.from({ length: 30 }, (_, k) => ({
+      t: k,
+      premiumPct: k + 1,
+    }));
+    const bandes = bandesPremium(serie);
+    expect(bandes?.moyenne).toBeCloseTo(15.5, 9);
+    expect(bandes?.sigma).toBeCloseTo(8.65544144839919, 9);
+  });
+});
+
+describe("zPoint — z-score d'un premium vs des bandes", () => {
+  it("z exact : (p − moyenne) / σ", () => {
+    const bandes = { moyenne: 15.5, sigma: 8.65544144839919 };
+    // Cohérent avec z30j de la série 1..30 : zPoint(30) = 1.6752467319482305.
+    expect(zPoint(30, bandes)).toBeCloseTo(1.6752467319482305, 9);
+    // La moyenne elle-même a un z de 0.
+    expect(zPoint(15.5, bandes)).toBeCloseTo(0, 9);
+    // Signe négatif si p < moyenne.
+    expect(zPoint(15.5 - 8.65544144839919, bandes)).toBeCloseTo(-1, 9);
   });
 });

@@ -19,6 +19,23 @@ vi.mock("../data/netliq", async (orig) => ({
 
 const fetchMock = vi.mocked(fetchSeriesNetliq);
 
+// Environnement de test Node (pas de DOM) : `localStorage` est absent par défaut. Même
+// mock en mémoire que sosovalue.test.ts / persist.test.ts — indispensable ici car le store
+// persiste la fenêtre (`axiom:netliq:fenetre`).
+function installMockLocalStorage(): void {
+  const data = new Map<string, string>();
+  (globalThis as { localStorage?: Storage }).localStorage = {
+    getItem: (k) => data.get(k) ?? null,
+    setItem: (k, v) => void data.set(k, v),
+    removeItem: (k) => void data.delete(k),
+    clear: () => data.clear(),
+    key: (i) => Array.from(data.keys())[i] ?? null,
+    get length() {
+      return data.size;
+    },
+  };
+}
+
 /** Raccourci de fabrication de PointFred. */
 function pf(date: string, valeur: number): PointFred {
   return { date, valeur };
@@ -35,10 +52,22 @@ function jambesValides(): { walcl: PointFred[]; tga: PointFred[]; rrp: PointFred
 
 beforeEach(() => {
   fetchMock.mockReset();
+  // localStorage neuf à chaque test → repart du défaut 2 a, pas de fuite d'ordre.
+  installMockLocalStorage();
 });
 
 afterEach(() => {
-  netliqStore.setState({ enCours: false, serie: [], stats: null, erreur: null, majTs: null });
+  // `fenetreAnnees` remis à 2 (défaut) en plus des champs de données, sinon un test qui
+  // bascule la fenêtre fuite sur les suivants.
+  netliqStore.setState({
+    enCours: false,
+    serie: [],
+    stats: null,
+    erreur: null,
+    majTs: null,
+    fenetreAnnees: 2,
+  });
+  delete (globalThis as { localStorage?: Storage }).localStorage;
 });
 
 describe("run() — succès", () => {
@@ -130,5 +159,49 @@ describe("run() — cache TTL 12 h", () => {
 
     await netliqStore.getState().run();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("run() — fenêtre transmise à la collecte", () => {
+  it("passe fenetreAnnees (défaut 2) à fetchSeriesNetliq", async () => {
+    fetchMock.mockResolvedValue(jambesValides());
+    await netliqStore.getState().run();
+    expect(fetchMock).toHaveBeenLastCalledWith(expect.any(Number), 2);
+  });
+});
+
+describe("setFenetre() — changement de fenêtre : invalidation + re-fetch forcé", () => {
+  it("un run 2 a frais NE bloque PAS le fetch 10 a (skip TTL invalidé au changement)", async () => {
+    fetchMock.mockResolvedValue(jambesValides());
+    await netliqStore.getState().run(); // majTs frais, série 2 a affichée
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenLastCalledWith(expect.any(Number), 2);
+
+    // Bascule vers 10 a : setFenetre déclenche un run(true) fire-and-forget.
+    netliqStore.getState().setFenetre(10);
+    expect(netliqStore.getState().fenetreAnnees).toBe(10);
+
+    // Le re-fetch DOIT survenir ET porter sur 10 a (preuve que la série 2 a fraîche n'a
+    // pas été servie par le skip TTL). Le call-count seul ne le prouverait pas (force
+    // re-fetch de toute façon) — c'est l'argument `10` qui est décisif.
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenLastCalledWith(expect.any(Number), 10);
+    });
+  });
+
+  it("re-sélectionner la fenêtre courante ne re-fetch pas", async () => {
+    fetchMock.mockResolvedValue(jambesValides());
+    await netliqStore.getState().run();
+    netliqStore.getState().setFenetre(2); // déjà 2 a → no-op
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("persiste la fenêtre dans axiom:netliq:fenetre", async () => {
+    // mock résolu pour que le run(true) déclenché par setFenetre s'achève proprement.
+    fetchMock.mockResolvedValue(jambesValides());
+    netliqStore.getState().setFenetre(5);
+    expect(localStorage.getItem("axiom:netliq:fenetre")).toBe("5");
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith(expect.any(Number), 5));
   });
 });

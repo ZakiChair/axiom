@@ -40,6 +40,10 @@
  */
 import { createFredM2Provider } from "./macro/fred";
 import type { MacroSeries } from "./macro/types";
+import { binanceAdapter } from "./binance";
+
+/** Fenêtre d'observation NETLIQ, en années calendaires. Défaut applicatif : 2 a. */
+export type FenetreNetliq = 1 | 2 | 5 | 10;
 
 /** Un point d'une série FRED normalisée. */
 export interface PointFred {
@@ -77,10 +81,10 @@ export function normaliserSerie(brute: MacroSeries, facteur: number): PointFred[
   return brute.map((p) => ({ date: versDateIso(p.time), valeur: p.value * facteur }));
 }
 
-/** Recule un horodatage de deux années calendaires (UTC). */
-function ilYaDeuxAns(nowMs: number): number {
+/** Recule un horodatage de `annees` années calendaires (UTC). */
+function ilYaNAns(nowMs: number, annees: FenetreNetliq): number {
   const d = new Date(nowMs);
-  d.setUTCFullYear(d.getUTCFullYear() - 2);
+  d.setUTCFullYear(d.getUTCFullYear() - annees);
   return d.getTime();
 }
 
@@ -195,17 +199,58 @@ export function statsNetliq(serie: PointNetliq[]): {
 }
 
 /**
- * Récupère les trois séries FRED de la liquidité nette, sur une fenêtre de 2 ans
- * (observation_start = nowMs − 2 ans), chacune normalisée en milliards de dollars.
+ * Récupère les trois séries FRED de la liquidité nette, sur une fenêtre de `annees`
+ * années (observation_start = nowMs − annees, via setUTCFullYear), chacune normalisée
+ * en milliards de dollars.
  */
 export async function fetchSeriesNetliq(
   nowMs: number,
+  annees: FenetreNetliq,
 ): Promise<{ walcl: PointFred[]; tga: PointFred[]; rrp: PointFred[] }> {
-  const debutMs = ilYaDeuxAns(nowMs);
+  const debutMs = ilYaNAns(nowMs, annees);
   const [walcl, tga, rrp] = await Promise.all([
     fetchSerieFred(SERIE_WALCL, debutMs, FACTEUR_MILLIONS_VERS_MILLIARDS),
     fetchSerieFred(SERIE_TGA, debutMs, FACTEUR_MILLIONS_VERS_MILLIARDS),
     fetchSerieFred(SERIE_RRP, debutMs, FACTEUR_DEJA_MILLIARDS),
   ]);
   return { walcl, tga, rrp };
+}
+
+/**
+ * Limite RÉELLE de bougies renvoyées par appel klines 1d Binance, vérifiée live le
+ * 2026-07-23 (`curl ".../api/v3/klines?symbol=BTCUSDT&interval=1d&limit=1500"` → 1000
+ * lignes) : le paramètre `limit` est plafonné à 1000 côté Binance, quelle que soit la
+ * valeur demandée. D'où la pagination pour couvrir 5 a (~1826 j) et 10 a (~3653 j).
+ */
+const KLINES_MAX_PAR_APPEL = 1000;
+/** Plafond de pages : 10 a ≈ 3653 j tient en 4 pages de 1000 (garde-fou anti-boucle). */
+const KLINES_MAX_PAGES = 4;
+
+/**
+ * Klines journalières (1d) d'un symbole Binance, par pagination ARRIÈRE (`endTime`
+ * décroissant, mécanique du store cbprem) jusqu'à couvrir ~`nJours` jours ou atteindre
+ * `KLINES_MAX_PAGES` pages. Réutilise `binanceAdapter.fetchKlines` (aucune URL nouvelle).
+ * Résultat DÉDUPLIQUÉ par openTime (le chevauchement de frontière entre pages est absorbé)
+ * puis TRIÉ par t croissant. Sert l'overlay BTC de NETLIQ (échec géré par l'appelant).
+ */
+export async function fetchKlines1dPagine(
+  symbol: string,
+  nJours: number,
+): Promise<{ t: number; close: number }[]> {
+  const parJour = new Map<number, number>(); // openTime ms → close (dédoublonnage)
+  let endTime: number | undefined;
+  for (let page = 0; page < KLINES_MAX_PAGES; page++) {
+    const reste = nJours - parJour.size;
+    if (reste <= 0) break;
+    const limit = Math.min(KLINES_MAX_PAR_APPEL, reste);
+    const batch = await binanceAdapter.fetchKlines(symbol, "1d", { limit, endTime });
+    if (batch.length === 0) break;
+    for (const c of batch) parJour.set(c.time, c.close);
+    // Binance renvoie chrono croissant → batch[0] est la bougie la plus ancienne de la page.
+    const plusAncien = batch[0];
+    if (plusAncien === undefined) break;
+    endTime = plusAncien.time - 1; // fenêtre suivante strictement plus ancienne
+    if (batch.length < limit) break; // page incomplète → plus rien en arrière
+  }
+  return [...parJour.entries()].map(([t, close]) => ({ t, close })).sort((a, b) => a.t - b.t);
 }

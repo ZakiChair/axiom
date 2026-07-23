@@ -1,7 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MacroSeries } from "./macro/types";
-import { normaliserSerie, serieNetliq, statsNetliq } from "./netliq";
+import { fetchKlines1dPagine, fetchSeriesNetliq, normaliserSerie, serieNetliq, statsNetliq } from "./netliq";
 import type { PointFred } from "./netliq";
+import { createFredM2Provider } from "./macro/fred";
+import { binanceAdapter } from "./binance";
+
+// Les fonctions pures (normaliserSerie/serieNetliq/statsNetliq) n'utilisent NI FRED NI
+// Binance : mocker ces deux modules n'affecte qu'elles fetchSeriesNetliq/fetchKlines1dPagine.
+vi.mock("./macro/fred", () => ({ createFredM2Provider: vi.fn() }));
+vi.mock("./binance", () => ({ binanceAdapter: { fetchKlines: vi.fn() } }));
 
 describe("normaliserSerie — normalisation d'unités FRED vers Md$", () => {
   it("convertit les millions de dollars en milliards (WALCL/WTREGEN, facteur 1e-3)", () => {
@@ -135,5 +142,104 @@ describe("statsNetliq — courant / delta4s / min2a / max2a", () => {
     const s = statsNetliq(serie);
     expect(s.delta4s).toBeNull();
     expect(s.courant).toBe(5040); // courant reste défini
+  });
+});
+
+/** observation_start attendu : nowMs reculé de `annees` années calendaires (UTC). */
+function debutAttendu(nowMs: number, annees: number): number {
+  const d = new Date(nowMs);
+  d.setUTCFullYear(d.getUTCFullYear() - annees);
+  return d.getTime();
+}
+
+describe("fetchSeriesNetliq — observation_start par fenêtre (1 / 2 / 5 / 10 a)", () => {
+  const providerMock = vi.mocked(createFredM2Provider);
+
+  beforeEach(() => {
+    providerMock.mockReset();
+  });
+
+  it.each([1, 2, 5, 10] as const)(
+    "fenêtre %i a → observation_start = now − %i a sur les 3 jambes",
+    async (annees) => {
+      const startsVus: (number | undefined)[] = [];
+      // Chaque appel de provider (une jambe) capture le `start` reçu puis renvoie [].
+      providerMock.mockImplementation(
+        () =>
+          ({
+            fetchSeries: async (opts?: { start?: number }) => {
+              startsVus.push(opts?.start);
+              return [] as MacroSeries;
+            },
+          }) as ReturnType<typeof createFredM2Provider>,
+      );
+
+      const nowMs = Date.parse("2026-07-23T00:00:00Z");
+      await fetchSeriesNetliq(nowMs, annees);
+
+      expect(startsVus).toHaveLength(3); // WALCL + TGA + RRP
+      for (const s of startsVus) expect(s).toBe(debutAttendu(nowMs, annees));
+    },
+  );
+});
+
+describe("fetchKlines1dPagine — pagination arrière par endTime, dédup, tri", () => {
+  const klinesMock = vi.mocked(binanceAdapter.fetchKlines);
+  const JOUR = 86_400_000;
+
+  beforeEach(() => {
+    klinesMock.mockReset();
+  });
+
+  /** Fabrique une page de bougies 1d : jours `[debut, debut+n[` (openTime = jour × JOUR). */
+  function page(debut: number, n: number): { time: number; close: number }[] {
+    return Array.from({ length: n }, (_, i) => ({ time: (debut + i) * JOUR, close: debut + i }));
+  }
+
+  it("joint 2 pages, dédoublonne le jour-frontière et trie par t croissant", async () => {
+    // nJours=1500 → page1 (récente, endTime undefined) : jours 501..1500 (1000 bougies).
+    // page2 (endTime = plus_ancien−1) : jours 1..501 (501 bougies) — le jour 501 se
+    // répète et doit être dédupliqué (union = jours 1..1500 = 1500 points).
+    klinesMock
+      .mockResolvedValueOnce(page(501, 1000) as never)
+      .mockResolvedValueOnce(page(1, 501) as never);
+
+    const res = await fetchKlines1dPagine("BTCUSDT", 1500);
+
+    expect(res).toHaveLength(1500); // dédup du jour 501
+    expect(res[0]?.t).toBe(1 * JOUR); // trié croissant
+    expect(res[res.length - 1]?.t).toBe(1500 * JOUR);
+    for (let i = 1; i < res.length; i++) expect(res[i]!.t).toBeGreaterThan(res[i - 1]!.t);
+
+    // Pagination arrière : 1er appel sans endTime, 2e avec endTime = plus_ancien − 1.
+    expect(klinesMock).toHaveBeenCalledTimes(2);
+    expect(klinesMock.mock.calls[0]?.[2]?.endTime).toBeUndefined();
+    expect(klinesMock.mock.calls[1]?.[2]?.endTime).toBe(501 * JOUR - 1);
+  });
+
+  it("s'arrête dès que la cible de jours est atteinte (≤ 4 pages)", async () => {
+    klinesMock.mockResolvedValue(page(1, 1000) as never);
+    await fetchKlines1dPagine("BTCUSDT", 30); // 30 j < 1000 → un seul appel
+    expect(klinesMock).toHaveBeenCalledTimes(1);
+    expect(klinesMock.mock.calls[0]?.[1]).toBe("1d");
+  });
+
+  it("couvre le pire cas 10 a (~3655 j) en EXACTEMENT 4 appels (limite 1000/appel)", async () => {
+    // 3655 j → limites 1000 / 1000 / 1000 / 655 sur 4 pages arrière disjointes.
+    // Pin de la contrainte load-bearing (KLINES_MAX_PAGES=4) : un cap cassé ou une
+    // formule nJours plus large tronquerait les données sans que les cas 1/2 pages
+    // ne le détectent.
+    klinesMock
+      .mockResolvedValueOnce(page(2656, 1000) as never)
+      .mockResolvedValueOnce(page(1656, 1000) as never)
+      .mockResolvedValueOnce(page(656, 1000) as never)
+      .mockResolvedValueOnce(page(1, 655) as never);
+
+    const res = await fetchKlines1dPagine("BTCUSDT", 3655);
+
+    expect(klinesMock).toHaveBeenCalledTimes(4);
+    expect(res).toHaveLength(3655); // couverture complète, aucune troncature
+    expect(res[0]?.t).toBe(1 * JOUR);
+    expect(res[res.length - 1]?.t).toBe(3655 * JOUR);
   });
 });

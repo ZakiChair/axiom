@@ -1,7 +1,7 @@
 /**
  * Store de la liquidité nette de la Fed (NETLIQ) — Zustand VANILLA.
  *
- * Un run (spec v1.4, branche feat/netliq) : fetch des trois séries FRED sur 2 ans
+ * Un run (spec v1.4, branche feat/netliq) : fetch des trois séries FRED sur la fenêtre choisie (1/2/5/10 ans)
  * (`fetchSeriesNetliq`, data/netliq.ts) → calcul PUR de la série de liquidité nette
  * (`serieNetliq`) → stats de synthèse (`statsNetliq`). Pas de polling : un run à
  * l'ouverture de la fenêtre + bouton Rafraîchir. Patron EXACT du store CBPREM :
@@ -20,10 +20,44 @@
  * le cache 12 h — il se ré-tente à la prochaine ouverture (terme `serie.length > 0`).
  */
 import { createStore } from "zustand/vanilla";
-import { fetchSeriesNetliq, serieNetliq, statsNetliq, type PointNetliq } from "../data/netliq";
+import {
+  fetchSeriesNetliq,
+  serieNetliq,
+  statsNetliq,
+  type FenetreNetliq,
+  type PointNetliq,
+} from "../data/netliq";
 
 /** TTL du cache en mémoire : 12 heures en millisecondes. */
 const TTL_MS = 12 * 60 * 60 * 1000;
+
+/** Fenêtre par défaut (comportement v1.4/v1.5 préservé au premier lancement). */
+const FENETRE_DEFAUT: FenetreNetliq = 2;
+/** Clé de persistance de la fenêtre choisie. */
+const CLE_FENETRE = "axiom:netliq:fenetre";
+/** Valeurs de fenêtre acceptées (garde de lecture tolérante). */
+const FENETRES_VALIDES: readonly FenetreNetliq[] = [1, 2, 5, 10];
+
+/** Lecture TOLÉRANTE de la fenêtre persistée : toute valeur absente/invalide → défaut 2 a. */
+function lireFenetre(): FenetreNetliq {
+  try {
+    if (typeof localStorage === "undefined") return FENETRE_DEFAUT;
+    const n = Number(localStorage.getItem(CLE_FENETRE));
+    return (FENETRES_VALIDES as readonly number[]).includes(n) ? (n as FenetreNetliq) : FENETRE_DEFAUT;
+  } catch {
+    return FENETRE_DEFAUT;
+  }
+}
+
+/** Écriture best-effort de la fenêtre (quota / localStorage indisponible → silencieux). */
+function ecrireFenetre(annees: FenetreNetliq): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(CLE_FENETRE, String(annees));
+  } catch {
+    /* silencieux : localStorage indisponible / readonly. */
+  }
+}
 
 export interface NetliqState {
   /** true pendant un run (désactive le bouton Rafraîchir). */
@@ -34,8 +68,16 @@ export interface NetliqState {
   erreur: string | null;
   /** Horodatage du dernier succès (fraîcheur affichée + base du TTL), sinon null. */
   majTs: number | null;
+  /** Fenêtre d'observation courante (années), persistée. */
+  fenetreAnnees: FenetreNetliq;
   /** Collecte + calcul. `force` (bouton Rafraîchir) court-circuite le TTL 12 h. */
   run: (force?: boolean) => Promise<void>;
+  /**
+   * Change la fenêtre : persiste, INVALIDE le cache (serie/stats/majTs remis à zéro pour
+   * que le skip TTL ne serve JAMAIS une série d'une autre fenêtre — ex. 2 a quand on
+   * demande 10 a), puis relance un run forcé. No-op si la fenêtre est inchangée.
+   */
+  setFenetre: (annees: FenetreNetliq) => void;
 }
 
 /** Identifiant du run courant : les résultats d'un run périmé (double clic / relance) sont ignorés. */
@@ -47,6 +89,16 @@ export const netliqStore = createStore<NetliqState>((set, get) => ({
   stats: null,
   erreur: null,
   majTs: null,
+  fenetreAnnees: lireFenetre(),
+
+  setFenetre: (annees) => {
+    if (get().fenetreAnnees === annees) return; // fenêtre inchangée → rien à faire
+    ecrireFenetre(annees);
+    // Invalidation au changement de fenêtre : serie/stats/majTs remis à zéro AVANT le run
+    // forcé — sans quoi le skip TTL pourrait servir la série de l'ancienne fenêtre.
+    set({ fenetreAnnees: annees, serie: [], stats: null, majTs: null });
+    void get().run(true);
+  },
 
   run: async (force = false) => {
     const nowMs = Date.now();
@@ -64,7 +116,7 @@ export const netliqStore = createStore<NetliqState>((set, get) => ({
 
     let series: Awaited<ReturnType<typeof fetchSeriesNetliq>>;
     try {
-      series = await fetchSeriesNetliq(nowMs);
+      series = await fetchSeriesNetliq(nowMs, get().fenetreAnnees);
     } catch {
       if (runId !== currentRunId) return;
       set({

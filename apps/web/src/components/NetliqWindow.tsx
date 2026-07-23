@@ -1,5 +1,5 @@
 /**
- * Fenêtre « NETLIQ » — Liquidité nette de la Fed : WALCL − TGA − RRP sur ~2 ans
+ * Fenêtre « NETLIQ » — Liquidité nette de la Fed : WALCL − TGA − RRP sur la fenêtre choisie (1/2/5/10 ans)
  * (séries FRED quotidiennes/hebdo forward-fillées, cf. data/netliq.ts). Niveau de
  * réserves nettes du système : sa PENTE est le signal (impulsion/retrait de liquidité).
  *
@@ -14,14 +14,13 @@
  * est un NIVEAU élevé (~5 800 Md$) qui varie de quelques centaines. Le domaine vertical
  * est donc calé sur les EXTRÊMES de la série (jamais forcé à contenir 0, sinon la courbe
  * s'écrase en haut du cadre) et il n'y a pas de remplissage bicolore up/down : juste une
- * courbe accent et deux repères min/max 2 ans en pointillés. Le teinté up/down ne concerne
+ * courbe accent et deux repères min/max de la fenêtre en pointillés. Le teinté up/down ne concerne
  * QUE le badge de delta 4 semaines.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { netliqStore } from "../store/netliq";
-import type { PointNetliq } from "../data/netliq";
-import { binanceAdapter } from "../data/binance";
+import { fetchKlines1dPagine, type FenetreNetliq, type PointNetliq } from "../data/netliq";
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { formatDateCourte, formatEntier, formatUsd, VALEUR_ABSENTE } from "../lib/format";
 import { normaliserSerieOverlay, ticksMd } from "./netliqWindow.util";
@@ -33,9 +32,18 @@ import {
   Fraicheur,
   InfobulleGraphe,
   NoteSource,
+  Segmente,
   Vide,
   type TonBadge,
 } from "./ui";
+
+/** Options du sélecteur de fenêtre (Segmente) : 1 a / 2 a / 5 a / 10 a. */
+const OPTIONS_FENETRE: ReadonlyArray<{ id: FenetreNetliq; label: string }> = [
+  { id: 1, label: "1 a" },
+  { id: 2, label: "2 a" },
+  { id: 5, label: "5 a" },
+  { id: 10, label: "10 a" },
+];
 
 // ─────────────────────────── Formatage Md$ (milliards de dollars) ───────────────────────────
 
@@ -124,7 +132,7 @@ interface DomaineY {
   /** Bornes du cadre (extrêmes de la série + marge de respiration). */
   vMin: number;
   vMax: number;
-  /** Extrêmes RÉELS de la série (repères min/max 2 ans, sans la marge). */
+  /** Extrêmes RÉELS de la série (repères min/max de la fenêtre affichée, sans la marge). */
   minData: number;
   maxData: number;
 }
@@ -210,7 +218,7 @@ function dessiner(
     ctx.fillText(formatEntier(t), g.left - 4, y);
   }
 
-  // Repères min/max 2 ans : lignes pointillées discrètes + étiquettes à droite.
+  // Repères min/max de la fenêtre : lignes pointillées discrètes + étiquettes à droite.
   const repere = (valeur: number, prefixe: string, dessous: boolean): void => {
     const y = yAt(g, valeur, dom);
     ctx.save();
@@ -302,17 +310,19 @@ export function NetliqWindow() {
   const stats = useStore(netliqStore, (s) => s.stats);
   const erreur = useStore(netliqStore, (s) => s.erreur);
   const majTs = useStore(netliqStore, (s) => s.majTs);
+  const fenetreAnnees = useStore(netliqStore, (s) => s.fenetreAnnees);
 
   const [survol, setSurvol] = useState<Survol | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Overlay BTC : toggle local (défaut ON) + série fetchée UNE fois. La garde `ref`
-  // « tenté » rend le fetch StrictMode-safe (même instance sur le double-effet, le ref
-  // persiste) et garantit que le toggle ne re-fetch JAMAIS. Échec → série reste null,
-  // overlay silencieusement absent (le cœur NETLIQ n'en dépend pas).
+  // Overlay BTC : toggle local (défaut ON) + série fetchée UNE fois PAR FENÊTRE. La garde
+  // `ref` mémorise la fenêtre déjà fetchée : elle rend le fetch StrictMode-safe (double-effet
+  // → 2e passe court-circuitée car ref === fenêtre), garantit que le toggle ne re-fetch JAMAIS
+  // (fenêtre inchangée), et déclenche un re-fetch au CHANGEMENT de fenêtre (ref ≠ fenêtre).
+  // Échec → série reste null, overlay silencieusement absent (le cœur NETLIQ n'en dépend pas).
   const [overlayBtc, setOverlayBtc] = useState(true);
   const [btcSerie, setBtcSerie] = useState<{ t: number; close: number }[] | null>(null);
-  const btcTenteRef = useRef(false);
+  const btcFenetreRef = useRef<FenetreNetliq | null>(null);
 
   // Index BTC par jour ISO (clôtures $) — sert au tooltip ; mémoïsé sur la série fetchée.
   const btcParJour = useMemo(
@@ -329,18 +339,20 @@ export function NetliqWindow() {
     if (!s.enCours && s.majTs === null && s.erreur === null) void s.run();
   }, []);
 
-  // Fetch BTC UNE fois au premier affichage de l'overlay (défaut ON → au montage).
-  // 1 appel klines Binance (patron store cbprem) ; jamais rejoué au toggle (garde ref).
+  // Fetch BTC au premier affichage de l'overlay et à chaque changement de fenêtre. Klines
+  // 1d paginées pour couvrir toute la fenêtre (nJours = annees×365 + 5 j de marge), ≤ 4
+  // appels. Le cache overlay est invalidé (setBtcSerie(null)) avant le re-fetch pour ne pas
+  // superposer une série d'une autre fenêtre. Jamais rejoué au toggle (fenêtre inchangée).
   useEffect(() => {
-    if (!overlayBtc || btcTenteRef.current) return;
-    btcTenteRef.current = true;
-    binanceAdapter
-      .fetchKlines("BTCUSDT", "1d", { limit: 730 })
-      .then((candles) => setBtcSerie(candles.map((c) => ({ t: c.time, close: c.close }))))
+    if (!overlayBtc || btcFenetreRef.current === fenetreAnnees) return;
+    btcFenetreRef.current = fenetreAnnees;
+    setBtcSerie(null);
+    fetchKlines1dPagine("BTCUSDT", fenetreAnnees * 365 + 5)
+      .then((points) => setBtcSerie(points))
       .catch(() => {
         /* overlay silencieusement absent — le cœur NETLIQ n'en dépend pas */
       });
-  }, [overlayBtc]);
+  }, [overlayBtc, fenetreAnnees]);
 
   // Dessin — redessine sur nouvelle série, overlay BTC (dispo/toggle) et redimensionnement.
   useEffect(() => {
@@ -391,9 +403,14 @@ export function NetliqWindow() {
       <EnTeteFenetre
         mnemo="NETLIQ"
         titre="Liquidité nette Fed"
-        sousTitre="WALCL − TGA − RRP · réserves nettes du système sur 2 ans"
+        sousTitre={`WALCL − TGA − RRP · réserves nettes du système sur ${fenetreAnnees} a`}
         actions={
           <div className="flex items-center gap-1.5">
+            <Segmente
+              options={OPTIONS_FENETRE}
+              actif={fenetreAnnees}
+              onChange={(a) => netliqStore.getState().setFenetre(a)}
+            />
             <button
               type="button"
               onClick={() => setOverlayBtc((v) => !v)}
@@ -490,7 +507,7 @@ export function NetliqWindow() {
 
         <div className="mt-3 flex items-center justify-between">
           <NoteSource>
-            FRED · WALCL − TGA − RRP · quotidien
+            FRED · WALCL − TGA − RRP · quotidien · fenêtre {fenetreAnnees} a
             {overlayBtc && btcSerie !== null && " · BTC superposé (échelle propre)"}
           </NoteSource>
           <Fraicheur loading={enCours} majTs={majTs} />

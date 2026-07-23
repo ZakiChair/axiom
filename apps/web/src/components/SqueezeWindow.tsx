@@ -59,13 +59,15 @@ const SEUIL_PANNEAU_PX = 520;
 const SCORE_MAX = Math.SQRT2;
 
 /**
- * Pont EQS : chaque étiquette de coin cliquable charge le preset screener du même
- * quadrant. carburant-squeeze (funding<0 & OI↑) ↔ « Crowded short » (shorts qui
- * s'accumulent = carburant à squeeze) ; longs-crowded (funding>0 & OI↑) ↔ « Crowded long ».
+ * Pont EQS : chaque étiquette de coin cliquable charge le preset SCÉNARIO screener du
+ * même quadrant (spec v1.5 §1) : carburant-squeeze (funding<0 & OI↑) ↔ « ▲ Long
+ * potentiel » ; longs-crowded (funding>0 & OI↑) ↔ « ▼ Short potentiel ». Ces presets
+ * vivent sur main (branche eqs-presets-scenario mergée) ; la garde d'absence ci-dessous
+ * couvre un checkout qui ne les aurait pas encore.
  */
 const PRESET_EQS: Record<"carburant" | "longs", string> = {
-  carburant: "builtin:crowded-short",
-  longs: "builtin:crowded-long",
+  carburant: "builtin:long-potentiel",
+  longs: "builtin:short-potentiel",
 };
 
 /** Libellés FR lisibles des quadrants (infobulle + étiquettes de coin). */

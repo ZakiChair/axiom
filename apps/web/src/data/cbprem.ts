@@ -4,6 +4,8 @@
  * POURQUOI : le gap % entre le spot Coinbase et le spot Binance est un proxy de
  * la demande institutionnelle US (Coinbase = plateforme dominante côté US) —
  * premium positif = Coinbase paie plus cher (demande US) ; négatif = décote.
+ * NB : Coinbase cote en USD, Binance en USDT — le signal est donc USD vs USDT et
+ * inclut l'écart de peg USDT (pas un pur écart Coinbase/Binance en devise identique).
  * Aucun fetch ici : les effets réseau vivent dans store/cbprem.ts (Task 2).
  */
 

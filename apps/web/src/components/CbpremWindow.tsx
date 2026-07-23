@@ -357,7 +357,9 @@ export function CbpremWindow() {
         )}
 
         <div className="mt-3 flex items-center justify-between">
-          <NoteSource>Coinbase vs Binance · klines 1h · 30 j</NoteSource>
+          <NoteSource>
+            Coinbase vs Binance · klines 1h · 30 j · USD vs USDT — inclut l'écart de peg
+          </NoteSource>
           <Fraicheur loading={enCours} majTs={majTs} />
         </div>
       </div>

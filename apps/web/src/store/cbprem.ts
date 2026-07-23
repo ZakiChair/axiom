@@ -7,8 +7,11 @@
  * calcul (alignement par openTime + stats) est PUR (data/cbprem.ts). Pas de polling :
  * un run à l'ouverture de la fenêtre + bouton Rafraîchir. Erreur NON destructive dès
  * la v1 (patron squeeze post-v1.1) : la série existante reste affichée, `erreur` n'est
- * effacée qu'au succès. Garde de péremption `currentRunId` (double clic / changement de
- * base) : les résultats d'un run périmé sont ignorés.
+ * effacée qu'au succès. Garde 200-vide : un succès HTTP à série vide n'écrase PAS une
+ * série valide déjà affichée — la série/stats/majTs existants sont conservés et `erreur`
+ * est posée (sinon un 200 vide effacerait silencieusement une courbe valide). Garde de
+ * péremption `currentRunId` (double clic / changement de base) : les résultats d'un run
+ * périmé sont ignorés.
  *
  * Filtrage de clôture : `serieCbprem` ne peut PAS filtrer les bougies en formation (sa
  * signature `{t, close}` n'expose pas `closed`). C'est le store qui écarte la dernière
@@ -126,6 +129,13 @@ export const cbpremStore = createStore<CbpremState>((set, get) => ({
     // Écarte la bougie en formation de chaque venue AVANT l'alignement, puis calcul pur.
     const serie = serieCbprem(versPointsClos(klinesCb), versPointsClos(klinesBn));
     const stats = statsPremium(serie);
+
+    if (serie.length === 0 && get().serie.length > 0) {
+      // Garde 200-vide : un succès HTTP à série vide n'écrase PAS une série valide déjà
+      // affichée (violerait l'invariant erreur non destructive) — on conserve l'existant.
+      set({ enCours: false, erreur: "Réponse vide des venues — courbe précédente conservée." });
+      return;
+    }
 
     // Succès : série/stats mises à jour, `erreur` effacée, fraîcheur horodatée.
     set({ enCours: false, serie, stats, erreur: null, majTs: Date.now() });

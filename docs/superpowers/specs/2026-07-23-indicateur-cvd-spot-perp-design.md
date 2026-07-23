@@ -17,7 +17,8 @@ Livrer l'item ⭐ Tier 1 du catalogue maison (`docs/research/02-indicateurs-edge
 `apps/web/src/chart/auxProvider.ts` :
 - Nouvel `AuxSeriesId` : `perpDelta` (`packages/types`) — **delta agresseur perp par bougie**, en unités base.
 - Source : `fapi/v1/klines` du perp de même base (résolution du symbole perp : même convention que les features existantes spot→perp du repo). Delta = `2 × takerBuyBaseVolume − volume` par bougie.
-- Alignement sur les bougies du chart (mécanisme `alignAux` existant), TTL cohérent avec les séries fapi existantes, single-flight.
+- **Fetché à l'interval du timeframe COURANT du chart** (un FLUX, pas un niveau : le LOCF d'`alignAux` fabriquerait un flux faux — delta horaire jeté en 1d, répété/cumulé en 1m). À interval identique l'alignement tombe 1:1 (mêmes openTime UTC klines spot/perp Binance). La clé de cache single-flight de `perpDelta` intègre donc le timeframe (les séries de niveaux gardent `(id, symbole)`). Timeframes AXIOM absents de fapi (sous-minute `1s/5s/15s`, agrégats client `3M/6M/12M`) → série vide.
+- TTL cohérent avec les séries fapi existantes, single-flight.
 - Dégradation : pas de perp pour la base, ou exchange ≠ binance → série vide (convention défensive existante, l'indicateur doit le tolérer).
 
 ## L'indicateur (`packages/indicators/src/orderflow/cvdSpotPerp.ts`)

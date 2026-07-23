@@ -4,7 +4,9 @@ import {
   parseTakerHistory,
   parseOiHistory,
   deltaDepuisKlinesPerp,
+  timeframeToFapiInterval,
 } from "./binanceFutures";
+import type { Timeframe } from "@axiom/types";
 import { aggTradeToTrade, type BinanceAggTrade } from "./binance";
 
 /**
@@ -156,5 +158,28 @@ describe("mapping aggTrade perp (fstream) — via aggTradeToTrade réutilisé", 
       qty: 0.203,
       side: "buy",
     });
+  });
+});
+
+describe("timeframeToFapiInterval", () => {
+  it("mappe les timeframes communs vers l'intervalle fapi (identité)", () => {
+    const supportes: Timeframe[] = [
+      "1m", "3m", "5m", "15m", "30m",
+      "1h", "2h", "4h", "6h", "12h",
+      "1d", "3d", "1w", "1M",
+    ];
+    for (const tf of supportes) expect(timeframeToFapiInterval(tf)).toBe(tf);
+  });
+
+  it("rend undefined pour le sous-minute (fapi minimum = 1m)", () => {
+    expect(timeframeToFapiInterval("1s")).toBeUndefined();
+    expect(timeframeToFapiInterval("5s")).toBeUndefined();
+    expect(timeframeToFapiInterval("15s")).toBeUndefined();
+  });
+
+  it("rend undefined pour les agrégats client absents de fapi (3M/6M/12M)", () => {
+    expect(timeframeToFapiInterval("3M")).toBeUndefined();
+    expect(timeframeToFapiInterval("6M")).toBeUndefined();
+    expect(timeframeToFapiInterval("12M")).toBeUndefined();
   });
 });

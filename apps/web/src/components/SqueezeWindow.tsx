@@ -16,19 +16,34 @@ import { useStore } from "zustand";
 import { squeezeStore } from "../store/squeeze";
 import { marketStore } from "../store/market";
 import { navigateTo } from "../lib/navigation";
-import { plusProchePoint, rayonPoint, type PointRadar, type QuadrantSqueeze } from "../data/squeeze";
+import {
+  plusProchePoint,
+  rayonPoint,
+  SEUIL_DOI_PCT,
+  SEUIL_FUNDING_PCT,
+  type PointRadar,
+  type QuadrantSqueeze,
+} from "../data/squeeze";
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { formatPct, formatUsd } from "../lib/format";
 import { Chargement, EnTeteFenetre, ErreurBloc, Fraicheur, NoteSource, Vide } from "./ui";
-import { domaineAxes, placerLabels, projeterEnPixels, type PointPixel } from "./squeezeWindow.util";
+import {
+  domaineAxesRobuste,
+  estEcrete,
+  genTicks,
+  placerLabels,
+  projeterEnPixels,
+  scoreSqueeze,
+  type PointPixel,
+} from "./squeezeWindow.util";
 
 // ─────────────────────────── Constantes de rendu ───────────────────────────
 
-/** Marge intérieure du canvas (px CSS) : loge les bulles RAYON_MAX + labels sans rogner. */
-const PAD = 34;
+/** Marge intérieure du canvas (px CSS) : loge bulles RAYON_MAX + graduations d'axes. */
+const PAD = 40;
 /** Rayon de capture du survol (px), aligné sur le cahier des charges. */
 const CAPTURE = 12;
-/** Nombre de symboles étiquetés (les plus gros volumes). */
+/** Nombre de symboles étiquetés (les plus intenses au sens scoreSqueeze). */
 const NB_LABELS = 8;
 /** Taille max estimée de l'infobulle (px CSS) : sert à la retourner près des bords. */
 const TOOLTIP_W = 170;
@@ -42,6 +57,46 @@ const LABEL_QUADRANT: Record<QuadrantSqueeze, string> = {
   deleveraging: "Déleveraging",
   neutre: "Neutre",
 };
+
+/**
+ * Couleur par quadrant : token CSS (thème courant) + repli hex (valeurs Dark d'index.css,
+ * contexte sans DOM). Cinq teintes distinctes — carburant-squeeze en vert « up », les deux
+ * crowded en rouge/bleu, deleveraging en ambre, neutre en gris dim. Partagé par le canvas
+ * (rgbaTokenCanvas) et la légende (var(--token) en CSS).
+ */
+const COULEUR_QUADRANT: Record<QuadrantSqueeze, { token: string; repli: string }> = {
+  "carburant-squeeze": { token: "--up", repli: "#2dc08e" },
+  "longs-crowded": { token: "--down", repli: "#f92855" },
+  "shorts-crowded": { token: "--accent", repli: "#38bdf8" },
+  deleveraging: { token: "--serie-3", repli: "#f59e0b" },
+  neutre: { token: "--text-dim", repli: "#9ca3af" },
+};
+
+/** Ordre d'affichage des pastilles de la légende (mêmes libellés que LABEL_QUADRANT). */
+const ORDRE_LEGENDE: QuadrantSqueeze[] = [
+  "carburant-squeeze",
+  "longs-crowded",
+  "shorts-crowded",
+  "deleveraging",
+  "neutre",
+];
+
+/** Légende chromatique fine sous le canvas : 5 pastilles rondes + libellés (10px). */
+function LegendeQuadrants() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-text-dim">
+      {ORDRE_LEGENDE.map((q) => (
+        <span key={q} className="inline-flex items-center gap-1">
+          <span
+            className="inline-block h-2 w-2 rounded-full"
+            style={{ backgroundColor: `var(${COULEUR_QUADRANT[q].token})` }}
+          />
+          {LABEL_QUADRANT[q]}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 // ─────────────────────────── Composant ───────────────────────────
 
@@ -99,12 +154,34 @@ export function SqueezeWindow() {
       const texte = lireTokenCanvas("--text", "#e5e7eb");
       const border = lireTokenCanvas("--border", "#262626");
 
-      const domaine = domaineAxes(points);
+      const domaine = domaineAxesRobuste(points);
       // Pixel de l'origine (funding=0, ΔOI=0) via la MÊME projection que les points :
       // garantit que les lignes de quadrant coïncident avec le repère des bulles.
       const [origine] = projeterEnPixels([{ fundingPct: 0, dOiPct: 0 }], domaine, w, h, PAD);
       const cx = origine?.x ?? w / 2;
       const cy = origine?.y ?? h / 2;
+
+      // Zone neutre : rect [±SEUIL_FUNDING] × [±SEUIL_DOI] PROJETÉ (mêmes coins que les
+      // bulles) — fond très discret + libellé, pour situer le seuil de « bruit ».
+      const [coinHG, coinBD] = projeterEnPixels(
+        [
+          { fundingPct: -SEUIL_FUNDING_PCT, dOiPct: SEUIL_DOI_PCT },
+          { fundingPct: SEUIL_FUNDING_PCT, dOiPct: -SEUIL_DOI_PCT },
+        ],
+        domaine,
+        w,
+        h,
+        PAD,
+      );
+      if (coinHG !== undefined && coinBD !== undefined) {
+        ctx.fillStyle = rgbaTokenCanvas("--text-dim", 0.06, "#9ca3af");
+        ctx.fillRect(coinHG.x, coinHG.y, coinBD.x - coinHG.x, coinBD.y - coinHG.y);
+        ctx.fillStyle = dim;
+        ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("neutre", (coinHG.x + coinBD.x) / 2, (coinHG.y + coinBD.y) / 2);
+      }
 
       // Lignes de quadrant en pointillé (axes x=0 et y=0) + cadre discret.
       ctx.strokeStyle = border;
@@ -121,6 +198,29 @@ export function SqueezeWindow() {
       ctx.stroke();
       ctx.restore();
 
+      // Graduations « rondes » (genTicks) : funding sous le cadre, ΔOI à gauche, projetées
+      // par la MÊME projection que les bulles. Titres d'axes aux extrémités.
+      ctx.fillStyle = dim;
+      ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      for (const t of genTicks(-domaine.fMax, domaine.fMax, 5)) {
+        const [px] = projeterEnPixels([{ fundingPct: t, dOiPct: 0 }], domaine, w, h, PAD);
+        if (px !== undefined) ctx.fillText(formatPct(t, 2), px.x, h - PAD + 4);
+      }
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      for (const t of genTicks(-domaine.oMax, domaine.oMax, 5)) {
+        const [px] = projeterEnPixels([{ fundingPct: 0, dOiPct: t }], domaine, w, h, PAD);
+        if (px !== undefined) ctx.fillText(formatPct(t, 2), PAD - 4, px.y);
+      }
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.fillText("funding %/8 h", w / 2, h - 3);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillText("ΔOI %", 2, 2);
+
       // Étiquettes de quadrant dans les quatre coins (ΔOI+ en haut ; funding+ à droite).
       ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
       ctx.fillStyle = dim;
@@ -134,35 +234,44 @@ export function SqueezeWindow() {
       ctx.textAlign = "left";
       ctx.fillText(LABEL_QUADRANT["shorts-crowded"], PAD + 4, h - PAD - 3);
 
-      // Projection + rayons.
-      const proj = projeterEnPixels(points, domaine, w, h, PAD);
+      // Projection : points ÉCRÊTÉS plaqués au bord (clamp AVANT projection). projRef partage
+      // ces positions clampées → le hit-test vise la bulle telle que dessinée (l'infobulle
+      // lit points[idx], donc affiche la vraie valeur hors échelle, pas la clampée).
+      const pointsClampes = points.map((p) => ({
+        fundingPct: Math.min(domaine.fMax, Math.max(-domaine.fMax, p.fundingPct)),
+        dOiPct: Math.min(domaine.oMax, Math.max(-domaine.oMax, p.dOiPct)),
+      }));
+      const proj = projeterEnPixels(pointsClampes, domaine, w, h, PAD);
       projRef.current = proj;
       const volumeMax = points.reduce((m, p) => Math.max(m, p.volumeUsd24h), 0);
 
-      // Bulles : semi-transparentes, colorées par quadrant (up = squeeze, down = longs crowded).
+      // Bulles : semi-transparentes, cinq couleurs par quadrant (COULEUR_QUADRANT). Neutre
+      // en gris plus effacé (fill 0.25). Un point écrêté porte un second anneau (r+2.5)
+      // signalant qu'il est plaqué au bord (valeur hors échelle).
       points.forEach((p, i) => {
         const px = proj[i];
         if (px === undefined) return;
         const r = rayonPoint(p.volumeUsd24h, volumeMax);
-        const token =
-          p.quadrant === "carburant-squeeze"
-            ? "--up"
-            : p.quadrant === "longs-crowded"
-              ? "--down"
-              : "--text-dim";
-        const repli = p.quadrant === "carburant-squeeze" ? "#2dc08e" : p.quadrant === "longs-crowded" ? "#f92855" : "#94a3b8";
+        const { token, repli } = COULEUR_QUADRANT[p.quadrant];
+        const alphaFill = p.quadrant === "neutre" ? 0.25 : 0.45;
         ctx.beginPath();
         ctx.arc(px.x, px.y, r, 0, Math.PI * 2);
-        ctx.fillStyle = rgbaTokenCanvas(token, 0.45, repli);
+        ctx.fillStyle = rgbaTokenCanvas(token, alphaFill, repli);
         ctx.fill();
         ctx.lineWidth = 1;
         ctx.strokeStyle = rgbaTokenCanvas(token, 0.9, repli);
         ctx.stroke();
+        if (estEcrete(p, domaine)) {
+          ctx.beginPath();
+          ctx.arc(px.x, px.y, r + 2.5, 0, Math.PI * 2);
+          ctx.stroke();
+        }
       });
 
-      // Étiquettes des NB_LABELS plus gros volumes (au-dessus des bulles).
+      // Étiquettes des NB_LABELS points les plus INTENSES (scoreSqueeze), pas les plus gros
+      // volumes : on nomme les candidats de squeeze, pas les mastodontes calmes.
       const topIdx = [...points.keys()]
-        .sort((a, b) => (points[b]?.volumeUsd24h ?? 0) - (points[a]?.volumeUsd24h ?? 0))
+        .sort((a, b) => scoreSqueeze(points[b]!, domaine) - scoreSqueeze(points[a]!, domaine))
         .slice(0, NB_LABELS);
       ctx.fillStyle = texte;
       ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
@@ -246,6 +355,7 @@ export function SqueezeWindow() {
         ) : points.length === 0 ? (
           <Vide>Aucun symbole exploitable (funding et ΔOI requis). Réessayez avec Rafraîchir.</Vide>
         ) : (
+          <>
           <div className="relative min-h-0 flex-1">
             {/* Refresh non destructif : un nuage valide n'est jamais remplacé par un bloc
                 d'erreur ; en cas d'échec du retry, seul un bandeau discret le signale. */}
@@ -287,6 +397,10 @@ export function SqueezeWindow() {
               </div>
             )}
           </div>
+          <div className="mt-2">
+            <LegendeQuadrants />
+          </div>
+          </>
         )}
 
         <div className="mt-3 flex items-center justify-between">

@@ -37,32 +37,6 @@ export interface LabelCandidat {
   texte: string;
 }
 
-/** Marge multiplicative autour du point le plus extrême (respiration des bulles). */
-const PAD_DOMAINE = 1.15;
-/** Demi-étendue minimale de l'axe funding (%/8 h) — garde 0 centré même sans donnée. */
-const F_DEMI_MIN = 0.02;
-/** Demi-étendue minimale de l'axe ΔOI (%) — idem, échelle lisible par défaut. */
-const O_DEMI_MIN = 5;
-
-/**
- * Domaine symétrique autour de 0 englobant tous les points, avec padding. Renvoie une
- * demi-étendue strictement positive par axe (fMax, oMax > 0) : 0 reste donc toujours au
- * centre, donc visible. Sans point (ou coordonnées non finies), retombe sur les minima.
- * PURE.
- */
-export function domaineAxes(points: readonly CoordRadar[]): DomaineAxes {
-  let fm = 0;
-  let om = 0;
-  for (const p of points) {
-    if (Number.isFinite(p.fundingPct)) fm = Math.max(fm, Math.abs(p.fundingPct));
-    if (Number.isFinite(p.dOiPct)) om = Math.max(om, Math.abs(p.dOiPct));
-  }
-  return {
-    fMax: Math.max(F_DEMI_MIN, fm * PAD_DOMAINE),
-    oMax: Math.max(O_DEMI_MIN, om * PAD_DOMAINE),
-  };
-}
-
 /**
  * Projette chaque point (funding, ΔOI) dans la zone de tracé [pad, w−pad] × [pad, h−pad].
  * Mapping linéaire : funding −fMax→gauche / +fMax→droite ; ΔOI +oMax→haut / −oMax→bas
@@ -164,8 +138,7 @@ export function quantile(valeurs: readonly number[], q: number): number | undefi
  * max(|q2 %|, |q98 %|), symétrisée autour de 0, avec un plancher à 2× le seuil de
  * neutralité de l'axe (SEUIL_FUNDING_PCT / SEUIL_DOI_PCT). Un outlier isolé au-delà du
  * 98ᵉ centile n'étire donc pas l'échelle ; sur un nuage calme, l'axe reste au plancher
- * (la zone neutre ±seuil occupe alors la moitié de la demi-étendue). Remplace
- * `domaineAxes` pour le rendu (l'ancienne reste tant qu'un consommateur l'utilise). PURE.
+ * (la zone neutre ±seuil occupe alors la moitié de la demi-étendue). PURE.
  */
 export function domaineAxesRobuste(points: readonly CoordRadar[]): DomaineAxes {
   const fundings = points.map((p) => p.fundingPct);

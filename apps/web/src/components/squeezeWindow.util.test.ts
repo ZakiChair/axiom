@@ -5,7 +5,6 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  domaineAxes,
   domaineAxesRobuste,
   estEcrete,
   genTicks,
@@ -28,46 +27,13 @@ function pt(fundingPct: number, dOiPct: number) {
   return { fundingPct, dOiPct };
 }
 
-describe("domaineAxes", () => {
-  it("renvoie des demi-étendues strictement positives même sans point (0 visible)", () => {
-    const d = domaineAxes([]);
-    // Un domaine [-fMax, fMax] avec fMax>0 garantit que x=0 (resp. y=0) est au centre,
-    // donc TOUJOURS visible — condition du cahier des charges.
-    expect(d.fMax).toBeGreaterThan(0);
-    expect(d.oMax).toBeGreaterThan(0);
-  });
-
-  it("englobe tous les points sur chaque axe (borne ≥ max |valeur|)", () => {
-    const points = [pt(0.05, 12), pt(-0.09, -4), pt(0.02, 20)];
-    const d = domaineAxes(points);
-    // Le point le plus extrême doit rester DANS le domaine : fMax ≥ |−0.09|, oMax ≥ |20|.
-    expect(d.fMax).toBeGreaterThanOrEqual(0.09);
-    expect(d.oMax).toBeGreaterThanOrEqual(20);
-  });
-
-  it("est symétrique autour de 0 (le domaine renvoie une seule demi-étendue par axe)", () => {
-    const d = domaineAxes([pt(0.3, -50)]);
-    // La symétrie est structurelle : le domaine est [-fMax, fMax] / [-oMax, oMax].
-    // On vérifie que la borne couvre bien la valeur négative comme positive.
-    expect(d.fMax).toBeGreaterThanOrEqual(0.3);
-    expect(d.oMax).toBeGreaterThanOrEqual(50);
-  });
-
-  it("applique un padding : la borne dépasse strictement le point extrême", () => {
-    const d = domaineAxes([pt(0.1, 10)]);
-    // Padding = marge de respiration pour que les bulles ne collent pas au bord.
-    expect(d.fMax).toBeGreaterThan(0.1);
-    expect(d.oMax).toBeGreaterThan(10);
-  });
-});
-
 describe("projeterEnPixels", () => {
   const w = 400;
   const h = 300;
   const pad = 30;
 
   it("projette (0,0) au centre de la zone de tracé", () => {
-    const d = domaineAxes([pt(0.1, 10)]);
+    const d = { fMax: 0.1, oMax: 10 };
     const [p] = projeterEnPixels([pt(0, 0)], d, w, h, pad);
     expect(p!.x).toBeCloseTo(w / 2, 6);
     expect(p!.y).toBeCloseTo(h / 2, 6);
@@ -268,6 +234,13 @@ describe("genTicks", () => {
     const tO = genTicks(-25, 25, 5);
     expect(tO.length).toBeGreaterThanOrEqual(4);
     expect(tO.length).toBeLessThanOrEqual(6);
+  });
+
+  it("plancher ΔOI ±6 (2× seuil) : 7 crans de pas 2 — tolérance documentée > 4-6", () => {
+    // Épinglage (revue T1) : le plancher ΔOI winsorisé vaut 2×SEUIL_DOI_PCT = 6. Aucun pas
+    // 1/2/5 ne donne exactement 4-6 crans sur [−6, 6] ; genTicks retient alors le plus proche
+    // (pas 2 → 7 crans), ce qui DÉPASSE la cible nominale 4-6. On fige ce comportement.
+    expect(genTicks(-6, 6, 5)).toEqual([-6, -4, -2, 0, 2, 4, 6]);
   });
 
   it("plancher funding ±0.02 (domaine le plus fréquent) : crans symétriques exacts", () => {

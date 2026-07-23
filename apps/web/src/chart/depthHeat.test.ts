@@ -22,6 +22,23 @@ vi.mock("../data/depth", async (importOriginal) => {
   return { ...actual, souscrireDepth: subDepthSpy };
 });
 
+// depthHeat importe ./liquidationHeat (rampes theme-aware réutilisées par le CONTRÔLEUR canvas,
+// non testé ici) — qui tire klinecharts, ./drawing, ../store/theme et les flux liquidations à
+// l'import. On stubbe le tout pour importer les fonctions PURES en environnement Node (mêmes
+// stubs que liquidationHeat.test.ts). Le contrôleur DepthHeatController n'est jamais instancié
+// dans ces tests (couplage KLineChart/DOM, convention repo).
+vi.mock("klinecharts", () => ({ registerOverlay: () => {} }));
+vi.mock("./drawing", () => ({ getActiveChart: () => null }));
+vi.mock("../store/theme", () => ({
+  themeStore: { getState: () => ({ theme: "dark" }), subscribe: () => () => {} },
+}));
+vi.mock("../data/liquidations", () => ({ subscribeLiquidations: () => () => {} }));
+vi.mock("../data/coinalyze", () => ({ fetchLiquidationHistory: async () => [] }));
+vi.mock("../data/daemon", () => ({
+  liquidationsGet: async () => null,
+  liquidationsPush: async () => false,
+}));
+
 import type { OrderBook } from "../data/depth";
 import { marketStore } from "../store/market";
 import {
@@ -189,23 +206,33 @@ describe("intensiteLogDepth", () => {
 
 describe("decisionAbonnement (logique pure de (ré)abonnement)", () => {
   it("actif=false, jamais abonné → rien", () => {
-    expect(decisionAbonnement(false, "BTCUSDT", null)).toEqual({ action: "rien" });
+    expect(decisionAbonnement(false, "binance", "BTCUSDT", null)).toEqual({ action: "rien" });
   });
 
   it("actif=false, abonné à un symbole → désabonner (implique un reset du buffer)", () => {
-    expect(decisionAbonnement(false, "BTCUSDT", "BTCUSDT")).toEqual({ action: "desabonner" });
+    expect(decisionAbonnement(false, "binance", "BTCUSDT", "BTCUSDT")).toEqual({ action: "desabonner" });
   });
 
-  it("actif=true, jamais abonné → souscrire au symbole courant", () => {
-    expect(decisionAbonnement(true, "BTCUSDT", null)).toEqual({ action: "souscrire", symbol: "BTCUSDT" });
+  it("actif=true (Binance), jamais abonné → souscrire au symbole courant", () => {
+    expect(decisionAbonnement(true, "binance", "BTCUSDT", null)).toEqual({ action: "souscrire", symbol: "BTCUSDT" });
   });
 
-  it("actif=true, déjà abonné au bon symbole → rien (pas de resouscription superflue)", () => {
-    expect(decisionAbonnement(true, "BTCUSDT", "BTCUSDT")).toEqual({ action: "rien" });
+  it("actif=true (Binance), déjà abonné au bon symbole → rien (pas de resouscription superflue)", () => {
+    expect(decisionAbonnement(true, "binance", "BTCUSDT", "BTCUSDT")).toEqual({ action: "rien" });
   });
 
-  it("actif=true, changement de symbole → souscrire au nouveau (implique un reset du buffer)", () => {
-    expect(decisionAbonnement(true, "ETHUSDT", "BTCUSDT")).toEqual({ action: "souscrire", symbol: "ETHUSDT" });
+  it("actif=true (Binance), changement de symbole → souscrire au nouveau (implique un reset du buffer)", () => {
+    expect(decisionAbonnement(true, "binance", "ETHUSDT", "BTCUSDT")).toEqual({ action: "souscrire", symbol: "ETHUSDT" });
+  });
+
+  // Garde exchange : souscrireDepth est Binance-only (cf. DomWindow.tsx). Sur un autre
+  // exchange, actif reste basculable mais AUCUNE souscription — on traite comme inactif.
+  it("actif=true mais exchange non-Binance, jamais abonné → rien (aucune souscription hors Binance)", () => {
+    expect(decisionAbonnement(true, "bybit", "BTCUSDT", null)).toEqual({ action: "rien" });
+  });
+
+  it("actif=true mais exchange non-Binance, encore abonné (passage binance→autre) → désabonner", () => {
+    expect(decisionAbonnement(true, "okx", "BTCUSDT", "BTCUSDT")).toEqual({ action: "desabonner" });
   });
 });
 

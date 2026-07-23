@@ -21,3 +21,16 @@ describe("orderflowStore — toggle cvdSpotPerp (Task 17)", () => {
     expect(orderflowStore.getState().cvdSpotPerp).toBe(false);
   });
 });
+
+describe("orderflowStore — seuil notionnel baleine (WHALE)", () => {
+  it("vaut 100 000 $ par défaut", () => {
+    expect(orderflowStore.getState().whaleNotionalMin).toBe(100_000);
+  });
+
+  it("setWhaleNotionalMin met à jour la valeur", () => {
+    orderflowStore.getState().setWhaleNotionalMin(250_000);
+    expect(orderflowStore.getState().whaleNotionalMin).toBe(250_000);
+    orderflowStore.getState().setWhaleNotionalMin(100_000);
+    expect(orderflowStore.getState().whaleNotionalMin).toBe(100_000);
+  });
+});

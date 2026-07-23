@@ -93,6 +93,107 @@ async function fetchSerieFred(seriesId: string, debutMs: number, facteur: number
   return normaliserSerie(brute, facteur);
 }
 
+/** Un point de la série de liquidité nette. */
+export interface PointNetliq {
+  /** Date ISO "YYYY-MM-DD" (UTC). */
+  date: string;
+  /** Liquidité nette en milliards de dollars (Md$) : walcl − tga − rrp. */
+  netliq: number;
+}
+
+/** Durée en millisecondes de la fenêtre delta4s (≈ 4 semaines / 28 jours). */
+const MS_28_JOURS = 28 * 24 * 60 * 60 * 1000;
+
+/**
+ * Renvoie une COPIE triée par date croissante d'une jambe FRED. Le tri lexicographique
+ * des dates ISO "YYYY-MM-DD" équivaut au tri chronologique — d'où la tolérance au
+ * désordre d'entrée.
+ */
+function trierParDate(jambe: PointFred[]): PointFred[] {
+  return [...jambe].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+/**
+ * LOCF (Last Observation Carried Forward, NIVEAU) : dernière valeur d'une jambe TRIÉE
+ * dont la date est ≤ `date`. Renvoie `null` si la jambe n'est pas encore amorcée à
+ * cette date (aucune observation antérieure ou égale).
+ */
+function valeurLocf(jambeTriee: PointFred[], date: string): number | null {
+  let valeur: number | null = null;
+  for (const point of jambeTriee) {
+    if (point.date <= date) valeur = point.valeur;
+    else break;
+  }
+  return valeur;
+}
+
+/**
+ * Construit la série de liquidité nette : netliq = walcl − tga − rrp.
+ *
+ * Axe des dates = UNION des dates des TROIS jambes (décision contrôleur : WALCL et TGA
+ * sont HEBDO, seul RRP est quotidien — voir en-tête ; en pratique l'axe quotidien vient
+ * du RRP). Chaque jambe est forward-fillée en NIVEAU (LOCF) depuis sa dernière valeur
+ * connue, ce qui absorbe les jambes hebdo étalées sur les jours du RRP. Un point n'est
+ * émis qu'une fois les 3 jambes amorcées (première date = max des premières dates).
+ * Sortie triée chronologiquement. Fonction pure.
+ */
+export function serieNetliq(walcl: PointFred[], tga: PointFred[], rrp: PointFred[]): PointNetliq[] {
+  const w = trierParDate(walcl);
+  const t = trierParDate(tga);
+  const r = trierParDate(rrp);
+
+  // Union triée des dates des trois jambes (Set → dédoublonnage, puis tri chrono).
+  const dates = [...new Set([...w, ...t, ...r].map((p) => p.date))].sort();
+
+  const serie: PointNetliq[] = [];
+  for (const date of dates) {
+    const vw = valeurLocf(w, date);
+    const vt = valeurLocf(t, date);
+    const vr = valeurLocf(r, date);
+    // Amorce : on n'émet que si les trois jambes ont une valeur connue à cette date.
+    if (vw === null || vt === null || vr === null) continue;
+    serie.push({ date, netliq: vw - vt - vr });
+  }
+  return serie;
+}
+
+/**
+ * Statistiques de synthèse sur une série de liquidité nette (supposée triée chrono) :
+ *   - `courant` : netliq du dernier point ;
+ *   - `delta4s` : `courant` − netliq du DERNIER point situé à ≥ 28 jours avant le dernier
+ *     t (variation ~4 semaines) ; `null` si aucun point n'est assez ancien ;
+ *   - `min2a` / `max2a` : extrêmes de netliq sur toute la série (fenêtre ~2 ans).
+ * Toutes les stats valent `null` pour une série vide. Fonction pure.
+ */
+export function statsNetliq(serie: PointNetliq[]): {
+  courant: number | null;
+  delta4s: number | null;
+  min2a: number | null;
+  max2a: number | null;
+} {
+  const dernier = serie[serie.length - 1];
+  if (dernier === undefined) return { courant: null, delta4s: null, min2a: null, max2a: null };
+
+  const courant = dernier.netliq;
+  const seuilMs = Date.parse(dernier.date) - MS_28_JOURS;
+
+  // Dernier point (le plus récent) dont la date est ≥ 28 jours avant le dernier t.
+  let reference: number | null = null;
+  for (const point of serie) {
+    if (Date.parse(point.date) <= seuilMs) reference = point.netliq;
+  }
+  const delta4s = reference === null ? null : courant - reference;
+
+  let min2a = courant;
+  let max2a = courant;
+  for (const point of serie) {
+    if (point.netliq < min2a) min2a = point.netliq;
+    if (point.netliq > max2a) max2a = point.netliq;
+  }
+
+  return { courant, delta4s, min2a, max2a };
+}
+
 /**
  * Récupère les trois séries FRED de la liquidité nette, sur une fenêtre de 2 ans
  * (observation_start = nowMs − 2 ans), chacune normalisée en milliards de dollars.

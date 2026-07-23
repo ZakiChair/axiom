@@ -195,6 +195,9 @@ const WINDOW_COMPONENTS: Record<WindowId, LazyExoticComponent<FenetreComp>> = {
   cbprem: lazy(() =>
     import("./components/CbpremWindow").then((m) => ({ default: m.CbpremWindow })),
   ),
+  netliq: lazy(() =>
+    import("./components/NetliqWindow").then((m) => ({ default: m.NetliqWindow })),
+  ),
 };
 
 /** Placeholder discret pendant le chargement du chunk de la fenêtre. */

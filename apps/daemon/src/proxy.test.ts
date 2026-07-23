@@ -142,7 +142,7 @@ describe("extapi — User-Agent par hôte", () => {
 
 describe("extapi — whitelist (mise à jour Lot E1)", () => {
   test("taille attendue après ajout SEC + GDELT", () => {
-    expect(EXTAPI_WHITELIST.size).toBe(31); // 23 existants + SEC ×2 + GDELT + JGB/RBA/Bloomberg/CNBC ×4 + OpenSky
+    expect(EXTAPI_WHITELIST.size).toBe(32); // 23 existants + SEC ×2 + GDELT + JGB/RBA/Bloomberg/CNBC ×4 + OpenSky + api.coinbase.com (fix CORS klines)
   });
   test("nouveaux hôtes présents", () => {
     expect(EXTAPI_WHITELIST.has("data.sec.gov")).toBe(true);

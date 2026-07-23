@@ -21,10 +21,17 @@
  * ne dépendent pas de l'exchange (Coinalyze cible toujours le perp Binance ; Coin
  * Metrics/DefiLlama sont mono-source) ni du timeframe du graphe (granularité brute
  * fixée : "1hour" / quotidien) ; l'écart de timeframe est absorbé par `alignAux` à la
- * lecture. EXCEPTION : `perpDelta` est un FLUX (delta agresseur par bougie), pas un
- * niveau — il DOIT être fetché à l'interval du chart (un LOCF sur un flux fabrique un
- * flux faux). Sa clé intègre donc le timeframe (`perpDelta:${symbole}:${tf}`) ; les
- * séries de niveaux gardent la clé `(id, symbole)` inchangée.
+ * lecture. EXCEPTIONS à la clé `(id, symbole)` :
+ *   - `perpDelta` est un FLUX (delta agresseur par bougie), pas un niveau — il DOIT être
+ *     fetché à l'interval du chart (un LOCF sur un flux fabrique un flux faux). Sa clé
+ *     intègre donc le timeframe (`perpDelta:${symbole}:${tf}`).
+ *   - `refClose` est un NIVEAU (close du symbole de référence) — le LOCF d'`alignAux` le
+ *     rééchantillonne sans le fausser ; il est néanmoins fetché à l'interval du chart et
+ *     keyé par timeframe par CHOIX (appariement 1:1 propre avec les autres jambes des
+ *     indicateurs statistiques), non par nécessité de correction comme perpDelta. Sa clé
+ *     porte de plus sur le symbole de RÉFÉRENCE (refSymbolStore), pas celui du chart :
+ *     `refClose:${refSymbol}:${tf}`.
+ * Les autres séries de niveaux gardent la clé `(id, symbole)` inchangée.
  */
 import { alignAux } from "@axiom/indicators";
 import type { AuxSeries, AuxSeriesId, ExchangeId, Timeframe } from "@axiom/types";
@@ -52,6 +59,8 @@ import { fetchQuarterlyBasisHistory } from "../data/binanceDapi";
 import { fetchLsAccountRatio, fetchLsTopTraderRatio, fetchTakerRatio } from "../data/positioning";
 import { fetchFearGreedHistory } from "../data/marketOverview";
 import { deltaDepuisKlinesPerp, timeframeToFapiInterval } from "../data/binanceFutures";
+import { binanceAdapter } from "../data/binance";
+import { refSymbolStore } from "../store/refSymbol";
 import { extUrl } from "../data/extapi";
 
 /** État renvoyé par `getAligned` pour l'ensemble des `ids` demandés. */
@@ -112,6 +121,14 @@ const TTL_MS: Record<AuxSeriesId, number> = {
 const ERROR_TTL_MS = 30_000;
 /** Profondeur d'historique demandée aux fournisseurs (90 jours). */
 const LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000;
+/**
+ * Profondeur d'un fetch `refClose` en UN appel (patron cbprem/derivatives). Un niveau :
+ * `binanceAdapter.fetchKlines` sans borne temporelle rend les `limit` bougies les plus
+ * RÉCENTES (atteint `now` sans pagination), 720 couvrant la vue initiale (backfill 500).
+ * Au-delà (scroll historique) les bougies plus anciennes restent `undefined` (LOCF sans
+ * antériorité) — dégradation gracieuse cohérente avec la clé sans composante de plage.
+ */
+const REFCLOSE_LIMIT = 720;
 /** Intervalle d'agrégation Coinalyze pour OI/funding (cf. COINALYZE_INTERVALS). */
 const COINALYZE_INTERVAL = "1hour";
 
@@ -242,8 +259,9 @@ async function fetchPerpDeltaHistory(
 /**
  * Récupère la série brute d'une famille auxiliaire pour un symbole, normalisée en
  * `AuxPoint[]` triés. Une exception (source injoignable) remonte → cache `error`.
- * `timeframe` n'est utilisé que par `perpDelta` (flux fetché à l'interval du chart) ;
- * les séries de niveaux gardent leur granularité brute fixe et l'ignorent.
+ * `timeframe` n'est utilisé que par `perpDelta` (flux) et `refClose` (niveau apparié),
+ * tous deux fetchés à l'interval du chart ; les autres séries de niveaux gardent leur
+ * granularité brute fixe et l'ignorent.
  */
 async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): Promise<AuxPoint[]> {
   const since = Date.now() - LOOKBACK_MS;
@@ -269,10 +287,25 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
       return fetchPerpDeltaHistory(symbol, since, interval);
     }
     case "refClose": {
-      // Close du symbole de référence (refSymbolStore) — jambe « croisée » des
-      // indicateurs statistiques. Câblage du fetch spot à l'interval du chart en
-      // Task 2 ; pour l'instant série vide (dégradation gracieuse : outputs undefined).
-      return [];
+      // Close du symbole de RÉFÉRENCE (refSymbolStore) — jambe « croisée » des indicateurs
+      // statistiques (corrélation/bêta/spread z-score vs référence). NIVEAU (≠ flux
+      // perpDelta) : le LOCF d'`alignAux` le rééchantillonne sans le fausser. On le fetch
+      // néanmoins à l'interval du chart (klines SPOT Binance, `binanceAdapter.fetchKlines`
+      // existant) pour un appariement 1:1 propre ; `timeframeToFapiInterval` sert ici de
+      // simple GARDE de support (sous-minute / 3M-6M-12M → série vide, comme perpDelta).
+      // `symbol` porte déjà le refSymbol (résolu dans getAligned, cohérent avec la clé).
+      // Dégradation gracieuse (patron perpDelta) : refSymbol invalide (HTTP 4xx → throw de
+      // fetchKlines) / échec réseau → série VIDE, jamais d'état `error` qui masquerait les
+      // autres séries de la requête.
+      if (timeframeToFapiInterval(timeframe) === undefined) return [];
+      try {
+        const candles = await binanceAdapter.fetchKlines(symbol, timeframe, {
+          limit: REFCLOSE_LIMIT,
+        });
+        return toPoints(candles.map((c) => ({ time: c.time, value: c.close })));
+      } catch {
+        return [];
+      }
     }
     case "stablecoins": {
       const s = await stablecoinsSupplyProvider.fetchSeries({ start: since });
@@ -375,10 +408,17 @@ export class AuxProvider {
     let pending = false;
 
     for (const id of req.ids) {
-      // `perpDelta` est un flux fetché à l'interval du chart → sa clé intègre le
-      // timeframe (sinon deux timeframes partageraient un flux faux). Niveaux inchangés.
+      // `perpDelta` (flux) et `refClose` (niveau apparié 1:1) sont fetchés à l'interval du
+      // chart → leur clé intègre le timeframe. `refClose` porte de plus sur le symbole de
+      // RÉFÉRENCE (refSymbolStore), pas celui du chart : le fetch ET la clé utilisent
+      // `refSymbol` (lu UNE fois ici → cohérence clé/fetch). Changer de refSymbol produit
+      // une clé différente → miss → refetch (l'ancienne entrée reste dans la Map jusqu'à ce
+      // que ce refSymbol soit re-sélectionné, puis purgée-si-expirée). Niveaux : inchangés.
+      const fetchSymbol = id === "refClose" ? refSymbolStore.getState().refSymbol : req.symbol;
       const key =
-        id === "perpDelta" ? `${id}:${req.symbol}:${req.timeframe}` : `${id}:${req.symbol}`;
+        id === "perpDelta" || id === "refClose"
+          ? `${id}:${fetchSymbol}:${req.timeframe}`
+          : `${id}:${req.symbol}`;
       let entry = this.cache.get(key);
 
       // Purge d'une entrée ready/error expirée → force un re-fetch au besoin.
@@ -388,7 +428,7 @@ export class AuxProvider {
       }
 
       if (entry === undefined) {
-        this.startFetch(id, req.symbol, req.timeframe, key, onReady);
+        this.startFetch(id, fetchSymbol, req.timeframe, key, onReady);
         pending = true;
         continue;
       }

@@ -29,6 +29,7 @@ import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 import { couleurRampeArrets, estFondClair, rampePourTheme } from "./liquidationHeat";
+import type { Commande } from "../commands/registry";
 
 /** Nombre de niveaux agrégés conservés PAR CÔTÉ (bid/ask) dans chaque colonne. Convention
  *  reprise de `pasArrondi` (vise ~20 niveaux couvrant ~1 % autour du mid) et de
@@ -261,7 +262,9 @@ let controllerStarted = false;
 /**
  * Démarre le contrôleur (idempotent). S'abonne à `marketStore` (symbole) et à
  * `depthHeatStore` (actif) pour réaligner l'abonnement WS + l'échantillonnage via `sync()`.
- * Appelé par le contrôleur canvas (Task 4) au montage — cf. modèle `demarrerTradeMarkers`.
+ * Appelé à l'IMPORT du module (cf. auto-démarrage en bas de fichier, modèle
+ * `demarrerTradeMarkers`) : idempotent, donc sans risque si le contrôleur canvas (Task 4)
+ * le rappelle aussi à son montage.
  */
 export function demarrerDepthHeat(): void {
   if (controllerStarted) return;
@@ -290,6 +293,26 @@ export function demarrerDepthHeat(): void {
     }
   });
 }
+
+// ─────────────────────────── Commande de palette (enregistrée par l'intégrateur) ───────────────────────────
+
+/** Commande à greffer dans la palette (via `enregistrerCommandes`), cf. modèle `tradeMarkers.ts`. */
+export const commandes: Commande[] = [
+  {
+    id: "action:depth-heat",
+    mnemonique: "BOOK",
+    libelle: "Heatmap de liquidité du carnet (chart) — activer / désactiver",
+    categorie: "action",
+    motsCles: ["book", "carnet", "orderbook", "liquidite", "depth", "heatmap", "bookmap", "chart"],
+    apercu: "Superpose la trace temps × prix de la liquidité du carnet d'ordres (style Bookmap)",
+    action: () => depthHeatStore.getState().basculer(),
+  },
+];
+
+// Auto-démarrage à l'import (l'intégrateur importe `commandes` → déclenche cet effet, cf.
+// modèle `tradeMarkers.ts` : sans cet appel, la commande basculerait un store que personne
+// n'écoute côté données — aucune souscription ne serait jamais ouverte).
+demarrerDepthHeat();
 
 // ─────────────────────────── Contrôleur canvas (non testé — couplage KLineChart) ───────────────────────────
 

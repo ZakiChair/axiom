@@ -39,6 +39,7 @@ import { commandes as derivChartCommands } from "./store/derivatives-chart";
 import { commandes as marksCommands } from "./chart/tradeMarkers";
 import { commandes as liqMarksCommands } from "./chart/liquidationMarkers";
 import { commandes as liqModeCommands } from "./chart/liquidationHeat";
+import { commandes as depthHeatCommands } from "./chart/depthHeat";
 // Niveaux de liquidation ESTIMÉS (modèle levier sur l'OI) — l'import démarre le fetch OI
 // singleton (effet de bord) ; couche indépendante de la heatmap réelle.
 import { commandes as liqEstCommands } from "./chart/liquidationEstimates";
@@ -111,6 +112,7 @@ enregistrerCommandes([
   ...liqMarksCommands,
   ...liqModeCommands,
   ...liqEstCommands,
+  ...depthHeatCommands,
   // Fenêtres Phase 4 (DOM/BT/REPLAY) + grille multi-chart.
   ...domCommands,
   ...backtestCommands,

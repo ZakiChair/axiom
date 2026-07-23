@@ -58,7 +58,9 @@ export type BgMetriqueId =
   // Modèles de plancher de prix (overlays).
   | "cvdd" | "balancedPrice"
   // Structure de marché : dominance BTC (%). GLOBAL (pas gaté sur l'actif affiché).
-  | "btcDominance";
+  | "btcDominance"
+  // Flux ETF spot BTC (repli du panneau ETF) et hashrate réseau.
+  | "etfFlow" | "hashrate";
 
 /** Définition d'une métrique BGeometrics (id interne, chemin API, champ JSON, libellé). */
 export interface DefMetriqueBg {
@@ -88,6 +90,15 @@ export const BG_CVDD: DefMetriqueBg = { id: "cvdd", chemin: "cvdd", champ: "cvdd
 export const BG_BALANCED_PRICE: DefMetriqueBg = { id: "balancedPrice", chemin: "balanced-price", champ: "balancedPrice", libelle: "Balanced Price" };
 // Dominance BTC (% de la capitalisation crypto totale) — métrique GLOBALE de marché.
 export const BG_BTC_DOMINANCE: DefMetriqueBg = { id: "btcDominance", chemin: "bitcoin-dominance", champ: "bitcoinDominance", libelle: "Dominance BTC" };
+// Flux net ETF spot BTC (repli du panneau ETF quand SoSoValue échoue). UNITÉ = BTC (prouvé
+// en réel le 2026-07-23 : etfFlow(17/07)=2069.907 × btcPrice(17/07)=63 916 $ = 132,3 M$,
+// égal au flux publié par Farside pour ce vendredi ; un -7695 en M$ vaudrait -7,7 Md$/jour,
+// impossible). Format API PARTICULIER : `unixTs` et `etfFlow` sont des CHAÎNES, week-ends
+// absents (bourse fermée) → parseBgeometrics les gère déjà via Number() sans changement.
+export const BG_ETF_FLOW: DefMetriqueBg = { id: "etfFlow", chemin: "etf-flow-btc", champ: "etfFlow", libelle: "Flux ETF BTC" };
+// Hashrate réseau BTC (aux chart-only). UNITÉ AMONT = TH/s (~1.07e9 TH/s ≈ 1075 EH/s en 2026)
+// — NE PAS passer à `fmtHashrate` d'OnchainWindow qui attend des H/s (÷1e18).
+export const BG_HASHRATE: DefMetriqueBg = { id: "hashrate", chemin: "hashrate", champ: "hashrate", libelle: "Hashrate" };
 
 export const BG_METRIQUES: readonly DefMetriqueBg[] = [
   BG_MVRV,
@@ -241,4 +252,80 @@ export async function fetchBgeometrics(
     BG_METRIQUES.map(async (def) => [def.id, await fetchBgeometricMetrique(def, cle, signal)] as const),
   );
   return Object.fromEntries(resultats);
+}
+
+// ─────────────────────────── Open Interest futures par exchange ───────────────────────────
+
+/** Open Interest futures d'un jour, ventilé par exchange (USD notionnel par plateforme). */
+export interface JourOiFutures {
+  d: string;
+  parExchange: Record<string, number>;
+}
+
+/**
+ * Parse `open-interest-futures` : chaque ligne porte `d`, `unixTs`, puis un champ par
+ * exchange (binance, bybit, okx…) en CHAÎNE décimale, plus un `openInterestFutures`
+ * de synthèse (souvent null). PURE et tolérante : clés DYNAMIQUES (tout champ ≠ d/unixTs),
+ * `Number()` sur chaque valeur, null / non-fini écarté. Une ligne sans aucun exchange
+ * exploitable est ignorée.
+ */
+export function parseOiFutures(json: unknown): JourOiFutures[] {
+  const jours: JourOiFutures[] = [];
+  if (!Array.isArray(json)) return jours;
+  for (const brut of json) {
+    if (brut === null || typeof brut !== "object") continue;
+    const row = brut as Record<string, unknown>;
+    const d = typeof row["d"] === "string" ? (row["d"] as string) : undefined;
+    if (d === undefined) continue;
+    const parExchange: Record<string, number> = {};
+    for (const [champ, v] of Object.entries(row)) {
+      if (champ === "d" || champ === "unixTs") continue; // méta, pas un exchange
+      if (v === null || v === undefined) continue;
+      const value = typeof v === "number" ? v : Number(v);
+      if (!Number.isFinite(value)) continue; // absorbe "NaN" / chaîne vide
+      parExchange[champ] = value;
+    }
+    if (Object.keys(parExchange).length === 0) continue;
+    jours.push({ d, parExchange });
+  }
+  return jours;
+}
+
+/**
+ * Récupère l'Open Interest futures ventilé par exchange (cache 24 h, même mécanique et même
+ * compteur de quota que les métriques). Renvoie le cache — même périmé — sur échec réseau ;
+ * `null` si rien en cache. PAS d'UI ici (consommé plus tard par le panneau dérivés).
+ */
+export async function fetchOiFuturesParExchange(
+  cle?: string | null,
+  signal?: AbortSignal,
+): Promise<{ ts: number; jours: JourOiFutures[] } | null> {
+  const cacheCle = "bg:oi-futures";
+  const cache = await lireCache<JourOiFutures[]>(cacheCle);
+  if (estFrais(cache, BG_TTL_MS) && cache !== null) {
+    return { ts: cache.ts, jours: cache.donnee };
+  }
+
+  const actif = cleActive(cle);
+  const headers: Record<string, string> = {};
+  if (cle) headers["Authorization"] = `Bearer ${cle}`;
+
+  try {
+    const compteur = incrementerCompteur(actif);
+    publierQuotaBg(cle);
+    const res = await fetch(construireUrl("open-interest-futures"), { headers, signal });
+    if (!res.ok) throw new Error(`BGeometrics oi-futures ${res.status}`);
+    const jours = parseOiFutures((await res.json()) as unknown);
+    await ecrireCache(cacheCle, jours);
+    healthStore.getState().setEtat(SOURCE_SANTE, "polling", {
+      dernierMessageTs: Date.now(),
+      quota: { utilise: compteur, limite: limiteQuota(actif), fenetre: actif ? "1heure" : "1jour" },
+    });
+    return { ts: Date.now(), jours };
+  } catch (e) {
+    if (signal?.aborted) return cache ? { ts: cache.ts, jours: cache.donnee } : null;
+    healthStore.getState().marquerErreur(SOURCE_SANTE, e instanceof Error ? e.message : "échec");
+    if (cache !== null) return { ts: cache.ts, jours: cache.donnee };
+    return null;
+  }
 }

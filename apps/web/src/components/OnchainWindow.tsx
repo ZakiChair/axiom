@@ -29,7 +29,16 @@ import {
   type PointMetrique,
   type SerieMetrique,
 } from "../data/onchain/coinmetrics";
-import { fetchBgeometrics, BG_METRIQUES, type BgResultat } from "../data/onchain/bgeometrics";
+import {
+  fetchBgeometrics,
+  fetchBgeometricMetrique,
+  BG_METRIQUES,
+  BG_ETF_FLOW,
+  BG_CLE_ENV_PRESENTE,
+  BG_LIMITE_HEURE,
+  BG_LIMITE_JOUR,
+  type BgResultat,
+} from "../data/onchain/bgeometrics";
 import {
   fetchHashrate,
   fetchMempoolReseau,
@@ -265,6 +274,18 @@ function sparkDe(serie: SerieMetrique | undefined, n = 60): number[] {
   return serie.points.slice(-n).map((p) => p.value);
 }
 
+/** Somme des valeurs des N derniers points (cumul de flux sur une fenêtre). */
+function cumulDe(serie: SerieMetrique | undefined, n: number): number {
+  if (serie === undefined) return 0;
+  return serie.points.slice(-n).reduce((s, p) => s + p.value, 0);
+}
+
+/** Flux ETF en BTC natif, signé (ex. « +2 738 BTC »). Unité prouvée BTC (cf. bgeometrics.ts). */
+function fmtFluxBtc(v: number | undefined): string {
+  if (v === undefined || !Number.isFinite(v)) return "—";
+  return `${v > 0 ? "+" : ""}${formatEntier(v)} BTC`;
+}
+
 // ─────────────────────────── Courbe pleine largeur ───────────────────────────
 
 const COURBE_H = 96;
@@ -460,6 +481,8 @@ interface EtatDonnees {
   mp: ResultatFrais<MempoolReseau> | null;
   hr: ResultatFrais<SerieMetrique> | null;
   etf: Record<ActifEtf, EtfResultat | null>;
+  /** Repli BTC bitcoin-data.com (flux ETF en BTC), chargé UNIQUEMENT si SoSoValue BTC échoue. */
+  etfRepli: BgResultat | null;
   eth: ReseauEth | null;
   sol: ResultatFrais<ReseauSol> | null;
 }
@@ -470,6 +493,7 @@ const VIDE: EtatDonnees = {
   mp: null,
   hr: null,
   etf: { btc: null, eth: null, sol: null },
+  etfRepli: null,
   eth: null,
   sol: null,
 };
@@ -521,7 +545,22 @@ export function OnchainWindow() {
       // Santé « sosovalue » agrégée sur le cycle complet (3 actifs) — une seule
       // écriture, hors cycles annulés, pour un état déterministe dans le panneau Santé.
       rapporterSanteEtf([btcEtf, ethEtf, solEtf]);
-      setDonnees((d) => ({ cm, bg, mp, hr, etf: { btc: btcEtf, eth: ethEtf, sol: solEtf }, eth, sol: d.sol }));
+      // Repli ETF BTC : bitcoin-data.com fetché SEULEMENT si SoSoValue BTC a échoué (absence
+      // de clé / 401 / réseau) — jamais de double coût quand SoSoValue répond.
+      const etfRepli = btcEtf.disponible
+        ? null
+        : await fetchBgeometricMetrique(BG_ETF_FLOW, getBgeometricsKey(), ctrl.signal);
+      if (ignore) return; // 2e garde : le repli a pu s'attendre après une fermeture/annulation.
+      setDonnees((d) => ({
+        cm,
+        bg,
+        mp,
+        hr,
+        etf: { btc: btcEtf, eth: ethEtf, sol: solEtf },
+        etfRepli,
+        eth,
+        sol: d.sol,
+      }));
       setLoading(false);
     };
 
@@ -545,6 +584,11 @@ export function OnchainWindow() {
   const mp = donnees.mp?.donnee;
   const halving = mp?.halving;
   const etf = donnees.etf[actifEtf];
+  // Quota BGeometrics EFFECTIF pour le texte du panneau (bloc affiché sans clé perso) :
+  // la seule présence d'une clé de repli .env fait basculer le quota IP 15/jour → 10/heure.
+  const bgQuotaTexte = BG_CLE_ENV_PRESENTE
+    ? `${BG_LIMITE_HEURE} req/heure`
+    : `${BG_LIMITE_JOUR} req/jour`;
   const eth = donnees.eth;
   // Mode dégradé sans clé Etherscan (1 req/5 s) : gas présent mais supply/nœuds null —
   // le CTA « clé Etherscan ⚙ » doit rester proposé tant qu'un champ manque.
@@ -645,7 +689,7 @@ export function OnchainWindow() {
                 type="button"
                 onClick={openSettings}
                 className="text-[10px] text-accent hover:underline"
-                title="Clé gratuite sur bitcoin-data.com — relève le quota (15 req/jour sans clé)"
+                title={`Clé gratuite sur bitcoin-data.com — quota actuel ${bgQuotaTexte}, cache 24 h`}
               >
                 clé BGeometrics ⚙
               </button>
@@ -690,7 +734,7 @@ export function OnchainWindow() {
           </div>
           {!bgHasKey && (
             <p className="mt-2 text-[10px] leading-snug text-text-dim">
-              MVRV Z-Score / SOPR / NUPL affichés sans clé (quota 15 req/jour, cache 24 h).
+              MVRV Z-Score / SOPR / NUPL affichés sans clé (quota {bgQuotaTexte}, cache 24 h).
               Une clé gratuite sur bitcoin-data.com relève le quota.
             </p>
           )}
@@ -748,6 +792,44 @@ export function OnchainWindow() {
                 <span className="tabular-nums text-text">{formatUsd(etf.total)}</span>
               </div>
             </div>
+          ) : actifEtf === "btc" && donnees.etfRepli?.serie.dernier ? (
+            // Repli bitcoin-data.com (SoSoValue indisponible pour BTC). Flux en BTC natif
+            // (unité prouvée) — teinté +/- selon le sens, sparkline 90 j, cumul 30 j.
+            // NB : 30 j / 90 j = dernières SÉANCES de bourse (les week-ends sont absents
+            // de la source), pas des jours calendaires.
+            (() => {
+              const serie = donnees.etfRepli.serie;
+              const jour = serie.dernier!.value;
+              const cumul30 = cumulDe(serie, 30);
+              return (
+                <div className="space-y-1.5 rounded-md border border-accent/40 bg-accent/5 px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-text-dim">Flux ETF BTC (jour)</span>
+                    <span
+                      className={`tabular-nums text-base font-semibold ${jour >= 0 ? "text-up" : "text-down"}`}
+                    >
+                      {fmtFluxBtc(jour)}
+                    </span>
+                  </div>
+                  <div className="flex justify-end">
+                    <Sparkline values={sparkDe(serie, 90)} color={jour >= 0 ? "--up" : "--down"} />
+                  </div>
+                  <div className="flex items-center justify-between border-t border-border pt-1 text-[11px] font-medium">
+                    <span className="text-text">Cumul 30 j</span>
+                    <span className={`tabular-nums ${cumul30 >= 0 ? "text-up" : "text-down"}`}>
+                      {fmtFluxBtc(cumul30)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <NoteSource>bitcoin-data.com (repli)</NoteSource>
+                    <span className="shrink-0 text-[10px] text-text-dim">
+                      {donnees.etfRepli.perime ? "cache périmé · " : ""}
+                      {fmtJour(serie.dernier!.time)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()
           ) : (
             <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg px-3 py-3">
               <span className="text-[11px] leading-snug text-text-dim">

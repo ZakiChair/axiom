@@ -7,6 +7,7 @@
  *   /mexcapi      → https://api.mexc.com             (keyless, simple réécriture de chemin)
  *   /sosoapi      → https://openapi.sosovalue.com    (EN-TÊTE x-soso-api-key si absent)
  *   /ethscanapi   → https://api.etherscan.io         (clé apikey si absente)
+ *   /bgapi        → https://bitcoin-data.com         (EN-TÊTE Authorization: Bearer si absent)
  *
  * Rappel BUILD-CONTRACT : le daemon ne proxifie JAMAIS le chemin chaud (les WS de
  * marché du front restent DIRECTS). Ici, uniquement du REST à quota, mis en cache.
@@ -111,6 +112,23 @@ export function construireRoutesProxy(cles: ProxyKeys): RouteProxy[] {
       target: "https://api.etherscan.io",
       rewrite: (chemin) =>
         appendApiKeyIfAbsent(chemin.replace(/^\/ethscanapi/, ""), "apikey", cles.ETHERSCAN_API_KEY),
+    },
+    {
+      // BGeometrics : bitcoin-data.com n'accepte QUE l'en-tête `Authorization: Bearer <clé>`
+      // (query param ou Authorization nu retombent sur le quota IP) → l'injection passe par
+      // `entetesAmont`. Le front envoie déjà « Bearer <clé perso> » quand une clé personnelle
+      // existe : on la relaie telle quelle (prioritaire) ; sinon repli .env préfixé « Bearer ».
+      prefix: "/bgapi",
+      target: "https://bitcoin-data.com",
+      rewrite: (chemin) => chemin.replace(/^\/bgapi/, ""),
+      entetesAmont: (entetesFront) => {
+        const perso = entetesFront.get("authorization");
+        const entetes: Record<string, string> = {};
+        if (perso) entetes["authorization"] = perso;
+        else if (cles.BGEOMETRICS_API_KEY.length > 0)
+          entetes["authorization"] = `Bearer ${cles.BGEOMETRICS_API_KEY}`;
+        return entetes;
+      },
     },
   ];
 }

@@ -63,9 +63,14 @@ export default defineConfig(({ mode }) => {
   const COINALYZE_API_KEY = loadEnv(mode, process.cwd(), "").COINALYZE_API_KEY ?? "";
   const SOSOVALUE_API_KEY = loadEnv(mode, process.cwd(), "").SOSOVALUE_API_KEY ?? "";
   const ETHERSCAN_API_KEY = loadEnv(mode, process.cwd(), "").ETHERSCAN_API_KEY ?? "";
+  const BGEOMETRICS_API_KEY = loadEnv(mode, process.cwd(), "").BGEOMETRICS_API_KEY ?? "";
 
   return {
   plugins: [react()],
+  // Expose UNIQUEMENT la PRÉSENCE de la clé .env BGeometrics (booléen), jamais sa valeur :
+  // le front bascule alors sur le quota horaire (10 req/h) même sans clé personnelle. Voir
+  // BG_CLE_ENV_PRESENTE dans data/onchain/bgeometrics.ts.
+  define: { __BG_CLE_ENV__: JSON.stringify(BGEOMETRICS_API_KEY !== "") },
   server: {
     proxy: {
       // La clé FRED est injectée ici SEULEMENT si le front n'en a pas déjà mis une
@@ -109,6 +114,23 @@ export default defineConfig(({ mode }) => {
           proxy.on("proxyReq", (proxyReq) => {
             if (SOSOVALUE_API_KEY.length > 0 && !proxyReq.getHeader("x-soso-api-key")) {
               proxyReq.setHeader("x-soso-api-key", SOSOVALUE_API_KEY);
+            }
+          });
+        },
+      },
+      // BGeometrics (bitcoin-data.com — valorisation BTC, flux ETF, hashrate, OI). SANS
+      // en-tête CORS pour l'auth par clé → même-origine via ce proxy. bitcoin-data.com
+      // n'accepte QUE `Authorization: Bearer <clé>` (les autres formats retombent sur le
+      // quota IP). La clé de repli .env est injectée via proxyReq (comme /sosoapi),
+      // UNIQUEMENT si le front n'a pas déjà envoyé sa clé personnelle (Réglages).
+      "/bgapi": {
+        target: "https://bitcoin-data.com",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/bgapi/, ""),
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq) => {
+            if (BGEOMETRICS_API_KEY.length > 0 && !proxyReq.getHeader("authorization")) {
+              proxyReq.setHeader("Authorization", `Bearer ${BGEOMETRICS_API_KEY}`);
             }
           });
         },

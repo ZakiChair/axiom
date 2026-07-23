@@ -13,6 +13,7 @@ import {
   coudre,
   creerMultiplexeurDepth,
   mediane,
+  meilleursNiveaux,
   pasArrondi,
   profondeurCumulee,
   type DepthDiff,
@@ -283,6 +284,55 @@ describe("creerMultiplexeurDepth", () => {
     off();
     off(); // 2e appel : sans effet
     expect(ouvertures[0]?.fermer).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejoue SYNCHRONEMENT le dernier carnet diffusé au nouvel abonné tardif", () => {
+    // Un 2e abonné qui rejoint une connexion vivante recevrait sinon RIEN jusqu'au prochain
+    // diff du stream (~100 ms BTC, plusieurs s sur illiquide → DOM/BOOK vide). Réplay immédiat.
+    const { ouvrir, ouvertures } = faireOuvreur();
+    const mux = creerMultiplexeurDepth(ouvrir);
+    mux.souscrire("BTCUSDT", () => {});
+    ouvertures[0]?.diffuser(livre(42)); // carnet vivant caché dans l'entrée
+    const recu2: number[] = [];
+    mux.souscrire("BTCUSDT", (l) => recu2.push(l.lastUpdateId)); // abonné tardif
+    expect(recu2).toEqual([42]); // reçu immédiatement, sans attendre un diff
+  });
+
+  it("ne rejoue RIEN au 1er abonné d'une connexion neuve (aucun carnet encore diffusé)", () => {
+    const { ouvrir } = faireOuvreur();
+    const mux = creerMultiplexeurDepth(ouvrir);
+    const recu: number[] = [];
+    mux.souscrire("BTCUSDT", (l) => recu.push(l.lastUpdateId));
+    expect(recu).toEqual([]); // rien avant le 1er livre du stream
+  });
+
+  it("le réplay au nouvel abonné ne re-déclenche PAS les abonnés déjà présents", () => {
+    const { ouvrir, ouvertures } = faireOuvreur();
+    const mux = creerMultiplexeurDepth(ouvrir);
+    const recu1: number[] = [];
+    mux.souscrire("BTCUSDT", (l) => recu1.push(l.lastUpdateId));
+    ouvertures[0]?.diffuser(livre(42));
+    expect(recu1).toEqual([42]); // 1 seule livraison via le fan-out
+    mux.souscrire("BTCUSDT", () => {}); // abonné tardif → réplay CIBLÉ
+    expect(recu1).toEqual([42]); // le 1er abonné n'a pas reçu de doublon
+  });
+});
+
+describe("meilleursNiveaux", () => {
+  function bk(bids: Niveau[], asks: Niveau[]): OrderBook {
+    return { lastUpdateId: 1, bids: new Map(bids), asks: new Map(asks) };
+  }
+  it("carnet vide ou côté manquant → null", () => {
+    expect(meilleursNiveaux(bk([], []))).toBeNull();
+    expect(meilleursNiveaux(bk([[100, 1]], []))).toBeNull();
+    expect(meilleursNiveaux(bk([], [[101, 1]]))).toBeNull();
+  });
+  it("meilleur bid (max), meilleur ask (min) et mid", () => {
+    expect(meilleursNiveaux(bk([[99, 1], [100, 2]], [[102, 1], [101, 3]]))).toEqual({
+      bestBid: 100,
+      bestAsk: 101,
+      mid: 100.5,
+    });
   });
 });
 

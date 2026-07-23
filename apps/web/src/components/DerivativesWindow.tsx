@@ -52,13 +52,18 @@ import {
   formatFunding,
   formatHeure,
   formatPct,
+  formatPourcentage,
   formatUsd,
+  formatUsdSigne,
   VALEUR_ABSENTE,
 } from "../lib/format";
 import { metaSource } from "../lib/fiabilite";
 import { annualiserFunding } from "../data/fundingCrossExchange";
 import { histFunding, histOiUsd } from "../data/referentiels";
 import { referentiel, type Referentiel } from "../lib/referentiel";
+import { getBgeometricsKey } from "../store/onchain";
+import { fetchOiFuturesParExchange, type JourOiFutures } from "../data/onchain/bgeometrics";
+import { construireModeleOiExchange } from "./derivativesWindow.util";
 import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, Fraicheur, Metric, RefBadge, SansCle, Vide } from "./ui";
 
 /** Période d'agrégation du long/short ratio et fenêtre des liquidations affichées. */
@@ -267,6 +272,14 @@ export function DerivativesWindow() {
   const [taker, setTaker] = useState<BinanceTakerPoint[]>([]);
   const [binOi, setBinOi] = useState<BinanceOiHistPoint[]>([]);
 
+  // Section repliable « OI BTC par exchange (quotidien) » — données BGeometrics BTC,
+  // INDÉPENDANTES de la clé/symbole Coinalyze. Fetch LAZY au premier dépliage (jamais au
+  // montage) : l'effet ci-dessous ne se déclenche que quand `oiExOuvert` passe à true.
+  const [oiExOuvert, setOiExOuvert] = useState(false);
+  const [oiExData, setOiExData] = useState<{ ts: number; jours: JourOiFutures[] } | null>(null);
+  const [oiExCharge, setOiExCharge] = useState(false);
+  const [oiExLoading, setOiExLoading] = useState(false);
+
   // Coinalyze mappe le symbole sur un perpétuel : pertinent uniquement pour Binance (M6).
   const isBinance = exchange === "binance";
   const coinalyzeSymbol = isBinance ? toCoinalyzeSymbol(symbol) : "—";
@@ -381,6 +394,29 @@ export function DerivativesWindow() {
       clearInterval(timer);
     };
   }, [open, symbol, isBinance]);
+
+  // Chargement LAZY de l'OI par exchange : au tout premier dépliage seulement (cache 24 h
+  // côté data → dépliages suivants gratuits). `oiExCharge` verrouille contre tout re-fetch.
+  useEffect(() => {
+    if (!oiExOuvert || oiExCharge) return;
+    const ctrl = new AbortController();
+    let ignore = false;
+    setOiExLoading(true);
+    void fetchOiFuturesParExchange(getBgeometricsKey(), ctrl.signal).then((r) => {
+      if (ignore) return;
+      setOiExData(r);
+      setOiExCharge(true);
+      setOiExLoading(false);
+    });
+    return () => {
+      ignore = true;
+      ctrl.abort();
+    };
+  }, [oiExOuvert, oiExCharge]);
+  const modeleOiEx = useMemo(
+    () => (oiExData ? construireModeleOiExchange(oiExData.jours) : null),
+    [oiExData],
+  );
 
   const recentLiqs = liqs.slice(-MAX_LIQ_ROWS).reverse();
   // Buckets long/short pour l'histogramme bicolore (dérivés des liquidations déjà chargées).
@@ -634,6 +670,73 @@ export function DerivativesWindow() {
               />
             </section>
           )}
+
+          {/* OI BTC par exchange (quotidien) — données BGeometrics BTC, INDÉPENDANTES de la
+              clé/symbole Coinalyze : placée HORS des branches ci-dessus pour rester
+              accessible sans clé Coinalyze. Repliable, fermée par défaut, fetch lazy. */}
+          <section className="mt-3 rounded-md border border-border bg-bg">
+            <button
+              type="button"
+              onClick={() => setOiExOuvert((v) => !v)}
+              aria-expanded={oiExOuvert}
+              className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+            >
+              <span className="text-[10px] uppercase tracking-wide text-text-dim">
+                OI BTC par exchange (quotidien)
+              </span>
+              <span className="text-[11px] text-text-dim">{oiExOuvert ? "▾" : "▸"}</span>
+            </button>
+            {oiExOuvert && (
+              <div className="border-t border-border px-3 py-2">
+                {oiExLoading ? (
+                  <p className="py-2 text-center text-[10px] text-text-dim">chargement…</p>
+                ) : modeleOiEx === null ? (
+                  <p className="py-2 text-center text-[10px] text-text-dim">indisponible</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[10px] text-text-dim">
+                      <span>{modeleOiEx.date}</span>
+                      <span className="tabular-nums">total {formatUsd(modeleOiEx.total)}</span>
+                    </div>
+                    {modeleOiEx.rangs.map((r) => (
+                      <div key={r.exchange} className="space-y-0.5">
+                        <div className="flex items-baseline justify-between gap-2 text-[11px]">
+                          <span className="capitalize text-text">{r.exchange}</span>
+                          <span className="flex items-baseline gap-2 tabular-nums">
+                            <span className="text-text">{formatUsd(r.usd)}</span>
+                            <span className="w-10 text-right text-text-dim">
+                              {formatPourcentage(r.part * 100, 1)}
+                            </span>
+                            <span
+                              className={`w-16 text-right ${
+                                r.deltaJ7 === null
+                                  ? "text-text-dim"
+                                  : r.deltaJ7 >= 0
+                                    ? "text-up"
+                                    : "text-down"
+                              }`}
+                            >
+                              {r.deltaJ7 === null ? "—" : formatUsdSigne(r.deltaJ7)}
+                            </span>
+                          </span>
+                        </div>
+                        <div className="h-1 w-full overflow-hidden rounded bg-border/40">
+                          <div
+                            className="h-full rounded"
+                            style={{ width: `${(r.part * 100).toFixed(1)}%`, background: "var(--serie-5)" }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                    <p className="pt-1 text-[9px] leading-snug text-text-dim">
+                      Part calculée hors total de synthèse · Δ vs 7 séances plus tôt ·
+                      bitcoin-data.com (cache 24 h)
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
         </div>
     </>
   );

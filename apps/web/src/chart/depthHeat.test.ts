@@ -106,6 +106,20 @@ describe("grilleDepuisColonnes", () => {
     for (const v of vals) expect([0, 2, 4]).toContain(v);
   });
 
+  it("cumule deux niveaux (bid + ask) dans la même ligne de la grille", () => {
+    // bid prix 100.3 et ask prix 100.7 tombent tous deux dans la ligne [100, 101).
+    const colonnes = [
+      col(0, 1, [{ prix: 100.3, qte: 5 }], [{ prix: 100.7, qte: 3 }]),
+    ];
+    // Plage prix [99, 102], 3 lignes → pas = 1 : ligne [100, 101) contient les deux niveaux.
+    const g = grilleDepuisColonnes(colonnes, 0, 1000, 99, 102, 3);
+    expect(g.nCols).toBe(1);
+    // La cellule de la ligne [100, 101) doit contenir la somme : 5 + 3 = 8.
+    expect(g.qtyMax).toBe(8);
+    // Vérifier que la deuxième cellule (colonne 0, ligne 1) contient bien 8.
+    expect(g.cellules[1]).toBe(8);
+  });
+
   it("grille vide (aucune colonne dans la plage) → qtyMax 0", () => {
     const colonnes = [col(0, 1, [{ prix: 100, qte: 4 }], [])];
     const g = grilleDepuisColonnes(colonnes, 5000, 6000, 99, 101, 2);

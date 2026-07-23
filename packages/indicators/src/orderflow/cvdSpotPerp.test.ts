@@ -86,6 +86,35 @@ describe("cvdSpotPerp", () => {
       for (const d of div) expect(d).toBeGreaterThan(0);
       for (let i = 1; i < div.length; i++) expect(div[i]).toBeGreaterThan(div[i - 1] as number);
     });
+
+    it("perp démarre à mi-série → les DEUX cumuls s'ancrent au même index, divergence sans offset", () => {
+      // Spot delta [3,1] défini sur les 44 bougies ; perp delta [3,1] IDENTIQUE mais
+      // défini seulement à partir de l'index 4 (undefined avant → perp ne couvre pas
+      // le début, cas lookback < chart). Ancre commune = index 4 : le cumul spot est
+      // rebasé là aussi, donc spot et perp deviennent la MÊME suite → divergence = 0.
+      //
+      // Ancien code (chaque jambe depuis SON 1er défini) : le cumul spot embarquait
+      // [3,1,3,1] = 8 avant l'index 4, tandis que le perp partait de 0 → offset CONSTANT
+      // de +8 sur cvdSpot ; après normalisation (stdev=1 des deux côtés) la divergence
+      // aurait valu +8 partout au lieu de 0.
+      const candles = candlesAlt(44, 3, 1);
+      const perpDelta: Array<number | undefined> = Array.from({ length: 44 }, (_, i) =>
+        i < 4 ? undefined : i % 2 === 0 ? 3 : 1
+      );
+      const { series } = cvdSpotPerp.calc(
+        candles,
+        { fenetre: 20, lissage: 1 },
+        { ...baseCtx, aux: { perpDelta } }
+      );
+      // Warm-up depuis l'ancre (index 4) : 20 deltas → défini dès l'index 23.
+      expect(series.divergence?.[22]).toBeUndefined();
+      for (let i = 23; i < 44; i++) expect(series.divergence?.[i]).toBe(0);
+      // La ligne spot est bien rebasée sur l'ancre : à l'index 23 (20 deltas alternés
+      // depuis l'index 4), CVD = dix 3 + dix 1 = 40, stdev=1 → 40 (pas 48 comme si
+      // cumulée depuis l'index 0).
+      expect(series.cvdSpot?.[23]).toBe(40);
+      expect(series.cvdPerp?.[23]).toBe(40);
+    });
   });
 
   describe("dégradations (jamais de throw, jamais de NaN)", () => {

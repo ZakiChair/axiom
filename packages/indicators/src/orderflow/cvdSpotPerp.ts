@@ -3,11 +3,12 @@
  *
  * CVD spot vs perp — compare le flux agresseur cumulé du spot (champs taker des
  * bougies) à celui du perp (série auxiliaire `perpDelta`, delta agresseur perp
- * par bougie, déjà alignée sur les bougies). Chaque jambe est cumulée depuis la
- * première bougie chargée (convention CVD) puis NORMALISÉE par l'écart-type
- * roulant de SES propres deltas lissés : les deux courbes deviennent comparables
- * quelle que soit l'échelle de volume de chaque marché. L'histogramme
- * `divergence` est leur différence signée (spot − perp).
+ * par bougie, déjà alignée sur les bougies). Les deux jambes sont cumulées depuis
+ * un ANCRAGE COMMUN — le 1er index où les deux deltas sont définis quand le perp est
+ * présent (sinon spot seul depuis son 1er delta) — puis NORMALISÉES par l'écart-type
+ * roulant de LEURS propres deltas lissés : les deux courbes deviennent comparables
+ * quelle que soit l'échelle de volume de chaque marché, sans offset parasite dans
+ * `divergence` (différence signée spot − perp) dû à l'histoire pré-perp du spot.
  *
  * Moteur PUR : aucun fetch. Lecture défensive de `ctx.aux.perpDelta` (modèle
  * `fundingRate`) — perp absent/vide ⇒ `cvdPerp`/`divergence` undefined, `cvdSpot`
@@ -151,8 +152,8 @@ export const cvdSpotPerp: IndicatorDef = {
 
     // Jambe perp : série auxiliaire perpDelta (déjà alignée), lecture défensive.
     const perp = ctx.aux?.perpDelta;
-    const cvdSpot = normaliserJambe(deltaSpot, fenetre, lissage);
 
+    let cvdSpot: Array<number | undefined>;
     let cvdPerp: Array<number | undefined>;
     if (perp) {
       const deltaPerp: Array<number | undefined> = new Array(n).fill(undefined);
@@ -160,8 +161,31 @@ export const cvdSpotPerp: IndicatorDef = {
         const v = perp[i];
         if (v !== undefined && Number.isFinite(v)) deltaPerp[i] = v;
       }
+      // Ancrage COMMUN : les deux cumuls démarrent au 1er index où les DEUX deltas
+      // sont définis. Sans ça, si le perp ne couvre pas tout le chart (lookback), le
+      // cumul spot embarque son histoire pré-perp → offset arbitraire dans `divergence`.
+      // Conséquence assumée : quand le perp est présent, la LIGNE cvdSpot est aussi
+      // rebasée sur ce point commun (sa portion pré-ancrage disparaît).
+      let ancre = -1;
+      for (let i = 0; i < n; i++) {
+        if (deltaSpot[i] !== undefined && deltaPerp[i] !== undefined) {
+          ancre = i;
+          break;
+        }
+      }
+      // Aucun index commun (perp entièrement absent après alignement) → pas de masquage :
+      // cvdSpot garde son comportement seul, cvdPerp restera undefined partout.
+      if (ancre >= 0) {
+        for (let j = 0; j < ancre; j++) {
+          deltaSpot[j] = undefined;
+          deltaPerp[j] = undefined;
+        }
+      }
+      cvdSpot = normaliserJambe(deltaSpot, fenetre, lissage);
       cvdPerp = normaliserJambe(deltaPerp, fenetre, lissage);
     } else {
+      // Perp totalement absente : cumul spot depuis son 1er delta défini (comportement seul).
+      cvdSpot = normaliserJambe(deltaSpot, fenetre, lissage);
       cvdPerp = new Array<number | undefined>(n).fill(undefined);
     }
 

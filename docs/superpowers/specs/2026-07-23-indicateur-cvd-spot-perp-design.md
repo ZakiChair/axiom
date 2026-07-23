@@ -27,7 +27,7 @@ Livrer l'item ⭐ Tier 1 du catalogue maison (`docs/research/02-indicateurs-edge
 - **Inputs** : `fenetre` (défaut 100, min 20, max 500) — fenêtre de rebase/normalisation ; `lissage` (défaut 3, EMA appliquée aux deltas avant cumul, 1 = brut).
 - **Calcul** :
   - Delta spot par bougie = `buyVolume − sellVolume` (champs enrichis de `Candle` ; si absents → série spot vide).
-  - CVD spot et CVD perp = cumuls des deltas lissés depuis la **première bougie chargée** (convention `cvd` existante du registre — le rebase suit le chargement, pas le viewport).
+  - CVD spot et CVD perp = cumuls des deltas lissés depuis un **ancrage COMMUN** : le 1er index où les DEUX deltas sont définis quand la jambe perp existe (sinon spot seul depuis son 1er delta). Sans cet ancrage, un perp ne couvrant pas tout le chart (lookback < histoire) laisserait le cumul spot embarquer son histoire pré-perp → offset arbitraire dans `divergence`. Conséquence assumée : quand le perp est présent, la ligne cvdSpot est aussi rebasée sur ce point commun (sa portion pré-ancrage disparaît).
   - **Normalisation** (les volumes spot et perp ont des ordres de grandeur différents) : chaque CVD est divisé par l'écart-type roulant de ses propres deltas sur `fenetre` → les deux courbes deviennent comparables sans unité.
   - **Divergence** = `cvdSpotNorm − cvdPerpNorm`, rendue en histogramme signé (up quand le spot domine, down quand le perp domine).
 - **Outputs** : `cvdSpot` (ligne, couleur up), `cvdPerp` (ligne, couleur down), `divergence` (histogramme, alpha réduit). Précision 2.

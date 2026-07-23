@@ -25,6 +25,8 @@ export interface CelluleOi {
   oiTotal: number;
   /** Gamma exposure SIGNÉ du strike (murs de gamma) — l'intensité utilise |gex|. */
   gex: number;
+  /** Volume 24h fusionné call+put du strike (NaN traité comme 0 à la somme). */
+  volume24h: number;
 }
 
 /** Grille complète strike × échéance + repères dérivés (max pain, maxima pour l'échelle). */
@@ -41,6 +43,8 @@ export interface GrilleOi {
   oiMax: number;
   /** Plus grand |gex| observé (échelle d'intensité métrique GEX). */
   gexAbsMax: number;
+  /** Plus grand `volume24h` de cellule observé (échelle d'intensité métrique Volume). */
+  volumeMax: number;
 }
 
 /**
@@ -71,12 +75,17 @@ export function construireGrilleOi(chain: OptionPoint[], spot: number, nowMs: nu
     // Agrégation OI par strike (calls/puts). Les strikes à OI nul sont CONSERVÉS ici : ce sont
     // des candidats de règlement légitimes pour le max pain (cf. agregerParStrike du modèle).
     const parStrike = new Map<number, StrikeOi>();
+    // Volume 24h fusionné call+put par strike (NaN traité comme 0 à la somme).
+    const volumeParStrike = new Map<number, number>();
     for (const p of points) {
       const cur = parStrike.get(p.strike) ?? { strike: p.strike, callOi: 0, putOi: 0 };
       const oi = Number.isFinite(p.openInterest) ? p.openInterest : 0;
       if (p.type === "call") cur.callOi += oi;
       else cur.putOi += oi;
       parStrike.set(p.strike, cur);
+
+      const vol = Number.isFinite(p.volume24h) ? p.volume24h : 0;
+      volumeParStrike.set(p.strike, (volumeParStrike.get(p.strike) ?? 0) + vol);
     }
 
     // Max pain sur l'agrégation complète (strikes à OI nul inclus comme candidats).
@@ -98,6 +107,7 @@ export function construireGrilleOi(chain: OptionPoint[], spot: number, nowMs: nu
         putOi: niv.putOi,
         oiTotal,
         gex: gexParStrike.get(niv.strike) ?? 0,
+        volume24h: volumeParStrike.get(niv.strike) ?? 0,
       });
       strikesSet.add(niv.strike);
     }
@@ -106,13 +116,15 @@ export function construireGrilleOi(chain: OptionPoint[], spot: number, nowMs: nu
   const strikes = [...strikesSet].sort((a, b) => a - b);
   let oiMax = 0;
   let gexAbsMax = 0;
+  let volumeMax = 0;
   for (const c of cellules) {
     if (c.oiTotal > oiMax) oiMax = c.oiTotal;
     const ag = Math.abs(c.gex);
     if (ag > gexAbsMax) gexAbsMax = ag;
+    if (c.volume24h > volumeMax) volumeMax = c.volume24h;
   }
 
-  return { echeances, strikes, cellules, maxPainParEcheance, oiMax, gexAbsMax };
+  return { echeances, strikes, cellules, maxPainParEcheance, oiMax, gexAbsMax, volumeMax };
 }
 
 /**

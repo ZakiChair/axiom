@@ -102,10 +102,13 @@ export const squeezeStore = createStore<SqueezeState>((set) => ({
     // 4. Fusion (funding × ΔOI × volume) → projection en points (data/squeeze.ts, PUR).
     const points = construirePoints(fusionnerSources(echantillon, fundingParSymbole, oiParSymbole));
 
+    // Note honnête (même esprit qu'EQS) : les symboles dont le ΔOI a échoué n'ont pas
+    // de point — on rapporte donc le ratio effectif, pas la taille de l'échantillon visé.
+    const nbAvecOi = oiParSymbole.size;
     set({
       enCours: false,
       points,
-      couverture: `ΔOI sur ${echantillon.length} symboles (top liquides ∪ watchlist)`,
+      couverture: `ΔOI sur ${nbAvecOi}/${echantillon.length} symboles (top liquides ∪ watchlist)`,
     });
   },
 }));

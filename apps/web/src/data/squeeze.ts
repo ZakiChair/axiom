@@ -21,7 +21,11 @@ export type QuadrantSqueeze =
   | "deleveraging"
   | "neutre";
 
-/** |funding| sous ce seuil (%/8 h) = axe funding neutre (≈ pas de tension de portage). */
+/**
+ * |funding| ≤ ce seuil (%/8 h) = axe funding neutre. Comparaison STRICTE (>) : 0.01 %/8 h
+ * est le funding PAR DÉFAUT de Binance (perp parfaitement équilibré, très fréquent) — un
+ * symbole calme doit rester neutre sur cet axe, pas basculer en « significatif ».
+ */
 export const SEUIL_FUNDING_PCT = 0.01;
 /** |ΔOI| sous ce seuil (%) = axe OI neutre — même seuil que signaux.ts SEUIL_OI_PCT. */
 export const SEUIL_DOI_PCT = 3;
@@ -37,7 +41,7 @@ export const RAYON_MAX = 16;
  */
 export function quadrantFundingOi(fundingPct: number, dOiPct: number): QuadrantSqueeze {
   if (!Number.isFinite(fundingPct) || !Number.isFinite(dOiPct)) return "neutre";
-  const fundingSignif = Math.abs(fundingPct) >= SEUIL_FUNDING_PCT;
+  const fundingSignif = Math.abs(fundingPct) > SEUIL_FUNDING_PCT;
   const oiSignif = Math.abs(dOiPct) >= SEUIL_DOI_PCT;
   if (!fundingSignif && !oiSignif) return "neutre";
 

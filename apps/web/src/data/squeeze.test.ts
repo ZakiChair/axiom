@@ -34,6 +34,20 @@ describe("quadrantFundingOi — 4 quadrants + zone neutre", () => {
     // ΔOI négligeable (−1, sous seuil) mais funding significatif → classé (funding<0, OI<0).
     expect(quadrantFundingOi(-0.05, -1)).toBe("shorts-crowded");
   });
+
+  it("borne stricte du seuil funding : 0.01 %/8h (funding par défaut Binance) reste neutre", () => {
+    // ΔOI=8 est significatif à lui seul (≥ SEUIL_DOI_PCT) : l'AND des deux axes ne rend
+    // donc PAS le résultat global « neutre » ici — seul l'axe funding est neutre, et
+    // l'axe négligeable reste porté par son signe (funding=0.01 est positif) → même
+    // quadrant que 0.0101 (significatif) : la borne stricte ne change pas ce cas-ci.
+    expect(quadrantFundingOi(0.01, 8)).toBe("longs-crowded");
+    expect(quadrantFundingOi(0.0101, 8)).toBe("longs-crowded");
+    // Cas qui révèle réellement la borne stricte : ΔOI aussi sous seuil (les DEUX axes
+    // doivent être neutres pour "neutre"). Avant le fix (>=), 0.01 était classé
+    // significatif → "longs-crowded" ; avec le fix (>), 0.01 est neutre → "neutre".
+    expect(quadrantFundingOi(0.01, 1)).toBe("neutre");
+    expect(quadrantFundingOi(0.0101, 1)).toBe("longs-crowded");
+  });
 });
 
 describe("construirePoints — exclusion des lignes incomplètes", () => {

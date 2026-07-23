@@ -181,6 +181,9 @@ const WINDOW_COMPONENTS: Record<WindowId, LazyExoticComponent<FenetreComp>> = {
   stablecoins: lazy(() =>
     import("./components/StablecoinsWindow").then((m) => ({ default: m.StablecoinsWindow })),
   ),
+  squeeze: lazy(() =>
+    import("./components/SqueezeWindow").then((m) => ({ default: m.SqueezeWindow })),
+  ),
 };
 
 /** Placeholder discret pendant le chargement du chunk de la fenêtre. */

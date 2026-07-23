@@ -21,6 +21,8 @@ function pt(over: Partial<OptionPoint>): OptionPoint {
     openInterest: 1,
     underlying: 100,
     interestRate: 0,
+    volume24h: NaN,
+    markPrice: NaN,
     ...over,
   };
 }
@@ -100,6 +102,36 @@ describe("construireGrilleOi", () => {
     ];
     const g = construireGrilleOi(chain, 100, NOW);
     expect(g.echeances).toEqual([E1]);
+  });
+
+  it("fusionne volume24h call+put par (échéance, strike) et expose volumeMax", () => {
+    const chain: OptionPoint[] = [
+      pt({ expiryMs: E1, strike: 100, type: "call", openInterest: 10, volume24h: 3 }),
+      pt({ expiryMs: E1, strike: 100, type: "put", openInterest: 5, volume24h: 2 }),
+      pt({ expiryMs: E1, strike: 120, type: "put", openInterest: 8, volume24h: 20 }),
+    ];
+    const g = construireGrilleOi(chain, 100, NOW);
+    const c100 = g.cellules.find((c) => c.expiryMs === E1 && c.strike === 100);
+    expect(c100?.volume24h).toBe(5);
+    const c120 = g.cellules.find((c) => c.expiryMs === E1 && c.strike === 120);
+    expect(c120?.volume24h).toBe(20);
+    // volumeMax = plus grand volume24h de cellule (ici 20).
+    expect(g.volumeMax).toBe(20);
+  });
+
+  it("traite un volume24h NaN (absent/illiquide) comme 0 à la somme", () => {
+    const chain: OptionPoint[] = [
+      pt({ expiryMs: E1, strike: 100, type: "call", openInterest: 10, volume24h: NaN }),
+      pt({ expiryMs: E1, strike: 100, type: "put", openInterest: 5, volume24h: 7 }),
+      // Strike sans aucun volume : volume24h de cellule = 0.
+      pt({ expiryMs: E1, strike: 120, type: "put", openInterest: 8, volume24h: NaN }),
+    ];
+    const g = construireGrilleOi(chain, 100, NOW);
+    const c100 = g.cellules.find((c) => c.expiryMs === E1 && c.strike === 100);
+    expect(c100?.volume24h).toBe(7);
+    const c120 = g.cellules.find((c) => c.expiryMs === E1 && c.strike === 120);
+    expect(c120?.volume24h).toBe(0);
+    expect(g.volumeMax).toBe(7);
   });
 });
 

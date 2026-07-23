@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateGexDex,
   computeCryptoGexDex,
+  gammaFlip,
+  gexParStrikeToutesEcheances,
   type CryptoOptionInput,
   type OptionGreekLeg,
 } from "./gexDex";
+import type { OptionPoint } from "./deribit";
 import { bsGreeks } from "./blackScholes";
 
 describe("aggregateGexDex", () => {
@@ -114,5 +117,142 @@ describe("computeCryptoGexDex", () => {
     const out = computeCryptoGexDex(points, 100, NOW);
     const g = bsGreeks(100, 100, 0.5, 0.6, 0);
     expect(out[0]?.gex).toBeCloseTo(g.gamma * 1 * 100 * 100 * 0.01 * 1, 6);
+  });
+});
+
+describe("gexParStrikeToutesEcheances", () => {
+  const NOW = Date.UTC(2026, 0, 1);
+  const UN_AN = 365 * 24 * 60 * 60 * 1000;
+  const EXP_A = NOW + 0.25 * UN_AN;
+  const EXP_B = NOW + 0.5 * UN_AN;
+
+  /** Fabrique d'OptionPoint : seuls les champs consommés par le calcul GEX/DEX comptent. */
+  function pt(over: Partial<OptionPoint>): OptionPoint {
+    return {
+      instrument: "TEST",
+      expiryMs: EXP_A,
+      strike: 100,
+      type: "call",
+      markIv: 50,
+      openInterest: 1,
+      underlying: 100,
+      interestRate: 0,
+      volume24h: NaN,
+      markPrice: NaN,
+      ...over,
+    };
+  }
+
+  it("fusionne les échéances par strike = somme des computeCryptoGexDex par échéance", () => {
+    // Strike 100 présent dans LES DEUX échéances → la fusion doit sommer leurs contributions.
+    const chain: OptionPoint[] = [
+      pt({ expiryMs: EXP_A, strike: 100, type: "call", markIv: 50, openInterest: 10 }),
+      pt({ expiryMs: EXP_A, strike: 120, type: "put", markIv: 55, openInterest: 5 }),
+      pt({ expiryMs: EXP_B, strike: 100, type: "put", markIv: 60, openInterest: 8 }),
+      pt({ expiryMs: EXP_B, strike: 140, type: "call", markIv: 45, openInterest: 3 }),
+    ];
+    const out = gexParStrikeToutesEcheances(chain, 100, NOW);
+
+    // Attendu = agrégation échéance par échéance puis somme par strike (comparaison directe).
+    const gexA = computeCryptoGexDex(
+      chain.filter((p) => p.expiryMs === EXP_A),
+      100,
+      NOW,
+    );
+    const gexB = computeCryptoGexDex(
+      chain.filter((p) => p.expiryMs === EXP_B),
+      100,
+      NOW,
+    );
+    const attenduGex = new Map<number, number>();
+    const attenduDex = new Map<number, number>();
+    for (const p of [...gexA, ...gexB]) {
+      attenduGex.set(p.strike, (attenduGex.get(p.strike) ?? 0) + p.gex);
+      attenduDex.set(p.strike, (attenduDex.get(p.strike) ?? 0) + p.dex);
+    }
+
+    // Strikes triés croissants et exhaustifs.
+    expect(out.map((p) => p.strike)).toEqual([100, 120, 140]);
+    for (const p of out) {
+      expect(p.gex).toBeCloseTo(attenduGex.get(p.strike) ?? 0, 6);
+      expect(p.dex).toBeCloseTo(attenduDex.get(p.strike) ?? 0, 6);
+    }
+
+    // Strike 100 = somme lisible des deux échéances (call échéance A + put échéance B).
+    const a100 = gexA.find((p) => p.strike === 100)!;
+    const b100 = gexB.find((p) => p.strike === 100)!;
+    const o100 = out.find((p) => p.strike === 100)!;
+    expect(o100.gex).toBeCloseTo(a100.gex + b100.gex, 6);
+    expect(o100.dex).toBeCloseTo(a100.dex + b100.dex, 6);
+  });
+
+  it("renvoie une liste vide si le spot est invalide", () => {
+    const chain: OptionPoint[] = [pt({ strike: 100, openInterest: 5 })];
+    expect(gexParStrikeToutesEcheances(chain, NaN, NOW)).toEqual([]);
+    expect(gexParStrikeToutesEcheances(chain, 0, NOW)).toEqual([]);
+  });
+
+  it("chaîne vide → liste vide", () => {
+    expect(gexParStrikeToutesEcheances([], 100, NOW)).toEqual([]);
+  });
+});
+
+describe("gammaFlip", () => {
+  it("interpole le strike du changement de signe entre les deux strikes encadrants", () => {
+    // cum(100) = −10 ; cum(200) = −10 + 20 = +10.  Changement de signe entre 100 et 200.
+    // flip = 100 + (0 − (−10)) / (10 − (−10)) · (200 − 100) = 100 + (10/20)·100 = 150.
+    const out = gammaFlip([
+      { strike: 100, gex: -10 },
+      { strike: 200, gex: 20 },
+    ]);
+    expect(out).toBeCloseTo(150, 9);
+  });
+
+  it("renvoie null quand le cumul ne change jamais de signe", () => {
+    // cum : 10, 15 — toujours positif.
+    expect(
+      gammaFlip([
+        { strike: 100, gex: 10 },
+        { strike: 200, gex: 5 },
+      ]),
+    ).toBeNull();
+  });
+
+  it("renvoie le PREMIER passage quand le cumul change de signe plusieurs fois", () => {
+    // cum : −10 (100), +10 (200) → 1er flip à 150 ; −20 (300) → 2e flip ; +30 (400) → 3e flip.
+    const out = gammaFlip([
+      { strike: 100, gex: -10 },
+      { strike: 200, gex: 20 },
+      { strike: 300, gex: -30 },
+      { strike: 400, gex: 50 },
+    ]);
+    expect(out).toBeCloseTo(150, 9);
+  });
+
+  it("tableau vide → null", () => {
+    expect(gammaFlip([])).toBeNull();
+  });
+
+  it("un seul strike → null (aucune paire à encadrer)", () => {
+    expect(gammaFlip([{ strike: 100, gex: -5 }])).toBeNull();
+  });
+
+  it("GEX nul partout → null (cumul constant à 0, pas de changement de signe)", () => {
+    expect(
+      gammaFlip([
+        { strike: 100, gex: 0 },
+        { strike: 200, gex: 0 },
+        { strike: 300, gex: 0 },
+      ]),
+    ).toBeNull();
+  });
+
+  it("trie les strikes croissants avant de cumuler (entrée non triée)", () => {
+    // Mêmes points que le cas d'interpolation mais désordonnés → même flip à 150.
+    const out = gammaFlip([
+      { strike: 200, gex: 20 },
+      { strike: 100, gex: -10 },
+    ]);
+    expect(out).toBeCloseTo(150, 9);
   });
 });

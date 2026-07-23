@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   computeMaxPain,
+  fetchDeribitOptionChain,
   fetchDvolHistory,
   parseOptionInstrument,
   putCallRatioOi,
@@ -80,6 +81,98 @@ describe("putCallRatioOi", () => {
 
   it("renvoie NaN sans aucun call", () => {
     expect(Number.isNaN(putCallRatioOi([{ type: "put", openInterest: 5 }]))).toBe(true);
+  });
+});
+
+/**
+ * fetchDeribitOptionChain : fetch global stubbé (même pattern que fetchDvolHistory
+ * ci-dessous — appelDeribit appelle `fetchJsonExt` qui appelle le `fetch` global direct).
+ */
+describe("fetchDeribitOptionChain", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("mappe volume24h depuis `volume` et markPrice depuis `mark_price`, champs existants inchangés", async () => {
+    const json = {
+      result: [
+        {
+          instrument_name: "BTC-28AUG26-78000-P",
+          mark_iv: 55.5,
+          open_interest: 120,
+          underlying_price: 65000,
+          interest_rate: 0,
+          volume: 12.5,
+          mark_price: 0.023,
+        },
+      ],
+    };
+    fetchMock.mockResolvedValue({ ok: true, json: () => Promise.resolve(json) });
+
+    const out = await fetchDeribitOptionChain("BTC");
+
+    expect(out).toEqual([
+      {
+        instrument: "BTC-28AUG26-78000-P",
+        expiryMs: Date.UTC(2026, 7, 28, 8, 0, 0),
+        strike: 78000,
+        type: "put",
+        markIv: 55.5,
+        openInterest: 120,
+        underlying: 65000,
+        interestRate: 0,
+        volume24h: 12.5,
+        markPrice: 0.023,
+      },
+    ]);
+  });
+
+  it("`volume`/`mark_price` absents → NaN", () => {
+    const json = {
+      result: [
+        {
+          instrument_name: "BTC-28AUG26-78000-P",
+          mark_iv: 55.5,
+          open_interest: 120,
+          underlying_price: 65000,
+          interest_rate: 0,
+        },
+      ],
+    };
+    fetchMock.mockResolvedValue({ ok: true, json: () => Promise.resolve(json) });
+
+    return fetchDeribitOptionChain("BTC").then((out) => {
+      expect(Number.isNaN(out[0]?.volume24h)).toBe(true);
+      expect(Number.isNaN(out[0]?.markPrice)).toBe(true);
+    });
+  });
+
+  it("`volume`/`mark_price` non finis (null, non-numérique) → NaN", async () => {
+    const json = {
+      result: [
+        {
+          instrument_name: "BTC-28AUG26-78000-P",
+          mark_iv: 55.5,
+          open_interest: 120,
+          underlying_price: 65000,
+          interest_rate: 0,
+          volume: null,
+          mark_price: "N/A",
+        },
+      ],
+    };
+    fetchMock.mockResolvedValue({ ok: true, json: () => Promise.resolve(json) });
+
+    const out = await fetchDeribitOptionChain("BTC");
+    expect(Number.isNaN(out[0]?.volume24h)).toBe(true);
+    expect(Number.isNaN(out[0]?.markPrice)).toBe(true);
   });
 });
 

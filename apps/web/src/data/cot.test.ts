@@ -5,12 +5,14 @@ import {
   WATCHLIST_COT,
   chargerRapportCot,
   construireRequete,
+  construireRequeteDataset,
   cotIndex,
   datasetPour,
   deltaSemaines,
   netSurOi,
   nombreCot,
   pointCot,
+  pointCotDataset,
   resumerCot,
   type CategoriePositionnement,
   type CotCategorie,
@@ -379,6 +381,157 @@ describe("construireRequete", () => {
     expect(params.get("$select")).toBe(
       "market_and_exchange_names,report_date_as_yyyy_mm_dd,noncomm_positions_long_all,noncomm_positions_short_all,open_interest_all",
     );
+  });
+});
+
+describe("construireRequeteDataset (requête générique par dataset)", () => {
+  // Instant UTC (suffixe Z) : borne calculée en UTC ⇒ déterministe quel que soit le fuseau.
+  const nowMs = Date.parse("2026-07-23T00:00:00.000Z");
+  // Un instrument par famille : permet de vérifier la RESTRICTION de watchlist par dataset.
+  const OR = "GOLD - COMMODITY EXCHANGE INC.";
+  const WTI = "WTI FINANCIAL CRUDE OIL - NEW YORK MERCANTILE EXCHANGE";
+  const EUR = "EURO FX - CHICAGO MERCANTILE EXCHANGE";
+  const SP = "E-MINI S&P 500 - CHICAGO MERCANTILE EXCHANGE";
+  const BTC = "BITCOIN - CHICAGO MERCANTILE EXCHANGE";
+  const watchlistMixte: InstrumentCot[] = [
+    { nom: OR, libelle: "Or", categorie: "metal" },
+    { nom: WTI, libelle: "WTI", categorie: "energie" },
+    { nom: EUR, libelle: "EUR", categorie: "fx" },
+    { nom: SP, libelle: "S&P 500", categorie: "indice" },
+    { nom: BTC, libelle: "Bitcoin", categorie: "crypto" },
+  ];
+
+  it("réutilise la mécanique legacy : $limit 3000, $order DESC, borne 3 ans (nowMs injecté)", () => {
+    const params = new URLSearchParams(construireRequeteDataset("disaggregated", watchlistMixte, nowMs));
+    expect(params.get("$limit")).toBe("3000");
+    expect(params.get("$order")).toBe("report_date_as_yyyy_mm_dd DESC");
+    expect(params.get("$where")).toContain("report_date_as_yyyy_mm_dd >= '2023-07-23T00:00:00.000'");
+  });
+
+  it("disaggregated : $select = champs MM + Prod/Merch (asymétrie _all préservée) + OI", () => {
+    const params = new URLSearchParams(construireRequeteDataset("disaggregated", watchlistMixte, nowMs));
+    expect(params.get("$select")).toBe(
+      "market_and_exchange_names,report_date_as_yyyy_mm_dd,m_money_positions_long_all,m_money_positions_short_all,prod_merc_positions_long,prod_merc_positions_short,open_interest_all",
+    );
+  });
+
+  it("disaggregated : watchlist RESTREINTE aux matières premières (metal/energie)", () => {
+    const where = new URLSearchParams(construireRequeteDataset("disaggregated", watchlistMixte, nowMs)).get("$where") ?? "";
+    expect(where).toContain(`'${OR}'`);
+    expect(where).toContain(`'${WTI}'`);
+    expect(where).not.toContain(`'${EUR}'`);
+    expect(where).not.toContain(`'${SP}'`);
+    expect(where).not.toContain(`'${BTC}'`);
+  });
+
+  it("tff : $select = champs Leveraged + Asset Manager + OI", () => {
+    const params = new URLSearchParams(construireRequeteDataset("tff", watchlistMixte, nowMs));
+    expect(params.get("$select")).toBe(
+      "market_and_exchange_names,report_date_as_yyyy_mm_dd,lev_money_positions_long,lev_money_positions_short,asset_mgr_positions_long,asset_mgr_positions_short,open_interest_all",
+    );
+  });
+
+  it("tff : watchlist RESTREINTE aux financiers (fx/indice/crypto)", () => {
+    const where = new URLSearchParams(construireRequeteDataset("tff", watchlistMixte, nowMs)).get("$where") ?? "";
+    expect(where).toContain(`'${EUR}'`);
+    expect(where).toContain(`'${SP}'`);
+    expect(where).toContain(`'${BTC}'`);
+    expect(where).not.toContain(`'${OR}'`);
+    expect(where).not.toContain(`'${WTI}'`);
+  });
+
+  it("legacy : $select = champs non-commercial + commercial + OI, watchlist COMPLÈTE", () => {
+    const params = new URLSearchParams(construireRequeteDataset("legacy", watchlistMixte, nowMs));
+    expect(params.get("$select")).toBe(
+      "market_and_exchange_names,report_date_as_yyyy_mm_dd,noncomm_positions_long_all,noncomm_positions_short_all,comm_positions_long_all,comm_positions_short_all,open_interest_all",
+    );
+    const where = params.get("$where") ?? "";
+    // Toutes les familles routent vers legacy (catégorie "legacy") ⇒ aucun instrument exclu.
+    for (const nom of [OR, WTI, EUR, SP, BTC]) expect(where).toContain(`'${nom}'`);
+  });
+});
+
+describe("pointCotDataset (net par catégorie de positionnement)", () => {
+  // Fixture disaggregated : noms de champs LITTÉRAUX du dataset 72hh-3qpy (asymétrie _all réelle).
+  const brutDisagg = {
+    market_and_exchange_names: "GOLD - COMMODITY EXCHANGE INC.",
+    report_date_as_yyyy_mm_dd: "2026-06-23T00:00:00.000",
+    m_money_positions_long_all: "180000", // Managed Money long
+    m_money_positions_short_all: "40000", // Managed Money short
+    prod_merc_positions_long: "90000", // Producer/Merchant long
+    prod_merc_positions_short: "150000", // Producer/Merchant short
+    open_interest_all: "500000",
+    // champ superflu ignoré
+    noncomm_positions_long_all: "999999",
+  };
+
+  // Fixture TFF : noms de champs LITTÉRAUX du dataset gpe5-46if.
+  const brutTff = {
+    market_and_exchange_names: "EURO FX - CHICAGO MERCANTILE EXCHANGE",
+    report_date_as_yyyy_mm_dd: "2026-06-23T00:00:00.000",
+    lev_money_positions_long: "120000", // Leveraged Funds long
+    lev_money_positions_short: "90000", // Leveraged Funds short
+    asset_mgr_positions_long: "200000", // Asset Manager long
+    asset_mgr_positions_short: "50000", // Asset Manager short
+    open_interest_all: "700000",
+  };
+
+  it("disaggregated / fonds : net = Managed Money long − short", () => {
+    const pt = pointCotDataset("disaggregated", "fonds", brutDisagg);
+    expect(pt?.net).toBe(180000 - 40000); // = 140000
+    expect(pt?.openInterest).toBe(500000);
+    expect(pt?.dateRapport).toBe(Date.parse("2026-06-23T00:00:00.000"));
+  });
+
+  it("disaggregated / commerciaux : net = Producer/Merchant long − short", () => {
+    const pt = pointCotDataset("disaggregated", "commerciaux", brutDisagg);
+    expect(pt?.net).toBe(90000 - 150000); // = -60000
+  });
+
+  it("tff / fonds : net = Leveraged Funds long − short", () => {
+    const pt = pointCotDataset("tff", "fonds", brutTff);
+    expect(pt?.net).toBe(120000 - 90000); // = 30000
+  });
+
+  it("tff / commerciaux : net = Asset Manager long − short", () => {
+    const pt = pointCotDataset("tff", "commerciaux", brutTff);
+    expect(pt?.net).toBe(200000 - 50000); // = 150000
+  });
+
+  it("champ de position absent pour la catégorie ciblée → null", () => {
+    // fonds lit m_money_* : sans le long, le point est inexploitable.
+    const { m_money_positions_long_all: _omit, ...sansMmLong } = brutDisagg;
+    expect(pointCotDataset("disaggregated", "fonds", sansMmLong)).toBeNull();
+    // idem TFF Asset Manager pour commerciaux.
+    const { asset_mgr_positions_short: _omit2, ...sansAmShort } = brutTff;
+    expect(pointCotDataset("tff", "commerciaux", sansAmShort)).toBeNull();
+  });
+
+  it("champ présent mais vide → null (« » ne devient PAS 0)", () => {
+    expect(pointCotDataset("tff", "fonds", { ...brutTff, lev_money_positions_long: "" })).toBeNull();
+  });
+
+  it("renvoie null si nom / date inexploitables, ou entrée non-objet", () => {
+    expect(pointCotDataset("disaggregated", "fonds", { ...brutDisagg, market_and_exchange_names: "" })).toBeNull();
+    expect(pointCotDataset("disaggregated", "fonds", { ...brutDisagg, report_date_as_yyyy_mm_dd: "nope" })).toBeNull();
+    expect(pointCotDataset("disaggregated", "fonds", null)).toBeNull();
+    expect(pointCotDataset("disaggregated", "fonds", "nope")).toBeNull();
+  });
+
+  it("bridge non-régression : legacy/legacy == pointCot (comportement actuel, même fixture)", () => {
+    const brutLegacy = {
+      market_and_exchange_names: "BITCOIN - CHICAGO MERCANTILE EXCHANGE",
+      report_date_as_yyyy_mm_dd: "2026-06-23T00:00:00.000",
+      noncomm_positions_long_all: "16348", // non-commercial long (net1 legacy)
+      noncomm_positions_short_all: "12824", // non-commercial short
+      comm_positions_long_all: "5000", // commercial long (net2 legacy)
+      comm_positions_short_all: "8000", // commercial short
+      open_interest_all: "20554",
+    };
+    // "legacy = comportement actuel" : net1 du dataset legacy = non-commercial = pointCot.
+    expect(pointCotDataset("legacy", "legacy", brutLegacy)).toEqual(pointCot(brutLegacy));
+    // commerciaux sur legacy → net2 = commercial.
+    expect(pointCotDataset("legacy", "commerciaux", brutLegacy)?.net).toBe(5000 - 8000); // = -3000
   });
 });
 

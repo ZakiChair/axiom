@@ -259,6 +259,42 @@ export function pointCot(rec: unknown): PointBrutCot | null {
 }
 
 /**
+ * Variante GÉNÉRIQUE de `pointCot` : parse un enregistrement d'un dataset DONNÉ pour la CATÉGORIE
+ * de positionnement demandée. Le net = long − short de la paire de la catégorie :
+ *  - `commerciaux` → `net2` (Producer/Merchant, Asset Manager, ou commercial legacy) ;
+ *  - `legacy` et `fonds` → `net1` (non-commercial legacy, Managed Money, ou Leveraged Funds).
+ * Les noms de champs viennent de `DATASETS_COT` (asymétrie `_all` préservée) ; réutilise `nombreCot`.
+ * Renvoie null si le nom, la date, ou l'une des positions de la paire sont inexploitables (champ
+ * absent/vide ⇒ null). `legacy`/`legacy` reproduit EXACTEMENT `pointCot`. Fonction PURE.
+ */
+export function pointCotDataset(
+  dataset: DatasetCot,
+  categorie: CategoriePositionnement,
+  rec: unknown,
+): PointBrutCot | null {
+  const r = rec as Record<string, unknown> | null;
+  const nom = typeof r?.market_and_exchange_names === "string" ? r.market_and_exchange_names : null;
+  if (nom === null || nom.length === 0) return null;
+  const dateStr = typeof r?.report_date_as_yyyy_mm_dd === "string" ? r.report_date_as_yyyy_mm_dd : "";
+  const dateRapport = Date.parse(dateStr);
+  if (!Number.isFinite(dateRapport)) return null;
+  const [champLong, champShort] =
+    categorie === "commerciaux"
+      ? DATASETS_COT[dataset].champs.net2
+      : DATASETS_COT[dataset].champs.net1;
+  const longs = nombreCot(r?.[champLong]);
+  const shorts = nombreCot(r?.[champShort]);
+  if (!Number.isFinite(longs) || !Number.isFinite(shorts)) return null;
+  const oi = nombreCot(r?.open_interest_all);
+  return {
+    nom,
+    dateRapport,
+    net: longs - shorts,
+    openInterest: Number.isFinite(oi) ? oi : NaN,
+  };
+}
+
+/**
  * Synthétise la réponse brute en lignes prêtes à afficher : filtre à la watchlist, regroupe
  * par instrument, conserve la SÉRIE historique complète triée chrono croissante et calcule le
  * net du dernier + la variation hebdo (dernier − précédent, null si une seule semaine).
@@ -393,6 +429,35 @@ export function construireRequete(watchlist: readonly InstrumentCot[], nowMs: nu
   );
   params.set("$order", "report_date_as_yyyy_mm_dd DESC");
   params.set("$limit", String(LIMITE));
+  return params.toString();
+}
+
+/**
+ * Variante GÉNÉRIQUE de `construireRequete` pour un dataset DONNÉ. Réutilise la mécanique legacy
+ * (fenêtre 3 ans UTC, `$where` instruments + date, `$order`, `$limit`) via délégation interne, puis
+ * SUBSTITUE le `$select` par les champs du dataset. La watchlist est RESTREINTE aux instruments dont
+ * la famille route vers ce dataset pour au moins une catégorie de positionnement (`datasetPour`) :
+ * legacy incluse ⇒ dataset `legacy` = watchlist complète ; `disaggregated` ⇒ metal/energie ; `tff` ⇒
+ * fx/indice/crypto. Les 4 champs de position (`net1` + `net2`) sont sélectionnés ENSEMBLE : un seul
+ * fetch par dataset sert les DEUX catégories fines (`pointCotDataset` choisit la paire au parse).
+ * Les chaînes de champs proviennent de `DATASETS_COT` (asymétrie `_all` préservée). Fonction PURE.
+ */
+export function construireRequeteDataset(
+  dataset: DatasetCot,
+  watchlist: readonly InstrumentCot[],
+  nowMs: number,
+): string {
+  const restreinte = watchlist.filter((inst) =>
+    (["legacy", "fonds", "commerciaux"] as CategoriePositionnement[]).some(
+      (cat) => datasetPour(inst.categorie, cat) === dataset,
+    ),
+  );
+  const params = new URLSearchParams(construireRequete(restreinte, nowMs));
+  const { net1, net2 } = DATASETS_COT[dataset].champs;
+  params.set(
+    "$select",
+    ["market_and_exchange_names", "report_date_as_yyyy_mm_dd", ...net1, ...net2, "open_interest_all"].join(","),
+  );
   return params.toString();
 }
 

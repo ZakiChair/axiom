@@ -96,9 +96,6 @@ export const BG_BTC_DOMINANCE: DefMetriqueBg = { id: "btcDominance", chemin: "bi
 // impossible). Format API PARTICULIER : `unixTs` et `etfFlow` sont des CHAÎNES, week-ends
 // absents (bourse fermée) → parseBgeometrics les gère déjà via Number() sans changement.
 export const BG_ETF_FLOW: DefMetriqueBg = { id: "etfFlow", chemin: "etf-flow-btc", champ: "etfFlow", libelle: "Flux ETF BTC" };
-// Hashrate réseau BTC (aux chart-only). UNITÉ AMONT = TH/s (~1.07e9 TH/s ≈ 1075 EH/s en 2026)
-// — NE PAS passer à `fmtHashrate` d'OnchainWindow qui attend des H/s (÷1e18).
-export const BG_HASHRATE: DefMetriqueBg = { id: "hashrate", chemin: "hashrate", champ: "hashrate", libelle: "Hashrate" };
 
 export const BG_METRIQUES: readonly DefMetriqueBg[] = [
   BG_MVRV,

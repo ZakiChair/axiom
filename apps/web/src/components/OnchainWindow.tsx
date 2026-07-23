@@ -26,6 +26,7 @@ import { settingsUiStore } from "../store/settings-ui";
 import {
   fetchCoinMetrics,
   type CoinMetricsResultat,
+  type PointMetrique,
   type SerieMetrique,
 } from "../data/onchain/coinmetrics";
 import {
@@ -33,13 +34,13 @@ import {
   fetchBgeometricMetrique,
   BG_METRIQUES,
   BG_ETF_FLOW,
-  BG_HASHRATE,
   BG_CLE_ENV_PRESENTE,
   BG_LIMITE_HEURE,
   BG_LIMITE_JOUR,
   type BgResultat,
 } from "../data/onchain/bgeometrics";
 import {
+  fetchHashrate,
   fetchMempoolReseau,
   type MempoolReseau,
   type ResultatFrais,
@@ -59,19 +60,29 @@ import {
   formatDec,
   formatEntier,
   formatPourcentage,
+  formatDateCourte,
   formatDateComplete,
   formatAge,
 } from "../lib/format";
-import { formatHashrate } from "./onchainWindow.util";
-import { lireTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { metaSource, type MetaFiabilite } from "../lib/fiabilite";
 import { zonePourMetrique } from "../lib/zonesOnchain";
 import {
   Badge,
   BadgeFiabilite,
+  BarrePeriodes,
   EnTeteFenetre,
+  InfobulleGraphe,
   NoteSource,
 } from "./ui";
+import {
+  domainePourPreset,
+  indicesVisibles,
+  pixelVersValeur,
+  valeurVersPixel,
+  type Domaine,
+} from "../lib/domaineAxe";
+import { useDomaineZoom } from "../hooks/useDomaineZoom";
 
 const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
 
@@ -80,6 +91,12 @@ const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
 // est délégué au module partagé src/lib/format. Ne restent LOCAUX que les
 // unités métier (hashrate EH/s, gas Gwei) et de fins adaptateurs (fraction → %,
 // ms optionnel, « maintenant » courant) qui s'appuient sur ces fonctions.
+
+/** Hashrate H/s → EH/s (1e18). */
+function fmtHashrate(hps: number | undefined): string {
+  if (hps === undefined || !Number.isFinite(hps)) return "—";
+  return `${(hps / 1e18).toFixed(1)} EH/s`;
+}
 
 /** Prix de gas en Gwei (peut être < 1 en période calme → 2 décimales). */
 function fmtGwei(n: number | null | undefined): string {
@@ -269,14 +286,200 @@ function fmtFluxBtc(v: number | undefined): string {
   return `${v > 0 ? "+" : ""}${formatEntier(v)} BTC`;
 }
 
+// ─────────────────────────── Courbe pleine largeur ───────────────────────────
+
+const COURBE_H = 96;
+
+/**
+ * Courbe d'évolution pleine largeur (canvas responsive), trait + aire remplie.
+ * Contrairement à la sparkline (largeur codée en dur à 88 px), elle MESURE son
+ * conteneur via ResizeObserver pour rester lisible quand le panneau est docké ou
+ * redimensionné. Couleurs résolues au dessin (token `--up`) → correctes sur les
+ * deux thèmes.
+ */
+function CourbeHashrate({ points }: { points: PointMetrique[] }) {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [largeur, setLargeur] = useState(0);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (wrap === null) return;
+    setLargeur(wrap.clientWidth);
+    const ro = new ResizeObserver((entries) => {
+      for (const e of entries) setLargeur(e.contentRect.width);
+    });
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, []);
+
+  const bornes = useMemo<Domaine | null>(
+    () =>
+      points.length >= 2
+        ? { min: points[0]!.time, max: points[points.length - 1]!.time }
+        : null,
+    [points],
+  );
+  const [presetId, setPresetId] = useState<string | null>("1a");
+  // Déclaré avant useDomaineZoom : son setter est référencé par l'onGeste qui vide le
+  // survol après un zoom/pan/double-clic (sinon le trait reste figé sur l'ancien point).
+  const [survol, setSurvol] = useState<{ xPix: number; point: PointMetrique } | null>(null);
+  const { refCanvas, domaine, setDomaine } = useDomaineZoom(bornes, () => {
+    setPresetId(null);
+    setSurvol(null);
+  });
+
+  useEffect(() => {
+    const cvs = refCanvas.current;
+    if (cvs === null || largeur <= 0 || domaine === null) return;
+    const ctx = cvs.getContext("2d");
+    if (ctx === null) return;
+
+    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+    cvs.width = largeur * dpr;
+    cvs.height = COURBE_H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, largeur, COURBE_H);
+
+    const { debut, fin } = indicesVisibles(points, (p) => p.time, domaine);
+    const visibles = points.slice(debut, fin + 1);
+    if (visibles.length < 2) return;
+
+    const PAD_B = 14; // marge basse pour les repères de dates
+    const padTop = 6;
+    const h = COURBE_H - padTop - 6 - PAD_B;
+    const xDe = (t: number) => valeurVersPixel(domaine, t, largeur);
+
+    const values = visibles.map((p) => p.value);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const span = max - min || 1;
+    const yDe = (v: number) => padTop + (h - ((v - min) / span) * h);
+
+    // Aire sous la courbe (remplissage semi-transparent), même token que le trait.
+    ctx.beginPath();
+    visibles.forEach((p, i) => {
+      const x = xDe(p.time);
+      const y = yDe(p.value);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.lineTo(xDe(visibles[visibles.length - 1]!.time), COURBE_H - PAD_B);
+    ctx.lineTo(xDe(visibles[0]!.time), COURBE_H - PAD_B);
+    ctx.closePath();
+    ctx.fillStyle = rgbaTokenCanvas("--up", 0.12, "#22c55e");
+    ctx.fill();
+
+    // Trait de la courbe.
+    ctx.beginPath();
+    visibles.forEach((p, i) => {
+      const x = xDe(p.time);
+      const y = yDe(p.value);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = lireTokenCanvas("--up", "#22c55e");
+    ctx.lineWidth = 1.4;
+    ctx.lineJoin = "round";
+    ctx.stroke();
+
+    // Repères de dates (début / milieu / fin du domaine).
+    const cDim = lireTokenCanvas("--text-dim", "#9ca3af");
+    ctx.fillStyle = cDim;
+    ctx.font = "10px system-ui, sans-serif";
+    const yLabel = COURBE_H - 3;
+    ctx.fillText(formatDateCourte(domaine.min), 2, yLabel);
+    const milieu = formatDateCourte((domaine.min + domaine.max) / 2);
+    ctx.fillText(milieu, largeur / 2 - ctx.measureText(milieu).width / 2, yLabel);
+    const finTxt = formatDateCourte(domaine.max);
+    ctx.fillText(finTxt, largeur - 2 - ctx.measureText(finTxt).width, yLabel);
+  }, [points, largeur, domaine]);
+
+  const surSurvol = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (domaine === null || points.length < 2) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const t = pixelVersValeur(domaine, e.clientX - rect.left, rect.width);
+    let point = points[0]!;
+    for (const p of points) if (Math.abs(p.time - t) < Math.abs(point.time - t)) point = p;
+    setSurvol({ xPix: valeurVersPixel(domaine, point.time, rect.width), point });
+  };
+
+  return (
+    <div ref={wrapRef} className="w-full">
+      <BarrePeriodes
+        actif={presetId}
+        onChange={(p) => {
+          setPresetId(p.id);
+          setSurvol(null);
+          if (bornes) setDomaine(domainePourPreset(bornes, p.jours));
+        }}
+      />
+      <div className="relative">
+        <canvas
+          ref={refCanvas}
+          style={{ width: "100%", height: COURBE_H }}
+          onMouseMove={surSurvol}
+          onMouseLeave={() => setSurvol(null)}
+        />
+        {survol && (
+          <InfobulleGraphe
+            xPix={survol.xPix}
+            largeurGraphe={largeur}
+            titre={formatDateComplete(survol.point.time)}
+            lignes={[{ label: "Hashrate", valeur: fmtHashrate(survol.point.value) }]}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Carte pleine largeur du hashrate : en-tête (valeur courante + fiabilité + fraîcheur)
+ * au-dessus de la courbe d'évolution 1 an, avec échelle min/max en EH/s et bornes
+ * temporelles — de quoi juger l'AMPLEUR des variations, pas seulement la forme.
+ */
+function CarteHashrate({ hr }: { hr: ResultatFrais<SerieMetrique> | null }) {
+  const serie = hr?.donnee;
+  const points = serie?.points ?? [];
+  const values = points.map((p) => p.value);
+  const min = values.length > 0 ? Math.min(...values) : undefined;
+  const max = values.length > 0 ? Math.max(...values) : undefined;
+  return (
+    <div className="col-span-2 flex flex-col gap-1 rounded-md border border-border bg-bg px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-[11px] text-text-dim">Évolution du hashrate (1 an)</span>
+        <BadgeFiabilite meta={META_DAILY} />
+      </div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="tabular-nums text-base font-semibold" style={{ color: "var(--up)" }}>
+          {fmtHashrate(serie?.dernier?.value)}
+        </span>
+        <span className="shrink-0 text-[10px] text-text-dim">
+          {hr?.perime ? "cache périmé · " : ""}
+          {fmtJour(serie?.dernier?.time)}
+        </span>
+      </div>
+      {points.length >= 2 ? (
+        <>
+          <CourbeHashrate points={points} />
+          <div className="text-center text-[9px] tabular-nums text-text-dim">
+            min {fmtHashrate(min)} · max {fmtHashrate(max)}
+          </div>
+        </>
+      ) : (
+        <div className="py-4 text-center text-[10px] text-text-dim">Hashrate indisponible</div>
+      )}
+    </div>
+  );
+}
+
 // ─────────────────────────── Fenêtre ───────────────────────────
 
 interface EtatDonnees {
   cm: CoinMetricsResultat | null;
   bg: Record<string, BgResultat | null>;
   mp: ResultatFrais<MempoolReseau> | null;
-  /** Hashrate réseau BTC (BGeometrics/bitcoin-data.com, unité amont TH/s). */
-  hr: BgResultat | null;
+  hr: ResultatFrais<SerieMetrique> | null;
   etf: Record<ActifEtf, EtfResultat | null>;
   /** Repli BTC bitcoin-data.com (flux ETF en BTC), chargé UNIQUEMENT si SoSoValue BTC échoue. */
   etfRepli: BgResultat | null;
@@ -332,7 +535,7 @@ export function OnchainWindow() {
         fetchCoinMetrics("btc", ctrl.signal),
         fetchBgeometrics(getBgeometricsKey(), ctrl.signal),
         fetchMempoolReseau(ctrl.signal),
-        fetchBgeometricMetrique(BG_HASHRATE, getBgeometricsKey(), ctrl.signal),
+        fetchHashrate(ctrl.signal),
         fetchEtfFlows("btc", cleSoSo, ctrl.signal),
         fetchEtfFlows("eth", cleSoSo, ctrl.signal),
         fetchEtfFlows("sol", cleSoSo, ctrl.signal),
@@ -416,15 +619,7 @@ export function OnchainWindow() {
             Réseau BTC
           </h3>
           <div className="grid grid-cols-2 gap-2">
-            <Widget
-              libelle="Hashrate"
-              valeur={formatHashrate(donnees.hr?.serie.dernier?.value)}
-              meta={META_BGEOMETRICS}
-              spark={sparkDe(donnees.hr?.serie, 120)}
-              color="--up"
-              fraicheur={fmtJour(donnees.hr?.serie.dernier?.time)}
-              perime={donnees.hr?.perime}
-            />
+            <CarteHashrate hr={donnees.hr} />
             <Widget
               libelle="Adresses actives"
               valeur={formatCompact(adr?.dernier?.value)}

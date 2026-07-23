@@ -32,6 +32,8 @@ import {
 } from "../data/gexDex";
 import { calculerSkew25d } from "../data/skew";
 import { termStructureIv, type PointTermIv } from "../data/termIv";
+import { histDvol } from "../data/referentiels";
+import { ivRank } from "../data/ivRank";
 import { bandeStrikes, construireGrilleOi, type GrilleOi } from "../data/oiHeatmap";
 import {
   CBOE_TICKERS,
@@ -154,6 +156,9 @@ export function OptionsWindow() {
   const [devise, setDevise] = useState<Devise>("BTC");
   const [chain, setChain] = useState<OptionPoint[]>([]);
   const [dvol, setDvol] = useState<number | null>(null);
+  // Historique DVOL 90 j (valeurs seules) pour l'IV Rank — accesseur referentiels, cache TTL 1 h
+  // partagé avec le régime (data/regime.ts) : ZÉRO fetch dédié, rechargé au rythme du poll OMON.
+  const [dvolHistorique, setDvolHistorique] = useState<number[] | null>(null);
   const [expiry, setExpiry] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
@@ -183,9 +188,10 @@ export function OptionsWindow() {
 
     const charger = async () => {
       setLoading(true);
-      const [chaine, vol] = await Promise.allSettled([
+      const [chaine, vol, histVol] = await Promise.allSettled([
         fetchDeribitOptionChain(devise),
         fetchDvol(devise),
+        histDvol(devise),
       ]);
       if (ignore) return;
       if (chaine.status === "fulfilled") {
@@ -196,6 +202,8 @@ export function OptionsWindow() {
         setErreur("Chaîne d'options Deribit indisponible.");
       }
       setDvol(vol.status === "fulfilled" ? vol.value : null);
+      const serie = histVol.status === "fulfilled" ? histVol.value : null;
+      setDvolHistorique(serie === null ? null : serie.map((p) => p.v));
       setMajTs(Date.now());
       setLoading(false);
     };
@@ -239,6 +247,12 @@ export function OptionsWindow() {
   const skew25 = useMemo(
     () => calculerSkew25d(pointsEcheance, underlying, Date.now()),
     [pointsEcheance, underlying],
+  );
+  // IV Rank (90 j) : percentile du DVOL courant dans son historique — null tant que l'un des
+  // deux manque (historique en cours de chargement, DVOL indisponible).
+  const dvolIvRank = useMemo(
+    () => (dvol === null || dvolHistorique === null ? null : ivRank(dvolHistorique, dvol)),
+    [dvolHistorique, dvol],
   );
 
   // Domaine d'axe strike (smile) : bornes = min/max des strikes de l'échéance sélectionnée —
@@ -731,12 +745,29 @@ export function OptionsWindow() {
           <div className="mt-3 grid grid-cols-2 gap-2">
             <Metric label="Max pain" value={formatUsdExact(maxPain)} />
             <Metric label="Sous-jacent" value={formatUsdExact(underlying)} />
+            {/* DVOL + IV Rank appariés dans la même ligne de la grille 2 colonnes (IV Rank
+                « à côté de » DVOL) — Put/Call décalé après pour laisser la paire ensemble. */}
+            <Metric label="DVOL" value={formatPourcentage(dvol, 1)} />
+            <div title="percentile du DVOL sur 90 j">
+              <Metric
+                label="IV Rank (90 j)"
+                value={formatEntier(dvolIvRank)}
+                couleur={
+                  dvolIvRank === null
+                    ? undefined
+                    : dvolIvRank >= 80
+                      ? "var(--down)"
+                      : dvolIvRank <= 20
+                        ? "var(--up)"
+                        : undefined
+                }
+              />
+            </div>
             <Metric
               label="Put/Call (OI)"
               value={formatDec(pcRatio, 2)}
               couleur={Number.isFinite(pcRatio) ? (pcRatio > 1 ? "var(--down)" : "var(--up)") : undefined}
             />
-            <Metric label="DVOL" value={formatPourcentage(dvol, 1)} />
             <Metric
               label="Skew 25Δ (RR)"
               value={formatPct(skew25?.rr25 ?? null, 1)}

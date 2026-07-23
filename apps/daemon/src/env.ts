@@ -20,6 +20,7 @@ export interface ProxyKeys {
   TWELVE_DATA_KEY: string;
   SOSOVALUE_API_KEY: string;
   ETHERSCAN_API_KEY: string;
+  BGEOMETRICS_API_KEY: string;
 }
 
 /**
@@ -74,5 +75,6 @@ export function chargerCles(cheminEnv: string = CHEMIN_ENV_DEFAUT): ProxyKeys {
     TWELVE_DATA_KEY: env.TWELVE_DATA_KEY ?? "",
     SOSOVALUE_API_KEY: env.SOSOVALUE_API_KEY ?? "",
     ETHERSCAN_API_KEY: env.ETHERSCAN_API_KEY ?? "",
+    BGEOMETRICS_API_KEY: env.BGEOMETRICS_API_KEY ?? "",
   };
 }

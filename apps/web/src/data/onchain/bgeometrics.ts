@@ -1,18 +1,23 @@
 /**
  * BGeometrics — bitcoin-data.com : indicateurs de VALORISATION BTC (MVRV Z-Score, SOPR, NUPL).
  *
- * Endpoints (CORS `*` → appel DIRECT ; JSON par métrique) :
- *   GET https://bitcoin-data.com/v1/<metrique>?startday=YYYY-MM-DD&endday=YYYY-MM-DD
- *   Ex  : /v1/mvrv-zscore  → [ { d, unixTs, mvrvZscore }, … ]
- *         /v1/sopr         → [ { d, unixTs, sopr }, … ]
- *         /v1/nupl         → [ { d, unixTs, nupl }, … ]
+ * Endpoints (JSON par métrique), routés en MÊME-ORIGINE via le proxy `/bgapi` (Vite en dev,
+ * daemon en prod) — bitcoin-data.com n'expose pas de CORS pour l'auth par clé :
+ *   GET /bgapi/v1/<metrique>?startday=YYYY-MM-DD&endday=YYYY-MM-DD
+ *   Ex  : /bgapi/v1/mvrv-zscore  → [ { d, unixTs, mvrvZscore }, … ]
+ *         /bgapi/v1/sopr         → [ { d, unixTs, sopr }, … ]
+ *         /bgapi/v1/nupl         → [ { d, unixTs, nupl }, … ]
  *
- * ⚠️ DÉBIT : ~15 requêtes / JOUR (par IP), sans clé. La clé (Réglages) est OPTIONNELLE
- *   et relève le quota — l'API fonctionne SANS clé (vérifié en réel). D'où :
- *   - CACHE 24 h OBLIGATOIRE par métrique (3 métriques → 3 req/jour, sous la limite).
- *   - Compteur journalier publié dans le store `health` (segment quota « x/15 j »).
- *   - Clé envoyée via l'en-tête `Authorization` (CORS autorise ce header). Format non
- *     re-vérifiable sans clé réelle → traité en best-effort (une clé invalide ne casse rien).
+ * ⚠️ AUTH & DÉBIT (vérifié en réel) : seul `Authorization: Bearer <clé>` est reconnu par
+ *   bitcoin-data.com ; sans clé valide, l'amont retombe sur le quota IP (~15 req/jour).
+ *   - Clé PERSONNELLE (Réglages) : envoyée `Authorization: Bearer <clé>` → prioritaire ;
+ *     le proxy la relaie sans y toucher.
+ *   - Clé de REPLI .env (BGEOMETRICS_API_KEY) : injectée par le proxy `/bgapi` si le front
+ *     n'envoie aucun Authorization. Sa seule PRÉSENCE est exposée au bundle via
+ *     `BG_CLE_ENV_PRESENTE` (booléen `define` — JAMAIS la valeur).
+ *   - Quota : clé active (personnelle OU .env) → ~10 req/HEURE (compteur horaire, « x/10 h ») ;
+ *     sinon quota IP ~15 req/JOUR (compteur journalier, « x/15 j »).
+ *   - CACHE 24 h OBLIGATOIRE par métrique (3 métriques → 3 req/jour, largement sous la limite).
  *
  * ⚠️ VALEURS : le champ peut valoir la CHAÎNE "NaN" (jour manquant) → le parseur l'ignore.
  * `unixTs` est en SECONDES.
@@ -21,12 +26,27 @@ import { ecrireCache, estFrais, lireCache } from "./cache";
 import { healthStore } from "../../store/health";
 import type { PointMetrique, SerieMetrique } from "./coinmetrics";
 
-const BASE = "https://bitcoin-data.com/v1";
+const BASE = "/bgapi/v1";
 const SOURCE_SANTE = "bgeometrics";
 /** TTL de cache : 24 h (quota 15 req/jour). */
 export const BG_TTL_MS = 24 * 60 * 60 * 1000;
-/** Limite journalière indicative (affichée en quota santé). */
+/** Limite journalière indicative (quota IP, sans clé — affichée en quota santé). */
 export const BG_LIMITE_JOUR = 15;
+/** Limite horaire indicative quand une clé est active (personnelle ou .env). */
+export const BG_LIMITE_HEURE = 10;
+
+/**
+ * PRÉSENCE d'une clé .env BGeometrics côté proxy (booléen `define` injecté par Vite —
+ * JAMAIS la valeur). `typeof` protège l'évaluation si le `define` n'est pas appliqué.
+ */
+declare const __BG_CLE_ENV__: boolean;
+export const BG_CLE_ENV_PRESENTE: boolean =
+  typeof __BG_CLE_ENV__ !== "undefined" ? __BG_CLE_ENV__ : false;
+
+/** Une clé est-elle active ? Clé personnelle non vide OU repli .env présent. */
+export function cleActive(cle?: string | null): boolean {
+  return (typeof cle === "string" && cle.length > 0) || BG_CLE_ENV_PRESENTE;
+}
 /** Profondeur d'historique demandée (jours) pour la sparkline. */
 const FENETRE_JOURS = 120;
 
@@ -106,25 +126,36 @@ export function parseBgeometrics(json: unknown, champ: string): SerieMetrique {
   return { points, dernier: points.length > 0 ? points[points.length - 1] : undefined };
 }
 
-// ─────────────────────────── Compteur de quota journalier ───────────────────────────
+// ─────────────────────────── Compteur de quota (horaire si clé active, sinon journalier) ───────────────────────────
 
-function cleJour(): string {
-  return new Date().toISOString().slice(0, 10);
+/**
+ * Clé de stockage localStorage du compteur : horaire (`YYYY-MM-DD-HH`) quand une clé est
+ * active (quota ~10 req/h), sinon journalière (`YYYY-MM-DD`, quota IP ~15 req/jour). PURE.
+ */
+export function cleStockageQuota(actif: boolean, maintenant: Date = new Date()): string {
+  const iso = maintenant.toISOString();
+  const suffixe = actif ? iso.slice(0, 13).replace("T", "-") : iso.slice(0, 10);
+  return `axiom:onchain:bg:count:${suffixe}`;
 }
 
-/** Lit le compteur de requêtes du jour (best-effort). */
-function lireCompteur(): number {
+/** Limite affichée selon l'activation d'une clé (horaire 10, sinon journalière 15). PURE. */
+export function limiteQuota(actif: boolean): number {
+  return actif ? BG_LIMITE_HEURE : BG_LIMITE_JOUR;
+}
+
+/** Lit le compteur de la fenêtre courante (best-effort). */
+function lireCompteur(actif: boolean): number {
   try {
-    return Number(localStorage.getItem(`axiom:onchain:bg:count:${cleJour()}`)) || 0;
+    return Number(localStorage.getItem(cleStockageQuota(actif))) || 0;
   } catch {
     return 0;
   }
 }
 
-/** Incrémente le compteur de requêtes du jour et renvoie la nouvelle valeur. */
-function incrementerCompteur(): number {
-  const cle = `axiom:onchain:bg:count:${cleJour()}`;
-  const n = lireCompteur() + 1;
+/** Incrémente le compteur de la fenêtre courante et renvoie la nouvelle valeur. */
+function incrementerCompteur(actif: boolean): number {
+  const cle = cleStockageQuota(actif);
+  const n = lireCompteur(actif) + 1;
   try {
     localStorage.setItem(cle, String(n));
   } catch {
@@ -134,10 +165,13 @@ function incrementerCompteur(): number {
 }
 
 /** Publie le quota courant (sans incrémenter) dans le store santé. */
-export function publierQuotaBg(): void {
-  healthStore
-    .getState()
-    .setQuota(SOURCE_SANTE, { utilise: lireCompteur(), limite: BG_LIMITE_JOUR, fenetre: "1jour" });
+export function publierQuotaBg(cle?: string | null): void {
+  const actif = cleActive(cle);
+  healthStore.getState().setQuota(SOURCE_SANTE, {
+    utilise: lireCompteur(actif),
+    limite: limiteQuota(actif),
+    fenetre: actif ? "1heure" : "1jour",
+  });
 }
 
 // ─────────────────────────── Fetch ───────────────────────────
@@ -168,12 +202,15 @@ export async function fetchBgeometricMetrique(
     return { serie: cache.donnee, ts: cache.ts, perime: false };
   }
 
+  const actif = cleActive(cle);
   const headers: Record<string, string> = {};
-  if (cle) headers["Authorization"] = cle;
+  // Clé personnelle envoyée `Bearer` (seul format reconnu) ; le repli .env est injecté
+  // côté proxy `/bgapi` quand aucun Authorization n'est envoyé ici.
+  if (cle) headers["Authorization"] = `Bearer ${cle}`;
 
   try {
-    const compteur = incrementerCompteur();
-    publierQuotaBg();
+    const compteur = incrementerCompteur(actif);
+    publierQuotaBg(cle);
     const res = await fetch(construireUrl(def.chemin), { headers, signal });
     if (!res.ok) throw new Error(`BGeometrics ${def.id} ${res.status}`);
     const json = (await res.json()) as unknown;
@@ -183,7 +220,7 @@ export async function fetchBgeometricMetrique(
       .getState()
       .setEtat(SOURCE_SANTE, "polling", {
         dernierMessageTs: Date.now(),
-        quota: { utilise: compteur, limite: BG_LIMITE_JOUR, fenetre: "1jour" },
+        quota: { utilise: compteur, limite: limiteQuota(actif), fenetre: actif ? "1heure" : "1jour" },
       });
     return { serie, ts: Date.now(), perime: false };
   } catch (e) {
@@ -199,7 +236,7 @@ export async function fetchBgeometrics(
   cle?: string | null,
   signal?: AbortSignal,
 ): Promise<Record<string, BgResultat | null>> {
-  publierQuotaBg();
+  publierQuotaBg(cle);
   const resultats = await Promise.all(
     BG_METRIQUES.map(async (def) => [def.id, await fetchBgeometricMetrique(def, cle, signal)] as const),
   );

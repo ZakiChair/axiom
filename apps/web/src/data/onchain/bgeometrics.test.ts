@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { parseBgeometrics } from "./bgeometrics";
+import {
+  BG_LIMITE_HEURE,
+  BG_LIMITE_JOUR,
+  cleActive,
+  cleStockageQuota,
+  limiteQuota,
+  parseBgeometrics,
+} from "./bgeometrics";
 
 describe("parseBgeometrics", () => {
   // bitcoin-data.com renvoie parfois la CHAÎNE "NaN" ou null pour un jour manquant ;
@@ -26,5 +33,30 @@ describe("parseBgeometrics", () => {
   it("tolère une réponse non-tableau", () => {
     expect(parseBgeometrics(null, "sopr").points).toEqual([]);
     expect(parseBgeometrics({ error: "x" }, "sopr").dernier).toBeUndefined();
+  });
+});
+
+describe("quota BGeometrics", () => {
+  // Instant fixe (UTC) pour vérifier le format des clés de stockage sans dépendre de l'heure.
+  const instant = new Date("2026-07-23T21:20:00.000Z");
+
+  it("clé horaire (YYYY-MM-DD-HH) quand une clé est active", () => {
+    expect(cleStockageQuota(true, instant)).toBe("axiom:onchain:bg:count:2026-07-23-21");
+  });
+
+  it("clé journalière (YYYY-MM-DD) sans clé active (quota IP)", () => {
+    expect(cleStockageQuota(false, instant)).toBe("axiom:onchain:bg:count:2026-07-23");
+  });
+
+  it("limite : 10/heure si clé active, 15/jour sinon", () => {
+    expect(limiteQuota(true)).toBe(BG_LIMITE_HEURE);
+    expect(limiteQuota(false)).toBe(BG_LIMITE_JOUR);
+  });
+
+  // NB : le cas « aucune clé » dépend de BG_CLE_ENV_PRESENTE (booléen `define` dérivé du
+  // .env chargé par Vite/vitest) → non déterministe selon la présence du .env. On n'assure
+  // ici que la branche indépendante du define : une clé personnelle rend TOUJOURS actif.
+  it("une clé personnelle non vide rend le quota actif (indépendant du repli .env)", () => {
+    expect(cleActive("ma-cle-perso")).toBe(true);
   });
 });

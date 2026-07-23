@@ -22,6 +22,7 @@ const CLES: ProxyKeys = {
   TWELVE_DATA_KEY: "tdkey",
   SOSOVALUE_API_KEY: "sosokey",
   ETHERSCAN_API_KEY: "ethkey",
+  BGEOMETRICS_API_KEY: "bgkey",
 };
 
 function routePar(prefix: string): RouteProxy {
@@ -56,6 +57,7 @@ describe("construireRoutesProxy — cibles et réécritures", () => {
     expect(routePar("/mexcapi").target).toBe("https://api.mexc.com");
     expect(routePar("/sosoapi").target).toBe("https://openapi.sosovalue.com");
     expect(routePar("/ethscanapi").target).toBe("https://api.etherscan.io");
+    expect(routePar("/bgapi").target).toBe("https://bitcoin-data.com");
   });
 
   test("/fredapi : strip préfixe + api_key si absent", () => {
@@ -103,6 +105,33 @@ describe("construireRoutesProxy — cibles et réécritures", () => {
     expect(routePar("/sosoapi").rewrite("/sosoapi/openapi/v2/etf/currentEtfDataMetrics")).toBe(
       "/openapi/v2/etf/currentEtfDataMetrics",
     );
+  });
+
+  test("/bgapi : strip préfixe (la clé passe par l'en-tête Authorization, pas la query)", () => {
+    expect(routePar("/bgapi").rewrite("/bgapi/v1/sopr?startday=2026-01-01&endday=2026-01-02")).toBe(
+      "/v1/sopr?startday=2026-01-01&endday=2026-01-02",
+    );
+  });
+});
+
+describe("/bgapi — injection d'en-tête Authorization: Bearer", () => {
+  const entetesAmont = routePar("/bgapi").entetesAmont;
+  if (!entetesAmont) throw new Error("entetesAmont manquant sur /bgapi");
+
+  test("repli .env (Bearer) quand le front n'envoie pas d'Authorization", () => {
+    expect(entetesAmont(new Headers())).toEqual({ authorization: "Bearer bgkey" });
+  });
+
+  test("clé personnelle du front prioritaire (relayée telle quelle, jamais écrasée)", () => {
+    expect(entetesAmont(new Headers({ authorization: "Bearer perso" }))).toEqual({
+      authorization: "Bearer perso",
+    });
+  });
+
+  test("aucune clé nulle part → aucun en-tête (l'amont retombe sur le quota IP)", () => {
+    const routes = construireRoutesProxy({ ...CLES, BGEOMETRICS_API_KEY: "" });
+    const route = routes.find((r) => r.prefix === "/bgapi");
+    expect(route?.entetesAmont?.(new Headers())).toEqual({});
   });
 });
 

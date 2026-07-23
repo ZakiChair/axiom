@@ -67,9 +67,10 @@ export function getBgeometricsKey(): string | null {
 
 export interface BgeometricsKeyState {
   /**
-   * true si une clé PERSONNELLE est configurée. Contrairement à coinalyze/fred (repli
-   * .env via proxy), BGeometrics est appelé en DIRECT sans repli : `hasKey` reflète donc
-   * la présence réelle d'une clé. Sans clé, la source reste utilisable (quota réduit).
+   * true si une clé PERSONNELLE est configurée. Comme coinalyze/fred, BGeometrics dispose
+   * désormais d'un repli .env (proxy `/bgapi`, en-tête `Bearer`) : `hasKey` ne reflète donc
+   * que la clé personnelle (prioritaire) — un repli .env peut relever le quota même sans elle.
+   * Sans aucune clé, la source reste utilisable (quota IP réduit).
    */
   hasKey: boolean;
   /** Enregistre une clé personnelle (localStorage). Vide => équivaut à clearKey. */

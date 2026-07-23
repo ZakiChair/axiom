@@ -2,11 +2,11 @@
  * Fenêtre « Rapport COT » (mnémonique COT) — dockable à droite, NON MODALE. Source CFTC.
  *
  * Résumé SYNTHÉTIQUE et VISUEL du dernier rapport hebdomadaire « Commitments of Traders »
- * (CFTC, dataset Legacy Futures Only). Pour une watchlist curée (majors FX, indices actions,
- * or/argent, pétrole, BTC/ETH CME) : POSITION NETTE SPÉCULATIVE (longs − shorts des « non-
- * commercials ») en barre divergente centrée sur zéro (vert = net long, rouge = net short,
- * longueur ∝ |net|), la VARIATION HEBDO (flèche + delta) et l'open interest. Regroupé par
- * famille pour une lecture au coup d'œil — ce n'est pas un dump de table brute.
+ * (CFTC, dataset Legacy Futures Only). Pour chaque instrument d'une watchlist curée (majors FX,
+ * indices actions, or/argent, pétrole, BTC/ETH CME) : sparkline 52 sem du net spéculatif
+ * (longs − shorts non-commercial), badge COT Index (position du net dans son amplitude 3 ans),
+ * barre divergente net/OI sur échelle fixe ±50 % (vert = net long, rouge = net short) et
+ * VARIATION HEBDO (flèche + delta). Regroupé par famille pour une lecture au coup d'œil.
  *
  * Données TRÈS lentes (publication hebdo le vendredi) : elles vivent dans le state React et
  * sont mises en cache 12 h par data/cot.ts. Chargement à l'ouverture (servi du cache si
@@ -20,13 +20,17 @@ import type { Commande } from "../commands/registry";
 import {
   CATEGORIES_COT,
   chargerRapportCot,
+  cotIndex,
+  deltaSemaines,
+  netSurOi,
   type CotCategorie,
   type LigneCot,
+  type PointCot,
   type ResumeCot,
 } from "../data/cot";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { formatDateComplete } from "../lib/format";
-import { EnTeteFenetre } from "./ui";
+import { Chargement, EnTeteFenetre, ErreurBloc, NoteSource } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -70,16 +74,86 @@ function formatSigned(v: number): string {
 
 // ─────────────────────────── Ligne d'instrument ───────────────────────────
 
-/** Barre divergente centrée sur zéro : net long vers la droite (up), net short vers la
- * gauche (down), longueur ∝ |net| / maxAbs. `ratio` ∈ [0, 1]. */
-function BarreNet({ net, maxAbs }: { net: number; maxAbs: number }) {
-  const ratio = maxAbs > 0 ? Math.min(1, Math.abs(net) / maxAbs) : 0;
+/**
+ * Sparkline SVG inline (~90×16) du net spéculatif sur les 52 dernières semaines : trait fin
+ * `text-dim` (via `currentColor`), zéro matérialisé par un pointillé discret, dernier point
+ * marqué d'un cercle teinté selon le signe. Pas d'axe ni d'interaction — c'est une tendance.
+ */
+function SparklineNet({ serie }: { serie: PointCot[] }) {
+  const largeur = 90;
+  const hauteur = 16;
+  const pts = serie.slice(-52);
+  // Réserve toujours l'emplacement (alignement de colonne), même série vide.
+  if (pts.length === 0) {
+    return <span className="inline-block shrink-0" style={{ width: largeur, height: hauteur }} aria-hidden />;
+  }
+  const nets = pts.map((p) => p.net);
+  // Le domaine INCLUT toujours zéro : sinon le trait du zéro sort du cadre pour un instrument
+  // durablement d'un seul côté (l'or, net-long persistant), et le signe du net (au-dessus / en
+  // dessous du zéro) ne serait plus lisible. Le compromis est une amplitude hebdo comprimée pour
+  // ces instruments — acceptable, le badge COT Index porte déjà la position dans l'amplitude.
+  const min = Math.min(0, ...nets);
+  const max = Math.max(0, ...nets);
+  const span = max - min || 1;
+  const y = (v: number) => hauteur - ((v - min) / span) * hauteur;
+  const step = pts.length > 1 ? largeur / (pts.length - 1) : 0;
+  const points = pts.map((p, i) => `${(i * step).toFixed(1)},${y(p.net).toFixed(1)}`).join(" ");
+  const dernier = pts[pts.length - 1]!;
+  const xDernier = (pts.length - 1) * step;
+  const teinte = dernier.net > 0 ? "var(--up)" : dernier.net < 0 ? "var(--down)" : "var(--text-dim)";
+  return (
+    <svg width={largeur} height={hauteur} className="shrink-0 text-text-dim" aria-hidden="true">
+      <line
+        x1={0}
+        y1={y(0).toFixed(1)}
+        x2={largeur}
+        y2={y(0).toFixed(1)}
+        stroke="currentColor"
+        strokeWidth={0.5}
+        strokeDasharray="2 2"
+        opacity={0.6}
+      />
+      {pts.length > 1 && (
+        <polyline points={points} fill="none" stroke="currentColor" strokeWidth={1} strokeLinejoin="round" />
+      )}
+      <circle cx={xDernier.toFixed(1)} cy={y(dernier.net).toFixed(1)} r={1.5} fill={teinte} />
+    </svg>
+  );
+}
+
+/** Badge COT Index (0-100) : valeur nue teintée up ≥ 80 / down ≤ 20 / neutre sinon ;
+ * « — » si null (moins de 26 semaines d'historique). Largeur fixe pour aligner la colonne. */
+function BadgeCotIndex({ valeur }: { valeur: number | null }) {
+  if (valeur === null) {
+    return <span className="w-7 text-right text-[11px] tabular-nums text-text-dim">—</span>;
+  }
+  const n = Math.round(valeur);
+  const couleur = n >= 80 ? "text-up" : n <= 20 ? "text-down" : "text-text-dim";
+  return <span className={`w-7 text-right text-[11px] font-medium tabular-nums ${couleur}`}>{n}</span>;
+}
+
+/** Barre divergente centrée sur zéro à l'échelle net/OI %, fixe et commune ±50 % (l'or et
+ * BTC deviennent comparables), avec graduations discrètes à ±25 %. « — » (pas de barre) si
+ * l'OI n'est pas exploitable (netSurOi null). */
+function BarreNet({ netSurOi: nsoi }: { netSurOi: number | null }) {
+  if (nsoi === null) {
+    return (
+      <div className="flex h-1.5 w-full items-center justify-center text-[9px] leading-none text-text-dim">
+        —
+      </div>
+    );
+  }
+  // Échelle fixe ±50 % : |netSurOi| plafonné à 50 mappé sur la demi-largeur (50 %) du conteneur.
+  const ratio = Math.min(Math.abs(nsoi), 50) / 50;
   const largeur = `${(ratio * 50).toFixed(2)}%`;
-  const positif = net >= 0;
+  const positif = nsoi >= 0;
   return (
     <div className="relative h-1.5 w-full rounded bg-bg">
       {/* Repère central (zéro). */}
       <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border" />
+      {/* Graduations discrètes à ±25 % (moitié de l'échelle ±50 %). */}
+      <div className="absolute inset-y-0 left-1/4 w-px bg-border" />
+      <div className="absolute inset-y-0 left-3/4 w-px bg-border" />
       <div
         className={`absolute inset-y-0 rounded ${positif ? "left-1/2 bg-up" : "right-1/2 bg-down"}`}
         style={{ width: largeur }}
@@ -88,16 +162,30 @@ function BarreNet({ net, maxAbs }: { net: number; maxAbs: number }) {
   );
 }
 
-/** Une ligne d'instrument : libellé + OI, barre nette, net signé + variation hebdo. */
-function Ligne({ ligne, maxAbs }: { ligne: LigneCot; maxAbs: number }) {
+/** Une ligne d'instrument : libellé + OI, sparkline, badge COT Index, barre net/OI, net signé
+ * + variation hebdo (delta 4 sem + net et OI exacts au survol via `title` natif). */
+function Ligne({ ligne }: { ligne: LigneCot }) {
   const netCouleur = ligne.net > 0 ? "text-up" : ligne.net < 0 ? "text-down" : "text-text";
   const deltaCouleur =
     ligne.delta === null ? "text-text-dim" : ligne.delta > 0 ? "text-up" : ligne.delta < 0 ? "text-down" : "text-text-dim";
   const fleche = ligne.delta === null ? "" : ligne.delta > 0 ? "↑" : ligne.delta < 0 ? "↓" : "→";
 
+  const idx = cotIndex(ligne.serie);
+  const nsoi = netSurOi(ligne.net, ligne.openInterest);
+  const delta4 = deltaSemaines(ligne.serie, 4);
+
+  // Infobulle native : delta 4 sem + net et OI exacts (le résumé visuel reste compact).
+  const titre = [
+    `Δ4sem : ${delta4 === null ? "—" : formatSigned(delta4)}`,
+    `net ${ligne.net.toLocaleString("fr-FR")}`,
+    Number.isFinite(ligne.openInterest) ? `OI ${ligne.openInterest.toLocaleString("fr-FR")}` : null,
+  ]
+    .filter((s) => s !== null)
+    .join(" · ");
+
   return (
-    <div className="space-y-1 px-3 py-2">
-      <div className="flex items-baseline justify-between gap-2">
+    <div className="space-y-1 px-3 py-2" title={titre}>
+      <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <span className="text-xs text-text">{ligne.libelle}</span>
           {Number.isFinite(ligne.openInterest) && (
@@ -106,14 +194,16 @@ function Ligne({ ligne, maxAbs }: { ligne: LigneCot; maxAbs: number }) {
             </span>
           )}
         </div>
-        <div className="flex shrink-0 items-baseline gap-2 tabular-nums">
+        <div className="flex shrink-0 items-center gap-2 tabular-nums">
+          <SparklineNet serie={ligne.serie} />
+          <BadgeCotIndex valeur={idx} />
           <span className={`text-sm font-medium ${netCouleur}`}>{formatSigned(ligne.net)}</span>
           <span className={`w-14 text-right text-[11px] ${deltaCouleur}`}>
             {ligne.delta === null ? "—" : `${fleche} ${formatSigned(ligne.delta)}`}
           </span>
         </div>
       </div>
-      <BarreNet net={ligne.net} maxAbs={maxAbs} />
+      <BarreNet netSurOi={nsoi} />
     </div>
   );
 }
@@ -141,9 +231,6 @@ export function CotWindow() {
   }, [open, resume, charger]);
 
   const lignes = resume?.lignes ?? [];
-  // Échelle commune des barres : le plus grand |net| de toute la watchlist (comparaison
-  // honnête entre l'or, très net-long, et un indice net-short).
-  const maxAbs = lignes.reduce((m, l) => Math.max(m, Math.abs(l.net)), 0);
 
   return (
     <>
@@ -171,13 +258,19 @@ export function CotWindow() {
 
       <div className="flex-1 overflow-y-auto">
         {erreur && (
-          <div className="border-b border-down/40 px-3 py-2 text-[11px] text-down">{erreur}</div>
+          <div className="px-3 py-2">
+            <ErreurBloc>{erreur}</ErreurBloc>
+          </div>
         )}
 
         {lignes.length === 0 ? (
-          <div className="px-3 py-6 text-center text-[11px] text-text-dim">
-            {loading ? "Chargement…" : "Aucune donnée COT disponible."}
-          </div>
+          loading ? (
+            <Chargement />
+          ) : (
+            <div className="px-3 py-6 text-center text-[11px] text-text-dim">
+              Aucune donnée COT disponible.
+            </div>
+          )
         ) : (
           CATEGORIES_COT.map((cat: { id: CotCategorie; libelle: string }) => {
             const duGroupe = lignes.filter((l) => l.categorie === cat.id);
@@ -188,7 +281,7 @@ export function CotWindow() {
                   {cat.libelle}
                 </h3>
                 {duGroupe.map((l) => (
-                  <Ligne key={l.nom} ligne={l} maxAbs={maxAbs} />
+                  <Ligne key={l.nom} ligne={l} />
                 ))}
               </section>
             );
@@ -196,11 +289,14 @@ export function CotWindow() {
         )}
 
         {lignes.length > 0 && (
-          <p className="px-3 py-3 text-[10px] leading-snug text-text-dim">
-            Position nette spéculative (« non-commercial ») = longs − shorts. Barre ∝ ampleur
-            du net (vert = net long, rouge = net short) ; flèche = variation vs semaine
-            précédente. Source CFTC, publication hebdomadaire.
-          </p>
+          <div className="px-3 py-3">
+            <NoteSource>
+              Position nette spéculative (« non-commercial ») = longs − shorts. Barre = net
+              rapporté à l'open interest (échelle ±50 %) ; flèche = variation vs semaine
+              précédente. COT Index = position du net spéculatif dans son amplitude 3 ans (0 =
+              extrême short, 100 = extrême long). Source CFTC, publication hebdomadaire.
+            </NoteSource>
+          </div>
         )}
       </div>
     </>

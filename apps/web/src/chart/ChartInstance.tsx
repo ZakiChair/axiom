@@ -45,6 +45,7 @@ import { macroOverlayStore } from "../store/macro-overlays";
 import { macroHistoryStore } from "../store/macroHistory";
 import { themeStore } from "../store/theme";
 import { chartLayoutStore } from "../store/chart-layout";
+import { refSymbolStore } from "../store/refSymbol";
 import { ChartIndicators } from "./indicators";
 import { PaneHeaders } from "./paneHeaders";
 import { OverlayLegend } from "./overlayLegend";
@@ -525,6 +526,14 @@ export function ChartInstance({
       indicators.sync(state.indicators, store.getState().candles, exchange);
     });
 
+    // Symbole de référence des indicateurs croisés (statistical) : en changer modifie la clé
+    // de cache aux `refClose` → recalcul immédiat des indicateurs affichés (sinon ils
+    // n'actualiseraient qu'à la prochaine bougie). Recompute direct (patron macroHistory) :
+    // aucune instance ajoutée/retirée, juste des valeurs à re-résoudre via l'aux fraîchement fetché.
+    const unsubscribeRefSymbol = refSymbolStore.subscribe(() => {
+      indicators.recompute(indicatorsStore.getState().indicators, store.getState().candles, exchange);
+    });
+
     // Échelle de l'axe prix (partagée) : appliquée à l'instance + propagée au footprint.
     const applyPriceScale = (type: PriceScaleType): void => {
       chart.setStyles({ yAxis: { type: Y_AXIS_TYPE[type] } });
@@ -799,6 +808,7 @@ export function ChartInstance({
       cancelled = true;
       indicators.disposeThrottle();
       unsubscribeIndicators();
+      unsubscribeRefSymbol();
       unsubscribePriceScale();
       unsubscribeFocusOf();
       unsubscribeOrderflow();

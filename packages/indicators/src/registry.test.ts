@@ -6,6 +6,7 @@ const VALID_CATEGORIES = new Set<IndicatorCategory>([
   "trend",
   "momentum",
   "volatility",
+  "statistical",
   "volume",
   "orderflow",
   "billwilliams",
@@ -15,8 +16,8 @@ const VALID_CATEGORIES = new Set<IndicatorCategory>([
 ]);
 
 describe("registry", () => {
-  it("câble exactement 150 indicateurs", () => {
-    expect(INDICATORS.length).toBe(150);
+  it("câble exactement 153 indicateurs", () => {
+    expect(INDICATORS.length).toBe(153);
   });
 
   it("n'a aucun id dupliqué", () => {

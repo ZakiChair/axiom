@@ -10,6 +10,8 @@
  * CSS px ; le hit-testing partage donc le même repère).
  */
 
+import { SEUIL_DOI_PCT, SEUIL_FUNDING_PCT, type QuadrantSqueeze } from "../data/squeeze";
+
 /** Coordonnée d'entrée : seules les deux valeurs d'axe importent pour la géométrie. */
 export interface CoordRadar {
   fundingPct: number;
@@ -135,4 +137,118 @@ function chevauchent(
   const y1 = y - LABEL_HAUTEUR;
   const y2 = y;
   return x1 < r.x2 && x2 > r.x1 && y1 < r.y2 && y2 > r.y1;
+}
+
+// ─────────────────────── Statistiques robustes (winsorisation) ───────────────────────
+
+/**
+ * Quantile `q` (∈ [0,1]) par interpolation linéaire, convention « type 7 » (défaut de
+ * R/numpy) : position = q·(n−1) sur les valeurs FINIES triées croissant, interpolation
+ * entre les deux voisins. Les valeurs non finies sont exclues ; liste finie vide →
+ * undefined (le domaine retombera alors sur son plancher). PURE.
+ */
+export function quantile(valeurs: readonly number[], q: number): number | undefined {
+  const finis = valeurs.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  const n = finis.length;
+  if (n === 0) return undefined;
+  if (n === 1) return finis[0];
+  const pos = q * (n - 1);
+  const bas = Math.floor(pos);
+  const haut = Math.ceil(pos);
+  const frac = pos - bas;
+  return finis[bas]! + (finis[haut]! - finis[bas]!) * frac;
+}
+
+/**
+ * Domaine d'axes ROBUSTE aux valeurs extrêmes (winsorisation) : par axe, borne =
+ * max(|q2 %|, |q98 %|), symétrisée autour de 0, avec un plancher à 2× le seuil de
+ * neutralité de l'axe (SEUIL_FUNDING_PCT / SEUIL_DOI_PCT). Un outlier isolé au-delà du
+ * 98ᵉ centile n'étire donc pas l'échelle ; sur un nuage calme, l'axe reste au plancher
+ * (la zone neutre ±seuil occupe alors la moitié de la demi-étendue). Remplace
+ * `domaineAxes` pour le rendu (l'ancienne reste tant qu'un consommateur l'utilise). PURE.
+ */
+export function domaineAxesRobuste(points: readonly CoordRadar[]): DomaineAxes {
+  const fundings = points.map((p) => p.fundingPct);
+  const ois = points.map((p) => p.dOiPct);
+  const borne = (valeurs: number[], plancher: number): number => {
+    const q2 = quantile(valeurs, 0.02);
+    const q98 = quantile(valeurs, 0.98);
+    if (q2 === undefined || q98 === undefined) return plancher;
+    return Math.max(plancher, Math.abs(q2), Math.abs(q98));
+  };
+  return {
+    fMax: borne(fundings, 2 * SEUIL_FUNDING_PCT),
+    oMax: borne(ois, 2 * SEUIL_DOI_PCT),
+  };
+}
+
+/** Contraint `v` à l'intervalle [−borne, +borne]. */
+function clamp(v: number, borne: number): number {
+  return Math.min(borne, Math.max(-borne, v));
+}
+
+/**
+ * Score d'intensité de squeeze ∈ [0, √2]. Nul pour un point « neutre » (bruit). Sinon,
+ * distance euclidienne normalisée √((f/bF)² + (oi/bOi)²) où f et oi sont CLAMPÉS aux
+ * bornes du domaine — un point écrêté au coin plafonne donc à √2, sans dominer l'échelle.
+ * Sert au classement du panneau Top candidats (T3) et au choix des étiquettes (T2). PURE.
+ */
+export function scoreSqueeze(
+  p: { fundingPct: number; dOiPct: number; quadrant: QuadrantSqueeze },
+  d: DomaineAxes,
+): number {
+  if (p.quadrant === "neutre") return 0;
+  const rf = clamp(p.fundingPct, d.fMax) / d.fMax;
+  const ro = clamp(p.dOiPct, d.oMax) / d.oMax;
+  return Math.sqrt(rf * rf + ro * ro);
+}
+
+/** Vrai si le point sort du domaine sur AU MOINS un axe (comparaison stricte). PURE. */
+export function estEcrete(p: CoordRadar, d: DomaineAxes): boolean {
+  return Math.abs(p.fundingPct) > d.fMax || Math.abs(p.dOiPct) > d.oMax;
+}
+
+/** Pas « ronds » candidats à l'intérieur d'une décade (mantisses 1/2/5). */
+const MANTISSES_TICK = [1, 2, 5] as const;
+
+/**
+ * Graduations « rondes » couvrant [min, max]. Le pas est de la forme 1/2/5×10^k, choisi
+ * pour approcher `n` graduations (typiquement 4-6). Les graduations sont des multiples du
+ * pas → 0 est inclus dès qu'il appartient à l'intervalle. La première est ≥ min et la
+ * dernière ≤ max (couverture à moins d'un pas des bornes). PURE.
+ *
+ * Note : certains domaines symétriques (p. ex. le plancher ΔOI ±6) n'admettent aucun pas
+ * 1/2/5 donnant exactement 4-6 crans ; on retient alors le pas dont le nombre de crans est
+ * le plus proche de `n` (à égalité, le plus dense, pour garantir la couverture).
+ */
+export function genTicks(min: number, max: number, n: number): number[] {
+  if (!(max > min) || !(n >= 2)) return [min];
+  const span = max - min;
+  const kBase = Math.floor(Math.log10(span / n));
+  let meilleurPas = 0;
+  let meilleurEcart = Infinity;
+  // Balaye quelques décades autour de l'ordre de grandeur de span/n × {1,2,5}.
+  for (let k = kBase - 1; k <= kBase + 1; k++) {
+    for (const m of MANTISSES_TICK) {
+      const pas = m * Math.pow(10, k);
+      const nb = Math.floor(max / pas) - Math.ceil(min / pas) + 1;
+      if (nb < 2) continue;
+      // Écart au nombre cible ; à égalité on préfère le pas le plus fin (nb plus grand).
+      const ecart = Math.abs(nb - n);
+      if (ecart < meilleurEcart || (ecart === meilleurEcart && pas < meilleurPas)) {
+        meilleurEcart = ecart;
+        meilleurPas = pas;
+      }
+    }
+  }
+  const pas = meilleurPas;
+  const decimales = Math.max(0, -Math.floor(Math.log10(pas)));
+  const debut = Math.ceil(min / pas) * pas;
+  const eps = pas * 1e-9;
+  const ticks: number[] = [];
+  for (let v = debut; v <= max + eps; v += pas) {
+    // Arrondi à la précision du pas pour effacer le bruit flottant (0.30000000004…).
+    ticks.push(Number(v.toFixed(decimales)));
+  }
+  return ticks;
 }

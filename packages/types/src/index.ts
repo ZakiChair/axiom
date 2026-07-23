@@ -190,6 +190,8 @@ export type AuxSeriesId =
   | "quarterlyBasis"
   // Positionnement Binance futures : comptes (foule), top traders, taker (flux agressif).
   | "lsAccount" | "lsTopTrader" | "lsTaker"
+  // Delta agresseur du perp par bougie (Binance fapi klines) — jambe perp du CVD spot vs perp.
+  | "perpDelta"
   // Sentiment global crypto : Fear & Greed Index (Alternative.me, 0-100).
   | "fearGreed";
 

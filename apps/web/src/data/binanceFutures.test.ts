@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { parseRatioHistory, parseTakerHistory, parseOiHistory } from "./binanceFutures";
+import {
+  parseRatioHistory,
+  parseTakerHistory,
+  parseOiHistory,
+  deltaDepuisKlinesPerp,
+  timeframeToFapiInterval,
+} from "./binanceFutures";
+import type { Timeframe } from "@axiom/types";
 import { aggTradeToTrade, type BinanceAggTrade } from "./binance";
 
 /**
@@ -70,6 +77,43 @@ describe("parseOiHistory", () => {
 });
 
 /**
+ * `deltaDepuisKlinesPerp` : delta agresseur par bougie depuis les lignes brutes de
+ * `fapi/v1/klines` (mêmes 12 champs que le spot — cf. `restKlineToCandle`, binance.ts) :
+ * indice 0 = open time, 5 = volume base, 9 = taker buy base. Champs numériques en
+ * CHAÎNES → `Number()`. delta = 2 × takerBuyBase − volume (= buyVol − sellVol).
+ */
+describe("deltaDepuisKlinesPerp", () => {
+  it("calcule le delta agresseur par bougie (achat dominant => positif)", () => {
+    const rows = [
+      // volume 100, takerBuy 70 => sell 30 => delta = 140 - 100 = +40 (achat dominant)
+      [1782950400000, "67000.0", "67100.0", "66950.0", "67080.0", "100", 1782950699999, "6.7e6", 500, "70", "4.7e6", "0"],
+      // volume 200, takerBuy 80 => sell 120 => delta = 160 - 200 = -40 (vente dominante)
+      [1782950700000, "67080.0", "67120.0", "67000.0", "67010.0", "200", 1782950999999, "1.3e7", 900, "80", "5.3e6", "0"],
+    ];
+    const out = deltaDepuisKlinesPerp(rows);
+    expect(out).toEqual([
+      { t: 1782950400000, delta: 40 },
+      { t: 1782950700000, delta: -40 },
+    ]);
+  });
+
+  it("ignore les lignes malformées (trop courtes, temps/volume/takerBuy non numériques)", () => {
+    const rows = [
+      [1782950400000, "6", "6", "6", "6", "100", 1, "0", 1, "70", "0", "0"], // valide => +40
+      [1782950700000, "6", "6", "6", "6", "100"], // trop courte (pas d'indice 9)
+      ["oops", "6", "6", "6", "6", "100", 1, "0", 1, "70", "0", "0"], // temps non numérique
+      [1782951000000, "6", "6", "6", "6", "x", 1, "0", 1, "70", "0", "0"], // volume non numérique
+      [1782951300000, "6", "6", "6", "6", "100", 1, "0", 1, "y", "0", "0"], // takerBuy non numérique
+    ];
+    expect(deltaDepuisKlinesPerp(rows)).toEqual([{ t: 1782950400000, delta: 40 }]);
+  });
+
+  it("renvoie [] pour un tableau vide", () => {
+    expect(deltaDepuisKlinesPerp([])).toEqual([]);
+  });
+});
+
+/**
  * `subscribePerpAggTrades` (flux WS fstream @aggTrade) réutilise TEL QUEL le mapping
  * `aggTradeToTrade` du spot (data/binance.ts, déjà figé par tradeMapping.test.ts) :
  * le schéma JSON de l'aggTrade perp (fstream) est identique à celui du spot sur les
@@ -114,5 +158,28 @@ describe("mapping aggTrade perp (fstream) — via aggTradeToTrade réutilisé", 
       qty: 0.203,
       side: "buy",
     });
+  });
+});
+
+describe("timeframeToFapiInterval", () => {
+  it("mappe les timeframes communs vers l'intervalle fapi (identité)", () => {
+    const supportes: Timeframe[] = [
+      "1m", "3m", "5m", "15m", "30m",
+      "1h", "2h", "4h", "6h", "12h",
+      "1d", "3d", "1w", "1M",
+    ];
+    for (const tf of supportes) expect(timeframeToFapiInterval(tf)).toBe(tf);
+  });
+
+  it("rend undefined pour le sous-minute (fapi minimum = 1m)", () => {
+    expect(timeframeToFapiInterval("1s")).toBeUndefined();
+    expect(timeframeToFapiInterval("5s")).toBeUndefined();
+    expect(timeframeToFapiInterval("15s")).toBeUndefined();
+  });
+
+  it("rend undefined pour les agrégats client absents de fapi (3M/6M/12M)", () => {
+    expect(timeframeToFapiInterval("3M")).toBeUndefined();
+    expect(timeframeToFapiInterval("6M")).toBeUndefined();
+    expect(timeframeToFapiInterval("12M")).toBeUndefined();
   });
 });

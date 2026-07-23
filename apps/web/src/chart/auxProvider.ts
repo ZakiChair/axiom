@@ -16,13 +16,15 @@
  *   - l'ALIGNEMENT (`alignAux`) est recalculé à CHAQUE `getAligned` car il dépend
  *     de `candleTimes` (propre à chaque graphe/appel) ; seul le fetch est mémoïsé.
  *
- * Choix de clé : `(id, symbole)` suffit — l'`exchange` et le `timeframe` de la
- * requête n'entrent PAS dans la clé. Les fetchs sous-jacents ne dépendent pas de
- * l'exchange (Coinalyze cible toujours le perp Binance ; Coin Metrics/DefiLlama
- * sont mono-source) ni du timeframe du graphe (granularité brute fixée : "1hour"
- * / quotidien) ; l'écart de timeframe est entièrement absorbé par `alignAux` à la
- * lecture. Inclure exchange/timeframe ne ferait que fragmenter le cache en
- * doublons identiques.
+ * Choix de clé : `(id, symbole)` suffit pour la plupart des séries — l'`exchange`
+ * et le `timeframe` de la requête n'entrent PAS dans la clé. Les fetchs sous-jacents
+ * ne dépendent pas de l'exchange (Coinalyze cible toujours le perp Binance ; Coin
+ * Metrics/DefiLlama sont mono-source) ni du timeframe du graphe (granularité brute
+ * fixée : "1hour" / quotidien) ; l'écart de timeframe est absorbé par `alignAux` à la
+ * lecture. EXCEPTION : `perpDelta` est un FLUX (delta agresseur par bougie), pas un
+ * niveau — il DOIT être fetché à l'interval du chart (un LOCF sur un flux fabrique un
+ * flux faux). Sa clé intègre donc le timeframe (`perpDelta:${symbole}:${tf}`) ; les
+ * séries de niveaux gardent la clé `(id, symbole)` inchangée.
  */
 import { alignAux } from "@axiom/indicators";
 import type { AuxSeries, AuxSeriesId, ExchangeId, Timeframe } from "@axiom/types";
@@ -49,6 +51,7 @@ import {
 import { fetchQuarterlyBasisHistory } from "../data/binanceDapi";
 import { fetchLsAccountRatio, fetchLsTopTraderRatio, fetchTakerRatio } from "../data/positioning";
 import { fetchFearGreedHistory } from "../data/marketOverview";
+import { deltaDepuisKlinesPerp, timeframeToFapiInterval } from "../data/binanceFutures";
 import { extUrl } from "../data/extapi";
 
 /** État renvoyé par `getAligned` pour l'ensemble des `ids` demandés. */
@@ -77,6 +80,7 @@ const TTL_MS: Record<AuxSeriesId, number> = {
   oi: 60_000,
   funding: 60_000,
   mark: 60_000, // mark price perp (Binance fapi markPriceKlines)
+  perpDelta: 60_000, // delta agresseur perp par bougie (Binance fapi klines)
   stablecoins: 60 * 60_000,
   nvt: 60 * 60_000,
   mvrv: 60 * 60_000,
@@ -181,10 +185,66 @@ async function fetchMarkPriceHistory(symbol: string, since: number): Promise<Aux
 }
 
 /**
+ * Historique du delta agresseur perp par bougie via Binance fapi klines (proxy
+ * /extapi). Fetché À L'INTERVAL DU CHART (`interval`, dérivé du timeframe courant) :
+ * un flux ≠ un niveau — le fetcher en 1h fixe puis LOCF fabriquerait un flux faux
+ * (delta horaire jeté en 1d, répété/cumulé en 1m). À interval identique, l'alignement
+ * `alignAux` tombe 1:1 (mêmes openTime UTC pour les klines spot et perp Binance).
+ * Pagination ARRIÈRE (via `endTime`, ≠ `fetchMarkPriceHistory` qui pagine en avant
+ * mais reste épinglé à 1h) : le flux se lit près de `now`, donc on récupère les
+ * bougies RÉCENTES d'abord. `startTime`-seul renverrait au contraire les plus VIEILLES
+ * de la fenêtre → sur interval fin, le plafond de 3 pages n'atteindrait jamais `now`
+ * et un LOCF fabriquerait un flux constant sur toute la vue récente. Parse via
+ * `deltaDepuisKlinesPerp` (PURE, testée) : delta = 2 × takerBuyBase − volume.
+ * 3 pages (limit 1500) : couvre 90 j en ≥30m ; en interval plus fin, couvre les ~4500
+ * DERNIÈRES bougies (couverture partielle du début tolérée par l'ancrage commun du def).
+ * Dégradation gracieuse propre à cette série (contrat Task 1) : pas de perp / symbole
+ * non listé en futures / échec réseau → SÉRIE VIDE (jamais de throw ni d'état `error`),
+ * de sorte que la jambe perp du def `cvdSpotPerp` disparaisse sans masquer le CVD spot.
+ */
+async function fetchPerpDeltaHistory(
+  symbol: string,
+  since: number,
+  interval: string
+): Promise<AuxPoint[]> {
+  const sym = toFuturesSymbol(symbol);
+  const out: AuxPoint[] = [];
+  let endTime = Date.now();
+  try {
+    for (let page = 0; page < 3; page++) {
+      const q = new URLSearchParams({
+        symbol: sym,
+        interval,
+        endTime: String(endTime), // borne HAUTE : Binance rend les `limit` plus récentes ≤ endTime.
+        limit: "1500",
+      });
+      const res = await fetch(extUrl("fapi.binance.com", `fapi/v1/klines?${q}`));
+      if (!res.ok) break; // partiel OK ; symbole non listé / échec → vide.
+      const raw: unknown = await res.json();
+      if (!Array.isArray(raw) || raw.length === 0) break;
+      const points = deltaDepuisKlinesPerp(raw as unknown[][]);
+      for (const p of points) out.push({ time: p.t, value: p.delta });
+      const firstT = points.length > 0 ? points[0]?.t : undefined;
+      if (firstT === undefined) break;
+      if (firstT <= since) break; // début de la fenêtre 90 j atteint
+      endTime = firstT - 1; // page suivante = bloc plus ancien, juste avant.
+      if (raw.length < 1500) break;
+    }
+  } catch {
+    // Réseau/CORS/blocage régional : jambe perp absente, dégradation → série vide.
+    return [];
+  }
+  // Borne basse 90 j (les pages arrière peuvent déborder sous `since`) ; toPoints trie.
+  return toPoints(out.filter((p) => p.time >= since));
+}
+
+/**
  * Récupère la série brute d'une famille auxiliaire pour un symbole, normalisée en
  * `AuxPoint[]` triés. Une exception (source injoignable) remonte → cache `error`.
+ * `timeframe` n'est utilisé que par `perpDelta` (flux fetché à l'interval du chart) ;
+ * les séries de niveaux gardent leur granularité brute fixe et l'ignorent.
  */
-async function rawFetch(id: AuxSeriesId, symbol: string): Promise<AuxPoint[]> {
+async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): Promise<AuxPoint[]> {
   const since = Date.now() - LOOKBACK_MS;
   switch (id) {
     case "oi": {
@@ -198,6 +258,14 @@ async function rawFetch(id: AuxSeriesId, symbol: string): Promise<AuxPoint[]> {
     case "mark": {
       // Mark price perp Binance (gratuit, fapi markPriceKlines 1h) — pour basis spot-perp.
       return fetchMarkPriceHistory(symbol, since);
+    }
+    case "perpDelta": {
+      // Delta agresseur perp par bougie (gratuit, fapi klines à l'interval du chart) —
+      // jambe perp du CVD spot vs perp. Toujours ciblé Binance USDT-M. Timeframe non
+      // supporté par fapi (sous-minute, 3M/6M/12M) → série vide ; échec/pas de perp → vide.
+      const interval = timeframeToFapiInterval(timeframe);
+      if (interval === undefined) return [];
+      return fetchPerpDeltaHistory(symbol, since, interval);
     }
     case "stablecoins": {
       const s = await stablecoinsSupplyProvider.fetchSeries({ start: since });
@@ -300,7 +368,10 @@ export class AuxProvider {
     let pending = false;
 
     for (const id of req.ids) {
-      const key = `${id}:${req.symbol}`;
+      // `perpDelta` est un flux fetché à l'interval du chart → sa clé intègre le
+      // timeframe (sinon deux timeframes partageraient un flux faux). Niveaux inchangés.
+      const key =
+        id === "perpDelta" ? `${id}:${req.symbol}:${req.timeframe}` : `${id}:${req.symbol}`;
       let entry = this.cache.get(key);
 
       // Purge d'une entrée ready/error expirée → force un re-fetch au besoin.
@@ -310,7 +381,7 @@ export class AuxProvider {
       }
 
       if (entry === undefined) {
-        this.startFetch(id, req.symbol, key, onReady);
+        this.startFetch(id, req.symbol, req.timeframe, key, onReady);
         pending = true;
         continue;
       }
@@ -332,10 +403,16 @@ export class AuxProvider {
   }
 
   /** Lance un unique fetch pour `key` et notifie tous les `onReady` à sa résolution. */
-  private startFetch(id: AuxSeriesId, symbol: string, key: string, onReady: () => void): void {
+  private startFetch(
+    id: AuxSeriesId,
+    symbol: string,
+    timeframe: Timeframe,
+    key: string,
+    onReady: () => void
+  ): void {
     const entry: Entry = { state: "pending", onReadys: [onReady] };
     this.cache.set(key, entry);
-    void rawFetch(id, symbol).then(
+    void rawFetch(id, symbol, timeframe).then(
       (points) => {
         this.cache.set(key, { state: "ready", points, expires: Date.now() + TTL_MS[id] });
         for (const cb of entry.onReadys) cb();

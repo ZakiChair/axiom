@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 149 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 150 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -121,6 +121,7 @@ import { vwapBands } from "./volume/vwapBands";
 import { cvd } from "./volume/cvd";
 import { volumeDelta } from "./volume/volumeDelta";
 import { takerBuyRatio } from "./volume/takerBuyRatio";
+import { cvdSpotPerp } from "./orderflow/cvdSpotPerp";
 import { relativeVolume } from "./volume/relativeVolume";
 import { volumeZScore } from "./volume/volumeZScore";
 import { netVolume } from "./volume/netVolume";
@@ -288,6 +289,7 @@ export const INDICATORS: IndicatorDef[] = [
   volumeDelta,
   takerBuyRatio,
   netVolume,
+  cvdSpotPerp,
   // billwilliams
   alligator,
   fractals,

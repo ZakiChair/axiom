@@ -16,7 +16,7 @@
  * marque l'erreur dans le registre santé et on rejette — l'appelant (fenêtre Dérivés)
  * utilise Promise.allSettled et n'affiche simplement pas la section, sans spam console.
  */
-import type { Trade, Unsubscribe } from "@axiom/types";
+import type { Timeframe, Trade, Unsubscribe } from "@axiom/types";
 import { healthStore } from "../store/health";
 import { aggTradeToTrade, type BinanceAggTrade } from "./binance";
 import { connectWsLoop } from "./wsLoop";
@@ -204,6 +204,58 @@ export function parseOiHistory(raw: unknown): BinanceOiHistPoint[] {
     out.push({ time, oi: Number(p.sumOpenInterest), oiUsd });
   }
   return out.sort((a, b) => a.time - b.time);
+}
+
+/** Delta agresseur d'une bougie perp {t: open time ms, delta: buyVol − sellVol}. */
+export interface PerpDeltaPoint {
+  t: number;
+  delta: number;
+}
+
+/**
+ * Delta agresseur par bougie depuis les lignes brutes de `fapi/v1/klines`. Chaque
+ * ligne suit les 12 champs officiels (identiques au spot, cf. `restKlineToCandle`,
+ * data/binance.ts) : indice 0 = open time, 5 = volume base, 9 = taker buy base volume.
+ * Les champs numériques arrivent en CHAÎNES → `Number()`. Le delta agresseur vaut
+ * `buyVol − sellVol` = `takerBuyBase − (volume − takerBuyBase)` = `2 × takerBuyBase −
+ * volume`. Fonction PURE : lignes malformées (non-tableau, trop courtes, temps/volume/
+ * takerBuy non finis) IGNORÉES, jamais de throw. Ordre d'entrée préservé.
+ */
+export function deltaDepuisKlinesPerp(rows: unknown[][]): PerpDeltaPoint[] {
+  if (!isArray(rows)) return [];
+  const out: PerpDeltaPoint[] = [];
+  for (const row of rows) {
+    if (!isArray(row) || row.length < 10) continue;
+    const t = Number(row[0]);
+    const volume = Number(row[5]);
+    const takerBuyBase = Number(row[9]);
+    if (!Number.isFinite(t) || !Number.isFinite(volume) || !Number.isFinite(takerBuyBase)) continue;
+    out.push({ t, delta: 2 * takerBuyBase - volume });
+  }
+  return out;
+}
+
+/**
+ * Intervalles acceptés par `fapi/v1/klines` (miroir de la doc Binance) — DISTINCT
+ * du set plus restreint `/futures/data` (`BinanceFuturesPeriod`). Note : fapi expose
+ * `8h` mais pas de sous-minute ; AXIOM n'a pas `8h` mais a `1s/5s/15s`.
+ */
+const FAPI_KLINE_INTERVALS = new Set([
+  "1m", "3m", "5m", "15m", "30m",
+  "1h", "2h", "4h", "6h", "8h", "12h",
+  "1d", "3d", "1w", "1M",
+]);
+
+/**
+ * Mappe un `Timeframe` AXIOM vers l'intervalle `fapi/v1/klines` correspondant, ou
+ * `undefined` si non supporté. Fonction PURE. Pour tous les timeframes communs, la
+ * chaîne AXIOM est déjà l'intervalle fapi (identité). Non supportés → `undefined` :
+ * le sous-minute (`1s/5s/15s`, fapi minimum = 1m) ET les agrégats client
+ * (`3M/6M/12M`, absents de fapi). L'appelant (perpDelta) rend alors une série vide —
+ * personne ne lit un flux de divergence en bougies 3M.
+ */
+export function timeframeToFapiInterval(tf: Timeframe): string | undefined {
+  return FAPI_KLINE_INTERVALS.has(tf) ? tf : undefined;
 }
 
 // ---------- Méthodes publiques ----------

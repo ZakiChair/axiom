@@ -225,6 +225,45 @@ export function resumerCot(
   return { lignes, dateRapport };
 }
 
+/**
+ * COT Index : position du net du DERNIER point dans son amplitude (min–max) sur la fenêtre des
+ * `fenetreSem` derniers points de la série (défaut 156 ≈ 3 ans hebdo) — l'indice « Larry
+ * Williams » classique, ramené sur 0-100. `null` si moins de 26 semaines d'historique total
+ * (fenêtre trop courte pour être significative) ; 50 si la fenêtre est constante (amplitude
+ * nulle, ratio indéfini). Fonction PURE.
+ */
+export function cotIndex(serie: PointCot[], fenetreSem = 156): number | null {
+  if (serie.length < 26) return null;
+  const fenetre = serie.slice(-fenetreSem);
+  const nets = fenetre.map((p) => p.net);
+  const min = Math.min(...nets);
+  const max = Math.max(...nets);
+  const dernier = nets[nets.length - 1]!;
+  if (max === min) return 50;
+  return ((dernier - min) / (max - min)) * 100;
+}
+
+/**
+ * Variation du net sur `n` semaines : net du dernier point − net du point `n` positions plus tôt
+ * dans la série. `null` si la série est trop courte pour reculer de `n` points. Fonction PURE.
+ */
+export function deltaSemaines(serie: PointCot[], n: number): number | null {
+  if (serie.length <= n) return null;
+  const dernier = serie[serie.length - 1]!;
+  const cible = serie[serie.length - 1 - n]!;
+  return dernier.net - cible.net;
+}
+
+/**
+ * Net rapporté à l'open interest, en pourcentage (échelle d'affichage de `BarreNet`). `null` si
+ * l'OI n'est pas strictement positif (absent/NaN/0/négatif — `!(oi > 0)` couvre NaN sans cas
+ * spécial). Fonction PURE.
+ */
+export function netSurOi(net: number, oi: number): number | null {
+  if (!(oi > 0)) return null;
+  return (net / oi) * 100;
+}
+
 // ─────────────────────────── Orchestrateur (effet de bord) ───────────────────────────
 
 const HOTE = "publicreporting.cftc.gov";
@@ -278,6 +317,24 @@ interface CacheCot {
   resume: ResumeCot;
 }
 
+/**
+ * `JSON.stringify(NaN)` produit `null` (NaN n'est pas représentable en JSON) : un `oi` ou un
+ * `openInterest` absent (NaN par convention `nombreCot`) revient donc `null` après un aller-retour
+ * localStorage, en violation du contrat `oi: number` / `openInterest: number`. On renormalise ici
+ * à la LECTURE (toute valeur non finie ⇒ NaN) plutôt qu'à l'écriture, pour rester robuste même à
+ * un cache écrit par une version antérieure du code. Fonction PURE.
+ */
+function normaliserResumeCache(resume: ResumeCot): ResumeCot {
+  return {
+    ...resume,
+    lignes: resume.lignes.map((ligne) => ({
+      ...ligne,
+      openInterest: Number.isFinite(ligne.openInterest) ? ligne.openInterest : NaN,
+      serie: ligne.serie.map((pt) => (Number.isFinite(pt.oi) ? pt : { ...pt, oi: NaN })),
+    })),
+  };
+}
+
 /** Lecture tolérante du cache (localStorage absent / JSON corrompu → null). */
 function lireCache(): CacheCot | null {
   try {
@@ -286,7 +343,7 @@ function lireCache(): CacheCot | null {
     if (!raw) return null;
     const p = JSON.parse(raw) as Partial<CacheCot> | null;
     if (!p || typeof p.ts !== "number" || !p.resume || !Array.isArray(p.resume.lignes)) return null;
-    return { ts: p.ts, resume: p.resume as ResumeCot };
+    return { ts: p.ts, resume: normaliserResumeCache(p.resume as ResumeCot) };
   } catch {
     return null;
   }

@@ -1,12 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CATEGORIES_COT,
   WATCHLIST_COT,
+  chargerRapportCot,
   construireRequete,
+  cotIndex,
+  deltaSemaines,
+  netSurOi,
   nombreCot,
   pointCot,
   resumerCot,
   type InstrumentCot,
+  type PointCot,
 } from "./cot";
 
 describe("nombreCot", () => {
@@ -192,6 +197,151 @@ describe("resumerCot", () => {
     expect(btc?.serie[1]?.t).toBe(Date.parse("2026-06-23T00:00:00.000"));
     expect(btc?.serie[1]?.net).toBe(90);
     expect(btc?.serie[1]?.oi).toBeNaN();
+  });
+});
+
+describe("cotIndex", () => {
+  /** Construit une série de longueur `n` à partir des nets fournis (t/oi arbitraires mais finis). */
+  function serieDe(nets: number[]): PointCot[] {
+    return nets.map((net, i) => ({ t: i * 1000, net, oi: 1000 }));
+  }
+
+  it("dernier = max de la fenêtre → 100", () => {
+    const nets = Array.from({ length: 30 }, (_, i) => i); // croissant, dernier = max
+    expect(cotIndex(serieDe(nets))).toBe(100);
+  });
+
+  it("dernier = min de la fenêtre → 0", () => {
+    const nets = Array.from({ length: 30 }, (_, i) => -i); // décroissant, dernier = min
+    expect(cotIndex(serieDe(nets))).toBe(0);
+  });
+
+  it("série constante (amplitude nulle) → 50", () => {
+    const nets = Array.from({ length: 30 }, () => 5000);
+    expect(cotIndex(serieDe(nets))).toBe(50);
+  });
+
+  it("< 26 points d'historique → null", () => {
+    expect(cotIndex(serieDe(Array.from({ length: 25 }, (_, i) => i)))).toBeNull();
+  });
+
+  it("valeur intermédiaire : dernier au 3/4 de l'amplitude → 75", () => {
+    // min=0, max=100, dernier=75 ⇒ (75-0)/(100-0)*100 = 75.
+    const nets = [0, 100, 25, 50, ...Array.from({ length: 22 }, () => 10), 75];
+    expect(cotIndex(serieDe(nets))).toBe(75);
+  });
+
+  it("fenêtre plus grande que la série → utilise toute la série", () => {
+    const nets = Array.from({ length: 30 }, (_, i) => i);
+    // fenetreSem très large (> longueur série) : identique à la fenêtre par défaut ici (30 < 156).
+    expect(cotIndex(serieDe(nets), 10_000)).toBe(cotIndex(serieDe(nets)));
+    expect(cotIndex(serieDe(nets), 10_000)).toBe(100);
+  });
+
+  it("fenêtre plus étroite que la série : ignore l'historique hors fenêtre (résultat DIFFÉRENT selon la fenêtre)", () => {
+    // min/max globaux = 0/100 (2 premiers points) ; 23 points de remplissage (50, sans effet sur
+    // le min/max global) ; 5 derniers points resserrés autour de 20-24 (min/max LOCAUX distincts
+    // du min/max global). Le dernier point (24) est extrême dans la fenêtre de 5 mais médian sur
+    // l'ensemble de la série ⇒ les deux calculs doivent diverger si la fenêtre est bien appliquée.
+    const nets = [100, 0, ...Array.from({ length: 23 }, () => 50), 20, 21, 22, 23, 24];
+    expect(cotIndex(serieDe(nets), 5)).toBe(100); // fenêtre [20,21,22,23,24] : dernier = max local
+    expect(cotIndex(serieDe(nets))).toBe(24); // série entière [0,100] : (24-0)/100*100 = 24
+  });
+});
+
+describe("deltaSemaines", () => {
+  function serieDe(nets: number[]): PointCot[] {
+    return nets.map((net, i) => ({ t: i * 1000, net, oi: 1000 }));
+  }
+
+  it("delta 1 semaine (net dernier − net précédent)", () => {
+    const serie = serieDe([100, 120, 90]);
+    expect(deltaSemaines(serie, 1)).toBe(90 - 120);
+  });
+
+  it("delta 4 semaines", () => {
+    const serie = serieDe([100, 120, 90, 80, 130]);
+    expect(deltaSemaines(serie, 4)).toBe(130 - 100);
+  });
+
+  it("série trop courte pour reculer de n → null", () => {
+    const serie = serieDe([100, 120, 90]);
+    expect(deltaSemaines(serie, 4)).toBeNull();
+    expect(deltaSemaines(serie, 3)).toBeNull(); // exactement à la limite (index -1 hors tableau)
+  });
+});
+
+describe("netSurOi", () => {
+  it("calcule le ratio net/OI en pourcentage (cas positif et négatif)", () => {
+    expect(netSurOi(5000, 20000)).toBe(25);
+    expect(netSurOi(-5000, 20000)).toBe(-25);
+  });
+
+  it("OI = 0 → null", () => {
+    expect(netSurOi(5000, 0)).toBeNull();
+  });
+
+  it("OI négatif ou NaN → null", () => {
+    expect(netSurOi(5000, -100)).toBeNull();
+    expect(netSurOi(5000, Number.NaN)).toBeNull();
+  });
+});
+
+describe("chargerRapportCot — normalisation du cache (fix revue Task 1)", () => {
+  /** Mock localStorage en mémoire (environnement de test Node, pas de DOM ici). */
+  function installMockLocalStorage(): Storage {
+    const data = new Map<string, string>();
+    const mock: Storage = {
+      getItem: (k) => data.get(k) ?? null,
+      setItem: (k, v) => void data.set(k, v),
+      removeItem: (k) => void data.delete(k),
+      clear: () => data.clear(),
+      key: (i) => Array.from(data.keys())[i] ?? null,
+      get length() {
+        return data.size;
+      },
+    };
+    (globalThis as { localStorage?: Storage }).localStorage = mock;
+    return mock;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
+  it("un OI absent (NaN) survit au round-trip localStorage sans devenir null", async () => {
+    installMockLocalStorage();
+    const BTC = "BITCOIN - CHICAGO MERCANTILE EXCHANGE";
+    const records = [
+      {
+        market_and_exchange_names: BTC,
+        report_date_as_yyyy_mm_dd: "2026-06-23T00:00:00.000",
+        noncomm_positions_long_all: "16348",
+        noncomm_positions_short_all: "12824",
+        open_interest_all: "", // ⇒ OI = NaN (convention nombreCot)
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => records }),
+    );
+
+    // 1) premier chargement réseau : écrit le cache (JSON.stringify(NaN) → "null" dans le blob).
+    const premier = await chargerRapportCot({ force: true });
+    const btc1 = premier.resume.lignes.find((l) => l.nom === BTC);
+    expect(Number.isNaN(btc1?.openInterest)).toBe(true);
+    expect(Number.isNaN(btc1?.serie[0]?.oi)).toBe(true);
+
+    // 2) relecture pure cache (frais, aucun fetch nécessaire) : sans le fix, oi/openInterest
+    //    reviendraient `null` (violation du contrat `number`) au lieu de NaN.
+    const second = await chargerRapportCot();
+    expect(second.depuisCache).toBe(true);
+    const btc2 = second.resume.lignes.find((l) => l.nom === BTC);
+    expect(btc2?.openInterest).not.toBeNull();
+    expect(Number.isNaN(btc2?.openInterest)).toBe(true);
+    expect(btc2?.serie[0]?.oi).not.toBeNull();
+    expect(Number.isNaN(btc2?.serie[0]?.oi)).toBe(true);
   });
 });
 

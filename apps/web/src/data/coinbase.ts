@@ -30,10 +30,14 @@
  *   - WS channels       : https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-channels
  */
 import type { Candle, IExchangeAdapter, Timeframe, Trade, Unsubscribe } from "@axiom/types";
+import { extUrl } from "./extapi";
 import { splitSymbol } from "./symbol";
 import { connectWsLoop } from "./wsLoop";
 
-const REST_CANDLES_BASE = "https://api.coinbase.com/api/v3/brokerage/market/products";
+// Chemin REST candles (sans hôte) : routé via le proxy /extapi pour contourner le CORS
+// navigateur (api.coinbase.com n'expose aucun en-tête CORS). Le WS reste DIRECT (BUILD-CONTRACT).
+const REST_CANDLES_HOST = "api.coinbase.com";
+const REST_CANDLES_PATH = "api/v3/brokerage/market/products";
 const WS_URL = "wss://advanced-trade-ws.coinbase.com";
 
 /** Fenêtre re-fetchée au resync post-reconnexion (bornée à 350 par l'API Coinbase). */
@@ -191,7 +195,9 @@ export const coinbaseAdapter: IExchangeAdapter = {
       limit: String(limit),
     });
 
-    const res = await fetch(`${REST_CANDLES_BASE}/${coinbaseProduct(symbol)}/candles?${params.toString()}`);
+    const res = await fetch(
+      extUrl(REST_CANDLES_HOST, `${REST_CANDLES_PATH}/${coinbaseProduct(symbol)}/candles?${params.toString()}`),
+    );
     if (!res.ok) {
       throw new Error(`Coinbase REST ${res.status} ${res.statusText}`);
     }

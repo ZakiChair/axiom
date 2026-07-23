@@ -37,6 +37,7 @@ export const EXTAPI_HOSTS: readonly string[] = [
   "api.gdeltproject.org", // GDELT (recherche news ciblée) — NEWS enrichi
   "www.mof.go.jp", // MOF Japon — CSV JGB
   "www.rba.gov.au", // RBA Australie — CSV F2
+  "api.coinbase.com", // Coinbase Advanced Trade (candles REST public — WS reste direct)
   "feeds.bloomberg.com", // RSS Bloomberg (news macro)
   "www.cnbc.com", // RSS CNBC Economy
   // OpenSky /states/all (trafic aérien — globe). CORS restreint à sa propre

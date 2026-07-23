@@ -112,5 +112,64 @@ export function computeCryptoGexDex(
   return aggregateGexDex(legs, spot, 1);
 }
 
+/**
+ * GEX/DEX crypto agrégé sur TOUTES les échéances de la chaîne. Fonction PURE.
+ * Délègue à `computeCryptoGexDex` échéance par échéance (chaque échéance a son propre T,
+ * donc ses propres greeks Black-Scholes) puis fusionne par strike en SOMMANT gex et dex —
+ * même convention que `computeCryptoGexDex`, sans en recopier la formule.
+ * Renvoie une liste triée par strike croissant ; liste vide si le spot est invalide.
+ */
+export function gexParStrikeToutesEcheances(
+  chain: CryptoOptionInput[],
+  spot: number,
+  nowMs: number,
+): GexDexPoint[] {
+  if (!Number.isFinite(spot) || spot <= 0) return [];
+  // Regroupe les points par échéance (chaque groupe → un appel délégué).
+  const parEcheance = new Map<number, CryptoOptionInput[]>();
+  for (const p of chain) {
+    const grp = parEcheance.get(p.expiryMs);
+    if (grp) grp.push(p);
+    else parEcheance.set(p.expiryMs, [p]);
+  }
+  // Fusionne par strike en sommant les contributions de chaque échéance.
+  const parStrike = new Map<number, { gex: number; dex: number }>();
+  for (const points of parEcheance.values()) {
+    for (const pt of computeCryptoGexDex(points, spot, nowMs)) {
+      const cur = parStrike.get(pt.strike) ?? { gex: 0, dex: 0 };
+      cur.gex += pt.gex;
+      cur.dex += pt.dex;
+      parStrike.set(pt.strike, cur);
+    }
+  }
+  return [...parStrike.entries()]
+    .map(([strike, v]) => ({ strike, gex: v.gex, dex: v.dex }))
+    .sort((a, b) => a.strike - b.strike);
+}
+
+/**
+ * Niveau de « gamma flip » : le strike où le GEX cumulé (strikes parcourus en ordre croissant)
+ * change de signe, obtenu par interpolation linéaire entre les deux strikes encadrants.
+ * Renvoie le PREMIER passage si le cumul change de signe plusieurs fois, `null` si aucun
+ * changement de signe (ou moins de deux strikes). Fonction PURE.
+ */
+export function gammaFlip(gexParStrike: { strike: number; gex: number }[]): number | null {
+  // Copie triée par strike croissant (l'entrée n'est pas garantie triée par le type).
+  const tri = [...gexParStrike].sort((a, b) => a.strike - b.strike);
+  let cumPrec = 0; // cumul jusqu'au strike i−1
+  for (let i = 0; i < tri.length; i++) {
+    const cum = cumPrec + tri[i]!.gex;
+    // Changement de signe strict entre deux cumuls consécutifs (i ≥ 1).
+    if (i > 0 && cumPrec * cum < 0) {
+      const s0 = tri[i - 1]!.strike;
+      const s1 = tri[i]!.strike;
+      // Point où le cumul linéaire s'annule entre (s0, cumPrec) et (s1, cum).
+      return s0 + (-cumPrec / (cum - cumPrec)) * (s1 - s0);
+    }
+    cumPrec = cum;
+  }
+  return null;
+}
+
 /** Multiplicateur standard d'une option sur indice actions (1 contrat = 100 sous-jacents). */
 export const EQUITY_CONTRACT_MULTIPLIER = 100;

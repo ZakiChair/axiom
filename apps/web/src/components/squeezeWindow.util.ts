@@ -28,6 +28,13 @@ export interface PointPixel {
   y: number;
 }
 
+/** Étiquette candidate : position d'ancrage souhaitée (x centré, y = baseline) + texte. */
+export interface LabelCandidat {
+  x: number;
+  y: number;
+  texte: string;
+}
+
 /** Marge multiplicative autour du point le plus extrême (respiration des bulles). */
 const PAD_DOMAINE = 1.15;
 /** Demi-étendue minimale de l'axe funding (%/8 h) — garde 0 centré même sans donnée. */
@@ -74,4 +81,58 @@ export function projeterEnPixels(
     x: pad + ((p.fundingPct + fMax) / (2 * fMax)) * innerW,
     y: pad + ((oMax - p.dOiPct) / (2 * oMax)) * innerH,
   }));
+}
+
+/** Hauteur approximative d'un label 9px (baseline en bas) — sert de rect et de pas. */
+const LABEL_HAUTEUR = 11;
+
+/**
+ * Placement anti-collision des étiquettes. Chaque label est ancré centré en X, baseline
+ * en Y ; son rect couvre [x−w/2, x+w/2] × [y−H, y]. Placement GLOUTON, déterministe : les
+ * candidats sont traités dans l'ordre reçu (priorité au premier), et un label qui chevauche
+ * un label déjà posé descend en cascade d'un pas (LABEL_HAUTEUR) jusqu'à se dégager, puis
+ * est clampé aux bords du canvas. Chevauchement STRICT (bords jointifs ≠ collision) : chaque
+ * cascade dégage exactement un cran, ce qui garantit la terminaison. Cas motivant : marché
+ * calme, tous les points groupés vers (0,0) → sans ce placement les 8 labels s'empilent.
+ * PURE — pas d'algorithme de force, aucune dépendance au DOM.
+ */
+export function placerLabels(
+  candidats: readonly LabelCandidat[],
+  largeurTexte: (t: string) => number,
+  w: number,
+  h: number,
+): LabelCandidat[] {
+  const poses: Array<{ x1: number; x2: number; y1: number; y2: number }> = [];
+  const resultat: LabelCandidat[] = [];
+
+  for (const c of candidats) {
+    const demiL = largeurTexte(c.texte) / 2;
+    let y = c.y;
+    // Cascade vers le bas tant qu'un chevauchement subsiste. Garde-fou : au plus un cran
+    // par label déjà posé (+1) — impossible à saturer avec un chevauchement strict.
+    let gardes = poses.length + 1;
+    while (gardes-- > 0 && poses.some((r) => chevauchent(c.x, y, demiL, r))) {
+      y += LABEL_HAUTEUR;
+    }
+    // Clamp aux bords : rect entièrement dans [0, w] × [0, h].
+    const x = Math.min(Math.max(c.x, demiL), w - demiL);
+    y = Math.min(Math.max(y, LABEL_HAUTEUR), h);
+    poses.push({ x1: x - demiL, x2: x + demiL, y1: y - LABEL_HAUTEUR, y2: y });
+    resultat.push({ x, y, texte: c.texte });
+  }
+  return resultat;
+}
+
+/** Chevauchement STRICT du rect d'un label (centre x, demi-largeur demiL, baseline y) avec r. */
+function chevauchent(
+  x: number,
+  y: number,
+  demiL: number,
+  r: { x1: number; x2: number; y1: number; y2: number },
+): boolean {
+  const x1 = x - demiL;
+  const x2 = x + demiL;
+  const y1 = y - LABEL_HAUTEUR;
+  const y2 = y;
+  return x1 < r.x2 && x2 > r.x1 && y1 < r.y2 && y2 > r.y1;
 }

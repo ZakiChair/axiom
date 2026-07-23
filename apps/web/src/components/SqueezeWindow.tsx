@@ -20,7 +20,7 @@ import { plusProchePoint, rayonPoint, type PointRadar, type QuadrantSqueeze } fr
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { formatPct, formatUsd } from "../lib/format";
 import { Chargement, EnTeteFenetre, ErreurBloc, Fraicheur, NoteSource, Vide } from "./ui";
-import { domaineAxes, projeterEnPixels, type PointPixel } from "./squeezeWindow.util";
+import { domaineAxes, placerLabels, projeterEnPixels, type PointPixel } from "./squeezeWindow.util";
 
 // ─────────────────────────── Constantes de rendu ───────────────────────────
 
@@ -30,6 +30,9 @@ const PAD = 34;
 const CAPTURE = 12;
 /** Nombre de symboles étiquetés (les plus gros volumes). */
 const NB_LABELS = 8;
+/** Taille max estimée de l'infobulle (px CSS) : sert à la retourner près des bords. */
+const TOOLTIP_W = 170;
+const TOOLTIP_H = 56;
 
 /** Libellés FR lisibles des quadrants (infobulle + étiquettes de coin). */
 const LABEL_QUADRANT: Record<QuadrantSqueeze, string> = {
@@ -165,12 +168,17 @@ export function SqueezeWindow() {
       ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
-      for (const i of topIdx) {
+      // Candidats ancrés au-dessus de chaque bulle, puis placement anti-collision (marché
+      // calme : sans ça les labels s'empilent au centre). Largeur mesurée via le contexte.
+      const candidats = topIdx.flatMap((i) => {
         const p = points[i];
         const px = proj[i];
-        if (p === undefined || px === undefined) continue;
+        if (p === undefined || px === undefined) return [];
         const r = rayonPoint(p.volumeUsd24h, volumeMax);
-        ctx.fillText(p.symbol, px.x, px.y - r - 2);
+        return [{ x: px.x, y: px.y - r - 2, texte: p.symbol }];
+      });
+      for (const l of placerLabels(candidats, (t) => ctx.measureText(t).width, w, h)) {
+        ctx.fillText(l.texte, l.x, l.y);
       }
     };
 
@@ -256,7 +264,18 @@ export function SqueezeWindow() {
             {tooltip && (
               <div
                 className="pointer-events-none absolute z-10 rounded border border-border bg-surface px-2 py-1 text-[10px] tabular-nums text-text shadow-lg"
-                style={{ left: tooltip.x + 12, top: tooltip.y + 12 }}
+                style={{
+                  // Clamp aux bords : bascule à gauche/au-dessus si l'infobulle clipperait
+                  // le conteneur overflow-hidden (bord droit / bas).
+                  left:
+                    tooltip.x + 12 + TOOLTIP_W > (canvasRef.current?.clientWidth ?? Infinity)
+                      ? tooltip.x - TOOLTIP_W - 12
+                      : tooltip.x + 12,
+                  top:
+                    tooltip.y + 12 + TOOLTIP_H > (canvasRef.current?.clientHeight ?? Infinity)
+                      ? tooltip.y - TOOLTIP_H - 12
+                      : tooltip.y + 12,
+                }}
               >
                 <div className="font-medium">{tooltip.point.symbol}</div>
                 <div className="text-text-dim">

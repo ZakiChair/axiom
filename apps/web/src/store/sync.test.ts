@@ -29,6 +29,17 @@ describe("interpretMessage", () => {
     ).toEqual({ kind: "symbol", sender: OTHER, exchange: "binance", symbol: "ETHUSDT" });
   });
 
+  // Source de vérité unique (EXCHANGE_IDS) : la synchro doit accepter TOUTE source câblée,
+  // pas seulement les 5 historiques. Régression si la liste de sync diverge de l'autorité.
+  it.each(["bybit", "okx", "hyperliquid", "synthetic"] as const)(
+    "accepte la source %s (liste complète des exchanges câblés)",
+    (exchange) => {
+      expect(
+        interpretMessage({ kind: "symbol", sender: OTHER, exchange, symbol: "BTCUSDT" }, ME),
+      ).toEqual({ kind: "symbol", sender: OTHER, exchange, symbol: "BTCUSDT" });
+    },
+  );
+
   it("accepte un changement de thème d'une autre fenêtre", () => {
     expect(interpretMessage({ kind: "theme", sender: OTHER, theme: "matrix" }, ME)).toEqual({
       kind: "theme",

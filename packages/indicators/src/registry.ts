@@ -10,7 +10,7 @@
 
 import type { IndicatorDef } from "@axiom/types";
 
-// — trend (27) —
+// — trend —
 import { adx } from "./trend/adx";
 import { alma } from "./trend/alma";
 import { aroon } from "./trend/aroon";
@@ -48,7 +48,7 @@ import { elderImpulse } from "./trend/elderImpulse";
 import { gmma } from "./trend/gmma";
 import { gannHilo } from "./trend/gannHilo";
 
-// — momentum (21) —
+// — momentum —
 import { accelerator } from "./momentum/accelerator";
 import { awesome } from "./momentum/awesome";
 import { bop } from "./momentum/bop";
@@ -78,7 +78,7 @@ import { disparity } from "./momentum/disparity";
 import { btcDominance } from "./momentum/btcDominance";
 import { kdj } from "./momentum/kdj";
 
-// — volatility (15) —
+// — volatility —
 import { atr } from "./volatility/atr";
 import { atrRegime } from "./volatility/atrRegime";
 import { bbBandwidth } from "./volatility/bbBandwidth";
@@ -103,7 +103,7 @@ import { hurst } from "./volatility/hurst";
 import { vhf } from "./volatility/vhf";
 import { priceZScore } from "./volatility/priceZScore";
 
-// — volume + orderflow (fichiers sous volume/, catégorie UI distincte) —
+// — volume + orderflow (fichiers sous volume/ ou orderflow/ selon la catégorie UI) —
 import { adLine } from "./volume/adLine";
 import { anchoredVwap } from "./volume/anchored-vwap";
 import { chaikinOsc } from "./volume/chaikinOsc";
@@ -118,7 +118,7 @@ import { volumeMa } from "./volume/volumeMa";
 import { volumeOsc } from "./volume/volumeOsc";
 import { vwap } from "./volume/vwap";
 import { vwapBands } from "./volume/vwapBands";
-import { cvd } from "./volume/cvd";
+import { cvd } from "./orderflow/cvd";
 import { volumeDelta } from "./volume/volumeDelta";
 import { takerBuyRatio } from "./volume/takerBuyRatio";
 import { cvdSpotPerp } from "./orderflow/cvdSpotPerp";
@@ -128,13 +128,13 @@ import { netVolume } from "./volume/netVolume";
 import { twiggsMf } from "./volume/twiggsMf";
 import { vfi } from "./volume/vfi";
 
-// — billwilliams (4) —
+// — billwilliams —
 import { alligator } from "./billwilliams/alligator";
 import { fractals } from "./billwilliams/fractals";
 import { gator } from "./billwilliams/gator";
 import { marketFacilitationIndex } from "./billwilliams/marketFacilitationIndex";
 
-// — support_resistance (7) —
+// — support_resistance —
 import { pivotCamarilla } from "./support_resistance/pivotCamarilla";
 import { pivotDemark } from "./support_resistance/pivotDemark";
 import { pivotFibonacci } from "./support_resistance/pivotFibonacci";
@@ -145,7 +145,7 @@ import { zigzag } from "./support_resistance/zigzag";
 import { chandelierExit } from "./support_resistance/chandelierExit";
 import { chandeKrollStop } from "./support_resistance/chandeKrollStop";
 
-// — derivatives (6) —
+// — derivatives —
 import { fundingRate } from "./derivatives/fundingRate";
 import { fundingZScore } from "./derivatives/fundingZScore";
 import { mvrv } from "./derivatives/mvrv";

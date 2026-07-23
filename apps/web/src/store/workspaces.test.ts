@@ -256,6 +256,29 @@ describe("workspacesStore — validation au chargement", () => {
     expect(wsX?.content.indicators).toEqual([]);
   });
 
+  // Source de vérité unique (EXCHANGE_IDS) : la restauration doit accepter TOUTE source
+  // câblée, y compris "synthetic" (9ᵉ entrée absente de la copie locale historique).
+  // Régression si RESTORABLE_EXCHANGES diverge de l'autorité @axiom/types.
+  it("restaure un workspace persisté avec la source 'synthetic' (liste complète des exchanges câblés)", async () => {
+    installMockLocalStorage();
+    localStorage.setItem(
+      "axiom:workspaces:v1",
+      JSON.stringify({
+        workspaces: [
+          { id: "defaut", name: "Défaut", content: contenuVierge() },
+          { id: "synth", name: "Synth", content: { ...contenuVierge(), exchange: "synthetic" } },
+        ],
+        currentId: "synth",
+      })
+    );
+
+    vi.resetModules();
+    const mod = await import("./workspaces");
+    const wsSynth = mod.workspacesStore.getState().workspaces.find((w) => w.id === "synth");
+
+    expect(wsSynth?.content.exchange).toBe("synthetic");
+  });
+
   it("un workspace relu depuis localStorage conserve l'état ouvert des fenêtres (sémantique unique, revue v2 H15)", async () => {
     windowManagerStore.getState().openWindow("derivatives");
     workspacesStore.getState().saveAs("plan");

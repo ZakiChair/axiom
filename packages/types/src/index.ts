@@ -17,23 +17,31 @@ export type Timeframe =
   // agrégés côté client depuis le mensuel (1M). Convention : "M" = mois.
   | "3M" | "6M" | "12M";
 
-export type ExchangeId =
-  | "binance"
-  | "bybit"
-  | "okx"
+/**
+ * SOURCE DE VÉRITÉ UNIQUE des sources câblées. Valeur runtime (et non simple type) :
+ * les gardes de validation (persistance, synchro multi-fenêtres) l'importent au lieu de
+ * recopier la liste — une divergence est impossible. `ExchangeId` en est dérivé.
+ */
+export const EXCHANGE_IDS = [
+  "binance",
+  "bybit",
+  "okx",
   // Hyperliquid : DEX de perpétuels margés USDC, marchés désignés par nom de coin.
-  | "hyperliquid"
-  | "coinbase"
-  | "kraken"
+  "hyperliquid",
+  "coinbase",
+  "kraken",
   // Source MARCHÉS TRADITIONNELS (actions, forex ; indices & commodités via ETF) —
   // Twelve Data (API à clé). Bougies OHLC ; polling (pas de WS gratuit) ; pas de tick.
-  | "twelvedata"
+  "twelvedata",
   // Exchange crypto MEXC (spot v3, keyless) — inclut des ACTIONS TOKENISÉES
   // (AAPLXUSDT, TSLAONUSDT…). Klines via proxy ; polling REST (WS spot = protobuf).
-  | "mexc"
+  "mexc",
   // Source VIRTUELLE : séries synthétiques ratio/spread à 2 jambes composées
   // client-side (data/synthetic.ts). Jamais une jambe elle-même.
-  | "synthetic";
+  "synthetic",
+] as const;
+
+export type ExchangeId = (typeof EXCHANGE_IDS)[number];
 
 export type MarketType = "spot" | "perp" | "futures" | "option";
 

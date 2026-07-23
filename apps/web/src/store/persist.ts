@@ -33,7 +33,7 @@
  * propre persistance dans leur module respectif ; ils ne sont donc pas re-persistés ici,
  * mais leurs clés `axiom:*` sont bien couvertes par l'export/import de sauvegarde.
  */
-import type { ChartState, ExchangeId, Timeframe } from "@axiom/types";
+import { EXCHANGE_IDS, type ChartState, type ExchangeId, type Timeframe } from "@axiom/types";
 import {
   daemonPret,
   detectDaemon,
@@ -87,8 +87,9 @@ const DEBOUNCE_MIROIR_MS = 400;
 const enAttenteMiroir = new Map<string, string>();
 const minuteursMiroir = new Map<string, ReturnType<typeof setTimeout>>();
 
-/** Sources câblées : seules valeurs d'exchange restaurables (cf. data/adapters.ts). */
-const RESTORABLE_EXCHANGES: ExchangeId[] = ["binance", "bybit", "okx", "hyperliquid", "kraken", "coinbase", "twelvedata", "mexc", "synthetic"];
+/** Sources câblées : seules valeurs d'exchange restaurables (cf. data/adapters.ts).
+ * Dérivé de la source de vérité unique `EXCHANGE_IDS` (@axiom/types) — plus de copie locale. */
+const RESTORABLE_EXCHANGES: ExchangeId[] = [...EXCHANGE_IDS];
 
 /** Échelles d'axe prix valides (miroir de PriceScaleType). */
 const PRICE_SCALES: PriceScaleType[] = ["normal", "log", "percentage"];

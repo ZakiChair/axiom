@@ -21,6 +21,8 @@ function pt(over: Partial<OptionPoint>): OptionPoint {
     openInterest: 1,
     underlying: 100,
     interestRate: 0,
+    volume24h: NaN,
+    markPrice: NaN,
     ...over,
   };
 }

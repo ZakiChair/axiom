@@ -1,7 +1,7 @@
 /**
  * Store de la liquidité nette de la Fed (NETLIQ) — Zustand VANILLA.
  *
- * Un run (spec v1.4, branche feat/netliq) : fetch des trois séries FRED sur 2 ans
+ * Un run (spec v1.4, branche feat/netliq) : fetch des trois séries FRED sur la fenêtre choisie (1/2/5/10 ans)
  * (`fetchSeriesNetliq`, data/netliq.ts) → calcul PUR de la série de liquidité nette
  * (`serieNetliq`) → stats de synthèse (`statsNetliq`). Pas de polling : un run à
  * l'ouverture de la fenêtre + bouton Rafraîchir. Patron EXACT du store CBPREM :

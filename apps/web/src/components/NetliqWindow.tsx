@@ -1,5 +1,5 @@
 /**
- * Fenêtre « NETLIQ » — Liquidité nette de la Fed : WALCL − TGA − RRP sur ~2 ans
+ * Fenêtre « NETLIQ » — Liquidité nette de la Fed : WALCL − TGA − RRP sur la fenêtre choisie (1/2/5/10 ans)
  * (séries FRED quotidiennes/hebdo forward-fillées, cf. data/netliq.ts). Niveau de
  * réserves nettes du système : sa PENTE est le signal (impulsion/retrait de liquidité).
  *
@@ -14,7 +14,7 @@
  * est un NIVEAU élevé (~5 800 Md$) qui varie de quelques centaines. Le domaine vertical
  * est donc calé sur les EXTRÊMES de la série (jamais forcé à contenir 0, sinon la courbe
  * s'écrase en haut du cadre) et il n'y a pas de remplissage bicolore up/down : juste une
- * courbe accent et deux repères min/max 2 ans en pointillés. Le teinté up/down ne concerne
+ * courbe accent et deux repères min/max de la fenêtre en pointillés. Le teinté up/down ne concerne
  * QUE le badge de delta 4 semaines.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -132,7 +132,7 @@ interface DomaineY {
   /** Bornes du cadre (extrêmes de la série + marge de respiration). */
   vMin: number;
   vMax: number;
-  /** Extrêmes RÉELS de la série (repères min/max 2 ans, sans la marge). */
+  /** Extrêmes RÉELS de la série (repères min/max de la fenêtre affichée, sans la marge). */
   minData: number;
   maxData: number;
 }
@@ -218,7 +218,7 @@ function dessiner(
     ctx.fillText(formatEntier(t), g.left - 4, y);
   }
 
-  // Repères min/max 2 ans : lignes pointillées discrètes + étiquettes à droite.
+  // Repères min/max de la fenêtre : lignes pointillées discrètes + étiquettes à droite.
   const repere = (valeur: number, prefixe: string, dessous: boolean): void => {
     const y = yAt(g, valeur, dom);
     ctx.save();

@@ -253,7 +253,7 @@ function dessiner(
           ctx.lineTo(x, y);
         }
       });
-      ctx.strokeStyle = lireTokenCanvas("--serie-1", "#38bdf8");
+      ctx.strokeStyle = lireTokenCanvas("--serie-2", "#a78bfa");
       ctx.lineWidth = 1;
       ctx.stroke();
     }
@@ -469,7 +469,7 @@ export function NetliqWindow() {
                         {
                           label: "BTC",
                           valeur: formatUsd(survol.btcClose),
-                          couleur: lireTokenCanvas("--serie-1", "#38bdf8"),
+                          couleur: lireTokenCanvas("--serie-2", "#a78bfa"),
                         },
                       ]
                     : []),

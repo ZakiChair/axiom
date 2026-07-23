@@ -195,6 +195,7 @@ const WINDOW_COMPONENTS: Record<WindowId, LazyExoticComponent<FenetreComp>> = {
   cbprem: lazy(() =>
     import("./components/CbpremWindow").then((m) => ({ default: m.CbpremWindow })),
   ),
+  dist: lazy(() => import("./components/DistWindow").then((m) => ({ default: m.DistWindow }))),
   netliq: lazy(() =>
     import("./components/NetliqWindow").then((m) => ({ default: m.NetliqWindow })),
   ),

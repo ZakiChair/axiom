@@ -12,11 +12,18 @@
  * demande. L'intensité log (mêmes propriétés que `intensiteLog` de liquidationHeat.ts)
  * relève les petits ordres face aux murs massifs.
  *
- * Toutes les fonctions ici sont PURES (aucun accès DOM/store/chart) et testées
- * (depthHeat.test.ts). Le contrôleur canvas (Task 4) et le store d'accumulation
- * (Task 3) consomment ces exports mais ne sont pas dans ce module.
+ * Toutes les fonctions d'accumulation/grille ci-dessus sont PURES (aucun accès DOM/
+ * store/chart) et testées (depthHeat.test.ts). Le store de bascule + contrôleur de
+ * souscription (ci-dessous, co-localisés — modèle `liquidationMarkers.ts`) exposent
+ * `depthHeatStore`/`lireColonnes`/`demarrerDepthHeat` ; le buffer de colonnes vit en
+ * variable MODULE (jamais dans le store Zustand, cf. invariant `store/orderflow.ts:6-8`).
+ * Le contrôleur canvas (Task 4) consomme ces exports mais n'est pas dans ce module.
  */
-import { agregerNiveaux, pasArrondi, type NiveauAgrege, type OrderBook } from "../data/depth";
+import { createStore } from "zustand/vanilla";
+import type { StoreApi } from "zustand/vanilla";
+import type { Unsubscribe } from "@axiom/types";
+import { agregerNiveaux, pasArrondi, souscrireDepth, type NiveauAgrege, type OrderBook } from "../data/depth";
+import { marketStore } from "../store/market";
 
 /** Nombre de niveaux agrégés conservés PAR CÔTÉ (bid/ask) dans chaque colonne. Convention
  *  reprise de `pasArrondi` (vise ~20 niveaux couvrant ~1 % autour du mid) et de
@@ -128,4 +135,138 @@ export function intensiteLogDepth(qty: number, qtyMax: number): number {
   if (!(qtyMax > 0)) return 0;
   const t = Math.log1p(Math.max(0, qty)) / Math.log1p(qtyMax);
   return t < 0 ? 0 : t > 1 ? 1 : t;
+}
+
+// ─────────────────────────── Bascule (store vanilla local) ───────────────────────────
+
+/** État du store de bascule : PAS de données tick ici (invariant `store/orderflow.ts:6-8`)
+ *  — seuls `actif` et `rev` (compteur de révision, bumpé au plus 1×/s par l'échantillonnage,
+ *  ou immédiatement lors d'un (ré)abonnement/reset). Le buffer de colonnes vit à part,
+ *  en variable module (cf. `lireColonnes`). */
+export interface DepthHeatState {
+  actif: boolean;
+  rev: number;
+  basculer: () => void;
+}
+
+export const depthHeatStore: StoreApi<DepthHeatState> = createStore<DepthHeatState>((set, get) => ({
+  actif: false,
+  rev: 0,
+  basculer: () => set({ actif: !get().actif }),
+}));
+
+// ─────────────────────────── Contrôleur de souscription (données uniquement) ───────────────────────────
+
+/** Buffer FIFO des colonnes échantillonnées du symbole abonné (hors store, cf. tête de fichier). */
+let colonnes: ColonneDepth[] = [];
+/** Dernier carnet reçu du symbole abonné (référence mutée par `souscrireDepth`, cf. data/depth.ts). */
+let dernierLivre: OrderBook | null = null;
+let abonnement: Unsubscribe | null = null;
+let symboleAbonne: string | null = null;
+let intervalId: ReturnType<typeof setInterval> | null = null;
+
+/** Lit le buffer de colonnes courant (accès au buffer module, hors store). */
+export function lireColonnes(): ColonneDepth[] {
+  return colonnes;
+}
+
+/**
+ * Décide l'action de (ré)abonnement à effectuer selon l'état actif/symbole courant vs
+ * le symbole actuellement abonné : `desabonner` (actif=false, était abonné) implique un
+ * reset du buffer ; `souscrire` (1re activation OU changement de symbole en cours
+ * d'activation) implique aussi un reset du buffer (désabonnement de l'ancien symbole
+ * d'abord, si présent). PURE — ne fait aucun effet, c'est `sync()` qui les exécute.
+ */
+export function decisionAbonnement(
+  actif: boolean,
+  symbol: string,
+  symboleAbonne: string | null,
+): { action: "rien" } | { action: "desabonner" } | { action: "souscrire"; symbol: string } {
+  if (!actif) return symboleAbonne === null ? { action: "rien" } : { action: "desabonner" };
+  if (symboleAbonne !== symbol) return { action: "souscrire", symbol };
+  return { action: "rien" };
+}
+
+/** Bump la révision (buffer inchangé) — les consommateurs comparent `rev`. */
+function publier(): void {
+  depthHeatStore.setState((s) => ({ rev: s.rev + 1 }));
+}
+
+/** Échantillonne le carnet courant (si déjà reçu) et l'ajoute au FIFO borné ; bump `rev`. */
+function echantillonner(): void {
+  if (dernierLivre === null) return; // aucun carnet reçu encore sur cette souscription
+  colonnes = ajouterColonne(colonnes, echantillonnerColonne(dernierLivre, Date.now()));
+  publier();
+}
+
+function demarrerEchantillonnage(): void {
+  if (intervalId !== null) return; // déjà en cours (changement de symbole sans coupure du timer)
+  intervalId = setInterval(echantillonner, INTERVALLE_COLONNE_MS);
+}
+
+function arreterEchantillonnage(): void {
+  if (intervalId === null) return;
+  clearInterval(intervalId);
+  intervalId = null;
+}
+
+/** Aligne l'abonnement WS sur l'état (bascule + symbole), cf. `decisionAbonnement`. */
+function sync(): void {
+  const { actif } = depthHeatStore.getState();
+  const { symbol } = marketStore.getState();
+  const decision = decisionAbonnement(actif, symbol, symboleAbonne);
+
+  if (decision.action === "rien") return;
+
+  if (decision.action === "desabonner") {
+    abonnement?.();
+    abonnement = null;
+    arreterEchantillonnage();
+    symboleAbonne = null;
+    dernierLivre = null;
+    colonnes = [];
+    publier();
+    return;
+  }
+
+  // "souscrire" : 1re activation ou changement de symbole en cours d'activation — on
+  // désabonne l'ancien symbole s'il y en avait un, puis on repart sur un buffer vide.
+  abonnement?.();
+  symboleAbonne = decision.symbol;
+  dernierLivre = null;
+  colonnes = [];
+  abonnement = souscrireDepth(decision.symbol, (livre) => {
+    dernierLivre = livre;
+  });
+  demarrerEchantillonnage();
+  publier();
+}
+
+let controllerStarted = false;
+
+/**
+ * Démarre le contrôleur (idempotent). S'abonne à `marketStore` (symbole) et à
+ * `depthHeatStore` (actif) pour réaligner l'abonnement WS + l'échantillonnage via `sync()`.
+ * Appelé par le contrôleur canvas (Task 4) au montage — cf. modèle `demarrerTradeMarkers`.
+ */
+export function demarrerDepthHeat(): void {
+  if (controllerStarted) return;
+  controllerStarted = true;
+
+  let prevSymbol = marketStore.getState().symbol;
+  marketStore.subscribe(() => {
+    const { symbol } = marketStore.getState();
+    if (symbol !== prevSymbol) {
+      prevSymbol = symbol;
+      sync();
+    }
+  });
+
+  let prevActif = depthHeatStore.getState().actif;
+  depthHeatStore.subscribe((s) => {
+    if (s.actif !== prevActif) {
+      prevActif = s.actif;
+      sync();
+    }
+  });
 }

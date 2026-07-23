@@ -1,16 +1,39 @@
 /**
  * Tests des fonctions PURES d'accumulation et de grille de la heatmap de liquidité du
  * carnet (BOOK) : échantillonnage d'une colonne depuis un `OrderBook`, FIFO borné des
- * colonnes, construction de la grille temps × prix sur la plage visible, et intensité
- * log-normalisée (même contrat que `intensiteLog` de liquidationHeat.ts).
+ * colonnes, construction de la grille temps × prix sur la plage visible, intensité
+ * log-normalisée (même contrat que `intensiteLog` de liquidationHeat.ts), la décision
+ * pure de (ré)abonnement, et le contrôleur `demarrerDepthHeat` (souscrireDepth mocké —
+ * pas de WS réel, modèle `liquidationMarkers.test.ts`).
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// souscrireDepth espionné : le reste de ../data/depth (agregerNiveaux, pasArrondi...)
+// reste réel, réutilisé par echantillonnerColonne dans les tests ci-dessous.
+const { subDepthSpy, unsubDepthSpy } = vi.hoisted(() => {
+  const unsubDepthSpy = vi.fn();
+  // Signature explicite (symbol, onLivre) : sans elle, TS infère un mock 0-arg et
+  // `mock.calls[i][1]` (callback onLivre) n'est plus typable côté tests.
+  const subDepthSpy = vi.fn((_symbol: string, _onLivre: (livre: unknown) => void) => unsubDepthSpy);
+  return { subDepthSpy, unsubDepthSpy };
+});
+vi.mock("../data/depth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../data/depth")>();
+  return { ...actual, souscrireDepth: subDepthSpy };
+});
+
 import type { OrderBook } from "../data/depth";
+import { marketStore } from "../store/market";
 import {
   ajouterColonne,
+  decisionAbonnement,
+  demarrerDepthHeat,
+  depthHeatStore,
   echantillonnerColonne,
   grilleDepuisColonnes,
+  INTERVALLE_COLONNE_MS,
   intensiteLogDepth,
+  lireColonnes,
   MAX_COLONNES,
   type ColonneDepth,
 } from "./depthHeat";
@@ -161,5 +184,132 @@ describe("intensiteLogDepth", () => {
     // significativement au-dessus (les petites valeurs sont relevées).
     const t = intensiteLogDepth(500, 1000);
     expect(t).toBeGreaterThan(0.5);
+  });
+});
+
+describe("decisionAbonnement (logique pure de (ré)abonnement)", () => {
+  it("actif=false, jamais abonné → rien", () => {
+    expect(decisionAbonnement(false, "BTCUSDT", null)).toEqual({ action: "rien" });
+  });
+
+  it("actif=false, abonné à un symbole → désabonner (implique un reset du buffer)", () => {
+    expect(decisionAbonnement(false, "BTCUSDT", "BTCUSDT")).toEqual({ action: "desabonner" });
+  });
+
+  it("actif=true, jamais abonné → souscrire au symbole courant", () => {
+    expect(decisionAbonnement(true, "BTCUSDT", null)).toEqual({ action: "souscrire", symbol: "BTCUSDT" });
+  });
+
+  it("actif=true, déjà abonné au bon symbole → rien (pas de resouscription superflue)", () => {
+    expect(decisionAbonnement(true, "BTCUSDT", "BTCUSDT")).toEqual({ action: "rien" });
+  });
+
+  it("actif=true, changement de symbole → souscrire au nouveau (implique un reset du buffer)", () => {
+    expect(decisionAbonnement(true, "ETHUSDT", "BTCUSDT")).toEqual({ action: "souscrire", symbol: "ETHUSDT" });
+  });
+});
+
+describe("demarrerDepthHeat (contrôleur — souscrireDepth mocké, pas de WS réel)", () => {
+  /** Carnet minimal valable pour echantillonnerColonne (best bid/ask présents). */
+  function livreTest(): OrderBook {
+    return { lastUpdateId: 1, bids: new Map([[100, 1]]), asks: new Map([[101, 1]]) };
+  }
+
+  /** Callback `onLivre` passé par le contrôleur au dernier appel de souscrireDepth. */
+  function dernierOnLivre(): (livre: OrderBook) => void {
+    const call = subDepthSpy.mock.calls[subDepthSpy.mock.calls.length - 1];
+    return call?.[1] as (livre: OrderBook) => void;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    // Coupe toute souscription encore active d'un test précédent AVANT de changer le
+    // symbole (sous fake timers, pour que l'éventuel clearInterval cible le bon timer).
+    depthHeatStore.setState({ actif: false });
+    marketStore.getState().setSymbol("BTCUSDT");
+    subDepthSpy.mockClear();
+    unsubDepthSpy.mockClear();
+  });
+
+  afterEach(() => {
+    depthHeatStore.setState({ actif: false }); // désabonne + reset avant de changer d'horloge
+    vi.useRealTimers();
+  });
+
+  it("bascule ON → souscrit au symbole courant du marketStore", () => {
+    demarrerDepthHeat();
+    depthHeatStore.getState().basculer();
+    expect(subDepthSpy).toHaveBeenCalledTimes(1);
+    expect(subDepthSpy).toHaveBeenCalledWith("BTCUSDT", expect.any(Function));
+  });
+
+  it("échantillonne le carnet courant toutes les INTERVALLE_COLONNE_MS et bump rev", () => {
+    demarrerDepthHeat();
+    const revAvant = depthHeatStore.getState().rev;
+    depthHeatStore.getState().basculer(); // ON
+    dernierOnLivre()(livreTest());
+    vi.advanceTimersByTime(INTERVALLE_COLONNE_MS);
+    expect(lireColonnes().length).toBe(1);
+    expect(depthHeatStore.getState().rev).toBeGreaterThan(revAvant);
+  });
+
+  it("une rafale de carnets entre deux ticks ne produit qu'UNE colonne et UN bump de rev (throttle ≤1/s)", () => {
+    demarrerDepthHeat();
+    depthHeatStore.getState().basculer(); // ON
+    const onLivre = dernierOnLivre();
+    // Rafale : plusieurs mises à jour WS avant le prochain tick d'échantillonnage —
+    // seule la dernière référence de carnet compte, échantillonnée une seule fois.
+    onLivre(livreTest());
+    onLivre(livreTest());
+    onLivre(livreTest());
+    const revAvant = depthHeatStore.getState().rev;
+    vi.advanceTimersByTime(INTERVALLE_COLONNE_MS);
+    expect(lireColonnes().length).toBe(1);
+    expect(depthHeatStore.getState().rev).toBe(revAvant + 1);
+  });
+
+  it("n'échantillonne rien tant qu'aucun carnet n'a été reçu (dernierLivre encore null)", () => {
+    demarrerDepthHeat();
+    depthHeatStore.getState().basculer(); // ON, mais onLivre jamais appelé
+    vi.advanceTimersByTime(INTERVALLE_COLONNE_MS * 3);
+    expect(lireColonnes()).toEqual([]);
+  });
+
+  it("bascule OFF → désabonne et VIDE le buffer", () => {
+    demarrerDepthHeat();
+    depthHeatStore.getState().basculer(); // ON
+    dernierOnLivre()(livreTest());
+    vi.advanceTimersByTime(INTERVALLE_COLONNE_MS);
+    expect(lireColonnes().length).toBe(1);
+
+    depthHeatStore.getState().basculer(); // OFF
+    expect(unsubDepthSpy).toHaveBeenCalledTimes(1);
+    expect(lireColonnes()).toEqual([]);
+  });
+
+  it("changement de symbole en cours d'activation → désabonne l'ancien, souscrit au nouveau, VIDE le buffer", () => {
+    demarrerDepthHeat();
+    depthHeatStore.getState().basculer(); // ON sur BTCUSDT
+    dernierOnLivre()(livreTest());
+    vi.advanceTimersByTime(INTERVALLE_COLONNE_MS);
+    expect(lireColonnes().length).toBe(1);
+
+    marketStore.getState().setSymbol("ETHUSDT");
+    expect(unsubDepthSpy).toHaveBeenCalledTimes(1);
+    expect(subDepthSpy).toHaveBeenCalledTimes(2);
+    expect(subDepthSpy).toHaveBeenLastCalledWith("ETHUSDT", expect.any(Function));
+    expect(lireColonnes()).toEqual([]);
+
+    // Le nouveau symbole échantillonne bien à son tour (nouvel abonnement fonctionnel).
+    dernierOnLivre()(livreTest());
+    vi.advanceTimersByTime(INTERVALLE_COLONNE_MS);
+    expect(lireColonnes().length).toBe(1);
+  });
+
+  it("demarrerDepthHeat() est idempotent (double appel = un seul jeu d'abonnements)", () => {
+    demarrerDepthHeat();
+    demarrerDepthHeat();
+    depthHeatStore.getState().basculer(); // ON
+    expect(subDepthSpy).toHaveBeenCalledTimes(1); // pas doublé par le second appel
   });
 });

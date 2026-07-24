@@ -48,6 +48,26 @@ describe("parseEtfFlows (schéma réel SoSoValue currentEtfDataMetrics)", () => 
     expect(parseEtfFlows({ code: 401, msg: "invalid api key", data: null }).disponible).toBe(false);
   });
 
+  it("trie les émetteurs par |flux du jour| décroissant (départage par ticker)", () => {
+    // Ordre d'entrée VOLONTAIREMENT différent de l'ordre attendu : GBTC arrive en tête
+    // du payload mais a le plus petit |flux| ; ARKB (sortie −80M) doit passer devant IBIT
+    // (+50M) car |−80M| > |+50M|. Deux ex æquo (±10M) départagés par ticker : BITB < HODL.
+    const json = {
+      data: {
+        dailyNetInflow: { value: "0", lastUpdateDate: "2026-07-07" },
+        list: [
+          { ticker: "GBTC", dailyNetInflow: { value: "5000000" } },
+          { ticker: "IBIT", dailyNetInflow: { value: "50000000" } },
+          { ticker: "HODL", dailyNetInflow: { value: "-10000000" } },
+          { ticker: "ARKB", dailyNetInflow: { value: "-80000000" } },
+          { ticker: "BITB", dailyNetInflow: { value: "10000000" } },
+        ],
+      },
+    };
+    const r = parseEtfFlows(json);
+    expect(r.parEmetteur?.map((e) => e.emetteur)).toEqual(["ARKB", "IBIT", "BITB", "HODL", "GBTC"]);
+  });
+
   it("ignore les entrées de la liste sans ticker ou avec netInflow non numérique", () => {
     const json = {
       data: {

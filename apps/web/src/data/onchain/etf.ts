@@ -79,6 +79,14 @@ export function parseEtfFlows(json: unknown): EtfResultat {
   }
   if (parEmetteur.length === 0) return indisponible;
 
+  // Tri par |flux du jour| décroissant : les émetteurs qui bougent le plus (entrées OU
+  // sorties) remontent en tête — la dispersion est le signal. Départage par ticker (ordre
+  // stable et déterministe sous noUncheckedIndexedAccess, tests reproductibles).
+  parEmetteur.sort((a, b) => {
+    const diff = Math.abs(b.flux) - Math.abs(a.flux);
+    return diff !== 0 ? diff : a.emetteur.localeCompare(b.emetteur);
+  });
+
   const jourGlobal =
     dailyNetInflow !== null && typeof dailyNetInflow === "object"
       ? (dailyNetInflow as { lastUpdateDate?: unknown }).lastUpdateDate

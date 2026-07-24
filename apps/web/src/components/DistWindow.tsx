@@ -20,6 +20,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { marketStore } from "../store/market";
+import { distOverlayStore } from "../chart/distLignes";
 import { distVar, HORIZONS, type NiveauxVar } from "../data/distVar";
 import { formatPrice, formatPct } from "../lib/format";
 import { Badge, EnTeteFenetre, Chargement, ErreurBloc, Fraicheur, NoteSource, Vide } from "./ui";
@@ -64,6 +65,8 @@ export function DistWindow() {
   // Seul objet basse fréquence abonné : bascule « ready » à la fin d'un backfill et
   // change de requête au switch symbole/TF → déclenche le recalcul avec des closes frais.
   const dataLoad = useStore(marketStore, (s) => s.dataLoad);
+  // Overlay des bandes VaR sur le chart maître (toggle persisté, défaut OFF).
+  const overlayActif = useStore(distOverlayStore, (s) => s.actif);
 
   // Compteur de rafraîchissement : sa hausse force la re-lecture du snapshot de bougies
   // (capte la dernière bougie mise à jour en direct, hors abonnement haute fréquence).
@@ -109,13 +112,29 @@ export function DistWindow() {
           </span>
         }
         actions={
-          <button
-            type="button"
-            onClick={rafraichir}
-            className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text"
-          >
-            ↻ Rafraîchir
-          </button>
+          <span className="flex items-center gap-2">
+            {/* Overlay des bandes VaR (p5/p95 · p1/p99 de l'horizon 20 b) sur le chart maître. */}
+            <button
+              type="button"
+              onClick={() => distOverlayStore.getState().basculer()}
+              aria-pressed={overlayActif}
+              title="Afficher les bandes VaR sur le chart maître"
+              className={`rounded border px-2 py-1 text-[11px] transition ${
+                overlayActif
+                  ? "border-accent/60 bg-accent/15 text-accent"
+                  : "border-border bg-bg text-text-dim hover:text-text"
+              }`}
+            >
+              Bandes VaR {overlayActif ? "ON" : "OFF"}
+            </button>
+            <button
+              type="button"
+              onClick={rafraichir}
+              className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text"
+            >
+              ↻ Rafraîchir
+            </button>
+          </span>
         }
       />
 

@@ -55,6 +55,9 @@ import { VolumeProfileController } from "./volumeProfile";
 import { LiquidationHeatController } from "./liquidationHeat";
 import { liqMarksStore } from "./liquidationMarkers";
 import { DepthHeatController, depthHeatStore } from "./depthHeat";
+import { NiveauxLignesController } from "./niveauxLignes";
+import { distOverlayStore, fournisseurDistLignes } from "./distLignes";
+import { paperOverlayStore, fournisseurPaperLignes } from "./paperLignes";
 import { RevenueController } from "./revenue";
 import { MacroController } from "./macro";
 import { DerivativesChartController } from "./derivatives";
@@ -291,6 +294,8 @@ export function ChartInstance({
   const vpCanvasRef = useRef<HTMLCanvasElement>(null); // volume profile (maître)
   const liqCanvasRef = useRef<HTMLCanvasElement>(null); // heatmap liquidations (maître)
   const depthHeatCanvasRef = useRef<HTMLCanvasElement>(null); // heatmap carnet BOOK (maître)
+  const distLignesCanvasRef = useRef<HTMLCanvasElement>(null); // lignes VaR DIST (maître)
+  const paperLignesCanvasRef = useRef<HTMLCanvasElement>(null); // lignes ordres PAPER (maître)
   const xhairCanvasRef = useRef<HTMLCanvasElement>(null); // crosshair synchronisé inter-slots
 
   // Objets à vie longue (instance KLineChart + indicateurs + en-têtes + throttle des ticks),
@@ -493,7 +498,10 @@ export function ChartInstance({
     const vpCanvas = vpCanvasRef.current;
     const liqCanvas = liqCanvasRef.current;
     const depthHeatCanvas = depthHeatCanvasRef.current;
+    const distLignesCanvas = distLignesCanvasRef.current;
+    const paperLignesCanvas = paperLignesCanvasRef.current;
     if (!container || !canvas || !vpCanvas || !liqCanvas || !depthHeatCanvas) return;
+    if (!distLignesCanvas || !paperLignesCanvas) return;
 
     // Capture immuable de l'identité + révision de requête. Le store vide son buffer
     // AVANT tout appel réseau ; le chart impératif est vidé dans le même cycle. Une réponse,
@@ -565,6 +573,8 @@ export function ChartInstance({
     let volumeProfile: VolumeProfileController | null = null;
     let liqHeat: LiquidationHeatController | null = null;
     let depthHeat: DepthHeatController | null = null;
+    let distLignes: NiveauxLignesController | null = null;
+    let paperLignes: NiveauxLignesController | null = null;
     let revenue: RevenueController | null = null;
     let macro: MacroController | null = null;
     let derivativesChart: DerivativesChartController | null = null;
@@ -572,6 +582,8 @@ export function ChartInstance({
     let unsubscribeVolumeProfile: (() => void) | null = null;
     let unsubscribeLiqHeat: (() => void) | null = null;
     let unsubscribeDepthHeat: (() => void) | null = null;
+    let unsubscribeDistLignes: (() => void) | null = null;
+    let unsubscribePaperLignes: (() => void) | null = null;
     let unsubscribeRevenue: (() => void) | null = null;
     let unsubscribeMacro: (() => void) | null = null;
     let unsubscribeMacroHistory: (() => void) | null = null;
@@ -596,6 +608,18 @@ export function ChartInstance({
       depthHeat = new DepthHeatController(chart, container, depthHeatCanvas);
       depthHeat.setEnabled(depthHeatStore.getState().actif);
       unsubscribeDepthHeat = depthHeatStore.subscribe((state) => depthHeat?.setEnabled(state.actif));
+
+      // Overlay DIST (bandes VaR) : lignes de prix horizontales calculées depuis les bougies du
+      // maître (même moteur `distVar` que la fenêtre). Toggle persisté (distOverlayStore, défaut OFF).
+      distLignes = new NiveauxLignesController(chart, container, distLignesCanvas, fournisseurDistLignes);
+      distLignes.setEnabled(distOverlayStore.getState().actif);
+      unsubscribeDistLignes = distOverlayStore.subscribe((state) => distLignes?.setEnabled(state.actif));
+
+      // Overlay PAPER (ordres/positions) : lignes du symbole courant, réactives au store paper.
+      // Toggle éphémère (paperOverlayStore, défaut ON).
+      paperLignes = new NiveauxLignesController(chart, container, paperLignesCanvas, fournisseurPaperLignes);
+      paperLignes.setEnabled(paperOverlayStore.getState().actif);
+      unsubscribePaperLignes = paperOverlayStore.subscribe((state) => paperLignes?.setEnabled(state.actif));
 
       revenue = new RevenueController(chart, symbol);
       revenue.setEnabled(revenueStore.getState().enabled);
@@ -816,6 +840,8 @@ export function ChartInstance({
       unsubscribeVolumeProfile?.();
       unsubscribeLiqHeat?.();
       unsubscribeDepthHeat?.();
+      unsubscribeDistLignes?.();
+      unsubscribePaperLignes?.();
       unsubscribeRevenue?.();
       unsubscribeMacro?.();
       unsubscribeMacroHistory?.();
@@ -825,6 +851,8 @@ export function ChartInstance({
       revenue?.dispose();
       liqHeat?.dispose();
       depthHeat?.dispose();
+      distLignes?.dispose();
+      paperLignes?.dispose();
       volumeProfile?.dispose();
       compare?.dispose();
       orderflow?.dispose();
@@ -891,6 +919,8 @@ export function ChartInstance({
       <canvas ref={vpCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={liqCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={depthHeatCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
+      <canvas ref={distLignesCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
+      <canvas ref={paperLignesCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={xhairCanvasRef} className="pointer-events-none absolute inset-0" />
       <ChartDataStatusOverlay

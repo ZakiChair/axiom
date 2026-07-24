@@ -14,6 +14,7 @@
  *   - `statsEvts` renvoie des POURCENTAGES (déjà ×100) prêts à afficher.
  */
 import type { Candle } from "@axiom/types";
+import { formatPct } from "./format";
 
 export interface FenetreAlignee {
   eventTime: number;
@@ -175,4 +176,42 @@ function ecartTypePopulation(valeurs: number[]): number {
   const moyenne = valeurs.reduce((acc, v) => acc + v, 0) / valeurs.length;
   const variance = valeurs.reduce((acc, v) => acc + (v - moyenne) ** 2, 0) / valeurs.length;
   return Math.sqrt(variance);
+}
+
+// ─────────────────────────── Helpers du composant (purs, testés) ───────────────────────────
+
+/**
+ * Les `n` DERNIERS éléments PASSÉS (`time` strictement < `maintenant`), en conservant
+ * l'ordre croissant reçu. Générique sur `{ time }` pour rester découplé de la couche data
+ * (`DateEvenement` satisfait la contrainte). `n ≤ 0` → `[]` ; `n` > disponible → tous.
+ */
+export function derniersPasses<T extends { time: number }>(items: T[], maintenant: number, n: number): T[] {
+  if (n <= 0) return [];
+  return items.filter((it) => it.time < maintenant).slice(-n);
+}
+
+/**
+ * Paramètres du fetch fenêtré d'UN évènement (pas de pagination massive) : assez de bougies
+ * pour couvrir [H0−demiFenetre, H0+demiFenetre] autour de la bougie qui couvre l'évènement.
+ *  - `limit = 2·demiFenetre + 10` (le +10 garantit la marge gauche : le fetch remonte
+ *    depuis `endTime`) ;
+ *  - `endTime = eventTime + (demiFenetre+2)·tfMs` (marge droite au-delà de +demiFenetre).
+ * `tfMs` : 1 h = 3 600 000, 1 j = 86 400 000.
+ */
+export function fenetreFetch(
+  eventTime: number,
+  demiFenetre: number,
+  tfMs: number,
+): { limit: number; endTime: number } {
+  return { limit: 2 * demiFenetre + 10, endTime: eventTime + (demiFenetre + 2) * tfMs };
+}
+
+/**
+ * Libellé condensé du retour forward médian (offset +demiFenetre), destiné à la fenêtre
+ * BRIEF (Task 4) — ex. « méd +24 h : -0.8% ». Signe explicite + 1 décimale via `formatPct`
+ * (conventions lib/format) ; unité selon le TF (« h » pour 1 h, « j » pour 1 j).
+ */
+export function libelleStatParType(perfMedianePost: number, demiFenetre: number, tf: "1h" | "1d"): string {
+  const unite = tf === "1h" ? "h" : "j";
+  return `méd +${demiFenetre} ${unite} : ${formatPct(perfMedianePost, 1)}`;
 }

@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
 import type { FenetreAlignee, OccurrenceExclue } from "./evts";
-import { agregerFenetres, alignerFenetre, statsEvts } from "./evts";
+import {
+  agregerFenetres,
+  alignerFenetre,
+  derniersPasses,
+  fenetreFetch,
+  libelleStatParType,
+  statsEvts,
+} from "./evts";
 
 const H = 3_600_000; // une heure en ms
 
@@ -151,5 +158,58 @@ describe("statsEvts", () => {
       min: 0,
       max: 0,
     });
+  });
+});
+
+describe("derniersPasses", () => {
+  const items = [
+    { time: 10 },
+    { time: 20 },
+    { time: 30 },
+    { time: 40 }, // futur (> maintenant 35)
+    { time: 50 }, // futur
+  ];
+
+  it("filtre les futurs (time ≥ maintenant) puis garde les n derniers passés", () => {
+    // maintenant = 35 → passés [10,20,30], 2 derniers = [20,30].
+    expect(derniersPasses(items, 35, 2)).toEqual([{ time: 20 }, { time: 30 }]);
+  });
+
+  it("n > nombre de passés → renvoie tous les passés", () => {
+    expect(derniersPasses(items, 35, 10)).toEqual([{ time: 10 }, { time: 20 }, { time: 30 }]);
+  });
+
+  it("time strictement < maintenant (borne exclusive)", () => {
+    // maintenant = 30 → 30 exclu, passés [10,20].
+    expect(derniersPasses(items, 30, 5)).toEqual([{ time: 10 }, { time: 20 }]);
+  });
+
+  it("n ≤ 0 ou aucun passé → []", () => {
+    expect(derniersPasses(items, 35, 0)).toEqual([]);
+    expect(derniersPasses(items, 5, 3)).toEqual([]);
+  });
+});
+
+describe("fenetreFetch", () => {
+  it("limit = 2·demiFenetre + 10 et endTime décalé de (demiFenetre+2)·tfMs", () => {
+    const H = 3_600_000;
+    expect(fenetreFetch(1_000, 24, H)).toEqual({
+      limit: 58, // 2×24 + 10
+      endTime: 1_000 + 26 * H, // (24+2)×tfMs
+    });
+  });
+
+  it("échelle avec demiFenetre (±48 → 106 bougies, couvre ~100)", () => {
+    const J = 86_400_000;
+    expect(fenetreFetch(0, 48, J)).toEqual({ limit: 106, endTime: 50 * J });
+  });
+});
+
+describe("libelleStatParType", () => {
+  it("préfixe méd, offset +demiFenetre signé et unité selon le TF", () => {
+    // formatPct(perf, 1) : signe explicite + 1 décimale (conventions lib/format).
+    expect(libelleStatParType(-0.8, 24, "1h")).toBe("méd +24 h : -0.8%");
+    expect(libelleStatParType(1.5, 12, "1d")).toBe("méd +12 j : +1.5%");
+    expect(libelleStatParType(0, 48, "1h")).toBe("méd +48 h : +0.0%");
   });
 });

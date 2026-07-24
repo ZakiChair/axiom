@@ -206,6 +206,7 @@ const WINDOW_COMPONENTS: Record<WindowId, LazyExoticComponent<FenetreComp>> = {
   mine: lazy(() => import("./components/MineWindow").then((m) => ({ default: m.MineWindow }))),
   cycle: lazy(() => import("./components/CycleWindow").then((m) => ({ default: m.CycleWindow }))),
   evts: lazy(() => import("./components/EvtsWindow").then((m) => ({ default: m.EvtsWindow }))),
+  scen: lazy(() => import("./components/ScenWindow").then((m) => ({ default: m.ScenWindow }))),
 };
 
 /** Placeholder discret pendant le chargement du chunk de la fenêtre. */

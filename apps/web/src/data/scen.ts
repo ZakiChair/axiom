@@ -22,6 +22,10 @@ import {
   type SerieActif,
 } from "./portRisque";
 import { mapPool } from "./screenerRun";
+// Imports de TYPE uniquement (élidés au runtime : aucun couplage store↔data) — sert aux
+// adaptateurs des stores vers `PositionBrute` plus bas.
+import type { Position } from "../store/portfolio";
+import type { PositionPaper } from "./paper";
 
 export type { SerieCloture };
 
@@ -157,6 +161,17 @@ export const PRESETS_SCEN: { label: string; chocs: Partial<Record<FacteurId, num
   { label: "Risk-on", chocs: { btc: 15, eth: 20, spx: 5 } },
 ];
 
+/**
+ * Complète un jeu de chocs PARTIEL (preset) en un Record COMPLET des cinq facteurs : tout
+ * facteur absent reçoit un choc de 0. `appliquerScenario` exige ce record complet — c'est le
+ * pont entre les presets partiels et l'application du scénario. PURE.
+ */
+export function mergePresetEnRecord(chocs: Partial<Record<FacteurId, number>>): Record<FacteurId, number> {
+  const complet = {} as Record<FacteurId, number>;
+  for (const f of FACTEURS) complet[f.id] = chocs[f.id] ?? 0;
+  return complet;
+}
+
 // ─────────────────────────── Collecte (impure) ───────────────────────────
 //
 // Fetch des klines 1 j puis assemblage. Les FACTEURS sont récupérés directement via leur
@@ -173,6 +188,38 @@ export interface PositionBrute {
   direction: "long" | "short";
   taille: number;
   prixEntree: number;
+}
+
+/**
+ * Adaptateur portefeuille → entrées brutes : ne garde que les positions OUVERTES et recopie
+ * leurs champs directs (l'exchange d'origine `source` est déjà connu). PURE (testée).
+ */
+export function brutesDepuisPortefeuille(positions: readonly Position[]): PositionBrute[] {
+  return positions
+    .filter((p) => p.statut === "ouvert")
+    .map((p) => ({
+      symbole: p.symbole,
+      source: p.source,
+      direction: p.direction,
+      taille: p.taille,
+      prixEntree: p.prixEntree,
+    }));
+}
+
+/**
+ * Adaptateur paper trading → entrées brutes. DÉCISION consignée : le store paper ne mémorise
+ * pas d'exchange et ses symboles sont crypto → la source est fixée à "binance" (même adaptateur
+ * de klines 1 j que le reste du terminal). Le champ `symbol` (anglais) devient `symbole`. PURE
+ * (testée). Les positions paper sont toutes ouvertes (les clôtures deviennent des exécutions).
+ */
+export function brutesDepuisPaper(positions: readonly PositionPaper[]): PositionBrute[] {
+  return positions.map((p): PositionBrute => ({
+    symbole: p.symbol,
+    source: "binance",
+    direction: p.direction,
+    taille: p.taille,
+    prixEntree: p.prixEntree,
+  }));
 }
 
 /** Résultat de la collecte : positions enrichies, VaR95 en $ (null si incalculable), exclusions annotées. */

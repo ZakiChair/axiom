@@ -8,10 +8,15 @@ import { describe, expect, it } from "vitest";
 import {
   appliquerScenario,
   betaRoulant,
+  brutesDepuisPaper,
+  brutesDepuisPortefeuille,
   facteurDe,
+  mergePresetEnRecord,
   type PositionScen,
   type SerieCloture,
 } from "./scen";
+import type { Position } from "../store/portfolio";
+import type { PositionPaper } from "./paper";
 
 const JOUR = 86_400_000;
 /** Horodatage (ms) du jour calendaire UTC n° `n`. */
@@ -101,5 +106,66 @@ describe("appliquerScenario", () => {
     // −500 · 1 · (−0,30) = +150 (le short gagne quand le facteur baisse)
     expect(res.lignes[0]!.plUsd).toBeCloseTo(150, 10);
     expect(res.totalUsd).toBeCloseTo(150, 10);
+  });
+});
+
+describe("mergePresetEnRecord", () => {
+  it("complète un preset partiel : facteurs absents → 0", () => {
+    expect(mergePresetEnRecord({ btc: -30, eth: -35 })).toEqual({
+      btc: -30,
+      eth: -35,
+      dxy: 0,
+      spx: 0,
+      or: 0,
+    });
+  });
+
+  it("record vide → tous les facteurs à 0 (bouton « Réinitialiser »)", () => {
+    expect(mergePresetEnRecord({})).toEqual({ btc: 0, eth: 0, dxy: 0, spx: 0, or: 0 });
+  });
+});
+
+describe("brutesDepuisPortefeuille", () => {
+  const base: Omit<Position, "id" | "statut"> = {
+    symbole: "BTCUSDT",
+    source: "binance",
+    direction: "long",
+    taille: 0.5,
+    prixEntree: 60_000,
+    dateEntree: 0,
+  };
+
+  it("ne garde que les positions OUVERTES et recopie les champs directs", () => {
+    const positions: Position[] = [
+      { ...base, id: "1", statut: "ouvert" },
+      { ...base, id: "2", statut: "clos", symbole: "ETHUSDT" },
+      { ...base, id: "3", statut: "ouvert", direction: "short", symbole: "SOLUSDT", taille: 10, prixEntree: 150 },
+    ];
+    expect(brutesDepuisPortefeuille(positions)).toEqual([
+      { symbole: "BTCUSDT", source: "binance", direction: "long", taille: 0.5, prixEntree: 60_000 },
+      { symbole: "SOLUSDT", source: "binance", direction: "short", taille: 10, prixEntree: 150 },
+    ]);
+  });
+});
+
+describe("brutesDepuisPaper", () => {
+  const base: Omit<PositionPaper, "id" | "symbol"> = {
+    direction: "long",
+    taille: 1,
+    prixEntree: 3_000,
+    tp: null,
+    sl: null,
+    ouvertTs: 0,
+  };
+
+  it("mappe symbol→symbole, force source « binance » (décision consignée)", () => {
+    const positions: PositionPaper[] = [
+      { ...base, id: "p1", symbol: "ETHUSDT" },
+      { ...base, id: "p2", symbol: "BTCUSDT", direction: "short", taille: 0.2, prixEntree: 62_000 },
+    ];
+    expect(brutesDepuisPaper(positions)).toEqual([
+      { symbole: "ETHUSDT", source: "binance", direction: "long", taille: 1, prixEntree: 3_000 },
+      { symbole: "BTCUSDT", source: "binance", direction: "short", taille: 0.2, prixEntree: 62_000 },
+    ]);
   });
 });

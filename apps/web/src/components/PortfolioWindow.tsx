@@ -37,8 +37,23 @@ import {
   type ResultatParseCsvPortfolio,
 } from "../store/portfolioCsv";
 import { notesUiStore } from "../store/notes";
-import { formatPrice, formatUsd, formatPct } from "../lib/format";
+import { formatPrice, formatUsd, formatPct, formatDec } from "../lib/format";
 import { EnTeteFenetre, Vide } from "./ui";
+import { binanceAdapter } from "../data/binance";
+import { mapPool } from "../data/screenerRun";
+import { lireTokenCanvas } from "../lib/canvasTokens";
+import { themeStore } from "../store/theme";
+import {
+  serieRendementsPortefeuille,
+  risquePortefeuille,
+  contributionsRisque,
+  betasVsRef,
+  stressGrid,
+  equityHistorique,
+  type SerieActif,
+  type PoidsPosition,
+} from "../data/portRisque";
+import type { Candle } from "@axiom/types";
 
 /** Cellules DOM d'une ligne, mises à jour impérativement (hors render-loop). */
 interface RowCells {
@@ -80,6 +95,162 @@ function prixMarcheActif(): number | undefined {
   return c ? c.close : undefined;
 }
 
+// ── Section « Risque » : collecte klines + calculs ───────────────────────────
+
+/** Référence de bêta (marché) : chocs de stress exprimés en variation BTC. */
+const RISQUE_SYMBOLE_REF = "BTCUSDT";
+/** ~91 bougies 1 j ⇒ ~90 rendements log (au-delà du seuil 30 j de risquePortefeuille). */
+const RISQUE_KLINE_LIMIT = 91;
+/** Concurrence du pool de collecte (décision contrôleur). */
+const RISQUE_CONCURRENCY = 4;
+/** TTL du cache mémoire de klines par symbole (1 h). */
+const RISQUE_TTL_MS = 3_600_000;
+
+/** Cache mémoire module des klines 1 j par symbole (partagé entre montages). */
+const cacheKlines: Record<string, { ts: number; klines: Candle[] }> = {};
+
+/** Rendements log 1 j depuis des klines (t = openTime de la bougie d'arrivée). PURE. */
+function klinesVersRendements(klines: readonly Candle[]): { t: number; r: number }[] {
+  const out: { t: number; r: number }[] = [];
+  for (let i = 1; i < klines.length; i++) {
+    const p0 = klines[i - 1]!.close;
+    const p1 = klines[i]!.close;
+    if (p0 > 0 && p1 > 0) out.push({ t: klines[i]!.time, r: Math.log(p1 / p0) });
+  }
+  return out;
+}
+
+/** Clôtures indexées par openTime (pour equityHistorique). PURE. */
+function klinesVersClotures(klines: readonly Candle[]): { t: number; close: number }[] {
+  return klines.map((k) => ({ t: k.time, close: k.close }));
+}
+
+/**
+ * Collecte les klines 1 j des `symboles` via binanceAdapter (pool concurrence 4). Cache
+ * mémoire TTL 1 h ; `force` court-circuite le TTL (bouton Rafraîchir). Les symboles en
+ * échec (TradFi/non-Binance/erreur REST) sont EXCLUS de la Map résultat (dégradation).
+ */
+async function collecterKlines(
+  symboles: readonly string[],
+  force: boolean,
+): Promise<Map<string, Candle[]>> {
+  const now = Date.now();
+  const out = new Map<string, Candle[]>();
+  await mapPool([...symboles], RISQUE_CONCURRENCY, async (s) => {
+    const c = cacheKlines[s];
+    if (!force && c && now - c.ts < RISQUE_TTL_MS) {
+      out.set(s, c.klines);
+      return;
+    }
+    try {
+      const klines = await binanceAdapter.fetchKlines(s, "1d", { limit: RISQUE_KLINE_LIMIT });
+      if (klines.length > 0) {
+        cacheKlines[s] = { ts: Date.now(), klines };
+        out.set(s, klines);
+      }
+    } catch {
+      // Symbole exclu du calcul de risque (compté « hors calcul » côté rendu).
+    }
+  });
+  return out;
+}
+
+/** Marges partagées du canvas P&L (curseur/tracé cohérents). */
+const PNL_PAD_L = 40;
+const PNL_PAD_R = 8;
+
+/** Dessine la courbe de P&L rétro-projeté (ligne + zéro pointillé, patron canvas repo). */
+function dessinerCourbePnl(canvas: HTMLCanvasElement, points: { t: number; equity: number }[]): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (points.length < 2) return;
+
+  const dim = lireTokenCanvas("--text-dim", "#94a3b8");
+  const border = lireTokenCanvas("--border", "#334155");
+  const up = lireTokenCanvas("--up", "#22c55e");
+  const down = lireTokenCanvas("--down", "#ef4444");
+  const police = lireTokenCanvas("--font-display", "monospace");
+  ctx.font = `10px ${police}`;
+
+  const top = 8;
+  const bottom = 16;
+  const plotW = Math.max(1, w - PNL_PAD_L - PNL_PAD_R);
+  const plotH = Math.max(1, h - top - bottom);
+
+  const eqs = points.map((p) => p.equity);
+  let yMin = Math.min(...eqs, 0);
+  let yMax = Math.max(...eqs, 0);
+  const span = yMax - yMin || 1;
+  const pad = span * 0.1;
+  yMin -= pad;
+  yMax += pad;
+  const yFull = yMax - yMin || 1;
+  const n = points.length;
+  const xOf = (i: number): number => PNL_PAD_L + (plotW * i) / (n - 1);
+  const yOf = (v: number): number => top + plotH - ((v - yMin) / yFull) * plotH;
+
+  // Graduations Y (min / 0 / max) + libellés $.
+  ctx.strokeStyle = border;
+  ctx.fillStyle = dim;
+  for (const v of [yMin + pad, 0, yMax - pad]) {
+    const y = yOf(v);
+    ctx.globalAlpha = 0.4;
+    ctx.beginPath();
+    ctx.moveTo(PNL_PAD_L, y);
+    ctx.lineTo(PNL_PAD_L + plotW, y);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.fillText(formatUsd(v), 2, y + 3);
+  }
+
+  // Ligne zéro pointillée (base = prix d'entrée théorique).
+  ctx.save();
+  ctx.setLineDash([3, 3]);
+  ctx.strokeStyle = dim;
+  ctx.globalAlpha = 0.7;
+  ctx.beginPath();
+  ctx.moveTo(PNL_PAD_L, yOf(0));
+  ctx.lineTo(PNL_PAD_L + plotW, yOf(0));
+  ctx.stroke();
+  ctx.restore();
+
+  // Courbe de P&L (teinte selon le signe du dernier point).
+  ctx.strokeStyle = eqs[n - 1]! >= 0 ? up : down;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = "round";
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const x = xOf(i);
+    const y = yOf(p.equity);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+/** Canvas P&L de la composition actuelle (90 j) — rendu PUR, non unit-testé (pattern repo). */
+function CourbePnl({ points }: { points: { t: number; equity: number }[] }): JSX.Element {
+  const theme = useStore(themeStore, (s) => s.theme); // redessine au changement de thème
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const redraw = (): void => dessinerCourbePnl(canvas, points);
+    redraw();
+    const ro = new ResizeObserver(redraw);
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, [points, theme]);
+  return <canvas ref={ref} className="h-[140px] w-full" aria-hidden="true" />;
+}
+
 export function PortfolioWindow() {
   const open = useStore(portfolioUiStore, (s) => s.open);
   const positions = useStore(portfolioStore, (s) => s.positions);
@@ -119,6 +290,111 @@ export function PortfolioWindow() {
   /** Dry-run import CSV (null = panneau masqué). */
   const [importDryRun, setImportDryRun] = useState<ResultatParseCsvPortfolio | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Section « Risque » : repliée par défaut, collecte LAZY au dépliage (+ Rafraîchir).
+  const [showRisk, setShowRisk] = useState(false);
+  const [risque, setRisque] = useState<
+    | { status: "idle" }
+    | { status: "loading" }
+    | { status: "error"; message: string }
+    | { status: "ready"; klines: Map<string, Candle[]>; refDispo: boolean; prix: Record<string, number> }
+  >({ status: "idle" });
+  /** Garde anti-course : une collecte lente ne doit pas écraser un Rafraîchir plus récent. */
+  const risqueRunId = useRef(0);
+
+  /** Collecte les klines des positions ouvertes (+ BTCUSDT réf.) et arme l'état « Risque ». */
+  const collecterRisque = useCallback(async (force: boolean) => {
+    const ouvertes = openRef.current;
+    if (ouvertes.length === 0) return;
+    const runId = ++risqueRunId.current;
+    setRisque({ status: "loading" });
+    // Prix courants : MÊME source que les PnL latents (WS tickers, latest.current) ?? prix d'entrée.
+    const prix: Record<string, number> = {};
+    for (const p of ouvertes) prix[p.symbole] = latest.current.get(p.symbole) ?? p.prixEntree;
+    const symboles = Array.from(new Set([...ouvertes.map((p) => p.symbole), RISQUE_SYMBOLE_REF]));
+    try {
+      const klines = await collecterKlines(symboles, force);
+      if (runId !== risqueRunId.current) return;
+      setRisque({ status: "ready", klines, refDispo: klines.has(RISQUE_SYMBOLE_REF), prix });
+    } catch (e) {
+      if (runId !== risqueRunId.current) return;
+      setRisque({ status: "error", message: e instanceof Error ? e.message : "collecte échouée" });
+    }
+  }, []);
+
+  // Déclenche la collecte au 1er dépliage de la section (lazy). Rafraîchir force ensuite.
+  useEffect(() => {
+    if (open && showRisk && risque.status === "idle" && openPositions.length > 0) {
+      void collecterRisque(false);
+    }
+  }, [open, showRisk, risque.status, openPositions.length, collecterRisque]);
+
+  /**
+   * Vue de risque dérivée : UN tableau de poids canonique (unique par symbole, w signé =
+   * Σ signe·taille·prixCourant) alimente TOUTES les fonctions pures ⇒ badges $, contributions
+   * et stress cohérents par construction. Symboles sans klines = exclus (comptés « hors calcul »).
+   */
+  const vueRisque = useMemo(() => {
+    if (risque.status !== "ready") return null;
+    const { klines, refDispo, prix } = risque;
+
+    // Agrégats par symbole : notionnel signé (poids) + taille nette & coût (pour l'equity).
+    const parSym = new Map<string, { notion: number; netTaille: number; cout: number }>();
+    for (const p of openPositions) {
+      const signe = p.direction === "long" ? 1 : -1;
+      const px = prix[p.symbole] ?? p.prixEntree;
+      const cur = parSym.get(p.symbole) ?? { notion: 0, netTaille: 0, cout: 0 };
+      cur.notion += signe * p.taille * px;
+      cur.netTaille += signe * p.taille;
+      cur.cout += signe * p.taille * p.prixEntree;
+      parSym.set(p.symbole, cur);
+    }
+
+    const inclus = [...parSym.keys()].filter((s) => klines.has(s));
+    const horsCalcul = openPositions.filter((p) => !klines.has(p.symbole)).length;
+    if (inclus.length === 0) return { vide: true as const, horsCalcul };
+
+    const series: SerieActif[] = inclus.map((s) => ({
+      symbol: s,
+      rendements: klinesVersRendements(klines.get(s)!),
+    }));
+    const poids: PoidsPosition[] = inclus.map((s) => ({ symbol: s, poids: parSym.get(s)!.notion }));
+    const sommeAbs = poids.reduce((a, p) => a + Math.abs(p.poids), 0);
+
+    const risqueP = risquePortefeuille(serieRendementsPortefeuille(series, poids));
+    const ctrs = new Map(contributionsRisque(series, poids).map((c) => [c.symbol, c.ctr]));
+
+    const refSerie: SerieActif | null = refDispo
+      ? { symbol: RISQUE_SYMBOLE_REF, rendements: klinesVersRendements(klines.get(RISQUE_SYMBOLE_REF)!) }
+      : null;
+    const betaMap = new Map<string, number | null>(
+      (refSerie ? betasVsRef(series, refSerie) : series.map((s) => ({ symbol: s.symbol, beta: null }))).map(
+        (b) => [b.symbol, b.beta],
+      ),
+    );
+    const stress = stressGrid(poids, betaMap);
+
+    // Equity rétro-projeté : clôtures + tailles NETTES agrégées (drop des symboles net-plats).
+    const closes = new Map<string, { t: number; close: number }[]>();
+    const tailles = new Map<string, { taille: number; entree: number; signe: 1 | -1 }>();
+    for (const s of inclus) {
+      closes.set(s, klinesVersClotures(klines.get(s)!));
+      const agg = parSym.get(s)!;
+      if (Math.abs(agg.netTaille) < 1e-12) continue;
+      const signe: 1 | -1 = agg.netTaille > 0 ? 1 : -1;
+      tailles.set(s, { taille: Math.abs(agg.netTaille), entree: agg.cout / agg.netTaille, signe });
+    }
+    const equity = equityHistorique(closes, tailles);
+
+    const lignes = inclus.map((s) => ({
+      symbol: s,
+      poidsPct: sommeAbs > 0 ? (parSym.get(s)!.notion / sommeAbs) * 100 : 0,
+      beta: betaMap.get(s) ?? null,
+      ctrPct: (ctrs.get(s) ?? 0) * 100,
+    }));
+
+    return { vide: false as const, horsCalcul, sommeAbs, risqueP, lignes, stress, equity };
+  }, [risque, openPositions]);
 
   /** Repeint toutes les lignes ouvertes + les totaux depuis les derniers prix connus. */
   const repaintAll = useCallback(() => {
@@ -670,6 +946,150 @@ export function PortfolioWindow() {
             </div>
           )}
         </section>
+
+        {/* Section « Risque » — repliée par défaut, collecte lazy au dépliage (masquée si 0 position ouverte) */}
+        {openPositions.length > 0 && (
+          <section className="mt-3">
+            <button
+              type="button"
+              onClick={() => setShowRisk((v) => !v)}
+              aria-expanded={showRisk}
+              className="flex w-full items-center justify-between rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-dim transition hover:text-text"
+            >
+              <span className="uppercase tracking-wider">Risque (VaR · β · stress)</span>
+              <span>{showRisk ? "▾" : "▸"}</span>
+            </button>
+            {showRisk && (
+              <div className="mt-1 space-y-2">
+                <div className="flex items-center justify-between text-[10px] text-text-dim">
+                  <span>Composition actuelle · 90 j Binance</span>
+                  <button
+                    type="button"
+                    onClick={() => void collecterRisque(true)}
+                    disabled={risque.status === "loading"}
+                    className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] transition hover:text-accent disabled:opacity-40"
+                  >
+                    {risque.status === "loading" ? "Collecte…" : "Rafraîchir"}
+                  </button>
+                </div>
+
+                {risque.status === "loading" && <Vide>Collecte des klines 1 j…</Vide>}
+                {risque.status === "error" && <Vide>Collecte échouée : {risque.message}</Vide>}
+                {vueRisque?.vide && (
+                  <Vide>
+                    Aucun symbole exploitable (périmètre crypto-Binance).
+                    {vueRisque.horsCalcul > 0 ? ` ${vueRisque.horsCalcul} position(s) hors calcul.` : ""}
+                  </Vide>
+                )}
+
+                {vueRisque && !vueRisque.vide && (
+                  <>
+                    {vueRisque.horsCalcul > 0 && (
+                      <p className="text-[10px] text-text-dim">
+                        {vueRisque.horsCalcul} position(s) hors calcul de risque (hors périmètre crypto-Binance).
+                      </p>
+                    )}
+
+                    {/* Badges VaR / CVaR 1 j */}
+                    {vueRisque.risqueP === null ? (
+                      <Vide>Historique insuffisant (&lt; 30 j communs).</Vide>
+                    ) : (
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        {(
+                          [
+                            ["VaR 95% · 1j", vueRisque.risqueP.var95Pct],
+                            ["VaR 99% · 1j", vueRisque.risqueP.var99Pct],
+                            ["CVaR 95%", vueRisque.risqueP.cvar95Pct],
+                          ] as const
+                        ).map(([label, pct]) => (
+                          <div key={label} className="rounded-md border border-border bg-bg px-2 py-1.5">
+                            <div className="text-[9px] uppercase tracking-wider text-text-dim">{label}</div>
+                            <div className="tabular-nums text-sm font-medium text-down">
+                              −{formatUsd(pct * vueRisque.sommeAbs)}
+                            </div>
+                            <div className="tabular-nums text-[10px] text-text-dim">
+                              {formatPct(pct * 100, 2, { signe: false })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Tableau des contributions au risque */}
+                    <div className="rounded-md border border-border bg-bg px-2.5 py-2">
+                      <div className="mb-1.5 grid grid-cols-[1fr_auto_auto_auto] gap-2 text-[9px] uppercase tracking-wider text-text-dim">
+                        <span>Symbole</span>
+                        <span className="text-right">Poids</span>
+                        <span className="text-right">β BTC</span>
+                        <span className="text-right">Contrib.</span>
+                      </div>
+                      {vueRisque.lignes.map((l) => (
+                        <div
+                          key={l.symbol}
+                          className="grid grid-cols-[1fr_auto_auto_auto] gap-2 py-0.5 text-[11px] tabular-nums"
+                        >
+                          <span className="font-medium text-text">{l.symbol}</span>
+                          <span className="text-right text-text-dim">
+                            {formatPct(l.poidsPct, 1, { signe: false })}
+                          </span>
+                          <span className="text-right text-text-dim">{formatDec(l.beta, 2)}</span>
+                          <span
+                            className={`text-right ${
+                              l.ctrPct > 0 ? "text-up" : l.ctrPct < 0 ? "text-down" : "text-text-dim"
+                            }`}
+                          >
+                            {formatPct(l.ctrPct, 1)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Grille de stress (choc BTC → impact linéaire en β) */}
+                    <div className="grid grid-cols-2 gap-2">
+                      {vueRisque.stress.map((c) => (
+                        <div key={c.chocPct} className="rounded-md border border-border bg-bg px-2 py-1.5">
+                          <div className="text-[9px] uppercase tracking-wider text-text-dim">
+                            Choc BTC {c.chocPct > 0 ? "+" : ""}
+                            {c.chocPct}%
+                          </div>
+                          <div
+                            className={`tabular-nums text-sm font-medium ${
+                              c.impactUsd > 0 ? "text-up" : c.impactUsd < 0 ? "text-down" : "text-text"
+                            }`}
+                          >
+                            {c.impactUsd > 0 ? "+" : ""}
+                            {formatUsd(c.impactUsd)}
+                          </div>
+                          {c.couvertUsd < vueRisque.sommeAbs && (
+                            <div className="text-[9px] text-text-dim">
+                              couvre {((c.couvertUsd / vueRisque.sommeAbs) * 100).toFixed(0)}% du notionnel
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Courbe de P&L de la composition actuelle (90 j) */}
+                    {vueRisque.equity.length >= 2 && (
+                      <div className="rounded-md border border-border bg-bg px-2 py-2">
+                        <div className="mb-1 text-[10px] uppercase tracking-wider text-text-dim">
+                          P&amp;L de la composition actuelle (90 j)
+                        </div>
+                        <CourbePnl points={vueRisque.equity} />
+                      </div>
+                    )}
+
+                    {/* Note d'honnêteté : 3 approximations assumées */}
+                    <p className="text-[9px] leading-relaxed text-text-dim">
+                      Approximations : composition ACTUELLE rétro-projetée (constante dans le temps) ;
+                      stress LINÉAIRE en β vs BTC ; périmètre crypto-Binance uniquement.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+          </section>
+        )}
       </div>
     </>
   );

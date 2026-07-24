@@ -102,3 +102,19 @@ describe("run() — garde 200-vide (réponse HTTP OK mais série vide)", () => {
     expect(apres.enCours).toBe(false);
   });
 });
+
+describe("run() — wording du PREMIER échec (aucune série préalable)", () => {
+  it("un échec réseau sans série déjà affichée pose un message SANS « conservé »", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      throw new Error("réseau");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await cbpremStore.getState().run();
+
+    const s = cbpremStore.getState();
+    expect(s.serie).toEqual([]); // rien n'a jamais été affiché
+    expect(s.erreur).toBe("Klines indisponibles (Coinbase ou Binance).");
+    expect(s.enCours).toBe(false);
+  });
+});

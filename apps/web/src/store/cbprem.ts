@@ -118,9 +118,14 @@ export const cbpremStore = createStore<CbpremState>((set, get) => ({
       ]);
     } catch {
       if (runId !== currentRunId) return;
+      // Wording honnête au PREMIER échec (aucune série encore affichée) : rien n'est
+      // « conservé », on n'annonce donc pas un premium précédent inexistant.
+      const aDeja = get().serie.length > 0;
       set({
         enCours: false,
-        erreur: "Klines indisponibles (Coinbase ou Binance) — dernier premium conservé.",
+        erreur: aDeja
+          ? "Klines indisponibles (Coinbase ou Binance) — dernier premium conservé."
+          : "Klines indisponibles (Coinbase ou Binance).",
       });
       return;
     }

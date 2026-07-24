@@ -14,7 +14,6 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
-import { createStore } from "zustand/vanilla";
 import type { Candle, ExchangeId } from "@axiom/types";
 import { getAdapter } from "../data/adapters";
 import {
@@ -36,33 +35,9 @@ import {
 import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { formatDateComplete, formatPct, formatPourcentage } from "../lib/format";
 import { marketStore } from "../store/market";
-import { mirrorOpenState, windowManagerStore } from "../store/windowManager";
+import { evtsUiStore } from "../store/evts";
+import { windowManagerStore } from "../store/windowManager";
 import { Chargement, EnTeteFenetre, ErreurBloc, Metric, NoteSource, Segmente, Vide } from "./ui";
-
-// ─────────────────────────── Store UI co-localisé ───────────────────────────
-
-export interface EvtsUiState {
-  open: boolean;
-  openEvts: () => void;
-  closeEvts: () => void;
-  toggleEvts: () => void;
-  /** Retour forward médian par type d'évènement (« méd +24 h : -0.8% »), pour la fenêtre
-   *  BRIEF (Task 4). Mis à jour après chaque calcul réussi (≥ 1 fenêtre alignée). */
-  statsParType: Partial<Record<TypeEvenement, string>>;
-  setStatParType: (type: TypeEvenement, libelle: string) => void;
-}
-
-export const evtsUiStore = createStore<EvtsUiState>((set) => ({
-  open: false,
-  openEvts: () => windowManagerStore.getState().openWindow("evts"),
-  closeEvts: () => windowManagerStore.getState().closeWindow("evts"),
-  toggleEvts: () => windowManagerStore.getState().toggleWindow("evts"),
-  statsParType: {},
-  setStatParType: (type, libelle) =>
-    set((s) => ({ statsParType: { ...s.statsParType, [type]: libelle } })),
-}));
-
-mirrorOpenState("evts", evtsUiStore);
 
 // ─────────────────────────── Contrôles ───────────────────────────
 

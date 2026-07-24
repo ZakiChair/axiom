@@ -5,7 +5,7 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 153 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * 155 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -77,6 +77,7 @@ import { fearGreed } from "./momentum/fearGreed";
 import { disparity } from "./momentum/disparity";
 import { btcDominance } from "./momentum/btcDominance";
 import { kdj } from "./momentum/kdj";
+import { rsiDivergence } from "./momentum/rsiDivergence";
 
 // — volatility —
 import { atr } from "./volatility/atr";
@@ -124,6 +125,7 @@ import { volumeOsc } from "./volume/volumeOsc";
 import { vwap } from "./volume/vwap";
 import { vwapBands } from "./volume/vwapBands";
 import { cvd } from "./orderflow/cvd";
+import { cvdDivergence } from "./orderflow/cvdDivergence";
 import { volumeDelta } from "./volume/volumeDelta";
 import { takerBuyRatio } from "./volume/takerBuyRatio";
 import { cvdSpotPerp } from "./orderflow/cvdSpotPerp";
@@ -246,6 +248,7 @@ export const INDICATORS: IndicatorDef[] = [
   disparity,
   btcDominance,
   kdj,
+  rsiDivergence,
   // volatility
   atr,
   atrRegime,
@@ -295,6 +298,7 @@ export const INDICATORS: IndicatorDef[] = [
   vfi,
   // orderflow (menu dédié — edge crypto)
   cvd,
+  cvdDivergence,
   volumeDelta,
   takerBuyRatio,
   netVolume,

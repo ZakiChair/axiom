@@ -6,5 +6,7 @@
 export * from "./utils";
 export * from "./utils-session";
 export * from "./utils-aux";
+export * from "./utils-divergence";
+export * from "./utils-divergence-points";
 export * from "./engine";
 export * from "./registry";

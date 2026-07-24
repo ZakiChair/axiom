@@ -26,6 +26,51 @@ import type {
 } from "@axiom/types";
 import { rma } from "../utils";
 
+/**
+ * Cœur de calcul du RSI de Wilder, extrait pour être réutilisé par la def
+ * `rsiDivergence` (Task 3) comme oscillateur source. Comportement identique à
+ * l'ancien corps inline de `rsi.calc` : les `length` premières positions restent
+ * `undefined`, la première valeur apparaît à l'index `length`. PURE.
+ */
+export function rsiOf(
+  source: ReadonlyArray<number>,
+  length: number
+): Array<number | undefined> {
+  const n = source.length;
+  const out: Array<number | undefined> = new Array(n).fill(undefined);
+
+  // Deltas alignés : gains[j] / losses[j] correspondent à la bougie j+1.
+  const gains: number[] = [];
+  const losses: number[] = [];
+  for (let i = 1; i < n; i++) {
+    const cur = source[i];
+    const prev = source[i - 1];
+    if (cur === undefined || prev === undefined) {
+      gains.push(0);
+      losses.push(0);
+      continue;
+    }
+    const delta = cur - prev;
+    gains.push(delta > 0 ? delta : 0);
+    losses.push(delta < 0 ? -delta : 0);
+  }
+
+  const avgGain = rma(gains, length);
+  const avgLoss = rma(losses, length);
+
+  for (let j = 0; j < gains.length; j++) {
+    const g = avgGain[j];
+    const l = avgLoss[j];
+    if (g === undefined || l === undefined) continue;
+    // avgLoss == 0 -> RS infini -> RSI = 100 (pas de gestion de division par 0).
+    const value = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+    // Décalage de +1 : le delta j provient de la bougie j+1.
+    out[j + 1] = value;
+  }
+
+  return out;
+}
+
 export const rsi: IndicatorDef = {
   id: "rsi",
   name: "RSI",
@@ -51,40 +96,6 @@ export const rsi: IndicatorDef = {
     ctx: CalcContext
   ): IndicatorResult {
     const length = Number(params.length);
-    const closes = ctx.source;
-    const n = closes.length;
-
-    const out: Array<number | undefined> = new Array(n).fill(undefined);
-
-    // Deltas alignés : gains[j] / losses[j] correspondent à la bougie j+1.
-    const gains: number[] = [];
-    const losses: number[] = [];
-    for (let i = 1; i < n; i++) {
-      const cur = closes[i];
-      const prev = closes[i - 1];
-      if (cur === undefined || prev === undefined) {
-        gains.push(0);
-        losses.push(0);
-        continue;
-      }
-      const delta = cur - prev;
-      gains.push(delta > 0 ? delta : 0);
-      losses.push(delta < 0 ? -delta : 0);
-    }
-
-    const avgGain = rma(gains, length);
-    const avgLoss = rma(losses, length);
-
-    for (let j = 0; j < gains.length; j++) {
-      const g = avgGain[j];
-      const l = avgLoss[j];
-      if (g === undefined || l === undefined) continue;
-      // avgLoss == 0 -> RS infini -> RSI = 100 (pas de gestion de division par 0).
-      const value = l === 0 ? 100 : 100 - 100 / (1 + g / l);
-      // Décalage de +1 : le delta j provient de la bougie j+1.
-      out[j + 1] = value;
-    }
-
-    return { series: { rsi: out } };
+    return { series: { rsi: rsiOf(ctx.source, length) } };
   },
 };

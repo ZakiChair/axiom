@@ -9,8 +9,34 @@
  * Edge : divergence prix/CVD ; lire pentes, pas niveaux absolus (offset d'ancre).
  */
 
-import type { IndicatorDef } from "@axiom/types";
+import type { Candle, IndicatorDef } from "@axiom/types";
 import { sma } from "../utils";
+
+/**
+ * Cœur du CVD : somme cumulée de (buyVolume − sellVolume) par bougie, extrait
+ * pour être réutilisé par la def `cvdDivergence` (Task 3) comme oscillateur.
+ * Comportement identique au corps inline de `cvd.calc` : une bougie sans champs
+ * taker buy/sell laisse le cumul inchangé (delta 0) → série toujours finie. Une
+ * source SANS aucun buy/sell produit donc une série plate à 0 : plate = aucun
+ * pivot fractal strict → aucune divergence → aucun point (dégradation propre). PURE.
+ */
+export function cvdOf(candles: Candle[]): number[] {
+  const n = candles.length;
+  const raw: number[] = new Array(n);
+  let acc = 0;
+  for (let i = 0; i < n; i++) {
+    const c = candles[i];
+    if (c !== undefined) {
+      const buy = c.buyVolume;
+      const sell = c.sellVolume;
+      if (buy !== undefined && sell !== undefined && Number.isFinite(buy) && Number.isFinite(sell)) {
+        acc += buy - sell;
+      }
+    }
+    raw[i] = acc;
+  }
+  return raw;
+}
 
 export const cvd: IndicatorDef = {
   id: "cvd",
@@ -34,20 +60,7 @@ export const cvd: IndicatorDef = {
   precision: 0,
   calc(candles, params) {
     const smooth = Math.max(1, Math.floor(Number(params.smooth) || 1));
-    const n = candles.length;
-    const raw: number[] = new Array(n);
-    let acc = 0;
-    for (let i = 0; i < n; i++) {
-      const c = candles[i];
-      if (c !== undefined) {
-        const buy = c.buyVolume;
-        const sell = c.sellVolume;
-        if (buy !== undefined && sell !== undefined && Number.isFinite(buy) && Number.isFinite(sell)) {
-          acc += buy - sell;
-        }
-      }
-      raw[i] = acc;
-    }
+    const raw = cvdOf(candles);
     const cvdOut: Array<number | undefined> = raw.map((v) => v);
     const signal =
       smooth <= 1

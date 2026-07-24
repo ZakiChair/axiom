@@ -207,6 +207,19 @@ function ecrireCacheDataset(dataset: DatasetCot, records: unknown[], ts: number)
   }
 }
 
+/**
+ * Lit le cache legacy SEUL et l'assemble en résumé, SANS AUCUN réseau (instantané pour le
+ * BRIEF). Réutilise le lecteur de cache privé (clé/shape internes au module) et
+ * `assemblerCategorie` — plus robuste que relire la clé localStorage depuis l'extérieur.
+ * `null` si le cache legacy est absent (⇒ la section BRIEF est masquée). La fraîcheur (TTL)
+ * est IGNORÉE : un rapport COT est hebdomadaire et le BRIEF n'est qu'un instantané.
+ */
+export function lireResumeLegacyCache(): ResumeCotCategorie | null {
+  const cache = lireCacheDataset("legacy");
+  if (cache === null) return null;
+  return assemblerCategorie({ legacy: cache.records }, "legacy");
+}
+
 /** Fetch d'un dataset (records bruts). Rejette sur échec réseau/HTTP. */
 async function fetchDataset(dataset: DatasetCot): Promise<unknown[]> {
   const qs = construireRequeteDataset(dataset, WATCHLIST_COT, Date.now());

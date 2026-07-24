@@ -79,5 +79,11 @@ export function decrireCondition(condition: Condition): string {
     case "liq-cascade":
       // Limite d'évaluation (flux liq actif requis) documentée côté runtime + UI.
       return `Cascade de liquidations ≥ ${formaterMontant(condition.seuilUsdParMin)} $/min`;
+    case "regime-seuil": {
+      const { comparateur, valeur } = condition;
+      // Symbole de comparaison lisible (≤/≥) et signe moins typographique (−).
+      const op = comparateur === "<=" ? "≤" : comparateur === ">=" ? "≥" : comparateur;
+      return `régime ${op} ${String(valeur).replace("-", "−")}`;
+    }
   }
 }

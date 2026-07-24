@@ -417,6 +417,42 @@ describe("liq-cascade", () => {
   });
 });
 
+describe("regime-seuil", () => {
+  const cond: Condition = { type: "regime-seuil", comparateur: "<=", valeur: -1.2 };
+  function ctxReg(regimeScore: number): ContexteAlerte {
+    return { maintenant: 1, dernierPrix: 0, regimeScore };
+  }
+
+  it("calibre puis déclenche au franchissement du seuil, se ré-arme au re-franchissement inverse", () => {
+    const { fires, defFinale } = piloter(def(cond), [
+      ctxReg(0.3), // au-dessus du seuil → calibrage armé
+      ctxReg(-1.5), // score ≤ −1.2 → DÉCLENCHE
+      ctxReg(-1.8), // toujours sous le seuil → rien (désarmée)
+      ctxReg(-0.4), // repasse au-dessus → ré-armement
+      ctxReg(-1.2), // bord exact (≤) → DÉCLENCHE
+    ]);
+    expect(fires).toEqual([false, true, false, false, true]);
+    expect(defFinale.declenchements).toHaveLength(2);
+  });
+
+  it("ne déclenche PAS immédiatement si le seuil est déjà franchi à la création", () => {
+    const { fires } = piloter(def(cond), [
+      ctxReg(-1.6), // déjà ≤ seuil → calibrage désarmé, PAS de déclenchement
+      ctxReg(-1.7), // toujours sous le seuil → rien
+      ctxReg(0.5), // repasse au-dessus → ré-armement
+      ctxReg(-1.4), // franchit à nouveau → DÉCLENCHE
+    ]);
+    expect(fires).toEqual([false, false, false, true]);
+  });
+
+  it("non évaluable si regimeScore absent (def inchangée, référence conservée)", () => {
+    const d = def(cond);
+    const res = evaluerAlertes([d], { maintenant: 0, dernierPrix: 0 });
+    expect(res.defs[0]).toBe(d);
+    expect(res.modifie).toBe(false);
+  });
+});
+
 describe("filtrage du lot", () => {
   it("laisse les defs inactives inchangées (même référence)", () => {
     const inactive = def({ type: "prix-croise", niveau: 100, sens: "hausse" }, { actif: false });

@@ -91,6 +91,8 @@ function evaluerUne(def: AlertDef, ctx: ContexteAlerte): EvalCondition | null {
       return evalCvdSpotPerpDiv(def, c, ctx);
     case "liq-cascade":
       return evalLiqCascade(def, c, ctx);
+    case "regime-seuil":
+      return evalRegimeSeuil(def, c, ctx);
   }
 }
 
@@ -258,6 +260,23 @@ function evalLiqCascade(
   const v = ctx.liqUsdParMin;
   if (v === undefined || !Number.isFinite(v)) return null;
   const satisfaite = v >= c.seuilUsdParMin;
+  const r = frontArme(def.arme, satisfaite);
+  return { fire: r.fire, arme: r.arme, valeur: v };
+}
+
+/**
+ * Score de régime : `regimeScore` (−2..+2, injecté par le runtime FRONT — le daemon ne
+ * calcule pas le score en v1) comparé au seuil. Ré-armement standard : le score doit
+ * repasser du côté opposé du seuil avant de pouvoir re-déclencher.
+ */
+function evalRegimeSeuil(
+  def: AlertDef,
+  c: Extract<Condition, { type: "regime-seuil" }>,
+  ctx: ContexteAlerte
+): EvalCondition | null {
+  const v = ctx.regimeScore;
+  if (v === undefined || !Number.isFinite(v)) return null;
+  const satisfaite = comparer(v, c.comparateur, c.valeur);
   const r = frontArme(def.arme, satisfaite);
   return { fire: r.fire, arme: r.arme, valeur: v };
 }

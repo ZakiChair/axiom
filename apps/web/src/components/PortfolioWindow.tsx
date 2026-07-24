@@ -39,8 +39,6 @@ import {
 import { notesUiStore } from "../store/notes";
 import { formatPrice, formatUsd, formatPct, formatDec } from "../lib/format";
 import { EnTeteFenetre, Vide } from "./ui";
-import { binanceAdapter } from "../data/binance";
-import { mapPool } from "../data/screenerRun";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 import { themeStore } from "../store/theme";
 import {
@@ -50,10 +48,14 @@ import {
   betasVsRef,
   stressGrid,
   equityHistorique,
+  collecterRisquePortefeuille,
+  klinesVersRendements,
+  klinesVersClotures,
+  RISQUE_SYMBOLE_REF,
   type SerieActif,
-  type PoidsPosition,
+  type CollecteRisque,
 } from "../data/portRisque";
-import type { Candle } from "@axiom/types";
+import { genererRapportHtml, collecterDonneesRapport } from "../data/rapport";
 
 /** Cellules DOM d'une ligne, mises à jour impérativement (hors render-loop). */
 interface RowCells {
@@ -95,65 +97,7 @@ function prixMarcheActif(): number | undefined {
   return c ? c.close : undefined;
 }
 
-// ── Section « Risque » : collecte klines + calculs ───────────────────────────
-
-/** Référence de bêta (marché) : chocs de stress exprimés en variation BTC. */
-const RISQUE_SYMBOLE_REF = "BTCUSDT";
-/** ~91 bougies 1 j ⇒ ~90 rendements log (au-delà du seuil 30 j de risquePortefeuille). */
-const RISQUE_KLINE_LIMIT = 91;
-/** Concurrence du pool de collecte (décision contrôleur). */
-const RISQUE_CONCURRENCY = 4;
-/** TTL du cache mémoire de klines par symbole (1 h). */
-const RISQUE_TTL_MS = 3_600_000;
-
-/** Cache mémoire module des klines 1 j par symbole (partagé entre montages). */
-const cacheKlines: Record<string, { ts: number; klines: Candle[] }> = {};
-
-/** Rendements log 1 j depuis des klines (t = openTime de la bougie d'arrivée). PURE. */
-function klinesVersRendements(klines: readonly Candle[]): { t: number; r: number }[] {
-  const out: { t: number; r: number }[] = [];
-  for (let i = 1; i < klines.length; i++) {
-    const p0 = klines[i - 1]!.close;
-    const p1 = klines[i]!.close;
-    if (p0 > 0 && p1 > 0) out.push({ t: klines[i]!.time, r: Math.log(p1 / p0) });
-  }
-  return out;
-}
-
-/** Clôtures indexées par openTime (pour equityHistorique). PURE. */
-function klinesVersClotures(klines: readonly Candle[]): { t: number; close: number }[] {
-  return klines.map((k) => ({ t: k.time, close: k.close }));
-}
-
-/**
- * Collecte les klines 1 j des `symboles` via binanceAdapter (pool concurrence 4). Cache
- * mémoire TTL 1 h ; `force` court-circuite le TTL (bouton Rafraîchir). Les symboles en
- * échec (TradFi/non-Binance/erreur REST) sont EXCLUS de la Map résultat (dégradation).
- */
-async function collecterKlines(
-  symboles: readonly string[],
-  force: boolean,
-): Promise<Map<string, Candle[]>> {
-  const now = Date.now();
-  const out = new Map<string, Candle[]>();
-  await mapPool([...symboles], RISQUE_CONCURRENCY, async (s) => {
-    const c = cacheKlines[s];
-    if (!force && c && now - c.ts < RISQUE_TTL_MS) {
-      out.set(s, c.klines);
-      return;
-    }
-    try {
-      const klines = await binanceAdapter.fetchKlines(s, "1d", { limit: RISQUE_KLINE_LIMIT });
-      if (klines.length > 0) {
-        cacheKlines[s] = { ts: Date.now(), klines };
-        out.set(s, klines);
-      }
-    } catch {
-      // Symbole exclu du calcul de risque (compté « hors calcul » côté rendu).
-    }
-  });
-  return out;
-}
+// ── Section « Risque » : rendu (collecte extraite → data/portRisque.ts) ──────
 
 /** Marges partagées du canvas P&L (curseur/tracé cohérents). */
 const PNL_PAD_L = 40;
@@ -291,13 +235,17 @@ export function PortfolioWindow() {
   const [importDryRun, setImportDryRun] = useState<ResultatParseCsvPortfolio | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Rapport périodique : fenêtre (7 j / 30 j) + garde anti-double-clic pendant la collecte.
+  const [rapportPeriode, setRapportPeriode] = useState<7 | 30>(30);
+  const [rapportEnCours, setRapportEnCours] = useState(false);
+
   // Section « Risque » : repliée par défaut, collecte LAZY au dépliage (+ Rafraîchir).
   const [showRisk, setShowRisk] = useState(false);
   const [risque, setRisque] = useState<
     | { status: "idle" }
     | { status: "loading" }
     | { status: "error"; message: string }
-    | { status: "ready"; klines: Map<string, Candle[]>; refDispo: boolean; prix: Record<string, number> }
+    | { status: "ready"; collecte: CollecteRisque }
   >({ status: "idle" });
   /** Garde anti-course : une collecte lente ne doit pas écraser un Rafraîchir plus récent. */
   const risqueRunId = useRef(0);
@@ -311,11 +259,10 @@ export function PortfolioWindow() {
     // Prix courants : MÊME source que les PnL latents (WS tickers, latest.current) ?? prix d'entrée.
     const prix: Record<string, number> = {};
     for (const p of ouvertes) prix[p.symbole] = latest.current.get(p.symbole) ?? p.prixEntree;
-    const symboles = Array.from(new Set([...ouvertes.map((p) => p.symbole), RISQUE_SYMBOLE_REF]));
     try {
-      const klines = await collecterKlines(symboles, force);
+      const collecte = await collecterRisquePortefeuille(ouvertes, prix, force);
       if (runId !== risqueRunId.current) return;
-      setRisque({ status: "ready", klines, refDispo: klines.has(RISQUE_SYMBOLE_REF), prix });
+      setRisque({ status: "ready", collecte });
     } catch (e) {
       if (runId !== risqueRunId.current) return;
       setRisque({ status: "error", message: e instanceof Error ? e.message : "collecte échouée" });
@@ -336,30 +283,16 @@ export function PortfolioWindow() {
    */
   const vueRisque = useMemo(() => {
     if (risque.status !== "ready") return null;
-    const { klines, refDispo, prix } = risque;
+    const { klines, refDispo, poids, sommeAbs } = risque.collecte;
 
-    // Agrégats par symbole : notionnel signé (poids) + taille nette & coût (pour l'equity).
-    const parSym = new Map<string, { notion: number; netTaille: number; cout: number }>();
-    for (const p of openPositions) {
-      const signe = p.direction === "long" ? 1 : -1;
-      const px = prix[p.symbole] ?? p.prixEntree;
-      const cur = parSym.get(p.symbole) ?? { notion: 0, netTaille: 0, cout: 0 };
-      cur.notion += signe * p.taille * px;
-      cur.netTaille += signe * p.taille;
-      cur.cout += signe * p.taille * p.prixEntree;
-      parSym.set(p.symbole, cur);
-    }
-
-    const inclus = [...parSym.keys()].filter((s) => klines.has(s));
     const horsCalcul = openPositions.filter((p) => !klines.has(p.symbole)).length;
-    if (inclus.length === 0) return { vide: true as const, horsCalcul };
+    if (poids.length === 0) return { vide: true as const, horsCalcul };
 
-    const series: SerieActif[] = inclus.map((s) => ({
-      symbol: s,
-      rendements: klinesVersRendements(klines.get(s)!),
+    const inclusSet = new Set(poids.map((p) => p.symbol));
+    const series: SerieActif[] = poids.map((p) => ({
+      symbol: p.symbol,
+      rendements: klinesVersRendements(klines.get(p.symbol)!),
     }));
-    const poids: PoidsPosition[] = inclus.map((s) => ({ symbol: s, poids: parSym.get(s)!.notion }));
-    const sommeAbs = poids.reduce((a, p) => a + Math.abs(p.poids), 0);
 
     const risqueP = risquePortefeuille(serieRendementsPortefeuille(series, poids));
     const ctrs = new Map(contributionsRisque(series, poids).map((c) => [c.symbol, c.ctr]));
@@ -374,23 +307,33 @@ export function PortfolioWindow() {
     );
     const stress = stressGrid(poids, betaMap);
 
-    // Equity rétro-projeté : clôtures + tailles NETTES agrégées (drop des symboles net-plats).
+    // Equity rétro-projeté : agrégats netTaille/coût LOCAUX (propres à l'equity, hors contrat
+    // de risque partagé) ; clôtures + tailles NETTES agrégées (drop des symboles net-plats).
+    const aggEquity = new Map<string, { netTaille: number; cout: number }>();
+    for (const p of openPositions) {
+      if (!inclusSet.has(p.symbole)) continue;
+      const signe = p.direction === "long" ? 1 : -1;
+      const cur = aggEquity.get(p.symbole) ?? { netTaille: 0, cout: 0 };
+      cur.netTaille += signe * p.taille;
+      cur.cout += signe * p.taille * p.prixEntree;
+      aggEquity.set(p.symbole, cur);
+    }
     const closes = new Map<string, { t: number; close: number }[]>();
     const tailles = new Map<string, { taille: number; entree: number; signe: 1 | -1 }>();
-    for (const s of inclus) {
+    for (const s of inclusSet) {
       closes.set(s, klinesVersClotures(klines.get(s)!));
-      const agg = parSym.get(s)!;
-      if (Math.abs(agg.netTaille) < 1e-12) continue;
+      const agg = aggEquity.get(s);
+      if (!agg || Math.abs(agg.netTaille) < 1e-12) continue;
       const signe: 1 | -1 = agg.netTaille > 0 ? 1 : -1;
       tailles.set(s, { taille: Math.abs(agg.netTaille), entree: agg.cout / agg.netTaille, signe });
     }
     const equity = equityHistorique(closes, tailles);
 
-    const lignes = inclus.map((s) => ({
-      symbol: s,
-      poidsPct: sommeAbs > 0 ? (parSym.get(s)!.notion / sommeAbs) * 100 : 0,
-      beta: betaMap.get(s) ?? null,
-      ctrPct: (ctrs.get(s) ?? 0) * 100,
+    const lignes = poids.map((p) => ({
+      symbol: p.symbol,
+      poidsPct: sommeAbs > 0 ? (p.poids / sommeAbs) * 100 : 0,
+      beta: betaMap.get(p.symbol) ?? null,
+      ctrPct: (ctrs.get(p.symbol) ?? 0) * 100,
     }));
 
     return { vide: false as const, horsCalcul, sommeAbs, risqueP, lignes, stress, equity };
@@ -507,6 +450,27 @@ export function PortfolioWindow() {
     fileInputRef.current?.click();
   };
 
+  /** Génère le rapport HTML autonome de la période et déclenche son téléchargement (patron EXPY). */
+  const genererRapport = async () => {
+    if (rapportEnCours) return;
+    setRapportEnCours(true);
+    try {
+      const donnees = await collecterDonneesRapport(rapportPeriode, Date.now());
+      const html = genererRapportHtml(donnees);
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `axiom-rapport-${new Date().toISOString().slice(0, 10)}.html`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setRapportEnCours(false);
+    }
+  };
+
   /** Lit le fichier, parse en dry-run (aucune mutation store tant que non confirmé). */
   const onFichierCsv = (file: File | undefined) => {
     if (!file) return;
@@ -549,8 +513,33 @@ export function PortfolioWindow() {
       {/* En-tête standard, sans croix de fermeture : celle-ci est fournie par le chrome FloatingWindow */}
       <EnTeteFenetre mnemo="PORT" titre="Portefeuille" sousTitre="Positions manuelles · PnL live" />
 
-      {/* Barre import / export CSV */}
-      <div className="flex shrink-0 items-center justify-end gap-1.5 border-b border-border px-4 py-1.5">
+      {/* Barre import / export CSV + rapport périodique */}
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-4 py-1.5">
+        {/* Segmente période du rapport */}
+        <div className="flex overflow-hidden rounded border border-border" title="Période du rapport">
+          {([7, 30] as const).map((j) => (
+            <button
+              key={j}
+              type="button"
+              onClick={() => setRapportPeriode(j)}
+              className={`px-2 py-0.5 text-[10px] font-medium transition ${
+                rapportPeriode === j ? "bg-surface text-accent" : "text-text-dim hover:text-text"
+              }`}
+            >
+              {j} j
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => void genererRapport()}
+          disabled={rapportEnCours}
+          className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] text-text-dim transition hover:text-accent disabled:opacity-40"
+          title="Générer un rapport HTML autonome (portefeuille, risque, journal)"
+        >
+          {rapportEnCours ? "Rapport…" : "📄 Rapport"}
+        </button>
+        <div className="flex-1" />
         <button
           type="button"
           onClick={declencherImportCsv}

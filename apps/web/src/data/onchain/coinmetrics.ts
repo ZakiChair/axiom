@@ -112,6 +112,22 @@ export function parseCoinMetrics(
   return out;
 }
 
+/** TTL du cache de l'historique PriceUSD complet (24 h — l'historique change d'un point/jour). */
+export const CM_TTL_FULL_MS = 24 * 60 * 60 * 1000;
+/** Début de l'historique BTC demandé (le 1er point réel date de 2010-07-18). */
+const DEBUT_HISTORIQUE = "2010-07-01";
+/** Garde-fou anti-boucle sur la pagination `next_page_url` (l'historique tient en 1 page à 10000). */
+const MAX_PAGES = 10;
+
+/** Résultat du fetch PriceUSD complet : la série de prix + fraîcheur + horodatage. */
+export interface PriceUsdCompletResultat {
+  points: PointMetrique[];
+  /** ms epoch de l'écriture en cache de ces données. */
+  ts: number;
+  /** true si servi depuis un cache PÉRIMÉ (source momentanément injoignable). */
+  perime: boolean;
+}
+
 /** Construit l'URL de requête (asset unique + fenêtre historique). */
 function construireUrl(asset: string): string {
   const debut = new Date(Date.now() - FENETRE_JOURS * 86_400_000).toISOString().slice(0, 10);
@@ -153,6 +169,60 @@ export async function fetchCoinMetrics(
     healthStore.getState().marquerErreur(SOURCE_SANTE, e instanceof Error ? e.message : "échec");
     // Dégradation : on ressert le dernier cache connu, même périmé.
     if (cache !== null) return { series: cache.donnee, ts: cache.ts, perime: true };
+    return null;
+  }
+}
+
+/**
+ * Récupère l'HISTORIQUE COMPLET du prix BTC (PriceUSD, daily, depuis 2010) — fetch DÉDIÉ
+ * pour la fenêtre CYCLE, indépendant du fetch CHAIN (qui reste sur 200 jours). Cache 24 h
+ * (clé `cm:priceusd:full`), dégradation gracieuse identique aux autres sources.
+ *
+ * Pagination : `page_size=10000` couvre tout l'historique (~5 850 points) en une requête ;
+ * si l'amont plafonnait la page, on suit `next_page_url` (URL complète) jusqu'à MAX_PAGES,
+ * en accumulant les tableaux `data` bruts puis en parsant UNE fois à la fin.
+ */
+export async function fetchCoinMetricsPriceUSDComplet(
+  signal?: AbortSignal,
+): Promise<PriceUsdCompletResultat | null> {
+  const cle = "cm:priceusd:full";
+  const cache = await lireCache<PointMetrique[]>(cle);
+  if (estFrais(cache, CM_TTL_FULL_MS) && cache !== null) {
+    return { points: cache.donnee, ts: cache.ts, perime: false };
+  }
+
+  const params = new URLSearchParams({
+    assets: "btc",
+    metrics: "PriceUSD",
+    frequency: "1d",
+    page_size: "10000",
+    start_time: DEBUT_HISTORIQUE,
+  });
+  let url: string | null = `${BASE}?${params.toString()}`;
+
+  try {
+    // Accumule les lignes brutes de toutes les pages, puis parse une seule fois.
+    const lignes: unknown[] = [];
+    for (let page = 0; page < MAX_PAGES && url !== null; page += 1) {
+      const res = await fetch(url, { signal });
+      if (!res.ok) throw new Error(`Coin Metrics PriceUSD ${res.status}`);
+      const json = (await res.json()) as { data?: unknown; next_page_url?: unknown };
+      if (Array.isArray(json.data)) lignes.push(...json.data);
+      url = typeof json.next_page_url === "string" ? json.next_page_url : null;
+    }
+
+    const series = parseCoinMetrics({ data: lignes }, "btc", ["PriceUSD"]);
+    const points = series["PriceUSD"]?.points ?? [];
+    if (points.length === 0) throw new Error("Coin Metrics PriceUSD vide");
+
+    await ecrireCache(cle, points);
+    healthStore.getState().setEtat(SOURCE_SANTE, "polling", { dernierMessageTs: Date.now() });
+    return { points, ts: Date.now(), perime: false };
+  } catch (e) {
+    if (signal?.aborted) return cache ? { points: cache.donnee, ts: cache.ts, perime: true } : null;
+    healthStore.getState().marquerErreur(SOURCE_SANTE, e instanceof Error ? e.message : "échec");
+    // Dégradation : on ressert le dernier cache connu, même périmé.
+    if (cache !== null) return { points: cache.donnee, ts: cache.ts, perime: true };
     return null;
   }
 }

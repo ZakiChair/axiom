@@ -123,13 +123,15 @@ function redraw(): void {
 
   const statsParType = evtsUiStore.getState().statsParType;
   for (const ev of marqueurs(events)) {
-    const base = `${ev.country} ${ev.title}`;
-    // Suffixe la stat d'étude d'évènements si elle est disponible pour ce type (budget
-    // allongé à 34 pour laisser voir le suffixe ; 18 pour un label nu).
+    const base = tronquer(`${ev.country} ${ev.title}`, 18);
+    // Suffixe la stat d'étude d'évènements si elle est disponible pour ce type. La base est
+    // tronquée à 18 (comme un label nu) PUIS la stat est ajoutée EN ENTIER : la stat PRIME
+    // sur la fin du titre. Sur un titre FRED verbeux (« Consumer Price Index ») le suffixe
+    // reste ainsi toujours lisible, au lieu d'être rogné par une troncature commune.
     const type = typeEvenementDe(ev.title);
     const stat = type ? statsParType[type] : undefined;
     const extend: EcoMarkerExtend = {
-      label: stat ? tronquer(`${base} · ${stat}`, 34) : tronquer(base, 18),
+      label: stat ? `${base} · ${stat}` : base,
     };
     const overlay: OverlayCreate = {
       name: ECO_MARKER,

@@ -4,7 +4,10 @@
  * Tout mempool.space est CORS `*` → appels DIRECTS (aucun proxy, fonctionne sans daemon).
  *   GET /api/v1/fees/recommended     → { fastestFee, halfHourFee, hourFee, economyFee, minimumFee } (sat/vB)
  *   GET /api/blocks/tip/height       → hauteur courante (nombre brut)
- *   GET /api/v1/mining/hashrate/1y   → { hashrates:[{ timestamp(s), avgHashrate }], … }
+ *   GET /api/v1/mining/hashrate/1y   → { hashrates:[{ timestamp(s), avgHashrate }],
+ *                                        difficulty:[{ time(s), height, difficulty, adjustment }], … }
+ *   GET /api/v1/difficulty-adjustment → { progressPercent, difficultyChange,
+ *                                        estimatedRetargetDate(ms), remainingBlocks, … }
  *
  * Le compte à rebours du HALVING est CALCULÉ depuis la hauteur (fonction pure `computeHalving`) :
  * pas d'endpoint dédié. On préfère mempool.space à blockchain.info pour le hashrate car
@@ -21,6 +24,8 @@ const SOURCE_SANTE = "mempool";
 export const MP_TTL_RESEAU_MS = 5 * 60 * 1000;
 /** TTL hashrate : 6 h (série daily). */
 export const MP_TTL_HASHRATE_MS = 6 * 60 * 60 * 1000;
+/** TTL ajustement de difficulté : 5 min (retarget lent, mais progression continue). */
+export const MP_TTL_AJUSTEMENT_MS = 5 * 60 * 1000;
 
 /** Constantes du protocole Bitcoin (halving tous les 210 000 blocs). */
 const BLOCS_PAR_HALVING = 210_000;
@@ -112,6 +117,64 @@ export function parseHashrate(json: unknown): SerieMetrique {
   return { points, dernier: points.length > 0 ? points[points.length - 1] : undefined };
 }
 
+/** Hashrate ET difficulté 1 an (mêmes deux tableaux d'une seule réponse). */
+export interface HashrateDifficulte {
+  hashrate: SerieMetrique;
+  difficulte: SerieMetrique;
+}
+
+/**
+ * Parse la réponse /mining/hashrate/1y en DEUX séries : le hashrate (réutilise
+ * `parseHashrate`, inchangé — CHAIN en dépend) et la difficulté. Le tableau
+ * `difficulty` a la forme réelle `{ time(s), height, difficulty, adjustment }` (une
+ * entrée par retarget, ~26/an) ; on tolère `timestamp` en repli sur `time`. PURE.
+ */
+export function parseHashrateDifficulte(json: unknown): HashrateDifficulte {
+  const points: PointMetrique[] = [];
+  const arr = (json as { difficulty?: unknown })?.difficulty;
+  if (Array.isArray(arr)) {
+    for (const brut of arr) {
+      const row = brut as { time?: unknown; timestamp?: unknown; difficulty?: unknown };
+      const time = nombre(row.time ?? row.timestamp) * 1000;
+      const value = nombre(row.difficulty);
+      if (!Number.isFinite(time) || !Number.isFinite(value)) continue;
+      points.push({ time, value });
+    }
+  }
+  points.sort((a, b) => a.time - b.time);
+  const difficulte: SerieMetrique = {
+    points,
+    dernier: points.length > 0 ? points[points.length - 1] : undefined,
+  };
+  return { hashrate: parseHashrate(json), difficulte };
+}
+
+/** Ajustement de difficulté courant (/difficulty-adjustment). */
+export interface AjustementDifficulte {
+  /** Avancée dans la période de retarget (0..100 %). */
+  progressPercent: number;
+  /** Variation estimée de la difficulté au prochain retarget (%, signé). */
+  difficultyChange: number;
+  /** Date estimée du prochain retarget (ms epoch). */
+  estimatedRetargetDate: number;
+  /** Blocs restants avant le retarget. */
+  remainingBlocks: number;
+  /** Variation du retarget PRÉCÉDENT (%, signé). */
+  previousRetarget: number;
+}
+
+/** Parse la réponse /difficulty-adjustment. Champs absents → NaN (rendu « — »). PURE. */
+export function parseAjustementDifficulte(json: unknown): AjustementDifficulte {
+  const o = (json ?? {}) as Record<string, unknown>;
+  return {
+    progressPercent: nombre(o["progressPercent"]),
+    difficultyChange: nombre(o["difficultyChange"]),
+    estimatedRetargetDate: nombre(o["estimatedRetargetDate"]),
+    remainingBlocks: nombre(o["remainingBlocks"]),
+    previousRetarget: nombre(o["previousRetarget"]),
+  };
+}
+
 /**
  * Récupère l'état réseau (frais + hauteur + halving), cache 5 min, dégradation gracieuse.
  */
@@ -160,6 +223,51 @@ export async function fetchHashrate(
     const serie = parseHashrate((await res.json()) as unknown);
     await ecrireCache(cle, serie);
     return { donnee: serie, ts: Date.now(), perime: false };
+  } catch {
+    if (cache !== null) return { donnee: cache.donnee, ts: cache.ts, perime: true };
+    return null;
+  }
+}
+
+/**
+ * Récupère hashrate ET difficulté 1 an d'une seule réponse (cache 6 h, clé DÉDIÉE pour
+ * ne pas interférer avec le cache `mp:hashrate` de CHAIN). Dégradation gracieuse.
+ */
+export async function fetchHashrateDifficulte(
+  signal?: AbortSignal,
+): Promise<ResultatFrais<HashrateDifficulte> | null> {
+  const cle = "mp:hashrate-diff";
+  const cache = await lireCache<HashrateDifficulte>(cle);
+  if (estFrais(cache, MP_TTL_HASHRATE_MS) && cache !== null) {
+    return { donnee: cache.donnee, ts: cache.ts, perime: false };
+  }
+  try {
+    const res = await fetch(`${BASE}/v1/mining/hashrate/1y`, { signal });
+    if (!res.ok) throw new Error(`mempool hashrate/diff ${res.status}`);
+    const donnee = parseHashrateDifficulte((await res.json()) as unknown);
+    await ecrireCache(cle, donnee);
+    return { donnee, ts: Date.now(), perime: false };
+  } catch {
+    if (cache !== null) return { donnee: cache.donnee, ts: cache.ts, perime: true };
+    return null;
+  }
+}
+
+/** Récupère l'ajustement de difficulté courant (cache 5 min, dégradation gracieuse). */
+export async function fetchAjustementDifficulte(
+  signal?: AbortSignal,
+): Promise<ResultatFrais<AjustementDifficulte> | null> {
+  const cle = "mp:diff-adjust";
+  const cache = await lireCache<AjustementDifficulte>(cle);
+  if (estFrais(cache, MP_TTL_AJUSTEMENT_MS) && cache !== null) {
+    return { donnee: cache.donnee, ts: cache.ts, perime: false };
+  }
+  try {
+    const res = await fetch(`${BASE}/v1/difficulty-adjustment`, { signal });
+    if (!res.ok) throw new Error(`mempool difficulty-adjustment ${res.status}`);
+    const donnee = parseAjustementDifficulte((await res.json()) as unknown);
+    await ecrireCache(cle, donnee);
+    return { donnee, ts: Date.now(), perime: false };
   } catch {
     if (cache !== null) return { donnee: cache.donnee, ts: cache.ts, perime: true };
     return null;

@@ -3,8 +3,8 @@
  *
  * Liste dense des alertes (état actif, armement, dernière exécution, libellé de la
  * condition), création (symbole prérempli = actif courant ; types prix / var% /
- * indicateur-seuil / funding-extreme / cascade liq), suppression, bascule
- * actif/inactif, et journal repliable des déclenchements.
+ * indicateur-seuil / funding-extreme / cascade liq / score de régime), suppression,
+ * bascule actif/inactif, et journal repliable des déclenchements.
  *
  * Ce composant se re-rend uniquement sur ÉVÉNEMENT (création, bascule, déclenchement) :
  * aucune donnée haute fréquence n'y transite (le runtime écrit le store hors render-loop).
@@ -35,7 +35,11 @@ type TypeAlerte =
   | "indicateur-seuil"
   | "funding-extreme"
   | "cvd-spot-perp-div"
-  | "liq-cascade";
+  | "liq-cascade"
+  | "regime-seuil";
+
+/** Symbole porteur neutre d'une alerte GLOBALE (regime-seuil, indépendante du symbole). */
+const PORTEUR_GLOBAL = { symbol: "BTCUSDT", source: "binance" } as const;
 
 /** Sens funding (overcrowding). */
 type SensFunding = "long-crowded" | "short-crowded" | "les-deux";
@@ -101,6 +105,9 @@ export function AlertsPanel() {
   const [kindCvd, setKindCvd] = useState<KindCvd>("les-deux");
   // liq-cascade : seuil de notionnel liquidé par minute glissante (USD/min).
   const [seuilCascade, setSeuilCascade] = useState("5000000");
+  // regime-seuil : comparateur + valeur (−2..+2), score composite de régime.
+  const [comparateurRegime, setComparateurRegime] = useState<Comparateur>("<=");
+  const [valeurRegime, setValeurRegime] = useState("-1.2");
   const [journalOuvert, setJournalOuvert] = useState(false);
   const [erreurForm, setErreurForm] = useState<string | null>(null);
   // Suppression armée (pattern SettingsPanel.restaurer) : id de l'alerte à confirmer.
@@ -175,14 +182,27 @@ export function AlertsPanel() {
         return;
       }
       condition = { type: "liq-cascade", seuilUsdParMin: s };
+    } else if (type === "regime-seuil") {
+      // regime-seuil : score composite borné −2..+2, condition globale.
+      const v = Number(valeurRegime);
+      if (!Number.isFinite(v) || v < -2 || v > 2) {
+        setErreurForm("Seuil de régime requis (entre −2 et +2).");
+        return;
+      }
+      condition = { type: "regime-seuil", comparateur: comparateurRegime, valeur: v };
     } else {
       // cvd-spot-perp-div — active le pipeline orderflow via le runtime.
       condition = { type: "cvd-spot-perp-div", kind: kindCvd };
     }
     setErreurForm(null);
+    // regime-seuil est GLOBAL : porté par un symbole neutre (BTCUSDT/binance).
+    const cible =
+      type === "regime-seuil"
+        ? PORTEUR_GLOBAL
+        : { symbol: symboleEffectif, source: marketStore.getState().exchange };
     alertsStore.getState().ajouter({
-      symbol: symboleEffectif,
-      source: marketStore.getState().exchange,
+      symbol: cible.symbol,
+      source: cible.source,
       condition,
     });
     // Réinitialise les valeurs numériques (on garde type/sens/fenêtre pour un enchaînement rapide).
@@ -300,6 +320,7 @@ export function AlertsPanel() {
             <option value="funding-extreme">Funding</option>
             <option value="cvd-spot-perp-div">CVD S/P</option>
             <option value="liq-cascade">Cascade liq</option>
+            <option value="regime-seuil">Régime</option>
           </select>
         </div>
 
@@ -472,12 +493,42 @@ export function AlertsPanel() {
           </div>
         )}
 
+        {type === "regime-seuil" && (
+          <div className="space-y-1.5">
+            <div className="flex gap-1.5">
+              <select
+                value={comparateurRegime}
+                onChange={(e) => setComparateurRegime(e.target.value as Comparateur)}
+                className="rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+              >
+                {COMPARATEURS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={valeurRegime}
+                onChange={(e) => setValeurRegime(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && soumettre()}
+                inputMode="decimal"
+                placeholder="Score (−2 à +2)"
+                title="Score de régime composite, borné −2..+2"
+                className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-xs tabular-nums text-text outline-none placeholder:text-text-dim focus:border-text-dim"
+              />
+            </div>
+            <p className="px-0.5 text-[10px] text-text-dim">
+              Alerte globale (score BRIEF −2..+2). App ouverte uniquement.
+            </p>
+          </div>
+        )}
+
         <button
           type="button"
           onClick={soumettre}
           className="w-full rounded border border-border bg-bg px-2 py-1 text-xs text-text-dim transition hover:border-text-dim hover:text-text"
         >
-          Ajouter sur {symboleEffectif}
+          {type === "regime-seuil" ? "Ajouter (régime global)" : `Ajouter sur ${symboleEffectif}`}
         </button>
         {erreurForm !== null && <p className="text-[10px] text-down">{erreurForm}</p>}
       </div>

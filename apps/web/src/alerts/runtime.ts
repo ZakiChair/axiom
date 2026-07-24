@@ -14,6 +14,11 @@
  *  - STORE CVD S/P (`cvdDivergenceStore`) : le contrôleur orderflow publie le kind
  *    de divergence ; on évalue `cvd-spot-perp-div` (app ouverte uniquement — pas de
  *    pipeline orderflow côté daemon).
+ *  - STORE RÉGIME (`regimeStore`) : le score composite −2..+2 (maj ~15 min) est injecté
+ *    dans le contexte ; on évalue `regime-seuil` (GLOBAL, def sur BTCUSDT/binance). Sous
+ *    le seuil de composants disponibles (libellé « indéterminé ») le score est du bruit :
+ *    on n'injecte rien (non évaluable → armement figé). Front-only (le daemon ne calcule
+ *    pas le score en v1).
  *  - POLL LIQ-CASCADE (~5 s) : injecte `liqUsdParMin` (notionnel liquidé sur la dernière
  *    minute glissante, pure `usdParMinute` sur le buffer `liqEventsStore`). Côté FRONT :
  *    évaluée uniquement pour le SYMBOLE COURANT du chart et seulement quand le flux liq
@@ -44,6 +49,7 @@ import { fluxLiqRetenu, liqEventsStore } from "../chart/liquidationMarkers";
 import { usdParMinute } from "../components/liquidationsWindow.util";
 import { alertsStore, pousserDefsDaemon } from "../store/alerts";
 import { cvdDivergenceStore } from "../store/cvd-divergence";
+import { regimeStore } from "../store/regime";
 import { orderflowStore } from "../store/orderflow";
 import { presetAlertsStore, diffEntrants, filtrerCooldown } from "../store/presetAlerts";
 import { subscribeTickers, type TickerUpdate } from "../data/ticker";
@@ -287,6 +293,25 @@ function creerRuntime(): Unsubscribe {
     }
   });
 
+  // ── Store régime : score composite −2..+2 → moteur ────────────────────────
+  // Condition GLOBALE (lot filtré par TYPE seul). « indéterminé » (< 3 composants) :
+  // score = bruit → non injecté (armement figé, pas de faux déclenchement).
+  const evaluerRegime = (): void => {
+    const regime = regimeStore.getState().regime;
+    if (regime === null || regime.libelle === "indéterminé") return; // non évaluable
+    const lot = alertsStore
+      .getState()
+      .defs.filter((d) => d.actif && d.condition.type === "regime-seuil");
+    if (lot.length === 0) return;
+    appliquerResultat(lot, {
+      maintenant: Date.now(),
+      dernierPrix: 0, // inutilisé par la condition (score global, sans symbole)
+      regimeScore: regime.score,
+    });
+  };
+
+  const unsubRegime = regimeStore.subscribe(evaluerRegime);
+
   // ── Alertes de PRESET : scan périodique + diff d'entrée dans l'ensemble ────
   // Chaque alerte active relance `executerScreener` (snapshot de ses filtres) à sa
   // période propre ; les symboles ENTRANTS (absents du scan précédent) hors cooldown
@@ -377,11 +402,13 @@ function creerRuntime(): Unsubscribe {
   for (const sym of Object.keys(cvdDivergenceStore.getState().bySymbol)) {
     evaluerCvdSymbol(sym);
   }
+  evaluerRegime(); // calibrage régime sur le score déjà publié
   const unsubAlerts = alertsStore.subscribe(() => {
     resyncTicker(); // re-route si la liste des symboles change
     resyncFunding();
     resyncLiqCascade();
     assurerPipelineCvd();
+    evaluerRegime(); // calibre une def régime nouvellement ajoutée
   });
   const unsubMarket = marketStore.subscribe(onMarket);
   onMarket(); // calibrage initial des conditions bougie sur le backfill présent
@@ -396,6 +423,7 @@ function creerRuntime(): Unsubscribe {
     unsubMarket();
     unsubTicker();
     unsubCvd();
+    unsubRegime();
     unsubPreset();
     stopHeartbeat();
     if (fundingTimer !== undefined) clearInterval(fundingTimer);

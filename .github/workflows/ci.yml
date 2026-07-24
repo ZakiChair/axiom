@@ -1,6 +1,22 @@
-# CI AXIOM — même gate que `pnpm check` (scripts/ci.sh) : typecheck + tests + build web.
-# Filet de sécurité distant (recommandation revue 2026-07-24) : le gate local reste
-# la référence, cette action empêche juste un push rouge de passer inaperçu.
+# CI AXIOM — filet de sécurité distant. Le gate LOCAL (`pnpm check` / scripts/ci.sh)
+# reste la référence ; cette action rejoue le même périmètre (typecheck + tests + build
+# web) mais DÉCOUPÉ EN ÉTAPES ATTRIBUABLES.
+#
+# Pourquoi le découpage (2026-07-24) — NE PAS re-fusionner en un seul `pnpm check` :
+# les runs des 24/07 (30111015668, 30082872130) ont été ANNULÉS au timeout de 15 min
+# alors que tous les tests passaient. Symptômes : `apps/daemon` n'a jamais rapporté son
+# total ni son « Done » (les 4 autres packages si), puis ~12 min d'inactivité totale,
+# et un process `bun` orphelin au nettoyage. Impossible de reproduire en local
+# (`pnpm --filter @axiom/daemon test` : 238 pass en 228 ms, sortie propre).
+#
+# En une seule commande, un blocage est INDISCERNABLE d'une suite lente et le job meurt
+# 12 min plus loin sans dire où. Pire : « cancelled » n'est pas « failure » — GitHub ne
+# notifie pas, donc le filet de sécurité ne signalait rien. Une étape par runner, avec
+# son propre `timeout-minutes`, fait échouer vite ET nomme le coupable.
+#
+# Effet de bord voulu : le daemon tourne hors du préfixage `pnpm -r`, donc sa sortie
+# n'est plus bufferisée par le wrapper — si sa queue de log manquait à cause du buffer,
+# elle réapparaît ici.
 name: ci
 
 on:
@@ -11,7 +27,7 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 15 # garde-fou global, les étapes doivent échouer bien avant
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4 # version pnpm lue depuis packageManager
@@ -21,6 +37,31 @@ jobs:
           cache: pnpm
       - uses: oven-sh/setup-bun@v2 # tests du daemon (`bun test src`)
         with:
+          # Volontairement NON épinglé pour l'instant : épingler en même temps que ce
+          # découpage masquerait la cause (écart local 1.3.11 / CI 1.3.14). À épingler
+          # seulement si les runs prouvent que la version est en jeu.
           bun-version: latest
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+        timeout-minutes: 5
+
+      - name: typecheck
+        run: pnpm -r typecheck
+        timeout-minutes: 5 # observé ~33 s
+
+      # Étape DISCRIMINANTE du diagnostic en cours : c'est le seul runner qui n'a
+      # jamais rendu son verdict sur CI.
+      - name: tests daemon (bun)
+        run: pnpm --filter @axiom/daemon test
+        timeout-minutes: 3 # observé 228 ms en local
+
+      - name: tests packages (vitest)
+        run: pnpm --filter @axiom/indicators --filter @axiom/alerts --filter @axiom/backtest test
+        timeout-minutes: 6
+
+      - name: tests web (vitest)
+        run: pnpm --filter @axiom/web test
+        timeout-minutes: 8 # observé ~87 s sur runner
+
+      - name: build web
+        run: pnpm --filter @axiom/web build
+        timeout-minutes: 5 # observé ~2,3 s en local

@@ -44,17 +44,15 @@ import {
   type CboeTicker,
 } from "../data/cboe";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
-import { formatUsd, formatDec, formatPct, formatPourcentage, formatEntier } from "../lib/format";
 import { valeurVersPixel, pixelVersValeur, type Domaine } from "../lib/domaineAxe";
 import { useDomaineZoom } from "../hooks/useDomaineZoom";
-import { Metric, EnTeteFenetre, ErreurBloc, NoteSource, Fraicheur, Segmente, InfobulleGraphe } from "./ui";
+import { EnTeteFenetre, Segmente } from "./ui";
 import {
   dessinerSmile,
   dessinerBarres,
   dessinerHeatmapOi,
   dessinerTermIv,
   filtrerAuSeuil,
-  formatStrike,
   joursAvant,
   SMILE_PAD_L,
   SMILE_PAD_R,
@@ -66,6 +64,11 @@ import {
   TERMIV_PAD_R,
   type SurvolHeatmap,
 } from "./omon/dessins";
+// Sous-vues présentationnelles (JSX extrait, découpe v1.9) — toute la logique reste ici.
+import { VueSmile, type SurvolSmile } from "./omon/VueSmile";
+import { VueGexDex } from "./omon/VueGexDex";
+import { VueHeatmap } from "./omon/VueHeatmap";
+import { VueTermIv } from "./omon/VueTermIv";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -119,17 +122,6 @@ function agregerParStrike(points: OptionPoint[]): StrikeOi[] {
 }
 
 // ─────────────────────────── Dessin du smile ───────────────────────────
-
-/**
- * Montant USD EXACT (« $68,432 ») pour les strikes et prix spot des Metric : un
- * strike est un identifiant de contrat, pas un ordre de grandeur — le compactage
- * K/M de formatUsd rendrait indistincts deux strikes voisins (ex. 3 425 vs
- * 3 430). Milliers en-US, sans décimales (grilles de strikes entières).
- */
-function formatUsdExact(v: number | null | undefined): string {
-  if (v === null || v === undefined || !Number.isFinite(v)) return "—";
-  return `$${v.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
-}
 
 /** Strike réel le plus proche de `cible` parmi `points` (calls et puts confondus). */
 function strikePlusProche(points: OptionPoint[], cible: number): number | null {
@@ -269,15 +261,7 @@ export function OptionsWindow() {
   // OptionPoint séparés (pas deux champs d'un même point), d'où jusqu'à 4 lignes. Déclaré
   // avant useDomaineZoom : son setter est référencé par l'onGeste qui vide le survol après
   // un zoom/pan/double-clic (sinon le trait reste figé sur l'ancien point, cf. lot revue finale).
-  const [survolSmile, setSurvolSmile] = useState<{
-    xPix: number;
-    largeur: number;
-    strike: number;
-    ivCall: number | null;
-    ivPut: number | null;
-    oiCall: number | null;
-    oiPut: number | null;
-  } | null>(null);
+  const [survolSmile, setSurvolSmile] = useState<SurvolSmile | null>(null);
   const { refCanvas, domaine } = useDomaineZoom(strikesBornes, () => setSurvolSmile(null));
 
   // Chaîne CBOE : chargée + pollée UNIQUEMENT en vue GEX/DEX « Actions » (dégradation gracieuse
@@ -690,355 +674,73 @@ export function OptionsWindow() {
           </div>
         )}
 
-        {/* ─────────── Vue SMILE (existante) ───────────
-            Bloc TOUJOURS monté (visibilité en CSS, pas en unmount JSX conditionnel) : le canvas
-            porte les listeners natifs de useDomaineZoom (molette/drag/dblclic), qui ne se
-            rattachent qu'au montage (effet clés [actif, domaineMonte]) — un unmount/remount au
-            changement d'onglet Smile↔GEX/DEX les perdrait silencieusement (cf. SeasonalityWindow/
-            VolWindow, même pattern canvas-hidden). */}
-        <div className={vue === "smile" ? undefined : "hidden"}>
-          <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
-            <span>Smile IV mark (calls / puts)</span>
-            <Fraicheur loading={loading} majTs={majTs} />
-          </div>
+        {/* ─────────── Vue SMILE (existante) — bloc TOUJOURS monté (canvas useDomaineZoom), cf. VueSmile ─────────── */}
+        <VueSmile
+          visible={vue === "smile"}
+          loading={loading}
+          majTs={majTs}
+          erreur={erreur}
+          refCanvas={refCanvas}
+          survolSmile={survolSmile}
+          onSurvolSmile={onSurvolSmile}
+          onSortieSmile={() => setSurvolSmile(null)}
+          maxPain={maxPain}
+          underlying={underlying}
+          dvol={dvol}
+          dvolIvRank={dvolIvRank}
+          pcRatio={pcRatio}
+          skew25={skew25}
+          pcVolRatio={pcVolRatio}
+          notionnelOi={notionnelOi}
+        />
 
-          {erreur && (
-            <div className="mb-3">
-              <ErreurBloc>{erreur}</ErreurBloc>
-            </div>
-          )}
-
-          <div className="rounded-md border border-border bg-bg p-2">
-            <div className="relative">
-              <canvas
-                ref={refCanvas}
-                className="h-[200px] w-full"
-                onMouseMove={onSurvolSmile}
-                onMouseLeave={() => setSurvolSmile(null)}
-              />
-              {survolSmile && (
-                <InfobulleGraphe
-                  xPix={survolSmile.xPix}
-                  largeurGraphe={survolSmile.largeur}
-                  titre={`Strike ${formatStrike(survolSmile.strike)}`}
-                  lignes={[
-                    { label: "IV call", valeur: formatPourcentage(survolSmile.ivCall, 1), couleur: "var(--up)" },
-                    { label: "IV put", valeur: formatPourcentage(survolSmile.ivPut, 1), couleur: "var(--down)" },
-                    { label: "OI call", valeur: formatDec(survolSmile.oiCall, 2) },
-                    { label: "OI put", valeur: formatDec(survolSmile.oiPut, 2) },
-                  ]}
-                />
-              )}
-            </div>
-          </div>
-          <div className="mt-1 flex items-center gap-4 text-[10px] text-text-dim">
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-1.5 w-3 rounded bg-up" />
-              calls
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-1.5 w-3 rounded bg-down" />
-              puts
-            </span>
-          </div>
-
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <Metric label="Max pain" value={formatUsdExact(maxPain)} />
-            <Metric label="Sous-jacent" value={formatUsdExact(underlying)} />
-            {/* DVOL + IV Rank appariés dans la même ligne de la grille 2 colonnes (IV Rank
-                « à côté de » DVOL) — Put/Call décalé après pour laisser la paire ensemble. */}
-            <Metric label="DVOL" value={formatPourcentage(dvol, 1)} />
-            <div title="percentile du DVOL sur 90 j">
-              <Metric
-                label="IV Rank (90 j)"
-                value={formatEntier(dvolIvRank)}
-                couleur={
-                  dvolIvRank === null
-                    ? undefined
-                    : dvolIvRank >= 80
-                      ? "var(--down)"
-                      : dvolIvRank <= 20
-                        ? "var(--up)"
-                        : undefined
-                }
-              />
-            </div>
-            <Metric
-              label="Put/Call (OI)"
-              value={formatDec(pcRatio, 2)}
-              couleur={Number.isFinite(pcRatio) ? (pcRatio > 1 ? "var(--down)" : "var(--up)") : undefined}
-            />
-            <Metric
-              label="Skew 25Δ (RR)"
-              value={formatPct(skew25?.rr25 ?? null, 1)}
-              couleur={
-                skew25 && skew25.rr25 !== 0
-                  ? skew25.rr25 > 0
-                    ? "var(--up)"
-                    : "var(--down)"
-                  : undefined
-              }
-            />
-            <Metric
-              label="P/C (Vol) (toutes éch.)"
-              value={formatDec(pcVolRatio, 2)}
-              couleur={
-                Number.isFinite(pcVolRatio) ? (pcVolRatio > 1 ? "var(--down)" : "var(--up)") : undefined
-              }
-            />
-            <Metric label="Notionnel OI (toutes éch.)" value={formatUsd(notionnelOi)} />
-          </div>
-
-          <div className="mt-3">
-            <NoteSource>
-              Max pain calculé côté client (min. de valeur intrinsèque versée aux détenteurs).
-              Skew 25Δ = IV(call 25Δ) − IV(put 25Δ), deltas Black-Scholes côté client
-              (négatif = puts chers). Données Deribit, ~1 min.
-            </NoteSource>
-          </div>
-        </div>
-
-        {/* ─────────── Vue GEX/DEX ─────────── */}
+        {/* ─────────── Vue GEX/DEX (montée conditionnellement) ─────────── */}
         {vue === "gexdex" && (
-          <>
-            <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
-              <span>{metrique === "gex" ? "Gamma exposure" : "Delta exposure"} par strike</span>
-              <Fraicheur loading={classe === "crypto" ? loading : cboeLoading} majTs={majTs} />
-            </div>
-
-            {classe === "actions" && (
-              <div className="mb-3 rounded-md border border-border bg-bg px-3 py-1.5 text-[10px] text-text-dim">
-                CBOE — données différées (~15 min), endpoint non contractuel.
-              </div>
-            )}
-
-            {(classe === "crypto" ? erreur : cboeErreur) && (
-              <div className="mb-3">
-                <ErreurBloc>{classe === "crypto" ? erreur : cboeErreur}</ErreurBloc>
-              </div>
-            )}
-
-            <div className="rounded-md border border-border bg-bg p-2">
-              <canvas ref={barCanvasRef} className="h-[200px] w-full" />
-            </div>
-            <div className="mt-1 flex items-center gap-4 text-[10px] text-text-dim">
-              <span className="flex items-center gap-1">
-                <span className="inline-block h-1.5 w-3 rounded bg-up" />
-                exposition positive
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="inline-block h-1.5 w-3 rounded bg-down" />
-                exposition négative
-              </span>
-            </div>
-
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <Metric
-                label={classe === "crypto" ? "GEX net (toutes éch.)" : "GEX net"}
-                value={formatUsd(gexNet)}
-                couleur={gexNet !== 0 ? (gexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
-              />
-              <Metric
-                label={classe === "crypto" ? "DEX net (toutes éch.)" : "DEX net"}
-                value={formatUsd(dexNet)}
-                couleur={dexNet !== 0 ? (dexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
-              />
-              <Metric label="Spot" value={formatUsdExact(gexDexSpot)} />
-              <Metric label="Gamma flip" value={formatUsdExact(flip)} />
-              <Metric
-                label="Strike |GEX| max"
-                value={formatUsdExact(strikePicGex)}
-              />
-            </div>
-
-            <div className="mt-3">
-              <NoteSource>
-                {classe === "crypto"
-                  ? "GEX/DEX calculés côté client (Black-Scholes sur IV mark Deribit, OI en unités de base, multiplicateur 1). Une seule échéance."
-                  : "Greeks pré-calculés CBOE (multiplicateur 100). GEX = Σ(Γc·OIc − Γp·OIp)·S²·0,01·mult ; DEX = Σ(Δ·OI)·S·mult."}
-              </NoteSource>
-            </div>
-          </>
+          <VueGexDex
+            metrique={metrique}
+            classe={classe}
+            loading={loading}
+            cboeLoading={cboeLoading}
+            majTs={majTs}
+            erreur={erreur}
+            cboeErreur={cboeErreur}
+            barCanvasRef={barCanvasRef}
+            gexNet={gexNet}
+            dexNet={dexNet}
+            gexDexSpot={gexDexSpot}
+            flip={flip}
+            strikePicGex={strikePicGex}
+          />
         )}
 
-        {/* ─────────── Vue HEATMAP OI (strike × échéance) ───────────
-            Bloc TOUJOURS monté, masqué en CSS quand la vue n'est pas active — convention de
-            montage des canvases d'OMON (cf. bloc smile). */}
-        <div className={vue === "heatmap" ? undefined : "hidden"}>
-          <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
-            <span>
-              {heatmapMetrique === "oi"
-                ? "Open interest"
-                : heatmapMetrique === "gex"
-                  ? "|GEX| (murs de gamma)"
-                  : "Volume 24h"}{" "}
-              par strike × échéance
-            </span>
-            <Fraicheur loading={loading} majTs={majTs} />
-          </div>
+        {/* ─────────── Vue HEATMAP OI — bloc TOUJOURS monté, cf. VueHeatmap ─────────── */}
+        <VueHeatmap
+          visible={vue === "heatmap"}
+          heatmapMetrique={heatmapMetrique}
+          loading={loading}
+          majTs={majTs}
+          erreur={erreur}
+          heatmapCanvasRef={heatmapCanvasRef}
+          onSurvolHeatmap={onSurvolHeatmap}
+          onSortieHeatmap={() => setSurvolHeatmap(null)}
+          survolHeatmap={survolHeatmap}
+          celluleSurvol={celluleSurvol}
+          grilleOi={grilleOi}
+          primeCellule={primeCellule}
+        />
 
-          {erreur && (
-            <div className="mb-3">
-              <ErreurBloc>{erreur}</ErreurBloc>
-            </div>
-          )}
-
-          <div className="rounded-md border border-border bg-bg p-2">
-            <div className="relative">
-              <canvas
-                ref={heatmapCanvasRef}
-                className="h-[300px] w-full"
-                onMouseMove={onSurvolHeatmap}
-                onMouseLeave={() => setSurvolHeatmap(null)}
-              />
-              {survolHeatmap && celluleSurvol && grilleOi && (
-                <InfobulleGraphe
-                  xPix={
-                    HEATMAP_PAD_L +
-                    ((grilleOi.echeances.indexOf(survolHeatmap.expiryMs) + 0.5) /
-                      Math.max(1, grilleOi.echeances.length)) *
-                      Math.max(
-                        1,
-                        (heatmapCanvasRef.current?.clientWidth ?? 0) - HEATMAP_PAD_L - HEATMAP_PAD_R,
-                      )
-                  }
-                  largeurGraphe={heatmapCanvasRef.current?.clientWidth ?? 0}
-                  titre={`${joursAvant(survolHeatmap.expiryMs)} · Strike ${formatStrike(survolHeatmap.strike)}`}
-                  lignes={[
-                    { label: "OI call", valeur: formatDec(celluleSurvol.callOi, 2), couleur: "var(--up)" },
-                    { label: "OI put", valeur: formatDec(celluleSurvol.putOi, 2), couleur: "var(--down)" },
-                    { label: "OI total", valeur: formatDec(celluleSurvol.oiTotal, 2) },
-                    { label: "Vol 24h", valeur: formatDec(celluleSurvol.volume24h, 2) },
-                    {
-                      label: "V/OI",
-                      valeur: formatDec(
-                        celluleSurvol.oiTotal > 0 ? celluleSurvol.volume24h / celluleSurvol.oiTotal : null,
-                        2,
-                      ),
-                    },
-                    { label: "GEX", valeur: formatUsd(celluleSurvol.gex) },
-                    {
-                      label: "Max pain",
-                      valeur: formatUsdExact(grilleOi.maxPainParEcheance.get(survolHeatmap.expiryMs) ?? null),
-                    },
-                    ...(heatmapMetrique === "volume"
-                      ? [{ label: "Prime OI", valeur: formatUsd(primeCellule) }]
-                      : []),
-                  ]}
-                />
-              )}
-            </div>
-          </div>
-          <div className="mt-1 flex items-center gap-4 text-[10px] text-text-dim">
-            {heatmapMetrique === "gex" ? (
-              <>
-                <span className="flex items-center gap-1">
-                  <span className="inline-block h-1.5 w-3 rounded bg-up" />
-                  GEX positif
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="inline-block h-1.5 w-3 rounded bg-down" />
-                  GEX négatif
-                </span>
-              </>
-            ) : (
-              <span className="flex items-center gap-1">
-                <span className="inline-block h-1.5 w-3 rounded bg-accent" />
-                {heatmapMetrique === "oi" ? "open interest (log)" : "volume 24h (log)"}
-              </span>
-            )}
-            <span className="flex items-center gap-1">
-              <span className="text-accent">◆</span>
-              max pain
-            </span>
-          </div>
-
-          <div className="mt-3">
-            <NoteSource>
-              Carte des positions options (toutes échéances). Couleur = open interest, |GEX|
-              (murs de gamma, teinte up/down selon le signe) OU volume 24h, échelle log. ◆ = max
-              pain par échéance, pointillé = spot. Données Deribit, ~1 min.
-            </NoteSource>
-          </div>
-        </div>
-
-        {/* ─────────── Vue TERM IV (IV ATM + RR25 par échéance) ───────────
-            Bloc TOUJOURS monté, masqué en CSS quand la vue n'est pas active — convention de
-            montage des canvases d'OMON (cf. blocs smile / heatmap). */}
-        <div className={vue === "termiv" ? undefined : "hidden"}>
-          <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
-            <span>IV ATM &amp; RR25 par échéance</span>
-            <Fraicheur loading={loading} majTs={majTs} />
-          </div>
-
-          {erreur && (
-            <div className="mb-3">
-              <ErreurBloc>{erreur}</ErreurBloc>
-            </div>
-          )}
-
-          <div className="rounded-md border border-border bg-bg p-2">
-            <div className="relative">
-              <canvas
-                ref={termIvCanvasRef}
-                className="h-[220px] w-full"
-                onMouseMove={onSurvolTermIv}
-                onMouseLeave={() => setSurvolTermIv(null)}
-              />
-              {survolTermIv !== null && termIvPoints[survolTermIv] && (
-                <InfobulleGraphe
-                  xPix={
-                    TERMIV_PAD_L +
-                    ((survolTermIv + 0.5) / Math.max(1, termIvPoints.length)) *
-                      Math.max(1, (termIvCanvasRef.current?.clientWidth ?? 0) - TERMIV_PAD_L - TERMIV_PAD_R)
-                  }
-                  largeurGraphe={termIvCanvasRef.current?.clientWidth ?? 0}
-                  titre={joursAvant(termIvPoints[survolTermIv]!.expiryMs)}
-                  lignes={[
-                    {
-                      label: "IV ATM",
-                      valeur: formatPourcentage(termIvPoints[survolTermIv]!.ivAtm, 1),
-                      couleur: "var(--accent)",
-                    },
-                    {
-                      label: "RR25",
-                      valeur: formatPct(termIvPoints[survolTermIv]!.rr25, 1),
-                      couleur:
-                        termIvPoints[survolTermIv]!.rr25 !== null
-                          ? termIvPoints[survolTermIv]!.rr25! >= 0
-                            ? "var(--up)"
-                            : "var(--down)"
-                          : undefined,
-                    },
-                    { label: "Nb strikes", valeur: formatEntier(termIvPoints[survolTermIv]!.nbStrikes) },
-                  ]}
-                />
-              )}
-            </div>
-          </div>
-          <div className="mt-1 flex items-center gap-4 text-[10px] text-text-dim">
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-1.5 w-3 rounded bg-accent" />
-              IV ATM
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-1.5 w-3 rounded bg-up" />
-              RR25 ≥ 0
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="inline-block h-1.5 w-3 rounded bg-down" />
-              RR25 &lt; 0
-            </span>
-          </div>
-
-          <div className="mt-3">
-            <NoteSource>
-              Term structure de la volatilité : IV ATM (strike le plus proche du spot, moyenne
-              call/put) et RR25 (skew 25Δ) par échéance. Pointillé = DVOL (indice de vol). Pente
-              montante = contango, descendante = backwardation. Données Deribit, ~1 min.
-            </NoteSource>
-          </div>
-        </div>
+        {/* ─────────── Vue TERM IV — bloc TOUJOURS monté, cf. VueTermIv ─────────── */}
+        <VueTermIv
+          visible={vue === "termiv"}
+          loading={loading}
+          majTs={majTs}
+          erreur={erreur}
+          termIvCanvasRef={termIvCanvasRef}
+          onSurvolTermIv={onSurvolTermIv}
+          onSortieTermIv={() => setSurvolTermIv(null)}
+          survolTermIv={survolTermIv}
+          termIvPoints={termIvPoints}
+        />
       </div>
     </>
   );

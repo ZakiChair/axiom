@@ -12,6 +12,8 @@ import {
   brutesDepuisPortefeuille,
   facteurDe,
   mergePresetEnRecord,
+  signatureBrutes,
+  type PositionBrute,
   type PositionScen,
   type SerieCloture,
 } from "./scen";
@@ -167,5 +169,27 @@ describe("brutesDepuisPaper", () => {
       { symbole: "ETHUSDT", source: "binance", direction: "long", taille: 1, prixEntree: 3_000 },
       { symbole: "BTCUSDT", source: "binance", direction: "short", taille: 0.2, prixEntree: 62_000 },
     ]);
+  });
+});
+
+describe("signatureBrutes (abonnement stable, insensible aux ticks paper)", () => {
+  const brutes: PositionBrute[] = [
+    { symbole: "BTCUSDT", source: "binance", direction: "long", taille: 0.5, prixEntree: 60_000 },
+    { symbole: "ETHUSDT", source: "binance", direction: "short", taille: 2, prixEntree: 3_000 },
+  ];
+
+  it("mêmes valeurs mais références DISTINCTES → signature identique", () => {
+    const copie = brutes.map((b) => ({ ...b }));
+    expect(copie).not.toBe(brutes);
+    expect(signatureBrutes(copie)).toBe(signatureBrutes(brutes));
+  });
+
+  it("insensible à l'ordre des positions (tri interne)", () => {
+    expect(signatureBrutes([...brutes].reverse())).toBe(signatureBrutes(brutes));
+  });
+
+  it("une seule valeur modifiée → signature différente", () => {
+    const modif: PositionBrute[] = [{ ...brutes[0]!, taille: 0.6 }, brutes[1]!];
+    expect(signatureBrutes(modif)).not.toBe(signatureBrutes(brutes));
   });
 });

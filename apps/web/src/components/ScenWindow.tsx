@@ -25,6 +25,7 @@ import {
   brutesDepuisPortefeuille,
   collecterScen,
   mergePresetEnRecord,
+  signatureBrutes,
   viderCacheFacteurs,
   type CollecteScen,
   type FacteurId,
@@ -81,11 +82,17 @@ function bornerChoc(v: number): number {
 
 export function ScenWindow() {
   const open = useStore(scenUiStore, (s) => s.open);
-  // Sélecteurs ÉTROITS sur `positions` seulement : le paperStore réécrit `derniersPrix` à
-  // CHAQUE tick — s'abonner à tout son état re-rendrait la fenêtre en continu. `positions`
-  // garde une référence stable hors mutation (contrat de perf des stores) → `brutes` stable.
-  const positionsPortefeuille = useStore(portfolioStore, (s) => s.positions);
-  const positionsPaper = useStore(paperStore, (s) => s.positions);
+  // Abonnement par SIGNATURE structurelle (string), PAS par référence de tableau : le store
+  // paper reconstruit son tableau `positions` à CHAQUE tick d'un symbole ayant une position
+  // ouverte (data/paper.ts `evaluerTickDetaille` rebâtit `positionsRestantes`, même sur un tick
+  // SANS exécution) — un abonnement direct à `s.positions` re-rendrait la fenêtre par tick et
+  // relancerait la collecte en boucle. La signature est stable PAR VALEUR (Object.is sur strings)
+  // : re-render UNIQUEMENT quand une position change réellement. Le portefeuille ne « ticke » pas
+  // aujourd'hui, mais suit la même voie par SYMÉTRIE (robuste si une valorisation live y était
+  // branchée plus tard).
+  const sigPortefeuille = useStore(portfolioStore, (s) => signatureBrutes(brutesDepuisPortefeuille(s.positions)));
+  const sigPaper = useStore(paperStore, (s) => signatureBrutes(brutesDepuisPaper(s.positions)));
+  const signature = `${sigPortefeuille}#${sigPaper}`;
 
   const [chocs, setChocs] = useState<Record<FacteurId, number>>(CHOCS_ZERO);
   const [nonce, setNonce] = useState(0); // bump = re-collecte forcée (« Recalculer β »)
@@ -94,11 +101,14 @@ export function ScenWindow() {
   const [erreur, setErreur] = useState<string | null>(null);
   const [majTs, setMajTs] = useState<number | null>(null);
 
-  // Entrées brutes = portefeuille (positions ouvertes) + paper. Référence stable tant que les
-  // positions ne changent pas (sélecteurs étroits) → dépendance d'effet sûre.
+  // Entrées brutes reconstruites via getState(), memoïsées sur la SIGNATURE : référence stable
+  // tant que les valeurs des positions ne changent pas, insensible au churn de références des ticks.
   const brutes = useMemo(
-    () => [...brutesDepuisPortefeuille(positionsPortefeuille), ...brutesDepuisPaper(positionsPaper)],
-    [positionsPortefeuille, positionsPaper],
+    () => [
+      ...brutesDepuisPortefeuille(portfolioStore.getState().positions),
+      ...brutesDepuisPaper(paperStore.getState().positions),
+    ],
+    [signature],
   );
   const vide = brutes.length === 0;
 
@@ -131,7 +141,7 @@ export function ScenWindow() {
     return () => {
       ignore = true;
     };
-  }, [open, brutes, nonce]);
+  }, [open, signature, nonce]);
 
   // Application du scénario : PURE & synchrone (aucun fetch) — se rejoue à chaque changement
   // de choc comme de collecte.

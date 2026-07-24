@@ -222,6 +222,22 @@ export function brutesDepuisPaper(positions: readonly PositionPaper[]): Position
   }));
 }
 
+/**
+ * Signature structurelle DÉTERMINISTE d'un lot d'entrées brutes : concatène les cinq champs de
+ * chaque position puis TRIE — deux tableaux aux mêmes valeurs (mais références distinctes)
+ * produisent la MÊME chaîne, et toute valeur modifiée la change. Sert à s'abonner aux stores
+ * PAR VALEUR (chaîne stable par Object.is) et non par référence : le store paper reconstruit son
+ * tableau `positions` à CHAQUE tick d'un symbole ayant une position ouverte (`evaluerTickDetaille`
+ * rebâtit `positionsRestantes`, même sur un tick SANS exécution) — un abonnement direct à
+ * `s.positions` re-rendrait donc la fenêtre à chaque tick. PURE.
+ */
+export function signatureBrutes(brutes: readonly PositionBrute[]): string {
+  return brutes
+    .map((b) => `${b.symbole}|${b.source}|${b.direction}|${b.taille}|${b.prixEntree}`)
+    .sort()
+    .join(";");
+}
+
 /** Résultat de la collecte : positions enrichies, VaR95 en $ (null si incalculable), exclusions annotées. */
 export interface CollecteScen {
   positions: PositionScen[];

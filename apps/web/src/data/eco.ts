@@ -225,7 +225,7 @@ export function parseFredReleases(donnees: unknown): EcoEvent[] {
  * (heure d'été) / 19:00 UTC (heure d'hiver) — on pose 18:30 UTC en compromis et on
  * marque `timeApprox`. Ces dates COMPLÈTENT ForexFactory au-delà de la semaine courante.
  */
-const FOMC_DATES: readonly string[] = [
+export const FOMC_DATES: readonly string[] = [
   // 2026
   "2026-01-28",
   "2026-03-18",

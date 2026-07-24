@@ -21,7 +21,9 @@ import type { OverlayCreate } from "klinecharts";
 import { getActiveChart } from "./drawing";
 import { marketStore } from "../store/market";
 import { ecoStore } from "../store/eco";
+import { evtsUiStore } from "../store/evts";
 import type { EcoEvent } from "../data/eco";
+import type { TypeEvenement } from "../data/macro/eventDates";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 
 /** Nom de l'overlay custom + groupe (permet un removeOverlay ciblé). */
@@ -39,6 +41,21 @@ interface EcoMarkerExtend {
 /** Tronque un label à `n` caractères (… si coupé). */
 function tronquer(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
+}
+
+/**
+ * Mappe le titre d'un évènement ECO vers le TypeEvenement d'étude (EVTS) correspondant,
+ * ou `null` s'il n'est pas l'un des trois étudiés. Matching INSENSIBLE À LA CASSE sur des
+ * fragments caractéristiques des libellés source (FRED « Consumer Price Index » /
+ * « Employment Situation », ForexFactory « CPI m/m » / « Non-Farm Employment Change »,
+ * décision statique « Décision FOMC (taux directeur) »). Fonction PURE.
+ */
+export function typeEvenementDe(title: string): TypeEvenement | null {
+  const t = title.toLowerCase();
+  if (t.includes("cpi") || t.includes("consumer price")) return "cpi";
+  if (t.includes("non-farm") || t.includes("nfp") || t.includes("employment situation")) return "nfp";
+  if (t.includes("fomc")) return "fomc";
+  return null;
 }
 
 let overlayRegistered = false;
@@ -104,9 +121,17 @@ function redraw(): void {
   if (!markersEnabled) return;
   if (marketStore.getState().candles.length === 0) return; // axe temps pas encore prêt
 
+  const statsParType = evtsUiStore.getState().statsParType;
   for (const ev of marqueurs(events)) {
+    const base = tronquer(`${ev.country} ${ev.title}`, 18);
+    // Suffixe la stat d'étude d'évènements si elle est disponible pour ce type. La base est
+    // tronquée à 18 (comme un label nu) PUIS la stat est ajoutée EN ENTIER : la stat PRIME
+    // sur la fin du titre. Sur un titre FRED verbeux (« Consumer Price Index ») le suffixe
+    // reste ainsi toujours lisible, au lieu d'être rogné par une troncature commune.
+    const type = typeEvenementDe(ev.title);
+    const stat = type ? statsParType[type] : undefined;
     const extend: EcoMarkerExtend = {
-      label: tronquer(`${ev.country} ${ev.title}`, 18),
+      label: stat ? `${base} · ${stat}` : base,
     };
     const overlay: OverlayCreate = {
       name: ECO_MARKER,
@@ -146,6 +171,16 @@ export function demarrerEcoMarkers(): void {
     if (s.events !== prevEvents || s.markersEnabled !== prevMarkers) {
       prevEvents = s.events;
       prevMarkers = s.markersEnabled;
+      redraw();
+    }
+  });
+
+  // Rejeu au changement des stats d'étude d'évènements (suffixe des labels de marqueurs).
+  // `setStatParType` produit une nouvelle référence → comparaison par identité suffit.
+  let prevStats = evtsUiStore.getState().statsParType;
+  evtsUiStore.subscribe((s) => {
+    if (s.statsParType !== prevStats) {
+      prevStats = s.statsParType;
       redraw();
     }
   });

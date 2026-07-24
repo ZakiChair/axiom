@@ -61,3 +61,8 @@ dispersion PAR ÉMETTEUR (IBIT/FBTC/GBTC…) est un signal en soi.
 - EXPY import auto portfolio/backtest (v1.6 : saisie manuelle assumée).
 - CVD spot agrégé multi-exchange (feature lourde, non priorisée).
 - Gate G100 : checklist manuelle G1-G10 — nécessite un œil humain.
+- ETF cumul/encours PAR émetteur (constat §3 du 2026-07-24) : le tableau par
+  émetteur existait déjà (flux du jour) — livré : tri par |flux|. Le cumul/AUM
+  par émetteur est NON VÉRIFIABLE en l'état : `SOSOVALUE_API_KEY` vide dans
+  `apps/web/.env` (currentEtfDataMetrics → 400101), docs SoSoValue injoignables.
+  Déblocage unique : déposer une clé valide, puis prouver les champs en réel.

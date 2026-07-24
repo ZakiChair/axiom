@@ -158,6 +158,21 @@ describe("detecterDivergences", () => {
     ]);
   });
 
+  it("borne ±3 pinnée (off-by-one) : osc à EXACTEMENT 3 apparié, à 4 rejeté", () => {
+    // Même forme de haussière régulière (creux prix idx10/idx28, LL) dans les deux cas ;
+    // SEUL le décalage prix↔osc change → c'est bien la borne ECART_APPARIEMENT (=3) qui
+    // tranche, pas la forme. Verrouille `dist <= 3` contre un `< 3` ou une constante à 2/4.
+    const prix = rampe(N, [[0, 70], [10, 50], [19, 62], [28, 44], [39, 58]]);
+    // Osc creux idx13/idx31 = pile +3 barres des creux prix → dist 3, 3 <= 3 → apparié.
+    const oscA3 = rampe(N, [[0, 45], [13, 30], [22, 42], [31, 34], [39, 40]]);
+    expect(detecterDivergences(prix, oscA3, OPTS)).toEqual<Divergence[]>([
+      { idxFrom: 10, idxTo: 28, type: "haussiere" },
+    ]);
+    // Osc creux idx14/idx32 = +4 barres → dist 4, 4 <= 3 faux → aucun appariement ⇒ [].
+    const oscA4 = rampe(N, [[0, 45], [14, 30], [23, 42], [32, 34], [39, 40]]);
+    expect(detecterDivergences(prix, oscA4, OPTS)).toEqual<Divergence[]>([]);
+  });
+
   it("osc pivot hors fenêtre ±3 (décalé de 5 barres) : non apparié ⇒ []", () => {
     // Prix : creux idx10/idx28 (LL) — forme de haussière régulière valide.
     const prix = rampe(N, [[0, 70], [10, 50], [19, 62], [28, 44], [39, 58]]);

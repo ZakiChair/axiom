@@ -62,4 +62,8 @@ describe("typeEvenementDe — hors périmètre", () => {
     expect(typeEvenementDe("Federal Funds Rate")).toBeNull();
     expect(typeEvenementDe("")).toBeNull();
   });
+
+  it("écarte « FOMC Meeting Minutes » : les Minutes ne sont pas une décision", () => {
+    expect(typeEvenementDe("FOMC Meeting Minutes")).toBeNull();
+  });
 });

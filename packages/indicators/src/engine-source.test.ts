@@ -77,6 +77,18 @@ const PARAM_OVERRIDES: Record<string, Record<string, number>> = {
   priceZScore: { length: 30 },
 };
 
+/**
+ * Defs à input `source` dont TOUTES les sorties sont des POINTS portant le PRIX au
+ * pivot (high/low) : `rsiDivergence` en est le cas. Pour eux la source pilote la
+ * DÉTECTION (l'index où un point apparaît), pas la VALEUR (toujours le prix à cet
+ * index). La comparaison de valeurs de ce test ne peut donc JAMAIS les départager
+ * — mêmes prix aux indices coïncidents, détections disjointes non comptées — d'où
+ * un faux positif « source ignorée ». Leur consommation réelle de `ctx.source` est
+ * prouvée par un test dédié co-localisé (rsiDivergence.test.ts : une source à RSI
+ * plat éteint toute détection). On les retire donc du .each de comparaison de valeurs.
+ */
+const POINT_VALUE_INVARIANTS = new Set<string>(["rsiDivergence"]);
+
 /** Un def déclare-t-il au moins un input de type "source" ? */
 function declaresSource(def: IndicatorDef): boolean {
   return def.inputs.some((input) => input.type === "source");
@@ -84,6 +96,11 @@ function declaresSource(def: IndicatorDef): boolean {
 
 /** Filtre DYNAMIQUE : tous les defs à input source du registre. */
 const sourceDefs: IndicatorDef[] = INDICATORS.filter(declaresSource);
+
+/** Defs à source dont la valeur de sortie DÉPEND de la source (comparables ici). */
+const sourceValueDefs: IndicatorDef[] = sourceDefs.filter(
+  (def) => !POINT_VALUE_INVARIANTS.has(def.id)
+);
 
 /**
  * Cherche un point défini où les deux séries divergent.
@@ -135,7 +152,23 @@ describe("conformité de l'input source", () => {
     }
   });
 
-  it.each(sourceDefs.map((def) => [def.id, def] as const))(
+  it("l'ensemble points-invariants par source reste minimal et valide", () => {
+    // Garde-fou symétrique de AUX_DEPENDENT : un futur def source réellement cassé
+    // (déclare source mais lit closeOf) ne doit pas pouvoir se cacher en atterrissant
+    // silencieusement ici. On fige la liste ET on exige que chaque exclu déclare bien
+    // une source (sinon il n'aurait rien à faire dans ce test).
+    expect([...POINT_VALUE_INVARIANTS].sort()).toEqual(["rsiDivergence"]);
+    for (const id of POINT_VALUE_INVARIANTS) {
+      const def = INDICATORS.find((d) => d.id === id);
+      expect(def, `def exclu "${id}" introuvable dans le registre`).toBeDefined();
+      expect(
+        def !== undefined && declaresSource(def),
+        `def exclu "${id}" ne déclare pas de source`
+      ).toBe(true);
+    }
+  });
+
+  it.each(sourceValueDefs.map((def) => [def.id, def] as const))(
     "%s consomme réellement ctx.source (hlc3 ≠ close)",
     (id, def) => {
       const override = PARAM_OVERRIDES[id] ?? {};

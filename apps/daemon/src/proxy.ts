@@ -542,37 +542,64 @@ export async function recupererExtapiSecurise(
   const resoudreHote = options.resoudreHote ?? resoudreHotePublic;
   const tailleMax = Math.max(1, options.tailleMaxCorps ?? EXTAPI_TAILLE_MAX_CORPS);
   const maxRedirections = Math.max(0, options.maxRedirections ?? EXTAPI_MAX_REDIRECTIONS);
-  const signal = AbortSignal.timeout(Math.max(1, options.timeoutMs ?? EXTAPI_TIMEOUT_MS));
+  // Timeout global : AbortController + setTimeout EXPLICITES, et NON AbortSignal.timeout().
+  //
+  // Raison (diagnostic CI du 2026-07-24) : le minuteur d'`AbortSignal.timeout()` est
+  // UNREF'D — il ne maintient pas la boucle d'évènements vivante et peut donc ne JAMAIS
+  // se déclencher quand il est le seul travail en attente. C'est exactement le cas d'un
+  // appelant dont le fetch ne se résout que sur `abort` : plus rien ne fait avancer la
+  // boucle, l'abort n'arrive pas, on attend indéfiniment. En CI le job en mourait au
+  // timeout (aucune sortie pendant 3 min sur `proxy.test.ts`) ; en local le même test
+  // passait — dépendre de l'ordonnancement d'un timer unref'd est intrinsèquement fragile.
+  // Un `setTimeout` est ref'd : il se déclenche toujours.
+  //
+  // Bénéfice au passage : ce minuteur est ANNULABLE. L'ancien signal laissait un timer de
+  // 15 s pendant après CHAQUE requête, y compris celles terminées en quelques ms.
+  //
+  // La raison d'abort est un `Error` NU (surtout pas `ErreurPolitiqueExtapi`) : `traiterExtapi`
+  // distingue les deux pour son libellé — un timeout est « amont injoignable », pas un refus
+  // de politique. Le statut reste 502 dans les deux cas.
+  const controleur = new AbortController();
+  const signal = controleur.signal;
+  const delaiMs = Math.max(1, options.timeoutMs ?? EXTAPI_TIMEOUT_MS);
+  const minuteur = setTimeout(
+    () => controleur.abort(new Error(`timeout amont /extapi dépassé (${delaiMs} ms)`)),
+    delaiMs,
+  );
   let courante = new URL(urlInitiale);
 
-  for (let redirections = 0; ; redirections++) {
-    await validerDestinationExtapi(courante, resoudreHote, signal);
-    const hote = sansCrochets(courante.hostname).toLowerCase();
-    const amont = await fetchImpl(courante, {
-      method: "GET",
-      headers: { "user-agent": userAgentPourHote(hote), accept: "*/*" },
-      signal,
-      redirect: "manual",
-    });
-    if ([301, 302, 303, 307, 308].includes(amont.status)) {
-      const location = amont.headers.get("location");
-      await amont.body?.cancel().catch(() => {});
-      if (redirections >= maxRedirections) throw new ErreurPolitiqueExtapi("trop de redirections amont");
-      if (!location) throw new ErreurPolitiqueExtapi("redirection amont sans Location");
-      try {
-        courante = new URL(location, courante);
-      } catch {
-        throw new ErreurPolitiqueExtapi("Location de redirection amont invalide");
+  try {
+    for (let redirections = 0; ; redirections++) {
+      await validerDestinationExtapi(courante, resoudreHote, signal);
+      const hote = sansCrochets(courante.hostname).toLowerCase();
+      const amont = await fetchImpl(courante, {
+        method: "GET",
+        headers: { "user-agent": userAgentPourHote(hote), accept: "*/*" },
+        signal,
+        redirect: "manual",
+      });
+      if ([301, 302, 303, 307, 308].includes(amont.status)) {
+        const location = amont.headers.get("location");
+        await amont.body?.cancel().catch(() => {});
+        if (redirections >= maxRedirections) throw new ErreurPolitiqueExtapi("trop de redirections amont");
+        if (!location) throw new ErreurPolitiqueExtapi("redirection amont sans Location");
+        try {
+          courante = new URL(location, courante);
+        } catch {
+          throw new ErreurPolitiqueExtapi("Location de redirection amont invalide");
+        }
+        continue;
       }
-      continue;
+      const contentType = amont.headers.get("content-type") ?? "application/octet-stream";
+      if (!mimeExtapiAutorise(contentType)) {
+        await amont.body?.cancel().catch(() => {});
+        throw new ErreurPolitiqueExtapi(`type MIME amont refusé : ${contentType.split(";", 1)[0] ?? "inconnu"}`);
+      }
+      const corps = await lireCorpsExtapiBorne(amont, tailleMax);
+      return { corps, contentType, status: amont.status, headers: amont.headers };
     }
-    const contentType = amont.headers.get("content-type") ?? "application/octet-stream";
-    if (!mimeExtapiAutorise(contentType)) {
-      await amont.body?.cancel().catch(() => {});
-      throw new ErreurPolitiqueExtapi(`type MIME amont refusé : ${contentType.split(";", 1)[0] ?? "inconnu"}`);
-    }
-    const corps = await lireCorpsExtapiBorne(amont, tailleMax);
-    return { corps, contentType, status: amont.status, headers: amont.headers };
+  } finally {
+    clearTimeout(minuteur);
   }
 }
 

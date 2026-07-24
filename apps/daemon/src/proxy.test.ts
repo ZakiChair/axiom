@@ -516,6 +516,28 @@ describe("recupererExtapiSecurise", () => {
     ).rejects.toBeDefined();
     expect(appelsFetch).toBe(0);
   });
+
+  test("le timeout global n'est PAS une erreur de politique (libellé « amont injoignable »)", async () => {
+    // `traiterExtapi` choisit son libellé sur `err instanceof ErreurPolitiqueExtapi` :
+    // un timeout doit rester un problème d'accès amont, pas un refus de politique.
+    // Verrouille aussi le choix d'un Error nu comme raison d'abort (cf. proxy.ts).
+    const fetchImpl = async (_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      });
+
+    const erreur = await recupererExtapiSecurise("https://data.sec.gov/x", {
+      fetchImpl,
+      resoudreHote: resoudrePublic,
+      timeoutMs: 5,
+    }).catch((e: unknown) => e);
+
+    expect(erreur).toBeInstanceOf(Error);
+    // `ErreurPolitiqueExtapi` n'est pas exportée (et n'a pas à l'être pour un test) :
+    // on vérifie que la raison est un Error NU, ce qui exclut toute sous-classe.
+    expect((erreur as Error).constructor.name).toBe("Error");
+    expect((erreur as Error).message).toContain("timeout amont");
+  });
 });
 
 describe("traiterExtapi — gardes (hors réseau)", () => {

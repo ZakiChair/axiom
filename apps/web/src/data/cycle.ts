@@ -4,8 +4,10 @@
  * On aligne les cycles passés et le cycle courant sur le JOUR 0 = date du halving, puis
  * on exprime le prix en INDICE relatif (prix / prix au jour du halving). Superposés en
  * échelle log, les 4 cycles deviennent comparables (l'ampleur des mouvements, pas leur
- * niveau absolu). Le cycle courant s'arrête naturellement à la dernière donnée ; les
- * cycles passés sont bornés à la fenêtre 0..1500 jours (un cycle dure ~1460 jours).
+ * niveau absolu). Le cycle courant s'arrête naturellement à la dernière donnée ; chaque
+ * cycle passé est borné au HALVING SUIVANT (les cycles réels durent 1319/1402/1440 j,
+ * moins que la fenêtre max 1500 j : sans cette borne, le début du cycle suivant —
+ * ex. l'ATH pré-halving de mars 2024 — contaminerait le sommet du cycle précédent).
  *
  * ⚠️ Aucun cycle passé ne préjuge du courant — l'histoire n'est qu'un repère, pas un modèle.
  * Fonctions NaN-safe : les entrées non finies sont ignorées (l'UI affiche « — »).
@@ -41,7 +43,8 @@ export interface SerieCycle {
   halvingIndex: number;
   /** Date du halving en ms epoch (UTC). */
   halvingMs: number;
-  /** Points alignés (jour 0 = halving), triés par jour croissant, fenêtre 0..1500 j. */
+  /** Points alignés (jour 0 = halving), triés par jour croissant, bornés au halving
+   *  suivant (cycles passés) et à la fenêtre max 0..1500 j. */
   points: PointCycle[];
 }
 
@@ -64,10 +67,12 @@ export interface StatsCycle {
  *
  * Pour chaque halving : `base` = prix du premier point de jour ≥ 0 (le jour 0 exact s'il
  * existe, sinon le plus proche après le halving) ; `indice = prix / base` (donc 1 au jour
- * de base) ; fenêtre retenue 0..1500 jours. Un halving sans point exploitable (aucune
- * donnée après lui, ou base non finie / ≤ 0) ne produit PAS de série.
+ * de base) ; fenêtre retenue 0..min(1500, veille du halving suivant) — un cycle passé
+ * s'arrête STRICTEMENT avant son successeur, sinon son sommet serait contaminé par le
+ * début du cycle suivant. Un halving sans point exploitable (aucune donnée après lui,
+ * ou base non finie / ≤ 0) ne produit PAS de série.
  *
- * La troncature du cycle courant « à aujourd'hui » découle du filtre 0..1500 sans horloge
+ * La troncature du cycle courant « à aujourd'hui » découle du filtre sans horloge
  * injectée : les données du cycle courant s'arrêtent d'elles-mêmes au dernier point.
  */
 export function decouperCycles(points: readonly PointMetrique[]): SerieCycle[] {
@@ -77,12 +82,18 @@ export function decouperCycles(points: readonly PointMetrique[]): SerieCycle[] {
 
   for (let i = 0; i < HALVINGS.length; i += 1) {
     const halvingMs = HALVINGS[i]!;
-    // Points du cycle : jour post-halving dans la fenêtre 0..1500, prix fini.
+    // Borne haute du cycle : veille du halving suivant s'il existe, sinon fenêtre max.
+    const suivantMs = HALVINGS[i + 1];
+    const finJours =
+      suivantMs !== undefined
+        ? Math.min(FENETRE_JOURS, Math.round((suivantMs - halvingMs) / JOUR_MS) - 1)
+        : FENETRE_JOURS;
+    // Points du cycle : jour post-halving dans la fenêtre 0..finJours, prix fini.
     const bruts: PointCycle[] = [];
     for (const p of tries) {
       if (!Number.isFinite(p.time) || !Number.isFinite(p.value)) continue;
       const jour = Math.round((p.time - halvingMs) / JOUR_MS);
-      if (jour < 0 || jour > FENETRE_JOURS) continue;
+      if (jour < 0 || jour > finJours) continue;
       bruts.push({ jour, indice: p.value }); // `indice` porte le prix brut avant normalisation
     }
     if (bruts.length === 0) continue;

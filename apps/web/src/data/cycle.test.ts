@@ -55,15 +55,24 @@ describe("decouperCycles", () => {
     expect(j100?.indice).toBeCloseTo(61_000 / 60_000, 6);
   });
 
-  it("tronque un cycle passé à la fenêtre 0..1500 jours", () => {
-    // H3 avec 2000 jours de données → série bornée à 1500, dernier point au jour 1500.
+  it("tronque un cycle passé à la veille du halving suivant (H3 : 1440 j → jour max 1439)", () => {
+    // H3 (2020-05-11) → H4 (2024-04-20) = 1440 jours : avec 2000 jours de données, la
+    // série s'arrête au jour 1439 — les points du cycle suivant n'y entrent jamais.
     const pts = serieSynthetique(HALVINGS[2]!, 0, 2000, (j) => 8000 + j);
     const c3 = cycle(decouperCycles(pts), 3);
     expect(c3).toBeDefined();
     const jours = c3!.points.map((p) => p.jour);
-    expect(Math.max(...jours)).toBe(1500);
-    expect(jours.every((j) => j >= 0 && j <= 1500)).toBe(true);
-    expect(c3!.points.some((p) => p.jour === 1500)).toBe(true);
+    expect(Math.max(...jours)).toBe(1439);
+    expect(jours.every((j) => j >= 0 && j <= 1439)).toBe(true);
+  });
+
+  it("ne laisse pas l'ATH pré-halving suivant contaminer le sommet d'un cycle passé", () => {
+    // H3 plat à 8 000 avec un pic à 73 000 au jour 1445 (= mars 2024, cycle suivant) :
+    // le pic est HORS cycle 3 (borné 1439) — son top reste celui des données internes.
+    const pts = serieSynthetique(HALVINGS[2]!, 0, 2000, (j) => (j === 1445 ? 73_000 : 8_000 + j));
+    const c3 = cycle(decouperCycles(pts), 3);
+    expect(c3).toBeDefined();
+    expect(Math.max(...c3!.points.map((p) => p.indice))).toBeCloseTo((8_000 + 1439) / 8_000, 6);
   });
 
   it("laisse le cycle courant se terminer à la dernière donnée (< 1500 j)", () => {

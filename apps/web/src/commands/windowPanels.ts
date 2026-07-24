@@ -377,6 +377,8 @@ export const windowPanelCommands: Commande[] = [
     ],
     apercu: "Ouvre / ferme le coût de production du minage BTC (plancher électrique, all-in, hashprice)",
     action: basculer("mine"),
+  },
+  {
     id: "panneau:cycle",
     mnemonique: "CYCLE",
     libelle: "Cycle 4 ans (halving)",

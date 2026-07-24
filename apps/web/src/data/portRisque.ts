@@ -1,8 +1,13 @@
 /**
- * Calculs PURS de risque du portefeuille (consommés par la section « Risque » de
- * PortfolioWindow, T2). Toutes les fonctions sont sans effet de bord et déterministes.
+ * Risque du portefeuille — deux couches nettement séparées :
+ *  1. CALCULS PURS (haut du fichier) : sans effet de bord, déterministes, verrouillés en test
+ *     (quantile, VaR/CVaR, contributions, bêtas, stress, equity). Aucune I/O.
+ *  2. COLLECTE (bas du fichier, « ── Collecte klines + assemblage poids ── ») : IMPURE —
+ *     fetch REST Binance + cache mémoire. Extraite chirurgicalement de PortfolioWindow (v1.7)
+ *     pour être RÉUTILISÉE par le composant ET le rapport périodique (data/rapport.ts). Les
+ *     fonctions pures ci-dessous restent l'unique cœur de calcul consommé par les deux.
  *
- * Conventions (décidées par le contrôleur, verrouillées en test) :
+ * Conventions des calculs purs (décidées par le contrôleur, verrouillées en test) :
  *  - quantiles : convention « type 7 » (interpolation linéaire, défaut R/numpy) ;
  *  - VaR = −quantile des rendements ⇒ PERTE POSITIVE (le signe est le piège n°1) ;
  *  - CVaR95 = −moyenne des rendements ≤ quantile 5 % ;
@@ -12,6 +17,10 @@
  *    sont calculés sur les MÊMES dates communes (intersection globale). D'où le pipeline
  *    partagé `alignerSurPortefeuille` qui produit r_p et les r_i alignés en une passe.
  */
+
+import type { Candle } from "@axiom/types";
+import { binanceAdapter } from "./binance";
+import { mapPool } from "./screenerRun";
 
 export interface SerieActif {
   symbol: string;
@@ -261,4 +270,119 @@ export function equityHistorique(
       return s + pos.signe * pos.taille * (close - pos.entree);
     }, 0),
   }));
+}
+
+// ── Collecte klines + assemblage poids (IMPURE) ──────────────────────────────
+//
+// Extraite de PortfolioWindow (v1.7) : le composant ET le rapport partagent désormais UNE
+// seule orchestration de collecte. Le composant construit sa carte `prix` depuis les tickers
+// WS live ; le rapport la construit depuis les prix d'entrée (pas de flux temps réel hors
+// fenêtre — cf. data/rapport.ts). Les calculs restent les fonctions pures ci-dessus.
+
+/** Référence de bêta (marché) : chocs de stress exprimés en variation BTC. */
+export const RISQUE_SYMBOLE_REF = "BTCUSDT";
+/** ~91 bougies 1 j ⇒ ~90 rendements log (au-delà du seuil 30 j de risquePortefeuille). */
+const RISQUE_KLINE_LIMIT = 91;
+/** Concurrence du pool de collecte (décision contrôleur). */
+const RISQUE_CONCURRENCY = 4;
+/** TTL du cache mémoire de klines par symbole (1 h). */
+const RISQUE_TTL_MS = 3_600_000;
+
+/** Cache mémoire module des klines 1 j par symbole (partagé entre montages ET rapport). */
+const cacheKlines: Record<string, { ts: number; klines: Candle[] }> = {};
+
+/** Rendements log 1 j depuis des klines (t = openTime de la bougie d'arrivée). PURE. */
+export function klinesVersRendements(klines: readonly Candle[]): { t: number; r: number }[] {
+  const out: { t: number; r: number }[] = [];
+  for (let i = 1; i < klines.length; i++) {
+    const p0 = klines[i - 1]!.close;
+    const p1 = klines[i]!.close;
+    if (p0 > 0 && p1 > 0) out.push({ t: klines[i]!.time, r: Math.log(p1 / p0) });
+  }
+  return out;
+}
+
+/** Clôtures indexées par openTime (pour equityHistorique). PURE. */
+export function klinesVersClotures(klines: readonly Candle[]): { t: number; close: number }[] {
+  return klines.map((k) => ({ t: k.time, close: k.close }));
+}
+
+/**
+ * Collecte les klines 1 j des `symboles` via binanceAdapter (pool concurrence 4). Cache
+ * mémoire TTL 1 h ; `force` court-circuite le TTL (bouton Rafraîchir). Les symboles en
+ * échec (TradFi/non-Binance/erreur REST) sont EXCLUS de la Map résultat (dégradation). IMPURE.
+ */
+async function collecterKlines(
+  symboles: readonly string[],
+  force: boolean,
+): Promise<Map<string, Candle[]>> {
+  const now = Date.now();
+  const out = new Map<string, Candle[]>();
+  await mapPool([...symboles], RISQUE_CONCURRENCY, async (s) => {
+    const c = cacheKlines[s];
+    if (!force && c && now - c.ts < RISQUE_TTL_MS) {
+      out.set(s, c.klines);
+      return;
+    }
+    try {
+      const klines = await binanceAdapter.fetchKlines(s, "1d", { limit: RISQUE_KLINE_LIMIT });
+      if (klines.length > 0) {
+        cacheKlines[s] = { ts: Date.now(), klines };
+        out.set(s, klines);
+      }
+    } catch {
+      // Symbole exclu du calcul de risque (compté « hors calcul » côté rendu).
+    }
+  });
+  return out;
+}
+
+/** Position minimale nécessaire à l'assemblage des poids (Position store & rapport la satisfont). */
+export interface PositionRisque {
+  symbole: string;
+  direction: "long" | "short";
+  taille: number;
+  prixEntree: number;
+}
+
+/** Résultat de la collecte : matières premières partagées composant/rapport. */
+export interface CollecteRisque {
+  /** Klines 1 j par symbole disponible (BTCUSDT réf. inclus si récupéré). */
+  klines: Map<string, Candle[]>;
+  /** true si la série de référence (BTCUSDT) a été récupérée (bêtas exploitables). */
+  refDispo: boolean;
+  /** Poids signés $ (notion) des symboles INCLUS (klines présentes), agrégés par symbole. */
+  poids: PoidsPosition[];
+  /** Σ|poids| des symboles inclus (base des VaR en $). */
+  sommeAbs: number;
+}
+
+/**
+ * Collecte les klines 1 j des positions ouvertes (+ BTCUSDT réf.) et assemble les poids
+ * signés (notion = Σ signe·taille·prix par symbole, valorisés par la carte `prix` fournie,
+ * repli sur le prix d'entrée). Seuls les symboles POURVUS de klines entrent dans `poids` /
+ * `sommeAbs`. `force` court-circuite le cache TTL. IMPURE (réseau). Réutilisée par
+ * PortfolioWindow (prix = tickers WS) ET data/rapport.ts (prix = prix d'entrée).
+ */
+export async function collecterRisquePortefeuille(
+  positions: readonly PositionRisque[],
+  prix: Record<string, number>,
+  force = false,
+): Promise<CollecteRisque> {
+  // Notion signé agrégé par symbole (long +, short −), valorisé à `prix` (repli prixEntree).
+  const parNotion = new Map<string, number>();
+  for (const p of positions) {
+    const signe = p.direction === "long" ? 1 : -1;
+    const px = prix[p.symbole] ?? p.prixEntree;
+    parNotion.set(p.symbole, (parNotion.get(p.symbole) ?? 0) + signe * p.taille * px);
+  }
+
+  const symboles = Array.from(new Set([...parNotion.keys(), RISQUE_SYMBOLE_REF]));
+  const klines = await collecterKlines(symboles, force);
+
+  const inclus = [...parNotion.keys()].filter((s) => klines.has(s));
+  const poids: PoidsPosition[] = inclus.map((s) => ({ symbol: s, poids: parNotion.get(s)! }));
+  const sommeAbs = poids.reduce((a, p) => a + Math.abs(p.poids), 0);
+
+  return { klines, refDispo: klines.has(RISQUE_SYMBOLE_REF), poids, sommeAbs };
 }

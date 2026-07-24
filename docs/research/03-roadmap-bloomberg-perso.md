@@ -84,12 +84,52 @@ Le front garde ses **WS directs** vers les exchanges (le daemon ne proxifie jama
 
 ## Indicateurs — dettes et extensions (package `@axiom/indicators`)
 
-- Rafraîchissement **intra-bougie throttlé** (250 ms-1 s) : à 500 bougies le full-recalc tient ; supprime le RSI « en retard d'une bougie ».
-- Câbler l'input `source` déjà déclaré dans les types (RSI sur hlc3…) — petit changement `engine.ts`.
-- Pivots **sessionnés** + VWAP à reset de session (les 2 simplifications MVP documentées) ; AVWAP ancrée par **timestamp** (stable au backfill) + ancrage par clic.
-- Contrat étendu à des **séries auxiliaires** (OI, funding, stablecoins — déjà branchées dans l'app) pour peupler la catégorie `derivatives` vide ; NVT/MVRV via Coin Metrics pour un embryon d'on-chain.
-- Golden tests vs export TradingView pour ADX/SuperTrend/Ichimoku/PSAR (conventions d'amorce divergentes) ; validation min/max dans `resolveParams`.
-- Tier 1 du doc 02 à dérouler : divergence **CVD spot vs perp** (l'item le plus distinctif), z-score de funding, ATR/vol réalisée en filtre de régime.
+> **Audit 2026-07-24 — les 6 dettes de cette section sont SOLDÉES.** Elles étaient listées
+> comme ouvertes alors que le code et les tests étaient livrés depuis plusieurs lots. Les
+> lignes ci-dessous sont conservées telles quelles avec leur preuve de livraison, plutôt que
+> supprimées, pour que la trace reste lisible. **Ne pas les reprendre comme du travail à faire.**
+
+| Dette d'origine | Statut | Preuve |
+|---|---|---|
+| Rafraîchissement **intra-bougie throttlé** (250 ms–1 s) | **Livré** | `chart/indicators.ts` — `RECOMPUTE_THROTTLE_MS = 500`, throttle leading+trailing ; 4 tests dans `indicators.throttle.test.ts` |
+| Câbler l'input `source` (RSI sur hlc3…) | **Livré** | `engine.ts` — `buildCalcContext(candles, sourceKey)`, `open/high/low/hl2/hlc3` ; `engine-source.test.ts` = test de conformité **dynamique** (tout def déclarant `source` doit réellement consommer `ctx.source`) |
+| Pivots **sessionnés** + VWAP à reset de session ; AVWAP ancrée par **timestamp** + ancrage par clic | **Livré** | `utils-session.ts` (`utcDayOf`, `sessionExtents`) consommé par les **5** variantes de pivot ; `volume/vwap.ts` reset au jour UTC ; `volume/anchored-vwap.ts` sur `anchorTime` (+ compat de l'ancien `anchorIndex` persisté) ; picker de clic `chart/drawing.ts:150` |
+| Séries auxiliaires → catégorie `derivatives` « vide » ; NVT/MVRV | **Livré** | `derivatives/` compte **27 defs**, dont `nvt`, `mvrv`, `mvrvZScore`, `nupl`, `rhodlRatio`, `realizedPrice`, `balancedPrice` ; `ctx.aux` câblé (`utils-aux.ts`, `chart/auxProvider.ts`) |
+| Golden tests ADX/SuperTrend/Ichimoku/PSAR ; validation min/max dans `resolveParams` | **Livré** (oracle reformulé, cf. ci-dessous) | `golden/` — 4 fixtures + `golden.test.ts` (comparaison point à point `toBeCloseTo(v, 6)`) ; clamp `[min, max]` + repli sur défaut si non-fini dans `resolveParams` |
+| Tier 1 doc 02 : divergence **CVD spot vs perp**, z-score de funding, ATR/vol réalisée | **Livré** | `chart/cvdSpotPerp.ts` + `utils-divergence.ts` ; `derivatives/fundingZScore.ts` ; `volatility/` — `atr`, `atrPct`, `atrRegime`, `rv`, `historicalVol`, `parkinsonVol` |
+
+### Les deux points restants — TRANCHÉS le 2026-07-24
+
+1. **Oracle golden pandas-ta et non TradingView → CLASSÉ SANS SUITE.** La dette visait à
+   réconcilier les conventions d'**amorce** divergentes de TradingView ; pandas-ta ne répond pas à
+   cette question-là. Mais `BUILD-CONTRACT.md` désigne explicitement pandas-ta comme oracle
+   autorisé et interdit toute dépendance Python au runtime — la formulation d'origine était hors
+   contrat. Des goldens TradingView exigeraient un export CSV manuel. **Décision de Zaki : la
+   divergence d'amorce ne gêne pas à l'usage.** Ne pas rouvrir sans besoin constaté.
+2. **Composante vol réalisée dans le score de régime → LIVRÉE.** `data/regime.ts` compose
+   désormais **7** composants : `btc24h · fearGreed · funding · dvol · volRealisee · etf ·
+   stables`. La vol réalisée vient de `data/referentiels.ts::histVolRealisee` (bougies 1 j Binance
+   + def `rv` de `@axiom/indicators`, 130 bougies pour ~100 points de référentiel), notée sur les
+   **mêmes paliers que `dvol`** à dessein (deux mesures du même phénomène doivent rester
+   commensurables — un test le verrouille).
+
+   **Conséquence de pondération, assumée et testée** : la volatilité pèse maintenant 2 notes sur 7
+   (~29 % du score contre ~17 % avant) et les deux composantes sont corrélées — en régime de
+   stress elles chargent le score dans le même sens. C'est le comportement voulu (implicite ET
+   réalisée élevées = environnement réellement hostile), mais **toute relecture historique de la
+   pastille REGIME doit en tenir compte**. Un test fige le diviseur à 7 pour qu'un futur ajout de
+   composant force à reconsidérer la pondération.
+
+   *Note* : `lib/volCone.ts::realizedVolSeries` est une seconde implémentation de la vol réalisée,
+   antérieure, avec une convention `null` vs `undefined` documentée comme requise par ce module.
+   Non touchée ici (le nouveau chemin passe par le def canonique du package) — signalée, pas
+   corrigée.
+
+**Leçon de méthode** (généralisable) : cette section a été citée comme « travail restant » dans la
+revue du 2026-07-24 avant vérification. Rien ne relie le code livré à ce catalogue — c'est le même
+défaut que celui identifié en P5 de cette revue (une doctrine sans verrou dérive). Dans ce dépôt,
+**les tests sont plus fiables que les docs** : vérifier une affirmation de doc contre le code avant
+de la citer.
 
 ## Anti-recommandations (garde-fous, à reporter dans BUILD-CONTRACT)
 

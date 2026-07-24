@@ -7,7 +7,14 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
 import { calculerRegime, type Regime } from "../data/regime";
 import { referentiel, type Referentiel, type PointSerie } from "../lib/referentiel";
-import { deltasFenetre, histDvol, histFearGreed, histFunding, histOiUsd } from "../data/referentiels";
+import {
+  deltasFenetre,
+  histDvol,
+  histFearGreed,
+  histFunding,
+  histOiUsd,
+  histVolRealisee,
+} from "../data/referentiels";
 import { fetchEtfBrief, fetchWatchlistOvernight } from "../data/brief";
 import { chargerEmetteurs } from "../data/macro/stablecoinsDetail";
 
@@ -59,11 +66,12 @@ function percentileCourant(serie: PointSerie[] | null, now: number): number | nu
 
 export async function rafraichirRegime(): Promise<void> {
   const now = Date.now();
-  const [tickers, fg, funding, dvol, oi, etf, emetteurs] = await Promise.allSettled([
+  const [tickers, fg, funding, dvol, volReal, oi, etf, emetteurs] = await Promise.allSettled([
     fetchWatchlistOvernight(["BTCUSDT", "ETHUSDT"]),
     histFearGreed(),
     histFunding("BTCUSDT"),
     histDvol("BTC"),
+    histVolRealisee("BTCUSDT"),
     histOiUsd("BTCUSDT"),
     fetchEtfBrief(),
     chargerEmetteurs(),
@@ -76,6 +84,7 @@ export async function rafraichirRegime(): Promise<void> {
   const serieFg = fg.status === "fulfilled" ? fg.value : null;
   const serieFunding = funding.status === "fulfilled" ? funding.value : null;
   const serieDvol = dvol.status === "fulfilled" ? dvol.value : null;
+  const serieVolReal = volReal.status === "fulfilled" ? volReal.value : null;
   const serieOi = oi.status === "fulfilled" ? oi.value : null;
 
   const fearGreedCourant = dernier(serieFg);
@@ -133,6 +142,7 @@ export async function rafraichirRegime(): Promise<void> {
     fearGreed: fearGreedCourant,
     fundingBtcPercentile: percentileCourant(serieFunding, now),
     dvolBtcPercentile: percentileCourant(serieDvol, now),
+    volRealiseeBtcPercentile: percentileCourant(serieVolReal, now),
     fluxEtfJourUsd,
     impressionStablecoins7jPct,
   });

@@ -92,6 +92,18 @@ describe("decrireCondition", () => {
     );
   });
 
+  it("regime-seuil avec comparateur lisible et signe unicode", () => {
+    expect(decrireCondition({ type: "regime-seuil", comparateur: "<=", valeur: -1.2 })).toBe(
+      "régime ≤ −1.2"
+    );
+    expect(decrireCondition({ type: "regime-seuil", comparateur: ">=", valeur: 1 })).toBe(
+      "régime ≥ 1"
+    );
+    expect(decrireCondition({ type: "regime-seuil", comparateur: ">", valeur: 0.5 })).toBe(
+      "régime > 0.5"
+    );
+  });
+
   it("cvd-spot-perp-div selon kind", () => {
     expect(decrireCondition({ type: "cvd-spot-perp-div", kind: "spotUp_perpDown" })).toBe(
       "CVD divergence spot↑ perp↓"

@@ -104,6 +104,18 @@ export interface ConditionLiqCascade {
   seuilUsdParMin: number;
 }
 
+/**
+ * Seuil sur le score de régime de marché (−2..+2, `data/regime.ts`).
+ * Condition GLOBALE (indépendante du symbole ; def portée par BTCUSDT/binance par
+ * convention). Le score est injecté par le runtime FRONT uniquement — le daemon ne
+ * le calcule pas en v1, donc il ignore cette condition (contexte sans `regimeScore`).
+ */
+export interface ConditionRegimeSeuil {
+  type: "regime-seuil";
+  comparateur: Comparateur;
+  valeur: number;
+}
+
 /** Condition d'une alerte (union discriminée sur `type`). */
 export type Condition =
   | ConditionPrixCroise
@@ -112,7 +124,8 @@ export type Condition =
   | ConditionIndicateurCroisement
   | ConditionFundingExtreme
   | ConditionCvdSpotPerpDiv
-  | ConditionLiqCascade;
+  | ConditionLiqCascade
+  | ConditionRegimeSeuil;
 
 /** Définition d'une alerte. */
 export interface AlertDef {
@@ -172,6 +185,12 @@ export interface ContexteAlerte {
    * `liquidations` sur la même fenêtre.
    */
   liqUsdParMin?: number;
+  /**
+   * Score de régime de marché courant (−2..+2, `data/regime.ts`) — requis pour
+   * `regime-seuil`. Injecté par le runtime FRONT uniquement (le daemon ne calcule pas
+   * le score en v1) : absent → condition non évaluable, aucun déclenchement.
+   */
+  regimeScore?: number;
 }
 
 /** Un déclenchement produit par le moteur. */

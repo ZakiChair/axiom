@@ -202,6 +202,7 @@ const WINDOW_COMPONENTS: Record<WindowId, LazyExoticComponent<FenetreComp>> = {
   ),
   data: lazy(() => import("./components/DataWindow").then((m) => ({ default: m.DataWindow }))),
   expy: lazy(() => import("./components/ExpyWindow").then((m) => ({ default: m.ExpyWindow }))),
+  paper: lazy(() => import("./components/PaperWindow").then((m) => ({ default: m.PaperWindow }))),
 };
 
 /** Placeholder discret pendant le chargement du chunk de la fenêtre. */

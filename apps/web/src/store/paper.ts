@@ -40,7 +40,7 @@ import { expyStore } from "./expy";
 /** Clé localStorage. Incluse d'office dans l'export/import de sauvegarde (préfixe axiom:). */
 export const PAPER_STORAGE_KEY = "axiom:paper:v1";
 /** Solde de départ par défaut du compte paper (aucune valeur spécifiée par la spec). */
-export const SOLDE_INITIAL = 10_000;
+export const SOLDE_INITIAL = 100_000;
 
 export interface PaperState extends EtatPaper {
   /** Dernier prix connu par symbole (alimenté par les ticks ; NON persisté). */

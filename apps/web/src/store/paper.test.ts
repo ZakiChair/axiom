@@ -132,7 +132,7 @@ describe("placerOrdre", () => {
     expect(positions).toHaveLength(1);
     expect(positions[0]!.prixEntree).toBe(100);
     expect(positions[0]!.taille).toBe(2);
-    // Frais entrée = 2×100×0.0005 = 0.10 → solde 10000 → 9999.90.
+    // Frais entrée = 2×100×0.0005 = 0.10 → solde 100000 → 99999.90.
     expect(solde).toBeCloseTo(SOLDE_INITIAL - 0.1, 10);
   });
 });

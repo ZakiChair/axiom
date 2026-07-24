@@ -3,6 +3,8 @@ import { parseSyntheticSymbol } from "../data/synthetic";
 
 export const SYNTHETIC_PRESETS: { label: string; symbol: string }[] = [
   { label: "ETH / BTC", symbol: "binance:ETHUSDT|/|binance:BTCUSDT" },
+  { label: "SOL / BTC", symbol: "binance:SOLUSDT|/|binance:BTCUSDT" },
+  { label: "BNB / BTC", symbol: "binance:BNBUSDT|/|binance:BTCUSDT" },
   { label: "BTC / DXY (proxy UUP)", symbol: "binance:BTCUSDT|/|twelvedata:UUP" },
   { label: "BTC / OR (proxy GLD)", symbol: "binance:BTCUSDT|/|twelvedata:GLD" },
 ];

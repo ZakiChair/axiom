@@ -14,6 +14,7 @@ import { useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { marketStore } from "../store/market";
+import { syntheticsStore } from "../store/synthetics";
 import {
   classifyTradfi,
   isMarketOpen,
@@ -22,6 +23,7 @@ import {
   type TickerUpdate,
 } from "../data/ticker";
 import { formatSyntheticLabel, parseSyntheticSymbol } from "../data/synthetic";
+import { estRatioBtc, symboleRatioBtc } from "../data/ratioBtc";
 import { formatCompact, formatCountdown, formatPct, formatPrice } from "../lib/format";
 
 /** Durée (ms) d'une bougie pour les timeframes à pas FIXE. */
@@ -105,6 +107,11 @@ export function SymbolBanner() {
     (syntheticSpec.exA === "twelvedata" && !isMarketOpen(classifyTradfi(syntheticSpec.legA), new Date())) ||
     (syntheticSpec.exB === "twelvedata" && !isMarketOpen(classifyTradfi(syntheticSpec.legB), new Date()))
   );
+
+  // Toggle ÷BTC — trois états : ACTIF (le marché EST un ratio ÷BTC → retour jambe A),
+  // BASCULABLE (basculer vers le ratio SYN X/BTC), sinon bouton absent.
+  const ratioBtcActif = estRatioBtc(symbol, exchange);
+  const cibleRatioBtc = ratioBtcActif === null ? symboleRatioBtc(symbol, exchange) : null;
 
   const priceRef = useRef<HTMLSpanElement>(null);
   const changeRef = useRef<HTMLSpanElement>(null);
@@ -192,6 +199,31 @@ export function SymbolBanner() {
         <span className="text-text-dim">jambe tradfi : dernier close (marché fermé)</span>
       )}
       <span className="text-text-dim">{timeframe}</span>
+      {(ratioBtcActif !== null || cibleRatioBtc !== null) && (
+        <button
+          type="button"
+          title={ratioBtcActif !== null ? `Revenir à ${ratioBtcActif.legA}` : "Ratio vs BTC"}
+          onClick={() => {
+            if (ratioBtcActif !== null) {
+              marketStore.getState().setMarket({
+                exchange: ratioBtcActif.exA,
+                symbol: ratioBtcActif.legA,
+                timeframe,
+              });
+            } else if (cibleRatioBtc !== null) {
+              syntheticsStore.getState().addRecent(cibleRatioBtc);
+              marketStore.getState().setMarket({ exchange: "synthetic", symbol: cibleRatioBtc, timeframe });
+            }
+          }}
+          className={`pointer-events-auto rounded border px-2 py-1 text-xs ${
+            ratioBtcActif !== null
+              ? "border-emerald-500 bg-emerald-500 text-accent-ink"
+              : "border-neutral-700 bg-neutral-900 text-neutral-300 hover:border-neutral-500"
+          }`}
+        >
+          ÷BTC
+        </button>
+      )}
       <span ref={priceRef} className="font-semibold text-text">
         —
       </span>

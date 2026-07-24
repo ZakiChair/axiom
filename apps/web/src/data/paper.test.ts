@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import {
   cloturerPosition,
   evaluerTick,
+  evaluerTickDetaille,
   FRAIS_TAKER,
   pnlLatent,
   tradeJournalDepuisCloture,
@@ -91,6 +92,30 @@ describe("evaluerTick — perf : référence identique si rien d'actif sur le sy
     const e = etat({ ordres: [ordre({ type: "market" })] });
     const r = evaluerTick(e, "BTCUSDT", 100, 2_000);
     expect(r).not.toBe(e);
+  });
+});
+
+describe("evaluerTick — préservation CROSS-SYMBOLE (invariant du moteur multi-symbole)", () => {
+  it("un tick sur A qui EXÉCUTE (chemin nouvel-objet) laisse INTACTS ordres/positions de B", () => {
+    // Symbole A (BTC) : un market qui ouvre → chemin nouvel-objet garanti (r !== e).
+    // Symbole B (ETH) : un ordre limit EN ATTENTE + une position ouverte, tous deux hors du tick A.
+    // Invariant load-bearing : le moteur multi-symbole tique symbole par symbole ; un tick A ne doit
+    // JAMAIS toucher l'état de B (mêmes RÉFÉRENCES d'objets conservées, aucune mutation).
+    const ordreB = ordre({ id: "oB", symbol: "ETHUSDT", type: "limit", prixLimite: 50, direction: "long" });
+    const posB = position({ id: "pB", symbol: "ETHUSDT", direction: "long", prixEntree: 40, tp: 999, sl: 10 });
+    const e = etat({
+      ordres: [ordre({ id: "oA", symbol: "BTCUSDT", type: "market", taille: 1 }), ordreB],
+      positions: [posB],
+    });
+
+    const r = evaluerTick(e, "BTCUSDT", 100, 2_000);
+
+    expect(r).not.toBe(e); // A a exécuté → nouvel objet d'état
+    expect(r.positions.some((p) => p.symbol === "BTCUSDT")).toBe(true); // position A créée
+
+    // B strictement intact : mêmes objets (référence), non mutés, toujours présents.
+    expect(r.ordres.find((o) => o.id === "oB")).toBe(ordreB);
+    expect(r.positions.find((p) => p.id === "pB")).toBe(posB);
   });
 });
 
@@ -361,6 +386,35 @@ describe("evaluerTick — executions bornées aux 50 dernières", () => {
     expect(r.executions).toHaveLength(50);
     expect(r.executions[0]!.ts).toBe(1); // ts=0 (la plus ancienne) évincée
     expect(r.executions[49]!.ts).toBe(9_999); // la nouvelle en dernier
+  });
+});
+
+describe("evaluerTickDetaille — clôtures TP/SL exposées (raccord pont EXPY du moteur T2)", () => {
+  it("clôture TP : expose la position AVANT retrait + l'exécution (état identique à evaluerTick)", () => {
+    const pos = position({ id: "pT", direction: "long", taille: 1, prixEntree: 100, tp: 110, sl: 90, ouvertTs: 1_000 });
+    const e = etat({ positions: [pos] });
+    const { etat: r, clotures } = evaluerTickDetaille(e, "BTCUSDT", 112, 2_000);
+
+    expect(r.positions).toHaveLength(0); // clôturée dans l'état
+    expect(clotures).toHaveLength(1);
+    expect(clotures[0]!.position).toBe(pos); // MÊME objet position, avant retrait (prixEntree/sl/ouvertTs intacts)
+    expect(clotures[0]!.exec.genre).toBe("tp");
+    expect(clotures[0]!.exec.prix).toBe(110);
+    // Cohérence avec le raccourci historique.
+    expect(evaluerTick(e, "BTCUSDT", 112, 2_000)).toEqual(r);
+  });
+
+  it("ouverture/renfort (aucune clôture) → clotures vide", () => {
+    const e = etat({ ordres: [ordre({ type: "market" })] });
+    const { clotures } = evaluerTickDetaille(e, "BTCUSDT", 100, 2_000);
+    expect(clotures).toHaveLength(0);
+  });
+
+  it("rien d'actif sur le symbole → même état, clotures vide", () => {
+    const e = etat({ positions: [position({ symbol: "ETHUSDT" })] });
+    const { etat: r, clotures } = evaluerTickDetaille(e, "BTCUSDT", 100, 2_000);
+    expect(r).toBe(e);
+    expect(clotures).toHaveLength(0);
   });
 });
 

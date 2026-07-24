@@ -139,18 +139,35 @@ function fusionner(
 }
 
 /**
- * Évalue un tick de prix sur `symbol`. PURE : retourne un NOUVEL état (ou le MÊME si rien
- * d'actif sur le symbole). Ordre des 4 étapes :
+ * Clôture produite par un tick : la position AVANT retrait de l'état + l'exécution de sortie.
+ * Le moteur (T2) en a besoin pour bâtir le trade de journal (tradeJournalDepuisCloture) — la
+ * position disparaît de l'état, donc l'exécution seule (sans prixEntree/sl/ouvertTs) ne suffit pas.
+ */
+export interface ClotureTick {
+  position: PositionPaper;
+  exec: ExecutionPaper;
+}
+
+/**
+ * Évalue un tick de prix sur `symbol` et retourne l'état résultant ET les clôtures TP/SL de ce
+ * tick (position + exécution). PURE. `evaluerTick` en est le raccourci qui ne renvoie que l'état
+ * (signature historique, tous les invariants préservés — dont « même référence si rien d'actif »).
+ * Ordre des 4 étapes :
  *   1) stops déclenchés → deviennent market ce tick ;
  *   2) markets remplis à `last` → fusion dans les positions ;
  *   3) limits remplis à la traversée AU prix limite → fusion ;
  *   4) TP/SL des positions du symbole (SL prioritaire) → clôture totale AU niveau + PnL réalisé.
  */
-export function evaluerTick(etat: EtatPaper, symbol: string, last: number, nowMs: number): EtatPaper {
+export function evaluerTickDetaille(
+  etat: EtatPaper,
+  symbol: string,
+  last: number,
+  nowMs: number,
+): { etat: EtatPaper; clotures: ClotureTick[] } {
   const aDesOrdres = etat.ordres.some((o) => o.symbol === symbol);
   const aDesPositions = etat.positions.some((p) => p.symbol === symbol);
-  // Perf : rien à faire sur ce symbole → même référence.
-  if (!aDesOrdres && !aDesPositions) return etat;
+  // Perf : rien à faire sur ce symbole → même référence, aucune clôture.
+  if (!aDesOrdres && !aDesPositions) return { etat, clotures: [] };
 
   let solde = etat.solde;
   const executions: ExecutionPaper[] = [];
@@ -209,6 +226,7 @@ export function evaluerTick(etat: EtatPaper, symbol: string, last: number, nowMs
 
   // Étape 4 : TP/SL des positions du symbole (SL prioritaire), clôture totale AU niveau.
   const positionsRestantes: PositionPaper[] = [];
+  const clotures: ClotureTick[] = [];
   for (const p of positions) {
     if (p.symbol !== symbol) {
       positionsRestantes.push(p);
@@ -228,19 +246,32 @@ export function evaluerTick(etat: EtatPaper, symbol: string, last: number, nowMs
     const fraisSortie = p.taille * prixSortie * FRAIS_TAKER;
     const pnl = brut - fraisSortie;
     solde += pnl;
-    executions.push({
+    const exec: ExecutionPaper = {
       ts: nowMs, symbol, genre, direction: p.direction,
       taille: p.taille, prix: prixSortie, fraisUsd: fraisSortie, pnlUsd: pnl,
-    });
+    };
+    executions.push(exec);
+    clotures.push({ position: p, exec }); // position AVANT retrait → pont EXPY (T2)
     // Clôture totale : la position disparaît.
   }
 
   return {
-    solde,
-    ordres: ordresRestants,
-    positions: positionsRestantes,
-    executions: [...etat.executions, ...executions].slice(-MAX_EXECUTIONS),
+    etat: {
+      solde,
+      ordres: ordresRestants,
+      positions: positionsRestantes,
+      executions: [...etat.executions, ...executions].slice(-MAX_EXECUTIONS),
+    },
+    clotures,
   };
+}
+
+/**
+ * Raccourci historique : évalue un tick et ne renvoie que l'état résultant. Conserve la
+ * signature et tous les invariants (dont « même référence si rien d'actif sur le symbole »).
+ */
+export function evaluerTick(etat: EtatPaper, symbol: string, last: number, nowMs: number): EtatPaper {
+  return evaluerTickDetaille(etat, symbol, last, nowMs).etat;
 }
 
 /**

@@ -61,6 +61,7 @@ import { windowPanelCommands } from "./commands/windowPanels";
 import { enregistrerCommandes, type Commande } from "./commands/registry";
 import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
 import { demarrerAlertes } from "./alerts/runtime";
+import { demarrerMoteurPaper } from "./store/paper";
 import { FloatingWindow } from "./components/FloatingWindow";
 import { Taskbar } from "./components/Taskbar";
 import { SnapOverlay } from "./components/SnapOverlay";
@@ -220,6 +221,13 @@ export function App() {
   // compatible double montage React StrictMode). Arrêté au démontage.
   useEffect(() => {
     const stop = demarrerAlertes();
+    return () => stop();
+  }, []);
+
+  // Moteur paper trading : idem alertes (idempotent, StrictMode-safe). Ne souscrit aux tickers
+  // que s'il y a des ordres/positions actifs ; dort sinon (aucun coût réseau).
+  useEffect(() => {
+    const stop = demarrerMoteurPaper();
     return () => stop();
   }, []);
 

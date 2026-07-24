@@ -22,6 +22,7 @@
 - `packages/indicators/src/momentum/rsi.ts` — réutiliser le calcul RSI (même règle : extraire `rsiOf(source, length)` si nécessaire).
 - `packages/indicators/src/engine.ts` — `computeIndicator` l.113 (lit `resolved.source`), `buildCalcContext` l.24.
 - `apps/web/src/chart/indicators.ts:87-103` — mapping `PlotStyle` → figures (`points`→circle) : le rendu overlay des sorties « points » est automatique.
+- **Art antérieur côté app** : `apps/web/src/data/signaux.ts` (`detecterDivergenceRsi`, pivots stricts k=3) et `data/validationSignaux.ts` (détection incrémentale dédupliquée) — détecteurs du screener SIG. Le package ne peut PAS les importer (pur, sens inverse) : reprendre leurs CONVENTIONS (pivots stricts, déduplication par pivot final) ; la migration de signaux.ts vers les nouveaux helpers du package est un NON-BUT de ce lot (consigné, candidate à un refactor ultérieur).
 
 ---
 

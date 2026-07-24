@@ -6,9 +6,11 @@ AT, event study, stress-test, extension du catalogue d'analyse).
 Invariants BUILD-CONTRACT habituels : renderer-first, indicateurs TS pur +
 golden tests, dégradation gracieuse (jamais de vide muet), FR, `pnpm check`
 vert par branche. Toute NOUVELLE fenêtre : pattern DerivativesWindow (non
-modal, translatée hors écran), mnémonique + CommandPalette + **menu Fonctions
-de la Toolbar (liste en dur — ne pas oublier)**. Zéro source de données
-nouvelle : les 4 chantiers recombinent des flux déjà câblés.
+modal, translatée hors écran), entrée `WINDOW_REGISTRY` + `WINDOW_COMPONENTS`
++ commande `windowPanels.ts` (le menu Fonctions de la Toolbar, la persistance
+et la Taskbar en DÉCOULENT automatiquement — corrigé 2026-07-24, la « liste en
+dur » n'existe plus). Zéro source de données nouvelle : les 4 chantiers
+recombinent des flux déjà câblés.
 
 Ordre de merge suggéré : C1 → C4 → C2 → C3 (indépendants, parallélisables).
 
@@ -42,12 +44,12 @@ de cet événement ? »
 - Rendu : courbes alignées base 100 à H-0 (spaghetti discrètes + médiane
   épaisse + bande p25–p75), stats pré/post (perf médiane, vol réalisée,
   min/max), liste des occurrences (date, actuel vs prévu quand connu).
-- Dates historiques : **listes statiques curées** dans
-  `data/macro/eventDates.ts` (timestamps UTC de publication, 2020→présent),
-  enrichies au fil de l'eau par le cache ECO (append des événements passés
-  correspondants, dédupliqué). Choix assumé vs persistance daemon :
-  déterministe, testable, offline-friendly (cohérent avec le fallback FOMC
-  statique existant).
+- Dates historiques (amendé 2026-07-24 au plan) : **FRED `release/dates`**
+  via le proxy `/fredapi` déjà câblé (release_id 10 = CPI, 50 = NFP) — dates
+  exactes 2020→présent, futures incluses, cache localStorage TTL 24 h.
+  FOMC : liste statique curée (source officielle Fed). L'« enrichissement par
+  cache ECO » initialement prévu est SUPPRIMÉ (YAGNI). Heures de publication
+  reconstruites en UTC avec DST US calculé (8:30 ET CPI/NFP, 14:00 ET FOMC).
 - Klines : adaptateurs existants (REST backfill), cache session comme CORR.
 - Chart maître : le marqueur du PROCHAIN événement (contrôleur `ecoMarkers`
   existant) gagne un title enrichi « médiane ±24 h sur N derniers » quand
@@ -83,37 +85,25 @@ Fenêtre SCEN : impact prospectif de chocs de facteurs sur le portefeuille
 Tests : purs — beta roulant (fixtures), P&L scénario, agrégation avec
 positions exclues. Mnémonique SCEN + palette + menu Toolbar.
 
-## C4. Indicateurs & outils (branche `feat/indicateurs-outils`) — M
+## C4. Indicateurs & outils (branche `feat/indicateurs-divergences`) — S/M
 
-⚠️ Le catalogue est en avance sur la roadmap (`cvdSpotPerp`, `fundingZScore`,
-`anchored-vwap`, catégorie derivatives complète : déjà livrés). Étape 0 du
-chantier : **audit d'inventaire** des dettes § indicateurs de
-`docs/research/03` — ne livrer que ce qui manque réellement.
+**Audit d'inventaire FAIT (recon 2026-07-24) — le repo est très en avance sur
+sa roadmap.** Existent DÉJÀ (ne rien re-livrer) : ancrage AVWAP par clic
+(outil `avwapAnchor`), pivots sessionnés vrais (J-1 UTC, `utils-session`),
+VWAP à reset de session, refresh intra-bougie throttlé 500 ms
+(`recomputeThrottled`), input `source` câblé dans engine.ts, Volume Profile
+(VPVR plage visible + VPFR plage fixe, POC/VAH/VAL), canal de régression
+±kσ (`linreg`), règle de mesure (Shift+glisser : Δ%, barres, durée), outil
+position sizing (`position` + `risqueStore`). 153 indicateurs au registre.
 
-### 4a. Dettes réelles restantes (sous réserve d'audit)
-- Ancrage AVWAP **par clic** sur le chart (l'indicateur ancré par timestamp
-  existe ; il manque l'interaction clic → param).
-- Pivots sessionnés + VWAP à reset de session (les 2 simplifications MVP
-  documentées).
-- Input `source` câblé dans `engine.ts` (RSI sur hlc3…, déjà déclaré dans
-  les types).
-- Refresh intra-bougie throttlé (250 ms–1 s) — supprime le « retard d'une
-  bougie » des oscillateurs.
+Périmètre RÉDUIT à ce qui manque réellement :
+- **Divergences auto prix ↔ oscillateur** (le seul vrai manque) : helpers
+  purs de détection (pivots fractals + appariement, régulières ET cachées)
+  dans `@axiom/indicators`, puis deux defs `rsiDivergence` / `cvdDivergence`
+  rendus en `points` overlay via la machinerie existante (zéro code chart).
+- **Balayage de conformité `source`** : test générique — tout def déclarant
+  l'input `source` doit réellement le consommer (des defs l'ignorent,
+  révélé en recon) ; fixes chirurgicaux des fautifs.
 
-### 4b. Nouvelles familles (package `@axiom/indicators`, golden tests)
-- **Volume Profile** : session + fixed-range, approximation depuis klines
-  (distribution du volume par buckets de prix H-L) — le footprint trades-based
-  existant reste l'outil fin ; POC/VAH/VAL affichés.
-- **Canal de régression linéaire** (`linreg` existe → canal ±kσ).
-- **Divergences auto** : helper pur de détection (pivots prix vs pivots
-  oscillateur, RSI et CVD en v1) → marqueurs chart régulière/cachée.
-
-### 4c. Outils interactifs (chart, patron overlay existant)
-- **Règle de mesure** : overlay 2 points → Δ%, nb de barres, durée ; style
-  discret, supprimable comme les dessins.
-- **Position sizing** : overlay entrée + stop, champ % risque → taille de
-  position calculée sur l'équité PAPER courante, affichée sur le chart
-  (et copiable). Aucun ordre créé — outil de lecture seulement.
-
-Tests : indicateurs = golden tests package ; helpers purs (divergences,
-sizing, mesure) ; interactions chart sans test DOM (patron dessins).
+Tests : fixtures construites à la main (pas d'oracle pandas-ta pour les
+divergences) ; test de conformité paramétré sur tout le registre.

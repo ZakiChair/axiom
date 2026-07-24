@@ -14,8 +14,12 @@
  *
  * Fenêtre-vitrine du standard UI : primitives components/ui.tsx + helpers lib/format.ts,
  * store UI vanilla éphémère + `mirrorOpenState`, aucun helper de formatage local dupliqué.
+ *
+ * Ce fichier est l'ORCHESTRATEUR : il tient l'état de chargement par section, la
+ * garde d'annulation et l'export. Le rendu de chaque section vit dans `brief/*.tsx`
+ * (présentation pure), les types/helpers partagés dans `brief/commun.tsx`.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { createStore } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
@@ -26,7 +30,6 @@ import { notesStore } from "../store/notes";
 import { portfolioStore } from "../store/portfolio";
 import { alertsStore } from "../store/alerts";
 import { regimeStore } from "../store/regime";
-import { tonRegime } from "../data/regime";
 import { lectures } from "../data/lecturesBrief";
 import {
   assemblerSession,
@@ -52,37 +55,30 @@ import {
 import { fetchBreadth, type ResumBreadth } from "../data/breadth";
 import { collecterSqueeze } from "../store/squeeze";
 import type { PointRadar } from "../data/squeeze";
-import { domaineAxesRobuste, scoreSqueeze } from "./squeezeWindow.util";
-import { distVar, type NiveauxVar } from "../data/distVar";
+import { distVar } from "../data/distVar";
 import { lireResumeLegacyCache, type LigneCotCategorie } from "../store/cot";
 import { deltaSemaines } from "../data/cot";
+import { formatHeureMinute } from "../lib/format";
+import { BTN_SECONDAIRE, EnTeteFenetre } from "./ui";
 import {
-  formatAge,
-  formatDateCourte,
-  formatDelai,
-  formatDec,
-  formatEntier,
-  formatFunding,
-  formatHeureMinute,
-  formatPct,
-  formatPourcentage,
-  formatPrice,
-  formatUsd,
-  formatUsdSigne,
-  VALEUR_ABSENTE,
-} from "../lib/format";
-import { navigateTo } from "../lib/navigation";
-import {
-  Badge,
-  BTN_SECONDAIRE,
-  Chargement,
-  EnTeteFenetre,
-  ErreurBloc,
-  Metric,
-  NoteSource,
-  RefBadge,
-  Vide,
-} from "./ui";
+  EN_ATTENTE,
+  type Section,
+  type VarChart,
+  type CotChart,
+} from "./brief/commun";
+import { SectionChapeau } from "./brief/SectionChapeau";
+import { SectionBreadth } from "./brief/SectionBreadth";
+import { SectionSession } from "./brief/SectionSession";
+import { SectionWatchlist } from "./brief/SectionWatchlist";
+import { SectionSqueeze } from "./brief/SectionSqueeze";
+import { SectionFunding } from "./brief/SectionFunding";
+import { SectionDerivs } from "./brief/SectionDerivs";
+import { SectionVar } from "./brief/SectionVar";
+import { SectionEtf } from "./brief/SectionEtf";
+import { SectionCot } from "./brief/SectionCot";
+import { SectionEco } from "./brief/SectionEco";
+import { SectionNews } from "./brief/SectionNews";
+import { SectionDvol } from "./brief/SectionDvol";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -114,82 +110,6 @@ export const commandes: Commande[] = [
     action: () => briefUiStore.getState().toggleBrief(),
   },
 ];
-
-// ─────────────────────────── État de chargement par section ───────────────────────────
-
-type Statut = "idle" | "loading" | "ready" | "error";
-
-/** État d'une section : statut de chargement + données (null tant qu'absentes). */
-interface Section<T> {
-  statut: Statut;
-  data: T | null;
-}
-
-const EN_ATTENTE = { statut: "loading" as Statut, data: null };
-
-// ─────────────────────────── Helpers d'affichage (locaux, purs) ───────────────────────────
-
-/** Couleur sémantique d'une variation (vert/rouge/neutre) — token CSS ou undefined. */
-function couleurVariation(v: number | null): string | undefined {
-  if (v === null || !Number.isFinite(v) || v === 0) return undefined;
-  return v > 0 ? "var(--up)" : "var(--down)";
-}
-
-/** Titre de bloc (petites capitales espacées, ton estompé). */
-function TitreBloc({ children }: { children: ReactNode }) {
-  return (
-    <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-dim">{children}</h3>
-  );
-}
-
-/**
- * Rend le corps d'une section selon son statut : Chargement → ErreurBloc → contenu. Le
- * cas « donnée présente mais vide » est décidé par `rendu` (qui peut renvoyer <Vide/>).
- */
-function corps<T>(section: Section<T>, erreur: string, rendu: (data: T) => ReactNode): ReactNode {
-  if (section.statut === "idle" || section.statut === "loading") return <Chargement />;
-  if (section.statut === "error" || section.data === null) return <ErreurBloc>{erreur}</ErreurBloc>;
-  return rendu(section.data);
-}
-
-/** Teinte d'une jauge breadth par tranche : > 60 % up, < 40 % down, sinon estompé. */
-function teinteBreadth(pct: number): string {
-  if (pct > 60) return "var(--up)";
-  if (pct < 40) return "var(--down)";
-  return "var(--text-dim)";
-}
-
-/** Jauge horizontale « % de l'univers au-dessus de sa MM », teintée par tranche. */
-function JaugeBreadth({ label, pct }: { label: string; pct: number }) {
-  const couleur = teinteBreadth(pct);
-  const largeur = Math.max(0, Math.min(100, pct));
-  return (
-    <div className="space-y-1">
-      <div className="flex items-baseline justify-between text-[11px]">
-        <span className="text-text-dim">{label}</span>
-        <span className="tabular-nums" style={{ color: couleur }}>
-          {formatPourcentage(pct, 0)}
-        </span>
-      </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg">
-        <div className="h-full rounded-full" style={{ width: `${largeur}%`, backgroundColor: couleur }} />
-      </div>
-    </div>
-  );
-}
-
-/** Instantané VaR du chart maître (section VaR) — null si < 300 bougies (section absente). */
-interface VarChart {
-  h20: NiveauxVar;
-  symbol: string;
-  timeframe: string;
-}
-
-/** Instantané COT legacy (section COT) — null si cache absent / aucun Δ hebdo (section absente). */
-interface CotChart {
-  lignes: { ligne: LigneCotCategorie; delta: number }[];
-  dateRapport: number | null;
-}
 
 // ─────────────────────────── Composant principal ───────────────────────────
 
@@ -430,555 +350,51 @@ export function BriefWindow() {
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
         {/* Chapeau interprété (H16) : régime + nuit + funding + vol, puis lecture générée. */}
-        <section className="flex flex-col gap-2">
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-            <Metric
-              label="Régime"
-              value={
-                regime === null || regime.libelle === "indéterminé"
-                  ? "—"
-                  : `${regime.libelle} ${regime.score >= 0 ? "+" : ""}${formatDec(regime.score, 1)}`
-              }
-              couleur={
-                regime === null
-                  ? undefined
-                  : tonRegime(regime.libelle) === "up"
-                    ? "var(--up)"
-                    : tonRegime(regime.libelle) === "down"
-                      ? "var(--down)"
-                      : undefined
-              }
-            />
-            <Metric
-              label="Nuit"
-              value={chapeau?.nuitBtcPct !== null && chapeau !== null ? formatPct(chapeau.nuitBtcPct, 1) : "—"}
-              couleur={
-                chapeau?.nuitBtcPct != null
-                  ? chapeau.nuitBtcPct >= 0
-                    ? "var(--up)"
-                    : "var(--down)"
-                  : undefined
-              }
-              extra={
-                chapeau?.nuitEthPct != null ? (
-                  <span className="text-[10px] tabular-nums text-text-dim">ETH {formatPct(chapeau.nuitEthPct, 1)}</span>
-                ) : undefined
-              }
-            />
-            <Metric
-              label="Funding BTC"
-              value={formatFunding(chapeau?.fundingBtcRate)}
-              labelExtra={<RefBadge referentiel={chapeau?.fundingRef ?? null} sens="hausse-chaud" />}
-            />
-            {/* Convention couleur Vol : DVOL en HAUSSE = stress → --down ; en baisse → --up. */}
-            <Metric
-              label="Vol (DVOL)"
-              labelExtra={<RefBadge referentiel={chapeau?.dvolRef ?? null} sens="hausse-chaud" />}
-              value={chapeau?.dvolCourant != null ? formatPourcentage(chapeau.dvolCourant, 1) : "—"}
-              couleur={
-                chapeau?.dvolDeltaPts != null
-                  ? chapeau.dvolDeltaPts >= 0
-                    ? "var(--down)"
-                    : "var(--up)"
-                  : undefined
-              }
-              extra={
-                chapeau?.dvolDeltaPts != null ? (
-                  <span className="text-[10px] tabular-nums text-text-dim">
-                    {chapeau.dvolDeltaPts >= 0 ? "+" : ""}
-                    {formatDec(chapeau.dvolDeltaPts, 1)} pts vs veille
-                  </span>
-                ) : undefined
-              }
-            />
-          </div>
-          {phrasesLecture.length > 0 && (
-            <p className="text-[12px] leading-snug text-text">{phrasesLecture.join(" ")}</p>
-          )}
-        </section>
+        <SectionChapeau regime={regime} chapeau={chapeau} phrasesLecture={phrasesLecture} />
 
         {/* Régime — largeur de marché (breadth) : jauges MM50/MM200, A/D, tendance MM50. */}
-        <section className="space-y-2">
-          <TitreBloc>Régime · largeur de marché</TitreBloc>
-          {corps(breadth, "Largeur de marché indisponible.", (b) => {
-            const dTend = b.pctMm50Prec === null ? null : b.pctAuDessusMm50 - b.pctMm50Prec;
-            // Tendance MM50 vs calcul précédent : ▲ hausse, ▼ baisse, — stable/premier calcul.
-            const fleche = dTend === null || Math.abs(dTend) < 0.5 ? "—" : dTend > 0 ? "▲" : "▼";
-            const couleurFleche =
-              dTend === null || Math.abs(dTend) < 0.5
-                ? "var(--text-dim)"
-                : dTend > 0
-                  ? "var(--up)"
-                  : "var(--down)";
-            return (
-              <div className="space-y-2">
-                <JaugeBreadth label="% > MM50" pct={b.pctAuDessusMm50} />
-                <JaugeBreadth label="% > MM200" pct={b.pctAuDessusMm200} />
-                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-[11px]">
-                  <span className="text-text-dim">
-                    A/D jour{" "}
-                    <span className="tabular-nums text-up">{b.adJour.hausses}</span>
-                    <span> / </span>
-                    <span className="tabular-nums text-down">{b.adJour.baisses}</span>
-                  </span>
-                  <span className="text-text-dim">
-                    Tendance MM50 <span style={{ color: couleurFleche }}>{fleche}</span>
-                  </span>
-                </div>
-                <p className="text-[10px] text-text-dim">
-                  {b.nUnivers < 50 ? `${b.nUnivers}/50 valides` : `${b.nUnivers} valides`}
-                </p>
-              </div>
-            );
-          })}
-          <NoteSource>Binance ticker 24 h + klines 1d (top 50) · cache 12 h · {noteFraicheur}.</NoteSource>
-        </section>
+        <SectionBreadth breadth={breadth} noteFraicheur={noteFraicheur} />
 
         {/* 0) Review de session (soir) — stores locaux portfolio + alertes + éco passés. */}
-        <section className="space-y-2">
-          <TitreBloc>Session · review</TitreBloc>
-          <div className="grid grid-cols-3 gap-2">
-            <Metric
-              label="PnL réalisé"
-              value={formatUsdSigne(session.pnlRealise)}
-              couleur={couleurVariation(session.pnlRealise)}
-            />
-            <Metric label="Trades clos" value={String(session.tradesClos.length)} />
-            <Metric label="W / L" value={`${session.gagnants} / ${session.perdants}`} />
-          </div>
-
-          <div className="space-y-1">
-            <p className="text-[10px] uppercase tracking-wide text-text-dim">Trades clos</p>
-            {session.tradesClos.length === 0 ? (
-              <Vide>Aucun trade clôturé aujourd&apos;hui.</Vide>
-            ) : (
-              <table className="w-full text-[11px] tabular-nums">
-                <tbody>
-                  {session.tradesClos.map((t, i) => (
-                    <tr
-                      key={`${t.symbole}-${t.dateSortie}-${i}`}
-                      className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-bg"
-                      onClick={() =>
-                        navigateTo({ symbol: t.symbole, exchange: "binance", source: "brief" })
-                      }
-                      title={`Ouvrir ${t.symbole} dans le chart`}
-                    >
-                      <td className="py-1 text-text-dim">{formatHeureMinute(t.dateSortie)}</td>
-                      <td className="py-1 text-text">{t.symbole}</td>
-                      <td className="py-1 text-text-dim">{t.direction}</td>
-                      <td
-                        className="py-1 text-right"
-                        style={{ color: couleurVariation(t.pnlNet) }}
-                      >
-                        {formatUsdSigne(t.pnlNet)}
-                      </td>
-                      <td
-                        className="py-1 text-right"
-                        style={{ color: couleurVariation(t.pnlPct) }}
-                      >
-                        {formatPct(t.pnlPct)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-
-          <div className="space-y-1">
-            <p className="text-[10px] uppercase tracking-wide text-text-dim">
-              Alertes déclenchées
-              {session.alertes.length > 0 ? ` · ${session.alertes.length}` : ""}
-            </p>
-            {session.alertes.length === 0 ? (
-              <Vide>Aucune alerte déclenchée aujourd&apos;hui.</Vide>
-            ) : (
-              <div className="space-y-1">
-                {session.alertes.map((a, i) => (
-                  <div
-                    key={`${a.alertId}-${a.ts}-${i}`}
-                    className="flex items-baseline gap-2 text-[11px]"
-                  >
-                    <span className="w-12 shrink-0 tabular-nums text-text-dim">
-                      {formatHeureMinute(a.ts)}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-text">{a.message}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-1">
-            <p className="text-[10px] uppercase tracking-wide text-text-dim">Éco passés</p>
-            {eco.statut === "idle" || eco.statut === "loading" ? (
-              <Chargement />
-            ) : session.ecoPasses === null ? (
-              <ErreurBloc>Calendrier éco indisponible.</ErreurBloc>
-            ) : session.ecoPasses.length === 0 ? (
-              <Vide>Aucun événement à fort impact écoulé aujourd&apos;hui.</Vide>
-            ) : (
-              <div className="space-y-1">
-                {session.ecoPasses.map((ev, i) => (
-                  <button
-                    key={`pass-${ev.time}-${i}`}
-                    type="button"
-                    onClick={() =>
-                      navigateTo({
-                        markTime: ev.time,
-                        markLabel: `${ev.pays} ${ev.titre}`,
-                        source: "brief",
-                      })
-                    }
-                    title="Marquer sur le chart"
-                    className="flex w-full items-baseline gap-2 text-left text-[11px] transition hover:bg-bg"
-                  >
-                    <span className="w-14 shrink-0 tabular-nums text-text-dim">
-                      {ev.timeApprox ? "~" : ""}
-                      {formatHeureMinute(ev.time)}
-                    </span>
-                    <span className="w-10 shrink-0 text-text-dim">{ev.pays}</span>
-                    <span className="min-w-0 flex-1 truncate text-text">{ev.titre}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-          <NoteSource>
-            Portefeuille local · journal alertes · calendrier éco (passés) · {noteFraicheur}.
-          </NoteSource>
-        </section>
+        <SectionSession session={session} eco={eco} noteFraicheur={noteFraicheur} />
 
         {/* 1) Watchlist overnight (Binance REST). */}
-        <section className="space-y-2">
-          <TitreBloc>Watchlist · overnight</TitreBloc>
-          {corps(watchlist, "Prix overnight indisponibles.", (rows) =>
-            rows.length === 0 ? (
-              <Vide>Aucun symbole dans la watchlist.</Vide>
-            ) : (
-              <table className="w-full text-[11px] tabular-nums">
-                <tbody>
-                  {rows.map((r) => (
-                    <tr
-                      key={r.symbole}
-                      className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-bg"
-                      onClick={() =>
-                        navigateTo({ symbol: r.symbole, exchange: "binance", source: "brief" })
-                      }
-                      title={`Ouvrir ${r.symbole} dans le chart`}
-                    >
-                      <td className="py-1 text-text">{r.symbole}</td>
-                      <td className="py-1 text-right text-text">{formatPrice(r.prix)}</td>
-                      <td className="py-1 text-right" style={{ color: couleurVariation(r.variation24h) }}>
-                        {formatPct(r.variation24h)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ),
-          )}
-          <NoteSource>Données Binance (ticker 24 h) · {noteFraicheur}.</NoteSource>
-        </section>
+        <SectionWatchlist watchlist={watchlist} noteFraicheur={noteFraicheur} />
 
         {/* Squeeze — top 3 carburant-squeeze (funding < 0 & OI ↑) par intensité (cf. SQZ). */}
-        <section className="space-y-2">
-          <TitreBloc>Squeeze · carburant</TitreBloc>
-          {corps(squeeze, "Radar de squeeze indisponible.", (points) => {
-            // Domaine calculé sur TOUS les points (cohérent avec la fenêtre SQZ), PUIS filtre.
-            const domaine = domaineAxesRobuste(points);
-            const top = points
-              .filter((p) => p.quadrant === "carburant-squeeze")
-              .sort((a, b) => scoreSqueeze(b, domaine) - scoreSqueeze(a, domaine))
-              .slice(0, 3);
-            return top.length === 0 ? (
-              <Vide>Aucun carburant-squeeze (funding négatif + OI en hausse).</Vide>
-            ) : (
-              <div className="space-y-1">
-                {top.map((p) => (
-                  <button
-                    key={p.symbol}
-                    type="button"
-                    onClick={() => navigateTo({ symbol: p.symbol, exchange: "binance", source: "brief" })}
-                    title={`Ouvrir ${p.symbol} dans le chart`}
-                    className="flex w-full items-baseline justify-between gap-2 text-left text-[11px] tabular-nums transition hover:bg-bg"
-                  >
-                    <span className="font-medium text-text">{p.symbol}</span>
-                    <span className="flex gap-x-3 text-[10px] text-text-dim">
-                      <span>
-                        funding <span className="text-down">{formatPct(p.fundingPct, 4)}</span>
-                      </span>
-                      <span>
-                        ΔOI <span className="text-up">{formatPct(p.dOiPct)}</span>
-                      </span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            );
-          })}
-          <NoteSource>Funding × ΔOI ~24 h (Binance perp) · {noteFraicheur}.</NoteSource>
-        </section>
+        <SectionSqueeze squeeze={squeeze} noteFraicheur={noteFraicheur} />
 
         {/* Funding extrêmes — top 3 |funding| > 0.03 %/8 h (premiumIndex, univers complet). */}
-        <section className="space-y-2">
-          <TitreBloc>Funding · extrêmes</TitreBloc>
-          {corps(funding, "Funding indisponible.", (lignes) =>
-            lignes.length === 0 ? (
-              <Vide>Aucun extrême (marché calme).</Vide>
-            ) : (
-              <div className="space-y-1">
-                {lignes.map((f) => (
-                  <button
-                    key={f.symbole}
-                    type="button"
-                    onClick={() => navigateTo({ symbol: f.symbole, exchange: "binance", source: "brief" })}
-                    title={`Ouvrir ${f.symbole} dans le chart`}
-                    className="flex w-full items-baseline justify-between gap-2 text-left text-[11px] tabular-nums transition hover:bg-bg"
-                  >
-                    <span className="font-medium text-text">{f.symbole}</span>
-                    <span style={{ color: couleurVariation(f.fundingPct) }}>
-                      {formatPct(f.fundingPct, 4)}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ),
-          )}
-          <NoteSource>Funding perp Binance (premiumIndex, %/8 h) · {noteFraicheur}.</NoteSource>
-        </section>
+        <SectionFunding funding={funding} noteFraicheur={noteFraicheur} />
 
         {/* 2) Dérivés — funding + prochain règlement + ΔOI 24 h (BTC/ETH/SOL). */}
-        <section className="space-y-2">
-          <TitreBloc>Dérivés</TitreBloc>
-          {corps(derivs, "Dérivés indisponibles.", (lignes) => (
-            <div className="space-y-2">
-              {lignes.map((d) => (
-                <button
-                  key={d.symbole}
-                  type="button"
-                  onClick={() =>
-                    navigateTo({
-                      symbol: `${d.symbole}USDT`,
-                      exchange: "binance",
-                      source: "brief",
-                    })
-                  }
-                  title={`Ouvrir ${d.symbole}USDT dans le chart`}
-                  className="w-full rounded-md border border-border bg-bg px-3 py-2 text-left transition hover:border-text-dim"
-                >
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-sm font-medium text-text">{d.symbole}</span>
-                    <span className="text-[11px] tabular-nums" style={{ color: couleurVariation(d.deltaOiPct) }}>
-                      ΔOI 24 h {d.deltaOiPct === null ? VALEUR_ABSENTE : formatPct(d.deltaOiPct)}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[10px] text-text-dim">
-                    <span>
-                      funding <span className="tabular-nums text-text">{formatFunding(d.fundingActuel)}</span>
-                    </span>
-                    <span>
-                      prédit <span className="tabular-nums text-text">{formatFunding(d.fundingPredit)}</span>
-                    </span>
-                    <span>
-                      prochain règlement{" "}
-                      <span className="text-text">
-                        {d.prochainReglement === null ? VALEUR_ABSENTE : formatDelai(d.prochainReglement, instant)}
-                      </span>
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          ))}
-          <NoteSource>Funding Coinalyze · Open Interest Binance fapi · {noteFraicheur}.</NoteSource>
-        </section>
+        <SectionDerivs derivs={derivs} instant={instant} noteFraicheur={noteFraicheur} />
 
         {/* VaR chart — VaR95/99 20 b du chart maître (distribution empirique, instantané).
             Absente sous 300 bougies (échantillon insuffisant, cf. distVar). */}
-        {varChart !== null && (
-          <section className="space-y-2">
-            <TitreBloc>VaR · {varChart.symbol} {varChart.timeframe}</TitreBloc>
-            <div className="grid grid-cols-2 gap-2">
-              <Metric
-                label="VaR95 · 20 b"
-                value={formatPct(varChart.h20.pct.p5, 1)}
-                couleur="var(--down)"
-                extra={
-                  <span className="text-[10px] tabular-nums text-text-dim">
-                    {formatPrice(varChart.h20.niveaux.p5)}
-                  </span>
-                }
-              />
-              <Metric
-                label="VaR99 · 20 b"
-                value={formatPct(varChart.h20.pct.p1, 1)}
-                couleur="var(--down)"
-                extra={
-                  <span className="text-[10px] tabular-nums text-text-dim">
-                    {formatPrice(varChart.h20.niveaux.p1)}
-                  </span>
-                }
-              />
-            </div>
-            <NoteSource>
-              Distribution empirique des bougies du chart maître (horizon 20 b, {varChart.h20.nEchantillons} échantillons) — PAS une prévision · {noteFraicheur}.
-            </NoteSource>
-          </section>
-        )}
+        {varChart !== null && <SectionVar varChart={varChart} noteFraicheur={noteFraicheur} />}
 
         {/* 3) Flux ETF de la veille (SoSoValue). */}
-        <section className="space-y-2">
-          <TitreBloc>Flux ETF · veille</TitreBloc>
-          {corps(etf, "Flux ETF indisponibles.", (actifs) => (
-            <div className="space-y-1">
-              {actifs.map((e) => (
-                <div key={e.actif} className="flex items-baseline justify-between text-[11px]">
-                  <span className="uppercase text-text-dim">{e.actif}</span>
-                  {e.disponible && e.total !== null ? (
-                    <span className="tabular-nums" style={{ color: couleurVariation(e.total) }}>
-                      {formatUsd(e.total)}
-                      {e.jour !== null && <span className="ml-1 text-[10px] text-text-dim">({e.jour})</span>}
-                    </span>
-                  ) : (
-                    <span className="text-text-dim">indisponible</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          ))}
-          <NoteSource>Données SoSoValue (flux nets quotidiens) · {noteFraicheur}.</NoteSource>
-        </section>
+        <SectionEtf etf={etf} noteFraicheur={noteFraicheur} />
 
         {/* COT (semaine) — cache legacy SEUL : 3 instruments au |Δ hebdo net| max.
             Absente si le cache COT est vide (aucun réseau déclenché ici). */}
-        {cot !== null && (
-          <section className="space-y-2">
-            <TitreBloc>COT · semaine</TitreBloc>
-            <div className="space-y-1">
-              {cot.lignes.map(({ ligne, delta }) => (
-                <div
-                  key={ligne.nom}
-                  className="flex items-baseline justify-between gap-2 text-[11px] tabular-nums"
-                >
-                  <span className="min-w-0 flex-1 truncate text-text">{ligne.libelle}</span>
-                  <span style={{ color: couleurVariation(delta) }}>
-                    Δ {delta >= 0 ? "+" : ""}
-                    {formatEntier(delta)}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <NoteSource>
-              Rapport COT CFTC (legacy, net non-commercial) · Δ 1 semaine ·{" "}
-              {cot.dateRapport !== null ? formatDateCourte(cot.dateRapport) : "date n/d"}.
-            </NoteSource>
-          </section>
-        )}
+        {cot !== null && <SectionCot cot={cot} />}
 
         {/* 4) Événements éco du jour, fort impact. */}
-        <section className="space-y-2">
-          <TitreBloc>Événements éco du jour</TitreBloc>
-          {corps(eco, "Calendrier éco indisponible.", (evs) =>
-            evs.length === 0 ? (
-              <Vide>Aucun événement à fort impact aujourd'hui.</Vide>
-            ) : (
-              <div className="space-y-1">
-                {evs.map((ev, i) => (
-                  <button
-                    key={`${ev.time}-${i}`}
-                    type="button"
-                    onClick={() =>
-                      navigateTo({
-                        markTime: ev.time,
-                        markLabel: `${ev.pays} ${ev.titre}`,
-                        source: "brief",
-                      })
-                    }
-                    title="Marquer sur le chart"
-                    className="flex w-full items-baseline gap-2 text-left text-[11px] transition hover:bg-bg"
-                  >
-                    <span className="w-14 shrink-0 tabular-nums text-text-dim">
-                      {ev.timeApprox ? "~" : ""}
-                      {formatHeureMinute(ev.time)}
-                    </span>
-                    <span className="w-10 shrink-0 text-text-dim">{ev.pays}</span>
-                    <span className="min-w-0 flex-1 truncate text-text">{ev.titre}</span>
-                    <span className="shrink-0 text-[10px] text-text-dim">
-                      {ev.time <= instant ? "passé" : formatDelai(ev.time, instant)}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ),
-          )}
-          <NoteSource>ForexFactory · FRED · FOMC (fort impact seulement) · {noteFraicheur}.</NoteSource>
-        </section>
+        <SectionEco eco={eco} instant={instant} noteFraicheur={noteFraicheur} />
 
         {/* 5) Actualités + indice Fear & Greed. */}
-        <section className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <TitreBloc>Actualités</TitreBloc>
-            {fearGreed.statut === "ready" && fearGreed.data !== null && (
-              <div className="flex items-center gap-1.5">
-                <Badge ton="accent" title="Indice Fear & Greed (alternative.me)">
-                  F&G {fearGreed.data.value}
-                  {fearGreed.data.classification ? ` · ${fearGreed.data.classification}` : ""}
-                </Badge>
-                {/* Un F&G nu ne dit pas s'il est extrême : 72 en marché euphorique
-                    n'est qu'un p40. Le référentiel situe la valeur dans ~90 j. */}
-                <RefBadge referentiel={chapeau?.fearGreedRef ?? null} sens="hausse-chaud" />
-              </div>
-            )}
-          </div>
-          {corps(news, "Actualités indisponibles.", (titres) =>
-            titres.length === 0 ? (
-              <Vide>Aucune actualité.</Vide>
-            ) : (
-              <div className="space-y-1.5">
-                {titres.map((n) => (
-                  <button
-                    key={n.id}
-                    type="button"
-                    onClick={() =>
-                      navigateTo({
-                        markTime: n.time,
-                        markLabel: n.titre,
-                        source: "brief",
-                      })
-                    }
-                    title="Marquer sur le chart"
-                    className="flex w-full flex-col gap-0.5 text-left transition hover:bg-bg"
-                  >
-                    <div className="flex items-center gap-2 text-[10px] text-text-dim">
-                      <span className="uppercase">{n.source}</span>
-                      <span className="tabular-nums">{formatAge(n.time, instant)}</span>
-                    </div>
-                    <span className="text-[11px] leading-snug text-text">{n.titre}</span>
-                  </button>
-                ))}
-              </div>
-            ),
-          )}
-          <NoteSource>Flux RSS/Finnhub · Fear &amp; Greed alternative.me · {noteFraicheur}.</NoteSource>
-        </section>
+        <SectionNews
+          news={news}
+          fearGreed={fearGreed}
+          chapeau={chapeau}
+          instant={instant}
+          noteFraicheur={noteFraicheur}
+        />
 
         {/* 6) Volatilité — DVOL BTC/ETH (Deribit). */}
-        <section className="space-y-2">
-          <TitreBloc>Volatilité · DVOL</TitreBloc>
-          {corps(dvol, "DVOL indisponible.", (vals) => (
-            <div className="grid grid-cols-2 gap-2">
-              {vals.map((v) => (
-                <Metric
-                  key={v.devise}
-                  label={`DVOL ${v.devise}`}
-                  value={v.valeur === null ? VALEUR_ABSENTE : formatPourcentage(v.valeur, 1)}
-                />
-              ))}
-            </div>
-          ))}
-          <NoteSource>Données Deribit (indice DVOL) · {noteFraicheur}.</NoteSource>
-        </section>
+        <SectionDvol dvol={dvol} noteFraicheur={noteFraicheur} />
       </div>
     </>
   );

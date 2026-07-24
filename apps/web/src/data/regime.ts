@@ -1,5 +1,5 @@
 /**
- * Régime de marché : score composite −2..+2 sur 6 composants publics.
+ * Régime de marché : score composite −2..+2 sur 7 composants publics.
  * PUR — l'assemblage des entrées vit dans store/regime.ts. Seule dépendance :
  * les formateurs purs de lib/format (montants signés du détail). Ton factuel,
  * jamais prescriptif : le score DÉCRIT l'environnement, il ne conseille pas.
@@ -15,6 +15,8 @@ export interface EntreesRegime {
   fundingBtcPercentile: number | null;
   /** Percentile 0..100 du DVOL BTC courant vs 90 j, ou null. */
   dvolBtcPercentile: number | null;
+  /** Percentile 0..100 de la vol RÉALISÉE BTC courante vs ~100 j, ou null. */
+  volRealiseeBtcPercentile: number | null;
   /** Flux ETF spot BTC+ETH+SOL de la veille, en USD, ou null. */
   fluxEtfJourUsd: number | null;
   /** Δ supply stablecoins 7 j en % de la supply, ou null. */
@@ -106,6 +108,29 @@ export function calculerRegime(entrees: EntreesRegime): Regime {
       libelle: "DVOL BTC",
       note,
       detail: note === null ? "vol —" : `vol p${Math.round(p ?? 0)} (${fmtNote(note)})`,
+    });
+  }
+  {
+    // Vol RÉALISÉE : pendant constaté du DVOL (implicite). Mêmes paliers que
+    // `dvol` À DESSEIN — deux notes de volatilité doivent rester commensurables ;
+    // des seuils asymétriques seraient un arbitrage caché dans le score.
+    //
+    // Conséquence de pondération ASSUMÉE : la volatilité pèse désormais 2 notes
+    // sur 7 (~29 % du score, contre ~17 % avant), et les deux sont corrélées —
+    // en régime de stress elles chargent le score dans le même sens. C'est le
+    // comportement voulu (vol implicite ET réalisée élevées = environnement
+    // réellement hostile), mais toute relecture historique de la pastille doit
+    // en tenir compte.
+    const p = entrees.volRealiseeBtcPercentile;
+    let note: number | null = null;
+    if (p !== null && Number.isFinite(p)) {
+      note = p < 50 ? 1 : p <= 85 ? 0 : -2;
+    }
+    composants.push({
+      id: "volRealisee",
+      libelle: "Vol réalisée BTC",
+      note,
+      detail: note === null ? "vol réal. —" : `vol réal. p${Math.round(p ?? 0)} (${fmtNote(note)})`,
     });
   }
   {

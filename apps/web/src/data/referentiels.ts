@@ -3,8 +3,10 @@
  * Chaque fetcher renvoie PointSerie[] | null (échec → null, jamais bloquant)
  * sous cache module TTL 1 h — les fenêtres consomment, AUCUNE boucle ici.
  */
+import { computeIndicator, getIndicator } from "@axiom/indicators";
 import type { PointSerie } from "../lib/referentiel";
 import { extUrl } from "./extapi";
+import { binanceAdapter } from "./binance";
 import { fetchOpenInterestHist, futuresSymbol } from "./binanceFutures";
 import { fetchDvolHistory } from "./deribit";
 import { fetchFearGreedHistory } from "./marketOverview";
@@ -125,6 +127,40 @@ export async function histDvol(devise: "BTC" | "ETH"): Promise<PointSerie[] | nu
   return memo(`dvol:${devise}`, async () => {
     const pts = await fetchDvolHistory(devise, 90);
     return pts.map((p) => ({ t: p.time, v: p.value }));
+  });
+}
+
+/**
+ * Volatilité RÉALISÉE annualisée (%), série quotidienne ~100 j.
+ *
+ * Complète `histDvol` (vol IMPLICITE, prospective) par la vol effectivement
+ * constatée : les deux se lisent ensemble mais ne disent pas la même chose —
+ * l'écart entre les deux est la prime de risque de variance.
+ *
+ * Calcul délégué au def `rv` de `@axiom/indicators` (source de vérité unique
+ * des indicateurs, cf. BUILD-CONTRACT) : AUCUNE formule de volatilité n'est
+ * réimplémentée ici.
+ *
+ * Profondeur demandée — NE PAS réduire sans refaire ce calcul : `rv(length=30)`
+ * n'émet rien tant que sa fenêtre n'est pas pleine (premier point défini à
+ * l'index 30), donc N bougies ne donnent que N−30 points. Pour ~100 points de
+ * référentiel il faut ≥ 130 bougies. Rogner cette limite raccourcirait la série
+ * SILENCIEUSEMENT et le percentile porterait sur moins d'histoire.
+ */
+export async function histVolRealisee(symbol: string): Promise<PointSerie[] | null> {
+  return memo(`volRealisee:${symbol}`, async () => {
+    const def = getIndicator("rv");
+    if (def === undefined) return null;
+    const candles = await binanceAdapter.fetchKlines(symbol, "1d", { limit: 130 });
+    const serie = computeIndicator(def, candles, { length: 30, periodesParAn: 365 }).series.rv;
+    if (serie === undefined) return null;
+    const points: PointSerie[] = [];
+    for (let i = 0; i < serie.length; i++) {
+      const v = serie[i];
+      const c = candles[i];
+      if (v !== undefined && Number.isFinite(v) && c !== undefined) points.push({ t: c.time, v });
+    }
+    return points;
   });
 }
 

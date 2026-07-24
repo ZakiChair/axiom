@@ -36,6 +36,7 @@ import {
   fetchEcoBrief,
   fetchEtfBrief,
   fetchFearGreed,
+  fetchFundingExtremes,
   fetchNewsBrief,
   fetchWatchlistOvernight,
   type DonneesBrief,
@@ -43,14 +44,24 @@ import {
   type EtfBrief,
   type EvenementBrief,
   type FearGreed,
+  type FundingExtreme,
   type LigneDeriv,
   type LigneWatchlist,
   type TitreNews,
 } from "../data/brief";
+import { fetchBreadth, type ResumBreadth } from "../data/breadth";
+import { collecterSqueeze } from "../store/squeeze";
+import type { PointRadar } from "../data/squeeze";
+import { domaineAxesRobuste, scoreSqueeze } from "./squeezeWindow.util";
+import { distVar, type NiveauxVar } from "../data/distVar";
+import { lireResumeLegacyCache, type LigneCotCategorie } from "../store/cot";
+import { deltaSemaines } from "../data/cot";
 import {
   formatAge,
+  formatDateCourte,
   formatDelai,
   formatDec,
+  formatEntier,
   formatFunding,
   formatHeureMinute,
   formatPct,
@@ -141,6 +152,45 @@ function corps<T>(section: Section<T>, erreur: string, rendu: (data: T) => React
   return rendu(section.data);
 }
 
+/** Teinte d'une jauge breadth par tranche : > 60 % up, < 40 % down, sinon estompé. */
+function teinteBreadth(pct: number): string {
+  if (pct > 60) return "var(--up)";
+  if (pct < 40) return "var(--down)";
+  return "var(--text-dim)";
+}
+
+/** Jauge horizontale « % de l'univers au-dessus de sa MM », teintée par tranche. */
+function JaugeBreadth({ label, pct }: { label: string; pct: number }) {
+  const couleur = teinteBreadth(pct);
+  const largeur = Math.max(0, Math.min(100, pct));
+  return (
+    <div className="space-y-1">
+      <div className="flex items-baseline justify-between text-[11px]">
+        <span className="text-text-dim">{label}</span>
+        <span className="tabular-nums" style={{ color: couleur }}>
+          {formatPourcentage(pct, 0)}
+        </span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg">
+        <div className="h-full rounded-full" style={{ width: `${largeur}%`, backgroundColor: couleur }} />
+      </div>
+    </div>
+  );
+}
+
+/** Instantané VaR du chart maître (section VaR) — null si < 300 bougies (section absente). */
+interface VarChart {
+  h20: NiveauxVar;
+  symbol: string;
+  timeframe: string;
+}
+
+/** Instantané COT legacy (section COT) — null si cache absent / aucun Δ hebdo (section absente). */
+interface CotChart {
+  lignes: { ligne: LigneCotCategorie; delta: number }[];
+  dateRapport: number | null;
+}
+
 // ─────────────────────────── Composant principal ───────────────────────────
 
 export function BriefWindow() {
@@ -171,6 +221,9 @@ export function BriefWindow() {
   // l'empilement de générations de fetchs — quota Coinalyze partagé avec DERIV).
   const [enChargement, setEnChargement] = useState(false);
 
+  const [breadth, setBreadth] = useState<Section<ResumBreadth>>(EN_ATTENTE);
+  const [squeeze, setSqueeze] = useState<Section<PointRadar[]>>(EN_ATTENTE);
+  const [funding, setFunding] = useState<Section<FundingExtreme[]>>(EN_ATTENTE);
   const [watchlist, setWatchlist] = useState<Section<LigneWatchlist[]>>(EN_ATTENTE);
   const [derivs, setDerivs] = useState<Section<LigneDeriv[]>>(EN_ATTENTE);
   const [etf, setEtf] = useState<Section<EtfBrief[]>>(EN_ATTENTE);
@@ -178,6 +231,9 @@ export function BriefWindow() {
   const [news, setNews] = useState<Section<TitreNews[]>>(EN_ATTENTE);
   const [fearGreed, setFearGreed] = useState<Section<FearGreed>>(EN_ATTENTE);
   const [dvol, setDvol] = useState<Section<DvolBrief[]>>(EN_ATTENTE);
+  // Instantanés SYNCHRONES (pas de fetch) calculés en fin de `charger` : null → section absente.
+  const [varChart, setVarChart] = useState<VarChart | null>(null);
+  const [cot, setCot] = useState<CotChart | null>(null);
 
   // Garde d'annulation : chaque `charger` incrémente la génération et remplace le
   // contrôleur ; les callbacks des fetchs de la génération précédente sont ignorés
@@ -201,6 +257,9 @@ export function BriefWindow() {
 
     const now = Date.now();
     setChargeA(now);
+    setBreadth(EN_ATTENTE);
+    setSqueeze(EN_ATTENTE);
+    setFunding(EN_ATTENTE);
     setWatchlist(EN_ATTENTE);
     setDerivs(EN_ATTENTE);
     setEtf(EN_ATTENTE);
@@ -224,6 +283,18 @@ export function BriefWindow() {
 
     const symboles = watchlistStore.getState().symbols;
     const taches = [
+      lancer(
+        fetchBreadth().then((b) => {
+          if (b === null) throw new Error("Largeur de marché indisponible");
+          return b;
+        }),
+        setBreadth,
+      ),
+      lancer(
+        collecterSqueeze().then((c) => c.points),
+        setSqueeze,
+      ),
+      lancer(fetchFundingExtremes(), setFunding),
       lancer(fetchWatchlistOvernight(symboles, ctrl.signal), setWatchlist),
       lancer(fetchDerivsBrief(), setDerivs),
       lancer(fetchEtfBrief(ctrl.signal), setEtf),
@@ -244,6 +315,32 @@ export function BriefWindow() {
       enCoursRef.current = false;
       setEnChargement(false);
     });
+
+    // ── Instantanés SYNCHRONES (aucun fetch) — calculés APRÈS le câblage des sections
+    //    réseau pour qu'un throw imprévu ne les avorte pas (distVar est pur ; le lecteur de
+    //    cache COT catche tout — assurance à coût nul). Lecture directe getState/cache.
+
+    // VaR chart : distribution empirique des bougies DÉJÀ chargées du chart maître
+    // (instantané via getState, JAMAIS abonné). < 300 bougies → distVar renvoie null → absente.
+    const { symbol, timeframe, candles } = marketStore.getState();
+    const niveaux = distVar(candles.map((c) => c.close));
+    const h20 = niveaux?.find((n) => n.h === 20) ?? null;
+    setVarChart(h20 !== null ? { h20, symbol, timeframe } : null);
+
+    // COT (semaine) : cache legacy SEUL (aucun réseau). Les 3 instruments couverts au
+    // |Δ hebdo| max. Cache absent ou aucun Δ calculable → section absente.
+    const resumeCot = lireResumeLegacyCache();
+    if (resumeCot === null) {
+      setCot(null);
+    } else {
+      const avecDelta = resumeCot.lignes
+        .filter((l) => !l.nonCouvert)
+        .map((ligne) => ({ ligne, delta: deltaSemaines(ligne.serie, 1) }))
+        .filter((x): x is { ligne: LigneCotCategorie; delta: number } => x.delta !== null)
+        .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+        .slice(0, 3);
+      setCot(avecDelta.length > 0 ? { lignes: avecDelta, dateRapport: resumeCot.dateRapport } : null);
+    }
   }, []);
 
   // Charge au montage/ouverture ; annule les fetchs en vol à la fermeture/démontage.
@@ -400,6 +497,43 @@ export function BriefWindow() {
           )}
         </section>
 
+        {/* Régime — largeur de marché (breadth) : jauges MM50/MM200, A/D, tendance MM50. */}
+        <section className="space-y-2">
+          <TitreBloc>Régime · largeur de marché</TitreBloc>
+          {corps(breadth, "Largeur de marché indisponible.", (b) => {
+            const dTend = b.pctMm50Prec === null ? null : b.pctAuDessusMm50 - b.pctMm50Prec;
+            // Tendance MM50 vs calcul précédent : ▲ hausse, ▼ baisse, — stable/premier calcul.
+            const fleche = dTend === null || Math.abs(dTend) < 0.5 ? "—" : dTend > 0 ? "▲" : "▼";
+            const couleurFleche =
+              dTend === null || Math.abs(dTend) < 0.5
+                ? "var(--text-dim)"
+                : dTend > 0
+                  ? "var(--up)"
+                  : "var(--down)";
+            return (
+              <div className="space-y-2">
+                <JaugeBreadth label="% > MM50" pct={b.pctAuDessusMm50} />
+                <JaugeBreadth label="% > MM200" pct={b.pctAuDessusMm200} />
+                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-[11px]">
+                  <span className="text-text-dim">
+                    A/D jour{" "}
+                    <span className="tabular-nums text-up">{b.adJour.hausses}</span>
+                    <span> / </span>
+                    <span className="tabular-nums text-down">{b.adJour.baisses}</span>
+                  </span>
+                  <span className="text-text-dim">
+                    Tendance MM50 <span style={{ color: couleurFleche }}>{fleche}</span>
+                  </span>
+                </div>
+                <p className="text-[10px] text-text-dim">
+                  {b.nUnivers < 50 ? `${b.nUnivers}/50 valides` : `${b.nUnivers} valides`}
+                </p>
+              </div>
+            );
+          })}
+          <NoteSource>Binance ticker 24 h + klines 1d (top 50) · cache 12 h · {noteFraicheur}.</NoteSource>
+        </section>
+
         {/* 0) Review de session (soir) — stores locaux portfolio + alertes + éco passés. */}
         <section className="space-y-2">
           <TitreBloc>Session · review</TitreBloc>
@@ -547,6 +681,73 @@ export function BriefWindow() {
           <NoteSource>Données Binance (ticker 24 h) · {noteFraicheur}.</NoteSource>
         </section>
 
+        {/* Squeeze — top 3 carburant-squeeze (funding < 0 & OI ↑) par intensité (cf. SQZ). */}
+        <section className="space-y-2">
+          <TitreBloc>Squeeze · carburant</TitreBloc>
+          {corps(squeeze, "Radar de squeeze indisponible.", (points) => {
+            // Domaine calculé sur TOUS les points (cohérent avec la fenêtre SQZ), PUIS filtre.
+            const domaine = domaineAxesRobuste(points);
+            const top = points
+              .filter((p) => p.quadrant === "carburant-squeeze")
+              .sort((a, b) => scoreSqueeze(b, domaine) - scoreSqueeze(a, domaine))
+              .slice(0, 3);
+            return top.length === 0 ? (
+              <Vide>Aucun carburant-squeeze (funding négatif + OI en hausse).</Vide>
+            ) : (
+              <div className="space-y-1">
+                {top.map((p) => (
+                  <button
+                    key={p.symbol}
+                    type="button"
+                    onClick={() => navigateTo({ symbol: p.symbol, exchange: "binance", source: "brief" })}
+                    title={`Ouvrir ${p.symbol} dans le chart`}
+                    className="flex w-full items-baseline justify-between gap-2 text-left text-[11px] tabular-nums transition hover:bg-bg"
+                  >
+                    <span className="font-medium text-text">{p.symbol}</span>
+                    <span className="flex gap-x-3 text-[10px] text-text-dim">
+                      <span>
+                        funding <span className="text-down">{formatPct(p.fundingPct, 4)}</span>
+                      </span>
+                      <span>
+                        ΔOI <span className="text-up">{formatPct(p.dOiPct)}</span>
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            );
+          })}
+          <NoteSource>Funding × ΔOI ~24 h (Binance perp) · {noteFraicheur}.</NoteSource>
+        </section>
+
+        {/* Funding extrêmes — top 3 |funding| > 0.03 %/8 h (premiumIndex, univers complet). */}
+        <section className="space-y-2">
+          <TitreBloc>Funding · extrêmes</TitreBloc>
+          {corps(funding, "Funding indisponible.", (lignes) =>
+            lignes.length === 0 ? (
+              <Vide>Aucun extrême (marché calme).</Vide>
+            ) : (
+              <div className="space-y-1">
+                {lignes.map((f) => (
+                  <button
+                    key={f.symbole}
+                    type="button"
+                    onClick={() => navigateTo({ symbol: f.symbole, exchange: "binance", source: "brief" })}
+                    title={`Ouvrir ${f.symbole} dans le chart`}
+                    className="flex w-full items-baseline justify-between gap-2 text-left text-[11px] tabular-nums transition hover:bg-bg"
+                  >
+                    <span className="font-medium text-text">{f.symbole}</span>
+                    <span style={{ color: couleurVariation(f.fundingPct) }}>
+                      {formatPct(f.fundingPct, 4)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ),
+          )}
+          <NoteSource>Funding perp Binance (premiumIndex, %/8 h) · {noteFraicheur}.</NoteSource>
+        </section>
+
         {/* 2) Dérivés — funding + prochain règlement + ΔOI 24 h (BTC/ETH/SOL). */}
         <section className="space-y-2">
           <TitreBloc>Dérivés</TitreBloc>
@@ -593,6 +794,39 @@ export function BriefWindow() {
           <NoteSource>Funding Coinalyze · Open Interest Binance fapi · {noteFraicheur}.</NoteSource>
         </section>
 
+        {/* VaR chart — VaR95/99 20 b du chart maître (distribution empirique, instantané).
+            Absente sous 300 bougies (échantillon insuffisant, cf. distVar). */}
+        {varChart !== null && (
+          <section className="space-y-2">
+            <TitreBloc>VaR · {varChart.symbol} {varChart.timeframe}</TitreBloc>
+            <div className="grid grid-cols-2 gap-2">
+              <Metric
+                label="VaR95 · 20 b"
+                value={formatPct(varChart.h20.pct.p5, 1)}
+                couleur="var(--down)"
+                extra={
+                  <span className="text-[10px] tabular-nums text-text-dim">
+                    {formatPrice(varChart.h20.niveaux.p5)}
+                  </span>
+                }
+              />
+              <Metric
+                label="VaR99 · 20 b"
+                value={formatPct(varChart.h20.pct.p1, 1)}
+                couleur="var(--down)"
+                extra={
+                  <span className="text-[10px] tabular-nums text-text-dim">
+                    {formatPrice(varChart.h20.niveaux.p1)}
+                  </span>
+                }
+              />
+            </div>
+            <NoteSource>
+              Distribution empirique des bougies du chart maître (horizon 20 b, {varChart.h20.nEchantillons} échantillons) — PAS une prévision · {noteFraicheur}.
+            </NoteSource>
+          </section>
+        )}
+
         {/* 3) Flux ETF de la veille (SoSoValue). */}
         <section className="space-y-2">
           <TitreBloc>Flux ETF · veille</TitreBloc>
@@ -615,6 +849,32 @@ export function BriefWindow() {
           ))}
           <NoteSource>Données SoSoValue (flux nets quotidiens) · {noteFraicheur}.</NoteSource>
         </section>
+
+        {/* COT (semaine) — cache legacy SEUL : 3 instruments au |Δ hebdo net| max.
+            Absente si le cache COT est vide (aucun réseau déclenché ici). */}
+        {cot !== null && (
+          <section className="space-y-2">
+            <TitreBloc>COT · semaine</TitreBloc>
+            <div className="space-y-1">
+              {cot.lignes.map(({ ligne, delta }) => (
+                <div
+                  key={ligne.nom}
+                  className="flex items-baseline justify-between gap-2 text-[11px] tabular-nums"
+                >
+                  <span className="min-w-0 flex-1 truncate text-text">{ligne.libelle}</span>
+                  <span style={{ color: couleurVariation(delta) }}>
+                    Δ {delta >= 0 ? "+" : ""}
+                    {formatEntier(delta)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <NoteSource>
+              Rapport COT CFTC (legacy, net non-commercial) · Δ 1 semaine ·{" "}
+              {cot.dateRapport !== null ? formatDateCourte(cot.dateRapport) : "date n/d"}.
+            </NoteSource>
+          </section>
+        )}
 
         {/* 4) Événements éco du jour, fort impact. */}
         <section className="space-y-2">

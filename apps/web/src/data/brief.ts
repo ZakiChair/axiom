@@ -13,6 +13,8 @@
  * « → Notes ». Les seules fonctions à effet de bord sont les `fetch*` ; le reste est pur.
  */
 import type { Declenchement } from "@axiom/alerts";
+import { extUrl } from "./extapi";
+import { parsePremiumIndex } from "./screener";
 import { fetchOpenInterestHist } from "./binanceFutures";
 import { coinalyzeProvider, fetchPredictedFundingRate } from "./coinalyze";
 import { fetchEtfFlows, type ActifEtf } from "./onchain/etf";
@@ -102,6 +104,14 @@ export interface DvolBrief {
   devise: "BTC" | "ETH";
   /** Valeur DVOL (en points de %), ou null si indisponible. */
   valeur: number | null;
+}
+
+/** Funding perp EXTRÊME d'un symbole (|taux| au-dessus du seuil de tension). */
+export interface FundingExtreme {
+  /** Symbole perp Binance (« BTCUSDT »). */
+  symbole: string;
+  /** Taux de funding courant en %/8 h (déjà en pourcentage — cf. parsePremiumIndex). */
+  fundingPct: number;
 }
 
 /** Trade clôturé du jour civil local (review de session). */
@@ -576,6 +586,28 @@ const DEVISES_DVOL: readonly ("BTC" | "ETH")[] = ["BTC", "ETH"];
 export async function fetchDvolBrief(): Promise<DvolBrief[]> {
   const valeurs = await Promise.all(DEVISES_DVOL.map((d) => fetchDvol(d)));
   return DEVISES_DVOL.map((devise, i) => ({ devise, valeur: valeurs[i] ?? null }));
+}
+
+/** Seuil de funding « extrême » (%/8 h) : au-delà de |0.03|, la tension perp est notable. */
+export const SEUIL_FUNDING_EXTREME_PCT = 0.03;
+
+/**
+ * Funding perp EXTRÊMES de l'univers : top 3 par |taux| au-dessus du seuil, via
+ * `fapi/v1/premiumIndex` (mêmes source et parse que le screener / le radar SQZ — le taux y
+ * est déjà en %/8 h). Univers COMPLET (aucun filtre volume/watchlist) : on veut l'état RÉEL
+ * du marché. Lève sur échec réseau/HTTP (la section affiche une erreur) ; une liste vide
+ * signifie « aucun extrême » (marché calme) et n'est PAS une erreur.
+ */
+export async function fetchFundingExtremes(): Promise<FundingExtreme[]> {
+  const res = await fetch(extUrl("fapi.binance.com", "fapi/v1/premiumIndex"));
+  if (!res.ok) throw new Error(`premiumIndex ${res.status}`);
+  const parSymbole = parsePremiumIndex(await res.json());
+  const extremes: FundingExtreme[] = [];
+  for (const [symbole, fundingPct] of parSymbole) {
+    if (Math.abs(fundingPct) > SEUIL_FUNDING_EXTREME_PCT) extremes.push({ symbole, fundingPct });
+  }
+  extremes.sort((a, b) => Math.abs(b.fundingPct) - Math.abs(a.fundingPct));
+  return extremes.slice(0, 3);
 }
 
 // Ré-export pour l'appelant (la section Fear & Greed partage la source de NewsWindow).

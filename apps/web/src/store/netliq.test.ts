@@ -101,6 +101,16 @@ describe("run() — erreur non destructive", () => {
     expect(apres.erreur).toBe("Séries FRED indisponibles — dernière liquidité nette conservée.");
     expect(apres.enCours).toBe(false);
   });
+
+  it("PREMIER échec (aucune série) : message SANS « conservé »", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("réseau"));
+    await netliqStore.getState().run();
+
+    const s = netliqStore.getState();
+    expect(s.serie).toEqual([]); // rien n'a jamais été affiché
+    expect(s.erreur).toBe("Séries FRED indisponibles.");
+    expect(s.enCours).toBe(false);
+  });
 });
 
 describe("run() — garde 200-vide", () => {

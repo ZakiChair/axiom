@@ -119,9 +119,14 @@ export const netliqStore = createStore<NetliqState>((set, get) => ({
       series = await fetchSeriesNetliq(nowMs, get().fenetreAnnees);
     } catch {
       if (runId !== currentRunId) return;
+      // Wording honnête au PREMIER échec (aucune série encore affichée) : rien n'est
+      // « conservé », on n'annonce donc pas une donnée précédente inexistante.
+      const aDeja = get().serie.length > 0;
       set({
         enCours: false,
-        erreur: "Séries FRED indisponibles — dernière liquidité nette conservée.",
+        erreur: aDeja
+          ? "Séries FRED indisponibles — dernière liquidité nette conservée."
+          : "Séries FRED indisponibles.",
       });
       return;
     }

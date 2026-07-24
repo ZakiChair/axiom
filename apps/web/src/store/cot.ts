@@ -270,9 +270,10 @@ export interface CotState {
 async function assurerDatasets(
   datasets: readonly DatasetCot[],
   force: boolean,
-): Promise<{ echec: boolean; servisPerime: boolean }> {
+): Promise<{ echec: boolean; servisPerime: boolean; videSansCache: boolean }> {
   let echec = false;
   let servisPerime = false;
+  let videSansCache = false;
 
   for (const dataset of datasets) {
     // Mémoire fraîche : rien à faire (sauf force).
@@ -300,6 +301,13 @@ async function assurerDatasets(
         servisPerime = true;
         continue;
       }
+      // Réponse vide SANS aucun cache : donnée réellement absente en amont. On NE poisonne
+      // PAS la mémoire/le cache avec ce vide (préserve un éventuel état antérieur) et on
+      // signale l'indisponibilité au store (wording « indisponible », pas un vide muet).
+      if (records.length === 0) {
+        videSansCache = true;
+        continue;
+      }
       recordsMem[dataset] = records;
       recordsTs[dataset] = ts;
       ecrireCacheDataset(dataset, records, ts);
@@ -314,73 +322,69 @@ async function assurerDatasets(
     }
   }
 
-  return { echec, servisPerime };
+  return { echec, servisPerime, videSansCache };
 }
 
-export const cotStore = createStore<CotState>((set, get) => ({
-  categorie: "legacy",
-  resume: { lignes: [], dateRapport: null },
-  enCours: false,
-  erreur: null,
-  depuisCache: false,
-  dateMaj: null,
-
-  charger: async () => {
+export const cotStore = createStore<CotState>((set, get) => {
+  /**
+   * Squelette commun de `charger` (force=false) et `rafraichir` (force=true) : garde de
+   * péremption, chargement des datasets requis, santé, réassemblage et pose du state. Seul
+   * le drapeau `force` (relit ou non le réseau au-delà du TTL) distingue les deux entrées.
+   */
+  const executerRun = async (force: boolean): Promise<void> => {
     const run = ++runCourant;
     const categorie = get().categorie;
     set({ enCours: true });
 
-    const { echec, servisPerime } = await assurerDatasets(datasetsRequis(categorie), false);
+    const { echec, servisPerime, videSansCache } = await assurerDatasets(
+      datasetsRequis(categorie),
+      force,
+    );
 
     // Run périmé (bascule de catégorie survenue pendant le fetch) : on abandonne ce rendu.
     if (run !== runCourant) return;
 
-    if (echec) {
+    if (echec || videSansCache) {
       healthStore.getState().marquerErreur(HEALTH_SOURCE, "Rapport COT (CFTC) indisponible");
     } else {
       healthStore.getState().setEtat(HEALTH_SOURCE, "polling", { dernierMessageTs: Date.now() });
     }
 
+    // `echec` (réseau, cache éventuel conservé) → suffixe « dernières données conservées » ;
+    // `videSansCache` (réponse vide au premier fetch, rien à conserver) → « indisponible » sec.
     const resume = assemblerCategorie(recordsMem, categorie);
     set({
       resume,
       enCours: false,
       depuisCache: servisPerime,
-      erreur: echec ? "Rapport COT (CFTC) indisponible — dernières données conservées." : null,
+      erreur: echec
+        ? "Rapport COT (CFTC) indisponible — dernières données conservées."
+        : videSansCache
+          ? "Rapport COT (CFTC) indisponible."
+          : null,
       dateMaj: Date.now(),
     });
-  },
+  };
 
-  setCategorie: async (categorie) => {
-    if (get().categorie === categorie) return;
-    set({ categorie });
-    // Réassemble IMMÉDIATEMENT depuis les records déjà en mémoire (feedback instantané, sans réseau
-    // si les datasets requis sont déjà chargés — ex. bascule fonds↔commerciaux sur un dataset commun).
-    set({ resume: assemblerCategorie(recordsMem, categorie) });
-    await get().charger();
-  },
+  return {
+    categorie: "legacy",
+    resume: { lignes: [], dateRapport: null },
+    enCours: false,
+    erreur: null,
+    depuisCache: false,
+    dateMaj: null,
 
-  rafraichir: async () => {
-    const run = ++runCourant;
-    const categorie = get().categorie;
-    set({ enCours: true });
+    charger: () => executerRun(false),
 
-    const { echec, servisPerime } = await assurerDatasets(datasetsRequis(categorie), true);
-    if (run !== runCourant) return;
+    setCategorie: async (categorie) => {
+      if (get().categorie === categorie) return;
+      set({ categorie });
+      // Réassemble IMMÉDIATEMENT depuis les records déjà en mémoire (feedback instantané, sans réseau
+      // si les datasets requis sont déjà chargés — ex. bascule fonds↔commerciaux sur un dataset commun).
+      set({ resume: assemblerCategorie(recordsMem, categorie) });
+      await get().charger();
+    },
 
-    if (echec) {
-      healthStore.getState().marquerErreur(HEALTH_SOURCE, "Rapport COT (CFTC) indisponible");
-    } else {
-      healthStore.getState().setEtat(HEALTH_SOURCE, "polling", { dernierMessageTs: Date.now() });
-    }
-
-    const resume = assemblerCategorie(recordsMem, categorie);
-    set({
-      resume,
-      enCours: false,
-      depuisCache: servisPerime,
-      erreur: echec ? "Rapport COT (CFTC) indisponible — dernières données conservées." : null,
-      dateMaj: Date.now(),
-    });
-  },
-}));
+    rafraichir: () => executerRun(true),
+  };
+});

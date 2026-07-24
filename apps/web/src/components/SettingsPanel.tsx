@@ -26,6 +26,7 @@ import { finnhubKeyStore } from "../store/finnhub";
 import { etherscanKeyStore } from "../store/etherscan";
 import { risqueStore } from "../store/risque";
 import { refSymbolStore } from "../store/refSymbol";
+import { fetchPairs } from "../data/pairs";
 import {
   creerSnapshot,
   listerSnapshots,
@@ -205,10 +206,35 @@ function ApiKeyField({
 function RefSymbolSection() {
   const refSymbol = useStore(refSymbolStore, (s) => s.refSymbol);
   const [draft, setDraft] = useState(refSymbol);
+  // Statut de disponibilité du symbole committé sur le catalogue spot Binance (la
+  // MÊME source que le fetch refClose des indicateurs croisés) : "verif" pendant le
+  // contrôle, "ok" présent, "indispo" absent. On ACCEPTE la valeur (accept-and-warn) :
+  // un symbole inconnu produit ici un état visible plutôt que des panes statistiques
+  // muets (refClose retombe alors sur une série vide, par conception de l'auxProvider).
+  const [statutRef, setStatutRef] = useState<"verif" | "ok" | "indispo">("ok");
 
   // Le store peut changer ailleurs (restauration de session) : on resynchronise
   // le brouillon quand la valeur committée bouge.
   useEffect(() => setDraft(refSymbol), [refSymbol]);
+
+  // Valide le symbole committé contre le catalogue spot Binance (`fetchPairs`, mémoïsé
+  // par session → au plus un fetch réseau). Garde `ignore` contre un résultat périmé si
+  // la valeur change avant la résolution. Catalogue injoignable → on n'alarme pas
+  // (impossible de conclure), l'indicateur reste "ok".
+  useEffect(() => {
+    let ignore = false;
+    setStatutRef("verif");
+    fetchPairs("binance")
+      .then((paires) => {
+        if (!ignore) setStatutRef(paires.includes(refSymbol) ? "ok" : "indispo");
+      })
+      .catch(() => {
+        if (!ignore) setStatutRef("ok");
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [refSymbol]);
 
   const commit = () => {
     refSymbolStore.getState().setRefSymbol(draft);
@@ -243,6 +269,12 @@ function RefSymbolSection() {
             }}
           />
         </label>
+        {statutRef === "indispo" && (
+          <p className="mt-1 text-[11px] leading-snug text-down">
+            « {refSymbol} » indisponible sur le spot Binance — indicateurs croisés
+            inactifs jusqu'à correction.
+          </p>
+        )}
       </div>
     </>
   );

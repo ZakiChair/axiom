@@ -397,6 +397,8 @@ export function NetliqWindow() {
 
   const courant = stats?.courant ?? null;
   const delta4s = stats?.delta4s ?? null;
+  const min2a = stats?.min2a ?? null;
+  const max2a = stats?.max2a ?? null;
 
   return (
     <>
@@ -436,7 +438,8 @@ export function NetliqWindow() {
         }
       />
 
-      {/* Bandeau de synthèse : liquidité courante (Md$), delta 4 semaines teinté. */}
+      {/* Bandeau de synthèse : liquidité courante (Md$), delta 4 semaines teinté, min/max de
+          la période affichée (extrêmes de la fenêtre, cf. repères pointillés du tracé). */}
       <div className="flex shrink-0 items-center gap-4 border-b border-border px-4 py-2 text-[11px]">
         <span className="flex items-center gap-1.5">
           <span className="text-text-dim">Liquidité nette</span>
@@ -445,6 +448,12 @@ export function NetliqWindow() {
         <span className="flex items-center gap-1.5">
           <span className="text-text-dim">Δ 4 sem</span>
           <Badge ton={tonDelta(delta4s)}>{formatMdSigne(delta4s)}</Badge>
+        </span>
+        <span className="text-text-dim">
+          Min <span className="tabular-nums text-text">{formatMd(min2a)}</span>
+        </span>
+        <span className="text-text-dim">
+          Max <span className="tabular-nums text-text">{formatMd(max2a)}</span>
         </span>
       </div>
 

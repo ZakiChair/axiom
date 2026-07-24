@@ -12,6 +12,7 @@
 import { useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { paperStore } from "../store/paper";
+import { paperOverlayStore } from "../chart/paperLignes";
 import { pnlLatent, FRAIS_TAKER, type OrdrePaper, type PositionPaper } from "../data/paper";
 import { marketStore } from "../store/market";
 import { debutJourLocalMs } from "../store/portfolio";
@@ -105,6 +106,8 @@ export function PaperWindow() {
   const executions = useStore(paperStore, (s) => s.executions);
   const derniersPrix = useStore(paperStore, (s) => s.derniersPrix);
   const symbolChart = useStore(marketStore, (s) => s.symbol);
+  // Overlay des lignes d'ordres/positions sur le chart maître (toggle éphémère, défaut ON).
+  const overlayActif = useStore(paperOverlayStore, (s) => s.actif);
 
   const [form, setForm] = useState<FormOrdre>(() => formInitial(symbolChart));
   const [erreurForm, setErreurForm] = useState<string | null>(null);
@@ -189,7 +192,18 @@ export function PaperWindow() {
         titre="Paper trading"
         sousTitre="Ordres simulés · flux live · journalisation EXPY"
         actions={
-          editSolde === null ? (
+          <span className="flex items-center gap-1">
+            {/* Overlay des lignes d'ordres/positions du symbole courant sur le chart maître. */}
+            <button
+              type="button"
+              className={BTN_SECONDAIRE}
+              aria-pressed={overlayActif}
+              title="Afficher les ordres/positions sur le chart maître"
+              onClick={() => paperOverlayStore.getState().basculer()}
+            >
+              Lignes {overlayActif ? "ON" : "OFF"}
+            </button>
+            {editSolde === null ? (
             <button
               type="button"
               className={BTN_SECONDAIRE}
@@ -217,7 +231,8 @@ export function PaperWindow() {
                 ✕
               </button>
             </span>
-          )
+          )}
+          </span>
         }
       />
 

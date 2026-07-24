@@ -60,6 +60,7 @@ import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
 import { liqMarksStore, type LiqHeatMode, type Granularite } from "../chart/liquidationMarkers";
 import { liqEstStore, LEVIERS } from "../chart/liquidationEstimates";
+import { distOverlayStore } from "../chart/distLignes";
 import { windowManagerStore, WINDOW_REGISTRY, type EtatFenetre } from "./windowManager";
 import { syntheticsStore } from "./synthetics";
 import { parseSyntheticSymbol } from "../data/synthetic";
@@ -375,6 +376,8 @@ interface PersistedSession {
   liqEstimates: boolean;
   /** Leviers cochés du modèle de niveaux estimés (sous-ensemble NON VIDE de LEVIERS). */
   liqLeviers: number[];
+  /** Bascule de l'overlay des bandes VaR sur le chart maître (chart/distLignes). */
+  distOverlay: boolean;
   macroOverlays: MacroOverlayId[];
   /** État replié des sections de la sidebar (clé = titre ; carte creuse). */
   sections: Record<string, boolean>;
@@ -394,6 +397,7 @@ function currentSession(): PersistedSession {
     liqGranularite: liqMarksStore.getState().granularite,
     liqEstimates: liqEstStore.getState().actif,
     liqLeviers: liqEstStore.getState().leviers,
+    distOverlay: distOverlayStore.getState().actif,
     macroOverlays: macroOverlayStore.getState().enabled,
     sections: uiSectionsStore.getState().open,
     priceScale: priceScaleStore.getState().type,
@@ -444,6 +448,7 @@ function hydrateSession(): void {
     );
     if (valides.length > 0) liqEstStore.getState().setLeviers(valides);
   }
+  if (typeof p.distOverlay === "boolean") distOverlayStore.getState().setActif(p.distOverlay);
 
   if (Array.isArray(p.macroOverlays)) {
     // setEnabled filtre lui-même les ids inconnus (unique()) — on borne malgré tout ici.
@@ -548,6 +553,7 @@ export function enablePersistence(): void {
   revenueStore.subscribe(saveSessionUi);
   liqMarksStore.subscribe(saveSessionUi);
   liqEstStore.subscribe(saveSessionUi);
+  distOverlayStore.subscribe(saveSessionUi);
   macroOverlayStore.subscribe(saveSessionUi);
   uiSectionsStore.subscribe(saveSessionUi);
   priceScaleStore.subscribe(saveSessionUi);

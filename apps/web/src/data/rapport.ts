@@ -15,7 +15,7 @@
  *  - PnL RÉALISÉ période = clôtures du portfolioStore dont `dateSortie` ∈ [now−période, now].
  *  - JOURNAL = trades EXPY dont `fermeTs` ∈ [now−période, now] ; `stats` recalculées sur ce
  *    MÊME sous-ensemble (cohérence liste/agrégats).
- *  - PAPER : le store paper n'est PAS encore mergé (T-futur). `paper` vaut toujours `null` ;
+ *  - PAPER : exécutions de clôture de la période (branché sur paperStore) ; section absente si aucune ;
  *    `ExecutionPaper` est un placeholder neutre local que T-futur remplacera par l'import réel.
  */
 import { formatUsd, formatPrice, formatDec } from "../lib/format";
@@ -37,10 +37,11 @@ import {
   type SerieActif,
 } from "./portRisque";
 
-/** Placeholder neutre : le store paper n'est pas encore mergé (T-futur le remplacera). */
-export interface ExecutionPaper {
-  [cle: string]: unknown;
-}
+// Type réel du moteur paper (branché au merge du lot v1.7 — les exécutions de la période
+// alimentent la section Paper du rapport).
+import type { ExecutionPaper } from "./paper";
+import { paperStore } from "../store/paper";
+export type { ExecutionPaper };
 
 /** Une position ouverte telle qu'affichée dans le rapport (prix courant = prix d'entrée). */
 export interface LignePositionRapport {
@@ -345,8 +346,18 @@ export async function collecterDonneesRapport(
     journal = null;
   }
 
-  // Paper : store non encore mergé (T-futur branchera executions.ts). Toujours null pour l'instant.
-  const paper: DonneesRapport["paper"] = null;
+  // Paper : exécutions de CLÔTURE (pnl non null) de la période — section absente si aucune.
+  let paper: DonneesRapport["paper"] = null;
+  try {
+    const execs = paperStore
+      .getState()
+      .executions.filter((e) => e.ts >= debut && e.ts <= nowMs && e.pnlUsd !== null);
+    if (execs.length > 0) {
+      paper = { executions: execs, pnlPeriode: execs.reduce((acc, e) => acc + (e.pnlUsd ?? 0), 0) };
+    }
+  } catch {
+    paper = null;
+  }
 
   return { genereTs: nowMs, periodeJours, portefeuille, risque, journal, paper };
 }

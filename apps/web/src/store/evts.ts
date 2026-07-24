@@ -18,10 +18,13 @@ export interface EvtsUiState {
   closeEvts: () => void;
   toggleEvts: () => void;
   /** Retour forward médian par type d'évènement (« méd +24 h : -0.8% »), pour la fenêtre
-   *  BRIEF et le suffixe des marqueurs ECO (Task 4). Mis à jour après chaque calcul réussi
-   *  (≥ 1 fenêtre alignée). */
-  statsParType: Partial<Record<TypeEvenement, string>>;
-  setStatParType: (type: TypeEvenement, libelle: string) => void;
+   *  BRIEF et le suffixe des marqueurs ECO (Task 4). `symbole` = le symbole SUR LEQUEL la
+   *  stat a été calculée (marché courant, éventuellement un symbole de groupe) : les
+   *  marqueurs ne suffixent que si ce symbole == symbole du chart maître (honnêteté
+   *  d'échantillon — jamais une stat d'un autre symbole sans le dire). Mis à jour après
+   *  chaque calcul réussi (≥ 1 fenêtre alignée). */
+  statsParType: Partial<Record<TypeEvenement, { symbole: string; libelle: string }>>;
+  setStatParType: (type: TypeEvenement, symbole: string, libelle: string) => void;
 }
 
 export const evtsUiStore = createStore<EvtsUiState>((set) => ({
@@ -30,8 +33,8 @@ export const evtsUiStore = createStore<EvtsUiState>((set) => ({
   closeEvts: () => windowManagerStore.getState().closeWindow("evts"),
   toggleEvts: () => windowManagerStore.getState().toggleWindow("evts"),
   statsParType: {},
-  setStatParType: (type, libelle) =>
-    set((s) => ({ statsParType: { ...s.statsParType, [type]: libelle } })),
+  setStatParType: (type, symbole, libelle) =>
+    set((s) => ({ statsParType: { ...s.statsParType, [type]: { symbole, libelle } } })),
 }));
 
 mirrorOpenState("evts", evtsUiStore);

@@ -279,7 +279,9 @@ export function EvtsWindow() {
         const fenetres = out.resultats.filter((r): r is FenetreAlignee => "points" in r);
         if (fenetres.length > 0) {
           const stats = statsEvts(fenetres);
-          evtsUiStore.getState().setStatParType(type, libelleStatParType(stats.perfMedianePost, demiFenetre, tf));
+          evtsUiStore
+            .getState()
+            .setStatParType(type, symbol, libelleStatParType(stats.perfMedianePost, demiFenetre, tf));
         }
       })
       .catch((err) => {

@@ -54,6 +54,7 @@ export function typeEvenementDe(title: string): TypeEvenement | null {
   const t = title.toLowerCase();
   if (t.includes("cpi") || t.includes("consumer price")) return "cpi";
   if (t.includes("non-farm") || t.includes("nfp") || t.includes("employment situation")) return "nfp";
+  if (t.includes("minutes")) return null; // les Minutes ne sont pas une décision (« FOMC Meeting Minutes »)
   if (t.includes("fomc")) return "fomc";
   return null;
 }
@@ -122,14 +123,17 @@ function redraw(): void {
   if (marketStore.getState().candles.length === 0) return; // axe temps pas encore prêt
 
   const statsParType = evtsUiStore.getState().statsParType;
+  const symboleMaitre = marketStore.getState().symbol;
   for (const ev of marqueurs(events)) {
     const base = tronquer(`${ev.country} ${ev.title}`, 18);
-    // Suffixe la stat d'étude d'évènements si elle est disponible pour ce type. La base est
-    // tronquée à 18 (comme un label nu) PUIS la stat est ajoutée EN ENTIER : la stat PRIME
-    // sur la fin du titre. Sur un titre FRED verbeux (« Consumer Price Index ») le suffixe
-    // reste ainsi toujours lisible, au lieu d'être rogné par une troncature commune.
+    // Suffixe la stat d'étude d'évènements — MAIS seulement si elle a été calculée sur le
+    // symbole du chart maître courant (honnêteté d'échantillon : une stat calculée sur un
+    // symbole de groupe ≠ maître n'est jamais affichée comme si elle valait pour le maître).
+    // La base est tronquée à 18 (comme un label nu) PUIS la stat est ajoutée EN ENTIER : la
+    // stat PRIME sur la fin du titre — sur un titre FRED verbeux elle reste toujours lisible.
     const type = typeEvenementDe(ev.title);
-    const stat = type ? statsParType[type] : undefined;
+    const entree = type ? statsParType[type] : undefined;
+    const stat = entree && entree.symbole === symboleMaitre ? entree.libelle : undefined;
     const extend: EcoMarkerExtend = {
       label: stat ? `${base} · ${stat}` : base,
     };

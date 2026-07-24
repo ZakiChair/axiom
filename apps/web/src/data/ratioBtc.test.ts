@@ -54,7 +54,9 @@ describe("estRatioBtc — reconnaît un ratio ÷BTC posé par le toggle", () => 
   });
 
   it("refuse exB ≠ exA", () => {
-    expect(estRatioBtc("binance:ETHUSDT|/|kraken:BTCUSD", "synthetic")).toBeNull();
+    // legB = BTCUSDT = réf binance : la garde legB≠réf ne joue PAS, seule exB≠exA isole
+    // le refus (kraken ≠ binance). Retirer la garde exB===exA rendrait ce cas passant.
+    expect(estRatioBtc("binance:ETHUSDT|/|kraken:BTCUSDT", "synthetic")).toBeNull();
   });
 
   it("refuse legB ≠ réf BTC de la source", () => {

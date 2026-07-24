@@ -1005,7 +1005,7 @@ export function PortfolioWindow() {
                           <div key={label} className="rounded-md border border-border bg-bg px-2 py-1.5">
                             <div className="text-[9px] uppercase tracking-wider text-text-dim">{label}</div>
                             <div className="tabular-nums text-sm font-medium text-down">
-                              −{formatUsd(pct * vueRisque.sommeAbs)}
+                              {pct >= 0 ? "−" : "+"}{formatUsd(Math.abs(pct) * vueRisque.sommeAbs)}
                             </div>
                             <div className="tabular-nums text-[10px] text-text-dim">
                               {formatPct(pct * 100, 2, { signe: false })}
@@ -1082,7 +1082,8 @@ export function PortfolioWindow() {
                     {/* Note d'honnêteté : 3 approximations assumées */}
                     <p className="text-[9px] leading-relaxed text-text-dim">
                       Approximations : composition ACTUELLE rétro-projetée (constante dans le temps) ;
-                      stress LINÉAIRE en β vs BTC ; périmètre crypto-Binance uniquement.
+                      stress LINÉAIRE en β vs BTC ; périmètre crypto-Binance uniquement. La VaR en %
+                      est exprimée sur le notionnel BRUT (Σ|positions|).
                     </p>
                   </>
                 )}

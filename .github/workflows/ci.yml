@@ -1,0 +1,26 @@
+# CI AXIOM — même gate que `pnpm check` (scripts/ci.sh) : typecheck + tests + build web.
+# Filet de sécurité distant (recommandation revue 2026-07-24) : le gate local reste
+# la référence, cette action empêche juste un push rouge de passer inaperçu.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # version pnpm lue depuis packageManager
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: oven-sh/setup-bun@v2 # tests du daemon (`bun test src`)
+        with:
+          bun-version: latest
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check

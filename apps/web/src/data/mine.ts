@@ -7,15 +7,15 @@
  * NaN ; l'UI affiche « — »). Repères externes (Capriole, mars 2026) : plancher élec
  * 46,4 k$ / all-in 58 k$ (soit un multiplicateur ≈ 1,25).
  *
- * NB honnêteté : aux défauts (30 J/TH), le modèle rend un plancher ~64,8 k$/BTC (formule
- * dimensionnellement juste), au-dessus du repère Capriole — Capriole implique une
- * efficacité EFFECTIVE de parc ~21,5 J/TH. Le curseur d'efficacité laisse l'utilisateur
- * ajuster ; la note d'honnêteté de la fenêtre l'explicite.
+ * NB honnêteté : le défaut d'efficacité (22 J/TH) suit l'efficacité EFFECTIVE de parc
+ * impliquée par Capriole (~21,5 J/TH) — à 900 EH/s il rend un plancher ~47,5 k$/BTC,
+ * cohérent avec le repère 46,4 k$. Le 30 J/TH initialement écrit dans la spec donnait
+ * ~64,8 k$ (incohérent avec ses propres repères) et a été amendé au merge du lot v1.8.
  */
 
 /** Paramètres réglables du modèle (persistés `axiom:mine:v1`, défauts affichés comme tels). */
 export interface ParametresMine {
-  /** Efficacité du parc en joules par térahash (J/TH). Défaut 30 (parc moyen). */
+  /** Efficacité du parc en joules par térahash (J/TH). Défaut 22 (efficacité effective de parc). */
   efficaciteJParTh: number;
   /** Prix de l'électricité en $/kWh. Défaut 0,045. */
   prixKwhUsd: number;
@@ -23,9 +23,9 @@ export interface ParametresMine {
   multiplicateurAllIn: number;
 }
 
-/** Défauts de la spec (Capriole mars 2026 : 58 032 / 46 426 ≈ 1,25). */
+/** Défauts (spec v1.8 amendée au merge : 22 J/TH ; Capriole mars 2026 : 58 032 / 46 426 ≈ 1,25). */
 export const PARAMS_MINE_DEFAUT: ParametresMine = {
-  efficaciteJParTh: 30,
+  efficaciteJParTh: 22,
   prixKwhUsd: 0.045,
   multiplicateurAllIn: 1.25,
 };

@@ -40,7 +40,9 @@ defaultWidth: 640, defaultHeight: 560, nouveau: true }`.
 
 ### Calculs purs (`apps/web/src/data/mine.ts` + `mine.test.ts`)
 Paramètres réglables (persistés `axiom:mine:v1`, défauts affichés comme tels) :
-`efficaciteJParTh = 30` (J/TH, parc moyen), `prixKwhUsd = 0.045`,
+`efficaciteJParTh = 22` (J/TH — AMENDÉ au merge : la version initiale disait 30,
+incohérent avec ses propres repères ; 22 suit l'efficacité effective de parc
+impliquée par Capriole ~21,5), `prixKwhUsd = 0.045`,
 `multiplicateurAllIn = 1.25` (Capriole mars 2026 : 58 032 / 46 426 ≈ 1,25).
 
 - `emissionBtcParJour(subsidyBtc)` = `144 × subsidyBtc` (post-halving 2024 : 450).
@@ -52,9 +54,10 @@ Paramètres réglables (persistés `axiom:mine:v1`, défauts affichés comme tel
   `144 × (subsidy + fees) × prixBtc / (hashrateHs / 1e15)`.
 - `ratioPrixCout(prixBtc, cout)` = prix / coût (NaN-safe).
 Chaque fonction : NaN-safe (entrées non finies → NaN, l'UI affiche « — »),
-testée sur des valeurs de référence réalistes (ex. 900 EH/s, 30 J/TH,
-0,045 $/kWh, 450 BTC/j → ~48,6 k$/BTC électrique ; vérifier l'ordre de grandeur
-vs Capriole 46,4 k$).
+testée sur des valeurs de référence réalistes (AMENDÉ au merge : 900 EH/s,
+22 J/TH, 0,045 $/kWh, 450 BTC/j → 47 520 $/BTC électrique, cohérent avec le
+repère Capriole 46,4 k$ ; à 30 J/TH la même formule donne 64 800 $ — le
+« ~48,6 k$ » initial était un lapsus arithmétique).
 
 ### UI (`components/MineWindow.tsx`)
 - Bandeau : prix spot vs **plancher électrique** vs **coût all-in** — barre

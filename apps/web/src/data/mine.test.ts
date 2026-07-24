@@ -21,13 +21,19 @@ describe("emissionBtcParJour", () => {
 });
 
 describe("coutElectriqueParBtc", () => {
-  // Repère de calcul EXACT du modèle avec les DÉFAUTS de la spec (30 J/TH). La formule
-  // est dimensionnellement juste ; 900 EH/s · 30 J/TH · 0,045 $/kWh · 450 BTC/j donne
-  // 64 800 $/BTC (27 GW → 648 GWh/j → 29,16 M$/j ÷ 450). Le « ~48,6 k$ » cité dans la
-  // spec correspond en réalité à ~22,5 J/TH (lapsus arithmétique de la spec) — cf. rapport.
-  it("calcule le coût électrique par BTC aux défauts (30 J/TH) → 64 800 $", () => {
+  // Contrôle d'exactitude DIMENSIONNELLE de la formule (valeurs rondes) :
+  // 900 EH/s · 30 J/TH · 0,045 $/kWh · 450 BTC/j → 64 800 $/BTC
+  // (27 GW → 648 GWh/j → 29,16 M$/j ÷ 450).
+  it("calcule exactement la formule (900 EH/s · 30 J/TH → 64 800 $)", () => {
     const cout = coutElectriqueParBtc(900e18, 30, 0.045, 450);
     expect(cout).toBeCloseTo(64_800, 0);
+  });
+
+  // AUX DÉFAUTS (22 J/TH, amendés au merge du lot v1.8 — le 30 J/TH initial de la spec
+  // était incohérent avec ses propres repères) : ~47,5 k$/BTC, cohérent avec Capriole.
+  it("rend ~47,5 k$ aux défauts (22 J/TH), cohérent avec le repère Capriole 46,4 k$", () => {
+    const cout = coutElectriqueParBtc(900e18, PARAMS_MINE_DEFAUT.efficaciteJParTh, 0.045, 450);
+    expect(cout).toBeCloseTo(47_520, 0);
   });
 
   // Gate spec « ordre de grandeur vs repère Capriole 46,4 k$ » : la même formule reproduit
@@ -97,9 +103,9 @@ describe("ratioPrixCout", () => {
 });
 
 describe("PARAMS_MINE_DEFAUT", () => {
-  it("expose les défauts de la spec (parc moyen)", () => {
+  it("expose les défauts (22 J/TH, spec v1.8 amendée au merge)", () => {
     expect(PARAMS_MINE_DEFAUT).toEqual({
-      efficaciteJParTh: 30,
+      efficaciteJParTh: 22,
       prixKwhUsd: 0.045,
       multiplicateurAllIn: 1.25,
     });

@@ -8,9 +8,9 @@
  * et des PARAMÈTRES réglables : changer un paramètre recalcule sans re-fetch (mémoïsé).
  *
  * Honnêteté (règle d'or doc 02) : c'est un MODÈLE paramétrique (parc moyen supposé), pas
- * une mesure. La note en bas rappelle les repères externes Capriole (mars 2026) et le
- * fait qu'aux défauts (30 J/TH) le plancher dépasse ces repères — le curseur d'efficacité
- * permet de recaler vers l'efficacité effective de parc (~21,5 J/TH chez Capriole).
+ * une mesure. La note en bas rappelle les repères externes Capriole (mars 2026) ; le
+ * défaut d'efficacité (22 J/TH) suit l'efficacité effective de parc impliquée par
+ * Capriole (~21,5 J/TH) et reste réglable via le curseur.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
@@ -422,8 +422,8 @@ export function MineWindow() {
                 </div>
                 <p className="mt-2 text-[10px] leading-snug text-text-dim">
                   Défauts : {PARAMS_MINE_DEFAUT.efficaciteJParTh} J/TH · {PARAMS_MINE_DEFAUT.prixKwhUsd} $/kWh ·
-                  ×{PARAMS_MINE_DEFAUT.multiplicateurAllIn}. Baisser l'efficacité (J/TH) vers ~21,5 recale le
-                  plancher sur l'efficacité effective de parc impliquée par Capriole.
+                  ×{PARAMS_MINE_DEFAUT.multiplicateurAllIn}. Le défaut d'efficacité suit l'efficacité
+                  effective de parc impliquée par Capriole (~21,5 J/TH) ; monter vers 25-30 modélise un parc moins moderne.
                 </p>
               </div>
             )}
@@ -492,8 +492,8 @@ export function MineWindow() {
             <div className="mt-1 flex items-start justify-between gap-3">
               <NoteSource>
                 Modèle paramétrique (parc moyen supposé), pas une mesure ; repères externes mars 2026 :
-                Capriole élec 46,4 k$ / all-in 58 k$. Aux défauts (30 J/TH) le plancher est plus haut —
-                ajuster l'efficacité dans ⚙ Paramètres.
+                Capriole élec 46,4 k$ / all-in 58 k$. Défaut 22 J/TH calé sur l'efficacité effective
+                de parc — ajustable dans ⚙ Paramètres.
               </NoteSource>
               <Fraicheur loading={enCours} majTs={majTs} />
             </div>

@@ -16,7 +16,7 @@
  *  - JOURNAL = trades EXPY dont `fermeTs` ∈ [now−période, now] ; `stats` recalculées sur ce
  *    MÊME sous-ensemble (cohérence liste/agrégats).
  *  - PAPER : exécutions de clôture de la période (branché sur paperStore) ; section absente si aucune ;
- *    `ExecutionPaper` est un placeholder neutre local que T-futur remplacera par l'import réel.
+ *    `ExecutionPaper` est ré-exporté depuis data/paper (moteur mergé).
  */
 import { formatUsd, formatPrice, formatDec } from "../lib/format";
 import {

@@ -9,6 +9,7 @@
 import { createStore } from "zustand/vanilla";
 import type { StoreApi } from "zustand/vanilla";
 import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
+import { parseSyntheticSymbol } from "../data/synthetic";
 
 /**
  * Fenêtre glissante max du buffer : sans borne, une session longue (terminal mono-
@@ -143,6 +144,29 @@ function loadingState(previous: MarketDataLoadState, requested: MarketIdentity):
   };
 }
 
+/**
+ * Source cohérente avec le symbole demandé, lors d'un changement de SYMBOLE SEUL.
+ *
+ * `synthetic` n'est pas une vraie source : son adaptateur ne sait lire que les symboles
+ * SYN encodés (`binance:ETHUSDT|/|binance:BTCUSDT`). Les appelants qui ne posent QUE le
+ * symbole (recherche de paires, watchlist, navigation, playbooks) laisseraient sinon la
+ * source virtuelle en place et l'adaptateur SYN recevrait un ticker normal — backfill
+ * impossible. Quitter un ratio = revenir à la source de sa jambe A (même sémantique que
+ * le détoggle ÷BTC) ; repli Binance si l'ancien symbole n'était pas un SYN décodable.
+ *
+ * Volontairement absent de `setMarket`/`setExchange` : une source posée EXPLICITEMENT
+ * doit gagner, sinon la séquence `setExchange("synthetic")` puis `setSymbol(SYN)` (SYN
+ * builder, restauration de session) ne pourrait plus jamais entrer dans un ratio.
+ */
+function exchangeForSymbol(
+  state: Pick<MarketState, "exchange" | "symbol">,
+  nextSymbol: string,
+): ExchangeId {
+  if (state.exchange !== "synthetic") return state.exchange;
+  if (parseSyntheticSymbol(nextSymbol) !== null) return "synthetic";
+  return parseSyntheticSymbol(state.symbol)?.exA ?? "binance";
+}
+
 /** Calcule le buffer suivant ; `null` signifie tick hors-ordre à ignorer. */
 function withCandle(candles: Candle[], candle: Candle): Candle[] | null {
   const last = candles[candles.length - 1];
@@ -196,7 +220,12 @@ export function createMarketStore(init: MarketStoreInit = {}): MarketStore {
     },
     setSymbol: (nextSymbol) => {
       const state = get();
-      state.setMarket({ ...marketIdentity(state), symbol: nextSymbol });
+      const symbol = normalizeMarketSymbol(nextSymbol);
+      state.setMarket({
+        ...marketIdentity(state),
+        symbol,
+        exchange: exchangeForSymbol(state, symbol),
+      });
     },
     setTimeframe: (nextTimeframe) => {
       const state = get();

@@ -4,7 +4,9 @@ import { Shell } from "./components/Shell";
 import type { ViewId } from "./components/Shell";
 import type { PacteState } from "./domain/model";
 import { usePacte } from "./hooks/usePacte";
+import { ContractsView } from "./views/ContractsView";
 import { DashboardView } from "./views/DashboardView";
+import { TransactionsView } from "./views/TransactionsView";
 
 type PlaceholderViewProps = {
   anomalyCount: number;
@@ -102,6 +104,19 @@ export function App() {
           onNavigate={navigateTo}
           score={pacte.score}
           state={pacte.state}
+        />
+      ) : activeView === "contracts" ? (
+        <ContractsView
+          contracts={pacte.state.contracts}
+          defaultCurrency={pacte.state.household.currency}
+          onAddContract={pacte.addContract}
+          onRemoveContract={pacte.removeContract}
+        />
+      ) : activeView === "transactions" ? (
+        <TransactionsView
+          defaultCurrency={pacte.state.household.currency}
+          onImportTransactions={pacte.importTransactions}
+          transactions={pacte.state.transactions}
         />
       ) : (
         <PlaceholderView

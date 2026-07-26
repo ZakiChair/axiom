@@ -2,9 +2,12 @@ import { useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 
 import { parsePacteState } from "../domain/guards";
+import { localDateKey } from "../domain/format";
 import type { PacteState } from "../domain/model";
 import type { MutationResult } from "../domain/mutations";
 import { downloadText } from "../infra/files";
+import { nextNotification } from "./notifications";
+import type { Notification } from "./notifications";
 
 type DataViewProps = {
   onReplaceState: (state: PacteState) => MutationResult;
@@ -17,13 +20,25 @@ type BackupParseResult =
   | { ok: true; state: PacteState }
   | { ok: false; error: string };
 
+type ImportLock = { current: boolean };
+
+export function acquireImportLock(lock: ImportLock): boolean {
+  if (lock.current) return false;
+  lock.current = true;
+  return true;
+}
+
+export function releaseImportLock(lock: ImportLock): void {
+  lock.current = false;
+}
+
 export function createStateExport(state: PacteState, now: Date): {
   name: string;
   content: string;
   type: string;
 } {
   return {
-    name: `pacte-sauvegarde-${now.toISOString().slice(0, 10)}.json`,
+    name: `pacte-sauvegarde-${localDateKey(now)}.json`,
     content: JSON.stringify(state, null, 2),
     type: "application/json;charset=utf-8",
   };
@@ -43,48 +58,54 @@ export function parseBackupText(text: string): BackupParseResult {
 }
 
 export function DataView({ onReplaceState, onResetEmpty, onRestoreDemo, state }: DataViewProps) {
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const [notification, setNotification] = useState<Notification | null>(null);
   const [reading, setReading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const importLockRef = useRef(false);
+
+  function notify(kind: Notification["kind"], message: string) {
+    setNotification((current) => nextNotification(current, kind, message));
+  }
 
   function showMutation(result: MutationResult, success: string) {
     if (!result.ok) {
-      setMessage("");
-      setError(result.error);
+      notify("error", result.error);
       return;
     }
-    setError("");
-    setMessage(success);
+    notify("success", success);
   }
 
   function exportState() {
     const backup = createStateExport(state, new Date());
     downloadText(backup.name, backup.content, backup.type);
-    setMessage("La sauvegarde JSON a été préparée sur cet appareil.");
-    setError("");
+    notify("success", "La sauvegarde JSON a été préparée sur cet appareil.");
   }
 
   async function importState(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0];
+    const input = event.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
+    if (!acquireImportLock(importLockRef)) return;
     setReading(true);
-    setMessage("");
-    setError("");
     try {
       const parsed = parseBackupText(await file.text());
       if (!parsed.ok) {
-        setError(parsed.error);
+        notify("error", parsed.error);
         return;
       }
-      if (!globalThis.confirm("Remplacer toutes les données locales par cette sauvegarde validée ?")) return;
+      if (!globalThis.confirm(`Remplacer toutes les données locales par la sauvegarde « ${file.name} » ?`)) return;
       const result = onReplaceState(parsed.state);
       showMutation(result, "La sauvegarde validée a remplacé le coffre local.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "La sauvegarde n’a pas pu être lue.");
+      notify(
+        "error",
+        caught instanceof Error ? caught.message : "La sauvegarde n’a pas pu être lue.",
+      );
     } finally {
+      releaseImportLock(importLockRef);
       setReading(false);
-      if (fileRef.current) fileRef.current.value = "";
+      input.value = "";
+      if (fileRef.current && fileRef.current !== input) fileRef.current.value = "";
     }
   }
 
@@ -93,7 +114,10 @@ export function DataView({ onReplaceState, onResetEmpty, onRestoreDemo, state }:
     try {
       showMutation(onRestoreDemo(), "Le jeu de démonstration a été restauré.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "La démonstration n’a pas pu être restaurée.");
+      notify(
+        "error",
+        caught instanceof Error ? caught.message : "La démonstration n’a pas pu être restaurée.",
+      );
     }
   }
 
@@ -102,7 +126,10 @@ export function DataView({ onReplaceState, onResetEmpty, onRestoreDemo, state }:
     try {
       showMutation(onResetEmpty(), "Un coffre vide a été créé pour ce foyer.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Le coffre vide n’a pas pu être créé.");
+      notify(
+        "error",
+        caught instanceof Error ? caught.message : "Le coffre vide n’a pas pu être créé.",
+      );
     }
   }
 
@@ -116,8 +143,15 @@ export function DataView({ onReplaceState, onResetEmpty, onRestoreDemo, state }:
         </div>
       </header>
 
-      {message ? <p className="mutation-toast" role="status">{message}</p> : null}
-      {error ? <p className="dialog-error" role="alert">{error}</p> : null}
+      {notification ? (
+        <p
+          className={notification.kind === "error" ? "dialog-error" : "mutation-toast"}
+          key={notification.id}
+          role={notification.kind === "error" ? "alert" : "status"}
+        >
+          {notification.message}
+        </p>
+      ) : null}
 
       <section className="local-scope" aria-labelledby="local-scope-title">
         <div className="audit-marker" aria-hidden="true">LC</div>
@@ -145,7 +179,7 @@ export function DataView({ onReplaceState, onResetEmpty, onRestoreDemo, state }:
           <h2>Importer après validation</h2>
           <p>Le schéma PACTE V1 est contrôlé avant toute confirmation de remplacement.</p>
           <label className="file-control" htmlFor="backup-file">Importer une sauvegarde</label>
-          <input accept=".json,application/json" id="backup-file" onChange={importState} ref={fileRef} type="file" />
+          <input accept=".json,application/json" disabled={reading} id="backup-file" onChange={importState} ref={fileRef} type="file" />
           {reading ? <p className="form-note" role="status">Validation locale en cours…</p> : null}
         </section>
       </div>

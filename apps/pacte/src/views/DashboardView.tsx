@@ -1,6 +1,6 @@
 import type { Anomaly, Contract, PacteState } from "../domain/model";
 import type { ViewId } from "../components/Shell";
-import { formatCalendarDate, formatCurrency } from "../domain/format";
+import { formatCalendarDate, formatCurrency, localDateKey } from "../domain/format";
 
 type DashboardViewProps = {
   anomalies: Anomaly[];
@@ -59,11 +59,7 @@ function scoreLabel(score: number): string {
 
 export function DashboardView({ anomalies, onNavigate, onOpenAnomaly, score, state }: DashboardViewProps) {
   const now = new Date();
-  const today = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    String(now.getDate()).padStart(2, "0"),
-  ].join("-");
+  const today = localDateKey(now);
   const deadlines = getUpcomingDeadlines(state.contracts, today);
   const activeContracts = state.contracts.filter((contract) => contract.status === "active");
   const priorityAnomalies = anomalies.slice(0, 3);

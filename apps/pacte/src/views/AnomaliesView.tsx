@@ -9,6 +9,8 @@ import type {
   ClaimCase,
 } from "../domain/model";
 import type { MutationResult } from "../domain/mutations";
+import { nextNotification } from "./notifications";
+import type { Notification } from "./notifications";
 
 export type AnomalyFilter = "all" | AnomalySeverity;
 
@@ -66,7 +68,7 @@ export function AnomaliesView({
   selectedAnomalyId,
 }: AnomaliesViewProps) {
   const [filter, setFilter] = useState<AnomalyFilter>("all");
-  const [message, setMessage] = useState("");
+  const [notification, setNotification] = useState<Notification | null>(null);
   const selectedRef = useRef<HTMLElement>(null);
   const filteredAnomalies = useMemo(
     () => filterAnomalies(anomalies, filter),
@@ -83,8 +85,11 @@ export function AnomaliesView({
     selectedRef.current?.focus();
   }, [selectedAnomalyId]);
 
+  function notify(kind: Notification["kind"], message: string) {
+    setNotification((current) => nextNotification(current, kind, message));
+  }
+
   function openClaim(anomaly: Anomaly) {
-    setMessage("");
     const existing = casesByAnomaly.get(anomaly.id);
     if (existing) {
       onSelectCase(existing.id);
@@ -94,27 +99,32 @@ export function AnomaliesView({
     try {
       const result = onOpenCase(anomaly);
       if (!result.ok) {
-        setMessage(result.error);
+        notify("error", result.error);
         return;
       }
       onSelectCase(`case:${anomaly.id}`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Le dossier n’a pas pu être ouvert.");
+      notify(
+        "error",
+        error instanceof Error ? error.message : "Le dossier n’a pas pu être ouvert.",
+      );
     }
   }
 
   function dismiss(anomaly: Anomaly) {
-    setMessage("");
     if (!globalThis.confirm(`Classer le contrôle « ${anomaly.title} » ?`)) return;
     try {
       const result = onDismissAnomaly(anomaly.id);
       if (!result.ok) {
-        setMessage(result.error);
+        notify("error", result.error);
         return;
       }
-      if (result.changed > 0) setMessage("L’anomalie a été classée dans le registre local.");
+      if (result.changed > 0) notify("success", "L’anomalie a été classée dans le registre local.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "L’anomalie n’a pas pu être classée.");
+      notify(
+        "error",
+        error instanceof Error ? error.message : "L’anomalie n’a pas pu être classée.",
+      );
     }
   }
 
@@ -142,7 +152,15 @@ export function AnomaliesView({
         ))}
       </div>
 
-      {message ? <p className="mutation-toast" role="status">{message}</p> : null}
+      {notification ? (
+        <p
+          className={notification.kind === "error" ? "dialog-error" : "mutation-toast"}
+          key={notification.id}
+          role={notification.kind === "error" ? "alert" : "status"}
+        >
+          {notification.message}
+        </p>
+      ) : null}
 
       {filteredAnomalies.length > 0 ? (
         <ol className="anomaly-register">

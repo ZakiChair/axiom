@@ -2,16 +2,31 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { createDemoState } from "../data/demo";
-import { createStateExport, DataView, parseBackupText } from "./DataView";
+import {
+  acquireImportLock,
+  createStateExport,
+  DataView,
+  parseBackupText,
+  releaseImportLock,
+} from "./DataView";
 
 describe("portabilité du coffre", () => {
   it("construit un export JSON daté et réimportable", () => {
     const state = createDemoState();
-    const backup = createStateExport(state, new Date("2026-07-26T21:15:00.000Z"));
+    const backup = createStateExport(state, new Date(2026, 6, 26, 0, 30));
 
     expect(backup.name).toBe("pacte-sauvegarde-2026-07-26.json");
     expect(backup.type).toBe("application/json;charset=utf-8");
     expect(parseBackupText(backup.content)).toEqual({ ok: true, state });
+  });
+
+  it("refuse une seconde acquisition tant que l'import courant détient le verrou", () => {
+    const lock = { current: false };
+
+    expect(acquireImportLock(lock)).toBe(true);
+    expect(acquireImportLock(lock)).toBe(false);
+    releaseImportLock(lock);
+    expect(acquireImportLock(lock)).toBe(true);
   });
 
   it("refuse un JSON illisible ou un état hors schéma", () => {

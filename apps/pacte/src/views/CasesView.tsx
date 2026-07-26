@@ -1,11 +1,21 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import { formatCalendarDate, formatCurrency, formatTimestamp } from "../domain/format";
+import {
+  formatCalendarDate,
+  formatCurrency,
+  formatTimestamp,
+  localDateKey,
+} from "../domain/format";
 import type { ClaimCase, ClaimCaseStatus } from "../domain/model";
 import type { MutationResult } from "../domain/mutations";
 import { downloadText } from "../infra/files";
+import { nextNotification } from "./notifications";
+import type { Notification } from "./notifications";
 
 type CaseChanges = Partial<Pick<ClaimCase, "status" | "note" | "letter">>;
+type CaseDraft = Pick<ClaimCase, "note" | "letter">;
+type CaseDrafts = Record<string, CaseDraft>;
+type CaseNotification = Notification & { caseId: string };
 
 type CasesViewProps = {
   cases: ClaimCase[];
@@ -33,36 +43,50 @@ export function caseLetterFileName(provider: string, date: string): string {
   return `reclamation-${slug || "dossier"}-${date}.txt`;
 }
 
-function today(): string {
-  const now = new Date();
-  return [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
+export function caseDraftFor(drafts: CaseDrafts, claim: ClaimCase): CaseDraft {
+  return drafts[claim.id] ?? { note: claim.note, letter: claim.letter };
+}
+
+export function updateCaseDraft(
+  drafts: CaseDrafts,
+  claim: ClaimCase,
+  changes: Partial<CaseDraft>,
+): CaseDrafts {
+  return {
+    ...drafts,
+    [claim.id]: { ...caseDraftFor(drafts, claim), ...changes },
+  };
 }
 
 export function CasesView({ cases, onSelectCase, onUpdateCase, selectedCaseId }: CasesViewProps) {
   const activeCase = cases.find((claim) => claim.id === selectedCaseId) ?? cases[0];
-  const [note, setNote] = useState(activeCase?.note ?? "");
-  const [letter, setLetter] = useState(activeCase?.letter ?? "");
-  const [message, setMessage] = useState("");
+  const [drafts, setDrafts] = useState<CaseDrafts>({});
+  const [notification, setNotification] = useState<CaseNotification | null>(null);
+  const activeDraft = activeCase ? caseDraftFor(drafts, activeCase) : { note: "", letter: "" };
 
-  useEffect(() => {
-    setNote(activeCase?.note ?? "");
-    setLetter(activeCase?.letter ?? "");
-    setMessage("");
-  }, [activeCase?.id]);
+  function notify(kind: Notification["kind"], message: string) {
+    if (!activeCase) return;
+    setNotification((current) => ({
+      ...nextNotification(current, kind, message),
+      caseId: activeCase.id,
+    }));
+  }
 
   function update(changes: CaseChanges, successMessage: string): boolean {
     if (!activeCase) return false;
-    setMessage("");
     try {
       const result = onUpdateCase(activeCase.id, changes);
       if (!result.ok) {
-        setMessage(result.error);
+        notify("error", result.error);
         return false;
       }
-      setMessage(successMessage);
+      notify("success", successMessage);
       return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Le dossier n’a pas pu être enregistré.");
+      notify(
+        "error",
+        error instanceof Error ? error.message : "Le dossier n’a pas pu être enregistré.",
+      );
       return false;
     }
   }
@@ -70,18 +94,18 @@ export function CasesView({ cases, onSelectCase, onUpdateCase, selectedCaseId }:
   async function copyLetter() {
     if (!activeCase) return;
     try {
-      await navigator.clipboard.writeText(letter);
-      setMessage("La lettre a été copiée dans le presse-papiers.");
+      await navigator.clipboard.writeText(activeDraft.letter);
+      notify("success", "La lettre a été copiée dans le presse-papiers.");
     } catch {
-      setMessage("La copie a échoué. Sélectionnez le texte de la lettre pour le copier.");
+      notify("error", "La copie a échoué. Sélectionnez le texte de la lettre pour le copier.");
     }
   }
 
   function downloadLetter() {
     if (!activeCase) return;
     downloadText(
-      caseLetterFileName(activeCase.contractSnapshot.provider, today()),
-      letter,
+      caseLetterFileName(activeCase.contractSnapshot.provider, localDateKey(new Date())),
+      activeDraft.letter,
       "text/plain;charset=utf-8",
     );
   }
@@ -147,7 +171,15 @@ export function CasesView({ cases, onSelectCase, onUpdateCase, selectedCaseId }:
               </div>
             </header>
 
-            {message ? <p className="mutation-toast" role="status">{message}</p> : null}
+            {notification?.caseId === activeCase.id ? (
+              <p
+                className={notification.kind === "error" ? "dialog-error" : "mutation-toast"}
+                key={notification.id}
+                role={notification.kind === "error" ? "alert" : "status"}
+              >
+                {notification.message}
+              </p>
+            ) : null}
 
             <section className="case-evidence" aria-labelledby="case-evidence-title">
               <p className="section-kicker">Instantané du contrôle</p>
@@ -181,15 +213,31 @@ export function CasesView({ cases, onSelectCase, onUpdateCase, selectedCaseId }:
             <div className="case-editor">
               <div className="field-group">
                 <label htmlFor="case-note">Note de suivi</label>
-                <textarea id="case-note" onChange={(event) => setNote(event.currentTarget.value)} rows={5} value={note} />
+                <textarea
+                  id="case-note"
+                  onChange={(event) => {
+                    const note = event.currentTarget.value;
+                    setDrafts((current) => updateCaseDraft(current, activeCase, { note }));
+                  }}
+                  rows={5}
+                  value={activeDraft.note}
+                />
               </div>
               <div className="field-group">
                 <label htmlFor="case-letter">Lettre de réclamation</label>
-                <textarea id="case-letter" onChange={(event) => setLetter(event.currentTarget.value)} rows={22} value={letter} />
+                <textarea
+                  id="case-letter"
+                  onChange={(event) => {
+                    const letter = event.currentTarget.value;
+                    setDrafts((current) => updateCaseDraft(current, activeCase, { letter }));
+                  }}
+                  rows={22}
+                  value={activeDraft.letter}
+                />
               </div>
               <p className="legal-note">Vérifiez les informations et les délais applicables dans votre juridiction avant tout envoi.</p>
               <div className="record-actions no-print">
-                <button className="primary-action" onClick={() => update({ note, letter }, "La note et la lettre ont été enregistrées.")} type="button">Enregistrer les modifications</button>
+                <button className="primary-action" onClick={() => update(activeDraft, "La note et la lettre ont été enregistrées.")} type="button">Enregistrer les modifications</button>
                 <button className="secondary-action" onClick={copyLetter} type="button">Copier la lettre</button>
                 <button className="secondary-action" onClick={downloadLetter} type="button">Télécharger en .txt</button>
                 <button className="secondary-action" onClick={() => window.print()} type="button">Imprimer la lettre</button>
@@ -197,7 +245,7 @@ export function CasesView({ cases, onSelectCase, onUpdateCase, selectedCaseId }:
             </div>
 
             <section className="printable-letter" aria-label="Lettre active à imprimer">
-              <pre>{letter}</pre>
+              <pre>{activeDraft.letter}</pre>
             </section>
           </article>
         </div>

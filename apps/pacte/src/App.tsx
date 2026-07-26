@@ -19,6 +19,8 @@ const VIEW_TITLES: Record<ViewId, string> = {
   data: "Données",
 };
 
+type FocusOwner = "main" | "target";
+
 export function App() {
   const [activeView, setActiveView] = useState<ViewId>("dashboard");
   const [selectedAnomalyId, setSelectedAnomalyId] = useState<string>();
@@ -29,15 +31,16 @@ export function App() {
   const activeTitle = VIEW_TITLES[activeView];
   const headingId = activeView === "dashboard" ? "dashboard-title" : `${activeView}-title`;
 
-  const navigateTo = useCallback((view: ViewId) => {
+  const navigateTo = useCallback((view: ViewId, focusOwner: FocusOwner = "main") => {
+    if (view === "anomalies" && focusOwner === "main") setSelectedAnomalyId(undefined);
     if (view === activeView) return;
-    shouldFocusMain.current = true;
+    shouldFocusMain.current = focusOwner === "main";
     setActiveView(view);
   }, [activeView]);
 
   const openAnomaly = useCallback((anomalyId: string) => {
     setSelectedAnomalyId(anomalyId);
-    navigateTo("anomalies");
+    navigateTo("anomalies", "target");
   }, [navigateTo]);
 
   const openCase = useCallback((caseId: string) => {

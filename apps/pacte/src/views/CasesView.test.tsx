@@ -4,7 +4,12 @@ import { describe, expect, it } from "vitest";
 import { createDemoState } from "../data/demo";
 import { analyseState } from "../domain/analyse";
 import { createClaimCase } from "../domain/cases";
-import { caseLetterFileName, CasesView } from "./CasesView";
+import {
+  caseDraftFor,
+  caseLetterFileName,
+  CasesView,
+  updateCaseDraft,
+} from "./CasesView";
 
 const NOW = new Date("2026-07-26T12:00:00.000Z");
 
@@ -13,6 +18,25 @@ describe("caseLetterFileName", () => {
     expect(caseLetterFileName("Énergie & Lac SA", "2026-07-26")).toBe(
       "reclamation-energie-lac-sa-2026-07-26.txt",
     );
+  });
+});
+
+describe("brouillons de dossier", () => {
+  it("préserve chaque brouillon et ne montre jamais celui de l'autre dossier lors de A → B → A", () => {
+    type Draft = { note: string; letter: string };
+    type Drafts = Record<string, Draft>;
+    const state = createDemoState();
+    const anomalies = analyseState(state, NOW);
+    const claimA = createClaimCase(anomalies[0]!, state, NOW);
+    const claimB = createClaimCase(anomalies[1]!, state, NOW);
+    let drafts: Drafts = {};
+
+    drafts = updateCaseDraft(drafts, claimA, { note: "Brouillon A" });
+    expect(caseDraftFor(drafts, claimB)).toEqual({ note: claimB.note, letter: claimB.letter });
+
+    drafts = updateCaseDraft(drafts, claimB, { letter: "Lettre B modifiée" });
+    expect(caseDraftFor(drafts, claimA)).toEqual({ note: "Brouillon A", letter: claimA.letter });
+    expect(caseDraftFor(drafts, claimB)).toEqual({ note: claimB.note, letter: "Lettre B modifiée" });
   });
 });
 

@@ -27,15 +27,21 @@ test.beforeEach(async ({ page }) => {
   await restaurerDemonstration(page);
 });
 
-test("récupère un coffre corrompu après export brut et confirmation", async ({ page }) => {
+test("récupère un coffre corrompu après export brut et confirmation", async ({ page }, testInfo) => {
   await page.evaluate(() => localStorage.setItem("pacte:v1", "{coffre-corrompu"));
   await page.reload();
 
   await expect(page.getByRole("heading", { name: "Coffre local à récupérer" })).toBeVisible();
   await expect(page.getByRole("navigation")).toHaveCount(0);
+  const exportRaw = page.getByRole("button", { name: "Exporter la valeur brute" });
+  const restoreDemo = page.getByRole("button", { name: "Restaurer la démonstration" });
+  if (testInfo.project.name === "chromium-mobile") {
+    await expectTouchTarget(exportRaw);
+    await expectTouchTarget(restoreDemo);
+  }
 
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Exporter la valeur brute" }).click();
+  await exportRaw.click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(
     /^pacte-recuperation-brute-\d{4}-\d{2}-\d{2}\.txt$/,
@@ -46,7 +52,7 @@ test("récupère un coffre corrompu après export brut et confirmation", async (
   expect(Buffer.concat(chunks).toString("utf8")).toBe("{coffre-corrompu");
 
   page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "Restaurer la démonstration" }).click();
+  await restoreDemo.click();
   await expect(page.getByRole("heading", { name: /Bonjour, Foyer Démo/ })).toBeVisible();
 
   await page.reload();

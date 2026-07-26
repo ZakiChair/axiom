@@ -31,6 +31,12 @@ export type TransactionEntryInput = {
 
 export type EntryErrors<T> = Partial<Record<keyof T, string>>;
 
+export function hasEntryErrors(errors: object): boolean {
+  return Object.values(errors).some((message: unknown) => (
+    typeof message === "string" && message.length > 0
+  ));
+}
+
 export function firstInvalidField<Field extends PropertyKey>(
   errors: Partial<Record<Field, string>>,
   order: readonly Field[],

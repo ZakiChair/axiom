@@ -4,9 +4,17 @@ import {
   buildContractEntry,
   buildTransactionEntry,
   firstInvalidField,
+  hasEntryErrors,
   validateContractEntry,
   validateTransactionEntry,
 } from "./entries";
+
+describe("hasEntryErrors", () => {
+  it("ignore une clé corrigée à undefined et détecte un vrai message", () => {
+    expect(hasEntryErrors({ provider: undefined })).toBe(false);
+    expect(hasEntryErrors({ provider: "Indiquez le fournisseur." })).toBe(true);
+  });
+});
 
 describe("firstInvalidField", () => {
   it("retourne le premier champ invalide dans l'ordre du formulaire", () => {

@@ -5,6 +5,7 @@ import { Modal } from "../components/Modal";
 import {
   buildContractEntry,
   firstInvalidField,
+  hasEntryErrors,
   validateContractEntry,
 } from "../domain/entries";
 import type { ContractEntryInput, EntryErrors } from "../domain/entries";
@@ -158,7 +159,7 @@ function ContractForm({ defaultCurrency, onCancel, onConfirm }: ContractFormProp
     const nextErrors = validateContractEntry(input);
     setErrors(nextErrors);
     setFormError("");
-    if (Object.keys(nextErrors).length > 0) {
+    if (hasEntryErrors(nextErrors)) {
       shouldFocusInvalidField.current = true;
       return;
     }
@@ -353,7 +354,7 @@ function ContractForm({ defaultCurrency, onCancel, onConfirm }: ContractFormProp
         ) : null}
       </div>
 
-      {Object.keys(errors).length > 0 ? (
+      {hasEntryErrors(errors) ? (
         <div className="dialog-error" role="alert">
           <p>Corrigez les champs signalés avant de confirmer le contrat.</p>
           <ul>{Object.values(errors).filter(Boolean).map((message) => <li key={message}>{message}</li>)}</ul>

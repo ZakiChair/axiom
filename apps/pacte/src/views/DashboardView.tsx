@@ -152,7 +152,6 @@ export function DashboardView({ anomalies, onNavigate, onOpenAnomaly, score, sta
                 <h2 id="priorities-title">Priorités</h2>
               </div>
               <button
-                aria-label="Voir toutes les anomalies"
                 className="text-action"
                 onClick={() => onNavigate("anomalies")}
                 type="button"

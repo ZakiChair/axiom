@@ -1633,6 +1633,14 @@ h2 {
     padding: 1.35rem 1rem 6.75rem;
   }
 
+  .dashboard-view button,
+  .registry-view button,
+  .registry-view input:not([type="hidden"]),
+  .registry-view select,
+  .registry-view summary {
+    min-height: 3rem;
+  }
+
   .mobile-navigation {
     position: fixed;
     z-index: 20;

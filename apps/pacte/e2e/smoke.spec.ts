@@ -1,4 +1,10 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+async function expectTouchTarget(locator: Locator) {
+  const box = await locator.boundingBox();
+  expect(box, "la cible tactile doit avoir une boîte visible").not.toBeNull();
+  expect(box!.height, "la cible tactile doit mesurer au moins 48 px de haut").toBeGreaterThanOrEqual(48);
+}
 
 async function restaurerDemonstration(page: Page) {
   await page.goto("/");
@@ -23,6 +29,9 @@ test.beforeEach(async ({ page }) => {
 
 test("transforme l’anomalie Helvetia du tableau de bord en dossier avec lettre", async ({ page }) => {
   await page.getByRole("button", { name: /^(Vue d’ensemble|Accueil)$/ }).click();
+
+  const toutesLesAnomalies = page.getByRole("button", { name: "Tout voir", exact: true });
+  await expect(toutesLesAnomalies).toHaveText("Tout voir");
 
   await page
     .getByRole("button", { name: /Double débit possible — Helvetia Protect/ })
@@ -87,4 +96,36 @@ test("refuse un JSON invalide sans remplacer le coffre", async ({ page }) => {
   await expect(page.getByText("Contrats3", { exact: true })).toBeVisible();
   await expect(page.getByText("Mouvements4", { exact: true })).toBeVisible();
   await expect(page.getByText("Dossiers0", { exact: true })).toBeVisible();
+});
+
+test("sert le favicon PACTE local avec son type SVG", async ({ page }) => {
+  const favicon = page.locator('link[rel~="icon"]');
+  await expect(favicon).toHaveAttribute("href", "/favicon.svg");
+
+  const response = await page.request.get(new URL("/favicon.svg", page.url()).toString());
+  expect(response.status()).toBe(200);
+  expect(response.headers()["content-type"]).toContain("image/svg+xml");
+});
+
+test("offre des cibles tactiles d’au moins 48 px dans les vues auditées", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "chromium-mobile", "Contrôle réservé au viewport mobile");
+
+  await page.getByRole("button", { name: /^Accueil$/ }).click();
+  const toutesLesAnomalies = page.locator("button", { hasText: "Tout voir" });
+  await expectTouchTarget(toutesLesAnomalies);
+  await toutesLesAnomalies.click();
+
+  for (const name of ["Toutes", "Critiques", "Importantes", "Vigilances"]) {
+    await expectTouchTarget(page.getByRole("button", { name, exact: true }));
+  }
+
+  await page.getByRole("button", { name: /^Données$/ }).click();
+  for (const name of [
+    "Exporter la sauvegarde",
+    "Restaurer la démonstration",
+    "Créer un coffre vide",
+  ]) {
+    await expectTouchTarget(page.getByRole("button", { name, exact: true }));
+  }
+  await expectTouchTarget(page.getByLabel("Importer une sauvegarde"));
 });

@@ -44,6 +44,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
         timeout-minutes: 5
 
+      - name: navigateur Chromium PACTE
+        run: pnpm --filter @pacte/web exec playwright install --with-deps chromium
+        timeout-minutes: 5
+
       - name: typecheck
         run: pnpm -r typecheck
         timeout-minutes: 5 # observé ~33 s
@@ -61,6 +65,18 @@ jobs:
       - name: tests web (vitest)
         run: pnpm --filter @axiom/web test
         timeout-minutes: 8 # observé ~87 s sur runner
+
+      - name: tests PACTE (vitest)
+        run: pnpm --filter @pacte/web test
+        timeout-minutes: 3
+
+      - name: build PACTE
+        run: pnpm --filter @pacte/web build
+        timeout-minutes: 3
+
+      - name: tests PACTE (playwright)
+        run: pnpm --filter @pacte/web test:e2e
+        timeout-minutes: 5
 
       - name: build web
         run: pnpm --filter @axiom/web build

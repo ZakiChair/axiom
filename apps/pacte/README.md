@@ -17,7 +17,16 @@ Depuis la racine du monorepo :
 
 ```bash
 pnpm install
+pnpm --filter @pacte/web exec playwright install chromium
 pnpm --filter @pacte/web dev
+```
+
+La deuxième commande installe le binaire Chromium nécessaire à `test:e2e` ;
+`pnpm install` seul installe le runner Playwright, pas son navigateur. Sur un
+runner Linux ou en CI, installez aussi les bibliothèques système :
+
+```bash
+pnpm --filter @pacte/web exec playwright install --with-deps chromium
 ```
 
 Vite affiche l’adresse locale à ouvrir, généralement

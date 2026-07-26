@@ -272,11 +272,12 @@ export function parseTransactionCsv(text: string, defaults: CsvImportDefaults): 
 }
 
 export function extractContractHints(text: string): ContractHints {
-  const currencyMatch = /\b(CHF|EUR)\b/i.exec(text);
-  const amountMatch = /\b(?:CHF|EUR)\s*([\d](?:[\d\s'’.,]*\d)?)|([\d](?:[\d\s'’.,]*\d)?)\s*(?:CHF|EUR)\b/i.exec(text);
+  const amountMatch = /\b(?:(CHF|EUR)\s*([\d](?:[\d\s'’.,]*\d)?)|([\d](?:[\d\s'’.,]*\d)?)\s*(CHF|EUR))\b/i.exec(text);
   const noticeMatch = /(?:préavis|preavis)\s*(?:de\s*)?(\d+)\s*jours|\b(\d+)\s*jours\s*(?:de\s*)?(?:préavis|preavis)/i.exec(text);
-  const amount = parseAmount(amountMatch?.[1] ?? amountMatch?.[2] ?? "");
-  const currency = currencyMatch === null ? undefined : currencyFrom(currencyMatch[1] ?? "", "CHF");
+  const amount = parseAmount(amountMatch?.[2] ?? amountMatch?.[3] ?? "");
+  const currency = amountMatch === null
+    ? undefined
+    : currencyFrom(amountMatch[1] ?? amountMatch[4] ?? "", "CHF");
   const noticeDays = Number(noticeMatch?.[1] ?? noticeMatch?.[2]);
 
   return {

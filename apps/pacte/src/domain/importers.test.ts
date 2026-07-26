@@ -71,4 +71,11 @@ describe("extractContractHints", () => {
       noticeDays: 30,
     });
   });
+
+  it("associe la devise au montant contractuel correspondant", () => {
+    expect(extractContractHints("Frais CHF. Prime EUR 89.90.")).toMatchObject({
+      amount: 89.9,
+      currency: "EUR",
+    });
+  });
 });

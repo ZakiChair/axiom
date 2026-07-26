@@ -10,6 +10,7 @@ import {
 } from "../domain/entries";
 import type { ContractEntryInput, EntryErrors } from "../domain/entries";
 import { extractContractHints } from "../domain/importers";
+import { formatCalendarDate, formatCurrency } from "../domain/format";
 import type { Contract, Currency } from "../domain/model";
 import type { MutationResult } from "../domain/mutations";
 import { readImportFile } from "../infra/files";
@@ -72,23 +73,6 @@ function createContractInput(defaultCurrency: Currency): ContractEntryInput {
 function localId(prefix: string): string {
   const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
   return `${prefix}-${random}`;
-}
-
-function formatAmount(amount: number, currency: Currency): string {
-  return new Intl.NumberFormat("fr-CH", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat("fr-CH", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(`${value}T00:00:00.000Z`));
 }
 
 function errorId(field: keyof ContractEntryInput): string {
@@ -381,20 +365,20 @@ function ContractCard({ contract, onRemove }: { contract: Contract; onRemove: (c
         <span className={`status-label status-${contract.status}`}>{STATUS_LABELS[contract.status]}</span>
       </div>
       <p className="record-amount">
-        {formatAmount(contract.amount, contract.currency)} · {CADENCE_LABELS[contract.cadence]}
+        {formatCurrency(contract.amount, contract.currency)} · {CADENCE_LABELS[contract.cadence]}
       </p>
       <details>
         <summary>Voir les clauses</summary>
         <dl className="clause-grid">
-          <div><dt>Début</dt><dd>{formatDate(contract.startDate)}</dd></div>
+          <div><dt>Début</dt><dd>{formatCalendarDate(contract.startDate)}</dd></div>
           <div><dt>Préavis</dt><dd>{contract.noticeDays} jours</dd></div>
-          <div><dt>Renouvellement</dt><dd>{contract.nextRenewalDate ? formatDate(contract.nextRenewalDate) : "Non renseigné"}</dd></div>
+          <div><dt>Renouvellement</dt><dd>{contract.nextRenewalDate ? formatCalendarDate(contract.nextRenewalDate) : "Non renseigné"}</dd></div>
           <div><dt>Catégorie</dt><dd>{contract.category || "Non renseignée"}</dd></div>
           <div className="clause-wide"><dt>Alias marchand</dt><dd>{contract.merchantAliases.length > 0 ? contract.merchantAliases.join(" · ") : "Aucun alias"}</dd></div>
           {contract.notes ? <div className="clause-wide"><dt>Notes</dt><dd>{contract.notes}</dd></div> : null}
         </dl>
       </details>
-      <button className="danger-action" onClick={() => onRemove(contract)} type="button">
+      <button aria-label={`Retirer ${contract.provider} du registre`} className="danger-action" onClick={() => onRemove(contract)} type="button">
         Retirer du registre
       </button>
     </li>

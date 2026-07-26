@@ -83,6 +83,7 @@ describe("pacteReducer", () => {
     const initial = createDemoState();
     const anomaly = analyseState(initial, NOW).find((item) => item.kind === "duplicate")!;
     const opened = pacteReducer(initial, { type: "case/open", anomaly, now: NOW });
+    const evidenceBeforeEdit = opened.cases[0]!.evidence.map((evidence) => ({ ...evidence }));
 
     const updated = pacteReducer(opened, {
       type: "case/update",
@@ -97,6 +98,7 @@ describe("pacteReducer", () => {
       status: "sent",
       note: "Courrier envoyé.",
     });
+    expect(updated.cases[0]?.evidence).toEqual(evidenceBeforeEdit);
     expect(opened.cases[0]?.status).toBe("review");
   });
 

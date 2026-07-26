@@ -9,6 +9,7 @@ import {
   validateTransactionEntry,
 } from "../domain/entries";
 import type { EntryErrors, TransactionEntryInput } from "../domain/entries";
+import { formatCalendarDate, formatCurrency } from "../domain/format";
 import { parseTransactionCsv } from "../domain/importers";
 import type { CsvImportResult } from "../domain/importers";
 import type { Currency, Transaction } from "../domain/model";
@@ -66,21 +67,19 @@ function localId(prefix: string): string {
   return `${prefix}-${random}`;
 }
 
-function formatAmount(amount: number, currency: Currency): string {
-  return new Intl.NumberFormat("fr-CH", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
+const MAX_VISIBLE_TRANSACTIONS = 250;
 
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat("fr-CH", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(`${value}T00:00:00.000Z`));
+export function transactionOrigin(transaction: Transaction): {
+  label: string;
+  className: string;
+} {
+  if (transaction.id.startsWith("transaction-manual-")) {
+    return { label: "Saisie manuelle", className: "origin-manual" };
+  }
+  if (transaction.importedAt) {
+    return { label: "Import CSV", className: "origin-csv" };
+  }
+  return { label: "Registre initial", className: "origin-initial" };
 }
 
 function transactionErrorId(field: keyof TransactionEntryInput): string {
@@ -243,9 +242,9 @@ function CsvPreview({ result }: { result: CsvImportResult }) {
             <tbody>
               {result.transactions.slice(0, 5).map((transaction) => (
                 <tr key={transaction.id}>
-                  <td>{formatDate(transaction.date)}</td>
+                  <td>{formatCalendarDate(transaction.date)}</td>
                   <td>{transaction.label}</td>
-                  <td className="numeric-cell">{formatAmount(transaction.amount, transaction.currency)}</td>
+                  <td className="numeric-cell">{formatCurrency(transaction.amount, transaction.currency)}</td>
                 </tr>
               ))}
             </tbody>
@@ -349,6 +348,7 @@ export function TransactionsView({
     || transaction.date.includes(normalizedFilter)
     || transaction.currency.toLocaleLowerCase("fr-CH").includes(normalizedFilter)
   )), [normalizedFilter, transactions]);
+  const visibleTransactions = filteredTransactions.slice(0, MAX_VISIBLE_TRANSACTIONS);
 
   useEffect(() => {
     if (!shouldFocusHeading.current) return;
@@ -403,7 +403,14 @@ export function TransactionsView({
             value={filter}
           />
         </div>
-        <p><strong>{filteredTransactions.length}</strong> sur {transactions.length} mouvements</p>
+        <p aria-label={filteredTransactions.length > MAX_VISIBLE_TRANSACTIONS
+          ? `${visibleTransactions.length} mouvements affichés sur ${filteredTransactions.length}`
+          : undefined}
+        >
+          {filteredTransactions.length > MAX_VISIBLE_TRANSACTIONS
+            ? <><strong>{visibleTransactions.length}</strong> mouvements affichés sur {filteredTransactions.length}</>
+            : <><strong>{filteredTransactions.length}</strong> sur {transactions.length} mouvements</>}
+        </p>
       </div>
 
       {filteredTransactions.length > 0 ? (
@@ -412,16 +419,19 @@ export function TransactionsView({
             <caption className="visually-hidden">Mouvements enregistrés</caption>
             <thead><tr><th scope="col">Date</th><th scope="col">Libellé</th><th scope="col">Origine</th><th scope="col">Montant</th></tr></thead>
             <tbody>
-              {filteredTransactions.map((transaction) => (
+              {visibleTransactions.map((transaction) => {
+                const origin = transactionOrigin(transaction);
+                return (
                 <tr key={transaction.id}>
-                  <td><time dateTime={transaction.date}>{formatDate(transaction.date)}</time></td>
+                  <td><time dateTime={transaction.date}>{formatCalendarDate(transaction.date)}</time></td>
                   <th scope="row">{transaction.label}</th>
-                  <td>{transaction.importedAt ? "Import local" : "Registre"}</td>
+                  <td><span className={`origin-label ${origin.className}`}>{origin.label}</span></td>
                   <td className={transaction.amount < 0 ? "numeric-cell credit-amount" : "numeric-cell"}>
-                    {formatAmount(transaction.amount, transaction.currency)}
+                    {formatCurrency(transaction.amount, transaction.currency)}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

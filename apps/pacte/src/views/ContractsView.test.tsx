@@ -21,5 +21,6 @@ describe("ContractsView", () => {
     expect(markup).toContain("Alpine Mobile");
     expect(markup).toContain("Préavis");
     expect(markup).toContain("Alias marchand");
+    expect(markup).toContain('aria-label="Retirer Alpine Mobile du registre"');
   });
 });

@@ -1,9 +1,11 @@
 import type { Anomaly, Contract, PacteState } from "../domain/model";
 import type { ViewId } from "../components/Shell";
+import { formatCalendarDate, formatCurrency } from "../domain/format";
 
 type DashboardViewProps = {
   anomalies: Anomaly[];
   onNavigate: (view: ViewId) => void;
+  onOpenAnomaly: (anomalyId: string) => void;
   score: number;
   state: PacteState;
 };
@@ -49,30 +51,13 @@ export function getUpcomingDeadlines(contracts: Contract[], today: string): Dead
     .slice(0, 2);
 }
 
-function formatDate(date: string): string {
-  return new Intl.DateTimeFormat("fr-CH", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(`${date}T00:00:00.000Z`));
-}
-
-function formatAmount(amount: number, currency: PacteState["household"]["currency"]): string {
-  return new Intl.NumberFormat("fr-CH", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 2,
-  }).format(amount);
-}
-
 function scoreLabel(score: number): string {
   if (score >= 80) return "Sous contrôle";
   if (score >= 55) return "À surveiller";
   return "À reprendre";
 }
 
-export function DashboardView({ anomalies, onNavigate, score, state }: DashboardViewProps) {
+export function DashboardView({ anomalies, onNavigate, onOpenAnomaly, score, state }: DashboardViewProps) {
   const now = new Date();
   const today = [
     now.getFullYear(),
@@ -132,7 +117,7 @@ export function DashboardView({ anomalies, onNavigate, score, state }: Dashboard
                       {CONTRACT_STATUS_LABELS[contract.status]}
                     </span>
                     <span className="contract-amount">
-                      {formatAmount(contract.amount, contract.currency)}
+                      {formatCurrency(contract.amount, contract.currency)}
                     </span>
                   </button>
                 </li>
@@ -184,13 +169,13 @@ export function DashboardView({ anomalies, onNavigate, score, state }: Dashboard
               <ol className="priority-list">
                 {priorityAnomalies.map((anomaly) => (
                   <li key={anomaly.id}>
-                    <button onClick={() => onNavigate("anomalies")} type="button">
+                    <button onClick={() => onOpenAnomaly(anomaly.id)} type="button">
                       <span className={`severity severity-${anomaly.severity}`}>
                         {SEVERITY_LABELS[anomaly.severity]}
                       </span>
                       <strong>{anomaly.title}</strong>
                       <span>
-                        {formatAmount(
+                        {formatCurrency(
                           anomaly.amount,
                           anomaly.evidence[0]?.currency ?? state.household.currency,
                         )}
@@ -215,7 +200,7 @@ export function DashboardView({ anomalies, onNavigate, score, state }: Dashboard
                 {deadlines.map((deadline) => (
                   <li key={deadline.contractId}>
                     <button onClick={() => onNavigate("contracts")} type="button">
-                      <time dateTime={deadline.date}>{formatDate(deadline.date)}</time>
+                      <time dateTime={deadline.date}>{formatCalendarDate(deadline.date)}</time>
                       <span>{deadline.provider}</span>
                     </button>
                   </li>

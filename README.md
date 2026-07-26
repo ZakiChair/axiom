@@ -4,12 +4,44 @@ Terminal de charting, orderflow et contexte macro **mono-utilisateur** (un opér
 
 Décisions figées : voir **`BUILD-CONTRACT.md`** (renderer-first, KLineChart, indicateurs TS pur, daemon localhost hors chemin chaud, pas de multi-tenant / Electron / AggregationEngine).
 
+![AXIOM Terminal — graphe BTCUSDT 4 h avec profil de volume et heatmap de liquidations, fenêtres FUNDX (funding cross-exchange), DOM (carnet d’ordres) et ECO (calendrier économique), watchlist et santé des sources](assets/apercu-terminal.png)
+
+## Présentation
+
+AXIOM est un **poste de marché local**, dans l’esprit d’un terminal Bloomberg ramené à un seul
+opérateur : une command line (`⌘K`), des **mnémoniques** courtes (`ECO`, `DOM`, `FUNDX`, `SCEN`…),
+des fenêtres flottantes avec snap et taskbar, des workspaces commutables — le tout servi par un
+process local unique et **vos** clés API.
+
+**Pour qui.** Un opérateur qui veut lire le marché crypto (spot + perp) *et* son contexte macro
+depuis un seul écran, sans abonnement ni compte. Ce n’est pas un SaaS : pas de multi-tenant, pas
+d’auth réseau, rien ne quitte la machine en dehors des appels aux APIs publiques.
+
+| | |
+|---|---|
+| **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations, **155 indicateurs** testés |
+| **Lire le contexte** | **35 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, treemap, options, COT, taux & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
+| **Décider** | screener, playbooks 1-clic, alertes, backtest, stress-test multi-facteurs, étude d’évènements (CPI/NFP/FOMC), journal de trades, paper trading |
+| **Ne pas décrocher** | alertes onglet fermé (macOS + Telegram optionnel), replay sur dumps officiels Binance, panneau de santé des sources |
+
+Deux partis pris structurent le produit :
+
+1. **Le chemin chaud reste direct.** Le front parle **directement** aux WebSockets des exchanges ;
+   le daemon `axiomd` ne prend en charge que le lent (APIs à quota, cache, persistance SQLite,
+   alertes). L’UI reste utilisable **sans** daemon.
+2. **Les calculs sont du TypeScript pur et testés.** Les 155 indicateurs vivent dans
+   `@axiom/indicators` — pas de WASM, pas de service Python — et sont vérifiés par golden tests
+   contre un oracle `pandas-ta` (`scripts/golden/`).
+
+**Hors périmètre assumé** : pas d’exécution d’ordres (`PAPER` est une simulation locale), pas de
+multi-utilisateur, pas d’Electron.
+
 ## Architecture
 
 ```
 packages/
   types/         @axiom/types       — contrat de données partagé
-  indicators/    @axiom/indicators  — ~98 indicateurs TS pur + golden tests
+  indicators/    @axiom/indicators  — 155 indicateurs TS pur + golden tests
   alerts/        @axiom/alerts      — moteur d’alertes pur (front + daemon)
   backtest/      @axiom/backtest    — moteur de backtest pur
 apps/
@@ -84,10 +116,10 @@ pnpm prod
 
 ## Fonctionnalités (aperçu)
 
-- **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, ~98 indicateurs
+- **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, 155 indicateurs
 - **Terminal** : palette ⌘K, raccourcis, workspaces, fenêtres flottantes + snap + taskbar
 - **Sources** : Binance, Bybit, OKX, Coinbase, Kraken, MEXC, Deribit, Twelve Data, Coinalyze, FRED, etc.
-- **Panneaux** : DES, ECO, NEWS, CORR, CHAIN, MAP, PORT, NOTE, EQS, TERM, OMON, DOM, BT, REPLAY, RATE, COT, SEAG, VOL, FUND, BRIEF, GLOBE
+- **Panneaux** : 35 fenêtres — DES, FUNDX, LIQ, ECO, NEWS, CORR, CHAIN, MAP, PORT, NOTE, EQS, TERM, OMON, DOM, BT, REPLAY, RATE, COT, SEAG, VOL, FUND, BRIEF, GLOBE, STBL, SQZ, CBPREM, NETLIQ, DATA, DIST, EXPY, PAPER, MINE, CYCLE, EVTS, SCEN
 - **Daemon** : proxy+cache, KV/candles SQLite, alertes (macOS + Telegram optionnel), replay dumps Binance, couches GDELT/UCDP
 
 ### Programme G100 (WTP 100 $/mois) — W0–W3 landés

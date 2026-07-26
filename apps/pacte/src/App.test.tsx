@@ -11,6 +11,9 @@ describe("PACTE application shell", () => {
     expect(markup).toContain('aria-label="Navigation principale"');
     expect(markup).toContain('aria-current="page"');
     expect(markup).toContain('id="contenu-principal"');
+    expect(markup).toContain('aria-labelledby="dashboard-title"');
+    expect(markup).toContain('aria-live="polite"');
+    expect(markup).toContain("Vue affichée : Vue d’ensemble");
     expect(markup).toContain("Coffre local");
     expect(markup).toContain("Bonjour, Foyer Démo");
   });

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 
 export type ViewId =
   | "dashboard"
@@ -12,7 +12,10 @@ type ShellProps = {
   activeView: ViewId;
   anomalyCount: number;
   children: ReactNode;
+  headingId: string;
+  mainRef: RefObject<HTMLElement>;
   onNavigate: (view: ViewId) => void;
+  viewTitle: string;
 };
 
 type NavigationProps = Pick<ShellProps, "activeView" | "anomalyCount" | "onNavigate"> & {
@@ -66,7 +69,15 @@ function Navigation({
   );
 }
 
-export function Shell({ activeView, anomalyCount, children, onNavigate }: ShellProps) {
+export function Shell({
+  activeView,
+  anomalyCount,
+  children,
+  headingId,
+  mainRef,
+  onNavigate,
+  viewTitle,
+}: ShellProps) {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#contenu-principal">
@@ -95,7 +106,17 @@ export function Shell({ activeView, anomalyCount, children, onNavigate }: ShellP
         </div>
       </aside>
 
-      <main id="contenu-principal" className="main-content" tabIndex={-1}>
+      <p aria-atomic="true" aria-live="polite" className="visually-hidden">
+        Vue affichée : {viewTitle}
+      </p>
+
+      <main
+        aria-labelledby={headingId}
+        id="contenu-principal"
+        className="main-content"
+        ref={mainRef}
+        tabIndex={-1}
+      >
         {children}
       </main>
 

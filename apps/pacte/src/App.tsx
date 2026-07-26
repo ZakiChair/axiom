@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Shell } from "./components/Shell";
 import type { ViewId } from "./components/Shell";
@@ -69,25 +69,44 @@ function PlaceholderView({ anomalyCount, onNavigate, state, view }: PlaceholderV
 
 export function App() {
   const [activeView, setActiveView] = useState<ViewId>("dashboard");
+  const mainRef = useRef<HTMLElement>(null);
+  const shouldFocusMain = useRef(false);
   const pacte = usePacte();
+  const activeTitle = activeView === "dashboard" ? "Vue d’ensemble" : VIEW_COPY[activeView].title;
+  const headingId = activeView === "dashboard" ? "dashboard-title" : `${activeView}-title`;
+
+  const navigateTo = useCallback((view: ViewId) => {
+    if (view === activeView) return;
+    shouldFocusMain.current = true;
+    setActiveView(view);
+  }, [activeView]);
+
+  useEffect(() => {
+    if (!shouldFocusMain.current) return;
+    shouldFocusMain.current = false;
+    mainRef.current?.focus();
+  }, [activeView]);
 
   return (
     <Shell
       activeView={activeView}
       anomalyCount={pacte.anomalies.length}
-      onNavigate={setActiveView}
+      headingId={headingId}
+      mainRef={mainRef}
+      onNavigate={navigateTo}
+      viewTitle={activeTitle}
     >
       {activeView === "dashboard" ? (
         <DashboardView
           anomalies={pacte.anomalies}
-          onNavigate={setActiveView}
+          onNavigate={navigateTo}
           score={pacte.score}
           state={pacte.state}
         />
       ) : (
         <PlaceholderView
           anomalyCount={pacte.anomalies.length}
-          onNavigate={setActiveView}
+          onNavigate={navigateTo}
           state={pacte.state}
           view={activeView}
         />

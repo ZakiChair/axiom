@@ -321,7 +321,11 @@ h2 {
 }
 
 .kpi-alert dd {
-  color: var(--vermilion);
+  width: max-content;
+  max-width: 100%;
+  padding-bottom: 0.15rem;
+  border-bottom: 0.25rem solid var(--vermilion);
+  color: var(--ink);
 }
 
 .contracts-register {
@@ -411,11 +415,13 @@ h2 {
 }
 
 .status-active {
-  color: var(--sage);
+  border-color: var(--sage);
+  color: var(--ink);
 }
 
 .status-terminated {
-  color: var(--vermilion);
+  border-color: var(--vermilion);
+  color: var(--ink);
 }
 
 .audit-rail {
@@ -443,7 +449,7 @@ h2 {
 
 .audit-marker {
   padding-top: 0.15rem;
-  color: var(--vermilion);
+  color: var(--ink);
   font-family: var(--font-data);
   font-size: 0.68rem;
   font-weight: 700;
@@ -548,6 +554,9 @@ h2 {
 
 .severity {
   grid-column: 1 / -1;
+  padding-left: 0.45rem;
+  border-left: 0.28rem solid var(--carbon);
+  color: var(--ink);
   font-family: var(--font-data);
   font-size: 0.61rem;
   font-weight: 700;
@@ -556,15 +565,16 @@ h2 {
 }
 
 .severity-critical {
-  color: var(--vermilion);
+  border-color: var(--vermilion);
 }
 
 .severity-important {
+  border-color: var(--carbon);
   color: var(--carbon);
 }
 
 .severity-vigilance {
-  color: var(--sage);
+  border-color: var(--sage);
 }
 
 .deadline-list {
@@ -579,8 +589,10 @@ h2 {
 }
 
 .deadline-list time {
+  padding-left: 0.45rem;
+  border-left: 0.25rem solid var(--vermilion);
   margin-bottom: 0.35rem;
-  color: var(--vermilion);
+  color: var(--ink);
   font-family: var(--font-data);
   font-size: 0.68rem;
   font-weight: 700;
@@ -771,7 +783,8 @@ h2 {
     min-width: 1.15rem;
     min-height: 1.15rem;
     background: var(--sheet);
-    color: var(--vermilion);
+    border-color: var(--vermilion);
+    color: var(--ink);
     font-size: 0.53rem;
   }
 

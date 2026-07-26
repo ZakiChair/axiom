@@ -33,7 +33,7 @@ function addDays(date: string, days: number): string {
   return new Date(time).toISOString().slice(0, 10);
 }
 
-function upcomingDeadlines(contracts: Contract[]): Deadline[] {
+export function getUpcomingDeadlines(contracts: Contract[], today: string): Deadline[] {
   return contracts
     .flatMap((contract) => {
       if (contract.status !== "active" || !contract.nextRenewalDate) return [];
@@ -44,6 +44,7 @@ function upcomingDeadlines(contracts: Contract[]): Deadline[] {
         provider: contract.provider,
       }];
     })
+    .filter((deadline) => deadline.date >= today)
     .sort((left, right) => left.date.localeCompare(right.date))
     .slice(0, 2);
 }
@@ -72,7 +73,13 @@ function scoreLabel(score: number): string {
 }
 
 export function DashboardView({ anomalies, onNavigate, score, state }: DashboardViewProps) {
-  const deadlines = upcomingDeadlines(state.contracts);
+  const now = new Date();
+  const today = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+  const deadlines = getUpcomingDeadlines(state.contracts, today);
   const activeContracts = state.contracts.filter((contract) => contract.status === "active");
   const priorityAnomalies = anomalies.slice(0, 3);
   const compactContracts = state.contracts.slice(0, 4);

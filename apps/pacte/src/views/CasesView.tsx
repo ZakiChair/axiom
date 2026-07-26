@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   formatCalendarDate,
@@ -9,13 +9,16 @@ import {
 import type { ClaimCase, ClaimCaseStatus } from "../domain/model";
 import type { MutationResult } from "../domain/mutations";
 import { downloadText } from "../infra/files";
-import { nextNotification } from "./notifications";
-import type { Notification } from "./notifications";
+import {
+  consumeNotification,
+  deliverContextNotification,
+  notificationForContext,
+} from "./notifications";
+import type { ContextNotification, Notification } from "./notifications";
 
 type CaseChanges = Partial<Pick<ClaimCase, "status" | "note" | "letter">>;
 type CaseDraft = Pick<ClaimCase, "note" | "letter">;
-type CaseDrafts = Record<string, CaseDraft>;
-type CaseNotification = Notification & { caseId: string };
+type CaseDrafts = ReadonlyMap<string, CaseDraft>;
 
 type CasesViewProps = {
   cases: ClaimCase[];
@@ -44,7 +47,7 @@ export function caseLetterFileName(provider: string, date: string): string {
 }
 
 export function caseDraftFor(drafts: CaseDrafts, claim: ClaimCase): CaseDraft {
-  return drafts[claim.id] ?? { note: claim.note, letter: claim.letter };
+  return drafts.get(claim.id) ?? { note: claim.note, letter: claim.letter };
 }
 
 export function updateCaseDraft(
@@ -52,38 +55,52 @@ export function updateCaseDraft(
   claim: ClaimCase,
   changes: Partial<CaseDraft>,
 ): CaseDrafts {
-  return {
-    ...drafts,
-    [claim.id]: { ...caseDraftFor(drafts, claim), ...changes },
-  };
+  const updated = new Map(drafts);
+  updated.set(claim.id, { ...caseDraftFor(drafts, claim), ...changes });
+  return updated;
 }
 
 export function CasesView({ cases, onSelectCase, onUpdateCase, selectedCaseId }: CasesViewProps) {
   const activeCase = cases.find((claim) => claim.id === selectedCaseId) ?? cases[0];
-  const [drafts, setDrafts] = useState<CaseDrafts>({});
-  const [notification, setNotification] = useState<CaseNotification | null>(null);
+  const [drafts, setDrafts] = useState<CaseDrafts>(() => new Map());
+  const [notification, setNotification] = useState<ContextNotification | null>(null);
+  const activeCaseIdRef = useRef(activeCase?.id);
+  activeCaseIdRef.current = activeCase?.id;
   const activeDraft = activeCase ? caseDraftFor(drafts, activeCase) : { note: "", letter: "" };
+  const activeNotification = activeCase
+    ? notificationForContext(notification, activeCase.id)
+    : null;
 
-  function notify(kind: Notification["kind"], message: string) {
-    if (!activeCase) return;
-    setNotification((current) => ({
-      ...nextNotification(current, kind, message),
-      caseId: activeCase.id,
-    }));
+  function notify(caseId: string, kind: Notification["kind"], message: string) {
+    setNotification((current) => deliverContextNotification(
+      current,
+      activeCaseIdRef.current,
+      caseId,
+      kind,
+      message,
+    ));
+  }
+
+  function selectCase(caseId: string) {
+    activeCaseIdRef.current = caseId;
+    setNotification((current) => consumeNotification(current));
+    onSelectCase(caseId);
   }
 
   function update(changes: CaseChanges, successMessage: string): boolean {
     if (!activeCase) return false;
+    const caseId = activeCase.id;
     try {
-      const result = onUpdateCase(activeCase.id, changes);
+      const result = onUpdateCase(caseId, changes);
       if (!result.ok) {
-        notify("error", result.error);
+        notify(caseId, "error", result.error);
         return false;
       }
-      notify("success", successMessage);
+      notify(caseId, "success", successMessage);
       return true;
     } catch (error) {
       notify(
+        caseId,
         "error",
         error instanceof Error ? error.message : "Le dossier n’a pas pu être enregistré.",
       );
@@ -93,11 +110,17 @@ export function CasesView({ cases, onSelectCase, onUpdateCase, selectedCaseId }:
 
   async function copyLetter() {
     if (!activeCase) return;
+    const caseId = activeCase.id;
+    const letter = activeDraft.letter;
     try {
-      await navigator.clipboard.writeText(activeDraft.letter);
-      notify("success", "La lettre a été copiée dans le presse-papiers.");
+      await navigator.clipboard.writeText(letter);
+      notify(caseId, "success", "La lettre a été copiée dans le presse-papiers.");
     } catch {
-      notify("error", "La copie a échoué. Sélectionnez le texte de la lettre pour le copier.");
+      notify(
+        caseId,
+        "error",
+        "La copie a échoué. Sélectionnez le texte de la lettre pour le copier.",
+      );
     }
   }
 
@@ -135,7 +158,7 @@ export function CasesView({ cases, onSelectCase, onUpdateCase, selectedCaseId }:
                 <li key={claim.id}>
                   <button
                     aria-current={claim.id === activeCase.id ? "true" : undefined}
-                    onClick={() => onSelectCase(claim.id)}
+                    onClick={() => selectCase(claim.id)}
                     type="button"
                   >
                     <span className="record-reference">{STATUS_LABELS[claim.status]}</span>
@@ -171,13 +194,13 @@ export function CasesView({ cases, onSelectCase, onUpdateCase, selectedCaseId }:
               </div>
             </header>
 
-            {notification?.caseId === activeCase.id ? (
+            {activeNotification ? (
               <p
-                className={notification.kind === "error" ? "dialog-error" : "mutation-toast"}
-                key={notification.id}
-                role={notification.kind === "error" ? "alert" : "status"}
+                className={activeNotification.kind === "error" ? "dialog-error" : "mutation-toast"}
+                key={activeNotification.id}
+                role={activeNotification.kind === "error" ? "alert" : "status"}
               >
-                {notification.message}
+                {activeNotification.message}
               </p>
             ) : null}
 

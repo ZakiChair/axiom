@@ -24,20 +24,45 @@ describe("caseLetterFileName", () => {
 describe("brouillons de dossier", () => {
   it("préserve chaque brouillon et ne montre jamais celui de l'autre dossier lors de A → B → A", () => {
     type Draft = { note: string; letter: string };
-    type Drafts = Record<string, Draft>;
     const state = createDemoState();
     const anomalies = analyseState(state, NOW);
     const claimA = createClaimCase(anomalies[0]!, state, NOW);
     const claimB = createClaimCase(anomalies[1]!, state, NOW);
-    let drafts: Drafts = {};
+    let drafts: ReadonlyMap<string, Draft> = new Map();
 
+    const initialDrafts = drafts;
     drafts = updateCaseDraft(drafts, claimA, { note: "Brouillon A" });
+    expect(drafts).not.toBe(initialDrafts);
+    expect(initialDrafts.size).toBe(0);
     expect(caseDraftFor(drafts, claimB)).toEqual({ note: claimB.note, letter: claimB.letter });
 
     drafts = updateCaseDraft(drafts, claimB, { letter: "Lettre B modifiée" });
     expect(caseDraftFor(drafts, claimA)).toEqual({ note: "Brouillon A", letter: claimA.letter });
     expect(caseDraftFor(drafts, claimB)).toEqual({ note: claimB.note, letter: "Lettre B modifiée" });
   });
+
+  it.each(["toString", "constructor", "__proto__"])(
+    "utilise le dossier importé %s sans collision avec Object",
+    (id) => {
+      const state = createDemoState();
+      const anomaly = analyseState(state, NOW)[0]!;
+      const claim = { ...createClaimCase(anomaly, state, NOW), id };
+      const emptyDrafts = new Map<string, { note: string; letter: string }>();
+
+      expect(caseDraftFor(emptyDrafts, claim)).toEqual({
+        note: claim.note,
+        letter: claim.letter,
+      });
+
+      const updated = updateCaseDraft(emptyDrafts, claim, { note: `Brouillon ${id}` });
+      expect(updated).not.toBe(emptyDrafts);
+      expect(emptyDrafts.size).toBe(0);
+      expect(caseDraftFor(updated, claim)).toEqual({
+        note: `Brouillon ${id}`,
+        letter: claim.letter,
+      });
+    },
+  );
 });
 
 describe("CasesView", () => {

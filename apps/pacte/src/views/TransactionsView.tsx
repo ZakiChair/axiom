@@ -111,6 +111,7 @@ function ManualTransactionForm({
   const [input, setInput] = useState(() => createTransactionInput(defaultCurrency));
   const [errors, setErrors] = useState<EntryErrors<TransactionEntryInput>>({});
   const [formError, setFormError] = useState("");
+  const [formNotice, setFormNotice] = useState("");
   const shouldFocusInvalidField = useRef(false);
 
   useEffect(() => {
@@ -124,6 +125,7 @@ function ManualTransactionForm({
     setInput((current) => ({ ...current, [field]: value }));
     setErrors((current) => ({ ...current, [field]: undefined }));
     setFormError("");
+    setFormNotice("");
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -131,6 +133,7 @@ function ManualTransactionForm({
     const nextErrors = validateTransactionEntry(input);
     setErrors(nextErrors);
     setFormError("");
+    setFormNotice("");
     if (hasEntryErrors(nextErrors)) {
       shouldFocusInvalidField.current = true;
       return;
@@ -142,7 +145,13 @@ function ManualTransactionForm({
         localId("transaction-manual"),
         new Date().toISOString(),
       ));
-      if (!result.ok) setFormError(result.error);
+      if (!result.ok) {
+        setFormError(result.error);
+      } else if (result.changed === 0) {
+        setFormNotice(
+          "Un mouvement identique existe déjà dans le journal. Aucun ajout n’a été effectué. Modifiez les faits ou annulez.",
+        );
+      }
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Le mouvement n’a pas pu être ajouté.");
     }
@@ -230,6 +239,7 @@ function ManualTransactionForm({
         </div>
       ) : null}
       {formError ? <p className="dialog-error" role="alert">{formError}</p> : null}
+      {formNotice ? <p className="confirmation-note" role="status">{formNotice}</p> : null}
       <p className="required-note">* Champs requis.</p>
       <div className="form-actions">
         <button className="secondary-action" onClick={onCancel} type="button">Annuler</button>
@@ -428,7 +438,7 @@ export function TransactionsView({
 
   function addManual(transaction: Transaction) {
     const result = onImportTransactions([transaction]);
-    if (!result.ok) return result;
+    if (!result.ok || result.changed === 0) return result;
     finishMutation("Le mouvement a été ajouté au journal.");
     return result;
   }

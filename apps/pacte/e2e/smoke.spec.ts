@@ -144,6 +144,24 @@ test("sélectionne puis corrige durablement le contrat d’un mouvement", async 
   );
 });
 
+test("garde ouverte la saisie manuelle d’un mouvement déjà présent", async ({ page }) => {
+  await page.getByRole("button", { name: /^(Transactions|Mouvements)$/ }).click();
+  await expect(page.locator(".transaction-register tbody tr")).toHaveCount(4);
+  await page.getByRole("button", { name: "Ajouter un mouvement" }).click();
+  const dialogue = page.getByRole("dialog", { name: "Ajouter un mouvement" });
+
+  await dialogue.getByLabel("Date *").fill("2026-07-05");
+  await dialogue.getByLabel("Libellé du mouvement *").fill("PRLV ALPINE MOBILE");
+  await dialogue.getByLabel("Montant *").fill("64,90");
+  await dialogue.getByRole("button", { name: "Confirmer le mouvement" }).click();
+
+  await expect(dialogue).toBeVisible();
+  await expect(dialogue.getByRole("status")).toHaveText(
+    "Un mouvement identique existe déjà dans le journal. Aucun ajout n’a été effectué. Modifiez les faits ou annulez.",
+  );
+  await expect(page.locator(".transaction-register tbody tr")).toHaveCount(4);
+});
+
 test("déduit puis laisse corriger le rattachement dans l’aperçu CSV", async ({ page }) => {
   await page.getByRole("button", { name: /^(Transactions|Mouvements)$/ }).click();
   await page.getByRole("button", { name: "Importer un CSV" }).click();

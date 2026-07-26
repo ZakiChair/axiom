@@ -87,6 +87,12 @@ describe("parsePacteState", () => {
       parsePacteState({ ...validState, transactions: [{ ...validTransaction, date: "15.07.2026" }] }),
     ).toBeNull();
     expect(
+      parsePacteState({
+        ...validState,
+        transactions: [{ ...validTransaction, importedAt: "July 26, 2026" }],
+      }),
+    ).toBeNull();
+    expect(
       parsePacteState({ ...validState, cases: [{ ...validCase, status: "archived" }] }),
     ).toBeNull();
     expect(parsePacteState({ ...validState, dismissedAnomalyIds: [42] })).toBeNull();

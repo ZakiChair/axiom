@@ -35,7 +35,38 @@ function isIsoDate(value: unknown): value is string {
 }
 
 function isIsoTimestamp(value: unknown): value is string {
-  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(
+      value,
+    );
+
+  if (match === null) {
+    return false;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const februaryDays = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28;
+  const daysInMonth = [31, februaryDays, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+  return (
+    month >= 1 &&
+    month <= 12 &&
+    day >= 1 &&
+    day <= daysInMonth[month - 1]! &&
+    hour <= 23 &&
+    minute <= 59 &&
+    second <= 59 &&
+    !Number.isNaN(Date.parse(value))
+  );
 }
 
 function isExpectedRefund(value: unknown): value is ExpectedRefund {

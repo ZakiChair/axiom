@@ -10,7 +10,9 @@ import { matchContract, normalizeMerchant } from "./normalize";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const DUPLICATE_WINDOW_DAYS = 7;
-const PRICE_TOLERANCE = 0.02;
+const MONEY_UNIT_SCALE = 10_000;
+const BASIS_POINT_SCALE = 10_000n;
+const PRICE_TOLERANCE_BASIS_POINTS = 200n;
 const DEADLINE_WINDOW_DAYS = 30;
 
 type MatchedTransaction = {
@@ -28,6 +30,30 @@ function todayMs(now: Date): number {
 
 function addDays(value: string, days: number): string {
   return new Date(isoDateMs(value) + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+function moneyUnits(amount: number): bigint {
+  return BigInt(Math.round(amount * MONEY_UNIT_SCALE));
+}
+
+function exceedsPriceTolerance(amount: number, reference: number): boolean {
+  const amountUnits = moneyUnits(amount);
+  const referenceUnits = moneyUnits(reference);
+
+  return (
+    (amountUnits - referenceUnits) * BASIS_POINT_SCALE >
+    referenceUnits * PRICE_TOLERANCE_BASIS_POINTS
+  );
+}
+
+function isWithinPriceTolerance(amount: number, reference: number): boolean {
+  const difference = moneyUnits(amount) - moneyUnits(reference);
+  const absoluteDifference = difference < 0n ? -difference : difference;
+
+  return (
+    absoluteDifference * BASIS_POINT_SCALE <=
+    moneyUnits(reference) * PRICE_TOLERANCE_BASIS_POINTS
+  );
 }
 
 function formatAmount(amount: number, currency: Contract["currency"]): string {
@@ -91,12 +117,12 @@ function duplicateAnomalies(matched: MatchedTransaction[]): Anomaly[] {
 
       const elapsedDays =
         (isoDateMs(right.transaction.date) - isoDateMs(left.transaction.date)) / DAY_MS;
-      if (elapsedDays > DUPLICATE_WINDOW_DAYS) break;
+      if (elapsedDays >= DUPLICATE_WINDOW_DAYS) break;
 
       const sameProvider =
         normalizeMerchant(left.contract.provider) === normalizeMerchant(right.contract.provider);
       const sameAmount =
-        left.transaction.amount === right.transaction.amount &&
+        moneyUnits(left.transaction.amount) === moneyUnits(right.transaction.amount) &&
         left.transaction.currency === right.transaction.currency;
       if (!sameProvider || !sameAmount) continue;
 
@@ -110,7 +136,7 @@ function duplicateAnomalies(matched: MatchedTransaction[]): Anomaly[] {
         severity: "critical",
         confidence: "high",
         title: `Double débit possible — ${left.contract.provider}`,
-        explanation: `Deux débits de ${formatAmount(left.transaction.amount, left.transaction.currency)} ont été relevés à sept jours d’intervalle ou moins.`,
+        explanation: `Deux débits de ${formatAmount(left.transaction.amount, left.transaction.currency)} ont été relevés à moins de sept jours d’intervalle.`,
         amount: left.transaction.amount,
         contractId,
         transactionIds,
@@ -132,12 +158,13 @@ function priceIncreaseAnomalies(matched: MatchedTransaction[]): Anomaly[] {
     if (
       transaction.amount <= 0 ||
       transaction.currency !== contract.currency ||
-      transaction.amount <= contract.amount * (1 + PRICE_TOLERANCE)
+      !exceedsPriceTolerance(transaction.amount, contract.amount)
     ) {
       return [];
     }
 
-    const recoverableAmount = transaction.amount - contract.amount;
+    const recoverableAmount =
+      Number(moneyUnits(transaction.amount) - moneyUnits(contract.amount)) / MONEY_UNIT_SCALE;
 
     return [{
       id: `anomaly:price-increase:${contract.id}:${transaction.id}`,
@@ -200,10 +227,7 @@ function missingRefundAnomalies(
         return false;
       }
 
-      return (
-        Math.abs(Math.abs(transaction.amount) - expectedRefund.amount) <=
-        expectedRefund.amount * PRICE_TOLERANCE
-      );
+      return isWithinPriceTolerance(Math.abs(transaction.amount), expectedRefund.amount);
     });
     if (matchingCredit) return [];
 

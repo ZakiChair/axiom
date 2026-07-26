@@ -53,10 +53,10 @@ function anomaliesOfKind(
 }
 
 describe("analyseState", () => {
-  it("signale une seule fois une paire de débits identiques à sept jours d'intervalle", () => {
+  it("signale une seule fois une paire de débits identiques à moins de sept jours d'intervalle", () => {
     const duplicateState = state({
       transactions: [
-        transaction({ id: "transaction-a", date: "2026-07-08" }),
+        transaction({ id: "transaction-a", date: "2026-07-09" }),
         transaction({ id: "transaction-b", date: "2026-07-15" }),
       ],
     });
@@ -74,7 +74,7 @@ describe("analyseState", () => {
     expect(duplicates[0]?.evidence).toHaveLength(2);
   });
 
-  it("ignore les débits distants de plus de sept jours et les transactions sans contrat", () => {
+  it("ignore les débits distants de sept jours ou plus et les transactions sans contrat", () => {
     const unrelated = transaction({
       id: "transaction-unrelated",
       date: "2026-07-15",
@@ -86,7 +86,7 @@ describe("analyseState", () => {
       anomaliesOfKind(
         state({
           transactions: [
-            transaction({ id: "transaction-a", date: "2026-07-07" }),
+            transaction({ id: "transaction-a", date: "2026-07-08" }),
             transaction({ id: "transaction-b", date: "2026-07-15" }),
             unrelated,
           ],
@@ -124,6 +124,20 @@ describe("analyseState", () => {
               contractId: undefined,
             }),
           ],
+        }),
+        "price-increase",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("ne signale pas une hausse décimale exactement à 2 %", () => {
+    const decimalContract: Contract = { ...baseContract, amount: 19.99 };
+
+    expect(
+      anomaliesOfKind(
+        state({
+          contracts: [decimalContract],
+          transactions: [transaction({ amount: 20.3898 })],
         }),
         "price-increase",
       ),
@@ -202,6 +216,23 @@ describe("analyseState", () => {
         state({
           contracts: [refundContract],
           transactions: [transaction({ amount: -78.4 })],
+        }),
+        "missing-refund",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("accepte un crédit décimal exactement à la frontière basse de 2 %", () => {
+    const refundContract: Contract = {
+      ...baseContract,
+      expectedRefund: { amount: 1, dueDate: "2026-07-20" },
+    };
+
+    expect(
+      anomaliesOfKind(
+        state({
+          contracts: [refundContract],
+          transactions: [transaction({ amount: -0.98 })],
         }),
         "missing-refund",
       ),

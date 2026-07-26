@@ -52,6 +52,22 @@ function isPdf(file: File): boolean {
   return file.type === "application/pdf" || file.name.toLocaleLowerCase("fr-CH").endsWith(".pdf");
 }
 
+export function importFileMetadata(file: File): { name: string; type: string } {
+  const lowerName = file.name.toLocaleLowerCase("fr-CH");
+  const inferredType = lowerName.endsWith(".eml")
+    ? "message/rfc822"
+    : lowerName.endsWith(".pdf")
+      ? "application/pdf"
+      : lowerName.endsWith(".txt")
+        ? "text/plain"
+        : "application/octet-stream";
+
+  return {
+    name: file.name,
+    type: file.type.trim() || inferredType,
+  };
+}
+
 export async function readImportFile(file: File): Promise<string> {
   try {
     if (!isPdf(file)) {

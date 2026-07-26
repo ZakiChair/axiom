@@ -4,11 +4,20 @@ import type {
   ClaimCase,
   ClaimCaseEvent,
   Contract,
+  ContractSourceFile,
   Currency,
   ExpectedRefund,
   PacteState,
   Transaction,
 } from "./model";
+import {
+  isBoundedAmount,
+  isBusinessIsoDate,
+  isNonNegativeAmount,
+  isNonZeroAmount,
+  isNoticeDays,
+  isPositiveAmount,
+} from "./limits";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -18,21 +27,12 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function isFiniteNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
 function isCurrency(value: unknown): value is Currency {
   return value === "CHF" || value === "EUR";
 }
 
 function isIsoDate(value: unknown): value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return false;
-  }
-
-  const parsedDate = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(parsedDate.valueOf()) && parsedDate.toISOString().slice(0, 10) === value;
+  return isBusinessIsoDate(value);
 }
 
 function isIsoTimestamp(value: unknown): value is string {
@@ -59,6 +59,7 @@ function isIsoTimestamp(value: unknown): value is string {
   const daysInMonth = [31, februaryDays, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
   return (
+    isBusinessIsoDate(`${match[1]}-${match[2]}-${match[3]}`) &&
     month >= 1 &&
     month <= 12 &&
     day >= 1 &&
@@ -73,9 +74,16 @@ function isIsoTimestamp(value: unknown): value is string {
 function isExpectedRefund(value: unknown): value is ExpectedRefund {
   return (
     isRecord(value) &&
-    isFiniteNumber(value.amount) &&
-    value.amount >= 0 &&
+    isPositiveAmount(value.amount) &&
     isIsoDate(value.dueDate)
+  );
+}
+
+function isContractSourceFile(value: unknown): value is ContractSourceFile {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.name) &&
+    isNonEmptyString(value.type)
   );
 }
 
@@ -86,25 +94,24 @@ function isContract(value: unknown): value is Contract {
     isNonEmptyString(value.provider) &&
     typeof value.category === "string" &&
     typeof value.reference === "string" &&
-    isFiniteNumber(value.amount) &&
-    value.amount >= 0 &&
+    isPositiveAmount(value.amount) &&
     isCurrency(value.currency) &&
     (value.cadence === "monthly" ||
       value.cadence === "quarterly" ||
       value.cadence === "annual" ||
       value.cadence === "one-off") &&
     isIsoDate(value.startDate) &&
-    isFiniteNumber(value.noticeDays) &&
-    Number.isInteger(value.noticeDays) &&
-    value.noticeDays >= 0 &&
+    isNoticeDays(value.noticeDays) &&
     (value.status === "active" || value.status === "terminated" || value.status === "paused") &&
     Array.isArray(value.merchantAliases) &&
     value.merchantAliases.every(isNonEmptyString) &&
     typeof value.notes === "string" &&
     (value.nextRenewalDate === undefined || isIsoDate(value.nextRenewalDate)) &&
     (value.terminatedAt === undefined || isIsoDate(value.terminatedAt)) &&
+    (value.status !== "terminated" || isIsoDate(value.terminatedAt)) &&
     (value.expectedRefund === undefined || isExpectedRefund(value.expectedRefund)) &&
-    (value.sourceText === undefined || typeof value.sourceText === "string")
+    (value.sourceText === undefined || typeof value.sourceText === "string") &&
+    (value.sourceFile === undefined || isContractSourceFile(value.sourceFile))
   );
 }
 
@@ -114,7 +121,7 @@ function isTransaction(value: unknown): value is Transaction {
     isNonEmptyString(value.id) &&
     isIsoDate(value.date) &&
     isNonEmptyString(value.label) &&
-    isFiniteNumber(value.amount) &&
+    isNonZeroAmount(value.amount) &&
     isCurrency(value.currency) &&
     (value.contractId === undefined || isNonEmptyString(value.contractId)) &&
     (value.importedAt === undefined || isIsoTimestamp(value.importedAt))
@@ -127,7 +134,7 @@ function isAnomalyEvidence(value: unknown): value is AnomalyEvidence {
     isNonEmptyString(value.id) &&
     isIsoDate(value.date) &&
     isNonEmptyString(value.label) &&
-    isFiniteNumber(value.amount) &&
+    isBoundedAmount(value.amount) &&
     isCurrency(value.currency)
   );
 }
@@ -156,8 +163,8 @@ function isClaimAnomalySnapshot(value: unknown): value is ClaimAnomalySnapshot {
       value.kind === "deadline") &&
     isNonEmptyString(value.title) &&
     isNonEmptyString(value.explanation) &&
-    isFiniteNumber(value.amount) &&
-    value.amount >= 0
+    isNonNegativeAmount(value.amount) &&
+    (value.currency === undefined || isCurrency(value.currency))
   );
 }
 

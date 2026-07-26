@@ -12,6 +12,7 @@ function copyContract(contract: Contract): Contract {
   return {
     ...contract,
     expectedRefund: contract.expectedRefund ? { ...contract.expectedRefund } : undefined,
+    sourceFile: contract.sourceFile ? { ...contract.sourceFile } : undefined,
     merchantAliases: [...contract.merchantAliases],
   };
 }
@@ -66,7 +67,8 @@ function formatDate(value: string): string {
 
 function requestFor(claim: ClaimCase): { heading: string; text: string } {
   const { anomalySnapshot: anomaly, contractSnapshot: contract } = claim;
-  const amount = formatAmount(anomaly.amount, contract.currency);
+  const anomalyCurrency = anomaly.currency ?? claim.evidence[0]?.currency ?? contract.currency;
+  const amount = formatAmount(anomaly.amount, anomalyCurrency);
 
   switch (anomaly.kind) {
     case "price-increase":
@@ -108,6 +110,7 @@ export function createClaimCase(
       title: anomaly.title,
       explanation: anomaly.explanation,
       amount: anomaly.amount,
+      currency: anomaly.currency,
     },
     status: "review",
     createdAt,

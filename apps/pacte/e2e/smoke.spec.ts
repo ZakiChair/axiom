@@ -27,6 +27,32 @@ test.beforeEach(async ({ page }) => {
   await restaurerDemonstration(page);
 });
 
+test("récupère un coffre corrompu après export brut et confirmation", async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem("pacte:v1", "{coffre-corrompu"));
+  await page.reload();
+
+  await expect(page.getByRole("heading", { name: "Coffre local à récupérer" })).toBeVisible();
+  await expect(page.getByRole("navigation")).toHaveCount(0);
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Exporter la valeur brute" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toMatch(
+    /^pacte-recuperation-brute-\d{4}-\d{2}-\d{2}\.txt$/,
+  );
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+  expect(Buffer.concat(chunks).toString("utf8")).toBe("{coffre-corrompu");
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Restaurer la démonstration" }).click();
+  await expect(page.getByRole("heading", { name: /Bonjour, Foyer Démo/ })).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: /Bonjour, Foyer Démo/ })).toBeVisible();
+});
+
 test("transforme l’anomalie Helvetia du tableau de bord en dossier avec lettre", async ({ page }) => {
   await page.getByRole("button", { name: /^(Vue d’ensemble|Accueil)$/ }).click();
 
@@ -64,6 +90,78 @@ test("garde le dialogue au clavier et rend le focus au bouton d’ouverture", as
 
   await expect(dialogue).toHaveCount(0);
   await expect(ouverture).toBeFocused();
+});
+
+test("enregistre les faits conditionnels et la provenance d’un contrat EML", async ({ page }) => {
+  await page.getByRole("button", { name: /^Contrats$/ }).click();
+  await page.getByRole("button", { name: "Nouveau contrat" }).click();
+  const dialogue = page.getByRole("dialog", { name: "Nouveau contrat" });
+
+  await dialogue.getByLabel("Choisir un document").setInputFiles({
+    name: "confirmation.eml",
+    mimeType: "message/rfc822",
+    buffer: Buffer.from("Subject: Résiliation\nRemboursement CHF 24.50"),
+  });
+  await dialogue.getByLabel("Fournisseur *").fill("Service EML");
+  await dialogue.getByLabel("Montant *").fill("49.90");
+  await dialogue.getByLabel("Début *").fill("2026-01-01");
+  await dialogue.getByLabel("Statut").selectOption("terminated");
+  await dialogue.getByLabel("Date de résiliation *").fill("2026-07-20");
+  await dialogue.getByLabel("Remboursement attendu").check();
+  await dialogue.getByLabel("Montant du remboursement *").fill("24.50");
+  await dialogue.getByLabel("Date attendue *").fill("2026-08-01");
+  await dialogue.getByRole("button", { name: "Confirmer le contrat" }).click();
+
+  await expect(page.getByRole("heading", { name: "Service EML" })).toBeVisible();
+  const persisted = await page.evaluate(() => JSON.parse(localStorage.getItem("pacte:v1")!));
+  const saved = persisted.contracts.find((contract: { provider: string }) => contract.provider === "Service EML");
+  expect(saved).toMatchObject({
+    terminatedAt: "2026-07-20",
+    expectedRefund: { amount: 24.5, dueDate: "2026-08-01" },
+    sourceFile: { name: "confirmation.eml", type: "message/rfc822" },
+  });
+  expect(saved).not.toHaveProperty("sourceBinary");
+});
+
+test("sélectionne puis corrige durablement le contrat d’un mouvement", async ({ page }) => {
+  await page.getByRole("button", { name: /^(Transactions|Mouvements)$/ }).click();
+  await page.getByRole("button", { name: "Ajouter un mouvement" }).click();
+  const dialogue = page.getByRole("dialog", { name: "Ajouter un mouvement" });
+  await dialogue.getByLabel("Date *").fill("2026-07-24");
+  await dialogue.getByLabel("Libellé du mouvement *").fill("OPÉRATION À RATTACHER");
+  await dialogue.getByLabel("Montant *").fill("12.50");
+  await dialogue.getByLabel("Contrat associé").selectOption({ label: "Alpine Mobile" });
+  await dialogue.getByRole("button", { name: "Confirmer le mouvement" }).click();
+
+  const selector = page.getByLabel("Rattachement de OPÉRATION À RATTACHER");
+  await expect(selector).toHaveValue("contract-demo-alpine-mobile");
+  await selector.selectOption("contract-demo-helvetia-protect");
+  await expect(page.getByRole("status")).toHaveText("Le rattachement a été enregistré.");
+  await page.reload();
+  await page.getByRole("button", { name: /^(Transactions|Mouvements)$/ }).click();
+  await expect(page.getByLabel("Rattachement de OPÉRATION À RATTACHER")).toHaveValue(
+    "contract-demo-helvetia-protect",
+  );
+});
+
+test("déduit puis laisse corriger le rattachement dans l’aperçu CSV", async ({ page }) => {
+  await page.getByRole("button", { name: /^(Transactions|Mouvements)$/ }).click();
+  await page.getByRole("button", { name: "Importer un CSV" }).click();
+  const dialogue = page.getByRole("dialog", { name: "Importer un relevé CSV" });
+  await dialogue.getByLabel("Choisir un fichier CSV").setInputFiles({
+    name: "rattachement.csv",
+    mimeType: "text/csv",
+    buffer: Buffer.from("Date;Libellé;Montant;Devise\n2026-07-23;PRLV ALPINE MOBILE;12,34;CHF"),
+  });
+
+  const selector = dialogue.getByLabel("Contrat pour PRLV ALPINE MOBILE");
+  await expect(selector).toHaveValue("contract-demo-alpine-mobile");
+  await selector.selectOption("contract-demo-studio-forme");
+  await dialogue.getByRole("button", { name: "Confirmer l’import" }).click();
+
+  await expect(page.getByLabel("Rattachement de PRLV ALPINE MOBILE").last()).toHaveValue(
+    "contract-demo-studio-forme",
+  );
 });
 
 test("préserve deux brouillons de lettre lors du parcours A → B → A", async ({ page }) => {

@@ -9,26 +9,34 @@ import {
   validateTransactionEntry,
 } from "../domain/entries";
 import type { EntryErrors, TransactionEntryInput } from "../domain/entries";
-import { formatCalendarDate, formatCurrency } from "../domain/format";
+import { formatCalendarDate, formatCurrency, localDateKey } from "../domain/format";
 import { parseTransactionCsv } from "../domain/importers";
 import type { CsvImportResult } from "../domain/importers";
-import type { Currency, Transaction } from "../domain/model";
+import type { Contract, Currency, Transaction } from "../domain/model";
+import { matchContract } from "../domain/normalize";
 import type { MutationResult } from "../domain/mutations";
 import { readImportFile } from "../infra/files";
 
 type TransactionsViewProps = {
+  contracts: Contract[];
   defaultCurrency: Currency;
+  onAssignContract: (
+    transactionId: string,
+    contractId: string | undefined,
+  ) => MutationResult;
   onImportTransactions: (transactions: Transaction[]) => MutationResult;
   transactions: Transaction[];
 };
 
 type ManualTransactionFormProps = {
+  contracts: Contract[];
   defaultCurrency: Currency;
   onCancel: () => void;
   onConfirm: (transaction: Transaction) => MutationResult;
 };
 
 type CsvImportFormProps = {
+  contracts: Contract[];
   defaultCurrency: Currency;
   onCancel: () => void;
   onConfirm: (transactions: Transaction[]) => MutationResult;
@@ -49,17 +57,14 @@ export function transactionImportMessage(changed: number): string {
   return `${changed} mouvements ont été ajoutés au journal.`;
 }
 
-function localDate(): string {
-  const date = new Date();
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, "0"),
-    String(date.getDate()).padStart(2, "0"),
-  ].join("-");
-}
-
 function createTransactionInput(defaultCurrency: Currency): TransactionEntryInput {
-  return { date: localDate(), label: "", amount: "", currency: defaultCurrency };
+  return {
+    date: localDateKey(new Date()),
+    label: "",
+    amount: "",
+    currency: defaultCurrency,
+    contractId: "",
+  };
 }
 
 function localId(prefix: string): string {
@@ -98,6 +103,7 @@ function TransactionFieldError({
 }
 
 function ManualTransactionForm({
+  contracts,
   defaultCurrency,
   onCancel,
   onConfirm,
@@ -203,6 +209,19 @@ function ManualTransactionForm({
           </select>
           <TransactionFieldError errors={errors} field="currency" />
         </div>
+        <div className="field-group field-wide">
+          <label htmlFor="transaction-contractId">Contrat associé</label>
+          <select
+            id="transaction-contractId"
+            onChange={(event) => updateField("contractId", event.currentTarget.value)}
+            value={input.contractId}
+          >
+            <option value="">Non rattaché</option>
+            {contracts.map((contract) => (
+              <option key={contract.id} value={contract.id}>{contract.provider}</option>
+            ))}
+          </select>
+        </div>
       </div>
       {hasEntryErrors(errors) ? (
         <div className="dialog-error" role="alert">
@@ -220,7 +239,15 @@ function ManualTransactionForm({
   );
 }
 
-function CsvPreview({ result }: { result: CsvImportResult }) {
+export function CsvPreview({
+  contracts,
+  onAssign,
+  result,
+}: {
+  contracts: Contract[];
+  onAssign: (transactionId: string, contractId: string | undefined) => void;
+  result: CsvImportResult;
+}) {
   const warnings = [...new Set(result.warnings)];
   return (
     <div className="csv-preview">
@@ -238,13 +265,28 @@ function CsvPreview({ result }: { result: CsvImportResult }) {
         <div className="table-scroll preview-table">
           <table>
             <caption>Aperçu des cinq premières lignes importables</caption>
-            <thead><tr><th scope="col">Date</th><th scope="col">Libellé</th><th scope="col">Montant</th></tr></thead>
+            <thead><tr><th scope="col">Date</th><th scope="col">Libellé</th><th scope="col">Montant</th><th scope="col">Rattachement</th></tr></thead>
             <tbody>
               {result.transactions.slice(0, 5).map((transaction) => (
                 <tr key={transaction.id}>
                   <td>{formatCalendarDate(transaction.date)}</td>
                   <td>{transaction.label}</td>
                   <td className="numeric-cell">{formatCurrency(transaction.amount, transaction.currency)}</td>
+                  <td>
+                    <select
+                      aria-label={`Contrat pour ${transaction.label}`}
+                      onChange={(event) => onAssign(
+                        transaction.id,
+                        event.currentTarget.value || undefined,
+                      )}
+                      value={transaction.contractId ?? ""}
+                    >
+                      <option value="">Non rattaché</option>
+                      {contracts.map((contract) => (
+                        <option key={contract.id} value={contract.id}>{contract.provider}</option>
+                      ))}
+                    </select>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -255,7 +297,7 @@ function CsvPreview({ result }: { result: CsvImportResult }) {
   );
 }
 
-function CsvImportForm({ defaultCurrency, onCancel, onConfirm }: CsvImportFormProps) {
+function CsvImportForm({ contracts, defaultCurrency, onCancel, onConfirm }: CsvImportFormProps) {
   const [step, setStep] = useState<"choose" | "preview">("choose");
   const [result, setResult] = useState<CsvImportResult | null>(null);
   const [fileName, setFileName] = useState("");
@@ -270,10 +312,17 @@ function CsvImportForm({ defaultCurrency, onCancel, onConfirm }: CsvImportFormPr
     setFileError("");
     try {
       const text = await readImportFile(file);
-      setResult(parseTransactionCsv(text, {
+      const parsed = parseTransactionCsv(text, {
         currency: defaultCurrency,
         importedAt: new Date().toISOString(),
-      }));
+      });
+      setResult({
+        ...parsed,
+        transactions: parsed.transactions.map((transaction) => {
+          const contractId = matchContract(transaction, contracts);
+          return contractId ? { ...transaction, contractId } : transaction;
+        }),
+      });
       setFileName(file.name);
       setStep("preview");
     } catch (error) {
@@ -291,6 +340,15 @@ function CsvImportForm({ defaultCurrency, onCancel, onConfirm }: CsvImportFormPr
     } catch (error) {
       setFileError(error instanceof Error ? error.message : "Les mouvements n’ont pas pu être importés.");
     }
+  }
+
+  function assignContract(transactionId: string, contractId: string | undefined) {
+    setResult((current) => current ? {
+      ...current,
+      transactions: current.transactions.map((transaction) => (
+        transaction.id === transactionId ? { ...transaction, contractId } : transaction
+      )),
+    } : current);
   }
 
   return (
@@ -312,7 +370,7 @@ function CsvImportForm({ defaultCurrency, onCancel, onConfirm }: CsvImportFormPr
           <p className="confirmation-note">
             Fichier « {fileName} » analysé. Vérifiez l’aperçu avant d’écrire dans le journal.
           </p>
-          <CsvPreview result={result} />
+          <CsvPreview contracts={contracts} onAssign={assignContract} result={result} />
         </div>
       ) : null}
 
@@ -332,13 +390,19 @@ function CsvImportForm({ defaultCurrency, onCancel, onConfirm }: CsvImportFormPr
 }
 
 export function TransactionsView({
+  contracts,
   defaultCurrency,
+  onAssignContract,
   onImportTransactions,
   transactions,
 }: TransactionsViewProps) {
   const [filter, setFilter] = useState("");
   const [modal, setModal] = useState<"manual" | "csv" | null>(null);
-  const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    id: number;
+    kind: "error" | "success";
+    message: string;
+  } | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const shouldFocusHeading = useRef(false);
   const normalizedFilter = filter.trim().toLocaleLowerCase("fr-CH");
@@ -359,7 +423,7 @@ export function TransactionsView({
   function finishMutation(message: string) {
     shouldFocusHeading.current = true;
     setModal(null);
-    setToast({ id: Date.now(), message });
+    setToast({ id: Date.now(), kind: "success", message });
   }
 
   function addManual(transaction: Transaction) {
@@ -376,6 +440,31 @@ export function TransactionsView({
     return result;
   }
 
+  function assignContract(transaction: Transaction, contractId: string | undefined) {
+    try {
+      const result = onAssignContract(transaction.id, contractId);
+      if (!result.ok) {
+        setToast({ id: Date.now(), kind: "error", message: result.error });
+        return;
+      }
+      if (result.changed > 0) {
+        setToast({
+          id: Date.now(),
+          kind: "success",
+          message: "Le rattachement a été enregistré.",
+        });
+      }
+    } catch (caught) {
+      setToast({
+        id: Date.now(),
+        kind: "error",
+        message: caught instanceof Error
+          ? caught.message
+          : "Le rattachement n’a pas pu être enregistré.",
+      });
+    }
+  }
+
   return (
     <section className="registry-view" aria-labelledby="transactions-title">
       <header className="view-heading">
@@ -390,7 +479,15 @@ export function TransactionsView({
         </div>
       </header>
 
-      {toast ? <p className="mutation-toast" key={toast.id} role="status">{toast.message}</p> : null}
+      {toast ? (
+        <p
+          className={toast.kind === "error" ? "dialog-error" : "mutation-toast"}
+          key={toast.id}
+          role={toast.kind === "error" ? "alert" : "status"}
+        >
+          {toast.message}
+        </p>
+      ) : null}
 
       <div className="registry-toolbar">
         <div className="filter-field">
@@ -417,7 +514,7 @@ export function TransactionsView({
         <div className="table-scroll transaction-register">
           <table>
             <caption className="visually-hidden">Mouvements enregistrés</caption>
-            <thead><tr><th scope="col">Date</th><th scope="col">Libellé</th><th scope="col">Origine</th><th scope="col">Montant</th></tr></thead>
+            <thead><tr><th scope="col">Date</th><th scope="col">Libellé</th><th scope="col">Origine</th><th scope="col">Montant</th><th scope="col">Rattachement</th></tr></thead>
             <tbody>
               {visibleTransactions.map((transaction) => {
                 const origin = transactionOrigin(transaction);
@@ -428,6 +525,26 @@ export function TransactionsView({
                   <td><span className={`origin-label ${origin.className}`}>{origin.label}</span></td>
                   <td className={transaction.amount < 0 ? "numeric-cell credit-amount" : "numeric-cell"}>
                     {formatCurrency(transaction.amount, transaction.currency)}
+                  </td>
+                  <td>
+                    <select
+                      aria-label={`Rattachement de ${transaction.label}`}
+                      onChange={(event) => assignContract(
+                        transaction,
+                        event.currentTarget.value || undefined,
+                      )}
+                      value={transaction.contractId ?? ""}
+                    >
+                      <option value="">Non rattaché</option>
+                      {transaction.contractId && !contracts.some(
+                        (contract) => contract.id === transaction.contractId,
+                      ) ? (
+                        <option value={transaction.contractId}>Contrat indisponible</option>
+                      ) : null}
+                      {contracts.map((contract) => (
+                        <option key={contract.id} value={contract.id}>{contract.provider}</option>
+                      ))}
+                    </select>
                   </td>
                 </tr>
                 );
@@ -445,12 +562,12 @@ export function TransactionsView({
 
       {modal === "manual" ? (
         <Modal onClose={() => setModal(null)} title="Ajouter un mouvement">
-          <ManualTransactionForm defaultCurrency={defaultCurrency} onCancel={() => setModal(null)} onConfirm={addManual} />
+          <ManualTransactionForm contracts={contracts} defaultCurrency={defaultCurrency} onCancel={() => setModal(null)} onConfirm={addManual} />
         </Modal>
       ) : null}
       {modal === "csv" ? (
         <Modal onClose={() => setModal(null)} title="Importer un relevé CSV">
-          <CsvImportForm defaultCurrency={defaultCurrency} onCancel={() => setModal(null)} onConfirm={importCsv} />
+          <CsvImportForm contracts={contracts} defaultCurrency={defaultCurrency} onCancel={() => setModal(null)} onConfirm={importCsv} />
         </Modal>
       ) : null}
     </section>

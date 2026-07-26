@@ -23,6 +23,11 @@ export type ExpectedRefund = {
   dueDate: string;
 };
 
+export type ContractSourceFile = {
+  name: string;
+  type: string;
+};
+
 export type Contract = {
   id: string;
   provider: string;
@@ -40,6 +45,7 @@ export type Contract = {
   merchantAliases: string[];
   notes: string;
   sourceText?: string;
+  sourceFile?: ContractSourceFile;
 };
 
 export type Transaction = {
@@ -68,6 +74,7 @@ export type Anomaly = {
   title: string;
   explanation: string;
   amount: number;
+  currency: Currency;
   contractId?: string;
   transactionIds: string[];
   evidence: AnomalyEvidence[];
@@ -82,7 +89,7 @@ export type ClaimCaseEvent = {
 export type ClaimAnomalySnapshot = Pick<
   Anomaly,
   "kind" | "title" | "explanation" | "amount"
->;
+> & { currency?: Currency };
 
 export type ClaimCase = {
   id: string;

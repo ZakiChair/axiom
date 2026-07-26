@@ -1,5 +1,11 @@
 import type { Currency, Transaction } from "./model";
-import { normalizeMerchant } from "./normalize";
+import {
+  isBusinessIsoDate,
+  isNonZeroAmount,
+  isNoticeDays,
+  isPositiveAmount,
+} from "./limits";
+import { normalizeMerchant, transactionFingerprint } from "./normalize";
 
 export type CsvImportDefaults = {
   currency: Currency;
@@ -125,9 +131,7 @@ function parseDate(value: string): string | undefined {
   const isoDate = match[1]?.length === 4
     ? `${match[1]}-${match[2]}-${match[3]}`
     : `${match[3]}-${match[2]}-${match[1]}`;
-  const parsedDate = new Date(`${isoDate}T00:00:00.000Z`);
-
-  return parsedDate.toISOString().slice(0, 10) === isoDate ? isoDate : undefined;
+  return isBusinessIsoDate(isoDate) ? isoDate : undefined;
 }
 
 function parseAmount(value: string): number | undefined {
@@ -249,8 +253,14 @@ export function parseTransactionCsv(text: string, defaults: CsvImportDefaults): 
       continue;
     }
 
+    if (!isNonZeroAmount(signedAmount)) {
+      skippedRows += 1;
+      warnings.push("Une ligne CSV invalide a été ignorée.");
+      continue;
+    }
+
     const currency = currencyFrom(csvValue(row, columns.currency), defaults.currency);
-    const fingerprint = `${date}|${normalizeMerchant(label)}|${signedAmount.toFixed(2)}|${currency}`;
+    const fingerprint = transactionFingerprint({ date, label, amount: signedAmount, currency });
     if (fingerprints.has(fingerprint)) {
       skippedRows += 1;
       warnings.push("Un doublon interne a été ignoré.");
@@ -281,8 +291,8 @@ export function extractContractHints(text: string): ContractHints {
   const noticeDays = Number(noticeMatch?.[1] ?? noticeMatch?.[2]);
 
   return {
-    ...(amount === undefined ? {} : { amount }),
+    ...(isPositiveAmount(amount) ? { amount } : {}),
     ...(currency === undefined ? {} : { currency }),
-    ...(Number.isInteger(noticeDays) && noticeDays >= 0 ? { noticeDays } : {}),
+    ...(isNoticeDays(noticeDays) ? { noticeDays } : {}),
   };
 }

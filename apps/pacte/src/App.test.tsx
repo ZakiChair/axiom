@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { App } from "./App";
 import { Modal } from "./components/Modal";
@@ -16,6 +16,31 @@ describe("PACTE application shell", () => {
     expect(markup).toContain("Vue affichée : Vue d’ensemble");
     expect(markup).toContain("Coffre local");
     expect(markup).toContain("Bonjour, Foyer Démo");
+    expect(markup).toContain("Total mensuel récurrent");
+    expect(markup).toContain("Potentiellement récupérable");
+    expect(markup).toContain("CHF");
+  });
+
+  it("bloque le parcours nominal lorsque le coffre local est corrompu", () => {
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: () => "{corrompu",
+        setItem: () => undefined,
+      },
+    });
+
+    const markup = renderToStaticMarkup(<App />);
+
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain("Coffre local à récupérer");
+    expect(markup).toContain("Exporter la valeur brute");
+    expect(markup).toContain("Restaurer la démonstration");
+    expect(markup).not.toContain('aria-label="Navigation principale"');
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, "localStorage");
   });
 });
 

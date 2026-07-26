@@ -11,9 +11,10 @@ import {
 import type { ContractEntryInput, EntryErrors } from "../domain/entries";
 import { extractContractHints } from "../domain/importers";
 import { formatCalendarDate, formatCurrency } from "../domain/format";
+import { MAX_ABSOLUTE_AMOUNT, MAX_NOTICE_DAYS } from "../domain/limits";
 import type { Contract, Currency } from "../domain/model";
 import type { MutationResult } from "../domain/mutations";
-import { readImportFile } from "../infra/files";
+import { importFileMetadata, readImportFile } from "../infra/files";
 
 type ContractsViewProps = {
   contracts: Contract[];
@@ -37,6 +38,9 @@ const CONTRACT_FIELD_ORDER: ReadonlyArray<keyof ContractEntryInput> = [
   "nextRenewalDate",
   "noticeDays",
   "status",
+  "terminatedAt",
+  "expectedRefundAmount",
+  "expectedRefundDueDate",
 ];
 
 const CADENCE_LABELS: Record<Contract["cadence"], string> = {
@@ -64,9 +68,15 @@ function createContractInput(defaultCurrency: Currency): ContractEntryInput {
     nextRenewalDate: "",
     noticeDays: "0",
     status: "active",
+    terminatedAt: "",
+    expectsRefund: false,
+    expectedRefundAmount: "",
+    expectedRefundDueDate: "",
     merchantAliases: "",
     notes: "",
     sourceText: "",
+    sourceFileName: "",
+    sourceFileType: "",
   };
 }
 
@@ -111,6 +121,16 @@ function ContractForm({ defaultCurrency, onCancel, onConfirm }: ContractFormProp
     setFormError("");
   }
 
+  function updateRefundExpectation(expectsRefund: boolean) {
+    setInput((current) => ({ ...current, expectsRefund }));
+    setErrors((current) => ({
+      ...current,
+      expectedRefundAmount: undefined,
+      expectedRefundDueDate: undefined,
+    }));
+    setFormError("");
+  }
+
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0];
     if (!file) return;
@@ -121,12 +141,15 @@ function ContractForm({ defaultCurrency, onCancel, onConfirm }: ContractFormProp
     try {
       const text = await readImportFile(file);
       const hints = extractContractHints(text);
+      const sourceFile = importFileMetadata(file);
       setInput((current) => ({
         ...current,
         ...(hints.amount === undefined ? {} : { amount: String(hints.amount) }),
         ...(hints.currency === undefined ? {} : { currency: hints.currency }),
         ...(hints.noticeDays === undefined ? {} : { noticeDays: String(hints.noticeDays) }),
         sourceText: text,
+        sourceFileName: sourceFile.name,
+        sourceFileType: sourceFile.type,
       }));
       setFileMessage(
         "Indices extraits. Vérifiez chaque champ : le contrat ne sera ajouté qu’après votre confirmation.",
@@ -165,11 +188,11 @@ function ContractForm({ defaultCurrency, onCancel, onConfirm }: ContractFormProp
       <fieldset className="import-fieldset">
         <legend>Préremplir depuis un document</legend>
         <p>
-          Texte ou PDF, lu localement. L’extraction PDF reste indicative et demande une vérification humaine.
+          Texte, e-mail EML ou PDF, lu localement. L’extraction PDF reste indicative et demande une vérification humaine.
         </p>
         <label className="file-control" htmlFor="contract-file">Choisir un document</label>
         <input
-          accept=".txt,.pdf,text/plain,application/pdf"
+          accept=".txt,.eml,.pdf,text/plain,message/rfc822,application/pdf"
           id="contract-file"
           onChange={handleFile}
           type="file"
@@ -199,6 +222,7 @@ function ContractForm({ defaultCurrency, onCancel, onConfirm }: ContractFormProp
             aria-invalid={errors.amount ? "true" : undefined}
             id="contract-amount"
             inputMode="decimal"
+            max={MAX_ABSOLUTE_AMOUNT}
             onChange={(event) => updateField("amount", event.currentTarget.value)}
             placeholder="89,90"
             required
@@ -285,6 +309,7 @@ function ContractForm({ defaultCurrency, onCancel, onConfirm }: ContractFormProp
             aria-invalid={errors.noticeDays ? "true" : undefined}
             id="contract-noticeDays"
             min="0"
+            max={MAX_NOTICE_DAYS}
             onChange={(event) => updateField("noticeDays", event.currentTarget.value)}
             step="1"
             type="number"
@@ -308,6 +333,70 @@ function ContractForm({ defaultCurrency, onCancel, onConfirm }: ContractFormProp
           </select>
           <FieldError errors={errors} field="status" />
         </div>
+
+        {input.status === "terminated" ? (
+          <div className="field-group">
+            <label htmlFor="contract-terminatedAt">Date de résiliation *</label>
+            <input
+              aria-describedby={describedBy("terminatedAt")}
+              aria-invalid={errors.terminatedAt ? "true" : undefined}
+              id="contract-terminatedAt"
+              onChange={(event) => updateField("terminatedAt", event.currentTarget.value)}
+              required
+              type="date"
+              value={input.terminatedAt}
+            />
+            <FieldError errors={errors} field="terminatedAt" />
+          </div>
+        ) : null}
+
+        <div className="field-group field-wide checkbox-field">
+          <input
+            checked={input.expectsRefund}
+            id="contract-expectsRefund"
+            onChange={(event) => updateRefundExpectation(event.currentTarget.checked)}
+            type="checkbox"
+          />
+          <label htmlFor="contract-expectsRefund">Remboursement attendu</label>
+        </div>
+
+        {input.expectsRefund ? (
+          <>
+            <div className="field-group">
+              <label htmlFor="contract-expectedRefundAmount">Montant du remboursement *</label>
+              <input
+                aria-describedby={describedBy("expectedRefundAmount")}
+                aria-invalid={errors.expectedRefundAmount ? "true" : undefined}
+                id="contract-expectedRefundAmount"
+                inputMode="decimal"
+                max={MAX_ABSOLUTE_AMOUNT}
+                onChange={(event) => updateField(
+                  "expectedRefundAmount",
+                  event.currentTarget.value,
+                )}
+                required
+                value={input.expectedRefundAmount}
+              />
+              <FieldError errors={errors} field="expectedRefundAmount" />
+            </div>
+            <div className="field-group">
+              <label htmlFor="contract-expectedRefundDueDate">Date attendue *</label>
+              <input
+                aria-describedby={describedBy("expectedRefundDueDate")}
+                aria-invalid={errors.expectedRefundDueDate ? "true" : undefined}
+                id="contract-expectedRefundDueDate"
+                onChange={(event) => updateField(
+                  "expectedRefundDueDate",
+                  event.currentTarget.value,
+                )}
+                required
+                type="date"
+                value={input.expectedRefundDueDate}
+              />
+              <FieldError errors={errors} field="expectedRefundDueDate" />
+            </div>
+          </>
+        ) : null}
 
         <div className="field-group field-wide">
           <label htmlFor="contract-merchantAliases">Alias marchand</label>
@@ -374,7 +463,20 @@ function ContractCard({ contract, onRemove }: { contract: Contract; onRemove: (c
           <div><dt>Préavis</dt><dd>{contract.noticeDays} jours</dd></div>
           <div><dt>Renouvellement</dt><dd>{contract.nextRenewalDate ? formatCalendarDate(contract.nextRenewalDate) : "Non renseigné"}</dd></div>
           <div><dt>Catégorie</dt><dd>{contract.category || "Non renseignée"}</dd></div>
+          {contract.terminatedAt ? <div><dt>Résilié le</dt><dd>{formatCalendarDate(contract.terminatedAt)}</dd></div> : null}
+          {contract.expectedRefund ? (
+            <div>
+              <dt>Remboursement attendu</dt>
+              <dd>{formatCurrency(contract.expectedRefund.amount, contract.currency)} · {formatCalendarDate(contract.expectedRefund.dueDate)}</dd>
+            </div>
+          ) : null}
           <div className="clause-wide"><dt>Alias marchand</dt><dd>{contract.merchantAliases.length > 0 ? contract.merchantAliases.join(" · ") : "Aucun alias"}</dd></div>
+          {contract.sourceFile ? (
+            <div className="clause-wide">
+              <dt>Document source</dt>
+              <dd>{contract.sourceFile.name} · {contract.sourceFile.type}</dd>
+            </div>
+          ) : null}
           {contract.notes ? <div className="clause-wide"><dt>Notes</dt><dd>{contract.notes}</dd></div> : null}
         </dl>
       </details>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Shell } from "./components/Shell";
+import { StorageRecovery } from "./components/StorageRecovery";
 import type { ViewId } from "./components/Shell";
 import { usePacte } from "./hooks/usePacte";
 import { AnomaliesView } from "./views/AnomaliesView";
@@ -54,6 +55,15 @@ export function App() {
     mainRef.current?.focus();
   }, [activeView]);
 
+  if (pacte.storageRecovery.required) {
+    return (
+      <StorageRecovery
+        onRestoreDemo={pacte.restoreCorruptStorage}
+        rawState={pacte.storageRecovery.raw}
+      />
+    );
+  }
+
   return (
     <Shell
       activeView={activeView}
@@ -80,7 +90,9 @@ export function App() {
         />
       ) : activeView === "transactions" ? (
         <TransactionsView
+          contracts={pacte.state.contracts}
           defaultCurrency={pacte.state.household.currency}
+          onAssignContract={pacte.assignTransactionContract}
           onImportTransactions={pacte.importTransactions}
           transactions={pacte.state.transactions}
         />

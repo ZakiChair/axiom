@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { matchContract, normalizeMerchant } from "./normalize";
+import {
+  matchContract,
+  normalizeMerchant,
+  transactionFingerprint,
+} from "./normalize";
 import type { Contract, Transaction } from "./model";
 
 const helvetia: Contract = {
@@ -50,5 +54,21 @@ describe("matchContract", () => {
     };
 
     expect(matchContract(transaction("PRLV ALPINE MOBILE"), [generic, precise])).toBe(precise.id);
+  });
+});
+
+describe("transactionFingerprint", () => {
+  it("ignore l’identifiant, l’origine et le rattachement pour une même opération métier", () => {
+    const first = transaction("  PRLV  HÉLVETIA ");
+    const second: Transaction = {
+      ...first,
+      id: "transaction-import-other",
+      label: "prlv helvetia",
+      contractId: "contract-corrige",
+      importedAt: "2026-07-26T12:00:00.000Z",
+    };
+
+    expect(transactionFingerprint(first)).toBe("2026-07-15|prlv helvetia|89.9000|CHF");
+    expect(transactionFingerprint(second)).toBe(transactionFingerprint(first));
   });
 });

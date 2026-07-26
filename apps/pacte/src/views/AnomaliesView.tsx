@@ -167,7 +167,6 @@ export function AnomaliesView({
           {filteredAnomalies.map((anomaly) => {
             const linkedCase = casesByAnomaly.get(anomaly.id);
             const selected = anomaly.id === selectedAnomalyId;
-            const currency = anomaly.evidence[0]?.currency ?? "CHF";
             return (
               <li key={anomaly.id}>
                 <article
@@ -186,7 +185,7 @@ export function AnomaliesView({
                     </div>
                     <p className="anomaly-amount">
                       <span>Montant à vérifier</span>
-                      <strong>{formatCurrency(anomaly.amount, currency)}</strong>
+                      <strong>{formatCurrency(anomaly.amount, anomaly.currency)}</strong>
                     </p>
                   </header>
 

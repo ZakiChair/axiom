@@ -239,6 +239,74 @@ describe("analyseState", () => {
     ).toHaveLength(0);
   });
 
+  it.each([
+    {
+      name: "dans une autre devise",
+      credit: transaction({ amount: -80, currency: "EUR", date: "2026-07-20" }),
+    },
+    {
+      name: "daté dans le futur",
+      credit: transaction({ amount: -80, date: "2026-07-27" }),
+    },
+    {
+      name: "trop ancien par rapport à l’échéance",
+      credit: transaction({ amount: -80, date: "2026-04-20" }),
+    },
+  ])("n’accepte pas un crédit $name comme remboursement reçu", ({ credit }) => {
+    const refundContract: Contract = {
+      ...baseContract,
+      expectedRefund: { amount: 80, dueDate: "2026-07-20" },
+    };
+
+    expect(anomaliesOfKind(state({
+      contracts: [refundContract],
+      transactions: [credit],
+    }), "missing-refund")).toHaveLength(1);
+  });
+
+  it("n’accepte pas un crédit antérieur au début du contrat", () => {
+    const refundContract: Contract = {
+      ...baseContract,
+      startDate: "2026-07-01",
+      expectedRefund: { amount: 80, dueDate: "2026-07-20" },
+    };
+
+    expect(anomaliesOfKind(state({
+      contracts: [refundContract],
+      transactions: [transaction({ amount: -80, date: "2026-06-30" })],
+    }), "missing-refund")).toHaveLength(1);
+  });
+
+  it("évalue les échéances avec le jour civil local du moteur", () => {
+    const refundContract: Contract = {
+      ...baseContract,
+      expectedRefund: { amount: 80, dueDate: "2026-07-26" },
+    };
+    const localHalfPastMidnight = new Date(2026, 6, 26, 0, 30);
+
+    expect(analyseState(state({ contracts: [refundContract] }), localHalfPastMidnight)
+      .filter(({ kind }) => kind === "missing-refund")).toHaveLength(1);
+  });
+
+  it("ignore défensivement les valeurs hors bornes au lieu de lancer BigInt ou toISOString", () => {
+    const unsafeContract = {
+      ...baseContract,
+      amount: Number.POSITIVE_INFINITY,
+      nextRenewalDate: "2026-09-15",
+      noticeDays: Number.MAX_SAFE_INTEGER,
+    };
+    const unsafeTransaction = transaction({ amount: Number.POSITIVE_INFINITY });
+
+    expect(() => analyseState(state({
+      contracts: [unsafeContract],
+      transactions: [unsafeTransaction],
+    }), NOW)).not.toThrow();
+    expect(analyseState(state({
+      contracts: [unsafeContract],
+      transactions: [unsafeTransaction],
+    }), NOW)).toEqual([]);
+  });
+
   it("signale un préavis à exercer dans les trente prochains jours", () => {
     const nearDeadline: Contract = {
       ...baseContract,
@@ -299,6 +367,7 @@ describe("analyseState", () => {
 
     expect(first?.id).toBe(second?.id);
     expect(first?.evidence.length).toBeGreaterThan(1);
+    expect(first?.currency).toBe("CHF");
     expect(first?.explanation).not.toContain("undefined");
     expect(
       analyseState(

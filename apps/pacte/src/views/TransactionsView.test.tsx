@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { createDemoState } from "../data/demo";
 import {
+  CsvPreview,
   transactionImportMessage,
   transactionOrigin,
   TransactionsView,
@@ -47,7 +48,9 @@ describe("TransactionsView", () => {
   it("rend le journal filtrable et les deux chemins d'ajout sans API navigateur", () => {
     const markup = renderToStaticMarkup(
       <TransactionsView
+        contracts={createDemoState().contracts}
         defaultCurrency="CHF"
+        onAssignContract={() => ({ ok: true, changed: 1 })}
         onImportTransactions={() => ({ ok: true, changed: 1 })}
         transactions={createDemoState().transactions}
       />,
@@ -59,6 +62,8 @@ describe("TransactionsView", () => {
     expect(markup).toContain("Importer un CSV");
     expect(markup).toContain("PRLV ALPINE MOBILE");
     expect(markup).toContain("Montant");
+    expect(markup).toContain("Rattachement");
+    expect(markup).toContain('aria-label="Rattachement de PRLV ALPINE MOBILE"');
   });
 
   it("borne le journal rendu et annonce les lignes restantes", () => {
@@ -70,7 +75,9 @@ describe("TransactionsView", () => {
     }));
     const markup = renderToStaticMarkup(
       <TransactionsView
+        contracts={createDemoState().contracts}
         defaultCurrency="CHF"
+        onAssignContract={() => ({ ok: true, changed: 1 })}
         onImportTransactions={() => ({ ok: true, changed: 1 })}
         transactions={transactions}
       />,
@@ -78,5 +85,25 @@ describe("TransactionsView", () => {
 
     expect(markup).toContain("250 mouvements affichés sur 251");
     expect(markup).not.toContain("LIGNE 250");
+  });
+
+  it("offre un rattachement modifiable pour chaque ligne de l’aperçu CSV", () => {
+    const state = createDemoState();
+    const transaction = {
+      ...state.transactions[0]!,
+      id: "transaction-preview",
+      contractId: undefined,
+    };
+    const markup = renderToStaticMarkup(
+      <CsvPreview
+        contracts={state.contracts}
+        onAssign={() => undefined}
+        result={{ transactions: [transaction], skippedRows: 0, warnings: [] }}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="Contrat pour PRLV ALPINE MOBILE"');
+    expect(markup).toContain("Alpine Mobile");
+    expect(markup).toContain("Non rattaché");
   });
 });

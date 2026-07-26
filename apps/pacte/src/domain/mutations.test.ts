@@ -87,4 +87,26 @@ describe("commitPacteAction", () => {
 
     expect(outcome).toEqual({ state: current, result: { ok: true, changed: 0 } });
   });
+
+  it("ne publie pas une correction de rattachement avant sa persistance", () => {
+    const current = { ...emptyState(), transactions: [transaction] };
+    let attempted: PacteState | undefined;
+
+    const failed = commitPacteAction(
+      current,
+      {
+        type: "transaction/assign-contract",
+        transactionId: transaction.id,
+        contractId: "contract-new-link",
+      },
+      (next) => {
+        attempted = next;
+        return { ok: false, error: "Coffre indisponible." };
+      },
+    );
+
+    expect(attempted?.transactions[0]?.contractId).toBe("contract-new-link");
+    expect(failed.state).toBe(current);
+    expect(failed.result).toEqual({ ok: false, changed: 0, error: "Coffre indisponible." });
+  });
 });

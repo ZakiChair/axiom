@@ -1,4 +1,5 @@
 import type { Contract, Transaction } from "./model";
+import { MAX_ABSOLUTE_AMOUNT } from "./limits";
 
 const LEGAL_FORMS = /(?:\s+(?:sa|sarl|sas|sasu|ag|gmbh|ltd|llc|inc|s\s+a))+$/;
 
@@ -11,6 +12,22 @@ export function normalizeMerchant(value: string): string {
     .trim();
 
   return normalized.replace(LEGAL_FORMS, "").trim();
+}
+
+export function transactionFingerprint(transaction: Pick<
+  Transaction,
+  "date" | "label" | "amount" | "currency"
+>): string {
+  const amount = Object.is(transaction.amount, -0) ? 0 : transaction.amount;
+  const normalizedAmount = Number.isFinite(amount) && Math.abs(amount) <= MAX_ABSOLUTE_AMOUNT
+    ? amount.toFixed(4)
+    : `invalid:${String(amount)}`;
+  return [
+    transaction.date,
+    normalizeMerchant(transaction.label),
+    normalizedAmount,
+    transaction.currency,
+  ].join("|");
 }
 
 export function matchContract(transaction: Transaction, contracts: Contract[]): string | undefined {

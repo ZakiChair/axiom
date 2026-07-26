@@ -7,6 +7,7 @@ import type {
   PacteState,
   Transaction,
 } from "./model";
+import { transactionFingerprint } from "./normalize";
 
 type CaseChanges = Partial<Pick<ClaimCase, "status" | "note" | "letter">>;
 
@@ -14,6 +15,11 @@ export type PacteAction =
   | { type: "contract/add"; contract: Contract }
   | { type: "contract/remove"; contractId: string }
   | { type: "transactions/import"; transactions: Transaction[] }
+  | {
+    type: "transaction/assign-contract";
+    transactionId: string;
+    contractId: string | undefined;
+  }
   | { type: "case/open"; anomaly: Anomaly; now: Date }
   | { type: "case/update"; caseId: string; changes: CaseChanges; now: Date }
   | { type: "anomaly/dismiss"; anomalyId: string }
@@ -25,6 +31,7 @@ function copyContract(contract: Contract): Contract {
   return {
     ...contract,
     expectedRefund: contract.expectedRefund ? { ...contract.expectedRefund } : undefined,
+    sourceFile: contract.sourceFile ? { ...contract.sourceFile } : undefined,
     merchantAliases: [...contract.merchantAliases],
   };
 }
@@ -99,9 +106,14 @@ export function pacteReducer(state: PacteState, action: PacteAction): PacteState
 
     case "transactions/import": {
       const knownIds = new Set(state.transactions.map((transaction) => transaction.id));
+      const knownFingerprints = new Set(
+        state.transactions.map((transaction) => transactionFingerprint(transaction)),
+      );
       const additions = action.transactions.filter((transaction) => {
-        if (knownIds.has(transaction.id)) return false;
+        const fingerprint = transactionFingerprint(transaction);
+        if (knownIds.has(transaction.id) || knownFingerprints.has(fingerprint)) return false;
         knownIds.add(transaction.id);
+        knownFingerprints.add(fingerprint);
         return true;
       });
       if (additions.length === 0) return state;
@@ -111,6 +123,21 @@ export function pacteReducer(state: PacteState, action: PacteAction): PacteState
           ...state.transactions,
           ...additions.map((transaction) => ({ ...transaction })),
         ],
+      };
+    }
+
+    case "transaction/assign-contract": {
+      const current = state.transactions.find(
+        (transaction) => transaction.id === action.transactionId,
+      );
+      if (!current || current.contractId === action.contractId) return state;
+      return {
+        ...state,
+        transactions: state.transactions.map((transaction) => (
+          transaction.id === action.transactionId
+            ? { ...transaction, contractId: action.contractId }
+            : transaction
+        )),
       };
     }
 

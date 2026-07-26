@@ -6,6 +6,15 @@ import type {
   PacteState,
   Transaction,
 } from "./model";
+import {
+  isBoundedAmount,
+  isBusinessIsoDate,
+  isNoticeDays,
+  isPositiveAmount,
+  isoDateMs as safeIsoDateMs,
+  shiftIsoDate,
+} from "./limits";
+import { localDateKey } from "./format";
 import { matchContract, normalizeMerchant } from "./normalize";
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -14,6 +23,7 @@ const MONEY_UNIT_SCALE = 10_000;
 const BASIS_POINT_SCALE = 10_000n;
 const PRICE_TOLERANCE_BASIS_POINTS = 200n;
 const DEADLINE_WINDOW_DAYS = 30;
+const REFUND_MATCH_WINDOW_DAYS = 90;
 
 type MatchedTransaction = {
   transaction: Transaction;
@@ -21,24 +31,22 @@ type MatchedTransaction = {
 };
 
 function isoDateMs(value: string): number {
-  return Date.parse(`${value}T00:00:00.000Z`);
+  return safeIsoDateMs(value) ?? Number.NaN;
 }
 
 function todayMs(now: Date): number {
-  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return isoDateMs(localDateKey(now));
 }
 
-function addDays(value: string, days: number): string {
-  return new Date(isoDateMs(value) + days * DAY_MS).toISOString().slice(0, 10);
-}
-
-function moneyUnits(amount: number): bigint {
+function moneyUnits(amount: number): bigint | undefined {
+  if (!isBoundedAmount(amount)) return undefined;
   return BigInt(Math.round(amount * MONEY_UNIT_SCALE));
 }
 
 function exceedsPriceTolerance(amount: number, reference: number): boolean {
   const amountUnits = moneyUnits(amount);
   const referenceUnits = moneyUnits(reference);
+  if (amountUnits === undefined || referenceUnits === undefined) return false;
 
   return (
     (amountUnits - referenceUnits) * BASIS_POINT_SCALE >
@@ -47,12 +55,15 @@ function exceedsPriceTolerance(amount: number, reference: number): boolean {
 }
 
 function isWithinPriceTolerance(amount: number, reference: number): boolean {
-  const difference = moneyUnits(amount) - moneyUnits(reference);
+  const amountUnits = moneyUnits(amount);
+  const referenceUnits = moneyUnits(reference);
+  if (amountUnits === undefined || referenceUnits === undefined) return false;
+  const difference = amountUnits - referenceUnits;
   const absoluteDifference = difference < 0n ? -difference : difference;
 
   return (
     absoluteDifference * BASIS_POINT_SCALE <=
-    moneyUnits(reference) * PRICE_TOLERANCE_BASIS_POINTS
+    referenceUnits * PRICE_TOLERANCE_BASIS_POINTS
   );
 }
 
@@ -84,13 +95,28 @@ function transactionEvidence(transaction: Transaction): AnomalyEvidence {
 }
 
 function matchedTransactions(state: PacteState): MatchedTransaction[] {
-  const contractsById = new Map(state.contracts.map((contract) => [contract.id, contract]));
+  const usableContracts = state.contracts.filter((contract) => (
+    isPositiveAmount(contract.amount) &&
+    isNoticeDays(contract.noticeDays) &&
+    isBusinessIsoDate(contract.startDate) &&
+    (contract.nextRenewalDate === undefined || isBusinessIsoDate(contract.nextRenewalDate)) &&
+    (contract.terminatedAt === undefined || isBusinessIsoDate(contract.terminatedAt)) &&
+    (contract.expectedRefund === undefined || (
+      isPositiveAmount(contract.expectedRefund.amount) &&
+      isBusinessIsoDate(contract.expectedRefund.dueDate)
+    ))
+  ));
+  const contractsById = new Map(usableContracts.map((contract) => [contract.id, contract]));
 
-  return state.transactions.flatMap((transaction) => {
+  return state.transactions.filter((transaction) => (
+    isBoundedAmount(transaction.amount) &&
+    transaction.amount !== 0 &&
+    isBusinessIsoDate(transaction.date)
+  )).flatMap((transaction) => {
     const explicitContract = transaction.contractId
       ? contractsById.get(transaction.contractId)
       : undefined;
-    const matchedId = explicitContract ? undefined : matchContract(transaction, state.contracts);
+    const matchedId = explicitContract ? undefined : matchContract(transaction, usableContracts);
     const contract = explicitContract ?? (matchedId ? contractsById.get(matchedId) : undefined);
 
     return contract ? [{ transaction, contract }] : [];
@@ -138,6 +164,7 @@ function duplicateAnomalies(matched: MatchedTransaction[]): Anomaly[] {
         title: `Double débit possible — ${left.contract.provider}`,
         explanation: `Deux débits de ${formatAmount(left.transaction.amount, left.transaction.currency)} ont été relevés à moins de sept jours d’intervalle.`,
         amount: left.transaction.amount,
+        currency: left.transaction.currency,
         contractId,
         transactionIds,
         evidence: [left.transaction, right.transaction]
@@ -163,8 +190,9 @@ function priceIncreaseAnomalies(matched: MatchedTransaction[]): Anomaly[] {
       return [];
     }
 
-    const recoverableAmount =
-      Number(moneyUnits(transaction.amount) - moneyUnits(contract.amount)) / MONEY_UNIT_SCALE;
+    const transactionUnits = moneyUnits(transaction.amount)!;
+    const contractUnits = moneyUnits(contract.amount)!;
+    const recoverableAmount = Number(transactionUnits - contractUnits) / MONEY_UNIT_SCALE;
 
     return [{
       id: `anomaly:price-increase:${contract.id}:${transaction.id}`,
@@ -174,6 +202,7 @@ function priceIncreaseAnomalies(matched: MatchedTransaction[]): Anomaly[] {
       title: `Hausse de prix — ${contract.provider}`,
       explanation: `Le débit du ${formatDate(transaction.date)} dépasse le prix contractuel de ${formatAmount(recoverableAmount, contract.currency)}.`,
       amount: recoverableAmount,
+      currency: transaction.currency,
       contractId: contract.id,
       transactionIds: [transaction.id],
       evidence: [transactionEvidence(transaction)],
@@ -200,6 +229,7 @@ function postTerminationAnomalies(matched: MatchedTransaction[]): Anomaly[] {
       title: `Débit après résiliation — ${contract.provider}`,
       explanation: `Un débit de ${formatAmount(transaction.amount, transaction.currency)} a été relevé le ${formatDate(transaction.date)}, après la résiliation du ${formatDate(contract.terminatedAt)}.`,
       amount: transaction.amount,
+      currency: transaction.currency,
       contractId: contract.id,
       transactionIds: [transaction.id],
       evidence: [transactionEvidence(transaction)],
@@ -216,13 +246,25 @@ function missingRefundAnomalies(
 
   return state.contracts.flatMap((contract) => {
     const expectedRefund = contract.expectedRefund;
-    if (!expectedRefund || isoDateMs(expectedRefund.dueDate) > nowDateMs) return [];
+    const dueDateMs = expectedRefund ? isoDateMs(expectedRefund.dueDate) : Number.NaN;
+    if (
+      !expectedRefund ||
+      !isPositiveAmount(expectedRefund.amount) ||
+      !Number.isFinite(dueDateMs) ||
+      dueDateMs > nowDateMs
+    ) return [];
+    const windowStart = dueDateMs - REFUND_MATCH_WINDOW_DAYS * DAY_MS;
+    const windowEnd = dueDateMs + REFUND_MATCH_WINDOW_DAYS * DAY_MS;
 
     const matchingCredit = matched.some(({ transaction, contract: matchedContract }) => {
       if (
         matchedContract.id !== contract.id ||
         transaction.amount >= 0 ||
-        transaction.currency !== contract.currency
+        transaction.currency !== contract.currency ||
+        transaction.date < contract.startDate ||
+        isoDateMs(transaction.date) < windowStart ||
+        isoDateMs(transaction.date) > windowEnd ||
+        isoDateMs(transaction.date) > nowDateMs
       ) {
         return false;
       }
@@ -247,6 +289,7 @@ function missingRefundAnomalies(
       title: `Remboursement manquant — ${contract.provider}`,
       explanation: `Le remboursement de ${formatAmount(expectedRefund.amount, contract.currency)} attendu au ${formatDate(expectedRefund.dueDate)} n’a pas de crédit correspondant.`,
       amount: expectedRefund.amount,
+      currency: contract.currency,
       contractId: contract.id,
       transactionIds: [],
       evidence: [evidence],
@@ -261,7 +304,9 @@ function deadlineAnomalies(state: PacteState, now: Date): Anomaly[] {
   return state.contracts.flatMap((contract) => {
     if (contract.status !== "active" || !contract.nextRenewalDate) return [];
 
-    const deadline = addDays(contract.nextRenewalDate, -contract.noticeDays);
+    if (!isNoticeDays(contract.noticeDays)) return [];
+    const deadline = shiftIsoDate(contract.nextRenewalDate, -contract.noticeDays);
+    if (!deadline) return [];
     const deadlineMs = isoDateMs(deadline);
     if (deadlineMs < from || deadlineMs > until) return [];
 
@@ -281,6 +326,7 @@ function deadlineAnomalies(state: PacteState, now: Date): Anomaly[] {
       title: `Échéance proche — ${contract.provider}`,
       explanation: `Le préavis doit être exercé au plus tard le ${formatDate(deadline)} pour le renouvellement du ${formatDate(contract.nextRenewalDate)}.`,
       amount: 0,
+      currency: contract.currency,
       contractId: contract.id,
       transactionIds: [],
       evidence: [evidence],

@@ -12,16 +12,34 @@ import type {
 import { commitPacteAction } from "../domain/mutations";
 import type { MutationResult } from "../domain/mutations";
 import type { PacteAction } from "../domain/reducer";
-import { loadState, saveState } from "../infra/storage";
+import { inspectStoredState, saveState } from "../infra/storage";
 
 type CaseChanges = Partial<Pick<ClaimCase, "status" | "note" | "letter">>;
 
-function initializeState(): PacteState {
-  return loadState() ?? createDemoState();
+type InitialSession = {
+  state: PacteState;
+  recovery: { required: false } | { required: true; raw: string | null };
+};
+
+function initializeSession(): InitialSession {
+  const stored = inspectStoredState();
+  if (stored.status === "valid") {
+    return { state: stored.state, recovery: { required: false } };
+  }
+  if (stored.status === "corrupt") {
+    return {
+      state: createDemoState(),
+      recovery: { required: true, raw: stored.raw },
+    };
+  }
+  return { state: createDemoState(), recovery: { required: false } };
 }
 
 export function usePacte() {
-  const [state, setState] = useState(initializeState);
+  const initialSession = useRef<InitialSession | undefined>(undefined);
+  if (!initialSession.current) initialSession.current = initializeSession();
+  const [state, setState] = useState(initialSession.current.state);
+  const [storageRecovery, setStorageRecovery] = useState(initialSession.current.recovery);
   const stateRef = useRef(state);
 
   const commit = useCallback((action: PacteAction): MutationResult => {
@@ -55,6 +73,13 @@ export function usePacte() {
     return commit({ type: "transactions/import", transactions });
   }, [commit]);
 
+  const assignTransactionContract = useCallback((
+    transactionId: string,
+    contractId: string | undefined,
+  ) => {
+    return commit({ type: "transaction/assign-contract", transactionId, contractId });
+  }, [commit]);
+
   const openCase = useCallback((anomaly: Anomaly) => {
     return commit({ type: "case/open", anomaly, now: new Date() });
   }, [commit]);
@@ -75,6 +100,12 @@ export function usePacte() {
     return commit({ type: "demo/restore" });
   }, [commit]);
 
+  const restoreCorruptStorage = useCallback(() => {
+    const result = commit({ type: "demo/restore" });
+    if (result.ok) setStorageRecovery({ required: false });
+    return result;
+  }, [commit]);
+
   const resetEmpty = useCallback(() => {
     return commit({ type: "state/reset" });
   }, [commit]);
@@ -83,14 +114,17 @@ export function usePacte() {
     state,
     anomalies: analysis.anomalies,
     score: analysis.score,
+    storageRecovery,
     addContract,
     removeContract,
     importTransactions,
+    assignTransactionContract,
     openCase,
     updateCase,
     dismissAnomaly,
     replaceState,
     restoreDemo,
+    restoreCorruptStorage,
     resetEmpty,
   };
 }

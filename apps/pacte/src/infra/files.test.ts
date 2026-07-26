@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { readImportFile } from "./files";
+import { importFileMetadata, readImportFile } from "./files";
 
 describe("readImportFile", () => {
   it("lit directement le contenu des fichiers CSV et EML", async () => {
@@ -9,6 +9,15 @@ describe("readImportFile", () => {
     });
 
     await expect(readImportFile(file)).resolves.toBe("Date;Libellé\n2026-07-15;ALPINE");
+  });
+
+  it("décrit un e-mail par son nom et un type utile sans conserver son binaire", () => {
+    const eml = new File(["Subject: Contrat"], "confirmation.eml", { type: "" });
+
+    expect(importFileMetadata(eml)).toEqual({
+      name: "confirmation.eml",
+      type: "message/rfc822",
+    });
   });
 
   it("extrait les chaînes littérales d'un PDF et interprète leurs échappements", async () => {

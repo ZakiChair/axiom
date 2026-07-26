@@ -55,6 +55,33 @@ describe("parseTransactionCsv", () => {
     expect(result.warnings).toHaveLength(2);
   });
 
+  it("isole une date hors calendrier sans annuler les lignes suivantes", () => {
+    const result = parseTransactionCsv(
+      "Date;Libellé;Montant\n99.99.2026;DATE CASSÉE;10,00\n15.07.2026;LIGNE VALIDE;12,50",
+      defaults,
+    );
+
+    expect(result.transactions).toHaveLength(1);
+    expect(result.transactions[0]).toMatchObject({
+      date: "2026-07-15",
+      label: "LIGNE VALIDE",
+      amount: 12.5,
+    });
+    expect(result.skippedRows).toBe(1);
+  });
+
+  it("ignore les montants nuls ou au-delà de la borne métier", () => {
+    const result = parseTransactionCsv(
+      "Date;Libellé;Montant\n15.07.2026;ZÉRO;0\n16.07.2026;EXTRÊME;1000000000.01\n17.07.2026;VALIDE;-42,00",
+      defaults,
+    );
+
+    expect(result.transactions.map(({ label, amount }) => ({ label, amount }))).toEqual([
+      { label: "VALIDE", amount: -42 },
+    ]);
+    expect(result.skippedRows).toBe(2);
+  });
+
   it("génère le même identifiant pour la même empreinte normalisée", () => {
     const first = parseTransactionCsv("Date;Libellé;Montant\n15.07.2026; ALPINE  MOBILE ;49,90", defaults);
     const second = parseTransactionCsv("Date;Libellé;Montant\n15.07.2026;alpine mobile;49.90", defaults);
@@ -77,5 +104,11 @@ describe("extractContractHints", () => {
       amount: 89.9,
       currency: "EUR",
     });
+  });
+
+  it("ne préremplit pas des indices hors bornes métier", () => {
+    expect(extractContractHints(
+      "Prime CHF 1000000000.01. Préavis 3651 jours.",
+    )).toEqual({ currency: "CHF" });
   });
 });

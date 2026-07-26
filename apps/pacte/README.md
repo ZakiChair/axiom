@@ -47,15 +47,20 @@ Vite affiche l’adresse locale à ouvrir, généralement
 
 ## Fonctionnalités de la V1
 
-- tableau de bord du foyer, score de contrôle, priorités et échéances ;
-- création manuelle de contrats et préremplissage local depuis un texte ou PDF ;
-- ajout manuel de mouvements et import CSV avec aperçu avant écriture ;
+- tableau de bord du foyer, contrats récents, engagements mensuels et montants
+  récupérables séparés en CHF et EUR ;
+- création manuelle de contrats, avec résiliation, remboursement attendu et
+  provenance du document, puis préremplissage local depuis un texte, e-mail ou
+  PDF ;
+- ajout manuel de mouvements et import CSV avec aperçu, association proposée à
+  un contrat et correction possible avant ou après écriture ;
 - détection déterministe des doubles débits, hausses de prix, débits après
   résiliation, remboursements manquants et échéances proches ;
 - ouverture d’un dossier avec instantané immuable des preuves ;
 - suivi du statut, notes et lettre factuelle éditable ;
 - export texte, copie presse-papiers et impression de la lettre ;
-- sauvegarde JSON complète, import validé et remise à un état connu.
+- sauvegarde JSON complète, import validé, récupération d'un stockage corrompu
+  et remise à un état connu.
 
 ## Format CSV accepté
 
@@ -91,19 +96,27 @@ absente ou inconnue reprend la devise du foyer.
 
 PACTE montre un aperçu avant confirmation. Une ligne invalide ou un doublon du
 fichier est ignoré et comptabilisé. Les doublons déjà présents dans le journal
-sont aussi écartés lors de l’écriture.
+sont aussi écartés lors de l’écriture, même si leur identifiant ou leur date
+d'import technique diffère : la comparaison repose sur la date, le libellé
+normalisé, le montant et la devise. Une association à un contrat peut être
+proposée d'après le libellé ; elle reste visible et modifiable dans l'aperçu.
+
+Les dates métier sont limitées aux années 1900 à 2200, les montants à une valeur
+absolue maximale de 1 000 000 000 et les préavis à 3 650 jours. Une ligne CSV
+hors limites est isolée sans empêcher l'import des autres lignes valides.
 
 ## Import de contrats et limites PDF
 
 Le formulaire **Nouveau contrat** peut lire localement un fichier texte, un
-e-mail exporté sous forme textuelle ou un PDF contenant des chaînes accessibles.
+e-mail `.eml` exporté sous forme textuelle ou un PDF contenant des chaînes accessibles.
 Le préremplissage ne recherche que quelques indices, notamment un montant, une
 devise et un préavis. Il ne remplace jamais la validation du formulaire.
 
 La lecture PDF est une meilleure tentative : la V1 ne contient ni OCR, ni moteur
 PDF complet. Un document scanné, protégé, compressé d’une manière non reconnue ou
 sans texte accessible peut ne rien produire. Dans ce cas, PACTE demande une
-saisie manuelle. Le fichier binaire brut n’est pas conservé.
+saisie manuelle. Le nom et le type MIME du document sont conservés avec le
+contrat pour en rappeler la provenance ; le fichier binaire brut ne l'est pas.
 
 ## Confidentialité, stockage et sauvegardes
 
@@ -121,6 +134,12 @@ L’import JSON valide entièrement le schéma avant de proposer le remplacement
 Une sauvegarde illisible ou incompatible ne modifie pas le coffre. Les actions
 **Restaurer la démonstration** et **Créer un coffre vide** demandent aussi une
 confirmation explicite.
+
+Si la valeur `pacte:v1` est corrompue, l'application bloque l'interface normale
+afin de ne pas écraser silencieusement les données. L'écran de récupération
+permet d'abord d'exporter la valeur brute, puis de restaurer la démonstration
+après confirmation. La même exportation brute reste disponible lorsqu'une
+erreur d'affichage inattendue est interceptée.
 
 ## Limites et responsabilité
 

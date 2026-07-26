@@ -37,9 +37,15 @@ const validContract = {
   nextRenewalDate: "2027-07-01",
   noticeDays: "30",
   status: "active",
+  terminatedAt: "",
+  expectsRefund: false,
+  expectedRefundAmount: "",
+  expectedRefundDueDate: "",
   merchantAliases: "Énergie Lac, ENERGIE-LAC\nÉnergie Lac",
   notes: "Contrat familial.",
   sourceText: "Prime CHF 129.90.",
+  sourceFileName: "conditions.eml",
+  sourceFileType: "message/rfc822",
 };
 
 describe("validateContractEntry", () => {
@@ -70,6 +76,36 @@ describe("validateContractEntry", () => {
       noticeDays: "Indiquez un nombre entier de jours positif ou nul.",
     });
   });
+
+  it("exige les faits conditionnels d’une résiliation et d’un remboursement attendu", () => {
+    expect(validateContractEntry({
+      ...validContract,
+      status: "terminated",
+      terminatedAt: "",
+      expectsRefund: true,
+      expectedRefundAmount: "0",
+      expectedRefundDueDate: "2026-02-31",
+    })).toMatchObject({
+      terminatedAt: "Indiquez la date de résiliation.",
+      expectedRefundAmount: "Indiquez un remboursement supérieur à zéro.",
+      expectedRefundDueDate: "Indiquez une date de remboursement valide.",
+    });
+  });
+
+  it("refuse les montants et préavis au-delà des bornes métier", () => {
+    expect(validateContractEntry({
+      ...validContract,
+      amount: "1000000000.01",
+      noticeDays: "3651",
+      expectsRefund: true,
+      expectedRefundAmount: "1000000000.01",
+      expectedRefundDueDate: "2026-08-01",
+    })).toMatchObject({
+      amount: "Indiquez un montant dans la limite autorisée.",
+      noticeDays: "Le préavis ne peut pas dépasser 3650 jours.",
+      expectedRefundAmount: "Indiquez un remboursement dans la limite autorisée.",
+    });
+  });
 });
 
 describe("buildContractEntry", () => {
@@ -89,6 +125,31 @@ describe("buildContractEntry", () => {
       merchantAliases: ["Énergie Lac", "ENERGIE-LAC"],
       notes: "Contrat familial.",
       sourceText: "Prime CHF 129.90.",
+      sourceFile: { name: "conditions.eml", type: "message/rfc822" },
+    });
+  });
+
+  it("construit la résiliation et le remboursement uniquement lorsqu’ils sont déclarés", () => {
+    expect(buildContractEntry({
+      ...validContract,
+      status: "terminated",
+      terminatedAt: "2026-07-10",
+      expectsRefund: true,
+      expectedRefundAmount: "24,50",
+      expectedRefundDueDate: "2026-08-01",
+    }, "contract-terminated")).toMatchObject({
+      terminatedAt: "2026-07-10",
+      expectedRefund: { amount: 24.5, dueDate: "2026-08-01" },
+    });
+
+    expect(buildContractEntry({
+      ...validContract,
+      terminatedAt: "2026-07-10",
+      expectedRefundAmount: "24,50",
+      expectedRefundDueDate: "2026-08-01",
+    }, "contract-active")).not.toMatchObject({
+      terminatedAt: expect.anything(),
+      expectedRefund: expect.anything(),
     });
   });
 });
@@ -98,6 +159,7 @@ const validTransaction = {
   label: "  ÉNERGIE LAC  ",
   amount: "-18,50",
   currency: "EUR",
+  contractId: "contract-energie",
 };
 
 describe("validateTransactionEntry", () => {
@@ -114,6 +176,15 @@ describe("validateTransactionEntry", () => {
       currency: "Choisissez une devise proposée.",
     });
   });
+
+  it("refuse un mouvement qui dépasse la borne monétaire", () => {
+    expect(validateTransactionEntry({
+      ...validTransaction,
+      amount: "-1000000000.01",
+    })).toMatchObject({
+      amount: "Indiquez un montant dans la limite autorisée.",
+    });
+  });
 });
 
 describe("buildTransactionEntry", () => {
@@ -128,6 +199,7 @@ describe("buildTransactionEntry", () => {
       label: "ÉNERGIE LAC",
       amount: -18.5,
       currency: "EUR",
+      contractId: "contract-energie",
       importedAt: "2026-07-26T08:30:00.000Z",
     });
   });

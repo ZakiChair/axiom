@@ -23,4 +23,26 @@ describe("ContractsView", () => {
     expect(markup).toContain("Alias marchand");
     expect(markup).toContain('aria-label="Retirer Alpine Mobile du registre"');
   });
+
+  it("affiche les faits de résiliation, remboursement et provenance conservés", () => {
+    const contract = {
+      ...createDemoState().contracts[2]!,
+      expectedRefund: { amount: 24.5, dueDate: "2026-08-15" },
+      sourceFile: { name: "confirmation.eml", type: "message/rfc822" },
+    };
+    const markup = renderToStaticMarkup(
+      <ContractsView
+        contracts={[contract]}
+        defaultCurrency="CHF"
+        onAddContract={() => ({ ok: true, changed: 1 })}
+        onRemoveContract={() => ({ ok: true, changed: 1 })}
+      />,
+    );
+
+    expect(markup).toContain("Résilié le");
+    expect(markup).toContain("Remboursement attendu");
+    expect(markup).toContain("24.50");
+    expect(markup).toContain("confirmation.eml");
+    expect(markup).toContain("message/rfc822");
+  });
 });

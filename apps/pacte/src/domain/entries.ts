@@ -5,6 +5,12 @@ import type {
   Currency,
   Transaction,
 } from "./model";
+import {
+  MAX_ABSOLUTE_AMOUNT,
+  MAX_NOTICE_DAYS,
+  isBoundedAmount,
+  isBusinessIsoDate,
+} from "./limits";
 
 export type ContractEntryInput = {
   provider: string;
@@ -17,9 +23,15 @@ export type ContractEntryInput = {
   nextRenewalDate: string;
   noticeDays: string;
   status: string;
+  terminatedAt?: string;
+  expectsRefund?: boolean;
+  expectedRefundAmount?: string;
+  expectedRefundDueDate?: string;
   merchantAliases: string;
   notes: string;
   sourceText: string;
+  sourceFileName?: string;
+  sourceFileType?: string;
 };
 
 export type TransactionEntryInput = {
@@ -27,6 +39,7 @@ export type TransactionEntryInput = {
   label: string;
   amount: string;
   currency: string;
+  contractId?: string;
 };
 
 export type EntryErrors<T> = Partial<Record<keyof T, string>>;
@@ -61,12 +74,11 @@ function isStatus(value: string): value is ContractStatus {
 }
 
 function isIsoDate(value: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  return isBusinessIsoDate(value);
 }
 
-function parseEntryAmount(value: string): number | undefined {
+function parseEntryAmount(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
   let normalized = value.trim().replace(/[\s'’]/g, "");
   if (!/^[+-]?\d+(?:[.,]\d+)?$/.test(normalized)) return undefined;
 
@@ -80,11 +92,14 @@ export function validateContractEntry(
 ): EntryErrors<ContractEntryInput> {
   const errors: EntryErrors<ContractEntryInput> = {};
   const amount = parseEntryAmount(input.amount);
+  const refundAmount = parseEntryAmount(input.expectedRefundAmount);
   const noticeDays = input.noticeDays.trim() === "" ? 0 : Number(input.noticeDays);
 
   if (input.provider.trim() === "") errors.provider = "Indiquez le fournisseur.";
   if (amount === undefined || amount <= 0) {
     errors.amount = "Indiquez un montant supérieur à zéro.";
+  } else if (!isBoundedAmount(amount)) {
+    errors.amount = "Indiquez un montant dans la limite autorisée.";
   }
   if (!isCurrency(input.currency)) errors.currency = "Choisissez une devise proposée.";
   if (!isCadence(input.cadence)) errors.cadence = "Choisissez une cadence proposée.";
@@ -94,8 +109,23 @@ export function validateContractEntry(
   }
   if (!Number.isInteger(noticeDays) || noticeDays < 0) {
     errors.noticeDays = "Indiquez un nombre entier de jours positif ou nul.";
+  } else if (noticeDays > MAX_NOTICE_DAYS) {
+    errors.noticeDays = `Le préavis ne peut pas dépasser ${MAX_NOTICE_DAYS} jours.`;
   }
   if (!isStatus(input.status)) errors.status = "Choisissez un statut proposé.";
+  if (input.status === "terminated" && !isIsoDate(input.terminatedAt ?? "")) {
+    errors.terminatedAt = "Indiquez la date de résiliation.";
+  }
+  if (input.expectsRefund) {
+    if (refundAmount === undefined || refundAmount <= 0) {
+      errors.expectedRefundAmount = "Indiquez un remboursement supérieur à zéro.";
+    } else if (refundAmount > MAX_ABSOLUTE_AMOUNT) {
+      errors.expectedRefundAmount = "Indiquez un remboursement dans la limite autorisée.";
+    }
+    if (!isIsoDate(input.expectedRefundDueDate ?? "")) {
+      errors.expectedRefundDueDate = "Indiquez une date de remboursement valide.";
+    }
+  }
 
   return errors;
 }
@@ -124,9 +154,26 @@ export function buildContractEntry(input: ContractEntryInput, id: string): Contr
     ...(input.nextRenewalDate.trim() === "" ? {} : { nextRenewalDate: input.nextRenewalDate }),
     noticeDays: input.noticeDays.trim() === "" ? 0 : Number(input.noticeDays),
     status: input.status as ContractStatus,
+    ...(input.status === "terminated" ? { terminatedAt: input.terminatedAt ?? "" } : {}),
+    ...(input.expectsRefund
+      ? {
+        expectedRefund: {
+          amount: parseEntryAmount(input.expectedRefundAmount)!,
+          dueDate: input.expectedRefundDueDate ?? "",
+        },
+      }
+      : {}),
     merchantAliases: aliases,
     notes: input.notes.trim(),
     ...(input.sourceText.trim() === "" ? {} : { sourceText: input.sourceText.trim() }),
+    ...((input.sourceFileName ?? "").trim() === ""
+      ? {}
+      : {
+        sourceFile: {
+          name: input.sourceFileName!.trim(),
+          type: (input.sourceFileType ?? "").trim() || "application/octet-stream",
+        },
+      }),
   };
 }
 
@@ -140,6 +187,8 @@ export function validateTransactionEntry(
   if (input.label.trim() === "") errors.label = "Indiquez le libellé du mouvement.";
   if (amount === undefined || amount === 0) {
     errors.amount = "Indiquez un montant différent de zéro.";
+  } else if (!isBoundedAmount(amount)) {
+    errors.amount = "Indiquez un montant dans la limite autorisée.";
   }
   if (!isCurrency(input.currency)) errors.currency = "Choisissez une devise proposée.";
 
@@ -157,6 +206,9 @@ export function buildTransactionEntry(
     label: input.label.trim(),
     amount: parseEntryAmount(input.amount)!,
     currency: input.currency as Currency,
+    ...((input.contractId ?? "").trim() === ""
+      ? {}
+      : { contractId: input.contractId!.trim() }),
     importedAt,
   };
 }

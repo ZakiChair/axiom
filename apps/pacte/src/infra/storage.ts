@@ -7,6 +7,11 @@ export type SaveStateResult =
   | { ok: true }
   | { ok: false; error: string };
 
+export type StoredStateInspection =
+  | { status: "missing" }
+  | { status: "valid"; state: PacteState }
+  | { status: "corrupt"; raw: string | null };
+
 const SAVE_ERROR = "Le coffre local n’a pas pu être enregistré. Libérez de l’espace puis réessayez.";
 
 function availableStorage(): Storage | undefined {
@@ -27,20 +32,33 @@ export function rawStoredState(): string | null {
 }
 
 export function loadState(): PacteState | null {
-  const rawState = rawStoredState();
+  const inspected = inspectStoredState();
+  return inspected.status === "valid" ? inspected.state : null;
+}
 
-  if (rawState === null) {
-    return null;
+export function inspectStoredState(): StoredStateInspection {
+  let raw: string | null;
+  try {
+    const storage = availableStorage();
+    if (storage === undefined) return { status: "missing" };
+    raw = storage.getItem(STORAGE_KEY);
+  } catch {
+    return { status: "corrupt", raw: null };
   }
 
+  if (raw === null) return { status: "missing" };
+
   try {
-    return parsePacteState(JSON.parse(rawState));
+    const state = parsePacteState(JSON.parse(raw));
+    return state ? { status: "valid", state } : { status: "corrupt", raw };
   } catch {
-    return null;
+    return { status: "corrupt", raw };
   }
 }
 
 export function saveState(state: PacteState): SaveStateResult {
+  if (parsePacteState(state) === null) return { ok: false, error: SAVE_ERROR };
+
   try {
     const storage = availableStorage();
     if (storage === undefined) return { ok: false, error: SAVE_ERROR };

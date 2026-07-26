@@ -1,6 +1,7 @@
-import type { Anomaly, Contract, PacteState } from "../domain/model";
+import type { Anomaly, Contract, Currency, PacteState } from "../domain/model";
 import type { ViewId } from "../components/Shell";
 import { formatCalendarDate, formatCurrency, localDateKey } from "../domain/format";
+import { isNonNegativeAmount, isPositiveAmount, shiftIsoDate } from "../domain/limits";
 
 type DashboardViewProps = {
   anomalies: Anomaly[];
@@ -28,27 +29,89 @@ const CONTRACT_STATUS_LABELS: Record<Contract["status"], string> = {
   terminated: "Résilié",
 };
 
-const DAY_IN_MS = 24 * 60 * 60 * 1_000;
-
-function addDays(date: string, days: number): string {
-  const time = Date.parse(`${date}T00:00:00.000Z`) + days * DAY_IN_MS;
-  return new Date(time).toISOString().slice(0, 10);
-}
-
 export function getUpcomingDeadlines(contracts: Contract[], today: string): Deadline[] {
   return contracts
     .flatMap((contract) => {
       if (contract.status !== "active" || !contract.nextRenewalDate) return [];
 
-      return [{
+      const date = shiftIsoDate(contract.nextRenewalDate, -contract.noticeDays);
+      return date ? [{
         contractId: contract.id,
-        date: addDays(contract.nextRenewalDate, -contract.noticeDays),
+        date,
         provider: contract.provider,
-      }];
+      }] : [];
     })
     .filter((deadline) => deadline.date >= today)
     .sort((left, right) => left.date.localeCompare(right.date))
     .slice(0, 2);
+}
+
+type CurrencyTotals = Record<Currency, number>;
+
+export type DashboardKpis = {
+  activeContracts: number;
+  recurringMonthly: CurrencyTotals;
+  recoverable: CurrencyTotals;
+};
+
+function emptyCurrencyTotals(): CurrencyTotals {
+  return { CHF: 0, EUR: 0 };
+}
+
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+export function computeDashboardKpis(
+  contracts: Contract[],
+  anomalies: Anomaly[],
+): DashboardKpis {
+  const activeContracts = contracts.filter((contract) => contract.status === "active");
+  const recurringMonthly = emptyCurrencyTotals();
+  const recoverable = emptyCurrencyTotals();
+
+  for (const contract of activeContracts) {
+    const divisor = contract.cadence === "monthly"
+      ? 1
+      : contract.cadence === "quarterly"
+        ? 3
+        : contract.cadence === "annual"
+          ? 12
+          : undefined;
+    if (divisor && isPositiveAmount(contract.amount)) {
+      recurringMonthly[contract.currency] += contract.amount / divisor;
+    }
+  }
+
+  for (const anomaly of anomalies) {
+    if (isNonNegativeAmount(anomaly.amount)) {
+      recoverable[anomaly.currency] += anomaly.amount;
+    }
+  }
+
+  recurringMonthly.CHF = roundMoney(recurringMonthly.CHF);
+  recurringMonthly.EUR = roundMoney(recurringMonthly.EUR);
+  recoverable.CHF = roundMoney(recoverable.CHF);
+  recoverable.EUR = roundMoney(recoverable.EUR);
+
+  return {
+    activeContracts: activeContracts.length,
+    recurringMonthly,
+    recoverable,
+  };
+}
+
+export function getRecentContracts(contracts: Contract[], limit = 4): Contract[] {
+  return contracts.slice(-limit).reverse();
+}
+
+function CurrencyAmounts({ totals }: { totals: CurrencyTotals }) {
+  return (
+    <span className="currency-totals">
+      <span>{formatCurrency(totals.CHF, "CHF")}</span>
+      <span>{formatCurrency(totals.EUR, "EUR")}</span>
+    </span>
+  );
 }
 
 function scoreLabel(score: number): string {
@@ -61,9 +124,9 @@ export function DashboardView({ anomalies, onNavigate, onOpenAnomaly, score, sta
   const now = new Date();
   const today = localDateKey(now);
   const deadlines = getUpcomingDeadlines(state.contracts, today);
-  const activeContracts = state.contracts.filter((contract) => contract.status === "active");
+  const kpis = computeDashboardKpis(state.contracts, anomalies);
   const priorityAnomalies = anomalies.slice(0, 3);
-  const compactContracts = state.contracts.slice(0, 4);
+  const compactContracts = getRecentContracts(state.contracts);
 
   return (
     <div className="dashboard-view">
@@ -79,15 +142,15 @@ export function DashboardView({ anomalies, onNavigate, onOpenAnomaly, score, sta
         <dl className="kpi-row" aria-label="Indicateurs du foyer">
           <div>
             <dt>Contrats actifs</dt>
-            <dd>{activeContracts.length}</dd>
+            <dd>{kpis.activeContracts}</dd>
           </div>
           <div>
-            <dt>Mouvements suivis</dt>
-            <dd>{state.transactions.length}</dd>
+            <dt>Total mensuel récurrent</dt>
+            <dd><CurrencyAmounts totals={kpis.recurringMonthly} /></dd>
           </div>
           <div className="kpi-alert">
-            <dt>Contrôles actifs</dt>
-            <dd>{anomalies.length}</dd>
+            <dt>Potentiellement récupérable</dt>
+            <dd><CurrencyAmounts totals={kpis.recoverable} /></dd>
           </div>
         </dl>
 
@@ -172,7 +235,7 @@ export function DashboardView({ anomalies, onNavigate, onOpenAnomaly, score, sta
                       <span>
                         {formatCurrency(
                           anomaly.amount,
-                          anomaly.evidence[0]?.currency ?? state.household.currency,
+                          anomaly.currency,
                         )}
                       </span>
                     </button>

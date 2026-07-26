@@ -16,6 +16,7 @@ function duplicateAnomaly(): Anomaly {
     title: "Double débit possible — Helvetia Protect",
     explanation: "Deux débits distincts de 89,90 CHF ont été relevés.",
     amount: 89.9,
+    currency: "CHF",
     contractId: "contract-demo-helvetia-protect",
     transactionIds: [
       "transaction-demo-helvetia-first",
@@ -68,6 +69,7 @@ describe("createClaimCase", () => {
       title: "Double débit possible — Helvetia Protect",
       explanation: "Deux débits distincts de 89,90 CHF ont été relevés.",
       amount: 89.9,
+      currency: "CHF",
     });
     expect(claim.note).toBe(capturedFacts);
     expect(claim.timeline).toEqual([
@@ -133,5 +135,34 @@ describe("generateClaimLetter", () => {
     expect(letter).toContain("confirmer la date limite et les modalités applicables");
     expect(letter).not.toMatch(/rembours/i);
     expect(letter).not.toContain("0,00 CHF");
+  });
+
+  it("conserve la devise du débit dans le snapshot et la demande si le contrat diffère", () => {
+    const state = createDemoState();
+    const terminated = {
+      ...state.contracts[2]!,
+      currency: "CHF" as const,
+    };
+    const debit = {
+      ...state.transactions[3]!,
+      amount: 79,
+      currency: "EUR" as const,
+      contractId: terminated.id,
+    };
+    const crossCurrencyState = {
+      ...state,
+      contracts: [terminated],
+      transactions: [debit],
+    };
+    const anomaly = analyseState(crossCurrencyState, NOW)
+      .find(({ kind }) => kind === "post-termination")!;
+
+    const claim = createClaimCase(anomaly, crossCurrencyState, NOW);
+    const letter = generateClaimLetter(claim, state.household);
+
+    expect(anomaly.currency).toBe("EUR");
+    expect(claim.anomalySnapshot.currency).toBe("EUR");
+    expect(letter).toContain("montant concerné de 79,00 EUR");
+    expect(letter).not.toContain("montant concerné de 79,00 CHF");
   });
 });

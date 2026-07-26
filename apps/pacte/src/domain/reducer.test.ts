@@ -68,6 +68,45 @@ describe("pacteReducer", () => {
     expect(initial.transactions).toEqual([transaction]);
   });
 
+  it("déduplique une opération métier malgré des identifiants et origines différents", () => {
+    const initial = { ...emptyState(), transactions: [transaction] };
+    const importedCopy: Transaction = {
+      ...transaction,
+      id: "transaction-csv-other-id",
+      label: "  cinema   du lac ",
+      importedAt: "2026-07-26T12:00:00.000Z",
+      contractId: undefined,
+    };
+
+    const next = pacteReducer(initial, {
+      type: "transactions/import",
+      transactions: [importedCopy],
+    });
+
+    expect(next).toBe(initial);
+  });
+
+  it("corrige ou retire le rattachement d’un mouvement sans toucher aux autres faits", () => {
+    const initial = { ...emptyState(), transactions: [transaction] };
+    const corrected = pacteReducer(initial, {
+      type: "transaction/assign-contract",
+      transactionId: transaction.id,
+      contractId: "contract-corrected",
+    });
+    const detached = pacteReducer(corrected, {
+      type: "transaction/assign-contract",
+      transactionId: transaction.id,
+      contractId: undefined,
+    });
+
+    expect(corrected.transactions[0]).toEqual({
+      ...transaction,
+      contractId: "contract-corrected",
+    });
+    expect(detached.transactions[0]).toEqual({ ...transaction, contractId: undefined });
+    expect(initial.transactions[0]).toBe(transaction);
+  });
+
   it("n'ouvre qu'un dossier par anomalie avec une lettre initiale", () => {
     const initial = createDemoState();
     const anomaly = analyseState(initial, NOW).find((item) => item.kind === "duplicate")!;

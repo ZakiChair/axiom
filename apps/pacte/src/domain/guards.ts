@@ -84,8 +84,8 @@ function isContract(value: unknown): value is Contract {
     isRecord(value) &&
     isNonEmptyString(value.id) &&
     isNonEmptyString(value.provider) &&
-    isNonEmptyString(value.category) &&
-    isNonEmptyString(value.reference) &&
+    typeof value.category === "string" &&
+    typeof value.reference === "string" &&
     isFiniteNumber(value.amount) &&
     value.amount >= 0 &&
     isCurrency(value.currency) &&

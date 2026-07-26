@@ -31,6 +31,13 @@ export type TransactionEntryInput = {
 
 export type EntryErrors<T> = Partial<Record<keyof T, string>>;
 
+export function firstInvalidField<Field extends PropertyKey>(
+  errors: Partial<Record<Field, string>>,
+  order: readonly Field[],
+): Field | undefined {
+  return order.find((field) => errors[field] !== undefined);
+}
+
 const CURRENCIES: Currency[] = ["CHF", "EUR"];
 const CADENCES: ContractCadence[] = ["monthly", "quarterly", "annual", "one-off"];
 const STATUSES: ContractStatus[] = ["active", "paused", "terminated"];

@@ -3,9 +3,20 @@ import { describe, expect, it } from "vitest";
 import {
   buildContractEntry,
   buildTransactionEntry,
+  firstInvalidField,
   validateContractEntry,
   validateTransactionEntry,
 } from "./entries";
+
+describe("firstInvalidField", () => {
+  it("retourne le premier champ invalide dans l'ordre du formulaire", () => {
+    expect(firstInvalidField(
+      { amount: "Montant invalide", provider: "Fournisseur manquant" },
+      ["provider", "amount", "currency"] as const,
+    )).toBe("provider");
+    expect(firstInvalidField({}, ["provider", "amount"] as const)).toBeUndefined();
+  });
+});
 
 const validContract = {
   provider: "  Énergie Lac  ",

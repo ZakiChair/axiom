@@ -10,8 +10,8 @@ describe("ContractsView", () => {
       <ContractsView
         contracts={createDemoState().contracts}
         defaultCurrency="CHF"
-        onAddContract={() => undefined}
-        onRemoveContract={() => undefined}
+        onAddContract={() => ({ ok: true, changed: 1 })}
+        onRemoveContract={() => ({ ok: true, changed: 1 })}
       />,
     );
 

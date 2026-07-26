@@ -4,31 +4,48 @@ import type { ChangeEvent, FormEvent } from "react";
 import { Modal } from "../components/Modal";
 import {
   buildTransactionEntry,
+  firstInvalidField,
   validateTransactionEntry,
 } from "../domain/entries";
 import type { EntryErrors, TransactionEntryInput } from "../domain/entries";
 import { parseTransactionCsv } from "../domain/importers";
 import type { CsvImportResult } from "../domain/importers";
 import type { Currency, Transaction } from "../domain/model";
+import type { MutationResult } from "../domain/mutations";
 import { readImportFile } from "../infra/files";
 
 type TransactionsViewProps = {
   defaultCurrency: Currency;
-  onImportTransactions: (transactions: Transaction[]) => void;
+  onImportTransactions: (transactions: Transaction[]) => MutationResult;
   transactions: Transaction[];
 };
 
 type ManualTransactionFormProps = {
   defaultCurrency: Currency;
   onCancel: () => void;
-  onConfirm: (transaction: Transaction) => void;
+  onConfirm: (transaction: Transaction) => MutationResult;
 };
 
 type CsvImportFormProps = {
   defaultCurrency: Currency;
   onCancel: () => void;
-  onConfirm: (transactions: Transaction[]) => void;
+  onConfirm: (transactions: Transaction[]) => MutationResult;
 };
+
+const TRANSACTION_FIELD_ORDER: ReadonlyArray<keyof TransactionEntryInput> = [
+  "date",
+  "label",
+  "amount",
+  "currency",
+];
+
+export function transactionImportMessage(changed: number): string {
+  if (changed === 0) {
+    return "Aucun nouveau mouvement : toutes les lignes étaient déjà dans le journal.";
+  }
+  if (changed === 1) return "1 mouvement a été ajouté au journal.";
+  return `${changed} mouvements ont été ajoutés au journal.`;
+}
 
 function localDate(): string {
   const date = new Date();
@@ -88,6 +105,14 @@ function ManualTransactionForm({
   const [input, setInput] = useState(() => createTransactionInput(defaultCurrency));
   const [errors, setErrors] = useState<EntryErrors<TransactionEntryInput>>({});
   const [formError, setFormError] = useState("");
+  const shouldFocusInvalidField = useRef(false);
+
+  useEffect(() => {
+    if (!shouldFocusInvalidField.current) return;
+    shouldFocusInvalidField.current = false;
+    const field = firstInvalidField(errors, TRANSACTION_FIELD_ORDER);
+    if (field) document.getElementById(`transaction-${field}`)?.focus();
+  }, [errors]);
 
   function updateField(field: keyof TransactionEntryInput, value: string) {
     setInput((current) => ({ ...current, [field]: value }));
@@ -100,14 +125,18 @@ function ManualTransactionForm({
     const nextErrors = validateTransactionEntry(input);
     setErrors(nextErrors);
     setFormError("");
-    if (Object.keys(nextErrors).length > 0) return;
+    if (Object.keys(nextErrors).length > 0) {
+      shouldFocusInvalidField.current = true;
+      return;
+    }
 
     try {
-      onConfirm(buildTransactionEntry(
+      const result = onConfirm(buildTransactionEntry(
         input,
         localId("transaction-manual"),
         new Date().toISOString(),
       ));
+      if (!result.ok) setFormError(result.error);
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Le mouvement n’a pas pu être ajouté.");
     }
@@ -175,6 +204,12 @@ function ManualTransactionForm({
           <TransactionFieldError errors={errors} field="currency" />
         </div>
       </div>
+      {Object.keys(errors).length > 0 ? (
+        <div className="dialog-error" role="alert">
+          <p>Corrigez les champs signalés avant de confirmer le mouvement.</p>
+          <ul>{Object.values(errors).filter(Boolean).map((message) => <li key={message}>{message}</li>)}</ul>
+        </div>
+      ) : null}
       {formError ? <p className="dialog-error" role="alert">{formError}</p> : null}
       <p className="required-note">* Champs requis.</p>
       <div className="form-actions">
@@ -251,7 +286,8 @@ function CsvImportForm({ defaultCurrency, onCancel, onConfirm }: CsvImportFormPr
   function confirmImport() {
     if (!result || result.transactions.length === 0) return;
     try {
-      onConfirm(result.transactions);
+      const mutation = onConfirm(result.transactions);
+      if (!mutation.ok) setFileError(mutation.error);
     } catch (error) {
       setFileError(error instanceof Error ? error.message : "Les mouvements n’ont pas pu être importés.");
     }
@@ -326,13 +362,17 @@ export function TransactionsView({
   }
 
   function addManual(transaction: Transaction) {
-    onImportTransactions([transaction]);
+    const result = onImportTransactions([transaction]);
+    if (!result.ok) return result;
     finishMutation("Le mouvement a été ajouté au journal.");
+    return result;
   }
 
   function importCsv(imported: Transaction[]) {
-    onImportTransactions(imported);
-    finishMutation(`${imported.length} mouvements ont été ajoutés au journal.`);
+    const result = onImportTransactions(imported);
+    if (!result.ok) return result;
+    finishMutation(transactionImportMessage(result.changed));
+    return result;
   }
 
   return (

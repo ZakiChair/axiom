@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { parsePacteState } from "./guards";
+import { buildContractEntry } from "./entries";
 import type { PacteState } from "./model";
 import { loadState, rawStoredState, saveState } from "../infra/storage";
 
@@ -72,6 +73,27 @@ describe("parsePacteState", () => {
     expect(parsePacteState(validState)).toEqual(validState);
   });
 
+  it("relit un contrat minimal produit par le formulaire sans catégorie ni référence", () => {
+    const contract = buildContractEntry({
+      provider: "Service Minimal",
+      amount: "12,50",
+      currency: "CHF",
+      cadence: "monthly",
+      startDate: "2026-07-01",
+      category: "",
+      reference: "",
+      nextRenewalDate: "",
+      noticeDays: "0",
+      status: "active",
+      merchantAliases: "",
+      notes: "",
+      sourceText: "",
+    }, "contract-minimal");
+    const state = { ...validState, contracts: [contract] };
+
+    expect(parsePacteState(JSON.parse(JSON.stringify(state)))).toEqual(state);
+  });
+
   it("refuse un foyer incomplet sans modifier la sauvegarde fournie", () => {
     const invalidState = {
       ...validState,
@@ -139,9 +161,25 @@ describe("coffre local", () => {
   });
 
   it("enregistre et relit un état V1 sous la clé versionnée", () => {
-    saveState(validState);
+    const result = saveState(validState);
 
+    expect(result).toEqual({ ok: true });
     expect(values.get("pacte:v1")).toBe(JSON.stringify(validState));
     expect(loadState()).toEqual(validState);
+  });
+
+  it("signale l'échec d'écriture sans prétendre que le coffre a été mis à jour", () => {
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: () => null,
+        setItem: () => { throw new DOMException("Quota exceeded", "QuotaExceededError"); },
+      },
+    });
+
+    expect(saveState(validState)).toEqual({
+      ok: false,
+      error: "Le coffre local n’a pas pu être enregistré. Libérez de l’espace puis réessayez.",
+    });
   });
 });

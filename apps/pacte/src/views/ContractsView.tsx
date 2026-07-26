@@ -4,25 +4,38 @@ import type { ChangeEvent, FormEvent } from "react";
 import { Modal } from "../components/Modal";
 import {
   buildContractEntry,
+  firstInvalidField,
   validateContractEntry,
 } from "../domain/entries";
 import type { ContractEntryInput, EntryErrors } from "../domain/entries";
 import { extractContractHints } from "../domain/importers";
 import type { Contract, Currency } from "../domain/model";
+import type { MutationResult } from "../domain/mutations";
 import { readImportFile } from "../infra/files";
 
 type ContractsViewProps = {
   contracts: Contract[];
   defaultCurrency: Currency;
-  onAddContract: (contract: Contract) => void;
-  onRemoveContract: (contractId: string) => void;
+  onAddContract: (contract: Contract) => MutationResult;
+  onRemoveContract: (contractId: string) => MutationResult;
 };
 
 type ContractFormProps = {
   defaultCurrency: Currency;
   onCancel: () => void;
-  onConfirm: (contract: Contract) => void;
+  onConfirm: (contract: Contract) => MutationResult;
 };
+
+const CONTRACT_FIELD_ORDER: ReadonlyArray<keyof ContractEntryInput> = [
+  "provider",
+  "amount",
+  "currency",
+  "cadence",
+  "startDate",
+  "nextRenewalDate",
+  "noticeDays",
+  "status",
+];
 
 const CADENCE_LABELS: Record<Contract["cadence"], string> = {
   monthly: "Mensuelle",
@@ -98,6 +111,14 @@ function ContractForm({ defaultCurrency, onCancel, onConfirm }: ContractFormProp
   const [formError, setFormError] = useState("");
   const [fileMessage, setFileMessage] = useState("");
   const [readingFile, setReadingFile] = useState(false);
+  const shouldFocusInvalidField = useRef(false);
+
+  useEffect(() => {
+    if (!shouldFocusInvalidField.current) return;
+    shouldFocusInvalidField.current = false;
+    const field = firstInvalidField(errors, CONTRACT_FIELD_ORDER);
+    if (field) document.getElementById(`contract-${field}`)?.focus();
+  }, [errors]);
 
   function updateField(field: keyof ContractEntryInput, value: string) {
     setInput((current) => ({ ...current, [field]: value }));
@@ -137,10 +158,14 @@ function ContractForm({ defaultCurrency, onCancel, onConfirm }: ContractFormProp
     const nextErrors = validateContractEntry(input);
     setErrors(nextErrors);
     setFormError("");
-    if (Object.keys(nextErrors).length > 0) return;
+    if (Object.keys(nextErrors).length > 0) {
+      shouldFocusInvalidField.current = true;
+      return;
+    }
 
     try {
-      onConfirm(buildContractEntry(input, localId("contract")));
+      const result = onConfirm(buildContractEntry(input, localId("contract")));
+      if (!result.ok) setFormError(result.error);
     } catch (error) {
       setFormError(error instanceof Error ? error.message : "Le contrat n’a pas pu être ajouté.");
     }
@@ -328,6 +353,12 @@ function ContractForm({ defaultCurrency, onCancel, onConfirm }: ContractFormProp
         ) : null}
       </div>
 
+      {Object.keys(errors).length > 0 ? (
+        <div className="dialog-error" role="alert">
+          <p>Corrigez les champs signalés avant de confirmer le contrat.</p>
+          <ul>{Object.values(errors).filter(Boolean).map((message) => <li key={message}>{message}</li>)}</ul>
+        </div>
+      ) : null}
       {formError ? <p className="dialog-error" id="contract-form-error" role="alert">{formError}</p> : null}
       <p className="required-note">* Champs requis. Vérifiez les informations avant de confirmer.</p>
       <div className="form-actions">
@@ -394,16 +425,23 @@ export function ContractsView({
   }, [toast]);
 
   function addContract(contract: Contract) {
-    onAddContract(contract);
+    const result = onAddContract(contract);
+    if (!result.ok) return result;
     shouldFocusHeading.current = true;
     setModalOpen(false);
     setToast({ id: Date.now(), message: `${contract.provider} a été ajouté au registre.` });
+    return result;
   }
 
   function removeContract(contract: Contract) {
     if (!globalThis.confirm(`Retirer ${contract.provider} du registre ?`)) return;
     try {
-      onRemoveContract(contract.id);
+      const result = onRemoveContract(contract.id);
+      if (!result.ok) {
+        setToast({ id: Date.now(), message: result.error });
+        return;
+      }
+      if (result.changed === 0) return;
       shouldFocusHeading.current = true;
       setToast({ id: Date.now(), message: `${contract.provider} a été retiré du registre.` });
     } catch (error) {

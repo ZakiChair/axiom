@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import { createDemoState } from "../data/demo";
 import { analyseState, computeControlScore } from "../domain/analyse";
@@ -9,7 +9,9 @@ import type {
   PacteState,
   Transaction,
 } from "../domain/model";
-import { pacteReducer } from "../domain/reducer";
+import { commitPacteAction } from "../domain/mutations";
+import type { MutationResult } from "../domain/mutations";
+import type { PacteAction } from "../domain/reducer";
 import { loadState, saveState } from "../infra/storage";
 
 type CaseChanges = Partial<Pick<ClaimCase, "status" | "note" | "letter">>;
@@ -19,11 +21,17 @@ function initializeState(): PacteState {
 }
 
 export function usePacte() {
-  const [state, dispatch] = useReducer(pacteReducer, undefined, initializeState);
+  const [state, setState] = useState(initializeState);
+  const stateRef = useRef(state);
 
-  useEffect(() => {
-    saveState(state);
-  }, [state]);
+  const commit = useCallback((action: PacteAction): MutationResult => {
+    const outcome = commitPacteAction(stateRef.current, action, saveState);
+    if (outcome.state !== stateRef.current) {
+      stateRef.current = outcome.state;
+      setState(outcome.state);
+    }
+    return outcome.result;
+  }, []);
 
   const analysis = useMemo(() => {
     const now = new Date();
@@ -36,40 +44,40 @@ export function usePacte() {
   }, [state]);
 
   const addContract = useCallback((contract: Contract) => {
-    dispatch({ type: "contract/add", contract });
-  }, []);
+    return commit({ type: "contract/add", contract });
+  }, [commit]);
 
   const removeContract = useCallback((contractId: string) => {
-    dispatch({ type: "contract/remove", contractId });
-  }, []);
+    return commit({ type: "contract/remove", contractId });
+  }, [commit]);
 
   const importTransactions = useCallback((transactions: Transaction[]) => {
-    dispatch({ type: "transactions/import", transactions });
-  }, []);
+    return commit({ type: "transactions/import", transactions });
+  }, [commit]);
 
   const openCase = useCallback((anomaly: Anomaly) => {
-    dispatch({ type: "case/open", anomaly, now: new Date() });
-  }, []);
+    return commit({ type: "case/open", anomaly, now: new Date() });
+  }, [commit]);
 
   const updateCase = useCallback((caseId: string, changes: CaseChanges) => {
-    dispatch({ type: "case/update", caseId, changes, now: new Date() });
-  }, []);
+    return commit({ type: "case/update", caseId, changes, now: new Date() });
+  }, [commit]);
 
   const dismissAnomaly = useCallback((anomalyId: string) => {
-    dispatch({ type: "anomaly/dismiss", anomalyId });
-  }, []);
+    return commit({ type: "anomaly/dismiss", anomalyId });
+  }, [commit]);
 
   const replaceState = useCallback((replacement: PacteState) => {
-    dispatch({ type: "state/replace", state: replacement });
-  }, []);
+    return commit({ type: "state/replace", state: replacement });
+  }, [commit]);
 
   const restoreDemo = useCallback(() => {
-    dispatch({ type: "demo/restore" });
-  }, []);
+    return commit({ type: "demo/restore" });
+  }, [commit]);
 
   const resetEmpty = useCallback(() => {
-    dispatch({ type: "state/reset" });
-  }, []);
+    return commit({ type: "state/reset" });
+  }, [commit]);
 
   return {
     state,

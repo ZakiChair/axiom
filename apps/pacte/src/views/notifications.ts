@@ -4,7 +4,12 @@ export type Notification = {
   message: string;
 };
 
-export type ContextNotification = Notification & { contextId: string };
+export type ContextToken = Readonly<{
+  contextId: string | undefined;
+  generation: number;
+}>;
+
+export type ContextNotification = Notification & { context: ContextToken };
 
 export function nextNotification(
   current: Notification | null,
@@ -14,15 +19,25 @@ export function nextNotification(
   return { id: (current?.id ?? 0) + 1, kind, message };
 }
 
+export function advanceContextToken(
+  current: ContextToken,
+  contextId: string | undefined,
+): ContextToken {
+  return { contextId, generation: current.generation + 1 };
+}
+
 export function deliverContextNotification(
   current: ContextNotification | null,
-  activeContextId: string | undefined,
-  originContextId: string,
+  activeContext: ContextToken,
+  originContext: ContextToken,
   kind: Notification["kind"],
   message: string,
 ): ContextNotification | null {
-  if (activeContextId !== originContextId) return current;
-  return { ...nextNotification(current, kind, message), contextId: originContextId };
+  if (
+    activeContext.contextId !== originContext.contextId
+    || activeContext.generation !== originContext.generation
+  ) return current;
+  return { ...nextNotification(current, kind, message), context: originContext };
 }
 
 export function consumeNotification(_current: Notification | null): null {
@@ -33,5 +48,5 @@ export function notificationForContext(
   current: ContextNotification | null,
   contextId: string,
 ): ContextNotification | null {
-  return current?.contextId === contextId ? current : null;
+  return current?.context.contextId === contextId ? current : null;
 }

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
   formatCalendarDate,
@@ -10,11 +10,16 @@ import type { ClaimCase, ClaimCaseStatus } from "../domain/model";
 import type { MutationResult } from "../domain/mutations";
 import { downloadText } from "../infra/files";
 import {
+  advanceContextToken,
   consumeNotification,
   deliverContextNotification,
   notificationForContext,
 } from "./notifications";
-import type { ContextNotification, Notification } from "./notifications";
+import type {
+  ContextNotification,
+  ContextToken,
+  Notification,
+} from "./notifications";
 
 type CaseChanges = Partial<Pick<ClaimCase, "status" | "note" | "letter">>;
 type CaseDraft = Pick<ClaimCase, "note" | "letter">;
@@ -35,6 +40,8 @@ const STATUS_LABELS: Record<ClaimCaseStatus, string> = {
   resolved: "Résolu",
   abandoned: "Abandonné",
 };
+
+const useCommitEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
 export function caseLetterFileName(provider: string, date: string): string {
   const slug = provider
@@ -64,25 +71,33 @@ export function CasesView({ cases, onSelectCase, onUpdateCase, selectedCaseId }:
   const activeCase = cases.find((claim) => claim.id === selectedCaseId) ?? cases[0];
   const [drafts, setDrafts] = useState<CaseDrafts>(() => new Map());
   const [notification, setNotification] = useState<ContextNotification | null>(null);
-  const activeCaseIdRef = useRef(activeCase?.id);
-  activeCaseIdRef.current = activeCase?.id;
+  const activeContextRef = useRef<ContextToken>({
+    contextId: activeCase?.id,
+    generation: 0,
+  });
   const activeDraft = activeCase ? caseDraftFor(drafts, activeCase) : { note: "", letter: "" };
   const activeNotification = activeCase
     ? notificationForContext(notification, activeCase.id)
     : null;
 
-  function notify(caseId: string, kind: Notification["kind"], message: string) {
+  useCommitEffect(() => {
+    if (activeContextRef.current.contextId === activeCase?.id) return;
+    activeContextRef.current = advanceContextToken(activeContextRef.current, activeCase?.id);
+    setNotification((current) => consumeNotification(current));
+  }, [activeCase?.id]);
+
+  function notify(context: ContextToken, kind: Notification["kind"], message: string) {
     setNotification((current) => deliverContextNotification(
       current,
-      activeCaseIdRef.current,
-      caseId,
+      activeContextRef.current,
+      context,
       kind,
       message,
     ));
   }
 
   function selectCase(caseId: string) {
-    activeCaseIdRef.current = caseId;
+    activeContextRef.current = advanceContextToken(activeContextRef.current, caseId);
     setNotification((current) => consumeNotification(current));
     onSelectCase(caseId);
   }
@@ -90,17 +105,18 @@ export function CasesView({ cases, onSelectCase, onUpdateCase, selectedCaseId }:
   function update(changes: CaseChanges, successMessage: string): boolean {
     if (!activeCase) return false;
     const caseId = activeCase.id;
+    const context = activeContextRef.current;
     try {
       const result = onUpdateCase(caseId, changes);
       if (!result.ok) {
-        notify(caseId, "error", result.error);
+        notify(context, "error", result.error);
         return false;
       }
-      notify(caseId, "success", successMessage);
+      notify(context, "success", successMessage);
       return true;
     } catch (error) {
       notify(
-        caseId,
+        context,
         "error",
         error instanceof Error ? error.message : "Le dossier n’a pas pu être enregistré.",
       );
@@ -110,14 +126,14 @@ export function CasesView({ cases, onSelectCase, onUpdateCase, selectedCaseId }:
 
   async function copyLetter() {
     if (!activeCase) return;
-    const caseId = activeCase.id;
+    const context = activeContextRef.current;
     const letter = activeDraft.letter;
     try {
       await navigator.clipboard.writeText(letter);
-      notify(caseId, "success", "La lettre a été copiée dans le presse-papiers.");
+      notify(context, "success", "La lettre a été copiée dans le presse-papiers.");
     } catch {
       notify(
-        caseId,
+        context,
         "error",
         "La copie a échoué. Sélectionnez le texte de la lettre pour le copier.",
       );

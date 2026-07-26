@@ -64,14 +64,33 @@ function formatDate(value: string): string {
   }).format(new Date(`${value}T00:00:00.000Z`));
 }
 
-function requestedAmount(claim: ClaimCase): number {
-  const firstAmount = Math.abs(claim.evidence[0]?.amount ?? 0);
+function requestFor(claim: ClaimCase): { heading: string; text: string } {
+  const { anomalySnapshot: anomaly, contractSnapshot: contract } = claim;
+  const amount = formatAmount(anomaly.amount, contract.currency);
 
-  if (claim.anomalyId.includes(":price-increase:")) {
-    return Math.max(0, firstAmount - claim.contractSnapshot.amount);
+  switch (anomaly.kind) {
+    case "price-increase":
+      return {
+        heading: "Demande chiffrée",
+        text: `Le prix contractuel de ${formatAmount(contract.amount, contract.currency)} est enregistré dans ce dossier. Je vous demande de vérifier la hausse et, si elle résulte d’une erreur, de rembourser l’écart relevé de ${amount}.`,
+      };
+    case "missing-refund":
+      return {
+        heading: "Demande chiffrée",
+        text: `Je vous demande de vérifier l’absence de crédit correspondant et de verser le remboursement attendu de ${amount}.`,
+      };
+    case "deadline":
+      return {
+        heading: "Demande",
+        text: "Je vous demande de confirmer la date limite et les modalités applicables à ce préavis.",
+      };
+    case "duplicate":
+    case "post-termination":
+      return {
+        heading: "Demande chiffrée",
+        text: `Je vous demande de vérifier ces éléments et, si une erreur est confirmée, de rembourser le montant concerné de ${amount}.`,
+      };
   }
-
-  return firstAmount;
 }
 
 export function createClaimCase(
@@ -84,6 +103,12 @@ export function createClaimCase(
   const claim: ClaimCase = {
     id: `case:${anomaly.id}`,
     anomalyId: anomaly.id,
+    anomalySnapshot: {
+      kind: anomaly.kind,
+      title: anomaly.title,
+      explanation: anomaly.explanation,
+      amount: anomaly.amount,
+    },
     status: "review",
     createdAt,
     contractSnapshot: contract,
@@ -108,11 +133,15 @@ export function generateClaimLetter(
   household: PacteState["household"],
 ): string {
   const contract = claim.contractSnapshot;
-  const amount = requestedAmount(claim);
+  const request = requestFor(claim);
   const evidenceLines = claim.evidence.length > 0
     ? claim.evidence.map(
-      (evidence) =>
-        `- Le ${formatDate(evidence.date)} : ${evidence.label} — ${formatAmount(Math.abs(evidence.amount), evidence.currency)}.`,
+      (evidence) => {
+        const evidenceAmount = evidence.amount === 0
+          ? ""
+          : ` — ${formatAmount(Math.abs(evidence.amount), evidence.currency)}`;
+        return `- Le ${formatDate(evidence.date)} : ${evidence.label}${evidenceAmount}.`;
+      },
     )
     : ["- Aucun justificatif transactionnel n’est encore listé dans ce dossier."];
   const attachmentLines = claim.evidence.length > 0
@@ -131,11 +160,17 @@ export function generateClaimLetter(
     "",
     "Madame, Monsieur,",
     "",
-    `Je vous contacte au sujet du contrat référencé ${contract.reference}. Les éléments suivants ont été relevés :`,
+    `Je vous contacte au sujet du contrat référencé ${contract.reference}.`,
+    "",
+    "Fait contrôlé",
+    claim.anomalySnapshot.title,
+    claim.anomalySnapshot.explanation,
+    "",
+    "Éléments datés",
     ...evidenceLines,
     "",
-    "Demande chiffrée",
-    `Je vous demande de vérifier ces éléments et, si une erreur est confirmée, de rembourser le montant concerné de ${formatAmount(amount, contract.currency)}.`,
+    request.heading,
+    request.text,
     "",
     "Pièces à joindre",
     ...attachmentLines,

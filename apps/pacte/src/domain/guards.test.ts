@@ -39,6 +39,12 @@ const validTransaction: PacteState["transactions"][number] = {
 const validCase: PacteState["cases"][number] = {
   id: "case-alpine",
   anomalyId: "anomaly-alpine",
+  anomalySnapshot: {
+    kind: "price-increase",
+    title: "Hausse de prix — Alpine Mobile",
+    explanation: "Le débit dépasse le prix enregistré.",
+    amount: 5,
+  },
   status: "review",
   createdAt: "2026-07-26T00:00:00.000Z",
   contractSnapshot: validContract,
@@ -94,6 +100,14 @@ describe("parsePacteState", () => {
     ).toBeNull();
     expect(
       parsePacteState({ ...validState, cases: [{ ...validCase, status: "archived" }] }),
+    ).toBeNull();
+    const { anomalySnapshot: _omitted, ...caseWithoutSnapshot } = validCase;
+    expect(parsePacteState({ ...validState, cases: [caseWithoutSnapshot] })).toBeNull();
+    expect(
+      parsePacteState({
+        ...validState,
+        cases: [{ ...validCase, anomalySnapshot: { ...validCase.anomalySnapshot, kind: "other" } }],
+      }),
     ).toBeNull();
     expect(parsePacteState({ ...validState, dismissedAnomalyIds: [42] })).toBeNull();
   });

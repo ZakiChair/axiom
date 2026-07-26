@@ -79,9 +79,15 @@ export type ClaimCaseEvent = {
   note: string;
 };
 
+export type ClaimAnomalySnapshot = Pick<
+  Anomaly,
+  "kind" | "title" | "explanation" | "amount"
+>;
+
 export type ClaimCase = {
   id: string;
   anomalyId: string;
+  anomalySnapshot: ClaimAnomalySnapshot;
   status: ClaimCaseStatus;
   createdAt: string;
   contractSnapshot: Contract;

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { createDemoState } from "../data/demo";
+import { analyseState } from "./analyse";
 import { createClaimCase, generateClaimLetter } from "./cases";
-import type { Anomaly } from "./model";
+import type { Anomaly, AnomalyKind, PacteState } from "./model";
 
 const NOW = new Date("2026-07-26T12:00:00.000Z");
 
@@ -22,6 +23,18 @@ function duplicateAnomaly(): Anomaly {
     ],
     evidence: [],
   };
+}
+
+function claimFor(kind: AnomalyKind): {
+  state: PacteState;
+  anomaly: Anomaly;
+  claim: ReturnType<typeof createClaimCase>;
+} {
+  const state = createDemoState();
+  const anomaly = analyseState(state, NOW).find((candidate) => candidate.kind === kind)!;
+  anomaly.id = `controle-metier-${kind}`;
+
+  return { state, anomaly, claim: createClaimCase(anomaly, state, NOW) };
 }
 
 describe("createClaimCase", () => {
@@ -50,6 +63,12 @@ describe("createClaimCase", () => {
     expect(claim.contractSnapshot.provider).toBe("Helvetia Protect");
     expect(claim.contractSnapshot.merchantAliases).toEqual(["Helvetia Protect"]);
     expect(claim.evidence[0]?.label).toBe("PRLV HELVETIA PROTECT");
+    expect(claim.anomalySnapshot).toEqual({
+      kind: "duplicate",
+      title: "Double débit possible — Helvetia Protect",
+      explanation: "Deux débits distincts de 89,90 CHF ont été relevés.",
+      amount: 89.9,
+    });
     expect(claim.note).toBe(capturedFacts);
     expect(claim.timeline).toEqual([
       {
@@ -80,5 +99,39 @@ describe("generateClaimLetter", () => {
     expect(letter).toContain("14 jours");
     expect(letter).toContain("Vérifiez les dates, montants et pièces");
     expect(letter).not.toMatch(/article|garanti|certain/i);
+  });
+
+  it("décrit une hausse depuis son snapshot sémantique sans dépendre de l'identifiant", () => {
+    const { state, anomaly, claim } = claimFor("price-increase");
+
+    const letter = generateClaimLetter(claim, state.household);
+
+    expect(letter).toContain(anomaly.title);
+    expect(letter).toContain(anomaly.explanation);
+    expect(letter).toContain("prix contractuel de 59,90 CHF");
+    expect(letter).toContain("écart relevé de 5,00 CHF");
+  });
+
+  it("décrit l'absence de crédit et demande le remboursement attendu", () => {
+    const { state, anomaly, claim } = claimFor("missing-refund");
+
+    const letter = generateClaimLetter(claim, state.household);
+
+    expect(letter).toContain(anomaly.title);
+    expect(letter).toContain(anomaly.explanation);
+    expect(letter).toContain("remboursement attendu de 24,50 CHF");
+    expect(letter).toContain("crédit correspondant");
+  });
+
+  it("demande une confirmation d'échéance sans réclamer de remboursement nul", () => {
+    const { state, anomaly, claim } = claimFor("deadline");
+
+    const letter = generateClaimLetter(claim, state.household);
+
+    expect(letter).toContain(anomaly.title);
+    expect(letter).toContain(anomaly.explanation);
+    expect(letter).toContain("confirmer la date limite et les modalités applicables");
+    expect(letter).not.toMatch(/rembours/i);
+    expect(letter).not.toContain("0,00 CHF");
   });
 });

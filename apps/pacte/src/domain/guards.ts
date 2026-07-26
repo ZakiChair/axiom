@@ -1,5 +1,6 @@
 import type {
   AnomalyEvidence,
+  ClaimAnomalySnapshot,
   ClaimCase,
   ClaimCaseEvent,
   Contract,
@@ -145,11 +146,27 @@ function isClaimCaseEvent(value: unknown): value is ClaimCaseEvent {
   );
 }
 
+function isClaimAnomalySnapshot(value: unknown): value is ClaimAnomalySnapshot {
+  return (
+    isRecord(value) &&
+    (value.kind === "duplicate" ||
+      value.kind === "price-increase" ||
+      value.kind === "post-termination" ||
+      value.kind === "missing-refund" ||
+      value.kind === "deadline") &&
+    isNonEmptyString(value.title) &&
+    isNonEmptyString(value.explanation) &&
+    isFiniteNumber(value.amount) &&
+    value.amount >= 0
+  );
+}
+
 function isClaimCase(value: unknown): value is ClaimCase {
   return (
     isRecord(value) &&
     isNonEmptyString(value.id) &&
     isNonEmptyString(value.anomalyId) &&
+    isClaimAnomalySnapshot(value.anomalySnapshot) &&
     (value.status === "review" ||
       value.status === "ready" ||
       value.status === "sent" ||

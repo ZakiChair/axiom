@@ -32,6 +32,7 @@ function copyContract(contract: Contract): Contract {
 function copyCase(claim: ClaimCase): ClaimCase {
   return {
     ...claim,
+    anomalySnapshot: { ...claim.anomalySnapshot },
     contractSnapshot: copyContract(claim.contractSnapshot),
     evidence: claim.evidence.map((evidence) => ({ ...evidence })),
     timeline: claim.timeline.map((event) => ({ ...event })),

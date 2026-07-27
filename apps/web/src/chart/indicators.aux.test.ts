@@ -26,6 +26,7 @@ import type { Candle, IndicatorResult } from "@axiom/types";
 // (vi.mock est hissé par Vitest avant les imports statiques ci-dessus.)
 vi.mock("klinecharts", () => ({
   registerIndicator: () => {},
+  registerOverlay: () => {},
   IndicatorSeries: { Normal: "normal", Price: "price", Volume: "volume" },
 }));
 

@@ -33,6 +33,7 @@ import type { Candle, ExchangeId, IndicatorDef, IndicatorResult, Timeframe } fro
 import { computeIndicator, getIndicator } from "@axiom/indicators";
 import { serieCanvas } from "../lib/canvasTokens";
 import { dessinerAnnotationsPane } from "./annotationsPane";
+import { AnnotationsPrix } from "./annotationsPrix";
 import { auxProvider } from "./auxProvider";
 import {
   computeKey,
@@ -230,8 +231,12 @@ export class ChartIndicators {
   private symbol = "";
   private timeframe: Timeframe | null = null;
 
+  /** Overlays d'annotations cible "prix" des defs à pane séparé (rejeu par instance). */
+  private readonly annotationsPrix: AnnotationsPrix;
+
   constructor(chart: Chart) {
     this.chart = chart;
+    this.annotationsPrix = new AnnotationsPrix(chart);
   }
 
   /** Renseigne le symbole/TF courants (voir `symbol`/`timeframe` ci-dessus). */
@@ -311,6 +316,7 @@ export class ChartIndicators {
       { name: info.name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result },
       info.paneId
     );
+    this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
   }
 
   /** Restreint le cache aux clés de calcul encore référencées (borne mémoire). */
@@ -351,6 +357,7 @@ export class ChartIndicators {
       if (!wanted.has(instanceId)) {
         this.chart.removeIndicator(info.paneId, info.name);
         this.active.delete(instanceId);
+        this.annotationsPrix.retirer(instanceId);
       }
     }
 
@@ -375,6 +382,7 @@ export class ChartIndicators {
         if (info) {
           this.chart.removeIndicator(info.paneId, info.name);
           this.active.delete(instanceId);
+          this.annotationsPrix.retirer(instanceId);
         }
       }
     }
@@ -397,6 +405,7 @@ export class ChartIndicators {
           existing.paneId
         );
         existing.key = key;
+        this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
         continue;
       }
 
@@ -410,6 +419,7 @@ export class ChartIndicators {
         { id: paneId, dragEnabled: true, minHeight: 60 }
       );
       if (created) this.active.set(inst.instanceId, { paneId: created, name, key });
+      if (created) this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
     }
 
     this.pruneCache(new Set(effectiveInstances.map((i) => computeKey(i.defId, i.params))));
@@ -440,6 +450,7 @@ export class ChartIndicators {
         ? { name: info.name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result }
         : { name: info.name, extendData: result };
       this.chart.overrideIndicator(override, info.paneId);
+      this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
     }
   }
 

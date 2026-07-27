@@ -13,6 +13,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Chart } from "klinecharts";
 import { ChartIndicators } from "./indicators";
+
+// Le bundle réel n'expose RIEN sous node (index.cjs délègue à l'UMD, inerte hors
+// navigateur) : le constructeur de `ChartIndicators` appelant désormais
+// `registerOverlay` (annotations prix), on stube klinecharts comme les autres
+// suites du pont.
+vi.mock("klinecharts", () => ({
+  registerIndicator: () => {},
+  registerOverlay: () => {},
+  IndicatorSeries: { Normal: "normal", Price: "price", Volume: "volume" },
+}));
 import type { ActiveIndicator } from "../store/indicators";
 import type { Candle, ExchangeId } from "@axiom/types";
 

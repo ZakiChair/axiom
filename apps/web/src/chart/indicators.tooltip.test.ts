@@ -23,6 +23,7 @@ vi.mock("klinecharts", () => ({
   registerIndicator: (t: IndicatorTemplate) => {
     capture.template = t;
   },
+  registerOverlay: () => {},
   IndicatorSeries: { Normal: "normal", Price: "price", Volume: "volume" },
 }));
 

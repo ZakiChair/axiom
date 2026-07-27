@@ -28,10 +28,12 @@
  *  - `extendData` comparé par RÉFÉRENCE -> un objet neuf force le recalcul.
  */
 import { registerIndicator, IndicatorSeries } from "klinecharts";
-import type { Chart, IndicatorFigure } from "klinecharts";
+import type { Chart, IndicatorFigure, IndicatorTooltipData, TooltipLegend } from "klinecharts";
 import type { Candle, ExchangeId, IndicatorDef, IndicatorResult, Timeframe } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
 import { serieCanvas } from "../lib/canvasTokens";
+import { dessinerAnnotationsPane } from "./annotationsPane";
+import { AnnotationsPrix } from "./annotationsPrix";
 import { auxProvider } from "./auxProvider";
 import {
   computeKey,
@@ -128,6 +130,57 @@ function ensureRegistered(def: IndicatorDef, name: string): void {
         return point;
       });
     },
+    // Rendu des annotations du calc (segments de divergence, rubans…) sur CE pane.
+    // Un def overlay vit sur candle_pane → cible "prix" ; un def séparé → cible
+    // "pane" (ses annotations "prix" passent par les overlays, cf. annotationsPrix).
+    // `return false` : KLineChart dessine ensuite les figures séries PAR-DESSUS
+    // (comportement prod des triangles CVD S/P, orderflow.ts).
+    draw: ({ ctx, visibleRange, xAxis, yAxis, indicator }) => {
+      const annotations = (indicator.extendData as IndicatorResult | undefined)?.annotations;
+      if (annotations === undefined) return false;
+      dessinerAnnotationsPane(
+        ctx,
+        annotations,
+        def.pane === "overlay" ? "prix" : "pane",
+        {
+          convertirX: (idx) => xAxis.convertToPixel(idx),
+          convertirY: (v) => yAxis.convertToPixel(v),
+        },
+        { de: visibleRange.from, a: visibleRange.to },
+      );
+      return false;
+    },
+    // Tooltip de pane : l'info de la divergence/du ruban le plus proche du
+    // crosshair (≤ 3 barres du pivot d'arrivée), 3 lignes max. Objet vide sinon.
+    // `crosshair.dataIndex` est renseigné en même temps que `kLineData` (bundle
+    // 9.8.12) : absent = crosshair hors données, donc rien à afficher.
+    createTooltipDataSource: ({ indicator, crosshair }) => {
+      const vide = {} as IndicatorTooltipData;
+      const annotations = (indicator.extendData as IndicatorResult | undefined)?.annotations;
+      if (annotations === undefined) return vide;
+      const idx = crosshair.dataIndex ?? -1;
+      if (idx < 0) return vide;
+      const values: TooltipLegend[] = [];
+      // Dédup par chaîne `info` : une divergence produit DEUX segments porteurs de la
+      // même info (utils-annotations.ts:82-83 — un « prix », un « pane », dont les
+      // pivots d'arrivée sont distants de ≤ 3 barres). Sans ce filtre, la ligne
+      // s'affiche deux fois et consomme 2 des 3 lignes du budget.
+      const vus = new Set<string>();
+      const ajouter = (info: string) => {
+        if (vus.has(info) || values.length >= 3) return;
+        vus.add(info);
+        values.push({ title: "", value: info });
+      };
+      const pousser = (a: number, info: string | undefined) => {
+        if (info !== undefined && Math.abs(a - idx) <= 3) ajouter(info);
+      };
+      for (const s of annotations.segments ?? []) pousser(s.aIdx, s.info);
+      for (const m of annotations.marqueurs ?? []) pousser(m.idx, m.info);
+      for (const r of annotations.rubans ?? []) {
+        if (r.info !== undefined && idx >= r.deIdx && idx < r.deIdx + r.hauts.length) ajouter(r.info);
+      }
+      return values.length > 0 ? ({ values } as IndicatorTooltipData) : vide;
+    },
   });
 
   registered.add(name);
@@ -178,8 +231,12 @@ export class ChartIndicators {
   private symbol = "";
   private timeframe: Timeframe | null = null;
 
+  /** Overlays d'annotations cible "prix" des defs à pane séparé (rejeu par instance). */
+  private readonly annotationsPrix: AnnotationsPrix;
+
   constructor(chart: Chart) {
     this.chart = chart;
+    this.annotationsPrix = new AnnotationsPrix(chart);
   }
 
   /** Renseigne le symbole/TF courants (voir `symbol`/`timeframe` ci-dessus). */
@@ -259,6 +316,7 @@ export class ChartIndicators {
       { name: info.name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result },
       info.paneId
     );
+    this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
   }
 
   /** Restreint le cache aux clés de calcul encore référencées (borne mémoire). */
@@ -299,6 +357,7 @@ export class ChartIndicators {
       if (!wanted.has(instanceId)) {
         this.chart.removeIndicator(info.paneId, info.name);
         this.active.delete(instanceId);
+        this.annotationsPrix.retirer(instanceId);
       }
     }
 
@@ -323,6 +382,7 @@ export class ChartIndicators {
         if (info) {
           this.chart.removeIndicator(info.paneId, info.name);
           this.active.delete(instanceId);
+          this.annotationsPrix.retirer(instanceId);
         }
       }
     }
@@ -345,6 +405,7 @@ export class ChartIndicators {
           existing.paneId
         );
         existing.key = key;
+        this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
         continue;
       }
 
@@ -358,6 +419,7 @@ export class ChartIndicators {
         { id: paneId, dragEnabled: true, minHeight: 60 }
       );
       if (created) this.active.set(inst.instanceId, { paneId: created, name, key });
+      if (created) this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
     }
 
     this.pruneCache(new Set(effectiveInstances.map((i) => computeKey(i.defId, i.params))));
@@ -388,6 +450,7 @@ export class ChartIndicators {
         ? { name: info.name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result }
         : { name: info.name, extendData: result };
       this.chart.overrideIndicator(override, info.paneId);
+      this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
     }
   }
 

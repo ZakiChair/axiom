@@ -251,10 +251,78 @@ export interface IndicatorOutput {
   color?: string;
 }
 
+// ---------- Annotations d'indicateur (canal de rendu visuel, lot v2.1) ----------
+/** Cible de rendu d'une annotation : chart maître ("prix") ou pane de l'indicateur ("pane"). */
+export type CibleAnnotation = "prix" | "pane";
+/** Trait d'un segment : plein = divergence régulière, pointillé = cachée. */
+export type TraitAnnotation = "plein" | "pointille";
+
+/**
+ * Segment pivot→pivot (ligne de divergence). Les index (`deIdx`/`aIdx`) sont des
+ * index de BOUGIE dans le tableau `candles` passé au calc — l'appelant convertit
+ * en timestamp/pixel au rendu. `couleur` est TOUJOURS un nom de token CSS
+ * (`"--up"`, `"--down"`, `"--accent"`, `"--serie-N"`), jamais un hex : le rendu
+ * résout par thème au moment du dessin. `info` = texte brut FR du tooltip.
+ */
+export interface SegmentAnnotation {
+  deIdx: number;
+  deValeur: number;
+  aIdx: number;
+  aValeur: number;
+  trait: TraitAnnotation;
+  couleur: string;
+  cible: CibleAnnotation;
+  info?: string;
+}
+
+/** Marqueur triangulaire posé à une bougie (mêmes conventions que SegmentAnnotation). */
+export interface MarqueurAnnotation {
+  idx: number;
+  valeur: number;
+  forme: "triangleHaut" | "triangleBas";
+  couleur: string;
+  cible: CibleAnnotation;
+  info?: string;
+}
+
+/** Étiquette texte ancrée à une bougie. `position` : "dessous" = sous le point (haussières). */
+export interface LabelAnnotation {
+  idx: number;
+  valeur: number;
+  texte: string;
+  couleur: string;
+  cible: CibleAnnotation;
+  position?: "dessus" | "dessous";
+  info?: string;
+}
+
+/**
+ * Zone remplie entre deux courbes (`hauts`/`bas` alignés depuis `deIdx`), rendue
+ * sur le chart maître uniquement (prime spot/perp). `alpha` = opacité du fill.
+ */
+export interface RubanAnnotation {
+  deIdx: number;
+  hauts: number[];
+  bas: number[];
+  couleur: string;
+  alpha: number;
+  info?: string;
+}
+
+/** Annotations optionnelles d'un calc — chaque clé absente = rien à rendre. */
+export interface AnnotationsIndicateur {
+  segments?: SegmentAnnotation[];
+  marqueurs?: MarqueurAnnotation[];
+  labels?: LabelAnnotation[];
+  rubans?: RubanAnnotation[];
+}
+
 /** Résultat de calcul : une série de valeurs par clé de sortie, alignée sur les bougies. */
 export interface IndicatorResult {
   /** clé d'output -> valeurs (NaN/undefined pour les bougies sans valeur). */
   series: Record<string, Array<number | undefined>>;
+  /** Annotations visuelles (segments de divergence, rubans…) — absentes = aucun rendu. */
+  annotations?: AnnotationsIndicateur;
 }
 
 /** Contexte fourni au calcul (sources dérivées, accès aux barres précédentes pour l'incrémental). */

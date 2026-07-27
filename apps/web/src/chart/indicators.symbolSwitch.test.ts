@@ -18,6 +18,7 @@ import type { Candle, IndicatorResult } from "@axiom/types";
 
 vi.mock("klinecharts", () => ({
   registerIndicator: () => {},
+  registerOverlay: () => {},
   IndicatorSeries: { Normal: "normal", Price: "price", Volume: "volume" },
 }));
 

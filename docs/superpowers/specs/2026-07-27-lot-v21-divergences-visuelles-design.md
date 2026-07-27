@@ -72,7 +72,6 @@ interface RubanAnnotation {
   deIdx: number;                     // index de la 1re bougie du run
   hauts: number[]; bas: number[];    // bornes du remplissage, alignées depuis deIdx
   couleur: string; alpha: number;    // ex. "--up", 0.15
-  cible: "prix";                     // le ruban n'a de sens que sur le chart maître
   info?: string;
 }
 
@@ -83,6 +82,13 @@ interface AnnotationsIndicateur {
   rubans?: RubanAnnotation[];
 }
 ```
+
+**Amendé à la clôture, revue finale** : `RubanAnnotation` n'a PAS de champ
+`cible` (cf. `packages/types/src/index.ts`). Le ruban n'a de sens que sur le
+chart maître, mais cette contrainte n'est pas portée par un champ : elle est
+portée par le RENDU — `dessinerAnnotationsPane` ne dessine les rubans que
+lorsqu'il est appelé avec `cible === "prix"`, c'est-à-dire pour un def
+`pane: "overlay"` sur le `candle_pane`. Voir aussi §1.5.
 
 Règles : `couleur` est TOUJOURS un nom de token (`"--up"`, `"--down"`,
 `"--accent"`, `"--serie-N"`), jamais un hex — le rendu résout par thème.
@@ -135,8 +141,13 @@ Le template d'`ensureRegistered` gagne un `draw` (patron `orderflow.ts:175`) :
 
 - lit `indicator.extendData.annotations`, filtre `cible === "pane"` ;
 - segments : `ctx.setLineDash([4,4])` si `pointille` ; marqueurs : triangles
-  (même géométrie que orderflow.ts) ; labels : texte + fond `rgbaTokenCanvas`
-  (surface, 0.85) ;
+  (même géométrie que orderflow.ts) ; labels : texte SANS fond — **amendé à la
+  clôture, revue finale** : le fond `rgbaTokenCanvas(surface, 0.85)` n'a PAS été
+  retenu (les labels restent lisibles sans pastille et l'aplat encombrait le
+  pane). Côté chart maître en revanche, l'absence de fond doit être DÉCLARÉE :
+  la figure `text` de l'overlay exige `backgroundColor: "transparent"`, sans quoi
+  le style d'overlay par défaut de KLineChart peint une pastille `#1677FF`
+  invariante au thème derrière chaque « Div ▲ » (défaut relevé au gate visuel) ;
 - ne dessine que ce qui intersecte `visibleRange` ; `return false` (les
   figures séries se dessinent par-dessus, comportement prod existant) ;
 - `createTooltipDataSource` : si le crosshair est à ≤ 3 barres du pivot
@@ -151,9 +162,17 @@ Un def sans annotations traverse ce `draw` en no-op — aucun impact sur les
 Patron WHALE/ECO : `registerOverlay("axiomAnnotation")` UNIQUE (module-scope,
 idempotent) dont `createPointFigures` rend, selon `extendData.genre` :
 segment (`line` 2 points + dash), label (`text`), marqueur (`polygon`
-triangle), ruban (`polygon` fermé : points `hauts` aller + `bas` retour,
-`alpha` en fill). `lock: true`, `needDefaultPointFigure: false`, points
-ancrés `{timestamp, value}`.
+triangle). `lock: true`, `needDefaultPointFigure: false`, points ancrés
+`{timestamp, value}`.
+
+**Amendé à la clôture, revue finale** : les RUBANS ne passent PAS par cet
+overlay. Ils sont rendus par le `draw` du `candle_pane` (§1.4,
+`dessinerAnnotationsPane` avec `cible === "prix"`), et leur seul producteur —
+`premiumSpotPerp` — est un def `pane: "overlay"`, donc précisément celui que
+`AnnotationsPrix.appliquer` ignore (`if (def.pane !== "separate") return`). Ce
+canal-ci ne sert que les annotations cible `"prix"` des defs à pane SÉPARÉ, qui
+n'ont pas de ruban à poser. Le cap « rubans : 40 runs max » ci-dessous est donc
+sans objet pour ce contrôleur.
 
 Contrôleur `AnnotationsPrixController` (câblé dans `ChartInstance.tsx` comme
 les contrôleurs existants) :
@@ -189,7 +208,7 @@ existants inchangés.
 |---|---|---|---|---|
 | `rsiDivergence` v2 | upgrade | momentum | `rsiOf(source, length)` | `length` 14, `source` close |
 | `cvdDivergence` v2 | upgrade | orderflow | `cvdOf(candles)` | — |
-| `macdDivergence` | nouveau | momentum | ligne MACD ou histogramme | `rapide` 12, `lent` 26, `signal` 9, `oscSource` select ["ligne","histogramme"] déf. "ligne" |
+| `macdDivergence` | nouveau | momentum | ligne MACD ou histogramme | `fast` 12, `slow` 26, `signal` 9, `oscSource` select ["ligne","histogramme"] déf. "ligne" (**amendé à la clôture, revue finale** : clés `fast`/`slow`/`signal` et non `rapide`/`lent` — alignées sur le def de base `macd`) |
 | `stochDivergence` | nouveau | momentum | %K lissé | `longueurK` 14, `lissageK` 3 |
 | `obvDivergence` | nouveau | volume | OBV | — |
 | `mfiDivergence` | nouveau | momentum (amendé : suit le def de base `mfi`) | MFI | `length` 14 |
@@ -250,8 +269,11 @@ Nouveau def, catégorie `derivatives`, `pane: "overlay"`, `aux: ["mark"]`
   en marché calme la prime perp vit sous ±0,05 %, le ruban doit apparaître
   sur les phases directionnelles, pas en permanence.
 - **Honnêteté d'affichage** : `mark` étant un niveau horaire LOCF, sous H1 le
-  ruban est en marches d'escalier — assumé, même situation que `basisPct` ;
-  aucun `minTimeframe` nouveau. Aux absent → ligne et ruban absents,
+  ruban est en marches d'escalier — assumé, même situation que `basisPct`.
+  **Amendé à la clôture, revue finale** : le def porte bien un
+  `minTimeframe: "15m"` — non pas une contrainte NOUVELLE, mais celle HÉRITÉE de
+  `basisPct`, dont `premiumSpotPerp` reprend le chemin aux `mark` (même
+  granularité, donc même plancher de TF). Aux absent → ligne et ruban absents,
   libellé « (indisponible) » standard du pont.
 
 ---

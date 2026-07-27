@@ -17,6 +17,66 @@
 import type { IndicatorDef } from "@axiom/types";
 import { ema as emaOf } from "../utils";
 
+/**
+ * Cœur de calcul du MACD, extrait pour être réutilisé par les defs de divergence
+ * (Task 7) comme oscillateur source. Comportement identique à l'ancien corps
+ * inline de `macd.calc`. PURE.
+ */
+export function macdOf(
+  source: number[],
+  fast: number,
+  slow: number,
+  signal: number
+): {
+  macd: Array<number | undefined>;
+  signal: Array<number | undefined>;
+  hist: Array<number | undefined>;
+} {
+  const n = source.length;
+
+  const fastEma = emaOf(source, fast);
+  const slowEma = emaOf(source, slow);
+
+  // Ligne MACD : différence des deux EMA ; undefined tant que l'une manque.
+  const macdLine: Array<number | undefined> = new Array(n).fill(undefined);
+  for (let i = 0; i < n; i++) {
+    const f = fastEma[i];
+    const s = slowEma[i];
+    if (f !== undefined && s !== undefined) macdLine[i] = f - s;
+  }
+
+  // Ligne signal : EMA des seules valeurs DÉFINIES de la ligne MACD.
+  // On compacte (en mémorisant l'index d'origine), on lisse, puis on ré-aligne :
+  // les `undefined` initiaux de la ligne MACD restent `undefined` dans le signal,
+  // et le démarrage propre de l'EMA (signal - 1 valeurs) décale encore le signal.
+  const definedIdx: number[] = [];
+  const definedVals: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const v = macdLine[i];
+    if (v !== undefined) {
+      definedIdx.push(i);
+      definedVals.push(v);
+    }
+  }
+  const signalCompact = emaOf(definedVals, signal);
+  const signalLine: Array<number | undefined> = new Array(n).fill(undefined);
+  for (let j = 0; j < definedIdx.length; j++) {
+    const idx = definedIdx[j];
+    if (idx === undefined) continue; // garde explicite (noUncheckedIndexedAccess)
+    signalLine[idx] = signalCompact[j];
+  }
+
+  // Histogramme : MACD - signal, là où les deux valeurs existent.
+  const hist: Array<number | undefined> = new Array(n).fill(undefined);
+  for (let i = 0; i < n; i++) {
+    const m = macdLine[i];
+    const s = signalLine[i];
+    if (m !== undefined && s !== undefined) hist[i] = m - s;
+  }
+
+  return { macd: macdLine, signal: signalLine, hist };
+}
+
 export const macd: IndicatorDef = {
   id: "macd",
   name: "MACD",
@@ -45,55 +105,7 @@ export const macd: IndicatorDef = {
     const slow = Number(params.slow ?? 26);
     const signal = Number(params.signal ?? 9);
 
-    const close = ctx.source;
-    const n = close.length;
-
-    const fastEma = emaOf(close, fast);
-    const slowEma = emaOf(close, slow);
-
-    // Ligne MACD : différence des deux EMA ; undefined tant que l'une manque.
-    const macdLine: Array<number | undefined> = new Array(n).fill(undefined);
-    for (let i = 0; i < n; i++) {
-      const f = fastEma[i];
-      const s = slowEma[i];
-      if (f !== undefined && s !== undefined) macdLine[i] = f - s;
-    }
-
-    // Ligne signal : EMA des seules valeurs DÉFINIES de la ligne MACD.
-    // On compacte (en mémorisant l'index d'origine), on lisse, puis on ré-aligne :
-    // les `undefined` initiaux de la ligne MACD restent `undefined` dans le signal,
-    // et le démarrage propre de l'EMA (signal - 1 valeurs) décale encore le signal.
-    const definedIdx: number[] = [];
-    const definedVals: number[] = [];
-    for (let i = 0; i < n; i++) {
-      const v = macdLine[i];
-      if (v !== undefined) {
-        definedIdx.push(i);
-        definedVals.push(v);
-      }
-    }
-    const signalCompact = emaOf(definedVals, signal);
-    const signalLine: Array<number | undefined> = new Array(n).fill(undefined);
-    for (let j = 0; j < definedIdx.length; j++) {
-      const idx = definedIdx[j];
-      if (idx === undefined) continue; // garde explicite (noUncheckedIndexedAccess)
-      signalLine[idx] = signalCompact[j];
-    }
-
-    // Histogramme : MACD - signal, là où les deux valeurs existent.
-    const hist: Array<number | undefined> = new Array(n).fill(undefined);
-    for (let i = 0; i < n; i++) {
-      const m = macdLine[i];
-      const s = signalLine[i];
-      if (m !== undefined && s !== undefined) hist[i] = m - s;
-    }
-
-    return {
-      series: {
-        macd: macdLine,
-        signal: signalLine,
-        hist,
-      },
-    };
+    const r = macdOf(ctx.source, fast, slow, signal);
+    return { series: { macd: r.macd, signal: r.signal, hist: r.hist } };
   },
 };

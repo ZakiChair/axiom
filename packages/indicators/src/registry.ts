@@ -166,6 +166,7 @@ import { stablecoinSupply } from "./derivatives/stablecoinSupply";
 import { fundingApr } from "./derivatives/fundingApr";
 import { oiChange } from "./derivatives/oiChange";
 import { basisPct } from "./derivatives/basisPct";
+import { premiumSpotPerp } from "./derivatives/premiumSpotPerp";
 import { mvrvZScore } from "./derivatives/mvrvZScore";
 import { fundingNotional } from "./derivatives/fundingNotional";
 import { ssr } from "./derivatives/ssr";
@@ -336,6 +337,7 @@ export const INDICATORS: IndicatorDef[] = [
   fundingApr,
   oiChange,
   basisPct,
+  premiumSpotPerp,
   mvrvZScore,
   fundingNotional,
   ssr,

@@ -28,10 +28,11 @@
  *  - `extendData` comparé par RÉFÉRENCE -> un objet neuf force le recalcul.
  */
 import { registerIndicator, IndicatorSeries } from "klinecharts";
-import type { Chart, IndicatorFigure } from "klinecharts";
+import type { Chart, IndicatorFigure, IndicatorTooltipData, TooltipLegend } from "klinecharts";
 import type { Candle, ExchangeId, IndicatorDef, IndicatorResult, Timeframe } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
 import { serieCanvas } from "../lib/canvasTokens";
+import { dessinerAnnotationsPane } from "./annotationsPane";
 import { auxProvider } from "./auxProvider";
 import {
   computeKey,
@@ -127,6 +128,51 @@ function ensureRegistered(def: IndicatorDef, name: string): void {
         }
         return point;
       });
+    },
+    // Rendu des annotations du calc (segments de divergence, rubans…) sur CE pane.
+    // Un def overlay vit sur candle_pane → cible "prix" ; un def séparé → cible
+    // "pane" (ses annotations "prix" passent par les overlays, cf. annotationsPrix).
+    // `return false` : KLineChart dessine ensuite les figures séries PAR-DESSUS
+    // (comportement prod des triangles CVD S/P, orderflow.ts).
+    draw: ({ ctx, visibleRange, xAxis, yAxis, indicator }) => {
+      const annotations = (indicator.extendData as IndicatorResult | undefined)?.annotations;
+      if (annotations === undefined) return false;
+      dessinerAnnotationsPane(
+        ctx,
+        annotations,
+        def.pane === "overlay" ? "prix" : "pane",
+        {
+          convertirX: (idx) => xAxis.convertToPixel(idx),
+          convertirY: (v) => yAxis.convertToPixel(v),
+        },
+        { de: visibleRange.from, a: visibleRange.to },
+      );
+      return false;
+    },
+    // Tooltip de pane : l'info de la divergence/du ruban le plus proche du
+    // crosshair (≤ 3 barres du pivot d'arrivée), 3 lignes max. Objet vide sinon.
+    // `crosshair.dataIndex` est renseigné en même temps que `kLineData` (bundle
+    // 9.8.12) : absent = crosshair hors données, donc rien à afficher.
+    createTooltipDataSource: ({ indicator, crosshair }) => {
+      const vide = {} as IndicatorTooltipData;
+      const annotations = (indicator.extendData as IndicatorResult | undefined)?.annotations;
+      if (annotations === undefined) return vide;
+      const idx = crosshair.dataIndex ?? -1;
+      if (idx < 0) return vide;
+      const values: TooltipLegend[] = [];
+      const pousser = (a: number, info: string | undefined) => {
+        if (info !== undefined && Math.abs(a - idx) <= 3 && values.length < 3) {
+          values.push({ title: "", value: info });
+        }
+      };
+      for (const s of annotations.segments ?? []) pousser(s.aIdx, s.info);
+      for (const m of annotations.marqueurs ?? []) pousser(m.idx, m.info);
+      for (const r of annotations.rubans ?? []) {
+        if (r.info !== undefined && idx >= r.deIdx && idx < r.deIdx + r.hauts.length && values.length < 3) {
+          values.push({ title: "", value: r.info });
+        }
+      }
+      return values.length > 0 ? ({ values } as IndicatorTooltipData) : vide;
     },
   });
 

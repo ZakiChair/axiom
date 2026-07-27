@@ -78,6 +78,9 @@ import { disparity } from "./momentum/disparity";
 import { btcDominance } from "./momentum/btcDominance";
 import { kdj } from "./momentum/kdj";
 import { rsiDivergence } from "./momentum/rsiDivergence";
+import { macdDivergence } from "./momentum/macdDivergence";
+import { stochDivergence } from "./momentum/stochDivergence";
+import { mfiDivergence } from "./momentum/mfiDivergence";
 
 // — volatility —
 import { atr } from "./volatility/atr";
@@ -117,6 +120,7 @@ import { cmf } from "./volume/cmf";
 import { klinger } from "./volume/klinger";
 import { nvi } from "./volume/nvi";
 import { obv } from "./volume/obv";
+import { obvDivergence } from "./volume/obvDivergence";
 import { pvi } from "./volume/pvi";
 import { pvt } from "./volume/pvt";
 import { volume } from "./volume/volume";
@@ -249,6 +253,9 @@ export const INDICATORS: IndicatorDef[] = [
   btcDominance,
   kdj,
   rsiDivergence,
+  macdDivergence,
+  stochDivergence,
+  mfiDivergence,
   // volatility
   atr,
   atrRegime,
@@ -285,6 +292,7 @@ export const INDICATORS: IndicatorDef[] = [
   klinger,
   nvi,
   obv,
+  obvDivergence,
   pvi,
   pvt,
   volume,

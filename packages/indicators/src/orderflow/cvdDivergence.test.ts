@@ -1,22 +1,21 @@
 /**
- * @axiom/indicators — orderflow/cvdDivergence.test.ts
- *
- * Fixtures façonnées À LA MAIN. Le CVD étant un cumul direct (buy − sell) SANS
- * amorçage, on fabrique les bougies pour que `cvdOf` reconstruise EXACTEMENT une
- * série cible en rampe : delta par barre = dérivée discrète de la cible, réalisée
- * par (buyVolume, sellVolume). On peut ainsi placer les pivots CVD aux index voulus.
- *
- * Deux divergences CACHÉES connues (couvrent les sorties `divHaussCachee` /
- * `divBaissCachee`, complémentaires des régulières couvertes côté RSI) plus la
- * dégradation propre d'une source sans champs taker buy/sell.
+ * cvdDivergence v2 — tests de CONTRAT + CÂBLAGE (même patron que
+ * rsiDivergence.test.ts). La géométrie des annotations est dérivée à la main
+ * dans utils-annotations.test.ts et le CVD dans cvd.test.ts : ici on vérifie
+ * que le def assemble bien ces briques hand-testées (comparaison aux fonctions
+ * pures composées), plus la dégradation propre (source sans taker → CVD plat).
  */
-
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
 import { computeIndicator } from "../engine";
+import { construireAnnotationsDivergence } from "../utils-annotations";
+import { highOf, lowOf } from "../utils";
 import { cvdOf } from "./cvd";
 import { cvdDivergence } from "./cvdDivergence";
 
+const FORMATEUR = (v: number) => v.toFixed(0);
+
+/** Série linéaire par morceaux : coins aux points de contrôle, monotone entre eux. */
 function rampe(n: number, points: ReadonlyArray<readonly [number, number]>): number[] {
   const out: number[] = [];
   for (let i = 0; i < n; i++) {
@@ -33,12 +32,14 @@ function rampe(n: number, points: ReadonlyArray<readonly [number, number]>): num
 /**
  * Bougies dont le CVD reconstruit exactement `cvdCible` : delta[i] = cvdCible[i] −
  * cvdCible[i−1] (delta[0] = cvdCible[0]), réalisé par buy/sell. high/low = close ± 1.
+ * Prix et CVD portent chacun de vrais pivots fractals (pas une rampe monotone), condition
+ * nécessaire pour qu'une divergence soit détectée par le moteur commun.
  */
 function candlesFromCvd(closes: number[], cvdCible: number[]): Candle[] {
   return closes.map((close, i) => {
     const delta = i === 0 ? cvdCible[0]! : cvdCible[i]! - cvdCible[i - 1]!;
     return {
-      time: i * 60_000,
+      time: 1_700_000_000_000 + i * 60_000,
       open: close,
       high: close + 1,
       low: close - 1,
@@ -50,91 +51,50 @@ function candlesFromCvd(closes: number[], cvdCible: number[]): Candle[] {
   });
 }
 
-function seulPointA(serie: Array<number | undefined> | undefined, idx: number, valeur: number): void {
-  expect(serie).toBeDefined();
-  if (serie === undefined) return;
-  for (let i = 0; i < serie.length; i++) {
-    if (i === idx) expect(serie[i]).toBe(valeur);
-    else expect(serie[i]).toBeUndefined();
-  }
-}
+describe("cvdDivergence v2", () => {
+  it("contrat : pane séparé, sortie unique cvd, inputs communs (pas d'input propre)", () => {
+    expect(cvdDivergence.pane).toBe("separate");
+    expect(cvdDivergence.outputs).toEqual([{ key: "cvd", name: "CVD", style: "line" }]);
+    expect(cvdDivergence.inputs.map((i) => i.key)).toEqual([
+      "gauche", "droite", "maxEcart", "cachees",
+    ]);
+  });
 
-function toutUndefined(serie: Array<number | undefined> | undefined): void {
-  expect(serie).toBeDefined();
-  if (serie === undefined) return;
-  expect(serie.every((v) => v === undefined)).toBe(true);
-}
-
-const N = 42;
-
-describe("cvdDivergence", () => {
-  it("divergence haussière CACHÉE : prix plus-bas plus haut, CVD plus-bas plus bas → divHaussCachee", () => {
+  it("câblage : série = cvdOf(candles), annotations = moteur commun sur le CVD", () => {
     // Prix : creux idx12 (close 48) puis idx30 (close 52) → HL (higher low).
+    // CVD : creux idx12 (30) puis idx30 (24) → LL (lower low) → divergence haussière cachée.
+    const N = 42;
     const closes = rampe(N, [[0, 60], [12, 48], [21, 58], [30, 52], [39, 60]]);
-    // CVD : creux idx12 (30) puis idx30 (24) → LL (lower low).
     const cvdCible = rampe(N, [[0, 40], [12, 30], [21, 42], [30, 24], [39, 40]]);
     const candles = candlesFromCvd(closes, cvdCible);
-    const { series } = computeIndicator(cvdDivergence, candles, {});
-
-    // Point au idxTo=30, valeur = low = close(52) − 1 = 51.
-    seulPointA(series.divHaussCachee, 30, 51);
-    toutUndefined(series.divHauss);
-    toutUndefined(series.divBaiss);
-    toutUndefined(series.divBaissCachee);
-
-    // Non-circularité + preuve que cvdOf reconstruit la cible.
-    const osc = cvdOf(candles);
-    expect(osc[12]).toBe(30);
-    expect(osc[30]).toBe(24);
-    expect(candles[30]!.low).toBeGreaterThan(candles[12]!.low); // prix HL
-    expect(osc[30]!).toBeLessThan(osc[12]!); // CVD LL
+    const params = { gauche: 2, droite: 2 };
+    const r = computeIndicator(cvdDivergence, candles, params);
+    const cvdAttendu = cvdOf(candles);
+    expect(r.series["cvd"]).toEqual(cvdAttendu);
+    // `?? {}` : la fabrique omet la clé `annotations` quand le moteur renvoie {}
+    // — l'égalité doit tenir dans les deux cas (divergence présente ou non).
+    const attendu = construireAnnotationsDivergence(highOf(candles), lowOf(candles), cvdAttendu, {
+      gauche: 2, droite: 2, maxEcart: 60, cachees: true, nomOsc: "CVD", formateur: FORMATEUR,
+    });
+    expect(r.annotations ?? {}).toEqual(attendu);
+    // Garde-fou anti-tautologie : la fixture produit RÉELLEMENT une divergence
+    // (sinon `attendu` serait {} et l'égalité ci-dessus passerait sans rien vérifier).
+    expect(Object.keys(attendu).length).toBeGreaterThan(0);
   });
 
-  it("divergence baissière CACHÉE : prix plus-haut plus bas, CVD plus-haut plus haut → divBaissCachee", () => {
-    // Prix : sommet idx12 (close 64) puis idx30 (close 58) → LH (lower high).
-    const closes = rampe(N, [[0, 40], [12, 64], [21, 50], [30, 58], [39, 44]]);
-    // CVD : sommet idx12 (50) puis idx30 (56) → HH (higher high).
-    const cvdCible = rampe(N, [[0, 30], [12, 50], [21, 40], [30, 56], [39, 42]]);
-    const candles = candlesFromCvd(closes, cvdCible);
-    const { series } = computeIndicator(cvdDivergence, candles, {});
-
-    // Point au idxTo=30, valeur = high = close(58) + 1 = 59.
-    seulPointA(series.divBaissCachee, 30, 59);
-    toutUndefined(series.divHauss);
-    toutUndefined(series.divBaiss);
-    toutUndefined(series.divHaussCachee);
-
-    const osc = cvdOf(candles);
-    expect(candles[30]!.high).toBeLessThan(candles[12]!.high); // prix LH
-    expect(osc[30]!).toBeGreaterThan(osc[12]!); // CVD HH
-  });
-
-  it("source sans buy/sell : CVD plat → aucun pivot → aucun point (dégradation propre)", () => {
-    // Prix avec des creux/sommets nets (pivots de prix bien présents), mais AUCUN
-    // champ taker buy/sell → CVD plat à 0 → aucune divergence, aucune erreur.
-    const closes = rampe(N, [[0, 60], [12, 48], [21, 58], [30, 52], [39, 60]]);
+  it("dégradation : bougies sans champs taker → CVD plat à 0, aucune annotation", () => {
+    const N = 42;
+    const closes = rampe(N, [[0, 60], [12, 48], [21, 58], [30, 52], [39, 60]]); // pivots de PRIX bien présents
     const candles: Candle[] = closes.map((close, i) => ({
-      time: i * 60_000,
-      open: close,
-      high: close + 1,
-      low: close - 1,
-      close,
-      volume: 100,
+      time: 1_700_000_000_000 + i * 60_000,
+      open: close, high: close + 1, low: close - 1, close, volume: 100,
     }));
-    const { series } = computeIndicator(cvdDivergence, candles, {});
+    const cvdAttendu = cvdOf(candles);
+    expect(cvdAttendu.every((v) => v === 0)).toBe(true); // comportement réel de cvdOf : plat à 0
 
-    expect(cvdOf(candles).every((v) => v === 0)).toBe(true); // CVD plat
-    toutUndefined(series.divHauss);
-    toutUndefined(series.divBaiss);
-    toutUndefined(series.divHaussCachee);
-    toutUndefined(series.divBaissCachee);
-  });
-
-  it("paramètres par défaut (gauche/droite 5, maxEcart 60) sans params", () => {
-    const closes = rampe(N, [[0, 60], [12, 48], [21, 58], [30, 52], [39, 60]]);
-    const cvdCible = rampe(N, [[0, 40], [12, 30], [21, 42], [30, 24], [39, 40]]);
-    const candles = candlesFromCvd(closes, cvdCible);
-    const { series } = computeIndicator(cvdDivergence, candles);
-    seulPointA(series.divHaussCachee, 30, 51);
+    const r = computeIndicator(cvdDivergence, candles, { gauche: 2, droite: 2 });
+    expect(r.series["cvd"]).toEqual(cvdAttendu);
+    expect(r.series["cvd"]?.every((v) => v === 0)).toBe(true);
+    expect(r.annotations).toBeUndefined();
   });
 });

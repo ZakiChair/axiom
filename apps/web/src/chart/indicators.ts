@@ -160,17 +160,23 @@ function ensureRegistered(def: IndicatorDef, name: string): void {
       const idx = crosshair.dataIndex ?? -1;
       if (idx < 0) return vide;
       const values: TooltipLegend[] = [];
+      // Dédup par chaîne `info` : une divergence produit DEUX segments porteurs de la
+      // même info (utils-annotations.ts:82-83 — un « prix », un « pane », dont les
+      // pivots d'arrivée sont distants de ≤ 3 barres). Sans ce filtre, la ligne
+      // s'affiche deux fois et consomme 2 des 3 lignes du budget.
+      const vus = new Set<string>();
+      const ajouter = (info: string) => {
+        if (vus.has(info) || values.length >= 3) return;
+        vus.add(info);
+        values.push({ title: "", value: info });
+      };
       const pousser = (a: number, info: string | undefined) => {
-        if (info !== undefined && Math.abs(a - idx) <= 3 && values.length < 3) {
-          values.push({ title: "", value: info });
-        }
+        if (info !== undefined && Math.abs(a - idx) <= 3) ajouter(info);
       };
       for (const s of annotations.segments ?? []) pousser(s.aIdx, s.info);
       for (const m of annotations.marqueurs ?? []) pousser(m.idx, m.info);
       for (const r of annotations.rubans ?? []) {
-        if (r.info !== undefined && idx >= r.deIdx && idx < r.deIdx + r.hauts.length && values.length < 3) {
-          values.push({ title: "", value: r.info });
-        }
+        if (r.info !== undefined && idx >= r.deIdx && idx < r.deIdx + r.hauts.length) ajouter(r.info);
       }
       return values.length > 0 ? ({ values } as IndicatorTooltipData) : vide;
     },

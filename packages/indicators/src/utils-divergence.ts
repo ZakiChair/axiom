@@ -58,6 +58,11 @@ export type TypeDivergence = "haussiere" | "baissiere" | "haussiere-cachee" | "b
 export interface Divergence {
   idxFrom: number;
   idxTo: number;
+  /** Index des pivots OSCILLATEUR appariés (±ECART_APPARIEMENT barres des pivots
+   * prix) — nécessaires pour tracer le segment miroir sur le pane de l'oscillateur
+   * en reliant les VRAIS pivots osc, pas les valeurs osc aux index prix. */
+  oscIdxFrom: number;
+  oscIdxTo: number;
   type: TypeDivergence;
 }
 
@@ -124,7 +129,7 @@ export function detecterDivergences(
         if (prix2 > prix1 && osc2 < osc1) type = "baissiere"; // prix HH & osc LH
         else if (prix2 < prix1 && osc2 > osc1) type = "baissiere-cachee"; // prix LH & osc HH
       }
-      if (type !== undefined) out.push({ idxFrom: p1.idx, idxTo: p2.idx, type });
+      if (type !== undefined) out.push({ idxFrom: p1.idx, idxTo: p2.idx, oscIdxFrom: o1, oscIdxTo: o2, type });
     }
   };
 

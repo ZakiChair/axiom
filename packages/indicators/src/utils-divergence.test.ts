@@ -92,7 +92,7 @@ describe("detecterDivergences", () => {
     // Osc : creux idx10 (30) puis creux idx28 (34) → HL (appariés à ±0 barre).
     const osc = rampe(N, [[0, 45], [10, 30], [19, 42], [28, 34], [39, 40]]);
     expect(detecterDivergences(prix, osc, OPTS)).toEqual<Divergence[]>([
-      { idxFrom: 10, idxTo: 28, type: "haussiere" },
+      { idxFrom: 10, idxTo: 28, oscIdxFrom: 10, oscIdxTo: 28, type: "haussiere" },
     ]);
   });
 
@@ -102,7 +102,7 @@ describe("detecterDivergences", () => {
     // Osc : sommet idx10 (55) puis sommet idx28 (50) → LH.
     const osc = rampe(N, [[0, 30], [10, 55], [19, 40], [28, 50], [39, 44]]);
     expect(detecterDivergences(prix, osc, OPTS)).toEqual<Divergence[]>([
-      { idxFrom: 10, idxTo: 28, type: "baissiere" },
+      { idxFrom: 10, idxTo: 28, oscIdxFrom: 10, oscIdxTo: 28, type: "baissiere" },
     ]);
   });
 
@@ -112,7 +112,7 @@ describe("detecterDivergences", () => {
     // Osc : creux idx10 (40) puis creux idx28 (34) → LL (lower low).
     const osc = rampe(N, [[0, 50], [10, 40], [19, 52], [28, 34], [39, 46]]);
     expect(detecterDivergences(prix, osc, OPTS)).toEqual<Divergence[]>([
-      { idxFrom: 10, idxTo: 28, type: "haussiere-cachee" },
+      { idxFrom: 10, idxTo: 28, oscIdxFrom: 10, oscIdxTo: 28, type: "haussiere-cachee" },
     ]);
   });
 
@@ -122,7 +122,7 @@ describe("detecterDivergences", () => {
     // Osc : sommet idx10 (50) puis sommet idx28 (56) → HH (higher high).
     const osc = rampe(N, [[0, 35], [10, 50], [19, 40], [28, 56], [39, 42]]);
     expect(detecterDivergences(prix, osc, OPTS)).toEqual<Divergence[]>([
-      { idxFrom: 10, idxTo: 28, type: "baissiere-cachee" },
+      { idxFrom: 10, idxTo: 28, oscIdxFrom: 10, oscIdxTo: 28, type: "baissiere-cachee" },
     ]);
   });
 
@@ -145,7 +145,7 @@ describe("detecterDivergences", () => {
     // fixture est valide et que c'est le garde d'écart qui a joué au-dessus).
     expect(detecterDivergences(prix, osc, { gauche: 2, droite: 2, maxEcart: 40 })).toEqual<
       Divergence[]
-    >([{ idxFrom: 8, idxTo: 30, type: "haussiere" }]);
+    >([{ idxFrom: 8, idxTo: 30, oscIdxFrom: 8, oscIdxTo: 30, type: "haussiere" }]);
   });
 
   it("pivots prix/osc décalés de 2 barres : appariés quand même (±3)", () => {
@@ -154,7 +154,7 @@ describe("detecterDivergences", () => {
     const prix = rampe(N, [[0, 70], [10, 50], [19, 62], [28, 44], [39, 58]]);
     const osc = rampe(N, [[0, 45], [12, 30], [21, 42], [30, 34], [39, 40]]);
     expect(detecterDivergences(prix, osc, OPTS)).toEqual<Divergence[]>([
-      { idxFrom: 10, idxTo: 28, type: "haussiere" },
+      { idxFrom: 10, idxTo: 28, oscIdxFrom: 12, oscIdxTo: 30, type: "haussiere" },
     ]);
   });
 
@@ -166,7 +166,7 @@ describe("detecterDivergences", () => {
     // Osc creux idx13/idx31 = pile +3 barres des creux prix → dist 3, 3 <= 3 → apparié.
     const oscA3 = rampe(N, [[0, 45], [13, 30], [22, 42], [31, 34], [39, 40]]);
     expect(detecterDivergences(prix, oscA3, OPTS)).toEqual<Divergence[]>([
-      { idxFrom: 10, idxTo: 28, type: "haussiere" },
+      { idxFrom: 10, idxTo: 28, oscIdxFrom: 13, oscIdxTo: 31, type: "haussiere" },
     ]);
     // Osc creux idx14/idx32 = +4 barres → dist 4, 4 <= 3 faux → aucun appariement ⇒ [].
     const oscA4 = rampe(N, [[0, 45], [14, 30], [23, 42], [32, 34], [39, 40]]);
@@ -189,8 +189,8 @@ describe("detecterDivergences", () => {
     const prix = rampe(N, [[0, 66], [8, 54], [14, 64], [20, 50], [26, 60], [32, 46], [39, 54]]);
     const osc = rampe(N, [[0, 40], [8, 30], [14, 44], [20, 34], [26, 42], [32, 38], [39, 44]]);
     expect(detecterDivergences(prix, osc, OPTS)).toEqual<Divergence[]>([
-      { idxFrom: 8, idxTo: 20, type: "haussiere" },
-      { idxFrom: 20, idxTo: 32, type: "haussiere" },
+      { idxFrom: 8, idxTo: 20, oscIdxFrom: 8, oscIdxTo: 20, type: "haussiere" },
+      { idxFrom: 20, idxTo: 32, oscIdxFrom: 20, oscIdxTo: 32, type: "haussiere" },
     ]);
   });
 });

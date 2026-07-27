@@ -1,23 +1,17 @@
 /**
- * @axiom/indicators — momentum/rsiDivergence.test.ts
- *
- * Fixtures façonnées À LA MAIN (rampe linéaire par morceaux, comme
- * utils-divergence.test.ts) produisant UNE divergence RSI connue :
- *  - haussière : deux creux de prix en plus-bas plus bas (LL) mais approche du 2ᵉ
- *    plus douce → RSI en plus-bas plus HAUT (HL) → point `divHauss` au 2ᵉ creux ;
- *  - baissière : deux sommets en plus-haut plus haut (HH), 2ᵉ montée plus douce →
- *    RSI en plus-haut plus BAS (LH) → point `divBaiss` au 2ᵉ sommet.
- *
- * Contrainte d'amorçage : le RSI est `undefined` sur les 14 premières barres, donc
- * un pivot osc (fenêtre ±5) n'existe qu'à partir de l'index 19 → les creux/sommets
- * sont placés loin dans la série (idx 24 puis 48, N=60). Les valeurs attendues ne
- * réimplémentent PAS le RSI : chaque test vérifie EN PLUS, structurellement, que la
- * divergence est authentique (prix LL/HH & RSI HL/LH), gage de non-circularité.
+ * rsiDivergence v2 — tests de CONTRAT + CÂBLAGE. La géométrie des annotations est
+ * dérivée à la main dans utils-annotations.test.ts et le RSI dans rsi.test.ts :
+ * ici on vérifie que le def assemble bien ces briques hand-testées (comparaison
+ * aux fonctions pures composées), plus un garde-fou anti-tautologie : la fixture
+ * (reprise de la v1, éprouvée) produit RÉELLEMENT une divergence haussière
+ * régulière (prix 61 → 57 aux idx 24 → 48, RSI 11.16 → 23.68 en hausse) — sans
+ * quoi `attendu` serait `{}` et l'égalité passerait sans rien vérifier.
  */
-
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
 import { computeIndicator } from "../engine";
+import { construireAnnotationsDivergence } from "../utils-annotations";
+import { highOf, lowOf } from "../utils";
 import { rsiOf } from "./rsi";
 import { rsiDivergence } from "./rsiDivergence";
 
@@ -47,97 +41,32 @@ function candlesFromCloses(closes: number[]): Candle[] {
   }));
 }
 
-/** Vérifie qu'une série ne porte de valeur qu'à `idx`, égale à `valeur`, undefined ailleurs. */
-function seulPointA(serie: Array<number | undefined> | undefined, idx: number, valeur: number): void {
-  expect(serie).toBeDefined();
-  if (serie === undefined) return;
-  for (let i = 0; i < serie.length; i++) {
-    if (i === idx) expect(serie[i]).toBe(valeur);
-    else expect(serie[i]).toBeUndefined();
-  }
-}
-
-function toutUndefined(serie: Array<number | undefined> | undefined): void {
-  expect(serie).toBeDefined();
-  if (serie === undefined) return;
-  expect(serie.every((v) => v === undefined)).toBe(true);
-}
-
-const N = 60;
-
-describe("rsiDivergence", () => {
-  it("divergence haussière régulière : point divHauss au 2ᵉ creux (prix low), reste vierge", () => {
-    // Creux prix idx24 (close 62) puis idx48 (close 58) → LL ; approche du 2ᵉ plus
-    // douce → RSI en plus-bas plus haut.
-    const closes = rampe(N, [[0, 100], [10, 108], [24, 62], [36, 88], [48, 58], [59, 74]]);
-    const candles = candlesFromCloses(closes);
-    const { series } = computeIndicator(rsiDivergence, candles, {});
-
-    // Point posé au idxTo=48, valeur = low du prix = close(58) − 1 = 57.
-    seulPointA(series.divHauss, 48, 57);
-    toutUndefined(series.divBaiss);
-    toutUndefined(series.divHaussCachee);
-    toutUndefined(series.divBaissCachee);
-
-    // Non-circularité : la divergence est réellement haussière régulière.
-    const osc = rsiOf(closes, 14);
-    expect(candles[48]!.low).toBeLessThan(candles[24]!.low); // prix LL
-    expect(osc[48]!).toBeGreaterThan(osc[24]!); // RSI HL
+describe("rsiDivergence v2", () => {
+  it("contrat : pane séparé, sortie unique rsi, inputs osc + communs", () => {
+    expect(rsiDivergence.pane).toBe("separate");
+    expect(rsiDivergence.outputs).toEqual([{ key: "rsi", name: "RSI", style: "line" }]);
+    expect(rsiDivergence.inputs.map((i) => i.key)).toEqual([
+      "length", "source", "gauche", "droite", "maxEcart", "cachees",
+    ]);
   });
 
-  it("divergence baissière régulière : point divBaiss au 2ᵉ sommet (prix high), reste vierge", () => {
-    // Sommet prix idx24 (close 98) puis idx48 (close 102) → HH ; 2ᵉ montée plus
-    // douce → RSI en plus-haut plus bas.
-    const closes = rampe(N, [[0, 60], [10, 52], [24, 98], [36, 72], [48, 102], [59, 86]]);
+  it("câblage : série = rsiOf(source, length), annotations = moteur commun sur le RSI", () => {
+    // Fixture v1 éprouvée : creux prix idx24 (close 62) puis idx48 (close 58) → LL ;
+    // approche du 2ᵉ plus douce → RSI en plus-bas plus HAUT → divergence haussière
+    // régulière détectée avec les défauts (length 14, gauche/droite 5, maxEcart 60).
+    const closes = rampe(60, [[0, 100], [10, 108], [24, 62], [36, 88], [48, 58], [59, 74]]);
     const candles = candlesFromCloses(closes);
-    const { series } = computeIndicator(rsiDivergence, candles, {});
-
-    // Point posé au idxTo=48, valeur = high du prix = close(102) + 1 = 103.
-    seulPointA(series.divBaiss, 48, 103);
-    toutUndefined(series.divHauss);
-    toutUndefined(series.divHaussCachee);
-    toutUndefined(series.divBaissCachee);
-
-    const osc = rsiOf(closes, 14);
-    expect(candles[48]!.high).toBeGreaterThan(candles[24]!.high); // prix HH
-    expect(osc[48]!).toBeLessThan(osc[24]!); // RSI LH
-  });
-
-  it("consomme réellement ctx.source : une source à RSI plat éteint toute détection", () => {
-    // Preuve directe que `calc` lit ctx.source (et non closeOf). `close` porte la
-    // divergence haussière ; `high` est une rampe linéaire STRICTE → tous les deltas
-    // sont égaux, pertes nulles → RSI(high) = 100 constant → aucun pivot fractal
-    // strict → aucune divergence. La comparaison de valeurs du test générique
-    // engine-source ne peut pas départager ce def (valeur = prix, invariante par
-    // source), d'où cette vérification dédiée.
-    const closes = rampe(N, [[0, 100], [10, 108], [24, 62], [36, 88], [48, 58], [59, 74]]);
-    const candles: Candle[] = closes.map((close, i) => ({
-      time: i * 60_000,
-      open: close,
-      high: 300 + 2 * i, // rampe linéaire stricte → RSI plat = 100
-      low: close - 1,
-      close,
-      volume: 100,
-    }));
-
-    const surClose = computeIndicator(rsiDivergence, candles, { source: "close" });
-    const surHigh = computeIndicator(rsiDivergence, candles, { source: "high" });
-
-    // source close : divergence détectée (point au 2ᵉ creux, valeur = low = 57).
-    expect(surClose.series.divHauss?.[48]).toBe(candles[48]!.low);
-    // source high (RSI plat) : plus aucun point sur aucune des 4 séries.
-    toutUndefined(surHigh.series.divHauss);
-    toutUndefined(surHigh.series.divBaiss);
-    toutUndefined(surHigh.series.divHaussCachee);
-    toutUndefined(surHigh.series.divBaissCachee);
-  });
-
-  it("paramètres par défaut (length 14, gauche/droite 5, maxEcart 60, source close) sans params", () => {
-    // Mêmes bougies que le cas haussier, mais AUCUN param → les défauts déclarés
-    // doivent reproduire exactement le point divHauss.
-    const closes = rampe(N, [[0, 100], [10, 108], [24, 62], [36, 88], [48, 58], [59, 74]]);
-    const candles = candlesFromCloses(closes);
-    const { series } = computeIndicator(rsiDivergence, candles);
-    seulPointA(series.divHauss, 48, 57);
+    const r = computeIndicator(rsiDivergence, candles, {});
+    const rsiAttendu = rsiOf(closes, 14);
+    expect(r.series["rsi"]).toEqual(rsiAttendu);
+    // `?? {}` : la fabrique omet la clé `annotations` quand le moteur renvoie {}
+    // — l'égalité doit tenir dans les deux cas (divergence présente ou non).
+    const attendu = construireAnnotationsDivergence(highOf(candles), lowOf(candles), rsiAttendu, {
+      gauche: 5, droite: 5, maxEcart: 60, cachees: true, nomOsc: "RSI",
+    });
+    expect(r.annotations ?? {}).toEqual(attendu);
+    // Garde-fou anti-tautologie : la fixture produit RÉELLEMENT une divergence
+    // (sinon `attendu` serait {} et l'égalité ci-dessus passerait sans rien vérifier).
+    expect(attendu.segments?.length ?? 0).toBeGreaterThan(0);
   });
 });

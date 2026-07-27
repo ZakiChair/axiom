@@ -9,5 +9,6 @@ export * from "./utils-aux";
 export * from "./utils-divergence";
 export * from "./utils-divergence-points";
 export * from "./utils-annotations";
+export * from "./utils-fabrique-divergence";
 export * from "./engine";
 export * from "./registry";

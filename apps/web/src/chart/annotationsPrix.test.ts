@@ -1,10 +1,24 @@
 /**
  * AnnotationsPrix — chart FACTICE enregistrant createOverlay/removeOverlay
  * (pattern des tests chart existants, vi.mock de klinecharts pour registerOverlay).
+ *
+ * Le TEMPLATE d'overlay est capturé au vol par le mock (`vi.hoisted`, patron
+ * d'indicators.tooltip.test.ts) : c'est ce qui verrouille `totalStep: 1`, dont
+ * dépend l'arité VARIABLE des points (1 pour marqueurs/labels, 2 pour segments).
+ * Régression couverte : avec `totalStep: 3`, `setPoints` laisse tout overlay à 1
+ * point en `isDrawing()` — il n'entre jamais dans `_instances` (donc non retirable
+ * au rejeu) et bloque le survol de TOUTES les annotations via `_progressInstanceInfo`.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { OverlayTemplate } from "klinecharts";
 
-vi.mock("klinecharts", () => ({ registerOverlay: () => {} }));
+const capture = vi.hoisted(() => ({ template: null as OverlayTemplate | null }));
+
+vi.mock("klinecharts", () => ({
+  registerOverlay: (t: OverlayTemplate) => {
+    capture.template = t;
+  },
+}));
 
 import type { Candle, IndicatorDef } from "@axiom/types";
 import { AnnotationsPrix } from "./annotationsPrix";
@@ -73,6 +87,22 @@ describe("AnnotationsPrix", () => {
   it("def overlay : AUCUN overlay (le draw du candle_pane s'en charge)", () => {
     ann.appliquer("inst1", defOverlay, ANNOTS as never, candles);
     expect(chart.crees.length).toBe(0);
+  });
+
+  it("template : totalStep 1 (overlays pré-créés, jamais dessinés à la souris)", () => {
+    // > 1 laisserait les overlays à UN point en cours de dessin (cf. docblock du module).
+    expect(capture.template?.totalStep).toBe(1);
+  });
+
+  it("arité des points : 2 pour un segment, 1 pour un marqueur et un label", () => {
+    const mixte = {
+      segments: [{ deIdx: 1, deValeur: 8, aIdx: 5, aValeur: 7, trait: "plein", couleur: "--up", cible: "prix" }],
+      marqueurs: [{ idx: 5, valeur: 7, forme: "triangleHaut", couleur: "--up", cible: "prix" }],
+      labels: [{ idx: 5, valeur: 7, texte: "Div ▲", couleur: "--up", cible: "prix" }],
+    };
+    ann.appliquer("inst1", defSepare, mixte as never, candles);
+    const arites = chart.crees.map((o) => (o.points as unknown[]).length);
+    expect(arites).toEqual([2, 1, 1]); // ordre de pose : segments, marqueurs, labels
   });
 
   it("cap 150 : seules les annotations les plus récentes sont posées", () => {

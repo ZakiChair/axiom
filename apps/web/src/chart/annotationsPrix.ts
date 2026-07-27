@@ -3,8 +3,16 @@
  * divergence, labels, marqueurs), rendues sur le chart maître via un overlay
  * custom unique « axiomAnnotation » (patron WHALE/ECO : registerOverlay
  * idempotent + un createOverlay par annotation + rejeu par ids suivis).
- * `totalStep: 3` (2 points max, précédent fibonacci.ts) — les points sont
- * toujours fournis à la création, jamais saisis à la souris. `lock: true` :
+ * `totalStep: 1` (précédent ecoMarkers.ts:70 / whaleBubbles.ts:193) — les points
+ * sont TOUJOURS fournis à la création, jamais saisis à la souris. Un seul template
+ * sert les overlays à 1 point (marqueurs, labels) ET à 2 points (segments) : le
+ * seuil de `setPoints` (index.esm.js:1311) est `points.length >= totalStep - 1`,
+ * soit `>= 0` — toujours vrai, donc l'overlay naît FINISHED. Avec `totalStep: 3`
+ * (valeur des dessins SAISIS à la souris, cf. fibonacci.ts) un overlay à 1 point
+ * resterait `isDrawing()` : il partirait dans `_progressInstanceInfo` au lieu de
+ * `_instances` (:5757), serait non-retirable par `removeOverlay`, et tuerait le
+ * survol de TOUTES les annotations (mouseMoveEvent sort avant `setHoverInstanceInfo`
+ * tant qu'une instance est en cours de dessin, :8422-8437). `lock: true` :
  * pas de drag ; les figures restent SENSIBLES au survol (pas d'ignoreEvent)
  * pour le tooltip onMouseEnter/onMouseLeave (div flottante singleton, stylée
  * par variables CSS — le DOM résout var(...) nativement, contrairement aux canvas).
@@ -86,7 +94,7 @@ export function ensureAnnotationOverlayRegistered(): void {
   overlayRegistered = true;
   registerOverlay({
     name: ANNOTATION_OVERLAY,
-    totalStep: 3,
+    totalStep: 1,
     lock: true,
     needDefaultPointFigure: false,
     needDefaultXAxisFigure: false,

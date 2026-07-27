@@ -63,7 +63,9 @@ interface MarqueurAnnotation {
 interface LabelAnnotation {
   idx: number; valeur: number;
   texte: string;                     // ex. "Div ▼"
-  couleur: string; cible: CibleAnnotation; info?: string;
+  couleur: string; cible: CibleAnnotation;
+  position?: "dessus" | "dessous";   // placement : sous le creux (haussières) / au-dessus du sommet
+  info?: string;
 }
 
 interface RubanAnnotation {
@@ -89,15 +91,19 @@ strictement identique à avant : le champ est optionnel de bout en bout.
 
 ### 1.2 Moteur commun (`packages/indicators/src/utils-annotations.ts`)
 
-`construireAnnotationsDivergence(candles, osc, opts)` : s'appuie sur
+`construireAnnotationsDivergence(highs, lows, osc, opts)` : s'appuie sur
 `detecterPivots`/`detecterDivergences` EXISTANTS (`utils-divergence.ts`, aucun
 changement de détection, `ECART_APPARIEMENT = 3` reste une constante).
-Pour chaque `Divergence {idxFrom, idxTo, type}` produit :
+**Amendement au plan** : `Divergence` gagne deux champs requis
+`oscIdxFrom`/`oscIdxTo` (index des pivots OSC appariés, ±3 barres) — le segment
+miroir doit relier les VRAIS pivots de l'oscillateur, pas les valeurs osc aux
+index prix. Pour chaque `Divergence {idxFrom, idxTo, oscIdxFrom, oscIdxTo, type}`
+produit :
 
 - 1 segment cible `"prix"` reliant les pivots sur le prix (haussières →
   ancrage sur les `low`, baissières → sur les `high`, règle déjà appliquée par
   `placerPointsDivergence`) ;
-- 1 segment cible `"pane"` reliant les MÊMES index sur `osc` ;
+- 1 segment cible `"pane"` reliant `osc[oscIdxFrom]` → `osc[oscIdxTo]` ;
 - 1 label cible `"prix"` au pivot d'arrivée : `"Div ▲"` (haussières, `--up`)
   ou `"Div ▼"` (baissières, `--down`). Les cachées n'ont PAS de label dédié
   (anti-encombrement) : elles se lisent au pointillé et au tooltip ;
@@ -186,7 +192,7 @@ existants inchangés.
 | `macdDivergence` | nouveau | momentum | ligne MACD ou histogramme | `rapide` 12, `lent` 26, `signal` 9, `oscSource` select ["ligne","histogramme"] déf. "ligne" |
 | `stochDivergence` | nouveau | momentum | %K lissé | `longueurK` 14, `lissageK` 3 |
 | `obvDivergence` | nouveau | volume | OBV | — |
-| `mfiDivergence` | nouveau | volume | MFI | `length` 14 |
+| `mfiDivergence` | nouveau | momentum (amendé : suit le def de base `mfi`) | MFI | `length` 14 |
 
 Points d'attention :
 
@@ -212,8 +218,10 @@ inchangé. Il gagne des annotations :
 - **Détection** : port PUR de `detectCvdDivergences`
   (`apps/web/src/chart/cvdSpotPerp.ts:55-91` — mismatch de signe sur
   `Δ lookback`, filtre médiane anti-bruit, garde zéro-delta symétrique) vers
-  `packages/indicators`, avec ses constantes actuelles comme défauts
-  (`lookback` = input existant `fenetre`) et tests à la main. Le module
+  `packages/indicators`, avec ses constantes actuelles comme défauts —
+  **amendé au plan : nouvel input `fenetreDiv` (déf. 14, la constante du module
+  WS), PAS l'input existant `fenetre` (100, fenêtre de normalisation z)** —
+  et tests à la main. Le module
   app-side WS (triangles live du toggle orderflow) N'EST PAS touché — les deux
   coexistent comme aujourd'hui, REST/def d'un côté, WS/toggle de l'autre.
 - **Rendu** : marqueurs cible `"pane"` — `triangleHaut` `--up` quand le spot

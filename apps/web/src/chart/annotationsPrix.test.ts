@@ -8,9 +8,13 @@
  * Régression couverte : avec `totalStep: 3`, `setPoints` laisse tout overlay à 1
  * point en `isDrawing()` — il n'entre jamais dans `_instances` (donc non retirable
  * au rejeu) et bloque le survol de TOUTES les annotations via `_progressInstanceInfo`.
+ *
+ * `canvasTokens` est mocké sur son repli : `createPointFigures` est appelé
+ * DIRECTEMENT ici et les tests tournent en environnement node (pas de
+ * `getComputedStyle`/`document`) — même pattern qu'annotationsPane.test.ts.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { OverlayTemplate } from "klinecharts";
+import type { OverlayCreateFiguresCallbackParams, OverlayFigure, OverlayTemplate } from "klinecharts";
 
 const capture = vi.hoisted(() => ({ template: null as OverlayTemplate | null }));
 
@@ -18,6 +22,10 @@ vi.mock("klinecharts", () => ({
   registerOverlay: (t: OverlayTemplate) => {
     capture.template = t;
   },
+}));
+
+vi.mock("../lib/canvasTokens", () => ({
+  lireTokenCanvas: (_t: string, d: string) => d,
 }));
 
 import type { Candle, IndicatorDef } from "@axiom/types";
@@ -92,6 +100,19 @@ describe("AnnotationsPrix", () => {
   it("template : totalStep 1 (overlays pré-créés, jamais dessinés à la souris)", () => {
     // > 1 laisserait les overlays à UN point en cours de dessin (cf. docblock du module).
     expect(capture.template?.totalStep).toBe(1);
+  });
+
+  it("figure label : fond TRANSPARENT (le défaut KLineChart peint une pastille bleue)", () => {
+    // Sans cette ligne de styles, `getDefaultOverlayStyle().text().backgroundColor`
+    // (#1677FF) est mergé à la figure : un aplat bleu INVARIANT AU THÈME sous chaque
+    // « Div ▲ » (défaut relevé au gate visuel du lot v2.1).
+    const figures = capture.template?.createPointFigures?.({
+      overlay: { extendData: { genre: "label", texte: "Div ▲", couleur: "--up", dessous: true } },
+      coordinates: [{ x: 10, y: 20 }],
+    } as unknown as OverlayCreateFiguresCallbackParams);
+    const [figure] = figures as OverlayFigure[];
+    expect(figure?.type).toBe("text");
+    expect(figure?.styles.backgroundColor).toBe("transparent");
   });
 
   it("arité des points : 2 pour un segment, 1 pour un marqueur et un label", () => {

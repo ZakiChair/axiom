@@ -136,7 +136,14 @@ export function ensureAnnotationOverlayRegistered(): void {
             align: "center",
             baseline: ext.dessous ? "top" : "bottom",
           },
-          styles: { color: couleur, size: 10 },
+          // `backgroundColor: "transparent"` OBLIGATOIRE : le style d'overlay par
+          // défaut de KLineChart peint les figures text sur une pastille pleine
+          // (`getDefaultOverlayStyle().text().backgroundColor = "#1677FF"`, mergée
+          // aux styles de la figure à index.esm.js:8800, puis remplie par
+          // drawText → drawRect :7290) — un aplat bleu INVARIANT AU THÈME derrière
+          // chaque « Div ▲ ». `isTransparent` (:6970) court-circuite ce remplissage ;
+          // la bordure, elle, n'est jamais tracée (style par défaut Fill, :7180).
+          styles: { color: couleur, size: 10, backgroundColor: "transparent" },
         },
       ];
     },

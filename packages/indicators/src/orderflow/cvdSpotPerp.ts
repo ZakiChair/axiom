@@ -19,6 +19,14 @@
  * écart-type est nul (évite la division par zéro). Le plancher de 20 est fixe,
  * indépendant de `fenetre` (warm-up minimal), cf. spec.
  *
+ * v2.1 — MARQUEURS DE DIVERGENCE : en plus des trois séries, le calc pose des
+ * `annotations.marqueurs` (cible `"pane"`, triangle haut `--up` / bas `--down`)
+ * aux bougies où les jambes NORMALISÉES divergent de signe sur `fenetreDiv`
+ * bougies (détecteur pur `detecterDivergencesSpotPerp`, filtre médiane
+ * anti-bruit). `fenetreDiv` (défaut 14) est le LOOKBACK de divergence — à ne pas
+ * confondre avec `fenetre` (défaut 100), la fenêtre de normalisation. Aucune
+ * divergence ⇒ pas de champ `annotations` du tout.
+ *
  * LECTURE (utilisateur) : jambe perp disponible sur les timeframes 1m-1M
  * (Binance USDT-M) ; ailleurs (autre exchange, autre marché), CVD spot seul.
  * Séries normalisées en écarts-types de flux — lire croisements et signe de
@@ -29,8 +37,9 @@
  * canal existe (hors périmètre, cf. rapport de tâche).
  */
 
-import type { IndicatorDef } from "@axiom/types";
+import type { AnnotationsIndicateur, IndicatorDef, MarqueurAnnotation } from "@axiom/types";
 import { stdev } from "../utils";
+import { detecterDivergencesSpotPerp } from "./divergenceSpotPerp";
 
 /** Plancher fixe d'échantillons requis pour un écart-type exploitable. */
 const MIN_POINTS_STDEV = 20;
@@ -134,6 +143,7 @@ export const cvdSpotPerp: IndicatorDef = {
   inputs: [
     { key: "fenetre", name: "Fenêtre", type: "number", default: 100, min: 20, max: 500 },
     { key: "lissage", name: "Lissage EMA", type: "number", default: 3, min: 1, max: 50 },
+    { key: "fenetreDiv", name: "Fenêtre divergence", type: "number", default: 14, min: 2, max: 100 },
   ],
   outputs: [
     { key: "cvdSpot", name: "CVD Spot", style: "line", color: "#26a69a" },
@@ -205,6 +215,26 @@ export const cvdSpotPerp: IndicatorDef = {
       if (s !== undefined && p !== undefined) divergence[i] = s - p;
     }
 
-    return { series: { cvdSpot, cvdPerp, divergence } };
+    // Marqueurs de divergence spot/perp (v2.1) : mismatch de signe soutenu des
+    // jambes NORMALISÉES sur `fenetreDiv` bougies (défaut 14 = constante du
+    // module WS historique — PAS `fenetre`, qui est la fenêtre de normalisation).
+    const fenetreDiv = clampInt(params.fenetreDiv, 14, 2, 100);
+    const fmtSigne = (v: number) => `${v > 0 ? "+" : ""}${v.toFixed(2)}`;
+    const marqueurs: MarqueurAnnotation[] = detecterDivergencesSpotPerp(cvdSpot, cvdPerp, fenetreDiv).map((d) => ({
+      idx: d.idx,
+      valeur: cvdSpot[d.idx] ?? 0, // ancré sur la jambe spot (définie par construction du Δ)
+      forme: d.sens === "spotHaussier" ? "triangleHaut" : "triangleBas",
+      couleur: d.sens === "spotHaussier" ? "--up" : "--down",
+      cible: "pane",
+      info:
+        `Divergence spot/perp (${fenetreDiv} bougies) — ` +
+        `Δspot ${fmtSigne(d.dSpot)} σ / Δperp ${fmtSigne(d.dPerp)} σ`,
+    }));
+    const annotations: AnnotationsIndicateur | undefined =
+      marqueurs.length > 0 ? { marqueurs } : undefined;
+
+    return annotations !== undefined
+      ? { series: { cvdSpot, cvdPerp, divergence }, annotations }
+      : { series: { cvdSpot, cvdPerp, divergence } };
   },
 };

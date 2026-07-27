@@ -10,5 +10,6 @@ export * from "./utils-divergence";
 export * from "./utils-divergence-points";
 export * from "./utils-annotations";
 export * from "./utils-fabrique-divergence";
+export * from "./orderflow/divergenceSpotPerp";
 export * from "./engine";
 export * from "./registry";

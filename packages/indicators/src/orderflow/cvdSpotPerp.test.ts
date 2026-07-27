@@ -174,6 +174,74 @@ describe("cvdSpotPerp", () => {
     });
   });
 
+  describe("marqueurs de divergence (v2.1)", () => {
+    it("sens opposés soutenus → marqueurs pane --up ancrés sur la jambe spot", () => {
+      // 60 bougies, delta spot alterné [1, 2] (stdev > 0), perp exactement opposé
+      // [-1, -2] : après lissage EMA (défaut 3) la jambe perp normalisée est
+      // l'opposée exacte de la spot → mismatch de signe soutenu.
+      // Warm-up : EMA-3 amorcée à l'index 2, il faut MIN_POINTS_STDEV=20 deltas
+      // lissés dans la fenêtre → cvdSpot/cvdPerp définis à partir de l'index 21 ;
+      // le Δ de divergence sur fenetreDiv=5 exige les DEUX bornes définies →
+      // premier marqueur possible à l'index 26.
+      const candles = candlesAlt(60, 1, 2);
+      const perpDelta = perpAlt(60, -1, -2);
+      const { series, annotations } = cvdSpotPerp.calc(
+        candles,
+        { fenetre: 100, lissage: 3, fenetreDiv: 5 },
+        { ...baseCtx, aux: { perpDelta } }
+      );
+      const marqueurs = annotations?.marqueurs ?? [];
+      expect(marqueurs.length).toBeGreaterThan(0);
+      expect(Math.min(...marqueurs.map((m) => m.idx))).toBeGreaterThanOrEqual(26);
+      for (const m of marqueurs) {
+        expect(m.forme).toBe("triangleHaut");
+        expect(m.couleur).toBe("--up");
+        expect(m.cible).toBe("pane");
+        expect(m.valeur).toBe(series.cvdSpot?.[m.idx]);
+        expect(m.info).toMatch(/^Divergence spot\/perp \(5 bougies\)/);
+      }
+    });
+
+    it("miroir : spot vend / perp achète → marqueurs triangleBas --down", () => {
+      // Même fixture retournée (sell-only côté spot, donc delta négatif ; candlesAlt
+      // ne peut pas la produire, il fige sell=0) : mêmes |deltas|, donc même stdev.
+      const candles = Array.from({ length: 60 }, (_v, i) => c(0, i % 2 === 0 ? 1 : 2));
+      const perpDelta = perpAlt(60, 1, 2);
+      const { series, annotations } = cvdSpotPerp.calc(
+        candles,
+        { fenetre: 100, lissage: 3, fenetreDiv: 5 },
+        { ...baseCtx, aux: { perpDelta } }
+      );
+      const marqueurs = annotations?.marqueurs ?? [];
+      expect(marqueurs.length).toBeGreaterThan(0);
+      for (const m of marqueurs) {
+        expect(m.forme).toBe("triangleBas");
+        expect(m.couleur).toBe("--down");
+        expect(m.cible).toBe("pane");
+        expect(m.valeur).toBe(series.cvdSpot?.[m.idx]);
+      }
+      // Le signe négatif n'est pas préfixé par le formateur (branche v <= 0).
+      expect(marqueurs[0]?.info).toContain("Δspot -");
+    });
+
+    it("même direction (spot et perp achètent) → aucune annotation", () => {
+      const candles = candlesAlt(60, 1, 2);
+      const perpDelta = perpAlt(60, 1, 2);
+      const { annotations } = cvdSpotPerp.calc(
+        candles,
+        { fenetre: 100, lissage: 3, fenetreDiv: 5 },
+        { ...baseCtx, aux: { perpDelta } }
+      );
+      expect(annotations).toBeUndefined();
+    });
+
+    it("perp absent → aucune annotation", () => {
+      const candles = candlesAlt(60, 1, 2);
+      const { annotations } = cvdSpotPerp.calc(candles, { fenetreDiv: 5 }, baseCtx);
+      expect(annotations).toBeUndefined();
+    });
+  });
+
   it("métadonnées conformes à la spec", () => {
     expect(cvdSpotPerp.id).toBe("cvdSpotPerp");
     expect(cvdSpotPerp.category).toBe("orderflow");
@@ -183,6 +251,7 @@ describe("cvdSpotPerp", () => {
     expect(cvdSpotPerp.inputs).toEqual([
       { key: "fenetre", name: expect.any(String), type: "number", default: 100, min: 20, max: 500 },
       { key: "lissage", name: expect.any(String), type: "number", default: 3, min: 1, max: 50 },
+      { key: "fenetreDiv", name: expect.any(String), type: "number", default: 14, min: 2, max: 100 },
     ]);
     expect(cvdSpotPerp.outputs.map((o) => o.key)).toEqual(["cvdSpot", "cvdPerp", "divergence"]);
     expect(cvdSpotPerp.outputs.map((o) => o.style)).toEqual(["line", "line", "histogram"]);

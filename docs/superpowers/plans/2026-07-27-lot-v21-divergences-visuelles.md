@@ -1052,8 +1052,11 @@ Attendu : FAIL (« Cannot find module './annotationsPrix' »).
  * divergence, labels, marqueurs), rendues sur le chart maître via un overlay
  * custom unique « axiomAnnotation » (patron WHALE/ECO : registerOverlay
  * idempotent + un createOverlay par annotation + rejeu par ids suivis).
- * `totalStep: 3` (2 points max, précédent fibonacci.ts) — les points sont
- * toujours fournis à la création, jamais saisis à la souris. `lock: true` :
+ * `totalStep: 1` (précédent ecoMarkers/whaleBubbles : points TOUJOURS fournis à
+ * la création, jamais saisis à la souris — le seuil FINISHED devient
+ * points.length >= 0, valable pour 1 ET 2 points ; totalStep: 3 laisserait les
+ * overlays à 1 point en état « dessin en cours » : non enregistrés, non
+ * retirables, tooltip global mort — attrapé en revue Task 4). `lock: true` :
  * pas de drag ; les figures restent SENSIBLES au survol (pas d'ignoreEvent)
  * pour le tooltip onMouseEnter/onMouseLeave (div flottante singleton, stylée
  * par variables CSS — le DOM résout var(...) nativement, contrairement aux canvas).
@@ -1120,7 +1123,7 @@ export function ensureAnnotationOverlayRegistered(): void {
   overlayRegistered = true;
   registerOverlay({
     name: ANNOTATION_OVERLAY,
-    totalStep: 3,
+    totalStep: 1,
     lock: true,
     needDefaultPointFigure: false,
     needDefaultXAxisFigure: false,

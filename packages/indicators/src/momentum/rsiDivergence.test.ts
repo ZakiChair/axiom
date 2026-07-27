@@ -48,6 +48,9 @@ describe("rsiDivergence v2", () => {
     expect(rsiDivergence.inputs.map((i) => i.key)).toEqual([
       "length", "source", "gauche", "droite", "maxEcart", "cachees",
     ]);
+    // `precision` est OPTIONNEL dans la fabrique (`if (spec.precision !== undefined)`) :
+    // sans cette assertion, un oubli de report du champ passerait inaperçu.
+    expect(rsiDivergence.precision).toBe(2);
   });
 
   it("câblage : série = rsiOf(source, length), annotations = moteur commun sur le RSI", () => {

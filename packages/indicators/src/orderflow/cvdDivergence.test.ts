@@ -79,7 +79,7 @@ describe("cvdDivergence v2", () => {
     expect(r.annotations ?? {}).toEqual(attendu);
     // Garde-fou anti-tautologie : la fixture produit RÉELLEMENT une divergence
     // (sinon `attendu` serait {} et l'égalité ci-dessus passerait sans rien vérifier).
-    expect(Object.keys(attendu).length).toBeGreaterThan(0);
+    expect(attendu.segments?.length ?? 0).toBeGreaterThan(0);
   });
 
   it("dégradation : bougies sans champs taker → CVD plat à 0, aucune annotation", () => {

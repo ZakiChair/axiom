@@ -7,8 +7,8 @@
  * label « Div ▲/▼ » au pivot d'arrivée (régulières seulement — les cachées se
  * lisent au pointillé et au tooltip, anti-encombrement), texte `info` FR partagé.
  *
- * Conventions héritées de placerPointsDivergence : la famille HAUSSIÈRE se lit
- * sur les creux (lows), la BAISSIÈRE sur les sommets (highs) ; chaque appel à
+ * Convention de lecture des familles : la HAUSSIÈRE se lit sur les creux (lows),
+ * la BAISSIÈRE sur les sommets (highs) ; chaque appel à
  * detecterDivergences calcule aussi l'autre famille sur la même série — on la
  * filtre. Anti-repaint hérité de detecterPivots (droite barres de confirmation).
  */

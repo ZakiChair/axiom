@@ -830,7 +830,7 @@ export function ChartInstance({
     const teardownData = (): void => {
       if (cancelled) return;
       cancelled = true;
-      indicators.disposeThrottle();
+      indicators.dispose();
       unsubscribeIndicators();
       unsubscribeRefSymbol();
       unsubscribePriceScale();

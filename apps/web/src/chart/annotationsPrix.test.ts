@@ -92,6 +92,16 @@ describe("AnnotationsPrix", () => {
     expect(chart.crees.length).toBe(2); // rien de nouveau
   });
 
+  it("retirerTout : retire les overlays de TOUTES les instances suivies (démontage du chart)", () => {
+    ann.appliquer("inst1", defSepare, ANNOTS as never, candles);
+    ann.appliquer("inst2", defSepare, ANNOTS as never, candles);
+    ann.retirerTout();
+    expect(chart.retires).toEqual(["ov-0", "ov-1", "ov-2", "ov-3"]);
+    // Suivi vidé : un second appel ne retente rien (chart potentiellement détruit).
+    ann.retirerTout();
+    expect(chart.retires.length).toBe(4);
+  });
+
   it("def overlay : AUCUN overlay (le draw du candle_pane s'en charge)", () => {
     ann.appliquer("inst1", defOverlay, ANNOTS as never, candles);
     expect(chart.crees.length).toBe(0);

@@ -73,11 +73,17 @@ function tooltip(): HTMLDivElement {
   return el;
 }
 
+/**
+ * `pageX`/`pageY` sont des coordonnées DOCUMENT (origine = haut-gauche du document,
+ * défilement inclus) alors que la div est en `position: fixed`, dont l'origine est le
+ * VIEWPORT : sans retrancher le défilement, le tooltip se décale de la hauteur/largeur
+ * scrollée dès que le document défile. D'où `- window.scrollX/scrollY`.
+ */
 export function afficherTooltipAnnotation(texte: string, pageX: number, pageY: number): void {
   const el = tooltip();
   el.textContent = texte;
-  el.style.left = `${pageX + 12}px`;
-  el.style.top = `${pageY + 12}px`;
+  el.style.left = `${pageX - window.scrollX + 12}px`;
+  el.style.top = `${pageY - window.scrollY + 12}px`;
   el.style.display = "block";
 }
 

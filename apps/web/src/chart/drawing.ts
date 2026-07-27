@@ -559,9 +559,13 @@ export function purgeChartDrawings(chart: KLineChartInstance): void {
 /** « Effacer tout » : retire TOUS les overlays de dessin de l'instance FOCUS. */
 export function clearAllOverlays(): void {
   if (activeChart === null) return;
-  // Sans argument, removeOverlay supprime tous les overlays. Sûr ici : les
+  // Sans argument, removeOverlay supprime tous les overlays. Les SÉRIES des
   // indicateurs @axiom et le CVD orderflow passent par `createIndicator` (système
-  // distinct), jamais par `createOverlay` — ils ne sont donc pas affectés.
+  // distinct) — elles ne sont pas affectées. En revanche, depuis le lot v2.1, les
+  // ANNOTATIONS cible "prix" des defs à pane séparé (segments/labels de divergence,
+  // cf. annotationsPrix.ts) sont bien des overlays : « Effacer tout » les balaie
+  // aussi. Comportement ASSUMÉ — elles se rejouent au prochain recompute (~1,5 s),
+  // et leur suivi par ids se resynchronise seul au rejeu suivant.
   activeChart.removeOverlay();
   // Vide aussi la map vivante + le stockage de l'instance (au cas où des overlays
   // n'auraient pas déclenché onRemoved).

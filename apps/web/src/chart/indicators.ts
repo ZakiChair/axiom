@@ -33,7 +33,7 @@ import type { Candle, ExchangeId, IndicatorDef, IndicatorResult, Timeframe } fro
 import { computeIndicator, getIndicator } from "@axiom/indicators";
 import { serieCanvas } from "../lib/canvasTokens";
 import { dessinerAnnotationsPane } from "./annotationsPane";
-import { AnnotationsPrix } from "./annotationsPrix";
+import { AnnotationsPrix, masquerTooltipAnnotation } from "./annotationsPrix";
 import { auxProvider } from "./auxProvider";
 import {
   computeKey,
@@ -486,5 +486,20 @@ export class ChartIndicators {
       clearTimeout(this.pending);
       this.pending = null;
     }
+  }
+
+  /**
+   * Teardown complet du contrôleur (cleanup de l'effet DONNÉES) : trailing annulé,
+   * overlays d'annotations retirés et tooltip flottant masqué. Les overlays doivent
+   * partir tant que le chart est VIVANT — `teardownData` s'exécute avant `dispose(chart)`.
+   * Appelé aussi à chaque changement exchange/symbole/TF (l'effet DONNÉES rejoue) :
+   * les annotations de l'ancien actif disparaissent, le recompute suivant les repose.
+   * Le tooltip est une div singleton au niveau du document, jamais retirée par
+   * `removeOverlay` : sans ce masquage elle resterait affichée après le démontage.
+   */
+  dispose(): void {
+    this.disposeThrottle();
+    this.annotationsPrix.retirerTout();
+    masquerTooltipAnnotation();
   }
 }

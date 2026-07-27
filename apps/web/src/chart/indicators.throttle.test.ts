@@ -82,7 +82,9 @@ describe("ChartIndicators.recomputeThrottled", () => {
     expect(recomputeSpy).toHaveBeenCalledTimes(2); // rien de plus : aucun trailing en attente
   });
 
-  it("disposeThrottle annule un trailing en attente", () => {
+  it("dispose (teardown de l'effet DONNÉES) annule un trailing en attente", () => {
+    // `dispose` délègue à `disposeThrottle` puis retire les overlays d'annotations et
+    // masque le tooltip — c'est le point d'entrée réellement câblé dans ChartInstance.
     vi.useFakeTimers();
     vi.setSystemTime(1_000_000);
     const { indicators, recomputeSpy } = makeIndicators();
@@ -91,7 +93,7 @@ describe("ChartIndicators.recomputeThrottled", () => {
     vi.advanceTimersByTime(100);
     indicators.recomputeThrottled(instances, candles, "binance"); // programme un trailing à t=1_000_500
 
-    indicators.disposeThrottle();
+    indicators.dispose();
 
     vi.advanceTimersByTime(1000);
     expect(recomputeSpy).toHaveBeenCalledTimes(1); // le trailing a été annulé, pas de 2e appel

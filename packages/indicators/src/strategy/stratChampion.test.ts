@@ -137,7 +137,7 @@ describe("stratChampion", () => {
       forme: "triangleHaut",
       couleur: "--up",
       cible: "prix",
-      info: "Entrée long 102.00 — cassure du plus-haut Donchian 20 (canal des bougies précédentes)",
+      info: "Entrée long 102.00 — cassure du plus-haut Donchian 20 (canal des bougies précédentes) — stratégie non validée",
     });
   });
 
@@ -159,7 +159,7 @@ describe("stratChampion", () => {
     const sortie = r.annotations?.labels?.find((l) => l.idx === 210);
     expect(sortie?.texte).toBe("+149.71 %");
     expect(sortie?.info).toBe(
-      "Sortie long 254.70 (+149.71 %) — stop trailing 3 × ATR(14) depuis l'extrême, ou cassure directe du canal opposé"
+      "Sortie long 254.70 (+149.71 %) — stop trailing 3 × ATR(14) depuis l'extrême, ou cassure directe du canal opposé — stratégie non validée"
     );
   });
 
@@ -171,7 +171,7 @@ describe("stratChampion", () => {
     const r = computeIndicator(stratChampion, CANDLES, DEFAUTS);
     const entree = r.annotations?.marqueurs?.find((m) => m.idx === 320);
     expect(entree?.info).toBe(
-      "Entrée short 170.70 — cassure du plus-bas Donchian 20 (canal des bougies précédentes)"
+      "Entrée short 170.70 — cassure du plus-bas Donchian 20 (canal des bougies précédentes) — stratégie non validée"
     );
   });
 
@@ -307,16 +307,16 @@ describe("stratChampion — quirk Task 6 : retournement direct sans flat interm�
     const r = computeIndicator(stratChampion, candles, PARAMS);
     expect(r.annotations?.marqueurs).toEqual([
       { idx: 4, valeur: 104.5, forme: "triangleHaut", couleur: "--up", cible: "prix",
-        info: "Entrée long 106.00 — cassure du plus-haut Donchian 3 (canal des bougies précédentes)" },
+        info: "Entrée long 106.00 — cassure du plus-haut Donchian 3 (canal des bougies précédentes) — stratégie non validée" },
       { idx: 10, valeur: 116, forme: "triangleBas", couleur: "--down", cible: "prix",
-        info: "Entrée short 40.00 — cassure du plus-bas Donchian 3 (canal des bougies précédentes)" },
+        info: "Entrée short 40.00 — cassure du plus-bas Donchian 3 (canal des bougies précédentes) — stratégie non validée" },
     ]);
     // La sortie du long PARTAGE l'idx 10 avec l'entrée du short ci-dessus —
     // c'est exactement le quirk : un flat forcé aurait décalé sortie et
     // entrée sur deux bougies distinctes.
     expect(r.annotations?.labels).toEqual([
       { idx: 10, valeur: 116, texte: "-62.26 %", couleur: "--down", cible: "prix", position: "dessus",
-        info: "Sortie long 40.00 (-62.26 %) — stop trailing 1 × ATR(3) depuis l'extrême, ou cassure directe du canal opposé" },
+        info: "Sortie long 40.00 (-62.26 %) — stop trailing 1 × ATR(3) depuis l'extrême, ou cassure directe du canal opposé — stratégie non validée" },
     ]);
   });
 });

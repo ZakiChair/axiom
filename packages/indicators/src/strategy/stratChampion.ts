@@ -1,7 +1,7 @@
 /**
  * @axiom/indicators — strategy/stratChampion.ts
  *
- * Stratégie champion (backtest) — recopie PARAMÉTRÉE du candidat classé no 1
+ * Champion relatif (non validée) — recopie PARAMÉTRÉE du candidat classé no 1
  * de la campagne de sélection (Task 6, `candDonchianTrailing` dans
  * `candidatsChampion.ts` — voir ce fichier pour la version à constantes
  * figées) : cassure du canal Donchian (défaut `canal` 20 bougies
@@ -62,7 +62,7 @@ import { closeOf, highOf, lowOf, rma, rollingHighest, rollingLowest, trueRange }
 
 export const stratChampion = defStrategie({
   id: "stratChampion",
-  name: "Stratégie champion (backtest)",
+  name: "Champion relatif (non validée)",
   inputsStrategie: [
     { key: "canal", name: "Canal Donchian (bougies)", type: "number", default: 20, min: 2 },
     { key: "atrLength", name: "Période ATR", type: "number", default: 14, min: 1 },
@@ -115,9 +115,13 @@ export const stratChampion = defStrategie({
     }
     return out;
   },
+  // La réserve du verdict est répétée dans CHAQUE libellé : entrée, sortie et
+  // segment de trade sont trois cibles de survol DISTINCTES — un utilisateur qui
+  // ne survole que les marqueurs d'entrée ne doit pas rater le statut, surtout
+  // avec les « +0.76 % » peints à côté. Suffixe court pour ne pas noyer la règle.
   libelles: (params) => ({
-    long: `cassure du plus-haut Donchian ${params.canal} (canal des bougies précédentes)`,
-    short: `cassure du plus-bas Donchian ${params.canal} (canal des bougies précédentes)`,
-    sortie: `stop trailing ${params.multAtr} × ATR(${params.atrLength}) depuis l'extrême, ou cassure directe du canal opposé`,
+    long: `cassure du plus-haut Donchian ${params.canal} (canal des bougies précédentes) — stratégie non validée`,
+    short: `cassure du plus-bas Donchian ${params.canal} (canal des bougies précédentes) — stratégie non validée`,
+    sortie: `stop trailing ${params.multAtr} × ATR(${params.atrLength}) depuis l'extrême, ou cassure directe du canal opposé — stratégie non validée`,
   }),
 });

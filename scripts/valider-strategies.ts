@@ -169,17 +169,38 @@ const cmp = (gauche: Operande, comparateur: ">" | ">=" | "<" | "<=", droite: Ope
 /**
  * Équivalents déclaratifs des six stratégies EXPRIMABLES (spec §3), avec les
  * MÊMES défauts que les defs. `fidelite` documente ce que le modèle déclaratif
- * ne sait PAS reproduire : les règles sont des listes conjonctives (ET), donc
- * toute sortie « A OU B » est hors de portée. Ces écarts sont reportés tels
- * quels dans le rapport — l'approximation est une mesure, pas un détail caché.
+ * ne sait PAS reproduire. Deux limites structurelles le contraignent :
+ *
+ *  1. **Les règles sont conjonctives (ET)** : toute sortie « A OU B » est hors
+ *     de portée (c'est ce qui bride `stratMmAdx` et `stratBollingerReversion`).
+ *  2. **`croisement` est un ÉVÉNEMENT d'UNE barre, et le retournement n'est pas
+ *     instantané** (`engine.ts` : « pas de réouverture sur la même barre »).
+ *     Dans un système `les-deux`, `reglesEntree` sert à la fois à OUVRIR long et
+ *     à FERMER short (et `reglesSortie` l'inverse) : après une clôture, le
+ *     croisement qui vient de la provoquer est déjà consommé, et le prochain
+ *     signal tirable est celui du MÊME côté qu'à l'origine — le système se
+ *     VERROUILLE sur la première jambe déclenchée. Mesuré sur BTCUSDT 1h :
+ *     `stratCroisementMM` en croisements donne 397 trades dont **0 long**, et
+ *     `stratMacdCross` 695 trades dont **0 short**.
+ *     → Pour les stratégies dont le def chart décrit un ÉTAT continu (signe de
+ *     `rapide − lente`, MACD vs signal, direction Supertrend), l'équivalent
+ *     correct est une **comparaison de NIVEAU**, pas un croisement : le niveau
+ *     est encore vrai à la barre suivante, donc le retournement a bien lieu.
+ *     Les deux stratégies dont le def décrit un vrai FRANCHISSEMENT
+ *     (`stratRsiReversion`, `stratBollingerReversion` — toutes deux `long`,
+ *     donc sans jambe à verrouiller) gardent leurs `croisement`.
+ *
+ * Ces écarts sont reportés tels quels dans le rapport — l'approximation est une
+ * mesure, pas un détail caché.
  */
 const EXPRIMABLES: ReadonlyArray<{ id: string; def: StrategieDef; fidelite: string }> = [
   {
     id: "stratCroisementMM",
-    fidelite: "fidèle (EMA 9/21, retournement symétrique)",
+    fidelite:
+      "fidèle : conditions de NIVEAU (signe de EMA 9 − EMA 21), qui reproduisent l'ÉTAT continu du def",
     def: {
-      reglesEntree: [croise(ema(9), ema(21), "hausse")],
-      reglesSortie: [croise(ema(9), ema(21), "baisse")],
+      reglesEntree: [cmp(ema(9), ">", ema(21))],
+      reglesSortie: [cmp(ema(9), "<", ema(21))],
       direction: "les-deux",
       tailleFixe: TAILLE_FIXE,
     },
@@ -196,17 +217,19 @@ const EXPRIMABLES: ReadonlyArray<{ id: string; def: StrategieDef; fidelite: stri
   },
   {
     id: "stratMacdCross",
-    fidelite: "fidèle (MACD 12/26/9, retournement symétrique)",
+    fidelite:
+      "fidèle : conditions de NIVEAU (MACD 12/26/9 vs sa ligne de signal), qui reproduisent l'ÉTAT continu du def",
     def: {
-      reglesEntree: [croise(ind("macd", { fast: 12, slow: 26, signal: 9 }, "macd"), ind("macd", { fast: 12, slow: 26, signal: 9 }, "signal"), "hausse")],
-      reglesSortie: [croise(ind("macd", { fast: 12, slow: 26, signal: 9 }, "macd"), ind("macd", { fast: 12, slow: 26, signal: 9 }, "signal"), "baisse")],
+      reglesEntree: [cmp(ind("macd", { fast: 12, slow: 26, signal: 9 }, "macd"), ">", ind("macd", { fast: 12, slow: 26, signal: 9 }, "signal"))],
+      reglesSortie: [cmp(ind("macd", { fast: 12, slow: 26, signal: 9 }, "macd"), "<", ind("macd", { fast: 12, slow: 26, signal: 9 }, "signal"))],
       direction: "les-deux",
       tailleFixe: TAILLE_FIXE,
     },
   },
   {
     id: "stratSupertrend",
-    fidelite: "fidèle (direction Supertrend 10 ×3, retournement symétrique)",
+    fidelite:
+      "fidèle : déjà en NIVEAU (direction du Supertrend 10 ×3) — 217 longs / 218 shorts sur BTCUSDT 1h, la parité attendue d'un système à retournement",
     def: {
       reglesEntree: [cmp(ind("supertrend", { period: 10, multiplier: 3 }, "direction"), ">", cst(0))],
       reglesSortie: [cmp(ind("supertrend", { period: 10, multiplier: 3 }, "direction"), "<", cst(0))],
@@ -226,10 +249,11 @@ const EXPRIMABLES: ReadonlyArray<{ id: string; def: StrategieDef; fidelite: stri
   },
   {
     id: "stratMmAdx",
-    fidelite: "APPROXIMATION : le flat FORCÉ quand ADX < 25 est inexprimable (règles conjonctives) — ici l'ADX ne filtre que les ENTRÉES",
+    fidelite:
+      "APPROXIMATION : l'ADX ≥ 25 est exigé des DEUX côtés (comme le def, qui gate l'état entier) — mais parce que les règles sont conjonctives, il gate aussi la CLÔTURE : une position est TENUE tant que le signal opposé ne coïncide pas avec ADX ≥ 25, là où le def la couperait à plat dès ADX < 25. Le flat FORCÉ est donc l'écart résiduel, et il va dans le sens d'une SURESTIMATION de la durée des positions",
     def: {
-      reglesEntree: [croise(ema(9), ema(21), "hausse"), cmp(ind("adx", { length: 14 }, "adx"), ">=", cst(25))],
-      reglesSortie: [croise(ema(9), ema(21), "baisse"), cmp(ind("adx", { length: 14 }, "adx"), ">=", cst(25))],
+      reglesEntree: [cmp(ema(9), ">", ema(21)), cmp(ind("adx", { length: 14 }, "adx"), ">=", cst(25))],
+      reglesSortie: [cmp(ema(9), "<", ema(21)), cmp(ind("adx", { length: 14 }, "adx"), ">=", cst(25))],
       direction: "les-deux",
       tailleFixe: TAILLE_FIXE,
     },
@@ -545,7 +569,7 @@ function construireRapport(cellules: ResultatCellule[], partiel: boolean): strin
         .sort((a, b) => b.expectancyMediane - a.expectancyMediane)
         .map((x) => [
           `\`${x.id}\``,
-          x.passe ? "✅ tous" : "❌",
+          x.passe ? (partiel ? "✅ (cellules calculées seulement)" : "✅ tous") : "❌",
           fmt(x.expectancyMediane, 3),
           x.nbTradesTotal,
           x.echecs.length === 0 ? "—" : x.echecs.join(" ; "),
@@ -555,7 +579,17 @@ function construireRapport(cellules: ResultatCellule[], partiel: boolean): strin
 
   const retenus = v.filter((x) => x.passe).sort((a, b) => b.expectancyMediane - a.expectancyMediane);
   const relatif = [...v].sort((a, b) => b.expectancyMediane - a.expectancyMediane)[0];
-  if (retenus.length > 0) {
+  if (partiel) {
+    // `verdicts()` n'itère que les cellules CALCULÉES : sur un run partiel, un
+    // « ✅ tous » ne veut dire « tous les critères » que pour les cellules
+    // présentes. Déclarer un champion ici contredirait le bandeau du haut.
+    parts.push(
+      `**Verdict non calculable — ${cellules.length} cellule(s) sur ${CELLULES.length}.** Les ` +
+        "critères pré-déclarés portent sur les QUATRE cellules : le tableau ci-dessus ne vaut " +
+        "que comme contrôle de tuyauterie, aucun champion n'est désigné. Relancer sans " +
+        "`--cellules` pour trancher."
+    );
+  } else if (retenus.length > 0) {
     const gagnant = retenus[0]!;
     parts.push(
       `**Champion : \`${gagnant.id}\`** (${gagnant.nom}) — ${gagnant.regle}. ` +

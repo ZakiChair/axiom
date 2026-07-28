@@ -201,6 +201,7 @@ import { stratSqueezeBreakout } from "./strategy/stratSqueezeBreakout";
 import { stratIchimokuKumo } from "./strategy/stratIchimokuKumo";
 import { stratMmAdx } from "./strategy/stratMmAdx";
 import { stratPsar } from "./strategy/stratPsar";
+import { stratChampion } from "./strategy/stratChampion";
 
 export const INDICATORS: IndicatorDef[] = [
   // trend
@@ -385,6 +386,7 @@ export const INDICATORS: IndicatorDef[] = [
   stratIchimokuKumo,
   stratMmAdx,
   stratPsar,
+  stratChampion,
 ];
 
 export function getIndicator(id: string): IndicatorDef | undefined {

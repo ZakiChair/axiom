@@ -28,3 +28,6 @@ apps/web/.playwright/
 
 # Venv Python de l'oracle golden (pandas-ta-classic) — jamais committé, voir scripts/golden/README.md
 scripts/golden/.venv/
+
+# Cache de klines Binance de la campagne de backtest — données brutes, jamais committées
+scripts/.cache-klines/

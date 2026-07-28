@@ -1,7 +1,7 @@
 /**
  * @axiom/indicators — strategy/stratChampion.ts
  *
- * Champion relatif (non validée) — recopie PARAMÉTRÉE du candidat classé no 1
+ * Champion relatif (non validé) — recopie PARAMÉTRÉE du candidat classé no 1
  * de la campagne de sélection (Task 6, `candDonchianTrailing` dans
  * `candidatsChampion.ts` — voir ce fichier pour la version à constantes
  * figées) : cassure du canal Donchian (défaut `canal` 20 bougies
@@ -62,7 +62,7 @@ import { closeOf, highOf, lowOf, rma, rollingHighest, rollingLowest, trueRange }
 
 export const stratChampion = defStrategie({
   id: "stratChampion",
-  name: "Champion relatif (non validée)",
+  name: "Champion relatif (non validé)",
   inputsStrategie: [
     { key: "canal", name: "Canal Donchian (bougies)", type: "number", default: 20, min: 2 },
     { key: "atrLength", name: "Période ATR", type: "number", default: 14, min: 1 },

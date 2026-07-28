@@ -4,8 +4,8 @@
  *     params ; boutons dupliquer / éditer / retirer, éditeur de params inline) ;
  *  2. le CATALOGUE des indicateurs du registre @axiom/indicators (compteur live),
  *     groupé par catégorie en sections repliables et filtrable par recherche.
- *     Ordre des catégories orienté crypto : Stratégies → Order Flow → Volume →
- *     Dérivés d'abord.
+ *     Ordre des catégories orienté crypto : Order Flow → Volume → Dérivés
+ *     d'abord. Les stratégies ont leur propre menu (foyer exclusif).
  *
  * MULTI-INSTANCES : cliquer un indicateur du catalogue AJOUTE une nouvelle instance
  * aux params par défaut (EMA(20) puis EMA(50) coexistent). L'état vient du
@@ -30,7 +30,6 @@ export const INDICATEURS_ANALYSE = INDICATORS.filter((d) => d.category !== "stra
 
 /** Libellés FR des catégories + ordre d'affichage. */
 const CATEGORY_LABELS: Partial<Record<IndicatorCategory, string>> = {
-  strategy: "Stratégies",
   orderflow: "Order Flow",
   volume: "Volume",
   derivatives: "Dérivés",
@@ -44,12 +43,11 @@ const CATEGORY_LABELS: Partial<Record<IndicatorCategory, string>> = {
 };
 
 /**
- * Ordre DA crypto-first : les stratégies (setups actionnables) en tête, puis
- * l'edge (orderflow / volume / dérivés), avant le catalogue technique classique —
- * cohérent avec le positionnement AXIOM.
+ * Ordre DA crypto-first : l'edge (orderflow / volume / dérivés) en tête, avant
+ * le catalogue technique classique — cohérent avec le positionnement AXIOM.
+ * `strategy` est absent : filtré en amont par `INDICATEURS_ANALYSE`.
  */
 const CATEGORY_ORDER: IndicatorCategory[] = [
-  "strategy",
   "orderflow",
   "volume",
   "derivatives",

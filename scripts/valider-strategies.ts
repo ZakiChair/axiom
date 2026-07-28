@@ -251,7 +251,7 @@ const EXPRIMABLES: ReadonlyArray<{ id: string; def: StrategieDef; fidelite: stri
   {
     id: "stratSupertrend",
     fidelite:
-      "fidèle : déjà en NIVEAU (direction du Supertrend 10 ×3) — 217 longs / 218 shorts sur BTCUSDT 1h, la parité attendue d'un système à retournement",
+      "fidèle : déjà en NIVEAU (direction du Supertrend 10 ×3) — longs et shorts ressortent à parité, comme attendu d'un système à retournement",
     def: {
       reglesEntree: [cmp(ind("supertrend", { period: 10, multiplier: 3 }, "direction"), ">", cst(0))],
       reglesSortie: [cmp(ind("supertrend", { period: 10, multiplier: 3 }, "direction"), "<", cst(0))],
@@ -408,7 +408,11 @@ function verdicts(cellules: ResultatCellule[]): VerdictCandidat[] {
       const r = cel.candidats.find((c) => c.id === cand.id);
       if (r === undefined) continue;
       const cle = `${cel.symbol} ${cel.tf}`;
-      expectancies.push(r.m.global.expectancy);
+      // Une cellule VIDE n'a rien mesuré : son expectancy 0 (valeur neutre de
+      // `StatsRejeu`) n'a pas à peser dans la médiane de départage — l'échec est
+      // déjà porté par `echecBloc`, l'injecter fausserait le seul chiffre qui
+      // sépare deux candidats recalés.
+      if (r.m.global.nbTrades > 0) expectancies.push(r.m.global.expectancy);
       nbTradesTotal += r.m.global.nbTrades;
       for (const e of [
         echecBloc(cle, r.m.global),
@@ -502,6 +506,10 @@ function construireRapport(cellules: ResultatCellule[], partiel: boolean): strin
         "coût d'exécution.",
       "- **Signes** : `DD max` du rejeu est NÉGATIF (retracement de l'equity composée) ; " +
         "celui de la contre-épreuve est POSITIF (convention `StatsBacktest`).",
+      "- **`Win %` : deux définitions, une par section** — le rejeu compte gagnant tout " +
+        "trade à `pnlPct >= 0` (`statsRejeu.ts` : un trade NUL est rangé en gagnant), la " +
+        "contre-épreuve exige `pnl > 0` (`engine.ts`). Les deux colonnes ne sont donc pas " +
+        "strictement comparables entre sections 1/3 et section 2.",
       "- **Comparabilité des expectancies** : celle du rejeu est une variation de PRIX en % ; " +
         "celle de la contre-épreuve est le PnL net rapporté au notionnel engagé. À taille " +
         "fixe et sans levier (quantité = taille / prix d'entrée), les deux dénominateurs " +
@@ -566,7 +574,7 @@ function construireRapport(cellules: ResultatCellule[], partiel: boolean): strin
   parts.push("**Fidélité des équivalents déclaratifs** (ce que le modèle ne reproduit pas) :");
   parts.push(EXPRIMABLES.map((e) => `- \`${e.id}\` — ${e.fidelite}`).join("\n"));
 
-  parts.push("## 3. Candidats champion");
+  parts.push("## 3. Candidats champion (hors frais)");
   parts.push(
     tableau(
       ["Candidat", "Règle (params figés)"],

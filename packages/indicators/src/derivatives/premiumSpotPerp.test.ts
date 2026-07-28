@@ -23,9 +23,9 @@ function candles100(n: number): Candle[] {
 const mark = [100, 100, 100, 100.1, 100.1, 100.1, 100.1, 99.9, 99.9, 99.9];
 
 describe("premiumSpotPerp", () => {
-  it("contrat : overlay derivatives, aux mark, sortie ligne mark, input seuilPct", () => {
+  it("contrat : overlay strategy, aux mark, sortie ligne mark, input seuilPct", () => {
     expect(premiumSpotPerp.pane).toBe("overlay");
-    expect(premiumSpotPerp.category).toBe("derivatives");
+    expect(premiumSpotPerp.category).toBe("strategy");
     expect(premiumSpotPerp.aux).toEqual(["mark"]);
     expect(premiumSpotPerp.minTimeframe).toBe("15m");
     expect(premiumSpotPerp.outputs).toEqual([{ key: "mark", name: "Mark perp", style: "line" }]);

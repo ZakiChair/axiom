@@ -244,7 +244,7 @@ describe("cvdSpotPerp", () => {
 
   it("métadonnées conformes à la spec", () => {
     expect(cvdSpotPerp.id).toBe("cvdSpotPerp");
-    expect(cvdSpotPerp.category).toBe("orderflow");
+    expect(cvdSpotPerp.category).toBe("strategy");
     expect(cvdSpotPerp.pane).toBe("separate");
     expect(cvdSpotPerp.aux).toEqual(["perpDelta"]);
     expect(cvdSpotPerp.precision).toBe(2);

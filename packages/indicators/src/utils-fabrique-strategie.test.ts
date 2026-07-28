@@ -48,6 +48,17 @@ describe("defStrategie", () => {
     expect(def.inputs.map((i) => i.key)).toEqual(["lignesTrades"]);
   });
 
+  it("ordre des inputs : propres inputsStrategie AVANT lignesTrades (inputsStrategie non vide)", () => {
+    const def = defStrategie({
+      id: "stratTestOrdre",
+      name: "Stratégie test ordre",
+      inputsStrategie: [{ key: "x", name: "X", type: "number", default: 1 }],
+      position: () => ETATS,
+      libelles: () => ({ long: "règle long", short: "règle short", sortie: "règle sortie" }),
+    });
+    expect(def.inputs.map((i) => i.key)).toEqual(["x", "lignesTrades"]);
+  });
+
   it("événements aux transitions : entrée short, sortie avec PnL, entrée long en cours", () => {
     const r = computeIndicator(defAvec(ETATS), candles);
     expect(r.annotations?.marqueurs).toEqual([
@@ -73,6 +84,7 @@ describe("defStrategie", () => {
     const r = computeIndicator(defAvec(ETATS), candles, { lignesTrades: false });
     expect(r.annotations?.segments).toBeUndefined();
     expect(r.annotations?.marqueurs?.length).toBe(2);
+    expect(r.annotations?.labels?.length).toBe(1);
   });
 
   it("aucun événement sur la dernière bougie (transition à n−1 ignorée)", () => {
@@ -83,11 +95,17 @@ describe("defStrategie", () => {
     expect(r.series["prixEntree"]).toEqual(new Array(12).fill(undefined)); // aucun trade réel ouvert
   });
 
-  it("undefined au milieu = maintien (pas de sortie fantôme)", () => {
+  it("undefined au milieu = maintien (pas de sortie fantôme) : label de sortie LONG complet", () => {
+    // entrée long i=1 @ close[1]=101 ; sortie long i=6 @ close[6]=104 (undefined en i=3 = maintien).
+    // PnL = (104−101)/101×100 = +2.9702... → « +2.97 % » (gagnant, --up) ; label AU-DESSUS
+    // (position "dessus", valeur = high[6] = 105) car sortie de LONG.
     const etats: Array<EtatStrategie | undefined> = [0, 1, 1, undefined, 1, 1, 0, 0, 0, 0, 0, 0];
     const r = computeIndicator(defAvec(etats), candles);
     expect(r.annotations?.marqueurs?.length).toBe(1); // une seule entrée (i=1)
-    expect(r.annotations?.labels?.length).toBe(1);    // une seule sortie (i=6)
+    expect(r.annotations?.labels).toEqual([
+      { idx: 6, valeur: 105, texte: "+2.97 %", couleur: "--up", cible: "prix", position: "dessus",
+        info: "Sortie long 104.00 (+2.97 %) — règle sortie" },
+    ]);
   });
 
   it("cap MAX_TRADES_ANNOTES : seuls les 60 derniers trades portent des annotations", () => {

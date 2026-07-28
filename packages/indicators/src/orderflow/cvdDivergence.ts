@@ -22,7 +22,7 @@ import { cvdOf } from "./cvd";
 export const cvdDivergence = defDivergenceOscillateur({
   id: "cvdDivergence",
   name: "CVD Divergence",
-  category: "orderflow",
+  category: "strategy",
   precision: 0,
   serieOsc: { key: "cvd", name: "CVD" },
   inputsOsc: [],

@@ -137,7 +137,7 @@ function normaliserJambe(
 export const cvdSpotPerp: IndicatorDef = {
   id: "cvdSpotPerp",
   name: "CVD Spot vs Perp",
-  category: "orderflow",
+  category: "strategy",
   pane: "separate",
   aux: ["perpDelta"],
   inputs: [

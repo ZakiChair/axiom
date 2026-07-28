@@ -16,7 +16,7 @@ import { rsiOf } from "./rsi";
 export const rsiDivergence = defDivergenceOscillateur({
   id: "rsiDivergence",
   name: "RSI Divergence",
-  category: "momentum",
+  category: "strategy",
   precision: 2,
   serieOsc: { key: "rsi", name: "RSI" },
   inputsOsc: [

@@ -226,6 +226,8 @@ export type IndicatorCategory =
   | "derivatives"
   // Indicateurs cross-asset (rendements log vs symbole de référence) : corrélation, bêta, spread z-score.
   | "statistical"
+  // Stratégies : setups de trade et signaux d'entrée/sortie (divergences, croisements, breakouts).
+  | "strategy"
   | "custom";
 
 export type IndicatorPane = "overlay" | "separate";

@@ -26,7 +26,7 @@ function fmtSigne(v: number): string {
 export const premiumSpotPerp: IndicatorDef = {
   id: "premiumSpotPerp",
   name: "Prime spot-perp",
-  category: "derivatives",
+  category: "strategy",
   pane: "overlay",
   aux: ["mark"],
   minTimeframe: "15m",

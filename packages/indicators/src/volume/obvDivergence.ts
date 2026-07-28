@@ -16,7 +16,7 @@ import { obvOf } from "./obv";
 export const obvDivergence = defDivergenceOscillateur({
   id: "obvDivergence",
   name: "OBV Divergence",
-  category: "volume",
+  category: "strategy",
   precision: 0,
   serieOsc: { key: "obv", name: "OBV" },
   inputsOsc: [],

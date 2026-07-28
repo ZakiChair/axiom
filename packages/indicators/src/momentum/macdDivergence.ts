@@ -13,7 +13,7 @@ import { macdOf } from "../trend/macd";
 export const macdDivergence = defDivergenceOscillateur({
   id: "macdDivergence",
   name: "MACD Divergence",
-  category: "momentum",
+  category: "strategy",
   precision: 4,
   serieOsc: { key: "osc", name: "MACD" },
   inputsOsc: [

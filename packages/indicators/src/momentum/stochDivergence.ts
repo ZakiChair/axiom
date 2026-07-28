@@ -14,7 +14,7 @@ import { smaOfDefined, stochKOf } from "./stochastic";
 export const stochDivergence = defDivergenceOscillateur({
   id: "stochDivergence",
   name: "Stochastic Divergence",
-  category: "momentum",
+  category: "strategy",
   precision: 2,
   serieOsc: { key: "k", name: "Stoch %K" },
   inputsOsc: [

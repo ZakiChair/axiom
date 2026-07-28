@@ -12,6 +12,7 @@ const VALID_CATEGORIES = new Set<IndicatorCategory>([
   "billwilliams",
   "support_resistance",
   "derivatives",
+  "strategy",
   "custom",
 ]);
 
@@ -38,5 +39,13 @@ describe("registry", () => {
 
   it("renvoie undefined pour un id inconnu", () => {
     expect(getIndicator("__inexistant__")).toBeUndefined();
+  });
+
+  it("catégorie strategy : les 8 defs v2.1 déplacés", () => {
+    const strategie = INDICATORS.filter((def) => def.category === "strategy").map((d) => d.id);
+    expect(strategie.sort()).toEqual([
+      "cvdDivergence", "cvdSpotPerp", "macdDivergence", "mfiDivergence",
+      "obvDivergence", "premiumSpotPerp", "rsiDivergence", "stochDivergence",
+    ]);
   });
 });

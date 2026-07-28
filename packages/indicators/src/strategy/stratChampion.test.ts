@@ -14,12 +14,7 @@
  * la même série d'états, bougie par bougie, que `candDonchianTrailing`. Cette
  * égalité stricte détecte les dérives de traduction (ratchet retiré, formule
  * ATR différente, bornes de comparaison assouplies, etc. — vérifié
- * empiriquement : retirer le ratchet de `extreme` fait échouer cette
- * égalité). L'ORDRE d'évaluation (trailing avant cassure) n'est PAS discriminé
- * par cette égalité ni par la fixture dédiée plus bas — vérifié empiriquement
- * aussi (un mutant qui inverse l'ordre passe les deux) : il est garanti par
- * fidélité STRUCTURELLE (diff ligne-à-ligne contre `positionDonchianTrailing`,
- * revu en review avant commit), pas par un test comportemental.
+ * empiriquement : retirer le ratchet de `extreme` fait échouer cette égalité).
  *
  * En complément :
  *  - recomposition indépendante (cœurs importés directement) aux trois points
@@ -29,6 +24,15 @@
  *    varier `canal`/`atrLength`/`multAtr` doit changer le comportement (une
  *    régression qui réintroduirait des littéraux 20/14/3 en dur passerait
  *    inaperçue sans ce test) ;
+ *  - mutation-kill de l'ORDRE d'évaluation lui-même (trailing avant cassure) :
+ *    une bougie d'ENTRÉE dont la mèche dépasse `multAtr` × ATR (balayage de
+ *    mèche) pin le fait que le bloc trailing ne s'applique QU'À un `etat` déjà
+ *    ±1 EN ENTRANT dans l'itération — sur cette même bougie, le bloc trailing
+ *    est encore inerte (etat=0), donc la cassure ouvre et TIENT ; un mutant
+ *    qui inverserait l'ordre (cassure puis trailing) ouvrirait la position
+ *    PUIS la retesterait avec l'extrême et l'ATR fraîchement gonflés par la
+ *    même bougie, et l'auto-tuerait aussitôt (vérifié empiriquement : réel →
+ *    `etat=1` qui tient, mutant → `etat=0` sur la même bougie) ;
  *  - fixture dédiée, PETITE et intégralement recomposée contre les cœurs, qui
  *    PIN le quirk documenté en Task 6 : sortie trailing puis cassure directe
  *    du canal opposé sur la MÊME bougie → un seul événement « Sortie long +
@@ -203,6 +207,53 @@ describe("stratChampion", () => {
     // Trailing à 1×ATR coupe et re-coupe plusieurs fois là où 3×ATR (défaut)
     // ne bouge qu'une fois — preuve que multAtr change réellement le calcul.
     expect(transitions).toEqual(["120:0->1", "123:1->0", "124:0->1", "203:1->0", "320:0->-1", "321:-1->0"]);
+  });
+
+  it("mutation-kill de l'ORDRE d'évaluation : une entrée en mèche (balayage > multAtr×ATR) OUVRE et TIENT", () => {
+    // canal=3, atrLength=3, multAtr=1. 6 bougies plates de warm-up (chop,
+    // etat=0 silencieux), PUIS une bougie de spike (mèche haute jusqu'à 200,
+    // close 150, loin au-dessus du canal haut ~100.5) : cassure du canal →
+    // ENTRÉE long, extreme = high de CETTE MÊME bougie = 200. L'ATR de CETTE
+    // bougie (RMA(3), true range ≈101) saute lui aussi sur cette même bougie
+    // à ≈34.33, si bien que `extreme − multAtr×ATR = 200 − 34.33 ≈ 165.67`
+    // est DÉJÀ SUPÉRIEUR au close (150) — un stop trailing qui s'appliquerait
+    // à la position tout juste ouverte l'auto-tuerait immédiatement.
+    //
+    // Le code réel ne le fait PAS : le bloc trailing est gardé par `etat===1`
+    // (ou −1), lu AVANT la mise à jour de cette itération — sur la bougie
+    // d'entrée, `etat` vaut encore 0 en entrant dans le bloc, le trailing est
+    // donc inerte, et c'est SEULEMENT le bloc de cassure, exécuté ensuite,
+    // qui pose `etat=1`. Un mutant qui inverserait l'ordre (cassure d'abord,
+    // trailing ensuite) évaluerait le trailing avec le `etat=1` et
+    // l'`extreme=200` FRAÎCHEMENT posés par cette même itération, et
+    // produirait `etat[6]=0` au lieu de `1` — vérifié empiriquement en
+    // inversant les deux blocs dans une copie du fichier (non commitée).
+    const flat: Candle[] = Array.from({ length: 6 }, (_v, i) => ({
+      time: 1_700_000_000_000 + i * 3_600_000, open: 100, high: 100.5, low: 99.5, close: 100, volume: 1,
+    }));
+    const spike: Candle = {
+      time: 1_700_000_000_000 + 6 * 3_600_000, open: 100, high: 200, low: 99, close: 150, volume: 1,
+    };
+    const consolidation: Candle[] = Array.from({ length: 2 }, (_v, i) => ({
+      time: 1_700_000_000_000 + (7 + i) * 3_600_000, open: 150, high: 150.5, low: 149.5, close: 150, volume: 1,
+    }));
+    const followUp: Candle = {
+      time: 1_700_000_000_000 + 9 * 3_600_000, open: 150, high: 150.5, low: 149.5, close: 150, volume: 1,
+    };
+    const candles = [...flat, spike, ...consolidation, followUp];
+    const PARAMS = { canal: 3, atrLength: 3, multAtr: 1 };
+
+    // Recomposition indépendante des seuils cités ci-dessus (cœurs importés) :
+    const hh = rollingHighest(highOf(candles), 3);
+    const atr = rma(trueRange(candles), 3);
+    expect(hh[5]).toBeCloseTo(100.5, 6); // canal haut AVANT le spike
+    expect(closeOf(candles)[6]!).toBeGreaterThan(hh[5]!); // cassure réelle
+    expect(atr[6]).toBeCloseTo(34.3333, 3); // ATR déjà gonflé par le spike lui-même
+    const seuilQuiTueraitLaPosition = highOf(candles)[6]! - PARAMS.multAtr * atr[6]!; // ≈165.67
+    expect(closeOf(candles)[6]!).toBeLessThan(seuilQuiTueraitLaPosition); // sous ce seuil → un mutant s'auto-tuerait ici
+
+    const etats = etatsStrategie("stratChampion", candles, PARAMS);
+    expect(etats?.[6]).toBe(1); // le code réel OUVRE et TIENT (pas 0)
   });
 });
 

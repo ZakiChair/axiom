@@ -20,7 +20,7 @@
  * Les positions précédant la première fenêtre pleine valent `undefined`.
  */
 
-import type { IndicatorDef } from "@axiom/types";
+import type { Candle, IndicatorDef } from "@axiom/types";
 import { highOf, lowOf, closeOf, rollingHighest, rollingLowest } from "../utils";
 
 /** Ligne médiane (« donchian mid ») : (plusHaut + plusBas) / 2 sur `length`. */
@@ -39,6 +39,57 @@ function midline(
     if (h !== undefined && l !== undefined) out[i] = (h + l) / 2;
   }
   return out;
+}
+
+/**
+ * Cœur exporté — réutilisé par les stratégies v2.3. Comportement identique à
+ * l'ancien corps inline de `ichimoku.calc`. PURE.
+ */
+export function ichimokuOf(
+  candles: Candle[],
+  tenkan: number,
+  kijun: number,
+  senkouB: number,
+  displacement: number
+): {
+  tenkan: Array<number | undefined>;
+  kijun: Array<number | undefined>;
+  spanA: Array<number | undefined>;
+  spanB: Array<number | undefined>;
+  chikou: Array<number | undefined>;
+} {
+  const highs = highOf(candles);
+  const lows = lowOf(candles);
+  const closes = closeOf(candles);
+  const n = candles.length;
+
+  const tenkanOut = midline(highs, lows, tenkan);
+  const kijunOut = midline(highs, lows, kijun);
+  const senkouBraw = midline(highs, lows, senkouB);
+
+  // Senkou A brut = (tenkan + kijun) / 2 (avant décalage).
+  const spanAraw: Array<number | undefined> = new Array(n).fill(undefined);
+  for (let i = 0; i < n; i++) {
+    const t = tenkanOut[i];
+    const k = kijunOut[i];
+    if (t !== undefined && k !== undefined) spanAraw[i] = (t + k) / 2;
+  }
+
+  // Décalage vers l'avant (+disp) pour les deux Senkou.
+  const spanA: Array<number | undefined> = new Array(n).fill(undefined);
+  const spanB: Array<number | undefined> = new Array(n).fill(undefined);
+  for (let i = displacement; i < n; i++) {
+    spanA[i] = spanAraw[i - displacement];
+    spanB[i] = senkouBraw[i - displacement];
+  }
+
+  // Chikou = close projeté vers l'arrière (-disp) ; queue laissée undefined.
+  const chikou: Array<number | undefined> = new Array(n).fill(undefined);
+  for (let i = 0; i + displacement < n; i++) {
+    chikou[i] = closes[i + displacement];
+  }
+
+  return { tenkan: tenkanOut, kijun: kijunOut, spanA, spanB, chikou };
 }
 
 export const ichimoku: IndicatorDef = {
@@ -70,38 +121,15 @@ export const ichimoku: IndicatorDef = {
     const pKijun = Number(params.kijun ?? 26);
     const pSenkou = Number(params.senkou ?? 52);
     const disp = Number(params.displacement ?? 26);
-
-    const highs = highOf(candles);
-    const lows = lowOf(candles);
-    const closes = closeOf(candles);
-    const n = candles.length;
-
-    const tenkan = midline(highs, lows, pTenkan);
-    const kijun = midline(highs, lows, pKijun);
-    const senkouBraw = midline(highs, lows, pSenkou);
-
-    // Senkou A brut = (tenkan + kijun) / 2 (avant décalage).
-    const spanAraw: Array<number | undefined> = new Array(n).fill(undefined);
-    for (let i = 0; i < n; i++) {
-      const t = tenkan[i];
-      const k = kijun[i];
-      if (t !== undefined && k !== undefined) spanAraw[i] = (t + k) / 2;
-    }
-
-    // Décalage vers l'avant (+disp) pour les deux Senkou.
-    const spanA: Array<number | undefined> = new Array(n).fill(undefined);
-    const spanB: Array<number | undefined> = new Array(n).fill(undefined);
-    for (let i = disp; i < n; i++) {
-      spanA[i] = spanAraw[i - disp];
-      spanB[i] = senkouBraw[i - disp];
-    }
-
-    // Chikou = close projeté vers l'arrière (-disp) ; queue laissée undefined.
-    const chikou: Array<number | undefined> = new Array(n).fill(undefined);
-    for (let i = 0; i + disp < n; i++) {
-      chikou[i] = closes[i + disp];
-    }
-
-    return { series: { tenkan, kijun, spanA, spanB, chikou } };
+    const r = ichimokuOf(candles, pTenkan, pKijun, pSenkou, disp);
+    return {
+      series: {
+        tenkan: r.tenkan,
+        kijun: r.kijun,
+        spanA: r.spanA,
+        spanB: r.spanB,
+        chikou: r.chikou,
+      },
+    };
   },
 };

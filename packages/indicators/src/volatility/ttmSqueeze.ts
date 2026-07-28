@@ -13,8 +13,58 @@
  * Sorties : `on` (1 = squeeze actif, 0 = relâché), `mom` (histogramme).
  */
 
-import type { IndicatorDef } from "@axiom/types";
+import type { Candle, IndicatorDef } from "@axiom/types";
 import { closeOf, ema, rma, sma, stdev, trueRange } from "../utils";
+
+/**
+ * Cœur exporté — réutilisé par les stratégies v2.3. Comportement identique à
+ * l'ancien corps inline de `ttmSqueeze.calc`. PURE.
+ */
+export function ttmSqueezeOf(
+  candles: Candle[],
+  hlc3: number[],
+  length: number,
+  multBB: number,
+  multKC: number
+): { on: Array<number | undefined>; mom: Array<number | undefined> } {
+  const close = closeOf(candles);
+  const n = candles.length;
+  const on: Array<number | undefined> = new Array(n).fill(undefined);
+  const mom: Array<number | undefined> = new Array(n).fill(undefined);
+
+  const midBB = sma(close, length);
+  const dev = stdev(close, length);
+  const midKC = ema(close, length);
+  // ATR Wilder = RMA(true range) — même construction que volatility/atr.ts.
+  const atrVals = rma(trueRange(candles), length);
+  const midHlc3 = sma(hlc3, length);
+
+  for (let i = 0; i < n; i++) {
+    const mbb = midBB[i];
+    const d = dev[i];
+    const mkc = midKC[i];
+    const a = atrVals[i];
+    const c = close[i];
+    const mh = midHlc3[i];
+    if (
+      mbb === undefined ||
+      d === undefined ||
+      mkc === undefined ||
+      a === undefined ||
+      c === undefined ||
+      mh === undefined
+    ) {
+      continue;
+    }
+    const bbUp = mbb + multBB * d;
+    const bbDn = mbb - multBB * d;
+    const kcUp = mkc + multKC * a;
+    const kcDn = mkc - multKC * a;
+    on[i] = bbUp < kcUp && bbDn > kcDn ? 1 : 0;
+    mom[i] = c - mh;
+  }
+  return { on, mom };
+}
 
 export const ttmSqueeze: IndicatorDef = {
   id: "ttmSqueeze",
@@ -35,42 +85,7 @@ export const ttmSqueeze: IndicatorDef = {
     const length = Number(params.length) || 20;
     const multBB = Number(params.multBB) || 2;
     const multKC = Number(params.multKC) || 1.5;
-    const close = closeOf(candles);
-    const n = candles.length;
-    const on: Array<number | undefined> = new Array(n).fill(undefined);
-    const mom: Array<number | undefined> = new Array(n).fill(undefined);
-
-    const midBB = sma(close, length);
-    const dev = stdev(close, length);
-    const midKC = ema(close, length);
-    // ATR Wilder = RMA(true range) — même construction que volatility/atr.ts.
-    const atrVals = rma(trueRange(candles), length);
-    const midHlc3 = sma(ctx.hlc3, length);
-
-    for (let i = 0; i < n; i++) {
-      const mbb = midBB[i];
-      const d = dev[i];
-      const mkc = midKC[i];
-      const a = atrVals[i];
-      const c = close[i];
-      const mh = midHlc3[i];
-      if (
-        mbb === undefined ||
-        d === undefined ||
-        mkc === undefined ||
-        a === undefined ||
-        c === undefined ||
-        mh === undefined
-      ) {
-        continue;
-      }
-      const bbUp = mbb + multBB * d;
-      const bbDn = mbb - multBB * d;
-      const kcUp = mkc + multKC * a;
-      const kcDn = mkc - multKC * a;
-      on[i] = bbUp < kcUp && bbDn > kcDn ? 1 : 0;
-      mom[i] = c - mh;
-    }
-    return { series: { on, mom } };
+    const r = ttmSqueezeOf(candles, ctx.hlc3, length, multBB, multKC);
+    return { series: { on: r.on, mom: r.mom } };
   },
 };

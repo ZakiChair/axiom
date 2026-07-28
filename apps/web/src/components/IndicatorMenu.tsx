@@ -25,6 +25,9 @@ import { marketStore } from "../store/market";
 import { tfAtLeast } from "../chart/tfOrder";
 import { indexRoving } from "./ui";
 
+/** Catalogue du menu Indicateurs : TOUT sauf les stratégies (foyer exclusif — menu Stratégies). */
+export const INDICATEURS_ANALYSE = INDICATORS.filter((d) => d.category !== "strategy");
+
 /** Libellés FR des catégories + ordre d'affichage. */
 const CATEGORY_LABELS: Partial<Record<IndicatorCategory, string>> = {
   strategy: "Stratégies",
@@ -80,7 +83,7 @@ function groupByCategory(defs: IndicatorDef[]): Array<[IndicatorCategory, Indica
  * (nombre / booléen / choix). Chaque changement remplace le jeu de params complet
  * de l'instance (instanceId inchangé → override en place côté chart).
  */
-function InstanceParamsEditor({
+export function InstanceParamsEditor({
   def,
   instance,
   onChange,
@@ -179,6 +182,12 @@ export function IndicatorMenu() {
   const duplicate = useStore(indicatorsStore, (s) => s.duplicate);
   const updateParams = useStore(indicatorsStore, (s) => s.updateParams);
 
+  // Foyer exclusif : les instances de stratégies vivent dans le menu Stratégies.
+  const activesAnalyse = useMemo(
+    () => active.filter((i) => getIndicator(i.defId)?.category !== "strategy"),
+    [active],
+  );
+
   // Nombre d'instances actives par defId (badge du catalogue).
   const countByDef = useMemo(() => {
     const m = new Map<string, number>();
@@ -188,8 +197,8 @@ export function IndicatorMenu() {
 
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => {
-    if (!q) return INDICATORS;
-    return INDICATORS.filter((d) => {
+    if (!q) return INDICATEURS_ANALYSE;
+    return INDICATEURS_ANALYSE.filter((d) => {
       if (d.name.toLowerCase().includes(q) || d.id.toLowerCase().includes(q)) return true;
       // Recherche par libellé de catégorie (ex. « order », « dérivés »).
       const catLabel = (CATEGORY_LABELS[d.category] ?? d.category).toLowerCase();
@@ -241,7 +250,9 @@ export function IndicatorMenu() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title={`${INDICATORS.length} indicateurs · ${active.length} actif${active.length > 1 ? "s" : ""}`}
+        title={`${INDICATEURS_ANALYSE.length} indicateurs · ${activesAnalyse.length} actif${
+          activesAnalyse.length > 1 ? "s" : ""
+        }`}
         className={`rounded px-2 py-1 text-xs tabular-nums ${
           open
             ? "bg-neutral-200 text-neutral-900"
@@ -250,7 +261,7 @@ export function IndicatorMenu() {
       >
         Indicateurs
         <span className="ml-1 text-[10px] opacity-70">
-          {active.length > 0 ? active.length : INDICATORS.length}
+          {activesAnalyse.length > 0 ? activesAnalyse.length : INDICATEURS_ANALYSE.length}
         </span>
       </button>
 
@@ -264,12 +275,12 @@ export function IndicatorMenu() {
           className="absolute left-0 top-full z-50 mt-1 flex max-h-[70vh] w-72 flex-col rounded border border-neutral-800 bg-neutral-900 shadow-xl"
         >
           {/* Section « Actifs » : les instances affichées, éditables par instance. */}
-          {active.length > 0 && (
+          {activesAnalyse.length > 0 && (
             <div className="border-b border-neutral-800 p-1">
               <div className="px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
-                Actifs <span className="text-neutral-600">{active.length}</span>
+                Actifs <span className="text-neutral-600">{activesAnalyse.length}</span>
               </div>
-              {active.map((inst) => {
+              {activesAnalyse.map((inst) => {
                 const def = getIndicator(inst.defId);
                 const label = def ? formatInstanceLabel(def, inst.params) : inst.defId;
                 const isEditing = editingId === inst.instanceId;
@@ -344,7 +355,7 @@ export function IndicatorMenu() {
               className="w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-accent"
             />
             <p className="mt-1 px-0.5 text-[10px] text-text-dim">
-              {filtered.length}/{INDICATORS.length} · Order Flow en tête du catalogue
+              {filtered.length}/{INDICATEURS_ANALYSE.length} · Order Flow en tête du catalogue
             </p>
           </div>
 

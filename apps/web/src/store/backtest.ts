@@ -130,6 +130,8 @@ export const CATALOGUE_OPERANDES: OperandeSpec[] = [
   indFixe("bollinger", "lower", "Bollinger inf", { length: 20, mult: 2 }),
   indFixe("stochastic", "k", "Stoch %K", { kLength: 14, dLength: 3 }),
   indFixe("stochastic", "d", "Stoch %D", { kLength: 14, dLength: 3 }),
+  indFixe("supertrend", "direction", "Supertrend (direction)", { period: 10, multiplier: 3 }),
+  indLen("adx", "adx", "ADX", 14),
 ];
 
 /** Résout une spec d'opérande par son id. */
@@ -191,8 +193,70 @@ const ema = (len: number): Operande => ({
   params: { length: len },
   output: "ema",
 });
+const macdLigne = (): Operande => ({
+  type: "indicateur",
+  indicateurId: "macd",
+  params: { fast: 12, slow: 26, signal: 9 },
+  output: "macd",
+});
+const macdSignal = (): Operande => ({
+  type: "indicateur",
+  indicateurId: "macd",
+  params: { fast: 12, slow: 26, signal: 9 },
+  output: "signal",
+});
+const supertrendDir = (): Operande => ({
+  type: "indicateur",
+  indicateurId: "supertrend",
+  params: { period: 10, multiplier: 3 },
+  output: "direction",
+});
+const adx14 = (): Operande => ({
+  type: "indicateur",
+  indicateurId: "adx",
+  params: { length: 14 },
+  output: "adx",
+});
+const bollLower = (): Operande => ({
+  type: "indicateur",
+  indicateurId: "bollinger",
+  params: { length: 20, mult: 2 },
+  output: "lower",
+});
+const bollBasis = (): Operande => ({
+  type: "indicateur",
+  indicateurId: "bollinger",
+  params: { length: 20, mult: 2 },
+  output: "basis",
+});
+const prixClose: Operande = { type: "prix", champ: "close" };
+const constante = (v: number): Operande => ({ type: "constante", valeur: v });
 
-/** Presets livrés (deux stratégies classiques, non supprimables). */
+/**
+ * Presets livrés. Tous LONG-ONLY (convention des builtins) et NON supprimables.
+ *
+ * Les conditions des quatre presets ci-dessous (macd-cross, supertrend,
+ * bollinger-reversion, mm-adx) reprennent au littéral près les defs FIABLES de
+ * la contre-épreuve `EXPRIMABLES` (`scripts/valider-strategies.ts`, corrigées
+ * en Task 5) : des conditions de NIVEAU (`comparaison`) là où le def source
+ * décrit un ÉTAT continu (MACD vs signal, direction Supertrend, EMA9 vs
+ * EMA21), et un vrai franchissement (`croisement`) seulement pour l'entrée
+ * Bollinger, qui teste un FRANCHISSEMENT réel de la bande basse. `mm-adx`
+ * répète le gate ADX ≥ 25 sur la sortie (comme la def source) : les règles
+ * étant conjonctives, tant que ADX < 25 aucune sortie par règle n'est
+ * possible — le stop à 5 % est le filet de secours dans ce cas.
+ *
+ * `tf` = le timeframe le plus favorable au moteur de backtest (frais/slippage
+ * inclus, cf. section 2 du rapport `docs/superpowers/research/2026-07-28-
+ * backtest-strategies.md`) : 4h partout. Ces mesures portent sur les defs
+ * `les-deux` SANS stop de la contre-épreuve, pas sur ces presets long-only
+ * avec stop — le tf n'est qu'un défaut de commodité, PAS une promesse de
+ * gain : macd-cross et supertrend ressortent positifs en 4h (macd +0.069 %
+ * BTC / +0.252 % ETH ; supertrend -0.047 % BTC / +0.497 % ETH), mais
+ * bollinger-reversion n'est positif qu'en BTC 4h (+0.063 %) — c'est la PIRE
+ * cellule du tableau en ETH 4h (-0.819 %) — et mm-adx est négatif dans les
+ * quatre cellules, 4h y étant seulement la MOINS mauvaise (-0.037 % BTC).
+ */
 export const BUILTIN_STRATEGIES: StrategiePreset[] = [
   {
     id: "builtin:rsi",
@@ -216,6 +280,60 @@ export const BUILTIN_STRATEGIES: StrategiePreset[] = [
     targetPct: null,
     reglesEntree: [{ type: "croisement", a: ema(9), b: ema(21), sens: "hausse" }],
     reglesSortie: [{ type: "croisement", a: ema(9), b: ema(21), sens: "baisse" }],
+    builtin: true,
+  },
+  {
+    id: "builtin:macd-cross",
+    name: "Croisement MACD",
+    tf: "4h",
+    direction: "long",
+    tailleFixe: 1000,
+    stopPct: 5,
+    targetPct: null,
+    reglesEntree: [{ type: "comparaison", gauche: macdLigne(), comparateur: ">", droite: macdSignal() }],
+    reglesSortie: [{ type: "comparaison", gauche: macdLigne(), comparateur: "<", droite: macdSignal() }],
+    builtin: true,
+  },
+  {
+    id: "builtin:supertrend",
+    name: "Supertrend (direction)",
+    tf: "4h",
+    direction: "long",
+    tailleFixe: 1000,
+    stopPct: null,
+    targetPct: null,
+    reglesEntree: [{ type: "comparaison", gauche: supertrendDir(), comparateur: ">", droite: constante(0) }],
+    reglesSortie: [{ type: "comparaison", gauche: supertrendDir(), comparateur: "<", droite: constante(0) }],
+    builtin: true,
+  },
+  {
+    id: "builtin:bollinger-reversion",
+    name: "Bollinger réversion",
+    tf: "4h",
+    direction: "long",
+    tailleFixe: 1000,
+    stopPct: 5,
+    targetPct: null,
+    reglesEntree: [{ type: "croisement", a: prixClose, b: bollLower(), sens: "hausse" }],
+    reglesSortie: [{ type: "comparaison", gauche: prixClose, comparateur: ">=", droite: bollBasis() }],
+    builtin: true,
+  },
+  {
+    id: "builtin:mm-adx",
+    name: "Croisement EMA 9/21 + ADX ≥ 25",
+    tf: "4h",
+    direction: "long",
+    tailleFixe: 1000,
+    stopPct: 5,
+    targetPct: null,
+    reglesEntree: [
+      { type: "comparaison", gauche: ema(9), comparateur: ">", droite: ema(21) },
+      { type: "comparaison", gauche: adx14(), comparateur: ">=", droite: constante(25) },
+    ],
+    reglesSortie: [
+      { type: "comparaison", gauche: ema(9), comparateur: "<", droite: ema(21) },
+      { type: "comparaison", gauche: adx14(), comparateur: ">=", droite: constante(25) },
+    ],
     builtin: true,
   },
 ];

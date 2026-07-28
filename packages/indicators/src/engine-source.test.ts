@@ -75,6 +75,16 @@ const PARAM_OVERRIDES: Record<string, Record<string, number>> = {
   // priceZScore : length par défaut 100 > 60 bougies → z jamais défini. On tient
   // length=30 (fenêtre pleine dès l'index 29) pour les deux sources.
   priceZScore: { length: 30 },
+  // stratMacdCross : `position` lit bien `ctx.source` (macdOf(ctx.source, …)), mais
+  // avec les défauts 12/26/9 le warm-up (~35 barres) ne laisse que ~25 barres
+  // utilisables sur les 60 de la fixture générique → UN SEUL croisement, au même
+  // index sous close et hlc3 (l'écart hlc3−close, trop faible ici, ne suffit pas
+  // à le déplacer) → `prixEntree` identique aux points comparés → faux négatif.
+  // Avec 3/6/3, la fixture produit plusieurs croisements dont deux se décalent
+  // réellement d'une barre entre les deux sources (vérifié : idx 32→33 et 35→36) —
+  // la dépendance à la source est donc bien exercée. Mêmes params des deux côtés,
+  // n'affecte pas la conformité testée (même garantie que pour priceZScore).
+  stratMacdCross: { fast: 3, slow: 6, signal: 3 },
 };
 
 /**

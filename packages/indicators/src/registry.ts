@@ -186,6 +186,15 @@ import { rhodlRatio } from "./derivatives/rhodlRatio";
 import { cvdd } from "./derivatives/cvdd";
 import { balancedPrice } from "./derivatives/balancedPrice";
 
+// — stratégies (v2.2) —
+import { stratCroisementMM } from "./strategy/stratCroisementMM";
+import { stratRsiReversion } from "./strategy/stratRsiReversion";
+import { stratMacdCross } from "./strategy/stratMacdCross";
+import { stratSupertrend } from "./strategy/stratSupertrend";
+import { stratDonchian } from "./strategy/stratDonchian";
+import { stratBollingerReversion } from "./strategy/stratBollingerReversion";
+import { stratDivergenceRsi } from "./strategy/stratDivergenceRsi";
+
 export const INDICATORS: IndicatorDef[] = [
   // trend
   adx,
@@ -356,6 +365,14 @@ export const INDICATORS: IndicatorDef[] = [
   rhodlRatio,
   cvdd,
   balancedPrice,
+  // — stratégies (v2.2)
+  stratCroisementMM,
+  stratRsiReversion,
+  stratMacdCross,
+  stratSupertrend,
+  stratDonchian,
+  stratBollingerReversion,
+  stratDivergenceRsi,
 ];
 
 export function getIndicator(id: string): IndicatorDef | undefined {

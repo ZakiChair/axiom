@@ -22,8 +22,93 @@
  * Les positions précédant la première fenêtre ATR pleine valent `undefined`.
  */
 
-import type { IndicatorDef } from "@axiom/types";
+import type { Candle, IndicatorDef } from "@axiom/types";
 import { trueRange, rma } from "../utils";
+
+/**
+ * Cœur de calcul du SuperTrend, extrait pour être réutilisé par la def
+ * `stratSupertrend` (Task 4). Comportement identique à l'ancien corps inline
+ * de `supertrend.calc`. PURE.
+ */
+export function supertrendOf(
+  candles: Candle[],
+  period: number,
+  mult: number
+): { line: Array<number | undefined>; direction: Array<number | undefined> } {
+  const n = candles.length;
+
+  const line: Array<number | undefined> = new Array(n).fill(undefined);
+  const direction: Array<number | undefined> = new Array(n).fill(undefined);
+
+  const atr = rma(trueRange(candles), period);
+
+  // Bandes de base et finales.
+  const finalUpper: Array<number | undefined> = new Array(n).fill(undefined);
+  const finalLower: Array<number | undefined> = new Array(n).fill(undefined);
+
+  let prevDir = 0; // direction de la bougie précédente (+1/-1)
+  let started = false;
+
+  for (let i = 0; i < n; i++) {
+    const c = candles[i];
+    const a = atr[i];
+    if (c === undefined || a === undefined) continue;
+
+    const hl2 = (c.high + c.low) / 2;
+    const basicUpper = hl2 + mult * a;
+    const basicLower = hl2 - mult * a;
+
+    const prevUpper = finalUpper[i - 1];
+    const prevLower = finalLower[i - 1];
+    const prevClose = i > 0 ? candles[i - 1]?.close : undefined;
+
+    // Bande haute finale.
+    let fu: number;
+    if (prevUpper === undefined || prevClose === undefined) {
+      fu = basicUpper;
+    } else {
+      fu =
+        basicUpper < prevUpper || prevClose > prevUpper
+          ? basicUpper
+          : prevUpper;
+    }
+    // Bande basse finale.
+    let fl: number;
+    if (prevLower === undefined || prevClose === undefined) {
+      fl = basicLower;
+    } else {
+      fl =
+        basicLower > prevLower || prevClose < prevLower
+          ? basicLower
+          : prevLower;
+    }
+    finalUpper[i] = fu;
+    finalLower[i] = fl;
+
+    if (!started) {
+      // Première valeur ATR définie : amorce en tendance haussière par convention.
+      prevDir = 1;
+      line[i] = fl;
+      direction[i] = 1;
+      started = true;
+      continue;
+    }
+
+    // Bascule de tendance selon la position de la clôture vs bande retenue.
+    let dir: number;
+    if (prevDir === 1) {
+      dir = c.close < fl ? -1 : 1;
+    } else {
+      dir = c.close > fu ? 1 : -1;
+    }
+
+    line[i] = dir === 1 ? fl : fu;
+    direction[i] = dir;
+    prevDir = dir;
+  }
+
+  return { line, direction };
+}
 
 export const supertrend: IndicatorDef = {
   id: "supertrend",
@@ -41,78 +126,7 @@ export const supertrend: IndicatorDef = {
   calc(candles, params) {
     const period = Number(params.period ?? 10);
     const mult = Number(params.multiplier ?? 3);
-    const n = candles.length;
-
-    const line: Array<number | undefined> = new Array(n).fill(undefined);
-    const direction: Array<number | undefined> = new Array(n).fill(undefined);
-
-    const atr = rma(trueRange(candles), period);
-
-    // Bandes de base et finales.
-    const finalUpper: Array<number | undefined> = new Array(n).fill(undefined);
-    const finalLower: Array<number | undefined> = new Array(n).fill(undefined);
-
-    let prevDir = 0; // direction de la bougie précédente (+1/-1)
-    let started = false;
-
-    for (let i = 0; i < n; i++) {
-      const c = candles[i];
-      const a = atr[i];
-      if (c === undefined || a === undefined) continue;
-
-      const hl2 = (c.high + c.low) / 2;
-      const basicUpper = hl2 + mult * a;
-      const basicLower = hl2 - mult * a;
-
-      const prevUpper = finalUpper[i - 1];
-      const prevLower = finalLower[i - 1];
-      const prevClose = i > 0 ? candles[i - 1]?.close : undefined;
-
-      // Bande haute finale.
-      let fu: number;
-      if (prevUpper === undefined || prevClose === undefined) {
-        fu = basicUpper;
-      } else {
-        fu =
-          basicUpper < prevUpper || prevClose > prevUpper
-            ? basicUpper
-            : prevUpper;
-      }
-      // Bande basse finale.
-      let fl: number;
-      if (prevLower === undefined || prevClose === undefined) {
-        fl = basicLower;
-      } else {
-        fl =
-          basicLower > prevLower || prevClose < prevLower
-            ? basicLower
-            : prevLower;
-      }
-      finalUpper[i] = fu;
-      finalLower[i] = fl;
-
-      if (!started) {
-        // Première valeur ATR définie : amorce en tendance haussière par convention.
-        prevDir = 1;
-        line[i] = fl;
-        direction[i] = 1;
-        started = true;
-        continue;
-      }
-
-      // Bascule de tendance selon la position de la clôture vs bande retenue.
-      let dir: number;
-      if (prevDir === 1) {
-        dir = c.close < fl ? -1 : 1;
-      } else {
-        dir = c.close > fu ? 1 : -1;
-      }
-
-      line[i] = dir === 1 ? fl : fu;
-      direction[i] = dir;
-      prevDir = dir;
-    }
-
-    return { series: { line, direction } };
+    const r = supertrendOf(candles, period, mult);
+    return { series: { line: r.line, direction: r.direction } };
   },
 };

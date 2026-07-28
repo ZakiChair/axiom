@@ -9,6 +9,7 @@ export * from "./utils-aux";
 export * from "./utils-divergence";
 export * from "./utils-annotations";
 export * from "./utils-fabrique-divergence";
+export * from "./utils-fabrique-strategie";
 export * from "./orderflow/divergenceSpotPerp";
 export * from "./engine";
 export * from "./registry";

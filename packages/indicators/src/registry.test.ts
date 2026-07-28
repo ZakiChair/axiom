@@ -17,8 +17,8 @@ const VALID_CATEGORIES = new Set<IndicatorCategory>([
 ]);
 
 describe("registry", () => {
-  it("câble exactement 160 indicateurs", () => {
-    expect(INDICATORS.length).toBe(160);
+  it("câble exactement 167 indicateurs", () => {
+    expect(INDICATORS.length).toBe(167);
   });
 
   it("n'a aucun id dupliqué", () => {
@@ -41,11 +41,13 @@ describe("registry", () => {
     expect(getIndicator("__inexistant__")).toBeUndefined();
   });
 
-  it("catégorie strategy : les 8 defs v2.1 déplacés", () => {
+  it("catégorie strategy : les 8 defs v2.1 déplacés + les 7 stratégies v2.2", () => {
     const strategie = INDICATORS.filter((def) => def.category === "strategy").map((d) => d.id);
     expect(strategie.sort()).toEqual([
       "cvdDivergence", "cvdSpotPerp", "macdDivergence", "mfiDivergence",
       "obvDivergence", "premiumSpotPerp", "rsiDivergence", "stochDivergence",
+      "stratBollingerReversion", "stratCroisementMM", "stratDivergenceRsi",
+      "stratDonchian", "stratMacdCross", "stratRsiReversion", "stratSupertrend",
     ]);
   });
 });

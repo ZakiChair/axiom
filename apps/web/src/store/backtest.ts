@@ -254,8 +254,17 @@ const constante = (v: number): Operande => ({ type: "constante", valeur: v });
  * gain : macd-cross et supertrend ressortent positifs en 4h (macd +0.069 %
  * BTC / +0.252 % ETH ; supertrend -0.047 % BTC / +0.497 % ETH), mais
  * bollinger-reversion n'est positif qu'en BTC 4h (+0.063 %) — c'est la PIRE
- * cellule du tableau en ETH 4h (-0.819 %) — et mm-adx est négatif dans les
- * quatre cellules, 4h y étant seulement la MOINS mauvaise (-0.037 % BTC).
+ * cellule DE CETTE STRATÉGIE en ETH 4h (-0.819 %, pas la pire du tableau
+ * complet : stratRsiReversion fait -2.824 % sur la même cellule) — et
+ * mm-adx est négatif dans les quatre cellules, 4h y étant seulement la
+ * MOINS mauvaise (-0.037 % BTC).
+ *
+ * Quirk non mesuré par la contre-épreuve (qui n'a pas de stop) : pour
+ * macd-cross et mm-adx, une condition de NIVEAU reste vraie après un
+ * stop-out tant que le régime ne s'est pas retourné — combinée à
+ * `stopPct: 5`, une position stoppée peut donc se rouvrir DÈS LA BARRE
+ * SUIVANTE si le niveau tient encore, ce qu'une entrée par `croisement`
+ * (événement d'une seule barre) n'aurait pas permis.
  */
 export const BUILTIN_STRATEGIES: StrategiePreset[] = [
   {
@@ -284,7 +293,7 @@ export const BUILTIN_STRATEGIES: StrategiePreset[] = [
   },
   {
     id: "builtin:macd-cross",
-    name: "Croisement MACD",
+    name: "MACD vs signal",
     tf: "4h",
     direction: "long",
     tailleFixe: 1000,
@@ -320,7 +329,7 @@ export const BUILTIN_STRATEGIES: StrategiePreset[] = [
   },
   {
     id: "builtin:mm-adx",
-    name: "Croisement EMA 9/21 + ADX ≥ 25",
+    name: "EMA 9 > 21 + ADX ≥ 25",
     tf: "4h",
     direction: "long",
     tailleFixe: 1000,

@@ -19,7 +19,13 @@
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
 import { computeIndicator } from "./engine";
-import { defStrategie, MAX_TRADES_ANNOTES, type EtatStrategie } from "./utils-fabrique-strategie";
+import {
+  construireTradesStrategie,
+  defStrategie,
+  etatsStrategie,
+  MAX_TRADES_ANNOTES,
+  type EtatStrategie,
+} from "./utils-fabrique-strategie";
 
 const closes = [100, 101, 102, 103, 104, 105, 104, 103, 102, 101, 100, 99];
 const candles: Candle[] = closes.map((c, i) => ({
@@ -118,5 +124,32 @@ describe("defStrategie", () => {
     const r = computeIndicator(defAvec(etats), grands);
     expect(r.annotations?.segments?.length).toBe(MAX_TRADES_ANNOTES);
     expect(r.annotations?.labels?.length).toBe(MAX_TRADES_ANNOTES);
+  });
+
+  it("construireTradesStrategie : mêmes trades que la fixture principale de la fabrique", () => {
+    const { trades, ouvert } = construireTradesStrategie(candles, ETATS);
+    expect(trades).toEqual([
+      { sens: -1, idxEntree: 7, prixEntree: 103, idxSortie: 9, prixSortie: 101, pnlPct: expect.closeTo(1.9417, 3) },
+    ]);
+    expect(ouvert).toEqual({ sens: 1, idxEntree: 10, prixEntree: 100 });
+  });
+
+  it("construireTradesStrategie : fill-forward interne (undefined juste avant une transition réelle n'est pas manquée)", () => {
+    // entrée long i=1 @ close[1]=101 ; i=2 undefined = maintien (effectif reste 1) ;
+    // sortie long i=3 @ close[3]=103 (transition détectée grâce au fill-forward,
+    // PAS à etats[2] brut qui est undefined). Sans fill-forward interne, cette
+    // transition serait manquée et le trade resterait ouvert indéfiniment.
+    const etats: Array<EtatStrategie | undefined> = [0, 1, undefined, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const { trades, ouvert } = construireTradesStrategie(candles, etats);
+    expect(trades).toEqual([
+      { sens: 1, idxEntree: 1, prixEntree: 101, idxSortie: 3, prixSortie: 103, pnlPct: expect.closeTo(1.9802, 3) },
+    ]);
+    expect(ouvert).toBeNull();
+  });
+
+  it("etatsStrategie : rejoue la position d'un def enregistré avec overrides", () => {
+    defAvec(ETATS); // enregistre stratTest dans SPECS_STRATEGIES
+    expect(etatsStrategie("stratTest", candles)).toEqual(ETATS);
+    expect(etatsStrategie("defInconnu", candles)).toBeUndefined();
   });
 });

@@ -36,6 +36,7 @@ import type {
   SegmentAnnotation,
   Timeframe,
 } from "@axiom/types";
+import { buildCalcContext, resolveParams } from "./engine";
 
 export type EtatStrategie = 1 | 0 | -1;
 
@@ -79,13 +80,104 @@ function fmtPrix(v: number): string {
 }
 
 /** Trade reconstruit depuis les transitions d'état. */
-interface TradeStrategie {
+export interface TradeStrategie {
   sens: 1 | -1;
   idxEntree: number;
   prixEntree: number;
   idxSortie?: number;
   prixSortie?: number;
   pnlPct?: number;
+}
+
+/**
+ * Reconstruction PURE des trades depuis une série d'états (logique EXACTE de
+ * la fabrique, extraite) : fill-forward (un trou `undefined` au milieu
+ * maintient l'état précédent) puis trades aux transitions (bougies clôturées :
+ * i ∈ [1, n−2] — anti-repaint, jamais la dernière bougie potentiellement en
+ * formation). Le premier état défini a un `prev` undefined → jamais
+ * d'événement (matérialisation silencieuse, pas de prix d'entrée connu).
+ */
+export function construireTradesStrategie(
+  candles: Candle[],
+  etats: Array<EtatStrategie | undefined>
+): { trades: TradeStrategie[]; ouvert: TradeStrategie | null } {
+  const n = candles.length;
+
+  // État EFFECTIF : un trou (undefined) au milieu maintient l'état précédent.
+  const effectif: Array<EtatStrategie | undefined> = new Array(n).fill(undefined);
+  let courant: EtatStrategie | undefined = undefined;
+  for (let i = 0; i < n; i++) {
+    const e = etats[i];
+    if (e !== undefined) courant = e;
+    effectif[i] = courant;
+  }
+
+  // Trades aux transitions (bougies clôturées : i ∈ [1, n−2]). Le premier
+  // état défini a un `prev` undefined → jamais d'événement (silencieux).
+  const trades: TradeStrategie[] = [];
+  let ouvert: TradeStrategie | null = null;
+  for (let i = 1; i <= n - 2; i++) {
+    const prev = effectif[i - 1];
+    const cur = effectif[i];
+    if (prev === undefined || cur === undefined || prev === cur) continue;
+    const close = candles[i]?.close;
+    if (close === undefined || !Number.isFinite(close)) continue;
+    if (prev !== 0 && ouvert !== null) {
+      ouvert.idxSortie = i;
+      ouvert.prixSortie = close;
+      ouvert.pnlPct = ((close - ouvert.prixEntree) / ouvert.prixEntree) * 100 * ouvert.sens;
+      trades.push(ouvert);
+      ouvert = null;
+    }
+    if (cur !== 0) ouvert = { sens: cur, idxEntree: i, prixEntree: close };
+  }
+
+  return { trades, ouvert };
+}
+
+/**
+ * Specs enregistrées par defStrategie (rejeu scripté : campagne de backtest).
+ * Remplie par EFFET DE BORD à l'évaluation des modules de stratégie : un
+ * consommateur doit avoir importé le module de la stratégie (ou `./registry`,
+ * qui les importe toutes) avant que `etatsStrategie(id)`/`specStrategie(id)`
+ * résolvent — c'est le prix de l'anti-cycle (voir `etatsStrategie` ci-dessous).
+ * Un id ré-enregistré ÉCRASE l'entrée précédente (dernier appel gagne) : sans
+ * incidence en usage normal (chaque id de stratégie n'est défini qu'une fois),
+ * mais les tests réutilisent l'id `stratTest` sans isolation — assumé.
+ */
+const SPECS_STRATEGIES = new Map<string, SpecStrategie>();
+
+export function specStrategie(id: string): SpecStrategie | undefined {
+  return SPECS_STRATEGIES.get(id);
+}
+
+/**
+ * États d'une stratégie du registre : résout les params (défauts + overrides)
+ * et appelle `spec.position`. `undefined` si `defId` inconnu ou non-stratégie.
+ * ANTI-CYCLE : ne dépend JAMAIS de `./registry` (qui importe les stratégies,
+ * qui importent cette fabrique) — passe par `SPECS_STRATEGIES` et reconstruit
+ * le def minimal nécessaire à `resolveParams`/`buildCalcContext`.
+ */
+export function etatsStrategie(
+  defId: string,
+  candles: Candle[],
+  params?: Record<string, number | boolean | string>
+): Array<EtatStrategie | undefined> | undefined {
+  const spec = SPECS_STRATEGIES.get(defId);
+  if (spec === undefined) return undefined;
+  const defMin: IndicatorDef = {
+    id: spec.id,
+    name: spec.name,
+    category: "strategy",
+    pane: "overlay",
+    inputs: [...spec.inputsStrategie, INPUT_LIGNES_TRADES],
+    outputs: [{ key: "prixEntree", name: "Prix d'entrée", style: "line" }],
+    calc: () => ({ series: {} }), // factice : resolveParams ne lit que def.inputs
+  };
+  const resolved = resolveParams(defMin, params);
+  const sourceKey = typeof resolved.source === "string" ? resolved.source : "close";
+  const ctx = buildCalcContext(candles, sourceKey);
+  return spec.position(candles, resolved, ctx);
 }
 
 export function defStrategie(spec: SpecStrategie): IndicatorDef {
@@ -102,34 +194,7 @@ export function defStrategie(spec: SpecStrategie): IndicatorDef {
       const lib = spec.libelles(params);
       const lignesTrades = params.lignesTrades !== false;
 
-      // État EFFECTIF : un trou (undefined) au milieu maintient l'état précédent.
-      const effectif: Array<EtatStrategie | undefined> = new Array(n).fill(undefined);
-      let courant: EtatStrategie | undefined = undefined;
-      for (let i = 0; i < n; i++) {
-        const e = etats[i];
-        if (e !== undefined) courant = e;
-        effectif[i] = courant;
-      }
-
-      // Trades aux transitions (bougies clôturées : i ∈ [1, n−2]). Le premier
-      // état défini a un `prev` undefined → jamais d'événement (silencieux).
-      const trades: TradeStrategie[] = [];
-      let ouvert: TradeStrategie | null = null;
-      for (let i = 1; i <= n - 2; i++) {
-        const prev = effectif[i - 1];
-        const cur = effectif[i];
-        if (prev === undefined || cur === undefined || prev === cur) continue;
-        const close = candles[i]?.close;
-        if (close === undefined || !Number.isFinite(close)) continue;
-        if (prev !== 0 && ouvert !== null) {
-          ouvert.idxSortie = i;
-          ouvert.prixSortie = close;
-          ouvert.pnlPct = ((close - ouvert.prixEntree) / ouvert.prixEntree) * 100 * ouvert.sens;
-          trades.push(ouvert);
-          ouvert = null;
-        }
-        if (cur !== 0) ouvert = { sens: cur, idxEntree: i, prixEntree: close };
-      }
+      const { trades, ouvert } = construireTradesStrategie(candles, etats);
 
       // Série prixEntree : le prix d'entrée répété tant que la position vit.
       const prixEntree: Array<number | undefined> = new Array(n).fill(undefined);
@@ -199,5 +264,6 @@ export function defStrategie(spec: SpecStrategie): IndicatorDef {
   };
   if (spec.precision !== undefined) def.precision = spec.precision;
   if (spec.minTimeframe !== undefined) def.minTimeframe = spec.minTimeframe;
+  SPECS_STRATEGIES.set(spec.id, spec);
   return def;
 }

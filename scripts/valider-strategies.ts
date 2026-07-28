@@ -341,6 +341,18 @@ function mediane(valeurs: number[]): number {
   return tri.length % 2 === 1 ? tri[milieu]! : (tri[milieu - 1]! + tri[milieu]!) / 2;
 }
 
+/**
+ * Motif d'échec d'un bloc de mesure, ou `undefined` s'il tient le critère.
+ * « aucun trade » et « expectancy ≤ 0 » sont DISTINGUÉS : une moitié vide n'a
+ * rien mesuré du tout, l'annoncer comme « expectancy 0.000 » laisserait croire
+ * le contraire (règle d'honnêteté du lot — le rapport est l'audit de la campagne).
+ */
+function echecBloc(cle: string, s: StatsRejeu): string | undefined {
+  if (s.nbTrades === 0) return `${cle} : aucun trade`;
+  if (s.expectancy <= 0) return `${cle} : expectancy ${fmt(s.expectancy, 3)} ≤ 0`;
+  return undefined;
+}
+
 function verdicts(cellules: ResultatCellule[]): VerdictCandidat[] {
   return CANDIDATS_CHAMPION.map((cand) => {
     const echecs: string[] = [];
@@ -352,10 +364,13 @@ function verdicts(cellules: ResultatCellule[]): VerdictCandidat[] {
       const cle = `${cel.symbol} ${cel.tf}`;
       expectancies.push(r.m.global.expectancy);
       nbTradesTotal += r.m.global.nbTrades;
-      if (r.m.global.nbTrades === 0) echecs.push(`${cle} : aucun trade`);
-      else if (r.m.global.expectancy <= 0) echecs.push(`${cle} : expectancy ${fmt(r.m.global.expectancy, 3)} ≤ 0`);
-      if (r.m.m1.nbTrades === 0 || r.m.m1.expectancy <= 0) echecs.push(`${cle} M1 : expectancy ${fmt(r.m.m1.expectancy, 3)}`);
-      if (r.m.m2.nbTrades === 0 || r.m.m2.expectancy <= 0) echecs.push(`${cle} M2 : expectancy ${fmt(r.m.m2.expectancy, 3)}`);
+      for (const e of [
+        echecBloc(cle, r.m.global),
+        echecBloc(`${cle} M1`, r.m.m1),
+        echecBloc(`${cle} M2`, r.m.m2),
+      ]) {
+        if (e !== undefined) echecs.push(e);
+      }
     }
     return {
       id: cand.id,
@@ -428,6 +443,10 @@ function construireRapport(cellules: ResultatCellule[], partiel: boolean): strin
         "coût d'exécution.",
       "- **Signes** : `DD max` du rejeu est NÉGATIF (retracement de l'equity composée) ; " +
         "celui de la contre-épreuve est POSITIF (convention `StatsBacktest`).",
+      "- **Comparabilité des expectancies** : celle du rejeu est une variation de PRIX en % ; " +
+        "celle de la contre-épreuve est le PnL net rapporté au notionnel engagé. À taille " +
+        "fixe et sans levier (quantité = taille / prix d'entrée), les deux dénominateurs " +
+        "coïncident : leur écart isole donc bien frais + slippage + décalage de fill.",
       "- **Aucun réglage par cellule** : un seul jeu de défauts partout, pas de grid-search.",
     ].join("\n")
   );

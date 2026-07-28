@@ -52,8 +52,24 @@ import type { Condition, Operande, ParamsBacktest, StrategieDef } from "../packa
 
 // ─────────────────────────── Protocole FIGÉ ───────────────────────────
 
-/** Début de la fenêtre d'étude (2024-07-01 UTC) — ~2 ans jusqu'à aujourd'hui. */
+/** Début de la fenêtre d'étude (2024-07-01 UTC). */
 const DEBUT_MS = Date.UTC(2024, 6, 1);
+
+/**
+ * Fin de la fenêtre d'étude, FIGÉE (2026-07-28 12:00 UTC), borne EXCLUE : seules
+ * les bougies dont le `closeTime` précède cet instant sont rejouées.
+ *
+ * Elle valait `Date.now()` jusqu'ici, ce qui rendait la campagne irreproductible :
+ * les quatre cellules sont téléchargées l'une après l'autre, donc chacune
+ * s'arrêtait à SON heure d'appel (dérive constatée sur le run commité : 18180
+ * bougies en BTCUSDT 1h contre 18181 en ETHUSDT 1h, ~36 min d'écart).
+ *
+ * Valeur choisie = la borne ronde qui reproduit EXACTEMENT le run commité : à
+ * 12:00 UTC, la dernière bougie 1h clôturée ouvre à 11:00 et la dernière 4h à
+ * 08:00 — soit les fins des cellules BTCUSDT du rapport commité, ETHUSDT 1h
+ * perdant la bougie de 12:00 qu'elle avait attrapée en arrivant plus tard.
+ */
+const FIN_MS = Date.UTC(2026, 6, 28, 12);
 
 /** Les quatre cellules du spec. Un seul jeu de params partout, aucun réglage par cellule. */
 const CELLULES: ReadonlyArray<{ symbol: string; tf: "1h" | "4h" }> = [
@@ -79,29 +95,28 @@ const LIMITE_PAGE = 1000;
 type LigneKline = [number, string, string, string, string, string, number, ...unknown[]];
 
 /**
- * Klines Binance spot paginées (1000 par appel) depuis `DEBUT_MS` jusqu'à
- * maintenant, converties en `Candle` (time = openTime ms).
+ * Klines Binance spot paginées (1000 par appel) sur la fenêtre FIGÉE
+ * `[DEBUT_MS, FIN_MS[`, converties en `Candle` (time = openTime ms).
  *
- * La bougie EN COURS est écartée (`closeTime >= maintenant`) : tout l'aval
- * suppose des bougies CLÔTURÉES — la fabrique comme le moteur — et une bougie
- * en formation fausserait silencieusement la campagne.
+ * Toute bougie non CLÔTURÉE à `FIN_MS` est écartée (`closeTime >= FIN_MS`) :
+ * tout l'aval suppose des bougies clôturées — la fabrique comme le moteur — et
+ * `endTime` seul laisserait passer celle qui chevauche la borne.
  */
 async function telechargerKlines(symbol: string, tf: string): Promise<Candle[]> {
-  const maintenant = Date.now();
   const out: Candle[] = [];
   let depuis = DEBUT_MS;
 
   for (;;) {
     const url =
       `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${tf}` +
-      `&startTime=${depuis}&limit=${LIMITE_PAGE}`;
+      `&startTime=${depuis}&endTime=${FIN_MS}&limit=${LIMITE_PAGE}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Binance ${res.status} ${res.statusText} sur ${symbol} ${tf}`);
     const lignes = (await res.json()) as LigneKline[];
     if (lignes.length === 0) break;
 
     for (const l of lignes) {
-      if (Number(l[6]) >= maintenant) continue; // bougie en cours : jamais rejouée
+      if (Number(l[6]) >= FIN_MS) continue; // bougie non clôturée à FIN_MS : jamais rejouée
       out.push({
         time: Number(l[0]),
         open: Number(l[1]),
@@ -123,11 +138,18 @@ async function telechargerKlines(symbol: string, tf: string): Promise<Candle[]> 
   return out;
 }
 
-/** Klines depuis le cache disque, téléchargées et mises en cache si absentes. */
+/**
+ * Klines depuis le cache disque, téléchargées et mises en cache si absentes.
+ *
+ * Le cache n'enregistre PAS la fenêtre qui l'a produit : un cache constitué
+ * avant le figeage de `FIN_MS` peut donc déborder à droite. Il est re-borné à
+ * la lecture, sinon « fenêtre figée » ne vaudrait qu'après un `rm` du cache.
+ */
 async function chargerKlines(symbol: string, tf: string): Promise<Candle[]> {
   const fichier = join(DOSSIER_CACHE, `${symbol}-${tf}.json`);
   if (existsSync(fichier)) {
-    const candles = JSON.parse(readFileSync(fichier, "utf8")) as Candle[];
+    const brut = JSON.parse(readFileSync(fichier, "utf8")) as Candle[];
+    const candles = brut.filter((c) => c.time >= DEBUT_MS && c.time < FIN_MS);
     process.stderr.write(`  ✓ ${symbol} ${tf} : ${candles.length} bougies (cache)\n`);
     return candles;
   }
@@ -419,6 +441,11 @@ function jour(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+/** Horodatage COMPLET (UTC) — la fenêtre du protocole se lit à la seconde près. */
+function horodatage(ms: number): string {
+  return new Date(ms).toISOString().replace(".000Z", "Z");
+}
+
 function ligne(cells: Array<string | number>): string {
   return `| ${cells.join(" | ")} |`;
 }
@@ -452,8 +479,16 @@ function construireRapport(cellules: ResultatCellule[], partiel: boolean): strin
   parts.push("## Méthodologie");
   parts.push(
     [
-      "- **Données** : klines Binance spot (`/api/v3/klines`), bougie en cours exclue, " +
-        `depuis le ${jour(DEBUT_MS)}.`,
+      "- **Données** : klines Binance spot (`/api/v3/klines`), bougies CLÔTURÉES " +
+        "uniquement.",
+      `- **Fenêtre FIGÉE** : \`[${horodatage(DEBUT_MS)} → ${horodatage(FIN_MS)}[\` ` +
+        "(borne haute EXCLUE, constantes `DEBUT_MS` / `FIN_MS` du script ; le cache " +
+        "disque est re-borné à la lecture). La borne haute valait `Date.now()` avant " +
+        "ce figeage : chaque cellule s'arrêtait à SON heure de téléchargement. " +
+        "**Le rapport commité `docs/superpowers/research/2026-07-28-backtest-strategies.md` " +
+        "a été produit AVANT le figeage** — d'où ses 18180 bougies en BTCUSDT 1h contre " +
+        "18181 en ETHUSDT 1h (~36 min de dérive entre deux cellules, soit moins d'une " +
+        "bougie 1h, sans effet sur le verdict).",
       "- **Rejeu chart-fidèle** : la fonction `position` de chaque def `strategy` est " +
         "rejouée, les trades reconstruits close-à-close par `construireTradesStrategie` " +
         "(mêmes conventions que les marqueurs du chart : anti-repaint, HORS frais).",

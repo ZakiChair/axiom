@@ -26,6 +26,7 @@ import { exportChartImage } from "../chart/drawing";
 import { pousserToast } from "../store/toasts";
 import { raccourciPour, raccourciTimeframe } from "../commands/hotkeys";
 import { IndicatorMenu } from "./IndicatorMenu";
+import { StrategyMenu } from "./StrategyMenu";
 import { PairSearch } from "./PairSearch";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { Badge, MenuDeroulant } from "./ui";
@@ -560,6 +561,9 @@ export function Toolbar() {
 
       {/* Panneau des indicateurs @axiom (activer/désactiver). */}
       <IndicatorMenu />
+
+      {/* Panneau des stratégies (catégorie strategy — foyer exclusif). */}
+      <StrategyMenu />
 
       {/* Orderflow (M5) : CVD + footprint, alimenté par le flux de trades de la
           source active. Footprint sur les 3 sources ; CVD complet sur

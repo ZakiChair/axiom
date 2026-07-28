@@ -5,7 +5,8 @@
  * Câblage final : importe chaque `IndicatorDef` depuis son fichier dédié et
  * peuple la liste `INDICATORS`. `getIndicator` permet la résolution par id.
  *
- * 155 indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * Indicateurs câblés (TS pur, source de vérité unique — cf. BUILD-CONTRACT).
+ * Le compte exact n'est pas figé ici : voir registry.test.ts.
  */
 
 import type { IndicatorDef } from "@axiom/types";

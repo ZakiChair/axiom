@@ -196,6 +196,12 @@ import { stratDonchian } from "./strategy/stratDonchian";
 import { stratBollingerReversion } from "./strategy/stratBollingerReversion";
 import { stratDivergenceRsi } from "./strategy/stratDivergenceRsi";
 
+// — stratégies (v2.3) —
+import { stratSqueezeBreakout } from "./strategy/stratSqueezeBreakout";
+import { stratIchimokuKumo } from "./strategy/stratIchimokuKumo";
+import { stratMmAdx } from "./strategy/stratMmAdx";
+import { stratPsar } from "./strategy/stratPsar";
+
 export const INDICATORS: IndicatorDef[] = [
   // trend
   adx,
@@ -374,6 +380,11 @@ export const INDICATORS: IndicatorDef[] = [
   stratDonchian,
   stratBollingerReversion,
   stratDivergenceRsi,
+  // — stratégies (v2.3)
+  stratSqueezeBreakout,
+  stratIchimokuKumo,
+  stratMmAdx,
+  stratPsar,
 ];
 
 export function getIndicator(id: string): IndicatorDef | undefined {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { dominance, dominanceAlts, serieDifference } from "../data/mcap";
 import {
   MARGES,
+  construireVues,
   domaineValeurs,
   fenetrer,
   indexDepuisX,
@@ -146,5 +148,69 @@ describe("fenetrer", () => {
 
   it("ne dépasse pas la longueur disponible", () => {
     expect(fenetrer(serie, 5_000)).toHaveLength(100);
+  });
+});
+
+describe("construireVues — assemblage des trois graphiques", () => {
+  const source = {
+    grille: [1, 2, 3],
+    total: [1_000, 1_000, 1_000],
+    pieces: {
+      bitcoin: [500, 500, 500],
+      ethereum: [200, 200, 200],
+      solana: [100, 100, 100],
+    },
+  };
+  const options = {
+    idAlts: "alts",
+    palette: ["--serie-1", "--serie-2"],
+    libelle: (id: string) => id.toUpperCase(),
+    dominance,
+    dominanceAlts,
+    difference: serieDifference,
+  };
+
+  it("calcule TOTAL3 = TOTAL − BTC − ETH", () => {
+    const v = construireVues(source, [], null, options);
+    expect(v.total3).toEqual([300, 300, 300]);
+  });
+
+  it("calcule la dominance de chaque pièce sur le total recalibré", () => {
+    const v = construireVues(source, ["bitcoin", "solana"], null, options);
+    expect(v.courbes[0]?.valeurs).toEqual([50, 50, 50]);
+    expect(v.courbes[1]?.valeurs).toEqual([10, 10, 10]);
+  });
+
+  it("calcule la dominance agrégée des alts sans série dédiée", () => {
+    const v = construireVues(source, ["alts"], null, options);
+    expect(v.courbes[0]?.libelle).toBe("Alts");
+    expect(v.courbes[0]?.valeurs).toEqual([30, 30, 30]); // 100 − 50 − 20
+  });
+
+  it("affecte les couleurs par rotation de la palette", () => {
+    const v = construireVues(source, ["bitcoin", "ethereum", "solana"], null, options);
+    expect(v.courbes.map((c) => c.token)).toEqual(["--serie-1", "--serie-2", "--serie-1"]);
+  });
+
+  it("fenêtre toutes les séries de la même façon", () => {
+    const v = construireVues(source, ["bitcoin"], 2, options);
+    expect(v.grille).toHaveLength(2);
+    expect(v.total).toHaveLength(2);
+    expect(v.total3).toHaveLength(2);
+    expect(v.courbes[0]?.valeurs).toHaveLength(2);
+  });
+
+  it("rend des vues vides sans historique", () => {
+    expect(construireVues(null, ["bitcoin"], null, options)).toEqual({
+      grille: [],
+      total: [],
+      total3: [],
+      courbes: [],
+    });
+  });
+
+  it("rend une courbe entièrement absente pour une pièce sans série en cache", () => {
+    const v = construireVues(source, ["inconnue"], null, options);
+    expect(v.courbes[0]?.valeurs).toEqual([null, null, null]);
   });
 });

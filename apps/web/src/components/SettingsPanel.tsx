@@ -24,6 +24,7 @@ import { bgeometricsKeyStore } from "../store/onchain";
 import { soSoValueKeyStore } from "../store/sosovalue";
 import { finnhubKeyStore } from "../store/finnhub";
 import { etherscanKeyStore } from "../store/etherscan";
+import { coingeckoKeyStore } from "../store/coingecko";
 import { risqueStore } from "../store/risque";
 import { refSymbolStore } from "../store/refSymbol";
 import { fetchPairs } from "../data/pairs";
@@ -492,6 +493,10 @@ export function SettingsPanel() {
   const etherscanSetKey = useStore(etherscanKeyStore, (s) => s.setKey);
   const etherscanClearKey = useStore(etherscanKeyStore, (s) => s.clearKey);
 
+  const cgHasKey = useStore(coingeckoKeyStore, (s) => s.hasKey);
+  const cgSetKey = useStore(coingeckoKeyStore, (s) => s.setKey);
+  const cgClearKey = useStore(coingeckoKeyStore, (s) => s.clearKey);
+
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Échap ferme — écouteur actif UNIQUEMENT quand le panneau est ouvert.
@@ -622,6 +627,17 @@ export function SettingsPanel() {
               hasKey={etherscanHasKey}
               onSave={etherscanSetKey}
               onClear={etherscanClearKey}
+            />
+            <ApiKeyField
+              name="CoinGecko (Demo)"
+              purpose="Capitalisations et dominances (fenêtre CAP, treemap MAP). Optionnelle : tout marche sans clé, mais elle relève les quotas — la reconstruction de l'historique CAP passe d'environ 15 min à 3,5 min."
+              domain="api.coingecko.com"
+              signupUrl="https://www.coingecko.com/en/developers/dashboard"
+              signupLabel="Clé gratuite"
+              placeholder="Clé Demo CoinGecko (optionnelle)"
+              hasKey={cgHasKey}
+              onSave={cgSetKey}
+              onClear={cgClearKey}
             />
           </div>
 

@@ -125,3 +125,80 @@ export function fenetrer<T>(serie: readonly T[], jours: number | null): T[] {
   if (jours === null || jours >= serie.length) return [...serie];
   return serie.slice(-jours);
 }
+
+// ─────────────────────────── Séries affichées ───────────────────────────
+
+/** Historique consommé par la fenêtre — forme structurelle (pas d'import du store). */
+export interface SourceMcap {
+  grille: readonly number[];
+  total: readonly number[];
+  pieces: Readonly<Record<string, readonly number[]>>;
+}
+
+/** Une courbe de dominance prête à tracer. */
+export interface CourbeDominance {
+  id: string;
+  libelle: string;
+  /** Token de couleur (`--serie-N`) — résolu au dessin, pas ici. */
+  token: string;
+  valeurs: (number | null)[];
+}
+
+/** Les trois graphiques, déjà fenêtrés et prêts à peindre. */
+export interface VuesMcap {
+  grille: number[];
+  total: number[];
+  total3: number[];
+  courbes: CourbeDominance[];
+}
+
+/**
+ * Construit les trois séries affichées à partir de l'historique, de la sélection de
+ * dominances et de la période. PURE.
+ *
+ * ⚠️ Les dominances sont calculées sur le TOTAL RECALIBRÉ (`source.total`), jamais sur
+ * la somme brute du panier — cf. data/mcap.ts. `idAlts` produit `100 − BTC.D − ETH.D`
+ * sans aucun appel réseau.
+ */
+export function construireVues(
+  source: SourceMcap | null,
+  dominances: readonly string[],
+  jours: number | null,
+  options: {
+    idAlts: string;
+    palette: readonly string[];
+    /** Libellé lisible d'un id CoinGecko (symbole du catalogue marchés). */
+    libelle: (id: string) => string;
+    dominance: (piece: readonly number[], total: readonly number[]) => (number | null)[];
+    dominanceAlts: (
+      btcD: readonly (number | null)[],
+      ethD: readonly (number | null)[]
+    ) => (number | null)[];
+    difference: (base: readonly number[], ...retraits: readonly number[][]) => number[];
+  }
+): VuesMcap {
+  if (source === null || source.grille.length === 0) {
+    return { grille: [], total: [], total3: [], courbes: [] };
+  }
+
+  const grille = fenetrer(source.grille, jours);
+  const total = fenetrer(source.total, jours);
+  const btc = fenetrer(source.pieces["bitcoin"] ?? [], jours);
+  const eth = fenetrer(source.pieces["ethereum"] ?? [], jours);
+
+  const total3 = options.difference(total, btc, eth);
+  const btcD = options.dominance(btc, total);
+  const ethD = options.dominance(eth, total);
+
+  const courbes = dominances.map((id, i) => ({
+    id,
+    libelle: id === options.idAlts ? "Alts" : options.libelle(id),
+    token: options.palette[i % options.palette.length] ?? "--serie-1",
+    valeurs:
+      id === options.idAlts
+        ? options.dominanceAlts(btcD, ethD)
+        : options.dominance(fenetrer(source.pieces[id] ?? [], jours), total),
+  }));
+
+  return { grille, total, total3, courbes };
+}

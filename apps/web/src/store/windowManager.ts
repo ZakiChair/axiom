@@ -79,6 +79,7 @@ export const WINDOW_REGISTRY = [
   { id: "cycle", title: "Cycle 4 ans (halving)", mnemonic: "CYCLE", defaultWidth: 760, defaultHeight: 600, nouveau: true },
   { id: "evts", title: "Étude d'évènements", mnemonic: "EVTS", defaultWidth: 760, defaultHeight: 560, nouveau: true },
   { id: "scen", title: "Stress-test", mnemonic: "SCEN", defaultWidth: 720, defaultHeight: 540, nouveau: true },
+  { id: "mcap", title: "Capitalisation & dominance", mnemonic: "CAP", defaultWidth: 880, defaultHeight: 700, menuLabel: "Capitalisation & dominance (TOTAL, TOTAL3, BTC.D)", nouveau: true },
 ] as const satisfies readonly DefinitionFenetre[];
 
 /** Union des ids de fenêtre — DÉRIVÉE du registre (source unique). Sert à typer la

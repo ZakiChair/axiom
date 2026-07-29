@@ -140,6 +140,13 @@ export function indexRoving(
   }
 }
 
+/** Classes du panneau de MenuDeroulant (pure — testable sans DOM). */
+export function classesPanneauMenu(align: "left" | "right", direction: "bas" | "haut"): string {
+  const h = align === "right" ? "right-0" : "left-0";
+  const v = direction === "haut" ? "bottom-full mb-1" : "mt-1";
+  return `absolute ${h} z-50 ${v} max-h-[70vh] overflow-y-auto rounded border border-border bg-surface p-1 shadow-xl`;
+}
+
 /**
  * Menu déroulant contrôlé et unifié de la Toolbar (remplace les copies locales
  * divergentes relevées par l'audit). Comportements standard : ouverture au clic,
@@ -161,6 +168,7 @@ export function MenuDeroulant({
   classePanneau = "w-60",
   declencheurClasse = "flex items-center gap-1 rounded border border-border bg-surface px-2 py-1 text-xs text-text hover:border-text-dim",
   chevron = true,
+  direction = "bas",
   children,
 }: {
   /** Contenu du bouton déclencheur (libellé) — le chevron ▾ est ajouté par la primitive. */
@@ -177,6 +185,8 @@ export function MenuDeroulant({
   declencheurClasse?: string;
   /** Affiche le chevron ▾ (désactivable pour un déclencheur-icône). */
   chevron?: boolean;
+  /** Bord vertical d'ouverture du panneau — "haut" pour un déclencheur en bas de fenêtre. */
+  direction?: "bas" | "haut";
   children: (fermer: () => void) => ReactNode;
 }) {
   const [ouvert, setOuvert] = useState(false);
@@ -240,7 +250,7 @@ export function MenuDeroulant({
         <div
           role="menu"
           ref={menuRef}
-          className={`absolute ${align === "right" ? "right-0" : "left-0"} z-50 mt-1 ${classePanneau} max-h-[70vh] overflow-y-auto rounded border border-border bg-surface p-1 shadow-xl`}
+          className={`${classesPanneauMenu(align, direction)} ${classePanneau}`}
         >
           {children(fermer)}
         </div>

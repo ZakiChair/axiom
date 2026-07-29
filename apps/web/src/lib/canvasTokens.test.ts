@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { indexSerie, parseHexRgb } from "./canvasTokens";
+import { indexSerie, parseHexRgb, POLICE_CANVAS } from "./canvasTokens";
 
 // serieCanvas/lireTokenCanvas exigent le DOM (vitest node) : on teste leurs
 // briques pures — le cycle modulo des séries et le parseur hex.
@@ -24,4 +24,8 @@ describe("parseHexRgb", () => {
     expect(parseHexRgb("rgb(1,2,3)")).toBeNull();
     expect(parseHexRgb("")).toBeNull();
   });
+});
+
+it("POLICE_CANVAS : police unique des axes canvas", () => {
+  expect(POLICE_CANVAS).toBe("10px ui-sans-serif, system-ui, sans-serif");
 });

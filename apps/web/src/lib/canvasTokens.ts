@@ -11,6 +11,9 @@
  * repeint alors avec les bonnes couleurs au prochain rendu.
  */
 
+/** Police UNIQUE des axes/étiquettes canvas (l'audit relevait 4 variantes pour le même rôle). */
+export const POLICE_CANVAS = "10px ui-sans-serif, system-ui, sans-serif";
+
 /**
  * Résout un lot de variables CSS (`--up`, `--text-dim`…) depuis `<html>`.
  * Renvoie les valeurs brutes trimées (hex ou rgb selon le thème) ; une

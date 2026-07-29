@@ -3,7 +3,7 @@ import type { ReactElement } from "react";
 import {
   CLASSES_CHAMP, Input, Select, Bouton, BoutonBascule, BoutonRafraichir, BTN_SECONDAIRE, CLASSES_BOUTON,
   BarreProgression, Chip, classesSegmentItem, CLASSES_SEGMENT_CONTENEUR, SegmenteCompact, TitreSection,
-  Metric, TuileStat,
+  Metric, TuileStat, classesPanneauMenu,
 } from "./ui";
 
 /** Invoque un composant SANS hook et retourne ses props d'élément racine. */
@@ -139,5 +139,13 @@ describe("TuileStat", () => {
   it("Metric (déprécié) délègue à TuileStat inline", () => {
     const viaMetric = racine(Metric({ label: "x", value: "1" }));
     expect(viaMetric.type).toBe(TuileStat);
+  });
+});
+
+describe("classesPanneauMenu", () => {
+  it("bas = mt-1, haut = bottom-full mb-1", () => {
+    expect(classesPanneauMenu("left", "bas")).toContain("mt-1");
+    expect(classesPanneauMenu("left", "haut")).toContain("bottom-full mb-1");
+    expect(classesPanneauMenu("right", "bas")).toContain("right-0");
   });
 });

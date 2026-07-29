@@ -1,11 +1,19 @@
 /**
- * Menu « Indicateurs » — bouton de la toolbar ouvrant :
+ * Menu « Indicateurs » — bouton de la toolbar ouvrant un panneau à DEUX ONGLETS.
+ *
+ * Onglet « Techniques » (catalogue du registre) :
  *  1. une section « Actifs » en tête (les INSTANCES affichées, chacune avec ses
  *     params ; boutons dupliquer / éditer / retirer, éditeur de params inline) ;
  *  2. le CATALOGUE des indicateurs du registre @axiom/indicators (compteur live),
  *     groupé par catégorie en sections repliables et filtrable par recherche.
  *     Ordre des catégories orienté crypto : Order Flow → Volume → Dérivés
  *     d'abord. Les stratégies ont leur propre menu (foyer exclusif).
+ *
+ * Onglet « Macro » (MacroIndicators) : les 3 mesures de liquidité (cap. crypto,
+ * stablecoins, M2), chacune cochable pour tracer le pane macro du graphe. Elles
+ * vivaient dans la sidebar droite ; l'onglet leur rend la place latérale. Ce ne sont
+ * PAS des `IndicatorDef` — séries fetchées en async, dessinées par un contrôleur
+ * dédié (chart/macro.ts) — d'où un onglet plutôt qu'une catégorie du registre.
  *
  * MULTI-INSTANCES : cliquer un indicateur du catalogue AJOUTE une nouvelle instance
  * aux params par défaut (EMA(20) puis EMA(50) coexistent). L'état vient du
@@ -22,8 +30,12 @@ import {
   type ActiveIndicator,
 } from "../store/indicators";
 import { marketStore } from "../store/market";
+import { macroOverlayStore } from "../store/macro-overlays";
+import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
+import { settingsUiStore } from "../store/settings-ui";
 import { tfAtLeast } from "../chart/tfOrder";
-import { indexRoving } from "./ui";
+import { indexRoving, Onglets } from "./ui";
+import { MacroIndicators } from "./MacroIndicators";
 
 /** Catalogue du menu Indicateurs : TOUT sauf les stratégies (foyer exclusif — menu Stratégies). */
 export const INDICATEURS_ANALYSE = INDICATORS.filter((d) => d.category !== "strategy");
@@ -165,7 +177,13 @@ export function InstanceParamsEditor({
 }
 
 export function IndicatorMenu() {
-  const [open, setOpen] = useState(false);
+  // Ouverture + onglet dans un store : la commande Launchpad « MACRO » ouvre le menu
+  // directement sur l'onglet Macro (cf. store/indicator-menu-ui.ts).
+  const open = useStore(indicatorMenuUiStore, (s) => s.open);
+  const onglet = useStore(indicatorMenuUiStore, (s) => s.onglet);
+  const basculerMenu = useStore(indicatorMenuUiStore, (s) => s.basculer);
+  const fermerMenu = useStore(indicatorMenuUiStore, (s) => s.fermer);
+  const setOnglet = useStore(indicatorMenuUiStore, (s) => s.setOnglet);
   const [query, setQuery] = useState("");
   // Sections repliées (set d'ids de catégorie). Par défaut : tout ouvert.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -173,6 +191,11 @@ export function IndicatorMenu() {
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const active = useStore(indicatorsStore, (s) => s.indicators);
+  // Macros actives : elles comptent dans le badge du bouton au même titre que les
+  // instances techniques (sinon, macros seules cochées, le badge afficherait le total
+  // du catalogue — ce qui se lit comme « aucune active »).
+  const macrosActives = useStore(macroOverlayStore, (s) => s.enabled);
+  const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
   const exchange = useStore(marketStore, (s) => s.exchange);
   const timeframe = useStore(marketStore, (s) => s.timeframe);
   const add = useStore(indicatorsStore, (s) => s.add);
@@ -229,7 +252,7 @@ export function IndicatorMenu() {
   function onKeyDownPanneau(e: React.KeyboardEvent<HTMLDivElement>) {
     if (e.key === "Escape") {
       e.preventDefault();
-      setOpen(false);
+      fermerMenu();
       return;
     }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
@@ -243,13 +266,16 @@ export function IndicatorMenu() {
     cible?.focus();
   }
 
+  // Total affiché en badge : instances techniques + mesures macro cochées.
+  const totalActifs = activesAnalyse.length + macrosActives.length;
+
   return (
     <div className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
-        title={`${INDICATEURS_ANALYSE.length} indicateurs · ${activesAnalyse.length} actif${
-          activesAnalyse.length > 1 ? "s" : ""
+        onClick={() => basculerMenu()}
+        title={`${INDICATEURS_ANALYSE.length} indicateurs + 3 mesures macro · ${totalActifs} actif${
+          totalActifs > 1 ? "s" : ""
         }`}
         className={`rounded px-2 py-1 text-xs tabular-nums ${
           open
@@ -259,19 +285,46 @@ export function IndicatorMenu() {
       >
         Indicateurs
         <span className="ml-1 text-[10px] opacity-70">
-          {activesAnalyse.length > 0 ? activesAnalyse.length : INDICATEURS_ANALYSE.length}
+          {totalActifs > 0 ? totalActifs : INDICATEURS_ANALYSE.length}
         </span>
       </button>
 
       {open && (
         <>
         {/* Zone de fermeture au clic extérieur (même mécanisme que les menus de la Toolbar). */}
-        <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+        <div className="fixed inset-0 z-40" onClick={() => fermerMenu()} />
         <div
           ref={panneauRef}
           onKeyDown={onKeyDownPanneau}
           className="absolute left-0 top-full z-50 mt-1 flex max-h-[70vh] w-72 flex-col rounded border border-neutral-800 bg-neutral-900 shadow-xl"
         >
+          {/* Onglets : catalogue technique | mesures macro. Les contenus sont montés
+              CONDITIONNELLEMENT (pas masqués en CSS) — les items de l'onglet inactif ne
+              sont donc pas dans le DOM et le focus roving ↑/↓ ne les traverse jamais. */}
+          <Onglets
+            options={[
+              { id: "techniques", label: "Techniques" },
+              {
+                id: "macro",
+                label: macrosActives.length > 0 ? `Macro ${macrosActives.length}` : "Macro",
+              },
+            ]}
+            actif={onglet}
+            onChange={setOnglet}
+          />
+
+          {onglet === "macro" && (
+            <MacroIndicators
+              onOuvrirReglages={() => {
+                // Le slide-over Réglages passerait devant un menu resté ouvert.
+                fermerMenu();
+                openSettings();
+              }}
+            />
+          )}
+
+          {onglet === "techniques" && (
+          <>
           {/* Section « Actifs » : les instances affichées, éditables par instance. */}
           {activesAnalyse.length > 0 && (
             <div className="border-b border-neutral-800 p-1">
@@ -429,6 +482,8 @@ export function IndicatorMenu() {
               );
             })}
           </div>
+          </>
+          )}
         </div>
         </>
       )}

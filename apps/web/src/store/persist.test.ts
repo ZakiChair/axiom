@@ -37,6 +37,7 @@ import { refSymbolStore, REF_SYMBOL_DEFAUT } from "./refSymbol";
 import { volumeProfileStore } from "./volumeProfile";
 import { revenueStore } from "./revenue";
 import { macroOverlayStore } from "./macro-overlays";
+import { denominateurStore, DENOMINATEUR_DEFAUT } from "./denominateur";
 import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore } from "../chart/Chart";
 import { liqMarksStore } from "../chart/liquidationMarkers";
@@ -91,6 +92,7 @@ beforeEach(() => {
   liqMarksStore.getState().setMode("intensite");
   liqEstStore.getState().setActif(false);
   macroOverlayStore.getState().setEnabled([]);
+  denominateurStore.getState().setDenominateur(DENOMINATEUR_DEFAUT);
   uiSectionsStore.getState().setAll({});
   priceScaleStore.getState().setType("normal");
 });
@@ -287,6 +289,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
         liqHeatmapMode: "dominance",
         liqEstimates: true,
         macroOverlays: ["m2", "stablecoins"],
+        denominateur: "SOL",
         sections: { Alertes: true, Watchlist: false },
         priceScale: "log",
       })
@@ -304,6 +307,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(compareStore.getState().symbols.map((c) => c.symbol)).toEqual(["ETHUSDT", "SOLUSDT"]);
     // setEnabled réordonne selon MACRO_OVERLAYS = ["crypto-total","stablecoins","m2"].
     expect(macroOverlayStore.getState().enabled).toEqual(["stablecoins", "m2"]);
+    expect(denominateurStore.getState().denominateur).toBe("SOL");
     expect(uiSectionsStore.getState().open).toEqual({ Alertes: true, Watchlist: false });
     expect(priceScaleStore.getState().type).toBe("log");
   });
@@ -317,6 +321,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
         liqHeatmapMode: "arc-en-ciel", // mode inconnu -> ignoré (reste intensite)
         priceScale: "diagonale", // échelle inconnue -> ignorée (reste normal)
         macroOverlays: ["m2", "inexistant"], // "inexistant" filtré
+        denominateur: "DOGE", // hors DENOMINATEURS -> ignoré (reste le défaut ETH)
         sections: { A: 1 }, // valeur non booléenne -> écartée
       })
     );
@@ -328,6 +333,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(liqMarksStore.getState().mode).toBe("intensite");
     expect(priceScaleStore.getState().type).toBe("normal");
     expect(macroOverlayStore.getState().enabled).toEqual(["m2"]);
+    expect(denominateurStore.getState().denominateur).toBe(DENOMINATEUR_DEFAUT);
     expect(uiSectionsStore.getState().open).toEqual({});
   });
 
@@ -337,6 +343,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     liqMarksStore.getState().setActif(true);
     liqMarksStore.getState().setMode("dominance");
     priceScaleStore.getState().setType("percentage");
+    denominateurStore.getState().setDenominateur("SOL");
     uiSectionsStore.getState().setOpen("Macro", false);
 
     saveSessionUi();
@@ -348,6 +355,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(raw.liqHeatmapMode).toBe("dominance");
     expect(raw.liqEstimates).toBe(false);
     expect(raw.priceScale).toBe("percentage");
+    expect(raw.denominateur).toBe("SOL");
     expect(raw.sections).toEqual({ Macro: false });
   });
 });

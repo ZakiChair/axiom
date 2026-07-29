@@ -21,6 +21,7 @@ import { orderflowStore } from "../store/orderflow";
 import { volumeProfileStore } from "../store/volumeProfile";
 import { revenueStore } from "../store/revenue";
 import { derivativesUiStore } from "../store/derivatives-ui";
+import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
 import { settingsUiStore } from "../store/settings-ui";
 import { exportChartImage, clearAllOverlays } from "../chart/drawing";
 import { QUOTE_ASSETS } from "../data/symbol";
@@ -437,11 +438,13 @@ export function construireRegistre(): Commande[] {
     {
       id: "panneau:macro",
       mnemonique: "MACRO",
-      libelle: "Masse monétaire (focus)",
+      libelle: "Masse monétaire (indicateurs)",
       categorie: "panneau",
       motsCles: ["macro", "masse monetaire", "liquidite", "m2", "stablecoins"],
-      apercu: "Fait défiler jusqu'au panneau macro",
-      action: () => focusPanneauSidebar("MASSE"),
+      // Les mesures macro ont quitté la sidebar : elles vivent dans l'onglet « Macro »
+      // du menu Indicateurs, que cette commande ouvre directement.
+      apercu: "Ouvre l'onglet Macro du menu Indicateurs",
+      action: () => indicatorMenuUiStore.getState().ouvrirSurMacro(),
     },
     {
       id: "panneau:sante",

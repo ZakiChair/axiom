@@ -11,9 +11,12 @@
  * (chart/macro.ts) — c'est ce qui fait de ces mesures des INDICATEURS et justifie
  * leur place dans ce menu plutôt que dans la sidebar.
  *
- * ⚠️ La case M2 reste ACTIVE même sans clé FRED perso : le proxy `/fredapi` injecte une
- * clé de repli (.env), donc l'overlay du graphe fonctionne. Seule la LECTURE CHIFFRÉE
- * est conditionnée à `hasKey` et renvoie vers les Réglages.
+ * ⚠️ La case M2 reste ACTIVE même sans clé FRED perso : le proxy `/fredapi` injecte la
+ * clé de repli `FRED_API_KEY` quand elle est configurée (.env en dev, daemon en prod) —
+ * vérifié le 2026-07-29, une requête sans clé renvoie bien des observations. L'overlay du
+ * graphe fonctionne donc sans clé perso. Seule la LECTURE CHIFFRÉE ci-dessous est
+ * conditionnée à `hasKey` et renvoie vers les Réglages ; ne PAS étendre cette garde à la
+ * case, elle désactiverait une fonctionnalité qui marche.
  *
  * Donnée BASSE fréquence : un fetch à l'ouverture + rafraîchissement périodique LARGE
  * (~15 min) + bouton de refresh manuel. Ces séries peuvent vivre dans le state React

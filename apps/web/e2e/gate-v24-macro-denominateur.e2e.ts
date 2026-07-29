@@ -52,6 +52,21 @@ test("cocher une mesure macro met à jour le compteur de l'onglet", async ({ pag
   await expect(page.getByRole("button", { name: "Macro 1" })).toBeVisible();
 });
 
+test("la commande MACRO du Launchpad ouvre l'onglet Macro (palette refermée)", async ({ page }) => {
+  await page.goto("/");
+  // Attendre le montage AVANT la frappe : l'écouteur ⌘K est posé par un effet React,
+  // une pression trop précoce se perd (constaté — le test échouait à ce point).
+  await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
+  // ⌘K : le registre prouve en unitaire que l'action mute le store ; SEUL le navigateur
+  // prouve que la palette se referme et ne recouvre pas le panneau ouvert.
+  await page.keyboard.press("ControlOrMeta+k");
+  await page.getByPlaceholder(/^Commande/).fill("MACRO");
+  await page.keyboard.press("Enter");
+
+  await expect(page.getByPlaceholder(/^Commande/)).toHaveCount(0);
+  await expect(page.getByText("Cap. totale crypto")).toBeVisible();
+});
+
 test("bandeau : ÷BTC absent sur BTCUSDT, ÷ETH pose le ratio et le menu bascule sur ÷SOL", async ({
   page,
 }) => {

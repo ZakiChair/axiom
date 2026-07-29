@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CoinTile, MarketGlobal } from "../data/marketOverview";
-import { ErreurCoinGecko, JOUR_MS, dominance, type SerieJour } from "../data/mcap";
+import { ErreurCoinGecko, JOUR_MS, STATUT_RESEAU, dominance, type SerieJour } from "../data/mcap";
 import {
   CLE_BACKFILL,
   ID_ALTS,
@@ -141,6 +141,42 @@ describe("demarrerBackfill — reconstruction recalibrée", () => {
     const hist = mcapStore.getState().hist;
     expect(hist?.total[hist.total.length - 1]).toBeCloseTo(1_000, 6);
     expect(Object.keys(hist?.pieces ?? {})).toContain("ethereum");
+  });
+
+  it("rejoue aussi sur un REJET RÉSEAU — c'est ainsi qu'un 429 se présente au navigateur", async () => {
+    // Un 429 CoinGecko n'a pas d'en-tête CORS : le navigateur bloque la réponse et
+    // `fetch` rejette, statut illisible. Ne retenter que sur 429 laisserait le repli
+    // inopérant précisément là où il sert (constaté en run réel).
+    let essais = 0;
+    const d = deps();
+    d.fetchPiece = vi.fn(async (id: string) => {
+      if (id === "ethereum") {
+        essais += 1;
+        if (essais === 1) throw new ErreurCoinGecko("CORS", STATUT_RESEAU, null);
+      }
+      return HISTOS[id] ?? [];
+    });
+
+    await mcapStore.getState().demarrerBackfill(d);
+
+    expect(essais).toBe(2);
+    const hist = mcapStore.getState().hist;
+    expect(hist?.total[hist.total.length - 1]).toBeCloseTo(1_000, 6);
+  });
+
+  it("rejoue le catalogue initial : un échec unique ne doit pas tuer tout le backfill", async () => {
+    let appels = 0;
+    const d = deps();
+    d.fetchMarchesEtGlobal = vi.fn(async () => {
+      appels += 1;
+      if (appels === 1) throw new ErreurCoinGecko("CORS", STATUT_RESEAU, null);
+      return { marches: MARCHES, global: GLOBAL };
+    });
+
+    await mcapStore.getState().demarrerBackfill(d);
+
+    expect(appels).toBe(2);
+    expect(mcapStore.getState().hist).not.toBeNull();
   });
 
   it("abandonne proprement après une erreur non 429 (série précédente préservée)", async () => {

@@ -228,9 +228,33 @@ function lireRetryAfter(res: Response): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** GET JSON CoinGecko : lève une `ErreurCoinGecko` typée sur statut non OK. */
+/**
+ * Statut conventionnel d'un échec RÉSEAU (fetch rejeté) : le navigateur n'a pas laissé
+ * voir la réponse. **Cas dominant en pratique : un 429 CoinGecko.**
+ *
+ * ⚠️ LEÇON DE RUN RÉEL (2026-07-29) : quand CoinGecko limite le débit, sa réponse
+ * d'erreur ne porte PAS d'en-tête `Access-Control-Allow-Origin`. Le navigateur bloque
+ * donc la réponse et `fetch` REJETTE avec un `TypeError` — la console affiche « blocked
+ * by CORS policy », et `res.status` n'est jamais lisible. Tout repli qui ne s'appuie que
+ * sur `status === 429` est donc mort dans un navigateur : il faut traiter le rejet
+ * réseau comme retentable. (En curl, la même requête renvoie un 429 bien visible — d'où
+ * le piège : le diagnostic en ligne de commande ne reproduit pas le symptôme.)
+ */
+export const STATUT_RESEAU = 0;
+
+/** GET JSON CoinGecko : lève une `ErreurCoinGecko` typée sur statut non OK OU sur rejet réseau. */
 async function getJsonCg(url: string, signal?: AbortSignal): Promise<unknown> {
-  const res = await fetch(withDemoKey(url), { signal });
+  let res: Response;
+  try {
+    res = await fetch(withDemoKey(url), { signal });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") throw e; // annulation explicite
+    throw new ErreurCoinGecko(
+      `CoinGecko injoignable (réseau ou CORS — quota probablement dépassé)`,
+      STATUT_RESEAU,
+      null
+    );
+  }
   if (!res.ok) {
     throw new ErreurCoinGecko(
       `CoinGecko ${res.status} ${res.statusText ?? ""}`.trim(),

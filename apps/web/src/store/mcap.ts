@@ -14,10 +14,15 @@
  *      l'overlay du graphe en profitent sans code supplémentaire.
  *
  * CADENCE : le seuil de 429 de CoinGecko est bas (mesuré : 429 dès le 6ᵉ appel d'une
- * rafale sans délai). L'espacement part de 2,1 s avec clé Demo / 3 s sans, puis suit un
- * AIMD — ×1,5 à chaque 429 (plafond 15 s), −200 ms après 10 succès (plancher = la base).
- * Le vrai plafond du tier Demo n'est pas documenté de façon fiable ; l'AIMD rend la
- * cadence robuste sans avoir à le trancher.
+ * rafale sans délai). L'espacement part de 2,1 s avec clé Demo / 6 s sans, puis suit un
+ * AIMD — ×1,5 à chaque échec retentable (plafond 15 s), −200 ms après 10 succès
+ * (plancher = la base). Le vrai plafond du tier Demo n'est pas documenté de façon
+ * fiable ; l'AIMD rend la cadence robuste sans avoir à le trancher.
+ *
+ * ⚠️ Un 429 CoinGecko arrive au NAVIGATEUR en erreur CORS (réponse d'erreur sans
+ * `Access-Control-Allow-Origin`), donc en rejet de `fetch` avec un statut illisible —
+ * d'où `estRetryable`, qui couvre aussi le rejet réseau. Constaté en run réel : sans
+ * cela, tout le repli était inopérant là où il sert.
  *
  * Patron d'erreur NETLIQ : non destructive (l'historique affiché survit à un échec),
  * garde de double-lancement, lecture de persistance tolérante.
@@ -27,6 +32,7 @@ import type { CoinTile, MarketGlobal } from "../data/marketOverview";
 import { resolveDemoKey } from "../data/marketOverview";
 import {
   ErreurCoinGecko,
+  STATUT_RESEAU,
   alignerSurGrille,
   attenteApres429,
   fetchHistoriquePiece,
@@ -72,7 +78,12 @@ export const PALETTE_DOMINANCES = [
 
 const ESSAIS_MAX = 4;
 const ESPACEMENT_AVEC_CLE_MS = 2_100;
-const ESPACEMENT_SANS_CLE_MS = 3_000;
+/**
+ * Sans clé, CoinGecko tolère de l'ordre de 5 à 15 appels/minute (mesuré : 429 dès le
+ * 6ᵉ appel d'une rafale sans délai). 6 s ≈ 10 appels/min part sous ce plafond ; l'AIMD
+ * ajuste ensuite. Une base plus vive déclenche une tempête de 429 dès le début.
+ */
+const ESPACEMENT_SANS_CLE_MS = 6_000;
 const ESPACEMENT_PLAFOND_MS = 15_000;
 const FACTEUR_429 = 1.5;
 const DECREMENT_MS = 200;
@@ -229,6 +240,18 @@ function semerMacroHistory(hist: HistoriqueMcap): void {
   macroHistoryStore.getState().seed(points);
 }
 
+/**
+ * Un échec vaut-il une nouvelle tentative ? Le 429 explicite (curl, daemon) ET le rejet
+ * réseau (`STATUT_RESEAU`) — car un 429 CoinGecko arrive au navigateur en erreur CORS,
+ * statut illisible (cf. data/mcap.ts). Ne pas inclure `STATUT_RESEAU` rendrait tout le
+ * repli inopérant là où il sert : dans le navigateur.
+ */
+function estRetryable(e: unknown): boolean {
+  return (
+    e instanceof ErreurCoinGecko && (e.status === 429 || e.status === STATUT_RESEAU)
+  );
+}
+
 /** Drapeau d'interruption du backfill — hors state : lu dans la boucle asynchrone. */
 let annulationDemandee = false;
 
@@ -300,7 +323,20 @@ export const mcapStore = createStore<McapState>((set, get) => ({
     set({ backfill: { enCours: true, faites: 0, total: 0, erreur: null } });
 
     try {
-      const { marches, global } = await fetchMg();
+      // Le catalogue est indispensable : un seul 429 ici (invisible côté navigateur,
+      // cf. estRetryable) tuerait le backfill avant même son premier appel.
+      let amorce: { marches: CoinTile[]; global: MarketGlobal } | null = null;
+      for (let essai = 1; essai <= ESSAIS_MAX; essai += 1) {
+        try {
+          amorce = await fetchMg();
+          break;
+        } catch (e) {
+          if (!estRetryable(e) || essai === ESSAIS_MAX) throw e;
+          await pause(attenteApres429(essai, (e as ErreurCoinGecko).retryAfter));
+        }
+      }
+      if (amorce === null) throw new Error("Catalogue CoinGecko indisponible");
+      const { marches, global } = amorce;
       set({ marches });
 
       const ids = marches.slice(0, TAILLE_PANIER).map((m) => m.id);
@@ -333,8 +369,7 @@ export const mcapStore = createStore<McapState>((set, get) => ({
             serie = await fetchPiece(id);
             break;
           } catch (e) {
-            const est429 = e instanceof ErreurCoinGecko && e.status === 429;
-            if (!est429 || essai === ESSAIS_MAX) throw e;
+            if (!estRetryable(e) || essai === ESSAIS_MAX) throw e;
             espacement = Math.min(espacement * FACTEUR_429, ESPACEMENT_PLAFOND_MS);
             succes = 0;
             await pause(attenteApres429(essai, (e as ErreurCoinGecko).retryAfter));

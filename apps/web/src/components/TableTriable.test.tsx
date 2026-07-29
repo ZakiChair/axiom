@@ -46,17 +46,52 @@ describe("TableTriable (markup)", () => {
     };
     expect(JSON.stringify(plein.props)).toContain("1fr 1fr");
   });
-  it("colonne triable: true SANS valeurTri → span, pas button", () => {
+  it("colonne triable: true SANS valeurTri → span (pas button) même avec onTri", () => {
     const colsSansValeur: ColonneTable<Ligne>[] = [
       { id: "test", label: "Test", triable: true, rendu: (l) => l.sym },
     ];
-    const el = TableTriable({ colonnes: colsSansValeur, lignes: LIGNES, cle: (l: Ligne) => l.sym }) as {
-      props: Record<string, unknown>;
+    const el = TableTriable({
+      colonnes: colsSansValeur,
+      lignes: LIGNES,
+      cle: (l: Ligne) => l.sym,
+      onTri: () => {}, // fourni, mais gate doit rejeter car pas de valeurTri
+    }) as {
+      props: { children: Array<{ props: { children: unknown[] } }> };
     };
-    const jsonStr = JSON.stringify(el.props);
-    // Le en-tête doit être un span, pas un button
-    expect(jsonStr).toContain("Test");
-    // Vérifie que c'est un span en cherchant la classe text-[10px] sans flex
-    expect(jsonStr).not.toContain("flex");
+    // Navigue vers le header div (premier enfant de section)
+    const headerDiv = el.props.children[0];
+    expect(headerDiv).toBeDefined();
+    const headerCells = (headerDiv?.props.children ?? []) as Array<{ type: string; key: string }>;
+    const testHeader = headerCells.find((c) => c.key === "test");
+    expect(testHeader?.type).toBe("span"); // type "span", pas "button"
+  });
+
+  it("colonne triable WITH valeurTri → button + onClick déclenche onTri avec basculerTri", () => {
+    let recu: { colonne: string; dir: 1 | -1 } | undefined;
+    const colsAvecValeur: ColonneTable<Ligne>[] = [
+      { id: "prix", label: "Prix", triable: true, valeurTri: (l) => l.prix, rendu: (l) => String(l.prix) },
+    ];
+    const el = TableTriable({
+      colonnes: colsAvecValeur,
+      lignes: LIGNES,
+      cle: (l: Ligne) => l.sym,
+      tri: null,
+      onTri: (t) => {
+        recu = t;
+      },
+    }) as {
+      props: { children: Array<{ props: { children: unknown[] } }> };
+    };
+    const headerDiv = el.props.children[0];
+    expect(headerDiv).toBeDefined();
+    const headerCells = (headerDiv?.props.children ?? []) as Array<{
+      type: string;
+      key: string;
+      props: { onClick?: () => void };
+    }>;
+    const prixHeader = headerCells.find((c) => c.key === "prix");
+    expect(prixHeader?.type).toBe("button"); // type "button"
+    prixHeader?.props.onClick?.(); // appelle le handler
+    expect(recu).toEqual({ colonne: "prix", dir: -1 }); // basculerTri(null, "prix")
   });
 });

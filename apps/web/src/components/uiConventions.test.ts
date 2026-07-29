@@ -17,7 +17,10 @@ const DOSSIER = dirname(fileURLToPath(import.meta.url));
 /** Fichiers hors périmètre : primitives elles-mêmes. */
 const HORS_PERIMETRE = new Set(["ui.tsx", "TableTriable.tsx"]);
 
-const SOURCES: Array<{ nom: string; texte: string }> = readdirSync(DOSSIER)
+/** Scan récursif : les chemins imbriqués (ex. "omon/VueSmile.tsx") sont dans le périmètre du ratchet. */
+const SOURCES: Array<{ nom: string; texte: string }> = readdirSync(DOSSIER, { recursive: true })
+  .filter((f): f is string => typeof f === "string")
+  .map((f) => f.replace(/\\/g, "/"))
   .filter((f) => f.endsWith(".tsx") && !f.includes(".test.") && !HORS_PERIMETRE.has(f))
   .map((nom) => ({ nom, texte: readFileSync(join(DOSSIER, nom), "utf8") }));
 
@@ -43,6 +46,7 @@ const MOTIFS: Motif[] = [
     exceptions: [
       "PaperWindow.tsx", "MacroRatesWindow.tsx", "StablecoinsWindow.tsx",
       "CycleWindow.tsx", "DistWindow.tsx", "FundWindow.tsx", "FundingMatrixWindow.tsx",
+      "brief/SectionSession.tsx", "brief/SectionWatchlist.tsx",
     ],
   },
   {

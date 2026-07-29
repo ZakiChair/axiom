@@ -28,6 +28,25 @@ export const BTN_SECONDAIRE =
   "rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text";
 
 /**
+ * Classes de champ standard (Input/Select) — UNE seule apparence, UN seul focus
+ * (l'audit 2026-07-29 relevait 5 traitements de focus, 2 rayons, 3 tailles).
+ */
+export const CLASSES_CHAMP =
+  "rounded-md border border-border bg-bg px-2 py-1 text-[11px] text-text placeholder:text-text-dim " +
+  "focus:border-accent/60 focus:outline-none focus:ring-1 focus:ring-accent " +
+  "disabled:cursor-not-allowed disabled:opacity-50";
+
+/** Champ texte/nombre standard. `className` s'AJOUTE (largeur, flex…) sans remplacer. */
+export function Input({ className, ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...props} className={`${CLASSES_CHAMP} ${className ?? ""}`} />;
+}
+
+/** Liste déroulante native standard — même gabarit que Input. */
+export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select {...props} className={`${CLASSES_CHAMP} ${className ?? ""}`} />;
+}
+
+/**
  * Calcule l'index de l'élément à focaliser lors d'une navigation clavier « roving »
  * dans un menu de `nb` éléments, depuis l'index `courant` (-1 = aucun focus).
  * ↑/↓ bouclent aux extrémités ; Home/End sautent aux bords. Fonction PURE (le

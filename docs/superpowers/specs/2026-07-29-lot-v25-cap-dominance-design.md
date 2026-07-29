@@ -185,8 +185,7 @@ total2, total3, dominance, btc.d, altseason).
 | Fichier | Rôle |
 | --- | --- |
 | `data/mcap.ts` (+ `.test.ts`) | fetchers + fonctions pures du §1 |
-| `store/mcap.ts` | store vanilla de la fenêtre : run, TTL, sélection de dominances, `mirrorOpenState("mcap", …)` |
-| `store/mcapHistory.ts` (+ `.test.ts`) | backfill, persistance, prolongement, `seed` vers `macroHistory` |
+| `store/mcap.ts` (+ `.test.ts`) | store vanilla unique : état UI (période, dominances), historique persisté, backfill, prolongement, `seed` vers `macroHistory`, `mirrorOpenState("mcap", …)` |
 | `components/McapWindow.tsx` | présentation pure : 3 canvas, sélecteur, états |
 | `components/mcapWindow.util.ts` (+ `.test.ts`) | géométrie partagée dessin ⇄ survol, ticks, formatage |
 
@@ -204,8 +203,9 @@ Trois graphiques empilés, hauteurs égales, axe des temps commun :
    extrêmes de la fenêtre (jamais forcé à contenir 0, cf. divergence assumée de
    NETLIQ : un niveau élevé écrasé contre le cadre est illisible).
 2. **TOTAL3** — hors BTC et ETH, même traitement.
-3. **Dominances** — courbes superposées en %, palette `COMPARE_PALETTE`, échelle
-   0 → max + marge.
+3. **Dominances** — courbes superposées en %, palette des six tokens `--serie-1`
+   … `--serie-6` d'`index.css` (et non `COMPARE_PALETTE`, qui n'en expose que
+   quatre pour un plafond de six courbes), échelle 0 → max + marge.
 
 Chrome commun : `EnTeteFenetre`, `BarrePeriodes` (30 j / 90 j / 1 a / Tout),
 `Fraicheur` sur le dernier point, `NoteSource` (« CoinGecko · reconstruction top

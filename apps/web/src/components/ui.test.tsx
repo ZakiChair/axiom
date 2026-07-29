@@ -104,13 +104,24 @@ describe("TuileStat", () => {
     expect(html).toContain("uppercase tracking-wider");
   });
   it("couleur brute prioritaire sur ton (style appliqué, classeTon conservé)", () => {
+    // Teste que couleur (style inline) est prioritaire sur ton (classe), en inspectant le span valeur
     const el = racine(TuileStat({ label: "OI", valeur: "1,2 Md", ton: "up", couleur: "var(--serie-1)" }));
-    const props = el.props;
-    const html = JSON.stringify(props);
-    expect(html).toContain("var(--serie-1)");
-    // Inspecte le style de l'objet pour vérifier que la couleur est effectivement appliquée
-    // Cherche le span valeur qui contient le style inline
-    expect(html).toContain("color"); // Propriété CSS appliquée
+
+    // Navigation structurelle : root > [labelDiv, valueDiv]
+    const rootChildren = el.props.children as any[];
+    const valueDiv = rootChildren[1]; // Rangée valeur (2e enfant du root)
+
+    // valueDiv contient le span de valeur (et optionnellement extra)
+    // Trouve le span dont children === "1,2 Md"
+    let spanValeur = valueDiv.props.children;
+    if (Array.isArray(spanValeur)) {
+      spanValeur = spanValeur.find((child: any) => child?.props?.children === "1,2 Md");
+    }
+
+    expect(spanValeur).toBeDefined();
+    // Assertions structurelles
+    expect(spanValeur.props.style?.color).toBe("var(--serie-1)"); // Style inline appliqué
+    expect(spanValeur.props.className).toContain("text-up"); // classeTon conservé
     // Note : classeTon ("text-up") reste dans className par design — le style inline gagne visuellement
   });
   it("inline : même tuile bordée, libellé et valeur sur une ligne", () => {

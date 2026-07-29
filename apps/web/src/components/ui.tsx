@@ -46,6 +46,76 @@ export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLS
   return <select {...props} className={`${CLASSES_CHAMP} ${className ?? ""}`} />;
 }
 
+/** Variantes de bouton standard — l'audit relevait 3 langages d'action primaire. */
+export type VarianteBouton = "primaire" | "secondaire" | "danger";
+
+export const CLASSES_BOUTON: Record<VarianteBouton, string> = {
+  /** Action principale d'une fenêtre (lancer un run, construire…) — standard CAP. */
+  primaire:
+    "rounded border border-accent/60 bg-accent/10 px-3 py-1.5 text-[11px] font-medium text-accent " +
+    "transition hover:bg-accent/20 disabled:cursor-not-allowed disabled:opacity-40",
+  /** Action secondaire (recalculer, exporter, choisir…) — reprend BTN_SECONDAIRE. */
+  secondaire: BTN_SECONDAIRE,
+  /** Action d'interruption/suppression (annuler un run, retirer…). */
+  danger:
+    "rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-down " +
+    "disabled:cursor-not-allowed disabled:opacity-40",
+};
+
+/** Bouton standard. `variante` par défaut : secondaire. `type` par défaut : button. */
+export function Bouton({
+  variante = "secondaire",
+  className,
+  type = "button",
+  ...props
+}: { variante?: VarianteBouton } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <button {...props} type={type} className={`${CLASSES_BOUTON[variante]} ${className ?? ""}`} />;
+}
+
+/**
+ * Bouton-bascule standard (état ON/OFF) : actif = bordure/texte accent + « ● »
+ * (langage LIQ, consacré — remplace ON/OFF textuel et opacity-60).
+ */
+export function BoutonBascule({
+  actif,
+  className,
+  children,
+  ...props
+}: { actif: boolean } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      {...props}
+      type="button"
+      aria-pressed={actif}
+      className={`rounded border px-2 py-1 text-[11px] font-medium transition ${
+        actif ? "border-accent bg-bg text-accent" : "border-border bg-bg text-text-dim hover:text-text"
+      } ${className ?? ""}`}
+    >
+      {actif ? "● " : ""}
+      {children}
+    </button>
+  );
+}
+
+/** Action « rafraîchir » standard : glyphe ↻, TOUJOURS dans le slot actions de l'en-tête. */
+export function BoutonRafraichir({
+  onClick,
+  libelle = "Rafraîchir",
+  disabled,
+  title,
+}: {
+  onClick: () => void;
+  libelle?: string;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <Bouton onClick={onClick} disabled={disabled} title={title ?? libelle}>
+      ↻ {libelle}
+    </Bouton>
+  );
+}
+
 /**
  * Calcule l'index de l'élément à focaliser lors d'une navigation clavier « roving »
  * dans un menu de `nb` éléments, depuis l'index `courant` (-1 = aucun focus).

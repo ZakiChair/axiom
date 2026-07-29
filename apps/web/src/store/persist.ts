@@ -56,6 +56,8 @@ import { refSymbolStore } from "./refSymbol";
 import { volumeProfileStore } from "./volumeProfile";
 import { revenueStore } from "./revenue";
 import { macroOverlayStore, MACRO_OVERLAYS, type MacroOverlayId } from "./macro-overlays";
+import { denominateurStore } from "./denominateur";
+import { DENOMINATEURS, type DenominateurId } from "../data/ratio";
 import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
 import { liqMarksStore, type LiqHeatMode, type Granularite } from "../chart/liquidationMarkers";
@@ -379,6 +381,8 @@ interface PersistedSession {
   /** Bascule de l'overlay des bandes VaR sur le chart maître (chart/distLignes). */
   distOverlay: boolean;
   macroOverlays: MacroOverlayId[];
+  /** Dénominateur choisi pour le bouton de ratio scindé du bandeau (÷ETH / ÷SOL). */
+  denominateur: DenominateurId;
   /** État replié des sections de la sidebar (clé = titre ; carte creuse). */
   sections: Record<string, boolean>;
   priceScale: PriceScaleType;
@@ -399,6 +403,7 @@ function currentSession(): PersistedSession {
     liqLeviers: liqEstStore.getState().leviers,
     distOverlay: distOverlayStore.getState().actif,
     macroOverlays: macroOverlayStore.getState().enabled,
+    denominateur: denominateurStore.getState().denominateur,
     sections: uiSectionsStore.getState().open,
     priceScale: priceScaleStore.getState().type,
   };
@@ -456,6 +461,14 @@ function hydrateSession(): void {
       (id): id is MacroOverlayId => (MACRO_OVERLAYS as readonly string[]).includes(id as string)
     );
     macroOverlayStore.getState().setEnabled(ids);
+  }
+
+  // Dénominateur du bouton de ratio : union fermée — toute valeur inconnue laisse le défaut.
+  if (
+    typeof p.denominateur === "string" &&
+    (DENOMINATEURS as readonly string[]).includes(p.denominateur)
+  ) {
+    denominateurStore.getState().setDenominateur(p.denominateur as DenominateurId);
   }
 
   if (p.sections && typeof p.sections === "object" && !Array.isArray(p.sections)) {
@@ -555,6 +568,7 @@ export function enablePersistence(): void {
   liqEstStore.subscribe(saveSessionUi);
   distOverlayStore.subscribe(saveSessionUi);
   macroOverlayStore.subscribe(saveSessionUi);
+  denominateurStore.subscribe(saveSessionUi);
   uiSectionsStore.subscribe(saveSessionUi);
   priceScaleStore.subscribe(saveSessionUi);
 

@@ -45,7 +45,22 @@ import { UNIVERS_VALIDATION } from "../data/validationSignaux";
 import { estExtremeColonne, seuilDecile } from "../lib/extremesColonne";
 import { formatPct, formatPrice, formatUsd } from "../lib/format";
 import { metaSource } from "../lib/fiabilite";
-import { Badge, BadgeFiabilite, EnTeteFenetre, ErreurBloc, NoteSource, Segmente, Vide } from "./ui";
+import {
+  Badge,
+  BadgeFiabilite,
+  BarreProgression,
+  Bouton,
+  Chip,
+  EnTeteFenetre,
+  ErreurBloc,
+  Input,
+  NoteSource,
+  Segmente,
+  Select,
+  TitreSection,
+  Vide,
+} from "./ui";
+import { TableTriable, trierLignes, type ColonneTable, type TriTable } from "./TableTriable";
 
 /**
  * Presets « scénario » : teinte du glyphe directionnel (▲▼↔◆), portée par le premier
@@ -61,20 +76,6 @@ const SCENARIO_TINT: Record<string, string> = {
 /** Presets livrés, séparés en « Scénarios » (glyphe teinté) et « Filtres » (les autres). */
 const SCENARIO_PRESETS = BUILTIN_PRESETS.filter((p) => p.id in SCENARIO_TINT);
 const FILTER_PRESETS = BUILTIN_PRESETS.filter((p) => !(p.id in SCENARIO_TINT));
-
-/** Colonnes triables de la table de résultats. */
-type SortKey =
-  | "symbol"
-  | "lastPrice"
-  | "priceChangePct24h"
-  | "volumeUsd24h"
-  | "fundingPct"
-  | "oiChangePct"
-  | "longShortRatio";
-interface SortState {
-  key: SortKey;
-  dir: 1 | -1;
-}
 
 // ─────────────────────────── Formatage ───────────────────────────
 
@@ -96,19 +97,16 @@ function runStateLabel(state: RunState): string {
 
 // ─────────────────────────── Sous-composants de filtres ───────────────────────────
 
-const inputClass =
-  "rounded border border-border bg-bg px-2 py-1 text-[11px] text-text focus:border-text-dim focus:outline-none";
-
 /** Ligne de condition de BASE : champ / opérateur / valeur / suppression. */
 function BaseConditionRow({ index, cond }: { index: number; cond: BaseCondition }) {
   const update = useStore(screenerStore, (s) => s.updateBaseCondition);
   const remove = useStore(screenerStore, (s) => s.removeBaseCondition);
   return (
     <div className="flex items-center gap-1.5">
-      <select
+      <Select
         value={cond.field}
         onChange={(e) => update(index, { field: e.target.value as BaseField })}
-        className={`${inputClass} flex-1`}
+        className="flex-1"
         aria-label="Champ"
       >
         {BASE_FIELDS.map((f) => (
@@ -117,11 +115,10 @@ function BaseConditionRow({ index, cond }: { index: number; cond: BaseCondition 
             {f.unit ? ` (${f.unit})` : ""}
           </option>
         ))}
-      </select>
-      <select
+      </Select>
+      <Select
         value={cond.op}
         onChange={(e) => update(index, { op: e.target.value as Operator })}
-        className={inputClass}
         aria-label="Opérateur"
       >
         {OPERATORS.map((op) => (
@@ -129,12 +126,12 @@ function BaseConditionRow({ index, cond }: { index: number; cond: BaseCondition 
             {op}
           </option>
         ))}
-      </select>
-      <input
+      </Select>
+      <Input
         type="number"
         value={cond.value}
         onChange={(e) => update(index, { value: Number(e.target.value) })}
-        className={`${inputClass} w-24 tabular-nums`}
+        className="w-24 tabular-nums"
         aria-label="Valeur"
       />
       <button
@@ -156,10 +153,10 @@ function IndicatorConditionRow({ index, cond }: { index: number; cond: Indicator
   const spec = getIndicatorField(cond.fieldId);
   return (
     <div className="flex items-center gap-1.5">
-      <select
+      <Select
         value={cond.fieldId}
         onChange={(e) => update(index, { fieldId: e.target.value })}
-        className={`${inputClass} flex-1`}
+        className="flex-1"
         aria-label="Indicateur"
       >
         {INDICATOR_FIELDS.map((f) => (
@@ -168,21 +165,20 @@ function IndicatorConditionRow({ index, cond }: { index: number; cond: Indicator
             {f.unit ? ` (${f.unit})` : ""}
           </option>
         ))}
-      </select>
+      </Select>
       {spec?.paramKey !== undefined && (
-        <input
+        <Input
           type="number"
           value={cond.param ?? spec.defaultParam ?? 0}
           onChange={(e) => update(index, { param: Number(e.target.value) })}
-          className={`${inputClass} w-12 tabular-nums`}
+          className="w-12 tabular-nums"
           aria-label={spec.paramKey}
           title={spec.paramKey}
         />
       )}
-      <select
+      <Select
         value={cond.op}
         onChange={(e) => update(index, { op: e.target.value as Operator })}
-        className={inputClass}
         aria-label="Opérateur"
       >
         {OPERATORS.map((op) => (
@@ -190,12 +186,12 @@ function IndicatorConditionRow({ index, cond }: { index: number; cond: Indicator
             {op}
           </option>
         ))}
-      </select>
-      <input
+      </Select>
+      <Input
         type="number"
         value={cond.value}
         onChange={(e) => update(index, { value: Number(e.target.value) })}
-        className={`${inputClass} w-16 tabular-nums`}
+        className="w-16 tabular-nums"
         aria-label="Valeur"
       />
       <button
@@ -207,36 +203,6 @@ function IndicatorConditionRow({ index, cond }: { index: number; cond: Indicator
         ✕
       </button>
     </div>
-  );
-}
-
-// ─────────────────────────── En-tête de colonne triable ───────────────────────────
-
-function SortHeader({
-  label,
-  colKey,
-  sort,
-  setSort,
-  align = "left",
-}: {
-  label: string;
-  colKey: SortKey;
-  sort: SortState;
-  setSort: (s: SortState) => void;
-  align?: "left" | "right";
-}) {
-  const active = sort.key === colKey;
-  return (
-    <button
-      type="button"
-      onClick={() => setSort({ key: colKey, dir: active && sort.dir === -1 ? 1 : -1 })}
-      className={`flex w-full items-center gap-0.5 text-[10px] uppercase tracking-wide text-text-dim transition hover:text-text ${
-        align === "right" ? "justify-end" : "justify-start"
-      }`}
-    >
-      {label}
-      {active && <span>{sort.dir === -1 ? "▾" : "▴"}</span>}
-    </button>
   );
 }
 
@@ -355,16 +321,11 @@ function SectionValidation() {
           actif={univers}
           onChange={setUnivers}
         />
-        <button
-          type="button"
-          onClick={valider}
-          disabled={etat === "running"}
-          className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text disabled:opacity-40"
-        >
+        <Bouton onClick={valider} disabled={etat === "running"} className="disabled:opacity-40">
           {etat === "running" ? `Mesure… ${progres.done}/${progres.total}` : "Valider sur l'historique"}
-        </button>
+        </Bouton>
       </div>
-      {erreur !== null && <p className="text-[10px] text-warn">{erreur}</p>}
+      {erreur !== null && <p className="text-[10px] text-down">{erreur}</p>}
       {resultat !== null && (
         <div className="rounded-md border border-border bg-bg">
           <div className="grid grid-cols-[1.2fr_1fr_1fr] items-center gap-2 border-b border-border px-3 py-1.5 text-[10px] uppercase tracking-wide text-text-dim">
@@ -405,25 +366,17 @@ function VueSignaux() {
   const busy = runState === "loading" || runState === "running";
 
   return (
-    <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+    <div className="space-y-3 px-4 py-3">
       <section className="space-y-2">
         <div className="flex items-center gap-2">
           {busy ? (
-            <button
-              type="button"
-              onClick={cancel}
-              className="rounded border border-border bg-bg px-3 py-1.5 text-[11px] text-text-dim transition hover:text-down"
-            >
+            <Bouton variante="danger" onClick={cancel}>
               Annuler
-            </button>
+            </Bouton>
           ) : (
-            <button
-              type="button"
-              onClick={run}
-              className="rounded border border-up/50 bg-bg px-3 py-1.5 text-[11px] font-medium text-up transition hover:bg-up/10"
-            >
+            <Bouton variante="primaire" onClick={run}>
               Scanner les setups
-            </button>
+            </Bouton>
           )}
           <span className="text-[11px] text-text-dim">{signauxStateLabel(runState)}</span>
           {runState === "running" && (
@@ -433,12 +386,7 @@ function VueSignaux() {
           )}
         </div>
         {runState === "running" && progress.total > 0 && (
-          <div className="h-1 w-full overflow-hidden rounded bg-bg">
-            <div
-              className="h-full bg-up transition-all"
-              style={{ width: `${(progress.done / progress.total) * 100}%` }}
-            />
-          </div>
+          <BarreProgression fraction={progress.done / progress.total} ariaLabel="Progression du scan" />
         )}
         {note !== null && <p className="text-[10px] text-text-dim">{note}</p>}
         {error !== null && <ErreurBloc>{error}</ErreurBloc>}
@@ -494,7 +442,7 @@ export function ScreenerWindow() {
   const setVue = useStore(signauxStore, (s) => s.setVue);
 
   const [presetName, setPresetName] = useState("");
-  const [sort, setSort] = useState<SortState>({ key: "volumeUsd24h", dir: -1 });
+  const [tri, setTri] = useState<TriTable>({ colonne: "volumeUsd24h", dir: -1 });
   // Message discret du bouton « Alerte » (confirmation période / refus limite), auto-effacé.
   const [msgAlerte, setMsgAlerte] = useState<{ ton: "ok" | "limite"; texte: string } | null>(null);
 
@@ -525,44 +473,164 @@ export function ScreenerWindow() {
     setTimeout(() => setMsgAlerte(null), 4000);
   };
 
-  const sortedRows = useMemo(() => {
-    const val = (r: ScreenerRow, k: SortKey): number | string | undefined => r[k];
-    return [...rows].sort((a, b) => {
-      const va = val(a, sort.key);
-      const vb = val(b, sort.key);
-      // Valeurs manquantes (ex. funding / OI) toujours en fin de tri.
-      if (va === undefined && vb === undefined) return 0;
-      if (va === undefined) return 1;
-      if (vb === undefined) return -1;
-      if (typeof va === "string" || typeof vb === "string") {
-        return String(va).localeCompare(String(vb)) * sort.dir;
-      }
-      return (va - vb) * sort.dir;
-    });
-  }, [rows, sort]);
-
   /** Colonnes OI / L-S uniquement si au moins une ligne les porte (échantillon enrichi). */
   const showPositionCols = useMemo(
     () => rows.some((r) => r.oiChangePct !== undefined || r.longShortRatio !== undefined),
     [rows],
   );
 
-  // Extrêmes cross-sectionnels : 9e décile des |valeurs| de l'univers affiché.
+  // Extrêmes cross-sectionnels : 9e décile des |valeurs| de l'univers affiché. Calculé sur
+  // `rows` (pas le tri courant) : seuilDecile trie en interne, l'ordre d'entrée est sans effet.
   const seuils = useMemo(
     () => ({
-      funding: seuilDecile(sortedRows.map((r) => Math.abs(r.fundingPct ?? Number.NaN)), 0.9),
-      deltaOi: seuilDecile(sortedRows.map((r) => Math.abs(r.oiChangePct ?? Number.NaN)), 0.9),
+      funding: seuilDecile(rows.map((r) => Math.abs(r.fundingPct ?? Number.NaN)), 0.9),
+      deltaOi: seuilDecile(rows.map((r) => Math.abs(r.oiChangePct ?? Number.NaN)), 0.9),
     }),
-    [sortedRows],
+    [rows],
   );
 
   /** Badge de couverture si la note mentionne l'échantillon OI/L-S. */
   const showPositionBadge =
     note !== null && (note.includes("OI/L-S") || note.includes("échantillon"));
 
-  const gridCols = showPositionCols
-    ? "grid-cols-[1.3fr_0.8fr_0.7fr_0.8fr_0.75fr_0.7fr_0.7fr_auto]"
-    : "grid-cols-[1.4fr_0.9fr_0.8fr_0.9fr_0.9fr_auto]";
+  const COLONNES_RESULTATS: ColonneTable<ScreenerRow>[] = [
+    {
+      id: "symbol",
+      label: "Symbole",
+      align: "left",
+      largeur: showPositionCols ? "1.3fr" : "1.4fr",
+      triable: true,
+      valeurTri: (l) => l.symbol,
+      rendu: (r) => (
+        <button
+          type="button"
+          onClick={() => ouvrirDansChart(r.symbol)}
+          className="truncate text-left font-medium text-text transition hover:text-up"
+          title={`Ouvrir ${r.symbol} dans le chart`}
+        >
+          {r.symbol}
+          {r.indicatorValues && r.indicatorValues.length > 0 && (
+            <span className="ml-1 text-[10px] font-normal text-text-dim">
+              {r.indicatorValues.map((v) => `${v.label} ${v.value.toFixed(2)}`).join(" · ")}
+            </span>
+          )}
+        </button>
+      ),
+    },
+    {
+      id: "lastPrice",
+      label: "Prix",
+      align: "right",
+      largeur: showPositionCols ? "0.8fr" : "0.9fr",
+      triable: true,
+      valeurTri: (l) => l.lastPrice,
+      rendu: (r) => <span className="text-right tabular-nums text-text">{formatPrice(r.lastPrice)}</span>,
+    },
+    {
+      id: "priceChangePct24h",
+      label: "Δ24h",
+      align: "right",
+      largeur: showPositionCols ? "0.7fr" : "0.8fr",
+      triable: true,
+      valeurTri: (l) => l.priceChangePct24h,
+      rendu: (r) => (
+        <span className={`text-right tabular-nums ${r.priceChangePct24h >= 0 ? "text-up" : "text-down"}`}>
+          {formatPct(r.priceChangePct24h)}
+        </span>
+      ),
+    },
+    {
+      id: "volumeUsd24h",
+      label: "Vol 24h",
+      align: "right",
+      largeur: showPositionCols ? "0.8fr" : "0.9fr",
+      triable: true,
+      valeurTri: (l) => l.volumeUsd24h,
+      rendu: (r) => <span className="text-right tabular-nums text-text-dim">{formatUsd(r.volumeUsd24h)}</span>,
+    },
+    {
+      id: "fundingPct",
+      label: "Funding",
+      align: "right",
+      largeur: showPositionCols ? "0.75fr" : "0.9fr",
+      triable: true,
+      valeurTri: (l) => l.fundingPct ?? null,
+      rendu: (r) => (
+        <span
+          className={`text-right tabular-nums ${
+            estExtremeColonne(r.fundingPct, seuils.funding)
+              ? "font-semibold text-warn"
+              : r.fundingPct === undefined
+                ? "text-text-dim"
+                : r.fundingPct >= 0
+                  ? "text-up"
+                  : "text-down"
+          }`}
+        >
+          {formatPct(r.fundingPct, 4)}
+        </span>
+      ),
+    },
+    ...(showPositionCols
+      ? [
+          {
+            id: "oiChangePct",
+            label: "Δ OI",
+            align: "right" as const,
+            largeur: "0.7fr",
+            triable: true,
+            valeurTri: (l: ScreenerRow) => l.oiChangePct ?? null,
+            rendu: (r: ScreenerRow) => (
+              <span
+                className={`text-right tabular-nums ${
+                  estExtremeColonne(r.oiChangePct, seuils.deltaOi)
+                    ? "font-semibold text-warn"
+                    : r.oiChangePct === undefined
+                      ? "text-text-dim"
+                      : r.oiChangePct >= 0
+                        ? "text-up"
+                        : "text-down"
+                }`}
+              >
+                {r.oiChangePct === undefined ? "—" : formatPct(r.oiChangePct)}
+              </span>
+            ),
+          },
+          {
+            id: "longShortRatio",
+            label: "L/S",
+            align: "right" as const,
+            largeur: "0.7fr",
+            triable: true,
+            valeurTri: (l: ScreenerRow) => l.longShortRatio ?? null,
+            rendu: (r: ScreenerRow) => (
+              <span className="text-right tabular-nums text-text-dim">
+                {r.longShortRatio === undefined ? "—" : r.longShortRatio.toFixed(2)}
+              </span>
+            ),
+          },
+        ]
+      : []),
+    {
+      id: "wl",
+      label: "Wl",
+      align: "right",
+      largeur: "auto",
+      rendu: (r) => (
+        <button
+          type="button"
+          onClick={() => ajouterAWatchlist(r.symbol)}
+          aria-label={`Ajouter ${r.symbol} à la watchlist`}
+          className="rounded px-1 text-text-dim transition hover:text-up"
+          title="Ajouter à la watchlist"
+        >
+          ＋
+        </button>
+      ),
+    },
+  ];
+
+  const triees = useMemo(() => trierLignes(rows, COLONNES_RESULTATS, tri), [rows, tri, COLONNES_RESULTATS]);
 
   return (
     <>
@@ -591,10 +659,10 @@ export function ScreenerWindow() {
       {vue === "signaux" ? (
         <VueSignaux />
       ) : (
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      <div className="space-y-3 px-4 py-3">
         {/* Presets — groupés : Scénarios (glyphe teinté) / Filtres / Mes presets */}
         <section className="space-y-2">
-          <div className="text-[10px] uppercase tracking-wide text-text-dim">Presets</div>
+          <TitreSection>Presets</TitreSection>
 
           {/* Scénarios : glyphe directionnel teinté, `title` = logique du scénario. */}
           <div className="text-[9px] uppercase tracking-wide text-text-dim/70">Scénarios</div>
@@ -604,16 +672,10 @@ export function ScreenerWindow() {
               const glyph = p.name.slice(0, 1);
               const rest = p.name.slice(1);
               return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => loadPreset(p.id)}
-                  className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text"
-                  title={p.description}
-                >
+                <Bouton key={p.id} onClick={() => loadPreset(p.id)} title={p.description}>
                   <span className={SCENARIO_TINT[p.id]}>{glyph}</span>
                   {rest}
-                </button>
+                </Bouton>
               );
             })}
           </div>
@@ -622,11 +684,9 @@ export function ScreenerWindow() {
           <div className="text-[9px] uppercase tracking-wide text-text-dim/70">Filtres</div>
           <div className="flex flex-wrap gap-1.5">
             {FILTER_PRESETS.map((p) => (
-              <button
+              <Bouton
                 key={p.id}
-                type="button"
                 onClick={() => loadPreset(p.id)}
-                className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text"
                 title={
                   p.description ??
                   (p.id.startsWith("builtin:crowded") || p.id === "builtin:funding-extreme"
@@ -635,7 +695,7 @@ export function ScreenerWindow() {
                 }
               >
                 {p.name}
-              </button>
+              </Bouton>
             ))}
           </div>
 
@@ -645,9 +705,10 @@ export function ScreenerWindow() {
               <div className="text-[9px] uppercase tracking-wide text-text-dim/70">Mes presets</div>
               <div className="flex flex-wrap gap-1.5">
                 {userPresets.map((p) => (
-                  <span
+                  <Chip
                     key={p.id}
-                    className="flex items-center gap-1 rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim"
+                    onRetirer={() => deletePreset(p.id)}
+                    retirerLabel={`Supprimer le preset ${p.name}`}
                   >
                     <button
                       type="button"
@@ -656,56 +717,46 @@ export function ScreenerWindow() {
                     >
                       {p.name}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => deletePreset(p.id)}
-                      aria-label={`Supprimer le preset ${p.name}`}
-                      className="text-text-dim transition hover:text-down"
-                    >
-                      ✕
-                    </button>
-                  </span>
+                  </Chip>
                 ))}
               </div>
             </>
           )}
           <div className="flex items-center gap-1.5">
-            <input
+            <Input
               type="text"
               value={presetName}
               onChange={(e) => setPresetName(e.target.value)}
               placeholder="Nom du preset…"
-              className={`${inputClass} flex-1`}
+              className="flex-1"
             />
-            <button
-              type="button"
+            <Bouton
               onClick={() => {
                 savePreset(presetName);
                 setPresetName("");
               }}
               disabled={presetName.trim().length === 0}
-              className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text disabled:opacity-40"
+              className="disabled:opacity-40"
             >
               Enregistrer
-            </button>
+            </Bouton>
           </div>
 
           {/* Alerte de scan : rescanne périodiquement le preset chargé, notifie les symboles
               ENTRANTS. Actif seulement sur un preset chargé et intact (édition manuelle → null). */}
           <div className="flex items-center gap-2">
-            <button
-              type="button"
+            <Bouton
               onClick={creerAlerte}
               disabled={dernierPresetCharge === null}
+              className="disabled:opacity-40"
               title={
                 dernierPresetCharge === null
                   ? "Chargez un preset pour créer une alerte de scan"
                   : "Fige les conditions courantes et rescanne périodiquement (notifie les symboles entrants)"
               }
-              className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text disabled:opacity-40"
             >
               ⏰ Alerte
-            </button>
+            </Bouton>
             {msgAlerte !== null && (
               <span className={`text-[10px] ${msgAlerte.ton === "limite" ? "text-warn" : "text-text-dim"}`}>
                 {msgAlerte.texte}
@@ -718,9 +769,7 @@ export function ScreenerWindow() {
         <section className="space-y-2 rounded-md border border-border bg-bg px-3 py-2.5">
           <div className="flex items-center justify-between">
             <span className="text-[10px] uppercase tracking-wide text-text-dim">Filtres de base</span>
-            <button type="button" onClick={addBase} className="text-[11px] text-text-dim hover:text-text">
-              + ajouter
-            </button>
+            <Bouton onClick={addBase}>+ ajouter</Bouton>
           </div>
           {baseConditions.length === 0 ? (
             <p className="text-[11px] text-text-dim">Aucun filtre (tout l'univers USDT/USDC).</p>
@@ -731,35 +780,29 @@ export function ScreenerWindow() {
 
         {/* Filtres indicateurs */}
         <section className="space-y-2 rounded-md border border-border bg-bg px-3 py-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase tracking-wide text-text-dim">
-              Filtres indicateurs
-            </span>
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1 text-[10px] text-text-dim">
-                TF
-                <select
-                  value={tf}
-                  onChange={(e) => setTf(e.target.value as (typeof SCREENER_TIMEFRAMES)[number])}
-                  className={inputClass}
-                  aria-label="Timeframe des indicateurs"
-                >
-                  {SCREENER_TIMEFRAMES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                onClick={addIndicator}
-                className="text-[11px] text-text-dim hover:text-text"
-              >
-                + ajouter
-              </button>
-            </div>
-          </div>
+          <TitreSection
+            extra={
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1 text-[10px] text-text-dim">
+                  TF
+                  <Select
+                    value={tf}
+                    onChange={(e) => setTf(e.target.value as (typeof SCREENER_TIMEFRAMES)[number])}
+                    aria-label="Timeframe des indicateurs"
+                  >
+                    {SCREENER_TIMEFRAMES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+                <Bouton onClick={addIndicator}>+ ajouter</Bouton>
+              </div>
+            }
+          >
+            Filtres indicateurs
+          </TitreSection>
           {indicatorConditions.length === 0 ? (
             <p className="text-[11px] text-text-dim">Aucun filtre indicateur (étage klines ignoré).</p>
           ) : (
@@ -776,21 +819,13 @@ export function ScreenerWindow() {
         <section className="space-y-2">
           <div className="flex items-center gap-2">
             {busy ? (
-              <button
-                type="button"
-                onClick={cancel}
-                className="rounded border border-border bg-bg px-3 py-1.5 text-[11px] text-text-dim transition hover:text-down"
-              >
+              <Bouton variante="danger" onClick={cancel}>
                 Annuler
-              </button>
+              </Bouton>
             ) : (
-              <button
-                type="button"
-                onClick={run}
-                className="rounded border border-up/50 bg-bg px-3 py-1.5 text-[11px] font-medium text-up transition hover:bg-up/10"
-              >
+              <Bouton variante="primaire" onClick={run}>
                 Lancer le screen
-              </button>
+              </Bouton>
             )}
             <span className="text-[11px] text-text-dim">{runStateLabel(runState)}</span>
             {runState === "running" && (
@@ -801,12 +836,7 @@ export function ScreenerWindow() {
           </div>
 
           {runState === "running" && progress.total > 0 && (
-            <div className="h-1 w-full overflow-hidden rounded bg-bg">
-              <div
-                className="h-full bg-up transition-all"
-                style={{ width: `${(progress.done / progress.total) * 100}%` }}
-              />
-            </div>
+            <BarreProgression fraction={progress.done / progress.total} ariaLabel="Progression du scan" />
           )}
 
           {note !== null && (
@@ -821,104 +851,20 @@ export function ScreenerWindow() {
         </section>
 
         {/* Résultats */}
-        <section className="rounded-md border border-border bg-bg">
-          <div className={`grid ${gridCols} items-center gap-2 border-b border-border px-3 py-1.5`}>
-            <SortHeader label="Symbole" colKey="symbol" sort={sort} setSort={setSort} />
-            <SortHeader label="Prix" colKey="lastPrice" sort={sort} setSort={setSort} align="right" />
-            <SortHeader label="Δ24h" colKey="priceChangePct24h" sort={sort} setSort={setSort} align="right" />
-            <SortHeader label="Vol 24h" colKey="volumeUsd24h" sort={sort} setSort={setSort} align="right" />
-            <SortHeader label="Funding" colKey="fundingPct" sort={sort} setSort={setSort} align="right" />
-            {showPositionCols && (
-              <>
-                <SortHeader label="Δ OI" colKey="oiChangePct" sort={sort} setSort={setSort} align="right" />
-                <SortHeader label="L/S" colKey="longShortRatio" sort={sort} setSort={setSort} align="right" />
-              </>
-            )}
-            <span className="text-right text-[10px] uppercase tracking-wide text-text-dim">Wl</span>
-          </div>
-          <div className="max-h-[40vh] overflow-y-auto">
-            {sortedRows.length === 0 ? (
-              <Vide>
-                {runState === "done" ? "Aucun résultat." : "Lancez un screen pour voir les résultats."}
-              </Vide>
-            ) : (
-              sortedRows.map((r) => (
-                <div
-                  key={r.symbol}
-                  className={`grid ${gridCols} items-center gap-2 border-b border-border/50 px-3 py-1.5 text-[11px] last:border-b-0 hover:bg-surface`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => ouvrirDansChart(r.symbol)}
-                    className="truncate text-left font-medium text-text transition hover:text-up"
-                    title={`Ouvrir ${r.symbol} dans le chart`}
-                  >
-                    {r.symbol}
-                    {r.indicatorValues && r.indicatorValues.length > 0 && (
-                      <span className="ml-1 text-[10px] font-normal text-text-dim">
-                        {r.indicatorValues.map((v) => `${v.label} ${v.value.toFixed(2)}`).join(" · ")}
-                      </span>
-                    )}
-                  </button>
-                  <span className="text-right tabular-nums text-text">{formatPrice(r.lastPrice)}</span>
-                  <span
-                    className={`text-right tabular-nums ${r.priceChangePct24h >= 0 ? "text-up" : "text-down"}`}
-                  >
-                    {formatPct(r.priceChangePct24h)}
-                  </span>
-                  <span className="text-right tabular-nums text-text-dim">{formatUsd(r.volumeUsd24h)}</span>
-                  <span
-                    className={`text-right tabular-nums ${
-                      estExtremeColonne(r.fundingPct, seuils.funding)
-                        ? "font-semibold text-warn"
-                        : r.fundingPct === undefined
-                          ? "text-text-dim"
-                          : r.fundingPct >= 0
-                            ? "text-up"
-                            : "text-down"
-                    }`}
-                  >
-                    {formatPct(r.fundingPct, 4)}
-                  </span>
-                  {showPositionCols && (
-                    <>
-                      <span
-                        className={`text-right tabular-nums ${
-                          estExtremeColonne(r.oiChangePct, seuils.deltaOi)
-                            ? "font-semibold text-warn"
-                            : r.oiChangePct === undefined
-                              ? "text-text-dim"
-                              : r.oiChangePct >= 0
-                                ? "text-up"
-                                : "text-down"
-                        }`}
-                      >
-                        {r.oiChangePct === undefined ? "—" : formatPct(r.oiChangePct)}
-                      </span>
-                      <span className="text-right tabular-nums text-text-dim">
-                        {r.longShortRatio === undefined ? "—" : r.longShortRatio.toFixed(2)}
-                      </span>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => ajouterAWatchlist(r.symbol)}
-                    aria-label={`Ajouter ${r.symbol} à la watchlist`}
-                    className="rounded px-1 text-text-dim transition hover:text-up"
-                    title="Ajouter à la watchlist"
-                  >
-                    ＋
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
+        <section className="space-y-2">
+          <TableTriable
+            colonnes={COLONNES_RESULTATS}
+            lignes={triees}
+            tri={tri}
+            onTri={setTri}
+            cle={(l) => l.symbol}
+            maxHauteur="40vh"
+            vide={runState === "done" ? "Aucun résultat." : "Lancez un screen pour voir les résultats."}
+          />
           {(seuils.funding !== null || seuils.deltaOi !== null) && (
-            <div className="border-t border-border/50 px-3 py-1.5">
-              <NoteSource>
-                En orange : 10 % les plus extrêmes de l'univers affiché (|funding|, |Δ OI|).
-              </NoteSource>
-            </div>
+            <NoteSource>
+              En orange : 10 % les plus extrêmes de l'univers affiché (|funding|, |Δ OI|).
+            </NoteSource>
           )}
         </section>
       </div>

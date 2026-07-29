@@ -48,7 +48,7 @@ import {
   formatPrice,
   formatUsd,
 } from "../lib/format";
-import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, rgbaTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import {
   domainePourPreset,
   indicesVisibles,
@@ -58,18 +58,22 @@ import {
 } from "../lib/domaineAxe";
 import { useDomaineZoom } from "../hooks/useDomaineZoom";
 import {
+  BarreProgression,
   BarrePeriodes,
+  Bouton,
   BTN_SECONDAIRE,
+  Chip,
   EnTeteFenetre,
   ErreurBloc,
+  Input,
   InfobulleGraphe,
   NoteSource,
   PERIODES_STANDARD,
-  Vide,
+  Select,
+  TitreSection,
+  TuileStat,
 } from "./ui";
-
-const inputClass =
-  "rounded border border-border bg-bg px-1.5 py-1 text-[11px] text-text focus:border-text-dim focus:outline-none";
+import { TableTriable, trierLignes, type ColonneTable, type TriTable } from "./TableTriable";
 
 const COMPARATEURS: Comparateur[] = [">", ">=", "<", "<="];
 
@@ -120,13 +124,12 @@ function OperandeSelect({
   const spec = specParId(specId);
   return (
     <span className="flex items-center gap-1">
-      <select
+      <Select
         value={specId}
         onChange={(e) => {
           const s = specParId(e.target.value);
           if (s) onChange(s.make(s.defaultParam));
         }}
-        className={inputClass}
         aria-label={aria}
       >
         {CATALOGUE_OPERANDES.map((s) => (
@@ -134,13 +137,13 @@ function OperandeSelect({
             {s.label}
           </option>
         ))}
-      </select>
+      </Select>
       {spec?.paramKey !== undefined && (
-        <input
+        <Input
           type="number"
           value={param ?? spec.defaultParam ?? 0}
           onChange={(e) => onChange(spec.make(Number(e.target.value)))}
-          className={`${inputClass} w-12 tabular-nums`}
+          className="w-12 tabular-nums"
           aria-label={spec.paramKey}
           title={spec.paramKey}
         />
@@ -177,15 +180,14 @@ function ConditionRow({
   return (
     <div className="space-y-1 rounded border border-border/60 bg-bg px-2 py-1.5">
       <div className="flex items-center justify-between gap-1.5">
-        <select
+        <Select
           value={cond.type}
           onChange={(e) => onChange(basculerType(cond, e.target.value as "comparaison" | "croisement"))}
-          className={inputClass}
           aria-label="Type de condition"
         >
           <option value="comparaison">comparaison</option>
           <option value="croisement">croisement</option>
-        </select>
+        </Select>
         <button
           type="button"
           onClick={onRemove}
@@ -199,10 +201,9 @@ function ConditionRow({
       {cond.type === "comparaison" ? (
         <div className="flex flex-wrap items-center gap-1.5">
           <OperandeSelect op={cond.gauche} onChange={(g) => onChange({ ...cond, gauche: g })} aria="Opérande gauche" />
-          <select
+          <Select
             value={cond.comparateur}
             onChange={(e) => onChange({ ...cond, comparateur: e.target.value as Comparateur })}
-            className={inputClass}
             aria-label="Comparateur"
           >
             {COMPARATEURS.map((op) => (
@@ -210,8 +211,8 @@ function ConditionRow({
                 {op}
               </option>
             ))}
-          </select>
-          <select
+          </Select>
+          <Select
             value={cond.droite.type === "constante" ? "constante" : "operande"}
             onChange={(e) =>
               onChange({
@@ -219,18 +220,17 @@ function ConditionRow({
                 droite: e.target.value === "constante" ? { type: "constante", valeur: 0 } : operandeDefaut(),
               })
             }
-            className={inputClass}
             aria-label="Type du terme droit"
           >
             <option value="constante">valeur</option>
             <option value="operande">opérande</option>
-          </select>
+          </Select>
           {cond.droite.type === "constante" ? (
-            <input
+            <Input
               type="number"
               value={cond.droite.valeur}
               onChange={(e) => onChange({ ...cond, droite: { type: "constante", valeur: Number(e.target.value) } })}
-              className={`${inputClass} w-20 tabular-nums`}
+              className="w-20 tabular-nums"
               aria-label="Valeur"
             />
           ) : (
@@ -240,15 +240,14 @@ function ConditionRow({
       ) : (
         <div className="flex flex-wrap items-center gap-1.5">
           <OperandeSelect op={cond.a} onChange={(a) => onChange({ ...cond, a })} aria="Opérande A" />
-          <select
+          <Select
             value={cond.sens}
             onChange={(e) => onChange({ ...cond, sens: e.target.value as SensCroisement })}
-            className={inputClass}
             aria-label="Sens du croisement"
           >
             <option value="hausse">croise ↑</option>
             <option value="baisse">croise ↓</option>
-          </select>
+          </Select>
           <OperandeSelect op={cond.b} onChange={(b) => onChange({ ...cond, b })} aria="Opérande B" />
         </div>
       )}
@@ -274,12 +273,15 @@ function RulesSection({
 }) {
   return (
     <section className="space-y-1.5 rounded-md border border-border bg-bg px-3 py-2.5">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-wide text-text-dim">{titre}</span>
-        <button type="button" onClick={onAdd} className="text-[11px] text-text-dim hover:text-text">
-          + ajouter
-        </button>
-      </div>
+      <TitreSection
+        extra={
+          <button type="button" onClick={onAdd} className="text-[11px] text-text-dim hover:text-text">
+            + ajouter
+          </button>
+        }
+      >
+        {titre}
+      </TitreSection>
       {conditions.length === 0 ? (
         <p className="text-[11px] text-text-dim">{videLabel}</p>
       ) : (
@@ -410,7 +412,7 @@ function dessinerEquity(canvas: HTMLCanvasElement, resultat: ResultatBacktest, d
 
   // Labels dates domaine.min/max en bas — dans la marge padB, sans chevaucher le drawdown.
   ctx.fillStyle = colDim;
-  ctx.font = "10px system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
   const yLabel = hauteur - 3;
   ctx.fillText(formatDateCourte(domaine.min), 2, yLabel);
   const texteFin = formatDateCourte(domaine.max);
@@ -610,7 +612,7 @@ function dessinerCone(canvas: HTMLCanvasElement, mc: ResultatMonteCarlo, capital
 
   // Labels d'index de trade (extrémités).
   ctx.fillStyle = colDim;
-  ctx.font = "10px system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
   const yLabel = hauteur - 3;
   ctx.fillText("0", 2, yLabel);
   const texteFin = `${n - 1} trades`;
@@ -639,27 +641,6 @@ function ConeCanvas({ mc, capital }: { mc: ResultatMonteCarlo; capital: number }
   );
 }
 
-/** Cellule de statistique de risque MC (teinte optionnelle + title explicatif). */
-function StatMC({
-  label,
-  value,
-  ton,
-  title,
-}: {
-  label: string;
-  value: string;
-  ton?: "up" | "down";
-  title: string;
-}) {
-  const couleur = ton === "up" ? "text-up" : ton === "down" ? "text-down" : "text-text";
-  return (
-    <div className="rounded-md border border-border bg-bg px-2.5 py-1.5" title={title}>
-      <div className="text-[10px] uppercase tracking-wider text-text-dim">{label}</div>
-      <div className={`tabular-nums text-sm font-medium ${couleur}`}>{value}</div>
-    </div>
-  );
-}
-
 /**
  * Section Monte-Carlo sous l'equity : bouton de run (synchrone au clic — mesuré ~25 ms
  * pour 500 trades × 500 chemins, donc pas de Segmente/worker), cône p5/p50/p95 et
@@ -682,56 +663,57 @@ function MonteCarloSection({ resultat, busy }: { resultat: ResultatBacktest; bus
 
   return (
     <section className="space-y-2 rounded-md border border-border bg-bg px-3 py-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] uppercase tracking-wide text-text-dim">
-          Monte-Carlo · rééchantillonnage des PnL
-        </span>
-        <button
-          type="button"
-          onClick={lancer}
-          disabled={desactive}
-          title={
-            assezDeTrades
-              ? `Simule ${MC_CHEMINS} réordonnancements des ${trades.length} trades (seed ${MC_SEED})`
-              : `Au moins ${MC_MIN_TRADES} trades requis (${trades.length} disponibles)`
-          }
-          className={`${BTN_SECONDAIRE} disabled:opacity-40`}
-        >
-          {assezDeTrades ? `Monte-Carlo (${MC_CHEMINS})` : `Monte-Carlo (≥ ${MC_MIN_TRADES} trades)`}
-        </button>
-      </div>
+      <TitreSection
+        extra={
+          <button
+            type="button"
+            onClick={lancer}
+            disabled={desactive}
+            title={
+              assezDeTrades
+                ? `Simule ${MC_CHEMINS} réordonnancements des ${trades.length} trades (seed ${MC_SEED})`
+                : `Au moins ${MC_MIN_TRADES} trades requis (${trades.length} disponibles)`
+            }
+            className={`${BTN_SECONDAIRE} disabled:opacity-40`}
+          >
+            {assezDeTrades ? `Monte-Carlo (${MC_CHEMINS})` : `Monte-Carlo (≥ ${MC_MIN_TRADES} trades)`}
+          </button>
+        }
+      >
+        Monte-Carlo · rééchantillonnage des PnL
+      </TitreSection>
 
       {mc !== null && (
         <div className="space-y-2">
           <ConeCanvas mc={mc} capital={capital} />
           <div className="grid grid-cols-3 gap-1.5">
-            <StatMC
+            <TuileStat
               label="Equity p5"
-              value={formatUsd(mc.equityFinale.p5)}
+              valeur={formatUsd(mc.equityFinale.p5)}
               ton={mc.equityFinale.p5 >= capital ? "up" : "down"}
               title="5e percentile de l'equity finale (scénario défavorable)"
             />
-            <StatMC
+            <TuileStat
               label="Equity p50"
-              value={formatUsd(mc.equityFinale.p50)}
+              valeur={formatUsd(mc.equityFinale.p50)}
               ton={mc.equityFinale.p50 >= capital ? "up" : "down"}
               title="Médiane de l'equity finale sur tous les chemins"
             />
-            <StatMC
+            <TuileStat
               label="Equity p95"
-              value={formatUsd(mc.equityFinale.p95)}
+              valeur={formatUsd(mc.equityFinale.p95)}
               ton={mc.equityFinale.p95 >= capital ? "up" : "down"}
               title="95e percentile de l'equity finale (scénario favorable)"
             />
-            <StatMC
+            <TuileStat
               label="Max DD p95"
-              value={formatPourcentage(mc.maxDrawdown.p95 * 100, 1)}
+              valeur={formatPourcentage(mc.maxDrawdown.p95 * 100, 1)}
               ton="down"
               title="95e percentile du drawdown maximal, en % du capital initial"
             />
-            <StatMC
+            <TuileStat
               label="Prob. ruine"
-              value={formatPourcentage(mc.probRuine * 100, 1)}
+              valeur={formatPourcentage(mc.probRuine * 100, 1)}
               ton={mc.probRuine > 0 ? "down" : undefined}
               title="Part des chemins finissant avec une equity négative"
             />
@@ -744,36 +726,6 @@ function MonteCarloSection({ resultat, busy }: { resultat: ResultatBacktest; bus
 
 // ─────────────────────────── Table des trades ───────────────────────────
 
-type SortKey = "tempsEntree" | "pnl" | "pnlPct" | "dureeBarres";
-interface SortState {
-  key: SortKey;
-  dir: 1 | -1;
-}
-
-function SortHeader({
-  label,
-  colKey,
-  sort,
-  setSort,
-}: {
-  label: string;
-  colKey: SortKey;
-  sort: SortState;
-  setSort: (s: SortState) => void;
-}) {
-  const active = sort.key === colKey;
-  return (
-    <button
-      type="button"
-      onClick={() => setSort({ key: colKey, dir: active && sort.dir === -1 ? 1 : -1 })}
-      className="flex w-full items-center justify-end gap-0.5 text-[10px] uppercase tracking-wide text-text-dim transition hover:text-text"
-    >
-      {label}
-      {active && <span>{sort.dir === -1 ? "▾" : "▴"}</span>}
-    </button>
-  );
-}
-
 const RAISON_LABEL: Record<TradeResultat["raison"], string> = {
   regle: "règle",
   stop: "stop",
@@ -781,88 +733,113 @@ const RAISON_LABEL: Record<TradeResultat["raison"], string> = {
   "fin-donnees": "fin",
 };
 
-function TradesTable({ trades }: { trades: TradeResultat[] }) {
-  const [sort, setSort] = useState<SortState>({ key: "tempsEntree", dir: 1 });
-  const sorted = useMemo(() => {
-    return [...trades].sort((a, b) => (a[sort.key] - b[sort.key]) * sort.dir);
-  }, [trades, sort]);
+const COLONNES_TRADES: ColonneTable<TradeResultat>[] = [
+  {
+    id: "sens",
+    label: "Sens",
+    align: "left",
+    largeur: "0.6fr",
+    rendu: (tr) => (
+      <span className={tr.sens === "long" ? "text-up" : "text-down"}>{tr.sens === "long" ? "L" : "S"}</span>
+    ),
+  },
+  {
+    id: "tempsEntree",
+    label: "Entrée",
+    align: "right",
+    triable: true,
+    valeurTri: (tr) => tr.tempsEntree,
+    rendu: (tr) => (
+      <span className="text-right tabular-nums text-text-dim">
+        {formatDateHeure(tr.tempsEntree)}
+        <span className="ml-1 text-text">{formatPrice(tr.prixEntree)}</span>
+      </span>
+    ),
+  },
+  {
+    id: "sortie",
+    label: "Sortie",
+    align: "right",
+    rendu: (tr) => (
+      <span className="text-right tabular-nums text-text-dim">
+        {formatDateHeure(tr.tempsSortie)}
+        <span className="ml-1 text-text">{formatPrice(tr.prixSortie)}</span>
+        <span className="ml-1 text-[9px] uppercase">{RAISON_LABEL[tr.raison]}</span>
+      </span>
+    ),
+  },
+  {
+    id: "dureeBarres",
+    label: "Durée",
+    align: "right",
+    largeur: "0.7fr",
+    triable: true,
+    valeurTri: (tr) => tr.dureeBarres,
+    rendu: (tr) => <span className="text-right tabular-nums text-text-dim">{tr.dureeBarres}</span>,
+  },
+  {
+    id: "pnl",
+    label: "PnL",
+    align: "right",
+    largeur: "0.9fr",
+    triable: true,
+    valeurTri: (tr) => tr.pnl,
+    rendu: (tr) => (
+      <span className={`text-right tabular-nums ${tr.pnl >= 0 ? "text-up" : "text-down"}`}>
+        {formatDec(tr.pnl)}
+      </span>
+    ),
+  },
+  {
+    id: "pnlPct",
+    label: "PnL%",
+    align: "right",
+    largeur: "0.7fr",
+    triable: true,
+    valeurTri: (tr) => tr.pnlPct,
+    rendu: (tr) => (
+      <span className={`text-right tabular-nums ${tr.pnlPct >= 0 ? "text-up" : "text-down"}`}>
+        {formatPct(tr.pnlPct)}
+      </span>
+    ),
+  },
+];
 
-  const cols = "grid grid-cols-[0.6fr_1fr_1fr_0.7fr_0.9fr_0.7fr] items-center gap-2";
+function TradesTable({ trades }: { trades: TradeResultat[] }) {
+  const [tri, setTri] = useState<TriTable>({ colonne: "tempsEntree", dir: 1 });
+  const triees = useMemo(() => trierLignes(trades, COLONNES_TRADES, tri), [trades, tri]);
   return (
-    <section className="rounded-md border border-border bg-bg">
-      <div className={`${cols} border-b border-border px-3 py-1.5`}>
-        <span className="text-[10px] uppercase tracking-wide text-text-dim">Sens</span>
-        <SortHeader label="Entrée" colKey="tempsEntree" sort={sort} setSort={setSort} />
-        <span className="text-right text-[10px] uppercase tracking-wide text-text-dim">Sortie</span>
-        <SortHeader label="Durée" colKey="dureeBarres" sort={sort} setSort={setSort} />
-        <SortHeader label="PnL" colKey="pnl" sort={sort} setSort={setSort} />
-        <SortHeader label="PnL%" colKey="pnlPct" sort={sort} setSort={setSort} />
-      </div>
-      <div className="max-h-[34vh] overflow-y-auto">
-        {sorted.length === 0 ? (
-          <Vide>Aucun trade.</Vide>
-        ) : (
-          sorted.map((tr, i) => (
-            <div
-              key={i}
-              className={`${cols} border-b border-border/50 px-3 py-1.5 text-[11px] last:border-b-0`}
-            >
-              <span className={tr.sens === "long" ? "text-up" : "text-down"}>
-                {tr.sens === "long" ? "L" : "S"}
-              </span>
-              <span className="text-right tabular-nums text-text-dim">
-                {formatDateHeure(tr.tempsEntree)}
-                <span className="ml-1 text-text">{formatPrice(tr.prixEntree)}</span>
-              </span>
-              <span className="text-right tabular-nums text-text-dim">
-                {formatDateHeure(tr.tempsSortie)}
-                <span className="ml-1 text-text">{formatPrice(tr.prixSortie)}</span>
-                <span className="ml-1 text-[9px] uppercase">{RAISON_LABEL[tr.raison]}</span>
-              </span>
-              <span className="text-right tabular-nums text-text-dim">{tr.dureeBarres}</span>
-              <span className={`text-right tabular-nums ${tr.pnl >= 0 ? "text-up" : "text-down"}`}>
-                {formatDec(tr.pnl)}
-              </span>
-              <span className={`text-right tabular-nums ${tr.pnlPct >= 0 ? "text-up" : "text-down"}`}>
-                {formatPct(tr.pnlPct)}
-              </span>
-            </div>
-          ))
-        )}
-      </div>
-    </section>
+    <TableTriable
+      colonnes={COLONNES_TRADES}
+      lignes={triees}
+      tri={tri}
+      onTri={setTri}
+      cle={(tr) => `${tr.tempsEntree}-${tr.tempsSortie}-${tr.pnl}`}
+      maxHauteur="34vh"
+      vide="Aucun trade."
+    />
   );
 }
 
 // ─────────────────────────── Grille de statistiques ───────────────────────────
 
-function StatCard({ label, value, ton }: { label: string; value: string; ton?: "up" | "down" }) {
-  const couleur = ton === "up" ? "text-up" : ton === "down" ? "text-down" : "text-text";
-  return (
-    <div className="rounded-md border border-border bg-bg px-2.5 py-1.5">
-      <div className="text-[10px] uppercase tracking-wider text-text-dim">{label}</div>
-      <div className={`tabular-nums text-sm font-medium ${couleur}`}>{value}</div>
-    </div>
-  );
-}
-
 function StatsGrid({ resultat }: { resultat: ResultatBacktest }) {
   const s = resultat.stats;
   return (
     <section className="grid grid-cols-3 gap-1.5">
-      <StatCard label="Trades" value={String(s.nbTrades)} />
-      <StatCard label="Taux de réussite" value={formatPourcentage(s.winRatePct, 1)} />
-      <StatCard label="Facteur de profit" value={formatPF(s.profitFactor)} />
-      <StatCard
+      <TuileStat label="Trades" valeur={String(s.nbTrades)} />
+      <TuileStat label="Taux de réussite" valeur={formatPourcentage(s.winRatePct, 1)} />
+      <TuileStat label="Facteur de profit" valeur={formatPF(s.profitFactor)} />
+      <TuileStat
         label="PnL net"
-        value={`${formatDec(s.pnlTotal)} (${formatPct(s.pnlTotalPct)})`}
+        valeur={`${formatDec(s.pnlTotal)} (${formatPct(s.pnlTotalPct)})`}
         ton={s.pnlTotal >= 0 ? "up" : "down"}
       />
-      <StatCard label="Drawdown max" value={formatPourcentage(s.maxDrawdownPct, 1)} ton="down" />
-      <StatCard label="Sharpe (annualisé)" value={formatDec(s.sharpe)} />
-      <StatCard label="Exposition" value={formatPourcentage(s.expositionPct, 0)} />
-      <StatCard label="Gain moyen" value={formatPct(s.gainMoyenPct)} ton="up" />
-      <StatCard label="Perte moyenne" value={formatPct(s.perteMoyennePct)} ton="down" />
+      <TuileStat label="Drawdown max" valeur={formatPourcentage(s.maxDrawdownPct, 1)} ton="down" />
+      <TuileStat label="Sharpe (annualisé)" valeur={formatDec(s.sharpe)} />
+      <TuileStat label="Exposition" valeur={formatPourcentage(s.expositionPct, 0)} />
+      <TuileStat label="Gain moyen" valeur={formatPct(s.gainMoyenPct)} ton="up" />
+      <TuileStat label="Perte moyenne" valeur={formatPct(s.perteMoyennePct)} ton="down" />
     </section>
   );
 }
@@ -931,10 +908,10 @@ export function BacktestWindow() {
         sousTitre="Bougies clôturées · exécution open+1 · pas d'intrabar"
       />
 
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      <div className="space-y-3 px-4 py-3">
         {/* Presets */}
         <section className="space-y-2">
-          <div className="text-[10px] uppercase tracking-wide text-text-dim">Stratégies</div>
+          <TitreSection>Stratégies</TitreSection>
           <div className="flex flex-wrap gap-1.5">
             {BUILTIN_STRATEGIES.map((p) => (
               <button
@@ -947,31 +924,20 @@ export function BacktestWindow() {
               </button>
             ))}
             {userPresets.map((p) => (
-              <span
-                key={p.id}
-                className="flex items-center gap-1 rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim"
-              >
+              <Chip key={p.id} onRetirer={() => deletePreset(p.id)} retirerLabel={`Supprimer le preset ${p.name}`}>
                 <button type="button" onClick={() => loadPreset(p.id)} className="transition hover:text-text">
                   {p.name}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => deletePreset(p.id)}
-                  aria-label={`Supprimer le preset ${p.name}`}
-                  className="text-text-dim transition hover:text-down"
-                >
-                  ✕
-                </button>
-              </span>
+              </Chip>
             ))}
           </div>
           <div className="flex items-center gap-1.5">
-            <input
+            <Input
               type="text"
               value={presetName}
               onChange={(e) => setPresetName(e.target.value)}
               placeholder="Nom de la stratégie…"
-              className={`${inputClass} flex-1`}
+              className="flex-1"
             />
             <button
               type="button"
@@ -992,11 +958,11 @@ export function BacktestWindow() {
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-1 text-[10px] text-text-dim">
               Symbole
-              <input
+              <Input
                 type="text"
                 value={symbol}
                 onChange={(e) => setSymbol(e.target.value)}
-                className={`${inputClass} w-28`}
+                className="w-28"
                 aria-label="Symbole"
               />
             </label>
@@ -1010,10 +976,9 @@ export function BacktestWindow() {
             </button>
             <label className="flex items-center gap-1 text-[10px] text-text-dim">
               TF
-              <select
+              <Select
                 value={tf}
                 onChange={(e) => setTf(e.target.value as (typeof BACKTEST_TIMEFRAMES)[number])}
-                className={inputClass}
                 aria-label="Timeframe"
               >
                 {BACKTEST_TIMEFRAMES.map((t) => (
@@ -1021,14 +986,13 @@ export function BacktestWindow() {
                     {t}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label className="flex items-center gap-1 text-[10px] text-text-dim">
               Plage
-              <select
+              <Select
                 value={plage}
                 onChange={(e) => setPlage(e.target.value as (typeof PLAGES)[number]["id"])}
-                className={inputClass}
                 aria-label="Plage historique"
               >
                 {PLAGES.map((p) => (
@@ -1036,7 +1000,7 @@ export function BacktestWindow() {
                     {p.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <button
               type="button"
@@ -1083,34 +1047,33 @@ export function BacktestWindow() {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <label className="flex items-center gap-1 text-[10px] text-text-dim">
               Direction
-              <select
+              <Select
                 value={direction}
                 onChange={(e) => setDirection(e.target.value as Direction)}
-                className={inputClass}
                 aria-label="Direction"
               >
                 <option value="long">Long</option>
                 <option value="short">Short</option>
                 <option value="les-deux">Les deux (retournement)</option>
-              </select>
+              </Select>
             </label>
             <label className="flex items-center gap-1 text-[10px] text-text-dim">
               Taille
-              <input
+              <Input
                 type="number"
                 value={tailleFixe}
                 onChange={(e) => setTailleFixe(Number(e.target.value))}
-                className={`${inputClass} w-20 tabular-nums`}
+                className="w-20 tabular-nums"
                 aria-label="Taille fixe (notionnel)"
               />
             </label>
             <label className="flex items-center gap-1 text-[10px] text-text-dim">
               Capital
-              <input
+              <Input
                 type="number"
                 value={capitalInitial}
                 onChange={(e) => setCapitalInitial(Number(e.target.value))}
-                className={`${inputClass} w-24 tabular-nums`}
+                className="w-24 tabular-nums"
                 aria-label="Capital initial"
               />
             </label>
@@ -1118,23 +1081,23 @@ export function BacktestWindow() {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <label className="flex items-center gap-1 text-[10px] text-text-dim">
               Frais %
-              <input
+              <Input
                 type="number"
                 step="0.01"
                 value={fraisPct}
                 onChange={(e) => setFraisPct(Number(e.target.value))}
-                className={`${inputClass} w-16 tabular-nums`}
+                className="w-16 tabular-nums"
                 aria-label="Frais en pourcentage"
               />
             </label>
             <label className="flex items-center gap-1 text-[10px] text-text-dim">
               Slippage %
-              <input
+              <Input
                 type="number"
                 step="0.01"
                 value={slippagePct}
                 onChange={(e) => setSlippagePct(Number(e.target.value))}
-                className={`${inputClass} w-16 tabular-nums`}
+                className="w-16 tabular-nums"
                 aria-label="Slippage en pourcentage"
               />
             </label>
@@ -1146,13 +1109,13 @@ export function BacktestWindow() {
                 aria-label="Activer le stop"
               />
               Stop %
-              <input
+              <Input
                 type="number"
                 step="0.1"
                 value={stopPct ?? 0}
                 disabled={stopPct === null}
                 onChange={(e) => setStopPct(Number(e.target.value))}
-                className={`${inputClass} w-14 tabular-nums disabled:opacity-40`}
+                className="w-14 tabular-nums"
                 aria-label="Stop en pourcentage"
               />
             </label>
@@ -1164,13 +1127,13 @@ export function BacktestWindow() {
                 aria-label="Activer l'objectif"
               />
               Objectif %
-              <input
+              <Input
                 type="number"
                 step="0.1"
                 value={targetPct ?? 0}
                 disabled={targetPct === null}
                 onChange={(e) => setTargetPct(Number(e.target.value))}
-                className={`${inputClass} w-14 tabular-nums disabled:opacity-40`}
+                className="w-14 tabular-nums"
                 aria-label="Objectif en pourcentage"
               />
             </label>
@@ -1181,21 +1144,13 @@ export function BacktestWindow() {
         <section className="space-y-2">
           <div className="flex items-center gap-2">
             {busy ? (
-              <button
-                type="button"
-                onClick={cancel}
-                className="rounded border border-border bg-bg px-3 py-1.5 text-[11px] text-text-dim transition hover:text-down"
-              >
+              <Bouton variante="danger" onClick={cancel}>
                 Annuler
-              </button>
+              </Bouton>
             ) : (
-              <button
-                type="button"
-                onClick={run}
-                className="rounded bg-accent/20 px-3 py-1.5 text-[11px] font-medium text-text transition hover:bg-accent/30"
-              >
+              <Bouton variante="primaire" onClick={run}>
                 Lancer le backtest
-              </button>
+              </Bouton>
             )}
             <span className="text-[11px] text-text-dim">{phaseLabel(phase)}</span>
             {phase === "chargement" && progress.cible > 0 && (
@@ -1206,9 +1161,7 @@ export function BacktestWindow() {
           </div>
 
           {phase === "chargement" && progress.cible > 0 && (
-            <div className="h-1 w-full overflow-hidden rounded bg-bg">
-              <div className="h-full bg-up transition-all" style={{ width: `${pctProgress}%` }} />
-            </div>
+            <BarreProgression fraction={pctProgress / 100} ariaLabel="Chargement de l'historique" />
           )}
 
           {note !== null && <p className="text-[10px] text-text-dim">{note}</p>}

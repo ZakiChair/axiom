@@ -37,7 +37,7 @@ const MOTIFS: Motif[] = [
     id: "champ-local",
     description: "constante input locale — utiliser <Input>/<Select> (ui.tsx)",
     regex: /const\s+input(Class|Cls)\s*=/,
-    exceptions: ["ScreenerWindow.tsx", "BacktestWindow.tsx", "PaperWindow.tsx"],
+    exceptions: ["PaperWindow.tsx"],
   },
   {
     id: "table-nue",
@@ -53,13 +53,13 @@ const MOTIFS: Motif[] = [
     id: "sort-header-local",
     description: "SortHeader local dupliqué — utiliser TableTriable",
     regex: /function SortHeader\(/,
-    exceptions: ["ScreenerWindow.tsx", "BacktestWindow.tsx"],
+    exceptions: [],
   },
   {
     id: "tuile-locale",
     description: "tuile KPI locale — utiliser TuileStat",
     regex: /function (StatCard|StatMC|Widget)\(/,
-    exceptions: ["BacktestWindow.tsx", "OnchainWindow.tsx"],
+    exceptions: ["OnchainWindow.tsx"],
   },
   {
     id: "segmente-maison",
@@ -71,15 +71,15 @@ const MOTIFS: Motif[] = [
     id: "barre-progression-maison",
     description: "barre de progression maison — utiliser BarreProgression",
     regex: /h-1 w-(full|64) overflow-hidden rounded/,
-    exceptions: ["ScreenerWindow.tsx", "BacktestWindow.tsx", "McapWindow.tsx", "DerivativesWindow.tsx"],
+    exceptions: ["McapWindow.tsx", "DerivativesWindow.tsx"],
   },
   {
     id: "btn-secondaire-copie",
     description: "classes de BTN_SECONDAIRE recopiées inline — utiliser <Bouton>",
     regex: /border-border bg-bg px-2 py-1 text-\[11px\] text-text-dim/,
     exceptions: [
-      "McapWindow.tsx", "ScreenerWindow.tsx",
-      "BacktestWindow.tsx", "CbpremWindow.tsx", "CycleWindow.tsx", "DistWindow.tsx",
+      "McapWindow.tsx",
+      "CbpremWindow.tsx", "CycleWindow.tsx", "DistWindow.tsx",
       "ExpyWindow.tsx", "MineWindow.tsx", "NetliqWindow.tsx", "SqueezeWindow.tsx",
     ],
   },
@@ -89,7 +89,7 @@ const MOTIFS: Motif[] = [
     regex: /(9px ui-sans-serif|11px ui-monospace|10px system-ui)/,
     exceptions: [
       "CorrWindow.tsx", "McapWindow.tsx", "EvtsWindow.tsx", "VolWindow.tsx",
-      "StablecoinsWindow.tsx", "OnchainWindow.tsx", "BacktestWindow.tsx",
+      "StablecoinsWindow.tsx", "OnchainWindow.tsx",
       "CbpremWindow.tsx", "CycleWindow.tsx", "DomWindow.tsx", "ExpyWindow.tsx",
       "NetliqWindow.tsx", "SqueezeWindow.tsx", "TermStructureWindow.tsx",
     ],

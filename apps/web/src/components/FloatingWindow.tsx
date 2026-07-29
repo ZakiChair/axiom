@@ -210,6 +210,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
   return (
     <div
       ref={rootRef}
+      data-window-id={id}
       role="complementary"
       aria-label={title}
       onPointerDownCapture={focus}
@@ -293,7 +294,11 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
           </button>
         </div>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+      {/* Corps : conteneur FLEX défilant — `flex-1` des enfants s'y résout (fini le
+          bloc où flex-1 était inerte, source de doubles ascenseurs). Convention :
+          fenêtre défilante = corps `px-4 py-3` nu ; géométrie fixe = corps
+          `flex min-h-0 flex-1 flex-col px-4 py-3`. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>
       {POIGNEES.map((p) => (
         <div key={p.id} onPointerDown={demarrerResize(p)} className={`absolute ${p.className}`} />
       ))}

@@ -503,6 +503,110 @@ export function Segmente<T extends string | number>({
   );
 }
 
+/** Conteneur du segmenté COMPACT (variante en-tête/réglages, consacrée depuis LIQ). */
+export const CLASSES_SEGMENT_CONTENEUR = "flex items-center gap-0.5 rounded border border-border p-0.5";
+
+/** Classes d'un item de segmenté compact (pure — réutilisable pour les groupes multi). */
+export function classesSegmentItem(actif: boolean): string {
+  return `rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
+    actif ? "bg-bg text-text" : "text-text-dim hover:text-text"
+  }`;
+}
+
+/**
+ * Segmenté compact standard (bascule EXCLUSIVE, plus dense que `Segmente`) —
+ * réglages de fenêtre, sélecteurs d'en-tête. Pour un groupe multi-sélection,
+ * réutiliser CLASSES_SEGMENT_CONTENEUR + classesSegmentItem (cf. leviers LIQ).
+ */
+export function SegmenteCompact<T extends string | number>({
+  options,
+  actif,
+  onChange,
+  ariaLabel,
+}: {
+  options: ReadonlyArray<{ id: T; label: string; title?: string }>;
+  actif: T;
+  onChange: (id: T) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <div role="group" aria-label={ariaLabel} className={CLASSES_SEGMENT_CONTENEUR}>
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          onClick={() => onChange(o.id)}
+          aria-pressed={actif === o.id}
+          title={o.title}
+          className={classesSegmentItem(actif === o.id)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Pastille supprimable standard (extras CORR, dominances CAP, presets EQS/BT). */
+export function Chip({
+  children,
+  onRetirer,
+  retirerLabel,
+  title,
+}: {
+  children: ReactNode;
+  onRetirer?: () => void;
+  /** Nom accessible de la croix — REQUIS si `onRetirer` est fourni. */
+  retirerLabel?: string;
+  title?: string;
+}) {
+  return (
+    <span
+      title={title}
+      className="flex items-center gap-1 rounded border border-border bg-bg px-1.5 py-0.5 text-[10px] text-text-dim"
+    >
+      {children}
+      {onRetirer !== undefined && (
+        <button
+          type="button"
+          onClick={onRetirer}
+          aria-label={retirerLabel}
+          className="leading-none text-text-dim transition hover:text-down"
+        >
+          ✕
+        </button>
+      )}
+    </span>
+  );
+}
+
+/** Barre de progression standard : piste bg-bg, remplissage accent, pleine largeur. */
+export function BarreProgression({ fraction, ariaLabel }: { fraction: number; ariaLabel?: string }) {
+  const pct = Math.round(Math.max(0, Math.min(1, fraction)) * 100);
+  return (
+    <div
+      role="progressbar"
+      aria-label={ariaLabel}
+      aria-valuenow={pct}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      className="h-1 w-full overflow-hidden rounded bg-bg"
+    >
+      <div className="h-full bg-accent transition-all" style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+/** Titre de section interne standard — un seul gabarit (l'audit relevait 4 variantes h3/span/div). */
+export function TitreSection({ children, extra }: { children: ReactNode; extra?: ReactNode }) {
+  return (
+    <h3 className="mb-1 flex items-baseline justify-between gap-2 text-[10px] uppercase tracking-wide text-text-dim">
+      <span>{children}</span>
+      {extra !== undefined && <span className="normal-case tracking-normal">{extra}</span>}
+    </h3>
+  );
+}
+
 /** Note de bas de section : source + cadence (« Données Deribit, ~1 min. »). */
 export function NoteSource({ children }: { children: ReactNode }) {
   return <p className="text-[10px] leading-snug text-text-dim">{children}</p>;

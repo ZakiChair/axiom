@@ -18,6 +18,9 @@ apps/daemon/axiom.db-wal
 # Scratch de suivi de progression (subagent-driven-development) — jamais committé
 .superpowers/
 
+# Worktrees locaux (exécution de plans en isolation) — jamais committés
+.worktrees/
+
 # Captures Chrome DevTools / Playwright MCP (vérifications runtime)
 .playwright-mcp/
 

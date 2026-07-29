@@ -194,6 +194,23 @@ describe("demarrerBackfill — reconstruction recalibrée", () => {
     expect(mcapStore.getState().backfill.enCours).toBe(false);
   });
 
+  it("sauvegarde la progression même quand il abandonne (curseur écrit dans le catch)", async () => {
+    // Sans ça, un abandon reperd jusqu'à PAS_CURSEUR pièces à chaque reprise : la
+    // dernière écriture périodique du curseur date d'au plus 5 pièces en arrière.
+    const d = deps();
+    d.fetchPiece = vi.fn(async (id: string) => {
+      if (id === "solana") throw new ErreurCoinGecko("500", 500, null);
+      return HISTOS[id] ?? [];
+    });
+
+    await mcapStore.getState().demarrerBackfill(d);
+
+    expect(mcapStore.getState().backfill.erreur).not.toBeNull();
+    const curseur = JSON.parse(stockage.get(CLE_BACKFILL) ?? "null");
+    expect(curseur).not.toBeNull();
+    expect(curseur.restants).toEqual(["solana"]); // BTC et ETH sont acquis
+  });
+
   it("ignore un second démarrage tant que le premier tourne", async () => {
     mcapStore.setState({ backfill: { enCours: true, faites: 1, total: 3, erreur: null } });
     const d = deps();
@@ -258,6 +275,18 @@ describe("prolonger — deux appels, pas cent", () => {
     await mcapStore.getState().prolonger(true, d);
 
     expect(mcapStore.getState().hist!.grille).toHaveLength(nbJours + 1);
+  });
+
+  it("ne fige pas le TTL quand il n'y a pas encore d'historique", async () => {
+    // Le catalogue alimente le sélecteur « + dominance » : le geler 10 min sur un
+    // état vide priverait la fenêtre de sa liste de pièces.
+    const d = deps();
+    await mcapStore.getState().prolonger(false, d);
+    expect(mcapStore.getState().majTs).toBeNull();
+
+    const d2 = deps();
+    await mcapStore.getState().prolonger(false, d2);
+    expect(d2.fetchMarchesEtGlobal).toHaveBeenCalled();
   });
 
   it("respecte le TTL sans le drapeau force", async () => {

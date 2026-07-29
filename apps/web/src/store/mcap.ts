@@ -322,6 +322,14 @@ export const mcapStore = createStore<McapState>((set, get) => ({
     annulationDemandee = false;
     set({ backfill: { enCours: true, faites: 0, total: 0, erreur: null } });
 
+    // Déclarés HORS du try : le `catch` doit pouvoir persister le curseur, sinon un
+    // abandon (4 échecs d'affilée sur une pièce) reperd jusqu'à PAS_CURSEUR pièces
+    // à chaque reprise.
+    let grille: number[] | null = null;
+    let somme: number[] | null = null;
+    let pieces: Record<string, number[]> = {};
+    let restants: string[] = [];
+
     try {
       // Le catalogue est indispensable : un seul 429 ici (invisible côté navigateur,
       // cf. estRetryable) tuerait le backfill avant même son premier appel.
@@ -349,10 +357,10 @@ export const mcapStore = createStore<McapState>((set, get) => ({
       const curseur = lireCurseur();
       const reprend = curseur !== null && curseur.restants.every((id) => ids.includes(id));
 
-      let grille: number[] | null = reprend ? curseur.grille : null;
-      let somme: number[] | null = reprend ? curseur.somme : null;
-      const pieces: Record<string, number[]> = reprend ? { ...curseur.pieces } : {};
-      let restants = reprend ? [...curseur.restants] : [...ids];
+      grille = reprend ? curseur.grille : null;
+      somme = reprend ? curseur.somme : null;
+      pieces = reprend ? { ...curseur.pieces } : {};
+      restants = reprend ? [...curseur.restants] : [...ids];
       let faites = ids.length - restants.length;
       let espacement = espacementBase;
       let succes = 0;
@@ -428,7 +436,9 @@ export const mcapStore = createStore<McapState>((set, get) => ({
       });
       semerMacroHistory(hist);
     } catch (e) {
-      // Erreur NON destructive : l'historique déjà affiché n'est pas touché.
+      // Erreur NON destructive : l'historique déjà affiché n'est pas touché, ET la
+      // progression est sauvegardée — relancer reprend là où ça s'est arrêté.
+      ecrireCurseurSi(grille, somme, restants, pieces);
       set((s) => ({
         backfill: { ...s.backfill, enCours: false, erreur: messageErreur(e) },
       }));
@@ -447,7 +457,10 @@ export const mcapStore = createStore<McapState>((set, get) => ({
 
       const hist = get().hist;
       if (hist === null) {
-        set({ majTs: now(), erreur: null });
+        // PAS de majTs ici : sans historique, il n'y a rien à dater, et poser la marque
+        // gèlerait le TTL 10 min sur un catalogue qui n'a pas encore servi — or c'est
+        // lui qui peuple le sélecteur « + dominance ».
+        set({ erreur: null });
         return;
       }
 

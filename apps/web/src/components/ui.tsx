@@ -380,7 +380,7 @@ export function TuileStat({
   return (
     <div title={title} className="flex flex-col gap-1 rounded-md border border-border bg-bg px-3 py-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-[10px] uppercase tracking-wider text-text-dim">{label}</span>
+        <span className="min-w-0 truncate text-[10px] uppercase tracking-wider text-text-dim">{label}</span>
         {badge !== undefined && <span className="flex shrink-0 items-center gap-1">{badge}</span>}
       </div>
       <div className="flex items-end justify-between gap-2">

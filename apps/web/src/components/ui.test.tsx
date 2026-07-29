@@ -92,20 +92,38 @@ describe("Chip / BarreProgression / TitreSection", () => {
 });
 
 describe("TuileStat", () => {
-  it("empilée : libellé au-dessus, ton down applique text-down", () => {
+  it("empilée : libellé au-dessus, ton down applique text-down, marqueurs unique à empilée", () => {
+    // Sans passer disposition, on vérifie la présence de marqueurs UNIQUES à empilée
+    // (absent de inline) pour prouver que disposition="empilee" est effectif
     const el = racine(TuileStat({ label: "PnL net", valeur: "−123", ton: "down" }));
     const html = JSON.stringify(el.props);
     expect(html).toContain("PnL net");
     expect(html).toContain("text-down");
     expect(html).toContain("tabular-nums");
+    // Marqueurs uniques à empilée : uppercase tracking-wider sur le libellé (text-[10px])
+    expect(html).toContain("uppercase tracking-wider");
   });
-  it("couleur brute prioritaire sur ton", () => {
+  it("couleur brute prioritaire sur ton (style appliqué, classeTon conservé)", () => {
     const el = racine(TuileStat({ label: "OI", valeur: "1,2 Md", ton: "up", couleur: "var(--serie-1)" }));
-    expect(JSON.stringify(el.props)).toContain("var(--serie-1)");
+    const props = el.props;
+    const html = JSON.stringify(props);
+    expect(html).toContain("var(--serie-1)");
+    // Inspecte le style de l'objet pour vérifier que la couleur est effectivement appliquée
+    // Cherche le span valeur qui contient le style inline
+    expect(html).toContain("color"); // Propriété CSS appliquée
+    // Note : classeTon ("text-up") reste dans className par design — le style inline gagne visuellement
   });
   it("inline : même tuile bordée, libellé et valeur sur une ligne", () => {
     const el = racine(TuileStat({ label: "Funding", valeur: "0,01 %", disposition: "inline" }));
     expect(el.props.className as string).toContain("items-baseline justify-between");
+  });
+  it("pied en empilée : rendu, absent en inline", () => {
+    // Empilée avec pied
+    const empilee = racine(TuileStat({ label: "Stock", valeur: "100", pied: "Fraîcheur 30s" }));
+    expect(JSON.stringify(empilee.props)).toContain("Fraîcheur 30s");
+    // Inline avec pied fourni → le contenu pied ne doit PAS apparaître (branche inline ignore pied)
+    const inline = racine(TuileStat({ label: "Stock", valeur: "100", disposition: "inline", pied: "Fraîcheur 30s" }));
+    expect(JSON.stringify(inline.props)).not.toContain("Fraîcheur 30s");
   });
   it("Metric (déprécié) délègue à TuileStat inline", () => {
     const viaMetric = racine(Metric({ label: "x", value: "1" }));

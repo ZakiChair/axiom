@@ -73,7 +73,16 @@ refresh manuel, helpers `lastValue` / `changePct` / `couleurTrend` /
 - Le lien « Clé FRED — Réglages ⚙ » ferme le menu avant d'ouvrir le panneau
   Réglages (sinon le menu reste ouvert derrière le slide-over).
 
-### 1.5 Hors périmètre explicite
+### 1.5 Effet de bord à réparer (découvert à l'implémentation)
+
+La commande Launchpad `MACRO` (`panneau:macro`) faisait défiler jusqu'au panneau
+de la sidebar via `focusPanneauSidebar("MASSE")`. Sans ce panneau, elle devient
+silencieusement inopérante (la fonction ne lève pas : elle ne trouve simplement
+aucune section). Elle est donc repointée : l'ouverture et l'onglet du menu passent
+dans `store/indicator-menu-ui.ts` (patron `settings-ui`, non persisté) et la
+commande appelle `ouvrirSurMacro()`.
+
+### 1.6 Hors périmètre explicite
 
 `MacroController` (`chart/macro.ts`), `store/macro-overlays.ts` et la
 persistance `macroOverlays` (session + workspaces) sont **inchangés**. Aucune
@@ -163,12 +172,19 @@ une préférence de barre d'outils.
   refus `base === denom` (SOLUSDT ÷SOL) + refus `quote === denom` +
   `estRatio` identifie le bon dénominateur + refus d'un legB étranger aux refs
   + recomposition depuis un ratio actif.
-- `store/denominateur.test.ts` : défaut ETH, `set` valide, valeur persistée
-  inconnue → repli sur le défaut.
-- `components/IndicatorMenu.test.tsx` (patron `StrategyMenu.test.tsx`) :
-  bascule d'onglet, la case macro appelle `macroOverlayStore.toggle`, le badge
-  agrège techniques + macros, l'onglet inactif n'est pas dans le DOM.
-- `store/persist.test.ts` : aller-retour du champ `denominateur`.
+- `store/persist.test.ts` : défaut ETH, aller-retour du champ `denominateur`,
+  valeur persistée inconnue → repli sur le défaut. (Un `store/denominateur.test.ts`
+  dédié était prévu ; il n'aurait testé que le comportement de `createStore` —
+  la validation réelle vit dans l'hydratation, donc les cas y ont été placés.)
+- **Correction du plan initial** : le test RTL prévu sur `IndicatorMenu` n'est
+  PAS réalisable — `apps/web` tourne en env vitest **node**, sans jsdom, et le
+  BUILD-CONTRACT interdit d'ajouter une dépendance. La couverture passe donc par
+  Playwright : `e2e/gate-v24-macro-denominateur.e2e.ts` (bascule d'onglet, onglet
+  inactif absent du DOM, compteur de l'onglet après cochage, bandeau ÷BTC/÷ETH/÷SOL
+  avec recomposition depuis la jambe A).
+- `commands/registry.test.ts` : la commande `MACRO` ouvre le menu Indicateurs sur
+  l'onglet Macro. Sa cible sidebar ayant disparu, l'ancienne action serait devenue
+  silencieusement inopérante (elle ne levait pas, elle ne trouvait rien).
 - `pnpm --filter @axiom/web test`, `typecheck`, `build` verts (puis
   `pnpm check`).
 - **Gate visuel navigateur** : menu Indicateurs → onglet Macro (3 mesures,

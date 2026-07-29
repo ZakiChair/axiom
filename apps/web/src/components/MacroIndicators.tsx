@@ -251,9 +251,11 @@ export function MacroIndicators({ onOuvrirReglages }: { onOuvrirReglages: () => 
 
   return (
     <div className="flex-1 overflow-y-auto">
-      {/* En-tête : rôle de l'onglet + refresh manuel (ex-`action` de SidebarSection). */}
-      <div className="flex items-baseline justify-between border-b border-border px-3 py-1.5">
-        <span className="text-[11px] text-text-dim">Cochez pour tracer dans le pane macro.</span>
+      {/* En-tête : rôle de l'onglet + refresh manuel (ex-`action` de SidebarSection).
+          Libellé court à dessein : au-delà, il passe sur deux lignes dans le panneau
+          (w-72) et bouscule l'horodatage de mise à jour — constaté à l'écran. */}
+      <div className="flex items-baseline justify-between gap-2 border-b border-border px-3 py-1.5">
+        <span className="shrink-0 text-[11px] text-text-dim">Tracer sur le graphe</span>
         <button
           type="button"
           onClick={() => {

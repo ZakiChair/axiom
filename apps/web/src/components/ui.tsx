@@ -330,10 +330,73 @@ export function SansCle({
 }
 
 /**
- * Tuile « libellé / valeur » standard (ex-Metric locaux de DERIV et OMON).
- * `couleur` accepte un token CSS (`var(--up)`) ; `extra` accueille un élément
- * à droite de la valeur (sparkline de DERIV).
+ * Tuile de statistique STANDARD — fusionne les 4 variantes locales relevées par
+ * l'audit (Metric partagée, StatCard/StatMC de BT, Widget de CHAIN).
  */
+export function TuileStat({
+  label,
+  valeur,
+  disposition = "empilee",
+  ton,
+  couleur,
+  title,
+  badge,
+  extra,
+  pied,
+}: {
+  label: string;
+  valeur: string;
+  disposition?: "inline" | "empilee";
+  ton?: "up" | "down";
+  couleur?: string;
+  title?: string;
+  badge?: ReactNode;
+  extra?: ReactNode;
+  pied?: ReactNode;
+}) {
+  const classeTon = ton === "up" ? "text-up" : ton === "down" ? "text-down" : "text-text";
+  const styleCouleur = couleur !== undefined ? { color: couleur } : undefined;
+  if (disposition === "inline") {
+    return (
+      <div
+        title={title}
+        className="flex items-baseline justify-between gap-3 rounded-md border border-border bg-bg px-3 py-2"
+      >
+        {/* min-w-0 + flex-wrap : un libellé long accompagné d'un badge se replie au
+            lieu de pousser la valeur hors de la tuile (backlog lot A). */}
+        <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-text-dim">
+          {label}
+          {badge}
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          {extra}
+          <span className={`tabular-nums text-sm font-medium ${classeTon}`} style={styleCouleur}>
+            {valeur}
+          </span>
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div title={title} className="flex flex-col gap-1 rounded-md border border-border bg-bg px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="truncate text-[10px] uppercase tracking-wider text-text-dim">{label}</span>
+        {badge !== undefined && <span className="flex shrink-0 items-center gap-1">{badge}</span>}
+      </div>
+      <div className="flex items-end justify-between gap-2">
+        <span className={`tabular-nums text-sm font-medium ${classeTon}`} style={styleCouleur}>
+          {valeur}
+        </span>
+        {extra}
+      </div>
+      {pied !== undefined && (
+        <div className="flex items-center justify-between gap-2 text-[10px] text-text-dim">{pied}</div>
+      )}
+    </div>
+  );
+}
+
+/** @deprecated Alias de compat (supprimé en fin de Lot 1) — utiliser TuileStat. */
 export function Metric({
   label,
   value,
@@ -345,27 +408,10 @@ export function Metric({
   value: string;
   couleur?: string;
   extra?: ReactNode;
-  /** Élément accolé au libellé (ex. BadgeFiabilite de DERIV). */
   labelExtra?: ReactNode;
 }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 rounded-md border border-border bg-bg px-3 py-2">
-      {/* min-w-0 + flex-wrap : un libellé long accompagné d'un badge se replie au
-          lieu de pousser la valeur hors de la tuile (backlog lot A). */}
-      <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-text-dim">
-        {label}
-        {labelExtra}
-      </span>
-      <span className="flex shrink-0 items-center gap-2">
-        {extra}
-        <span
-          className="tabular-nums text-sm font-medium text-text"
-          style={couleur ? { color: couleur } : undefined}
-        >
-          {value}
-        </span>
-      </span>
-    </div>
+    <TuileStat label={label} valeur={value} disposition="inline" couleur={couleur} extra={extra} badge={labelExtra} />
   );
 }
 

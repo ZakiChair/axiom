@@ -3,6 +3,7 @@ import type { ReactElement } from "react";
 import {
   CLASSES_CHAMP, Input, Select, Bouton, BoutonBascule, BoutonRafraichir, BTN_SECONDAIRE, CLASSES_BOUTON,
   BarreProgression, Chip, classesSegmentItem, CLASSES_SEGMENT_CONTENEUR, SegmenteCompact, TitreSection,
+  Metric, TuileStat,
 } from "./ui";
 
 /** Invoque un composant SANS hook et retourne ses props d'élément racine. */
@@ -87,5 +88,27 @@ describe("Chip / BarreProgression / TitreSection", () => {
     const el = racine(TitreSection({ children: "Positions" }));
     expect(el.type).toBe("h3");
     expect(el.props.className).toContain("text-[10px] uppercase tracking-wide text-text-dim");
+  });
+});
+
+describe("TuileStat", () => {
+  it("empilée : libellé au-dessus, ton down applique text-down", () => {
+    const el = racine(TuileStat({ label: "PnL net", valeur: "−123", ton: "down" }));
+    const html = JSON.stringify(el.props);
+    expect(html).toContain("PnL net");
+    expect(html).toContain("text-down");
+    expect(html).toContain("tabular-nums");
+  });
+  it("couleur brute prioritaire sur ton", () => {
+    const el = racine(TuileStat({ label: "OI", valeur: "1,2 Md", ton: "up", couleur: "var(--serie-1)" }));
+    expect(JSON.stringify(el.props)).toContain("var(--serie-1)");
+  });
+  it("inline : même tuile bordée, libellé et valeur sur une ligne", () => {
+    const el = racine(TuileStat({ label: "Funding", valeur: "0,01 %", disposition: "inline" }));
+    expect(el.props.className as string).toContain("items-baseline justify-between");
+  });
+  it("Metric (déprécié) délègue à TuileStat inline", () => {
+    const viaMetric = racine(Metric({ label: "x", value: "1" }));
+    expect(viaMetric.type).toBe(TuileStat);
   });
 });

@@ -63,12 +63,12 @@ export async function fetchHistoriquePiece(id: string, signal?: AbortSignal): Pr
 export async function fetchMarchesEtGlobal(signal?: AbortSignal): Promise<{ marches: CoinTile[]; global: MarketGlobal }>;
 ```
 
-- [ ] **Étape 1 — tests d'abord** (`data/mcap.test.ts`), un cas par comportement :
+- [x] **Étape 1 — tests d'abord** (`data/mcap.test.ts`), un cas par comportement :
   `grilleJournaliere` colle deux points du même jour et garde le dernier (cas réel : 365 minuits + 1 point « maintenant ») ; `alignerSurGrille` rend 0 avant le premier point, forward-fill un trou interne, ne dépasse pas la grille ; `reconstruireTotal` somme et applique k à TOUTE la série, et rend `recalibre: false` sur somme finale nulle ; `dominance` est invariante d'échelle (×10 numérateur ET dénominateur ⇒ même résultat) et rend `null` sur total 0/NaN ; `serieDifference` clampe à 0 ; `dominanceAlts` propage `null` ; `attenteApres429` respecte `Retry-After` puis plafonne à 60 s.
-- [ ] **Étape 2** — `pnpm --filter @axiom/web test -- mcap` : ÉCHEC attendu (module absent).
-- [ ] **Étape 3** — implémenter `data/mcap.ts`. Les fetchers réutilisent `parseGlobal` / `parseMarkets` de `marketOverview.ts` et la clé Demo de `macro/coingecko.ts` ; URL historique : `${CG_BASE}/coins/${id}/market_chart?vs_currency=usd&days=365&interval=daily`. Un 429 est propagé tel quel (`erreur.status = 429`, `retryAfter` lu sur l'en-tête) — c'est l'appelant (T3) qui cadence.
-- [ ] **Étape 4** — tests verts.
-- [ ] **Étape 5** — commit `feat(web): data/mcap — reconstruction recalibrée de la cap. totale et des dominances`.
+- [x] **Étape 2** — `pnpm --filter @axiom/web test -- mcap` : ÉCHEC attendu (module absent).
+- [x] **Étape 3** — implémenter `data/mcap.ts`. Les fetchers réutilisent `parseGlobal` / `parseMarkets` de `marketOverview.ts` et la clé Demo de `macro/coingecko.ts` ; URL historique : `${CG_BASE}/coins/${id}/market_chart?vs_currency=usd&days=365&interval=daily`. Un 429 est propagé tel quel (`erreur.status = 429`, `retryAfter` lu sur l'en-tête) — c'est l'appelant (T3) qui cadence.
+- [x] **Étape 4** — tests verts.
+- [x] **Étape 5** — commit `feat(web): data/mcap — reconstruction recalibrée de la cap. totale et des dominances`.
 
 ---
 
@@ -84,11 +84,11 @@ export function compacter(snaps: readonly McapSnapshot[], maintenant: number): M
 seed: (points: readonly McapSnapshot[]) => void;  // fusionne, dédoublonne par jour, n'écrase JAMAIS un échantillon existant
 ```
 
-- [ ] **Étape 1** — tests : `compacter` garde tout sur les 48 dernières heures, réduit à 1/jour au-delà, préserve l'ordre, respecte `MAX_POINTS` ; `seed` insère 366 points journaliers devant une série de 3 échantillons temps réel sans les écraser ni créer de doublon de jour ; `record` appelle la compaction (2 000 échantillons simulés ⇒ la série garde encore les points anciens, ce qui échoue avec le code actuel).
-- [ ] **Étape 2** — lancer : ÉCHEC attendu sur `compacter` (absente) et sur le test `record` (le `slice(-1500)` actuel évince).
-- [ ] **Étape 3** — implémenter `compacter` (pure, exportée) et `seed` ; brancher la compaction dans `record`. Corriger les DEUX docblocks mensongers : celui de `macroHistory.ts` l.9-11 (« l'historique se construit VERS L'AVANT … aucun backfill possible ») et celui de `macro/coingecko.ts` l.22-26 — remplacer par le constat mesuré : l'historique **par pièce** est gratuit (`/coins/{id}/market_chart`, 365 j max, `error_code 10012` au-delà), seul l'agrégat `/global/market_cap_chart` est Pro.
-- [ ] **Étape 4** — tests verts.
-- [ ] **Étape 5** — commit `fix(web): macroHistory — compaction journalière et seed (le plafond de 5,2 j tombe)`.
+- [x] **Étape 1** — tests : `compacter` garde tout sur les 48 dernières heures, réduit à 1/jour au-delà, préserve l'ordre, respecte `MAX_POINTS` ; `seed` insère 366 points journaliers devant une série de 3 échantillons temps réel sans les écraser ni créer de doublon de jour ; `record` appelle la compaction (2 000 échantillons simulés ⇒ la série garde encore les points anciens, ce qui échoue avec le code actuel).
+- [x] **Étape 2** — lancer : ÉCHEC attendu sur `compacter` (absente) et sur le test `record` (le `slice(-1500)` actuel évince).
+- [x] **Étape 3** — implémenter `compacter` (pure, exportée) et `seed` ; brancher la compaction dans `record`. Corriger les DEUX docblocks mensongers : celui de `macroHistory.ts` l.9-11 (« l'historique se construit VERS L'AVANT … aucun backfill possible ») et celui de `macro/coingecko.ts` l.22-26 — remplacer par le constat mesuré : l'historique **par pièce** est gratuit (`/coins/{id}/market_chart`, 365 j max, `error_code 10012` au-delà), seul l'agrégat `/global/market_cap_chart` est Pro.
+- [x] **Étape 4** — tests verts.
+- [x] **Étape 5** — commit `fix(web): macroHistory — compaction journalière et seed (le plafond de 5,2 j tombe)`.
 
 ---
 
@@ -125,11 +125,11 @@ export interface DepsBackfill {
 export const mcapStore: StoreApi<McapState>;
 ```
 
-- [ ] **Étape 1** — tests avec `DepsBackfill` bouchonnées (aucun réseau, `espacementMs: 0`) : un backfill de 3 pièces produit un `hist` dont `total[dernier] === global.totalMcapUsd` (recalibrage) et dont `dominance(btc)[dernier]` retombe sur `global.btcDominance` à 0,1 pt ; **c'est le test qui attrape l'erreur « divisé par la somme non recalibrée »** ; une pièce en 429 est rejouée puis réussit sans perdre la progression ; `interrompre` laisse le curseur persisté et une reprise repart du reste ; `prolonger` remplace le point du jour au lieu d'en ajouter un second ; `ajouterDominance` au-delà de `PLAFOND_DOMINANCES` est refusée ; lecture tolérante (JSON corrompu, `version` inconnue ⇒ `hist: null`) ; `mirrorOpenState("mcap", mcapStore)` reflète `open`.
-- [ ] **Étape 2** — lancer : ÉCHEC attendu.
-- [ ] **Étape 3** — implémenter. Clés localStorage : `axiom:mcap:v1` (historique), `axiom:mcap:backfill:v1` (curseur = ids restants + somme partielle), `axiom:mcap:dominances` (sélection, défaut `["bitcoin","ethereum"]`), `axiom:mcap:periode`. Cadence : 2 100 ms avec clé Demo, 3 000 ms sans, AIMD (×1,5 sur 429, plafond 15 s ; −200 ms après 10 succès, plancher 3 s). À la fin du backfill : `macroHistoryStore.getState().seed(...)` avec `{t, total, total2, total3}` par jour. Erreur NON destructive et garde 200-vide (patron netliq).
-- [ ] **Étape 4** — tests verts.
-- [ ] **Étape 5** — commit `feat(web): store CAP — backfill cadencé, persistance et prolongement`.
+- [x] **Étape 1** — tests avec `DepsBackfill` bouchonnées (aucun réseau, `espacementMs: 0`) : un backfill de 3 pièces produit un `hist` dont `total[dernier] === global.totalMcapUsd` (recalibrage) et dont `dominance(btc)[dernier]` retombe sur `global.btcDominance` à 0,1 pt ; **c'est le test qui attrape l'erreur « divisé par la somme non recalibrée »** ; une pièce en 429 est rejouée puis réussit sans perdre la progression ; `interrompre` laisse le curseur persisté et une reprise repart du reste ; `prolonger` remplace le point du jour au lieu d'en ajouter un second ; `ajouterDominance` au-delà de `PLAFOND_DOMINANCES` est refusée ; lecture tolérante (JSON corrompu, `version` inconnue ⇒ `hist: null`) ; `mirrorOpenState("mcap", mcapStore)` reflète `open`.
+- [x] **Étape 2** — lancer : ÉCHEC attendu.
+- [x] **Étape 3** — implémenter. Clés localStorage : `axiom:mcap:v1` (historique), `axiom:mcap:backfill:v1` (curseur = ids restants + somme partielle), `axiom:mcap:dominances` (sélection, défaut `["bitcoin","ethereum"]`), `axiom:mcap:periode`. Cadence : 2 100 ms avec clé Demo, 3 000 ms sans, AIMD (×1,5 sur 429, plafond 15 s ; −200 ms après 10 succès, plancher 3 s). À la fin du backfill : `macroHistoryStore.getState().seed(...)` avec `{t, total, total2, total3}` par jour. Erreur NON destructive et garde 200-vide (patron netliq).
+- [x] **Étape 4** — tests verts.
+- [x] **Étape 5** — commit `feat(web): store CAP — backfill cadencé, persistance et prolongement`.
 
 ---
 
@@ -151,11 +151,11 @@ export function formatDom(v: number | null): string;  // « 56,6 % » / VALEUR_A
 export function fenetrer<T>(serie: readonly T[], jours: number | null): T[];  // null = tout
 ```
 
-- [ ] **Étape 1** — tests : `domaineValeurs` ignore les `null` et n'inclut PAS 0 de force ; `projX(0)` = marge gauche et `projX(n-1)` = largeur − marge droite ; `indexDepuisX` est l'inverse de `projX` aux extrémités et clampe hors cadre (**c'est cette réciprocité qui garantit que le réticule coïncide avec le point**) ; `ticksValeurs` rend des bornes rondes ; `formatMcap` bascule T$/G$/M$ avec le groupement fr-FR ; `fenetrer(serie, null)` rend la série entière.
-- [ ] **Étape 2** — lancer : ÉCHEC attendu.
-- [ ] **Étape 3** — implémenter.
-- [ ] **Étape 4** — tests verts.
-- [ ] **Étape 5** — commit `feat(web): géométrie partagée de la fenêtre CAP`.
+- [x] **Étape 1** — tests : `domaineValeurs` ignore les `null` et n'inclut PAS 0 de force ; `projX(0)` = marge gauche et `projX(n-1)` = largeur − marge droite ; `indexDepuisX` est l'inverse de `projX` aux extrémités et clampe hors cadre (**c'est cette réciprocité qui garantit que le réticule coïncide avec le point**) ; `ticksValeurs` rend des bornes rondes ; `formatMcap` bascule T$/G$/M$ avec le groupement fr-FR ; `fenetrer(serie, null)` rend la série entière.
+- [x] **Étape 2** — lancer : ÉCHEC attendu.
+- [x] **Étape 3** — implémenter.
+- [x] **Étape 4** — tests verts.
+- [x] **Étape 5** — commit `feat(web): géométrie partagée de la fenêtre CAP`.
 
 ---
 
@@ -163,12 +163,12 @@ export function fenetrer<T>(serie: readonly T[], jours: number | null): T[];  //
 
 **Files:** Create `apps/web/src/components/McapWindow.tsx` — Modify `apps/web/src/store/windowManager.ts` (registre), `apps/web/src/App.tsx` (`WINDOW_COMPONENTS`), `apps/web/src/commands/windowPanels.ts`, `apps/web/src/components/SettingsPanel.tsx`
 
-- [ ] **Étape 1** — entrée de registre `{ id: "mcap", title: "Capitalisation & dominance", mnemonic: "CAP", defaultWidth: 880, defaultHeight: 700, nouveau: true }` + `mcap: lazy(() => import("./components/McapWindow").then((m) => ({ default: m.McapWindow })))` + commande `panneau:cap` (mots-clés : `capitalisation, total, total2, total3, dominance, btc.d, altseason, market cap`). Vérifier : `pnpm --filter @axiom/web build` — un id sans composant est une erreur de type, c'est le filet.
-- [ ] **Étape 2** — composant : trois canvas empilés de hauteurs égales, axe des temps commun, `BarrePeriodes` (30 j / 90 j / 1 a / Tout), `Fraicheur`, `NoteSource` « CoinGecko · reconstruction top 100 recalibrée, couverture 97,8 % · 365 j max en gratuit ». Un unique `indexSurvol` en state React partagé par les trois canvas : trait vertical sur les trois, `InfobulleGraphe` uniquement sur le graphique sous la souris. Domaines calés sur les extrêmes (jamais forcés à 0). Tokens lus AU DESSIN.
-- [ ] **Étape 3** — sélecteur de dominances sous le 3ᵉ graphique : pastilles BTC / ETH / alts + bouton **+** ouvrant une liste filtrable des 100 premières pièces de `marches` (recherche symbole ou nom), croix de retrait, plafond 6.
-- [ ] **Étape 4** — état de backfill : barre de progression `n/100` + bouton **Interrompre** tant que `backfill.enCours` ; si aucun historique et backfill jamais lancé, un bloc `Vide` avec un bouton **Construire l'historique (365 j)** qui annonce la durée (~3,5 min avec clé, 5–20 min sans).
-- [ ] **Étape 5** — `SettingsPanel` : champ « Clé Demo CoinGecko (optionnelle) » dans la section Clés API existante, écrivant `axiom.coingecko.demoApiKey` (déjà lue par `macro/coingecko.ts` et `marketOverview.ts`, mais jusqu'ici non renseignable).
-- [ ] **Étape 6** — `pnpm test` racine + `pnpm --filter @axiom/web build` verts, puis commit `feat(web): fenêtre CAP — TOTAL, TOTAL3 et dominances`.
+- [x] **Étape 1** — entrée de registre `{ id: "mcap", title: "Capitalisation & dominance", mnemonic: "CAP", defaultWidth: 880, defaultHeight: 700, nouveau: true }` + `mcap: lazy(() => import("./components/McapWindow").then((m) => ({ default: m.McapWindow })))` + commande `panneau:cap` (mots-clés : `capitalisation, total, total2, total3, dominance, btc.d, altseason, market cap`). Vérifier : `pnpm --filter @axiom/web build` — un id sans composant est une erreur de type, c'est le filet.
+- [x] **Étape 2** — composant : trois canvas empilés de hauteurs égales, axe des temps commun, `BarrePeriodes` (30 j / 90 j / 1 a / Tout), `Fraicheur`, `NoteSource` « CoinGecko · reconstruction top 100 recalibrée, couverture 97,8 % · 365 j max en gratuit ». Un unique `indexSurvol` en state React partagé par les trois canvas : trait vertical sur les trois, `InfobulleGraphe` uniquement sur le graphique sous la souris. Domaines calés sur les extrêmes (jamais forcés à 0). Tokens lus AU DESSIN.
+- [x] **Étape 3** — sélecteur de dominances sous le 3ᵉ graphique : pastilles BTC / ETH / alts + bouton **+** ouvrant une liste filtrable des 100 premières pièces de `marches` (recherche symbole ou nom), croix de retrait, plafond 6.
+- [x] **Étape 4** — état de backfill : barre de progression `n/100` + bouton **Interrompre** tant que `backfill.enCours` ; si aucun historique et backfill jamais lancé, un bloc `Vide` avec un bouton **Construire l'historique (365 j)** qui annonce la durée (~3,5 min avec clé, 5–20 min sans).
+- [x] **Étape 5** — `SettingsPanel` : champ « Clé Demo CoinGecko (optionnelle) » dans la section Clés API existante, écrivant `axiom.coingecko.demoApiKey` (déjà lue par `macro/coingecko.ts` et `marketOverview.ts`, mais jusqu'ici non renseignable).
+- [x] **Étape 6** — `pnpm test` racine + `pnpm --filter @axiom/web build` verts, puis commit `feat(web): fenêtre CAP — TOTAL, TOTAL3 et dominances`.
 
 ---
 
@@ -176,7 +176,7 @@ export function fenetrer<T>(serie: readonly T[], jours: number | null): T[];  //
 
 **Files:** Modify `apps/web/e2e/smoke.e2e.ts` (ou fichier e2e dédié selon la convention en place)
 
-- [ ] **Étape 1** — E2E : la commande `CAP` ouvre la fenêtre ; les trois canvas sont présents ; l'ajout d'une dominance (SOL) fait apparaître une pastille. Réseau bouché comme les autres E2E du dépôt.
-- [ ] **Étape 2** — vérification empirique en conditions réelles : lancer le backfill dans le navigateur, puis comparer le dernier point à `/global` — TOTAL identique et BTC.D à 0,1 pt près (≈ 56,6 % le 2026-07-29). Consigner le chiffre obtenu dans le message de commit.
-- [ ] **Étape 3** — **gate visuel navigateur** : les 5 thèmes, fenêtre étroite ET large, réticule aligné sur les points, axes lisibles, aucune courbe écrasée contre le cadre.
-- [ ] **Étape 4** — `pnpm test` racine vert, commit, puis fusion dans `main`.
+- [x] **Étape 1** — E2E : la commande `CAP` ouvre la fenêtre ; les trois canvas sont présents ; l'ajout d'une dominance (SOL) fait apparaître une pastille. Réseau bouché comme les autres E2E du dépôt.
+- [x] **Étape 2** — vérification empirique en conditions réelles : lancer le backfill dans le navigateur, puis comparer le dernier point à `/global` — TOTAL identique et BTC.D à 0,1 pt près (≈ 56,6 % le 2026-07-29). Consigner le chiffre obtenu dans le message de commit.
+- [x] **Étape 3** — **gate visuel navigateur** : les 5 thèmes, fenêtre étroite ET large, réticule aligné sur les points, axes lisibles, aucune courbe écrasée contre le cadre.
+- [x] **Étape 4** — `pnpm test` racine vert, commit, puis fusion dans `main`.

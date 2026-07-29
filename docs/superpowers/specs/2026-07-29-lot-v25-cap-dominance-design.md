@@ -97,15 +97,26 @@ Un seul pipeline sert les trois graphiques et toutes les dominances.
 - `attenteApres429(essai, retryAfterSecondes)` — pure, donc testable sans timers :
   respecte `Retry-After` s'il est présent, sinon repli exponentiel
   `min(2^essai × 1 000, 60 000)` ms.
-- Espacement nominal du backfill : **2 100 ms avec clé Demo** (soit ≈ 28 appels/min,
-  sous le plafond annoncé de 30/min) et **3 000 ms sans clé**. Le sans-clé est
-  cadencé en AIMD : chaque 429 multiplie l'espacement courant par 1,5 (plafond
-  15 s), et 10 succès consécutifs le réduisent de 200 ms (plancher 3 s). Le
-  docblock du dépôt annonce 100 appels/min pour le tier Demo — chiffre **non
-  vérifié** ; l'AIMD rend la cadence robuste quel que soit le vrai plafond, ce qui
-  évite d'avoir à trancher.
-- Un 429 déclenche l'attente ci-dessus puis **rejoue la même pièce** (jusqu'à 4
-  essais), sans perdre la progression.
+- Espacement nominal du backfill : **2 100 ms avec clé Demo** (≈ 28 appels/min) et
+  **13 000 ms sans clé**. Le sans-clé est cadencé en AIMD : chaque échec retentable
+  multiplie l'espacement courant par 1,5 (plafond 15 s), et 10 succès consécutifs le
+  réduisent de 200 ms (plancher = la base).
+- Un échec retentable déclenche l'attente ci-dessus puis **rejoue la même pièce**
+  (jusqu'à 4 essais), sans perdre la progression. L'appel de catalogue initial est
+  rejoué de la même façon : un seul échec ne doit pas tuer tout le backfill.
+
+**Deux mesures faites APRÈS rédaction, qui corrigent cette section :**
+
+1. **Un 429 CoinGecko arrive au NAVIGATEUR en erreur CORS.** Sa réponse d'erreur ne
+   porte pas d'en-tête `Access-Control-Allow-Origin` : le navigateur bloque la réponse
+   et `fetch` rejette avec un `TypeError`, `res.status` restant illisible. Tout repli
+   conditionné à `status === 429` est donc **mort dans un navigateur**. Le rejet réseau
+   doit être traité comme retentable (`STATUT_RESEAU`). ⚠️ En curl, la même requête
+   renvoie un 429 parfaitement visible — le diagnostic en ligne de commande **ne
+   reproduit pas le symptôme**.
+2. **Le plafond keyless réel est de l'ordre de 5 appels/minute**, pas 20. Mesuré : 429
+   dès le 6ᵉ appel d'une rafale, et encore à un espacement de 8 s, avec un en-tête
+   `Retry-After: 60`. D'où 13 s de base et une durée annoncée de ~25 min sans clé.
 
 ---
 
@@ -123,10 +134,12 @@ monde). File séquentielle sur les 100 premiers ids de `fetchTopMarches`, avec :
   repart où elle en était ;
 - à la fin : recalibrage, écriture de l'historique, purge du curseur.
 
-Durée attendue : **~3,5 min avec clé Demo**, **5 à 20 min sans clé** selon ce que
-l'AIMD converge à trouver. Le 429 observé au 6ᵉ appel d'une rafale sans délai est
-la seule mesure dure dont on dispose sur le plafond keyless — d'où la cadence
-prudente et l'interruption toujours possible.
+Durée attendue : **~3,5 min avec clé Demo**, **~25 min sans clé** (plafond keyless
+mesuré ≈ 5 appels/min avec 60 s de pénalité). La clé Demo, gratuite, cesse d'être un
+confort : la fenêtre la recommande explicitement.
+
+Le curseur est écrit périodiquement **et sur le chemin d'erreur** : un abandon après
+quatre échecs consécutifs conserve tout ce qui est acquis.
 
 ### 2.2 Persistance
 
@@ -275,6 +288,11 @@ le cadre.
 
 - **365 jours maximum** en gratuit (`error_code 10012` vérifié). Aucun contournement
   sans plan Pro ; la fenêtre le dit dans sa note de source.
+- **Le backfill complet des 100 pièces n'a pas été exécuté de bout en bout** : trois
+  tentatives ont été bloquées par le quota keyless (épuisé par les sondes de la
+  session). La chaîne a été vérifiée sur **5 pièces réelles** — c'est ce qui répondait
+  à la seule question ouverte (l'alignement de payloads réels entre pièces) ; le reste
+  (recalibrage, dominance) est vrai par construction et verrouillé en test unitaire.
 - Le recalibrage est un **facteur constant** : il corrige le niveau, pas la dérive
   de la part de la longue traîne au fil de l'année. L'erreur croît en remontant le
   temps.

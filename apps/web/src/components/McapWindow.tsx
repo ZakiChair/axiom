@@ -18,8 +18,9 @@
  * (même divergence assumée que NETLIQ).
  *
  * L'HISTORIQUE se construit en une fois (bouton dédié) : 100 appels cadencés, ~3,5 min
- * avec une clé Demo CoinGecko, 5 à 20 min sans. Interruptible, repris là où il s'était
- * arrêté. Ensuite, deux appels suffisent à prolonger la série jour après jour.
+ * avec une clé Demo CoinGecko, ~25 min sans (plafond keyless mesuré ≈ 5 appels/min, avec
+ * 60 s de pénalité). Interruptible, repris là où il s'était arrêté. Ensuite, deux appels
+ * suffisent à prolonger la série jour après jour.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
@@ -465,8 +466,10 @@ export function McapWindow() {
               Construire l'historique (365 j)
             </button>
             <p className="max-w-sm text-center text-[10px] leading-snug text-text-dim">
-              100 appels cadencés : ~3,5 min avec une clé Demo CoinGecko (Réglages), 5 à 20 min
-              sans. Interruptible, et repris là où il s'est arrêté.
+              100 appels cadencés. Avec une clé Demo CoinGecko (gratuite, à saisir dans les
+              Réglages) : environ 3,5 min. Sans clé : environ 25 min — CoinGecko limite alors
+              à ~5 appels/minute et impose 60 s d'attente à chaque dépassement (mesuré).
+              Interruptible à tout moment, et repris là où il s'est arrêté.
             </p>
             {backfill.erreur !== null && <ErreurBloc>{backfill.erreur}</ErreurBloc>}
           </div>

@@ -14,7 +14,7 @@
  *      l'overlay du graphe en profitent sans code supplémentaire.
  *
  * CADENCE : le seuil de 429 de CoinGecko est bas (mesuré : 429 dès le 6ᵉ appel d'une
- * rafale sans délai). L'espacement part de 2,1 s avec clé Demo / 6 s sans, puis suit un
+ * rafale sans délai, `Retry-After: 60`). L'espacement part de 2,1 s avec clé Demo / 13 s sans, puis suit un
  * AIMD — ×1,5 à chaque échec retentable (plafond 15 s), −200 ms après 10 succès
  * (plancher = la base). Le vrai plafond du tier Demo n'est pas documenté de façon
  * fiable ; l'AIMD rend la cadence robuste sans avoir à le trancher.
@@ -79,11 +79,14 @@ export const PALETTE_DOMINANCES = [
 const ESSAIS_MAX = 4;
 const ESPACEMENT_AVEC_CLE_MS = 2_100;
 /**
- * Sans clé, CoinGecko tolère de l'ordre de 5 à 15 appels/minute (mesuré : 429 dès le
- * 6ᵉ appel d'une rafale sans délai). 6 s ≈ 10 appels/min part sous ce plafond ; l'AIMD
- * ajuste ensuite. Une base plus vive déclenche une tempête de 429 dès le début.
+ * MESURÉ le 2026-07-29 sur le réseau de Zaki : sans clé, CoinGecko 429 dès le 6ᵉ appel
+ * d'une rafale, ET encore à ~7,5 appels/min (espacement 8 s) — avec `Retry-After: 60`.
+ * Le plafond keyless réel est donc de l'ordre de **5 appels/minute**. 13 s (≈ 4,6/min)
+ * passe dessous ; l'AIMD ajuste ensuite. Conséquence assumée : un backfill keyless dure
+ * ~25 min. Une clé Demo (gratuite) le ramène à ~3,5 min — d'où la recommandation
+ * explicite dans la fenêtre.
  */
-const ESPACEMENT_SANS_CLE_MS = 6_000;
+const ESPACEMENT_SANS_CLE_MS = 13_000;
 const ESPACEMENT_PLAFOND_MS = 15_000;
 const FACTEUR_429 = 1.5;
 const DECREMENT_MS = 200;

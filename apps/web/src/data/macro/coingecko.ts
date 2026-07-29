@@ -18,11 +18,18 @@
  *
  * UNITÉ de `value` : USD absolu (ex. ~2.4e12).
  *
- * ⚠️ LIMITE DU GRATUIT : `/global` ne renvoie qu'un INSTANTANÉ courant. CoinGecko
- * n'expose PAS l'historique de la cap. totale en gratuit (`/global/market_cap_chart`
- * est réservé au tier Pro, et DefiLlama n'a pas d'équivalent total-mcap). `fetchSeries`
- * renvoie donc UN SEUL point (l'instant présent) ; pour bâtir une série, l'appelant
- * échantillonne dans le temps (polling) et persiste localement.
+ * ⚠️ LIMITE DU GRATUIT : `/global` ne renvoie qu'un INSTANTANÉ courant, et l'AGRÉGAT
+ * historique `/global/market_cap_chart` est réservé au tier Pro (401 error_code 10005).
+ * `fetchSeries` renvoie donc UN SEUL point (l'instant présent).
+ *
+ * ✅ MAIS L'HISTORIQUE PAR PIÈCE EST GRATUIT (vérifié le 2026-07-29) :
+ * `/coins/{id}/market_chart?vs_currency=usd&days=365&interval=daily` répond 200 avec
+ * 366 points de `market_caps` sans aucune clé (au-delà de 365 jours : 401
+ * error_code 10012). `data/mcap.ts` s'en sert pour RECONSTRUIRE la cap. totale par
+ * somme du top 100 recalibrée sur `/global` (97,8 % de couverture mesurée), et
+ * `store/macroHistory.seed` injecte cette année d'historique dans la série locale.
+ * L'ancienne mention « aucun backfill possible en gratuit » qui figurait ici était
+ * fausse et a induit en erreur : c'est l'agrégat qui est payant, pas les pièces.
  */
 import type { IMacroProvider, MacroFetchOptions, MacroPoint, MacroSeries } from "./types";
 

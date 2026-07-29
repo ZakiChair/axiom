@@ -79,6 +79,9 @@ export const WINDOW_REGISTRY = [
   { id: "cycle", title: "Cycle 4 ans (halving)", mnemonic: "CYCLE", defaultWidth: 760, defaultHeight: 600, nouveau: true },
   { id: "evts", title: "Étude d'évènements", mnemonic: "EVTS", defaultWidth: 760, defaultHeight: 560, nouveau: true },
   { id: "scen", title: "Stress-test", mnemonic: "SCEN", defaultWidth: 720, defaultHeight: 540, nouveau: true },
+  // Haute par défaut : TROIS graphiques empilés, ~215 px chacun (mesuré) — en dessous
+  // de 800 px de fenêtre, les axes se télescopent.
+  { id: "mcap", title: "Capitalisation & dominance", mnemonic: "CAP", defaultWidth: 900, defaultHeight: 820, menuLabel: "Capitalisation & dominance (TOTAL, TOTAL3, BTC.D)", nouveau: true },
 ] as const satisfies readonly DefinitionFenetre[];
 
 /** Union des ids de fenêtre — DÉRIVÉE du registre (source unique). Sert à typer la

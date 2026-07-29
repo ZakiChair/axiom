@@ -1,18 +1,26 @@
 /**
- * Panneau « Masse monétaire / Macro » — sidebar droite, sous le panneau Dérivés.
+ * Contenu de l'onglet « Macro » du menu Indicateurs (ex-panneau « Masse monétaire »
+ * de la sidebar droite, déplacé pour ne plus consommer de place latérale).
  *
  * Affiche trois mesures de liquidité, toutes via des fournisseurs gratuits :
  *   1. Cap. totale crypto (CoinGecko)      — INSTANTANÉ (le gratuit ne donne qu'un point).
  *   2. Supply agrégée stablecoins (DefiLlama) — série journalière → valeur + var. 30 j + mini-trend.
  *   3. M2 US (FRED, clé optionnelle)        — série hebdo → valeur + var. 30 j + mini-trend.
  *
+ * Chaque case à cocher pilote `macroOverlayStore`, donc le pane macro du graphe
+ * (chart/macro.ts) — c'est ce qui fait de ces mesures des INDICATEURS et justifie
+ * leur place dans ce menu plutôt que dans la sidebar.
+ *
+ * ⚠️ La case M2 reste ACTIVE même sans clé FRED perso : le proxy `/fredapi` injecte une
+ * clé de repli (.env), donc l'overlay du graphe fonctionne. Seule la LECTURE CHIFFRÉE
+ * est conditionnée à `hasKey` et renvoie vers les Réglages.
+ *
  * Donnée BASSE fréquence : un fetch à l'ouverture + rafraîchissement périodique LARGE
  * (~15 min) + bouton de refresh manuel. Ces séries peuvent vivre dans le state React
  * (sanctionné par data/macro/types.ts — rien à voir avec les flux tick haute fréquence).
  *
  * GRACIEUX : chaque source est récupérée indépendamment (Promise.allSettled) ; un échec
- * affiche un message inline sur SA ligne sans bloquer les autres. Sans clé FRED, la ligne
- * M2 propose un champ de saisie (clé stockée localement, jamais affichée).
+ * affiche un message inline sur SA ligne sans bloquer les autres.
  */
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
@@ -23,8 +31,6 @@ import { fredM2WeeklyProvider, stablecoinsSupplyProvider } from "../data/macro";
 import { fredKeyStore, getFredKey } from "../store/macro";
 import { macroHistoryStore, recordGlobalSnapshotNow } from "../store/macroHistory";
 import { macroOverlayStore, type MacroOverlayId } from "../store/macro-overlays";
-import { settingsUiStore } from "../store/settings-ui";
-import { SidebarSection } from "./SidebarSection";
 
 /** Rafraîchissement large (donnée macro basse fréquence). */
 const REFRESH_MS = 15 * 60_000; // ~15 min.
@@ -150,17 +156,15 @@ function Measure({
   );
 }
 
-export function MacroPanel() {
+export function MacroIndicators({ onOuvrirReglages }: { onOuvrirReglages: () => void }) {
   const hasKey = useStore(fredKeyStore, (s) => s.hasKey);
   const activeMacros = useStore(macroOverlayStore, (s) => s.enabled);
   const toggleMacro = useStore(macroOverlayStore, (s) => s.toggle);
-  // La saisie de la clé FRED vit désormais dans le panneau Réglages dédié.
-  const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
   const isMacroActive = (id: MacroOverlayId) => activeMacros.includes(id);
 
-  // Cap. totale crypto : série persistée (échantillonnée par le poller central),
-  // pas un fetch local — voir store/macroHistory.ts. Le composant se re-rend quand
-  // un nouvel échantillon arrive.
+  // Cap. totale crypto : série persistée (échantillonnée par le poller central lancé
+  // depuis main.tsx, pas ici) — voir store/macroHistory.ts. Le composant se re-rend
+  // quand un nouvel échantillon arrive.
   const snapshots = useStore(macroHistoryStore, (s) => s.snapshots);
 
   const [stables, setStables] = useState<MacroSeries>([]);
@@ -246,11 +250,10 @@ export function MacroPanel() {
   const m2Spark = m2.slice(-SPARK_POINTS).map((p) => p.value);
 
   return (
-    <SidebarSection
-      title="Masse monétaire"
-      collapsible
-      defaultOpen={false}
-      action={
+    <div className="flex-1 overflow-y-auto">
+      {/* En-tête : rôle de l'onglet + refresh manuel (ex-`action` de SidebarSection). */}
+      <div className="flex items-baseline justify-between border-b border-border px-3 py-1.5">
+        <span className="text-[11px] text-text-dim">Cochez pour tracer dans le pane macro.</span>
         <button
           type="button"
           onClick={() => {
@@ -262,8 +265,8 @@ export function MacroPanel() {
         >
           {loading ? "maj…" : `maj ${updatedAt ? formatHeureMinute(updatedAt) : "—"} · ↻`}
         </button>
-      }
-    >
+      </div>
+
       {/* 1. Cap. totale crypto — série échantillonnée localement (le gratuit ne donne
             qu'un instantané) : variation ~30 j + mini-trend se construisent dans le temps. */}
       <Measure
@@ -302,10 +305,11 @@ export function MacroPanel() {
         </div>
 
         {!hasKey ? (
-          /* --- Sans clé FRED : renvoi vers les Réglages (le M2 reste optionnel) --- */
+          /* --- Sans clé FRED : renvoi vers les Réglages (le M2 reste optionnel, et
+                 l'overlay du graphe marche déjà via la clé de repli du proxy). --- */
           <button
             type="button"
-            onClick={openSettings}
+            onClick={onOuvrirReglages}
             className="mt-1 text-[11px] text-accent hover:underline"
           >
             Clé FRED — Réglages ⚙
@@ -340,6 +344,6 @@ export function MacroPanel() {
         d'historique, la courbe se construit dans le temps), DefiLlama (stablecoins), FRED
         (M2 US). Variation ~30 j. Données basse fréquence, maj ~15 min.
       </p>
-    </SidebarSection>
+    </div>
   );
 }

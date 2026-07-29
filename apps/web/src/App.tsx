@@ -20,7 +20,6 @@ import { ChartGrid } from "./chart/ChartGrid";
 import { Watchlist } from "./components/Watchlist";
 import { AlertsPanel } from "./components/AlertsPanel";
 import { CompareControl } from "./components/CompareControl";
-import { MacroPanel } from "./components/MacroPanel";
 import { HealthPanel } from "./components/HealthPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { CommandPalette } from "./components/CommandPalette";
@@ -278,7 +277,8 @@ export function App() {
           </ErrorBoundary>
         </div>
         {/* Colonne droite : en-tête (accès Réglages) + panneaux empilés, tous harmonisés
-            via SidebarSection. Ordre : Watchlist, Alertes, Macro, Comparer, Santé. */}
+            via SidebarSection. Ordre : Watchlist, Alertes, Comparer, Santé. Les mesures
+            macro ont quitté la sidebar pour l'onglet « Macro » du menu Indicateurs. */}
         {!plein && (
           <aside className="flex w-60 shrink-0 flex-col min-h-0 overflow-y-auto border-l border-border bg-surface">
             <div className="flex shrink-0 items-center justify-between px-3 py-2">
@@ -299,7 +299,6 @@ export function App() {
             </div>
             <Watchlist />
             <AlertsPanel />
-            <MacroPanel />
             <CompareControl />
             <HealthPanel />
           </aside>

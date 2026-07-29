@@ -49,6 +49,7 @@ import {
   type NavCommande,
 } from "./registry";
 import { marketStore } from "../store/market";
+import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
 import { toastsStore, retirerToast } from "../store/toasts";
 // ─── Sources de commandes greffées par App.tsx (`enregistrerCommandes([...])`) ───
 // Ces modules n'enregistrent RIEN eux-mêmes : ils exportent un tableau `Commande[]`
@@ -311,6 +312,21 @@ describe("construireRegistre — commandes attendues présentes", () => {
   it("expose les 11 timeframes et les 5 thèmes", () => {
     expect(registre.filter((c) => c.categorie === "timeframe")).toHaveLength(11);
     expect(registre.filter((c) => c.categorie === "theme")).toHaveLength(5);
+  });
+
+  it("la commande MACRO ouvre le menu Indicateurs sur son onglet Macro", () => {
+    // Les mesures macro ayant quitté la sidebar, cette commande ne peut plus faire
+    // défiler vers un panneau : elle DOIT ouvrir l'onglet. Sans ce test, la régression
+    // serait silencieuse (l'ancienne action ne levait pas, elle ne trouvait rien).
+    indicatorMenuUiStore.getState().fermer();
+    indicatorMenuUiStore.getState().setOnglet("techniques");
+
+    const macro = registre.find((c) => c.id === "panneau:macro");
+    expect(macro?.mnemonique).toBe("MACRO");
+    macro?.action();
+
+    expect(indicatorMenuUiStore.getState().open).toBe(true);
+    expect(indicatorMenuUiStore.getState().onglet).toBe("macro");
   });
 });
 

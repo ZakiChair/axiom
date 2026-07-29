@@ -65,7 +65,7 @@ const MOTIFS: Motif[] = [
     id: "segmente-maison",
     description: "segmenté compact maison — utiliser SegmenteCompact ou CLASSES_SEGMENT_*",
     regex: /rounded border border-border p-0\.5/,
-    exceptions: ["LiquidationsWindow.tsx"],
+    exceptions: [],
   },
   {
     id: "barre-progression-maison",

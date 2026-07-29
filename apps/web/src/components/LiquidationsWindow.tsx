@@ -52,6 +52,11 @@ import {
   Chargement,
   Onglets,
   RefBadge,
+  SegmenteCompact,
+  CLASSES_SEGMENT_CONTENEUR,
+  classesSegmentItem,
+  BoutonBascule,
+  Fraicheur,
   type TonBadge,
 } from "./ui";
 import {
@@ -88,10 +93,10 @@ const SEUIL_GRAS_USD = 1_000_000;
 
 /** Fenêtres glissantes proposées (segmented en en-tête). */
 type FenetreId = "5m" | "1h" | "24h";
-const FENETRES: ReadonlyArray<{ id: FenetreId; label: string }> = [
-  { id: "5m", label: "5m" },
-  { id: "1h", label: "1h" },
-  { id: "24h", label: "24h" },
+const FENETRES: ReadonlyArray<{ id: FenetreId; label: string; title: string }> = [
+  { id: "5m", label: "5m", title: "Totaux et stats sur les 5m glissantes" },
+  { id: "1h", label: "1h", title: "Totaux et stats sur les 1h glissantes" },
+  { id: "24h", label: "24h", title: "Totaux et stats sur les 24h glissantes" },
 ];
 const FENETRE_MS: Record<FenetreId, number> = {
   "5m": 5 * 60_000,
@@ -139,17 +144,13 @@ function ToggleChart() {
   const footprintActif = useStore(orderflowStore, (s) => s.enabled);
   return (
     <>
-      <button
-        type="button"
+      <BoutonBascule
+        actif={actif}
         onClick={basculer}
-        aria-pressed={actif}
         title="Afficher les liquidations sur le graphe (marqueurs)"
-        className={`rounded border px-2 py-1 text-[11px] font-medium transition ${
-          actif ? "border-accent bg-bg text-accent" : "border-border bg-bg text-text-dim hover:text-text"
-        }`}
       >
-        {actif ? "● Sur le graphe" : "Sur le graphe"}
-      </button>
+        Sur le graphe
+      </BoutonBascule>
       {actif && footprintActif && (
         <p className="text-[10px] text-text-dim">Heatmap atténuée : footprint actif.</p>
       )}
@@ -174,26 +175,12 @@ function SelecteurMode() {
   const setMode = useStore(liqMarksStore, (s) => s.setMode);
   if (!actif) return null;
   return (
-    <div
-      role="group"
-      aria-label="Mode de coloration de la heatmap"
-      className="flex items-center gap-0.5 rounded border border-border p-0.5"
-    >
-      {MODES_HEATMAP.map((m) => (
-        <button
-          key={m.id}
-          type="button"
-          onClick={() => setMode(m.id)}
-          aria-pressed={mode === m.id}
-          title={m.title}
-          className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
-            mode === m.id ? "bg-bg text-text" : "text-text-dim hover:text-text"
-          }`}
-        >
-          {m.label}
-        </button>
-      ))}
-    </div>
+    <SegmenteCompact
+      options={MODES_HEATMAP}
+      actif={mode}
+      onChange={setMode}
+      ariaLabel="Mode de coloration de la heatmap"
+    />
   );
 }
 
@@ -207,25 +194,21 @@ function ToggleEstimes() {
   const actif = useStore(liqEstStore, (s) => s.actif);
   const basculer = useStore(liqEstStore, (s) => s.basculer);
   return (
-    <button
-      type="button"
+    <BoutonBascule
+      actif={actif}
       onClick={basculer}
-      aria-pressed={actif}
       title="Niveaux de liquidation ESTIMÉS depuis l'OI (modèle de levier — approximation, étiquetée EST.)"
-      className={`rounded border px-2 py-1 text-[11px] font-medium transition ${
-        actif ? "border-accent bg-bg text-accent" : "border-border bg-bg text-text-dim hover:text-text"
-      }`}
     >
-      {actif ? "● Niveaux estimés" : "Niveaux estimés"}
-    </button>
+      Niveaux estimés
+    </BoutonBascule>
   );
 }
 
 /** Granularités proposées : facteur multiplicatif de la taille de bucket de prix. */
-const GRANULARITES: ReadonlyArray<{ id: Granularite; label: string }> = [
-  { id: 0.5, label: "½×" },
-  { id: 1, label: "1×" },
-  { id: 2, label: "2×" },
+const GRANULARITES: ReadonlyArray<{ id: Granularite; label: string; title: string }> = [
+  { id: 0.5, label: "½×", title: "Granularité des buckets de prix — ½×" },
+  { id: 1, label: "1×", title: "Granularité des buckets de prix — 1×" },
+  { id: 2, label: "2×", title: "Granularité des buckets de prix — 2×" },
 ];
 
 /**
@@ -251,11 +234,7 @@ function ReglagesLiq() {
       <span className="text-[10px] uppercase tracking-wider text-text-dim">Réglages</span>
 
       {/* Leviers du modèle estimé : cases cochables, dernier coché non-décochable. */}
-      <div
-        role="group"
-        aria-label="Leviers du modèle de niveaux estimés"
-        className="flex items-center gap-0.5 rounded border border-border p-0.5"
-      >
+      <div role="group" aria-label="Leviers du modèle de niveaux estimés" className={CLASSES_SEGMENT_CONTENEUR}>
         {LEVIERS.map((L) => {
           const coche = leviers.includes(L);
           const verrou = coche && leviers.length === 1; // dernier coché : non-décochable
@@ -271,9 +250,7 @@ function ReglagesLiq() {
                   ? `Levier ×${L} — au moins un levier doit rester coché`
                   : `${coche ? "Retirer" : "Inclure"} le levier ×${L} du modèle de niveaux estimés`
               }
-              className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
-                coche ? "bg-bg text-text" : "text-text-dim hover:text-text"
-              } ${verrou ? "cursor-not-allowed" : ""}`}
+              className={`${classesSegmentItem(coche)} ${verrou ? "cursor-not-allowed" : ""}`}
             >
               ×{L}
             </button>
@@ -282,27 +259,12 @@ function ReglagesLiq() {
       </div>
 
       {/* Granularité des buckets de prix (facteur de tailleBucket). */}
-      <div
-        role="group"
-        aria-label="Granularité des buckets de prix"
-        title="Granularité des buckets de prix"
-        className="flex items-center gap-0.5 rounded border border-border p-0.5"
-      >
-        {GRANULARITES.map((g) => (
-          <button
-            key={g.id}
-            type="button"
-            onClick={() => setGranularite(g.id)}
-            aria-pressed={granularite === g.id}
-            title={`Granularité des buckets de prix — ${g.label}`}
-            className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
-              granularite === g.id ? "bg-bg text-text" : "text-text-dim hover:text-text"
-            }`}
-          >
-            {g.label}
-          </button>
-        ))}
-      </div>
+      <SegmenteCompact
+        options={GRANULARITES}
+        actif={granularite}
+        onChange={setGranularite}
+        ariaLabel="Granularité des buckets de prix"
+      />
     </div>
   );
 }
@@ -316,26 +278,12 @@ function SelecteurFenetre({
   onChange: (f: FenetreId) => void;
 }) {
   return (
-    <div
-      role="group"
-      aria-label="Fenêtre temporelle des totaux"
-      className="flex items-center gap-0.5 rounded border border-border p-0.5"
-    >
-      {FENETRES.map((f) => (
-        <button
-          key={f.id}
-          type="button"
-          onClick={() => onChange(f.id)}
-          aria-pressed={fenetre === f.id}
-          title={`Totaux et stats sur les ${f.label} glissantes`}
-          className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
-            fenetre === f.id ? "bg-bg text-text" : "text-text-dim hover:text-text"
-          }`}
-        >
-          {f.label}
-        </button>
-      ))}
-    </div>
+    <SegmenteCompact
+      options={FENETRES}
+      actif={fenetre}
+      onChange={onChange}
+      ariaLabel="Fenêtre temporelle des totaux"
+    />
   );
 }
 
@@ -518,7 +466,7 @@ function ContenuLive() {
     return () => clearInterval(timer);
   }, []);
 
-  const { stats, buckets, feed, feedMaxUsd } = useMemo(() => {
+  const { stats, buckets, feed, feedMaxUsd, derniereMajTs } = useMemo(() => {
     const nowMs = Date.now();
     const depuisMs = nowMs - FENETRE_MS[fenetre];
     // Événements RÉELS uniquement : le seed Coinalyze (approx) est réservé à la heatmap.
@@ -535,7 +483,10 @@ function ContenuLive() {
       const usd = item.type === "groupe" ? item.sommeUsd : item.ev.usd;
       if (usd > feedMaxUsd) feedMaxUsd = usd;
     }
-    return { stats, buckets, feed, feedMaxUsd };
+    // Horodatage du dernier événement réel du buffer (`reels` est chronologique croissant) —
+    // aucun nouvel abonnement : dérivé du même tableau que les stats.
+    const derniereMajTs = reels[reels.length - 1]?.time ?? null;
+    return { stats, buckets, feed, feedMaxUsd, derniereMajTs };
     // `rev` et `horloge` pilotent le recalcul (le store vanilla mute hors React).
   }, [rev, horloge, fenetre, symbol]);
 
@@ -593,6 +544,11 @@ function ContenuLive() {
 
       {/* Bloc totaux/stats FIXE (seul le feed défile). Fenêtre glissante sélectionnée. */}
       <div className="shrink-0 px-4 pt-4">
+        {/* Fraîcheur = horodatage du dernier événement RÉEL du buffer (aucun nouvel
+            abonnement : dérivé du même tableau `reels` que les stats ci-dessous). */}
+        <div className="mb-1 flex justify-end text-[10px] text-text-dim">
+          <Fraicheur loading={false} majTs={derniereMajTs} />
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <Metric label={`Longs liquidés (${fenetre})`} value={formatUsd(stats.longUsd)} couleur="var(--down)" />
           <Metric label={`Shorts liquidés (${fenetre})`} value={formatUsd(stats.shortUsd)} couleur="var(--up)" />
@@ -709,11 +665,11 @@ function ContenuLive() {
 
 /** Fenêtres proposées par l'onglet Historique (borne basse de la lecture daemon). */
 type FenetreHistoId = "1h" | "24h" | "7j" | "30j";
-const FENETRES_HISTO: ReadonlyArray<{ id: FenetreHistoId; label: string }> = [
-  { id: "1h", label: "1h" },
-  { id: "24h", label: "24h" },
-  { id: "7j", label: "7j" },
-  { id: "30j", label: "30j" },
+const FENETRES_HISTO: ReadonlyArray<{ id: FenetreHistoId; label: string; title: string }> = [
+  { id: "1h", label: "1h", title: "Historique daemon sur les 1h écoulés" },
+  { id: "24h", label: "24h", title: "Historique daemon sur les 24h écoulés" },
+  { id: "7j", label: "7j", title: "Historique daemon sur les 7j écoulés" },
+  { id: "30j", label: "30j", title: "Historique daemon sur les 30j écoulés" },
 ];
 const FENETRE_HISTO_MS: Record<FenetreHistoId, number> = {
   "1h": 60 * 60_000,
@@ -768,26 +724,12 @@ function SelecteurFenetreHisto({
   onChange: (f: FenetreHistoId) => void;
 }) {
   return (
-    <div
-      role="group"
-      aria-label="Fenêtre de l'historique"
-      className="flex items-center gap-0.5 rounded border border-border p-0.5"
-    >
-      {FENETRES_HISTO.map((f) => (
-        <button
-          key={f.id}
-          type="button"
-          onClick={() => onChange(f.id)}
-          aria-pressed={fenetre === f.id}
-          title={`Historique daemon sur les ${f.label} écoulés`}
-          className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition ${
-            fenetre === f.id ? "bg-bg text-text" : "text-text-dim hover:text-text"
-          }`}
-        >
-          {f.label}
-        </button>
-      ))}
-    </div>
+    <SegmenteCompact
+      options={FENETRES_HISTO}
+      actif={fenetre}
+      onChange={onChange}
+      ariaLabel="Fenêtre de l'historique"
+    />
   );
 }
 
@@ -831,7 +773,13 @@ function LigneTop({ ev, maxUsd }: { ev: LiqEvent; maxUsd: number }) {
  * via les mêmes pures que l'onglet Live. Replis honnêtes : daemon absent (null) vs
  * fenêtre vide ([]) — le daemon n'enregistre que depuis son démarrage.
  */
-function ContenuHistorique({ fenetre }: { fenetre: FenetreHistoId }) {
+function ContenuHistorique({
+  fenetre,
+  onChangeFenetre,
+}: {
+  fenetre: FenetreHistoId;
+  onChangeFenetre: (f: FenetreHistoId) => void;
+}) {
   const symbol = useStore(marketStore, (s) => s.symbol);
   const [etat, setEtat] = useState<EtatHisto>({ statut: "chargement" });
 
@@ -873,6 +821,13 @@ function ContenuHistorique({ fenetre }: { fenetre: FenetreHistoId }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {/* Rangée « Réglages » de l'onglet, sous les onglets Live/Historique — le sélecteur de
+          fenêtre ne dépend QUE de cet onglet (retiré du slot actions de l'en-tête). */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-border px-4 py-2">
+        <span className="text-[10px] uppercase tracking-wider text-text-dim">Réglages</span>
+        <SelecteurFenetreHisto fenetre={fenetre} onChange={onChangeFenetre} />
+      </div>
+
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {etat.statut === "chargement" && <Chargement libelle="Lecture de l'historique daemon…" />}
 
@@ -982,8 +937,8 @@ const ONGLETS: ReadonlyArray<{ id: OngletId; label: string }> = [
 export function LiquidationsWindow() {
   const [onglet, setOnglet] = useState<OngletId>("live");
   const symbol = useStore(marketStore, (s) => s.symbol);
-  // Fenêtre de l'onglet Historique, levée ici pour rester visible dans l'en-tête unique
-  // quand on bascule sur l'onglet Live (cf. SelecteurFenetreHisto, actions de l'en-tête).
+  // Fenêtre de l'onglet Historique, levée ici pour survivre au changement d'onglet
+  // (le sélecteur — cf. SelecteurFenetreHisto — vit dans la rangée « Réglages » du corps).
   const [fenetre, setFenetre] = useState<FenetreHistoId>("24h");
 
   // Retient le flux du singleton (refcount) TANT QUE la fenêtre est ouverte, quel que soit
@@ -1001,14 +956,13 @@ export function LiquidationsWindow() {
             ? `${symbol} · ${okxCouvre(symbol) ? "perp Bybit + OKX (live)" : "perp Bybit (live)"}`
             : `${symbol} · historique daemon (rétention 30 j)`
         }
-        actions={
-          onglet === "historique" ? (
-            <SelecteurFenetreHisto fenetre={fenetre} onChange={setFenetre} />
-          ) : undefined
-        }
       />
       <Onglets options={ONGLETS} actif={onglet} onChange={setOnglet} />
-      {onglet === "live" ? <ContenuLive /> : <ContenuHistorique fenetre={fenetre} />}
+      {onglet === "live" ? (
+        <ContenuLive />
+      ) : (
+        <ContenuHistorique fenetre={fenetre} onChangeFenetre={setFenetre} />
+      )}
     </div>
   );
 }

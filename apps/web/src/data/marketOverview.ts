@@ -83,7 +83,8 @@ export interface FearGreed {
 
 // ─────────────────────────── Constantes ───────────────────────────
 
-const CG_BASE = "https://api.coingecko.com/api/v3";
+/** Base publique CoinGecko (le `pro-api.*` est payant). Exportée : `data/mcap.ts` la réutilise. */
+export const CG_BASE = "https://api.coingecko.com/api/v3";
 const DEMO_KEY_STORAGE = "axiom.coingecko.demoApiKey";
 const MARKETS_PER_PAGE = 250;
 
@@ -267,7 +268,7 @@ function writeCache(key: string, value: unknown): void {
 }
 
 /** Clé Demo OPTIONNELLE (localStorage) — même emplacement que le fournisseur macro. */
-function resolveDemoKey(): string | undefined {
+export function resolveDemoKey(): string | undefined {
   try {
     if (typeof localStorage === "undefined") return undefined;
     return localStorage.getItem(DEMO_KEY_STORAGE) ?? undefined;
@@ -276,8 +277,8 @@ function resolveDemoKey(): string | undefined {
   }
 }
 
-/** Ajoute la clé Demo à une URL CoinGecko si présente. */
-function withDemoKey(url: string): string {
+/** Ajoute la clé Demo à une URL CoinGecko si présente. Exportée : `data/mcap.ts` la réutilise. */
+export function withDemoKey(url: string): string {
   const key = resolveDemoKey();
   if (!key) return url;
   const sep = url.includes("?") ? "&" : "?";

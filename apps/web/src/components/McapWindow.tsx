@@ -428,7 +428,12 @@ export function McapWindow() {
         }
       />
 
-      <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
+      {/* `h-full` et non `flex-1` : le corps de FloatingWindow est un bloc
+          (`min-h-0 flex-1 overflow-y-auto`), pas un conteneur flex — `flex-1` y est
+          inerte et les trois canvas prenaient 423 px chacun, forçant un défilement
+          (mesuré). Le corps ayant une hauteur DÉFINIE, `h-full` se résout et les trois
+          graphiques se partagent la fenêtre. */}
+      <div className="flex h-full min-h-0 flex-col px-4 py-3">
         {backfill.enCours ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
             <Chargement

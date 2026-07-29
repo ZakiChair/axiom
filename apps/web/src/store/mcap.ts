@@ -258,15 +258,18 @@ export interface McapState {
   retirerDominance: (id: string) => void;
 }
 
+/** Historique relu UNE fois au chargement du module (et non deux, cf. `majTs`). */
+const HIST_INITIAL = lireHistoriquePersiste();
+
 export const mcapStore = createStore<McapState>((set, get) => ({
   open: false,
   periode: lirePeriode(),
   dominances: lireListe(CLE_DOMINANCES, [...IDS_BASE]),
-  hist: lireHistoriquePersiste(),
+  hist: HIST_INITIAL,
   marches: [],
   backfill: { enCours: false, faites: 0, total: 0, erreur: null },
   erreur: null,
-  majTs: lireHistoriquePersiste()?.majTs ?? null,
+  majTs: HIST_INITIAL?.majTs ?? null,
 
   ouvrir: () => windowManagerStore.getState().openWindow("mcap"),
   fermer: () => windowManagerStore.getState().closeWindow("mcap"),

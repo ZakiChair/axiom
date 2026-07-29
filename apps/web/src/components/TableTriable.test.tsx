@@ -46,4 +46,17 @@ describe("TableTriable (markup)", () => {
     };
     expect(JSON.stringify(plein.props)).toContain("1fr 1fr");
   });
+  it("colonne triable: true SANS valeurTri → span, pas button", () => {
+    const colsSansValeur: ColonneTable<Ligne>[] = [
+      { id: "test", label: "Test", triable: true, rendu: (l) => l.sym },
+    ];
+    const el = TableTriable({ colonnes: colsSansValeur, lignes: LIGNES, cle: (l: Ligne) => l.sym }) as {
+      props: Record<string, unknown>;
+    };
+    const jsonStr = JSON.stringify(el.props);
+    // Le en-tête doit être un span, pas un button
+    expect(jsonStr).toContain("Test");
+    // Vérifie que c'est un span en cherchant la classe text-[10px] sans flex
+    expect(jsonStr).not.toContain("flex");
+  });
 });

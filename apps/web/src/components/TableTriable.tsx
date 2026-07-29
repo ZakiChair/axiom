@@ -70,8 +70,10 @@ export function TableTriable<L>({
   surClicLigne?: (ligne: L) => void;
 }) {
   const grille = colonnes.map((c) => c.largeur ?? "1fr").join(" ");
-  const alignement = (c: ColonneTable<L>) =>
+  const alignementBouton = (c: ColonneTable<L>) =>
     c.align === "right" ? "text-right justify-end" : "text-left justify-start";
+  const alignementSpan = (c: ColonneTable<L>) =>
+    c.align === "right" ? "text-right" : "text-left";
   const corps = (
     <div
       style={maxHauteur !== undefined ? { maxHeight: maxHauteur } : undefined}
@@ -106,12 +108,12 @@ export function TableTriable<L>({
         style={{ gridTemplateColumns: grille }}
       >
         {colonnes.map((c) =>
-          c.triable === true && onTri !== undefined ? (
+          c.triable === true && c.valeurTri !== undefined && onTri !== undefined ? (
             <button
               key={c.id}
               type="button"
               onClick={() => onTri(basculerTri(tri, c.id))}
-              className={`flex w-full items-center gap-0.5 text-[10px] uppercase tracking-wide text-text-dim transition hover:text-text ${alignement(c)}`}
+              className={`flex w-full items-center gap-0.5 text-[10px] uppercase tracking-wide text-text-dim transition hover:text-text ${alignementBouton(c)}`}
             >
               {c.label}
               {tri !== null && tri.colonne === c.id && <span>{tri.dir === -1 ? "▾" : "▴"}</span>}
@@ -119,7 +121,7 @@ export function TableTriable<L>({
           ) : (
             <span
               key={c.id}
-              className={`text-[10px] uppercase tracking-wide text-text-dim ${alignement(c)}`}
+              className={`text-[10px] uppercase tracking-wide text-text-dim ${alignementSpan(c)}`}
             >
               {c.label}
             </span>

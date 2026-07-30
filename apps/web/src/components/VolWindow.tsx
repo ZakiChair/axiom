@@ -294,7 +294,7 @@ function draw(canvas: HTMLCanvasElement, data: VolData, domaine: Domaine): void 
   ctx.clearRect(0, 0, w, h);
 
   const tk = lireTokens();
-  // Pile monospace unifiée pour les chiffres, cohérente avec les tabular-nums du DOM.
+  // Police canvas unique (POLICE_CANVAS), cohérente avec les autres fenêtres.
   ctx.font = POLICE_CANVAS;
 
   ctx.fillStyle = tk.dim;

@@ -64,7 +64,7 @@ import { referentiel, type Referentiel } from "../lib/referentiel";
 import { getBgeometricsKey } from "../store/onchain";
 import { fetchOiFuturesParExchange, type JourOiFutures } from "../data/onchain/bgeometrics";
 import { construireModeleOiExchange } from "./derivativesWindow.util";
-import { BadgeFiabilite, BarreProgression, EnTeteFenetre, ErreurBloc, Fraicheur, Metric, RefBadge, SansCle, Vide } from "./ui";
+import { BadgeFiabilite, BarreProgression, EnTeteFenetre, ErreurBloc, Fraicheur, TuileStat, RefBadge, SansCle, Vide } from "./ui";
 
 /** Période d'agrégation du long/short ratio et fenêtre des liquidations affichées. */
 const LS_PERIOD = "5min";
@@ -508,12 +508,13 @@ export function DerivativesWindow() {
               {error && <ErreurBloc>{error}</ErreurBloc>}
 
               <div className="space-y-2">
-                <Metric
+                <TuileStat
+                  disposition="inline"
                   label="Open Interest"
-                  value={formatUsd(oi?.oiUsd)}
+                  valeur={formatUsd(oi?.oiUsd)}
                   couleur="var(--serie-5)"
                   extra={oiSpark.length >= 2 && <Sparkline values={oiSpark} color="var(--serie-5)" />}
-                  labelExtra={<BadgeFiabilite meta={metaSource("coinalyze:oi")} />}
+                  badge={<BadgeFiabilite meta={metaSource("coinalyze:oi")} />}
                 />
                 {oi !== undefined && Number.isFinite(oi.oiUsd) && (
                   <div className="flex items-center gap-2 px-3 text-[11px] tabular-nums text-text-dim">
@@ -521,16 +522,17 @@ export function DerivativesWindow() {
                     <RefBadge referentiel={refOi} sens="hausse-chaud" />
                   </div>
                 )}
-                <Metric
+                <TuileStat
+                  disposition="inline"
                   label="Funding"
-                  value={formatFunding(funding?.rate)}
+                  valeur={formatFunding(funding?.rate)}
                   couleur={fundingColor}
                   extra={
                     fundingSpark.length >= 2 && (
                       <Sparkline values={fundingSpark} color={fundingColor ?? "var(--text-dim)"} />
                     )
                   }
-                  labelExtra={<BadgeFiabilite meta={metaSource("coinalyze:funding")} />}
+                  badge={<BadgeFiabilite meta={metaSource("coinalyze:funding")} />}
                 />
                 {funding !== undefined && Number.isFinite(funding.rate) && (
                   <div className="flex items-center gap-2 px-3 text-[11px] tabular-nums text-text-dim">
@@ -559,16 +561,17 @@ export function DerivativesWindow() {
                     </div>
                   </div>
                 )}
-                <Metric
+                <TuileStat
+                  disposition="inline"
                   label="Long / Short agrégé"
-                  value={
+                  valeur={
                     ls && Number.isFinite(ls.ratio)
                       ? `${ls.ratio.toFixed(2)} · L ${ls.longAccount.toFixed(1)}% / S ${ls.shortAccount.toFixed(1)}%`
                       : VALEUR_ABSENTE
                   }
                   couleur="var(--serie-2)"
                   extra={lsSpark.length >= 2 && <Sparkline values={lsSpark} color="var(--serie-2)" />}
-                  labelExtra={<BadgeFiabilite meta={metaSource("coinalyze:ls")} />}
+                  badge={<BadgeFiabilite meta={metaSource("coinalyze:ls")} />}
                 />
               </div>
 
@@ -644,27 +647,31 @@ export function DerivativesWindow() {
                 <span className="text-[10px] uppercase tracking-wide">Sentiment perp · Binance</span>
                 <span className="text-[10px]">sans clé · {BIN_PERIOD}</span>
               </div>
-              <Metric
+              <TuileStat
+                disposition="inline"
                 label="Comptes globaux L/S"
-                value={formatRatioBreakdown(globalLs.at(-1))}
+                valeur={formatRatioBreakdown(globalLs.at(-1))}
                 couleur="var(--serie-6)"
                 extra={globalLsSpark.length >= 2 && <Sparkline values={globalLsSpark} color="var(--serie-6)" />}
               />
-              <Metric
+              <TuileStat
+                disposition="inline"
                 label="Top traders L/S"
-                value={formatRatioBreakdown(topLs.at(-1))}
+                valeur={formatRatioBreakdown(topLs.at(-1))}
                 couleur="var(--serie-4)"
                 extra={topLsSpark.length >= 2 && <Sparkline values={topLsSpark} color="var(--serie-4)" />}
               />
-              <Metric
+              <TuileStat
+                disposition="inline"
                 label="Taker achat / vente"
-                value={formatDec(lastTaker?.buySellRatio, 2)}
+                valeur={formatDec(lastTaker?.buySellRatio, 2)}
                 couleur={takerColor}
                 extra={takerSpark.length >= 2 && <Sparkline values={takerSpark} color={takerColor} />}
               />
-              <Metric
+              <TuileStat
+                disposition="inline"
                 label="Open Interest"
-                value={formatUsd(binOi.at(-1)?.oiUsd)}
+                valeur={formatUsd(binOi.at(-1)?.oiUsd)}
                 couleur="var(--serie-5)"
                 extra={binOiSpark.length >= 2 && <Sparkline values={binOiSpark} color="var(--serie-5)" />}
               />

@@ -47,7 +47,7 @@ import {
   EnTeteFenetre,
   Vide,
   NoteSource,
-  Metric,
+  TuileStat,
   Badge,
   Chargement,
   Onglets,
@@ -550,8 +550,8 @@ function ContenuLive() {
           <Fraicheur loading={false} majTs={derniereMajTs} />
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <Metric label={`Longs liquidés (${fenetre})`} value={formatUsd(stats.longUsd)} couleur="var(--down)" />
-          <Metric label={`Shorts liquidés (${fenetre})`} value={formatUsd(stats.shortUsd)} couleur="var(--up)" />
+          <TuileStat disposition="inline" label={`Longs liquidés (${fenetre})`} valeur={formatUsd(stats.longUsd)} couleur="var(--down)" />
+          <TuileStat disposition="inline" label={`Shorts liquidés (${fenetre})`} valeur={formatUsd(stats.shortUsd)} couleur="var(--up)" />
         </div>
 
         {/* Baseline USD/heure vs 30 j (daemon) : rien si le daemon est absent. */}
@@ -847,14 +847,16 @@ function ContenuHistorique({
             <>
               {/* Totaux longs/shorts de la fenêtre. */}
               <div className="grid grid-cols-2 gap-3">
-                <Metric
+                <TuileStat
+                  disposition="inline"
                   label={`Longs liquidés (${fenetre})`}
-                  value={formatUsd(derives.stats.longUsd)}
+                  valeur={formatUsd(derives.stats.longUsd)}
                   couleur="var(--down)"
                 />
-                <Metric
+                <TuileStat
+                  disposition="inline"
                   label={`Shorts liquidés (${fenetre})`}
-                  value={formatUsd(derives.stats.shortUsd)}
+                  valeur={formatUsd(derives.stats.shortUsd)}
                   couleur="var(--up)"
                 />
               </div>

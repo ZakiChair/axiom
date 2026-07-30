@@ -4,7 +4,7 @@
  * l'orchestrateur, qui ne monte cette section qu'avec un `varChart` non nul.
  */
 import { formatPct, formatPrice } from "../../lib/format";
-import { Metric, NoteSource } from "../ui";
+import { TuileStat, NoteSource } from "../ui";
 import { TitreBloc, type VarChart } from "./commun";
 
 interface Props {
@@ -17,9 +17,10 @@ export function SectionVar({ varChart, noteFraicheur }: Props) {
     <section className="space-y-2">
       <TitreBloc>VaR · {varChart.symbol} {varChart.timeframe}</TitreBloc>
       <div className="grid grid-cols-2 gap-2">
-        <Metric
+        <TuileStat
+          disposition="inline"
           label="VaR95 · 20 b"
-          value={formatPct(varChart.h20.pct.p5, 1)}
+          valeur={formatPct(varChart.h20.pct.p5, 1)}
           couleur="var(--down)"
           extra={
             <span className="text-[10px] tabular-nums text-text-dim">
@@ -27,9 +28,10 @@ export function SectionVar({ varChart, noteFraicheur }: Props) {
             </span>
           }
         />
-        <Metric
+        <TuileStat
+          disposition="inline"
           label="VaR99 · 20 b"
-          value={formatPct(varChart.h20.pct.p1, 1)}
+          valeur={formatPct(varChart.h20.pct.p1, 1)}
           couleur="var(--down)"
           extra={
             <span className="text-[10px] tabular-nums text-text-dim">

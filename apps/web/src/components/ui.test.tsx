@@ -3,7 +3,7 @@ import type { ReactElement } from "react";
 import {
   CLASSES_CHAMP, Input, Select, Bouton, BoutonBascule, BoutonRafraichir, BTN_SECONDAIRE, CLASSES_BOUTON,
   BarreProgression, Chip, classesSegmentItem, CLASSES_SEGMENT_CONTENEUR, SegmenteCompact, TitreSection,
-  Metric, TuileStat, classesPanneauMenu,
+  TuileStat, classesPanneauMenu,
 } from "./ui";
 
 /** Invoque un composant SANS hook et retourne ses props d'élément racine. */
@@ -135,10 +135,6 @@ describe("TuileStat", () => {
     // Inline avec pied fourni → le contenu pied ne doit PAS apparaître (branche inline ignore pied)
     const inline = racine(TuileStat({ label: "Stock", valeur: "100", disposition: "inline", pied: "Fraîcheur 30s" }));
     expect(JSON.stringify(inline.props)).not.toContain("Fraîcheur 30s");
-  });
-  it("Metric (déprécié) délègue à TuileStat inline", () => {
-    const viaMetric = racine(Metric({ label: "x", value: "1" }));
-    expect(viaMetric.type).toBe(TuileStat);
   });
 });
 

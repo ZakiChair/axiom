@@ -85,6 +85,12 @@ const MOTIFS: Motif[] = [
     // constante consacre cette valeur au lieu de la chaîne en dur.
     exceptions: [],
   },
+  {
+    id: "metric-deprecie",
+    description: "Metric supprimé — utiliser TuileStat",
+    regex: /\bMetric\b/,
+    exceptions: [],
+  },
 ];
 
 describe("conventions UI (ratchet)", () => {

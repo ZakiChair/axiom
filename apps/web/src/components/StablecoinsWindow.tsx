@@ -56,7 +56,7 @@ import {
 import {
   EnTeteFenetre,
   Onglets,
-  Metric,
+  TuileStat,
   Badge,
   Chargement,
   ErreurBloc,
@@ -241,11 +241,11 @@ function VueEnsemble({
         );
       })()}
       <div className="grid grid-cols-2 gap-2">
-        <Metric label="Supply totale" value={formatUsd(totalUsd)} />
-        <Metric label="Dominance USDT" value={formatPourcentage(partUsdt)} />
-        <Metric label="Δ 24 h" value={fmtDeltaUsd(d24h)} couleur={couleurDelta(d24h)} />
-        <Metric label="Δ 7 j" value={fmtDeltaUsd(d7j)} couleur={couleurDelta(d7j)} />
-        <Metric label="Δ 30 j" value={fmtDeltaUsd(d30j)} couleur={couleurDelta(d30j)} />
+        <TuileStat disposition="inline" label="Supply totale" valeur={formatUsd(totalUsd)} />
+        <TuileStat disposition="inline" label="Dominance USDT" valeur={formatPourcentage(partUsdt)} />
+        <TuileStat disposition="inline" label="Δ 24 h" valeur={fmtDeltaUsd(d24h)} couleur={couleurDelta(d24h)} />
+        <TuileStat disposition="inline" label="Δ 7 j" valeur={fmtDeltaUsd(d7j)} couleur={couleurDelta(d7j)} />
+        <TuileStat disposition="inline" label="Δ 30 j" valeur={fmtDeltaUsd(d30j)} couleur={couleurDelta(d30j)} />
       </div>
       <TreemapDominance parts={dominance} onSelect={onSelect} />
       <TableEmetteurs emetteurs={emetteurs} onSelect={onSelect} />
@@ -869,16 +869,18 @@ function VueEmetteur({ id, onRetour }: { id: string; onRetour: () => void }) {
       {statut === "ready" && detail !== null && (
         <>
           <div className="grid grid-cols-2 gap-2">
-            <Metric
+            <TuileStat
+              disposition="inline"
               label="Supply"
-              value={formatUsd(historique[historique.length - 1]?.totalUsd ?? null)}
+              valeur={formatUsd(historique[historique.length - 1]?.totalUsd ?? null)}
             />
-            <Metric
+            <TuileStat
+              disposition="inline"
               label="Prix"
-              value={detail.prix === null ? VALEUR_ABSENTE : detail.prix.toFixed(4)}
+              valeur={detail.prix === null ? VALEUR_ABSENTE : detail.prix.toFixed(4)}
             />
-            <Metric label="Δ 7 j" value={fmtDeltaUsd(d7)} couleur={couleurDelta(d7)} />
-            <Metric label="Δ 30 j" value={fmtDeltaUsd(d30)} couleur={couleurDelta(d30)} />
+            <TuileStat disposition="inline" label="Δ 7 j" valeur={fmtDeltaUsd(d7)} couleur={couleurDelta(d7)} />
+            <TuileStat disposition="inline" label="Δ 30 j" valeur={fmtDeltaUsd(d30)} couleur={couleurDelta(d30)} />
           </div>
           <p className="text-[11px] text-text-dim">Historique 1 a — {detail.symbole}</p>
           <canvas ref={canvasRef} className="h-48 w-full rounded-md border border-border" />

@@ -7,7 +7,7 @@
  * ce fichier ne reçoit que des props. ZÉRO changement de rendu.
  */
 import { formatUsd } from "../../lib/format";
-import { Metric, ErreurBloc, NoteSource, Fraicheur } from "../ui";
+import { TuileStat, ErreurBloc, NoteSource, Fraicheur } from "../ui";
 import { formatUsdExact } from "./format";
 
 interface Props {
@@ -75,21 +75,24 @@ export function VueGexDex({
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <Metric
+        <TuileStat
+          disposition="inline"
           label={classe === "crypto" ? "GEX net (toutes éch.)" : "GEX net"}
-          value={formatUsd(gexNet)}
+          valeur={formatUsd(gexNet)}
           couleur={gexNet !== 0 ? (gexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
         />
-        <Metric
+        <TuileStat
+          disposition="inline"
           label={classe === "crypto" ? "DEX net (toutes éch.)" : "DEX net"}
-          value={formatUsd(dexNet)}
+          valeur={formatUsd(dexNet)}
           couleur={dexNet !== 0 ? (dexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
         />
-        <Metric label="Spot" value={formatUsdExact(gexDexSpot)} />
-        <Metric label="Gamma flip" value={formatUsdExact(flip)} />
-        <Metric
+        <TuileStat disposition="inline" label="Spot" valeur={formatUsdExact(gexDexSpot)} />
+        <TuileStat disposition="inline" label="Gamma flip" valeur={formatUsdExact(flip)} />
+        <TuileStat
+          disposition="inline"
           label="Strike |GEX| max"
-          value={formatUsdExact(strikePicGex)}
+          valeur={formatUsdExact(strikePicGex)}
         />
       </div>
 

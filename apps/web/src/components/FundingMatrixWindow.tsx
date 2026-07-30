@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { fetchFundingMatrix, fundingSpreadApr, type FundingVenue } from "../data/fundingCrossExchange";
-import { EnTeteFenetre, Chargement, Vide, NoteSource, Fraicheur, Metric } from "./ui";
+import { EnTeteFenetre, Chargement, Vide, NoteSource, Fraicheur, TuileStat } from "./ui";
 import { TableTriable, type ColonneTable } from "./TableTriable";
 import { formatPct } from "../lib/format";
 
@@ -105,9 +105,10 @@ export function FundingMatrixWindow() {
       />
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {spread !== null && (
-          <Metric
+          <TuileStat
+            disposition="inline"
             label="Écart CEX/DEX (APR)"
-            value={formatPct(spread, 2, { signe: false })}
+            valeur={formatPct(spread, 2, { signe: false })}
             couleur={spread >= 10 ? "var(--ui-amber)" : undefined}
           />
         )}

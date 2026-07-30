@@ -19,7 +19,7 @@ import { formatDateComplete, formatDateCourte, formatDec, formatPourcentage, VAL
 import { realizedVolSeries, volCone, zScore, type VolConeRow } from "../lib/volCone";
 import { marketStore } from "../store/market";
 import { mirrorOpenState, windowManagerStore } from "../store/windowManager";
-import { BarrePeriodes, Chargement, EnTeteFenetre, ErreurBloc, InfobulleGraphe, Metric, PERIODES_STANDARD } from "./ui";
+import { BarrePeriodes, Chargement, EnTeteFenetre, ErreurBloc, InfobulleGraphe, TuileStat, PERIODES_STANDARD } from "./ui";
 import {
   domainePourPreset,
   indicesVisibles,
@@ -471,14 +471,15 @@ export function VolWindow() {
         {statut === "error" && <ErreurBloc>Volatilité indisponible pour ce symbole.</ErreurBloc>}
         {statut === "ready" && synthese !== null && (
           <div className="mb-2 grid grid-cols-2 gap-2 md:grid-cols-4">
-            <Metric label={`RV${RV_WINDOW}`} value={synthese.rv !== null ? formatPourcentage(synthese.rv, 1) : "—"} />
-            <Metric label="DVOL" value={synthese.dvol !== null ? formatPourcentage(synthese.dvol, 1) : "—"} />
-            <Metric
+            <TuileStat disposition="inline" label={`RV${RV_WINDOW}`} valeur={synthese.rv !== null ? formatPourcentage(synthese.rv, 1) : "—"} />
+            <TuileStat disposition="inline" label="DVOL" valeur={synthese.dvol !== null ? formatPourcentage(synthese.dvol, 1) : "—"} />
+            <TuileStat
+              disposition="inline"
               label="VRP"
-              value={synthese.vrp !== null ? `${formatDec(synthese.vrp, 1)} pts` : "—"}
+              valeur={synthese.vrp !== null ? `${formatDec(synthese.vrp, 1)} pts` : "—"}
               couleur={synthese.vrp !== null ? (synthese.vrp >= 0 ? "var(--up)" : "var(--down)") : undefined}
             />
-            <Metric label="z-score RV" value={synthese.z !== null ? formatDec(synthese.z, 2) : "—"} />
+            <TuileStat disposition="inline" label="z-score RV" valeur={synthese.z !== null ? formatDec(synthese.z, 2) : "—"} />
           </div>
         )}
         {statut === "ready" && sansIv && (

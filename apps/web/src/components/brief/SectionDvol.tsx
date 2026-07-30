@@ -4,7 +4,7 @@
  */
 import type { DvolBrief } from "../../data/brief";
 import { formatPourcentage, VALEUR_ABSENTE } from "../../lib/format";
-import { Metric, NoteSource } from "../ui";
+import { TuileStat, NoteSource } from "../ui";
 import { corps, TitreBloc, type Section } from "./commun";
 
 interface Props {
@@ -19,10 +19,11 @@ export function SectionDvol({ dvol, noteFraicheur }: Props) {
       {corps(dvol, "DVOL indisponible.", (vals) => (
         <div className="grid grid-cols-2 gap-2">
           {vals.map((v) => (
-            <Metric
+            <TuileStat
+              disposition="inline"
               key={v.devise}
               label={`DVOL ${v.devise}`}
-              value={v.valeur === null ? VALEUR_ABSENTE : formatPourcentage(v.valeur, 1)}
+              valeur={v.valeur === null ? VALEUR_ABSENTE : formatPourcentage(v.valeur, 1)}
             />
           ))}
         </div>

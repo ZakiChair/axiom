@@ -37,7 +37,7 @@ import { formatDateComplete, formatPct, formatPourcentage } from "../lib/format"
 import { marketStore } from "../store/market";
 import { evtsUiStore } from "../store/evts";
 import { windowManagerStore } from "../store/windowManager";
-import { Chargement, EnTeteFenetre, ErreurBloc, Metric, NoteSource, Segmente, Vide } from "./ui";
+import { Chargement, EnTeteFenetre, ErreurBloc, TuileStat, NoteSource, Segmente, Vide } from "./ui";
 
 // ─────────────────────────── Contrôles ───────────────────────────
 
@@ -376,15 +376,16 @@ export function EvtsWindow() {
             {/* Stats — seulement quand l'échantillon aligné est non vide. */}
             {fenetres.length >= 1 && (
               <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
-                <Metric label={`Niveau méd. à −${demiFenetre}${unite}`} value={formatPct(stats.perfMedianePre, 1)} />
-                <Metric
+                <TuileStat disposition="inline" label={`Niveau méd. à −${demiFenetre}${unite}`} valeur={formatPct(stats.perfMedianePre, 1)} />
+                <TuileStat
+                  disposition="inline"
                   label={`Perf méd. à +${demiFenetre}${unite}`}
-                  value={formatPct(stats.perfMedianePost, 1)}
+                  valeur={formatPct(stats.perfMedianePost, 1)}
                   couleur={stats.perfMedianePost >= 0 ? "var(--up)" : "var(--down)"}
                 />
-                <Metric label="Vol. post" value={formatPourcentage(stats.volPost, 1)} />
-                <Metric label="Min" value={formatPct(stats.min, 1)} couleur="var(--down)" />
-                <Metric label="Max" value={formatPct(stats.max, 1)} couleur="var(--up)" />
+                <TuileStat disposition="inline" label="Vol. post" valeur={formatPourcentage(stats.volPost, 1)} />
+                <TuileStat disposition="inline" label="Min" valeur={formatPct(stats.min, 1)} couleur="var(--down)" />
+                <TuileStat disposition="inline" label="Max" valeur={formatPct(stats.max, 1)} couleur="var(--up)" />
               </div>
             )}
 

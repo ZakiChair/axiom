@@ -8,7 +8,7 @@
  */
 import type { Skew25d } from "../../data/skew";
 import { formatUsd, formatDec, formatPct, formatPourcentage, formatEntier } from "../../lib/format";
-import { Metric, ErreurBloc, NoteSource, Fraicheur, InfobulleGraphe } from "../ui";
+import { TuileStat, ErreurBloc, NoteSource, Fraicheur, InfobulleGraphe } from "../ui";
 import { formatStrike } from "./dessins";
 import { formatUsdExact } from "./format";
 
@@ -108,15 +108,16 @@ export function VueSmile({
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <Metric label="Max pain" value={formatUsdExact(maxPain)} />
-        <Metric label="Sous-jacent" value={formatUsdExact(underlying)} />
+        <TuileStat disposition="inline" label="Max pain" valeur={formatUsdExact(maxPain)} />
+        <TuileStat disposition="inline" label="Sous-jacent" valeur={formatUsdExact(underlying)} />
         {/* DVOL + IV Rank appariés dans la même ligne de la grille 2 colonnes (IV Rank
             « à côté de » DVOL) — Put/Call décalé après pour laisser la paire ensemble. */}
-        <Metric label="DVOL" value={formatPourcentage(dvol, 1)} />
+        <TuileStat disposition="inline" label="DVOL" valeur={formatPourcentage(dvol, 1)} />
         <div title="percentile du DVOL sur 90 j">
-          <Metric
+          <TuileStat
+            disposition="inline"
             label="IV Rank (90 j)"
-            value={formatEntier(dvolIvRank)}
+            valeur={formatEntier(dvolIvRank)}
             couleur={
               dvolIvRank === null
                 ? undefined
@@ -128,14 +129,16 @@ export function VueSmile({
             }
           />
         </div>
-        <Metric
+        <TuileStat
+          disposition="inline"
           label="Put/Call (OI)"
-          value={formatDec(pcRatio, 2)}
+          valeur={formatDec(pcRatio, 2)}
           couleur={Number.isFinite(pcRatio) ? (pcRatio > 1 ? "var(--down)" : "var(--up)") : undefined}
         />
-        <Metric
+        <TuileStat
+          disposition="inline"
           label="Skew 25Δ (RR)"
-          value={formatPct(skew25?.rr25 ?? null, 1)}
+          valeur={formatPct(skew25?.rr25 ?? null, 1)}
           couleur={
             skew25 && skew25.rr25 !== 0
               ? skew25.rr25 > 0
@@ -144,14 +147,15 @@ export function VueSmile({
               : undefined
           }
         />
-        <Metric
+        <TuileStat
+          disposition="inline"
           label="P/C (Vol) (toutes éch.)"
-          value={formatDec(pcVolRatio, 2)}
+          valeur={formatDec(pcVolRatio, 2)}
           couleur={
             Number.isFinite(pcVolRatio) ? (pcVolRatio > 1 ? "var(--down)" : "var(--up)") : undefined
           }
         />
-        <Metric label="Notionnel OI (toutes éch.)" value={formatUsd(notionnelOi)} />
+        <TuileStat disposition="inline" label="Notionnel OI (toutes éch.)" valeur={formatUsd(notionnelOi)} />
       </div>
 
       <div className="mt-3">

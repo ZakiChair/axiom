@@ -6,7 +6,7 @@
 import type { EvenementBrief, SessionBrief, TradeClosBrief } from "../../data/brief";
 import { formatHeureMinute, formatPct, formatUsdSigne } from "../../lib/format";
 import { navigateTo } from "../../lib/navigation";
-import { Chargement, ErreurBloc, Metric, NoteSource, TitreSection, Vide } from "../ui";
+import { Chargement, ErreurBloc, TuileStat, NoteSource, TitreSection, Vide } from "../ui";
 import { TableTriable, type ColonneTable } from "../TableTriable";
 import { couleurVariation, TitreBloc, type Section } from "./commun";
 
@@ -48,13 +48,14 @@ export function SectionSession({ session, eco, noteFraicheur }: Props) {
     <section className="space-y-2">
       <TitreBloc>Session · review</TitreBloc>
       <div className="grid grid-cols-3 gap-2">
-        <Metric
+        <TuileStat
+          disposition="inline"
           label="PnL réalisé"
-          value={formatUsdSigne(session.pnlRealise)}
+          valeur={formatUsdSigne(session.pnlRealise)}
           couleur={couleurVariation(session.pnlRealise)}
         />
-        <Metric label="Trades clos" value={String(session.tradesClos.length)} />
-        <Metric label="W / L" value={`${session.gagnants} / ${session.perdants}`} />
+        <TuileStat disposition="inline" label="Trades clos" valeur={String(session.tradesClos.length)} />
+        <TuileStat disposition="inline" label="W / L" valeur={`${session.gagnants} / ${session.perdants}`} />
       </div>
 
       <div className="space-y-1">

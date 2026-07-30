@@ -2,7 +2,7 @@
  * Primitives d'interface partagées entre fenêtres — le standard visuel AXIOM.
  *
  * Chaque primitive consacre le pattern DOMINANT relevé par l'audit d'uniformité
- * (2026-07-09) et remplace des copies locales (Metric ×2, trio
+ * (2026-07-09) et remplace des copies locales (tuile de stat ×2, trio
  * Chargement/Indisponible/SansCle de FundWindow, badges ×3, onglets ×N…).
  * Uniquement du MARKUP : aucune logique, aucun état — les comportements restent
  * dans les fenêtres (testables sans DOM, contrat vitest node du repo).
@@ -341,7 +341,7 @@ export function SansCle({
 
 /**
  * Tuile de statistique STANDARD — fusionne les 4 variantes locales relevées par
- * l'audit (Metric partagée, StatCard/StatMC de BT, Widget de CHAIN).
+ * l'audit (tuile de stat partagée, StatCard/StatMC de BT, Widget de CHAIN).
  */
 export function TuileStat({
   label,
@@ -403,25 +403,6 @@ export function TuileStat({
         <div className="flex items-center justify-between gap-2 text-[10px] text-text-dim">{pied}</div>
       )}
     </div>
-  );
-}
-
-/** @deprecated Alias de compat (supprimé en fin de Lot 1) — utiliser TuileStat. */
-export function Metric({
-  label,
-  value,
-  couleur,
-  extra,
-  labelExtra,
-}: {
-  label: string;
-  value: string;
-  couleur?: string;
-  extra?: ReactNode;
-  labelExtra?: ReactNode;
-}) {
-  return (
-    <TuileStat label={label} valeur={value} disposition="inline" couleur={couleur} extra={extra} badge={labelExtra} />
   );
 }
 

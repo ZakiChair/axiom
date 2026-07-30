@@ -29,7 +29,7 @@ import {
   ErreurBloc,
   Fraicheur,
   InfobulleGraphe,
-  Metric,
+  TuileStat,
   NoteSource,
   Vide,
   type TonBadge,
@@ -418,13 +418,15 @@ export function CycleWindow() {
 
       {/* Tuiles : jours depuis halving 2024, drawdown vs ATH, Mayer, MVRV, countdown halving. */}
       <div className="grid shrink-0 grid-cols-2 gap-2 border-b border-border px-4 py-3 sm:grid-cols-3">
-        <Metric
+        <TuileStat
+          disposition="inline"
           label="Jours post-halving 2024"
-          value={joursDepuisHalving !== null ? `${formatEntier(joursDepuisHalving)} j` : VALEUR_ABSENTE}
+          valeur={joursDepuisHalving !== null ? `${formatEntier(joursDepuisHalving)} j` : VALEUR_ABSENTE}
         />
-        <Metric
+        <TuileStat
+          disposition="inline"
           label="Drawdown vs ATH cycle"
-          value={
+          valeur={
             drawdownCourant !== null && Number.isFinite(drawdownCourant)
               ? `${formatDec(drawdownCourant, 1)} %`
               : VALEUR_ABSENTE
@@ -435,13 +437,15 @@ export function CycleWindow() {
               : undefined
           }
         />
-        <Metric
+        <TuileStat
+          disposition="inline"
           label="Mayer Multiple"
-          value={mayer !== null ? formatDec(mayer, 2) : VALEUR_ABSENTE}
+          valeur={mayer !== null ? formatDec(mayer, 2) : VALEUR_ABSENTE}
         />
-        <Metric
+        <TuileStat
+          disposition="inline"
           label={mvrv?.zscore === false ? "MVRV (ratio)" : "MVRV Z-Score"}
-          value={mvrv !== null ? formatDec(mvrv.valeur, 2) : VALEUR_ABSENTE}
+          valeur={mvrv !== null ? formatDec(mvrv.valeur, 2) : VALEUR_ABSENTE}
           // Le badge de zone (froid/chaud/surchauffe) n'a de sens QUE sur le Z-Score : les
           // seuils canoniques ne s'appliquent pas au ratio de repli → pas de badge pour lui.
           extra={
@@ -450,9 +454,10 @@ export function CycleWindow() {
             ) : undefined
           }
         />
-        <Metric
+        <TuileStat
+          disposition="inline"
           label="Prochain halving"
-          value={msProchainHalving !== null ? `~${formatEntier(msProchainHalving / JOUR_MS)} j` : VALEUR_ABSENTE}
+          valeur={msProchainHalving !== null ? `~${formatEntier(msProchainHalving / JOUR_MS)} j` : VALEUR_ABSENTE}
           extra={
             msProchainHalving !== null ? (
               <span className="text-[10px] text-text-dim">

@@ -5,7 +5,7 @@
 import { tonRegime, type Regime } from "../../data/regime";
 import type { Chapeau } from "../../store/regime";
 import { formatDec, formatFunding, formatPct, formatPourcentage } from "../../lib/format";
-import { Metric, RefBadge } from "../ui";
+import { TuileStat, RefBadge } from "../ui";
 
 interface Props {
   regime: Regime | null;
@@ -17,9 +17,10 @@ export function SectionChapeau({ regime, chapeau, phrasesLecture }: Props) {
   return (
     <section className="flex flex-col gap-2">
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        <Metric
+        <TuileStat
+          disposition="inline"
           label="Régime"
-          value={
+          valeur={
             regime === null || regime.libelle === "indéterminé"
               ? "—"
               : `${regime.libelle} ${regime.score >= 0 ? "+" : ""}${formatDec(regime.score, 1)}`
@@ -34,9 +35,10 @@ export function SectionChapeau({ regime, chapeau, phrasesLecture }: Props) {
                   : undefined
           }
         />
-        <Metric
+        <TuileStat
+          disposition="inline"
           label="Nuit"
-          value={chapeau?.nuitBtcPct !== null && chapeau !== null ? formatPct(chapeau.nuitBtcPct, 1) : "—"}
+          valeur={chapeau?.nuitBtcPct !== null && chapeau !== null ? formatPct(chapeau.nuitBtcPct, 1) : "—"}
           couleur={
             chapeau?.nuitBtcPct != null
               ? chapeau.nuitBtcPct >= 0
@@ -50,16 +52,18 @@ export function SectionChapeau({ regime, chapeau, phrasesLecture }: Props) {
             ) : undefined
           }
         />
-        <Metric
+        <TuileStat
+          disposition="inline"
           label="Funding BTC"
-          value={formatFunding(chapeau?.fundingBtcRate)}
-          labelExtra={<RefBadge referentiel={chapeau?.fundingRef ?? null} sens="hausse-chaud" />}
+          valeur={formatFunding(chapeau?.fundingBtcRate)}
+          badge={<RefBadge referentiel={chapeau?.fundingRef ?? null} sens="hausse-chaud" />}
         />
         {/* Convention couleur Vol : DVOL en HAUSSE = stress → --down ; en baisse → --up. */}
-        <Metric
+        <TuileStat
+          disposition="inline"
           label="Vol (DVOL)"
-          labelExtra={<RefBadge referentiel={chapeau?.dvolRef ?? null} sens="hausse-chaud" />}
-          value={chapeau?.dvolCourant != null ? formatPourcentage(chapeau.dvolCourant, 1) : "—"}
+          badge={<RefBadge referentiel={chapeau?.dvolRef ?? null} sens="hausse-chaud" />}
+          valeur={chapeau?.dvolCourant != null ? formatPourcentage(chapeau.dvolCourant, 1) : "—"}
           couleur={
             chapeau?.dvolDeltaPts != null
               ? chapeau.dvolDeltaPts >= 0

@@ -17,7 +17,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createStore } from "zustand/vanilla";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { squarify, type Rect, type Tuile } from "../lib/treemap";
-import { lireTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import {
   chargerDetailEmetteur,
   chargerEmetteurs,
@@ -42,6 +42,7 @@ import {
   SUPPLY_MIN_USD,
   tronquerSerie,
   type EtatPeg,
+  type PartChaine,
   type PartDominance,
 } from "./stablecoinsWindow.util";
 import {
@@ -66,6 +67,7 @@ import {
   PERIODES_STANDARD,
   type TonBadge,
 } from "./ui";
+import { TableTriable, type ColonneTable } from "./TableTriable";
 import {
   indicesVisibles,
   valeurVersPixel,
@@ -153,7 +155,7 @@ function dessinerTreemap(canvas: HTMLCanvasElement, parts: PartDominance[]): Tui
     ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
     if (w > 46 && h > 26) {
       ctx.fillStyle = cText;
-      ctx.font = "10px ui-sans-serif, system-ui";
+      ctx.font = POLICE_CANVAS;
       ctx.fillText(t.item.symbole, x + 5, y + 13, w - 10);
       ctx.fillText(`${t.item.partPct.toFixed(1)} %`, x + 5, y + 24, w - 10);
     }
@@ -262,45 +264,56 @@ function TableEmetteurs({
 }) {
   const total = emetteurs.reduce((s, e) => s + e.mcapUsd, 0);
   const tries = [...emetteurs].sort((a, b) => b.mcapUsd - a.mcapUsd).slice(0, 25);
-  return (
-    <table className="w-full text-[11px]">
-      <thead>
-        <tr className="border-b border-border text-left text-text-dim">
-          <th className="py-1 pr-2 font-normal">Émetteur</th>
-          <th className="py-1 pr-2 text-right font-normal">Supply</th>
-          <th className="py-1 pr-2 text-right font-normal">Part</th>
-          <th className="py-1 pr-2 text-right font-normal">Δ 7 j</th>
-          <th className="py-1 pr-2 text-right font-normal">Prix</th>
-          <th className="py-1 font-normal">Mécanisme</th>
-        </tr>
-      </thead>
-      <tbody>
-        {tries.map((e) => {
-          const d7 = deltaPct(e.mcapUsd, e.mcap7jUsd);
-          return (
-            <tr
-              key={e.id}
-              onClick={() => onSelect(e.id)}
-              className="cursor-pointer border-b border-border/50 hover:bg-bg"
-            >
-              <td className="py-1 pr-2 font-medium text-text">{e.symbole}</td>
-              <td className="py-1 pr-2 text-right tabular-nums">{formatUsd(e.mcapUsd)}</td>
-              <td className="py-1 pr-2 text-right tabular-nums text-text-dim">
-                {total > 0 ? formatPourcentage((e.mcapUsd / total) * 100, 1) : VALEUR_ABSENTE}
-              </td>
-              <td className="py-1 pr-2 text-right tabular-nums" style={{ color: couleurDelta(d7) }}>
-                {formatPct(d7)}
-              </td>
-              <td className="py-1 pr-2 text-right tabular-nums">
-                {e.prix === null ? VALEUR_ABSENTE : e.prix.toFixed(4)}
-              </td>
-              <td className="py-1 text-text-dim">{e.pegMechanism || VALEUR_ABSENTE}</td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  );
+  const colonnes: ColonneTable<EmetteurStablecoin>[] = [
+    {
+      id: "emetteur",
+      label: "Émetteur",
+      triable: false,
+      rendu: (e) => <span className="font-medium text-text">{e.symbole}</span>,
+    },
+    {
+      id: "supply",
+      label: "Supply",
+      align: "right",
+      triable: false,
+      rendu: (e) => formatUsd(e.mcapUsd),
+    },
+    {
+      id: "part",
+      label: "Part",
+      align: "right",
+      triable: false,
+      rendu: (e) => (
+        <span className="text-text-dim">
+          {total > 0 ? formatPourcentage((e.mcapUsd / total) * 100, 1) : VALEUR_ABSENTE}
+        </span>
+      ),
+    },
+    {
+      id: "delta7j",
+      label: "Δ 7 j",
+      align: "right",
+      triable: false,
+      rendu: (e) => {
+        const d7 = deltaPct(e.mcapUsd, e.mcap7jUsd);
+        return <span style={{ color: couleurDelta(d7) }}>{formatPct(d7)}</span>;
+      },
+    },
+    {
+      id: "prix",
+      label: "Prix",
+      align: "right",
+      triable: false,
+      rendu: (e) => (e.prix === null ? VALEUR_ABSENTE : e.prix.toFixed(4)),
+    },
+    {
+      id: "mecanisme",
+      label: "Mécanisme",
+      triable: false,
+      rendu: (e) => <span className="text-text-dim">{e.pegMechanism || VALEUR_ABSENTE}</span>,
+    },
+  ];
+  return <TableTriable colonnes={colonnes} lignes={tries} cle={(e) => e.id} surClicLigne={(e) => onSelect(e.id)} />;
 }
 
 // ─────────────────────────── Onglet Impression ───────────────────────────
@@ -384,7 +397,7 @@ function dessinerImpression(canvas: HTMLCanvasElement, serie: PointSupply[], dom
   // Repères de dates (début / milieu / fin du domaine) — sans eux, impossible de
   // savoir à quel jour correspond une barre de mint/burn.
   ctx.fillStyle = cTextDim;
-  ctx.font = "10px system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
   const yLabel = cssH - 3;
   ctx.fillText(formatDateCourte(domaine.min), 2, yLabel);
   if (visibles.length > 2) {
@@ -612,46 +625,54 @@ function VueChaines({ emetteurs }: { emetteurs: EmetteurStablecoin[] }) {
   }, [serie]);
 
   const partMax = parts[0]?.partPct ?? 100;
+  const colonnesChaines: ColonneTable<PartChaine>[] = [
+    {
+      id: "chaine",
+      label: "Chaîne",
+      triable: false,
+      rendu: (p) => (
+        <span className={`font-medium ${chaineSel === p.chaine ? "text-accent" : "text-text"}`}>{p.chaine}</span>
+      ),
+    },
+    {
+      id: "supply",
+      label: "Supply",
+      align: "right",
+      triable: false,
+      rendu: (p) => formatUsd(p.totalUsd),
+    },
+    {
+      id: "part",
+      label: "Part",
+      align: "right",
+      triable: false,
+      rendu: (p) => <span className="text-text-dim">{formatPourcentage(p.partPct, 1)}</span>,
+    },
+    {
+      id: "barre",
+      label: "",
+      triable: false,
+      rendu: (p) => (
+        // Barre de part relative — largeur en % de la part max (lisible même quand
+        // Ethereum/Tron écrasent la queue). `bg-accent` + `opacity-60` et non `bg-accent/60` :
+        // les tokens thème sont des var() bruts, le modificateur d'opacité slash n'est pas
+        // généré par Tailwind.
+        <div
+          className="h-1.5 rounded-sm bg-accent opacity-60"
+          style={{ width: `${Math.max(2, (p.partPct / partMax) * 100)}%` }}
+        />
+      ),
+    },
+  ];
 
   return (
     <div className="flex flex-col gap-3">
-      <table className="w-full text-[11px]">
-        <thead>
-          <tr className="border-b border-border text-left text-text-dim">
-            <th className="py-1 pr-2 font-normal">Chaîne</th>
-            <th className="py-1 pr-2 text-right font-normal">Supply</th>
-            <th className="py-1 pr-2 text-right font-normal">Part</th>
-            <th className="w-1/3 py-1 font-normal" />
-          </tr>
-        </thead>
-        <tbody>
-          {parts.slice(0, 15).map((p) => (
-            <tr
-              key={p.chaine}
-              onClick={() => setChaineSel(p.chaine)}
-              className={`cursor-pointer border-b border-border/50 hover:bg-bg ${
-                chaineSel === p.chaine ? "bg-bg" : ""
-              }`}
-            >
-              <td className="py-1 pr-2 font-medium text-text">{p.chaine}</td>
-              <td className="py-1 pr-2 text-right tabular-nums">{formatUsd(p.totalUsd)}</td>
-              <td className="py-1 pr-2 text-right tabular-nums text-text-dim">
-                {formatPourcentage(p.partPct, 1)}
-              </td>
-              <td className="py-1">
-                {/* Barre de part relative — largeur en % de la part max (lisible même
-                    quand Ethereum/Tron écrasent la queue). `bg-accent` + `opacity-60`
-                    et non `bg-accent/60` : les tokens thème sont des var() bruts, le
-                    modificateur d'opacité slash n'est pas généré par Tailwind. */}
-                <div
-                  className="h-1.5 rounded-sm bg-accent opacity-60"
-                  style={{ width: `${Math.max(2, (p.partPct / partMax) * 100)}%` }}
-                />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <TableTriable
+        colonnes={colonnesChaines}
+        lignes={parts.slice(0, 15)}
+        cle={(p) => p.chaine}
+        surClicLigne={(p) => setChaineSel(p.chaine)}
+      />
       {chaineSel !== null && (
         <div className="flex flex-col gap-1">
           <p className="text-[11px] text-text-dim">Historique 1 a — {chaineSel}</p>
@@ -691,49 +712,60 @@ function VuePegs({
   // Pegs non-USD : listés à part, prix brut sans bps (limite DefiLlama documentée au spec).
   const autres = emetteurs.filter((e) => e.pegType !== "peggedUSD").slice(0, 10);
 
+  const colonnesPegs: ColonneTable<{ e: EmetteurStablecoin; bps: number }>[] = [
+    {
+      id: "emetteur",
+      label: "Émetteur",
+      triable: false,
+      rendu: ({ e }) => <span className="font-medium text-text">{e.symbole}</span>,
+    },
+    {
+      id: "prix",
+      label: "Prix",
+      align: "right",
+      triable: false,
+      rendu: ({ e }) => (e.prix === null ? VALEUR_ABSENTE : e.prix.toFixed(4)),
+    },
+    {
+      id: "ecart",
+      label: "Écart",
+      align: "right",
+      triable: false,
+      // Tout écart non nul est teinté "down" (un écart de peg n'est jamais « bon » ) ;
+      // -0 || null garde le neutre à zéro exact.
+      rendu: ({ bps }) => (
+        <span style={{ color: couleurDelta(-Math.abs(bps) || null) }}>
+          {bps >= 0 ? "+" : "−"}
+          {Math.abs(bps).toFixed(1)} bps
+        </span>
+      ),
+    },
+    {
+      id: "supply",
+      label: "Supply",
+      align: "right",
+      triable: false,
+      rendu: ({ e }) => formatUsd(e.mcapUsd),
+    },
+    {
+      id: "etat",
+      label: "État",
+      triable: false,
+      rendu: ({ bps }) => {
+        const etat = etatPeg(bps);
+        return <Badge ton={TON_PEG[etat]}>{LIBELLE_PEG[etat]}</Badge>;
+      },
+    },
+  ];
+
   return (
     <div className="flex flex-col gap-3">
-      <table className="w-full text-[11px]">
-        <thead>
-          <tr className="border-b border-border text-left text-text-dim">
-            <th className="py-1 pr-2 font-normal">Émetteur</th>
-            <th className="py-1 pr-2 text-right font-normal">Prix</th>
-            <th className="py-1 pr-2 text-right font-normal">Écart</th>
-            <th className="py-1 pr-2 text-right font-normal">Supply</th>
-            <th className="py-1 font-normal">État</th>
-          </tr>
-        </thead>
-        <tbody>
-          {usd.slice(0, 30).map(({ e, bps }) => {
-            const etat = etatPeg(bps);
-            return (
-              <tr
-                key={e.id}
-                onClick={() => onSelect(e.id)}
-                className="cursor-pointer border-b border-border/50 hover:bg-bg"
-              >
-                <td className="py-1 pr-2 font-medium text-text">{e.symbole}</td>
-                <td className="py-1 pr-2 text-right tabular-nums">
-                  {e.prix === null ? VALEUR_ABSENTE : e.prix.toFixed(4)}
-                </td>
-                {/* Tout écart non nul est teinté "down" (un écart de peg n'est jamais
-                    « bon ») ; -0 || null garde le neutre à zéro exact. */}
-                <td
-                  className="py-1 pr-2 text-right tabular-nums"
-                  style={{ color: couleurDelta(-Math.abs(bps) || null) }}
-                >
-                  {bps >= 0 ? "+" : "−"}
-                  {Math.abs(bps).toFixed(1)} bps
-                </td>
-                <td className="py-1 pr-2 text-right tabular-nums">{formatUsd(e.mcapUsd)}</td>
-                <td className="py-1">
-                  <Badge ton={TON_PEG[etat]}>{LIBELLE_PEG[etat]}</Badge>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <TableTriable
+        colonnes={colonnesPegs}
+        lignes={usd.slice(0, 30)}
+        cle={({ e }) => e.id}
+        surClicLigne={({ e }) => onSelect(e.id)}
+      />
       {autres.length > 0 && (
         <div className="rounded-md border border-border bg-bg px-3 py-2">
           <p className="mb-1 text-[11px] text-text-dim">
@@ -914,7 +946,7 @@ export function StablecoinsWindow() {
           setOnglet(id);
         }}
       />
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      <div className="px-4 py-3">
         {statut === "loading" && <Chargement />}
         {statut === "error" && <ErreurBloc>Impossible de charger les données DefiLlama.</ErreurBloc>}
         {statut === "ready" && emetteurs !== null && historique !== null && (

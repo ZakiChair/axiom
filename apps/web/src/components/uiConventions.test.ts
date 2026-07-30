@@ -37,14 +37,13 @@ const MOTIFS: Motif[] = [
     id: "champ-local",
     description: "constante input locale — utiliser <Input>/<Select> (ui.tsx)",
     regex: /const\s+input(Class|Cls)\s*=/,
-    exceptions: ["PaperWindow.tsx"],
+    exceptions: [],
   },
   {
     id: "table-nue",
     description: "<table> nu — utiliser TableTriable",
     regex: /<table\b/,
     exceptions: [
-      "PaperWindow.tsx", "MacroRatesWindow.tsx", "StablecoinsWindow.tsx",
       "CycleWindow.tsx", "DistWindow.tsx", "FundWindow.tsx", "FundingMatrixWindow.tsx",
       "brief/SectionSession.tsx", "brief/SectionWatchlist.tsx",
     ],
@@ -89,7 +88,7 @@ const MOTIFS: Motif[] = [
     regex: /(9px ui-sans-serif|11px ui-monospace|10px system-ui)/,
     exceptions: [
       "CorrWindow.tsx", "McapWindow.tsx", "EvtsWindow.tsx", "VolWindow.tsx",
-      "StablecoinsWindow.tsx", "OnchainWindow.tsx",
+      "OnchainWindow.tsx",
       "CbpremWindow.tsx", "CycleWindow.tsx", "DomWindow.tsx", "ExpyWindow.tsx",
       "NetliqWindow.tsx", "SqueezeWindow.tsx", "TermStructureWindow.tsx",
     ],

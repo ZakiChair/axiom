@@ -13,19 +13,23 @@ import { useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { paperStore } from "../store/paper";
 import { paperOverlayStore } from "../chart/paperLignes";
-import { pnlLatent, FRAIS_TAKER, type OrdrePaper, type PositionPaper } from "../data/paper";
+import { pnlLatent, FRAIS_TAKER, type ExecutionPaper, type OrdrePaper, type PositionPaper } from "../data/paper";
 import { marketStore } from "../store/market";
 import { debutJourLocalMs } from "../store/portfolio";
 import { formatUsd, formatDec, VALEUR_ABSENTE } from "../lib/format";
 import {
   Badge,
+  Bouton,
+  BoutonBascule,
   BTN_SECONDAIRE,
   EnTeteFenetre,
+  Input,
   NoteSource,
   Segmente,
-  Vide,
+  TitreSection,
   type TonBadge,
 } from "./ui";
+import { TableTriable, type ColonneTable } from "./TableTriable";
 
 // ─────────────────────────── Helpers d'affichage ───────────────────────────
 
@@ -182,8 +186,210 @@ export function PaperWindow() {
     setEditTpSl(null);
   };
 
-  const inputCls =
-    "w-full rounded border border-border bg-bg px-2 py-1 text-xs tabular-nums text-text placeholder:text-text-dim focus:outline-none focus:ring-1 focus:ring-accent";
+  // Colonnes des 3 tables — triable: false partout (l'apport = en-têtes + gabarit unique,
+  // pas le tri). Les `rendu` reprennent EXACTEMENT le JSX des cellules d'origine.
+  const COLONNES_ORDRES: ColonneTable<OrdrePaper>[] = [
+    { id: "symbole", label: "Symbole", triable: false, rendu: (o) => <span className="font-medium">{o.symbol}</span> },
+    {
+      id: "sens",
+      label: "Sens",
+      triable: false,
+      rendu: (o) => <span className={o.direction === "long" ? "text-up" : "text-down"}>{o.direction}</span>,
+    },
+    { id: "type", label: "Type", triable: false, rendu: (o) => <span className="text-text-dim">{o.type}</span> },
+    {
+      id: "prix",
+      label: "Prix",
+      triable: false,
+      rendu: (o) => (
+        <span className="text-text-dim">
+          {o.type === "limit" && o.prixLimite !== null
+            ? `@ ${formatUsd(o.prixLimite)}`
+            : o.type === "stop" && o.prixStop !== null
+              ? `décl. ${formatUsd(o.prixStop)}`
+              : "au marché"}
+        </span>
+      ),
+    },
+    {
+      id: "taille",
+      label: "Taille",
+      triable: false,
+      rendu: (o) => <span className="text-text-dim">{formatDec(o.taille, 6)} u</span>,
+    },
+    {
+      id: "action",
+      label: "",
+      align: "right",
+      triable: false,
+      rendu: (o) => (
+        <button
+          type="button"
+          className="text-text-dim transition hover:text-down"
+          title="Annuler l'ordre"
+          onClick={() => paperStore.getState().annulerOrdre(o.id)}
+        >
+          ✕
+        </button>
+      ),
+    },
+  ];
+
+  const COLONNES_POSITIONS: ColonneTable<PositionPaper>[] = [
+    { id: "symbole", label: "Symbole", triable: false, rendu: (p) => <span className="font-medium">{p.symbol}</span> },
+    {
+      id: "sens",
+      label: "Sens",
+      triable: false,
+      rendu: (p) => <span className={p.direction === "long" ? "text-up" : "text-down"}>{p.direction}</span>,
+    },
+    {
+      id: "taille",
+      label: "Taille",
+      triable: false,
+      rendu: (p) => (
+        <span className="text-text-dim">
+          {formatDec(p.taille, 6)} u @ {formatUsd(p.prixEntree)}
+        </span>
+      ),
+    },
+    {
+      // Brief : 7 en-têtes « Symbole/Sens/Taille/Entrée/PnL latent/TP-SL/(actions) » pour 7
+      // cellules, mais cette cellule est le DERNIER prix connu (pas le prix d'entrée, déjà
+      // dans « Taille ») — « Entrée » induirait le trader en erreur, on garde « Dernier ».
+      id: "dernier",
+      label: "Dernier",
+      triable: false,
+      rendu: (p) => {
+        const last = derniersPrix[p.symbol];
+        return <span className="text-text-dim">{last !== undefined ? formatUsd(last) : VALEUR_ABSENTE}</span>;
+      },
+    },
+    {
+      id: "pnl",
+      label: "PnL latent",
+      triable: false,
+      rendu: (p) => {
+        const last = derniersPrix[p.symbol];
+        const pnl = last !== undefined ? pnlLatent(p, last) : null;
+        return (
+          <span className={`font-medium ${pnl !== null ? couleurMontant(pnl) : "text-text-dim"}`}>
+            {pnl !== null ? usdSigne(pnl) : VALEUR_ABSENTE}
+          </span>
+        );
+      },
+    },
+    {
+      id: "tpsl",
+      label: "TP-SL",
+      triable: false,
+      rendu: (p) => {
+        const enEdition = editTpSl?.id === p.id;
+        return (
+          <span className="text-text-dim">
+            {enEdition && editTpSl !== null ? (
+              <span className="flex items-center gap-1">
+                <Input
+                  className="w-20 tabular-nums"
+                  placeholder="TP"
+                  value={editTpSl.tp}
+                  onChange={(e) => setEditTpSl({ ...editTpSl, tp: e.target.value })}
+                  onKeyDown={(e) => e.key === "Enter" && validerTpSl()}
+                />
+                <Input
+                  className="w-20 tabular-nums"
+                  placeholder="SL"
+                  value={editTpSl.sl}
+                  onChange={(e) => setEditTpSl({ ...editTpSl, sl: e.target.value })}
+                  onKeyDown={(e) => e.key === "Enter" && validerTpSl()}
+                />
+                <Bouton onClick={validerTpSl}>OK</Bouton>
+                <Bouton onClick={() => setEditTpSl(null)}>✕</Bouton>
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="text-text-dim underline decoration-dotted transition hover:text-text"
+                title="Éditer TP / SL"
+                onClick={() =>
+                  setEditTpSl({ id: p.id, tp: p.tp !== null ? String(p.tp) : "", sl: p.sl !== null ? String(p.sl) : "" })
+                }
+              >
+                TP {p.tp !== null ? formatUsd(p.tp) : "—"} · SL {p.sl !== null ? formatUsd(p.sl) : "—"}
+              </button>
+            )}
+          </span>
+        );
+      },
+    },
+    {
+      id: "action",
+      label: "",
+      align: "right",
+      triable: false,
+      rendu: (p) => {
+        const last = derniersPrix[p.symbol];
+        return (
+          <Bouton
+            disabled={last === undefined}
+            title={last === undefined ? "Prix inconnu — attendez un tick" : "Clôturer au dernier prix"}
+            onClick={() => paperStore.getState().cloturer(p.id)}
+          >
+            Clôturer
+          </Bouton>
+        );
+      },
+    },
+  ];
+
+  // { exec, idx } : l'index (unique par construction, contrairement à ts/symbol/genre/prix
+  // qui peuvent coïncider entre deux exécutions) fournit la clé React — comme l'ancien
+  // `key={`${e.ts}-${i}`}`.
+  const COLONNES_EXECUTIONS: ColonneTable<{ exec: ExecutionPaper; idx: number }>[] = [
+    {
+      id: "heure",
+      label: "Heure",
+      triable: false,
+      rendu: ({ exec: e }) => (
+        <span className="text-text-dim">
+          {new Date(e.ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
+        </span>
+      ),
+    },
+    {
+      id: "symbole",
+      label: "Symbole",
+      triable: false,
+      rendu: ({ exec: e }) => <span className="font-medium">{e.symbol}</span>,
+    },
+    {
+      id: "genre",
+      label: "Genre",
+      triable: false,
+      rendu: ({ exec: e }) => <span className="text-text-dim">{LIBELLE_GENRE[e.genre] ?? e.genre}</span>,
+    },
+    {
+      id: "prix",
+      label: "Prix",
+      triable: false,
+      rendu: ({ exec: e }) => <span className="text-text-dim">@ {formatUsd(e.prix)}</span>,
+    },
+    {
+      id: "pnl",
+      label: "PnL",
+      triable: false,
+      rendu: ({ exec: e }) => (
+        <span className={e.pnlUsd !== null ? couleurMontant(e.pnlUsd) : "text-text-dim"}>
+          {e.pnlUsd !== null ? usdSigne(e.pnlUsd) : VALEUR_ABSENTE}
+        </span>
+      ),
+    },
+  ];
+
+  const executionsRecentes = [...executions]
+    .slice(-10)
+    .reverse()
+    .map((exec, idx) => ({ exec, idx }));
 
   return (
     <>
@@ -191,31 +397,26 @@ export function PaperWindow() {
         mnemo="PAPER"
         titre="Paper trading"
         sousTitre="Ordres simulés · flux live · journalisation EXPY"
-        actions={
-          <span className="flex items-center gap-1">
-            {/* Overlay des lignes d'ordres/positions du symbole courant sur le chart maître. */}
-            <button
-              type="button"
-              className={BTN_SECONDAIRE}
-              aria-pressed={overlayActif}
-              title="Afficher les ordres/positions sur le chart maître"
-              onClick={() => paperOverlayStore.getState().basculer()}
-            >
-              Lignes {overlayActif ? "ON" : "OFF"}
-            </button>
-            {editSolde === null ? (
-            <button
-              type="button"
-              className={BTN_SECONDAIRE}
-              title="Modifier le solde fictif"
-              onClick={() => setEditSolde(String(solde))}
-            >
+      />
+
+      <div className="space-y-3 px-4 py-3">
+        {/* Overlay des lignes d'ordres/positions du symbole courant sur le chart maître + solde fictif. */}
+        <div className="flex items-center gap-2">
+          <BoutonBascule
+            actif={overlayActif}
+            title="Afficher les ordres/positions sur le chart maître"
+            onClick={() => paperOverlayStore.getState().basculer()}
+          >
+            Lignes
+          </BoutonBascule>
+          {editSolde === null ? (
+            <Bouton title="Modifier le solde fictif" onClick={() => setEditSolde(String(solde))}>
               ⚙ solde
-            </button>
+            </Bouton>
           ) : (
             <span className="flex items-center gap-1">
-              <input
-                className={`${inputCls} w-24`}
+              <Input
+                className="w-24 tabular-nums"
                 value={editSolde}
                 onChange={(e) => setEditSolde(e.target.value)}
                 onKeyDown={(e) => {
@@ -227,16 +428,11 @@ export function PaperWindow() {
                   if (e.key === "Escape") setEditSolde(null);
                 }}
               />
-              <button type="button" className={BTN_SECONDAIRE} onClick={() => setEditSolde(null)}>
-                ✕
-              </button>
+              <Bouton onClick={() => setEditSolde(null)}>✕</Bouton>
             </span>
           )}
-          </span>
-        }
-      />
+        </div>
 
-      <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
         {/* Badges Solde / Équity / PnL jour */}
         <div className="flex flex-wrap items-center gap-2">
           <Badge ton="neutre">Solde {formatUsd(solde)}</Badge>
@@ -252,8 +448,8 @@ export function PaperWindow() {
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             <label className="flex flex-col gap-1 text-[10px] text-text-dim">
               Symbole
-              <input
-                className={inputCls}
+              <Input
+                className="w-full"
                 value={form.symbol}
                 onChange={(e) => setForm((f) => ({ ...f, symbol: e.target.value }))}
                 placeholder="BTCUSDT"
@@ -284,8 +480,8 @@ export function PaperWindow() {
             </label>
             <label className="flex flex-col gap-1 text-[10px] text-text-dim">
               Montant ($)
-              <input
-                className={inputCls}
+              <Input
+                className="w-full tabular-nums"
                 value={form.montantUsd}
                 onChange={(e) => setForm((f) => ({ ...f, montantUsd: e.target.value }))}
                 placeholder="1000"
@@ -294,8 +490,8 @@ export function PaperWindow() {
             {form.type === "limit" && (
               <label className="flex flex-col gap-1 text-[10px] text-text-dim">
                 Prix limite
-                <input
-                  className={inputCls}
+                <Input
+                  className="w-full tabular-nums"
                   value={form.prixLimite}
                   onChange={(e) => setForm((f) => ({ ...f, prixLimite: e.target.value }))}
                 />
@@ -304,8 +500,8 @@ export function PaperWindow() {
             {form.type === "stop" && (
               <label className="flex flex-col gap-1 text-[10px] text-text-dim">
                 Déclenchement
-                <input
-                  className={inputCls}
+                <Input
+                  className="w-full tabular-nums"
                   value={form.prixStop}
                   onChange={(e) => setForm((f) => ({ ...f, prixStop: e.target.value }))}
                 />
@@ -313,16 +509,16 @@ export function PaperWindow() {
             )}
             <label className="flex flex-col gap-1 text-[10px] text-text-dim">
               TP (opt.)
-              <input
-                className={inputCls}
+              <Input
+                className="w-full tabular-nums"
                 value={form.tp}
                 onChange={(e) => setForm((f) => ({ ...f, tp: e.target.value }))}
               />
             </label>
             <label className="flex flex-col gap-1 text-[10px] text-text-dim">
               SL (opt.)
-              <input
-                className={inputCls}
+              <Input
+                className="w-full tabular-nums"
                 value={form.sl}
                 onChange={(e) => setForm((f) => ({ ...f, sl: e.target.value }))}
               />
@@ -343,154 +539,35 @@ export function PaperWindow() {
 
         {/* Ordres en attente */}
         <section>
-          <h3 className="mb-1 text-[10px] uppercase tracking-wider text-text-dim">
-            Ordres en attente ({ordres.length})
-          </h3>
-          {ordres.length === 0 ? (
-            <Vide>Aucun ordre en attente.</Vide>
-          ) : (
-            <table className="w-full text-left text-xs">
-              <tbody>
-                {ordres.map((o: OrdrePaper) => (
-                  <tr key={o.id} className="border-b border-border/50">
-                    <td className="py-1 font-medium">{o.symbol}</td>
-                    <td className={o.direction === "long" ? "text-up" : "text-down"}>{o.direction}</td>
-                    <td className="text-text-dim">{o.type}</td>
-                    <td className="tabular-nums text-text-dim">
-                      {o.type === "limit" && o.prixLimite !== null
-                        ? `@ ${formatUsd(o.prixLimite)}`
-                        : o.type === "stop" && o.prixStop !== null
-                          ? `décl. ${formatUsd(o.prixStop)}`
-                          : "au marché"}
-                    </td>
-                    <td className="tabular-nums text-text-dim">{formatDec(o.taille, 6)} u</td>
-                    <td className="text-right">
-                      <button
-                        type="button"
-                        className="text-text-dim transition hover:text-down"
-                        title="Annuler l'ordre"
-                        onClick={() => paperStore.getState().annulerOrdre(o.id)}
-                      >
-                        ✕
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          <TitreSection>Ordres en attente ({ordres.length})</TitreSection>
+          <TableTriable
+            colonnes={COLONNES_ORDRES}
+            lignes={ordres}
+            cle={(o) => o.id}
+            vide="Aucun ordre en attente."
+          />
         </section>
 
         {/* Positions ouvertes */}
         <section>
-          <h3 className="mb-1 text-[10px] uppercase tracking-wider text-text-dim">
-            Positions ({positions.length})
-          </h3>
-          {positions.length === 0 ? (
-            <Vide>Aucune position ouverte.</Vide>
-          ) : (
-            <table className="w-full text-left text-xs">
-              <tbody>
-                {positions.map((p: PositionPaper) => {
-                  const last = derniersPrix[p.symbol];
-                  const pnl = last !== undefined ? pnlLatent(p, last) : null;
-                  const enEdition = editTpSl?.id === p.id;
-                  return (
-                    <tr key={p.id} className="border-b border-border/50 align-middle">
-                      <td className="py-1 font-medium">{p.symbol}</td>
-                      <td className={p.direction === "long" ? "text-up" : "text-down"}>{p.direction}</td>
-                      <td className="tabular-nums text-text-dim">
-                        {formatDec(p.taille, 6)} u @ {formatUsd(p.prixEntree)}
-                      </td>
-                      <td className="tabular-nums text-text-dim">
-                        {last !== undefined ? formatUsd(last) : VALEUR_ABSENTE}
-                      </td>
-                      <td className={`tabular-nums font-medium ${pnl !== null ? couleurMontant(pnl) : "text-text-dim"}`}>
-                        {pnl !== null ? usdSigne(pnl) : VALEUR_ABSENTE}
-                      </td>
-                      <td className="tabular-nums text-text-dim">
-                        {enEdition ? (
-                          <span className="flex items-center gap-1">
-                            <input
-                              className={`${inputCls} w-20`}
-                              placeholder="TP"
-                              value={editTpSl.tp}
-                              onChange={(e) => setEditTpSl({ ...editTpSl, tp: e.target.value })}
-                              onKeyDown={(e) => e.key === "Enter" && validerTpSl()}
-                            />
-                            <input
-                              className={`${inputCls} w-20`}
-                              placeholder="SL"
-                              value={editTpSl.sl}
-                              onChange={(e) => setEditTpSl({ ...editTpSl, sl: e.target.value })}
-                              onKeyDown={(e) => e.key === "Enter" && validerTpSl()}
-                            />
-                            <button type="button" className={BTN_SECONDAIRE} onClick={validerTpSl}>
-                              OK
-                            </button>
-                            <button type="button" className={BTN_SECONDAIRE} onClick={() => setEditTpSl(null)}>
-                              ✕
-                            </button>
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            className="text-text-dim underline decoration-dotted transition hover:text-text"
-                            title="Éditer TP / SL"
-                            onClick={() =>
-                              setEditTpSl({ id: p.id, tp: p.tp !== null ? String(p.tp) : "", sl: p.sl !== null ? String(p.sl) : "" })
-                            }
-                          >
-                            TP {p.tp !== null ? formatUsd(p.tp) : "—"} · SL {p.sl !== null ? formatUsd(p.sl) : "—"}
-                          </button>
-                        )}
-                      </td>
-                      <td className="text-right">
-                        <button
-                          type="button"
-                          className={BTN_SECONDAIRE}
-                          disabled={last === undefined}
-                          title={last === undefined ? "Prix inconnu — attendez un tick" : "Clôturer au dernier prix"}
-                          onClick={() => paperStore.getState().cloturer(p.id)}
-                        >
-                          Clôturer
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
+          <TitreSection>Positions ({positions.length})</TitreSection>
+          <TableTriable
+            colonnes={COLONNES_POSITIONS}
+            lignes={positions}
+            cle={(p) => p.id}
+            vide="Aucune position ouverte."
+          />
         </section>
 
         {/* Dernières exécutions */}
         <section>
-          <h3 className="mb-1 text-[10px] uppercase tracking-wider text-text-dim">Dernières exécutions</h3>
-          {executions.length === 0 ? (
-            <Vide>Aucune exécution.</Vide>
-          ) : (
-            <table className="w-full text-left text-xs">
-              <tbody>
-                {[...executions]
-                  .slice(-10)
-                  .reverse()
-                  .map((e, i) => (
-                    <tr key={`${e.ts}-${i}`} className="border-b border-border/50">
-                      <td className="py-1 text-text-dim">
-                        {new Date(e.ts).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
-                      </td>
-                      <td className="font-medium">{e.symbol}</td>
-                      <td className="text-text-dim">{LIBELLE_GENRE[e.genre] ?? e.genre}</td>
-                      <td className="tabular-nums text-text-dim">@ {formatUsd(e.prix)}</td>
-                      <td className={`tabular-nums ${e.pnlUsd !== null ? couleurMontant(e.pnlUsd) : "text-text-dim"}`}>
-                        {e.pnlUsd !== null ? usdSigne(e.pnlUsd) : VALEUR_ABSENTE}
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          )}
+          <TitreSection>Dernières exécutions</TitreSection>
+          <TableTriable
+            colonnes={COLONNES_EXECUTIONS}
+            lignes={executionsRecentes}
+            cle={({ idx }) => String(idx)}
+            vide="Aucune exécution."
+          />
         </section>
 
         <NoteSource>

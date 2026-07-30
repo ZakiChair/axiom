@@ -36,7 +36,8 @@ import { CourbeTaux, type SerieCourbe } from "./CourbeTaux";
 import { pointsDeCourbe } from "./courbeTaux.util";
 import { paysIndisponibles } from "./macroRatesWindow.util";
 import { formatPourcentage, formatEntier, formatDateComplete } from "../lib/format";
-import { EnTeteFenetre, Onglets, Chargement, NoteSource, Vide } from "./ui";
+import { BoutonBascule, BoutonRafraichir, EnTeteFenetre, Onglets, Chargement, NoteSource, Segmente, TitreSection, Vide } from "./ui";
+import { TableTriable, type ColonneTable } from "./TableTriable";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -185,16 +186,6 @@ const MATURITES_EURO: readonly string[] = ["2 Yr", "10 Yr", "30 Yr"];
  * Australie (2/3/5/10 Yr + indexée). Les lignes sans aucune valeur sont masquées. */
 const MATURITES_INTL: readonly string[] = [...MATURITES_JP, MATURITE_AU_INDEXEE];
 
-/** Classes `text-serie-N` par index de token (littéraux STATIQUES pour le JIT Tailwind). */
-const CLASSES_SERIE: readonly string[] = [
-  "text-serie-1",
-  "text-serie-2",
-  "text-serie-3",
-  "text-serie-4",
-  "text-serie-5",
-  "text-serie-6",
-];
-
 /** Identifiants des pays affichables sur la courbe (bascules de visibilité). */
 type PaysCourbe = "us" | "euro" | "jp" | "ca" | "au";
 
@@ -288,35 +279,22 @@ function VueRendements({
   return (
     <div className="space-y-4">
       <div className="flex justify-end gap-1">
-        {VUES_RENDEMENTS.map((v) => (
-          <button
-            key={v.id}
-            type="button"
-            onClick={() => setVue(v.id)}
-            className={`rounded px-2.5 py-1 text-[11px] transition ${
-              vue === v.id ? "bg-bg text-text" : "text-text-dim hover:text-text"
-            }`}
-          >
-            {v.label}
-          </button>
-        ))}
+        <Segmente options={VUES_RENDEMENTS} actif={vue} onChange={setVue} />
       </div>
 
       {vue === "courbe" ? (
         <section>
-          <EnteteSection
-            titre="Courbe des taux"
-            info={derniere !== undefined ? `au ${formatDateSource(derniere.date)}` : undefined}
-          />
+          <TitreSection extra={derniere !== undefined ? `au ${formatDateSource(derniere.date)}` : undefined}>
+            Courbe des taux
+          </TitreSection>
           {seriesDisponibles.length > 1 && (
             <div className="mb-2 flex flex-wrap gap-1">
               {seriesDisponibles.map(({ id, serie }) => {
                 const actif = !masques.has(id);
                 return (
-                  <button
+                  <BoutonBascule
                     key={id}
-                    type="button"
-                    aria-pressed={actif}
+                    actif={actif}
                     title={actif ? `Masquer ${serie.label}` : `Afficher ${serie.label}`}
                     onClick={() =>
                       setMasques((prev) => {
@@ -326,15 +304,9 @@ function VueRendements({
                         return suivant;
                       })
                     }
-                    className={`rounded px-2 py-0.5 text-[10px] transition ${
-                      actif ? "bg-bg text-text" : "text-text-dim opacity-60 hover:opacity-100"
-                    }`}
                   >
-                    <span className={CLASSES_SERIE[serie.couleurTokenIndex - 1] ?? "text-serie-1"}>
-                      ●
-                    </span>{" "}
                     {serie.label}
-                  </button>
+                  </BoutonBascule>
                 );
               })}
             </div>
@@ -349,29 +321,36 @@ function VueRendements({
         <>
           {derniere !== undefined && (
             <section>
-              <EnteteSection titre="Trésor américain" info={`au ${formatDateSource(derniere.date)}`} />
-              <table className="w-full text-[11px] tabular-nums">
-                <thead>
-                  <tr className="text-text-dim">
-                    <th className="py-1 text-left font-medium">Maturité</th>
-                    <th className="py-1 text-right font-medium">Taux</th>
-                    <th className="py-1 text-right font-medium">Δ jour</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {MATURITES_US.map((m) => {
-                    const v = derniere.rendements[m];
-                    const d = deltaJour(us, m);
-                    return (
-                      <tr key={m} className="border-t border-border/60">
-                        <td className="py-1 text-left text-text">{libelleMaturiteFr(m)}</td>
-                        <td className="py-1 text-right text-text">{formatPourcentage(v)}</td>
-                        <td className={`py-1 text-right ${couleurDelta(d)}`}>{fmtDelta(d)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <TitreSection extra={`au ${formatDateSource(derniere.date)}`}>Trésor américain</TitreSection>
+              <TableTriable
+                colonnes={[
+                  {
+                    id: "maturite",
+                    label: "Maturité",
+                    triable: false,
+                    rendu: (m) => <span className="text-text">{libelleMaturiteFr(m)}</span>,
+                  },
+                  {
+                    id: "taux",
+                    label: "Taux",
+                    align: "right",
+                    triable: false,
+                    rendu: (m) => <span className="text-text">{formatPourcentage(derniere.rendements[m])}</span>,
+                  },
+                  {
+                    id: "delta",
+                    label: "Δ jour",
+                    align: "right",
+                    triable: false,
+                    rendu: (m) => {
+                      const d = deltaJour(us, m);
+                      return <span className={couleurDelta(d)}>{fmtDelta(d)}</span>;
+                    },
+                  },
+                ]}
+                lignes={MATURITES_US}
+                cle={(m) => m}
+              />
               {spread !== null && (
                 <div className="mt-2 flex items-center justify-between rounded border border-border bg-bg px-2 py-1 text-[11px]">
                   <span className="text-text-dim">Écart 2 ans / 10 ans</span>
@@ -385,38 +364,30 @@ function VueRendements({
 
           {colonnesIntl.length > 0 && (
             <section>
-              <EnteteSection titre="International" info="ECB · MOF · BoC · RBA" />
-              <table className="w-full text-[11px] tabular-nums">
-                <thead>
-                  <tr className="text-text-dim">
-                    <th className="py-1 text-left font-medium">Maturité</th>
-                    {colonnesIntl.map((c) => (
-                      <th key={c.id} className="py-1 text-right font-medium">
-                        {c.titre}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {MATURITES_INTL.filter((m) =>
-                    colonnesIntl.some((c) => c.valeurs[m] !== undefined),
-                  ).map((m) => (
-                    <tr key={m} className="border-t border-border/60">
-                      <td className="py-1 text-left text-text">{libelleMaturiteFr(m)}</td>
-                      {colonnesIntl.map((c) => (
-                        <td
-                          key={c.id}
-                          className={`py-1 text-right ${
-                            c.valeurs[m] === undefined ? "text-text-dim" : "text-text"
-                          }`}
-                        >
-                          {formatPourcentage(c.valeurs[m])}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <TitreSection extra="ECB · MOF · BoC · RBA">International</TitreSection>
+              <TableTriable
+                colonnes={[
+                  {
+                    id: "maturite",
+                    label: "Maturité",
+                    triable: false,
+                    rendu: (m) => <span className="text-text">{libelleMaturiteFr(m)}</span>,
+                  },
+                  ...colonnesIntl.map((c) => ({
+                    id: c.id,
+                    label: c.titre,
+                    align: "right" as const,
+                    triable: false,
+                    rendu: (m: string) => (
+                      <span className={c.valeurs[m] === undefined ? "text-text-dim" : "text-text"}>
+                        {formatPourcentage(c.valeurs[m])}
+                      </span>
+                    ),
+                  })),
+                ]}
+                lignes={MATURITES_INTL.filter((m) => colonnesIntl.some((c) => c.valeurs[m] !== undefined))}
+                cle={(m) => m}
+              />
               <div className="mt-1">
                 <NoteSource>
                   Zone euro : courbe AAA (taux spot) · « {MATURITE_AU_INDEXEE} » : rendement réel
@@ -439,31 +410,39 @@ function VueRendements({
 
 function VueDirecteurs({ data, statut }: { data: TauxDirecteur[] | null; statut: Statut }) {
   if (statut === "loading" && data === null) return <Chargement />;
-  if (data === null || data.length === 0) {
-    return <Vide>Taux directeurs indisponibles pour le moment.</Vide>;
-  }
   return (
-    <table className="w-full text-[11px] tabular-nums">
-      <thead>
-        <tr className="text-text-dim">
-          <th className="py-1 text-left font-medium">Banque centrale</th>
-          <th className="py-1 text-right font-medium">Taux</th>
-          <th className="py-1 text-right font-medium">au</th>
-        </tr>
-      </thead>
-      <tbody>
-        {data.map((t) => (
-          <tr key={t.refArea} className="border-t border-border/60">
-            <td className="py-1 text-left">
+    <TableTriable
+      colonnes={[
+        {
+          id: "banque",
+          label: "Banque centrale",
+          triable: false,
+          rendu: (t) => (
+            <>
               <span className="font-medium text-accent">{t.sigle}</span>{" "}
               <span className="text-text-dim">· {t.banque}</span>
-            </td>
-            <td className="py-1 text-right text-text">{formatPourcentage(t.taux)}</td>
-            <td className="py-1 text-right text-text-dim">{formatDateSource(t.date)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+            </>
+          ),
+        },
+        {
+          id: "taux",
+          label: "Taux",
+          align: "right",
+          triable: false,
+          rendu: (t) => <span className="text-text">{formatPourcentage(t.taux)}</span>,
+        },
+        {
+          id: "au",
+          label: "au",
+          align: "right",
+          triable: false,
+          rendu: (t) => <span className="text-text-dim">{formatDateSource(t.date)}</span>,
+        },
+      ]}
+      lignes={data ?? []}
+      cle={(t) => t.refArea}
+      vide="Taux directeurs indisponibles pour le moment."
+    />
   );
 }
 
@@ -497,15 +476,6 @@ function VueOr({ data, statut }: { data: ReserveOr[] | null; statut: Statut }) {
         Source IMF SDMX 3.0 (IRFCL) · volume converti en tonnes. Déclarants au chiffre
         aberrant ou agrégats régionaux écartés.
       </p>
-    </div>
-  );
-}
-
-function EnteteSection({ titre, info }: { titre: string; info?: string }) {
-  return (
-    <div className="mb-1 flex items-baseline justify-between">
-      <span className="text-[11px] font-semibold uppercase tracking-wide text-text">{titre}</span>
-      {info !== undefined && <span className="text-[10px] text-text-dim">{info}</span>}
     </div>
   );
 }
@@ -588,23 +558,13 @@ export function MacroRatesWindow() {
         mnemo="RATE"
         titre="Taux & Réserves"
         sousTitre="Trésor US · ECB · MOF · BoC · RBA · BIS · IMF"
-        actions={
-          <button
-            type="button"
-            onClick={rafraichir}
-            aria-label="Rafraîchir la section active"
-            title="Rafraîchir"
-            className="rounded p-1 text-sm leading-none text-text-dim transition hover:bg-bg hover:text-text"
-          >
-            ⟳
-          </button>
-        }
+        actions={<BoutonRafraichir onClick={rafraichir} title="Rafraîchir la section active" />}
       />
 
       {/* Onglets. */}
       <Onglets options={ONGLETS} actif={onglet} onChange={setOnglet} />
 
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      <div className="px-4 py-3">
         {onglet === "rendements" && (
           <VueRendements data={rendements} statut={statutR} vue={vue} setVue={setVue} />
         )}

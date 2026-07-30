@@ -21,11 +21,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { netliqStore } from "../store/netliq";
 import { fetchKlines1dPagine, type FenetreNetliq, type PointNetliq } from "../data/netliq";
-import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, rgbaTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { formatDateCourte, formatEntier, formatUsd, VALEUR_ABSENTE } from "../lib/format";
 import { normaliserSerieOverlay, ticksMd } from "./netliqWindow.util";
 import {
   Badge,
+  BoutonRafraichir,
   Chargement,
   EnTeteFenetre,
   ErreurBloc,
@@ -187,7 +188,7 @@ function dessiner(
   const g = geometrie(w, h);
   const dom = domaineY(serie);
 
-  ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
 
   // Aire dégradée sous la courbe : accent alpha 0.10 (haut du cadre) → 0 (plancher).
   ctx.save();
@@ -426,14 +427,7 @@ export function NetliqWindow() {
             >
               ₿ BTC
             </button>
-            <button
-              type="button"
-              onClick={rafraichir}
-              disabled={enCours}
-              className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              ↻ Rafraîchir
-            </button>
+            <BoutonRafraichir onClick={rafraichir} disabled={enCours} />
           </div>
         }
       />
@@ -457,7 +451,7 @@ export function NetliqWindow() {
         </span>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col px-4 py-4">
+      <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
         {erreur !== null && serie.length === 0 ? (
           <ErreurBloc>{erreur}</ErreurBloc>
         ) : enCours && serie.length === 0 ? (

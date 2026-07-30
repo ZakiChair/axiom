@@ -28,9 +28,9 @@ import {
 import { marketStore } from "../store/market";
 import { navigateTo } from "../lib/navigation";
 import { pousserToast } from "../store/toasts";
-import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, rgbaTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { formatDec } from "../lib/format";
-import { Badge, EnTeteFenetre, Segmente, Vide, type TonBadge } from "./ui";
+import { Badge, Bouton, EnTeteFenetre, Segmente, Vide, type TonBadge } from "./ui";
 
 // ─────────────────────────── Formatage ───────────────────────────
 
@@ -92,7 +92,7 @@ function preparerCanvas(
 /** Message centré discret quand un canvas n'a pas de données à tracer. */
 function dessinerVide(ctx: CanvasRenderingContext2D, w: number, h: number, texte: string): void {
   ctx.fillStyle = lireTokenCanvas("--text-dim", "#94a3b8");
-  ctx.font = "10px ui-sans-serif, system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(texte, w / 2, h / 2);
@@ -133,7 +133,7 @@ function dessinerEquity(canvas: HTMLCanvasElement, points: readonly { ts: number
   const xAt = (i: number): number => (n <= 1 ? left + plotW / 2 : left + (i * plotW) / (n - 1));
   const yAt = (v: number): number => bottom - ((v - vMin) / (vMax - vMin)) * plotH;
 
-  ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
 
   // Ligne de zéro pointillée + étiquette « 0 » à gauche.
   const yZero = yAt(0);
@@ -185,7 +185,7 @@ function tonBucket(j: number, total: number): "up" | "down" {
   return borneBasse !== undefined && borneBasse >= 0 ? "up" : "down";
 }
 
-/** Histogramme des R : barres teintées par signe + effectif + étiquettes de bucket (9px). */
+/** Histogramme des R : barres teintées par signe + effectif + étiquettes de bucket (POLICE_CANVAS). */
 function dessinerHisto(canvas: HTMLCanvasElement, buckets: readonly { label: string; n: number }[]): void {
   const p = preparerCanvas(canvas);
   if (p === null) return;
@@ -207,7 +207,7 @@ function dessinerHisto(canvas: HTMLCanvasElement, buckets: readonly { label: str
   const plotH = bottom - top;
   const larg = plotW / total;
 
-  ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
   ctx.textBaseline = "alphabetic";
 
   buckets.forEach((b, j) => {
@@ -444,23 +444,15 @@ export function ExpyWindow() {
             >
               + Trade
             </button>
-            <button
-              type="button"
-              onClick={exporter}
-              disabled={trades.length === 0}
-              title="Exporter le journal en JSON"
-              className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-            >
+            <Bouton onClick={exporter} disabled={trades.length === 0} title="Exporter le journal en JSON">
               Export
-            </button>
-            <button
-              type="button"
+            </Bouton>
+            <Bouton
               onClick={() => fileInputRef.current?.click()}
               title="Importer un journal JSON (fusion par id)"
-              className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text"
             >
               Import
-            </button>
+            </Bouton>
           </div>
         }
       />

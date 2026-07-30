@@ -33,7 +33,7 @@ import {
   type OrderBook,
 } from "../data/depth";
 import { formatUsd } from "../lib/format";
-import { lireTokensCanvas } from "../lib/canvasTokens";
+import { lireTokensCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { EnTeteFenetre, Onglets, Vide } from "./ui";
 
 /** Nombre MAX de niveaux affichés de chaque côté du mid (LADDER, fenêtre haute). */
@@ -177,7 +177,7 @@ function niveauxDepuisMap(map: Map<number, number>): Niveau[] {
 function placeholder(ctx: CanvasRenderingContext2D, w: number, h: number, tk: Tokens, txt: string): void {
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = rgbCss(tk.textDim);
-  ctx.font = "12px ui-sans-serif, system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(txt, w / 2, h / 2);
@@ -563,7 +563,7 @@ export function DomWindow() {
         {isBinance ? (
           <canvas ref={canvasRef} className="block h-full w-full" />
         ) : (
-          <div className="px-4 py-4">
+          <div className="px-4 py-3">
             <Vide>
               Carnet d'ordres non disponible pour cette source — DOM, depth chart et time &amp; sales sont
               réservés à Binance.

@@ -73,19 +73,18 @@ const MOTIFS: Motif[] = [
     id: "btn-secondaire-copie",
     description: "classes de BTN_SECONDAIRE recopiées inline — utiliser <Bouton>",
     regex: /border-border bg-bg px-2 py-1 text-\[11px\] text-text-dim/,
-    exceptions: [
-      "CbpremWindow.tsx",
-      "ExpyWindow.tsx", "MineWindow.tsx", "NetliqWindow.tsx", "SqueezeWindow.tsx",
-    ],
+    exceptions: [],
   },
   {
     id: "police-canvas-divergente",
     description: "police canvas non standard — utiliser POLICE_CANVAS (canvasTokens)",
     regex: /(9px ui-sans-serif|11px ui-monospace|10px system-ui)/,
-    exceptions: [
-      "CbpremWindow.tsx", "DomWindow.tsx", "ExpyWindow.tsx",
-      "NetliqWindow.tsx", "SqueezeWindow.tsx", "TermStructureWindow.tsx",
-    ],
+    // DomWindow (T14) : carnet/tape en MONOSPACE délibéré (alignement des colonnes de
+    // chiffres du ladder/tape/mid-label — fillText canvas ne bénéficie pas de
+    // tabular-nums CSS). POLICE_CANVAS est sans-serif et casserait cet alignement.
+    // Exception ASSUMÉE, pas un reste de migration : une variante monospace du
+    // token (POLICE_CANVAS_MONO) relève d'une tâche dédiée, pas de T14.
+    exceptions: ["DomWindow.tsx"],
   },
 ];
 

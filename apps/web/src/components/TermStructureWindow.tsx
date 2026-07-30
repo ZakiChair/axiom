@@ -24,7 +24,7 @@ import { fetchDeribitTermStructure } from "../data/deribit";
 import { daemonPret, detectDaemon, kvGet, kvPut } from "../data/daemon";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { formatDateCourte, formatPct, VALEUR_ABSENTE } from "../lib/format";
-import { lireTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { type Domaine, indicesVisibles, pixelVersValeur, valeurVersPixel } from "../lib/domaineAxe";
 import { useDomaineZoom } from "../hooks/useDomaineZoom";
 import { EnTeteFenetre, ErreurBloc, NoteSource, Fraicheur, InfobulleGraphe } from "./ui";
@@ -177,7 +177,7 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>, d
   const liveTous = [...data.BTC.live, ...data.ETH.live];
   if (liveTous.length === 0) {
     ctx.fillStyle = cTextDim;
-    ctx.font = "11px system-ui, sans-serif";
+    ctx.font = POLICE_CANVAS;
     ctx.fillText("En attente de données…", padL, padT + plotH / 2);
     return;
   }
@@ -205,7 +205,7 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>, d
   // Grille Y + étiquettes (min / 0 / max).
   ctx.strokeStyle = cBorder;
   ctx.fillStyle = cTextDim;
-  ctx.font = "10px system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
   ctx.lineWidth = 1;
   for (const val of [yMin, (yMin + yMax) / 2, yMax]) {
     const y = py(val);
@@ -403,7 +403,7 @@ export function TermStructureWindow() {
     <>
       <EnTeteFenetre mnemo="TERM" titre="Structure par terme" sousTitre="Basis annualisé · Binance COIN-M + Deribit" />
 
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto px-4 py-3">
         <div className="mb-3 flex items-center justify-between rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-dim">
           <span>BTC / ETH · basis (future − spot)/spot p.a.</span>
           <Fraicheur loading={loading} majTs={majTs} />

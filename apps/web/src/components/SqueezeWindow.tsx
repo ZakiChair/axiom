@@ -26,9 +26,9 @@ import {
   type PointRadar,
   type QuadrantSqueeze,
 } from "../data/squeeze";
-import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, rgbaTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { formatPct, formatUsd } from "../lib/format";
-import { Chargement, EnTeteFenetre, ErreurBloc, Fraicheur, NoteSource, Vide } from "./ui";
+import { BoutonRafraichir, Chargement, EnTeteFenetre, ErreurBloc, Fraicheur, NoteSource, Vide } from "./ui";
 import {
   domaineAxesRobuste,
   estEcrete,
@@ -349,7 +349,7 @@ export function SqueezeWindow() {
         ctx.fillStyle = rgbaTokenCanvas("--text-dim", 0.06, "#9ca3af");
         ctx.fillRect(coinHG.x, coinHG.y, coinBD.x - coinHG.x, coinBD.y - coinHG.y);
         ctx.fillStyle = dim;
-        ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+        ctx.font = POLICE_CANVAS;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText("neutre", (coinHG.x + coinBD.x) / 2, (coinHG.y + coinBD.y) / 2);
@@ -373,7 +373,7 @@ export function SqueezeWindow() {
       // Graduations « rondes » (genTicks) : funding sous le cadre, ΔOI à gauche, projetées
       // par la MÊME projection que les bulles. Titres d'axes aux extrémités.
       ctx.fillStyle = dim;
-      ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+      ctx.font = POLICE_CANVAS;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       for (const t of genTicks(-domaine.fMax, domaine.fMax, 5)) {
@@ -396,7 +396,7 @@ export function SqueezeWindow() {
       // Étiquettes de quadrant dans les quatre coins (ΔOI+ en haut ; funding+ à droite).
       // Les deux coins « haut » (carburant-squeeze, longs-crowded) sont CLIQUABLES (pont EQS) :
       // teintés du token de leur quadrant, soulignés au survol, et leurs rects mémorisés.
-      ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+      ctx.font = POLICE_CANVAS;
       const HAUT_LABEL = 10;
       const coulCarb = lireTokenCanvas(COULEUR_QUADRANT["carburant-squeeze"].token, COULEUR_QUADRANT["carburant-squeeze"].repli);
       const coulLongs = lireTokenCanvas(COULEUR_QUADRANT["longs-crowded"].token, COULEUR_QUADRANT["longs-crowded"].repli);
@@ -473,7 +473,7 @@ export function SqueezeWindow() {
         .sort((a, b) => scoreSqueeze(points[b]!, domaine) - scoreSqueeze(points[a]!, domaine))
         .slice(0, NB_LABELS);
       ctx.fillStyle = texte;
-      ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+      ctx.font = POLICE_CANVAS;
       ctx.textAlign = "center";
       ctx.textBaseline = "bottom";
       // Candidats ancrés au-dessus de chaque bulle, puis placement anti-collision (marché
@@ -590,18 +590,11 @@ export function SqueezeWindow() {
         titre="Radar de squeeze"
         sousTitre="Funding × ΔOI ~24 h · univers Signaux"
         actions={
-          <button
-            type="button"
-            onClick={rafraichir}
-            disabled={enCours}
-            className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            ↻ Rafraîchir
-          </button>
+          <BoutonRafraichir onClick={rafraichir} disabled={enCours} />
         }
       />
 
-      <div className="flex flex-1 flex-col overflow-hidden px-4 py-4">
+      <div className="flex flex-1 flex-col overflow-hidden px-4 py-3">
         {erreur !== null && points.length === 0 ? (
           <ErreurBloc>{erreur}</ErreurBloc>
         ) : enCours && points.length === 0 ? (

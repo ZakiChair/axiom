@@ -33,6 +33,7 @@ import {
 } from "../lib/format";
 import {
   Badge,
+  BoutonRafraichir,
   Chargement,
   EnTeteFenetre,
   ErreurBloc,
@@ -353,19 +354,12 @@ export function MineWindow() {
             >
               ⚙ Paramètres
             </button>
-            <button
-              type="button"
-              onClick={rafraichir}
-              disabled={enCours}
-              className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              ↻ Rafraîchir
-            </button>
+            <BoutonRafraichir onClick={rafraichir} disabled={enCours} />
           </>
         }
       />
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
         {erreur !== null && entrees === null ? (
           <ErreurBloc>{erreur}</ErreurBloc>
         ) : enCours && entrees === null ? (

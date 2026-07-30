@@ -33,7 +33,7 @@ import {
   type OrderBook,
 } from "../data/depth";
 import { formatUsd } from "../lib/format";
-import { lireTokensCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
+import { lireTokensCanvas, POLICE_CANVAS, POLICE_CANVAS_MONO } from "../lib/canvasTokens";
 import { EnTeteFenetre, Onglets, Vide } from "./ui";
 
 /** Nombre MAX de niveaux affichés de chaque côté du mid (LADDER, fenêtre haute). */
@@ -215,7 +215,7 @@ function dessinerLadder(ctx: CanvasRenderingContext2D, w: number, h: number, liv
   const barX = priceW;
   const barW = Math.max(0, w - priceW - 8);
 
-  ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+  ctx.font = POLICE_CANVAS_MONO;
   ctx.textBaseline = "middle";
 
   rows.forEach((r, i) => {
@@ -254,7 +254,7 @@ function dessinerLadder(ctx: CanvasRenderingContext2D, w: number, h: number, liv
 
   const spread = best.bestAsk - best.bestBid;
   const label = `${formatPrix(best.mid, dec)}  ·  spread ${formatPrix(spread, dec)}`;
-  ctx.font = "600 11px ui-monospace, monospace";
+  ctx.font = `600 ${POLICE_CANVAS_MONO}`;
   const lw = ctx.measureText(label).width + 12;
   const lx = w / 2 - lw / 2;
   ctx.fillStyle = rgba(tk.bg, 0.96);
@@ -350,7 +350,7 @@ function dessinerTape(ctx: CanvasRenderingContext2D, w: number, h: number, trade
 
   const nRows = Math.max(1, Math.floor(h / TAPE_ROW_H));
   const recents = trades.slice(-nRows).reverse(); // plus récent en haut
-  ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+  ctx.font = POLICE_CANVAS_MONO;
   ctx.textBaseline = "middle";
   const xPrix = w * 0.62;
 

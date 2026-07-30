@@ -14,6 +14,9 @@
 /** Police UNIQUE des axes/étiquettes canvas (l'audit relevait 4 variantes pour le même rôle). */
 export const POLICE_CANVAS = "10px ui-sans-serif, system-ui, sans-serif";
 
+/** Variante MONOSPACE de la police canvas — uniquement pour l'alignement de colonnes de chiffres (carnet DOM, tape). */
+export const POLICE_CANVAS_MONO = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+
 /**
  * Résout un lot de variables CSS (`--up`, `--text-dim`…) depuis `<html>`.
  * Renvoie les valeurs brutes trimées (hex ou rgb selon le thème) ; une

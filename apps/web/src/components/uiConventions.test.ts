@@ -79,12 +79,11 @@ const MOTIFS: Motif[] = [
     id: "police-canvas-divergente",
     description: "police canvas non standard — utiliser POLICE_CANVAS (canvasTokens)",
     regex: /(9px ui-sans-serif|11px ui-monospace|10px system-ui)/,
-    // DomWindow (T14) : carnet/tape en MONOSPACE délibéré (alignement des colonnes de
-    // chiffres du ladder/tape/mid-label — fillText canvas ne bénéficie pas de
-    // tabular-nums CSS). POLICE_CANVAS est sans-serif et casserait cet alignement.
-    // Exception ASSUMÉE, pas un reste de migration : une variante monospace du
-    // token (POLICE_CANVAS_MONO) relève d'une tâche dédiée, pas de T14.
-    exceptions: ["DomWindow.tsx"],
+    // DomWindow migré sur POLICE_CANVAS_MONO (canvasTokens) : le carnet/tape a
+    // besoin d'une police à chasse fixe pour l'alignement des colonnes de
+    // chiffres (fillText canvas ne bénéficie pas de tabular-nums CSS) — la
+    // constante consacre cette valeur au lieu de la chaîne en dur.
+    exceptions: [],
   },
 ];
 

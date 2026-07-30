@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { indexSerie, parseHexRgb, POLICE_CANVAS } from "./canvasTokens";
+import { indexSerie, parseHexRgb, POLICE_CANVAS, POLICE_CANVAS_MONO } from "./canvasTokens";
 
 // serieCanvas/lireTokenCanvas exigent le DOM (vitest node) : on teste leurs
 // briques pures — le cycle modulo des séries et le parseur hex.
@@ -28,4 +28,8 @@ describe("parseHexRgb", () => {
 
 it("POLICE_CANVAS : police unique des axes canvas", () => {
   expect(POLICE_CANVAS).toBe("10px ui-sans-serif, system-ui, sans-serif");
+});
+
+it("POLICE_CANVAS_MONO : variante monospace pour l'alignement de colonnes de chiffres", () => {
+  expect(POLICE_CANVAS_MONO).toBe("11px ui-monospace, SFMono-Regular, Menlo, monospace");
 });

@@ -67,7 +67,7 @@ const MOTIFS: Motif[] = [
     id: "barre-progression-maison",
     description: "barre de progression maison — utiliser BarreProgression",
     regex: /h-1 w-(full|64) overflow-hidden rounded/,
-    exceptions: ["DerivativesWindow.tsx"],
+    exceptions: [],
   },
   {
     id: "btn-secondaire-copie",

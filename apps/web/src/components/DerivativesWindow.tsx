@@ -64,7 +64,7 @@ import { referentiel, type Referentiel } from "../lib/referentiel";
 import { getBgeometricsKey } from "../store/onchain";
 import { fetchOiFuturesParExchange, type JourOiFutures } from "../data/onchain/bgeometrics";
 import { construireModeleOiExchange } from "./derivativesWindow.util";
-import { BadgeFiabilite, EnTeteFenetre, ErreurBloc, Fraicheur, Metric, RefBadge, SansCle, Vide } from "./ui";
+import { BadgeFiabilite, BarreProgression, EnTeteFenetre, ErreurBloc, Fraicheur, Metric, RefBadge, SansCle, Vide } from "./ui";
 
 /** Période d'agrégation du long/short ratio et fenêtre des liquidations affichées. */
 const LS_PERIOD = "5min";
@@ -487,7 +487,7 @@ export function DerivativesWindow() {
         }
       />
 
-        <div className="flex-1 overflow-y-auto px-4 py-4">
+        <div className="flex-1 overflow-y-auto px-4 py-3">
           {!isBinance ? (
             <Vide>
               Binance uniquement — Open Interest, funding, long/short et liquidations ne sont disponibles que
@@ -720,12 +720,7 @@ export function DerivativesWindow() {
                             </span>
                           </span>
                         </div>
-                        <div className="h-1 w-full overflow-hidden rounded bg-border/40">
-                          <div
-                            className="h-full rounded"
-                            style={{ width: `${(r.part * 100).toFixed(1)}%`, background: "var(--serie-5)" }}
-                          />
-                        </div>
+                        <BarreProgression fraction={r.part} ariaLabel={`Part de ${r.exchange}`} />
                       </div>
                     ))}
                     <p className="pt-1 text-[9px] leading-snug text-text-dim">

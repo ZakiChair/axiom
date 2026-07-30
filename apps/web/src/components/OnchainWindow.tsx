@@ -17,7 +17,7 @@
  * Règle d'or (doc 02) : chaque widget porte un BadgeFiabilite honnête via
  * `metaSource` / métas partagées (fiable · partiel · estimation · indisponible).
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { onchainUiStore, getBgeometricsKey, bgeometricsKeyStore } from "../store/onchain";
 import { getSoSoValueKey, soSoValueKeyStore } from "../store/sosovalue";
@@ -62,9 +62,8 @@ import {
   formatPourcentage,
   formatDateCourte,
   formatDateComplete,
-  formatAge,
 } from "../lib/format";
-import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, rgbaTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { metaSource, type MetaFiabilite } from "../lib/fiabilite";
 import { zonePourMetrique } from "../lib/zonesOnchain";
 import {
@@ -72,8 +71,14 @@ import {
   BadgeFiabilite,
   BarrePeriodes,
   EnTeteFenetre,
+  Fraicheur,
   InfobulleGraphe,
   NoteSource,
+  SegmenteCompact,
+  texteFraicheur,
+  TitreSection,
+  TuileStat,
+  Vide,
 } from "./ui";
 import {
   domainePourPreset,
@@ -108,16 +113,6 @@ function fmtGwei(n: number | null | undefined): string {
 function fmtPct(x: number | null | undefined, d = 2): string {
   if (x === null || x === undefined || !Number.isFinite(x)) return "—";
   return formatPourcentage(x * 100, d);
-}
-
-/** Date courte d'un ms epoch, avec année (ex. « 30 juin 2026 »). */
-function fmtJour(ms: number | undefined): string {
-  return ms === undefined ? "—" : formatDateComplete(ms);
-}
-
-/** Âge relatif compact d'un ms epoch (« maintenant » courant, format partagé). */
-function fmtAge(ms: number | undefined): string {
-  return ms === undefined ? "—" : formatAge(ms, Date.now());
 }
 
 /** Durée en jours (compte à rebours halving). */
@@ -181,7 +176,7 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
   );
 }
 
-// ─────────────────────────── Widget ───────────────────────────
+// ─────────────────────────── Métadonnées de fiabilité ───────────────────────────
 
 /**
  * Métas réutilisées (lookup catalogue unique — dédup vs. tags locaux « daily/live »).
@@ -212,61 +207,6 @@ const META_INDISPONIBLE: MetaFiabilite = {
   label: "indisponible",
   detail: "Source non câblée, en échec, ou clé manquante.",
 };
-
-/** Un widget compact : libellé + badge fiabilité, valeur + sparkline, sous-texte + fraîcheur. */
-function Widget({
-  libelle,
-  valeur,
-  meta,
-  spark,
-  color,
-  sousTexte,
-  fraicheur,
-  perime,
-  badge,
-}: {
-  libelle: string;
-  valeur: string;
-  /** Métadonnées catalogue (`metaSource`) ou constantes locales ci-dessus. */
-  meta: MetaFiabilite;
-  spark?: number[];
-  color?: string; // nom de token CSS (« --serie-1 »…) appliqué à la valeur et à la sparkline
-  sousTexte?: string;
-  fraicheur?: string;
-  perime?: boolean;
-  /** Badge de zone (ex. MVRV-Z « chaud »), rendu entre le libellé et BadgeFiabilite. */
-  badge?: ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-1 rounded-md border border-border bg-bg px-3 py-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-[11px] text-text-dim">{libelle}</span>
-        <span className="flex shrink-0 items-center gap-1">
-          {badge}
-          <BadgeFiabilite meta={meta} />
-        </span>
-      </div>
-      <div className="flex items-end justify-between gap-2">
-        <span
-          className="tabular-nums text-base font-semibold text-text"
-          style={color ? { color: `var(${color})` } : undefined}
-        >
-          {valeur}
-        </span>
-        {spark && spark.length >= 2 && <Sparkline values={spark} color={color ?? "--text-dim"} />}
-      </div>
-      {(sousTexte || fraicheur) && (
-        <div className="flex items-center justify-between gap-2 text-[10px] text-text-dim">
-          <span className="truncate">{sousTexte ?? ""}</span>
-          <span className="shrink-0">
-            {perime ? "cache périmé · " : ""}
-            {fraicheur ?? ""}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
 
 /** Derniers N points d'une série (valeurs), pour la sparkline. */
 function sparkDe(serie: SerieMetrique | undefined, n = 60): number[] {
@@ -385,7 +325,7 @@ function CourbeHashrate({ points }: { points: PointMetrique[] }) {
     // Repères de dates (début / milieu / fin du domaine).
     const cDim = lireTokenCanvas("--text-dim", "#9ca3af");
     ctx.fillStyle = cDim;
-    ctx.font = "10px system-ui, sans-serif";
+    ctx.font = POLICE_CANVAS;
     const yLabel = COURBE_H - 3;
     ctx.fillText(formatDateCourte(domaine.min), 2, yLabel);
     const milieu = formatDateCourte((domaine.min + domaine.max) / 2);
@@ -456,7 +396,7 @@ function CarteHashrate({ hr }: { hr: ResultatFrais<SerieMetrique> | null }) {
         </span>
         <span className="shrink-0 text-[10px] text-text-dim">
           {hr?.perime ? "cache périmé · " : ""}
-          {fmtJour(serie?.dernier?.time)}
+          {serie?.dernier?.time === undefined ? "—" : formatDateComplete(serie.dernier.time)}
         </span>
       </div>
       {points.length >= 2 ? (
@@ -467,7 +407,7 @@ function CarteHashrate({ hr }: { hr: ResultatFrais<SerieMetrique> | null }) {
           </div>
         </>
       ) : (
-        <div className="py-4 text-center text-[10px] text-text-dim">Hashrate indisponible</div>
+        <Vide>Hashrate indisponible</Vide>
       )}
     </div>
   );
@@ -512,11 +452,15 @@ export function OnchainWindow() {
   const [donnees, setDonnees] = useState<EtatDonnees>(VIDE);
   const [loading, setLoading] = useState(false);
   const [actifEtf, setActifEtf] = useState<ActifEtf>("btc");
+  // Horodatage du dernier cycle de fetch complet — alimente le <Fraicheur> du slot actions
+  // (convention CorrWindow/DerivativesWindow).
+  const [majTs, setMajTs] = useState<number | null>(null);
 
   useEffect(() => {
     if (!open) {
       setDonnees(VIDE);
       setLoading(false);
+      setMajTs(null);
       return;
     }
     const ctrl = new AbortController();
@@ -561,6 +505,7 @@ export function OnchainWindow() {
         eth,
         sol: d.sol,
       }));
+      setMajTs(Date.now());
       setLoading(false);
     };
 
@@ -579,11 +524,16 @@ export function OnchainWindow() {
   const feeNtv = cm?.series["FeeTotNtv"];
   const mcap = cm?.series["CapMrktCurUSD"];
   const mvrvRatio = cm?.series["CapMVRVCur"];
-  const cmDaily = cm ? fmtJour(adr?.dernier?.time ?? tx?.dernier?.time) : "—";
+  const cmDaily = texteFraicheur(loading, adr?.dernier?.time ?? tx?.dernier?.time ?? null, Date.now(), "quotidien");
 
   const mp = donnees.mp?.donnee;
   const halving = mp?.halving;
   const etf = donnees.etf[actifEtf];
+  const etfPrincipal = Boolean(etf && etf.disponible && etf.parEmetteur);
+  const etfRepliDispo = actifEtf === "btc" && Boolean(donnees.etfRepli?.serie.dernier);
+  // Ni le rendu principal (SoSoValue) ni le repli (bitcoin-data.com) — le badge
+  // indisponible passe alors à côté du titre de section, pas dans le corps.
+  const etfIndisponible = !etfPrincipal && !etfRepliDispo;
   // Quota BGeometrics EFFECTIF pour le texte du panneau (bloc affiché sans clé perso) :
   // la seule présence d'une clé de repli .env fait basculer le quota IP 15/jour → 10/heure.
   const bgQuotaTexte = BG_CLE_ENV_PRESENTE
@@ -594,8 +544,9 @@ export function OnchainWindow() {
   // le CTA « clé Etherscan ⚙ » doit rester proposé tant qu'un champ manque.
   const ethIncomplet =
     eth !== null && (eth.supplyEth === null || eth.nodeCount === null || eth.gasSafe === null);
+  const ethIndisponible = eth === null && !loading;
   const sol = donnees.sol?.donnee;
-  const solFraicheur = fmtAge(donnees.sol?.ts);
+  const solFraicheur = texteFraicheur(loading, donnees.sol?.ts ?? null, Date.now());
   const solPerime = donnees.sol?.perime;
 
   return (
@@ -603,76 +554,112 @@ export function OnchainWindow() {
       <EnTeteFenetre
         mnemo="CHAIN"
         titre="On-chain"
-        sousTitre={
-          <>
-            Coin Metrics · BGeometrics · mempool.space · SoSoValue · Etherscan · RPC Solana ·
-            CoinGecko {loading ? "· maj…" : ""}
-          </>
-        }
+        sousTitre="Coin Metrics · BGeometrics · mempool.space · SoSoValue · Etherscan · RPC Solana · CoinGecko"
+        actions={<Fraicheur loading={loading} majTs={majTs} />}
       />
       {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
         {/* ─────────── RÉSEAU BTC ─────────── */}
         <section>
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
-            Réseau BTC
-          </h3>
+          <TitreSection>Réseau BTC</TitreSection>
           <div className="grid grid-cols-2 gap-2">
             <CarteHashrate hr={donnees.hr} />
-            <Widget
-              libelle="Adresses actives"
+            <TuileStat
+              label="Adresses actives"
               valeur={formatCompact(adr?.dernier?.value)}
-              meta={META_COINMETRICS}
-              spark={sparkDe(adr)}
-              color="--serie-1"
-              fraicheur={cmDaily}
-              perime={cm?.perime}
+              couleur="var(--serie-1)"
+              badge={<BadgeFiabilite meta={META_COINMETRICS} />}
+              extra={sparkDe(adr).length >= 2 ? <Sparkline values={sparkDe(adr)} color="--serie-1" /> : undefined}
+              pied={
+                <>
+                  <span className="truncate" />
+                  <span className="flex shrink-0 items-center gap-1">
+                    {cm?.perime ? <Badge ton="warn">cache périmé</Badge> : null}
+                    {cmDaily}
+                  </span>
+                </>
+              }
             />
-            <Widget
-              libelle="Transactions / j"
+            <TuileStat
+              label="Transactions / j"
               valeur={formatCompact(tx?.dernier?.value)}
-              meta={META_COINMETRICS}
-              spark={sparkDe(tx)}
-              color="--serie-2"
-              fraicheur={cmDaily}
-              perime={cm?.perime}
+              couleur="var(--serie-2)"
+              badge={<BadgeFiabilite meta={META_COINMETRICS} />}
+              extra={sparkDe(tx).length >= 2 ? <Sparkline values={sparkDe(tx)} color="--serie-2" /> : undefined}
+              pied={
+                <>
+                  <span className="truncate" />
+                  <span className="flex shrink-0 items-center gap-1">
+                    {cm?.perime ? <Badge ton="warn">cache périmé</Badge> : null}
+                    {cmDaily}
+                  </span>
+                </>
+              }
             />
-            <Widget
-              libelle="Frais totaux (BTC)"
+            <TuileStat
+              label="Frais totaux (BTC)"
               valeur={formatDec(feeNtv?.dernier?.value, 2)}
-              meta={META_COINMETRICS}
-              spark={sparkDe(feeNtv)}
-              color="--serie-3"
-              fraicheur={cmDaily}
-              perime={cm?.perime}
+              couleur="var(--serie-3)"
+              badge={<BadgeFiabilite meta={META_COINMETRICS} />}
+              extra={sparkDe(feeNtv).length >= 2 ? <Sparkline values={sparkDe(feeNtv)} color="--serie-3" /> : undefined}
+              pied={
+                <>
+                  <span className="truncate" />
+                  <span className="flex shrink-0 items-center gap-1">
+                    {cm?.perime ? <Badge ton="warn">cache périmé</Badge> : null}
+                    {cmDaily}
+                  </span>
+                </>
+              }
             />
-            <Widget
-              libelle="Frais recommandés"
+            <TuileStat
+              label="Frais recommandés"
               valeur={mp ? `${formatDec(mp.fees.fastestFee, 0)} sat/vB` : "—"}
-              meta={META_LIVE}
-              sousTexte={mp ? `1h ${formatDec(mp.fees.hourFee, 0)} · éco ${formatDec(mp.fees.economyFee, 0)}` : undefined}
-              fraicheur={fmtAge(donnees.mp?.ts)}
-              perime={donnees.mp?.perime}
+              badge={<BadgeFiabilite meta={META_LIVE} />}
+              pied={
+                <>
+                  <span className="truncate">
+                    {mp ? `1h ${formatDec(mp.fees.hourFee, 0)} · éco ${formatDec(mp.fees.economyFee, 0)}` : ""}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    {donnees.mp?.perime ? <Badge ton="warn">cache périmé</Badge> : null}
+                    {texteFraicheur(loading, donnees.mp?.ts ?? null, Date.now())}
+                  </span>
+                </>
+              }
             />
-            <Widget
-              libelle="Hauteur de bloc"
+            <TuileStat
+              label="Hauteur de bloc"
               valeur={formatEntier(mp?.hauteur)}
-              meta={META_LIVE}
-              fraicheur={fmtAge(donnees.mp?.ts)}
-              perime={donnees.mp?.perime}
+              badge={<BadgeFiabilite meta={META_LIVE} />}
+              pied={
+                <>
+                  <span className="truncate" />
+                  <span className="flex shrink-0 items-center gap-1">
+                    {donnees.mp?.perime ? <Badge ton="warn">cache périmé</Badge> : null}
+                    {texteFraicheur(loading, donnees.mp?.ts ?? null, Date.now())}
+                  </span>
+                </>
+              }
             />
             <div className="col-span-2">
-              <Widget
-                libelle={halving ? `Halving (bloc ${formatEntier(halving.prochainBloc)})` : "Halving"}
+              <TuileStat
+                label={halving ? `Halving (bloc ${formatEntier(halving.prochainBloc)})` : "Halving"}
                 valeur={fmtJours(halving?.msEstimes)}
-                meta={META_ESTIMATION}
-                sousTexte={
-                  halving
-                    ? `reste ${formatEntier(halving.blocsRestants)} blocs → ${halving.recompenseApres} BTC`
-                    : undefined
+                badge={<BadgeFiabilite meta={META_ESTIMATION} />}
+                pied={
+                  halving ? (
+                    <>
+                      <span className="truncate">
+                        reste {formatEntier(halving.blocsRestants)} blocs → {halving.recompenseApres} BTC
+                      </span>
+                      <span className="flex shrink-0 items-center gap-1">
+                        {formatDateComplete(Date.now() + halving.msEstimes)}
+                      </span>
+                    </>
+                  ) : undefined
                 }
-                fraicheur={halving ? fmtJour(Date.now() + halving.msEstimes) : undefined}
               />
             </div>
           </div>
@@ -680,56 +667,84 @@ export function OnchainWindow() {
 
         {/* ─────────── VALORISATION ─────────── */}
         <section>
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
-              Valorisation
-            </h3>
-            {!bgHasKey && (
-              <button
-                type="button"
-                onClick={openSettings}
-                className="text-[10px] text-accent hover:underline"
-                title={`Clé gratuite sur bitcoin-data.com — quota actuel ${bgQuotaTexte}, cache 24 h`}
-              >
-                clé BGeometrics ⚙
-              </button>
-            )}
-          </div>
+          <TitreSection
+            extra={
+              !bgHasKey && (
+                <button
+                  type="button"
+                  onClick={openSettings}
+                  className="text-[10px] text-accent hover:underline"
+                  title={`Clé gratuite sur bitcoin-data.com — quota actuel ${bgQuotaTexte}, cache 24 h`}
+                >
+                  clé BGeometrics ⚙
+                </button>
+              )
+            }
+          >
+            Valorisation
+          </TitreSection>
           <div className="grid grid-cols-2 gap-2">
             {BG_METRIQUES.map((def) => {
               const r = donnees.bg[def.id] ?? null;
               const zone = zonePourMetrique(def.id, r?.serie.dernier?.value);
               return (
-                <Widget
+                <TuileStat
                   key={def.id}
-                  libelle={def.libelle}
+                  label={def.libelle}
                   valeur={formatDec(r?.serie.dernier?.value, def.id === "mvrv" ? 2 : 4)}
-                  meta={def.id === "mvrv" ? metaSource("bgeometrics:mvrv") : META_BGEOMETRICS}
-                  spark={sparkDe(r?.serie)}
-                  color="--serie-4"
-                  fraicheur={fmtJour(r?.serie.dernier?.time)}
-                  perime={r?.perime}
-                  badge={zone !== null ? <Badge ton={zone.ton}>{zone.libelle}</Badge> : undefined}
+                  couleur="var(--serie-4)"
+                  badge={
+                    <>
+                      {zone !== null ? <Badge ton={zone.ton}>{zone.libelle}</Badge> : null}
+                      <BadgeFiabilite meta={def.id === "mvrv" ? metaSource("bgeometrics:mvrv") : META_BGEOMETRICS} />
+                    </>
+                  }
+                  extra={
+                    sparkDe(r?.serie).length >= 2 ? <Sparkline values={sparkDe(r?.serie)} color="--serie-4" /> : undefined
+                  }
+                  pied={
+                    <>
+                      <span className="truncate" />
+                      <span className="flex shrink-0 items-center gap-1">
+                        {r?.perime ? <Badge ton="warn">cache périmé</Badge> : null}
+                        {texteFraicheur(loading, r?.serie.dernier?.time ?? null, Date.now(), "quotidien")}
+                      </span>
+                    </>
+                  }
                 />
               );
             })}
-            <Widget
-              libelle="MVRV (ratio)"
+            <TuileStat
+              label="MVRV (ratio)"
               valeur={formatDec(mvrvRatio?.dernier?.value, 2)}
-              meta={META_COINMETRICS}
-              spark={sparkDe(mvrvRatio)}
-              color="--serie-4"
-              fraicheur={cmDaily}
-              perime={cm?.perime}
+              couleur="var(--serie-4)"
+              badge={<BadgeFiabilite meta={META_COINMETRICS} />}
+              extra={sparkDe(mvrvRatio).length >= 2 ? <Sparkline values={sparkDe(mvrvRatio)} color="--serie-4" /> : undefined}
+              pied={
+                <>
+                  <span className="truncate" />
+                  <span className="flex shrink-0 items-center gap-1">
+                    {cm?.perime ? <Badge ton="warn">cache périmé</Badge> : null}
+                    {cmDaily}
+                  </span>
+                </>
+              }
             />
-            <Widget
-              libelle="Cap. marché BTC"
+            <TuileStat
+              label="Cap. marché BTC"
               valeur={formatUsd(mcap?.dernier?.value)}
-              meta={META_COINMETRICS}
-              spark={sparkDe(mcap)}
-              color="--serie-6"
-              fraicheur={cmDaily}
-              perime={cm?.perime}
+              couleur="var(--serie-6)"
+              badge={<BadgeFiabilite meta={META_COINMETRICS} />}
+              extra={sparkDe(mcap).length >= 2 ? <Sparkline values={sparkDe(mcap)} color="--serie-6" /> : undefined}
+              pied={
+                <>
+                  <span className="truncate" />
+                  <span className="flex shrink-0 items-center gap-1">
+                    {cm?.perime ? <Badge ton="warn">cache périmé</Badge> : null}
+                    {cmDaily}
+                  </span>
+                </>
+              }
             />
           </div>
           {!bgHasKey && (
@@ -746,38 +761,36 @@ export function OnchainWindow() {
 
         {/* ─────────── ETF ─────────── */}
         <section>
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
-              Flux ETF spot
-            </h3>
-            {/* Proposé seulement sur un échec effectivement lié à la clé (401/403) —
-                pas sur un 5xx/réseau où une clé ne changerait rien. */}
-            {!soSoHasKey && etf !== null && etf.raison === RAISON_CLE_SOSOVALUE && (
-              <button
-                type="button"
-                onClick={openSettings}
-                className="text-[10px] text-accent hover:underline"
-                title="Clé gratuite sur sosovalue.com/developer (plan Demo) — ou SOSOVALUE_API_KEY dans .env"
-              >
-                clé SoSoValue ⚙
-              </button>
-            )}
+          <TitreSection
+            extra={
+              <>
+                {/* Proposé seulement sur un échec effectivement lié à la clé (401/403) —
+                    pas sur un 5xx/réseau où une clé ne changerait rien. */}
+                {!soSoHasKey && etf !== null && etf.raison === RAISON_CLE_SOSOVALUE && (
+                  <button
+                    type="button"
+                    onClick={openSettings}
+                    className="text-[10px] text-accent hover:underline"
+                    title="Clé gratuite sur sosovalue.com/developer (plan Demo) — ou SOSOVALUE_API_KEY dans .env"
+                  >
+                    clé SoSoValue ⚙
+                  </button>
+                )}
+                {etfIndisponible && <BadgeFiabilite meta={META_INDISPONIBLE} />}
+              </>
+            }
+          >
+            Flux ETF spot
+          </TitreSection>
+          <div className="mb-2">
+            <SegmenteCompact
+              options={ACTIFS_ETF.map((a) => ({ id: a, label: a.toUpperCase() }))}
+              actif={actifEtf}
+              onChange={setActifEtf}
+              ariaLabel="Actif ETF"
+            />
           </div>
-          <div className="mb-2 flex gap-1">
-            {ACTIFS_ETF.map((a) => (
-              <button
-                key={a}
-                type="button"
-                onClick={() => setActifEtf(a)}
-                className={`rounded px-2 py-0.5 text-[10px] uppercase tracking-wide transition ${
-                  actifEtf === a ? "bg-bg text-text" : "text-text-dim hover:text-text"
-                }`}
-              >
-                {a}
-              </button>
-            ))}
-          </div>
-          {etf && etf.disponible && etf.parEmetteur ? (
+          {etfPrincipal && etf && etf.parEmetteur ? (
             <div className="space-y-1 rounded-md border border-border bg-bg px-3 py-2">
               {etf.parEmetteur.map((e) => (
                 <div key={e.emetteur} className="flex items-center justify-between text-[11px]">
@@ -792,7 +805,7 @@ export function OnchainWindow() {
                 <span className="tabular-nums text-text">{formatUsd(etf.total)}</span>
               </div>
             </div>
-          ) : actifEtf === "btc" && donnees.etfRepli?.serie.dernier ? (
+          ) : etfRepliDispo && donnees.etfRepli?.serie.dernier ? (
             // Repli bitcoin-data.com (SoSoValue indisponible pour BTC). Flux en BTC natif
             // (unité prouvée) — teinté +/- selon le sens, sparkline 90 j, cumul 30 j.
             // NB : 30 j / 90 j = dernières SÉANCES de bourse (les week-ends sont absents
@@ -824,143 +837,184 @@ export function OnchainWindow() {
                     <NoteSource>bitcoin-data.com (repli)</NoteSource>
                     <span className="shrink-0 text-[10px] text-text-dim">
                       {donnees.etfRepli.perime ? "cache périmé · " : ""}
-                      {fmtJour(serie.dernier!.time)}
+                      {formatDateComplete(serie.dernier!.time)}
                     </span>
                   </div>
                 </div>
               );
             })()
           ) : (
-            <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg px-3 py-3">
-              <span className="text-[11px] leading-snug text-text-dim">
-                {etf?.raison ?? "Flux ETF indisponibles."}
-              </span>
-              <BadgeFiabilite meta={META_INDISPONIBLE} />
-            </div>
+            <Vide>{etf?.raison ?? "Flux ETF indisponibles."}</Vide>
           )}
         </section>
 
         {/* ─────────── RÉSEAU ETH ─────────── */}
         <section>
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
-              Réseau ETH
-            </h3>
-            {/* Proposé dès que les données sont absentes OU incomplètes (mode dégradé
-                sans clé : gas seul) et qu'aucune clé Réglages n'est saisie. */}
-            {!etherscanHasKey && !loading && (eth === null || ethIncomplet) && (
-              <button
-                type="button"
-                onClick={openSettings}
-                className="text-[10px] text-accent hover:underline"
-                title="Clé gratuite sur etherscan.io/register — ou ETHERSCAN_API_KEY dans .env"
-              >
-                clé Etherscan ⚙
-              </button>
-            )}
-          </div>
+          <TitreSection
+            extra={
+              <>
+                {/* Proposé dès que les données sont absentes OU incomplètes (mode dégradé
+                    sans clé : gas seul) et qu'aucune clé Réglages n'est saisie. */}
+                {!etherscanHasKey && !loading && (eth === null || ethIncomplet) && (
+                  <button
+                    type="button"
+                    onClick={openSettings}
+                    className="text-[10px] text-accent hover:underline"
+                    title="Clé gratuite sur etherscan.io/register — ou ETHERSCAN_API_KEY dans .env"
+                  >
+                    clé Etherscan ⚙
+                  </button>
+                )}
+                {ethIndisponible && <BadgeFiabilite meta={META_INDISPONIBLE} />}
+              </>
+            }
+          >
+            Réseau ETH
+          </TitreSection>
           {eth !== null || loading ? (
             <div className="grid grid-cols-2 gap-2">
-              <Widget
-                libelle="Gas recommandé"
+              <TuileStat
+                label="Gas recommandé"
                 valeur={fmtGwei(eth?.gasFast)}
-                meta={META_LIVE}
-                sousTexte={
-                  eth ? `sûr ${fmtGwei(eth.gasSafe)} · standard ${fmtGwei(eth.gasPropose)}` : undefined
+                couleur="var(--serie-3)"
+                badge={<BadgeFiabilite meta={META_LIVE} />}
+                pied={
+                  eth ? (
+                    <>
+                      <span className="truncate">
+                        sûr {fmtGwei(eth.gasSafe)} · standard {fmtGwei(eth.gasPropose)}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-1" />
+                    </>
+                  ) : undefined
                 }
-                color="--serie-3"
               />
-              <Widget
-                libelle="Supply ETH"
+              <TuileStat
+                label="Supply ETH"
                 valeur={formatCompact(eth?.supplyEth ?? undefined)}
-                meta={META_LIVE}
-                color="--serie-6"
+                couleur="var(--serie-6)"
+                badge={<BadgeFiabilite meta={META_LIVE} />}
               />
               <div className="col-span-2">
-                <Widget
-                  libelle="Nombre de nœuds"
+                <TuileStat
+                  label="Nombre de nœuds"
                   valeur={formatEntier(eth?.nodeCount)}
-                  meta={META_DAILY}
-                  color="--up"
+                  couleur="var(--up)"
+                  badge={<BadgeFiabilite meta={META_DAILY} />}
                 />
               </div>
             </div>
           ) : (
-            <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-bg px-3 py-3">
-              <span className="text-[11px] leading-snug text-text-dim">
-                Réseau ETH indisponible — Etherscan injoignable ou clé invalide
-                (Réglages ⚙ ou ETHERSCAN_API_KEY dans .env).
-              </span>
-              <BadgeFiabilite meta={META_INDISPONIBLE} />
-            </div>
+            <Vide>
+              Réseau ETH indisponible — Etherscan injoignable ou clé invalide
+              (Réglages ⚙ ou ETHERSCAN_API_KEY dans .env).
+            </Vide>
           )}
         </section>
 
         {/* ─────────── RÉSEAU SOL ─────────── */}
         <section>
-          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
-            Réseau SOL
-          </h3>
+          <TitreSection>Réseau SOL</TitreSection>
           <div className="grid grid-cols-2 gap-2">
-            <Widget
-              libelle="TPS (hors votes)"
+            <TuileStat
+              label="TPS (hors votes)"
               valeur={formatEntier(sol?.tpsHorsVotes)}
-              meta={META_LIVE}
-              sousTexte={
-                sol?.tps != null ? `total ${formatEntier(sol.tps)} tps (votes inclus)` : undefined
+              couleur="var(--serie-3)"
+              badge={<BadgeFiabilite meta={META_LIVE} />}
+              pied={
+                <>
+                  <span className="truncate">
+                    {sol?.tps != null ? `total ${formatEntier(sol.tps)} tps (votes inclus)` : ""}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    {solPerime ? <Badge ton="warn">cache périmé</Badge> : null}
+                    {solFraicheur}
+                  </span>
+                </>
               }
-              color="--serie-3"
-              fraicheur={solFraicheur}
-              perime={solPerime}
             />
-            <Widget
-              libelle="Époque"
+            <TuileStat
+              label="Époque"
               valeur={formatEntier(sol?.epoque)}
-              meta={META_LIVE}
-              sousTexte={sol?.progressionEpoque != null ? `avancée ${fmtPct(sol.progressionEpoque, 1)}` : undefined}
-              color="--serie-2"
-              fraicheur={solFraicheur}
-              perime={solPerime}
+              couleur="var(--serie-2)"
+              badge={<BadgeFiabilite meta={META_LIVE} />}
+              pied={
+                <>
+                  <span className="truncate">
+                    {sol?.progressionEpoque != null ? `avancée ${fmtPct(sol.progressionEpoque, 1)}` : ""}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    {solPerime ? <Badge ton="warn">cache périmé</Badge> : null}
+                    {solFraicheur}
+                  </span>
+                </>
+              }
             />
-            <Widget
-              libelle="Supply circulante"
+            <TuileStat
+              label="Supply circulante"
               valeur={formatCompact(sol?.supplySol ?? undefined)}
-              meta={META_LIVE}
-              color="--serie-6"
-              fraicheur={solFraicheur}
-              perime={solPerime}
+              couleur="var(--serie-6)"
+              badge={<BadgeFiabilite meta={META_LIVE} />}
+              pied={
+                <>
+                  <span className="truncate" />
+                  <span className="flex shrink-0 items-center gap-1">
+                    {solPerime ? <Badge ton="warn">cache périmé</Badge> : null}
+                    {solFraicheur}
+                  </span>
+                </>
+              }
             />
-            <Widget
-              libelle="Inflation annuelle"
+            <TuileStat
+              label="Inflation annuelle"
               valeur={fmtPct(sol?.inflation)}
-              meta={META_DAILY}
-              color="--serie-4"
-              fraicheur={solFraicheur}
-              perime={solPerime}
+              couleur="var(--serie-4)"
+              badge={<BadgeFiabilite meta={META_DAILY} />}
+              pied={
+                <>
+                  <span className="truncate" />
+                  <span className="flex shrink-0 items-center gap-1">
+                    {solPerime ? <Badge ton="warn">cache périmé</Badge> : null}
+                    {solFraicheur}
+                  </span>
+                </>
+              }
             />
-            <Widget
-              libelle="Validateurs actifs"
+            <TuileStat
+              label="Validateurs actifs"
               valeur={formatEntier(sol?.validateursActifs)}
-              meta={META_LIVE}
-              sousTexte={
-                sol?.validateursDelinquants != null ? `${sol.validateursDelinquants} délinquants` : undefined
+              couleur="var(--up)"
+              badge={<BadgeFiabilite meta={META_LIVE} />}
+              pied={
+                <>
+                  <span className="truncate">
+                    {sol?.validateursDelinquants != null ? `${sol.validateursDelinquants} délinquants` : ""}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    {solPerime ? <Badge ton="warn">cache périmé</Badge> : null}
+                    {solFraicheur}
+                  </span>
+                </>
               }
-              color="--up"
-              fraicheur={solFraicheur}
-              perime={solPerime}
             />
-            <Widget
-              libelle="SOL staké"
+            <TuileStat
+              label="SOL staké"
               valeur={formatCompact(sol?.stakeSol ?? undefined)}
-              meta={META_LIVE}
-              sousTexte={
-                sol?.stakeSol != null && sol.supplySol != null && sol.supplySol > 0
-                  ? `≈ ${fmtPct(sol.stakeSol / sol.supplySol, 1)} du circulant`
-                  : undefined
+              couleur="var(--serie-1)"
+              badge={<BadgeFiabilite meta={META_LIVE} />}
+              pied={
+                <>
+                  <span className="truncate">
+                    {sol?.stakeSol != null && sol.supplySol != null && sol.supplySol > 0
+                      ? `≈ ${fmtPct(sol.stakeSol / sol.supplySol, 1)} du circulant`
+                      : ""}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    {solPerime ? <Badge ton="warn">cache périmé</Badge> : null}
+                    {solFraicheur}
+                  </span>
+                </>
               }
-              color="--serie-1"
-              fraicheur={solFraicheur}
-              perime={solPerime}
             />
           </div>
         </section>

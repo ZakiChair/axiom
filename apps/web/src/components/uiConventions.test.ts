@@ -58,7 +58,7 @@ const MOTIFS: Motif[] = [
     id: "tuile-locale",
     description: "tuile KPI locale — utiliser TuileStat",
     regex: /function (StatCard|StatMC|Widget)\(/,
-    exceptions: ["OnchainWindow.tsx"],
+    exceptions: [],
   },
   {
     id: "segmente-maison",
@@ -70,14 +70,13 @@ const MOTIFS: Motif[] = [
     id: "barre-progression-maison",
     description: "barre de progression maison — utiliser BarreProgression",
     regex: /h-1 w-(full|64) overflow-hidden rounded/,
-    exceptions: ["McapWindow.tsx", "DerivativesWindow.tsx"],
+    exceptions: ["DerivativesWindow.tsx"],
   },
   {
     id: "btn-secondaire-copie",
     description: "classes de BTN_SECONDAIRE recopiées inline — utiliser <Bouton>",
     regex: /border-border bg-bg px-2 py-1 text-\[11px\] text-text-dim/,
     exceptions: [
-      "McapWindow.tsx",
       "CbpremWindow.tsx", "CycleWindow.tsx", "DistWindow.tsx",
       "ExpyWindow.tsx", "MineWindow.tsx", "NetliqWindow.tsx", "SqueezeWindow.tsx",
     ],
@@ -87,8 +86,7 @@ const MOTIFS: Motif[] = [
     description: "police canvas non standard — utiliser POLICE_CANVAS (canvasTokens)",
     regex: /(9px ui-sans-serif|11px ui-monospace|10px system-ui)/,
     exceptions: [
-      "CorrWindow.tsx", "McapWindow.tsx", "EvtsWindow.tsx", "VolWindow.tsx",
-      "OnchainWindow.tsx",
+      "CorrWindow.tsx", "EvtsWindow.tsx", "VolWindow.tsx",
       "CbpremWindow.tsx", "CycleWindow.tsx", "DomWindow.tsx", "ExpyWindow.tsx",
       "NetliqWindow.tsx", "SqueezeWindow.tsx", "TermStructureWindow.tsx",
     ],

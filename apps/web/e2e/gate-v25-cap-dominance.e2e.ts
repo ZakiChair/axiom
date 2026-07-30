@@ -111,7 +111,9 @@ test.describe("avec historique reconstruit", () => {
 
     await page.getByRole("button", { name: "+ dominance" }).click();
     await page.getByLabel("Rechercher une pièce").fill("sol");
-    await page.getByRole("button", { name: /SOL\s+Solana/ }).click();
+    // role="menuitem" (primitive MenuDeroulant, T12) — même convention que les autres
+    // menus de la Toolbar (cf. gate-g3-playbooks, gate-g2-badges…).
+    await page.getByRole("menuitem", { name: /SOL\s+Solana/ }).click();
 
     await expect(page.getByRole("button", { name: "Retirer SOL", exact: true })).toBeVisible();
 

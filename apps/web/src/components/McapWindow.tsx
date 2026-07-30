@@ -26,7 +26,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { dominance, dominanceAlts, serieDifference } from "../data/mcap";
 import { formatPourcentage, formatUsd } from "../lib/format";
-import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, rgbaTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import {
   ID_ALTS,
   PALETTE_DOMINANCES,
@@ -34,15 +34,22 @@ import {
   mcapStore,
 } from "../store/mcap";
 import {
+  BarrePeriodes,
+  BarreProgression,
+  Bouton,
   Chargement,
+  Chip,
+  CLASSES_BOUTON,
   EnTeteFenetre,
   ErreurBloc,
   Fraicheur,
+  Input,
   InfobulleGraphe,
+  MenuDeroulant,
   NoteSource,
   PERIODES_STANDARD,
   Vide,
-  BarrePeriodes,
+  BoutonRafraichir,
 } from "./ui";
 import {
   MARGES,
@@ -105,7 +112,7 @@ function dessiner(
   const trait = lireTokenCanvas("--grid", "#1f2937");
   const dom = domaineValeurs(series.map((s) => s.valeurs));
 
-  ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
 
   // Grille horizontale + étiquettes de valeurs à gauche.
   ctx.textAlign = "right";
@@ -277,7 +284,6 @@ function Graphe({
 function AjoutDominance({ desactive }: { desactive: boolean }) {
   const marches = useStore(mcapStore, (s) => s.marches);
   const dominances = useStore(mcapStore, (s) => s.dominances);
-  const [ouvert, setOuvert] = useState(false);
   const [filtre, setFiltre] = useState("");
 
   const candidats = useMemo(() => {
@@ -289,34 +295,41 @@ function AjoutDominance({ desactive }: { desactive: boolean }) {
       .slice(0, 40);
   }, [marches, dominances, filtre]);
 
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOuvert((v) => !v)}
-        disabled={desactive}
-        title="Ajouter une dominance (top 100)"
-        className="rounded border border-border bg-bg px-2 py-0.5 text-[11px] text-text-dim transition hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-      >
+  if (desactive) {
+    return (
+      <Bouton disabled title="Ajouter une dominance (top 100)">
         + dominance
-      </button>
-      {ouvert && (
-        <div className="absolute bottom-full left-0 z-30 mb-1 w-56 rounded border border-border bg-surface p-2 shadow-lg">
-          <input
+      </Bouton>
+    );
+  }
+
+  return (
+    <MenuDeroulant
+      direction="haut"
+      declencheur="+ dominance"
+      titre="Ajouter une dominance (top 100)"
+      classePanneau="w-56"
+      chevron={false}
+      declencheurClasse={CLASSES_BOUTON.secondaire}
+    >
+      {(fermer) => (
+        <>
+          <Input
             autoFocus
             value={filtre}
             onChange={(e) => setFiltre(e.target.value)}
             placeholder="Symbole ou nom…"
             aria-label="Rechercher une pièce"
-            className="mb-1 w-full rounded border border-border bg-bg px-2 py-1 text-[11px] text-text outline-none focus:border-accent/60"
+            className="mb-1 w-full"
           />
           <div className="max-h-48 overflow-y-auto">
             {!dominances.includes(ID_ALTS) && (
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => {
                   void mcapStore.getState().ajouterDominance(ID_ALTS);
-                  setOuvert(false);
+                  fermer();
                 }}
                 className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-[11px] text-text hover:bg-bg"
               >
@@ -327,9 +340,10 @@ function AjoutDominance({ desactive }: { desactive: boolean }) {
               <button
                 key={m.id}
                 type="button"
+                role="menuitem"
                 onClick={() => {
                   void mcapStore.getState().ajouterDominance(m.id);
-                  setOuvert(false);
+                  fermer();
                 }}
                 className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-[11px] text-text hover:bg-bg"
               >
@@ -341,9 +355,9 @@ function AjoutDominance({ desactive }: { desactive: boolean }) {
               <p className="px-2 py-1 text-[11px] text-text-dim">Aucune pièce.</p>
             )}
           </div>
-        </div>
+        </>
       )}
-    </div>
+    </MenuDeroulant>
   );
 }
 
@@ -412,20 +426,10 @@ export function McapWindow() {
         titre="Capitalisation & dominance"
         sousTitre="TOTAL · TOTAL3 · dominances — reconstruction top 100 recalibrée"
         actions={
-          <div className="flex items-center gap-1.5">
-            <BarrePeriodes
-              actif={periode}
-              onChange={(p) => mcapStore.getState().setPeriode(p.id)}
-            />
-            <button
-              type="button"
-              onClick={() => void mcapStore.getState().prolonger(true)}
-              disabled={backfill.enCours}
-              className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              ↻ Rafraîchir
-            </button>
-          </div>
+          <BoutonRafraichir
+            onClick={() => void mcapStore.getState().prolonger(true)}
+            disabled={backfill.enCours}
+          />
         }
       />
 
@@ -435,16 +439,12 @@ export function McapWindow() {
             <Chargement
               libelle={`Reconstruction de l'historique — ${backfill.faites}/${backfill.total} pièces`}
             />
-            <div className="h-1 w-64 overflow-hidden rounded bg-border">
-              <div className="h-full bg-accent transition-all" style={{ width: `${progression}%` }} />
+            <div className="w-64">
+              <BarreProgression fraction={progression / 100} ariaLabel="Progression du backfill" />
             </div>
-            <button
-              type="button"
-              onClick={() => mcapStore.getState().interrompre()}
-              className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text"
-            >
+            <Bouton onClick={() => mcapStore.getState().interrompre()}>
               Interrompre (la progression est conservée)
-            </button>
+            </Bouton>
           </div>
         ) : vide ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
@@ -453,13 +453,9 @@ export function McapWindow() {
               AXIOM le reconstruit en sommant les 100 premières capitalisations (≈ 97,8 % du
               marché), puis recale le résultat sur le total courant.
             </Vide>
-            <button
-              type="button"
-              onClick={() => void mcapStore.getState().demarrerBackfill()}
-              className="rounded border border-accent/60 bg-accent/10 px-3 py-1.5 text-[11px] text-accent transition hover:bg-accent/20"
-            >
+            <Bouton variante="primaire" onClick={() => void mcapStore.getState().demarrerBackfill()}>
               Construire l'historique (365 j)
-            </button>
+            </Bouton>
             <p className="max-w-sm text-center text-[10px] leading-snug text-text-dim">
               100 appels cadencés. Avec une clé Demo CoinGecko (gratuite, à saisir dans les
               Réglages) : environ 3,5 min. Sans clé : environ 25 min — CoinGecko limite alors
@@ -471,10 +467,17 @@ export function McapWindow() {
         ) : (
           <>
             {(erreur !== null || backfill.erreur !== null) && (
-              <div className="mb-2 rounded border border-down/40 bg-surface/90 px-2 py-1 text-[10px] text-down">
-                {erreur ?? backfill.erreur}
+              <div className="mb-2">
+                <ErreurBloc>{erreur ?? backfill.erreur}</ErreurBloc>
               </div>
             )}
+
+            <div className="mb-1">
+              <BarrePeriodes
+                actif={periode}
+                onChange={(p) => mcapStore.getState().setPeriode(p.id)}
+              />
+            </div>
 
             <div className="flex min-h-0 flex-1 flex-col gap-1">
               <Graphe
@@ -533,9 +536,10 @@ export function McapWindow() {
             {/* Pastilles de dominance : couleur de la courbe, retrait d'un clic. */}
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               {vues.courbes.map((c) => (
-                <span
+                <Chip
                   key={c.id}
-                  className="flex items-center gap-1 rounded border border-border bg-bg px-1.5 py-0.5 text-[11px] text-text"
+                  onRetirer={() => mcapStore.getState().retirerDominance(c.id)}
+                  retirerLabel={`Retirer ${c.libelle}`}
                 >
                   <span
                     aria-hidden="true"
@@ -543,15 +547,7 @@ export function McapWindow() {
                     style={{ background: `var(${c.token})` }}
                   />
                   {c.libelle}
-                  <button
-                    type="button"
-                    onClick={() => mcapStore.getState().retirerDominance(c.id)}
-                    aria-label={`Retirer ${c.libelle}`}
-                    className="text-text-dim transition hover:text-down"
-                  >
-                    ×
-                  </button>
-                </span>
+                </Chip>
               ))}
               <AjoutDominance desactive={dominances.length >= PLAFOND_DOMINANCES} />
             </div>

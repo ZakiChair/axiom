@@ -12,6 +12,7 @@ import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { fetchFundingMatrix, fundingSpreadApr, type FundingVenue } from "../data/fundingCrossExchange";
 import { EnTeteFenetre, Chargement, Vide, NoteSource, Fraicheur, Metric } from "./ui";
+import { TableTriable, type ColonneTable } from "./TableTriable";
 import { formatPct } from "../lib/format";
 
 const RAFRAICHISSEMENT_MS = 60_000;
@@ -21,6 +22,46 @@ function couleurSigne(v: number): string {
   if (v > 0) return "text-up";
   if (v < 0) return "text-down";
   return "text-text-dim";
+}
+
+/** Colonnes de la matrice — ● vert = APR max, ● rouge = APR min (dépend de la liste triée reçue). */
+function colonnesFunding(venues: readonly FundingVenue[]): ColonneTable<FundingVenue>[] {
+  return [
+    {
+      id: "venue",
+      label: "Venue",
+      rendu: (v) => {
+        const i = venues.indexOf(v);
+        return (
+          <span className="text-text">
+            {venues.length >= 2 && i === 0 && (
+              <span aria-hidden className="mr-1 text-up" title="APR le plus élevé">●</span>
+            )}
+            {venues.length >= 2 && i === venues.length - 1 && (
+              <span aria-hidden className="mr-1 text-down" title="APR le plus bas">●</span>
+            )}
+            {v.label}
+          </span>
+        );
+      },
+    },
+    {
+      id: "funding",
+      label: "Funding / intervalle",
+      align: "right",
+      rendu: (v) => (
+        <span className={couleurSigne(v.ratePct)}>
+          {formatPct(v.ratePct, 4)} <span className="text-text-dim">/ {v.intervalHours}h</span>
+        </span>
+      ),
+    },
+    {
+      id: "apr",
+      label: "APR",
+      align: "right",
+      rendu: (v) => <span className={`font-semibold ${couleurSigne(v.apr)}`}>{formatPct(v.apr, 2)}</span>,
+    },
+  ];
 }
 
 export function FundingMatrixWindow() {
@@ -62,59 +103,30 @@ export function FundingMatrixWindow() {
           </>
         }
       />
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {spread !== null && (
-          <div className="mb-3">
-            <Metric
-              label="Écart CEX/DEX (APR)"
-              value={formatPct(spread, 2, { signe: false })}
-              couleur={spread >= 10 ? "var(--ui-amber)" : undefined}
-            />
-          </div>
+          <Metric
+            label="Écart CEX/DEX (APR)"
+            value={formatPct(spread, 2, { signe: false })}
+            couleur={spread >= 10 ? "var(--ui-amber)" : undefined}
+          />
         )}
         {chargement && venues === null ? (
           <Chargement />
         ) : venues && venues.length > 0 ? (
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-text-dim">
-                <th className="pb-2 font-medium">Venue</th>
-                <th className="pb-2 text-right font-medium">Funding / {" "}intervalle</th>
-                <th className="pb-2 text-right font-medium">APR</th>
-              </tr>
-            </thead>
-            <tbody>
-              {venues.map((v, i) => (
-                <tr key={v.exchange} className="border-b border-border/50">
-                  <td className="py-2 text-text">
-                    {venues.length >= 2 && i === 0 && (
-                      <span aria-hidden className="mr-1 text-up" title="APR le plus élevé">●</span>
-                    )}
-                    {venues.length >= 2 && i === venues.length - 1 && (
-                      <span aria-hidden className="mr-1 text-down" title="APR le plus bas">●</span>
-                    )}
-                    {v.label}
-                  </td>
-                  <td className={`py-2 text-right tabular-nums ${couleurSigne(v.ratePct)}`}>
-                    {formatPct(v.ratePct, 4)} <span className="text-text-dim">/ {v.intervalHours}h</span>
-                  </td>
-                  <td className={`py-2 text-right font-semibold tabular-nums ${couleurSigne(v.apr)}`}>
-                    {formatPct(v.apr, 2)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <TableTriable<FundingVenue>
+            colonnes={colonnesFunding(venues)}
+            lignes={venues}
+            cle={(v) => v.exchange}
+          />
         ) : (
           <Vide>Aucun funding disponible (symbole non listé en perp USDT sur ces venues ?)</Vide>
         )}
-        <div className="mt-3">
-          <NoteSource>
-            APR = taux × (24 / intervalle) × 365. Binance/Bybit/OKX règlent /8 h, Hyperliquid /1 h.
-            Écart = APR max − APR min entre venues ; ≥ 10 points d'APR = tension de financement
-            inter-venues (arbitrage/positionnement asymétrique). ● vert = APR max, ● rouge = APR min.
-          </NoteSource>
-        </div>
+        <NoteSource>
+          APR = taux × (24 / intervalle) × 365. Binance/Bybit/OKX règlent /8 h, Hyperliquid /1 h.
+          Écart = APR max − APR min entre venues ; ≥ 10 points d'APR = tension de financement
+          inter-venues (arbitrage/positionnement asymétrique). ● vert = APR max, ● rouge = APR min.
+        </NoteSource>
       </div>
     </div>
   );

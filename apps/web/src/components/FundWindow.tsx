@@ -37,7 +37,8 @@ import {
   type EarningsEvent,
 } from "../data/fund/finnhub";
 import { formatUsd, formatDec, formatDateComplete, VALEUR_ABSENTE } from "../lib/format";
-import { EnTeteFenetre, Onglets, Chargement, Vide, SansCle } from "./ui";
+import { EnTeteFenetre, Onglets, Chargement, Input, Vide, SansCle } from "./ui";
+import { TableTriable, type ColonneTable } from "./TableTriable";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -103,24 +104,22 @@ function VueProfil({ data }: { data: ProfilFinnhub }) {
   const siteWeb = urlHttpSure(data.description);
   return (
     <div className="space-y-3">
-      <table className="w-full text-[11px]">
-        <tbody>
-          <tr className="border-b border-border/60">
-            <td className="py-1 text-text-dim">Nom</td>
-            <td className="py-1 text-right text-text">{data.nom}</td>
-          </tr>
-          <tr className="border-b border-border/60">
-            <td className="py-1 text-text-dim">Secteur</td>
-            <td className="py-1 text-right text-text">{data.secteur || "—"}</td>
-          </tr>
-          <tr>
-            <td className="py-1 text-text-dim">Capitalisation</td>
-            <td className="py-1 text-right tabular-nums text-text">
-              {fmtCapitalisation(data.capitalisation)}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      {/* Fiche identité (3 champs) : pas une table de DONNÉES au sens TableTriable
+          (pas de tri, pas de lignes homogènes) — liste définition simple. */}
+      <div className="divide-y divide-border/60 text-[11px]">
+        <div className="flex items-center justify-between py-1">
+          <span className="text-text-dim">Nom</span>
+          <span className="text-text">{data.nom}</span>
+        </div>
+        <div className="flex items-center justify-between py-1">
+          <span className="text-text-dim">Secteur</span>
+          <span className="text-text">{data.secteur || "—"}</span>
+        </div>
+        <div className="flex items-center justify-between py-1">
+          <span className="text-text-dim">Capitalisation</span>
+          <span className="tabular-nums text-text">{fmtCapitalisation(data.capitalisation)}</span>
+        </div>
+      </div>
       {/* NOTE : le champ `description` de ProfilFinnhub est en réalité `weburl` côté
           Finnhub (une URL, pas un texte descriptif) — libellé « Site web », jamais
           « Description », et rendu comme lien plutôt que comme prose. `urlHttpSure`
@@ -146,27 +145,24 @@ function VueProfil({ data }: { data: ProfilFinnhub }) {
   );
 }
 
+const COLONNES_EARNINGS: ColonneTable<EarningsEvent>[] = [
+  { id: "date", label: "Date", rendu: (e) => <span className="text-text">{fmtDateCourte(e.date)}</span> },
+  {
+    id: "epsEstime",
+    label: "EPS estimé",
+    align: "right",
+    rendu: (e) => <span className="text-text-dim">{formatDec(e.epsEstime, 2)}</span>,
+  },
+  {
+    id: "epsReel",
+    label: "EPS réel",
+    align: "right",
+    rendu: (e) => <span className="text-text">{formatDec(e.epsReel, 2)}</span>,
+  },
+];
+
 function VueEarnings({ data }: { data: EarningsEvent[] }) {
-  return (
-    <table className="w-full text-[11px] tabular-nums">
-      <thead>
-        <tr className="text-text-dim">
-          <th className="py-1 text-left font-medium">Date</th>
-          <th className="py-1 text-right font-medium">EPS estimé</th>
-          <th className="py-1 text-right font-medium">EPS réel</th>
-        </tr>
-      </thead>
-      <tbody>
-        {data.map((e) => (
-          <tr key={e.date} className="border-t border-border/60">
-            <td className="py-1 text-left text-text">{fmtDateCourte(e.date)}</td>
-            <td className="py-1 text-right text-text-dim">{formatDec(e.epsEstime, 2)}</td>
-            <td className="py-1 text-right text-text">{formatDec(e.epsReel, 2)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
+  return <TableTriable colonnes={COLONNES_EARNINGS} lignes={data} cle={(e) => e.date} />;
 }
 
 // ─────────────────────────── Composant principal ───────────────────────────
@@ -279,7 +275,7 @@ export function FundWindow() {
 
       {/* Recherche — annuaire SEC EDGAR, aucune clé requise. */}
       <div className="relative border-b border-border px-4 py-2">
-        <input
+        <Input
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -293,7 +289,7 @@ export function FundWindow() {
           placeholder="Rechercher un ticker ou une société (ex. AAPL, Apple)"
           spellCheck={false}
           autoComplete="off"
-          className="w-full rounded border border-border bg-bg px-2 py-1.5 text-sm text-text outline-none placeholder:text-text-dim focus:border-accent"
+          className="w-full"
           aria-label="Rechercher une société"
         />
         {statutTickers === "loading" && (
@@ -322,7 +318,7 @@ export function FundWindow() {
       </div>
 
       {selected === null ? (
-        <div className="flex-1 px-4 py-6">
+        <div className="min-h-0 flex-1 px-4 py-3">
           <Vide>Recherchez une société ci-dessus (SEC EDGAR, aucune clé requise) pour afficher sa fiche.</Vide>
         </div>
       ) : (
@@ -343,7 +339,7 @@ export function FundWindow() {
           {/* Onglets. */}
           <Onglets options={ONGLETS} actif={onglet} onChange={setOnglet} />
 
-          <div className="flex-1 overflow-y-auto px-4 py-3">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
             {onglet === "profil" &&
               (!hasKey ? (
                 <SansCle

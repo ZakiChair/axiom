@@ -44,7 +44,6 @@ const MOTIFS: Motif[] = [
     description: "<table> nu — utiliser TableTriable",
     regex: /<table\b/,
     exceptions: [
-      "FundWindow.tsx", "FundingMatrixWindow.tsx",
       "brief/SectionSession.tsx", "brief/SectionWatchlist.tsx",
     ],
   },

@@ -43,9 +43,7 @@ const MOTIFS: Motif[] = [
     id: "table-nue",
     description: "<table> nu — utiliser TableTriable",
     regex: /<table\b/,
-    exceptions: [
-      "brief/SectionSession.tsx", "brief/SectionWatchlist.tsx",
-    ],
+    exceptions: [],
   },
   {
     id: "sort-header-local",

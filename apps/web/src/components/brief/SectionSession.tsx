@@ -3,11 +3,30 @@
  * déclenchées, éco passés. Données locales (portfolio + alertes + éco). Le bloc
  * « Éco passés » branche sur le statut de la section `eco`, pas sur la session.
  */
-import type { EvenementBrief, SessionBrief } from "../../data/brief";
+import type { EvenementBrief, SessionBrief, TradeClosBrief } from "../../data/brief";
 import { formatHeureMinute, formatPct, formatUsdSigne } from "../../lib/format";
 import { navigateTo } from "../../lib/navigation";
-import { Chargement, ErreurBloc, Metric, NoteSource, Vide } from "../ui";
+import { Chargement, ErreurBloc, Metric, NoteSource, TitreSection, Vide } from "../ui";
+import { TableTriable, type ColonneTable } from "../TableTriable";
 import { couleurVariation, TitreBloc, type Section } from "./commun";
+
+const COLONNES_TRADES_CLOS: ColonneTable<TradeClosBrief>[] = [
+  { id: "heure", label: "Heure", rendu: (t) => <span className="text-text-dim">{formatHeureMinute(t.dateSortie)}</span> },
+  { id: "symbole", label: "Symbole", rendu: (t) => <span className="text-text">{t.symbole}</span> },
+  { id: "direction", label: "Sens", rendu: (t) => <span className="text-text-dim">{t.direction}</span> },
+  {
+    id: "pnl",
+    label: "PnL",
+    align: "right",
+    rendu: (t) => <span style={{ color: couleurVariation(t.pnlNet) }}>{formatUsdSigne(t.pnlNet)}</span>,
+  },
+  {
+    id: "pnlPct",
+    label: "PnL %",
+    align: "right",
+    rendu: (t) => <span style={{ color: couleurVariation(t.pnlPct) }}>{formatPct(t.pnlPct)}</span>,
+  },
+];
 
 interface Props {
   session: SessionBrief;
@@ -30,48 +49,23 @@ export function SectionSession({ session, eco, noteFraicheur }: Props) {
       </div>
 
       <div className="space-y-1">
-        <p className="text-[10px] uppercase tracking-wide text-text-dim">Trades clos</p>
+        <TitreSection>Trades clos</TitreSection>
         {session.tradesClos.length === 0 ? (
           <Vide>Aucun trade clôturé aujourd&apos;hui.</Vide>
         ) : (
-          <table className="w-full text-[11px] tabular-nums">
-            <tbody>
-              {session.tradesClos.map((t, i) => (
-                <tr
-                  key={`${t.symbole}-${t.dateSortie}-${i}`}
-                  className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-bg"
-                  onClick={() =>
-                    navigateTo({ symbol: t.symbole, exchange: "binance", source: "brief" })
-                  }
-                  title={`Ouvrir ${t.symbole} dans le chart`}
-                >
-                  <td className="py-1 text-text-dim">{formatHeureMinute(t.dateSortie)}</td>
-                  <td className="py-1 text-text">{t.symbole}</td>
-                  <td className="py-1 text-text-dim">{t.direction}</td>
-                  <td
-                    className="py-1 text-right"
-                    style={{ color: couleurVariation(t.pnlNet) }}
-                  >
-                    {formatUsdSigne(t.pnlNet)}
-                  </td>
-                  <td
-                    className="py-1 text-right"
-                    style={{ color: couleurVariation(t.pnlPct) }}
-                  >
-                    {formatPct(t.pnlPct)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <TableTriable
+            colonnes={COLONNES_TRADES_CLOS}
+            lignes={session.tradesClos}
+            cle={(t) => `${t.symbole}-${t.dateSortie}`}
+            surClicLigne={(t) => navigateTo({ symbol: t.symbole, exchange: "binance", source: "brief" })}
+          />
         )}
       </div>
 
       <div className="space-y-1">
-        <p className="text-[10px] uppercase tracking-wide text-text-dim">
+        <TitreSection extra={session.alertes.length > 0 ? String(session.alertes.length) : undefined}>
           Alertes déclenchées
-          {session.alertes.length > 0 ? ` · ${session.alertes.length}` : ""}
-        </p>
+        </TitreSection>
         {session.alertes.length === 0 ? (
           <Vide>Aucune alerte déclenchée aujourd&apos;hui.</Vide>
         ) : (
@@ -92,7 +86,7 @@ export function SectionSession({ session, eco, noteFraicheur }: Props) {
       </div>
 
       <div className="space-y-1">
-        <p className="text-[10px] uppercase tracking-wide text-text-dim">Éco passés</p>
+        <TitreSection>Éco passés</TitreSection>
         {eco.statut === "idle" || eco.statut === "loading" ? (
           <Chargement />
         ) : session.ecoPasses === null ? (

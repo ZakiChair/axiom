@@ -6,7 +6,19 @@ import type { LigneWatchlist } from "../../data/brief";
 import { formatPct, formatPrice } from "../../lib/format";
 import { navigateTo } from "../../lib/navigation";
 import { NoteSource, Vide } from "../ui";
+import { TableTriable, type ColonneTable } from "../TableTriable";
 import { corps, couleurVariation, TitreBloc, type Section } from "./commun";
+
+const COLONNES_WATCHLIST: ColonneTable<LigneWatchlist>[] = [
+  { id: "symbole", label: "Symbole", rendu: (r) => <span className="text-text">{r.symbole}</span> },
+  { id: "prix", label: "Prix", align: "right", rendu: (r) => <span className="text-text">{formatPrice(r.prix)}</span> },
+  {
+    id: "variation24h",
+    label: "24 h",
+    align: "right",
+    rendu: (r) => <span style={{ color: couleurVariation(r.variation24h) }}>{formatPct(r.variation24h)}</span>,
+  },
+];
 
 interface Props {
   watchlist: Section<LigneWatchlist[]>;
@@ -21,26 +33,12 @@ export function SectionWatchlist({ watchlist, noteFraicheur }: Props) {
         rows.length === 0 ? (
           <Vide>Aucun symbole dans la watchlist.</Vide>
         ) : (
-          <table className="w-full text-[11px] tabular-nums">
-            <tbody>
-              {rows.map((r) => (
-                <tr
-                  key={r.symbole}
-                  className="cursor-pointer border-b border-border/60 last:border-0 hover:bg-bg"
-                  onClick={() =>
-                    navigateTo({ symbol: r.symbole, exchange: "binance", source: "brief" })
-                  }
-                  title={`Ouvrir ${r.symbole} dans le chart`}
-                >
-                  <td className="py-1 text-text">{r.symbole}</td>
-                  <td className="py-1 text-right text-text">{formatPrice(r.prix)}</td>
-                  <td className="py-1 text-right" style={{ color: couleurVariation(r.variation24h) }}>
-                    {formatPct(r.variation24h)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <TableTriable
+            colonnes={COLONNES_WATCHLIST}
+            lignes={rows}
+            cle={(r) => r.symbole}
+            surClicLigne={(r) => navigateTo({ symbol: r.symbole, exchange: "binance", source: "brief" })}
+          />
         ),
       )}
       <NoteSource>Données Binance (ticker 24 h) · {noteFraicheur}.</NoteSource>

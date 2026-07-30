@@ -10,7 +10,16 @@ import { Chargement, ErreurBloc, Metric, NoteSource, TitreSection, Vide } from "
 import { TableTriable, type ColonneTable } from "../TableTriable";
 import { couleurVariation, TitreBloc, type Section } from "./commun";
 
-const COLONNES_TRADES_CLOS: ColonneTable<TradeClosBrief>[] = [
+/**
+ * Ligne de trade clos + clé stable pour TableTriable (`cle` n'a pas accès à
+ * l'index de la liste — symbole+dateSortie seuls peuvent collisionner si 2
+ * clôtures du même symbole tombent sur la même milliseconde).
+ */
+interface LigneTradeClos extends TradeClosBrief {
+  cle: string;
+}
+
+const COLONNES_TRADES_CLOS: ColonneTable<LigneTradeClos>[] = [
   { id: "heure", label: "Heure", rendu: (t) => <span className="text-text-dim">{formatHeureMinute(t.dateSortie)}</span> },
   { id: "symbole", label: "Symbole", rendu: (t) => <span className="text-text">{t.symbole}</span> },
   { id: "direction", label: "Sens", rendu: (t) => <span className="text-text-dim">{t.direction}</span> },
@@ -55,8 +64,8 @@ export function SectionSession({ session, eco, noteFraicheur }: Props) {
         ) : (
           <TableTriable
             colonnes={COLONNES_TRADES_CLOS}
-            lignes={session.tradesClos}
-            cle={(t) => `${t.symbole}-${t.dateSortie}`}
+            lignes={session.tradesClos.map((t, i) => ({ ...t, cle: `${t.symbole}-${t.dateSortie}-${i}` }))}
+            cle={(t) => t.cle}
             surClicLigne={(t) => navigateTo({ symbol: t.symbole, exchange: "binance", source: "brief" })}
           />
         )}

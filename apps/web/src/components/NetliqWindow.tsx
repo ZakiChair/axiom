@@ -26,6 +26,7 @@ import { formatDateCourte, formatEntier, formatUsd, VALEUR_ABSENTE } from "../li
 import { normaliserSerieOverlay, ticksMd } from "./netliqWindow.util";
 import {
   Badge,
+  BoutonBascule,
   BoutonRafraichir,
   Chargement,
   EnTeteFenetre,
@@ -414,19 +415,13 @@ export function NetliqWindow() {
               actif={fenetreAnnees}
               onChange={(a) => netliqStore.getState().setFenetre(a)}
             />
-            <button
-              type="button"
+            <BoutonBascule
+              actif={overlayBtc}
               onClick={() => setOverlayBtc((v) => !v)}
-              aria-pressed={overlayBtc}
               title="Superposer le cours BTC (échelle propre)"
-              className={`rounded border px-2 py-1 text-[11px] transition ${
-                overlayBtc
-                  ? "border-accent/60 bg-accent/10 text-accent"
-                  : "border-border bg-bg text-text-dim hover:text-text"
-              }`}
             >
               ₿ BTC
-            </button>
+            </BoutonBascule>
             <BoutonRafraichir onClick={rafraichir} disabled={enCours} />
           </div>
         }

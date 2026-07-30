@@ -44,10 +44,18 @@ function teinteSigne(v: number): string {
   return v > 0 ? "text-up" : "text-down";
 }
 
-/** Une cellule prix + % teinté (empilés), tabular-nums pour l'alignement des chiffres. */
-function Cellule({ prix, pct }: { prix: number; pct: number }) {
+/**
+ * Une cellule prix + % teinté (empilés), tabular-nums pour l'alignement des chiffres.
+ * `separateur` : filet du haut par CELLULE — TableTriable ne permet pas de className
+ * par ligne (le conteneur de ligne appartient au composant), donc l'ancien filet
+ * `border-t border-border` de la ligne CVaR95 (markup HTML nu d'avant migration)
+ * est reconstitué ici colonne par colonne. Le filet n'est donc plus continu
+ * (coupé par le `gap-2` entre colonnes) — delta visuel assumé, documenté dans le
+ * rapport de la Tâche 14.
+ */
+function Cellule({ prix, pct, separateur }: { prix: number; pct: number; separateur?: boolean }) {
   return (
-    <span className="block">
+    <span className={`block ${separateur ? "border-t border-border pt-1" : ""}`}>
       <span className="block text-text">{formatPrice(prix)}</span>
       <span className={`block text-[10px] ${teinteSigne(pct)}`}>{formatPct(pct, 2)}</span>
     </span>
@@ -115,7 +123,17 @@ export function DistWindow() {
       {
         id: "niveau",
         label: "Niveau",
-        rendu: (l) => <span className={l.cvar ? "font-medium text-text" : "text-text-dim"}>{l.label}</span>,
+        rendu: (l) => (
+          <span
+            className={
+              l.cvar
+                ? "block border-t border-border pt-1 font-medium text-text"
+                : "text-text-dim"
+            }
+          >
+            {l.label}
+          </span>
+        ),
       },
       ...niveaux.map((n): ColonneTable<LigneDist> => ({
         id: `h${n.h}`,
@@ -123,7 +141,7 @@ export function DistWindow() {
         align: "right",
         rendu: (l) =>
           l.cvar ? (
-            <Cellule prix={n.cvar95Niveau} pct={n.cvar95Pct} />
+            <Cellule prix={n.cvar95Niveau} pct={n.cvar95Pct} separateur />
           ) : (
             <Cellule prix={n.niveaux[l.cle as keyof typeof n.niveaux]} pct={n.pct[l.cle as keyof typeof n.pct]} />
           ),

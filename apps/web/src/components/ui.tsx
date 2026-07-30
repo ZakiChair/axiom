@@ -713,7 +713,11 @@ export function Fraicheur({
   majTs?: number | null;
   cadence?: string;
 }) {
-  return <span className="tabular-nums">{texteFraicheur(loading, majTs ?? null, Date.now(), cadence)}</span>;
+  return (
+    <span className="tabular-nums whitespace-nowrap">
+      {texteFraicheur(loading, majTs ?? null, Date.now(), cadence)}
+    </span>
+  );
 }
 
 // ─────────────────────────── Graphes : périodes & infobulle ───────────────────────────

@@ -16,7 +16,11 @@ interface Props {
 export function SectionChapeau({ regime, chapeau, phrasesLecture }: Props) {
   return (
     <section className="flex flex-col gap-2">
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+      {/* grid-cols-2 fixe (pas de md:grid-cols-4) : le seuil `md:` réagit à la largeur du
+          VIEWPORT, pas à celle de la fenêtre flottante (BRIEF = 480px par défaut), donc
+          4 colonnes s'activaient même sur une fenêtre étroite et écrasaient les tuiles
+          (libellé + badge + valeur) — gate visuel 2026-07-29, anomalie 1. */}
+      <div className="grid grid-cols-2 gap-2">
         <TuileStat
           disposition="inline"
           label="Régime"

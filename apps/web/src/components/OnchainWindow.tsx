@@ -394,8 +394,8 @@ function CarteHashrate({ hr }: { hr: ResultatFrais<SerieMetrique> | null }) {
         <span className="tabular-nums text-base font-semibold" style={{ color: "var(--up)" }}>
           {fmtHashrate(serie?.dernier?.value)}
         </span>
-        <span className="shrink-0 text-[10px] text-text-dim">
-          {hr?.perime ? "cache périmé · " : ""}
+        <span className="flex shrink-0 items-center gap-1 text-[10px] text-text-dim">
+          {hr?.perime ? <Badge ton="warn">cache périmé</Badge> : null}
           {serie?.dernier?.time === undefined ? "—" : formatDateComplete(serie.dernier.time)}
         </span>
       </div>
@@ -835,8 +835,8 @@ export function OnchainWindow() {
                   </div>
                   <div className="flex items-center justify-between gap-2">
                     <NoteSource>bitcoin-data.com (repli)</NoteSource>
-                    <span className="shrink-0 text-[10px] text-text-dim">
-                      {donnees.etfRepli.perime ? "cache périmé · " : ""}
+                    <span className="flex shrink-0 items-center gap-1 text-[10px] text-text-dim">
+                      {donnees.etfRepli.perime ? <Badge ton="warn">cache périmé</Badge> : null}
                       {formatDateComplete(serie.dernier!.time)}
                     </span>
                   </div>

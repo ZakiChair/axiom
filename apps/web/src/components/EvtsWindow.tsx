@@ -32,7 +32,7 @@ import {
   type FenetreAlignee,
   type OccurrenceExclue,
 } from "../lib/evts";
-import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, POLICE_CANVAS, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { formatDateComplete, formatPct, formatPourcentage } from "../lib/format";
 import { marketStore } from "../store/market";
 import { evtsUiStore } from "../store/evts";
@@ -170,7 +170,7 @@ function dessinerEvts(
   const xAt = (offset: number): number => left + ((offset + demiFenetre) / (2 * demiFenetre)) * plotW;
   const yAt = (ratio: number): number => top + (1 - (ratio - yMin) / (yMax - yMin)) * plotH;
 
-  ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+  ctx.font = POLICE_CANVAS;
 
   // Base 100 (référence horizontale pointillée).
   const yBase = yAt(1);
@@ -332,7 +332,7 @@ export function EvtsWindow() {
         }
       />
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 px-4 py-3">
         {/* Contrôles : type · TF · demi-fenêtre · N derniers. */}
         <div className="flex flex-wrap gap-2">
           <div className="min-w-[150px] flex-1">

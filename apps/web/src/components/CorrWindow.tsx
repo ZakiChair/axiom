@@ -36,8 +36,8 @@ import {
   type SerieCloture,
 } from "../data/corr";
 import { formatDec } from "../lib/format";
-import { lireTokenCanvas } from "../lib/canvasTokens";
-import { Chargement, EnTeteFenetre, Fraicheur, NoteSource, Segmente, Vide } from "./ui";
+import { lireTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
+import { Bouton, BoutonRafraichir, Chargement, Chip, EnTeteFenetre, Fraicheur, Input, NoteSource, Segmente, Vide } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère) ───────────────────────────
 
@@ -233,7 +233,7 @@ export function CorrWindow() {
     const texte = lireTokenCanvas("--text", "#e5e7eb");
 
     // Étiquettes de colonnes (base des symboles, en haut).
-    ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+    ctx.font = POLICE_CANVAS;
     ctx.fillStyle = dim;
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
@@ -418,70 +418,48 @@ export function CorrWindow() {
         mnemo="CORR"
         titre="Corrélations"
         sousTitre={`Log-rendements journaliers · ${methode === "pearson" ? "Pearson" : "Spearman"} · ${fenetreJours} j`}
+        actions={
+          <>
+            <Fraicheur loading={loading} majTs={majTs} />
+            <BoutonRafraichir onClick={recalculer} libelle="Recalculer" />
+          </>
+        }
       />
 
-      <div className="flex-1 overflow-y-auto px-4 py-4">
-        {/* Contrôles : méthode, fenêtre, recalcul + fraîcheur. */}
-        <div className="mb-3 space-y-2">
-          <div className="flex items-center gap-2">
-            <Segmente
-              options={[
-                { id: "pearson", label: "Pearson" },
-                { id: "spearman", label: "Spearman" },
-              ] as const}
-              actif={methode}
-              onChange={setMethode}
-            />
-            <Segmente
-              options={FENETRES.map((f) => ({ id: f, label: `${f}j` }))}
-              actif={fenetreJours}
-              onChange={setFenetreJours}
-            />
-          </div>
-          <div className="flex items-center justify-between text-[11px] text-text-dim">
-            <button
-              type="button"
-              onClick={recalculer}
-              className="rounded border border-border bg-bg px-2 py-1 text-text-dim transition hover:text-text"
-            >
-              ↻ Recalculer
-            </button>
-            <Fraicheur loading={loading} majTs={majTs} />
-          </div>
+      <div className="px-4 py-3">
+        {/* Contrôles : méthode, fenêtre. */}
+        <div className="mb-3 flex items-center gap-2">
+          <Segmente
+            options={[
+              { id: "pearson", label: "Pearson" },
+              { id: "spearman", label: "Spearman" },
+            ] as const}
+            actif={methode}
+            onChange={setMethode}
+          />
+          <Segmente
+            options={FENETRES.map((f) => ({ id: f, label: `${f}j` }))}
+            actif={fenetreJours}
+            onChange={setFenetreJours}
+          />
         </div>
 
         {/* Ajout ponctuel de symboles (hors watchlist). */}
         <form onSubmit={ajouterSymbole} className="mb-3 flex gap-2">
-          <input
+          <Input
             value={saisie}
             onChange={(e) => setSaisie(e.target.value)}
             placeholder="Ajouter un symbole (ex. AVAXUSDT, SPY)"
-            className="min-w-0 flex-1 rounded-md border border-border bg-bg px-2 py-1.5 text-[11px] text-text placeholder:text-text-dim focus:outline-none focus:ring-1 focus:ring-border"
+            className="min-w-0 flex-1"
           />
-          <button
-            type="submit"
-            className="rounded-md border border-border bg-bg px-2.5 py-1.5 text-[11px] text-text-dim transition hover:text-text"
-          >
-            +
-          </button>
+          <Bouton type="submit">+</Bouton>
         </form>
         {extras.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-1.5">
             {extras.map((s) => (
-              <span
-                key={s}
-                className="flex items-center gap-1 rounded border border-border bg-bg px-1.5 py-0.5 text-[10px] text-text-dim"
-              >
+              <Chip key={s} onRetirer={() => setExtras((x) => x.filter((v) => v !== s))} retirerLabel={`Retirer ${s}`}>
                 {s}
-                <button
-                  type="button"
-                  onClick={() => setExtras((x) => x.filter((v) => v !== s))}
-                  aria-label={`Retirer ${s}`}
-                  className="leading-none text-text-dim transition hover:text-down"
-                >
-                  ✕
-                </button>
-              </span>
+              </Chip>
             ))}
           </div>
         )}
@@ -504,7 +482,7 @@ export function CorrWindow() {
             </div>
             {tooltip && (
               <div
-                className="pointer-events-none absolute z-10 rounded border border-border bg-surface px-2 py-1 text-[10px] tabular-nums text-text shadow-lg"
+                className="pointer-events-none absolute z-10 rounded border border-border bg-surface px-2 py-1 text-[11px] tabular-nums text-text shadow-lg"
                 style={{ left: tooltip.x + 12, top: tooltip.y + 12 }}
               >
                 {tooltip.text}

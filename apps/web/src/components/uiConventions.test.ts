@@ -86,7 +86,6 @@ const MOTIFS: Motif[] = [
     description: "police canvas non standard — utiliser POLICE_CANVAS (canvasTokens)",
     regex: /(9px ui-sans-serif|11px ui-monospace|10px system-ui)/,
     exceptions: [
-      "CorrWindow.tsx", "EvtsWindow.tsx", "VolWindow.tsx",
       "CbpremWindow.tsx", "CycleWindow.tsx", "DomWindow.tsx", "ExpyWindow.tsx",
       "NetliqWindow.tsx", "SqueezeWindow.tsx", "TermStructureWindow.tsx",
     ],

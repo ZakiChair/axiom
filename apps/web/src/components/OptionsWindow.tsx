@@ -46,7 +46,7 @@ import {
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { valeurVersPixel, pixelVersValeur, type Domaine } from "../lib/domaineAxe";
 import { useDomaineZoom } from "../hooks/useDomaineZoom";
-import { EnTeteFenetre, Segmente } from "./ui";
+import { EnTeteFenetre, Segmente, Select } from "./ui";
 import {
   dessinerSmile,
   dessinerBarres,
@@ -87,6 +87,41 @@ export const optionsUiStore = createStore<OptionsUiState>(() => ({
 }));
 
 mirrorOpenState("options", optionsUiStore);
+
+// ─────────────────────────── Commande palette (enregistrée par l'intégrateur) ───────────────────────────
+
+export const commandes: Commande[] = [
+  {
+    id: "panneau:options",
+    mnemonique: "OMON",
+    libelle: "Options (smile IV, max pain, GEX/DEX)",
+    categorie: "panneau",
+    motsCles: [
+      "options",
+      "omon",
+      "smile",
+      "iv",
+      "volatilite implicite",
+      "max pain",
+      "put call ratio",
+      "dvol",
+      "skew",
+      "risk reversal",
+      "rr25",
+      "deribit",
+      "gex",
+      "dex",
+      "gamma exposure",
+      "delta exposure",
+      "cboe",
+      "spx",
+      "ndx",
+      "vix",
+    ],
+    apercu: "Ouvre / ferme le moniteur d'options (smile, GEX/DEX crypto & actions)",
+    action: () => optionsUiStore.getState().toggleOptions(),
+  },
+];
 
 // ─────────────────────────── Constantes ───────────────────────────
 
@@ -547,7 +582,7 @@ export function OptionsWindow() {
     <>
       <EnTeteFenetre mnemo="OMON" titre="Options" sousTitre="Smile IV · max pain · GEX/DEX · heatmap OI · term IV" />
 
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="px-4 py-3">
         {/* Bascule de vue : Smile ↔ GEX/DEX ↔ Heatmap OI */}
         <div className="mb-3">
           <Segmente
@@ -624,11 +659,11 @@ export function OptionsWindow() {
               actif={devise}
               onChange={setDevise}
             />
-            <select
+            <Select
               value={expiry ?? ""}
               onChange={(e) => setExpiry(Number(e.target.value))}
               aria-label="Échéance"
-              className="flex-1 rounded-md border border-border bg-bg px-2 py-1.5 text-[11px] text-text"
+              className="flex-1"
             >
               {echeances.length === 0 && <option value="">—</option>}
               {echeances.map((e) => (
@@ -641,7 +676,7 @@ export function OptionsWindow() {
                   · {joursAvant(e.expiryMs)} · {e.count} opt
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
         )}
 
@@ -653,11 +688,11 @@ export function OptionsWindow() {
               actif={cboeTicker}
               onChange={setCboeTicker}
             />
-            <select
+            <Select
               value={cboeExpiry ?? ""}
               onChange={(e) => setCboeExpiry(Number(e.target.value))}
               aria-label="Échéance CBOE"
-              className="flex-1 rounded-md border border-border bg-bg px-2 py-1.5 text-[11px] text-text"
+              className="flex-1"
             >
               {cboeEcheances.length === 0 && <option value="">—</option>}
               {cboeEcheances.map((e) => (
@@ -670,7 +705,7 @@ export function OptionsWindow() {
                   · {joursAvant(e.expiryMs)} · {e.count} opt
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
         )}
 
@@ -745,38 +780,3 @@ export function OptionsWindow() {
     </>
   );
 }
-
-// ─────────────────────────── Commande palette (enregistrée par l'intégrateur) ───────────────────────────
-
-export const commandes: Commande[] = [
-  {
-    id: "panneau:options",
-    mnemonique: "OMON",
-    libelle: "Options (smile IV, max pain, GEX/DEX)",
-    categorie: "panneau",
-    motsCles: [
-      "options",
-      "omon",
-      "smile",
-      "iv",
-      "volatilite implicite",
-      "max pain",
-      "put call ratio",
-      "dvol",
-      "skew",
-      "risk reversal",
-      "rr25",
-      "deribit",
-      "gex",
-      "dex",
-      "gamma exposure",
-      "delta exposure",
-      "cboe",
-      "spx",
-      "ndx",
-      "vix",
-    ],
-    apercu: "Ouvre / ferme le moniteur d'options (smile, GEX/DEX crypto & actions)",
-    action: () => optionsUiStore.getState().toggleOptions(),
-  },
-];

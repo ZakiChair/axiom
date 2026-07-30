@@ -14,7 +14,7 @@ import type { Candle, ExchangeId } from "@axiom/types";
 import type { Commande } from "../commands/registry";
 import { getAdapter } from "../data/adapters";
 import { fetchDvolHistory } from "../data/deribit";
-import { lireTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { formatDateComplete, formatDateCourte, formatDec, formatPourcentage, VALEUR_ABSENTE } from "../lib/format";
 import { realizedVolSeries, volCone, zScore, type VolConeRow } from "../lib/volCone";
 import { marketStore } from "../store/market";
@@ -295,7 +295,7 @@ function draw(canvas: HTMLCanvasElement, data: VolData, domaine: Domaine): void 
 
   const tk = lireTokens();
   // Pile monospace unifiée pour les chiffres, cohérente avec les tabular-nums du DOM.
-  ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+  ctx.font = POLICE_CANVAS;
 
   ctx.fillStyle = tk.dim;
   ctx.fillText("CÔNE RV (percentiles 5/25/50/75/95)", 8, 14);
@@ -466,7 +466,7 @@ export function VolWindow() {
         sousTitre={`${symbol} · quotidien · annualisation √${PPA}`}
       />
 
-      <div className="relative flex min-h-0 flex-1 flex-col p-3">
+      <div className="relative flex min-h-0 flex-1 flex-col px-4 py-3">
         {statut === "loading" && <Chargement />}
         {statut === "error" && <ErreurBloc>Volatilité indisponible pour ce symbole.</ErreurBloc>}
         {statut === "ready" && synthese !== null && (

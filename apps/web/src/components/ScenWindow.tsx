@@ -32,7 +32,7 @@ import {
   type ResultatScen,
 } from "../data/scen";
 import { formatDec, formatUsd, VALEUR_ABSENTE } from "../lib/format";
-import { Badge, BTN_SECONDAIRE, Chargement, EnTeteFenetre, ErreurBloc, Fraicheur, NoteSource, Vide } from "./ui";
+import { Badge, BoutonRafraichir, BTN_SECONDAIRE, Chargement, EnTeteFenetre, ErreurBloc, Fraicheur, NoteSource, Vide } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère) ───────────────────────────
 
@@ -169,14 +169,11 @@ export function ScenWindow() {
         actions={
           <>
             <Fraicheur loading={loading} majTs={majTs} />
-            <button
-              type="button"
+            <BoutonRafraichir
               onClick={recalculer}
-              className={BTN_SECONDAIRE}
+              libelle="Recalculer β"
               title="Vider les caches de séries et recalculer les bêtas"
-            >
-              ↻ Recalculer β
-            </button>
+            />
           </>
         }
       />

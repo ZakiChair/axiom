@@ -18,7 +18,7 @@ import { useStore } from "zustand";
 import { ecoStore, ECO_IMPACTS } from "../store/eco";
 import type { EcoEvent, EcoImpact } from "../data/eco";
 import { navigateTo } from "../lib/navigation";
-import { EnTeteFenetre } from "./ui";
+import { BoutonRafraichir, EnTeteFenetre } from "./ui";
 import "../chart/ecoMarkers";
 
 /** Libellé court FR d'un impact. */
@@ -168,15 +168,10 @@ export function EcoWindow() {
           </>
         }
         actions={
-          <button
-            type="button"
+          <BoutonRafraichir
             onClick={() => ecoStore.getState().refresh(true)}
-            aria-label="Rafraîchir le calendrier"
-            title="Rafraîchir"
-            className="rounded p-1 text-sm leading-none text-text-dim transition hover:bg-bg hover:text-text"
-          >
-            ⟳
-          </button>
+            title="Rafraîchir le calendrier"
+          />
         }
       />
 

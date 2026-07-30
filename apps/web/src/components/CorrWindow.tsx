@@ -36,7 +36,7 @@ import {
   type SerieCloture,
 } from "../data/corr";
 import { formatDec } from "../lib/format";
-import { lireTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
+import { lireTokenCanvas, POLICE_CANVAS, POLICE_CANVAS_MONO } from "../lib/canvasTokens";
 import { Bouton, BoutonRafraichir, Chargement, Chip, EnTeteFenetre, Fraicheur, Input, NoteSource, Segmente, Vide } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère) ───────────────────────────
@@ -266,7 +266,7 @@ export function CorrWindow() {
           // volontairement hors thème (le contraste suit la luminance de la cellule, pas
           // le thème — dériver de --text inverserait le contraste en thème clair).
           ctx.fillStyle = luminance(rgb) > 0.55 ? "#0b0b0b" : "#f5f5f5";
-          ctx.font = "10px ui-monospace, monospace";
+          ctx.font = POLICE_CANVAS_MONO;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText(v.toFixed(2), x + (cell - 1) / 2, y + (cell - 1) / 2);

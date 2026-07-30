@@ -14,7 +14,7 @@ import { useRef, useState } from "react";
 import { useStore } from "zustand";
 import { replayStore, joursProposes, REPLAY_TFS, VITESSES } from "../store/replay";
 import { debutJour, JOUR_MS } from "../data/replayFeed";
-import { EnTeteFenetre, NoteSource, Vide } from "./ui";
+import { BoutonRafraichir, EnTeteFenetre, NoteSource, Vide } from "./ui";
 import { formatEntier } from "../lib/format";
 
 /** Formate un nombre d'octets en Ko/Mo. */
@@ -246,15 +246,10 @@ export function ReplayWindow() {
             <h3 className="text-[10px] font-semibold uppercase tracking-wider text-text-dim">
               Stockage ({s.jours.length})
             </h3>
-            <button
-              type="button"
+            <BoutonRafraichir
               onClick={() => replayStore.getState().rafraichirJours()}
-              aria-label="Rafraîchir la liste des jours"
-              title="Rafraîchir"
-              className="rounded p-1 text-xs leading-none text-text-dim transition hover:bg-bg hover:text-text"
-            >
-              ↻
-            </button>
+              title="Rafraîchir la liste des jours"
+            />
           </div>
           {s.jours.length === 0 ? (
             <Vide>Aucun jour téléchargé.</Vide>

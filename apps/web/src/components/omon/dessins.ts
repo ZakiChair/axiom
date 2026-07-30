@@ -14,7 +14,7 @@ import type { GexDexPoint } from "../../data/gexDex";
 import type { PointTermIv } from "../../data/termIv";
 import { intensiteCellule, type GrilleOi } from "../../data/oiHeatmap";
 import { formatUsd } from "../../lib/format";
-import { lireTokenCanvas, rgbaTokenCanvas } from "../../lib/canvasTokens";
+import { lireTokenCanvas, POLICE_CANVAS, rgbaTokenCanvas } from "../../lib/canvasTokens";
 import { indicesVisibles, valeurVersPixel, type Domaine } from "../../lib/domaineAxe";
 
 /** Formatte un strike de façon compacte (ex. 78 000 → 78K). */
@@ -72,7 +72,7 @@ export function dessinerSmile(
     .sort((a, b) => a.strike - b.strike);
   if (finiesTri.length === 0) {
     ctx.fillStyle = couleurDim;
-    ctx.font = "11px system-ui, sans-serif";
+    ctx.font = POLICE_CANVAS;
     ctx.fillText("Pas d'IV pour cette échéance…", padL, padT + plotH / 2);
     return;
   }
@@ -93,7 +93,7 @@ export function dessinerSmile(
   // Grille + étiquettes Y (IV %).
   ctx.strokeStyle = couleurBordure;
   ctx.fillStyle = couleurDim;
-  ctx.font = "10px system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
   ctx.lineWidth = 1;
   for (const val of [yMin, (yMin + yMax) / 2, yMax]) {
     const y = py(val);
@@ -217,7 +217,7 @@ export function dessinerBarres(
 
   if (seuil.length === 0) {
     ctx.fillStyle = couleurDim;
-    ctx.font = "11px system-ui, sans-serif";
+    ctx.font = POLICE_CANVAS;
     ctx.fillText("Pas d'exposition pour cette échéance…", padL, padT + plotH / 2);
     return;
   }
@@ -234,7 +234,7 @@ export function dessinerBarres(
   const py = (v: number) => padT + (1 - (v - yLo) / yRange) * plotH;
 
   // Grille + étiquettes Y (exposition compacte).
-  ctx.font = "10px system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
   ctx.lineWidth = 1;
   for (const v of [yHi, 0, yLo]) {
     const y = py(v);
@@ -346,14 +346,14 @@ export function dessinerHeatmapOi(
   const couleurDim = lireTokenCanvas("--text-dim", "#9ca3af");
   const couleurAccent = lireTokenCanvas("--accent", "#38bdf8");
 
-  ctx.font = "10px system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
 
   const echeances = grille.echeances;
   // bandeDesc arrive déjà triée décroissant (strike haut en haut) — hoistée dans le useMemo
   // du composant hôte, partagée avec onSurvolHeatmap.
   if (echeances.length === 0 || bandeDesc.length === 0) {
     ctx.fillStyle = couleurDim;
-    ctx.font = "11px system-ui, sans-serif";
+    ctx.font = POLICE_CANVAS;
     ctx.fillText("Pas d'open interest à afficher…", padL, padT + plotH / 2);
     return;
   }
@@ -523,11 +523,11 @@ export function dessinerTermIv(
   const couleurDown = lireTokenCanvas("--down", "#f92855");
   const couleurBg = lireTokenCanvas("--bg", "#0a0a0a");
 
-  ctx.font = "10px system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
 
   if (points.length === 0) {
     ctx.fillStyle = couleurDim;
-    ctx.font = "11px system-ui, sans-serif";
+    ctx.font = POLICE_CANVAS;
     ctx.fillText("Pas de données de term structure…", padL, padT + plotH / 2);
     return;
   }

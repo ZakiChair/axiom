@@ -17,11 +17,16 @@ const DOSSIER = dirname(fileURLToPath(import.meta.url));
 /** Fichiers hors périmètre : primitives elles-mêmes. */
 const HORS_PERIMETRE = new Set(["ui.tsx", "TableTriable.tsx"]);
 
-/** Scan récursif : les chemins imbriqués (ex. "omon/VueSmile.tsx") sont dans le périmètre du ratchet. */
-const SOURCES: Array<{ nom: string; texte: string }> = readdirSync(DOSSIER, { recursive: true })
+/**
+ * Scan récursif : les chemins imbriqués (ex. "omon/VueSmile.tsx") sont dans le périmètre du
+ * ratchet. Tous les fichiers `.ts`/`.tsx` sont indexés ici — chaque motif restreint ensuite
+ * lui-même les extensions qu'il scrute via `extensions` (par défaut `.tsx` seul : élargir aux
+ * `.ts` à la légère ferait matcher des fichiers hors sujet, ex. chaînes dans des commentaires).
+ */
+const TOUTES_SOURCES: Array<{ nom: string; texte: string }> = readdirSync(DOSSIER, { recursive: true })
   .filter((f): f is string => typeof f === "string")
   .map((f) => f.replace(/\\/g, "/"))
-  .filter((f) => f.endsWith(".tsx") && !f.includes(".test.") && !HORS_PERIMETRE.has(f))
+  .filter((f) => /\.tsx?$/.test(f) && !f.includes(".test.") && !HORS_PERIMETRE.has(f))
   .map((nom) => ({ nom, texte: readFileSync(join(DOSSIER, nom), "utf8") }));
 
 interface Motif {
@@ -30,6 +35,8 @@ interface Motif {
   regex: RegExp;
   /** Fichiers encore autorisés à matcher (état au moment du commit — le ratchet). */
   exceptions: string[];
+  /** Extensions scrutées par ce motif (défaut : `.tsx` seul). */
+  extensions?: Array<".ts" | ".tsx">;
 }
 
 const MOTIFS: Motif[] = [
@@ -77,12 +84,14 @@ const MOTIFS: Motif[] = [
   },
   {
     id: "police-canvas-divergente",
-    description: "police canvas non standard — utiliser POLICE_CANVAS (canvasTokens)",
-    regex: /(9px ui-sans-serif|11px ui-monospace|10px system-ui)/,
-    // DomWindow migré sur POLICE_CANVAS_MONO (canvasTokens) : le carnet/tape a
-    // besoin d'une police à chasse fixe pour l'alignement des colonnes de
-    // chiffres (fillText canvas ne bénéficie pas de tabular-nums CSS) — la
-    // constante consacre cette valeur au lieu de la chaîne en dur.
+    description: "police canvas non standard — utiliser POLICE_CANVAS/POLICE_CANVAS_MONO (canvasTokens)",
+    // Couvre aussi bien la variante sans-serif (POLICE_CANVAS) que la variante à chasse fixe
+    // (POLICE_CANVAS_MONO, 10px ET 11px ui-monospace relevés en dur) — le carnet/tape et les
+    // matrices de chiffres (CorrWindow) ont besoin d'une police à chasse fixe pour l'alignement
+    // des colonnes (fillText canvas ne bénéficie pas de tabular-nums CSS) : la constante
+    // consacre cette valeur au lieu de la chaîne en dur. Scan étendu aux .ts (dessins.ts).
+    regex: /(9px ui-sans-serif|1[01]px ui-monospace|10px system-ui)/,
+    extensions: [".ts", ".tsx"],
     exceptions: [],
   },
   {
@@ -96,7 +105,9 @@ const MOTIFS: Motif[] = [
 describe("conventions UI (ratchet)", () => {
   for (const motif of MOTIFS) {
     it(`${motif.id} — ${motif.description}`, () => {
-      const fautifs = SOURCES.filter((s) => motif.regex.test(s.texte)).map((s) => s.nom).sort();
+      const extensions = motif.extensions ?? [".tsx"];
+      const sources = TOUTES_SOURCES.filter((s) => extensions.some((ext) => s.nom.endsWith(ext)));
+      const fautifs = sources.filter((s) => motif.regex.test(s.texte)).map((s) => s.nom).sort();
       expect(
         fautifs,
         `Fichiers matchant « ${motif.id} » (mettre à jour exceptions UNIQUEMENT en migrant)`,

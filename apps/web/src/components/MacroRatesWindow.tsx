@@ -37,7 +37,7 @@ import { pointsDeCourbe } from "./courbeTaux.util";
 import { paysIndisponibles } from "./macroRatesWindow.util";
 import { formatPourcentage, formatEntier, formatDateComplete } from "../lib/format";
 import { BoutonBascule, BoutonRafraichir, EnTeteFenetre, Onglets, Chargement, NoteSource, Segmente, TitreSection, Vide } from "./ui";
-import { TableTriable, type ColonneTable } from "./TableTriable";
+import { TableTriable } from "./TableTriable";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 

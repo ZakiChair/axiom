@@ -493,142 +493,145 @@ export function ScreenerWindow() {
   const showPositionBadge =
     note !== null && (note.includes("OI/L-S") || note.includes("échantillon"));
 
-  const COLONNES_RESULTATS: ColonneTable<ScreenerRow>[] = [
-    {
-      id: "symbol",
-      label: "Symbole",
-      align: "left",
-      largeur: showPositionCols ? "1.3fr" : "1.4fr",
-      triable: true,
-      valeurTri: (l) => l.symbol,
-      rendu: (r) => (
-        <button
-          type="button"
-          onClick={() => ouvrirDansChart(r.symbol)}
-          className="truncate text-left font-medium text-text transition hover:text-up"
-          title={`Ouvrir ${r.symbol} dans le chart`}
-        >
-          {r.symbol}
-          {r.indicatorValues && r.indicatorValues.length > 0 && (
-            <span className="ml-1 text-[10px] font-normal text-text-dim">
-              {r.indicatorValues.map((v) => `${v.label} ${v.value.toFixed(2)}`).join(" · ")}
-            </span>
-          )}
-        </button>
-      ),
-    },
-    {
-      id: "lastPrice",
-      label: "Prix",
-      align: "right",
-      largeur: showPositionCols ? "0.8fr" : "0.9fr",
-      triable: true,
-      valeurTri: (l) => l.lastPrice,
-      rendu: (r) => <span className="text-right tabular-nums text-text">{formatPrice(r.lastPrice)}</span>,
-    },
-    {
-      id: "priceChangePct24h",
-      label: "Δ24h",
-      align: "right",
-      largeur: showPositionCols ? "0.7fr" : "0.8fr",
-      triable: true,
-      valeurTri: (l) => l.priceChangePct24h,
-      rendu: (r) => (
-        <span className={`text-right tabular-nums ${r.priceChangePct24h >= 0 ? "text-up" : "text-down"}`}>
-          {formatPct(r.priceChangePct24h)}
-        </span>
-      ),
-    },
-    {
-      id: "volumeUsd24h",
-      label: "Vol 24h",
-      align: "right",
-      largeur: showPositionCols ? "0.8fr" : "0.9fr",
-      triable: true,
-      valeurTri: (l) => l.volumeUsd24h,
-      rendu: (r) => <span className="text-right tabular-nums text-text-dim">{formatUsd(r.volumeUsd24h)}</span>,
-    },
-    {
-      id: "fundingPct",
-      label: "Funding",
-      align: "right",
-      largeur: showPositionCols ? "0.75fr" : "0.9fr",
-      triable: true,
-      valeurTri: (l) => l.fundingPct ?? null,
-      rendu: (r) => (
-        <span
-          className={`text-right tabular-nums ${
-            estExtremeColonne(r.fundingPct, seuils.funding)
-              ? "font-semibold text-warn"
-              : r.fundingPct === undefined
-                ? "text-text-dim"
-                : r.fundingPct >= 0
-                  ? "text-up"
-                  : "text-down"
-          }`}
-        >
-          {formatPct(r.fundingPct, 4)}
-        </span>
-      ),
-    },
-    ...(showPositionCols
-      ? [
-          {
-            id: "oiChangePct",
-            label: "Δ OI",
-            align: "right" as const,
-            largeur: "0.7fr",
-            triable: true,
-            valeurTri: (l: ScreenerRow) => l.oiChangePct ?? null,
-            rendu: (r: ScreenerRow) => (
-              <span
-                className={`text-right tabular-nums ${
-                  estExtremeColonne(r.oiChangePct, seuils.deltaOi)
-                    ? "font-semibold text-warn"
-                    : r.oiChangePct === undefined
-                      ? "text-text-dim"
-                      : r.oiChangePct >= 0
-                        ? "text-up"
-                        : "text-down"
-                }`}
-              >
-                {r.oiChangePct === undefined ? "—" : formatPct(r.oiChangePct)}
+  const COLONNES_RESULTATS: ColonneTable<ScreenerRow>[] = useMemo(
+    () => [
+      {
+        id: "symbol",
+        label: "Symbole",
+        align: "left",
+        largeur: showPositionCols ? "1.3fr" : "1.4fr",
+        triable: true,
+        valeurTri: (l) => l.symbol,
+        rendu: (r) => (
+          <button
+            type="button"
+            onClick={() => ouvrirDansChart(r.symbol)}
+            className="truncate text-left font-medium text-text transition hover:text-up"
+            title={`Ouvrir ${r.symbol} dans le chart`}
+          >
+            {r.symbol}
+            {r.indicatorValues && r.indicatorValues.length > 0 && (
+              <span className="ml-1 text-[10px] font-normal text-text-dim">
+                {r.indicatorValues.map((v) => `${v.label} ${v.value.toFixed(2)}`).join(" · ")}
               </span>
-            ),
-          },
-          {
-            id: "longShortRatio",
-            label: "L/S",
-            align: "right" as const,
-            largeur: "0.7fr",
-            triable: true,
-            valeurTri: (l: ScreenerRow) => l.longShortRatio ?? null,
-            rendu: (r: ScreenerRow) => (
-              <span className="text-right tabular-nums text-text-dim">
-                {r.longShortRatio === undefined ? "—" : r.longShortRatio.toFixed(2)}
-              </span>
-            ),
-          },
-        ]
-      : []),
-    {
-      id: "wl",
-      label: "Wl",
-      align: "right",
-      largeur: "auto",
-      rendu: (r) => (
-        <button
-          type="button"
-          onClick={() => ajouterAWatchlist(r.symbol)}
-          aria-label={`Ajouter ${r.symbol} à la watchlist`}
-          className="rounded px-1 text-text-dim transition hover:text-up"
-          title="Ajouter à la watchlist"
-        >
-          ＋
-        </button>
-      ),
-    },
-  ];
+            )}
+          </button>
+        ),
+      },
+      {
+        id: "lastPrice",
+        label: "Prix",
+        align: "right",
+        largeur: showPositionCols ? "0.8fr" : "0.9fr",
+        triable: true,
+        valeurTri: (l) => l.lastPrice,
+        rendu: (r) => <span className="text-right tabular-nums text-text">{formatPrice(r.lastPrice)}</span>,
+      },
+      {
+        id: "priceChangePct24h",
+        label: "Δ24h",
+        align: "right",
+        largeur: showPositionCols ? "0.7fr" : "0.8fr",
+        triable: true,
+        valeurTri: (l) => l.priceChangePct24h,
+        rendu: (r) => (
+          <span className={`text-right tabular-nums ${r.priceChangePct24h >= 0 ? "text-up" : "text-down"}`}>
+            {formatPct(r.priceChangePct24h)}
+          </span>
+        ),
+      },
+      {
+        id: "volumeUsd24h",
+        label: "Vol 24h",
+        align: "right",
+        largeur: showPositionCols ? "0.8fr" : "0.9fr",
+        triable: true,
+        valeurTri: (l) => l.volumeUsd24h,
+        rendu: (r) => <span className="text-right tabular-nums text-text-dim">{formatUsd(r.volumeUsd24h)}</span>,
+      },
+      {
+        id: "fundingPct",
+        label: "Funding",
+        align: "right",
+        largeur: showPositionCols ? "0.75fr" : "0.9fr",
+        triable: true,
+        valeurTri: (l) => l.fundingPct ?? null,
+        rendu: (r) => (
+          <span
+            className={`text-right tabular-nums ${
+              estExtremeColonne(r.fundingPct, seuils.funding)
+                ? "font-semibold text-warn"
+                : r.fundingPct === undefined
+                  ? "text-text-dim"
+                  : r.fundingPct >= 0
+                    ? "text-up"
+                    : "text-down"
+            }`}
+          >
+            {formatPct(r.fundingPct, 4)}
+          </span>
+        ),
+      },
+      ...(showPositionCols
+        ? [
+            {
+              id: "oiChangePct",
+              label: "Δ OI",
+              align: "right" as const,
+              largeur: "0.7fr",
+              triable: true,
+              valeurTri: (l: ScreenerRow) => l.oiChangePct ?? null,
+              rendu: (r: ScreenerRow) => (
+                <span
+                  className={`text-right tabular-nums ${
+                    estExtremeColonne(r.oiChangePct, seuils.deltaOi)
+                      ? "font-semibold text-warn"
+                      : r.oiChangePct === undefined
+                        ? "text-text-dim"
+                        : r.oiChangePct >= 0
+                          ? "text-up"
+                          : "text-down"
+                  }`}
+                >
+                  {r.oiChangePct === undefined ? "—" : formatPct(r.oiChangePct)}
+                </span>
+              ),
+            },
+            {
+              id: "longShortRatio",
+              label: "L/S",
+              align: "right" as const,
+              largeur: "0.7fr",
+              triable: true,
+              valeurTri: (l: ScreenerRow) => l.longShortRatio ?? null,
+              rendu: (r: ScreenerRow) => (
+                <span className="text-right tabular-nums text-text-dim">
+                  {r.longShortRatio === undefined ? "—" : r.longShortRatio.toFixed(2)}
+                </span>
+              ),
+            },
+          ]
+        : []),
+      {
+        id: "wl",
+        label: "Wl",
+        align: "right",
+        largeur: "auto",
+        rendu: (r) => (
+          <button
+            type="button"
+            onClick={() => ajouterAWatchlist(r.symbol)}
+            aria-label={`Ajouter ${r.symbol} à la watchlist`}
+            className="rounded px-1 text-text-dim transition hover:text-up"
+            title="Ajouter à la watchlist"
+          >
+            ＋
+          </button>
+        ),
+      },
+    ],
+    [showPositionCols, seuils],
+  );
 
   const triees = useMemo(() => trierLignes(rows, COLONNES_RESULTATS, tri), [rows, tri, COLONNES_RESULTATS]);
 

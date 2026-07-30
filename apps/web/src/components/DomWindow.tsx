@@ -332,7 +332,7 @@ function dessinerDepth(ctx: CanvasRenderingContext2D, w: number, h: number, livr
 
   // Repères d'axes : bornes de prix + profondeur max.
   const dec = decimalesPas(pasArrondi(mid));
-  ctx.font = "10px ui-monospace, monospace";
+  ctx.font = POLICE_CANVAS_MONO;
   ctx.fillStyle = rgbCss(tk.textDim);
   ctx.textBaseline = "top";
   ctx.textAlign = "left";

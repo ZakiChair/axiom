@@ -32,7 +32,7 @@ import {
 import { cotStore } from "../store/cot";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { formatDateComplete } from "../lib/format";
-import { Chargement, EnTeteFenetre, ErreurBloc, NoteSource, Segmente } from "./ui";
+import { BoutonRafraichir, Chargement, EnTeteFenetre, ErreurBloc, NoteSource, Segmente } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -300,15 +300,10 @@ export function CotWindow() {
               actif={categorie}
               onChange={(id) => void cotStore.getState().setCategorie(id)}
             />
-            <button
-              type="button"
+            <BoutonRafraichir
               onClick={() => void cotStore.getState().rafraichir()}
-              aria-label="Rafraîchir le rapport COT"
-              title="Rafraîchir"
-              className="rounded p-1 text-sm leading-none text-text-dim transition hover:bg-bg hover:text-text"
-            >
-              ⟳
-            </button>
+              title="Rafraîchir le rapport COT"
+            />
           </>
         }
       />

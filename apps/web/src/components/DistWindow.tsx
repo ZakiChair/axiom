@@ -23,7 +23,8 @@ import { marketStore } from "../store/market";
 import { distOverlayStore } from "../chart/distLignes";
 import { distVar, HORIZONS, type NiveauxVar } from "../data/distVar";
 import { formatPrice, formatPct } from "../lib/format";
-import { Badge, EnTeteFenetre, Chargement, ErreurBloc, Fraicheur, NoteSource, Vide } from "./ui";
+import { Badge, BoutonBascule, BoutonRafraichir, EnTeteFenetre, Chargement, ErreurBloc, Fraicheur, NoteSource, Vide } from "./ui";
+import { TableTriable, type ColonneTable } from "./TableTriable";
 
 /** Seuil d'échantillon exigé par `distVar` (repris pour le message « insuffisant »). */
 const MIN_CLOSES = 300;
@@ -46,10 +47,10 @@ function teinteSigne(v: number): string {
 /** Une cellule prix + % teinté (empilés), tabular-nums pour l'alignement des chiffres. */
 function Cellule({ prix, pct }: { prix: number; pct: number }) {
   return (
-    <td className="px-3 py-1.5 text-right tabular-nums">
-      <div className="text-text">{formatPrice(prix)}</div>
-      <div className={`text-[10px] ${teinteSigne(pct)}`}>{formatPct(pct, 2)}</div>
-    </td>
+    <span className="block">
+      <span className="block text-text">{formatPrice(prix)}</span>
+      <span className={`block text-[10px] ${teinteSigne(pct)}`}>{formatPct(pct, 2)}</span>
+    </span>
   );
 }
 
@@ -58,6 +59,15 @@ interface Calcul {
   /** Nombre de closes FINIS disponibles (pour le message « insuffisant »). */
   nCloses: number;
 }
+
+/** Une ligne de la table : soit un quantile, soit la ligne CVaR95 (mise en avant). */
+interface LigneDist {
+  cle: string;
+  label: string;
+  cvar?: boolean;
+}
+
+const LIGNES_TABLE: LigneDist[] = [...LIGNES_QUANTILE, { cle: "cvar95", label: "CVaR95", cvar: true }];
 
 export function DistWindow() {
   const symbol = useStore(marketStore, (s) => s.symbol);
@@ -98,6 +108,29 @@ export function DistWindow() {
 
   const rafraichir = (): void => setRefreshTick((t) => t + 1);
 
+  // Une colonne par horizon (dynamique — dépend des horizons effectivement calculés).
+  const colonnesDist: ColonneTable<LigneDist>[] = useMemo(() => {
+    const niveaux = calcul.niveaux ?? [];
+    return [
+      {
+        id: "niveau",
+        label: "Niveau",
+        rendu: (l) => <span className={l.cvar ? "font-medium text-text" : "text-text-dim"}>{l.label}</span>,
+      },
+      ...niveaux.map((n): ColonneTable<LigneDist> => ({
+        id: `h${n.h}`,
+        label: `${n.h} b`,
+        align: "right",
+        rendu: (l) =>
+          l.cvar ? (
+            <Cellule prix={n.cvar95Niveau} pct={n.cvar95Pct} />
+          ) : (
+            <Cellule prix={n.niveaux[l.cle as keyof typeof n.niveaux]} pct={n.pct[l.cle as keyof typeof n.pct]} />
+          ),
+      })),
+    ];
+  }, [calcul.niveaux]);
+
   return (
     <>
       <EnTeteFenetre
@@ -114,31 +147,19 @@ export function DistWindow() {
         actions={
           <span className="flex items-center gap-2">
             {/* Overlay des bandes VaR (p5/p95 · p1/p99 de l'horizon 20 b) sur le chart maître. */}
-            <button
-              type="button"
+            <BoutonBascule
+              actif={overlayActif}
               onClick={() => distOverlayStore.getState().basculer()}
-              aria-pressed={overlayActif}
               title="Afficher les bandes VaR sur le chart maître"
-              className={`rounded border px-2 py-1 text-[11px] transition ${
-                overlayActif
-                  ? "border-accent/60 bg-accent/15 text-accent"
-                  : "border-border bg-bg text-text-dim hover:text-text"
-              }`}
             >
-              Bandes VaR {overlayActif ? "ON" : "OFF"}
-            </button>
-            <button
-              type="button"
-              onClick={rafraichir}
-              className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text"
-            >
-              ↻ Rafraîchir
-            </button>
+              Bandes VaR
+            </BoutonBascule>
+            <BoutonRafraichir onClick={rafraichir} />
           </span>
         }
       />
 
-      <div className="flex min-h-0 flex-1 flex-col px-4 py-4">
+      <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
         {enErreur ? (
           <ErreurBloc>Bougies du chart indisponibles ({dataLoad.error}).</ErreurBloc>
         ) : enChargement ? (
@@ -151,35 +172,11 @@ export function DistWindow() {
           </Vide>
         ) : (
           <div className="min-h-0 flex-1 overflow-auto">
-            <table className="w-full border-collapse text-[11px]">
-              <thead>
-                <tr className="border-b border-border text-text-dim">
-                  <th className="px-3 py-1.5 text-left font-medium">Niveau</th>
-                  {calcul.niveaux.map((n) => (
-                    <th key={n.h} className="px-3 py-1.5 text-right font-medium">
-                      {n.h} b
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {LIGNES_QUANTILE.map((ligne) => (
-                  <tr key={ligne.cle} className="border-b border-border/50">
-                    <td className="px-3 py-1.5 text-left text-text-dim">{ligne.label}</td>
-                    {calcul.niveaux!.map((n) => (
-                      <Cellule key={n.h} prix={n.niveaux[ligne.cle]} pct={n.pct[ligne.cle]} />
-                    ))}
-                  </tr>
-                ))}
-                {/* CVaR95 : moyenne de la queue ≤ p5 (perte attendue conditionnelle) — teintée down. */}
-                <tr className="border-t border-border">
-                  <td className="px-3 py-1.5 text-left font-medium text-text">CVaR95</td>
-                  {calcul.niveaux.map((n) => (
-                    <Cellule key={n.h} prix={n.cvar95Niveau} pct={n.cvar95Pct} />
-                  ))}
-                </tr>
-              </tbody>
-            </table>
+            <TableTriable<LigneDist>
+              colonnes={colonnesDist}
+              lignes={LIGNES_TABLE}
+              cle={(l) => l.cle}
+            />
           </div>
         )}
 

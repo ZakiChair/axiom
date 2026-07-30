@@ -18,11 +18,12 @@ import { useStore } from "zustand";
 import { cycleStore } from "../store/cycle";
 import { FENETRE_JOURS, statsCycle, type SerieCycle } from "../data/cycle";
 import { COMPARE_PALETTE } from "../store/compare";
-import { lireTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { zoneMvrvZ } from "../lib/zonesOnchain";
 import { formatDateCourte, formatDec, formatEntier, VALEUR_ABSENTE } from "../lib/format";
 import {
   Badge,
+  BoutonRafraichir,
   Chargement,
   EnTeteFenetre,
   ErreurBloc,
@@ -33,6 +34,7 @@ import {
   Vide,
   type TonBadge,
 } from "./ui";
+import { TableTriable, type ColonneTable } from "./TableTriable";
 
 /** Un jour en millisecondes (dates de halving et de sommet reconstruites depuis le jour post-halving). */
 const JOUR_MS = 86_400_000;
@@ -161,7 +163,7 @@ function dessiner(canvas: HTMLCanvasElement, series: readonly SerieCycle[]): voi
   const dom = domaineLog(series);
   const courant = cycleCourant(series);
 
-  ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
 
   // Grille horizontale : repères d'indice ronds dans le domaine + étiquettes Y à gauche (×N).
   ctx.textAlign = "right";
@@ -333,22 +335,85 @@ export function CycleWindow() {
   const drawdownCourant = statsCourant?.drawdownDepuisTopPct ?? null;
   const msProchainHalving = halving?.msEstimes ?? null;
 
+  const colonnesCycles: ColonneTable<SerieCycle>[] = useMemo(
+    () => [
+      {
+        id: "cycle",
+        label: "Cycle",
+        rendu: (s) => (
+          <span className="inline-flex items-center gap-1.5">
+            <span
+              className="inline-block h-2 w-2 rounded-full"
+              style={{ backgroundColor: couleurCycle(s.halvingIndex) }}
+            />
+            {libelleCycle(s.halvingMs)}
+            {s === courant && <span className="text-[9px] text-accent">courant</span>}
+          </span>
+        ),
+      },
+      {
+        id: "sommet",
+        label: "Sommet",
+        rendu: (s) => {
+          const st = statsCycle(s.points);
+          return (
+            <span className="text-text-dim">
+              {Number.isFinite(st.topJour) ? formatDateCourte(s.halvingMs + st.topJour * JOUR_MS) : VALEUR_ABSENTE}
+            </span>
+          );
+        },
+      },
+      {
+        id: "x",
+        label: "×",
+        rendu: (s) => {
+          const st = statsCycle(s.points);
+          return Number.isFinite(st.topIndice) ? `×${formatDec(st.topIndice, 1)}` : VALEUR_ABSENTE;
+        },
+      },
+      {
+        id: "jour",
+        label: "Jour",
+        rendu: (s) => {
+          const st = statsCycle(s.points);
+          return (
+            <span className="text-text-dim">
+              {Number.isFinite(st.topJour) ? `${formatEntier(st.topJour)} j` : VALEUR_ABSENTE}
+            </span>
+          );
+        },
+      },
+      {
+        id: "plancher",
+        label: "Plancher hist.",
+        rendu: (s) => {
+          const meta = CYCLE_META[s.halvingIndex];
+          return (
+            <span className="text-down">
+              {meta?.bottomPct != null ? `${formatEntier(meta.bottomPct)} % (${meta.anneeBottom})` : "en cours"}
+            </span>
+          );
+        },
+      },
+      {
+        id: "courant",
+        label: "Courant",
+        rendu: (s) => {
+          const st = statsCycle(s.points);
+          return Number.isFinite(st.indiceCourant) ? `×${formatDec(st.indiceCourant, 2)}` : VALEUR_ABSENTE;
+        },
+      },
+    ],
+    [courant],
+  );
+
   return (
     <>
       <EnTeteFenetre
         mnemo="CYCLE"
         titre="Cycle 4 ans (halving)"
         sousTitre="4 cycles alignés jour-0 · indice prix/halving (échelle log)"
-        actions={
-          <button
-            type="button"
-            onClick={rafraichir}
-            disabled={enCours}
-            className="rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            ↻ Rafraîchir
-          </button>
-        }
+        actions={<BoutonRafraichir onClick={rafraichir} disabled={enCours} />}
       />
 
       {/* Tuiles : jours depuis halving 2024, drawdown vs ATH, Mayer, MVRV, countdown halving. */}
@@ -434,54 +499,13 @@ export function CycleWindow() {
             </div>
 
             {/* Tableau par cycle : halving, sommet (date/×/jour), plancher historique, état courant. */}
-            <div className="mt-3 max-h-40 shrink-0 overflow-y-auto">
-              <table className="w-full text-[11px] tabular-nums">
-                <thead className="text-text-dim">
-                  <tr className="border-b border-border text-left">
-                    <th className="py-1 pr-2 font-medium">Cycle</th>
-                    <th className="py-1 pr-2 font-medium">Sommet</th>
-                    <th className="py-1 pr-2 font-medium">×</th>
-                    <th className="py-1 pr-2 font-medium">Jour</th>
-                    <th className="py-1 pr-2 font-medium">Plancher hist.</th>
-                    <th className="py-1 font-medium">Courant</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...series]
-                    .sort((a, b) => a.halvingIndex - b.halvingIndex)
-                    .map((s) => {
-                      const st = statsCycle(s.points);
-                      const meta = CYCLE_META[s.halvingIndex];
-                      const topDate = Number.isFinite(st.topJour)
-                        ? formatDateCourte(s.halvingMs + st.topJour * JOUR_MS)
-                        : VALEUR_ABSENTE;
-                      const estCourant = s === courant;
-                      return (
-                        <tr key={s.halvingIndex} className="border-b border-border/50">
-                          <td className="py-1 pr-2">
-                            <span className="inline-flex items-center gap-1.5">
-                              <span
-                                className="inline-block h-2 w-2 rounded-full"
-                                style={{ backgroundColor: couleurCycle(s.halvingIndex) }}
-                              />
-                              {libelleCycle(s.halvingMs)}
-                              {estCourant && <span className="text-[9px] text-accent">courant</span>}
-                            </span>
-                          </td>
-                          <td className="py-1 pr-2 text-text-dim">{topDate}</td>
-                          <td className="py-1 pr-2">{Number.isFinite(st.topIndice) ? `×${formatDec(st.topIndice, 1)}` : VALEUR_ABSENTE}</td>
-                          <td className="py-1 pr-2 text-text-dim">{Number.isFinite(st.topJour) ? `${formatEntier(st.topJour)} j` : VALEUR_ABSENTE}</td>
-                          <td className="py-1 pr-2 text-down">
-                            {meta?.bottomPct != null ? `${formatEntier(meta.bottomPct)} % (${meta.anneeBottom})` : "en cours"}
-                          </td>
-                          <td className="py-1">
-                            {Number.isFinite(st.indiceCourant) ? `×${formatDec(st.indiceCourant, 2)}` : VALEUR_ABSENTE}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
+            <div className="mt-3 shrink-0">
+              <TableTriable<SerieCycle>
+                colonnes={colonnesCycles}
+                lignes={[...series].sort((a, b) => a.halvingIndex - b.halvingIndex)}
+                cle={(s) => String(s.halvingIndex)}
+                maxHauteur="10rem"
+              />
             </div>
 
             <div className="mt-2 flex items-center justify-between gap-2">

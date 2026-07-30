@@ -44,7 +44,7 @@ const MOTIFS: Motif[] = [
     description: "<table> nu — utiliser TableTriable",
     regex: /<table\b/,
     exceptions: [
-      "CycleWindow.tsx", "DistWindow.tsx", "FundWindow.tsx", "FundingMatrixWindow.tsx",
+      "FundWindow.tsx", "FundingMatrixWindow.tsx",
       "brief/SectionSession.tsx", "brief/SectionWatchlist.tsx",
     ],
   },
@@ -77,7 +77,7 @@ const MOTIFS: Motif[] = [
     description: "classes de BTN_SECONDAIRE recopiées inline — utiliser <Bouton>",
     regex: /border-border bg-bg px-2 py-1 text-\[11px\] text-text-dim/,
     exceptions: [
-      "CbpremWindow.tsx", "CycleWindow.tsx", "DistWindow.tsx",
+      "CbpremWindow.tsx",
       "ExpyWindow.tsx", "MineWindow.tsx", "NetliqWindow.tsx", "SqueezeWindow.tsx",
     ],
   },
@@ -86,7 +86,7 @@ const MOTIFS: Motif[] = [
     description: "police canvas non standard — utiliser POLICE_CANVAS (canvasTokens)",
     regex: /(9px ui-sans-serif|11px ui-monospace|10px system-ui)/,
     exceptions: [
-      "CbpremWindow.tsx", "CycleWindow.tsx", "DomWindow.tsx", "ExpyWindow.tsx",
+      "CbpremWindow.tsx", "DomWindow.tsx", "ExpyWindow.tsx",
       "NetliqWindow.tsx", "SqueezeWindow.tsx", "TermStructureWindow.tsx",
     ],
   },

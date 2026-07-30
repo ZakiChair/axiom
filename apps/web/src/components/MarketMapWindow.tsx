@@ -25,9 +25,9 @@ import { marketMapUiStore } from "../store/marketmap-ui";
 import { fetchPairs } from "../data/pairs";
 import { squarify, type Rect, type Tuile } from "../lib/treemap";
 import { formatPct, formatPourcentage, formatUsd } from "../lib/format";
-import { lireTokensCanvas } from "../lib/canvasTokens";
+import { lireTokensCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { navigateTo } from "../lib/navigation";
-import { EnTeteFenetre, ErreurBloc, Fraicheur, NoteSource, Onglets } from "./ui";
+import { Chargement, EnTeteFenetre, ErreurBloc, Fraicheur, NoteSource, Onglets, Vide } from "./ui";
 import {
   fetchFearGreed,
   fetchMarketOverview,
@@ -163,7 +163,7 @@ function drawTooltip(
   tok: Tokens,
 ): void {
   const lignes = [t.name, `${formatUsd(t.price)} · ${formatPct(t.changePct24h)}`, `Cap. ${formatUsd(t.mcapUsd)}`];
-  ctx.font = "11px ui-sans-serif, system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
   const wBox = Math.max(...lignes.map((l) => ctx.measureText(l).width)) + 16;
   const hBox = lignes.length * 15 + 10;
   let bx = mx + 12;
@@ -189,8 +189,8 @@ function SectorsTab({ overview }: { overview: MarketOverview | null }) {
   const secteurs = (overview?.sectors ?? []).slice(0, MAX_SECTORS);
   if (secteurs.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-[11px] text-text-dim">
-        Secteurs indisponibles.
+      <div className="flex h-full items-center justify-center">
+        <Vide>Secteurs indisponibles.</Vide>
       </div>
     );
   }
@@ -440,8 +440,8 @@ export function MarketMapWindow() {
       {tab === "carte" ? (
         <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden">
           {(overview?.coins.length ?? 0) === 0 ? (
-            <div className="flex h-full items-center justify-center text-[11px] text-text-dim">
-              {loading ? "Chargement…" : "Carte indisponible."}
+            <div className="flex h-full items-center justify-center">
+              {loading ? <Chargement /> : <Vide>Carte indisponible.</Vide>}
             </div>
           ) : (
             <canvas

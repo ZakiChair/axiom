@@ -348,7 +348,7 @@ export function BriefWindow() {
         }
       />
 
-      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
         {/* Chapeau interprété (H16) : régime + nuit + funding + vol, puis lecture générée. */}
         <SectionChapeau regime={regime} chapeau={chapeau} phrasesLecture={phrasesLecture} />
 

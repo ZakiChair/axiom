@@ -181,7 +181,7 @@ export function ScenWindow() {
         }
       />
 
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto px-4 py-3">
         {vide ? (
           <Vide>
             Aucune position ouverte (portefeuille + paper). Ouvrez une position pour lancer un stress-test.

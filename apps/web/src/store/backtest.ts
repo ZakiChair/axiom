@@ -132,6 +132,7 @@ export const CATALOGUE_OPERANDES: OperandeSpec[] = [
   indFixe("stochastic", "d", "Stoch %D", { kLength: 14, dLength: 3 }),
   indFixe("supertrend", "direction", "Supertrend (direction)", { period: 10, multiplier: 3 }),
   indLen("adx", "adx", "ADX", 14),
+  indFixe("psar", "psar", "PSAR", { step: 0.02, max: 0.2 }),
 ];
 
 /** Résout une spec d'opérande par son id. */
@@ -231,6 +232,18 @@ const bollBasis = (): Operande => ({
 });
 const prixClose: Operande = { type: "prix", champ: "close" };
 const constante = (v: number): Operande => ({ type: "constante", valeur: v });
+const rsi14 = (): Operande => ({
+  type: "indicateur",
+  indicateurId: "rsi",
+  params: { length: 14 },
+  output: "rsi",
+});
+const psarDefaut = (): Operande => ({
+  type: "indicateur",
+  indicateurId: "psar",
+  params: { step: 0.02, max: 0.2 },
+  output: "psar",
+});
 
 /**
  * Presets livrés. Tous LONG-ONLY (convention des builtins) et NON supprimables.
@@ -341,6 +354,60 @@ export const BUILTIN_STRATEGIES: StrategiePreset[] = [
     ],
     reglesSortie: [
       { type: "comparaison", gauche: ema(9), comparateur: "<", droite: ema(21) },
+      { type: "comparaison", gauche: adx14(), comparateur: ">=", droite: constante(25) },
+    ],
+    builtin: true,
+  },
+  // Les trois presets v2.6 expriment les stratégies chart du même nom (Lot B).
+  // Limite du conjonctif assumée : leurs defs sortent quand N'IMPORTE QUELLE
+  // condition se retourne (OU), inexprimable en listes ET — la sortie retenue
+  // est le DÉCLENCHEUR inverse seul, le stop 5 % sert de filet quand c'est le
+  // filtre qui lâche en premier (même compromis documenté que mm-adx).
+  {
+    id: "builtin:macd-supertrend",
+    name: "MACD + direction Supertrend",
+    tf: "4h",
+    direction: "long",
+    tailleFixe: 1000,
+    stopPct: 5,
+    targetPct: null,
+    reglesEntree: [
+      { type: "comparaison", gauche: macdLigne(), comparateur: ">", droite: macdSignal() },
+      { type: "comparaison", gauche: supertrendDir(), comparateur: ">", droite: constante(0) },
+    ],
+    reglesSortie: [{ type: "comparaison", gauche: macdLigne(), comparateur: "<", droite: macdSignal() }],
+    builtin: true,
+  },
+  {
+    id: "builtin:triple-confirmation",
+    name: "Triple confirmation (ST + MACD + RSI)",
+    tf: "4h",
+    direction: "long",
+    tailleFixe: 1000,
+    stopPct: 5,
+    targetPct: null,
+    reglesEntree: [
+      { type: "comparaison", gauche: supertrendDir(), comparateur: ">", droite: constante(0) },
+      { type: "comparaison", gauche: macdLigne(), comparateur: ">", droite: macdSignal() },
+      { type: "comparaison", gauche: rsi14(), comparateur: ">", droite: constante(50) },
+    ],
+    reglesSortie: [{ type: "comparaison", gauche: macdLigne(), comparateur: "<", droite: macdSignal() }],
+    builtin: true,
+  },
+  {
+    id: "builtin:psar-adx",
+    name: "PSAR + ADX ≥ 25",
+    tf: "4h",
+    direction: "long",
+    tailleFixe: 1000,
+    stopPct: 5,
+    targetPct: null,
+    reglesEntree: [
+      { type: "comparaison", gauche: prixClose, comparateur: ">", droite: psarDefaut() },
+      { type: "comparaison", gauche: adx14(), comparateur: ">=", droite: constante(25) },
+    ],
+    reglesSortie: [
+      { type: "comparaison", gauche: prixClose, comparateur: "<", droite: psarDefaut() },
       { type: "comparaison", gauche: adx14(), comparateur: ">=", droite: constante(25) },
     ],
     builtin: true,

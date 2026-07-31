@@ -207,6 +207,15 @@ import { stratMmAdx } from "./strategy/stratMmAdx";
 import { stratPsar } from "./strategy/stratPsar";
 import { stratChampion } from "./strategy/stratChampion";
 
+// — stratégies (v2.6 — multi-indicateurs : 5 candidats promus + 2 nouvelles) —
+import { stratSupertrendAdx } from "./strategy/stratSupertrendAdx";
+import { stratMmRsi } from "./strategy/stratMmRsi";
+import { stratSqueezeKumo } from "./strategy/stratSqueezeKumo";
+import { stratMacdSupertrend } from "./strategy/stratMacdSupertrend";
+import { stratPsarAdx } from "./strategy/stratPsarAdx";
+import { stratTripleConfirmation } from "./strategy/stratTripleConfirmation";
+import { stratRsiRange } from "./strategy/stratRsiRange";
+
 export const INDICATORS: IndicatorDef[] = [
   // trend
   adx,
@@ -392,6 +401,14 @@ export const INDICATORS: IndicatorDef[] = [
   stratMmAdx,
   stratPsar,
   stratChampion,
+  // — stratégies (v2.6 — multi-indicateurs)
+  stratSupertrendAdx,
+  stratMmRsi,
+  stratSqueezeKumo,
+  stratMacdSupertrend,
+  stratPsarAdx,
+  stratTripleConfirmation,
+  stratRsiRange,
 ];
 
 export function getIndicator(id: string): IndicatorDef | undefined {

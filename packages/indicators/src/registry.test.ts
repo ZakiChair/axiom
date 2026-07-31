@@ -17,8 +17,8 @@ const VALID_CATEGORIES = new Set<IndicatorCategory>([
 ]);
 
 describe("registry", () => {
-  it("câble exactement 172 indicateurs", () => {
-    expect(INDICATORS.length).toBe(172);
+  it("câble exactement 179 indicateurs", () => {
+    expect(INDICATORS.length).toBe(179);
   });
 
   it("n'a aucun id dupliqué", () => {
@@ -41,14 +41,16 @@ describe("registry", () => {
     expect(getIndicator("__inexistant__")).toBeUndefined();
   });
 
-  it("catégorie strategy : les 8 defs v2.1 déplacés + les 7 stratégies v2.2 + les 5 stratégies v2.3", () => {
+  it("catégorie strategy : 8 defs v2.1 déplacés + 7 stratégies v2.2 + 5 v2.3 + 7 v2.6", () => {
     const strategie = INDICATORS.filter((def) => def.category === "strategy").map((d) => d.id);
     expect(strategie.sort()).toEqual([
       "cvdDivergence", "cvdSpotPerp", "macdDivergence", "mfiDivergence",
       "obvDivergence", "premiumSpotPerp", "rsiDivergence", "stochDivergence",
       "stratBollingerReversion", "stratChampion", "stratCroisementMM", "stratDivergenceRsi",
-      "stratDonchian", "stratIchimokuKumo", "stratMacdCross", "stratMmAdx",
-      "stratPsar", "stratRsiReversion", "stratSqueezeBreakout", "stratSupertrend",
+      "stratDonchian", "stratIchimokuKumo", "stratMacdCross", "stratMacdSupertrend",
+      "stratMmAdx", "stratMmRsi", "stratPsar", "stratPsarAdx",
+      "stratRsiRange", "stratRsiReversion", "stratSqueezeBreakout", "stratSqueezeKumo",
+      "stratSupertrend", "stratSupertrendAdx", "stratTripleConfirmation",
     ]);
   });
 });

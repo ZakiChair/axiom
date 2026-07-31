@@ -13,13 +13,13 @@ import { volOf, sma } from "../utils";
 
 export const volumeMa: IndicatorDef = {
   id: "volumeMa",
-  name: "Volume MA",
+  name: "MM Volume",
   category: "volume",
   pane: "separate",
   inputs: [
     { key: "length", name: "Longueur", type: "number", default: 20, min: 1 },
   ],
-  outputs: [{ key: "volumeMa", name: "Volume MA", style: "line" }],
+  outputs: [{ key: "volumeMa", name: "MM Volume", style: "line" }],
   calc(candles, params) {
     const length = Number(params.length ?? 20);
     const out = sma(volOf(candles), length);

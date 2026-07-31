@@ -35,7 +35,7 @@ export const fisher: IndicatorDef = {
   ],
   outputs: [
     { key: "fisher", name: "Fisher", style: "line" },
-    { key: "trigger", name: "Trigger", style: "line" },
+    { key: "trigger", name: "Déclencheur", style: "line" },
   ],
 
   calc(candles, params, ctx) {

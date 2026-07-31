@@ -17,7 +17,7 @@ import { volOf, ema } from "../utils";
 
 export const volumeOsc: IndicatorDef = {
   id: "volumeOsc",
-  name: "Volume Oscillator",
+  name: "Oscillateur de volume",
   category: "volume",
   pane: "separate",
   inputs: [

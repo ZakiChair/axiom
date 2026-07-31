@@ -33,17 +33,17 @@ import { closeOf } from "../utils";
 
 export const stdErrorBands: IndicatorDef = {
   id: "stdErrorBands",
-  name: "Standard Error Bands",
+  name: "Bandes d'erreur type",
   category: "volatility",
   pane: "overlay",
   inputs: [
-    { key: "length", name: "Length", type: "number", default: 21, min: 3 },
-    { key: "mult", name: "Multiplier", type: "number", default: 2, min: 0 },
+    { key: "length", name: "Longueur", type: "number", default: 21, min: 3 },
+    { key: "mult", name: "Multiplicateur", type: "number", default: 2, min: 0 },
   ],
   outputs: [
-    { key: "basis", name: "Basis", style: "line" },
-    { key: "upper", name: "Upper", style: "line" },
-    { key: "lower", name: "Lower", style: "line" },
+    { key: "basis", name: "Médiane", style: "line" },
+    { key: "upper", name: "Bande haute", style: "line" },
+    { key: "lower", name: "Bande basse", style: "line" },
   ],
 
   calc(

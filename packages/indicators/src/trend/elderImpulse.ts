@@ -19,8 +19,8 @@ export const elderImpulse: IndicatorDef = {
   precision: 0,
   inputs: [
     { key: "emaLength", name: "EMA", type: "number", default: 13, min: 2, max: 100 },
-    { key: "macdFast", name: "MACD fast", type: "number", default: 12, min: 2, max: 50 },
-    { key: "macdSlow", name: "MACD slow", type: "number", default: 26, min: 3, max: 100 },
+    { key: "macdFast", name: "MACD rapide", type: "number", default: 12, min: 2, max: 50 },
+    { key: "macdSlow", name: "MACD lente", type: "number", default: 26, min: 3, max: 100 },
     { key: "macdSignal", name: "MACD signal", type: "number", default: 9, min: 2, max: 50 },
     {
       key: "source",

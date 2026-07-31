@@ -25,7 +25,7 @@ import { utcDayOf } from "../utils-session";
 
 export const vwapBands: IndicatorDef = {
   id: "vwapBands",
-  name: "VWAP Bands",
+  name: "Bandes VWAP",
   category: "volume",
   pane: "overlay",
   inputs: [

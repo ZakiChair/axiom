@@ -12,13 +12,13 @@ import type { IndicatorDef } from "@axiom/types";
 
 export const stablecoinSupply: IndicatorDef = {
   id: "stablecoinSupply",
-  name: "Stablecoin Supply",
+  name: "Offre de stablecoins",
   category: "derivatives",
   pane: "separate",
   aux: ["stablecoins"],
   minTimeframe: "1d",
   inputs: [],
-  outputs: [{ key: "stablecoinSupply", name: "Stablecoin Supply", style: "line" }],
+  outputs: [{ key: "stablecoinSupply", name: "Offre de stablecoins", style: "line" }],
   calc(candles, _params, ctx) {
     const n = candles.length;
     const series = ctx.aux?.stablecoins;

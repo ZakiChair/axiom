@@ -12,7 +12,7 @@ import { closeOf } from "../utils";
 
 export const efficiencyRatio: IndicatorDef = {
   id: "efficiencyRatio",
-  name: "Efficiency Ratio (Kaufman)",
+  name: "Ratio d'efficacité (Kaufman)",
   category: "trend",
   pane: "separate",
   inputs: [

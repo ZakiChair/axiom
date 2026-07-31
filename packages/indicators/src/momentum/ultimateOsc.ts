@@ -27,9 +27,9 @@ export const ultimateOsc: IndicatorDef = {
   category: "momentum",
   pane: "separate",
   inputs: [
-    { key: "fast", name: "Fast", type: "number", default: 7, min: 1 },
+    { key: "fast", name: "Rapide", type: "number", default: 7, min: 1 },
     { key: "mid", name: "Mid", type: "number", default: 14, min: 1 },
-    { key: "slow", name: "Slow", type: "number", default: 28, min: 1 },
+    { key: "slow", name: "Lente", type: "number", default: 28, min: 1 },
   ],
   outputs: [{ key: "uo", name: "UO", style: "line" }],
 

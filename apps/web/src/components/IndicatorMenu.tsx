@@ -53,7 +53,6 @@ const CATEGORY_LABELS: Partial<Record<IndicatorCategory, string>> = {
   statistical: "Statistiques",
   support_resistance: "Support / Résistance",
   billwilliams: "Bill Williams",
-  custom: "Personnalisés",
 };
 
 /**
@@ -71,8 +70,69 @@ const CATEGORY_ORDER: IndicatorCategory[] = [
   "statistical",
   "support_resistance",
   "billwilliams",
-  "custom",
 ];
+
+/**
+ * Sous-groupes d'AFFICHAGE de la catégorie Dérivés (classement produit, pas un
+ * type) : la catégorie mélange trois natures que le menu sépare — dérivés perp
+ * (funding/OI/basis), métriques on-chain BTC et positionnement (ratios L/S).
+ * Table exhaustive : un def `derivatives` absent d'ici fait échouer le test
+ * jumeau (IndicatorMenu.sousGroupes.test.ts) — classer avant de câbler.
+ */
+export const SOUS_GROUPES_DERIVES: Record<string, "perp" | "onchain" | "positionnement"> = {
+  openInterest: "perp",
+  fundingRate: "perp",
+  fundingZScore: "perp",
+  fundingApr: "perp",
+  fundingNotional: "perp",
+  oiChange: "perp",
+  basisPct: "perp",
+  quarterlyBasis: "perp",
+  nvt: "onchain",
+  mvrv: "onchain",
+  mvrvZScore: "onchain",
+  nupl: "onchain",
+  puell: "onchain",
+  sopr: "onchain",
+  asopr: "onchain",
+  sthSopr: "onchain",
+  lthSopr: "onchain",
+  reserveRisk: "onchain",
+  rhodlRatio: "onchain",
+  cvdd: "onchain",
+  balancedPrice: "onchain",
+  realizedPrice: "onchain",
+  ssr: "onchain",
+  stablecoinSupply: "onchain",
+  lsAccountRatio: "positionnement",
+  lsTopTraderRatio: "positionnement",
+  takerBuySellRatio: "positionnement",
+};
+
+const LIBELLES_SOUS_GROUPES_DERIVES: Record<"perp" | "onchain" | "positionnement", string> = {
+  perp: "Dérivés perp",
+  onchain: "On-chain",
+  positionnement: "Positionnement",
+};
+
+/**
+ * Découpe une section du catalogue en sous-groupes d'affichage : seule la
+ * catégorie Dérivés en a ; les autres rendent un unique groupe sans sous-titre.
+ * PURE (testée) — un def derivatives non classé retombe dans « Dérivés perp ».
+ */
+export function groupesAffichage(
+  cat: IndicatorCategory,
+  defs: IndicatorDef[],
+): Array<[string | null, IndicatorDef[]]> {
+  if (cat !== "derivatives") return [[null, defs]];
+  const ordre = ["perp", "onchain", "positionnement"] as const;
+  const groupes: Array<[string | null, IndicatorDef[]]> = [];
+  for (const g of ordre) {
+    const liste = defs.filter((d) => (SOUS_GROUPES_DERIVES[d.id] ?? "perp") === g);
+    if (liste.length > 0) groupes.push([LIBELLES_SOUS_GROUPES_DERIVES[g], liste]);
+  }
+  return groupes;
+}
 
 /** Regroupe les définitions par catégorie, dans l'ordre déclaré ci-dessus. */
 function groupByCategory(defs: IndicatorDef[]): Array<[IndicatorCategory, IndicatorDef[]]> {
@@ -499,7 +559,14 @@ export function IndicatorMenu() {
                     })()}
 
                   {!isCollapsed &&
-                    defs.map((def) => {
+                    groupesAffichage(cat, defs).map(([sousTitre, defsGroupe]) => (
+                      <div key={sousTitre ?? "tous"}>
+                        {sousTitre !== null && (
+                          <div className="px-2 pb-0.5 pt-1.5 text-[10px] uppercase tracking-[0.12em] text-neutral-600">
+                            {sousTitre}
+                          </div>
+                        )}
+                        {defsGroupe.map((def) => {
                       const count = countByDef.get(def.id) ?? 0;
                       const disabledSynthetic = exchange === "synthetic" && def.id === "volume";
                       // Grisage par TF minimal (Task 14) : def dérivé (OI/funding/NVT/MVRV…)
@@ -540,7 +607,9 @@ export function IndicatorMenu() {
                           </span>
                         </button>
                       );
-                    })}
+                        })}
+                      </div>
+                    ))}
                 </div>
               );
             })}

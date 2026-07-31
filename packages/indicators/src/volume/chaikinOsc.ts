@@ -21,8 +21,8 @@ export const chaikinOsc: IndicatorDef = {
   category: "volume",
   pane: "separate",
   inputs: [
-    { key: "fast", name: "Fast", type: "number", default: 3, min: 1 },
-    { key: "slow", name: "Slow", type: "number", default: 10, min: 1 },
+    { key: "fast", name: "Rapide", type: "number", default: 3, min: 1 },
+    { key: "slow", name: "Lente", type: "number", default: 10, min: 1 },
   ],
   outputs: [{ key: "chaikinOsc", name: "Chaikin Osc", style: "line" }],
   calc(candles, params) {

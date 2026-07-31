@@ -78,10 +78,6 @@ import { fearGreed } from "./momentum/fearGreed";
 import { disparity } from "./momentum/disparity";
 import { btcDominance } from "./momentum/btcDominance";
 import { kdj } from "./momentum/kdj";
-import { rsiDivergence } from "./momentum/rsiDivergence";
-import { macdDivergence } from "./momentum/macdDivergence";
-import { stochDivergence } from "./momentum/stochDivergence";
-import { mfiDivergence } from "./momentum/mfiDivergence";
 
 // — volatility —
 import { atr } from "./volatility/atr";
@@ -113,15 +109,14 @@ import { rollingCorrelation } from "./statistical/rollingCorrelation";
 import { betaRef } from "./statistical/betaRef";
 import { spreadZScore } from "./statistical/spreadZScore";
 
-// — volume + orderflow (fichiers sous volume/ ou orderflow/ selon la catégorie UI) —
+// — volume —
 import { adLine } from "./volume/adLine";
-import { anchoredVwap } from "./volume/anchored-vwap";
+import { anchoredVwap } from "./volume/anchoredVwap";
 import { chaikinOsc } from "./volume/chaikinOsc";
 import { cmf } from "./volume/cmf";
 import { klinger } from "./volume/klinger";
 import { nvi } from "./volume/nvi";
 import { obv } from "./volume/obv";
-import { obvDivergence } from "./volume/obvDivergence";
 import { pvi } from "./volume/pvi";
 import { pvt } from "./volume/pvt";
 import { volume } from "./volume/volume";
@@ -129,16 +124,16 @@ import { volumeMa } from "./volume/volumeMa";
 import { volumeOsc } from "./volume/volumeOsc";
 import { vwap } from "./volume/vwap";
 import { vwapBands } from "./volume/vwapBands";
-import { cvd } from "./orderflow/cvd";
-import { cvdDivergence } from "./orderflow/cvdDivergence";
-import { volumeDelta } from "./volume/volumeDelta";
-import { takerBuyRatio } from "./volume/takerBuyRatio";
-import { cvdSpotPerp } from "./orderflow/cvdSpotPerp";
 import { relativeVolume } from "./volume/relativeVolume";
 import { volumeZScore } from "./volume/volumeZScore";
-import { netVolume } from "./volume/netVolume";
 import { twiggsMf } from "./volume/twiggsMf";
 import { vfi } from "./volume/vfi";
+
+// — orderflow —
+import { cvd } from "./orderflow/cvd";
+import { volumeDelta } from "./orderflow/volumeDelta";
+import { takerBuyRatio } from "./orderflow/takerBuyRatio";
+import { netVolume } from "./orderflow/netVolume";
 
 // — billwilliams —
 import { alligator } from "./billwilliams/alligator";
@@ -167,7 +162,6 @@ import { stablecoinSupply } from "./derivatives/stablecoinSupply";
 import { fundingApr } from "./derivatives/fundingApr";
 import { oiChange } from "./derivatives/oiChange";
 import { basisPct } from "./derivatives/basisPct";
-import { premiumSpotPerp } from "./derivatives/premiumSpotPerp";
 import { mvrvZScore } from "./derivatives/mvrvZScore";
 import { fundingNotional } from "./derivatives/fundingNotional";
 import { ssr } from "./derivatives/ssr";
@@ -186,6 +180,16 @@ import { lthSopr } from "./derivatives/lthSopr";
 import { rhodlRatio } from "./derivatives/rhodlRatio";
 import { cvdd } from "./derivatives/cvdd";
 import { balancedPrice } from "./derivatives/balancedPrice";
+
+// — stratégies (v2.1 — divergences & spot/perp reclassés) —
+import { rsiDivergence } from "./strategy/rsiDivergence";
+import { macdDivergence } from "./strategy/macdDivergence";
+import { stochDivergence } from "./strategy/stochDivergence";
+import { mfiDivergence } from "./strategy/mfiDivergence";
+import { obvDivergence } from "./strategy/obvDivergence";
+import { cvdDivergence } from "./strategy/cvdDivergence";
+import { cvdSpotPerp } from "./strategy/cvdSpotPerp";
+import { premiumSpotPerp } from "./strategy/premiumSpotPerp";
 
 // — stratégies (v2.2) —
 import { stratCroisementMM } from "./strategy/stratCroisementMM";
@@ -270,10 +274,6 @@ export const INDICATORS: IndicatorDef[] = [
   disparity,
   btcDominance,
   kdj,
-  rsiDivergence,
-  macdDivergence,
-  stochDivergence,
-  mfiDivergence,
   // volatility
   atr,
   atrRegime,
@@ -310,7 +310,6 @@ export const INDICATORS: IndicatorDef[] = [
   klinger,
   nvi,
   obv,
-  obvDivergence,
   pvi,
   pvt,
   volume,
@@ -324,11 +323,9 @@ export const INDICATORS: IndicatorDef[] = [
   vfi,
   // orderflow (menu dédié — edge crypto)
   cvd,
-  cvdDivergence,
   volumeDelta,
   takerBuyRatio,
   netVolume,
-  cvdSpotPerp,
   // billwilliams
   alligator,
   fractals,
@@ -354,7 +351,6 @@ export const INDICATORS: IndicatorDef[] = [
   fundingApr,
   oiChange,
   basisPct,
-  premiumSpotPerp,
   mvrvZScore,
   fundingNotional,
   ssr,
@@ -373,6 +369,15 @@ export const INDICATORS: IndicatorDef[] = [
   rhodlRatio,
   cvdd,
   balancedPrice,
+  // — stratégies (v2.1 — divergences & spot/perp reclassés)
+  rsiDivergence,
+  macdDivergence,
+  stochDivergence,
+  mfiDivergence,
+  obvDivergence,
+  cvdDivergence,
+  cvdSpotPerp,
+  premiumSpotPerp,
   // — stratégies (v2.2)
   stratCroisementMM,
   stratRsiReversion,

@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — volume/takerBuyRatio.ts
+ * @axiom/indicators — orderflow/takerBuyRatio.ts
  *
  * Ratio agresseur acheteur = buyVolume / (buyVolume + sellVolume) ∈ [0, 1].
  * 0,5 = équilibre ; > 0,5 pression acheteuse. Sans volumes split → undefined.

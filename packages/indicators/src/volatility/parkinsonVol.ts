@@ -16,14 +16,14 @@ const INV_4LN2 = 1 / (4 * Math.LN2);
 
 export const parkinsonVol: IndicatorDef = {
   id: "parkinsonVol",
-  name: "Vol. Parkinson",
+  name: "Volatilité de Parkinson",
   category: "volatility",
   pane: "separate",
   inputs: [
     { key: "length", name: "Longueur", type: "number", default: 20, min: 2, max: 200 },
     {
       key: "periodsPerYear",
-      name: "Périodes/an",
+      name: "Périodes par an",
       type: "number",
       default: 365,
       min: 1,

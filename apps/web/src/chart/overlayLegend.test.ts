@@ -16,7 +16,7 @@ describe("overlayIndicators", () => {
     const result = overlayIndicators(indicators);
     expect(result).toHaveLength(1);
     expect(result[0]?.instanceId).toBe("vwap-1");
-    expect(result[0]?.label).toContain("Anchored VWAP");
+    expect(result[0]?.label).toContain("VWAP ancré");
   });
 
   it("exclut une instance à pane séparé (rsi)", () => {

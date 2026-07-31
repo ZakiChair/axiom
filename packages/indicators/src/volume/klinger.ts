@@ -29,8 +29,8 @@ export const klinger: IndicatorDef = {
   category: "volume",
   pane: "separate",
   inputs: [
-    { key: "fast", name: "Fast", type: "number", default: 34, min: 1 },
-    { key: "slow", name: "Slow", type: "number", default: 55, min: 1 },
+    { key: "fast", name: "Rapide", type: "number", default: 34, min: 1 },
+    { key: "slow", name: "Lente", type: "number", default: 55, min: 1 },
     { key: "signal", name: "Signal", type: "number", default: 13, min: 1 },
   ],
   outputs: [

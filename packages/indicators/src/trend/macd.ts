@@ -83,8 +83,8 @@ export const macd: IndicatorDef = {
   category: "trend",
   pane: "separate",
   inputs: [
-    { key: "fast", name: "Fast", type: "number", default: 12, min: 1 },
-    { key: "slow", name: "Slow", type: "number", default: 26, min: 1 },
+    { key: "fast", name: "Rapide", type: "number", default: 12, min: 1 },
+    { key: "slow", name: "Lente", type: "number", default: 26, min: 1 },
     { key: "signal", name: "Signal", type: "number", default: 9, min: 1 },
     {
       key: "source",

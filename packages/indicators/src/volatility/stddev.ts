@@ -23,13 +23,13 @@ import { closeOf, stdev } from "../utils";
 
 export const stddev: IndicatorDef = {
   id: "stddev",
-  name: "Standard Deviation",
+  name: "Écart-type",
   category: "volatility",
   pane: "separate",
   inputs: [
-    { key: "length", name: "Length", type: "number", default: 20, min: 1 },
+    { key: "length", name: "Longueur", type: "number", default: 20, min: 1 },
   ],
-  outputs: [{ key: "stddev", name: "StdDev", style: "line" }],
+  outputs: [{ key: "stddev", name: "Écart-type", style: "line" }],
 
   calc(
     candles: Candle[],

@@ -20,7 +20,7 @@ export const gannHilo: IndicatorDef = {
   name: "Gann HiLo Activator",
   category: "trend",
   pane: "overlay",
-  inputs: [{ key: "length", name: "Length", type: "number", default: 10, min: 1 }],
+  inputs: [{ key: "length", name: "Longueur", type: "number", default: 10, min: 1 }],
   outputs: [{ key: "hilo", name: "HiLo", style: "line" }],
   calc(candles: Candle[], params: Record<string, number | boolean | string>, _ctx: CalcContext): IndicatorResult {
     const length = Number(params.length);

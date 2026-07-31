@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — orderflow/cvdSpotPerp.ts
+ * @axiom/indicators — strategy/cvdSpotPerp.ts
  *
  * CVD spot vs perp — compare le flux agresseur cumulé du spot (champs taker des
  * bougies) à celui du perp (série auxiliaire `perpDelta`, delta agresseur perp
@@ -39,7 +39,7 @@
 
 import type { AnnotationsIndicateur, IndicatorDef, MarqueurAnnotation } from "@axiom/types";
 import { stdev } from "../utils";
-import { detecterDivergencesSpotPerp } from "./divergenceSpotPerp";
+import { detecterDivergencesSpotPerp } from "../orderflow/divergenceSpotPerp";
 
 /** Plancher fixe d'échantillons requis pour un écart-type exploitable. */
 const MIN_POINTS_STDEV = 20;
@@ -146,9 +146,9 @@ export const cvdSpotPerp: IndicatorDef = {
     { key: "fenetreDiv", name: "Fenêtre divergence", type: "number", default: 14, min: 2, max: 100 },
   ],
   outputs: [
-    { key: "cvdSpot", name: "CVD Spot", style: "line", color: "#26a69a" },
-    { key: "cvdPerp", name: "CVD Perp", style: "line", color: "#ef5350" },
-    { key: "divergence", name: "Divergence", style: "histogram", color: "rgba(120, 123, 134, 0.5)" },
+    { key: "cvdSpot", name: "CVD Spot", style: "line" },
+    { key: "cvdPerp", name: "CVD Perp", style: "line" },
+    { key: "divergence", name: "Divergence", style: "histogram" },
   ],
   precision: 2,
   calc(candles, params, ctx) {

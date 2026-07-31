@@ -11,7 +11,7 @@ import type { Candle } from "@axiom/types";
 import { computeIndicator } from "../engine";
 import { construireAnnotationsDivergence } from "../utils-annotations";
 import { highOf, lowOf } from "../utils";
-import { obvOf } from "./obv";
+import { obvOf } from "../volume/obv";
 import { obvDivergence } from "./obvDivergence";
 
 /** Série linéaire par morceaux : coins aux points de contrôle, monotone entre eux. */

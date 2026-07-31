@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — volume/volumeDelta.ts
+ * @axiom/indicators — orderflow/volumeDelta.ts
  *
  * Delta de volume par bougie : buyVolume − sellVolume (histogramme).
  * Complément du CVD (qui cumule). Sans buy/sell → undefined sur la barre.

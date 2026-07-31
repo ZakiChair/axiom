@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — momentum/macdDivergence.ts
+ * @axiom/indicators — strategy/macdDivergence.ts
  *
  * Divergences MACD ↔ prix (lot v2.1, via la fabrique commune). L'oscillateur est
  * au choix la LIGNE MACD (défaut — la lecture canonique en divergence) ou
@@ -12,13 +12,13 @@ import { macdOf } from "../trend/macd";
 
 export const macdDivergence = defDivergenceOscillateur({
   id: "macdDivergence",
-  name: "MACD Divergence",
+  name: "Divergence MACD",
   category: "strategy",
   precision: 4,
   serieOsc: { key: "osc", name: "MACD" },
   inputsOsc: [
-    { key: "fast", name: "Fast", type: "number", default: 12, min: 1 },
-    { key: "slow", name: "Slow", type: "number", default: 26, min: 1 },
+    { key: "fast", name: "Rapide", type: "number", default: 12, min: 1 },
+    { key: "slow", name: "Lente", type: "number", default: 26, min: 1 },
     { key: "signal", name: "Signal", type: "number", default: 9, min: 1 },
     {
       key: "source", name: "Source", type: "source", default: "close",

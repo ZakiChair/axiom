@@ -10,7 +10,7 @@ import type { Candle } from "@axiom/types";
 import { computeIndicator } from "../engine";
 import { construireAnnotationsDivergence } from "../utils-annotations";
 import { highOf, lowOf } from "../utils";
-import { cvdOf } from "./cvd";
+import { cvdOf } from "../orderflow/cvd";
 import { cvdDivergence } from "./cvdDivergence";
 
 const FORMATEUR = (v: number) => v.toFixed(0);

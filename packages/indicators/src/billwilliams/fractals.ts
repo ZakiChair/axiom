@@ -24,13 +24,13 @@ import { highOf, lowOf } from "../utils";
 
 export const fractals: IndicatorDef = {
   id: "fractals",
-  name: "Fractals",
+  name: "Fractales",
   category: "billwilliams",
   pane: "overlay",
   inputs: [],
   outputs: [
-    { key: "up", name: "Up Fractal", style: "points" },
-    { key: "down", name: "Down Fractal", style: "points" },
+    { key: "up", name: "Fractale haute", style: "points" },
+    { key: "down", name: "Fractale basse", style: "points" },
   ],
 
   calc(

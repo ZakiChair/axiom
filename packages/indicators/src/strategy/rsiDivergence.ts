@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — momentum/rsiDivergence.ts
+ * @axiom/indicators — strategy/rsiDivergence.ts
  *
  * Divergences RSI ↔ prix, v2 (lot v2.1) : pane SÉPARÉ portant la courbe RSI,
  * segments pivot→pivot sur le RSI (cible "pane") ET sur le prix (cible "prix",
@@ -11,11 +11,11 @@
  */
 
 import { defDivergenceOscillateur } from "../utils-fabrique-divergence";
-import { rsiOf } from "./rsi";
+import { rsiOf } from "../momentum/rsi";
 
 export const rsiDivergence = defDivergenceOscillateur({
   id: "rsiDivergence",
-  name: "RSI Divergence",
+  name: "Divergence RSI",
   category: "strategy",
   precision: 2,
   serieOsc: { key: "rsi", name: "RSI" },

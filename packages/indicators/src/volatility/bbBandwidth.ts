@@ -28,12 +28,12 @@ import { closeOf, sma, stdev } from "../utils";
 
 export const bbBandwidth: IndicatorDef = {
   id: "bbBandwidth",
-  name: "Bollinger Bandwidth",
+  name: "Largeur de bande Bollinger",
   category: "volatility",
   pane: "separate",
   inputs: [
-    { key: "length", name: "Length", type: "number", default: 20, min: 1 },
-    { key: "mult", name: "StdDev", type: "number", default: 2, min: 0 },
+    { key: "length", name: "Longueur", type: "number", default: 20, min: 1 },
+    { key: "mult", name: "Multiplicateur σ", type: "number", default: 2, min: 0 },
   ],
   outputs: [{ key: "bandwidth", name: "Bandwidth", style: "line" }],
 

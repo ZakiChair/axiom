@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — volume/anchored-vwap.ts
+ * @axiom/indicators — volume/anchoredVwap.ts
  *
  * Anchored VWAP — VWAP cumulée à partir d'un point d'ancrage choisi.
  *
@@ -46,7 +46,7 @@ function anchorIndexFromTime(candles: ReadonlyArray<Candle>, anchorTime: number)
 
 export const anchoredVwap: IndicatorDef = {
   id: "anchoredVwap",
-  name: "Anchored VWAP",
+  name: "VWAP ancré",
   category: "volume",
   pane: "overlay",
   inputs: [
@@ -58,7 +58,7 @@ export const anchoredVwap: IndicatorDef = {
       min: 0,
     },
   ],
-  outputs: [{ key: "anchoredVwap", name: "Anchored VWAP", style: "line" }],
+  outputs: [{ key: "anchoredVwap", name: "VWAP ancré", style: "line" }],
 
   calc(candles, params, ctx) {
     const n = candles.length;

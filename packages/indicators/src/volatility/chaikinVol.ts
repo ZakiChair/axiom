@@ -26,11 +26,11 @@ import { ema, highOf, lowOf } from "../utils";
 
 export const chaikinVol: IndicatorDef = {
   id: "chaikinVol",
-  name: "Chaikin Volatility",
+  name: "Volatilité de Chaikin",
   category: "volatility",
   pane: "separate",
   inputs: [
-    { key: "emaLength", name: "EMA Length", type: "number", default: 10, min: 1 },
+    { key: "emaLength", name: "Longueur EMA", type: "number", default: 10, min: 1 },
     { key: "rocLength", name: "ROC Length", type: "number", default: 10, min: 1 },
   ],
   outputs: [{ key: "chaikinVol", name: "Chaikin Vol %", style: "line" }],

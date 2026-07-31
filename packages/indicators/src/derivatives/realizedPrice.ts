@@ -15,7 +15,7 @@ import type { IndicatorDef } from "@axiom/types";
 
 export const realizedPrice: IndicatorDef = {
   id: "realizedPrice",
-  name: "Realized Price (on-chain)",
+  name: "Prix réalisé (on-chain)",
   category: "derivatives",
   pane: "overlay",
   aux: ["realizedPrice"],

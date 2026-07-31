@@ -35,7 +35,7 @@ export const massIndex: IndicatorDef = {
   category: "volatility",
   pane: "separate",
   inputs: [
-    { key: "emaLength", name: "EMA Length", type: "number", default: 9, min: 1 },
+    { key: "emaLength", name: "Longueur EMA", type: "number", default: 9, min: 1 },
     { key: "sumLength", name: "Sum Length", type: "number", default: 25, min: 1 },
   ],
   outputs: [{ key: "massIndex", name: "Mass Index", style: "line" }],

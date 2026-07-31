@@ -25,16 +25,16 @@ import { highOf, lowOf, rollingHighest, rollingLowest } from "../utils";
 
 export const donchian: IndicatorDef = {
   id: "donchian",
-  name: "Donchian Channels",
+  name: "Canaux de Donchian",
   category: "volatility",
   pane: "overlay",
   inputs: [
-    { key: "length", name: "Length", type: "number", default: 20, min: 1 },
+    { key: "length", name: "Longueur", type: "number", default: 20, min: 1 },
   ],
   outputs: [
-    { key: "basis", name: "Basis", style: "line" },
-    { key: "upper", name: "Upper", style: "line" },
-    { key: "lower", name: "Lower", style: "line" },
+    { key: "basis", name: "Médiane", style: "line" },
+    { key: "upper", name: "Bande haute", style: "line" },
+    { key: "lower", name: "Bande basse", style: "line" },
   ],
 
   calc(

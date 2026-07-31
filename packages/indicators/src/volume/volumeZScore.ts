@@ -11,7 +11,7 @@ import { sma, stdev, volOf } from "../utils";
 
 export const volumeZScore: IndicatorDef = {
   id: "volumeZScore",
-  name: "Volume Z-Score",
+  name: "Z-Score du volume",
   category: "volume",
   pane: "separate",
   inputs: [

@@ -50,7 +50,7 @@ export const hma: IndicatorDef = {
   category: "trend",
   pane: "overlay",
   inputs: [
-    { key: "length", name: "Length", type: "number", default: 16, min: 2 },
+    { key: "length", name: "Longueur", type: "number", default: 16, min: 2 },
   ],
   outputs: [{ key: "hma", name: "HMA", style: "line" }],
   calc(candles, params) {

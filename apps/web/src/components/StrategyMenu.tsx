@@ -6,8 +6,9 @@
  * Bouton de la toolbar ouvrant :
  *  1. une section « Actives » en tête (les INSTANCES de catégorie `strategy`
  *     affichées, chacune avec ses params ; dupliquer / éditer / retirer) ;
- *  2. le CATALOGUE PLAT des defs `strategy` du registre @axiom/indicators
- *     (pas de sections : une seule catégorie), filtrable par recherche.
+ *  2. le catalogue des defs `strategy` du registre @axiom/indicators, SECTIONNÉ
+ *     par nature (Stratégies / Divergences / Spot vs Perp — dérivé par règle
+ *     d'id, robuste aux ajouts), filtrable par recherche.
  *
  * MULTI-INSTANCES : cliquer une stratégie AJOUTE une instance aux params par
  * défaut. L'état vient du `indicatorsStore` (vanilla), comme pour les indicateurs.
@@ -25,6 +26,38 @@ import { InstanceParamsEditor } from "./IndicatorMenu";
 /** Defs de catégorie strategy (catalogue du menu Stratégies). PURE. */
 export function defsStrategie(): IndicatorDef[] {
   return INDICATORS.filter((d) => d.category === "strategy");
+}
+
+/** Sections d'affichage du catalogue, dans l'ordre de rendu. */
+export type SectionStrategie = "strategies" | "divergences" | "spotPerp";
+
+export const LIBELLES_SECTIONS_STRATEGIE: Record<SectionStrategie, string> = {
+  strategies: "Stratégies",
+  divergences: "Divergences",
+  spotPerp: "Spot vs Perp",
+};
+
+/**
+ * Section d'un def strategy, dérivée PAR RÈGLE d'id (pas de liste en dur —
+ * une nouvelle stratégie `stratXxx` se classe seule) : préfixe `strat` →
+ * Stratégies ; suffixe `Divergence` → Divergences ; le reste (cvdSpotPerp,
+ * premiumSpotPerp) → Spot vs Perp. PURE (testée).
+ */
+export function sectionStrategie(def: IndicatorDef): SectionStrategie {
+  if (def.id.startsWith("strat")) return "strategies";
+  if (def.id.endsWith("Divergence")) return "divergences";
+  return "spotPerp";
+}
+
+/** Découpe un catalogue (déjà filtré) en sections non vides, ordre stable. PURE. */
+export function sectionsStrategies(defs: IndicatorDef[]): Array<[SectionStrategie, IndicatorDef[]]> {
+  const ordre: SectionStrategie[] = ["strategies", "divergences", "spotPerp"];
+  const sections: Array<[SectionStrategie, IndicatorDef[]]> = [];
+  for (const s of ordre) {
+    const liste = defs.filter((d) => sectionStrategie(d) === s);
+    if (liste.length > 0) sections.push([s, liste]);
+  }
+  return sections;
 }
 
 export function StrategyMenu() {
@@ -205,7 +238,8 @@ export function StrategyMenu() {
             </p>
           </div>
 
-          {/* Catalogue PLAT scrollable (une seule catégorie) — cliquer AJOUTE une instance. */}
+          {/* Catalogue SECTIONNÉ scrollable (Stratégies / Divergences / Spot vs Perp)
+              — cliquer AJOUTE une instance. */}
           <div className="flex-1 overflow-y-auto p-1">
             {filtered.length === 0 && (
               <div className="px-2 py-6 text-center text-xs text-text-dim">
@@ -213,7 +247,12 @@ export function StrategyMenu() {
               </div>
             )}
 
-            {filtered.map((def) => {
+            {sectionsStrategies(filtered).map(([section, defsSection]) => (
+              <div key={section} className="mb-1">
+                <div className="px-2 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+                  {LIBELLES_SECTIONS_STRATEGIE[section]}
+                </div>
+                {defsSection.map((def) => {
               const count = countByDef.get(def.id) ?? 0;
               // Grisage par TF minimal : stratégie non pertinente en dessous de son
               // `minTimeframe` (ex. prime spot-perp sous 15m).
@@ -246,7 +285,9 @@ export function StrategyMenu() {
                   </span>
                 </button>
               );
-            })}
+                })}
+              </div>
+            ))}
           </div>
         </div>
         </>

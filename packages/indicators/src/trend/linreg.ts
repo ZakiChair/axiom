@@ -15,17 +15,17 @@ import { closeOf } from "../utils";
 
 export const linreg: IndicatorDef = {
   id: "linreg",
-  name: "Linear Regression Channel",
+  name: "Canal de régression linéaire",
   category: "trend",
   pane: "overlay",
   inputs: [
-    { key: "length", name: "Length", type: "number", default: 100, min: 5, max: 500 },
+    { key: "length", name: "Longueur", type: "number", default: 100, min: 5, max: 500 },
     { key: "mult", name: "σ mult", type: "number", default: 2, min: 0.5, max: 5 },
   ],
   outputs: [
     { key: "mid", name: "LinReg", style: "line" },
-    { key: "upper", name: "Upper", style: "line" },
-    { key: "lower", name: "Lower", style: "line" },
+    { key: "upper", name: "Bande haute", style: "line" },
+    { key: "lower", name: "Bande basse", style: "line" },
   ],
   calc(candles, params) {
     const length = Math.max(2, Math.floor(Number(params.length) || 100));

@@ -74,7 +74,7 @@ function smaOfDefined(
 
 export const stochRsi: IndicatorDef = {
   id: "stochRsi",
-  name: "Stochastic RSI",
+  name: "RSI stochastique",
   category: "momentum",
   pane: "separate",
   inputs: [

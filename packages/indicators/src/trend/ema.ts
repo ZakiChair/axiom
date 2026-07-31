@@ -16,7 +16,7 @@ export const ema: IndicatorDef = {
   category: "trend",
   pane: "overlay",
   inputs: [
-    { key: "length", name: "Length", type: "number", default: 20, min: 1 },
+    { key: "length", name: "Longueur", type: "number", default: 20, min: 1 },
     {
       key: "source",
       name: "Source",

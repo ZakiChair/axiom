@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — volume/netVolume.ts
+ * @axiom/indicators — orderflow/netVolume.ts
  *
  * Volume net par bougie via la direction de clôture (tick rule simplifiée) :
  *   +volume si close ≥ open, −volume sinon.

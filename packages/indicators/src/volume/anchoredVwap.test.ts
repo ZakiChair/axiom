@@ -27,7 +27,7 @@
 import { describe, it, expect } from "vitest";
 import type { Candle } from "@axiom/types";
 import { computeIndicator } from "../engine";
-import { anchoredVwap } from "./anchored-vwap";
+import { anchoredVwap } from "./anchoredVwap";
 
 /** Construit des bougies à partir de couples (prix, volume) — high=low=close=prix. */
 function candlesFromPriceVol(rows: Array<[price: number, volume: number]>): Candle[] {

@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — momentum/mfiDivergence.ts
+ * @axiom/indicators — strategy/mfiDivergence.ts
  *
  * Divergences MFI ↔ prix (lot v2.1, via la fabrique commune). Le MFI (`mfiOf`)
  * est un « RSI pondéré par le volume » — il combine le prix typique (hlc3) et le
@@ -12,11 +12,11 @@
  */
 
 import { defDivergenceOscillateur } from "../utils-fabrique-divergence";
-import { mfiOf } from "./mfi";
+import { mfiOf } from "../momentum/mfi";
 
 export const mfiDivergence = defDivergenceOscillateur({
   id: "mfiDivergence",
-  name: "MFI Divergence",
+  name: "Divergence MFI",
   category: "strategy",
   precision: 2,
   serieOsc: { key: "mfi", name: "MFI" },

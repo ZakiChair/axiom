@@ -14,10 +14,10 @@ import { sma } from "../utils";
 
 export const disparity: IndicatorDef = {
   id: "disparity",
-  name: "Disparity Index",
+  name: "Indice de disparité",
   category: "momentum",
   pane: "separate",
-  inputs: [{ key: "length", name: "Length", type: "number", default: 14, min: 1 }],
+  inputs: [{ key: "length", name: "Longueur", type: "number", default: 14, min: 1 }],
   outputs: [{ key: "disparity", name: "Disparity %", style: "line" }],
   calc(candles: Candle[], params: Record<string, number | boolean | string>, ctx: CalcContext): IndicatorResult {
     const length = Number(params.length);

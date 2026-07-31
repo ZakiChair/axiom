@@ -64,8 +64,8 @@ export const t3: IndicatorDef = {
   category: "trend",
   pane: "overlay",
   inputs: [
-    { key: "length", name: "Length", type: "number", default: 5, min: 1 },
-    { key: "v", name: "Volume Factor", type: "number", default: 0.7, min: 0, max: 1 },
+    { key: "length", name: "Longueur", type: "number", default: 5, min: 1 },
+    { key: "v", name: "Facteur volume", type: "number", default: 0.7, min: 0, max: 1 },
   ],
   outputs: [{ key: "t3", name: "T3", style: "line" }],
   calc(candles, params) {

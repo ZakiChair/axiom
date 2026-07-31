@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — volume/obvDivergence.ts
+ * @axiom/indicators — strategy/obvDivergence.ts
  *
  * Divergences OBV ↔ prix (lot v2.1, via la fabrique commune). L'OBV (`obvOf`)
  * cumule le volume signé par le sens de la clôture : une confirmation de
@@ -11,11 +11,11 @@
  */
 
 import { defDivergenceOscillateur } from "../utils-fabrique-divergence";
-import { obvOf } from "./obv";
+import { obvOf } from "../volume/obv";
 
 export const obvDivergence = defDivergenceOscillateur({
   id: "obvDivergence",
-  name: "OBV Divergence",
+  name: "Divergence OBV",
   category: "strategy",
   precision: 0,
   serieOsc: { key: "obv", name: "OBV" },

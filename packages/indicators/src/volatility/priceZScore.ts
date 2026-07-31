@@ -29,12 +29,12 @@ import { sma, stdev } from "../utils";
 
 export const priceZScore: IndicatorDef = {
   id: "priceZScore",
-  name: "Price Z-Score",
+  name: "Z-Score du prix",
   category: "volatility",
   pane: "separate",
   precision: 2,
   inputs: [
-    { key: "length", name: "Length", type: "number", default: 100, min: 10, max: 500 },
+    { key: "length", name: "Longueur", type: "number", default: 100, min: 10, max: 500 },
     {
       key: "source",
       name: "Source",

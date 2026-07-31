@@ -24,7 +24,7 @@ export const alma: IndicatorDef = {
   category: "trend",
   pane: "overlay",
   inputs: [
-    { key: "window", name: "Window", type: "number", default: 9, min: 1 },
+    { key: "window", name: "Fenêtre", type: "number", default: 9, min: 1 },
     { key: "offset", name: "Offset", type: "number", default: 0.85, min: 0, max: 1 },
     { key: "sigma", name: "Sigma", type: "number", default: 6, min: 0.1 },
   ],

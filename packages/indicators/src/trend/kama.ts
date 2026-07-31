@@ -23,9 +23,9 @@ export const kama: IndicatorDef = {
   category: "trend",
   pane: "overlay",
   inputs: [
-    { key: "length", name: "Length", type: "number", default: 10, min: 1 },
-    { key: "fast", name: "Fast", type: "number", default: 2, min: 1 },
-    { key: "slow", name: "Slow", type: "number", default: 30, min: 1 },
+    { key: "length", name: "Longueur", type: "number", default: 10, min: 1 },
+    { key: "fast", name: "Rapide", type: "number", default: 2, min: 1 },
+    { key: "slow", name: "Lente", type: "number", default: 30, min: 1 },
   ],
   outputs: [{ key: "kama", name: "KAMA", style: "line" }],
   calc(candles, params) {

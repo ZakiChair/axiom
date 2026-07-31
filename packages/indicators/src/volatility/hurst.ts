@@ -19,7 +19,7 @@ import { closeOf } from "../utils";
 
 export const hurst: IndicatorDef = {
   id: "hurst",
-  name: "Hurst Exponent",
+  name: "Exposant de Hurst",
   category: "volatility",
   pane: "separate",
   precision: 3,

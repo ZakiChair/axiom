@@ -27,18 +27,18 @@ import { closeOf, ema, rma, trueRange } from "../utils";
 
 export const keltner: IndicatorDef = {
   id: "keltner",
-  name: "Keltner Channels",
+  name: "Canaux de Keltner",
   category: "volatility",
   pane: "overlay",
   inputs: [
-    { key: "emaLength", name: "EMA Length", type: "number", default: 20, min: 1 },
+    { key: "emaLength", name: "Longueur EMA", type: "number", default: 20, min: 1 },
     { key: "atrLength", name: "ATR Length", type: "number", default: 10, min: 1 },
-    { key: "mult", name: "Multiplier", type: "number", default: 2, min: 0 },
+    { key: "mult", name: "Multiplicateur", type: "number", default: 2, min: 0 },
   ],
   outputs: [
-    { key: "basis", name: "Basis", style: "line" },
-    { key: "upper", name: "Upper", style: "line" },
-    { key: "lower", name: "Lower", style: "line" },
+    { key: "basis", name: "Médiane", style: "line" },
+    { key: "upper", name: "Bande haute", style: "line" },
+    { key: "lower", name: "Bande basse", style: "line" },
   ],
 
   calc(

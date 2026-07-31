@@ -12,13 +12,13 @@ import type { IndicatorDef } from "@axiom/types";
 
 export const fundingRate: IndicatorDef = {
   id: "fundingRate",
-  name: "Funding Rate",
+  name: "Taux de funding",
   category: "derivatives",
   pane: "separate",
   aux: ["funding"],
   minTimeframe: "1h",
   inputs: [],
-  outputs: [{ key: "fundingRate", name: "Funding Rate", style: "histogram" }],
+  outputs: [{ key: "fundingRate", name: "Taux de funding", style: "histogram" }],
   calc(candles, _params, ctx) {
     const n = candles.length;
     const series = ctx.aux?.funding;

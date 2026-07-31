@@ -24,8 +24,8 @@ export const awesome: IndicatorDef = {
   category: "momentum",
   pane: "separate",
   inputs: [
-    { key: "fast", name: "Fast", type: "number", default: 5, min: 1 },
-    { key: "slow", name: "Slow", type: "number", default: 34, min: 1 },
+    { key: "fast", name: "Rapide", type: "number", default: 5, min: 1 },
+    { key: "slow", name: "Lente", type: "number", default: 34, min: 1 },
   ],
   outputs: [{ key: "ao", name: "AO", style: "histogram" }],
 

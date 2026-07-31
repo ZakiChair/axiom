@@ -19,15 +19,15 @@ export const waddahAttar: IndicatorDef = {
   pane: "separate",
   precision: 4,
   inputs: [
-    { key: "fast", name: "MACD fast", type: "number", default: 20, min: 2, max: 100 },
-    { key: "slow", name: "MACD slow", type: "number", default: 40, min: 2, max: 200 },
+    { key: "fast", name: "MACD rapide", type: "number", default: 20, min: 2, max: 100 },
+    { key: "slow", name: "MACD lente", type: "number", default: 40, min: 2, max: 200 },
     { key: "bbLength", name: "BB length", type: "number", default: 20, min: 2, max: 100 },
-    { key: "bbMult", name: "BB mult", type: "number", default: 2, min: 0.5, max: 5 },
+    { key: "bbMult", name: "Multiplicateur BB", type: "number", default: 2, min: 0.5, max: 5 },
     { key: "sensitivity", name: "Sensibilité", type: "number", default: 150, min: 1, max: 500 },
   ],
   outputs: [
-    { key: "up", name: "Trend Up", style: "histogram" },
-    { key: "down", name: "Trend Down", style: "histogram" },
+    { key: "up", name: "Tendance haussière", style: "histogram" },
+    { key: "down", name: "Tendance baissière", style: "histogram" },
     { key: "explosion", name: "Explosion", style: "line" },
   ],
   calc(candles, params) {

@@ -79,7 +79,7 @@ export function stochKOf(
 
 export const stochastic: IndicatorDef = {
   id: "stochastic",
-  name: "Stochastic",
+  name: "Stochastique",
   category: "momentum",
   pane: "separate",
   inputs: [

@@ -33,7 +33,7 @@ export const kdj: IndicatorDef = {
   pane: "separate",
   precision: 2,
   inputs: [
-    { key: "length", name: "Length", type: "number", default: 9, min: 2, max: 100 },
+    { key: "length", name: "Longueur", type: "number", default: 9, min: 2, max: 100 },
     { key: "signalK", name: "Signal K", type: "number", default: 3, min: 1, max: 20 },
     { key: "signalD", name: "Signal D", type: "number", default: 3, min: 1, max: 20 },
   ],

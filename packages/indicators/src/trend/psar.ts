@@ -109,7 +109,7 @@ export const psar: IndicatorDef = {
   category: "trend",
   pane: "overlay",
   inputs: [
-    { key: "step", name: "AF step", type: "number", default: 0.02, min: 0 },
+    { key: "step", name: "Pas AF", type: "number", default: 0.02, min: 0 },
     { key: "max", name: "AF max", type: "number", default: 0.2, min: 0 },
   ],
   outputs: [{ key: "psar", name: "SAR", style: "points" }],

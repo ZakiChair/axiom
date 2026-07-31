@@ -25,8 +25,8 @@ export const accelerator: IndicatorDef = {
   category: "momentum",
   pane: "separate",
   inputs: [
-    { key: "fast", name: "Fast", type: "number", default: 5, min: 1 },
-    { key: "slow", name: "Slow", type: "number", default: 34, min: 1 },
+    { key: "fast", name: "Rapide", type: "number", default: 5, min: 1 },
+    { key: "slow", name: "Lente", type: "number", default: 34, min: 1 },
     { key: "smaLength", name: "SMA AO", type: "number", default: 5, min: 1 },
   ],
   outputs: [{ key: "ac", name: "AC", style: "histogram" }],

@@ -12,7 +12,7 @@ import type { Candle } from "@axiom/types";
 import { computeIndicator } from "../engine";
 import { construireAnnotationsDivergence } from "../utils-annotations";
 import { highOf, lowOf } from "../utils";
-import { mfiOf } from "./mfi";
+import { mfiOf } from "../momentum/mfi";
 import { mfiDivergence } from "./mfiDivergence";
 
 /** Série linéaire par morceaux : coins aux points de contrôle, monotone entre eux. */

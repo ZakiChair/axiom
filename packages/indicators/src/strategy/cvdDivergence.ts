@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — orderflow/cvdDivergence.ts
+ * @axiom/indicators — strategy/cvdDivergence.ts
  *
  * Divergences CVD ↔ prix, v2 (lot v2.1) : pane SÉPARÉ portant la courbe CVD,
  * segments pivot→pivot sur le CVD (cible "pane") ET sur le prix (cible "prix",
@@ -17,11 +17,11 @@
  */
 
 import { defDivergenceOscillateur } from "../utils-fabrique-divergence";
-import { cvdOf } from "./cvd";
+import { cvdOf } from "../orderflow/cvd";
 
 export const cvdDivergence = defDivergenceOscillateur({
   id: "cvdDivergence",
-  name: "CVD Divergence",
+  name: "Divergence CVD",
   category: "strategy",
   precision: 0,
   serieOsc: { key: "cvd", name: "CVD" },

@@ -72,9 +72,9 @@ export const ttmSqueeze: IndicatorDef = {
   category: "volatility",
   pane: "separate",
   inputs: [
-    { key: "length", name: "Length", type: "number", default: 20, min: 2, max: 200 },
-    { key: "multBB", name: "BB mult", type: "number", default: 2, min: 0.5, max: 5 },
-    { key: "multKC", name: "KC mult", type: "number", default: 1.5, min: 0.5, max: 5 },
+    { key: "length", name: "Longueur", type: "number", default: 20, min: 2, max: 200 },
+    { key: "multBB", name: "Multiplicateur BB", type: "number", default: 2, min: 0.5, max: 5 },
+    { key: "multKC", name: "Multiplicateur KC", type: "number", default: 1.5, min: 0.5, max: 5 },
   ],
   outputs: [
     { key: "on", name: "Squeeze ON", style: "histogram" },

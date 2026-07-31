@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — momentum/stochDivergence.ts
+ * @axiom/indicators — strategy/stochDivergence.ts
  *
  * Divergences Stochastic ↔ prix (lot v2.1, via la fabrique commune). Oscillateur :
  * %K LISSÉ (SMA de `lissageK` sur le %K brut, cf. `smaOfDefined`/`stochKOf`) — le
@@ -9,11 +9,11 @@
  */
 
 import { defDivergenceOscillateur } from "../utils-fabrique-divergence";
-import { smaOfDefined, stochKOf } from "./stochastic";
+import { smaOfDefined, stochKOf } from "../momentum/stochastic";
 
 export const stochDivergence = defDivergenceOscillateur({
   id: "stochDivergence",
-  name: "Stochastic Divergence",
+  name: "Divergence stochastique",
   category: "strategy",
   precision: 2,
   serieOsc: { key: "k", name: "Stoch %K" },

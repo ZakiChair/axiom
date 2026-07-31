@@ -18,7 +18,7 @@ export const vhf: IndicatorDef = {
   name: "Vertical Horizontal Filter",
   category: "volatility",
   pane: "separate",
-  inputs: [{ key: "length", name: "Length", type: "number", default: 28, min: 2 }],
+  inputs: [{ key: "length", name: "Longueur", type: "number", default: 28, min: 2 }],
   outputs: [{ key: "vhf", name: "VHF", style: "line" }],
   calc(candles: Candle[], params: Record<string, number | boolean | string>, _ctx: CalcContext): IndicatorResult {
     const length = Number(params.length);

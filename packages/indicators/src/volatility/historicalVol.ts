@@ -27,11 +27,11 @@ import { closeOf, stdev } from "../utils";
 
 export const historicalVol: IndicatorDef = {
   id: "historicalVol",
-  name: "Historical Volatility",
+  name: "Volatilité historique (HV)",
   category: "volatility",
   pane: "separate",
   inputs: [
-    { key: "length", name: "Length", type: "number", default: 10, min: 2 },
+    { key: "length", name: "Longueur", type: "number", default: 10, min: 2 },
     { key: "annual", name: "Annual", type: "number", default: 365, min: 1 },
   ],
   outputs: [{ key: "hv", name: "Hist Vol %", style: "line" }],

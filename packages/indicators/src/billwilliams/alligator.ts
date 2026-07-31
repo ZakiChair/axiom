@@ -45,12 +45,12 @@ export const alligator: IndicatorDef = {
   category: "billwilliams",
   pane: "overlay",
   inputs: [
-    { key: "jawLength", name: "Jaw Length", type: "number", default: 13, min: 1 },
-    { key: "jawShift", name: "Jaw Shift", type: "number", default: 8, min: 0 },
-    { key: "teethLength", name: "Teeth Length", type: "number", default: 8, min: 1 },
-    { key: "teethShift", name: "Teeth Shift", type: "number", default: 5, min: 0 },
-    { key: "lipsLength", name: "Lips Length", type: "number", default: 5, min: 1 },
-    { key: "lipsShift", name: "Lips Shift", type: "number", default: 3, min: 0 },
+    { key: "jawLength", name: "Longueur Jaw", type: "number", default: 13, min: 1 },
+    { key: "jawShift", name: "Décalage Jaw", type: "number", default: 8, min: 0 },
+    { key: "teethLength", name: "Longueur Teeth", type: "number", default: 8, min: 1 },
+    { key: "teethShift", name: "Décalage Teeth", type: "number", default: 5, min: 0 },
+    { key: "lipsLength", name: "Longueur Lips", type: "number", default: 5, min: 1 },
+    { key: "lipsShift", name: "Décalage Lips", type: "number", default: 3, min: 0 },
   ],
   outputs: [
     { key: "jaw", name: "Jaw", style: "line" },

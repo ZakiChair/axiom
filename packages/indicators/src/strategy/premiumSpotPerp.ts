@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — derivatives/premiumSpotPerp.ts
+ * @axiom/indicators — strategy/premiumSpotPerp.ts
  *
  * Prime spot/perp EN VISUEL sur le chart maître (lot v2.1) : trace la ligne mark
  * price du perp (aux `mark`, chemin basisPct — 1 h LOCF Binance USDT-M, d'où le

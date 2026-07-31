@@ -31,7 +31,13 @@ import type { MarketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
 import { cvdDivergenceStore } from "../store/cvd-divergence";
 import { detectImbalances, detectDeltaDivergences, type DivergenceFlag } from "./footprintAnalytics";
-import { subscribePerpAggTrades } from "../data/binanceFutures";
+import {
+  fetchOpenInterestHist,
+  subscribePerpAggTrades,
+  type BinanceFuturesPeriod,
+} from "../data/binanceFutures";
+import { computeOpenCloseNet, deltasOiParBougie, type OiPoint } from "./openCloseNet.calc";
+import { drawOpenCloseNet } from "./openCloseNet";
 import { detectCvdDivergences, type CvdDivergence } from "./cvdSpotPerp";
 import { precisionCvd } from "./cvdPrecision";
 import { lireTokenCanvas } from "../lib/canvasTokens";
@@ -64,6 +70,10 @@ const MAX_PERP_CANDLES = 500;
 const MAX_FOOTPRINT_CANDLES = 120;
 /** Nombre max de colonnes footprint dessinées (perf / lisibilité). */
 const MAX_RENDER_COLUMNS = 60;
+/** Périodes `/futures/data` acceptées pour l'OI de l'OCN (miroir BinanceFuturesPeriod). */
+const OCN_PERIODS = new Set<string>(["5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"]);
+/** Cadence de rafraîchissement de l'historique OI de l'OCN. */
+const OCN_OI_REFRESH_MS = 60_000;
 /** Cible de lignes de prix par bougie (sert à dimensionner le bucket). */
 const TARGET_ROWS_PER_CANDLE = 24;
 
@@ -261,6 +271,16 @@ export class OrderflowController {
   /** Delta perp PAR bougie (open time -> somme buy−sell), depuis la souscription. */
   private readonly perpDelta = new Map<number, number>();
 
+  // --- OCN (Open/Close Net) : sous-feature auto-gérée (patron cvdSpotPerp) ---
+  /** L'overlay OCN est-il actif (toggle + binance + timeframe supporté + hors replay) ? */
+  private ocnRunning = false;
+  /** Snapshots OI (contrats) du perp, triés ascendants — rafraîchis périodiquement. */
+  private ocnOiPoints: OiPoint[] = [];
+  /** false après un échec de fetch OI → mention « OI indisponible » dans la légende. */
+  private ocnOiOk = true;
+  /** Interval de rafraîchissement OI (0 = inactif). */
+  private ocnTimer = 0;
+
   constructor(
     chart: Chart,
     container: HTMLElement,
@@ -298,8 +318,13 @@ export class OrderflowController {
     // CVD spot vs perp (Task 17) : sous-feature pilotée par son propre toggle. Le
     // contrôleur s'abonne lui-même (comme DerivativesChartController) → aucun câblage
     // supplémentaire dans ChartInstance. Init immédiate si le toggle est déjà actif.
-    this.unsubOrderflowStore = orderflowStore.subscribe(() => this.syncCvdSpotPerp());
+    this.unsubOrderflowStore = orderflowStore.subscribe(() => {
+      this.syncCvdSpotPerp();
+      this.syncOcn();
+      this.markDirty(); // réglages d'affichage (OCN, imbalances…) → redessin au prochain rAF
+    });
     this.syncCvdSpotPerp();
+    this.syncOcn();
     // Redimensionnement du conteneur (resize fenêtre, toggle sidebar…) : aucun
     // scroll/zoom/trade ne le signale autrement, d'où l'observer dédié.
     this.resizeObserver = new ResizeObserver(this.markDirty);
@@ -328,6 +353,7 @@ export class OrderflowController {
       this.unsubOrderflowStore = null;
     }
     this.teardownCvdSpotPerp();
+    this.teardownOcn();
     this.removeCvdPane();
     this.footprints.clear();
     this.clearCanvas();
@@ -348,6 +374,9 @@ export class OrderflowController {
       this.refreshCvd();
       this.ensureTrades();
       if (this.spRunning) this.refreshCvdSpotPerp();
+      // OCN : le timeframe a pu changer (backfill) → re-gate + re-fetch OI à la bonne period.
+      this.syncOcn();
+      if (this.ocnRunning) void this.refreshOcnOi();
     }
   }
 
@@ -498,6 +527,65 @@ export class OrderflowController {
           id: CVD_SP_PANE_ID,
         }) ?? null;
     }
+  }
+
+  // --- OCN (Open/Close Net) : historique OI + gate (patron cvdSpotPerp) ---
+
+  /** Souhaité ssi : toggle activé ET binance ET timeframe supporté par `/futures/data`
+   *  ET hors replay (pas d'historique OI rejouable). */
+  private wantOcn(): boolean {
+    return (
+      orderflowStore.getState().showOpenCloseNet &&
+      this.store.getState().exchange === "binance" &&
+      OCN_PERIODS.has(this.store.getState().timeframe) &&
+      this.replayAdapter === null
+    );
+  }
+
+  /** Réconcilie l'état OCN avec le toggle (au start, à chaque changement de store,
+   *  et après backfill — le timeframe a pu changer). */
+  private syncOcn(): void {
+    if (!this.running) return;
+    const want = this.wantOcn();
+    if (want && !this.ocnRunning) this.startOcn();
+    else if (!want && this.ocnRunning) this.teardownOcn();
+  }
+
+  private startOcn(): void {
+    this.ocnRunning = true;
+    void this.refreshOcnOi();
+    this.ocnTimer = window.setInterval(() => void this.refreshOcnOi(), OCN_OI_REFRESH_MS);
+    this.markDirty();
+  }
+
+  /** Démonte l'overlay OCN : stoppe le refresh OI, vide les snapshots. */
+  private teardownOcn(): void {
+    this.ocnRunning = false;
+    if (this.ocnTimer !== 0) {
+      window.clearInterval(this.ocnTimer);
+      this.ocnTimer = 0;
+    }
+    this.ocnOiPoints = [];
+    this.ocnOiOk = true;
+    this.markDirty();
+  }
+
+  /** Recharge l'historique OI à la period du timeframe courant (REST, basse fréquence). */
+  private async refreshOcnOi(): Promise<void> {
+    const tf = this.store.getState().timeframe;
+    if (!OCN_PERIODS.has(tf)) return;
+    try {
+      const lookback = orderflowStore.getState().ocnLookback;
+      const limit = Math.min(500, Math.max(30, lookback + 10));
+      const pts = await fetchOpenInterestHist(this.symbol, tf as BinanceFuturesPeriod, limit);
+      if (!this.ocnRunning) return;
+      this.ocnOiPoints = pts;
+      this.ocnOiOk = pts.length > 0;
+    } catch {
+      if (!this.ocnRunning) return;
+      this.ocnOiOk = false;
+    }
+    this.markDirty();
   }
 
   // --- Footprint : flux de trades + accumulation -------------------------
@@ -764,7 +852,53 @@ export class OrderflowController {
       );
     }
 
+    // Overlay OCN (Open/Close Net) — par-dessus le footprint, dans le même clip.
+    if (this.ocnRunning && settings.showOpenCloseNet) {
+      this.renderOcn(left, top, width, height, yOf, rowH, settings.ocnLookback);
+    }
+
     ctx.restore();
+  }
+
+  /** Assemble la fenêtre d'analyse OCN (bars footprint + ΔOI) et délègue le dessin. */
+  private renderOcn(
+    left: number,
+    top: number,
+    width: number,
+    height: number,
+    yOf: (price: number) => number,
+    rowH: number,
+    lookback: number
+  ): void {
+    const candles = this.store.getState().candles;
+    const times: number[] = [];
+    const bars: FootprintBar[] = [];
+    const start = Math.max(0, candles.length - lookback);
+    for (let i = start; i < candles.length; i++) {
+      const c = candles[i];
+      if (c === undefined) continue;
+      times.push(c.time);
+      const cells = this.footprints.get(c.time);
+      if (cells === undefined || cells.size === 0) continue;
+      bars.push(buildFootprintBar(c.time, cells, this.bucketSize));
+    }
+    const deltas = deltasOiParBougie(times, this.ocnOiPoints);
+    const res = computeOpenCloseNet(bars, deltas, this.bucketSize);
+    drawOpenCloseNet(this.ctx, {
+      entries: res.entries,
+      profile: res.profile,
+      poc: res.poc,
+      bucketSize: this.bucketSize,
+      xOf: (time) => this.toPx({ timestamp: time }).x,
+      yOf,
+      left,
+      top,
+      width,
+      height,
+      rowH,
+      candlesUsed: bars.length,
+      oiOk: this.ocnOiOk && this.ocnOiPoints.length > 0,
+    });
   }
 
   private drawColumn(

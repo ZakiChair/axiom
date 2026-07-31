@@ -31,6 +31,8 @@ export function FootprintSettingsPanel({ onClose }: { onClose: () => void }) {
   const showDivergences = useStore(orderflowStore, (s) => s.showDivergences);
   const cvdSpotPerp = useStore(orderflowStore, (s) => s.cvdSpotPerp);
   const whaleNotionalMin = useStore(orderflowStore, (s) => s.whaleNotionalMin);
+  const showOpenCloseNet = useStore(orderflowStore, (s) => s.showOpenCloseNet);
+  const ocnLookback = useStore(orderflowStore, (s) => s.ocnLookback);
   // Flux perp Binance-only : le toggle CVD S/P est grisé sur toute autre source.
   const exchange = useStore(marketStore, (s) => s.exchange);
   const isBinance = exchange === "binance";
@@ -43,15 +45,19 @@ export function FootprintSettingsPanel({ onClose }: { onClose: () => void }) {
   const setShowDivergences = useStore(orderflowStore, (s) => s.setShowDivergences);
   const setCvdSpotPerp = useStore(orderflowStore, (s) => s.setCvdSpotPerp);
   const setWhaleNotionalMin = useStore(orderflowStore, (s) => s.setWhaleNotionalMin);
+  const setShowOpenCloseNet = useStore(orderflowStore, (s) => s.setShowOpenCloseNet);
+  const setOcnLookback = useStore(orderflowStore, (s) => s.setOcnLookback);
 
   const [draftRatio, setDraftRatio] = useState(String(ratioPct));
   const [draftMinVol, setDraftMinVol] = useState(String(minVol));
   const [draftWhale, setDraftWhale] = useState(String(whaleNotionalMin));
+  const [draftOcnLookback, setDraftOcnLookback] = useState(String(ocnLookback));
 
   // Synchroniser le draft quand le store change (ex. via un autre onglet).
   useEffect(() => { setDraftRatio(String(ratioPct)); }, [ratioPct]);
   useEffect(() => { setDraftMinVol(String(minVol)); }, [minVol]);
   useEffect(() => { setDraftWhale(String(whaleNotionalMin)); }, [whaleNotionalMin]);
+  useEffect(() => { setDraftOcnLookback(String(ocnLookback)); }, [ocnLookback]);
 
   const submitRatio = () => {
     const v = Number.parseInt(draftRatio, 10);
@@ -64,6 +70,10 @@ export function FootprintSettingsPanel({ onClose }: { onClose: () => void }) {
   const submitWhale = () => {
     const v = Number.parseInt(draftWhale, 10);
     if (Number.isFinite(v) && v > 0) setWhaleNotionalMin(v);
+  };
+  const submitOcnLookback = () => {
+    const v = Number.parseInt(draftOcnLookback, 10);
+    if (Number.isFinite(v) && v >= 5 && v <= 120) setOcnLookback(v);
   };
 
   return (
@@ -186,6 +196,39 @@ export function FootprintSettingsPanel({ onClose }: { onClose: () => void }) {
             className="w-20 rounded border border-border bg-bg px-2 py-0.5 text-[11px] text-text outline-none placeholder:text-text-dim focus:border-accent"
           />
         </div>
+
+        {/* OCN (Open/Close Net) : overlay façon Flux — positions nettes encore ouvertes
+            par niveau (estimation ΔOI × footprint). Binance perp only. */}
+        <label
+          className={`mt-2 flex items-center gap-2 text-[11px] ${
+            isBinance ? "text-text-dim" : "cursor-not-allowed text-text-dim/50"
+          }`}
+          title={isBinance ? undefined : "Open interest disponible uniquement sur Binance"}
+        >
+          <input
+            type="checkbox"
+            checked={showOpenCloseNet && isBinance}
+            disabled={!isBinance}
+            onChange={(e) => setShowOpenCloseNet(e.target.checked)}
+            className="h-3 w-3 accent-[var(--accent)] disabled:opacity-50"
+          />
+          <span>Open/Close Net (OCN)</span>
+        </label>
+
+        {showOpenCloseNet && isBinance && (
+          <div className="mt-1 flex items-center gap-2 text-[11px] text-text-dim">
+            <span>Fenêtre (bougies)</span>
+            <input
+              value={draftOcnLookback}
+              onChange={(e) => setDraftOcnLookback(e.target.value)}
+              onBlur={submitOcnLookback}
+              onKeyDown={(e) => { if (e.key === "Enter") submitOcnLookback(); }}
+              inputMode="numeric"
+              spellCheck={false}
+              className="w-16 rounded border border-border bg-bg px-2 py-0.5 text-[11px] text-text outline-none placeholder:text-text-dim focus:border-accent"
+            />
+          </div>
+        )}
       </div>
     </>
   );

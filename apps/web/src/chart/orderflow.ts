@@ -40,6 +40,7 @@ import {
   computeOpenCloseNet,
   deltasOiParBougie,
   OCN_PERIODS,
+  rowsApprochees,
   type OiPoint,
 } from "./openCloseNet.calc";
 import { drawOpenCloseNet } from "./openCloseNet";
@@ -881,9 +882,20 @@ export class OrderflowController {
       const c = candles[i];
       if (c === undefined) continue;
       times.push(c.time);
+      // Ticks réels si la bougie a été vue en direct ; sinon footprint APPROCHÉ
+      // depuis l'OHLCV (buy/sell de bougie réparti sur la plage) — sans quoi la
+      // fenêtre démarre vide et met 30+ min à devenir lisible.
       const cells = this.footprints.get(c.time);
-      if (cells === undefined || cells.size === 0) continue;
-      bars.push(buildFootprintBar(c.time, cells, this.bucketSize));
+      if (cells !== undefined && cells.size > 0) {
+        bars.push(buildFootprintBar(c.time, cells, this.bucketSize));
+      } else {
+        const rows = rowsApprochees(c, this.bucketSize);
+        if (rows.length > 0) {
+          let delta = 0;
+          for (const r of rows) delta += r.buyVol - r.sellVol;
+          bars.push({ time: c.time, rows, poc: 0, vah: 0, val: 0, delta });
+        }
+      }
     }
     const deltas = deltasOiParBougie(times, this.ocnOiPoints);
     const res = computeOpenCloseNet(bars, deltas, this.bucketSize);

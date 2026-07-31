@@ -14,7 +14,7 @@
  * Aucune dépendance à KLineChart, au DOM ni aux stores — testé dans
  * openCloseNet.calc.test.ts.
  */
-import type { FootprintBar } from "@axiom/types";
+import type { Candle, FootprintBar, FootprintRow } from "@axiom/types";
 
 /** Point OI normalisé (sous-ensemble de BinanceOiHistPoint, découplé de la source). */
 export interface OiPoint {
@@ -93,6 +93,34 @@ export function deltasOiParBougie(
     prevOi = oiClose;
   }
   return out;
+}
+
+/**
+ * Footprint APPROCHÉ d'une bougie OHLCV : le volume (buy/sell de la bougie —
+ * taker buy Binance, historique) est réparti UNIFORMÉMENT sur les buckets
+ * couvrant [low, high]. Sert aux bougies antérieures à la souscription tick :
+ * sans lui, la fenêtre OCN démarre vide et se remplit sur 30+ min (illisible),
+ * alors que Flux affiche l'historique immédiatement — leur modèle est le même
+ * (l'attribution intra-bougie de l'historique est TOUJOURS une approximation).
+ * Chaque niveau hérite du ratio buy/sell de la bougie → le sens OCN d'une
+ * bougie approchée est celui de son delta agressif, à tous ses niveaux.
+ * Source sans taker buy → répartition neutre 50/50. PURE.
+ */
+export function rowsApprochees(
+  candle: Pick<Candle, "low" | "high" | "volume" | "buyVolume" | "sellVolume">,
+  bucketSize: number
+): FootprintRow[] {
+  if (candle.volume <= 0 || bucketSize <= 0) return [];
+  const buyTotal = candle.buyVolume ?? candle.volume / 2;
+  const sellTotal = candle.sellVolume ?? candle.volume - buyTotal;
+  const first = Math.floor(candle.low / bucketSize);
+  const last = Math.max(first, Math.floor(candle.high / bucketSize));
+  const n = last - first + 1;
+  const rows: FootprintRow[] = [];
+  for (let k = first; k <= last; k++) {
+    rows.push({ price: k * bucketSize, buyVol: buyTotal / n, sellVol: sellTotal / n });
+  }
+  return rows;
 }
 
 /** Consomme `amount` proportionnellement sur les entrées d'un côté (clamp à 0). */

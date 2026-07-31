@@ -7,8 +7,8 @@
  * conservation (Σ restant = Σ attribué − Σ consommé), POC, ΔOI = 0/absent.
  */
 import { describe, expect, it } from "vitest";
-import type { FootprintBar, FootprintRow } from "@axiom/types";
-import { computeOpenCloseNet, deltasOiParBougie } from "./openCloseNet.calc";
+import type { Candle, FootprintBar, FootprintRow } from "@axiom/types";
+import { computeOpenCloseNet, deltasOiParBougie, rowsApprochees } from "./openCloseNet.calc";
 
 const BUCKET = 100;
 
@@ -165,6 +165,73 @@ describe("computeOpenCloseNet — fermetures (ΔOI < 0)", () => {
     const long = res.entries.find((e) => e.side === "long");
     expect(short?.remaining).toBeCloseTo(225);
     expect(long?.remaining).toBeCloseTo(75);
+  });
+});
+
+describe("rowsApprochees — footprint approché depuis une bougie OHLCV", () => {
+  function candle(partial: Partial<Candle>): Candle {
+    return {
+      time: 0,
+      open: 100,
+      high: 110,
+      low: 90,
+      close: 105,
+      volume: 60,
+      buyVolume: 40,
+      sellVolume: 20,
+      ...partial,
+    } as Candle;
+  }
+
+  it("répartit le volume sur les buckets de la plage, totaux conservés", () => {
+    // Plage 90..110, bucket 10 → buckets 90, 100, 110 (3 niveaux).
+    const rows = rowsApprochees(candle({}), 10);
+    expect(rows.length).toBe(3);
+    expect(rows.map((r) => r.price)).toEqual([90, 100, 110]);
+    const buy = rows.reduce((s, r) => s + r.buyVol, 0);
+    const sell = rows.reduce((s, r) => s + r.sellVol, 0);
+    expect(buy).toBeCloseTo(40);
+    expect(sell).toBeCloseTo(20);
+  });
+
+  it("plage plus petite qu'un bucket → un seul niveau, aligné au bucket", () => {
+    const rows = rowsApprochees(candle({ high: 102, low: 101, close: 101.5 }), 10);
+    expect(rows.length).toBe(1);
+    expect(rows[0]?.price).toBe(100);
+    expect((rows[0]?.buyVol ?? 0) + (rows[0]?.sellVol ?? 0)).toBeCloseTo(60);
+  });
+
+  it("buyVolume absent (source sans taker buy) → répartition neutre 50/50", () => {
+    const rows = rowsApprochees(
+      candle({ buyVolume: undefined, sellVolume: undefined }),
+      10
+    );
+    const buy = rows.reduce((s, r) => s + r.buyVol, 0);
+    const sell = rows.reduce((s, r) => s + r.sellVol, 0);
+    expect(buy).toBeCloseTo(30);
+    expect(sell).toBeCloseTo(30);
+  });
+
+  it("volume nul → aucune row", () => {
+    expect(rowsApprochees(candle({ volume: 0, buyVolume: 0, sellVolume: 0 }), 10)).toEqual([]);
+  });
+
+  it("s'intègre à computeOpenCloseNet : des bougies historiques produisent des entrées", () => {
+    // Bougie vendeuse (sell net) + OI qui monte → shorts ouverts sur ses niveaux.
+    const c = candle({ time: 60, buyVolume: 10, sellVolume: 50 });
+    const bar: FootprintBar = {
+      time: 60,
+      rows: rowsApprochees(c, 10),
+      poc: 0,
+      vah: 0,
+      val: 0,
+      delta: -40,
+    };
+    const res = computeOpenCloseNet([bar], new Map([[60, 300]]), 10);
+    expect(res.entries.length).toBeGreaterThan(0);
+    expect(res.entries.every((e) => e.side === "short")).toBe(true);
+    const total = res.entries.reduce((s, e) => s + e.opened, 0);
+    expect(total).toBeCloseTo(300);
   });
 });
 

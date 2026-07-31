@@ -4,6 +4,10 @@ import {
   computeCryptoGexDex,
   gammaFlip,
   gexParStrikeToutesEcheances,
+  mursGamma,
+  profilGexSpot,
+  SEUIL_INDETERMINATION_GEX,
+  verdictGamma,
   type CryptoOptionInput,
   type OptionGreekLeg,
 } from "./gexDex";
@@ -254,5 +258,173 @@ describe("gammaFlip", () => {
       { strike: 100, gex: -10 },
     ]);
     expect(out).toBeCloseTo(150, 9);
+  });
+});
+
+describe("verdictGamma", () => {
+  it("GEX net franchement positif → long-gamma (amorti), les dealers vendent les hausses", () => {
+    // net = 1000, Σ|GEX| = 5000 → 1000 ≥ 2 % de 5000 (=100) : régime tranché.
+    const v = verdictGamma(1000, 100, 90, 5000);
+    expect(v.regime).toBe("long-gamma");
+    expect(v.qualificatif).toBe("amorti");
+    expect(v.action).toContain("vendent le sous-jacent quand ça monte");
+    // distance = (100 − 90)/100 × 100 = 10 %.
+    expect(v.distanceFlipPct).toBeCloseTo(10, 9);
+  });
+
+  it("GEX net franchement négatif → short-gamma (amplifié), les dealers achètent les hausses", () => {
+    const v = verdictGamma(-1000, 100, 110, 5000);
+    expect(v.regime).toBe("short-gamma");
+    expect(v.qualificatif).toBe("amplifié");
+    expect(v.action).toContain("achètent les hausses");
+    // distance = (100 − 110)/100 × 100 = −10 %.
+    expect(v.distanceFlipPct).toBeCloseTo(-10, 9);
+  });
+
+  it("|net| sous le seuil relatif de Σ|GEX| → indetermine (distance au flip calculée quand même)", () => {
+    // 50 < 0,02 × 5000 = 100 → indéterminé, mais la distance reste informative.
+    const v = verdictGamma(50, 100, 90, 5000);
+    expect(v.regime).toBe("indetermine");
+    expect(v.qualificatif).toBe("neutre");
+    expect(v.distanceFlipPct).toBeCloseTo(10, 9);
+  });
+
+  it("au seuil EXACT le régime est tranché (comparaison stricte <)", () => {
+    // 100 = 0,02 × 5000 exactement → « 100 < 100 » faux → long-gamma.
+    const v = verdictGamma(SEUIL_INDETERMINATION_GEX * 5000, 100, null, 5000);
+    expect(v.regime).toBe("long-gamma");
+  });
+
+  it("flip null → verdict fondé sur le seul signe du net, distance null", () => {
+    const v = verdictGamma(-500, 100, null, 1000);
+    expect(v.regime).toBe("short-gamma");
+    expect(v.distanceFlipPct).toBeNull();
+  });
+
+  it("net NaN → indetermine (dégradation gracieuse, jamais d'exception)", () => {
+    const v = verdictGamma(NaN, 100, 90, 1000);
+    expect(v.regime).toBe("indetermine");
+    expect(v.distanceFlipPct).toBeCloseTo(10, 9);
+  });
+
+  it("spot invalide (NaN ou ≤ 0) → distance null, régime inchangé", () => {
+    expect(verdictGamma(1000, NaN, 90, 5000).distanceFlipPct).toBeNull();
+    expect(verdictGamma(1000, 0, 90, 5000).distanceFlipPct).toBeNull();
+    expect(verdictGamma(1000, NaN, 90, 5000).regime).toBe("long-gamma");
+  });
+
+  it("Σ|GEX| inexploitable (0 ou NaN) → seuil ignoré, verdict au seul signe du net", () => {
+    expect(verdictGamma(1, 100, null, 0).regime).toBe("long-gamma");
+    expect(verdictGamma(-1, 100, null, NaN).regime).toBe("short-gamma");
+    // net exactement 0 → indéterminé même sans seuil.
+    expect(verdictGamma(0, 100, null, NaN).regime).toBe("indetermine");
+  });
+});
+
+describe("mursGamma", () => {
+  it("call wall = strike du GEX positif max, put wall = strike du GEX négatif max en |valeur|", () => {
+    const murs = mursGamma([
+      { strike: 80, gex: -7 },
+      { strike: 90, gex: -3 },
+      { strike: 100, gex: 5 },
+      { strike: 110, gex: 8 },
+    ]);
+    expect(murs.callWall).toBe(110);
+    expect(murs.putWall).toBe(80);
+  });
+
+  it("aucun GEX du signe → mur null (profil tout positif / tout négatif / vide)", () => {
+    expect(mursGamma([{ strike: 100, gex: 5 }]).putWall).toBeNull();
+    expect(mursGamma([{ strike: 100, gex: 5 }]).callWall).toBe(100);
+    expect(mursGamma([{ strike: 100, gex: -5 }]).callWall).toBeNull();
+    expect(mursGamma([{ strike: 100, gex: -5 }]).putWall).toBe(100);
+    expect(mursGamma([])).toEqual({ callWall: null, putWall: null });
+  });
+
+  it("ignore les valeurs non finies (GEX NaN, strike NaN)", () => {
+    const murs = mursGamma([
+      { strike: 100, gex: NaN },
+      { strike: NaN, gex: 50 },
+      { strike: 110, gex: 4 },
+    ]);
+    expect(murs.callWall).toBe(110);
+    expect(murs.putWall).toBeNull();
+  });
+
+  it("un GEX nul ne compte ni comme call wall ni comme put wall", () => {
+    expect(mursGamma([{ strike: 100, gex: 0 }])).toEqual({ callWall: null, putWall: null });
+  });
+});
+
+describe("profilGexSpot", () => {
+  const NOW = Date.UTC(2026, 0, 1);
+  const UN_AN = 365 * 24 * 60 * 60 * 1000;
+  const EXP = NOW + 0.25 * UN_AN; // T = 0,25 an exactement.
+
+  it("recalcule le GEX net à chaque spot simulé — vérifié à la main via bsGreeks", () => {
+    // Un seul call : strike 100, IV 50 %, OI 10, r 0. À chaque spot simulé s :
+    // GEX(s) = Γ_BS(s, 100, 0,25, 0,5, 0) · 10 · s² · 0,01 (multiplicateur crypto 1).
+    const chaine: CryptoOptionInput[] = [
+      { strike: 100, type: "call", markIv: 50, openInterest: 10, interestRate: 0, expiryMs: EXP },
+    ];
+    const { points, flipReel } = profilGexSpot(chaine, [90, 100, 110], NOW);
+    expect(points.map((p) => p.spot)).toEqual([90, 100, 110]);
+    for (const p of points) {
+      const attendu = bsGreeks(p.spot, 100, 0.25, 0.5, 0).gamma * 10 * p.spot * p.spot * 0.01;
+      expect(p.gexNet).toBeCloseTo(attendu, 6);
+      expect(p.gexNet).toBeGreaterThan(0); // un call seul → GEX toujours positif…
+    }
+    expect(flipReel).toBeNull(); // …donc aucun zéro du profil.
+  });
+
+  it("flip réel = zéro du profil, interpolé entre les deux spots encadrants (premier passage)", () => {
+    // Call OTM haut (strike 120) + put OTM bas (strike 80), même OI/IV : près de 80 la
+    // gamma du put domine (GEX net < 0), près de 120 celle du call domine (GEX net > 0)
+    // → le profil traverse zéro entre les deux.
+    const chaine: CryptoOptionInput[] = [
+      { strike: 120, type: "call", markIv: 50, openInterest: 10, interestRate: 0, expiryMs: EXP },
+      { strike: 80, type: "put", markIv: 50, openInterest: 10, interestRate: 0, expiryMs: EXP },
+    ];
+    const spots = [80, 90, 100, 110, 120];
+    const { points, flipReel } = profilGexSpot(chaine, spots, NOW);
+    expect(points[0]!.gexNet).toBeLessThan(0);
+    expect(points[points.length - 1]!.gexNet).toBeGreaterThan(0);
+    expect(flipReel).not.toBeNull();
+    expect(flipReel!).toBeGreaterThan(80);
+    expect(flipReel!).toBeLessThan(120);
+    // Vérification à la main de l'interpolation sur la paire encadrant le zéro.
+    const i = points.findIndex((p, k) => k > 0 && points[k - 1]!.gexNet * p.gexNet < 0);
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const attendu = a.spot + (-a.gexNet / (b.gexNet - a.gexNet)) * (b.spot - a.spot);
+    expect(flipReel!).toBeCloseTo(attendu, 9);
+  });
+
+  it("ignore les spots non finis ou ≤ 0 et trie les spots croissants", () => {
+    const chaine: CryptoOptionInput[] = [
+      { strike: 100, type: "call", markIv: 50, openInterest: 1, interestRate: 0, expiryMs: EXP },
+    ];
+    const { points } = profilGexSpot(chaine, [110, NaN, -5, 0, 90], NOW);
+    expect(points.map((p) => p.spot)).toEqual([90, 110]);
+  });
+
+  it("chaîne vide → GEX net nul partout, flip réel null (pas de faux zéro)", () => {
+    const { points, flipReel } = profilGexSpot([], [90, 100, 110], NOW);
+    expect(points.map((p) => p.gexNet)).toEqual([0, 0, 0]);
+    expect(flipReel).toBeNull();
+  });
+
+  it("délègue la convention d'unités à computeCryptoGexDex (somme des points par strike)", () => {
+    // Deux échéances, deux strikes : le net à spot simulé s doit être EXACTEMENT la somme
+    // des GEX par strike renvoyés par computeCryptoGexDex(chaîne, s, now).
+    const EXP_B = NOW + 0.5 * UN_AN;
+    const chaine: CryptoOptionInput[] = [
+      { strike: 100, type: "call", markIv: 50, openInterest: 10, interestRate: 0, expiryMs: EXP },
+      { strike: 110, type: "put", markIv: 60, openInterest: 8, interestRate: 0, expiryMs: EXP_B },
+    ];
+    const s = 105;
+    const { points } = profilGexSpot(chaine, [s], NOW);
+    const attendu = computeCryptoGexDex(chaine, s, NOW).reduce((somme, p) => somme + p.gex, 0);
+    expect(points[0]!.gexNet).toBeCloseTo(attendu, 9);
   });
 });

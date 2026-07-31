@@ -164,6 +164,13 @@ export function dessinerSmile(
 
 // ─────────────────────────── Dessin des barres GEX/DEX ───────────────────────────
 
+// Marges latérales du plot de l'histogramme GEX/DEX — partagées avec l'inversion pixel→strike
+// du survol (onSurvolBarres, composant hôte), même modèle que SMILE_PAD_L/R : dessin et survol
+// doivent utiliser EXACTEMENT les mêmes constantes, sinon l'infobulle dérive des barres
+// (leçon HEATMAP_PAD documentée).
+export const BARRES_PAD_L = 46;
+export const BARRES_PAD_R = 10;
+
 /** Sous-ensemble des points dont l'exposition |gex ou dex| dépasse 0,5 % du max — même
  * base pour le tracé (dessinerBarres) et le domaine de l'axe (domaineActionsGexDex). */
 export function filtrerAuSeuil(points: GexDexPoint[], metrique: "gex" | "dex"): GexDexPoint[] {
@@ -195,8 +202,8 @@ export function dessinerBarres(
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
 
-  const padL = 46;
-  const padR = 10;
+  const padL = BARRES_PAD_L;
+  const padR = BARRES_PAD_R;
   const padT = 12;
   const padB = 22;
   const plotW = Math.max(1, cssW - padL - padR);
@@ -293,6 +300,111 @@ export function dessinerBarres(
     ctx.fillStyle = couleurAccent;
     ctx.fillText("γ flip", Math.min(x + 3, cssW - padR - 30), padT + 20);
   }
+}
+
+// ─────────────────────────── Dessin du profil GEX(S) ───────────────────────────
+
+/**
+ * Dessine la courbe compacte du profil GEX(S) (crypto uniquement, Lot E) : axe X = spot
+ * simulé, axe Y = GEX net total recalculé à ce spot (profilGexSpot). Ligne zéro appuyée,
+ * courbe en accent, repères verticaux pointillés au spot courant (dim) et au « flip réel »
+ * (accent — zéro du profil). Canvas simple SANS zoom ni survol : aucun handler n'inverse
+ * cette géométrie, les marges restent donc locales (pas de constantes PAD partagées).
+ * Tokens thème lus AU MOMENT du dessin, POLICE_CANVAS (conventions canvas du dépôt).
+ */
+export function dessinerProfilGex(
+  canvas: HTMLCanvasElement,
+  points: { spot: number; gexNet: number }[],
+  spotCourant: number,
+  flipReel: number | null,
+): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
+  const cssW = canvas.clientWidth || 380;
+  const cssH = canvas.clientHeight || 90;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const padL = 46;
+  const padR = 10;
+  const padT = 8;
+  const padB = 14;
+  const plotW = Math.max(1, cssW - padL - padR);
+  const plotH = Math.max(1, cssH - padT - padB);
+
+  const couleurDim = lireTokenCanvas("--text-dim", "#9ca3af");
+  const couleurBordure = lireTokenCanvas("--border", "#262626");
+  const couleurAccent = lireTokenCanvas("--accent", "#38bdf8");
+
+  ctx.font = POLICE_CANVAS;
+
+  // Points exploitables (profilGexSpot les renvoie déjà triés par spot croissant).
+  const finis = points.filter((p) => Number.isFinite(p.spot) && Number.isFinite(p.gexNet));
+  if (finis.length < 2) {
+    ctx.fillStyle = couleurDim;
+    ctx.fillText("Pas de profil GEX(S)…", padL, padT + plotH / 2);
+    return;
+  }
+
+  const xMin = finis[0]!.spot;
+  const xMax = finis[finis.length - 1]!.spot;
+  const ys = finis.map((p) => p.gexNet);
+  let yHi = Math.max(0, ...ys);
+  let yLo = Math.min(0, ...ys);
+  if (yHi === yLo) yHi = yLo + 1;
+
+  const px = (s: number) => padL + ((s - xMin) / (xMax - xMin || 1)) * plotW;
+  const py = (v: number) => padT + (1 - (v - yLo) / (yHi - yLo)) * plotH;
+
+  // Grille : bornes Y (compactes) + ligne zéro appuyée (dim) — même patron que dessinerBarres.
+  ctx.lineWidth = 1;
+  for (const v of [yHi, 0, yLo]) {
+    const y = py(v);
+    ctx.strokeStyle = v === 0 ? couleurDim : couleurBordure;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(cssW - padR, y);
+    ctx.stroke();
+    ctx.fillStyle = couleurDim;
+    ctx.fillText(formatUsd(v), 2, y + 3);
+  }
+  // Étiquettes X (bornes de la plage de spots simulés).
+  ctx.fillStyle = couleurDim;
+  ctx.fillText(formatStrike(xMin), padL, cssH - 3);
+  const txtMax = formatStrike(xMax);
+  ctx.fillText(txtMax, cssW - padR - ctx.measureText(txtMax).width, cssH - 3);
+
+  // Courbe GEX net(S) en accent.
+  ctx.strokeStyle = couleurAccent;
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  finis.forEach((p, i) => (i === 0 ? ctx.moveTo(px(p.spot), py(p.gexNet)) : ctx.lineTo(px(p.spot), py(p.gexNet))));
+  ctx.stroke();
+
+  /** Repère vertical pointillé borné à la plage simulée (spot courant / flip réel). */
+  const repere = (val: number, couleur: string, etiquette: string, yLibelle: number) => {
+    if (!Number.isFinite(val) || val < xMin || val > xMax) return;
+    const x = px(val);
+    ctx.strokeStyle = couleur;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, padT);
+    ctx.lineTo(x, padT + plotH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = couleur;
+    ctx.fillText(etiquette, Math.min(x + 3, cssW - padR - ctx.measureText(etiquette).width), yLibelle);
+  };
+  // Libellés étagés quand spot et flip réel sont proches en x (même recette que dessinerSmile).
+  const xSpot = Number.isFinite(spotCourant) ? px(spotCourant) : NaN;
+  const xFlip = flipReel !== null && Number.isFinite(flipReel) ? px(flipReel) : NaN;
+  const proches = Number.isFinite(xSpot) && Number.isFinite(xFlip) && Math.abs(xSpot - xFlip) < 48;
+  repere(spotCourant, couleurDim, "spot", padT + 8);
+  if (flipReel !== null) repere(flipReel, couleurAccent, "flip réel", proches ? padT + 18 : padT + 8);
 }
 
 // ─────────────────────────── Dessin de la heatmap OI strike × échéance ───────────────────────────

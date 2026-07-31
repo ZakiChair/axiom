@@ -173,3 +173,171 @@ export function gammaFlip(gexParStrike: { strike: number; gex: number }[]): numb
 
 /** Multiplicateur standard d'une option sur indice actions (1 contrat = 100 sous-jacents). */
 export const EQUITY_CONTRACT_MULTIPLIER = 100;
+
+// ─────────────────────────── Verdict market maker (gamma) ───────────────────────────
+
+/**
+ * Seuil relatif d'indétermination du verdict gamma : le GEX net est jugé trop faible pour
+ * trancher quand |gexNet| < 2 % de Σ|GEX| par strike — le net est alors un résidu marginal
+ * des expositions brutes, dont le signe peut basculer au moindre flux. Constante documentée
+ * ici (unique) pour que tests et UI partagent la même valeur.
+ */
+export const SEUIL_INDETERMINATION_GEX = 0.02;
+
+/** Régime gamma des dealers (convention retail : dealers long les calls, short les puts). */
+export type RegimeGamma = "long-gamma" | "short-gamma" | "indetermine";
+
+/** Verdict market maker dérivé du GEX net — régime + phrase d'action mécanique. */
+export interface VerdictGamma {
+  regime: RegimeGamma;
+  /** Phrase d'action mécanique du dealer (ce qu'il FAIT pour rester delta-neutre). */
+  action: string;
+  /** Qualificatif court du régime de marché induit (« amorti » / « amplifié » / « neutre »). */
+  qualificatif: string;
+  /** Distance spot↔flip = (spot − flip)/spot × 100 (%), null si flip absent ou spot invalide. */
+  distanceFlipPct: number | null;
+}
+
+/**
+ * Verdict market maker (gamma). Fonction PURE.
+ *
+ * GEX net > 0 → dealers long gamma : pour rester delta-neutres ils VENDENT le sous-jacent
+ * quand ça monte et l'ACHÈTENT quand ça baisse → mouvements amortis, aimantation vers les
+ * murs. GEX net < 0 → short gamma : ils ACHÈTENT les hausses et VENDENT les baisses →
+ * mouvements amplifiés (carburant de squeeze/cascade).
+ *
+ * « indetermine » quand |gexNet| < SEUIL_INDETERMINATION_GEX × sommeAbs, quand gexNet vaut 0,
+ * ou quand gexNet n'est pas fini (dégradation gracieuse Number.isFinite — jamais d'exception).
+ * Si `sommeAbs` n'est pas exploitable (non fini ou ≤ 0), le seuil relatif est ignoré et le
+ * verdict retombe sur le seul signe du net. `flip` null → verdict fondé sur le seul signe du
+ * net, distance null. La distance au flip est calculée indépendamment du régime.
+ *
+ * @param gexNet    GEX net (USD par 1 % de mouvement) sur le périmètre choisi par l'appelant.
+ * @param spot      Spot du MÊME périmètre (sert uniquement à la distance au flip).
+ * @param flip      Gamma flip (strike interpolé, cf. gammaFlip), ou null si aucun.
+ * @param sommeAbs  Σ|GEX| par strike du même périmètre (échelle du seuil relatif).
+ */
+export function verdictGamma(
+  gexNet: number,
+  spot: number,
+  flip: number | null,
+  sommeAbs: number,
+): VerdictGamma {
+  const distanceFlipPct =
+    flip !== null && Number.isFinite(flip) && Number.isFinite(spot) && spot > 0
+      ? ((spot - flip) / spot) * 100
+      : null;
+  const sousSeuilRelatif =
+    Number.isFinite(sommeAbs) && sommeAbs > 0
+      ? Math.abs(gexNet) < SEUIL_INDETERMINATION_GEX * sommeAbs
+      : false;
+  if (!Number.isFinite(gexNet) || gexNet === 0 || sousSeuilRelatif) {
+    return {
+      regime: "indetermine",
+      action: "GEX net trop faible pour trancher — pas de pression dominante des dealers.",
+      qualificatif: "neutre",
+      distanceFlipPct,
+    };
+  }
+  if (gexNet > 0) {
+    return {
+      regime: "long-gamma",
+      action:
+        "Les dealers vendent le sous-jacent quand ça monte, l'achètent quand ça baisse — mouvements amortis, aimantation vers les murs.",
+      qualificatif: "amorti",
+      distanceFlipPct,
+    };
+  }
+  return {
+    regime: "short-gamma",
+    action:
+      "Les dealers achètent les hausses, vendent les baisses — mouvements amplifiés (carburant de squeeze/cascade).",
+    qualificatif: "amplifié",
+    distanceFlipPct,
+  };
+}
+
+/** Murs de gamma nommés sur un profil GEX par strike. */
+export interface MursGamma {
+  /** Strike du GEX POSITIF maximal (aimantation côté calls), null si aucun GEX > 0. */
+  callWall: number | null;
+  /** Strike du GEX NÉGATIF maximal en valeur absolue, null si aucun GEX < 0. */
+  putWall: number | null;
+}
+
+/**
+ * Call wall / put wall sur le profil GEX par strike fourni — toutes échéances côté crypto,
+ * échéance sélectionnée côté actions : le choix du périmètre appartient à l'APPELANT.
+ * Les valeurs non finies sont ignorées (convention Number.isFinite). Fonction PURE.
+ */
+export function mursGamma(points: { strike: number; gex: number }[]): MursGamma {
+  let callWall: number | null = null;
+  let putWall: number | null = null;
+  let maxPos = 0; // GEX positif maximal rencontré (strictement > 0 pour compter).
+  let maxNeg = 0; // GEX négatif maximal en valeur absolue (strictement < 0 pour compter).
+  for (const p of points) {
+    if (!Number.isFinite(p.strike) || !Number.isFinite(p.gex)) continue;
+    if (p.gex > maxPos) {
+      maxPos = p.gex;
+      callWall = p.strike;
+    }
+    if (p.gex < maxNeg) {
+      maxNeg = p.gex;
+      putWall = p.strike;
+    }
+  }
+  return { callWall, putWall };
+}
+
+// ─────────────────────────── Profil GEX(spot simulé) ───────────────────────────
+
+/** Un point du profil GEX(S) : GEX net total recalculé au spot simulé. */
+export interface PointProfilGex {
+  spot: number;
+  gexNet: number;
+}
+
+/** Profil GEX(S) complet + zéro du profil (« flip réel »). */
+export interface ProfilGexSpot {
+  /** Courbe [{spot, gexNet}] triée par spot croissant. */
+  points: PointProfilGex[];
+  /** Spot où le GEX net recalculé s'annule (interpolation linéaire, premier passage), null si aucun. */
+  flipReel: number | null;
+}
+
+/**
+ * Profil GEX(spot simulé) — crypto uniquement. Pour chaque spot de `spots`, le GEX net TOTAL
+ * de la chaîne est recalculé par Black-Scholes au spot simulé, IV mark et échéance de chaque
+ * instrument INCHANGÉES : T dérivé d'expiryMs et nowMs, markIv en % ÷ 100, OI en unités de
+ * base, multiplicateur 1, GEX en USD via ×S²×0,01 — exactement la convention de
+ * computeCryptoGexDex, à qui le calcul est DÉLÉGUÉ (chaque point y reçoit son propre T ;
+ * la formule n'est pas recopiée) puis sommé par spot.
+ *
+ * Le « flip réel » est le zéro du profil : premier changement de signe STRICT entre deux
+ * spots consécutifs, interpolé linéairement (même convention que gammaFlip, mais sur le
+ * profil en spot — pas sur le cumul en strike). Null si le profil ne change jamais de signe
+ * (chaîne vide → gexNet 0 partout → null aussi). Les spots non finis ou ≤ 0 sont ignorés,
+ * l'entrée est triée par spot croissant. Fonction PURE (nowMs injecté, jamais Date.now()).
+ */
+export function profilGexSpot(
+  chaine: CryptoOptionInput[],
+  spots: number[],
+  nowMs: number,
+): ProfilGexSpot {
+  const tri = spots.filter((s) => Number.isFinite(s) && s > 0).sort((a, b) => a - b);
+  const points: PointProfilGex[] = tri.map((s) => ({
+    spot: s,
+    gexNet: computeCryptoGexDex(chaine, s, nowMs).reduce((somme, p) => somme + p.gex, 0),
+  }));
+  let flipReel: number | null = null;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    if (a.gexNet * b.gexNet < 0) {
+      // Point où le profil linéaire s'annule entre (spotA, gexA) et (spotB, gexB).
+      flipReel = a.spot + (-a.gexNet / (b.gexNet - a.gexNet)) * (b.spot - a.spot);
+      break;
+    }
+  }
+  return { points, flipReel };
+}

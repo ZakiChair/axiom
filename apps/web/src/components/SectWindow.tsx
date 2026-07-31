@@ -176,9 +176,11 @@ export function SectWindow() {
               title={
                 paire !== null
                   ? `Ouvrir ${paire} dans le chart`
-                  : m.couvert
-                    ? "Non cotée sur Binance"
-                    : "Hors top 250 CoinGecko (non couvert)"
+                  : !m.couvert
+                    ? "Hors top 250 CoinGecko (non couvert)"
+                    : paires === null
+                      ? "Catalogue Binance non chargé — clic inactif"
+                      : "Non cotée sur Binance"
               }
             >
               <span className={m.couvert ? "text-text" : "text-text-dim"}>{m.membre.ticker}</span>

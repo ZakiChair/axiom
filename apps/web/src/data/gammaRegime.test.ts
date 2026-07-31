@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { verdictGammaDepuisChaine, type PointChaineGamma } from "./gammaRegime";
 
 const NOW = 1_700_000_000_000;
@@ -73,5 +73,46 @@ describe("verdictGammaDepuisChaine", () => {
     expect(
       verdictGammaDepuisChaine([opt({ strike: 100_000, type: "call", underlying: -5 })], NOW),
     ).toBeNull();
+  });
+});
+
+// ─── Cache TTL de chargerVerdictGammaBtc (impur, fetch Deribit MOCKÉ — revue Lot 3 :
+// une inversion du TTL ou la mise en cache d'un échec doit casser un test) ───
+
+vi.mock("./deribit", () => ({
+  fetchDeribitOptionChain: vi.fn(),
+}));
+
+describe("chargerVerdictGammaBtc — cache TTL 10 min, succès seulement", () => {
+  it("mémoïse un succès dans le TTL, re-fetch après expiration, et ne cache JAMAIS un échec", async () => {
+    const { fetchDeribitOptionChain } = await import("./deribit");
+    const { chargerVerdictGammaBtc, _viderCacheGammaRegime } = await import("./gammaRegime");
+    const fetchMock = vi.mocked(fetchDeribitOptionChain);
+    _viderCacheGammaRegime();
+
+    const chaine = [opt({ strike: 95_000, type: "call" })];
+    fetchMock.mockResolvedValueOnce(chaine as never);
+    const r1 = await chargerVerdictGammaBtc(NOW);
+    expect(r1?.verdict.regime).toBe("long-gamma");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Dans le TTL : servi du cache, AUCUN nouvel appel réseau.
+    const r2 = await chargerVerdictGammaBtc(NOW + 60_000);
+    expect(r2).toBe(r1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // TTL expiré : re-fetch. Un ÉCHEC renvoie null sans être caché…
+    fetchMock.mockRejectedValueOnce(new Error("panne"));
+    const r3 = await chargerVerdictGammaBtc(NOW + 700_000);
+    expect(r3).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // …et le tick suivant RETENTE immédiatement (l'échec n'a pas empoisonné le cache).
+    fetchMock.mockResolvedValueOnce(chaine as never);
+    const r4 = await chargerVerdictGammaBtc(NOW + 700_001);
+    expect(r4?.verdict.regime).toBe("long-gamma");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    _viderCacheGammaRegime();
   });
 });

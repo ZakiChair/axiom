@@ -175,6 +175,10 @@ export function calculerRegime(entrees: EntreesRegime): Regime {
     // Short gamma → couverture pro-tendance → mouvements amplifiés : −1.
     // Indéterminé (net trop faible) → 0. Pas de ±2 : sans référentiel historique
     // du GEX net, aucune gradation d'intensité n'est défendable.
+    // NOTE (revue Lot 3) : « indéterminé » est une note 0 DISPONIBLE — elle
+    // compte donc pour MIN_COMPOSANTS, comme les autres équilibres mesurés
+    // (funding p50 → 0, ETF plat → 0) : un équilibre observé n'est pas une
+    // absence de donnée. Interaction testée (regime.test.ts, cas frontière).
     const g = entrees.regimeGammaBtc;
     let note: number | null = null;
     if (g !== null) {

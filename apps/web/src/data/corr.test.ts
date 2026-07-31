@@ -24,7 +24,9 @@ import {
   spearman,
   STABLECOINS_EXCLUS,
   symbolesEnEchec,
+  estEchecRecent,
   topPairesUnivers,
+  TTL_ECHEC_MS,
   type CelluleCorr,
   type MatriceCorr,
   type PaireCorr,
@@ -374,6 +376,39 @@ describe("topPairesUnivers", () => {
     expect(topPairesUnivers([], 10)).toEqual([]);
   });
 
+  it("filtre contre le catalogue Binance et REMPLACE au-delà du rang N (revue Lot 3)", () => {
+    // Le vrai top 20 du jour contenait 7 tickers sans paire Binance (LEO, HYPE,
+    // XMR délisté…) : sans remplacement, autant de lignes mortes dans la matrice.
+    const avecMorts = [
+      { symbol: "BTC", mcapUsd: 1000 },
+      { symbol: "LEO", mcapUsd: 900 }, // pas de paire Binance → sauté
+      { symbol: "ETH", mcapUsd: 800 },
+      { symbol: "HYPE", mcapUsd: 700 }, // pas de paire Binance → sauté
+      { symbol: "SOL", mcapUsd: 500 },
+      { symbol: "XRP", mcapUsd: 400 }, // pris EN REMPLACEMENT, au-delà du rang 3
+    ];
+    const listees = new Set(["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]);
+    expect(topPairesUnivers(avecMorts, 3, listees)).toEqual(["BTCUSDT", "ETHUSDT", "SOLUSDT"]);
+    expect(topPairesUnivers(avecMorts, 4, listees)).toEqual([
+      "BTCUSDT",
+      "ETHUSDT",
+      "SOLUSDT",
+      "XRPUSDT",
+    ]);
+    // Sans catalogue (null) : aucun filtrage — comportement d'avant la revue.
+    expect(topPairesUnivers(avecMorts, 3, null)).toEqual(["BTCUSDT", "LEOUSDT", "ETHUSDT"]);
+  });
+
+  it("exclut les jetons emballés/staked (quasi-doublons du sous-jacent, r ≈ 1)", () => {
+    const avecEmballes = [
+      { symbol: "BTC", mcapUsd: 1000 },
+      { symbol: "WBTC", mcapUsd: 900 }, // ≈ BTC — une place du top sans information
+      { symbol: "STETH", mcapUsd: 850 }, // ≈ ETH
+      { symbol: "ETH", mcapUsd: 800 },
+    ];
+    expect(topPairesUnivers(avecEmballes, 3)).toEqual(["BTCUSDT", "ETHUSDT"]);
+  });
+
   it("la liste d'exclusion couvre les stablecoins majeurs, pas les jetons adossés à l'or", () => {
     for (const s of ["USDT", "USDC", "DAI", "USDE", "FDUSD", "TUSD", "USDD", "PYUSD", "USDS"]) {
       expect(STABLECOINS_EXCLUS.has(s)).toBe(true);
@@ -523,5 +558,15 @@ describe("filtrerPairesExtremes", () => {
 
   it("écarte les paires sans valeur même si nb dépasse l'effectif", () => {
     expect(filtrerPairesExtremes(paires, "plus", 10)).toHaveLength(3);
+  });
+});
+
+describe("estEchecRecent (rétention courte des échecs — revue Lot 3)", () => {
+  it("vrai dans la fenêtre TTL, faux au-delà ou pour un symbole jamais en échec", () => {
+    const now = 1_700_000_000_000;
+    const echecs = new Map([["HYPEUSDT", now - 30_000]]);
+    expect(estEchecRecent(echecs, "HYPEUSDT", now)).toBe(true); // 30 s < TTL 60 s
+    expect(estEchecRecent(echecs, "HYPEUSDT", now + TTL_ECHEC_MS)).toBe(false); // expiré
+    expect(estEchecRecent(echecs, "BTCUSDT", now)).toBe(false); // jamais en échec
   });
 });

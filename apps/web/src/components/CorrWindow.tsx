@@ -35,6 +35,7 @@ import { corrUiStore } from "../store/corrUi";
 import { mcapStore } from "../store/mcap";
 import { QUOTE_ASSETS } from "../data/symbol";
 import { fetchMarketOverview, type CoinTile } from "../data/marketOverview";
+import { fetchPairs } from "../data/pairs";
 import {
   alignerSeries,
   calculerMatrice,
@@ -215,6 +216,9 @@ const COLONNES_PAIRES: readonly ColonneTable<PaireCorr>[] = [
 /** Référence stable du catalogue vide (un `[]` littéral par rendu invaliderait les memos). */
 const CATALOGUE_VIDE: CoinTile[] = [];
 
+/** Univers top-N en attente du catalogue des paires Binance : référence STABLE. */
+const CATALOGUE_PAIRES_EN_COURS: string[] = [];
+
 // ─────────────────────────── Composant ───────────────────────────
 
 export function CorrWindow() {
@@ -264,6 +268,13 @@ export function CorrWindow() {
     void fetchMarketOverview()
       .then((o) => {
         if (ignore) return;
+        // Un 200 au format inattendu (ou un cache stale vide) donne coins: [] — le
+        // traiter comme un succès figerait le spinner pour toujours (revue Lot 3) :
+        // c'est une ERREUR, sans poser le repli (le re-fetch reste possible).
+        if (o.coins.length === 0) {
+          setCatalogueErreur(true);
+          return;
+        }
         setCatalogueRepli(o.coins);
         setCatalogueErreur(false);
       })
@@ -275,27 +286,62 @@ export function CorrWindow() {
     };
   }, [open, topN, marches, catalogueRepli]);
 
+  // Catalogue des paires Binance réelles (fetchPairs, mémoïsé par data/pairs — même
+  // patron que MAP/SECT) : l'univers top-N n'est composé QU'AVEC des paires listées,
+  // en itérant au-delà du rang N pour remplacer les tickers sans paire (LEO, HYPE,
+  // XMR délisté… — sans ce filtre, ~7 lignes mortes sur 20 mesurées en revue).
+  // `undefined` = résolution en cours (l'univers top-N attend) ; `null` = échec du
+  // fetch (best-effort : composition SANS filtre, les paires mortes remontent en chips).
+  const [pairesBinance, setPairesBinance] = useState<ReadonlySet<string> | null | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    if (!open || topN === null || pairesBinance !== undefined) return;
+    let ignore = false;
+    void fetchPairs("binance")
+      .then((liste) => {
+        // Une liste VIDE est forcément anormale (réponse au mauvais format) :
+        // filtrer avec viderait tout l'univers — repli « sans filtre » comme un échec.
+        if (!ignore) setPairesBinance(liste.length > 0 ? new Set(liste) : null);
+      })
+      .catch(() => {
+        if (!ignore) setPairesBinance(null);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [open, topN, pairesBinance]);
+
   // Séries chargées (pour la sparkline glissante) — hors state React (pas de re-render).
   const seriesRef = useRef<Map<string, SerieCloture[]>>(new Map());
   const matrixCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const sparkCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Base de l'univers : watchlist (groupe actif) ou top N par capitalisation (stablecoins
-  // exclus, paires Binance USDT). En mode watchlist, le résultat garde la référence de
-  // `watchSymbols` — un changement de catalogue n'invalide alors rien en aval.
-  const basePaires = useMemo(
-    () => (topN === null ? watchSymbols : topPairesUnivers(catalogue, topN)),
-    [topN, watchSymbols, catalogue]
-  );
+  // et emballés exclus, paires filtrées contre le catalogue Binance réel — tant que ce
+  // catalogue se résout (`undefined`), l'univers top-N reste vide (spinner).
+  const basePaires = useMemo(() => {
+    if (topN === null) return watchSymbols;
+    if (pairesBinance === undefined) return CATALOGUE_PAIRES_EN_COURS;
+    return topPairesUnivers(catalogue, topN, pairesBinance);
+  }, [topN, watchSymbols, catalogue, pairesBinance]);
 
   // Symboles = univers + références tradfi actives + ajouts ponctuels, normalisés et
-  // dédoublonnés (les références forment un bloc contigu dans la matrice).
-  const symbols = useMemo(() => {
+  // dédoublonnés (les références forment un bloc contigu dans la matrice). STABILISÉS
+  // par signature de contenu : un rafraîchissement de mcapStore (ouverture de CAP,
+  // TTL, backfill) produit un NOUVEAU tableau `marches` à contenu identique — sans
+  // cette stabilisation, l'effet de chargement re-tournait et effaçait la sélection
+  // et la sparkline sans qu'aucune donnée n'ait changé (revue Lot 3).
+  const symbolsSignature = useMemo(() => {
     const all = [...basePaires, ...referencesActives, ...extras]
       .map((s) => s.trim().toUpperCase())
       .filter((s) => s.length > 0);
-    return [...new Set(all)];
+    return [...new Set(all)].join("|");
   }, [basePaires, referencesActives, extras]);
+  const symbols = useMemo(
+    () => (symbolsSignature.length === 0 ? [] : symbolsSignature.split("|")),
+    [symbolsSignature],
+  );
 
   // Chargement + calcul de la matrice (déclenché à l'ouverture et sur changement de
   // symboles / méthode / fenêtre / recalcul). Changer la fenêtre ou la méthode NE refetch
@@ -542,8 +588,12 @@ export function CorrWindow() {
     const cel = matriceAffichee.cellules[hit.r]?.[hit.c];
     const sr = matriceAffichee.symbols[hit.r];
     const sc = matriceAffichee.symbols[hit.c];
+    // localX est relatif au CANVAS (plus large que le conteneur en Top 20/30) ; le
+    // tooltip est positionné dans l'ancêtre `relative` — soustraire le défilement
+    // horizontal du wrapper, sinon le tooltip dérive de scrollLeft (revue Lot 3).
+    const scrollX = e.currentTarget.parentElement?.scrollLeft ?? 0;
     setTooltip({
-      x: hit.localX,
+      x: hit.localX - scrollX,
       y: hit.localY,
       titre: `${sr} × ${sc}`,
       lignes: [
@@ -637,7 +687,13 @@ export function CorrWindow() {
           />
           <SegmenteCompact
             ariaLabel="Tri de la matrice"
-            options={TRIS_CORR.map((t) => ({ id: t.id, label: t.label }))}
+            options={TRIS_CORR.map((t) => ({
+              id: t.id,
+              // Le tri identité suit l'ORDRE D'ENTRÉE de la matrice : la watchlist en
+              // univers Watchlist, la capitalisation décroissante en univers Top-N —
+              // le libellé suit, sinon il ment (revue Lot 3).
+              label: t.id === "watchlist" && topN !== null ? "Cap." : t.label,
+            }))}
             actif={tri}
             onChange={(t) => corrUiStore.getState().setTri(t)}
           />
@@ -684,21 +740,21 @@ export function CorrWindow() {
           <div className="mb-3 flex flex-wrap gap-1.5">
             {echecs.map((s) => (
               <Badge key={s} ton="warn" title={`Série ${s} indisponible : cellules vides dans la matrice`}>
-                {s} — échec de chargement (quota ?)
+                {s} — série indisponible (paire non listée, source en panne ou quota)
               </Badge>
             ))}
           </div>
         )}
 
         {/* Matrice, table des paires ou message d'état. */}
-        {topN !== null && catalogue.length === 0 ? (
+        {topN !== null && (catalogue.length === 0 || pairesBinance === undefined) ? (
           catalogueErreur ? (
             <ErreurBloc>
               Catalogue CoinGecko indisponible — l'univers Top {topN} ne peut pas être construit.
               Repassez sur Watchlist ou réessayez plus tard.
             </ErreurBloc>
           ) : (
-            <Chargement libelle="Catalogue CoinGecko…" />
+            <Chargement libelle="Catalogues (CoinGecko · paires Binance)…" />
           )
         ) : symbols.length < 2 ? (
           <Vide>Au moins deux symboles sont nécessaires. Ajoutez-en à la watchlist ou via le champ ci-dessus.</Vide>

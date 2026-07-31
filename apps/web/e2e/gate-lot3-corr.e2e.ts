@@ -53,6 +53,13 @@ async function bouchonnerReseau(page: Page): Promise<void> {
   // Repli générique Binance (exchangeInfo…) AVANT la route klines : Playwright teste
   // les routes de la plus récente à la plus ancienne, la plus spécifique gagne.
   await page.route("**/api.binance.com/**", (route) => route.fulfill({ json: [] }));
+  // Catalogue des paires réelles (fetchPairs — filtre de l'univers top-N depuis la
+  // revue Lot 3) : toutes les paires du CATALOGUE bouchonné sont « listées ».
+  await page.route("**/api.binance.com/api/v3/exchangeInfo*", (route) =>
+    route.fulfill({
+      json: { symbols: CATALOGUE.map((t) => ({ symbol: `${t}USDT`, status: "TRADING" })) },
+    }),
+  );
   await page.route("**/api.binance.com/api/v3/klines*", (route) => {
     const url = new URL(route.request().url());
     const symbol = url.searchParams.get("symbol") ?? "X";

@@ -116,9 +116,36 @@ export const STABLECOINS_EXCLUS: ReadonlySet<string> = new Set([
   "LUSD",
   "USDL",
   "USDY",
+  "USDG",
+  "USYC",
   "EURC",
   "EURT",
   "EURS",
+]);
+
+/**
+ * Jetons emballés / staked exclus de l'univers top-N : quasi-doublons de leur
+ * sous-jacent (WBTC ≈ BTC, r ≈ 1) — une place du top qui n'apporte AUCUNE
+ * information de corrélation. Liste curée, même esprit que STABLECOINS_EXCLUS.
+ */
+export const EMBALLES_EXCLUS: ReadonlySet<string> = new Set([
+  "WBTC",
+  "CBBTC",
+  "LBTC",
+  "TBTC",
+  "SOLVBTC",
+  "WETH",
+  "WBETH",
+  "STETH",
+  "WSTETH",
+  "WEETH",
+  "RETH",
+  "RSETH",
+  "EZETH",
+  "METH",
+  "JITOSOL",
+  "MSOL",
+  "BNSOL",
 ]);
 
 /** Sous-ensemble de `CoinTile` (marketOverview) suffisant pour bâtir l'univers top-N. */
@@ -130,21 +157,32 @@ export interface MembreCatalogue {
 
 /**
  * Paires Binance USDT du top `n` par capitalisation d'un catalogue CoinGecko (top 250
- * déjà chargé par mcapStore / marketOverview — AUCUN appel réseau ici) : stablecoins
- * exclus, tri par capitalisation décroissante, doublons de paire écartés. Une paire
- * inexistante sur Binance échouera au chargement et remontera en chip d'erreur
- * (`symbolesEnEchec`) — pas de vérification préalable du catalogue Binance. Fonction PURE.
+ * déjà chargé par mcapStore / marketOverview — AUCUN appel réseau ici) : stablecoins et
+ * jetons emballés exclus, tri par capitalisation décroissante, doublons écartés.
+ *
+ * `pairesBinance` = catalogue réel des paires Binance (fetchPairs, comme MAP/SECT) :
+ * un ticker CoinGecko sans paire listée (LEO, HYPE, XMR délisté…) est SAUTÉ et
+ * l'itération continue AU-DELÀ du rang n pour compléter — sans ce filtre, le vrai
+ * top 20 du jour produit ~7 lignes mortes sur 20 (mesuré en revue, 2026-07-31).
+ * `null` = catalogue indisponible : aucun filtrage (l'appelant décide d'attendre).
+ * Fonction PURE.
  */
-export function topPairesUnivers(catalogue: readonly MembreCatalogue[], n: number): string[] {
+export function topPairesUnivers(
+  catalogue: readonly MembreCatalogue[],
+  n: number,
+  pairesBinance: ReadonlySet<string> | null = null,
+): string[] {
   const parCap = [...catalogue].sort((a, b) => b.mcapUsd - a.mcapUsd);
   const paires: string[] = [];
   const vues = new Set<string>();
   for (const membre of parCap) {
     if (paires.length >= n) break;
     const ticker = membre.symbol.trim().toUpperCase();
-    if (ticker.length === 0 || STABLECOINS_EXCLUS.has(ticker)) continue;
+    if (ticker.length === 0 || STABLECOINS_EXCLUS.has(ticker) || EMBALLES_EXCLUS.has(ticker))
+      continue;
     const paire = toBinanceUsdtPair(ticker);
     if (vues.has(paire)) continue;
+    if (pairesBinance !== null && !pairesBinance.has(paire)) continue; // non listée : suivant
     vues.add(paire);
     paires.push(paire);
   }
@@ -627,9 +665,26 @@ const cacheSeries = new Map<string, SerieCloture[]>();
  * SANS la cacher (dégradation gracieuse : cellules vides + réessai possible), plutôt qu'une
  * exception qui casserait toute la matrice.
  */
+/**
+ * Rétention courte des ÉCHECS de chargement : sans elle, un symbole en échec est
+ * re-requêté à CHAQUE re-run de l'effet (bascule méthode/fenêtre, rafraîchissement du
+ * catalogue) — violation du contrat « ne refetch pas » mesurée en revue. Un échec n'est
+ * PAS caché durablement (convention du dépôt) : simple fenêtre de silence, purgée par
+ * « Recalculer » (viderCacheSeries), après quoi le réessai est le comportement voulu.
+ */
+export const TTL_ECHEC_MS = 60_000;
+const echecsRecents = new Map<string, number>();
+
+/** Un symbole a-t-il échoué il y a moins de `TTL_ECHEC_MS` ? PURE (map + now injectés). */
+export function estEchecRecent(echecs: ReadonlyMap<string, number>, symbol: string, now: number): boolean {
+  const ts = echecs.get(symbol);
+  return ts !== undefined && now - ts < TTL_ECHEC_MS;
+}
+
 export async function chargerSerie(symbol: string): Promise<SerieCloture[]> {
   const cached = cacheSeries.get(symbol);
   if (cached !== undefined) return cached;
+  if (estEchecRecent(echecsRecents, symbol, Date.now())) return [];
   try {
     const source = resolveTickerSource(symbol, watchlistStore.getState().sources[symbol]);
     const candles: Candle[] = await getAdapter(source).fetchKlines(symbol, "1d", { limit: MAX_JOURS });
@@ -638,8 +693,10 @@ export async function chargerSerie(symbol: string): Promise<SerieCloture[]> {
       .map((c) => ({ time: c.time, close: c.close }))
       .sort((x, y) => x.time - y.time);
     cacheSeries.set(symbol, serie);
+    echecsRecents.delete(symbol);
     return serie;
   } catch {
+    echecsRecents.set(symbol, Date.now());
     return [];
   }
 }
@@ -659,4 +716,5 @@ export async function chargerSeries(symbols: string[]): Promise<Map<string, Seri
 /** Vide le cache session des séries (bouton « recalculer » = re-fetch forcé). */
 export function viderCacheSeries(): void {
   cacheSeries.clear();
+  echecsRecents.clear(); // « Recalculer » ré-arme aussi les symboles récemment en échec
 }

@@ -257,8 +257,9 @@ export interface AgregatSecteur {
   membres: MembreValorise[];
 }
 
-/** Nombre fini → lui-même, sinon null (garde contre un vieux cache sans 7 j/30 j). */
-function fini(v: number | undefined): number | null {
+/** Nombre fini → lui-même, sinon null (null CoinGecko « pièce trop récente » PRÉSERVÉ
+ *  par parseMarkets depuis la revue Lot 3 ; undefined = vieux cache sans 7 j/30 j). */
+function fini(v: number | null | undefined): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 

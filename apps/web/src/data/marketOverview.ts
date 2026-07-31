@@ -51,13 +51,15 @@ export interface CoinTile {
   price: number;
   /** Variation 24 h (%) — couleur de la tuile. */
   changePct24h: number;
-  /** Variation 7 j (%) — sert SECT ; 0 si CoinGecko renvoie null (pièce trop récente).
+  /** Variation 7 j (%) — sert SECT ; NULL si CoinGecko renvoie null (pièce trop
+   *  récente) : un 0 fabriqué diluerait les moyennes pondérées vers 0 et
+   *  s'afficherait « +0.00% » en vert (revue Lot 3).
    *  ⚠ Une entrée de cache ANTÉRIEURE à ce champ peut le laisser `undefined` au
    *  runtime pendant ≤ 5 min (ou en repli périmé) : les consommateurs gardent
    *  avec `Number.isFinite` (cf. data/secteurs.ts). */
-  changePct7j: number;
+  changePct7j: number | null;
   /** Variation 30 j (%) — même convention que `changePct7j`. */
-  changePct30j: number;
+  changePct30j: number | null;
 }
 
 /** Performance d'un secteur (catégorie CoinGecko). */
@@ -109,6 +111,11 @@ const HEALTH_SOURCE = "coingecko:market";
 /** Nombre fini, sinon `fallback`. PURE. */
 function num(v: unknown, fallback = 0): number {
   return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
+/** Nombre fini, sinon NULL — pour les champs où « absent » ≠ « zéro » (7 j/30 j). PURE. */
+function numOuNull(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
 /** Forme brute (partielle) de /global. */
@@ -165,8 +172,8 @@ export function parseMarkets(json: unknown): CoinTile[] {
       mcapUsd,
       price: num(raw.current_price),
       changePct24h: num(raw.price_change_percentage_24h),
-      changePct7j: num(raw.price_change_percentage_7d_in_currency),
-      changePct30j: num(raw.price_change_percentage_30d_in_currency),
+      changePct7j: numOuNull(raw.price_change_percentage_7d_in_currency),
+      changePct30j: numOuNull(raw.price_change_percentage_30d_in_currency),
     });
   }
   out.sort((a, b) => b.mcapUsd - a.mcapUsd);

@@ -75,7 +75,12 @@ export function lectures(entrees: EntreesLecture): string[] {
     );
   }
 
-  // 4. Sentiment : extrêmes Fear & Greed seulement.
+  // 4. Sentiment : extrêmes Fear & Greed seulement. DERNIER par PRIORITÉ
+  //    assumée (revue Lot 3) : à 4 candidates (nuit + positionnement + gamma +
+  //    sentiment — le scénario de stress typique), le slice(0,3) évince CETTE
+  //    phrase — mécanique de flux (funding/OI/gamma) > sentiment lent, et le
+  //    F&G reste visible ailleurs dans le BRIEF (badge SectionNews + pastille
+  //    REGIME). Ordre d'insertion = ordre de priorité, testé.
   if (entrees.fearGreed !== null && Number.isFinite(entrees.fearGreed)) {
     if (entrees.fearGreed >= 75) out.push(`Sentiment en zone avidité (F&G ${Math.round(entrees.fearGreed)}).`);
     else if (entrees.fearGreed <= 25) out.push(`Sentiment en zone peur (F&G ${Math.round(entrees.fearGreed)}).`);

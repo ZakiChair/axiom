@@ -81,7 +81,7 @@ describe("parseMarkets", () => {
     expect(at(tiles, 0).changePct24h).toBe(0);
   });
 
-  it("parse les périodes 7 j / 30 j (champs *_in_currency) ; absentes ou null → 0", () => {
+  it("parse les périodes 7 j / 30 j (champs *_in_currency) ; absentes ou null → NULL (jamais 0)", () => {
     const tiles = parseMarkets([
       {
         id: "a",
@@ -96,9 +96,11 @@ describe("parseMarkets", () => {
     ]);
     expect(at(tiles, 0).changePct7j).toBeCloseTo(-4.2, 10);
     expect(at(tiles, 0).changePct30j).toBeCloseTo(12.75, 10);
-    // Réponse SANS le paramètre de périodes (ou null) : 0, comme le Δ24 h.
-    expect(at(tiles, 1).changePct7j).toBe(0);
-    expect(at(tiles, 1).changePct30j).toBe(0);
+    // Réponse SANS le paramètre de périodes (ou null) : NULL préservé — un 0
+    // fabriqué diluerait les moyennes pondérées de SECT vers 0 et s'afficherait
+    // « +0.00% » en vert (revue Lot 3). Le Δ24 h garde sa convention 0 (MAP).
+    expect(at(tiles, 1).changePct7j).toBeNull();
+    expect(at(tiles, 1).changePct30j).toBeNull();
   });
 
   it("entrée non-tableau → liste vide", () => {

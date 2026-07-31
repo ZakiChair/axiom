@@ -141,6 +141,27 @@ describe("calculerRegime — score et libellé", () => {
     expect(r.composants).toHaveLength(8);
     expect(r.score).toBeCloseTo(2 / 8, 6);
   });
+
+  it("frontière MIN_COMPOSANTS : « indéterminé » gamma est une note 0 DISPONIBLE qui qualifie le plancher", () => {
+    // Comportement DOCUMENTÉ (revue Lot 3) : un équilibre gamma MESURÉ (net trop
+    // faible pour trancher) n'est pas une absence de donnée — il compte comme
+    // 3e composant, exactement comme un funding p50 → 0. Deux sources + gamma
+    // indéterminé ⇒ le composite tranche ((2+2+0)/3 → « risk-on tendu »), là où
+    // gamma NULL (Deribit en panne) le laisserait « indéterminé ».
+    const deuxSources = {
+      ...VIDE,
+      directionBtc24hPct: 5, // +2
+      fearGreed: 80, // +2
+    };
+    const avecEquilibreGamma = calculerRegime({
+      ...deuxSources,
+      regimeGammaBtc: { regime: "indetermine", gexNetUsd: 1_000_000 }, // 0, disponible
+    });
+    expect(avecEquilibreGamma.libelle).toBe("risk-on tendu");
+    expect(avecEquilibreGamma.score).toBeCloseTo(4 / 3, 6);
+    const sansGamma = calculerRegime({ ...deuxSources, regimeGammaBtc: null });
+    expect(sansGamma.libelle).toBe("indéterminé");
+  });
 });
 
 describe("tonRegime", () => {

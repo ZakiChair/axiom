@@ -69,4 +69,21 @@ describe("lectures", () => {
       expect(phrase.toLowerCase()).not.toMatch(/acheter|vendre|conseil|prendre position/);
     }
   });
+
+  it("à 4 candidates, c'est la phrase SENTIMENT qui saute (priorité flux > sentiment, documentée)", () => {
+    // Scénario de stress où les 4 co-occurrent : nuit + positionnement + gamma
+    // + F&G extrême. Le F&G reste visible ailleurs (badge NEWS, pastille REGIME).
+    const l = lectures({
+      nuitBtcPct: -4,
+      fundingPercentile: 95,
+      dvolPercentile: 90,
+      deltaOi24hPct: 8,
+      fearGreed: 12,
+      regimeGamma: "short-gamma",
+      gexNetUsd: -80_000_000,
+    });
+    expect(l).toHaveLength(3);
+    expect(l.some((p) => p.includes("short gamma"))).toBe(true);
+    expect(l.some((p) => p.includes("F&G"))).toBe(false);
+  });
 });

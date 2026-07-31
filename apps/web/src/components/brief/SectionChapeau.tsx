@@ -96,7 +96,11 @@ export function SectionChapeau({ regime, chapeau, phrasesLecture }: Props) {
               ? "Long gamma — amorti"
               : chapeau?.regimeGamma === "short-gamma"
                 ? "Short gamma — amplifié"
-                : "—"
+                : chapeau?.regimeGamma === "indetermine"
+                  ? // Résultat MESURÉ (|net| < 2 % de Σ|GEX| — zone du flip), pas une
+                    // panne : « — » est réservé à l'indisponible (revue Lot 3).
+                    "Équilibré — sans pression dominante"
+                  : "—"
           }
           ton={
             chapeau?.regimeGamma === "long-gamma"

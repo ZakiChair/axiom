@@ -11,14 +11,23 @@ import {
   exclureJourCourant,
   fenetrer,
   FENETRES_CORR,
+  filtrerPairesExtremes,
   hydraterReglagesCorr,
+  listerPaires,
   logRendements,
+  ordonnerMatrice,
+  ordonnerParSimilarite,
   pearson,
   pointsFiables,
   REFERENCES_CORR,
   SEUIL_POINTS_FIABLES,
   spearman,
+  STABLECOINS_EXCLUS,
   symbolesEnEchec,
+  topPairesUnivers,
+  type CelluleCorr,
+  type MatriceCorr,
+  type PaireCorr,
   type SerieCloture,
 } from "./corr";
 
@@ -258,11 +267,43 @@ describe("REFERENCES_CORR", () => {
 describe("hydraterReglagesCorr", () => {
   it("renvoie les défauts sur entrée absente ou non-objet, sans jeter", () => {
     const defauts = hydraterReglagesCorr(undefined);
-    expect(defauts).toEqual({ methode: "pearson", fenetreJours: 90, extras: [], referencesActives: [] });
+    expect(defauts).toEqual({
+      methode: "pearson",
+      fenetreJours: 90,
+      extras: [],
+      referencesActives: [],
+      univers: "watchlist",
+      tri: "watchlist",
+      onglet: "matrice",
+    });
     expect(hydraterReglagesCorr(null)).toEqual(defauts);
     expect(hydraterReglagesCorr("n'importe quoi")).toEqual(defauts);
     expect(hydraterReglagesCorr(42)).toEqual(defauts);
     expect(hydraterReglagesCorr([])).toEqual(defauts);
+  });
+
+  it("rétro-compatible : un localStorage v2.6 sans univers/tri/onglet hérite des défauts", () => {
+    const h = hydraterReglagesCorr({
+      methode: "spearman",
+      fenetreJours: 30,
+      extras: ["AVAXUSDT"],
+      referencesActives: ["SPY"],
+    });
+    expect(h.methode).toBe("spearman"); // les champs v2.6 survivent
+    expect(h.univers).toBe("watchlist");
+    expect(h.tri).toBe("watchlist");
+    expect(h.onglet).toBe("matrice");
+  });
+
+  it("accepte univers/tri/onglet valides, remplace les inconnus par leurs défauts", () => {
+    const valides = hydraterReglagesCorr({ univers: "top20", tri: "similarite", onglet: "paires" });
+    expect(valides.univers).toBe("top20");
+    expect(valides.tri).toBe("similarite");
+    expect(valides.onglet).toBe("paires");
+    const invalides = hydraterReglagesCorr({ univers: "top50", tri: "corr", onglet: "liste" });
+    expect(invalides.univers).toBe("watchlist");
+    expect(invalides.tri).toBe("watchlist");
+    expect(invalides.onglet).toBe("matrice");
   });
 
   it("accepte un état valide champ par champ (extras normalisés trim+MAJUSCULES)", () => {
@@ -304,5 +345,183 @@ describe("hydraterReglagesCorr", () => {
     for (const f of FENETRES_CORR) {
       expect(hydraterReglagesCorr({ fenetreJours: f }).fenetreJours).toBe(f);
     }
+  });
+});
+
+describe("FENETRES_CORR", () => {
+  it("propose 7, 30, 90 et 180 jours (7 j ajouté par CORR v2, MAX_JOURS inchangé)", () => {
+    expect(FENETRES_CORR).toEqual([7, 30, 90, 180]);
+  });
+});
+
+describe("topPairesUnivers", () => {
+  const catalogue = [
+    { symbol: "ETH", mcapUsd: 800 },
+    { symbol: "BTC", mcapUsd: 1000 }, // désordre volontaire : le tri par cap est à la charge de la fonction
+    { symbol: "USDT", mcapUsd: 900 }, // stablecoin → exclu
+    { symbol: "eth", mcapUsd: 700 }, // doublon de paire (trim + MAJUSCULES) → écarté
+    { symbol: "USDC", mcapUsd: 600 }, // stablecoin → exclu
+    { symbol: "SOL", mcapUsd: 500 },
+    { symbol: "XRP", mcapUsd: 400 },
+  ];
+
+  it("prend le top N par capitalisation, stablecoins exclus, en paires Binance USDT", () => {
+    expect(topPairesUnivers(catalogue, 3)).toEqual(["BTCUSDT", "ETHUSDT", "SOLUSDT"]);
+  });
+
+  it("renvoie tous les éligibles si N dépasse le catalogue, [] sur catalogue vide", () => {
+    expect(topPairesUnivers(catalogue, 30)).toEqual(["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]);
+    expect(topPairesUnivers([], 10)).toEqual([]);
+  });
+
+  it("la liste d'exclusion couvre les stablecoins majeurs, pas les jetons adossés à l'or", () => {
+    for (const s of ["USDT", "USDC", "DAI", "USDE", "FDUSD", "TUSD", "USDD", "PYUSD", "USDS"]) {
+      expect(STABLECOINS_EXCLUS.has(s)).toBe(true);
+    }
+    expect(STABLECOINS_EXCLUS.has("BTC")).toBe(false);
+    expect(STABLECOINS_EXCLUS.has("PAXG")).toBe(false);
+  });
+});
+
+/** Matrice synthétique : cellules à points constants (30), valeurs fournies ligne à ligne. */
+function matriceDe(symbols: string[], vals: (number | null)[][]): MatriceCorr {
+  return {
+    symbols,
+    methode: "pearson",
+    fenetreJours: 90,
+    cellules: vals.map((ligne) => ligne.map((v) => ({ valeur: v, points: 30 }))),
+  };
+}
+
+describe("ordonnerParSimilarite", () => {
+  it("regroupe deux blocs corrélés entrelacés en deux blocs CONTIGUS (critère de succès)", () => {
+    // Blocs {A,B} (r = 0,75) et {C,D} (r = 0,875), croisements à 0,25, ordre d'entrée
+    // ENTRELACÉ [A, C, B, D]. Valeurs EXACTES en binaire (0,25/0,75/0,875) : les sommes
+    // sont exactes quel que soit l'ordre d'addition, l'égalité C/D est donc réelle et
+    // tranchée par le plus petit index. Moyennes absolues hors diagonale :
+    //   A = (0,25+0,75+0,25)/3 ≈ 0,417 ; C = D = (0,25+0,25+0,875)/3 ≈ 0,458 → départ C.
+    // Depuis C : plus proche voisin D (0,875) → puis A (égalité 0,25/0,25, plus petit
+    // index) → puis B. Ordre attendu : [C, D, A, B] = indices [1, 3, 0, 2].
+    const m = matriceDe(
+      ["A", "C", "B", "D"],
+      [
+        [1, 0.25, 0.75, 0.25],
+        [0.25, 1, 0.25, 0.875],
+        [0.75, 0.25, 1, 0.25],
+        [0.25, 0.875, 0.25, 1],
+      ]
+    );
+    const ordre = ordonnerParSimilarite(m);
+    expect(ordre).toEqual([1, 3, 0, 2]);
+    const symbolesOrdonnes = ordre.map((i) => m.symbols[i]);
+    // Contiguïté des blocs : {C,D} adjacents ET {A,B} adjacents.
+    expect(Math.abs(symbolesOrdonnes.indexOf("C") - symbolesOrdonnes.indexOf("D"))).toBe(1);
+    expect(Math.abs(symbolesOrdonnes.indexOf("A") - symbolesOrdonnes.indexOf("B"))).toBe(1);
+  });
+
+  it("traite les cellules null comme 0 (aucune affinité connue)", () => {
+    // Moyennes absolues : A = (0,8+0)/2 = 0,4 ; B = (0,8+0,5)/2 = 0,65 (départ) ;
+    // C = (0+0,5)/2 = 0,25. Depuis B : A (0,8) puis C. Ordre = [1, 0, 2].
+    const m = matriceDe(
+      ["A", "B", "C"],
+      [
+        [1, 0.8, null],
+        [0.8, 1, 0.5],
+        [null, 0.5, 1],
+      ]
+    );
+    expect(ordonnerParSimilarite(m)).toEqual([1, 0, 2]);
+  });
+
+  it("matrice vide → [], singleton → [0]", () => {
+    expect(ordonnerParSimilarite(matriceDe([], []))).toEqual([]);
+    expect(ordonnerParSimilarite(matriceDe(["A"], [[1]]))).toEqual([0]);
+  });
+});
+
+describe("ordonnerMatrice", () => {
+  it("tri « watchlist » : renvoie la matrice TELLE QUELLE (même référence)", () => {
+    const m = matriceDe(["B", "A"], [[1, 0.5], [0.5, 1]]);
+    expect(ordonnerMatrice(m, "watchlist")).toBe(m);
+  });
+
+  it("tri « alpha » : symboles triés, cellules permutées de façon cohérente", () => {
+    // Points distincts par cellule pour tracer la permutation.
+    const cel = (valeur: number | null, points: number): CelluleCorr => ({ valeur, points });
+    const m: MatriceCorr = {
+      symbols: ["B", "A"],
+      methode: "pearson",
+      fenetreJours: 90,
+      cellules: [
+        [cel(1, 2), cel(0.5, 7)],
+        [cel(0.5, 7), cel(1, 3)],
+      ],
+    };
+    const o = ordonnerMatrice(m, "alpha");
+    expect(o.symbols).toEqual(["A", "B"]);
+    expect(o.cellules[0]?.[0]).toEqual(cel(1, 3)); // diagonale de A suit A
+    expect(o.cellules[0]?.[1]).toEqual(cel(0.5, 7)); // cellule croisée conservée
+    expect(m.symbols).toEqual(["B", "A"]); // l'entrée n'est pas mutée
+  });
+
+  it("tri « similarite » : applique l'ordre glouton aux symboles ET aux cellules", () => {
+    // Mêmes valeurs exactes en binaire que le cas « deux blocs » ci-dessus.
+    const m = matriceDe(
+      ["A", "C", "B", "D"],
+      [
+        [1, 0.25, 0.75, 0.25],
+        [0.25, 1, 0.25, 0.875],
+        [0.75, 0.25, 1, 0.25],
+        [0.25, 0.875, 0.25, 1],
+      ]
+    );
+    const o = ordonnerMatrice(m, "similarite");
+    expect(o.symbols).toEqual(["C", "D", "A", "B"]);
+    expect(o.cellules[0]?.[1]?.valeur).toBe(0.875); // C×D en tête de bloc
+    expect(o.cellules[2]?.[3]?.valeur).toBe(0.75); // A×B dans le second bloc
+  });
+});
+
+describe("listerPaires", () => {
+  it("liste le triangle supérieur (hors diagonale, A–B ≡ B–A une seule fois)", () => {
+    const m = matriceDe(
+      ["X", "Y", "Z"],
+      [
+        [1, 0.4, null],
+        [0.4, 1, -0.2],
+        [null, -0.2, 1],
+      ]
+    );
+    expect(listerPaires(m)).toEqual([
+      { a: "X", b: "Y", valeur: 0.4, points: 30 },
+      { a: "X", b: "Z", valeur: null, points: 30 },
+      { a: "Y", b: "Z", valeur: -0.2, points: 30 },
+    ]);
+  });
+
+  it("matrice vide ou singleton → aucune paire", () => {
+    expect(listerPaires(matriceDe([], []))).toEqual([]);
+    expect(listerPaires(matriceDe(["A"], [[1]]))).toEqual([]);
+  });
+});
+
+describe("filtrerPairesExtremes", () => {
+  const paires: PaireCorr[] = [
+    { a: "A", b: "B", valeur: 0.9, points: 30 },
+    { a: "A", b: "C", valeur: 0.5, points: 30 },
+    { a: "B", b: "C", valeur: null, points: 0 }, // sans valeur → jamais retenue
+    { a: "C", b: "D", valeur: -0.3, points: 30 },
+  ];
+
+  it("« plus » : les nb corrélations les plus hautes, extrême en tête", () => {
+    expect(filtrerPairesExtremes(paires, "plus", 2).map((p) => p.valeur)).toEqual([0.9, 0.5]);
+  });
+
+  it("« moins » : les nb corrélations les plus basses, extrême en tête", () => {
+    expect(filtrerPairesExtremes(paires, "moins", 2).map((p) => p.valeur)).toEqual([-0.3, 0.5]);
+  });
+
+  it("écarte les paires sans valeur même si nb dépasse l'effectif", () => {
+    expect(filtrerPairesExtremes(paires, "plus", 10)).toHaveLength(3);
   });
 });

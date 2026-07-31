@@ -4,9 +4,10 @@
  * POURQUOI un store dédié : la fermeture d'une FloatingWindow DÉMONTE le composant —
  * tout réglage en useState (méthode, fenêtre, extras) était perdu à chaque fermeture
  * (leçon documentée par la spec v2.6, Lot C). Les réglages vivent donc ici et sont
- * persistés sous la clé `axiom:corr:v1` : méthode, fenêtre, extras manuels et
- * références tradfi actives — JAMAIS l'état `open` (déjà miroir du windowManager via
- * `mirrorOpenState`, refléter l'ouverture dans localStorage créerait un double maître).
+ * persistés sous la clé `axiom:corr:v1` : méthode, fenêtre, extras manuels, références
+ * tradfi actives, univers, tri et onglet — JAMAIS l'état `open` (déjà miroir du
+ * windowManager via `mirrorOpenState`, refléter l'ouverture dans localStorage créerait
+ * un double maître).
  *
  * Hydratation : lecture tolérante (localStorage indisponible / JSON corrompu → défauts)
  * déléguée à `hydraterReglagesCorr` (pure, testée dans corr.test.ts) — validation champ
@@ -22,7 +23,10 @@ import {
   hydraterReglagesCorr,
   FENETRES_CORR,
   type MethodeCorr,
+  type OngletCorr,
   type ReglagesCorr,
+  type TriCorr,
+  type UniversCorr,
 } from "../data/corr";
 
 /** Clé localStorage des réglages CORR (versionnée). */
@@ -32,6 +36,9 @@ export interface CorrUiState extends ReglagesCorr {
   open: boolean;
   setMethode: (methode: MethodeCorr) => void;
   setFenetre: (jours: number) => void;
+  setUnivers: (univers: UniversCorr) => void;
+  setTri: (tri: TriCorr) => void;
+  setOnglet: (onglet: OngletCorr) => void;
   ajouterExtra: (symbole: string) => void;
   retirerExtra: (symbole: string) => void;
   basculerReference: (symbole: string) => void;
@@ -58,6 +65,9 @@ export const corrUiStore = createStore<CorrUiState>((set, get) => ({
   setFenetre: (jours) => {
     if (FENETRES_CORR.includes(jours)) set({ fenetreJours: jours });
   },
+  setUnivers: (univers) => set({ univers }),
+  setTri: (tri) => set({ tri }),
+  setOnglet: (onglet) => set({ onglet }),
   ajouterExtra: (symbole) => {
     const s = symbole.trim().toUpperCase();
     if (s.length === 0 || get().extras.includes(s)) return;
@@ -86,6 +96,9 @@ function signatureReglages(s: CorrUiState): string {
     fenetreJours: s.fenetreJours,
     extras: s.extras,
     referencesActives: s.referencesActives,
+    univers: s.univers,
+    tri: s.tri,
+    onglet: s.onglet,
   };
   return JSON.stringify(reglages);
 }

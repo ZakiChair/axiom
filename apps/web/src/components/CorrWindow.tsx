@@ -1,33 +1,40 @@
 /**
- * Panneau « CORR » — matrice de corrélation, dockable à droite, NON MODAL (pas d'overlay).
- *
- * Suit le pattern DerivativesWindow : panneau translaté hors écran quand fermé (inerte,
- * pointer-events-none), toggle par le mnémonique CORR ou une commande de la palette. Le
- * graphe reste interactif pendant l'analyse.
+ * Fenêtre « CORR » — matrice de corrélation (FloatingWindow du registre, toggle par le
+ * mnémonique CORR ou la palette ; le graphe reste interactif pendant l'analyse).
  *
  * Contenu :
- *  - matrice N×N (canvas) sur les symboles de la WATCHLIST + références tradfi préréglées
- *    (S&P 500, Nasdaq, or, dollar, forex — toggles individuels) + ajout ponctuel, dégradé
- *    down→up entre -1 et +1, valeur au survol, cellules à n < 20 rendements ATTÉNUÉES ;
+ *  - univers segmenté Watchlist | Top 10 | Top 20 | Top 30 (top N par capitalisation du
+ *    top 250 CoinGecko déjà chargé — mcapStore, repli fetchMarketOverview en cache 5 min ;
+ *    stablecoins exclus, conversion ticker→paire via toBinanceUsdtPair) + références
+ *    tradfi préréglées (toggles individuels, elles s'AJOUTENT à l'univers) + ajout ponctuel ;
+ *  - matrice N×N (canvas), dégradé down→up entre -1 et +1, valeur au survol, cellules à
+ *    n < 20 rendements ATTÉNUÉES, tri Watchlist / Alphabétique / Similarité (ordonnancement
+ *    glouton — VUE pure sur la matrice calculée, aucun refetch) ;
+ *  - onglet « Paires » : TableTriable de toutes les paires hors diagonale (r, n, fiabilité),
+ *    raccourcis 10 plus / 10 moins corrélées ;
  *  - clic sur une cellule = mini-détail : corrélation glissante en sparkline (canvas),
  *    fenêtre glissante = les rendements communs de la fenêtre sélectionnée (le
  *    dernier point coïncide avec la valeur de la cellule) ;
- *  - bascule Pearson / Spearman, fenêtre 30/90/180 j, bouton « recalculer » (re-fetch forcé),
- *    indication de fraîcheur, chips d'erreur par symbole en échec de chargement.
+ *  - bascule Pearson / Spearman, fenêtre 7/30/90/180 j, bouton « recalculer » (re-fetch
+ *    forcé), indication de fraîcheur, chips d'erreur par symbole en échec de chargement.
  *
  * Données : klines 1d des adaptateurs existants (aucune source nouvelle), en CACHE session
- * (réouvrir ≠ refetch ; changer méthode/fenêtre ne refetch pas — quota Twelve Data ménagé).
+ * (réouvrir ≠ refetch ; changer méthode/fenêtre/tri/onglet ne refetch pas ; changer
+ * d'univers ne refetch QUE les symboles nouveaux — quota Twelve Data ménagé).
  * Le point du jour UTC courant est EXCLU des calculs (bougie partielle, crypto comme tradfi).
- * Réglages (méthode, fenêtre, extras, références) dans le store PERSISTÉ store/corrUi.ts —
- * la fermeture démonte le composant, un useState les perdait. L'état de session (sélection,
- * survol, saisie) reste en React ; seul le dessin passe par le canvas.
+ * Réglages (méthode, fenêtre, extras, références, univers, tri, onglet) dans le store
+ * PERSISTÉ store/corrUi.ts — la fermeture démonte le composant, un useState les perdait.
+ * L'état de session (sélection, survol, saisie, tri de la table) reste en React ; seul le
+ * dessin passe par le canvas.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { Commande } from "../commands/registry";
 import { watchlistStore } from "../store/watchlist";
 import { corrUiStore } from "../store/corrUi";
+import { mcapStore } from "../store/mcap";
 import { QUOTE_ASSETS } from "../data/symbol";
+import { fetchMarketOverview, type CoinTile } from "../data/marketOverview";
 import {
   alignerSeries,
   calculerMatrice,
@@ -35,18 +42,27 @@ import {
   correlationGlissante,
   exclureJourCourant,
   FENETRES_CORR,
+  filtrerPairesExtremes,
+  listerPaires,
   logRendements,
+  ordonnerMatrice,
   pointsFiables,
   REFERENCES_CORR,
   SEUIL_POINTS_FIABLES,
   symbolesEnEchec,
+  topPairesUnivers,
+  TRIS_CORR,
+  UNIVERS_CORR,
   viderCacheSeries,
   type MatriceCorr,
+  type OngletCorr,
+  type PaireCorr,
   type SerieCloture,
 } from "../data/corr";
 import { formatDec } from "../lib/format";
 import { lireTokenCanvas, POLICE_CANVAS, POLICE_CANVAS_MONO } from "../lib/canvasTokens";
-import { Badge, Bouton, BoutonBascule, BoutonRafraichir, Chargement, Chip, EnTeteFenetre, Fraicheur, Input, NoteSource, Segmente, Vide } from "./ui";
+import { Badge, BadgeFiabilite, Bouton, BoutonBascule, BoutonRafraichir, Chargement, Chip, EnTeteFenetre, ErreurBloc, Fraicheur, Input, NoteSource, Onglets, Segmente, SegmenteCompact, Vide } from "./ui";
+import { TableTriable, trierLignes, type ColonneTable, type TriTable } from "./TableTriable";
 
 /**
  * Commandes exposées à la palette (l'intégrateur les enregistre via `enregistrerCommandes`).
@@ -133,6 +149,72 @@ function tailleCellule(n: number): number {
   return 24;
 }
 
+// ─────────────────────────── Onglet « Paires » (déclaratif) ───────────────────────────
+
+/** Onglets de la fenêtre (matrice canvas / liste des paires). */
+const ONGLETS_CORR: readonly { id: OngletCorr; label: string }[] = [
+  { id: "matrice", label: "Matrice" },
+  { id: "paires", label: "Paires" },
+];
+
+/** Colonnes de la table des paires (module : aucune dépendance à l'état du composant). */
+const COLONNES_PAIRES: readonly ColonneTable<PaireCorr>[] = [
+  {
+    id: "paire",
+    label: "Paire",
+    largeur: "2fr",
+    triable: true,
+    valeurTri: (l) => `${l.a} × ${l.b}`,
+    rendu: (l) => (
+      <span title={`${l.a} × ${l.b}`}>
+        {courtSymbole(l.a)} × {courtSymbole(l.b)}
+      </span>
+    ),
+  },
+  {
+    id: "r",
+    label: "r",
+    align: "right",
+    triable: true,
+    valeurTri: (l) => l.valeur,
+    rendu: (l) => (
+      <span className={l.valeur === null ? "text-text-dim" : l.valeur >= 0 ? "text-up" : "text-down"}>
+        {formatDec(l.valeur)}
+      </span>
+    ),
+  },
+  {
+    id: "n",
+    label: "n",
+    align: "right",
+    triable: true,
+    valeurTri: (l) => l.points,
+    rendu: (l) => <>{l.points}</>,
+  },
+  {
+    id: "fiab",
+    label: "Fiab.",
+    align: "right",
+    rendu: (l) =>
+      pointsFiables(l.points) ? (
+        <BadgeFiabilite
+          niveau="fiable"
+          label="fiable"
+          title={`${l.points} rendements communs (seuil de fiabilité : ${SEUIL_POINTS_FIABLES})`}
+        />
+      ) : (
+        <BadgeFiabilite
+          niveau="partiel"
+          label="faible"
+          title={`${l.points} rendements communs — sous le seuil de ${SEUIL_POINTS_FIABLES}, corrélation bruitée`}
+        />
+      ),
+  },
+];
+
+/** Référence stable du catalogue vide (un `[]` littéral par rendu invaliderait les memos). */
+const CATALOGUE_VIDE: CoinTile[] = [];
+
 // ─────────────────────────── Composant ───────────────────────────
 
 export function CorrWindow() {
@@ -144,6 +226,9 @@ export function CorrWindow() {
   const fenetreJours = useStore(corrUiStore, (s) => s.fenetreJours);
   const extras = useStore(corrUiStore, (s) => s.extras);
   const referencesActives = useStore(corrUiStore, (s) => s.referencesActives);
+  const univers = useStore(corrUiStore, (s) => s.univers);
+  const tri = useStore(corrUiStore, (s) => s.tri);
+  const onglet = useStore(corrUiStore, (s) => s.onglet);
 
   const [saisie, setSaisie] = useState("");
   const [nonce, setNonce] = useState(0); // bump = recalcul forcé (re-fetch)
@@ -153,21 +238,64 @@ export function CorrWindow() {
   const [majTs, setMajTs] = useState<number | null>(null);
   const [selection, setSelection] = useState<{ r: number; c: number } | null>(null);
   const [hover, setHover] = useState<{ r: number; c: number } | null>(null);
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [tooltip, setTooltip] = useState<{
+    x: number;
+    y: number;
+    titre: string;
+    lignes: { label: string; valeur: string }[];
+  } | null>(null);
+
+  // État de session de l'onglet « Paires » (tri de table + raccourcis — non persisté).
+  const [triTable, setTriTable] = useState<TriTable | null>({ colonne: "r", dir: -1 });
+  const [filtrePaires, setFiltrePaires] = useState<"plus" | "moins" | null>(null);
+
+  // Catalogue top 250 pour l'univers top-N : mcapStore s'il est déjà peuplé (lecture
+  // seule), sinon repli fetchMarketOverview — cache 5 min partagé, budget CoinGecko
+  // existant (aucun appel dans la fenêtre de fraîcheur).
+  const marches = useStore(mcapStore, (s) => s.marches);
+  const [catalogueRepli, setCatalogueRepli] = useState<CoinTile[] | null>(null);
+  const [catalogueErreur, setCatalogueErreur] = useState(false);
+  const topN = UNIVERS_CORR.find((u) => u.id === univers)?.topN ?? null;
+  const catalogue = marches.length > 0 ? marches : catalogueRepli ?? CATALOGUE_VIDE;
+
+  useEffect(() => {
+    if (!open || topN === null || marches.length > 0 || catalogueRepli !== null) return;
+    let ignore = false;
+    void fetchMarketOverview()
+      .then((o) => {
+        if (ignore) return;
+        setCatalogueRepli(o.coins);
+        setCatalogueErreur(false);
+      })
+      .catch(() => {
+        if (!ignore) setCatalogueErreur(true);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [open, topN, marches, catalogueRepli]);
 
   // Séries chargées (pour la sparkline glissante) — hors state React (pas de re-render).
   const seriesRef = useRef<Map<string, SerieCloture[]>>(new Map());
   const matrixCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const sparkCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Symboles = watchlist (groupe actif) + références tradfi actives + ajouts ponctuels,
-  // normalisés et dédoublonnés (les références forment un bloc contigu dans la matrice).
+  // Base de l'univers : watchlist (groupe actif) ou top N par capitalisation (stablecoins
+  // exclus, paires Binance USDT). En mode watchlist, le résultat garde la référence de
+  // `watchSymbols` — un changement de catalogue n'invalide alors rien en aval.
+  const basePaires = useMemo(
+    () => (topN === null ? watchSymbols : topPairesUnivers(catalogue, topN)),
+    [topN, watchSymbols, catalogue]
+  );
+
+  // Symboles = univers + références tradfi actives + ajouts ponctuels, normalisés et
+  // dédoublonnés (les références forment un bloc contigu dans la matrice).
   const symbols = useMemo(() => {
-    const all = [...watchSymbols, ...referencesActives, ...extras]
+    const all = [...basePaires, ...referencesActives, ...extras]
       .map((s) => s.trim().toUpperCase())
       .filter((s) => s.length > 0);
     return [...new Set(all)];
-  }, [watchSymbols, referencesActives, extras]);
+  }, [basePaires, referencesActives, extras]);
 
   // Chargement + calcul de la matrice (déclenché à l'ouverture et sur changement de
   // symboles / méthode / fenêtre / recalcul). Changer la fenêtre ou la méthode NE refetch
@@ -202,9 +330,35 @@ export function CorrWindow() {
     };
   }, [open, symbols, methode, fenetreJours, nonce]);
 
-  // Dessin de la matrice (canvas) — redessine sur nouvelle matrice / survol / sélection.
+  // VUE réordonnée de la matrice selon le tri choisi — pur, aucun refetch ni recalcul
+  // de corrélation (changer le tri ne touche pas l'effet de chargement ci-dessus).
+  const matriceAffichee = useMemo(
+    () => (matrice === null ? null : ordonnerMatrice(matrice, tri)),
+    [matrice, tri]
+  );
+
+  // Changer le tri permute les indices : la sélection/le survol pointeraient une autre
+  // cellule — on les efface.
   useEffect(() => {
+    setSelection(null);
+    setHover(null);
+    setTooltip(null);
+  }, [tri]);
+
+  // Onglet « Paires » : liste dédupliquée (triangle supérieur de la matrice BASE — l'ordre
+  // d'affichage de la matrice n'a pas à faire bouger la table), filtrée puis triée.
+  const paires = useMemo(() => (matrice === null ? [] : listerPaires(matrice)), [matrice]);
+  const pairesVisibles = useMemo(() => {
+    const filtrees = filtrePaires === null ? paires : filtrerPairesExtremes(paires, filtrePaires);
+    return trierLignes(filtrees, COLONNES_PAIRES, triTable);
+  }, [paires, filtrePaires, triTable]);
+
+  // Dessin de la matrice (canvas) — redessine sur nouvelle matrice / tri / survol /
+  // sélection, et au RETOUR sur l'onglet matrice (le canvas est remonté à ce moment-là).
+  useEffect(() => {
+    if (onglet !== "matrice") return;
     const canvas = matrixCanvasRef.current;
+    const matrice = matriceAffichee;
     if (canvas === null || matrice === null) return;
     const ctx = canvas.getContext("2d");
     if (ctx === null) return;
@@ -283,7 +437,7 @@ export function CorrWindow() {
     };
     if (hover) cadre(hover.r, hover.c, texte, 1);
     if (selection) cadre(selection.r, selection.c, lireTokenCanvas("--accent", texte), 2);
-  }, [matrice, hover, selection]);
+  }, [matriceAffichee, hover, selection, onglet]);
 
   // Dessin de la sparkline de corrélation glissante pour la cellule sélectionnée.
   // Fenêtre glissante en RENDEMENTS COMMUNS = ceux que la cellule a réellement
@@ -293,7 +447,9 @@ export function CorrWindow() {
   // la vidait à 180 j (revue v2.6, trouvailles no 5/10). Ainsi le dernier point
   // de la sparkline EST la corrélation de la cellule sélectionnée.
   useEffect(() => {
+    if (onglet !== "matrice") return;
     const canvas = sparkCanvasRef.current;
+    const matrice = matriceAffichee; // la sélection pointe des indices de la vue AFFICHÉE
     if (canvas === null || selection === null || matrice === null) return;
     const { r, c } = selection;
     const sr = matrice.symbols[r];
@@ -359,10 +515,10 @@ export function CorrWindow() {
       ctx.fillText("historique insuffisant pour la fenêtre glissante", W / 2, mid - 4);
       ctx.textAlign = "start";
     }
-  }, [selection, methode, fenetreJours, matrice]);
+  }, [selection, methode, fenetreJours, matriceAffichee, onglet]);
 
   // Interactions de la matrice (survol → tooltip ; clic → sélection pour le mini-détail).
-  const n = matrice?.symbols.length ?? 0;
+  const n = matriceAffichee?.symbols.length ?? 0;
   const cell = tailleCellule(n);
 
   const cellDepuisEvenement = (clientX: number, clientY: number, canvas: HTMLCanvasElement) => {
@@ -375,7 +531,7 @@ export function CorrWindow() {
   };
 
   const onMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (matrice === null) return;
+    if (matriceAffichee === null) return;
     const hit = cellDepuisEvenement(e.clientX, e.clientY, e.currentTarget);
     if (hit === null) {
       setHover(null);
@@ -383,13 +539,17 @@ export function CorrWindow() {
       return;
     }
     setHover({ r: hit.r, c: hit.c });
-    const cel = matrice.cellules[hit.r]?.[hit.c];
-    const sr = matrice.symbols[hit.r];
-    const sc = matrice.symbols[hit.c];
+    const cel = matriceAffichee.cellules[hit.r]?.[hit.c];
+    const sr = matriceAffichee.symbols[hit.r];
+    const sc = matriceAffichee.symbols[hit.c];
     setTooltip({
       x: hit.localX,
       y: hit.localY,
-      text: `${sr} × ${sc} · r=${formatDec(cel?.valeur)} · n=${cel?.points ?? 0}`,
+      titre: `${sr} × ${sc}`,
+      lignes: [
+        { label: "r", valeur: formatDec(cel?.valeur) },
+        { label: "n", valeur: `${cel?.points ?? 0} rendements` },
+      ],
     });
   };
 
@@ -399,7 +559,7 @@ export function CorrWindow() {
   };
 
   const onClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (matrice === null) return;
+    if (matriceAffichee === null) return;
     const hit = cellDepuisEvenement(e.clientX, e.clientY, e.currentTarget);
     if (hit === null || hit.r === hit.c) {
       setSelection(null); // diagonale (auto-corrélation = 1) → pas de mini-détail
@@ -421,10 +581,10 @@ export function CorrWindow() {
     corrUiStore.getState().ajouterExtra(v);
   };
 
-  const selCellule = selection ? matrice?.cellules[selection.r]?.[selection.c] : undefined;
+  const selCellule = selection ? matriceAffichee?.cellules[selection.r]?.[selection.c] : undefined;
   const selLabel =
-    selection && matrice
-      ? `${matrice.symbols[selection.r] ?? ""} × ${matrice.symbols[selection.c] ?? ""}`
+    selection && matriceAffichee
+      ? `${matriceAffichee.symbols[selection.r] ?? ""} × ${matriceAffichee.symbols[selection.c] ?? ""}`
       : "";
 
   return (
@@ -442,6 +602,13 @@ export function CorrWindow() {
         }
       />
 
+      {/* Onglets Matrice / Paires (persistés — deux VUES de la même matrice calculée). */}
+      <Onglets
+        options={ONGLETS_CORR.map((o) => ({ id: o.id, label: o.label }))}
+        actif={onglet}
+        onChange={(o) => corrUiStore.getState().setOnglet(o)}
+      />
+
       <div className="px-4 py-3">
         {/* Contrôles : méthode, fenêtre (réglages persistés — store corrUi). */}
         <div className="mb-3 flex items-center gap-2">
@@ -457,6 +624,22 @@ export function CorrWindow() {
             options={FENETRES_CORR.map((f) => ({ id: f, label: `${f}j` }))}
             actif={fenetreJours}
             onChange={(f) => corrUiStore.getState().setFenetre(f)}
+          />
+        </div>
+
+        {/* Univers de la matrice (watchlist / top N CoinGecko) et tri d'affichage. */}
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <SegmenteCompact
+            ariaLabel="Univers de la matrice"
+            options={UNIVERS_CORR.map((u) => ({ id: u.id, label: u.label }))}
+            actif={univers}
+            onChange={(u) => corrUiStore.getState().setUnivers(u)}
+          />
+          <SegmenteCompact
+            ariaLabel="Tri de la matrice"
+            options={TRIS_CORR.map((t) => ({ id: t.id, label: t.label }))}
+            actif={tri}
+            onChange={(t) => corrUiStore.getState().setTri(t)}
           />
         </div>
 
@@ -507,11 +690,49 @@ export function CorrWindow() {
           </div>
         )}
 
-        {/* Matrice ou message d'état. */}
-        {symbols.length < 2 ? (
+        {/* Matrice, table des paires ou message d'état. */}
+        {topN !== null && catalogue.length === 0 ? (
+          catalogueErreur ? (
+            <ErreurBloc>
+              Catalogue CoinGecko indisponible — l'univers Top {topN} ne peut pas être construit.
+              Repassez sur Watchlist ou réessayez plus tard.
+            </ErreurBloc>
+          ) : (
+            <Chargement libelle="Catalogue CoinGecko…" />
+          )
+        ) : symbols.length < 2 ? (
           <Vide>Au moins deux symboles sont nécessaires. Ajoutez-en à la watchlist ou via le champ ci-dessus.</Vide>
         ) : matrice === null ? (
           <Chargement libelle="Calcul…" />
+        ) : onglet === "paires" ? (
+          <div>
+            {/* Raccourcis : filtres exclusifs sur la table (re-clic = toutes les paires). */}
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              <BoutonBascule
+                actif={filtrePaires === "plus"}
+                onClick={() => setFiltrePaires(filtrePaires === "plus" ? null : "plus")}
+                title="Les 10 paires à la corrélation la plus haute"
+              >
+                10 plus corrélées
+              </BoutonBascule>
+              <BoutonBascule
+                actif={filtrePaires === "moins"}
+                onClick={() => setFiltrePaires(filtrePaires === "moins" ? null : "moins")}
+                title="Les 10 paires à la corrélation la plus basse"
+              >
+                10 moins corrélées
+              </BoutonBascule>
+            </div>
+            <TableTriable
+              colonnes={COLONNES_PAIRES}
+              lignes={pairesVisibles}
+              tri={triTable}
+              onTri={setTriTable}
+              cle={(l) => `${l.a}×${l.b}`}
+              vide="Aucune paire à afficher."
+              maxHauteur="340px"
+            />
+          </div>
         ) : (
           <div className="relative">
             <div className="overflow-x-auto">
@@ -523,12 +744,19 @@ export function CorrWindow() {
                 className="cursor-pointer"
               />
             </div>
+            {/* Tooltip maison (grille dense ≠ courbe : InfobulleGraphe inadapté) mais au
+                STYLE de l'infobulle partagée — mêmes classes de panneau, titre estompé. */}
             {tooltip && (
               <div
-                className="pointer-events-none absolute z-10 rounded border border-border bg-surface px-2 py-1 text-[11px] tabular-nums text-text shadow-lg"
+                className="pointer-events-none absolute z-10 whitespace-nowrap rounded border border-border bg-surface px-2 py-1 text-[11px] tabular-nums text-text shadow-lg"
                 style={{ left: tooltip.x + 12, top: tooltip.y + 12 }}
               >
-                {tooltip.text}
+                <div className="text-text-dim">{tooltip.titre}</div>
+                {tooltip.lignes.map((l) => (
+                  <div key={l.label}>
+                    {l.label} : {l.valeur}
+                  </div>
+                ))}
               </div>
             )}
             <p className="mt-1 text-[10px] leading-snug text-text-dim">
@@ -539,7 +767,7 @@ export function CorrWindow() {
         )}
 
         {/* Mini-détail : corrélation glissante (fenêtre sélectionnée) de la cellule choisie. */}
-        {selection && matrice && (
+        {onglet === "matrice" && selection && matriceAffichee && (
           <section className="mt-3 rounded-md border border-border bg-bg">
             <div className="flex items-baseline justify-between border-b border-border px-3 py-2">
               <span className="text-[11px] font-medium text-text">{selLabel}</span>

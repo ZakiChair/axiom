@@ -16,6 +16,7 @@
  */
 import type { Candle } from "@axiom/types";
 import { getAdapter } from "./adapters";
+import { toBinanceUsdtPair } from "./marketOverview";
 import { resolveTickerSource } from "./ticker";
 import { watchlistStore } from "../store/watchlist";
 
@@ -34,8 +35,12 @@ const JOUR_MS = 86_400_000;
 /** Jours d'historique quotidien récupérés (couvre 180 j de fenêtre + week-ends écartés). */
 export const MAX_JOURS = 260;
 
-/** Fenêtres de calcul proposées à l'UI (en jours calendaires). */
-export const FENETRES_CORR: readonly number[] = [30, 90, 180];
+/**
+ * Fenêtres de calcul proposées à l'UI (en jours calendaires). À 7 j sur un croisement
+ * tradfi il ne reste ~5 rendements communs : le garde-fou n < SEUIL_POINTS_FIABLES
+ * (cellules atténuées) assume ce cas, la fenêtre courte reste utile en crypto pur.
+ */
+export const FENETRES_CORR: readonly number[] = [7, 30, 90, 180];
 
 // ─────────────────────────── Références tradfi curées ───────────────────────────
 
@@ -60,6 +65,91 @@ export const REFERENCES_CORR: readonly ReferenceCorr[] = [
   { symbole: "EUR/USD", libelle: "EUR/USD" },
   { symbole: "USD/JPY", libelle: "USD/JPY" },
 ];
+
+// ─────────────────────────── Univers, tri, onglet (pur) ───────────────────────────
+
+/** Univers de la matrice : watchlist active, ou top N par capitalisation CoinGecko. */
+export type UniversCorr = "watchlist" | "top10" | "top20" | "top30";
+
+/** Options d'univers proposées à l'UI (`topN: null` = watchlist, ordre actuel). */
+export const UNIVERS_CORR: readonly { id: UniversCorr; label: string; topN: number | null }[] = [
+  { id: "watchlist", label: "Watchlist", topN: null },
+  { id: "top10", label: "Top 10", topN: 10 },
+  { id: "top20", label: "Top 20", topN: 20 },
+  { id: "top30", label: "Top 30", topN: 30 },
+];
+
+/** Ordre d'affichage de la matrice (vue PURE — jamais de refetch ni de recalcul). */
+export type TriCorr = "watchlist" | "alpha" | "similarite";
+
+/** Options de tri proposées à l'UI. */
+export const TRIS_CORR: readonly { id: TriCorr; label: string }[] = [
+  { id: "watchlist", label: "Watchlist" },
+  { id: "alpha", label: "Alphabétique" },
+  { id: "similarite", label: "Similarité" },
+];
+
+/** Onglet actif de la fenêtre CORR. */
+export type OngletCorr = "matrice" | "paires";
+
+/**
+ * Stablecoins EXCLUS de l'univers top-N (tickers CoinGecko en MAJUSCULES) : corréler
+ * USDT à USDC n'apporte rien (paires quasi constantes → corrélations dégénérées).
+ * Liste locale curée — les jetons adossés à l'or (PAXG, XAUT) ne sont PAS des
+ * stablecoins et restent éligibles.
+ */
+export const STABLECOINS_EXCLUS: ReadonlySet<string> = new Set([
+  "USDT",
+  "USDC",
+  "USDS",
+  "USDE",
+  "DAI",
+  "FDUSD",
+  "TUSD",
+  "USDD",
+  "PYUSD",
+  "USD1",
+  "BUSD",
+  "USDP",
+  "GUSD",
+  "FRAX",
+  "LUSD",
+  "USDL",
+  "USDY",
+  "EURC",
+  "EURT",
+  "EURS",
+]);
+
+/** Sous-ensemble de `CoinTile` (marketOverview) suffisant pour bâtir l'univers top-N. */
+export interface MembreCatalogue {
+  /** Ticker en MAJUSCULES (ex. "BTC"). */
+  symbol: string;
+  mcapUsd: number;
+}
+
+/**
+ * Paires Binance USDT du top `n` par capitalisation d'un catalogue CoinGecko (top 250
+ * déjà chargé par mcapStore / marketOverview — AUCUN appel réseau ici) : stablecoins
+ * exclus, tri par capitalisation décroissante, doublons de paire écartés. Une paire
+ * inexistante sur Binance échouera au chargement et remontera en chip d'erreur
+ * (`symbolesEnEchec`) — pas de vérification préalable du catalogue Binance. Fonction PURE.
+ */
+export function topPairesUnivers(catalogue: readonly MembreCatalogue[], n: number): string[] {
+  const parCap = [...catalogue].sort((a, b) => b.mcapUsd - a.mcapUsd);
+  const paires: string[] = [];
+  const vues = new Set<string>();
+  for (const membre of parCap) {
+    if (paires.length >= n) break;
+    const ticker = membre.symbol.trim().toUpperCase();
+    if (ticker.length === 0 || STABLECOINS_EXCLUS.has(ticker)) continue;
+    const paire = toBinanceUsdtPair(ticker);
+    if (vues.has(paire)) continue;
+    vues.add(paire);
+    paires.push(paire);
+  }
+  return paires;
+}
 
 // ─────────────────────────── Alignement (pur) ───────────────────────────
 
@@ -307,6 +397,130 @@ export function calculerMatrice(
   return { symbols, methode, fenetreJours, cellules };
 }
 
+// ─────────────────────────── Tri de la matrice (pur) ───────────────────────────
+
+/** |corrélation| d'une cellule, null/non-fini traités comme 0 (aucune affinité connue). */
+function absCellule(matrice: MatriceCorr, i: number, j: number): number {
+  const v = matrice.cellules[i]?.[j]?.valeur;
+  return v === null || v === undefined || !Number.isFinite(v) ? 0 : Math.abs(v);
+}
+
+/**
+ * Ordonnancement GLOUTON par corrélation (fait apparaître les blocs corrélés en zones
+ * contiguës, sans dépendance de clustering) : départ = l'actif à la corrélation moyenne
+ * absolue la plus forte avec le reste, puis plus proche voisin (|corrélation| max avec
+ * le DERNIER placé) parmi les restants. Cellules null = 0. Égalités tranchées par le
+ * plus petit index (déterministe). Renvoie la permutation d'INDICES. Fonction PURE.
+ */
+export function ordonnerParSimilarite(matrice: MatriceCorr): number[] {
+  const n = matrice.symbols.length;
+  if (n === 0) return [];
+  let depart = 0;
+  let meilleure = -1;
+  for (let i = 0; i < n; i++) {
+    let somme = 0;
+    for (let j = 0; j < n; j++) {
+      if (j !== i) somme += absCellule(matrice, i, j);
+    }
+    const moyenne = n > 1 ? somme / (n - 1) : 0;
+    if (moyenne > meilleure) {
+      meilleure = moyenne;
+      depart = i;
+    }
+  }
+  const ordre = [depart];
+  const restants = new Set<number>();
+  for (let i = 0; i < n; i++) {
+    if (i !== depart) restants.add(i);
+  }
+  while (restants.size > 0) {
+    const dernier = ordre[ordre.length - 1] ?? depart;
+    let suivant = -1;
+    let max = -1;
+    for (const j of restants) {
+      const a = absCellule(matrice, dernier, j);
+      if (a > max) {
+        max = a;
+        suivant = j;
+      }
+    }
+    ordre.push(suivant);
+    restants.delete(suivant);
+  }
+  return ordre;
+}
+
+/**
+ * VUE réordonnée d'une matrice déjà calculée selon le tri choisi — aucune corrélation
+ * recalculée, aucun refetch : `watchlist` renvoie la matrice telle quelle (ordre
+ * d'entrée), `alpha` trie les symboles, `similarite` applique `ordonnerParSimilarite`.
+ * Fonction PURE.
+ */
+export function ordonnerMatrice(matrice: MatriceCorr, tri: TriCorr): MatriceCorr {
+  if (tri === "watchlist") return matrice;
+  const ordre =
+    tri === "alpha"
+      ? matrice.symbols
+          .map((s, i) => ({ s, i }))
+          .sort((a, b) => a.s.localeCompare(b.s))
+          .map((x) => x.i)
+      : ordonnerParSimilarite(matrice);
+  const symbols = ordre.map((i) => matrice.symbols[i] ?? "");
+  const cellules = ordre.map((i) =>
+    ordre.map((j) => matrice.cellules[i]?.[j] ?? { valeur: null, points: 0 })
+  );
+  return { ...matrice, symbols, cellules };
+}
+
+// ─────────────────────────── Vue « Paires » (pur) ───────────────────────────
+
+/** Une paire hors diagonale de la matrice (A–B ≡ B–A, listée une seule fois). */
+export interface PaireCorr {
+  a: string;
+  b: string;
+  valeur: number | null;
+  /** Rendements communs du calcul (fiabilité : < SEUIL_POINTS_FIABLES = faible). */
+  points: number;
+}
+
+/**
+ * Toutes les paires hors diagonale d'une matrice, dédupliquées (triangle supérieur,
+ * ordre d'entrée). Fonction PURE.
+ */
+export function listerPaires(matrice: MatriceCorr): PaireCorr[] {
+  const out: PaireCorr[] = [];
+  const n = matrice.symbols.length;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const cel = matrice.cellules[i]?.[j];
+      out.push({
+        a: matrice.symbols[i] ?? "",
+        b: matrice.symbols[j] ?? "",
+        valeur: cel?.valeur ?? null,
+        points: cel?.points ?? 0,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Raccourcis « 10 plus / 10 moins corrélées » : les `nb` paires à corrélation la plus
+ * haute (`plus`) ou la plus basse (`moins`), paires sans valeur écartées, résultat trié
+ * (extrême en tête). Fonction PURE.
+ */
+export function filtrerPairesExtremes(
+  paires: readonly PaireCorr[],
+  mode: "plus" | "moins",
+  nb = 10
+): PaireCorr[] {
+  const definies = paires.filter((p) => p.valeur !== null && Number.isFinite(p.valeur));
+  definies.sort((x, y) =>
+    mode === "plus" ? (y.valeur ?? 0) - (x.valeur ?? 0) : (x.valeur ?? 0) - (y.valeur ?? 0)
+  );
+  return definies.slice(0, nb);
+}
+
 // ─────────────────────────── Fiabilité (pur) ───────────────────────────
 
 /**
@@ -341,6 +555,12 @@ export interface ReglagesCorr {
   extras: string[];
   /** Symboles des références tradfi actives (⊆ REFERENCES_CORR). */
   referencesActives: string[];
+  /** Univers de la matrice (watchlist ou top N par capitalisation). */
+  univers: UniversCorr;
+  /** Tri d'affichage de la matrice (vue pure sur la matrice calculée). */
+  tri: TriCorr;
+  /** Onglet actif (matrice ou liste des paires). */
+  onglet: OngletCorr;
 }
 
 /** Plafond d'extras restaurés (garde-fou quota : chaque symbole tradfi = 1 crédit). */
@@ -362,10 +582,19 @@ function symbolesValides(raw: unknown): string[] {
  * Hydrate les réglages CORR depuis une valeur persistée INCONNUE (localStorage parsé ou
  * n'importe quoi) : validation champ par champ, valeur inconnue → défaut du champ, ne
  * jette JAMAIS. Fenêtre restreinte à FENETRES_CORR, références restreintes au catalogue
- * REFERENCES_CORR. Fonction PURE.
+ * REFERENCES_CORR, univers/tri/onglet restreints à leurs catalogues (rétro-compatible :
+ * un localStorage v2.6 sans ces champs hérite des défauts). Fonction PURE.
  */
 export function hydraterReglagesCorr(raw: unknown): ReglagesCorr {
-  const defauts: ReglagesCorr = { methode: "pearson", fenetreJours: 90, extras: [], referencesActives: [] };
+  const defauts: ReglagesCorr = {
+    methode: "pearson",
+    fenetreJours: 90,
+    extras: [],
+    referencesActives: [],
+    univers: "watchlist",
+    tri: "watchlist",
+    onglet: "matrice",
+  };
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return defauts;
   const o = raw as Record<string, unknown>;
   const methode: MethodeCorr =
@@ -377,7 +606,13 @@ export function hydraterReglagesCorr(raw: unknown): ReglagesCorr {
   const extras = symbolesValides(o.extras).slice(0, MAX_EXTRAS_RESTAURES);
   const connues = new Set(REFERENCES_CORR.map((r) => r.symbole));
   const referencesActives = symbolesValides(o.referencesActives).filter((s) => connues.has(s));
-  return { methode, fenetreJours, extras, referencesActives };
+  const univers: UniversCorr = UNIVERS_CORR.some((u) => u.id === o.univers)
+    ? (o.univers as UniversCorr)
+    : defauts.univers;
+  const tri: TriCorr = TRIS_CORR.some((t) => t.id === o.tri) ? (o.tri as TriCorr) : defauts.tri;
+  const onglet: OngletCorr =
+    o.onglet === "matrice" || o.onglet === "paires" ? o.onglet : defauts.onglet;
+  return { methode, fenetreJours, extras, referencesActives, univers, tri, onglet };
 }
 
 // ─────────────── Chargement des klines (impur, cache SESSION) ───────────────

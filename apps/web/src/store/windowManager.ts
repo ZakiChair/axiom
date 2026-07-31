@@ -82,6 +82,7 @@ export const WINDOW_REGISTRY = [
   // Haute par défaut : TROIS graphiques empilés, ~215 px chacun (mesuré) — en dessous
   // de 800 px de fenêtre, les axes se télescopent.
   { id: "mcap", title: "Capitalisation & dominance", mnemonic: "CAP", defaultWidth: 900, defaultHeight: 820, menuLabel: "Capitalisation & dominance (TOTAL, TOTAL3, BTC.D)", nouveau: true },
+  { id: "sect", title: "Secteurs crypto", mnemonic: "SECT", defaultWidth: 640, defaultHeight: 640, nouveau: true },
 ] as const satisfies readonly DefinitionFenetre[];
 
 /** Union des ids de fenêtre — DÉRIVÉE du registre (source unique). Sert à typer la

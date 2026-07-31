@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  fetchMarketOverview,
   parseCategories,
   parseFearGreed,
   parseFearGreedHistory,
@@ -80,6 +81,26 @@ describe("parseMarkets", () => {
     expect(at(tiles, 0).changePct24h).toBe(0);
   });
 
+  it("parse les périodes 7 j / 30 j (champs *_in_currency) ; absentes ou null → 0", () => {
+    const tiles = parseMarkets([
+      {
+        id: "a",
+        symbol: "a",
+        name: "A",
+        market_cap: 100,
+        price_change_percentage_24h: 1.5,
+        price_change_percentage_7d_in_currency: -4.2,
+        price_change_percentage_30d_in_currency: 12.75,
+      },
+      { id: "b", symbol: "b", name: "B", market_cap: 50, price_change_percentage_7d_in_currency: null },
+    ]);
+    expect(at(tiles, 0).changePct7j).toBeCloseTo(-4.2, 10);
+    expect(at(tiles, 0).changePct30j).toBeCloseTo(12.75, 10);
+    // Réponse SANS le paramètre de périodes (ou null) : 0, comme le Δ24 h.
+    expect(at(tiles, 1).changePct7j).toBe(0);
+    expect(at(tiles, 1).changePct30j).toBe(0);
+  });
+
   it("entrée non-tableau → liste vide", () => {
     expect(parseMarkets({})).toEqual([]);
     expect(parseMarkets(null)).toEqual([]);
@@ -152,5 +173,49 @@ describe("toBinanceUsdtPair", () => {
   it("suffixe USDT et met en majuscules", () => {
     expect(toBinanceUsdtPair("btc")).toBe("BTCUSDT");
     expect(toBinanceUsdtPair(" eth ")).toBe("ETHUSDT");
+  });
+});
+
+describe("fetchMarketOverview — budget strict de requêtes (critère SECT no 2)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("un refresh = EXACTEMENT 3 requêtes, et /coins/markets épingle 24h,7d,30d", async () => {
+    // En env node (pas de localStorage) le cache 5 min est inopérant : le fetch a
+    // toujours lieu — parfait pour compter les requêtes d'un refresh complet.
+    const urls: string[] = [];
+    const bouchon = vi.fn(async (entree: RequestInfo | URL) => {
+      const url = String(entree);
+      urls.push(url);
+      const corps = url.includes("/coins/markets")
+        ? [
+            {
+              id: "bitcoin",
+              symbol: "btc",
+              name: "Bitcoin",
+              current_price: 1,
+              market_cap: 2,
+              price_change_percentage_24h: 1,
+              price_change_percentage_7d_in_currency: 2,
+              price_change_percentage_30d_in_currency: 3,
+            },
+          ]
+        : url.includes("/global")
+          ? { data: {} }
+          : [];
+      return { ok: true, status: 200, statusText: "OK", json: async () => corps } as Response;
+    });
+    vi.stubGlobal("fetch", bouchon);
+
+    const overview = await fetchMarketOverview();
+
+    // Budget strict : SECT n'ajoute AUCUN appel — toujours 3 requêtes par refresh.
+    expect(bouchon).toHaveBeenCalledTimes(3);
+    const marches = urls.find((u) => u.includes("/coins/markets"));
+    expect(marches).toContain("price_change_percentage=24h,7d,30d");
+    // Les périodes voyagent bien jusqu'aux tuiles (mêmes octets, zéro requête en plus).
+    expect(overview.coins[0]?.changePct7j).toBe(2);
+    expect(overview.coins[0]?.changePct30j).toBe(3);
   });
 });

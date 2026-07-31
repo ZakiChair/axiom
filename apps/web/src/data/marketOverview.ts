@@ -3,7 +3,8 @@
  *
  * Sert trois choses au panneau treemap / secteurs :
  *   1. /global            → capitalisation totale, dominance BTC/ETH, volume 24 h.
- *   2. /coins/markets     → top ~250 par capitalisation (taille + Δ24 h des tuiles).
+ *   2. /coins/markets     → top ~250 par capitalisation (taille + Δ24 h/7 j/30 j —
+ *                           les périodes 7 j/30 j servent la fenêtre SECT, MÊME requête).
  *   3. /coins/categories  → performance par SECTEUR (onglet « Secteurs »).
  * Auth : publique/keyless ; une clé Demo OPTIONNELLE (query `x_cg_demo_api_key`,
  * même stockage `axiom.coingecko.demoApiKey` que data/macro/coingecko.ts) relève les
@@ -50,6 +51,13 @@ export interface CoinTile {
   price: number;
   /** Variation 24 h (%) — couleur de la tuile. */
   changePct24h: number;
+  /** Variation 7 j (%) — sert SECT ; 0 si CoinGecko renvoie null (pièce trop récente).
+   *  ⚠ Une entrée de cache ANTÉRIEURE à ce champ peut le laisser `undefined` au
+   *  runtime pendant ≤ 5 min (ou en repli périmé) : les consommateurs gardent
+   *  avec `Number.isFinite` (cf. data/secteurs.ts). */
+  changePct7j: number;
+  /** Variation 30 j (%) — même convention que `changePct7j`. */
+  changePct30j: number;
 }
 
 /** Performance d'un secteur (catégorie CoinGecko). */
@@ -133,6 +141,9 @@ interface MarketRaw {
   current_price?: unknown;
   market_cap?: unknown;
   price_change_percentage_24h?: unknown;
+  /** Présents seulement avec `price_change_percentage=24h,7d,30d` dans la requête. */
+  price_change_percentage_7d_in_currency?: unknown;
+  price_change_percentage_30d_in_currency?: unknown;
 }
 
 /**
@@ -154,6 +165,8 @@ export function parseMarkets(json: unknown): CoinTile[] {
       mcapUsd,
       price: num(raw.current_price),
       changePct24h: num(raw.price_change_percentage_24h),
+      changePct7j: num(raw.price_change_percentage_7d_in_currency),
+      changePct30j: num(raw.price_change_percentage_30d_in_currency),
     });
   }
   out.sort((a, b) => b.mcapUsd - a.mcapUsd);
@@ -309,7 +322,11 @@ export async function fetchMarketOverview(signal?: AbortSignal): Promise<MarketO
   const [globalR, marketsR, categoriesR] = await Promise.allSettled([
     getJson(withDemoKey(`${CG_BASE}/global`), signal),
     getJson(
-      withDemoKey(`${CG_BASE}/coins/markets?vs_currency=usd&per_page=${MARKETS_PER_PAGE}&page=1`),
+      // `price_change_percentage=24h,7d,30d` : périodes 7 j/30 j pour SECT — MÊME
+      // endpoint, MÊME requête : le budget strict de 3 req/refresh est inchangé.
+      withDemoKey(
+        `${CG_BASE}/coins/markets?vs_currency=usd&per_page=${MARKETS_PER_PAGE}&page=1&price_change_percentage=24h,7d,30d`,
+      ),
       signal,
     ),
     getJson(withDemoKey(`${CG_BASE}/coins/categories?order=market_cap_desc`), signal),

@@ -25,7 +25,7 @@ function serie(n: number, v: number): SerieJour {
 
 /** Tuile marché minimale (seuls id/symbol/mcapUsd comptent ici). */
 function tuile(id: string, symbol: string, mcapUsd: number): CoinTile {
-  return { id, symbol, name: symbol, mcapUsd, price: 1, changePct24h: 0 };
+  return { id, symbol, name: symbol, mcapUsd, price: 1, changePct24h: 0, changePct7j: 0, changePct30j: 0 };
 }
 
 // Panier de test : 3 pièces couvrant 900 sur un total /global de 1 000 (k = 1,111…).

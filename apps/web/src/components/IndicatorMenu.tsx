@@ -30,6 +30,8 @@ import {
   type ActiveIndicator,
 } from "../store/indicators";
 import { marketStore } from "../store/market";
+import { orderflowStore } from "../store/orderflow";
+import { OCN_PERIODS } from "../chart/openCloseNet.calc";
 import { macroOverlayStore } from "../store/macro-overlays";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
 import { settingsUiStore } from "../store/settings-ui";
@@ -198,6 +200,12 @@ export function IndicatorMenu() {
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
   const exchange = useStore(marketStore, (s) => s.exchange);
   const timeframe = useStore(marketStore, (s) => s.timeframe);
+  // OCN (overlay Open/Close Net) : épinglé en tête de la section Order Flow.
+  // Pas un IndicatorDef (overlay canvas du contrôleur orderflow, cf. openCloseNet.ts).
+  const ocnActif = useStore(orderflowStore, (s) => s.showOpenCloseNet);
+  const setOcn = useStore(orderflowStore, (s) => s.setShowOpenCloseNet);
+  const orderflowEnabled = useStore(orderflowStore, (s) => s.enabled);
+  const setOrderflowEnabled = useStore(orderflowStore, (s) => s.setEnabled);
   const add = useStore(indicatorsStore, (s) => s.add);
   const remove = useStore(indicatorsStore, (s) => s.remove);
   const duplicate = useStore(indicatorsStore, (s) => s.duplicate);
@@ -227,7 +235,16 @@ export function IndicatorMenu() {
     });
   }, [q]);
 
-  const groups = useMemo(() => groupByCategory(filtered), [filtered]);
+  // L'OCN est une pseudo-entrée épinglée HORS registre : quand la recherche le
+  // matche sans matcher aucun def orderflow, on garde la section visible.
+  const ocnMatch = !q || "open/close net ocn oi positions flux".includes(q);
+  const groups = useMemo(() => {
+    const g = groupByCategory(filtered);
+    if (q && ocnMatch && !g.some(([cat]) => cat === "orderflow")) {
+      g.unshift(["orderflow", []]);
+    }
+    return g;
+  }, [filtered, ocnMatch, q]);
 
   const toggleSection = (cat: string) => {
     setCollapsed((prev) => {
@@ -434,6 +451,52 @@ export function IndicatorMenu() {
                       <span>{isCollapsed ? "▸" : "▾"}</span>
                     </span>
                   </button>
+
+                  {/* OCN épinglé en tête d'Order Flow — overlay contrôleur, hors registre.
+                      L'activer enclenche aussi l'orderflow (prérequis flux tick). */}
+                  {cat === "orderflow" &&
+                    !isCollapsed &&
+                    ocnMatch &&
+                    (() => {
+                      const ocnDisabled =
+                        exchange !== "binance" || !OCN_PERIODS.has(timeframe);
+                      const ocnTitle =
+                        exchange !== "binance"
+                          ? "Open interest disponible uniquement sur Binance"
+                          : !OCN_PERIODS.has(timeframe)
+                            ? "Nécessite un timeframe entre 5m et 1d"
+                            : ocnActif
+                              ? "Retirer l'overlay OCN"
+                              : "Afficher l'overlay OCN (active l'orderflow)";
+                      return (
+                        <button
+                          type="button"
+                          data-item-indicateur=""
+                          title={ocnTitle}
+                          disabled={ocnDisabled}
+                          onClick={() => {
+                            if (ocnDisabled) return;
+                            const suivant = !ocnActif;
+                            setOcn(suivant);
+                            if (suivant && !orderflowEnabled) setOrderflowEnabled(true);
+                          }}
+                          className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${
+                            ocnDisabled
+                              ? "cursor-not-allowed text-neutral-600"
+                              : "cursor-pointer text-neutral-200 hover:bg-neutral-800"
+                          }`}
+                        >
+                          <span className="text-accent">{ocnActif ? "✓" : "＋"}</span>
+                          <span className="flex-1 truncate">Open/Close Net (OCN)</span>
+                          {ocnActif && (
+                            <span className="rounded bg-accent/20 px-1 text-[10px] text-accent">
+                              actif
+                            </span>
+                          )}
+                          <span className="text-[10px] uppercase text-neutral-500">prix</span>
+                        </button>
+                      );
+                    })()}
 
                   {!isCollapsed &&
                     defs.map((def) => {

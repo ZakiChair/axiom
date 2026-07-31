@@ -22,6 +22,15 @@ export interface OiPoint {
   oi: number;
 }
 
+/**
+ * Timeframes AXIOM pour lesquels l'OI `/futures/data` existe (miroir
+ * BinanceFuturesPeriod). Source unique, partagée entre le gate du contrôleur
+ * et le grisage UI (IndicatorMenu) — module pur, importable partout.
+ */
+export const OCN_PERIODS = new Set<string>([
+  "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d",
+]);
+
 /** Position nette estimée, ancrée à la bougie et au niveau où elle s'est ouverte. */
 export interface OcnEntry {
   time: number; // open time de la bougie d'ouverture

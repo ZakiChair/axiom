@@ -508,6 +508,21 @@ export function construireRegistre(): Commande[] {
       action: () => orderflowStore.getState().toggle(),
     },
     {
+      id: "action:ocn",
+      mnemonique: "OCN",
+      libelle: "OCN — Open/Close Net (positions encore ouvertes)",
+      categorie: "action",
+      motsCles: ["ocn", "open close net", "oi", "open interest", "positions", "flux"],
+      apercu: "Bascule l'overlay OCN (active l'orderflow si besoin) — Binance perp",
+      action: () => {
+        const s = orderflowStore.getState();
+        const suivant = !s.showOpenCloseNet;
+        s.setShowOpenCloseNet(suivant);
+        // Prérequis : l'OCN se nourrit du footprint tick → orderflow obligatoire.
+        if (suivant && !s.enabled) s.setEnabled(true);
+      },
+    },
+    {
       id: "action:volume-profile",
       mnemonique: "VP",
       libelle: "Profil de volume — activer / désactiver",

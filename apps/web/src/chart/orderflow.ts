@@ -36,7 +36,12 @@ import {
   subscribePerpAggTrades,
   type BinanceFuturesPeriod,
 } from "../data/binanceFutures";
-import { computeOpenCloseNet, deltasOiParBougie, type OiPoint } from "./openCloseNet.calc";
+import {
+  computeOpenCloseNet,
+  deltasOiParBougie,
+  OCN_PERIODS,
+  type OiPoint,
+} from "./openCloseNet.calc";
 import { drawOpenCloseNet } from "./openCloseNet";
 import { detectCvdDivergences, type CvdDivergence } from "./cvdSpotPerp";
 import { precisionCvd } from "./cvdPrecision";
@@ -70,8 +75,6 @@ const MAX_PERP_CANDLES = 500;
 const MAX_FOOTPRINT_CANDLES = 120;
 /** Nombre max de colonnes footprint dessinées (perf / lisibilité). */
 const MAX_RENDER_COLUMNS = 60;
-/** Périodes `/futures/data` acceptées pour l'OI de l'OCN (miroir BinanceFuturesPeriod). */
-const OCN_PERIODS = new Set<string>(["5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"]);
 /** Cadence de rafraîchissement de l'historique OI de l'OCN. */
 const OCN_OI_REFRESH_MS = 60_000;
 /** Cible de lignes de prix par bougie (sert à dimensionner le bucket). */

@@ -85,7 +85,7 @@ export function drawOpenCloseNet(ctx: CanvasRenderingContext2D, p: OcnDrawParams
   ctx.textBaseline = "bottom";
   ctx.fillStyle = palette.textDim;
   const legende = p.oiOk
-    ? `Open/Close Net · ${p.candlesUsed} bougies`
+    ? `Open/Close Net · ${p.candlesUsed} bougie${p.candlesUsed > 1 ? "s" : ""}`
     : "Open/Close Net · OI indisponible";
   ctx.fillText(legende, p.left + 8, p.top + p.height - 6);
   if (!p.oiOk || p.candlesUsed === 0) return;

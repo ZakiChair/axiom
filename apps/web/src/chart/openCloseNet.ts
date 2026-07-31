@@ -79,14 +79,15 @@ export function drawOpenCloseNet(ctx: CanvasRenderingContext2D, p: OcnDrawParams
   const right = p.left + p.width;
 
   // ── Légende (toujours affichée quand l'overlay est actif) ──
+  // En BAS à gauche du pane : le haut est occupé par le bandeau symbole flottant.
   ctx.font = POLICE_CANVAS_MONO;
   ctx.textAlign = "left";
-  ctx.textBaseline = "top";
+  ctx.textBaseline = "bottom";
   ctx.fillStyle = palette.textDim;
   const legende = p.oiOk
     ? `Open/Close Net · ${p.candlesUsed} bougies`
     : "Open/Close Net · OI indisponible";
-  ctx.fillText(legende, p.left + 8, p.top + 20);
+  ctx.fillText(legende, p.left + 8, p.top + p.height - 6);
   if (!p.oiOk || p.candlesUsed === 0) return;
 
   // ── Cadre discret de la fenêtre d'analyse ──

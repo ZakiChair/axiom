@@ -10,6 +10,10 @@ import { test, expect } from "@playwright/test";
  * STRUCTUREL, sans donnée de marché live : les libellés testés (bandeau de ratio,
  * onglets, cases macro) sont dérivés du SYMBOLE et des stores, pas des WS/REST exchange
  * — la suite passe hors ligne.
+ *
+ * Étendu au lot D (ratios cross-source) : le test tradfi bouchonne /tdapi (patron du
+ * gate v2.5 : page.route + fixtures minimales) pour que la jambe GLD ne consomme ni
+ * quota Twelve Data ni réseau réel.
  */
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -87,4 +91,50 @@ test("bandeau : ÷BTC absent sur BTCUSDT, ÷ETH pose le ratio et le menu bascule
   // ÷SOL est maintenant le ratio actif : un clic dessus détoggle vers la jambe A.
   await page.getByRole("button", { name: "÷SOL" }).click();
   await expect(page.getByText("BTCUSDT / SOLUSDT")).toHaveCount(0);
+});
+
+// ───────── Lot D — ratio cross-source tradfi ÷ crypto (réf canonique Binance) ─────────
+
+/** Bougies journalières minimales de la jambe GLD (forme time_series Twelve Data). */
+const SERIE_TD = {
+  status: "ok",
+  values: [
+    { datetime: "2026-07-28", open: "180", high: "182", low: "179", close: "181", volume: "1000" },
+    { datetime: "2026-07-29", open: "181", high: "184", low: "180", close: "183", volume: "1100" },
+    { datetime: "2026-07-30", open: "183", high: "186", low: "182", close: "185", volume: "1200" },
+  ],
+};
+
+/** Forme À PLAT d'un /quote mono-symbole (cf. parseQuotes, data/twelvedata.ts). */
+const QUOTE_TD = { symbol: "GLD", close: "185.0", percent_change: "0.42" };
+
+/** Intercepte les deux endpoints /tdapi utilisés (graphe + ticker) — zéro quota. */
+async function bouchonnerTwelveData(page: import("@playwright/test").Page): Promise<void> {
+  await page.route("**/tdapi/time_series*", (route) => route.fulfill({ json: SERIE_TD }));
+  await page.route("**/tdapi/quote*", (route) => route.fulfill({ json: QUOTE_TD }));
+}
+
+test("bandeau tradfi : ÷BTC apparaît sur GLD, pose le SYN cross-source, détoggle → retour GLD", async ({
+  page,
+}) => {
+  await bouchonnerTwelveData(page);
+  await page.goto("/");
+
+  // Basculer la source sur TradFi (le symbole retombe sur SPY), puis preset GLD.
+  await page.getByLabel("Source").selectOption("twelvedata");
+  await page.getByRole("button", { name: "GLD", exact: true }).click();
+
+  // Lot D : le bouton ÷BTC apparaît sur un symbole tradfi (composition cross-source).
+  const boutonBtc = page.getByRole("button", { name: "÷BTC" });
+  await expect(boutonBtc).toBeVisible();
+  await boutonBtc.click();
+
+  // Le bandeau affiche le label du SYN cross-source : GLD ÷ réf canonique Binance.
+  await expect(page.getByText("GLD / BTCUSDT")).toBeVisible({ timeout: 15_000 });
+
+  // Détoggle : retour à la jambe A (GLD sur TradFi), le bouton reste proposé.
+  await boutonBtc.click();
+  await expect(page.getByText("GLD / BTCUSDT")).toHaveCount(0);
+  await expect(page.getByLabel("Source")).toHaveValue("twelvedata");
+  await expect(boutonBtc).toBeVisible();
 });

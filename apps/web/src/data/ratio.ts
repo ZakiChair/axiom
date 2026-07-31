@@ -9,6 +9,13 @@
  *    bouton s'affiche actif et vers quelle jambe on revient ;
  *  - le dénominateur CHOISI est une préférence persistée (store/denominateur.ts) qui ne
  *    pilote que le libellé et l'action du bouton scindé.
+ *
+ * CROSS-SOURCE (lot D) : une source SANS réf locale mais dont les jambes sont acceptées
+ * par le moteur SYN (twelvedata) se compose contre la RÉFÉRENCE CANONIQUE Binance
+ * (`REF_CANONIQUE`) — ex. or ÷ BTC = `twelvedata:GLD|/|binance:BTCUSDT`. `estRatio`
+ * reconnaît symétriquement une jambe B sur un AUTRE exchange que la jambe A, à condition
+ * qu'elle soit exactement la réf canonique de SON exchange. La source virtuelle
+ * `synthetic` reste exclue dans les deux sens (pas de SYN imbriqué).
  */
 import type { ExchangeId } from "@axiom/types";
 import { encodeSyntheticSymbol, parseSyntheticSymbol, type SyntheticSpec } from "./synthetic";
@@ -30,20 +37,50 @@ export const REFS: Record<DenominateurId, Partial<Record<ExchangeId, string>>> =
 };
 
 /**
+ * Référence CANONIQUE cross-source par dénominateur : la jambe B posée quand la source
+ * courante n'a PAS de réf locale (tradfi ÷ crypto). Binance spot, comme les réfs des
+ * indicateurs statistiques (store/refSymbol.ts) — la paire la plus liquide, toujours
+ * listée, 24/7 (la jambe crypto ne crée jamais de trous face au forward-fill tradfi).
+ */
+export const REF_CANONIQUE: Record<DenominateurId, { ex: "binance"; sym: string }> = {
+  BTC: { ex: "binance", sym: "BTCUSDT" },
+  ETH: { ex: "binance", sym: "ETHUSDT" },
+  SOL: { ex: "binance", sym: "SOLUSDT" },
+};
+
+/**
  * Symbole SYN du ratio X/DENOM pour le marché courant, ou null si non basculable :
- * source sans réf pour ce dénominateur (twelvedata, synthetic, non-jambe), base déjà
- * égale au dénominateur, cotation déjà dans le dénominateur (ex. ETHBTC ÷BTC), ou
- * symbole non découpable (splitSymbol throw).
+ * source virtuelle `synthetic` (jamais de SYN imbriqué), source sans réf ni composition
+ * cross-source (bybit, okx…), base déjà égale au dénominateur, cotation déjà dans le
+ * dénominateur (ex. ETHBTC ÷BTC), ou symbole non découpable (splitSymbol throw).
+ *
+ * Même source quand `REFS[denom][exchange]` existe (comportement historique, inchangé) ;
+ * sinon, twelvedata compose CROSS-SOURCE contre la réf canonique Binance — SANS
+ * splitSymbol : un ticker tradfi (SPY, GLD, EUR/USD) n'est pas découpable et ne peut
+ * pas être déjà coté en BTC/ETH/SOL.
  */
 export function symboleRatio(
   symbol: string,
   exchange: ExchangeId,
   denom: DenominateurId,
 ): string | null {
-  // Garde de source EN PREMIER : un SYN encodé contient un `/` que splitSymbol
-  // découperait à tort sans lever — c'est cette garde qui l'écarte (réf undefined).
+  // Garde `synthetic` EN PREMIER : un SYN encodé contient un `/` que splitSymbol
+  // découperait à tort sans lever, et il ne doit JAMAIS redevenir une jambe.
+  if (exchange === "synthetic") return null;
+
   const ref = REFS[denom][exchange];
-  if (ref === undefined) return null;
+  if (ref === undefined) {
+    // Pas de réf locale : seule twelvedata se compose cross-source (réf canonique).
+    if (exchange !== "twelvedata") return null;
+    const canon = REF_CANONIQUE[denom];
+    return encodeSyntheticSymbol({
+      exA: exchange,
+      legA: symbol,
+      exB: canon.ex,
+      legB: canon.sym,
+      op: "/",
+    });
+  }
 
   let parts: { base: string; quote: string };
   try {
@@ -64,14 +101,24 @@ export interface RatioActif {
 
 /**
  * Ratio ÷DENOM actif si le marché courant EST un ratio posé par un toggle
- * (exchange="synthetic", op="/", exB===exA, legB===REFS[denom][exA]), sinon null.
+ * (exchange="synthetic", op="/", jambe B = réf du dénominateur), sinon null.
  * Le dénominateur renvoyé est celui dont la réf correspond à la jambe B.
+ *
+ * La jambe B est TOUJOURS vérifiée contre la réf de SON exchange (spec.exB, jamais
+ * celle de exA — sinon un SYN quelconque à legB « BTCUSD » serait faussement reconnu) :
+ *  - même source (exB === exA) : réf locale `REFS[denom][exB]` ;
+ *  - cross-source (exB !== exA, lot D) : exactement la réf canonique
+ *    (`exB === REF_CANONIQUE[denom].ex` ET `legB === REF_CANONIQUE[denom].sym`).
  */
 export function estRatio(symbol: string, exchange: ExchangeId): RatioActif | null {
   if (exchange !== "synthetic") return null;
   const spec = parseSyntheticSymbol(symbol);
   if (spec === null) return null;
-  if (spec.op !== "/" || spec.exB !== spec.exA) return null;
-  const denom = DENOMINATEURS.find((d) => spec.legB === REFS[d][spec.exA]);
+  if (spec.op !== "/") return null;
+  const denom = DENOMINATEURS.find((d) =>
+    spec.exB === spec.exA
+      ? spec.legB === REFS[d][spec.exB]
+      : spec.exB === REF_CANONIQUE[d].ex && spec.legB === REF_CANONIQUE[d].sym,
+  );
   return denom === undefined ? null : { spec, denom };
 }

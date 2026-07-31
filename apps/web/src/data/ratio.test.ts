@@ -50,9 +50,20 @@ describe("symboleRatio — cible SYN X/DENOM pour le marché courant", () => {
     expect(symboleRatio("ETHBTC", "binance", "SOL")).toBe("binance:ETHBTC|/|binance:SOLUSDT");
   });
 
-  it("refuse une source sans réf (twelvedata), pour tous les dénominateurs", () => {
+  it("compose CROSS-SOURCE un tradfi ÷ réf canonique Binance (or, indice, forex)", () => {
+    expect(symboleRatio("GLD", "twelvedata", "BTC")).toBe("twelvedata:GLD|/|binance:BTCUSDT");
+    expect(symboleRatio("SPY", "twelvedata", "ETH")).toBe("twelvedata:SPY|/|binance:ETHUSDT");
+    // Ticker forex avec un `/` : jamais découpé (pas de splitSymbol sur ce chemin).
+    expect(symboleRatio("EUR/USD", "twelvedata", "SOL")).toBe(
+      "twelvedata:EUR/USD|/|binance:SOLUSDT",
+    );
+  });
+
+  it("refuse une source sans réf ni composition cross-source (bybit, okx, hyperliquid)", () => {
     for (const denom of DENOMINATEURS) {
-      expect(symboleRatio("SPY", "twelvedata", denom)).toBeNull();
+      expect(symboleRatio("ETHUSDT", "bybit", denom)).toBeNull();
+      expect(symboleRatio("ETHUSDT", "okx", denom)).toBeNull();
+      expect(symboleRatio("ETH", "hyperliquid", denom)).toBeNull();
     }
   });
 
@@ -90,20 +101,55 @@ describe("estRatio — reconnaît un ratio posé par le toggle ET son dénominat
     expect(estRatio("binance:ETHUSDT|-|binance:BTCUSDT", "synthetic")).toBeNull();
   });
 
-  it("refuse exB ≠ exA", () => {
-    // legB = BTCUSDT = réf binance : la garde legB≠réf ne joue PAS, seule exB≠exA isole
-    // le refus (kraken ≠ binance). Retirer la garde exB===exA rendrait ce cas passant.
+  it("reconnaît un SYN CROSS-SOURCE dont la jambe B est la réf canonique Binance", () => {
+    const tradfi = estRatio("twelvedata:GLD|/|binance:BTCUSDT", "synthetic");
+    expect(tradfi?.denom).toBe("BTC");
+    expect(tradfi?.spec.exA).toBe("twelvedata");
+    expect(tradfi?.spec.legA).toBe("GLD");
+    // La jambe A peut être N'IMPORTE QUELLE source non virtuelle (SYN bâti à la main).
+    expect(estRatio("kraken:SOLUSD|/|binance:ETHUSDT", "synthetic")?.denom).toBe("ETH");
+  });
+
+  it("refuse un exB cross-source qui n'est pas l'exchange canonique (binance)", () => {
+    // legB = BTCUSD = réf kraken : valable en MÊME source, jamais en cross-source.
+    expect(estRatio("binance:ETHUSDT|/|kraken:BTCUSD", "synthetic")).toBeNull();
+    expect(estRatio("twelvedata:GLD|/|kraken:BTCUSD", "synthetic")).toBeNull();
+    // Ticker canonique (BTCUSDT) mais sur le MAUVAIS exchange : refusé aussi.
     expect(estRatio("binance:ETHUSDT|/|kraken:BTCUSDT", "synthetic")).toBeNull();
   });
 
   it("refuse un legB étranger aux réfs des dénominateurs", () => {
     expect(estRatio("binance:ETHUSDT|/|binance:BNBUSDT", "synthetic")).toBeNull();
-    // Réf d'une AUTRE source : ETHUSD est la réf kraken/coinbase, pas binance.
+    // Réf d'une AUTRE source que celle de la jambe B : ETHUSD est la réf kraken/coinbase,
+    // pas binance — la jambe B se vérifie toujours contre la réf de SON exchange (exB).
     expect(estRatio("binance:SOLUSDT|/|binance:ETHUSD", "synthetic")).toBeNull();
+    // Idem en cross-source : BTCUSD n'est pas la réf canonique binance (BTCUSDT).
+    expect(estRatio("twelvedata:GLD|/|binance:BTCUSD", "synthetic")).toBeNull();
   });
 
   it("refuse un exchange autre que synthetic", () => {
     expect(estRatio("binance:ETHUSDT|/|binance:BTCUSDT", "binance")).toBeNull();
+  });
+
+  it("round-trip CROSS-SOURCE pour chaque dénominateur : legA et exA préservées", () => {
+    for (const denom of DENOMINATEURS) {
+      const cible = symboleRatio("GLD", "twelvedata", denom);
+      expect(cible).not.toBeNull();
+      const actif = estRatio(cible as string, "synthetic");
+      expect(actif?.denom).toBe(denom);
+      expect(actif?.spec.legA).toBe("GLD");
+      expect(actif?.spec.exA).toBe("twelvedata");
+    }
+  });
+
+  it("recomposition tradfi : la jambe A d'un ratio cross-source rebascule ÷ETH ⇄ ÷SOL", () => {
+    const actif = estRatio("twelvedata:GLD|/|binance:BTCUSDT", "synthetic");
+    expect(actif).not.toBeNull();
+    if (actif === null) return;
+    // Même patron que le cas same-source : SymbolBanner recompose depuis exA/legA.
+    expect(symboleRatio(actif.spec.legA, actif.spec.exA, "ETH")).toBe(
+      "twelvedata:GLD|/|binance:ETHUSDT",
+    );
   });
 
   it("recomposition : depuis un ratio actif, la jambe A sert de base à un autre dénominateur", () => {

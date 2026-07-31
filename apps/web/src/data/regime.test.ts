@@ -9,6 +9,7 @@ const VIDE: EntreesRegime = {
   volRealiseeBtcPercentile: null,
   fluxEtfJourUsd: null,
   impressionStablecoins7jPct: null,
+  regimeGammaBtc: null,
 };
 
 describe("calculerRegime — notes par composant", () => {
@@ -74,6 +75,22 @@ describe("calculerRegime — notes par composant", () => {
     const etf = calculerRegime({ ...VIDE, fluxEtfJourUsd: 161_000_000 }).composants.find((c) => c.id === "etf");
     expect(etf?.detail).toContain("+$161");
   });
+  it("gamma dealers : long +1, short −1, indéterminé 0, absent null (pas de ±2)", () => {
+    const note = (regimeGammaBtc: EntreesRegime["regimeGammaBtc"]) =>
+      calculerRegime({ ...VIDE, regimeGammaBtc }).composants.find((c) => c.id === "gammaDealer")?.note;
+    expect(note({ regime: "long-gamma", gexNetUsd: 51_000_000 })).toBe(1);
+    expect(note({ regime: "short-gamma", gexNetUsd: -51_000_000 })).toBe(-1);
+    expect(note({ regime: "indetermine", gexNetUsd: 1_000_000 })).toBe(0);
+    expect(note(null)).toBe(null);
+  });
+  it("detail gamma dealers : régime + net via le formateur standard", () => {
+    const detail = (regimeGammaBtc: EntreesRegime["regimeGammaBtc"]) =>
+      calculerRegime({ ...VIDE, regimeGammaBtc }).composants.find((c) => c.id === "gammaDealer")?.detail;
+    expect(detail({ regime: "long-gamma", gexNetUsd: 51_000_000 })).toBe("γ dealers long (net +$51.00M) (+1)");
+    expect(detail({ regime: "short-gamma", gexNetUsd: -51_000_000 })).toBe("γ dealers short (net −$51.00M) (-1)");
+    expect(detail({ regime: "indetermine", gexNetUsd: 0 })).toBe("γ dealers indéterminé (net $0.00) (+0)");
+    expect(detail(null)).toBe("γ dealers —");
+  });
 });
 
 describe("calculerRegime — score et libellé", () => {
@@ -91,9 +108,9 @@ describe("calculerRegime — score et libellé", () => {
     const r3 = calculerRegime({ ...VIDE, directionBtc24hPct: 0, fearGreed: 50, dvolBtcPercentile: 70 });
     expect(r3.libelle).toBe("neutre");
   });
-  it("les 7 composants sont toujours listés (note null si indisponible)", () => {
+  it("les 8 composants sont toujours listés (note null si indisponible)", () => {
     const r = calculerRegime(VIDE);
-    expect(r.composants).toHaveLength(7);
+    expect(r.composants).toHaveLength(8);
     expect(r.composants.map((c) => c.id)).toEqual([
       "btc24h",
       "fearGreed",
@@ -102,12 +119,13 @@ describe("calculerRegime — score et libellé", () => {
       "volRealisee",
       "etf",
       "stables",
+      "gammaDealer",
     ]);
     expect(r.composants.every((c) => c.note === null)).toBe(true);
     expect(r.libelle).toBe("indéterminé");
   });
-  it("score = moyenne sur les 7 notes quand toutes sont disponibles", () => {
-    // Garde-fou de PONDÉRATION : la volatilité pèse 2 notes sur 7 (dvol +
+  it("score = moyenne sur les 8 notes quand toutes sont disponibles", () => {
+    // Garde-fou de PONDÉRATION : la volatilité pèse 2 notes sur 8 (dvol +
     // vol réalisée, corrélées). Ce test fige le diviseur — il échoue si un
     // composant est ajouté/retiré sans que la pondération soit reconsidérée.
     const r = calculerRegime({
@@ -118,9 +136,10 @@ describe("calculerRegime — score et libellé", () => {
       volRealiseeBtcPercentile: 90, // −2
       fluxEtfJourUsd: 60_000_000, // +1
       impressionStablecoins7jPct: 0.6, // +1
+      regimeGammaBtc: { regime: "long-gamma", gexNetUsd: 51_000_000 }, // +1
     });
-    expect(r.composants).toHaveLength(7);
-    expect(r.score).toBeCloseTo(1 / 7, 6);
+    expect(r.composants).toHaveLength(8);
+    expect(r.score).toBeCloseTo(2 / 8, 6);
   });
 });
 

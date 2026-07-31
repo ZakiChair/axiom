@@ -7,6 +7,8 @@ const VIDE: EntreesLecture = {
   dvolPercentile: null,
   deltaOi24hPct: null,
   fearGreed: null,
+  regimeGamma: null,
+  gexNetUsd: null,
 };
 
 describe("lectures", () => {
@@ -32,6 +34,21 @@ describe("lectures", () => {
     // Sous le seuil de ΔOI, pas de phrase de positionnement (et pas de nuit → pas de contexte).
     expect(lectures({ ...VIDE, fundingPercentile: 95, deltaOi24hPct: 1 })).toEqual([]);
   });
+  it("gamma dealers : lecture seulement quand le régime est tranché", () => {
+    expect(lectures({ ...VIDE, regimeGamma: "long-gamma", gexNetUsd: 51_000_000 })).toEqual([
+      "Dealers options BTC long gamma (net +$51.00M) : mouvements amortis, aimantation vers les murs.",
+    ]);
+    expect(lectures({ ...VIDE, regimeGamma: "short-gamma", gexNetUsd: -51_000_000 })).toEqual([
+      "Dealers options BTC short gamma (net −$51.00M) : mouvements amplifiés (carburant de squeeze/cascade).",
+    ]);
+    // Net indisponible : la lecture reste valable, sans la parenthèse de montant.
+    expect(lectures({ ...VIDE, regimeGamma: "long-gamma", gexNetUsd: null })).toEqual([
+      "Dealers options BTC long gamma : mouvements amortis, aimantation vers les murs.",
+    ]);
+    // Indéterminé ou absent : pas de phrase.
+    expect(lectures({ ...VIDE, regimeGamma: "indetermine", gexNetUsd: 1_000_000 })).toEqual([]);
+    expect(lectures(VIDE)).toEqual([]);
+  });
   it("sentiment aux extrêmes seulement", () => {
     expect(lectures({ ...VIDE, fearGreed: 80 })).toEqual(["Sentiment en zone avidité (F&G 80)."]);
     expect(lectures({ ...VIDE, fearGreed: 20 })).toEqual(["Sentiment en zone peur (F&G 20)."]);
@@ -44,6 +61,8 @@ describe("lectures", () => {
       dvolPercentile: 90,
       deltaOi24hPct: 8,
       fearGreed: 12,
+      regimeGamma: "short-gamma",
+      gexNetUsd: -80_000_000,
     });
     expect(l.length).toBeLessThanOrEqual(3);
     for (const phrase of l) {

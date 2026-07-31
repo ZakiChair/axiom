@@ -1,6 +1,7 @@
 /**
  * Régime de marché : assemble les entrées du score composite (data/regime.ts)
- * depuis les caches TTL 1 h de data/referentiels.ts + fetchers existants,
+ * depuis les caches TTL 1 h de data/referentiels.ts + fetchers existants (+ le
+ * verdict gamma dealer BTC, cache TTL 10 min de data/gammaRegime.ts),
  * toutes en Promise.allSettled (une source en échec → composant null).
  * Poller 15 min (pattern startMacroHistoryPolling), démarré dans main.tsx.
  */
@@ -17,6 +18,8 @@ import {
 } from "../data/referentiels";
 import { fetchEtfBrief, fetchWatchlistOvernight } from "../data/brief";
 import { chargerEmetteurs } from "../data/macro/stablecoinsDetail";
+import { chargerVerdictGammaBtc } from "../data/gammaRegime";
+import type { RegimeGamma } from "../data/gexDex";
 
 /** Données « courantes » du chapeau BRIEF (dérivées du même rafraîchissement). */
 export interface Chapeau {
@@ -34,6 +37,12 @@ export interface Chapeau {
   dvolRef: Referentiel | null;
   /** ΔOI BTC ~24 h en %. */
   deltaOi24hPct: number | null;
+  /** Régime gamma des dealers BTC (verdict OMON, toutes échéances), null si indisponible. */
+  regimeGamma: RegimeGamma | null;
+  /** GEX net BTC toutes échéances (USD par 1 % de mouvement), null si indisponible. */
+  gexNetUsd: number | null;
+  /** Distance spot↔gamma flip en % du spot, null si flip absent ou verdict indisponible. */
+  distanceFlipPct: number | null;
 }
 
 export interface RegimeState {
@@ -66,7 +75,7 @@ function percentileCourant(serie: PointSerie[] | null, now: number): number | nu
 
 export async function rafraichirRegime(): Promise<void> {
   const now = Date.now();
-  const [tickers, fg, funding, dvol, volReal, oi, etf, emetteurs] = await Promise.allSettled([
+  const [tickers, fg, funding, dvol, volReal, oi, etf, emetteurs, gamma] = await Promise.allSettled([
     fetchWatchlistOvernight(["BTCUSDT", "ETHUSDT"]),
     histFearGreed(),
     histFunding("BTCUSDT"),
@@ -75,6 +84,8 @@ export async function rafraichirRegime(): Promise<void> {
     histOiUsd("BTCUSDT"),
     fetchEtfBrief(),
     chargerEmetteurs(),
+    // Verdict gamma dealer BTC : cache TTL 10 min → au plus 1 appel Deribit par cycle 15 min.
+    chargerVerdictGammaBtc(now),
   ]);
 
   const lignes = tickers.status === "fulfilled" ? tickers.value : [];
@@ -137,6 +148,8 @@ export async function rafraichirRegime(): Promise<void> {
     if (tot7 > 0) impressionStablecoins7jPct = (tot / tot7 - 1) * 100;
   }
 
+  const verdictBtc = gamma.status === "fulfilled" ? gamma.value : null;
+
   const regime = calculerRegime({
     directionBtc24hPct: nuitBtcPct,
     fearGreed: fearGreedCourant,
@@ -145,6 +158,10 @@ export async function rafraichirRegime(): Promise<void> {
     volRealiseeBtcPercentile: percentileCourant(serieVolReal, now),
     fluxEtfJourUsd,
     impressionStablecoins7jPct,
+    regimeGammaBtc:
+      verdictBtc !== null
+        ? { regime: verdictBtc.verdict.regime, gexNetUsd: verdictBtc.gexNetUsd }
+        : null,
   });
 
   regimeStore.setState({
@@ -160,6 +177,9 @@ export async function rafraichirRegime(): Promise<void> {
       dvolDeltaPts,
       dvolRef,
       deltaOi24hPct,
+      regimeGamma: verdictBtc?.verdict.regime ?? null,
+      gexNetUsd: verdictBtc?.gexNetUsd ?? null,
+      distanceFlipPct: verdictBtc?.verdict.distanceFlipPct ?? null,
     },
     majTs: now,
   });

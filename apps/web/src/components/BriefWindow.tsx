@@ -131,6 +131,8 @@ export function BriefWindow() {
       dvolPercentile: chapeau.dvolRef?.percentile ?? null,
       deltaOi24hPct: chapeau.deltaOi24hPct,
       fearGreed: chapeau.fearGreed,
+      regimeGamma: chapeau.regimeGamma,
+      gexNetUsd: chapeau.gexNetUsd,
     });
   }, [chapeau]);
 

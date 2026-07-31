@@ -3,7 +3,8 @@
  * mêmes entrées que le régime (+ ΔOI). Jamais prescriptif — on décrit
  * l'environnement, on ne recommande rien (BUILD-CONTRACT).
  */
-import { formatPct } from "../lib/format";
+import { formatPct, formatUsdSigne } from "../lib/format";
+import type { RegimeGamma } from "./gexDex";
 
 export interface EntreesLecture {
   nuitBtcPct: number | null;
@@ -13,6 +14,10 @@ export interface EntreesLecture {
   dvolPercentile: number | null;
   deltaOi24hPct: number | null;
   fearGreed: number | null;
+  /** Régime gamma des dealers BTC (verdict OMON, toutes échéances), null si indisponible. */
+  regimeGamma: RegimeGamma | null;
+  /** GEX net BTC toutes échéances (USD par 1 % de mouvement), null si indisponible. */
+  gexNetUsd: number | null;
 }
 
 const MAX_PHRASES = 3;
@@ -55,7 +60,22 @@ export function lectures(entrees: EntreesLecture): string[] {
     );
   }
 
-  // 3. Sentiment : extrêmes Fear & Greed seulement.
+  // 3. Dealers options : régime gamma BTC tranché seulement (long/short — pas
+  //    « indetermine »). Factuel : décrit l'environnement de mouvement induit par
+  //    la couverture des dealers (hypothèse retail : long calls, short puts).
+  if (entrees.regimeGamma === "long-gamma" || entrees.regimeGamma === "short-gamma") {
+    const net =
+      entrees.gexNetUsd !== null && Number.isFinite(entrees.gexNetUsd)
+        ? ` (net ${formatUsdSigne(entrees.gexNetUsd)})`
+        : "";
+    out.push(
+      entrees.regimeGamma === "long-gamma"
+        ? `Dealers options BTC long gamma${net} : mouvements amortis, aimantation vers les murs.`
+        : `Dealers options BTC short gamma${net} : mouvements amplifiés (carburant de squeeze/cascade).`,
+    );
+  }
+
+  // 4. Sentiment : extrêmes Fear & Greed seulement.
   if (entrees.fearGreed !== null && Number.isFinite(entrees.fearGreed)) {
     if (entrees.fearGreed >= 75) out.push(`Sentiment en zone avidité (F&G ${Math.round(entrees.fearGreed)}).`);
     else if (entrees.fearGreed <= 25) out.push(`Sentiment en zone peur (F&G ${Math.round(entrees.fearGreed)}).`);

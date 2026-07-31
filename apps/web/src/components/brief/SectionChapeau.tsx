@@ -1,11 +1,12 @@
 /**
- * Section BRIEF — chapeau interprété (H16) : régime + nuit + funding + vol, puis
- * lecture générée. Purement présentationnel : reçoit l'état du store regime.
+ * Section BRIEF — chapeau interprété (H16) : régime + nuit + funding + vol +
+ * γ dealers, puis lecture générée. Purement présentationnel : reçoit l'état du
+ * store regime.
  */
 import { tonRegime, type Regime } from "../../data/regime";
 import type { Chapeau } from "../../store/regime";
-import { formatDec, formatFunding, formatPct, formatPourcentage } from "../../lib/format";
-import { TuileStat, RefBadge } from "../ui";
+import { formatDec, formatFunding, formatPct, formatPourcentage, formatUsdSigne } from "../../lib/format";
+import { TuileStat, RefBadge, Badge } from "../ui";
 
 interface Props {
   regime: Regime | null;
@@ -80,6 +81,44 @@ export function SectionChapeau({ regime, chapeau, phrasesLecture }: Props) {
               <span className="text-[10px] tabular-nums text-text-dim">
                 {chapeau.dvolDeltaPts >= 0 ? "+" : ""}
                 {formatDec(chapeau.dvolDeltaPts, 1)} pts vs veille
+              </span>
+            ) : undefined
+          }
+        />
+        {/* Verdict gamma dealer (OMON v2.6) : long gamma = mouvements amortis (up),
+            short gamma = amplifiés (down) — la note DÉCRIT, elle ne conseille pas. */}
+        <TuileStat
+          disposition="inline"
+          label="γ dealers"
+          badge={<Badge>BTC · toutes échéances</Badge>}
+          valeur={
+            chapeau?.regimeGamma === "long-gamma"
+              ? "Long gamma — amorti"
+              : chapeau?.regimeGamma === "short-gamma"
+                ? "Short gamma — amplifié"
+                : "—"
+          }
+          ton={
+            chapeau?.regimeGamma === "long-gamma"
+              ? "up"
+              : chapeau?.regimeGamma === "short-gamma"
+                ? "down"
+                : undefined
+          }
+          title={
+            "Hypothèse dealer (convention retail) : dealers long les calls, short les puts. " +
+            "GEX net Deribit BTC, toutes échéances" +
+            (chapeau?.distanceFlipPct != null
+              ? ` · spot vs gamma flip ${formatPct(chapeau.distanceFlipPct, 1)}`
+              : "") +
+            "."
+          }
+          extra={
+            chapeau?.gexNetUsd != null &&
+            Number.isFinite(chapeau.gexNetUsd) &&
+            chapeau.regimeGamma !== null ? (
+              <span className="text-[10px] tabular-nums text-text-dim">
+                net {formatUsdSigne(chapeau.gexNetUsd)}
               </span>
             ) : undefined
           }

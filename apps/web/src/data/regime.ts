@@ -1,10 +1,12 @@
 /**
- * Régime de marché : score composite −2..+2 sur 7 composants publics.
- * PUR — l'assemblage des entrées vit dans store/regime.ts. Seule dépendance :
- * les formateurs purs de lib/format (montants signés du détail). Ton factuel,
- * jamais prescriptif : le score DÉCRIT l'environnement, il ne conseille pas.
+ * Régime de marché : score composite −2..+2 sur 8 composants publics.
+ * PUR — l'assemblage des entrées vit dans store/regime.ts. Seules dépendances :
+ * les formateurs purs de lib/format (montants signés du détail) et le type
+ * RegimeGamma de data/gexDex (verdict OMON v2.6). Ton factuel, jamais
+ * prescriptif : le score DÉCRIT l'environnement, il ne conseille pas.
  */
 import { formatUsdSigne } from "../lib/format";
+import type { RegimeGamma } from "./gexDex";
 
 export interface EntreesRegime {
   /** Variation BTC 24 h en % (ticker Binance), ou null. */
@@ -21,6 +23,11 @@ export interface EntreesRegime {
   fluxEtfJourUsd: number | null;
   /** Δ supply stablecoins 7 j en % de la supply, ou null. */
   impressionStablecoins7jPct: number | null;
+  /**
+   * Régime gamma des dealers BTC (verdict OMON, toutes échéances) + GEX net USD,
+   * ou null. Hypothèse retail standard : dealers long les calls, short les puts.
+   */
+  regimeGammaBtc: { regime: RegimeGamma; gexNetUsd: number } | null;
 }
 
 export interface ComposantRegime {
@@ -115,8 +122,8 @@ export function calculerRegime(entrees: EntreesRegime): Regime {
     // `dvol` À DESSEIN — deux notes de volatilité doivent rester commensurables ;
     // des seuils asymétriques seraient un arbitrage caché dans le score.
     //
-    // Conséquence de pondération ASSUMÉE : la volatilité pèse désormais 2 notes
-    // sur 7 (~29 % du score, contre ~17 % avant), et les deux sont corrélées —
+    // Conséquence de pondération ASSUMÉE : la volatilité pèse 2 notes
+    // sur 8 (25 % du score), et les deux sont corrélées —
     // en régime de stress elles chargent le score dans le même sens. C'est le
     // comportement voulu (vol implicite ET réalisée élevées = environnement
     // réellement hostile), mais toute relecture historique de la pastille doit
@@ -157,6 +164,38 @@ export function calculerRegime(entrees: EntreesRegime): Regime {
       libelle: "Impression stablecoins 7 j",
       note,
       detail: note === null ? "stables —" : `stables ${v !== null && v >= 0 ? "+" : ""}${v?.toFixed(2)}% 7j (${fmtNote(note)})`,
+    });
+  }
+  {
+    // Gamma dealers BTC (verdict OMON v2.6, toutes échéances) : la note DÉCRIT
+    // l'environnement de MOUVEMENT induit par la couverture des dealers, sous
+    // l'hypothèse retail standard (dealers long les calls, short les puts).
+    // Long gamma → couverture contra-tendance → mouvements amortis : +1 (même
+    // philosophie que dvol/vol réalisée : environnement calme = note positive).
+    // Short gamma → couverture pro-tendance → mouvements amplifiés : −1.
+    // Indéterminé (net trop faible) → 0. Pas de ±2 : sans référentiel historique
+    // du GEX net, aucune gradation d'intensité n'est défendable.
+    const g = entrees.regimeGammaBtc;
+    let note: number | null = null;
+    if (g !== null) {
+      note = g.regime === "long-gamma" ? 1 : g.regime === "short-gamma" ? -1 : 0;
+    }
+    const nomRegime =
+      g === null
+        ? ""
+        : g.regime === "long-gamma"
+          ? "long"
+          : g.regime === "short-gamma"
+            ? "short"
+            : "indéterminé";
+    composants.push({
+      id: "gammaDealer",
+      libelle: "Gamma dealers BTC",
+      note,
+      detail:
+        note === null || g === null
+          ? "γ dealers —"
+          : `γ dealers ${nomRegime} (net ${formatUsdSigne(g.gexNetUsd)}) (${fmtNote(note)})`,
     });
   }
 

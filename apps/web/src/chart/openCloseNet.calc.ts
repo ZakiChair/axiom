@@ -123,6 +123,59 @@ export function rowsApprochees(
   return rows;
 }
 
+/** Barre condensée : une par (bougie, sens), au niveau moyen pondéré. */
+export interface OcnBarreCondensee {
+  time: number;
+  price: number; // moyenne des niveaux pondérée par `opened`
+  side: "long" | "short";
+  opened: number;
+  remaining: number;
+}
+
+/**
+ * Condense les entrées pour la LISIBILITÉ (façon Flux « N zones · k/n candles ») :
+ *  1. fusionne les niveaux d'une même (bougie, sens) en UNE barre, ancrée au
+ *     prix moyen pondéré par `opened` — l'approximation historique produit des
+ *     piles de niveaux identiques qui, dessinées brutes, noient le graphe ;
+ *  2. écarte les barres dont `opened` < seuilPct % du max — le bruit disparaît,
+ *     les barres consommées significatives restent (elles portent la trace).
+ * PURE, testée.
+ */
+export function condenserEntrees(
+  entries: OcnEntry[],
+  seuilPct: number
+): OcnBarreCondensee[] {
+  const parCle = new Map<string, OcnBarreCondensee & { poids: number }>();
+  for (const e of entries) {
+    const cle = `${e.time}:${e.side}`;
+    let b = parCle.get(cle);
+    if (b === undefined) {
+      b = { time: e.time, price: 0, side: e.side, opened: 0, remaining: 0, poids: 0 };
+      parCle.set(cle, b);
+    }
+    b.opened += e.opened;
+    b.remaining += e.remaining;
+    b.poids += e.price * e.opened;
+  }
+  let max = 0;
+  for (const b of parCle.values()) {
+    if (b.opened > max) max = b.opened;
+  }
+  const seuil = (seuilPct / 100) * max;
+  const out: OcnBarreCondensee[] = [];
+  for (const b of parCle.values()) {
+    if (b.opened <= 0 || b.opened < seuil) continue;
+    out.push({
+      time: b.time,
+      price: b.poids / b.opened,
+      side: b.side,
+      opened: b.opened,
+      remaining: b.remaining,
+    });
+  }
+  return out.sort((a, b) => a.time - b.time);
+}
+
 /** Consomme `amount` proportionnellement sur les entrées d'un côté (clamp à 0). */
 function consommer(entries: OcnEntry[], side: "long" | "short", amount: number): void {
   if (amount <= 0) return;

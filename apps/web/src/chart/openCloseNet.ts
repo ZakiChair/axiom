@@ -15,7 +15,7 @@
  * autres modules chart.
  */
 import { lireTokenCanvas, POLICE_CANVAS_MONO } from "../lib/canvasTokens";
-import type { OcnEntry, OcnProfileLevel } from "./openCloseNet.calc";
+import { condenserEntrees, type OcnEntry, type OcnProfileLevel } from "./openCloseNet.calc";
 
 /** Largeur max (px) d'une barre ancrée à sa bougie d'ouverture. */
 const MAX_BAR_PX = 140;
@@ -23,6 +23,10 @@ const MAX_BAR_PX = 140;
 const MAX_PROFILE_PX = 90;
 /** Largeur (px) minimale pour qu'une barre non nulle reste visible. */
 const MIN_BAR_PX = 2;
+/** Seuil de significativité (% du max d'`opened`) sous lequel une barre est tue. */
+const OCN_SEUIL_PCT = 10;
+/** Hauteur (px) des barres-pilules. */
+const BAR_H = 5;
 
 /**
  * Largeur en px d'une quantité `value` sur une échelle linéaire bornée par
@@ -78,6 +82,10 @@ export function drawOpenCloseNet(ctx: CanvasRenderingContext2D, p: OcnDrawParams
   const palette = lireOcnPalette();
   const right = p.left + p.width;
 
+  // ── Condensation façon Flux : 1 barre max par (bougie, sens), seuil 10 %. ──
+  const barres = condenserEntrees(p.entries, OCN_SEUIL_PCT);
+  const bougiesRetenues = new Set(barres.map((b) => b.time)).size;
+
   // ── Légende (toujours affichée quand l'overlay est actif) ──
   // En BAS à gauche du pane : le haut est occupé par le bandeau symbole flottant.
   ctx.font = POLICE_CANVAS_MONO;
@@ -85,45 +93,47 @@ export function drawOpenCloseNet(ctx: CanvasRenderingContext2D, p: OcnDrawParams
   ctx.textBaseline = "bottom";
   ctx.fillStyle = palette.textDim;
   const legende = p.oiOk
-    ? `Open/Close Net · ${p.candlesUsed} bougie${p.candlesUsed > 1 ? "s" : ""}`
+    ? `Open/Close Net · ${bougiesRetenues}/${p.candlesUsed} bougies · seuil ${OCN_SEUIL_PCT} %`
     : "Open/Close Net · OI indisponible";
   ctx.fillText(legende, p.left + 8, p.top + p.height - 6);
   if (!p.oiOk || p.candlesUsed === 0) return;
 
   // ── Cadre discret de la fenêtre d'analyse ──
-  const firstTime = p.entries.length > 0 ? Math.min(...p.entries.map((e) => e.time)) : null;
+  const firstTime = barres.length > 0 ? (barres[0]?.time ?? null) : null;
   const xStart = firstTime !== null ? (p.xOf(firstTime) ?? p.left) : p.left;
-  ctx.globalAlpha = 0.25;
+  ctx.globalAlpha = 0.2;
   ctx.strokeStyle = palette.textDim;
   ctx.lineWidth = 1;
   ctx.strokeRect(xStart - 4, p.top + 16, right - MAX_PROFILE_PX - (xStart - 4), p.height - 32);
   ctx.globalAlpha = 1;
 
-  // ── Barres ancrées à la bougie d'ouverture ──
-  const barH = Math.max(2, Math.min(p.rowH * 0.55, 10));
+  // ── Barres-pilules ancrées à la bougie d'ouverture ──
   let maxOpened = 0;
-  for (const e of p.entries) {
-    if (e.opened > maxOpened) maxOpened = e.opened;
+  for (const b of barres) {
+    if (b.opened > maxOpened) maxOpened = b.opened;
   }
-  for (const e of p.entries) {
-    const x = p.xOf(e.time);
+  const pilule = (x: number, y: number, w: number, h: number): void => {
+    ctx.beginPath();
+    if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, h, h / 2);
+    else ctx.rect(x, y, w, h);
+    ctx.fill();
+  };
+  for (const b of barres) {
+    const x = p.xOf(b.time);
     if (x === undefined) continue;
-    const yMid = p.yOf(e.price + p.bucketSize / 2);
+    const yMid = p.yOf(b.price + p.bucketSize / 2);
     if (!Number.isFinite(yMid) || yMid < p.top || yMid > p.top + p.height) continue;
-    const color = e.side === "short" ? palette.short : palette.long;
-    const wOpened = largeurBarre(e.opened, maxOpened, MAX_BAR_PX);
-    const wRemaining = largeurBarre(e.remaining, maxOpened, MAX_BAR_PX);
+    const color = b.side === "short" ? palette.short : palette.long;
+    const wOpened = largeurBarre(b.opened, maxOpened, MAX_BAR_PX);
+    const wRemaining = largeurBarre(b.remaining, maxOpened, MAX_BAR_PX);
+    ctx.fillStyle = color;
     // Part consommée : trace en alpha réduit sur toute la longueur d'origine.
-    if (wOpened > wRemaining) {
-      ctx.globalAlpha = 0.18;
-      ctx.fillStyle = color;
-      ctx.fillRect(x, yMid - barH / 2, wOpened, barH);
+    if (wOpened > wRemaining + 1) {
+      ctx.globalAlpha = 0.14;
+      pilule(x, yMid - BAR_H / 2, wOpened, BAR_H);
       ctx.globalAlpha = 1;
     }
-    if (wRemaining > 0) {
-      ctx.fillStyle = color;
-      ctx.fillRect(x, yMid - barH / 2, wRemaining, barH);
-    }
+    if (wRemaining > 0) pilule(x, yMid - BAR_H / 2, wRemaining, BAR_H);
   }
 
   // ── Profil latéral droit (net encore ouvert par niveau) ──
@@ -133,6 +143,9 @@ export function drawOpenCloseNet(ctx: CanvasRenderingContext2D, p: OcnDrawParams
     if (t > maxNet) maxNet = t;
   }
   for (const lvl of p.profile) {
+    // Niveaux insignifiants (< 3 % du max) : tus — sinon le plancher MIN_BAR_PX
+    // transforme le profil en pluie de lamelles.
+    if (lvl.openLong + lvl.openShort < 0.03 * maxNet) continue;
     const yTop = p.yOf(lvl.price + p.bucketSize);
     const yBot = p.yOf(lvl.price);
     if (!Number.isFinite(yTop) || !Number.isFinite(yBot)) continue;

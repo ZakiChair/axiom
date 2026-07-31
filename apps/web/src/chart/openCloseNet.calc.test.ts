@@ -8,7 +8,13 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Candle, FootprintBar, FootprintRow } from "@axiom/types";
-import { computeOpenCloseNet, deltasOiParBougie, rowsApprochees } from "./openCloseNet.calc";
+import {
+  computeOpenCloseNet,
+  condenserEntrees,
+  deltasOiParBougie,
+  rowsApprochees,
+  type OcnEntry,
+} from "./openCloseNet.calc";
 
 const BUCKET = 100;
 
@@ -165,6 +171,48 @@ describe("computeOpenCloseNet — fermetures (ΔOI < 0)", () => {
     const long = res.entries.find((e) => e.side === "long");
     expect(short?.remaining).toBeCloseTo(225);
     expect(long?.remaining).toBeCloseTo(75);
+  });
+});
+
+describe("condenserEntrees — lisibilité façon Flux (fusion + seuil)", () => {
+  function entry(partial: Partial<OcnEntry>): OcnEntry {
+    return { time: 0, price: 100, side: "short", opened: 10, remaining: 10, ...partial };
+  }
+
+  it("fusionne les niveaux d'une même (bougie, sens) en UNE barre au prix pondéré", () => {
+    const entries = [
+      entry({ price: 100, opened: 100, remaining: 50 }),
+      entry({ price: 200, opened: 300, remaining: 150 }),
+    ];
+    const barres = condenserEntrees(entries, 0);
+    expect(barres).toHaveLength(1);
+    // Prix pondéré par opened : (100×100 + 200×300) / 400 = 175.
+    expect(barres[0]).toMatchObject({ time: 0, side: "short", opened: 400, remaining: 200 });
+    expect(barres[0]?.price).toBeCloseTo(175);
+  });
+
+  it("garde les sens séparés (une barre short ET une barre long par bougie)", () => {
+    const entries = [
+      entry({ side: "short", opened: 100, remaining: 100 }),
+      entry({ side: "long", price: 300, opened: 100, remaining: 100 }),
+    ];
+    const barres = condenserEntrees(entries, 0);
+    expect(barres).toHaveLength(2);
+    expect(new Set(barres.map((b) => b.side))).toEqual(new Set(["short", "long"]));
+  });
+
+  it("filtre sous le seuil relatif au max (opened) — les petites barres disparaissent", () => {
+    const entries = [
+      entry({ time: 0, opened: 1000, remaining: 800 }),
+      entry({ time: 60, opened: 50, remaining: 50 }), // 5 % du max → sous seuil 10 %
+      entry({ time: 120, opened: 200, remaining: 0 }), // consommée mais ≥ seuil → gardée (trace)
+    ];
+    const barres = condenserEntrees(entries, 10);
+    expect(barres.map((b) => b.time)).toEqual([0, 120]);
+  });
+
+  it("entrées vides → vide", () => {
+    expect(condenserEntrees([], 10)).toEqual([]);
   });
 });
 

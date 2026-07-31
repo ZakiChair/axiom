@@ -39,6 +39,13 @@ export interface OrderflowState {
   /** Seuil notionnel ($) des bulles baleines sur le chart (WHALE) — session-only. */
   whaleNotionalMin: number;
   setWhaleNotionalMin: (v: number) => void;
+
+  /** Overlay OCN (Open/Close Net) — Binance perp only, façon Flux. */
+  showOpenCloseNet: boolean;
+  setShowOpenCloseNet: (v: boolean) => void;
+  /** Fenêtre d'analyse OCN en bougies (défaut 32). */
+  ocnLookback: number;
+  setOcnLookback: (v: number) => void;
 }
 
 export const orderflowStore = createStore<OrderflowState>((set, get) => ({
@@ -66,4 +73,9 @@ export const orderflowStore = createStore<OrderflowState>((set, get) => ({
 
   whaleNotionalMin: 100_000,
   setWhaleNotionalMin: (v) => set({ whaleNotionalMin: v }),
+
+  showOpenCloseNet: false,
+  setShowOpenCloseNet: (v) => set({ showOpenCloseNet: v }),
+  ocnLookback: 32,
+  setOcnLookback: (v) => set({ ocnLookback: v }),
 }));

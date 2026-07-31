@@ -358,14 +358,16 @@ export const BUILTIN_STRATEGIES: StrategiePreset[] = [
     ],
     builtin: true,
   },
-  // Les trois presets v2.6 expriment les stratégies chart du même nom (Lot B).
+  // Les trois presets v2.6 expriment les stratégies chart du même nom (Lot B) —
+  // mesurées et RECALÉES par la campagne, d'où le « (non validé) » conservé
+  // dans le nom affiché (principe d'honnêteté de la spec v2.6 §5).
   // Limite du conjonctif assumée : leurs defs sortent quand N'IMPORTE QUELLE
   // condition se retourne (OU), inexprimable en listes ET — la sortie retenue
   // est le DÉCLENCHEUR inverse seul, le stop 5 % sert de filet quand c'est le
-  // filtre qui lâche en premier (même compromis documenté que mm-adx).
+  // filtre qui lâche en premier.
   {
     id: "builtin:macd-supertrend",
-    name: "MACD + direction Supertrend",
+    name: "MACD + direction Supertrend (non validé)",
     tf: "4h",
     direction: "long",
     tailleFixe: 1000,
@@ -380,7 +382,7 @@ export const BUILTIN_STRATEGIES: StrategiePreset[] = [
   },
   {
     id: "builtin:triple-confirmation",
-    name: "Triple confirmation (ST + MACD + RSI)",
+    name: "Triple confirmation ST+MACD+RSI (non validé)",
     tf: "4h",
     direction: "long",
     tailleFixe: 1000,
@@ -396,7 +398,7 @@ export const BUILTIN_STRATEGIES: StrategiePreset[] = [
   },
   {
     id: "builtin:psar-adx",
-    name: "PSAR + ADX ≥ 25",
+    name: "PSAR + ADX ≥ 25 (non validé)",
     tf: "4h",
     direction: "long",
     tailleFixe: 1000,
@@ -406,10 +408,11 @@ export const BUILTIN_STRATEGIES: StrategiePreset[] = [
       { type: "comparaison", gauche: prixClose, comparateur: ">", droite: psarDefaut() },
       { type: "comparaison", gauche: adx14(), comparateur: ">=", droite: constante(25) },
     ],
-    reglesSortie: [
-      { type: "comparaison", gauche: prixClose, comparateur: "<", droite: psarDefaut() },
-      { type: "comparaison", gauche: adx14(), comparateur: ">=", droite: constante(25) },
-    ],
+    // Déclencheur inverse SEUL (pas de gate ADX répété) : répéter le gate
+    // bloquerait la sortie tout le temps que le range dure (quirk mm-adx),
+    // alors que la def chart est flat forcé dès ADX < 25 — le déclencheur
+    // seul est strictement plus proche du comportement chart.
+    reglesSortie: [{ type: "comparaison", gauche: prixClose, comparateur: "<", droite: psarDefaut() }],
     builtin: true,
   },
 ];

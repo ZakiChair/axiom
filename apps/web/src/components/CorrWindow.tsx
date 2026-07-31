@@ -10,7 +10,8 @@
  *    (S&P 500, Nasdaq, or, dollar, forex — toggles individuels) + ajout ponctuel, dégradé
  *    down→up entre -1 et +1, valeur au survol, cellules à n < 20 rendements ATTÉNUÉES ;
  *  - clic sur une cellule = mini-détail : corrélation glissante en sparkline (canvas),
- *    fenêtre glissante = LA fenêtre sélectionnée (30/90/180) ;
+ *    fenêtre glissante = les rendements communs de la fenêtre sélectionnée (le
+ *    dernier point coïncide avec la valeur de la cellule) ;
  *  - bascule Pearson / Spearman, fenêtre 30/90/180 j, bouton « recalculer » (re-fetch forcé),
  *    indication de fraîcheur, chips d'erreur par symbole en échec de chargement.
  *
@@ -284,8 +285,13 @@ export function CorrWindow() {
     if (selection) cadre(selection.r, selection.c, lireTokenCanvas("--accent", texte), 2);
   }, [matrice, hover, selection]);
 
-  // Dessin de la sparkline de corrélation glissante pour la cellule sélectionnée —
-  // fenêtre glissante = LA fenêtre sélectionnée (30/90/180 rendements communs).
+  // Dessin de la sparkline de corrélation glissante pour la cellule sélectionnée.
+  // Fenêtre glissante en RENDEMENTS COMMUNS = ceux que la cellule a réellement
+  // utilisés (son champ `points`) : la matrice fenêtre en JOURS calendaires, et
+  // sur un croisement tradfi 90 j ≈ 62 rendements communs — passer fenetreJours
+  // brut décalait le dernier point de la sparkline par rapport à la cellule et
+  // la vidait à 180 j (revue v2.6, trouvailles no 5/10). Ainsi le dernier point
+  // de la sparkline EST la corrélation de la cellule sélectionnée.
   useEffect(() => {
     const canvas = sparkCanvasRef.current;
     if (canvas === null || selection === null || matrice === null) return;
@@ -296,7 +302,9 @@ export function CorrWindow() {
     const A = seriesRef.current.get(sr) ?? [];
     const B = seriesRef.current.get(sc) ?? [];
     const { a, b } = alignerSeries(A, B);
-    const serie = correlationGlissante(methode, logRendements(a), logRendements(b), fenetreJours);
+    const cellule = matrice.cellules[r]?.[c];
+    const fenetreRendements = Math.max(2, Math.min(cellule?.points ?? fenetreJours, fenetreJours));
+    const serie = correlationGlissante(methode, logRendements(a), logRendements(b), fenetreRendements);
 
     const ctx = canvas.getContext("2d");
     if (ctx === null) return;
@@ -343,6 +351,13 @@ export function CorrWindow() {
         dessine = true;
       });
       ctx.stroke();
+    } else {
+      // État vide HONNÊTE : jamais de canvas muet (revue v2.6, trouvaille no 10).
+      ctx.fillStyle = dim;
+      ctx.font = POLICE_CANVAS;
+      ctx.textAlign = "center";
+      ctx.fillText("historique insuffisant pour la fenêtre glissante", W / 2, mid - 4);
+      ctx.textAlign = "start";
     }
   }, [selection, methode, fenetreJours, matrice]);
 
@@ -535,7 +550,8 @@ export function CorrWindow() {
             <div className="px-3 py-2">
               <canvas ref={sparkCanvasRef} className="w-full" />
               <p className="mt-1 text-[10px] leading-snug text-text-dim">
-                Corrélation glissante sur {fenetreJours} rendements communs (fenêtre sélectionnée).
+                Corrélation glissante — fenêtre {fenetreJours} j, exprimée en rendements
+                communs de la paire (le dernier point est la valeur de la cellule).
               </p>
             </div>
           </section>

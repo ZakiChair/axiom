@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — volume/anchored-vwap.test.ts
+ * @axiom/indicators — volume/anchoredVwap.test.ts
  *
  * Test déterministe de l'Anchored VWAP avec des valeurs CALCULÉES À LA MAIN.
  *

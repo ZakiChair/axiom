@@ -477,21 +477,32 @@ export function OptionsWindow() {
     if (canvas && domaine) dessinerSmile(canvas, pointsEcheance, underlying, maxPain, domaine);
   }, [open, vue, pointsEcheance, underlying, maxPain, domaine]);
 
+  // Repère « γ flip » du canvas : cumul des barres AFFICHÉES (mono-échéance),
+  // pas le flip toutes-échéances des tuiles — l'histogramme est étiqueté
+  // « échéance sélectionnée », son repère doit l'être aussi (revue v2.6 no 7).
+  // En actions, sourceNet === gexDexPoints : identique au flip des tuiles.
+  const flipBarres = useMemo(() => gammaFlip(gexDexPoints), [gexDexPoints]);
+
   // Redessine l'histogramme GEX/DEX (fenêtre ouverte, vue gexdex).
   useEffect(() => {
     if (!open || vue !== "gexdex") return;
     const canvas = barCanvasRef.current;
     if (canvas && domaineBarres)
-      dessinerBarres(canvas, gexDexPoints, gexDexSpot, metrique, domaineBarres, flip);
-  }, [open, vue, gexDexPoints, gexDexSpot, metrique, domaineBarres, flip]);
+      dessinerBarres(canvas, gexDexPoints, gexDexSpot, metrique, domaineBarres, flipBarres);
+  }, [open, vue, gexDexPoints, gexDexSpot, metrique, domaineBarres, flipBarres]);
 
   // Redessine le profil GEX(S) (fenêtre ouverte, vue gexdex crypto) — canvas monté
   // conditionnellement avec VueGexDex, cf. profilCanvasRef.
   useEffect(() => {
     if (!open || vue !== "gexdex" || classe !== "crypto") return;
     const canvas = profilCanvasRef.current;
-    if (canvas && profilGex) {
+    if (!canvas) return;
+    if (profilGex) {
       dessinerProfilGex(canvas, profilGex.points, spotChaine, profilGex.flipReel);
+    } else {
+      // Profil indisponible (chaîne vide, spot invalide) : effacer, sinon la
+      // dernière courbe reste affichée périmée (revue v2.6, trouvaille no 11).
+      canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
     }
   }, [open, vue, classe, profilGex, spotChaine]);
 
@@ -853,7 +864,7 @@ export function OptionsWindow() {
             barCanvasRef={barCanvasRef}
             gexNet={gexNet}
             dexNet={dexNet}
-            gexDexSpot={gexDexSpot}
+            spotVerdict={spotVerdict}
             flip={flip}
             strikePicGex={strikePicGex}
             verdict={verdict}

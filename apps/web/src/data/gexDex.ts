@@ -157,15 +157,27 @@ export function gammaFlip(gexParStrike: { strike: number; gex: number }[]): numb
   // Copie triée par strike croissant (l'entrée n'est pas garantie triée par le type).
   const tri = [...gexParStrike].sort((a, b) => a.strike - b.strike);
   let cumPrec = 0; // cumul jusqu'au strike i−1
+  // Signe du dernier cumul NON NUL : un cumul qui touche EXACTEMENT 0 puis
+  // repart de l'autre côté est un vrai flip (au strike du zéro), qu'un simple
+  // produit strictement négatif raterait (revue v2.6, trouvaille no 9).
+  let signePrec = 0;
   for (let i = 0; i < tri.length; i++) {
     const cum = cumPrec + tri[i]!.gex;
-    // Changement de signe strict entre deux cumuls consécutifs (i ≥ 1).
-    if (i > 0 && cumPrec * cum < 0) {
-      const s0 = tri[i - 1]!.strike;
-      const s1 = tri[i]!.strike;
-      // Point où le cumul linéaire s'annule entre (s0, cumPrec) et (s1, cum).
-      return s0 + (-cumPrec / (cum - cumPrec)) * (s1 - s0);
+    if (i > 0) {
+      // Changement de signe strict entre deux cumuls consécutifs non nuls.
+      if (cumPrec * cum < 0) {
+        const s0 = tri[i - 1]!.strike;
+        const s1 = tri[i]!.strike;
+        // Point où le cumul linéaire s'annule entre (s0, cumPrec) et (s1, cum).
+        return s0 + (-cumPrec / (cum - cumPrec)) * (s1 - s0);
+      }
+      // Passage EXACTEMENT par zéro : le cumul a touché 0 au strike i−1 puis
+      // bascule du côté opposé au dernier signe vu → flip au strike du zéro.
+      if (cumPrec === 0 && cum !== 0 && signePrec !== 0 && Math.sign(cum) !== signePrec) {
+        return tri[i - 1]!.strike;
+      }
     }
+    if (cum !== 0) signePrec = Math.sign(cum);
     cumPrec = cum;
   }
   return null;
@@ -330,14 +342,24 @@ export function profilGexSpot(
     gexNet: computeCryptoGexDex(chaine, s, nowMs).reduce((somme, p) => somme + p.gex, 0),
   }));
   let flipReel: number | null = null;
-  for (let i = 1; i < points.length; i++) {
-    const a = points[i - 1]!;
+  // Même convention que gammaFlip : un profil qui touche EXACTEMENT 0 puis
+  // repart du côté opposé bascule au spot du zéro (revue v2.6, trouvaille no 9).
+  let signePrec = 0;
+  for (let i = 0; i < points.length; i++) {
     const b = points[i]!;
-    if (a.gexNet * b.gexNet < 0) {
-      // Point où le profil linéaire s'annule entre (spotA, gexA) et (spotB, gexB).
-      flipReel = a.spot + (-a.gexNet / (b.gexNet - a.gexNet)) * (b.spot - a.spot);
-      break;
+    if (i > 0) {
+      const a = points[i - 1]!;
+      if (a.gexNet * b.gexNet < 0) {
+        // Point où le profil linéaire s'annule entre (spotA, gexA) et (spotB, gexB).
+        flipReel = a.spot + (-a.gexNet / (b.gexNet - a.gexNet)) * (b.spot - a.spot);
+        break;
+      }
+      if (a.gexNet === 0 && b.gexNet !== 0 && signePrec !== 0 && Math.sign(b.gexNet) !== signePrec) {
+        flipReel = a.spot;
+        break;
+      }
     }
+    if (b.gexNet !== 0) signePrec = Math.sign(b.gexNet);
   }
   return { points, flipReel };
 }

@@ -10,6 +10,11 @@
  * de corr.ts pour les rendements ; `risquePortefeuille/serieRendementsPortefeuille` de
  * portRisque.ts pour la VaR). Modèle ASSUMÉ (spec) : P&L = poids · β · choc, approximation
  * 1-facteur (ordres de grandeur, pas de somme multi-facteurs).
+ *
+ * Différence méthodologique ASSUMÉE avec CORR (v2.6) : CORR exclut la bougie du jour EN
+ * COURS (partielle) de ses corrélations ; SCEN garde la série complète car la dernière
+ * clôture sert AUSSI de prix de valorisation des positions (dernierClose) — le biais d'une
+ * bougie partielle sur un β roulant de 90 j est marginal, l'exclure fausserait le marquage.
  */
 
 import type { Candle, ExchangeId } from "@axiom/types";

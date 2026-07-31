@@ -56,8 +56,10 @@ export const REF_CANONIQUE: Record<DenominateurId, { ex: "binance"; sym: string 
  *
  * Même source quand `REFS[denom][exchange]` existe (comportement historique, inchangé) ;
  * sinon, twelvedata compose CROSS-SOURCE contre la réf canonique Binance — SANS
- * splitSymbol : un ticker tradfi (SPY, GLD, EUR/USD) n'est pas découpable et ne peut
- * pas être déjà coté en BTC/ETH/SOL.
+ * splitSymbol (un ticker tradfi comme SPY ou GLD n'est pas découpable), mais AVEC une
+ * garde sur les paires à barre oblique : l'API Twelve Data cote aussi des paires
+ * crypto (BTC/USD, ETH/BTC…) en saisie libre — si une jambe de la paire EST le
+ * dénominateur, le ratio serait un SYN mort (≈ constante 1) ou une double division.
  */
 export function symboleRatio(
   symbol: string,
@@ -72,6 +74,10 @@ export function symboleRatio(
   if (ref === undefined) {
     // Pas de réf locale : seule twelvedata se compose cross-source (réf canonique).
     if (exchange !== "twelvedata") return null;
+    // Garde paires crypto en saisie libre (BTC/USD, ETH/BTC…) : une jambe qui
+    // EST le dénominateur rend le ratio sans signification — bouton absent.
+    const jambes = symbol.split("/");
+    if (jambes.length > 1 && jambes.some((j) => j.trim().toUpperCase() === denom)) return null;
     const canon = REF_CANONIQUE[denom];
     return encodeSyntheticSymbol({
       exA: exchange,

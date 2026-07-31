@@ -1,7 +1,7 @@
 /**
  * @axiom/indicators — strategy/stratRsiRange.ts
  *
- * RSI réversion + filtre range ADX (non validé — JAMAIS MESURÉE). Nouvelle
+ * RSI réversion + filtre range ADX (non validé). Nouvelle
  * combinaison du programme v2.6 Lot B (spec
  * docs/superpowers/specs/2026-07-31-programme-v26-marches-croises-design.md,
  * §B2) : la mean-reversion n'a de sens qu'en RANGE — ce def est le miroir
@@ -35,6 +35,11 @@
  * évaluée AVANT l'entrée sur la même bougie) : un bond du RSI qui traverse à
  * la fois la zone neutre et le seuil de réversion sur une seule bougie peut
  * enchaîner sortie + ré-entrée du même côté sans transition d'état visible.
+ *
+ * Choix assumé : le RSI lit `ctx.source` (close par défaut) — patron v2.2 de
+ * son parent stratRsiReversion — là où les promotions v2.6 figent
+ * closeOf(candles). Un rejeu scripté qui passerait `source` ne déplacerait
+ * donc QUE cette stratégie du lot ; l'UI ne déclare pas cet input.
  */
 
 import { defStrategie, type EtatStrategie } from "../utils-fabrique-strategie";

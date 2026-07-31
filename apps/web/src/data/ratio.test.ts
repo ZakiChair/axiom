@@ -165,3 +165,24 @@ describe("estRatio — reconnaît un ratio posé par le toggle ET son dénominat
     );
   });
 });
+
+describe("garde cross-source : paires crypto en saisie libre Twelve Data (revue v2.6)", () => {
+  it("refuse une paire dont une jambe EST le dénominateur (SYN mort ou double division)", () => {
+    // BTC/USD ÷BTC ≈ constante 1 ; ETH/BTC ÷BTC = double division — bouton absent.
+    expect(symboleRatio("BTC/USD", "twelvedata", "BTC")).toBeNull();
+    expect(symboleRatio("ETH/BTC", "twelvedata", "BTC")).toBeNull();
+    expect(symboleRatio("ETH/USD", "twelvedata", "ETH")).toBeNull();
+    expect(symboleRatio("SOL/USD", "twelvedata", "SOL")).toBeNull();
+  });
+
+  it("laisse passer les paires à barre oblique dont aucune jambe n'est le dénominateur", () => {
+    // EUR/USD ÷BTC reste composable (aucune jambe n'est BTC).
+    expect(symboleRatio("EUR/USD", "twelvedata", "BTC")).toBe(
+      "twelvedata:EUR/USD|/|binance:BTCUSDT",
+    );
+    // ETH/BTC ÷SOL : étrange mais inoffensif — aucune jambe n'est SOL.
+    expect(symboleRatio("ETH/BTC", "twelvedata", "SOL")).toBe(
+      "twelvedata:ETH/BTC|/|binance:SOLUSDT",
+    );
+  });
+});

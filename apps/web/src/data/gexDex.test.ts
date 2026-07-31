@@ -428,3 +428,33 @@ describe("profilGexSpot", () => {
     expect(points[0]!.gexNet).toBeCloseTo(attendu, 9);
   });
 });
+
+describe("passage EXACTEMENT par zéro (revue v2.6, trouvaille no 9)", () => {
+  it("gammaFlip : cumul +5 → 0 → −3 bascule au strike du zéro", () => {
+    // Cumuls : 5, 0, −3 — deux jambes symétriques s'annulent exactement puis
+    // le cumul devient négatif : le flip est au strike où le cumul a touché 0.
+    const flip = gammaFlip([
+      { strike: 100, gex: 5 },
+      { strike: 110, gex: -5 },
+      { strike: 120, gex: -3 },
+    ]);
+    expect(flip).toBe(110);
+  });
+
+  it("gammaFlip : cumul +5 → 0 → +3 (retour du même côté) n'est PAS un flip", () => {
+    const flip = gammaFlip([
+      { strike: 100, gex: 5 },
+      { strike: 110, gex: -5 },
+      { strike: 120, gex: 3 },
+    ]);
+    expect(flip).toBeNull();
+  });
+
+  it("gammaFlip : cumul qui DÉMARRE à zéro puis devient négatif n'est pas un flip", () => {
+    const flip = gammaFlip([
+      { strike: 100, gex: 0 },
+      { strike: 110, gex: -3 },
+    ]);
+    expect(flip).toBeNull();
+  });
+});

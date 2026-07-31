@@ -39,7 +39,12 @@ interface Props {
   barCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
   gexNet: number;
   dexNet: number;
-  gexDexSpot: number;
+  /**
+   * Spot du PÉRIMÈTRE du verdict (spot de la chaîne complète en crypto, spot
+   * CBOE en actions) — le même que celui de Spot↔flip, pour que recalculer
+   * (spot − flip)/spot depuis les tuiles redonne le % affiché (revue v2.6 no 8).
+   */
+  spotVerdict: number;
   flip: number | null;
   strikePicGex: number | null;
   /** Verdict market maker (fonction pure verdictGamma) — régime, action, distance au flip. */
@@ -66,7 +71,7 @@ export function VueGexDex({
   barCanvasRef,
   gexNet,
   dexNet,
-  gexDexSpot,
+  spotVerdict,
   flip,
   strikePicGex,
   verdict,
@@ -198,7 +203,12 @@ export function VueGexDex({
           valeur={formatUsd(dexNet)}
           couleur={dexNet !== 0 ? (dexNet > 0 ? "var(--up)" : "var(--down)") : undefined}
         />
-        <TuileStat disposition="inline" label="Spot" valeur={formatUsdExact(gexDexSpot)} />
+        <TuileStat
+          disposition="inline"
+          label="Spot"
+          badge={<Badge>{porteeNet}</Badge>}
+          valeur={formatUsdExact(spotVerdict)}
+        />
         <TuileStat
           disposition="inline"
           label="Gamma flip"

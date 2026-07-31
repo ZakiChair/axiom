@@ -6,7 +6,12 @@
  */
 import { describe, expect, it } from "vitest";
 import { INDICATORS } from "@axiom/indicators";
-import { groupesAffichage, INDICATEURS_ANALYSE, SOUS_GROUPES_DERIVES } from "./IndicatorMenu";
+import {
+  CATEGORY_ORDER,
+  groupesAffichage,
+  INDICATEURS_ANALYSE,
+  SOUS_GROUPES_DERIVES,
+} from "./IndicatorMenu";
 
 describe("SOUS_GROUPES_DERIVES (exhaustivité)", () => {
   it("classe TOUS les defs de catégorie derivatives, sans entrée orpheline", () => {
@@ -18,6 +23,15 @@ describe("SOUS_GROUPES_DERIVES (exhaustivité)", () => {
     const connus = new Set(derives);
     for (const id of Object.keys(SOUS_GROUPES_DERIVES)) {
       expect(connus.has(id), `entrée orpheline dans la table : ${id}`).toBe(true);
+    }
+  });
+});
+
+describe("CATEGORY_ORDER (exhaustivité)", () => {
+  it("couvre TOUTES les catégories du catalogue — une catégorie absente rendrait ses defs invisibles", () => {
+    const ordre = new Set<string>(CATEGORY_ORDER);
+    for (const def of INDICATEURS_ANALYSE) {
+      expect(ordre.has(def.category), `catégorie hors CATEGORY_ORDER : ${def.category}`).toBe(true);
     }
   });
 });

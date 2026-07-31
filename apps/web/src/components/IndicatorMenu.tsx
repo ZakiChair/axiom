@@ -59,8 +59,11 @@ const CATEGORY_LABELS: Partial<Record<IndicatorCategory, string>> = {
  * Ordre DA crypto-first : l'edge (orderflow / volume / dérivés) en tête, avant
  * le catalogue technique classique — cohérent avec le positionnement AXIOM.
  * `strategy` est absent : filtré en amont par `INDICATEURS_ANALYSE`.
+ * EXHAUSTIVITÉ verrouillée par test : une catégorie présente dans le catalogue
+ * mais absente d'ici rendrait ses defs INVISIBLES en silence (groupByCategory
+ * n'itère que cet ordre) — cf. IndicatorMenu.sousGroupes.test.ts.
  */
-const CATEGORY_ORDER: IndicatorCategory[] = [
+export const CATEGORY_ORDER: IndicatorCategory[] = [
   "orderflow",
   "volume",
   "derivatives",

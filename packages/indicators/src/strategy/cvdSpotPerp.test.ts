@@ -1,5 +1,5 @@
 /**
- * @axiom/indicators — orderflow/cvdSpotPerp.test.ts
+ * @axiom/indicators — strategy/cvdSpotPerp.test.ts
  *
  * Astuce des fixtures : deltas alternés [3, 1] (ou leurs négatifs / ×10). Toute
  * fenêtre de 20 valeurs consécutives alternées contient exactement dix 3 et dix

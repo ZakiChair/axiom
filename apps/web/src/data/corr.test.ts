@@ -8,10 +8,17 @@ import {
   calculerMatrice,
   correlation,
   correlationGlissante,
+  exclureJourCourant,
   fenetrer,
+  FENETRES_CORR,
+  hydraterReglagesCorr,
   logRendements,
   pearson,
+  pointsFiables,
+  REFERENCES_CORR,
+  SEUIL_POINTS_FIABLES,
   spearman,
+  symbolesEnEchec,
   type SerieCloture,
 } from "./corr";
 
@@ -179,5 +186,123 @@ describe("correlation (aiguillage)", () => {
     const ys = [1, 4, 9, 16];
     expect(correlation("pearson", xs, ys)).toBe(pearson(xs, ys));
     expect(correlation("spearman", xs, ys)).toBe(spearman(xs, ys));
+  });
+});
+
+describe("exclureJourCourant", () => {
+  it("écarte le(s) point(s) du jour calendaire UTC courant (bougie partielle)", () => {
+    const serie: SerieCloture[] = [
+      { time: j(8), close: 1 },
+      { time: j(9), close: 2 },
+      { time: j(9) + 3 * 3600_000, close: 3 }, // même jour 9, plus tard
+    ];
+    // now = milieu du jour 9 → les deux points du jour 9 sont écartés
+    expect(exclureJourCourant(serie, j(9) + 12 * 3600_000)).toEqual([{ time: j(8), close: 1 }]);
+  });
+
+  it("ne touche pas une série entièrement antérieure au jour courant", () => {
+    const serie: SerieCloture[] = [
+      { time: j(3), close: 1 },
+      { time: j(4), close: 2 },
+    ];
+    expect(exclureJourCourant(serie, j(12))).toEqual(serie);
+  });
+
+  it("écarte aussi un point postérieur au jour courant (horloge en avance)", () => {
+    const serie: SerieCloture[] = [
+      { time: j(5), close: 1 },
+      { time: j(7), close: 2 },
+    ];
+    expect(exclureJourCourant(serie, j(6))).toEqual([{ time: j(5), close: 1 }]);
+  });
+
+  it("série vide → vide", () => {
+    expect(exclureJourCourant([], j(1))).toEqual([]);
+  });
+});
+
+describe("pointsFiables", () => {
+  it("seuil de fiabilité = 20 rendements communs", () => {
+    expect(SEUIL_POINTS_FIABLES).toBe(20);
+    expect(pointsFiables(19)).toBe(false);
+    expect(pointsFiables(20)).toBe(true);
+    expect(pointsFiables(0)).toBe(false);
+  });
+});
+
+describe("symbolesEnEchec", () => {
+  it("signale les symboles à série vide ou absente (série vide = échec de chargement)", () => {
+    const map = new Map<string, SerieCloture[]>([
+      ["BTCUSDT", [{ time: j(0), close: 1 }]],
+      ["SPY", []], // chargé mais vide → échec
+    ]);
+    // GLD absent de la map → échec aussi ; l'ordre d'entrée est conservé
+    expect(symbolesEnEchec(map, ["BTCUSDT", "SPY", "GLD"])).toEqual(["SPY", "GLD"]);
+  });
+
+  it("renvoie [] quand toutes les séries sont non vides", () => {
+    const map = new Map<string, SerieCloture[]>([["A", [{ time: j(0), close: 1 }]]]);
+    expect(symbolesEnEchec(map, ["A"])).toEqual([]);
+  });
+});
+
+describe("REFERENCES_CORR", () => {
+  it("expose les 6 références curées (proxys étiquetés), symboles uniques", () => {
+    const symboles = REFERENCES_CORR.map((r) => r.symbole);
+    expect(symboles).toEqual(["SPY", "QQQ", "GLD", "UUP", "EUR/USD", "USD/JPY"]);
+    expect(new Set(symboles).size).toBe(REFERENCES_CORR.length);
+    for (const r of REFERENCES_CORR) expect(r.libelle.length).toBeGreaterThan(0);
+  });
+});
+
+describe("hydraterReglagesCorr", () => {
+  it("renvoie les défauts sur entrée absente ou non-objet, sans jeter", () => {
+    const defauts = hydraterReglagesCorr(undefined);
+    expect(defauts).toEqual({ methode: "pearson", fenetreJours: 90, extras: [], referencesActives: [] });
+    expect(hydraterReglagesCorr(null)).toEqual(defauts);
+    expect(hydraterReglagesCorr("n'importe quoi")).toEqual(defauts);
+    expect(hydraterReglagesCorr(42)).toEqual(defauts);
+    expect(hydraterReglagesCorr([])).toEqual(defauts);
+  });
+
+  it("accepte un état valide champ par champ (extras normalisés trim+MAJUSCULES)", () => {
+    const h = hydraterReglagesCorr({
+      methode: "spearman",
+      fenetreJours: 30,
+      extras: ["avaxusdt", " spy "],
+      referencesActives: ["GLD", "EUR/USD"],
+    });
+    expect(h.methode).toBe("spearman");
+    expect(h.fenetreJours).toBe(30);
+    expect(h.extras).toEqual(["AVAXUSDT", "SPY"]);
+    expect(h.referencesActives).toEqual(["GLD", "EUR/USD"]);
+  });
+
+  it("remplace chaque champ invalide par son défaut, indépendamment des autres", () => {
+    const h = hydraterReglagesCorr({
+      methode: "kendall", // méthode inconnue → défaut
+      fenetreJours: 45, // hors FENETRES_CORR → défaut
+      extras: "SPY", // pas un tableau → défaut
+      referencesActives: [12, "INCONNU", "UUP"], // seules les références du catalogue survivent
+    });
+    expect(h.methode).toBe("pearson");
+    expect(h.fenetreJours).toBe(90);
+    expect(h.extras).toEqual([]);
+    expect(h.referencesActives).toEqual(["UUP"]);
+  });
+
+  it("dédoublonne extras et références, écarte les entrées vides", () => {
+    const h = hydraterReglagesCorr({
+      extras: ["SPY", "spy", "", "  ", 7],
+      referencesActives: ["GLD", "GLD"],
+    });
+    expect(h.extras).toEqual(["SPY"]);
+    expect(h.referencesActives).toEqual(["GLD"]);
+  });
+
+  it("chaque fenêtre proposée par l'UI est acceptée telle quelle", () => {
+    for (const f of FENETRES_CORR) {
+      expect(hydraterReglagesCorr({ fenetreJours: f }).fenetreJours).toBe(f);
+    }
   });
 });

@@ -34,6 +34,33 @@ const JOUR_MS = 86_400_000;
 /** Jours d'historique quotidien récupérés (couvre 180 j de fenêtre + week-ends écartés). */
 export const MAX_JOURS = 260;
 
+/** Fenêtres de calcul proposées à l'UI (en jours calendaires). */
+export const FENETRES_CORR: readonly number[] = [30, 90, 180];
+
+// ─────────────────────────── Références tradfi curées ───────────────────────────
+
+/** Référence tradfi préréglée de la matrice (libellé honnête sur les proxys ETF). */
+export interface ReferenceCorr {
+  /** Ticker curé du catalogue Twelve Data — `chargerSerie` le route déjà vers twelvedata. */
+  symbole: string;
+  libelle: string;
+}
+
+/**
+ * Références croisées curées : indices actions via ETF, or via GLD, dollar via UUP
+ * (le vrai DXY et l'or spot XAU ne sont pas au plan gratuit Twelve Data — proxys
+ * ASSUMÉS et étiquetés), plus deux paires forex majeures. Chaque activation coûte
+ * 1 crédit Twelve Data par recalcul (cache session ensuite).
+ */
+export const REFERENCES_CORR: readonly ReferenceCorr[] = [
+  { symbole: "SPY", libelle: "S&P 500 (SPY)" },
+  { symbole: "QQQ", libelle: "Nasdaq 100 (QQQ)" },
+  { symbole: "GLD", libelle: "Or (GLD)" },
+  { symbole: "UUP", libelle: "Dollar (UUP — proxy DXY)" },
+  { symbole: "EUR/USD", libelle: "EUR/USD" },
+  { symbole: "USD/JPY", libelle: "USD/JPY" },
+];
+
 // ─────────────────────────── Alignement (pur) ───────────────────────────
 
 /** Numéro de jour calendaire UTC d'un horodatage ms (bucket d'alignement). */
@@ -79,6 +106,17 @@ export function fenetrer(serie: SerieCloture[], jours: number): SerieCloture[] {
   if (dernier === undefined) return serie;
   const seuil = dernier.time - jours * JOUR_MS;
   return serie.filter((p) => p.time >= seuil);
+}
+
+/**
+ * Écarte le point du jour calendaire UTC COURANT d'une série (et tout point postérieur —
+ * horloge locale en avance) : la dernière bougie journalière est PARTIELLE, côté crypto
+ * (jour UTC en cours) comme côté Twelve Data (`closed:false`), et fausserait le dernier
+ * rendement. `nowMs` est injecté par l'appelant (jamais de Date.now() ici). Fonction PURE.
+ */
+export function exclureJourCourant(serie: SerieCloture[], nowMs: number): SerieCloture[] {
+  const jourCourant = bucketJour(nowMs);
+  return serie.filter((p) => bucketJour(p.time) < jourCourant);
 }
 
 // ─────────────────────────── Log-rendements (pur) ───────────────────────────
@@ -267,6 +305,79 @@ export function calculerMatrice(
     }
   }
   return { symbols, methode, fenetreJours, cellules };
+}
+
+// ─────────────────────────── Fiabilité (pur) ───────────────────────────
+
+/**
+ * Seuil de fiabilité d'une cellule : en dessous de 20 rendements communs, la corrélation
+ * est trop bruitée pour être lue seule (l'alignement jours UTC communs écarte les
+ * week-ends tradfi : ~62 points communs sur 90 j — une fenêtre courte croisée tradfi
+ * tombe vite sous ce seuil). L'UI atténue ces cellules.
+ */
+export const SEUIL_POINTS_FIABLES = 20;
+
+/** Vrai si le nombre de rendements communs atteint le seuil de fiabilité. Fonction PURE. */
+export function pointsFiables(points: number): boolean {
+  return points >= SEUIL_POINTS_FIABLES;
+}
+
+/**
+ * Symboles dont la série chargée est ABSENTE ou VIDE (convention `chargerSerie` : échec
+ * réseau/source → série vide) — remontés à l'UI en chips d'erreur au lieu de cellules
+ * vides silencieuses. Ordre d'entrée conservé. Fonction PURE.
+ */
+export function symbolesEnEchec(series: Map<string, SerieCloture[]>, symbols: string[]): string[] {
+  return symbols.filter((s) => (series.get(s) ?? []).length === 0);
+}
+
+// ─────────────────────────── Réglages persistés (pur) ───────────────────────────
+
+/** Réglages de la fenêtre CORR persistés sous `axiom:corr:v1` (jamais l'état `open`). */
+export interface ReglagesCorr {
+  methode: MethodeCorr;
+  fenetreJours: number;
+  /** Symboles ajoutés à la main (normalisés trim + MAJUSCULES, dédoublonnés). */
+  extras: string[];
+  /** Symboles des références tradfi actives (⊆ REFERENCES_CORR). */
+  referencesActives: string[];
+}
+
+/** Plafond d'extras restaurés (garde-fou quota : chaque symbole tradfi = 1 crédit). */
+const MAX_EXTRAS_RESTAURES = 24;
+
+/** Normalise un tableau brut de symboles : chaînes non vides trim+MAJUSCULES, dédoublonnées. */
+function symbolesValides(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const vus = new Set<string>();
+  for (const v of raw) {
+    if (typeof v !== "string") continue;
+    const s = v.trim().toUpperCase();
+    if (s.length > 0) vus.add(s);
+  }
+  return [...vus];
+}
+
+/**
+ * Hydrate les réglages CORR depuis une valeur persistée INCONNUE (localStorage parsé ou
+ * n'importe quoi) : validation champ par champ, valeur inconnue → défaut du champ, ne
+ * jette JAMAIS. Fenêtre restreinte à FENETRES_CORR, références restreintes au catalogue
+ * REFERENCES_CORR. Fonction PURE.
+ */
+export function hydraterReglagesCorr(raw: unknown): ReglagesCorr {
+  const defauts: ReglagesCorr = { methode: "pearson", fenetreJours: 90, extras: [], referencesActives: [] };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return defauts;
+  const o = raw as Record<string, unknown>;
+  const methode: MethodeCorr =
+    o.methode === "pearson" || o.methode === "spearman" ? o.methode : defauts.methode;
+  const fenetreJours =
+    typeof o.fenetreJours === "number" && FENETRES_CORR.includes(o.fenetreJours)
+      ? o.fenetreJours
+      : defauts.fenetreJours;
+  const extras = symbolesValides(o.extras).slice(0, MAX_EXTRAS_RESTAURES);
+  const connues = new Set(REFERENCES_CORR.map((r) => r.symbole));
+  const referencesActives = symbolesValides(o.referencesActives).filter((s) => connues.has(s));
+  return { methode, fenetreJours, extras, referencesActives };
 }
 
 // ─────────────── Chargement des klines (impur, cache SESSION) ───────────────

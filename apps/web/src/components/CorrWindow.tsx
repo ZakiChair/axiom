@@ -6,61 +6,46 @@
  * graphe reste interactif pendant l'analyse.
  *
  * Contenu :
- *  - matrice N×N (canvas) sur les symboles de la WATCHLIST (+ ajout ponctuel), dégradé
- *    down→up entre -1 et +1, valeur au survol ;
- *  - clic sur une cellule = mini-détail : corrélation glissante 30 j en sparkline (canvas) ;
+ *  - matrice N×N (canvas) sur les symboles de la WATCHLIST + références tradfi préréglées
+ *    (S&P 500, Nasdaq, or, dollar, forex — toggles individuels) + ajout ponctuel, dégradé
+ *    down→up entre -1 et +1, valeur au survol, cellules à n < 20 rendements ATTÉNUÉES ;
+ *  - clic sur une cellule = mini-détail : corrélation glissante en sparkline (canvas),
+ *    fenêtre glissante = LA fenêtre sélectionnée (30/90/180) ;
  *  - bascule Pearson / Spearman, fenêtre 30/90/180 j, bouton « recalculer » (re-fetch forcé),
- *    indication de fraîcheur.
+ *    indication de fraîcheur, chips d'erreur par symbole en échec de chargement.
  *
  * Données : klines 1d des adaptateurs existants (aucune source nouvelle), en CACHE session
- * (réouvrir ≠ refetch). La corrélation n'est PAS haute fréquence (données journalières,
- * calcul ponctuel) : l'état peut vivre dans React ; seul le dessin passe par le canvas.
- * Dégradation gracieuse : une source en panne laisse ses cellules vides, sans erreur en boucle.
+ * (réouvrir ≠ refetch ; changer méthode/fenêtre ne refetch pas — quota Twelve Data ménagé).
+ * Le point du jour UTC courant est EXCLU des calculs (bougie partielle, crypto comme tradfi).
+ * Réglages (méthode, fenêtre, extras, références) dans le store PERSISTÉ store/corrUi.ts —
+ * la fermeture démonte le composant, un useState les perdait. L'état de session (sélection,
+ * survol, saisie) reste en React ; seul le dessin passe par le canvas.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 import type { Commande } from "../commands/registry";
 import { watchlistStore } from "../store/watchlist";
-import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
+import { corrUiStore } from "../store/corrUi";
 import { QUOTE_ASSETS } from "../data/symbol";
 import {
   alignerSeries,
   calculerMatrice,
   chargerSeries,
   correlationGlissante,
+  exclureJourCourant,
+  FENETRES_CORR,
   logRendements,
+  pointsFiables,
+  REFERENCES_CORR,
+  SEUIL_POINTS_FIABLES,
+  symbolesEnEchec,
   viderCacheSeries,
   type MatriceCorr,
-  type MethodeCorr,
   type SerieCloture,
 } from "../data/corr";
 import { formatDec } from "../lib/format";
 import { lireTokenCanvas, POLICE_CANVAS, POLICE_CANVAS_MONO } from "../lib/canvasTokens";
-import { Bouton, BoutonRafraichir, Chargement, Chip, EnTeteFenetre, Fraicheur, Input, NoteSource, Segmente, Vide } from "./ui";
-
-// ─────────────────────────── Store UI (vanilla, éphémère) ───────────────────────────
-
-/**
- * Store d'ouverture du panneau CORR — Zustand VANILLA (hors render-loop React). Défini ici
- * (et non dans un fichier store dédié) pour tenir le périmètre strict de la mission à trois
- * fichiers. Éphémère : NON persisté.
- */
-export interface CorrUiState {
-  open: boolean;
-  openCorr: () => void;
-  closeCorr: () => void;
-  toggleCorr: () => void;
-}
-
-export const corrUiStore = createStore<CorrUiState>(() => ({
-  open: false,
-  openCorr: () => windowManagerStore.getState().openWindow("corr"),
-  closeCorr: () => windowManagerStore.getState().closeWindow("corr"),
-  toggleCorr: () => windowManagerStore.getState().toggleWindow("corr"),
-}));
-
-mirrorOpenState("corr", corrUiStore);
+import { Badge, Bouton, BoutonBascule, BoutonRafraichir, Chargement, Chip, EnTeteFenetre, Fraicheur, Input, NoteSource, Segmente, Vide } from "./ui";
 
 /**
  * Commandes exposées à la palette (l'intégrateur les enregistre via `enregistrerCommandes`).
@@ -147,21 +132,22 @@ function tailleCellule(n: number): number {
   return 24;
 }
 
-/** Fenêtres de calcul proposées (en jours). */
-const FENETRES: readonly number[] = [30, 90, 180];
-
 // ─────────────────────────── Composant ───────────────────────────
 
 export function CorrWindow() {
   const open = useStore(corrUiStore, (s) => s.open);
   const watchSymbols = useStore(watchlistStore, (s) => s.symbols);
 
-  const [methode, setMethode] = useState<MethodeCorr>("pearson");
-  const [fenetreJours, setFenetreJours] = useState<number>(90);
-  const [extras, setExtras] = useState<string[]>([]);
+  // Réglages persistés (store corrUi — survivent à la fermeture/réouverture).
+  const methode = useStore(corrUiStore, (s) => s.methode);
+  const fenetreJours = useStore(corrUiStore, (s) => s.fenetreJours);
+  const extras = useStore(corrUiStore, (s) => s.extras);
+  const referencesActives = useStore(corrUiStore, (s) => s.referencesActives);
+
   const [saisie, setSaisie] = useState("");
   const [nonce, setNonce] = useState(0); // bump = recalcul forcé (re-fetch)
   const [matrice, setMatrice] = useState<MatriceCorr | null>(null);
+  const [echecs, setEchecs] = useState<string[]>([]); // symboles en échec de chargement
   const [loading, setLoading] = useState(false);
   const [majTs, setMajTs] = useState<number | null>(null);
   const [selection, setSelection] = useState<{ r: number; c: number } | null>(null);
@@ -173,11 +159,14 @@ export function CorrWindow() {
   const matrixCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const sparkCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Symboles = watchlist (groupe actif) + ajouts ponctuels, normalisés et dédoublonnés.
+  // Symboles = watchlist (groupe actif) + références tradfi actives + ajouts ponctuels,
+  // normalisés et dédoublonnés (les références forment un bloc contigu dans la matrice).
   const symbols = useMemo(() => {
-    const all = [...watchSymbols, ...extras].map((s) => s.trim().toUpperCase()).filter((s) => s.length > 0);
+    const all = [...watchSymbols, ...referencesActives, ...extras]
+      .map((s) => s.trim().toUpperCase())
+      .filter((s) => s.length > 0);
     return [...new Set(all)];
-  }, [watchSymbols, extras]);
+  }, [watchSymbols, referencesActives, extras]);
 
   // Chargement + calcul de la matrice (déclenché à l'ouverture et sur changement de
   // symboles / méthode / fenêtre / recalcul). Changer la fenêtre ou la méthode NE refetch
@@ -188,14 +177,20 @@ export function CorrWindow() {
     if (symbols.length < 2) {
       setMatrice(null);
       setSelection(null);
+      setEchecs([]);
       setLoading(false);
       return;
     }
     setLoading(true);
     void (async () => {
-      const seriesMap = await chargerSeries(symbols);
+      const brutes = await chargerSeries(symbols);
       if (ignore) return;
+      // Bougie du jour partielle (crypto comme tradfi) : le point du jour UTC courant
+      // est écarté AVANT tout calcul (matrice ET sparkline via seriesRef).
+      const seriesMap = new Map<string, SerieCloture[]>();
+      for (const [s, serie] of brutes) seriesMap.set(s, exclureJourCourant(serie, Date.now()));
       seriesRef.current = seriesMap;
+      setEchecs(symbolesEnEchec(brutes, symbols)); // sur les séries BRUTES : vide = échec de chargement
       setMatrice(calculerMatrice(seriesMap, symbols, methode, fenetreJours));
       setSelection(null);
       setMajTs(Date.now());
@@ -257,6 +252,10 @@ export function CorrWindow() {
         const rgb = couleurCellule(v, neutre, up, down, vide);
         const x = GUTTER_L + c * cell;
         const y = GUTTER_T + r * cell;
+        // Fiabilité : une cellule calculée sur trop peu de rendements communs (croisement
+        // crypto×tradfi à fenêtre courte) est ATTÉNUÉE — cf. note de légende sous la matrice.
+        const attenuee = v !== null && Number.isFinite(v) && !pointsFiables(cel?.points ?? 0);
+        if (attenuee) ctx.globalAlpha = 0.35;
         ctx.fillStyle = rgbCss(rgb);
         ctx.fillRect(x, y, cell - 1, cell - 1);
 
@@ -271,6 +270,7 @@ export function CorrWindow() {
           ctx.textBaseline = "middle";
           ctx.fillText(v.toFixed(2), x + (cell - 1) / 2, y + (cell - 1) / 2);
         }
+        if (attenuee) ctx.globalAlpha = 1;
       }
     }
 
@@ -284,7 +284,8 @@ export function CorrWindow() {
     if (selection) cadre(selection.r, selection.c, lireTokenCanvas("--accent", texte), 2);
   }, [matrice, hover, selection]);
 
-  // Dessin de la sparkline de corrélation glissante 30 j pour la cellule sélectionnée.
+  // Dessin de la sparkline de corrélation glissante pour la cellule sélectionnée —
+  // fenêtre glissante = LA fenêtre sélectionnée (30/90/180 rendements communs).
   useEffect(() => {
     const canvas = sparkCanvasRef.current;
     if (canvas === null || selection === null || matrice === null) return;
@@ -295,7 +296,7 @@ export function CorrWindow() {
     const A = seriesRef.current.get(sr) ?? [];
     const B = seriesRef.current.get(sc) ?? [];
     const { a, b } = alignerSeries(A, B);
-    const serie = correlationGlissante(methode, logRendements(a), logRendements(b), 30);
+    const serie = correlationGlissante(methode, logRendements(a), logRendements(b), fenetreJours);
 
     const ctx = canvas.getContext("2d");
     if (ctx === null) return;
@@ -343,7 +344,7 @@ export function CorrWindow() {
       });
       ctx.stroke();
     }
-  }, [selection, methode, matrice]);
+  }, [selection, methode, fenetreJours, matrice]);
 
   // Interactions de la matrice (survol → tooltip ; clic → sélection pour le mini-détail).
   const n = matrice?.symbols.length ?? 0;
@@ -402,7 +403,7 @@ export function CorrWindow() {
     const v = saisie.trim().toUpperCase();
     setSaisie("");
     if (v.length === 0 || symbols.includes(v)) return;
-    setExtras((x) => (x.includes(v) ? x : [...x, v]));
+    corrUiStore.getState().ajouterExtra(v);
   };
 
   const selCellule = selection ? matrice?.cellules[selection.r]?.[selection.c] : undefined;
@@ -427,7 +428,7 @@ export function CorrWindow() {
       />
 
       <div className="px-4 py-3">
-        {/* Contrôles : méthode, fenêtre. */}
+        {/* Contrôles : méthode, fenêtre (réglages persistés — store corrUi). */}
         <div className="mb-3 flex items-center gap-2">
           <Segmente
             options={[
@@ -435,13 +436,28 @@ export function CorrWindow() {
               { id: "spearman", label: "Spearman" },
             ] as const}
             actif={methode}
-            onChange={setMethode}
+            onChange={(m) => corrUiStore.getState().setMethode(m)}
           />
           <Segmente
-            options={FENETRES.map((f) => ({ id: f, label: `${f}j` }))}
+            options={FENETRES_CORR.map((f) => ({ id: f, label: `${f}j` }))}
             actif={fenetreJours}
-            onChange={setFenetreJours}
+            onChange={(f) => corrUiStore.getState().setFenetre(f)}
           />
+        </div>
+
+        {/* Références tradfi préréglées : toggles individuels, les actives rejoignent
+            l'univers de la matrice (routage curé → twelvedata, 1 crédit par recalcul). */}
+        <div className="mb-3 flex flex-wrap items-center gap-1.5" role="group" aria-label="Références tradfi">
+          {REFERENCES_CORR.map((ref) => (
+            <BoutonBascule
+              key={ref.symbole}
+              actif={referencesActives.includes(ref.symbole)}
+              onClick={() => corrUiStore.getState().basculerReference(ref.symbole)}
+              title={`${ref.libelle} — croiser avec la matrice`}
+            >
+              {ref.libelle}
+            </BoutonBascule>
+          ))}
         </div>
 
         {/* Ajout ponctuel de symboles (hors watchlist). */}
@@ -457,9 +473,21 @@ export function CorrWindow() {
         {extras.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-1.5">
             {extras.map((s) => (
-              <Chip key={s} onRetirer={() => setExtras((x) => x.filter((v) => v !== s))} retirerLabel={`Retirer ${s}`}>
+              <Chip key={s} onRetirer={() => corrUiStore.getState().retirerExtra(s)} retirerLabel={`Retirer ${s}`}>
                 {s}
               </Chip>
+            ))}
+          </div>
+        )}
+
+        {/* Chips d'erreur : chaque série en échec est signalée (plus de cellules vides
+            silencieuses — un quota Twelve Data épuisé est la cause la plus probable). */}
+        {echecs.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            {echecs.map((s) => (
+              <Badge key={s} ton="warn" title={`Série ${s} indisponible : cellules vides dans la matrice`}>
+                {s} — échec de chargement (quota ?)
+              </Badge>
             ))}
           </div>
         )}
@@ -488,10 +516,14 @@ export function CorrWindow() {
                 {tooltip.text}
               </div>
             )}
+            <p className="mt-1 text-[10px] leading-snug text-text-dim">
+              Cellules atténuées : n &lt; {SEUIL_POINTS_FIABLES} rendements communs (fiabilité limitée —
+              l'alignement sur les jours de bourse écarte les week-ends).
+            </p>
           </div>
         )}
 
-        {/* Mini-détail : corrélation glissante 30 j de la cellule sélectionnée. */}
+        {/* Mini-détail : corrélation glissante (fenêtre sélectionnée) de la cellule choisie. */}
         {selection && matrice && (
           <section className="mt-3 rounded-md border border-border bg-bg">
             <div className="flex items-baseline justify-between border-b border-border px-3 py-2">
@@ -503,7 +535,7 @@ export function CorrWindow() {
             <div className="px-3 py-2">
               <canvas ref={sparkCanvasRef} className="w-full" />
               <p className="mt-1 text-[10px] leading-snug text-text-dim">
-                Corrélation glissante sur 30 rendements (fenêtre de 30 jours communs).
+                Corrélation glissante sur {fenetreJours} rendements communs (fenêtre sélectionnée).
               </p>
             </div>
           </section>
@@ -512,7 +544,9 @@ export function CorrWindow() {
         <div className="mt-3">
           <NoteSource>
             Corrélations sur log-rendements journaliers, alignés sur les jours calendaires UTC communs
-            (crypto 7j/7 vs bourse 5j/7). Klines réutilisées des sources existantes, en cache de session.
+            (crypto 7j/7 vs bourse 5j/7) ; clôtures NON synchrones (bourse ~20-21h UTC vs crypto 00:00 UTC) ;
+            jour en cours exclu (bougie partielle). Proxys assumés : UUP = dollar (DXY), GLD = or.
+            Klines réutilisées des sources existantes, en cache de session.
           </NoteSource>
         </div>
       </div>

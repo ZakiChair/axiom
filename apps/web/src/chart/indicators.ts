@@ -454,32 +454,53 @@ export class ChartIndicators {
    * Idempotent et sans recalcul : `setPaneOptions` ne touche qu'à la géométrie.
    */
   private equilibrerHauteurs(): void {
-    const separes = [...this.active.values()].filter((info) => info.paneId !== CANDLE_PANE_ID);
-    const utile = this.hauteurUtile();
+    // Panes séparés DISTINCTS : `this.active` est indexé par instance, et toutes les
+    // instances overlay partagent `candle_pane` — les compter ferait un doublon (et
+    // gonflerait la hauteur utile d'autant, au point de neutraliser le budget).
+    const separes = [...new Set([...this.active.values()].map((i) => i.paneId))].filter(
+      (paneId) => paneId !== CANDLE_PANE_ID
+    );
+    const utile = this.hauteurUtile(separes);
     // Le maître publie sa capacité pour que le menu puisse refuser en amont (le budget
     // seul ne peut pas sauver le prix au-delà du plafond, cf. paneBudget.test.ts).
     if (this.estMaitre) chartCapaciteStore.getState().setPaneMax(paneMax(utile));
     const hauteur = hauteurPaneIndicateur(utile, separes.length);
     if (hauteur === null) return;
-    for (const info of separes) {
-      this.chart.setPaneOptions({ id: info.paneId, height: hauteur });
+    for (const paneId of separes) {
+      // N'écrire QUE sur écart réel : `setPaneOptions` déclenche `adjustPaneViewport`
+      // (bundle :13261), et cette méthode est rappelée à chaque OnDataReady — soit
+      // ~10 fois par seconde en flux live. À l'équilibre, aucune écriture n'est émise,
+      // ce qui évite aussi bien le coût que la boucle relayout → OnDataReady → relayout.
+      const actuelle = this.chart.getSize(paneId)?.height;
+      if (actuelle === undefined || Math.abs(actuelle - hauteur) < 1) continue;
+      this.chart.setPaneOptions({ id: paneId, height: hauteur });
     }
   }
 
   /**
-   * Hauteur disponible pour les panes, axe des temps déduit. Mesurée sur le pane prix
-   * (`getSize` sans DomPosition = le pane complet) plutôt que sur le conteneur DOM : c'est
-   * la grandeur que klinecharts répartit réellement. 0 tant que le graphe n'a pas de
-   * géométrie — `hauteurPaneIndicateur` renvoie alors null et on laisse faire.
+   * Rejoue l'équilibrage quand la géométrie devient connue ou change (création de pane,
+   * redimensionnement de la fenêtre). Appelé par `ChartInstance` sur les mêmes événements
+   * que `PaneHeaders` : au premier `sync()`, les panes viennent d'être créés et leur
+   * hauteur n'est pas encore mesurable — sans ce rattrapage, le budget ne s'appliquait
+   * jamais et les panes gardaient les 100 px par défaut de klinecharts.
    */
-  private hauteurUtile(): number {
-    let total = 0;
-    for (const info of this.active.values()) {
-      const b = this.chart.getSize(info.paneId);
-      if (b) total += b.height;
+  rafraichirHauteurs(): void {
+    this.equilibrerHauteurs();
+  }
+
+  /**
+   * Hauteur que klinecharts répartit entre les panes = pane prix + panes séparés, chacun
+   * compté UNE fois (`getSize` sans DomPosition renvoie le pane complet). Mesurée ainsi
+   * plutôt que sur le conteneur DOM, qui inclut l'axe des temps et les séparateurs.
+   * 0 tant que le graphe n'a pas de géométrie — `hauteurPaneIndicateur` renvoie alors
+   * null et on laisse klinecharts faire.
+   */
+  private hauteurUtile(separes: readonly string[]): number {
+    let total = this.chart.getSize(CANDLE_PANE_ID)?.height ?? 0;
+    for (const paneId of separes) {
+      total += this.chart.getSize(paneId)?.height ?? 0;
     }
-    const prix = this.chart.getSize(CANDLE_PANE_ID);
-    return total + (prix?.height ?? 0);
+    return total;
   }
 
   /**

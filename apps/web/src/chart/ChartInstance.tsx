@@ -412,6 +412,15 @@ export function ChartInstance({
     paneHeaders.sync();
     overlayLegend.sync();
 
+    // Rattrapage du budget de hauteur des panes : au premier `sync()` d'indicateurs, les
+    // panes viennent d'être créés et leur hauteur n'est pas encore mesurable — l'équilibrage
+    // ne pouvait donc rien calculer, et les panes gardaient les 100 px par défaut de
+    // klinecharts. `OnDataReady` est le même signal que celui qui repositionne les en-têtes ;
+    // `rafraichirHauteurs` n'écrit que sur écart réel, donc c'est un no-op à l'équilibre.
+    const majHauteurs = (): void => indicators.rafraichirHauteurs();
+    chart.subscribeAction(ActionType.OnDataReady, majHauteurs);
+    chart.subscribeAction(ActionType.OnPaneDrag, majHauteurs);
+
     // Outils d'analyse de prix (contrôleurs impératifs, overlays DOM propres à ce slot) :
     //  - measureTool : règle Shift+glisser transitoire (écart %/Δ/bougies/durée).
     //  - candleReadout : encart O/H/L/C + variation % + amplitude qui suit le crosshair.
@@ -516,6 +525,8 @@ export function ChartInstance({
       unbindPriceAlert();
       unsubscribeTheme();
       unsubscribePaneHeaders();
+      chart.unsubscribeAction(ActionType.OnDataReady, majHauteurs);
+      chart.unsubscribeAction(ActionType.OnPaneDrag, majHauteurs);
       paneHeaders.dispose();
       overlayLegend.dispose();
       measureTool.dispose();

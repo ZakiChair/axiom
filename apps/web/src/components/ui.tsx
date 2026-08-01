@@ -28,6 +28,14 @@ export const BTN_SECONDAIRE =
   "rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text";
 
 /**
+ * Largeur de la colonne MNÉMONIQUE, partagée par les trois surfaces qui l'affichent :
+ * menu Fonctions, en-tête de fenêtre et palette de commandes. Elles utilisaient trois
+ * largeurs différentes (`w-12` / `w-14` / `w-24`) pour le même token, et 48 px
+ * tronquaient les mnémoniques de six caractères — CBPREM, NETLIQ, REPLAY.
+ */
+export const LARGEUR_MNEMONIQUE = "w-16";
+
+/**
  * Classes de champ standard (Input/Select) — UNE seule apparence, UN seul focus
  * (l'audit 2026-07-29 relevait 5 traitements de focus, 2 rayons, 3 tailles).
  */

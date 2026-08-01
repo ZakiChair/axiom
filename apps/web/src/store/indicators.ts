@@ -322,11 +322,19 @@ export const indicatorsStore = createStore<IndicatorsState>((set, get) => ({
 
   toggle: (defId) => {
     const current = get().indicators;
-    if (current.some((i) => i.defId === defId)) {
-      set({ indicators: current.filter((i) => i.defId !== defId) });
-    } else {
-      get().add(defId);
+    // NON DESTRUCTIF : ne retire que la DERNIÈRE instance du def. Avant, une frappe
+    // « EMA » dans ⌘K supprimait d'un coup EMA(20), EMA(50) et EMA(200) soigneusement
+    // réglées, sans confirmation ni annulation, alors que le menu ajoute toujours une
+    // instance à la fois (revue du 2026-08-01 § 6.2).
+    let dernier = -1;
+    for (let i = current.length - 1; i >= 0; i--) {
+      if (current[i]?.defId === defId) {
+        dernier = i;
+        break;
+      }
     }
+    if (dernier >= 0) set({ indicators: current.filter((_, i) => i !== dernier) });
+    else get().add(defId);
   },
 
   setAll: (indicators) => set({ indicators: assignInstanceIds(indicators) }),

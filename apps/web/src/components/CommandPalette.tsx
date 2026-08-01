@@ -22,6 +22,7 @@ import {
   type Commande,
 } from "../commands/registry";
 import { RACCOURCIS_AIDE, lignesMnemoniques } from "../commands/hotkeys";
+import { LARGEUR_MNEMONIQUE } from "./ui";
 
 /** Entrée d'historique persistée (id de commande + texte de saisie pour rejouer la navigation). */
 interface EntreeHistorique {
@@ -66,7 +67,10 @@ export function CommandPalette() {
   const mode = useStore(paletteStore, (s) => s.mode);
   const fermer = useStore(paletteStore, (s) => s.fermer);
 
-  const registre = useMemo(() => construireRegistre(), []);
+  // Reconstruit à chaque OUVERTURE : les jeux d'indicateurs nommés sont dynamiques,
+  // un registre mémoïsé une fois pour toutes ne les aurait jamais vus. Fréquence
+  // basse (une ouverture de palette), coût négligeable.
+  const registre = useMemo(() => construireRegistre(), [ouvert]);
   const [requete, setRequete] = useState("");
   const [indexSel, setIndexSel] = useState(0);
   const [historique, setHistorique] = useState<EntreeHistorique[]>(() => lireHistorique());
@@ -261,7 +265,7 @@ export function CommandPalette() {
                       it.cmd.id === "nav" ? "border-l-2 border-accent " : ""
                     }${i === indexSel ? "bg-accent/15" : "hover:bg-bg"}`}
                   >
-                    <span className="w-24 shrink-0 truncate text-[11px] font-semibold uppercase tracking-wider text-accent">
+                    <span className={`${LARGEUR_MNEMONIQUE} shrink-0 truncate text-[11px] font-semibold uppercase tracking-wider text-accent`}>
                       {it.cmd.id === "nav" ? "→" : (it.cmd.mnemonique ?? "")}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm text-text">{it.cmd.libelle}</span>

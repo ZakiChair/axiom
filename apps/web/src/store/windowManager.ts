@@ -35,7 +35,25 @@ export interface DefinitionFenetre {
   readonly menuLabel?: string;
   readonly menuHidden?: boolean;
   readonly nouveau?: boolean;
+  /** Section du menu Fonctions. Sans elle, la fenêtre tombe dans « Outils ». */
+  readonly groupe?: GroupeFenetre;
 }
+
+/**
+ * Sections du menu Fonctions, dans l'ordre d'affichage. Le menu déroulait jusqu'ici les
+ * 36 entrées à plat, dans l'ORDRE D'IMPLÉMENTATION du registre — il dépassait la hauteur
+ * du panneau et n'avait aucun champ de recherche (revue du 2026-08-01 § 6.1).
+ */
+export const GROUPES_FENETRES = [
+  "Marché & dérivés",
+  "Macro & tradfi",
+  "On-chain & stablecoins",
+  "Analyse",
+  "Risque & portefeuille",
+  "Outils",
+] as const;
+
+export type GroupeFenetre = (typeof GROUPES_FENETRES)[number];
 
 /** Registre statique des fenêtres Bloomberg — SOURCE UNIQUE : titre/mnémonique/
  * taille par défaut + appartenance au menu Fonctions. Utilisé par `App.tsx` (montage,
@@ -44,45 +62,45 @@ export interface DefinitionFenetre {
  * `menuWindows`) et `persist`. Ajouter une fenêtre = 1 entrée ici + 1 composant dans
  * `WINDOW_COMPONENTS` (App.tsx, sinon erreur de compilation) ; menu + montage en découlent. */
 export const WINDOW_REGISTRY = [
-  { id: "derivatives", title: "Produits dérivés", mnemonic: "DES", defaultWidth: 420, defaultHeight: 640, menuHidden: true },
-  { id: "fundingMatrix", title: "Funding cross-exchange", mnemonic: "FUNDX", defaultWidth: 460, defaultHeight: 420 },
-  { id: "liquidations", title: "Liquidations", mnemonic: "LIQ", defaultWidth: 460, defaultHeight: 520, nouveau: true },
-  { id: "eco", title: "Calendrier économique", mnemonic: "ECO", defaultWidth: 440, defaultHeight: 640 },
-  { id: "news", title: "Actualités crypto", mnemonic: "NEWS", defaultWidth: 440, defaultHeight: 640 },
-  { id: "corr", title: "Corrélations", mnemonic: "CORR", defaultWidth: 480, defaultHeight: 640 },
-  { id: "onchain", title: "On-chain", mnemonic: "CHAIN", defaultWidth: 460, defaultHeight: 640 },
-  { id: "marketMap", title: "Vue marché (treemap)", mnemonic: "MAP", defaultWidth: 1100, defaultHeight: 720 },
-  { id: "portfolio", title: "Portefeuille", mnemonic: "PORT", defaultWidth: 460, defaultHeight: 640 },
-  { id: "notes", title: "Notes / journal", mnemonic: "NOTE", defaultWidth: 440, defaultHeight: 640 },
-  { id: "screener", title: "Screener d'actifs", mnemonic: "EQS", defaultWidth: 680, defaultHeight: 680 },
-  { id: "termStructure", title: "Structure par terme", mnemonic: "TERM", defaultWidth: 480, defaultHeight: 640 },
-  { id: "options", title: "Options (smile IV, max pain)", mnemonic: "OMON", defaultWidth: 480, defaultHeight: 640 },
-  { id: "dom", title: "Carnet d'ordres (DOM / depth)", mnemonic: "DOM", defaultWidth: 560, defaultHeight: 680 },
-  { id: "backtest", title: "Backtest de stratégie", mnemonic: "BT", defaultWidth: 720, defaultHeight: 680 },
-  { id: "replay", title: "Replay de marché", mnemonic: "REPLAY", defaultWidth: 420, defaultHeight: 640 },
-  { id: "macroRates", title: "Taux & Réserves souveraines", mnemonic: "RATE", defaultWidth: 560, defaultHeight: 680 },
-  { id: "cot", title: "Rapport COT (CFTC)", mnemonic: "COT", defaultWidth: 520, defaultHeight: 680 },
-  { id: "seasonality", title: "Saisonnalité", mnemonic: "SEAG", defaultWidth: 760, defaultHeight: 560 },
-  { id: "vol", title: "Volatilité (cône RV, VRP)", mnemonic: "VOL", defaultWidth: 760, defaultHeight: 560 },
-  { id: "fund", title: "Fiche société (FUND)", mnemonic: "FUND", defaultWidth: 480, defaultHeight: 640 },
-  { id: "brief", title: "Point marché", mnemonic: "BRIEF", defaultWidth: 480, defaultHeight: 720, menuLabel: "Point marché (snapshot)" },
-  { id: "globe", title: "Globe (chokepoints & trafic aérien)", mnemonic: "GLOBE", defaultWidth: 720, defaultHeight: 720, menuLabel: "Globe (géopolitique, chokepoints & trafic aérien)", nouveau: true },
-  { id: "stablecoins", title: "Stablecoins (supply, dominance, pegs)", mnemonic: "STBL", defaultWidth: 860, defaultHeight: 640, nouveau: true },
-  { id: "squeeze", title: "Radar squeeze", mnemonic: "SQZ", defaultWidth: 640, defaultHeight: 560, nouveau: true },
-  { id: "cbprem", title: "Coinbase premium", mnemonic: "CBPREM", defaultWidth: 640, defaultHeight: 560, nouveau: true },
-  { id: "netliq", title: "Liquidité nette Fed", mnemonic: "NETLIQ", defaultWidth: 640, defaultHeight: 560, nouveau: true },
-  { id: "data", title: "Sources de données", mnemonic: "DATA", defaultWidth: 640, defaultHeight: 560, nouveau: true },
-  { id: "dist", title: "Distribution des rendements (VaR)", mnemonic: "DIST", defaultWidth: 560, defaultHeight: 480, nouveau: true },
-  { id: "expy", title: "Journal de trades", mnemonic: "EXPY", defaultWidth: 680, defaultHeight: 700, nouveau: true },
-  { id: "paper", title: "Paper trading", mnemonic: "PAPER", defaultWidth: 720, defaultHeight: 640, nouveau: true },
-  { id: "mine", title: "Coût de production (minage)", mnemonic: "MINE", defaultWidth: 640, defaultHeight: 560, nouveau: true },
-  { id: "cycle", title: "Cycle 4 ans (halving)", mnemonic: "CYCLE", defaultWidth: 760, defaultHeight: 600, nouveau: true },
-  { id: "evts", title: "Étude d'évènements", mnemonic: "EVTS", defaultWidth: 760, defaultHeight: 560, nouveau: true },
-  { id: "scen", title: "Stress-test", mnemonic: "SCEN", defaultWidth: 720, defaultHeight: 540, nouveau: true },
+  { id: "derivatives", title: "Produits dérivés", mnemonic: "DES", defaultWidth: 420, defaultHeight: 640, menuHidden: true, groupe: "Marché & dérivés" },
+  { id: "fundingMatrix", title: "Funding cross-exchange", mnemonic: "FUNDX", defaultWidth: 460, defaultHeight: 420, groupe: "Marché & dérivés" },
+  { id: "liquidations", title: "Liquidations", mnemonic: "LIQ", defaultWidth: 460, defaultHeight: 520, nouveau: true, groupe: "Marché & dérivés" },
+  { id: "eco", title: "Calendrier économique", mnemonic: "ECO", defaultWidth: 440, defaultHeight: 640, groupe: "Macro & tradfi" },
+  { id: "news", title: "Actualités crypto", mnemonic: "NEWS", defaultWidth: 440, defaultHeight: 640, groupe: "Analyse" },
+  { id: "corr", title: "Corrélations", mnemonic: "CORR", defaultWidth: 480, defaultHeight: 640, groupe: "Analyse" },
+  { id: "onchain", title: "On-chain", mnemonic: "CHAIN", defaultWidth: 460, defaultHeight: 640, groupe: "On-chain & stablecoins" },
+  { id: "marketMap", title: "Vue marché (treemap)", mnemonic: "MAP", defaultWidth: 1100, defaultHeight: 720, groupe: "Analyse" },
+  { id: "portfolio", title: "Portefeuille", mnemonic: "PORT", defaultWidth: 460, defaultHeight: 640, groupe: "Risque & portefeuille" },
+  { id: "notes", title: "Notes / journal", mnemonic: "NOTE", defaultWidth: 440, defaultHeight: 640, groupe: "Risque & portefeuille" },
+  { id: "screener", title: "Screener d'actifs", mnemonic: "EQS", defaultWidth: 680, defaultHeight: 680, groupe: "Analyse" },
+  { id: "termStructure", title: "Structure par terme", mnemonic: "TERM", defaultWidth: 480, defaultHeight: 640, groupe: "Marché & dérivés" },
+  { id: "options", title: "Options (smile IV, max pain)", mnemonic: "OMON", defaultWidth: 480, defaultHeight: 640, groupe: "Marché & dérivés" },
+  { id: "dom", title: "Carnet d'ordres (DOM / depth)", mnemonic: "DOM", defaultWidth: 560, defaultHeight: 680, groupe: "Marché & dérivés" },
+  { id: "backtest", title: "Backtest de stratégie", mnemonic: "BT", defaultWidth: 720, defaultHeight: 680, groupe: "Risque & portefeuille" },
+  { id: "replay", title: "Replay de marché", mnemonic: "REPLAY", defaultWidth: 420, defaultHeight: 640, groupe: "Outils" },
+  { id: "macroRates", title: "Taux & Réserves souveraines", mnemonic: "RATE", defaultWidth: 560, defaultHeight: 680, groupe: "Macro & tradfi" },
+  { id: "cot", title: "Rapport COT (CFTC)", mnemonic: "COT", defaultWidth: 520, defaultHeight: 680, groupe: "Macro & tradfi" },
+  { id: "seasonality", title: "Saisonnalité", mnemonic: "SEAG", defaultWidth: 760, defaultHeight: 560, groupe: "Analyse" },
+  { id: "vol", title: "Volatilité (cône RV, VRP)", mnemonic: "VOL", defaultWidth: 760, defaultHeight: 560, groupe: "Marché & dérivés" },
+  { id: "fund", title: "Fiche société (FUND)", mnemonic: "FUND", defaultWidth: 480, defaultHeight: 640, groupe: "Macro & tradfi" },
+  { id: "brief", title: "Point marché", mnemonic: "BRIEF", defaultWidth: 480, defaultHeight: 720, menuLabel: "Point marché (snapshot)", groupe: "Analyse" },
+  { id: "globe", title: "Globe (chokepoints & trafic aérien)", mnemonic: "GLOBE", defaultWidth: 720, defaultHeight: 720, menuLabel: "Globe (géopolitique, chokepoints & trafic aérien)", nouveau: true, groupe: "Macro & tradfi" },
+  { id: "stablecoins", title: "Stablecoins (supply, dominance, pegs)", mnemonic: "STBL", defaultWidth: 860, defaultHeight: 640, nouveau: true, groupe: "On-chain & stablecoins" },
+  { id: "squeeze", title: "Radar squeeze", mnemonic: "SQZ", defaultWidth: 640, defaultHeight: 560, nouveau: true, groupe: "Marché & dérivés" },
+  { id: "cbprem", title: "Coinbase premium", mnemonic: "CBPREM", defaultWidth: 640, defaultHeight: 560, nouveau: true, groupe: "Marché & dérivés" },
+  { id: "netliq", title: "Liquidité nette Fed", mnemonic: "NETLIQ", defaultWidth: 640, defaultHeight: 560, nouveau: true, groupe: "Macro & tradfi" },
+  { id: "data", title: "Sources de données", mnemonic: "DATA", defaultWidth: 640, defaultHeight: 560, nouveau: true, groupe: "Outils" },
+  { id: "dist", title: "Distribution des rendements (VaR)", mnemonic: "DIST", defaultWidth: 560, defaultHeight: 480, nouveau: true, groupe: "Analyse" },
+  { id: "expy", title: "Journal de trades", mnemonic: "EXPY", defaultWidth: 680, defaultHeight: 700, nouveau: true, groupe: "Risque & portefeuille" },
+  { id: "paper", title: "Paper trading", mnemonic: "PAPER", defaultWidth: 720, defaultHeight: 640, nouveau: true, groupe: "Risque & portefeuille" },
+  { id: "mine", title: "Coût de production (minage)", mnemonic: "MINE", defaultWidth: 640, defaultHeight: 560, nouveau: true, groupe: "On-chain & stablecoins" },
+  { id: "cycle", title: "Cycle 4 ans (halving)", mnemonic: "CYCLE", defaultWidth: 760, defaultHeight: 600, nouveau: true, groupe: "On-chain & stablecoins" },
+  { id: "evts", title: "Étude d'évènements", mnemonic: "EVTS", defaultWidth: 760, defaultHeight: 560, nouveau: true, groupe: "Analyse" },
+  { id: "scen", title: "Stress-test", mnemonic: "SCEN", defaultWidth: 720, defaultHeight: 540, nouveau: true, groupe: "Risque & portefeuille" },
   // Haute par défaut : TROIS graphiques empilés, ~215 px chacun (mesuré) — en dessous
   // de 800 px de fenêtre, les axes se télescopent.
-  { id: "mcap", title: "Capitalisation & dominance", mnemonic: "CAP", defaultWidth: 900, defaultHeight: 820, menuLabel: "Capitalisation & dominance (TOTAL, TOTAL3, BTC.D)", nouveau: true },
-  { id: "sect", title: "Secteurs crypto", mnemonic: "SECT", defaultWidth: 640, defaultHeight: 640, nouveau: true },
+  { id: "mcap", title: "Capitalisation & dominance", mnemonic: "CAP", defaultWidth: 900, defaultHeight: 820, menuLabel: "Capitalisation & dominance (TOTAL, TOTAL3, BTC.D)", nouveau: true, groupe: "Analyse" },
+  { id: "sect", title: "Secteurs crypto", mnemonic: "SECT", defaultWidth: 640, defaultHeight: 640, nouveau: true, groupe: "Analyse" },
 ] as const satisfies readonly DefinitionFenetre[];
 
 /** Union des ids de fenêtre — DÉRIVÉE du registre (source unique). Sert à typer la
@@ -102,6 +120,39 @@ export function menuWindows(): { id: WindowId; mnemonique: string; libelle: stri
       libelle: w.menuLabel ?? w.title,
       nouveau: w.nouveau ?? false,
     }));
+}
+
+/** Une entrée du menu Fonctions. */
+export interface EntreeMenuFenetre {
+  id: WindowId;
+  mnemonique: string;
+  libelle: string;
+  nouveau: boolean;
+}
+
+/**
+ * Menu Fonctions GROUPÉ par thème, sections dans l'ordre de `GROUPES_FENETRES` et
+ * entrées triées par mnémonique à l'intérieur de chacune. Les sections vides sont
+ * omises. PURE, dérivée du registre (qui reste la source unique) — testée.
+ */
+export function menuWindowsGroupees(): { groupe: GroupeFenetre; entrees: EntreeMenuFenetre[] }[] {
+  const parGroupe = new Map<GroupeFenetre, EntreeMenuFenetre[]>();
+  for (const w of WINDOW_REGISTRY as readonly DefinitionFenetre[]) {
+    if (w.menuHidden) continue;
+    const groupe = w.groupe ?? "Outils";
+    const entrees = parGroupe.get(groupe) ?? [];
+    entrees.push({
+      id: w.id as WindowId,
+      mnemonique: w.mnemonic,
+      libelle: w.menuLabel ?? w.title,
+      nouveau: w.nouveau ?? false,
+    });
+    parGroupe.set(groupe, entrees);
+  }
+  return GROUPES_FENETRES.map((groupe) => ({
+    groupe,
+    entrees: (parGroupe.get(groupe) ?? []).sort((a, b) => a.mnemonique.localeCompare(b.mnemonique)),
+  })).filter((s) => s.entrees.length > 0);
 }
 
 /** Préfixe localStorage marquant qu'une fenêtre « nouveau » a déjà été ouverte (badge). */
@@ -394,8 +445,19 @@ export interface WindowManagerState {
 
   openWindow: (id: string) => void;
   closeWindow: (id: string) => void;
+  /**
+   * « Focus d'abord » : fermée → ouvre ; minimisée → restaure ; ouverte mais enfouie →
+   * remonte au premier plan ; déjà au premier plan → ferme. Toutes les commandes de
+   * fenêtre de la palette et les `toggleX` des stores passent par ici.
+   */
   toggleWindow: (id: string) => void;
   focusWindow: (id: string) => void;
+  /** Remonte la fenêtre ouverte la plus ENFOUIE (rotation clavier, cf. hotkeys). */
+  cycleFocus: () => void;
+  /** Id de la fenêtre au premier plan, ou null (aucune ouverte / toutes réduites). */
+  fenetreFocalisee: () => string | null;
+  /** Ancre la fenêtre focalisée au clavier (⌥←/→/↑, ⌥↓ = revenir à l'avant-ancrage). */
+  ancrerFocalisee: (zone: SnapZone | "restaurer") => void;
   moveWindow: (id: string, x: number, y: number) => void;
   resizeWindow: (id: string, width: number, height: number) => void;
   minimizeWindow: (id: string) => void;
@@ -568,14 +630,64 @@ export const windowManagerStore = createStore<WindowManagerState>((set, get) => 
   },
 
   toggleWindow: (id) => {
-    const w = get().windows[id];
+    const state = get();
+    const w = state.windows[id];
     // Une fenêtre minimisée se RESTAURE (⌘K la faisait disparaître — revue v2).
     if (w?.open && w.minimized) {
       get().restoreWindow(id);
       return;
     }
-    if (w?.open) get().closeWindow(id);
-    else get().openWindow(id);
+    if (w?.open) {
+      // « Focus d'abord » : taper une fonction, c'est Y ALLER (contrat Bloomberg, que
+      // la barre d'outils annonce déjà). Une fenêtre ENFOUIE remonte au premier plan ;
+      // seule celle qui y est déjà se ferme. Avant, toute fenêtre ouverte se fermait
+      // sans regarder son z : revenir à une fenêtre enfouie la faisait disparaître, et
+      // il fallait retaper le mnémonique (revue du 2026-08-01 § 3.6).
+      if (w.z !== zFenetreFocalisee(state.windows)) get().focusWindow(id);
+      else get().closeWindow(id);
+      return;
+    }
+    get().openWindow(id);
+  },
+
+  cycleFocus: () => {
+    // Rotation par z CROISSANT : la plus enfouie remonte, puis la suivante… — l'ordre
+    // est celui que l'utilisateur voit empilé, et la boucle est naturelle.
+    const ouvertes = Object.entries(get().windows)
+      .filter(([, w]) => w.open && !w.minimized)
+      .sort(([, a], [, b]) => a.z - b.z);
+    const premiere = ouvertes[0];
+    if (!premiere) return;
+    get().focusWindow(premiere[0]);
+  },
+
+  fenetreFocalisee: () => {
+    const state = get();
+    const z = zFenetreFocalisee(state.windows);
+    if (z === null) return null;
+    return (
+      Object.entries(state.windows).find(([, w]) => w.open && !w.minimized && w.z === z)?.[0] ?? null
+    );
+  },
+
+  ancrerFocalisee: (zone) => {
+    const state = get();
+    const id = get().fenetreFocalisee();
+    if (id === null) return;
+    if (zone === "restaurer") {
+      // Retour à la géométrie d'avant l'ancrage. Sans elle (jamais ancrée), on ne
+      // touche à rien plutôt que d'inventer une position.
+      const avant = state.windows[id]?.preSnapGeometry;
+      if (!avant) return;
+      set({
+        windows: {
+          ...state.windows,
+          [id]: { ...state.windows[id]!, ...avant, preSnapGeometry: null },
+        },
+      });
+      return;
+    }
+    get().snapWindow(id, snapGeometry(zone, state.workspace));
   },
 
   focusWindow: (id) => {

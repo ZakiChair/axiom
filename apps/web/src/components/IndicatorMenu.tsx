@@ -38,7 +38,7 @@ import { chartCapaciteStore, plafondPanesAtteint } from "../store/chartCapacite"
 import { correspondAlias, normaliser } from "./indicateurAlias";
 import { settingsUiStore } from "../store/settings-ui";
 import { tfAtLeast } from "../chart/tfOrder";
-import { indexRoving, Onglets } from "./ui";
+import { CLASSES_CHAMP, indexRoving, Input, Onglets, Select } from "./ui";
 import { MacroIndicators } from "./MacroIndicators";
 import { JeuxIndicateurs } from "./JeuxIndicateurs";
 
@@ -182,17 +182,17 @@ export function InstanceParamsEditor({
     // Choix explicite (select) ou source avec options : liste déroulante.
     if ((input.type === "select" || input.type === "source") && input.options && input.options.length > 0) {
       return (
-        <select
+        <Select
           value={String(value)}
           onChange={(e) => set(input.key, e.target.value)}
-          className="w-24 rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-accent"
+          className="w-24"
         >
           {input.options.map((opt) => (
             <option key={opt} value={opt}>
               {opt}
             </option>
           ))}
-        </select>
+        </Select>
       );
     }
     if (input.type === "boolean") {
@@ -207,7 +207,7 @@ export function InstanceParamsEditor({
     }
     if (input.type === "number") {
       return (
-        <input
+        <Input
           type="number"
           value={typeof value === "number" ? value : Number(value)}
           min={input.min}
@@ -217,17 +217,17 @@ export function InstanceParamsEditor({
             // On ignore une saisie non finie (champ vidé transitoirement).
             if (Number.isFinite(n)) set(input.key, n);
           }}
-          className="w-20 rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-accent"
+          className="w-20"
         />
       );
     }
     // Repli (source sans options) : saisie texte libre.
     return (
-      <input
+      <Input
         type="text"
         value={String(value)}
         onChange={(e) => set(input.key, e.target.value)}
-        className="w-24 rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-accent"
+        className="w-24"
       />
     );
   };
@@ -522,7 +522,7 @@ export function IndicatorMenu() {
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Rechercher… (CVD, RVOL, orderflow…)"
               autoFocus
-              className="w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-accent"
+              className={`${CLASSES_CHAMP} w-full`}
             />
             <p className="mt-1 px-0.5 text-[10px] text-text-dim">
               {filtered.length}/{INDICATEURS_ANALYSE.length} · Order Flow en tête du catalogue

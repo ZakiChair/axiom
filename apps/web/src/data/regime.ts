@@ -52,10 +52,35 @@ export interface Regime {
   score: number;
   libelle: LibelleRegime;
   composants: ComposantRegime[];
+  /**
+   * Nombre de composants ayant réellement répondu, et total attendu. Un score calculé
+   * sur trois notes s'affichait EXACTEMENT comme un score sur huit — alors que la panne
+   * partielle est le cas nominal (les neuf sources partent en `allSettled`, une source
+   * en échec donne simplement une note nulle). Aucune surface n'exposait cette
+   * couverture : il fallait survoler la pastille et compter les « — » dans une chaîne
+   * d'une ligne (revue du 2026-08-01 § 6.4).
+   */
+  couverture: { disponibles: number; total: number };
+}
+
+/** Bornes du score composite — écrites dans le formulaire d'alerte, jamais là où on lit. */
+export const SCORE_MIN = -2;
+export const SCORE_MAX = 2;
+
+/**
+ * Fiabilité de lecture d'un score, dérivée de sa couverture. PURE.
+ * Sous `MIN_COMPOSANTS`, le libellé vaut déjà « indéterminé » ; au-dessus, une couverture
+ * partielle reste exploitable mais mérite d'être signalée.
+ */
+export function fiabiliteRegime(
+  couverture: { disponibles: number; total: number }
+): "complet" | "partiel" | "insuffisant" {
+  if (couverture.disponibles < MIN_COMPOSANTS) return "insuffisant";
+  return couverture.disponibles === couverture.total ? "complet" : "partiel";
 }
 
 /** Sous ce nombre de composants disponibles, le score serait du bruit. */
-const MIN_COMPOSANTS = 3;
+export const MIN_COMPOSANTS = 3;
 
 function fmtNote(note: number): string {
   return note >= 0 ? `+${note}` : `${note}`;
@@ -213,7 +238,12 @@ export function calculerRegime(entrees: EntreesRegime): Regime {
   else if (score > -1.2) libelle = "risk-off";
   else libelle = "risk-off marqué";
 
-  return { score, libelle, composants };
+  return {
+    score,
+    libelle,
+    composants,
+    couverture: { disponibles: notes.length, total: composants.length },
+  };
 }
 
 /** Ton d'affichage de la pastille (le composant funding en warn vit dans le détail). */

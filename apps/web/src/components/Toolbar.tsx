@@ -29,7 +29,7 @@ import { IndicatorMenu } from "./IndicatorMenu";
 import { StrategyMenu } from "./StrategyMenu";
 import { PairSearch } from "./PairSearch";
 import { ThemeSwitcher } from "./ThemeSwitcher";
-import { Badge, LARGEUR_MNEMONIQUE, MenuDeroulant } from "./ui";
+import { Badge, CLASSES_CHAMP, LARGEUR_MNEMONIQUE, MenuDeroulant } from "./ui";
 
 /**
  * Ouvre un sélecteur de fichier, valide et REMPLACE tout l'état `axiom:*` du terminal par
@@ -499,7 +499,7 @@ export function Toolbar() {
       <select
         value={exchange}
         onChange={(e) => onChangeExchange(e.target.value as ExchangeId)}
-        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none focus:border-neutral-500"
+        className={CLASSES_CHAMP}
         aria-label="Source"
       >
         {EXCHANGES.map((ex) => (
@@ -575,7 +575,7 @@ export function Toolbar() {
       <select
         value={priceScale}
         onChange={(e) => setPriceScale(e.target.value as PriceScaleType)}
-        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none focus:border-neutral-500"
+        className={CLASSES_CHAMP}
         aria-label="Échelle de l'axe prix"
         title="Échelle de l'axe prix"
       >

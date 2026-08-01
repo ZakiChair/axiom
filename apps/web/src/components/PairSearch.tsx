@@ -16,6 +16,7 @@ import { marketStore } from "../store/market";
 import { SYNTHETIC_PRESETS, syntheticsStore } from "../store/synthetics";
 import { encodeSyntheticSymbol, formatSyntheticLabel, parseSyntheticSymbol } from "../data/synthetic";
 import { fetchPairs, TWELVEDATA_SYMBOLS } from "../data/pairs";
+import { CLASSES_CHAMP } from "./ui";
 
 /** Nombre maximum de résultats affichés (perf + lisibilité de la liste). */
 const MAX_RESULTS = 30;
@@ -395,7 +396,7 @@ function LegEditor({
         <select
           value={exchange}
           onChange={(e) => onExchange(e.target.value as Exclude<ExchangeId, "synthetic">)}
-          className="w-24 rounded border border-neutral-700 bg-neutral-950 px-1 py-1 text-xs text-neutral-200 outline-none focus:border-neutral-500"
+          className={`${CLASSES_CHAMP} w-24`}
         >
           {LEG_SOURCES.map((source) => (
             <option key={source} value={source}>{sourceLabel(source)}</option>
@@ -404,7 +405,7 @@ function LegEditor({
         <input
           value={symbol}
           onChange={(e) => onSymbol(e.target.value.toUpperCase())}
-          className="min-w-0 flex-1 rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-100 outline-none focus:border-neutral-500"
+          className={`${CLASSES_CHAMP} min-w-0 flex-1`}
         />
       </div>
       {visibleMatches.length > 0 && (

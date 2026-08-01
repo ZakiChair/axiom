@@ -13,6 +13,7 @@ import { useStore } from "zustand";
 import { indicatorsStore, type ActiveIndicator } from "../store/indicators";
 import { indicatorSetsStore, MAX_JEUX } from "../store/indicatorSets";
 import { pousserToast } from "../store/toasts";
+import { Input } from "./ui";
 
 export function JeuxIndicateurs({ actives }: { actives: ActiveIndicator[] }) {
   const jeux = useStore(indicatorSetsStore, (s) => s.jeux);
@@ -77,7 +78,7 @@ export function JeuxIndicateurs({ actives }: { actives: ActiveIndicator[] }) {
       ))}
 
       <div className="flex items-center gap-1 px-2 py-1">
-        <input
+        <Input
           type="text"
           value={nom}
           onChange={(e) => setNom(e.target.value)}
@@ -90,7 +91,7 @@ export function JeuxIndicateurs({ actives }: { actives: ActiveIndicator[] }) {
           }}
           placeholder={plein ? `${MAX_JEUX} jeux maximum` : "Enregistrer ce jeu sous…"}
           disabled={plein}
-          className="min-w-0 flex-1 rounded bg-neutral-800 px-2 py-0.5 text-xs text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+          className="min-w-0 flex-1"
         />
         <button
           type="button"

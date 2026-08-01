@@ -451,9 +451,15 @@ export type SensRef = "hausse-chaud" | "hausse-froid";
 /** Ton du RefBadge — pur, testé (défaut : les deux extrêmes sont chauds). */
 export function tonRef(refe: Referentiel, sens?: SensRef): TonBadge {
   if (!estExtreme(refe)) return "neutre";
-  if (sens === "hausse-chaud") return refe.percentile >= 90 ? "warn" : "neutre";
-  if (sens === "hausse-froid") return refe.percentile <= 10 ? "warn" : "neutre";
-  return "warn";
+  // Les DEUX queues sont signalées, avec des tons DIFFÉRENTS. Auparavant les six
+  // usages passaient `hausse-chaud` et la branche basse était du code mort : un DVOL
+  // au 3e percentile — la compression de volatilité, configuration parmi les plus
+  // actionnables — s'affichait dans le même gris qu'un p40 (revue § 6.4).
+  //   haut = tension (warn) ; bas = compression/apathie (accent).
+  const haut = refe.percentile >= 90;
+  if (sens === "hausse-chaud") return haut ? "warn" : "accent";
+  if (sens === "hausse-froid") return haut ? "accent" : "warn";
+  return haut ? "warn" : "accent";
 }
 
 /**
@@ -692,7 +698,7 @@ export function BadgeFiabilite({
   return (
     <span
       title={tip}
-      className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${TONS_FIABILITE[n]}`}
+      className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${TONS_FIABILITE[n]}`}
     >
       {texte}
     </span>
@@ -711,19 +717,62 @@ export function texteFraicheur(
   return cadence !== undefined ? `maj ~${cadence}` : VALEUR_ABSENTE;
 }
 
+/**
+ * Fraîcheur d'une donnée par rapport à sa cadence de rafraîchissement. PURE.
+ *
+ * « maj il y a 3 s » et « maj il y a 14 min » avaient rigoureusement la même apparence,
+ * alors que l'un est vivant et l'autre périmé : la primitive n'avait ni seuil, ni prop de
+ * cadence, ni token de péremption (revue du 2026-08-01 § 6.4).
+ *
+ * Le seuil est RELATIF à la cadence annoncée : une source qui se rafraîchit toutes les
+ * 15 min n'est pas en retard à 5 min, une source temps réel si.
+ */
+export function etatFraicheur(
+  majTs: number | null,
+  now: number,
+  cadenceMs?: number
+): "frais" | "attardé" | "périmé" | "inconnu" {
+  if (majTs === null || !Number.isFinite(majTs)) return "inconnu";
+  const age = now - majTs;
+  if (age < 0) return "frais"; // horloge locale en avance : ne pas alarmer
+  const cadence = cadenceMs !== undefined && cadenceMs > 0 ? cadenceMs : 60_000;
+  if (age <= cadence * 1.5) return "frais";
+  if (age <= cadence * 4) return "attardé";
+  return "périmé";
+}
+
+/** Classe de couleur d'un état de fraîcheur (le retard doit SE VOIR, pas se déduire). */
+const CLASSE_FRAICHEUR: Record<ReturnType<typeof etatFraicheur>, string> = {
+  frais: "",
+  attardé: "text-warn",
+  périmé: "text-down",
+  inconnu: "",
+};
+
 /** Ligne de fraîcheur standard — remplace les 4 variantes divergentes des fenêtres. */
 export function Fraicheur({
   loading,
   majTs,
   cadence,
+  cadenceMs,
 }: {
   loading: boolean;
   majTs?: number | null;
   cadence?: string;
+  /** Cadence attendue en ms — active la coloration du retard. */
+  cadenceMs?: number;
 }) {
+  const now = Date.now();
+  const etat = loading ? "inconnu" : etatFraicheur(majTs ?? null, now, cadenceMs);
+  const titre =
+    etat === "attardé"
+      ? "Donnée en retard sur sa cadence de rafraîchissement"
+      : etat === "périmé"
+        ? "Donnée périmée : le rafraîchissement ne suit plus"
+        : undefined;
   return (
-    <span className="tabular-nums whitespace-nowrap">
-      {texteFraicheur(loading, majTs ?? null, Date.now(), cadence)}
+    <span className={`tabular-nums whitespace-nowrap ${CLASSE_FRAICHEUR[etat]}`} title={titre}>
+      {texteFraicheur(loading, majTs ?? null, now, cadence)}
     </span>
   );
 }

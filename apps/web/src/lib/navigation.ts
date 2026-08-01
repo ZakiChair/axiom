@@ -158,7 +158,11 @@ function ensureOverlayRegistered(): void {
           type: "text",
           ignoreEvent: true,
           attrs: { x: c.x + 3, y: 2, text: label, align: "left", baseline: "top" },
-          styles: { color, size: 10 },
+          // Fond transparent obligatoire : sans lui la figure hérite du fond de texte
+          // d'overlay (l'accent du thème depuis applyChartTheme, #1677FF avant lui) et
+          // l'étiquette se retrouve écrite dans la couleur de son propre fond.
+          // Verrou : chart/overlayTextStyles.test.ts.
+          styles: { color, size: 10, backgroundColor: "transparent" },
         },
       ];
     },

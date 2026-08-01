@@ -33,6 +33,12 @@ function makeIndicators() {
     createIndicator: vi.fn((_config: IndicatorConfigStub, _isStack: boolean, opts?: { id: string }) => opts?.id ?? null),
     overrideIndicator: vi.fn((_override: IndicatorConfigStub, _paneId?: string) => {}),
     removeIndicator: vi.fn(),
+
+    // Géométrie : lue par l'équilibrage de hauteur des panes (chart/paneBudget.ts).
+
+    getSize: vi.fn(() => ({ top: 0, left: 0, width: 800, height: 100, right: 800, bottom: 100 })),
+
+    setPaneOptions: vi.fn(),
   };
   const indicators = new ChartIndicators(chart as unknown as Chart);
   return { indicators, chart };
@@ -40,7 +46,7 @@ function makeIndicators() {
 
 // SMA(length: 1) = close de la bougie elle-même à chaque index (fenêtre glissante de
 // taille 1) : valeurs directement lisibles, aucune bougie « chauffe » à ignorer.
-const smaInstance: ActiveIndicator = { instanceId: "sma-1", defId: "sma", params: { length: 1 } };
+const smaInstance: ActiveIndicator = { instanceId: "sma-1", defId: "sma", params: { length: 1 } , couleurIdx: 0 };
 
 const btcCandles: Candle[] = [
   { time: 1_000, open: 90_000, high: 90_500, low: 89_500, close: 90_000, volume: 10 },

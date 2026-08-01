@@ -89,7 +89,8 @@ function ensureOverlayRegistered(): void {
           type: "text",
           ignoreEvent: true,
           attrs: { x: c.x + 3, y: 2, text: label, align: "left", baseline: "top" },
-          styles: { color, size: 10 },
+          // Fond transparent obligatoire (pastille #1677FF par défaut, cf. annotationsPrix.ts).
+          styles: { color, size: 10, backgroundColor: "transparent" },
         },
       ];
     },

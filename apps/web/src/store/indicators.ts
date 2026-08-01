@@ -29,6 +29,69 @@ type IndicatorParams = Record<string, number | boolean | string>;
 export interface ActiveIndicator extends IndicatorInstance {
   /** Identité stable de l'instance (base « defId-hashParams » + suffixe d'unicité). */
   instanceId: string;
+  /**
+   * Index de couleur de l'instance dans le cycle `--serie-1…6` du thème (0-based).
+   * Attribué à l'ACTIVATION et figé ensuite : la couleur suit l'ENTITÉ, jamais son
+   * rang d'affichage — réordonner les panes ou éditer les params ne repeint rien.
+   * Le chart le lit AU MOMENT DU DESSIN (cf. chart/indicators.ts).
+   */
+  couleurIdx: number;
+}
+
+/** Nombre de tokens de série du thème (`--serie-1` … `--serie-6`). */
+export const NB_COULEURS_SERIE = 6;
+
+/**
+ * Nombre de jetons de couleur qu'une instance CONSOMME : une par sortie tracée, car
+ * le chart peint la sortie `i` avec `serieCanvas(couleurIdx + i)`. Une instance à trois
+ * sorties (Bollinger) occupe donc trois jetons consécutifs, et la suivante doit
+ * commencer après — sinon son unique ligne reprend exactement la couleur d'une des
+ * bandes, sur le même pane. Borné à la taille du cycle : au-delà, les couleurs se
+ * répètent de toute façon à l'intérieur de l'instance.
+ */
+export function jetonsConsommes(defId: string): number {
+  const n = getIndicator(defId)?.outputs.length ?? 1;
+  return Math.max(1, Math.min(n, NB_COULEURS_SERIE));
+}
+
+/**
+ * Index de couleur le MOINS chargé, en tenant compte de l'ARITÉ de chaque instance
+ * (à charge égale, le plus petit index). PURE.
+ *
+ * `pris` liste les instances déjà placées sous la forme `[indexDeDépart, nbJetons]` :
+ * chacune marque `nbJetons` index consécutifs à partir de son départ. Le comptage,
+ * plutôt qu'un « premier libre sinon 0 », vient de deux cas observés : six panes
+ * occupant déjà les six tokens faisaient ressortir toutes les EMA suivantes en
+ * --serie-1 ; et une instance multi-sorties non déclarée faisait recouvrir ses bandes
+ * par l'overlay suivant.
+ */
+export function prochainIndexCouleur(
+  pris: ReadonlyArray<number | undefined | readonly [number, number]>
+): number {
+  const comptes = new Array<number>(NB_COULEURS_SERIE).fill(0);
+  const marquer = (depart: number, jetons: number): void => {
+    if (!Number.isInteger(depart) || depart < 0 || depart >= NB_COULEURS_SERIE) return;
+    for (let k = 0; k < jetons; k++) {
+      const idx = (depart + k) % NB_COULEURS_SERIE;
+      comptes[idx] = (comptes[idx] ?? 0) + 1;
+    }
+  };
+  for (const entree of pris) {
+    if (typeof entree === "number") marquer(entree, 1);
+    else if (Array.isArray(entree)) marquer(entree[0], Math.max(1, entree[1]));
+  }
+  let meilleur = 0;
+  for (let i = 1; i < NB_COULEURS_SERIE; i++) {
+    if ((comptes[i] ?? 0) < (comptes[meilleur] ?? 0)) meilleur = i;
+  }
+  return meilleur;
+}
+
+/** Occupation courante d'une liste d'instances, prête pour `prochainIndexCouleur`. */
+export function occupationCouleurs(
+  instances: ReadonlyArray<{ defId: string; couleurIdx: number }>
+): Array<readonly [number, number]> {
+  return instances.map((i) => [i.couleurIdx, jetonsConsommes(i.defId)] as const);
 }
 
 /** Paramètres par défaut déclarés dans les `inputs` d'une définition. */
@@ -87,25 +150,51 @@ function uniqueId(base: string, used: Set<string>): string {
 }
 
 /** Élément entrant potentiellement déjà identifié (persistance) ou non (défaut). */
-type MaybeIdentified = IndicatorInstance & { instanceId?: string };
+type MaybeIdentified = IndicatorInstance & { instanceId?: string; couleurIdx?: number };
 
 /**
  * Attribue un `instanceId` stable et UNIQUE à chaque élément : réutilise
  * l'instanceId fourni s'il existe (état déjà migré), sinon le compose depuis
  * `defId-hashParams`. Les collisions (duplicatas de config) reçoivent un suffixe.
+ * Même traitement pour `couleurIdx` : préservé s'il est déjà là (session restaurée,
+ * la couleur d'une EMA ne doit pas changer d'un lancement à l'autre), sinon alloué.
  */
 function assignInstanceIds(list: ReadonlyArray<MaybeIdentified>): ActiveIndicator[] {
+  const couleurPersistee = (item: MaybeIdentified): number | null =>
+    typeof item.couleurIdx === "number" &&
+    Number.isInteger(item.couleurIdx) &&
+    item.couleurIdx >= 0 &&
+    item.couleurIdx < NB_COULEURS_SERIE
+      ? item.couleurIdx
+      : null;
+
+  // Un état enregistré AVANT l'allocation par instance a toutes ses instances sur la
+  // même couleur : rien dans l'UI ne permettrait de le réparer, on réalloue donc tout.
+  // C'est le SEUL cas de réattribution — hors de là, ce qui est persisté fait foi.
+  // Une règle plus fine (« garder sauf si une autre couleur est moins chargée »)
+  // paraissait plus juste mais n'était pas idempotente : recharger une liste comportant
+  // un doublon inévitable décalait les couleurs de toutes les instances suivantes, et
+  // l'agencement changeait de teintes à chaque ouverture.
+  const persistees = list.map(couleurPersistee);
+  const toutesPersistees = persistees.every((c) => c !== null);
+  const degenere =
+    list.length > 1 && toutesPersistees && new Set(persistees).size === 1;
+
   const used = new Set<string>();
+  const placees: Array<{ defId: string; couleurIdx: number }> = [];
   const out: ActiveIndicator[] = [];
-  for (const item of list) {
+  list.forEach((item, i) => {
     const base =
       typeof item.instanceId === "string" && item.instanceId.length > 0
         ? item.instanceId
         : `${item.defId}-${shortHash(item.params)}`;
     const instanceId = uniqueId(base, used);
     used.add(instanceId);
-    out.push({ instanceId, defId: item.defId, params: item.params });
-  }
+    const persistee = degenere ? null : persistees[i] ?? null;
+    const couleurIdx = persistee ?? prochainIndexCouleur(occupationCouleurs(placees));
+    placees.push({ defId: item.defId, couleurIdx });
+    out.push({ instanceId, defId: item.defId, params: item.params, couleurIdx });
+  });
   return out;
 }
 
@@ -121,7 +210,12 @@ export function migratePersistedIndicators(raw: unknown): ActiveIndicator[] {
   const valid: MaybeIdentified[] = [];
   for (const entry of raw) {
     if (!entry || typeof entry !== "object") continue;
-    const e = entry as { defId?: unknown; params?: unknown; instanceId?: unknown };
+    const e = entry as {
+      defId?: unknown;
+      params?: unknown;
+      instanceId?: unknown;
+      couleurIdx?: unknown;
+    };
     if (typeof e.defId !== "string" || getIndicator(e.defId) === undefined) continue;
     const params: IndicatorParams =
       e.params && typeof e.params === "object"
@@ -131,6 +225,7 @@ export function migratePersistedIndicators(raw: unknown): ActiveIndicator[] {
     if (typeof e.instanceId === "string" && e.instanceId.length > 0) {
       identified.instanceId = e.instanceId;
     }
+    if (typeof e.couleurIdx === "number") identified.couleurIdx = e.couleurIdx;
     valid.push(identified);
   }
   return assignInstanceIds(valid);
@@ -152,8 +247,11 @@ export interface IndicatorsState {
    * params par défaut. Pratique pour un raccourci « activer / désactiver ».
    */
   toggle: (defId: string) => void;
-  /** Remplace toute la liste (restauration depuis localStorage) ; réattribue les instanceId. */
-  setAll: (indicators: IndicatorInstance[]) => void;
+  /**
+   * Remplace toute la liste (restauration depuis localStorage) ; réattribue les
+   * instanceId, et les couleurs manquantes (celles déjà persistées sont gardées).
+   */
+  setAll: (indicators: Array<IndicatorInstance & { couleurIdx?: number }>) => void;
   /** Réordonne les instances selon l'ordre d'instanceId fourni (drag des en-têtes de
    * pane, cf. chart/paneHeaders.tsx). Toute instance absente de `order` est ajoutée
    * en fin (garde-fou anti-perte). */
@@ -170,7 +268,8 @@ export const indicatorsStore = createStore<IndicatorsState>((set, get) => ({
     const current = get().indicators;
     const used = new Set(current.map((i) => i.instanceId));
     const instanceId = uniqueId(`${defId}-${shortHash(params)}`, used);
-    set({ indicators: [...current, { instanceId, defId, params }] });
+    const couleurIdx = prochainIndexCouleur(occupationCouleurs(current));
+    set({ indicators: [...current, { instanceId, defId, params, couleurIdx }] });
   },
 
   remove: (instanceId) => {
@@ -200,6 +299,9 @@ export const indicatorsStore = createStore<IndicatorsState>((set, get) => ({
       instanceId: newId,
       defId: src.defId,
       params: { ...src.params },
+      // Couleur PROPRE à la copie : dupliquer celle de la source donnerait deux
+      // courbes de mêmes params ET même couleur, donc indiscernables.
+      couleurIdx: prochainIndexCouleur(occupationCouleurs(current)),
     };
     const next = current.slice();
     next.splice(idx + 1, 0, copy);
@@ -211,7 +313,9 @@ export const indicatorsStore = createStore<IndicatorsState>((set, get) => ({
     // (override), sans recréer le pane — le libellé, lui, est recalculé.
     set({
       indicators: get().indicators.map((i) =>
-        i.instanceId === instanceId ? { instanceId: i.instanceId, defId: i.defId, params } : i
+        i.instanceId === instanceId
+          ? { instanceId: i.instanceId, defId: i.defId, params, couleurIdx: i.couleurIdx }
+          : i
       ),
     });
   },

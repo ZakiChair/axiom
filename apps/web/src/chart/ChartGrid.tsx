@@ -138,8 +138,10 @@ export function ChartGrid() {
 
   return (
     <div className="relative h-full w-full">
-      {/* Barre flottante : disposition + liaison. */}
-      <div className="pointer-events-auto absolute right-2 top-2 z-20 flex items-center gap-1 rounded border border-border bg-surface/85 px-1 py-0.5 backdrop-blur">
+      {/* Barre flottante : disposition + liaison. Ancrée en BAS à droite — en haut, elle
+          occupait le pixel de départ de la légende d'indicateurs overlay
+          (chart/overlayLegend.ts, z-10) et la recouvrait, avec un z supérieur. */}
+      <div className="pointer-events-auto absolute bottom-2 right-2 z-20 flex items-center gap-1 rounded border border-border bg-surface/85 px-1 py-0.5 backdrop-blur">
         {LAYOUT_BUTTONS.map((b) => (
           <button
             key={b.mode}

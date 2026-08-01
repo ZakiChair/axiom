@@ -24,7 +24,12 @@
  *    vide ; dispose() nettoie tout AVANT dispose(chart).
  */
 import { registerIndicator, IndicatorSeries } from "klinecharts";
-import type { Chart, IndicatorFigure } from "klinecharts";
+import type {
+  Chart,
+  IndicatorFigure,
+  IndicatorTooltipData,
+  TooltipLegend,
+} from "klinecharts";
 import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
 import { getAdapter } from "../data/adapters";
 import { marketStore } from "../store/market";
@@ -54,6 +59,8 @@ type ComparePoint = Record<string, number>;
 interface CompareSlot {
   color: string;
   normByTime: Record<number, number>;
+  /** Symbole de la ligne — porté dans la légende du pane (cf. createTooltipDataSource). */
+  label: string;
 }
 
 /** Contenu d'`extendData` lu par `calc` et par les callbacks `figure.styles`. */
@@ -121,6 +128,24 @@ function ensureRegistered(): void {
     shortName: "Comp (base 100)",
     series: IndicatorSeries.Normal, // sous-pane à part : n'écrase pas l'axe prix
     figures,
+    // Légende du pane construite à la main : les `title` des figures sont vides (une
+    // ligne = un symbole, connu seulement au runtime) et le nom d'indicateur n'est plus
+    // imprimé par klinecharts depuis que les légendes DOM le portent — sans ceci le pane
+    // n'afficherait que des nombres nus.
+    createTooltipDataSource: ({ indicator, crosshair }) => {
+      const slots = (indicator.extendData as CompareExtend | undefined)?.slots;
+      const idx = crosshair.dataIndex ?? -1;
+      if (!slots || idx < 0) return {} as IndicatorTooltipData;
+      const point = indicator.result[idx] as ComparePoint | undefined;
+      const values: TooltipLegend[] = slots.map((slot, i) => {
+        const v = point?.[`line${i}`];
+        return {
+          title: `${slot.label}: `,
+          value: typeof v === "number" && Number.isFinite(v) ? v.toFixed(1) : "—",
+        };
+      });
+      return { name: "Comp (base 100)", values } as IndicatorTooltipData;
+    },
     // calc PUR de mapping : relit la série normalisée (extendData) par timestamp.
     // Aucune math refaite ici, aucun re-render.
     calc: (dataList, indicator) => {
@@ -252,7 +277,11 @@ export class CompareController {
     // Slot 0 : symbole PRINCIPAL (référence) — depuis le buffer marché, AUCUN fetch.
     const mainClose = new Map<number, number>();
     for (const c of candles) mainClose.set(c.time, c.close);
-    slots.push({ color: MAIN_COLOR, normByTime: normalize(candles, mainClose) });
+    slots.push({
+      color: MAIN_COLOR,
+      normByTime: normalize(candles, mainClose),
+      label: marketStore.getState().symbol,
+    });
 
     // Slots suivants : comparés, dans l'ordre voulu, s'ils sont déjà récupérés.
     for (const c of this.order) {
@@ -261,6 +290,7 @@ export class CompareController {
       slots.push({
         color: entry.color,
         normByTime: normalize(candles, entry.closeByTime),
+        label: c.symbol,
       });
     }
 

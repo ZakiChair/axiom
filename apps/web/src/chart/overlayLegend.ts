@@ -8,11 +8,29 @@
  * Positionné en haut à DROITE du pane prix pour ne pas chevaucher la légende native
  * (nom + valeur) de klinecharts, ancrée en haut-gauche — même convention que
  * `PaneHeaders` pour les panes séparés.
+ *
+ * Chaque ligne porte « ▪ Nom (params)  ⚙  ✕ ». La pastille relie visuellement la ligne
+ * à sa courbe (couleur d'instance, cf. store/indicators.ts) ; le libellé porte
+ * l'identité, que la couleur ne peut pas porter seule ; le ⚙ ouvre les réglages sans
+ * quitter le graphe. Avant, la ligne ne contenait QU'une croix ✕ : trois EMA actives
+ * donnaient trois croix identiques, et cliquer la mauvaise retirait la mauvaise courbe
+ * sans annulation possible (revue du 2026-08-01 § 3.2).
  */
 import type { Chart } from "klinecharts";
 import { ActionType, DomPosition } from "klinecharts";
 import { getIndicator } from "@axiom/indicators";
 import { indicatorsStore, formatInstanceLabel, type ActiveIndicator } from "../store/indicators";
+import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
+import { estReglable } from "./legendeReglable";
+import {
+  creerBoutonFermer,
+  creerBoutonReglages,
+  creerLibelle,
+  creerPastille,
+  majEtiquettes,
+  majLibelle,
+  majPastille,
+} from "./legendeControles";
 
 const CANDLE_PANE_ID = "candle_pane";
 /** Espace vertical entre deux lignes empilées (px). */
@@ -21,6 +39,9 @@ const ROW_GAP = 2;
 interface EntreeLegende {
   instanceId: string;
   label: string;
+  couleurIdx: number;
+  /** Le ⚙ mène-t-il à un éditeur réel ? (cf. legendeReglable.ts) */
+  reglable: boolean;
 }
 
 /** Filtre les instances actives à `def.pane === "overlay"` (EMA/BOLL/VWAP…). PURE. */
@@ -29,7 +50,12 @@ export function overlayIndicators(indicators: readonly ActiveIndicator[]): Entre
   for (const inst of indicators) {
     const def = getIndicator(inst.defId);
     if (!def || def.pane !== "overlay") continue;
-    result.push({ instanceId: inst.instanceId, label: formatInstanceLabel(def, inst.params) });
+    result.push({
+      instanceId: inst.instanceId,
+      label: formatInstanceLabel(def, inst.params),
+      couleurIdx: inst.couleurIdx,
+      reglable: estReglable(def),
+    });
   }
   return result;
 }
@@ -65,8 +91,9 @@ export class OverlayLegend {
         this.els.set(entry.instanceId, el);
         this.container.appendChild(el);
       } else {
-        const croix = el.querySelector<HTMLButtonElement>("[data-role=close]");
-        if (croix) croix.setAttribute("aria-label", `Fermer ${entry.label}`);
+        majPastille(el, entry.couleurIdx);
+        majLibelle(el, entry.label);
+        majEtiquettes(el, entry.label);
       }
     }
     this.repositionnerTout();
@@ -77,16 +104,17 @@ export class OverlayLegend {
     el.className =
       "pointer-events-auto absolute z-10 flex items-center gap-1.5 rounded bg-surface/90 px-1.5 py-0.5 text-[10px] text-text-dim shadow-sm";
 
-    const croix = document.createElement("button");
-    croix.textContent = "✕";
-    croix.type = "button";
-    croix.setAttribute("data-role", "close");
-    croix.setAttribute("aria-label", `Fermer ${entry.label}`);
-    croix.title = entry.label;
-    croix.className = "leading-none text-text-dim hover:text-text";
-    croix.addEventListener("click", () => indicatorsStore.getState().remove(entry.instanceId));
-
-    el.append(croix);
+    el.append(creerPastille(entry.couleurIdx), creerLibelle(entry.label));
+    if (entry.reglable) {
+      el.append(
+        creerBoutonReglages(entry.label, () =>
+          indicatorMenuUiStore.getState().ouvrirSurInstance(entry.instanceId)
+        )
+      );
+    }
+    el.append(
+      creerBoutonFermer(entry.label, () => indicatorsStore.getState().remove(entry.instanceId))
+    );
     return el;
   }
 

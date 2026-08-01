@@ -20,7 +20,7 @@
  * `indicatorsStore` (vanilla) ; le Chart réagit à ses changements de façon
  * impérative (aucun re-render du canvas).
  */
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { INDICATORS, getIndicator } from "@axiom/indicators";
 import type { IndicatorCategory, IndicatorDef, IndicatorInput } from "@axiom/types";
@@ -34,6 +34,7 @@ import { orderflowStore } from "../store/orderflow";
 import { OCN_PERIODS } from "../chart/openCloseNet.calc";
 import { macroOverlayStore } from "../store/macro-overlays";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
+import { chartCapaciteStore, plafondPanesAtteint } from "../store/chartCapacite";
 import { settingsUiStore } from "../store/settings-ui";
 import { tfAtLeast } from "../chart/tfOrder";
 import { indexRoving, Onglets } from "./ui";
@@ -249,13 +250,30 @@ export function IndicatorMenu() {
   const basculerMenu = useStore(indicatorMenuUiStore, (s) => s.basculer);
   const fermerMenu = useStore(indicatorMenuUiStore, (s) => s.fermer);
   const setOnglet = useStore(indicatorMenuUiStore, (s) => s.setOnglet);
+  const instanceCible = useStore(indicatorMenuUiStore, (s) => s.instanceCible);
+  const cibleConsommee = useStore(indicatorMenuUiStore, (s) => s.cibleConsommee);
   const [query, setQuery] = useState("");
   // Sections repliées (set d'ids de catégorie). Par défaut : tout ouvert.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // instanceId dont l'éditeur de params est déplié (un seul à la fois).
   const [editingId, setEditingId] = useState<string | null>(null);
 
+  // Ouverture ciblée depuis le graphe (⚙ d'une légende, double-clic sur un pane) :
+  // on déplie l'éditeur de CETTE instance, puis on accuse réception — l'intention ne
+  // doit pas se rejouer à la prochaine ouverture du menu.
+  useEffect(() => {
+    if (instanceCible === null) return;
+    setEditingId(instanceCible);
+    cibleConsommee();
+  }, [instanceCible, cibleConsommee]);
+
   const active = useStore(indicatorsStore, (s) => s.indicators);
+  // Capacité en panes du graphe maître, publiée par le contrôleur d'indicateurs.
+  const paneMaxCourant = useStore(chartCapaciteStore, (s) => s.paneMax);
+  const panesActifs = useMemo(
+    () => active.filter((i) => getIndicator(i.defId)?.pane !== "overlay").length,
+    [active]
+  );
   // Macros actives : elles comptent dans le badge du bouton au même titre que les
   // instances techniques (sinon, macros seules cochées, le badge afficherait le total
   // du catalogue — ce qui se lit comme « aucune active »).
@@ -576,12 +594,20 @@ export function IndicatorMenu() {
                       // non pertinent en dessous de son `minTimeframe` (ex. données quotidiennes).
                       const disabledTf =
                         def.minTimeframe !== undefined && !tfAtLeast(timeframe, def.minTimeframe);
-                      const disabled = disabledSynthetic || disabledTf;
+                      // Plus de place en hauteur : au-delà du plafond, klinecharts prend
+                      // la hauteur du pane PRIX (aucun plancher côté bougies) et
+                      // l'indicateur ajouté rendrait 0 px sans le dire. On refuse en
+                      // amont, avec la sortie à faire.
+                      const disabledPlace =
+                        def.pane !== "overlay" && plafondPanesAtteint(panesActifs, paneMaxCourant);
+                      const disabled = disabledSynthetic || disabledTf || disabledPlace;
                       const title = disabledSynthetic
                         ? "Volume non défini sur une série synthétique"
                         : disabledTf
                           ? `Nécessite ≥ ${def.minTimeframe}`
-                          : "Ajouter une instance";
+                          : disabledPlace
+                            ? `${paneMaxCourant} panes maximum à cette hauteur de fenêtre : fermez-en un, agrandissez la fenêtre, ou choisissez un indicateur qui se pose sur les prix`
+                            : "Ajouter une instance";
                       return (
                         <button
                           key={def.id}

@@ -31,13 +31,27 @@ import type { Chart } from "klinecharts";
 import { ActionType, DomPosition } from "klinecharts";
 import { getIndicator } from "@axiom/indicators";
 import { indicatorsStore, formatInstanceLabel } from "../store/indicators";
+import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
 import { axiomPaneId } from "./indicators";
+import { estReglable } from "./legendeReglable";
+import {
+  creerBoutonFermer,
+  creerBoutonReglages,
+  creerLibelle,
+  creerPastille,
+  majEtiquettes,
+  majLibelle,
+  majPastille,
+} from "./legendeControles";
 import { computeDropOrder } from "./paneOrder";
 
 interface EnTetePane {
   instanceId: string;
   paneId: string;
   label: string;
+  couleurIdx: number;
+  /** Le ⚙ mène-t-il à un éditeur réel ? (cf. legendeReglable.ts) */
+  reglable: boolean;
 }
 
 /** Panes séparés (hors overlay) VOULUS, dans l'ordre courant du store. */
@@ -46,7 +60,13 @@ function panesSepares(): EnTetePane[] {
   for (const inst of indicatorsStore.getState().indicators) {
     const def = getIndicator(inst.defId);
     if (!def || def.pane === "overlay") continue;
-    result.push({ instanceId: inst.instanceId, paneId: axiomPaneId(inst.instanceId), label: formatInstanceLabel(def, inst.params) });
+    result.push({
+      instanceId: inst.instanceId,
+      paneId: axiomPaneId(inst.instanceId),
+      label: formatInstanceLabel(def, inst.params),
+      couleurIdx: inst.couleurIdx,
+      reglable: estReglable(def),
+    });
   }
   return result;
 }
@@ -83,10 +103,9 @@ export class PaneHeaders {
         this.els.set(pane.instanceId, el);
         this.container.appendChild(el);
       } else {
-        // Le nom n'est plus affiché (légende native) : on garde juste l'aria-label de la
-        // croix à jour si les paramètres de l'instance ont changé (édition).
-        const croix = el.querySelector<HTMLButtonElement>("[data-role=close]");
-        if (croix) croix.setAttribute("aria-label", `Fermer ${pane.label}`);
+        majPastille(el, pane.couleurIdx);
+        majLibelle(el, pane.label);
+        majEtiquettes(el, pane.label);
       }
     }
     this.repositionnerTout();
@@ -102,8 +121,9 @@ export class PaneHeaders {
   private creerElement(pane: EnTetePane): HTMLDivElement {
     const el = document.createElement("div");
     // Ancré en haut à DROITE du pane (position calculée dans `positionner`) : la légende
-    // native (nom + valeur) occupe désormais le coin haut-GAUCHE, on décale donc les contrôles
-    // pour ne pas la chevaucher. Le nom n'est plus imprimé ici (audit #2/#10).
+    // native (nom + valeur) occupe le coin haut-GAUCHE, on décale donc les contrôles pour
+    // ne pas la chevaucher. La PASTILLE de couleur y est reprise pour relier l'en-tête à
+    // sa courbe, et le ⚙ ouvre les réglages sans passer par le menu latéral.
     el.className =
       "pointer-events-auto absolute z-10 flex items-center gap-1.5 rounded bg-surface/90 px-1.5 py-0.5 text-[10px] text-text-dim shadow-sm";
 
@@ -113,16 +133,17 @@ export class PaneHeaders {
     poignee.setAttribute("aria-hidden", "true"); // affordance visuelle de drag (souris)
     poignee.addEventListener("pointerdown", (e) => this.demarrerDrag(e, pane.instanceId));
 
-    const croix = document.createElement("button");
-    croix.textContent = "✕";
-    croix.type = "button";
-    croix.setAttribute("data-role", "close");
-    // Le nom n'étant plus visible dans l'en-tête, la croix porte l'indicateur ciblé.
-    croix.setAttribute("aria-label", `Fermer ${pane.label}`);
-    croix.className = "leading-none text-text-dim hover:text-text";
-    croix.addEventListener("click", () => indicatorsStore.getState().remove(pane.instanceId));
-
-    el.append(poignee, croix);
+    el.append(poignee, creerPastille(pane.couleurIdx), creerLibelle(pane.label));
+    if (pane.reglable) {
+      el.append(
+        creerBoutonReglages(pane.label, () =>
+          indicatorMenuUiStore.getState().ouvrirSurInstance(pane.instanceId)
+        )
+      );
+    }
+    el.append(
+      creerBoutonFermer(pane.label, () => indicatorsStore.getState().remove(pane.instanceId))
+    );
     return el;
   }
 

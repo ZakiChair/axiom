@@ -17,6 +17,13 @@ export type OngletIndicateurs = "techniques" | "macro";
 export interface IndicatorMenuUiState {
   open: boolean;
   onglet: OngletIndicateurs;
+  /**
+   * Instance dont l'éditeur de paramètres doit s'ouvrir à l'affichage du panneau
+   * (⚙ d'une légende du graphe, double-clic sur un pane). Consommé UNE fois par
+   * `IndicatorMenu` puis remis à null : c'est une intention de navigation, pas un
+   * état de sélection — sans quoi rouvrir le menu redéplierait toujours la même.
+   */
+  instanceCible: string | null;
   /** Ouvre / ferme le panneau (bouton de la toolbar). */
   basculer: () => void;
   /** Ferme le panneau (clic extérieur, Échap, ouverture d'un autre panneau). */
@@ -24,13 +31,21 @@ export interface IndicatorMenuUiState {
   setOnglet: (onglet: OngletIndicateurs) => void;
   /** Ouvre le panneau directement sur l'onglet Macro (commande Launchpad « MACRO »). */
   ouvrirSurMacro: () => void;
+  /** Ouvre le panneau sur l'onglet technique, éditeur déplié sur cette instance. */
+  ouvrirSurInstance: (instanceId: string) => void;
+  /** Accuse réception de `instanceCible` (appelé par le menu après dépliage). */
+  cibleConsommee: () => void;
 }
 
 export const indicatorMenuUiStore = createStore<IndicatorMenuUiState>((set) => ({
   open: false,
   onglet: "techniques",
+  instanceCible: null,
   basculer: () => set((s) => ({ open: !s.open })),
   fermer: () => set({ open: false }),
   setOnglet: (onglet) => set({ onglet }),
   ouvrirSurMacro: () => set({ open: true, onglet: "macro" }),
+  ouvrirSurInstance: (instanceId) =>
+    set({ open: true, onglet: "techniques", instanceCible: instanceId }),
+  cibleConsommee: () => set({ instanceCible: null }),
 }));

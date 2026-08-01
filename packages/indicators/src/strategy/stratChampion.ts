@@ -62,7 +62,8 @@ import { closeOf, highOf, lowOf, rma, rollingHighest, rollingLowest, trueRange }
 
 export const stratChampion = defStrategie({
   id: "stratChampion",
-  name: "Champion relatif (non validé)",
+  name: "Champion relatif",
+  validation: "non-valide",
   inputsStrategie: [
     { key: "canal", name: "Canal Donchian (bougies)", type: "number", default: 20, min: 2 },
     { key: "atrLength", name: "Période ATR", type: "number", default: 14, min: 1 },

@@ -42,7 +42,8 @@ import { supertrendOf } from "../trend/supertrend";
 
 export const stratMacdSupertrend = defStrategie({
   id: "stratMacdSupertrend",
-  name: "MACD + direction Supertrend (non validé)",
+  name: "MACD + direction Supertrend",
+  validation: "non-valide",
   inputsStrategie: [
     { key: "macdRapide", name: "MACD rapide", type: "number", default: 12, min: 1 },
     { key: "macdLente", name: "MACD lente", type: "number", default: 26, min: 1 },

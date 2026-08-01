@@ -47,6 +47,8 @@ export interface SpecStrategie {
   inputsStrategie: IndicatorInput[];
   precision?: number;
   minTimeframe?: Timeframe;
+  /** Statut de validation (campagne de rejeu) — porté par une donnée, pas par le nom. */
+  validation?: IndicatorDef["validation"];
   /** État de position DÉSIRÉ par bougie (décidé à la clôture). PURE. */
   position: (
     candles: Candle[],
@@ -63,6 +65,18 @@ export interface SpecStrategie {
 
 /** Cap de trades clos annotés (les plus récents) — borne le coût du rendu. */
 export const MAX_TRADES_ANNOTES = 60;
+
+/**
+ * Nombre de sorties portant une ÉTIQUETTE de résultat (« ±x.xx % »). Les autres gardent
+ * leur marqueur et leur segment : le détail reste accessible au survol via le tooltip
+ * du crosshair.
+ *
+ * Une étiquette par sortie — jusqu'à 60 — c'était l'anti-patron « une valeur sur chaque
+ * point » : les textes se chevauchaient entre eux, avec ceux des divergences et avec
+ * les mèches, au point de rendre le prix illisible sur un pas de temps actif
+ * (revue du 2026-08-01 § 6.3).
+ */
+export const MAX_LABELS_SORTIE = 10;
 
 const INPUT_LIGNES_TRADES: IndicatorInput = {
   key: "lignesTrades",
@@ -184,6 +198,7 @@ export function defStrategie(spec: SpecStrategie): IndicatorDef {
   const def: IndicatorDef = {
     id: spec.id,
     name: spec.name,
+    ...(spec.validation !== undefined ? { validation: spec.validation } : {}),
     category: "strategy",
     pane: "overlay",
     inputs: [...spec.inputsStrategie, INPUT_LIGNES_TRADES],
@@ -209,7 +224,10 @@ export function defStrategie(spec: SpecStrategie): IndicatorDef {
       const marqueurs: MarqueurAnnotation[] = [];
       const labels: LabelAnnotation[] = [];
       const segments: SegmentAnnotation[] = [];
-      const annoter = (t: TradeStrategie) => {
+      // Les `n` derniers trades clos portent une étiquette ; les plus anciens non.
+      const clos = trades.slice(-MAX_TRADES_ANNOTES);
+      const avecLabel = new Set(clos.slice(-MAX_LABELS_SORTIE));
+      const annoter = (t: TradeStrategie, etiquette = true) => {
         const bEntree = candles[t.idxEntree];
         if (bEntree === undefined) return;
         const libEntree = t.sens === 1 ? lib.long : lib.short;
@@ -226,7 +244,7 @@ export function defStrategie(spec: SpecStrategie): IndicatorDef {
         const bSortie = candles[t.idxSortie];
         if (bSortie === undefined) return;
         const gagnant = t.pnlPct >= 0;
-        labels.push({
+        if (etiquette) labels.push({
           idx: t.idxSortie,
           valeur: t.sens === 1 ? bSortie.high : bSortie.low,
           texte: `${fmtSigne(t.pnlPct)} %`,
@@ -250,8 +268,8 @@ export function defStrategie(spec: SpecStrategie): IndicatorDef {
           });
         }
       };
-      for (const t of trades.slice(-MAX_TRADES_ANNOTES)) annoter(t);
-      if (ouvert !== null) annoter(ouvert);
+      for (const t of clos) annoter(t, avecLabel.has(t));
+      if (ouvert !== null) annoter(ouvert); // le trade EN COURS est toujours étiqueté
 
       const annotations: AnnotationsIndicateur = {};
       if (segments.length > 0) annotations.segments = segments;

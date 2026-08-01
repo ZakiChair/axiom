@@ -356,6 +356,16 @@ export interface IndicatorDef {
   precision?: number;
   /** Timeframe minimal en dessous duquel ce def n'est pas pertinent (ex. données on-chain journalières). */
   minTimeframe?: Timeframe;
+  /**
+   * Statut de VALIDATION d'une stratégie. « non-valide » = mesurée par la campagne de
+   * rejeu et recalée : le résultat dépend d'hypothèses d'exécution non tenues en réel.
+   *
+   * Porté par une DONNÉE, pas par le nom : la mention vivait auparavant dans le champ
+   * `name` (« … (non validé) »), donc tronquée en premier par le `truncate` d'un panneau
+   * de 288 px, et concaténée aux paramètres dans la légende du chart — le statut le plus
+   * important du catalogue était le moins lisible (revue du 2026-08-01 § 6.3).
+   */
+  validation?: "non-valide";
   calc: (
     candles: Candle[],
     params: Record<string, number | boolean | string>,

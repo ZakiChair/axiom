@@ -44,7 +44,8 @@ import { psarOf } from "../trend/psar";
 
 export const stratPsarAdx = defStrategie({
   id: "stratPsarAdx",
-  name: "PSAR + filtre ADX (non validé)",
+  name: "PSAR + filtre ADX",
+  validation: "non-valide",
   inputsStrategie: [
     { key: "psarStep", name: "Pas AF", type: "number", default: 0.02, min: 0 },
     { key: "psarMax", name: "AF max", type: "number", default: 0.2, min: 0 },

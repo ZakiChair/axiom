@@ -36,6 +36,7 @@ import {
 } from "../data/backtestData";
 import type { WorkerRequest, WorkerResponse } from "../workers/backtest.worker";
 import { windowManagerStore, mirrorOpenState } from "./windowManager";
+import { signatureRun, type ConfigRun } from "./backtestSignature";
 
 export { BACKTEST_TIMEFRAMES, SEUIL_PROFONDEUR_BT };
 
@@ -500,6 +501,13 @@ export interface BacktestState {
   phase: PhaseBacktest;
   progress: ProgressionAccumulation;
   resultat: ResultatBacktest | null;
+  /**
+   * Signature de la configuration qui a PRODUIT `resultat`. Comparée à la config
+   * courante, elle dit si les stats affichées décrivent encore ce que montre le
+   * builder — aucun setter n'invalidait le résultat, et il y en a quatorze
+   * (cf. store/backtestSignature.ts).
+   */
+  signatureRun: string | null;
   error: string | null;
   note: string | null;
   /** Dernier nombre de bougies accumulées (run ou précharge 2a/1d) ; null = jamais. */
@@ -521,6 +529,24 @@ function terminateWorker(): void {
     worker.terminate();
     worker = null;
   }
+}
+
+/** Extrait de l'état la configuration qui décide du résultat d'un run. */
+export function configCourante(s: BacktestState): ConfigRun {
+  return {
+    symbol: s.symbol,
+    tf: s.tf,
+    plage: s.plage,
+    direction: s.direction,
+    tailleFixe: s.tailleFixe,
+    stopPct: s.stopPct,
+    targetPct: s.targetPct,
+    fraisPct: s.fraisPct,
+    slippagePct: s.slippagePct,
+    capitalInitial: s.capitalInitial,
+    reglesEntree: s.reglesEntree,
+    reglesSortie: s.reglesSortie,
+  };
 }
 
 export const backtestStore = createStore<BacktestState>((set, get) => ({
@@ -607,6 +633,7 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
   phase: "idle",
   progress: { recuperees: 0, cible: 0 },
   resultat: null,
+  signatureRun: null,
   error: null,
   note: null,
   nbBougiesChargees: null,
@@ -678,7 +705,11 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
         if (runId !== currentRunId) return;
         const msg = event.data as WorkerResponse;
         if (msg.type === "result") {
-          set({ phase: "done", resultat: msg.resultat });
+          set({
+            phase: "done",
+            resultat: msg.resultat,
+            signatureRun: signatureRun(configCourante(get())),
+          });
           terminateWorker();
         } else if (msg.type === "error") {
           set({ phase: "error", error: `Moteur : ${msg.message}` });

@@ -51,7 +51,8 @@ const RSI_NEUTRE = 50;
 
 export const stratRsiRange = defStrategie({
   id: "stratRsiRange",
-  name: "RSI réversion + filtre range ADX (non validé)",
+  name: "RSI réversion + filtre range ADX",
+  validation: "non-valide",
   inputsStrategie: [
     { key: "rsiLength", name: "Longueur RSI", type: "number", default: 14, min: 1 },
     { key: "seuilBas", name: "Seuil bas (survente)", type: "number", default: 30, min: 1, max: 50 },

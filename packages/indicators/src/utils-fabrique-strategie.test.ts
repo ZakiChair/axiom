@@ -24,6 +24,7 @@ import {
   defStrategie,
   etatsStrategie,
   MAX_TRADES_ANNOTES,
+  MAX_LABELS_SORTIE,
   type EtatStrategie,
 } from "./utils-fabrique-strategie";
 
@@ -114,7 +115,7 @@ describe("defStrategie", () => {
     ]);
   });
 
-  it("cap MAX_TRADES_ANNOTES : seuls les 60 derniers trades portent des annotations", () => {
+  it("cap MAX_TRADES_ANNOTES : seuls les 60 derniers trades sont annotés, et 10 étiquetés", () => {
     // 140 bougies, alternance 1/0 → un trade complet toutes les 2 bougies (~69 trades clos).
     const n = 140;
     const grands: Candle[] = Array.from({ length: n }, (_v, i) => ({
@@ -123,7 +124,11 @@ describe("defStrategie", () => {
     const etats: Array<EtatStrategie | undefined> = Array.from({ length: n }, (_v, i) => (i % 2 === 0 ? 1 : 0));
     const r = computeIndicator(defAvec(etats), grands);
     expect(r.annotations?.segments?.length).toBe(MAX_TRADES_ANNOTES);
-    expect(r.annotations?.labels?.length).toBe(MAX_TRADES_ANNOTES);
+    // Les ÉTIQUETTES sont sélectives : une par sortie (jusqu'à 60) rendait le prix
+    // illisible — textes chevauchés entre eux et avec les mèches. Le détail reste au
+    // survol, via le tooltip du crosshair.
+    expect(r.annotations?.labels?.length).toBe(MAX_LABELS_SORTIE);
+    expect(r.annotations?.marqueurs?.length).toBeGreaterThan(MAX_LABELS_SORTIE);
   });
 
   it("construireTradesStrategie : mêmes trades que la fixture principale de la fabrique", () => {

@@ -495,20 +495,36 @@ page.
 Quatre lots, ordonnés par rapport valeur/effort. Les efforts sont indicatifs pour un
 développeur seul qui connaît le code.
 
-### Lot A — « Rendre le graphe lisible » (le plus rentable)
+### Lot A — « Rendre le graphe lisible » ✅ LIVRÉ le 2026-08-01
 
-| # | Action | Effort |
-|---|---|---|
-| A1 | Fermer `applyChartTheme` sur `overlay` / `indicator` / `separator` | S |
-| A2 | `backgroundColor: "transparent"` sur les 8 figures texte + test de garde | S |
-| A3 | `candle.tooltip.showRule: 'none'` + `offsetTop: 36` ; barre de disposition en bas | S |
-| A4 | Couleur par instance (`couleurIdx`, lu au dessin) | M |
-| A5 | Légende porteuse : pastille + nom + valeur + ⚙ + ✕ | M |
-| A6 | Double-clic sur pane / ⚙ → réglages de l'instance | S |
-| A7 | Budget de hauteur des panes + refus explicite au-delà | M |
+| # | Action | Effort | État |
+|---|---|---|---|
+| A1 | Fermer `applyChartTheme` sur `overlay` / `indicator` / `separator` | S | fait |
+| A2 | `backgroundColor: "transparent"` sur les 8 figures texte + test de garde | S | fait |
+| A3 | `candle.tooltip.showRule: 'none'` + `offsetTop: 36` ; barre de disposition en bas | S | fait |
+| A4 | Couleur par instance (`couleurIdx`, lu au dessin) | M | fait |
+| A5 | Légende porteuse : pastille + nom + ⚙ + ✕ | M | fait |
+| A6 | Double-clic sur pane / ⚙ → réglages de l'instance | S | fait |
+| A7 | Filet de hauteur des panes + refus explicite au-delà | M | fait |
 
-Après ce lot, un indicateur a une couleur propre, un nom lisible, une valeur au crosshair et des
-réglages à un clic — et le graphe ne s'éteint plus.
+Commits `eaecec2` → `a6abfcd`, 2852 tests, CI verte. Un indicateur a désormais une couleur
+propre, un nom lisible et des réglages à un clic ; le graphe ne s'éteint plus.
+
+**Ce que la vérification a corrigé après coup** (mesures dans le navigateur + revue
+adversariale à 6 lentilles, 32 constats rapportés) :
+
+- Le filet de hauteur ne s'appliquait pas du tout : `hauteurUtile()` comptait le pane des prix
+  une fois par overlay, gonflant la hauteur mesurée au point de neutraliser le calcul.
+- Sa première version annulait le redimensionnement manuel des panes. Il est devenu un
+  **filet** — il ne rogne que si le prix est réellement étouffé, et proportionnellement.
+- `rect`/`circle` en « transparent » supprimaient la bande de sélection des dessins.
+- La légende OHLCV coupée l'était aussi dans l'export PNG (qui ne composite que les canvases) ;
+  elle y est rétablie le temps de la capture.
+- L'allocateur de couleurs ignorait l'arité des sorties (Bollinger réserve trois jetons) et sa
+  règle de réparation n'était pas idempotente — les couleurs bougeaient à chaque rechargement.
+- Le ⚙ des stratégies et des définitions sans paramètre ne menait à aucun éditeur.
+- Le verrou lexical se satisfaisait d'un commentaire, et ne couvrait pas la seule figure texte
+  hors de `chart/` — que A1 avait justement rendue invisible.
 
 ### Lot B — « Le clavier reprend la main »
 

@@ -32,7 +32,7 @@ import type { Chart, IndicatorFigure, IndicatorTooltipData, TooltipLegend } from
 import type { Candle, ExchangeId, IndicatorDef, IndicatorResult, Timeframe } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
 import { serieCanvas } from "../lib/canvasTokens";
-import { hauteurPaneIndicateur, paneMax } from "./paneBudget";
+import { hauteursCorrigees, paneMax } from "./paneBudget";
 import { chartCapaciteStore } from "../store/chartCapacite";
 import { dessinerAnnotationsPane } from "./annotationsPane";
 import { AnnotationsPrix, masquerTooltipAnnotation } from "./annotationsPrix";
@@ -453,54 +453,53 @@ export class ChartIndicators {
    * canvas du prix tombait à 4 px CSS — plus une bougie à l'écran (revue § 3.4).
    * Idempotent et sans recalcul : `setPaneOptions` ne touche qu'à la géométrie.
    */
+  /**
+   * Filet de hauteur : n'intervient QUE si le pane des prix est étouffé, et se contente
+   * alors de rogner les panes d'indicateurs proportionnellement (cf. paneBudget.ts).
+   * Tant que le prix a sa part, aucune écriture — c'est ce qui laisse tenir le
+   * redimensionnement manuel à la poignée (`dragEnabled: true`), y compris au-delà de la
+   * hauteur par défaut.
+   */
   private equilibrerHauteurs(): void {
     // Panes séparés DISTINCTS : `this.active` est indexé par instance, et toutes les
     // instances overlay partagent `candle_pane` — les compter ferait un doublon (et
-    // gonflerait la hauteur utile d'autant, au point de neutraliser le budget).
+    // gonflerait la hauteur utile d'autant, au point de neutraliser le filet).
     const separes = [...new Set([...this.active.values()].map((i) => i.paneId))].filter(
       (paneId) => paneId !== CANDLE_PANE_ID
     );
-    const utile = this.hauteurUtile(separes);
-    // Le maître publie sa capacité pour que le menu puisse refuser en amont (le budget
+    const hauteurs: number[] = [];
+    let utile = this.chart.getSize(CANDLE_PANE_ID)?.height ?? 0;
+    for (const paneId of separes) {
+      const h = this.chart.getSize(paneId)?.height ?? 0;
+      hauteurs.push(h);
+      utile += h;
+    }
+    // Le maître publie sa capacité pour que le menu puisse refuser en amont (le rognage
     // seul ne peut pas sauver le prix au-delà du plafond, cf. paneBudget.test.ts).
     if (this.estMaitre) chartCapaciteStore.getState().setPaneMax(paneMax(utile));
-    const hauteur = hauteurPaneIndicateur(utile, separes.length);
-    if (hauteur === null) return;
-    for (const paneId of separes) {
-      // N'écrire QUE sur écart réel : `setPaneOptions` déclenche `adjustPaneViewport`
-      // (bundle :13261), et cette méthode est rappelée à chaque OnDataReady — soit
-      // ~10 fois par seconde en flux live. À l'équilibre, aucune écriture n'est émise,
-      // ce qui évite aussi bien le coût que la boucle relayout → OnDataReady → relayout.
-      const actuelle = this.chart.getSize(paneId)?.height;
-      if (actuelle === undefined || Math.abs(actuelle - hauteur) < 1) continue;
-      this.chart.setPaneOptions({ id: paneId, height: hauteur });
-    }
+
+    const corrigees = hauteursCorrigees(utile, hauteurs);
+    if (corrigees === null) return; // cas courant : rien à faire, aucune écriture.
+    separes.forEach((paneId, i) => {
+      const h = corrigees[i];
+      if (h !== undefined && h !== hauteurs[i]) {
+        this.chart.setPaneOptions({ id: paneId, height: h });
+      }
+    });
   }
 
   /**
-   * Rejoue l'équilibrage quand la géométrie devient connue ou change (création de pane,
-   * redimensionnement de la fenêtre). Appelé par `ChartInstance` sur les mêmes événements
-   * que `PaneHeaders` : au premier `sync()`, les panes viennent d'être créés et leur
-   * hauteur n'est pas encore mesurable — sans ce rattrapage, le budget ne s'appliquait
-   * jamais et les panes gardaient les 100 px par défaut de klinecharts.
+   * Rejoue le filet quand la géométrie change (création de pane, redimensionnement de la
+   * fenêtre). Appelé par `ChartInstance` sur `OnDataReady` : au premier `sync()`, les
+   * panes viennent d'être créés et leur hauteur n'est pas encore mesurable — sans ce
+   * rattrapage, le filet ne s'appliquait jamais.
+   *
+   * NB : volontairement PAS abonné à `OnPaneDrag`. Y répondre annulait le geste avant
+   * même le relâchement de la souris ; le filet se déclenchera au prochain OnDataReady
+   * si — et seulement si — le drag a réellement étouffé le pane des prix.
    */
   rafraichirHauteurs(): void {
     this.equilibrerHauteurs();
-  }
-
-  /**
-   * Hauteur que klinecharts répartit entre les panes = pane prix + panes séparés, chacun
-   * compté UNE fois (`getSize` sans DomPosition renvoie le pane complet). Mesurée ainsi
-   * plutôt que sur le conteneur DOM, qui inclut l'axe des temps et les séparateurs.
-   * 0 tant que le graphe n'a pas de géométrie — `hauteurPaneIndicateur` renvoie alors
-   * null et on laisse klinecharts faire.
-   */
-  private hauteurUtile(separes: readonly string[]): number {
-    let total = this.chart.getSize(CANDLE_PANE_ID)?.height ?? 0;
-    for (const paneId of separes) {
-      total += this.chart.getSize(paneId)?.height ?? 0;
-    }
-    return total;
   }
 
   /**

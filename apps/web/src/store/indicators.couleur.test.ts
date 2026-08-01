@@ -8,7 +8,12 @@
  * stable, distinct de celui de ses voisines, et libéré à la suppression.
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { indicatorsStore, prochainIndexCouleur, NB_COULEURS_SERIE } from "./indicators";
+import {
+  indicatorsStore,
+  jetonsConsommes,
+  prochainIndexCouleur,
+  NB_COULEURS_SERIE,
+} from "./indicators";
 
 const etat = () => indicatorsStore.getState();
 const couleurs = () => etat().indicators.map((i) => i.couleurIdx);
@@ -128,6 +133,40 @@ describe("attribution à l'ajout", () => {
     }));
     etat().setAll(liste);
     expect(couleurs()).toEqual([0, 1, 2, 3, 4, 5, 0]);
+  });
+
+  it("setAll est IDEMPOTENT après une duplication : recharger ne repeint personne", () => {
+    // Le cas qui cassait la promesse « la couleur suit l'entité » : six instances bien
+    // réparties, on en duplique une (la copie prend un index déjà pris, c'est normal à
+    // six), puis on recharge — toutes les couleurs doivent être exactement les mêmes.
+    for (let i = 0; i < 6; i++) etat().add("ema");
+    const premier = etat().indicators[0];
+    if (!premier) throw new Error("instance absente");
+    etat().duplicate(premier.instanceId);
+    const avant = couleurs();
+
+    etat().setAll(etat().indicators);
+    expect(couleurs()).toEqual(avant);
+    // Et une seconde fois, pour verrouiller le point fixe.
+    etat().setAll(etat().indicators);
+    expect(couleurs()).toEqual(avant);
+  });
+
+  it("un multi-sorties RÉSERVE une couleur par sortie : l'overlay suivant ne la reprend pas", () => {
+    // Bollinger trace trois lignes en --serie-(idx+1..3) ; sans tenir compte de cette
+    // arité, l'EMA suivante recevait l'index 1, c'est-à-dire exactement la couleur de la
+    // bande haute, sur le même pane.
+    etat().add("bollinger");
+    etat().add("ema");
+    const [boll, ema] = etat().indicators;
+    if (!boll || !ema) throw new Error("instances absentes");
+    const sortiesBoll = jetonsConsommes(boll.defId);
+    expect(sortiesBoll).toBeGreaterThan(1);
+    const occupeesParBoll = Array.from(
+      { length: sortiesBoll },
+      (_, k) => (boll.couleurIdx + k) % NB_COULEURS_SERIE
+    );
+    expect(occupeesParBoll).not.toContain(ema.couleurIdx);
   });
 
   it("toutes les couleurs attribuées restent dans la bande des tokens", () => {

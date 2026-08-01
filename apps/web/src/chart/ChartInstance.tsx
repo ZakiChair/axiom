@@ -57,6 +57,7 @@ import { refSymbolStore } from "../store/refSymbol";
 import { getIndicator } from "@axiom/indicators";
 import { ChartIndicators, axiomPaneId } from "./indicators";
 import { instancePourY } from "./paneSousCurseur";
+import { estReglable } from "./legendeReglable";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
 import { PaneHeaders } from "./paneHeaders";
 import { OverlayLegend } from "./overlayLegend";
@@ -79,7 +80,7 @@ import { bindPriceAlertMenu } from "./priceAlertMenu";
 import { MeasureTool } from "./measureTool";
 import { CandleReadout } from "./candleReadout";
 import { SymbolBanner } from "../components/SymbolBanner";
-import { lireTokenCanvas } from "../lib/canvasTokens";
+import { lireTokenCanvas, rgbaTokenCanvas } from "../lib/canvasTokens";
 
 /** Type d'échelle de l'axe prix (miroir de YAxisType klinecharts). */
 export type PriceScaleType = "normal" | "log" | "percentage";
@@ -270,9 +271,13 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
       text: { color: accentInk, backgroundColor: accent, borderColor: accent, size: 10, family: font },
       point: { color: accent, borderColor: accent, activeColor: accent, activeBorderColor: accent },
       line: { color: accent },
-      rect: { color: "transparent", borderColor: accent },
+      // `rect` et `circle` sont des REMPLISSAGES (style Fill par défaut) : klinecharts s'en
+      // sert notamment pour la bande de sélection d'un dessin sur les axes. Les mettre à
+      // « transparent » les faisait disparaître — `borderColor` ne compense pas, il n'est
+      // pas tracé tant que le style reste Fill. On garde donc un aplat, en accent voilé.
+      rect: { color: rgbaTokenCanvas("--accent", 0.18, "#38bdf8"), borderColor: accent },
       polygon: { color: accent, borderColor: accent },
-      circle: { color: "transparent", borderColor: accent },
+      circle: { color: rgbaTokenCanvas("--accent", 0.18, "#38bdf8"), borderColor: accent },
       arc: { color: accent },
     },
     // Le NOM de l'indicateur est porté par les légendes DOM (overlayLegend / paneHeaders),
@@ -417,9 +422,12 @@ export function ChartInstance({
     // ne pouvait donc rien calculer, et les panes gardaient les 100 px par défaut de
     // klinecharts. `OnDataReady` est le même signal que celui qui repositionne les en-têtes ;
     // `rafraichirHauteurs` n'écrit que sur écart réel, donc c'est un no-op à l'équilibre.
+    // PAS d'abonnement à `OnPaneDrag` : y répondre annulait le redimensionnement manuel
+    // avant même le relâchement de la souris (le filet réécrivait la hauteur que le drag
+    // venait d'écrire). Le filet se rejoue sur OnDataReady, et ne rogne que si le pane
+    // des prix est réellement étouffé — un pane agrandi à la main est donc conservé.
     const majHauteurs = (): void => indicators.rafraichirHauteurs();
     chart.subscribeAction(ActionType.OnDataReady, majHauteurs);
-    chart.subscribeAction(ActionType.OnPaneDrag, majHauteurs);
 
     // Outils d'analyse de prix (contrôleurs impératifs, overlays DOM propres à ce slot) :
     //  - measureTool : règle Shift+glisser transitoire (écart %/Δ/bougies/durée).
@@ -526,7 +534,6 @@ export function ChartInstance({
       unsubscribeTheme();
       unsubscribePaneHeaders();
       chart.unsubscribeAction(ActionType.OnDataReady, majHauteurs);
-      chart.unsubscribeAction(ActionType.OnPaneDrag, majHauteurs);
       paneHeaders.dispose();
       overlayLegend.dispose();
       measureTool.dispose();
@@ -956,9 +963,14 @@ export function ChartInstance({
         const chart = mountRef.current?.chart;
         const boite = containerRef.current?.getBoundingClientRect();
         if (!chart || !boite) return;
+        // Mêmes instances que celles qui portent un ⚙ : une stratégie ou une def sans
+        // paramètre n'a pas d'éditeur, le double-clic ouvrirait un menu sur rien.
         const panes = indicatorsStore
           .getState()
-          .indicators.filter((i) => getIndicator(i.defId)?.pane !== "overlay")
+          .indicators.filter((i) => {
+            const def = getIndicator(i.defId);
+            return def?.pane !== "overlay" && estReglable(def);
+          })
           .map((i) => ({ instanceId: i.instanceId, boite: chart.getSize(axiomPaneId(i.instanceId)) }));
         const cible = instancePourY(e.clientY - boite.top, panes);
         if (cible !== null) indicatorMenuUiStore.getState().ouvrirSurInstance(cible);

@@ -25,7 +25,7 @@
  * `createOverlay` sur l'instance FOCUS.
  */
 import { createStore } from "zustand/vanilla";
-import { registerOverlay } from "klinecharts";
+import { registerOverlay, TooltipShowRule } from "klinecharts";
 import type { Chart as KLineChartInstance, OverlayEvent } from "klinecharts";
 // Effet de bord : enregistre les overlays Fibonacci custom (fibCustom / fibTrend).
 import { FIB_RETRACEMENT, FIB_TREND } from "./fibonacci";
@@ -524,7 +524,15 @@ export function redrawFibOverlays(rev: number): void {
 export function exportChartImage(symbol: string, tf: string): boolean {
   if (activeChart === null) return false;
   const bg = lireTokenCanvas("--bg", "#000000");
+  // La légende OHLCV native est coupée à l'écran (le bandeau de symbole et le readout la
+  // rendent déjà, cf. applyChartTheme) — mais ces deux-là sont du DOM, et
+  // `getConvertPictureUrl` ne composite QUE les canvases : sans ce rétablissement
+  // temporaire, l'image exportée ne porterait plus aucun O/H/L/C. `setStyles` redessine
+  // de façon synchrone (`adjustPaneViewport`, bundle 9.8.12 :13281), la capture voit donc
+  // bien la légende, et l'état d'écran est restauré juste après.
+  activeChart.setStyles({ candle: { tooltip: { showRule: TooltipShowRule.Always } } });
   const url = activeChart.getConvertPictureUrl(true, "png", bg);
+  activeChart.setStyles({ candle: { tooltip: { showRule: TooltipShowRule.None } } });
   const date = new Date().toISOString().slice(0, 10); // AAAA-MM-JJ
   const a = document.createElement("a");
   a.href = url;

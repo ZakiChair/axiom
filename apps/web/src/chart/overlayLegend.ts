@@ -21,6 +21,7 @@ import { ActionType, DomPosition } from "klinecharts";
 import { getIndicator } from "@axiom/indicators";
 import { indicatorsStore, formatInstanceLabel, type ActiveIndicator } from "../store/indicators";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
+import { estReglable } from "./legendeReglable";
 import {
   creerBoutonFermer,
   creerBoutonReglages,
@@ -39,6 +40,8 @@ interface EntreeLegende {
   instanceId: string;
   label: string;
   couleurIdx: number;
+  /** Le ⚙ mène-t-il à un éditeur réel ? (cf. legendeReglable.ts) */
+  reglable: boolean;
 }
 
 /** Filtre les instances actives à `def.pane === "overlay"` (EMA/BOLL/VWAP…). PURE. */
@@ -51,6 +54,7 @@ export function overlayIndicators(indicators: readonly ActiveIndicator[]): Entre
       instanceId: inst.instanceId,
       label: formatInstanceLabel(def, inst.params),
       couleurIdx: inst.couleurIdx,
+      reglable: estReglable(def),
     });
   }
   return result;
@@ -100,12 +104,15 @@ export class OverlayLegend {
     el.className =
       "pointer-events-auto absolute z-10 flex items-center gap-1.5 rounded bg-surface/90 px-1.5 py-0.5 text-[10px] text-text-dim shadow-sm";
 
+    el.append(creerPastille(entry.couleurIdx), creerLibelle(entry.label));
+    if (entry.reglable) {
+      el.append(
+        creerBoutonReglages(entry.label, () =>
+          indicatorMenuUiStore.getState().ouvrirSurInstance(entry.instanceId)
+        )
+      );
+    }
     el.append(
-      creerPastille(entry.couleurIdx),
-      creerLibelle(entry.label),
-      creerBoutonReglages(entry.label, () =>
-        indicatorMenuUiStore.getState().ouvrirSurInstance(entry.instanceId)
-      ),
       creerBoutonFermer(entry.label, () => indicatorsStore.getState().remove(entry.instanceId))
     );
     return el;

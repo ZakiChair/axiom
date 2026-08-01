@@ -42,27 +42,56 @@ export interface ActiveIndicator extends IndicatorInstance {
 export const NB_COULEURS_SERIE = 6;
 
 /**
- * Index de couleur le MOINS utilisé parmi `pris` (à égalité, le plus petit) — donc le
- * plus petit index libre tant qu'il en reste un. PURE.
- *
- * Le comptage, plutôt qu'un simple « premier libre sinon 0 », vient d'un cas observé :
- * six panes séparés occupant déjà les six tokens, puis trois EMA ajoutées sur le prix
- * ressortaient TOUTES en --serie-1. Au-delà de six instances la répétition est
- * inévitable (le thème n'en déclare pas plus), mais les nouvelles doivent au moins
- * rester distinctes entre elles.
+ * Nombre de jetons de couleur qu'une instance CONSOMME : une par sortie tracée, car
+ * le chart peint la sortie `i` avec `serieCanvas(couleurIdx + i)`. Une instance à trois
+ * sorties (Bollinger) occupe donc trois jetons consécutifs, et la suivante doit
+ * commencer après — sinon son unique ligne reprend exactement la couleur d'une des
+ * bandes, sur le même pane. Borné à la taille du cycle : au-delà, les couleurs se
+ * répètent de toute façon à l'intérieur de l'instance.
  */
-export function prochainIndexCouleur(pris: ReadonlyArray<number | undefined>): number {
+export function jetonsConsommes(defId: string): number {
+  const n = getIndicator(defId)?.outputs.length ?? 1;
+  return Math.max(1, Math.min(n, NB_COULEURS_SERIE));
+}
+
+/**
+ * Index de couleur le MOINS chargé, en tenant compte de l'ARITÉ de chaque instance
+ * (à charge égale, le plus petit index). PURE.
+ *
+ * `pris` liste les instances déjà placées sous la forme `[indexDeDépart, nbJetons]` :
+ * chacune marque `nbJetons` index consécutifs à partir de son départ. Le comptage,
+ * plutôt qu'un « premier libre sinon 0 », vient de deux cas observés : six panes
+ * occupant déjà les six tokens faisaient ressortir toutes les EMA suivantes en
+ * --serie-1 ; et une instance multi-sorties non déclarée faisait recouvrir ses bandes
+ * par l'overlay suivant.
+ */
+export function prochainIndexCouleur(
+  pris: ReadonlyArray<number | undefined | readonly [number, number]>
+): number {
   const comptes = new Array<number>(NB_COULEURS_SERIE).fill(0);
-  for (const n of pris) {
-    if (typeof n === "number" && Number.isInteger(n) && n >= 0 && n < NB_COULEURS_SERIE) {
-      comptes[n] = (comptes[n] ?? 0) + 1;
+  const marquer = (depart: number, jetons: number): void => {
+    if (!Number.isInteger(depart) || depart < 0 || depart >= NB_COULEURS_SERIE) return;
+    for (let k = 0; k < jetons; k++) {
+      const idx = (depart + k) % NB_COULEURS_SERIE;
+      comptes[idx] = (comptes[idx] ?? 0) + 1;
     }
+  };
+  for (const entree of pris) {
+    if (typeof entree === "number") marquer(entree, 1);
+    else if (Array.isArray(entree)) marquer(entree[0], Math.max(1, entree[1]));
   }
   let meilleur = 0;
   for (let i = 1; i < NB_COULEURS_SERIE; i++) {
     if ((comptes[i] ?? 0) < (comptes[meilleur] ?? 0)) meilleur = i;
   }
   return meilleur;
+}
+
+/** Occupation courante d'une liste d'instances, prête pour `prochainIndexCouleur`. */
+export function occupationCouleurs(
+  instances: ReadonlyArray<{ defId: string; couleurIdx: number }>
+): Array<readonly [number, number]> {
+  return instances.map((i) => [i.couleurIdx, jetonsConsommes(i.defId)] as const);
 }
 
 /** Paramètres par défaut déclarés dans les `inputs` d'une définition. */
@@ -131,35 +160,41 @@ type MaybeIdentified = IndicatorInstance & { instanceId?: string; couleurIdx?: n
  * la couleur d'une EMA ne doit pas changer d'un lancement à l'autre), sinon alloué.
  */
 function assignInstanceIds(list: ReadonlyArray<MaybeIdentified>): ActiveIndicator[] {
+  const couleurPersistee = (item: MaybeIdentified): number | null =>
+    typeof item.couleurIdx === "number" &&
+    Number.isInteger(item.couleurIdx) &&
+    item.couleurIdx >= 0 &&
+    item.couleurIdx < NB_COULEURS_SERIE
+      ? item.couleurIdx
+      : null;
+
+  // Un état enregistré AVANT l'allocation par instance a toutes ses instances sur la
+  // même couleur : rien dans l'UI ne permettrait de le réparer, on réalloue donc tout.
+  // C'est le SEUL cas de réattribution — hors de là, ce qui est persisté fait foi.
+  // Une règle plus fine (« garder sauf si une autre couleur est moins chargée »)
+  // paraissait plus juste mais n'était pas idempotente : recharger une liste comportant
+  // un doublon inévitable décalait les couleurs de toutes les instances suivantes, et
+  // l'agencement changeait de teintes à chaque ouverture.
+  const persistees = list.map(couleurPersistee);
+  const toutesPersistees = persistees.every((c) => c !== null);
+  const degenere =
+    list.length > 1 && toutesPersistees && new Set(persistees).size === 1;
+
   const used = new Set<string>();
-  const couleurs: number[] = [];
+  const placees: Array<{ defId: string; couleurIdx: number }> = [];
   const out: ActiveIndicator[] = [];
-  for (const item of list) {
+  list.forEach((item, i) => {
     const base =
       typeof item.instanceId === "string" && item.instanceId.length > 0
         ? item.instanceId
         : `${item.defId}-${shortHash(item.params)}`;
     const instanceId = uniqueId(base, used);
     used.add(instanceId);
-    // Couleur persistée gardée telle quelle — SAUF si une autre est strictement MOINS
-    // chargée : un état enregistré avant l'allocation par instance a toutes ses instances
-    // à 0 et resterait sinon indistinguable pour toujours, sans aucun moyen de le réparer
-    // côté UI. La règle vaut aussi au-delà de six instances, où les répétitions sont
-    // inévitables mais doivent au moins s'étaler.
-    const persistee =
-      typeof item.couleurIdx === "number" &&
-      Number.isInteger(item.couleurIdx) &&
-      item.couleurIdx >= 0 &&
-      item.couleurIdx < NB_COULEURS_SERIE
-        ? item.couleurIdx
-        : null;
-    const propose = prochainIndexCouleur(couleurs);
-    const compte = (idx: number): number => couleurs.filter((c) => c === idx).length;
-    const couleurIdx =
-      persistee !== null && compte(persistee) <= compte(propose) ? persistee : propose;
-    couleurs.push(couleurIdx);
+    const persistee = degenere ? null : persistees[i] ?? null;
+    const couleurIdx = persistee ?? prochainIndexCouleur(occupationCouleurs(placees));
+    placees.push({ defId: item.defId, couleurIdx });
     out.push({ instanceId, defId: item.defId, params: item.params, couleurIdx });
-  }
+  });
   return out;
 }
 
@@ -233,7 +268,7 @@ export const indicatorsStore = createStore<IndicatorsState>((set, get) => ({
     const current = get().indicators;
     const used = new Set(current.map((i) => i.instanceId));
     const instanceId = uniqueId(`${defId}-${shortHash(params)}`, used);
-    const couleurIdx = prochainIndexCouleur(current.map((i) => i.couleurIdx));
+    const couleurIdx = prochainIndexCouleur(occupationCouleurs(current));
     set({ indicators: [...current, { instanceId, defId, params, couleurIdx }] });
   },
 
@@ -266,7 +301,7 @@ export const indicatorsStore = createStore<IndicatorsState>((set, get) => ({
       params: { ...src.params },
       // Couleur PROPRE à la copie : dupliquer celle de la source donnerait deux
       // courbes de mêmes params ET même couleur, donc indiscernables.
-      couleurIdx: prochainIndexCouleur(current.map((i) => i.couleurIdx)),
+      couleurIdx: prochainIndexCouleur(occupationCouleurs(current)),
     };
     const next = current.slice();
     next.splice(idx + 1, 0, copy);

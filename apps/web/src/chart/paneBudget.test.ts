@@ -1,62 +1,86 @@
 /**
- * Budget de hauteur des panes. Le cas qui compte est celui mesuré dans le navigateur
- * avant le correctif : conteneur ~565 px, sept panes d'indicateurs → pane prix à 4 px.
+ * Budget de hauteur des panes. Deux exigences opposées à tenir ensemble :
+ *  - le pane prix ne doit jamais être étouffé (le cas mesuré avant correctif :
+ *    sept oscillateurs, pane prix à 4 px CSS) ;
+ *  - le redimensionnement manuel à la poignée doit TENIR, y compris au-delà de la
+ *    hauteur par défaut — une première version rognait tout à chaque frame et rendait
+ *    la poignée inerte.
+ *
+ * Les tests d'invariant balaient plusieurs valeurs de PART_PRIX_MIN plutôt que d'en
+ * relire la constante : abaisser la garantie doit faire ÉCHOUER la suite, pas la
+ * suivre en silence.
  */
 import { describe, expect, it } from "vitest";
 import {
-  HAUTEUR_PANE_DEFAUT,
   HAUTEUR_PANE_MIN,
   PART_PRIX_MIN,
-  hauteurPaneIndicateur,
+  hauteursCorrigees,
   paneMax,
 } from "./paneBudget";
 
-describe("hauteurPaneIndicateur", () => {
-  it("laisse faire klinecharts quand il n'y a aucun pane séparé", () => {
-    expect(hauteurPaneIndicateur(565, 0)).toBeNull();
+describe("hauteursCorrigees", () => {
+  it("ne corrige rien quand il n'y a aucun pane séparé", () => {
+    expect(hauteursCorrigees(565, [])).toBeNull();
   });
 
-  it("laisse faire quand la hauteur n'est pas encore connue (montage)", () => {
-    expect(hauteurPaneIndicateur(0, 3)).toBeNull();
-    expect(hauteurPaneIndicateur(Number.NaN, 3)).toBeNull();
+  it("ne corrige rien quand la hauteur n'est pas encore connue (montage)", () => {
+    expect(hauteursCorrigees(0, [100, 100])).toBeNull();
+    expect(hauteursCorrigees(Number.NaN, [100])).toBeNull();
   });
 
-  it("ne dépasse jamais la hauteur par défaut quand la place ne manque pas", () => {
-    // 900 px, 2 panes : le budget (495) permettrait 247 px par pane — inutile.
-    expect(hauteurPaneIndicateur(900, 2)).toBe(HAUTEUR_PANE_DEFAUT);
+  it("LAISSE INTACT un pane agrandi à la main tant que le prix garde sa part", () => {
+    // 900 px utiles, budget = 495. Un pane à 250 px (bien au-dessus du défaut de 100)
+    // et un à 100 : total 350 ≤ 495 → aucune correction, la poignée tient.
+    expect(hauteursCorrigees(900, [250, 100])).toBeNull();
   });
 
-  it("resserre les panes plutôt que d'écraser le prix", () => {
-    // 565 px utiles, 5 panes (le plafond à cette hauteur) : sans budget, klinecharts
-    // donnerait 5 × 100 = 500 px aux oscillateurs et 65 px au prix.
-    const h = hauteurPaneIndicateur(565, 5);
-    expect(h).not.toBeNull();
-    expect(h).toBeLessThan(HAUTEUR_PANE_DEFAUT);
-    expect((h ?? 0) * 5).toBeLessThanOrEqual(565 * (1 - PART_PRIX_MIN));
+  it("rogne quand le prix est étouffé, et RESPECTE les proportions voulues", () => {
+    // 600 utiles, budget = 330. Panes à 300 et 150 (total 450) → facteur 0,733.
+    const corrigees = hauteursCorrigees(600, [300, 150]);
+    expect(corrigees).not.toBeNull();
+    const [a, b] = corrigees ?? [];
+    expect((a ?? 0) + (b ?? 0)).toBeLessThanOrEqual(600 * (1 - PART_PRIX_MIN));
+    // Le pane que l'utilisateur avait agrandi reste le plus grand.
+    expect(a).toBeGreaterThan(b ?? 0);
   });
 
-  it("au-delà du plafond, le plancher de pane prime — d'où le refus à l'activation", () => {
-    // 7 panes ne TIENNENT pas à 565 px : chacun tombe au plancher et le prix repasse
-    // sous sa part. C'est précisément le cas que `paneMax` doit interdire en amont ;
-    // le budget seul ne peut pas le rattraper, et ce test le dit explicitement.
-    const h = hauteurPaneIndicateur(565, 7) ?? 0;
-    expect(h).toBe(HAUTEUR_PANE_MIN);
-    expect(7).toBeGreaterThan(paneMax(565));
+  it("reproduit le cas mesuré : sept panes de 100 px sur 806 px utiles", () => {
+    const corrigees = hauteursCorrigees(806, Array(7).fill(100));
+    expect(corrigees).not.toBeNull();
+    const total = (corrigees ?? []).reduce((s, h) => s + h, 0);
+    const prix = 806 - total;
+    expect(prix / 806).toBeGreaterThanOrEqual(PART_PRIX_MIN - 0.01);
   });
 
-  it("garantit au prix sa part tant que le nombre de panes reste sous le plafond", () => {
-    for (const utile of [400, 565, 800, 1200]) {
-      const max = paneMax(utile);
-      for (let n = 1; n <= max; n++) {
-        const h = hauteurPaneIndicateur(utile, n) ?? 0;
-        const restePrix = utile - h * n;
-        expect(restePrix / utile).toBeGreaterThanOrEqual(PART_PRIX_MIN - 0.02);
+  it("ne descend jamais un pane sous le plancher de lisibilité", () => {
+    const corrigees = hauteursCorrigees(400, Array(10).fill(100)) ?? [];
+    for (const h of corrigees) expect(h).toBeGreaterThanOrEqual(HAUTEUR_PANE_MIN);
+  });
+
+  it("n'émet rien quand tout est déjà au plancher (pas de réécriture à chaque frame)", () => {
+    // 300 utiles, 5 panes déjà à 60 px : la correction proportionnelle les y laisse.
+    expect(hauteursCorrigees(300, Array(5).fill(HAUTEUR_PANE_MIN))).toBeNull();
+  });
+
+  it("est IDEMPOTENT : réappliquer la correction ne change plus rien", () => {
+    const une = hauteursCorrigees(600, [300, 150]);
+    expect(une).not.toBeNull();
+    expect(hauteursCorrigees(600, une ?? [])).toBeNull();
+  });
+
+  it("garantit la part du prix sous plusieurs valeurs de garantie (test non tautologique)", () => {
+    // On ne relit pas PART_PRIX_MIN pour construire le cas : on vérifie que la part
+    // effectivement rendue au prix atteint au moins 0,40 — plancher qui échouerait si
+    // quelqu'un abaissait la garantie à 0,20 « pour laisser plus de place ».
+    for (const utile of [400, 565, 806, 1200]) {
+      for (const n of [2, 4, 7, 10]) {
+        const corrigees = hauteursCorrigees(utile, Array(n).fill(100)) ?? Array(n).fill(100);
+        const prix = utile - corrigees.reduce((s, h) => s + h, 0);
+        // Au-delà du plafond de panes, le plancher de 60 px prime : on ne teste
+        // l'invariant que dans le domaine où il est atteignable (rôle de paneMax).
+        if (n <= paneMax(utile)) expect(prix / utile).toBeGreaterThanOrEqual(0.4);
       }
     }
-  });
-
-  it("ne descend jamais sous le plancher de lisibilité d'un pane", () => {
-    expect(hauteurPaneIndicateur(565, 20)).toBe(HAUTEUR_PANE_MIN);
   });
 });
 
@@ -67,11 +91,18 @@ describe("paneMax", () => {
   });
 
   it("plafonne à 5 panes sur la hauteur où klinecharts en laissait passer 7", () => {
-    // 565 × 0,55 / 60 = 5,18. Cinq panes au plancher laissent 265 px au prix (46,9 %).
     expect(paneMax(565)).toBe(5);
   });
 
   it("croît avec la hauteur disponible", () => {
     expect(paneMax(1200)).toBeGreaterThan(paneMax(565));
+  });
+
+  it("reste cohérent avec le rognage : n panes au plafond tiennent dans le budget", () => {
+    for (const utile of [400, 565, 806, 1200]) {
+      const n = paneMax(utile);
+      if (n === 0) continue;
+      expect(n * HAUTEUR_PANE_MIN).toBeLessThanOrEqual(utile * (1 - PART_PRIX_MIN));
+    }
   });
 });

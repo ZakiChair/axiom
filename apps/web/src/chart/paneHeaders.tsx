@@ -33,6 +33,7 @@ import { getIndicator } from "@axiom/indicators";
 import { indicatorsStore, formatInstanceLabel } from "../store/indicators";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
 import { axiomPaneId } from "./indicators";
+import { estReglable } from "./legendeReglable";
 import {
   creerBoutonFermer,
   creerBoutonReglages,
@@ -49,6 +50,8 @@ interface EnTetePane {
   paneId: string;
   label: string;
   couleurIdx: number;
+  /** Le ⚙ mène-t-il à un éditeur réel ? (cf. legendeReglable.ts) */
+  reglable: boolean;
 }
 
 /** Panes séparés (hors overlay) VOULUS, dans l'ordre courant du store. */
@@ -62,6 +65,7 @@ function panesSepares(): EnTetePane[] {
       paneId: axiomPaneId(inst.instanceId),
       label: formatInstanceLabel(def, inst.params),
       couleurIdx: inst.couleurIdx,
+      reglable: estReglable(def),
     });
   }
   return result;
@@ -129,13 +133,15 @@ export class PaneHeaders {
     poignee.setAttribute("aria-hidden", "true"); // affordance visuelle de drag (souris)
     poignee.addEventListener("pointerdown", (e) => this.demarrerDrag(e, pane.instanceId));
 
+    el.append(poignee, creerPastille(pane.couleurIdx), creerLibelle(pane.label));
+    if (pane.reglable) {
+      el.append(
+        creerBoutonReglages(pane.label, () =>
+          indicatorMenuUiStore.getState().ouvrirSurInstance(pane.instanceId)
+        )
+      );
+    }
     el.append(
-      poignee,
-      creerPastille(pane.couleurIdx),
-      creerLibelle(pane.label),
-      creerBoutonReglages(pane.label, () =>
-        indicatorMenuUiStore.getState().ouvrirSurInstance(pane.instanceId)
-      ),
       creerBoutonFermer(pane.label, () => indicatorsStore.getState().remove(pane.instanceId))
     );
     return el;

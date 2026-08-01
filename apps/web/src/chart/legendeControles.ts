@@ -61,39 +61,50 @@ export function majLibelle(parent: HTMLElement, label: string): void {
   if (s) s.textContent = label;
 }
 
-/** Bouton « réglages » (⚙) : ouvre le menu Indicateurs déplié sur CETTE instance. */
-export function creerBoutonReglages(label: string, onClick: () => void): HTMLButtonElement {
+/**
+ * Étiquette d'un bouton de légende. PURE — c'est la seule partie de ce module qui porte
+ * une décision (nommer la cible plutôt que laisser une croix anonyme), donc la seule
+ * qu'un test peut utilement verrouiller dans un environnement sans DOM.
+ */
+export function etiquetteBouton(role: "settings" | "close", label: string): string {
+  return `${role === "settings" ? "Réglages de" : "Fermer"} ${label}`;
+}
+
+/** Fabrique commune aux deux boutons d'action d'une ligne de légende. */
+function creerBouton(
+  role: "settings" | "close",
+  glyphe: string,
+  label: string,
+  onClick: () => void
+): HTMLButtonElement {
   const b = document.createElement("button");
-  b.textContent = "⚙";
+  b.textContent = glyphe;
   b.type = "button";
-  b.setAttribute("data-role", "settings");
-  b.setAttribute("aria-label", `Réglages de ${label}`);
-  b.title = `Réglages de ${label}`;
+  b.setAttribute("data-role", role);
+  b.setAttribute("aria-label", etiquetteBouton(role, label));
+  b.title = etiquetteBouton(role, label);
   b.className = `${CIBLE} rounded leading-none text-text-dim hover:text-text`;
   b.addEventListener("click", onClick);
   return b;
+}
+
+/** Bouton « réglages » (⚙) : ouvre le menu Indicateurs déplié sur CETTE instance. */
+export function creerBoutonReglages(label: string, onClick: () => void): HTMLButtonElement {
+  return creerBouton("settings", "⚙", label, onClick);
 }
 
 /** Bouton « fermer » (✕) de l'instance. */
 export function creerBoutonFermer(label: string, onClick: () => void): HTMLButtonElement {
-  const b = document.createElement("button");
-  b.textContent = "✕";
-  b.type = "button";
-  b.setAttribute("data-role", "close");
-  b.setAttribute("aria-label", `Fermer ${label}`);
-  b.title = `Fermer ${label}`;
-  b.className = `${CIBLE} rounded leading-none text-text-dim hover:text-text`;
-  b.addEventListener("click", onClick);
-  return b;
+  return creerBouton("close", "✕", label, onClick);
 }
 
 /** Réétiquette les boutons d'un élément de légende après édition des params. */
 export function majEtiquettes(parent: HTMLElement, label: string): void {
-  for (const [role, prefixe] of [["settings", "Réglages de"], ["close", "Fermer"]] as const) {
+  for (const role of ["settings", "close"] as const) {
     const b = parent.querySelector<HTMLButtonElement>(`[data-role=${role}]`);
     if (b) {
-      b.setAttribute("aria-label", `${prefixe} ${label}`);
-      b.title = `${prefixe} ${label}`;
+      b.setAttribute("aria-label", etiquetteBouton(role, label));
+      b.title = etiquetteBouton(role, label);
     }
   }
 }

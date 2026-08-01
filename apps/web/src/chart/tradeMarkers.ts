@@ -255,7 +255,8 @@ function figuresFleche(x: number, y: number, d: DonneesMarqueur): OverlayFigure[
       type: "text",
       ignoreEvent: true,
       attrs: { x: x + T + 4, y, text: d.label, align: "left", baseline: "middle" },
-      styles: { color: d.couleur, size: 10 },
+      // Fond transparent obligatoire (pastille #1677FF par défaut, cf. annotationsPrix.ts).
+      styles: { color: d.couleur, size: 10, backgroundColor: "transparent" },
     });
   }
   return figures;
@@ -274,7 +275,8 @@ function figuresNote(x: number, y: number, d: DonneesMarqueur): OverlayFigure[] 
       type: "text",
       ignoreEvent: true,
       attrs: { x: x + 8, y, text: d.label, align: "left", baseline: "middle" },
-      styles: { color: d.couleur, size: 10 },
+      // Fond transparent obligatoire (pastille #1677FF par défaut, cf. annotationsPrix.ts).
+      styles: { color: d.couleur, size: 10, backgroundColor: "transparent" },
     },
   ];
 }

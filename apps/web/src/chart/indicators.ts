@@ -32,12 +32,15 @@ import type { Chart, IndicatorFigure, IndicatorTooltipData, TooltipLegend } from
 import type { Candle, ExchangeId, IndicatorDef, IndicatorResult, Timeframe } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
 import { serieCanvas } from "../lib/canvasTokens";
+import { hauteurPaneIndicateur, paneMax } from "./paneBudget";
+import { chartCapaciteStore } from "../store/chartCapacite";
 import { dessinerAnnotationsPane } from "./annotationsPane";
 import { AnnotationsPrix, masquerTooltipAnnotation } from "./annotationsPrix";
 import { auxProvider } from "./auxProvider";
 import {
   computeKey,
   formatInstanceLabel,
+  indicatorsStore,
   type ActiveIndicator,
 } from "../store/indicators";
 
@@ -68,6 +71,16 @@ export function axiomPaneId(instanceId: string): string {
 /** Enregistrement idempotent (module-scope) : survit aux remounts StrictMode. */
 const registered = new Set<string>();
 
+/**
+ * Index de couleur COURANT d'une instance, lu dans le store au moment du dessin.
+ * Repli 0 si l'instance a disparu entre deux frames (le template survit brièvement
+ * à son instance) — jamais d'exception dans un callback de rendu.
+ */
+function couleurInstance(instanceId: string): number {
+  const inst = indicatorsStore.getState().indicators.find((i) => i.instanceId === instanceId);
+  return inst?.couleurIdx ?? 0;
+}
+
 /** Série KLineChart : prix pour les overlays, volume pour le Volume, normal sinon. */
 function seriesFor(def: IndicatorDef): IndicatorSeries {
   if (def.pane === "overlay") return IndicatorSeries.Price;
@@ -81,16 +94,20 @@ function seriesFor(def: IndicatorDef): IndicatorSeries {
  * Chaque instance a son `name` propre : le template est donc réenregistré par
  * instanceId, mais son contenu (figures + calc générique) ne dépend que de `def`.
  */
-function ensureRegistered(def: IndicatorDef, name: string): void {
+function ensureRegistered(def: IndicatorDef, name: string, instanceId: string): void {
   if (registered.has(name)) return;
 
   const outputKeys = def.outputs.map((o) => o.key);
 
   const figures: Array<IndicatorFigure<AxiomPoint>> = def.outputs.map((o, i) => {
-    // Couleur de série lue AU RENDU (callback rappelé par KLineChart) : les ~98
-    // indicateurs suivent les tokens --serie-1…6 du thème actif, sans re-registration
-    // (pattern prouvé par orderflow.ts CVD S/P).
-    const styles = () => ({ color: serieCanvas(i) });
+    // Couleur lue AU RENDU (callback rappelé par KLineChart), pour DEUX raisons :
+    //  - le thème peut changer sans re-registration (pattern orderflow.ts CVD S/P) ;
+    //  - l'index de couleur appartient à l'INSTANCE et peut être réalloué (suppression
+    //    d'une voisine, duplication) : le capturer ici figerait une couleur périmée,
+    //    car `registered` interdit de réenregistrer ce `name`.
+    // La couleur suit donc l'ENTITÉ ; `i` (rang de la sortie) ne fait que décaler les
+    // sorties d'un même indicateur multi-séries (MACD, BOLL) autour de SA teinte.
+    const styles = () => ({ color: serieCanvas(couleurInstance(instanceId) + i) });
     // Mapping déclaratif PlotStyle (@axiom/types) -> figure KLineChart :
     //  - histogram -> barres (référence 0) ;
     //  - points    -> marqueurs circulaires (SAR, fractals, pivotHighLow…) ;
@@ -234,8 +251,12 @@ export class ChartIndicators {
   /** Overlays d'annotations cible "prix" des defs à pane séparé (rejeu par instance). */
   private readonly annotationsPrix: AnnotationsPrix;
 
-  constructor(chart: Chart) {
+  /** Seul le graphe maître publie sa capacité en panes (cf. store/chartCapacite.ts). */
+  private readonly estMaitre: boolean;
+
+  constructor(chart: Chart, estMaitre = false) {
     this.chart = chart;
+    this.estMaitre = estMaitre;
     this.annotationsPrix = new AnnotationsPrix(chart);
   }
 
@@ -410,7 +431,7 @@ export class ChartIndicators {
       }
 
       // Nouvelle instance.
-      ensureRegistered(def, name);
+      ensureRegistered(def, name, inst.instanceId);
       const { result, suffix } = this.computeForInstance(def, inst, candles, exchange);
       const paneId = def.pane === "overlay" ? CANDLE_PANE_ID : axiomPaneId(inst.instanceId);
       const created = this.chart.createIndicator(
@@ -423,6 +444,42 @@ export class ChartIndicators {
     }
 
     this.pruneCache(new Set(effectiveInstances.map((i) => computeKey(i.defId, i.params))));
+    this.equilibrerHauteurs();
+  }
+
+  /**
+   * Redonne au pane des PRIX une part garantie de la hauteur. klinecharts sert les panes
+   * séparés en premier et laisse au prix le reste, sans plancher : à sept oscillateurs, le
+   * canvas du prix tombait à 4 px CSS — plus une bougie à l'écran (revue § 3.4).
+   * Idempotent et sans recalcul : `setPaneOptions` ne touche qu'à la géométrie.
+   */
+  private equilibrerHauteurs(): void {
+    const separes = [...this.active.values()].filter((info) => info.paneId !== CANDLE_PANE_ID);
+    const utile = this.hauteurUtile();
+    // Le maître publie sa capacité pour que le menu puisse refuser en amont (le budget
+    // seul ne peut pas sauver le prix au-delà du plafond, cf. paneBudget.test.ts).
+    if (this.estMaitre) chartCapaciteStore.getState().setPaneMax(paneMax(utile));
+    const hauteur = hauteurPaneIndicateur(utile, separes.length);
+    if (hauteur === null) return;
+    for (const info of separes) {
+      this.chart.setPaneOptions({ id: info.paneId, height: hauteur });
+    }
+  }
+
+  /**
+   * Hauteur disponible pour les panes, axe des temps déduit. Mesurée sur le pane prix
+   * (`getSize` sans DomPosition = le pane complet) plutôt que sur le conteneur DOM : c'est
+   * la grandeur que klinecharts répartit réellement. 0 tant que le graphe n'a pas de
+   * géométrie — `hauteurPaneIndicateur` renvoie alors null et on laisse faire.
+   */
+  private hauteurUtile(): number {
+    let total = 0;
+    for (const info of this.active.values()) {
+      const b = this.chart.getSize(info.paneId);
+      if (b) total += b.height;
+    }
+    const prix = this.chart.getSize(CANDLE_PANE_ID);
+    return total + (prix?.height ?? 0);
   }
 
   /**

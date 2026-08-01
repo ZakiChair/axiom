@@ -158,9 +158,9 @@ describe("reorder", () => {
   it("réordonne selon la liste d'instanceId fournie", () => {
     indicatorsStore.setState({
       indicators: [
-        { instanceId: "a", defId: "rsi", params: {} },
-        { instanceId: "b", defId: "macd", params: {} },
-        { instanceId: "c", defId: "ema", params: {} },
+        { instanceId: "a", defId: "rsi", params: {} , couleurIdx: 0 },
+        { instanceId: "b", defId: "macd", params: {} , couleurIdx: 0 },
+        { instanceId: "c", defId: "ema", params: {} , couleurIdx: 0 },
       ],
     });
     indicatorsStore.getState().reorder(["c", "a", "b"]);
@@ -170,8 +170,8 @@ describe("reorder", () => {
   it("ajoute en fin toute instance absente de l'ordre fourni (garde-fou)", () => {
     indicatorsStore.setState({
       indicators: [
-        { instanceId: "a", defId: "rsi", params: {} },
-        { instanceId: "b", defId: "macd", params: {} },
+        { instanceId: "a", defId: "rsi", params: {} , couleurIdx: 0 },
+        { instanceId: "b", defId: "macd", params: {} , couleurIdx: 0 },
       ],
     });
     indicatorsStore.getState().reorder(["b"]);
@@ -179,7 +179,7 @@ describe("reorder", () => {
   });
 
   it("ignore les ids inconnus dans l'ordre fourni", () => {
-    indicatorsStore.setState({ indicators: [{ instanceId: "a", defId: "rsi", params: {} }] });
+    indicatorsStore.setState({ indicators: [{ instanceId: "a", defId: "rsi", params: {} , couleurIdx: 0 }] });
     indicatorsStore.getState().reorder(["inconnu", "a"]);
     expect(indicatorsStore.getState().indicators.map((i) => i.instanceId)).toEqual(["a"]);
   });

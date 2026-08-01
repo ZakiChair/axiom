@@ -294,7 +294,11 @@ function buildFigures(
         baseline: "bottom",
         align: "left",
       },
-      styles: { color: r.color, size: 10 },
+      // `backgroundColor: "transparent"` : sans lui, le style d'overlay par défaut de
+      // KLineChart peint chaque niveau sur une pastille pleine #1677FF (cf. le
+      // commentaire détaillé d'annotationsPrix.ts) — sept aplats bleus jointifs
+      // par-dessus les bougies, invariants au thème. Verrou : overlayTextStyles.test.ts.
+      styles: { color: r.color, size: 10, backgroundColor: "transparent" },
     });
   }
 

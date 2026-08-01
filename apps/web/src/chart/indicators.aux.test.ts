@@ -46,6 +46,12 @@ function makeIndicators() {
     createIndicator: vi.fn((_config: IndicatorConfigStub, _isStack: boolean, opts?: { id: string }) => opts?.id ?? null),
     overrideIndicator: vi.fn((_override: IndicatorConfigStub, _paneId?: string) => {}),
     removeIndicator: vi.fn(),
+
+    // Géométrie : lue par l'équilibrage de hauteur des panes (chart/paneBudget.ts).
+
+    getSize: vi.fn(() => ({ top: 0, left: 0, width: 800, height: 100, right: 800, bottom: 100 })),
+
+    setPaneOptions: vi.fn(),
   };
   const indicators = new ChartIndicators(chart as unknown as Chart);
   return { indicators, chart };
@@ -56,7 +62,7 @@ const candles: Candle[] = [
   { time: 2_000, open: 1, high: 1, low: 1, close: 1, volume: 1 },
 ];
 
-const oiInstance: ActiveIndicator = { instanceId: "oi-1", defId: "openInterest", params: {} };
+const oiInstance: ActiveIndicator = { instanceId: "oi-1", defId: "openInterest", params: {} , couleurIdx: 0 };
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -126,8 +132,8 @@ describe("ChartIndicators — pont aux-aware (Task 14)", () => {
       return { status: "pending" };
     });
     const { indicators, chart } = makeIndicators();
-    const inst1: ActiveIndicator = { instanceId: "oi-1", defId: "openInterest", params: {} };
-    const inst2: ActiveIndicator = { instanceId: "oi-2", defId: "openInterest", params: {} };
+    const inst1: ActiveIndicator = { instanceId: "oi-1", defId: "openInterest", params: {} , couleurIdx: 0 };
+    const inst2: ActiveIndicator = { instanceId: "oi-2", defId: "openInterest", params: {} , couleurIdx: 0 };
 
     indicators.setMarket("BTCUSDT", "1h");
     indicators.sync([inst1, inst2], candles, "binance");

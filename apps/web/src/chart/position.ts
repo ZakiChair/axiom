@@ -197,7 +197,8 @@ function registerPositionOverlay(): void {
         type: "text",
         ignoreEvent: true,
         attrs: { x: xMax + 4, y, text: `${prefixe} ${formatPrice(prix)}`, align: "left", baseline: "middle" },
-        styles: { color: couleur, size: 10 },
+        // Fond transparent obligatoire (pastille #1677FF par défaut, cf. annotationsPrix.ts).
+        styles: { color: couleur, size: 10, backgroundColor: "transparent" },
       });
       figures.push(prixLabel(cEntree.y, pEntree, texte, "E"));
       figures.push(prixLabel(cStop.y, pStop, rouge, "SL"));
@@ -226,7 +227,8 @@ function registerPositionOverlay(): void {
             align: "left",
             baseline: "bottom",
           },
-          styles: { color: pos.ratio >= 1 ? vert : texte, size: 11 },
+          // Fond transparent obligatoire (pastille #1677FF par défaut, cf. annotationsPrix.ts).
+          styles: { color: pos.ratio >= 1 ? vert : texte, size: 11, backgroundColor: "transparent" },
         });
       }
 

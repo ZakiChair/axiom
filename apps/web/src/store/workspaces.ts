@@ -83,9 +83,14 @@ function snapshot(): WorkspaceContent {
     exchange: m.exchange,
     symbol: m.symbol,
     timeframe: m.timeframe,
-    indicators: indicatorsStore
-      .getState()
-      .indicators.map((i) => ({ instanceId: i.instanceId, defId: i.defId, params: { ...i.params } })),
+    indicators: indicatorsStore.getState().indicators.map((i) => ({
+      instanceId: i.instanceId,
+      defId: i.defId,
+      params: { ...i.params },
+      // La couleur fait partie de l'agencement : réappliquer un workspace doit rendre
+      // au graphe exactement les mêmes courbes, aux mêmes couleurs.
+      couleurIdx: i.couleurIdx,
+    })),
     orderflow: orderflowStore.getState().enabled,
     volumeProfile: volumeProfileStore.getState().enabled,
     revenue: revenueStore.getState().enabled,

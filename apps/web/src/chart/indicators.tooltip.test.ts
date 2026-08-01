@@ -40,8 +40,11 @@ function templateCapture(): IndicatorTemplate {
     createIndicator: (_c: unknown, _s: boolean, opts?: { id: string }) => opts?.id ?? null,
     overrideIndicator: () => {},
     removeIndicator: () => {},
+    // Géométrie : lue par l'équilibrage de hauteur des panes (chart/paneBudget.ts).
+    getSize: () => ({ top: 0, left: 0, width: 800, height: 100, right: 800, bottom: 100 }),
+    setPaneOptions: () => {},
   };
-  const instance: ActiveIndicator = { instanceId: "sma-tooltip", defId: "sma", params: { length: 1 } };
+  const instance: ActiveIndicator = { instanceId: "sma-tooltip", defId: "sma", params: { length: 1 } , couleurIdx: 0 };
   new ChartIndicators(chart as unknown as Chart).sync([instance], candles, "binance");
   const template = capture.template;
   if (template === null) throw new Error("registerIndicator n'a pas été appelé");

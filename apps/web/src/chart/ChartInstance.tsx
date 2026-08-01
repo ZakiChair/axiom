@@ -19,7 +19,15 @@
  * IMPÉRATIF (aucun re-render React sur tick). API KLineChart v9.8.x confirmée.
  */
 import { useEffect, useRef, useState } from "react";
-import { dispose, init, ActionType, DomPosition, LoadDataType, YAxisType } from "klinecharts";
+import {
+  dispose,
+  init,
+  ActionType,
+  DomPosition,
+  LoadDataType,
+  TooltipShowRule,
+  YAxisType,
+} from "klinecharts";
 import type { Chart as KLineChartInstance, Crosshair, KLineData } from "klinecharts";
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
@@ -46,7 +54,10 @@ import { macroHistoryStore } from "../store/macroHistory";
 import { themeStore } from "../store/theme";
 import { chartLayoutStore } from "../store/chart-layout";
 import { refSymbolStore } from "../store/refSymbol";
-import { ChartIndicators } from "./indicators";
+import { getIndicator } from "@axiom/indicators";
+import { ChartIndicators, axiomPaneId } from "./indicators";
+import { instancePourY } from "./paneSousCurseur";
+import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
 import { PaneHeaders } from "./paneHeaders";
 import { OverlayLegend } from "./overlayLegend";
 import { OrderflowController } from "./orderflow";
@@ -189,6 +200,9 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
   const crosshair = lireTokenCanvas("--crosshair", "");
   const atmos = lireTokenCanvas("--atmos", "");
   const font = lireTokenCanvas("--font-display", "");
+  // Dessins (fibonacci, position, mesure…) : accent du thème, encre sombre par-dessus.
+  const accent = lireTokenCanvas("--accent", "");
+  const accentInk = lireTokenCanvas("--accent-ink", "");
 
   chartDom.style.backgroundColor = bg;
   chartDom.style.backgroundImage = atmos && atmos !== "none" ? atmos : "";
@@ -198,14 +212,24 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
     // Légende native (nom + valeur) laissée aux défauts KLineChart (showName/showParams) :
     // elle est désormais la SEULE source du NOM d'indicateur — panes séparés ET overlays.
     // Indispensable pour les overlays (EMA/BOLL) : leur en-tête DOM (chart/overlayLegend.ts)
-    // n'affiche qu'une croix ✕ de suppression, jamais le nom — deux instances d'un même
-    // overlay (EMA(20)+EMA(50)) ne sont donc distinguables QUE par leurs paramètres dans
-    // cette légende native. L'en-tête DOM des panes séparés (chart/paneHeaders.tsx) ne porte
-    // pas non plus le nom (juste ⠿ + ✕, décalés en haut à DROITE du pane) : plus de double
-    // impression du nom (audit #2/#10).
+    // porte la PASTILLE de couleur d'instance et les actions (⚙ ✕), le nom restant ici pour
+    // ne pas l'imprimer deux fois.
     // NB : la portée est forcément globale — klinecharts@9.8.12 lit showName depuis les styles
     // GLOBAUX (getStyles().indicator.tooltip), un override par indicateur est ignoré.
     candle: {
+      // La légende OHLCV native est COUPÉE (`showRule: "none"`) : le bandeau de symbole et le
+      // readout de bougie l'affichent déjà, elle faisait un troisième exemplaire — et surtout
+      // elle poussait la légende des INDICATEURS sous ce bandeau, où elle était illisible
+      // (seule sa queue dépassait, cf. revue du 2026-08-01 § 3.2).
+      //
+      // `offsetTop: 36` place alors la légende d'indicateur juste SOUS le bandeau : vérifié
+      // dans le bundle 9.8.12 — `_drawCandleStandardTooltip` (index.esm.js:9376) retourne
+      // `coordinate.y + prevRowHeight`, soit `offsetTop` quand `isDrawTooltip` est faux, et
+      // c'est CE retour qui sert d'ordonnée à `drawIndicatorTooltip` (:9356-9357). Poser
+      // `showRule: "none"` SEUL ferait retomber l'ordonnée à 6, donc sous le bandeau :
+      // les deux réglages vont ensemble. Les panes SÉPARÉS ne sont pas concernés — ils lisent
+      // `indicator.tooltip.offsetTop` par un autre chemin (:8152).
+      tooltip: { showRule: TooltipShowRule.None, offsetTop: 36 },
       bar: {
         upColor: candleUp,
         downColor: candleDown,
@@ -235,6 +259,32 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
         text: { color: text, family: font, backgroundColor: surface, borderColor: border },
       },
     },
+    // Trois familles longtemps ABSENTES de ce setStyles — leurs défauts d'usine
+    // s'appliquaient donc dans les 5 thèmes : #1677FF pour tout ce qui est dessin
+    // (texte, points, lignes, poignées), #76808F/Helvetica Neue pour les légendes de
+    // pane, #DDDDDD pour les séparateurs. Une quatrième palette, n'appartenant à aucun
+    // thème, sur la surface la plus regardée du produit (revue du 2026-08-01 § 3.3).
+    // Le fond des figures TEXTE reste neutralisé figure par figure (les styles sont
+    // mergés aux défauts, un override partiel laisse l'aplat) — cf. overlayTextStyles.test.ts.
+    overlay: {
+      text: { color: accentInk, backgroundColor: accent, borderColor: accent, size: 10, family: font },
+      point: { color: accent, borderColor: accent, activeColor: accent, activeBorderColor: accent },
+      line: { color: accent },
+      rect: { color: "transparent", borderColor: accent },
+      polygon: { color: accent, borderColor: accent },
+      circle: { color: "transparent", borderColor: accent },
+      arc: { color: accent },
+    },
+    // Le NOM de l'indicateur est porté par les légendes DOM (overlayLegend / paneHeaders),
+    // qui y ajoutent la pastille de couleur d'instance et les actions ⚙ ✕. La légende
+    // native ne garde donc que les VALEURS, chacune préfixée du nom de sa sortie
+    // (« EMA: 64 088,93 ») : une seule impression du nom, et c'est celle qui est
+    // cliquable. NB : showName/showParams sont lus depuis les styles GLOBAUX en
+    // 9.8.12 — un override par indicateur serait ignoré.
+    indicator: {
+      tooltip: { showName: false, showParams: false, text: { color: textDim, family: font, size: 11 } },
+    },
+    separator: { color: border },
   });
 }
 
@@ -347,7 +397,7 @@ export function ChartInstance({
     // Contrôleur d'indicateurs @axiom (partagé : même sélection sur tous les slots ;
     // chaque slot calcule sur SON buffer). L'abonnement `indicatorsStore` qui CAPTURE
     // `exchange` vit dans l'effet DONNÉES (il doit lire la source courante).
-    const indicators = new ChartIndicators(chart);
+    const indicators = new ChartIndicators(chart, isMaster);
 
     // En-têtes overlay des panes séparés (croix + drag-reorder) : le contrôleur lit
     // `indicatorsStore` lui-même (pas besoin de brancher `state`).
@@ -887,6 +937,20 @@ export function ChartInstance({
       onMouseDownCapture={() => {
         if (chartLayoutStore.getState().focus !== slot) chartLayoutStore.getState().setFocus(slot);
         setFocusChart(slot);
+      }}
+      // Double-clic sur un pane d'indicateur → ses réglages, geste de référence des
+      // terminaux de charting. Auparavant il fallait passer par le menu latéral, section
+      // « Actifs », puis retrouver la bonne instance dans la liste (revue § 5.1).
+      onDoubleClick={(e) => {
+        const chart = mountRef.current?.chart;
+        const boite = containerRef.current?.getBoundingClientRect();
+        if (!chart || !boite) return;
+        const panes = indicatorsStore
+          .getState()
+          .indicators.filter((i) => getIndicator(i.defId)?.pane !== "overlay")
+          .map((i) => ({ instanceId: i.instanceId, boite: chart.getSize(axiomPaneId(i.instanceId)) }));
+        const cible = instancePourY(e.clientY - boite.top, panes);
+        if (cible !== null) indicatorMenuUiStore.getState().ouvrirSurInstance(cible);
       }}
     >
       <div ref={chartRef} className="absolute inset-0" />

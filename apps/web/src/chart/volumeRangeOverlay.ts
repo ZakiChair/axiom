@@ -273,7 +273,8 @@ function buildFigures(params: OverlayCreateFiguresCallbackParams): OverlayFigure
         baseline,
         align: "left",
       },
-      styles: { color: textDim, size: 9 },
+      // Fond transparent obligatoire (pastille #1677FF par défaut, cf. annotationsPrix.ts).
+      styles: { color: textDim, size: 9, backgroundColor: "transparent" },
     });
   }
 

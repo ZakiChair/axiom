@@ -8,6 +8,7 @@ import type { PointSerie } from "../lib/referentiel";
 import { extUrl } from "./extapi";
 import { binanceAdapter } from "./binance";
 import { fetchOpenInterestHist, futuresSymbol } from "./binanceFutures";
+import { coinalyzeProvider } from "./coinalyze";
 import { fetchDvolHistory } from "./deribit";
 import { fetchFearGreedHistory } from "./marketOverview";
 import { liquidationsGet } from "./daemon";
@@ -120,6 +121,39 @@ export async function histOiUsd(symbol: string): Promise<PointSerie[] | null> {
     const pts = await fetchOpenInterestHist(symbol, "1h", 500);
     return pts.map((p) => ({ t: p.time, v: p.oiUsd }));
   });
+}
+
+/**
+ * Historique OI notionnel USD avec REPLI automatique de source.
+ *
+ *  1. PRIMAIRE : Coinalyze (`open-interest-history`) — agrégé multi-exchange, 30 j à
+ *     l'heure, mais tributaire du quota (40 req/min) et d'une clé (401 sans clé) ;
+ *  2. REPLI : Binance `futures/data/openInterestHist` via `histOiUsd` ci-dessus —
+ *     GRATUIT, SANS CLÉ, déclenché dès que Coinalyze rejette OU rend une série vide
+ *     (purge quotidienne du gratuit).
+ *
+ * POURQUOI ICI plutôt qu'un nouveau fetcher : `histOiUsd` (Binance) existe déjà dans ce
+ * module, avec son memo TTL 1 h — seul l'ARBITRAGE est nouveau, aucun demi-pont ajouté.
+ * Repli PARTIEL et assumé : `/futures/data` plafonne à 500 points, soit ~20 j en 1 h au
+ * lieu de 30, et couvre le seul perp Binance USDⓈ-M (≠ agrégat multi-exchange) — un OI
+ * dégradé mais présent vaut mieux qu'un sous-pane vide. Ne rejette JAMAIS : les deux
+ * sources muettes donnent une série vide (l'appelant affiche « pas de données »).
+ */
+export async function histOiUsdAvecRepli(
+  symbol: string,
+  intervalCoinalyze: string,
+  depuisMs: number,
+): Promise<PointSerie[]> {
+  try {
+    const hist = await coinalyzeProvider.fetchOpenInterestHistory(symbol, intervalCoinalyze, depuisMs);
+    const points = hist
+      .map((p) => ({ t: p.time, v: p.oiUsd }))
+      .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.v));
+    if (points.length > 0) return points;
+  } catch {
+    /* indisponible / sans clé / quota saturé → repli Binance ci-dessous */
+  }
+  return (await histOiUsd(symbol)) ?? [];
 }
 
 /** DVOL Deribit quotidien 90 j (BTC/ETH seulement). */

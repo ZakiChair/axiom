@@ -21,6 +21,7 @@ import { binanceAdapter } from "./binance";
 import { TWELVEDATA_SYMBOLS } from "./pairs";
 import { pollLoop } from "./pollLoop";
 import { splitSymbol } from "./symbol";
+import { connectWsLoop } from "./wsLoop";
 import { watchlistStore, type WatchlistSource } from "../store/watchlist";
 import { healthStore } from "../store/health";
 
@@ -31,6 +32,8 @@ const TRADFI_POLL_MS = 60_000;
 const CRYPTO_TICKER_POLL_MS = 30_000;
 /** Clé du registre santé pour le poller de quotes tradfi (cf. store/health.ts). */
 const TRADFI_HEALTH = "twelvedata:quotes";
+/** Clé du registre santé du flux ticker Binance (convention `<exchange>:<canal>`). */
+export const TICKER_HEALTH = "binance:ticker";
 
 /** Catalogue tradfi curé, en Set pour la classification. */
 const TRADFI_SET = new Set(TWELVEDATA_SYMBOLS);
@@ -147,65 +150,84 @@ interface BinanceStreamMessage {
   data: BinanceTicker;
 }
 
-/** Souscription ticker Binance (crypto) — WebSocket combiné + reconnexion backoff. */
+/** Construit l'URL du stream COMBINÉ `@ticker` pour un lot de symboles. PURE & testée. */
+export function construireUrlStreamTicker(symbols: readonly string[]): string {
+  const streams = symbols.map((s) => `${s.toLowerCase()}@ticker`).join("/");
+  return `${WS_STREAM_BASE}?streams=${streams}`;
+}
+
+/**
+ * Parse un message du stream combiné en `TickerUpdate`, ou null si le message n'est pas
+ * une donnée exploitable (JSON illisible, enveloppe sans `data`, symbole absent). PURE
+ * & testée : c'est elle qui décide, côté `connectWsLoop`, si le message réarme le backoff.
+ */
+export function parseMessageTicker(data: string): TickerUpdate | null {
+  let msg: BinanceStreamMessage;
+  try {
+    msg = JSON.parse(data) as BinanceStreamMessage;
+  } catch (err) {
+    console.error("[AXIOM] Message ticker Binance illisible", err);
+    return null;
+  }
+  const d = msg.data;
+  if (!d || typeof d.s !== "string") return null;
+  const quoteVolume = Number(d.q);
+  return {
+    symbol: d.s,
+    price: Number(d.c),
+    changePercent: Number(d.P),
+    quoteVolume: Number.isFinite(quoteVolume) ? quoteVolume : undefined,
+  };
+}
+
+/**
+ * Nombre de flux ticker Binance vivants. La clé santé est PARTAGÉE (convention
+ * `<exchange>:<canal>`) alors que plusieurs consommateurs (watchlist, bandeau, portefeuille,
+ * moteur paper, alertes) ouvrent chacun leur stream combiné. `connectWsLoop` pose "closed"
+ * au désabonnement : sans ce compteur, le démontage d'UN consommateur afficherait le flux
+ * fermé dans le panneau DATA alors que les autres sont bien vivants (et `marquerMessage` ne
+ * relève que "stale", jamais "closed" — cf. store/health.ts).
+ */
+let fluxTickerVivants = 0;
+
+/**
+ * Souscription ticker Binance (crypto) — WebSocket combiné. Cycle de vie (backoff anti-flap,
+ * watchdog de staleness, report au registre santé sous `binance:ticker`) délégué à
+ * `connectWsLoop`, comme les neuf autres adaptateurs. La liste de symboles est FIGÉE pour la
+ * durée de l'abonnement : une watchlist qui change fait re-souscrire l'appelant (désabonnement
+ * + nouvel appel), donc aucune re-souscription dynamique à gérer sur la socket elle-même.
+ */
 function subscribeBinanceTickers(
   symbols: string[],
   cb: (update: TickerUpdate) => void
 ): Unsubscribe {
   if (symbols.length === 0) return () => {};
 
-  const streams = symbols.map((s) => `${s.toLowerCase()}@ticker`).join("/");
-  const url = `${WS_STREAM_BASE}?streams=${streams}`;
+  fluxTickerVivants += 1;
+  const unsub = connectWsLoop({
+    url: construireUrlStreamTicker(symbols),
+    source: TICKER_HEALTH,
+    onMessage: (data) => {
+      const update = parseMessageTicker(data);
+      if (update === null) return false;
+      cb(update);
+      return true;
+    },
+  });
 
-  let ws: WebSocket | null = null;
-  let closedByUser = false;
-  let attempt = 0;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const connect = () => {
-    ws = new WebSocket(url);
-
-    ws.onopen = () => {
-      attempt = 0; // succès => on remet le backoff à zéro.
-    };
-
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data as string) as BinanceStreamMessage;
-        const d = msg.data;
-        if (!d || typeof d.s !== "string") return;
-        const quoteVolume = Number(d.q);
-        cb({
-          symbol: d.s,
-          price: Number(d.c),
-          changePercent: Number(d.P),
-          quoteVolume: Number.isFinite(quoteVolume) ? quoteVolume : undefined,
-        });
-      } catch (err) {
-        console.error("[AXIOM] Message ticker Binance illisible", err);
-      }
-    };
-
-    // Une erreur ferme la socket, ce qui déclenche onclose -> reconnexion.
-    ws.onerror = () => {
-      ws?.close();
-    };
-
-    ws.onclose = () => {
-      if (closedByUser) return;
-      // Backoff exponentiel plafonné à 30 s : 1s, 2s, 4s, 8s, ... 30s.
-      const delay = Math.min(30_000, 1_000 * 2 ** attempt);
-      attempt += 1;
-      reconnectTimer = setTimeout(connect, delay);
-    };
-  };
-
-  connect();
-
+  let annule = false;
   return () => {
-    closedByUser = true;
-    if (reconnectTimer) clearTimeout(reconnectTimer);
-    ws?.close();
+    if (annule) return; // idempotent : un double appel ne décrémente qu'une fois
+    annule = true;
+    unsub();
+    fluxTickerVivants -= 1;
+    // Un autre flux ticker reste ouvert : on annule le "closed" que vient de poser wsLoop —
+    // et UNIQUEMENT celui-là. Écraser un "reconnecting"/"error" légitime du flux survivant
+    // par un "connected" optimiste serait le même mensonge, à l'envers.
+    const sante = healthStore.getState();
+    if (fluxTickerVivants > 0 && sante.sources[TICKER_HEALTH]?.etat === "closed") {
+      sante.setEtat(TICKER_HEALTH, "connected");
+    }
   };
 }
 

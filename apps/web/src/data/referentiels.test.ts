@@ -1,6 +1,21 @@
-import { describe, expect, it } from "vitest";
-import { bucketsHoraires, deltasFenetre } from "./referentiels";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  _viderCacheReferentiels,
+  bucketsHoraires,
+  deltasFenetre,
+  histOiUsdAvecRepli,
+} from "./referentiels";
 import type { PointSerie } from "../lib/referentiel";
+import { coinalyzeProvider } from "./coinalyze";
+import { fetchOpenInterestHist } from "./binanceFutures";
+
+vi.mock("./coinalyze", () => ({
+  coinalyzeProvider: { fetchOpenInterestHistory: vi.fn() },
+}));
+vi.mock("./binanceFutures", () => ({
+  fetchOpenInterestHist: vi.fn(),
+  futuresSymbol: (s: string) => s.trim().toUpperCase(),
+}));
 
 const H = 3_600_000;
 
@@ -40,5 +55,57 @@ describe("bucketsHoraires", () => {
   });
   it("vide → vide", () => {
     expect(bucketsHoraires([], 1_700_000_000_000)).toEqual([]);
+  });
+});
+
+/**
+ * Repli OI : Coinalyze (primaire, 30 j) → Binance `futures/data/openInterestHist`
+ * (gratuit, SANS clé) dès que Coinalyze est indisponible / sans clé / à vide.
+ */
+describe("histOiUsdAvecRepli", () => {
+  const oiCoinalyze = vi.mocked(coinalyzeProvider.fetchOpenInterestHistory);
+  const oiBinance = vi.mocked(fetchOpenInterestHist);
+  const t0 = 1_700_000_000_000;
+  const depuis = t0 - 30 * 24 * H;
+
+  beforeEach(() => {
+    _viderCacheReferentiels();
+    vi.clearAllMocks();
+  });
+
+  it("sert Coinalyze quand il répond, SANS appeler Binance (quota préservé)", async () => {
+    oiCoinalyze.mockResolvedValue([
+      { time: t0, symbol: "BTCUSDT_PERP.A", oi: Number.NaN, oiUsd: 6.0e9 },
+      { time: t0 + H, symbol: "BTCUSDT_PERP.A", oi: Number.NaN, oiUsd: 6.2e9 },
+    ]);
+
+    expect(await histOiUsdAvecRepli("BTCUSDT", "1hour", depuis)).toEqual([
+      { t: t0, v: 6.0e9 },
+      { t: t0 + H, v: 6.2e9 },
+    ]);
+    expect(oiBinance).not.toHaveBeenCalled();
+  });
+
+  it("replie sur Binance quand Coinalyze rejette (401 sans clé, quota saturé…)", async () => {
+    oiCoinalyze.mockRejectedValue(new Error("Coinalyze 401 Unauthorized"));
+    oiBinance.mockResolvedValue([{ time: t0, oi: 1, oiUsd: 5.5e9 }]);
+
+    expect(await histOiUsdAvecRepli("BTCUSDT", "1hour", depuis)).toEqual([{ t: t0, v: 5.5e9 }]);
+    // Historique horaire (période `/futures/data`, ≤ 500 points ≈ 20 j).
+    expect(oiBinance).toHaveBeenCalledWith("BTCUSDT", "1h", 500);
+  });
+
+  it("replie sur Binance quand Coinalyze rend une série VIDE (purge quotidienne)", async () => {
+    oiCoinalyze.mockResolvedValue([]);
+    oiBinance.mockResolvedValue([{ time: t0, oi: 1, oiUsd: 5.5e9 }]);
+
+    expect(await histOiUsdAvecRepli("BTCUSDT", "1hour", depuis)).toEqual([{ t: t0, v: 5.5e9 }]);
+  });
+
+  it("rend une série vide (jamais d'exception) si les DEUX sources échouent", async () => {
+    oiCoinalyze.mockRejectedValue(new Error("Coinalyze indisponible"));
+    oiBinance.mockRejectedValue(new Error("fapi injoignable"));
+
+    expect(await histOiUsdAvecRepli("BTCUSDT", "1hour", depuis)).toEqual([]);
   });
 });

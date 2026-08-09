@@ -66,7 +66,10 @@ export function CommandPalette() {
   const mode = useStore(paletteStore, (s) => s.mode);
   const fermer = useStore(paletteStore, (s) => s.fermer);
 
-  const registre = useMemo(() => construireRegistre(), []);
+  // Reconstruit à chaque OUVERTURE : les jeux d'indicateurs nommés sont dynamiques,
+  // un registre mémoïsé une fois pour toutes ne les aurait jamais vus. Fréquence
+  // basse (une ouverture de palette), coût négligeable.
+  const registre = useMemo(() => construireRegistre(), [ouvert]);
   const [requete, setRequete] = useState("");
   const [indexSel, setIndexSel] = useState(0);
   const [historique, setHistorique] = useState<EntreeHistorique[]>(() => lireHistorique());
@@ -261,6 +264,10 @@ export function CommandPalette() {
                       it.cmd.id === "nav" ? "border-l-2 border-accent " : ""
                     }${i === indexSel ? "bg-accent/15" : "hover:bg-bg"}`}
                   >
+                    {/* Mnémoniques COMPOSÉS ici (« THEME BLOOMBERG », « JEU SWING ») : la
+                        largeur partagée des tokens simples (w-16) les tronquerait — la
+                        palette garde sa colonne large. LARGEUR_MNEMONIQUE reste pour le
+                        menu Fonctions et l'en-tête de fenêtre (mnémoniques ≤ 6 car.). */}
                     <span className="w-24 shrink-0 truncate text-[11px] font-semibold uppercase tracking-wider text-accent">
                       {it.cmd.id === "nav" ? "→" : (it.cmd.mnemonique ?? "")}
                     </span>

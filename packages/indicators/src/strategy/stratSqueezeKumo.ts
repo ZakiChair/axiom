@@ -65,7 +65,8 @@ import { ttmSqueezeOf } from "../volatility/ttmSqueeze";
 
 export const stratSqueezeKumo = defStrategie({
   id: "stratSqueezeKumo",
-  name: "Squeeze + tendance kumo (non validé)",
+  name: "Squeeze + tendance kumo",
+  validation: "non-valide",
   inputsStrategie: [
     { key: "sqzLength", name: "Longueur squeeze", type: "number", default: 20, min: 2, max: 200 },
     { key: "multBb", name: "Multiplicateur BB", type: "number", default: 2, min: 0.5, max: 5 },

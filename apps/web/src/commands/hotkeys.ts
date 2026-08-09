@@ -21,6 +21,15 @@ import { themeStore, THEMES } from "../store/theme";
 import { SUPPORTED_TIMEFRAMES } from "../data/adapters";
 import { pousserToast } from "../store/toasts";
 import { watchlistStore } from "../store/watchlist";
+import { windowManagerStore, type SnapZone } from "../store/windowManager";
+
+/** ⌥ + flèche → zone d'ancrage de la fenêtre focalisée. */
+const ANCRAGE_PAR_TOUCHE: Record<string, SnapZone | "restaurer" | undefined> = {
+  ArrowLeft: "left",
+  ArrowRight: "right",
+  ArrowUp: "top",
+  ArrowDown: "restaurer",
+};
 import { navigateTo } from "../lib/navigation";
 import {
   avancer,
@@ -105,7 +114,17 @@ export const RACCOURCIS_AIDE: { touche: string; description: string }[] = [
   { touche: "L", description: "Heatmap liquidations (activer / désactiver)" },
   { touche: "F", description: "Plein écran du graphe" },
   { touche: "T", description: "Thème suivant" },
-  { touche: "Échap", description: "Quitter le plein écran / fermer / passer l'onboarding" },
+  { touche: "Échap", description: "Quitter le plein écran, sinon réduire la fenêtre au premier plan" },
+  // Gestes de FENÊTRE — aucun n'était documenté, et la moitié n'existait que si on
+  // la devinait (revue du 2026-08-01 § 6.1).
+  { touche: "⇧Échap", description: "Fermer la fenêtre au premier plan" },
+  { touche: "²  (touche sous Échap)", description: "Passer à la fenêtre suivante" },
+  { touche: "⌥← / ⌥→", description: "Ancrer la fenêtre à gauche / à droite" },
+  { touche: "⌥↑ / ⌥↓", description: "Ancrer en plein espace / revenir à la taille d'avant" },
+  { touche: "Glisser l'en-tête vers un bord", description: "Ancrer la fenêtre (aperçu à l'approche)" },
+  { touche: "Double-clic sur l'en-tête", description: "Maximiser / restaurer la fenêtre" },
+  { touche: "Clic sur une pastille de la barre", description: "Restaurer, réduire ou remonter la fenêtre" },
+  { touche: "Double-clic sur un pane d'indicateur", description: "Ouvrir ses réglages" },
 ];
 
 /**
@@ -249,12 +268,41 @@ export function useRaccourcisGlobaux(): void {
       // Champ de saisie focalisé : on ne capture pas les touches nues.
       if (estChampEditable(e.target)) return;
 
-      // Échap : quitte le plein écran s'il est actif.
+      // Échap : quitte le plein écran s'il est actif, sinon range la fenêtre au premier
+      // plan (⇧Échap la ferme). Avant, aucune touche ne ciblait une fenêtre : fermer ou
+      // réduire imposait de viser une cible d'environ 14×18 px à la souris.
       if (e.key === "Escape") {
         if (fullscreenStore.getState().plein) {
           fullscreenStore.getState().definir(false);
           e.preventDefault();
+          return;
         }
+        const focalisee = windowManagerStore.getState().fenetreFocalisee();
+        if (focalisee !== null) {
+          if (e.shiftKey) windowManagerStore.getState().closeWindow(focalisee);
+          else windowManagerStore.getState().minimizeWindow(focalisee);
+          e.preventDefault();
+        }
+        return;
+      }
+
+      // ⌥ + flèches : ancrage de la fenêtre au premier plan (moitié gauche/droite,
+      // plein workspace, retour à la géométrie d'avant). Réutilise `snapWindow` et
+      // `preSnapGeometry`, déjà en place pour le glisser-vers-un-bord.
+      if (e.altKey && !e.metaKey && !e.ctrlKey) {
+        const zone = ANCRAGE_PAR_TOUCHE[e.key];
+        if (zone !== undefined) {
+          windowManagerStore.getState().ancrerFocalisee(zone);
+          e.preventDefault();
+          return;
+        }
+      }
+
+      // Rotation du focus entre fenêtres ouvertes — par CODE physique (la touche sous
+      // « ² » d'un AZERTY), comme les timeframes : indépendant de la disposition.
+      if (e.code === "Backquote" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        windowManagerStore.getState().cycleFocus();
+        e.preventDefault();
         return;
       }
 

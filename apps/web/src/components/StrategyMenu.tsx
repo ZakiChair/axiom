@@ -20,7 +20,7 @@ import type { IndicatorDef } from "@axiom/types";
 import { indicatorsStore, formatInstanceLabel } from "../store/indicators";
 import { marketStore } from "../store/market";
 import { tfAtLeast } from "../chart/tfOrder";
-import { indexRoving } from "./ui";
+import { CLASSES_CHAMP, indexRoving } from "./ui";
 import { InstanceParamsEditor } from "./IndicatorMenu";
 
 /** Defs de catégorie strategy (catalogue du menu Stratégies). PURE. */
@@ -231,7 +231,7 @@ export function StrategyMenu() {
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Rechercher… (croisement, squeeze, divergence…)"
               autoFocus
-              className="w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-accent"
+              className={`${CLASSES_CHAMP} w-full`}
             />
             <p className="mt-1 px-0.5 text-[10px] text-text-dim">
               {filtered.length}/{strategies.length} · setups actionnables
@@ -274,7 +274,18 @@ export function StrategyMenu() {
                   }`}
                 >
                   <span className="text-accent">＋</span>
-                  <span className="flex-1 truncate">{def.name}</span>
+                  <span className="min-w-0 flex-1 truncate">{def.name}</span>
+                  {/* Statut de validation HORS du `truncate` : dans le nom, il était la
+                      première chose coupée par un panneau de 288 px — alors que c'est
+                      l'information la plus importante du catalogue. */}
+                  {def.validation === "non-valide" && (
+                    <span
+                      title="Mesurée par la campagne de rejeu puis recalée : le résultat dépend d'hypothèses d'exécution non tenues en réel."
+                      className="shrink-0 rounded bg-down/15 px-1 text-[9px] uppercase tracking-wider text-down"
+                    >
+                      non validé
+                    </span>
+                  )}
                   {count > 0 && (
                     <span className="rounded bg-accent/20 px-1 text-[10px] text-accent">
                       {count}

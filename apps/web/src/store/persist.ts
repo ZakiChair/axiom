@@ -42,6 +42,7 @@ import {
   type SnapshotKv,
 } from "../data/daemon";
 import { defaultParams, migratePersistedIndicators, indicatorsStore } from "./indicators";
+import { indicatorSetsStore, migrerJeuxPersistes } from "./indicatorSets";
 import { marketStore } from "./market";
 import {
   watchlistStore,
@@ -72,6 +73,8 @@ const WINDOW_MANAGER_KEY = "axiom:windowManager:v1";
 const WATCH_KEY = "axiom:watchlist:v1";
 const SESSION_KEY = "axiom:sessionUi:v1";
 const SYNTHETIC_RECENTS_KEY = "axiom:synthetic:recents:v1";
+/** Jeux d'indicateurs nommés (rappelables depuis le menu et la palette). */
+const INDICATOR_SETS_KEY = "axiom:indicatorSets:v1";
 
 /** Préfixe commun de toutes les clés du terminal (export/import de sauvegarde). */
 const AXIOM_PREFIX = "axiom:";
@@ -81,7 +84,7 @@ const AXIOM_PREFIX = "axiom:";
 /** Namespace KV du daemon où sont miroitées les clés gérées ici. */
 const NS_PERSIST = "persist";
 /** Clés localStorage doublées vers le daemon (les 3 gérées par ce module). */
-const MANAGED_KEYS: readonly string[] = [CHART_KEY, WATCH_KEY, SESSION_KEY, WINDOW_MANAGER_KEY, SYNTHETIC_RECENTS_KEY];
+const MANAGED_KEYS: readonly string[] = [CHART_KEY, WATCH_KEY, SESSION_KEY, WINDOW_MANAGER_KEY, SYNTHETIC_RECENTS_KEY, INDICATOR_SETS_KEY];
 /** Horodatages locaux (ms) par clé gérée — arbitre la réconciliation. NON miroité. */
 const META_KEY = "axiom:persistMeta:v1";
 /** Fenêtre de coalescence des kvPut par clé (ms). */
@@ -207,6 +210,16 @@ function currentChartState(): ChartState {
 
 export function saveChartState(): void {
   writeJson(CHART_KEY, currentChartState());
+}
+
+/** Écrit les jeux d'indicateurs nommés (clé propre : ils survivent à un reset du chart). */
+export function saveIndicatorSets(): void {
+  writeJson(INDICATOR_SETS_KEY, indicatorSetsStore.getState().jeux);
+}
+
+/** Restaure les jeux nommés, en filtrant tout ce qui n'a pas la forme attendue. */
+function hydrateJeuxIndicateurs(): void {
+  indicatorSetsStore.getState().setAll(migrerJeuxPersistes(readJson<unknown>(INDICATOR_SETS_KEY)));
 }
 
 // ─────────────────────────── WindowManager (géométrie des fenêtres flottantes) ───────────────────────────
@@ -532,6 +545,11 @@ function hydrateChart(): void {
  */
 export function hydrateStores(): void {
   hydrateChart();
+  // Sans cet appel, les jeux d'indicateurs nommés ne survivaient PAS au rechargement :
+  // l'hydrateur existait, la clé était gérée, l'écriture câblée — seul le boot manquait.
+  // Pire, le premier ré-enregistrement écrasait alors les jeux de la session précédente
+  // (l'abonnement persiste la liste COURANTE, repartie de zéro). Revue adversariale BCD.
+  hydrateJeuxIndicateurs();
   hydrateWindowManager();
   hydrateWatchlist();
   hydrateSyntheticRecents();
@@ -554,6 +572,7 @@ export function enablePersistence(): void {
     }
   });
   indicatorsStore.subscribe(() => saveChartState());
+  indicatorSetsStore.subscribe(() => saveIndicatorSets());
   windowManagerStore.subscribe(() => saveWindowManagerState());
   watchlistStore.subscribe(() => saveWatchlist());
   syntheticsStore.subscribe(() => saveSyntheticRecents());
@@ -581,6 +600,7 @@ export function enablePersistence(): void {
 
 /** Hydrateur par clé gérée : réapplique À CHAUD (via setters) la valeur adoptée. */
 const HYDRATE_PAR_CLE: Record<string, () => void> = {
+  [INDICATOR_SETS_KEY]: hydrateJeuxIndicateurs,
   [CHART_KEY]: hydrateChart,
   [WATCH_KEY]: hydrateWatchlist,
   [SESSION_KEY]: hydrateSession,

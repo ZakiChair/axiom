@@ -28,6 +28,14 @@ export const BTN_SECONDAIRE =
   "rounded border border-border bg-bg px-2 py-1 text-[11px] text-text-dim transition hover:text-text";
 
 /**
+ * Largeur de la colonne MNÉMONIQUE, partagée par les trois surfaces qui l'affichent :
+ * menu Fonctions, en-tête de fenêtre et palette de commandes. Elles utilisaient trois
+ * largeurs différentes (`w-12` / `w-14` / `w-24`) pour le même token, et 48 px
+ * tronquaient les mnémoniques de six caractères — CBPREM, NETLIQ, REPLAY.
+ */
+export const LARGEUR_MNEMONIQUE = "w-16";
+
+/**
  * Classes de champ standard (Input/Select) — UNE seule apparence, UN seul focus
  * (l'audit 2026-07-29 relevait 5 traitements de focus, 2 rayons, 3 tailles).
  */
@@ -440,12 +448,19 @@ export function Badge({
 /** Orientation d'un référentiel : quelle queue de distribution est « chaude » (warn). */
 export type SensRef = "hausse-chaud" | "hausse-froid";
 
-/** Ton du RefBadge — pur, testé (défaut : les deux extrêmes sont chauds). */
+/** Ton du RefBadge — pur, testé. Les DEUX queues sont signalées : celle que `sens`
+ * désigne en `warn` (tension), l'autre en `accent` (compression) — jamais en neutre. */
 export function tonRef(refe: Referentiel, sens?: SensRef): TonBadge {
   if (!estExtreme(refe)) return "neutre";
-  if (sens === "hausse-chaud") return refe.percentile >= 90 ? "warn" : "neutre";
-  if (sens === "hausse-froid") return refe.percentile <= 10 ? "warn" : "neutre";
-  return "warn";
+  // Les DEUX queues sont signalées, avec des tons DIFFÉRENTS. Auparavant les six
+  // usages passaient `hausse-chaud` et la branche basse était du code mort : un DVOL
+  // au 3e percentile — la compression de volatilité, configuration parmi les plus
+  // actionnables — s'affichait dans le même gris qu'un p40 (revue § 6.4).
+  //   haut = tension (warn) ; bas = compression/apathie (accent).
+  const haut = refe.percentile >= 90;
+  if (sens === "hausse-chaud") return haut ? "warn" : "accent";
+  if (sens === "hausse-froid") return haut ? "accent" : "warn";
+  return haut ? "warn" : "accent";
 }
 
 /**
@@ -684,7 +699,7 @@ export function BadgeFiabilite({
   return (
     <span
       title={tip}
-      className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide ${TONS_FIABILITE[n]}`}
+      className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${TONS_FIABILITE[n]}`}
     >
       {texte}
     </span>
@@ -703,19 +718,62 @@ export function texteFraicheur(
   return cadence !== undefined ? `maj ~${cadence}` : VALEUR_ABSENTE;
 }
 
+/**
+ * Fraîcheur d'une donnée par rapport à sa cadence de rafraîchissement. PURE.
+ *
+ * « maj il y a 3 s » et « maj il y a 14 min » avaient rigoureusement la même apparence,
+ * alors que l'un est vivant et l'autre périmé : la primitive n'avait ni seuil, ni prop de
+ * cadence, ni token de péremption (revue du 2026-08-01 § 6.4).
+ *
+ * Le seuil est RELATIF à la cadence annoncée : une source qui se rafraîchit toutes les
+ * 15 min n'est pas en retard à 5 min, une source temps réel si.
+ */
+export function etatFraicheur(
+  majTs: number | null,
+  now: number,
+  cadenceMs?: number
+): "frais" | "attardé" | "périmé" | "inconnu" {
+  if (majTs === null || !Number.isFinite(majTs)) return "inconnu";
+  const age = now - majTs;
+  if (age < 0) return "frais"; // horloge locale en avance : ne pas alarmer
+  const cadence = cadenceMs !== undefined && cadenceMs > 0 ? cadenceMs : 60_000;
+  if (age <= cadence * 1.5) return "frais";
+  if (age <= cadence * 4) return "attardé";
+  return "périmé";
+}
+
+/** Classe de couleur d'un état de fraîcheur (le retard doit SE VOIR, pas se déduire). */
+const CLASSE_FRAICHEUR: Record<ReturnType<typeof etatFraicheur>, string> = {
+  frais: "",
+  attardé: "text-warn",
+  périmé: "text-down",
+  inconnu: "",
+};
+
 /** Ligne de fraîcheur standard — remplace les 4 variantes divergentes des fenêtres. */
 export function Fraicheur({
   loading,
   majTs,
   cadence,
+  cadenceMs,
 }: {
   loading: boolean;
   majTs?: number | null;
   cadence?: string;
+  /** Cadence attendue en ms — active la coloration du retard. */
+  cadenceMs?: number;
 }) {
+  const now = Date.now();
+  const etat = loading ? "inconnu" : etatFraicheur(majTs ?? null, now, cadenceMs);
+  const titre =
+    etat === "attardé"
+      ? "Donnée en retard sur sa cadence de rafraîchissement"
+      : etat === "périmé"
+        ? "Donnée périmée : le rafraîchissement ne suit plus"
+        : undefined;
   return (
-    <span className="tabular-nums whitespace-nowrap">
-      {texteFraicheur(loading, majTs ?? null, Date.now(), cadence)}
+    <span className={`tabular-nums whitespace-nowrap ${CLASSE_FRAICHEUR[etat]}`} title={titre}>
+      {texteFraicheur(loading, majTs ?? null, now, cadence)}
     </span>
   );
 }

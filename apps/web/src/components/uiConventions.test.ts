@@ -95,6 +95,25 @@ const MOTIFS: Motif[] = [
     exceptions: [],
   },
   {
+    // Le ratchet matchait sur des IDENTIFIANTS (`const inputClass =`, `function StatCard(`) :
+    // un champ écrit directement `className="bg-neutral-800 px-1.5 py-0.5 text-xs"` passait
+    // au travers — c'est exactement ce qui laissait les réglages du menu Indicateurs sans
+    // bordure ni fond thémé, invisibles en thème clair (revue du 2026-08-01 § 6.4).
+    // Ce motif regarde le RENDU, pas le nom.
+    id: "champ-inline-non-tokenise",
+    description:
+      "champ de saisie stylé en classes littérales — utiliser <Input>/<Select> (CLASSES_CHAMP)",
+    // `[^<]` borne la recherche à l'intérieur de la balise : le `>` d'une flèche
+    // (`onChange={(e) => …}`) ne doit pas la couper, mais un élément voisin ne doit
+    // pas être happé non plus.
+    // Les DEUX formes d'attribut : `className="…"` ET `className={`…`}` — la forme
+    // gabarit est précisément celle que produit la migration, un contournement
+    // trivial sinon (revue adversariale BCD).
+    regex: /<(?:input|select)\b[^<]{0,400}?className=(?:"[^"]*bg-neutral-\d{3}|\{`[^`]*bg-neutral-\d{3})/,
+    extensions: [".tsx"],
+    exceptions: [],
+  },
+  {
     id: "metric-deprecie",
     description: "Metric supprimé — utiliser TuileStat",
     regex: /\bMetric\b/,

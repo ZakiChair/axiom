@@ -32,7 +32,8 @@ import { supertrendOf } from "../trend/supertrend";
 
 export const stratTripleConfirmation = defStrategie({
   id: "stratTripleConfirmation",
-  name: "Triple confirmation (non validé)",
+  name: "Triple confirmation",
+  validation: "non-valide",
   inputsStrategie: [
     { key: "stPeriode", name: "Période Supertrend", type: "number", default: 10, min: 1 },
     { key: "stMult", name: "Multiplicateur Supertrend", type: "number", default: 3, min: 0.5 },

@@ -13,7 +13,7 @@ import { liqMarksStore } from "../chart/liquidationMarkers";
 import { derivativesUiStore } from "../store/derivatives-ui";
 // Bandeau ticker (pas une fenêtre Launchpad) + disposition grille.
 import { tickerBandStore } from "../store/tickerBand";
-import { estNouvelle, menuWindows, windowManagerStore, type WindowId } from "../store/windowManager";
+import { estNouvelle, menuWindowsGroupees, windowManagerStore, type WindowId } from "../store/windowManager";
 import { FootprintSettingsPanel } from "./FootprintSettingsPanel";
 import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
@@ -29,7 +29,7 @@ import { IndicatorMenu } from "./IndicatorMenu";
 import { StrategyMenu } from "./StrategyMenu";
 import { PairSearch } from "./PairSearch";
 import { ThemeSwitcher } from "./ThemeSwitcher";
-import { Badge, MenuDeroulant } from "./ui";
+import { Badge, CLASSES_CHAMP, LARGEUR_MNEMONIQUE, MenuDeroulant } from "./ui";
 
 /**
  * Ouvre un sélecteur de fichier, valide et REMPLACE tout l'état `axiom:*` du terminal par
@@ -172,17 +172,35 @@ const TICKER_ENTREE = {
   libelle: "Bandeau news défilant",
   ouvrir: () => tickerBandStore.getState().basculer(),
 };
-const FONCTIONS: { id?: WindowId; mnemonique: string; libelle: string; nouveau?: boolean; ouvrir: () => void }[] =
-  menuWindows().flatMap((w) => {
-    const entree = {
-      id: w.id,
-      mnemonique: w.mnemonique,
-      libelle: w.libelle,
-      nouveau: w.nouveau,
-      ouvrir: () => windowManagerStore.getState().openWindow(w.id),
-    };
-    return w.id === "news" ? [entree, TICKER_ENTREE] : [entree];
-  });
+type EntreeFonction = {
+  id?: WindowId;
+  mnemonique: string;
+  libelle: string;
+  nouveau?: boolean;
+  ouvrir: () => void;
+};
+
+/**
+ * Menu Fonctions GROUPÉ par thème (sections dérivées du registre). Il déroulait
+ * jusqu'ici 37 entrées à plat dans l'ordre d'implémentation, au-delà de la hauteur du
+ * panneau (revue du 2026-08-01 § 6.1). TICKER, qui n'est pas une fenêtre du registre,
+ * rejoint « Outils ».
+ */
+const SECTIONS_FONCTIONS: { groupe: string; entrees: EntreeFonction[] }[] = menuWindowsGroupees().map(
+  (section) => ({
+    groupe: section.groupe,
+    entrees: [
+      ...section.entrees.map((w) => ({
+        id: w.id,
+        mnemonique: w.mnemonique,
+        libelle: w.libelle,
+        nouveau: w.nouveau,
+        ouvrir: () => windowManagerStore.getState().openWindow(w.id),
+      })),
+      ...(section.groupe === "Outils" ? [TICKER_ENTREE] : []),
+    ],
+  })
+);
 
 /**
  * Menu déroulant compact « Fonctions » : liste les fenêtres non modales (libellé +
@@ -196,24 +214,36 @@ function FonctionsMenu() {
       titre="Fonctions — ouvrir un panneau (mêmes mnémoniques dans ⌘K)"
     >
       {(fermer) =>
-        FONCTIONS.map((f) => (
-          <button
-            key={f.mnemonique}
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              f.ouvrir();
-              fermer();
-            }}
-            className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs text-neutral-200 hover:bg-neutral-800"
-          >
-            <span className="w-12 shrink-0 font-semibold uppercase tracking-wider text-emerald-400">
-              {f.mnemonique}
-            </span>
-            <span className="min-w-0 flex-1 truncate">{f.libelle}</span>
-            {/* Badge « nouveau » (fenêtres récentes) jusqu'à la 1ère ouverture. */}
-            {f.nouveau && f.id !== undefined && estNouvelle(f.id) && <Badge ton="accent">nouveau</Badge>}
-          </button>
+        SECTIONS_FONCTIONS.map((section) => (
+          <div key={section.groupe}>
+            <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+              {section.groupe}
+            </div>
+            {section.entrees.map((f) => (
+              <button
+                key={f.mnemonique}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  f.ouvrir();
+                  fermer();
+                }}
+                className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs text-neutral-200 hover:bg-neutral-800"
+              >
+                {/* Largeur commune du token mnémonique (l'en-tête de fenêtre et la
+                    palette en utilisaient trois différentes, et 48 px tronquaient
+                    CBPREM / NETLIQ / REPLAY). */}
+                <span className={`${LARGEUR_MNEMONIQUE} shrink-0 truncate font-semibold uppercase tracking-wider text-emerald-400`}>
+                  {f.mnemonique}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{f.libelle}</span>
+                {/* Badge « nouveau » (fenêtres récentes) jusqu'à la 1ère ouverture. */}
+                {f.nouveau && f.id !== undefined && estNouvelle(f.id) && (
+                  <Badge ton="accent">nouveau</Badge>
+                )}
+              </button>
+            ))}
+          </div>
         ))
       }
     </MenuDeroulant>
@@ -469,7 +499,7 @@ export function Toolbar() {
       <select
         value={exchange}
         onChange={(e) => onChangeExchange(e.target.value as ExchangeId)}
-        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none focus:border-neutral-500"
+        className={CLASSES_CHAMP}
         aria-label="Source"
       >
         {EXCHANGES.map((ex) => (
@@ -545,7 +575,7 @@ export function Toolbar() {
       <select
         value={priceScale}
         onChange={(e) => setPriceScale(e.target.value as PriceScaleType)}
-        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100 outline-none focus:border-neutral-500"
+        className={CLASSES_CHAMP}
         aria-label="Échelle de l'axe prix"
         title="Échelle de l'axe prix"
       >

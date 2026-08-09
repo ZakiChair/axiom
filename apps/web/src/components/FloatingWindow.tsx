@@ -23,6 +23,7 @@ import {
   type SnapZone,
 } from "../store/windowManager";
 import { couleurAffichable } from "../store/compare";
+import { LARGEUR_MNEMONIQUE } from "./ui";
 
 export interface FloatingWindowProps {
   id: string;
@@ -230,7 +231,7 @@ export function FloatingWindow({ id, title, mnemonic, children }: FloatingWindow
         className="flex shrink-0 cursor-move items-center justify-between gap-2 rounded-t border-b border-border bg-bg px-2 py-1.5"
       >
         <div className="flex min-w-0 items-center gap-2">
-          <span className="w-14 shrink-0 text-[10px] font-semibold uppercase tracking-wider text-text-dim">
+          <span className={`${LARGEUR_MNEMONIQUE} shrink-0 text-[10px] font-semibold uppercase tracking-wider text-text-dim`}>
             {mnemonic}
           </span>
           <span className="truncate text-xs font-medium text-text">{title}</span>

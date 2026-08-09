@@ -16,6 +16,7 @@ import type { ExchangeId, Timeframe } from "@axiom/types";
 import { INDICATORS } from "@axiom/indicators";
 import { marketStore } from "../store/market";
 import { indicatorsStore } from "../store/indicators";
+import { indicatorSetsStore } from "../store/indicatorSets";
 import { themeStore, THEMES, type ThemeId } from "../store/theme";
 import { orderflowStore } from "../store/orderflow";
 import { volumeProfileStore } from "../store/volumeProfile";
@@ -412,6 +413,21 @@ export function construireRegistre(): Commande[] {
       motsCles: ["theme", "apparence", id, THEME_LABEL[id]],
       apercu: `Applique le thème ${THEME_LABEL[id]}`,
       action: () => themeStore.getState().setTheme(id),
+    });
+  }
+
+  // — Jeux d'indicateurs nommés (dynamiques : dérivés du store, pas d'une liste figée) —
+  for (const jeu of indicatorSetsStore.getState().jeux) {
+    commandes.push({
+      id: `ind-set:${jeu.id}`,
+      // Unique par jeu (patron « THEME <id> ») : un littéral partagé « JEU »
+      // rendait les commandes indiscernables et invisibles à l'invariant d'unicité.
+      mnemonique: `JEU ${jeu.id.toUpperCase()}`,
+      libelle: `Jeu « ${jeu.nom} » — rappeler`,
+      categorie: "indicateur",
+      motsCles: ["jeu", "setup", "preset", "indicateurs", jeu.nom, jeu.id],
+      apercu: `Remplace les indicateurs par ce jeu (${jeu.instances.length})`,
+      action: () => indicatorsStore.getState().setAll(jeu.instances),
     });
   }
 

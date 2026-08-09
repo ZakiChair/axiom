@@ -29,6 +29,7 @@ vi.mock("../data/coinalyze", () => ({
 }));
 
 import { defaultParams, indicatorsStore } from "./indicators";
+import { indicatorSetsStore } from "./indicatorSets";
 import { marketStore } from "./market";
 import { DEFAULT_WATCHLIST, watchlistStore } from "./watchlist";
 import { compareStore } from "./compare";
@@ -99,6 +100,31 @@ beforeEach(() => {
 
 afterEach(() => {
   delete (globalThis as { localStorage?: Storage }).localStorage;
+});
+
+describe("hydrateStores — jeux d'indicateurs nommés", () => {
+  // Le cycle COMPLET écrire → recharger. Ce trou de couverture a laissé passer une
+  // fonctionnalité morte : l'hydrateur des jeux existait mais n'était appelé nulle
+  // part, si bien qu'aucun jeu ne survivait au rechargement — et que le premier
+  // ré-enregistrement écrasait ceux de la session précédente. 2945 tests étaient
+  // verts pendant ce temps (revue adversariale BCD).
+  it("réhydrate les jeux enregistrés au boot", () => {
+    localStorage.setItem(
+      "axiom:indicatorSets:v1",
+      JSON.stringify([
+        { id: "swing", nom: "Swing", instances: [{ instanceId: "sma-1", defId: "sma", params: { length: 20 }, couleurIdx: 0 }] },
+      ])
+    );
+
+    hydrateStores();
+
+    expect(indicatorSetsStore.getState().jeux.map((j) => j.nom)).toEqual(["Swing"]);
+  });
+
+  it("repart d'une liste vide sans casser quand la clé est absente", () => {
+    hydrateStores();
+    expect(indicatorSetsStore.getState().jeux).toEqual([]);
+  });
 });
 
 describe("hydrateStores — indicateurs persistés", () => {

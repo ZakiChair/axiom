@@ -64,10 +64,13 @@ const candles = mkCandles(closes);
 const PARAMS = { rsiLength: 3, seuilBas: 30, seuilHaut: 70, adxLength: 14, seuilAdx: 25 };
 
 describe("stratRsiRange", () => {
-  it("contrat : strategy/overlay, « (non validé) » au nom, inputs propres + lignesTrades en dernier", () => {
+  it("contrat : strategy/overlay, statut validation typé, inputs propres + lignesTrades en dernier", () => {
     expect(stratRsiRange.category).toBe("strategy");
     expect(stratRsiRange.pane).toBe("overlay");
-    expect(stratRsiRange.name).toContain("(non validé)");
+    // Le statut est porté par une DONNÉE, pas par le nom (il y était tronqué en
+    // premier dans un panneau de 288 px). Cf. IndicatorDef.validation.
+    expect(stratRsiRange.validation).toBe("non-valide");
+    expect(stratRsiRange.name).not.toContain("(non validé)");
     expect(stratRsiRange.inputs.map((i) => i.key)).toEqual([
       "rsiLength", "seuilBas", "seuilHaut", "adxLength", "seuilAdx", "lignesTrades",
     ]);

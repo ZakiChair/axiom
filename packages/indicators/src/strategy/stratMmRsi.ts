@@ -41,7 +41,8 @@ import { rsiOf } from "../momentum/rsi";
 
 export const stratMmRsi = defStrategie({
   id: "stratMmRsi",
-  name: "Croisement MM + confirmation RSI (non validé)",
+  name: "Croisement MM + confirmation RSI",
+  validation: "non-valide",
   inputsStrategie: [
     { key: "rapide", name: "MM rapide", type: "number", default: 9, min: 1 },
     { key: "lente", name: "MM lente", type: "number", default: 21, min: 2 },

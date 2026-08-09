@@ -67,6 +67,7 @@ import {
   type CotChart,
 } from "./brief/commun";
 import { SectionChapeau } from "./brief/SectionChapeau";
+import { SectionRegime } from "./brief/SectionRegime";
 import { SectionBreadth } from "./brief/SectionBreadth";
 import { SectionSession } from "./brief/SectionSession";
 import { SectionWatchlist } from "./brief/SectionWatchlist";
@@ -122,6 +123,10 @@ export function BriefWindow() {
   // indépendants des sections réseau de la fenêtre (qui peuvent être en erreur séparément).
   const regime = useStore(regimeStore, (s) => s.regime);
   const chapeau = useStore(regimeStore, (s) => s.chapeau);
+  // `majTs` était écrit à chaque cycle du poller et lu par PERSONNE : le chapeau
+  // n'avait aucun indicateur de fraîcheur, et le « maj HH:MM » du sous-titre date
+  // des sections réseau, pas de lui (revue § 6.4).
+  const regimeMajTs = useStore(regimeStore, (s) => s.majTs);
 
   const phrasesLecture = useMemo(() => {
     if (chapeau === null) return [];
@@ -353,6 +358,7 @@ export function BriefWindow() {
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
         {/* Chapeau interprété (H16) : régime + nuit + funding + vol, puis lecture générée. */}
         <SectionChapeau regime={regime} chapeau={chapeau} phrasesLecture={phrasesLecture} />
+        <SectionRegime regime={regime} majTs={regimeMajTs} />
 
         {/* Régime — largeur de marché (breadth) : jauges MM50/MM200, A/D, tendance MM50. */}
         <SectionBreadth breadth={breadth} noteFraicheur={noteFraicheur} />

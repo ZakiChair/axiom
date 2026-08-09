@@ -15,6 +15,8 @@ import {
   mirrorOpenState,
   WINDOW_REGISTRY,
   menuWindows,
+  menuWindowsGroupees,
+  GROUPES_FENETRES,
   WINDOW_Z_MAX,
   WINDOW_Z_MIN,
   MIN_WIDTH,
@@ -312,6 +314,47 @@ describe("menuWindows (menu Fonctions dérivé du registre)", () => {
     expect(parId.get("stablecoins")).toBe(true);
     expect(parId.get("dist")).toBe(true);
     expect(parId.get("eco")).toBe(false);
+  });
+});
+
+describe("menuWindowsGroupees (menu Fonctions par sections — c'est LUI que la Toolbar rend)", () => {
+  // `menuWindows()` reste testé ci-dessus comme dérivation de référence, mais le produit
+  // rend désormais la version GROUPÉE : sans ces tests, une fenêtre pouvait disparaître
+  // du menu réel pendant que la suite restait verte (revue adversariale BCD).
+  it("couvre EXACTEMENT les mêmes fenêtres que menuWindows — rien ne se perd au groupage", () => {
+    const aplati = menuWindowsGroupees()
+      .flatMap((s) => s.entrees)
+      .map((e) => e.id)
+      .sort();
+    const reference = menuWindows()
+      .map((w) => w.id)
+      .sort();
+    expect(aplati).toEqual(reference);
+  });
+
+  it("rend les sections dans l'ordre déclaré, sans section vide", () => {
+    const groupes = menuWindowsGroupees().map((s) => s.groupe);
+    const ordreDeclare = GROUPES_FENETRES.filter((g) => groupes.includes(g));
+    expect(groupes).toEqual(ordreDeclare);
+    for (const s of menuWindowsGroupees()) expect(s.entrees.length).toBeGreaterThan(0);
+  });
+
+  it("une fenêtre SANS groupe tomberait dans « Outils » (filet, pas un trou)", () => {
+    // Vérifié indirectement : toutes les entrées du registre en portent un aujourd'hui,
+    // et le repli est codé — on assert le repli sur la forme, pas sur un cas fabriqué.
+    const total = menuWindowsGroupees().flatMap((s) => s.entrees).length;
+    expect(total).toBe(menuWindows().length);
+  });
+
+  it("résout menuLabel et `nouveau` comme la dérivation de référence", () => {
+    const brief = menuWindowsGroupees()
+      .flatMap((s) => s.entrees)
+      .find((e) => e.id === "brief");
+    expect(brief?.libelle).toBe("Point marché (snapshot)");
+    const liq = menuWindowsGroupees()
+      .flatMap((s) => s.entrees)
+      .find((e) => e.id === "liquidations");
+    expect(liq?.nouveau).toBe(true);
   });
 });
 

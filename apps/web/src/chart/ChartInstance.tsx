@@ -199,14 +199,18 @@ function applyChartTheme(chart: KLineChartInstance, chartDom: HTMLElement): void
   const candleDown = lireTokenCanvas("--candle-down", down);
   const grid = lireTokenCanvas("--grid", "");
   const crosshair = lireTokenCanvas("--crosshair", "");
-  const atmos = lireTokenCanvas("--atmos", "");
   const font = lireTokenCanvas("--font-display", "");
   // Dessins (fibonacci, position, mesure…) : accent du thème, encre sombre par-dessus.
   const accent = lireTokenCanvas("--accent", "");
   const accentInk = lireTokenCanvas("--accent-ink", "");
 
   chartDom.style.backgroundColor = bg;
-  chartDom.style.backgroundImage = atmos && atmos !== "none" ? atmos : "";
+  // Le dégradé d'ambiance du thème reste sur le `body` (index.css), JAMAIS sur la zone de
+  // tracé : le fond des bougies doit être uniforme. En « aurora » il est de surcroît animé
+  // en boucle de 18 s — le fond respirait derrière les prix. C'était le seul endroit du
+  // produit où l'identité coûtait du contraste, et le seul où elle ne devrait pas
+  // (revue du 2026-08-01 § 6.4). L'identité reste sur tout le chrome autour du graphe.
+  chartDom.style.backgroundImage = "";
 
   chart.setStyles({
     grid: { horizontal: { color: grid }, vertical: { color: grid } },

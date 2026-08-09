@@ -36,8 +36,14 @@ import {
   PLAGES,
   SEUIL_PROFONDEUR_BT,
   specParId,
+  configCourante,
   type PhaseBacktest,
 } from "../store/backtest";
+import { runPerime, resumeRun } from "../store/backtestSignature";
+import { btMarksStore } from "../chart/btMarkers";
+import { MAX_MARQUEURS_BT, tradesTronques } from "../chart/btMarkers.calc";
+import { navigateTo } from "../lib/navigation";
+import type { Timeframe } from "@axiom/types";
 import {
   formatDateComplete,
   formatDateCourte,
@@ -61,6 +67,7 @@ import {
   BarreProgression,
   BarrePeriodes,
   Bouton,
+  BoutonBascule,
   BTN_SECONDAIRE,
   Chip,
   EnTeteFenetre,
@@ -366,7 +373,13 @@ function dessinerEquity(canvas: HTMLCanvasElement, resultat: ResultatBacktest, d
   ctx.stroke();
   ctx.setLineDash([]);
 
-  ctx.strokeStyle = colUp;
+  // Couleur de l'équité conditionnée au RÉSULTAT du run. Elle était toujours verte :
+  // un backtest à −20 % traçait une ligne verte descendante au-dessus d'une aire rouge
+  // de drawdown, en contradiction avec la tuile PnL juste au-dessus — le token de statut
+  // « bon » recyclé en couleur de série (revue du 2026-08-01 § 6.3).
+  // `capital` (points[0]) est déjà le capital de départ du run, calculé plus haut.
+  const dernier = points.at(-1)?.equity ?? capital;
+  ctx.strokeStyle = dernier >= capital ? colUp : colDown;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   visibles.forEach((p, i) => {
@@ -805,7 +818,7 @@ const COLONNES_TRADES: ColonneTable<TradeResultat>[] = [
   },
 ];
 
-function TradesTable({ trades }: { trades: TradeResultat[] }) {
+function TradesTable({ trades, symbol, tf }: { trades: TradeResultat[]; symbol: string; tf: Timeframe }) {
   const [tri, setTri] = useState<TriTable>({ colonne: "tempsEntree", dir: 1 });
   const triees = useMemo(() => trierLignes(trades, COLONNES_TRADES, tri), [trades, tri]);
   return (
@@ -817,29 +830,99 @@ function TradesTable({ trades }: { trades: TradeResultat[] }) {
       cle={(tr) => `${tr.tempsEntree}-${tr.tempsSortie}-${tr.pnl}`}
       maxHauteur="34vh"
       vide="Aucun trade."
+      // Clic sur une ligne → le chart se cale sur l'actif du run et centre l'entrée.
+      // La primitive supportait déjà ce geste (le BRIEF s'en sert) ; la table du
+      // backtest, elle, ne le fournissait pas — les trades restaient une liste morte.
+      surClicLigne={(tr) =>
+        navigateTo({ symbol, exchange: "binance", timeframe: tf, markTime: tr.tempsEntree, source: "Backtest" })
+      }
     />
   );
 }
 
 // ─────────────────────────── Grille de statistiques ───────────────────────────
 
+/**
+ * En-tête des résultats : ce que le run décrit, et s'il décrit encore la configuration
+ * affichée. Aucun setter du builder n'effaçait le résultat — on pouvait changer symbole,
+ * pas de temps, règles et frais pendant que les neuf tuiles continuaient d'afficher le
+ * run précédent, sans aucune marque. La seule trace était une note de 10 px qui ne
+ * couvrait ni les règles ni les frais (revue du 2026-08-01 § 6.3).
+ *
+ * Deux boutons y vivent aussi : rejouer, et projeter les trades sur le graphe.
+ */
+function EnTeteResultat({ resultat }: { resultat: ResultatBacktest }) {
+  const signature = useStore(backtestStore, (s) => s.signatureRun);
+  const etat = useStore(backtestStore, (s) => s);
+  const perime = runPerime(signature, configCourante(etat));
+  const marquesActives = useStore(btMarksStore, (s) => s.actif);
+  const libellePlage = PLAGES.find((p) => p.id === etat.plage)?.label ?? etat.plage;
+  const tronques = tradesTronques(resultat.trades.length);
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <TitreSection>{resumeRun(configCourante(etat), resultat.trades.length, libellePlage)}</TitreSection>
+        <div className="ml-auto flex items-center gap-1.5">
+          <BoutonBascule
+            actif={marquesActives}
+            onClick={() => btMarksStore.getState().basculer()}
+            title={
+              marquesActives
+                ? "Retirer les trades du graphe"
+                : "Poser les trades de ce run sur le graphe (triangles creux)"
+            }
+          >
+            Trades sur le chart
+          </BoutonBascule>
+        </div>
+      </div>
+      {perime && (
+        <div className="rounded border border-warn/40 bg-warn/10 px-2 py-1 text-[11px] text-warn">
+          La configuration a changé depuis ce run — ces chiffres décrivent la précédente.
+          Relancer pour les mettre à jour.
+        </div>
+      )}
+      {tronques > 0 && marquesActives && (
+        <p className="text-[10px] text-text-dim">
+          Sur le graphe, seuls les {MAX_MARQUEURS_BT} trades les plus récents de ce run sont
+          posés — {tronques} de plus dans ce run.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Trois niveaux de lecture au lieu d'une nappe uniforme de neuf tuiles identiques : le
+ * VERDICT (PnL net, pleine largeur), le RISQUE, puis le détail. Le chiffre-clé était en
+ * quatrième position, sans emphase — le scan « chiffre-clé d'abord » n'existait pas
+ * (revue du 2026-08-01 § 6.3).
+ */
 function StatsGrid({ resultat }: { resultat: ResultatBacktest }) {
   const s = resultat.stats;
   return (
-    <section className="grid grid-cols-3 gap-1.5">
-      <TuileStat label="Trades" valeur={String(s.nbTrades)} />
-      <TuileStat label="Taux de réussite" valeur={formatPourcentage(s.winRatePct, 1)} />
-      <TuileStat label="Facteur de profit" valeur={formatPF(s.profitFactor)} />
+    <section className="space-y-1.5">
       <TuileStat
         label="PnL net"
         valeur={`${formatDec(s.pnlTotal)} (${formatPct(s.pnlTotalPct)})`}
         ton={s.pnlTotal >= 0 ? "up" : "down"}
+        disposition="inline"
       />
-      <TuileStat label="Drawdown max" valeur={formatPourcentage(s.maxDrawdownPct, 1)} ton="down" />
-      <TuileStat label="Sharpe (annualisé)" valeur={formatDec(s.sharpe)} />
-      <TuileStat label="Exposition" valeur={formatPourcentage(s.expositionPct, 0)} />
-      <TuileStat label="Gain moyen" valeur={formatPct(s.gainMoyenPct)} ton="up" />
-      <TuileStat label="Perte moyenne" valeur={formatPct(s.perteMoyennePct)} ton="down" />
+      <div className="grid grid-cols-3 gap-1.5">
+        <TuileStat label="Drawdown max" valeur={formatPourcentage(s.maxDrawdownPct, 1)} ton="down" />
+        <TuileStat label="Facteur de profit" valeur={formatPF(s.profitFactor)} />
+        <TuileStat label="Sharpe (annualisé)" valeur={formatDec(s.sharpe)} />
+      </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        <TuileStat label="Trades" valeur={String(s.nbTrades)} />
+        <TuileStat label="Taux de réussite" valeur={formatPourcentage(s.winRatePct, 1)} />
+        <TuileStat label="Exposition" valeur={formatPourcentage(s.expositionPct, 0)} />
+      </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        <TuileStat label="Gain moyen" valeur={formatPct(s.gainMoyenPct)} ton="up" />
+        <TuileStat label="Perte moyenne" valeur={formatPct(s.perteMoyennePct)} ton="down" />
+      </div>
     </section>
   );
 }
@@ -1175,10 +1258,11 @@ export function BacktestWindow() {
         {/* Résultats */}
         {resultat !== null && phase === "done" && (
           <div className="space-y-3">
+            <EnTeteResultat resultat={resultat} />
             <StatsGrid resultat={resultat} />
             <EquityCanvas resultat={resultat} />
             <MonteCarloSection resultat={resultat} busy={busy} />
-            <TradesTable trades={resultat.trades} />
+            <TradesTable trades={resultat.trades} symbol={symbol} tf={tf} />
           </div>
         )}
       </div>

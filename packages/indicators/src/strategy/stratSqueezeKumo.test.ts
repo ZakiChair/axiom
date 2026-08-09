@@ -67,10 +67,13 @@ const barres = [...range1, ...breakoutUp, ...reversal, ...transition, ...range2,
 const candles = mkCandles(barres);
 
 describe("stratSqueezeKumo", () => {
-  it("contrat : strategy/overlay, « (non validé) » au nom, inputs propres + lignesTrades en dernier", () => {
+  it("contrat : strategy/overlay, statut validation typé, inputs propres + lignesTrades en dernier", () => {
     expect(stratSqueezeKumo.category).toBe("strategy");
     expect(stratSqueezeKumo.pane).toBe("overlay");
-    expect(stratSqueezeKumo.name).toContain("(non validé)");
+    // Le statut est porté par une DONNÉE, pas par le nom (il y était tronqué en
+    // premier dans un panneau de 288 px). Cf. IndicatorDef.validation.
+    expect(stratSqueezeKumo.validation).toBe("non-valide");
+    expect(stratSqueezeKumo.name).not.toContain("(non validé)");
     expect(stratSqueezeKumo.inputs.map((i) => i.key)).toEqual([
       "sqzLength", "multBb", "multKc", "dureeMin", "tenkan", "kijun", "senkouB", "lignesTrades",
     ]);

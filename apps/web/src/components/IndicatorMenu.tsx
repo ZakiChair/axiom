@@ -35,10 +35,12 @@ import { OCN_PERIODS } from "../chart/openCloseNet.calc";
 import { macroOverlayStore } from "../store/macro-overlays";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
 import { chartCapaciteStore, plafondPanesAtteint } from "../store/chartCapacite";
+import { correspondAlias, normaliser } from "./indicateurAlias";
 import { settingsUiStore } from "../store/settings-ui";
 import { tfAtLeast } from "../chart/tfOrder";
-import { indexRoving, Onglets } from "./ui";
+import { CLASSES_CHAMP, indexRoving, Input, Onglets, Select } from "./ui";
 import { MacroIndicators } from "./MacroIndicators";
+import { JeuxIndicateurs } from "./JeuxIndicateurs";
 
 /** Catalogue du menu Indicateurs : TOUT sauf les stratégies (foyer exclusif — menu Stratégies). */
 export const INDICATEURS_ANALYSE = INDICATORS.filter((d) => d.category !== "strategy");
@@ -180,17 +182,17 @@ export function InstanceParamsEditor({
     // Choix explicite (select) ou source avec options : liste déroulante.
     if ((input.type === "select" || input.type === "source") && input.options && input.options.length > 0) {
       return (
-        <select
+        <Select
           value={String(value)}
           onChange={(e) => set(input.key, e.target.value)}
-          className="w-24 rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-accent"
+          className="w-24"
         >
           {input.options.map((opt) => (
             <option key={opt} value={opt}>
               {opt}
             </option>
           ))}
-        </select>
+        </Select>
       );
     }
     if (input.type === "boolean") {
@@ -205,7 +207,7 @@ export function InstanceParamsEditor({
     }
     if (input.type === "number") {
       return (
-        <input
+        <Input
           type="number"
           value={typeof value === "number" ? value : Number(value)}
           min={input.min}
@@ -215,17 +217,17 @@ export function InstanceParamsEditor({
             // On ignore une saisie non finie (champ vidé transitoirement).
             if (Number.isFinite(n)) set(input.key, n);
           }}
-          className="w-20 rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-accent"
+          className="w-20"
         />
       );
     }
     // Repli (source sans options) : saisie texte libre.
     return (
-      <input
+      <Input
         type="text"
         value={String(value)}
         onChange={(e) => set(input.key, e.target.value)}
-        className="w-24 rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-200 focus:outline-none focus:ring-1 focus:ring-accent"
+        className="w-24"
       />
     );
   };
@@ -306,15 +308,19 @@ export function IndicatorMenu() {
   }, [active]);
 
   const q = query.trim().toLowerCase();
+  // Requête normalisée (sans accents ni tirets) pour les alias français : le catalogue
+  // est en sigles anglais, « moyenne mobile » ne matchait rien dans une app 100 % FR.
+  const qNorm = normaliser(query);
   const filtered = useMemo(() => {
     if (!q) return INDICATEURS_ANALYSE;
     return INDICATEURS_ANALYSE.filter((d) => {
       if (d.name.toLowerCase().includes(q) || d.id.toLowerCase().includes(q)) return true;
       // Recherche par libellé de catégorie (ex. « order », « dérivés »).
       const catLabel = (CATEGORY_LABELS[d.category] ?? d.category).toLowerCase();
-      return catLabel.includes(q) || d.category.toLowerCase().includes(q);
+      if (catLabel.includes(q) || d.category.toLowerCase().includes(q)) return true;
+      return correspondAlias(d.id, qNorm);
     });
-  }, [q]);
+  }, [q, qNorm]);
 
   // L'OCN est une pseudo-entrée épinglée HORS registre : quand la recherche le
   // matche sans matcher aucun def orderflow, on garde la section visible.
@@ -351,6 +357,17 @@ export function IndicatorMenu() {
     if (e.key === "Escape") {
       e.preventDefault();
       fermerMenu();
+      return;
+    }
+    // Entrée depuis le champ de recherche : ajoute le PREMIER résultat non grisé.
+    // Sans cela, même avec un unique résultat il fallait ↓ puis Entrée.
+    if (e.key === "Enter" && document.activeElement === rechercheRef.current) {
+      const premier = itemsAjout()[0];
+      if (premier) {
+        e.preventDefault();
+        premier.click();
+        rechercheRef.current?.focus(); // on reste dans le champ pour enchaîner
+      }
       return;
     }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
@@ -492,6 +509,10 @@ export function IndicatorMenu() {
             </div>
           )}
 
+          {/* Jeux nommés : rappeler un setup complet en un clic (ou une frappe ⌘K)
+              plutôt que re-cocher huit lignes dans un panneau de 288 px. */}
+          <JeuxIndicateurs actives={activesAnalyse} />
+
           {/* Recherche */}
           <div className="border-b border-neutral-800 p-2">
             <input
@@ -501,7 +522,7 @@ export function IndicatorMenu() {
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Rechercher… (CVD, RVOL, orderflow…)"
               autoFocus
-              className="w-full rounded bg-neutral-800 px-2 py-1 text-sm text-neutral-200 placeholder:text-neutral-500 focus:outline-none focus:ring-1 focus:ring-accent"
+              className={`${CLASSES_CHAMP} w-full`}
             />
             <p className="mt-1 px-0.5 text-[10px] text-text-dim">
               {filtered.length}/{INDICATEURS_ANALYSE.length} · Order Flow en tête du catalogue

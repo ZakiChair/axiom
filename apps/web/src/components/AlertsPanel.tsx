@@ -3,8 +3,10 @@
  *
  * Liste dense des alertes (état actif, armement, dernière exécution, libellé de la
  * condition), création (symbole prérempli = actif courant ; types prix / var% /
- * indicateur-seuil / funding-extreme / cascade liq / score de régime), suppression,
- * bascule actif/inactif, et journal repliable des déclenchements.
+ * indicateur-seuil / indicateur-croisement / funding-extreme / cascade liq / score de
+ * régime), suppression, bascule actif/inactif, et journal repliable des déclenchements.
+ * Un clic sur une alerte (ou sur une ligne de journal) navigue le chart maître vers son
+ * symbole (pattern `navigateTo`, cf. SqueezeWindow).
  *
  * Ce composant se re-rend uniquement sur ÉVÉNEMENT (création, bascule, déclenchement) :
  * aucune donnée haute fréquence n'y transite (le runtime écrit le store hors render-loop).
@@ -25,6 +27,12 @@ import { alertsStore } from "../store/alerts";
 import { presetAlertsStore } from "../store/presetAlerts";
 import { demanderPermissionNotifications } from "../alerts/runtime";
 import { formatHeure } from "../lib/format";
+import { navigateTo } from "../lib/navigation";
+import {
+  cibleAlerte,
+  construireConditionCroisement,
+  INDICATEURS_CROISEMENT,
+} from "./alertsPanel.util";
 import { SidebarSection } from "./SidebarSection";
 import { Vide } from "./ui";
 
@@ -33,6 +41,7 @@ type TypeAlerte =
   | "prix-croise"
   | "variation-pct"
   | "indicateur-seuil"
+  | "indicateur-croisement"
   | "funding-extreme"
   | "cvd-spot-perp-div"
   | "liq-cascade"
@@ -97,6 +106,14 @@ export function AlertsPanel() {
   const [output, setOutput] = useState(INDICATEURS_SEUIL[0]?.outputs[0]?.key ?? "rsi");
   const [comparateur, setComparateur] = useState<Comparateur>(">");
   const [valeurInd, setValeurInd] = useState("");
+  // indicateur-croisement : état PROPRE (catalogue différent de `indicateur-seuil` —
+  // partager `indicateurId` laisserait des sorties périmées en changeant de type).
+  const [indicateurCroise, setIndicateurCroise] = useState(INDICATEURS_CROISEMENT[0]?.id ?? "macd");
+  const [outputA, setOutputA] = useState(INDICATEURS_CROISEMENT[0]?.outputs[0]?.key ?? "macd");
+  const [outputB, setOutputB] = useState(INDICATEURS_CROISEMENT[0]?.outputs[1]?.key ?? "signal");
+  // Sens PROPRE au croisement : `sens` est conservé d'une soumission à l'autre
+  // (enchaînement rapide) et le partager ferait fuiter le choix d'un type vers l'autre.
+  const [sensCroisement, setSensCroisement] = useState<SensCroisement>("hausse");
   // funding-extreme
   const [sensFunding, setSensFunding] = useState<SensFunding>("les-deux");
   const [seuilAbsPct, setSeuilAbsPct] = useState("0.1"); // saisie en % (0.1 = 0.1 %)
@@ -125,6 +142,20 @@ export function AlertsPanel() {
     const idef = getIndicator(id);
     const firstOut = idef?.outputs[0]?.key;
     if (firstOut) setOutput(firstOut);
+  };
+
+  const outputsCroisement = useMemo(() => {
+    return getIndicator(indicateurCroise)?.outputs ?? [];
+  }, [indicateurCroise]);
+
+  const onChangeIndicateurCroise = (id: string) => {
+    setIndicateurCroise(id);
+    // Deux premières sorties du nouvel indicateur (garanti ≥ 2 par le catalogue).
+    const outs = getIndicator(id)?.outputs ?? [];
+    const a = outs[0]?.key;
+    const b = outs[1]?.key;
+    if (a) setOutputA(a);
+    if (b) setOutputB(b);
   };
 
   const soumettre = () => {
@@ -158,6 +189,13 @@ export function AlertsPanel() {
         comparateur,
         valeur: v,
       };
+    } else if (type === "indicateur-croisement") {
+      const c = construireConditionCroisement(indicateurCroise, outputA, outputB, sensCroisement);
+      if (c === null) {
+        setErreurForm("Deux sorties DIFFÉRENTES du même indicateur requises.");
+        return;
+      }
+      condition = c;
     } else if (type === "funding-extreme") {
       // funding-extreme : seuilAbs en fraction (saisie % → /100) ; z optionnel.
       const absPct = Number(seuilAbsPct);
@@ -255,20 +293,28 @@ export function AlertsPanel() {
               >
                 ●
               </button>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline justify-between gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  navigateTo({ symbol: d.symbol, exchange: d.source, source: "alerte" })
+                }
+                title="Voir sur le chart"
+                className="min-w-0 flex-1 text-left"
+              >
+                {/* Spans (et non divs) : contenu autorisé dans un <button>. */}
+                <span className="flex items-baseline justify-between gap-2">
                   <span className="truncate font-medium text-text">{d.symbol}</span>
                   <span className={`shrink-0 text-[10px] ${arm.classe}`}>{arm.texte}</span>
-                </div>
-                <div className="flex items-baseline justify-between gap-2">
+                </span>
+                <span className="flex items-baseline justify-between gap-2">
                   <span className="truncate text-[11px] text-text-dim">
                     {decrireCondition(d.condition)}
                   </span>
                   <span className="shrink-0 text-[10px] tabular-nums text-text-dim">
                     {formatHeure(derniere ?? 0)}
                   </span>
-                </div>
-              </div>
+                </span>
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -317,6 +363,7 @@ export function AlertsPanel() {
             <option value="prix-croise">Prix</option>
             <option value="variation-pct">Var %</option>
             <option value="indicateur-seuil">Indicateur</option>
+            <option value="indicateur-croisement">Croisement</option>
             <option value="funding-extreme">Funding</option>
             <option value="cvd-spot-perp-div">CVD S/P</option>
             <option value="liq-cascade">Cascade liq</option>
@@ -417,6 +464,61 @@ export function AlertsPanel() {
                 className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-xs tabular-nums text-text outline-none placeholder:text-text-dim focus:border-text-dim"
               />
             </div>
+          </div>
+        )}
+
+        {type === "indicateur-croisement" && (
+          <div className="space-y-1.5">
+            <select
+              value={indicateurCroise}
+              onChange={(e) => onChangeIndicateurCroise(e.target.value)}
+              className="w-full rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+            >
+              {INDICATEURS_CROISEMENT.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+            <div className="flex items-center gap-1.5">
+              <select
+                value={outputA}
+                onChange={(e) => setOutputA(e.target.value)}
+                className="min-w-0 flex-1 rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+              >
+                {outputsCroisement.map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.key}
+                  </option>
+                ))}
+              </select>
+              <span aria-hidden className="shrink-0 text-[10px] text-text-dim">
+                ×
+              </span>
+              <select
+                value={outputB}
+                onChange={(e) => setOutputB(e.target.value)}
+                className="min-w-0 flex-1 rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+              >
+                {outputsCroisement.map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.key}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <select
+              value={sensCroisement}
+              onChange={(e) => setSensCroisement(e.target.value as SensCroisement)}
+              className="w-full rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+            >
+              <option value="hausse">↑ A croise B à la hausse</option>
+              <option value="baisse">↓ A croise B à la baisse</option>
+              <option value="les-deux">↕ les deux</option>
+            </select>
+            <p className="px-0.5 text-[10px] text-text-dim">
+              Évalué à la clôture de bougie (front ET daemon onglet fermé).
+            </p>
           </div>
         )}
 
@@ -550,15 +652,39 @@ export function AlertsPanel() {
             {journal.length === 0 ? (
               <Vide>Aucun déclenchement.</Vide>
             ) : (
-              journal.map((d, i) => (
-                <div
-                  key={`${d.alertId}-${d.ts}-${i}`}
-                  className="flex items-baseline justify-between gap-2 py-0.5 text-[11px]"
-                >
-                  <span className="truncate text-text-dim">{d.message}</span>
-                  <span className="shrink-0 tabular-nums text-text-dim">{formatHeure(d.ts)}</span>
-                </div>
-              ))
+              journal.map((d, i) => {
+                // La def peut avoir été supprimée depuis : sans cible, pas de navigation.
+                const cible = cibleAlerte(defs, d.alertId);
+                const contenu = (
+                  <>
+                    <span className="truncate text-text-dim">{d.message}</span>
+                    <span className="shrink-0 tabular-nums text-text-dim">{formatHeure(d.ts)}</span>
+                  </>
+                );
+                const classes = "flex w-full items-baseline justify-between gap-2 py-0.5 text-left text-[11px]";
+                return cible === null ? (
+                  <div key={`${d.alertId}-${d.ts}-${i}`} className={classes}>
+                    {contenu}
+                  </div>
+                ) : (
+                  <button
+                    key={`${d.alertId}-${d.ts}-${i}`}
+                    type="button"
+                    onClick={() =>
+                      navigateTo({
+                        symbol: cible.symbol,
+                        exchange: cible.source,
+                        markTime: d.ts,
+                        source: "alerte",
+                      })
+                    }
+                    title="Marquer sur le chart"
+                    className={`${classes} transition hover:bg-bg`}
+                  >
+                    {contenu}
+                  </button>
+                );
+              })
             )}
           </div>
         )}

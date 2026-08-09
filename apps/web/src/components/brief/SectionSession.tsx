@@ -2,10 +2,19 @@
  * Section BRIEF — review de session (soir) : PnL réalisé, trades clos, alertes
  * déclenchées, éco passés. Données locales (portfolio + alertes + éco). Le bloc
  * « Éco passés » branche sur le statut de la section `eco`, pas sur la session.
+ *
+ * EXCEPTION aux autres sections (purement présentationnelles) : celle-ci lit AUSSI le
+ * journal du daemon à son montage (`GET /alerts/journal`), seul témoin des alertes
+ * déclenchées onglet fermé, et le fusionne au journal front (cf. `sessionAlertes.ts`).
+ * Sans daemon, l'affichage est strictement inchangé.
  */
+import { useEffect, useMemo, useState } from "react";
 import type { EvenementBrief, SessionBrief, TradeClosBrief } from "../../data/brief";
+import { journalAlertesGet, type DeclenchementDaemon } from "../../data/daemon";
+import { debutJourLocalMs } from "../../store/portfolio";
 import { formatHeureMinute, formatPct, formatUsdSigne } from "../../lib/format";
 import { navigateTo } from "../../lib/navigation";
+import { fusionnerAlertesSession } from "./sessionAlertes";
 import { Chargement, ErreurBloc, TuileStat, NoteSource, TitreSection, Vide } from "../ui";
 import { TableTriable, type ColonneTable } from "../TableTriable";
 import { couleurVariation, TitreBloc, type Section } from "./commun";
@@ -44,6 +53,28 @@ interface Props {
 }
 
 export function SectionSession({ session, eco, noteFraicheur }: Props) {
+  // Journal daemon : une seule lecture au montage (chemin froid, pas de poll).
+  const [journalDaemon, setJournalDaemon] = useState<DeclenchementDaemon[]>([]);
+  useEffect(() => {
+    let monte = true;
+    void journalAlertesGet().then((j) => {
+      if (monte && j !== null) setJournalDaemon(j);
+    });
+    return () => {
+      monte = false;
+    };
+  }, []);
+
+  const alertes = useMemo(() => {
+    const maintenant = Date.now();
+    return fusionnerAlertesSession(
+      session.alertes,
+      journalDaemon,
+      debutJourLocalMs(maintenant),
+      maintenant,
+    );
+  }, [session.alertes, journalDaemon]);
+
   return (
     <section className="space-y-2">
       <TitreBloc>Session · review</TitreBloc>
@@ -73,14 +104,14 @@ export function SectionSession({ session, eco, noteFraicheur }: Props) {
       </div>
 
       <div className="space-y-1">
-        <TitreSection extra={session.alertes.length > 0 ? String(session.alertes.length) : undefined}>
+        <TitreSection extra={alertes.length > 0 ? String(alertes.length) : undefined}>
           Alertes déclenchées
         </TitreSection>
-        {session.alertes.length === 0 ? (
+        {alertes.length === 0 ? (
           <Vide>Aucune alerte déclenchée aujourd&apos;hui.</Vide>
         ) : (
           <div className="space-y-1">
-            {session.alertes.map((a, i) => (
+            {alertes.map((a, i) => (
               <div
                 key={`${a.alertId}-${a.ts}-${i}`}
                 className="flex items-baseline gap-2 text-[11px]"
@@ -89,6 +120,14 @@ export function SectionSession({ session, eco, noteFraicheur }: Props) {
                   {formatHeureMinute(a.ts)}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-text">{a.message}</span>
+                {a.daemon && (
+                  <span
+                    title="Déclenchée par le daemon, application fermée"
+                    className="shrink-0 text-[10px] text-text-dim"
+                  >
+                    pendant votre absence
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -131,7 +170,8 @@ export function SectionSession({ session, eco, noteFraicheur }: Props) {
         )}
       </div>
       <NoteSource>
-        Portefeuille local · journal alertes · calendrier éco (passés) · {noteFraicheur}.
+        Portefeuille local · journal alertes (local + daemon) · calendrier éco (passés) ·{" "}
+        {noteFraicheur}.
       </NoteSource>
     </section>
   );

@@ -506,6 +506,42 @@ export async function liquidationsGet(
   }
 }
 
+// ─────────────────────────── Journal d'alertes (déclenchements onglet fermé) ───────────────────────────
+
+/**
+ * Un déclenchement journalisé par le daemon — forme de fil de `GET /alerts/journal`
+ * (identique au stockage SQLite `alertes_journal`, aucune traduction nécessaire).
+ */
+export interface DeclenchementDaemon {
+  alertId: string;
+  /** Symbole porteur de l'alerte (le journal front, lui, ne le connaît pas). */
+  symbol: string;
+  ts: number;
+  valeur: number;
+  message: string;
+  /** Vrai si le daemon a réellement notifié (app fermée au moment du déclenchement). */
+  notifie: boolean;
+}
+
+/**
+ * Lit le journal des déclenchements du daemon (200 derniers, plus récent en tête).
+ * C'est la SEULE source de ce qui s'est déclenché onglet fermé. Sonde d'abord la
+ * capability `alerts` (comme `liquidationsGet`) ; renvoie `null` si le daemon est
+ * absent / sans capability / en erreur — l'appelant garde alors son journal local.
+ */
+export async function journalAlertesGet(): Promise<DeclenchementDaemon[] | null> {
+  if (!(await detectDaemon("alerts"))) return null;
+  try {
+    const res = await fetch(`${baseDaemon()}/alerts/journal`);
+    if (!res.ok) return null;
+    const corps = (await res.json()) as { journal?: DeclenchementDaemon[] };
+    if (!Array.isArray(corps.journal)) return null;
+    return corps.journal;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Pousse un lot de liquidations au daemon (insert idempotent). Best-effort SANS sonde
  * (comme `candlesPush`) : renvoie `false` en cas d'échec silencieux. Le format de fil du

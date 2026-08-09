@@ -19,8 +19,8 @@ d’auth réseau, rien ne quitte la machine en dehors des appels aux APIs publiq
 
 | | |
 |---|---|
-| **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations, **155 indicateurs** testés |
-| **Lire le contexte** | **35 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, treemap, options, COT, taux & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
+| **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations, **179 indicateurs** testés |
+| **Lire le contexte** | **37 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, treemap, options, COT, taux & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
 | **Décider** | screener, playbooks 1-clic, alertes, backtest, stress-test multi-facteurs, étude d’évènements (CPI/NFP/FOMC), journal de trades, paper trading |
 | **Ne pas décrocher** | alertes onglet fermé (macOS + Telegram optionnel), replay sur dumps officiels Binance, panneau de santé des sources |
 
@@ -29,7 +29,7 @@ Deux partis pris structurent le produit :
 1. **Le chemin chaud reste direct.** Le front parle **directement** aux WebSockets des exchanges ;
    le daemon `axiomd` ne prend en charge que le lent (APIs à quota, cache, persistance SQLite,
    alertes). L’UI reste utilisable **sans** daemon.
-2. **Les calculs sont du TypeScript pur et testés.** Les 155 indicateurs vivent dans
+2. **Les calculs sont du TypeScript pur et testés.** Les 179 indicateurs vivent dans
    `@axiom/indicators` — pas de WASM, pas de service Python — et sont vérifiés par golden tests
    contre un oracle `pandas-ta` (`scripts/golden/`).
 
@@ -41,7 +41,7 @@ multi-utilisateur, pas d’Electron.
 ```
 packages/
   types/         @axiom/types       — contrat de données partagé
-  indicators/    @axiom/indicators  — 155 indicateurs TS pur + golden tests
+  indicators/    @axiom/indicators  — 179 indicateurs TS pur + golden tests
   alerts/        @axiom/alerts      — moteur d’alertes pur (front + daemon)
   backtest/      @axiom/backtest    — moteur de backtest pur
 apps/
@@ -116,10 +116,10 @@ pnpm prod
 
 ## Fonctionnalités (aperçu)
 
-- **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, 155 indicateurs
+- **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, 179 indicateurs
 - **Terminal** : palette ⌘K, raccourcis, workspaces, fenêtres flottantes + snap + taskbar
 - **Sources** : Binance, Bybit, OKX, Coinbase, Kraken, MEXC, Deribit, Twelve Data, Coinalyze, FRED, etc.
-- **Panneaux** : 35 fenêtres — DES, FUNDX, LIQ, ECO, NEWS, CORR, CHAIN, MAP, PORT, NOTE, EQS, TERM, OMON, DOM, BT, REPLAY, RATE, COT, SEAG, VOL, FUND, BRIEF, GLOBE, STBL, SQZ, CBPREM, NETLIQ, DATA, DIST, EXPY, PAPER, MINE, CYCLE, EVTS, SCEN
+- **Panneaux** : 37 fenêtres — DES, FUNDX, LIQ, ECO, NEWS, CORR, CHAIN, MAP, PORT, NOTE, EQS, TERM, OMON, DOM, BT, REPLAY, RATE, COT, SEAG, VOL, FUND, BRIEF, GLOBE, STBL, SQZ, CBPREM, NETLIQ, DATA, DIST, EXPY, PAPER, MINE, CYCLE, EVTS, SCEN, CAP, SECT
 - **Daemon** : proxy+cache, KV/candles SQLite, alertes (macOS + Telegram optionnel), replay dumps Binance, couches GDELT/UCDP
 
 ### Programme G100 (WTP 100 $/mois) — W0–W3 landés

@@ -89,7 +89,7 @@ LE trou identitaire.
 |---|---|---|---|
 | 2.1 | **Historiser le brief** | S/M | Store `briefs` + KV daemon (1 snapshot/jour, compaction). Débloque : relire le brief de J-7, comparer le régime à J-30, vérifier a posteriori les lectures de `lecturesBrief.ts`. Prolongement naturel du Lot D. |
 | 2.2 | **Brancher le cold-store `candles`** sur ses cibles déclarées | S | Écrire depuis `coinalyze.ts` et `twelvedata.ts` (le module daemon et les helpers existent). Compense la purge quotidienne Coinalyze. |
-| 2.3 | **`openInterestHist` Binance** (30 j d'OI, gratuit, sans clé) | XS | L'hôte est déjà whitelisté, la forme d'appel existe (`positioning.ts:52`). Couvre l'OI sans quota Coinalyze. |
+| 2.3 | **`openInterestHist` Binance** (30 j d'OI, gratuit, sans clé) | XS | ~~L'endpoint n'est pas appelé~~ **Erratum 2026-08-10** : le fetcher existait déjà (`binanceFutures.ts:311`, consommé via `referentiels.ts histOiUsd`). Le vrai manque était l'**arbitrage de repli** Coinalyze→Binance — livré (sous-pane OI du chart, `histOiUsdAvecRepli`). |
 | 2.4 | Horodater le **funding cross-exchange** (divergence CEX↔Hyperliquid) | S | Le code le présente comme « le signal recherché » mais ne le rend pas comparable dans le temps. |
 | 2.5 | **Étendre les snapshots daemon** aux clés critiques localStorage-only | S | `drawings`, `workspaces`, `paper`, `expy`, et surtout `macroHistory` (1 an de TOTAL/TOTAL2/TOTAL3 non rejouable). Étendre le dual-write de `persist.ts:71-77` (6 clés aujourd'hui). |
 
@@ -146,3 +146,13 @@ LE trou identitaire.
 
 *Sources : 4 rapports d'agents (2026-08-09) sur `lots-bcd` + `pnpm check` vert.
 Constats vérifiés par chemins de fichiers ; les numéros de ligne peuvent glisser après merge.*
+
+---
+
+## Mise à jour 2026-08-10 — Lot « Liens & ménage » livré
+
+- **P0.2 / P0.3 faits** : correctifs adversariaux commités, `lots-bcd` mergé dans `main` et poussé, README à jour (179/37, +CAP +SECT). **P0.1 (G100 manuel) reste à l'opérateur.**
+- **P1.1a/1.2/1.4/1.5 livrés** : formulaire `indicateur-croisement` (+ `alertsPanel.util.ts` pur), navigation alerte→chart (liste + journal, `markTime`), journal daemon fusionné dans la section Session du BRIEF (`sessionAlertes.ts`, dédup à tolérance 60 s), test croisé `windowPanels.couverture.test.ts` (génération auto rejetée après mesure : 32/32 entrées portent mots-clés/aperçus faits main).
+- **P2.3 livré (erratum ci-dessus)** : repli OI Binance sur le sous-pane dérivés.
+- **P4.1/4.2 livrés** : ticker sur `wsLoop` + santé `binance:ticker` (compteur de flux vivants sur clé santé partagée) ; purge `alertes_journal` 30 j + compactage `VACUUM` conditionné (piège WAL : `wal_checkpoint(TRUNCATE)` obligatoire pour rendre l'espace disque).
+- **Frigo du lot** : `briefEnMarkdown` n'inclut pas les déclenchements daemon (l'écran oui) ; repli OI silencieux sur le sous-pane (pas de surface de badge) ; couverture DOM impossible en vitest node (formulaire testé via fonctions pures + ratchet).

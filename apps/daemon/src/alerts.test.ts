@@ -10,6 +10,8 @@ import {
   evaluerTick,
   FENETRE_LIQ_MS,
   fusionnerEtatArme,
+  purgerJournalAlertes,
+  RETENTION_JOURNAL_MS,
   SEUIL_HEARTBEAT_MS,
   sommeLiqUsdParMin,
   symbolesBinanceActifs,
@@ -368,5 +370,43 @@ describe("evaluerLiqCascadeTick (tick complet en base)", () => {
     expect(journal).toHaveLength(1);
     expect(journal[0]?.notifie).toBe(0); // journalisé mais NON notifié (front actif)
     expect(notifs).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────── Purge du journal (rétention 30 j) ───────────────────────────
+
+describe("purgerJournalAlertes", () => {
+  /** Base :memory: avec la table `alertes_journal` et une ligne par horodatage fourni. */
+  function baseAvecJournal(...ts: number[]): Database {
+    const d = new Database(":memory:");
+    assurerTablesAlertes(d);
+    const inserer = d.query(
+      "INSERT INTO alertes_journal (alertId, symbol, ts, valeur, message, notifie) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    for (const t of ts) inserer.run(`a${t}`, "BTCUSDT", t, 1, "msg", 0);
+    return d;
+  }
+
+  test("supprime les entrées plus vieilles que la rétention, garde les récentes", () => {
+    const now = 100 * RETENTION_JOURNAL_MS; // repère arbitraire, loin de 0
+    const vieille = now - RETENTION_JOURNAL_MS - 86_400_000; // 31 j
+    const recente = now - 86_400_000; // 1 j
+    const d = baseAvecJournal(vieille, recente);
+
+    expect(purgerJournalAlertes(d, now - RETENTION_JOURNAL_MS)).toBe(1);
+    const restant = d.query("SELECT ts FROM alertes_journal").all() as Array<{ ts: number }>;
+    expect(restant).toEqual([{ ts: recente }]);
+  });
+
+  test("borne stricte : exactement 30 jours est gardé", () => {
+    const now = 100 * RETENTION_JOURNAL_MS;
+    const d = baseAvecJournal(now - RETENTION_JOURNAL_MS);
+    expect(purgerJournalAlertes(d, now - RETENTION_JOURNAL_MS)).toBe(0);
+    expect(d.query("SELECT COUNT(*) AS n FROM alertes_journal").get()).toMatchObject({ n: 1 });
+  });
+
+  test("journal vide → 0 suppression (idempotent)", () => {
+    const d = baseAvecJournal();
+    expect(purgerJournalAlertes(d, Date.now())).toBe(0);
   });
 });

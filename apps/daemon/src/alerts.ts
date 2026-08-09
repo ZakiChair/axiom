@@ -70,6 +70,12 @@ export const PERIODE_LIQ_MS = 10_000;
 export const FENETRE_LIQ_MS = 60_000;
 /** Borne du journal renvoyé par GET /alerts/journal. */
 const LIMITE_JOURNAL = 200;
+/**
+ * Rétention du journal des déclenchements (30 jours — même convention que les snapshots
+ * KV et les liquidations). Le GET n'en montre que les 200 derniers : sans purge la table
+ * croîtrait indéfiniment pour des lignes que plus rien ne lit.
+ */
+export const RETENTION_JOURNAL_MS = 30 * 24 * 3_600_000;
 
 // ─────────────────────────── Fonctions PURES (testées) ───────────────────────────
 
@@ -171,6 +177,16 @@ export function assurerTablesAlertes(d: Database): void {
     message TEXT NOT NULL,
     notifie INTEGER NOT NULL
   )`);
+}
+
+/**
+ * Supprime les entrées du journal antérieures à `avantMs` ; renvoie le nombre supprimé.
+ * Borne stricte (une entrée pile sur la limite est gardée), comme `idsAPurger` des
+ * snapshots. Base injectée, comme le reste du module.
+ */
+export function purgerJournalAlertes(d: Database, avantMs: number): number {
+  assurerTablesAlertes(d);
+  return d.query("DELETE FROM alertes_journal WHERE ts < ?").run(avantMs).changes;
 }
 
 /** Garde d'AlertDef minimale (validation défensive des défs venues du KV). */

@@ -4,17 +4,22 @@
  *  - classifyTradfi + isMarketOpen : gate « marché fermé » (roadmap 0.4d).
  * Valeurs attendues justifiées en commentaire (heures UTC, jours de semaine explicités).
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Candle } from "@axiom/types";
 import {
   classifyTradfi,
   computeBarStats,
+  construireUrlStreamTicker,
   groupTickerSymbolsBySource,
   isMarketOpen,
   isTickerSource,
   isTradfiSymbol,
+  parseMessageTicker,
   resolveTickerSource,
+  subscribeTickers,
+  TICKER_HEALTH,
 } from "./ticker";
+import { healthStore } from "../store/health";
 
 describe("isTradfiSymbol", () => {
   it("classe tradfi les symboles du catalogue curé", () => {
@@ -198,5 +203,98 @@ describe("computeBarStats — Δ% 1h/7j + sparkline depuis les klines horaires",
     // La clôture NaN médiane est écartée → série exploitable [100, 120] → Δ1h = +20 %.
     const stats = computeBarStats(hourlyFromCloses([100, Number.NaN, 120]));
     expect(stats?.change1h).toBeCloseTo(20, 6);
+  });
+});
+
+// ───────── Flux ticker Binance migré sur connectWsLoop (lot « liens & ménage ») ─────────
+
+describe("construireUrlStreamTicker", () => {
+  it("compose le stream COMBINÉ en minuscules, joint par « / »", () => {
+    expect(construireUrlStreamTicker(["BTCUSDT", "ethusdt"])).toBe(
+      "wss://stream.binance.com:9443/stream?streams=btcusdt@ticker/ethusdt@ticker",
+    );
+  });
+});
+
+describe("parseMessageTicker", () => {
+  it("extrait prix, variation 24 h et volume quote d'un message combiné", () => {
+    const u = parseMessageTicker(
+      JSON.stringify({ stream: "btcusdt@ticker", data: { s: "BTCUSDT", c: "42000.5", P: "-1.25", q: "123.5" } }),
+    );
+    expect(u).toEqual({ symbol: "BTCUSDT", price: 42000.5, changePercent: -1.25, quoteVolume: 123.5 });
+  });
+
+  it("laisse quoteVolume indéfini quand le volume n'est pas un nombre fini", () => {
+    const u = parseMessageTicker(
+      JSON.stringify({ stream: "btcusdt@ticker", data: { s: "BTCUSDT", c: "1", P: "0", q: "n/a" } }),
+    );
+    expect(u?.quoteVolume).toBeUndefined();
+  });
+
+  it("renvoie null sur un message sans données exploitables ou illisible", () => {
+    expect(parseMessageTicker(JSON.stringify({ stream: "x" }))).toBeNull(); // pas de `data`
+    expect(parseMessageTicker(JSON.stringify({ data: { c: "1" } }))).toBeNull(); // pas de symbole
+    expect(parseMessageTicker("{pas du json")).toBeNull();
+  });
+});
+
+/** WebSocket mocké (même patron que wsLoop.test.ts) : aucune connexion réelle. */
+class MockWebSocket {
+  static instances: MockWebSocket[] = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((ev: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  closed = false;
+
+  constructor(public url: string) {
+    MockWebSocket.instances.push(this);
+  }
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.onclose?.();
+  }
+}
+
+describe("subscribeTickers — enregistrement au registre santé (panneau DATA)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    MockWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+    healthStore.getState().retirer(TICKER_HEALTH);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("publie l'état « connected » du flux ticker Binance (sinon il gèlerait INVISIBLEMENT)", () => {
+    const unsub = subscribeTickers(["BTCUSDT"], () => {}, { source: "binance" });
+    const ws = MockWebSocket.instances[0];
+    expect(ws?.url).toBe("wss://stream.binance.com:9443/stream?streams=btcusdt@ticker");
+
+    ws?.onopen?.();
+    expect(healthStore.getState().sources[TICKER_HEALTH]?.etat).toBe("connected");
+
+    unsub();
+    expect(healthStore.getState().sources[TICKER_HEALTH]?.etat).toBe("closed");
+  });
+
+  it("ne marque PAS le flux « closed » tant qu'un autre abonnement ticker reste vivant", () => {
+    // Watchlist + bandeau + moteur paper coexistent : la clé santé est PARTAGÉE. Le
+    // démontage de l'un ne doit pas faire mentir le panneau DATA sur les autres.
+    const unsubA = subscribeTickers(["BTCUSDT"], () => {}, { source: "binance" });
+    const unsubB = subscribeTickers(["ETHUSDT"], () => {}, { source: "binance" });
+    MockWebSocket.instances[0]?.onopen?.();
+    MockWebSocket.instances[1]?.onopen?.();
+
+    unsubA();
+    unsubA(); // idempotent : un double désabonnement ne doit pas fausser le compte
+    expect(healthStore.getState().sources[TICKER_HEALTH]?.etat).not.toBe("closed");
+
+    unsubB();
+    expect(healthStore.getState().sources[TICKER_HEALTH]?.etat).toBe("closed");
   });
 });

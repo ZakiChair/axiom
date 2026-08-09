@@ -20,10 +20,12 @@
  */
 import { registerIndicator, IndicatorSeries } from "klinecharts";
 import type { Chart, IndicatorFigure } from "klinecharts";
-import type { FundingRate, OpenInterest } from "@axiom/types";
+import type { FundingRate } from "@axiom/types";
 import type { MarketStore } from "../store/market";
+import type { PointSerie } from "../lib/referentiel";
 import { derivativesChartStore, type DerivativesChartState } from "../store/derivatives-chart";
 import { coinalyzeProvider } from "../data/coinalyze";
+import { histOiUsdAvecRepli } from "../data/referentiels";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 
 /** Sous-pane Open Interest (notionnel USD). */
@@ -59,7 +61,7 @@ interface CacheEntry<T> {
   fetchedAt: number;
 }
 
-const oiHistoryCache = new Map<string, CacheEntry<OpenInterest[]>>();
+const oiHistoryCache = new Map<string, CacheEntry<PointSerie[]>>();
 const fundingHistoryCache = new Map<string, CacheEntry<FundingRate[]>>();
 
 /** Sert la promesse en cache si récente (< TTL), sinon relance et mémorise. Une erreur
@@ -237,13 +239,13 @@ export class DerivativesChartController {
   private async loadOi(): Promise<void> {
     this.oiFetching = true;
     try {
+      // Coinalyze en primaire, repli Binance openInterestHist (gratuit, sans clé) si
+      // indisponible/à vide — cf. `histOiUsdAvecRepli` (data/referentiels.ts).
       const hist = await memoized(oiHistoryCache, this.symbol, () =>
-        coinalyzeProvider.fetchOpenInterestHistory(this.symbol, DERIV_INTERVAL, Date.now() - DERIV_LOOKBACK_MS)
+        histOiUsdAvecRepli(this.symbol, DERIV_INTERVAL, Date.now() - DERIV_LOOKBACK_MS)
       );
       if (this.disposed) return;
-      const series = hist
-        .map((p) => ({ time: p.time, value: p.oiUsd }))
-        .filter((p) => Number.isFinite(p.value));
+      const series = hist.map((p) => ({ time: p.t, value: p.v }));
       this.oiSeries = series.length > 0 ? series : null;
       this.oiFetched = true;
     } catch (err) {

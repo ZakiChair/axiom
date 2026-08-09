@@ -26,8 +26,9 @@
  *   POST /kv/snapshots/:id/restore  → pré-snapshot auto + remplacement du KV ; 404 si id inconnu
  */
 import type { Database } from "bun:sqlite";
+import { purgerJournalAlertes, RETENTION_JOURNAL_MS } from "./alerts";
 import { entetesCors } from "./cors";
-import { getDb } from "./db";
+import { compacterSiNecessaire, getDb } from "./db";
 import type { Routeur } from "./router";
 
 /** Millisecondes dans un jour calendaire (24 h) — base des calculs de rétention. */
@@ -242,6 +243,11 @@ export function restaurerSnapshot(d: Database, id: number, now: number = Date.no
  * faite IMMÉDIATEMENT au démarrage (couvre un daemon relancé chaque jour ; sans effet
  * si le snapshot du jour existe déjà). Renvoie une fonction d'arrêt. À appeler UNE
  * fois depuis index.ts.
+ *
+ * C'est aussi le POINT D'ENTRETIEN de la base (seule boucle à froid horaire touchant
+ * tout le fichier) : on y purge le journal des alertes (rétention 30 j, sinon la table
+ * croît sans borne) et on y compacte le fichier quand les purges ont laissé trop de
+ * pages libres. Chaque étape est isolée : un échec ne doit pas priver les autres.
  */
 export function demarrerBoucleSnapshots(): () => void {
   const verifier = (): void => {
@@ -249,6 +255,17 @@ export function demarrerBoucleSnapshots(): () => void {
       snapshotQuotidienSiNecessaire(getDb());
     } catch (err) {
       console.error("[axiomd] snapshot quotidien échoué :", err);
+    }
+    try {
+      purgerJournalAlertes(getDb(), Date.now() - RETENTION_JOURNAL_MS);
+    } catch (err) {
+      console.error("[axiomd] purge du journal d'alertes échouée :", err);
+    }
+    try {
+      // Après les purges seulement : c'est là que la freelist vient de grossir.
+      compacterSiNecessaire(getDb());
+    } catch (err) {
+      console.error("[axiomd] compactage de la base échoué :", err);
     }
   };
   verifier();

@@ -14,6 +14,13 @@ import { join } from "node:path";
 /** Fichier SQLite unique du daemon (module-relatif → indépendant du cwd). */
 export const CHEMIN_DB = join(import.meta.dir, "..", "axiom.db");
 
+/**
+ * Fraction de pages LIBRES au-delà de laquelle on compacte (cf. `compacterSiNecessaire`).
+ * 20 % : assez haut pour ne quasi jamais se déclencher en régime normal, assez bas pour
+ * rattraper l'espace laissé par les purges de rétention (snapshots, liquidations, journal).
+ */
+export const SEUIL_FREELIST = 0.2;
+
 let _db: Database | null = null;
 
 /** Renvoie la connexion SQLite (l'ouvre et crée le schéma au premier appel). */
@@ -37,4 +44,39 @@ export function getDb(): Database {
   )`);
   _db = db;
   return db;
+}
+
+/**
+ * Fraction de pages LIBRES (freelist) dans le fichier : `freelist_count / page_count`.
+ * Base vide (0 page, ex. `:memory:` fraîche) → 0 (pas de division par zéro).
+ */
+export function ratioFreelist(d: Database): number {
+  const { freelist_count: libres } = d.query("PRAGMA freelist_count").get() as { freelist_count: number };
+  const { page_count: total } = d.query("PRAGMA page_count").get() as { page_count: number };
+  return total > 0 ? libres / total : 0;
+}
+
+/**
+ * Récupère l'espace disque laissé par les purges de rétention SI la freelist dépasse
+ * `seuil`. Renvoie vrai si un compactage a eu lieu.
+ *
+ * POURQUOI un VACUUM complet conditionnel plutôt qu'`incremental_vacuum` : la base a
+ * été créée avec `auto_vacuum=0` (défaut), et sous ce mode SQLite ne tient AUCUNE carte
+ * des pages libres — `PRAGMA incremental_vacuum` y est un no-op silencieux (vérifié :
+ * freelist inchangée). Le faire fonctionner exigerait `auto_vacuum=INCREMENTAL` **plus**
+ * un VACUUM complet pour matérialiser le changement : autant garder le VACUUM seul, et
+ * la garde sur la freelist suffit à le rendre rare (après coup elle retombe à 0).
+ *
+ * WAL : le VACUUM réécrit la base LOGIQUE mais le fichier n'est tronqué qu'au
+ * checkpoint — sans lui la freelist tombe à 0 et les mégaoctets restent sur disque.
+ * D'où le `wal_checkpoint(TRUNCATE)` juste après (inoffensif hors WAL).
+ *
+ * Un VACUUM ne peut PAS tourner dans une transaction : ces `run` sont volontairement
+ * hors `d.transaction(...)`.
+ */
+export function compacterSiNecessaire(d: Database, seuil = SEUIL_FREELIST): boolean {
+  if (ratioFreelist(d) < seuil) return false;
+  d.run("VACUUM");
+  d.run("PRAGMA wal_checkpoint(TRUNCATE)");
+  return true;
 }

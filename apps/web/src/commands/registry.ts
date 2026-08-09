@@ -420,7 +420,9 @@ export function construireRegistre(): Commande[] {
   for (const jeu of indicatorSetsStore.getState().jeux) {
     commandes.push({
       id: `ind-set:${jeu.id}`,
-      mnemonique: "JEU",
+      // Unique par jeu (patron « THEME <id> ») : un littéral partagé « JEU »
+      // rendait les commandes indiscernables et invisibles à l'invariant d'unicité.
+      mnemonique: `JEU ${jeu.id.toUpperCase()}`,
       libelle: `Jeu « ${jeu.nom} » — rappeler`,
       categorie: "indicateur",
       motsCles: ["jeu", "setup", "preset", "indicateurs", jeu.nom, jeu.id],

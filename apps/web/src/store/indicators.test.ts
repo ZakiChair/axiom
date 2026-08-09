@@ -184,3 +184,38 @@ describe("reorder", () => {
     expect(indicatorsStore.getState().indicators.map((i) => i.instanceId)).toEqual(["a"]);
   });
 });
+
+describe("toggle — bascule ⌘K non destructive (B6)", () => {
+  beforeEach(() => {
+    indicatorsStore.setState({ indicators: [] });
+  });
+
+  it("ajoute une instance quand aucune n'existe", () => {
+    indicatorsStore.getState().toggle("ema");
+    expect(indicatorsStore.getState().indicators.map((i) => i.defId)).toEqual(["ema"]);
+  });
+
+  it("ne retire QUE la dernière instance — trois EMA réglées ne disparaissent plus d'une frappe", () => {
+    const s = indicatorsStore.getState();
+    s.add("ema");
+    s.add("ema");
+    s.add("ema");
+    const ids = indicatorsStore.getState().indicators.map((i) => i.instanceId);
+    indicatorsStore.getState().toggle("ema");
+    expect(indicatorsStore.getState().indicators.map((i) => i.instanceId)).toEqual(ids.slice(0, 2));
+  });
+
+  it("retire la dernière instance du def même si d'autres defs la suivent dans la liste", () => {
+    const s = indicatorsStore.getState();
+    s.add("ema");
+    s.add("rsi");
+    indicatorsStore.getState().toggle("ema");
+    expect(indicatorsStore.getState().indicators.map((i) => i.defId)).toEqual(["rsi"]);
+  });
+
+  it("aller-retour complet : toggle ×2 revient à l'état de départ (une instance près)", () => {
+    indicatorsStore.getState().toggle("rsi");
+    indicatorsStore.getState().toggle("rsi");
+    expect(indicatorsStore.getState().indicators).toEqual([]);
+  });
+});

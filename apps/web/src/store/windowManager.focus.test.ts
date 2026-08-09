@@ -11,15 +11,13 @@
  * dizaine de `toggleX` de stores : corriger la sémantique ICI les couvre toutes.
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { windowManagerStore, zFenetreFocalisee } from "./windowManager";
+import { windowManagerStore } from "./windowManager";
 
 const etat = () => windowManagerStore.getState();
 const fenetre = (id: string) => etat().windows[id];
-const focalisee = (): string | null => {
-  const z = zFenetreFocalisee(etat().windows);
-  if (z === null) return null;
-  return Object.entries(etat().windows).find(([, w]) => w.open && !w.minimized && w.z === z)?.[0] ?? null;
-};
+// L'API du STORE, pas une copie locale de son implémentation : un helper recopié
+// resterait vert même si `fenetreFocalisee` régressait (revue adversariale BCD).
+const focalisee = (): string | null => etat().fenetreFocalisee();
 
 beforeEach(() => {
   windowManagerStore.setState({ windows: {}, nextZ: 1 });

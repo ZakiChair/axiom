@@ -22,7 +22,6 @@ import {
   type Commande,
 } from "../commands/registry";
 import { RACCOURCIS_AIDE, lignesMnemoniques } from "../commands/hotkeys";
-import { LARGEUR_MNEMONIQUE } from "./ui";
 
 /** Entrée d'historique persistée (id de commande + texte de saisie pour rejouer la navigation). */
 interface EntreeHistorique {
@@ -265,7 +264,11 @@ export function CommandPalette() {
                       it.cmd.id === "nav" ? "border-l-2 border-accent " : ""
                     }${i === indexSel ? "bg-accent/15" : "hover:bg-bg"}`}
                   >
-                    <span className={`${LARGEUR_MNEMONIQUE} shrink-0 truncate text-[11px] font-semibold uppercase tracking-wider text-accent`}>
+                    {/* Mnémoniques COMPOSÉS ici (« THEME BLOOMBERG », « JEU SWING ») : la
+                        largeur partagée des tokens simples (w-16) les tronquerait — la
+                        palette garde sa colonne large. LARGEUR_MNEMONIQUE reste pour le
+                        menu Fonctions et l'en-tête de fenêtre (mnémoniques ≤ 6 car.). */}
+                    <span className="w-24 shrink-0 truncate text-[11px] font-semibold uppercase tracking-wider text-accent">
                       {it.cmd.id === "nav" ? "→" : (it.cmd.mnemonique ?? "")}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm text-text">{it.cmd.libelle}</span>

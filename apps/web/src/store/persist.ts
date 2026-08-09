@@ -545,6 +545,11 @@ function hydrateChart(): void {
  */
 export function hydrateStores(): void {
   hydrateChart();
+  // Sans cet appel, les jeux d'indicateurs nommés ne survivaient PAS au rechargement :
+  // l'hydrateur existait, la clé était gérée, l'écriture câblée — seul le boot manquait.
+  // Pire, le premier ré-enregistrement écrasait alors les jeux de la session précédente
+  // (l'abonnement persiste la liste COURANTE, repartie de zéro). Revue adversariale BCD.
+  hydrateJeuxIndicateurs();
   hydrateWindowManager();
   hydrateWatchlist();
   hydrateSyntheticRecents();

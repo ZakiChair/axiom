@@ -20,6 +20,13 @@ import type { Regime } from "../../data/regime";
 import { fiabiliteRegime, SCORE_MAX, SCORE_MIN, tonRegime } from "../../data/regime";
 import { Badge, Fraicheur, TitreSection } from "../ui";
 
+/** Classes de ton du libellé de régime — littérales, pour survivre à la purge Tailwind. */
+const CLASSE_TON_REGIME: Record<"up" | "down" | "neutre", string> = {
+  up: "text-up",
+  down: "text-down",
+  neutre: "text-text",
+};
+
 /** Ton du badge d'une note : la note EST un signe, elle se lit comme telle. */
 function tonNote(note: number | null): "up" | "down" | "neutre" {
   if (note === null) return "neutre";
@@ -59,16 +66,26 @@ export function SectionRegime({ regime, majTs }: { regime: Regime | null; majTs:
       </div>
 
       <div className="flex items-baseline gap-2">
-        <span className={`text-sm font-semibold text-${tonRegime(regime.libelle)}`}>
+        {/* Classe LITTÉRALE, jamais construite : Tailwind scanne la source et ne verrait
+            pas `text-${…}` — la classe serait purgée du CSS et le libellé rendu sans
+            couleur (piège classique). */}
+        <span className={`text-sm font-semibold ${CLASSE_TON_REGIME[tonRegime(regime.libelle)]}`}>
           {regime.libelle}
         </span>
-        <span className="tabular-nums text-sm text-text">
-          {regime.score >= 0 ? "+" : ""}
-          {regime.score.toFixed(2)}
-        </span>
-        <span className="text-[10px] text-text-dim">
-          sur une échelle {SCORE_MIN} à +{SCORE_MAX}
-        </span>
+        {/* Pas de chiffre en « indéterminé » : sous MIN_COMPOSANTS le score serait du
+            bruit, et le SessionStrip le supprime déjà — les deux surfaces doivent dire
+            la même chose. */}
+        {regime.libelle !== "indéterminé" && (
+          <>
+            <span className="tabular-nums text-sm text-text">
+              {regime.score >= 0 ? "+" : ""}
+              {regime.score.toFixed(2)}
+            </span>
+            <span className="text-[10px] text-text-dim">
+              sur une échelle {SCORE_MIN} à +{SCORE_MAX}
+            </span>
+          </>
+        )}
       </div>
 
       <ul className="space-y-0.5">

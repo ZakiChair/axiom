@@ -448,7 +448,8 @@ export function Badge({
 /** Orientation d'un référentiel : quelle queue de distribution est « chaude » (warn). */
 export type SensRef = "hausse-chaud" | "hausse-froid";
 
-/** Ton du RefBadge — pur, testé (défaut : les deux extrêmes sont chauds). */
+/** Ton du RefBadge — pur, testé. Les DEUX queues sont signalées : celle que `sens`
+ * désigne en `warn` (tension), l'autre en `accent` (compression) — jamais en neutre. */
 export function tonRef(refe: Referentiel, sens?: SensRef): TonBadge {
   if (!estExtreme(refe)) return "neutre";
   // Les DEUX queues sont signalées, avec des tons DIFFÉRENTS. Auparavant les six

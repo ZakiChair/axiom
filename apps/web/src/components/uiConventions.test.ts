@@ -106,7 +106,10 @@ const MOTIFS: Motif[] = [
     // `[^<]` borne la recherche à l'intérieur de la balise : le `>` d'une flèche
     // (`onChange={(e) => …}`) ne doit pas la couper, mais un élément voisin ne doit
     // pas être happé non plus.
-    regex: /<(?:input|select)\b[^<]{0,400}?className="[^"]*bg-neutral-\d{3}/,
+    // Les DEUX formes d'attribut : `className="…"` ET `className={`…`}` — la forme
+    // gabarit est précisément celle que produit la migration, un contournement
+    // trivial sinon (revue adversariale BCD).
+    regex: /<(?:input|select)\b[^<]{0,400}?className=(?:"[^"]*bg-neutral-\d{3}|\{`[^`]*bg-neutral-\d{3})/,
     extensions: [".tsx"],
     exceptions: [],
   },

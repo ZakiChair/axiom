@@ -834,7 +834,7 @@ function TradesTable({ trades, symbol, tf }: { trades: TradeResultat[]; symbol: 
       // La primitive supportait déjà ce geste (le BRIEF s'en sert) ; la table du
       // backtest, elle, ne le fournissait pas — les trades restaient une liste morte.
       surClicLigne={(tr) =>
-        navigateTo({ symbol, timeframe: tf, markTime: tr.tempsEntree, source: "Backtest" })
+        navigateTo({ symbol, exchange: "binance", timeframe: tf, markTime: tr.tempsEntree, source: "Backtest" })
       }
     />
   );
@@ -885,8 +885,8 @@ function EnTeteResultat({ resultat }: { resultat: ResultatBacktest }) {
       )}
       {tronques > 0 && marquesActives && (
         <p className="text-[10px] text-text-dim">
-          Graphe : {MAX_MARQUEURS_BT} trades les plus récents affichés, {tronques} plus anciens
-          masqués.
+          Sur le graphe, seuls les {MAX_MARQUEURS_BT} trades les plus récents de ce run sont
+          posés — {tronques} de plus dans ce run.
         </p>
       )}
     </div>

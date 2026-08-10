@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitSymbol } from "./symbol";
+import { basePerp, splitSymbol } from "./symbol";
 
 describe("splitSymbol — format concaténé", () => {
   it("découpe avec le suffixe de cotation le plus long en priorité (USDT avant USD)", () => {
@@ -61,5 +61,41 @@ describe("splitSymbol — format explicite BASE/QUOTE (slash)", () => {
   it("lève une erreur si un côté du slash est vide", () => {
     expect(() => splitSymbol("/USD", "Kraken")).toThrow(/invalide/);
     expect(() => splitSymbol("BTC/", "Kraken")).toThrow(/invalide/);
+  });
+});
+
+describe("basePerp — base normalisée pour un perp USDT", () => {
+  it("extrait la base d'un concaténé Binance", () => {
+    expect(basePerp("BTCUSDT")).toBe("BTC");
+    expect(basePerp("ETHUSDT")).toBe("ETH");
+  });
+
+  it("tolère le tiret Coinbase « BTC-USD » (splitSymbol renverrait « BTC- »)", () => {
+    // Cause racine du bug LIQEST muet : « BTC-USD » n'était pas normalisé avant le fetch OI.
+    expect(basePerp("BTC-USD")).toBe("BTC");
+    expect(basePerp("SOL-USDT")).toBe("SOL");
+  });
+
+  it("tolère le slash Kraken et mappe XBT → BTC", () => {
+    expect(basePerp("XBT/USD")).toBe("BTC");
+    expect(basePerp("ETH/USD")).toBe("ETH");
+    // LIMITE ASSUMÉE : l'altname REST concaténé « XBTUSD » se termine par « TUSD » (TrueUSD),
+    // que QUOTE_ASSETS prend en priorité — il donne donc « XB ». Sans conséquence : le catalogue
+    // rétablit BTC (data/pairs.ts KRAKEN_ASSET_ALIAS) et le WS Kraken v2 émet « BTC »/« XBT/USD ».
+    expect(basePerp("XBTUSD")).toBe("XB");
+  });
+
+  it("est insensible à la casse et aux espaces", () => {
+    expect(basePerp("  btc-usd ")).toBe("BTC");
+  });
+
+  it("renvoie null sur un symbole synthétique (encodage à barres verticales)", () => {
+    expect(basePerp("binance:ETHUSDT|/|binance:BTCUSDT")).toBeNull();
+  });
+
+  it("renvoie null quand la base est inextricable", () => {
+    expect(basePerp("")).toBeNull();
+    expect(basePerp("FOOBAR")).toBeNull(); // aucune cotation reconnue en suffixe
+    expect(basePerp("/USD")).toBeNull(); // base vide
   });
 });

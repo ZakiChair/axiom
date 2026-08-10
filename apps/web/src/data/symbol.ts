@@ -49,3 +49,35 @@ export function splitSymbol(symbol: string, exchangeLabel: string): { base: stri
   }
   return { base: s.slice(0, s.length - quote.length), quote };
 }
+
+/** Alias d'actif propres à un exchange → ticker canonique (Kraken code le bitcoin « XBT »). */
+const ALIAS_BASE: Record<string, string> = { XBT: "BTC" };
+
+/**
+ * Base CANONIQUE d'un symbole, quel que soit le format d'exchange — pensée pour les sources
+ * qui ne connaissent QUE le perp Binance (`<base>USDT` : Coinalyze, openInterestHist).
+ *
+ * `splitSymbol` ne suffit pas : il ignore le séparateur TIRET de Coinbase (« BTC-USD » y
+ * donnerait la base « BTC- », d'où l'OI muet hors perp Binance) et rend l'alias Kraken « XBT »
+ * tel quel. On ajoute donc un helper SÉPARÉ plutôt que d'élargir `splitSymbol` (34 appelants).
+ *
+ *  - « BTC-USD » / « XBT/USD » / « BTCUSDT » → « BTC » ;
+ *  - symbole SYNTHÉTIQUE (encodage `exA:LEGA|op|exB:LEGB`, cf. data/synthetic.ts) → `null` :
+ *    il n'a pas d'actif sous-jacent unique ;
+ *  - cotation inconnue / base vide ou non alphanumérique → `null` (l'appelant renonce au fetch).
+ */
+export function basePerp(symbol: string): string | null {
+  const s = symbol.trim().toUpperCase();
+  if (s.length === 0 || s.includes("|")) return null; // vide ou synthétique
+
+  // Tiret Coinbase ramené au séparateur explicite déjà géré par splitSymbol.
+  const normalise = s.replace("-", "/");
+  let base: string;
+  try {
+    base = splitSymbol(normalise, "basePerp").base;
+  } catch {
+    return null; // cotation inconnue / côté vide → inextricable
+  }
+  if (!/^[A-Z0-9]{2,10}$/.test(base)) return null;
+  return ALIAS_BASE[base] ?? base;
+}

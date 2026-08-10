@@ -23,7 +23,8 @@ import type { StoreApi } from "zustand/vanilla";
 import type { Candle } from "@axiom/types";
 import type { Commande } from "../commands/registry";
 import { candleContenant } from "./liquidationMarkers";
-import { fetchOpenInterestHistoryBatch } from "../data/coinalyze";
+import { histOiUsdAvecRepli } from "../data/referentiels";
+import { basePerp } from "../data/symbol";
 import { marketStore } from "../store/market";
 
 /** Un niveau de liquidation ESTIMÉ (approximation — étiquetage « EST. » obligatoire). */
@@ -196,7 +197,7 @@ export const oiHistStore: StoreApi<OiHistState> = createStore<OiHistState>(() =>
 
 // ─────────────────────────── Singleton de fetch OI (au toggle + refresh 15 min) ───────────────────────────
 
-/** Fenêtre d'historique OI demandée à Coinalyze (72 h, bucket horaire). */
+/** Fenêtre d'historique OI demandée à la source primaire (72 h, bucket horaire). */
 const WINDOW_MS = 72 * 60 * 60 * 1000;
 /** Rafraîchissement de l'OI tant que la couche est active. */
 const REFRESH_MS = 15 * 60 * 1000;
@@ -206,16 +207,39 @@ const OI_PERIOD = "1hour";
 let symboleActif: string | null = null;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
-/** Récupère l'OI (best-effort) et publie dans le store si le symbole n'a pas changé entre-temps. */
+/**
+ * Récupère l'OI (best-effort) et publie dans le store si le symbole n'a pas changé entre-temps.
+ *
+ * DEUX corrections d'un même mode d'échec (couche muette hors perp Binance) :
+ *  1. NORMALISATION — l'OI n'existe que pour le perp `<base>USDT` ; le symbole BRUT du chart
+ *     (« BTC-USD » Coinbase, « XBT/USD » Kraken, MEXC…) donnait un identifiant inconnu de la
+ *     source, donc une série vide. On interroge donc `basePerp(symbol) + "USDT"` ; une base
+ *     inextricable (symbole synthétique…) publie explicitement un historique VIDE — la légende
+ *     affiche alors la raison (cf. `libelleLegendeEst`).
+ *  2. REPLI DE SOURCE — `histOiUsdAvecRepli` bascule sur `openInterestHist` Binance (gratuit,
+ *     sans clé) dès que Coinalyze rejette ou rend une série vide (quota / 401 sans clé).
+ *
+ * FENÊTRE RE-BORNÉE ICI : le repli Binance IGNORE `depuisMs` (il demande 500 points horaires,
+ * soit ~20 j), là où la source primaire respecte la fenêtre. Sans ce filtre, le nombre de niveaux
+ * estimés — et le cumul « EST. » affiché en légende — dépendraient de la source qui a répondu,
+ * de façon invisible pour l'utilisateur. On tranche donc à `WINDOW_MS` après coup (le clamp ne
+ * peut pas vivre dans `histOiUsdAvecRepli` : ses autres appelants VEULENT la série longue).
+ *
+ * MÉMOÏSATION (asymétrique, à ne pas confondre) : le cache TTL 1 h de data/referentiels ne couvre
+ * que le REPLI Binance (`histOiUsd`) ; la source primaire Coinalyze est appelée directement, sans
+ * cache. Le rafraîchissement 15 min est donc réel sur la primaire, et ~horaire sur le repli.
+ * Ne REJETTE jamais (contrat de `histOiUsdAvecRepli`) : les deux sources muettes → série vide.
+ */
 async function rafraichirOi(symbol: string): Promise<void> {
-  let map: Map<string, { time: number; oiUsd: number }[]>;
-  try {
-    map = await fetchOpenInterestHistoryBatch([symbol], OI_PERIOD, Date.now() - WINDOW_MS);
-  } catch {
-    return; // échec réseau : on garde l'état précédent (best-effort)
-  }
+  const base = basePerp(symbol);
+  const depuis = Date.now() - WINDOW_MS;
+  const hist =
+    base === null
+      ? []
+      : (await histOiUsdAvecRepli(`${base}USDT`, OI_PERIOD, depuis))
+          .filter((p) => p.t >= depuis)
+          .map((p) => ({ time: p.t, oiUsd: p.v }));
   if (symboleActif !== symbol) return; // symbole/état changé pendant l'attente → jeté
-  const hist = map.get(symbol) ?? [];
   oiHistStore.setState((s) => ({ hist, symbol, rev: s.rev + 1 }));
 }
 

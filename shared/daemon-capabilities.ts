@@ -14,6 +14,7 @@ export const DAEMON_CAPABILITIES = [
   "alerts",
   "replay",
   "globe",
+  "hl",
   "snapshots",
   "proxy",
 ] as const;

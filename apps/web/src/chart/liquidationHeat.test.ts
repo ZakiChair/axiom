@@ -20,6 +20,9 @@ vi.mock("../data/coinalyze", () => ({ fetchLiquidationHistory: async () => [] })
 vi.mock("../data/daemon", () => ({
   liquidationsGet: async () => null,
   liquidationsPush: async () => false,
+  // Couche LIQHL : liquidationHeat importe data/hyperliquidLiq, qui tire ces deux helpers.
+  hlLiqLevelsGet: async () => null,
+  daemonSupporteHl: () => false,
 }));
 
 import type { Candle } from "@axiom/types";
@@ -42,6 +45,10 @@ import {
   alphaFadeIn,
   attenuationFootprint,
   filtrerNiveauxDenses,
+  libelleLegendeEst,
+  filtrerNiveauxHl,
+  clusteriserNiveauxHl,
+  libelleLegendeHl,
   dechevaucher,
   liqFlashStore,
   flasherNiveau,
@@ -565,5 +572,113 @@ describe("liqFlashStore / flasherNiveau (lien feed→chart)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("libelleLegendeEst — la couche EST active n'est jamais muette", () => {
+  it("niveaux présents → libellé nominal (garde-fou « approximation »)", () => {
+    expect(libelleLegendeEst("BTCUSDT", true, 12)).toBe(
+      "Niveaux ESTIMÉS (modèle levier — approximation)",
+    );
+  });
+
+  it("OI vide → raison EXPLICITE avec le symbole du chart", () => {
+    // Bug LIQEST muet : hors perp Binance (Coinbase/Kraken/MEXC), la source d'OI ne
+    // renvoyait rien → couche ON mais indistinguable d'une couche OFF.
+    expect(libelleLegendeEst("BTC-USD", false, 0)).toBe("Niveaux ESTIMÉS — OI indisponible (BTC-USD)");
+  });
+
+  it("OI présent mais aucun niveau actif → « tous consommés »", () => {
+    expect(libelleLegendeEst("BTCUSDT", true, 0)).toBe("Niveaux ESTIMÉS — tous consommés");
+  });
+});
+
+// ─────────────── Niveaux de liquidation RÉELS Hyperliquid (couche LIQHL) ───────────────
+
+/** Niveau HL minimal pour les fonctions de rendu (px + side + montant). */
+function nhl(px: number, side: "long" | "short", valueUsd: number) {
+  return { px, side, valueUsd };
+}
+
+describe("filtrerNiveauxHl — bornage autour du prix + plancher de taille", () => {
+  it("écarte les niveaux hors de ±40 % du dernier prix", () => {
+    // Le daemon laisse passer les aberrations de marge croisée (liqPx à 53 M$ sur un
+    // short de 12 $) : c'est le FRONT qui borne autour du prix.
+    const prix = 60_000;
+    const out = filtrerNiveauxHl(
+      [
+        nhl(53_000_000, "short", 1_000_000), // aberration marge croisée
+        nhl(36_000, "long", 500_000), // −40 % pile → gardé (borne inclusive)
+        nhl(35_999, "long", 500_000), // juste sous la borne → écarté
+        nhl(84_000, "short", 500_000), // +40 % pile → gardé
+        nhl(84_001, "short", 500_000), // juste au-dessus → écarté
+      ],
+      prix,
+    );
+    expect(out.map((n) => n.px)).toEqual([36_000, 84_000]);
+  });
+
+  it("écarte les niveaux sous le plancher de 10 000 $", () => {
+    const out = filtrerNiveauxHl([nhl(59_000, "long", 9_999), nhl(61_000, "short", 10_000)], 60_000);
+    expect(out.map((n) => n.px)).toEqual([61_000]);
+  });
+
+  it("écarte les valeurs non finies et un prix nul, et rend [] si le prix est invalide", () => {
+    expect(filtrerNiveauxHl([nhl(0, "long", 1e6), nhl(Number.NaN, "long", 1e6)], 60_000)).toEqual([]);
+    expect(filtrerNiveauxHl([nhl(59_000, "long", 1e6)], 0)).toEqual([]);
+  });
+});
+
+describe("clusteriserNiveauxHl — regroupement par buckets de 0,25 % du prix", () => {
+  it("regroupe deux niveaux du même bucket : total, prix moyen PONDÉRÉ, compte", () => {
+    // Bucket = 0,25 % de 60 000 = 150 $. 59 000 et 59 100 tombent dans le même bucket
+    // (idx 393 : 58 950–59 100 … 59 100 ouvre le suivant) → on choisit 59 000 / 59 050.
+    const clusters = clusteriserNiveauxHl([nhl(59_000, "long", 1_000_000), nhl(59_050, "long", 3_000_000)], 60_000);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0]?.totalUsd).toBe(4_000_000);
+    expect(clusters[0]?.n).toBe(2);
+    expect(clusters[0]?.side).toBe("long");
+    // Moyenne pondérée : (59000×1 + 59050×3) / 4 = 59 037.5
+    expect(clusters[0]?.pxMoyenPondere).toBeCloseTo(59_037.5, 6);
+  });
+
+  it("sépare deux buckets distincts", () => {
+    const clusters = clusteriserNiveauxHl([nhl(59_000, "long", 1e6), nhl(61_000, "short", 2e6)], 60_000);
+    expect(clusters).toHaveLength(2);
+    expect(clusters.map((c) => c.side).sort()).toEqual(["long", "short"]);
+  });
+
+  it("le side d'un cluster mixte est le DOMINANT en USD", () => {
+    const clusters = clusteriserNiveauxHl([nhl(59_000, "long", 1e6), nhl(59_050, "short", 5e6)], 60_000);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0]?.side).toBe("short");
+    expect(clusters[0]?.totalUsd).toBe(6e6);
+  });
+
+  it("rend [] sur une entrée vide ou un prix invalide", () => {
+    expect(clusteriserNiveauxHl([], 60_000)).toEqual([]);
+    expect(clusteriserNiveauxHl([nhl(59_000, "long", 1e6)], 0)).toEqual([]);
+  });
+});
+
+describe("libelleLegendeHl — la couche LIQHL nomme toujours son état", () => {
+  it("état ok avec des clusters → couverture annoncée (adresses · positions)", () => {
+    expect(libelleLegendeHl("ok", 250, 12, 5)).toBe("LIQ HL RÉELS — 250 adresses · 12 positions");
+  });
+
+  it("état ok mais tout est hors fenêtre → dit POURQUOI l'écran est vide", () => {
+    expect(libelleLegendeHl("ok", 250, 12, 0)).toBe("LIQ HL RÉELS — aucun niveau dans ±40 %");
+  });
+
+  it("capability absente → « nécessite le daemon » (précédent REPLAY)", () => {
+    expect(libelleLegendeHl("sans-daemon", 0, 0, 0)).toBe("LIQ HL RÉELS — nécessite le daemon axiomd");
+  });
+
+  it("coin non couvert par le leaderboard → « vide » explicite", () => {
+    expect(libelleLegendeHl("vide", 0, 0, 0)).toBe("LIQ HL RÉELS — aucun niveau pour ce symbole");
+  });
+
+  it("échec réseau / réponse illisible → erreur DOUCE", () => {
+    expect(libelleLegendeHl("erreur", 0, 0, 0)).toBe("LIQ HL RÉELS — source indisponible");
   });
 });

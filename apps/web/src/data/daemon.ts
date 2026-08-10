@@ -542,6 +542,30 @@ export async function journalAlertesGet(): Promise<DeclenchementDaemon[] | null>
   }
 }
 
+// ─────────────────────────── Niveaux de liquidation RÉELS Hyperliquid ───────────────────────────
+
+/**
+ * Lit les niveaux de liquidation RÉELS d'un coin (top adresses Hyperliquid) — charge utile
+ * BRUTE, dont la VALIDATION de forme vit dans `data/hyperliquidLiq.ts` (pure et testée).
+ * Sonde d'abord la capability `hl` (comme `journalAlertesGet`) ; renvoie `null` si le daemon
+ * est absent / sans capability / en erreur — la couche affiche alors « nécessite le daemon ».
+ */
+export async function hlLiqLevelsGet(coin: string): Promise<unknown | null> {
+  if (!(await detectDaemon("hl"))) return null;
+  try {
+    const res = await fetch(`${baseDaemon()}/hl/liqlevels/${encodeURIComponent(coin)}`);
+    if (!res.ok) return null;
+    return (await res.json()) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/** Le daemon annonce-t-il la capability `hl` ? (état synchrone, sans nouvelle sonde). */
+export function daemonSupporteHl(): boolean {
+  return daemonSupporte("hl");
+}
+
 /**
  * Pousse un lot de liquidations au daemon (insert idempotent). Best-effort SANS sonde
  * (comme `candlesPush`) : renvoie `false` en cas d'échec silencieux. Le format de fil du

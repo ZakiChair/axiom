@@ -33,6 +33,7 @@ import {
   type NiveauEstime,
   type NiveauConsomme,
 } from "./liquidationEstimates";
+import { hlLiqStore, type EtatHl } from "../data/hyperliquidLiq";
 import type { Commande } from "../commands/registry";
 import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
@@ -431,6 +432,131 @@ export function dechevaucher<T extends { y: number; poids: number }>(
   return retenus;
 }
 
+/**
+ * Libellé de la légende de la couche ESTIMÉE, RAISON COMPRISE — une couche active mais vide
+ * doit rester distinguable d'une couche éteinte (le mode d'échec le plus fréquent : hors perp
+ * Binance, la source d'OI ne renvoie rien et la couche se taisait). Trois cas :
+ *  - des niveaux → libellé nominal (garde-fou BUILD-CONTRACT « approximation ») ;
+ *  - aucun niveau ET OI vide → « OI indisponible (<symbole du chart>) » — le symbole affiché est
+ *    celui que l'utilisateur RECONNAÎT (« BTC-USD »), pas la base normalisée du fetch ;
+ *  - aucun niveau mais OI présent → « tous consommés » (le prix a traversé tous les niveaux).
+ * PURE.
+ */
+export function libelleLegendeEst(symbol: string, oiCharge: boolean, nbNiveauxActifs: number): string {
+  if (nbNiveauxActifs > 0) return "Niveaux ESTIMÉS (modèle levier — approximation)";
+  if (!oiCharge) return `Niveaux ESTIMÉS — OI indisponible (${symbol})`;
+  return "Niveaux ESTIMÉS — tous consommés";
+}
+
+// ───────────── Niveaux de liquidation RÉELS Hyperliquid (couche LIQHL) — fonctions PURES ─────────────
+
+/** Demi-largeur de la fenêtre d'affichage autour du dernier prix (fraction). */
+const HL_FENETRE_FRAC = 0.4;
+/** Plancher de notionnel d'un niveau HL affiché (USD). */
+const HL_PLANCHER_USD = 10_000;
+/** Largeur d'un bucket de clustering HL, en fraction du prix (0,25 %). */
+const HL_BUCKET_FRAC = 0.0025;
+
+/** Forme minimale d'un niveau HL pour le rendu (px + side + montant). */
+export interface NiveauHlRendu {
+  px: number;
+  side: "long" | "short";
+  valueUsd: number;
+}
+
+/** Un groupe de niveaux HL voisins : une barre à l'écran. */
+export interface ClusterHl {
+  /** Prix moyen PONDÉRÉ par le notionnel (le gros de la masse, pas le centre du bucket). */
+  pxMoyenPondere: number;
+  totalUsd: number;
+  /** Side DOMINANT en USD du groupe (égalité → « long », arbitraire et sans enjeu). */
+  side: "long" | "short";
+  /** Nombre de niveaux regroupés. */
+  n: number;
+}
+
+/**
+ * Ne garde que les niveaux LISIBLES : dans ±`HL_FENETRE_FRAC` du dernier prix (bornes INCLUSES)
+ * et d'au moins `HL_PLANCHER_USD`. Le daemon relaie l'API telle quelle et laisse passer les
+ * aberrations de MARGE CROISÉE (un prix de liquidation à 53 M$ sur un short de 12 $ a été
+ * observé) : c'est donc le FRONT qui borne, sinon l'échelle des barres est écrasée par une
+ * seule valeur absurde. Prix invalide → `[]`. PURE.
+ */
+export function filtrerNiveauxHl<T extends NiveauHlRendu>(niveaux: readonly T[], prix: number): T[] {
+  if (!(prix > 0) || !Number.isFinite(prix)) return [];
+  const ecartMax = prix * HL_FENETRE_FRAC;
+  return niveaux.filter(
+    (n) =>
+      n.px > 0 &&
+      Number.isFinite(n.px) &&
+      Number.isFinite(n.valueUsd) &&
+      n.valueUsd >= HL_PLANCHER_USD &&
+      Math.abs(n.px - prix) <= ecartMax,
+  );
+}
+
+/**
+ * Regroupe les niveaux en buckets de `HL_BUCKET_FRAC` du prix (0,25 %) : sans cela, des
+ * centaines de positions voisines donneraient autant de barres illisibles d'un pixel. Chaque
+ * cluster porte le total USD, le prix moyen PONDÉRÉ par le notionnel, le side dominant en USD
+ * et le nombre de niveaux. N'applique AUCUN filtre (composer avec `filtrerNiveauxHl`). Entrée
+ * vide ou prix invalide → `[]`. PURE.
+ */
+export function clusteriserNiveauxHl(niveaux: readonly NiveauHlRendu[], prix: number): ClusterHl[] {
+  if (!(prix > 0) || !Number.isFinite(prix)) return [];
+  const taille = prix * HL_BUCKET_FRAC;
+  if (!(taille > 0)) return [];
+
+  const parBucket = new Map<number, { sommePx: number; totalUsd: number; longUsd: number; n: number }>();
+  for (const n of niveaux) {
+    if (!(n.px > 0) || !Number.isFinite(n.px) || !Number.isFinite(n.valueUsd)) continue;
+    const idx = Math.floor(n.px / taille);
+    let b = parBucket.get(idx);
+    if (b === undefined) {
+      b = { sommePx: 0, totalUsd: 0, longUsd: 0, n: 0 };
+      parBucket.set(idx, b);
+    }
+    b.sommePx += n.px * n.valueUsd;
+    b.totalUsd += n.valueUsd;
+    if (n.side === "long") b.longUsd += n.valueUsd;
+    b.n += 1;
+  }
+
+  const clusters: ClusterHl[] = [];
+  for (const b of parBucket.values()) {
+    if (!(b.totalUsd > 0)) continue;
+    clusters.push({
+      pxMoyenPondere: b.sommePx / b.totalUsd,
+      totalUsd: b.totalUsd,
+      side: b.longUsd >= b.totalUsd - b.longUsd ? "long" : "short",
+      n: b.n,
+    });
+  }
+  return clusters;
+}
+
+/**
+ * Libellé de la légende de la couche HL, RAISON COMPRISE (même exigence que `libelleLegendeEst` :
+ * une couche active ne doit jamais être muette). L'état « ok » avec 0 cluster VISIBLE est un cas
+ * à part : la source a répondu, c'est le bornage ±40 % du front qui vide l'écran — le dire évite
+ * de faire soupçonner le daemon.
+ *
+ * ⚠️ HONNÊTETÉ : « N adresses » annonce la COUVERTURE réelle (top du leaderboard), pas le carnet
+ * entier — cf. l'en-tête de data/hyperliquidLiq.ts. PURE.
+ */
+export function libelleLegendeHl(
+  etat: EtatHl,
+  adressesScannees: number,
+  nbPositions: number,
+  nbClustersVisibles: number,
+): string {
+  if (etat === "sans-daemon") return "LIQ HL RÉELS — nécessite le daemon axiomd";
+  if (etat === "erreur") return "LIQ HL RÉELS — source indisponible";
+  if (etat === "vide") return "LIQ HL RÉELS — aucun niveau pour ce symbole";
+  if (nbClustersVisibles === 0) return "LIQ HL RÉELS — aucun niveau dans ±40 %";
+  return `LIQ HL RÉELS — ${adressesScannees} adresses · ${nbPositions} positions`;
+}
+
 // ─────────────────────────── Flash de bande (lien feed→chart) ───────────────────────────
 
 /** Durée (ms) du flash de bande déclenché par un clic dans le feed LIQ. */
@@ -491,6 +617,14 @@ const EST_MAX_NIVEAUX = 30;
 const NB_LABELS_EST = 4;
 /** Nombre de clusters du profil réel étiquetés (prix · USD) au bord droit. */
 const NB_LABELS_CLUSTER = 3;
+/** Longueur max (px CSS) d'une barre de cluster HL — plafond du plus gros cluster visible. */
+const HL_BARRE_MAX_PX = 120;
+/** Épaisseur (px CSS) d'une barre HL. */
+const HL_BARRE_H = 3;
+/** Opacité des barres HL (assez franches pour se lire, assez douces pour laisser voir le prix). */
+const HL_ALPHA = 0.75;
+/** Nombre de clusters HL étiquetés (les plus gros). */
+const NB_LABELS_HL = 3;
 
 interface PixelXY {
   x?: number;
@@ -599,6 +733,10 @@ export class LiquidationHeatController {
   private marksWanted = false;
   /** Abonnement permanent à la bascule des niveaux ESTIMÉS (LIQEST) — indépendant de LIQMARK. */
   private readonly unsubLiqEst: () => void;
+  /** Idem pour la bascule des niveaux RÉELS Hyperliquid (LIQHL) — 3e couche indépendante. */
+  private readonly unsubHl: () => void;
+  /** Nb de clusters HL réellement peints à la dernière frame (la légende en tire sa raison). */
+  private clustersHlVisibles = 0;
 
   private readonly markDirty = (): void => {
     this.grilleObsolete = true;
@@ -650,6 +788,13 @@ export class LiquidationHeatController {
       this.reconcile();
       this.markDirty();
     });
+    // Idem pour LIQHL. `dirty` SEUL (pas `markDirty`) : le store change à chaque fetch (toutes
+    // les 4 min) et les niveaux HL sont re-clusterisés à chaque peinture — inutile d'invalider
+    // au passage la grille réelle et les niveaux estimés mémoïsés.
+    this.unsubHl = hlLiqStore.subscribe(() => {
+      this.reconcile();
+      this.dirty = true;
+    });
   }
 
   /** setEnabled pilote la couche RÉELLE (LIQMARK, appelé par ChartInstance). */
@@ -658,9 +803,9 @@ export class LiquidationHeatController {
     this.reconcile();
   }
 
-  /** Le contrôleur tourne si AU MOINS une couche est active (RÉELLE ou ESTIMÉE). */
+  /** Le contrôleur tourne si AU MOINS une couche est active (RÉELLE, ESTIMÉE ou HL). */
   private reconcile(): void {
-    const want = this.marksWanted || liqEstStore.getState().actif;
+    const want = this.marksWanted || liqEstStore.getState().actif || hlLiqStore.getState().actif;
     if (want === this.running) return;
     if (want) this.start();
     else this.stop();
@@ -669,6 +814,7 @@ export class LiquidationHeatController {
   dispose(): void {
     this.stop();
     this.unsubLiqEst();
+    this.unsubHl();
   }
 
   private start(): void {
@@ -838,13 +984,104 @@ export class LiquidationHeatController {
     // ESTIMÉS (LIQEST). Chacune est activable seule (cf. reconcile()).
     const heatActif = liqMarksStore.getState().actif;
     const estActif = liqEstStore.getState().actif;
+    const hlActif = hlLiqStore.getState().actif;
     if (heatActif) this.dessinerHeatmap(main, tokens);
     if (estActif) this.dessinerNiveauxEstimes(main, tokens);
+    // Remis à zéro À CHAQUE frame : sans couche HL peinte, la légende ne doit pas réutiliser
+    // le compte de la frame précédente.
+    this.clustersHlVisibles = 0;
+    if (hlActif) this.dessinerNiveauxHl(main, tokens, heatActif);
     // Bloc de légendes UNIFIÉ en bas-droite (barre d'échelle USD, mini-légende profil, légende
     // EST) : dessiné une fois par frame APRÈS les couches (la grille est alors en cache), empilé
     // vers le haut au-dessus de l'axe temps — supprime les collisions avec les boutons de layout
     // DOM et la légende du Volume Profile (restée en haut à droite).
-    this.dessinerLegendes(main, tokens, heatActif, estActif);
+    this.dessinerLegendes(main, tokens, heatActif, estActif, hlActif);
+  }
+
+  /**
+   * Couche NIVEAUX RÉELS HYPERLIQUID (LIQHL) — barres horizontales PLEINES ancrées au bord
+   * droit, une par cluster de positions ouvertes dont le prix de liquidation tombe dans ±40 %
+   * du dernier prix (cf. `filtrerNiveauxHl` / `clusteriserNiveauxHl`, pures et testées).
+   *
+   * Distincte à l'œil des deux autres couches : la heatmap réelle peint des cellules
+   * temps×prix, les niveaux ESTIMÉS des lignes POINTILLÉES pleine largeur — ici des barres
+   * PLEINES adossées au bord droit, dont la LONGUEUR ∝ √(totalUsd) (la racine comprime les
+   * cascades sans écraser les petits clusters, comme le log ailleurs), normalisée au plus gros
+   * cluster VISIBLE et plafonnée à `HL_BARRE_MAX_PX`.
+   *
+   * Couleurs : longs liquidés (SOUS le prix, ventes forcées) → `--down` ; shorts (AU-DESSUS,
+   * rachats forcés) → `--up` — même sémantique que le profil latéral et le tooltip.
+   *
+   * ANCRAGE : décalé vers l'intérieur de la largeur du Volume Profile s'il est actif ET de
+   * celle des bandes du profil réel si la heatmap est active — sans quoi les trois histogrammes
+   * du bord droit se peindraient les uns sur les autres.
+   */
+  private dessinerNiveauxHl(main: Bounding, tokens: Tokens, heatActif: boolean): void {
+    const { niveaux } = hlLiqStore.getState();
+    if (niveaux.length === 0) return;
+
+    const candles = marketStore.getState().candles;
+    const range = this.chart.getVisibleRange();
+    const derniereVisible = candles[Math.min(candles.length, range.to) - 1];
+    if (derniereVisible === undefined) return;
+    const prix = derniereVisible.close;
+
+    const clusters = clusteriserNiveauxHl(filtrerNiveauxHl(niveaux, prix), prix);
+    if (clusters.length === 0) return;
+    this.clustersHlVisibles = clusters.length;
+
+    let maxUsd = 0;
+    for (const c of clusters) if (c.totalUsd > maxUsd) maxUsd = c.totalUsd;
+    if (!(maxUsd > 0)) return;
+    const racineMax = Math.sqrt(maxUsd);
+
+    const ctx = this.ctx;
+    const { left, top, width, height } = main;
+    const vpActif = volumeProfileStore.getState().enabled;
+    const xAncre =
+      left + width - (vpActif ? width * VP_WIDTH_FRAC : 0) - (heatActif ? width * MAX_BAND_FRAC : 0);
+    const longueurMax = Math.min(HL_BARRE_MAX_PX, width * 0.25);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left, top, width, height);
+    ctx.clip();
+
+    // Barres, du bord droit vers la gauche. `y` centré sur le prix moyen pondéré du cluster.
+    const dessinees: Array<{ y: number; poids: number; px: number; total: number; w: number }> = [];
+    ctx.globalAlpha = HL_ALPHA;
+    for (const c of clusters) {
+      const y = this.toPx({ value: c.pxMoyenPondere }).y;
+      if (y === undefined || !Number.isFinite(y)) continue;
+      const w = Math.max(2, (Math.sqrt(c.totalUsd) / racineMax) * longueurMax);
+      ctx.fillStyle = c.side === "long" ? tokens.down : tokens.up;
+      ctx.fillRect(xAncre - w, Math.round(y) - HL_BARRE_H / 2, w, HL_BARRE_H);
+      dessinees.push({ y, poids: c.totalUsd, px: c.pxMoyenPondere, total: c.totalUsd, w });
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // Étiquettes des NB_LABELS_HL plus gros clusters, à gauche de leur barre — même pilule et
+    // même ordre « prix · USD » que les labels de clusters du profil réel (cohérence de lecture).
+    ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    const tops = dessinees.sort((a, b) => b.poids - a.poids).slice(0, NB_LABELS_HL);
+    for (const item of dechevaucher(tops, 14)) {
+      if (item.y < top + 24 || item.y > top + height) continue;
+      const label = `${formatPrice(item.px)} · ${formatUsd(item.total)}`;
+      const droite = xAncre - item.w - 4;
+      const w = ctx.measureText(label).width;
+      ctx.fillStyle = tokens.surface;
+      ctx.globalAlpha = 0.96;
+      ctx.fillRect(droite - w - 6, item.y - 7, w + 6, 14);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = tokens.border;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(droite - w - 6, item.y - 7, w + 6, 14);
+      ctx.fillStyle = tokens.text;
+      ctx.fillText(label, droite - 3, item.y);
+    }
   }
 
   /**
@@ -1397,24 +1634,11 @@ export class LiquidationHeatController {
     // Trace grisée ÉPHÉMÈRE des consommés récents, dessinée SOUS les niveaux actifs (fond discret).
     if (taille > 0) this.dessinerTraceConsommes(this.derniersConsommes ?? [], candles, taille, main, tokens);
 
-    if (niveaux.length === 0) {
-      // Couche active mais OI pas encore chargé (ou aucune hausse d'OI) : indice discret en haut
-      // à droite, sous l'éventuel indicateur « en attente » de la heatmap (top+22). La légende
-      // « Niveaux ESTIMÉS … » (garde-fou EST.) reste affichée par le bloc de légendes bas-droite.
-      const heatEnAttente = liqMarksStore.getState().actif && liqEventsStore.getState().enAttente;
-      ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
-      ctx.textAlign = "right";
-      ctx.textBaseline = "top";
-      ctx.fillStyle = est(0.8);
-      // Deux cas distincts : OI pas encore chargé (attente réseau) vs OI chargé mais tous les
-      // niveaux consommés par le prix (modèle purgé — fréquent sur TF court après un range).
-      const oiCharge = oiHistStore.getState().hist.length > 0;
-      const msg = oiCharge
-        ? "⋯ Niveaux ESTIMÉS — aucun niveau actif (tous consommés par le prix)"
-        : "⋯ Niveaux ESTIMÉS — en attente de l'Open Interest";
-      ctx.fillText(msg, xRight - 4, top + (heatEnAttente ? 36 : 22));
-      return;
-    }
+    // Couche active mais aucun niveau : la RAISON (OI indisponible vs tous consommés) est
+    // désormais portée par la légende bas-droite (`libelleLegendeEst`, cf. dessinerLegendes) —
+    // l'indice haut-droite qui la répétait mot pour mot a été retiré pour ne pas afficher deux
+    // formulations concurrentes du même état.
+    if (niveaux.length === 0) return;
 
     if (!(taille > 0)) return;
     // Regroupement par bucket de prix : somme des poids + levier dominant du bucket (la taille de
@@ -1579,7 +1803,13 @@ export class LiquidationHeatController {
    *      réel (tokens.text) et « EST. » (teinte EST du thème) séparés — au SOMMET de la pile.
    * Emplacement jamais occupé par les boutons de layout ni la légende du Volume Profile.
    */
-  private dessinerLegendes(main: Bounding, tokens: Tokens, heatActif: boolean, estActif: boolean): void {
+  private dessinerLegendes(
+    main: Bounding,
+    tokens: Tokens,
+    heatActif: boolean,
+    estActif: boolean,
+    hlActif: boolean,
+  ): void {
     const ctx = this.ctx;
     const { left, top, width, height } = main;
     const xRight = left + width;
@@ -1652,13 +1882,40 @@ export class LiquidationHeatController {
       yb -= 14;
     }
 
-    // (c) légende EST — dessinée dès que la couche est active (étiquetage non contournable).
+    // (c) légende EST — dessinée dès que la couche est active (étiquetage non contournable),
+    // AVEC la raison quand la couche est vide (cf. libelleLegendeEst) : ON-mais-vide ne doit
+    // jamais être indistinguable de OFF.
     if (estActif) {
       ctx.textAlign = "right";
       ctx.textBaseline = "bottom";
       ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
       ctx.fillStyle = `rgba(${tokens.estRgb.join(",")},0.95)`;
-      ctx.fillText("Niveaux ESTIMÉS (modèle levier — approximation)", xRight - 4, yb);
+      ctx.fillText(
+        libelleLegendeEst(
+          marketStore.getState().symbol,
+          oiHistStore.getState().hist.length > 0,
+          (this.derniersNiveaux ?? []).length,
+        ),
+        xRight - 4,
+        yb,
+      );
+      yb -= 14;
+    }
+
+    // (c bis) légende LIQ HL RÉELS — dessinée dès que la couche est active, AVANT (d) : ce
+    // dernier peut retourner tôt (aucune bougie visible), ce qui escamoterait la légende.
+    // ⚠️ « N adresses » = TOP du leaderboard Hyperliquid, PAS tout le carnet (cf. libelleLegendeHl).
+    if (hlActif) {
+      const hl = hlLiqStore.getState();
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
+      ctx.fillStyle = tokens.textDim;
+      ctx.fillText(
+        libelleLegendeHl(hl.etat, hl.adressesScannees, hl.niveaux.length, this.clustersHlVisibles),
+        xRight - 4,
+        yb,
+      );
       yb -= 14;
     }
 

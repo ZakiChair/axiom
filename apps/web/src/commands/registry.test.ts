@@ -70,6 +70,7 @@ import { commandes as marksCommandes } from "../chart/tradeMarkers";
 import { commandes as liqMarksCommandes } from "../chart/liquidationMarkers";
 import { commandes as liqModeCommandes } from "../chart/liquidationHeat";
 import { commandes as liqEstCommandes } from "../chart/liquidationEstimates";
+import { commandes as hlLiqCommandes } from "../data/hyperliquidLiq";
 import { commandes as whaleCommandes } from "../chart/whaleBubbles";
 import { commandes as depthHeatCommandes } from "../chart/depthHeat";
 import { commandes as domCommandes } from "../store/dom-ui";
@@ -98,6 +99,7 @@ const SOURCES_GREFFEES: Record<string, readonly Commande[]> = {
   "chart/liquidationMarkers": liqMarksCommandes,
   "chart/liquidationHeat": liqModeCommandes,
   "chart/liquidationEstimates": liqEstCommandes,
+  "data/hyperliquidLiq": hlLiqCommandes,
   "chart/whaleBubbles": whaleCommandes,
   "chart/depthHeat": depthHeatCommandes,
   "store/dom-ui": domCommandes,

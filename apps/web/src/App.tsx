@@ -47,6 +47,9 @@ import { commandes as depthHeatCommands } from "./chart/depthHeat";
 // Niveaux de liquidation ESTIMÉS (modèle levier sur l'OI) — l'import démarre le fetch OI
 // singleton (effet de bord) ; couche indépendante de la heatmap réelle.
 import { commandes as liqEstCommands } from "./chart/liquidationEstimates";
+// Niveaux de liquidation RÉELS Hyperliquid (top adresses, via le daemon) — l'import démarre le
+// singleton de rafraîchissement (effet de bord) ; 3e couche indépendante du même contrôleur.
+import { commandes as hlLiqCommands } from "./data/hyperliquidLiq";
 // Contrôleur marqueurs éco (effet de bord) — indépendant du lazy-load de EcoWindow.
 import "./chart/ecoMarkers";
 import { commandes as domCommands } from "./store/dom-ui";
@@ -117,6 +120,7 @@ enregistrerCommandes([
   ...liqMarksCommands,
   ...liqModeCommands,
   ...liqEstCommands,
+  ...hlLiqCommands,
   ...whaleCommands,
   ...depthHeatCommands,
   // Fenêtres Phase 4 (DOM/BT/REPLAY) + grille multi-chart.

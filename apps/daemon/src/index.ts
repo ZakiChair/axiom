@@ -23,6 +23,7 @@ import { enregistrerCandles } from "./candles";
 import { entetesCors, entetesCorsRejet, reponsePreflight, requeteLocaleAutorisee } from "./cors";
 import { chargerCles } from "./env";
 import { demarrerBoucleGlobe, enregistrerGlobe } from "./globe";
+import { enregistrerHl } from "./hyperliquid";
 import { enregistrerKv } from "./kv";
 import { demarrerBoucleLiquidations } from "./liqFeed";
 import { enregistrerLiquidations } from "./liquidations";
@@ -90,6 +91,10 @@ enregistrerReplay(routeur);
 
 // Données géopolitiques du globe (Phase F2) : cellules GDELT + zones de conflit UCDP.
 enregistrerGlobe(routeur);
+
+// Niveaux de liquidation réels Hyperliquid : GET /hl/liqlevels/:coin.
+// Amonts sollicités PARESSEUSEMENT (au premier besoin) — aucune boucle de fond.
+enregistrerHl(routeur);
 
 // --- Gestionnaire principal ------------------------------------------------
 async function gestionnaire(req: Request): Promise<Response> {

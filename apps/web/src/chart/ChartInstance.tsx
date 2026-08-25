@@ -122,6 +122,18 @@ const Y_AXIS_TYPE: Record<PriceScaleType, YAxisType> = {
   percentage: YAxisType.Percentage,
 };
 
+const MOBILE_AXIS_BREAKPOINT_PX = 640;
+const MOBILE_X_AXIS_SIZE_PX = 28;
+const MOBILE_Y_AXIS_SIZE_PX = 80;
+
+function applyResponsiveAxisStyles(chart: KLineChartInstance, viewportWidth: number): void {
+  const mobile = viewportWidth < MOBILE_AXIS_BREAKPOINT_PX;
+  chart.setStyles({
+    xAxis: { size: mobile ? MOBILE_X_AXIS_SIZE_PX : "auto", tickText: { size: 12 } },
+    yAxis: { size: mobile ? MOBILE_Y_AXIS_SIZE_PX : "auto", tickText: { size: 12 } },
+  });
+}
+
 /** Pane prix (id par défaut KLineChart, vérifié dans le bundle v9.8.x). */
 const CANDLE_PANE_ID = "candle_pane";
 /** Nombre de bougies récupérées par page d'historique (scroll gauche). */
@@ -479,6 +491,20 @@ export function ChartInstance({
       ctx.globalAlpha = 1;
     };
     const xhairThrottle = createRafThrottle(drawSyncedCrosshair, { minIntervalMs: 16 });
+    const resizeThrottle = createRafThrottle(
+      () => {
+        applyResponsiveAxisStyles(chart, window.innerWidth);
+        chart.resize();
+        indicators.rafraichirHauteurs();
+        paneHeaders.sync();
+        overlayLegend.sync();
+        xhairThrottle.trigger();
+      },
+      { minIntervalMs: 50 },
+    );
+    const resizeObserver = new ResizeObserver(resizeThrottle.trigger);
+    resizeObserver.observe(container);
+    resizeThrottle.trigger();
     // Ce slot survolé publie le timestamp pointé ; les autres tracent la ligne.
     const onCrosshair = (data?: Crosshair): void => {
       const t = data?.kLineData?.timestamp;
@@ -547,6 +573,8 @@ export function ChartInstance({
       chart.unsubscribeAction(ActionType.OnScroll, onXhairViewport);
       chart.unsubscribeAction(ActionType.OnZoom, onXhairViewport);
       chart.unsubscribeAction(ActionType.OnVisibleRangeChange, onXhairViewport);
+      resizeObserver.disconnect();
+      resizeThrottle.dispose();
       xhairThrottle.dispose();
       updateThrottle.dispose();
       unbindChart(chart);

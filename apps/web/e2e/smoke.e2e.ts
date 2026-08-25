@@ -26,6 +26,51 @@ test("le terminal démarre et rend son canvas de chart", async ({ page }) => {
   await expect(page.locator("canvas").first()).toBeVisible({ timeout: 15_000 });
 });
 
+test("garde les axes du temps et des prix visibles sur mobile", async ({ page }) => {
+  await page.setViewportSize({ width: 1512, height: 748 });
+  await page.goto("/");
+  await expect(page.locator("main canvas").first()).toBeVisible({ timeout: 15_000 });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect
+    .poll(
+      () =>
+        page.locator("main").evaluate((main) => {
+          const bounds = main.getBoundingClientRect();
+          const canvases = [...main.querySelectorAll("canvas")].map((canvas) => {
+            const rect = canvas.getBoundingClientRect();
+            return {
+              left: rect.left,
+              right: rect.right,
+              top: rect.top,
+              bottom: rect.bottom,
+              width: rect.width,
+              height: rect.height,
+            };
+          });
+          const timeAxis = canvases.find(
+            (rect) =>
+              rect.width >= bounds.width / 2 &&
+              rect.height >= 20 &&
+              rect.height <= 40 &&
+              rect.top >= bounds.top + bounds.height / 2,
+          );
+          const priceAxis = canvases.find(
+            (rect) =>
+              Math.abs(rect.right - bounds.right) <= 1 &&
+              rect.width >= 76 &&
+              rect.width < bounds.width / 2 &&
+              rect.height >= bounds.height / 2,
+          );
+          return {
+            tempsVisible: timeAxis !== undefined && timeAxis.bottom <= bounds.bottom + 1,
+            prixLisibles: priceAxis !== undefined,
+          };
+        }),
+      { timeout: 15_000 },
+    )
+    .toEqual({ tempsVisible: true, prixLisibles: true });
+});
+
 test("le menu Fonctions ouvre une fenêtre Launchpad (COT, sans data live)", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Fonctions" }).click();

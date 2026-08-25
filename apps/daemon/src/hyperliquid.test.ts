@@ -335,6 +335,36 @@ describe("GET /hl/liqlevels/:coin", () => {
     expect((await traiterHl(new Request(uVide), uVide)).status).toBe(400);
   });
 
+  test("GET /hl/positions/:coin : agrégats long/short + top trié, MÊME instantané (0 appel de plus)", async () => {
+    reinitialiserHl();
+    const d = baseTest();
+    const { fetchImpl, appels } = stubHl({
+      adresses: [A1, A2],
+      etats: {
+        // A1 : long 402 k$ ; A2 : short 900 k$ (plus grosse → première du top).
+        [A1]: etat([pos()]),
+        [A2]: etat([pos({ szi: "-2", positionValue: "900000" })]),
+      },
+    });
+    const urlLevels = new URL("http://x/hl/liqlevels/BTC");
+    await traiterHl(new Request(urlLevels), urlLevels, d, T0, fetchImpl);
+    const nbAppels = appels.length;
+
+    const url = new URL("http://x/hl/positions/BTC");
+    const res = await traiterHl(new Request(url), url, d, T0 + 60_000, fetchImpl);
+    expect(res.status).toBe(200);
+    const corps = (await res.json()) as {
+      ts: number;
+      coin: string;
+      agregats: { longUsd: number; shortUsd: number; nbLong: number; nbShort: number };
+      positions: NiveauLiqHL[];
+    };
+    expect(corps.ts).toBe(T0); // même instantané que liqlevels
+    expect(appels.length).toBe(nbAppels); // aucun appel amont supplémentaire
+    expect(corps.agregats).toEqual({ longUsd: 402414.15, shortUsd: 900000, nbLong: 1, nbShort: 1 });
+    expect(corps.positions.map((p) => p.valueUsd)).toEqual([900000, 402414.15]); // tri décroissant
+  });
+
   test("enregistrerHl branche le préfixe /hl sur le routeur", async () => {
     const routeur = new Routeur();
     enregistrerHl(routeur);

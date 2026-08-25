@@ -175,6 +175,35 @@ export function agregerParCoin(positions: readonly PositionLiq[]): Map<string, N
   return parCoin;
 }
 
+/** Agrégats long/short d'un coin (fenêtre WHALES : « que font les gros comptes ? »). */
+export interface AgregatsPositions {
+  longUsd: number;
+  shortUsd: number;
+  nbLong: number;
+  nbShort: number;
+}
+
+/** Somme notionnels et compte les positions par côté. Fonction PURE (testée). */
+export function agregatsPositions(niveaux: readonly NiveauLiqHL[]): AgregatsPositions {
+  const out: AgregatsPositions = { longUsd: 0, shortUsd: 0, nbLong: 0, nbShort: 0 };
+  for (const n of niveaux) {
+    if (n.side === "long") {
+      out.longUsd += n.valueUsd;
+      out.nbLong += 1;
+    } else {
+      out.shortUsd += n.valueUsd;
+      out.nbShort += 1;
+    }
+  }
+  return out;
+}
+
+/** Les `n` plus grosses positions par notionnel décroissant (l'entrée n'est pas mutée). PURE. */
+export function topPositions(niveaux: readonly NiveauLiqHL[], n: number): NiveauLiqHL[] {
+  if (!(n >= 1)) return [];
+  return [...niveaux].sort((a, b) => b.valueUsd - a.valueUsd).slice(0, n);
+}
+
 function entetesAmont(): Record<string, string> {
   return { "user-agent": "axiom-daemon/1.0 (terminal perso)", accept: "application/json" };
 }
@@ -327,9 +356,18 @@ function json(corps: unknown, req: Request, status = 200): Response {
   });
 }
 
+/** Cap de positions renvoyées par /hl/positions/:coin (les plus grosses d'abord). */
+export const MAX_POSITIONS = 100;
+
 /**
- * Gestionnaire de `GET /hl/liqlevels/:coin`. Gardes AVANT tout accès base/réseau.
- * `dInjecte`/`now`/`fetchImpl` permettent aux tests d'injecter (convention globe.ts).
+ * Gestionnaire de `GET /hl/liqlevels/:coin` et `GET /hl/positions/:coin` (MÊME
+ * instantané amont, cache 5 min partagé — la 2e route ne coûte AUCUN appel HL de
+ * plus). Gardes AVANT tout accès base/réseau. `dInjecte`/`now`/`fetchImpl`
+ * permettent aux tests d'injecter (convention globe.ts).
+ *
+ * LIMITE ASSUMÉE de /positions : l'instantané ne retient que les positions à
+ * `liquidationPx` exploitable (cf. parserEtatCompte) — les positions cross très
+ * collatéralisées en sont absentes. Étiqueté « échantillon » côté UI.
  */
 export async function traiterHl(
   req: Request,
@@ -341,7 +379,8 @@ export async function traiterHl(
   if (req.method !== "GET") return json({ erreur: "méthode non autorisée" }, req, 405);
   const segments = url.pathname.split("/").filter((s) => s.length > 0);
   // segments[0] === "hl" (garanti par le préfixe de route)
-  if (segments[1] !== "liqlevels") return json({ erreur: "chemin inconnu" }, req, 404);
+  const vue = segments[1];
+  if (vue !== "liqlevels" && vue !== "positions") return json({ erreur: "chemin inconnu" }, req, 404);
   if (segments.length !== 3) return json({ erreur: "coin requis" }, req, 400);
   let coin: string;
   try {
@@ -358,10 +397,20 @@ export async function traiterHl(
     if (inst === null) {
       return json({ erreur: "pool d'adresses Hyperliquid indisponible" }, req, 503);
     }
-    return json(
-      { ts: inst.ts, coin, adressesScannees: inst.adressesScannees, niveaux: inst.parCoin.get(coin) ?? [] },
-      req,
-    );
+    const niveaux = inst.parCoin.get(coin) ?? [];
+    if (vue === "positions") {
+      return json(
+        {
+          ts: inst.ts,
+          coin,
+          adressesScannees: inst.adressesScannees,
+          agregats: agregatsPositions(niveaux),
+          positions: topPositions(niveaux, MAX_POSITIONS),
+        },
+        req,
+      );
+    }
+    return json({ ts: inst.ts, coin, adressesScannees: inst.adressesScannees, niveaux }, req);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return json({ erreur: "erreur interne hl", detail }, req, 500);

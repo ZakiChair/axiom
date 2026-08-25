@@ -32,6 +32,7 @@ import { enregistrerReplay } from "./replay";
 import { Routeur } from "./router";
 import { demarrerBoucleSnapshots, enregistrerSnapshots } from "./snapshots";
 import { distExiste, servirStatique } from "./static";
+import { demarrerBoucleWhales, enregistrerWhales } from "./whales";
 import { DAEMON_CAPABILITIES } from "../../../shared/daemon-capabilities";
 
 const HOSTNAME = "127.0.0.1";
@@ -92,9 +93,12 @@ enregistrerReplay(routeur);
 // Données géopolitiques du globe (Phase F2) : cellules GDELT + zones de conflit UCDP.
 enregistrerGlobe(routeur);
 
-// Niveaux de liquidation réels Hyperliquid : GET /hl/liqlevels/:coin.
+// Niveaux de liquidation réels Hyperliquid : GET /hl/liqlevels/:coin + /hl/positions/:coin.
 // Amonts sollicités PARESSEUSEMENT (au premier besoin) — aucune boucle de fond.
 enregistrerHl(routeur);
+
+// Mouvements baleines on-chain : GET /whales/recent (fenêtre WHALES + alertes whale-flux).
+enregistrerWhales(routeur);
 
 // --- Gestionnaire principal ------------------------------------------------
 async function gestionnaire(req: Request): Promise<Response> {
@@ -136,6 +140,10 @@ demarrerBoucleGlobe();
 
 // Boucle d'ingestion liquidations (WS Bybit à froid) — jamais sur le chemin chaud du renderer.
 demarrerBoucleLiquidations();
+
+// Boucle de collecte des mouvements baleines (WS blockchain.info + poll Etherscan à froid)
+// — jamais sur le chemin chaud du renderer.
+demarrerBoucleWhales(cles.ETHERSCAN_API_KEY);
 
 console.log(
   `[axiomd] v${VERSION} écoute sur http://${serveur.hostname}:${serveur.port} ` +

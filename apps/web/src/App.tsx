@@ -286,7 +286,7 @@ export function App() {
             via SidebarSection. Ordre : Watchlist, Alertes, Comparer, Santé. Les mesures
             macro ont quitté la sidebar pour l'onglet « Macro » du menu Indicateurs. */}
         {!plein && (
-          <aside className="flex w-60 shrink-0 flex-col min-h-0 overflow-y-auto border-l border-border bg-surface">
+          <aside className="hidden w-60 shrink-0 flex-col min-h-0 overflow-y-auto border-l border-border bg-surface sm:flex">
             <div className="flex shrink-0 items-center justify-between px-3 py-2">
               <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
                 Panneaux

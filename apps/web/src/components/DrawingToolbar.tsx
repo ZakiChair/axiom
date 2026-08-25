@@ -425,7 +425,7 @@ export function DrawingToolbar() {
   return (
     <>
       <nav
-        className="flex w-10 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-border bg-surface py-2"
+        className="hidden w-10 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-border bg-surface py-2 sm:flex"
         aria-label="Outils de dessin"
       >
         {TOOLS.map(({ id, label, Icon }) => {

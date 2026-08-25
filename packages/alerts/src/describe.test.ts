@@ -115,4 +115,16 @@ describe("decrireCondition", () => {
       "CVD divergence spot/perp"
     );
   });
+
+  it("whale-flux en montant compact + direction lisible", () => {
+    expect(decrireCondition({ type: "whale-flux", seuilUsd: 10_000_000, direction: "tous" })).toBe(
+      "Baleine ≥ 10M $ (toutes directions)"
+    );
+    expect(decrireCondition({ type: "whale-flux", seuilUsd: 5_000_000, direction: "depot" })).toBe(
+      "Baleine ≥ 5M $ (dépôt exchange)"
+    );
+    expect(decrireCondition({ type: "whale-flux", seuilUsd: 2_500_000, direction: "retrait" })).toBe(
+      "Baleine ≥ 2.5M $ (retrait exchange)"
+    );
+  });
 });

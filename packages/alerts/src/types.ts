@@ -116,6 +116,28 @@ export interface ConditionRegimeSeuil {
   valeur: number;
 }
 
+/** Direction HEURISTIQUE d'un mouvement baleine vis-à-vis des exchanges (liste curée). */
+export type DirectionWhale = "depot" | "retrait" | "interne" | "inconnu";
+
+/**
+ * Gros mouvement on-chain (« baleine ») : UN transfert ≥ `seuilUsd` observé sur la
+ * fenêtre récente injectée (`whaleMouvements`). `direction` filtre les dépôts (vers un
+ * exchange, pression vendeuse potentielle) ou les retraits (depuis un exchange,
+ * accumulation) ; « tous » accepte toute direction (interne/inconnu inclus).
+ *
+ * Convention de portage : `symbol` = ACTIF surveillé (« BTC », « USDT »…), `source` =
+ * "binance" (porteur neutre, comme `regime-seuil`). Évaluée par le DAEMON uniquement
+ * (collecteur whales.ts) — le runtime front n'injecte pas `whaleMouvements` en v1,
+ * la condition y est donc non évaluable (aucun déclenchement front).
+ */
+export interface ConditionWhaleFlux {
+  type: "whale-flux";
+  /** Seuil de notionnel d'UN transfert (USD). */
+  seuilUsd: number;
+  /** Filtre de direction (« tous » = dépôt, retrait, interne et inconnu confondus). */
+  direction: "depot" | "retrait" | "tous";
+}
+
 /** Condition d'une alerte (union discriminée sur `type`). */
 export type Condition =
   | ConditionPrixCroise
@@ -125,7 +147,8 @@ export type Condition =
   | ConditionFundingExtreme
   | ConditionCvdSpotPerpDiv
   | ConditionLiqCascade
-  | ConditionRegimeSeuil;
+  | ConditionRegimeSeuil
+  | ConditionWhaleFlux;
 
 /** Définition d'une alerte. */
 export interface AlertDef {
@@ -191,6 +214,21 @@ export interface ContexteAlerte {
    * le score en v1) : absent → condition non évaluable, aucun déclenchement.
    */
   regimeScore?: number;
+  /**
+   * Mouvements baleines de l'actif sur la fenêtre récente (10 min par convention de
+   * l'appelant) — requis pour `whale-flux`. Injecté par le DAEMON uniquement (requête
+   * sur sa table `whale_moves`, cf. whales.ts) : absent → condition non évaluable ;
+   * tableau vide → un vrai « aucun mouvement » (ré-arme la condition).
+   */
+  whaleMouvements?: MouvementWhaleCtx[];
+}
+
+/** Un mouvement baleine de la fenêtre récente (contexte de `whale-flux`). */
+export interface MouvementWhaleCtx {
+  /** Notionnel du transfert (USD). */
+  usd: number;
+  /** Direction heuristique vis-à-vis des exchanges. */
+  direction: DirectionWhale;
 }
 
 /** Un déclenchement produit par le moteur. */

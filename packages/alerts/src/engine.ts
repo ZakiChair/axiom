@@ -93,6 +93,8 @@ function evaluerUne(def: AlertDef, ctx: ContexteAlerte): EvalCondition | null {
       return evalLiqCascade(def, c, ctx);
     case "regime-seuil":
       return evalRegimeSeuil(def, c, ctx);
+    case "whale-flux":
+      return evalWhaleFlux(def, c, ctx);
   }
 }
 
@@ -279,6 +281,29 @@ function evalRegimeSeuil(
   const satisfaite = comparer(v, c.comparateur, c.valeur);
   const r = frontArme(def.arme, satisfaite);
   return { fire: r.fire, arme: r.arme, valeur: v };
+}
+
+/**
+ * Mouvement baleine : plus gros transfert (USD) de la fenêtre récente injectée,
+ * filtré par direction, comparé au seuil. Ré-armement standard : la fenêtre doit
+ * ne plus contenir de transfert ≥ seuil (dans la direction filtrée) avant de pouvoir
+ * re-déclencher — la fenêtre glissante (10 min côté daemon) borne donc le silence.
+ */
+function evalWhaleFlux(
+  def: AlertDef,
+  c: Extract<Condition, { type: "whale-flux" }>,
+  ctx: ContexteAlerte
+): EvalCondition | null {
+  const mouvements = ctx.whaleMouvements;
+  if (mouvements === undefined) return null;
+  let max = 0;
+  for (const m of mouvements) {
+    if (c.direction !== "tous" && m.direction !== c.direction) continue;
+    if (Number.isFinite(m.usd) && m.usd > max) max = m.usd;
+  }
+  const satisfaite = max >= c.seuilUsd;
+  const r = frontArme(def.arme, satisfaite);
+  return { fire: r.fire, arme: r.arme, valeur: max };
 }
 
 // ───────── Helpers purs ─────────

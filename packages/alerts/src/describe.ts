@@ -85,5 +85,15 @@ export function decrireCondition(condition: Condition): string {
       const op = comparateur === "<=" ? "≤" : comparateur === ">=" ? "≥" : comparateur;
       return `régime ${op} ${String(valeur).replace("-", "−")}`;
     }
+    case "whale-flux": {
+      const { seuilUsd, direction } = condition;
+      const dir =
+        direction === "depot"
+          ? "dépôt exchange"
+          : direction === "retrait"
+            ? "retrait exchange"
+            : "toutes directions";
+      return `Baleine ≥ ${formaterMontant(seuilUsd)} $ (${dir})`;
+    }
   }
 }

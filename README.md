@@ -33,8 +33,9 @@ Deux partis pris structurent le produit :
    `@axiom/indicators` — pas de WASM, pas de service Python — et sont vérifiés par golden tests
    contre un oracle `pandas-ta` (`scripts/golden/`).
 
-**Hors périmètre assumé** : pas d’exécution d’ordres (`PAPER` est une simulation locale), pas de
-multi-utilisateur, pas d’Electron.
+**Hors périmètre assumé** : pas d’exécution d’ordres réels (aucune clé de trading). Le paper
+trading (`PAPER`) est une simulation locale déjà présente ; pas de multi-utilisateur, pas
+d’Electron.
 
 ## Architecture
 
@@ -122,9 +123,17 @@ pnpm prod
 - **Panneaux** : 37 fenêtres — DES, FUNDX, LIQ, ECO, NEWS, CORR, CHAIN, MAP, PORT, NOTE, EQS, TERM, OMON, DOM, BT, REPLAY, RATE, COT, SEAG, VOL, FUND, BRIEF, GLOBE, STBL, SQZ, CBPREM, NETLIQ, DATA, DIST, EXPY, PAPER, MINE, CYCLE, EVTS, SCEN, CAP, SECT
 - **Daemon** : proxy+cache, KV/candles SQLite, alertes (macOS + Telegram optionnel), replay dumps Binance, couches GDELT/UCDP
 
-### Programme G100 (WTP 100 $/mois) — W0–W3 landés
+### Programme G100 (WTP 100 $/mois) — W0–W3 landés, gate **ouvert**
 
-Les vagues **W0–W3** du plan `docs/superpowers/plans/2026-07-13-cible-100-usd-mois.md` sont **mergées en main** (confiance CVD/badges, `pnpm run up`, onboarding, session strip, alertes edge + funding daemon, playbooks, screener positionnement, bus panneau→chart, import CSV, brief review). **W4 / gate G100** (E1 polish + E2 QA checklist G1–G10) reste à valider manuellement — voir section 14 du plan (statut provisoire *code-complete · manual QA*).
+Les vagues **W0–W3** du plan `docs/superpowers/plans/2026-07-13-cible-100-usd-mois.md` sont **mergées en main** (confiance CVD/badges, `pnpm run up`, onboarding, session strip, alertes edge + funding daemon, playbooks, screener positionnement, bus panneau→chart, import CSV, brief review).
+
+**Gate G100** : le code est *code-complete* et la partie e2e **partiellement automatisée**
+(16 tests Playwright de gate, scripts G5/G9 — baseline 31/33 PASS avec 2 échecs réseau live).
+Le **noyau manuel reste à dérouler** (G1 tenue 30 min + coupure 90 s, bannière macOS,
+chrono onboarding, jugements visuels) — voir le protocole
+`docs/superpowers/plans/2026-07-22-gate-g100-qa.md` et le plan d'action
+`docs/superpowers/plans/2026-08-24-plan-action-revue-globale.md`. **Aucune nouvelle fenêtre
+avant le verdict.**
 
 ## Secrets
 
@@ -141,7 +150,15 @@ pnpm check
 # équivalent : typecheck monorepo + tests (vitest / bun:test) + build @axiom/web
 ```
 
-Pas de CI distante imposée : le script local suffit pour un usage perso. Les tests unitaires couvrent indicateurs, data layer, stores, daemon (parse, cache, globe…).
+Le gate local **`pnpm check`** reste la référence ; un filet de sécurité distant
+existe en plus dans `.github/workflows/ci.yml` (typecheck + tests + build web sur
+chaque push `main` et PR, étapes découpées avec timeouts individuels, Node 22).
+
+Baseline vérifiée le 2026-08-24 : `pnpm check` PASS, **4 012 tests** verts,
+build web PASS (bundle principal 1,10 Mo / 322 ko gzip), `pnpm audit --prod` sans
+vulnérabilité connue, Playwright 31/33 au premier passage (2 échecs réseau live,
+3/3 à la relance). Les tests unitaires couvrent indicateurs, data layer, stores,
+daemon (parse, cache, globe…).
 
 ## Documentation
 
@@ -156,4 +173,5 @@ Pas de CI distante imposée : le script local suffit pour un usage perso. Les te
 
 ## Licence / usage
 
-Build **personnel**. Pas de multi-tenant, pas d’auth réseau, pas de clés de trading dans le MVP (paper trading hors scope actuel).
+Build **personnel**. Pas de multi-tenant, pas d’auth réseau, aucune clé de trading réelle
+(le paper trading est une simulation locale ; `PAPER` est inclus mais hors gate G100).

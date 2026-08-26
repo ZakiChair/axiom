@@ -18,7 +18,7 @@
  * chart) reste l'outil du flux exchange en séance.
  */
 import { useEffect, useRef, useState } from "react";
-import { hlPositionsGet, whalesRecentGet } from "../data/daemon";
+import { daemonSupporteHl, hlPositionsGet, whalesRecentGet } from "../data/daemon";
 import {
   libelleBout,
   mapperReponsePositions,
@@ -289,6 +289,8 @@ function OngletPositions() {
   const [coin, setCoin] = useState<string>("BTC");
   const [reponse, setReponse] = useState<ReponseHlPositions | null>(null);
   const [tri, setTri] = useState<TriTable | null>({ colonne: "notionnel", dir: -1 });
+  // Compteur de relance manuelle (bouton Réessayer — utile au démarrage à froid).
+  const [relance, setRelance] = useState(0);
 
   const generation = useRef(0);
   useEffect(() => {
@@ -298,7 +300,10 @@ function OngletPositions() {
       const brut = await hlPositionsGet(coin);
       if (generation.current !== gen) return; // réponse périmée (coin changé)
       if (brut === null) {
-        setStatut("sans-daemon");
+        // Daemon présent mais réponse indisponible = premier scan en cours (~1 min,
+        // 150 comptes + leaderboard 34 Mo) ou échec amont → « erreur » douce, PAS
+        // « sans daemon » (le feature-detect hl a répondu).
+        setStatut(daemonSupporteHl() ? "erreur" : "sans-daemon");
         return;
       }
       const mappee = mapperReponsePositions(brut);
@@ -309,7 +314,7 @@ function OngletPositions() {
       setReponse(mappee);
       setStatut("ok");
     })();
-  }, [coin]);
+  }, [coin, relance]);
 
   const agregats = reponse?.agregats ?? null;
   const total = (agregats?.longUsd ?? 0) + (agregats?.shortUsd ?? 0);
@@ -334,7 +339,19 @@ function OngletPositions() {
           Lancer <code className="text-text">pnpm run up</code> puis rouvrir cette fenêtre.
         </Vide>
       )}
-      {statut === "erreur" && <Vide>Réponse du daemon illisible — changer de coin pour réessayer.</Vide>}
+      {statut === "erreur" && (
+        <Vide>
+          Instantané indisponible — au premier démarrage, le scan des 150 comptes prend ~1 min.
+          <br />
+          <button
+            type="button"
+            onClick={() => setRelance((n) => n + 1)}
+            className="mt-2 text-accent hover:underline"
+          >
+            Réessayer
+          </button>
+        </Vide>
+      )}
       {statut === "charge" && <Chargement libelle="Scan des top comptes Hyperliquid…" />}
 
       {statut === "ok" && reponse !== null && agregats !== null && (

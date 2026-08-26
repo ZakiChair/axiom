@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { healthStore } from "../../store/health";
-import { parseEtfFlows, rapporterSanteEtf } from "./etf";
+import { parseEtfFlows, rapporterSanteEtf, sosoUnusableWithoutKey } from "./etf";
 
 // Schéma RÉEL confirmé par curl direct (2026-07-08) sur
 // POST https://openapi.sosovalue.com/openapi/v2/etf/currentEtfDataMetrics
 // avec { type: "us-btc-spot" | "us-eth-spot" | "us-sol-spot" } — voir en-tête de etf.ts.
+describe("sosoUnusableWithoutKey", () => {
+  it("exige une clé personnelle uniquement sur Vercel", () => {
+    expect(sosoUnusableWithoutKey(true, null)).toBe(true);
+    expect(sosoUnusableWithoutKey(true, "   ")).toBe(true);
+    expect(sosoUnusableWithoutKey(true, "personnelle")).toBe(false);
+    expect(sosoUnusableWithoutKey(false, null)).toBe(false);
+  });
+});
+
 describe("parseEtfFlows (schéma réel SoSoValue currentEtfDataMetrics)", () => {
   it("parse une réponse valide", () => {
     const json = {

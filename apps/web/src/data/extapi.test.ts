@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estHoteExtapiAutorise, EXTAPI_WHITELIST, extUrl } from "./extapi";
+import { estHoteExtapiAutorise, EXTAPI_WHITELIST, extUrl, extUrlPourDeployment } from "./extapi";
 
 describe("extUrl", () => {
   it("construit une URL relative /extapi/<hote>/<chemin>", () => {
@@ -13,6 +13,16 @@ describe("extUrl", () => {
       "/extapi/fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT",
     );
   });
+  it("appelle fapi directement sur Vercel pour éviter le 451 des IP serverless", () => {
+    expect(extUrlPourDeployment("fapi.binance.com", "/fapi/v1/premiumIndex?symbol=BTCUSDT", true)).toBe(
+      "https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT",
+    );
+  });
+  it("conserve le proxy Vercel pour les autres hôtes", () => {
+    expect(extUrlPourDeployment("api.alternative.me", "fng/", true)).toBe(
+      "/extapi/api.alternative.me/fng/",
+    );
+  });
 });
 
 describe("estHoteExtapiAutorise", () => {
@@ -22,8 +32,8 @@ describe("estHoteExtapiAutorise", () => {
   it("faux hors whitelist", () => {
     expect(estHoteExtapiAutorise("evil.com")).toBe(false);
   });
-  it("whitelist = 32 hôtes", () => {
-    expect(EXTAPI_WHITELIST.length).toBe(32);
+  it("whitelist = 33 hôtes", () => {
+    expect(EXTAPI_WHITELIST.length).toBe(33);
   });
   it("inclut home.treasury.gov (courbe des taux US)", () => {
     expect(estHoteExtapiAutorise("home.treasury.gov")).toBe(true);

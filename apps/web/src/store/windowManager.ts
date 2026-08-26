@@ -22,6 +22,8 @@ import { COMPARE_PALETTE } from "./compare";
  * existante (déjà choisie pour être lisible sur les 5 thèmes du terminal). */
 export const GROUP_PALETTE: readonly string[] = COMPARE_PALETTE;
 
+export type DisponibiliteVercel = "full" | "partial" | "unusable";
+
 /** Définition d'une fenêtre du registre. Le libellé du menu Fonctions vaut `title`
  *  sauf si `menuLabel` est fourni ; `menuHidden` exclut la fenêtre du menu (ex.
  *  `derivatives` possède son bouton DES dédié dans la Toolbar). `nouveau` marque une
@@ -35,6 +37,8 @@ export interface DefinitionFenetre {
   readonly menuLabel?: string;
   readonly menuHidden?: boolean;
   readonly nouveau?: boolean;
+  /** Absente = support complet ; seules les dégradations Vercel sont annotées. */
+  readonly vercel?: Exclude<DisponibiliteVercel, "full">;
   /** Section du menu Fonctions. Sans elle, la fenêtre tombe dans « Outils ». */
   readonly groupe?: GroupeFenetre;
 }
@@ -64,7 +68,7 @@ export type GroupeFenetre = (typeof GROUPES_FENETRES)[number];
 export const WINDOW_REGISTRY = [
   { id: "derivatives", title: "Produits dérivés", mnemonic: "DES", defaultWidth: 420, defaultHeight: 640, menuHidden: true, groupe: "Marché & dérivés" },
   { id: "fundingMatrix", title: "Funding cross-exchange", mnemonic: "FUNDX", defaultWidth: 460, defaultHeight: 420, groupe: "Marché & dérivés" },
-  { id: "liquidations", title: "Liquidations", mnemonic: "LIQ", defaultWidth: 460, defaultHeight: 520, nouveau: true, groupe: "Marché & dérivés" },
+  { id: "liquidations", title: "Liquidations", mnemonic: "LIQ", defaultWidth: 460, defaultHeight: 520, nouveau: true, vercel: "partial", groupe: "Marché & dérivés" },
   { id: "eco", title: "Calendrier économique", mnemonic: "ECO", defaultWidth: 440, defaultHeight: 640, groupe: "Macro & tradfi" },
   { id: "news", title: "Actualités crypto", mnemonic: "NEWS", defaultWidth: 440, defaultHeight: 640, groupe: "Analyse" },
   { id: "corr", title: "Corrélations", mnemonic: "CORR", defaultWidth: 480, defaultHeight: 640, groupe: "Analyse" },
@@ -77,14 +81,14 @@ export const WINDOW_REGISTRY = [
   { id: "options", title: "Options (smile IV, max pain)", mnemonic: "OMON", defaultWidth: 480, defaultHeight: 640, groupe: "Marché & dérivés" },
   { id: "dom", title: "Carnet d'ordres (DOM / depth)", mnemonic: "DOM", defaultWidth: 560, defaultHeight: 680, groupe: "Marché & dérivés" },
   { id: "backtest", title: "Backtest de stratégie", mnemonic: "BT", defaultWidth: 720, defaultHeight: 680, groupe: "Risque & portefeuille" },
-  { id: "replay", title: "Replay de marché", mnemonic: "REPLAY", defaultWidth: 420, defaultHeight: 640, groupe: "Outils" },
+  { id: "replay", title: "Replay de marché", mnemonic: "REPLAY", defaultWidth: 420, defaultHeight: 640, vercel: "unusable", groupe: "Outils" },
   { id: "macroRates", title: "Taux & Réserves souveraines", mnemonic: "RATE", defaultWidth: 560, defaultHeight: 680, groupe: "Macro & tradfi" },
   { id: "cot", title: "Rapport COT (CFTC)", mnemonic: "COT", defaultWidth: 520, defaultHeight: 680, groupe: "Macro & tradfi" },
   { id: "seasonality", title: "Saisonnalité", mnemonic: "SEAG", defaultWidth: 760, defaultHeight: 560, groupe: "Analyse" },
   { id: "vol", title: "Volatilité (cône RV, VRP)", mnemonic: "VOL", defaultWidth: 760, defaultHeight: 560, groupe: "Marché & dérivés" },
   { id: "fund", title: "Fiche société (FUND)", mnemonic: "FUND", defaultWidth: 480, defaultHeight: 640, groupe: "Macro & tradfi" },
   { id: "brief", title: "Point marché", mnemonic: "BRIEF", defaultWidth: 480, defaultHeight: 720, menuLabel: "Point marché (snapshot)", groupe: "Analyse" },
-  { id: "globe", title: "Globe (chokepoints & trafic aérien)", mnemonic: "GLOBE", defaultWidth: 720, defaultHeight: 720, menuLabel: "Globe (géopolitique, chokepoints & trafic aérien)", nouveau: true, groupe: "Macro & tradfi" },
+  { id: "globe", title: "Globe (chokepoints & trafic aérien)", mnemonic: "GLOBE", defaultWidth: 720, defaultHeight: 720, menuLabel: "Globe (géopolitique, chokepoints & trafic aérien)", nouveau: true, vercel: "partial", groupe: "Macro & tradfi" },
   { id: "stablecoins", title: "Stablecoins (supply, dominance, pegs)", mnemonic: "STBL", defaultWidth: 860, defaultHeight: 640, nouveau: true, groupe: "On-chain & stablecoins" },
   { id: "squeeze", title: "Radar squeeze", mnemonic: "SQZ", defaultWidth: 640, defaultHeight: 560, nouveau: true, groupe: "Marché & dérivés" },
   { id: "cbprem", title: "Coinbase premium", mnemonic: "CBPREM", defaultWidth: 640, defaultHeight: 560, nouveau: true, groupe: "Marché & dérivés" },
@@ -94,7 +98,7 @@ export const WINDOW_REGISTRY = [
   { id: "expy", title: "Journal de trades", mnemonic: "EXPY", defaultWidth: 680, defaultHeight: 700, nouveau: true, groupe: "Risque & portefeuille" },
   { id: "paper", title: "Paper trading", mnemonic: "PAPER", defaultWidth: 720, defaultHeight: 640, nouveau: true, groupe: "Risque & portefeuille" },
   { id: "mine", title: "Coût de production (minage)", mnemonic: "MINE", defaultWidth: 640, defaultHeight: 560, nouveau: true, groupe: "On-chain & stablecoins" },
-  { id: "whales", title: "Mouvements de baleines", mnemonic: "WHALES", defaultWidth: 640, defaultHeight: 680, menuLabel: "Mouvements de baleines (on-chain & Hyperliquid)", nouveau: true, groupe: "On-chain & stablecoins" },
+  { id: "whales", title: "Mouvements de baleines", mnemonic: "WHALES", defaultWidth: 640, defaultHeight: 680, menuLabel: "Mouvements de baleines (on-chain & Hyperliquid)", nouveau: true, vercel: "unusable", groupe: "On-chain & stablecoins" },
   { id: "cycle", title: "Cycle 4 ans (halving)", mnemonic: "CYCLE", defaultWidth: 760, defaultHeight: 600, nouveau: true, groupe: "On-chain & stablecoins" },
   { id: "evts", title: "Étude d'évènements", mnemonic: "EVTS", defaultWidth: 760, defaultHeight: 560, nouveau: true, groupe: "Analyse" },
   { id: "scen", title: "Stress-test", mnemonic: "SCEN", defaultWidth: 720, defaultHeight: 540, nouveau: true, groupe: "Risque & portefeuille" },
@@ -112,7 +116,7 @@ export type WindowId = (typeof WINDOW_REGISTRY)[number]["id"];
  *  avec le libellé d'affichage résolu (`menuLabel ?? title`) et le drapeau `nouveau`
  *  (badge de découvrabilité). PURE (sans DOM) : la Toolbar y greffe l'action
  *  d'ouverture. Testée dans windowManager.test.ts. */
-export function menuWindows(): { id: WindowId; mnemonique: string; libelle: string; nouveau: boolean }[] {
+export function menuWindows(): EntreeMenuFenetre[] {
   return (WINDOW_REGISTRY as readonly DefinitionFenetre[])
     .filter((w) => !w.menuHidden)
     .map((w) => ({
@@ -120,6 +124,7 @@ export function menuWindows(): { id: WindowId; mnemonique: string; libelle: stri
       mnemonique: w.mnemonic,
       libelle: w.menuLabel ?? w.title,
       nouveau: w.nouveau ?? false,
+      vercel: w.vercel ?? "full",
     }));
 }
 
@@ -129,6 +134,7 @@ export interface EntreeMenuFenetre {
   mnemonique: string;
   libelle: string;
   nouveau: boolean;
+  vercel: DisponibiliteVercel;
 }
 
 /**
@@ -147,6 +153,7 @@ export function menuWindowsGroupees(): { groupe: GroupeFenetre; entrees: EntreeM
       mnemonique: w.mnemonic,
       libelle: w.menuLabel ?? w.title,
       nouveau: w.nouveau ?? false,
+      vercel: w.vercel ?? "full",
     });
     parGroupe.set(groupe, entrees);
   }

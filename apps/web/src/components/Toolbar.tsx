@@ -2,7 +2,7 @@
  * Toolbar — sélecteurs source / symbole / timeframe, branchés sur le store marché vanilla.
  * Un changement re-déclenche backfill + souscription côté Chart (effet [exchange, symbol, tf]).
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import type { ExchangeId, Timeframe } from "@axiom/types";
 import { marketStore } from "../store/market";
@@ -13,7 +13,13 @@ import { liqMarksStore } from "../chart/liquidationMarkers";
 import { derivativesUiStore } from "../store/derivatives-ui";
 // Bandeau ticker (pas une fenêtre Launchpad) + disposition grille.
 import { tickerBandStore } from "../store/tickerBand";
-import { estNouvelle, menuWindowsGroupees, windowManagerStore, type WindowId } from "../store/windowManager";
+import {
+  estNouvelle,
+  menuWindowsGroupees,
+  windowManagerStore,
+  type DisponibiliteVercel,
+  type WindowId,
+} from "../store/windowManager";
 import { FootprintSettingsPanel } from "./FootprintSettingsPanel";
 import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
@@ -24,6 +30,9 @@ import { PLAYBOOKS } from "../data/playbooks";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
 import { exportChartImage } from "../chart/drawing";
 import { pousserToast } from "../store/toasts";
+import { settingsUiStore } from "../store/settings-ui";
+import { twelveDataKeyStore } from "../store/twelvedata";
+import { IS_VERCEL } from "../lib/deployment";
 import { raccourciPour, raccourciTimeframe } from "../commands/hotkeys";
 import { IndicatorMenu } from "./IndicatorMenu";
 import { StrategyMenu } from "./StrategyMenu";
@@ -177,6 +186,7 @@ type EntreeFonction = {
   mnemonique: string;
   libelle: string;
   nouveau?: boolean;
+  vercel?: DisponibiliteVercel;
   ouvrir: () => void;
 };
 
@@ -195,6 +205,7 @@ const SECTIONS_FONCTIONS: { groupe: string; entrees: EntreeFonction[] }[] = menu
         mnemonique: w.mnemonique,
         libelle: w.libelle,
         nouveau: w.nouveau,
+        vercel: w.vercel,
         ouvrir: () => windowManagerStore.getState().openWindow(w.id),
       })),
       ...(section.groupe === "Outils" ? [TICKER_ENTREE] : []),
@@ -237,6 +248,11 @@ function FonctionsMenu() {
                   {f.mnemonique}
                 </span>
                 <span className="min-w-0 flex-1 truncate">{f.libelle}</span>
+                {IS_VERCEL && f.vercel !== undefined && f.vercel !== "full" && (
+                  <Badge ton={f.vercel === "unusable" ? "down" : "warn"}>
+                    {f.vercel === "unusable" ? "UNUSABLE" : "PARTIAL"}
+                  </Badge>
+                )}
                 {/* Badge « nouveau » (fenêtres récentes) jusqu'à la 1ère ouverture. */}
                 {f.nouveau && f.id !== undefined && estNouvelle(f.id) && (
                   <Badge ton="accent">nouveau</Badge>
@@ -456,6 +472,8 @@ export function Toolbar() {
   const liqActif = useStore(liqMarksStore, (s) => s.actif);
   const toggleLiq = useStore(liqMarksStore, (s) => s.basculer);
   const openDerivatives = useStore(derivativesUiStore, (s) => s.openDerivatives);
+  const twelveDataHasKey = useStore(twelveDataKeyStore, (s) => s.hasKey);
+  const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
   const priceScale = useStore(priceScaleStore, (s) => s.type);
   const setPriceScale = useStore(priceScaleStore, (s) => s.setType);
 
@@ -479,6 +497,11 @@ export function Toolbar() {
    * ce symbole n'existe sur AUCUNE autre source et casserait silencieusement le backfill.
    */
   const onChangeExchange = (next: ExchangeId) => {
+    if (IS_VERCEL && next === "twelvedata" && !twelveDataHasKey) {
+      pousserToast("UNUSABLE — clé Twelve Data requise sur Vercel");
+      openSettings();
+      return;
+    }
     const wasTradfi = exchange === "twelvedata";
     const willBeTradfi = next === "twelvedata";
     const wasMexcOnlySymbol =
@@ -489,6 +512,15 @@ export function Toolbar() {
     const supported = supportedTimeframesFor(next, next === "synthetic" ? symbol : "");
     if (!supported.includes(timeframe)) setTimeframe("1h");
   };
+
+  useEffect(() => {
+    if (!IS_VERCEL || twelveDataHasKey || exchange !== "twelvedata") return;
+    setExchange("binance");
+    setSymbol(DEFAULT_CRYPTO_SYMBOL);
+    if (!supportedTimeframesFor("binance", "").includes(timeframe)) setTimeframe("1h");
+    pousserToast("UNUSABLE — clé Twelve Data requise sur Vercel");
+    openSettings();
+  }, [exchange, openSettings, setExchange, setSymbol, setTimeframe, timeframe, twelveDataHasKey]);
 
   return (
     <>
@@ -504,7 +536,9 @@ export function Toolbar() {
       >
         {EXCHANGES.map((ex) => (
           <option key={ex.id} value={ex.id}>
-            {ex.label}
+            {ex.id === "twelvedata" && IS_VERCEL && !twelveDataHasKey
+              ? `${ex.label} — UNUSABLE sans clé`
+              : ex.label}
           </option>
         ))}
       </select>

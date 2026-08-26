@@ -1,10 +1,43 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
+  "devCommand": "pnpm --filter @axiom/web exec vite --port $PORT",
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm --filter @axiom/web build",
   "outputDirectory": "apps/web/dist",
   "rewrites": [
+    {
+      "source": "/extapi/(.*)",
+      "destination": "/api/proxy?__axiom_route=extapi&__axiom_path=$1"
+    },
+    {
+      "source": "/fredapi/(.*)",
+      "destination": "/api/proxy?__axiom_route=fredapi&__axiom_path=$1"
+    },
+    {
+      "source": "/coinalyzeapi/(.*)",
+      "destination": "/api/proxy?__axiom_route=coinalyzeapi&__axiom_path=$1"
+    },
+    {
+      "source": "/tdapi/(.*)",
+      "destination": "/api/proxy?__axiom_route=tdapi&__axiom_path=$1"
+    },
+    {
+      "source": "/mexcapi/(.*)",
+      "destination": "/api/proxy?__axiom_route=mexcapi&__axiom_path=$1"
+    },
+    {
+      "source": "/sosoapi/(.*)",
+      "destination": "/api/proxy?__axiom_route=sosoapi&__axiom_path=$1"
+    },
+    {
+      "source": "/bgapi/(.*)",
+      "destination": "/api/proxy?__axiom_route=bgapi&__axiom_path=$1"
+    },
+    {
+      "source": "/ethscanapi/(.*)",
+      "destination": "/api/proxy?__axiom_route=ethscanapi&__axiom_path=$1"
+    },
     {
       "source": "/(.*)",
       "destination": "/index.html"

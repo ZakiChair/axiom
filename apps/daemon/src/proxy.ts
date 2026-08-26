@@ -3,7 +3,7 @@
  * (apps/web/vite.config.ts) pour que le chemin de PROD (daemon) soit iso au dev :
  *   /fredapi      → https://api.stlouisfed.org       (clé api_key si absente)
  *   /coinalyzeapi → https://api.coinalyze.net        (clé api_key si absente)
- *   /tdapi        → https://api.twelvedata.com       (apikey TOUJOURS ajoutée, cf. Vite)
+ *   /tdapi        → https://api.twelvedata.com       (clé apikey si absente)
  *   /mexcapi      → https://api.mexc.com             (keyless, simple réécriture de chemin)
  *   /sosoapi      → https://openapi.sosovalue.com    (EN-TÊTE x-soso-api-key si absent)
  *   /ethscanapi   → https://api.etherscan.io         (clé apikey si absente)
@@ -79,15 +79,16 @@ export function construireRoutesProxy(cles: ProxyKeys): RouteProxy[] {
         ),
     },
     {
-      // Twelve Data : Vite ajoute TOUJOURS `apikey` (pas de « si absente ») car le
-      // front n'a pas de mécanisme d'override pour cette source → on réplique tel quel.
+      // Twelve Data : la clé personnelle du front en query reste prioritaire ; le daemon
+      // injecte TWELVE_DATA_KEY uniquement en repli, comme le proxy Vite local.
       prefix: "/tdapi",
       target: "https://api.twelvedata.com",
-      rewrite: (chemin) => {
-        const stripped = chemin.replace(/^\/tdapi/, "");
-        const sep = stripped.includes("?") ? "&" : "?";
-        return `${stripped}${sep}apikey=${cles.TWELVE_DATA_KEY}`;
-      },
+      rewrite: (chemin) =>
+        appendApiKeyIfAbsent(
+          chemin.replace(/^\/tdapi/, ""),
+          "apikey",
+          cles.TWELVE_DATA_KEY,
+        ),
     },
     {
       prefix: "/mexcapi",

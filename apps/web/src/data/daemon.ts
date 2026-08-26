@@ -2,9 +2,9 @@
  * Client du daemon `axiomd` (OPTIONNEL) — feature-detect + accès /kv et /candles.
  *
  * Le daemon localhost (Bun + SQLite, port 8787) apporte proxy/cache et PERSISTANCE
- * DURABLE (survit au vidage du cache navigateur). Il est FACULTATIF : toutes les
- * fonctions ici échouent en silence si le daemon est absent — le front reste 100 %
- * fonctionnel sans lui (repli localStorage, cf. store/persist.ts).
+ * DURABLE (survit au vidage du cache navigateur). Les appels échouent en silence si
+ * le daemon est absent ; les fonctions qui en dépendent signalent alors leur indisponibilité
+ * et la persistance générale conserve son repli localStorage (cf. store/persist.ts).
  *
  * INVARIANT (BUILD-CONTRACT) : le daemon n'est JAMAIS sur le chemin chaud du
  * renderer. Ici, uniquement du stockage à froid (kv/candles) et la sonde /health.
@@ -12,10 +12,12 @@
  * Origine :
  *  - DEV  : `VITE_AXIOMD_URL`, injectée par `axiom-up.sh` depuis AXIOMD_PORT
  *           (repli sûr : http://127.0.0.1:8787).
- *  - PROD : le front est SERVI PAR le daemon → même origine (window.location.origin).
+ *  - PROD local : le front est SERVI PAR le daemon → même origine.
+ *  - Vercel : détection désactivée au build, aucune sonde `/health`.
  */
 import type { Candle } from "@axiom/types";
 import { healthStore } from "../store/health";
+import { IS_VERCEL } from "../lib/deployment";
 import { DAEMON_CAPABILITIES, type DaemonCapability } from "../../../../shared/daemon-capabilities";
 
 /** Source santé du lien daemon (affichée dans le panneau « santé des sources »). */
@@ -157,6 +159,7 @@ async function sonder(): Promise<boolean> {
 export async function detectDaemon(
   exigence?: AxiomCapability | readonly AxiomCapability[],
 ): Promise<boolean> {
+  if (IS_VERCEL) return false;
   let present: boolean;
   if (etatDaemon !== null && Date.now() - dernierSondageTs < TTL_SONDE_MS) {
     present = etatDaemon;
@@ -176,7 +179,7 @@ export async function detectDaemon(
 
 /** État synchrone d'une fonctionnalité, sans déclencher de nouvelle sonde. */
 export function daemonSupporte(capability: AxiomCapability): boolean {
-  return etatDaemon === true && capabilitiesDaemon.has(capability);
+  return !IS_VERCEL && etatDaemon === true && capabilitiesDaemon.has(capability);
 }
 
 /** Le dual-write KV est prêt seulement si le daemon annonce explicitement `kv`. */

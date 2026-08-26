@@ -78,11 +78,27 @@ describe("construireRoutesProxy — cibles et réécritures", () => {
     );
   });
 
-  test("/tdapi : apikey TOUJOURS ajoutée (réplique Vite), avec le bon séparateur", () => {
+  test("/tdapi : strip préfixe + apikey .env en repli si absente", () => {
     expect(routePar("/tdapi").rewrite("/tdapi/time_series")).toBe("/time_series?apikey=tdkey");
     expect(routePar("/tdapi").rewrite("/tdapi/time_series?symbol=AAPL")).toBe(
       "/time_series?symbol=AAPL&apikey=tdkey",
     );
+  });
+
+  test("/tdapi : clé personnelle du front prioritaire pour time_series et quote", () => {
+    expect(
+      routePar("/tdapi").rewrite("/tdapi/time_series?symbol=AAPL&apikey=personnelle"),
+    ).toBe("/time_series?symbol=AAPL&apikey=personnelle");
+    expect(routePar("/tdapi").rewrite("/tdapi/quote?symbol=SPY&apikey=personnelle")).toBe(
+      "/quote?symbol=SPY&apikey=personnelle",
+    );
+  });
+
+  test("/tdapi : sans clé personnelle ni .env, aucun apikey vide n'est ajouté", () => {
+    const route = construireRoutesProxy({ ...CLES, TWELVE_DATA_KEY: "" }).find(
+      (candidate) => candidate.prefix === "/tdapi",
+    );
+    expect(route?.rewrite("/tdapi/quote?symbol=SPY")).toBe("/quote?symbol=SPY");
   });
 
   test("/mexcapi : simple strip de préfixe, keyless", () => {
@@ -171,7 +187,7 @@ describe("extapi — User-Agent par hôte", () => {
 
 describe("extapi — whitelist (mise à jour Lot E1)", () => {
   test("taille attendue après ajout SEC + GDELT", () => {
-    expect(EXTAPI_WHITELIST.size).toBe(32); // 23 existants + SEC ×2 + GDELT + JGB/RBA/Bloomberg/CNBC ×4 + OpenSky + api.coinbase.com (fix CORS klines)
+    expect(EXTAPI_WHITELIST.size).toBe(33); // + www.bloomberg.com, destination actuelle du redirect RSS
   });
   test("nouveaux hôtes présents", () => {
     expect(EXTAPI_WHITELIST.has("data.sec.gov")).toBe(true);

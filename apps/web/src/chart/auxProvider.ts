@@ -36,7 +36,9 @@
 import { alignAux } from "@axiom/indicators";
 import type { AuxSeries, AuxSeriesId, ExchangeId, Timeframe } from "@axiom/types";
 import { coinalyzeProvider } from "../data/coinalyze";
+import { histFunding, histOiUsd, histOiUsdAvecRepli } from "../data/referentiels";
 import { stablecoinsSupplyProvider } from "../data/macro/stablecoins";
+import { fetchNvtHistory } from "../data/onchain/blockchainNvt";
 import { fetchCoinMetrics } from "../data/onchain/coinmetrics";
 import {
   BG_ASOPR,
@@ -60,7 +62,9 @@ import { fetchLsAccountRatio, fetchLsTopTraderRatio, fetchTakerRatio } from "../
 import { fetchFearGreedHistory } from "../data/marketOverview";
 import { deltaDepuisKlinesPerp, timeframeToFapiInterval } from "../data/binanceFutures";
 import { binanceAdapter } from "../data/binance";
+import { coinalyzeKeyStore } from "../store/coinalyze";
 import { refSymbolStore } from "../store/refSymbol";
+import { getBgeometricsKey } from "../store/onchain";
 import { extUrl } from "../data/extapi";
 
 /** État renvoyé par `getAligned` pour l'ensemble des `ids` demandés. */
@@ -267,12 +271,21 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
   const since = Date.now() - LOOKBACK_MS;
   switch (id) {
     case "oi": {
-      const h = await coinalyzeProvider.fetchOpenInterestHistory(symbol, COINALYZE_INTERVAL, since);
-      return toPoints(h.map((o) => ({ time: o.time, value: o.oiUsd })));
+      const h = coinalyzeKeyStore.getState().hasKey
+        ? await histOiUsdAvecRepli(symbol, COINALYZE_INTERVAL, since)
+        : (await histOiUsd(symbol)) ?? [];
+      return toPoints(h.map((p) => ({ time: p.t, value: p.v })));
     }
     case "funding": {
-      const h = await coinalyzeProvider.fetchFundingRateHistory(symbol, COINALYZE_INTERVAL, since);
-      return toPoints(h.map((f) => ({ time: f.time, value: f.rate })));
+      if (coinalyzeKeyStore.getState().hasKey) {
+        try {
+          const h = await coinalyzeProvider.fetchFundingRateHistory(symbol, COINALYZE_INTERVAL, since);
+          const points = toPoints(h.map((f) => ({ time: f.time, value: f.rate })));
+          if (points.length > 0) return points;
+        } catch {}
+      }
+      const h = await histFunding(symbol);
+      return toPoints((h ?? []).map((p) => ({ time: p.t, value: p.v })));
     }
     case "mark": {
       // Mark price perp Binance (gratuit, fapi markPriceKlines 1h) — pour basis spot-perp.
@@ -312,13 +325,11 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
       return toPoints(s.map((p) => ({ time: p.time, value: p.value })));
     }
     case "nvt":
+      return toPoints(await fetchNvtHistory(since));
     case "mvrv": {
-      // NVT = NVTAdj, MVRV = CapMVRVCur (métriques Coin Metrics). ⚠️ NVTAdj n'est PAS
-      // servie par le tier community (cf. coinmetrics.ts) → série vide tant que la
-      // liste CM_METRIQUES ne l'inclut pas ; l'alignement reste gracieux (undefined).
-      const metric = id === "mvrv" ? "CapMVRVCur" : "NVTAdj";
+      // MVRV = CapMVRVCur, disponible dans Coin Metrics Community (BTC).
       const r = await fetchCoinMetrics(symbolToAsset(symbol));
-      const serie = r?.series[metric];
+      const serie = r?.series.CapMVRVCur;
       return toPoints((serie?.points ?? []).map((p) => ({ time: p.time, value: p.value })));
     }
     case "marketcap": {
@@ -344,7 +355,7 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
       // les autres actifs restent vides (dégradation gracieuse).
       if (symbolToAsset(symbol) !== "btc") return [];
       const def = BG_DEF_PAR_AUX[id];
-      const r = await fetchBgeometricMetrique(def);
+      const r = await fetchBgeometricMetrique(def, getBgeometricsKey());
       return toPoints((r?.serie.points ?? []).map((p) => ({ time: p.time, value: p.value })));
     }
     case "quarterlyBasis": {
@@ -365,7 +376,7 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
       return toPoints(await fetchFearGreedHistory(120));
     case "btcDominance": {
       // Dominance BTC GLOBALE (non gatée sur l'actif) — pertinente sur tout chart.
-      const r = await fetchBgeometricMetrique(BG_BTC_DOMINANCE);
+      const r = await fetchBgeometricMetrique(BG_BTC_DOMINANCE, getBgeometricsKey());
       return toPoints((r?.serie.points ?? []).map((p) => ({ time: p.time, value: p.value })));
     }
   }

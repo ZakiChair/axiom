@@ -51,10 +51,10 @@ const extapiProxy: Record<string, ProxyOptions> = Object.fromEntries(
 // en-tête CORS → un navigateur bloque les appels directs. On route ces deux APIs en
 // SAME-ORIGIN via Vite : `changeOrigin` présente l'amont comme destinataire direct.
 // (CoinGecko a un vrai CORS « * » → appelé en direct.)
-// Les clés FRED/Coinalyze sont INJECTÉES ICI (voir appendApiKeyIfAbsent) → elles
-// restent côté serveur de dev et n'apparaissent jamais dans le bundle navigateur.
-// ⚠️ Ces réécritures n'existent qu'en `vite dev` : un build statique nécessiterait
-//    un vrai proxy côté serveur (hors périmètre de cet outil mono-utilisateur).
+// Les clés de repli FRED/Coinalyze/Twelve Data sont INJECTÉES ICI
+// (voir appendApiKeyIfAbsent) et n'apparaissent jamais dans le bundle navigateur.
+// Ces réécritures n'existent qu'en `vite dev` ; Vercel réplique les mêmes préfixes via
+// la fonction serverless `api/proxy.ts`, sans clé partagée.
 export default defineConfig(({ mode }) => {
   // Clés lues depuis .env (gitignored) — JAMAIS en dur dans le source.
   // Injectées côté proxy → absentes du bundle navigateur. Voir .env.example.
@@ -64,13 +64,20 @@ export default defineConfig(({ mode }) => {
   const SOSOVALUE_API_KEY = loadEnv(mode, process.cwd(), "").SOSOVALUE_API_KEY ?? "";
   const ETHERSCAN_API_KEY = loadEnv(mode, process.cwd(), "").ETHERSCAN_API_KEY ?? "";
   const BGEOMETRICS_API_KEY = loadEnv(mode, process.cwd(), "").BGEOMETRICS_API_KEY ?? "";
+  const isVercelBuild = process.env.VERCEL === "1";
+  const AXIOM_DEPLOYMENT = isVercelBuild ? "vercel" : "local";
+  const TWELVE_DATA_API_BASE = isVercelBuild ? "https://api.twelvedata.com" : "/tdapi";
 
   return {
   plugins: [react()],
   // Expose UNIQUEMENT la PRÉSENCE de la clé .env BGeometrics (booléen), jamais sa valeur :
-  // le front bascule alors sur le quota horaire (10 req/h) même sans clé personnelle. Voir
-  // BG_CLE_ENV_PRESENTE dans data/onchain/bgeometrics.ts.
-  define: { __BG_CLE_ENV__: JSON.stringify(BGEOMETRICS_API_KEY !== "") },
+  // le front bascule alors sur le quota horaire (10 req/h). Voir BG_CLE_ENV_PRESENTE dans
+  // data/onchain/bgeometrics.ts ; fixe aussi le déploiement public et la base Twelve Data.
+  define: {
+    __BG_CLE_ENV__: JSON.stringify(!isVercelBuild && BGEOMETRICS_API_KEY !== ""),
+    "import.meta.env.VITE_AXIOM_DEPLOYMENT": JSON.stringify(AXIOM_DEPLOYMENT),
+    "import.meta.env.VITE_TWELVE_DATA_API_BASE": JSON.stringify(TWELVE_DATA_API_BASE),
+  },
   server: {
     proxy: {
       // La clé FRED est injectée ici SEULEMENT si le front n'en a pas déjà mis une
@@ -90,17 +97,14 @@ export default defineConfig(({ mode }) => {
           appendApiKeyIfAbsent(path.replace(/^\/coinalyzeapi/, ""), "api_key", COINALYZE_API_KEY),
       },
       // Marchés traditionnels (actions, forex ; indices/commodités via ETF) — Twelve Data.
-      // La clé API est INJECTÉE ICI (rewrite ajoute &apikey=…) → elle reste côté serveur,
-      // jamais exposée au navigateur. CORS de Twelve Data est ouvert, mais on proxifie
-      // justement pour cacher la clé (même pattern dev-only que FRED/Coinalyze).
+      // La clé personnelle déjà envoyée en query reste prioritaire ; sinon le proxy local
+      // injecte TWELVE_DATA_KEY en repli. Sur Vercel, le front appelle directement l'API
+      // dont le CORS est ouvert, avec la clé personnelle stockée dans le navigateur.
       "/tdapi": {
         target: "https://api.twelvedata.com",
         changeOrigin: true,
-        rewrite: (path) => {
-          const stripped = path.replace(/^\/tdapi/, "");
-          const sep = stripped.includes("?") ? "&" : "?";
-          return `${stripped}${sep}apikey=${TWELVE_DATA_KEY}`;
-        },
+        rewrite: (path) =>
+          appendApiKeyIfAbsent(path.replace(/^\/tdapi/, ""), "apikey", TWELVE_DATA_KEY),
       },
       // SoSoValue (flux ETF spot BTC/ETH/SOL — panneau ON-CHAIN). CORS ouvert, mais on
       // proxifie pour fournir la clé de repli .env : SoSoValue s'authentifie par EN-TÊTE

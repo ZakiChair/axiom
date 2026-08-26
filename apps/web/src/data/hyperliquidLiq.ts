@@ -19,7 +19,9 @@ import type { StoreApi } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
 import { hlLiqLevelsGet, daemonSupporteHl } from "./daemon";
 import { basePerp } from "./symbol";
+import { IS_VERCEL } from "../lib/deployment";
 import { marketStore } from "../store/market";
+import { pousserToast } from "../store/toasts";
 
 /** Un niveau de liquidation RÉEL : position ouverte d'une adresse du leaderboard. */
 export interface NiveauHl {
@@ -209,15 +211,48 @@ export function demarrerHyperliquidLiq(): void {
 
 // ─────────────────────────── Commande de palette ───────────────────────────
 
+const LIBELLE_COMMANDE =
+  "Niveaux de liquidation RÉELS Hyperliquid (top adresses) — activer / désactiver";
+const APERCU_COMMANDE =
+  "Superpose les prix de liquidation RÉELS des top positions Hyperliquid (nécessite le daemon)";
+const RAISON_VERCEL = "les niveaux LIQHL dépendent du daemon local axiomd, indisponible sur Vercel";
+
+export function presentationCommandeLiqHl(isVercel: boolean): { libelle: string; apercu: string } {
+  if (!isVercel) return { libelle: LIBELLE_COMMANDE, apercu: APERCU_COMMANDE };
+  return {
+    libelle: `UNUSABLE — ${LIBELLE_COMMANDE}`,
+    apercu: `UNUSABLE — ${RAISON_VERCEL}.`,
+  };
+}
+
+export function executerCommandeLiqHl(
+  isVercel: boolean,
+  basculer: () => void,
+  notifier: (message: string) => void,
+): void {
+  if (isVercel) {
+    notifier(`UNUSABLE — ${RAISON_VERCEL}.`);
+    return;
+  }
+  basculer();
+}
+
+const presentationCommande = presentationCommandeLiqHl(IS_VERCEL);
+
 export const commandes: Commande[] = [
   {
     id: "action:liqhl",
     mnemonique: "LIQHL",
-    libelle: "Niveaux de liquidation RÉELS Hyperliquid (top adresses) — activer / désactiver",
+    libelle: presentationCommande.libelle,
     categorie: "action",
     motsCles: ["liquidations", "reels", "hyperliquid", "hl", "liqhl", "niveaux", "leaderboard", "positions", "daemon"],
-    apercu: "Superpose les prix de liquidation RÉELS des top positions Hyperliquid (nécessite le daemon)",
-    action: () => hlLiqStore.getState().basculer(),
+    apercu: presentationCommande.apercu,
+    action: () =>
+      executerCommandeLiqHl(
+        IS_VERCEL,
+        () => hlLiqStore.getState().basculer(),
+        pousserToast,
+      ),
   },
 ];
 

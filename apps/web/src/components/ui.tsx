@@ -326,6 +326,15 @@ export function Vide({ children }: { children: ReactNode }) {
   );
 }
 
+export function Unusable({ raison }: { raison: ReactNode }) {
+  return (
+    <div className="flex items-start gap-2 rounded border border-down/40 bg-bg px-3 py-2 text-[11px]">
+      <span className="shrink-0 font-semibold tracking-wide text-down">UNUSABLE</span>
+      <span className="min-w-0 text-text-dim">{raison}</span>
+    </div>
+  );
+}
+
 /**
  * Section dépendant d'une clé API non configurée : message + lien vers les
  * Réglages (généralisation d'IndisponibleSansCle de FundWindow).

@@ -1,19 +1,15 @@
 /**
  * Helper front du proxy générique /extapi (Phase 3).
  *
- * Beaucoup d'APIs de la Phase 3 (RSS news, calendriers éco, on-chain, Deribit,
- * Binance fapi/dapi…) n'ont PAS d'en-tête CORS : un appel direct depuis le
- * navigateur est bloqué. On les route en SAME-ORIGIN via un proxy générique
- * `/extapi/<hote>/<chemin…>` → `https://<hote>/<chemin…>` :
- *   - en DEV  : le proxy de Vite (vite.config.ts) réécrit (une entrée par hôte) ;
- *   - en PROD : le daemon `axiomd` réécrit ET met en cache (TTL 120 s / 30 s dérivés).
- * Une URL RELATIVE suffit dans les deux cas (même origine que le front) — comme
- * les proxys /fredapi… existants. Le front reste donc fonctionnel SANS daemon en dev.
+ * Les APIs sans CORS passent en SAME-ORIGIN par `/extapi/<hote>/<chemin…>` : Vite en
+ * dev, axiomd en prod locale, fonction serverless sur Vercel. Exception : Binance fapi
+ * est appelé directement sur Vercel (CORS public), car ses IP serverless répondent 451.
  *
  * Whitelist : source unique `shared/extapi-hosts.ts` (daemon + Vite + ce module).
  */
 
 import { EXTAPI_HOSTS } from "../../../../shared/extapi-hosts";
+import { IS_VERCEL } from "../lib/deployment";
 
 /** Hôtes autorisés par le proxy /extapi. */
 export const EXTAPI_WHITELIST: readonly string[] = EXTAPI_HOSTS;
@@ -24,7 +20,7 @@ export function estHoteExtapiAutorise(hote: string): boolean {
 }
 
 /**
- * Construit l'URL relative same-origin `/extapi/<hote>/<chemin>`.
+ * Construit l'URL `/extapi/<hote>/<chemin>`, ou l'URL fapi directe sur Vercel.
  * `chemin` peut inclure un query string (`fng/?limit=10`) — passé tel quel (le
  * caller construit son query via URLSearchParams si besoin). Un `/` en tête de
  * `chemin` est absorbé pour éviter un double slash.
@@ -32,7 +28,16 @@ export function estHoteExtapiAutorise(hote: string): boolean {
  * NB : ne valide PAS l'hôte (le daemon renvoie 403 si hors whitelist) — utiliser
  * `estHoteExtapiAutorise` en amont si un garde-fou explicite est souhaité.
  */
-export function extUrl(hote: string, chemin: string): string {
+export function extUrlPourDeployment(
+  hote: string,
+  chemin: string,
+  isVercel: boolean,
+): string {
   const cheminNettoye = chemin.startsWith("/") ? chemin.slice(1) : chemin;
+  if (isVercel && hote === "fapi.binance.com") return `https://${hote}/${cheminNettoye}`;
   return `/extapi/${hote}/${cheminNettoye}`;
+}
+
+export function extUrl(hote: string, chemin: string): string {
+  return extUrlPourDeployment(hote, chemin, IS_VERCEL);
 }

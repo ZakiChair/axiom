@@ -43,6 +43,7 @@ import { getActiveChart } from "../chart/drawing";
 import { liquidationsGet, type LiqDaemon } from "../data/daemon";
 import { histLiqParHeure } from "../data/referentiels";
 import { referentiel, type PointSerie } from "../lib/referentiel";
+import { IS_VERCEL } from "../lib/deployment";
 import {
   EnTeteFenetre,
   Vide,
@@ -57,6 +58,7 @@ import {
   classesSegmentItem,
   BoutonBascule,
   Fraicheur,
+  Unusable,
   type TonBadge,
 } from "./ui";
 import {
@@ -781,11 +783,17 @@ function ContenuHistorique({
   onChangeFenetre: (f: FenetreHistoId) => void;
 }) {
   const symbol = useStore(marketStore, (s) => s.symbol);
-  const [etat, setEtat] = useState<EtatHisto>({ statut: "chargement" });
+  const [etat, setEtat] = useState<EtatHisto>(
+    IS_VERCEL ? { statut: "absent" } : { statut: "chargement" },
+  );
 
   // Lecture à l'activation de l'onglet et à chaque changement fenêtre/symbole (cache 60 s ;
   // garde anti-course : si les deps changent pendant l'attente, le résultat est jeté).
   useEffect(() => {
+    if (IS_VERCEL) {
+      setEtat({ statut: "absent" });
+      return;
+    }
     let annule = false;
     setEtat({ statut: "chargement" });
     void chargerHistorique(symbol, fenetre).then(({ rows, depuis }) => {
@@ -831,14 +839,17 @@ function ContenuHistorique({
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {etat.statut === "chargement" && <Chargement libelle="Lecture de l'historique daemon…" />}
 
-        {etat.statut === "absent" && (
-          <Vide>
-            <div className="flex flex-col items-center gap-2">
-              <Badge ton="neutre">daemon absent</Badge>
-              <span>Historique indisponible — daemon axiomd requis (npm run daemon)</span>
-            </div>
-          </Vide>
-        )}
+        {etat.statut === "absent" &&
+          (IS_VERCEL ? (
+            <Unusable raison="L'historique persistant dépend du daemon local axiomd, indisponible sur Vercel." />
+          ) : (
+            <Vide>
+              <div className="flex flex-col items-center gap-2">
+                <Badge ton="neutre">daemon absent</Badge>
+                <span>Historique indisponible — daemon axiomd requis (npm run daemon)</span>
+              </div>
+            </Vide>
+          ))}
 
         {derives !== null &&
           (derives.stats.nb === 0 ? (

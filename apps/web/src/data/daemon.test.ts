@@ -215,3 +215,23 @@ describe("normaliserUrlDaemonDev", () => {
     }
   });
 });
+
+describe("détection daemon sur Vercel", () => {
+  afterEach(() => {
+    vi.doUnmock("../lib/deployment");
+    vi.unstubAllGlobals();
+  });
+
+  it("renvoie false sans lancer de sonde /health", async () => {
+    vi.resetModules();
+    vi.doMock("../lib/deployment", () => ({ IS_VERCEL: true }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { detectDaemon, daemonSupporte } = await import("./daemon");
+
+    expect(await detectDaemon()).toBe(false);
+    expect(await detectDaemon("kv")).toBe(false);
+    expect(daemonSupporte("kv")).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

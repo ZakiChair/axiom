@@ -2,7 +2,7 @@
  * SettingsPanel — panneau Réglages dédié (slide-over depuis la droite).
  *
  * CENTRALISE toute la configuration jusqu'ici éparpillée dans la sidebar :
- *  - les clés API (Coinalyze pour les dérivés, FRED pour le M2 macro) ;
+ *  - les clés API (Coinalyze, Twelve Data, FRED et autres sources) ;
  *  - le choix du thème (réutilise le ThemeSwitcher existant).
  *
  * Ouvert/fermé via le store vanilla `settings-ui`. Trois chemins de fermeture :
@@ -10,15 +10,16 @@
  * de glissement à l'ouverture ET à la fermeture) ; quand il est fermé, le
  * conteneur passe en `pointer-events-none` pour ne rien intercepter.
  *
- * Sécurité des clés : on NE stocke JAMAIS la valeur d'une clé dans le state React.
+ * Sécurité des clés : on ne conserve JAMAIS la valeur enregistrée dans React/Zustand.
  * Chaque champ ne tient qu'un brouillon local transmis à `setKey`/`clearKey` des
- * stores existants (coinalyze, fred) — aucune duplication du stockage.
+ * stores dédiés (coinalyze, twelvedata, fred…) — aucune duplication du stockage.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { settingsUiStore } from "../store/settings-ui";
 import { onboardingStore } from "../store/onboarding";
 import { coinalyzeKeyStore } from "../store/coinalyze";
+import { twelveDataKeyStore } from "../store/twelvedata";
 import { fredKeyStore } from "../store/macro";
 import { bgeometricsKeyStore } from "../store/onchain";
 import { soSoValueKeyStore } from "../store/sosovalue";
@@ -28,6 +29,7 @@ import { coingeckoKeyStore } from "../store/coingecko";
 import { risqueStore } from "../store/risque";
 import { refSymbolStore } from "../store/refSymbol";
 import { fetchPairs } from "../data/pairs";
+import { IS_VERCEL } from "../lib/deployment";
 import {
   creerSnapshot,
   listerSnapshots,
@@ -36,7 +38,7 @@ import {
 } from "../data/daemon";
 import { formatCompact, formatDateHeure } from "../lib/format";
 import { ThemeSwitcher } from "./ThemeSwitcher";
-import { Badge, BTN_SECONDAIRE, Chargement, Vide } from "./ui";
+import { Badge, BTN_SECONDAIRE, Chargement, Unusable, Vide } from "./ui";
 
 interface ApiKeyFieldProps {
   /** Nom de la source (ex. « Coinalyze »). */
@@ -406,7 +408,11 @@ function SauvegardesSection({ open }: { open: boolean }) {
         </div>
       ) : snapshots === null ? (
         <div className="mt-3">
-          <Vide>Sauvegardes indisponibles — le daemon axiomd n'est pas actif.</Vide>
+          {IS_VERCEL ? (
+            <Unusable raison="Les snapshots persistants dépendent du daemon local axiomd, indisponible sur Vercel." />
+          ) : (
+            <Vide>Sauvegardes indisponibles — le daemon axiomd n'est pas actif.</Vide>
+          )}
         </div>
       ) : (
         <>
@@ -472,6 +478,10 @@ export function SettingsPanel() {
   const coinalyzeHasKey = useStore(coinalyzeKeyStore, (s) => s.hasKey);
   const coinalyzeSetKey = useStore(coinalyzeKeyStore, (s) => s.setKey);
   const coinalyzeClearKey = useStore(coinalyzeKeyStore, (s) => s.clearKey);
+
+  const twelveDataHasKey = useStore(twelveDataKeyStore, (s) => s.hasKey);
+  const twelveDataSetKey = useStore(twelveDataKeyStore, (s) => s.setKey);
+  const twelveDataClearKey = useStore(twelveDataKeyStore, (s) => s.clearKey);
 
   const fredHasKey = useStore(fredKeyStore, (s) => s.hasKey);
   const fredSetKey = useStore(fredKeyStore, (s) => s.setKey);
@@ -564,7 +574,9 @@ export function SettingsPanel() {
           <div className="mt-3 space-y-3">
             <ApiKeyField
               name="Coinalyze"
-              purpose="Dérivés — Open Interest, funding, long/short et liquidations (Binance)."
+              purpose={IS_VERCEL
+                ? "Dérivés avancés — clé personnelle requise sur Vercel ; OI/funding du graphe gardent un repli Binance sans clé."
+                : "Dérivés — Open Interest, funding, long/short et liquidations (Binance)."}
               domain="api.coinalyze.net"
               signupUrl="https://coinalyze.net"
               signupLabel="Obtenir une clé"
@@ -574,8 +586,21 @@ export function SettingsPanel() {
               onClear={coinalyzeClearKey}
             />
             <ApiKeyField
+              name="Twelve Data"
+              purpose="Marchés traditionnels — actions, forex et ETF. Requise sur Vercel ; en local, TWELVE_DATA_KEY reste disponible en repli."
+              domain="api.twelvedata.com"
+              signupUrl="https://twelvedata.com"
+              signupLabel="Obtenir une clé"
+              placeholder="Clé API Twelve Data"
+              hasKey={twelveDataHasKey}
+              onSave={twelveDataSetKey}
+              onClear={twelveDataClearKey}
+            />
+            <ApiKeyField
               name="FRED (M2 US)"
-              purpose="Masse monétaire — série M2 hebdomadaire de la Fed de Saint-Louis."
+              purpose={IS_VERCEL
+                ? "Masse monétaire M2 — clé personnelle FRED requise sur Vercel."
+                : "Masse monétaire — série M2 hebdomadaire de la Fed de Saint-Louis."}
               domain="api.stlouisfed.org"
               signupUrl="https://fredaccount.stlouisfed.org/apikeys"
               signupLabel="Obtenir une clé"
@@ -597,7 +622,9 @@ export function SettingsPanel() {
             />
             <ApiKeyField
               name="SoSoValue (ETF)"
-              purpose="Flux ETF spot BTC/ETH/SOL — plan Demo gratuit. Optionnelle si SOSOVALUE_API_KEY est renseignée dans .env (repli proxy) ; une clé saisie ici reste prioritaire."
+              purpose={IS_VERCEL
+                ? "Flux ETF spot BTC/ETH/SOL — clé personnelle Demo requise sur Vercel."
+                : "Flux ETF spot BTC/ETH/SOL — plan Demo gratuit. Optionnelle si SOSOVALUE_API_KEY est renseignée dans .env (repli proxy) ; une clé saisie ici reste prioritaire."}
               domain="openapi.sosovalue.com"
               signupUrl="https://sosovalue.com/developer"
               signupLabel="Obtenir une clé gratuite"
@@ -619,7 +646,9 @@ export function SettingsPanel() {
             />
             <ApiKeyField
               name="Etherscan v2"
-              purpose="Réseau ETH — gas recommandé, supply, nombre de nœuds. Optionnelle si ETHERSCAN_API_KEY est renseignée dans .env (repli proxy) ; une clé saisie ici reste prioritaire."
+              purpose={IS_VERCEL
+                ? "Réseau ETH — clé personnelle Etherscan v2 requise sur Vercel."
+                : "Réseau ETH — gas recommandé, supply, nombre de nœuds. Optionnelle si ETHERSCAN_API_KEY est renseignée dans .env (repli proxy) ; une clé saisie ici reste prioritaire."}
               domain="api.etherscan.io"
               signupUrl="https://etherscan.io/register"
               signupLabel="Obtenir une clé gratuite"

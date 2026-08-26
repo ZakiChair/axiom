@@ -37,6 +37,7 @@ import { chartCapaciteStore } from "../store/chartCapacite";
 import { dessinerAnnotationsPane } from "./annotationsPane";
 import { AnnotationsPrix, masquerTooltipAnnotation } from "./annotationsPrix";
 import { auxProvider } from "./auxProvider";
+import { raisonUnusableIndicateur } from "../lib/indicatorUsability";
 import {
   computeKey,
   formatInstanceLabel,
@@ -46,6 +47,12 @@ import {
 
 /** Point d'indicateur côté KLineChart : clé d'output -> valeur finie. */
 type AxiomPoint = Record<string, number>;
+
+function sortieFinie(def: IndicatorDef, result: IndicatorResult): boolean {
+  return def.outputs.some((output) =>
+    result.series[output.key]?.some((value) => typeof value === "number" && Number.isFinite(value)) === true
+  );
+}
 
 /** Id du pane prix (constante interne KLineChart, vérifiée dans le bundle). */
 const CANDLE_PANE_ID = "candle_pane";
@@ -287,7 +294,7 @@ export class ChartIndicators {
    *
    * Renvoie aussi le SUFFIXE de statut à ajouter au libellé du pane — même canal
    * que le nom normal (`shortName`, cf. `formatInstanceLabel`) : "" (ready/aux
-   * absent), " …" (pending), " (indisponible)" (error).
+   * absent), " …" (pending), " (UNUSABLE)" (contexte impossible/error/vide).
    */
   private computeForInstance(
     def: IndicatorDef,
@@ -295,6 +302,15 @@ export class ChartIndicators {
     candles: Candle[],
     exchange: ExchangeId
   ): { result: IndicatorResult; suffix: string } {
+    const raison = this.timeframe === null
+      ? null
+      : raisonUnusableIndicateur(def, { exchange, symbol: this.symbol, timeframe: this.timeframe });
+    if (raison !== null) {
+      const result = def.aux && def.aux.length > 0
+        ? computeIndicator(def, candles, inst.params)
+        : this.compute(def, inst.params, candles);
+      return { result, suffix: " (UNUSABLE)" };
+    }
     if (!def.aux || def.aux.length === 0) {
       return { result: this.compute(def, inst.params, candles), suffix: "" };
     }
@@ -309,11 +325,12 @@ export class ChartIndicators {
       () => this.onAuxReady(inst.instanceId)
     );
     if (status.status === "ready") {
-      return { result: computeIndicator(def, candles, inst.params, status.aux), suffix: "" };
+      const result = computeIndicator(def, candles, inst.params, status.aux);
+      return { result, suffix: sortieFinie(def, result) ? "" : " (UNUSABLE)" };
     }
     // `pending`/`error` : aux absent -> le def dégrade en séries all-undefined (garde Task 13).
     const result = computeIndicator(def, candles, inst.params);
-    return { result, suffix: status.status === "pending" ? " …" : " (indisponible)" };
+    return { result, suffix: status.status === "pending" ? " …" : " (UNUSABLE)" };
   }
 
   /**
@@ -520,10 +537,10 @@ export class ChartIndicators {
       const def = getIndicator(inst.defId);
       if (!def) continue;
       const { result, suffix } = this.computeForInstance(def, inst, candles, exchange);
-      // Le libellé (shortName) n'est renvoyé que pour les defs aux-aware : leur suffixe
-      // d'état peut changer sans édition de params (résolution async) ; les autres defs
-      // gardent leur libellé déjà posé par `sync` (aucun changement de comportement).
-      const override = def.aux && def.aux.length > 0
+      // Le libellé (shortName) est renvoyé pour les defs aux-aware, dont le suffixe
+      // peut changer sans édition de params, ainsi que pour tout def contextuellement
+      // UNUSABLE ; les autres gardent leur libellé déjà posé par `sync`.
+      const override = (def.aux && def.aux.length > 0) || suffix !== ""
         ? { name: info.name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result }
         : { name: info.name, extendData: result };
       this.chart.overrideIndicator(override, info.paneId);

@@ -11,12 +11,9 @@
  * (chart/macro.ts) — c'est ce qui fait de ces mesures des INDICATEURS et justifie
  * leur place dans ce menu plutôt que dans la sidebar.
  *
- * ⚠️ La case M2 reste ACTIVE même sans clé FRED perso : le proxy `/fredapi` injecte la
- * clé de repli `FRED_API_KEY` quand elle est configurée (.env en dev, daemon en prod) —
- * vérifié le 2026-07-29, une requête sans clé renvoie bien des observations. L'overlay du
- * graphe fonctionne donc sans clé perso. Seule la LECTURE CHIFFRÉE ci-dessous est
- * conditionnée à `hasKey` et renvoie vers les Réglages ; ne PAS étendre cette garde à la
- * case, elle désactiverait une fonctionnalité qui marche.
+ * La case M2 reste disponible sans clé personnelle en local quand le proxy injecte
+ * `FRED_API_KEY`. Sur Vercel, aucun secret partagé n'est exposé : une clé personnelle est
+ * requise et la case reste désactivée tant qu'elle manque.
  *
  * Donnée BASSE fréquence : un fetch à l'ouverture + rafraîchissement périodique LARGE
  * (~15 min) + bouton de refresh manuel. Ces séries peuvent vivre dans le state React
@@ -165,6 +162,10 @@ export function MacroIndicators({ onOuvrirReglages }: { onOuvrirReglages: () => 
   const toggleMacro = useStore(macroOverlayStore, (s) => s.toggle);
   const isMacroActive = (id: MacroOverlayId) => activeMacros.includes(id);
 
+  useEffect(() => {
+    if (!hasKey && activeMacros.includes("m2")) toggleMacro("m2");
+  }, [activeMacros, hasKey, toggleMacro]);
+
   // Cap. totale crypto : série persistée (échantillonnée par le poller central lancé
   // depuis main.tsx, pas ici) — voir store/macroHistory.ts. Le composant se re-rend
   // quand un nouvel échantillon arrive.
@@ -302,8 +303,11 @@ export function MacroIndicators({ onOuvrirReglages }: { onOuvrirReglages: () => 
             <input
               type="checkbox"
               checked={isMacroActive("m2")}
-              onChange={() => toggleMacro("m2")}
-              className="h-3 w-3 accent-accent"
+              disabled={!hasKey}
+              onChange={() => {
+                if (hasKey) toggleMacro("m2");
+              }}
+              className="h-3 w-3 accent-accent disabled:cursor-not-allowed disabled:opacity-40"
             />
             <span>M2 (US · FRED)</span>
           </label>

@@ -21,6 +21,7 @@ import { globeUiStore, type CouchesGlobe } from "../store/globe-ui";
 import { themeStore } from "../store/theme";
 import { createRafThrottle, type RafThrottle } from "../chart/rafThrottle";
 import { lireTokensCanvas } from "../lib/canvasTokens";
+import { IS_VERCEL } from "../lib/deployment";
 import { formatAge, formatEntier } from "../lib/format";
 import { chargerChokepoints } from "../data/globe/portwatch";
 import { chargerEtatsAvions, INTERVALLE_POLL_MS } from "../data/globe/opensky";
@@ -54,7 +55,7 @@ import {
 import { noteConflits, noteEvenements, noteUkraine } from "./globeWindow.util";
 import { GlobeDetailPanel } from "./GlobeDetailPanel";
 import type { SelectionGlobe } from "./globeDetail.util";
-import { Chargement, EnTeteFenetre, ErreurBloc, NoteSource, Vide } from "./ui";
+import { Chargement, EnTeteFenetre, ErreurBloc, NoteSource, Unusable, Vide } from "./ui";
 
 /** Vitesse de la rotation automatique (degrés de longitude par seconde — lente). */
 const VITESSE_ROTATION_DEG_S = 2;
@@ -459,6 +460,14 @@ export function GlobeWindow() {
   const erreurAvions = couches.avions && echecAvions && etatAvions === null;
   const aucuneCouche =
     !couches.chokepoints && !couches.avions && !couches.evenements && !couches.conflits && !couches.ukraine;
+  const couchesDaemonVercel = [
+    couches.evenements ? "GDELT" : null,
+    couches.conflits ? "UCDP" : null,
+  ].filter((couche): couche is string => couche !== null);
+  const raisonCouchesVercel =
+    couchesDaemonVercel.length === 1
+      ? `Couche ${couchesDaemonVercel[0]} uniquement : elle dépend du daemon local axiomd, indisponible sur Vercel.`
+      : `Couches ${couchesDaemonVercel.join(" et ")} uniquement : elles dépendent du daemon local axiomd, indisponible sur Vercel.`;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -538,6 +547,12 @@ export function GlobeWindow() {
         </button>
         <span className="ml-auto">molette = zoom · glisser = tourner · clic = détails</span>
       </div>
+
+      {IS_VERCEL && couchesDaemonVercel.length > 0 && (
+        <div className="px-3 pt-2">
+          <Unusable raison={raisonCouchesVercel} />
+        </div>
+      )}
 
       {(erreurChokepoints || erreurAvions) && (
         <div className="px-3 pt-2">

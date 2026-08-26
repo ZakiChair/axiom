@@ -39,6 +39,7 @@ export const EXTAPI_HOSTS: readonly string[] = [
   "www.rba.gov.au", // RBA Australie — CSV F2
   "api.coinbase.com", // Coinbase Advanced Trade (candles REST public — WS reste direct)
   "feeds.bloomberg.com", // RSS Bloomberg (news macro)
+  "www.bloomberg.com", // destination actuelle de la redirection RSS Bloomberg
   "www.cnbc.com", // RSS CNBC Economy
   // OpenSky /states/all (trafic aérien — globe). CORS restreint à sa propre
   // origine → proxy obligatoire. PortWatch ArcGIS (CORS *) reste en appel direct.

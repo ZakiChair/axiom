@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
-  parseTwelveData,
+  buildTwelveDataUrl,
+  fetchQuotes,
+  nextDailyCount,
   parseQuotes,
+  parseTwelveData,
+  setTwelveDataApiKey,
   twelveDataAdapter,
   utcDayKey,
-  nextDailyCount,
   type DailyUsage,
   type TwelveDataResponse,
 } from "./twelvedata";
@@ -15,6 +18,57 @@ function at<T>(arr: T[], i: number): T {
   if (v === undefined) throw new Error(`index ${i} absent`);
   return v;
 }
+
+describe("buildTwelveDataUrl", () => {
+  it("construit une URL sans muter les paramètres et encode la clé personnelle", () => {
+    const params = new URLSearchParams({ symbol: "EUR/USD", interval: "1day" });
+    expect(buildTwelveDataUrl("/tdapi/time_series", params, "perso&1")).toBe(
+      "/tdapi/time_series?symbol=EUR%2FUSD&interval=1day&apikey=perso%261",
+    );
+    expect(params.has("apikey")).toBe(false);
+  });
+
+  it("fonctionne avec la base directe Vercel et omet apikey sans clé personnelle", () => {
+    expect(
+      buildTwelveDataUrl("https://api.twelvedata.com/quote", { symbol: "SPY" }, null),
+    ).toBe("https://api.twelvedata.com/quote?symbol=SPY");
+  });
+});
+
+describe("clé personnelle Twelve Data", () => {
+  beforeEach(() => {
+    setTwelveDataApiKey("personnelle");
+  });
+
+  afterEach(() => {
+    setTwelveDataApiKey(null);
+    vi.unstubAllGlobals();
+  });
+
+  it("ajoute apikey aux requêtes time_series et quote", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const json = String(input).includes("time_series")
+        ? { status: "ok", values: [] }
+        : { symbol: "SPY", close: "100", percent_change: "1" };
+      return Promise.resolve({
+        status: 200,
+        statusText: "OK",
+        json: () => Promise.resolve(json),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await twelveDataAdapter.fetchKlines("URL_KEY_TEST", "1d", { limit: 2 });
+    await fetchQuotes(["SPY"]);
+
+    const urls = fetchMock.mock.calls.map(([input]) => new URL(String(input), "http://localhost"));
+    expect(urls.map((url) => url.pathname)).toEqual([
+      "/tdapi/time_series",
+      "/tdapi/quote",
+    ]);
+    expect(urls.every((url) => url.searchParams.get("apikey") === "personnelle")).toBe(true);
+  });
+});
 
 describe("parseTwelveData", () => {
   it("convertit values en bougies (ms) ; dernière non clôturée ; tri ascendant", () => {

@@ -41,6 +41,7 @@ import { tfAtLeast } from "../chart/tfOrder";
 import { CLASSES_CHAMP, indexRoving, Input, Onglets, Select } from "./ui";
 import { MacroIndicators } from "./MacroIndicators";
 import { JeuxIndicateurs } from "./JeuxIndicateurs";
+import { raisonUnusableIndicateur } from "../lib/indicatorUsability";
 
 /** Catalogue du menu Indicateurs : TOUT sauf les stratégies (foyer exclusif — menu Stratégies). */
 export const INDICATEURS_ANALYSE = INDICATORS.filter((d) => d.category !== "strategy");
@@ -282,6 +283,7 @@ export function IndicatorMenu() {
   const macrosActives = useStore(macroOverlayStore, (s) => s.enabled);
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
   const exchange = useStore(marketStore, (s) => s.exchange);
+  const symbol = useStore(marketStore, (s) => s.symbol);
   const timeframe = useStore(marketStore, (s) => s.timeframe);
   // OCN (overlay Open/Close Net) : épinglé en tête de la section Order Flow.
   // Pas un IndicatorDef (overlay canvas du contrôleur orderflow, cf. openCloseNet.ts).
@@ -610,6 +612,7 @@ export function IndicatorMenu() {
                         )}
                         {defsGroupe.map((def) => {
                       const count = countByDef.get(def.id) ?? 0;
+                      const raisonUnusable = raisonUnusableIndicateur(def, { exchange, symbol, timeframe });
                       const disabledSynthetic = exchange === "synthetic" && def.id === "volume";
                       // Grisage par TF minimal (Task 14) : def dérivé (OI/funding/NVT/MVRV…)
                       // non pertinent en dessous de son `minTimeframe` (ex. données quotidiennes).
@@ -621,14 +624,14 @@ export function IndicatorMenu() {
                       // amont, avec la sortie à faire.
                       const disabledPlace =
                         def.pane !== "overlay" && plafondPanesAtteint(panesActifs, paneMaxCourant);
-                      const disabled = disabledSynthetic || disabledTf || disabledPlace;
-                      const title = disabledSynthetic
+                      const disabled = raisonUnusable !== null || disabledSynthetic || disabledTf || disabledPlace;
+                      const title = raisonUnusable ?? (disabledSynthetic
                         ? "Volume non défini sur une série synthétique"
                         : disabledTf
                           ? `Nécessite ≥ ${def.minTimeframe}`
                           : disabledPlace
                             ? `${paneMaxCourant} panes maximum à cette hauteur de fenêtre : fermez-en un, agrandissez la fenêtre, ou choisissez un indicateur qui se pose sur les prix`
-                            : "Ajouter une instance";
+                            : "Ajouter une instance");
                       return (
                         <button
                           key={def.id}
@@ -647,6 +650,11 @@ export function IndicatorMenu() {
                         >
                           <span className="text-accent">＋</span>
                           <span className="flex-1 truncate">{def.name}</span>
+                          {raisonUnusable !== null && (
+                            <span className="shrink-0 rounded bg-down/15 px-1 text-[9px] tracking-wider text-down">
+                              UNUSABLE
+                            </span>
+                          )}
                           {count > 0 && (
                             <span className="rounded bg-accent/20 px-1 text-[10px] text-accent">
                               {count}

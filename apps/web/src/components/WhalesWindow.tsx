@@ -31,6 +31,7 @@ import {
   type SanteWhales,
 } from "../data/whales";
 import { formatCompact, formatHeure, formatPrice, formatUsd } from "../lib/format";
+import { IS_VERCEL } from "../lib/deployment";
 import { TableTriable, trierLignes, type ColonneTable, type TriTable } from "./TableTriable";
 import {
   Badge,
@@ -43,6 +44,7 @@ import {
   Segmente,
   TitreSection,
   TuileStat,
+  Unusable,
   Vide,
   type TonBadge,
 } from "./ui";
@@ -135,7 +137,7 @@ function SanteCollecteur({ sante }: { sante: SanteWhales }) {
 }
 
 function OngletFlux() {
-  const [statut, setStatut] = useState<Statut>("charge");
+  const [statut, setStatut] = useState<Statut>(IS_VERCEL ? "sans-daemon" : "charge");
   const [mouvements, setMouvements] = useState<MouvementWhale[]>([]);
   const [sante, setSante] = useState<SanteWhales | null>(null);
   const [majTs, setMajTs] = useState<number | null>(null);
@@ -148,6 +150,7 @@ function OngletFlux() {
   // requête en vol écrit l'état (« dernière réponse gagne », changement de filtre inclus).
   const generation = useRef(0);
   useEffect(() => {
+    if (IS_VERCEL) return;
     const gen = ++generation.current;
     const charger = async (): Promise<void> => {
       const brut = await whalesRecentGet({
@@ -187,13 +190,16 @@ function OngletFlux() {
         </span>
       </div>
 
-      {statut === "sans-daemon" && (
-        <Vide>
-          Le fil des baleines nécessite le daemon axiomd (collecte continue en SQLite).
-          <br />
-          Lancer <code className="text-text">pnpm run up</code> puis rouvrir cette fenêtre.
-        </Vide>
-      )}
+      {statut === "sans-daemon" &&
+        (IS_VERCEL ? (
+          <Unusable raison="Le flux on-chain dépend du collecteur local axiomd, indisponible sur Vercel." />
+        ) : (
+          <Vide>
+            Le fil des baleines nécessite le daemon axiomd (collecte continue en SQLite).
+            <br />
+            Lancer <code className="text-text">pnpm run up</code> puis rouvrir cette fenêtre.
+          </Vide>
+        ))}
       {statut === "erreur" && <Vide>Réponse du daemon illisible — réessaiera au prochain cycle.</Vide>}
       {statut === "charge" && <Chargement libelle="Lecture du fil des baleines…" />}
 
@@ -285,7 +291,7 @@ const COLONNES_POSITIONS: readonly ColonneTable<PositionHl>[] = [
 ];
 
 function OngletPositions() {
-  const [statut, setStatut] = useState<Statut>("charge");
+  const [statut, setStatut] = useState<Statut>(IS_VERCEL ? "sans-daemon" : "charge");
   const [coin, setCoin] = useState<string>("BTC");
   const [reponse, setReponse] = useState<ReponseHlPositions | null>(null);
   const [tri, setTri] = useState<TriTable | null>({ colonne: "notionnel", dir: -1 });
@@ -294,6 +300,7 @@ function OngletPositions() {
 
   const generation = useRef(0);
   useEffect(() => {
+    if (IS_VERCEL) return;
     const gen = ++generation.current;
     setStatut("charge");
     void (async () => {
@@ -332,13 +339,16 @@ function OngletPositions() {
         )}
       </div>
 
-      {statut === "sans-daemon" && (
-        <Vide>
-          Les positions Hyperliquid nécessitent le daemon axiomd (leaderboard + instantané 5 min).
-          <br />
-          Lancer <code className="text-text">pnpm run up</code> puis rouvrir cette fenêtre.
-        </Vide>
-      )}
+      {statut === "sans-daemon" &&
+        (IS_VERCEL ? (
+          <Unusable raison="Les positions Hyperliquid dépendent du scanner local axiomd, indisponible sur Vercel." />
+        ) : (
+          <Vide>
+            Les positions Hyperliquid nécessitent le daemon axiomd (leaderboard + instantané 5 min).
+            <br />
+            Lancer <code className="text-text">pnpm run up</code> puis rouvrir cette fenêtre.
+          </Vide>
+        ))}
       {statut === "erreur" && (
         <Vide>
           Instantané indisponible — au premier démarrage, le scan des 150 comptes prend ~1 min.

@@ -22,6 +22,7 @@ import { marketStore } from "../store/market";
 import { tfAtLeast } from "../chart/tfOrder";
 import { CLASSES_CHAMP, indexRoving } from "./ui";
 import { InstanceParamsEditor } from "./IndicatorMenu";
+import { raisonUnusableIndicateur } from "../lib/indicatorUsability";
 
 /** Defs de catégorie strategy (catalogue du menu Stratégies). PURE. */
 export function defsStrategie(): IndicatorDef[] {
@@ -67,6 +68,8 @@ export function StrategyMenu() {
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const active = useStore(indicatorsStore, (s) => s.indicators);
+  const exchange = useStore(marketStore, (s) => s.exchange);
+  const symbol = useStore(marketStore, (s) => s.symbol);
   const timeframe = useStore(marketStore, (s) => s.timeframe);
   const add = useStore(indicatorsStore, (s) => s.add);
   const remove = useStore(indicatorsStore, (s) => s.remove);
@@ -254,15 +257,17 @@ export function StrategyMenu() {
                 </div>
                 {defsSection.map((def) => {
               const count = countByDef.get(def.id) ?? 0;
+              const raisonUnusable = raisonUnusableIndicateur(def, { exchange, symbol, timeframe });
               // Grisage par TF minimal : stratégie non pertinente en dessous de son
               // `minTimeframe` (ex. prime spot-perp sous 15m).
-              const disabled = def.minTimeframe !== undefined && !tfAtLeast(timeframe, def.minTimeframe);
+              const disabledTf = def.minTimeframe !== undefined && !tfAtLeast(timeframe, def.minTimeframe);
+              const disabled = raisonUnusable !== null || disabledTf;
               return (
                 <button
                   key={def.id}
                   type="button"
                   data-item-strategie=""
-                  title={disabled ? `Nécessite ≥ ${def.minTimeframe}` : "Ajouter une instance"}
+                  title={raisonUnusable ?? (disabledTf ? `Nécessite ≥ ${def.minTimeframe}` : "Ajouter une instance")}
                   disabled={disabled}
                   onClick={() => {
                     if (!disabled) add(def.id);
@@ -275,6 +280,11 @@ export function StrategyMenu() {
                 >
                   <span className="text-accent">＋</span>
                   <span className="min-w-0 flex-1 truncate">{def.name}</span>
+                  {raisonUnusable !== null && (
+                    <span className="shrink-0 rounded bg-down/15 px-1 text-[9px] tracking-wider text-down">
+                      UNUSABLE
+                    </span>
+                  )}
                   {/* Statut de validation HORS du `truncate` : dans le nom, il était la
                       première chose coupée par un panneau de 288 px — alors que c'est
                       l'information la plus importante du catalogue. */}

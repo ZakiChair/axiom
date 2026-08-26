@@ -11,21 +11,26 @@
  * UNIQUEMENT pour la transmettre à `fetchSeries`, jamais pour l'afficher.
  */
 import { createStore } from "zustand/vanilla";
+import { IS_VERCEL } from "../lib/deployment";
 
 const STORAGE_KEY = "axiom:fred:key";
 
 /**
  * Lecture tolérante de la clé PERSONNELLE : clé persistée, sinon `null`.
- * `null` = aucune clé côté front → le proxy /fredapi fournit la clé de repli (.env).
- * On ne committe plus de clé « par défaut » dans le source (cf. data/macro/fred.ts).
+ * En local, `null` laisse le proxy /fredapi fournir le repli `.env` ; sur Vercel,
+ * aucune clé de proxy n'existe. Aucune clé « par défaut » n'est committée dans le source.
  */
 function readKey(): string | null {
   try {
-    const v = localStorage.getItem(STORAGE_KEY);
-    return v !== null && v.length > 0 ? v : null;
+    const value = localStorage.getItem(STORAGE_KEY)?.trim() ?? "";
+    return value.length > 0 ? value : null;
   } catch {
     return null;
   }
+}
+
+export function hasUsableFredKey(personalKey: string | null, isVercel: boolean): boolean {
+  return !isVercel || (personalKey?.trim().length ?? 0) > 0;
 }
 
 /** Écriture/suppression tolérante (quota / mode privé => silencieux). */
@@ -48,31 +53,30 @@ export function getFredKey(): string | null {
 
 export interface FredKeyState {
   /**
-   * true si une clé FRED est utilisable. TOUJOURS vrai : une clé de repli est
-   * fournie par le proxy (.env), donc l'UI affiche le M2 sans jamais bloquer sur un
-   * formulaire « clé requise ». Une clé personnelle saisie dans les Réglages remplace
-   * simplement le repli (le M2 se recharge alors avec elle).
+   * En local, le proxy conserve le repli `.env` historique. Sur Vercel, true seulement
+   * si une clé personnelle est présente dans localStorage.
    */
   hasKey: boolean;
   /** Enregistre une clé personnelle (localStorage). Vide => équivaut à clearKey. */
   setKey: (key: string) => void;
-  /** Supprime la clé personnelle (retour au repli du proxy). */
+  /** Supprime la clé personnelle (retour au repli du proxy local). */
   clearKey: () => void;
 }
 
+const persistedKey = readKey();
+
 export const fredKeyStore = createStore<FredKeyState>((set) => ({
-  // Toujours vrai : cf. commentaire de `hasKey` ci-dessus.
-  hasKey: true,
+  hasKey: hasUsableFredKey(persistedKey, IS_VERCEL),
 
   setKey: (key) => {
     const k = key.trim();
     const value = k.length > 0 ? k : null;
     writeKey(value);
-    set({ hasKey: true });
+    set({ hasKey: hasUsableFredKey(value, IS_VERCEL) });
   },
 
   clearKey: () => {
     writeKey(null);
-    set({ hasKey: true });
+    set({ hasKey: hasUsableFredKey(null, IS_VERCEL) });
   },
 }));

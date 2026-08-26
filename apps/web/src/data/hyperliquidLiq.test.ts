@@ -5,9 +5,15 @@
  * ⚠️ Ces niveaux viennent du TOP du leaderboard Hyperliquid, PAS de tout le carnet :
  * ils sont RÉELS (positions ouvertes observées) mais NON EXHAUSTIFS.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
-import { mapperReponseHl, deciderEtatHl, type ReponseHlLiq } from "./hyperliquidLiq";
+import {
+  mapperReponseHl,
+  deciderEtatHl,
+  executerCommandeLiqHl,
+  presentationCommandeLiqHl,
+  type ReponseHlLiq,
+} from "./hyperliquidLiq";
 
 /** Réponse daemon minimale valide (contrat apps/daemon). */
 function reponse(partial: Partial<ReponseHlLiq> = {}): ReponseHlLiq {
@@ -79,5 +85,34 @@ describe("deciderEtatHl — état affiché de la couche", () => {
 
   it("réponse conforme avec des niveaux → « ok »", () => {
     expect(deciderEtatHl(true, reponse())).toBe("ok");
+  });
+});
+
+describe("commande LIQHL sur Vercel", () => {
+  it("inclut UNUSABLE dans le libellé et l'aperçu", () => {
+    const presentation = presentationCommandeLiqHl(true);
+    expect(presentation.libelle).toContain("UNUSABLE");
+    expect(presentation.apercu).toContain("UNUSABLE");
+    expect(presentationCommandeLiqHl(false).libelle).not.toContain("UNUSABLE");
+  });
+
+  it("n'active pas la couche et explique la raison par toast", () => {
+    const basculer = vi.fn();
+    const notifier = vi.fn();
+    executerCommandeLiqHl(true, basculer, notifier);
+
+    expect(basculer).not.toHaveBeenCalled();
+    expect(notifier).toHaveBeenCalledOnce();
+    expect(notifier.mock.calls[0]?.[0]).toContain("daemon local axiomd");
+    expect(notifier.mock.calls[0]?.[0]).toContain("Vercel");
+  });
+
+  it("conserve la bascule locale sans toast", () => {
+    const basculer = vi.fn();
+    const notifier = vi.fn();
+    executerCommandeLiqHl(false, basculer, notifier);
+
+    expect(basculer).toHaveBeenCalledOnce();
+    expect(notifier).not.toHaveBeenCalled();
   });
 });

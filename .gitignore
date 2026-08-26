@@ -8,6 +8,7 @@ build/
 coverage/
 .vite/
 .turbo/
+.vercel/
 *.tsbuildinfo
 
 # Daemon axiomd — base SQLite locale (cache/persistance), jamais committée

@@ -115,6 +115,21 @@ pnpm prod
 # (Chrome mode app : open -a "Google Chrome" --args --app=http://127.0.0.1:8787)
 ```
 
+## Déploiement Vercel
+
+Le build Vercel sert le front et un proxy serverless restreint aux hôtes de
+`shared/extapi-hosts.ts`. Aucun secret partagé n'est injecté dans ce proxy public : les clés
+Coinalyze, FRED, Twelve Data, SoSoValue et Etherscan se saisissent dans **Réglages** et restent
+dans le `localStorage` du navigateur. OI et funding du graphe disposent d'un repli Binance sans
+clé ; NVT utilise directement les charts publics Blockchain.com.
+
+Le catalogue conserve les 179 indicateurs. Une entrée impossible pour la source, le symbole ou
+le timeframe courant est désactivée et marquée **UNUSABLE** au lieu de produire un pane vide.
+Les fonctions intrinsèquement locales sont également nommées : REPLAY et WHALES sont
+**UNUSABLE** sur Vercel ; l'historique LIQ et les couches GDELT/UCDP de GLOBE sont **PARTIAL**.
+Les snapshots, LIQHL, les alertes baleines et les notifications onglet fermé nécessitent toujours
+`axiomd`.
+
 ## Fonctionnalités (aperçu)
 
 - **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, 179 indicateurs
@@ -138,7 +153,9 @@ cf. `BUILD-CONTRACT.md`).
 
 ## Secrets
 
-**Source unique** : `apps/web/.env` (gitignoré), lue par Vite **et** par le daemon. Les clés sont injectées côté proxy — elles ne partent pas dans le bundle navigateur.
+En local, `apps/web/.env` (gitignoré) est lu par Vite et par le daemon ; ses clés de repli sont injectées côté proxy et restent hors du bundle navigateur.
+
+Sur Vercel, aucune clé serveur partagée n'est utilisée. Les clés personnelles sont stockées dans le `localStorage` du navigateur et envoyées uniquement au fournisseur concerné via le proxy restreint, ou directement à Twelve Data (CORS public).
 
 Modèle sans valeurs : `apps/web/.env.example`.
 

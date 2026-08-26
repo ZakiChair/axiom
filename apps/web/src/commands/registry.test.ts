@@ -49,6 +49,7 @@ import {
   type NavCommande,
 } from "./registry";
 import { marketStore } from "../store/market";
+import { indicatorsStore } from "../store/indicators";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
 import { toastsStore, retirerToast } from "../store/toasts";
 // ─── Sources de commandes greffées par App.tsx (`enregistrerCommandes([...])`) ───
@@ -309,6 +310,38 @@ describe("construireRegistre — commandes attendues présentes", () => {
 
   it("expose une commande de bascule pour l'indicateur RSI", () => {
     expect(ids.has("ind:rsi")).toBe(true);
+  });
+
+  it("bloque un indicateur UNUSABLE avec un toast et conserve la bascule en contexte valide", () => {
+    vi.useFakeTimers();
+    const marketAvant = marketStore.getState();
+    const toastIdsAvant = new Set(toastsStore.getState().toasts.map((toast) => toast.id));
+    const toggle = vi.spyOn(indicatorsStore.getState(), "toggle");
+    try {
+      const cvd = registre.find((commande) => commande.id === "ind:cvd");
+      expect(cvd).toBeDefined();
+
+      marketStore.getState().setMarket({ exchange: "kraken", symbol: "BTCUSD", timeframe: "1h" });
+      cvd?.action();
+
+      expect(toggle).not.toHaveBeenCalled();
+      expect(toastsStore.getState().toasts.at(-1)?.texte).toBe(
+        "UNUSABLE — Volumes acheteur/vendeur historiques complets disponibles uniquement sur Binance",
+      );
+
+      marketStore.getState().setMarket({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h" });
+      cvd?.action();
+      expect(toggle).toHaveBeenCalledOnce();
+      expect(toggle).toHaveBeenCalledWith("cvd");
+    } finally {
+      toggle.mockRestore();
+      marketStore.setState(marketAvant, true);
+      for (const toast of toastsStore.getState().toasts) {
+        if (!toastIdsAvant.has(toast.id)) retirerToast(toast.id);
+      }
+      vi.runOnlyPendingTimers();
+      vi.useRealTimers();
+    }
   });
 
   it("expose les 11 timeframes et les 5 thèmes", () => {

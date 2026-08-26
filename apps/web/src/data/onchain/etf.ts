@@ -23,6 +23,7 @@
  * Plan Demo/Beta gratuit, 20 req/min : sosovalue.com/developer.
  */
 import { healthStore } from "../../store/health";
+import { IS_VERCEL } from "../../lib/deployment";
 import { ecrireCache, estFrais, lireCache } from "./cache";
 
 export type ActifEtf = "btc" | "eth" | "sol";
@@ -36,7 +37,11 @@ const SOURCE_SANTE = "sosovalue";
  * SoSoValue ⚙ » QUE sur un échec effectivement lié à la clé (pas sur un 5xx/réseau).
  */
 export const RAISON_CLE_SOSOVALUE =
-  "Clé SoSoValue absente ou invalide (Réglages ⚙ ou SOSOVALUE_API_KEY dans .env).";
+  "Clé SoSoValue absente ou invalide (Réglages ⚙).";
+
+export function sosoUnusableWithoutKey(isVercel: boolean, cle: string | null): boolean {
+  return isVercel && (cle?.trim().length ?? 0) === 0;
+}
 
 export interface FluxEmetteur {
   emetteur: string;
@@ -102,15 +107,17 @@ export function parseEtfFlows(json: unknown): EtfResultat {
 
 /**
  * Récupère les flux ETF pour un actif, avec cache 6 h et dégradation gracieuse.
- * La clé des Réglages est OPTIONNELLE : envoyée en en-tête si présente (prioritaire),
- * sinon le proxy /sosoapi injecte la clé de repli SOSOVALUE_API_KEY du .env. Sans clé
- * nulle part, l'amont répond 401 → raison explicite (pas de crash, pas de cache).
+ * La clé des Réglages est envoyée en en-tête si présente. En local, le proxy peut injecter
+ * SOSOVALUE_API_KEY ; sur Vercel, l'absence de clé personnelle est rejetée sans appel réseau.
  */
 export async function fetchEtfFlows(
   actif: ActifEtf,
   cle: string | null,
   signal?: AbortSignal,
 ): Promise<EtfResultat> {
+  if (sosoUnusableWithoutKey(IS_VERCEL, cle)) {
+    return { disponible: false, raison: RAISON_CLE_SOSOVALUE };
+  }
   const cacheCle = `etf:${actif}`;
   const cache = await lireCache<EtfResultat>(cacheCle);
   if (estFrais(cache, ETF_TTL_MS) && cache !== null) return cache.donnee;

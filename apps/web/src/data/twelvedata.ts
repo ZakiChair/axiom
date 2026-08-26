@@ -5,10 +5,10 @@
  *
  * POURQUOI Twelve Data (et pas Yahoo/Stooq) : ces sources keyless sont anti-bot et
  * bloquent l'IP (Yahoo 429, Stooq Proof-of-Work). Twelve Data authentifie par CLÉ →
- * pas de blocage IP, CORS ouvert, officiel/stable. La clé est injectée CÔTÉ PROXY
- * (cf. /tdapi dans vite.config.ts) → jamais exposée au navigateur.
+ * pas de blocage IP, CORS ouvert, officiel/stable. La clé PERSONNELLE reste côté
+ * navigateur ; sur Vercel l'API est appelée directement, en local /tdapi garde le repli .env.
  *
- * - fetchKlines : GET /tdapi/time_series?symbol=&interval=&outputsize=&order=ASC&timezone=UTC
+ * - fetchKlines : GET time_series?symbol=&interval=&outputsize=&order=ASC&timezone=UTC
  * - subscribeKline : pas de WebSocket en gratuit → POLLING (~30 s) de la bougie courante.
  * - subscribeTrades : no-op (pas de tick → orderflow/footprint inactifs).
  *
@@ -20,8 +20,28 @@ import type { Candle, IExchangeAdapter, Timeframe, Unsubscribe } from "@axiom/ty
 import { pollLoop } from "./pollLoop";
 import { healthStore } from "../store/health";
 
-/** Base proxifiée (same-origin) — cf. proxy "/tdapi" dans vite.config.ts (injecte la clé). */
-const SERIES_URL = "/tdapi/time_series";
+/** Base directe sur Vercel, proxifiée par /tdapi en local pour conserver le repli .env. */
+const TWELVE_DATA_API_BASE = import.meta.env.VITE_TWELVE_DATA_API_BASE || "/tdapi";
+const SERIES_URL = `${TWELVE_DATA_API_BASE}/time_series`;
+
+let apiKey: string | null = null;
+
+export function setTwelveDataApiKey(key: string | null): void {
+  const value = key?.trim() ?? "";
+  apiKey = value.length > 0 ? value : null;
+}
+
+export function buildTwelveDataUrl(
+  path: string,
+  params: Record<string, string> | URLSearchParams,
+  personalApiKey: string | null,
+): string {
+  const search = new URLSearchParams(params);
+  if (personalApiKey !== null && personalApiKey.length > 0) search.set("apikey", personalApiKey);
+  const query = search.toString();
+  if (query.length === 0) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}${query}`;
+}
 
 /** Cadence du polling (donnée différée ~15 min → 60 s économise le quota 8 req/min). */
 const POLL_MS = 60_000;
@@ -253,7 +273,7 @@ async function requestSeries(
     order: "ASC",
     timezone: "UTC",
   });
-  const res = await fetch(`${SERIES_URL}?${params.toString()}`, { signal });
+  const res = await fetch(buildTwelveDataUrl(SERIES_URL, params, apiKey), { signal });
   // Twelve Data renvoie un corps JSON d'erreur même en non-2xx → on tente de le lire.
   const json = (await res.json().catch(() => null)) as TwelveDataResponse | null;
   if (json === null) throw new Error(`Twelve Data ${res.status} ${res.statusText}`);
@@ -330,8 +350,8 @@ export const twelveDataAdapter: IExchangeAdapter = {
 
 // ───────── /quote : prix + variation pour la WATCHLIST (data/ticker.ts) ─────────
 
-/** Endpoint /quote proxifié (clé injectée côté serveur, cf. vite.config.ts). */
-const QUOTE_URL = "/tdapi/quote";
+/** Endpoint /quote direct sur Vercel ou proxifié en local, comme /time_series. */
+const QUOTE_URL = `${TWELVE_DATA_API_BASE}/quote`;
 
 /** Mise à jour ticker tradfi (même forme que TickerUpdate de data/ticker.ts). */
 export interface TwelveDataQuote {
@@ -377,7 +397,7 @@ export async function fetchQuotes(symbols: string[]): Promise<TwelveDataQuote[]>
   if (symbols.length === 0) return [];
   for (let i = 0; i < symbols.length; i++) await acquireSlot();
   const params = new URLSearchParams({ symbol: symbols.join(",") });
-  const res = await fetch(`${QUOTE_URL}?${params.toString()}`);
+  const res = await fetch(buildTwelveDataUrl(QUOTE_URL, params, apiKey));
   const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
   if (json === null) throw new Error(`Twelve Data quote ${res.status} ${res.statusText}`);
   return parseQuotes(json, symbols);

@@ -96,7 +96,7 @@ describe("ChartIndicators — pont aux-aware (Task 14)", () => {
     expect(config.extendData?.series.openInterest).toEqual([undefined, undefined]); // pas de données réelles
   });
 
-  it("statut error : shortName suffixé ' (indisponible)'", () => {
+  it("statut error : shortName suffixé ' (UNUSABLE)'", () => {
     const errorStatus: AuxStatus = { status: "error", message: "source injoignable" };
     vi.spyOn(auxProvider, "getAligned").mockReturnValue(errorStatus);
     const { indicators, chart } = makeIndicators();
@@ -105,7 +105,63 @@ describe("ChartIndicators — pont aux-aware (Task 14)", () => {
     indicators.sync([oiInstance], candles, "binance");
 
     const [config] = chart.createIndicator.mock.calls[0]!;
-    expect(config.shortName).toBe("Open Interest (indisponible)");
+    expect(config.shortName).toBe("Open Interest (UNUSABLE)");
+  });
+
+  it("statut ready sans aucune sortie finie : shortName suffixé ' (UNUSABLE)'", () => {
+    const readyStatus: AuxStatus = { status: "ready", aux: { oi: [] } };
+    vi.spyOn(auxProvider, "getAligned").mockReturnValue(readyStatus);
+    const { indicators, chart } = makeIndicators();
+
+    indicators.setMarket("BTCUSDT", "1h");
+    indicators.sync([oiInstance], candles, "binance");
+
+    const [config] = chart.createIndicator.mock.calls[0]!;
+    expect(config.shortName).toBe("Open Interest (UNUSABLE)");
+    expect(config.extendData?.series.openInterest).toEqual([undefined, undefined]);
+  });
+
+  it("contexte incompatible : court-circuite le fetch aux et affiche UNUSABLE", () => {
+    const getAlignedSpy = vi.spyOn(auxProvider, "getAligned").mockReturnValue({ status: "pending" });
+    const { indicators, chart } = makeIndicators();
+
+    indicators.setMarket("SPY", "1h");
+    indicators.sync([oiInstance], candles, "twelvedata");
+
+    expect(getAlignedSpy).not.toHaveBeenCalled();
+    const [config] = chart.createIndicator.mock.calls[0]!;
+    expect(config.shortName).toBe("Open Interest (UNUSABLE)");
+  });
+
+  it("recompute renvoie le shortName d'un indicateur sans aux contextuellement UNUSABLE", () => {
+    const cvdInstance: ActiveIndicator = { instanceId: "cvd-1", defId: "cvd", params: { smooth: 1 }, couleurIdx: 0 };
+    const { indicators, chart } = makeIndicators();
+
+    indicators.setMarket("BTCUSD", "1h");
+    indicators.sync([cvdInstance], candles, "kraken");
+    expect(chart.createIndicator.mock.calls[0]![0].shortName).toBe("CVD (Volume Delta cumulé) (1) (UNUSABLE)");
+
+    chart.overrideIndicator.mockClear();
+    indicators.recompute([cvdInstance], candles, "kraken");
+
+    expect(chart.overrideIndicator.mock.calls[0]![0].shortName).toBe("CVD (Volume Delta cumulé) (1) (UNUSABLE)");
+  });
+
+  it("ne classe pas UNUSABLE une stratégie sans aux qui n'a temporairement aucun trade", () => {
+    const strategy: ActiveIndicator = {
+      instanceId: "strategy-1",
+      defId: "stratRsiReversion",
+      params: { length: 14, survente: 30, surachat: 70, lignesTrades: true },
+      couleurIdx: 0,
+    };
+    const { indicators, chart } = makeIndicators();
+
+    indicators.setMarket("BTCUSDT", "1h");
+    indicators.sync([strategy], candles, "binance");
+
+    const [config] = chart.createIndicator.mock.calls[0]!;
+    expect(config.extendData?.series.prixEntree).toEqual([undefined, undefined]);
+    expect(config.shortName).toBe("Stratégie RSI réversion (14, 30, 70)");
   });
 
   it("le suffixe n'est PAS collant : un recompute() en ready après un pending revient à un shortName sans suffixe", () => {

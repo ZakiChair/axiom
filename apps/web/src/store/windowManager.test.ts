@@ -288,6 +288,19 @@ describe("WINDOW_REGISTRY", () => {
     expect(ids).toContain("sect");
     expect(mnemos).toContain("SECT");
   });
+
+  it("annote uniquement les quatre dégradations Vercel, full restant implicite", () => {
+    const support = (id: string) => {
+      const fenetre = (WINDOW_REGISTRY as readonly { id: string; vercel?: "partial" | "unusable" }[])
+        .find((w) => w.id === id);
+      return fenetre?.vercel ?? "full";
+    };
+    expect(support("replay")).toBe("unusable");
+    expect(support("whales")).toBe("unusable");
+    expect(support("liquidations")).toBe("partial");
+    expect(support("globe")).toBe("partial");
+    expect(support("eco")).toBe("full");
+  });
 });
 
 describe("menuWindows (menu Fonctions dérivé du registre)", () => {
@@ -316,6 +329,15 @@ describe("menuWindows (menu Fonctions dérivé du registre)", () => {
     expect(parId.get("stablecoins")).toBe(true);
     expect(parId.get("dist")).toBe(true);
     expect(parId.get("eco")).toBe(false);
+  });
+
+  it("propage le support Vercel résolu, y compris full implicite", () => {
+    const parId = new Map(menuWindows().map((w) => [w.id, w.vercel]));
+    expect(parId.get("replay")).toBe("unusable");
+    expect(parId.get("whales")).toBe("unusable");
+    expect(parId.get("liquidations")).toBe("partial");
+    expect(parId.get("globe")).toBe("partial");
+    expect(parId.get("eco")).toBe("full");
   });
 });
 
@@ -348,15 +370,15 @@ describe("menuWindowsGroupees (menu Fonctions par sections — c'est LUI que la 
     expect(total).toBe(menuWindows().length);
   });
 
-  it("résout menuLabel et `nouveau` comme la dérivation de référence", () => {
-    const brief = menuWindowsGroupees()
-      .flatMap((s) => s.entrees)
-      .find((e) => e.id === "brief");
+  it("résout menuLabel, `nouveau` et le support Vercel comme la dérivation de référence", () => {
+    const entrees = menuWindowsGroupees().flatMap((s) => s.entrees);
+    const brief = entrees.find((e) => e.id === "brief");
     expect(brief?.libelle).toBe("Point marché (snapshot)");
-    const liq = menuWindowsGroupees()
-      .flatMap((s) => s.entrees)
-      .find((e) => e.id === "liquidations");
+    expect(brief?.vercel).toBe("full");
+    const liq = entrees.find((e) => e.id === "liquidations");
     expect(liq?.nouveau).toBe(true);
+    expect(liq?.vercel).toBe("partial");
+    expect(entrees.find((e) => e.id === "replay")?.vercel).toBe("unusable");
   });
 });
 

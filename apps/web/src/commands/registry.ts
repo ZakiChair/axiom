@@ -27,6 +27,7 @@ import { settingsUiStore } from "../store/settings-ui";
 import { exportChartImage, clearAllOverlays } from "../chart/drawing";
 import { QUOTE_ASSETS } from "../data/symbol";
 import { pousserToast } from "../store/toasts";
+import { raisonUnusableIndicateur } from "../lib/indicatorUsability";
 
 // ─────────────────────────── Types ───────────────────────────
 
@@ -399,7 +400,14 @@ export function construireRegistre(): Commande[] {
       categorie: "indicateur",
       motsCles: ["indicateur", def.name, def.category, def.id],
       apercu: `Ajoute ou retire ${def.name} du graphe`,
-      action: () => indicatorsStore.getState().toggle(def.id),
+      action: () => {
+        const raison = raisonUnusableIndicateur(def, marketStore.getState());
+        if (raison !== null) {
+          pousserToast(`UNUSABLE — ${raison}`);
+          return;
+        }
+        indicatorsStore.getState().toggle(def.id);
+      },
     });
   }
 

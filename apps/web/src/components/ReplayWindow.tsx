@@ -14,8 +14,9 @@ import { useRef, useState } from "react";
 import { useStore } from "zustand";
 import { replayStore, joursProposes, REPLAY_TFS, VITESSES } from "../store/replay";
 import { debutJour, JOUR_MS } from "../data/replayFeed";
-import { BoutonRafraichir, EnTeteFenetre, NoteSource, Vide } from "./ui";
+import { BoutonRafraichir, EnTeteFenetre, NoteSource, Unusable, Vide } from "./ui";
 import { formatEntier } from "../lib/format";
+import { IS_VERCEL } from "../lib/deployment";
 
 /** Formate un nombre d'octets en Ko/Mo. */
 function formatOctets(o: number): string {
@@ -35,6 +36,21 @@ export function ReplayWindow() {
   // Valeur locale du curseur pendant un glissé (évite un seek à chaque frame du drag).
   const [scrub, setScrub] = useState<number | null>(null);
   const scrubRef = useRef<number | null>(null);
+
+  if (IS_VERCEL) {
+    return (
+      <>
+        <EnTeteFenetre
+          mnemo="REPLAY"
+          titre="Replay de marché"
+          sousTitre="Dumps aggTrades officiels (data.binance.vision) · Binance spot"
+        />
+        <div className="p-3">
+          <Unusable raison="Le replay dépend du daemon local axiomd, indisponible sur Vercel." />
+        </div>
+      </>
+    );
+  }
 
   const updateScrub = (value: number): void => {
     scrubRef.current = value;

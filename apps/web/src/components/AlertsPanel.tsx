@@ -26,6 +26,7 @@ import { marketStore } from "../store/market";
 import { alertsStore } from "../store/alerts";
 import { presetAlertsStore } from "../store/presetAlerts";
 import { demanderPermissionNotifications } from "../alerts/runtime";
+import { IS_VERCEL } from "../lib/deployment";
 import { formatHeure } from "../lib/format";
 import { navigateTo } from "../lib/navigation";
 import {
@@ -34,7 +35,7 @@ import {
   INDICATEURS_CROISEMENT,
 } from "./alertsPanel.util";
 import { SidebarSection } from "./SidebarSection";
-import { Vide } from "./ui";
+import { Badge, Unusable, Vide } from "./ui";
 
 /** Types d'alerte proposés à la création. */
 type TypeAlerte =
@@ -170,6 +171,7 @@ export function AlertsPanel() {
   };
 
   const soumettre = () => {
+    if (IS_VERCEL && type === "whale-flux") return;
     let condition: Condition;
     if (type === "prix-croise") {
       const n = Number(niveau);
@@ -292,6 +294,11 @@ export function AlertsPanel() {
         </button>
       }
     >
+      {IS_VERCEL && (
+        <div className="px-3 py-2">
+          <Unusable raison="L’évaluation et les notifications onglet fermé nécessitent axiomd ; les alertes front restent actives tant que l’application est ouverte." />
+        </div>
+      )}
       {/* Liste des alertes */}
       <div className="max-h-64 overflow-y-auto">
         {defs.length === 0 && (
@@ -302,6 +309,7 @@ export function AlertsPanel() {
         {defs.map((d) => {
           const arm = etatArmement(d.arme);
           const derniere = d.declenchements[d.declenchements.length - 1];
+          const whaleUnusable = IS_VERCEL && d.condition.type === "whale-flux";
           return (
             <div
               key={d.id}
@@ -326,7 +334,10 @@ export function AlertsPanel() {
                 {/* Spans (et non divs) : contenu autorisé dans un <button>. */}
                 <span className="flex items-baseline justify-between gap-2">
                   <span className="truncate font-medium text-text">{d.symbol}</span>
-                  <span className={`shrink-0 text-[10px] ${arm.classe}`}>{arm.texte}</span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    {whaleUnusable && <Badge ton="down">UNUSABLE</Badge>}
+                    <span className={`text-[10px] ${arm.classe}`}>{arm.texte}</span>
+                  </span>
                 </span>
                 <span className="flex items-baseline justify-between gap-2">
                   <span className="truncate text-[11px] text-text-dim">
@@ -650,6 +661,9 @@ export function AlertsPanel() {
 
         {type === "whale-flux" && (
           <div className="space-y-1.5">
+            {IS_VERCEL && (
+              <Unusable raison="Les alertes Baleines dépendent du collecteur local axiomd, indisponible sur Vercel." />
+            )}
             <div className="flex gap-1.5">
               <select
                 value={actifWhale}
@@ -693,7 +707,8 @@ export function AlertsPanel() {
         <button
           type="button"
           onClick={soumettre}
-          className="w-full rounded border border-border bg-bg px-2 py-1 text-xs text-text-dim transition hover:border-text-dim hover:text-text"
+          disabled={IS_VERCEL && type === "whale-flux"}
+          className="w-full rounded border border-border bg-bg px-2 py-1 text-xs text-text-dim transition hover:border-text-dim hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
         >
           {type === "regime-seuil"
             ? "Ajouter (régime global)"

@@ -35,12 +35,16 @@ export interface MouvementWhale {
 
 /** Santé du collecteur daemon (affichée en pied de fenêtre — fraîcheur honnête). */
 export interface SanteWhales {
-  btcWsConnecte: boolean;
-  dernierTxBtcTs: number;
+  /** Dernier poll de bloc BTC abouti (ms), 0 = aucun. */
+  dernierPollBtcTs: number;
+  /** Hauteur du dernier bloc BTC traité, null tant qu'aucun. */
+  dernierBlocBtc: number | null;
+  erreurBtc: string | null;
   prixBtc: number | null;
   dernierPollEthTs: number;
   dernierBlocEth: number | null;
   erreurEth: string | null;
+  /** Une clé ETHERSCAN_API_KEY est-elle présente (requise pour les stables) ? */
   clePresente: boolean;
 }
 
@@ -105,8 +109,9 @@ export function mapperReponseWhales(brut: unknown): ReponseWhales | null {
   return {
     mouvements,
     sante: {
-      btcWsConnecte: s.btcWsConnecte === true,
-      dernierTxBtcTs: typeof s.dernierTxBtcTs === "number" ? s.dernierTxBtcTs : 0,
+      dernierPollBtcTs: typeof s.dernierPollBtcTs === "number" ? s.dernierPollBtcTs : 0,
+      dernierBlocBtc: typeof s.dernierBlocBtc === "number" ? s.dernierBlocBtc : null,
+      erreurBtc: typeof s.erreurBtc === "string" ? s.erreurBtc : null,
       prixBtc: typeof s.prixBtc === "number" && Number.isFinite(s.prixBtc) ? s.prixBtc : null,
       dernierPollEthTs: typeof s.dernierPollEthTs === "number" ? s.dernierPollEthTs : 0,
       dernierBlocEth: typeof s.dernierBlocEth === "number" ? s.dernierBlocEth : null,

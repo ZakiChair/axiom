@@ -9,6 +9,7 @@ import {
   montantNetBtc,
   mouvementsRecents,
   nombreHex,
+  parseLatestBlock,
   parseLogsEtherscan,
   parseRequeteWhales,
   parseTxBtc,
@@ -31,22 +32,19 @@ const ETH_BINANCE = "0x28c6c06298d514db089934071355e5743bf21d60";
 // ─────────────────────────── BTC ───────────────────────────
 
 describe("parseTxBtc", () => {
-  const utx = {
-    op: "utx",
-    x: {
-      hash: "abc123",
-      time: 1_755_000_000, // secondes epoch → ms attendu
-      inputs: [{ prev_out: { addr: "1Emetteur", value: 50 } }, { prev_out: { addr: "1Emetteur" } }],
-      out: [
-        { addr: "1Destinataire", value: 200_000_000 },
-        { addr: "1Emetteur", value: 40_000_000 },
-        { value: 1 }, // sortie sans adresse (OP_RETURN) : écartée
-      ],
-    },
+  const txBrute = {
+    hash: "abc123",
+    time: 1_755_000_000, // secondes epoch → ms attendu
+    inputs: [{ prev_out: { addr: "1Emetteur", value: 50 } }, { prev_out: { addr: "1Emetteur" } }],
+    out: [
+      { addr: "1Destinataire", value: 200_000_000 },
+      { addr: "1Emetteur", value: 40_000_000 },
+      { value: 1 }, // sortie sans adresse (OP_RETURN) : écartée
+    ],
   };
 
-  it("parse une tx utx (secondes → ms, entrées dédoublonnées, sorties adressées)", () => {
-    const tx = parseTxBtc(utx);
+  it("parse une tx de rawblock (secondes → ms, entrées dédoublonnées, sorties adressées)", () => {
+    const tx = parseTxBtc(txBrute);
     expect(tx).toEqual({
       hash: "abc123",
       t: 1_755_000_000_000,
@@ -58,10 +56,21 @@ describe("parseTxBtc", () => {
     });
   });
 
-  it("écarte les messages d'un autre op et les corps illisibles", () => {
-    expect(parseTxBtc({ op: "block", x: {} })).toBeNull();
+  it("écarte les corps illisibles (hash absent/vide, non-objet)", () => {
+    expect(parseTxBtc({ time: 1 })).toBeNull();
     expect(parseTxBtc(null)).toBeNull();
-    expect(parseTxBtc({ op: "utx", x: { hash: "" } })).toBeNull();
+    expect(parseTxBtc({ hash: "" })).toBeNull();
+  });
+});
+
+describe("parseLatestBlock", () => {
+  const HASH = "00000000000000000002194a80ef7f78197c4c6deecaae1898b6482fff2c662b";
+
+  it("extrait hash + hauteur, rejette hash non-hex ou hauteur invalide", () => {
+    expect(parseLatestBlock({ hash: HASH, height: 964_101 })).toEqual({ hash: HASH, height: 964_101 });
+    expect(parseLatestBlock({ hash: "xyz", height: 1 })).toBeNull();
+    expect(parseLatestBlock({ hash: HASH, height: 0 })).toBeNull();
+    expect(parseLatestBlock(null)).toBeNull();
   });
 });
 
@@ -294,9 +303,9 @@ describe("traiterWhales — GET /whales/recent", () => {
     const { req, url } = requete("?minUsd=2500000&asset=BTC");
     const res = traiterWhales(req, url, d);
     expect(res.status).toBe(200);
-    const corps = (await res.json()) as { mouvements: MouvementWhale[]; sante: { btcWsConnecte: boolean } };
+    const corps = (await res.json()) as { mouvements: MouvementWhale[]; sante: { clePresente: boolean } };
     expect(corps.mouvements.map((m) => m.id)).toEqual(["id2"]);
-    expect(typeof corps.sante.btcWsConnecte).toBe("boolean");
+    expect(typeof corps.sante.clePresente).toBe("boolean");
   });
 
   it("405 hors GET, 404 hors /recent", async () => {

@@ -7,15 +7,20 @@
  * GET /whales/recent (poll lent) ; sans daemon, la fenêtre WHALES affiche un repli honnête.
  *
  * DEUX amonts GRATUITS, déjà dans l'écosystème du projet (aucun fournisseur nouveau) :
- *  - BTC : WS `wss://ws.blockchain.info/inv` (op `unconfirmed_sub`) — toutes les tx
- *    mempool (~3-7/s), filtrées au seuil notionnel. Montant = somme des sorties vers des
+ *  - BTC : poll REST `blockchain.info/latestblock` (~60 s, réponse minuscule) puis
+ *    `rawblock/<hash>` à CHAQUE nouveau bloc (~10 min, quelques Mo — précédent leaderboard
+ *    HL 34 Mo/6 h). Transactions CONFIRMÉES : latence ~1 bloc mais aucune tx RBF-annulable,
+ *    et pas de WebSocket à maintenir (le fil mempool `unconfirmed_sub` du même hôte est
+ *    MUET, vérifié 2026-08-25 — pong OK, zéro utx). Montant = somme des sorties vers des
  *    adresses ABSENTES des entrées (heuristique standard d'exclusion du change ; c'est une
  *    ESTIMATION, étiquetée comme telle côté UI). Prix BTC pollé (~60 s) sur Binance REST.
  *  - ETH (stables USDT/USDC) : poll Etherscan v2 `getLogs` (topic Transfer) toutes les
  *    ~90 s depuis le dernier bloc traité (persisté en KV « whales »/« dernierBlocEth »).
- *    Clé ETHERSCAN_API_KEY du .env si présente ; sans clé, cadence dégradée (1 req/5 s
- *    respectée par une pause entre appels). Peg 1 USDT/USDC = 1 $ assumé (l'écart réel
- *    est négligeable devant le seuil). L'ETH natif n'est PAS couvert en v1 (il faudrait
+ *    Clé ETHERSCAN_API_KEY du .env REQUISE : l'API v2 refuse toute requête sans clé
+ *    (« Missing/Invalid API Key », vérifié 2026-08-25 — l'ancien mode dégradé sans clé
+ *    n'existe plus). Sans clé, le poll n'est PAS démarré (aucun appel voué au 401) et la
+ *    santé l'affiche honnêtement. Peg 1 USDT/USDC = 1 $ assumé (l'écart réel est
+ *    négligeable devant le seuil). L'ETH natif n'est PAS couvert en v1 (il faudrait
  *    scanner chaque bloc complet) — documenté côté UI.
  *
  * Étiquetage dépôt/retrait : liste curée whaleLabels.ts (hot/cold wallets publics). Un
@@ -39,8 +44,10 @@ export const SEUIL_COLLECTE_USD = 1_000_000;
 const RETENTION_MS = 30 * 24 * 3_600_000;
 /** Cadence de la purge (quotidienne). */
 const PERIODE_PURGE_MS = 24 * 3_600_000;
-/** Poll du prix BTC (conversion USD des tx mempool). */
+/** Poll du prix BTC (conversion USD des transferts). */
 const PERIODE_PRIX_MS = 60_000;
+/** Poll du dernier bloc BTC (~60 s ; un bloc toutes les ~10 min → aucun manqué). */
+export const PERIODE_POLL_BTC_MS = 60_000;
 /** Poll Etherscan (2 tokens + n° de bloc). */
 export const PERIODE_POLL_ETH_MS = 90_000;
 /** Rattrapage MAX par poll (blocs) : au-delà on saute en avant (getLogs plafonne à 1000 lignes). */
@@ -49,7 +56,10 @@ export const MAX_BLOCS_PAR_POLL = 25;
 export const LIMITE_DEFAUT = 200;
 export const LIMITE_MAX = 2_000;
 
-const WS_BLOCKCHAIN_URL = "wss://ws.blockchain.info/inv";
+const URL_LATEST_BLOCK = "https://blockchain.info/latestblock";
+const URL_RAWBLOCK = "https://blockchain.info/rawblock";
+/** Garde de volume du rawblock (un bloc plein pèse quelques Mo ; 80 Mo = aberrant). */
+const TAILLE_MAX_BLOC = 80 * 1024 * 1024;
 const URL_PRIX_BTC = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT";
 const URL_ETHERSCAN = "https://api.etherscan.io/v2/api";
 /** topic0 de l'évènement ERC-20 Transfer(address,address,uint256). */
@@ -150,10 +160,10 @@ export function mouvementsRecents(d: Database, asset: string, depuisMs: number):
 
 // ─────────────────────────── BTC — fonctions PURES (testées) ───────────────────────────
 
-/** Une transaction mempool blockchain.info réduite aux champs utiles. */
+/** Une transaction blockchain.info (rawblock) réduite aux champs utiles. */
 export interface TxBtc {
   hash: string;
-  /** ms epoch (le fil livre des secondes). */
+  /** ms epoch (l'API livre des secondes). */
   t: number;
   /** Adresses des entrées (dédoublonnées). */
   entrees: string[];
@@ -162,15 +172,12 @@ export interface TxBtc {
 }
 
 /**
- * Parse un message WS blockchain.info (`op: "utx"`) en TxBtc, ou `null` si le message
- * est d'un autre type / illisible. Les sorties sans adresse (OP_RETURN…) sont écartées.
- * Fonction PURE.
+ * Parse une transaction blockchain.info (élément de `rawblock.tx`) en TxBtc, ou `null`
+ * si illisible. Les sorties sans adresse (OP_RETURN…) sont écartées. Fonction PURE.
  */
 export function parseTxBtc(brut: unknown): TxBtc | null {
   if (!brut || typeof brut !== "object") return null;
-  const msg = brut as { op?: unknown; x?: unknown };
-  if (msg.op !== "utx" || !msg.x || typeof msg.x !== "object") return null;
-  const x = msg.x as { hash?: unknown; time?: unknown; inputs?: unknown; out?: unknown };
+  const x = brut as { hash?: unknown; time?: unknown; inputs?: unknown; out?: unknown };
   if (typeof x.hash !== "string" || x.hash.length === 0) return null;
 
   const entrees: string[] = [];
@@ -197,6 +204,16 @@ export function parseTxBtc(brut: unknown): TxBtc | null {
     entrees,
     sorties,
   };
+}
+
+/** En-tête du dernier bloc (`GET /latestblock`) : hash + hauteur, ou `null`. Fonction PURE. */
+export function parseLatestBlock(brut: unknown): { hash: string; height: number } | null {
+  if (!brut || typeof brut !== "object") return null;
+  const b = brut as { hash?: unknown; height?: unknown };
+  const height = Number(b.height);
+  if (typeof b.hash !== "string" || !/^[0-9a-fA-F]{64}$/.test(b.hash)) return null;
+  if (!Number.isFinite(height) || height <= 0) return null;
+  return { hash: b.hash, height };
 }
 
 /**
@@ -407,9 +424,12 @@ export function parseRequeteWhales(params: URLSearchParams): RequeteWhales {
 
 /** Santé exposée dans la réponse /whales/recent (badges honnêtes côté UI). */
 export interface SanteWhales {
-  btcWsConnecte: boolean;
-  /** Dernier mouvement BTC persisté (ms), 0 = aucun depuis le boot. */
-  dernierTxBtcTs: number;
+  /** Dernier poll de bloc BTC ABOUTI (ms), 0 = aucun. */
+  dernierPollBtcTs: number;
+  /** Hauteur du dernier bloc BTC traité, null tant qu'aucun. */
+  dernierBlocBtc: number | null;
+  /** Dernière erreur du poll BTC (message court), null si le dernier poll a réussi. */
+  erreurBtc: string | null;
   /** Prix BTC courant utilisé pour la conversion, null tant qu'aucun poll n'a abouti. */
   prixBtc: number | null;
   /** Dernier poll Etherscan ABOUTI (ms), 0 = aucun. */
@@ -417,13 +437,14 @@ export interface SanteWhales {
   dernierBlocEth: number | null;
   /** Dernière erreur Etherscan (message court), null si le dernier poll a réussi. */
   erreurEth: string | null;
-  /** Une clé ETHERSCAN_API_KEY est-elle présente (cadence pleine) ? */
+  /** Une clé ETHERSCAN_API_KEY est-elle présente (requise pour les stables) ? */
   clePresente: boolean;
 }
 
 const sante: SanteWhales = {
-  btcWsConnecte: false,
-  dernierTxBtcTs: 0,
+  dernierPollBtcTs: 0,
+  dernierBlocBtc: null,
+  erreurBtc: null,
   prixBtc: null,
   dernierPollEthTs: 0,
   dernierBlocEth: null,
@@ -431,131 +452,58 @@ const sante: SanteWhales = {
   clePresente: false,
 };
 
-// ─────────────────────────── Boucle WS BTC (pattern liqFeed.ts) ───────────────────────────
+// ─────────────────────────── Poll blocs BTC ───────────────────────────
 
-const DELAI_STALE_MS = 5 * 60_000; // le fil mempool est dense : 5 min sans message = zombie
-const DELAI_STABLE_RESET_MS = 10_000;
-const BACKOFF_MAX_MS = 30_000;
-const PERIODE_WATCHDOG_MS = 15_000;
+/** Hauteur du dernier bloc BTC traité (mémoire process — un redémarrage repart du bloc courant). */
+let dernierBlocBtcTraite: number | null = null;
 
 /**
- * Ouvre une WebSocket reconnectante (backoff exponentiel 1s→30s + watchdog de staleness).
- * COPIE ADAPTÉE de liqFeed.ts (`connecterBoucleWs`) avec un hook `onEtat` pour tenir la
- * santé à jour — dupliquée sciemment : mutualiser exigerait de toucher liqFeed (hors
- * périmètre de ce lot).
+ * Un poll BTC : en-tête du dernier bloc, puis `rawblock` SI la hauteur a avancé —
+ * chaque tx du bloc passe l'heuristique de montant net + seuil et rejoint la table.
+ * Sans prix BTC connu, le bloc n'est PAS consommé (retraité au poll suivant, une fois
+ * le prix disponible). Un redémarrage ne rattrape pas les blocs manqués (trou assumé,
+ * même politique que la fenêtre Etherscan).
  */
-function connecterBoucleWs(
-  url: string,
-  onOpen: (ws: WebSocket) => void,
-  onMessage: (data: string) => boolean | void,
-  onEtat: (connecte: boolean) => void,
-): () => void {
-  let ws: WebSocket | null = null;
-  let fermeParUtilisateur = false;
-  let essai = 0;
-  let dernierMessageTs = 0;
-  let minuteurReconnexion: ReturnType<typeof setTimeout> | null = null;
-  let minuteurStable: ReturnType<typeof setTimeout> | null = null;
-  let minuteurWatchdog: ReturnType<typeof setInterval> | null = null;
-
-  const nettoyerStable = (): void => {
-    if (minuteurStable) {
-      clearTimeout(minuteurStable);
-      minuteurStable = null;
-    }
-  };
-  const nettoyerWatchdog = (): void => {
-    if (minuteurWatchdog) {
-      clearInterval(minuteurWatchdog);
-      minuteurWatchdog = null;
-    }
-  };
-  const armerWatchdog = (): void => {
-    nettoyerWatchdog();
-    minuteurWatchdog = setInterval(() => {
-      if (Date.now() - dernierMessageTs <= DELAI_STALE_MS) return;
-      try {
-        ws?.close();
-      } catch {
-        /* fermeture best-effort */
-      }
-    }, Math.min(DELAI_STALE_MS, PERIODE_WATCHDOG_MS));
-  };
-
-  const connecter = (): void => {
-    const socket = new WebSocket(url);
-    ws = socket;
-
-    socket.onopen = (): void => {
-      dernierMessageTs = Date.now();
-      onEtat(true);
-      onOpen(socket);
-      nettoyerStable();
-      minuteurStable = setTimeout(() => {
-        essai = 0;
-      }, DELAI_STABLE_RESET_MS);
-      armerWatchdog();
-    };
-    socket.onmessage = (ev: MessageEvent): void => {
-      dernierMessageTs = Date.now();
-      const estDonnee = onMessage(ev.data as string) === true;
-      if (estDonnee) essai = 0;
-    };
-    socket.onerror = (): void => {
-      try {
-        socket.close();
-      } catch {
-        /* best-effort */
-      }
-    };
-    socket.onclose = (): void => {
-      nettoyerStable();
-      nettoyerWatchdog();
-      onEtat(false);
-      if (fermeParUtilisateur) return;
-      const delai = Math.min(BACKOFF_MAX_MS, 1_000 * 2 ** essai);
-      essai += 1;
-      minuteurReconnexion = setTimeout(connecter, delai);
-    };
-  };
-
-  connecter();
-
-  return () => {
-    fermeParUtilisateur = true;
-    if (minuteurReconnexion) clearTimeout(minuteurReconnexion);
-    nettoyerStable();
-    nettoyerWatchdog();
-    try {
-      ws?.close();
-    } catch {
-      /* best-effort */
-    }
-  };
-}
-
-/** Traite un message WS blockchain.info : parse, filtre au seuil, persiste. */
-function ingererMessageBtc(data: string): boolean {
-  let brut: unknown;
+async function pollBtc(): Promise<void> {
   try {
-    brut = JSON.parse(data);
-  } catch {
-    return false;
-  }
-  const tx = parseTxBtc(brut);
-  if (tx === null) return false; // ping / autre op
-  const prix = sante.prixBtc;
-  if (prix === null) return true; // pas encore de prix : message de données quand même
-  const mouvement = versMouvementBtc(tx, prix, SEUIL_COLLECTE_USD);
-  if (mouvement !== null) {
-    try {
-      insererMouvements(db(), [mouvement]);
-      sante.dernierTxBtcTs = Date.now();
-    } catch (err) {
-      console.error("[axiomd] insertion mouvement BTC échouée :", err);
+    const resTete = await fetch(URL_LATEST_BLOCK, { signal: AbortSignal.timeout(15_000) });
+    if (!resTete.ok) throw new Error(`latestblock HTTP ${resTete.status}`);
+    const tete = parseLatestBlock(await resTete.json());
+    if (tete === null) throw new Error("latestblock illisible");
+
+    if (dernierBlocBtcTraite !== null && tete.height <= dernierBlocBtcTraite) {
+      sante.dernierPollBtcTs = Date.now();
+      sante.erreurBtc = null;
+      return; // aucun nouveau bloc : poll abouti quand même (santé fraîche)
     }
+    const prix = sante.prixBtc;
+    if (prix === null) throw new Error("prix BTC pas encore disponible");
+
+    const resBloc = await fetch(`${URL_RAWBLOCK}/${tete.hash}`, {
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!resBloc.ok) throw new Error(`rawblock HTTP ${resBloc.status}`);
+    const cl = resBloc.headers.get("content-length");
+    if (cl !== null && Number(cl) > TAILLE_MAX_BLOC) throw new Error("rawblock trop volumineux");
+    const bloc = (await resBloc.json()) as { tx?: unknown };
+    const txs = Array.isArray(bloc.tx) ? bloc.tx : [];
+
+    const lot: MouvementWhale[] = [];
+    for (const brut of txs) {
+      const tx = parseTxBtc(brut);
+      if (tx === null) continue;
+      const mouvement = versMouvementBtc(tx, prix, SEUIL_COLLECTE_USD);
+      if (mouvement !== null) lot.push(mouvement);
+    }
+    insererMouvements(db(), lot);
+    dernierBlocBtcTraite = tete.height;
+    sante.dernierBlocBtc = tete.height;
+    sante.dernierPollBtcTs = Date.now();
+    sante.erreurBtc = null;
+  } catch (err) {
+    sante.erreurBtc = err instanceof Error ? err.message : String(err);
+    console.error("[axiomd] poll blocs BTC échoué :", err);
   }
-  return true;
 }
 
 // ─────────────────────────── Poll prix BTC ───────────────────────────
@@ -620,7 +568,7 @@ function pause(ms: number): Promise<void> {
  */
 async function pollEtherscan(cle: string): Promise<void> {
   const d = db();
-  const pauseMs = cle.length > 0 ? 250 : 5_500;
+  const pauseMs = 250; // clé garantie par l'appelant (sans clé, le poll n'est pas démarré)
   try {
     const resBloc = await fetch(urlEtherscan({ module: "proxy", action: "eth_blockNumber" }, cle), {
       signal: AbortSignal.timeout(15_000),
@@ -676,29 +624,34 @@ async function pollEtherscan(cle: string): Promise<void> {
 // ─────────────────────────── Boucle de vie ───────────────────────────
 
 /**
- * Démarre la collecte des mouvements baleines : WS BTC + poll prix + poll Etherscan +
- * purge quotidienne. Renvoie une fonction d'arrêt. À appeler UNE fois depuis index.ts.
+ * Démarre la collecte des mouvements baleines : poll prix + poll blocs BTC + poll
+ * Etherscan + purge quotidienne. Renvoie une fonction d'arrêt. À appeler UNE fois
+ * depuis index.ts.
  */
 export function demarrerBoucleWhales(cleEtherscan: string): () => void {
   assurerTableWhales(getDb());
   sante.clePresente = cleEtherscan.length > 0;
   sante.dernierBlocEth = lireDernierBloc(getDb());
 
-  // Prix d'abord (les tx mempool arrivant avant le premier prix sont ignorées — assumé).
-  void pollPrixBtc();
+  // Prix d'abord : pollBtc refuse de consommer un bloc tant qu'aucun prix n'est connu
+  // (le bloc reste dû et sera retraité au poll suivant).
+  const demarrage = (async (): Promise<void> => {
+    await pollPrixBtc();
+    await pollBtc();
+  })();
+  void demarrage;
   const minuteurPrix = setInterval(() => void pollPrixBtc(), PERIODE_PRIX_MS);
+  const minuteurBtc = setInterval(() => void pollBtc(), PERIODE_POLL_BTC_MS);
 
-  const stopWs = connecterBoucleWs(
-    WS_BLOCKCHAIN_URL,
-    (ws) => ws.send(JSON.stringify({ op: "unconfirmed_sub" })),
-    ingererMessageBtc,
-    (connecte) => {
-      sante.btcWsConnecte = connecte;
-    },
-  );
-
-  void pollEtherscan(cleEtherscan);
-  const minuteurEth = setInterval(() => void pollEtherscan(cleEtherscan), PERIODE_POLL_ETH_MS);
+  // Etherscan v2 refuse toute requête SANS clé : ne pas démarrer un poll voué au 401
+  // (la santé porte la raison, la fenêtre WHALES affiche « clé requise »).
+  let minuteurEth: ReturnType<typeof setInterval> | null = null;
+  if (cleEtherscan.length > 0) {
+    void pollEtherscan(cleEtherscan);
+    minuteurEth = setInterval(() => void pollEtherscan(cleEtherscan), PERIODE_POLL_ETH_MS);
+  } else {
+    sante.erreurEth = "clé ETHERSCAN_API_KEY requise (Etherscan v2 sans mode dégradé)";
+  }
 
   const purger = (): void => {
     try {
@@ -712,9 +665,9 @@ export function demarrerBoucleWhales(cleEtherscan: string): () => void {
 
   return () => {
     clearInterval(minuteurPrix);
-    clearInterval(minuteurEth);
+    clearInterval(minuteurBtc);
+    if (minuteurEth !== null) clearInterval(minuteurEth);
     clearInterval(minuteurPurge);
-    stopWs();
   };
 }
 

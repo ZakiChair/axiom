@@ -99,25 +99,37 @@ function LigneMouvement({ m }: { m: MouvementWhale }) {
   );
 }
 
-/** Pied de santé du collecteur : états honnêtes (WS BTC, poll ETH, clé, prix). */
+/** Pied de santé du collecteur : états honnêtes (blocs BTC, poll ETH, clé, prix). */
 function SanteCollecteur({ sante }: { sante: SanteWhales }) {
+  const btcOk = sante.erreurBtc === null && sante.dernierPollBtcTs > 0;
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Badge ton={sante.btcWsConnecte ? "up" : "down"}>
-        {sante.btcWsConnecte ? "BTC · flux connecté" : "BTC · flux coupé"}
+      <Badge
+        ton={btcOk ? "up" : "warn"}
+        title={sante.erreurBtc ?? "Blocs confirmés blockchain.info (~10 min de latence, sans mempool)."}
+      >
+        {btcOk
+          ? `BTC · bloc ${sante.dernierBlocBtc ?? "—"}`
+          : sante.erreurBtc !== null
+            ? "BTC · erreur de poll"
+            : "BTC · en attente"}
       </Badge>
-      <Badge ton={sante.dernierPollEthTs > 0 && sante.erreurEth === null ? "up" : "warn"}>
-        {sante.erreurEth !== null
-          ? "ETH · erreur Etherscan"
-          : sante.dernierPollEthTs > 0
-            ? "ETH · stables suivis"
-            : "ETH · en attente"}
+      <Badge
+        ton={sante.dernierPollEthTs > 0 && sante.erreurEth === null ? "up" : "warn"}
+        title={
+          !sante.clePresente
+            ? "L'API Etherscan v2 refuse toute requête sans clé : renseigner ETHERSCAN_API_KEY dans apps/web/.env pour suivre USDT/USDC."
+            : (sante.erreurEth ?? undefined)
+        }
+      >
+        {!sante.clePresente
+          ? "stables · clé Etherscan requise"
+          : sante.erreurEth !== null
+            ? "stables · erreur Etherscan"
+            : sante.dernierPollEthTs > 0
+              ? "stables · suivis"
+              : "stables · en attente"}
       </Badge>
-      {!sante.clePresente && (
-        <Badge ton="warn" title="Sans ETHERSCAN_API_KEY (apps/web/.env), le suivi des stables tourne en cadence dégradée (1 req/5 s).">
-          sans clé Etherscan
-        </Badge>
-      )}
     </div>
   );
 }
@@ -213,9 +225,9 @@ function OngletFlux() {
       )}
 
       <NoteSource>
-        Couverture v1 : BTC natif (mempool blockchain.info, montant net estimé hors change) + USDT/USDC
-        ERC-20 (Etherscan, ~90 s) ≥ 1 M$. ETH natif et autres chaînes non couverts. Étiquettes
-        dépôt/retrait : liste curée de wallets exchange publics, non exhaustive.{" "}
+        Couverture v1 : BTC natif (blocs confirmés blockchain.info ~10 min, montant net estimé hors change)
+        + USDT/USDC ERC-20 (Etherscan, clé requise, ~90 s) ≥ 1 M$. ETH natif et autres chaînes non couverts.
+        Étiquettes dépôt/retrait : liste curée de wallets exchange publics, non exhaustive.{" "}
         <BadgeFiabilite niveau="estimation" label="estimation" title="Montants BTC nets heuristiques ; directions dépendantes d'une liste d'adresses curée." />
       </NoteSource>
     </div>

@@ -31,8 +31,9 @@ function mouvement(over: Partial<MouvementWhale> = {}): MouvementWhale {
 }
 
 const sante = {
-  btcWsConnecte: true,
-  dernierTxBtcTs: 1,
+  dernierPollBtcTs: 1,
+  dernierBlocBtc: 964_101,
+  erreurBtc: null,
   prixBtc: 100_000,
   dernierPollEthTs: 2,
   dernierBlocEth: 3,
@@ -60,8 +61,9 @@ describe("mapperReponseWhales", () => {
   it("santé partielle → valeurs de repli sûres (jamais de NaN/undefined)", () => {
     const res = mapperReponseWhales({ mouvements: [], sante: {} });
     expect(res?.sante).toEqual({
-      btcWsConnecte: false,
-      dernierTxBtcTs: 0,
+      dernierPollBtcTs: 0,
+      dernierBlocBtc: null,
+      erreurBtc: null,
       prixBtc: null,
       dernierPollEthTs: 0,
       dernierBlocEth: null,

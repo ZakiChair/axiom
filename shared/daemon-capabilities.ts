@@ -17,6 +17,7 @@ export const DAEMON_CAPABILITIES = [
   "hl",
   "snapshots",
   "proxy",
+  "whales",
 ] as const;
 
 export type DaemonCapability = (typeof DAEMON_CAPABILITIES)[number];

@@ -207,6 +207,7 @@ const WINDOW_COMPONENTS: Record<WindowId, LazyExoticComponent<FenetreComp>> = {
   expy: lazy(() => import("./components/ExpyWindow").then((m) => ({ default: m.ExpyWindow }))),
   paper: lazy(() => import("./components/PaperWindow").then((m) => ({ default: m.PaperWindow }))),
   mine: lazy(() => import("./components/MineWindow").then((m) => ({ default: m.MineWindow }))),
+  whales: lazy(() => import("./components/WhalesWindow").then((m) => ({ default: m.WhalesWindow }))),
   cycle: lazy(() => import("./components/CycleWindow").then((m) => ({ default: m.CycleWindow }))),
   evts: lazy(() => import("./components/EvtsWindow").then((m) => ({ default: m.EvtsWindow }))),
   scen: lazy(() => import("./components/ScenWindow").then((m) => ({ default: m.ScenWindow }))),

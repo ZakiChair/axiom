@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import type { AlertDef, Declenchement } from "@axiom/alerts";
 import {
+  assetsWhaleFluxActifs,
   assurerTablesAlertes,
   chargerDefs,
   doitNotifier,
   evaluerEtPersister,
   evaluerLiqCascadeTick,
   evaluerTick,
+  evaluerWhaleFluxTick,
   FENETRE_LIQ_MS,
   fusionnerEtatArme,
   purgerJournalAlertes,
@@ -21,6 +23,7 @@ import {
   TYPES_PRIX,
 } from "./alerts";
 import { assurerTableLiquidations } from "./liquidations";
+import { assurerTableWhales } from "./whales";
 
 /** Def d'alerte prix-croise binance, réutilisée dans plusieurs cas. */
 function alertePrix(id: string, symbol: string, niveau: number, sens: "hausse" | "baisse" = "hausse"): AlertDef {
@@ -58,6 +61,23 @@ function alerteCascade(id: string, symbol: string, seuilUsdParMin = 1_000_000): 
     symbol,
     source: "binance",
     condition: { type: "liq-cascade", seuilUsdParMin },
+    actif: true,
+    declenchements: [],
+  };
+}
+
+/** Def whale-flux (symbol = ACTIF par convention, porteur binance). */
+function alerteWhale(
+  id: string,
+  asset: string,
+  seuilUsd = 5_000_000,
+  direction: "depot" | "retrait" | "tous" = "tous",
+): AlertDef {
+  return {
+    id,
+    symbol: asset,
+    source: "binance",
+    condition: { type: "whale-flux", seuilUsd, direction },
     actif: true,
     declenchements: [],
   };
@@ -369,6 +389,93 @@ describe("evaluerLiqCascadeTick (tick complet en base)", () => {
     const journal = d.query("SELECT notifie FROM alertes_journal").all() as Array<{ notifie: number }>;
     expect(journal).toHaveLength(1);
     expect(journal[0]?.notifie).toBe(0); // journalisé mais NON notifié (front actif)
+    expect(notifs).toHaveLength(0);
+  });
+});
+
+describe("assetsWhaleFluxActifs", () => {
+  test("ne retient que les actives whale-flux (actifs uniques, majuscules, triés)", () => {
+    const defs: AlertDef[] = [
+      alerteWhale("w1", "usdt"),
+      alerteWhale("w2", "BTC"),
+      { ...alerteWhale("w3", "ETH"), actif: false }, // inactive → exclue
+      alerteCascade("l1", "BTCUSDT"), // autre type → exclue
+      alerteWhale("w4", "BTC"), // doublon actif
+    ];
+    expect(assetsWhaleFluxActifs(defs)).toEqual(["BTC", "USDT"]);
+  });
+});
+
+describe("evaluerWhaleFluxTick (tick complet en base)", () => {
+  /** Insère un mouvement baleine minimal dans `whale_moves` (table créée au besoin). */
+  function insererMouvementTest(d: Database, id: string, t: number, usd: number, direction: string): void {
+    assurerTableWhales(d);
+    d.query(
+      `INSERT INTO whale_moves (id, t, chain, asset, qty, usd, de, vers, deLabel, versLabel, direction)
+       VALUES (?, ?, 'btc', 'BTC', 1, ?, '1A', '1B', NULL, NULL, ?)`,
+    ).run(id, t, usd, direction);
+  }
+
+  test("inerte sans def whale-flux active", () => {
+    const d = baseAvecAlerte(alertePrix("p1", "BTCUSDT", 100));
+    const notifier = (): void => {
+      throw new Error("ne doit pas notifier");
+    };
+    evaluerWhaleFluxTick(1_000_000, { db: d, notifier, dernierHeartbeat: 0 });
+    const tables = d
+      .query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'whale_moves'")
+      .all();
+    expect(tables).toHaveLength(0); // inerte : la table n'a même pas été créée
+  });
+
+  test("calibre fenêtre vide puis déclenche sur un transfert ≥ seuil dans la fenêtre 10 min", () => {
+    const d = baseAvecAlerte(alerteWhale("w1", "BTC", 5_000_000, "tous"));
+    const notifs: Array<{ symbol: string; decl: Declenchement }> = [];
+    const notifier = (symbol: string, decl: Declenchement): void => {
+      notifs.push({ symbol, decl });
+    };
+    const opts = { db: d, notifier, dernierHeartbeat: 0 }; // heartbeat ancien → notifie
+
+    // Tick 1 : aucune ligne → calibrage (armée), aucun déclenchement.
+    evaluerWhaleFluxTick(1_000_000, opts);
+    expect(chargerDefs(d).find((x) => x.id === "w1")?.arme).toBe(true);
+    expect(notifs).toHaveLength(0);
+
+    // 8 M$ dans la fenêtre + 20 M$ HORS fenêtre (> 10 min avant le tick 2) : ignoré.
+    insererMouvementTest(d, "m1", 1_050_000, 8_000_000, "inconnu");
+    insererMouvementTest(d, "m2", 300_000, 20_000_000, "depot");
+
+    // Tick 2 : max fenêtre = 8 M$ ≥ 5 M$ → déclenche, journalise (symbol = actif) et notifie.
+    evaluerWhaleFluxTick(1_060_000, opts);
+    const journal = d
+      .query("SELECT alertId, symbol, valeur, notifie FROM alertes_journal")
+      .all() as Array<{ alertId: string; symbol: string; valeur: number; notifie: number }>;
+    expect(journal).toHaveLength(1);
+    expect(journal[0]).toMatchObject({ alertId: "w1", symbol: "BTC", valeur: 8_000_000, notifie: 1 });
+    expect(notifs).toHaveLength(1);
+    expect(notifs[0]?.symbol).toBe("BTC");
+
+    // Tick 3 : la fenêtre a glissé (plus aucun transfert ≥ seuil) → ré-armement, pas de re-fire.
+    evaluerWhaleFluxTick(2_000_000, opts);
+    expect(chargerDefs(d).find((x) => x.id === "w1")?.arme).toBe(true);
+    expect(notifs).toHaveLength(1);
+  });
+
+  test("filtre par direction : un retrait ne déclenche pas une alerte « dépôt »", () => {
+    const d = baseAvecAlerte(alerteWhale("w2", "USDT", 1_000_000, "depot"));
+    const notifs: Declenchement[] = [];
+    const notifier = (_symbol: string, decl: Declenchement): void => {
+      notifs.push(decl);
+    };
+    const opts = { db: d, notifier, dernierHeartbeat: 0 };
+
+    evaluerWhaleFluxTick(1_000_000, opts); // calibrage (fenêtre vide)
+    assurerTableWhales(d);
+    d.query(
+      `INSERT INTO whale_moves (id, t, chain, asset, qty, usd, de, vers, deLabel, versLabel, direction)
+       VALUES ('m3', 1_005_000, 'eth', 'USDT', 9000000, 9000000, '0xa', '0xb', 'Binance', NULL, 'retrait')`,
+    ).run();
+    evaluerWhaleFluxTick(1_010_000, opts); // retrait 9 M$ mais direction filtrée « depot » → rien
     expect(notifs).toHaveLength(0);
   });
 });

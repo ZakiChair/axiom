@@ -45,10 +45,17 @@ type TypeAlerte =
   | "funding-extreme"
   | "cvd-spot-perp-div"
   | "liq-cascade"
-  | "regime-seuil";
+  | "regime-seuil"
+  | "whale-flux";
 
 /** Symbole porteur neutre d'une alerte GLOBALE (regime-seuil, indépendante du symbole). */
 const PORTEUR_GLOBAL = { symbol: "BTCUSDT", source: "binance" } as const;
+
+/** Actifs suivis par le collecteur whales du daemon (couverture v1 — cf. data/whales.ts). */
+const ACTIFS_WHALE = ["BTC", "USDT", "USDC"] as const;
+
+/** Direction d'une alerte baleine (filtre de la condition whale-flux). */
+type DirectionAlerteWhale = "tous" | "depot" | "retrait";
 
 /** Sens funding (overcrowding). */
 type SensFunding = "long-crowded" | "short-crowded" | "les-deux";
@@ -125,6 +132,10 @@ export function AlertsPanel() {
   // regime-seuil : comparateur + valeur (−2..+2), score composite de régime.
   const [comparateurRegime, setComparateurRegime] = useState<Comparateur>("<=");
   const [valeurRegime, setValeurRegime] = useState("-1.2");
+  // whale-flux : actif surveillé + seuil d'UN transfert (USD) + filtre de direction.
+  const [actifWhale, setActifWhale] = useState<string>("BTC");
+  const [seuilWhale, setSeuilWhale] = useState("10000000");
+  const [directionWhale, setDirectionWhale] = useState<DirectionAlerteWhale>("tous");
   const [journalOuvert, setJournalOuvert] = useState(false);
   const [erreurForm, setErreurForm] = useState<string | null>(null);
   // Suppression armée (pattern SettingsPanel.restaurer) : id de l'alerte à confirmer.
@@ -228,16 +239,27 @@ export function AlertsPanel() {
         return;
       }
       condition = { type: "regime-seuil", comparateur: comparateurRegime, valeur: v };
+    } else if (type === "whale-flux") {
+      // whale-flux : seuil d'UN transfert (USD) strictement positif requis.
+      const s = Number(seuilWhale);
+      if (!Number.isFinite(s) || s <= 0) {
+        setErreurForm("Seuil baleine (> 0 $) requis.");
+        return;
+      }
+      condition = { type: "whale-flux", seuilUsd: s, direction: directionWhale };
     } else {
       // cvd-spot-perp-div — active le pipeline orderflow via le runtime.
       condition = { type: "cvd-spot-perp-div", kind: kindCvd };
     }
     setErreurForm(null);
     // regime-seuil est GLOBAL : porté par un symbole neutre (BTCUSDT/binance).
+    // whale-flux est porté par l'ACTIF surveillé (convention @axiom/alerts, source binance).
     const cible =
       type === "regime-seuil"
         ? PORTEUR_GLOBAL
-        : { symbol: symboleEffectif, source: marketStore.getState().exchange };
+        : type === "whale-flux"
+          ? { symbol: actifWhale, source: "binance" as const }
+          : { symbol: symboleEffectif, source: marketStore.getState().exchange };
     alertsStore.getState().ajouter({
       symbol: cible.symbol,
       source: cible.source,
@@ -368,6 +390,7 @@ export function AlertsPanel() {
             <option value="cvd-spot-perp-div">CVD S/P</option>
             <option value="liq-cascade">Cascade liq</option>
             <option value="regime-seuil">Régime</option>
+            <option value="whale-flux">Baleines</option>
           </select>
         </div>
 
@@ -625,12 +648,58 @@ export function AlertsPanel() {
           </div>
         )}
 
+        {type === "whale-flux" && (
+          <div className="space-y-1.5">
+            <div className="flex gap-1.5">
+              <select
+                value={actifWhale}
+                onChange={(e) => setActifWhale(e.target.value)}
+                title="Actif surveillé (couverture du collecteur : BTC natif + stables ERC-20)"
+                className="rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+              >
+                {ACTIFS_WHALE.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={seuilWhale}
+                onChange={(e) => setSeuilWhale(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && soumettre()}
+                inputMode="numeric"
+                placeholder="Seuil $ (ex. 10000000)"
+                title="Notionnel d'UN transfert on-chain (USD)"
+                className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-xs tabular-nums text-text outline-none placeholder:text-text-dim focus:border-text-dim"
+              />
+              <select
+                value={directionWhale}
+                onChange={(e) => setDirectionWhale(e.target.value as DirectionAlerteWhale)}
+                title="Filtre de direction (étiquetage heuristique — liste curée d'adresses exchange)"
+                className="rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+              >
+                <option value="tous">↕ toutes</option>
+                <option value="depot">→ dépôt</option>
+                <option value="retrait">← retrait</option>
+              </select>
+            </div>
+            <p className="px-0.5 text-[10px] text-text-dim">
+              Évaluée par le daemon uniquement (collecteur whales, tick 30 s, fenêtre 10 min)
+              — notification onglet fermé comprise. Fenêtre WHALES pour le fil.
+            </p>
+          </div>
+        )}
+
         <button
           type="button"
           onClick={soumettre}
           className="w-full rounded border border-border bg-bg px-2 py-1 text-xs text-text-dim transition hover:border-text-dim hover:text-text"
         >
-          {type === "regime-seuil" ? "Ajouter (régime global)" : `Ajouter sur ${symboleEffectif}`}
+          {type === "regime-seuil"
+            ? "Ajouter (régime global)"
+            : type === "whale-flux"
+              ? `Ajouter (baleines ${actifWhale})`
+              : `Ajouter sur ${symboleEffectif}`}
         </button>
         {erreurForm !== null && <p className="text-[10px] text-down">{erreurForm}</p>}
       </div>

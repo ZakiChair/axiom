@@ -584,3 +584,50 @@ export async function liquidationsPush(symbole: string, lot: LiqDaemon[]): Promi
     return false;
   }
 }
+
+// ─────────────────────────── Mouvements baleines (fenêtre WHALES) ───────────────────────────
+
+/** Filtres de lecture des mouvements baleines (traduits en query). */
+export interface OptionsWhalesGet {
+  limite?: number;
+  minUsd?: number;
+  asset?: string;
+}
+
+/**
+ * Lit les mouvements baleines collectés par le daemon (`GET /whales/recent`) — charge utile
+ * BRUTE, dont la VALIDATION de forme vit dans `data/whales.ts` (pure et testée, convention
+ * `hlLiqLevelsGet`). Sonde d'abord la capability `whales` ; renvoie `null` si le daemon est
+ * absent / sans capability / en erreur — la fenêtre affiche alors « nécessite le daemon ».
+ */
+export async function whalesRecentGet(opts: OptionsWhalesGet = {}): Promise<unknown | null> {
+  if (!(await detectDaemon("whales"))) return null;
+  try {
+    const params = new URLSearchParams();
+    if (opts.limite !== undefined) params.set("limite", String(opts.limite));
+    if (opts.minUsd !== undefined) params.set("minUsd", String(opts.minUsd));
+    if (opts.asset !== undefined) params.set("asset", opts.asset);
+    const query = params.toString();
+    const res = await fetch(`${baseDaemon()}/whales/recent${query ? `?${query}` : ""}`);
+    if (!res.ok) return null;
+    return (await res.json()) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Lit les positions des top comptes Hyperliquid d'un coin (`GET /hl/positions/:coin`,
+ * MÊME instantané daemon que les niveaux de liquidation) — charge utile BRUTE, validée
+ * dans `data/whales.ts`. Même régime de repli que `hlLiqLevelsGet`.
+ */
+export async function hlPositionsGet(coin: string): Promise<unknown | null> {
+  if (!(await detectDaemon("hl"))) return null;
+  try {
+    const res = await fetch(`${baseDaemon()}/hl/positions/${encodeURIComponent(coin)}`);
+    if (!res.ok) return null;
+    return (await res.json()) as unknown;
+  } catch {
+    return null;
+  }
+}

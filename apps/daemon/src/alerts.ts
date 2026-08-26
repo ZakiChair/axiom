@@ -43,6 +43,7 @@ import {
 import { assurerTableLiquidations } from "./liquidations";
 import { notifierDeclenchement } from "./notify";
 import type { Routeur } from "./router";
+import { mouvementsRecents } from "./whales";
 
 /** Types de condition évalués sur un TICK de prix (miniTicker). */
 export const TYPES_PRIX: ReadonlySet<string> = new Set(["prix-croise"]);
@@ -56,6 +57,8 @@ export const TYPES_BOUGIE: ReadonlySet<string> = new Set([
 export const TYPES_FUNDING: ReadonlySet<string> = new Set(["funding-extreme"]);
 /** Types de condition évalués sur le tick liquidations (table `liquidations`). */
 export const TYPES_LIQ: ReadonlySet<string> = new Set(["liq-cascade"]);
+/** Types de condition évalués sur le tick baleines (table `whale_moves`). */
+export const TYPES_WHALE: ReadonlySet<string> = new Set(["whale-flux"]);
 // CVD `cvd-spot-perp-div` : hors daemon (pipeline orderflow chart uniquement).
 
 /** Seuil d'anti-doublon : on ne notifie que si le dernier heartbeat > 90 s. */
@@ -68,6 +71,10 @@ export const PERIODE_FUNDING_MS = 60_000;
 export const PERIODE_LIQ_MS = 10_000;
 /** Fenêtre glissante de `liq-cascade` (1 min — même convention que `usdParMinute` front). */
 export const FENETRE_LIQ_MS = 60_000;
+/** Période du tick whale-flux (inerte sans def whale-flux active — la collecte est lente). */
+export const PERIODE_WHALE_MS = 30_000;
+/** Fenêtre glissante de `whale-flux` (10 min — convention documentée dans @axiom/alerts). */
+export const FENETRE_WHALE_MS = 10 * 60_000;
 /** Borne du journal renvoyé par GET /alerts/journal. */
 const LIMITE_JOURNAL = 200;
 /**
@@ -124,6 +131,21 @@ export function symbolesLiqCascadeActifs(defs: readonly AlertDef[]): string[] {
     ...new Set(
       defs
         .filter((d) => d.actif && d.source === "binance" && d.condition.type === "liq-cascade")
+        .map((d) => d.symbol.toUpperCase()),
+    ),
+  ].sort();
+}
+
+/**
+ * Actifs (majuscules) ayant au moins une alerte active de type `whale-flux`.
+ * Convention @axiom/alerts : `symbol` = ACTIF (« BTC », « USDT »…), `source` =
+ * "binance" (porteur neutre). Fonction PURE (testée) — pattern `symbolesLiqCascadeActifs`.
+ */
+export function assetsWhaleFluxActifs(defs: readonly AlertDef[]): string[] {
+  return [
+    ...new Set(
+      defs
+        .filter((d) => d.actif && d.source === "binance" && d.condition.type === "whale-flux")
         .map((d) => d.symbol.toUpperCase()),
     ),
   ].sort();
@@ -337,6 +359,28 @@ export function evaluerLiqCascadeTick(maintenant: number = Date.now(), opts: Opt
   }
 }
 
+// ─────────────────────────── Tick whale-flux (table `whale_moves`) ───────────────────────────
+
+/**
+ * Un tick d'évaluation `whale-flux` : pour chaque ACTIF ayant une alerte whale-flux
+ * active, injecte les mouvements (usd, direction) de la fenêtre glissante de 10 min
+ * (table `whale_moves`, ingérée par whales.ts) et évalue via le mécanisme standard.
+ * INERTE si aucune def whale-flux active. Pattern `evaluerLiqCascadeTick`.
+ */
+export function evaluerWhaleFluxTick(maintenant: number = Date.now(), opts: OptionsEval = {}): void {
+  const d = opts.db ?? getDb();
+  const assets = assetsWhaleFluxActifs(lireDefsKv(d));
+  if (assets.length === 0) return; // inerte : aucune alerte whale-flux active
+  for (const asset of assets) {
+    const whaleMouvements = mouvementsRecents(d, asset, maintenant - FENETRE_WHALE_MS).map((m) => ({
+      usd: m.usd,
+      direction: m.direction,
+    }));
+    // dernierPrix: 0 — le moteur whale-flux n'utilise pas le prix (comme liq-cascade).
+    evaluerEtPersister(asset, TYPES_WHALE, { maintenant, dernierPrix: 0, whaleMouvements }, opts);
+  }
+}
+
 // ─────────────────────────── Boucle de vie ───────────────────────────
 
 let feed: Feed | null = null;
@@ -449,10 +493,23 @@ export function demarrerBoucleAlertes(): () => void {
   tickLiq();
   const minuteurLiq = setInterval(tickLiq, PERIODE_LIQ_MS);
 
+  // Tick whale-flux (30 s) : mouvements de la table `whale_moves` (ingérée par whales.ts)
+  // sur la fenêtre glissante de 10 min — inerte sans def whale-flux active.
+  const tickWhale = (): void => {
+    try {
+      evaluerWhaleFluxTick();
+    } catch (err) {
+      console.error("[axiomd] évaluation whale-flux échouée :", err);
+    }
+  };
+  tickWhale();
+  const minuteurWhale = setInterval(tickWhale, PERIODE_WHALE_MS);
+
   return () => {
     clearInterval(minuteur);
     clearInterval(minuteurFunding);
     clearInterval(minuteurLiq);
+    clearInterval(minuteurWhale);
     feed?.arreter();
     feed = null;
   };

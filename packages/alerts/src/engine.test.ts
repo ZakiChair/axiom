@@ -453,6 +453,61 @@ describe("regime-seuil", () => {
   });
 });
 
+describe("whale-flux", () => {
+  const cond: Condition = { type: "whale-flux", seuilUsd: 10_000_000, direction: "tous" };
+  /** Contexte whale : liste (usd, direction) des mouvements de la fenêtre récente. */
+  function ctxWhale(
+    mouvements: Array<{ usd: number; direction: "depot" | "retrait" | "interne" | "inconnu" }>,
+  ): ContexteAlerte {
+    return { maintenant: 1, dernierPrix: 0, whaleMouvements: mouvements };
+  }
+
+  it("calibre puis déclenche sur un transfert ≥ seuil, se ré-arme fenêtre redevenue calme", () => {
+    const { fires, defFinale } = piloter(def(cond), [
+      ctxWhale([]), // fenêtre vide → calibrage armé
+      ctxWhale([{ usd: 12_000_000, direction: "inconnu" }]), // gros transfert → DÉCLENCHE
+      ctxWhale([{ usd: 12_000_000, direction: "inconnu" }]), // même fenêtre → rien (désarmée)
+      ctxWhale([{ usd: 2_000_000, direction: "depot" }]), // fenêtre calme → ré-armement
+      ctxWhale([{ usd: 10_000_000, direction: "retrait" }]), // bord exact (≥) → DÉCLENCHE
+    ]);
+    expect(fires).toEqual([false, true, false, false, true]);
+    expect(defFinale.declenchements).toHaveLength(2);
+  });
+
+  it("ne déclenche PAS immédiatement si un gros transfert est déjà dans la fenêtre à la création", () => {
+    const { fires } = piloter(def(cond), [
+      ctxWhale([{ usd: 50_000_000, direction: "depot" }]), // déjà ≥ seuil → calibrage désarmé
+      ctxWhale([]), // fenêtre vidée → ré-armement
+      ctxWhale([{ usd: 11_000_000, direction: "interne" }]), // nouveau transfert → DÉCLENCHE
+    ]);
+    expect(fires).toEqual([false, false, true]);
+  });
+
+  it("filtre par direction (dépôt seul) et rapporte le max de la direction filtrée", () => {
+    const depot: Condition = { type: "whale-flux", seuilUsd: 5_000_000, direction: "depot" };
+    const { fires, defFinale } = piloter(def(depot), [
+      ctxWhale([]), // calibrage armé
+      // Retrait énorme mais AUCUN dépôt ≥ seuil → rien.
+      ctxWhale([{ usd: 80_000_000, direction: "retrait" }]),
+      // Dépôt 6 M + retrait 80 M → déclenche sur le DÉPÔT (valeur = 6 M).
+      ctxWhale([
+        { usd: 80_000_000, direction: "retrait" },
+        { usd: 6_000_000, direction: "depot" },
+      ]),
+    ]);
+    expect(fires).toEqual([false, false, true]);
+    // La valeur journalisée est le max de la direction filtrée, pas le max global.
+    expect(defFinale.declenchements).toHaveLength(1);
+  });
+
+  it("non évaluable si whaleMouvements absent (def inchangée, référence conservée)", () => {
+    const d = def(cond);
+    const res = evaluerAlertes([d], { maintenant: 0, dernierPrix: 0 });
+    expect(res.defs[0]).toBe(d);
+    expect(res.modifie).toBe(false);
+  });
+});
+
 describe("filtrage du lot", () => {
   it("laisse les defs inactives inchangées (même référence)", () => {
     const inactive = def({ type: "prix-croise", niveau: 100, sens: "hausse" }, { actif: false });

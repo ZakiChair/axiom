@@ -7,36 +7,68 @@
   "outputDirectory": "apps/web/dist",
   "rewrites": [
     {
-      "source": "/extapi/(.*)",
-      "destination": "/api/proxy?__axiom_route=extapi&__axiom_path=$1"
+      "source": "/extapi/:path*",
+      "destination": "/api/proxy?__axiom_route=extapi&__axiom_path=:path"
     },
     {
-      "source": "/fredapi/(.*)",
-      "destination": "/api/proxy?__axiom_route=fredapi&__axiom_path=$1"
+      "source": "/extapi/:path*/",
+      "destination": "/api/proxy?__axiom_route=extapi&__axiom_path=:path/"
     },
     {
-      "source": "/coinalyzeapi/(.*)",
-      "destination": "/api/proxy?__axiom_route=coinalyzeapi&__axiom_path=$1"
+      "source": "/fredapi/:path*",
+      "destination": "/api/proxy?__axiom_route=fredapi&__axiom_path=:path"
     },
     {
-      "source": "/tdapi/(.*)",
-      "destination": "/api/proxy?__axiom_route=tdapi&__axiom_path=$1"
+      "source": "/fredapi/:path*/",
+      "destination": "/api/proxy?__axiom_route=fredapi&__axiom_path=:path/"
     },
     {
-      "source": "/mexcapi/(.*)",
-      "destination": "/api/proxy?__axiom_route=mexcapi&__axiom_path=$1"
+      "source": "/coinalyzeapi/:path*",
+      "destination": "/api/proxy?__axiom_route=coinalyzeapi&__axiom_path=:path"
     },
     {
-      "source": "/sosoapi/(.*)",
-      "destination": "/api/proxy?__axiom_route=sosoapi&__axiom_path=$1"
+      "source": "/coinalyzeapi/:path*/",
+      "destination": "/api/proxy?__axiom_route=coinalyzeapi&__axiom_path=:path/"
     },
     {
-      "source": "/bgapi/(.*)",
-      "destination": "/api/proxy?__axiom_route=bgapi&__axiom_path=$1"
+      "source": "/tdapi/:path*",
+      "destination": "/api/proxy?__axiom_route=tdapi&__axiom_path=:path"
     },
     {
-      "source": "/ethscanapi/(.*)",
-      "destination": "/api/proxy?__axiom_route=ethscanapi&__axiom_path=$1"
+      "source": "/tdapi/:path*/",
+      "destination": "/api/proxy?__axiom_route=tdapi&__axiom_path=:path/"
+    },
+    {
+      "source": "/mexcapi/:path*",
+      "destination": "/api/proxy?__axiom_route=mexcapi&__axiom_path=:path"
+    },
+    {
+      "source": "/mexcapi/:path*/",
+      "destination": "/api/proxy?__axiom_route=mexcapi&__axiom_path=:path/"
+    },
+    {
+      "source": "/sosoapi/:path*",
+      "destination": "/api/proxy?__axiom_route=sosoapi&__axiom_path=:path"
+    },
+    {
+      "source": "/sosoapi/:path*/",
+      "destination": "/api/proxy?__axiom_route=sosoapi&__axiom_path=:path/"
+    },
+    {
+      "source": "/bgapi/:path*",
+      "destination": "/api/proxy?__axiom_route=bgapi&__axiom_path=:path"
+    },
+    {
+      "source": "/bgapi/:path*/",
+      "destination": "/api/proxy?__axiom_route=bgapi&__axiom_path=:path/"
+    },
+    {
+      "source": "/ethscanapi/:path*",
+      "destination": "/api/proxy?__axiom_route=ethscanapi&__axiom_path=:path"
+    },
+    {
+      "source": "/ethscanapi/:path*/",
+      "destination": "/api/proxy?__axiom_route=ethscanapi&__axiom_path=:path/"
     },
     {
       "source": "/(.*)",

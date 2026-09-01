@@ -28,6 +28,7 @@ import { exportChartImage, clearAllOverlays } from "../chart/drawing";
 import { QUOTE_ASSETS } from "../data/symbol";
 import { pousserToast } from "../store/toasts";
 import { raisonUnusableIndicateur } from "../lib/indicatorUsability";
+import { supportedTimeframesFor } from "../data/adapters";
 
 // ─────────────────────────── Types ───────────────────────────
 
@@ -209,7 +210,17 @@ export function appliquerNavigation(nav: NavCommande): void {
   const avant = { exchange: m.exchange, symbol: m.symbol, timeframe: m.timeframe };
   if (nav.source !== undefined) m.setExchange(nav.source);
   if (nav.symbol !== undefined) m.setSymbol(nav.symbol);
-  if (nav.timeframe !== undefined) m.setTimeframe(nav.timeframe);
+  if (nav.timeframe !== undefined) {
+    // Garde alignée sur le chemin clavier (hotkeys) : la source/symbole viennent d'être
+    // appliqués, on valide contre la capacité RÉELLE de la cible — sinon l'adaptateur
+    // lève (« Coinbase: timeframe '6M' non supporté ») et le pane part en erreur.
+    const { exchange, symbol } = marketStore.getState();
+    if (supportedTimeframesFor(exchange, symbol).includes(nav.timeframe)) {
+      m.setTimeframe(nav.timeframe);
+    } else {
+      pousserToast(`Timeframe ${nav.timeframe} non supporté sur cette source`);
+    }
+  }
   if (nav.symbol !== undefined && nav.symbol !== avant.symbol) {
     pousserToast(`Paire changée → ${nav.symbol}`, {
       libelle: "Annuler",
@@ -243,15 +254,24 @@ export function commandeNavigation(nav: NavCommande): Commande {
 // ─────────────────────────── Recherche fuzzy (pur) ───────────────────────────
 
 /**
+ * Normalisation de RECHERCHE : sans accents (NFD) et en minuscules — réutilise
+ * `normaliserTexte` (même règle que le focus sidebar) pour que « saisonnalite »
+ * matche « Saisonnalité » dans les deux sens.
+ */
+function normaliserRecherche(s: string): string {
+  return normaliserTexte(s).toLowerCase();
+}
+
+/**
  * Score de correspondance fuzzy par SOUS-SÉQUENCE : chaque caractère de `requete`
  * doit apparaître dans `cible`, dans l'ordre. Renvoie null si ce n'est pas une
  * sous-séquence, sinon un score (plus haut = meilleur). Bonus : début de mot,
  * caractères consécutifs, cible courte ; malus : caractères sautés. Fonction PURE.
  */
 export function scoreFuzzy(requete: string, cible: string): number | null {
-  const q = requete.trim().toLowerCase();
+  const q = normaliserRecherche(requete.trim());
   if (q.length === 0) return 0;
-  const c = cible.toLowerCase();
+  const c = normaliserRecherche(cible);
 
   let score = 0;
   let curseur = 0;
@@ -296,7 +316,7 @@ export function rechercher(registre: readonly Commande[], requete: string): Comm
       if (s !== null && (meilleur === null || s > meilleur)) meilleur = s;
     }
     // Bonus fort quand le mnémonique COMMENCE par la requête (frappe Bloomberg directe).
-    if (cmd.mnemonique !== undefined && cmd.mnemonique.toLowerCase().startsWith(q.toLowerCase())) {
+    if (cmd.mnemonique !== undefined && normaliserRecherche(cmd.mnemonique).startsWith(normaliserRecherche(q))) {
       meilleur = (meilleur ?? 0) + 30;
     }
     if (meilleur !== null) notes.push({ cmd, note: meilleur });
@@ -387,7 +407,15 @@ export function construireRegistre(): Commande[] {
       categorie: "timeframe",
       motsCles: ["timeframe", "tf", "intervalle", tf],
       apercu: `Bascule le graphe en ${tf}`,
-      action: () => marketStore.getState().setTimeframe(tf),
+      action: () => {
+        // Même garde que le chemin clavier (pattern du toggle Orderflow : toast, pas d'état cassé).
+        const { exchange, symbol } = marketStore.getState();
+        if (!supportedTimeframesFor(exchange, symbol).includes(tf)) {
+          pousserToast(`Timeframe ${tf} non supporté sur cette source`);
+          return;
+        }
+        marketStore.getState().setTimeframe(tf);
+      },
     });
   }
 

@@ -297,6 +297,72 @@ describe("rechercher — filtrage + tri par pertinence", () => {
   });
 });
 
+describe("scoreFuzzy / rechercher — diacritiques normalisés (normaliserTexte réutilisé)", () => {
+  it("« saisonnalite » (frappe naturelle sans accent) matche « Saisonnalité »", () => {
+    // Vérifié sur l'algorithme actuel : renvoyait null contre TOUTES les cibles de SEAG,
+    // et la palette proposait alors « Changer la paire → SAISONNALITE » (symbole poubelle).
+    expect(scoreFuzzy("saisonnalite", "Saisonnalité")).not.toBeNull();
+    expect(scoreFuzzy("saisonnalité", "saisonnalite")).not.toBeNull(); // sens inverse aussi
+  });
+
+  it("rechercher retrouve une commande par ses mots-clés accentués", () => {
+    const cmds: Commande[] = [
+      {
+        id: "seag",
+        mnemonique: "SEAG",
+        libelle: "Saisonnalité",
+        categorie: "panneau",
+        motsCles: ["saisonnalité", "heatmap", "mensuel"],
+        action: () => {},
+      },
+    ];
+    expect(rechercher(cmds, "saisonnalite").map((c) => c.id)).toEqual(["seag"]);
+  });
+});
+
+describe("commandes tf:* et navigation — garde des TF supportés (parité avec le clavier)", () => {
+  it("tf:6M sur Coinbase ne change pas le TF et pousse un toast explicite", () => {
+    const marketAvant = marketStore.getState();
+    const toastIdsAvant = new Set(toastsStore.getState().toasts.map((t) => t.id));
+    marketStore.setState({ exchange: "coinbase", symbol: "BTCUSDT", timeframe: "1h" });
+    try {
+      const cmd = construireRegistre().find((c) => c.id === "tf:6M");
+      expect(cmd).toBeDefined();
+
+      cmd?.action();
+
+      expect(marketStore.getState().timeframe).toBe("1h"); // pas de setTimeframe → pas de backfill 400
+      expect(toastsStore.getState().toasts.at(-1)?.texte).toContain("non supporté");
+    } finally {
+      marketStore.setState(marketAvant, true);
+      for (const t of toastsStore.getState().toasts) {
+        if (!toastIdsAvant.has(t.id)) retirerToast(t.id);
+      }
+    }
+  });
+
+  it("appliquerNavigation applique symbole+source mais ignore (avec toast) un TF non supporté par la cible", () => {
+    const marketAvant = marketStore.getState();
+    const toastIdsAvant = new Set(toastsStore.getState().toasts.map((t) => t.id));
+    try {
+      // Kraken ne supporte pas 3d (adapters.ts) : « BTC 3D KRAKEN » via ⌘K.
+      appliquerNavigation({ source: "kraken", symbol: "ETHUSD", timeframe: "3d" });
+
+      expect(marketStore.getState().exchange).toBe("kraken");
+      expect(marketStore.getState().symbol).toBe("ETHUSD");
+      expect(marketStore.getState().timeframe).toBe(marketAvant.timeframe); // TF inchangé
+      expect(
+        toastsStore.getState().toasts.some((t) => t.texte.includes("non supporté")),
+      ).toBe(true);
+    } finally {
+      marketStore.setState(marketAvant, true);
+      for (const t of toastsStore.getState().toasts) {
+        if (!toastIdsAvant.has(t.id)) retirerToast(t.id);
+      }
+    }
+  });
+});
+
 describe("construireRegistre — commandes attendues présentes", () => {
   const registre = construireRegistre();
   const ids = new Set(registre.map((c) => c.id));

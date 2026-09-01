@@ -100,6 +100,7 @@ export const WINDOW_REGISTRY = [
   { id: "mine", title: "Coût de production (minage)", mnemonic: "MINE", defaultWidth: 640, defaultHeight: 560, nouveau: true, groupe: "On-chain & stablecoins" },
   { id: "whales", title: "Mouvements de baleines", mnemonic: "WHALES", defaultWidth: 640, defaultHeight: 680, menuLabel: "Mouvements de baleines (on-chain & Hyperliquid)", nouveau: true, vercel: "unusable", groupe: "On-chain & stablecoins" },
   { id: "cycle", title: "Cycle 4 ans (halving)", mnemonic: "CYCLE", defaultWidth: 760, defaultHeight: 600, nouveau: true, groupe: "On-chain & stablecoins" },
+  { id: "btcPowerLaw", title: "Bitcoin Power Law", mnemonic: "BPL", defaultWidth: 760, defaultHeight: 640, nouveau: true, groupe: "On-chain & stablecoins" },
   { id: "evts", title: "Étude d'évènements", mnemonic: "EVTS", defaultWidth: 760, defaultHeight: 560, nouveau: true, groupe: "Analyse" },
   { id: "scen", title: "Stress-test", mnemonic: "SCEN", defaultWidth: 720, defaultHeight: 540, nouveau: true, groupe: "Risque & portefeuille" },
   // Haute par défaut : TROIS graphiques empilés, ~215 px chacun (mesuré) — en dessous

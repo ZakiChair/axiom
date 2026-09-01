@@ -5,7 +5,7 @@
  * Fonctions, la persistance et le montage (map typée par `WindowId`) en dérivent — oublier
  * une entrée y casse la compilation. SEULE la palette ⌘K échappe à cette dérivation : les
  * commandes `panneau:*` sont écrites À LA MAIN (ici, ou dans le store de la fenêtre). Une
- * 38ᵉ fenêtre serait donc muette au ⌘K sans que rien ne le signale.
+ * 39ᵉ fenêtre serait donc muette au ⌘K sans que rien ne le signale.
  *
  * Ce fichier ferme le trou : toute fenêtre du registre DOIT être ouvrable par une commande,
  * soit de `windowPanelCommands`, soit — liste explicite ci-dessous — d'un autre module.

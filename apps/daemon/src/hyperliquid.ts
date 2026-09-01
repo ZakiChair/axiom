@@ -335,6 +335,10 @@ function obtenirInstantane(d: Database, fetchImpl: typeof fetch, now: number): P
     const adresses = await chargerPool(d, fetchImpl, now);
     if (adresses.length === 0) return null;
     const inst = await construireInstantane(adresses, fetchImpl, now);
+    // Échec amont TOTAL (0 adresse scannée = les 150 POST ont échoué) : ne PAS cacher
+    // 5 min un instantané vide comme une donnée valide — on sert l'ancien cache (même
+    // périmé) s'il existe, sinon null (503) ; la requête suivante retente immédiatement.
+    if (inst.adressesScannees === 0) return cacheInstantane;
     cacheInstantane = inst;
     return inst;
   })();

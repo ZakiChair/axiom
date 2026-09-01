@@ -11,6 +11,7 @@ import {
   reinitialiserHl,
   SEUIL_VALEUR_USD,
   traiterHl,
+  TTL_INSTANTANE_MS,
   URL_INFO,
   URL_LEADERBOARD,
   type NiveauLiqHL,
@@ -374,5 +375,28 @@ describe("GET /hl/liqlevels/:coin", () => {
     expect(res?.status).toBe(405);
     const uAutre = new URL("http://x/autre");
     expect(await routeur.gerer(new Request(uAutre), uAutre)).toBeNull();
+  });
+});
+
+describe("instantané entièrement vide (échec amont total)", () => {
+  test("0 adresse scannée : PAS de cache — 503 sans cache antérieur, retente immédiate, sinon stale servi", async () => {
+    reinitialiserHl();
+    const d = baseTest();
+    const url = new URL("http://x/hl/liqlevels/BTC");
+    // 1) Toutes les adresses en échec, aucun cache antérieur → 503 (pas un 200 « 0 adresses »).
+    const ko = stubHl({ adresses: [A1, A2], infoKo: [A1, A2] });
+    const res = await traiterHl(new Request(url), url, d, T0, ko.fetchImpl);
+    expect(res.status).toBe(503);
+    // 2) La requête SUIVANTE retente immédiatement (rien n'a été caché 5 min) et réussit.
+    const okStub = stubHl({ adresses: [A1], etats: { [A1]: etat([pos()]) } });
+    const res2 = await traiterHl(new Request(url), url, d, T0 + 1_000, okStub.fetchImpl);
+    expect(res2.status).toBe(200);
+    const corps2 = (await res2.json()) as { ts: number; adressesScannees: number };
+    expect(corps2.adressesScannees).toBe(2); // pool persisté [A1,A2] ; A2 → etat([]) du stub
+    // 3) Cache expiré + échec amont total → l'ANCIEN instantané est servi (jamais le vide).
+    const res3 = await traiterHl(new Request(url), url, d, T0 + 1_000 + TTL_INSTANTANE_MS + 1, ko.fetchImpl);
+    expect(res3.status).toBe(200);
+    const corps3 = (await res3.json()) as { ts: number };
+    expect(corps3.ts).toBe(T0 + 1_000); // instantané de l'étape 2, pas un vide reconstruit
   });
 });

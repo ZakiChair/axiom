@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { compacterSiNecessaire, ratioFreelist } from "./db";
+import { compacterSiNecessaire, ratioFreelist, SEUIL_FREELIST } from "./db";
 
 // Le compactage n'a de sens que sur une base FICHIER en WAL (comme la base réelle) :
 // `:memory:` n'a ni fichier ni WAL, donc ne peut pas exercer la troncature.
@@ -61,5 +61,14 @@ describe("compacterSiNecessaire", () => {
 
   test("base :memory: (tests injectant une base) : inerte, ne lève pas", () => {
     expect(compacterSiNecessaire(new Database(":memory:"))).toBe(false);
+  });
+
+  test("fichier au-delà de la borne VACUUM : saute le compactage (event loop jamais gelée)", () => {
+    const { d } = baseFichier(20_000);
+    d.run("DELETE FROM t WHERE id < 15000");
+    expect(ratioFreelist(d)).toBeGreaterThan(0.2); // compactage NORMALEMENT dû…
+    // …mais borne minuscule injectée : la base (~6 Mo) est « trop grosse » → renoncement.
+    expect(compacterSiNecessaire(d, SEUIL_FREELIST, 1024)).toBe(false);
+    expect(ratioFreelist(d)).toBeGreaterThan(0.2); // freelist intacte : VACUUM non exécuté
   });
 });

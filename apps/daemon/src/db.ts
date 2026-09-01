@@ -21,6 +21,16 @@ export const CHEMIN_DB = join(import.meta.dir, "..", "axiom.db");
  */
 export const SEUIL_FREELIST = 0.2;
 
+/**
+ * Taille de fichier au-delà de laquelle on RENONCE au VACUUM synchrone (256 Mo).
+ * bun:sqlite est synchrone : un VACUUM réécrit tout le fichier et bloque l'event loop
+ * ENTIER du daemon (plus aucune requête servie, /health compris — le front basculerait
+ * en mode dégradé en pleine session). Avec des jours de replay stockés, la base atteint
+ * des Go : sous cette borne le VACUUM reste sub-seconde ; au-delà on saute et on log —
+ * l'espace libre reste alors simplement dans la freelist (réutilisé par SQLite).
+ */
+export const TAILLE_MAX_VACUUM_OCTETS = 256 * 1024 * 1024;
+
 let _db: Database | null = null;
 
 /** Renvoie la connexion SQLite (l'ouvre et crée le schéma au premier appel). */
@@ -73,9 +83,25 @@ export function ratioFreelist(d: Database): number {
  *
  * Un VACUUM ne peut PAS tourner dans une transaction : ces `run` sont volontairement
  * hors `d.transaction(...)`.
+ *
+ * Si le fichier dépasse `tailleMaxOctets` (`TAILLE_MAX_VACUUM_OCTETS`, 256 Mo), on
+ * saute le VACUUM : mieux vaut garder la freelist qu'un daemon gelé des minutes.
  */
-export function compacterSiNecessaire(d: Database, seuil = SEUIL_FREELIST): boolean {
+export function compacterSiNecessaire(
+  d: Database,
+  seuil = SEUIL_FREELIST,
+  tailleMaxOctets = TAILLE_MAX_VACUUM_OCTETS,
+): boolean {
   if (ratioFreelist(d) < seuil) return false;
+  const { page_count: pages } = d.query("PRAGMA page_count").get() as { page_count: number };
+  const { page_size: taillePage } = d.query("PRAGMA page_size").get() as { page_size: number };
+  if (pages * taillePage > tailleMaxOctets) {
+    console.warn(
+      `[axiomd] compactage sauté : base de ${((pages * taillePage) / 1_048_576).toFixed(0)} Mo ` +
+        "au-delà de la borne du VACUUM synchrone (event loop bloquante)",
+    );
+    return false;
+  }
   d.run("VACUUM");
   d.run("PRAGMA wal_checkpoint(TRUNCATE)");
   return true;

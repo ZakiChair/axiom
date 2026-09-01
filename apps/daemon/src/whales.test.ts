@@ -6,20 +6,27 @@ import {
   curseurApresGetLogs,
   ecrireDernierBloc,
   fenetreBlocs,
+  hauteursARattraper,
   insererMouvements,
   LIMITE_MAX,
   lireDernierBloc,
   montantNetBtc,
   mouvementsRecents,
   nombreHex,
+  parseBlocParHauteur,
   parseLatestBlock,
   parseLogsEtherscan,
   parseRequeteWhales,
   parseTxBtc,
+  PEREMPTION_PRIX_BTC_MS,
   PLAFOND_GETLOGS,
+  pollBtc,
   pollEtherscan,
+  pollPrixBtc,
+  prixBtcUtilisable,
   purgerMouvements,
   quantiteDepuisData,
+  reinitialiserWhales,
   resultatGetLogs,
   TOKENS_ETH,
   TOPIC_TRANSFER,
@@ -408,5 +415,109 @@ describe("pollEtherscan — troncature getLogs", () => {
     });
     await pollEtherscan("cle-test", d, fetchImpl, 0);
     expect(lireDernierBloc(d)).toBe(95); // AVANT le fix : 100 (blocs 96..100 jamais relus)
+  });
+});
+
+// ─────────────────────────── Poll blocs BTC (rattrapage borné, fetch injecté) ───────────────────────────
+
+describe("hauteursARattraper", () => {
+  it("premier poll : tête seule ; ensuite dernier+1..tête", () => {
+    expect(hauteursARattraper(null, 100)).toEqual([100]);
+    expect(hauteursARattraper(100, 103)).toEqual([101, 102, 103]);
+  });
+  it("à jour ou tête illisible → [] ; retard borné aux blocs les plus récents", () => {
+    expect(hauteursARattraper(100, 100)).toEqual([]);
+    expect(hauteursARattraper(100, 0)).toEqual([]);
+    expect(hauteursARattraper(10, 100, 3)).toEqual([98, 99, 100]);
+  });
+});
+
+describe("parseBlocParHauteur", () => {
+  it("choisit le bloc main_chain et renvoie ses tx", () => {
+    const orphelin = { main_chain: false, tx: [{ hash: "o" }] };
+    const principal = { main_chain: true, tx: [{ hash: "p" }] };
+    expect(parseBlocParHauteur({ blocks: [orphelin, principal] })).toEqual({ tx: [{ hash: "p" }] });
+  });
+  it("réponse illisible → null", () => {
+    expect(parseBlocParHauteur(null)).toBeNull();
+    expect(parseBlocParHauteur({ blocks: [] })).toBeNull();
+    expect(parseBlocParHauteur({ blocks: [{ main_chain: true, tx: "nope" }] })).toBeNull();
+  });
+});
+
+describe("prixBtcUtilisable", () => {
+  it("frais → true ; plus vieux que la péremption ou invalide → false", () => {
+    expect(prixBtcUtilisable(100_000, T0, T0 + 60_000)).toBe(true);
+    expect(prixBtcUtilisable(100_000, T0, T0 + PEREMPTION_PRIX_BTC_MS + 1)).toBe(false);
+    expect(prixBtcUtilisable(0, T0, T0)).toBe(false);
+  });
+});
+
+describe("pollBtc — rattrapage des blocs intermédiaires", () => {
+  const HASH = "0".repeat(64);
+
+  /** Stub fetch blockchain.info + prix Binance ; journalise les hauteurs demandées. */
+  function stubBtc(etat: {
+    tete: { hash: string; height: number };
+    blocs: Record<number, unknown[]>;
+  }): { fetchImpl: typeof fetch; hauteursDemandees: number[] } {
+    const hauteursDemandees: number[] = [];
+    const fetchImpl = (async (entree: RequestInfo | URL) => {
+      const u = String(entree);
+      if (u.includes("latestblock")) return new Response(JSON.stringify(etat.tete));
+      if (u.includes("ticker/price")) return new Response(JSON.stringify({ price: "100000" }));
+      const m = /block-height\/(\d+)/.exec(u);
+      if (m !== null) {
+        const h = Number(m[1]);
+        hauteursDemandees.push(h);
+        return new Response(JSON.stringify({ blocks: [{ main_chain: true, tx: etat.blocs[h] ?? [] }] }));
+      }
+      throw new Error(`URL inattendue : ${u}`);
+    }) as typeof fetch;
+    return { fetchImpl, hauteursDemandees };
+  }
+
+  /** Une tx de 20 BTC (2 M$ à 100 k$) vers une adresse propre au bloc. */
+  function txBloc(h: number): unknown {
+    return {
+      hash: `hash-${h}`,
+      time: 1_755_000_000,
+      inputs: [{ prev_out: { addr: "1Emetteur" } }],
+      out: [{ addr: `1Dest${h}`, value: 2_000_000_000 }],
+    };
+  }
+
+  it("itère de dernierBloc+1 à la tête et insère les mouvements de CHAQUE bloc", async () => {
+    reinitialiserWhales();
+    const d = new Database(":memory:");
+    assurerTableWhales(d);
+    const etat = { tete: { hash: HASH, height: 100 }, blocs: {} as Record<number, unknown[]> };
+    const stub = stubBtc(etat);
+    await pollPrixBtc(stub.fetchImpl);
+    await pollBtc(stub.fetchImpl, d); // premier poll : tête seule (comportement actuel conservé)
+    expect(stub.hauteursDemandees).toEqual([100]);
+
+    etat.tete = { hash: HASH, height: 103 }; // 3 blocs minés entre deux polls
+    etat.blocs[101] = [txBloc(101)];
+    etat.blocs[102] = [txBloc(102)];
+    etat.blocs[103] = [txBloc(103)];
+    await pollBtc(stub.fetchImpl, d);
+    expect(stub.hauteursDemandees).toEqual([100, 101, 102, 103]); // AVANT le fix : [<hash>] de la tête seule
+    const ids = mouvementsRecents(d, "BTC", 0).map((m) => m.id).sort();
+    expect(ids).toEqual(["hash-101", "hash-102", "hash-103"]);
+  });
+
+  it("sans prix utilisable : AUCUN bloc téléchargé, erreur portée en santé", async () => {
+    reinitialiserWhales();
+    const d = new Database(":memory:");
+    assurerTableWhales(d);
+    const stub = stubBtc({ tete: { hash: HASH, height: 100 }, blocs: {} });
+    await pollBtc(stub.fetchImpl, d); // AUCUN pollPrixBtc avant → prix inconnu
+    expect(stub.hauteursDemandees).toEqual([]);
+    const url = new URL("http://127.0.0.1:8787/whales/recent");
+    const corps = (await traiterWhales(new Request(url), url, d).json()) as {
+      sante: { erreurBtc: string | null };
+    };
+    expect(corps.sante.erreurBtc).toContain("prix BTC");
   });
 });

@@ -8,8 +8,8 @@
  *
  * DEUX amonts GRATUITS, déjà dans l'écosystème du projet (aucun fournisseur nouveau) :
  *  - BTC : poll REST `blockchain.info/latestblock` (~60 s, réponse minuscule) puis
- *    `rawblock/<hash>` à CHAQUE nouveau bloc (~10 min, quelques Mo — précédent leaderboard
- *    HL 34 Mo/6 h). Transactions CONFIRMÉES : latence ~1 bloc mais aucune tx RBF-annulable,
+ *    `block-height/<h>` pour chaque bloc dû (rattrapage borné, cf. hauteursARattraper —
+ *    précédent leaderboard HL 34 Mo/6 h). Transactions CONFIRMÉES : latence ~1 bloc mais aucune tx RBF-annulable,
  *    et pas de WebSocket à maintenir (le fil mempool `unconfirmed_sub` du même hôte est
  *    MUET, vérifié 2026-08-25 — pong OK, zéro utx). Montant = somme des sorties vers des
  *    adresses ABSENTES des entrées (heuristique standard d'exclusion du change ; c'est une
@@ -46,8 +46,12 @@ const RETENTION_MS = 30 * 24 * 3_600_000;
 const PERIODE_PURGE_MS = 24 * 3_600_000;
 /** Poll du prix BTC (conversion USD des transferts). */
 const PERIODE_PRIX_MS = 60_000;
-/** Poll du dernier bloc BTC (~60 s ; un bloc toutes les ~10 min → aucun manqué). */
+/** Poll du dernier bloc BTC (~60 s ; ≥2 blocs minés entre deux polls → rattrapage borné, cf. hauteursARattraper). */
 export const PERIODE_POLL_BTC_MS = 60_000;
+/** Rattrapage BTC max par poll (chaque bloc pèse quelques Mo : borne le volume téléchargé). */
+export const MAX_BLOCS_BTC_PAR_POLL = 6;
+/** Péremption du prix BTC : au-delà, le seuil de collecte et le champ `usd` persisté seraient faussés. */
+export const PEREMPTION_PRIX_BTC_MS = 15 * 60_000;
 /** Poll Etherscan (2 tokens + n° de bloc). */
 export const PERIODE_POLL_ETH_MS = 90_000;
 /** Rattrapage MAX par poll (blocs) : au-delà on saute en avant (getLogs plafonne à 1000 lignes). */
@@ -57,8 +61,9 @@ export const LIMITE_DEFAUT = 200;
 export const LIMITE_MAX = 2_000;
 
 const URL_LATEST_BLOCK = "https://blockchain.info/latestblock";
-const URL_RAWBLOCK = "https://blockchain.info/rawblock";
-/** Garde de volume du rawblock (un bloc plein pèse quelques Mo ; 80 Mo = aberrant). */
+/** Résolution d'un bloc PAR HAUTEUR (`/block-height/<h>?format=json`) : requise pour le rattrapage. */
+const URL_BLOCK_HEIGHT = "https://blockchain.info/block-height";
+/** Garde de volume du bloc (un bloc plein pèse quelques Mo ; 80 Mo = aberrant). */
 const TAILLE_MAX_BLOC = 80 * 1024 * 1024;
 const URL_PRIX_BTC = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT";
 const URL_ETHERSCAN = "https://api.etherscan.io/v2/api";
@@ -214,6 +219,44 @@ export function parseLatestBlock(brut: unknown): { hash: string; height: number 
   if (typeof b.hash !== "string" || !/^[0-9a-fA-F]{64}$/.test(b.hash)) return null;
   if (!Number.isFinite(height) || height <= 0) return null;
   return { hash: b.hash, height };
+}
+
+/**
+ * Hauteurs de blocs à traiter ce poll : de `dernierTraite+1` à `tete`, bornées aux plus
+ * RÉCENTES (au-delà de `max`, on saute en avant — trou assumé, même politique que la
+ * fenêtre Etherscan). Premier poll (`dernierTraite` null) : la tête seule. Fonction PURE.
+ */
+export function hauteursARattraper(
+  dernierTraite: number | null,
+  tete: number,
+  max: number = MAX_BLOCS_BTC_PAR_POLL,
+): number[] {
+  if (!Number.isFinite(tete) || tete <= 0) return [];
+  if (dernierTraite === null) return [tete];
+  if (dernierTraite >= tete) return [];
+  const de = Math.max(dernierTraite + 1, tete - max + 1);
+  const out: number[] = [];
+  for (let h = de; h <= tete; h++) out.push(h);
+  return out;
+}
+
+/**
+ * Bloc PRINCIPAL d'une réponse `block-height/<h>?format=json` (blockchain.info renvoie
+ * un tableau `blocks` — orphelins possibles : on prend `main_chain`, sinon le premier),
+ * réduit à ses `tx`. `null` si illisible. Fonction PURE.
+ */
+export function parseBlocParHauteur(brut: unknown): { tx: unknown[] } | null {
+  const blocs = (brut as { blocks?: unknown } | null)?.blocks;
+  if (!Array.isArray(blocs)) return null;
+  const principal = blocs.find((b) => (b as { main_chain?: unknown } | null)?.main_chain === true) ?? blocs[0];
+  if (!principal || typeof principal !== "object") return null;
+  const tx = (principal as { tx?: unknown }).tx;
+  return Array.isArray(tx) ? { tx } : null;
+}
+
+/** Le prix BTC est-il utilisable (fini, > 0, plus jeune que la péremption) ? Fonction PURE. */
+export function prixBtcUtilisable(prix: number, prixTs: number, now: number): boolean {
+  return Number.isFinite(prix) && prix > 0 && now - prixTs <= PEREMPTION_PRIX_BTC_MS;
 }
 
 /**
@@ -468,6 +511,8 @@ export interface SanteWhales {
   erreurBtc: string | null;
   /** Prix BTC courant utilisé pour la conversion, null tant qu'aucun poll n'a abouti. */
   prixBtc: number | null;
+  /** Horodatage du dernier prix BTC obtenu (ms), 0 = jamais (péremption : PEREMPTION_PRIX_BTC_MS). */
+  prixBtcTs: number;
   /** Dernier poll Etherscan ABOUTI (ms), 0 = aucun. */
   dernierPollEthTs: number;
   dernierBlocEth: number | null;
@@ -482,11 +527,26 @@ const sante: SanteWhales = {
   dernierBlocBtc: null,
   erreurBtc: null,
   prixBtc: null,
+  prixBtcTs: 0,
   dernierPollEthTs: 0,
   dernierBlocEth: null,
   erreurEth: null,
   clePresente: false,
 };
+
+/** Réinitialise l'état mémoire du collecteur (tests ; cf. reinitialiserHl de hyperliquid.ts). */
+export function reinitialiserWhales(): void {
+  dernierBlocBtcTraite = null;
+  sante.dernierPollBtcTs = 0;
+  sante.dernierBlocBtc = null;
+  sante.erreurBtc = null;
+  sante.prixBtc = null;
+  sante.prixBtcTs = 0;
+  sante.dernierPollEthTs = 0;
+  sante.dernierBlocEth = null;
+  sante.erreurEth = null;
+  sante.clePresente = false;
+}
 
 // ─────────────────────────── Poll blocs BTC ───────────────────────────
 
@@ -494,46 +554,55 @@ const sante: SanteWhales = {
 let dernierBlocBtcTraite: number | null = null;
 
 /**
- * Un poll BTC : en-tête du dernier bloc, puis `rawblock` SI la hauteur a avancé —
- * chaque tx du bloc passe l'heuristique de montant net + seuil et rejoint la table.
- * Sans prix BTC connu, le bloc n'est PAS consommé (retraité au poll suivant, une fois
- * le prix disponible). Un redémarrage ne rattrape pas les blocs manqués (trou assumé,
- * même politique que la fenêtre Etherscan).
+ * Un poll BTC : en-tête du dernier bloc, puis chaque bloc de `dernierBlocBtcTraite+1`
+ * à la tête (rattrapage borné à MAX_BLOCS_BTC_PAR_POLL — ≥2 blocs peuvent être minés
+ * entre deux polls) via `block-height/<h>`. Chaque tx passe l'heuristique de montant
+ * net + seuil. Sans prix BTC utilisable (absent OU périmé, cf. prixBtcUtilisable), les
+ * blocs ne sont PAS consommés (retraités une fois le prix revenu). Le curseur avance
+ * bloc PAR bloc : un échec en cours de rattrapage garde l'acquis. `fetchImpl`/`dInjecte`
+ * pour les tests (convention traiterHl).
  */
-async function pollBtc(): Promise<void> {
+export async function pollBtc(fetchImpl: typeof fetch = fetch, dInjecte?: Database): Promise<void> {
+  const d = dInjecte ?? db();
+  if (dInjecte !== undefined) assurerTableWhales(dInjecte);
   try {
-    const resTete = await fetch(URL_LATEST_BLOCK, { signal: AbortSignal.timeout(15_000) });
+    const resTete = await fetchImpl(URL_LATEST_BLOCK, { signal: AbortSignal.timeout(15_000) });
     if (!resTete.ok) throw new Error(`latestblock HTTP ${resTete.status}`);
     const tete = parseLatestBlock(await resTete.json());
     if (tete === null) throw new Error("latestblock illisible");
 
-    if (dernierBlocBtcTraite !== null && tete.height <= dernierBlocBtcTraite) {
+    const hauteurs = hauteursARattraper(dernierBlocBtcTraite, tete.height);
+    if (hauteurs.length === 0) {
       sante.dernierPollBtcTs = Date.now();
       sante.erreurBtc = null;
       return; // aucun nouveau bloc : poll abouti quand même (santé fraîche)
     }
     const prix = sante.prixBtc;
-    if (prix === null) throw new Error("prix BTC pas encore disponible");
-
-    const resBloc = await fetch(`${URL_RAWBLOCK}/${tete.hash}`, {
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!resBloc.ok) throw new Error(`rawblock HTTP ${resBloc.status}`);
-    const cl = resBloc.headers.get("content-length");
-    if (cl !== null && Number(cl) > TAILLE_MAX_BLOC) throw new Error("rawblock trop volumineux");
-    const bloc = (await resBloc.json()) as { tx?: unknown };
-    const txs = Array.isArray(bloc.tx) ? bloc.tx : [];
-
-    const lot: MouvementWhale[] = [];
-    for (const brut of txs) {
-      const tx = parseTxBtc(brut);
-      if (tx === null) continue;
-      const mouvement = versMouvementBtc(tx, prix, SEUIL_COLLECTE_USD);
-      if (mouvement !== null) lot.push(mouvement);
+    if (prix === null || !prixBtcUtilisable(prix, sante.prixBtcTs, Date.now())) {
+      throw new Error("prix BTC indisponible ou périmé");
     }
-    insererMouvements(db(), lot);
-    dernierBlocBtcTraite = tete.height;
-    sante.dernierBlocBtc = tete.height;
+
+    for (const hauteur of hauteurs) {
+      const resBloc = await fetchImpl(`${URL_BLOCK_HEIGHT}/${hauteur}?format=json`, {
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!resBloc.ok) throw new Error(`block-height ${hauteur} HTTP ${resBloc.status}`);
+      const cl = resBloc.headers.get("content-length");
+      if (cl !== null && Number(cl) > TAILLE_MAX_BLOC) throw new Error("bloc trop volumineux");
+      const bloc = parseBlocParHauteur(await resBloc.json());
+      if (bloc === null) throw new Error(`block-height ${hauteur} illisible`);
+
+      const lot: MouvementWhale[] = [];
+      for (const brut of bloc.tx) {
+        const tx = parseTxBtc(brut);
+        if (tx === null) continue;
+        const mouvement = versMouvementBtc(tx, prix, SEUIL_COLLECTE_USD);
+        if (mouvement !== null) lot.push(mouvement);
+      }
+      insererMouvements(d, lot);
+      dernierBlocBtcTraite = hauteur;
+      sante.dernierBlocBtc = hauteur;
+    }
     sante.dernierPollBtcTs = Date.now();
     sante.erreurBtc = null;
   } catch (err) {
@@ -544,14 +613,18 @@ async function pollBtc(): Promise<void> {
 
 // ─────────────────────────── Poll prix BTC ───────────────────────────
 
-/** Rafraîchit le prix BTC (Binance REST, best-effort : on garde l'ancien prix sur échec). */
-async function pollPrixBtc(): Promise<void> {
+/** Rafraîchit le prix BTC (Binance REST, best-effort : on garde l'ancien prix sur échec
+ * — mais horodaté : pollBtc refuse un prix plus vieux que PEREMPTION_PRIX_BTC_MS). */
+export async function pollPrixBtc(fetchImpl: typeof fetch = fetch): Promise<void> {
   try {
-    const res = await fetch(URL_PRIX_BTC, { signal: AbortSignal.timeout(10_000) });
+    const res = await fetchImpl(URL_PRIX_BTC, { signal: AbortSignal.timeout(10_000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = (await res.json()) as { price?: unknown };
     const prix = Number(json.price);
-    if (Number.isFinite(prix) && prix > 0) sante.prixBtc = prix;
+    if (Number.isFinite(prix) && prix > 0) {
+      sante.prixBtc = prix;
+      sante.prixBtcTs = Date.now();
+    }
   } catch (err) {
     console.error("[axiomd] poll prix BTC échoué :", err);
   }

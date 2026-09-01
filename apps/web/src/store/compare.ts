@@ -7,8 +7,9 @@
  * donnée live ne transite ici. Lu par le panneau CompareControl (légende) et par
  * le contrôleur de comparaison du Chart (souscription impérative).
  *
- * Session-only : non persisté (cohérent avec l'orderflow ; le `ChartState` figé de
- * @axiom/types ne comporte pas de champ comparaison — on ne modifie pas les types).
+ * PERSISTANCE : la liste des symboles comparés est persistée par store/persist.ts
+ * (clé `axiom:sessionUi:v1`, champ `compare`) et ré-ajoutée au boot — persistance
+ * DÉLÉGUÉE, ne pas en recréer ici. Le `ChartState` figé de @axiom/types est inchangé.
  */
 import { createStore } from "zustand/vanilla";
 

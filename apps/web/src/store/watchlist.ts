@@ -7,10 +7,10 @@
  * (aucun re-render React sur tick — cf. BUILD-CONTRACT).
  *
  * GROUPES (roadmap 1.4) : `groups` liste les onglets (défaut « Principal ») ; `activeGroupId`
- * désigne l'onglet affiché. Le champ `symbols` est un MIROIR en lecture du groupe actif,
- * conservé pour rétro-compatibilité : `persist.ts` (hors de ce périmètre) persiste et restaure
- * UNIQUEMENT cette liste plate via `setAll`. Tant que la persistance n'aura pas été étendue aux
- * groupes (agent ultérieur), un rechargement replie l'ensemble sur un unique groupe « Principal ».
+ * désigne l'onglet affiché. Le champ `symbols` est un MIROIR en lecture du groupe actif.
+ * PERSISTANCE : store/persist.ts sauvegarde et restaure le format à GROUPES complet
+ * ({groups, activeGroupId, sources} — cf. saveWatchlist/hydrateWatchlist) ; l'ancienne
+ * liste plate ne subsiste que comme format de MIGRATION à la lecture.
  *
  * SOURCE D'ORIGINE (roadmap 0.4b) : chaque entrée peut porter la source dont elle provient
  * (`sources[symbole]`, map GLOBALE creuse), pour que data/ticker route le flux de prix vers le

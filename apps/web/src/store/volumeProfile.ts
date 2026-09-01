@@ -6,7 +6,8 @@
  * toolbar (bouton « Profil Vol ») et par le contrôleur Chart (rendu impératif sur
  * canvas). Aucune donnée de calcul ne transite par ce store (cf. BUILD-CONTRACT).
  *
- * Session-only : non persisté (ChartState @axiom/types est figé).
+ * PERSISTANCE : `enabled` est persisté par store/persist.ts (clé `axiom:sessionUi:v1`,
+ * persistance déléguée — ne pas en recréer ici). ChartState @axiom/types reste figé.
  */
 import { createStore } from "zustand/vanilla";
 

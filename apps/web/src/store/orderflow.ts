@@ -7,8 +7,9 @@
  * orderflow du Chart (souscription impérative). Les données tick (trades, footprint)
  * ne transitent JAMAIS par ce store — elles vivent dans le contrôleur (cf. BUILD-CONTRACT).
  *
- * Session-only : non persisté (le `ChartState` de @axiom/types est figé et ne
- * comporte pas de champ orderflow ; on ne modifie pas les types).
+ * PERSISTANCE : le drapeau `enabled` est persisté par store/persist.ts (clé
+ * `axiom:sessionUi:v1`) et restauré au boot — la persistance est DÉLÉGUÉE, ne pas
+ * en recréer une ici (double maître). Le `ChartState` de @axiom/types reste figé.
  */
 import { createStore } from "zustand/vanilla";
 

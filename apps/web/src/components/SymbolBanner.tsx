@@ -107,6 +107,22 @@ export function libelleSourceCapitalisation(
   return source === "ccdata" ? "CCData · daily" : "CoinGecko · local";
 }
 
+/**
+ * Remet la variation 24 h à l'état neutre (« — », couleur de texte par défaut).
+ * Le texte est écrit IMPÉRATIVEMENT dans le DOM (aucun re-render sur tick) : React ne
+ * le rétablit pas au changement d'identité — sans ce reset, la variation de l'ANCIEN
+ * symbole restait affichée indéfiniment sur un symbole SANS ticker (ratio ÷BTC, SYN,
+ * TOTAL — isTickerSource("synthetic") est faux, l'abonnement est un no-op).
+ * PURE (élément injecté), testée sans DOM.
+ */
+export function resetVariation24h(
+  el: { textContent: string | null; style: { color: string } } | null,
+): void {
+  if (el === null) return;
+  el.textContent = "—";
+  el.style.color = "var(--text)";
+}
+
 /** Souscription ticker du bandeau, explicitement liée à la source du marché affiché. */
 export function subscribeSymbolBannerTicker(
   exchange: ExchangeId,
@@ -359,6 +375,10 @@ export function SymbolBanner() {
           : "—";
       }
     };
+
+    // Nouvelle identité : la variation de l'ancien symbole est effacée AVANT toute
+    // souscription (elle ne sera ré-écrite que si la nouvelle source a un ticker).
+    resetVariation24h(changeRef.current);
 
     // État initial (le backfill a pu déjà remplir le buffer avant ce montage).
     updateFromCandles();

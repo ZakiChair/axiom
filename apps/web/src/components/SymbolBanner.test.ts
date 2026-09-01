@@ -12,6 +12,7 @@ import type { Candle } from "@axiom/types";
 import {
   libelleSourceCapitalisation,
   nextCloseTs,
+  resetVariation24h,
   rolling24h,
   subscribeSymbolBannerTicker,
 } from "./SymbolBanner";
@@ -94,6 +95,24 @@ describe("subscribeSymbolBannerTicker", () => {
     subscribeSymbolBannerTicker("synthetic", "binance:BTCUSDT|/|twelvedata:GLD", vi.fn());
 
     expect(subscribeTickersMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("resetVariation24h", () => {
+  it("remet le texte à « — » et la couleur au token neutre (variation de l'ancien symbole effacée)", () => {
+    // Scénario : ETHUSDT affiche « +2,3 % », clic ÷BTC → exchange devient synthetic,
+    // isTickerSource est faux → l'abonnement est un no-op et le DOM impératif garde
+    // l'ancien texte : le reset en tête d'effet est le seul à l'effacer.
+    const el = { textContent: "+2,3 %", style: { color: "var(--up)" } };
+
+    resetVariation24h(el);
+
+    expect(el.textContent).toBe("—");
+    expect(el.style.color).toBe("var(--text)");
+  });
+
+  it("tolère une ref nulle (montage en cours)", () => {
+    expect(() => resetVariation24h(null)).not.toThrow();
   });
 });
 

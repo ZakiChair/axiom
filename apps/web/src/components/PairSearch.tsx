@@ -50,6 +50,11 @@ export function isBuilderQuery(query: string, pairs: readonly string[]): boolean
   return q.includes("/") || q.includes("-");
 }
 
+/** Jambe B par défaut du builder SYN — DOIT exister dans TWELVEDATA_SYMBOLS (la source
+ * pré-sélectionnée de la jambe B est twelvedata) : « BTCUSDT » (format Binance) y est
+ * inconnu et cassait le « Charger » par défaut. GLD = or, cohérent avec les suggestions. */
+export const JAMBE_B_TRADFI_DEFAUT = "GLD";
+
 export function PairSearch({
   onPick,
   placeholder = "Rechercher une paire",
@@ -74,7 +79,7 @@ export function PairSearch({
   const [legAExchange, setLegAExchange] = useState<Exclude<ExchangeId, "synthetic">>(defaultLegSource);
   const [legBExchange, setLegBExchange] = useState<Exclude<ExchangeId, "synthetic">>("twelvedata");
   const [legA, setLegA] = useState("ETHUSDT");
-  const [legB, setLegB] = useState("BTCUSDT");
+  const [legB, setLegB] = useState(JAMBE_B_TRADFI_DEFAUT);
   const [op, setOp] = useState<"/" | "-">("/");
   const [legAPairs, setLegAPairs] = useState<string[]>([]);
   const [legBPairs, setLegBPairs] = useState<string[]>([]);

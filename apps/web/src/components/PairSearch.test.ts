@@ -4,7 +4,8 @@
  * constructeur de séries synthétiques — seule porteuse de régression silencieuse.
  */
 import { describe, expect, it } from "vitest";
-import { isBuilderQuery } from "./PairSearch";
+import { isBuilderQuery, JAMBE_B_TRADFI_DEFAUT } from "./PairSearch";
+import { TWELVEDATA_SYMBOLS } from "../data/pairs";
 
 describe("isBuilderQuery", () => {
   it("détecte une saisie de symbole synthétique en construction (contient / ou -)", () => {
@@ -32,5 +33,14 @@ describe("isBuilderQuery", () => {
 
   it("chaîne vide : jamais une saisie constructeur", () => {
     expect(isBuilderQuery("", ["EUR/USD"])).toBe(false);
+  });
+});
+
+describe("constructeur SYN — jambe B par défaut", () => {
+  it("le défaut de la jambe B appartient au catalogue Twelve Data (source pré-sélectionnée)", () => {
+    // Avant : legB = "BTCUSDT" (format Binance) sur legBExchange = "twelvedata" →
+    // « Charger » sans rien toucher produisait un synthétique dont la jambe tradfi
+    // ne peut pas se charger (graphe en erreur sur le geste par défaut du panneau).
+    expect(TWELVEDATA_SYMBOLS).toContain(JAMBE_B_TRADFI_DEFAUT);
   });
 });

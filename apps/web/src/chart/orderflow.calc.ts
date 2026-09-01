@@ -8,6 +8,7 @@
  */
 import type { Candle, ExchangeId, FootprintBar, FootprintRow } from "@axiom/types";
 import type { CvdBucket } from "./cvdSpotPerp";
+import { rowsApprochees } from "./openCloseNet.calc";
 
 /** Accumulateur buy/sell d'un niveau de prix (clé = index de bucket au tickSize). */
 export interface FpCell {
@@ -148,6 +149,25 @@ export function buildFootprintBar(
   const vah = rows[hi]?.price ?? poc;
 
   return { time, rows, poc, vah, val, delta };
+}
+
+/**
+ * FootprintBar APPROCHÉ d'une bougie jamais vue en live : répartition uniforme de
+ * l'OHLCV sur la plage (rowsApprochees — déjà utilisé par l'overlay OCN). Renvoie null
+ * si la bougie est inexploitable (volume nul). L'appelant DOIT étiqueter le résultat
+ * « ≈ » : ce n'est PAS un footprint tick réel — sans quoi, en 4h/1d, le footprint
+ * activé restait invisible pendant des heures (revue 2026-08-01 § 3.5).
+ */
+export function buildFootprintBarApprochee(
+  time: number,
+  candle: Pick<Candle, "low" | "high" | "volume" | "buyVolume" | "sellVolume">,
+  bucketSize: number
+): FootprintBar | null {
+  const rows = rowsApprochees(candle, bucketSize);
+  if (rows.length === 0) return null;
+  const cells = new Map<number, FpCell>();
+  for (const r of rows) cells.set(Math.round(r.price / bucketSize), { buy: r.buyVol, sell: r.sellVol });
+  return buildFootprintBar(time, cells, bucketSize);
 }
 
 /** Repli tickSize selon la magnitude du prix (si /exchangeInfo échoue). */

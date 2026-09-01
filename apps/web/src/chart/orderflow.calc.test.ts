@@ -6,7 +6,14 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
-import { buildCvdSpotPerpBuckets, buildFootprintBar, computeCvd, sourceFournitCvd, type FpCell } from "./orderflow.calc";
+import {
+  buildCvdSpotPerpBuckets,
+  buildFootprintBar,
+  buildFootprintBarApprochee,
+  computeCvd,
+  sourceFournitCvd,
+  type FpCell,
+} from "./orderflow.calc";
 
 function candle(time: number, buy: number, sell: number): Candle {
   return {
@@ -101,6 +108,27 @@ describe("computeCvd — bougies SANS split buy/sell (Kraken/OKX/Bybit/HL, hist.
     expect(computeCvd([sansSplit, { ...sansSplit, time: 2_000 }])).toEqual([0, 0]);
     // Une bougie AVEC split garde son delta réel.
     expect(computeCvd([candle(1_000, 10, 4)])).toEqual([6]);
+  });
+});
+
+describe("buildFootprintBarApprochee", () => {
+  it("répartit l'OHLCV uniformément sur la plage et conserve le delta de bougie", () => {
+    // low 100 → high 102, bucket 1 : 3 niveaux ; buy 6 / sell 3 répartis uniformément.
+    const bar = buildFootprintBarApprochee(1_000, { low: 100, high: 102, volume: 9, buyVolume: 6, sellVolume: 3 }, 1);
+    expect(bar).not.toBeNull();
+    expect(bar!.rows.map((r) => r.price)).toEqual([100, 101, 102]);
+    expect(bar!.delta).toBeCloseTo(3, 10); // Σ(buy − sell) = 6 − 3
+    expect(bar!.rows[0]?.buyVol).toBeCloseTo(2, 10); // 6 / 3 niveaux
+  });
+
+  it("sans split buy/sell, répartit 50/50 (delta 0) — approximation assumée", () => {
+    const bar = buildFootprintBarApprochee(1_000, { low: 100, high: 100.5, volume: 8 }, 1);
+    expect(bar).not.toBeNull();
+    expect(bar!.delta).toBeCloseTo(0, 10);
+  });
+
+  it("renvoie null pour une bougie sans volume (rien à dessiner)", () => {
+    expect(buildFootprintBarApprochee(1_000, { low: 100, high: 102, volume: 0 }, 1)).toBeNull();
   });
 });
 

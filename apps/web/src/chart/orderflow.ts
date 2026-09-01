@@ -51,6 +51,7 @@ import { lireTokenCanvas } from "../lib/canvasTokens";
 import {
   buildCvdSpotPerpBuckets,
   buildFootprintBar,
+  buildFootprintBarApprochee,
   computeCvd,
   fallbackTick,
   fmtDelta,
@@ -614,16 +615,24 @@ export class OrderflowController {
     });
   }
 
-  /** Résout le tickSize (REST) puis dimensionne le bucket (repli si échec). */
+  /** Résout le tickSize (REST Binance) puis dimensionne le bucket (repli si échec). */
   private async resolveTick(): Promise<void> {
     if (this.tickResolved) return;
-    try {
-      const meta = await fetchSymbolInfo(this.symbol);
-      this.tickSize = meta.tickSize;
-    } catch (err) {
+    if (this.store.getState().exchange !== "binance") {
+      // fetchSymbolInfo interroge l'exchangeInfo BINANCE : sur toute autre source l'appel
+      // est voué au 400 (symbole absent) ou renverrait le pas Binance, pas celui de la
+      // venue affichée → repli direct sur la magnitude, sans requête inutile.
       const last = this.store.getState().candles.at(-1);
       this.tickSize = fallbackTick(last?.close ?? 0);
-      console.warn("[AXIOM] tickSize indisponible, repli sur la magnitude", err);
+    } else {
+      try {
+        const meta = await fetchSymbolInfo(this.symbol);
+        this.tickSize = meta.tickSize;
+      } catch (err) {
+        const last = this.store.getState().candles.at(-1);
+        this.tickSize = fallbackTick(last?.close ?? 0);
+        console.warn("[AXIOM] tickSize indisponible, repli sur la magnitude", err);
+      }
     }
     this.tickResolved = true;
     this.recomputeBucket();
@@ -804,27 +813,58 @@ export class OrderflowController {
     const visibleCandles: Candle[] = [];
     const visibleBars: FootprintBar[] = [];
     const barPositions: { xc: number; colW: number }[] = [];
+    const approxFlags: boolean[] = [];
 
     for (let i = start; i < end; i++) {
       const kd: KLineData | undefined = dataList[i];
       if (kd === undefined) continue;
-      const cells = this.footprints.get(kd.timestamp);
-      if (cells === undefined || cells.size === 0) continue;
       const xc = this.toPx({ timestamp: kd.timestamp }).x;
       if (xc === undefined) continue;
       const candle = candles[i];
       if (candle === undefined) continue;
+      const cells = this.footprints.get(kd.timestamp);
+      let bar: FootprintBar | null;
+      let approx = false;
+      if (cells !== undefined && cells.size > 0) {
+        bar = buildFootprintBar(kd.timestamp, cells, this.bucketSize);
+      } else {
+        // Bougie jamais vue en live : colonne APPROCHÉE depuis l'OHLCV, étiquetée « ≈ ».
+        bar = buildFootprintBarApprochee(kd.timestamp, candle, this.bucketSize);
+        approx = true;
+      }
+      if (bar === null) continue;
       visibleCandles.push(candle);
-      const bar = buildFootprintBar(kd.timestamp, cells, this.bucketSize);
       visibleBars.push(bar);
       barPositions.push({ xc, colW });
+      approxFlags.push(approx);
     }
 
-    // Divergences delta : calculées une fois sur toutes les bars visibles.
-    const divergences =
-      settings.showDivergences && visibleBars.length > 1
-        ? detectDeltaDivergences(visibleCandles, visibleBars)
-        : new Array(visibleBars.length).fill(null);
+    // Divergences delta : calculées sur le SEUL sous-ensemble à ticks réels. Le
+    // détecteur compare chaque bar à sa voisine directe (bars[i] vs bars[i-1]) — une
+    // colonne approchée (delta fabriqué par répartition uniforme) insérée dans la
+    // séquence fausserait la comparaison des colonnes réelles adjacentes, pas
+    // seulement la sienne. On reconstruit donc un sous-tableau dense des seules
+    // colonnes réelles, on détecte dessus, puis on redistribue par index d'origine.
+    const realIdx: number[] = [];
+    const realCandles: Candle[] = [];
+    const realBars: FootprintBar[] = [];
+    for (let i = 0; i < visibleBars.length; i++) {
+      if (approxFlags[i] === true) continue;
+      const b = visibleBars[i];
+      const c = visibleCandles[i];
+      if (b === undefined || c === undefined) continue;
+      realIdx.push(i);
+      realCandles.push(c);
+      realBars.push(b);
+    }
+    const divergences: DivergenceFlag[] = new Array(visibleBars.length).fill(null);
+    if (settings.showDivergences && realBars.length > 1) {
+      const d = detectDeltaDivergences(realCandles, realBars);
+      for (let k = 0; k < realIdx.length; k++) {
+        const idx = realIdx[k];
+        if (idx !== undefined) divergences[idx] = d[k] ?? null;
+      }
+    }
 
     ctx.save();
     ctx.beginPath();
@@ -837,9 +877,10 @@ export class OrderflowController {
       const pos = barPositions[i];
       if (bar === undefined || pos === undefined) continue;
 
-      // Imbalances : calculées par bar au rendu seulement.
+      const approx = approxFlags[i] === true;
+      // Imbalances : uniquement sur les colonnes à ticks réels.
       const imbFlags =
-        settings.showImbalances
+        !approx && settings.showImbalances
           ? detectImbalances(bar.rows, settings.imbalanceRatioPct, settings.imbalanceMinVol)
           : null;
 
@@ -854,9 +895,10 @@ export class OrderflowController {
         palette,
         imbPalette,
         imbFlags,
-        settings.showBarPoc,
-        settings.showBarVa,
-        divergences[i]
+        settings.showBarPoc && !approx, // POC/VA d'une répartition uniforme = arbitraire
+        settings.showBarVa && !approx,
+        divergences[i] ?? null,
+        approx
       );
     }
 
@@ -933,7 +975,8 @@ export class OrderflowController {
     imbFlags: ReturnType<typeof detectImbalances> | null,
     showBarPoc: boolean,
     showBarVa: boolean,
-    divergence: DivergenceFlag
+    divergence: DivergenceFlag,
+    approx: boolean
   ): void {
     const ctx = this.ctx;
     const cellW = Math.min(colW * 0.92, 180);
@@ -947,7 +990,9 @@ export class OrderflowController {
     }
     if (maxTot <= 0) return;
 
-    const showText = colW >= 44 && rowH >= 9;
+    // Répartition uniforme : mêmes buy/sell affichés sur chaque ligne → aucun signal
+    // de niveau, comme le POC/VA/imbalances déjà masqués pour ces colonnes.
+    const showText = colW >= 44 && rowH >= 9 && !approx;
     ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
 
     for (const r of bar.rows) {
@@ -958,7 +1003,7 @@ export class OrderflowController {
       const h = Math.max(1, yBot - yTop);
       const net = r.buyVol - r.sellVol;
       const intensity = Math.min(1, (r.buyVol + r.sellVol) / maxTot);
-      const alpha = 0.12 + 0.5 * intensity;
+      const alpha = (0.12 + 0.5 * intensity) * (approx ? 0.55 : 1); // colonnes ≈ atténuées
 
       // Teinte up/down du thème + intensité via globalAlpha (le canvas n'évalue pas var()).
       ctx.globalAlpha = alpha;
@@ -1025,8 +1070,14 @@ export class OrderflowController {
     if (colW >= 22) {
       ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
       ctx.textAlign = "center";
-      ctx.fillStyle = bar.delta >= 0 ? palette.up : palette.down;
-      ctx.fillText(fmtDelta(bar.delta), xc, paneTop + 8);
+      if (approx) {
+        // Approximation : delta en teinte neutre, préfixé ≈ (jamais présenté comme réel).
+        ctx.fillStyle = palette.textDim;
+        ctx.fillText(`≈${fmtDelta(bar.delta)}`, xc, paneTop + 8);
+      } else {
+        ctx.fillStyle = bar.delta >= 0 ? palette.up : palette.down;
+        ctx.fillText(fmtDelta(bar.delta), xc, paneTop + 8);
+      }
     }
 
     // Divergence delta : triangle 6 px au-dessus de la bougie.

@@ -43,8 +43,8 @@ const TOPIC_PREFIXE = "allLiquidation.";
 
 /** Endpoint public OKX du canal de liquidations (SWAP, non authentifié). */
 const OKX_WS_URL = "wss://ws.okx.com:8443/ws/v5/public";
-/** REST OKX des instruments (source du `ctVal`, CORS `*`). */
-const OKX_INSTRUMENTS_URL = "https://www.okx.com/api/v5/public/instruments";
+/** REST OKX des instruments (source du `ctVal`, CORS `*`). Exporté pour les stubs de test. */
+export const OKX_INSTRUMENTS_URL = "https://www.okx.com/api/v5/public/instruments";
 /** Canal public OKX des liquidations. */
 const OKX_CANAL_LIQ = "liquidation-orders";
 /** Rafraîchissement périodique des ctVal OKX (rarement modifiés → 24 h). */
@@ -404,6 +404,8 @@ function connecterBoucleWs(
 export interface FeedLiquidations {
   /** Ajuste le jeu de symboles surveillés (re-souscrit si l'ensemble change). */
   setSymboles: (symboles: readonly string[]) => void;
+  /** Retente le chargement des ctVal encore MANQUANTS (feed OKX seulement). */
+  retenterCtVal?: () => void;
   /** Ferme la WS et libère les ressources. */
   arreter: () => void;
 }
@@ -466,6 +468,43 @@ interface OkxInstrumentsResponse {
   data?: unknown;
 }
 
+/** Registre des ctVal OKX (sz en CONTRATS → qty = sz × ctVal), fetch injectable pour les tests. */
+export interface RegistreCtVal {
+  get: (instId: string) => number | undefined;
+  /** Charge les ctVal des instId donnés (MANQUANTS seulement, ou TOUS si `forcer`). */
+  charger: (instIds: Iterable<string>, forcer: boolean) => Promise<void>;
+}
+
+export function creerRegistreCtVal(fetchImpl: typeof fetch = fetch): RegistreCtVal {
+  const parInst = new Map<string, number>();
+  /** Fetch le ctVal d'un instId (best-effort ; log sur échec — le retry court repassera). */
+  const chargerUn = async (instId: string): Promise<void> => {
+    const instFamily = instId.replace(/-SWAP$/, "");
+    try {
+      const params = new URLSearchParams({ instType: "SWAP", instFamily });
+      const res = await fetchImpl(`${OKX_INSTRUMENTS_URL}?${params.toString()}`, {
+        // Timeout : un fetch qui pend bloquait indéfiniment le chargement (aucun avant).
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      const json = (await res.json()) as OkxInstrumentsResponse;
+      const liste = Array.isArray(json.data) ? (json.data as OkxInstrument[]) : [];
+      const inst = liste.find((i) => i.instId === instId);
+      const ctVal = Number(inst?.ctVal);
+      if (!Number.isFinite(ctVal) || ctVal <= 0) throw new Error("ctVal illisible");
+      parInst.set(instId, ctVal);
+    } catch (err) {
+      console.error("[axiomd] ctVal OKX indisponible pour", instId, err);
+    }
+  };
+  return {
+    get: (instId) => parInst.get(instId),
+    charger: async (instIds, forcer) => {
+      await Promise.all([...instIds].filter((id) => forcer || !parInst.has(id)).map(chargerUn));
+    },
+  };
+}
+
 /**
  * Crée un feed de liquidations OKX pour un jeu de symboles évolutif. UNE WS globale
  * (`liquidation-orders`, instType SWAP) filtrée par instId côté client. Le jeu de symboles
@@ -476,38 +515,15 @@ interface OkxInstrumentsResponse {
 export function creerFeedLiquidationsOkx(): FeedLiquidations {
   // Map instId → symbole surveillé (routage des messages vers la bonne clé de stockage).
   let mapInst = new Map<string, string>();
-  const ctValParInst = new Map<string, number>();
+  const registreCtVal = creerRegistreCtVal();
   let stopWs: (() => void) | null = null;
   let cleEnsemble = ""; // clé du jeu de symboles courant (anti re-fetch inutile au poll)
 
-  /** Fetch le ctVal d'un instId (best-effort ; log sur échec, on retentera au refresh). */
-  const chargerCtVal = async (instId: string): Promise<void> => {
-    const instFamily = instId.replace(/-SWAP$/, "");
-    try {
-      const params = new URLSearchParams({ instType: "SWAP", instFamily });
-      const res = await fetch(`${OKX_INSTRUMENTS_URL}?${params.toString()}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-      const json = (await res.json()) as OkxInstrumentsResponse;
-      const liste = Array.isArray(json.data) ? (json.data as OkxInstrument[]) : [];
-      const inst = liste.find((i) => i.instId === instId);
-      const ctVal = Number(inst?.ctVal);
-      if (!Number.isFinite(ctVal) || ctVal <= 0) throw new Error("ctVal illisible");
-      ctValParInst.set(instId, ctVal);
-    } catch (err) {
-      console.error("[axiomd] ctVal OKX indisponible pour", instId, err);
-    }
-  };
-
-  /** Charge les ctVal des instId surveillés (manquants seulement, ou TOUS si `forcer`). */
-  const chargerTousCtVal = (forcer: boolean): void => {
-    for (const instId of mapInst.keys()) {
-      if (!forcer && ctValParInst.has(instId)) continue;
-      void chargerCtVal(instId);
-    }
-  };
-
   // Refresh périodique des ctVal (24 h) — no-op tant que mapInst est vide.
-  const minuteurCtVal = setInterval(() => chargerTousCtVal(true), PERIODE_REFRESH_CTVAL_MS);
+  const minuteurCtVal = setInterval(
+    () => void registreCtVal.charger(mapInst.keys(), true),
+    PERIODE_REFRESH_CTVAL_MS,
+  );
 
   /** Traite un message OKX : filtre par instId surveillé, parse et insère sous le symbole. */
   const ingererMessageOkx = (data: string): boolean => {
@@ -522,8 +538,8 @@ export function creerFeedLiquidationsOkx(): FeedLiquidations {
       if (!entree || typeof entree.instId !== "string") continue;
       const symbole = mapInst.get(entree.instId);
       if (symbole === undefined) continue; // instrument non surveillé
-      const ctVal = ctValParInst.get(entree.instId);
-      if (ctVal === undefined || !Array.isArray(entree.details)) continue; // ctVal pas encore chargé → on saute (à froid, ça reviendra)
+      const ctVal = registreCtVal.get(entree.instId);
+      if (ctVal === undefined || !Array.isArray(entree.details)) continue; // ctVal pas encore chargé → on saute (retry court au poll KV 60 s)
       const lot: LiqFil[] = [];
       for (const detail of entree.details) {
         const liq = parseOkxLiqDaemon(detail, ctVal);
@@ -555,7 +571,7 @@ export function creerFeedLiquidationsOkx(): FeedLiquidations {
       stopWs = null;
       return;
     }
-    chargerTousCtVal(false); // charge les ctVal manquants pour les nouveaux instId
+    void registreCtVal.charger(mapInst.keys(), false); // charge les ctVal manquants pour les nouveaux instId
     if (stopWs === null) {
       const sub = JSON.stringify({ op: "subscribe", args: [{ channel: OKX_CANAL_LIQ, instType: "SWAP" }] });
       stopWs = connecterBoucleWs(OKX_WS_URL, (ws) => ws.send(sub), ingererMessageOkx, HEARTBEAT_OKX);
@@ -564,6 +580,9 @@ export function creerFeedLiquidationsOkx(): FeedLiquidations {
 
   return {
     setSymboles,
+    // Retry COURT des ctVal manquants (appelé par le poll KV 60 s) : sans lui, le seul
+    // retry était le refresh 24 h — jusqu'à 24 h de liquidations OKX jetées en silence.
+    retenterCtVal: () => void registreCtVal.charger(mapInst.keys(), false),
     arreter: () => {
       clearInterval(minuteurCtVal);
       stopWs?.();
@@ -592,6 +611,7 @@ export function demarrerBoucleLiquidations(): () => void {
       const symboles = fusionnerSymbolesLiq(lireKvLiqBrut(), lireDefsKv(getDb()));
       feed.setSymboles(symboles);
       feedOkx.setSymboles(symboles);
+      feedOkx.retenterCtVal?.(); // ≤60 s entre deux tentatives sur un ctVal manquant
     } catch (err) {
       console.error("[axiomd] rafraîchissement des symboles liquidations échoué :", err);
     }

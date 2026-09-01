@@ -2,9 +2,11 @@ import { describe, expect, it } from "bun:test";
 import type { AlertDef } from "@axiom/alerts";
 import {
   armerHeartbeatWs,
+  creerRegistreCtVal,
   fusionnerSymbolesLiq,
   HEARTBEAT_BYBIT,
   HEARTBEAT_OKX,
+  OKX_INSTRUMENTS_URL,
   okxInstIdDaemon,
   parseBybitLiqDaemon,
   parseOkxLiqDaemon,
@@ -151,5 +153,40 @@ describe("armerHeartbeatWs", () => {
     );
     await new Promise((r) => setTimeout(r, 15)); // aucune exception ne doit fuir
     stop();
+  });
+});
+
+describe("creerRegistreCtVal", () => {
+  const INST = "BTC-USDT-SWAP";
+
+  /** Stub REST instruments OKX : échoue tant que `etat.ok` est false ; compte les appels. */
+  function stubCtVal(): { fetchImpl: typeof fetch; etat: { ok: boolean; appels: number } } {
+    const etat = { ok: false, appels: 0 };
+    const fetchImpl = (async (entree: RequestInfo | URL) => {
+      etat.appels += 1;
+      expect(String(entree).startsWith(OKX_INSTRUMENTS_URL)).toBe(true);
+      if (!etat.ok) return new Response("boom", { status: 500 });
+      return new Response(JSON.stringify({ code: "0", data: [{ instId: INST, ctVal: "0.01" }] }));
+    }) as typeof fetch;
+    return { fetchImpl, etat };
+  }
+
+  it("échec au démarrage puis retry NON forcé : le ctVal manquant est rechargé", async () => {
+    const { fetchImpl, etat } = stubCtVal();
+    const registre = creerRegistreCtVal(fetchImpl);
+    await registre.charger([INST], false);
+    expect(registre.get(INST)).toBeUndefined(); // échec absorbé (best-effort)
+    expect(etat.appels).toBe(1);
+
+    etat.ok = true;
+    await registre.charger([INST], false); // retry : MANQUANT → refetch (le bug : seul le refresh 24 h retentait)
+    expect(registre.get(INST)).toBe(0.01);
+    expect(etat.appels).toBe(2);
+
+    await registre.charger([INST], false); // présent, non forcé → AUCUN fetch (anti-spam au poll 60 s)
+    expect(etat.appels).toBe(2);
+
+    await registre.charger([INST], true); // forcé (refresh 24 h) → refetch
+    expect(etat.appels).toBe(3);
   });
 });

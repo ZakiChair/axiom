@@ -113,21 +113,28 @@ export const qqe: IndicatorDef = {
       const newLong = rm - dar * factor;
       const newShort = rm + dar * factor;
 
+      // Bandes de la barre PRÉCÉDENTE : la bascule se teste contre ELLES
+      // (convention QQE : cross(RSIndex, shortband[1])). Tester contre les
+      // bandes déjà mises à jour rendait `rm > shortBand` impossible
+      // (newShort = rm + dar·factor ≥ rm) : le trend restait figé à jamais.
+      const prevLongBand = longBand;
+      const prevShortBand = shortBand;
+
       // Trailing bands (logique QQE classique).
-      if (rm > longBand && rsiMa[i - 1] !== undefined && rsiMa[i - 1]! > longBand) {
-        longBand = Math.max(longBand, newLong);
+      if (rm > prevLongBand && rsiMa[i - 1] !== undefined && rsiMa[i - 1]! > prevLongBand) {
+        longBand = Math.max(prevLongBand, newLong);
       } else {
         longBand = newLong;
       }
-      if (rm < shortBand && rsiMa[i - 1] !== undefined && rsiMa[i - 1]! < shortBand) {
-        shortBand = Math.min(shortBand, newShort);
+      if (rm < prevShortBand && rsiMa[i - 1] !== undefined && rsiMa[i - 1]! < prevShortBand) {
+        shortBand = Math.min(prevShortBand, newShort);
       } else {
         shortBand = newShort;
       }
 
-      // Direction : croisement des bandes.
-      if (rm > shortBand && trend <= 0) trend = 1;
-      else if (rm < longBand && trend >= 0) trend = -1;
+      // Direction : croisement du RSI lissé avec la bande opposée PRÉCÉDENTE.
+      if (rm > prevShortBand && trend <= 0) trend = 1;
+      else if (rm < prevLongBand && trend >= 0) trend = -1;
 
       qqeOut[i] = rm;
       fast[i] = trend === 1 ? longBand : shortBand;

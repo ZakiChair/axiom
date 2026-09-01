@@ -3,7 +3,7 @@
  * backoff exponentiel anti-flap, watchdog de staleness). Testé avec un WebSocket mocké
  * + fake timers : déterministe, sans réseau. Vérifie les invariants documentés en tête
  * de wsLoop.ts (backoff non remis à zéro dans onopen, reset au 1er message de données,
- * onReconnected jamais à la 1re connexion, fermeture forcée d'une socket zombie).
+ * onReconnected dès la 1re connexion (raccord backfill→WS), fermeture forcée d'une socket zombie).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { connectWsLoop } from "./wsLoop";
@@ -53,7 +53,9 @@ afterEach(() => {
 });
 
 describe("connectWsLoop", () => {
-  it("appelle onOpen à la connexion, PAS onReconnected la 1re fois", () => {
+  it("appelle onOpen ET onReconnected (resync) dès la 1re connexion — raccord backfill→WS", () => {
+    // Des bougies peuvent clôturer entre l'instantané REST du backfill et le premier
+    // message WS (systématique en 1s) : le resync doit aussi couvrir la 1re connexion.
     const onOpen = vi.fn();
     const onReconnected = vi.fn();
     connectWsLoop({ url: "wss://x", source: "test", onMessage: () => true, onOpen, onReconnected });
@@ -61,7 +63,7 @@ describe("connectWsLoop", () => {
     expect(MockWebSocket.instances).toHaveLength(1);
     dernière().déclencherOpen();
     expect(onOpen).toHaveBeenCalledTimes(1);
-    expect(onReconnected).not.toHaveBeenCalled();
+    expect(onReconnected).toHaveBeenCalledTimes(1);
   });
 
   it("reconnecte après une fermeture, avec backoff exponentiel, et appelle onReconnected", () => {
@@ -78,7 +80,7 @@ describe("connectWsLoop", () => {
     expect(MockWebSocket.instances).toHaveLength(2); // reconnexion #1
 
     dernière().déclencherOpen();
-    expect(onReconnected).toHaveBeenCalledTimes(1); // appelé sur une RE-connexion
+    expect(onReconnected).toHaveBeenCalledTimes(2); // 1re connexion + RE-connexion
     dernière().close(); // 2e chute → délai 2000ms (2^1, backoff non remis à zéro)
 
     vi.advanceTimersByTime(1999);

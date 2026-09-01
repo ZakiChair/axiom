@@ -9,9 +9,9 @@
  *  - Watchdog de staleness : sans AUCUN message pendant `staleMs` (les heartbeats
  *    comptent comme activité), la socket est fermée de force → la reconnexion prend
  *    le relais. Détecte les connexions « zombies » qui ne lèvent jamais `onclose`.
- *  - Détection de reconnexion : `onReconnected` est appelé après chaque
- *    rétablissement (jamais à la 1re connexion) — les flux kline y déclenchent leur
- *    resync REST.
+ *  - Resync : `onReconnected` est appelé après CHAQUE connexion établie, première
+ *    incluse (raccord backfill→1er message WS) — les flux kline y déclenchent leur
+ *    resync REST ; les flux trades ne fournissent pas ce callback.
  *
  * Report d'état dans `healthStore` (reconnecting/connected/stale/closed/error). Le
  * parsing/emission des messages (`onMessage`) et l'envoi de la souscription à
@@ -34,7 +34,7 @@ export interface WsLoopOptions {
    * malgré tout comme activité pour le watchdog (via l'horodatage interne).
    */
   onMessage: (data: string) => boolean | void;
-  /** Appelé après une RECONNEXION réussie (jamais à la 1re connexion) → resync REST. */
+  /** Appelé après CHAQUE connexion établie (première incluse) → resync REST kline. */
   onReconnected?: () => void;
   /** Seuil de staleness du watchdog (défaut 60s). */
   staleMs?: number;
@@ -103,7 +103,6 @@ export function connectWsLoop(o: WsLoopOptions): Unsubscribe {
     ws = socket;
 
     socket.onopen = () => {
-      const wasReconnect = hasConnected;
       hasConnected = true;
       lastMessageTs = Date.now();
       healthStore.getState().setEtat(o.source, "connected", { dernierMessageTs: lastMessageTs });
@@ -115,7 +114,11 @@ export function connectWsLoop(o: WsLoopOptions): Unsubscribe {
         attempt = 0;
       }, stableResetMs);
       armWatchdog();
-      if (wasReconnect) o.onReconnected?.();
+      // Resync REST à CHAQUE connexion établie, PREMIÈRE INCLUSE : des bougies peuvent
+      // clôturer entre l'instantané REST du backfill et le premier message WS (trou
+      // systématique en 1s, ~1 chargement/60 en 1m). Les flux trades ne passent jamais
+      // ce callback ; côté kline, la fusion (prepareResyncApply) est idempotente.
+      o.onReconnected?.();
     };
 
     socket.onmessage = (ev) => {

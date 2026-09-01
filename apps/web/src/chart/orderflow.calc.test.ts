@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
-import { buildCvdSpotPerpBuckets, buildFootprintBar, type FpCell } from "./orderflow.calc";
+import { buildCvdSpotPerpBuckets, buildFootprintBar, computeCvd, sourceFournitCvd, type FpCell } from "./orderflow.calc";
 
 function candle(time: number, buy: number, sell: number): Candle {
   return {
@@ -89,5 +89,26 @@ describe("buildCvdSpotPerpBuckets", () => {
   it("retourne [] si aucune bougie n'a de delta perp", () => {
     const candles = [candle(1_000, 1, 1), candle(2_000, 2, 2)];
     expect(buildCvdSpotPerpBuckets(candles, new Map())).toEqual([]);
+  });
+});
+
+describe("computeCvd — bougies SANS split buy/sell (Kraken/OKX/Bybit/HL, hist. Coinbase)", () => {
+  it("contribue un delta 0 (CVD plat), pas −volume", () => {
+    // Bougie sans buyVolume/sellVolume : avant correctif, buy=0 et sell=volume → −volume cumulé.
+    const sansSplit: Candle = {
+      time: 1_000, open: 100, high: 110, low: 90, close: 105, volume: 42, closed: true,
+    };
+    expect(computeCvd([sansSplit, { ...sansSplit, time: 2_000 }])).toEqual([0, 0]);
+    // Une bougie AVEC split garde son delta réel.
+    expect(computeCvd([candle(1_000, 10, 4)])).toEqual([6]);
+  });
+});
+
+describe("sourceFournitCvd", () => {
+  it("vrai UNIQUEMENT pour binance (seule source au split historique complet)", () => {
+    expect(sourceFournitCvd("binance")).toBe(true);
+    for (const ex of ["kraken", "okx", "bybit", "hyperliquid", "coinbase", "mexc", "twelvedata", "synthetic"] as const) {
+      expect(sourceFournitCvd(ex)).toBe(false);
+    }
   });
 });

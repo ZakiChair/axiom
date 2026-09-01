@@ -6,7 +6,7 @@
  * ainsi une frontière de fichier — `orderflow.ts` conserve le contrôleur de rendu
  * (Canvas + sync viewport) et importe ces helpers. Testé dans orderflow.calc.test.ts.
  */
-import type { Candle, FootprintBar, FootprintRow } from "@axiom/types";
+import type { Candle, ExchangeId, FootprintBar, FootprintRow } from "@axiom/types";
 import type { CvdBucket } from "./cvdSpotPerp";
 
 /** Accumulateur buy/sell d'un niveau de prix (clé = index de bucket au tickSize). */
@@ -26,12 +26,25 @@ export function computeCvd(candles: Candle[]): number[] {
     const c = candles[i];
     if (c !== undefined) {
       const buy = c.buyVolume ?? 0;
-      const sell = c.sellVolume ?? c.volume - buy;
+      const sell = c.sellVolume ?? (c.buyVolume === undefined ? 0 : c.volume - buy);
       acc += buy - sell;
     }
     out[i] = acc;
   }
   return out;
+}
+
+/**
+ * Vrai si la source fournit le split volume acheteur/vendeur (`buyVolume`/`sellVolume`)
+ * sur TOUT l'historique de bougies — condition d'un CVD honnête. Seul Binance le porte
+ * (REST k[9] « taker buy base volume » + WS `V`) ; les mappers Kraken/OKX/Bybit/
+ * Hyperliquid n'en posent aucun, et le backfill REST Coinbase non plus (seules ses
+ * bougies agrégées en LIVE l'ont). Plutôt qu'afficher une droite −Σvolume, on NE CRÉE
+ * PAS le pane CVD (contrat « jamais de pane muet » : pas de pane vaut mieux qu'un pane
+ * mensonger) — même patron de gate que wantCvdSpotPerp côté contrôleur.
+ */
+export function sourceFournitCvd(exchange: ExchangeId): boolean {
+  return exchange === "binance";
 }
 
 /**

@@ -630,8 +630,8 @@ export function Toolbar() {
       <StrategyMenu />
 
       {/* Orderflow (M5) : CVD + footprint, alimenté par le flux de trades de la
-          source active. Footprint sur les 3 sources ; CVD complet sur
-          Binance/Coinbase (klines à volume taker), plat sur Kraken. */}
+          source active. Footprint sur toutes les sources à flux de trades ; pane CVD
+          créé UNIQUEMENT sur Binance (seule source au split buy/sell historique). */}
       <button
         type="button"
         onClick={toggleOrderflow}
@@ -645,7 +645,7 @@ export function Toolbar() {
           noTradeStream
             ? "Indisponible sur cette source (aucun flux de trades)"
             : avecRaccourci(
-                isBinance ? "Orderflow" : "Footprint complet ; CVD limité hors Binance/Coinbase",
+                isBinance ? "Orderflow" : "Footprint seul — CVD indisponible (pas de volumes buy/sell sur cette source)",
                 RC_ORDERFLOW,
               )
         }

@@ -55,6 +55,7 @@ import {
   fallbackTick,
   fmtDelta,
   fmtVol,
+  sourceFournitCvd,
   type FpCell,
 } from "./orderflow.calc";
 
@@ -403,6 +404,9 @@ export class OrderflowController {
 
   private createCvdPane(): void {
     if (this.cvdPaneId) return;
+    // Pas de split buy/sell historique sur cette source → pas de pane CVD (cf.
+    // sourceFournitCvd) : le footprint (flux de trades live) reste, lui, disponible.
+    if (!sourceFournitCvd(this.store.getState().exchange)) return;
     const cvd = computeCvd(this.store.getState().candles);
     const id = this.chart.createIndicator(
       { name: CVD_NAME, extendData: { cvd }, precision: precisionCvd(cvd) },

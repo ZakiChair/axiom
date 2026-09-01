@@ -59,10 +59,12 @@ const CANDLE_PANE_ID = "candle_pane";
 
 /**
  * Panes séparés créés HORS de ce contrôleur (OrderflowController, DerivativesChart-
- * Controller, CompareController) : créés sans minHeight ni budget, ils échappaient au
- * filet de hauteur — 5 panes annexes suffisaient à écraser le pane prix sans que le
- * filet ne voie rien à corriger. Ids déterministes, miroir des constantes de leurs
- * modules (orderflow.ts, derivatives.ts, compare.ts).
+ * Controller, CompareController, RevenueController, MacroController) : créés sans
+ * minHeight ni budget, ils échappaient au filet de hauteur — ces panes annexes
+ * suffisaient à écraser le pane prix sans que le filet ne voie rien à corriger. Liste
+ * exhaustive (grep `createIndicator(` hors indicators.ts) : ids déterministes, miroir
+ * des constantes de leurs modules (orderflow.ts, derivatives.ts, compare.ts,
+ * revenue.ts:30, macro.ts:12).
  */
 const PANES_HORS_CONTROLEUR: readonly string[] = [
   "axiom_orderflow_cvd",
@@ -70,6 +72,8 @@ const PANES_HORS_CONTROLEUR: readonly string[] = [
   "axiom_deriv_oi",
   "axiom_deriv_funding",
   "axiom_compare",
+  "axiom_revenue",
+  "axiom_macro",
 ];
 
 /** Période du throttle leading+trailing de `recomputeThrottled` (recalcul intra-bougie). */

@@ -29,6 +29,11 @@ const HIST = {
   },
 };
 
+const MACRO_HIST = HIST.grille.map((t, i) => {
+  const total = HIST.total[i] ?? 0;
+  return { t, total, total2: total - 1e12, total3: total - 1.2e12 };
+});
+
 const MARCHES = [
   { id: "bitcoin", symbol: "btc", name: "Bitcoin", current_price: 65_000, market_cap: 1e12, price_change_percentage_24h: 1 },
   { id: "ethereum", symbol: "eth", name: "Ethereum", current_price: 3_000, market_cap: 2e11, price_change_percentage_24h: 1 },
@@ -45,6 +50,33 @@ const GLOBAL = {
   },
 };
 
+const BINANCE_KLINES = HIST.grille.map((t, i) => {
+  const close = 60_000 + i * 100;
+  return [t, String(close - 50), String(close + 100), String(close - 100), String(close), "100", t + JOUR - 1, "0", 10, "50", "0", "0"];
+});
+
+const CMC_DEBUT = Date.UTC(2013, 11, 31);
+const CMC_FIN = Date.UTC(2026, 7, 31);
+const CMC_GLOBAL_QUOTES = Array.from(
+  { length: Math.floor((CMC_FIN - CMC_DEBUT) / JOUR) + 1 },
+  (_, i) => {
+    const t = CMC_DEBUT + i * JOUR;
+    const total = 1e9 + i * 5e8;
+    return {
+      timestamp: new Date(t).toISOString(),
+      btcDominance: 60,
+      ethDominance: t >= Date.UTC(2015, 7, 7) ? 10 : 0,
+      quote: [{ name: "2781", totalMarketCap: total, altcoinMarketCap: total * 0.4 }],
+    };
+  },
+);
+const CMC_ETH_POINTS = CMC_GLOBAL_QUOTES
+  .filter((point) => Date.parse(point.timestamp) >= Date.UTC(2015, 7, 7))
+  .map((point) => ({
+    s: String(Date.parse(point.timestamp) / 1000),
+    v: [1, 1, point.quote[0]!.totalMarketCap * 0.1],
+  }));
+
 /** Intercepte les trois endpoints CoinGecko utilisés par la fenêtre. */
 async function bouchonnerCoinGecko(page: import("@playwright/test").Page): Promise<void> {
   await page.route("**/api.coingecko.com/api/v3/coins/markets*", (route) =>
@@ -58,6 +90,7 @@ async function bouchonnerCoinGecko(page: import("@playwright/test").Page): Promi
       },
     })
   );
+  await page.route("**/api/v3/klines*", (route) => route.fulfill({ json: BINANCE_KLINES }));
 }
 
 test.beforeEach(async ({ page }) => {
@@ -70,11 +103,12 @@ test.beforeEach(async ({ page }) => {
 test.describe("avec historique reconstruit", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(
-      ([hist, dominances]) => {
+      ([hist, dominances, macroHist]) => {
         window.localStorage.setItem("axiom:mcap:v1", hist as string);
         window.localStorage.setItem("axiom:mcap:dominances", dominances as string);
+        window.localStorage.setItem("axiom:macroHistory:v1", macroHist as string);
       },
-      [JSON.stringify(HIST), JSON.stringify(["bitcoin", "ethereum"])]
+      [JSON.stringify(HIST), JSON.stringify(["bitcoin", "ethereum"]), JSON.stringify(MACRO_HIST)]
     );
   });
 
@@ -94,6 +128,87 @@ test.describe("avec historique reconstruit", () => {
     await expect(page.getByLabel("Dominances")).toBeVisible();
     // La note de source dit d'où viennent les chiffres et ce qu'ils valent.
     await expect(page.getByText(/reconstruit par somme du top 100/)).toBeVisible();
+  });
+
+  test("TOTAL3 utilise l'historique long CMC sans clé et bascule contre BTC puis SOL", async ({ page }) => {
+    let appelsCmc = 0;
+    let authorizationPresente = false;
+    const intervallesGlobaux = new Set<string>();
+    await page.route("**/extapi/api.coinmarketcap.com/data-api/**", (route) => {
+      appelsCmc += 1;
+      authorizationPresente ||= route.request().headers().authorization !== undefined;
+      const url = new URL(route.request().url());
+      const debut = Number(url.searchParams.get("timeStart")) * 1000;
+      const fin = Number(url.searchParams.get("timeEnd")) * 1000;
+      const intervalle = url.searchParams.get("interval") ?? "1d";
+      if (url.pathname.includes("global-metrics")) {
+        intervallesGlobaux.add(intervalle);
+        const pas = intervalle === "1h" ? 3_600_000 : intervalle === "4h" ? 4 * 3_600_000 : JOUR;
+        const quotes = intervalle === "1d"
+          ? CMC_GLOBAL_QUOTES.filter((point) => {
+              const t = Date.parse(point.timestamp);
+              return t >= debut && t <= fin;
+            })
+          : Array.from({ length: Math.floor((fin - debut) / pas) + 1 }, (_, i) => {
+              const t = debut + i * pas;
+              const total = 2e12 + i * 1e9;
+              return {
+                timestamp: new Date(t).toISOString(),
+                btcDominance: 50,
+                ethDominance: 10,
+                quote: [{ name: "2781", totalMarketCap: total, altcoinMarketCap: total * 0.5 }],
+              };
+            });
+        return route.fulfill({ json: { data: { quotes }, status: { error_code: "0" } } });
+      }
+      const points = intervalle === "1d"
+        ? CMC_ETH_POINTS.filter((point) => {
+            const t = Number(point.s) * 1000;
+            return t >= debut && t <= fin;
+          })
+        : Array.from({ length: Math.floor((fin - debut) / 3_600_000) + 1 }, (_, i) => ({
+            s: String((debut + i * 3_600_000) / 1000),
+            v: [1, 1, 2e11 + i * 1e8],
+          }));
+      return route.fulfill({ json: { data: { points }, status: { error_code: "0" } } });
+    });
+    await page.goto("/");
+    await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
+
+    await page.getByRole("combobox", { name: "Rechercher une paire" }).fill("TOTAL3");
+    await page.getByRole("option", { name: "TOTAL3", exact: true }).click();
+
+    await expect(page.getByText("TOTAL3", { exact: true })).toBeVisible();
+    await expect(page.getByText("CoinMarketCap · daily", { exact: true })).toBeVisible();
+    await expect.poll(() => appelsCmc).toBeGreaterThanOrEqual(4);
+    expect(authorizationPresente).toBe(false);
+
+    for (const tf of ["1h", "4h", "1d", "1w", "1M", "3M", "6M", "12M"]) {
+      await expect(page.getByRole("button", { name: tf, exact: true })).toBeEnabled();
+    }
+    await page.getByRole("button", { name: "1h", exact: true }).click();
+    await expect(page.getByText("CoinMarketCap · 1h", { exact: true })).toBeVisible();
+    await expect.poll(() => intervallesGlobaux.has("1h")).toBe(true);
+    await page.getByRole("button", { name: "4h", exact: true }).click();
+    await expect(page.getByText("CoinMarketCap · 4h", { exact: true })).toBeVisible();
+    await expect.poll(() => intervallesGlobaux.has("4h")).toBe(true);
+    for (const tf of ["1w", "1M", "3M", "6M", "12M", "1d"]) {
+      const bouton = page.getByRole("button", { name: tf, exact: true });
+      await bouton.click();
+      await expect(bouton).toHaveClass(/bg-emerald-500/);
+    }
+
+    await expect(page.getByRole("button", { name: "÷BTC" })).toBeVisible();
+    await page.getByRole("button", { name: "÷BTC" }).click();
+    await expect(page.getByText("TOTAL3 / BTCUSDT", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "Choisir l'actif de comparaison" }).click();
+    await page.getByTitle("Comparer vs SOL").click();
+    await expect(page.getByText("TOTAL3 / SOLUSDT", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "÷SOL", exact: true }).click();
+    await expect(page.getByText("TOTAL3 / SOLUSDT", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("TOTAL3", { exact: true })).toBeVisible();
   });
 
   test("ajouter une dominance ajoute sa pastille ; la retirer la fait disparaître", async ({

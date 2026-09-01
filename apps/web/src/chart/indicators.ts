@@ -57,6 +57,21 @@ function sortieFinie(def: IndicatorDef, result: IndicatorResult): boolean {
 /** Id du pane prix (constante interne KLineChart, vérifiée dans le bundle). */
 const CANDLE_PANE_ID = "candle_pane";
 
+/**
+ * Panes séparés créés HORS de ce contrôleur (OrderflowController, DerivativesChart-
+ * Controller, CompareController) : créés sans minHeight ni budget, ils échappaient au
+ * filet de hauteur — 5 panes annexes suffisaient à écraser le pane prix sans que le
+ * filet ne voie rien à corriger. Ids déterministes, miroir des constantes de leurs
+ * modules (orderflow.ts, derivatives.ts, compare.ts).
+ */
+const PANES_HORS_CONTROLEUR: readonly string[] = [
+  "axiom_orderflow_cvd",
+  "axiom_orderflow_cvd_sp",
+  "axiom_deriv_oi",
+  "axiom_deriv_funding",
+  "axiom_compare",
+];
+
 /** Période du throttle leading+trailing de `recomputeThrottled` (recalcul intra-bougie). */
 const RECOMPUTE_THROTTLE_MS = 500;
 
@@ -484,6 +499,13 @@ export class ChartIndicators {
     const separes = [...new Set([...this.active.values()].map((i) => i.paneId))].filter(
       (paneId) => paneId !== CANDLE_PANE_ID
     );
+    // Panes annexes réellement montés (getSize → null quand le pane n'existe pas) :
+    // ils consomment la même hauteur que les panes @axiom et entrent au même budget.
+    for (const paneId of PANES_HORS_CONTROLEUR) {
+      if (!separes.includes(paneId) && (this.chart.getSize(paneId)?.height ?? 0) > 0) {
+        separes.push(paneId);
+      }
+    }
     const hauteurs: number[] = [];
     let utile = this.chart.getSize(CANDLE_PANE_ID)?.height ?? 0;
     for (const paneId of separes) {

@@ -7,7 +7,7 @@
  * via vi.mock — même approche que registry.test.ts — pour importer les modules réels en
  * environnement Node.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../store/theme", () => ({
   THEMES: ["dark", "bloomberg", "matrix", "cute", "aurora"] as const,
@@ -21,8 +21,18 @@ vi.mock("../chart/liquidationMarkers", () => ({
   liqMarksStore: { getState: () => ({ basculer: () => {} }) },
 }));
 
-import { construireRegistre, enregistrerCommandes } from "./registry";
-import { raccourciPour, raccourciTimeframe, lignesMnemoniques, timeframePourCode } from "./hotkeys";
+import { construireRegistre, enregistrerCommandes, paletteStore } from "./registry";
+import {
+  raccourciPour,
+  raccourciTimeframe,
+  lignesMnemoniques,
+  timeframePourCode,
+  gererRaccourciGlobal,
+} from "./hotkeys";
+import { settingsUiStore } from "../store/settings-ui";
+import { windowManagerStore, type SnapZone } from "../store/windowManager";
+import { orderflowStore } from "../store/orderflow";
+import { marketStore } from "../store/market";
 // Les deux sources externes n'exportent qu'un tableau `Commande[]` — c'est App.tsx qui les
 // greffe dans le registre via `enregistrerCommandes([...])`. Un simple import side-effect ne
 // greffe donc RIEN dans `commandesExternes` (même remarque que registry.test.ts). On reproduit
@@ -98,5 +108,88 @@ describe("lignesMnemoniques", () => {
     for (const c of registre) {
       if (c.mnemonique !== undefined) expect(texte).toContain(c.mnemonique);
     }
+  });
+});
+
+// ─── Handler global (extrait pour être testable) ───
+
+/** Événement clavier minimal (env Node : pas de KeyboardEvent natif). */
+function ev(
+  partiel: Partial<{ key: string; code: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean }>,
+): KeyboardEvent {
+  return {
+    key: "",
+    code: "",
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    target: null,
+    preventDefault: () => {},
+    ...partiel,
+  } as unknown as KeyboardEvent;
+}
+
+describe("gererRaccourciGlobal — ancrage ⌥+flèches et modale Réglages", () => {
+  beforeEach(() => {
+    // estChampEditable fait `target instanceof HTMLElement` : la classe n'existe pas en Node.
+    (globalThis as { HTMLElement?: unknown }).HTMLElement = class {};
+    settingsUiStore.getState().closeSettings();
+    paletteStore.getState().fermer();
+  });
+
+  it("⌥→ ancre la fenêtre focalisée à droite (branche auparavant inaccessible : tout ⌥ sortait à la garde des modificateurs)", () => {
+    const zones: Array<SnapZone | "restaurer"> = [];
+    const originale = windowManagerStore.getState().ancrerFocalisee;
+    windowManagerStore.setState({ ancrerFocalisee: (z: SnapZone | "restaurer") => void zones.push(z) });
+    try {
+      gererRaccourciGlobal(ev({ key: "ArrowRight", altKey: true }));
+      gererRaccourciGlobal(ev({ key: "ArrowDown", altKey: true }));
+      expect(zones).toEqual(["right", "restaurer"]);
+    } finally {
+      windowManagerStore.setState({ ancrerFocalisee: originale });
+    }
+  });
+
+  it("Réglages ouvert : Échap et ⇧Échap n'atteignent plus la fenêtre flottante derrière la modale", () => {
+    const appels: string[] = [];
+    const etat = windowManagerStore.getState();
+    const originales = {
+      fenetreFocalisee: etat.fenetreFocalisee,
+      minimizeWindow: etat.minimizeWindow,
+      closeWindow: etat.closeWindow,
+    };
+    windowManagerStore.setState({
+      fenetreFocalisee: () => "whales",
+      minimizeWindow: (id: string) => void appels.push(`min:${id}`),
+      closeWindow: (id: string) => void appels.push(`close:${id}`),
+    });
+    try {
+      settingsUiStore.getState().openSettings();
+      gererRaccourciGlobal(ev({ key: "Escape" }));
+      gererRaccourciGlobal(ev({ key: "Escape", shiftKey: true }));
+      expect(appels).toEqual([]); // la modale absorbe tout (SettingsPanel gère sa propre fermeture)
+
+      settingsUiStore.getState().closeSettings();
+      gererRaccourciGlobal(ev({ key: "Escape" }));
+      expect(appels).toEqual(["min:whales"]); // comportement normal hors modale
+    } finally {
+      windowManagerStore.setState(originales);
+      settingsUiStore.getState().closeSettings();
+    }
+  });
+
+  it("Réglages ouvert : les toggles à une touche (O…) sont aussi neutralisés derrière la modale aria-modal", () => {
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1m" });
+    orderflowStore.getState().setEnabled(false);
+
+    settingsUiStore.getState().openSettings();
+    gererRaccourciGlobal(ev({ key: "o" }));
+    expect(orderflowStore.getState().enabled).toBe(false); // absorbé
+
+    settingsUiStore.getState().closeSettings();
+    gererRaccourciGlobal(ev({ key: "o" }));
+    expect(orderflowStore.getState().enabled).toBe(true); // actif hors modale
+    orderflowStore.getState().setEnabled(false);
   });
 });

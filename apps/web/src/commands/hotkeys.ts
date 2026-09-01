@@ -22,6 +22,7 @@ import { SUPPORTED_TIMEFRAMES } from "../data/adapters";
 import { pousserToast } from "../store/toasts";
 import { watchlistStore } from "../store/watchlist";
 import { windowManagerStore, type SnapZone } from "../store/windowManager";
+import { settingsUiStore } from "../store/settings-ui";
 
 /** ⌥ + flèche → zone d'ancrage de la fenêtre focalisée. */
 const ANCRAGE_PAR_TOUCHE: Record<string, SnapZone | "restaurer" | undefined> = {
@@ -236,176 +237,186 @@ function estChampEditable(target: EventTarget | null): boolean {
 }
 
 /**
+ * Handler keydown GLOBAL — extrait du hook pour être testable en Node (les stores sont
+ * tous vanilla). Monté une seule fois par useRaccourcisGlobaux.
+ */
+export function gererRaccourciGlobal(e: KeyboardEvent): void {
+  // ⌘K / Ctrl+K : palette de commandes — actif même dans un champ.
+  if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+    e.preventDefault();
+    paletteStore.getState().ouvrir("commandes");
+    return;
+  }
+  // ⌘[ / ⌘] : historique de navigation entre symboles. On preventDefault car ces
+  // touches sont le « précédent/suivant » du navigateur — ici on reste dans l'app.
+  if ((e.metaKey || e.ctrlKey) && (e.key === "[" || e.key === "]")) {
+    e.preventDefault();
+    const h = symbolHistoryStore.getState();
+    const cible = e.key === "[" ? h.reculer() : h.avancer();
+    if (cible !== null) {
+      navigationHistorique = true;
+      allerAuSymbole(cible);
+      navigationHistorique = false;
+    }
+    return;
+  }
+  // Palette ouverte : elle gère son propre clavier (⌘K déjà traité au-dessus).
+  if (paletteStore.getState().ouvert) return;
+  // Panneau Réglages ouvert (dialogue aria-modal) : AUCUNE touche globale ne doit agir
+  // derrière — Échap minimisait (⇧Échap FERMAIT) la fenêtre flottante focalisée EN PLUS
+  // de fermer le panneau, et F/T/O/V/L/R/chiffres/↑↓ restaient actives. SettingsPanel
+  // gère lui-même Échap → fermeture du panneau.
+  if (settingsUiStore.getState().open) return;
+  // Champ de saisie focalisé : on ne capture pas les touches nues (⌥+flèches y navigue par mot).
+  if (estChampEditable(e.target)) return;
+
+  // ⌥ + flèches : ancrage de la fenêtre au premier plan (moitié gauche/droite, plein
+  // workspace, retour à la géométrie d'avant). DOIT précéder le retour anticipé des
+  // modificateurs ci-dessous : ce retour incluait e.altKey et rendait cette branche
+  // INACCESSIBLE (l'ancrage clavier ne se déclenchait jamais, contredisant l'aide « ? »).
+  if (e.altKey && !e.metaKey && !e.ctrlKey) {
+    const zone = ANCRAGE_PAR_TOUCHE[e.key];
+    if (zone !== undefined) {
+      windowManagerStore.getState().ancrerFocalisee(zone);
+      e.preventDefault();
+    }
+    return; // ⌥ + autre touche : laissé au navigateur/OS
+  }
+  // Tout autre raccourci navigateur (Cmd/Ctrl) : laissé au navigateur.
+  if (e.metaKey || e.ctrlKey) return;
+
+  // Échap : quitte le plein écran s'il est actif, sinon range la fenêtre au premier
+  // plan (⇧Échap la ferme). Avant, aucune touche ne ciblait une fenêtre : fermer ou
+  // réduire imposait de viser une cible d'environ 14×18 px à la souris.
+  if (e.key === "Escape") {
+    if (fullscreenStore.getState().plein) {
+      fullscreenStore.getState().definir(false);
+      e.preventDefault();
+      return;
+    }
+    const focalisee = windowManagerStore.getState().fenetreFocalisee();
+    if (focalisee !== null) {
+      if (e.shiftKey) windowManagerStore.getState().closeWindow(focalisee);
+      else windowManagerStore.getState().minimizeWindow(focalisee);
+      e.preventDefault();
+    }
+    return;
+  }
+
+  // Rotation du focus entre fenêtres ouvertes — par CODE physique (la touche sous
+  // « ² » d'un AZERTY), comme les timeframes : indépendant de la disposition.
+  if (e.code === "Backquote" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    windowManagerStore.getState().cycleFocus();
+    e.preventDefault();
+    return;
+  }
+
+  // « ? » : aide.
+  if (e.key === "?") {
+    paletteStore.getState().ouvrir("aide");
+    e.preventDefault();
+    return;
+  }
+
+  // ↑ / ↓ : symbole précédent / suivant dans la watchlist (liste CIRCULAIRE).
+  if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+    const { symbols } = watchlistStore.getState();
+    const cible = symboleVoisin(symbols, marketStore.getState().symbol, e.key === "ArrowUp" ? -1 : 1);
+    if (cible !== null) {
+      allerAuSymbole(cible);
+      e.preventDefault();
+    }
+    return;
+  }
+
+  // [ / ] : timeframe plus bas / plus haut (NON circulaire, borné aux TF supportés).
+  if (e.key === "[" || e.key === "]") {
+    const { exchange, timeframe } = marketStore.getState();
+    const supportes = SUPPORTED_TIMEFRAMES[exchange] ?? [];
+    const cible = timeframeVoisin(supportes, timeframe, e.key === "[" ? -1 : 1);
+    if (cible !== null) {
+      marketStore.getState().setTimeframe(cible);
+      e.preventDefault();
+    }
+    return;
+  }
+
+  // « / » : focus sur la recherche de paires (input de la Toolbar).
+  if (e.key === "/") {
+    const input = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Rechercher une paire"]'
+    );
+    if (input !== null) {
+      input.focus();
+      e.preventDefault();
+    }
+    return;
+  }
+
+  // Timeframes rapides par code PHYSIQUE (AZERTY : e.key vaudrait & é " …).
+  const tfCode = timeframePourCode(e.code, e);
+  if (tfCode !== null) {
+    const exchange = marketStore.getState().exchange;
+    const supportes = SUPPORTED_TIMEFRAMES[exchange] ?? [];
+    if (supportes.includes(tfCode)) marketStore.getState().setTimeframe(tfCode);
+    return;
+  }
+
+  // Toggles à une touche (insensibles à la casse).
+  switch (e.key.toLowerCase()) {
+    case "o": {
+      // Orderflow : pertinent uniquement sur les sources à flux de trades.
+      if (SOURCES_FLUX_TRADES.has(marketStore.getState().exchange)) {
+        orderflowStore.getState().toggle();
+      } else {
+        pousserToast("Orderflow indisponible sur cette source (flux de trades requis)");
+      }
+      break;
+    }
+    case "v":
+      volumeProfileStore.getState().toggle();
+      break;
+    case "l": {
+      // Heatmap liquidations : flux perp Bybit/OKX uniquement (indispo tradfi / synthétique).
+      const ex = marketStore.getState().exchange;
+      if (ex !== "twelvedata" && ex !== "synthetic") {
+        liqMarksStore.getState().basculer();
+      } else {
+        // Wording aligné sur la garde réelle (tradfi / synthétique exclus) — le flux
+        // vient des perps Bybit/OKX quel que soit l'exchange crypto affiché.
+        pousserToast("Heatmap liquidations indisponible en marchés traditionnels / synthétiques");
+      }
+      break;
+    }
+    case "r": {
+      // Revenus on-chain : indisponible en marchés traditionnels.
+      if (marketStore.getState().exchange !== "twelvedata") {
+        revenueStore.getState().toggle();
+      } else {
+        pousserToast("Revenus on-chain indisponibles en marchés traditionnels");
+      }
+      break;
+    }
+    case "f":
+      fullscreenStore.getState().basculer();
+      break;
+    case "t": {
+      const { theme, setTheme } = themeStore.getState();
+      const i = THEMES.indexOf(theme);
+      const suivant = THEMES[(i + 1) % THEMES.length];
+      if (suivant !== undefined) setTheme(suivant);
+      break;
+    }
+  }
+}
+
+/**
  * Monte l'écouteur global de raccourcis clavier. À appeler UNE fois (dans App).
  * Le nettoyage retire l'écouteur (idempotent en React StrictMode : montage/démontage).
  */
 export function useRaccourcisGlobaux(): void {
   useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      // ⌘K / Ctrl+K : palette de commandes — actif même dans un champ.
-      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
-        e.preventDefault();
-        paletteStore.getState().ouvrir("commandes");
-        return;
-      }
-      // ⌘[ / ⌘] : historique de navigation entre symboles. On preventDefault car ces
-      // touches sont le « précédent/suivant » du navigateur — ici on reste dans l'app.
-      if ((e.metaKey || e.ctrlKey) && (e.key === "[" || e.key === "]")) {
-        e.preventDefault();
-        const h = symbolHistoryStore.getState();
-        const cible = e.key === "[" ? h.reculer() : h.avancer();
-        if (cible !== null) {
-          navigationHistorique = true;
-          allerAuSymbole(cible);
-          navigationHistorique = false;
-        }
-        return;
-      }
-      // Tout autre raccourci navigateur (Cmd/Ctrl/Alt) : laissé au navigateur.
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      // Palette ouverte : elle gère son propre clavier (⌘K déjà traité au-dessus).
-      if (paletteStore.getState().ouvert) return;
-      // Champ de saisie focalisé : on ne capture pas les touches nues.
-      if (estChampEditable(e.target)) return;
-
-      // Échap : quitte le plein écran s'il est actif, sinon range la fenêtre au premier
-      // plan (⇧Échap la ferme). Avant, aucune touche ne ciblait une fenêtre : fermer ou
-      // réduire imposait de viser une cible d'environ 14×18 px à la souris.
-      if (e.key === "Escape") {
-        if (fullscreenStore.getState().plein) {
-          fullscreenStore.getState().definir(false);
-          e.preventDefault();
-          return;
-        }
-        const focalisee = windowManagerStore.getState().fenetreFocalisee();
-        if (focalisee !== null) {
-          if (e.shiftKey) windowManagerStore.getState().closeWindow(focalisee);
-          else windowManagerStore.getState().minimizeWindow(focalisee);
-          e.preventDefault();
-        }
-        return;
-      }
-
-      // ⌥ + flèches : ancrage de la fenêtre au premier plan (moitié gauche/droite,
-      // plein workspace, retour à la géométrie d'avant). Réutilise `snapWindow` et
-      // `preSnapGeometry`, déjà en place pour le glisser-vers-un-bord.
-      if (e.altKey && !e.metaKey && !e.ctrlKey) {
-        const zone = ANCRAGE_PAR_TOUCHE[e.key];
-        if (zone !== undefined) {
-          windowManagerStore.getState().ancrerFocalisee(zone);
-          e.preventDefault();
-          return;
-        }
-      }
-
-      // Rotation du focus entre fenêtres ouvertes — par CODE physique (la touche sous
-      // « ² » d'un AZERTY), comme les timeframes : indépendant de la disposition.
-      if (e.code === "Backquote" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        windowManagerStore.getState().cycleFocus();
-        e.preventDefault();
-        return;
-      }
-
-      // « ? » : aide.
-      if (e.key === "?") {
-        paletteStore.getState().ouvrir("aide");
-        e.preventDefault();
-        return;
-      }
-
-      // ↑ / ↓ : symbole précédent / suivant dans la watchlist (liste CIRCULAIRE).
-      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-        const { symbols } = watchlistStore.getState();
-        const cible = symboleVoisin(symbols, marketStore.getState().symbol, e.key === "ArrowUp" ? -1 : 1);
-        if (cible !== null) {
-          allerAuSymbole(cible);
-          e.preventDefault();
-        }
-        return;
-      }
-
-      // [ / ] : timeframe plus bas / plus haut (NON circulaire, borné aux TF supportés).
-      if (e.key === "[" || e.key === "]") {
-        const { exchange, timeframe } = marketStore.getState();
-        const supportes = SUPPORTED_TIMEFRAMES[exchange] ?? [];
-        const cible = timeframeVoisin(supportes, timeframe, e.key === "[" ? -1 : 1);
-        if (cible !== null) {
-          marketStore.getState().setTimeframe(cible);
-          e.preventDefault();
-        }
-        return;
-      }
-
-      // « / » : focus sur la recherche de paires (input de la Toolbar).
-      if (e.key === "/") {
-        const input = document.querySelector<HTMLInputElement>(
-          'input[aria-label="Rechercher une paire"]'
-        );
-        if (input !== null) {
-          input.focus();
-          e.preventDefault();
-        }
-        return;
-      }
-
-      // Timeframes rapides par code PHYSIQUE (AZERTY : e.key vaudrait & é " …).
-      const tfCode = timeframePourCode(e.code, e);
-      if (tfCode !== null) {
-        const exchange = marketStore.getState().exchange;
-        const supportes = SUPPORTED_TIMEFRAMES[exchange] ?? [];
-        if (supportes.includes(tfCode)) marketStore.getState().setTimeframe(tfCode);
-        return;
-      }
-
-      // Toggles à une touche (insensibles à la casse).
-      switch (e.key.toLowerCase()) {
-        case "o": {
-          // Orderflow : pertinent uniquement sur les sources à flux de trades.
-          if (SOURCES_FLUX_TRADES.has(marketStore.getState().exchange)) {
-            orderflowStore.getState().toggle();
-          } else {
-            pousserToast("Orderflow indisponible sur cette source (flux de trades requis)");
-          }
-          break;
-        }
-        case "v":
-          volumeProfileStore.getState().toggle();
-          break;
-        case "l": {
-          // Heatmap liquidations : flux perp Bybit/OKX uniquement (indispo tradfi / synthétique).
-          const ex = marketStore.getState().exchange;
-          if (ex !== "twelvedata" && ex !== "synthetic") {
-            liqMarksStore.getState().basculer();
-          } else {
-            // Wording aligné sur la garde réelle (tradfi / synthétique exclus) — le flux
-            // vient des perps Bybit/OKX quel que soit l'exchange crypto affiché.
-            pousserToast("Heatmap liquidations indisponible en marchés traditionnels / synthétiques");
-          }
-          break;
-        }
-        case "r": {
-          // Revenus on-chain : indisponible en marchés traditionnels.
-          if (marketStore.getState().exchange !== "twelvedata") {
-            revenueStore.getState().toggle();
-          } else {
-            pousserToast("Revenus on-chain indisponibles en marchés traditionnels");
-          }
-          break;
-        }
-        case "f":
-          fullscreenStore.getState().basculer();
-          break;
-        case "t": {
-          const { theme, setTheme } = themeStore.getState();
-          const i = THEMES.indexOf(theme);
-          const suivant = THEMES[(i + 1) % THEMES.length];
-          if (suivant !== undefined) setTheme(suivant);
-          break;
-        }
-      }
-    };
-
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", gererRaccourciGlobal);
 
     // Alimente l'historique depuis le marché lui-même : toute navigation compte
     // (palette, watchlist, EQS, NEWS…), sauf celles issues de l'historique.
@@ -418,7 +429,7 @@ export function useRaccourcisGlobaux(): void {
     });
 
     return () => {
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", gererRaccourciGlobal);
       desabonner();
     };
   }, []);

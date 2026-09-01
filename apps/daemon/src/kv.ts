@@ -22,7 +22,7 @@
  */
 import { entetesCors } from "./cors";
 import { getDb } from "./db";
-import type { Routeur } from "./router";
+import { avecGardeErreur, type Routeur } from "./router";
 
 /** Taille max d'une valeur (1 Mio) — garde-fou contre un corps aberrant. */
 export const TAILLE_MAX_VALEUR = 1_048_576;
@@ -163,5 +163,5 @@ export async function traiterKv(req: Request, url: URL): Promise<Response> {
 
 /** Enregistre la route `/kv` dans le routeur (préfixe → dispatch interne par méthode). */
 export function enregistrerKv(routeur: Routeur): void {
-  routeur.enregistrerPrefixe("/kv", (req, url) => traiterKv(req, url));
+  routeur.enregistrerPrefixe("/kv", avecGardeErreur("kv", (req, url) => traiterKv(req, url)));
 }

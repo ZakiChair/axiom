@@ -135,12 +135,27 @@ export function construireRoutesProxy(cles: ProxyKeys): RouteProxy[] {
   ];
 }
 
+/** Dépendances injectables des tests de traiterProxy (cache + fetch). */
+export interface OptionsProxy {
+  fetchImpl?: FetchExtapi;
+  lireCacheImpl?: typeof lireCache;
+  ecrireCacheImpl?: typeof ecrireCache;
+}
+
 /**
  * Traite une requête proxifiée : cache GET (par préfixe), fetch amont, en-têtes
  * CORS + `X-Axiomd-Cache: hit|miss`. Les erreurs réseau renvoient un 502 propre
  * (le daemon ne plante pas).
  */
-export async function traiterProxy(req: Request, url: URL, route: RouteProxy): Promise<Response> {
+export async function traiterProxy(
+  req: Request,
+  url: URL,
+  route: RouteProxy,
+  options: OptionsProxy = {},
+): Promise<Response> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const lireCacheImpl = options.lireCacheImpl ?? lireCache;
+  const ecrireCacheImpl = options.ecrireCacheImpl ?? ecrireCache;
   const cheminEntrant = url.pathname + url.search;
   const urlAmont = route.target + route.rewrite(cheminEntrant);
   const cors = entetesCors(req);
@@ -150,7 +165,15 @@ export async function traiterProxy(req: Request, url: URL, route: RouteProxy): P
     const ttlMs = ttlMsPourChemin(url.pathname);
     const cle = cleCache("GET", cheminEntrant);
     if (ttlMs > 0) {
-      const hit = lireCache(cle);
+      // Le cache est une OPTIMISATION : une panne SQLite (disque plein, base corrompue)
+      // ne doit jamais faire échouer une requête dont l'amont est joignable — miss
+      // forcé, même patron que /extapi (traiterExtapi).
+      let hit: ReturnType<typeof lireCache> = null;
+      try {
+        hit = lireCacheImpl(cle);
+      } catch (err) {
+        console.error("[axiomd] cache proxy indisponible (miss forcé) :", err);
+      }
       if (hit) {
         return new Response(hit.corps, {
           headers: { "content-type": hit.contentType, "x-axiomd-cache": "hit", ...cors },
@@ -159,14 +182,20 @@ export async function traiterProxy(req: Request, url: URL, route: RouteProxy): P
     }
     let amont: Response;
     try {
-      amont = await fetch(urlAmont, { method: "GET", headers: entetesAmont });
+      amont = await fetchImpl(urlAmont, { method: "GET", headers: entetesAmont });
     } catch (err) {
       return reponseErreurAmont(err, cors);
     }
     const corps = new Uint8Array(await amont.arrayBuffer());
     const contentType = amont.headers.get("content-type") ?? "application/octet-stream";
     // On ne met en cache que les réponses valides (évite de figer une erreur transitoire).
-    if (ttlMs > 0 && amont.ok) ecrireCache(cle, corps, contentType, ttlMs);
+    if (ttlMs > 0 && amont.ok) {
+      try {
+        ecrireCacheImpl(cle, corps, contentType, ttlMs);
+      } catch (err) {
+        console.error("[axiomd] écriture cache proxy échouée :", err);
+      }
+    }
     return new Response(corps, {
       status: amont.status,
       headers: { "content-type": contentType, "x-axiomd-cache": "miss", ...cors },
@@ -177,7 +206,7 @@ export async function traiterProxy(req: Request, url: URL, route: RouteProxy): P
   const corpsReq = req.method === "HEAD" ? undefined : await req.arrayBuffer();
   let amont: Response;
   try {
-    amont = await fetch(urlAmont, {
+    amont = await fetchImpl(urlAmont, {
       method: req.method,
       body: corpsReq && corpsReq.byteLength > 0 ? corpsReq : undefined,
       headers: {

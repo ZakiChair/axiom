@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Routeur } from "./router";
+import { avecGardeErreur, Routeur } from "./router";
 
 function req(chemin: string): [Request, URL] {
   const url = new URL(`http://127.0.0.1:8787${chemin}`);
@@ -38,5 +38,29 @@ describe("Routeur", () => {
     });
     expect(await (await r.gerer(...req("/quelconque?x=1")))?.text()).toBe("async-ok");
     expect(await r.gerer(...req("/quelconque?x=2"))).toBeNull();
+  });
+});
+
+describe("avecGardeErreur", () => {
+  test("une exception du handler devient un 500 JSON conventionnel AVEC en-têtes CORS", async () => {
+    const gerer = avecGardeErreur("kv", () => {
+      throw new Error("SQLITE_FULL: database or disk is full");
+    });
+    const url = new URL("http://127.0.0.1:8787/kv/persist/x");
+    const requete = new Request(url, {
+      headers: { origin: "http://localhost:5173", host: "127.0.0.1:8787" },
+    });
+    const rep = await gerer(requete, url);
+    expect(rep.status).toBe(500);
+    expect(rep.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    // Sans CORS, le front dev (5173) verrait une erreur réseau opaque au lieu du 500.
+    expect(rep.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
+    expect(await rep.json()).toEqual({ erreur: "erreur interne kv" });
+  });
+
+  test("laisse passer telle quelle une réponse réussie (y compris asynchrone)", async () => {
+    const gerer = avecGardeErreur("candles", async () => new Response("ok"));
+    const url = new URL("http://127.0.0.1:8787/candles/binance/BTCUSDT/1m");
+    expect(await (await gerer(new Request(url), url)).text()).toBe("ok");
   });
 });

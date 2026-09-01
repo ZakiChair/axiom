@@ -19,7 +19,7 @@
  */
 import { entetesCors } from "./cors";
 import { getDb } from "./db";
-import type { Routeur } from "./router";
+import { avecGardeErreur, type Routeur } from "./router";
 
 /** Limite de lignes par GET (défaut) et plafond dur (garde-fou mémoire). */
 export const LIMITE_DEFAUT = 5000;
@@ -198,5 +198,5 @@ export async function traiterCandles(req: Request, url: URL): Promise<Response> 
 
 /** Enregistre la route `/candles` dans le routeur. */
 export function enregistrerCandles(routeur: Routeur): void {
-  routeur.enregistrerPrefixe("/candles", (req, url) => traiterCandles(req, url));
+  routeur.enregistrerPrefixe("/candles", avecGardeErreur("candles", (req, url) => traiterCandles(req, url)));
 }

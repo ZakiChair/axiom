@@ -11,6 +11,7 @@ import {
   requeteNavigationExtapiInterdite,
   traiterCcData,
   traiterExtapi,
+  traiterProxy,
   ttlMsExtapi,
   userAgentPourHote,
   type RouteProxy,
@@ -660,5 +661,40 @@ describe("traiterExtapi — gardes (hors réseau)", () => {
     expect(res.headers.get("x-axiomd-cache")).toBe("hit");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(await res.json()).toEqual({ ok: true });
+  });
+});
+
+describe("traiterProxy — cache SQLite en panne = optimisation, jamais une panne de route", () => {
+  const route = routePar("/tdapi"); // helper déjà présent en tête de proxy.test.ts
+  const fetchImpl = async () =>
+    new Response(JSON.stringify({ status: "ok" }), {
+      headers: { "content-type": "application/json" },
+    });
+
+  test("lireCache qui lève → miss forcé, la réponse amont saine est servie (200)", async () => {
+    const req = new Request("http://localhost:8787/tdapi/quote?symbol=AAPL");
+    const rep = await traiterProxy(req, new URL(req.url), route, {
+      fetchImpl,
+      lireCacheImpl: () => {
+        throw new Error("SQLITE_CORRUPT");
+      },
+      ecrireCacheImpl: () => {},
+    });
+    expect(rep.status).toBe(200);
+    expect(rep.headers.get("x-axiomd-cache")).toBe("miss");
+    expect(await rep.json()).toEqual({ status: "ok" });
+  });
+
+  test("ecrireCache qui lève → la réponse amont est quand même servie (200)", async () => {
+    const req = new Request("http://localhost:8787/tdapi/quote?symbol=AAPL");
+    const rep = await traiterProxy(req, new URL(req.url), route, {
+      fetchImpl,
+      lireCacheImpl: () => null,
+      ecrireCacheImpl: () => {
+        throw new Error("SQLITE_FULL");
+      },
+    });
+    expect(rep.status).toBe(200);
+    expect(await rep.json()).toEqual({ status: "ok" });
   });
 });

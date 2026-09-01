@@ -28,7 +28,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { entetesCors } from "./cors";
 import { getDb } from "./db";
-import type { Routeur } from "./router";
+import { avecGardeErreur, type Routeur } from "./router";
 
 /** Base des dumps publics Binance (spot, aggTrades quotidiens). */
 const BASE_VISION = "https://data.binance.vision/data/spot/daily/aggTrades";
@@ -471,5 +471,5 @@ export async function traiterReplay(req: Request, url: URL): Promise<Response> {
 
 /** Enregistre le préfixe `/replay` dans le routeur. */
 export function enregistrerReplay(routeur: Routeur): void {
-  routeur.enregistrerPrefixe("/replay", (req, url) => traiterReplay(req, url));
+  routeur.enregistrerPrefixe("/replay", avecGardeErreur("replay", (req, url) => traiterReplay(req, url)));
 }

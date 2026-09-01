@@ -2,11 +2,11 @@ import { describe, it, expect, vi } from "vitest";
 import type { Liquidation } from "@axiom/types";
 import {
   chunkCoinalyzeSymbols,
+  filtrerFrontieres8h,
   normalizeInterval,
   prochainReglementFunding,
   groupLiquidationBuckets,
   toCoinalyzeSymbol,
-  unPointSurDeux,
 } from "./coinalyze";
 
 describe("prochainReglementFunding", () => {
@@ -79,12 +79,31 @@ describe("normalizeInterval", () => {
   });
 });
 
-describe("unPointSurDeux", () => {
-  it("garde un point sur deux EN PARTANT DE LA FIN (le dernier est toujours retenu)", () => {
-    // 5 clôtures 4 h : on veut approx. la cadence 8 h en retenant les clôtures paires depuis la fin.
-    expect(unPointSurDeux([1, 2, 3, 4, 5])).toEqual([1, 3, 5]);
-    expect(unPointSurDeux([1, 2, 3, 4])).toEqual([2, 4]);
-    expect(unPointSurDeux([])).toEqual([]);
-    expect(unPointSurDeux([7])).toEqual([7]);
+describe("filtrerFrontieres8h", () => {
+  const h = (heure: number) => Date.UTC(2026, 6, 2, heure, 0, 0);
+
+  it("ne garde que les points sur une frontière de règlement 8 h UTC (00/08/16), rejette 04/12/20", () => {
+    // 6 clôtures 4 h : la moitié hors-cycle (04/12/20) doit disparaître, l'ordre est préservé.
+    const points = [
+      { time: h(0), v: "00h" },
+      { time: h(4), v: "04h" },
+      { time: h(8), v: "08h" },
+      { time: h(12), v: "12h" },
+      { time: h(16), v: "16h" },
+      { time: h(20), v: "20h" },
+    ];
+    expect(filtrerFrontieres8h(points)).toEqual([
+      { time: h(0), v: "00h" },
+      { time: h(8), v: "08h" },
+      { time: h(16), v: "16h" },
+    ]);
+  });
+
+  it("renvoie [] si aucun point ne tombe sur une frontière 8 h", () => {
+    expect(filtrerFrontieres8h([{ time: h(4) }, { time: h(12) }, { time: h(20) }])).toEqual([]);
+  });
+
+  it("renvoie [] pour une entrée vide", () => {
+    expect(filtrerFrontieres8h([])).toEqual([]);
   });
 });

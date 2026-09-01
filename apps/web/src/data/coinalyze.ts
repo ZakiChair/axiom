@@ -199,18 +199,20 @@ export function normalizeInterval(period: string): CoinalyzeInterval {
   return "5min";
 }
 
+/** Durée d'un cycle de règlement funding standard (8 h), en ms. */
+const HUIT_H_MS = 8 * 3_600_000;
+
 /**
- * Garde un point sur deux EN PARTANT DE LA FIN (le dernier point est toujours retenu).
- * Sert à approximer une cadence 8 h depuis un historique « 4hour » (Coinalyze n'expose
- * pas d'intervalle 8 h) : chaque clôture retenue tombe sur une frontière de 8 h. PURE.
+ * Ne garde que les points dont l'horodatage tombe EXACTEMENT sur une frontière de
+ * règlement 8 h UTC (00:00 / 08:00 / 16:00). Sert à approximer une cadence 8 h depuis
+ * un historique Coinalyze « 4hour » (Coinalyze n'expose pas d'intervalle 8 h) : un
+ * sous-échantillonnage par INDEX (1 point sur 2) ne garantit PAS cet alignement — la
+ * parité retenue dépend du nombre de bougies renvoyées par la fenêtre de requête, donc
+ * arbitraire d'un appel à l'autre. Filtrer sur le TEMPS plutôt que l'index est le seul
+ * moyen d'obtenir de vrais points de règlement 8 h. PURE.
  */
-export function unPointSurDeux<T>(points: readonly T[]): T[] {
-  const out: T[] = [];
-  for (let i = points.length - 1; i >= 0; i -= 2) {
-    const p = points[i];
-    if (p !== undefined) out.unshift(p);
-  }
-  return out;
+export function filtrerFrontieres8h<T extends { time: number }>(points: readonly T[]): T[] {
+  return points.filter((p) => p.time % HUIT_H_MS === 0);
 }
 
 // ---------- Formes de réponse Coinalyze ----------

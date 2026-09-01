@@ -54,7 +54,7 @@ import { orderflowStore } from "../store/orderflow";
 import { presetAlertsStore, diffEntrants, filtrerCooldown } from "../store/presetAlerts";
 import { subscribeTickers, type TickerUpdate } from "../data/ticker";
 import { daemonSupporte, detectDaemon, urlDaemon } from "../data/daemon";
-import { coinalyzeProvider, unPointSurDeux } from "../data/coinalyze";
+import { coinalyzeProvider, filtrerFrontieres8h } from "../data/coinalyze";
 import { histFunding } from "../data/referentiels";
 import { executerScreener } from "../data/screenerRun";
 import { SCREENER_POSITION_CAP } from "../data/screener";
@@ -68,7 +68,9 @@ const FUNDING_POLL_MS = 60_000;
 /** Période d'évaluation de `liq-cascade` (ms) — le poll fait aussi RETOMBER la fenêtre
  *  glissante sous le seuil (ré-armement) quand le flux se calme. */
 const LIQ_CASCADE_POLL_MS = 5_000;
-/** Fenêtre min. d'historique funding pour un z-score (points). */
+/** Fenêtre min. d'historique funding pour un z-score (points). Horizon variable selon la
+ *  source : ~10 j (perp 8h) ou ~5 j (perp 4h) en primaire (`histFunding`, cadence réelle
+ *  du perp) vs toujours ~10 j en repli Coinalyze (filtré aux frontières 8h UTC). */
 const FUNDING_Z_WINDOW = 30;
 
 /** Cooldown par (alerte, symbole) d'une alerte de preset (ms) : anti-spam sur un aller-retour. */
@@ -475,17 +477,22 @@ async function chargerFunding(
   if (rate === undefined) return undefined;
 
   // 3) Z-score sur les RÈGLEMENTS RÉELS (Binance fapi/v1/fundingRate via histFunding —
-  //    cadence 8 h OU 4 h selon le perp, memoïsé). Repli : Coinalyze « 4hour »
-  //    sous-échantillonné 1 point sur 2 (≈ cadence 8 h) — « 8hour » N'EXISTE PAS chez
-  //    Coinalyze et repliait en silence sur du 5 min : les 30 « règlements » couvraient
-  //    ~2 h 30, écart-type ≈ 0, z aberrant.
+  //    cadence 8 h OU 4 h selon le perp, memoïsé). Repli : Coinalyze « 4hour » filtré aux
+  //    frontières de règlement 8 h UTC (00/08/16) — « 8hour » N'EXISTE PAS chez Coinalyze
+  //    et repliait en silence sur du 5 min : les 30 « règlements » couvraient ~2 h 30,
+  //    écart-type ≈ 0, z aberrant. Filtre sur le TEMPS (pas sur l'index) : un
+  //    sous-échantillonnage par index ne garantit pas l'alignement sur les vraies
+  //    frontières de règlement (cf. `filtrerFrontieres8h`).
   let z: number | undefined;
   try {
     let rates = ((await histFunding(symbol)) ?? []).map((p) => p.v);
     if (rates.length === 0) {
       const since = Date.now() - FUNDING_Z_WINDOW * 8 * 3_600_000;
       const hist = await coinalyzeProvider.fetchFundingRateHistory(symbol, "4hour", since);
-      rates = unPointSurDeux(hist.map((h) => h.rate)).filter((v) => Number.isFinite(v));
+      // Filtre les taux finis AVANT la sélection par frontière (sinon un point non-fini
+      // sur une frontière retenue élargirait silencieusement un trou à ~16 h).
+      const finis = hist.filter((h) => Number.isFinite(h.rate));
+      rates = filtrerFrontieres8h(finis).map((h) => h.rate);
     }
     // Inclut le rate courant s'il n'est pas déjà le dernier point.
     const series =

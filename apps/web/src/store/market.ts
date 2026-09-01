@@ -153,7 +153,7 @@ function loadingState(previous: MarketDataLoadState, requested: MarketIdentity):
  * doit gagner, sinon la séquence `setExchange("synthetic")` puis `setSymbol(SYN)` (SYN
  * builder, restauration de session) ne pourrait plus jamais entrer dans un ratio.
  */
-function exchangeForSymbol(
+export function exchangeForSymbol(
   state: Pick<MarketState, "exchange" | "symbol">,
   nextSymbol: string,
 ): ExchangeId {

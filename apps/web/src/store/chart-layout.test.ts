@@ -139,6 +139,19 @@ describe("sanitizeSlotConfig", () => {
       fallback,
     );
   });
+
+  it("répare une incohérence persistée AVANT le correctif (source réelle + symbole synthétique)", () => {
+    // Un vieux localStorage a pu écrire binance+TOTAL (accepté par l'ancien
+    // sanitizeSlotConfig, qui ne vérifiait exchange et symbol qu'indépendamment) →
+    // sans réparation à l'hydratation, le pane reste en erreur permanente à chaque boot.
+    expect(
+      sanitizeSlotConfig({ exchange: "binance", symbol: "TOTAL", timeframe: "1h" }, fallback),
+    ).toEqual({
+      exchange: "synthetic",
+      symbol: "TOTAL",
+      timeframe: "1h",
+    });
+  });
 });
 
 describe("chartLayoutStore — liaison", () => {
@@ -146,5 +159,41 @@ describe("chartLayoutStore — liaison", () => {
     expect(chartLayoutStore.getState().linked).toBe(false);
     chartLayoutStore.getState().toggleLinked();
     expect(chartLayoutStore.getState().linked).toBe(true);
+  });
+});
+
+describe("chartLayoutStore — dérivation de source sur symbole synthétique (parité avec le maître)", () => {
+  it("« TOTAL » tapé dans un slot binance bascule le slot sur la source synthetic", () => {
+    // Avant : binance+TOTAL était ACCEPTÉ par sanitizeSlotConfig et PERSISTÉ →
+    // backfill Binance 400 « Invalid symbol » → pane en erreur à chaque boot.
+    chartLayoutStore.getState().setSlotSymbol(1, "TOTAL");
+
+    const slot = chartLayoutStore.getState().slots[0];
+    expect(slot.symbol).toBe("TOTAL");
+    expect(slot.exchange).toBe("synthetic");
+  });
+
+  it("un symbole SYN encodé bascule sur synthetic ; quitter le ratio revient à la jambe A", () => {
+    chartLayoutStore.getState().setSlotSymbol(1, "kraken:ETHUSD|/|binance:BTCUSDT");
+    expect(chartLayoutStore.getState().slots[0].exchange).toBe("synthetic");
+
+    chartLayoutStore.getState().setSlotSymbol(1, "ETHUSD");
+    const slot = chartLayoutStore.getState().slots[0];
+    expect(slot.exchange).toBe("kraken"); // jambe A du ratio quitté (même règle que market.ts)
+    expect(slot.symbol).toBe("ETHUSD");
+  });
+
+  it("le chemin ChartGrid (setSlotMarket avec exchange INCHANGÉ, spread d'en-tête) dérive aussi", () => {
+    chartLayoutStore
+      .getState()
+      .setSlotMarket(1, { exchange: "binance", symbol: "TOTAL", timeframe: "1h" });
+    expect(chartLayoutStore.getState().slots[0].exchange).toBe("synthetic");
+  });
+
+  it("un changement de source EXPLICITE reste prioritaire (pas de dérivation)", () => {
+    chartLayoutStore
+      .getState()
+      .setSlotMarket(1, { exchange: "kraken", symbol: "ETHUSD", timeframe: "1h" });
+    expect(chartLayoutStore.getState().slots[0].exchange).toBe("kraken");
   });
 });

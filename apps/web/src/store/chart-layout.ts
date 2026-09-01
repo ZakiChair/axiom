@@ -19,7 +19,7 @@
 import { createStore } from "zustand/vanilla";
 import { EXCHANGE_IDS, type ExchangeId, type Timeframe } from "@axiom/types";
 import { supportedTimeframesFor } from "../data/adapters";
-import { normalizeMarketSymbol } from "./market";
+import { exchangeForSymbol, normalizeMarketSymbol } from "./market";
 
 /** Modes de disposition : 1 seul, 2 côte-à-côte, 2 empilés, 2×2. */
 export type ChartLayoutMode = "1" | "2h" | "2v" | "2x2";
@@ -109,7 +109,7 @@ export function sanitizeSlotConfig(raw: unknown, fallback: SlotConfig): SlotConf
   ) {
     return fallback;
   }
-  const exchange =
+  const exchangeBrute =
     typeof o.exchange === "string" && (RESTORABLE_EXCHANGES as readonly string[]).includes(o.exchange)
       ? (o.exchange as ExchangeId)
       : fallback.exchange;
@@ -118,6 +118,19 @@ export function sanitizeSlotConfig(raw: unknown, fallback: SlotConfig): SlotConf
     rawSymbol.length > 0 && rawSymbol.length <= 200
       ? normalizeMarketSymbol(rawSymbol)
       : fallback.symbol;
+  // Répare une incohérence persistée AVANT ce correctif (source réelle + symbole
+  // synthétique, ex. binance+TOTAL, écrit par l'ancienne validation qui contrôlait
+  // exchange et symbol indépendamment) : même prédicat que le maître (market.ts
+  // exchangeForSymbol) — un symbole TOTAL*/ratio/SYN impose `synthetic`, quelle que
+  // soit la source persistée. Volontairement à SENS UNIQUE : une source déjà
+  // `synthetic` garde son traitement existant (symbole synthétique mal formé →
+  // rejet en bloc sur `fallback`, cf. tests) — l'appel n'est fait que quand la
+  // source persistée n'est pas déjà `synthetic`, donc sans effet sur ce cas-là.
+  // Conséquence assumée : ceci prime même sur une source posée EXPLICITEMENT
+  // ailleurs (setSlotExchange) si le symbole reste synthétique — binance+TOTAL est
+  // la combinaison inexploitable que ce correctif existe pour éliminer.
+  const exchange =
+    exchangeBrute !== "synthetic" ? exchangeForSymbol({ exchange: exchangeBrute, symbol }, symbol) : exchangeBrute;
   const supported = supportedTimeframesFor(exchange, symbol);
   // Un synthétique illisible (ou toute combinaison sans capacité) est rejeté en bloc.
   if (supported.length === 0) return fallback;
@@ -187,11 +200,21 @@ function patchSlot(
   const cur = slots[i];
   if (cur === undefined) return slots;
   const next = slots.slice() as [SlotConfig, SlotConfig, SlotConfig];
-  next[i] = sanitizeSlotConfig({
-    exchange: patch.exchange ?? cur.exchange,
-    symbol: patch.symbol !== undefined ? normalizeMarketSymbol(patch.symbol) : cur.symbol,
-    timeframe: patch.timeframe ?? cur.timeframe,
-  }, cur);
+  const symbol = patch.symbol !== undefined ? normalizeMarketSymbol(patch.symbol) : cur.symbol;
+  // Changement de SYMBOLE sans changement de SOURCE explicite : même dérivation que le
+  // maître (market.ts exchangeForSymbol) — TOTAL/SYN encodé ⇒ `synthetic`, quitter un
+  // ratio ⇒ source de la jambe A. Sans elle, « TOTAL » tapé dans l'en-tête d'un slot
+  // binance produisait binance+TOTAL, accepté et PERSISTÉ (pane en erreur à chaque
+  // boot, propagé au maître via la liaison). Une source posée EXPLICITEMENT gagne.
+  const exchangeExplicite = patch.exchange !== undefined && patch.exchange !== cur.exchange;
+  const exchange =
+    !exchangeExplicite && symbol !== cur.symbol
+      ? exchangeForSymbol({ exchange: cur.exchange, symbol: cur.symbol }, symbol)
+      : (patch.exchange ?? cur.exchange);
+  next[i] = sanitizeSlotConfig(
+    { exchange, symbol, timeframe: patch.timeframe ?? cur.timeframe },
+    cur,
+  );
   return next;
 }
 

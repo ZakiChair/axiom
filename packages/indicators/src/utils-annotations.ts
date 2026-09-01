@@ -11,6 +11,11 @@
  * la BAISSIÈRE sur les sommets (highs) ; chaque appel à
  * detecterDivergences calcule aussi l'autre famille sur la même série — on la
  * filtre. Anti-repaint hérité de detecterPivots (droite barres de confirmation).
+ * NB : le pivot OSC apparié pouvant suivre le pivot prix de ±3 barres
+ * (ECART_APPARIEMENT), une annotation peut n'apparaître — rétrodatée — que
+ * jusqu'à 3 barres après idxTo + droite. C'est un TRACÉ rétrodaté par nature
+ * (segment pivot→pivot), pas un signal d'entrée : rien à retarder ici — le
+ * signal exécutable, lui, est daté dans stratDivergenceRsi.
  */
 
 import type {

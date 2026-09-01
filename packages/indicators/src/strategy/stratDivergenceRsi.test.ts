@@ -65,7 +65,7 @@ describe("stratDivergenceRsi", () => {
     ]);
   });
 
-  it("entrée long à idxTo + droite (confirmation), JAMAIS à idxTo (anti-look-ahead pinné)", () => {
+  it("entrée long à max(idxTo, oscIdxTo) + droite (confirmation), JAMAIS à idxTo (anti-look-ahead pinné)", () => {
     // Re-dérivation indépendante : même cœur (`detecterDivergences`) que la def,
     // appelé ici sur le RSI(3) et les lows bruts pour retrouver idxTo SANS le
     // supposer à la main.
@@ -77,7 +77,9 @@ describe("stratDivergenceRsi", () => {
     // suite du test ne prouverait rien).
     expect(div).toBeDefined();
     const idxTo = div!.idxTo;
-    const idxConfirmation = idxTo + OPTS.droite;
+    // Contrat corrigé : confirmation au dernier des deux pivots + droite
+    // (ici oscIdxTo === idxTo === 48, l'index attendu est inchangé : 50).
+    const idxConfirmation = Math.max(idxTo, div!.oscIdxTo) + OPTS.droite;
 
     const r = computeIndicator(stratDivergenceRsi, candles, PARAMS);
     const marqueurs = r.annotations?.marqueurs ?? [];
@@ -99,6 +101,47 @@ describe("stratDivergenceRsi", () => {
         info: `Entrée long ${candles[idxConfirmation]!.close.toFixed(2)} — divergence RSI haussière confirmée (2/2)`,
       },
     ]);
+  });
+
+  it("pivot oscillateur en retard (oscIdxTo > idxTo) : l'entrée attend max(idxTo, oscIdxTo) + droite", () => {
+    // Fixture VALIDÉE numériquement : zigzag baissier (RSI(14) non saturé,
+    // creux prix/osc alignés à idx 18), rebond, puis glissade vers un 2e creux :
+    // MÈCHE profonde à idx 40 (low 64 → pivot PRIX à 40) alors que les closes
+    // baissent jusqu'à idx 42 (→ pivot RSI à 42). detecterDivergences rend UNE
+    // divergence haussière {idxTo: 40, oscIdxTo: 42} : le pivot osc n'est
+    // confirmé qu'à 42 + droite = 44 — une entrée à idxTo + droite = 42 lirait
+    // le futur (le pivot RSI n'y est pas encore confirmé).
+    const closesMeche = rampe(60, [
+      [0, 100], [6, 84], [8, 88], [14, 72], [16, 76], [18, 70],
+      [30, 88], [42, 68], [59, 80],
+    ]);
+    const candlesMeche: Candle[] = closesMeche.map((close, i) => ({
+      time: i * 60_000,
+      open: close,
+      high: close + 1,
+      low: i === 40 ? 64 : close - 1, // mèche : pivot prix AVANT le pivot RSI
+      close,
+      volume: 100,
+    }));
+    const paramsMeche = { length: 14, gauche: 2, droite: 2, maxEcart: 60, seuilSortie: 70 };
+
+    // Garde anti-tautologie : la fixture produit bien un pivot osc EN RETARD.
+    const rsi = rsiOf(closesMeche, paramsMeche.length);
+    const divs = detecterDivergences(lowOf(candlesMeche), rsi, {
+      gauche: 2, droite: 2, maxEcart: 60,
+    });
+    const div = divs.find((d) => d.type === "haussiere");
+    expect(div).toBeDefined();
+    expect(div!.oscIdxTo).toBeGreaterThan(div!.idxTo);
+    const conf = Math.max(div!.idxTo, div!.oscIdxTo) + paramsMeche.droite;
+
+    const r = computeIndicator(stratDivergenceRsi, candlesMeche, paramsMeche);
+    const idxMarqueurs = (r.annotations?.marqueurs ?? []).map((m) => m.idx);
+    // Aucun marqueur avant la confirmation du pivot OSC (l'ancien code en
+    // posait un à idxTo + droite = 42).
+    expect(idxMarqueurs.filter((idx) => idx < conf)).toEqual([]);
+    // L'entrée long existe, exactement à la confirmation.
+    expect(idxMarqueurs).toContain(conf);
   });
 
   it("seuilSortie bas (55) : sortie plus précoce qu'avec le défaut (70) — preuve de sortie", () => {

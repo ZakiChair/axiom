@@ -4,9 +4,13 @@
  * Stratégie divergence RSI (long/short) : entrée à la CONFIRMATION d'une
  * divergence RÉGULIÈRE (les cachées ne déclenchent rien — stratégie de
  * retournement). Anti-look-ahead STRICT : detecterDivergences date une
- * divergence à son pivot (idxTo), mais ce pivot n'est CONNU que `droite`
- * bougies plus tard — l'entrée est donc posée à idxTo + droite, jamais au
- * pivot. Sortie : RSI extrême opposé (long sort à ≥ seuilSortie, short à
+ * divergence à son pivot PRIX (idxTo) apparié à un pivot OSCILLATEUR
+ * (oscIdxTo, jusqu'à ±3 barres — ECART_APPARIEMENT) ; chacun n'est CONNU que
+ * `droite` bougies après son PROPRE index. L'entrée est donc posée à
+ * max(idxTo, oscIdxTo) + droite, jamais plus tôt. Impact : le signal peut
+ * arriver jusqu'à 3 barres après idxTo + droite (retard assumé — prix de
+ * l'absence de repaint, dans le rejeu comme en live incrémental).
+ * Sortie : RSI extrême opposé (long sort à ≥ seuilSortie, short à
  * ≤ 100 − seuilSortie). Une divergence confirmée pendant une position du même
  * sens est ignorée ; pendant une position opposée, elle attend le flat (pas de
  * retournement direct : la sortie est pilotée par le RSI). Rendu par defStrategie.
@@ -37,14 +41,19 @@ export const stratDivergenceRsi = defStrategie({
     const n = candles.length;
     const opts = { gauche, droite, maxEcart };
 
-    // Index de CONFIRMATION (idxTo + droite) des divergences régulières.
+    // Index de CONFIRMATION des divergences régulières : le pivot PRIX (idxTo)
+    // ET le pivot OSCILLATEUR apparié (oscIdxTo) doivent chacun être confirmés
+    // `droite` barres après leur propre index — la divergence n'est
+    // connaissable qu'à max(idxTo, oscIdxTo) + droite.
     const confirmLong = new Set<number>();
     for (const d of detecterDivergences(lowOf(candles), r, opts)) {
-      if (d.type === "haussiere" && d.idxTo + droite < n) confirmLong.add(d.idxTo + droite);
+      const conf = Math.max(d.idxTo, d.oscIdxTo) + droite;
+      if (d.type === "haussiere" && conf < n) confirmLong.add(conf);
     }
     const confirmShort = new Set<number>();
     for (const d of detecterDivergences(highOf(candles), r, opts)) {
-      if (d.type === "baissiere" && d.idxTo + droite < n) confirmShort.add(d.idxTo + droite);
+      const conf = Math.max(d.idxTo, d.oscIdxTo) + droite;
+      if (d.type === "baissiere" && conf < n) confirmShort.add(conf);
     }
 
     const out: Array<EtatStrategie | undefined> = new Array(n).fill(undefined);

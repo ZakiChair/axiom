@@ -5,20 +5,22 @@
  * verticale pointillée pleine hauteur au timestamp de l'évènement + un court label en
  * haut. `lock: true` → informatif, ne capture aucun clic (le graphe reste pilotable).
  *
- * Le contrôleur est un SINGLETON (le chart est recréé par Chart.tsx à chaque changement
- * symbole/TF, hors de notre périmètre). On atteint l'instance vivante via
- * `getActiveChart()` (drawing.ts) et on REJOUE les marqueurs :
- *   - au changement d'instance (nouveau symbole/TF) — détecté via marketStore ;
+ * Le contrôleur reste un SINGLETON. On atteint l'instance vivante via `getActiveChart()`
+ * (drawing.ts) et on REJOUE les marqueurs au changement de CONTEXTE (focus, symbole,
+ * source, axe temps prêt) et retire ses overlays sur toutes les instances suivies
+ * (patron tradeMarkers) :
+ *   - au changement de contexte (focus/symbole/source/axe prêt) — voir `doitRejouerEco` ;
  *   - à tout changement des évènements ou de la bascule des marqueurs (ecoStore).
- * Pattern « rejeu des dessins » : on efface (`removeOverlay({ name })`) puis on recrée.
+ * Pattern « rejeu des dessins » : on efface (`retirerMarqueursSuivis`) puis on recrée.
  *
  * Les marqueurs ne visent QUE l'impact « high » (les filtres d'affichage de la fenêtre
  * ECO concernent la liste, pas le chart). Aucune donnée haute fréquence : le redraw
- * n'a lieu qu'au changement d'instance, pas sur tick.
+ * n'a lieu qu'au changement de contexte, pas sur tick.
  */
 import { registerOverlay } from "klinecharts";
 import type { OverlayCreate } from "klinecharts";
 import { getActiveChart } from "./drawing";
+import { retirerMarqueursSuivis, type CibleMarqueurs } from "./tradeMarkers";
 import { marketStore } from "../store/market";
 import { ecoStore } from "../store/eco";
 import { evtsUiStore } from "../store/evts";
@@ -99,8 +101,29 @@ function ensureOverlayRegistered(): void {
 
 // ─────────────────────────── Contrôleur singleton ───────────────────────────
 
-/** Dernière instance sur laquelle on a dessiné (détecte la recréation symbole/TF). */
-let boundChart: ReturnType<typeof getActiveChart> = null;
+/** Instances portant ACTUELLEMENT des marqueurs éco (ids posés par instance). En grille
+ *  multi-chart, le retrait doit viser TOUTES ces instances, pas le seul focus courant —
+ *  patron overlaysSuivis de tradeMarkers (sinon marqueurs orphelins + duplication). */
+const overlaysSuivis = new Map<CibleMarqueurs, string[]>();
+
+/** Contexte dont TOUT changement rejoue les marqueurs. L'identité d'instance ne suffit
+ *  plus : depuis le Lot D1, l'instance KLineChart SURVIT aux changements de symbole/TF. */
+export interface ContexteRejeuEco {
+  chart: unknown;
+  symbol: string;
+  exchange: string;
+  ready: boolean;
+}
+
+/** PURE : vrai si le contexte a changé (focus, actif, source, axe temps prêt). */
+export function doitRejouerEco(prev: ContexteRejeuEco, next: ContexteRejeuEco): boolean {
+  return (
+    prev.chart !== next.chart ||
+    prev.symbol !== next.symbol ||
+    prev.exchange !== next.exchange ||
+    prev.ready !== next.ready
+  );
+}
 
 /** Sélectionne les évènements à marquer : fort impact, bornés en nombre. */
 function marqueurs(events: EcoEvent[]): EcoEvent[] {
@@ -108,16 +131,16 @@ function marqueurs(events: EcoEvent[]): EcoEvent[] {
 }
 
 /**
- * (Re)pose les marqueurs sur l'instance vivante. Efface d'abord les anciens (ciblé par
- * nom) puis recrée si la bascule est active ET qu'il y a des bougies (axe temps prêt).
+ * (Re)pose les marqueurs sur l'instance vivante. Efface d'abord les anciens sur TOUTES
+ * les instances suivies (le focus a pu changer depuis le dernier tracé) puis recrée si
+ * la bascule est active ET qu'il y a des bougies (axe temps prêt).
  */
 function redraw(): void {
-  const chart = getActiveChart();
-  boundChart = chart;
-  if (chart === null) return;
+  // Retire d'abord les marqueurs de TOUTES les instances qui en portaient (focus ou non).
+  retirerMarqueursSuivis(overlaysSuivis);
 
-  // Efface les marqueurs éco existants (no-op si l'instance vient d'être recréée).
-  chart.removeOverlay({ name: ECO_MARKER });
+  const chart = getActiveChart();
+  if (chart === null) return;
 
   const { markersEnabled, events } = ecoStore.getState();
   if (!markersEnabled) return;
@@ -125,6 +148,7 @@ function redraw(): void {
 
   const statsParType = evtsUiStore.getState().statsParType;
   const symboleMaitre = marketStore.getState().symbol;
+  const idsPoses: string[] = [];
   for (const ev of marqueurs(events)) {
     const base = tronquer(`${ev.country} ${ev.title}`, 18);
     // Suffixe la stat d'étude d'évènements — MAIS seulement si elle a été calculée sur le
@@ -145,8 +169,12 @@ function redraw(): void {
       points: [{ timestamp: ev.time, value: 0 }],
       extendData: extend,
     };
-    chart.createOverlay(overlay);
+    const id = chart.createOverlay(overlay);
+    if (typeof id === "string") idsPoses.push(id);
   }
+  // Mémorise l'instance et ses ids : ils seront retirés au prochain redraw même si le
+  // focus a changé entre-temps (cf. retirerMarqueursSuivis).
+  if (idsPoses.length > 0) overlaysSuivis.set(chart, idsPoses);
 }
 
 let controllerStarted = false;
@@ -162,11 +190,28 @@ export function demarrerEcoMarkers(): void {
   controllerStarted = true;
   ensureOverlayRegistered();
 
-  // Rejeu au changement d'INSTANCE (nouveau symbole/TF → chart recréé par Chart.tsx).
-  // marketStore émet aussi sur tick : on ne redessine QUE si l'instance a changé.
+  // Rejeu au changement de CONTEXTE (focus, symbole, source, axe prêt) — plus sur la
+  // seule identité d'instance : l'instance survit au changement de symbole/TF (Lot D1),
+  // et le premier redraw pendant le backfill figeait l'ancien boundChart (marqueurs
+  // jamais posés en mono-chart, suffixes de stats de l'ANCIEN symbole conservés).
+  let prev: ContexteRejeuEco = {
+    chart: getActiveChart(),
+    symbol: marketStore.getState().symbol,
+    exchange: marketStore.getState().exchange,
+    ready: marketStore.getState().candles.length > 0,
+  };
   marketStore.subscribe(() => {
-    const chart = getActiveChart();
-    if (chart !== null && chart !== boundChart) redraw();
+    const s = marketStore.getState();
+    const next: ContexteRejeuEco = {
+      chart: getActiveChart(),
+      symbol: s.symbol,
+      exchange: s.exchange,
+      ready: s.candles.length > 0,
+    };
+    if (doitRejouerEco(prev, next)) {
+      prev = next;
+      redraw();
+    }
   });
 
   // Rejeu au changement des évènements ou de la bascule des marqueurs.

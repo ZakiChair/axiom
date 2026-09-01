@@ -13,8 +13,14 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("klinecharts", () => ({ registerOverlay: () => {} }));
 vi.mock("./drawing", () => ({ getActiveChart: () => null }));
+vi.mock("../store/theme", () => ({
+  themeStore: { getState: () => ({ theme: "dark" }), subscribe: () => () => {} },
+}));
 vi.mock("../store/market", () => ({
-  marketStore: { getState: () => ({ candles: [] }), subscribe: () => () => {} },
+  marketStore: {
+    getState: () => ({ candles: [], symbol: "BTCUSDT", exchange: "binance" }),
+    subscribe: () => () => {},
+  },
 }));
 vi.mock("../store/eco", () => ({
   ecoStore: { getState: () => ({ markersEnabled: false, events: [] }), subscribe: () => () => {} },
@@ -23,7 +29,7 @@ vi.mock("../store/evts", () => ({
   evtsUiStore: { getState: () => ({ statsParType: {} }), subscribe: () => () => {} },
 }));
 
-import { typeEvenementDe } from "./ecoMarkers";
+import { typeEvenementDe, doitRejouerEco, type ContexteRejeuEco } from "./ecoMarkers";
 
 describe("typeEvenementDe — CPI", () => {
   it("reconnaît le titre FRED « Consumer Price Index »", () => {
@@ -65,5 +71,23 @@ describe("typeEvenementDe — hors périmètre", () => {
 
   it("écarte « FOMC Meeting Minutes » : les Minutes ne sont pas une décision", () => {
     expect(typeEvenementDe("FOMC Meeting Minutes")).toBeNull();
+  });
+});
+
+describe("doitRejouerEco — garde de rejeu (post-Lot D1)", () => {
+  const base: ContexteRejeuEco = { chart: { id: 1 }, symbol: "BTCUSDT", exchange: "binance", ready: true };
+
+  it("rejoue quand le SYMBOLE change sur la MÊME instance (l'instance survit au changement d'actif)", () => {
+    expect(doitRejouerEco(base, { ...base, symbol: "ETHUSDT" })).toBe(true);
+  });
+
+  it("rejoue quand l'axe temps devient prêt (fin du backfill) ou quand le focus change", () => {
+    expect(doitRejouerEco({ ...base, ready: false }, base)).toBe(true);
+    expect(doitRejouerEco(base, { ...base, chart: { id: 2 } })).toBe(true);
+    expect(doitRejouerEco(base, { ...base, exchange: "kraken" })).toBe(true);
+  });
+
+  it("ne rejoue PAS sur un simple tick (contexte identique)", () => {
+    expect(doitRejouerEco(base, { ...base })).toBe(false);
   });
 });

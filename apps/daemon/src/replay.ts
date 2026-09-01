@@ -449,23 +449,40 @@ function traiterJours(req: Request): Response {
   return json({ jours }, req);
 }
 
-/** DELETE /replay/trades/:symbole/:jour — purge d'un jour. */
-function traiterPurge(url: URL, req: Request): Response {
+/** DELETE /replay/trades/:symbole/:jour — purge d'un jour (refusée si job en vol). */
+function traiterPurge(url: URL, req: Request, enCoursActuels: ReadonlySet<string>): Response {
   const chemin = parseCheminReplay(url.pathname);
   if (!chemin) return json({ erreur: "chemin invalide" }, req, 400);
+  // Téléchargement EN VOL : purger maintenant s'intercalerait entre deux lots d'insertion
+  // (transactions synchrones entre deux awaits) — trades déjà insérés effacés, puis
+  // `majJob` recrée la ligne et le job finit « pret » avec un replay TROUÉ en silence
+  // (CVD/footprint faux). On refuse : purger après la fin (ou l'échec) du job.
+  if (enCoursActuels.has(`${chemin.symbole}|${chemin.jour}`)) {
+    return json(
+      { erreur: "téléchargement en cours, purge refusée", symbole: chemin.symbole, jour: chemin.jour },
+      req,
+      409,
+    );
+  }
   db().query("DELETE FROM replay_trades WHERE symbole = ? AND jour = ?").run(chemin.symbole, chemin.jour);
   db().query("DELETE FROM replay_jobs WHERE symbole = ? AND jour = ?").run(chemin.symbole, chemin.jour);
   return json({ ok: true, symbole: chemin.symbole, jour: chemin.jour }, req);
 }
 
-/** Aiguille une requête `/replay/...` vers le bon handler. */
-export async function traiterReplay(req: Request, url: URL): Promise<Response> {
+/** Aiguille une requête `/replay/...` vers le bon handler. `enCoursInjecte` : tests. */
+export async function traiterReplay(
+  req: Request,
+  url: URL,
+  enCoursInjecte?: ReadonlySet<string>,
+): Promise<Response> {
   const p = url.pathname;
   if (req.method === "POST" && p === "/replay/download") return traiterDownload(req);
   if (req.method === "GET" && p === "/replay/jours") return traiterJours(req);
   if (req.method === "GET" && p.startsWith("/replay/status/")) return traiterStatus(url, req);
   if (req.method === "GET" && p.startsWith("/replay/trades/")) return traiterTrades(url, req);
-  if (req.method === "DELETE" && p.startsWith("/replay/trades/")) return traiterPurge(url, req);
+  if (req.method === "DELETE" && p.startsWith("/replay/trades/")) {
+    return traiterPurge(url, req, enCoursInjecte ?? enCours);
+  }
   return json({ erreur: "route replay inconnue" }, req, 404);
 }
 

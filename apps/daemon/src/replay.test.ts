@@ -10,6 +10,7 @@ import {
   parseCheminReplay,
   parseLigneTrade,
   parseRequeteTrades,
+  traiterReplay,
 } from "./replay";
 
 describe("normaliserHorodatage", () => {
@@ -170,5 +171,23 @@ describe("lireTradesDepuisProcessus", () => {
     expect(tue()).toBe(false);
     expect(res.recus).toBe(250);
     expect(total).toBe(250);
+  });
+});
+
+describe("traiterReplay — purge pendant téléchargement", () => {
+  test("DELETE d'un jour dont le job est EN VOL → 409, sans toucher la base", async () => {
+    // Le garde `enCoursInjecte` court-circuite AVANT tout accès SQLite : ce test ne
+    // touche donc jamais le fichier axiom.db réel (aucun jeu d'état à nettoyer).
+    const url = new URL("http://127.0.0.1:8787/replay/trades/BTCUSDT/2026-01-01");
+    const rep = await traiterReplay(
+      new Request(url, { method: "DELETE" }),
+      url,
+      new Set(["BTCUSDT|2026-01-01"]),
+    );
+    expect(rep.status).toBe(409);
+    const corps = (await rep.json()) as Record<string, unknown>;
+    expect(corps.erreur).toBe("téléchargement en cours, purge refusée");
+    expect(corps.symbole).toBe("BTCUSDT");
+    expect(corps.jour).toBe("2026-01-01");
   });
 });

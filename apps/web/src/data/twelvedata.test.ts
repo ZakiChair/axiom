@@ -12,6 +12,7 @@ import {
   type DailyUsage,
   type TwelveDataResponse,
 } from "./twelvedata";
+import { healthStore } from "../store/health";
 
 /** Accès indexé gardé explicitement (noUncheckedIndexedAccess actif sur apps/web). */
 function at<T>(arr: T[], i: number): T {
@@ -274,6 +275,11 @@ describe("quotaJourEpuise (plafond ~800 crédits/jour)", () => {
 });
 
 describe("plafond journalier appliqué (acquireSlot)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    healthStore.getState().retirer("twelvedata:quotes");
+  });
+
   it("refuse tout appel réseau quand le compteur du jour a atteint la limite", async () => {
     const jour = utcDayKey(new Date());
     const stockage = new Map<string, string>([
@@ -289,6 +295,80 @@ describe("plafond journalier appliqué (acquireSlot)", () => {
     // Symbole unique : ne partage ni cache ni inflight avec les autres tests du fichier.
     await expect(twelveDataAdapter.fetchKlines("QUOTAJOURTEST", "1d")).rejects.toThrow(/quota journalier/);
     expect(f).not.toHaveBeenCalled(); // aucun crédit consommé
-    vi.unstubAllGlobals();
+
+    // Vérifier que l'erreur quota est posée dans la santé (sticky jusqu'à minuit UTC).
+    const state = healthStore.getState().sources["twelvedata:quotes"];
+    expect(state?.etat).toBe("error");
+    expect(state?.derniereErreur).toBe("quota journalier Twelve Data épuisé (800 crédits)");
+  });
+
+  it("lève l'erreur quota au jour suivant lors du premier succès (reportQuota)", async () => {
+    vi.useFakeTimers();
+    const jour1 = new Date("2026-07-01T12:00:00Z");
+    vi.setSystemTime(jour1);
+
+    // Jour 1 : brûler le quota, erreur posée
+    const stockage = new Map<string, string>([
+      ["axiom:twelvedata:daily:v1", JSON.stringify({ jour: "2026-07-01", count: 800 })],
+    ]);
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => stockage.get(k) ?? null,
+      setItem: (k: string, v: string) => void stockage.set(k, v),
+    });
+    const f = vi.fn();
+    vi.stubGlobal("fetch", f);
+
+    // Tentative 1 : quota épuisé jour 1
+    await expect(twelveDataAdapter.fetchKlines("DAYCHANGETEST", "1d")).rejects.toThrow(/quota journalier/);
+    let state = healthStore.getState().sources["twelvedata:quotes"];
+    expect(state?.etat).toBe("error");
+    expect(state?.derniereErreur).toBe("quota journalier Twelve Data épuisé (800 crédits)");
+
+    // Jour 2 (minuit UTC passé) : compteur reset, requête réussit, erreur levée
+    const jour2 = new Date("2026-07-02T00:00:05Z");
+    vi.setSystemTime(jour2);
+
+    stockage.clear();
+    f.mockClear();
+    f.mockResolvedValueOnce({
+      status: 200,
+      json: () => Promise.resolve({ status: "ok", values: [] }),
+    });
+
+    await twelveDataAdapter.fetchKlines("DAYCHANGETEST", "1d", { limit: 2 });
+
+    // L'erreur quota doit être levée (derniereErreur = undefined, etat = "polling")
+    state = healthStore.getState().sources["twelvedata:quotes"];
+    expect(state?.etat).toBe("polling");
+    expect(state?.derniereErreur).toBeUndefined();
+
+    vi.useRealTimers();
+  });
+
+  it("n'efface pas une erreur NON-quota posée par ailleurs (ex. ticker.ts)", async () => {
+    // Simuler une erreur polling posée par ticker.ts (non-quota)
+    healthStore.getState().marquerErreur("twelvedata:quotes", "erreur réseau: Connection refused");
+
+    const jour = utcDayKey(new Date());
+    const stockage = new Map<string, string>([
+      ["axiom:twelvedata:daily:v1", JSON.stringify({ jour, count: 0 })], // quota non épuisé
+    ]);
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => stockage.get(k) ?? null,
+      setItem: (k: string, v: string) => void stockage.set(k, v),
+    });
+    const f = vi.fn();
+    f.mockResolvedValueOnce({
+      status: 200,
+      json: () => Promise.resolve({ status: "ok", values: [] }),
+    });
+    vi.stubGlobal("fetch", f);
+
+    // Requête réussit (quota OK)
+    await twelveDataAdapter.fetchKlines("NONQUOTAERROR", "1d", { limit: 2 });
+
+    // L'erreur NON-quota doit rester (reportQuota ne la lève pas)
+    const state = healthStore.getState().sources["twelvedata:quotes"];
+    expect(state?.derniereErreur).toBe("erreur réseau: Connection refused");
   });
 });

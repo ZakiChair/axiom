@@ -59,13 +59,19 @@ const CACHE_TTL_MS = 30_000;
 /**
  * Source du registre santé où publier le quota Twelve Data. On réutilise la ligne du
  * poller de watchlist (`twelvedata:quotes`, dont l'état est tenu par data/ticker.ts) :
- * c'est le consommateur Twelve Data quasi permanent et la seule ligne TD affichée. Le
- * quota est un budget de COMPTE (partagé graphe + watchlist), attaché à cette ligne
- * représentative — data/ticker.ts gère l'état, ce module n'y pose QUE le quota.
+ * c'est le consommateur Twelve Data quasi permanent et la seule ligne TD affichée.
+ *
+ * PROPRIÉTÉ DE CE MODULE : Ce module est PROPRIÉTAIRE du cycle de vie COMPLET de l'erreur
+ * quota journalier — il la pose (marquerErreur au gate acquireSlot) ET la lève (setEtat
+ * avec derniereErreur=undefined dans reportQuota) après minuit UTC. Les erreurs de polling
+ * (non-quota) restent sous la responsabilité de data/ticker.ts. Identification par message
+ * exact (MSG_QUOTA_JOUR), pour ne jamais lever d'erreur posée par un autre module.
  */
 const HEALTH_SOURCE = "twelvedata:quotes";
 /** Clé localStorage du compteur JOURNALIER (reset à minuit UTC, cf. nextDailyCount). */
 const DAILY_KEY = "axiom:twelvedata:daily:v1";
+/** Message d'erreur quota utilisé pour l'identification dans le registre santé (levée = message exact). */
+const MSG_QUOTA_JOUR = "quota journalier Twelve Data épuisé (800 crédits)";
 
 const requestTimes: number[] = [];
 let throttleChain: Promise<void> = Promise.resolve();
@@ -142,12 +148,24 @@ function bumpDailyCount(): number | null {
 /**
  * Publie la consommation du débit (fenêtre glissante 8/60 s) + le compteur journalier
  * dans le registre santé, à chaque créneau acquis (= 1 crédit). Best-effort : n'affecte
- * jamais les données renvoyées ni le débit. `data/ticker.ts` reste seul maître de l'ÉTAT
- * de la ligne ; ici on ne pose QUE le quota.
+ * jamais les données renvoyées ni le débit.
+ *
+ * LEVÉE D'ERREUR QUOTA : si le registre porte EXACTEMENT l'erreur quota (MSG_QUOTA_JOUR),
+ * on la lève via setEtat("polling", {derniereErreur: undefined}). Cela nettoie l'erreur
+ * quota posée hier après minuit UTC → le premier succès de reportQuota retrouve le flux
+ * opérationnel. Les erreurs non-quota posées par data/ticker.ts ne sont jamais levées ici.
  */
 function reportQuota(): void {
   const jour = bumpDailyCount();
-  healthStore.getState().setQuota(HEALTH_SOURCE, {
+  const state = healthStore.getState();
+
+  // Lève l'erreur quota si elle est actuellement posée (et seulement l'erreur quota).
+  const current = state.sources[HEALTH_SOURCE];
+  if (current?.derniereErreur === MSG_QUOTA_JOUR) {
+    state.setEtat(HEALTH_SOURCE, "polling", { derniereErreur: undefined });
+  }
+
+  state.setQuota(HEALTH_SOURCE, {
     utilise: requestTimes.length,
     limite: RATE_LIMIT,
     fenetre: "1min",
@@ -166,10 +184,11 @@ function acquireSlot(): Promise<void> {
     // pollés à 60 s + le chart crevaient le plafond en cours de séance US, puis chaque
     // appel échouait en silence jusqu'à minuit UTC. On refuse ICI, explicitement : le
     // chart ressert son cache périmé (cachedSeries), la watchlist passe en erreur, et
-    // le backoff de pollLoop espace les tentatives.
+    // le backoff de pollLoop espace les tentatives. L'erreur est levée au jour suivant
+    // lors du premier succès de reportQuota (minuit UTC passé, compteur reset).
     if (quotaJourEpuise(lireDailyUsage(), new Date())) {
-      healthStore.getState().marquerErreur(HEALTH_SOURCE, "quota journalier Twelve Data épuisé (800 crédits)");
-      throw new Error("Twelve Data: quota journalier épuisé (800 crédits) — reset à minuit UTC");
+      healthStore.getState().marquerErreur(HEALTH_SOURCE, MSG_QUOTA_JOUR);
+      throw new Error(`Twelve Data: ${MSG_QUOTA_JOUR} — reset à minuit UTC`);
     }
     for (;;) {
       const now = Date.now();

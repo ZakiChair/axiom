@@ -94,10 +94,10 @@ export function resolveParams(
         resolved[input.key] = input.default;
       } else {
         // Clamp la valeur entre min et max
-        resolved[input.key] = Math.min(
-          input.max ?? v,
-          Math.max(input.min ?? v, v)
-        );
+        let clamped = v;
+        if (input.min !== undefined) clamped = Math.max(clamped, input.min);
+        if (input.max !== undefined) clamped = Math.min(clamped, input.max);
+        resolved[input.key] = clamped;
       }
     }
   }

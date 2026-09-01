@@ -150,18 +150,21 @@ function bumpDailyCount(): number | null {
  * dans le registre santé, à chaque créneau acquis (= 1 crédit). Best-effort : n'affecte
  * jamais les données renvoyées ni le débit.
  *
- * LEVÉE D'ERREUR QUOTA : si le registre porte EXACTEMENT l'erreur quota (MSG_QUOTA_JOUR),
- * on la lève via setEtat("polling", {derniereErreur: undefined}). Cela nettoie l'erreur
- * quota posée hier après minuit UTC → le premier succès de reportQuota retrouve le flux
- * opérationnel. Les erreurs non-quota posées par data/ticker.ts ne sont jamais levées ici.
+ * LEVÉE D'ERREUR QUOTA : si le registre porte l'erreur quota (MSG_QUOTA_JOUR), on la
+ * lève via setEtat("polling", {derniereErreur: undefined}). Cela nettoie l'erreur quota
+ * posée hier après minuit UTC → le premier succès de reportQuota retrouve le flux
+ * opérationnel. Cherche par inclusion (includes) plutôt que égalité exacte car le
+ * message peut être formaté par data/ticker.ts en amont (ex. "Twelve Data: ${MSG_QUOTA_JOUR} — …").
+ * Les erreurs non-quota posées par data/ticker.ts ne sont jamais levées ici.
  */
 function reportQuota(): void {
   const jour = bumpDailyCount();
   const state = healthStore.getState();
 
   // Lève l'erreur quota si elle est actuellement posée (et seulement l'erreur quota).
+  // Cherche par inclusion : le message est distinctif et préservé même formaté par ticker.ts.
   const current = state.sources[HEALTH_SOURCE];
-  if (current?.derniereErreur === MSG_QUOTA_JOUR) {
+  if (current?.derniereErreur?.includes(MSG_QUOTA_JOUR)) {
     state.setEtat(HEALTH_SOURCE, "polling", { derniereErreur: undefined });
   }
 

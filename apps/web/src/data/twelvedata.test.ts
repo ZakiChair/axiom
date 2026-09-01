@@ -371,4 +371,50 @@ describe("plafond journalier appliqué (acquireSlot)", () => {
     const state = healthStore.getState().sources["twelvedata:quotes"];
     expect(state?.derniereErreur).toBe("erreur réseau: Connection refused");
   });
+
+  it("lève l'erreur quota FORMATÉE par ticker.ts sur le chemin watchlist réel (includes guard)", async () => {
+    vi.useFakeTimers();
+    const jour1 = new Date("2026-07-01T12:00:00Z");
+    vi.setSystemTime(jour1);
+
+    // Jour 1 : brûler le quota, ticker.ts va formater l'erreur
+    const stockage = new Map<string, string>([
+      ["axiom:twelvedata:daily:v1", JSON.stringify({ jour: "2026-07-01", count: 800 })],
+    ]);
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => stockage.get(k) ?? null,
+      setItem: (k: string, v: string) => void stockage.set(k, v),
+    });
+
+    // Simuler le message formaté par ticker.ts au catch de pollTradfiQuotes
+    // (watchlist → fetchQuotes → pollTradfiQuotes → pollLoop catch → ticker.ts reformatte)
+    const formattedError = `Twelve Data: quota journalier Twelve Data épuisé (800 crédits) — reset à minuit UTC`;
+    healthStore.getState().marquerErreur("twelvedata:quotes", formattedError);
+
+    // Vérifier que l'erreur formatée est posée
+    let state = healthStore.getState().sources["twelvedata:quotes"];
+    expect(state?.derniereErreur).toBe(formattedError);
+
+    // Jour 2 (minuit UTC passé) : compteur reset, requête réussit
+    const jour2 = new Date("2026-07-02T00:00:05Z");
+    vi.setSystemTime(jour2);
+
+    stockage.clear();
+    const f = vi.fn();
+    f.mockResolvedValueOnce({
+      status: 200,
+      json: () => Promise.resolve({ status: "ok", values: [] }),
+    });
+    vi.stubGlobal("fetch", f);
+
+    // Requête réussit → reportQuota appelé
+    await twelveDataAdapter.fetchKlines("FORMATTEDQUOTATEST", "1d", { limit: 2 });
+
+    // La garde includes() doit reconnaître l'erreur formatée et la lever
+    state = healthStore.getState().sources["twelvedata:quotes"];
+    expect(state?.etat).toBe("polling");
+    expect(state?.derniereErreur).toBeUndefined();
+
+    vi.useRealTimers();
+  });
 });

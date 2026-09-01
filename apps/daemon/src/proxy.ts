@@ -135,11 +135,15 @@ export function construireRoutesProxy(cles: ProxyKeys): RouteProxy[] {
   ];
 }
 
+/** Délai maximum d'un fetch amont des proxys à préfixe (ms) — même valeur que /extapi. */
+const PROXY_TIMEOUT_MS = 15_000;
+
 /** Dépendances injectables des tests de traiterProxy (cache + fetch). */
 export interface OptionsProxy {
   fetchImpl?: FetchExtapi;
   lireCacheImpl?: typeof lireCache;
   ecrireCacheImpl?: typeof ecrireCache;
+  timeoutMs?: number;
 }
 
 /**
@@ -156,6 +160,7 @@ export async function traiterProxy(
   const fetchImpl = options.fetchImpl ?? fetch;
   const lireCacheImpl = options.lireCacheImpl ?? lireCache;
   const ecrireCacheImpl = options.ecrireCacheImpl ?? ecrireCache;
+  const delaiMs = Math.max(1, options.timeoutMs ?? PROXY_TIMEOUT_MS);
   const cheminEntrant = url.pathname + url.search;
   const urlAmont = route.target + route.rewrite(cheminEntrant);
   const cors = entetesCors(req);
@@ -180,13 +185,29 @@ export async function traiterProxy(
         });
       }
     }
+    // Timeout global : AbortController + setTimeout REF'D (pas AbortSignal.timeout()) —
+    // même justification que recupererExtapiSecurise : minuteur annulable, déclenché
+    // même si le fetch ne se résout que sur abort. Couvre en-têtes ET corps.
     let amont: Response;
+    // ArrayBuffer (pas ArrayBufferLike) : BodyInit refuse le Uint8Array générique.
+    let corps: Uint8Array<ArrayBuffer>;
+    const controleur = new AbortController();
+    const minuteur = setTimeout(
+      () => controleur.abort(new Error(`timeout amont proxy dépassé (${delaiMs} ms)`)),
+      delaiMs,
+    );
     try {
-      amont = await fetchImpl(urlAmont, { method: "GET", headers: entetesAmont });
+      amont = await fetchImpl(urlAmont, {
+        method: "GET",
+        headers: entetesAmont,
+        signal: controleur.signal,
+      });
+      corps = new Uint8Array(await amont.arrayBuffer());
     } catch (err) {
       return reponseErreurAmont(err, cors);
+    } finally {
+      clearTimeout(minuteur);
     }
-    const corps = new Uint8Array(await amont.arrayBuffer());
     const contentType = amont.headers.get("content-type") ?? "application/octet-stream";
     // On ne met en cache que les réponses valides (évite de figer une erreur transitoire).
     if (ttlMs > 0 && amont.ok) {
@@ -205,6 +226,12 @@ export async function traiterProxy(
   // Méthodes non-GET (rare pour ces APIs de lecture) : transfert direct, sans cache.
   const corpsReq = req.method === "HEAD" ? undefined : await req.arrayBuffer();
   let amont: Response;
+  let corps: Uint8Array<ArrayBuffer>;
+  const controleur = new AbortController();
+  const minuteur = setTimeout(
+    () => controleur.abort(new Error(`timeout amont proxy dépassé (${delaiMs} ms)`)),
+    delaiMs,
+  );
   try {
     amont = await fetchImpl(urlAmont, {
       method: req.method,
@@ -215,11 +242,14 @@ export async function traiterProxy(
           : {}),
         ...entetesAmont,
       },
+      signal: controleur.signal,
     });
+    corps = new Uint8Array(await amont.arrayBuffer());
   } catch (err) {
     return reponseErreurAmont(err, cors);
+  } finally {
+    clearTimeout(minuteur);
   }
-  const corps = new Uint8Array(await amont.arrayBuffer());
   return new Response(corps, {
     status: amont.status,
     headers: {

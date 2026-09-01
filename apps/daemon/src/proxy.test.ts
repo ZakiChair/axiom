@@ -697,4 +697,23 @@ describe("traiterProxy — cache SQLite en panne = optimisation, jamais une pann
     expect(rep.status).toBe(200);
     expect(await rep.json()).toEqual({ status: "ok" });
   });
+
+  test("amont qui blackhole (ne répond jamais) → 502 au timeout, pas d'attente infinie", async () => {
+    const fetchQuiPend = (async (_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        // Ne se résout QUE sur abort : sans timeout explicite, la requête pendrait à jamais.
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+      })) as typeof fetch;
+    const req = new Request("http://localhost:8787/tdapi/quote?symbol=AAPL");
+    const rep = await traiterProxy(req, new URL(req.url), route, {
+      fetchImpl: fetchQuiPend,
+      lireCacheImpl: () => null,
+      ecrireCacheImpl: () => {},
+      timeoutMs: 20,
+    });
+    expect(rep.status).toBe(502);
+    const corps = (await rep.json()) as { erreur: string; detail: string };
+    expect(corps.erreur).toBe("amont injoignable");
+    expect(corps.detail).toContain("timeout amont proxy dépassé");
+  });
 });

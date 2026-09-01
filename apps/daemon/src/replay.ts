@@ -38,6 +38,12 @@ const TAILLE_LOT = 50_000;
 const MAX_LIGNES = 20_000_000;
 /** Garde-fou concurrence : nombre max de téléchargements simultanés. */
 const MAX_TELECHARGEMENTS = 3;
+/**
+ * Délai max du téléchargement d'un dump (fetch COMPLET, en-têtes + corps). Large (10 min) :
+ * un zip quotidien pèse des centaines de Mo — 15 s tuerait des téléchargements légitimes.
+ * Le but est de libérer le slot `enCours` quand l'amont blackhole (TCP qui ne casse pas).
+ */
+const TELECHARGEMENT_TIMEOUT_MS = 600_000;
 /** Limite de lignes par page GET (défaut) et plafond dur (garde-fou mémoire). */
 export const LIMITE_DEFAUT = 50_000;
 export const LIMITE_MAX = 100_000;
@@ -307,16 +313,27 @@ async function executerTelechargement(symbole: string, jour: string): Promise<vo
     db().query("DELETE FROM replay_trades WHERE symbole = ? AND jour = ?").run(symbole, jour);
 
     const url = `${BASE_VISION}/${symbole}/${symbole}-aggTrades-${jour}.zip`;
-    const rep = await fetch(url);
-    if (!rep.ok) {
-      const msg =
-        rep.status === 404
-          ? "dump introuvable (jour trop récent ou symbole inexistant)"
-          : `amont ${rep.status}`;
-      majJob(symbole, jour, "erreur", 0, 0, msg);
-      return;
+    const controleur = new AbortController();
+    const minuteur = setTimeout(
+      () => controleur.abort(new Error(`timeout dump replay dépassé (${TELECHARGEMENT_TIMEOUT_MS} ms)`)),
+      TELECHARGEMENT_TIMEOUT_MS,
+    );
+    let rep: Response;
+    let octetsZip: ArrayBuffer;
+    try {
+      rep = await fetch(url, { signal: controleur.signal });
+      if (!rep.ok) {
+        const msg =
+          rep.status === 404
+            ? "dump introuvable (jour trop récent ou symbole inexistant)"
+            : `amont ${rep.status}`;
+        majJob(symbole, jour, "erreur", 0, 0, msg);
+        return;
+      }
+      octetsZip = await rep.arrayBuffer();
+    } finally {
+      clearTimeout(minuteur);
     }
-    const octetsZip = (await rep.arrayBuffer());
     await Bun.write(cheminTmp, octetsZip);
 
     proc = Bun.spawn(["unzip", "-p", cheminTmp], { stdout: "pipe", stderr: "pipe" });

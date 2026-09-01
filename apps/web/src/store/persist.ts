@@ -41,6 +41,7 @@ import {
   kvSnapshot,
   type SnapshotKv,
 } from "../data/daemon";
+import { supportedTimeframesFor } from "../data/adapters";
 import { defaultParams, migratePersistedIndicators, indicatorsStore } from "./indicators";
 import { indicatorSetsStore, migrerJeuxPersistes } from "./indicatorSets";
 import { marketStore } from "./market";
@@ -546,8 +547,16 @@ function hydrateChart(): void {
     if (!syntheticIncoherent && typeof persisted.symbol === "string" && persisted.symbol.length > 0) {
       marketStore.getState().setSymbol(persisted.symbol);
     }
+    // TF validé contre la capacité RÉELLE de la source restaurée (même garde que les
+    // slots secondaires, cf. sanitizeSlotConfig) : un TF étranger (« 5x », ou retiré
+    // d'une version future) ferait partir le backfill avec un interval invalide →
+    // graphe maître en erreur à chaque boot. Hors référentiel → on garde le TF courant.
     if (typeof persisted.timeframe === "string") {
-      marketStore.getState().setTimeframe(persisted.timeframe as Timeframe);
+      const { exchange, symbol } = marketStore.getState();
+      const supportes = supportedTimeframesFor(exchange, symbol) as readonly string[];
+      if (supportes.includes(persisted.timeframe)) {
+        marketStore.getState().setTimeframe(persisted.timeframe as Timeframe);
+      }
     }
     // Migration/validation des indicateurs (filtre les defId disparus, backfille les params,
     // attribue des instanceId stables) — fonction PURE exportée par store/indicators.

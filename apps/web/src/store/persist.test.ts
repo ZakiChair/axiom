@@ -234,6 +234,31 @@ describe("hydrateStores — marché (exchange/symbole/timeframe)", () => {
 
     expect(marketStore.getState().exchange).toBe("binance"); // valeur initiale inchangée
   });
+
+  it("ignore un timeframe persisté que la source restaurée ne supporte pas (plus de cast aveugle)", () => {
+    // Coinbase ne supporte pas 6M (adapters.ts) : l'appliquer ferait partir le backfill
+    // avec un interval invalide → graphe maître en erreur à chaque boot.
+    localStorage.setItem(
+      CHART_KEY,
+      JSON.stringify({ symbol: "BTCUSDT", exchange: "coinbase", timeframe: "6M", indicators: [] })
+    );
+
+    hydrateStores();
+
+    expect(marketStore.getState().exchange).toBe("coinbase");
+    expect(marketStore.getState().timeframe).toBe("1m"); // valeur d'avant hydratation, inchangée
+  });
+
+  it("ignore un timeframe fantaisiste (sauvegarde éditée : \"5x\")", () => {
+    localStorage.setItem(
+      CHART_KEY,
+      JSON.stringify({ symbol: "BTCUSDT", exchange: "binance", timeframe: "5x", indicators: [] })
+    );
+
+    hydrateStores();
+
+    expect(marketStore.getState().timeframe).toBe("1m");
+  });
 });
 
 describe("hydrateStores — watchlist", () => {

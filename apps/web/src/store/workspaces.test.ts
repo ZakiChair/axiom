@@ -279,6 +279,27 @@ describe("workspacesStore — validation au chargement", () => {
     expect(wsSynth?.content.exchange).toBe("synthetic");
   });
 
+  it("remplace un timeframe non supporté par la source du workspace par un défaut applicable", async () => {
+    installMockLocalStorage();
+    localStorage.setItem(
+      "axiom:workspaces:v1",
+      JSON.stringify({
+        workspaces: [
+          { id: "defaut", name: "Défaut", content: { ...contenuVierge(), exchange: "coinbase", timeframe: "6M" } },
+        ],
+        currentId: "defaut",
+      })
+    );
+
+    vi.resetModules();
+    const mod = await import("./workspaces");
+    const ws = mod.workspacesStore.getState().workspaces.find((w) => w.id === "defaut");
+
+    // La docstring de validateContent promet un contenu « TOUJOURS applicable » :
+    // 6M sur Coinbase ne l'est pas → repli sur 1h (supporté par Coinbase).
+    expect(ws?.content.timeframe).toBe("1h");
+  });
+
   it("un workspace relu depuis localStorage conserve l'état ouvert des fenêtres (sémantique unique, revue v2 H15)", async () => {
     windowManagerStore.getState().openWindow("derivatives");
     workspacesStore.getState().saveAs("plan");

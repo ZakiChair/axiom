@@ -35,6 +35,7 @@ import { uiSectionsStore } from "./ui-sections";
 import { themeStore, THEMES, type ThemeId } from "./theme";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
 import { windowManagerStore, type EtatFenetre } from "./windowManager";
+import { supportedTimeframesFor } from "../data/adapters";
 
 const STORAGE_KEY = "axiom:workspaces:v1";
 /** Identifiant réservé du workspace « Défaut » (indestructible, auto-mis à jour). */
@@ -193,13 +194,24 @@ function validateContent(raw: unknown): WorkspaceContent {
       if (isBool(v)) sections[k] = v;
     }
   }
+  const exchange =
+    typeof o.exchange === "string" && (RESTORABLE_EXCHANGES as string[]).includes(o.exchange)
+      ? (o.exchange as ExchangeId)
+      : "binance";
+  const symbol = isNonEmptyString(o.symbol) ? o.symbol : "BTCUSDT";
+  // TF « TOUJOURS applicable » (docstring) : validé contre la source restaurée,
+  // repli 1h si supporté, sinon premier TF supporté.
+  const supportes = supportedTimeframesFor(exchange, symbol);
+  const timeframe =
+    isNonEmptyString(o.timeframe) && (supportes as readonly string[]).includes(o.timeframe)
+      ? (o.timeframe as Timeframe)
+      : supportes.includes("1h")
+        ? "1h"
+        : (supportes[0] ?? "1h");
   return {
-    exchange:
-      typeof o.exchange === "string" && (RESTORABLE_EXCHANGES as string[]).includes(o.exchange)
-        ? (o.exchange as ExchangeId)
-        : "binance",
-    symbol: isNonEmptyString(o.symbol) ? o.symbol : "BTCUSDT",
-    timeframe: isNonEmptyString(o.timeframe) ? (o.timeframe as Timeframe) : "1h",
+    exchange,
+    symbol,
+    timeframe,
     indicators: migratePersistedIndicators(o.indicators),
     orderflow: isBool(o.orderflow) ? o.orderflow : false,
     volumeProfile: isBool(o.volumeProfile) ? o.volumeProfile : false,

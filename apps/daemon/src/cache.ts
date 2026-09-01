@@ -8,6 +8,7 @@
  * Les fonctions `ttlMsPourChemin` et `cleCache` sont PURES (testées) et n'ouvrent
  * pas la base ; les fonctions d'accès (`lireCache`…) l'ouvrent paresseusement.
  */
+import type { Database } from "bun:sqlite";
 import { getDb } from "./db";
 
 /**
@@ -83,10 +84,11 @@ interface LigneCache {
 
 /**
  * Lit une entrée non expirée. Purge PARESSEUSE : si l'entrée existe mais est
- * expirée, on la supprime et on renvoie `null` (miss).
+ * expirée, on la supprime et on renvoie `null` (miss). `dInjecte` permet aux tests
+ * d'injecter une base :memory: (défaut : base réelle du daemon).
  */
-export function lireCache(cle: string): EntreeCache | null {
-  const db = getDb();
+export function lireCache(cle: string, dInjecte?: Database): EntreeCache | null {
+  const db = dInjecte ?? getDb();
   const ligne = db
     .query("SELECT corps, contentType, expireA FROM cache WHERE cle = ?")
     .get(cle) as LigneCache | null;
@@ -104,8 +106,9 @@ export function ecrireCache(
   corps: Uint8Array,
   contentType: string,
   ttlMs: number,
+  dInjecte?: Database,
 ): void {
-  const db = getDb();
+  const db = dInjecte ?? getDb();
   const expireA = Date.now() + ttlMs;
   db.query(
     "INSERT OR REPLACE INTO cache (cle, corps, contentType, expireA) VALUES (?, ?, ?, ?)",
@@ -113,14 +116,14 @@ export function ecrireCache(
 }
 
 /** Nombre d'entrées actuellement stockées (utilisé par /health). */
-export function compterEntrees(): number {
-  const db = getDb();
+export function compterEntrees(dInjecte?: Database): number {
+  const db = dInjecte ?? getDb();
   const ligne = db.query("SELECT COUNT(*) AS n FROM cache").get() as { n: number };
   return ligne.n;
 }
 
 /** Purge de masse des entrées expirées ; renvoie le nombre de lignes supprimées. */
-export function purgerExpires(): number {
-  const db = getDb();
+export function purgerExpires(dInjecte?: Database): number {
+  const db = dInjecte ?? getDb();
   return db.query("DELETE FROM cache WHERE expireA <= ?").run(Date.now()).changes;
 }

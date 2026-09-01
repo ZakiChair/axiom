@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { cleCache, ttlMsPourChemin, TTL_SECONDES_PAR_PREFIXE } from "./cache";
+import { Database } from "bun:sqlite";
+import {
+  cleCache,
+  compterEntrees,
+  ecrireCache,
+  lireCache,
+  purgerExpires,
+  ttlMsPourChemin,
+  TTL_SECONDES_PAR_PREFIXE,
+} from "./cache";
 
 describe("ttlMsPourChemin", () => {
   test("TTL par préfixe connu (converti en ms)", () => {
@@ -57,5 +66,53 @@ describe("cleCache", () => {
 
   test("des query différentes donnent des clés différentes", () => {
     expect(cleCache("GET", "/x?a=1")).not.toBe(cleCache("GET", "/x?a=2"));
+  });
+});
+
+// ─────────────────────────── Accès SQLite (base injectée :memory:) ───────────────────────────
+
+/** Base :memory: avec le schéma `cache` de db.ts — aucun effet de bord disque. */
+function baseMemoire(): Database {
+  const d = new Database(":memory:");
+  d.run(`CREATE TABLE cache (
+    cle TEXT PRIMARY KEY,
+    corps BLOB NOT NULL,
+    contentType TEXT NOT NULL,
+    expireA INTEGER NOT NULL
+  )`);
+  return d;
+}
+
+describe("lireCache / ecrireCache (base injectée)", () => {
+  test("aller-retour : une entrée écrite est relue avant expiration", () => {
+    const d = baseMemoire();
+    ecrireCache("GET /tdapi/x", new TextEncoder().encode("{}"), "application/json", 60_000, d);
+    const hit = lireCache("GET /tdapi/x", d);
+    expect(hit).not.toBeNull();
+    expect(hit?.contentType).toBe("application/json");
+    expect(new TextDecoder().decode(hit?.corps)).toBe("{}");
+    expect(compterEntrees(d)).toBe(1);
+  });
+
+  test("entrée expirée : miss + purge PARESSEUSE à la relecture", () => {
+    const d = baseMemoire();
+    ecrireCache("GET /tdapi/perime", new Uint8Array([1]), "text/plain", -1, d); // déjà expirée
+    expect(lireCache("GET /tdapi/perime", d)).toBeNull();
+    expect(compterEntrees(d)).toBe(0); // supprimée par la relecture
+  });
+});
+
+describe("purgerExpires (base injectée)", () => {
+  test("purge de MASSE des expirées jamais relues, épargne les vivantes", () => {
+    const d = baseMemoire();
+    // Deux entrées expirées à clé unique (patron réel : Coinalyze met `to=now` dans la
+    // query → clé nouvelle à chaque poll, jamais relue → la purge paresseuse de
+    // lireCache ne les atteint jamais).
+    ecrireCache("GET /coinalyzeapi/oi?to=1", new Uint8Array([1]), "text/plain", -1, d);
+    ecrireCache("GET /coinalyzeapi/oi?to=2", new Uint8Array([2]), "text/plain", -1, d);
+    ecrireCache("GET /coinalyzeapi/oi?to=3", new Uint8Array([3]), "text/plain", 60_000, d);
+    expect(purgerExpires(d)).toBe(2);
+    expect(compterEntrees(d)).toBe(1);
+    expect(lireCache("GET /coinalyzeapi/oi?to=3", d)).not.toBeNull();
   });
 });

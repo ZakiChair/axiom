@@ -27,6 +27,7 @@
  */
 import type { Database } from "bun:sqlite";
 import { purgerJournalAlertes, RETENTION_JOURNAL_MS } from "./alerts";
+import { purgerExpires } from "./cache";
 import { entetesCors } from "./cors";
 import { compacterSiNecessaire, getDb } from "./db";
 import type { Routeur } from "./router";
@@ -260,6 +261,15 @@ export function demarrerBoucleSnapshots(): () => void {
       purgerJournalAlertes(getDb(), Date.now() - RETENTION_JOURNAL_MS);
     } catch (err) {
       console.error("[axiomd] purge du journal d'alertes échouée :", err);
+    }
+    try {
+      // Purge de MASSE du cache TTL : les clés à horodatage (ex. Coinalyze `to=now`,
+      // coinalyze.ts:274 côté front) créent une entrée NOUVELLE à chaque poll, jamais
+      // relue → la purge paresseuse de lireCache ne les atteint jamais et la table
+      // grossirait sans borne sur un daemon long-vivant.
+      purgerExpires();
+    } catch (err) {
+      console.error("[axiomd] purge du cache expiré échouée :", err);
     }
     try {
       // Après les purges seulement : c'est là que la freelist vient de grossir.

@@ -2,10 +2,11 @@
  * Funding cross-exchange — snapshot du taux de funding perp du symbole courant sur
  * plusieurs venues (Binance, Bybit, OKX, Hyperliquid), NORMALISÉ en APR annualisé.
  *
- * ⚠️ Les intervalles de funding DIFFÈRENT : Binance/Bybit/OKX règlent toutes les 8 h,
- * Hyperliquid toutes les 1 h. Comparer les taux bruts serait trompeur → on annualise
- * chaque taux (APR %) pour une base commune. La DIVERGENCE d'APR entre CEX et le perp
- * DEX (Hyperliquid) est le signal recherché (arbitrage de funding / stress relatif).
+ * ⚠️ Binance/Bybit/OKX règlent en 8 h STANDARD mais nombre de perps sont passés en 4 h
+ * (voire moins) — l'intervalle est dérivé par venue, Hyperliquid reste 1 h. Comparer les
+ * taux bruts serait trompeur → on annualise chaque taux (APR %) pour une base commune.
+ * La DIVERGENCE d'APR entre CEX et le perp DEX (Hyperliquid) est le signal recherché
+ * (arbitrage de funding / stress relatif).
  *
  * Accès : Bybit/OKX/Hyperliquid renvoient CORS `*` (appel direct) ; Binance fapi passe
  * par le proxy /extapi. Chaque venue est indépendante (Promise.allSettled) : une source
@@ -20,7 +21,7 @@ export interface FundingVenue {
   label: string;
   /** Taux de funding brut par intervalle, en POURCENTAGE (ex. 0.01 = 0,01 %/8 h). */
   ratePct: number;
-  /** Intervalle de règlement en heures (8 CEX, 1 Hyperliquid). */
+  /** Intervalle de règlement en heures (dérivé par venue pour les CEX, défaut 8 ; 1 Hyperliquid). */
   intervalHours: number;
   /** Taux annualisé (APR %) — base commune de comparaison. */
   apr: number;
@@ -79,8 +80,45 @@ export function parseHyperliquidFunding(json: unknown, coin: string): number | n
   return Number.isFinite(v) ? v : null;
 }
 
+// ─────────────────────────── Parsers PURS d'INTERVALLE de règlement (heures) ───────────────────────────
+// Depuis 2023-2024, nombre de perps USDT Binance/Bybit (et certains OKX) règlent toutes
+// les 4 h (voire moins) : figer 8 h fausse l'APR d'un facteur 2 — et donc la divergence
+// CEX vs DEX, le signal recherché. On dérive l'intervalle réel par venue, repli 8 h.
+
+/** OKX public/funding-rate → intervalle en heures (nextFundingTime − fundingTime), ou null. */
+export function parseOkxFundingIntervalH(json: unknown): number | null {
+  const d = (json as { data?: Array<{ fundingTime?: unknown; nextFundingTime?: unknown }> })?.data?.[0];
+  const cur = Number(d?.fundingTime);
+  const next = Number(d?.nextFundingTime);
+  if (!Number.isFinite(cur) || !Number.isFinite(next) || next <= cur) return null;
+  const h = Math.round((next - cur) / 3_600_000);
+  return h > 0 && h <= 24 ? h : null;
+}
+
+/** Bybit v5 instruments-info (linear) → fundingInterval (minutes) converti en heures, ou null. */
+export function parseBybitFundingIntervalH(json: unknown): number | null {
+  const list = (json as { result?: { list?: Array<{ fundingInterval?: unknown }> } })?.result?.list;
+  const min = Number(list?.[0]?.fundingInterval);
+  if (!Number.isFinite(min) || min <= 0) return null;
+  return min / 60;
+}
+
+/** Binance fapi/v1/fundingInfo → fundingIntervalHours du symbole (liste des perps HORS 8 h), ou null. */
+export function parseBinanceFundingIntervalH(json: unknown, symbol: string): number | null {
+  if (!Array.isArray(json)) return null;
+  for (const item of json) {
+    const o = item as { symbol?: unknown; fundingIntervalHours?: unknown };
+    if (o?.symbol === symbol) {
+      const h = Number(o.fundingIntervalHours);
+      return Number.isFinite(h) && h > 0 ? h : null;
+    }
+  }
+  return null;
+}
+
 // ─────────────────────────── Fetchers par venue (rate → venue normalisée | null) ───────────────────────────
 
+/** Cadence STANDARD de règlement CEX : défaut quand l'intervalle réel est indisponible. */
 const CEX_INTERVAL_H = 8;
 const HL_INTERVAL_H = 1;
 
@@ -93,19 +131,40 @@ async function jsonDirect(url: string): Promise<unknown> {
 async function fetchBinance(base: string): Promise<FundingVenue | null> {
   const json = await jsonDirect(extUrl("fapi.binance.com", `fapi/v1/premiumIndex?symbol=${base}USDT`));
   const rate = parseBinanceFunding(json);
-  return rate === null ? null : venue("binance", "Binance", rate, CEX_INTERVAL_H);
+  if (rate === null) return null;
+  // Intervalle réel : fundingInfo ne liste QUE les perps hors cadence 8 h. Best-effort.
+  let intervalH = CEX_INTERVAL_H;
+  try {
+    const info = await jsonDirect(extUrl("fapi.binance.com", "fapi/v1/fundingInfo"));
+    intervalH = parseBinanceFundingIntervalH(info, `${base}USDT`) ?? CEX_INTERVAL_H;
+  } catch {
+    /* best-effort : cadence standard */
+  }
+  return venue("binance", "Binance", rate, intervalH);
 }
 
 async function fetchBybit(base: string): Promise<FundingVenue | null> {
   const json = await jsonDirect(`https://api.bybit.com/v5/market/tickers?category=linear&symbol=${base}USDT`);
   const rate = parseBybitFunding(json);
-  return rate === null ? null : venue("bybit", "Bybit", rate, CEX_INTERVAL_H);
+  if (rate === null) return null;
+  let intervalH = CEX_INTERVAL_H;
+  try {
+    const info = await jsonDirect(
+      `https://api.bybit.com/v5/market/instruments-info?category=linear&symbol=${base}USDT`,
+    );
+    intervalH = parseBybitFundingIntervalH(info) ?? CEX_INTERVAL_H;
+  } catch {
+    /* best-effort : cadence standard */
+  }
+  return venue("bybit", "Bybit", rate, intervalH);
 }
 
 async function fetchOkx(base: string): Promise<FundingVenue | null> {
   const json = await jsonDirect(`https://www.okx.com/api/v5/public/funding-rate?instId=${base}-USDT-SWAP`);
   const rate = parseOkxFunding(json);
-  return rate === null ? null : venue("okx", "OKX", rate, CEX_INTERVAL_H);
+  if (rate === null) return null;
+  // fundingTime/nextFundingTime sont dans la MÊME réponse : aucune requête en plus.
+  return venue("okx", "OKX", rate, parseOkxFundingIntervalH(json) ?? CEX_INTERVAL_H);
 }
 
 async function fetchHyperliquid(base: string): Promise<FundingVenue | null> {

@@ -7,9 +7,12 @@ import {
   annualiserFunding,
   fundingSpreadApr,
   parseBinanceFunding,
+  parseBinanceFundingIntervalH,
   parseBybitFunding,
+  parseBybitFundingIntervalH,
   parseHyperliquidFunding,
   parseOkxFunding,
+  parseOkxFundingIntervalH,
   type FundingVenue,
 } from "./fundingCrossExchange";
 
@@ -46,6 +49,28 @@ describe("parsers de funding", () => {
     expect(parseHyperliquidFunding(json, "BTC")).toBe(0.0000125);
     expect(parseHyperliquidFunding(json, "SOL")).toBeNull(); // coin absent
     expect(parseHyperliquidFunding([{ universe: [] }], "BTC")).toBeNull(); // tuple incomplet
+  });
+});
+
+describe("parsers d'intervalle de funding (heures)", () => {
+  it("OKX : nextFundingTime − fundingTime de la même réponse funding-rate", () => {
+    const h4 = { data: [{ fundingRate: "0.0001", fundingTime: "1700000000000", nextFundingTime: "1700014400000" }] };
+    expect(parseOkxFundingIntervalH(h4)).toBe(4); // 4 h exactes
+    expect(parseOkxFundingIntervalH({ data: [{ fundingRate: "0.0001" }] })).toBeNull(); // champs absents
+    expect(parseOkxFundingIntervalH({ data: [{ fundingTime: "2", nextFundingTime: "1" }] })).toBeNull(); // incohérent
+  });
+
+  it("Bybit : fundingInterval (minutes) d'instruments-info converti en heures", () => {
+    expect(parseBybitFundingIntervalH({ result: { list: [{ fundingInterval: 240 }] } })).toBe(4);
+    expect(parseBybitFundingIntervalH({ result: { list: [{ fundingInterval: 480 }] } })).toBe(8);
+    expect(parseBybitFundingIntervalH({ result: { list: [] } })).toBeNull();
+  });
+
+  it("Binance : fundingIntervalHours de fundingInfo (liste des perps HORS 8 h ; absent = null → défaut 8)", () => {
+    const info = [{ symbol: "PUMPUSDT", fundingIntervalHours: 4 }];
+    expect(parseBinanceFundingIntervalH(info, "PUMPUSDT")).toBe(4);
+    expect(parseBinanceFundingIntervalH(info, "BTCUSDT")).toBeNull(); // absent = cadence standard 8 h
+    expect(parseBinanceFundingIntervalH({}, "BTCUSDT")).toBeNull(); // réponse inattendue
   });
 });
 

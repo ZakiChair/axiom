@@ -18,7 +18,7 @@ import { volumeProfileStore } from "../store/volumeProfile";
 import { revenueStore } from "../store/revenue";
 import { liqMarksStore } from "../chart/liquidationMarkers";
 import { themeStore, THEMES } from "../store/theme";
-import { SUPPORTED_TIMEFRAMES } from "../data/adapters";
+import { supportedTimeframesFor } from "../data/adapters";
 import { pousserToast } from "../store/toasts";
 import { watchlistStore } from "../store/watchlist";
 import { windowManagerStore, type SnapZone } from "../store/windowManager";
@@ -330,9 +330,12 @@ export function gererRaccourciGlobal(e: KeyboardEvent): void {
   }
 
   // [ / ] : timeframe plus bas / plus haut (NON circulaire, borné aux TF supportés).
+  // `supportedTimeframesFor` (et non la table brute) : un synthétique/capitalisation
+  // n'a pas d'entrée dans SUPPORTED_TIMEFRAMES — la Toolbar calcule l'intersection
+  // des jambes, le clavier doit faire pareil (parité clavier/souris).
   if (e.key === "[" || e.key === "]") {
-    const { exchange, timeframe } = marketStore.getState();
-    const supportes = SUPPORTED_TIMEFRAMES[exchange] ?? [];
+    const { exchange, symbol, timeframe } = marketStore.getState();
+    const supportes = supportedTimeframesFor(exchange, symbol);
     const cible = timeframeVoisin(supportes, timeframe, e.key === "[" ? -1 : 1);
     if (cible !== null) {
       marketStore.getState().setTimeframe(cible);
@@ -356,8 +359,8 @@ export function gererRaccourciGlobal(e: KeyboardEvent): void {
   // Timeframes rapides par code PHYSIQUE (AZERTY : e.key vaudrait & é " …).
   const tfCode = timeframePourCode(e.code, e);
   if (tfCode !== null) {
-    const exchange = marketStore.getState().exchange;
-    const supportes = SUPPORTED_TIMEFRAMES[exchange] ?? [];
+    const { exchange, symbol } = marketStore.getState();
+    const supportes = supportedTimeframesFor(exchange, symbol);
     if (supportes.includes(tfCode)) marketStore.getState().setTimeframe(tfCode);
     return;
   }

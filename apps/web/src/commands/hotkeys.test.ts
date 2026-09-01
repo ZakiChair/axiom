@@ -193,3 +193,33 @@ describe("gererRaccourciGlobal — ancrage ⌥+flèches et modale Réglages", ()
     orderflowStore.getState().setEnabled(false);
   });
 });
+
+describe("gererRaccourciGlobal — timeframes clavier sur symboles synthétiques", () => {
+  beforeEach(() => {
+    (globalThis as { HTMLElement?: unknown }).HTMLElement = class {};
+    settingsUiStore.getState().closeSettings();
+    paletteStore.getState().fermer();
+  });
+
+  it("la touche 5 (4h) fonctionne sur un ratio binance/binance (intersection des jambes, comme la Toolbar)", () => {
+    // Avant : SUPPORTED_TIMEFRAMES["synthetic"] n'existe pas → [] → no-op silencieux,
+    // alors que la Toolbar (supportedTimeframesFor) propose bien 1m→12M sur ce ratio.
+    marketStore.setState({
+      exchange: "synthetic",
+      symbol: "binance:ETHUSDT|/|binance:BTCUSDT",
+      timeframe: "1m",
+    });
+
+    gererRaccourciGlobal(ev({ key: "5", code: "Digit5" }));
+
+    expect(marketStore.getState().timeframe).toBe("4h");
+  });
+
+  it("« ] » monte le TF d'un cran sur une capitalisation (TOTAL : 1h → 4h)", () => {
+    marketStore.setState({ exchange: "synthetic", symbol: "TOTAL", timeframe: "1h" });
+
+    gererRaccourciGlobal(ev({ key: "]" }));
+
+    expect(marketStore.getState().timeframe).toBe("4h");
+  });
+});

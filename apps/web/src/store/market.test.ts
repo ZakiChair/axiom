@@ -42,16 +42,18 @@ describe("upsertCandle", () => {
     expect(candles.map((c) => c.time)).toEqual([1000, 2000]); // buffer inchangé
   });
 
-  it("borne le buffer à une fenêtre glissante : l'ajout au-delà de la limite évince les plus anciennes", () => {
-    const MAX_CANDLES = 5000;
-    const seeded = Array.from({ length: MAX_CANDLES }, (_, i) => candle(i, i));
+  it("ne tronque JAMAIS le buffer : il reste aligné index-par-index avec la dataList du chart", () => {
+    // La pagination historique (ChartInstance) pousse les MÊMES bougies dans le store et
+    // dans la dataList KLineChart ; une troncature côté store seul décale tous les
+    // indicateurs/CVD (mappés par index sur dataList). L'ancienne fenêtre de 5 000 est supprimée.
+    const seeded = Array.from({ length: 5000 }, (_, i) => candle(i, i));
     marketStore.setState({ candles: seeded });
 
-    marketStore.getState().upsertCandle(candle(MAX_CANDLES, MAX_CANDLES)); // une de plus
+    marketStore.getState().upsertCandle(candle(5000, 5000)); // une de plus
 
     const candles = marketStore.getState().candles;
-    expect(candles).toHaveLength(MAX_CANDLES); // toujours borné
-    expect(candles[0]?.time).toBe(1); // la plus ancienne (time=0) a été évincée
-    expect(candles[candles.length - 1]?.time).toBe(MAX_CANDLES); // la nouvelle est bien en fin
+    expect(candles).toHaveLength(5001); // rien d'évincé
+    expect(candles[0]?.time).toBe(0); // la plus ancienne est toujours là
+    expect(candles[candles.length - 1]?.time).toBe(5000);
   });
 });

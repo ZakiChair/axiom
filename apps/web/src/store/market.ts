@@ -12,12 +12,6 @@ import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
 import { estSymboleCapitalisation } from "../data/mcap";
 import { parseSyntheticSymbol } from "../data/synthetic";
 
-/**
- * Fenêtre glissante max du buffer : sans borne, une session longue (terminal mono-
- * utilisateur censé rester ouvert en continu) fait grossir `candles` indéfiniment,
- * alors que upsertCandle copie tout le tableau à chaque tick (même non clôturé).
- */
-const MAX_CANDLES = 5000;
 
 export interface MarketState {
   /** Source de marché courante (Binance par défaut). */
@@ -173,7 +167,16 @@ function exchangeForSymbol(
     : sourcePrecedente;
 }
 
-/** Calcule le buffer suivant ; `null` signifie tick hors-ordre à ignorer. */
+/**
+ * Calcule le buffer suivant ; `null` signifie tick hors-ordre à ignorer.
+ *
+ * AUCUNE troncature ici : le buffer doit rester le miroir EXACT de la dataList de
+ * KLineChart (indicateurs, CVD et footprint sont mappés index-par-index dessus, cf.
+ * chart/indicators.ts). L'ancienne fenêtre glissante de 5 000 désalignait les deux dès
+ * la première bougie live après une pagination profonde (dataList à 20 000). La borne
+ * mémoire réelle : purge à chaque changement d'identité (setMarket/startDataLoad) +
+ * plafond de pagination (ChartInstance) + croissance live d'1 bougie/période.
+ */
 function withCandle(candles: Candle[], candle: Candle): Candle[] | null {
   const last = candles[candles.length - 1];
   if (last && last.time === candle.time) {
@@ -182,8 +185,7 @@ function withCandle(candles: Candle[], candle: Candle): Candle[] | null {
     return next;
   }
   if (!last || candle.time > last.time) {
-    const next = [...candles, candle];
-    return next.length > MAX_CANDLES ? next.slice(next.length - MAX_CANDLES) : next;
+    return [...candles, candle];
   }
   return null;
 }

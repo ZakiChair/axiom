@@ -18,7 +18,7 @@
  * chart) reste l'outil du flux exchange en séance.
  */
 import { useEffect, useRef, useState } from "react";
-import { daemonSupporteHl, hlPositionsGet, whalesRecentGet } from "../data/daemon";
+import { daemonSupporte, daemonSupporteHl, hlPositionsGet, whalesRecentGet } from "../data/daemon";
 import {
   libelleBout,
   mapperReponsePositions,
@@ -70,6 +70,17 @@ const COINS_HL = ["BTC", "ETH", "SOL", "HYPE"] as const;
 
 /** Statut de chargement local (pattern triplet des fenêtres daemon-dépendantes). */
 type Statut = "charge" | "ok" | "sans-daemon" | "erreur";
+
+/**
+ * Statut d'un onglet quand la lecture renvoie null : `whalesRecentGet`/`hlPositionsGet`
+ * renvoient null indifféremment daemon ABSENT ou daemon présent mais en échec (!ok /
+ * throw). Daemon présent ⇒ « erreur » douce (premier scan en cours, échec amont) — PAS
+ * la consigne « Lancer pnpm run up », fausse quand il tourne (même distinction que
+ * l'onglet Positions). PURE, testée.
+ */
+export function statutLectureNulle(daemonPresent: boolean): Statut {
+  return daemonPresent ? "erreur" : "sans-daemon";
+}
 
 /** Ton + libellé FR du badge de direction (dépôt = offre potentielle → down). */
 const BADGE_DIRECTION: Record<MouvementWhale["direction"], { ton: TonBadge; label: string }> = {
@@ -160,7 +171,7 @@ function OngletFlux() {
       });
       if (generation.current !== gen) return; // réponse périmée
       if (brut === null) {
-        setStatut("sans-daemon");
+        setStatut(statutLectureNulle(daemonSupporte("whales")));
         return;
       }
       const reponse = mapperReponseWhales(brut);

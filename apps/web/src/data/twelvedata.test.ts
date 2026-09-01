@@ -5,6 +5,7 @@ import {
   nextDailyCount,
   parseQuotes,
   parseTwelveData,
+  quotaJourEpuise,
   setTwelveDataApiKey,
   twelveDataAdapter,
   utcDayKey,
@@ -255,5 +256,39 @@ describe("twelveDataAdapter.subscribeKline — séquence closed:true", () => {
       { time: tB, closed: true }, // poll 3 : B vient de clore → recalcul des indicateurs
       { time: tC, closed: false }, // poll 3 : C, la nouvelle bougie en cours
     ]);
+  });
+});
+
+describe("quotaJourEpuise (plafond ~800 crédits/jour)", () => {
+  const now = new Date("2026-07-01T12:00:00Z");
+
+  it("vrai quand le compteur du MÊME jour UTC atteint la limite", () => {
+    expect(quotaJourEpuise({ jour: "2026-07-01", count: 800 }, now)).toBe(true);
+    expect(quotaJourEpuise({ jour: "2026-07-01", count: 799 }, now)).toBe(false);
+  });
+
+  it("faux sans compteur, ou pour un compteur d'un AUTRE jour UTC (reset minuit UTC)", () => {
+    expect(quotaJourEpuise(null, now)).toBe(false);
+    expect(quotaJourEpuise({ jour: "2026-06-30", count: 800 }, now)).toBe(false);
+  });
+});
+
+describe("plafond journalier appliqué (acquireSlot)", () => {
+  it("refuse tout appel réseau quand le compteur du jour a atteint la limite", async () => {
+    const jour = utcDayKey(new Date());
+    const stockage = new Map<string, string>([
+      ["axiom:twelvedata:daily:v1", JSON.stringify({ jour, count: 800 })],
+    ]);
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => stockage.get(k) ?? null,
+      setItem: (k: string, v: string) => void stockage.set(k, v),
+    });
+    const f = vi.fn();
+    vi.stubGlobal("fetch", f);
+
+    // Symbole unique : ne partage ni cache ni inflight avec les autres tests du fichier.
+    await expect(twelveDataAdapter.fetchKlines("QUOTAJOURTEST", "1d")).rejects.toThrow(/quota journalier/);
+    expect(f).not.toHaveBeenCalled(); // aucun crédit consommé
+    vi.unstubAllGlobals();
   });
 });

@@ -99,6 +99,30 @@ export function nextDailyCount(stored: DailyUsage | null, now: Date): DailyUsage
   return { jour, count: stored.count + 1 };
 }
 
+/** Lit le compteur journalier persisté SANS l'incrémenter (null si indisponible/corrompu). */
+function lireDailyUsage(): DailyUsage | null {
+  try {
+    const raw = localStorage.getItem(DAILY_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    return parsed !== null &&
+      typeof parsed === "object" &&
+      typeof (parsed as DailyUsage).jour === "string" &&
+      typeof (parsed as DailyUsage).count === "number"
+      ? (parsed as DailyUsage)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Vrai si le plafond JOURNALIER est atteint pour le jour UTC de `now`. PURE & testée.
+ * Un compteur d'un autre jour ne compte pas (reset minuit UTC), un compteur absent non plus.
+ */
+export function quotaJourEpuise(stored: DailyUsage | null, now: Date, limite = DAILY_LIMIT): boolean {
+  return stored !== null && stored.jour === utcDayKey(now) && stored.count >= limite;
+}
+
 /**
  * Incrémente + persiste le compteur journalier (localStorage), renvoie le total du jour.
  * Best-effort : si localStorage est indisponible (mode privé / tests node), renvoie
@@ -106,15 +130,7 @@ export function nextDailyCount(stored: DailyUsage | null, now: Date): DailyUsage
  */
 function bumpDailyCount(): number | null {
   try {
-    const raw = localStorage.getItem(DAILY_KEY);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
-    const stored =
-      parsed !== null &&
-      typeof parsed === "object" &&
-      typeof (parsed as DailyUsage).jour === "string" &&
-      typeof (parsed as DailyUsage).count === "number"
-        ? (parsed as DailyUsage)
-        : null;
+    const stored = lireDailyUsage();
     const next = nextDailyCount(stored, new Date());
     localStorage.setItem(DAILY_KEY, JSON.stringify(next));
     return next.count;
@@ -146,6 +162,15 @@ function reportQuota(): void {
  */
 function acquireSlot(): Promise<void> {
   const run = throttleChain.then(async () => {
+    // Plafond JOURNALIER (~800 crédits) : jusqu'ici seulement AFFICHÉ. 3 symboles tradfi
+    // pollés à 60 s + le chart crevaient le plafond en cours de séance US, puis chaque
+    // appel échouait en silence jusqu'à minuit UTC. On refuse ICI, explicitement : le
+    // chart ressert son cache périmé (cachedSeries), la watchlist passe en erreur, et
+    // le backoff de pollLoop espace les tentatives.
+    if (quotaJourEpuise(lireDailyUsage(), new Date())) {
+      healthStore.getState().marquerErreur(HEALTH_SOURCE, "quota journalier Twelve Data épuisé (800 crédits)");
+      throw new Error("Twelve Data: quota journalier épuisé (800 crédits) — reset à minuit UTC");
+    }
     for (;;) {
       const now = Date.now();
       while (requestTimes.length > 0) {

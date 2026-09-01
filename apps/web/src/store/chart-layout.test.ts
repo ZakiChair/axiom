@@ -196,4 +196,34 @@ describe("chartLayoutStore — dérivation de source sur symbole synthétique (p
       .setSlotMarket(1, { exchange: "kraken", symbol: "ETHUSD", timeframe: "1h" });
     expect(chartLayoutStore.getState().slots[0].exchange).toBe("kraken");
   });
+
+  it("pick source explicite pendant TOTAL, puis symbole changé : compromis « cohérence-au-repos » épinglé (diverge du maître transitoire — ACCEPTÉ, cf. task-C.4-report.md)", () => {
+    // Étape 1 : slot déjà synthetic+TOTAL.
+    chartLayoutStore.getState().setSlotSymbol(1, "TOTAL");
+    const s1 = chartLayoutStore.getState().slots[0];
+    expect(s1).toEqual({ exchange: "synthetic", symbol: "TOTAL", timeframe: "1h" });
+
+    // Étape 2 : l'utilisateur choisit EXPLICITEMENT « kraken » en en-tête PENDANT que le
+    // symbole reste TOTAL (spread de l'état courant, exchange changé). Le maître tolère
+    // kraken+TOTAL transitoirement en mémoire (setExchange n'y dérive jamais, cf. sa
+    // docstring dans market.ts) ; le slot secondaire, lui, PERSISTE sa config à CHAQUE
+    // mutation (localStorage) — laisser passer kraken+TOTAL, même un instant, rouvrirait
+    // le constat (pane cassé au repos si le prochain rendu lit ce blob). sanitizeSlotConfig
+    // neutralise donc le pick : le symbole synthétique impose sa source, le choix explicite
+    // de venue est perdu.
+    chartLayoutStore.getState().setSlotMarket(1, { ...s1, exchange: "kraken" });
+    const s2 = chartLayoutStore.getState().slots[0];
+    expect(s2).toEqual({ exchange: "synthetic", symbol: "TOTAL", timeframe: "1h" }); // pick neutralisé
+
+    // Étape 3 : l'utilisateur tape ensuite « ETHUSD » — l'en-tête spreade l'état RÉEL s2
+    // (exchange:"synthetic" INCHANGÉ dans ce patch, le kraken de l'étape 2 n'a jamais été
+    // retenu) : ce n'est donc PAS un changement de source explicite, patchSlot dérive comme
+    // une sortie de TOTAL normale. TOTAL n'a pas de jambe A (parseSyntheticSymbol("TOTAL")
+    // est null, ce n'est pas un ratio) → repli sur Binance, PAS kraken : le pick de l'étape 2
+    // est définitivement perdu, il faut re-choisir la venue APRÈS avoir changé le symbole.
+    // Couple épinglé = ce que le code fait réellement (vérifié par exécution).
+    chartLayoutStore.getState().setSlotMarket(1, { ...s2, symbol: "ETHUSD" });
+    const s3 = chartLayoutStore.getState().slots[0];
+    expect(s3).toEqual({ exchange: "binance", symbol: "ETHUSD", timeframe: "1h" });
+  });
 });

@@ -126,9 +126,15 @@ export function sanitizeSlotConfig(raw: unknown, fallback: SlotConfig): SlotConf
   // `synthetic` garde son traitement existant (symbole synthétique mal formé →
   // rejet en bloc sur `fallback`, cf. tests) — l'appel n'est fait que quand la
   // source persistée n'est pas déjà `synthetic`, donc sans effet sur ce cas-là.
-  // Conséquence assumée : ceci prime même sur une source posée EXPLICITEMENT
-  // ailleurs (setSlotExchange) si le symbole reste synthétique — binance+TOTAL est
-  // la combinaison inexploitable que ce correctif existe pour éliminer.
+  //
+  // Compromis ACCEPTÉ (cf. task-C.4-report.md) : une source posée explicitement dans
+  // patchSlot gagne, SAUF si elle rendrait le couple invalide AU REPOS (ex. kraken
+  // choisi pendant que le symbole reste TOTAL) — ce filet la neutralise vers
+  // `synthetic`. Le maître, lui, tolère l'incohérence transitoirement EN MÉMOIRE
+  // (setExchange n'y dérive jamais) car il ne persiste pas à chaque mutation ; le
+  // slot secondaire persiste sa config à chaque `set()`, donc ne peut pas se permettre
+  // ce répit. Conséquence assumée : le pick explicite est perdu, il faut re-choisir la
+  // venue APRÈS avoir changé le symbole (épinglé dans chart-layout.test.ts).
   const exchange =
     exchangeBrute !== "synthetic" ? exchangeForSymbol({ exchange: exchangeBrute, symbol }, symbol) : exchangeBrute;
   const supported = supportedTimeframesFor(exchange, symbol);
@@ -205,7 +211,10 @@ function patchSlot(
   // maître (market.ts exchangeForSymbol) — TOTAL/SYN encodé ⇒ `synthetic`, quitter un
   // ratio ⇒ source de la jambe A. Sans elle, « TOTAL » tapé dans l'en-tête d'un slot
   // binance produisait binance+TOTAL, accepté et PERSISTÉ (pane en erreur à chaque
-  // boot, propagé au maître via la liaison). Une source posée EXPLICITEMENT gagne.
+  // boot, propagé au maître via la liaison). Une source posée EXPLICITEMENT gagne ICI —
+  // sauf si le couple résultant reste invalide au repos : `sanitizeSlotConfig` (filet
+  // final, ci-dessus) la neutralise alors vers `synthetic` (compromis ACCEPTÉ, cf.
+  // task-C.4-report.md et son commentaire).
   const exchangeExplicite = patch.exchange !== undefined && patch.exchange !== cur.exchange;
   const exchange =
     !exchangeExplicite && symbol !== cur.symbol

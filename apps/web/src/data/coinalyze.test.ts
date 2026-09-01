@@ -1,10 +1,12 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { Liquidation } from "@axiom/types";
 import {
   chunkCoinalyzeSymbols,
+  normalizeInterval,
   prochainReglementFunding,
   groupLiquidationBuckets,
   toCoinalyzeSymbol,
+  unPointSurDeux,
 } from "./coinalyze";
 
 describe("prochainReglementFunding", () => {
@@ -58,5 +60,31 @@ describe("chunkCoinalyzeSymbols (batch B2)", () => {
 
   it("renvoie [] pour une liste vide", () => {
     expect(chunkCoinalyzeSymbols([])).toEqual([]);
+  });
+});
+
+describe("normalizeInterval", () => {
+  it("laisse passer un intervalle supporté sans avertir", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(normalizeInterval("4hour")).toBe("4hour");
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("AVERTIT sur un intervalle inconnu au lieu de replier en silence (le piège « 8hour »)", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(normalizeInterval("8hour")).toBe("5min"); // repli conservé, mais bruyant
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
+  });
+});
+
+describe("unPointSurDeux", () => {
+  it("garde un point sur deux EN PARTANT DE LA FIN (le dernier est toujours retenu)", () => {
+    // 5 clôtures 4 h : on veut approx. la cadence 8 h en retenant les clôtures paires depuis la fin.
+    expect(unPointSurDeux([1, 2, 3, 4, 5])).toEqual([1, 3, 5]);
+    expect(unPointSurDeux([1, 2, 3, 4])).toEqual([2, 4]);
+    expect(unPointSurDeux([])).toEqual([]);
+    expect(unPointSurDeux([7])).toEqual([7]);
   });
 });

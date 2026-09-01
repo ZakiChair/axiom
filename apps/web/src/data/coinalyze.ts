@@ -185,11 +185,32 @@ function pctToFraction(pct: number): number {
   return pct / 100;
 }
 
-/** Valide la période demandée comme intervalle Coinalyze (repli « 5min »). */
-function normalizeInterval(period: string): CoinalyzeInterval {
-  return (COINALYZE_INTERVALS as readonly string[]).includes(period)
-    ? (period as CoinalyzeInterval)
-    : "5min";
+/**
+ * Valide la période demandée comme intervalle Coinalyze. Un intervalle inconnu replie
+ * sur « 5min » mais AVERTIT désormais : le repli silencieux a déjà produit un z-score
+ * de funding calculé sur du 5 min (« 8hour » n'existe pas chez Coinalyze). Exporté
+ * pour test.
+ */
+export function normalizeInterval(period: string): CoinalyzeInterval {
+  if ((COINALYZE_INTERVALS as readonly string[]).includes(period)) {
+    return period as CoinalyzeInterval;
+  }
+  console.warn(`[AXIOM] intervalle Coinalyze inconnu « ${period} » — repli 5min`);
+  return "5min";
+}
+
+/**
+ * Garde un point sur deux EN PARTANT DE LA FIN (le dernier point est toujours retenu).
+ * Sert à approximer une cadence 8 h depuis un historique « 4hour » (Coinalyze n'expose
+ * pas d'intervalle 8 h) : chaque clôture retenue tombe sur une frontière de 8 h. PURE.
+ */
+export function unPointSurDeux<T>(points: readonly T[]): T[] {
+  const out: T[] = [];
+  for (let i = points.length - 1; i >= 0; i -= 2) {
+    const p = points[i];
+    if (p !== undefined) out.unshift(p);
+  }
+  return out;
 }
 
 // ---------- Formes de réponse Coinalyze ----------

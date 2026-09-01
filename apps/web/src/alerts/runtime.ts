@@ -54,7 +54,8 @@ import { orderflowStore } from "../store/orderflow";
 import { presetAlertsStore, diffEntrants, filtrerCooldown } from "../store/presetAlerts";
 import { subscribeTickers, type TickerUpdate } from "../data/ticker";
 import { daemonSupporte, detectDaemon, urlDaemon } from "../data/daemon";
-import { coinalyzeProvider } from "../data/coinalyze";
+import { coinalyzeProvider, unPointSurDeux } from "../data/coinalyze";
+import { histFunding } from "../data/referentiels";
 import { executerScreener } from "../data/screenerRun";
 import { SCREENER_POSITION_CAP } from "../data/screener";
 import { extUrl } from "../data/extapi";
@@ -473,12 +474,19 @@ async function chargerFunding(
   }
   if (rate === undefined) return undefined;
 
-  // 3) Z-score sur historique 8h Coinalyze (fenêtre FUNDING_Z_WINDOW).
+  // 3) Z-score sur les RÈGLEMENTS RÉELS (Binance fapi/v1/fundingRate via histFunding —
+  //    cadence 8 h OU 4 h selon le perp, memoïsé). Repli : Coinalyze « 4hour »
+  //    sous-échantillonné 1 point sur 2 (≈ cadence 8 h) — « 8hour » N'EXISTE PAS chez
+  //    Coinalyze et repliait en silence sur du 5 min : les 30 « règlements » couvraient
+  //    ~2 h 30, écart-type ≈ 0, z aberrant.
   let z: number | undefined;
   try {
-    const since = Date.now() - FUNDING_Z_WINDOW * 8 * 3_600_000;
-    const hist = await coinalyzeProvider.fetchFundingRateHistory(symbol, "8hour", since);
-    const rates = hist.map((h) => h.rate).filter((v) => Number.isFinite(v));
+    let rates = ((await histFunding(symbol)) ?? []).map((p) => p.v);
+    if (rates.length === 0) {
+      const since = Date.now() - FUNDING_Z_WINDOW * 8 * 3_600_000;
+      const hist = await coinalyzeProvider.fetchFundingRateHistory(symbol, "4hour", since);
+      rates = unPointSurDeux(hist.map((h) => h.rate)).filter((v) => Number.isFinite(v));
+    }
     // Inclut le rate courant s'il n'est pas déjà le dernier point.
     const series =
       rates.length > 0 && rates[rates.length - 1] === rate ? rates : [...rates, rate];

@@ -1,16 +1,20 @@
 /**
  * @axiom/indicators — trend/halfTrend.ts
  *
- * HalfTrend (logique Everget / community) — suiveur ATR :
- *   dev = ATR(atrPeriod) · amplitude / 2
- *   en tendance haussière : ligne = max des lows − dev (trailing)
- *   bascule baissière si close < maxLow − dev
- *   symétrique pour la baisse
+ * HalfTrend (règle canonique Everget) — suiveur ATR :
+ *   bascule BAISSIÈRE si SMA(high, amplitude) < maxLowPrice (plus haut des
+ *   creux ratcheté) ET close < low[1] ; miroir pour la bascule haussière.
+ *   maxLowPrice/minHighPrice sont ratchetés sur les extrêmes ROULANTS
+ *   (plus bas/plus haut des `amplitude` dernières barres).
+ * Écart assumé vs Everget : la LIGNE est décalée de ±dev (dev = ATR·amplitude/2)
+ * alors que le canonique trace up/down sans décalage et réserve dev au canal
+ * atrHigh/atrLow (non exposé ici) — sans quoi l'input atrPeriod serait mort.
+ * La règle de BASCULE, elle, est canonique.
  * Overlay : `line` + `direction` (+1 / −1).
  */
 
 import type { IndicatorDef } from "@axiom/types";
-import { rma, trueRange } from "../utils";
+import { highOf, lowOf, rma, rollingHighest, rollingLowest, sma, trueRange } from "../utils";
 
 export const halfTrend: IndicatorDef = {
   id: "halfTrend",
@@ -32,6 +36,14 @@ export const halfTrend: IndicatorDef = {
     const line: Array<number | undefined> = new Array(n).fill(undefined);
     const direction: Array<number | undefined> = new Array(n).fill(undefined);
     const atrVals = rma(trueRange(candles), atrPeriod);
+    const highs = highOf(candles);
+    const lows = lowOf(candles);
+    // Briques canoniques Everget : SMA(high/low, amplitude) pour la condition
+    // de bascule, extrêmes roulants pour le ratchet maxLow/minHigh.
+    const smaHigh = sma(highs, amplitude);
+    const smaLow = sma(lows, amplitude);
+    const plusHaut = rollingHighest(highs, amplitude);
+    const plusBas = rollingLowest(lows, amplitude);
 
     // 0 = up, 1 = down (convention Pine halfTrend)
     let trend = 0;
@@ -45,49 +57,38 @@ export const halfTrend: IndicatorDef = {
       const c = candles[i];
       const atr = atrVals[i];
       if (c === undefined || atr === undefined) continue;
+      const hma = smaHigh[i];
+      const lma = smaLow[i];
+      const highPrice = plusHaut[i];
+      const lowPrice = plusBas[i];
+      // atrPeriod ≥ amplitude en pratique (défauts 100 vs 2) mais les gardes
+      // restent explicites (noUncheckedIndexedAccess).
+      if (hma === undefined || lma === undefined || highPrice === undefined || lowPrice === undefined) {
+        continue;
+      }
 
-      const highPrice = c.high;
-      const lowPrice = c.low;
       const close = c.close;
       const dev = (atr * amplitude) / 2;
-
-      // High/low à lookback amplitude (barre i − amplitude)
-      const back = candles[i - amplitude];
-      const highBack = back?.high;
-      const lowBack = back?.low;
       const prev = candles[i - 1];
-      const prevLow = prev?.low;
-      const prevHigh = prev?.high;
+      const prevLow = prev?.low ?? c.low; // nz(low[1], low)
+      const prevHigh = prev?.high ?? c.high; // nz(high[1], high)
 
-      if (Number.isNaN(maxLowPrice)) maxLowPrice = lowPrice;
-      if (Number.isNaN(minHighPrice)) minHighPrice = highPrice;
+      if (Number.isNaN(maxLowPrice)) maxLowPrice = prevLow;
+      if (Number.isNaN(minHighPrice)) minHighPrice = prevHigh;
 
       if (nextTrend === 1) {
         maxLowPrice = Math.max(lowPrice, maxLowPrice);
-        if (
-          highBack !== undefined &&
-          highBack < maxLowPrice &&
-          prevLow !== undefined &&
-          close < prevLow
-        ) {
-          // conserve nextTrend
-        }
-        if (close < maxLowPrice) {
+        // Bascule baissière canonique : SMA des highs passée SOUS le plus haut
+        // des creux ratcheté ET close sous le low précédent.
+        if (hma < maxLowPrice && close < prevLow) {
           trend = 1;
           nextTrend = 0;
           minHighPrice = highPrice;
         }
       } else {
         minHighPrice = Math.min(highPrice, minHighPrice);
-        if (
-          lowBack !== undefined &&
-          lowBack > minHighPrice &&
-          prevHigh !== undefined &&
-          close > prevHigh
-        ) {
-          // conserve
-        }
-        if (close > minHighPrice) {
+        // Bascule haussière canonique (miroir).
+        if (lma > minHighPrice && close > prevHigh) {
           trend = 0;
           nextTrend = 1;
           maxLowPrice = lowPrice;

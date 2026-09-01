@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import type { AlertDef } from "@axiom/alerts";
 import {
+  armerHeartbeatWs,
   fusionnerSymbolesLiq,
+  HEARTBEAT_BYBIT,
+  HEARTBEAT_OKX,
   okxInstIdDaemon,
   parseBybitLiqDaemon,
   parseOkxLiqDaemon,
@@ -118,5 +121,35 @@ describe("fusionnerSymbolesLiq", () => {
 
   it("aucune alerte liq-cascade → symboles KV seuls", () => {
     expect(fusionnerSymbolesLiq(["solusdt"], [])).toEqual(["SOLUSDT"]);
+  });
+});
+
+describe("armerHeartbeatWs", () => {
+  it("envoie le payload à chaque période et s'arrête au désarmement", async () => {
+    const envois: string[] = [];
+    const stop = armerHeartbeatWs({ send: (d) => envois.push(d) }, HEARTBEAT_OKX, 5);
+    await new Promise((r) => setTimeout(r, 40));
+    expect(envois.length).toBeGreaterThanOrEqual(3);
+    expect(envois[0]).toBe("ping");
+    stop();
+    const n = envois.length;
+    await new Promise((r) => setTimeout(r, 25));
+    expect(envois.length).toBe(n); // plus aucun envoi après désarmement
+  });
+
+  it("payloads par feed figés ; un send qui jette (WS fermée) est absorbé", async () => {
+    expect(HEARTBEAT_OKX).toBe("ping"); // OKX attend la CHAÎNE « ping » (coupe à 30 s sinon)
+    expect(JSON.parse(HEARTBEAT_BYBIT)).toEqual({ op: "ping" }); // Bybit v5 : {"op":"ping"}
+    const stop = armerHeartbeatWs(
+      {
+        send: () => {
+          throw new Error("WS fermée");
+        },
+      },
+      HEARTBEAT_BYBIT,
+      5,
+    );
+    await new Promise((r) => setTimeout(r, 15)); // aucune exception ne doit fuir
+    stop();
   });
 });

@@ -3,9 +3,11 @@ import { Database } from "bun:sqlite";
 import {
   adresseDepuisTopic,
   assurerTableWhales,
+  ecrireDernierBloc,
   fenetreBlocs,
   insererMouvements,
   LIMITE_MAX,
+  lireDernierBloc,
   montantNetBtc,
   mouvementsRecents,
   nombreHex,
@@ -13,8 +15,11 @@ import {
   parseLogsEtherscan,
   parseRequeteWhales,
   parseTxBtc,
+  pollEtherscan,
   purgerMouvements,
   quantiteDepuisData,
+  resultatGetLogs,
+  TOKENS_ETH,
   TOPIC_TRANSFER,
   traiterWhales,
   versMouvementBtc,
@@ -315,5 +320,55 @@ describe("traiterWhales — GET /whales/recent", () => {
     const mauvaise = new URL("http://127.0.0.1:8787/whales/autre");
     const res = traiterWhales(new Request(mauvaise, { method: "GET" }), mauvaise, new Database(":memory:"));
     expect(res.status).toBe(404);
+  });
+});
+
+// ─────────────────────────── Poll Etherscan (fetch injecté, convention traiterHl) ───────────────────────────
+
+/** Stub fetch Etherscan : eth_blockNumber + getLogs par contrat. Journalise les URLs. */
+function stubEth(scenario: {
+  blockNumber: string;
+  parContrat: Record<string, unknown>;
+}): { fetchImpl: typeof fetch; urls: string[] } {
+  const urls: string[] = [];
+  const fetchImpl = (async (entree: RequestInfo | URL) => {
+    const u = String(entree);
+    urls.push(u);
+    if (u.includes("eth_blockNumber")) return new Response(JSON.stringify({ result: scenario.blockNumber }));
+    const contrat = new URL(u).searchParams.get("address") ?? "";
+    return new Response(JSON.stringify(scenario.parContrat[contrat] ?? { status: "1", result: [] }));
+  }) as typeof fetch;
+  return { fetchImpl, urls };
+}
+
+describe("resultatGetLogs", () => {
+  it("laisse passer un tableau (logs ou « No records found ») et jette sur erreur en chaîne", () => {
+    expect(resultatGetLogs({ status: "1", result: [{ x: 1 }] })).toEqual([{ x: 1 }]);
+    expect(resultatGetLogs({ status: "0", message: "No records found", result: [] })).toEqual([]);
+    expect(() => resultatGetLogs({ status: "0", result: "Max rate limit reached" })).toThrow(
+      "Max rate limit reached",
+    );
+    expect(() => resultatGetLogs({ status: "0", message: "NOTOK" })).toThrow("NOTOK");
+    expect(() => resultatGetLogs(null)).toThrow("réponse illisible");
+  });
+});
+
+describe("pollEtherscan — erreurs Etherscan en HTTP 200", () => {
+  it("result en chaîne : curseur NON avancé (fenêtre rejouée), erreur portée en santé", async () => {
+    const d = new Database(":memory:");
+    assurerTableWhales(d);
+    ecrireDernierBloc(d, 90);
+    const usdt = TOKENS_ETH[0]?.contrat ?? "";
+    const { fetchImpl } = stubEth({
+      blockNumber: "0x64", // bloc 100 → fenêtre 91..100
+      parContrat: { [usdt]: { status: "0", result: "Max rate limit reached" } },
+    });
+    await pollEtherscan("cle-test", d, fetchImpl, 0);
+    expect(lireDernierBloc(d)).toBe(90); // AVANT le fix : 100 (fenêtre 91..100 perdue en silence)
+    const url = new URL("http://127.0.0.1:8787/whales/recent");
+    const corps = (await traiterWhales(new Request(url), url, d).json()) as {
+      sante: { erreurEth: string | null };
+    };
+    expect(corps.sante.erreurEth).toContain("Max rate limit reached");
   });
 });

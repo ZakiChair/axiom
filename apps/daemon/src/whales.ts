@@ -352,6 +352,22 @@ export function parseLogsEtherscan(json: unknown, decimales: number): LogTransfe
 }
 
 /**
+ * Extrait le tableau `result` d'une réponse getLogs en JETANT sur erreur Etherscan :
+ * l'API renvoie ses erreurs en HTTP 200 avec `status:"0"` et `result` en CHAÎNE
+ * (« Max rate limit reached », « Query timeout », clé invalide) — à ne PAS confondre
+ * avec « No records found » (status "0" mais `result: []`, cas légitime). Sans cette
+ * garde, une erreur passait pour « zéro log » et le curseur sautait la fenêtre.
+ * Fonction PURE.
+ */
+export function resultatGetLogs(json: unknown): unknown[] {
+  const j = (json ?? {}) as { message?: unknown; result?: unknown };
+  if (Array.isArray(j.result)) return j.result;
+  const detail =
+    typeof j.result === "string" ? j.result : typeof j.message === "string" ? j.message : "réponse illisible";
+  throw new Error(`getLogs erreur Etherscan : ${detail}`);
+}
+
+/**
  * Projette un log Transfer en mouvement persistable SI son notionnel atteint le seuil
  * (peg 1 $ assumé pour les stables surveillés). Fonction PURE.
  */
@@ -563,14 +579,21 @@ function pause(ms: number): Promise<void> {
 
 /**
  * Un poll Etherscan : n° de bloc courant, puis getLogs Transfer par token sur la
- * fenêtre `fenetreBlocs`, filtrage au seuil et persistance. Échec d'UN appel → poll
- * abandonné SANS avancer le curseur de bloc (rejouera au prochain tick).
+ * fenêtre `fenetreBlocs`, filtrage au seuil et persistance. Échec d'UN appel — HTTP
+ * non-2xx OU erreur Etherscan en HTTP 200 (cf. resultatGetLogs) → poll abandonné SANS
+ * avancer le curseur de bloc (rejouera au prochain tick). `dInjecte`/`fetchImpl`/
+ * `pauseMs` pour les tests (convention traiterHl).
  */
-async function pollEtherscan(cle: string): Promise<void> {
-  const d = db();
-  const pauseMs = 250; // clé garantie par l'appelant (sans clé, le poll n'est pas démarré)
+export async function pollEtherscan(
+  cle: string,
+  dInjecte?: Database,
+  fetchImpl: typeof fetch = fetch,
+  pauseMs = 250, // clé garantie par l'appelant (sans clé, le poll n'est pas démarré)
+): Promise<void> {
+  const d = dInjecte ?? db();
+  if (dInjecte !== undefined) assurerTableWhales(dInjecte);
   try {
-    const resBloc = await fetch(urlEtherscan({ module: "proxy", action: "eth_blockNumber" }, cle), {
+    const resBloc = await fetchImpl(urlEtherscan({ module: "proxy", action: "eth_blockNumber" }, cle), {
       signal: AbortSignal.timeout(15_000),
     });
     if (!resBloc.ok) throw new Error(`eth_blockNumber HTTP ${resBloc.status}`);
@@ -589,7 +612,7 @@ async function pollEtherscan(cle: string): Promise<void> {
     const lot: MouvementWhale[] = [];
     for (const token of TOKENS_ETH) {
       await pause(pauseMs);
-      const res = await fetch(
+      const res = await fetchImpl(
         urlEtherscan(
           {
             module: "logs",
@@ -605,6 +628,9 @@ async function pollEtherscan(cle: string): Promise<void> {
       );
       if (!res.ok) throw new Error(`getLogs ${token.asset} HTTP ${res.status}`);
       const json = (await res.json()) as unknown;
+      // Erreur Etherscan en HTTP 200 : jeter AVANT parse — le catch n'avance pas le
+      // curseur (la fenêtre sera rejouée au prochain tick) et remplit sante.erreurEth.
+      resultatGetLogs(json);
       for (const log of parseLogsEtherscan(json, token.decimales)) {
         const mouvement = versMouvementErc20(log, token.asset, SEUIL_COLLECTE_USD);
         if (mouvement !== null) lot.push(mouvement);

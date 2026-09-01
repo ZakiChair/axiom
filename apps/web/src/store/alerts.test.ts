@@ -4,12 +4,13 @@
  * `localStorage` est absent → la persistance interne est un no-op silencieux (couvert
  * par les try/catch du store), ce qui n'affecte pas la logique testée ici.
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AlertDef, Declenchement } from "@axiom/alerts";
 import {
   alertePrixAuNiveau,
   alertsStore,
   arrondirNiveauAlerte,
+  lireInitial,
   type NouvelleAlerte,
 } from "./alerts";
 
@@ -129,5 +130,54 @@ describe("journal", () => {
     expect(j[0]?.ts).toBe(104); // plus récent en tête
     alertsStore.getState().viderJournal();
     expect(alertsStore.getState().journal).toHaveLength(0);
+  });
+});
+
+describe("lireInitial — hydratation par élément (un item corrompu est écarté, pas le boot cassé)", () => {
+  beforeEach(() => {
+    const data = new Map<string, string>();
+    const mock: Storage = {
+      getItem: (k) => data.get(k) ?? null,
+      setItem: (k, v) => void data.set(k, v),
+      removeItem: (k) => void data.delete(k),
+      clear: () => data.clear(),
+      key: () => null,
+      get length() {
+        return data.size;
+      },
+    };
+    (globalThis as { localStorage?: Storage }).localStorage = mock;
+  });
+
+  afterEach(() => {
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
+  it("écarte les defs null / sans condition et conserve les valides", () => {
+    // {"id":"x","actif":true} sans condition : resyncTicker ferait `d.condition.type`
+    // → TypeError dans le useEffect de App → ErrorBoundary racine à CHAQUE boot.
+    localStorage.setItem(
+      "axiom:alerts:v1",
+      JSON.stringify({
+        defs: [
+          null,
+          { id: "x", actif: true },
+          {
+            id: "ok",
+            symbol: "BTCUSDT",
+            source: "binance",
+            condition: { type: "prix-croise", niveau: 100, sens: "hausse" },
+            actif: true,
+            declenchements: [],
+          },
+        ],
+        journal: [null, 42, { alertId: "ok", ts: 1, valeur: 2, message: "m" }],
+      })
+    );
+
+    const etat = lireInitial();
+
+    expect(etat.defs.map((d) => d.id)).toEqual(["ok"]);
+    expect(etat.journal).toHaveLength(1);
   });
 });

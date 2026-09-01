@@ -190,4 +190,27 @@ describe("presetAlertsStore", () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ foo: 1 }));
     expect(lirePresetAlerts()).toEqual([]);
   });
+
+  it("lirePresetAlerts écarte un item sans champs requis au lieu de le charger (resyncPreset lit a.actif/a.periodeMin)", () => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([
+        null,
+        { id: "corrompu" }, // sans periodeMin/actif/conditions
+        {
+          id: "ok",
+          presetId: "p1",
+          nom: "Momentum",
+          tf: "1h",
+          baseConditions: [],
+          indicatorConditions: [],
+          periodeMin: 15,
+          actif: true,
+          creeTs: 1,
+        },
+      ])
+    );
+
+    expect(lirePresetAlerts().map((a) => a.id)).toEqual(["ok"]);
+  });
 });

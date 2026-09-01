@@ -33,6 +33,8 @@ import {
   tradeJournalDepuisCloture,
   type EtatPaper,
   type OrdrePaper,
+  type PositionPaper,
+  type ExecutionPaper,
 } from "../data/paper";
 import { subscribeTickers, type TickerUpdate } from "../data/ticker";
 import { expyStore } from "./expy";
@@ -86,17 +88,64 @@ interface PaperPersiste {
   executions: EtatPaper["executions"];
 }
 
+// ─── Gardes de forme des items persistés (patron estTradeValide d'expy.ts) ───
+// Un item corrompu (ordre null, position sans symbol…) ferait planter symbolesActifs
+// (`o.symbol`) au démarrage du moteur (App.tsx) : il est écarté à la lecture.
+const estNombre = (x: unknown): boolean => typeof x === "number" && Number.isFinite(x);
+const estNombreOuNull = (x: unknown): boolean => x === null || estNombre(x);
+
+function estOrdreValide(v: unknown): v is OrdrePaper {
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Record<string, unknown>;
+  if (typeof o.id !== "string" || typeof o.symbol !== "string") return false;
+  if (o.direction !== "long" && o.direction !== "short") return false;
+  if (o.type !== "market" && o.type !== "limit" && o.type !== "stop") return false;
+  if (!estNombreOuNull(o.prixLimite) || !estNombreOuNull(o.prixStop)) return false;
+  if (!estNombre(o.taille) || !estNombre(o.creeTs)) return false;
+  return estNombreOuNull(o.tp) && estNombreOuNull(o.sl);
+}
+
+function estPositionValide(v: unknown): v is PositionPaper {
+  if (typeof v !== "object" || v === null) return false;
+  const p = v as Record<string, unknown>;
+  if (typeof p.id !== "string" || typeof p.symbol !== "string") return false;
+  if (p.direction !== "long" && p.direction !== "short") return false;
+  if (!estNombre(p.taille) || !estNombre(p.prixEntree) || !estNombre(p.ouvertTs)) return false;
+  return estNombreOuNull(p.tp) && estNombreOuNull(p.sl);
+}
+
+function estExecutionValide(v: unknown): v is ExecutionPaper {
+  if (typeof v !== "object" || v === null) return false;
+  const e = v as Record<string, unknown>;
+  if (typeof e.symbol !== "string") return false;
+  if (e.direction !== "long" && e.direction !== "short") return false;
+  if (!["ouverture", "renfort", "tp", "sl", "cloture-manuelle"].includes(e.genre as string)) return false;
+  if (!estNombre(e.ts) || !estNombre(e.taille) || !estNombre(e.prix) || !estNombre(e.fraisUsd)) return false;
+  return estNombreOuNull(e.pnlUsd);
+}
+
 /** Lecture tolérante de l'état persisté (localStorage absent / JSON corrompu → défauts). */
 export function chargerPaper(): PaperPersiste {
   try {
     const raw = localStorage.getItem(PAPER_STORAGE_KEY);
     if (!raw) return { solde: SOLDE_INITIAL, ordres: [], positions: [], executions: [] };
     const p = JSON.parse(raw) as Partial<PaperPersiste>;
+    const ordresBruts = Array.isArray(p.ordres) ? p.ordres : [];
+    const positionsBrutes = Array.isArray(p.positions) ? p.positions : [];
+    const executionsBrutes = Array.isArray(p.executions) ? p.executions : [];
+    const ordres = ordresBruts.filter(estOrdreValide);
+    const positions = positionsBrutes.filter(estPositionValide);
+    const executions = executionsBrutes.filter(estExecutionValide);
+    const ecartes =
+      ordresBruts.length - ordres.length +
+      (positionsBrutes.length - positions.length) +
+      (executionsBrutes.length - executions.length);
+    if (ecartes > 0) console.warn(`[AXIOM] paper : ${ecartes} item(s) corrompu(s) écarté(s) à l'hydratation`);
     return {
       solde: typeof p.solde === "number" && Number.isFinite(p.solde) ? p.solde : SOLDE_INITIAL,
-      ordres: Array.isArray(p.ordres) ? p.ordres : [],
-      positions: Array.isArray(p.positions) ? p.positions : [],
-      executions: Array.isArray(p.executions) ? p.executions : [],
+      ordres,
+      positions,
+      executions,
     };
   } catch {
     return { solde: SOLDE_INITIAL, ordres: [], positions: [], executions: [] };

@@ -85,6 +85,24 @@ function genId(): string {
   return `palert:${suffix}`;
 }
 
+/** Garde de forme d'une alerte persistée (patron estTradeValide d'expy.ts) : un item
+ * corrompu est écarté à la lecture — `resyncPreset` lit `a.actif`/`a.periodeMin` sans filet. */
+function estAlertePresetValide(v: unknown): v is AlertePreset {
+  if (typeof v !== "object" || v === null) return false;
+  const a = v as Record<string, unknown>;
+  return (
+    typeof a.id === "string" &&
+    typeof a.presetId === "string" &&
+    typeof a.nom === "string" &&
+    typeof a.tf === "string" &&
+    Array.isArray(a.baseConditions) &&
+    Array.isArray(a.indicatorConditions) &&
+    (a.periodeMin === 15 || a.periodeMin === 60) &&
+    typeof a.actif === "boolean" &&
+    typeof a.creeTs === "number"
+  );
+}
+
 /**
  * Lecture TOLÉRANTE des alertes persistées (localStorage absent / JSON corrompu → []).
  * Exportée pour le test de persistance (round-trip + résilience à la corruption).
@@ -94,7 +112,11 @@ export function lirePresetAlerts(): AlertePreset[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as AlertePreset[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    const alertes = parsed.filter(estAlertePresetValide);
+    const ecartes = parsed.length - alertes.length;
+    if (ecartes > 0) console.warn(`[AXIOM] presetAlerts : ${ecartes} item(s) corrompu(s) écarté(s) à l'hydratation`);
+    return alertes;
   } catch {
     return [];
   }

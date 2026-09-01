@@ -247,4 +247,28 @@ describe("persistance", () => {
     storage.setItem(PAPER_STORAGE_KEY, "{pas du json");
     expect(chargerPaper().solde).toBe(SOLDE_INITIAL);
   });
+
+  it("chargerPaper écarte les ordres/positions/exécutions corrompus item par item (boot préservé)", () => {
+    // Un ordre null ferait planter symbolesActifs (`o.symbol`) au démarrage du moteur.
+    localStorage.setItem(
+      PAPER_STORAGE_KEY,
+      JSON.stringify({
+        solde: 50_000,
+        ordres: [
+          null,
+          { id: "o1" }, // sans symbol/direction/taille
+          { id: "ok", symbol: "BTCUSDT", direction: "long", type: "limit", prixLimite: 10, prixStop: null, taille: 1, tp: null, sl: null, creeTs: 1 },
+        ],
+        positions: [{ pas: "une position" }],
+        executions: [null],
+      })
+    );
+
+    const relu = chargerPaper();
+
+    expect(relu.solde).toBe(50_000);
+    expect(relu.ordres.map((o) => o.id)).toEqual(["ok"]);
+    expect(relu.positions).toEqual([]);
+    expect(relu.executions).toEqual([]);
+  });
 });

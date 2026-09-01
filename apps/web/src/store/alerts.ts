@@ -101,16 +101,48 @@ interface Persiste {
   journal: Declenchement[];
 }
 
-/** Lecture tolérante de l'état persisté (localStorage absent / JSON corrompu => défauts). */
-function lireInitial(): Persiste {
+/** Garde de forme d'une def persistée (patron `estTradeValide` d'expy.ts) : champs
+ * requis + types. Un item corrompu est ÉCARTÉ à l'hydratation — sans cette garde,
+ * `demarrerAlertes` (App.tsx, useEffect sans try/catch) lit `d.actif && d.condition.type`
+ * → TypeError → ErrorBoundary racine à CHAQUE boot tant que la clé n'est pas purgée. */
+function estAlertDefValide(v: unknown): v is AlertDef {
+  if (typeof v !== "object" || v === null) return false;
+  const d = v as Record<string, unknown>;
+  if (typeof d.id !== "string" || d.id.length === 0) return false;
+  if (typeof d.symbol !== "string" || typeof d.source !== "string") return false;
+  if (typeof d.actif !== "boolean") return false;
+  if (!d.condition || typeof d.condition !== "object") return false;
+  if (typeof (d.condition as Record<string, unknown>).type !== "string") return false;
+  if (!Array.isArray(d.declenchements) || !d.declenchements.every((t) => typeof t === "number")) return false;
+  return true;
+}
+
+/** Garde de forme d'une entrée de journal persistée. */
+function estDeclenchementValide(v: unknown): v is Declenchement {
+  if (typeof v !== "object" || v === null) return false;
+  const d = v as Record<string, unknown>;
+  return (
+    typeof d.alertId === "string" &&
+    typeof d.ts === "number" &&
+    typeof d.valeur === "number" &&
+    typeof d.message === "string"
+  );
+}
+
+/** Lecture tolérante de l'état persisté, validée PAR ÉLÉMENT (localStorage absent /
+ * JSON corrompu / item invalide => écarté). Exportée pour les tests. */
+export function lireInitial(): Persiste {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { defs: [], journal: [] };
     const parsed = JSON.parse(raw) as Partial<Persiste>;
-    return {
-      defs: Array.isArray(parsed.defs) ? parsed.defs : [],
-      journal: Array.isArray(parsed.journal) ? parsed.journal : [],
-    };
+    const defsBrutes = Array.isArray(parsed.defs) ? parsed.defs : [];
+    const journalBrut = Array.isArray(parsed.journal) ? parsed.journal : [];
+    const defs = defsBrutes.filter(estAlertDefValide);
+    const journal = journalBrut.filter(estDeclenchementValide);
+    const ecartes = defsBrutes.length - defs.length + (journalBrut.length - journal.length);
+    if (ecartes > 0) console.warn(`[AXIOM] alerts : ${ecartes} item(s) corrompu(s) écarté(s) à l'hydratation`);
+    return { defs, journal };
   } catch {
     return { defs: [], journal: [] };
   }

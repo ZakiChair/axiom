@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { AlertDef } from "@axiom/alerts";
 import {
-  armerHeartbeatWs,
   creerRegistreCtVal,
   fusionnerSymbolesLiq,
   HEARTBEAT_BYBIT,
@@ -126,33 +125,13 @@ describe("fusionnerSymbolesLiq", () => {
   });
 });
 
-describe("armerHeartbeatWs", () => {
-  it("envoie le payload à chaque période et s'arrête au désarmement", async () => {
-    const envois: string[] = [];
-    const stop = armerHeartbeatWs({ send: (d) => envois.push(d) }, HEARTBEAT_OKX, 5);
-    await new Promise((r) => setTimeout(r, 40));
-    expect(envois.length).toBeGreaterThanOrEqual(3);
-    expect(envois[0]).toBe("ping");
-    stop();
-    const n = envois.length;
-    await new Promise((r) => setTimeout(r, 25));
-    expect(envois.length).toBe(n); // plus aucun envoi après désarmement
-  });
-
-  it("payloads par feed figés ; un send qui jette (WS fermée) est absorbé", async () => {
+// Le mécanisme d'armement (`armerHeartbeatWs`) vit désormais dans wsLoop.ts (E.3 : les
+// DEUX sites d'appel liqFeed passent par la boucle PARTAGÉE, cf. wsLoop.test.ts pour le
+// comportement d'armement/désarmement). Ne reste ici que le contrat de PAYLOAD par feed.
+describe("constantes heartbeat", () => {
+  it("payloads par feed figés (OKX chaîne « ping », Bybit {op:\"ping\"})", () => {
     expect(HEARTBEAT_OKX).toBe("ping"); // OKX attend la CHAÎNE « ping » (coupe à 30 s sinon)
     expect(JSON.parse(HEARTBEAT_BYBIT)).toEqual({ op: "ping" }); // Bybit v5 : {"op":"ping"}
-    const stop = armerHeartbeatWs(
-      {
-        send: () => {
-          throw new Error("WS fermée");
-        },
-      },
-      HEARTBEAT_BYBIT,
-      5,
-    );
-    await new Promise((r) => setTimeout(r, 15)); // aucune exception ne doit fuir
-    stop();
   });
 });
 

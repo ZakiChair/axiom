@@ -20,11 +20,12 @@
  * daemon n'évalue les alertes onglet fermé que pour `source === "binance"`. Les
  * autres restent évaluées par le runtime du front lorsqu'il est ouvert (cf. mission).
  *
- * La reconnexion réutilise le PATTERN de apps/web/src/data/wsLoop.ts (backoff
- * exponentiel plafonné + watchdog de staleness), recopié ici et ADAPTÉ : le daemon
- * n'a pas de `healthStore`, donc aucune remontée d'état — juste des logs.
+ * La reconnexion passe par la boucle PARTAGÉE du daemon (wsLoop.ts : backoff
+ * exponentiel plafonné + watchdog de staleness), héritée du pattern de
+ * apps/web/src/data/wsLoop.ts sans healthStore (aucune remontée d'état).
  */
 import type { Candle } from "@axiom/types";
+import { connecterBoucleWs } from "./wsLoop";
 
 const REST_KLINES_URL = "https://api.binance.com/api/v3/klines";
 /** Snapshot funding USDⓈ-M (tous symboles si `symbol` absent). */
@@ -124,108 +125,6 @@ export function construireUrlFlux(symboles: readonly string[]): string | null {
     .map((s) => `${s.toLowerCase()}@miniTicker/${s.toLowerCase()}@kline_1m`)
     .join("/");
   return WS_STREAM_BASE + streams;
-}
-
-// ─────────────────────────── Boucle WS reconnectante (pattern wsLoop.ts) ───────────────────────────
-
-const DELAI_STALE_MS = 60_000;
-const DELAI_STABLE_RESET_MS = 10_000;
-const BACKOFF_MAX_MS = 30_000;
-const PERIODE_WATCHDOG_MS = 15_000;
-
-/**
- * Ouvre une WebSocket reconnectante (backoff exponentiel 1s→30s + watchdog de
- * staleness). `onMessage` renvoie `true` si c'était un message de DONNÉES (réarme le
- * backoff). Renvoie une fonction d'arrêt. Copie ADAPTÉE de wsLoop.ts (sans healthStore).
- */
-function connecterBoucleWs(url: string, onMessage: (data: string) => boolean | void): () => void {
-  let ws: WebSocket | null = null;
-  let fermeParUtilisateur = false;
-  let essai = 0;
-  let dernierMessageTs = 0;
-  let minuteurReconnexion: ReturnType<typeof setTimeout> | null = null;
-  let minuteurStable: ReturnType<typeof setTimeout> | null = null;
-  let minuteurWatchdog: ReturnType<typeof setInterval> | null = null;
-
-  const nettoyerStable = (): void => {
-    if (minuteurStable) {
-      clearTimeout(minuteurStable);
-      minuteurStable = null;
-    }
-  };
-  const nettoyerWatchdog = (): void => {
-    if (minuteurWatchdog) {
-      clearInterval(minuteurWatchdog);
-      minuteurWatchdog = null;
-    }
-  };
-
-  const armerWatchdog = (): void => {
-    nettoyerWatchdog();
-    minuteurWatchdog = setInterval(() => {
-      if (Date.now() - dernierMessageTs <= DELAI_STALE_MS) return;
-      // Connexion « zombie » (aucun message depuis DELAI_STALE_MS) : on la ferme de
-      // force ; `onclose` (fermeParUtilisateur=false) relance la reconnexion.
-      try {
-        ws?.close();
-      } catch {
-        /* fermeture best-effort */
-      }
-    }, Math.min(DELAI_STALE_MS, PERIODE_WATCHDOG_MS));
-  };
-
-  const connecter = (): void => {
-    const socket = new WebSocket(url);
-    ws = socket;
-
-    socket.onopen = (): void => {
-      dernierMessageTs = Date.now();
-      // Backoff : AUCUN reset ici (anti-flap). Reset programmé après une connexion
-      // maintenue DELAI_STABLE_RESET_MS (couvre « connecté mais silencieux »).
-      nettoyerStable();
-      minuteurStable = setTimeout(() => {
-        essai = 0;
-      }, DELAI_STABLE_RESET_MS);
-      armerWatchdog();
-    };
-
-    socket.onmessage = (ev: MessageEvent): void => {
-      dernierMessageTs = Date.now(); // tout message = activité watchdog
-      const estDonnee = onMessage(ev.data as string) === true;
-      if (estDonnee) essai = 0; // seul un message de DONNÉES réarme le backoff
-    };
-
-    socket.onerror = (): void => {
-      try {
-        socket.close();
-      } catch {
-        /* best-effort */
-      }
-    };
-
-    socket.onclose = (): void => {
-      nettoyerStable();
-      nettoyerWatchdog();
-      if (fermeParUtilisateur) return;
-      const delai = Math.min(BACKOFF_MAX_MS, 1_000 * 2 ** essai);
-      essai += 1;
-      minuteurReconnexion = setTimeout(connecter, delai);
-    };
-  };
-
-  connecter();
-
-  return () => {
-    fermeParUtilisateur = true;
-    if (minuteurReconnexion) clearTimeout(minuteurReconnexion);
-    nettoyerStable();
-    nettoyerWatchdog();
-    try {
-      ws?.close();
-    } catch {
-      /* best-effort */
-    }
-  };
 }
 
 // ─────────────────────────── Feed ───────────────────────────
@@ -396,7 +295,7 @@ export function creerFeed(o: OptionsFeed): Feed {
     stopWs = null;
     const url = construireUrlFlux(symbolesActuels);
     if (!url) return; // aucun symbole → feed inerte
-    stopWs = connecterBoucleWs(url, dispatch);
+    stopWs = connecterBoucleWs({ url, onMessage: dispatch });
   };
 
   const setSymboles = (symboles: readonly string[]): void => {

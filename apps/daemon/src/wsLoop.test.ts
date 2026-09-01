@@ -10,7 +10,7 @@
  * option que consommera la bascule de liqFeed.ts (Task E.3).
  */
 import { beforeEach, describe, expect, test } from "bun:test";
-import { connecterBoucleWs, PERIODE_HEARTBEAT_WS_MS, type HorlogeWs } from "./wsLoop";
+import { armerHeartbeatWs, connecterBoucleWs, PERIODE_HEARTBEAT_WS_MS, type HorlogeWs } from "./wsLoop";
 
 /** Horloge factice déterministe : file de minuteurs déclenchés par `avancer(ms)`. */
 class HorlogeFactice implements HorlogeWs {
@@ -240,5 +240,39 @@ describe("connecterBoucleWs (daemon)", () => {
       horloge.avancer(120_000);
       expect(derniere().envois).toEqual([]);
     });
+  });
+});
+
+// Tests migrés de liqFeed.test.ts (E.3) : `armerHeartbeatWs` était dupliquée dans
+// liqFeed.ts (lot B.4) et testée en isolation (timers réels) ; la copie a été supprimée
+// au profit de celle-ci (wsLoop.ts), consommée via l'option `heartbeat` de
+// `connecterBoucleWs`. Repris ici avec l'horloge factice (déterministe) plutôt que des
+// timers réels + awaits.
+describe("armerHeartbeatWs (appel direct, hors connecterBoucleWs)", () => {
+  test("envoie le message à l'intervalle configuré et s'arrête au désarmement", () => {
+    const horloge = new HorlogeFactice();
+    const envois: string[] = [];
+    const stop = armerHeartbeatWs({ send: (d) => envois.push(d) }, "ping", 5, horloge);
+    horloge.avancer(16); // 3 échéances : t=5, 10, 15
+    expect(envois).toEqual(["ping", "ping", "ping"]);
+    stop();
+    horloge.avancer(50);
+    expect(envois).toEqual(["ping", "ping", "ping"]); // plus aucun envoi après désarmement
+  });
+
+  test("un send qui jette (WS fermée) est absorbé — repris de liqFeed.ts (lot B.4)", () => {
+    const horloge = new HorlogeFactice();
+    const stop = armerHeartbeatWs(
+      {
+        send: () => {
+          throw new Error("WS fermée");
+        },
+      },
+      "ping",
+      5,
+      horloge,
+    );
+    expect(() => horloge.avancer(15)).not.toThrow(); // aucune exception ne doit fuir
+    stop();
   });
 });

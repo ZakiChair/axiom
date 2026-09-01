@@ -22,9 +22,11 @@
  * les 60 s. Chaque message valide → parseur → `insererLiquidations`. Une purge quotidienne
  * borne la taille du .db (rétention 30 j).
  *
- * La reconnexion réutilise le PATTERN de marketFeed.ts (backoff exponentiel plafonné
- * 1s→30s + watchdog de staleness), recopié ici et ADAPTÉ : pas de healthStore (logs
- * seulement) et un `onOpen` pour envoyer la souscription à l'ouverture.
+ * La reconnexion passe par la boucle PARTAGÉE du daemon (wsLoop.ts : backoff exponentiel
+ * plafonné 1s→30s + watchdog de staleness — ici 10 min, liquidations sparses), avec un
+ * `onOpen` pour envoyer la souscription à l'ouverture et un `heartbeat` applicatif
+ * (HEARTBEAT_BYBIT/HEARTBEAT_OKX, ci-dessous) pour éviter la coupure des canaux creux.
+ * Pas de healthStore (logs seulement).
  *
  * Parseurs : COPIES ANNOTÉES de `parseBybitLiquidation` / `parseOkxLiquidation` du front
  * (apps/web/src/data/liquidations.ts). L'import cross-package apps/web↔apps/daemon est
@@ -36,6 +38,7 @@ import type { AlertDef } from "@axiom/alerts";
 import { lireDefsKv, symbolesLiqCascadeActifs } from "./alerts";
 import { getDb } from "./db";
 import { insererLiquidations, purgerLiquidations, type LiqFil } from "./liquidations";
+import { connecterBoucleWs } from "./wsLoop";
 
 const WS_URL = "wss://stream.bybit.com/v5/public/linear";
 /** Préfixe de topic Bybit (souscription + routage des messages). */
@@ -245,158 +248,12 @@ function ingererMessage(data: string): boolean {
   return true;
 }
 
-// ─────────────────────────── Boucle WS reconnectante (pattern marketFeed.ts) ───────────────────────────
-
 /** Staleness large : les liquidations sont sparses par nature (cf. front liquidations.ts). */
 const DELAI_STALE_MS = 10 * 60_000;
-const DELAI_STABLE_RESET_MS = 10_000;
-const BACKOFF_MAX_MS = 30_000;
-const PERIODE_WATCHDOG_MS = 15_000;
 
-/** Cadence des pings applicatifs (OKX coupe toute WS silencieuse à 30 s ; Bybit v5 demande ~20 s). */
-export const PERIODE_HEARTBEAT_WS_MS = 20_000;
 /** Charges utiles de heartbeat PAR FEED (protocoles distincts, vérifiés en réel). */
 export const HEARTBEAT_BYBIT = JSON.stringify({ op: "ping" });
 export const HEARTBEAT_OKX = "ping";
-
-/**
- * Arme l'envoi périodique d'un heartbeat applicatif sur une WS : les canaux de
- * liquidations sont creux par nature — sans trafic client, les serveurs ferment la
- * connexion en boucle (cycle fermeture/backoff/re-souscription, liquidations perdues
- * dans les fenêtres de reconnexion). Envoi best-effort (une WS fermée entre deux ticks
- * ne jette pas : `onclose` gère la reconnexion). Renvoie la fonction de désarmement.
- */
-export function armerHeartbeatWs(
-  ws: { send: (data: string) => void },
-  payload: string,
-  periodeMs: number = PERIODE_HEARTBEAT_WS_MS,
-): () => void {
-  const minuteur = setInterval(() => {
-    try {
-      ws.send(payload);
-    } catch {
-      /* WS fermée entre deux ticks : le onclose relance la reconnexion */
-    }
-  }, periodeMs);
-  return () => clearInterval(minuteur);
-}
-
-/**
- * Ouvre une WebSocket reconnectante (backoff exponentiel 1s→30s + watchdog de
- * staleness). `onOpen` envoie la souscription à l'ouverture ; `onMessage` renvoie `true`
- * pour un message de DONNÉES (réarme le backoff). Renvoie une fonction d'arrêt. Copie
- * ADAPTÉE de marketFeed.ts (sans healthStore, avec `onOpen`).
- */
-function connecterBoucleWs(
-  url: string,
-  onOpen: (ws: WebSocket) => void,
-  onMessage: (data: string) => boolean | void,
-  heartbeat?: string,
-): () => void {
-  let ws: WebSocket | null = null;
-  let fermeParUtilisateur = false;
-  let essai = 0;
-  let dernierMessageTs = 0;
-  let minuteurReconnexion: ReturnType<typeof setTimeout> | null = null;
-  let minuteurStable: ReturnType<typeof setTimeout> | null = null;
-  let minuteurWatchdog: ReturnType<typeof setInterval> | null = null;
-  let desarmerHeartbeat: (() => void) | null = null;
-
-  const nettoyerStable = (): void => {
-    if (minuteurStable) {
-      clearTimeout(minuteurStable);
-      minuteurStable = null;
-    }
-  };
-  const nettoyerWatchdog = (): void => {
-    if (minuteurWatchdog) {
-      clearInterval(minuteurWatchdog);
-      minuteurWatchdog = null;
-    }
-  };
-  const nettoyerHeartbeat = (): void => {
-    if (desarmerHeartbeat) {
-      desarmerHeartbeat();
-      desarmerHeartbeat = null;
-    }
-  };
-
-  const armerWatchdog = (): void => {
-    nettoyerWatchdog();
-    minuteurWatchdog = setInterval(() => {
-      if (Date.now() - dernierMessageTs <= DELAI_STALE_MS) return;
-      // Connexion « zombie » (aucun message depuis DELAI_STALE_MS) : on la ferme de
-      // force ; `onclose` (fermeParUtilisateur=false) relance la reconnexion.
-      try {
-        ws?.close();
-      } catch {
-        /* fermeture best-effort */
-      }
-    }, Math.min(DELAI_STALE_MS, PERIODE_WATCHDOG_MS));
-  };
-
-  const connecter = (): void => {
-    const socket = new WebSocket(url);
-    ws = socket;
-
-    socket.onopen = (): void => {
-      dernierMessageTs = Date.now();
-      onOpen(socket);
-      // Backoff : AUCUN reset ici (anti-flap). Reset programmé après une connexion
-      // maintenue DELAI_STABLE_RESET_MS (couvre « connecté mais silencieux »).
-      nettoyerStable();
-      minuteurStable = setTimeout(() => {
-        essai = 0;
-      }, DELAI_STABLE_RESET_MS);
-      armerWatchdog();
-      // Heartbeat applicatif par feed (chaîne « ping » OKX / {"op":"ping"} Bybit),
-      // armé à CHAQUE ouverture, désarmé à la fermeture.
-      if (heartbeat !== undefined) {
-        nettoyerHeartbeat();
-        desarmerHeartbeat = armerHeartbeatWs(socket, heartbeat);
-      }
-    };
-
-    socket.onmessage = (ev: MessageEvent): void => {
-      dernierMessageTs = Date.now(); // tout message = activité watchdog
-      const estDonnee = onMessage(ev.data as string) === true;
-      if (estDonnee) essai = 0; // seul un message de DONNÉES réarme le backoff
-    };
-
-    socket.onerror = (): void => {
-      try {
-        socket.close();
-      } catch {
-        /* best-effort */
-      }
-    };
-
-    socket.onclose = (): void => {
-      nettoyerHeartbeat();
-      nettoyerStable();
-      nettoyerWatchdog();
-      if (fermeParUtilisateur) return;
-      const delai = Math.min(BACKOFF_MAX_MS, 1_000 * 2 ** essai);
-      essai += 1;
-      minuteurReconnexion = setTimeout(connecter, delai);
-    };
-  };
-
-  connecter();
-
-  return () => {
-    fermeParUtilisateur = true;
-    if (minuteurReconnexion) clearTimeout(minuteurReconnexion);
-    nettoyerHeartbeat();
-    nettoyerStable();
-    nettoyerWatchdog();
-    try {
-      ws?.close();
-    } catch {
-      /* best-effort */
-    }
-  };
-}
 
 // ─────────────────────────── Feed ───────────────────────────
 
@@ -424,12 +281,13 @@ export function creerFeedLiquidations(): FeedLiquidations {
     stopWs = null;
     if (symbolesActuels.length === 0) return; // aucun symbole → feed inerte
     const args = symbolesActuels.map((s) => `${TOPIC_PREFIXE}${s}`);
-    stopWs = connecterBoucleWs(
-      WS_URL,
-      (ws) => ws.send(JSON.stringify({ op: "subscribe", args })),
-      ingererMessage,
-      HEARTBEAT_BYBIT,
-    );
+    stopWs = connecterBoucleWs({
+      url: WS_URL,
+      onOpen: (ws) => ws.send(JSON.stringify({ op: "subscribe", args })),
+      onMessage: ingererMessage,
+      staleMs: DELAI_STALE_MS,
+      heartbeat: { message: HEARTBEAT_BYBIT },
+    });
   };
 
   const setSymboles = (symboles: readonly string[]): void => {
@@ -574,7 +432,13 @@ export function creerFeedLiquidationsOkx(): FeedLiquidations {
     void registreCtVal.charger(mapInst.keys(), false); // charge les ctVal manquants pour les nouveaux instId
     if (stopWs === null) {
       const sub = JSON.stringify({ op: "subscribe", args: [{ channel: OKX_CANAL_LIQ, instType: "SWAP" }] });
-      stopWs = connecterBoucleWs(OKX_WS_URL, (ws) => ws.send(sub), ingererMessageOkx, HEARTBEAT_OKX);
+      stopWs = connecterBoucleWs({
+        url: OKX_WS_URL,
+        onOpen: (ws) => ws.send(sub),
+        onMessage: ingererMessageOkx,
+        staleMs: DELAI_STALE_MS,
+        heartbeat: { message: HEARTBEAT_OKX },
+      });
     }
   };
 

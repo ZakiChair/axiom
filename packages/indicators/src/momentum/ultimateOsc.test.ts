@@ -58,4 +58,17 @@ describe("Ultimate Oscillator", () => {
       expect(out[i]).toBeCloseTo(100, 9);
     }
   });
+
+  it("longueur fractionnaire quantifiée : slow=27.5 -> arrondi 28, série non vide", () => {
+    const candles: Candle[] = [];
+    for (let i = 0; i < 40; i++) {
+      const base = 100 + Math.sin(i * 0.7) * 8;
+      candles.push(candle(i, base + 2, base - 2, base + Math.cos(i) * 1.5));
+    }
+    const frac = computeIndicator(ultimateOsc, candles, { fast: 7, mid: 14, slow: 27.5 }).series.uo;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(
+      computeIndicator(ultimateOsc, candles, { fast: 7, mid: 14, slow: 28 }).series.uo
+    );
+  });
 });

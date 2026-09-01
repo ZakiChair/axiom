@@ -139,4 +139,11 @@ describe("ATR Régime (percentile roulant)", () => {
     expect(out[3]).toBeUndefined();
     expect(out[4]).toBeUndefined();
   });
+
+  it("longueur fractionnaire quantifiée : lookback=4.5 -> arrondi 5, série non vide", () => {
+    const candles = candlesFromCloses([100, 101, 103, 106, 110, 115, 121, 128, 136]);
+    const frac = atrRegime.calc(candles, { period: 2, lookback: 4.5 }, baseCtx).series.pct;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(atrRegime.calc(candles, { period: 2, lookback: 5 }, baseCtx).series.pct);
+  });
 });

@@ -55,4 +55,19 @@ describe("MFI (Money Flow Index)", () => {
     expect(out[3]).toBe(100);
     expect(out[5]).toBe(100);
   });
+
+  it("longueur fractionnaire quantifiée : length=2.5 -> arrondi 3, série non vide", () => {
+    const candles: Candle[] = [
+      candle(0, 11, 9, 10, 100),
+      candle(1, 12, 10, 11, 120),
+      candle(2, 11, 9, 10, 90),
+      candle(3, 13, 11, 12, 150),
+      candle(4, 14, 12, 13, 130),
+      candle(5, 13, 11, 12, 110),
+      candle(6, 15, 13, 14, 160),
+    ];
+    const frac = computeIndicator(mfi, candles, { length: 2.5 }).series.mfi;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(computeIndicator(mfi, candles, { length: 3 }).series.mfi);
+  });
 });

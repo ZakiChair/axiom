@@ -28,6 +28,11 @@ export function detecterPivots(
   gauche: number,
   droite: number,
 ): Pivot[] {
+  // Quantifie : `i = gauche`/`i - gauche` fractionnaires n'atteignent aucun
+  // index entier (protège aussi les appelants utils-fabrique-divergence.ts et
+  // strategy/stratDivergenceRsi.ts, qui ne quantifient pas eux-mêmes).
+  gauche = Math.round(gauche);
+  droite = Math.round(droite);
   const out: Pivot[] = [];
   const n = valeurs.length;
   for (let i = gauche; i < n - droite; i++) {

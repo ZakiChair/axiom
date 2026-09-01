@@ -25,7 +25,8 @@ export const roc: IndicatorDef = {
   outputs: [{ key: "roc", name: "ROC", style: "line" }],
 
   calc(candles, params) {
-    const length = Number(params.length ?? 9);
+    // Quantifie : close[i - length] avec length fractionnaire = série vide.
+    const length = Math.round(Number(params.length ?? 9));
     const close = closeOf(candles);
     const n = close.length;
 

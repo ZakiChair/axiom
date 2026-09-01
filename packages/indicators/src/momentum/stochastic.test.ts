@@ -86,4 +86,22 @@ describe("Stochastic", () => {
       }
     }
   });
+
+  it("longueur fractionnaire quantifiée : dLength=2.5 -> arrondi 3, %D non vide", () => {
+    const candles = candlesFromHLC([
+      [10, 8, 9],
+      [12, 9, 11],
+      [11, 7, 8],
+      [13, 10, 12],
+      [14, 11, 13],
+      [15, 9, 10],
+      [13, 8, 12],
+      [16, 12, 15],
+    ]);
+    const frac = computeIndicator(stochastic, candles, { kLength: 3, dLength: 2.5 }).series.d;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(
+      computeIndicator(stochastic, candles, { kLength: 3, dLength: 3 }).series.d
+    );
+  });
 });

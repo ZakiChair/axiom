@@ -275,6 +275,7 @@ export function change(
   values: Array<number | undefined>,
   n: number = 1
 ): Array<number | undefined> {
+  n = Math.round(n); // fenêtre entière obligatoire (voir sma) — 9e helper, ex. momentum.ts
   const len = values.length;
   const out: Array<number | undefined> = new Array(len).fill(undefined);
   if (n <= 0) return out;
@@ -312,6 +313,16 @@ export function rollingSum(
   }
   return out;
 }
+
+/**
+ * NB conventions de quantification (non unifiées, coexistence assumée) : les
+ * helpers de fenêtre ci-dessus (et les quantifications locales ajoutées dans les
+ * defs à indexation directe, ex. kama/fisher/roc) arrondissent au plus proche
+ * (`Math.round`) ; plusieurs defs plus anciennes (ex. `randomWalk`,
+ * `efficiencyRatio`, `linreg`, `smi`) quantifient déjà en amont via
+ * `Math.floor`, et `clampInt` ci-dessous fait de même. Les deux conventions
+ * cohabitent sans être unifiées (hors périmètre de ce correctif).
+ */
 
 /** Borne un entier de paramètre dans [min, max], repli sur `def` si non fini. */
 export function clampInt(v: unknown, def: number, min: number, max: number): number {

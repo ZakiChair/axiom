@@ -77,4 +77,16 @@ describe("Aroon", () => {
       }
     }
   });
+
+  it("longueur fractionnaire quantifiée : length=13.5 -> arrondi 14, série non vide", () => {
+    const rows: Array<[number, number]> = [];
+    for (let i = 0; i < 40; i++) {
+      const base = 50 + Math.sin(i / 3) * 10;
+      rows.push([base + 1, base - 1]);
+    }
+    const candles = candlesFromHL(rows);
+    const frac = computeIndicator(aroon, candles, { length: 13.5 }).series.up;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(computeIndicator(aroon, candles, { length: 14 }).series.up);
+  });
 });

@@ -68,4 +68,33 @@ describe("Stochastic RSI", () => {
       expect(defined).toBeGreaterThan(0);
     }
   });
+
+  it("longueur fractionnaire quantifiée : stochLength=13.5 -> arrondi 14, série non vide", () => {
+    const frac = computeIndicator(stochRsi, candles, {
+      rsiLength: 14,
+      stochLength: 13.5,
+      kSmooth: 3,
+      dSmooth: 3,
+    }).series.k;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(series.k);
+  });
+
+  it("longueur fractionnaire quantifiée : kSmooth=2.5 -> arrondi 3 (smaOfDefined local), non vide", () => {
+    const frac = computeIndicator(stochRsi, candles, {
+      rsiLength: 14,
+      stochLength: 14,
+      kSmooth: 2.5,
+      dSmooth: 3,
+    }).series.k;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(
+      computeIndicator(stochRsi, candles, {
+        rsiLength: 14,
+        stochLength: 14,
+        kSmooth: 3,
+        dSmooth: 3,
+      }).series.k
+    );
+  });
 });

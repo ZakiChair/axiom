@@ -69,7 +69,8 @@ export const connorsRsi: IndicatorDef = {
   calc(candles, params) {
     const rsiLength = Number(params.rsiLength ?? 3);
     const streakLength = Number(params.streakLength ?? 2);
-    const rankLength = Number(params.rankLength ?? 100);
+    // Quantifie : `i - rankLength` fractionnaire n'atteint aucun index entier.
+    const rankLength = Math.round(Number(params.rankLength ?? 100));
 
     const closes = closeOf(candles);
     const n = closes.length;

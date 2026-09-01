@@ -42,4 +42,19 @@ describe("chandeKrollStop", () => {
     expect(chandeKrollStop.category).toBe("support_resistance");
     expect(chandeKrollStop.outputs).toHaveLength(2);
   });
+
+  it("longueur fractionnaire quantifiée : p=1.5/q=1.5 -> arrondis 2, série non vide", () => {
+    const low = 10;
+    const c: Candle[] = new Array(6).fill(0).map(() => ({
+      time: 0,
+      open: low + 1,
+      high: low + 2,
+      low,
+      close: low + 1,
+      volume: 1,
+    }));
+    const frac = chandeKrollStop.calc(c, { p: 1.5, x: 1, q: 1.5 }, noCtx).series.stopHigh;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(chandeKrollStop.calc(c, { p: 2, x: 1, q: 2 }, noCtx).series.stopHigh);
+  });
 });

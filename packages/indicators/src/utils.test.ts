@@ -8,6 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  change,
   ema,
   rma,
   rollingHighest,
@@ -38,5 +39,11 @@ describe("quantification des longueurs fractionnaires", () => {
     expect(rollingSum(valeurs, 9.5)).toEqual(rollingSum(valeurs, 10));
     expect(rollingHighest(valeurs, 9.5)).toEqual(rollingHighest(valeurs, 10));
     expect(rollingLowest(valeurs, 9.5)).toEqual(rollingLowest(valeurs, 10));
+  });
+
+  it("change(10.5) === change(11) — 9e helper (différence roulante), non vide", () => {
+    const c = change(valeurs, 10.5);
+    expect(c.some((v) => v !== undefined)).toBe(true);
+    expect(c).toEqual(change(valeurs, 11));
   });
 });

@@ -60,4 +60,10 @@ describe("stdErrorBands", () => {
     expect(s2.upper?.[24]).toBeCloseTo(10 + 2 * 24, 6);
     expect(s2.lower?.[24]).toBeCloseTo(10 + 2 * 24, 6);
   });
+
+  it("longueur fractionnaire quantifiée : length=20.5 -> arrondi 21, série non vide", () => {
+    const frac = stdErrorBands.calc(candles, { length: 20.5, mult: 2 }, ctx).series.basis;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(stdErrorBands.calc(candles, { length: 21, mult: 2 }, ctx).series.basis);
+  });
 });

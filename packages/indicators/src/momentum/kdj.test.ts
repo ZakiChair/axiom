@@ -135,4 +135,17 @@ describe("KDJ", () => {
       }
     }
   });
+
+  it("longueur fractionnaire quantifiée : length=2.5 -> arrondi 3, série non vide", () => {
+    const candles = candlesFromValues([5, 5, 5, 10, 5, 5, 5]);
+    const frac = computeIndicator(kdj, candles, {
+      length: 2.5,
+      signalK: 3,
+      signalD: 3,
+    }).series.k;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(
+      computeIndicator(kdj, candles, { length: 3, signalK: 3, signalD: 3 }).series.k
+    );
+  });
 });

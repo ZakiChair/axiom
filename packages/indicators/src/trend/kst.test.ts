@@ -70,4 +70,12 @@ describe("kst", () => {
     const firstSig = sig.findIndex((v) => v !== undefined);
     expect(firstSig).toBeGreaterThan(firstKst);
   });
+
+  it("longueur fractionnaire quantifiée : r1=9.5 -> arrondi 10, série non vide", () => {
+    const closes = Array.from({ length: 120 }, (_, i) => 100 + Math.sin(i / 5) * 10 + i * 0.3);
+    const candles = candlesFromCloses(closes);
+    const frac = kst.calc(candles, { r1: 9.5 }, emptyCtx).series.kst;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(kst.calc(candles, { r1: 10 }, emptyCtx).series.kst);
+  });
 });

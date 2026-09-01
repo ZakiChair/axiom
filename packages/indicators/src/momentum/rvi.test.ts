@@ -69,4 +69,20 @@ describe("RVI (Relative Vigor Index)", () => {
       expect(Number.isFinite(v)).toBe(true);
     }
   });
+
+  it("longueur fractionnaire quantifiée : length=3.5 -> arrondi 4, série non vide", () => {
+    const varied: Candle[] = [12, 11, 13, 14, 12, 15, 14, 16, 15, 17, 16, 18].map(
+      (c, i) => ({
+        time: i * 60_000,
+        open: c - 0.5,
+        high: c + 1,
+        low: c - 1,
+        close: c,
+        volume: 100,
+      })
+    );
+    const frac = computeIndicator(rvi, varied, { length: 3.5 }).series.rvi;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(computeIndicator(rvi, varied, { length: 4 }).series.rvi);
+  });
 });

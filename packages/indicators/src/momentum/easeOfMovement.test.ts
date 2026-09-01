@@ -38,4 +38,22 @@ describe("Ease of Movement (EMV)", () => {
     expect(out[2]).toBeCloseTo(-0.02, 12);
     expect(out[3]).toBeCloseTo(-0.025, 12);
   });
+
+  it("longueur fractionnaire quantifiée : length=2.5 -> arrondi 3, série non vide", () => {
+    const varied: Candle[] = Array.from({ length: 20 }, (_, i) => {
+      const base = 100 + i;
+      const span = 2 + (i % 4);
+      return {
+        time: i * 60_000,
+        open: base,
+        high: base + span,
+        low: base - span,
+        close: base,
+        volume: 100 + (i % 7) * 10,
+      };
+    });
+    const frac = computeIndicator(easeOfMovement, varied, { length: 2.5 }).series.emv;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(computeIndicator(easeOfMovement, varied, { length: 3 }).series.emv);
+  });
 });

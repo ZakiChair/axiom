@@ -48,4 +48,10 @@ describe("massIndex", () => {
       expect(v).toBeGreaterThan(0);
     }
   });
+
+  it("longueur fractionnaire quantifiée : sumLength=24.5 -> arrondi 25, série non vide", () => {
+    const frac = massIndex.calc(candles, { emaLength: 9, sumLength: 24.5 }, ctx).series.massIndex;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(series.massIndex);
+  });
 });

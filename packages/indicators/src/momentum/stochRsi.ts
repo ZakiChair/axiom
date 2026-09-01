@@ -53,6 +53,7 @@ function smaOfDefined(
   values: Array<number | undefined>,
   length: number
 ): Array<number | undefined> {
+  length = Math.round(length); // fenêtre entière obligatoire (voir sma / kama / fisher)
   const n = values.length;
   const out: Array<number | undefined> = new Array(n).fill(undefined);
   if (length <= 0) return out;
@@ -90,7 +91,8 @@ export const stochRsi: IndicatorDef = {
 
   calc(candles, params) {
     const rsiLength = Number(params.rsiLength ?? 14);
-    const stochLength = Number(params.stochLength ?? 14);
+    // Quantifie : boucle `i = stochLength - 1` fractionnaire n'atteint aucun index entier.
+    const stochLength = Math.round(Number(params.stochLength ?? 14));
     const kSmooth = Number(params.kSmooth ?? 3);
     const dSmooth = Number(params.dSmooth ?? 3);
 

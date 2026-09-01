@@ -58,4 +58,24 @@ describe("chaikinVol", () => {
     );
     expect(series.chaikinVol?.[39]).toBeCloseTo(0, 9);
   });
+
+  it("longueur fractionnaire quantifiée : rocLength=9.5 -> arrondi 10, série non vide", () => {
+    const candles: Candle[] = Array.from({ length: 40 }, (_, i) => {
+      const base = 100 + i;
+      const span = 2 + (i % 5);
+      return {
+        time: i * 60_000,
+        open: base,
+        high: base + span,
+        low: base - span,
+        close: base,
+        volume: 0,
+      };
+    });
+    const frac = chaikinVol.calc(candles, { emaLength: 10, rocLength: 9.5 }, ctx).series.chaikinVol;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(
+      chaikinVol.calc(candles, { emaLength: 10, rocLength: 10 }, ctx).series.chaikinVol
+    );
+  });
 });

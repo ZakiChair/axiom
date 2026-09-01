@@ -40,4 +40,12 @@ describe("Momentum", () => {
     expect(out[3]).toBeCloseTo(1, 12);
     expect(out[4]).toBeCloseTo(6, 12);
   });
+
+  it("longueur fractionnaire quantifiée : length 10.5 -> arrondie à 11 (Math.round), série non vide", () => {
+    const closes = Array.from({ length: 40 }, (_, i) => 100 + i);
+    const candles = candlesFromCloses(closes);
+    const frac = computeIndicator(momentum, candles, { length: 10.5 }).series.mom;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(computeIndicator(momentum, candles, { length: 11 }).series.mom);
+  });
 });

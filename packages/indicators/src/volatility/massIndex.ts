@@ -46,7 +46,8 @@ export const massIndex: IndicatorDef = {
     _ctx: CalcContext
   ): IndicatorResult {
     const emaLength = Number(params.emaLength);
-    const sumLength = Number(params.sumLength);
+    // Quantifie : boucle `i = sumLength - 1` fractionnaire n'atteint aucun index entier.
+    const sumLength = Math.round(Number(params.sumLength));
 
     const highs = highOf(candles);
     const lows = lowOf(candles);

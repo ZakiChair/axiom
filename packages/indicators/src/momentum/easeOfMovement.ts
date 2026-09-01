@@ -32,7 +32,8 @@ export const easeOfMovement: IndicatorDef = {
   outputs: [{ key: "emv", name: "EMV", style: "line" }],
 
   calc(candles, params, ctx) {
-    const length = Number(params.length ?? 14);
+    // Quantifie : boucle `i = length` fractionnaire n'atteint aucun index entier.
+    const length = Math.round(Number(params.length ?? 14));
     const n = candles.length;
     const hl2 = ctx.hl2; // (high + low) / 2 fourni par le moteur
     const highs = highOf(candles);

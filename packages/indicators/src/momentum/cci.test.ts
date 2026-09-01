@@ -53,4 +53,11 @@ describe("CCI", () => {
       expect(Number.isFinite(v)).toBe(true);
     }
   });
+
+  it("longueur fractionnaire quantifiée : length=3.5 -> arrondi 4, série non vide", () => {
+    const candles = candlesFromCloses([10, 12, 11, 13, 9, 14, 8, 15, 12, 11]);
+    const frac = computeIndicator(cci, candles, { length: 3.5 }).series.cci;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(computeIndicator(cci, candles, { length: 4 }).series.cci);
+  });
 });

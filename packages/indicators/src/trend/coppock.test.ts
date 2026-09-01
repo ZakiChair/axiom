@@ -50,4 +50,12 @@ describe("coppock", () => {
     expect(out[22]).toBeUndefined();
     expect(out[23]).toBeTypeOf("number");
   });
+
+  it("longueur fractionnaire quantifiée : longRoC=13.5 -> arrondi 14, série non vide", () => {
+    const closes = Array.from({ length: 50 }, (_, i) => 100 + Math.cos(i / 4) * 8 + i * 0.5);
+    const candles = candlesFromCloses(closes);
+    const frac = coppock.calc(candles, { longRoC: 13.5 }, emptyCtx).series.coppock;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(coppock.calc(candles, { longRoC: 14 }, emptyCtx).series.coppock);
+  });
 });

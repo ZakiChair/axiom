@@ -32,7 +32,8 @@ export const aroon: IndicatorDef = {
     { key: "down", name: "Aroon Down", style: "line" },
   ],
   calc(candles, params) {
-    const length = Number(params.length ?? 14);
+    // Quantifie : boucle `i = length` fractionnaire n'atteint aucun index entier.
+    const length = Math.round(Number(params.length ?? 14));
     const highs = highOf(candles);
     const lows = lowOf(candles);
     const n = candles.length;

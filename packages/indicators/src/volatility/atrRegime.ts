@@ -52,7 +52,8 @@ export const atrRegime: IndicatorDef = {
     _ctx: CalcContext
   ): IndicatorResult {
     const period = Number(params.period);
-    const lookback = Number(params.lookback);
+    // Quantifie : boucle `i = lookback - 1` fractionnaire n'atteint aucun index entier.
+    const lookback = Math.round(Number(params.lookback));
     const n = candles.length;
 
     const out: Array<number | undefined> = new Array(n).fill(undefined);

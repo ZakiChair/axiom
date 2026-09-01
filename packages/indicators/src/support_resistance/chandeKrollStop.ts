@@ -21,6 +21,7 @@ function rollingExtremeStrict(
   length: number,
   type: "max" | "min",
 ): Array<number | undefined> {
+  length = Math.round(length); // fenêtre entière obligatoire (voir sma / kama / fisher)
   const n = values.length;
   const out: Array<number | undefined> = new Array(n).fill(undefined);
   for (let i = length - 1; i < n; i++) {

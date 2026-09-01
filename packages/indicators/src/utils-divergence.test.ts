@@ -83,6 +83,13 @@ describe("detecterPivots", () => {
       { idx: 4, kind: "low" }, // voisins 5 et 9, tous deux définis et > 4
     ]);
   });
+
+  it("longueur fractionnaire quantifiée : gauche/droite=1.5 -> arrondis 2, ≡ gauche/droite=2", () => {
+    const prix = rampe(N, [[0, 70], [10, 50], [19, 62], [28, 44], [39, 58]]);
+    const frac = detecterPivots(prix, 1.5, 1.5);
+    expect(frac.length).toBeGreaterThan(0);
+    expect(frac).toEqual(detecterPivots(prix, 2, 2));
+  });
 });
 
 describe("detecterDivergences", () => {

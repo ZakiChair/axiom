@@ -26,6 +26,7 @@ export function smaOfDefined(
   values: Array<number | undefined>,
   length: number
 ): Array<number | undefined> {
+  length = Math.round(length); // fenêtre entière obligatoire (voir sma / kama / fisher)
   const n = values.length;
   const out: Array<number | undefined> = new Array(n).fill(undefined);
   if (length <= 0) return out;

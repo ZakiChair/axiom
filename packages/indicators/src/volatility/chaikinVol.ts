@@ -41,7 +41,8 @@ export const chaikinVol: IndicatorDef = {
     _ctx: CalcContext
   ): IndicatorResult {
     const emaLength = Number(params.emaLength);
-    const rocLength = Number(params.rocLength);
+    // Quantifie : m[i - rocLength] avec rocLength fractionnaire = série vide.
+    const rocLength = Math.round(Number(params.rocLength));
 
     const highs = highOf(candles);
     const lows = lowOf(candles);

@@ -48,4 +48,15 @@ describe("alma (trend, overlay)", () => {
     const { series } = alma.calc(flat, { window: 9, offset: 0.85, sigma: 6 }, ctx);
     expect(series.alma?.[19]).toBeCloseTo(7, 10);
   });
+
+  it("longueur fractionnaire quantifiée : window=8.5 ne lève pas (new Array), ≡ window=9", () => {
+    let frac: ReturnType<typeof alma.calc>;
+    expect(() => {
+      frac = alma.calc(candles, { window: 8.5, offset: 0.85, sigma: 6 }, ctx);
+    }).not.toThrow();
+    expect(frac!.series.alma?.some((v) => v !== undefined)).toBe(true);
+    expect(frac!.series.alma).toEqual(
+      alma.calc(candles, { window: 9, offset: 0.85, sigma: 6 }, ctx).series.alma
+    );
+  });
 });

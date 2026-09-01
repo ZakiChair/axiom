@@ -35,7 +35,8 @@ export const rvi: IndicatorDef = {
   ],
 
   calc(candles, params) {
-    const length = Number(params.length ?? 10);
+    // Quantifie : `start`/`i - length` fractionnaires n'atteignent aucun index entier.
+    const length = Math.round(Number(params.length ?? 10));
     const n = candles.length;
     const closes = closeOf(candles);
     const highs = highOf(candles);

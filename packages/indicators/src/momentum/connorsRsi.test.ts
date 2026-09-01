@@ -63,4 +63,14 @@ describe("Connors RSI", () => {
     }
     expect(defined).toBeGreaterThan(0);
   });
+
+  it("longueur fractionnaire quantifiée : rankLength=4.5 -> arrondi 5, série non vide", () => {
+    const frac = computeIndicator(connorsRsi, candles, {
+      rsiLength: 3,
+      streakLength: 2,
+      rankLength: 4.5,
+    }).series.crsi;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(series.crsi);
+  });
 });

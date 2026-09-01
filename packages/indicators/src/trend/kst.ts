@@ -28,6 +28,7 @@ import { closeOf, sma } from "../utils";
 
 /** ROC en % : (values[i] / values[i-length] - 1) * 100, sinon `undefined`. */
 function roc(values: number[], length: number): Array<number | undefined> {
+  length = Math.round(length); // fenêtre entière obligatoire (voir sma / kama / fisher)
   const n = values.length;
   const out: Array<number | undefined> = new Array(n).fill(undefined);
   for (let i = length; i < n; i++) {

@@ -33,6 +33,10 @@ export function mfiOf(
   tp: number[],
   length: number
 ): Array<number | undefined> {
+  // Quantifie : boucle `i = length` fractionnaire n'atteint aucun index entier
+  // (rollingSum arrondit déjà en interne, mais la boucle ci-dessous, elle, ne
+  // relit ses résultats qu'à des index entiers).
+  length = Math.round(length);
   const n = candles.length;
   const out: Array<number | undefined> = new Array(n).fill(undefined);
 

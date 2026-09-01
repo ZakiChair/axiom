@@ -40,4 +40,12 @@ describe("ROC", () => {
     expect(out[3]).toBeCloseTo(100 / 11, 12);
     expect(out[4]).toBeCloseTo(30, 12);
   });
+
+  it("longueur fractionnaire quantifiée : roc(9.5) === roc(10), série non vide", () => {
+    const closes = Array.from({ length: 30 }, (_, i) => 100 + i);
+    const candles = candlesFromCloses(closes);
+    const frac = computeIndicator(roc, candles, { length: 9.5 }).series.roc;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(computeIndicator(roc, candles, { length: 10 }).series.roc);
+  });
 });

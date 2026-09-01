@@ -51,7 +51,8 @@ export const stdErrorBands: IndicatorDef = {
     params: Record<string, number | boolean | string>,
     _ctx: CalcContext
   ): IndicatorResult {
-    const length = Number(params.length);
+    // Quantifie : close[i - length + 1 + k] avec length fractionnaire = série vide.
+    const length = Math.round(Number(params.length));
     const mult = Number(params.mult);
 
     const close = closeOf(candles);

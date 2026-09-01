@@ -30,7 +30,8 @@ export const alma: IndicatorDef = {
   ],
   outputs: [{ key: "alma", name: "ALMA", style: "line" }],
   calc(candles, params) {
-    const window = Number(params.window ?? 9);
+    // Quantifie : `new Array(window)` lève RangeError si window est fractionnaire.
+    const window = Math.round(Number(params.window ?? 9));
     const offset = Number(params.offset ?? 0.85);
     const sigma = Number(params.sigma ?? 6);
 

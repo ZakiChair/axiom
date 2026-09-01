@@ -82,6 +82,19 @@ describe("fundingZScore", () => {
     expect(res.series.fundingZScore?.[29]).toBe(0);
   });
 
+  it("longueur fractionnaire quantifiée : window=29.3 -> arrondi 29, ≡ window=29 (pas 30)", () => {
+    // Sans arrondi au plus proche, `win.length < window` collecterait jusqu'à
+    // ce que win.length atteigne 30 (le premier entier >= 29.3) au lieu du
+    // plus proche (29) : même symptôme que la SMA cumulative fausse (résultat
+    // silencieusement différent, sans série vide).
+    const c = candles(35);
+    const funding = new Array(35).fill(0.25);
+    const frac = fundingZScore.calc(c, { window: 29.3 }, { ...baseCtx, aux: { funding } });
+    const entier = fundingZScore.calc(c, { window: 29 }, { ...baseCtx, aux: { funding } });
+    expect(frac.series.fundingZScore?.some((v) => v !== undefined)).toBe(true);
+    expect(frac.series.fundingZScore).toEqual(entier.series.fundingZScore);
+  });
+
   it("métadonnées conformes", () => {
     expect(fundingZScore.id).toBe("fundingZScore");
     expect(fundingZScore.category).toBe("derivatives");

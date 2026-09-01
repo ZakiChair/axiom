@@ -30,7 +30,8 @@ export const cci: IndicatorDef = {
   outputs: [{ key: "cci", name: "CCI", style: "line" }],
 
   calc(candles, params, ctx) {
-    const length = Number(params.length ?? 20);
+    // Quantifie : boucle `i = length - 1` fractionnaire n'atteint aucun index entier.
+    const length = Math.round(Number(params.length ?? 20));
     const tp = ctx.hlc3; // prix typique fourni par le moteur.
     const n = tp.length;
 

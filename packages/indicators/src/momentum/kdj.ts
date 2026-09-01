@@ -44,7 +44,8 @@ export const kdj: IndicatorDef = {
   ],
 
   calc(candles, params) {
-    const length = Number(params.length ?? 9);
+    // Quantifie : boucle `i = length - 1` fractionnaire n'atteint aucun index entier.
+    const length = Math.round(Number(params.length ?? 9));
     const signalK = Number(params.signalK ?? 3);
     const signalD = Number(params.signalD ?? 3);
 

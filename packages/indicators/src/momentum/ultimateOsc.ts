@@ -34,9 +34,10 @@ export const ultimateOsc: IndicatorDef = {
   outputs: [{ key: "uo", name: "UO", style: "line" }],
 
   calc(candles, params) {
-    const fast = Number(params.fast);
-    const mid = Number(params.mid);
-    const slow = Number(params.slow);
+    // Quantifie : `start = max(fast,mid,slow)` fractionnaire n'atteint aucun index entier.
+    const fast = Math.round(Number(params.fast));
+    const mid = Math.round(Number(params.mid));
+    const slow = Math.round(Number(params.slow));
     const n = candles.length;
     const out: Array<number | undefined> = new Array(n).fill(undefined);
 

@@ -31,7 +31,10 @@ export const fundingZScore: IndicatorDef = {
   outputs: [{ key: "fundingZScore", name: "Funding Z-Score", style: "line" }],
   calc(candles, params, ctx) {
     const n = candles.length;
-    const window = Number(params.window ?? 30);
+    // Quantifie : sinon `win.length < window` (comparaison entier/fractionnaire)
+    // collecte silencieusement un point de trop (ceil implicite au lieu du plus
+    // proche) — variante "fenêtre fausse" du même bug, sans série vide.
+    const window = Math.round(Number(params.window ?? 30));
     const out: Array<number | undefined> = new Array(n).fill(undefined);
 
     const funding = ctx.aux?.funding;

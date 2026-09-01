@@ -135,6 +135,75 @@ export function parseAggTradesCsv(texte: string): LigneTrade[] {
   return out;
 }
 
+/** Sous-ensemble de Bun.Subprocess consommé par la lecture (testable avec un process factice). */
+export interface ProcessusUnzip {
+  stdout: ReadableStream<Uint8Array>;
+  kill: () => void;
+  exited: Promise<number>;
+}
+
+/**
+ * Consomme le stdout CSV d'un process `unzip -p` : parsing ligne à ligne, lots de
+ * `tailleLot` remis à `onLot`, borne dure `maxLignes`. BORNE MÉMOIRE EFFECTIVE : au
+ * dépassement, le process est TUÉ et le flux ANNULÉ AVANT `await exited` — sinon Bun
+ * draine tout le stdout restant du child en RSS (~1-2 Go de CSV décompressé pour un
+ * dump juste au-dessus du seuil ; vérifié empiriquement avec releaseLock+exited).
+ */
+export async function lireTradesDepuisProcessus(
+  proc: ProcessusUnzip,
+  onLot: (lot: LigneTrade[]) => void,
+  maxLignes: number = MAX_LIGNES,
+  tailleLot: number = TAILLE_LOT,
+): Promise<{ recus: number; deborde: boolean }> {
+  const decodeur = new TextDecoder();
+  let reste = "";
+  let lot: LigneTrade[] = [];
+  let recus = 0;
+  let deborde = false;
+
+  const viderLot = (): void => {
+    if (lot.length === 0) return;
+    onLot(lot);
+    recus += lot.length;
+    lot = [];
+  };
+
+  const lecteur = proc.stdout.getReader();
+  for (;;) {
+    const { done, value } = await lecteur.read();
+    if (done) break;
+    if (value) reste += decodeur.decode(value, { stream: true });
+    let nl = reste.indexOf("\n");
+    while (nl !== -1) {
+      const ligne = reste.slice(0, nl);
+      reste = reste.slice(nl + 1);
+      const tr = parseLigneTrade(ligne);
+      if (tr !== null) {
+        lot.push(tr);
+        if (lot.length >= tailleLot) viderLot();
+        if (recus + lot.length > maxLignes) {
+          deborde = true;
+          break;
+        }
+      }
+      nl = reste.indexOf("\n");
+    }
+    if (deborde) break;
+  }
+  if (deborde) {
+    proc.kill();
+    await lecteur.cancel().catch(() => {});
+  } else {
+    lecteur.releaseLock();
+    // Dernière ligne éventuelle (sans \n final).
+    const tr = parseLigneTrade(reste);
+    if (tr !== null) lot.push(tr);
+  }
+  viderLot();
+  await proc.exited;
+  return { recus, deborde };
+}
+
 // ─────────────────────────── Validation & parsing de chemin (PURES) ───────────────────────────
 
 /** Valide un jour au format `YYYY-MM-DD`. Fonction PURE. */
@@ -231,6 +300,7 @@ function lireJob(symbole: string, jour: string): Record<string, unknown> | null 
  */
 async function executerTelechargement(symbole: string, jour: string): Promise<void> {
   const cheminTmp = join(tmpdir(), `axiom-replay-${symbole}-${jour}-${Date.now()}.zip`);
+  let proc: ReturnType<typeof Bun.spawn> | null = null;
   try {
     majJob(symbole, jour, "en_cours", 0, 0, null);
     // Repart propre : purge un éventuel jour partiel d'un run précédent.
@@ -249,7 +319,7 @@ async function executerTelechargement(symbole: string, jour: string): Promise<vo
     const octetsZip = (await rep.arrayBuffer());
     await Bun.write(cheminTmp, octetsZip);
 
-    const proc = Bun.spawn(["unzip", "-p", cheminTmp], { stdout: "pipe", stderr: "pipe" });
+    proc = Bun.spawn(["unzip", "-p", cheminTmp], { stdout: "pipe", stderr: "pipe" });
 
     const inserer = db().query(
       "INSERT INTO replay_trades (symbole, jour, t, prix, qty, isBuyerMaker) VALUES (?, ?, ?, ?, ?, ?)",
@@ -258,50 +328,19 @@ async function executerTelechargement(symbole: string, jour: string): Promise<vo
       for (const tr of lot) inserer.run(symbole, jour, tr.t, tr.prix, tr.qty, tr.isBuyerMaker);
     });
 
-    const decodeur = new TextDecoder();
-    let reste = "";
-    let lot: LigneTrade[] = [];
-    let recus = 0;
-    let deborde = false;
-
-    const viderLot = (): void => {
-      if (lot.length === 0) return;
-      insererLot(lot);
-      recus += lot.length;
-      lot = [];
-      majJob(symbole, jour, "en_cours", recus, octetsZip.byteLength, null);
-    };
-
-    const lecteur = (proc.stdout as ReadableStream<Uint8Array>).getReader();
-    for (;;) {
-      const { done, value } = await lecteur.read();
-      if (done) break;
-      if (value) reste += decodeur.decode(value, { stream: true });
-      let nl = reste.indexOf("\n");
-      while (nl !== -1) {
-        const ligne = reste.slice(0, nl);
-        reste = reste.slice(nl + 1);
-        const tr = parseLigneTrade(ligne);
-        if (tr !== null) {
-          lot.push(tr);
-          if (lot.length >= TAILLE_LOT) viderLot();
-          if (recus + lot.length > MAX_LIGNES) {
-            deborde = true;
-            break;
-          }
-        }
-        nl = reste.indexOf("\n");
-      }
-      if (deborde) break;
-    }
-    lecteur.releaseLock();
-    // Dernière ligne éventuelle (sans \n final).
-    if (!deborde) {
-      const tr = parseLigneTrade(reste);
-      if (tr !== null) lot.push(tr);
-    }
-    viderLot();
-    await proc.exited;
+    let inseres = 0;
+    const { recus, deborde } = await lireTradesDepuisProcessus(
+      {
+        stdout: proc.stdout as ReadableStream<Uint8Array>,
+        kill: () => proc?.kill(),
+        exited: proc.exited,
+      },
+      (lot) => {
+        insererLot(lot);
+        inseres += lot.length;
+        majJob(symbole, jour, "en_cours", inseres, octetsZip.byteLength, null);
+      },
+    );
 
     if (deborde) {
       majJob(symbole, jour, "erreur", recus, octetsZip.byteLength, `jour trop volumineux (> ${MAX_LIGNES} trades)`);
@@ -317,6 +356,12 @@ async function executerTelechargement(symbole: string, jour: string): Promise<vo
         `(${(octetsZip.byteLength / 1_048_576).toFixed(1)} Mo zip).`,
     );
   } catch (err) {
+    // Même défaut sur le chemin d'erreur : sans kill, Bun drainerait le stdout restant.
+    try {
+      proc?.kill();
+    } catch {
+      /* best-effort */
+    }
     majJob(symbole, jour, "erreur", 0, 0, err instanceof Error ? err.message : String(err));
   } finally {
     void unlink(cheminTmp).catch(() => {

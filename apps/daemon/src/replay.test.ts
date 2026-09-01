@@ -4,6 +4,7 @@ import {
   estSymboleValide,
   LIMITE_DEFAUT,
   LIMITE_MAX,
+  lireTradesDepuisProcessus,
   normaliserHorodatage,
   parseAggTradesCsv,
   parseCheminReplay,
@@ -118,5 +119,56 @@ describe("parseRequeteTrades", () => {
   test("limite bornée à [1, LIMITE_MAX]", () => {
     expect(parseRequeteTrades(new URLSearchParams("limite=0")).limite).toBe(1);
     expect(parseRequeteTrades(new URLSearchParams("limite=99999999")).limite).toBe(LIMITE_MAX);
+  });
+});
+
+describe("lireTradesDepuisProcessus", () => {
+  /** Lance un process réel (bun -e) exécutant `script`, avec un espion sur kill(). */
+  function processusScript(script: string): {
+    processus: { stdout: ReadableStream<Uint8Array>; kill: () => void; exited: Promise<number> };
+    tue: () => boolean;
+  } {
+    const proc = Bun.spawn(["bun", "-e", script], { stdout: "pipe", stderr: "ignore" });
+    let aTue = false;
+    return {
+      processus: {
+        stdout: proc.stdout as ReadableStream<Uint8Array>,
+        kill: () => {
+          aTue = true;
+          proc.kill();
+        },
+        exited: proc.exited,
+      },
+      tue: () => aTue,
+    };
+  }
+
+  /** Script imprimant `n` lignes CSV d'aggTrades valides (\n final sauf si demandé). */
+  function scriptCsv(n: number, avecNewlineFinal: boolean): string {
+    return (
+      `let s = ""; for (let i = 0; i < ${n}; i++) ` +
+      `s += i + ",100,1,1,1,1782000000000,true,true" + ((i < ${n} - 1 || ${avecNewlineFinal}) ? "\\n" : ""); ` +
+      `process.stdout.write(s);`
+    );
+  }
+
+  test("dépassement de maxLignes : TUE le process (borne mémoire effective) et signale deborde", async () => {
+    const { processus, tue } = processusScript(scriptCsv(5_000, true));
+    const lots: number[] = [];
+    const res = await lireTradesDepuisProcessus(processus, (lot) => lots.push(lot.length), 1_000, 100);
+    expect(res.deborde).toBe(true);
+    expect(tue()).toBe(true); // unzip tué AVANT `await exited` : stdout restant jamais drainé en RSS
+    // Comptage déterministe : flush par 100 jusqu'à 1000, puis 1 ligne fait déborder (flush final).
+    expect(res.recus).toBe(1_001);
+  });
+
+  test("flux complet sous la borne : tout est lu, dernière ligne SANS \\n incluse, process non tué", async () => {
+    const { processus, tue } = processusScript(scriptCsv(250, false));
+    let total = 0;
+    const res = await lireTradesDepuisProcessus(processus, (lot) => (total += lot.length), 1_000_000, 100);
+    expect(res.deborde).toBe(false);
+    expect(tue()).toBe(false);
+    expect(res.recus).toBe(250);
+    expect(total).toBe(250);
   });
 });

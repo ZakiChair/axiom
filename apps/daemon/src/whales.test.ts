@@ -3,6 +3,7 @@ import { Database } from "bun:sqlite";
 import {
   adresseDepuisTopic,
   assurerTableWhales,
+  curseurApresGetLogs,
   ecrireDernierBloc,
   fenetreBlocs,
   insererMouvements,
@@ -15,6 +16,7 @@ import {
   parseLogsEtherscan,
   parseRequeteWhales,
   parseTxBtc,
+  PLAFOND_GETLOGS,
   pollEtherscan,
   purgerMouvements,
   quantiteDepuisData,
@@ -181,7 +183,7 @@ describe("parseLogsEtherscan", () => {
   };
 
   it("parse un log Transfer valide (hex → nombres, adresses minuscules)", () => {
-    const logs = parseLogsEtherscan({ status: "1", result: [log] }, 6);
+    const logs = parseLogsEtherscan([log], 6);
     expect(logs).toEqual([
       {
         txHash: "0xtx1",
@@ -196,9 +198,8 @@ describe("parseLogsEtherscan", () => {
 
   it("écarte les topics étrangers et les entrées illisibles ; « No records » → []", () => {
     const mauvaisTopic = { ...log, topics: ["0xdeadbeef", topicDe, topicVers] };
-    expect(parseLogsEtherscan({ status: "1", result: [mauvaisTopic, null, { x: 1 }] }, 6)).toEqual([]);
-    expect(parseLogsEtherscan({ status: "0", message: "No records found", result: [] }, 6)).toEqual([]);
-    expect(parseLogsEtherscan({ status: "0", result: "Max rate limit reached" }, 6)).toEqual([]);
+    expect(parseLogsEtherscan([mauvaisTopic, null, { x: 1 }], 6)).toEqual([]);
+    expect(parseLogsEtherscan([], 6)).toEqual([]);
   });
 });
 
@@ -370,5 +371,42 @@ describe("pollEtherscan — erreurs Etherscan en HTTP 200", () => {
       sante: { erreurEth: string | null };
     };
     expect(corps.sante.erreurEth).toContain("Max rate limit reached");
+  });
+});
+
+describe("curseurApresGetLogs", () => {
+  const ligne = (bloc: number): unknown => ({ blockNumber: `0x${bloc.toString(16)}` });
+
+  it("sous le plafond : la fenêtre entière est couverte", () => {
+    expect(curseurApresGetLogs([ligne(95)], 91, 100)).toBe(100);
+    expect(curseurApresGetLogs([], 91, 100)).toBe(100);
+  });
+
+  it("au plafond (troncature) : recule au dernier bloc entièrement couvert", () => {
+    const tronque = Array.from({ length: PLAFOND_GETLOGS }, () => ligne(96));
+    expect(curseurApresGetLogs(tronque, 91, 100)).toBe(95); // 96 − 1
+  });
+
+  it("borné au début de fenêtre (méga-bloc) ; tronqué sans blockNumber lisible → jette", () => {
+    const tronque = Array.from({ length: PLAFOND_GETLOGS }, () => ligne(91));
+    expect(curseurApresGetLogs(tronque, 91, 100)).toBe(91);
+    const illisible = Array.from({ length: PLAFOND_GETLOGS }, () => ({}));
+    expect(() => curseurApresGetLogs(illisible, 91, 100)).toThrow("tronqué");
+  });
+});
+
+describe("pollEtherscan — troncature getLogs", () => {
+  it("1000 lignes : curseur avancé au dernier blockNumber reçu − 1, PAS à fenetre.a", async () => {
+    const d = new Database(":memory:");
+    assurerTableWhales(d);
+    ecrireDernierBloc(d, 90);
+    const usdt = TOKENS_ETH[0]?.contrat ?? "";
+    const tronque = Array.from({ length: 1000 }, () => ({ blockNumber: "0x60" })); // bloc 96
+    const { fetchImpl } = stubEth({
+      blockNumber: "0x64", // bloc 100 → fenêtre 91..100
+      parContrat: { [usdt]: { status: "1", result: tronque } }, // USDC : défaut { result: [] }
+    });
+    await pollEtherscan("cle-test", d, fetchImpl, 0);
+    expect(lireDernierBloc(d)).toBe(95); // AVANT le fix : 100 (blocs 96..100 jamais relus)
   });
 });

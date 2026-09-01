@@ -326,13 +326,11 @@ export interface LogTransfert {
 }
 
 /**
- * Parse la réponse `getLogs` d'Etherscan en logs Transfer exploitables (les entrées
- * illisibles sont écartées, le lot partiel n'échoue pas). `status !== "1"` avec un
- * `result` non-tableau (erreur ou « No records found ») → []. Fonction PURE.
+ * Parse un tableau `result` de getLogs (déjà extrait par `resultatGetLogs`, qui jette
+ * sur erreur Etherscan) en logs Transfer exploitables — les entrées illisibles sont
+ * écartées, le lot partiel n'échoue pas. Fonction PURE.
  */
-export function parseLogsEtherscan(json: unknown, decimales: number): LogTransfert[] {
-  const result = (json as { result?: unknown } | null)?.result;
-  if (!Array.isArray(result)) return [];
+export function parseLogsEtherscan(result: readonly unknown[], decimales: number): LogTransfert[] {
   const out: LogTransfert[] = [];
   for (const brut of result) {
     if (!brut || typeof brut !== "object") continue;
@@ -365,6 +363,28 @@ export function resultatGetLogs(json: unknown): unknown[] {
   const detail =
     typeof j.result === "string" ? j.result : typeof j.message === "string" ? j.message : "réponse illisible";
   throw new Error(`getLogs erreur Etherscan : ${detail}`);
+}
+
+/** Plafond de lignes d'une réponse getLogs Etherscan (au-delà : réponse TRONQUÉE). */
+export const PLAFOND_GETLOGS = 1000;
+
+/**
+ * Curseur de bloc SÛR après un getLogs : si la réponse atteint le plafond (troncature —
+ * les logs au-delà du 1000e sont PERDUS), on ne peut avancer que jusqu'au dernier bloc
+ * entièrement couvert = (plus haut blockNumber reçu − 1), le bloc le plus haut étant
+ * potentiellement coupé en plein milieu. Borné à `fenetreDe` pour garantir la progression
+ * (un méga-bloc saturant seul le plafond avance quand même d'un bloc : trou assumé,
+ * cohérent avec fenetreBlocs). Sans troncature : `fenetreA`. Fonction PURE.
+ */
+export function curseurApresGetLogs(result: readonly unknown[], fenetreDe: number, fenetreA: number): number {
+  if (result.length < PLAFOND_GETLOGS) return fenetreA;
+  let max = 0;
+  for (const brut of result) {
+    const bn = nombreHex((brut as { blockNumber?: unknown } | null)?.blockNumber);
+    if (bn !== null && bn > max) max = bn;
+  }
+  if (max === 0) throw new Error("getLogs tronqué sans blockNumber lisible");
+  return Math.max(fenetreDe, max - 1);
 }
 
 /**
@@ -610,6 +630,7 @@ export async function pollEtherscan(
     }
 
     const lot: MouvementWhale[] = [];
+    let curseur = fenetre.a;
     for (const token of TOKENS_ETH) {
       await pause(pauseMs);
       const res = await fetchImpl(
@@ -630,15 +651,20 @@ export async function pollEtherscan(
       const json = (await res.json()) as unknown;
       // Erreur Etherscan en HTTP 200 : jeter AVANT parse — le catch n'avance pas le
       // curseur (la fenêtre sera rejouée au prochain tick) et remplit sante.erreurEth.
-      resultatGetLogs(json);
-      for (const log of parseLogsEtherscan(json, token.decimales)) {
+      // Troncature au plafond getLogs : curseur ramené au dernier bloc entièrement
+      // couvert — MIN entre tokens (curseur persisté partagé). Les ids idempotents
+      // rendent la relecture partielle du bloc frontière sans doublon.
+      const lignes = resultatGetLogs(json);
+      const c = curseurApresGetLogs(lignes, fenetre.de, fenetre.a);
+      if (c < curseur) curseur = c;
+      for (const log of parseLogsEtherscan(lignes, token.decimales)) {
         const mouvement = versMouvementErc20(log, token.asset, SEUIL_COLLECTE_USD);
         if (mouvement !== null) lot.push(mouvement);
       }
     }
     insererMouvements(d, lot);
-    ecrireDernierBloc(d, fenetre.a);
-    sante.dernierBlocEth = fenetre.a;
+    ecrireDernierBloc(d, curseur);
+    sante.dernierBlocEth = curseur;
     sante.dernierPollEthTs = Date.now();
     sante.erreurEth = null;
   } catch (err) {

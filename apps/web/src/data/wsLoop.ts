@@ -61,7 +61,6 @@ export function connectWsLoop(o: WsLoopOptions): Unsubscribe {
 
   let ws: WebSocket | null = null;
   let closedByUser = false;
-  let hasConnected = false; // ≥1 connexion réussie => les suivantes sont des reconnexions
   let attempt = 0;
   let lastMessageTs = 0;
   let lastHealthPushTs = 0; // dernier push au healthStore (throttle d'affichage)
@@ -103,7 +102,6 @@ export function connectWsLoop(o: WsLoopOptions): Unsubscribe {
     ws = socket;
 
     socket.onopen = () => {
-      hasConnected = true;
       lastMessageTs = Date.now();
       healthStore.getState().setEtat(o.source, "connected", { dernierMessageTs: lastMessageTs });
       o.onOpen?.(socket);

@@ -40,6 +40,7 @@ const DRAWINGS_KEY = "axiom:drawings:v1";
 const SYMBOL = "BTCUSDT";
 const EXCHANGE = "binance";
 const COMPOSITE_KEY = "binance:BTCUSDT";
+const SLOT0_KEY = "0:binance:BTCUSDT";
 
 type OverlayCallback = (event: { overlay: { id: string; points: unknown[] } }) => unknown;
 
@@ -91,7 +92,7 @@ function createMockChart() {
   };
 }
 
-function readStoredCount(localStorage: Storage, key = COMPOSITE_KEY): number {
+function readStoredCount(localStorage: Storage, key = SLOT0_KEY): number {
   const all = JSON.parse(localStorage.getItem(DRAWINGS_KEY) ?? "{}") as Record<string, unknown[]>;
   return all[key]?.length ?? 0;
 }
@@ -233,8 +234,8 @@ describe("drawing.ts — isolation multi-chart (focus)", () => {
       { timestamp: 2, value: 110 },
     ]);
 
-    expect(readStoredCount(localStorage, "binance:ETHUSDT")).toBe(1);
-    expect(readStoredCount(localStorage, "binance:BTCUSDT")).toBe(0); // slot maître intact
+    expect(readStoredCount(localStorage, "1:binance:ETHUSDT")).toBe(1);
+    expect(readStoredCount(localStorage, "0:binance:BTCUSDT")).toBe(0); // slot maître intact
 
     // Bascule le focus sur le slot 0 → l'outil trace sur l'instance a (BTCUSDT).
     setFocusChart(0);
@@ -243,8 +244,8 @@ describe("drawing.ts — isolation multi-chart (focus)", () => {
       { timestamp: 3, value: 30 },
       { timestamp: 4, value: 40 },
     ]);
-    expect(readStoredCount(localStorage, "binance:BTCUSDT")).toBe(1);
-    expect(readStoredCount(localStorage, "binance:ETHUSDT")).toBe(1); // inchangé
+    expect(readStoredCount(localStorage, "0:binance:BTCUSDT")).toBe(1);
+    expect(readStoredCount(localStorage, "1:binance:ETHUSDT")).toBe(1); // inchangé
 
     unbindChart(a.chart);
     unbindChart(b.chart);
@@ -373,7 +374,8 @@ describe("drawing.ts — migration douce de la clé « symbole » → « exchang
     restoreDrawings(a.chart, EXCHANGE, SYMBOL); // déclenche la migration + rejoue le dessin
 
     const all = JSON.parse(localStorage.getItem(DRAWINGS_KEY) ?? "{}") as Record<string, unknown[]>;
-    expect(all[COMPOSITE_KEY]?.length).toBe(1); // repris sous la clé composite
+    expect(all[SLOT0_KEY]?.length).toBe(1); // repris sous la clé scellée au slot
+    expect(all[COMPOSITE_KEY]?.length).toBe(1); // clé partagée semée (héritage des autres slots)
     expect(all[SYMBOL]).toBeUndefined(); // ancienne clé plate retirée
     unbindChart(a.chart);
   });
@@ -392,6 +394,63 @@ describe("drawing.ts — migration douce de la clé « symbole » → « exchang
 
     const all = JSON.parse(localStorage.getItem(DRAWINGS_KEY) ?? "{}") as Record<string, unknown[]>;
     expect(all["ETHUSDT"]?.length).toBe(1); // héritage d'un autre symbole non touché
+    unbindChart(a.chart);
+  });
+});
+
+describe("drawing.ts — slots scellés : même actif affiché sur deux slots", () => {
+  let localStorage: Storage;
+
+  beforeEach(() => {
+    localStorage = installMockLocalStorage();
+  });
+
+  afterEach(() => {
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
+  it("un dessin posé sur le slot 1 n'efface pas le dessin persisté du slot 0 (grille liée, même symbole)", () => {
+    const a = createMockChart(); // slot 0 = binance:BTCUSDT
+    a.setIdPrefix("a-");
+    const b = createMockChart(); // slot 1 = binance:BTCUSDT (liaison ⛓ : même actif)
+    b.setIdPrefix("b-");
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    bindChart(b.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 1);
+    restoreDrawings(a.chart, EXCHANGE, SYMBOL);
+    restoreDrawings(b.chart, EXCHANGE, SYMBOL);
+
+    setFocusChart(0);
+    selectTool("trendLine");
+    a.finishDraw("a-ov-0", [{ timestamp: 1, value: 100 }, { timestamp: 2, value: 110 }]);
+    expect(readStoredCount(localStorage, "0:binance:BTCUSDT")).toBe(1);
+
+    // AVANT le fix : persistEntry(slot 1) réécrivait la clé PARTAGÉE « binance:BTCUSDT »
+    // avec la map du slot 1 (qui n'a jamais vu le segment du slot 0) → perte silencieuse.
+    setFocusChart(1);
+    selectTool("rect");
+    b.finishDraw("b-ov-0", [{ timestamp: 3, value: 30 }, { timestamp: 4, value: 40 }]);
+
+    expect(readStoredCount(localStorage, "0:binance:BTCUSDT")).toBe(1); // intact
+    expect(readStoredCount(localStorage, "1:binance:BTCUSDT")).toBe(1);
+    unbindChart(a.chart);
+    unbindChart(b.chart);
+  });
+
+  it("migration : la clé partagée « exchange:symbole » existante est COPIÉE vers la clé du slot à la première lecture (et conservée pour les autres slots)", () => {
+    localStorage.setItem(
+      DRAWINGS_KEY,
+      JSON.stringify({
+        "binance:BTCUSDT": [{ name: "segment", points: [{ timestamp: 1, value: 100 }] }],
+      })
+    );
+
+    const a = createMockChart();
+    bindChart(a.chart, { exchange: EXCHANGE, symbol: SYMBOL }, 0);
+    restoreDrawings(a.chart, EXCHANGE, SYMBOL);
+
+    const all = JSON.parse(localStorage.getItem(DRAWINGS_KEY) ?? "{}") as Record<string, unknown[]>;
+    expect(all["0:binance:BTCUSDT"]?.length).toBe(1); // copié vers la clé scellée au slot
+    expect(all["binance:BTCUSDT"]?.length).toBe(1); // conservé : source d'héritage des AUTRES slots
     unbindChart(a.chart);
   });
 });

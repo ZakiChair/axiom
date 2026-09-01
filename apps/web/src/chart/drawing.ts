@@ -7,7 +7,8 @@
  * (overlays vivants + méta actif/symbole propres à CHAQUE instance). Les outils
  * (tracer, supprimer, effacer, export PNG) s'appliquent au chart FOCUS ; un clic dans
  * un slot le met au focus (`setFocusChart`). Chaque instance persiste ses propres
- * dessins sous « exchange:symbole » — les slots ne se marchent pas dessus.
+ * dessins sous « slot:exchange:symbole » — les slots ne se marchent pas dessus, même
+ * sur un actif identique.
  *
  * KLineChart fournit nativement la plupart des overlays requis (vérifié sur la
  * v9.8.12 via `getSupportedOverlays` / `index.d.ts` + docs context7 v9) :
@@ -314,14 +315,24 @@ export function unbindChart(chart: KLineChartInstance): void {
 // PROBLÈME : ChartInstance recrée l'instance (donc détruit les overlays) à chaque
 // changement de symbole/TF, et klinecharts n'expose pas d'énumération globale des
 // overlays. On TRACE donc nous-mêmes chaque dessin (id → {name, points}) et on le
-// REJOUE après le backfill via `restoreDrawings`. Stockage par « EXCHANGE:SYMBOLE »
-// (localStorage) → les dessins survivent au changement de TF, au changement d'actif
-// et au rechargement, SANS collision entre sources NI entre slots.
+// REJOUE après le backfill via `restoreDrawings`. Stockage par « SLOT:EXCHANGE:SYMBOLE »
+// (scellé au slot) (localStorage) → les dessins survivent au changement de TF, au
+// changement d'actif et au rechargement, SANS collision entre sources NI entre slots.
 
 const DRAWINGS_KEY = "axiom:drawings:v1";
 
-/** Clé de stockage composite d'un actif : « exchange:symbole ». */
-function storageKey(exchange: string, symbol: string): string {
+/** Clé de stockage d'un SLOT : « slot:exchange:symbole ». Le préfixe numérique scelle
+ * les dessins au slot (BUILD-CONTRACT / plan 2026-08-24 Lot 3) : deux slots affichant
+ * le MÊME actif (grille liée ⛓) ne s'écrasent plus mutuellement. Aucun id d'exchange
+ * n'étant numérique, pas d'ambiguïté avec l'ancienne clé partagée. */
+function storageKey(slot: number, exchange: string, symbol: string): string {
+  return `${slot}:${exchange}:${symbol}`;
+}
+
+/** Ancienne clé PARTAGÉE entre slots (« exchange:symbole ») : source de migration à la
+ * lecture. Conservée après copie (les autres slots doivent pouvoir en hériter aussi) ;
+ * plus jamais réécrite. */
+function legacyKey(exchange: string, symbol: string): string {
   return `${exchange}:${symbol}`;
 }
 
@@ -341,12 +352,12 @@ function writeAll(all: Record<string, SavedOverlay[]>): void {
   localStorage.setItem(DRAWINGS_KEY, JSON.stringify(all));
 }
 
-/** Persiste les overlays vivants d'UNE instance sous sa clé « exchange:symbole ». */
+/** Persiste les overlays vivants d'UNE instance sous sa clé « slot:exchange:symbole ». */
 function persistEntry(entry: ChartEntry): void {
   if (entry.suppressPersist) return; // teardown en cours : ne pas écraser le stockage.
   try {
     const all = readAll();
-    all[storageKey(entry.exchange, entry.symbol)] = Array.from(entry.liveOverlays.values());
+    all[storageKey(entry.slot, entry.exchange, entry.symbol)] = Array.from(entry.liveOverlays.values());
     writeAll(all);
   } catch {
     /* best-effort : la persistance des dessins n'est pas bloquante */
@@ -439,23 +450,40 @@ export function restoreDrawings(chart: KLineChartInstance, exchange: string, sym
   entry.liveOverlays.clear();
 
   const all = readAll();
-  const key = storageKey(exchange, symbol);
+  const key = storageKey(entry.slot, exchange, symbol);
   let list = all[key];
 
-  // Migration douce du schéma v1 : l'ancien stockage indexait par SYMBOLE seul
-  // (implicitement Binance, seule source de dessins à l'époque). On REPREND UNE FOIS
-  // ces dessins vers la clé composite « binance:<symbol> », puis on retire l'entrée
-  // héritée. Un symbole ne contient jamais « : » → aucune ambiguïté avec une clé composite.
+  // Migration douce v2 : l'ancien stockage PARTAGEAIT « exchange:symbole » entre slots.
+  // À la première lecture d'un slot, on COPIE ces dessins vers sa clé scellée — sans
+  // retirer l'entrée héritée (les autres slots affichant le même actif en héritent au
+  // même titre ; elle n'est plus jamais réécrite).
+  if (list === undefined) {
+    const partages = all[legacyKey(exchange, symbol)];
+    if (partages !== undefined) {
+      list = partages;
+      all[key] = partages;
+      try {
+        writeAll(all);
+      } catch {
+        /* best-effort : si l'écriture de reprise échoue, on rejoue quand même les dessins */
+      }
+    }
+  }
+
+  // Migration douce v1 (héritage « symbole » nu, implicitement Binance) : reprise vers
+  // la clé partagée (pour que les autres slots héritent) ET la clé du slot courant,
+  // puis retrait de l'entrée plate (comportement historique conservé).
   if (list === undefined && exchange === "binance") {
     const legacy = all[symbol];
     if (legacy !== undefined) {
       list = legacy;
       all[key] = legacy;
+      all[legacyKey(exchange, symbol)] = legacy;
       delete all[symbol];
       try {
         writeAll(all);
       } catch {
-        /* best-effort : si l'écriture de reprise échoue, on rejoue quand même les dessins */
+        /* best-effort */
       }
     }
   }

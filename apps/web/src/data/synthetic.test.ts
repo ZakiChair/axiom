@@ -26,6 +26,13 @@ describe("parseSyntheticSymbol", () => {
     });
   });
 
+  it("parse une capitalisation comme jambe virtuelle bornée", () => {
+    expect(parseSyntheticSymbol("mcap:TOTAL3|/|binance:SOLUSDT")).toEqual({
+      exA: "mcap", legA: "TOTAL3", exB: "binance", legB: "SOLUSDT", op: "/",
+    });
+    expect(parseSyntheticSymbol("mcap:INCONNU|/|binance:BTCUSDT")).toBeNull();
+  });
+
   it("rejette : op inconnu, segments manquants, jambe synthetic, jambe vide", () => {
     expect(parseSyntheticSymbol("binance:A|*|binance:B")).toBeNull();
     expect(parseSyntheticSymbol("binance:A|/|")).toBeNull();
@@ -94,6 +101,12 @@ describe("combineKlines", () => {
     const spread = combineKlines([c(1000, 1, 1, 1, 1)], [c(1000, 0, 1, 0, 1)], "-");
     expect(spread).toHaveLength(1);
   });
+
+  it("propage la clôture de la jambe A et écarte les résultats non finis", () => {
+    const fermee = { ...c(1000, 10, 12, 8, 11), closed: true };
+    expect(combineKlines([fermee], [c(1000, 2, 2, 2, 2)], "/")[0]?.closed).toBe(true);
+    expect(combineKlines([c(1000, Number.NaN, 12, 8, 11)], [c(1000, 2, 2, 2, 2)], "/")).toEqual([]);
+  });
 });
 
 function fakeAdapter(id: string, candles: Candle[]): IExchangeAdapter & { unsubs: number } {
@@ -124,6 +137,24 @@ describe("createSyntheticAdapter", () => {
 
   it("fetchKlines rejette un symbole invalide", async () => {
     await expect(syn.fetchKlines("nimporte", "1h", {})).rejects.toThrow(/invalide/);
+  });
+
+  it("délègue TOTAL autonome et compose une jambe mcap", async () => {
+    const mcap = fakeAdapter("synthetic", [c(1000, 300, 400, 200, 360)]);
+    const btc = fakeAdapter("binance", [c(1000, 10, 10, 10, 12)]);
+    const avecMcap = createSyntheticAdapter(
+      ((ex: string) => (ex === "mcap" ? mcap : btc)) as never,
+      mcap,
+    );
+
+    await expect(avecMcap.fetchKlines("TOTAL", "1d", {})).resolves.toEqual([
+      c(1000, 300, 400, 200, 360),
+    ]);
+    await expect(
+      avecMcap.fetchKlines("mcap:TOTAL|/|binance:BTCUSDT", "1d", {}),
+    ).resolves.toEqual([
+      { time: 1000, open: 30, high: 40, low: 20, close: 30, volume: 0 },
+    ]);
   });
 
   it("subscribeKline émet dès que les 2 jambes ont un état, et l'unsubscribe ferme les 2", () => {

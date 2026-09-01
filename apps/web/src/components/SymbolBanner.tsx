@@ -24,6 +24,8 @@ import {
   type TickerUpdate,
 } from "../data/ticker";
 import { formatSyntheticLabel, parseSyntheticSymbol } from "../data/synthetic";
+import { estSymboleCapitalisation } from "../data/mcap";
+import { sourcesCapitalisationStore, type SourceCapitalisation } from "../data/mcapCandles";
 import { DENOMINATEURS, estRatio, symboleRatio, type DenominateurId } from "../data/ratio";
 import { formatCompact, formatCountdown, formatPct, formatPrice } from "../lib/format";
 
@@ -88,6 +90,23 @@ export function rolling24h(candles: Candle[], referenceMs: number): Rolling24h |
   return count === 0 ? null : { high, low, volume };
 }
 
+/**
+ * Libellé de provenance d'une série de capitalisation, à partir de la source RÉELLEMENT
+ * servie par `capitalisationAdapter.fetchKlines` (jamais re-devinée par disponibilité).
+ * `undefined` (fetch pas encore abouti) → null : le bandeau se tait plutôt que de mentir.
+ * PURE & testée.
+ */
+export function libelleSourceCapitalisation(
+  source: SourceCapitalisation | undefined,
+  timeframe: Timeframe,
+): string | null {
+  if (source === undefined) return null;
+  if (source === "cmc") {
+    return `CoinMarketCap · ${timeframe === "1h" || timeframe === "4h" ? timeframe : "daily"}`;
+  }
+  return source === "ccdata" ? "CCData · daily" : "CoinGecko · local";
+}
+
 /** Souscription ticker du bandeau, explicitement liée à la source du marché affiché. */
 export function subscribeSymbolBannerTicker(
   exchange: ExchangeId,
@@ -138,7 +157,11 @@ function BoutonsRatio({
 
   const actif = estRatio(symbol, exchange);
   // Base de composition : la jambe A du ratio actif, sinon le marché courant.
-  const baseEx = actif ? actif.spec.exA : exchange;
+  const baseEx: ExchangeId = actif?.spec.exA === "mcap"
+    ? "synthetic"
+    : actif
+      ? actif.spec.exA
+      : exchange;
   const baseSym = actif ? actif.spec.legA : symbol;
 
   /** Pose le ratio ÷denom (sans jamais détoggler). Sans cible composable : rien. */
@@ -153,8 +176,8 @@ function BoutonsRatio({
   const basculer = (denom: DenominateurId): void => {
     if (actif !== null && actif.denom === denom) {
       marketStore.getState().setMarket({
-        exchange: actif.spec.exA,
-        symbol: actif.spec.legA,
+        exchange: baseEx,
+        symbol: baseSym,
         timeframe,
       });
       return;
@@ -263,8 +286,24 @@ export function SymbolBanner() {
   const exchange = useStore(marketStore, (s) => s.exchange);
   const symbol = useStore(marketStore, (s) => s.symbol);
   const timeframe = useStore(marketStore, (s) => s.timeframe);
+  useStore(marketStore, (s) => s.dataLoad.status);
   const syntheticSpec = exchange === "synthetic" ? parseSyntheticSymbol(symbol) : null;
   const bannerSymbol = syntheticSpec ? formatSyntheticLabel(syntheticSpec) : symbol;
+  const estCapitalisation =
+    estSymboleCapitalisation(symbol) || syntheticSpec?.exA === "mcap" || syntheticSpec?.exB === "mcap";
+  // Pour un ratio, la jambe mcap porte la provenance (fetchKlines est appelé avec elle).
+  const cleSource = syntheticSpec?.exA === "mcap"
+    ? syntheticSpec.legA
+    : syntheticSpec?.exB === "mcap"
+      ? syntheticSpec.legB
+      : symbol;
+  const sourceServie = useStore(
+    sourcesCapitalisationStore,
+    (s) => s.sources[`${cleSource}:${timeframe}`],
+  );
+  const sourceCapitalisation = estCapitalisation
+    ? libelleSourceCapitalisation(sourceServie, timeframe)
+    : null;
   const hasClosedTradfiLeg = syntheticSpec !== null && (
     (syntheticSpec.exA === "twelvedata" && !isMarketOpen(classifyTradfi(syntheticSpec.legA), new Date())) ||
     (syntheticSpec.exB === "twelvedata" && !isMarketOpen(classifyTradfi(syntheticSpec.legB), new Date()))
@@ -352,6 +391,9 @@ export function SymbolBanner() {
   return (
     <div className="pointer-events-none absolute left-2 top-2 z-10 flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-border bg-surface/80 px-2.5 py-1 text-xs tabular-nums text-text-dim backdrop-blur-sm">
       <span className="font-semibold text-text">{bannerSymbol}</span>
+      {sourceCapitalisation !== null && (
+        <span className="text-text-dim">{sourceCapitalisation}</span>
+      )}
       {hasClosedTradfiLeg && (
         <span className="text-text-dim">jambe tradfi : dernier close (marché fermé)</span>
       )}

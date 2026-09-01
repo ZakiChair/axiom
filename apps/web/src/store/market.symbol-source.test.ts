@@ -45,6 +45,42 @@ describe("setSymbol — source cohérente avec le symbole", () => {
     expect(store.getState().symbol).toBe(SOL_BTC);
   });
 
+  it("reste sur synthetic pour une capitalisation autonome", () => {
+    const store = createMarketStore({ exchange: "synthetic", symbol: ETH_BTC, timeframe: "1d" });
+
+    store.getState().setSymbol("TOTAL2");
+
+    expect(store.getState().exchange).toBe("synthetic");
+    expect(store.getState().symbol).toBe("TOTAL2");
+  });
+
+  it("route une saisie directe TOTAL ou mcap vers synthetic en 1d", () => {
+    const store = createMarketStore({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1m" });
+
+    store.getState().setSymbol("TOTAL");
+    expect(store.getState()).toMatchObject({ exchange: "synthetic", symbol: "TOTAL", timeframe: "1d" });
+
+    store.setState({ exchange: "kraken", symbol: "ETHUSD", timeframe: "1h" });
+    store.getState().setSymbol("mcap:TOTAL2|/|binance:ETHUSDT");
+    expect(store.getState()).toMatchObject({
+      exchange: "synthetic",
+      symbol: "mcap:TOTAL2|/|binance:ETHUSDT",
+      timeframe: "1d",
+    });
+  });
+
+  it("quitte un ratio mcap vers TOTAL mais retombe sur Binance pour un ticker normal", () => {
+    const ratio = "mcap:TOTAL3|/|binance:BTCUSDT";
+    const store = createMarketStore({ exchange: "synthetic", symbol: ratio, timeframe: "1d" });
+
+    store.getState().setSymbol("TOTAL3");
+    expect(store.getState().exchange).toBe("synthetic");
+
+    store.setState({ exchange: "synthetic", symbol: ratio });
+    store.getState().setSymbol("SOLUSDT");
+    expect(store.getState().exchange).toBe("binance");
+  });
+
   it("préserve la séquence setExchange('synthetic') puis setSymbol(SYN) (constructeur SYN, restauration)", () => {
     const store = createMarketStore({ exchange: "binance", symbol: "BTCUSDT" });
 

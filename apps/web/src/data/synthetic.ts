@@ -1,5 +1,5 @@
 /**
- * Séries synthétiques (SYN) — parse du symbole encodé et composition de bougies.
+ * Séries synthétiques (SYN) — TOTAL* autonomes, parse des ratios/spreads et composition OHLC.
  *
  * Encodage : `exA:LEGA|op|exB:LEGB` (ex. `binance:ETHUSDT|/|binance:BTCUSDT`).
  * Le séparateur `|` n'apparaît dans aucun ticker ; `:` sépare source/jambe au
@@ -11,29 +11,31 @@
  * Jambe B absente d'un bucket → forward-fill de son dernier close (marché fermé).
  */
 import type { Candle, ExchangeId, IExchangeAdapter } from "@axiom/types";
+import { estSymboleCapitalisation } from "./mcap";
 
 export type SyntheticOp = "/" | "-";
+export type SyntheticLegSource = Exclude<ExchangeId, "synthetic"> | "mcap";
 
 export interface SyntheticSpec {
-  exA: ExchangeId;
+  exA: SyntheticLegSource;
   legA: string;
-  exB: ExchangeId;
+  exB: SyntheticLegSource;
   legB: string;
   op: SyntheticOp;
 }
 
-/** Sources autorisées comme jambe (toute source câblée non synthétique). */
+/** Sources autorisées comme jambe : marchés câblés historiques + pseudo-source `mcap`. */
 const LEG_EXCHANGES: ReadonlySet<string> = new Set([
-  "binance", "kraken", "coinbase", "twelvedata", "mexc",
+  "binance", "kraken", "coinbase", "twelvedata", "mexc", "mcap",
 ]);
 
-function splitLeg(leg: string): { ex: ExchangeId; sym: string } | null {
+function splitLeg(leg: string): { ex: SyntheticLegSource; sym: string } | null {
   const i = leg.indexOf(":");
   if (i <= 0 || i >= leg.length - 1) return null;
   const ex = leg.slice(0, i);
   const sym = leg.slice(i + 1);
-  if (!LEG_EXCHANGES.has(ex)) return null;
-  return { ex: ex as ExchangeId, sym };
+  if (!LEG_EXCHANGES.has(ex) || (ex === "mcap" && !estSymboleCapitalisation(sym))) return null;
+  return { ex: ex as SyntheticLegSource, sym };
 }
 
 export function parseSyntheticSymbol(symbol: string): SyntheticSpec | null {
@@ -80,12 +82,14 @@ export function combineKlines(a: Candle[], b: Candle[], op: SyntheticOp): Candle
     const bl = exact ? lastB.low : lastB.close;
     const bc = lastB.close;
 
+    if (![ca.open, ca.high, ca.low, ca.close, bo, bh, bl, bc].every(Number.isFinite)) continue;
     if (op === "/" && (bo === 0 || bh === 0 || bl === 0 || bc === 0)) continue;
 
     const o = apply(op, ca.open, bo);
     const h = apply(op, ca.high, bh);
     const l = apply(op, ca.low, bl);
     const cl = apply(op, ca.close, bc);
+    if (![o, h, l, cl].every(Number.isFinite)) continue;
     out.push({
       time: ca.time,
       open: o,
@@ -93,23 +97,29 @@ export function combineKlines(a: Candle[], b: Candle[], op: SyntheticOp): Candle
       low: Math.min(o, h, l, cl),
       close: cl,
       volume: 0,
+      ...(ca.closed === undefined ? {} : { closed: ca.closed }),
     });
   }
   return out;
 }
 
 /**
- * Adapter virtuel : compose 2 jambes via les adaptateurs réels, injectés pour
- * éviter l'import circulaire avec adapters.ts (qui nous enregistre).
+ * Adapter virtuel : délègue les TOTAL* autonomes ou compose 2 jambes via les adaptateurs
+ * injectés pour éviter l'import circulaire avec adapters.ts (qui nous enregistre).
  * subscribeTrades est un no-op : orderflow/footprint/CVD/DOM inertes sur SYN.
  */
 export function createSyntheticAdapter(
-  resolve: (ex: ExchangeId) => IExchangeAdapter
+  resolve: (ex: SyntheticLegSource) => IExchangeAdapter,
+  standalone?: IExchangeAdapter,
 ): IExchangeAdapter {
   return {
     id: "synthetic",
 
     async fetchKlines(symbol, tf, opts) {
+      if (estSymboleCapitalisation(symbol)) {
+        if (standalone === undefined) throw new Error(`Série de capitalisation indisponible : ${symbol}`);
+        return standalone.fetchKlines(symbol, tf, opts);
+      }
       const spec = parseSyntheticSymbol(symbol);
       if (spec === null) throw new Error(`Symbole synthétique invalide : ${symbol}`);
       const [a, b] = await Promise.all([
@@ -120,6 +130,9 @@ export function createSyntheticAdapter(
     },
 
     subscribeKline(symbol, tf, cb) {
+      if (estSymboleCapitalisation(symbol)) {
+        return standalone?.subscribeKline(symbol, tf, cb) ?? (() => {});
+      }
       const spec = parseSyntheticSymbol(symbol);
       if (spec === null) return () => {};
       let lastA: Candle | null = null;

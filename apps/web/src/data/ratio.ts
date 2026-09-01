@@ -14,11 +14,12 @@
  * par le moteur SYN (twelvedata) se compose contre la RÉFÉRENCE CANONIQUE Binance
  * (`REF_CANONIQUE`) — ex. or ÷ BTC = `twelvedata:GLD|/|binance:BTCUSDT`. `estRatio`
  * reconnaît symétriquement une jambe B sur un AUTRE exchange que la jambe A, à condition
- * qu'elle soit exactement la réf canonique de SON exchange. La source virtuelle
- * `synthetic` reste exclue dans les deux sens (pas de SYN imbriqué).
+ * qu'elle soit exactement la réf canonique de SON exchange. Les SYN composés restent
+ * exclus comme jambes ; les séries autonomes TOTAL* passent par la jambe virtuelle `mcap`.
  */
 import type { ExchangeId } from "@axiom/types";
 import { encodeSyntheticSymbol, parseSyntheticSymbol, type SyntheticSpec } from "./synthetic";
+import { estSymboleCapitalisation } from "./mcap";
 import { splitSymbol } from "./symbol";
 
 /** Dénominateurs proposés par les toggles de ratio, dans l'ordre d'affichage. */
@@ -50,7 +51,7 @@ export const REF_CANONIQUE: Record<DenominateurId, { ex: "binance"; sym: string 
 
 /**
  * Symbole SYN du ratio X/DENOM pour le marché courant, ou null si non basculable :
- * source virtuelle `synthetic` (jamais de SYN imbriqué), source sans réf ni composition
+ * SYN déjà composé (les TOTAL* autonomes sont l'exception), source sans réf ni composition
  * cross-source (bybit, okx…), base déjà égale au dénominateur, cotation déjà dans le
  * dénominateur (ex. ETHBTC ÷BTC), ou symbole non découpable (splitSymbol throw).
  *
@@ -66,9 +67,19 @@ export function symboleRatio(
   exchange: ExchangeId,
   denom: DenominateurId,
 ): string | null {
-  // Garde `synthetic` EN PREMIER : un SYN encodé contient un `/` que splitSymbol
-  // découperait à tort sans lever, et il ne doit JAMAIS redevenir une jambe.
-  if (exchange === "synthetic") return null;
+  // Garde `synthetic` EN PREMIER : seul un TOTAL* autonome devient une jambe `mcap` ;
+  // un SYN déjà encodé ne doit JAMAIS être imbriqué comme nouvelle jambe.
+  if (exchange === "synthetic") {
+    if (!estSymboleCapitalisation(symbol)) return null;
+    const canon = REF_CANONIQUE[denom];
+    return encodeSyntheticSymbol({
+      exA: "mcap",
+      legA: symbol,
+      exB: canon.ex,
+      legB: canon.sym,
+      op: "/",
+    });
+  }
 
   const ref = REFS[denom][exchange];
   if (ref === undefined) {
@@ -120,11 +131,12 @@ export function estRatio(symbol: string, exchange: ExchangeId): RatioActif | nul
   if (exchange !== "synthetic") return null;
   const spec = parseSyntheticSymbol(symbol);
   if (spec === null) return null;
-  if (spec.op !== "/") return null;
+  const exB = spec.exB;
+  if (spec.op !== "/" || exB === "mcap") return null;
   const denom = DENOMINATEURS.find((d) =>
-    spec.exB === spec.exA
-      ? spec.legB === REFS[d][spec.exB]
-      : spec.exB === REF_CANONIQUE[d].ex && spec.legB === REF_CANONIQUE[d].sym,
+    exB === spec.exA
+      ? spec.legB === REFS[d][exB]
+      : exB === REF_CANONIQUE[d].ex && spec.legB === REF_CANONIQUE[d].sym,
   );
   return denom === undefined ? null : { spec, denom };
 }

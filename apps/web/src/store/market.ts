@@ -9,6 +9,7 @@
 import { createStore } from "zustand/vanilla";
 import type { StoreApi } from "zustand/vanilla";
 import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
+import { estSymboleCapitalisation } from "../data/mcap";
 import { parseSyntheticSymbol } from "../data/synthetic";
 
 /**
@@ -147,12 +148,12 @@ function loadingState(previous: MarketDataLoadState, requested: MarketIdentity):
 /**
  * Source cohérente avec le symbole demandé, lors d'un changement de SYMBOLE SEUL.
  *
- * `synthetic` n'est pas une vraie source : son adaptateur ne sait lire que les symboles
- * SYN encodés (`binance:ETHUSDT|/|binance:BTCUSDT`). Les appelants qui ne posent QUE le
- * symbole (recherche de paires, watchlist, navigation, playbooks) laisseraient sinon la
- * source virtuelle en place et l'adaptateur SYN recevrait un ticker normal — backfill
- * impossible. Quitter un ratio = revenir à la source de sa jambe A (même sémantique que
- * le détoggle ÷BTC) ; repli Binance si l'ancien symbole n'était pas un SYN décodable.
+ * `synthetic` n'est pas une vraie source : son adaptateur ne lit que les symboles SYN
+ * encodés ou les TOTAL* autonomes. Les appelants qui ne posent QUE le symbole (recherche
+ * de paires, watchlist, navigation, playbooks) laisseraient sinon la source virtuelle en
+ * place face à un ticker normal — backfill impossible. Quitter un ratio = revenir à la
+ * source de sa jambe A ; une jambe `mcap` revient à `synthetic`, et un ticker normal à
+ * Binance si l'ancien symbole n'indique aucune source réelle exploitable.
  *
  * Volontairement absent de `setMarket`/`setExchange` : une source posée EXPLICITEMENT
  * doit gagner, sinon la séquence `setExchange("synthetic")` puis `setSymbol(SYN)` (SYN
@@ -162,9 +163,14 @@ function exchangeForSymbol(
   state: Pick<MarketState, "exchange" | "symbol">,
   nextSymbol: string,
 ): ExchangeId {
+  if (estSymboleCapitalisation(nextSymbol) || parseSyntheticSymbol(nextSymbol) !== null) {
+    return "synthetic";
+  }
   if (state.exchange !== "synthetic") return state.exchange;
-  if (parseSyntheticSymbol(nextSymbol) !== null) return "synthetic";
-  return parseSyntheticSymbol(state.symbol)?.exA ?? "binance";
+  const sourcePrecedente = parseSyntheticSymbol(state.symbol)?.exA;
+  return sourcePrecedente === undefined || sourcePrecedente === "mcap"
+    ? "binance"
+    : sourcePrecedente;
 }
 
 /** Calcule le buffer suivant ; `null` signifie tick hors-ordre à ignorer. */
@@ -221,10 +227,14 @@ export function createMarketStore(init: MarketStoreInit = {}): MarketStore {
     setSymbol: (nextSymbol) => {
       const state = get();
       const symbol = normalizeMarketSymbol(nextSymbol);
+      const spec = parseSyntheticSymbol(symbol);
+      const capitalisation =
+        estSymboleCapitalisation(symbol) || spec?.exA === "mcap" || spec?.exB === "mcap";
       state.setMarket({
         ...marketIdentity(state),
         symbol,
         exchange: exchangeForSymbol(state, symbol),
+        timeframe: capitalisation ? "1d" : state.timeframe,
       });
     },
     setTimeframe: (nextTimeframe) => {

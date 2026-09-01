@@ -1,7 +1,11 @@
 import { createStore } from "zustand/vanilla";
+import { estSymboleCapitalisation } from "../data/mcap";
 import { parseSyntheticSymbol } from "../data/synthetic";
 
 export const SYNTHETIC_PRESETS: { label: string; symbol: string }[] = [
+  { label: "TOTAL", symbol: "TOTAL" },
+  { label: "TOTAL2 · hors BTC", symbol: "TOTAL2" },
+  { label: "TOTAL3 · hors BTC et ETH", symbol: "TOTAL3" },
   { label: "ETH / BTC", symbol: "binance:ETHUSDT|/|binance:BTCUSDT" },
   { label: "SOL / BTC", symbol: "binance:SOLUSDT|/|binance:BTCUSDT" },
   { label: "BNB / BTC", symbol: "binance:BNBUSDT|/|binance:BTCUSDT" },
@@ -15,10 +19,14 @@ export interface SyntheticsState {
   setRecents: (symbols: string[]) => void;
 }
 
+function estSymboleSynthetiqueValide(symbol: string): boolean {
+  return estSymboleCapitalisation(symbol) || parseSyntheticSymbol(symbol) !== null;
+}
+
 function normalizeRecents(symbols: string[]): string[] {
   const out: string[] = [];
   for (const symbol of symbols) {
-    if (parseSyntheticSymbol(symbol) === null) continue;
+    if (!estSymboleSynthetiqueValide(symbol)) continue;
     if (!out.includes(symbol)) out.push(symbol);
     if (out.length >= 8) break;
   }
@@ -29,7 +37,7 @@ export const syntheticsStore = createStore<SyntheticsState>((set, get) => ({
   recents: [],
 
   addRecent: (symbol) => {
-    if (parseSyntheticSymbol(symbol) === null) return;
+    if (!estSymboleSynthetiqueValide(symbol)) return;
     set({ recents: normalizeRecents([symbol, ...get().recents.filter((s) => s !== symbol)]) });
   },
 

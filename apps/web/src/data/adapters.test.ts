@@ -28,6 +28,12 @@ describe("syntheticTimeframes", () => {
       "1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w",
     ]);
   });
+
+  it("borne une jambe de capitalisation aux unités disponibles", () => {
+    expect(syntheticTimeframes("mcap", "binance")).toEqual([
+      "1h", "4h", "1d", "1w", "1M", "3M", "6M", "12M",
+    ]);
+  });
 });
 
 describe("supportedTimeframesFor", () => {
@@ -39,6 +45,12 @@ describe("supportedTimeframesFor", () => {
     expect(supportedTimeframesFor("synthetic", "binance:A|/|kraken:B")).toEqual([
       "1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w",
     ]);
+  });
+
+  it("expose les huit unités demandées pour TOTAL et ses ratios Binance", () => {
+    const attendus = ["1h", "4h", "1d", "1w", "1M", "3M", "6M", "12M"];
+    expect(supportedTimeframesFor("synthetic", "TOTAL")).toEqual(attendus);
+    expect(supportedTimeframesFor("synthetic", "mcap:TOTAL2|/|binance:ETHUSDT")).toEqual(attendus);
   });
 
   it("renvoie une liste vide pour un symbole synthetic invalide", () => {

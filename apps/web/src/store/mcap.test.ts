@@ -14,7 +14,9 @@ import {
   PLAFOND_DOMINANCES,
   lireHistoriquePersiste,
   mcapStore,
+  seedMacroHistoryFromPersistedMcap,
 } from "./mcap";
+import { macroHistoryStore } from "./macroHistory";
 
 const T0 = Date.parse("2026-07-29T00:00:00Z");
 
@@ -72,6 +74,7 @@ beforeEach(() => {
       return stockage.size;
     },
   };
+  macroHistoryStore.setState({ snapshots: [] });
   mcapStore.setState({
     hist: null,
     marches: [],
@@ -216,6 +219,26 @@ describe("demarrerBackfill — reconstruction recalibrée", () => {
     const d = deps();
     await mcapStore.getState().demarrerBackfill(d);
     expect(d.fetchMarchesEtGlobal).not.toHaveBeenCalled();
+  });
+});
+
+describe("seedMacroHistoryFromPersistedMcap", () => {
+  it("restaure le backfill CAP dans le chart après un redémarrage", async () => {
+    await mcapStore.getState().demarrerBackfill(deps());
+    macroHistoryStore.setState({ snapshots: [] });
+
+    seedMacroHistoryFromPersistedMcap();
+
+    const snapshots = macroHistoryStore.getState().snapshots;
+    expect(snapshots).toHaveLength(5);
+    expect(snapshots.at(-1)).toMatchObject({ total: 1_000 });
+    seedMacroHistoryFromPersistedMcap();
+    expect(macroHistoryStore.getState().snapshots).toHaveLength(5);
+  });
+
+  it("reste sans effet si aucun backfill n'est persisté", () => {
+    seedMacroHistoryFromPersistedMcap();
+    expect(macroHistoryStore.getState().snapshots).toEqual([]);
   });
 });
 

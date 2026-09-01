@@ -22,7 +22,13 @@ import { krakenAdapter } from "./kraken";
 import { coinbaseAdapter } from "./coinbase";
 import { twelveDataAdapter } from "./twelvedata";
 import { mexcAdapter } from "./mexc";
-import { createSyntheticAdapter, parseSyntheticSymbol } from "./synthetic";
+import { capitalisationAdapter, TIMEFRAMES_CAPITALISATION } from "./mcapCandles";
+import { estSymboleCapitalisation } from "./mcap";
+import {
+  createSyntheticAdapter,
+  parseSyntheticSymbol,
+  type SyntheticLegSource,
+} from "./synthetic";
 
 /** Adaptateurs câblés (crypto : Binance/Bybit/OKX/Hyperliquid/Kraken/Coinbase/MEXC ; tradfi : Twelve Data). */
 const ADAPTERS: Partial<Record<ExchangeId, IExchangeAdapter>> = {
@@ -34,7 +40,10 @@ const ADAPTERS: Partial<Record<ExchangeId, IExchangeAdapter>> = {
   coinbase: coinbaseAdapter,
   twelvedata: twelveDataAdapter,
   mexc: mexcAdapter,
-  synthetic: createSyntheticAdapter((ex) => getAdapter(ex)),
+  synthetic: createSyntheticAdapter(
+    (ex) => ex === "mcap" ? capitalisationAdapter : getAdapter(ex),
+    capitalisationAdapter,
+  ),
 };
 
 /** Adaptateur de la source demandée ; LÈVE si la source n'est pas câblée (pas de repli muet). */
@@ -77,16 +86,21 @@ export const SUPPORTED_TIMEFRAMES: Partial<Record<ExchangeId, Timeframe[]>> = {
 
 const SYNTHETIC_TIMEFRAME_ORDER = SUPPORTED_TIMEFRAMES.binance ?? [];
 
+function timeframesJambe(ex: SyntheticLegSource): Timeframe[] {
+  return ex === "mcap" ? TIMEFRAMES_CAPITALISATION : SUPPORTED_TIMEFRAMES[ex] ?? [];
+}
+
 /** TF d'un synthétique = intersection des 2 jambes, dans l'ordre de la liste Binance. */
-export function syntheticTimeframes(exA: ExchangeId, exB: ExchangeId): Timeframe[] {
-  const a = new Set(SUPPORTED_TIMEFRAMES[exA] ?? []);
-  const b = new Set(SUPPORTED_TIMEFRAMES[exB] ?? []);
+export function syntheticTimeframes(exA: SyntheticLegSource, exB: SyntheticLegSource): Timeframe[] {
+  const a = new Set(timeframesJambe(exA));
+  const b = new Set(timeframesJambe(exB));
   return SYNTHETIC_TIMEFRAME_ORDER.filter((tf) => a.has(tf) && b.has(tf));
 }
 
 /** Point d'entrée unique du grisage TF : table statique, ou intersection si SYN. */
 export function supportedTimeframesFor(exchange: ExchangeId, symbol: string): Timeframe[] {
   if (exchange !== "synthetic") return SUPPORTED_TIMEFRAMES[exchange] ?? [];
+  if (estSymboleCapitalisation(symbol)) return TIMEFRAMES_CAPITALISATION;
   const spec = parseSyntheticSymbol(symbol);
   if (spec === null) return [];
   return syntheticTimeframes(spec.exA, spec.exB);

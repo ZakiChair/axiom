@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { syntheticsStore } from "./synthetics";
+import { SYNTHETIC_PRESETS, syntheticsStore } from "./synthetics";
 
 beforeEach(() => {
   syntheticsStore.getState().setRecents([]);
@@ -28,6 +28,14 @@ describe("syntheticsStore", () => {
     expect(syntheticsStore.getState().recents).toHaveLength(8);
     expect(syntheticsStore.getState().recents[0]).toBe("binance:A9|/|binance:B9");
     expect(syntheticsStore.getState().recents[7]).toBe("binance:A2|/|binance:B2");
+  });
+
+  it("accepte les trois capitalisations autonomes", () => {
+    syntheticsStore.getState().setRecents(["TOTAL", "TOTAL2", "TOTAL3"]);
+    expect(syntheticsStore.getState().recents).toEqual(["TOTAL", "TOTAL2", "TOTAL3"]);
+    expect(SYNTHETIC_PRESETS.map((preset) => preset.symbol)).toEqual(
+      expect.arrayContaining(["TOTAL", "TOTAL2", "TOTAL3"]),
+    );
   });
 
   it("ignore les symboles invalides à l'ajout et à l'hydratation", () => {

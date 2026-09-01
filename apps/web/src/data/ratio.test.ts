@@ -67,7 +67,13 @@ describe("symboleRatio — cible SYN X/DENOM pour le marché courant", () => {
     }
   });
 
-  it("refuse la source virtuelle synthetic, pour tous les dénominateurs", () => {
+  it("compose TOTAL, TOTAL2 et TOTAL3 contre les références canoniques", () => {
+    expect(symboleRatio("TOTAL", "synthetic", "BTC")).toBe("mcap:TOTAL|/|binance:BTCUSDT");
+    expect(symboleRatio("TOTAL2", "synthetic", "ETH")).toBe("mcap:TOTAL2|/|binance:ETHUSDT");
+    expect(symboleRatio("TOTAL3", "synthetic", "SOL")).toBe("mcap:TOTAL3|/|binance:SOLUSDT");
+  });
+
+  it("refuse les synthétiques qui ne sont pas une capitalisation autonome", () => {
     for (const denom of DENOMINATEURS) {
       expect(symboleRatio("binance:ETHUSDT|/|binance:BTCUSDT", "synthetic", denom)).toBeNull();
     }
@@ -110,6 +116,13 @@ describe("estRatio — reconnaît un ratio posé par le toggle ET son dénominat
     expect(estRatio("kraken:SOLUSD|/|binance:ETHUSDT", "synthetic")?.denom).toBe("ETH");
   });
 
+  it("reconnaît les ratios de capitalisation et conserve leur jambe mcap", () => {
+    const actif = estRatio("mcap:TOTAL3|/|binance:SOLUSDT", "synthetic");
+    expect(actif?.denom).toBe("SOL");
+    expect(actif?.spec.exA).toBe("mcap");
+    expect(actif?.spec.legA).toBe("TOTAL3");
+  });
+
   it("refuse un exB cross-source qui n'est pas l'exchange canonique (binance)", () => {
     // legB = BTCUSD = réf kraken : valable en MÊME source, jamais en cross-source.
     expect(estRatio("binance:ETHUSDT|/|kraken:BTCUSD", "synthetic")).toBeNull();
@@ -145,7 +158,7 @@ describe("estRatio — reconnaît un ratio posé par le toggle ET son dénominat
   it("recomposition tradfi : la jambe A d'un ratio cross-source rebascule ÷ETH ⇄ ÷SOL", () => {
     const actif = estRatio("twelvedata:GLD|/|binance:BTCUSDT", "synthetic");
     expect(actif).not.toBeNull();
-    if (actif === null) return;
+    if (actif === null || actif.spec.exA === "mcap") return;
     // Même patron que le cas same-source : SymbolBanner recompose depuis exA/legA.
     expect(symboleRatio(actif.spec.legA, actif.spec.exA, "ETH")).toBe(
       "twelvedata:GLD|/|binance:ETHUSDT",
@@ -155,7 +168,7 @@ describe("estRatio — reconnaît un ratio posé par le toggle ET son dénominat
   it("recomposition : depuis un ratio actif, la jambe A sert de base à un autre dénominateur", () => {
     const actif = estRatio("binance:BNBUSDT|/|binance:SOLUSDT", "synthetic");
     expect(actif).not.toBeNull();
-    if (actif === null) return;
+    if (actif === null || actif.spec.exA === "mcap") return;
     expect(actif.denom).toBe("SOL");
     // Le SYN courant n'est pas basculable tel quel (source synthetic) : c'est la jambe A
     // qui se recompose — patron utilisé par SymbolBanner pour passer d'un ÷X à un ÷Y.

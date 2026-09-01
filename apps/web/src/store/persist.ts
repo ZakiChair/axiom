@@ -66,6 +66,7 @@ import { liqEstStore, LEVIERS } from "../chart/liquidationEstimates";
 import { distOverlayStore } from "../chart/distLignes";
 import { windowManagerStore, WINDOW_REGISTRY, type EtatFenetre } from "./windowManager";
 import { syntheticsStore } from "./synthetics";
+import { estSymboleCapitalisation } from "../data/mcap";
 import { parseSyntheticSymbol } from "../data/synthetic";
 
 const CHART_KEY = "axiom:chartState:v1";
@@ -511,12 +512,13 @@ function hydrateChart(): void {
   const persisted = readJson<Partial<ChartState>>(CHART_KEY);
 
   if (persisted) {
-    // Un état `synthetic` n'est cohérent qu'avec un symbole encodé parsable ;
+    // Un état `synthetic` exige un symbole encodé parsable ou un TOTAL* autonome ;
     // sinon (état corrompu), on ignore le couple exchange+symbol persisté
     // (chart bloqué à chaque reload autrement : adapter synthétique × ticker normal).
     const syntheticIncoherent =
       persisted.exchange === "synthetic" &&
-      (typeof persisted.symbol !== "string" || parseSyntheticSymbol(persisted.symbol) === null);
+      (typeof persisted.symbol !== "string" ||
+        (!estSymboleCapitalisation(persisted.symbol) && parseSyntheticSymbol(persisted.symbol) === null));
     if (
       !syntheticIncoherent &&
       typeof persisted.exchange === "string" &&

@@ -5,6 +5,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { WebGLSyncSpike } from "./spike/WebGLSyncSpike";
 import { enablePersistence, hydrateStores } from "./store/persist";
 import { startMacroHistoryPolling } from "./store/macroHistory";
+import { seedMacroHistoryFromPersistedMcap } from "./store/mcap";
 import { startRegimePolling } from "./store/regime";
 // Effet de bord du module : pose [data-theme] sur <html> dès l'import, AVANT le
 // premier rendu (pas de flash « dark -> thème persisté » au rechargement).
@@ -14,6 +15,7 @@ import "./index.css";
 // Restaure l'état persisté AVANT le rendu (stores à jour dès le premier montage),
 // puis active la sauvegarde automatique sur changement.
 hydrateStores();
+seedMacroHistoryFromPersistedMcap();
 enablePersistence();
 
 // Échantillonnage central de la capitalisation totale crypto (CoinGecko n'expose

@@ -243,6 +243,11 @@ function semerMacroHistory(hist: HistoriqueMcap): void {
   macroHistoryStore.getState().seed(points);
 }
 
+export function seedMacroHistoryFromPersistedMcap(): void {
+  const hist = lireHistoriquePersiste();
+  if (hist !== null) semerMacroHistory(hist);
+}
+
 /**
  * Un échec vaut-il une nouvelle tentative ? Le 429 explicite (curl, daemon) ET le rejet
  * réseau (`STATUT_RESEAU`) — car un 429 CoinGecko arrive au navigateur en erreur CORS,

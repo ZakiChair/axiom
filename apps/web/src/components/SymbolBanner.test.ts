@@ -9,7 +9,12 @@
  */
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import type { Candle } from "@axiom/types";
-import { nextCloseTs, rolling24h, subscribeSymbolBannerTicker } from "./SymbolBanner";
+import {
+  libelleSourceCapitalisation,
+  nextCloseTs,
+  rolling24h,
+  subscribeSymbolBannerTicker,
+} from "./SymbolBanner";
 
 const { subscribeTickersMock } = vi.hoisted(() => ({
   subscribeTickersMock: vi.fn(() => () => {}),
@@ -89,5 +94,16 @@ describe("subscribeSymbolBannerTicker", () => {
     subscribeSymbolBannerTicker("synthetic", "binance:BTCUSDT|/|twelvedata:GLD", vi.fn());
 
     expect(subscribeTickersMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("libelleSourceCapitalisation", () => {
+  it("étiquette la source réellement servie et se tait tant qu'elle est inconnue", () => {
+    expect(libelleSourceCapitalisation(undefined, "1d")).toBeNull();
+    expect(libelleSourceCapitalisation("cmc", "1h")).toBe("CoinMarketCap · 1h");
+    expect(libelleSourceCapitalisation("cmc", "4h")).toBe("CoinMarketCap · 4h");
+    expect(libelleSourceCapitalisation("cmc", "1w")).toBe("CoinMarketCap · daily");
+    expect(libelleSourceCapitalisation("ccdata", "1d")).toBe("CCData · daily");
+    expect(libelleSourceCapitalisation("coingecko", "1h")).toBe("CoinGecko · local");
   });
 });

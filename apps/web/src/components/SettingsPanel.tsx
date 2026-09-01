@@ -26,6 +26,7 @@ import { soSoValueKeyStore } from "../store/sosovalue";
 import { finnhubKeyStore } from "../store/finnhub";
 import { etherscanKeyStore } from "../store/etherscan";
 import { coingeckoKeyStore } from "../store/coingecko";
+import { ccdataKeyStore } from "../store/ccdata";
 import { risqueStore } from "../store/risque";
 import { refSymbolStore } from "../store/refSymbol";
 import { fetchPairs } from "../data/pairs";
@@ -507,6 +508,10 @@ export function SettingsPanel() {
   const cgSetKey = useStore(coingeckoKeyStore, (s) => s.setKey);
   const cgClearKey = useStore(coingeckoKeyStore, (s) => s.clearKey);
 
+  const ccdataHasKey = useStore(ccdataKeyStore, (s) => s.hasKey);
+  const ccdataSetKey = useStore(ccdataKeyStore, (s) => s.setKey);
+  const ccdataClearKey = useStore(ccdataKeyStore, (s) => s.clearKey);
+
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Échap ferme — écouteur actif UNIQUEMENT quand le panneau est ouvert.
@@ -656,6 +661,17 @@ export function SettingsPanel() {
               hasKey={etherscanHasKey}
               onSave={etherscanSetKey}
               onClear={etherscanClearKey}
+            />
+            <ApiKeyField
+              name="CoinDesk Data (CCData, repli)"
+              purpose="Repli optionnel pour TOTAL/TOTAL2/TOTAL3 si la source publique CoinMarketCap devient indisponible. Aucune clé n'est requise en fonctionnement normal."
+              domain="min-api.cryptocompare.com"
+              signupUrl="https://developers.coindesk.com/"
+              signupLabel="Clé gratuite"
+              placeholder="Clé API CoinDesk Data"
+              hasKey={ccdataHasKey}
+              onSave={ccdataSetKey}
+              onClear={ccdataClearKey}
             />
             <ApiKeyField
               name="CoinGecko (Demo)"

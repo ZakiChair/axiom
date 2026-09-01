@@ -43,6 +43,13 @@ import {
 /** Une journée en millisecondes. */
 export const JOUR_MS = 86_400_000;
 
+export const SYMBOLES_CAPITALISATION = ["TOTAL", "TOTAL2", "TOTAL3"] as const;
+export type SymboleCapitalisation = (typeof SYMBOLES_CAPITALISATION)[number];
+
+export function estSymboleCapitalisation(symbol: string): symbol is SymboleCapitalisation {
+  return (SYMBOLES_CAPITALISATION as readonly string[]).includes(symbol);
+}
+
 /** Un point journalier : capitalisation en USD au minuit UTC `t`. */
 export interface PointJour {
   /** Minuit UTC (ms epoch) du jour mesuré. */

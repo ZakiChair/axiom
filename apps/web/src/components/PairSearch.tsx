@@ -14,6 +14,7 @@ import { useStore } from "zustand";
 import type { ExchangeId } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { SYNTHETIC_PRESETS, syntheticsStore } from "../store/synthetics";
+import { SYMBOLES_CAPITALISATION, estSymboleCapitalisation } from "../data/mcap";
 import { encodeSyntheticSymbol, formatSyntheticLabel, parseSyntheticSymbol } from "../data/synthetic";
 import { fetchPairs, TWELVEDATA_SYMBOLS } from "../data/pairs";
 import { CLASSES_CHAMP } from "./ui";
@@ -54,7 +55,6 @@ export function PairSearch({
   placeholder = "Rechercher une paire",
 }: PairSearchProps = {}) {
   const exchange = useStore(marketStore, (s) => s.exchange);
-  const setExchange = useStore(marketStore, (s) => s.setExchange);
   const setSymbol = useStore(marketStore, (s) => s.setSymbol);
   const recents = useStore(syntheticsStore, (s) => s.recents);
   const addRecent = useStore(syntheticsStore, (s) => s.addRecent);
@@ -136,7 +136,8 @@ export function PairSearch({
   }, [exchange]);
 
   const q = query.trim().toUpperCase();
-  const matches = q.length === 0 ? [] : pairs.filter((p) => p.includes(q)).slice(0, MAX_RESULTS);
+  const catalogue = onPick === undefined ? [...SYMBOLES_CAPITALISATION, ...pairs] : pairs;
+  const matches = q.length === 0 ? [] : catalogue.filter((p) => p.includes(q)).slice(0, MAX_RESULTS);
   const showBuilder = syntheticOpen || (open && isBuilderQuery(query, pairs));
   const listeVisible = open && matches.length > 0 && !showBuilder;
 
@@ -169,12 +170,19 @@ export function PairSearch({
   };
 
   const chooseSynthetic = (symbol: string) => {
-    if (parseSyntheticSymbol(symbol) === null) return;
+    const spec = parseSyntheticSymbol(symbol);
+    if (!estSymboleCapitalisation(symbol) && spec === null) return;
     addRecent(symbol);
     if (onPick) onPick(symbol);
     else {
-      setExchange("synthetic");
-      setSymbol(symbol);
+      const state = marketStore.getState();
+      const capitalisation =
+        estSymboleCapitalisation(symbol) || spec?.exA === "mcap" || spec?.exB === "mcap";
+      state.setMarket({
+        exchange: "synthetic",
+        symbol,
+        timeframe: capitalisation ? "1d" : state.timeframe,
+      });
     }
     setQuery("");
     setOpen(false);

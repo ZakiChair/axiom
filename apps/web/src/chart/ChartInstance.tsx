@@ -35,6 +35,9 @@ import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { getAdapter } from "../data/adapters";
 import { prepareResyncApply } from "../data/resync";
 import { adaptateurReplayActif } from "../data/replayFeed";
+import { estSymboleCapitalisation } from "../data/mcap";
+import { TIMEFRAMES_CAPITALISATION } from "../data/mcapCandles";
+import { parseSyntheticSymbol } from "../data/synthetic";
 import { replayStore } from "../store/replay";
 import {
   isMarketDataReady,
@@ -54,6 +57,7 @@ import { macroHistoryStore } from "../store/macroHistory";
 import { themeStore } from "../store/theme";
 import { chartLayoutStore } from "../store/chart-layout";
 import { refSymbolStore } from "../store/refSymbol";
+import { ccdataKeyStore } from "../store/ccdata";
 import { getIndicator } from "@axiom/indicators";
 import { ChartIndicators, axiomPaneId } from "./indicators";
 import { instancePourY } from "./paneSousCurseur";
@@ -138,8 +142,11 @@ function applyResponsiveAxisStyles(chart: KLineChartInstance, viewportWidth: num
 const CANDLE_PANE_ID = "candle_pane";
 /** Nombre de bougies récupérées par page d'historique (scroll gauche). */
 const PAGINATION_LIMIT = 500;
+const PAGINATION_MCAP_LIMIT = 10_000;
+const PAGINATION_MCAP_RATIO_LIMIT = 1_000;
 /** Plafond du buffer marché au fil des paginations (borne mémoire session longue). */
 const PAGINATION_MAX_CANDLES = 20_000;
+const PAGINATION_MCAP_MAX_CANDLES = 150_000;
 /** Débit max des ticks WS appliqués au graphe (coalescés par rAF) : ~10 upd/s par chart. */
 const TICK_MIN_INTERVAL_MS = 100;
 
@@ -345,6 +352,7 @@ export interface ChartInstanceProps {
 /** Message volontairement stable : le détail technique reste dans la console/Health. */
 function dataLoadErrorMessage(error: unknown): string {
   if (error instanceof Error && error.name === "AbortError") return "Chargement annulé.";
+  if (error instanceof Error && error.name === "ErreurCcData") return error.message;
   if (error instanceof Error && /timeout|timed out|délai/i.test(error.message)) {
     return "La source n’a pas répondu dans le délai prévu.";
   }
@@ -379,6 +387,19 @@ export function ChartInstance({
   const exchange = useStore(store, (s) => s.exchange);
   const symbol = useStore(store, (s) => s.symbol);
   const timeframe = useStore(store, (s) => s.timeframe);
+  const ccdataRevision = useStore(ccdataKeyStore, (s) => s.revision);
+  const spec = exchange === "synthetic" ? parseSyntheticSymbol(symbol) : null;
+  const estSerieCapitalisation = exchange === "synthetic" &&
+    (estSymboleCapitalisation(symbol) || spec?.exA === "mcap" || spec?.exB === "mcap");
+  const ccdataDataRevision = estSerieCapitalisation ? ccdataRevision : 0;
+  const paginationLimit = !estSerieCapitalisation
+    ? PAGINATION_LIMIT
+    : estSymboleCapitalisation(symbol)
+      ? PAGINATION_MCAP_LIMIT
+      : PAGINATION_MCAP_RATIO_LIMIT;
+  const paginationMaxCandles = estSerieCapitalisation
+    ? PAGINATION_MCAP_MAX_CANDLES
+    : PAGINATION_MAX_CANDLES;
   // Seul ce petit objet basse fréquence déclenche un rendu React ; `candles` reste hors
   // render-loop. Il porte la provenance du dernier succès et l'état de la requête courante.
   const dataLoad = useStore(store, (s) => s.dataLoad);
@@ -584,7 +605,7 @@ export function ChartInstance({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slot]);
 
-  // ── Effet DONNÉES (deps `[exchange, symbol, timeframe, replayGen, isMaster]`) ──
+  // ── Effet DONNÉES (identité, replay, rôle, retry et révision CCData) ──
   // Recrée la couche DONNÉES (dessins, contrôleurs maîtres/orderflow, backfill + WS) à
   // chaque changement d'identité de données, SANS toucher à l'instance KLineChart (partagée
   // via `mountRef`). Au teardown : désabonne/dispose TOUT sauf le chart.
@@ -828,13 +849,13 @@ export function ChartInstance({
           const beforeFetch = store.getState();
           if (
             !isMarketDataReady(beforeFetch, requestedIdentity, requestId) ||
-            beforeFetch.candles.length >= PAGINATION_MAX_CANDLES
+            beforeFetch.candles.length >= paginationMaxCandles
           ) {
             params.callback([], false);
             return;
           }
           adapter
-            .fetchKlines(symbol, timeframe, { limit: PAGINATION_LIMIT, endTime: leftmost.timestamp - 1 })
+            .fetchKlines(symbol, timeframe, { limit: paginationLimit, endTime: leftmost.timestamp - 1 })
             .then((fetched) => {
               if (cancelled || !isMarketDataReady(store.getState(), requestedIdentity, requestId)) {
                 params.callback([], false);
@@ -976,7 +997,7 @@ export function ChartInstance({
     teardownDataRef.current = teardownData;
     return teardownData;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [exchange, symbol, timeframe, replayGen, isMaster, retryRevision]);
+  }, [exchange, symbol, timeframe, replayGen, isMaster, retryRevision, ccdataDataRevision]);
 
   return (
     // Conteneur relatif : le graphe le remplit ; les canvases se superposent
@@ -1136,6 +1157,11 @@ function SecondaryHeader({
   onChangeTimeframe?: (tf: Timeframe) => void;
   onChangeExchange?: (ex: ExchangeId) => void;
 }) {
+  const spec = exchange === "synthetic" ? parseSyntheticSymbol(symbol) : null;
+  const timeframes = exchange === "synthetic" &&
+      (estSymboleCapitalisation(symbol) || spec?.exA === "mcap" || spec?.exB === "mcap")
+    ? TIMEFRAMES_CAPITALISATION
+    : SECONDARY_TFS;
   return (
     <div className="pointer-events-auto absolute left-1 top-1 z-20 flex items-center gap-1 rounded bg-surface/80 px-1 py-0.5 text-[10px] backdrop-blur">
       <input
@@ -1154,7 +1180,7 @@ function SecondaryHeader({
         onChange={(e) => onChangeTimeframe?.(e.target.value as Timeframe)}
         className="rounded bg-bg px-0.5 py-0.5 text-text outline-none"
       >
-        {SECONDARY_TFS.map((tf) => (
+        {timeframes.map((tf) => (
           <option key={tf} value={tf}>
             {tf}
           </option>

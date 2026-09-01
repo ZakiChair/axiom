@@ -212,6 +212,17 @@ describe("hydrateStores — marché (exchange/symbole/timeframe)", () => {
     expect(s.timeframe).toBe("4h");
   });
 
+  it("restaure une capitalisation autonome comme marché synthétique", () => {
+    localStorage.setItem(
+      CHART_KEY,
+      JSON.stringify({ symbol: "TOTAL3", exchange: "synthetic", timeframe: "1d", indicators: [] }),
+    );
+
+    hydrateStores();
+
+    expect(marketStore.getState()).toMatchObject({ exchange: "synthetic", symbol: "TOTAL3", timeframe: "1d" });
+  });
+
   it("ignore un exchange non restaurable (absent de RESTORABLE_EXCHANGES)", () => {
     localStorage.setItem(
       CHART_KEY,

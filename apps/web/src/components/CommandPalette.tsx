@@ -20,6 +20,7 @@ import {
   rechercher,
   CATEGORIE_LABEL,
   type Commande,
+  type NavCommande,
 } from "../commands/registry";
 import { RACCOURCIS_AIDE, lignesMnemoniques } from "../commands/hotkeys";
 
@@ -40,6 +41,36 @@ interface Item {
 const CLE_HISTO = "axiom:paletteHistory:v1";
 /** Nombre maximum d'entrées d'historique conservées. */
 const MAX_HISTO = 20;
+
+/**
+ * Décide si la navigation doit être proéminente (en tête de la palette).
+ * La navigation prend la tête si :
+ *  - La saisie contient un timeframe ou une source explicites (« SOL 4H », « BTC BINANCE »)
+ *  - La saisie a plusieurs tokens (« SOL 4H BINANCE »)
+ *  - Aucune commande du registre ne matche la saisie (utilisateur cherche à naviguer)
+ * Sinon, la commande (si trouvée) prend la tête.
+ */
+export function devraitAvoirNavProeminent(
+  requete: string,
+  nav: NavCommande | null,
+  registre: readonly Commande[],
+): boolean {
+  const q = requete.trim();
+  if (nav === null) return false;
+
+  // Navigation explicite : timeframe ou source → proéminente.
+  if (nav.timeframe !== undefined || nav.source !== undefined) return true;
+
+  // Plusieurs tokens → proéminente (complexe, probablement une navigation).
+  const tokens = q.split(/\s+/).filter((t) => t.length > 0);
+  if (tokens.length > 1) return true;
+
+  // Aucune commande ne matche → proéminente (utilisateur navigant).
+  if (rechercher(registre, q).length === 0) return true;
+
+  // Sinon, la commande prend la tête.
+  return false;
+}
 
 /** Garde de type d'une entrée d'historique restaurée. */
 function estEntree(x: unknown): x is EntreeHistorique {
@@ -96,18 +127,8 @@ export function CommandPalette() {
     }
     const base: Item[] = rechercher(registre, q).map((cmd) => ({ cmd, texte: "" }));
     const nav = parseNavigation(q);
-    if (nav !== null) {
-      // La navigation ne prend la tête que si la saisie « ressemble » à une navigation :
-      // timeframe/source explicite, plusieurs tokens, ou aucun mnémonique de commande ne
-      // débute par la requête. Ainsi « RSI » ouvre l'indicateur, « BTC » navigue.
-      const tokens = q.split(/\s+/).filter((t) => t.length > 0);
-      const qUpper = q.toUpperCase();
-      const matchMnemo = registre.some(
-        (c) => c.mnemonique !== undefined && c.mnemonique.toUpperCase().startsWith(qUpper)
-      );
-      const navProeminent =
-        nav.timeframe !== undefined || nav.source !== undefined || tokens.length > 1 || !matchMnemo;
-      if (navProeminent) return [{ cmd: commandeNavigation(nav), texte: q }, ...base];
+    if (nav !== null && devraitAvoirNavProeminent(q, nav, registre)) {
+      return [{ cmd: commandeNavigation(nav), texte: q }, ...base];
     }
     return base;
   }, [requete, registre, historique]);

@@ -122,11 +122,28 @@ function setItemSafe(key: string, valeur: string): void {
 }
 
 /**
+ * MULTI-FENÊTRES (BroadcastChannel, cf. store/sync.ts) : chaque fenêtre exécute son
+ * propre enablePersistence, or les clés gérées ici sont des instantanés COMPLETS
+ * (currentChartState re-sérialise aussi les indicateurs). Une fenêtre PASSIVE qui
+ * applique un changement distant (setSymbol diffusé) réécrirait la clé avec SON état
+ * en mémoire — et perdrait ce que la fenêtre active vient d'y mettre (le dual-write
+ * daemon rendant la perte durable). Garde minimale : seule la fenêtre FOCALISÉE écrit
+ * (toute mutation d'origine utilisateur s'y produit ; l'écriture est synchrone dans
+ * l'action, le focus ne bouge pas entre-temps). `document` absent (tests Node,
+ * mono-fenêtre de fait) → on écrit toujours.
+ */
+function fenetreDoitPersister(): boolean {
+  if (typeof document === "undefined") return true;
+  return document.hasFocus();
+}
+
+/**
  * Écriture JSON tolérante. DUAL-WRITE : pour les clés gérées, on note l'horodatage
  * local (arbitrage de réconciliation) et on DOUBLE l'écriture d'un `kvPut` debouncé
  * vers le daemon (si détecté). L'hydratation, elle, reste 100 % synchrone (localStorage).
  */
 function writeJson(key: string, value: unknown): void {
+  if (!fenetreDoitPersister()) return; // fenêtre passive : ne pas écraser la clé
   const serialise = JSON.stringify(value);
   setItemSafe(key, serialise);
   if (MANAGED_KEYS.includes(key)) {

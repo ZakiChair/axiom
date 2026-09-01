@@ -45,6 +45,7 @@ import { liqMarksStore } from "../chart/liquidationMarkers";
 import { liqEstStore } from "../chart/liquidationEstimates";
 import {
   hydrateStores,
+  saveChartState,
   saveSessionUi,
   saveWatchlist,
   importerSauvegarde,
@@ -494,5 +495,26 @@ describe("dual-write — aucune régression sans daemon", () => {
     // …et un horodatage local a été enregistré pour la clé gérée (arbitrage futur).
     const meta = JSON.parse(localStorage.getItem(META_KEY) ?? "{}");
     expect(typeof meta[SESSION_KEY]).toBe("number");
+  });
+});
+
+describe("multi-fenêtres — seule la fenêtre focalisée persiste", () => {
+  afterEach(() => {
+    delete (globalThis as { document?: { hasFocus: () => boolean } }).document;
+  });
+
+  it("saveChartState est un no-op dans une fenêtre SANS focus (fenêtre passive du mode multi-fenêtres)", () => {
+    // Scénario du constat : la fenêtre B applique un setSymbol diffusé par A (sync.ts)
+    // → son abonnement déclenche saveChartState avec SES indicateurs en mémoire (sans
+    // l'EMA ajoutée dans A) et écrasait la clé. B n'a pas le focus : l'écriture doit être ignorée.
+    (globalThis as { document?: { hasFocus: () => boolean } }).document = { hasFocus: () => false };
+    saveChartState();
+    expect(localStorage.getItem(CHART_KEY)).toBeNull();
+  });
+
+  it("saveChartState écrit normalement dans la fenêtre focalisée", () => {
+    (globalThis as { document?: { hasFocus: () => boolean } }).document = { hasFocus: () => true };
+    saveChartState();
+    expect(JSON.parse(localStorage.getItem(CHART_KEY) ?? "null")?.symbol).toBe("BTCUSDT");
   });
 });

@@ -81,6 +81,21 @@ describe("okxAdapter.fetchKlines", () => {
     mockFetch({ code: "51001", msg: "instrument doesn't exist", data: [] });
     await expect(okxAdapter.fetchKlines("BTCUSDT", "1h")).rejects.toThrow(/instrument doesn't exist/);
   });
+
+  it("demande les bars alignés UTC pour 6h/12h/1d/1w/1M (suffixe utc), pas l'alignement Hong Kong", async () => {
+    // OKX v5 : les granularités ≥ 6H SANS suffixe ouvrent à 00:00 UTC+8 (16:00 UTC) —
+    // jours décalés de 16 h vs toutes les autres sources du terminal. Variantes "…utc" requises.
+    const f = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ code: "0", msg: "", data: [] }) }));
+    vi.stubGlobal("fetch", f);
+    await okxAdapter.fetchKlines("BTCUSDT", "1d");
+    await okxAdapter.fetchKlines("BTCUSDT", "6h");
+    await okxAdapter.fetchKlines("BTCUSDT", "1h");
+    const urls = (f.mock.calls as unknown as Array<[string]>).map((c) => String(c[0]));
+    expect(urls[0]).toContain("bar=1Dutc");
+    expect(urls[1]).toContain("bar=6Hutc");
+    expect(urls[2]).toContain("bar=1H"); // < 6h : pas de variante utc côté OKX
+    expect(urls[2]).not.toContain("utc");
+  });
 });
 
 describe("hyperliquidAdapter.fetchKlines", () => {

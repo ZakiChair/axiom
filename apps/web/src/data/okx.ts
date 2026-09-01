@@ -4,8 +4,10 @@
  * Format de symbole (ENTRÉE) : style Binance concaténé "BTCUSDT" → instId OKX
  *   "BASE-QUOTE" ("BTC-USDT") via splitSymbol (suffixe de cotation reconnu).
  *
- * Timeframes : 1m/5m/15m/30m (minutes minuscules), 1h→1H, 2h→2H, 4h→4H, 6h→6H,
- *   12h→12H, 1d→1D, 1w→1W, 1M→1M (heure/jour+ en MAJUSCULE côté OKX).
+ * Timeframes : 1m/5m/15m/30m (minutes minuscules), 1h→1H, 2h→2H, 4h→4H, puis variantes
+ *   ALIGNÉES UTC pour ≥ 6h : 6h→6Hutc, 12h→12Hutc, 1d→1Dutc, 1w→1Wutc, 1M→1Mutc
+ *   (les bars sans suffixe ouvrent à 00:00 UTC+8 — heure de Hong Kong — chez OKX ;
+ *   le canal WS suit la même convention : `candle1Dutc`…).
  *
  * Limites notables :
  *   - REST /market/candles : `data` en ordre DÉCROISSANT → inversion en ascendant.
@@ -45,11 +47,11 @@ const OKX_BAR: Partial<Record<Timeframe, string>> = {
   "1h": "1H",
   "2h": "2H",
   "4h": "4H",
-  "6h": "6H",
-  "12h": "12H",
-  "1d": "1D",
-  "1w": "1W",
-  "1M": "1M",
+  "6h": "6Hutc",
+  "12h": "12Hutc",
+  "1d": "1Dutc",
+  "1w": "1Wutc",
+  "1M": "1Mutc",
 };
 
 /** instId OKX (ex. "BTCUSDT" -> "BTC-USDT"). */

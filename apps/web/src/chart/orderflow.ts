@@ -1054,8 +1054,12 @@ export class OrderflowController {
       ctx.fillStyle = palette.textDim;
       ctx.fillRect(xLeft, Math.min(yVAH, yVAL), cellW, Math.abs(yVAL - yVAH));
       ctx.globalAlpha = 1;
-    } else if (Number.isFinite(yVAH) && Number.isFinite(yVAL)) {
-      // Trait atténué à gauche de la colonne (comportement par défaut).
+    } else if (!approx && Number.isFinite(yVAH) && Number.isFinite(yVAL)) {
+      // Trait atténué à gauche de la colonne (comportement par défaut). Jamais sur
+      // une colonne ≈ : sur une répartition uniforme, pocIdx épingle le niveau le
+      // plus bas (premier de la Map) et l'expansion VA n'a de place que vers le
+      // haut → la VA fabriquée s'étendrait de low à ~70 % du range, non atténuée
+      // par le facteur ≈ (alpha 0.7 fixe) — plus visible que les cellules elles-mêmes.
       ctx.globalAlpha = 0.7;
       ctx.strokeStyle = palette.textDim;
       ctx.lineWidth = 1;

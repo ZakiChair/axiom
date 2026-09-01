@@ -38,6 +38,7 @@ export const EXTAPI_HOSTS: readonly string[] = [
   "www.mof.go.jp", // MOF Japon — CSV JGB
   "www.rba.gov.au", // RBA Australie — CSV F2
   "api.coinbase.com", // Coinbase Advanced Trade (candles REST public — WS reste direct)
+  "api.coinmarketcap.com", // historique global public CMC (TOTAL/TOTAL2/TOTAL3)
   "feeds.bloomberg.com", // RSS Bloomberg (news macro)
   "www.bloomberg.com", // destination actuelle de la redirection RSS Bloomberg
   "www.cnbc.com", // RSS CNBC Economy

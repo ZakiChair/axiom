@@ -32,8 +32,9 @@ describe("estHoteExtapiAutorise", () => {
   it("faux hors whitelist", () => {
     expect(estHoteExtapiAutorise("evil.com")).toBe(false);
   });
-  it("whitelist = 33 hôtes", () => {
-    expect(EXTAPI_WHITELIST.length).toBe(33);
+  it("whitelist = 34 hôtes", () => {
+    expect(EXTAPI_WHITELIST.length).toBe(34);
+    expect(estHoteExtapiAutorise("api.coinmarketcap.com")).toBe(true);
   });
   it("inclut home.treasury.gov (courbe des taux US)", () => {
     expect(estHoteExtapiAutorise("home.treasury.gov")).toBe(true);

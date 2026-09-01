@@ -9,6 +9,7 @@ import {
   parseExtapiChemin,
   recupererExtapiSecurise,
   requeteNavigationExtapiInterdite,
+  traiterCcData,
   traiterExtapi,
   ttlMsExtapi,
   userAgentPourHote,
@@ -128,6 +129,13 @@ describe("construireRoutesProxy — cibles et réécritures", () => {
       "/v1/sopr?startday=2026-01-01&endday=2026-01-02",
     );
   });
+
+  test("aucune route générique /ccdataapi : le préfixe est servi par traiterCcData seul", () => {
+    // enregistrerProxy court-circuite /ccdataapi vers traiterCcData, qui recalcule
+    // cible/réécriture/validation lui-même : une entrée RouteProxy serait du code mort
+    // (rewrite et entetesAmont jamais exécutés en production).
+    expect(construireRoutesProxy(CLES).some((route) => route.prefix === "/ccdataapi")).toBe(false);
+  });
 });
 
 describe("/bgapi — injection d'en-tête Authorization: Bearer", () => {
@@ -148,6 +156,63 @@ describe("/bgapi — injection d'en-tête Authorization: Bearer", () => {
     const routes = construireRoutesProxy({ ...CLES, BGEOMETRICS_API_KEY: "" });
     const route = routes.find((r) => r.prefix === "/bgapi");
     expect(route?.entetesAmont?.(new Headers())).toEqual({});
+  });
+});
+
+describe("traiterCcData — proxy authentifié durci", () => {
+  test("borne la destination et relaie seulement Apikey sans cache partagé", async () => {
+    let input = "";
+    let init: RequestInit | undefined;
+    const fetchImpl = async (url: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
+      input = String(url);
+      init = options;
+      return new Response(JSON.stringify({ Data: [] }), {
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const req = new Request(
+      "http://localhost:8787/ccdataapi/data/overview/v1/historical/marketcap/all-assets/days?limit=2",
+      { headers: { authorization: "Apikey personnelle", accept: "application/json" } },
+    );
+
+    const response = await traiterCcData(req, new URL(req.url), {
+      fetchImpl,
+      resoudreHote: async () => ["104.18.25.229"],
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(input).toBe(
+      "https://min-api.cryptocompare.com/data/overview/v1/historical/marketcap/all-assets/days?limit=2",
+    );
+    expect(new Headers(init?.headers).get("authorization")).toBe("Apikey personnelle");
+    expect(init?.redirect).toBe("manual");
+  });
+
+  test("refuse méthode, navigation et clé invalide avant tout fetch", async () => {
+    let appels = 0;
+    const options = {
+      fetchImpl: async (): Promise<Response> => {
+        appels += 1;
+        return new Response("{}");
+      },
+      resoudreHote: async () => ["104.18.25.229"],
+    };
+    const post = new Request("http://localhost:8787/ccdataapi/data/x", {
+      method: "POST",
+      headers: { authorization: "Apikey personnelle" },
+    });
+    const navigation = new Request("http://localhost:8787/ccdataapi/data/x", {
+      headers: { authorization: "Apikey personnelle", "sec-fetch-mode": "navigate" },
+    });
+    const invalide = new Request("http://localhost:8787/ccdataapi/data/x", {
+      headers: { authorization: "Bearer interdite" },
+    });
+
+    expect((await traiterCcData(post, new URL(post.url), options)).status).toBe(405);
+    expect((await traiterCcData(navigation, new URL(navigation.url), options)).status).toBe(403);
+    expect((await traiterCcData(invalide, new URL(invalide.url), options)).status).toBe(401);
+    expect(appels).toBe(0);
   });
 });
 
@@ -187,12 +252,13 @@ describe("extapi — User-Agent par hôte", () => {
 
 describe("extapi — whitelist (mise à jour Lot E1)", () => {
   test("taille attendue après ajout SEC + GDELT", () => {
-    expect(EXTAPI_WHITELIST.size).toBe(33); // + www.bloomberg.com, destination actuelle du redirect RSS
+    expect(EXTAPI_WHITELIST.size).toBe(34); // + api.coinmarketcap.com, historique global keyless
   });
   test("nouveaux hôtes présents", () => {
     expect(EXTAPI_WHITELIST.has("data.sec.gov")).toBe(true);
     expect(EXTAPI_WHITELIST.has("www.sec.gov")).toBe(true);
     expect(EXTAPI_WHITELIST.has("api.gdeltproject.org")).toBe(true);
+    expect(EXTAPI_WHITELIST.has("api.coinmarketcap.com")).toBe(true);
   });
 });
 

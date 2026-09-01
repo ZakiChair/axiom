@@ -27,7 +27,8 @@ export type ProxyRouteId =
   | "mexcapi"
   | "sosoapi"
   | "bgapi"
-  | "ethscanapi";
+  | "ethscanapi"
+  | "ccdataapi";
 
 interface FixedRoute {
   host: string;
@@ -42,6 +43,7 @@ const FIXED_ROUTES: Readonly<Record<Exclude<ProxyRouteId, "extapi">, FixedRoute>
   sosoapi: { host: "openapi.sosovalue.com", methods: ["GET", "HEAD", "POST"] },
   bgapi: { host: "bitcoin-data.com", methods: ["GET", "HEAD"] },
   ethscanapi: { host: "api.etherscan.io", methods: ["GET", "HEAD"] },
+  ccdataapi: { host: "min-api.cryptocompare.com", methods: ["GET", "HEAD"] },
 };
 
 const ROUTE_IDS: readonly ProxyRouteId[] = [
@@ -53,6 +55,7 @@ const ROUTE_IDS: readonly ProxyRouteId[] = [
   "sosoapi",
   "bgapi",
   "ethscanapi",
+  "ccdataapi",
 ];
 const ROUTES = new Set<ProxyRouteId>(ROUTE_IDS);
 const EXTAPI_WHITELIST: ReadonlySet<string> = new Set(EXTAPI_HOSTS);
@@ -258,6 +261,14 @@ export function proxyUpstreamHeaders(headers: Headers, destinationHost: string, 
     authorization !== null &&
     authorization.length <= 512 &&
     /^Bearer\s+\S+$/i.test(authorization)
+  ) {
+    upstream.set("authorization", authorization);
+  }
+  if (
+    host === "min-api.cryptocompare.com" &&
+    authorization !== null &&
+    authorization.length <= 512 &&
+    /^Apikey\s+\S+$/i.test(authorization)
   ) {
     upstream.set("authorization", authorization);
   }

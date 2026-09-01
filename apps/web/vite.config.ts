@@ -147,6 +147,13 @@ export default defineConfig(({ mode }) => {
         rewrite: (path) =>
           appendApiKeyIfAbsent(path.replace(/^\/ethscanapi/, ""), "apikey", ETHERSCAN_API_KEY),
       },
+      "/ccdataapi": {
+        target: "https://min-api.cryptocompare.com",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ccdataapi/, ""),
+        timeout: 15_000,
+        proxyTimeout: 15_000,
+      },
       // MEXC (exchange crypto, inclut des ACTIONS TOKENISÉES : AAPLXUSDT, TSLAONUSDT…).
       // API spot v3 compatible Binance, KEYLESS pour les données publiques, mais SANS
       // en-tête CORS → on route en same-origin via le proxy (même pattern que ci-dessus).

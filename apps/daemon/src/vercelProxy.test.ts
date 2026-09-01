@@ -40,7 +40,7 @@ describe("proxy Vercel", () => {
     expect(`${policySource}\n${handlerSource}`).not.toMatch(/\b(?:process|Bun|Deno)\.env\b/);
   });
 
-  test("place les huit rewrites avant le fallback SPA", async () => {
+  test("place les neuf rewrites avant le fallback SPA", async () => {
     const config = (await Bun.file(new URL("../../../vercel.json", import.meta.url)).json()) as {
       rewrites: Array<{ source: string; destination: string }>;
     };
@@ -53,6 +53,7 @@ describe("proxy Vercel", () => {
       "/sosoapi/:path*",
       "/bgapi/:path*",
       "/ethscanapi/:path*",
+      "/ccdataapi/:path*",
     ];
     const fallbackIndex = config.rewrites.findIndex((rewrite) => rewrite.destination === "/index.html");
     const proxyRewrites = config.rewrites.slice(0, fallbackIndex);
@@ -65,6 +66,7 @@ describe("proxy Vercel", () => {
 
   test("réécrit extapi vers la whitelist partagée et conserve path et query", () => {
     expect(proxyExtapiHostAllowed("api.alternative.me")).toBe(true);
+    expect(proxyExtapiHostAllowed("api.coinmarketcap.com")).toBe(true);
     expect(proxyExtapiHostAllowed("example.invalid")).toBe(false);
     const plan = planProxyRequest(
       url("extapi", "api.alternative.me/fng/", "limit=90&format=json&path=legitime"),
@@ -102,7 +104,7 @@ describe("proxy Vercel", () => {
     expect(publicPlan.privateResponse).toBe(true);
   });
 
-  test("fixe l'autorité des sept routes spécifiques", () => {
+  test("fixe l'autorité des huit routes spécifiques", () => {
     for (const [route, host] of [
       ["fredapi", "api.stlouisfed.org"],
       ["coinalyzeapi", "api.coinalyze.net"],
@@ -111,6 +113,7 @@ describe("proxy Vercel", () => {
       ["sosoapi", "openapi.sosovalue.com"],
       ["bgapi", "bitcoin-data.com"],
       ["ethscanapi", "api.etherscan.io"],
+      ["ccdataapi", "min-api.cryptocompare.com"],
     ] as const) {
       expect(planProxyRequest(url(route, "v1/data"), "GET", new Headers()).target.hostname).toBe(host);
     }
@@ -138,6 +141,7 @@ describe("proxy Vercel", () => {
     for (const [route, path] of [
       ["extapi", "api.alternative.me/fng/"],
       ["fredapi", "fred/series/observations"],
+      ["ccdataapi", "data/overview/v1/history"],
     ] as const) {
       const error = policyError(() => planProxyRequest(url(route, path), "POST", new Headers()));
       expect(error.status).toBe(405);
@@ -177,19 +181,34 @@ describe("proxy Vercel", () => {
     expect(plan.privateResponse).toBe(true);
   });
 
-  test("Authorization est relayé uniquement vers bitcoin-data.com", () => {
-    const headers = new Headers({ authorization: "Bearer personnelle", cookie: "secret" });
-    const bitcoin = planProxyRequest(url("bgapi", "v1/sopr"), "GET", headers);
-    const fred = planProxyRequest(url("fredapi", "fred/series/observations"), "GET", headers);
-    const extapi = planProxyRequest(url("extapi", "bitcoin-data.com/v1/sopr"), "GET", headers);
+  test("Authorization est relayé uniquement avec le schéma attendu par destination", () => {
+    const bearer = new Headers({ authorization: "Bearer personnelle", cookie: "secret" });
+    const apikey = new Headers({ authorization: "Apikey personnelle", cookie: "secret" });
+    const bitcoin = planProxyRequest(url("bgapi", "v1/sopr"), "GET", bearer);
+    const ccdata = planProxyRequest(url("ccdataapi", "data/overview/v1/history"), "GET", apikey);
+    const fred = planProxyRequest(url("fredapi", "fred/series/observations"), "GET", bearer);
+    const extapi = planProxyRequest(url("extapi", "bitcoin-data.com/v1/sopr"), "GET", bearer);
     expect(bitcoin.upstreamHeaders.get("authorization")).toBe("Bearer personnelle");
+    expect(ccdata.upstreamHeaders.get("authorization")).toBe("Apikey personnelle");
     expect(extapi.upstreamHeaders.get("authorization")).toBe("Bearer personnelle");
     expect(fred.upstreamHeaders.has("authorization")).toBe(false);
     expect(
       planProxyRequest(url("bgapi", "v1/sopr"), "GET", new Headers({ authorization: "Basic secret" }))
         .upstreamHeaders.has("authorization"),
     ).toBe(false);
+    expect(
+      planProxyRequest(url("ccdataapi", "v1/data"), "GET", bearer).upstreamHeaders.has("authorization"),
+    ).toBe(false);
+    expect(
+      planProxyRequest(
+        url("ccdataapi", "v1/data"),
+        "GET",
+        new Headers({ authorization: `Apikey ${"x".repeat(600)}` }),
+      ).upstreamHeaders.has("authorization"),
+    ).toBe(false);
     expect(bitcoin.upstreamHeaders.has("cookie")).toBe(false);
+    expect(ccdata.upstreamHeaders.has("cookie")).toBe(false);
+    expect(ccdata.privateResponse).toBe(true);
     expect(fred.privateResponse).toBe(true);
   });
 

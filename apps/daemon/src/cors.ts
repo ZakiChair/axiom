@@ -111,7 +111,7 @@ export function reponsePreflight(req: Request): Response {
       // PUT/DELETE ajoutés en Phase 2.E2 : le store /kv accepte l'upsert (PUT) et la
       // suppression (DELETE), qui déclenchent un préflight en cross-origin (dev).
       "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
-      "access-control-allow-headers": "content-type",
+      "access-control-allow-headers": "content-type, authorization",
       "access-control-max-age": "86400",
     },
   });

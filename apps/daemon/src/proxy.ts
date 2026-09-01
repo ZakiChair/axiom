@@ -7,7 +7,8 @@
  *   /mexcapi      → https://api.mexc.com             (keyless, simple réécriture de chemin)
  *   /sosoapi      → https://openapi.sosovalue.com    (EN-TÊTE x-soso-api-key si absent)
  *   /ethscanapi   → https://api.etherscan.io         (clé apikey si absente)
- *   /bgapi        → https://bitcoin-data.com         (EN-TÊTE Authorization: Bearer si absent)
+ *   /bgapi → bitcoin-data.com (Bearer)
+ *   /ccdataapi → min-api.cryptocompare.com (Apikey) — gestionnaire dédié traiterCcData, hors table
  *
  * Rappel BUILD-CONTRACT : le daemon ne proxifie JAMAIS le chemin chaud (les WS de
  * marché du front restent DIRECTS). Ici, uniquement du REST à quota, mis en cache.
@@ -57,7 +58,7 @@ export interface RouteProxy {
 }
 
 /**
- * Construit les 4 routes de proxy avec les clés injectées.
+ * Construit les routes de proxy avec les clés injectées.
  * Chaque `rewrite` reproduit EXACTEMENT la réécriture du vite.config.ts correspondant.
  */
 export function construireRoutesProxy(cles: ProxyKeys): RouteProxy[] {
@@ -311,6 +312,8 @@ export interface OptionsExtapi {
   timeoutMs?: number;
   tailleMaxCorps?: number;
   maxRedirections?: number;
+  entetesAmont?: HeadersInit;
+  hotesAutorises?: ReadonlySet<string>;
 }
 
 /** Réponse amont matérialisée seulement après toutes les gardes de sécurité. */
@@ -480,12 +483,13 @@ async function validerDestinationExtapi(
   url: URL,
   resoudreHote: ResoudreHoteExtapi,
   signal: AbortSignal,
+  hotesAutorises: ReadonlySet<string>,
 ): Promise<void> {
   if (url.protocol !== "https:") throw new ErreurPolitiqueExtapi("schéma amont refusé (HTTPS requis)");
   if (url.username || url.password) throw new ErreurPolitiqueExtapi("identifiants dans l'URL refusés");
   if (url.port && url.port !== "443") throw new ErreurPolitiqueExtapi("port amont refusé (443 requis)");
   const hote = sansCrochets(url.hostname).toLowerCase();
-  if (!EXTAPI_WHITELIST.has(hote)) throw new ErreurPolitiqueExtapi(`hôte de redirection non autorisé : ${hote}`);
+  if (!hotesAutorises.has(hote)) throw new ErreurPolitiqueExtapi(`hôte de redirection non autorisé : ${hote}`);
   const adresses = isIP(hote) ? [hote] : await avecSignalExtapi(resoudreHote(hote), signal);
   if (adresses.length === 0) throw new ErreurPolitiqueExtapi(`résolution DNS vide : ${hote}`);
   if (adresses.some((adresse) => !adresseIpPublique(adresse))) {
@@ -543,6 +547,7 @@ export async function recupererExtapiSecurise(
   const resoudreHote = options.resoudreHote ?? resoudreHotePublic;
   const tailleMax = Math.max(1, options.tailleMaxCorps ?? EXTAPI_TAILLE_MAX_CORPS);
   const maxRedirections = Math.max(0, options.maxRedirections ?? EXTAPI_MAX_REDIRECTIONS);
+  const hotesAutorises = options.hotesAutorises ?? EXTAPI_WHITELIST;
   // Timeout global : AbortController + setTimeout EXPLICITES, et NON AbortSignal.timeout().
   //
   // Raison (diagnostic CI du 2026-07-24) : le minuteur d'`AbortSignal.timeout()` est
@@ -571,11 +576,13 @@ export async function recupererExtapiSecurise(
 
   try {
     for (let redirections = 0; ; redirections++) {
-      await validerDestinationExtapi(courante, resoudreHote, signal);
+      await validerDestinationExtapi(courante, resoudreHote, signal, hotesAutorises);
       const hote = sansCrochets(courante.hostname).toLowerCase();
+      const entetes = new Headers({ "user-agent": userAgentPourHote(hote), accept: "*/*" });
+      for (const [cle, valeur] of new Headers(options.entetesAmont)) entetes.set(cle, valeur);
       const amont = await fetchImpl(courante, {
         method: "GET",
-        headers: { "user-agent": userAgentPourHote(hote), accept: "*/*" },
+        headers: entetes,
         signal,
         redirect: "manual",
       });
@@ -602,6 +609,83 @@ export async function recupererExtapiSecurise(
   } finally {
     clearTimeout(minuteur);
   }
+}
+
+export async function traiterCcData(
+  req: Request,
+  url: URL,
+  options: OptionsExtapi = {},
+): Promise<Response> {
+  const cors = entetesCors(req);
+  const securite = ENTETES_SECURITE_EXTAPI;
+  const headers = {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "private, no-store",
+    ...securite,
+    ...cors,
+  };
+  if (requeteNavigationExtapiInterdite(req)) {
+    return new Response(JSON.stringify({ erreur: "navigation CCData interdite" }), {
+      status: 403,
+      headers,
+    });
+  }
+  if (req.method !== "GET") {
+    return new Response(JSON.stringify({ erreur: "méthode CCData non autorisée" }), {
+      status: 405,
+      headers: { ...headers, allow: "GET" },
+    });
+  }
+  const authorization = req.headers.get("authorization");
+  if (
+    authorization === null ||
+    authorization.length > 512 ||
+    !/^Apikey\s+\S+$/i.test(authorization)
+  ) {
+    return new Response(JSON.stringify({ erreur: "clé CCData absente ou invalide" }), {
+      status: 401,
+      headers,
+    });
+  }
+
+  const hote = "min-api.cryptocompare.com";
+  const chemin = url.pathname.replace(/^\/ccdataapi/, "");
+  const cible = new URL(`https://${hote}`);
+  cible.pathname = chemin.startsWith("/") ? chemin : `/${chemin}`;
+  cible.search = url.search;
+  let amont: ReponseAmontExtapi;
+  try {
+    amont = await recupererExtapiSecurise(cible.toString(), {
+      ...options,
+      entetesAmont: {
+        accept: req.headers.get("accept") ?? "application/json",
+        authorization,
+      },
+      hotesAutorises: new Set([hote]),
+    });
+  } catch (err) {
+    return new Response(
+      JSON.stringify({
+        erreur: err instanceof ErreurPolitiqueExtapi ? "amont CCData refusé" : "amont CCData injoignable",
+        detail: err instanceof Error ? err.message : String(err),
+      }),
+      { status: 502, headers },
+    );
+  }
+
+  const entetes: Record<string, string> = {
+    "content-type": amont.contentType,
+    "cache-control": "private, no-store",
+    ...securite,
+    ...cors,
+  };
+  const credits = amont.headers.get("x-rate-limit-remaining");
+  if (credits !== null) entetes["x-rate-limit-remaining"] = credits;
+  const statutSansCorps = amont.status === 204 || amont.status === 205 || amont.status === 304;
+  return new Response(statutSansCorps ? null : amont.corps, {
+    status: amont.status,
+    headers: entetes,
+  });
 }
 
 /** TTL cache /extapi par défaut (RSS et calendriers sont lents). */
@@ -763,6 +847,9 @@ export function enregistrerProxy(routeur: Routeur, cles: ProxyKeys): void {
   for (const route of construireRoutesProxy(cles)) {
     routeur.enregistrerPrefixe(route.prefix, (req, url) => traiterProxy(req, url, route));
   }
+  // /ccdataapi : gestionnaire DÉDIÉ durci (validation Apikey + gardes /extapi), PAS une
+  // RouteProxy générique — traiterCcData recalcule cible, réécriture et validation lui-même.
+  routeur.enregistrerPrefixe("/ccdataapi", (req, url) => traiterCcData(req, url));
   // Proxy générique /extapi (Phase 3) : hôtes whitelistés, GET only, cache TTL.
   routeur.enregistrerPrefixe("/extapi", (req, url) => traiterExtapi(req, url));
 }

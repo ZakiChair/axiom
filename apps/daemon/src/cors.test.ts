@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { entetesCorsRejet, hostAutorise, origineAutorisee, requeteLocaleAutorisee } from "./cors";
+import {
+  entetesCorsRejet,
+  hostAutorise,
+  origineAutorisee,
+  reponsePreflight,
+  requeteLocaleAutorisee,
+} from "./cors";
 
 describe("frontière locale du daemon", () => {
   test("accepte seulement les Host loopback explicites", () => {
@@ -59,6 +65,14 @@ describe("frontière locale du daemon", () => {
     const cli = new Request("http://127.0.0.1:8787/health", { headers: { host: "127.0.0.1:8787" } });
     expect(entetesCorsRejet(distant)).toEqual({});
     expect(entetesCorsRejet(cli)).toEqual({});
+  });
+
+  test("autorise Authorization dans le preflight des clés personnelles", () => {
+    const req = new Request("http://127.0.0.1:8787/ccdataapi/data/x", {
+      method: "OPTIONS",
+      headers: { host: "127.0.0.1:8787", origin: "http://localhost:5173" },
+    });
+    expect(reponsePreflight(req).headers.get("access-control-allow-headers")).toContain("authorization");
   });
 
   test("accepte le front Vite autorisé et les clients CLI locaux", () => {

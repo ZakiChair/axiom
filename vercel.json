@@ -71,6 +71,14 @@
       "destination": "/api/proxy?__axiom_route=ethscanapi&__axiom_path=:path/"
     },
     {
+      "source": "/ccdataapi/:path*",
+      "destination": "/api/proxy?__axiom_route=ccdataapi&__axiom_path=:path"
+    },
+    {
+      "source": "/ccdataapi/:path*/",
+      "destination": "/api/proxy?__axiom_route=ccdataapi&__axiom_path=:path/"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

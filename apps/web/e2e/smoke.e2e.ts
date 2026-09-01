@@ -115,3 +115,27 @@ test("bascule vers Bybit (CORS-ouvert) et charge le chart via l'adaptateur", asy
   // Aucune exception non catchée au changement de source (câblage adaptateur sain).
   expect(erreurs).toEqual([]);
 });
+
+test("le chart principal AFFICHE les bougies du backfill (prix du bandeau dérivé des données)", async ({ page }) => {
+  // Déterministe et hors ligne (patron gate-lot3-corr) : klines bouchonnées à un close
+  // FIXE, WebSockets neutralisées (la page « se connecte » mais ne reçoit rien) → le prix
+  // affiché ne peut venir QUE du backfill REST bouchonné. Un adaptateur qui renvoie
+  // 0 bougie laisserait le bandeau à « — » avec un canvas monté mais VIDE → échec.
+  const MINUTE = 60_000;
+  const T_FIN = Math.floor(Date.now() / MINUTE) * MINUTE;
+  const CLOSE_FIXE = "42123.5"; // formatPrice → « 42,123.50 » dans le bandeau symbole
+  const lignes = Array.from({ length: 180 }, (_, i) => {
+    const t = T_FIN - (179 - i) * MINUTE;
+    // [openTime, open, high, low, close, volume, closeTime, quoteVol, trades, buyBase, buyQuote, ignore]
+    return [t, "42000", "42200", "41900", CLOSE_FIXE, "1000", t + MINUTE - 1, "100000", 100, "500", "50000", "0"];
+  });
+  await page.routeWebSocket("**/*", () => {});
+  // Repli générique AVANT la route klines : la plus récente/spécifique gagne (cf. gate-lot3-corr).
+  await page.route("**/api.binance.com/**", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api.binance.com/api/v3/klines*", (route) => route.fulfill({ json: lignes }));
+
+  await page.goto("/");
+  await expect(page.locator("canvas").first()).toBeVisible({ timeout: 20_000 });
+  // Assertion SUR LES DONNÉES : le bandeau symbole affiche le close du backfill bouchonné.
+  await expect(page.getByText("42,123.50").first()).toBeVisible({ timeout: 20_000 });
+});

@@ -278,6 +278,10 @@ export async function rafraichirUcdp(
   fetchImpl: typeof fetch = fetch,
   now: number = Date.now(),
 ): Promise<boolean> {
+  // Skip si frais (< 24 h) : le tick 6 h redevient le no-op promis par les commentaires
+  // de demarrerBoucleGlobe (sinon : re-téléchargement index + CSV complet 4×/jour).
+  const meta = lireMeta(d, "ucdp");
+  if (meta !== null && now - meta.majA < FRAICHEUR_UCDP_MS) return true;
   try {
     const resIndex = await fetchImpl(URL_INDEX_UCDP, { headers: entetesAmont(), signal: AbortSignal.timeout(TIMEOUT_AMONT_MS) });
     if (!resIndex.ok) return false;

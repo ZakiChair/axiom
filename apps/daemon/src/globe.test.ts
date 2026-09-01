@@ -243,6 +243,23 @@ describe("rafraichirUcdp + GET /globe/conflits-ucdp", () => {
     const res502 = await traiterGlobe(new Request(url), url, d2, T0, fetchUcdp(false));
     expect(res502.status).toBe(502);
   });
+  test("skip si frais : un instantané < 24 h n'est PAS re-téléchargé (tick 6 h = no-op)", async () => {
+    const d = new Database(":memory:");
+    assurerTablesGlobe(d);
+    await rafraichirUcdp(d, fetchUcdp(true), T0); // seed
+    let appels = 0;
+    const fetchCompteur = (async (entree: RequestInfo | URL, init?: RequestInit) => {
+      appels += 1;
+      return (fetchUcdp(true) as typeof fetch)(entree, init);
+    }) as typeof fetch;
+    // 23 h plus tard : frais → true SANS AUCUN fetch (ni index ni CSV).
+    expect(await rafraichirUcdp(d, fetchCompteur, T0 + 23 * 3_600_000)).toBe(true);
+    expect(appels).toBe(0);
+    // 25 h plus tard : périmé → re-téléchargement (index + CSV) et méta réécrite.
+    expect(await rafraichirUcdp(d, fetchCompteur, T0 + 25 * 3_600_000)).toBe(true);
+    expect(appels).toBe(2);
+    expect(lireMeta(d, "ucdp")?.majA).toBe(T0 + 25 * 3_600_000);
+  });
 });
 
 describe("enregistrerGlobe", () => {

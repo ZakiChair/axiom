@@ -127,4 +127,22 @@ describe("migrerJeuxPersistes", () => {
     }));
     expect(migrerJeuxPersistes(brut)).toHaveLength(MAX_JEUX);
   });
+
+  it("valide les instances via migratePersistedIndicators : defId inconnu filtré, params backfillés, instanceId attribué", () => {
+    // {"defId":"ema"} sans params : au rappel du jeu, assignInstanceIds ferait
+    // shortHash(undefined) → TypeError silencieuse dans le handler de clic.
+    const jeux = migrerJeuxPersistes([
+      {
+        id: "swing",
+        nom: "Swing",
+        instances: [{ defId: "ema" }, { defId: "disparu-du-registre", params: {} }, null],
+      },
+    ]);
+
+    expect(jeux).toHaveLength(1);
+    const instances = jeux[0]?.instances ?? [];
+    expect(instances.map((i) => i.defId)).toEqual(["ema"]); // l'id fantôme et le null sont filtrés
+    expect(instances[0]?.params).toEqual(expect.any(Object)); // params backfillés (défauts du registre)
+    expect(typeof instances[0]?.instanceId).toBe("string"); // instanceId stable attribué
+  });
 });

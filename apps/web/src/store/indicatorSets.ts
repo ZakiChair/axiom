@@ -11,7 +11,7 @@
  * passe par `indicatorsStore.setAll`, exactement comme une restauration de session.
  */
 import { createStore } from "zustand/vanilla";
-import type { ActiveIndicator } from "./indicators";
+import { migratePersistedIndicators, type ActiveIndicator } from "./indicators";
 
 /** Un jeu nommé : instantané des instances actives au moment de l'enregistrement. */
 export interface JeuIndicateurs {
@@ -96,7 +96,10 @@ export function migrerJeuxPersistes(brut: unknown): JeuIndicateurs[] {
     const e = entree as { id?: unknown; nom?: unknown; instances?: unknown };
     if (typeof e.id !== "string" || typeof e.nom !== "string") continue;
     if (!Array.isArray(e.instances)) continue;
-    out.push({ id: e.id, nom: e.nom, instances: e.instances as ActiveIndicator[] });
+    // Migration RÉELLE des instances (la docstring le promettait, le cast ne le faisait
+    // pas) : filtre les defId disparus du registre, backfille les params, attribue des
+    // instanceId stables — le rappel d'un jeu ne peut plus jeter dans assignInstanceIds.
+    out.push({ id: e.id, nom: e.nom, instances: migratePersistedIndicators(e.instances) });
   }
   return out.slice(0, MAX_JEUX);
 }

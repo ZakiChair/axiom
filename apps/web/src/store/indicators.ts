@@ -16,7 +16,7 @@
  */
 import { createStore } from "zustand/vanilla";
 import type { IndicatorDef, IndicatorInstance } from "@axiom/types";
-import { getIndicator } from "@axiom/indicators";
+import { getIndicator, resolveParams } from "@axiom/indicators";
 
 /** Jeu de paramètres d'un indicateur (miroir du type des `params` d'IndicatorInstance). */
 type IndicatorParams = Record<string, number | boolean | string>;
@@ -127,14 +127,19 @@ export function computeKey(defId: string, params: IndicatorParams): string {
 
 /**
  * Libellé lisible d'une instance : « EMA (20) », « MACD (12, 26, 9) », « VWAP »…
- * On n'affiche que les paramètres de forme (nombres et chaînes source/select),
- * pas les booléens (bruit visuel). Utilisé comme `shortName` de pane KLineChart
- * et dans la section « Actifs » du menu.
+ * Params RÉSOLUS (clamp [min,max], NaN → défaut — même chemin que le calcul via
+ * computeIndicator→resolveParams) : le libellé doit montrer la valeur EFFECTIVE de la
+ * courbe, pas la saisie brute (ex. « EMA (-3) » mentait, courbe clampée à 1).
+ * On n'affiche que les clés effectivement posées dans `params` (comportement
+ * historique : « EMA (20) », jamais les défauts non touchés comme la source).
+ * Utilisé comme `shortName` de pane KLineChart et dans la section « Actifs » du menu.
  */
 export function formatInstanceLabel(def: IndicatorDef, params: IndicatorParams): string {
+  const resolus = resolveParams(def, params);
   const parts: string[] = [];
   for (const input of def.inputs) {
-    const v = params[input.key];
+    if (!(input.key in params)) continue;
+    const v = resolus[input.key];
     if (typeof v === "number") parts.push(String(v));
     else if (typeof v === "string") parts.push(v);
   }

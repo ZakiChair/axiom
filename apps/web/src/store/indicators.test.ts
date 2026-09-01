@@ -54,6 +54,18 @@ describe("formatInstanceLabel", () => {
     if (!vwap) throw new Error("def vwap absente du registre");
     expect(formatInstanceLabel(vwap, {})).toBe("VWAP");
   });
+
+  it("affiche la valeur EFFECTIVE (clampée/assainie par resolveParams), pas la saisie brute", () => {
+    // resolveParams clampe au calcul (gotcha connu) : le libellé doit dire la même chose.
+    const ema = getIndicator("ema");
+    if (!ema) throw new Error("def ema absente du registre");
+    expect(formatInstanceLabel(ema, { length: -3 })).toBe("EMA (1)"); // clamp min=1
+    expect(formatInstanceLabel(ema, { length: Number.NaN })).toBe("EMA (20)"); // NaN → défaut
+
+    const rsi = getIndicator("rsi");
+    if (!rsi) throw new Error("def rsi absente du registre");
+    expect(formatInstanceLabel(rsi, { length: 0 })).toBe("RSI (1)"); // clamp min=1
+  });
 });
 
 describe("migratePersistedIndicators (fonction PURE)", () => {

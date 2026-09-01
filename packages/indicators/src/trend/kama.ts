@@ -29,7 +29,8 @@ export const kama: IndicatorDef = {
   ],
   outputs: [{ key: "kama", name: "KAMA", style: "line" }],
   calc(candles, params) {
-    const length = Number(params.length ?? 10);
+    // Quantifie : close[i - length] avec length fractionnaire = série vide.
+    const length = Math.round(Number(params.length ?? 10));
     const fast = Number(params.fast ?? 2);
     const slow = Number(params.slow ?? 30);
 

@@ -64,4 +64,15 @@ describe("Fisher Transform", () => {
     if (fDown === undefined) throw new Error("série fisher absente");
     expect(fDown[19]).toBeLessThan(0);
   });
+
+  it("longueur fractionnaire quantifiée : fisher(9.5) === fisher(10), série non vide", () => {
+    const candles: Candle[] = [];
+    for (let i = 0; i < 30; i++) {
+      const base = 100 + Math.sin(i * 0.5) * 10;
+      candles.push(candle(i, base + 1, base - 1));
+    }
+    const frac = computeIndicator(fisher, candles, { length: 9.5 }).series.fisher;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(computeIndicator(fisher, candles, { length: 10 }).series.fisher);
+  });
 });

@@ -22,6 +22,9 @@ export function closeOf(candles: Candle[]): number[] {
  * Les `length - 1` premières positions valent `undefined`.
  */
 export function sma(values: number[], length: number): Array<number | undefined> {
+  // Quantifie la fenêtre : une longueur fractionnaire produirait des index
+  // fractionnaires (values[i - 14.5] === undefined) et une somme divergente.
+  length = Math.round(length);
   const n = values.length;
   const out: Array<number | undefined> = new Array(n).fill(undefined);
   if (length <= 0) return out;
@@ -45,6 +48,7 @@ export function sma(values: number[], length: number): Array<number | undefined>
  * valeurs (placée à l'index `length - 1`). Avant cela : `undefined`.
  */
 export function ema(values: number[], length: number): Array<number | undefined> {
+  length = Math.round(length); // fenêtre entière obligatoire (voir sma)
   const n = values.length;
   const out: Array<number | undefined> = new Array(n).fill(undefined);
   if (length <= 0 || n < length) return out;
@@ -75,6 +79,7 @@ export function ema(values: number[], length: number): Array<number | undefined>
  * valeurs (placée à l'index `length - 1`). Avant cela : `undefined`.
  */
 export function rma(values: number[], length: number): Array<number | undefined> {
+  length = Math.round(length); // fenêtre entière obligatoire (voir sma)
   const n = values.length;
   const out: Array<number | undefined> = new Array(n).fill(undefined);
   if (length <= 0 || n < length) return out;
@@ -109,6 +114,7 @@ export function stdev(
   length: number,
   population: boolean = true
 ): Array<number | undefined> {
+  length = Math.round(length); // fenêtre entière obligatoire (voir sma)
   const n = values.length;
   const out: Array<number | undefined> = new Array(n).fill(undefined);
   if (length <= 0 || n < length) return out;
@@ -149,6 +155,7 @@ export function rollingHighest(
   values: number[],
   length: number
 ): Array<number | undefined> {
+  length = Math.round(length); // fenêtre entière obligatoire (voir sma)
   const n = values.length;
   const out: Array<number | undefined> = new Array(n).fill(undefined);
   if (length <= 0) return out;
@@ -172,6 +179,7 @@ export function rollingLowest(
   values: number[],
   length: number
 ): Array<number | undefined> {
+  length = Math.round(length); // fenêtre entière obligatoire (voir sma)
   const n = values.length;
   const out: Array<number | undefined> = new Array(n).fill(undefined);
   if (length <= 0) return out;
@@ -210,6 +218,7 @@ export function volOf(c: Candle[]): number[] {
  * Les `length - 1` premières positions valent `undefined`.
  */
 export function wma(values: number[], length: number): Array<number | undefined> {
+  length = Math.round(length); // fenêtre entière obligatoire (voir sma)
   const n = values.length;
   const out: Array<number | undefined> = new Array(n).fill(undefined);
   if (length <= 0 || n < length) return out;
@@ -286,6 +295,7 @@ export function rollingSum(
   values: number[],
   length: number
 ): Array<number | undefined> {
+  length = Math.round(length); // fenêtre entière obligatoire (voir sma)
   const n = values.length;
   const out: Array<number | undefined> = new Array(n).fill(undefined);
   if (length <= 0) return out;

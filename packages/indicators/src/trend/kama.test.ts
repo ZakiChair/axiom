@@ -53,4 +53,10 @@ describe("kama (trend, overlay)", () => {
     const { series } = kama.calc(flat, { length: 10 }, ctx);
     expect(series.kama?.[29]).toBeCloseTo(15, 9);
   });
+
+  it("longueur fractionnaire quantifiée : kama(10.5) === kama(11), série non vide", () => {
+    const frac = kama.calc(candles, { length: 10.5 }, ctx).series.kama;
+    expect(frac?.some((v) => v !== undefined)).toBe(true);
+    expect(frac).toEqual(kama.calc(candles, { length: 11 }, ctx).series.kama);
+  });
 });

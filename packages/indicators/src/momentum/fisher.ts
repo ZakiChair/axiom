@@ -39,7 +39,8 @@ export const fisher: IndicatorDef = {
   ],
 
   calc(candles, params, ctx) {
-    const length = Number(params.length);
+    // Quantifie : la boucle `i = length - 1` fractionnaire n'atteint aucun index.
+    const length = Math.round(Number(params.length));
     const n = candles.length;
     const fisherOut: Array<number | undefined> = new Array(n).fill(undefined);
     const triggerOut: Array<number | undefined> = new Array(n).fill(undefined);

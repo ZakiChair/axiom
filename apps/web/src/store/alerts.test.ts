@@ -181,3 +181,53 @@ describe("lireInitial — hydratation par élément (un item corrompu est écart
     expect(etat.journal).toHaveLength(1);
   });
 });
+
+describe("timeframe de la définition (conditions de bougie)", () => {
+  it("propage le timeframe fourni à la création", () => {
+    alertsStore.getState().ajouter({
+      symbol: "btcusdt",
+      source: "binance",
+      condition: { type: "variation-pct", seuilPct: 5, fenetreMs: 60_000 },
+      timeframe: "15m",
+    });
+    expect(alertsStore.getState().defs[0]?.timeframe).toBe("15m");
+  });
+
+  it("laisse le timeframe absent quand il n'est pas fourni (defs héritées)", () => {
+    alertsStore.getState().ajouter(NOUVELLE);
+    expect(alertsStore.getState().defs[0]?.timeframe).toBeUndefined();
+  });
+
+  it("conserve le timeframe à l'hydratation (garde de forme non bloquante)", () => {
+    const data = new Map<string, string>();
+    (globalThis as { localStorage?: Storage }).localStorage = {
+      getItem: (k) => data.get(k) ?? null,
+      setItem: (k, v) => void data.set(k, v),
+      removeItem: (k) => void data.delete(k),
+      clear: () => data.clear(),
+      key: () => null,
+      get length() {
+        return data.size;
+      },
+    };
+    localStorage.setItem(
+      "axiom:alerts:v1",
+      JSON.stringify({
+        defs: [
+          {
+            id: "tf",
+            symbol: "BTCUSDT",
+            source: "binance",
+            condition: { type: "variation-pct", seuilPct: 5, fenetreMs: 60_000 },
+            timeframe: "4h",
+            actif: true,
+            declenchements: [],
+          },
+        ],
+        journal: [],
+      })
+    );
+    expect(lireInitial().defs[0]?.timeframe).toBe("4h");
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+});

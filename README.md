@@ -20,7 +20,7 @@ d’auth réseau, rien ne quitte la machine en dehors des appels aux APIs publiq
 | | |
 |---|---|
 | **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations, **179 indicateurs** testés |
-| **Lire le contexte** | **38 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, mouvements de baleines, treemap, options, COT, taux & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
+| **Lire le contexte** | **39 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, mouvements de baleines, treemap, options, COT, taux & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
 | **Décider** | screener, playbooks 1-clic, alertes, backtest, stress-test multi-facteurs, étude d’évènements (CPI/NFP/FOMC), journal de trades, paper trading |
 | **Ne pas décrocher** | alertes onglet fermé (macOS + Telegram optionnel), replay sur dumps officiels Binance, panneau de santé des sources |
 
@@ -30,8 +30,9 @@ Deux partis pris structurent le produit :
    le daemon `axiomd` ne prend en charge que le lent (APIs à quota, cache, persistance SQLite,
    alertes). L’UI reste utilisable **sans** daemon.
 2. **Les calculs sont du TypeScript pur et testés.** Les 179 indicateurs vivent dans
-   `@axiom/indicators` — pas de WASM, pas de service Python — et sont vérifiés par golden tests
-   contre un oracle `pandas-ta` (`scripts/golden/`).
+   `@axiom/indicators` — pas de WASM, pas de service Python — et sont couverts par des tests
+   unitaires et structurels, dont **4 golden tests** contre un oracle `pandas-ta` (ADX,
+   SuperTrend, Ichimoku, PSAR ; `scripts/golden/`).
 
 **Hors périmètre assumé** : pas d’exécution d’ordres réels (aucune clé de trading). Le paper
 trading (`PAPER`) est une simulation locale déjà présente ; pas de multi-utilisateur, pas
@@ -118,9 +119,10 @@ pnpm prod
 ## Déploiement Vercel
 
 Le build Vercel sert le front et un proxy serverless restreint aux hôtes de
-`shared/extapi-hosts.ts`. Aucun secret partagé n'est injecté dans ce proxy public : les clés
-Coinalyze, FRED, Twelve Data, SoSoValue et Etherscan se saisissent dans **Réglages** et restent
-dans le `localStorage` du navigateur. OI et funding du graphe disposent d'un repli Binance sans
+`shared/extapi-hosts.ts`. Aucun secret partagé n'est injecté dans ce proxy public : les **neuf
+clés** saisissables dans **Réglages** (Coinalyze, Twelve Data, FRED, BGeometrics, SoSoValue,
+Finnhub, Etherscan v2, CoinDesk Data/CCData et CoinGecko) restent dans le `localStorage` du
+navigateur. OI et funding du graphe disposent d'un repli Binance sans
 clé ; NVT utilise directement les charts publics Blockchain.com.
 
 Le catalogue conserve les 179 indicateurs. Une entrée impossible pour la source, le symbole ou
@@ -135,7 +137,7 @@ Les snapshots, LIQHL, les alertes baleines et les notifications onglet fermé n�
 - **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, 179 indicateurs
 - **Terminal** : palette ⌘K, raccourcis, workspaces, fenêtres flottantes + snap + taskbar
 - **Sources** : Binance, Bybit, OKX, Coinbase, Kraken, MEXC, Deribit, Twelve Data, Coinalyze, FRED, etc.
-- **Panneaux** : 38 fenêtres — DES, FUNDX, LIQ, ECO, NEWS, CORR, CHAIN, MAP, PORT, NOTE, EQS, TERM, OMON, DOM, BT, REPLAY, RATE, COT, SEAG, VOL, FUND, BRIEF, GLOBE, STBL, SQZ, CBPREM, NETLIQ, DATA, DIST, EXPY, PAPER, MINE, WHALES, CYCLE, EVTS, SCEN, CAP, SECT
+- **Panneaux** : 39 fenêtres — DES, FUNDX, LIQ, ECO, NEWS, CORR, CHAIN, MAP, PORT, NOTE, EQS, TERM, OMON, DOM, BT, REPLAY, RATE, COT, SEAG, VOL, FUND, BRIEF, GLOBE, STBL, SQZ, CBPREM, NETLIQ, DATA, DIST, EXPY, PAPER, MINE, WHALES, CYCLE, BPL, EVTS, SCEN, CAP, SECT
 - **Daemon** : proxy+cache, KV/candles SQLite, alertes (macOS + Telegram optionnel), replay dumps Binance, couches GDELT/UCDP, collecte des mouvements baleines (BTC + stables)
 
 ### Programme G100 (WTP 100 $/mois) — W0–W3 landés, gate **ouvert**
@@ -148,8 +150,9 @@ Le **noyau manuel reste à dérouler** (G1 tenue 30 min + coupure 90 s, bannièr
 chrono onboarding, jugements visuels) — voir le protocole
 `docs/superpowers/plans/2026-07-22-gate-g100-qa.md` et le plan d'action
 `docs/superpowers/plans/2026-08-24-plan-action-revue-globale.md`. **Aucune nouvelle fenêtre
-avant le verdict** (exception actée le 2026-08-25 : fenêtre WHALES, demande utilisateur —
-cf. `BUILD-CONTRACT.md`).
+avant le verdict** — deux exceptions actées, toutes deux sur demande utilisateur : le 2026-08-25
+(fenêtre WHALES) et le 2026-09-01 (fenêtre BPL + séries TOTAL/TOTAL2/TOTAL3 chartables, chantier
+CAP/BPL) — cf. `BUILD-CONTRACT.md`.
 
 ## Secrets
 

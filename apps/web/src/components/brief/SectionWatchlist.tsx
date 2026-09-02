@@ -37,7 +37,9 @@ export function SectionWatchlist({ watchlist, noteFraicheur }: Props) {
             colonnes={COLONNES_WATCHLIST}
             lignes={rows}
             cle={(r) => r.symbole}
-            surClicLigne={(r) => navigateTo({ symbol: r.symbole, exchange: "binance", source: "brief" })}
+            // Source RÉELLE du symbole (résolue à la construction de la ligne) : forcer
+            // Binance envoyait un actif Kraken/tradfi sur `binance:<symbole>`.
+            surClicLigne={(r) => navigateTo({ symbol: r.symbole, exchange: r.source, source: "brief" })}
           />
         ),
       )}

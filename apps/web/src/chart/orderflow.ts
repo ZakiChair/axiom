@@ -47,6 +47,7 @@ import { drawOpenCloseNet } from "./openCloseNet";
 import { detectCvdDivergences, type CvdDivergence } from "./cvdSpotPerp";
 import { precisionCvd } from "./cvdPrecision";
 import { lireTokenCanvas } from "../lib/canvasTokens";
+import { createRafThrottle, type RafThrottle } from "./rafThrottle";
 // Calcul pur (CVD, footprint, formatteurs) — cf. ./orderflow.calc.
 import {
   buildCvdSpotPerpBuckets,
@@ -82,6 +83,13 @@ const MAX_RENDER_COLUMNS = 60;
 const OCN_OI_REFRESH_MS = 60_000;
 /** Cible de lignes de prix par bougie (sert à dimensionner le bucket). */
 const TARGET_ROWS_PER_CANDLE = 24;
+/**
+ * Débit max des mises à jour de rendu déclenchées par le flux live (coalescées par
+ * rAF) : ~10 upd/s par chart. Partagé par le chemin store→chart (ticks WS, ChartInstance)
+ * et par les repaints footprint issus des trades — un aggTrade par message sur BTCUSDT
+ * dépasse largement 60/s, sans quoi le footprint se redessine à chaque frame.
+ */
+export const TICK_MIN_INTERVAL_MS = 100;
 
 /** Coordonnée renvoyée par convertToPixel (x/y optionnels selon l'entrée). */
 interface PixelXY {
@@ -246,6 +254,12 @@ export class OrderflowController {
   /** Redessine le footprint seulement si dirty : évite un recalcul complet à 60 fps au repos. */
   private dirty = true;
   private resizeObserver: ResizeObserver | null = null;
+  /**
+   * Repaints déclenchés par les trades, bornés à ~10/s. Créé au `start`, jeté au `stop`
+   * (`dispose()` d'un throttle est TERMINAL : le recréer est la seule façon de survivre
+   * à un cycle désactivation → réactivation du footprint).
+   */
+  private tradeRepaint: RafThrottle | null = null;
 
   private readonly markDirty = (): void => {
     this.dirty = true;
@@ -317,6 +331,7 @@ export class OrderflowController {
   private start(): void {
     this.running = true;
     this.dirty = true;
+    this.tradeRepaint = createRafThrottle(this.markDirty, { minIntervalMs: TICK_MIN_INTERVAL_MS });
     this.canvas.style.display = "block";
     ensureCvdRegistered();
     this.createCvdPane();
@@ -346,6 +361,8 @@ export class OrderflowController {
     this.canvas.style.display = "none";
     cancelAnimationFrame(this.raf);
     this.raf = 0;
+    this.tradeRepaint?.dispose();
+    this.tradeRepaint = null;
     this.unsubscribeActions();
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
@@ -698,7 +715,9 @@ export class OrderflowController {
     }
     if (t.side === "buy") cell.buy += t.qty;
     else cell.sell += t.qty;
-    this.markDirty();
+    // Accumulation immédiate, REPAINT throttlé : seule la bougie en cours change d'un
+    // trade à l'autre, inutile de reconstruire toutes les colonnes visibles à 60 fps.
+    this.tradeRepaint?.trigger();
   }
 
   // --- Synchro viewport (technique du spike M4) --------------------------

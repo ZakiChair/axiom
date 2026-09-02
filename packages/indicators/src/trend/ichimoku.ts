@@ -120,7 +120,9 @@ export const ichimoku: IndicatorDef = {
     const pTenkan = Number(params.tenkan ?? 9);
     const pKijun = Number(params.kijun ?? 26);
     const pSenkou = Number(params.senkou ?? 52);
-    const disp = Number(params.displacement ?? 26);
+    // Quantifie : le décalage sert d'index (spanAraw[i - disp], closes[i + disp]) ;
+    // fractionnaire => spanA/spanB/chikou entièrement vides.
+    const disp = Math.round(Number(params.displacement ?? 26));
     const r = ichimokuOf(candles, pTenkan, pKijun, pSenkou, disp);
     return {
       series: {

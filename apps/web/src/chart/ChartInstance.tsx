@@ -65,7 +65,7 @@ import { estReglable } from "./legendeReglable";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
 import { PaneHeaders } from "./paneHeaders";
 import { OverlayLegend } from "./overlayLegend";
-import { OrderflowController } from "./orderflow";
+import { OrderflowController, TICK_MIN_INTERVAL_MS } from "./orderflow";
 import { CompareController } from "./compare";
 import { VolumeProfileController } from "./volumeProfile";
 import { LiquidationHeatController } from "./liquidationHeat";
@@ -147,8 +147,6 @@ const PAGINATION_MCAP_RATIO_LIMIT = 1_000;
 /** Plafond du buffer marché au fil des paginations (borne mémoire session longue). */
 const PAGINATION_MAX_CANDLES = 20_000;
 const PAGINATION_MCAP_MAX_CANDLES = 150_000;
-/** Débit max des ticks WS appliqués au graphe (coalescés par rAF) : ~10 upd/s par chart. */
-const TICK_MIN_INTERVAL_MS = 100;
 
 /** Timeframes proposés dans l'en-tête d'un slot secondaire (sous-ensemble commun). */
 const SECONDARY_TFS: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1d"];
@@ -347,6 +345,31 @@ export interface ChartInstanceProps {
   onChangeSymbol?: (symbol: string) => void;
   onChangeTimeframe?: (tf: Timeframe) => void;
   onChangeExchange?: (ex: ExchangeId) => void;
+}
+
+/** Délai maximal du backfill REST initial (chien de garde du gate G1) — ms. */
+export const BACKFILL_TIMEOUT_MS = 20_000;
+
+/**
+ * Borne l'attente de `travail` : rejette avec un message contenant « délai » si rien
+ * n'arrive avant `ms`. Sans ce garde-fou, un `fetchKlines` qui ne répond jamais (réveil
+ * de veille, TCP semi-ouvert) laisse le slot bloqué sur « Chargement des bougies… ».
+ * Le rejet emprunte le `catch` du backfill → `failDataLoad` → bouton « Réessayer ».
+ * `annuler` coupe le minuteur au démontage ; succès et échec le coupent d'eux-mêmes.
+ */
+export function avecDelai<T>(
+  travail: Promise<T>,
+  ms: number,
+): { promesse: Promise<T>; annuler: () => void } {
+  let handle: ReturnType<typeof setTimeout> | undefined;
+  const garde = new Promise<never>((_resolve, reject) => {
+    handle = setTimeout(() => reject(new Error("Backfill : délai dépassé")), ms);
+  });
+  const annuler = (): void => {
+    if (handle !== undefined) clearTimeout(handle);
+    handle = undefined;
+  };
+  return { promesse: Promise.race([travail, garde]).finally(annuler), annuler };
 }
 
 /** Message volontairement stable : le détail technique reste dans la console/Health. */
@@ -765,6 +788,9 @@ export function ChartInstance({
     // rien faire après le teardown. Sert aussi de garde d'idempotence au teardown lui-même.
     let cancelled = false;
     let unsubscribe: Unsubscribe | null = null;
+    // Chien de garde du backfill : coupé par `teardownData` si le run d'effet s'arrête
+    // pendant que la requête REST est encore en vol.
+    let annulerDelaiBackfill: (() => void) | null = null;
     // En replay, ce slot lit le MOTEUR de rejeu (même surface IExchangeAdapter → tout le
     // pipeline live fonctionne inchangé) au lieu du flux WS de l'exchange ; sinon la source
     // du slot. Le footprint/CVD (OrderflowController) résout le même adaptateur de son côté.
@@ -773,9 +799,17 @@ export function ChartInstance({
     // persistée invalide qui ferait lever `getAdapter` devient un état d'erreur récupérable.
     Promise.resolve()
       .then(() => replayAdapter ?? getAdapter(exchange))
-      .then((adapter) =>
-        adapter.fetchKlines(symbol, timeframe, { limit: 500 }).then((candles) => ({ adapter, candles })),
-      )
+      .then((adapter) => {
+        const { promesse, annuler } = avecDelai(
+          adapter.fetchKlines(symbol, timeframe, { limit: 500 }),
+          BACKFILL_TIMEOUT_MS,
+        );
+        // Le teardown a pu passer pendant la résolution de l'adaptateur : on coupe
+        // tout de suite plutôt que de laisser un minuteur orphelin 20 s.
+        if (cancelled) annuler();
+        else annulerDelaiBackfill = annuler;
+        return promesse.then((candles) => ({ adapter, candles }));
+      })
       .then(({ adapter, candles }) => {
         if (cancelled) return;
         const current = store.getState();
@@ -951,6 +985,7 @@ export function ChartInstance({
     const teardownData = (): void => {
       if (cancelled) return;
       cancelled = true;
+      annulerDelaiBackfill?.();
       indicators.dispose();
       unsubscribeIndicators();
       unsubscribeRefSymbol();

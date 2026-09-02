@@ -214,3 +214,39 @@ describe("presetAlertsStore", () => {
     expect(lirePresetAlerts().map((a) => a.id)).toEqual(["ok"]);
   });
 });
+
+describe("marquerScan — état de scan de SESSION (jamais persisté)", () => {
+  beforeEach(() => {
+    installMockLocalStorage();
+    presetAlertsStore.setState({ alertes: [] });
+  });
+
+  afterEach(() => {
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
+  it("publie l'horodatage puis l'erreur, et l'efface au scan suivant qui réussit", () => {
+    presetAlertsStore.getState().ajouter(builder("Momentum"));
+    const id = presetAlertsStore.getState().alertes[0]?.id ?? "";
+
+    presetAlertsStore.getState().marquerScan(id, 1_000, "réseau HS");
+    expect(presetAlertsStore.getState().alertes[0]?.dernierScanTs).toBe(1_000);
+    expect(presetAlertsStore.getState().alertes[0]?.derniereErreur).toBe("réseau HS");
+
+    presetAlertsStore.getState().marquerScan(id, 2_000);
+    expect(presetAlertsStore.getState().alertes[0]?.dernierScanTs).toBe(2_000);
+    expect(presetAlertsStore.getState().alertes[0]?.derniereErreur).toBeUndefined();
+  });
+
+  it("l'état de scan ne survit PAS à un rechargement (retiré de la persistance)", () => {
+    presetAlertsStore.getState().ajouter(builder("Momentum"));
+    const id = presetAlertsStore.getState().alertes[0]?.id ?? "";
+    presetAlertsStore.getState().marquerScan(id, 1_000, "réseau HS");
+    // Une mutation persistée (bascule) réécrit la clé : les champs de session en sont exclus.
+    presetAlertsStore.getState().basculer(id);
+
+    const relu = lirePresetAlerts();
+    expect(relu[0]?.dernierScanTs).toBeUndefined();
+    expect(relu[0]?.derniereErreur).toBeUndefined();
+  });
+});

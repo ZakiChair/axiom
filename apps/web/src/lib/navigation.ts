@@ -180,6 +180,16 @@ let pendingScroll: number | null = null;
  */
 function redrawNavMarker(): void {
   const chart = getActiveChart();
+  // Grille multi-chart : le focus a pu changer depuis le dernier tracé. Sans ce retrait
+  // sur l'ANCIEN porteur, l'overlay resterait à demeure sur le slot d'origine (pattern
+  // `retirerMarqueursSuivis` de chart/tradeMarkers ; try/catch pour l'instance disposée).
+  if (boundChart !== null && boundChart !== chart) {
+    try {
+      boundChart.removeOverlay({ name: NAV_MARKER });
+    } catch {
+      // Instance détruite (dispose) — silencieux.
+    }
+  }
   boundChart = chart;
   if (chart === null) return;
 

@@ -7,6 +7,11 @@
  * ⚠️ Emplacement de stockage IMPOSÉ : `axiom.coingecko.demoApiKey`, déjà lu par
  * `data/marketOverview.ts` (`resolveDemoKey`) et `data/macro/coingecko.ts`. Ce store ne
  * fait qu'ouvrir une saisie dans les Réglages sur une clé jusqu'ici seulement lisible.
+ *
+ * ⚠️ Conséquence assumée (revue 2026-09) : cet emplacement utilise des POINTS, il est donc
+ * hors du filtre `axiom:` de l'export/import de sauvegarde (`store/persist`). Cette clé
+ * n'est PAS sauvegardée : après un import sur un autre poste, il faut la ressaisir (sans
+ * elle, la capitalisation reste fonctionnelle mais sur le quota public, plus lent).
  */
 import { createStore } from "zustand/vanilla";
 

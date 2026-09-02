@@ -20,7 +20,7 @@ export const fundingApr: IndicatorDef = {
   inputs: [
     {
       key: "intervalH",
-      name: "Intervalle funding (h)",
+      name: "Règlement funding (h) — 8 ou 4",
       type: "number",
       default: 8,
       min: 1,

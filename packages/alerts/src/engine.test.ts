@@ -110,8 +110,9 @@ describe("prix-croise — sens les-deux (bidirectionnel via prix précédent)", 
 });
 
 describe("variation-pct", () => {
-  // Fenêtre 60 s ; référence = clôture <= (maintenant - 60 000). Bougies aux temps 0/60000/120000
-  // toutes à 100 → à maintenant=180000, cible=120000, réf=100. pct = (prix-100)/100*100.
+  // Fenêtre 60 s ; à maintenant=180000, cible=120000. La dernière bougie OUVERTE <= 120000 est
+  // celle de 120000 (elle clôture après la cible) : la référence est la clôture de la PRÉCÉDENTE,
+  // celle de 60000. Les trois bougies étant à 100, réf=100. pct = (prix-100)/100*100.
   const candles = [candle(0, 100), candle(60_000, 100), candle(120_000, 100)];
   function ctxVar(dernierPrix: number): ContexteAlerte {
     return { maintenant: 180_000, dernierPrix, candles };
@@ -132,6 +133,30 @@ describe("variation-pct", () => {
     const { fires } = piloter(def({ type: "variation-pct", fenetreMs: 60_000, seuilPct: -5 }), [
       ctxVar(100), // pct 0 → calibrage
       ctxVar(94), // pct -6 ≤ -5 → DÉCLENCHE
+    ]);
+    expect(fires).toEqual([false, true]);
+  });
+
+  it("prend la bougie CLÔTURÉE à la cible, pas celle encore ouverte (fenêtre == TF)", () => {
+    // Régression : `time` est l'OUVERTURE. Avec TF 1 h et fenêtre 1 h, la dernière bougie
+    // ouverte <= cible est celle qui clôture APRÈS la cible — prendre sa clôture comparait le
+    // prix à lui-même (pct = 0, alerte structurellement morte). La référence correcte est la
+    // clôture de la bougie PRÉCÉDENTE, qui a certainement clôturé à la cible.
+    const H = 3_600_000;
+    const { fires } = piloter(def({ type: "variation-pct", fenetreMs: H, seuilPct: -10 }), [
+      // Avant la chute : tout à 100 → pct 0 → calibrage (armé, aucun déclenchement).
+      {
+        maintenant: 2 * H + 60_000,
+        dernierPrix: 100,
+        candles: [candle(0, 100), candle(H, 100), candle(2 * H, 100)],
+      },
+      // La bougie ouverte en 2H a clôturé à 90 (−10 %) ; cible = 2H + 60 000 → référence =
+      // clôture de la bougie ouverte en H (= 100), donc pct = −10 ≤ −10 → DÉCLENCHE.
+      {
+        maintenant: 3 * H + 60_000,
+        dernierPrix: 90,
+        candles: [candle(0, 100), candle(H, 100), candle(2 * H, 90), candle(3 * H, 90)],
+      },
     ]);
     expect(fires).toEqual([false, true]);
   });

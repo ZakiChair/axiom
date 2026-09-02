@@ -49,6 +49,7 @@ import {
   saveSessionUi,
   saveWatchlist,
   importerSauvegarde,
+  exporterSauvegarde,
   decisionsReconcile,
 } from "./persist";
 import type { SnapshotKv } from "../data/daemon";
@@ -448,6 +449,55 @@ describe("importerSauvegarde — remplacement des clés axiom:*", () => {
     expect(importerSauvegarde(JSON.stringify({ foo: "bar" }))).toBe(false);
 
     expect(localStorage.getItem("axiom:garde:v1")).toBe("intact"); // rien n'a bougé
+  });
+});
+
+describe("exporterSauvegarde — périmètre réel du fichier téléchargé", () => {
+  /** Stub minimal du DOM pour capturer le Blob téléchargé (env vitest node). */
+  async function capturerExport(): Promise<Record<string, string>> {
+    let capture: Blob | null = null;
+    const g = globalThis as unknown as { document?: unknown; URL: typeof URL };
+    const urlObj = g.URL as unknown as Record<string, unknown>;
+    const ancienCreate = urlObj.createObjectURL;
+    const ancienRevoke = urlObj.revokeObjectURL;
+    g.document = {
+      createElement: () => ({ href: "", download: "", click: () => {}, remove: () => {} }),
+      body: { appendChild: () => {} },
+    };
+    urlObj.createObjectURL = (b: Blob) => {
+      capture = b;
+      return "blob:test";
+    };
+    urlObj.revokeObjectURL = () => {};
+    try {
+      exporterSauvegarde();
+    } finally {
+      delete g.document;
+      urlObj.createObjectURL = ancienCreate;
+      urlObj.revokeObjectURL = ancienRevoke;
+    }
+    if (capture === null) throw new Error("aucun Blob exporté");
+    return JSON.parse(await (capture as Blob).text()) as Record<string, string>;
+  }
+
+  it("embarque les clés API `axiom:*` EN CLAIR (d'où la confirmation avant export)", async () => {
+    localStorage.setItem("axiom:coinalyze:key", "SECRET-COINALYZE");
+    localStorage.setItem("axiom:fred:key", "SECRET-FRED");
+
+    const dump = await capturerExport();
+
+    expect(dump["axiom:coinalyze:key"]).toBe("SECRET-COINALYZE");
+    expect(dump["axiom:fred:key"]).toBe("SECRET-FRED");
+  });
+
+  it("n'embarque PAS la clé CoinGecko : elle est hors préfixe `axiom:` (promesse corrigée)", async () => {
+    localStorage.setItem("axiom.coingecko.demoApiKey", "SECRET-CG");
+    localStorage.setItem("axiom:coinalyze:key", "SECRET-COINALYZE");
+
+    const dump = await capturerExport();
+
+    expect(dump["axiom.coingecko.demoApiKey"]).toBeUndefined();
+    expect(Object.keys(dump).every((k) => k.startsWith("axiom:"))).toBe(true);
   });
 });
 

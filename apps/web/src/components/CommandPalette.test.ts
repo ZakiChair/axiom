@@ -1,6 +1,7 @@
 /**
- * Tests du helper `devraitAvoirNavProeminent` — logique de décision
- * pour déterminer si la navigation doit être proéminente dans la palette.
+ * Tests des helpers PURES de la palette : `devraitAvoirNavProeminent` (la navigation
+ * doit-elle prendre la tête ?) et `construireItemsRecherche` (liste affichée pour une
+ * requête non vide, navigation comprise).
  */
 import { describe, it, expect, vi } from "vitest";
 
@@ -24,8 +25,8 @@ vi.mock("klinecharts", () => ({
   DomPosition: {},
 }));
 
-import { devraitAvoirNavProeminent } from "./CommandPalette";
-import type { Commande } from "../commands/registry";
+import { construireItemsRecherche, devraitAvoirNavProeminent } from "./CommandPalette";
+import { construireRegistre, rechercher, type Commande } from "../commands/registry";
 
 describe("devraitAvoirNavProeminent — navigation proéminente en tête", () => {
   const registre: Commande[] = [
@@ -86,5 +87,40 @@ describe("devraitAvoirNavProeminent — navigation proéminente en tête", () =>
   it('retourne false quand « RSI » matche la commande RSI', () => {
     const nav = { symbol: "RSI" };
     expect(devraitAvoirNavProeminent("RSI", nav, registre)).toBe(false);
+  });
+});
+
+/**
+ * Non-régression du commit a033f20 : la commande de navigation ne doit JAMAIS
+ * disparaître de la liste. Le registre RÉEL (208 commandes) est indispensable ici :
+ * la recherche floue par sous-séquence fait matcher presque tout ticker de 3-4 lettres
+ * (ETH → 6 résultats, tête HURST), donc `devraitAvoirNavProeminent` est faux et
+ * l'ancienne implémentation OMETTAIT l'item de navigation — taper « ETH » puis Entrée
+ * basculait un indicateur au lieu de changer de paire.
+ */
+describe("construireItemsRecherche — la navigation n'est jamais supprimée", () => {
+  const reel = construireRegistre();
+
+  it("« ETH » : nav rétrogradée en fin de liste, jamais absente", () => {
+    // Prérequis du cas : ETH matche bien des commandes (sinon la nav serait proéminente).
+    expect(rechercher(reel, "ETH").length).toBeGreaterThan(0);
+    const items = construireItemsRecherche("ETH", reel);
+    expect(items.some((it) => it.cmd.id === "nav")).toBe(true);
+    expect(items[items.length - 1]?.cmd.id).toBe("nav");
+    expect(items[0]?.cmd.id).not.toBe("nav");
+  });
+
+  it("« RSI » et « DES » : la commande garde la tête, la nav reste en queue", () => {
+    for (const q of ["RSI", "DES"]) {
+      const items = construireItemsRecherche(q, reel);
+      expect(items[0]?.cmd.id).not.toBe("nav");
+      expect(items[items.length - 1]?.cmd.id).toBe("nav");
+    }
+  });
+
+  it("« SOL 4H » : la navigation explicite garde la tête", () => {
+    const items = construireItemsRecherche("SOL 4H", reel);
+    expect(items[0]?.cmd.id).toBe("nav");
+    expect(items.filter((it) => it.cmd.id === "nav").length).toBe(1);
   });
 });

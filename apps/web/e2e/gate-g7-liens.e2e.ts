@@ -3,10 +3,10 @@ import { test, expect, type Page } from "@playwright/test";
 /**
  * Gate G100 — G7 : « Lien panneau → chart (symbole + marqueur/TF) en 1 clic ».
  *
- * ⚠ RÉSEAU REQUIS : univers Binance (EQS), liste de paires Binance (MAP) —
- * daemon toléré absent (proxy Vite /extapi en dev). La treemap MAP est servie
- * par une FIXTURE de cache local (le tier keyless CoinGecko 429 en runs
- * répétés — voir le test MAP) ; le lien clic → chart reste réel.
+ * ⚠ RÉSEAU REQUIS : univers Binance (EQS) uniquement — daemon toléré absent
+ * (proxy Vite /extapi en dev). Le test MAP, lui, est HORS LIGNE : treemap servie
+ * par une FIXTURE de cache local, Fear & Greed et catalogue de paires Binance
+ * bouchonnés par `page.route` (voir le test MAP) ; le lien clic → chart reste réel.
  *
  * Couverture automatisée : EQS (clic ligne de résultat) et MAP (clic tuile
  * treemap) — les deux passent par le MÊME bus `navigateTo` (lib/navigation).
@@ -73,12 +73,16 @@ test("EQS : cliquer un résultat ouvre le symbole dans le chart", async ({ page 
 
 test("MAP : cliquer une tuile de la treemap ouvre le symbole dans le chart", async ({ page }) => {
   // FIXTURE : cache local CoinGecko posé AVANT le boot (clé + forme de
-  // data/marketOverview.ts, TTL 5 min). Constat en run réel : le tier keyless
-  // CoinGecko répond 429 dès que la suite tourne deux fois de suite (l'app tire
-  // déjà /global au boot) → « Carte indisponible. » = flake pur quota, hors
-  // critère. G7 mesure le LIEN clic tuile → chart : la navigation (navigateTo +
-  // garde-fou catalogue Binance, chargé en RÉSEAU réel) reste intégralement
-  // exercée ; seule la source de la treemap est fixée.
+  // data/marketOverview.ts, TTL 5 min). Elle ne suffit PAS à elle seule : la
+  // fenêtre attend `Promise.all([fetchMarketOverview(), fetchFearGreed()])`, donc
+  // le canvas reste sur « Chargement… » tant que l'indice Fear & Greed n'a pas
+  // répondu — appel live vers api.alternative.me via /extapi, sans délai propre,
+  // coupé à 15 s par le proxy Vite : EXACTEMENT le délai de l'assertion ci-dessous
+  // (d'où un échec au premier run et un succès à la relance). Les deux appels
+  // live restants sont donc bouchonnés : l'indice Fear & Greed et le catalogue de
+  // paires Binance (garde-fou du clic). G7 mesure le LIEN clic tuile → chart : la
+  // navigation (navigateTo + garde-fou catalogue) reste intégralement exercée ;
+  // seules les SOURCES sont fixées.
   await page.addInitScript(() => {
     window.localStorage.setItem(
       "axiom.marketmap.overview.v1",
@@ -101,6 +105,26 @@ test("MAP : cliquer une tuile de la treemap ouvre le symbole dans le chart", asy
       }),
     );
   });
+  // Indice Fear & Greed (forme lue par parseFearGreed : `value` et `timestamp`
+  // sont des CHAÎNES, timestamp en secondes epoch).
+  await page.route("**/extapi/api.alternative.me/**", (route) =>
+    route.fulfill({
+      json: { data: [{ value: "50", value_classification: "Neutral", timestamp: "1725235200" }] },
+    }),
+  );
+  // Catalogue de paires Binance (forme lue par loadBinancePairs : symbols[].symbol
+  // en statut "TRADING") : ETHBTC pour le symbole témoin, BTCUSDT pour le garde-fou
+  // du clic sur la tuile BTC.
+  await page.route("**/api.binance.com/api/v3/exchangeInfo*", (route) =>
+    route.fulfill({
+      json: {
+        symbols: [
+          { symbol: "BTCUSDT", status: "TRADING" },
+          { symbol: "ETHBTC", status: "TRADING" },
+        ],
+      },
+    }),
+  );
   await page.goto("/");
   await poserSymboleTemoin(page);
 

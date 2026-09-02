@@ -548,6 +548,17 @@ export function reinitialiserWhales(): void {
   sante.clePresente = false;
 }
 
+/**
+ * Rend une erreur du collecteur SÛRE à journaliser : la convertit en CHAÎNE (Bun
+ * imprimerait sinon les champs annexes de l'objet, dont `path` = l'URL appelée) puis
+ * expurge la clé Etherscan de la query string. Sans quoi ETHERSCAN_API_KEY finit en
+ * clair dans `logs/daemon.log`. Fonction PURE — précédent : `redigerErreurTelegram`
+ * de notify.ts.
+ */
+export function redigerErreurWhales(err: unknown): string {
+  return String(err).replace(/apikey=[^&\s]+/gi, "apikey=***");
+}
+
 // ─────────────────────────── Poll blocs BTC ───────────────────────────
 
 /** Hauteur du dernier bloc BTC traité (mémoire process — un redémarrage repart du bloc courant). */
@@ -607,7 +618,7 @@ export async function pollBtc(fetchImpl: typeof fetch = fetch, dInjecte?: Databa
     sante.erreurBtc = null;
   } catch (err) {
     sante.erreurBtc = err instanceof Error ? err.message : String(err);
-    console.error("[axiomd] poll blocs BTC échoué :", err);
+    console.error("[axiomd] poll blocs BTC échoué :", redigerErreurWhales(err));
   }
 }
 
@@ -626,7 +637,7 @@ export async function pollPrixBtc(fetchImpl: typeof fetch = fetch): Promise<void
       sante.prixBtcTs = Date.now();
     }
   } catch (err) {
-    console.error("[axiomd] poll prix BTC échoué :", err);
+    console.error("[axiomd] poll prix BTC échoué :", redigerErreurWhales(err));
   }
 }
 
@@ -741,8 +752,8 @@ export async function pollEtherscan(
     sante.dernierPollEthTs = Date.now();
     sante.erreurEth = null;
   } catch (err) {
-    sante.erreurEth = err instanceof Error ? err.message : String(err);
-    console.error("[axiomd] poll Etherscan whales échoué :", err);
+    sante.erreurEth = redigerErreurWhales(err instanceof Error ? err.message : err);
+    console.error("[axiomd] poll Etherscan whales échoué :", redigerErreurWhales(err));
   }
 }
 
@@ -782,7 +793,7 @@ export function demarrerBoucleWhales(cleEtherscan: string): () => void {
     try {
       purgerMouvements(db(), Date.now() - RETENTION_MS);
     } catch (err) {
-      console.error("[axiomd] purge whale_moves échouée :", err);
+      console.error("[axiomd] purge whale_moves échouée :", redigerErreurWhales(err));
     }
   };
   purger();

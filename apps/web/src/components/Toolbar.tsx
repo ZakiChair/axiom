@@ -87,8 +87,25 @@ function enregistrerWorkspaceAvecNom(): void {
   }
 }
 
-/** Exporte la sauvegarde complète (téléchargement) + toast de feedback. */
+/**
+ * Exporte la sauvegarde complète (téléchargement) + toast de feedback.
+ *
+ * Confirmation OBLIGATOIRE avant l'export, sur le modèle de celle de l'import : le
+ * fichier produit est le seul artefact du terminal conçu pour quitter la machine et il
+ * embarque les clés API `axiom:*` EN CLAIR. La clé CoinGecko, elle, est stockée hors
+ * préfixe (`axiom.coingecko.demoApiKey`) et n'est donc PAS du voyage.
+ */
 function exporterSauvegardeAvecFeedback(): void {
+  if (
+    !window.confirm(
+      "Exporter la sauvegarde ? Le fichier contiendra vos clés API EN CLAIR " +
+        "(Coinalyze, Twelve Data, FRED, CCData…) : ne le placez ni dans un dépôt git " +
+        "ni dans un dossier synchronisé (iCloud, Drive, Dropbox). " +
+        "La clé CoinGecko n'y est PAS incluse (stockée hors préfixe axiom:)."
+    )
+  ) {
+    return;
+  }
   exporterSauvegarde();
   pousserToast("Sauvegarde exportée");
 }
@@ -123,7 +140,7 @@ enregistrerCommandes([
     libelle: "Exporter la sauvegarde (JSON)",
     categorie: "action",
     motsCles: ["backup", "sauvegarde", "export", "json", "exporter", "telecharger"],
-    apercu: "Télécharge une sauvegarde de tout le terminal",
+    apercu: "Télécharge une sauvegarde du terminal — clés API EN CLAIR dans le fichier (clé CoinGecko exclue)",
     action: () => exporterSauvegardeAvecFeedback(),
   },
   {

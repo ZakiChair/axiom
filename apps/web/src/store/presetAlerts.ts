@@ -47,6 +47,16 @@ export interface AlertePreset {
   actif: boolean;
   /** ms epoch de création. */
   creeTs: number;
+  /**
+   * ms epoch du dernier scan tenté (succès OU échec). Champ de SESSION : écrit par le
+   * runtime, jamais persisté (absent au boot = aucun scan depuis le démarrage).
+   */
+  dernierScanTs?: number;
+  /**
+   * Message d'erreur du dernier scan, effacé au scan suivant s'il réussit. Champ de
+   * SESSION (cf. `dernierScanTs`) — rend visibles les échecs autrefois avalés.
+   */
+  derniereErreur?: string;
 }
 
 /**
@@ -76,6 +86,11 @@ export interface PresetAlertsState {
    * — chaque active fait tourner un scan périodique, la garde tient donc aussi ici.
    */
   basculer: (id: string) => "ok" | "limite";
+  /**
+   * Publie l'issue d'un scan (champs de SESSION `dernierScanTs` / `derniereErreur`) :
+   * appelé par le runtime au succès comme à l'échec. NON persisté.
+   */
+  marquerScan: (id: string, ts: number, erreur?: string) => void;
 }
 
 /** Identifiant d'alerte (crypto.randomUUID si dispo, repli horodaté). */
@@ -122,10 +137,13 @@ export function lirePresetAlerts(): AlertePreset[] {
   }
 }
 
-/** Écriture TOLÉRANTE (best-effort : quota / mode privé silencieux). */
+/** Écriture TOLÉRANTE (best-effort : quota / mode privé silencieux). Les champs de
+ *  SESSION (`dernierScanTs`, `derniereErreur`) sont retirés : les relire au boot
+ *  afficherait l'état d'une session précédente. */
 function ecrirePresetAlerts(alertes: AlertePreset[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(alertes));
+    const persistables = alertes.map(({ dernierScanTs, derniereErreur, ...reste }) => reste);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persistables));
   } catch {
     /* best-effort */
   }
@@ -173,6 +191,15 @@ export const presetAlertsStore = createStore<PresetAlertsState>((set, get) => ({
     ecrirePresetAlerts(alertes);
     set({ alertes });
     return "ok";
+  },
+
+  marquerScan: (id, ts, erreur) => {
+    // Pas d'écriture localStorage : l'état de scan est volontairement éphémère.
+    set({
+      alertes: get().alertes.map((a) =>
+        a.id === id ? { ...a, dernierScanTs: ts, derniereErreur: erreur } : a,
+      ),
+    });
   },
 }));
 

@@ -26,6 +26,7 @@ import {
   prixBtcUtilisable,
   purgerMouvements,
   quantiteDepuisData,
+  redigerErreurWhales,
   reinitialiserWhales,
   resultatGetLogs,
   TOKENS_ETH,
@@ -519,5 +520,35 @@ describe("pollBtc — rattrapage des blocs intermédiaires", () => {
       sante: { erreurBtc: string | null };
     };
     expect(corps.sante.erreurBtc).toContain("prix BTC");
+  });
+});
+
+// ─────────────────────────── Rédaction de la clé Etherscan dans les logs ───────────────────────────
+
+describe("redigerErreurWhales", () => {
+  it("expurge la clé d'une erreur Bun portant le champ `path` (URL complète)", () => {
+    const err = Object.assign(new Error("Unable to connect"), {
+      path: "https://api.etherscan.io/v2/api?chainid=1&module=proxy&apikey=CLE_SECRETE",
+    });
+    const texte = redigerErreurWhales(err);
+    expect(texte).not.toContain("CLE_SECRETE");
+  });
+
+  it("expurge la clé au milieu d'une query string et garde le reste lisible", () => {
+    const texte = redigerErreurWhales(
+      new Error("getLogs échoué https://api.etherscan.io/v2/api?chainid=1&apikey=CLE_SECRETE&module=logs"),
+    );
+    expect(texte).not.toContain("CLE_SECRETE");
+    expect(texte).toContain("apikey=***");
+    expect(texte).toContain("chainid=1");
+    expect(texte).toContain("module=logs");
+  });
+
+  it("laisse intact un message sans clé", () => {
+    expect(redigerErreurWhales(new Error("eth_blockNumber HTTP 429"))).toContain("eth_blockNumber HTTP 429");
+  });
+
+  it("accepte une valeur non-Error (chaîne brute)", () => {
+    expect(redigerErreurWhales("boom ?apikey=CLE_SECRETE")).toBe("boom ?apikey=***");
   });
 });

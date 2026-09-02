@@ -8,6 +8,7 @@ import {
   doitNotifier,
   evaluerEtPersister,
   evaluerLiqCascadeTick,
+  evaluableSurBougie1m,
   evaluerTick,
   evaluerWhaleFluxTick,
   FENETRE_LIQ_MS,
@@ -19,6 +20,7 @@ import {
   symbolesBinanceActifs,
   symbolesFundingActifs,
   symbolesLiqCascadeActifs,
+  TYPES_BOUGIE,
   TYPES_FUNDING,
   TYPES_PRIX,
 } from "./alerts";
@@ -515,5 +517,110 @@ describe("purgerJournalAlertes", () => {
   test("journal vide → 0 suppression (idempotent)", () => {
     const d = baseAvecJournal();
     expect(purgerJournalAlertes(d, Date.now())).toBe(0);
+  });
+});
+
+// ─────────────────────────── Filtre de timeframe (bougies 1 min du daemon) ───────────────────────────
+
+/** Def `variation-pct` binance (fenêtre 1 min, seuil +5 %), avec timeframe optionnel. */
+function alerteVariation(id: string, symbol: string, timeframe?: AlertDef["timeframe"]): AlertDef {
+  return {
+    id,
+    symbol,
+    source: "binance",
+    condition: { type: "variation-pct", fenetreMs: 60_000, seuilPct: 5 },
+    ...(timeframe === undefined ? {} : { timeframe }),
+    actif: true,
+    declenchements: [],
+  };
+}
+
+/** Trois bougies plates : la fenêtre de 1 min est couverte, la variation vaut 0 %. */
+function bougiesPlates(maintenant: number): Array<{
+  time: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}> {
+  return [180_000, 120_000, 60_000].map((recul) => ({
+    time: maintenant - recul,
+    open: 100,
+    high: 100,
+    low: 100,
+    close: 100,
+    volume: 1,
+  }));
+}
+
+describe("evaluableSurBougie1m", () => {
+  test("def héritée (timeframe absent) → évaluable par le daemon", () => {
+    expect(evaluableSurBougie1m(alerteVariation("v0", "BTCUSDT"))).toBe(true);
+  });
+
+  test("def explicitement 1m → évaluable", () => {
+    expect(evaluableSurBougie1m(alerteVariation("v1", "BTCUSDT", "1m"))).toBe(true);
+  });
+
+  test("def 4h → NON évaluable (front-only plutôt que fausse)", () => {
+    expect(evaluableSurBougie1m(alerteVariation("v4", "BTCUSDT", "4h"))).toBe(false);
+  });
+});
+
+describe("evaluerTick — conditions de bougie filtrées sur le timeframe", () => {
+  const maintenant = 3_000_000;
+  const ctx = { maintenant, dernierPrix: 100, candles: bougiesPlates(maintenant) };
+
+  test("def 1m : évaluée (calibrage de l'armement)", () => {
+    const res = evaluerTick([alerteVariation("v1", "BTCUSDT", "1m")], "BTCUSDT", TYPES_BOUGIE, ctx);
+    expect(res.modifie).toBe(true);
+    expect(res.defs).toHaveLength(1);
+    expect(res.defs[0]?.arme).toBe(true);
+  });
+
+  test("def héritée (sans timeframe) : évaluée comme avant", () => {
+    const res = evaluerTick([alerteVariation("v0", "BTCUSDT")], "BTCUSDT", TYPES_BOUGIE, ctx);
+    expect(res.modifie).toBe(true);
+    expect(res.defs).toHaveLength(1);
+  });
+
+  test("def 4h : écartée du lot (le daemon n'a que des bougies 1 min)", () => {
+    const res = evaluerTick([alerteVariation("v4", "BTCUSDT", "4h")], "BTCUSDT", TYPES_BOUGIE, ctx);
+    expect(res.defs).toHaveLength(0);
+    expect(res.modifie).toBe(false);
+  });
+
+  test("le filtre ne touche PAS les conditions hors bougie (prix-croise timeframé)", () => {
+    const def: AlertDef = { ...alertePrix("p4", "BTCUSDT", 100, "hausse"), timeframe: "4h" };
+    const res = evaluerTick([def], "BTCUSDT", TYPES_PRIX, { maintenant, dernierPrix: 90 });
+    expect(res.defs).toHaveLength(1);
+    expect(res.defs[0]?.arme).toBe(true);
+  });
+});
+
+describe("evaluerEtPersister — alerte de bougie 4h (front-only)", () => {
+  const maintenant = 3_000_000;
+
+  test("def 4h : aucun état de ré-armement persisté par le daemon", () => {
+    const d = baseAvecAlerte(alerteVariation("v4", "BTCUSDT", "4h"));
+    evaluerEtPersister(
+      "BTCUSDT",
+      TYPES_BOUGIE,
+      { maintenant, dernierPrix: 100, candles: bougiesPlates(maintenant) },
+      { db: d, dernierHeartbeat: 0 },
+    );
+    expect(d.query("SELECT COUNT(*) AS n FROM alertes_etat").get()).toMatchObject({ n: 0 });
+  });
+
+  test("def 1m : état persisté (le daemon l'évalue bien)", () => {
+    const d = baseAvecAlerte(alerteVariation("v1", "BTCUSDT", "1m"));
+    evaluerEtPersister(
+      "BTCUSDT",
+      TYPES_BOUGIE,
+      { maintenant, dernierPrix: 100, candles: bougiesPlates(maintenant) },
+      { db: d, dernierHeartbeat: 0 },
+    );
+    expect(d.query("SELECT COUNT(*) AS n FROM alertes_etat").get()).toMatchObject({ n: 1 });
   });
 });

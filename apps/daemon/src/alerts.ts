@@ -152,9 +152,24 @@ export function assetsWhaleFluxActifs(defs: readonly AlertDef[]): string[] {
 }
 
 /**
+ * Le daemon n'a QUE des bougies 1 minute (`marketFeed` s'abonne à `@kline_1m`) : une
+ * def de bougie déclarant un autre timeframe ne peut pas y être évaluée honnêtement —
+ * 500 bougies d'une minute ne reconstruisent pas une bougie 4 h. On l'ÉCARTE donc :
+ * l'alerte devient FRONT-ONLY (évaluée par le runtime du front sur son TF affiché)
+ * plutôt que fausse (évaluée sur du 1 min). `timeframe` absent = def HÉRITÉE :
+ * comportement inchangé (le daemon l'évalue sur ses bougies 1 min). Fonction PURE.
+ */
+export function evaluableSurBougie1m(def: AlertDef): boolean {
+  return def.timeframe === undefined || def.timeframe === "1m";
+}
+
+/**
  * Évalue le sous-lot d'alertes concerné par un événement (symbole + types de
  * condition) contre un contexte. Filtre `binance` + `actif` + `symbol` + `types`,
- * puis délègue au moteur pur. Fonction PURE (le moteur ne fait aucune I/O).
+ * puis délègue au moteur pur. Les conditions de BOUGIE sont en plus filtrées sur le
+ * timeframe (cf. `evaluableSurBougie1m`) ; les autres types (prix, funding, liq,
+ * whale) ne dépendent d'aucune bougie et ne sont donc jamais écartés. Fonction PURE
+ * (le moteur ne fait aucune I/O).
  */
 export function evaluerTick(
   defs: readonly AlertDef[],
@@ -163,7 +178,12 @@ export function evaluerTick(
   ctx: ContexteAlerte,
 ): ReturnType<typeof evaluerAlertes> {
   const lot = defs.filter(
-    (d) => d.actif && d.source === "binance" && d.symbol.toUpperCase() === symbol.toUpperCase() && types.has(d.condition.type),
+    (d) =>
+      d.actif &&
+      d.source === "binance" &&
+      d.symbol.toUpperCase() === symbol.toUpperCase() &&
+      types.has(d.condition.type) &&
+      (!TYPES_BOUGIE.has(d.condition.type) || evaluableSurBougie1m(d)),
   );
   return evaluerAlertes(lot, ctx);
 }
@@ -402,6 +422,8 @@ export function demarrerBoucleAlertes(): () => void {
         console.error("[axiomd] évaluation tick échouée :", err);
       }
     },
+    // Bougies 1 MINUTE (@kline_1m) : les defs déclarant un autre timeframe sont
+    // écartées par `evaluableSurBougie1m` (front-only plutôt que fausses).
     onBougieClose: (symbol, candles) => {
       const derniere = candles[candles.length - 1];
       if (!derniere) return;

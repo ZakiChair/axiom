@@ -13,6 +13,7 @@
  * « → Notes ». Les seules fonctions à effet de bord sont les `fetch*` ; le reste est pur.
  */
 import type { Declenchement } from "@axiom/alerts";
+import type { ExchangeId } from "@axiom/types";
 import { extUrl } from "./extapi";
 import { parsePremiumIndex } from "./screener";
 import { fetchOpenInterestHist } from "./binanceFutures";
@@ -23,7 +24,7 @@ import { fetchDvol } from "./deribit";
 import { fetchFearGreed, type FearGreed } from "./marketOverview";
 import { fetchToutesLesNews, type NewsItem } from "./news";
 import { resolveTickerSource } from "./ticker";
-import { watchlistStore } from "../store/watchlist";
+import { watchlistStore, type WatchlistSource } from "../store/watchlist";
 import { getSoSoValueKey } from "../store/sosovalue";
 import {
   debutJourLocalMs,
@@ -54,6 +55,8 @@ export interface LigneWatchlist {
   prix: number | null;
   /** Variation 24 h en %, ou null. */
   variation24h: number | null;
+  /** Source réelle du symbole (routage du clic → chart, jamais Binance par défaut). */
+  source: WatchlistSource;
 }
 
 /** Ligne dérivés d'un actif majeur (funding + prochain règlement + ΔOI 24 h). */
@@ -117,6 +120,8 @@ export interface FundingExtreme {
 /** Trade clôturé du jour civil local (review de session). */
 export interface TradeClosBrief {
   symbole: string;
+  /** Exchange d'origine de la position (routage du clic → chart). */
+  source: ExchangeId;
   direction: Direction;
   /** PnL net réalisé (devise de cotation). */
   pnlNet: number;
@@ -232,6 +237,7 @@ export function tradesClosDuJour(positions: readonly Position[], now: number): T
     if (pnl === null || p.prixSortie === undefined) continue;
     out.push({
       symbole: p.symbole,
+      source: p.source,
       direction: p.direction,
       pnlNet: pnl.net,
       pnlPct: pnl.pct,
@@ -447,13 +453,18 @@ interface RawTicker24h {
  * ticker absent — symbole non couvert ou en échec du repli par symbole — ou aux champs
  * non numériques donne prix/variation à null (affichés « — »).
  */
-export function ligneDepuisTicker(symbole: string, t: RawTicker24h | undefined): LigneWatchlist {
+export function ligneDepuisTicker(
+  symbole: string,
+  t: RawTicker24h | undefined,
+  source: WatchlistSource,
+): LigneWatchlist {
   const prix = t !== undefined ? Number(t.lastPrice) : NaN;
   const variation = t !== undefined ? Number(t.priceChangePercent) : NaN;
   return {
     symbole,
     prix: Number.isFinite(prix) ? prix : null,
     variation24h: Number.isFinite(variation) ? variation : null,
+    source,
   };
 }
 
@@ -499,7 +510,9 @@ export async function fetchWatchlistOvernight(
       }
     }
   }
-  return symboles.map((s) => ligneDepuisTicker(s, parSymbole.get(s)));
+  return symboles.map((s) =>
+    ligneDepuisTicker(s, parSymbole.get(s), resolveTickerSource(s, sources[s])),
+  );
 }
 
 /** Actifs majeurs suivis par la section dérivés (code court ↔ paire perpétuelle). */

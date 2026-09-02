@@ -1,7 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
   creerSnapshot,
+  demarrerBoucleSnapshots,
   deserialiserSnapshot,
   doitDeclencherSnapshot,
   idsAPurger,
@@ -315,5 +316,54 @@ describe("traiterSnapshots — restore (base injectée)", () => {
     expect(res.status).toBe(500);
     expect(res.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
     expect(res.headers.get("content-type")).toContain("application/json");
+  });
+});
+
+// ─────────────────────────── Branchement de la boucle d'entretien ───────────────────────────
+
+/**
+ * Le défaut d'origine était une purge MORTE : `purgerExpires()` existait, était testée,
+ * mais n'était appelée par personne. Tester la fonction seule ne protège pas d'une
+ * débranche — c'est le CYCLE d'entretien qu'il faut exercer.
+ *
+ * `demarrerBoucleSnapshots` n'est pas injectable (elle appelle `getDb()`) : on substitue
+ * le module `./db` par une base `:memory:` (`mock.module`), ce qui évite d'ouvrir le
+ * fichier `axiom.db` réel. La substitution est globale au process → ce bloc reste EN
+ * DERNIER, après tous les tests qui passent leur propre Database explicitement.
+ */
+describe("demarrerBoucleSnapshots — purge du cache effectivement branchée", () => {
+  test("le cycle d'entretien supprime les entrées de cache expirées, garde les valides", async () => {
+    const dbReel = await import("./db");
+    const memDb = new Database(":memory:");
+    // Mêmes DDL que db.ts (les seules tables touchées par le cycle ; `alertes_journal`
+    // et `kv` sont créées/tolérées par leurs propres fonctions).
+    memDb.run(
+      "CREATE TABLE cache (cle TEXT PRIMARY KEY, corps BLOB NOT NULL, contentType TEXT NOT NULL, expireA INTEGER NOT NULL)",
+    );
+    memDb.run(
+      "CREATE TABLE kv_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, donnees TEXT NOT NULL)",
+    );
+    mock.module("./db", () => ({ ...dbReel, getDb: () => memDb }));
+
+    const maintenant = Date.now();
+    const inserer = memDb.query(
+      "INSERT INTO cache (cle, corps, contentType, expireA) VALUES (?, ?, ?, ?)",
+    );
+    inserer.run("expiree", Buffer.from("x"), "application/json", maintenant - 1_000);
+    inserer.run("valide", Buffer.from("y"), "application/json", maintenant + 600_000);
+    const clesAvant = (memDb.query("SELECT cle FROM cache ORDER BY cle").all() as { cle: string }[]).map(
+      (r) => r.cle,
+    );
+    expect(clesAvant).toEqual(["expiree", "valide"]); // témoin : rien n'a encore purgé
+
+    // La première vérification est SYNCHRONE dans demarrerBoucleSnapshots ; on arrête
+    // aussitôt le minuteur horaire.
+    const arreter = demarrerBoucleSnapshots();
+    arreter();
+
+    const clesApres = (memDb.query("SELECT cle FROM cache ORDER BY cle").all() as { cle: string }[]).map(
+      (r) => r.cle,
+    );
+    expect(clesApres).toEqual(["valide"]);
   });
 });

@@ -31,7 +31,9 @@
  *
  * Note périmètre : le thème (`store/theme`) et les alertes (`store/alerts`) gèrent leur
  * propre persistance dans leur module respectif ; ils ne sont donc pas re-persistés ici,
- * mais leurs clés `axiom:*` sont bien couvertes par l'export/import de sauvegarde.
+ * mais leurs clés `axiom:*` sont bien couvertes par l'export/import de sauvegarde. Seule
+ * exception connue : la clé Demo CoinGecko (`axiom.coingecko.demoApiKey`, hors préfixe)
+ * est HORS export — cf. `exporterSauvegarde`.
  */
 import { EXCHANGE_IDS, type ChartState, type ExchangeId, type Timeframe } from "@axiom/types";
 import {
@@ -736,9 +738,17 @@ function axiomKeys(): string[] {
 }
 
 /**
- * Exporte TOUT l'état `axiom:*` de localStorage en un fichier JSON horodaté
- * (téléchargement navigateur). Backup complet du terminal : chart, watchlist, session,
- * workspaces, thème, alertes, dessins, clés API… tout ce qui est préfixé `axiom:`.
+ * Exporte l'état `axiom:*` de localStorage en un fichier JSON horodaté (téléchargement
+ * navigateur) : chart, watchlist, session, workspaces, thème, alertes, dessins, et les
+ * clés API préfixées `axiom:` — Coinalyze, Twelve Data, FRED, CCData… — EN CLAIR. C'est
+ * le seul artefact du terminal conçu pour quitter la machine : l'appelant DOIT demander
+ * confirmation (cf. `exporterSauvegardeAvecFeedback`, Toolbar).
+ *
+ * HORS PÉRIMÈTRE (le filtre est strictement le préfixe `axiom:`) : la clé Demo CoinGecko,
+ * stockée sous `axiom.coingecko.demoApiKey` (points, pas deux-points — emplacement imposé
+ * par ses lecteurs `data/marketOverview.ts` et `data/macro/coingecko.ts`). Elle est donc à
+ * ressaisir après un import sur un autre poste ; sans elle les fenêtres de capitalisation
+ * retombent sur le quota public (fonctionnel, seulement plus lent).
  */
 export function exporterSauvegarde(): void {
   const dump: Record<string, string> = {};

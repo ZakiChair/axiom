@@ -16,7 +16,7 @@
  */
 import { createStore } from "zustand/vanilla";
 import type { AlertDef, Condition, Declenchement, SensCroisement } from "@axiom/alerts";
-import type { ExchangeId } from "@axiom/types";
+import type { ExchangeId, Timeframe } from "@axiom/types";
 import { daemonPret, kvPut } from "../data/daemon";
 
 const STORAGE_KEY = "axiom:alerts:v1";
@@ -35,6 +35,8 @@ export interface NouvelleAlerte {
   symbol: string;
   source: ExchangeId;
   condition: Condition;
+  /** TF d'évaluation des conditions de bougie (absent = def héritée, TF affiché). */
+  timeframe?: Timeframe;
   message?: string;
 }
 
@@ -173,6 +175,7 @@ export const alertsStore = createStore<AlertsState>((set, get) => ({
           symbol: a.symbol.toUpperCase(),
           source: a.source,
           condition: a.condition,
+          timeframe: a.timeframe,
           message: a.message,
           actif: true,
           // `arme` volontairement absent (undefined) : la 1re évaluation calibre le côté.

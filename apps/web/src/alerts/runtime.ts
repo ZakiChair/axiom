@@ -9,6 +9,8 @@
  *  - CLÔTURE DE BOUGIE (abonnement `marketStore`) sur le symbole affiché : évalue les
  *    conditions `variation-pct` et `indicateur-*` à chaque nouvelle bougie CLÔTURÉE
  *    (ces conditions requièrent les bougies, présentes uniquement pour le symbole affiché).
+ *    Une def n'est évaluée que si son `timeframe` est celui du chart ; `timeframe`
+ *    absent (def HÉRITÉE) = évaluée sur le TF affiché, quel qu'il soit.
  *  - POLL FUNDING (~60 s) pour les symboles ayant une alerte `funding-extreme` :
  *    injecte `fundingRate` (+ `fundingZScore` si historique dispo) dans le contexte.
  *  - STORE CVD S/P (`cvdDivergenceStore`) : le contrôleur orderflow publie le kind
@@ -28,13 +30,17 @@
  *
  *  - ALERTES DE PRESET (`presetAlertsStore`) : un timer par alerte active (période 15 ou
  *    60 min) relance `executerScreener` (snapshot des filtres) ; les symboles ENTRANT dans
- *    l'ensemble scanné (diff, hors cooldown 6 h) sont journalisés + notifiés. Scan LOURD →
- *    garde de visibilité en tête de tick. Front-only (pas de couverture daemon).
+ *    l'ensemble scanné (diff, hors cooldown 6 h) sont journalisés + notifiés. AUCUNE garde
+ *    de visibilité : c'est la seule source SANS relais daemon, la couper onglet caché
+ *    laisserait l'opérateur non couvert (une période de 15–60 min survit à la limitation
+ *    des timers d'arrière-plan). Chaque tick publie son issue (`dernierScanTs`,
+ *    `derniereErreur`, champs de session du store) — le panneau les affiche.
  *
  * ONGLET FERMÉ : le daemon évalue aussi `funding-extreme` (poll premiumIndex ~60 s,
  * lot D3) ET `liq-cascade` (tick 10 s sur sa table `liquidations` ingérée Bybit+OKX,
- * tous les symboles d'alerte — ingestion d'un nouveau symbole ≤60 s). Seul CVD
- * spot/perp-div reste dormant côté daemon (pas de pipeline orderflow).
+ * tous les symboles d'alerte — ingestion d'un nouveau symbole ≤60 s). Restent FRONT-ONLY
+ * (dormants côté daemon) : CVD spot/perp-div (pas de pipeline orderflow), `regime-seuil`
+ * (score non calculé en v1) et les alertes de preset.
  *
  * Un déclenchement → journal du store + notification système (Notification API) + bip
  * discret (WebAudio, aucun fichier binaire). AUCUNE donnée haute fréquence ne transite
@@ -133,12 +139,16 @@ function creerRuntime(): Unsubscribe {
 
   // ── Clôture de bougie : conditions variation-pct + indicateur-* ────────────
   let dernierSymbole = "";
+  let dernierTf = "";
   let dernierTempsCloture = 0;
   const onMarket = (): void => {
-    const { symbol, candles } = marketStore.getState();
-    // Changement de symbole (backfill) : on réinitialise le suivi de clôture.
-    if (symbol !== dernierSymbole) {
+    const { symbol, timeframe, candles } = marketStore.getState();
+    // Changement de symbole OU de TF (backfill) : on réinitialise le suivi de clôture.
+    // Le TF compte depuis que les defs y sont filtrées : les clôtures d'un TF plus long
+    // sont ANTÉRIEURES à la dernière vue sur un TF court, et resteraient ignorées.
+    if (symbol !== dernierSymbole || timeframe !== dernierTf) {
       dernierSymbole = symbol;
+      dernierTf = timeframe;
       dernierTempsCloture = 0;
     }
     if (candles.length < 2) return;
@@ -150,9 +160,17 @@ function creerRuntime(): Unsubscribe {
     if (!barreClose || barreClose.time <= dernierTempsCloture) return; // déjà évaluée
     dernierTempsCloture = barreClose.time;
 
+    // Une def PORTE son TF d'évaluation ; `undefined` = def héritée (évaluée sur le TF
+    // affiché, comportement d'origine).
     const lot = alertsStore
       .getState()
-      .defs.filter((d) => d.actif && d.symbol === symbol && TYPES_BOUGIE.has(d.condition.type));
+      .defs.filter(
+        (d) =>
+          d.actif &&
+          d.symbol === symbol &&
+          TYPES_BOUGIE.has(d.condition.type) &&
+          (d.timeframe === undefined || d.timeframe === timeframe)
+      );
     if (lot.length === 0) return;
     const avant = candles[idxClose - 1];
     appliquerResultat(lot, {
@@ -289,6 +307,23 @@ function creerRuntime(): Unsubscribe {
     if (!of.cvdSpotPerp) of.setCvdSpotPerp(true);
   };
 
+  // Rallumage du pipeline UNIQUEMENT quand l'ENSEMBLE des alertes CVD actives change
+  // (patron `resyncTicker`). Le store émet aussi sur le journal et sur chaque transition
+  // d'armement (`appliquerMisesAJour` réalloue `defs`) : sans cette clé, un déclenchement
+  // SANS RAPPORT ressusciterait l'orderflow que l'opérateur venait de couper.
+  let cleCvd = "";
+  const resyncCvd = (): void => {
+    const cle = alertsStore
+      .getState()
+      .defs.filter((d) => d.actif && d.condition.type === "cvd-spot-perp-div")
+      .map((d) => d.id)
+      .sort()
+      .join(",");
+    if (cle === cleCvd) return; // ensemble inchangé → on ne touche pas à l'orderflow
+    cleCvd = cle;
+    assurerPipelineCvd();
+  };
+
   const unsubCvd = cvdDivergenceStore.subscribe((s, prev) => {
     // Évalue seulement les symboles dont le kind a changé.
     for (const [sym, kind] of Object.entries(s.bySymbol)) {
@@ -330,8 +365,8 @@ function creerRuntime(): Unsubscribe {
   const ticksEnCours = new Set<string>();
 
   const tickPreset = async (id: string): Promise<void> => {
-    // Garde visibilité en tête : un scan est LOURD (réseau + worker), inutile onglet caché.
-    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    // AUCUNE garde de visibilité : c'est la seule source d'alerte sans relais daemon —
+    // la couper onglet caché laissait l'opérateur non couvert sans le savoir.
     if (ticksEnCours.has(id)) return; // tick précédent encore en vol
     const alerte = presetAlertsStore.getState().alertes.find((a) => a.id === id);
     if (!alerte || !alerte.actif) return; // retirée/désactivée entre-temps
@@ -347,6 +382,7 @@ function creerRuntime(): Unsubscribe {
       // pour une alerte disparue).
       const encoreActive = presetAlertsStore.getState().alertes.find((a) => a.id === id);
       if (!encoreActive || !encoreActive.actif) return;
+      presetAlertsStore.getState().marquerScan(id, Date.now()); // succès : erreur effacée
       const courant = res.rows.map((r) => r.symbol);
       const precedent = dernierEnsemble.get(id) ?? null;
       const entrants = diffEntrants(precedent, courant);
@@ -367,8 +403,12 @@ function creerRuntime(): Unsubscribe {
         notifier(d);
       }
       cooldownsPreset.set(id, cd);
-    } catch {
-      // Scan best-effort : un échec réseau ne casse ni la baseline ni le timer.
+    } catch (e) {
+      // Scan best-effort : un échec réseau ne casse ni la baseline ni le timer, mais il
+      // est PUBLIÉ (le panneau affichait une pastille verte après des heures d'échecs).
+      presetAlertsStore
+        .getState()
+        .marquerScan(id, Date.now(), e instanceof Error ? e.message : String(e));
     } finally {
       ticksEnCours.delete(id);
     }
@@ -400,7 +440,7 @@ function creerRuntime(): Unsubscribe {
   resyncFunding();
   resyncLiqCascade();
   resyncPreset();
-  assurerPipelineCvd();
+  resyncCvd();
   // Calibrage CVD sur l'état déjà publié (si orderflow déjà actif).
   for (const sym of Object.keys(cvdDivergenceStore.getState().bySymbol)) {
     evaluerCvdSymbol(sym);
@@ -410,7 +450,7 @@ function creerRuntime(): Unsubscribe {
     resyncTicker(); // re-route si la liste des symboles change
     resyncFunding();
     resyncLiqCascade();
-    assurerPipelineCvd();
+    resyncCvd();
     evaluerRegime(); // calibre une def régime nouvellement ajoutée
   });
   const unsubMarket = marketStore.subscribe(onMarket);

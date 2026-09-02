@@ -24,7 +24,7 @@ import {
 import { INDICATORS, getIndicator } from "@axiom/indicators";
 import { marketStore } from "../store/market";
 import { alertsStore } from "../store/alerts";
-import { presetAlertsStore } from "../store/presetAlerts";
+import { presetAlertsStore, type AlertePreset } from "../store/presetAlerts";
 import { demanderPermissionNotifications } from "../alerts/runtime";
 import { IS_VERCEL } from "../lib/deployment";
 import { formatHeure } from "../lib/format";
@@ -87,10 +87,30 @@ function etatArmement(arme: boolean | undefined): { texte: string; classe: strin
   return { texte: "déclenchée", classe: "text-serie-3" };
 }
 
+/**
+ * État du dernier scan d'une alerte de preset : pastille + libellé. Un échec avalé ne
+ * doit PAS rester vert (le scan est front-only, sans relais daemon).
+ */
+function etatScan(a: AlertePreset): { classePastille: string; classeTexte: string; texte: string } {
+  if (!a.actif) return { classePastille: "text-text-dim", classeTexte: "text-text-dim", texte: "en pause" };
+  if (a.derniereErreur !== undefined) {
+    return {
+      classePastille: "text-warn",
+      classeTexte: "text-warn",
+      texte: `échec ${formatHeure(a.dernierScanTs ?? 0)} — ${a.derniereErreur}`,
+    };
+  }
+  if (a.dernierScanTs === undefined) {
+    return { classePastille: "text-text-dim", classeTexte: "text-text-dim", texte: "aucun scan" };
+  }
+  return { classePastille: "text-up", classeTexte: "text-text-dim", texte: `scan ${formatHeure(a.dernierScanTs)}` };
+}
+
 export function AlertsPanel() {
   const defs = useStore(alertsStore, (s) => s.defs);
   const journal = useStore(alertsStore, (s) => s.journal);
   const symbolCourant = useStore(marketStore, (s) => s.symbol);
+  const tfCourant = useStore(marketStore, (s) => s.timeframe);
   // Alertes de scan (EQS) : liste réactive + message discret sur refus de reprise (limite).
   const alertesScan = useStore(presetAlertsStore, (s) => s.alertes);
   const [msgScan, setMsgScan] = useState<string | null>(null);
@@ -262,10 +282,17 @@ export function AlertsPanel() {
         : type === "whale-flux"
           ? { symbol: actifWhale, source: "binance" as const }
           : { symbol: symboleEffectif, source: marketStore.getState().exchange };
+    // Conditions de BOUGIE : la def porte le TF courant du chart (le runtime ne
+    // l'évalue plus que sur ce TF-là). Les autres types n'ont pas de TF.
+    const tfDef =
+      type === "variation-pct" || type === "indicateur-seuil" || type === "indicateur-croisement"
+        ? marketStore.getState().timeframe
+        : undefined;
     alertsStore.getState().ajouter({
       symbol: cible.symbol,
       source: cible.source,
       condition,
+      ...(tfDef !== undefined ? { timeframe: tfDef } : {}),
     });
     // Réinitialise les valeurs numériques (on garde type/sens/fenêtre pour un enchaînement rapide).
     setSymbol("");
@@ -551,7 +578,8 @@ export function AlertsPanel() {
               <option value="les-deux">↕ les deux</option>
             </select>
             <p className="px-0.5 text-[10px] text-text-dim">
-              Évalué à la clôture de bougie (front ET daemon onglet fermé).
+              Évalué à la clôture de bougie {tfCourant} (TF figé à la création). Onglet
+              fermé, le daemon ne couvre que la minute.
             </p>
           </div>
         )}
@@ -793,7 +821,7 @@ export function AlertsPanel() {
                 type="button"
                 onClick={() => basculerScan(a.id)}
                 title={a.actif ? "Mettre en pause" : "Reprendre"}
-                className={`shrink-0 text-[9px] leading-none ${a.actif ? "text-up" : "text-text-dim"}`}
+                className={`shrink-0 text-[9px] leading-none ${etatScan(a).classePastille}`}
               >
                 ●
               </button>
@@ -803,6 +831,9 @@ export function AlertsPanel() {
                   <span className="shrink-0 text-[10px] tabular-nums text-text-dim">
                     toutes les {a.periodeMin} min
                   </span>
+                </div>
+                <div className={`truncate text-[10px] ${etatScan(a).classeTexte}`}>
+                  {etatScan(a).texte}
                 </div>
               </div>
               <button

@@ -407,8 +407,9 @@ Leur état exact à HEAD figure dans la table de clôture ci-dessous.
 
 - `pnpm check` relancé deux fois, vert les deux fois : à `5a0aa04` (4 332 tests) au début
   de l'audit, puis à `e1e7e20` (4 354 tests) après le merge.
-- Aucun fichier du dépôt modifié pendant l'audit ; le présent rapport est le seul écrit,
-  et il n'est pas committé.
+- Aucun fichier du dépôt modifié pendant l'audit ; le présent rapport en a été le seul
+  écrit. Il a été versionné ensuite, avec les correctifs issus de cet audit
+  (branche `fix/revue-2026-09-02`, cf. annexe « Suites données »).
 - Une autre session travaillait dans le même checkout : les tâches E.2 à E.10 ont été
   traitées comme **en cours** et exclues des constats. Elles ont été committées et mergées
   dans `main` pendant l'audit.
@@ -491,3 +492,56 @@ les fichiers du daemon touchés par les tâches E.3 à E.10 (`marketFeed.ts`, `p
 `replay.ts`, `snapshots.ts`, `candles.ts`) ont pu se décaler de quelques lignes à
 `e1e7e20` — les constats les concernant restent valides, leurs numéros de ligne sont à
 recaler.*
+
+---
+
+## Annexe — Suites données (2026-09-02, branche `fix/revue-2026-09-02`)
+
+Huit commits, `pnpm check` vert (4 424 tests, soit +70). **Livrés** : les 5 constats de
+sévérité haute (suggestions 4, 5, 6, 9 et la référence de `variation-pct`), FUNDX / FUND /
+BRIEF (11 à 13), le marqueur de navigation (14), le résidu de quantification (18), le
+libellé de `fundingApr` (16), la cadence du footprint (22), le test de gate G7 (24), les
+trois points de sécurité (25 à 27), et toute la vérité documentaire (2, 3, et le protocole
+G100 avec son script de session).
+
+**Laissés délibérément**, parce qu'ils demandent une décision et non un correctif :
+la session partielle de VWAP et des pivots (15 — le vrai correctif est d'étendre le
+backfill au dernier minuit UTC, ce qui change le volume de données chargé), l'horodatage
+des buckets Coinalyze (17 — à vérifier d'abord sur une réponse réelle), le branchement du
+cache du proxy daemon (21 — change le chemin de TOUTES les requêtes), et le découpage du
+bundle (23).
+
+### Deux résidus connus, introduits par rien mais bornant les correctifs
+
+1. **L'horloge de référence des alertes reste celle de la machine.** Le contexte
+   d'évaluation est construit avec `Date.now()` alors que `Candle.time` porte l'horloge de
+   l'exchange. Avec la référence corrigée, la cible doit tomber pile sur l'ouverture de la
+   bougie qui vient de clôturer : une horloge cliente en retard de quelques secondes fait
+   glisser la référence d'une bougie de plus, et la fenêtre effective devient 2 × TF.
+   L'ancien code avait la fragilité miroir, ce n'est donc **pas une régression**, mais la
+   correction de `variation-pct` n'est exacte que si l'horloge est juste. Le correctif
+   robuste est de dériver la cible de l'horloge des bougies au site d'appel, des deux côtés
+   (front et daemon) — il touche la sémantique de `maintenant` pour tous les types de
+   condition, ce qui n'est pas un correctif d'une ligne.
+
+2. **Une souscription oisive subsiste côté daemon.** La sélection des symboles suivis n'a
+   pas été filtrée par timeframe : un symbole dont la seule alerte est en 4 h ouvre encore
+   un abonnement aux bougies d'une minute que le daemon n'évaluera jamais. Coût réel : une
+   souscription WebSocket inutile, zéro évaluation. Une ligne, non faite faute de périmètre.
+
+### Trois écarts d'implémentation à connaître
+
+- **Pipeline CVD** : la garde par comparaison de références que le brief prescrivait ne
+  corrige rien — `appliquerMisesAJour` réalloue le tableau des définitions à chaque
+  évaluation. La garde porte donc sur l'ensemble des identifiants d'alertes CVD actives.
+- La constante d'intervalle minimal a été **déplacée** vers le module d'orderflow, qui ne
+  peut pas importer le composant sans créer un cycle.
+- Le libellé de `fundingApr` a été **raccourci à 30 caractères** : le menu tronque sans
+  attribut de survol, et le piège est déjà documenté ailleurs dans le dépôt.
+
+### Non couvert par le gate
+
+`scripts/ci.sh` n'a **aucune étape Playwright** : le correctif du test de gate G7 n'a été
+vérifié que par son auteur, contre un serveur de développement qui servait alors les
+modifications non committées des autres agents. Le changement est un bouchon de test, sans
+code de production, mais le gate final ne l'a pas exercé.

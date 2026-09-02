@@ -21,6 +21,7 @@
 import type { Database } from "bun:sqlite";
 import { entetesCors } from "./cors";
 import { getDb } from "./db";
+import { santeLiqFeed, type SanteLiqFeed } from "./liqFeed";
 import type { Routeur } from "./router";
 
 /** Limite de lignes par GET (défaut) et plafond dur (garde-fou mémoire). */
@@ -162,6 +163,18 @@ export function purgerLiquidations(avantMs: number): void {
   db().query("DELETE FROM liquidations WHERE t < ?").run(avantMs);
 }
 
+/**
+ * Corps de réponse d'un GET liquidations : le fil DEMANDÉ + la santé des collecteurs.
+ * Sans cette dernière, un fil vide reste ambigu (marché calme ou collecteur muet ?) —
+ * c'est exactement la panne de 2,5 jours restée invisible en août.
+ */
+export function corpsLiquidations(
+  symbole: string,
+  liquidations: LiqFil[],
+): { symbole: string; liquidations: LiqFil[]; collecteurs: SanteLiqFeed } {
+  return { symbole, liquidations, collecteurs: santeLiqFeed() };
+}
+
 /** Réponse JSON avec en-têtes CORS. */
 function json(corps: unknown, req: Request, status = 200): Response {
   return new Response(JSON.stringify(corps), {
@@ -205,7 +218,7 @@ export async function traiterLiquidations(req: Request, url: URL): Promise<Respo
     sql += " ORDER BY t ASC LIMIT ?";
     params.push(limite);
     const liquidations = db().query(sql).all(...params) as LiqFil[];
-    return json({ symbole, liquidations }, req);
+    return json(corpsLiquidations(symbole, liquidations), req);
   }
 
   return json({ erreur: "méthode non permise" }, req, 405);

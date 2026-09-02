@@ -9,6 +9,7 @@
  */
 
 import { EXTAPI_HOSTS } from "../../../../shared/extapi-hosts";
+import { daemonSupporte, urlDaemon } from "./daemon";
 import { IS_VERCEL } from "../lib/deployment";
 
 /** Hôtes autorisés par le proxy /extapi. */
@@ -27,17 +28,25 @@ export function estHoteExtapiAutorise(hote: string): boolean {
  *
  * NB : ne valide PAS l'hôte (le daemon renvoie 403 si hors whitelist) — utiliser
  * `estHoteExtapiAutorise` en amont si un garde-fou explicite est souhaité.
+ *
+ * `baseDaemon` non vide → l'URL est ABSOLUE vers le daemon (son cache SQLite et ses
+ * gardes MIME/redirect/DNS entrent alors sur le chemin des requêtes) ; vide → chemin
+ * relatif historique (proxy Vite en dev, fonction serverless sur Vercel).
  */
 export function extUrlPourDeployment(
   hote: string,
   chemin: string,
   isVercel: boolean,
+  baseDaemon = "",
 ): string {
   const cheminNettoye = chemin.startsWith("/") ? chemin.slice(1) : chemin;
   if (isVercel && hote === "fapi.binance.com") return `https://${hote}/${cheminNettoye}`;
-  return `/extapi/${hote}/${cheminNettoye}`;
+  return `${baseDaemon}/extapi/${hote}/${cheminNettoye}`;
 }
 
 export function extUrl(hote: string, chemin: string): string {
-  return extUrlPourDeployment(hote, chemin, IS_VERCEL);
+  // Test SYNCHRONE de l'état déjà sondé (aucune sonde réseau ici) : tant que le daemon
+  // n'a pas été détecté avec la capability `proxy`, le chemin relatif est INCHANGÉ.
+  const base = daemonSupporte("proxy") ? urlDaemon("") : "";
+  return extUrlPourDeployment(hote, chemin, IS_VERCEL, base);
 }

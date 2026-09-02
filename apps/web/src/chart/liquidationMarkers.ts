@@ -26,7 +26,13 @@ import type { Commande } from "../commands/registry";
 import { marketStore } from "../store/market";
 import { subscribeLiquidations, type Liquidation } from "../data/liquidations";
 import { fetchLiquidationHistory, type LiquidationHistPoint } from "../data/coinalyze";
-import { liquidationsGet, liquidationsPush, type LiqDaemon } from "../data/daemon";
+import {
+  collecteurLiqMuet,
+  liquidationsGet,
+  liquidationsPush,
+  santeLiquidationsDaemon,
+  type LiqDaemon,
+} from "../data/daemon";
 import type { Candle, Unsubscribe } from "@axiom/types";
 
 const STORAGE_PREFIX = "axiom:liqheat:";
@@ -401,19 +407,22 @@ function depuisDaemon(d: LiqDaemon): LiqEvent {
  * Amorce le buffer au changement de symbole : d'abord le seed DAEMON (historique persistant
  * 7 j), fusionné + dédoublonné avec le buffer localStorage déjà restauré. Si le daemon est
  * ABSENT (`null`) ET le buffer vide, repli COINALYZE (événements approx, long→low/short→high).
+ * Le repli vaut AUSSI quand le daemon répond mais que son collecteur est MUET : il ne
+ * collecte alors plus rien et son historique vide n'est pas une vérité sur le marché.
  * Garde anti-course : si le symbole change pendant l'attente async, on jette le résultat.
  */
 async function amorcerSeed(symbol: string): Promise<void> {
   const daemon = await liquidationsGet(symbol, { depuis: Date.now() - SEED_WINDOW_MS });
   if (symboleAbonne !== symbol) return; // symbole changé pendant l'attente → jeté
   if (daemon !== null) {
-    // Daemon présent : on fusionne son historique (même vide → pas de repli Coinalyze).
+    // Daemon présent : on fusionne son historique.
     if (daemon.length > 0) {
       evenements = bornerEvenements(fusionnerEvenements(evenements, daemon.map(depuisDaemon)), MAX_EVENTS);
       publier();
       sauverProfil(symbol);
     }
-    return;
+    // Collecteur VIVANT → son historique fait foi, pas de repli. Muet → on continue.
+    if (!collecteurLiqMuet(santeLiquidationsDaemon(), Date.now())) return;
   }
   // Daemon absent ET buffer vide → repli Coinalyze (sinon on garde le buffer persisté).
   if (evenements.length > 0) return;

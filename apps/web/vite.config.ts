@@ -78,6 +78,34 @@ export default defineConfig(({ mode }) => {
     "import.meta.env.VITE_AXIOM_DEPLOYMENT": JSON.stringify(AXIOM_DEPLOYMENT),
     "import.meta.env.VITE_TWELVE_DATA_API_BASE": JSON.stringify(TWELVE_DATA_API_BASE),
   },
+  // DÉCOUPAGE DU BUNDLE — isole les vendeurs STABLES (rendu React, KLineChart, moteur
+  // d'indicateurs) hors du chunk d'entrée : une modification du code applicatif ne
+  // réinvalide plus leur cache navigateur. Trois groupes seulement — un découpage plus
+  // fin multiplierait les requêtes. On ne touche PAS aux dépendances déjà isolées par
+  // les imports paresseux (d3-geo/topojson dans GlobeWindow) : les regrouper ici les
+  // ferait charger au démarrage.
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: (id: string) => {
+          if (id.includes("/node_modules/klinecharts/")) return "vendor-klinecharts";
+          if (
+            id.includes("/node_modules/react/") ||
+            id.includes("/node_modules/react-dom/") ||
+            id.includes("/node_modules/scheduler/")
+          ) {
+            return "vendor-react";
+          }
+          // Package workspace : pnpm résout le symlink, l'id est le chemin source réel.
+          if (id.includes("/packages/indicators/")) return "indicators";
+          return undefined;
+        },
+      },
+    },
+    // Budget non complaisant : juste au-dessus du plus gros chunk émis après découpage,
+    // pour qu'une dérive d'une dizaine de kilo-octets redéclenche l'avertissement.
+    chunkSizeWarningLimit: 670,
+  },
   server: {
     proxy: {
       // La clé FRED est injectée ici SEULEMENT si le front n'en a pas déjà mis une

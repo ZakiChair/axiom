@@ -4,7 +4,8 @@
  * Ouverte par ⌘K/Ctrl+K (ou la touche « ? » pour l'aide), elle propose une ligne de
  * saisie unique façon Bloomberg : recherche fuzzy sur le registre de commandes, plus
  * une interprétation LIBRE de la saisie en navigation (« SOL 4H », « btcusdt »). La
- * commande de navigation synthétisée apparaît en tête des résultats.
+ * commande de navigation synthétisée apparaît en tête des résultats, ou en fin de liste
+ * quand une commande du registre matche mieux — mais elle n'est jamais supprimée.
  *
  * Navigation au clavier (flèches + Entrée), aperçu de la commande sélectionnée, et
  * historique des 20 dernières commandes (localStorage, clé dédiée). Un mode « aide »
@@ -32,7 +33,7 @@ interface EntreeHistorique {
 }
 
 /** Élément affiché : commande + texte de saisie associé (pour l'historique). */
-interface Item {
+export interface Item {
   cmd: Commande;
   texte: string;
 }
@@ -70,6 +71,22 @@ export function devraitAvoirNavProeminent(
 
   // Sinon, la commande prend la tête.
   return false;
+}
+
+/**
+ * Construit la liste affichée pour une requête NON vide : résultats fuzzy du registre
+ * plus la commande de navigation synthétisée. PURE (extraite du useMemo pour être
+ * testable avec le registre RÉEL — pas de jsdom dans apps/web).
+ */
+export function construireItemsRecherche(q: string, registre: readonly Commande[]): Item[] {
+  const base: Item[] = rechercher(registre, q).map((cmd) => ({ cmd, texte: "" }));
+  const nav = parseNavigation(q);
+  if (nav === null) return base;
+  // La navigation n'est JAMAIS supprimée : proéminente en tête, sinon RÉTROGRADÉE en
+  // fin de liste. L'omettre privait « ETH » (qui matche 6 commandes en fuzzy) de
+  // « Changer la paire », et Entrée basculait un indicateur.
+  const itemNav: Item = { cmd: commandeNavigation(nav), texte: q };
+  return devraitAvoirNavProeminent(q, nav, registre) ? [itemNav, ...base] : [...base, itemNav];
 }
 
 /** Garde de type d'une entrée d'historique restaurée. */
@@ -125,12 +142,7 @@ export function CommandPalette() {
       if (histo.length > 0) return histo;
       return registre.map((cmd) => ({ cmd, texte: "" }));
     }
-    const base: Item[] = rechercher(registre, q).map((cmd) => ({ cmd, texte: "" }));
-    const nav = parseNavigation(q);
-    if (nav !== null && devraitAvoirNavProeminent(q, nav, registre)) {
-      return [{ cmd: commandeNavigation(nav), texte: q }, ...base];
-    }
-    return base;
+    return construireItemsRecherche(q, registre);
   }, [requete, registre, historique]);
 
   // Ouverture : recharge l'historique, remet la saisie à zéro, focalise le champ.

@@ -36,7 +36,7 @@
 import { alignAux } from "@axiom/indicators";
 import type { AuxSeries, AuxSeriesId, ExchangeId, Timeframe } from "@axiom/types";
 import { coinalyzeProvider } from "../data/coinalyze";
-import { histFunding, histOiUsd, histOiUsdAvecRepli } from "../data/referentiels";
+import { histFunding, histOiUsd } from "../data/referentiels";
 import { stablecoinsSupplyProvider } from "../data/macro/stablecoins";
 import { fetchNvtHistory } from "../data/onchain/blockchainNvt";
 import { fetchCoinMetrics } from "../data/onchain/coinmetrics";
@@ -135,12 +135,35 @@ const LOOKBACK_MS = 90 * 24 * 60 * 60 * 1000;
 const REFCLOSE_LIMIT = 720;
 /** Intervalle d'agrégation Coinalyze pour OI/funding (cf. COINALYZE_INTERVALS). */
 const COINALYZE_INTERVAL = "1hour";
+/** Durée du bucket `COINALYZE_INTERVAL`, en ms. */
+const COINALYZE_BUCKET_MS = 60 * 60_000;
+/**
+ * Séries dont les points portent l'INSTANT OÙ LEUR VALEUR EST CONNUE → alignées sur la
+ * CLÔTURE de bougie (cf. la convention en tête d'`alignAux`). Les autres restent sur
+ * l'ouverture : appariées 1:1 (`perpDelta`, `refClose`) ou horodatées au début de leur
+ * période (séries quotidiennes), le mode clôture leur ferait lire la période suivante.
+ */
+const AUX_SUR_CLOTURE: ReadonlySet<AuxSeriesId> = new Set<AuxSeriesId>(["oi", "funding"]);
 
 /** Entrée de cache pour une clé `(id, symbole)`. */
 type Entry =
   | { state: "pending"; onReadys: Array<() => void> }
   | { state: "ready"; points: AuxPoint[]; expires: number }
   | { state: "error"; message: string; expires: number };
+
+/**
+ * Réhorodate un point d'historique Coinalyze à l'instant où sa valeur est CONNUE.
+ * VÉRIFIÉ sur l'API le 2026-09-02 : `t` est le DÉBUT du bucket et la valeur retenue est
+ * sa clôture (`c`) — le point 1 min `t=08:05` portait la valeur du snapshot
+ * `/open-interest` relevé à 08:05:42, et la clôture du bucket 1 h `t=07:00` égalait
+ * celle du bucket 1 min `07:59`. Datée à `t`, cette valeur est donc FUTURE d'un bucket.
+ * Le bucket EN COURS, lui, n'a pas atteint sa fin : sa clôture est la dernière valeur
+ * OBSERVÉE, d'où la borne à `Date.now()` (sans quoi la bougie live perdrait jusqu'à
+ * une heure de fraîcheur).
+ */
+function instantConnuCoinalyze(t: number): number {
+  return Math.min(t + COINALYZE_BUCKET_MS, Date.now());
+}
 
 /** Nettoie une série brute pour `alignAux` : écarte le non-fini, trie par time croissant. */
 function toPoints(raw: AuxPoint[]): AuxPoint[] {
@@ -271,19 +294,33 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
   const since = Date.now() - LOOKBACK_MS;
   switch (id) {
     case "oi": {
-      const h = coinalyzeKeyStore.getState().hasKey
-        ? await histOiUsdAvecRepli(symbol, COINALYZE_INTERVAL, since)
-        : (await histOiUsd(symbol)) ?? [];
-      return toPoints(h.map((p) => ({ time: p.t, value: p.v })));
+      // Coinalyze en primaire (points RÉHORODATÉS, cf. instantConnuCoinalyze), repli
+      // Binance `openInterestHist` sinon — MÊME arbitrage que `histOiUsdAvecRepli`,
+      // déplié ici (patron `funding` ci-dessous) parce que seuls les points Coinalyze
+      // doivent être décalés : ceux du repli portent déjà leur instant de relevé.
+      if (coinalyzeKeyStore.getState().hasKey) {
+        try {
+          const h = await coinalyzeProvider.fetchOpenInterestHistory(symbol, COINALYZE_INTERVAL, since);
+          const points = toPoints(
+            h.map((p) => ({ time: instantConnuCoinalyze(p.time), value: p.oiUsd }))
+          );
+          if (points.length > 0) return points;
+        } catch {}
+      }
+      const h = await histOiUsd(symbol);
+      return toPoints((h ?? []).map((p) => ({ time: p.t, value: p.v })));
     }
     case "funding": {
       if (coinalyzeKeyStore.getState().hasKey) {
         try {
           const h = await coinalyzeProvider.fetchFundingRateHistory(symbol, COINALYZE_INTERVAL, since);
-          const points = toPoints(h.map((f) => ({ time: f.time, value: f.rate })));
+          const points = toPoints(
+            h.map((f) => ({ time: instantConnuCoinalyze(f.time), value: f.rate }))
+          );
           if (points.length > 0) return points;
         } catch {}
       }
+      // Repli : `fundingRate` Binance porte l'instant de RÈGLEMENT — déjà l'instant connu.
       const h = await histFunding(symbol);
       return toPoints((h ?? []).map((p) => ({ time: p.t, value: p.v })));
     }
@@ -452,7 +489,7 @@ export class AuxProvider {
         errorMessage = entry.message;
         continue;
       }
-      aux[id] = alignAux(req.candleTimes, entry.points);
+      aux[id] = alignAux(req.candleTimes, entry.points, AUX_SUR_CLOTURE.has(id));
     }
 
     if (errorMessage !== undefined) return { status: "error", message: errorMessage };

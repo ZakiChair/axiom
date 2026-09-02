@@ -26,7 +26,6 @@ vi.mock("../store/onchain", () => ({
 vi.mock("../data/referentiels", () => ({
   histFunding: vi.fn(),
   histOiUsd: vi.fn(),
-  histOiUsdAvecRepli: vi.fn(),
 }));
 
 import { AuxProvider } from "./auxProvider";
@@ -34,7 +33,7 @@ import { coinalyzeProvider } from "../data/coinalyze";
 import { stablecoinsSupplyProvider } from "../data/macro/stablecoins";
 import { fetchBgeometricMetrique } from "../data/onchain/bgeometrics";
 import { fetchCoinMetrics } from "../data/onchain/coinmetrics";
-import { histFunding, histOiUsd, histOiUsdAvecRepli } from "../data/referentiels";
+import { histFunding, histOiUsd } from "../data/referentiels";
 import { coinalyzeKeyStore } from "../store/coinalyze";
 import { getBgeometricsKey } from "../store/onchain";
 
@@ -46,7 +45,6 @@ const bgFetchMock = vi.mocked(fetchBgeometricMetrique);
 const bgKeyMock = vi.mocked(getBgeometricsKey);
 const fundingFallbackMock = vi.mocked(histFunding);
 const oiFallbackMock = vi.mocked(histOiUsd);
-const oiWithFallbackMock = vi.mocked(histOiUsdAvecRepli);
 
 /** Point OpenInterest de test (seul `oiUsd` est lu par l'AuxProvider). */
 function oiPoint(time: number, oiUsd: number): OpenInterest {
@@ -79,14 +77,13 @@ function fundingReq(candleTimes: number[]) {
 }
 
 describe("AuxProvider.getAligned", () => {
+  /** Durée d'un bucket Coinalyze : les points OI/funding sont horodatés à sa FIN. */
+  const H = 3_600_000;
+
   beforeEach(() => {
     vi.clearAllMocks();
     coinalyzeKeyStore.setState({ hasKey: true });
     oiFallbackMock.mockResolvedValue(null);
-    oiWithFallbackMock.mockImplementation(async (symbol, interval, since) => {
-      const points = await oiMock(symbol, interval, since);
-      return points.map((point) => ({ t: point.time, v: point.oiUsd }));
-    });
     fundingFallbackMock.mockResolvedValue(null);
   });
   afterEach(() => {
@@ -100,10 +97,8 @@ describe("AuxProvider.getAligned", () => {
     const status = p.getAligned(oiReq([1500, 2500]), () => {});
 
     expect(status).toEqual({ status: "pending" });
-    expect(oiWithFallbackMock).toHaveBeenCalledTimes(1);
     expect(oiMock).toHaveBeenCalledTimes(1);
     // Signature vérifiée : (symbol, "1hour", sinceMs).
-    expect(oiWithFallbackMock).toHaveBeenCalledWith("BTCUSDT", "1hour", expect.any(Number));
     expect(oiMock).toHaveBeenCalledWith("BTCUSDT", "1hour", expect.any(Number));
   });
 
@@ -112,58 +107,66 @@ describe("AuxProvider.getAligned", () => {
     oiFallbackMock.mockResolvedValue([{ t: 1000, v: 10 }, { t: 2000, v: 20 }]);
     const p = new AuxProvider();
 
+    // Bougies [500, 1500) et [1500, 2500) : le relevé de 1000 est connu à la clôture de
+    // la première, celui de 2000 à la clôture de la seconde.
     await new Promise<void>((resolve) => {
-      p.getAligned(oiReq([1500, 2500]), resolve);
+      p.getAligned(oiReq([500, 1500]), resolve);
     });
 
-    expect(p.getAligned(oiReq([1500, 2500]), () => {})).toEqual({
+    expect(p.getAligned(oiReq([500, 1500]), () => {})).toEqual({
       status: "ready",
       aux: { oi: [10, 20] },
     });
     expect(oiFallbackMock).toHaveBeenCalledWith("BTCUSDT");
-    expect(oiWithFallbackMock).not.toHaveBeenCalled();
     expect(oiMock).not.toHaveBeenCalled();
   });
 
   it("après résolution → onReady appelé, 2e appel → ready avec série alignée (alignAux)", async () => {
-    oiMock.mockResolvedValue([oiPoint(1000, 10), oiPoint(2000, 20)]);
+    // Buckets [0, H) → 10 et [H, 2H) → 20 ; sur un chart 1 h, chaque bougie reçoit la
+    // clôture du bucket qui lui correspond (cf. anti-régression plus bas).
+    oiMock.mockResolvedValue([oiPoint(0, 10), oiPoint(H, 20)]);
     const p = new AuxProvider();
 
     await new Promise<void>((resolve) => {
-      const first = p.getAligned(oiReq([1500, 2500]), resolve);
+      const first = p.getAligned(oiReq([0, H]), resolve);
       expect(first).toEqual({ status: "pending" });
     });
 
     // 2e appel même clé (id+symbole) → données prêtes, alignées sur candleTimes.
-    const second = p.getAligned(oiReq([1500, 2500]), () => {});
+    const second = p.getAligned(oiReq([0, H]), () => {});
     expect(second).toEqual({ status: "ready", aux: { oi: [10, 20] } });
     // Le fetch n'est PAS relancé (mémoïsé).
     expect(oiMock).toHaveBeenCalledTimes(1);
   });
 
-  it("mappe et aligne les points fournis par le repli OI", async () => {
-    oiWithFallbackMock.mockResolvedValue([
+  it("replie OI sur Binance quand Coinalyze renvoie une série vide, mappe et trie", async () => {
+    oiMock.mockResolvedValue([]);
+    oiFallbackMock.mockResolvedValue([
       { t: 2000, v: 20 },
       { t: 1000, v: 10 },
     ]);
     const p = new AuxProvider();
 
     await new Promise<void>((resolve) => {
-      p.getAligned(oiReq([1500, 2500]), resolve);
+      p.getAligned(oiReq([500, 1500]), resolve);
     });
 
-    expect(p.getAligned(oiReq([1500, 2500]), () => {})).toEqual({
+    expect(p.getAligned(oiReq([500, 1500]), () => {})).toEqual({
       status: "ready",
       aux: { oi: [10, 20] },
     });
-    expect(oiWithFallbackMock).toHaveBeenCalledWith("BTCUSDT", "1hour", expect.any(Number));
-    expect(oiMock).not.toHaveBeenCalled();
+    expect(oiMock).toHaveBeenCalledWith("BTCUSDT", "1hour", expect.any(Number));
+    expect(oiFallbackMock).toHaveBeenCalledWith("BTCUSDT");
   });
 
   it("échec du fetch → error, puis pas de re-fetch avant 30 s", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
-    oiMock.mockRejectedValue(new Error("boom"));
+    // Les DEUX sources doivent tomber : depuis la convention d'horodatage du 2026-09-02,
+    // l'échec Coinalyze est rattrapé par le repli Binance (patron `histOiUsdAvecRepli`
+    // déplié dans rawFetch). Seul l'échec du repli fait remonter l'erreur à l'écran.
+    oiMock.mockRejectedValue(new Error("coinalyze down"));
+    oiFallbackMock.mockRejectedValue(new Error("boom"));
     const p = new AuxProvider();
 
     await new Promise<void>((resolve) => {
@@ -196,10 +199,16 @@ describe("AuxProvider.getAligned", () => {
   });
 
   it("aligne funding, stablecoins et mvrv depuis leurs fournisseurs respectifs", async () => {
-    fundingMock.mockResolvedValue([fundingPoint(1000, 0.0001)]);
-    stableMock.mockResolvedValue([{ time: 1000, value: 1.6e11 }]);
+    // Horodatages RÉALISTES (ms epoch, pas de bucket 1 h) : depuis la convention du
+    // 2026-09-02, un point Coinalyze est réhorodaté à la FIN de son bucket. Le bucket
+    // ouvrant à T0−1h est donc connu à T0, l'ouverture de la bougie mesurée.
+    const H = 3_600_000;
+    const T0 = 1_700_000_000_000;
+    fundingMock.mockResolvedValue([fundingPoint(T0 - H, 0.0001)]);
+    // Séries NON réhorodatées (quotidiennes, alignées sur l'ouverture) : inchangées.
+    stableMock.mockResolvedValue([{ time: T0 - H, value: 1.6e11 }]);
     cmMock.mockResolvedValue({
-      series: { CapMVRVCur: { points: [{ time: 1000, value: 2.3 }] } },
+      series: { CapMVRVCur: { points: [{ time: T0 - H, value: 2.3 }] } },
       ts: 0,
       perime: false,
     });
@@ -210,7 +219,7 @@ describe("AuxProvider.getAligned", () => {
       symbol: "BTCUSDT",
       timeframe: "1h" as const,
       ids: ["funding" as const, "stablecoins" as const, "mvrv" as const],
-      candleTimes: [1500],
+      candleTimes: [T0],
     };
 
     await new Promise<void>((resolve) => {
@@ -253,8 +262,11 @@ describe("AuxProvider.getAligned", () => {
     async (mode) => {
       if (mode === "exception") fundingMock.mockRejectedValue(new Error("Coinalyze 401"));
       else fundingMock.mockResolvedValue([]);
+      // Règlements Binance : ils portent DÉJÀ leur instant connu, donc pas de
+      // réhorodatage — mais ils se lisent désormais à la CLÔTURE de bougie (2500 et
+      // 3500 pour un pas de 1000). Un règlement par bougie, valeurs distinctes.
       fundingFallbackMock.mockResolvedValue([
-        { t: 2000, v: 0.0002 },
+        { t: 3000, v: 0.0002 },
         { t: 1000, v: 0.0001 },
       ]);
       const p = new AuxProvider();
@@ -348,5 +360,70 @@ describe("AuxProvider.getAligned", () => {
       ].sort(),
     );
     for (const [, key] of bgFetchMock.mock.calls) expect(key).toBe(personalKey);
+  });
+});
+
+/**
+ * Horodatage des buckets Coinalyze (suggestion 17, vérifiée sur l'API le 2026-09-02) :
+ * `t` est le DÉBUT du bucket et la valeur retenue (`c`) sa CLÔTURE — elle n'est donc
+ * connue qu'à `t + 1 h`. Les deux moitiés du correctif se testent ENSEMBLE : décalage
+ * des points à la fin du bucket ET alignement sur la clôture de bougie.
+ */
+describe("AuxProvider — horodatage des buckets Coinalyze", () => {
+  const H = 3_600_000;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    coinalyzeKeyStore.setState({ hasKey: true });
+    oiFallbackMock.mockResolvedValue(null);
+    // Deux buckets 1 h CLOS : [0, H) → 10 et [H, 2H) → 20.
+    oiMock.mockResolvedValue([oiPoint(0, 10), oiPoint(H, 20)]);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Résout le fetch puis rend la série alignée sur `candleTimes`. */
+  async function serieOi(candleTimes: number[], timeframe: "15m" | "1h") {
+    const p = new AuxProvider();
+    const req = {
+      exchange: "binance" as const,
+      symbol: "BTCUSDT",
+      timeframe,
+      ids: ["oi" as const],
+      candleTimes,
+    };
+    await new Promise<void>((resolve) => {
+      p.getAligned(req, resolve);
+    });
+    return p.getAligned(req, () => {});
+  }
+
+  it("chart 15 min : les bougies DANS le bucket ne reçoivent pas sa clôture (pas de look-ahead)", async () => {
+    vi.setSystemTime(3 * H); // les deux buckets sont clos.
+    // Bougies 15 min à l'intérieur de [0, H) : la clôture du bucket n'est connue qu'à H,
+    // donc seule la bougie qui CLÔT à H (ouverte à 3H/4) peut l'afficher.
+    const status = await serieOi([0, H / 4, H / 2, (3 * H) / 4, H], "15m");
+    expect(status).toEqual({
+      status: "ready",
+      aux: { oi: [undefined, undefined, undefined, 10, 10] },
+    });
+  });
+
+  it("chart 1 h : sortie INCHANGÉE par rapport à l'alignement d'avant correctif", async () => {
+    vi.setSystemTime(3 * H);
+    // Anti-régression : à pas de bougie = pas de bucket, décalage + clôture se compensent.
+    const status = await serieOi([0, H, 2 * H], "1h");
+    expect(status).toEqual({ status: "ready", aux: { oi: [10, 20, 20] } });
+  });
+
+  it("bucket EN COURS : borné à l'instant courant → la bougie live garde la valeur fraîche", async () => {
+    vi.setSystemTime(H + H / 4); // le bucket [H, 2H) n'est pas clos : 20 est sa valeur du moment.
+    const status = await serieOi([0, H / 4, H / 2, (3 * H) / 4, H], "15m");
+    expect(status).toEqual({
+      status: "ready",
+      aux: { oi: [undefined, undefined, undefined, 10, 20] },
+    });
   });
 });

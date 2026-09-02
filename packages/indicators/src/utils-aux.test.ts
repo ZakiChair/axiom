@@ -35,3 +35,23 @@ describe("alignAux", () => {
     expect(result).toEqual([5, 5]);
   });
 });
+
+describe("alignAux — mode clôture (surCloture)", () => {
+  it("borne la lecture à la CLÔTURE de la bougie (= ouverture de la suivante)", () => {
+    // Bougies contiguës de 15 : [0,15) [15,30) [30,45) [45,60) [60,75). Un point
+    // horodaté 60 (instant où sa valeur est connue) n'est visible qu'à partir de la
+    // bougie qui CLÔT à 60, soit celle ouverte à 45 — jamais avant (look-ahead).
+    const result = alignAux([0, 15, 30, 45, 60], [{ time: 60, value: 7 }], true);
+    expect(result).toEqual([undefined, undefined, undefined, 7, 7]);
+  });
+
+  it("extrapole la clôture de la DERNIÈRE bougie depuis le dernier pas", () => {
+    // 2 bougies de pas 10 : la dernière (t=10) clôt à 20 → un point à 20 lui est visible.
+    expect(alignAux([0, 10], [{ time: 20, value: 3 }], true)).toEqual([undefined, 3]);
+  });
+
+  it("avec une SEULE bougie, le pas est inconnu → repli conservateur sur l'ouverture", () => {
+    expect(alignAux([10], [{ time: 11, value: 3 }], true)).toEqual([undefined]);
+    expect(alignAux([10], [{ time: 10, value: 3 }], true)).toEqual([3]);
+  });
+});

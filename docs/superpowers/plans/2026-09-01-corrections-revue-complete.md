@@ -6429,10 +6429,11 @@ export function compacterSiNecessaire(
 
 ## Backlog (constats hors plan, à traiter plus tard)
 
-Un seul constat confirmé n'est volontairement pas planifié ici, plus les trouvailles annexes de la revue :
+Un constat confirmé n'est volontairement pas planifié ici, plus le report acté en C.3 et les trouvailles annexes de la revue :
 
-- **Verdict G100 non rendu** (`docs/superpowers/plans/2026-07-22-gate-g100-qa.md:11`, moyenne) — gate manuel, décision de Zaki, pas une tâche de code. Le e2e « une bougie s'affiche » (Task E.4) en est le préalable automatisable.
+- **Verdict G100 non rendu** (`docs/superpowers/plans/2026-07-22-gate-g100-qa.md:11`, moyenne) — gate manuel, décision de Zaki, pas une tâche de code. Le e2e « une bougie s'affiche » (Task E.5) en est le préalable automatisable.
 - **`screener.worker.ts:145`** (hors décompte, trouvé par le critique de complétude) — aucun mécanisme d'annulation : deux runs concurrents cumulent ~20 req/s vers Binance ; et `cond.param` passe brut à `computeIndicator` sans le clamp de `resolveParams` (l. 101). À traiter avec le Lot D3 comme référence.
+- **Hydratation par élément de `notes.ts` et `portfolio.ts`** (décision C.3) — mêmes défaut et patron que la Task C.3 (`estTradeValide` d'expy.ts : validateur par item, l'item invalide est écarté au lieu de casser le boot), mais hors périmètre du constat d'origine qui visait alerts/paper/presetAlerts.
 - **Angle mort à instruire** : vérifier que la fenêtre BPL/mcapCandles (pagination 150 000) n'hérite pas du bug d'alignement store↔dataList corrigé en Task A.3 — ajouter un test croisé si besoin.
 
 ## Rappel des sévérités par lot

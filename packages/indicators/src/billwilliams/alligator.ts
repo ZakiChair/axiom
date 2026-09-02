@@ -64,11 +64,13 @@ export const alligator: IndicatorDef = {
     ctx: CalcContext
   ): IndicatorResult {
     const jawLength = Number(params.jawLength);
-    const jawShift = Number(params.jawShift);
+    // Quantifie : les décalages servent d'index dans displace() (out[i] = src[i - shift]) ;
+    // fractionnaire => les trois mâchoires entièrement vides.
+    const jawShift = Math.round(Number(params.jawShift));
     const teethLength = Number(params.teethLength);
-    const teethShift = Number(params.teethShift);
+    const teethShift = Math.round(Number(params.teethShift));
     const lipsLength = Number(params.lipsLength);
-    const lipsShift = Number(params.lipsShift);
+    const lipsShift = Math.round(Number(params.lipsShift));
 
     // Prix médian (hl2) déjà fourni par le moteur.
     const median = ctx.hl2;

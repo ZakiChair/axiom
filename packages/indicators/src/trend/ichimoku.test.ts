@@ -101,4 +101,19 @@ describe("Ichimoku", () => {
       expect(v).toBeGreaterThanOrEqual(lo);
     }
   });
+
+  it("décalage fractionnaire quantifié : displacement=25.5 -> arrondi 26, séries non vides", () => {
+    const frac = computeIndicator(ichimoku, candles, {
+      tenkan: 9,
+      kijun: 26,
+      senkou: 52,
+      displacement: 25.5,
+    }).series;
+    expect(frac.spanA?.some((v) => v !== undefined)).toBe(true);
+    expect(frac.spanB?.some((v) => v !== undefined)).toBe(true);
+    expect(frac.chikou?.some((v) => v !== undefined)).toBe(true);
+    expect(frac.spanA).toEqual(series.spanA);
+    expect(frac.spanB).toEqual(series.spanB);
+    expect(frac.chikou).toEqual(series.chikou);
+  });
 });

@@ -90,4 +90,21 @@ describe("Alligator (Bill Williams)", () => {
       }
     }
   });
+
+  it("décalages fractionnaires quantifiés : 8.4/5.4/3.4 -> arrondis 8/5/3, séries non vides", () => {
+    const prices = Array.from({ length: 40 }, (_, i) => 100 + Math.sin(i) * 5);
+    const candles = flatCandles(prices);
+    const frac = computeIndicator(alligator, candles, {
+      jawShift: 8.4,
+      teethShift: 5.4,
+      lipsShift: 3.4,
+    }).series;
+    const entier = computeIndicator(alligator, candles).series;
+    expect(frac.jaw?.some((v) => v !== undefined)).toBe(true);
+    expect(frac.teeth?.some((v) => v !== undefined)).toBe(true);
+    expect(frac.lips?.some((v) => v !== undefined)).toBe(true);
+    expect(frac.jaw).toEqual(entier.jaw);
+    expect(frac.teeth).toEqual(entier.teeth);
+    expect(frac.lips).toEqual(entier.lips);
+  });
 });

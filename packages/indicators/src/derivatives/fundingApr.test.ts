@@ -33,4 +33,16 @@ describe("fundingApr", () => {
     );
     expect(series.apr?.[0]).toBeUndefined();
   });
+
+  it("libellé de l'intervalle : expose l'hypothèse 8 h / 4 h et reste lisible dans le menu", () => {
+    const input = fundingApr.inputs.find((i) => i.key === "intervalH");
+    expect(input).toBeDefined();
+    const nom = input?.name ?? "";
+    // L'hypothèse doit être VISIBLE : les deux cadences réelles apparaissent.
+    expect(nom).toContain("8");
+    expect(nom).toContain("4");
+    // …sans dépasser la largeur du panneau (span `truncate`, w-72) : cf. gel des
+    // mentions longues dans `name` (types/IndicatorDef, « non validé »).
+    expect(nom.length).toBeLessThanOrEqual(32);
+  });
 });

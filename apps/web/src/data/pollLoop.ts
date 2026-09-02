@@ -13,6 +13,28 @@
  *    (délai croissant plafonné) au lieu de marteler une source en panne/quota épuisé ;
  *  - `onError` optionnel : l'erreur est surfacée (au lieu d'être silencieusement avalée) ;
  *  - `source` optionnel : report d'état (polling/error/closed) dans le healthStore.
+ *
+ * Suspension onglet masqué (`suspendreSiMasque`, opt-in — cf. suggestion 20) :
+ * un poller marqué suspendable ne tire plus tant que `document.visibilityState`
+ * vaut "hidden", et reprend par UN SEUL rafraîchissement si la période est dépassée
+ * (jamais un rattrapage des ticks manqués). L'option est **opt-in** : sans elle, le
+ * poller reste actif en fond — c'est le défaut sûr.
+ *
+ * QUI RESTE ACTIF EN FOND, ET POURQUOI (le daemon n'évalue les alertes onglet fermé
+ * que pour `source === "binance"`, cf. apps/daemon/src/marketFeed.ts) :
+ *  - `ticker.ts` pollCryptoTickers (kraken/coinbase/mexc) et pollTradfiQuotes
+ *    (Twelve Data /quote) : ils alimentent `subscribeTickers`, dont dépend
+ *    l'évaluation des alertes `prix-croise` sur les sources NON binance. Aucun relais
+ *    daemon → les suspendre casserait les notifications onglet masqué.
+ *  - `mexc.ts` et `twelvedata.ts` subscribeKline : ils alimentent `marketStore`, dont
+ *    dépend l'évaluation des conditions `variation-pct` / `indicateur-*` sur le symbole
+ *    affiché. Même raison — non relayées par le daemon hors binance. Le quota Twelve
+ *    Data continue donc d'être consommé en fond : c'est un coût assumé, moindre que la
+ *    perte d'une alerte.
+ *  - Le battement de cœur vers le daemon ne passe PAS par `pollLoop` (aucun appelant
+ *    ici) : il n'est pas concerné par cette suspension.
+ * Sont suspendables (affichage seul, aucun consommateur d'alerte) : la veille news
+ * (`news.ts`) et les barres de watchlist (`ticker.ts` subscribeWatchlistBars).
  */
 import type { Unsubscribe } from "@axiom/types";
 import { healthStore } from "../store/health";
@@ -38,6 +60,11 @@ export interface PollLoopOptions {
   onError?: (err: unknown, consecutiveErrors: number) => void;
   /** Identifiant de source pour le registre santé (report polling/error/closed). */
   source?: string;
+  /**
+   * Suspend les cycles tant que l'onglet est masqué (opt-in). À réserver aux pollers
+   * d'AFFICHAGE : un poller alimentant l'évaluation des alertes doit rester actif.
+   */
+  suspendreSiMasque?: boolean;
 }
 
 export function pollLoop(
@@ -49,13 +76,17 @@ export function pollLoop(
   let running = false; // garde anti-chevauchement
   let consecutiveErrors = 0;
   let nextAllowedTs = 0; // aucun tick avant cet instant (backoff)
+  let dernierTickTs = 0; // début du dernier cycle lancé (0 = aucun)
   const controller = new AbortController();
   const source = opts?.source;
+  const suspendable = opts?.suspendreSiMasque === true;
 
   const run = async () => {
     if (cancelled || running) return; // pas de tick chevauchant le précédent
+    if (suspendable && estMasque()) return; // onglet masqué : cycle sauté
     if (Date.now() < nextAllowedTs) return; // backoff en cours après erreurs
     running = true;
+    dernierTickTs = Date.now();
     try {
       await tick(controller.signal, () => cancelled);
       consecutiveErrors = 0;
@@ -74,14 +105,39 @@ export function pollLoop(
   };
 
   if (opts?.immediate) void run();
-  const timer = setInterval(() => void run(), intervalMs);
+  let timer = setInterval(() => void run(), intervalMs);
+
+  // Reprise de visibilité : UN seul rafraîchissement si la période est dépassée, et
+  // l'intervalle repart de la reprise (sinon un tick déjà programmé doublerait l'appel).
+  const onVisibilite = () => {
+    if (cancelled || estMasque()) return;
+    if (Date.now() - dernierTickTs < intervalMs) return; // période non dépassée : rien
+    clearInterval(timer);
+    timer = setInterval(() => void run(), intervalMs);
+    void run();
+  };
+  const cible = suspendable ? cibleVisibilite() : null;
+  cible?.addEventListener("visibilitychange", onVisibilite);
 
   return () => {
     cancelled = true;
     controller.abort();
     clearInterval(timer);
+    cible?.removeEventListener("visibilitychange", onVisibilite);
     if (source) healthStore.getState().setEtat(source, "closed");
   };
+}
+
+/** `document` s'il expose les écouteurs (absent en environnement Node sans DOM). */
+function cibleVisibilite(): Pick<Document, "addEventListener" | "removeEventListener"> | null {
+  return typeof document !== "undefined" && typeof document.addEventListener === "function"
+    ? document
+    : null;
+}
+
+/** Onglet masqué ? `false` si `document` n'existe pas (environnement Node). */
+function estMasque(): boolean {
+  return typeof document !== "undefined" && document.visibilityState === "hidden";
 }
 
 /** Message lisible d'une erreur inconnue. */

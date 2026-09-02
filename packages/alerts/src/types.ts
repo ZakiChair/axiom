@@ -6,12 +6,13 @@
  * tel quel par le futur daemon de Phase 2 (roadmap 03, piste 1.7).
  *
  * Une `AlertDef` porte : sa cible (symbol + source), sa `condition` (union
- * discriminée), un `message` optionnel, l'état `actif`, l'état de ré-armement
+ * discriminée), son `timeframe` optionnel d'évaluation, un `message` optionnel,
+ * l'état `actif`, l'état de ré-armement
  * `arme` (géré par le moteur, cf. engine.ts) et le journal `declenchements`
  * (horodatages ms epoch, borné).
  */
 
-import type { Candle, ExchangeId } from "@axiom/types";
+import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
 
 /** Sens d'un franchissement / croisement. */
 export type SensCroisement = "hausse" | "baisse" | "les-deux";
@@ -156,6 +157,13 @@ export interface AlertDef {
   symbol: string;
   source: ExchangeId;
   condition: Condition;
+  /**
+   * Timeframe sur lequel la définition doit être évaluée (conditions de bougie).
+   * `undefined` = définitions HÉRITÉES : comportement actuel conservé (le front évalue
+   * sur le TF affiché, le daemon sur ses bougies 1 minute). Le moteur reste agnostique —
+   * ce sont les consommateurs (runtime front, daemon) qui filtrent dessus.
+   */
+  timeframe?: Timeframe;
   /** Message personnalisé ; à défaut le moteur en dérive un via `decrireCondition`. */
   message?: string;
   actif: boolean;

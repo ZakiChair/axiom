@@ -141,7 +141,7 @@ function evalVariation(
   const p = ctx.dernierPrix;
   if (!Number.isFinite(p)) return null;
 
-  // Prix de référence = clôture de la dernière bougie ouverte AVANT (maintenant - fenetreMs).
+  // Prix de référence = clôture de la bougie qui a CLÔTURÉ à (maintenant - fenetreMs).
   const cible = ctx.maintenant - c.fenetreMs;
   const ref = clotureAvant(candles, cible);
   if (ref === undefined || ref === 0) return null; // fenêtre pas encore couverte
@@ -308,11 +308,16 @@ function evalWhaleFlux(
 
 // ───────── Helpers purs ─────────
 
-/** Clôture de la dernière bougie dont l'open time est <= `cible` (undefined si aucune). */
+/**
+ * Clôture de la bougie qui avait certainement CLÔTURÉ à `cible` (undefined si aucune).
+ * `time` étant l'OUVERTURE, la dernière bougie ouverte <= `cible` se clôture APRÈS la
+ * cible : on renvoie donc la clôture de celle qui la PRÉCÈDE (sinon la variation porterait
+ * sur (fenêtre − TF), nulle dès que fenêtre <= TF).
+ */
 function clotureAvant(candles: Candle[], cible: number): number | undefined {
   for (let i = candles.length - 1; i >= 0; i--) {
     const cd = candles[i];
-    if (cd && cd.time <= cible) return cd.close;
+    if (cd && cd.time <= cible) return candles[i - 1]?.close;
   }
   return undefined;
 }

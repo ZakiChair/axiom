@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { type LiqFil, normaliserLiqs, parseRequeteLiqs } from "./liquidations";
+import { reinitialiserSanteLiqFeed, santeLiqFeed } from "./liqFeed";
+import { corpsLiquidations, type LiqFil, normaliserLiqs, parseRequeteLiqs } from "./liquidations";
 
 describe("normaliserLiqs", () => {
   it("garde les entrées valides et écarte les invalides", () => {
@@ -15,5 +16,15 @@ describe("parseRequeteLiqs", () => {
   it("borne la limite et parse depuis/jusqua", () => {
     const p = new URLSearchParams("depuis=5&jusqua=9&limite=999999999");
     expect(parseRequeteLiqs(p)).toEqual({ depuis: 5, jusqua: 9, limite: 100_000 });
+  });
+});
+
+describe("corpsLiquidations", () => {
+  it("joint la santé des collecteurs au fil renvoyé par GET /liquidations/:symbole", () => {
+    reinitialiserSanteLiqFeed();
+    const corps = corpsLiquidations("BTCUSDT", []);
+    expect(corps.symbole).toBe("BTCUSDT");
+    expect(corps.liquidations).toEqual([]);
+    expect(corps.collecteurs).toEqual(santeLiqFeed());
   });
 });

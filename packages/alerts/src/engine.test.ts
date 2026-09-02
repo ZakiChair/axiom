@@ -110,9 +110,9 @@ describe("prix-croise — sens les-deux (bidirectionnel via prix précédent)", 
 });
 
 describe("variation-pct", () => {
-  // Fenêtre 60 s ; à maintenant=180000, cible=120000. La dernière bougie OUVERTE <= 120000 est
-  // celle de 120000 (elle clôture après la cible) : la référence est la clôture de la PRÉCÉDENTE,
-  // celle de 60000. Les trois bougies étant à 100, réf=100. pct = (prix-100)/100*100.
+  // Fenêtre 60 s ; ancrage sur la dernière bougie CLÔTURÉE (120000), cible = 60000 : la
+  // référence est la clôture de la bougie ouverte en 60000 (elle a clôturé en 120000).
+  // Les trois bougies étant à 100, réf=100. pct = (prix-100)/100*100.
   const candles = [candle(0, 100), candle(60_000, 100), candle(120_000, 100)];
   function ctxVar(dernierPrix: number): ContexteAlerte {
     return { maintenant: 180_000, dernierPrix, candles };
@@ -138,35 +138,53 @@ describe("variation-pct", () => {
   });
 
   it("prend la bougie CLÔTURÉE à la cible, pas celle encore ouverte (fenêtre == TF)", () => {
-    // Régression : `time` est l'OUVERTURE. Avec TF 1 h et fenêtre 1 h, la dernière bougie
-    // ouverte <= cible est celle qui clôture APRÈS la cible — prendre sa clôture comparait le
-    // prix à lui-même (pct = 0, alerte structurellement morte). La référence correcte est la
-    // clôture de la bougie PRÉCÉDENTE, qui a certainement clôturé à la cible.
+    // Régression : `time` est l'OUVERTURE. Avec TF 1 h et fenêtre 1 h, comparer à la clôture
+    // de la dernière bougie du tableau reviendrait à comparer le prix à lui-même (pct = 0,
+    // alerte structurellement morte). La référence correcte est la clôture de la bougie
+    // ouverte un TF plus tôt (elle a clôturé à l'ouverture de la dernière).
     const H = 3_600_000;
     const { fires } = piloter(def({ type: "variation-pct", fenetreMs: H, seuilPct: -10 }), [
       // Avant la chute : tout à 100 → pct 0 → calibrage (armé, aucun déclenchement).
       {
-        maintenant: 2 * H + 60_000,
+        maintenant: 2 * H,
         dernierPrix: 100,
-        candles: [candle(0, 100), candle(H, 100), candle(2 * H, 100)],
+        candles: [candle(0, 100), candle(H, 100)],
       },
-      // La bougie ouverte en 2H a clôturé à 90 (−10 %) ; cible = 2H + 60 000 → référence =
+      // La bougie ouverte en 2H a clôturé à 90 (−10 %) ; ancrage = 2H → référence =
       // clôture de la bougie ouverte en H (= 100), donc pct = −10 ≤ −10 → DÉCLENCHE.
       {
-        maintenant: 3 * H + 60_000,
+        maintenant: 3 * H,
         dernierPrix: 90,
-        candles: [candle(0, 100), candle(H, 100), candle(2 * H, 90), candle(3 * H, 90)],
+        candles: [candle(0, 100), candle(H, 100), candle(2 * H, 90)],
       },
     ]);
     expect(fires).toEqual([false, true]);
   });
 
   it("ne s'évalue pas tant que la fenêtre n'est pas couverte par les bougies", () => {
-    // maintenant - fenetreMs = -30000 : aucune bougie n'a un time <= -30000 → non évaluable.
-    const ctx: ContexteAlerte = { maintenant: 30_000, dernierPrix: 200, candles };
-    const res = evaluerAlertes([def({ type: "variation-pct", fenetreMs: 60_000, seuilPct: 5 })], ctx);
+    // Ancrage = 60 000 (dernière bougie clôturée), fenêtre 120 s → cible = -60 000 :
+    // aucune bougie n'a un time <= -60 000 → non évaluable.
+    const courtes = [candle(0, 100), candle(60_000, 100)];
+    const ctx: ContexteAlerte = { maintenant: 120_000, dernierPrix: 200, candles: courtes };
+    const res = evaluerAlertes([def({ type: "variation-pct", fenetreMs: 120_000, seuilPct: 5 })], ctx);
     expect(res.declenchements).toHaveLength(0);
     expect(res.modifie).toBe(false); // def inchangée (arme reste undefined)
+  });
+
+  it("ancre la référence sur l'horloge des BOUGIES, pas sur celle de la machine", () => {
+    // TF 60 s ; dernière bougie CLÔTURÉE ouverte en 120 000 (elle a clôturé à 180 000).
+    // Clôtures distinctes pour que le décalage d'une bougie soit visible : 80 / 100 / 90.
+    const cs = [candle(0, 80), candle(60_000, 100), candle(120_000, 90)];
+    const cond: Condition = { type: "variation-pct", fenetreMs: 60_000, seuilPct: -10 };
+    const armee = def(cond, { arme: true });
+
+    // Horloge JUSTE (maintenant = instant exact de la clôture) : réf = 100 → pct = −10.
+    const exact = evaluerAlertes([armee], { maintenant: 180_000, dernierPrix: 90, candles: cs });
+    // Horloge de la MACHINE en retard de 3,5 s : la référence ne doit PAS glisser d'une bougie.
+    const enRetard = evaluerAlertes([armee], { maintenant: 176_500, dernierPrix: 90, candles: cs });
+
+    expect(exact.declenchements[0]?.valeur).toBeCloseTo(-10);
+    expect(enRetard.declenchements[0]?.valeur).toBeCloseTo(-10);
   });
 });
 

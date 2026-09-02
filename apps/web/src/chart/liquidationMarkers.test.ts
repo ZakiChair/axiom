@@ -4,7 +4,7 @@
  * (sérialisation v2, fusion/dédoublonnage, borne FIFO, seed Coinalyze). Le rendu
  * KLineChart et le couplage aux stores ne sont pas testés.
  */
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 // liquidationMarkers.ts appelle registerOverlay + importe ./drawing (klinecharts) et
 // ../store/theme (pose [data-theme] au chargement) + s'abonne à des flux WS/daemon à
@@ -23,13 +23,23 @@ const { subSpy, unsubSpy } = vi.hoisted(() => {
   return { subSpy, unsubSpy };
 });
 vi.mock("../data/liquidations", () => ({ subscribeLiquidations: subSpy }));
-vi.mock("../data/coinalyze", () => ({ fetchLiquidationHistory: async () => [] }));
-vi.mock("../data/daemon", () => ({
-  liquidationsGet: async () => null,
+// Amorçage : le daemon et le fournisseur tiers sont pilotés par test (l'ORDRE des replis
+// est justement ce qu'on vérifie) ; les pures de santé (`collecteurLiqMuet`) restent RÉELLES.
+const { liqGetSpy, coinalyzeSpy, santeSpy } = vi.hoisted(() => ({
+  liqGetSpy: vi.fn<() => Promise<unknown[] | null>>(async () => null),
+  coinalyzeSpy: vi.fn<() => Promise<unknown[]>>(async () => []),
+  santeSpy: vi.fn<() => unknown>(() => null),
+}));
+vi.mock("../data/coinalyze", () => ({ fetchLiquidationHistory: coinalyzeSpy }));
+vi.mock("../data/daemon", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../data/daemon")>()),
+  liquidationsGet: liqGetSpy,
   liquidationsPush: async () => false,
+  santeLiquidationsDaemon: santeSpy,
 }));
 
 import type { Candle } from "@axiom/types";
+import { marketStore } from "../store/market";
 import {
   bornerEvenements,
   bucketIndex,
@@ -288,5 +298,54 @@ describe("retenirFluxLiq (refcount des consommateurs UI)", () => {
     expect(unsubSpy).not.toHaveBeenCalled(); // la bascule retient encore le flux
     liqMarksStore.getState().basculer(); // heatmap OFF → plus aucun reteneur
     expect(unsubSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("amorce du buffer — repli tiers quand le collecteur daemon est MUET", () => {
+  /** Santé d'un collecteur qui n'a jamais rien reçu depuis un daemon démarré en 1970. */
+  const SANTE_MUETTE = {
+    demarreTs: 0,
+    venues: { bybit: { dernierMessageTs: 0, derniereErreur: null } },
+  };
+  const candles: Candle[] = [
+    { time: 1000, open: 64000, high: 64200, low: 64000, close: 64200, volume: 1 },
+  ];
+
+  beforeEach(() => {
+    // Historique d'appels remis à zéro (convention du fichier, cf. mockClear ci-dessus) :
+    // sans cela le cas « collecteur vivant » lirait l'appel Coinalyze du cas précédent.
+    liqGetSpy.mockClear();
+    coinalyzeSpy.mockClear();
+    santeSpy.mockClear();
+    liqGetSpy.mockResolvedValue(null);
+    coinalyzeSpy.mockResolvedValue([]);
+    santeSpy.mockReturnValue(null);
+    marketStore.setState({ candles });
+  });
+
+  it("daemon qui répond VIDE mais collecteur muet → repli Coinalyze", async () => {
+    liqGetSpy.mockResolvedValue([]); // daemon joignable, historique vide
+    santeSpy.mockReturnValue(SANTE_MUETTE);
+    coinalyzeSpy.mockResolvedValue([{ time: 1500, longUsd: 3000, shortUsd: 0 }]);
+
+    const relacher = retenirFluxLiq();
+    await vi.waitFor(() => expect(liqEventsStore.getState().events.length).toBeGreaterThan(0));
+    expect(liqEventsStore.getState().events[0]?.venue).toBe("coinalyze");
+    relacher();
+  });
+
+  it("daemon qui répond VIDE et collecteur VIVANT → aucun repli (l'historique daemon fait foi)", async () => {
+    liqGetSpy.mockResolvedValue([]);
+    santeSpy.mockReturnValue({
+      demarreTs: Date.now(),
+      venues: { bybit: { dernierMessageTs: Date.now(), derniereErreur: null } },
+    });
+    coinalyzeSpy.mockResolvedValue([{ time: 1500, longUsd: 3000, shortUsd: 0 }]);
+
+    const relacher = retenirFluxLiq();
+    await vi.waitFor(() => expect(liqGetSpy).toHaveBeenCalled());
+    expect(coinalyzeSpy).not.toHaveBeenCalled();
+    expect(liqEventsStore.getState().events).toEqual([]);
+    relacher();
   });
 });

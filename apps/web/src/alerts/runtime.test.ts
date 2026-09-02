@@ -48,7 +48,7 @@ const DEF: AlertDef = {
   id: "a1",
   symbol: "BTCUSDT",
   source: "binance",
-  condition: { type: "variation-pct", fenetreMs: 90_000, seuilPct: 5 },
+  condition: { type: "variation-pct", fenetreMs: 60_000, seuilPct: 5 },
   actif: true,
   declenchements: [],
 };
@@ -86,7 +86,7 @@ describe("creerRuntime — source clôture de bougie (variation-pct)", () => {
     expect(alertsStore.getState().journal).toHaveLength(0);
     expect(alertsStore.getState().defs[0]?.arme).toBe(true);
 
-    // Nouvelle bougie CLÔTURÉE à +10 % (référence = clôture d'il y a ≥ 90 s = 100)
+    // Nouvelle bougie CLÔTURÉE à +10 % (référence = clôture de la bougie précédente = 100)
     // → le câblage marketStore → moteur déclenche : journal + désarmement.
     marketStore.setState({
       candles: [bougie(tA, 100, true), bougie(tB, 100, true), bougie(tC, 110, true)],

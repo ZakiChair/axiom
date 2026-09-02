@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 import type { Candle } from "@axiom/types";
-import { utcDayOf, sessionExtents } from "./utils-session";
+import { utcDayOf, sessionExtents, debutSessionPartiel } from "./utils-session";
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -48,6 +48,7 @@ describe("sessionExtents", () => {
       close: 11,
       from: 0,
       to: 2 * HOUR_MS,
+      partiel: false,
     });
     expect(extents[1]).toEqual({
       dayIdx: 1,
@@ -57,6 +58,33 @@ describe("sessionExtents", () => {
       close: 14,
       from: DAY_MS,
       to: DAY_MS + 2 * HOUR_MS,
+      partiel: false,
     });
+  });
+
+  // Buffer TRONQUÉ : le backfill initial ne remonte pas jusqu'à minuit UTC, donc
+  // le premier jour du buffer n'est PAS un jour entier (ses H/L/C sont faux).
+  const tronque: Candle[] = [
+    { time: 5 * HOUR_MS, open: 9, high: 10, low: 8, close: 9, volume: 0 },
+    { time: 6 * HOUR_MS, open: 9, high: 12, low: 8.5, close: 11, volume: 0 },
+    { time: DAY_MS, open: 11, high: 13, low: 10, close: 12, volume: 0 },
+  ];
+
+  it("marque le PREMIER intervalle partiel quand le buffer ne démarre pas à 00:00 UTC", () => {
+    const extents = sessionExtents(tronque);
+    expect(extents.length).toBe(2);
+    expect(extents[0]?.partiel).toBe(true);
+    expect(extents[1]?.partiel).toBe(false); // jour suivant : entier dans le buffer
+  });
+});
+
+describe("debutSessionPartiel", () => {
+  it("vrai quand la première bougie ne tombe pas sur 00:00 UTC", () => {
+    expect(debutSessionPartiel([{ time: 5 * HOUR_MS, open: 1, high: 1, low: 1, close: 1, volume: 0 }])).toBe(true);
+  });
+
+  it("faux quand la première bougie tombe pile sur 00:00 UTC, faux sur buffer vide", () => {
+    expect(debutSessionPartiel([{ time: DAY_MS, open: 1, high: 1, low: 1, close: 1, volume: 0 }])).toBe(false);
+    expect(debutSessionPartiel([])).toBe(false);
   });
 });

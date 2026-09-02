@@ -25,7 +25,7 @@ import { chargerCles } from "./env";
 import { demarrerBoucleGlobe, enregistrerGlobe } from "./globe";
 import { enregistrerHl } from "./hyperliquid";
 import { enregistrerKv } from "./kv";
-import { demarrerBoucleLiquidations } from "./liqFeed";
+import { demarrerBoucleLiquidations, santeLiqFeed } from "./liqFeed";
 import { enregistrerLiquidations } from "./liquidations";
 import { enregistrerProxy } from "./proxy";
 import { enregistrerReplay } from "./replay";
@@ -67,6 +67,9 @@ routeur.enregistrerPrefixe("/health", (req) => {
     version: VERSION,
     uptime: process.uptime(),
     cache: { entrees: compterEntrees() },
+    // Santé des collecteurs de FOND : sans elle, un flux muet depuis des jours ne se
+    // voit sur aucune surface (seul `liquidations` est branché ici pour l'instant).
+    collecteurs: { liquidations: santeLiqFeed() },
     dist: distExiste(),
   });
   return new Response(corps, {

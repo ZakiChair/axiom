@@ -148,6 +148,69 @@ const PAGINATION_MCAP_RATIO_LIMIT = 1_000;
 const PAGINATION_MAX_CANDLES = 20_000;
 const PAGINATION_MCAP_MAX_CANDLES = 150_000;
 
+const JOUR_MS = 86_400_000;
+/**
+ * Définitions SESSIONNÉES (jour UTC) -> profondeur d'historique requise, en
+ * jours : 0 = la session courante suffit (VWAP et ses bandes cumulent depuis
+ * minuit), 1 = il faut AUSSI la veille entière (les pivots lisent ses H/L/C).
+ * Sans elles, le backfill de 500 bougies démarre en milieu de journée et le
+ * cumul/les extents sont faux (cf. utils-session.ts, `partiel`).
+ */
+const PROFONDEUR_SESSION: Record<string, number> = {
+  vwap: 0,
+  vwapBands: 0,
+  pivotStandard: 1,
+  pivotCamarilla: 1,
+  pivotDemark: 1,
+  pivotFibonacci: 1,
+  pivotWoodie: 1,
+};
+/** Plafond de pages de l'extension de session (2 jours en 1 min = 6 pages de 500). */
+const MAX_PAGES_SESSION = 8;
+
+/**
+ * Minuit UTC jusqu'auquel le backfill doit remonter pour que les définitions
+ * sessionnées ACTIVES lisent des sessions entières. `undefined` = aucune n'est
+ * active, donc rien de plus à charger (le coût réseau reste celui d'avant).
+ * La référence est l'horloge des BOUGIES (`dernierTime`), pas celle de la machine.
+ */
+export function cibleSessionUTC(defIds: string[], dernierTime: number): number | undefined {
+  let profondeur = -1;
+  for (const id of defIds) {
+    const p = PROFONDEUR_SESSION[id];
+    if (p !== undefined && p > profondeur) profondeur = p;
+  }
+  if (profondeur < 0) return undefined;
+  return (Math.floor(dernierTime / JOUR_MS) - profondeur) * JOUR_MS;
+}
+
+/**
+ * Pas moyen entre bougies du buffer (ms), tel que la SOURCE le rend — plus fiable
+ * qu'une table de timeframes, et exact sur une série régulière. 0 quand le buffer
+ * n'a pas au moins deux bougies (pas de pas mesurable, donc pas d'extension).
+ */
+export function pasBougiesMs(candles: Candle[]): number {
+  const premier = candles[0];
+  const dernier = candles[candles.length - 1];
+  if (premier === undefined || dernier === undefined || candles.length < 2) return 0;
+  return (dernier.time - premier.time) / (candles.length - 1);
+}
+
+/**
+ * Taille de page de l'extension : le NÉCESSAIRE pour combler l'écart entre la
+ * plus ancienne bougie du buffer et `cible`, plafonné à `limitePage`. 0 = la
+ * cible est déjà couverte (ou le timeframe est inconnu) — on ne demande rien.
+ */
+export function limitePageSession(
+  premierTime: number,
+  cible: number,
+  tfMs: number,
+  limitePage: number,
+): number {
+  if (tfMs <= 0 || premierTime <= cible) return 0;
+  return Math.min(limitePage, Math.ceil((premierTime - cible) / tfMs));
+}
+
 /** Timeframes proposés dans l'en-tête d'un slot secondaire (sous-ensemble commun). */
 const SECONDARY_TFS: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1d"];
 /** Sources proposées dans l'en-tête d'un slot secondaire. */
@@ -873,6 +936,33 @@ export function ChartInstance({
         revenue?.onCandles();
         macro?.onCandles();
 
+        // Une page d'historique ANTÉRIEURE à `avantTime`, préfixée au buffer du slot
+        // (store + indicateurs + contrôleurs). Chemin PARTAGÉ par la pagination au
+        // scroll et par l'extension de session ci-dessous. Rend les bougies ajoutées.
+        const chargerPlusAncien = async (avantTime: number, limit: number): Promise<Candle[]> => {
+          const fetched = await adapter.fetchKlines(symbol, timeframe, {
+            limit,
+            endTime: avantTime - 1,
+          });
+          if (cancelled || !isMarketDataReady(store.getState(), requestedIdentity, requestId)) return [];
+          const older = fetched.filter((c) => c.time < avantTime);
+          if (older.length === 0) return [];
+          const merged = older.concat(store.getState().candles);
+          store.getState().setCandles(merged);
+          indicators.recompute(indicatorsStore.getState().indicators, merged, exchange);
+          orderflow?.onCandles();
+          compare?.onCandles();
+          volumeProfile?.onCandles();
+          revenue?.onCandles();
+          macro?.onCandles();
+          return older;
+        };
+
+        // L'extension de session (ci-dessous) réapplique TOUT le buffer au graphe :
+        // pendant qu'elle tourne, la pagination au scroll est mise en attente pour ne
+        // pas préfixer des bougies que ce `applyNewData` va déjà contenir.
+        let extensionSessionEnCours = false;
+
         // Pagination historique (scroll gauche) — prépend au buffer + au graphe.
         chart.setLoadDataCallback((params) => {
           const leftmost = params.data;
@@ -882,40 +972,61 @@ export function ChartInstance({
           }
           const beforeFetch = store.getState();
           if (
+            extensionSessionEnCours ||
             !isMarketDataReady(beforeFetch, requestedIdentity, requestId) ||
             beforeFetch.candles.length >= paginationMaxCandles
           ) {
-            params.callback([], false);
+            params.callback([], extensionSessionEnCours);
             return;
           }
-          adapter
-            .fetchKlines(symbol, timeframe, { limit: paginationLimit, endTime: leftmost.timestamp - 1 })
-            .then((fetched) => {
-              if (cancelled || !isMarketDataReady(store.getState(), requestedIdentity, requestId)) {
-                params.callback([], false);
-                return;
-              }
-              const older = fetched.filter((c) => c.time < leftmost.timestamp);
-              if (older.length === 0) {
-                params.callback([], false);
-                return;
-              }
-              const existing = store.getState().candles;
-              const merged = older.concat(existing);
-              store.getState().setCandles(merged);
-              indicators.recompute(indicatorsStore.getState().indicators, merged, exchange);
-              orderflow?.onCandles();
-              compare?.onCandles();
-              volumeProfile?.onCandles();
-              revenue?.onCandles();
-              macro?.onCandles();
-              params.callback(older.map(toKLineData), true);
+          chargerPlusAncien(leftmost.timestamp, paginationLimit)
+            .then((older) => {
+              params.callback(older.map(toKLineData), older.length > 0);
             })
             .catch((err) => {
               if (!cancelled) params.callback([], true);
               console.error("[AXIOM] pagination historique échouée", err);
             });
         });
+
+        // Extension du backfill aux sessions UTC ENTIÈRES. Le backfill initial est
+        // borné à 500 bougies : en 1 min il démarre en milieu de journée, la VWAP
+        // s'ancre alors au mauvais endroit et les pivots lisent une veille tronquée.
+        // On ne remonte QUE si une définition sessionnée est active (coût réseau
+        // inchangé sinon), et jamais au-delà de la veille (`cibleSessionUTC`).
+        // Lancé APRÈS le premier rendu : le chien de garde du gate G1 n'est pas allongé.
+        const etendreSession = async (cible: number): Promise<void> => {
+          const tfMs = pasBougiesMs(candles);
+          for (let page = 0; page < MAX_PAGES_SESSION; page++) {
+            if (cancelled) return;
+            const etat = store.getState();
+            if (!isMarketDataReady(etat, requestedIdentity, requestId)) return;
+            const premier = etat.candles[0];
+            if (premier === undefined || etat.candles.length >= paginationMaxCandles) return;
+            const limit = limitePageSession(premier.time, cible, tfMs, paginationLimit);
+            if (limit === 0) return;
+            // Source à court d'historique : on arrête plutôt que de boucler à vide.
+            if ((await chargerPlusAncien(premier.time, limit)).length === 0) return;
+          }
+        };
+
+        const cibleSession = cibleSessionUTC(
+          indicatorsStore.getState().indicators.map((i) => i.defId),
+          candles[candles.length - 1]?.time ?? 0,
+        );
+        if (cibleSession !== undefined) {
+          const avant = store.getState().candles.length;
+          extensionSessionEnCours = true;
+          void etendreSession(cibleSession)
+            .catch((err) => console.error("[AXIOM] extension de session échouée", err))
+            .finally(() => {
+              extensionSessionEnCours = false;
+              if (cancelled || !isMarketDataReady(store.getState(), requestedIdentity, requestId)) return;
+              const complet = store.getState().candles;
+              // Même chemin que le resync post-reconnexion : réapplication du buffer entier.
+              if (complet.length > avant) chart.applyNewData(complet.map(toKLineData));
+            });
+        }
 
         const onKline = (candle: Candle) => {
           // Un callback WS peut être déjà en file lors du changement de symbole. La garde

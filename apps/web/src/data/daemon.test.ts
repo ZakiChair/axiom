@@ -4,9 +4,13 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  collecteurLiqMuet,
   isAxiomHealth,
   normaliserUrlDaemonDev,
+  parseSanteCollecteurs,
+  SEUIL_COLLECTEUR_MUET_MS,
   URL_DAEMON_DEV_DEFAUT,
+  venuesMuettes,
 } from "./daemon";
 
 const HEALTH_COMPLET = {
@@ -233,5 +237,61 @@ describe("détection daemon sur Vercel", () => {
     expect(await detectDaemon("kv")).toBe(false);
     expect(daemonSupporte("kv")).toBe(false);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("santé des collecteurs de fond (liquidations)", () => {
+  const SANTE_LIQ = {
+    demarreTs: 1_000_000,
+    bybit: { dernierMessageTs: 1_500_000, derniereErreur: null },
+    okx: { dernierMessageTs: 0, derniereErreur: "ctVal BTC-USDT-SWAP : HTTP 500" },
+  };
+
+  it("parseSanteCollecteurs extrait collecteurs.liquidations et tolère les formes inattendues", () => {
+    expect(parseSanteCollecteurs({ collecteurs: { liquidations: SANTE_LIQ } })).toEqual({
+      demarreTs: 1_000_000,
+      venues: {
+        bybit: { dernierMessageTs: 1_500_000, derniereErreur: null },
+        okx: { dernierMessageTs: 0, derniereErreur: "ctVal BTC-USDT-SWAP : HTTP 500" },
+      },
+    });
+    // Daemon d'une version antérieure (aucune clé collecteurs) → null, pas de badge.
+    expect(parseSanteCollecteurs({ ok: true })).toBeNull();
+    expect(parseSanteCollecteurs(null)).toBeNull();
+    expect(parseSanteCollecteurs({ collecteurs: { liquidations: { demarreTs: "x" } } })).toBeNull();
+  });
+
+  it("venuesMuettes : au-delà du seuil, bornée au démarrage du daemon", () => {
+    const sante = parseSanteCollecteurs({ collecteurs: { liquidations: SANTE_LIQ } });
+    // okx n'a jamais reçu : le « muet depuis » part du DÉMARRAGE, pas de 1970.
+    const muettes = venuesMuettes(sante, 1_000_000 + SEUIL_COLLECTEUR_MUET_MS + 1);
+    expect(muettes.map((m) => m.venue)).toEqual(["okx"]);
+    expect(muettes[0]?.depuisMs).toBe(SEUIL_COLLECTEUR_MUET_MS + 1);
+    // Juste sous le seuil : aucune venue muette (daemon fraîchement démarré compris).
+    expect(venuesMuettes(sante, 1_000_000 + SEUIL_COLLECTEUR_MUET_MS)).toEqual([]);
+  });
+
+  it("collecteurLiqMuet : vrai seulement si TOUTES les venues sont muettes", () => {
+    const sante = parseSanteCollecteurs({ collecteurs: { liquidations: SANTE_LIQ } });
+    // okx est déjà muette, bybit non (dernier message pile au seuil) → pas de repli.
+    expect(collecteurLiqMuet(sante, 1_500_000 + SEUIL_COLLECTEUR_MUET_MS)).toBe(false);
+    // Une milliseconde plus tard, bybit bascule à son tour → collecteur ENTIÈREMENT muet.
+    expect(collecteurLiqMuet(sante, 1_500_000 + SEUIL_COLLECTEUR_MUET_MS + 1)).toBe(true);
+    expect(collecteurLiqMuet(null, Date.now())).toBe(false);
+  });
+
+  it("la sonde /health mémorise la santé des collecteurs (aucun appel réseau de plus)", async () => {
+    vi.resetModules();
+    const mod = await import("./daemon");
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ ...HEALTH_COMPLET, collecteurs: { liquidations: SANTE_LIQ } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(mod.santeLiquidationsDaemon()).toBeNull(); // avant toute sonde
+    expect(await mod.detectDaemon()).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mod.santeLiquidationsDaemon()?.venues.bybit?.dernierMessageTs).toBe(1_500_000);
+    vi.unstubAllGlobals();
   });
 });

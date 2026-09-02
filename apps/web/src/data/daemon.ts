@@ -61,6 +61,92 @@ export function isAxiomHealth(
   );
 }
 
+// ─────────────────────────── Santé des collecteurs de fond ───────────────────────────
+
+/** Santé du collecteur d'UNE venue, telle que publiée par le daemon. */
+export interface SanteCollecteurLiq {
+  /** Dernier message de données reçu de la venue (ms), 0 = aucun depuis le démarrage. */
+  dernierMessageTs: number;
+  /** Dernière erreur du collecteur (message court), null si la dernière opération a réussi. */
+  derniereErreur: string | null;
+}
+
+/** Santé du collecteur de liquidations : démarrage de la boucle + une entrée par venue. */
+export interface SanteLiquidationsDaemon {
+  demarreTs: number;
+  venues: Record<string, SanteCollecteurLiq>;
+}
+
+/**
+ * Seuil au-delà duquel une venue est déclarée MUETTE. Aligné sur le `DELAI_STALE_MS`
+ * du daemon (liqFeed.ts) : c'est SA propre définition de la staleness d'un flux de
+ * liquidations — au-delà, il reconnecte déjà la WS.
+ */
+export const SEUIL_COLLECTEUR_MUET_MS = 10 * 60_000;
+
+/**
+ * Extrait `collecteurs.liquidations` d'une charge `/health`. Tolérant : toute forme
+ * inattendue (daemon d'une version antérieure) → `null`, donc aucun badge. PURE (testée).
+ */
+export function parseSanteCollecteurs(payload: unknown): SanteLiquidationsDaemon | null {
+  if (!payload || typeof payload !== "object") return null;
+  const collecteurs = (payload as Record<string, unknown>).collecteurs;
+  if (!collecteurs || typeof collecteurs !== "object") return null;
+  const liq = (collecteurs as Record<string, unknown>).liquidations;
+  if (!liq || typeof liq !== "object") return null;
+  const brut = liq as Record<string, unknown>;
+  if (typeof brut.demarreTs !== "number") return null;
+  const venues: Record<string, SanteCollecteurLiq> = {};
+  for (const [nom, valeur] of Object.entries(brut)) {
+    if (nom === "demarreTs" || !valeur || typeof valeur !== "object") continue;
+    const v = valeur as Record<string, unknown>;
+    if (typeof v.dernierMessageTs !== "number") continue;
+    venues[nom] = {
+      dernierMessageTs: v.dernierMessageTs,
+      derniereErreur: typeof v.derniereErreur === "string" ? v.derniereErreur : null,
+    };
+  }
+  return { demarreTs: brut.demarreTs, venues };
+}
+
+/** Une venue muette et depuis combien de temps. */
+export interface VenueMuette {
+  venue: string;
+  depuisMs: number;
+}
+
+/**
+ * Venues sans aucun message depuis plus de `SEUIL_COLLECTEUR_MUET_MS`. Le « depuis »
+ * part du dernier message OU du démarrage du daemon (le plus récent) : sans cette borne,
+ * un daemon qui vient de démarrer paraîtrait muet depuis 1970. PURE (testée).
+ */
+export function venuesMuettes(
+  sante: SanteLiquidationsDaemon | null,
+  maintenant: number,
+): VenueMuette[] {
+  if (sante === null) return [];
+  const out: VenueMuette[] = [];
+  for (const [venue, etat] of Object.entries(sante.venues)) {
+    const depuisMs = maintenant - Math.max(etat.dernierMessageTs, sante.demarreTs);
+    if (depuisMs > SEUIL_COLLECTEUR_MUET_MS) out.push({ venue, depuisMs });
+  }
+  return out;
+}
+
+/**
+ * Le collecteur est-il ENTIÈREMENT muet (toutes les venues) ? Dans ce cas son historique
+ * vide n'est pas une vérité sur le marché, et l'amorce du front peut se replier sur le
+ * fournisseur tiers. PURE (testée).
+ */
+export function collecteurLiqMuet(
+  sante: SanteLiquidationsDaemon | null,
+  maintenant: number,
+): boolean {
+  if (sante === null) return false;
+  const nb = Object.keys(sante.venues).length;
+  return nb > 0 && venuesMuettes(sante, maintenant).length === nb;
+}
+
 /**
  * Accepte seulement le daemon HTTP loopback attendu. Une variable Vite erronée ou
  * hostile ne doit jamais transformer les dual-writes locaux en envoi réseau externe.
@@ -111,6 +197,8 @@ export function urlDaemon(chemin: string): string {
 let etatDaemon: boolean | null = null;
 let dernierSondageTs = 0;
 let capabilitiesDaemon: ReadonlySet<string> = new Set();
+/** Santé des collecteurs vue à la DERNIÈRE sonde /health (null = inconnue/daemon absent). */
+let santeCollecteurs: SanteLiquidationsDaemon | null = null;
 /** Devient vrai à la 1re détection réussie : conditionne l'émission de « closed ». */
 let dejaDetecte = false;
 let intervalDemarre = false;
@@ -121,6 +209,7 @@ async function sonder(): Promise<boolean> {
   const minuteur = setTimeout(() => ctrl.abort(), TIMEOUT_SONDE_MS);
   let ok = false;
   let health: AxiomHealth | null = null;
+  let collecteurs: SanteLiquidationsDaemon | null = null;
   try {
     const res = await fetch(baseDaemon() + "/health", { signal: ctrl.signal });
     if (res.ok) {
@@ -129,6 +218,9 @@ async function sonder(): Promise<boolean> {
         const payload = (await res.json()) as unknown;
         if (isAxiomHealth(payload)) {
           health = payload;
+          // La sonde périodique EST le canal de la santé des collecteurs : aucun
+          // appel réseau supplémentaire pour le badge « collecteur muet ».
+          collecteurs = parseSanteCollecteurs(payload);
           ok = true;
         }
       }
@@ -140,6 +232,7 @@ async function sonder(): Promise<boolean> {
   }
   etatDaemon = ok;
   capabilitiesDaemon = health ? new Set(health.capabilities) : new Set();
+  santeCollecteurs = collecteurs;
   dernierSondageTs = Date.now();
   if (ok) {
     dejaDetecte = true;
@@ -180,6 +273,15 @@ export async function detectDaemon(
 /** État synchrone d'une fonctionnalité, sans déclencher de nouvelle sonde. */
 export function daemonSupporte(capability: AxiomCapability): boolean {
   return !IS_VERCEL && etatDaemon === true && capabilitiesDaemon.has(capability);
+}
+
+/**
+ * Santé du collecteur de liquidations vue à la dernière sonde /health (SYNCHRONE, sans
+ * nouvelle sonde, comme `daemonSupporte`). `null` = jamais sondé, daemon absent, ou
+ * daemon d'une version qui n'expose pas `collecteurs`.
+ */
+export function santeLiquidationsDaemon(): SanteLiquidationsDaemon | null {
+  return santeCollecteurs;
 }
 
 /** Le dual-write KV est prêt seulement si le daemon annonce explicitement `kv`. */

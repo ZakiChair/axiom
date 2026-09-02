@@ -98,4 +98,35 @@ describe("vwap", () => {
       expect(series.vwap![3]).toBeCloseTo(390 / 20, 10); // 19.5
     });
   });
+
+  // Buffer démarrant EN MILIEU DE JOURNÉE (première bougie à 05:00 UTC) : le
+  // cumul ne peut pas repartir de 00:00, l'ancre est donc fausse. On ne vide
+  // pas l'overlay (« jamais de pane muet ») : on étiquette la session.
+  describe("session partielle (buffer démarrant en milieu de journée)", () => {
+    const HOUR_MS = 3_600_000;
+    const partiel: Candle[] = [
+      candle(12, 10, 11, 10, 5 * HOUR_MS),
+      candle(14, 12, 13, 20, 6 * HOUR_MS),
+    ];
+
+    it("émet une étiquette « session partielle » sur la première bougie", () => {
+      const { annotations } = computeIndicator(vwap, partiel);
+      const labels = annotations?.labels ?? [];
+      expect(labels.length).toBe(1);
+      expect(labels[0]!.idx).toBe(0);
+      expect(labels[0]!.cible).toBe("prix");
+      expect(labels[0]!.texte.toLowerCase()).toContain("partielle");
+    });
+
+    it("laisse les valeurs inchangées (cumul depuis la 1re bougie du buffer)", () => {
+      const { series } = computeIndicator(vwap, partiel);
+      expect(series.vwap![0]).toBeCloseTo(11, 10);
+      expect(series.vwap![1]).toBeCloseTo(370 / 30, 10);
+    });
+
+    it("aucune annotation quand le buffer démarre pile à 00:00 UTC", () => {
+      const { annotations } = computeIndicator(vwap, candles);
+      expect(annotations).toBeUndefined();
+    });
+  });
 });

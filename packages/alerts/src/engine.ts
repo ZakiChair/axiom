@@ -141,9 +141,15 @@ function evalVariation(
   const p = ctx.dernierPrix;
   if (!Number.isFinite(p)) return null;
 
-  // Prix de référence = clôture de la bougie qui a CLÔTURÉ à (maintenant - fenetreMs).
-  const cible = ctx.maintenant - c.fenetreMs;
-  const ref = clotureAvant(candles, cible);
+  // Référence ancrée sur l'horloge des BOUGIES, jamais sur `ctx.maintenant` (horloge de
+  // la MACHINE, qui peut retarder de quelques secondes sur celle de l'exchange et faire
+  // glisser la référence d'une bougie entière). CONTRAT D'APPEL : la dernière bougie du
+  // tableau est la dernière CLÔTURÉE (front et daemon la garantissent). Elle a clôturé à
+  // `time + TF` ; la référence doit avoir clôturé `fenetreMs` plus tôt, c'est donc la
+  // bougie OUVERTE en `time - fenetreMs`.
+  const derniere = candles[candles.length - 1];
+  if (!derniere) return null;
+  const ref = clotureAOuverture(candles, derniere.time - c.fenetreMs);
   if (ref === undefined || ref === 0) return null; // fenêtre pas encore couverte
 
   const pct = ((p - ref) / ref) * 100;
@@ -309,15 +315,16 @@ function evalWhaleFlux(
 // ───────── Helpers purs ─────────
 
 /**
- * Clôture de la bougie qui avait certainement CLÔTURÉ à `cible` (undefined si aucune).
- * `time` étant l'OUVERTURE, la dernière bougie ouverte <= `cible` se clôture APRÈS la
- * cible : on renvoie donc la clôture de celle qui la PRÉCÈDE (sinon la variation porterait
- * sur (fenêtre − TF), nulle dès que fenêtre <= TF).
+ * Clôture de la dernière bougie OUVERTE en `cible` au plus tard (undefined si aucune).
+ * `cible` est une OUVERTURE (dérivée de la grille des bougies, pas d'une horloge) : la
+ * bougie retenue a donc clôturé exactement `fenetreMs` avant la dernière du tableau.
+ * Cible non alignée sur la grille (fenêtre non multiple du TF) → on recule d'un cran,
+ * la fenêtre effective est arrondie au TF supérieur plutôt que tronquée.
  */
-function clotureAvant(candles: Candle[], cible: number): number | undefined {
+function clotureAOuverture(candles: Candle[], cible: number): number | undefined {
   for (let i = candles.length - 1; i >= 0; i--) {
     const cd = candles[i];
-    if (cd && cd.time <= cible) return candles[i - 1]?.close;
+    if (cd && cd.time <= cible) return cd.close;
   }
   return undefined;
 }

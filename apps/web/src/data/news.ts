@@ -520,7 +520,9 @@ function creerBoucleVeille(): Unsubscribe {
       newsStore.getState().appliquerResultat(items, statuts);
     },
     NEWS_POLL_MS,
-    { immediate: true, source: HEALTH_SOURCE }
+    // Affichage seul (bandeau + fenêtre NEWS), aucun consommateur d'alerte → suspendable
+    // onglet masqué ; la reprise rafraîchit une fois si la période est dépassée.
+    { immediate: true, source: HEALTH_SOURCE, suspendreSiMasque: true }
   );
 }
 

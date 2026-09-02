@@ -195,6 +195,46 @@ export function fusionnerSymbolesLiq(kvBrut: unknown, defs: readonly AlertDef[])
   return [...new Set([...symbolesSurveilles(kvBrut), ...symbolesLiqCascadeActifs(defs)])].sort();
 }
 
+// ─────────────────────────── Santé des collecteurs (modèle SanteWhales de whales.ts) ───────────────────────────
+
+/** Santé du collecteur d'UNE venue (dernier message reçu, dernière erreur). */
+export interface SanteCollecteurLiq {
+  /** Dernier message de DONNÉES reçu de la venue (ms), 0 = aucun depuis le démarrage. */
+  dernierMessageTs: number;
+  /** Dernière erreur (message court), null si la dernière opération a réussi. */
+  derniereErreur: string | null;
+}
+
+/** Santé du flux de liquidations : démarrage de la boucle + un état PAR VENUE. */
+export interface SanteLiqFeed {
+  /**
+   * Démarrage de la boucle d'ingestion (ms), 0 = non démarrée. Borne basse du « muet
+   * depuis X » côté interface : sans elle, un daemon qui vient de démarrer paraîtrait
+   * muet depuis 1970.
+   */
+  demarreTs: number;
+  bybit: SanteCollecteurLiq;
+  okx: SanteCollecteurLiq;
+}
+
+const sante: SanteLiqFeed = {
+  demarreTs: 0,
+  bybit: { dernierMessageTs: 0, derniereErreur: null },
+  okx: { dernierMessageTs: 0, derniereErreur: null },
+};
+
+/** Santé courante du flux — exposée par /health et par GET /liquidations/:symbole. */
+export function santeLiqFeed(): SanteLiqFeed {
+  return sante;
+}
+
+/** Réinitialise l'état de santé (tests ; cf. reinitialiserWhales de whales.ts). */
+export function reinitialiserSanteLiqFeed(): void {
+  sante.demarreTs = 0;
+  sante.bybit = { dernierMessageTs: 0, derniereErreur: null };
+  sante.okx = { dernierMessageTs: 0, derniereErreur: null };
+}
+
 // ─────────────────────────── Lecture KV (pattern lireDefsKv de alerts.ts) ───────────────────────────
 
 /**
@@ -221,7 +261,7 @@ function lireKvLiqBrut(): unknown {
  * entrées valides et les insère (idempotent). Renvoie `true` s'il s'agissait d'un
  * message de DONNÉES (≠ ack de souscription) pour réarmer le backoff.
  */
-function ingererMessage(data: string): boolean {
+export function ingererMessage(data: string): boolean {
   let msg: BybitLiqMessage;
   try {
     msg = JSON.parse(data) as BybitLiqMessage;
@@ -233,6 +273,8 @@ function ingererMessage(data: string): boolean {
     return false; // ack de souscription / message hors sujet
   }
   const symbole = topic.slice(TOPIC_PREFIXE.length);
+  // Horodaté à la RÉCEPTION (≠ insertion) : c'est le silence de la venue qu'on mesure.
+  sante.bybit.dernierMessageTs = Date.now();
   const lot: LiqFil[] = [];
   for (const entry of msg.data) {
     const liq = parseBybitLiqDaemon(entry);
@@ -241,7 +283,9 @@ function ingererMessage(data: string): boolean {
   if (lot.length > 0) {
     try {
       insererLiquidations(symbole, lot);
+      sante.bybit.derniereErreur = null;
     } catch (err) {
+      sante.bybit.derniereErreur = err instanceof Error ? err.message : String(err);
       console.error("[axiomd] insertion liquidations échouée :", err);
     }
   }
@@ -352,6 +396,8 @@ export function creerRegistreCtVal(fetchImpl: typeof fetch = fetch): RegistreCtV
       if (!Number.isFinite(ctVal) || ctVal <= 0) throw new Error("ctVal illisible");
       parInst.set(instId, ctVal);
     } catch (err) {
+      // Seule erreur qui fait jeter des liquidations OKX en SILENCE pendant des heures.
+      sante.okx.derniereErreur = `ctVal ${instId} : ${err instanceof Error ? err.message : String(err)}`;
       console.error("[axiomd] ctVal OKX indisponible pour", instId, err);
     }
   };
@@ -392,6 +438,9 @@ export function creerFeedLiquidationsOkx(): FeedLiquidations {
       return false;
     }
     if (msg.arg?.channel !== OKX_CANAL_LIQ || !Array.isArray(msg.data)) return false; // ack / hors sujet
+    // Horodaté à la RÉCEPTION du canal (avant filtrage par instId surveillé) : la
+    // souscription OKX est GLOBALE, son silence est donc bien celui de la venue.
+    sante.okx.dernierMessageTs = Date.now();
     for (const entree of msg.data as OkxLiqEntry[]) {
       if (!entree || typeof entree.instId !== "string") continue;
       const symbole = mapInst.get(entree.instId);
@@ -406,7 +455,9 @@ export function creerFeedLiquidationsOkx(): FeedLiquidations {
       if (lot.length > 0) {
         try {
           insererLiquidations(symbole, lot);
+          sante.okx.derniereErreur = null;
         } catch (err) {
+          sante.okx.derniereErreur = err instanceof Error ? err.message : String(err);
           console.error("[axiomd] insertion liquidations OKX échouée :", err);
         }
       }
@@ -466,6 +517,7 @@ export function creerFeedLiquidationsOkx(): FeedLiquidations {
  * depuis index.ts. Ingestion à FROID uniquement (jamais sur le chemin chaud du renderer).
  */
 export function demarrerBoucleLiquidations(): () => void {
+  sante.demarreTs = Date.now(); // borne basse du « muet depuis X » côté interface
   const feed = creerFeedLiquidations(); // Bybit
   const feedOkx = creerFeedLiquidationsOkx(); // OKX (2e connexion indépendante)
 

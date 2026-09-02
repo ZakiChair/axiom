@@ -1,5 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Le routage vers le daemon est un test SYNCHRONE de l'état déjà sondé : on pilote
+// `daemonSupporte` depuis le test (faux par défaut = comportement sans daemon).
+const { supporteSpy } = vi.hoisted(() => ({ supporteSpy: vi.fn(() => false) }));
+vi.mock("./daemon", () => ({
+  daemonSupporte: supporteSpy,
+  urlDaemon: (chemin: string) => `http://127.0.0.1:8787${chemin}`,
+}));
+
 import { estHoteExtapiAutorise, EXTAPI_WHITELIST, extUrl, extUrlPourDeployment } from "./extapi";
+
+beforeEach(() => {
+  supporteSpy.mockReturnValue(false);
+});
 
 describe("extUrl", () => {
   it("construit une URL relative /extapi/<hote>/<chemin>", () => {
@@ -22,6 +35,26 @@ describe("extUrl", () => {
     expect(extUrlPourDeployment("api.alternative.me", "fng/", true)).toBe(
       "/extapi/api.alternative.me/fng/",
     );
+  });
+});
+
+describe("extUrl — routage vers le daemon (cache /extapi)", () => {
+  it("route vers le daemon quand il annonce la capability proxy", () => {
+    supporteSpy.mockReturnValue(true);
+    expect(extUrl("api.alternative.me", "fng/")).toBe(
+      "http://127.0.0.1:8787/extapi/api.alternative.me/fng/",
+    );
+    expect(supporteSpy).toHaveBeenCalledWith("proxy");
+  });
+
+  it("sans daemon, le chemin relatif reste STRICTEMENT inchangé", () => {
+    expect(extUrl("api.alternative.me", "fng/")).toBe("/extapi/api.alternative.me/fng/");
+  });
+
+  it("l'exception fapi de Vercel prime sur le routage daemon (base ignorée)", () => {
+    expect(
+      extUrlPourDeployment("fapi.binance.com", "fapi/v1/klines", true, "http://127.0.0.1:8787"),
+    ).toBe("https://fapi.binance.com/fapi/v1/klines");
   });
 });
 

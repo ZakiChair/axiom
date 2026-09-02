@@ -17,10 +17,16 @@
  * (démarrage sans aucun volume), la VWAP n'est pas définie et reste
  * `undefined`. Dès la première bougie porteuse de volume dans la session, la
  * valeur devient calculable.
+ *
+ * SESSION TRONQUÉE : quand le buffer ne démarre pas à 00:00 UTC (backfill borné
+ * à N bougies), le cumul de la première session part de la première bougie du
+ * buffer et non de minuit — l'ancre est donc fausse jusqu'au prochain minuit.
+ * On ne vide PAS l'overlay pour autant (jamais de pane muet) : une étiquette
+ * « Session partielle » est posée sur la première bougie.
  */
 
-import type { IndicatorDef } from "@axiom/types";
-import { utcDayOf } from "../utils-session";
+import type { AnnotationsIndicateur, IndicatorDef } from "@axiom/types";
+import { debutSessionPartiel, etiquetteSessionPartielle, utcDayOf } from "../utils-session";
 
 export const vwap: IndicatorDef = {
   id: "vwap",
@@ -58,6 +64,11 @@ export const vwap: IndicatorDef = {
       if (cumVol > 0) out[i] = cumTPV / cumVol;
     }
 
-    return { series: { vwap: out } };
+    const series = { vwap: out };
+    if (!debutSessionPartiel(candles)) return { series };
+    const annotations: AnnotationsIndicateur = {
+      labels: [etiquetteSessionPartielle(candles, out)],
+    };
+    return { series, annotations };
   },
 };

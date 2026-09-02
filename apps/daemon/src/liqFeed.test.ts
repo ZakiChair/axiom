@@ -5,10 +5,13 @@ import {
   fusionnerSymbolesLiq,
   HEARTBEAT_BYBIT,
   HEARTBEAT_OKX,
+  ingererMessage,
   OKX_INSTRUMENTS_URL,
   okxInstIdDaemon,
   parseBybitLiqDaemon,
   parseOkxLiqDaemon,
+  reinitialiserSanteLiqFeed,
+  santeLiqFeed,
   SYMBOLES_DEFAUT,
   symbolesSurveilles,
 } from "./liqFeed";
@@ -167,5 +170,36 @@ describe("creerRegistreCtVal", () => {
 
     await registre.charger([INST], true); // forcé (refresh 24 h) → refetch
     expect(etat.appels).toBe(3);
+  });
+});
+
+describe("santeLiqFeed (état des collecteurs)", () => {
+  it("état initial : aucun message, aucune erreur, boucle non démarrée", () => {
+    reinitialiserSanteLiqFeed();
+    const s = santeLiqFeed();
+    expect(s.demarreTs).toBe(0);
+    expect(s.bybit).toEqual({ dernierMessageTs: 0, derniereErreur: null });
+    expect(s.okx).toEqual({ dernierMessageTs: 0, derniereErreur: null });
+  });
+
+  it("un message de DONNÉES Bybit horodate le collecteur (même sans liquidation lisible)", () => {
+    reinitialiserSanteLiqFeed();
+    const avant = Date.now();
+    expect(ingererMessage(JSON.stringify({ topic: "allLiquidation.BTCUSDT", data: [] }))).toBe(true);
+    expect(santeLiqFeed().bybit.dernierMessageTs).toBeGreaterThanOrEqual(avant);
+  });
+
+  it("un ack de souscription n'horodate RIEN (c'est bien le silence qu'on mesure)", () => {
+    reinitialiserSanteLiqFeed();
+    expect(ingererMessage(JSON.stringify({ op: "subscribe", success: true }))).toBe(false);
+    expect(santeLiqFeed().bybit.dernierMessageTs).toBe(0);
+  });
+
+  it("un ctVal OKX indisponible est enregistré comme dernière erreur du collecteur okx", async () => {
+    reinitialiserSanteLiqFeed();
+    const registre = creerRegistreCtVal((async () =>
+      new Response("nope", { status: 500 })) as unknown as typeof fetch);
+    await registre.charger(["BTC-USDT-SWAP"], false);
+    expect(santeLiqFeed().okx.derniereErreur).toContain("BTC-USDT-SWAP");
   });
 });

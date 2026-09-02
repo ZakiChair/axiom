@@ -18,10 +18,14 @@
  *
  * Indéfini tant que le volume cumulé de la session vaut 0 (cf. vwap.ts).
  * Invariant garanti : upper ≥ basis ≥ lower.
+ *
+ * SESSION TRONQUÉE : même convention que vwap.ts — buffer ne démarrant pas à
+ * 00:00 UTC = étiquette « Session partielle » sur la première bougie, valeurs
+ * conservées (jamais de pane muet).
  */
 
-import type { IndicatorDef } from "@axiom/types";
-import { utcDayOf } from "../utils-session";
+import type { AnnotationsIndicateur, IndicatorDef } from "@axiom/types";
+import { debutSessionPartiel, etiquetteSessionPartielle, utcDayOf } from "../utils-session";
 
 export const vwapBands: IndicatorDef = {
   id: "vwapBands",
@@ -77,6 +81,11 @@ export const vwapBands: IndicatorDef = {
       }
     }
 
-    return { series: { basis, upper, lower } };
+    const series = { basis, upper, lower };
+    if (!debutSessionPartiel(candles)) return { series };
+    const annotations: AnnotationsIndicateur = {
+      labels: [etiquetteSessionPartielle(candles, basis)],
+    };
+    return { series, annotations };
   },
 };

@@ -548,6 +548,8 @@ export function subscribeWatchlistBars(
       }
     },
     WATCHLIST_BARS_POLL_MS,
-    { immediate: true }
+    // Δ% 1h/7j + sparkline : affichage seul (aucune alerte ne les consomme) → suspendable
+    // onglet masqué. Les pollers de PRIX ci-dessus restent actifs (alertes prix-croise).
+    { immediate: true, suspendreSiMasque: true }
   );
 }

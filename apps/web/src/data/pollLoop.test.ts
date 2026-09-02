@@ -112,3 +112,152 @@ describe("pollLoop — cycle de vie", () => {
     unsub();
   });
 });
+
+describe("pollLoop — suspension quand l'onglet est masqué", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /**
+   * Stub minimal de `document` : visibilité pilotable + capture du gestionnaire
+   * `visibilitychange` posé par pollLoop (l'environnement de test est Node, sans DOM).
+   */
+  function stubDocument(visibilityState: "visible" | "hidden") {
+    const doc = {
+      visibilityState,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal("document", doc);
+    return {
+      doc,
+      /** Bascule la visibilité puis invoque le gestionnaire capturé. */
+      basculer(vers: "visible" | "hidden") {
+        doc.visibilityState = vers;
+        for (const [type, handler] of doc.addEventListener.mock.calls) {
+          if (type === "visibilitychange") (handler as () => void)();
+        }
+      },
+    };
+  }
+
+  it("un poller suspendable ne tire pas tant que l'onglet est masqué", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    stubDocument("hidden");
+    let calls = 0;
+    const tick = () => {
+      calls += 1;
+      return Promise.resolve();
+    };
+
+    const unsub = pollLoop(tick, 1000, { immediate: true, suspendreSiMasque: true });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(calls).toBe(0);
+
+    unsub();
+  });
+
+  it("un poller critique (sans l'option) tire même onglet masqué", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    stubDocument("hidden");
+    let calls = 0;
+    const tick = () => {
+      calls += 1;
+      return Promise.resolve();
+    };
+
+    const unsub = pollLoop(tick, 1000);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(calls).toBe(3);
+
+    unsub();
+  });
+
+  it("la reprise ne produit qu'UN seul rafraîchissement (pas de rattrapage des ticks manqués)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const vis = stubDocument("visible");
+    let calls = 0;
+    const tick = () => {
+      calls += 1;
+      return Promise.resolve();
+    };
+
+    const unsub = pollLoop(tick, 1000, { immediate: true, suspendreSiMasque: true });
+    await vi.advanceTimersByTimeAsync(0); // tick immédiat (t=0)
+    expect(calls).toBe(1);
+
+    vis.basculer("hidden");
+    // Durée VOLONTAIREMENT non multiple de la période : la reprise est déphasée de
+    // l'ancien intervalle, si bien qu'un intervalle non ré-armé tirerait à t=6000 (rafale).
+    await vi.advanceTimersByTimeAsync(5300); // 5 cycles manqués
+    expect(calls).toBe(1);
+
+    vis.basculer("visible"); // période dépassée → UN seul rattrapage
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(2);
+
+    // Et l'intervalle repart de la reprise (t=5300) : rien avant un intervalle complet.
+    await vi.advanceTimersByTimeAsync(999);
+    expect(calls).toBe(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(calls).toBe(3);
+
+    unsub();
+  });
+
+  it("un masquage plus court que la période ne déclenche AUCUN rafraîchissement à la reprise", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const vis = stubDocument("visible");
+    let calls = 0;
+    const tick = () => {
+      calls += 1;
+      return Promise.resolve();
+    };
+
+    const unsub = pollLoop(tick, 1000, { immediate: true, suspendreSiMasque: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(1);
+
+    vis.basculer("hidden");
+    await vi.advanceTimersByTimeAsync(300); // masquage bref (< période)
+    vis.basculer("visible");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(1); // période non dépassée → pas de tick anticipé
+
+    unsub();
+  });
+
+  it("le désabonnement retire le gestionnaire de visibilité (pas de fuite)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const { doc } = stubDocument("visible");
+
+    const unsub = pollLoop(() => Promise.resolve(), 1000, { suspendreSiMasque: true });
+    const pose = doc.addEventListener.mock.calls.find(([type]) => type === "visibilitychange");
+    expect(pose).toBeDefined();
+
+    unsub();
+    expect(doc.removeEventListener).toHaveBeenCalledWith("visibilitychange", pose?.[1]);
+  });
+
+  it("fonctionne sans `document` (environnement Node) : le poller tire normalement", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    let calls = 0;
+    const tick = () => {
+      calls += 1;
+      return Promise.resolve();
+    };
+
+    // Aucun stub de `document` : l'accès doit être gardé.
+    const unsub = pollLoop(tick, 1000, { suspendreSiMasque: true });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(calls).toBe(3);
+
+    unsub();
+  });
+});

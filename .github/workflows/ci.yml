@@ -65,3 +65,25 @@ jobs:
       - name: build web
         run: pnpm --filter @axiom/web build
         timeout-minutes: 5 # observé ~2,3 s en local
+
+      # Playwright, en DERNIER : c'est l'étape la plus chère à préparer (téléchargement
+      # du navigateur), donc tout ce qui peut échouer moins cher a déjà échoué.
+      # `chromium` SEUL : playwright.config.ts ne déclare qu'un projet chromium — Firefox
+      # et WebKit seraient du téléchargement pur (~2 min) pour zéro test exécuté.
+      - name: navigateur playwright (chromium)
+        run: pnpm --filter @axiom/web exec playwright install --with-deps chromium
+        timeout-minutes: 5
+
+      # UNIQUEMENT les specs HERMÉTIQUES (réseau bouchonné par `page.route`), filtrées
+      # en ligne de commande — aucun script ajouté au package.json. Les autres specs
+      # e2e dépendent de Binance / CoinGecko en direct : les mettre ici rendrait la CI
+      # instable, exactement ce que le découpage ci-dessus cherche à éviter.
+      # HORS liste, et pourquoi : `gate-g6-screener` et `gate-g7-liens` (EQS live),
+      # `gate-lot3-sect` (« RÉSEAU Binance REQUIS » dans son en-tête), `smoke` (5 tests
+      # sur 6 sans bouchon), `gate-v24-macro-denominateur` (seul /tdapi est bouchonné :
+      # son test de bandeau ÷ETH attend un chart réellement chargé, et il échoue déjà
+      # en local sur l'overlay d'erreur du chart). Une spec qui devient hermétique
+      # s'ajoute à cette liste.
+      - name: e2e hermétiques (playwright)
+        run: pnpm --filter @axiom/web exec playwright test gate-g6-screener.hermetique gate-lot3-corr gate-v25-cap-dominance
+        timeout-minutes: 6 # observé ~9 s pour 6 tests en local (hors boot du serveur Vite)

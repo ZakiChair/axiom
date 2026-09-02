@@ -3,8 +3,12 @@ import { test, expect } from "@playwright/test";
 /**
  * Gate G100 — G6 : « Screener crowded long/short (funding + ΔOI + L/S) en ≤15 s ».
  *
- * ⚠ RÉSEAU REQUIS : univers Binance spot (REST CORS-ouvert) + funding fapi et
- * OI/L-S futures via le proxy Vite /extapi — daemon toléré absent (proxy dev).
+ * ⚠ RÉSEAU REQUIS : univers Binance spot (REST CORS-ouvert) EN DIRECT, funding
+ * (fapi/v1/premiumIndex) via le proxy Vite /extapi — daemon toléré absent (proxy
+ * dev) — et OI/L-S (fapi futures/data) EN DIRECT eux aussi : `data/binanceFutures.ts`
+ * appelle `fapi.binance.com` sans proxy (CORS ouvert). Quatre points d'accès live,
+ * dont UN SEUL passe par /extapi : c'est ce qu'il faut bouchonner (cf. le jumeau
+ * hermétique `gate-g6-screener.hermetique.e2e.ts`).
  *
  * Le timeout de 15_000 ms sur l'état « Terminé » ENCODE le critère ≤15 s : ne
  * pas l'augmenter pour absorber un flake — un dépassement est un échec de gate.

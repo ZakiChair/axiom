@@ -511,7 +511,39 @@ des buckets Coinalyze (17 — à vérifier d'abord sur une réponse réelle), le
 cache du proxy daemon (21 — change le chemin de TOUTES les requêtes), et le découpage du
 bundle (23).
 
-### Deux résidus connus, introduits par rien mais bornant les correctifs
+### Second lot, même jour — branche `fix/residus-2026-09-02`
+
+Sept commits de plus, `pnpm check` vert (**4 477 tests**). Les deux résidus ci-dessous
+sont **fermés**, et cinq des six suggestions laissées au premier lot sont livrées :
+
+- **Sessions VWAP et pivots (15)** — une session incomplète est marquée comme telle ; les
+  5 pivots ignorent une veille partielle comme ils ignorent déjà le jour zéro, la VWAP
+  porte une annotation plutôt que de disparaître, et le chart étend son backfill au
+  dernier minuit UTC quand une définition sessionnée est active.
+- **Horodatage Coinalyze (17)** — **vérifié sur l'API avant correctif**, comme le rapport
+  l'exigeait : `t` est bien le début du bucket et la valeur sa clôture, donc future d'un
+  bucket. Points réhorodatés à la fin du bucket ET `alignAux` doté d'un mode « lecture à
+  la clôture » : les deux moitiés vont ensemble.
+- **Santé des collecteurs (10)** — chaque venue publie son dernier message et sa dernière
+  erreur sur `/health` et sur la route des liquidations ; l'amorce se replie sur le
+  fournisseur tiers quand le collecteur est muet.
+- **Cache du proxy (21)** — `extUrl` route vers le daemon quand la capability est là ; le
+  comportement sans daemon est inchangé.
+- **Bundle (23)** — entrée de **1 144 à 664 kB** minifié (−42 %), 336 à 208 kB gzip.
+  Trois chunks de vendeurs stables, tous en `modulepreload`.
+- **e2e en CI (24)** — jumeau hermétique du gate G6 assertionnant sans branche, et étape
+  Playwright restreinte aux specs à réseau bouchonné. 6 tests verts en 13 s.
+
+**Une seule suggestion reste partiellement livrée. La visibilité des pollers (20)** ne
+couvre que la veille d'actualités et les barres de watchlist : contrairement à ce que
+supposait le rapport, les pollers Twelve Data et MEXC **ne peuvent pas** être suspendus,
+car ils alimentent les stores dont dépend l'évaluation des alertes et le daemon ne relaie
+les alertes onglet fermé que pour Binance. Les suspendre casserait des notifications. Le
+gain sur le quota Twelve Data annoncé en suggestion 20 est donc **nul** ; le distinguer
+demanderait de séparer le chemin « affichage » du chemin « alertes », qui est un choix
+d'architecture et non un correctif.
+
+### Deux résidus connus — FERMÉS par le second lot
 
 1. **L'horloge de référence des alertes reste celle de la machine.** Le contexte
    d'évaluation est construit avec `Date.now()` alors que `Candle.time` porte l'horloge de
@@ -522,12 +554,15 @@ bundle (23).
    correction de `variation-pct` n'est exacte que si l'horloge est juste. Le correctif
    robuste est de dériver la cible de l'horloge des bougies au site d'appel, des deux côtés
    (front et daemon) — il touche la sémantique de `maintenant` pour tous les types de
-   condition, ce qui n'est pas un correctif d'une ligne.
+   condition, ce qui n'est pas un correctif d'une ligne. **FERMÉ** : la cible est désormais
+   dérivée de la grille des bougies elle-même, sans toucher à `maintenant` pour les autres
+   conditions (cooldowns, journal).
 
 2. **Une souscription oisive subsiste côté daemon.** La sélection des symboles suivis n'a
    pas été filtrée par timeframe : un symbole dont la seule alerte est en 4 h ouvre encore
    un abonnement aux bougies d'une minute que le daemon n'évaluera jamais. Coût réel : une
-   souscription WebSocket inutile, zéro évaluation. Une ligne, non faite faute de périmètre.
+   souscription WebSocket inutile, zéro évaluation. **FERMÉ** : la sélection des symboles
+   suivis est filtrée par la même règle que l'évaluation.
 
 ### Trois écarts d'implémentation à connaître
 
@@ -540,6 +575,9 @@ bundle (23).
   attribut de survol, et le piège est déjà documenté ailleurs dans le dépôt.
 
 ### Non couvert par le gate
+
+*(Corrigé depuis : la CI GitHub a désormais une étape Playwright sur les specs
+hermétiques. `scripts/ci.sh`, le gate LOCAL, n'en a toujours pas.)*
 
 `scripts/ci.sh` n'a **aucune étape Playwright** : le correctif du test de gate G7 n'a été
 vérifié que par son auteur, contre un serveur de développement qui servait alors les

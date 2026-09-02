@@ -81,6 +81,7 @@ import {
   TuileStat,
 } from "./ui";
 import { TableTriable, trierLignes, type ColonneTable, type TriTable } from "./TableTriable";
+import { risqueStore } from "../store/risque";
 
 const COMPARATEURS: Comparateur[] = [">", ">=", "<", "<="];
 
@@ -1277,6 +1278,19 @@ export function BacktestWindow() {
                 aria-label="Risque en pourcentage du capital"
               />
             </label>
+            <button
+              type="button"
+              className={BTN_SECONDAIRE}
+              title="Pré-remplit risque % et capital depuis l'outil POSITION (lecture seule)"
+              onClick={() => {
+                const r = risqueStore.getState();
+                if (stopPct === null && stopAtr === null) setStopPct(5);
+                setRisquePct(r.risquePct);
+                if (r.capital !== null) setCapitalInitial(r.capital);
+              }}
+            >
+              Reprendre RISQUE
+            </button>
             <label className="flex items-center gap-1 text-[10px] text-text-dim">
               <input
                 type="checkbox"

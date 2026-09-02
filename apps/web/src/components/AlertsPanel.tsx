@@ -17,6 +17,7 @@ import { useMemo, useState } from "react";
 import { useStore } from "zustand";
 import {
   decrireCondition,
+  estFrontOnly,
   validerComposite,
   type Comparateur,
   type Condition,
@@ -355,6 +356,7 @@ export function AlertsPanel() {
           const arm = etatArmement(d.arme);
           const derniere = d.declenchements[d.declenchements.length - 1];
           const whaleUnusable = IS_VERCEL && d.condition.type === "whale-flux";
+          const frontOnly = estFrontOnly(d);
           return (
             <div
               key={d.id}
@@ -381,6 +383,11 @@ export function AlertsPanel() {
                   <span className="truncate font-medium text-text">{d.symbol}</span>
                   <span className="flex shrink-0 items-center gap-1">
                     {whaleUnusable && <Badge ton="down">UNUSABLE</Badge>}
+                    {frontOnly && (
+                      <Badge ton="neutre" title="Évaluée seulement app ouverte (CVD / régime)">
+                        front-only
+                      </Badge>
+                    )}
                     <span className={`text-[10px] ${arm.classe}`}>{arm.texte}</span>
                   </span>
                 </span>

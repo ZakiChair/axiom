@@ -127,6 +127,18 @@ export function validerComposite(conditions: readonly Condition[]): conditions i
   return true;
 }
 
+/** Types que le daemon n'évalue pas (pipeline orderflow / score de régime). */
+const TYPES_FRONT_ONLY = new Set(["cvd-spot-perp-div", "regime-seuil"]);
+
+/**
+ * true si la def (atomique ou composite) porte CVD spot/perp ou un seuil de régime :
+ * évaluée par le runtime front uniquement. PURE — pastille UI + `evaluableDaemon`.
+ */
+export function estFrontOnly(def: AlertDef): boolean {
+  for (const t of typesDeDef(def)) if (TYPES_FRONT_ONLY.has(t)) return true;
+  return false;
+}
+
 /**
  * État instantané d'une condition atomique : `satisfaite` (booléen de seuil) +
  * valeur rapportée. `null` = non évaluable dans ce contexte.

@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
-import { evaluerAlertes, typesDeDef } from "./engine";
+import { estFrontOnly, evaluerAlertes, typesDeDef } from "./engine";
 import type { AlertDef, Condition, ConditionSimple, ContexteAlerte } from "./types";
 
 /** Bougie plate (open=high=low=close) au temps `time`. */
@@ -557,6 +557,24 @@ describe("filtrage du lot", () => {
     const res = evaluerAlertes([inactive], ctxPrix(150));
     expect(res.defs[0]).toBe(inactive); // référence conservée
     expect(res.modifie).toBe(false);
+  });
+});
+
+describe("estFrontOnly", () => {
+  it("repère CVD et régime, y compris en sous-condition", () => {
+    expect(estFrontOnly(def({ type: "prix-croise", niveau: 1, sens: "hausse" }))).toBe(false);
+    expect(estFrontOnly(def({ type: "cvd-spot-perp-div", kind: "les-deux" }))).toBe(true);
+    expect(
+      estFrontOnly(
+        def({
+          type: "composite",
+          conditions: [
+            { type: "prix-croise", niveau: 100, sens: "hausse" },
+            { type: "regime-seuil", comparateur: "<=", valeur: -1 },
+          ],
+        }),
+      ),
+    ).toBe(true);
   });
 });
 

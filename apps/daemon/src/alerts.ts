@@ -30,7 +30,7 @@
  * il ne partage rien avec le chemin chaud du renderer (WS du front restent directs).
  */
 import type { Database } from "bun:sqlite";
-import { evaluerAlertes, typesDeDef, type AlertDef, type ContexteAlerte, type Declenchement } from "@axiom/alerts";
+import { evaluerAlertes, estFrontOnly, typesDeDef, type AlertDef, type ContexteAlerte, type Declenchement } from "@axiom/alerts";
 import { entetesCors } from "./cors";
 import { getDb } from "./db";
 import {
@@ -62,8 +62,6 @@ export const TYPES_WHALE: ReadonlySet<string> = new Set(["whale-flux"]);
 /** Types de condition évalués sur une clôture de bougie AVEC contexte fusionné. */
 export const TYPES_COMPOSITE: ReadonlySet<string> = new Set(["composite"]);
 // CVD `cvd-spot-perp-div` : hors daemon (pipeline orderflow chart uniquement).
-/** Types front-only (daemon n'a ni pipeline orderflow ni score de régime). */
-const TYPES_FRONT_ONLY = new Set(["cvd-spot-perp-div", "regime-seuil"]);
 /** Cache funding périmé après 3 polls (~3 min). */
 const FUNDING_PERIME_MS = 3 * 60_000;
 
@@ -191,9 +189,9 @@ export function evaluableSurBougie1m(def: AlertDef): boolean {
  * ou composite avec sous-condition de bougie) hors 1m l'est aussi. Fonction PURE.
  */
 export function evaluableDaemon(def: AlertDef): boolean {
-  const types = typesDeDef(def);
-  for (const t of types) if (TYPES_FRONT_ONLY.has(t)) return false;
+  if (estFrontOnly(def)) return false;
   if (def.condition.type === "composite") {
+    const types = typesDeDef(def);
     const aUneBougie = [...types].some((t) => TYPES_BOUGIE.has(t));
     if (aUneBougie && !evaluableSurBougie1m(def)) return false;
   }

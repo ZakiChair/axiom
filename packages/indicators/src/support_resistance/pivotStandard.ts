@@ -15,7 +15,8 @@
  * précédente. Conséquence : les niveaux sont constants sur toute la durée
  * d'une session (jour UTC courant) et changent une fois par jour, à minuit
  * UTC. Les bougies du premier jour du buffer (pas de jour J-1 disponible)
- * restent `undefined`.
+ * restent `undefined` — de même quand le jour J-1 présent dans le buffer est
+ * TRONQUÉ (backfill démarrant en milieu de journée).
  */
 
 import type { IndicatorDef } from "@axiom/types";
@@ -56,7 +57,9 @@ export const pivotStandard: IndicatorDef = {
 
       const dayIdx = utcDayOf(candle.time);
       const prevDay = extentsByDay.get(dayIdx - 1);
-      if (prevDay === undefined) continue; // pas de jour J-1 dans le buffer
+      // Veille absente OU tronquée (buffer démarrant en milieu de journée) :
+      // ses H/L/C ne sont pas ceux d'un jour entier -> niveaux non rendus.
+      if (prevDay === undefined || prevDay.partiel) continue;
 
       const { high: h, low: l, close: c } = prevDay;
 

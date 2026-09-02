@@ -85,4 +85,22 @@ describe("Pivot Points Fibonacci (sessionné)", () => {
     expect(pp[3]).toBe(pp[4]);
     expect(pp[4]).toBe(pp[5]);
   });
+
+
+  // Buffer démarrant EN MILIEU DE JOURNÉE : le jour 0 est tronqué (première
+  // bougie à 05:00 UTC), ses H/L/C ne sont donc pas ceux d'une session
+  // entière. Les pivots du jour 1 doivent rester `undefined` plutôt que
+  // d'afficher des niveaux faux (même convention que le « jour 0 »).
+  const tronque: Candle[] = candles.map((c, i) =>
+    i < 3 ? { ...c, time: c.time + 5 * HOUR_MS } : c,
+  );
+
+  it("veille PARTIELLE (buffer démarrant en milieu de journée) : undefined", () => {
+    const { series } = computeIndicator(pivotFibonacci, tronque, {});
+
+    for (const key of ["pp", "r1", "s1", "r2", "s2", "r3", "s3"]) {
+      const serie = series[key]!;
+      for (const i of [0, 1, 2, 3, 4, 5]) expect(serie[i]).toBeUndefined();
+    }
+  });
 });

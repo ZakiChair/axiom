@@ -91,4 +91,22 @@ describe("Pivot Points Camarilla (sessionné)", () => {
     expect(h1[3]).toBe(h1[4]);
     expect(h1[4]).toBe(h1[5]);
   });
+
+
+  // Buffer démarrant EN MILIEU DE JOURNÉE : le jour 0 est tronqué (première
+  // bougie à 05:00 UTC), ses H/L/C ne sont donc pas ceux d'une session
+  // entière. Les pivots du jour 1 doivent rester `undefined` plutôt que
+  // d'afficher des niveaux faux (même convention que le « jour 0 »).
+  const tronque: Candle[] = candles.map((c, i) =>
+    i < 3 ? { ...c, time: c.time + 5 * HOUR_MS } : c,
+  );
+
+  it("veille PARTIELLE (buffer démarrant en milieu de journée) : undefined", () => {
+    const { series } = computeIndicator(pivotCamarilla, tronque, {});
+
+    for (const key of ["pp", "h1", "h2", "h3", "h4", "l1", "l2", "l3", "l4"]) {
+      const serie = series[key]!;
+      for (const i of [0, 1, 2, 3, 4, 5]) expect(serie[i]).toBeUndefined();
+    }
+  });
 });

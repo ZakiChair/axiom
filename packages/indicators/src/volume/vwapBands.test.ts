@@ -130,4 +130,30 @@ describe("vwapBands", () => {
       expect(res.series.lower?.[4]).toBeCloseTo(113, 10);
     });
   });
+
+  // Buffer démarrant EN MILIEU DE JOURNÉE : même convention que vwap.ts —
+  // valeurs conservées, session étiquetée « partielle ».
+  describe("session partielle (buffer démarrant en milieu de journée)", () => {
+    const HOUR_MS = 3_600_000;
+    const partiel: Candle[] = [
+      candle(110, 100, 108, 50, 5 * HOUR_MS),
+      candle(112, 104, 106, 30, 6 * HOUR_MS),
+    ];
+
+    it("émet une étiquette « session partielle » sur la première bougie", () => {
+      const res = vwapBands.calc(partiel, { mult: 1 }, makeCtx(partiel));
+      const labels = res.annotations?.labels ?? [];
+      expect(labels.length).toBe(1);
+      expect(labels[0]!.idx).toBe(0);
+      expect(labels[0]!.cible).toBe("prix");
+      expect(labels[0]!.texte.toLowerCase()).toContain("partielle");
+    });
+
+    it("laisse les valeurs inchangées et n'annote pas un buffer démarrant à 00:00 UTC", () => {
+      const res = vwapBands.calc(partiel, { mult: 1 }, makeCtx(partiel));
+      expect(res.series.basis?.[0]).toBeCloseTo((110 + 100 + 108) / 3, 10);
+      const plein = vwapBands.calc(candles, { mult: 1 }, makeCtx(candles));
+      expect(plein.annotations).toBeUndefined();
+    });
+  });
 });

@@ -8,6 +8,7 @@ import {
   doitNotifier,
   evaluerEtPersister,
   evaluerLiqCascadeTick,
+  evaluableDaemon,
   evaluableSurBougie1m,
   evaluerTick,
   evaluerWhaleFluxTick,
@@ -593,6 +594,45 @@ describe("evaluableSurBougie1m", () => {
 
   test("def 4h → NON évaluable (front-only plutôt que fausse)", () => {
     expect(evaluableSurBougie1m(alerteVariation("v4", "BTCUSDT", "4h"))).toBe(false);
+  });
+});
+
+describe("evaluableDaemon", () => {
+  test("composite CVD ou régime → front-only", () => {
+    const cvd: AlertDef = {
+      id: "c1",
+      symbol: "BTCUSDT",
+      source: "binance",
+      actif: true,
+      declenchements: [],
+      condition: {
+        type: "composite",
+        conditions: [
+          { type: "prix-croise", niveau: 100, sens: "hausse" },
+          { type: "cvd-spot-perp-div", kind: "les-deux" },
+        ],
+      },
+    };
+    expect(evaluableDaemon(cvd)).toBe(false);
+  });
+
+  test("composite prix + funding 1m → évaluable", () => {
+    const ok: AlertDef = {
+      id: "c2",
+      symbol: "BTCUSDT",
+      source: "binance",
+      actif: true,
+      declenchements: [],
+      timeframe: "1m",
+      condition: {
+        type: "composite",
+        conditions: [
+          { type: "prix-croise", niveau: 100, sens: "hausse" },
+          { type: "funding-extreme", sens: "les-deux", zSeuil: 2 },
+        ],
+      },
+    };
+    expect(evaluableDaemon(ok)).toBe(true);
   });
 });
 

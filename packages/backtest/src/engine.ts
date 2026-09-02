@@ -202,6 +202,8 @@ interface PositionOuverte {
   quantite: number;
   tempsEntree: number;
   indexEntree: number;
+  /** Niveau de stop FIGÉ à l'entrée (null = pas de stop). */
+  niveauStop: number | null;
 }
 
 /**
@@ -225,7 +227,13 @@ function cloturerTrade(
       : pos.quantite * (pos.prixEntree - prixSortie);
   const frais = (notionnelEntree + notionnelSortie) * (params.fraisPct / 100);
   const pnl = brut - frais;
-  const pnlPct = strat.tailleFixe > 0 ? (pnl / strat.tailleFixe) * 100 : 0;
+  const notionnel = pos.quantite * pos.prixEntree;
+  const pnlPct = notionnel > 0 ? (pnl / notionnel) * 100 : 0;
+  const distanceStop =
+    pos.niveauStop !== null ? Math.abs(pos.prixEntree - pos.niveauStop) : null;
+  const risqueInitial =
+    distanceStop !== null && distanceStop > 0 ? pos.quantite * distanceStop : null;
+  const r = risqueInitial !== null && risqueInitial > 0 ? pnl / risqueInitial : null;
   return {
     sens: pos.sens,
     tempsEntree: pos.tempsEntree,
@@ -239,6 +247,8 @@ function cloturerTrade(
     frais,
     dureeBarres: indexSortie - pos.indexEntree,
     dureeMs: tempsSortie - pos.tempsEntree,
+    risqueInitial,
+    r,
   };
 }
 
@@ -258,12 +268,8 @@ function decisionSortie(
   i: number,
   direction: Direction,
 ): RaisonSortie | null {
-  if (strat.stopPct !== undefined && strat.stopPct > 0) {
-    const seuil =
-      pos.sens === "long"
-        ? pos.prixEntree * (1 - strat.stopPct / 100)
-        : pos.prixEntree * (1 + strat.stopPct / 100);
-    const touche = pos.sens === "long" ? cloture <= seuil : cloture >= seuil;
+  if (pos.niveauStop !== null) {
+    const touche = pos.sens === "long" ? cloture <= pos.niveauStop : cloture >= pos.niveauStop;
     if (touche) return "stop";
   }
   if (strat.targetPct !== undefined && strat.targetPct > 0) {
@@ -299,6 +305,15 @@ export function runBacktest(
   const entree = compilerRegles(strat.reglesEntree, candles, cache);
   const sortie = compilerRegles(strat.reglesSortie, candles, cache);
   const direction = strat.direction;
+  // ATR pré-calculé si stopAtr (retenu même si stopPct est aussi défini).
+  const serieAtr: Serie | null =
+    strat.stopAtr !== undefined
+      ? resoudreOperande(
+          { type: "indicateur", indicateurId: "atr", params: { length: strat.stopAtr.length }, output: "atr" },
+          candles,
+          cache,
+        )
+      : null;
 
   const trades: TradeResultat[] = [];
   let pos: PositionOuverte | null = null;
@@ -326,12 +341,41 @@ export function runBacktest(
       if (sensOuvrir !== null) {
         const prixEntree = fillEntree(barreFill.open, sensOuvrir, params.slippagePct);
         if (prixEntree > 0) {
+          let niveauStop: number | null = null;
+          if (serieAtr !== null && strat.stopAtr !== undefined) {
+            const atr = valeurFinie(serieAtr, i);
+            if (atr === undefined || !(atr > 0)) {
+              continue; // ATR indéfini à la barre de décision → pas d'entrée
+            }
+            niveauStop =
+              sensOuvrir === "long"
+                ? prixEntree - strat.stopAtr.mult * atr
+                : prixEntree + strat.stopAtr.mult * atr;
+          } else if (strat.stopPct !== undefined && strat.stopPct > 0) {
+            niveauStop =
+              sensOuvrir === "long"
+                ? prixEntree * (1 - strat.stopPct / 100)
+                : prixEntree * (1 + strat.stopPct / 100);
+          }
+          let quantite = strat.tailleFixe / prixEntree;
+          if (
+            strat.risquePct !== undefined &&
+            strat.risquePct > 0 &&
+            niveauStop !== null
+          ) {
+            const distance = Math.abs(prixEntree - niveauStop);
+            if (distance > 0) {
+              const risqueUsd = params.capitalInitial * (strat.risquePct / 100);
+              quantite = risqueUsd / distance;
+            }
+          }
           pos = {
             sens: sensOuvrir,
             prixEntree,
-            quantite: strat.tailleFixe / prixEntree,
+            quantite,
             tempsEntree: barreFill.time,
             indexEntree: i + 1,
+            niveauStop,
           };
         }
       }
@@ -457,6 +501,15 @@ export function calculerStats(
     candles.length > 1 ? (candles[candles.length - 1]?.time ?? 0) - (candles[0]?.time ?? 0) : 0;
   const expositionPct = dureeTotale > 0 ? (sommeDuree / dureeTotale) * 100 : 0;
 
+  let sommeR = 0;
+  let nbTradesR = 0;
+  for (const t of trades) {
+    if (t.r !== null && Number.isFinite(t.r)) {
+      sommeR += t.r;
+      nbTradesR += 1;
+    }
+  }
+
   return {
     nbTrades,
     nbGagnants: gagnants.length,
@@ -470,5 +523,8 @@ export function calculerStats(
     expositionPct,
     gainMoyenPct: moyenne(gagnants.map((t) => t.pnlPct)),
     perteMoyennePct: moyenne(perdants.map((t) => t.pnlPct)),
+    nbTradesR,
+    sommeR,
+    expectancyR: nbTradesR > 0 ? sommeR / nbTradesR : null,
   };
 }

@@ -94,6 +94,17 @@ export interface StrategieDef {
   reglesSortie: Condition[];
   /** Stop en % du prix d'entrée (évalué sur la CLÔTURE, sans intrabar). Omis = pas de stop. */
   stopPct?: number;
+  /**
+   * Stop en multiples d'ATR (def `atr` de @axiom/indicators, sortie "atr").
+   * Exclusif avec `stopPct` : si les deux sont définis, le moteur retient `stopAtr`
+   * (jamais d'exception dans un moteur pur).
+   */
+  stopAtr?: { length: number; mult: number };
+  /**
+   * Risque par trade en % de `params.capitalInitial`. Requiert un stop (pct ou atr) ;
+   * sinon ignoré (repli `tailleFixe`). Fraction du capital INITIAL, non composée.
+   */
+  risquePct?: number;
   /** Objectif en % du prix d'entrée (évalué sur la CLÔTURE, sans intrabar). Omis = pas d'objectif. */
   targetPct?: number;
   direction: Direction;
@@ -147,6 +158,15 @@ export interface TradeResultat {
   dureeBarres: number;
   /** Durée en ms (tempsSortie − tempsEntree). */
   dureeMs: number;
+  /**
+   * Risque initial en cotation (`quantite × |prixEntree − niveauStop|`). `null` si
+   * aucun stop n'était défini à l'entrée.
+   */
+  risqueInitial: number | null;
+  /**
+   * R net = `pnl / risqueInitial` (frais + slippage inclus). `null` si pas de stop.
+   */
+  r: number | null;
 }
 
 /** Un point de l'equity curve (après chaque trade, plus un point initial). */
@@ -182,6 +202,12 @@ export interface StatsBacktest {
   gainMoyenPct: number;
   /** Perte moyenne des trades perdants, en % (valeur négative ; 0 si aucun). */
   perteMoyennePct: number;
+  /** Nombre de trades ayant un R défini (stop à l'entrée). */
+  nbTradesR: number;
+  /** Somme des R nets. */
+  sommeR: number;
+  /** Expectancy R = sommeR / nbTradesR (null si aucun trade à R). Convention EXPY : R=0 compté. */
+  expectancyR: number | null;
 }
 
 /** Résultat complet d'un backtest. */

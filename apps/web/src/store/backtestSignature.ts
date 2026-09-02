@@ -27,6 +27,8 @@ export interface ConfigRun {
   tailleFixe: number;
   stopPct: number | null;
   targetPct: number | null;
+  stopAtr: { length: number; mult: number } | null;
+  risquePct: number | null;
   fraisPct: number;
   slippagePct: number;
   capitalInitial: number;
@@ -48,6 +50,8 @@ export function signatureRun(c: ConfigRun): string {
     c.tailleFixe,
     c.stopPct,
     c.targetPct,
+    c.stopAtr,
+    c.risquePct,
     c.fraisPct,
     c.slippagePct,
     c.capitalInitial,

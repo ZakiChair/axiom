@@ -3,7 +3,7 @@
  * `indicateur-croisement` (formulaire) et cible de navigation d'un déclenchement.
  */
 import { describe, expect, it } from "vitest";
-import { decrireCondition, type AlertDef } from "@axiom/alerts";
+import { decrireCondition, validerComposite, type AlertDef } from "@axiom/alerts";
 import { cibleAlerte, construireConditionCroisement, INDICATEURS_CROISEMENT } from "./alertsPanel.util";
 
 /** Def minimale pour les tests de cible de navigation. */
@@ -71,5 +71,16 @@ describe("cibleAlerte", () => {
 
   it("renvoie null si la def a été supprimée depuis le déclenchement", () => {
     expect(cibleAlerte([def("a1", "BTCUSDT", "binance")], "disparue")).toBeNull();
+  });
+});
+
+describe("validerComposite", () => {
+  it("accepte 2–4 sous-conditions atomiques, refuse whale-flux / les-deux / n=1", () => {
+    const prix = { type: "prix-croise" as const, niveau: 100, sens: "hausse" as const };
+    const fund = { type: "funding-extreme" as const, sens: "short-crowded" as const, zSeuil: 2 };
+    expect(validerComposite([prix, fund])).toBe(true);
+    expect(validerComposite([prix])).toBe(false);
+    expect(validerComposite([{ type: "prix-croise", niveau: 1, sens: "les-deux" }, fund])).toBe(false);
+    expect(validerComposite([prix, { type: "whale-flux", seuilUsd: 1, direction: "tous" }])).toBe(false);
   });
 });

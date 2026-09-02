@@ -21,7 +21,7 @@ d’auth réseau, rien ne quitte la machine en dehors des appels aux APIs publiq
 |---|---|
 | **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations, **179 indicateurs** testés |
 | **Lire le contexte** | **39 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, mouvements de baleines, treemap, options, COT, taux & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
-| **Décider** | screener, playbooks 1-clic, alertes, backtest, stress-test multi-facteurs, étude d’évènements (CPI/NFP/FOMC), journal de trades, paper trading |
+| **Décider** | screener, playbooks 1-clic, alertes (dont composite ET), backtest en R (stop ATR / sizing risque), coût d’exécution L2 (DOM), stress-test, étude d’évènements, journal, paper trading |
 | **Ne pas décrocher** | alertes onglet fermé (macOS + Telegram optionnel), replay sur dumps officiels Binance, panneau de santé des sources |
 
 Deux partis pris structurent le produit :

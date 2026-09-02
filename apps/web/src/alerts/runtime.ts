@@ -48,7 +48,7 @@
  *
  * Aucune modification de Chart.tsx : on lit `marketStore` en aval, sans le piloter.
  */
-import { evaluerAlertes, type AlertDef, type ContexteAlerte, type Declenchement } from "@axiom/alerts";
+import { evaluerAlertes, typesDeDef, type AlertDef, type ContexteAlerte, type Declenchement } from "@axiom/alerts";
 import type { Unsubscribe } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { fluxLiqRetenu, liqEventsStore } from "../chart/liquidationMarkers";
@@ -68,6 +68,12 @@ import { extUrl } from "../data/extapi";
 
 /** Types de condition évalués sur la clôture de bougie (nécessitent les bougies). */
 const TYPES_BOUGIE = new Set(["variation-pct", "indicateur-seuil", "indicateur-croisement"]);
+/** Throttle d'évaluation des composites (ms) — `computeIndicator` n'a pas à courir à chaque tick. */
+const COMPOSITE_THROTTLE_MS = 1_000;
+
+function defPorte(def: AlertDef, type: string): boolean {
+  return typesDeDef(def).has(type);
+}
 
 /** Période de poll funding (ms) — lent, hors chemin chaud. */
 const FUNDING_POLL_MS = 60_000;
@@ -102,9 +108,47 @@ function creerRuntime(): Unsubscribe {
   /** Dernier prix vu par symbole (pour le `prixPrecedent` du sens `les-deux`). */
   const dernierPrix = new Map<string, number>();
 
+  /** Contexte fusionné par symbole (hors React) — les sources y ÉCRIVENT leur contribution. */
+  const contextes = new Map<string, Partial<ContexteAlerte>>();
+  const dernierEvalComposite = new Map<string, number>();
+
+  const fusionner = (symbol: string, patch: Partial<ContexteAlerte>): void => {
+    const prev = contextes.get(symbol) ?? {};
+    contextes.set(symbol, { ...prev, ...patch });
+  };
+
+  const evaluerComposites = (symbol: string): void => {
+    const now = Date.now();
+    const last = dernierEvalComposite.get(symbol) ?? 0;
+    if (now - last < COMPOSITE_THROTTLE_MS) return;
+    const partiel = contextes.get(symbol);
+    if (!partiel || partiel.dernierPrix === undefined || !Number.isFinite(partiel.dernierPrix)) return;
+    const lot = alertsStore
+      .getState()
+      .defs.filter((d) => d.actif && d.symbol === symbol && d.condition.type === "composite");
+    if (lot.length === 0) return;
+    dernierEvalComposite.set(symbol, now);
+    const regime = regimeStore.getState().regime;
+    const regimeScore =
+      regime !== null && regime.libelle !== "indéterminé" ? regime.score : undefined;
+    appliquerResultat(lot, {
+      maintenant: now,
+      dernierPrix: partiel.dernierPrix,
+      prixPrecedent: partiel.prixPrecedent,
+      candles: partiel.candles,
+      fundingRate: partiel.fundingRate,
+      fundingZScore: partiel.fundingZScore,
+      cvdDivergenceKind: partiel.cvdDivergenceKind,
+      liqUsdParMin: partiel.liqUsdParMin,
+      regimeScore,
+    });
+  };
+
   // ── Flux ticker : conditions prix-croise ──────────────────────────────────
   const onTicker = ({ symbol, price }: TickerUpdate): void => {
     if (!Number.isFinite(price)) return;
+    const precedent = dernierPrix.get(symbol);
+    fusionner(symbol, { dernierPrix: price, prixPrecedent: precedent });
     const lot = alertsStore
       .getState()
       .defs.filter((d) => d.actif && d.symbol === symbol && d.condition.type === "prix-croise");
@@ -112,10 +156,11 @@ function creerRuntime(): Unsubscribe {
       appliquerResultat(lot, {
         maintenant: Date.now(),
         dernierPrix: price,
-        prixPrecedent: dernierPrix.get(symbol),
+        prixPrecedent: precedent,
       });
     }
     dernierPrix.set(symbol, price);
+    evaluerComposites(symbol);
   };
 
   // (Re)souscription du flux ticker quand l'ENSEMBLE des symboles à alertes prix change.
@@ -126,7 +171,7 @@ function creerRuntime(): Unsubscribe {
       ...new Set(
         alertsStore
           .getState()
-          .defs.filter((d) => d.actif && d.condition.type === "prix-croise")
+          .defs.filter((d) => d.actif && defPorte(d, "prix-croise"))
           .map((d) => d.symbol)
       ),
     ].sort();
@@ -171,14 +216,22 @@ function creerRuntime(): Unsubscribe {
           TYPES_BOUGIE.has(d.condition.type) &&
           (d.timeframe === undefined || d.timeframe === timeframe)
       );
-    if (lot.length === 0) return;
     const avant = candles[idxClose - 1];
-    appliquerResultat(lot, {
-      maintenant: Date.now(),
+    const candlesCloturees = candles.slice(0, idxClose + 1);
+    fusionner(symbol, {
       dernierPrix: barreClose.close,
       prixPrecedent: avant?.close,
-      candles: candles.slice(0, idxClose + 1), // bougies clôturées uniquement
+      candles: candlesCloturees,
     });
+    if (lot.length > 0) {
+      appliquerResultat(lot, {
+        maintenant: Date.now(),
+        dernierPrix: barreClose.close,
+        prixPrecedent: avant?.close,
+        candles: candlesCloturees,
+      });
+    }
+    evaluerComposites(symbol);
   };
 
   // ── Poll funding : conditions funding-extreme ─────────────────────────────
@@ -191,16 +244,23 @@ function creerRuntime(): Unsubscribe {
     const lot = alertsStore
       .getState()
       .defs.filter((d) => d.actif && d.symbol === symbol && d.condition.type === "funding-extreme");
-    if (lot.length === 0) return;
     const mkt = marketStore.getState();
     const lastCandle =
       mkt.symbol === symbol ? mkt.candles[mkt.candles.length - 1] : undefined;
-    appliquerResultat(lot, {
-      maintenant: Date.now(),
+    fusionner(symbol, {
       dernierPrix: lastCandle?.close ?? 0,
       fundingRate: snap.rate,
       fundingZScore: snap.z,
     });
+    if (lot.length > 0) {
+      appliquerResultat(lot, {
+        maintenant: Date.now(),
+        dernierPrix: lastCandle?.close ?? 0,
+        fundingRate: snap.rate,
+        fundingZScore: snap.z,
+      });
+    }
+    evaluerComposites(symbol);
   };
 
   const pollFunding = async (): Promise<void> => {
@@ -208,7 +268,7 @@ function creerRuntime(): Unsubscribe {
       ...new Set(
         alertsStore
           .getState()
-          .defs.filter((d) => d.actif && d.condition.type === "funding-extreme")
+          .defs.filter((d) => d.actif && defPorte(d, "funding-extreme"))
           .map((d) => d.symbol)
       ),
     ];
@@ -224,7 +284,7 @@ function creerRuntime(): Unsubscribe {
   const resyncFunding = (): void => {
     const aDesFunding = alertsStore
       .getState()
-      .defs.some((d) => d.actif && d.condition.type === "funding-extreme");
+      .defs.some((d) => d.actif && defPorte(d, "funding-extreme"));
     if (aDesFunding && fundingTimer === undefined) {
       void pollFunding();
       fundingTimer = setInterval(() => {
@@ -249,25 +309,29 @@ function creerRuntime(): Unsubscribe {
     const lot = alertsStore
       .getState()
       .defs.filter((d) => d.actif && d.symbol === symbol && d.condition.type === "liq-cascade");
-    if (lot.length === 0) return;
     // Événements RÉELS uniquement : le seed Coinalyze (`approx`) est agrégé par bougie
     // et gonflerait artificiellement la minute glissante.
     const reels = liqEventsStore.getState().events.filter((ev) => ev.approx !== true);
     const nowMs = Date.now();
     const mkt = marketStore.getState();
     const lastCandle = mkt.candles[mkt.candles.length - 1];
-    appliquerResultat(lot, {
-      maintenant: nowMs,
-      dernierPrix: lastCandle?.close ?? 0,
-      liqUsdParMin: usdParMinute(reels, nowMs),
-    });
+    const liqUsdParMin = usdParMinute(reels, nowMs);
+    fusionner(symbol, { dernierPrix: lastCandle?.close ?? 0, liqUsdParMin });
+    if (lot.length > 0) {
+      appliquerResultat(lot, {
+        maintenant: nowMs,
+        dernierPrix: lastCandle?.close ?? 0,
+        liqUsdParMin,
+      });
+    }
+    evaluerComposites(symbol);
   };
 
   let liqCascadeTimer: ReturnType<typeof setInterval> | undefined;
   const resyncLiqCascade = (): void => {
     const aDesCascade = alertsStore
       .getState()
-      .defs.some((d) => d.actif && d.condition.type === "liq-cascade");
+      .defs.some((d) => d.actif && defPorte(d, "liq-cascade"));
     if (aDesCascade && liqCascadeTimer === undefined) {
       evaluerLiqCascade();
       liqCascadeTimer = setInterval(evaluerLiqCascade, LIQ_CASCADE_POLL_MS);
@@ -285,22 +349,25 @@ function creerRuntime(): Unsubscribe {
     const lot = alertsStore
       .getState()
       .defs.filter((d) => d.actif && d.symbol === symbol && d.condition.type === "cvd-spot-perp-div");
-    if (lot.length === 0) return;
     const mkt = marketStore.getState();
     const lastCandle =
       mkt.symbol === symbol ? mkt.candles[mkt.candles.length - 1] : undefined;
-    appliquerResultat(lot, {
-      maintenant: Date.now(),
-      dernierPrix: lastCandle?.close ?? 0,
-      cvdDivergenceKind: kind,
-    });
+    fusionner(symbol, { dernierPrix: lastCandle?.close ?? 0, cvdDivergenceKind: kind });
+    if (lot.length > 0) {
+      appliquerResultat(lot, {
+        maintenant: Date.now(),
+        dernierPrix: lastCandle?.close ?? 0,
+        cvdDivergenceKind: kind,
+      });
+    }
+    evaluerComposites(symbol);
   };
 
   /** Active orderflow + CVD S/P si au moins une alerte CVD active (Binance). */
   const assurerPipelineCvd = (): void => {
     const aDesCvd = alertsStore
       .getState()
-      .defs.some((d) => d.actif && d.condition.type === "cvd-spot-perp-div");
+      .defs.some((d) => d.actif && defPorte(d, "cvd-spot-perp-div"));
     if (!aDesCvd) return;
     const of = orderflowStore.getState();
     if (!of.enabled) of.setEnabled(true);
@@ -315,7 +382,7 @@ function creerRuntime(): Unsubscribe {
   const resyncCvd = (): void => {
     const cle = alertsStore
       .getState()
-      .defs.filter((d) => d.actif && d.condition.type === "cvd-spot-perp-div")
+      .defs.filter((d) => d.actif && defPorte(d, "cvd-spot-perp-div"))
       .map((d) => d.id)
       .sort()
       .join(",");
@@ -346,6 +413,9 @@ function creerRuntime(): Unsubscribe {
       dernierPrix: 0, // inutilisé par la condition (score global, sans symbole)
       regimeScore: regime.score,
     });
+    for (const d of alertsStore.getState().defs) {
+      if (d.actif && d.condition.type === "composite") evaluerComposites(d.symbol);
+    }
   };
 
   const unsubRegime = regimeStore.subscribe(evaluerRegime);

@@ -9,8 +9,8 @@
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
-import { evaluerAlertes } from "./engine";
-import type { AlertDef, Condition, ContexteAlerte } from "./types";
+import { evaluerAlertes, typesDeDef } from "./engine";
+import type { AlertDef, Condition, ConditionSimple, ContexteAlerte } from "./types";
 
 /** Bougie plate (open=high=low=close) au temps `time`. */
 function candle(time: number, close: number): Candle {
@@ -557,5 +557,92 @@ describe("filtrage du lot", () => {
     const res = evaluerAlertes([inactive], ctxPrix(150));
     expect(res.defs[0]).toBe(inactive); // référence conservée
     expect(res.modifie).toBe(false);
+  });
+});
+
+describe("typesDeDef", () => {
+  it("renvoie le type atomique, ou l'ensemble des sous-types d'un composite", () => {
+    expect([...typesDeDef(def({ type: "prix-croise", niveau: 1, sens: "hausse" }))]).toEqual(["prix-croise"]);
+    const c = def({
+      type: "composite",
+      conditions: [
+        { type: "prix-croise", niveau: 100, sens: "hausse" },
+        { type: "funding-extreme", sens: "short-crowded", zSeuil: 2 },
+      ],
+    });
+    expect(typesDeDef(c)).toEqual(new Set(["prix-croise", "funding-extreme"]));
+  });
+});
+
+describe("composite", () => {
+  const prix: ConditionSimple = { type: "prix-croise", niveau: 100, sens: "hausse" };
+  const fund: ConditionSimple = { type: "funding-extreme", sens: "short-crowded", zSeuil: 2 };
+  const cond: Condition = { type: "composite", conditions: [prix, fund] };
+  function ctx(prix: number, z?: number, rate = -0.001): ContexteAlerte {
+    return {
+      maintenant: 1,
+      dernierPrix: prix,
+      ...(z !== undefined ? { fundingRate: rate, fundingZScore: z } : {}),
+    };
+  }
+
+  it("calibre, déclenche quand la dernière sous-condition devient vraie, se ré-arme dès qu'une redevient fausse", () => {
+    const { fires, defFinale } = piloter(def(cond), [
+      ctx(90, 0.5), // prix faux, funding faux → calibrage armé
+      ctx(110, 0.5), // prix vrai, funding faux → rien
+      ctx(110, -2.5), // les deux vrais → DÉCLENCHE
+      ctx(110, -3), // toujours vrais → rien
+      ctx(90, -3), // prix faux → ré-armement
+      ctx(110, -2.5), // les deux vrais → DÉCLENCHE
+    ]);
+    expect(fires).toEqual([false, false, true, false, false, true]);
+    expect(defFinale.declenchements).toHaveLength(2);
+  });
+
+  it("non évaluable (armement figé) si UNE sous-condition manque de données", () => {
+    const d = def(cond, { arme: true });
+    const res = evaluerAlertes([d], ctx(110)); // funding absent
+    expect(res.defs[0]).toBe(d);
+    expect(res.modifie).toBe(false);
+  });
+
+  it("refuse n hors [2,4], prix-croise les-deux, whale-flux", () => {
+    const tropPeu = def({ type: "composite", conditions: [prix] });
+    expect(evaluerAlertes([tropPeu], ctx(110, -3)).modifie).toBe(false);
+    const lesDeux = def({
+      type: "composite",
+      conditions: [
+        { type: "prix-croise", niveau: 100, sens: "les-deux" },
+        fund,
+      ],
+    });
+    expect(evaluerAlertes([lesDeux], ctx(110, -3)).modifie).toBe(false);
+  });
+
+  it("croisement vrai sur la bougie du croisement puis faux à la suivante", () => {
+    // MACD : on simule via un croisement close × niveau (mais le type indiqueur-croisement
+    // exige un def d'indicateur). RSI n'a qu'une sortie → on croise macd × signal sur une
+    // série plate (jamais de croisement) vs un signal RSI>0 toujours vrai en ET.
+    const rsiSeuil: ConditionSimple = {
+      type: "indicateur-seuil",
+      indicateurId: "rsi",
+      params: { length: 2 },
+      output: "rsi",
+      comparateur: ">",
+      valeur: 0,
+    };
+    const croise: ConditionSimple = {
+      type: "indicateur-croisement",
+      indicateurId: "macd",
+      params: { fast: 2, slow: 3, signal: 2 },
+      outputA: "macd",
+      outputB: "signal",
+      sens: "hausse",
+    };
+    // Série construite pour un unique croisement macd×signal : bougies plates puis un
+    // spike — on vérifie surtout le contrat « non évaluable sans bougies ».
+    const sansBougies = def({ type: "composite", conditions: [rsiSeuil, croise] });
+    const res = evaluerAlertes([sansBougies], { maintenant: 0, dernierPrix: 1 });
+    expect(res.defs[0]).toBe(sansBougies);
   });
 });

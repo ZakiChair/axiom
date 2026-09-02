@@ -24,6 +24,7 @@ import type {
   AlertDef,
   Comparateur,
   Condition,
+  ConditionSimple,
   ContexteAlerte,
   Declenchement,
   ResultatEvaluation,
@@ -95,7 +96,148 @@ function evaluerUne(def: AlertDef, ctx: ContexteAlerte): EvalCondition | null {
       return evalRegimeSeuil(def, c, ctx);
     case "whale-flux":
       return evalWhaleFlux(def, c, ctx);
+    case "composite":
+      return evalComposite(def, c, ctx);
   }
+}
+
+/**
+ * Types de condition portés par une def : le type atomique, ou l'ensemble des
+ * sous-types d'un composite. Sert aux (re)souscriptions ticker/funding/liq
+ * (front et daemon) pour qu'un composite « funding ET prix » ouvre les deux feeds.
+ * Fonction PURE.
+ */
+export function typesDeDef(def: AlertDef): ReadonlySet<string> {
+  if (def.condition.type === "composite") {
+    return new Set(def.condition.conditions.map((c) => c.type));
+  }
+  return new Set([def.condition.type]);
+}
+
+/**
+ * Forme d'un composite créable : 2–4 sous-conditions, pas d'imbrication, pas de
+ * whale-flux, pas de `prix-croise les-deux`. PURE — le store refuse avant d'écrire.
+ */
+export function validerComposite(conditions: readonly Condition[]): conditions is ConditionSimple[] {
+  if (conditions.length < 2 || conditions.length > 4) return false;
+  for (const c of conditions) {
+    if (c.type === "composite" || c.type === "whale-flux") return false;
+    if (c.type === "prix-croise" && c.sens === "les-deux") return false;
+  }
+  return true;
+}
+
+/**
+ * État instantané d'une condition atomique : `satisfaite` (booléen de seuil) +
+ * valeur rapportée. `null` = non évaluable dans ce contexte.
+ *
+ * Pour `indicateur-croisement` : vrai SSI un croisement est constaté sur les
+ * deux dernières bougies CLÔTURÉES (fenêtre de coïncidence d'une composition).
+ * `prix-croise` `les-deux` n'a pas d'état de niveau → `null` (non composable).
+ */
+function etatCondition(
+  c: Condition,
+  ctx: ContexteAlerte,
+): { satisfaite: boolean; valeur: number } | null {
+  switch (c.type) {
+    case "prix-croise": {
+      if (c.sens === "les-deux") return null;
+      const p = ctx.dernierPrix;
+      if (!Number.isFinite(p)) return null;
+      return { satisfaite: c.sens === "hausse" ? p >= c.niveau : p <= c.niveau, valeur: p };
+    }
+    case "variation-pct": {
+      const candles = ctx.candles;
+      if (!candles || candles.length === 0) return null;
+      const p = ctx.dernierPrix;
+      if (!Number.isFinite(p)) return null;
+      const derniere = candles[candles.length - 1];
+      if (!derniere) return null;
+      const ref = clotureAOuverture(candles, derniere.time - c.fenetreMs);
+      if (ref === undefined || ref === 0) return null;
+      const pct = ((p - ref) / ref) * 100;
+      return { satisfaite: c.seuilPct >= 0 ? pct >= c.seuilPct : pct <= c.seuilPct, valeur: pct };
+    }
+    case "indicateur-seuil": {
+      const serie = calculerSortie(c.indicateurId, c.params, c.output, ctx.candles);
+      if (!serie) return null;
+      const v = derniereValeurDefinie(serie);
+      if (v === undefined) return null;
+      return { satisfaite: comparer(v, c.comparateur, c.valeur), valeur: v };
+    }
+    case "indicateur-croisement": {
+      const candles = ctx.candles;
+      if (!candles || candles.length === 0) return null;
+      const idef = getIndicator(c.indicateurId);
+      if (!idef) return null;
+      const res = computeIndicator(idef, candles, c.params);
+      const a = res.series[c.outputA];
+      const b = res.series[c.outputB];
+      if (!a || !b) return null;
+      const paire = deuxDernieresPaires(a, b);
+      if (!paire) return null;
+      const { a0, b0, a1, b1 } = paire;
+      const franchitHaut = a0 <= b0 && a1 > b1;
+      const franchitBas = a0 >= b0 && a1 < b1;
+      const satisfaite =
+        c.sens === "hausse" ? franchitHaut : c.sens === "baisse" ? franchitBas : franchitHaut || franchitBas;
+      return { satisfaite, valeur: a1 };
+    }
+    case "funding-extreme": {
+      const rate = ctx.fundingRate;
+      if (rate === undefined || !Number.isFinite(rate)) return null;
+      const z = ctx.fundingZScore;
+      const hasAbs = c.seuilAbs !== undefined && Number.isFinite(c.seuilAbs);
+      const hasZ = z !== undefined && Number.isFinite(z);
+      if (!hasAbs && !hasZ) return null;
+      const extremeAbs = hasAbs && Math.abs(rate) >= (c.seuilAbs as number);
+      const extremeZ = hasZ && Math.abs(z as number) >= (c.zSeuil ?? 2);
+      const extreme = Boolean(extremeAbs || extremeZ);
+      let coteOk = false;
+      if (c.sens === "les-deux") coteOk = rate !== 0;
+      else if (c.sens === "long-crowded") coteOk = rate > 0;
+      else coteOk = rate < 0;
+      return { satisfaite: extreme && coteOk, valeur: hasZ ? (z as number) : rate };
+    }
+    case "cvd-spot-perp-div": {
+      if (ctx.cvdDivergenceKind === undefined) return null;
+      const kind = ctx.cvdDivergenceKind;
+      const satisfaite = kind !== null && (c.kind === "les-deux" || kind === c.kind);
+      const valeur = kind === "spotUp_perpDown" ? 1 : kind === "spotDown_perpUp" ? -1 : 0;
+      return { satisfaite, valeur };
+    }
+    case "liq-cascade": {
+      const v = ctx.liqUsdParMin;
+      if (v === undefined || !Number.isFinite(v)) return null;
+      return { satisfaite: v >= c.seuilUsdParMin, valeur: v };
+    }
+    case "regime-seuil": {
+      const v = ctx.regimeScore;
+      if (v === undefined || !Number.isFinite(v)) return null;
+      return { satisfaite: comparer(v, c.comparateur, c.valeur), valeur: v };
+    }
+    case "whale-flux": {
+      const mouvements = ctx.whaleMouvements;
+      if (mouvements === undefined) return null;
+      let max = 0;
+      for (const m of mouvements) {
+        if (c.direction !== "tous" && m.direction !== c.direction) continue;
+        if (Number.isFinite(m.usd) && m.usd > max) max = m.usd;
+      }
+      return { satisfaite: max >= c.seuilUsd, valeur: max };
+    }
+    case "composite":
+      return null;
+  }
+}
+
+function etatOuNull(
+  def: AlertDef,
+  etat: { satisfaite: boolean; valeur: number } | null,
+): EvalCondition | null {
+  if (etat === null) return null;
+  const r = frontArme(def.arme, etat.satisfaite);
+  return { fire: r.fire, arme: r.arme, valeur: etat.valeur };
 }
 
 /**
@@ -126,9 +268,7 @@ function evalPrixCroise(
     return { fire: franchitHaut || franchitBas, arme: def.arme, valeur: p };
   }
 
-  const satisfaite = c.sens === "hausse" ? p >= c.niveau : p <= c.niveau;
-  const r = frontArme(def.arme, satisfaite);
-  return { fire: r.fire, arme: r.arme, valeur: p };
+  return etatOuNull(def, etatCondition(c, ctx));
 }
 
 function evalVariation(
@@ -136,26 +276,7 @@ function evalVariation(
   c: Extract<Condition, { type: "variation-pct" }>,
   ctx: ContexteAlerte
 ): EvalCondition | null {
-  const candles = ctx.candles;
-  if (!candles || candles.length === 0) return null;
-  const p = ctx.dernierPrix;
-  if (!Number.isFinite(p)) return null;
-
-  // Référence ancrée sur l'horloge des BOUGIES, jamais sur `ctx.maintenant` (horloge de
-  // la MACHINE, qui peut retarder de quelques secondes sur celle de l'exchange et faire
-  // glisser la référence d'une bougie entière). CONTRAT D'APPEL : la dernière bougie du
-  // tableau est la dernière CLÔTURÉE (front et daemon la garantissent). Elle a clôturé à
-  // `time + TF` ; la référence doit avoir clôturé `fenetreMs` plus tôt, c'est donc la
-  // bougie OUVERTE en `time - fenetreMs`.
-  const derniere = candles[candles.length - 1];
-  if (!derniere) return null;
-  const ref = clotureAOuverture(candles, derniere.time - c.fenetreMs);
-  if (ref === undefined || ref === 0) return null; // fenêtre pas encore couverte
-
-  const pct = ((p - ref) / ref) * 100;
-  const satisfaite = c.seuilPct >= 0 ? pct >= c.seuilPct : pct <= c.seuilPct;
-  const r = frontArme(def.arme, satisfaite);
-  return { fire: r.fire, arme: r.arme, valeur: pct };
+  return etatOuNull(def, etatCondition(c, ctx));
 }
 
 function evalIndicateurSeuil(
@@ -163,14 +284,7 @@ function evalIndicateurSeuil(
   c: Extract<Condition, { type: "indicateur-seuil" }>,
   ctx: ContexteAlerte
 ): EvalCondition | null {
-  const serie = calculerSortie(c.indicateurId, c.params, c.output, ctx.candles);
-  if (!serie) return null;
-  const v = derniereValeurDefinie(serie);
-  if (v === undefined) return null;
-
-  const satisfaite = comparer(v, c.comparateur, c.valeur);
-  const r = frontArme(def.arme, satisfaite);
-  return { fire: r.fire, arme: r.arme, valeur: v };
+  return etatOuNull(def, etatCondition(c, ctx));
 }
 
 function evalIndicateurCroisement(
@@ -211,29 +325,7 @@ function evalFundingExtreme(
   c: Extract<Condition, { type: "funding-extreme" }>,
   ctx: ContexteAlerte
 ): EvalCondition | null {
-  const rate = ctx.fundingRate;
-  if (rate === undefined || !Number.isFinite(rate)) return null;
-
-  const z = ctx.fundingZScore;
-  const hasAbs = c.seuilAbs !== undefined && Number.isFinite(c.seuilAbs);
-  const hasZ = z !== undefined && Number.isFinite(z);
-  if (!hasAbs && !hasZ) return null; // rien pour juger l'extrémité
-
-  const extremeAbs = hasAbs && Math.abs(rate) >= (c.seuilAbs as number);
-  const extremeZ = hasZ && Math.abs(z as number) >= (c.zSeuil ?? 2);
-  const extreme = Boolean(extremeAbs || extremeZ);
-
-  // Filtre de sens (signe du rate) : 0 n'est ni long ni short crowded.
-  let coteOk = false;
-  if (c.sens === "les-deux") coteOk = rate !== 0;
-  else if (c.sens === "long-crowded") coteOk = rate > 0;
-  else coteOk = rate < 0; // short-crowded
-
-  const satisfaite = extreme && coteOk;
-  const r = frontArme(def.arme, satisfaite);
-  // Valeur rapportée : z si dispo (plus interprétable pour l'extrême), sinon rate.
-  const valeur = hasZ ? (z as number) : rate;
-  return { fire: r.fire, arme: r.arme, valeur };
+  return etatOuNull(def, etatCondition(c, ctx));
 }
 
 /**
@@ -245,14 +337,7 @@ function evalCvdSpotPerpDiv(
   c: Extract<Condition, { type: "cvd-spot-perp-div" }>,
   ctx: ContexteAlerte
 ): EvalCondition | null {
-  if (ctx.cvdDivergenceKind === undefined) return null;
-  const kind = ctx.cvdDivergenceKind;
-  const satisfaite =
-    kind !== null && (c.kind === "les-deux" || kind === c.kind);
-  // Valeur codée pour le journal : +1 spot↑perp↓, -1 spot↓perp↑, 0 = aucune.
-  const valeur = kind === "spotUp_perpDown" ? 1 : kind === "spotDown_perpUp" ? -1 : 0;
-  const r = frontArme(def.arme, satisfaite);
-  return { fire: r.fire, arme: r.arme, valeur };
+  return etatOuNull(def, etatCondition(c, ctx));
 }
 
 /**
@@ -265,11 +350,7 @@ function evalLiqCascade(
   c: Extract<Condition, { type: "liq-cascade" }>,
   ctx: ContexteAlerte
 ): EvalCondition | null {
-  const v = ctx.liqUsdParMin;
-  if (v === undefined || !Number.isFinite(v)) return null;
-  const satisfaite = v >= c.seuilUsdParMin;
-  const r = frontArme(def.arme, satisfaite);
-  return { fire: r.fire, arme: r.arme, valeur: v };
+  return etatOuNull(def, etatCondition(c, ctx));
 }
 
 /**
@@ -282,11 +363,7 @@ function evalRegimeSeuil(
   c: Extract<Condition, { type: "regime-seuil" }>,
   ctx: ContexteAlerte
 ): EvalCondition | null {
-  const v = ctx.regimeScore;
-  if (v === undefined || !Number.isFinite(v)) return null;
-  const satisfaite = comparer(v, c.comparateur, c.valeur);
-  const r = frontArme(def.arme, satisfaite);
-  return { fire: r.fire, arme: r.arme, valeur: v };
+  return etatOuNull(def, etatCondition(c, ctx));
 }
 
 /**
@@ -300,16 +377,34 @@ function evalWhaleFlux(
   c: Extract<Condition, { type: "whale-flux" }>,
   ctx: ContexteAlerte
 ): EvalCondition | null {
-  const mouvements = ctx.whaleMouvements;
-  if (mouvements === undefined) return null;
-  let max = 0;
-  for (const m of mouvements) {
-    if (c.direction !== "tous" && m.direction !== c.direction) continue;
-    if (Number.isFinite(m.usd) && m.usd > max) max = m.usd;
+  return etatOuNull(def, etatCondition(c, ctx));
+}
+
+/**
+ * Composite ET : `satisfaite = ∧ etatCondition(cᵢ)`. Forme invalide (n hors [2,4],
+ * imbrication, `whale-flux`, `prix-croise les-deux`) ou UNE sous-condition non
+ * évaluable → `null` (armement figé — jamais un ET sur données partielles).
+ * `valeur` du déclenchement = nombre de sous-conditions.
+ */
+function evalComposite(
+  def: AlertDef,
+  c: Extract<Condition, { type: "composite" }>,
+  ctx: ContexteAlerte
+): EvalCondition | null {
+  const sous = c.conditions;
+  if (sous.length < 2 || sous.length > 4) return null;
+  let toutes = true;
+  for (const sc of sous) {
+    // Garde runtime (hydratation JSON) : ConditionSimple exclut ces types à la compilation.
+    const t = (sc as Condition).type;
+    if (t === "composite" || t === "whale-flux") return null;
+    if (sc.type === "prix-croise" && sc.sens === "les-deux") return null;
+    const etat = etatCondition(sc, ctx);
+    if (etat === null) return null;
+    if (!etat.satisfaite) toutes = false;
   }
-  const satisfaite = max >= c.seuilUsd;
-  const r = frontArme(def.arme, satisfaite);
-  return { fire: r.fire, arme: r.arme, valeur: max };
+  const r = frontArme(def.arme, toutes);
+  return { fire: r.fire, arme: r.arme, valeur: sous.length };
 }
 
 // ───────── Helpers purs ─────────

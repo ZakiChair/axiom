@@ -139,8 +139,11 @@ export interface ConditionWhaleFlux {
   direction: "depot" | "retrait" | "tous";
 }
 
-/** Condition d'une alerte (union discriminée sur `type`). */
-export type Condition =
+/**
+ * Condition atomique (tout sauf composition). Union fermée : toute nouvelle
+ * condition s'ajoute ICI, puis à `Condition` via `| ConditionComposite`.
+ */
+export type ConditionAtomique =
   | ConditionPrixCroise
   | ConditionVariationPct
   | ConditionIndicateurSeuil
@@ -150,6 +153,24 @@ export type Condition =
   | ConditionLiqCascade
   | ConditionRegimeSeuil
   | ConditionWhaleFlux;
+
+/**
+ * Sous-condition admise dans une composition (tout sauf `whale-flux` : convention
+ * de portage `symbol = actif` incompatible avec un def porté par une paire).
+ */
+export type ConditionSimple = Exclude<ConditionAtomique, ConditionWhaleFlux>;
+
+/**
+ * ET conjonctif de 2 à 4 sous-conditions, évaluées dans le MÊME contexte (même
+ * symbole). Pas d'imbrication. Validé par le moteur (forme invalide → non évaluable).
+ */
+export interface ConditionComposite {
+  type: "composite";
+  conditions: ConditionSimple[];
+}
+
+/** Condition d'une alerte (union discriminée sur `type`). */
+export type Condition = ConditionAtomique | ConditionComposite;
 
 /** Définition d'une alerte. */
 export interface AlertDef {

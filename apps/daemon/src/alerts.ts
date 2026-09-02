@@ -30,7 +30,7 @@
  * il ne partage rien avec le chemin chaud du renderer (WS du front restent directs).
  */
 import type { Database } from "bun:sqlite";
-import { evaluerAlertes, type AlertDef, type ContexteAlerte, type Declenchement } from "@axiom/alerts";
+import { evaluerAlertes, typesDeDef, type AlertDef, type ContexteAlerte, type Declenchement } from "@axiom/alerts";
 import { entetesCors } from "./cors";
 import { getDb } from "./db";
 import {
@@ -59,7 +59,13 @@ export const TYPES_FUNDING: ReadonlySet<string> = new Set(["funding-extreme"]);
 export const TYPES_LIQ: ReadonlySet<string> = new Set(["liq-cascade"]);
 /** Types de condition évalués sur le tick baleines (table `whale_moves`). */
 export const TYPES_WHALE: ReadonlySet<string> = new Set(["whale-flux"]);
+/** Types de condition évalués sur une clôture de bougie AVEC contexte fusionné. */
+export const TYPES_COMPOSITE: ReadonlySet<string> = new Set(["composite"]);
 // CVD `cvd-spot-perp-div` : hors daemon (pipeline orderflow chart uniquement).
+/** Types front-only (daemon n'a ni pipeline orderflow ni score de régime). */
+const TYPES_FRONT_ONLY = new Set(["cvd-spot-perp-div", "regime-seuil"]);
+/** Cache funding périmé après 3 polls (~3 min). */
+const FUNDING_PERIME_MS = 3 * 60_000;
 
 /** Seuil d'anti-doublon : on ne notifie que si le dernier heartbeat > 90 s. */
 export const SEUIL_HEARTBEAT_MS = 90_000;
@@ -117,6 +123,7 @@ export function symbolesBinanceActifs(defs: readonly AlertDef[]): string[] {
           (d) =>
             d.actif &&
             d.source === "binance" &&
+            evaluableDaemon(d) &&
             (!TYPES_BOUGIE.has(d.condition.type) || evaluableSurBougie1m(d)),
         )
         .map((d) => d.symbol.toUpperCase()),
@@ -132,7 +139,7 @@ export function symbolesFundingActifs(defs: readonly AlertDef[]): string[] {
   return [
     ...new Set(
       defs
-        .filter((d) => d.actif && d.source === "binance" && d.condition.type === "funding-extreme")
+        .filter((d) => d.actif && d.source === "binance" && typesDeDef(d).has("funding-extreme"))
         .map((d) => d.symbol.toUpperCase()),
     ),
   ].sort();
@@ -146,7 +153,7 @@ export function symbolesLiqCascadeActifs(defs: readonly AlertDef[]): string[] {
   return [
     ...new Set(
       defs
-        .filter((d) => d.actif && d.source === "binance" && d.condition.type === "liq-cascade")
+        .filter((d) => d.actif && d.source === "binance" && typesDeDef(d).has("liq-cascade"))
         .map((d) => d.symbol.toUpperCase()),
     ),
   ].sort();
@@ -180,6 +187,20 @@ export function evaluableSurBougie1m(def: AlertDef): boolean {
 }
 
 /**
+ * Un composite contenant CVD ou régime est front-only. Une def de bougie (atomique
+ * ou composite avec sous-condition de bougie) hors 1m l'est aussi. Fonction PURE.
+ */
+export function evaluableDaemon(def: AlertDef): boolean {
+  const types = typesDeDef(def);
+  for (const t of types) if (TYPES_FRONT_ONLY.has(t)) return false;
+  if (def.condition.type === "composite") {
+    const aUneBougie = [...types].some((t) => TYPES_BOUGIE.has(t));
+    if (aUneBougie && !evaluableSurBougie1m(def)) return false;
+  }
+  return true;
+}
+
+/**
  * Évalue le sous-lot d'alertes concerné par un événement (symbole + types de
  * condition) contre un contexte. Filtre `binance` + `actif` + `symbol` + `types`,
  * puis délègue au moteur pur. Les conditions de BOUGIE sont en plus filtrées sur le
@@ -199,6 +220,7 @@ export function evaluerTick(
       d.source === "binance" &&
       d.symbol.toUpperCase() === symbol.toUpperCase() &&
       types.has(d.condition.type) &&
+      evaluableDaemon(d) &&
       (!TYPES_BOUGIE.has(d.condition.type) || evaluableSurBougie1m(d)),
   );
   return evaluerAlertes(lot, ctx);
@@ -420,6 +442,8 @@ export function evaluerWhaleFluxTick(maintenant: number = Date.now(), opts: Opti
 // ─────────────────────────── Boucle de vie ───────────────────────────
 
 let feed: Feed | null = null;
+/** Cache funding écrit par le poll (~60 s), lu par l'éval composite à la clôture. */
+const cacheFunding = new Map<string, { rate: number; z?: number; ts: number }>();
 
 /**
  * Démarre la boucle d'alertes du daemon : crée le feed Binance, poll le KV toutes
@@ -444,15 +468,40 @@ export function demarrerBoucleAlertes(): () => void {
       const derniere = candles[candles.length - 1];
       if (!derniere) return;
       const avant = candles[candles.length - 2];
+      const maintenant = Date.now();
       try {
         evaluerEtPersister(symbol, TYPES_BOUGIE, {
-          maintenant: Date.now(),
+          maintenant,
           dernierPrix: derniere.close,
           prixPrecedent: avant?.close,
           candles,
         });
       } catch (err) {
         console.error("[axiomd] évaluation bougie échouée :", err);
+      }
+      const snap = cacheFunding.get(symbol);
+      const funding =
+        snap !== undefined && maintenant - snap.ts < FUNDING_PERIME_MS
+          ? { fundingRate: snap.rate, fundingZScore: snap.z }
+          : {};
+      let liqUsdParMin: number | undefined;
+      try {
+        assurerTableLiquidations(getDb());
+        liqUsdParMin = sommeLiqUsdParMin(getDb(), symbol, maintenant);
+      } catch {
+        /* table absente : sous-condition liq non évaluable */
+      }
+      try {
+        evaluerEtPersister(symbol, TYPES_COMPOSITE, {
+          maintenant,
+          dernierPrix: derniere.close,
+          prixPrecedent: avant?.close,
+          candles,
+          ...funding,
+          ...(liqUsdParMin !== undefined ? { liqUsdParMin } : {}),
+        });
+      } catch (err) {
+        console.error("[axiomd] évaluation composite échouée :", err);
       }
     },
   });
@@ -501,6 +550,7 @@ export function demarrerBoucleAlertes(): () => void {
       } catch {
         /* z best-effort */
       }
+      cacheFunding.set(symbol, { rate, z, ts: Date.now() });
       try {
         evaluerEtPersister(symbol, TYPES_FUNDING, {
           maintenant: Date.now(),

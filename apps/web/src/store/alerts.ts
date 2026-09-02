@@ -15,7 +15,7 @@
  * de Phase 2) ; ce store n'est qu'un conteneur d'état + un journal.
  */
 import { createStore } from "zustand/vanilla";
-import type { AlertDef, Condition, Declenchement, SensCroisement } from "@axiom/alerts";
+import { validerComposite, type AlertDef, type Condition, type Declenchement, type SensCroisement } from "@axiom/alerts";
 import type { ExchangeId, Timeframe } from "@axiom/types";
 import { daemonPret, kvPut } from "../data/daemon";
 
@@ -166,7 +166,8 @@ export const alertsStore = createStore<AlertsState>((set, get) => ({
   defs: initial.defs,
   journal: initial.journal,
 
-  ajouter: (a) =>
+  ajouter: (a) => {
+    if (a.condition.type === "composite" && !validerComposite(a.condition.conditions)) return;
     set((s) => ({
       defs: [
         ...s.defs,
@@ -182,7 +183,8 @@ export const alertsStore = createStore<AlertsState>((set, get) => ({
           declenchements: [],
         },
       ],
-    })),
+    }));
+  },
 
   supprimer: (id) => set((s) => ({ defs: s.defs.filter((d) => d.id !== id) })),
 

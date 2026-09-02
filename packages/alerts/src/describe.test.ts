@@ -127,4 +127,16 @@ describe("decrireCondition", () => {
       "Baleine ≥ 2.5M $ (retrait exchange)"
     );
   });
+
+  it("composite joint par ET", () => {
+    expect(
+      decrireCondition({
+        type: "composite",
+        conditions: [
+          { type: "prix-croise", niveau: 100, sens: "hausse" },
+          { type: "funding-extreme", sens: "short-crowded", zSeuil: 2 },
+        ],
+      }),
+    ).toBe("Prix franchit 100 à la hausse ET Funding extrême (short crowded, |z|≥2)");
+  });
 });

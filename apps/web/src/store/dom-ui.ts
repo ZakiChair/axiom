@@ -17,6 +17,8 @@ export type DomTab = "ladder" | "depth" | "tape";
 export const FACTEURS_PAS = [1, 2, 5, 10, 25] as const;
 /** Seuils de surlignage « gros trade » (notionnel USD) proposés dans la TAPE. */
 export const SEUILS_GROS_TRADE = [50_000, 100_000, 250_000, 1_000_000] as const;
+/** Notionnels (USD) du bandeau de coût d'exécution. */
+export const NOTIONNELS_COUT = [10_000, 50_000, 250_000, 1_000_000] as const;
 
 export interface DomUiState {
   /** true quand le panneau DOM est ouvert. */
@@ -27,6 +29,8 @@ export interface DomUiState {
   facteurPas: number;
   /** Seuil (USD) au-delà duquel un trade est surligné dans la TAPE. */
   seuilGrosTrade: number;
+  /** Bandeau coût d'exécution visible (LADDER/DEPTH). Éphémère. */
+  coutVisible: boolean;
   /** Ouvre le panneau (onglet optionnel). */
   openDom: (tab?: DomTab) => void;
   /** Ferme le panneau. */
@@ -39,6 +43,8 @@ export interface DomUiState {
   setFacteurPas: (facteur: number) => void;
   /** Fixe le seuil de surlignage des gros trades. */
   setSeuilGrosTrade: (seuil: number) => void;
+  /** Affiche / masque le bandeau de coût. */
+  toggleCout: () => void;
 }
 
 export const domUiStore = createStore<DomUiState>((set) => ({
@@ -46,6 +52,7 @@ export const domUiStore = createStore<DomUiState>((set) => ({
   tab: "ladder",
   facteurPas: 1,
   seuilGrosTrade: 100_000,
+  coutVisible: true,
   openDom: (tab) => {
     if (tab) set({ tab });
     windowManagerStore.getState().openWindow("dom");
@@ -55,6 +62,7 @@ export const domUiStore = createStore<DomUiState>((set) => ({
   setTab: (tab) => set({ tab }),
   setFacteurPas: (facteur) => set({ facteurPas: facteur }),
   setSeuilGrosTrade: (seuil) => set({ seuilGrosTrade: seuil }),
+  toggleCout: () => set((s) => ({ coutVisible: !s.coutVisible })),
 }));
 
 mirrorOpenState("dom", domUiStore);
@@ -81,5 +89,18 @@ export const commandes: Commande[] = [
     motsCles: ["tape", "time and sales", "time&sales", "trades", "transactions", "impressions"],
     apercu: "Ouvre le carnet d'ordres sur l'onglet time & sales",
     action: () => domUiStore.getState().openDom("tape"),
+  },
+  {
+    id: "panneau:dom-cout",
+    mnemonique: "DOMCOUT",
+    libelle: "DOM — coût d'exécution",
+    categorie: "panneau",
+    motsCles: ["cout", "slippage", "execution", "bps", "carnet", "desequilibre"],
+    apercu: "Ouvre le carnet et bascule le bandeau de coût d'exécution",
+    action: () => {
+      const s = domUiStore.getState();
+      s.openDom();
+      s.toggleCout();
+    },
   },
 ];

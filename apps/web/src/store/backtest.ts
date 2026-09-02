@@ -183,6 +183,9 @@ export interface StrategiePreset {
   tailleFixe: number;
   stopPct: number | null;
   targetPct: number | null;
+  /** Optionnel : presets utilisateur post-v2.7. Absents = comportement inchangé. */
+  stopAtr?: { length: number; mult: number } | null;
+  risquePct?: number | null;
   reglesEntree: Condition[];
   reglesSortie: Condition[];
   /** true pour les presets livrés (non supprimables). */
@@ -468,6 +471,8 @@ export interface BacktestState {
   tailleFixe: number;
   stopPct: number | null;
   targetPct: number | null;
+  stopAtr: { length: number; mult: number } | null;
+  risquePct: number | null;
   fraisPct: number;
   slippagePct: number;
   capitalInitial: number;
@@ -481,6 +486,8 @@ export interface BacktestState {
   setTailleFixe: (v: number) => void;
   setStopPct: (v: number | null) => void;
   setTargetPct: (v: number | null) => void;
+  setStopAtr: (v: { length: number; mult: number } | null) => void;
+  setRisquePct: (v: number | null) => void;
   setFraisPct: (v: number) => void;
   setSlippagePct: (v: number) => void;
   setCapitalInitial: (v: number) => void;
@@ -541,6 +548,8 @@ export function configCourante(s: BacktestState): ConfigRun {
     tailleFixe: s.tailleFixe,
     stopPct: s.stopPct,
     targetPct: s.targetPct,
+    stopAtr: s.stopAtr,
+    risquePct: s.risquePct,
     fraisPct: s.fraisPct,
     slippagePct: s.slippagePct,
     capitalInitial: s.capitalInitial,
@@ -562,6 +571,8 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
   tailleFixe: 1000,
   stopPct: null,
   targetPct: null,
+  stopAtr: null,
+  risquePct: null,
   fraisPct: 0.05,
   slippagePct: 0.02,
   capitalInitial: 10_000,
@@ -573,8 +584,10 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
   setPlage: (plage) => set({ plage }),
   setDirection: (direction) => set({ direction }),
   setTailleFixe: (v) => set({ tailleFixe: v }),
-  setStopPct: (v) => set({ stopPct: v }),
+  setStopPct: (v) => set({ stopPct: v, stopAtr: v !== null ? null : get().stopAtr }),
   setTargetPct: (v) => set({ targetPct: v }),
+  setStopAtr: (v) => set({ stopAtr: v, stopPct: v !== null ? null : get().stopPct }),
+  setRisquePct: (v) => set({ risquePct: v }),
   setFraisPct: (v) => set({ fraisPct: v }),
   setSlippagePct: (v) => set({ slippagePct: v }),
   setCapitalInitial: (v) => set({ capitalInitial: v }),
@@ -601,6 +614,8 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
       tailleFixe: preset.tailleFixe,
       stopPct: preset.stopPct,
       targetPct: preset.targetPct,
+      stopAtr: preset.stopAtr ?? null,
+      risquePct: preset.risquePct ?? null,
       reglesEntree: clonerConditions(preset.reglesEntree),
       reglesSortie: clonerConditions(preset.reglesSortie),
     });
@@ -617,6 +632,8 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
       tailleFixe: s.tailleFixe,
       stopPct: s.stopPct,
       targetPct: s.targetPct,
+      stopAtr: s.stopAtr,
+      risquePct: s.risquePct,
       reglesEntree: clonerConditions(s.reglesEntree),
       reglesSortie: clonerConditions(s.reglesSortie),
     };
@@ -728,8 +745,9 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
         reglesSortie: s.reglesSortie,
         direction: s.direction,
         tailleFixe: s.tailleFixe,
-        ...(s.stopPct !== null ? { stopPct: s.stopPct } : {}),
+        ...(s.stopAtr !== null ? { stopAtr: s.stopAtr } : s.stopPct !== null ? { stopPct: s.stopPct } : {}),
         ...(s.targetPct !== null ? { targetPct: s.targetPct } : {}),
+        ...(s.risquePct !== null ? { risquePct: s.risquePct } : {}),
       };
       const params: ParamsBacktest = {
         fraisPct: s.fraisPct,

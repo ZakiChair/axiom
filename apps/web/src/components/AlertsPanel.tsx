@@ -17,8 +17,10 @@ import { useMemo, useState } from "react";
 import { useStore } from "zustand";
 import {
   decrireCondition,
+  validerComposite,
   type Comparateur,
   type Condition,
+  type ConditionSimple,
   type SensCroisement,
 } from "@axiom/alerts";
 import { INDICATORS, getIndicator } from "@axiom/indicators";
@@ -161,6 +163,9 @@ export function AlertsPanel() {
   const [erreurForm, setErreurForm] = useState<string | null>(null);
   // Suppression armée (pattern SettingsPanel.restaurer) : id de l'alerte à confirmer.
   const [confirmSuppr, setConfirmSuppr] = useState<string | null>(null);
+  const [composer, setComposer] = useState(false);
+  const [composition, setComposition] = useState<ConditionSimple[]>([]);
+  const [symboleCompose, setSymboleCompose] = useState<string | null>(null);
 
   const symboleEffectif = (symbol.trim() || symbolCourant).toUpperCase();
 
@@ -192,6 +197,10 @@ export function AlertsPanel() {
 
   const soumettre = () => {
     if (IS_VERCEL && type === "whale-flux") return;
+    if (composer && (type === "whale-flux" || (type === "prix-croise" && sens === "les-deux"))) {
+      setErreurForm("Type non composable (whale-flux / prix ↕).");
+      return;
+    }
     let condition: Condition;
     if (type === "prix-croise") {
       const n = Number(niveau);
@@ -274,6 +283,15 @@ export function AlertsPanel() {
       condition = { type: "cvd-spot-perp-div", kind: kindCvd };
     }
     setErreurForm(null);
+    if (composer) {
+      if (composition.length >= 4) {
+        setErreurForm("4 sous-conditions maximum.");
+        return;
+      }
+      if (composition.length === 0) setSymboleCompose(symboleEffectif);
+      setComposition((cs) => [...cs, condition as ConditionSimple]);
+      return;
+    }
     // regime-seuil est GLOBAL : porté par un symbole neutre (BTCUSDT/binance).
     // whale-flux est porté par l'ACTIF surveillé (convention @axiom/alerts, source binance).
     const cible =
@@ -407,13 +425,44 @@ export function AlertsPanel() {
 
       {/* Formulaire de création */}
       <div className="space-y-1.5 border-t border-border p-2">
+        <label className="flex items-center gap-1.5 px-0.5 text-[10px] text-text-dim">
+          <input
+            type="checkbox"
+            checked={composer}
+            onChange={(e) => {
+              setComposer(e.target.checked);
+              if (!e.target.checked) {
+                setComposition([]);
+                setSymboleCompose(null);
+              }
+            }}
+          />
+          Composer (ET)
+        </label>
+        {composer && composition.length > 0 && (
+          <ul className="space-y-0.5 px-0.5">
+            {composition.map((c, i) => (
+              <li key={i} className="flex items-baseline gap-1 text-[11px] text-text-dim">
+                <span className="truncate">⋀ {decrireCondition(c)}</span>
+                <button
+                  type="button"
+                  onClick={() => setComposition((cs) => cs.filter((_, j) => j !== i))}
+                  className="shrink-0 text-text-dim hover:text-text"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="flex gap-1.5">
           <input
             value={symbol}
             onChange={(e) => setSymbol(e.target.value.toUpperCase())}
             placeholder={symbolCourant}
             spellCheck={false}
-            className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-xs text-text outline-none placeholder:text-text-dim focus:border-text-dim"
+            disabled={composer && composition.length > 0}
+            className="min-w-0 flex-1 rounded border border-border bg-bg px-2 py-1 text-xs text-text outline-none placeholder:text-text-dim focus:border-text-dim disabled:opacity-60"
           />
           <select
             value={type}
@@ -738,12 +787,41 @@ export function AlertsPanel() {
           disabled={IS_VERCEL && type === "whale-flux"}
           className="w-full rounded border border-border bg-bg px-2 py-1 text-xs text-text-dim transition hover:border-text-dim hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {type === "regime-seuil"
-            ? "Ajouter (régime global)"
-            : type === "whale-flux"
-              ? `Ajouter (baleines ${actifWhale})`
-              : `Ajouter sur ${symboleEffectif}`}
+          {composer
+            ? `+ Ajouter à la composition (${composition.length}/4)`
+            : type === "regime-seuil"
+              ? "Ajouter (régime global)"
+              : type === "whale-flux"
+                ? `Ajouter (baleines ${actifWhale})`
+                : `Ajouter sur ${symboleEffectif}`}
         </button>
+        {composer && (
+          <button
+            type="button"
+            onClick={() => {
+              if (!validerComposite(composition)) {
+                setErreurForm("2 à 4 sous-conditions requises.");
+                return;
+              }
+              const aUneBougie = composition.some((c) =>
+                c.type === "variation-pct" || c.type === "indicateur-seuil" || c.type === "indicateur-croisement",
+              );
+              alertsStore.getState().ajouter({
+                symbol: symboleCompose ?? symboleEffectif,
+                source: marketStore.getState().exchange,
+                condition: { type: "composite", conditions: [...composition] },
+                ...(aUneBougie ? { timeframe: marketStore.getState().timeframe } : {}),
+              });
+              setComposition([]);
+              setSymboleCompose(null);
+              setErreurForm(null);
+            }}
+            disabled={composition.length < 2}
+            className="w-full rounded border border-border bg-bg px-2 py-1 text-xs text-text-dim transition hover:border-text-dim hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Créer l'alerte composée ({composition.length}/4)
+          </button>
+        )}
         {erreurForm !== null && <p className="text-[10px] text-down">{erreurForm}</p>}
       </div>
 

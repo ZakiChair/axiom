@@ -410,6 +410,8 @@ describe("statistiques agrégées", () => {
       frais: 0,
       dureeBarres: 1,
       dureeMs: tSortie - tEntree,
+      risqueInitial: null,
+      r: null,
     });
     const trades = [mk(100, 10, 0, 1000), mk(-50, -5, 1000, 2000), mk(30, 3, 2000, 3000)];
     const candles = [barre(0, 100, 100), barre(3000, 100, 100)];
@@ -442,6 +444,7 @@ describe("statistiques agrégées", () => {
     const gagnant: TradeResultat = {
       sens: "long", tempsEntree: 0, prixEntree: 100, tempsSortie: 1000, prixSortie: 110,
       raison: "regle", quantite: 10, pnl: 100, pnlPct: 10, frais: 0, dureeBarres: 1, dureeMs: 1000,
+      risqueInitial: null, r: null,
     };
     const candles = [barre(0, 100, 100), barre(1000, 100, 100)];
     const s1 = calculerStats([gagnant], construireEquity([gagnant], candles, 1000), candles, 1000);
@@ -469,5 +472,153 @@ describe("sharpeAnnualise", () => {
     expect(sharpeAnnualise([], 252)).toBe(0);
     expect(sharpeAnnualise([0.05], 252)).toBe(0);
     expect(sharpeAnnualise([0.02, 0.02, 0.02], 252)).toBe(0); // écart-type nul
+  });
+});
+
+// ─────────────────────────── 12. Stop ATR + sizing en % de risque ───────────────────────────
+
+describe("stop ATR figé à l'entrée", () => {
+  it("fixe le niveau à prixEntree − 2·ATR[i] (long) et stoppe à la clôture sous ce niveau", () => {
+    // Entrée long : cross close×100 hausse à i=1 → fill open barre 2 = 100.
+    // ATR(2) à i=1 est défini (amorce Wilder). On impose un ATR via des ranges connus
+    // puis un close sous le niveau figé.
+    const candles = [
+      bougie(t(0), 99, 101, 97, 99, 1),
+      bougie(t(1), 101, 103, 99, 101, 1), // cross up ; ATR défini
+      bougie(t(2), 100, 102, 98, 100, 1), // fill entrée = 100
+      bougie(t(3), 100, 101, 50, 50, 1), // close 50 → stop (niveau figé ~100−2·ATR)
+      barre(t(4), 50, 50), // fill sortie = 50
+      barre(t(5), 50, 50),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, "hausse")],
+      reglesSortie: [],
+      direction: "long",
+      stopAtr: { length: 2, mult: 2 },
+      tailleFixe: 1000,
+    };
+    const r = runBacktest(candles, strat, SANS_FRICTION);
+    expect(r.trades.length).toBe(1);
+    const trade = r.trades[0]!;
+    expect(trade.raison).toBe("stop");
+    expect(trade.prixEntree).toBe(100);
+    expect(trade.risqueInitial).not.toBeNull();
+    expect(trade.r).not.toBeNull();
+    expect(trade.r!).toBeLessThan(0);
+  });
+
+  it("ATR indéfini à la barre de décision → pas d'entrée", () => {
+    // ATR length 50 sur 6 barres : amorce trop courte.
+    const candles = [
+      barre(t(0), 99, 99),
+      barre(t(1), 101, 101),
+      barre(t(2), 100, 100),
+      barre(t(3), 100, 100),
+      barre(t(4), 100, 100),
+      barre(t(5), 100, 100),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, "hausse")],
+      reglesSortie: [],
+      direction: "long",
+      stopAtr: { length: 50, mult: 2 },
+      tailleFixe: 1000,
+    };
+    expect(runBacktest(candles, strat, SANS_FRICTION).trades).toHaveLength(0);
+  });
+
+  it("stopPct + stopAtr → atr retenu (entrée stoppée au niveau ATR, pas au 5 %)", () => {
+    const candles = [
+      bougie(t(0), 99, 101, 97, 99, 1),
+      bougie(t(1), 101, 103, 99, 101, 1),
+      bougie(t(2), 100, 102, 98, 100, 1),
+      bougie(t(3), 100, 101, 94, 94, 1), // close 94 : 5 % = 95 → stop pct, ATR×2 souvent plus large
+      barre(t(4), 94, 94),
+      barre(t(5), 94, 94),
+    ];
+    const atr: StrategieDef = {
+      reglesEntree: [croiseClose(100, "hausse")],
+      reglesSortie: [],
+      direction: "long",
+      stopPct: 5,
+      stopAtr: { length: 2, mult: 10 }, // ATR×10 très large → close 94 ne touche PAS
+      tailleFixe: 1000,
+    };
+    const r = runBacktest(candles, atr, SANS_FRICTION);
+    // Si ATR est retenu, le close 94 ne stoppe pas (niveau trop loin) → fin-donnees.
+    expect(r.trades[0]?.raison).toBe("fin-donnees");
+  });
+});
+
+describe("sizing en % de risque", () => {
+  it("quantite = (capital × risque%) / distance exacte ; r = pnl net / risque", () => {
+    // Entrée long 100, stop 5 % → niveau 95, distance 5.
+    // capital 10 000, risque 1 % → 100 USD de risque → qté = 100/5 = 20.
+    const candles = [
+      barre(t(0), 99, 99),
+      barre(t(1), 101, 101),
+      barre(t(2), 100, 100),
+      barre(t(3), 94, 94), // close 94 ≤ 95 → stop
+      barre(t(4), 93, 93), // fill 93
+      barre(t(5), 93, 93),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, "hausse")],
+      reglesSortie: [],
+      direction: "long",
+      stopPct: 5,
+      risquePct: 1,
+      tailleFixe: 1000, // ignoré
+    };
+    const r = runBacktest(candles, strat, { ...SANS_FRICTION, capitalInitial: 10_000 });
+    const trade = r.trades[0]!;
+    expect(trade.quantite).toBeCloseTo(20, 8);
+    expect(trade.risqueInitial).toBeCloseTo(100, 8);
+    expect(trade.pnl).toBeCloseTo(20 * (93 - 100), 8); // −140
+    expect(trade.r).toBeCloseTo(-140 / 100, 8);
+  });
+
+  it("risquePct sans stop → tailleFixe (ignoré)", () => {
+    const candles = [
+      barre(t(0), 99, 99),
+      barre(t(1), 101, 101),
+      barre(t(2), 100, 100),
+      barre(t(3), 110, 110),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, "hausse")],
+      reglesSortie: [],
+      direction: "long",
+      risquePct: 1,
+      tailleFixe: 1000,
+    };
+    const r = runBacktest(candles, strat, SANS_FRICTION);
+    expect(r.trades[0]!.quantite).toBeCloseTo(10, 8); // 1000/100
+    expect(r.trades[0]!.r).toBeNull();
+    expect(r.stats.expectancyR).toBeNull();
+  });
+
+  it("R d'un stop exact inclut les frais (pas −1 pile)", () => {
+    const candles = [
+      barre(t(0), 99, 99),
+      barre(t(1), 101, 101),
+      barre(t(2), 100, 100),
+      barre(t(3), 95, 95), // close = stop 95
+      barre(t(4), 95, 95), // fill 95
+      barre(t(5), 95, 95),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, "hausse")],
+      reglesSortie: [],
+      direction: "long",
+      stopPct: 5,
+      risquePct: 1,
+      tailleFixe: 1000,
+    };
+    const r = runBacktest(candles, strat, { fraisPct: 0.05, slippagePct: 0, capitalInitial: 10_000 });
+    const trade = r.trades[0]!;
+    expect(trade.r).not.toBeNull();
+    expect(trade.r!).toBeLessThan(-1); // frais dans le R
+    expect(trade.frais).toBeGreaterThan(0);
   });
 });

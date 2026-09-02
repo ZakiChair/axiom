@@ -19,7 +19,7 @@ import { useStore } from "zustand";
 import type { Trade } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
-import { domUiStore, FACTEURS_PAS, SEUILS_GROS_TRADE } from "../store/dom-ui";
+import { domUiStore, FACTEURS_PAS, NOTIONNELS_COUT, SEUILS_GROS_TRADE } from "../store/dom-ui";
 import { binanceAdapter } from "../data/binance";
 import {
   agregerNiveaux,
@@ -34,6 +34,7 @@ import {
 } from "../data/depth";
 import { formatUsd } from "../lib/format";
 import { lireTokensCanvas, POLICE_CANVAS, POLICE_CANVAS_MONO } from "../lib/canvasTokens";
+import { coutExecution, desequilibre, profondeurAPct } from "../data/depthExecution";
 import { EnTeteFenetre, Onglets, Vide } from "./ui";
 
 /** Nombre MAX de niveaux affichés de chaque côté du mid (LADDER, fenêtre haute). */
@@ -51,6 +52,10 @@ const TAPE_MAX = 200;
 const TAPE_ROW_H = 16;
 /** Cadence de peinture max (~15 fps) : throttle du rAF. */
 const MIN_FRAME_MS = 66;
+/** Hauteur réservée au bandeau de coût (LADDER/DEPTH). */
+const COUT_H = 92;
+/** Échantillons de la sparkline de déséquilibre (1 / s, 60 s). */
+const SPARK_N = 60;
 
 // ─────────────────────────── Couleurs (tokens de thème) ───────────────────────────
 
@@ -343,6 +348,99 @@ function dessinerDepth(ctx: CanvasRenderingContext2D, w: number, h: number, livr
   ctx.fillText(`Σ ${formatQte(maxCum)}`, midX, 4);
 }
 
+function formatBps(v: number): string {
+  const s = v >= 0 ? "+" : "−";
+  return `${s}${Math.abs(v).toFixed(1)} bps`;
+}
+
+/**
+ * Bandeau COÛT : 4 notionnels (achat/vente), profondeur ±0,5 %, déséquilibre I(10)
+ * + sparkline 60 s. Peint en pied du canvas (hors React). Hors frais, « > carnet »
+ * jamais extrapolé.
+ */
+function dessinerCout(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  y0: number,
+  h: number,
+  livre: OrderBook,
+  spark: number[],
+  tk: Tokens,
+): void {
+  ctx.fillStyle = rgba(tk.surface, 0.96);
+  ctx.fillRect(0, y0, w, h);
+  ctx.strokeStyle = rgba(tk.border, 0.8);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, y0 + 0.5);
+  ctx.lineTo(w, y0 + 0.5);
+  ctx.stroke();
+
+  ctx.font = POLICE_CANVAS_MONO;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  let y = y0 + 11;
+  for (const n of NOTIONNELS_COUT) {
+    const achat = coutExecution(livre, "achat", n);
+    const vente = coutExecution(livre, "vente", n);
+    const aTxt = !achat ? "—" : achat.couvert ? formatBps(achat.slippageBps) : "> carnet";
+    const vTxt = !vente ? "—" : vente.couvert ? formatBps(vente.slippageBps) : "> carnet";
+    ctx.fillStyle = rgbCss(tk.textDim);
+    ctx.fillText(`${formatUsd(n)}`, 6, y);
+    ctx.fillStyle = achat && achat.couvert ? rgbCss(tk.up) : rgbCss(tk.textDim);
+    ctx.fillText(`achat ${aTxt}`, w * 0.32, y);
+    ctx.fillStyle = vente && vente.couvert ? rgbCss(tk.down) : rgbCss(tk.textDim);
+    ctx.fillText(`vente ${vTxt}`, w * 0.66, y);
+    y += 12;
+  }
+  const prof = profondeurAPct(livre, 0.005);
+  ctx.fillStyle = rgbCss(tk.textDim);
+  const profTxt = prof
+    ? `±0,5 % : bid ${formatUsd(prof.bidUsd)} · ask ${formatUsd(prof.askUsd)}`
+    : "±0,5 % : —";
+  ctx.fillText(profTxt, 6, y);
+  y += 12;
+  const i = desequilibre(livre, 10);
+  const iTxt = i === null ? "—" : i.toFixed(2);
+  ctx.fillText(`déséquilibre I(10) ${iTxt}`, 6, y);
+
+  // Sparkline 60 s à droite de la dernière ligne.
+  const sparkW = Math.min(72, w * 0.28);
+  const sparkX = w - sparkW - 6;
+  const sparkY = y - 8;
+  const sparkH = 14;
+  if (spark.length >= 2) {
+    ctx.beginPath();
+    const n = spark.length;
+    for (let k = 0; k < n; k++) {
+      const x = sparkX + (k / (n - 1)) * sparkW;
+      const v = spark[k] ?? 0;
+      const yy = sparkY + sparkH * (0.5 - v * 0.5);
+      if (k === 0) ctx.moveTo(x, yy);
+      else ctx.lineTo(x, yy);
+    }
+    ctx.strokeStyle = rgbCss(tk.textDim);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = rgbCss(tk.textDim);
+  ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+  const best = meilleursNiveaux(livre);
+  let couverture = "—";
+  if (best) {
+    const bids = [...livre.bids.keys()];
+    const asks = [...livre.asks.keys()];
+    const lo = Math.min(...bids);
+    const hi = Math.max(...asks);
+    if (Number.isFinite(lo) && Number.isFinite(hi) && best.mid > 0) {
+      const pct = Math.min(Math.abs(best.mid - lo), Math.abs(hi - best.mid)) / best.mid * 100;
+      couverture = `±${pct.toFixed(1)} %`;
+    }
+  }
+  ctx.fillText(`Binance spot · carnet reçu ${couverture} · descriptif, hors frais`, 6, y0 + h - 8);
+}
+
 /** TAPE : time & sales défilant (heure, prix, taille, agresseur coloré). */
 function dessinerTape(ctx: CanvasRenderingContext2D, w: number, h: number, trades: Trade[], seuil: number, tk: Tokens): void {
   if (trades.length === 0) return placeholder(ctx, w, h, tk, "Aucune transaction reçue.");
@@ -384,6 +482,8 @@ export function DomWindow() {
   const setFacteurPas = useStore(domUiStore, (s) => s.setFacteurPas);
   const seuilGrosTrade = useStore(domUiStore, (s) => s.seuilGrosTrade);
   const setSeuilGrosTrade = useStore(domUiStore, (s) => s.setSeuilGrosTrade);
+  const coutVisible = useStore(domUiStore, (s) => s.coutVisible);
+  const toggleCout = useStore(domUiStore, (s) => s.toggleCout);
   const exchange = useStore(marketStore, (s) => s.exchange);
   const symbol = useStore(marketStore, (s) => s.symbol);
   const themeId = useStore(themeStore, (s) => s.theme); // redessine au changement de thème
@@ -394,6 +494,8 @@ export function DomWindow() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const livreRef = useRef<OrderBook | null>(null);
   const tradesRef = useRef<Trade[]>([]);
+  const sparkRef = useRef<number[]>([]);
+  const lastSparkRef = useRef<number>(0);
   const sizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
   const paintRef = useRef<() => void>(() => {});
   const rafRef = useRef<number>(0);
@@ -483,16 +585,31 @@ export function DomWindow() {
         dessinerTape(ctx, w, h, tradesRef.current, seuilGrosTrade, tk);
       } else if (!livre) {
         placeholder(ctx, w, h, tk, "Chargement…");
-      } else if (tab === "ladder") {
-        const pas = pasArrondi(meilleursNiveaux(livre)?.mid ?? 0) * facteurPas;
-        dessinerLadder(ctx, w, h, livre, pas, tk);
-      } else {
-        dessinerDepth(ctx, w, h, livre, tk);
+      } else if (tab === "ladder" || tab === "depth") {
+        const afficherCout = coutVisible;
+        const hChart = afficherCout ? Math.max(0, h - COUT_H) : h;
+        if (tab === "ladder") {
+          const pas = pasArrondi(meilleursNiveaux(livre)?.mid ?? 0) * facteurPas;
+          dessinerLadder(ctx, w, hChart, livre, pas, tk);
+        } else {
+          dessinerDepth(ctx, w, hChart, livre, tk);
+        }
+        const now = performance.now();
+        if (now - lastSparkRef.current >= 1000) {
+          lastSparkRef.current = now;
+          const i = desequilibre(livre, 10);
+          if (i !== null) {
+            const arr = sparkRef.current;
+            arr.push(i);
+            if (arr.length > SPARK_N) arr.splice(0, arr.length - SPARK_N);
+          }
+        }
+        if (afficherCout) dessinerCout(ctx, w, hChart, COUT_H, livre, sparkRef.current, tk);
       }
     };
     paintRef.current = paint;
     paint();
-  }, [open, isBinance, tab, sizeTick, themeId, facteurPas, seuilGrosTrade, symbol]);
+  }, [open, isBinance, tab, sizeTick, themeId, facteurPas, seuilGrosTrade, symbol, coutVisible]);
 
   // Nettoyage du rAF au démontage.
   useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
@@ -553,6 +670,16 @@ export function DomWindow() {
                   {f}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={toggleCout}
+                aria-pressed={coutVisible}
+                className={`ml-auto rounded border px-1.5 py-0.5 transition ${
+                  coutVisible ? "border-border bg-bg text-text" : "border-border hover:text-text"
+                }`}
+              >
+                Coût
+              </button>
             </>
           )}
         </div>

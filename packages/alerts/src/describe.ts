@@ -95,5 +95,7 @@ export function decrireCondition(condition: Condition): string {
             : "toutes directions";
       return `Baleine ≥ ${formaterMontant(seuilUsd)} $ (${dir})`;
     }
+    case "composite":
+      return condition.conditions.map(decrireCondition).join(" ET ");
   }
 }

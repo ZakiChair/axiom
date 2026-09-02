@@ -816,6 +816,19 @@ const COLONNES_TRADES: ColonneTable<TradeResultat>[] = [
       </span>
     ),
   },
+  {
+    id: "r",
+    label: "R",
+    align: "right",
+    largeur: "0.6fr",
+    triable: true,
+    valeurTri: (tr) => tr.r ?? Number.NEGATIVE_INFINITY,
+    rendu: (tr) => (
+      <span className={`text-right tabular-nums ${tr.r === null ? "text-text-dim" : tr.r >= 0 ? "text-up" : "text-down"}`}>
+        {tr.r === null ? "—" : formatDec(tr.r)}
+      </span>
+    ),
+  },
 ];
 
 function TradesTable({ trades, symbol, tf }: { trades: TradeResultat[]; symbol: string; tf: Timeframe }) {
@@ -922,7 +935,17 @@ function StatsGrid({ resultat }: { resultat: ResultatBacktest }) {
       <div className="grid grid-cols-3 gap-1.5">
         <TuileStat label="Gain moyen" valeur={formatPct(s.gainMoyenPct)} ton="up" />
         <TuileStat label="Perte moyenne" valeur={formatPct(s.perteMoyennePct)} ton="down" />
+        <TuileStat
+          label="Expectancy R"
+          valeur={s.expectancyR === null ? "—" : formatDec(s.expectancyR)}
+          ton={s.expectancyR !== null && s.expectancyR < 0 ? "down" : s.expectancyR !== null ? "up" : undefined}
+        />
       </div>
+      {s.expectancyR !== null && (
+        <p className="text-[10px] text-text-dim">
+          R net (frais + slippage), risque initial = distance au stop à l'entrée · n={s.nbTradesR} · ΣR={formatDec(s.sommeR)}
+        </p>
+      )}
     </section>
   );
 }
@@ -937,6 +960,8 @@ export function BacktestWindow() {
   const tailleFixe = useStore(backtestStore, (s) => s.tailleFixe);
   const stopPct = useStore(backtestStore, (s) => s.stopPct);
   const targetPct = useStore(backtestStore, (s) => s.targetPct);
+  const stopAtr = useStore(backtestStore, (s) => s.stopAtr);
+  const risquePct = useStore(backtestStore, (s) => s.risquePct);
   const fraisPct = useStore(backtestStore, (s) => s.fraisPct);
   const slippagePct = useStore(backtestStore, (s) => s.slippagePct);
   const capitalInitial = useStore(backtestStore, (s) => s.capitalInitial);
@@ -950,6 +975,8 @@ export function BacktestWindow() {
   const setTailleFixe = useStore(backtestStore, (s) => s.setTailleFixe);
   const setStopPct = useStore(backtestStore, (s) => s.setStopPct);
   const setTargetPct = useStore(backtestStore, (s) => s.setTargetPct);
+  const setStopAtr = useStore(backtestStore, (s) => s.setStopAtr);
+  const setRisquePct = useStore(backtestStore, (s) => s.setRisquePct);
   const setFraisPct = useStore(backtestStore, (s) => s.setFraisPct);
   const setSlippagePct = useStore(backtestStore, (s) => s.setSlippagePct);
   const setCapitalInitial = useStore(backtestStore, (s) => s.setCapitalInitial);
@@ -1185,21 +1212,69 @@ export function BacktestWindow() {
               />
             </label>
             <label className="flex items-center gap-1 text-[10px] text-text-dim">
-              <input
-                type="checkbox"
-                checked={stopPct !== null}
-                onChange={(e) => setStopPct(e.target.checked ? 5 : null)}
-                aria-label="Activer le stop"
-              />
-              Stop %
+              Stop
+              <Select
+                value={stopAtr !== null ? "atr" : stopPct !== null ? "pct" : "aucun"}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "aucun") {
+                    setStopPct(null);
+                    setStopAtr(null);
+                  } else if (v === "pct") {
+                    setStopPct(5);
+                  } else {
+                    setStopAtr({ length: 14, mult: 2 });
+                  }
+                }}
+                aria-label="Type de stop"
+              >
+                <option value="aucun">aucun</option>
+                <option value="pct">%</option>
+                <option value="atr">ATR</option>
+              </Select>
+              {stopPct !== null && (
+                <Input
+                  type="number"
+                  step="0.1"
+                  value={stopPct}
+                  onChange={(e) => setStopPct(Number(e.target.value))}
+                  className="w-14 tabular-nums"
+                  aria-label="Stop en pourcentage"
+                />
+              )}
+              {stopAtr !== null && (
+                <>
+                  <Input
+                    type="number"
+                    value={stopAtr.length}
+                    onChange={(e) => setStopAtr({ ...stopAtr, length: Number(e.target.value) })}
+                    className="w-12 tabular-nums"
+                    aria-label="Longueur ATR"
+                    title="Longueur ATR"
+                  />
+                  ×
+                  <Input
+                    type="number"
+                    step="0.1"
+                    value={stopAtr.mult}
+                    onChange={(e) => setStopAtr({ ...stopAtr, mult: Number(e.target.value) })}
+                    className="w-12 tabular-nums"
+                    aria-label="Multiple ATR"
+                    title="Multiple ATR"
+                  />
+                </>
+              )}
+            </label>
+            <label className="flex items-center gap-1 text-[10px] text-text-dim" title={stopPct === null && stopAtr === null ? "Requiert un stop" : undefined}>
+              Risque %
               <Input
                 type="number"
                 step="0.1"
-                value={stopPct ?? 0}
-                disabled={stopPct === null}
-                onChange={(e) => setStopPct(Number(e.target.value))}
+                value={risquePct ?? 0}
+                disabled={stopPct === null && stopAtr === null}
+                onChange={(e) => setRisquePct(Number(e.target.value) || null)}
                 className="w-14 tabular-nums"
-                aria-label="Stop en pourcentage"
+                aria-label="Risque en pourcentage du capital"
               />
             </label>
             <label className="flex items-center gap-1 text-[10px] text-text-dim">

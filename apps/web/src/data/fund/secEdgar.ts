@@ -55,8 +55,13 @@ export function parseTickers(json: unknown): EntreeTicker[] {
   return out;
 }
 
-/** Charge la liste complète des tickers SEC (cache 24 h, ~10 000 entrées). */
-export async function chargerTickers(signal?: AbortSignal): Promise<EntreeTicker[]> {
+/**
+ * Charge la liste complète des tickers SEC (cache 24 h, ~10 000 entrées).
+ * `null` = annuaire INDISPONIBLE (réseau/HTTP/proxy en échec, aucun cache) — à ne pas
+ * confondre avec un annuaire vide : sans cette distinction la recherche reste muette
+ * sans jamais dire pourquoi.
+ */
+export async function chargerTickers(signal?: AbortSignal): Promise<EntreeTicker[] | null> {
   const cle = "sec:tickers";
   const cache = await lireCache<EntreeTicker[]>(cle);
   if (estFrais(cache, TTL_TICKERS_MS) && cache !== null) return cache.donnee;
@@ -68,7 +73,7 @@ export async function chargerTickers(signal?: AbortSignal): Promise<EntreeTicker
     await ecrireCache(cle, tickers);
     return tickers;
   } catch {
-    return cache?.donnee ?? [];
+    return cache?.donnee ?? null;
   }
 }
 

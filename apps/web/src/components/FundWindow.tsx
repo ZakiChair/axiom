@@ -37,7 +37,7 @@ import {
   type EarningsEvent,
 } from "../data/fund/finnhub";
 import { formatUsd, formatDec, formatDateComplete, VALEUR_ABSENTE } from "../lib/format";
-import { EnTeteFenetre, Onglets, Chargement, Input, Vide, SansCle } from "./ui";
+import { EnTeteFenetre, Onglets, Chargement, ErreurBloc, Bouton, Input, Vide, SansCle } from "./ui";
 import { TableTriable, type ColonneTable } from "./TableTriable";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
@@ -90,7 +90,7 @@ function fmtDateCourte(iso: string): string {
 // ─────────────────────────── Onglets ───────────────────────────
 
 type Onglet = "profil" | "insider" | "earnings";
-type Statut = "idle" | "loading" | "ready";
+type Statut = "idle" | "loading" | "ready" | "error";
 
 const ONGLETS: ReadonlyArray<{ id: Onglet; label: string }> = [
   { id: "profil", label: "Profil" },
@@ -175,6 +175,8 @@ export function FundWindow() {
   // Annuaire SEC EDGAR (tickers), chargé une seule fois à la première ouverture.
   const [tickers, setTickers] = useState<EntreeTicker[]>([]);
   const [statutTickers, setStatutTickers] = useState<Statut>("idle");
+  /** Compteur de tentatives : incrémenté par « Réessayer », relance l'effet ci-dessous. */
+  const [essaiTickers, setEssaiTickers] = useState(0);
 
   // Recherche : saisie brute + version debouncée (200 ms) utilisée pour filtrer.
   const [query, setQuery] = useState("");
@@ -194,16 +196,28 @@ export function FundWindow() {
   // Charge l'annuaire SEC une seule fois, à la première ouverture (10 000 entrées,
   // cache 24 h côté chargerTickers — inutile de refetch à chaque réouverture).
   useEffect(() => {
-    if (!open || statutTickers !== "idle") return;
+    if (!open || statutTickers === "loading" || statutTickers === "ready") return;
     const ctrl = new AbortController();
     setStatutTickers("loading");
     void chargerTickers(ctrl.signal).then((t) => {
+      // Fenêtre refermée en vol : l'abort remonte en `null`, ce n'est PAS une panne —
+      // on repasse « idle » pour que la réouverture retente (sinon statut figé).
+      if (ctrl.signal.aborted) {
+        setStatutTickers("idle");
+        return;
+      }
+      // `null` = annuaire injoignable — distinct d'un annuaire vide, qui laisserait la
+      // recherche muette sans explication (cf. data/fund/secEdgar.ts).
+      if (t === null) {
+        setStatutTickers("error");
+        return;
+      }
       setTickers(t);
       setStatutTickers("ready");
     });
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- statutTickers lu en closure (cf. MacroRatesWindow)
-  }, [open]);
+  }, [open, essaiTickers]);
 
   // Debounce 200 ms de la saisie avant de filtrer l'annuaire (évite un filtrage fuzzy
   // sur ~10 000 entrées à chaque frappe).
@@ -237,18 +251,19 @@ export function FundWindow() {
     if (hasKey && cle !== null) {
       setStatutFinnhub("loading");
       setProfilFinnhub(null);
-      void chargerProfilFinnhub(selected.ticker, cle, ctrl.signal).then((p) => {
+      void chargerProfilFinnhub(selected.ticker, cle, ctrl.signal).then((r) => {
         if (ignore) return;
-        setProfilFinnhub(p);
-        setStatutFinnhub("ready");
+        // Échec (clé invalide, quota, réseau) ≠ ticker sans profil : deux messages distincts.
+        setProfilFinnhub(r.ok ? r.donnee : null);
+        setStatutFinnhub(r.ok ? "ready" : "error");
       });
 
       setStatutEarnings("loading");
       setEarnings(null);
-      void chargerEarnings(selected.ticker, cle, ctrl.signal).then((e) => {
+      void chargerEarnings(selected.ticker, cle, ctrl.signal).then((r) => {
         if (ignore) return;
-        setEarnings(e);
-        setStatutEarnings("ready");
+        setEarnings(r.ok ? r.donnee : null);
+        setStatutEarnings(r.ok ? "ready" : "error");
       });
     } else {
       setStatutFinnhub("idle");
@@ -294,6 +309,18 @@ export function FundWindow() {
         />
         {statutTickers === "loading" && (
           <p className="mt-1 text-[11px] text-text-dim">Chargement de l'annuaire SEC…</p>
+        )}
+        {/* Annuaire injoignable : sans ce bloc, la recherche ne renvoie rien et l'opérateur
+            n'a AUCUNE explication (le pane serait muet, cf. BUILD-CONTRACT). */}
+        {statutTickers === "error" && (
+          <div className="mt-1">
+            <ErreurBloc>
+              <div className="flex items-center justify-between gap-2">
+                <span>Annuaire SEC EDGAR indisponible — réessayer.</span>
+                <Bouton onClick={() => setEssaiTickers((n) => n + 1)}>Réessayer</Bouton>
+              </div>
+            </ErreurBloc>
+          </div>
         )}
         {dropdownOpen && resultats.length > 0 && (
           <ul className="absolute left-4 right-4 top-full z-20 mt-1 max-h-64 overflow-y-auto rounded border border-border bg-surface py-1 shadow-xl">
@@ -348,6 +375,8 @@ export function FundWindow() {
                 />
               ) : statutFinnhub === "loading" && profilFinnhub === null ? (
                 <Chargement />
+              ) : statutFinnhub === "error" ? (
+                <ErreurBloc>Finnhub : clé invalide ou quota atteint — profil non chargé.</ErreurBloc>
               ) : profilFinnhub === null ? (
                 <Vide>Profil Finnhub indisponible pour ce ticker.</Vide>
               ) : (
@@ -369,6 +398,8 @@ export function FundWindow() {
                 />
               ) : statutEarnings === "loading" && earnings === null ? (
                 <Chargement />
+              ) : statutEarnings === "error" ? (
+                <ErreurBloc>Finnhub : clé invalide ou quota atteint — calendrier non chargé.</ErreurBloc>
               ) : earnings === null || earnings.length === 0 ? (
                 <Vide>Aucun résultat trimestriel programmé trouvé.</Vide>
               ) : (

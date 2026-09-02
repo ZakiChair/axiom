@@ -129,8 +129,12 @@ async function jsonDirect(url: string): Promise<unknown> {
 }
 
 async function fetchBinance(base: string): Promise<FundingVenue | null> {
-  const json = await jsonDirect(extUrl("fapi.binance.com", `fapi/v1/premiumIndex?symbol=${base}USDT`));
-  const rate = parseBinanceFunding(json);
+  const res = await fetch(extUrl("fapi.binance.com", `fapi/v1/premiumIndex?symbol=${base}USDT`));
+  // 400 « Invalid symbol » = perp NON LISTÉ, pas une panne : on rend null (absence)
+  // plutôt que de lever, sinon un symbole sans perp compterait comme venue injoignable.
+  if (res.status === 400) return null;
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const rate = parseBinanceFunding(await res.json());
   if (rate === null) return null;
   // Intervalle réel : fundingInfo ne liste QUE les perps hors cadence 8 h. Best-effort.
   let intervalH = CEX_INTERVAL_H;
@@ -182,14 +186,23 @@ function venue(exchange: string, label: string, rate: number, intervalHours: num
   return { exchange, label, ratePct: rate * 100, intervalHours, apr: annualiserFunding(rate, intervalHours) };
 }
 
+/** Résultat de la matrice : venues obtenues + nombre de venues INJOIGNABLES. */
+export interface MatriceFunding {
+  venues: FundingVenue[];
+  /** Venues dont la requête a échoué (réseau/HTTP) — à distinguer d'un perp non listé. */
+  echecs: number;
+}
+
 /**
  * Récupère le funding cross-exchange du symbole (USDT perp), trié par APR décroissant.
- * Une venue en échec (source down / symbole absent) est simplement omise (allSettled).
- * Renvoie [] si la base est illisible.
+ * Une venue rejetée (source down) compte dans `echecs` ; une venue qui répond « pas de
+ * perp » rend simplement null et ne compte PAS comme échec — sans cette distinction,
+ * une coupure réseau serait indiscernable d'un symbole non listé. Base illisible →
+ * matrice vide sans échec.
  */
-export async function fetchFundingMatrix(symbol: string): Promise<FundingVenue[]> {
+export async function fetchFundingMatrix(symbol: string): Promise<MatriceFunding> {
   const base = baseDe(symbol);
-  if (base === null) return [];
+  if (base === null) return { venues: [], echecs: 0 };
   const résultats = await Promise.allSettled([
     fetchBinance(base),
     fetchBybit(base),
@@ -201,7 +214,19 @@ export async function fetchFundingMatrix(symbol: string): Promise<FundingVenue[]
     .map((r) => r.value)
     .filter((v): v is FundingVenue => v !== null);
   venues.sort((a, b) => b.apr - a.apr);
-  return venues;
+  return { venues, echecs: résultats.filter((r) => r.status === "rejected").length };
+}
+
+/** État affichable d'une matrice : exploitable, venues injoignables, ou perp non listé. */
+export type EtatMatrice = "ok" | "injoignable" | "non-liste";
+
+/**
+ * Qualifie une matrice reçue. PURE. Une matrice vide n'est « non listé » QUE si aucune
+ * venue n'a échoué — sinon c'est une panne, et l'appelant doit conserver l'état précédent.
+ */
+export function etatMatrice(venues: readonly FundingVenue[], echecs: number): EtatMatrice {
+  if (venues.length > 0) return "ok";
+  return echecs > 0 ? "injoignable" : "non-liste";
 }
 
 /** Écart (spread) d'APR entre la venue la plus chère et la moins chère, ou null si < 2. */

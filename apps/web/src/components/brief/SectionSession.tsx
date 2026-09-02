@@ -98,7 +98,9 @@ export function SectionSession({ session, eco, noteFraicheur }: Props) {
             colonnes={COLONNES_TRADES_CLOS}
             lignes={session.tradesClos.map((t, i) => ({ ...t, cle: `${t.symbole}-${t.dateSortie}-${i}` }))}
             cle={(t) => t.cle}
-            surClicLigne={(t) => navigateTo({ symbol: t.symbole, exchange: "binance", source: "brief" })}
+            // Source RÉELLE de la position (exchange d'origine) : forcer Binance
+            // renvoyait un actif Kraken/tradfi sur `binance:<symbole>`.
+            surClicLigne={(t) => navigateTo({ symbol: t.symbole, exchange: t.source, source: "brief" })}
           />
         )}
       </div>

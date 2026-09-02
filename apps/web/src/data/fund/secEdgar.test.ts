@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { rechercherSociete, parseTickers, parseProfilSec, type EntreeTicker } from "./secEdgar";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { rechercherSociete, parseTickers, parseProfilSec, chargerTickers, type EntreeTicker } from "./secEdgar";
+import { estFrais, lireCache } from "../onchain/cache";
 
 const TICKERS: EntreeTicker[] = [
   { cik: "0000320193", ticker: "AAPL", nom: "Apple Inc." },
@@ -64,5 +65,50 @@ describe("parseProfilSec", () => {
   it("renvoie null si `name` absent (CIK inconnu/forme inattendue)", () => {
     expect(parseProfilSec({ sicDescription: "x" }, "0000000000")).toBeNull();
     expect(parseProfilSec(null, "0000000000")).toBeNull();
+  });
+});
+
+// ─────────────────────────── chargerTickers : échec ≠ annuaire vide ───────────────────────────
+
+/**
+ * Un annuaire VIDE et un annuaire INJOIGNABLE ne doivent pas être confondus : sur
+ * échec sans cache, la fenêtre FUND passait « prête » avec zéro ticker et la
+ * recherche restait muette (violation du « jamais de pane muet » du contrat).
+ */
+vi.mock("../onchain/cache", () => ({
+  lireCache: vi.fn(async () => null),
+  ecrireCache: vi.fn(async () => undefined),
+  estFrais: vi.fn(() => false),
+}));
+
+describe("chargerTickers", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(lireCache).mockResolvedValue(null);
+    vi.mocked(estFrais).mockReturnValue(false);
+  });
+
+  it("échec réseau SANS cache → null (annuaire indisponible), pas un tableau vide", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("network down"))));
+    await expect(chargerTickers()).resolves.toBeNull();
+  });
+
+  it("HTTP non-2xx SANS cache → null", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("forbidden", { status: 403 })));
+    await expect(chargerTickers()).resolves.toBeNull();
+  });
+
+  it("échec AVEC cache périmé → le cache est servi (dégradation, pas panne)", async () => {
+    vi.mocked(lireCache).mockResolvedValue({ ts: 0, donnee: TICKERS } as never);
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("network down"))));
+    await expect(chargerTickers()).resolves.toEqual(TICKERS);
+  });
+
+  it("succès → l'annuaire parsé", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ "0": { cik_str: 320193, ticker: "AAPL", title: "Apple Inc." } }))),
+    );
+    await expect(chargerTickers()).resolves.toEqual([TICKERS[0]]);
   });
 });

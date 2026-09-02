@@ -113,23 +113,31 @@ describe("top5News", () => {
 describe("ligneDepuisTicker", () => {
   it("mappe un ticker présent en prix + variation", () => {
     expect(
-      ligneDepuisTicker("BTCUSDT", { symbol: "BTCUSDT", lastPrice: "108432.1", priceChangePercent: "1.24" }),
-    ).toEqual({ symbole: "BTCUSDT", prix: 108_432.1, variation24h: 1.24 });
+      ligneDepuisTicker(
+        "BTCUSDT",
+        { symbol: "BTCUSDT", lastPrice: "108432.1", priceChangePercent: "1.24" },
+        "binance",
+      ),
+    ).toEqual({ symbole: "BTCUSDT", prix: 108_432.1, variation24h: 1.24, source: "binance" });
   });
 
   it("renvoie null (« — ») pour un symbole absent — repli par symbole en échec", () => {
-    expect(ligneDepuisTicker("XXXUSDT", undefined)).toEqual({
+    expect(ligneDepuisTicker("XXXUSDT", undefined, "binance")).toEqual({
       symbole: "XXXUSDT",
       prix: null,
       variation24h: null,
+      source: "binance",
     });
   });
 
   it("renvoie null pour des champs non numériques", () => {
-    expect(ligneDepuisTicker("BAD", { symbol: "BAD", lastPrice: "n/a", priceChangePercent: "x" })).toEqual({
+    expect(
+      ligneDepuisTicker("BAD", { symbol: "BAD", lastPrice: "n/a", priceChangePercent: "x" }, "binance"),
+    ).toEqual({
       symbole: "BAD",
       prix: null,
       variation24h: null,
+      source: "binance",
     });
   });
 });
@@ -275,6 +283,7 @@ describe("briefEnMarkdown", () => {
         tradesClos: [
           {
             symbole: "BTCUSDT",
+            source: "binance",
             direction: "long",
             pnlNet: 250,
             pnlPct: 2.5,
@@ -289,7 +298,7 @@ describe("briefEnMarkdown", () => {
         alertes: [{ alertId: "a1", ts: now - 1800_000, message: "Prix franchit 100000", valeur: 100_001 }],
         ecoPasses: [{ time: now - 7200_000, pays: "USD", titre: "CPI", timeApprox: false }],
       },
-      watchlist: [{ symbole: "BTCUSDT", prix: 108_432.1, variation24h: 1.24 }],
+      watchlist: [{ symbole: "BTCUSDT", prix: 108_432.1, variation24h: 1.24, source: "binance" }],
       derivs: [
         {
           symbole: "BTC",
@@ -408,5 +417,43 @@ describe("briefEnMarkdown — section Lecture", () => {
   it("aucune section quand lecture absente ou vide", () => {
     expect(briefEnMarkdown(donneesMinimales(), 1_700_000_000_000)).not.toContain("## Lecture");
     expect(briefEnMarkdown(donneesMinimales(), 1_700_000_000_000, [])).not.toContain("## Lecture");
+  });
+});
+
+// ─────────────────────────── Source réelle du symbole (clic → chart) ───────────────────────────
+
+/**
+ * Le clic « voir sur le chart » depuis BRIEF forçait `exchange: "binance"` en dur :
+ * une position Kraken ou un actif tradfi partait sur `binance:<symbole>` (pane en
+ * erreur + source changée à l'insu de l'opérateur). La source réelle est connue des
+ * deux côtés — elle doit remonter jusqu'à la section.
+ */
+describe("propagation de la source réelle", () => {
+  const now = new Date(2026, 6, 9, 18, 0, 0).getTime();
+  const midi = new Date(2026, 6, 9, 12, 0, 0).getTime();
+
+  it("tradesClosDuJour porte la source de la position, pas Binance par défaut", () => {
+    const res = tradesClosDuJour(
+      [
+        pos({
+          id: "k",
+          statut: "clos",
+          prixSortie: 110,
+          dateSortie: midi,
+          symbole: "XBTUSD",
+          source: "kraken",
+        }),
+      ],
+      now,
+    );
+    expect(res[0]?.source).toBe("kraken");
+  });
+
+  it("ligneDepuisTicker porte la source résolue du symbole", () => {
+    expect(ligneDepuisTicker("SPY", undefined, "twelvedata").source).toBe("twelvedata");
+    expect(
+      ligneDepuisTicker("BTCUSDT", { symbol: "BTCUSDT", lastPrice: "1", priceChangePercent: "0" }, "binance")
+        .source,
+    ).toBe("binance");
   });
 });

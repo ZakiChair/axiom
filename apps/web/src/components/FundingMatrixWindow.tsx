@@ -10,8 +10,8 @@
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { marketStore } from "../store/market";
-import { fetchFundingMatrix, fundingSpreadApr, type FundingVenue } from "../data/fundingCrossExchange";
-import { EnTeteFenetre, Chargement, Vide, NoteSource, Fraicheur, TuileStat } from "./ui";
+import { etatMatrice, fetchFundingMatrix, fundingSpreadApr, type FundingVenue } from "../data/fundingCrossExchange";
+import { EnTeteFenetre, Chargement, ErreurBloc, Vide, NoteSource, Fraicheur, TuileStat } from "./ui";
 import { TableTriable, type ColonneTable } from "./TableTriable";
 import { formatPct } from "../lib/format";
 
@@ -68,16 +68,30 @@ export function FundingMatrixWindow() {
   const symbol = useStore(marketStore, (s) => s.symbol);
   const [venues, setVenues] = useState<FundingVenue[] | null>(null);
   const [chargement, setChargement] = useState(true);
+  const [injoignable, setInjoignable] = useState(false);
   const [majTs, setMajTs] = useState<number | null>(null);
 
   useEffect(() => {
     let annule = false;
+    // Changement de symbole : la matrice en place porte sur l'ANCIEN symbole — la
+    // conserver mentirait autant qu'un écrasement à vide.
+    setVenues(null);
+    setMajTs(null);
+    setInjoignable(false);
     const charger = async () => {
       setChargement(true);
-      const v = await fetchFundingMatrix(symbol); // allSettled interne : ne rejette pas
+      const { venues: v, echecs } = await fetchFundingMatrix(symbol); // allSettled interne : ne rejette pas
       if (annule) return;
-      setVenues(v);
       setChargement(false);
+      // Toutes les venues injoignables : on CONSERVE la matrice et l'horodatage
+      // précédents — écraser à vide et rafraîchir la fraîcheur affirmerait « aucun
+      // funding, à l'instant », ce qui est faux (cf. etatMatrice).
+      if (etatMatrice(v, echecs) === "injoignable") {
+        setInjoignable(true);
+        return;
+      }
+      setInjoignable(false);
+      setVenues(v);
       setMajTs(Date.now());
     };
     void charger();
@@ -112,6 +126,14 @@ export function FundingMatrixWindow() {
             couleur={spread >= 10 ? "var(--ui-amber)" : undefined}
           />
         )}
+        {/* « dernière matrice conservée » seulement s'il Y EN A une : sur premier échec
+            (ou matrice vide), l'annoncer serait un second mensonge. */}
+        {injoignable && (
+          <ErreurBloc>
+            Venues injoignables
+            {venues !== null && venues.length > 0 ? " — dernière matrice conservée" : ""}.
+          </ErreurBloc>
+        )}
         {chargement && venues === null ? (
           <Chargement />
         ) : venues && venues.length > 0 ? (
@@ -120,7 +142,7 @@ export function FundingMatrixWindow() {
             lignes={venues}
             cle={(v) => v.exchange}
           />
-        ) : (
+        ) : injoignable ? null : (
           <Vide>Aucun funding disponible (symbole non listé en perp USDT sur ces venues ?)</Vide>
         )}
         <NoteSource>

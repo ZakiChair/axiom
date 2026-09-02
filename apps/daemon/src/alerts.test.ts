@@ -109,6 +109,34 @@ describe("symbolesBinanceActifs", () => {
     ];
     expect(symbolesBinanceActifs(defs)).toEqual(["BTCUSDT"]);
   });
+
+  test("une def de bougie non-1m ne justifie PAS à elle seule une souscription", () => {
+    // Le daemon n'évalue que les bougies 1 min (cf. `evaluableSurBougie1m`) : un symbole
+    // dont la SEULE alerte est en 4 h ouvrirait un abonnement jamais exploité.
+    const defs: AlertDef[] = [
+      alerteVariation("v4", "SOLUSDT", "4h"), // seule alerte du symbole → exclu
+      {
+        ...alerteVariation("i4", "XRPUSDT", "4h"),
+        condition: { type: "indicateur-seuil", indicateurId: "rsi", params: {}, output: "rsi", comparateur: ">", valeur: 70 },
+      }, // autre type de bougie, même exclusion
+      alerteVariation("v1", "ETHUSDT", "1m"), // bougie 1m → gardé
+      alerteVariation("v0", "ADAUSDT"), // def héritée (sans timeframe) → gardé
+    ];
+    expect(symbolesBinanceActifs(defs)).toEqual(["ADAUSDT", "ETHUSDT"]);
+  });
+
+  test("garde le symbole si une AUTRE def évaluable le requiert (prix, funding, liq, whale)", () => {
+    const defs: AlertDef[] = [
+      alerteVariation("v4", "BTCUSDT", "4h"), // non évaluable...
+      alertePrix("p1", "BTCUSDT", 100), // ...mais le prix, lui, l'est → gardé
+      alerteVariation("w4", "ETHUSDT", "4h"),
+      alerteFunding("f1", "ETHUSDT"),
+      alerteVariation("l4", "SOLUSDT", "4h"),
+      alerteCascade("c1", "SOLUSDT"),
+      alerteWhale("h1", "BTC"),
+    ];
+    expect(symbolesBinanceActifs(defs)).toEqual(["BTC", "BTCUSDT", "ETHUSDT", "SOLUSDT"]);
+  });
 });
 
 describe("symbolesFundingActifs", () => {
@@ -589,6 +617,32 @@ describe("evaluerTick — conditions de bougie filtrées sur le timeframe", () =
     const res = evaluerTick([alerteVariation("v4", "BTCUSDT", "4h")], "BTCUSDT", TYPES_BOUGIE, ctx);
     expect(res.defs).toHaveLength(0);
     expect(res.modifie).toBe(false);
+  });
+
+  test("horloge du daemon en retard : la référence ne glisse pas d'une bougie", () => {
+    // Bougies 1 min CLÔTURÉES aux prix 80 / 100 / 90 ; la dernière est ouverte en
+    // `maintenant - 60 000` (elle a donc clôturé à `maintenant`). Référence attendue =
+    // clôture de la bougie précédente (100) → pct = −10, quel que soit le retard de
+    // l'horloge de la machine sur celle de l'exchange.
+    const t = 3_000_000;
+    const bougie = (time: number, close: number) => ({ time, open: close, high: close, low: close, close, volume: 1 });
+    const candles = [bougie(t - 180_000, 80), bougie(t - 120_000, 100), bougie(t - 60_000, 90)];
+    const chute: AlertDef = {
+      ...alerteVariation("vc", "BTCUSDT", "1m"),
+      condition: { type: "variation-pct", fenetreMs: 60_000, seuilPct: -10 },
+      arme: true,
+    };
+
+    const juste = evaluerTick([chute], "BTCUSDT", TYPES_BOUGIE, { maintenant: t, dernierPrix: 90, candles });
+    // Horloge locale en retard de 3,5 s sur la clôture réelle.
+    const enRetard = evaluerTick([chute], "BTCUSDT", TYPES_BOUGIE, {
+      maintenant: t - 3_500,
+      dernierPrix: 90,
+      candles,
+    });
+
+    expect(juste.declenchements[0]?.valeur).toBeCloseTo(-10, 5);
+    expect(enRetard.declenchements[0]?.valeur).toBeCloseTo(-10, 5);
   });
 
   test("le filtre ne touche PAS les conditions hors bougie (prix-croise timeframé)", () => {

@@ -101,10 +101,26 @@ export function fusionnerEtatArme(
   );
 }
 
-/** Symboles (majuscules) ayant AU MOINS une alerte binance active. Fonction PURE. */
+/**
+ * Symboles (majuscules) ayant AU MOINS une alerte binance active ÉVALUABLE par le feed.
+ * Une def de bougie déclarant un timeframe autre que 1 min ne l'est pas (cf.
+ * `evaluableSurBougie1m`) : à elle seule, elle n'ouvre donc plus d'abonnement oisif — un
+ * symbole dont la seule alerte est en 4 h coûtait une souscription WS pour zéro
+ * évaluation. Les autres types (prix, funding, liq, whale) ne dépendent d'aucune bougie
+ * et gardent leur symbole. Fonction PURE.
+ */
 export function symbolesBinanceActifs(defs: readonly AlertDef[]): string[] {
   return [
-    ...new Set(defs.filter((d) => d.actif && d.source === "binance").map((d) => d.symbol.toUpperCase())),
+    ...new Set(
+      defs
+        .filter(
+          (d) =>
+            d.actif &&
+            d.source === "binance" &&
+            (!TYPES_BOUGIE.has(d.condition.type) || evaluableSurBougie1m(d)),
+        )
+        .map((d) => d.symbol.toUpperCase()),
+    ),
   ].sort();
 }
 

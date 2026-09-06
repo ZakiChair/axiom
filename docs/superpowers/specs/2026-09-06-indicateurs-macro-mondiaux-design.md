@@ -1,4 +1,4 @@
-# AXIOM — Indicateurs macroéconomiques mondiaux (ECST)
+# AXIOM — Indicateurs macroéconomiques mondiaux
 
 > **Spec de conception · 2026-09-06.** Issue d'un recensement multi-agents (18 agents, 152 séries
 > vérifiées en live par curl) puis d'un arbitrage entre trois architectures indépendantes.
@@ -186,13 +186,15 @@ ligne ECO ouvre l'onglet sur la bonne série ; `briefEnMarkdown` avec `macro: nu
 `glissementAnnuel` (+ son test) sont touchés.
 
 - **Change effectif réel BIS 6/6** — `RBUSBIS`, `RBXMBIS`, `RBGBBIS`, `RBJPBIS`, `RBCNBIS`,
-  `RBINBIS`, tout FRED : la ligne la moins chère du catalogue.
-  ⚠️ `RBXMBIS` n'est cité que dans une note de famille — le vérifier, repli `NBXMBIS` étiqueté
-  « nominal ». Ne **jamais** employer `DTWEXBGS` (nominal, base 2006, échelle non comparable).
-- **Core CPI 4/6** (US, EZ, UK, JP). Japon : série **740** (core-core) ou OCDE `_TXCP01_NRG`,
-  **jamais 733** (hors produits frais ≠ hors alimentation et énergie). CN et IN : aucun core
-  vivant, vérifié sur trois sources.
-- **Production industrielle 5/6** — publiée en indice, seul usage de `glissementAnnuel`.
+  `RBINBIS`, tout FRED avec `units=pc1` : la ligne la moins chère du catalogue, et **zéro calcul
+  maison**. `RBXMBIS` est vérifié en live (« Real Broad Effective Exchange Rate for Euro Area »,
+  index 2020=100, dernière obs. 2026-07). Ne **jamais** employer `DTWEXBGS` (nominal, base 2006,
+  échelle non comparable).
+- **Core CPI 4/6** (US, EZ, UK, JP). Japon : OCDE `JPN.M.N.CPI.PA._TXCP01_NRG.N.GY` (vérifié :
+  1,5 % en 2026-07) ou série e-Stat **740** (core-core), **jamais 733** (hors produits frais
+  ≠ hors alimentation et énergie). CN et IN : aucun core vivant, vérifié sur trois sources.
+- **Production industrielle 5/6** — seul usage de `glissementAnnuel`, et uniquement pour les
+  régions dont la source ne sert que l'indice.
 - **Chômage BIT 3/6** (US, EZ, JP). **UK exclu** : `BCJE` est un compte administratif de
   demandeurs d'indemnités, `MGSX` (BIT) plafonne à 2026-05. Trou **assumé**, pas comblé par un
   substitut de définition différente.
@@ -237,19 +239,40 @@ sans son étiquette.
 `chart/macro.ts`, `store/macro-overlays.ts`, `packages/indicators/**` (catalogue gelé à 187),
 `packages/types/**`, `store/windowManager.ts` (aucune fenêtre nouvelle).
 
-## 6. Deux choix structurants
+## 6. Choix structurants
 
 **Pas de primitive graphique neuve.** `CourbeTaux` est réutilisable via ~25 lignes de projection
-(son axe X est un flottant quelconque), ce qui économise ~480 lignes de canvas. **Contrainte
-qui en découle et qui doit être respectée** : son infobulle apparie les points *par identité de
-chaîne* (`CourbeTaux.tsx:242`), donc **un graphe = une fréquence**. Un `Segmente` choisit
-l'indicateur, les pays sont les séries. Mélanger PIB trimestriel et CPI mensuel sur le même canvas
-remplirait l'infobulle de `VALEUR_ABSENTE` — c'est ce qui invalide l'idée d'une matrice 2D
-comme vue *graphique*.
+(son axe X, `anneesTri`, est un flottant quelconque : `CourbeTaux.tsx:150-161`), ce qui économise
+~480 lignes de canvas. **Deux contraintes en découlent, toutes deux vérifiées dans le source et
+non négociables** :
+
+1. **Un graphe = une fréquence.** L'infobulle apparie les points *par identité de chaîne*
+   (`CourbeTaux.tsx:249` : `s.points.find((pt) => pt.maturite === survol.maturite)`). Un
+   `Segmente` choisit l'indicateur, les pays sont les séries. Mélanger PIB trimestriel et CPI
+   mensuel remplirait l'infobulle de `VALEUR_ABSENTE` — c'est ce qui invalide l'idée d'une
+   matrice 2D comme vue *graphique*.
+2. **Un graphe = des pourcentages.** L'axe Y formate en dur (`CourbeTaux.tsx:118` :
+   `` ctx.fillText(`${taux.toFixed(1)}%`, 2, y + 3) ``) et l'infobulle appelle
+   `formatPourcentage`. Un indice affiché ici lirait « 102,3 % ».
+
+**Règle d'axe unique qui en résulte : l'onglet n'affiche QUE des pourcentages.** Toute série entre
+en taux ou en glissement annuel ; aucun niveau, aucun indice brut. Conséquences directes :
+- `CourbeTaux` n'a **pas** besoin d'une prop d'unité — la seule modification envisagée reste une
+  prop `hauteur` optionnelle, et encore, seulement si le calibrage `h-[180px]` gêne dans l'onglet.
+- Le **change effectif réel entre en a/a**, pas en niveau. FRED le sert nativement
+  (`RBCNBIS&units=pc1` → +7,34 % en 2026-07, vérifié), donc sans calcul maison.
+- Les indices bruts (niveau du CPI, niveau du REER) sont hors périmètre de l'onglet.
 
 **Pas de calcul de glissement annuel maison en lot 1.** FRED (`units=pc1`), Eurostat (`RCH_A`),
 ONS (D7G7) et l'OCDE (`GY`) le servent tous nativement. `glissementAnnuel` n'apparaît qu'au lot 3,
-pour la production industrielle publiée en indice.
+et uniquement pour les séries qu'aucune source ne sert déjà en taux.
+
+**Le pass-through de `units` est acquis** (vérifié dans les trois couches de proxy) :
+`appendApiKeyIfAbsent` (`apps/daemon/src/proxy.ts:34-42`, copie verbatim de
+`apps/web/src/data/apiKeyProxy.ts`) n'ajoute que `api_key` s'il est absent et laisse le reste de
+la requête intact ; `originalQuery` (`api/_policy.ts:227-245`) recopie **tous** les paramètres
+sauf les deux métadonnées de route. Ajouter `units` à `createFredM2Provider` est donc purement
+additif : aucun appelant existant ne le passe, l'URL de M2 et de NETLIQ reste identique.
 
 **Réutiliser `Fraicheur` existant** (`ui.tsx:719-788` : `texteFraicheur`, `etatFraicheur`,
 `Fraicheur({loading, majTs, cadence, cadenceMs})`). Il ne reste à écrire que

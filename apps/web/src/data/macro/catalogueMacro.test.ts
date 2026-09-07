@@ -13,8 +13,10 @@ describe("CATALOGUE_MACRO", () => {
   });
 
   it("déclare un couleurTokenIndex distinct par région, dans 1..6", () => {
-    const index = ORDRE_REGIONS.map((r, i) => i + 1);
-    expect(index).toEqual([1, 2, 3, 4, 5, 6]);
+    // La POSITION dans ORDRE_REGIONS dérive le token de couleur `--serie-N` : deux
+    // régions au même index tracteraient deux courbes de la même couleur.
+    expect(ORDRE_REGIONS).toHaveLength(6);
+    expect(new Set(ORDRE_REGIONS).size).toBe(ORDRE_REGIONS.length);
     for (const def of CATALOGUE_MACRO) {
       expect(ORDRE_REGIONS).toContain(def.region);
     }

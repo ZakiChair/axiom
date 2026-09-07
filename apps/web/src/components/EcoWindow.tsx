@@ -20,8 +20,10 @@ import type { EcoEvent, EcoImpact } from "../data/eco";
 import { navigateTo } from "../lib/navigation";
 import { BoutonRafraichir, EnTeteFenetre } from "./ui";
 import { serieMacroDe } from "../data/macro/ecoVersSerie";
+import { CATALOGUE_MACRO } from "../data/macro/catalogueMacro";
 import { macroSeriesStore } from "../store/macroSeries";
 import { windowManagerStore } from "../store/windowManager";
+import { macroRatesViewStore } from "../store/macroRatesView";
 import "../chart/ecoMarkers";
 
 /** Libellé court FR d'un impact. */
@@ -139,7 +141,15 @@ function Ligne({ ev, passe }: { ev: EcoEvent; passe: boolean }) {
           className="absolute right-3 bottom-2 rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-dim transition hover:text-text"
           onClick={() => {
             windowManagerStore.getState().openWindow("macroRates");
-            void macroSeriesStore.getState().demanderIndicateur("cpi-aa");
+            // Force l'onglet Indicateurs (canal séparé de la commande CRVF — RATE
+            // s'ouvrirait sinon sur son onglet par défaut « Rendements »).
+            macroRatesViewStore.getState().demanderIndicateurs();
+            // La famille est DÉRIVÉE du catalogue plutôt qu'écrite en dur : `idSerie`
+            // porte l'id de série complet (ex. "cpi-aa-cn"), pas la famille — les
+            // découpler garantirait un mauvais indicateur silencieux le jour où une
+            // seconde famille rejoint le catalogue.
+            const def = CATALOGUE_MACRO.find((d) => d.id === idSerie);
+            if (def !== undefined) void macroSeriesStore.getState().demanderIndicateur(def.indicateur);
           }}
         >
           série

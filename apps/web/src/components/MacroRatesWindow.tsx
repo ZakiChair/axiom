@@ -600,6 +600,15 @@ export function MacroRatesWindow() {
     setVue("courbe");
   }, [requeteCourbe]);
 
+  // Second canal de requête, INDÉPENDANT du précédent (cf. store/macroRatesView.ts) :
+  // force l'onglet « Indicateurs » (bouton « série » du calendrier ECO), sans toucher à
+  // `vue` — propre à l'onglet Rendements — ni à l'effet CRVF ci-dessus.
+  const requeteIndicateurs = useStore(macroRatesViewStore, (s) => s.requeteIndicateurs);
+  useEffect(() => {
+    if (requeteIndicateurs === 0) return; // état initial : un montage frais ne détourne pas l'onglet par défaut
+    setOnglet("indicateurs");
+  }, [requeteIndicateurs]);
+
   const [rendements, setRendements] = useState<RendementsSouverainsMulti | null>(null);
   const [taux, setTaux] = useState<TauxDirecteur[] | null>(null);
   const [reserves, setReserves] = useState<ReserveOr[] | null>(null);

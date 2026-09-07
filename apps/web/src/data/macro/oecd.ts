@@ -64,9 +64,13 @@ export function parseOecdSdmxJson(json: unknown, refAreaAttendu: string): MacroS
   const dimRefArea = dimSeries[idxRefArea];
   // Préférer keyPosition si disponible (pour l'ordre d'apparition dans la clé),
   // tomber sur l'index du tableau uniquement si le champ est absent ou invalide.
+  // Vérifier le TYPE avant toute coercition : Number(null) vaut 0, un entier ≥ 0
+  // qui passerait le garde-fou à tort et masquerait un keyPosition absent.
   const keyPosValue = champ(dimRefArea, "keyPosition");
-  const keyPos = Number(keyPosValue);
-  const posRefAreaInKey = Number.isInteger(keyPos) && keyPos >= 0 ? keyPos : idxRefArea;
+  const posRefAreaInKey =
+    typeof keyPosValue === "number" && Number.isInteger(keyPosValue) && keyPosValue >= 0
+      ? keyPosValue
+      : idxRefArea;
   const valeursRefArea = champ(dimRefArea, "values");
   const zones = Array.isArray(valeursRefArea)
     ? valeursRefArea.map((v) => String(champ(v, "id") ?? ""))

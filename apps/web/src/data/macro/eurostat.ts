@@ -62,13 +62,14 @@ export function parseEurostatJsonStat(json: unknown): MacroSeries {
     throw new Error("Eurostat : réponse vide (source indisponible ou jeu archivé)");
   }
 
-  // Pas d'écart entre positions successives : toutes les autres dimensions valent 1, et
-  // `time` est la dernière de `id`. La position d'une observation est donc son index.
+  // Pas d'écart entre positions successives : la garde ci-dessus impose que toutes les
+  // dimensions non temporelles valent 1, quelle que soit leur place dans `id`. La position
+  // d'une observation dans l'hypercube est donc toujours son index temporel.
   const points: MacroPoint[] = [];
   for (const [periode, pos] of Object.entries(index as Record<string, number>)) {
     const brut = table[String(pos)];
-    const value = Number(brut);
-    if (brut === undefined || brut === null || !Number.isFinite(value)) continue;
+    const value = typeof brut === "number" ? brut : NaN;
+    if (!Number.isFinite(value)) continue;
     const time = periodeVersMs(periode);
     if (!Number.isFinite(time)) continue;
     points.push({ time, value });

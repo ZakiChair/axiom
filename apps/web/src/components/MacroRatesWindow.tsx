@@ -34,7 +34,6 @@ import { chargerTauxDirecteurs, type TauxDirecteur } from "../data/macro/policyR
 import { chargerReservesOr, type ReserveOr } from "../data/macro/goldReserves";
 import { macroSeriesStore } from "../store/macroSeries";
 import { INDICATEURS_MACRO, ORDRE_REGIONS, seriesDeIndicateur, type IndicateurMacro } from "../data/macro/catalogueMacro";
-import { finDePeriode } from "../data/macro/harmonisation";
 import { CourbeTaux, type SerieCourbe } from "./CourbeTaux";
 import { pointsDeCourbe, pointsDeSerieTemporelle } from "./courbeTaux.util";
 import { paysIndisponibles } from "./macroRatesWindow.util";
@@ -491,8 +490,13 @@ function VueOr({ data, statut }: { data: ReserveOr[] | null; statut: Statut }) {
  * de chaîne et formate son axe Y en pourcentage. UN indicateur (donc une fréquence et
  * une unité) par graphe est la condition de sa réutilisation.
  */
-function OngletIndicateurs() {
-  const [indicateur, setIndicateur] = useState<IndicateurMacro>("cpi-aa");
+function OngletIndicateurs({
+  indicateur,
+  setIndicateur,
+}: {
+  indicateur: IndicateurMacro;
+  setIndicateur: (i: IndicateurMacro) => void;
+}) {
   const series = useStore(macroSeriesStore, (s) => s.series);
 
   useEffect(() => {
@@ -538,7 +542,7 @@ function OngletIndicateurs() {
         {definitions.map((def) => {
           const etat = series[def.id];
           const dernier = etat?.points[etat.points.length - 1];
-          const majTs = dernier !== undefined ? finDePeriode(dernier.time, def.frequence) : null;
+          const majTs = etat?.majTs ?? null;
           return (
             <div key={def.id} className="flex items-baseline justify-between gap-2 text-[11px]">
               <span className="flex items-baseline gap-1.5">
@@ -617,6 +621,10 @@ export function MacroRatesWindow() {
   const [rendements, setRendements] = useState<RendementsSouverainsMulti | null>(null);
   const [taux, setTaux] = useState<TauxDirecteur[] | null>(null);
   const [reserves, setReserves] = useState<ReserveOr[] | null>(null);
+  // Indicateur sélectionné dans l'onglet « Indicateurs » — levé ici pour que `rafraichir`
+  // (bouton d'en-tête, commun aux quatre onglets) connaisse l'indicateur affiché plutôt
+  // que de recharger un indicateur en dur.
+  const [indicateur, setIndicateur] = useState<IndicateurMacro>("cpi-aa");
 
   const [statutR, setStatutR] = useState<Statut>("idle");
   const [statutD, setStatutD] = useState<Statut>("idle");
@@ -667,7 +675,7 @@ export function MacroRatesWindow() {
     else if (onglet === "directeurs") setStatutD("idle");
     else if (onglet === "or") setStatutO("idle");
     else if (onglet === "indicateurs") {
-      void macroSeriesStore.getState().demanderIndicateur("cpi-aa", { force: true });
+      void macroSeriesStore.getState().demanderIndicateur(indicateur, { force: true });
     }
     setNonce((n) => n + 1);
   };
@@ -690,7 +698,9 @@ export function MacroRatesWindow() {
         )}
         {onglet === "directeurs" && <VueDirecteurs data={taux} statut={statutD} />}
         {onglet === "or" && <VueOr data={reserves} statut={statutO} />}
-        {onglet === "indicateurs" && <OngletIndicateurs />}
+        {onglet === "indicateurs" && (
+          <OngletIndicateurs indicateur={indicateur} setIndicateur={setIndicateur} />
+        )}
       </div>
     </>
   );

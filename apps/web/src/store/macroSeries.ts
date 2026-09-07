@@ -20,6 +20,7 @@ import {
   seriesDeIndicateur,
 } from "../data/macro/catalogueMacro";
 import { chargerSerieMacro, cleSante } from "../data/macro/chargerSerieMacro";
+import { finDePeriode } from "../data/macro/harmonisation";
 import { healthStore } from "./health";
 
 /** Profondeur d'historique récupérée — au-delà, la courbe devient illisible. */
@@ -37,7 +38,11 @@ export type StatutSerie = "idle" | "loading" | "ok" | "quota" | "sansCle" | "pan
 export interface EtatSerie {
   statut: StatutSerie;
   points: MacroSeries;
-  /** ms epoch du dernier point (fin de période) — alimente la primitive `Fraicheur`. */
+  /**
+   * ms epoch du dernier point ramené en FIN DE PÉRIODE via `finDePeriode` (les points
+   * sont datés en DÉBUT de période par toutes les sources) — alimente la primitive
+   * `Fraicheur`.
+   */
   majTs: number | null;
   /** Motif d'indisponibilité, affiché tel quel. `null` quand tout va bien. */
   message: string | null;
@@ -122,7 +127,7 @@ export const macroSeriesStore = createStore<MacroSeriesState>((set, get) => {
         majSerie(def.id, {
           statut: "ok",
           points: cache,
-          majTs: dernier?.time ?? null,
+          majTs: dernier !== undefined ? finDePeriode(dernier.time, def.frequence) : null,
           message: null,
         });
       } else {
@@ -139,7 +144,12 @@ export const macroSeriesStore = createStore<MacroSeriesState>((set, get) => {
       const source = cleSante(def);
       if (r.statut === "ok") {
         const dernier = r.points[r.points.length - 1];
-        majSerie(def.id, { statut: "ok", points: r.points, majTs: dernier?.time ?? null, message: null });
+        majSerie(def.id, {
+          statut: "ok",
+          points: r.points,
+          majTs: dernier !== undefined ? finDePeriode(dernier.time, def.frequence) : null,
+          message: null,
+        });
         ecrireCache(def.id, r.points, now);
         // Une source REST qui vient de réussir n'est pas « en connexion » : même choix
         // que `setQuota` (health.ts) — on affiche honnêtement "polling", jamais l'état
@@ -161,9 +171,11 @@ export const macroSeriesStore = createStore<MacroSeriesState>((set, get) => {
     // dépendre du contrat d'un appelé.
     const chargerProtege = (def: DefinitionSerieMacro): ReturnType<typeof chargerSerieMacro> =>
       chargerSerieMacro(def, depuis).catch(
-        (e: unknown): Awaited<ReturnType<typeof chargerSerieMacro>> => ({
+        (): Awaited<ReturnType<typeof chargerSerieMacro>> => ({
           statut: "panne",
-          message: e instanceof Error ? e.message : "Source indisponible.",
+          // Même message curaté que le chemin normal (chargerSerieMacro.ts) : aucune
+          // URL, format de réponse ou code HTTP ne doit remonter jusqu'à l'utilisateur.
+          message: "Source indisponible.",
         }),
       );
 

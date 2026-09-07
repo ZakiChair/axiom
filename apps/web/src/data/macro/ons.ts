@@ -45,13 +45,19 @@ export function parseOnsTimeseries(json: unknown, depuisMs: number): MacroSeries
 
   const points: MacroPoint[] = [];
   for (const entree of mois) {
-    const annee = Number(champ(entree, "year"));
+    const bruteAnnee = champ(entree, "year");
+    if (typeof bruteAnnee !== "string" || bruteAnnee.trim() === "") continue;
+    const annee = Number(bruteAnnee);
     const nomMois = String(champ(entree, "month") ?? "").trim().toLowerCase();
     const indexMois = MOIS_ANGLAIS[nomMois];
     if (!Number.isInteger(annee) || indexMois === undefined) continue;
 
-    // « NA » et toute chaîne non numérique deviennent NaN → point écarté.
-    const value = Number(champ(entree, "value"));
+    // « NA » devient NaN et le point est écarté. Une valeur VIDE ou blanche est écartée
+    // AVANT la conversion : `Number("")` vaut 0, pas NaN, et passerait donc le filtre de
+    // finitude en se faisant passer pour une lecture réelle de 0,0 %.
+    const bruteValeur = champ(entree, "value");
+    if (typeof bruteValeur !== "string" || bruteValeur.trim() === "") continue;
+    const value = Number(bruteValeur);
     if (!Number.isFinite(value)) continue;
 
     points.push({ time: Date.UTC(annee, indexMois, 1), value });

@@ -7,8 +7,8 @@ import { parseOnsTimeseries } from "./ons";
 // lettres, et le document porte aussi `quarters`/`years` qu'il faut IGNORER.
 const ONS_D7G7 = {
   description: { title: "CPI ANNUAL RATE 00: ALL ITEMS 2015=100" },
-  years: [{ date: "2025", value: "2.5", year: "2025", month: "", quarter: "" }],
-  quarters: [{ date: "2026 Q2", value: "2.8", year: "2026", month: "", quarter: "Q2" }],
+  years: [{ date: "2025", value: "2.5", year: "2025", month: "April", quarter: "" }],
+  quarters: [{ date: "2026 Q2", value: "3.5", year: "2026", month: "September", quarter: "Q2" }],
   months: [
     { date: "2019 DEC", value: "1.3", year: "2019", month: "December", quarter: "" },
     { date: "2026 MAY", value: "2.8", year: "2026", month: "May", quarter: "" },
@@ -37,9 +37,12 @@ describe("parseOnsTimeseries", () => {
   });
 
   it("ignore les blocs quarters et years", () => {
+    // Les entrées years et quarters ont des mois valides pour que SEUL le fait que
+    // le parseur lit `months` et non ces blocs les exclue. Un parseur défectueux qui
+    // fusionnerait les trois blocs échouerait ce test.
     const serie = parseOnsTimeseries(ONS_D7G7, Date.UTC(2019, 0, 1));
     expect(serie.some((p) => p.value === 2.5)).toBe(false); // years
-    expect(serie.filter((p) => p.value === 2.8)).toHaveLength(1); // pas le doublon quarters
+    expect(serie.some((p) => p.value === 3.5)).toBe(false); // quarters
   });
 
   it("écarte les valeurs « NA » et les mois illisibles", () => {

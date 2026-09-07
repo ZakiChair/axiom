@@ -76,3 +76,38 @@ export function construireModeleOiExchange(jours: JourOiFutures[]): ModeleOiExch
 
   return { date: jours[idx]!.d, total, rangs };
 }
+
+/** Point L/S (foule ou top traders) joint par timestamp. */
+export interface PointRatioSpread {
+  time: number;
+  longAccount: number;
+  shortAccount: number;
+}
+
+export interface PointSpreadJoint {
+  time: number;
+  spread: number;
+}
+
+function netLongPct(p: PointRatioSpread): number {
+  return (p.longAccount - p.shortAccount) * 100;
+}
+
+/**
+ * Jointure Smart vs Retail SUR TIMESTAMP (jamais par index).
+ * Un bucket manquant au début ou au milieu est simplement omis.
+ */
+export function joindreSpreadParTimestamp(
+  foule: readonly PointRatioSpread[],
+  top: readonly PointRatioSpread[],
+): PointSpreadJoint[] {
+  const parTemps = new Map<number, PointRatioSpread>();
+  for (const p of foule) parTemps.set(p.time, p);
+  const out: PointSpreadJoint[] = [];
+  for (const t of top) {
+    const g = parTemps.get(t.time);
+    if (g === undefined) continue;
+    out.push({ time: t.time, spread: netLongPct(t) - netLongPct(g) });
+  }
+  return out;
+}

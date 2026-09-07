@@ -47,6 +47,19 @@ function defAvec(etats: Array<EtatStrategie | undefined>) {
 }
 
 describe("defStrategie", () => {
+  it("propage les séries auxiliaires requises dans la définition", () => {
+    const def = defStrategie({
+      id: "stratTestAux",
+      name: "Stratégie test aux",
+      aux: ["lsAccount", "lsTopTrader"],
+      inputsStrategie: [],
+      position: (candles) => new Array(candles.length).fill(0),
+      libelles: () => ({ long: "Long", short: "Short", sortie: "Sortie" }),
+    });
+
+    expect(def.aux).toEqual(["lsAccount", "lsTopTrader"]);
+  });
+
   it("contrat : category strategy, pane overlay, sortie prixEntree, input lignesTrades en dernier", () => {
     const def = defAvec(ETATS);
     expect(def.category).toBe("strategy");

@@ -169,11 +169,11 @@ export interface TradeResultat {
   r: number | null;
 }
 
-/** Un point de l'equity curve (après chaque trade, plus un point initial). */
+/** Un point d'équité valorisé à chaque clôture de bougie, plus un point initial. */
 export interface PointEquity {
-  /** ms epoch (temps de sortie du trade ; temps de la 1re bougie pour le point initial). */
+  /** ms epoch de la bougie valorisée ; temps de la 1re bougie pour le point initial. */
   temps: number;
-  /** Capital cumulé (capitalInitial + somme des pnl jusqu'ici). */
+  /** Capital réalisé + PnL latent au close, frais d'entrée déjà déduits. */
   equity: number;
   /** Drawdown à ce point, en % du plus haut atteint. */
   drawdownPct: number;
@@ -192,7 +192,7 @@ export interface StatsBacktest {
   pnlTotal: number;
   /** PnL net total en % du capital initial. */
   pnlTotalPct: number;
-  /** Drawdown maximum en % (plus grande chute pic → creux de l'equity). */
+  /** Drawdown maximum en % de l'équité valorisée aux clôtures (PnL latent inclus). */
   maxDrawdownPct: number;
   /** Sharpe simple annualisé depuis les rendements par trade (cf. engine.ts). */
   sharpe: number;

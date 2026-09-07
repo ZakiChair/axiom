@@ -160,6 +160,10 @@ describe("cycle long complet avec frais et slippage", () => {
     expect(trade.frais).toBeCloseTo(frais, 8);
     expect(trade.pnl).toBeCloseTo(pnl, 8);
     expect(trade.pnlPct).toBeCloseTo((pnl / 1000) * 100, 8);
+    // Avant toute sortie : le latent utilise le close 115 et le fill d'entrée
+    // glissé, avec les seuls frais d'entrée (1 USD) déjà payés.
+    expect(r.equity.find((p) => p.temps === t(2))!.equity).toBeCloseTo(10_000 - 1 + qty * (115 - prixEntree), 9);
+    expect(r.equity.at(-1)!.equity).toBeCloseTo(10_000 + pnl, 9);
   });
 });
 
@@ -293,6 +297,7 @@ describe("mode les-deux (long via reglesEntree, short via reglesSortie)", () => 
     expect(t2.prixEntree).toBe(97);
     expect(t2.prixSortie).toBe(109);
     expect(t2.raison).toBe("regle");
+    expect(r.equity.at(-1)!.equity).toBeCloseTo(10_000 + t1.pnl + t2.pnl, 9);
   });
 });
 
@@ -387,6 +392,79 @@ describe("opérande indicateur (croisé avec @axiom/indicators)", () => {
   });
 });
 
+describe("équité valorisée à chaque clôture", () => {
+  const strategie = (direction: "long" | "short"): StrategieDef => ({
+    reglesEntree: [compareClose(">", 0)],
+    reglesSortie: [],
+    direction,
+    tailleFixe: 10_000,
+  });
+
+  it.each([
+    { direction: "long" as const, creux: 50, sortie: 110 },
+    { direction: "short" as const, creux: 150, sortie: 90 },
+  ])("mesure 50 % de perte latente malgré une sortie gagnante ($direction)", ({ direction, creux, sortie }) => {
+    const candles = [
+      barre(t(0), 100, 100),
+      barre(t(1), 100, 100),
+      barre(t(2), 100, creux),
+      barre(t(3), creux, sortie),
+    ];
+    const r = runBacktest(candles, strategie(direction), SANS_FRICTION);
+
+    expect(r.equity.map((p) => p.equity)).toEqual([10_000, 10_000, 10_000, 5_000, 11_000]);
+    expect(r.equity.map((p) => p.temps)).toEqual([t(0), t(0), t(1), t(2), t(3)]);
+    expect(r.stats.maxDrawdownPct).toBe(50);
+    expect(r.equity.at(-1)!.equity).toBeCloseTo(10_000 + r.stats.pnlTotal, 9);
+  });
+
+  it.each([
+    { direction: "long" as const, creux: 50, sortie: 110, final: 10_790 },
+    { direction: "short" as const, creux: 150, sortie: 90, final: 10_810 },
+  ])("déduit les frais d'entrée dès le fill et ceux de sortie une seule fois ($direction)", ({ direction, creux, sortie, final }) => {
+    const candles = [barre(t(0), 100, 100), barre(t(1), 100, 100), barre(t(2), 100, creux), barre(t(3), creux, sortie)];
+    const r = runBacktest(candles, strategie(direction), { ...SANS_FRICTION, fraisPct: 1 });
+
+    // 100 unités : frais d'entrée = 100 ; frais de sortie = 110 (long) / 90 (short).
+    expect(r.equity.map((p) => p.equity)).toEqual([10_000, 10_000, 9_900, 4_900, final]);
+    expect(r.equity.at(-1)!.equity).toBeCloseTo(10_000 + r.stats.pnlTotal, 9);
+    expect(r.stats.maxDrawdownPct).toBe(51);
+  });
+
+  it("valorise la sortie à l'open suivant, sans conserver la position jusqu'au close de cette barre", () => {
+    const candles = [barre(t(0), 100, 100), barre(t(1), 100, 120), barre(t(2), 80, 300)];
+    const strat: StrategieDef = {
+      ...strategie("long"),
+      reglesEntree: [compareClose("<=", 100)],
+      reglesSortie: [compareClose(">=", 110)],
+    };
+    const r = runBacktest(candles, strat, SANS_FRICTION);
+
+    expect(r.equity.map((p) => p.equity)).toEqual([10_000, 10_000, 12_000, 8_000]);
+    expect(r.trades[0]!.prixSortie).toBe(80);
+    expect(r.stats.maxDrawdownPct).toBeCloseTo(100 / 3, 9);
+  });
+
+  it("comptabilise la clôture finale quand entrée et sortie partagent la dernière barre", () => {
+    const r = runBacktest(
+      [barre(t(0), 100, 100), barre(t(1), 100, 110)],
+      strategie("long"),
+      { ...SANS_FRICTION, fraisPct: 1 },
+    );
+    expect(r.equity.map((p) => p.equity)).toEqual([10_000, 10_000, 10_790]);
+    expect(r.equity.at(-1)!.equity).toBeCloseTo(10_000 + r.stats.pnlTotal, 9);
+  });
+
+  it("conserve une courbe plate sans trade et un point initial pour une série vide", () => {
+    const strat = { ...strategie("long"), reglesEntree: [] };
+    const r = runBacktest([barre(t(0), 100, 200), barre(t(1), 200, 50)], strat, SANS_FRICTION);
+    expect(r.equity.map((p) => p.equity)).toEqual([10_000, 10_000, 10_000]);
+    expect(runBacktest([], strat, SANS_FRICTION).equity).toEqual([
+      { temps: 0, equity: 10_000, drawdownPct: 0 },
+    ]);
+  });
+});
+
 // ─────────────────────────── 10. Statistiques (fonctions pures) ───────────────────────────
 
 describe("statistiques agrégées", () => {
@@ -414,14 +492,14 @@ describe("statistiques agrégées", () => {
       r: null,
     });
     const trades = [mk(100, 10, 0, 1000), mk(-50, -5, 1000, 2000), mk(30, 3, 2000, 3000)];
-    const candles = [barre(0, 100, 100), barre(3000, 100, 100)];
+    const candles = [barre(0, 100, 100), barre(1000, 100, 100), barre(2000, 100, 100), barre(3000, 100, 100)];
     const equity = construireEquity(trades, candles, 1000);
     const stats = calculerStats(trades, equity, candles, 1000);
 
-    // Equity : 1000 → 1100 → 1050 → 1080. Pic = 1100.
-    expect(equity).toHaveLength(4);
+    // Point initial + chaque clôture : 1000 → 1000 → 1100 → 1050 → 1080.
+    expect(equity).toHaveLength(5);
     expect(equity[0]!.equity).toBe(1000);
-    expect(equity[3]!.equity).toBe(1080);
+    expect(equity[4]!.equity).toBe(1080);
     // Drawdown max = (1100-1050)/1100·100 = 4.5454…
     expect(stats.maxDrawdownPct).toBeCloseTo((50 / 1100) * 100, 8);
 

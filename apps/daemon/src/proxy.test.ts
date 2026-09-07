@@ -666,6 +666,7 @@ describe("traiterExtapi — gardes (hors réseau)", () => {
 
 describe("traiterProxy — cache SQLite en panne = optimisation, jamais une panne de route", () => {
   const route = routePar("/tdapi"); // helper déjà présent en tête de proxy.test.ts
+  const resoudrePublic = async (): Promise<readonly string[]> => ["93.184.216.34"];
   const fetchImpl = async () =>
     new Response(JSON.stringify({ status: "ok" }), {
       headers: { "content-type": "application/json" },
@@ -675,6 +676,7 @@ describe("traiterProxy — cache SQLite en panne = optimisation, jamais une pann
     const req = new Request("http://localhost:8787/tdapi/quote?symbol=AAPL");
     const rep = await traiterProxy(req, new URL(req.url), route, {
       fetchImpl,
+      resoudreHote: resoudrePublic,
       lireCacheImpl: () => {
         throw new Error("SQLITE_CORRUPT");
       },
@@ -689,6 +691,7 @@ describe("traiterProxy — cache SQLite en panne = optimisation, jamais une pann
     const req = new Request("http://localhost:8787/tdapi/quote?symbol=AAPL");
     const rep = await traiterProxy(req, new URL(req.url), route, {
       fetchImpl,
+      resoudreHote: resoudrePublic,
       lireCacheImpl: () => null,
       ecrireCacheImpl: () => {
         throw new Error("SQLITE_FULL");
@@ -707,6 +710,7 @@ describe("traiterProxy — cache SQLite en panne = optimisation, jamais une pann
     const req = new Request("http://localhost:8787/tdapi/quote?symbol=AAPL");
     const rep = await traiterProxy(req, new URL(req.url), route, {
       fetchImpl: fetchQuiPend,
+      resoudreHote: resoudrePublic,
       lireCacheImpl: () => null,
       ecrireCacheImpl: () => {},
       timeoutMs: 20,
@@ -715,5 +719,112 @@ describe("traiterProxy — cache SQLite en panne = optimisation, jamais une pann
     const corps = (await rep.json()) as { erreur: string; detail: string };
     expect(corps.erreur).toBe("amont injoignable");
     expect(corps.detail).toContain("timeout amont proxy dépassé");
+  });
+});
+
+describe("traiterProxy — politique des proxys fixes (réutilise /extapi)", () => {
+  const resoudrePublic = async (): Promise<readonly string[]> => ["93.184.216.34"];
+
+  test("injection HTML active via /fredapi ⇒ bloquée avant le corps", async () => {
+    const fetchImpl = async () =>
+      new Response("<html><script>alert(1)</script></html>", {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    const req = new Request("http://localhost:8787/fredapi/fred/series");
+    const rep = await traiterProxy(req, new URL(req.url), routePar("/fredapi"), {
+      fetchImpl,
+      resoudreHote: resoudrePublic,
+      lireCacheImpl: () => null,
+      ecrireCacheImpl: () => {},
+    });
+    expect(rep.status).toBe(502);
+    const texte = await rep.text();
+    expect(texte).not.toContain("<html");
+    expect(texte).toContain("type MIME");
+    expect(rep.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(rep.headers.get("content-security-policy")).toContain("sandbox");
+  });
+
+  test("redirection hors hôte original ⇒ refusée, second fetch jamais lancé", async () => {
+    let appels = 0;
+    const fetchImpl = async () => {
+      appels += 1;
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://evil.example/secret" },
+      });
+    };
+    const req = new Request("http://localhost:8787/tdapi/quote?symbol=AAPL");
+    const rep = await traiterProxy(req, new URL(req.url), routePar("/tdapi"), {
+      fetchImpl,
+      resoudreHote: resoudrePublic,
+      lireCacheImpl: () => null,
+      ecrireCacheImpl: () => {},
+    });
+    expect(rep.status).toBe(502);
+    const corps = (await rep.json()) as { detail: string };
+    expect(corps.detail).toContain("hôte de redirection non autorisé");
+    expect(appels).toBe(1);
+  });
+
+  test("POST vers un endpoint non-SoSoValue ⇒ 405, zéro fetch", async () => {
+    let appels = 0;
+    const fetchImpl = async () => {
+      appels += 1;
+      return new Response("{}");
+    };
+    const req = new Request("http://localhost:8787/tdapi/quote", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ x: 1 }),
+    });
+    const rep = await traiterProxy(req, new URL(req.url), routePar("/tdapi"), {
+      fetchImpl,
+      resoudreHote: resoudrePublic,
+    });
+    expect(rep.status).toBe(405);
+    expect(appels).toBe(0);
+  });
+
+  test("POST SoSoValue hors currentEtfDataMetrics ⇒ 405", async () => {
+    let appels = 0;
+    const req = new Request("http://localhost:8787/sosoapi/openapi/v2/etf/autre", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "us-btc-spot" }),
+    });
+    const rep = await traiterProxy(req, new URL(req.url), routePar("/sosoapi"), {
+      fetchImpl: async () => {
+        appels += 1;
+        return new Response("{}");
+      },
+      resoudreHote: resoudrePublic,
+    });
+    expect(rep.status).toBe(405);
+    expect(appels).toBe(0);
+  });
+
+  test("POST JSON currentEtfDataMetrics est relayé", async () => {
+    const appels: Array<{ method?: string; url: string }> = [];
+    const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => {
+      appels.push({ method: init?.method, url: String(input) });
+      return new Response('{"ok":true}', { headers: { "content-type": "application/json" } });
+    };
+    const req = new Request("http://localhost:8787/sosoapi/openapi/v2/etf/currentEtfDataMetrics", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "us-btc-spot" }),
+    });
+    const rep = await traiterProxy(req, new URL(req.url), routePar("/sosoapi"), {
+      fetchImpl,
+      resoudreHote: resoudrePublic,
+    });
+    expect(rep.status).toBe(200);
+    expect(appels).toEqual([
+      {
+        method: "POST",
+        url: "https://openapi.sosovalue.com/openapi/v2/etf/currentEtfDataMetrics",
+      },
+    ]);
   });
 });

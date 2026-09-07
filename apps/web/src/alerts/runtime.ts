@@ -58,7 +58,8 @@ import { cvdDivergenceStore } from "../store/cvd-divergence";
 import { regimeStore } from "../store/regime";
 import { orderflowStore } from "../store/orderflow";
 import { presetAlertsStore, diffEntrants, filtrerCooldown } from "../store/presetAlerts";
-import { subscribeTickers, type TickerUpdate } from "../data/ticker";
+import { isTickerSource, subscribeTickers, type TickerUpdate } from "../data/ticker";
+import type { WatchlistSource } from "../store/watchlist";
 import { daemonSupporte, detectDaemon, urlDaemon } from "../data/daemon";
 import { coinalyzeProvider, filtrerFrontieres8h } from "../data/coinalyze";
 import { histFunding } from "../data/referentiels";
@@ -105,29 +106,51 @@ function appliquerResultat(lot: AlertDef[], ctx: ContexteAlerte): void {
 
 /** Crée le runtime et démarre les abonnements. Renvoie une fonction d'arrêt. */
 function creerRuntime(): Unsubscribe {
-  /** Dernier prix vu par symbole (pour le `prixPrecedent` du sens `les-deux`). */
+  const cleMarche = (source: AlertDef["source"], symbol: string): string => `${source}|${symbol}`;
+
+  /** Dernier prix vu par marché (pour le `prixPrecedent` du sens `les-deux`). */
   const dernierPrix = new Map<string, number>();
 
-  /** Contexte fusionné par symbole (hors React) — les sources y ÉCRIVENT leur contribution. */
-  const contextes = new Map<string, Partial<ContexteAlerte>>();
+  /** Contexte fusionné par marché (hors React) — les flux y écrivent leur contribution. */
+  type ContextePartiel = Partial<ContexteAlerte> & { timeframeBougies?: string };
+  const contextes = new Map<string, ContextePartiel>();
   const dernierEvalComposite = new Map<string, number>();
 
-  const fusionner = (symbol: string, patch: Partial<ContexteAlerte>): void => {
-    const prev = contextes.get(symbol) ?? {};
-    contextes.set(symbol, { ...prev, ...patch });
+  const fusionner = (
+    source: AlertDef["source"],
+    symbol: string,
+    patch: ContextePartiel,
+  ): void => {
+    const cle = cleMarche(source, symbol);
+    const prev = contextes.get(cle) ?? {};
+    if (patch.timeframeBougies !== undefined && patch.timeframeBougies !== prev.timeframeBougies) {
+      dernierEvalComposite.delete(cle);
+    }
+    const { dernierPrix: prixPatch, ...reste } = patch;
+    const next: ContextePartiel = { ...prev, ...reste };
+    // 0 n'est pas une mesure : on n'écrase un prix ticker que par une valeur réelle.
+    if (prixPatch !== undefined && Number.isFinite(prixPatch)) next.dernierPrix = prixPatch;
+    contextes.set(cle, next);
   };
 
-  const evaluerComposites = (symbol: string): void => {
+  const evaluerComposites = (source: AlertDef["source"], symbol: string): void => {
+    const cle = cleMarche(source, symbol);
     const now = Date.now();
-    const last = dernierEvalComposite.get(symbol) ?? 0;
+    const last = dernierEvalComposite.get(cle) ?? 0;
     if (now - last < COMPOSITE_THROTTLE_MS) return;
-    const partiel = contextes.get(symbol);
+    const partiel = contextes.get(cle);
     if (!partiel || partiel.dernierPrix === undefined || !Number.isFinite(partiel.dernierPrix)) return;
     const lot = alertsStore
       .getState()
-      .defs.filter((d) => d.actif && d.symbol === symbol && d.condition.type === "composite");
+      .defs.filter((d) => {
+        if (!d.actif || d.source !== source || d.symbol !== symbol || d.condition.type !== "composite") {
+          return false;
+        }
+        const porteBougie = [...TYPES_BOUGIE].some((type) => defPorte(d, type));
+        return !porteBougie || d.timeframe === undefined || d.timeframe === partiel.timeframeBougies;
+      });
     if (lot.length === 0) return;
-    dernierEvalComposite.set(symbol, now);
+    dernierEvalComposite.set(cle, now);
     const regime = regimeStore.getState().regime;
     const regimeScore =
       regime !== null && regime.libelle !== "indéterminé" ? regime.score : undefined;
@@ -145,13 +168,20 @@ function creerRuntime(): Unsubscribe {
   };
 
   // ── Flux ticker : conditions prix-croise ──────────────────────────────────
-  const onTicker = ({ symbol, price }: TickerUpdate): void => {
+  const onTicker = (source: AlertDef["source"], { symbol, price }: TickerUpdate): void => {
     if (!Number.isFinite(price)) return;
-    const precedent = dernierPrix.get(symbol);
-    fusionner(symbol, { dernierPrix: price, prixPrecedent: precedent });
+    const cle = cleMarche(source, symbol);
+    const precedent = dernierPrix.get(cle);
+    fusionner(source, symbol, { dernierPrix: price, prixPrecedent: precedent });
     const lot = alertsStore
       .getState()
-      .defs.filter((d) => d.actif && d.symbol === symbol && d.condition.type === "prix-croise");
+      .defs.filter(
+        (d) =>
+          d.actif &&
+          d.source === source &&
+          d.symbol === symbol &&
+          d.condition.type === "prix-croise",
+      );
     if (lot.length > 0) {
       appliquerResultat(lot, {
         maintenant: Date.now(),
@@ -159,39 +189,60 @@ function creerRuntime(): Unsubscribe {
         prixPrecedent: precedent,
       });
     }
-    dernierPrix.set(symbol, price);
-    evaluerComposites(symbol);
+    dernierPrix.set(cle, price);
+    evaluerComposites(source, symbol);
   };
 
-  // (Re)souscription du flux ticker quand l'ENSEMBLE des symboles à alertes prix change.
+  // (Re)souscription du flux ticker quand les marchés à alertes prix changent. Les
+  // sources sans route ticker restent évaluées sur les clôtures du chart maître.
   let unsubTicker: Unsubscribe = () => {};
   let cleTicker = "";
+  let generationTicker = 0;
   const resyncTicker = (): void => {
-    const symbols = [
-      ...new Set(
-        alertsStore
-          .getState()
-          .defs.filter((d) => d.actif && defPorte(d, "prix-croise"))
-          .map((d) => d.symbol)
-      ),
-    ].sort();
-    const cle = symbols.join(",");
+    const groupes = new Map<WatchlistSource, Set<string>>();
+    for (const d of alertsStore.getState().defs) {
+      if (!d.actif || !defPorte(d, "prix-croise") || !isTickerSource(d.source)) continue;
+      const symbols = groupes.get(d.source) ?? new Set<string>();
+      symbols.add(d.symbol);
+      groupes.set(d.source, symbols);
+    }
+    const groupesTries = [...groupes.entries()]
+      .map(([source, symbols]) => [source, [...symbols].sort()] as const)
+      .sort(([sourceA], [sourceB]) => sourceA.localeCompare(sourceB));
+    const cle = groupesTries.map(([source, symbols]) => `${source}:${symbols.join(",")}`).join(";");
     if (cle === cleTicker) return; // ensemble inchangé → on garde la souscription en place
     cleTicker = cle;
     unsubTicker();
-    unsubTicker = subscribeTickers(symbols, onTicker);
+    generationTicker += 1;
+    const generation = generationTicker;
+    const unsubs = groupesTries.map(([source, symbols]) =>
+      subscribeTickers(
+        symbols,
+        (update) => {
+          if (generation !== generationTicker) return;
+          onTicker(source, update);
+        },
+        { source },
+      ),
+    );
+    unsubTicker = () => {
+      generationTicker += 1;
+      for (const unsub of unsubs) unsub();
+    };
   };
 
   // ── Clôture de bougie : conditions variation-pct + indicateur-* ────────────
+  let derniereSource = "";
   let dernierSymbole = "";
   let dernierTf = "";
   let dernierTempsCloture = 0;
   const onMarket = (): void => {
-    const { symbol, timeframe, candles } = marketStore.getState();
-    // Changement de symbole OU de TF (backfill) : on réinitialise le suivi de clôture.
+    const { exchange, symbol, timeframe, candles } = marketStore.getState();
+    // Changement de source, symbole OU TF (backfill) : on réinitialise le suivi de clôture.
     // Le TF compte depuis que les defs y sont filtrées : les clôtures d'un TF plus long
     // sont ANTÉRIEURES à la dernière vue sur un TF court, et resteraient ignorées.
-    if (symbol !== dernierSymbole || timeframe !== dernierTf) {
+    if (exchange !== derniereSource || symbol !== dernierSymbole || timeframe !== dernierTf) {
+      derniereSource = exchange;
       dernierSymbole = symbol;
       dernierTf = timeframe;
       dernierTempsCloture = 0;
@@ -212,16 +263,19 @@ function creerRuntime(): Unsubscribe {
       .defs.filter(
         (d) =>
           d.actif &&
+          d.source === exchange &&
           d.symbol === symbol &&
-          TYPES_BOUGIE.has(d.condition.type) &&
+          (TYPES_BOUGIE.has(d.condition.type) ||
+            (!isTickerSource(exchange) && d.condition.type === "prix-croise")) &&
           (d.timeframe === undefined || d.timeframe === timeframe)
       );
     const avant = candles[idxClose - 1];
     const candlesCloturees = candles.slice(0, idxClose + 1);
-    fusionner(symbol, {
+    fusionner(exchange, symbol, {
       dernierPrix: barreClose.close,
       prixPrecedent: avant?.close,
       candles: candlesCloturees,
+      timeframeBougies: timeframe,
     });
     if (lot.length > 0) {
       appliquerResultat(lot, {
@@ -231,52 +285,62 @@ function creerRuntime(): Unsubscribe {
         candles: candlesCloturees,
       });
     }
-    evaluerComposites(symbol);
+    evaluerComposites(exchange, symbol);
   };
 
   // ── Poll funding : conditions funding-extreme ─────────────────────────────
   // Cache par symbole : rate courant + z-score optionnel (historique Coinalyze).
   const cacheFunding = new Map<string, { rate: number; z?: number; ts: number }>();
 
-  const evaluerFundingSymbol = (symbol: string): void => {
-    const snap = cacheFunding.get(symbol);
+  const evaluerFundingSymbol = (source: AlertDef["source"], symbol: string): void => {
+    const snap = cacheFunding.get(cleMarche(source, symbol));
     if (!snap) return;
     const lot = alertsStore
       .getState()
-      .defs.filter((d) => d.actif && d.symbol === symbol && d.condition.type === "funding-extreme");
+      .defs.filter(
+        (d) =>
+          d.actif &&
+          d.source === source &&
+          d.symbol === symbol &&
+          d.condition.type === "funding-extreme",
+      );
     const mkt = marketStore.getState();
     const lastCandle =
-      mkt.symbol === symbol ? mkt.candles[mkt.candles.length - 1] : undefined;
-    fusionner(symbol, {
-      dernierPrix: lastCandle?.close ?? 0,
+      mkt.exchange === source && mkt.symbol === symbol
+        ? mkt.candles[mkt.candles.length - 1]
+        : undefined;
+    const prixReel = lastCandle !== undefined && Number.isFinite(lastCandle.close) ? lastCandle.close : undefined;
+    fusionner(source, symbol, {
+      ...(prixReel !== undefined ? { dernierPrix: prixReel } : {}),
       fundingRate: snap.rate,
       fundingZScore: snap.z,
     });
     if (lot.length > 0) {
       appliquerResultat(lot, {
         maintenant: Date.now(),
-        dernierPrix: lastCandle?.close ?? 0,
+        dernierPrix: prixReel ?? 0,
         fundingRate: snap.rate,
         fundingZScore: snap.z,
       });
     }
-    evaluerComposites(symbol);
+    evaluerComposites(source, symbol);
   };
 
   const pollFunding = async (): Promise<void> => {
-    const symbols = [
-      ...new Set(
-        alertsStore
-          .getState()
-          .defs.filter((d) => d.actif && defPorte(d, "funding-extreme"))
-          .map((d) => d.symbol)
-      ),
-    ];
-    for (const symbol of symbols) {
+    const sourcesParSymbole = new Map<string, Set<AlertDef["source"]>>();
+    for (const d of alertsStore.getState().defs) {
+      if (!d.actif || !defPorte(d, "funding-extreme")) continue;
+      const sources = sourcesParSymbole.get(d.symbol) ?? new Set<AlertDef["source"]>();
+      sources.add(d.source);
+      sourcesParSymbole.set(d.symbol, sources);
+    }
+    for (const [symbol, sources] of sourcesParSymbole) {
       const snap = await chargerFunding(symbol);
       if (!snap) continue;
-      cacheFunding.set(symbol, { ...snap, ts: Date.now() });
-      evaluerFundingSymbol(symbol);
+      for (const source of sources) {
+        cacheFunding.set(cleMarche(source, symbol), { ...snap, ts: Date.now() });
+        evaluerFundingSymbol(source, symbol);
+      }
     }
   };
 
@@ -305,10 +369,16 @@ function creerRuntime(): Unsubscribe {
   // double notification quand l'app est ouverte.
   const evaluerLiqCascade = (): void => {
     if (!fluxLiqRetenu()) return; // flux inactif → non évaluable
-    const symbol = marketStore.getState().symbol;
+    const { exchange, symbol } = marketStore.getState();
     const lot = alertsStore
       .getState()
-      .defs.filter((d) => d.actif && d.symbol === symbol && d.condition.type === "liq-cascade");
+      .defs.filter(
+        (d) =>
+          d.actif &&
+          d.source === exchange &&
+          d.symbol === symbol &&
+          d.condition.type === "liq-cascade",
+      );
     // Événements RÉELS uniquement : le seed Coinalyze (`approx`) est agrégé par bougie
     // et gonflerait artificiellement la minute glissante.
     const reels = liqEventsStore.getState().events.filter((ev) => ev.approx !== true);
@@ -316,15 +386,19 @@ function creerRuntime(): Unsubscribe {
     const mkt = marketStore.getState();
     const lastCandle = mkt.candles[mkt.candles.length - 1];
     const liqUsdParMin = usdParMinute(reels, nowMs);
-    fusionner(symbol, { dernierPrix: lastCandle?.close ?? 0, liqUsdParMin });
+    const prixReel = lastCandle !== undefined && Number.isFinite(lastCandle.close) ? lastCandle.close : undefined;
+    fusionner(exchange, symbol, {
+      ...(prixReel !== undefined ? { dernierPrix: prixReel } : {}),
+      liqUsdParMin,
+    });
     if (lot.length > 0) {
       appliquerResultat(lot, {
         maintenant: nowMs,
-        dernierPrix: lastCandle?.close ?? 0,
+        dernierPrix: prixReel ?? 0,
         liqUsdParMin,
       });
     }
-    evaluerComposites(symbol);
+    evaluerComposites(exchange, symbol);
   };
 
   let liqCascadeTimer: ReturnType<typeof setInterval> | undefined;
@@ -342,25 +416,37 @@ function creerRuntime(): Unsubscribe {
   };
 
   // ── CVD spot/perp-div : pont orderflow → moteur ─────────────────────────
-  const evaluerCvdSymbol = (symbol: string): void => {
+  const evaluerCvdSymbol = (source: AlertDef["source"], symbol: string): void => {
     const kind = cvdDivergenceStore.getState().bySymbol[symbol.toUpperCase()];
     // Clé absente → undefined : non évaluable (pipeline off).
     if (kind === undefined) return;
     const lot = alertsStore
       .getState()
-      .defs.filter((d) => d.actif && d.symbol === symbol && d.condition.type === "cvd-spot-perp-div");
+      .defs.filter(
+        (d) =>
+          d.actif &&
+          d.source === source &&
+          d.symbol === symbol &&
+          d.condition.type === "cvd-spot-perp-div",
+      );
     const mkt = marketStore.getState();
     const lastCandle =
-      mkt.symbol === symbol ? mkt.candles[mkt.candles.length - 1] : undefined;
-    fusionner(symbol, { dernierPrix: lastCandle?.close ?? 0, cvdDivergenceKind: kind });
+      mkt.exchange === source && mkt.symbol === symbol
+        ? mkt.candles[mkt.candles.length - 1]
+        : undefined;
+    const prixReel = lastCandle !== undefined && Number.isFinite(lastCandle.close) ? lastCandle.close : undefined;
+    fusionner(source, symbol, {
+      ...(prixReel !== undefined ? { dernierPrix: prixReel } : {}),
+      cvdDivergenceKind: kind,
+    });
     if (lot.length > 0) {
       appliquerResultat(lot, {
         maintenant: Date.now(),
-        dernierPrix: lastCandle?.close ?? 0,
+        dernierPrix: prixReel ?? 0,
         cvdDivergenceKind: kind,
       });
     }
-    evaluerComposites(symbol);
+    evaluerComposites(source, symbol);
   };
 
   /** Active orderflow + CVD S/P si au moins une alerte CVD active (Binance). */
@@ -392,9 +478,10 @@ function creerRuntime(): Unsubscribe {
   };
 
   const unsubCvd = cvdDivergenceStore.subscribe((s, prev) => {
+    const source = marketStore.getState().exchange;
     // Évalue seulement les symboles dont le kind a changé.
     for (const [sym, kind] of Object.entries(s.bySymbol)) {
-      if (prev.bySymbol[sym] !== kind) evaluerCvdSymbol(sym);
+      if (prev.bySymbol[sym] !== kind) evaluerCvdSymbol(source, sym);
     }
   });
 
@@ -414,7 +501,7 @@ function creerRuntime(): Unsubscribe {
       regimeScore: regime.score,
     });
     for (const d of alertsStore.getState().defs) {
-      if (d.actif && d.condition.type === "composite") evaluerComposites(d.symbol);
+      if (d.actif && d.condition.type === "composite") evaluerComposites(d.source, d.symbol);
     }
   };
 
@@ -513,7 +600,7 @@ function creerRuntime(): Unsubscribe {
   resyncCvd();
   // Calibrage CVD sur l'état déjà publié (si orderflow déjà actif).
   for (const sym of Object.keys(cvdDivergenceStore.getState().bySymbol)) {
-    evaluerCvdSymbol(sym);
+    evaluerCvdSymbol(marketStore.getState().exchange, sym);
   }
   evaluerRegime(); // calibrage régime sur le score déjà publié
   const unsubAlerts = alertsStore.subscribe(() => {
@@ -640,20 +727,37 @@ export function demarrerAlertes(): Unsubscribe {
 
 // ───────── Heartbeat vers le daemon (anti-doublon onglet fermé) ─────────
 //
-// Tant que l'app est OUVERTE, elle POST /heartbeat toutes les 30 s. Le daemon ne
-// NOTIFIE (macOS/Telegram) un déclenchement que si le dernier heartbeat date de plus
-// de 90 s : app ouverte → le daemon reste silencieux (l'app a déjà notifié via la
-// Notification API), app fermée → le daemon prend le relais. Sans daemon détecté :
-// aucun POST (silencieux, zéro régression).
+// Tant que l'app est OUVERTE, elle POST /heartbeat toutes les 30 s avec
+// `{visible, canNotify}`. Le daemon relaie macOS sauf si le heartbeat est récent
+// ET `canNotify: true` (onglet visible + permission). Champ absent (legacy) ⇒ relais.
+// Telegram reste propriétaire du daemon. Sans daemon : aucun POST.
 
 /** Intervalle d'émission du heartbeat (ms). */
 const HEARTBEAT_MS = 30_000;
+
+function ongletVisible(): boolean {
+  return typeof document !== "undefined" && document.visibilityState === "visible";
+}
+
+function permissionNotificationAccordee(): boolean {
+  return typeof Notification !== "undefined" && Notification.permission === "granted";
+}
+
+/** Corps heartbeat v2 : le front ne notifie que si visible ET permission. */
+function payloadHeartbeat(): { visible: boolean; canNotify: boolean } {
+  const visible = ongletVisible();
+  return { visible, canNotify: visible && permissionNotificationAccordee() };
+}
 
 /** Envoie un heartbeat (best-effort, silencieux) si le daemon est détecté présent. */
 function envoyerHeartbeat(): void {
   if (!daemonSupporte("alerts")) return;
   try {
-    void fetch(urlDaemon("/heartbeat"), { method: "POST" }).catch(() => {});
+    void fetch(urlDaemon("/heartbeat"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payloadHeartbeat()),
+    }).catch(() => {});
   } catch {
     /* best-effort */
   }
@@ -664,14 +768,22 @@ function envoyerHeartbeat(): void {
  * celui-ci confirmé présent. Renvoie une fonction d'arrêt.
  */
 function demarrerHeartbeat(): Unsubscribe {
+  let arrete = false;
   // Détection (mémoïsée) : au succès, on sème les défs courantes et on bat le cœur.
   void detectDaemon(["alerts", "kv"]).then((present) => {
-    if (!present) return;
+    if (!present || arrete) return;
     pousserDefsDaemon();
     envoyerHeartbeat();
   });
+  // Le relais change dès que l'onglet est masqué, sans fenêtre muette de 30 secondes.
+  const documentHeartbeat = typeof document !== "undefined" ? document : undefined;
+  documentHeartbeat?.addEventListener("visibilitychange", envoyerHeartbeat);
   const timer = setInterval(envoyerHeartbeat, HEARTBEAT_MS);
-  return () => clearInterval(timer);
+  return () => {
+    arrete = true;
+    clearInterval(timer);
+    documentHeartbeat?.removeEventListener("visibilitychange", envoyerHeartbeat);
+  };
 }
 
 // ───────── Notification système + bip WebAudio (best-effort) ─────────
@@ -690,10 +802,10 @@ export function demanderPermissionNotifications(): void {
   }
 }
 
-/** Notifie un déclenchement : notification système (si accordée) + bip discret. */
+/** Notifie un déclenchement : Notification API seulement si onglet visible ET permission. */
 export function notifier(d: Declenchement): void {
   try {
-    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+    if (ongletVisible() && permissionNotificationAccordee()) {
       new Notification("AXIOM — alerte", { body: d.message });
     }
   } catch {

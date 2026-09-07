@@ -63,7 +63,7 @@ import { histFunding, histOiUsd } from "../data/referentiels";
 import { referentiel, type Referentiel } from "../lib/referentiel";
 import { getBgeometricsKey } from "../store/onchain";
 import { fetchOiFuturesParExchange, type JourOiFutures } from "../data/onchain/bgeometrics";
-import { construireModeleOiExchange } from "./derivativesWindow.util";
+import { construireModeleOiExchange, joindreSpreadParTimestamp } from "./derivativesWindow.util";
 import { BadgeFiabilite, BarreProgression, EnTeteFenetre, ErreurBloc, Fraicheur, TuileStat, RefBadge, SansCle, Vide } from "./ui";
 
 /** Période d'agrégation du long/short ratio et fenêtre des liquidations affichées. */
@@ -81,10 +81,12 @@ const BIN_LIMIT = 30;
 /** Nombre de buckets de liquidations affichés dans le mini-histogramme bicolore. */
 const LIQ_BARS = 24;
 
-/** Ratio L/S + part longue (« 1.87 · L 65% ») d'un point Binance (longAccount = fraction). */
+/** Ratio L/S + Net Long/Short % (« 1.87 · Net +30% ») d'un point Binance (longAccount = fraction). */
 function formatRatioBreakdown(p: BinanceRatioPoint | undefined): string {
   if (!p || !Number.isFinite(p.ratio)) return VALEUR_ABSENTE;
-  return `${p.ratio.toFixed(2)} · L ${(p.longAccount * 100).toFixed(0)}%`;
+  const net = (p.longAccount - p.shortAccount) * 100;
+  const signe = net > 0 ? "+" : "";
+  return `${p.ratio.toFixed(2)} · Net ${signe}${net.toFixed(0)}% (L ${(p.longAccount * 100).toFixed(0)}%)`;
 }
 
 /** Mini-courbe de tendance récente (SVG inline, sans dépendance). */
@@ -429,6 +431,16 @@ export function DerivativesWindow() {
   const topLsSpark = topLs.map((p) => p.ratio);
   const takerSpark = taker.map((p) => p.buySellRatio);
   const binOiSpark = binOi.map((p) => p.oiUsd);
+
+  // Spread Smart vs Retail : jointure par timestamp (bucket manquant ≠ décalage d'index).
+  const spreadSpark = useMemo(
+    () => joindreSpreadParTimestamp(globalLs, topLs).map((p) => p.spread),
+    [globalLs, topLs],
+  );
+  const lastSpread = spreadSpark.at(-1);
+  const spreadColor =
+    lastSpread !== undefined ? (lastSpread >= 0 ? "var(--up)" : "var(--down)") : undefined;
+
   const lastTaker = taker.at(-1);
   const takerColor = lastTaker && lastTaker.buySellRatio >= 1 ? "var(--up)" : "var(--down)";
   const fundingColor =
@@ -661,6 +673,15 @@ export function DerivativesWindow() {
                 couleur="var(--serie-4)"
                 extra={topLsSpark.length >= 2 && <Sparkline values={topLsSpark} color="var(--serie-4)" />}
               />
+              {lastSpread !== undefined && (
+                <TuileStat
+                  disposition="inline"
+                  label="Spread Smart vs Retail"
+                  valeur={`${lastSpread > 0 ? "+" : ""}${lastSpread.toFixed(1)} %`}
+                  couleur={spreadColor}
+                  extra={spreadSpark.length >= 2 && <Sparkline values={spreadSpark} color={spreadColor ?? "var(--serie-3)"} />}
+                />
+              )}
               <TuileStat
                 disposition="inline"
                 label="Taker achat / vente"

@@ -9,6 +9,7 @@ import {
   applyCvdEdge,
   applyFadeFunding,
   applyMacroFomc,
+  applyNetPositioning,
   applyOptionsDeribit,
   applyRiskOff,
   applyScalpBtc,
@@ -47,13 +48,14 @@ function installMockLocalStorage(): void {
 installMockLocalStorage();
 
 describe("playbooksMeta — catalogue seed", () => {
-  it("expose exactement 7 playbooks avec ids uniques", () => {
+  it("expose exactement 8 playbooks avec ids uniques", () => {
     const meta = playbooksMeta();
-    expect(meta).toHaveLength(7);
+    expect(meta).toHaveLength(8);
     const ids = meta.map((m) => m.id);
-    expect(new Set(ids).size).toBe(7);
+    expect(new Set(ids).size).toBe(8);
     expect(ids).toEqual([
       "scalp-btc",
+      "net-positioning",
       "fade-funding",
       "cvd-edge",
       "macro-fomc",
@@ -66,6 +68,7 @@ describe("playbooksMeta — catalogue seed", () => {
   it("associe les mnémoniques PLAY-* attendus", () => {
     const byId = Object.fromEntries(playbooksMeta().map((m) => [m.id, m.mnemonique]));
     expect(byId["scalp-btc"]).toBe("PLAY-SCALP");
+    expect(byId["net-positioning"]).toBe("PLAY-POS");
     expect(byId["fade-funding"]).toBe("PLAY-FADE");
     expect(byId["cvd-edge"]).toBe("PLAY-CVD");
     expect(byId["macro-fomc"]).toBe("PLAY-FOMC");
@@ -132,6 +135,18 @@ describe("apply* — composition stores (spies)", () => {
     expect(volumeProfileStore.getState().enabled).toBe(true);
     expect(open).toHaveBeenCalledWith("derivatives");
     expect(open).toHaveBeenCalledWith("dom");
+  });
+
+  it("applyNetPositioning : layout 1, DES+SQZ+screener, funding ON, BTC 1h", () => {
+    const open = vi.spyOn(windowManagerStore.getState(), "openWindow");
+    applyNetPositioning();
+    expect(chartLayoutStore.getState().layout).toBe("1");
+    expect(marketStore.getState().symbol).toBe("BTCUSDT");
+    expect(marketStore.getState().timeframe).toBe("1h");
+    expect(derivativesChartStore.getState().funding).toBe(true);
+    expect(open).toHaveBeenCalledWith("derivatives");
+    expect(open).toHaveBeenCalledWith("squeeze");
+    expect(open).toHaveBeenCalledWith("screener");
   });
 
   it("applyFadeFunding : DES+EQS + funding pane ON + CVD S/P", () => {

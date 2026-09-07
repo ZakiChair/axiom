@@ -137,6 +137,10 @@ export function construireRoutesProxy(cles: ProxyKeys): RouteProxy[] {
 
 /** Délai maximum d'un fetch amont des proxys à préfixe (ms) — même valeur que /extapi. */
 const PROXY_TIMEOUT_MS = 15_000;
+/** Taille max du corps de requête (POST SoSoValue) — même politique Vercel. */
+export const PROXY_TAILLE_MAX_REQUETE = 64 * 1024;
+/** Seul POST JSON SoSoValue réellement utilisé par le front. */
+const SOSO_POST_CHEMINS = new Set(["/openapi/v2/etf/currentEtfDataMetrics"]);
 
 /** Dépendances injectables des tests de traiterProxy (cache + fetch). */
 export interface OptionsProxy {
@@ -144,12 +148,41 @@ export interface OptionsProxy {
   lireCacheImpl?: typeof lireCache;
   ecrireCacheImpl?: typeof ecrireCache;
   timeoutMs?: number;
+  resoudreHote?: ResoudreHoteExtapi;
+  tailleMaxCorps?: number;
+  tailleMaxRequete?: number;
+}
+
+function jsonProxy(
+  corps: unknown,
+  req: Request,
+  status: number,
+  extra: Record<string, string> = {},
+): Response {
+  return new Response(JSON.stringify(corps), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      ...ENTETES_SECURITE_EXTAPI,
+      ...entetesCors(req),
+      ...extra,
+    },
+  });
+}
+
+function hoteCibleRoute(route: RouteProxy): string {
+  return new URL(route.target).hostname.toLowerCase();
+}
+
+function pathnameAmont(route: RouteProxy, url: URL): string {
+  const reecrit = route.rewrite(url.pathname + url.search);
+  const q = reecrit.indexOf("?");
+  return q === -1 ? reecrit : reecrit.slice(0, q);
 }
 
 /**
- * Traite une requête proxifiée : cache GET (par préfixe), fetch amont, en-têtes
- * CORS + `X-Axiomd-Cache: hit|miss`. Les erreurs réseau renvoient un 502 propre
- * (le daemon ne plante pas).
+ * Traite une requête de proxy fixe : mêmes gardes que /extapi (GET/HEAD, POST JSON
+ * SoSoValue borné, redirects sur l'hôte original, MIME inerte, DNS public).
  */
 export async function traiterProxy(
   req: Request,
@@ -161,18 +194,49 @@ export async function traiterProxy(
   const lireCacheImpl = options.lireCacheImpl ?? lireCache;
   const ecrireCacheImpl = options.ecrireCacheImpl ?? ecrireCache;
   const delaiMs = Math.max(1, options.timeoutMs ?? PROXY_TIMEOUT_MS);
+  const tailleMaxRequete = Math.max(1, options.tailleMaxRequete ?? PROXY_TAILLE_MAX_REQUETE);
   const cheminEntrant = url.pathname + url.search;
   const urlAmont = route.target + route.rewrite(cheminEntrant);
   const cors = entetesCors(req);
-  const entetesAmont = route.entetesAmont?.(req.headers) ?? {};
+  const securite = ENTETES_SECURITE_EXTAPI;
+  const method = req.method.toUpperCase();
+  const hoteOriginal = hoteCibleRoute(route);
+  const chemin = pathnameAmont(route, url);
 
-  if (req.method === "GET") {
+  if (requeteNavigationExtapiInterdite(req)) {
+    return jsonProxy({ erreur: "navigation proxy interdite (API fetch uniquement)" }, req, 403);
+  }
+
+  const postSosoAutorise = method === "POST" && route.prefix === "/sosoapi" && SOSO_POST_CHEMINS.has(chemin);
+  if (method !== "GET" && method !== "HEAD" && !postSosoAutorise) {
+    return jsonProxy({ erreur: "méthode non autorisée" }, req, 405, { allow: "GET, HEAD" });
+  }
+  if (method === "POST") {
+    const ct = req.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+    if (ct !== "application/json") {
+      return jsonProxy({ erreur: "type de requête refusé" }, req, 415);
+    }
+  }
+
+  let corpsReq: Uint8Array<ArrayBuffer> | undefined;
+  if (method === "POST") {
+    const controleur = new AbortController();
+    const minuteur = setTimeout(() => controleur.abort(new Error("timeout de lecture du POST")), delaiMs);
+    try {
+      // Même lecteur que /extapi : borne réelle même sans Content-Length.
+      corpsReq = await lireCorpsExtapiBorne(req, tailleMaxRequete, controleur.signal);
+    } catch (err) {
+      const statut = controleur.signal.aborted ? 408 : err instanceof ErreurPolitiqueExtapi ? 413 : 400;
+      return jsonProxy({ erreur: statut === 413 ? "corps de requête trop volumineux" : "lecture de requête interrompue" }, req, statut);
+    } finally {
+      clearTimeout(minuteur);
+    }
+  }
+
+  if (method === "GET") {
     const ttlMs = ttlMsPourChemin(url.pathname);
     const cle = cleCache("GET", cheminEntrant);
     if (ttlMs > 0) {
-      // Le cache est une OPTIMISATION : une panne SQLite (disque plein, base corrompue)
-      // ne doit jamais faire échouer une requête dont l'amont est joignable — miss
-      // forcé, même patron que /extapi (traiterExtapi).
       let hit: ReturnType<typeof lireCache> = null;
       try {
         hit = lireCacheImpl(cle);
@@ -180,91 +244,69 @@ export async function traiterProxy(
         console.error("[axiomd] cache proxy indisponible (miss forcé) :", err);
       }
       if (hit) {
-        return new Response(hit.corps, {
-          headers: { "content-type": hit.contentType, "x-axiomd-cache": "hit", ...cors },
-        });
+        if (hit.corps.byteLength <= (options.tailleMaxCorps ?? EXTAPI_TAILLE_MAX_CORPS) && mimeExtapiAutorise(hit.contentType)) {
+          return new Response(hit.corps, {
+            headers: {
+              "content-type": hit.contentType,
+              "x-axiomd-cache": "hit",
+              ...securite,
+              ...cors,
+            },
+          });
+        }
       }
     }
-    // Timeout global : AbortController + setTimeout REF'D (pas AbortSignal.timeout()) —
-    // même justification que recupererExtapiSecurise : minuteur annulable, déclenché
-    // même si le fetch ne se résout que sur abort. Couvre en-têtes ET corps.
-    let amont: Response;
-    // ArrayBuffer (pas ArrayBufferLike) : BodyInit refuse le Uint8Array générique.
-    let corps: Uint8Array<ArrayBuffer>;
-    const controleur = new AbortController();
-    const minuteur = setTimeout(
-      () => controleur.abort(new Error(`timeout amont proxy dépassé (${delaiMs} ms)`)),
-      delaiMs,
+  }
+
+  const entetesAmont: Record<string, string> = { ...(route.entetesAmont?.(req.headers) ?? {}) };
+  const ctReq = req.headers.get("content-type");
+  if (method === "POST" && ctReq) entetesAmont["content-type"] = ctReq;
+
+  let amont: ReponseAmontExtapi;
+  try {
+    amont = await recupererExtapiSecurise(urlAmont, {
+      fetchImpl,
+      resoudreHote: options.resoudreHote,
+      timeoutMs: delaiMs,
+      tailleMaxCorps: options.tailleMaxCorps,
+      method,
+      corps: corpsReq,
+      entetesAmont,
+      hotesAutorises: new Set([hoteOriginal]),
+      libelleTimeout: "proxy",
+    });
+  } catch (err) {
+    const politique = err instanceof ErreurPolitiqueExtapi;
+    return jsonProxy(
+      {
+        erreur: politique ? "amont refusé par la politique" : "amont injoignable",
+        detail: err instanceof Error ? err.message : String(err),
+      },
+      req,
+      502,
     );
-    try {
-      amont = await fetchImpl(urlAmont, {
-        method: "GET",
-        headers: entetesAmont,
-        signal: controleur.signal,
-      });
-      corps = new Uint8Array(await amont.arrayBuffer());
-    } catch (err) {
-      return reponseErreurAmont(err, cors);
-    } finally {
-      clearTimeout(minuteur);
-    }
-    const contentType = amont.headers.get("content-type") ?? "application/octet-stream";
-    // On ne met en cache que les réponses valides (évite de figer une erreur transitoire).
-    if (ttlMs > 0 && amont.ok) {
+  }
+
+  if (method === "GET") {
+    const ttlMs = ttlMsPourChemin(url.pathname);
+    if (ttlMs > 0 && amont.status === 200) {
       try {
-        ecrireCacheImpl(cle, corps, contentType, ttlMs);
+        ecrireCacheImpl(cleCache("GET", cheminEntrant), amont.corps, amont.contentType, ttlMs);
       } catch (err) {
         console.error("[axiomd] écriture cache proxy échouée :", err);
       }
     }
-    return new Response(corps, {
-      status: amont.status,
-      headers: { "content-type": contentType, "x-axiomd-cache": "miss", ...cors },
-    });
   }
 
-  // Méthodes non-GET (rare pour ces APIs de lecture) : transfert direct, sans cache.
-  const corpsReq = req.method === "HEAD" ? undefined : await req.arrayBuffer();
-  let amont: Response;
-  let corps: Uint8Array<ArrayBuffer>;
-  const controleur = new AbortController();
-  const minuteur = setTimeout(
-    () => controleur.abort(new Error(`timeout amont proxy dépassé (${delaiMs} ms)`)),
-    delaiMs,
-  );
-  try {
-    amont = await fetchImpl(urlAmont, {
-      method: req.method,
-      body: corpsReq && corpsReq.byteLength > 0 ? corpsReq : undefined,
-      headers: {
-        ...(req.headers.get("content-type")
-          ? { "content-type": req.headers.get("content-type") as string }
-          : {}),
-        ...entetesAmont,
-      },
-      signal: controleur.signal,
-    });
-    corps = new Uint8Array(await amont.arrayBuffer());
-  } catch (err) {
-    return reponseErreurAmont(err, cors);
-  } finally {
-    clearTimeout(minuteur);
-  }
-  return new Response(corps, {
+  const statutSansCorps = method === "HEAD" || amont.status === 204 || amont.status === 205 || amont.status === 304;
+  return new Response(statutSansCorps ? null : amont.corps, {
     status: amont.status,
     headers: {
-      "content-type": amont.headers.get("content-type") ?? "application/octet-stream",
+      "content-type": amont.contentType,
       "x-axiomd-cache": "miss",
+      ...securite,
       ...cors,
     },
-  });
-}
-
-function reponseErreurAmont(err: unknown, cors: Record<string, string>): Response {
-  const message = err instanceof Error ? err.message : String(err);
-  return new Response(JSON.stringify({ erreur: "amont injoignable", detail: message }), {
-    status: 502,
-    headers: { "content-type": "application/json; charset=utf-8", ...cors },
   });
 }
 
@@ -373,6 +415,9 @@ export interface OptionsExtapi {
   maxRedirections?: number;
   entetesAmont?: HeadersInit;
   hotesAutorises?: ReadonlySet<string>;
+  method?: string;
+  corps?: Uint8Array<ArrayBuffer>;
+  libelleTimeout?: string;
 }
 
 /** Réponse amont matérialisée seulement après toutes les gardes de sécurité. */
@@ -557,7 +602,11 @@ async function validerDestinationExtapi(
 }
 
 /** Lit un corps en flux avec pré-borne Content-Length ET borne réelle. */
-async function lireCorpsExtapiBorne(res: Response, tailleMax: number): Promise<Uint8Array<ArrayBuffer>> {
+async function lireCorpsExtapiBorne(
+  res: Pick<Response, "headers" | "body">,
+  tailleMax: number,
+  signal?: AbortSignal,
+): Promise<Uint8Array<ArrayBuffer>> {
   const longueur = res.headers.get("content-length");
   if (longueur !== null) {
     const annoncee = Number(longueur);
@@ -572,7 +621,7 @@ async function lireCorpsExtapiBorne(res: Response, tailleMax: number): Promise<U
   let total = 0;
   try {
     for (;;) {
-      const { done, value } = await lecteur.read();
+      const { done, value } = await (signal ? avecSignalExtapi(lecteur.read(), signal) : lecteur.read());
       if (done) break;
       if (!value) continue;
       total += value.byteLength;
@@ -582,6 +631,9 @@ async function lireCorpsExtapiBorne(res: Response, tailleMax: number): Promise<U
       }
       morceaux.push(value);
     }
+  } catch (err) {
+    await lecteur.cancel().catch(() => {});
+    throw err;
   } finally {
     lecteur.releaseLock();
   }
@@ -607,6 +659,9 @@ export async function recupererExtapiSecurise(
   const tailleMax = Math.max(1, options.tailleMaxCorps ?? EXTAPI_TAILLE_MAX_CORPS);
   const maxRedirections = Math.max(0, options.maxRedirections ?? EXTAPI_MAX_REDIRECTIONS);
   const hotesAutorises = options.hotesAutorises ?? EXTAPI_WHITELIST;
+  const methodeInitiale = (options.method ?? "GET").toUpperCase();
+  let method = methodeInitiale;
+  const libelleTimeout = options.libelleTimeout ?? "/extapi";
   // Timeout global : AbortController + setTimeout EXPLICITES, et NON AbortSignal.timeout().
   //
   // Raison (diagnostic CI du 2026-07-24) : le minuteur d'`AbortSignal.timeout()` est
@@ -628,10 +683,11 @@ export async function recupererExtapiSecurise(
   const signal = controleur.signal;
   const delaiMs = Math.max(1, options.timeoutMs ?? EXTAPI_TIMEOUT_MS);
   const minuteur = setTimeout(
-    () => controleur.abort(new Error(`timeout amont /extapi dépassé (${delaiMs} ms)`)),
+    () => controleur.abort(new Error(`timeout amont ${libelleTimeout} dépassé (${delaiMs} ms)`)),
     delaiMs,
   );
   let courante = new URL(urlInitiale);
+  const cheminPostAutorise = courante.pathname;
 
   try {
     for (let redirections = 0; ; redirections++) {
@@ -639,9 +695,18 @@ export async function recupererExtapiSecurise(
       const hote = sansCrochets(courante.hostname).toLowerCase();
       const entetes = new Headers({ "user-agent": userAgentPourHote(hote), accept: "*/*" });
       for (const [cle, valeur] of new Headers(options.entetesAmont)) entetes.set(cle, valeur);
+      if (method !== methodeInitiale) {
+        for (const nom of ["content-type", "content-encoding", "content-language", "content-location", "content-length"]) {
+          entetes.delete(nom);
+        }
+      }
+      if (options.corps && method === "POST") {
+        entetes.set("content-type", entetes.get("content-type") ?? "application/json");
+      }
       const amont = await fetchImpl(courante, {
-        method: "GET",
+        method,
         headers: entetes,
+        body: method === "POST" && options.corps && options.corps.byteLength > 0 ? options.corps : undefined,
         signal,
         redirect: "manual",
       });
@@ -655,6 +720,11 @@ export async function recupererExtapiSecurise(
         } catch {
           throw new ErreurPolitiqueExtapi("Location de redirection amont invalide");
         }
+        // Comportement Fetch : 301/302/303 transforment un POST en GET sans corps.
+        if (method === "POST" && [301, 302, 303].includes(amont.status)) method = "GET";
+        if (method === "POST" && courante.pathname !== cheminPostAutorise) {
+          throw new ErreurPolitiqueExtapi("chemin POST de redirection non autorisé");
+        }
         continue;
       }
       const contentType = amont.headers.get("content-type") ?? "application/octet-stream";
@@ -662,7 +732,7 @@ export async function recupererExtapiSecurise(
         await amont.body?.cancel().catch(() => {});
         throw new ErreurPolitiqueExtapi(`type MIME amont refusé : ${contentType.split(";", 1)[0] ?? "inconnu"}`);
       }
-      const corps = await lireCorpsExtapiBorne(amont, tailleMax);
+      const corps = await lireCorpsExtapiBorne(amont, tailleMax, signal);
       return { corps, contentType, status: amont.status, headers: amont.headers };
     }
   } finally {

@@ -14,7 +14,8 @@
     "prod": "pnpm --filter @axiom/web build && bun apps/daemon/src/index.ts",
     "up": "bash scripts/axiom-up.sh",
     "up:prod": "bash scripts/axiom-up.sh --prod",
-    "check": "bash scripts/ci.sh"
+    "check": "bash scripts/ci.sh",
+    "check:e2e": "bash scripts/ci.sh --e2e"
   },
   "devDependencies": {
     "@types/node": "^20.16.0",

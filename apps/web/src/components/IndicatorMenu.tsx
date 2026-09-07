@@ -114,6 +114,10 @@ export const SOUS_GROUPES_DERIVES: Record<string, "perp" | "onchain" | "position
   lsAccountRatio: "positionnement",
   lsTopTraderRatio: "positionnement",
   takerBuySellRatio: "positionnement",
+  netPositioningIndex: "positionnement",
+  netPositioningTopTrader: "positionnement",
+  smartRetailSpread: "positionnement",
+  squeezePressureIndex: "perp",
 };
 
 const LIBELLES_SOUS_GROUPES_DERIVES: Record<"perp" | "onchain" | "positionnement", string> = {

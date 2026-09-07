@@ -37,10 +37,8 @@ jobs:
           cache: pnpm
       - uses: oven-sh/setup-bun@v2 # tests du daemon (`bun test src`)
         with:
-          # Volontairement NON épinglé pour l'instant : épingler en même temps que ce
-          # découpage masquerait la cause (écart local 1.3.11 / CI 1.3.14). À épingler
-          # seulement si les runs prouvent que la version est en jeu.
-          bun-version: latest
+          # Version de référence locale, épinglée pour rendre les tests reproductibles.
+          bun-version: 1.3.11
       - run: pnpm install --frozen-lockfile
         timeout-minutes: 5
 
@@ -74,8 +72,8 @@ jobs:
         run: pnpm --filter @axiom/web exec playwright install --with-deps chromium
         timeout-minutes: 5
 
-      # UNIQUEMENT les specs HERMÉTIQUES (réseau bouchonné par `page.route`), filtrées
-      # en ligne de commande — aucun script ajouté au package.json. Les autres specs
+      # UNIQUEMENT les specs HERMÉTIQUES (réseau bouchonné par `page.route`), listées
+      # dans scripts/ci.sh --e2e pour partager la sélection locale/CI. Les autres specs
       # e2e dépendent de Binance / CoinGecko en direct : les mettre ici rendrait la CI
       # instable, exactement ce que le découpage ci-dessus cherche à éviter.
       # HORS liste, et pourquoi : `gate-g6-screener` et `gate-g7-liens` (EQS live),
@@ -85,5 +83,5 @@ jobs:
       # en local sur l'overlay d'erreur du chart). Une spec qui devient hermétique
       # s'ajoute à cette liste.
       - name: e2e hermétiques (playwright)
-        run: pnpm --filter @axiom/web exec playwright test gate-g6-screener.hermetique gate-lot3-corr gate-v25-cap-dominance
-        timeout-minutes: 6 # observé ~9 s pour 6 tests en local (hors boot du serveur Vite)
+        run: pnpm check:e2e
+        timeout-minutes: 6

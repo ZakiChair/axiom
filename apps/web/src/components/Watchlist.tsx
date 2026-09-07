@@ -90,6 +90,17 @@ const DEFAULT_COLS: VisibleCols = {
   spark: true,
 };
 
+/** Largeur minimale réservée au ticker (BTCUSDT / ETHUSDT / SOLUSDT tiennent en entier). */
+export const LARGEUR_MIN_SYMBOLE_CH = 7;
+
+/** Sous 280 px (sidebar w-60 = 240), la sparkline cède la place au symbole. */
+export function colonnesWatchlistPourLargeur(largeurPx: number): { change24h: boolean; spark: boolean } {
+  return {
+    change24h: largeurPx >= 200,
+    spark: largeurPx >= 280,
+  };
+}
+
 /** Écrit une cellule de variation en % (couleur via tokens --up/--down ; « — » si absente). */
 function writePctCell(el: HTMLSpanElement, pct: number | null | undefined): void {
   if (pct === null || pct === undefined || !Number.isFinite(pct)) {
@@ -193,6 +204,8 @@ export function Watchlist() {
   const [groupDraft, setGroupDraft] = useState("");
   const [visibleCols, setVisibleCols] = useState<VisibleCols>(DEFAULT_COLS);
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" } | null>(null);
+  const [largeurListe, setLargeurListe] = useState(240);
+  const listeRef = useRef<HTMLDivElement>(null);
 
   // Cellules DOM (maj impérative) + dernières valeurs connues (tri par instantané + repaint).
   const cells = useRef(new Map<string, RowCells>());
@@ -208,11 +221,29 @@ export function Watchlist() {
     return s;
   };
 
+  const espace = colonnesWatchlistPourLargeur(largeurListe);
+  const sparkVisible = visibleCols.spark && espace.spark;
+  const change24hVisible = visibleCols.change24h && espace.change24h;
+
   // Colonnes métriques réellement visibles (ordre figé de METRIC_META).
   const metricCols = useMemo(
-    () => METRIC_META.filter((c) => visibleCols[c.key]),
-    [visibleCols]
+    () =>
+      METRIC_META.filter((c) => {
+        if (c.key === "change24h") return change24hVisible;
+        return visibleCols[c.key];
+      }),
+    [visibleCols, change24hVisible]
   );
+
+  useLayoutEffect(() => {
+    const el = listeRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const appliquer = (): void => setLargeurListe(el.getBoundingClientRect().width);
+    appliquer();
+    const obs = new ResizeObserver(appliquer);
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
 
   // Clé stable de l'ENSEMBLE des symboles (indépendante de l'ordre) : un simple
   // réordonnancement ne doit PAS reconnecter le flux ticker ni relancer le poller
@@ -288,7 +319,7 @@ export function Watchlist() {
       if (row.volume && snap.volume !== undefined) row.volume.textContent = formatCompact(snap.volume);
       if (row.spark && snap.sparkPoints) drawSparkline(row.spark, snap.sparkPoints, colors);
     });
-  }, [displayOrder, metricCols, visibleCols.spark]);
+  }, [displayOrder, metricCols, sparkVisible]);
 
   const submitAdd = () => {
     add(draft);
@@ -425,13 +456,12 @@ export function Watchlist() {
         )}
       </div>
 
-      {/* En-tête de colonnes (tri au clic) */}
+      {/* En-tête de colonnes (tri au clic). Pas d'espace réservé aux actions hors-flux. */}
       <div className="flex shrink-0 items-center gap-1.5 border-b border-border px-1.5 py-1 text-[9px] uppercase tracking-wider text-text-dim">
-        {manual && <span className="w-3 shrink-0" aria-hidden />}
         <button
           type="button"
           onClick={() => toggleSort("symbol")}
-          className="flex flex-1 items-center pl-1 text-left transition hover:text-text"
+          className="min-w-[7ch] shrink-0 pl-1 text-left transition hover:text-text"
         >
           Sym{sortMark("symbol")}
         </button>
@@ -447,14 +477,13 @@ export function Watchlist() {
             {sortMark(col.key)}
           </button>
         ))}
-        {visibleCols.spark && <span className="w-[40px] shrink-0 text-right">24h</span>}
-        <span className="w-3.5 shrink-0" aria-hidden />
+        {sparkVisible && <span className="w-[40px] shrink-0 text-right">24h</span>}
       </div>
 
       {/* Lignes — `min-h-[8rem]` (et non `min-h-0`) impose un plancher : la liste des
           paires reste visible/défilable même quand « Santé sources » se déploie et que
           l'aside doit défiler, tout en autorisant le scroll interne quand la place manque. */}
-      <div className="min-h-[8rem] flex-1 overflow-y-auto">
+      <div ref={listeRef} className="min-h-[8rem] flex-1 overflow-y-auto">
         {symbols.length === 0 && (
           <p className="px-3 py-3 text-[11px] text-text-dim">
             Aucune paire dans cet onglet. Ajoutez-en une ci-dessous.
@@ -465,12 +494,12 @@ export function Watchlist() {
           return (
             <div
               key={sym}
-              className={`group flex items-center gap-1.5 border-l-2 pr-1.5 text-sm ${
+              className={`group relative flex items-center gap-1.5 border-l-2 pr-1.5 text-sm ${
                 selected ? "border-accent bg-surface" : "border-transparent hover:bg-surface"
               }`}
             >
               {manual && (
-                <span className="flex w-3 shrink-0 flex-col opacity-0 transition group-hover:opacity-100">
+                <span className="absolute right-5 top-1/2 z-10 hidden -translate-y-1/2 flex-col group-hover:flex group-focus-within:flex">
                   <button
                     type="button"
                     onClick={() => move(sym, -1)}
@@ -494,9 +523,9 @@ export function Watchlist() {
               <button
                 type="button"
                 onClick={() => selectSymbol(sym)}
-                className="flex min-w-0 flex-1 items-center py-1.5 pl-1 text-left"
+                className="flex min-w-[7ch] shrink-0 items-center py-1.5 pl-1 text-left"
               >
-                <span className={`truncate font-medium ${selected ? "text-text" : "text-text-dim"}`}>
+                <span className={`whitespace-nowrap font-medium ${selected ? "text-text" : "text-text-dim"}`}>
                   {sym}
                 </span>
               </button>
@@ -515,7 +544,7 @@ export function Watchlist() {
                   —
                 </span>
               ))}
-              {visibleCols.spark && (
+              {sparkVisible && (
                 <canvas
                   ref={(el) => registerCell(cells.current, sym, "spark", el)}
                   width={40}
@@ -527,7 +556,7 @@ export function Watchlist() {
                 type="button"
                 onClick={() => remove(sym)}
                 aria-label={`Retirer ${sym}`}
-                className="w-3.5 shrink-0 text-text-dim opacity-0 transition hover:text-text group-hover:opacity-100"
+                className="absolute right-1 top-1/2 z-10 hidden -translate-y-1/2 text-text-dim hover:text-text group-hover:block group-focus-within:block"
               >
                 ×
               </button>

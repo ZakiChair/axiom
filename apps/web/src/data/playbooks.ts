@@ -162,6 +162,17 @@ export function applyChasseLiquidations(): void {
   liqEstStore.getState().setActif(true);
 }
 
+/**
+ * Positionnement & Squeeze : 1 graphe, DES + SQZ + screener, TF 1h.
+ * Active l'affichage du funding et ouvre les fenêtres de dérivés et de radar squeeze.
+ */
+export function applyNetPositioning(): void {
+  setLayout("1");
+  setMarche({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h" });
+  ouvrirFenetres("derivatives", "squeeze", "screener");
+  derivativesChartStore.setState({ funding: true });
+}
+
 // ─────────────────────────── Catalogue ───────────────────────────
 
 /** Playbooks seed (ordre d'affichage palette / menu). */
@@ -172,6 +183,13 @@ export const PLAYBOOKS: readonly Playbook[] = [
     mnemonique: "PLAY-SCALP",
     description: "BTC 1m · DES + DOM · orderflow + profil de volume",
     apply: applyScalpBtc,
+  },
+  {
+    id: "net-positioning",
+    nom: "Positionnement & Squeeze",
+    mnemonique: "PLAY-POS",
+    description: "BTC 1h · DES + SQZ + EQS · positionnement net & funding",
+    apply: applyNetPositioning,
   },
   {
     id: "fade-funding",

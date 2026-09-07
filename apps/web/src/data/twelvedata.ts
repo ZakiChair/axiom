@@ -220,8 +220,9 @@ interface CacheEntry {
   at: number;
   data: Candle[];
 }
-/** Cache des séries par clé `symbol|interval|outputsize`. */
+/** Cache des séries par clé `symbol|interval|outputsize|endTime`. */
 const seriesCache = new Map<string, CacheEntry>();
+const MAX_SERIES_CACHE = 32;
 /** Requêtes en vol par clé (dédup : le double-montage StrictMode = 1 seul appel). */
 const inflight = new Map<string, Promise<Candle[]>>();
 
@@ -305,12 +306,35 @@ export function parseTwelveData(json: TwelveDataResponse): Candle[] {
   return out;
 }
 
+/** `endTime` epoch ms → `YYYY-MM-DD HH:MM:SS` UTC (doc Twelve Data, timezone=UTC). */
+export function formatEndDateUtc(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
+
+export function cleCacheTwelveData(
+  symbol: string,
+  interval: string,
+  outputsize: number,
+  endTime?: number,
+): string {
+  return `${symbol}|${interval}|${outputsize}|${endTime ?? ""}`;
+}
+
+/** Écarte (ou vide) les points hors borne : pas de repli sur la queue récente. */
+export function filtrerKlinesBornes(candles: Candle[], endTime?: number): Candle[] {
+  if (endTime === undefined) return candles;
+  return candles.filter((c) => c.time <= endTime);
+}
+
 /** GET + parse, APRÈS acquisition d'un créneau de débit (respecte le quota 8/min). */
 async function requestSeries(
   symbol: string,
   interval: string,
   outputsize: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  endTime?: number,
 ): Promise<Candle[]> {
   await acquireSlot();
   const params = new URLSearchParams({
@@ -320,11 +344,12 @@ async function requestSeries(
     order: "ASC",
     timezone: "UTC",
   });
+  if (endTime !== undefined) params.set("end_date", formatEndDateUtc(endTime));
   const res = await fetch(buildTwelveDataUrl(SERIES_URL, params, apiKey), { signal });
   // Twelve Data renvoie un corps JSON d'erreur même en non-2xx → on tente de le lire.
   const json = (await res.json().catch(() => null)) as TwelveDataResponse | null;
   if (json === null) throw new Error(`Twelve Data ${res.status} ${res.statusText}`);
-  return parseTwelveData(json);
+  return filtrerKlinesBornes(parseTwelveData(json), endTime);
 }
 
 /**
@@ -333,8 +358,13 @@ async function requestSeries(
  * partagent UNE requête. Si le fetch échoue (quota/réseau), on ressert le cache PÉRIMÉ
  * s'il existe plutôt qu'un graphe vide.
  */
-async function cachedSeries(symbol: string, interval: string, outputsize: number): Promise<Candle[]> {
-  const key = `${symbol}|${interval}|${outputsize}`;
+async function cachedSeries(
+  symbol: string,
+  interval: string,
+  outputsize: number,
+  endTime?: number,
+): Promise<Candle[]> {
+  const key = cleCacheTwelveData(symbol, interval, outputsize, endTime);
   const hit = seriesCache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.data;
   const flying = inflight.get(key);
@@ -342,8 +372,14 @@ async function cachedSeries(symbol: string, interval: string, outputsize: number
 
   const p = (async () => {
     try {
-      const data = await requestSeries(symbol, interval, outputsize);
+      const data = await requestSeries(symbol, interval, outputsize, undefined, endTime);
+      seriesCache.delete(key);
       seriesCache.set(key, { at: Date.now(), data });
+      while (seriesCache.size > MAX_SERIES_CACHE) {
+        const ancienne = seriesCache.keys().next().value;
+        if (ancienne === undefined) break;
+        seriesCache.delete(ancienne);
+      }
       return data;
     } catch (err) {
       const stale = seriesCache.get(key);
@@ -363,7 +399,7 @@ export const twelveDataAdapter: IExchangeAdapter = {
   async fetchKlines(symbol, tf, opts) {
     const interval = TF_MAP[tf] ?? "1day";
     const outputsize = Math.min(opts?.limit ?? 500, 5000);
-    return cachedSeries(symbol, interval, outputsize); // cache + dédup + repli périmé
+    return cachedSeries(symbol, interval, outputsize, opts?.endTime); // cache + dédup + repli périmé
   },
 
   // Pas de WebSocket en gratuit → POLLING de la bougie courante (petit outputsize).

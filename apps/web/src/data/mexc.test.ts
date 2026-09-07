@@ -112,3 +112,142 @@ describe("mexcAdapter.subscribeKline — séquence closed:true", () => {
     ]);
   });
 });
+
+describe("mexcAdapter.fetchKlines — pagination par endTime", () => {
+  const MINUTE = 60_000;
+  const PAGE_A = 1_700_000_000_000;
+  const PAGE_B = PAGE_A - 500 * MINUTE;
+
+  function tuple(time: number): unknown[] {
+    return [time, "1", "2", "0.5", "1.5", "10", time + MINUTE - 1, "15"];
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("transmet endTime et distingue deux pages disjointes par la clé de cache", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      const end = Number(url.searchParams.get("endTime"));
+      const debut = end === PAGE_A - 1 ? PAGE_B : PAGE_A;
+      const body = Array.from({ length: 2 }, (_, i) => tuple(debut + i * MINUTE));
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const recente = await mexcAdapter.fetchKlines("PAGEMEXCA", "1m", { limit: 2, endTime: PAGE_A - 1 });
+    const ancienne = await mexcAdapter.fetchKlines("PAGEMEXCA", "1m", { limit: 2, endTime: PAGE_B - 1 });
+
+    const urls = fetchMock.mock.calls.map(([input]) => new URL(String(input), "http://localhost"));
+    expect(urls).toHaveLength(2);
+    expect(urls[0]!.searchParams.get("endTime")).toBe(String(PAGE_A - 1));
+    expect(urls[1]!.searchParams.get("endTime")).toBe(String(PAGE_B - 1));
+    expect(urls[0]!.searchParams.get("endTime")).not.toBe(urls[1]!.searchParams.get("endTime"));
+    expect(recente.map((c) => c.time)).not.toEqual(ancienne.map((c) => c.time));
+  });
+
+  it("ressert le cache pour la même borne (zéro second appel)", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({ ok: true, json: () => Promise.resolve([tuple(PAGE_A)]) }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mexcAdapter.fetchKlines("CACHEMEXC", "1m", { limit: 1, endTime: PAGE_A });
+    await mexcAdapter.fetchKlines("CACHEMEXC", "1m", { limit: 1, endTime: PAGE_A });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("points hors période → vide (pas de repli sur la queue récente)", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve([tuple(PAGE_A), tuple(PAGE_A + MINUTE)]),
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const hors = await mexcAdapter.fetchKlines("HORSMEXC", "1m", {
+      limit: 2,
+      endTime: PAGE_A - 1,
+    });
+    expect(hors).toEqual([]);
+  });
+});
+
+describe("mexcAdapter.fetchKlines — TTL 30 s et cache borné", () => {
+  const MINUTE = 60_000;
+  const T0 = 1_710_000_000_000;
+  const TTL_MS = 30_000;
+  /** Borne raisonnable (session) : au-delà, la plus ancienne entrée est évincée. */
+  const BORNE = 32;
+
+  function tuple(time: number): unknown[] {
+    return [time, "1", "2", "0.5", "1.5", "10", time + MINUTE - 1, "15"];
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("avant expiration : même symbole/TF/endTime ressert le cache (zéro second fetch)", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({ ok: true, json: () => Promise.resolve([tuple(T0)]) }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mexcAdapter.fetchKlines("TTLMEXC", "1m", { limit: 1, endTime: T0 });
+    vi.setSystemTime(T0 + TTL_MS - 1);
+    await mexcAdapter.fetchKlines("TTLMEXC", "1m", { limit: 1, endTime: T0 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("après expiration : nouvelle requête (plus la vieille queue indéfiniment)", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({ ok: true, json: () => Promise.resolve([tuple(T0)]) }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mexcAdapter.fetchKlines("TTLMEXC2", "1m", { limit: 1, endTime: T0 });
+    vi.setSystemTime(T0 + TTL_MS);
+    await mexcAdapter.fetchKlines("TTLMEXC2", "1m", { limit: 1, endTime: T0 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("pages endTime distinctes : deux fetches, deux files disjointes", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      const end = Number(url.searchParams.get("endTime"));
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([tuple(end)]) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const a = await mexcAdapter.fetchKlines("TTLPAGES", "1m", { limit: 1, endTime: T0 });
+    const b = await mexcAdapter.fetchKlines("TTLPAGES", "1m", { limit: 1, endTime: T0 - MINUTE });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(a.map((c) => c.time)).toEqual([T0]);
+    expect(b.map((c) => c.time)).toEqual([T0 - MINUTE]);
+  });
+
+  it("éviction de la borne : la plus ancienne clé refetch après saturation", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      const end = Number(url.searchParams.get("endTime") ?? T0);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([tuple(end)]) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (let i = 0; i <= BORNE; i++) {
+      await mexcAdapter.fetchKlines(`BORNE${i}`, "1m", { limit: 1, endTime: T0 + i });
+    }
+    const fetchesApresRemplissage = fetchMock.mock.calls.length;
+    await mexcAdapter.fetchKlines("BORNE0", "1m", { limit: 1, endTime: T0 });
+    expect(fetchMock.mock.calls.length).toBe(fetchesApresRemplissage + 1);
+  });
+});

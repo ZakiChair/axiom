@@ -35,7 +35,15 @@ describe("raisonUnusableIndicateur", () => {
     ).toBe("Volume non défini sur une série synthétique");
   });
 
-  it.each(["cvd", "volumeDelta", "takerBuyRatio", "cvdDivergence", "cvdSpotPerp"])(
+  it.each([
+    "cvd",
+    "volumeDelta",
+    "takerBuyRatio",
+    "cvdDivergence",
+    "cvdSpotPerp",
+    "takerNetPct",
+    "stratSpotBreakout",
+  ])(
     "%s exige les volumes split de Binance",
     (id) => {
       expect(
@@ -151,6 +159,8 @@ describe("raisonUnusableIndicateur", () => {
       "basisPct",
       "lsAccountRatio",
       "cvdSpotPerp",
+      "stratNetPositionFade",
+      "stratSmartMoneyDivergence",
     ]) {
       expect(raisonUnusableIndicateur(def(id), binanceBtc), id).toBeNull();
       expect(
@@ -180,8 +190,8 @@ describe("raisonUnusableIndicateur", () => {
     }
   });
 
-  it("accepte les 179 définitions sans lever", () => {
-    expect(INDICATORS).toHaveLength(179);
+  it("accepte les 187 définitions sans lever", () => {
+    expect(INDICATORS).toHaveLength(187);
     for (const indicateur of INDICATORS) {
       expect(() => raisonUnusableIndicateur(indicateur, binanceBtc), indicateur.id).not.toThrow();
     }

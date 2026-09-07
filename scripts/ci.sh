@@ -5,10 +5,20 @@
 # Usage (racine du repo) :
 #   pnpm check
 #   ./scripts/ci.sh
+#   pnpm check:e2e   # parcours navigateur hermétiques uniquement (Chromium installé)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+if [[ "${1:-}" == "--e2e" && "$#" == 1 ]]; then
+  exec pnpm --filter @axiom/web exec playwright test \
+    gate-g6-screener.hermetique gate-lot3-corr gate-v25-cap-dominance \
+    gate-g3-playbooks corrections-revue
+elif [[ "$#" != 0 ]]; then
+  echo "Usage : $0 [--e2e]" >&2
+  exit 2
+fi
 
 echo "==> [ci] typecheck"
 pnpm -r typecheck

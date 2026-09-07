@@ -23,7 +23,8 @@
  *   GET    /replay/jours                                 → jours téléchargés (panneau stockage)
  *   DELETE /replay/trades/:symbole/:jour                 → purge d'un jour
  */
-import { unlink } from "node:fs/promises";
+import type { Database } from "bun:sqlite";
+import { open, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { entetesCors } from "./cors";
@@ -36,6 +37,10 @@ const BASE_VISION = "https://data.binance.vision/data/spot/daily/aggTrades";
 const TAILLE_LOT = 50_000;
 /** Garde-fou : nombre max de trades acceptés pour un jour (évite un run fou). */
 const MAX_LIGNES = 20_000_000;
+/** Taille du ZIP reçue, contrôlée pendant la lecture, avant chaque écriture disque. */
+const MAX_OCTETS_ZIP = 512 * 1024 * 1024;
+/** Une ligne CSV malformée sans séparateur ne doit pas grossir sans limite en RAM. */
+const MAX_CARACTERES_LIGNE = 64 * 1024;
 /** Garde-fou concurrence : nombre max de téléchargements simultanés. */
 const MAX_TELECHARGEMENTS = 3;
 /**
@@ -175,39 +180,53 @@ export async function lireTradesDepuisProcessus(
   };
 
   const lecteur = proc.stdout.getReader();
-  for (;;) {
-    const { done, value } = await lecteur.read();
-    if (done) break;
-    if (value) reste += decodeur.decode(value, { stream: true });
-    let nl = reste.indexOf("\n");
-    while (nl !== -1) {
-      const ligne = reste.slice(0, nl);
-      reste = reste.slice(nl + 1);
-      const tr = parseLigneTrade(ligne);
-      if (tr !== null) {
-        lot.push(tr);
-        if (lot.length >= tailleLot) viderLot();
-        if (recus + lot.length > maxLignes) {
-          deborde = true;
-          break;
+  try {
+    for (;;) {
+      const { done, value } = await lecteur.read();
+      if (done) break;
+      if (value) reste += decodeur.decode(value, { stream: true });
+      let nl = reste.indexOf("\n");
+      while (nl !== -1) {
+        if (nl > MAX_CARACTERES_LIGNE) throw new Error("ligne CSV replay trop volumineuse");
+        const ligne = reste.slice(0, nl);
+        reste = reste.slice(nl + 1);
+        const tr = parseLigneTrade(ligne);
+        if (tr !== null) {
+          lot.push(tr);
+          if (lot.length >= tailleLot) viderLot();
+          if (recus + lot.length > maxLignes) {
+            deborde = true;
+            break;
+          }
         }
+        nl = reste.indexOf("\n");
       }
-      nl = reste.indexOf("\n");
+      if (deborde) break;
+      if (reste.length > MAX_CARACTERES_LIGNE) throw new Error("ligne CSV replay trop volumineuse");
     }
-    if (deborde) break;
-  }
-  if (deborde) {
-    proc.kill();
+    if (!deborde) {
+      // Dernière ligne éventuelle (sans \n final), soumise à la même borne.
+      reste += decodeur.decode();
+      const tr = parseLigneTrade(reste);
+      if (tr !== null) lot.push(tr);
+      deborde = recus + lot.length > maxLignes;
+    }
+    if (deborde) {
+      proc.kill();
+      await lecteur.cancel().catch(() => {});
+    }
+    viderLot();
+    const code = await proc.exited;
+    if (!deborde && code !== 0) throw new Error(`archive replay illisible (unzip ${code})`);
+    return { recus, deborde };
+  } catch (err) {
+    try { proc.kill(); } catch { /* déjà terminé */ }
     await lecteur.cancel().catch(() => {});
-  } else {
+    await proc.exited.catch(() => {});
+    throw err;
+  } finally {
     lecteur.releaseLock();
-    // Dernière ligne éventuelle (sans \n final).
-    const tr = parseLigneTrade(reste);
-    if (tr !== null) lot.push(tr);
   }
-  viderLot();
-  await proc.exited;
-  return { recus, deborde };
 }
 
 // ─────────────────────────── Validation & parsing de chemin (PURES) ───────────────────────────
@@ -281,8 +300,9 @@ function majJob(
   recus: number,
   octets: number,
   erreur: string | null,
+  connexion: Database = db(),
 ): void {
-  db()
+  connexion
     .query(
       `INSERT OR REPLACE INTO replay_jobs (symbole, jour, etat, recus, octets, erreur, majA)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -304,13 +324,73 @@ function lireJob(symbole: string, jour: string): Record<string, unknown> | null 
  * Best-effort : toute erreur bascule le job en `erreur`. Le fichier zip temporaire
  * est supprimé en fin (finally).
  */
-async function executerTelechargement(symbole: string, jour: string): Promise<void> {
-  const cheminTmp = join(tmpdir(), `axiom-replay-${symbole}-${jour}-${Date.now()}.zip`);
-  let proc: ReturnType<typeof Bun.spawn> | null = null;
+interface OptionsTelechargement {
+  db?: Database;
+  tmpDir?: string;
+  tailleMaxZip?: number;
+  tailleLot?: number;
+  maxLignes?: number;
+  fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
+  spawnUnzip?: (chemin: string) => ProcessusUnzip;
+}
+
+/** Copie bornée : ni arrayBuffer() ni accumulation des chunks du ZIP. */
+async function enregistrerZip(rep: Response, chemin: string, maxOctets: number): Promise<number> {
+  const tailleAnnoncee = Number(rep.headers.get("content-length"));
+  if (tailleAnnoncee > maxOctets) {
+    await rep.body?.cancel().catch(() => {});
+    throw new Error(`dump replay trop volumineux (> ${maxOctets} octets)`);
+  }
+  if (!rep.body) throw new Error("archive replay vide");
+  const lecteur = rep.body.getReader();
+  let fichier: Awaited<ReturnType<typeof open>> | undefined;
+  let total = 0;
   try {
-    majJob(symbole, jour, "en_cours", 0, 0, null);
+    fichier = await open(chemin, "wx", 0o600);
+    for (;;) {
+      const { done, value } = await lecteur.read();
+      if (done) break;
+      if (total + value.byteLength > maxOctets) {
+        throw new Error(`dump replay trop volumineux (> ${maxOctets} octets)`);
+      }
+      let ecrits = 0;
+      while (ecrits < value.byteLength) {
+        const { bytesWritten } = await fichier.write(value, ecrits, value.byteLength - ecrits);
+        if (bytesWritten === 0) throw new Error("écriture du ZIP replay interrompue");
+        ecrits += bytesWritten;
+      }
+      total += value.byteLength;
+    }
+    return total;
+  } catch (err) {
+    await lecteur.cancel().catch(() => {});
+    throw err;
+  } finally {
+    lecteur.releaseLock();
+    await fichier?.close();
+  }
+}
+
+export async function executerTelechargement(
+  symbole: string,
+  jour: string,
+  options: OptionsTelechargement = {},
+): Promise<void> {
+  const connexion = options.db ?? db();
+  const cheminTmp = join(options.tmpDir ?? tmpdir(), `axiom-replay-${crypto.randomUUID()}.zip`);
+  const maxLignes = options.maxLignes ?? MAX_LIGNES;
+  let proc: ProcessusUnzip | null = null;
+  let octetsZip = 0;
+  const purgerJour = (): void => {
+    connexion.query("DELETE FROM replay_trades WHERE symbole = ? AND jour = ?").run(symbole, jour);
+  };
+  const maj = (etat: string, recus: number, erreur: string | null): void => {
+    majJob(symbole, jour, etat, recus, octetsZip, erreur, connexion);
+  };
+  try {
+    maj("en_cours", 0, null);
     // Repart propre : purge un éventuel jour partiel d'un run précédent.
-    db().query("DELETE FROM replay_trades WHERE symbole = ? AND jour = ?").run(symbole, jour);
+    purgerJour();
 
     const url = `${BASE_VISION}/${symbole}/${symbole}-aggTrades-${jour}.zip`;
     const controleur = new AbortController();
@@ -318,59 +398,57 @@ async function executerTelechargement(symbole: string, jour: string): Promise<vo
       () => controleur.abort(new Error(`timeout dump replay dépassé (${TELECHARGEMENT_TIMEOUT_MS} ms)`)),
       TELECHARGEMENT_TIMEOUT_MS,
     );
-    let rep: Response;
-    let octetsZip: ArrayBuffer;
     try {
-      rep = await fetch(url, { signal: controleur.signal });
+      const rep = await (options.fetchImpl ?? fetch)(url, { signal: controleur.signal });
       if (!rep.ok) {
         const msg =
           rep.status === 404
             ? "dump introuvable (jour trop récent ou symbole inexistant)"
             : `amont ${rep.status}`;
-        majJob(symbole, jour, "erreur", 0, 0, msg);
-        return;
+        await rep.body?.cancel().catch(() => {});
+        throw new Error(msg);
       }
-      octetsZip = await rep.arrayBuffer();
+      octetsZip = await enregistrerZip(rep, cheminTmp, options.tailleMaxZip ?? MAX_OCTETS_ZIP);
     } finally {
       clearTimeout(minuteur);
     }
-    await Bun.write(cheminTmp, octetsZip);
+    if (options.spawnUnzip) {
+      proc = options.spawnUnzip(cheminTmp);
+    } else {
+      // stderr ignoré : un diagnostic massif ne doit pas bloquer unzip sur un pipe non lu.
+      const child = Bun.spawn(["unzip", "-p", cheminTmp], { stdout: "pipe", stderr: "ignore" });
+      proc = { stdout: child.stdout, kill: () => child.kill("SIGKILL"), exited: child.exited };
+    }
 
-    proc = Bun.spawn(["unzip", "-p", cheminTmp], { stdout: "pipe", stderr: "pipe" });
-
-    const inserer = db().query(
+    const inserer = connexion.query(
       "INSERT INTO replay_trades (symbole, jour, t, prix, qty, isBuyerMaker) VALUES (?, ?, ?, ?, ?, ?)",
     );
-    const insererLot = db().transaction((lot: LigneTrade[]) => {
+    const insererLot = connexion.transaction((lot: LigneTrade[]) => {
       for (const tr of lot) inserer.run(symbole, jour, tr.t, tr.prix, tr.qty, tr.isBuyerMaker);
     });
 
     let inseres = 0;
     const { recus, deborde } = await lireTradesDepuisProcessus(
-      {
-        stdout: proc.stdout as ReadableStream<Uint8Array>,
-        kill: () => proc?.kill(),
-        exited: proc.exited,
-      },
+      proc,
       (lot) => {
         insererLot(lot);
         inseres += lot.length;
-        majJob(symbole, jour, "en_cours", inseres, octetsZip.byteLength, null);
+        maj("en_cours", inseres, null);
       },
+      maxLignes,
+      options.tailleLot ?? TAILLE_LOT,
     );
 
     if (deborde) {
-      majJob(symbole, jour, "erreur", recus, octetsZip.byteLength, `jour trop volumineux (> ${MAX_LIGNES} trades)`);
-      return;
+      throw new Error(`jour trop volumineux (> ${maxLignes} trades)`);
     }
     if (recus === 0) {
-      majJob(symbole, jour, "erreur", 0, octetsZip.byteLength, "archive vide ou illisible");
-      return;
+      throw new Error("archive vide ou illisible");
     }
-    majJob(symbole, jour, "pret", recus, octetsZip.byteLength, null);
+    maj("pret", recus, null);
     console.log(
       `[axiomd:replay] ${symbole} ${jour} : ${recus} trades insérés ` +
-        `(${(octetsZip.byteLength / 1_048_576).toFixed(1)} Mo zip).`,
+        `(${(octetsZip / 1_048_576).toFixed(1)} Mo zip).`,
     );
   } catch (err) {
     // Même défaut sur le chemin d'erreur : sans kill, Bun drainerait le stdout restant.
@@ -379,9 +457,11 @@ async function executerTelechargement(symbole: string, jour: string): Promise<vo
     } catch {
       /* best-effort */
     }
-    majJob(symbole, jour, "erreur", 0, 0, err instanceof Error ? err.message : String(err));
+    purgerJour();
+    maj("erreur", 0, err instanceof Error ? err.message : String(err));
   } finally {
-    void unlink(cheminTmp).catch(() => {
+    await proc?.exited.catch(() => {});
+    await unlink(cheminTmp).catch(() => {
       /* nettoyage best-effort */
     });
   }

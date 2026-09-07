@@ -74,21 +74,71 @@ export function parseMexcKlines(raw: unknown, now: number): Candle[] {
   return out;
 }
 
-/** GET + parse des klines pour (symbole, interval, limit). */
+/** Écarte (ou vide) les points hors borne : pas de repli sur la queue récente. */
+export function filtrerKlinesBornes(candles: Candle[], endTime?: number): Candle[] {
+  if (endTime === undefined) return candles;
+  return candles.filter((c) => c.time <= endTime);
+}
+
+export function cleCacheMexc(
+  symbol: string,
+  interval: string,
+  limit: number,
+  endTime?: number,
+): string {
+  return `${symbol}|${interval}|${limit}|${endTime ?? ""}`;
+}
+
+/** Cohérent TwelveData : revisiter un symbole/TF dans les 30 s = 0 appel. */
+const CACHE_TTL_MS = 30_000;
+/** Borne mémoire session : évince la plus ancienne entrée au-delà. */
+const TAILLE_MAX_CACHE = 32;
+
+interface EntreeCacheMexc {
+  at: number;
+  data: Candle[];
+}
+
+const seriesCache = new Map<string, EntreeCacheMexc>();
+const inflight = new Map<string, Promise<Candle[]>>();
+
+function lireCacheMexc(key: string, now: number): Candle[] | undefined {
+  const hit = seriesCache.get(key);
+  if (!hit) return undefined;
+  if (now - hit.at >= CACHE_TTL_MS) {
+    seriesCache.delete(key);
+    return undefined;
+  }
+  return hit.data;
+}
+
+function poserCacheMexc(key: string, data: Candle[], now: number): void {
+  if (seriesCache.has(key)) seriesCache.delete(key);
+  seriesCache.set(key, { at: now, data });
+  while (seriesCache.size > TAILLE_MAX_CACHE) {
+    const plusAncienne = seriesCache.keys().next().value;
+    if (plusAncienne === undefined) break;
+    seriesCache.delete(plusAncienne);
+  }
+}
+
+/** GET + parse des klines pour (symbole, interval, limit [, endTime]). */
 async function fetchKlines(
   symbol: string,
   interval: string,
   limit: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  endTime?: number,
 ): Promise<Candle[]> {
   const params = new URLSearchParams({
     symbol: symbol.toUpperCase(),
     interval,
     limit: String(limit),
   });
+  if (endTime !== undefined) params.set("endTime", String(endTime));
   const res = await fetch(`${KLINES_URL}?${params.toString()}`, { signal });
   if (!res.ok) throw new Error(`MEXC ${res.status} ${res.statusText}`);
-  return parseMexcKlines(await res.json(), Date.now());
+  return filtrerKlinesBornes(parseMexcKlines(await res.json(), Date.now()), endTime);
 }
 
 export const mexcAdapter: IExchangeAdapter = {
@@ -97,7 +147,20 @@ export const mexcAdapter: IExchangeAdapter = {
   async fetchKlines(symbol, tf, opts) {
     const interval = TF_MAP[tf] ?? "1d";
     const limit = Math.min(opts?.limit ?? 500, 1000);
-    return fetchKlines(symbol, interval, limit);
+    const endTime = opts?.endTime;
+    const key = cleCacheMexc(symbol, interval, limit, endTime);
+    const hit = lireCacheMexc(key, Date.now());
+    if (hit) return hit;
+    const flying = inflight.get(key);
+    if (flying) return flying;
+    const p = fetchKlines(symbol, interval, limit, undefined, endTime).then((data) => {
+      poserCacheMexc(key, data, Date.now());
+      return data;
+    }).finally(() => {
+      inflight.delete(key);
+    });
+    inflight.set(key, p);
+    return p;
   },
 
   // WS spot MEXC = protobuf → POLLING REST de la bougie courante.

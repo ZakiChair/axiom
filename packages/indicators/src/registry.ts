@@ -134,6 +134,7 @@ import { cvd } from "./orderflow/cvd";
 import { volumeDelta } from "./orderflow/volumeDelta";
 import { takerBuyRatio } from "./orderflow/takerBuyRatio";
 import { netVolume } from "./orderflow/netVolume";
+import { takerNetPct } from "./orderflow/takerNetPct";
 
 // — billwilliams —
 import { alligator } from "./billwilliams/alligator";
@@ -180,6 +181,10 @@ import { lthSopr } from "./derivatives/lthSopr";
 import { rhodlRatio } from "./derivatives/rhodlRatio";
 import { cvdd } from "./derivatives/cvdd";
 import { balancedPrice } from "./derivatives/balancedPrice";
+import { netPositioningIndex } from "./derivatives/netPositioningIndex";
+import { netPositioningTopTrader } from "./derivatives/netPositioningTopTrader";
+import { smartRetailSpread } from "./derivatives/smartRetailSpread";
+import { squeezePressureIndex } from "./derivatives/squeezePressureIndex";
 
 // — stratégies (v2.1 — divergences & spot/perp reclassés) —
 import { rsiDivergence } from "./strategy/rsiDivergence";
@@ -215,6 +220,11 @@ import { stratMacdSupertrend } from "./strategy/stratMacdSupertrend";
 import { stratPsarAdx } from "./strategy/stratPsarAdx";
 import { stratTripleConfirmation } from "./strategy/stratTripleConfirmation";
 import { stratRsiRange } from "./strategy/stratRsiRange";
+
+// — stratégies (v2.8 — positionnement & orderflow) —
+import { stratNetPositionFade } from "./strategy/stratNetPositionFade";
+import { stratSmartMoneyDivergence } from "./strategy/stratSmartMoneyDivergence";
+import { stratSpotBreakout } from "./strategy/stratSpotBreakout";
 
 export const INDICATORS: IndicatorDef[] = [
   // trend
@@ -335,6 +345,7 @@ export const INDICATORS: IndicatorDef[] = [
   volumeDelta,
   takerBuyRatio,
   netVolume,
+  takerNetPct,
   // billwilliams
   alligator,
   fractals,
@@ -378,6 +389,10 @@ export const INDICATORS: IndicatorDef[] = [
   rhodlRatio,
   cvdd,
   balancedPrice,
+  netPositioningIndex,
+  netPositioningTopTrader,
+  smartRetailSpread,
+  squeezePressureIndex,
   // — stratégies (v2.1 — divergences & spot/perp reclassés)
   rsiDivergence,
   macdDivergence,
@@ -409,6 +424,10 @@ export const INDICATORS: IndicatorDef[] = [
   stratPsarAdx,
   stratTripleConfirmation,
   stratRsiRange,
+  // — stratégies (v2.8 — positionnement & orderflow)
+  stratNetPositionFade,
+  stratSmartMoneyDivergence,
+  stratSpotBreakout,
 ];
 
 export function getIndicator(id: string): IndicatorDef | undefined {

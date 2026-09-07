@@ -329,7 +329,7 @@ function dessinerEquity(canvas: HTMLCanvasElement, resultat: ResultatBacktest, d
   if (points.length < 2) {
     ctx.fillStyle = colDim;
     ctx.font = "11px sans-serif";
-    ctx.fillText("Equity : trop peu de points (aucun trade).", 8, hauteur / 2);
+    ctx.fillText("Equity : trop peu de bougies.", 8, hauteur / 2);
     return;
   }
 
@@ -338,7 +338,7 @@ function dessinerEquity(canvas: HTMLCanvasElement, resultat: ResultatBacktest, d
   if (visibles.length < 2) {
     ctx.fillStyle = colDim;
     ctx.font = "11px sans-serif";
-    ctx.fillText("Equity : trop peu de points (aucun trade).", 8, hauteur / 2);
+    ctx.fillText("Equity : trop peu de bougies visibles.", 8, hauteur / 2);
     return;
   }
 
@@ -471,8 +471,8 @@ function EquityCanvas({ resultat }: { resultat: ResultatBacktest }) {
   useEffect(() => {
     const canvas = refCanvas.current;
     if (canvas === null) return;
-    // Moins de 2 points (0 trade) → bornes/domaine restent null, mais dessinerEquity doit
-    // quand même tourner pour afficher son message « trop peu de points » (le domaine de
+    // Moins de 2 points (aucune bougie) → bornes/domaine restent null, mais dessinerEquity doit
+    // quand même tourner pour afficher son message « trop peu de bougies » (le domaine de
     // repli n'est jamais lu : le early-return de la fonction survient avant tout usage).
     const d = domaine ?? { min: 0, max: 1 };
     const redraw = (): void => dessinerEquity(canvas, resultat, d);
@@ -924,7 +924,7 @@ function StatsGrid({ resultat }: { resultat: ResultatBacktest }) {
         disposition="inline"
       />
       <div className="grid grid-cols-3 gap-1.5">
-        <TuileStat label="Drawdown max" valeur={formatPourcentage(s.maxDrawdownPct, 1)} ton="down" />
+        <TuileStat label="Drawdown max" valeur={formatPourcentage(s.maxDrawdownPct, 1)} ton="down" title="Plus forte baisse de l'équité aux clôtures, pertes latentes et frais inclus ; hors variations intrabar." />
         <TuileStat label="Facteur de profit" valeur={formatPF(s.profitFactor)} />
         <TuileStat label="Sharpe (annualisé)" valeur={formatDec(s.sharpe)} />
       </div>

@@ -412,8 +412,9 @@ export function runBacktest(
 // ─────────────────────────── Equity curve & drawdown ───────────────────────────
 
 /**
- * Construit l'equity curve : point initial (capital, 1re bougie) puis un point par trade
- * (capital cumulé + drawdown vs plus haut atteint). PURE.
+ * Construit l'équité à chaque clôture : capital réalisé + PnL latent de la position
+ * ouverte, frais d'entrée déjà déduits. Trades et bougies sont chronologiques, avec
+ * une seule position à la fois (contrat du moteur). Parcours O(bougies + trades).
  */
 export function construireEquity(
   trades: TradeResultat[],
@@ -424,11 +425,31 @@ export function construireEquity(
   const points: PointEquity[] = [{ temps: t0, equity: capitalInitial, drawdownPct: 0 }];
   let capital = capitalInitial;
   let pic = capitalInitial;
-  for (const t of trades) {
-    capital += t.pnl;
-    if (capital > pic) pic = capital;
-    const dd = pic > 0 ? ((pic - capital) / pic) * 100 : 0;
-    points.push({ temps: t.tempsSortie, equity: capital, drawdownPct: dd });
+  let indexTrade = 0;
+  for (const bougie of candles) {
+    // Les sorties ordinaires sont exécutées à l'open de cette barre. La sortie
+    // fin-donnees se fait à son close : dans les deux cas, le PnL est réalisé au
+    // point de clôture. Le net du trade inclut déjà les frais des DEUX côtés.
+    while (indexTrade < trades.length) {
+      const trade = trades[indexTrade];
+      if (trade === undefined || trade.tempsSortie > bougie.time) break;
+      capital += trade.pnl;
+      indexTrade++;
+    }
+    let equity = capital;
+    const ouverte = trades[indexTrade];
+    if (ouverte !== undefined && ouverte.tempsEntree <= bougie.time) {
+      const latent = ouverte.quantite * (bougie.close - ouverte.prixEntree) *
+        (ouverte.sens === "long" ? 1 : -1);
+      // Même taux sur chaque notionnel : cette répartition restitue exactement
+      // les frais d'entrée sans modifier le format public de TradeResultat.
+      const sommePrix = ouverte.prixEntree + ouverte.prixSortie;
+      const fraisEntree = sommePrix > 0 ? ouverte.frais * ouverte.prixEntree / sommePrix : 0;
+      equity += latent - fraisEntree;
+    }
+    if (equity > pic) pic = equity;
+    const dd = pic > 0 ? ((pic - equity) / pic) * 100 : 0;
+    points.push({ temps: bougie.time, equity, drawdownPct: dd });
   }
   return points;
 }

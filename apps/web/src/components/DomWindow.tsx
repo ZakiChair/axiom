@@ -425,7 +425,7 @@ function dessinerCout(
   }
 
   ctx.fillStyle = rgbCss(tk.textDim);
-  ctx.font = "9px ui-sans-serif, system-ui, sans-serif";
+  ctx.font = POLICE_CANVAS;
   const best = meilleursNiveaux(livre);
   let couverture = "—";
   if (best) {

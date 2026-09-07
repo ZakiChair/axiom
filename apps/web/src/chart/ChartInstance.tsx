@@ -211,6 +211,108 @@ export function limitePageSession(
   return Math.min(limitePage, Math.ceil((premierTime - cible) / tfMs));
 }
 
+/** Vrai si une définition sessionnée active exige un historique plus ancien que le buffer. */
+export function doitEtendreSession(
+  defIds: string[],
+  premierTime: number,
+  dernierTime: number,
+): boolean {
+  const cible = cibleSessionUTC(defIds, dernierTime);
+  return cible !== undefined && premierTime > cible;
+}
+
+/** Une pagination concurrente peut avoir préfixé le buffer pendant la requête. */
+export function bougiesAvantBuffer(fetched: Candle[], buffer: Candle[], avantTime: number): Candle[] {
+  const borne = Math.min(avantTime, buffer[0]?.time ?? avantTime);
+  // Le buffer contient déjà une bougie plus récente : la queue d'une page historique
+  // (Twelve Data la marque ouverte par défaut) est donc clôturée. Ne pas muter le cache.
+  return fetched.filter((c) => c.time < borne).map((c) => c.closed === true ? c : { ...c, closed: true });
+}
+
+export interface ParamsExtensionSession {
+  cible: number;
+  tfMs: number;
+  limitePage: number;
+  maxPages?: number;
+  lirePremierTime: () => number | undefined;
+  chargerPlusAncien: (avantTime: number, limit: number) => Promise<number>;
+  estAnnule?: () => boolean;
+}
+
+/**
+ * Boucle d'extension : pages successives jusqu'à la cible, 0 requête si déjà couverte.
+ * S'arrête aussi si `estAnnule` (identité/révision invalidée) ou si la source est à sec.
+ */
+export async function etendreSessionJusqua(params: ParamsExtensionSession): Promise<number> {
+  const maxPages = params.maxPages ?? MAX_PAGES_SESSION;
+  let pages = 0;
+  for (let page = 0; page < maxPages; page++) {
+    if (params.estAnnule?.()) return pages;
+    const premierTime = params.lirePremierTime();
+    if (premierTime === undefined) return pages;
+    const limit = limitePageSession(premierTime, params.cible, params.tfMs, params.limitePage);
+    if (limit === 0) return pages;
+    const recus = await params.chargerPlusAncien(premierTime, limit);
+    pages += 1;
+    if (recus === 0) {
+      const nouveauPremier = params.lirePremierTime();
+      // Une page déjà ajoutée par le scroll est redondante, pas une fin d'historique.
+      if (nouveauPremier === undefined || nouveauPremier >= premierTime) return pages;
+    }
+  }
+  return pages;
+}
+
+/** Kraken ignore `endTime` (~720 bougies) : une page demandée et vide = plafond atteint. */
+export function doitSignalerLimiteKraken(
+  exchange: ExchangeId,
+  limitDemandee: number,
+  olderRecus: number,
+): boolean {
+  return exchange === "kraken" && limitDemandee > 0 && olderRecus === 0;
+}
+
+export const MESSAGE_LIMITE_KRAKEN = "Historique Kraken limité à ~720 bougies";
+
+export interface ParamsOrdonnanceurExtension {
+  estAnnule: () => boolean;
+  peutLancer: () => boolean;
+  executer: () => Promise<void>;
+}
+
+/**
+ * File d'attente d'une extension à la fois (VWAP puis pivots) : un second
+ * `demander` pendant l'exécution est rejoué après, sauf identité/révision
+ * invalidée.
+ */
+export function creerOrdonnanceurExtension(params: ParamsOrdonnanceurExtension): {
+  demander: () => void;
+} {
+  let enCours = false;
+  let enAttente = false;
+  const demander = (): void => {
+    if (params.estAnnule()) return;
+    if (enCours) {
+      enAttente = true;
+      return;
+    }
+    if (!params.peutLancer()) return;
+    enCours = true;
+    void params.executer().finally(() => {
+      enCours = false;
+      if (params.estAnnule() || !params.peutLancer()) {
+        enAttente = false;
+        return;
+      }
+      if (enAttente) {
+        enAttente = false;
+        demander();
+      }
+    });
+  };
+  return { demander };
+}
+
 /** Timeframes proposés dans l'en-tête d'un slot secondaire (sous-ensemble commun). */
 const SECONDARY_TFS: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1d"];
 /** Sources proposées dans l'en-tête d'un slot secondaire. */
@@ -490,6 +592,7 @@ export function ChartInstance({
   // render-loop. Il porte la provenance du dernier succès et l'état de la requête courante.
   const dataLoad = useStore(store, (s) => s.dataLoad);
   const [retryRevision, setRetryRevision] = useState(0);
+  const [limiteKrakenVisible, setLimiteKrakenVisible] = useState(false);
   const focus = useStore(chartLayoutStore, (s) => s.focus);
   const layout = useStore(chartLayoutStore, (s) => s.layout);
   const orderflowEnabled = useStore(orderflowStore, (s) => s.enabled);
@@ -851,6 +954,8 @@ export function ChartInstance({
     // rien faire après le teardown. Sert aussi de garde d'idempotence au teardown lui-même.
     let cancelled = false;
     let unsubscribe: Unsubscribe | null = null;
+    let unsubscribeExtensionChaud: (() => void) | null = null;
+    setLimiteKrakenVisible(false);
     // Chien de garde du backfill : coupé par `teardownData` si le run d'effet s'arrête
     // pendant que la requête REST est encore en vol.
     let annulerDelaiBackfill: (() => void) | null = null;
@@ -889,6 +994,7 @@ export function ChartInstance({
           chart.clearData();
           return;
         }
+        if (exchange === "kraken") setLimiteKrakenVisible(true);
 
         // Préservation best-effort du cadrage (même source ET même actif — un changement
         // de TF conserve le zoom relatif). Sur un vrai changement d'actif, klinecharts ne
@@ -945,8 +1051,11 @@ export function ChartInstance({
             endTime: avantTime - 1,
           });
           if (cancelled || !isMarketDataReady(store.getState(), requestedIdentity, requestId)) return [];
-          const older = fetched.filter((c) => c.time < avantTime);
-          if (older.length === 0) return [];
+          const older = bougiesAvantBuffer(fetched, store.getState().candles, avantTime);
+          if (older.length === 0) {
+            if (doitSignalerLimiteKraken(exchange, limit, 0)) setLimiteKrakenVisible(true);
+            return [];
+          }
           const merged = older.concat(store.getState().candles);
           store.getState().setCandles(merged);
           indicators.recompute(indicatorsStore.getState().indicators, merged, exchange);
@@ -996,37 +1105,55 @@ export function ChartInstance({
         // inchangé sinon), et jamais au-delà de la veille (`cibleSessionUTC`).
         // Lancé APRÈS le premier rendu : le chien de garde du gate G1 n'est pas allongé.
         const etendreSession = async (cible: number): Promise<void> => {
-          const tfMs = pasBougiesMs(candles);
-          for (let page = 0; page < MAX_PAGES_SESSION; page++) {
-            if (cancelled) return;
-            const etat = store.getState();
-            if (!isMarketDataReady(etat, requestedIdentity, requestId)) return;
-            const premier = etat.candles[0];
-            if (premier === undefined || etat.candles.length >= paginationMaxCandles) return;
-            const limit = limitePageSession(premier.time, cible, tfMs, paginationLimit);
-            if (limit === 0) return;
-            // Source à court d'historique : on arrête plutôt que de boucler à vide.
-            if ((await chargerPlusAncien(premier.time, limit)).length === 0) return;
-          }
+          const tfMs = pasBougiesMs(store.getState().candles.length >= 2 ? store.getState().candles : candles);
+          await etendreSessionJusqua({
+            cible,
+            tfMs,
+            limitePage: paginationLimit,
+            lirePremierTime: () => {
+              const etat = store.getState();
+              if (!isMarketDataReady(etat, requestedIdentity, requestId)) return undefined;
+              if (etat.candles.length >= paginationMaxCandles) return undefined;
+              return etat.candles[0]?.time;
+            },
+            chargerPlusAncien: async (avantTime, limit) =>
+              (await chargerPlusAncien(avantTime, limit)).length,
+            estAnnule: () => cancelled,
+          });
         };
 
-        const cibleSession = cibleSessionUTC(
-          indicatorsStore.getState().indicators.map((i) => i.defId),
-          candles[candles.length - 1]?.time ?? 0,
-        );
-        if (cibleSession !== undefined) {
-          const avant = store.getState().candles.length;
-          extensionSessionEnCours = true;
-          void etendreSession(cibleSession)
-            .catch((err) => console.error("[AXIOM] extension de session échouée", err))
-            .finally(() => {
+        const ordonnanceurExtension = creerOrdonnanceurExtension({
+          estAnnule: () => cancelled,
+          peutLancer: () => isMarketDataReady(store.getState(), requestedIdentity, requestId),
+          executer: async () => {
+            const buffer = store.getState().candles;
+            const premier = buffer[0];
+            const dernier = buffer[buffer.length - 1];
+            if (premier === undefined || dernier === undefined) return;
+            const defIds = indicatorsStore.getState().indicators.map((i) => i.defId);
+            if (!doitEtendreSession(defIds, premier.time, dernier.time)) return;
+            const cible = cibleSessionUTC(defIds, dernier.time);
+            if (cible === undefined) return;
+            const avant = buffer.length;
+            extensionSessionEnCours = true;
+            try {
+              await etendreSession(cible);
+            } catch (err) {
+              console.error("[AXIOM] extension de session échouée", err);
+            } finally {
               extensionSessionEnCours = false;
-              if (cancelled || !isMarketDataReady(store.getState(), requestedIdentity, requestId)) return;
-              const complet = store.getState().candles;
-              // Même chemin que le resync post-reconnexion : réapplication du buffer entier.
-              if (complet.length > avant) chart.applyNewData(complet.map(toKLineData));
-            });
-        }
+            }
+            if (cancelled || !isMarketDataReady(store.getState(), requestedIdentity, requestId)) return;
+            const complet = store.getState().candles;
+            // Même chemin que le resync post-reconnexion : réapplication du buffer entier.
+            if (complet.length > avant) chart.applyNewData(complet.map(toKLineData));
+          },
+        });
+
+        unsubscribeExtensionChaud = indicatorsStore.subscribe(() => {
+          ordonnanceurExtension.demander();
+        });
+        ordonnanceurExtension.demander();
 
         const onKline = (candle: Candle) => {
           // Un callback WS peut être déjà en file lors du changement de symbole. La garde
@@ -1099,6 +1226,7 @@ export function ChartInstance({
       annulerDelaiBackfill?.();
       indicators.dispose();
       unsubscribeIndicators();
+      unsubscribeExtensionChaud?.();
       unsubscribeRefSymbol();
       unsubscribePriceScale();
       unsubscribeFocusOf();
@@ -1209,6 +1337,15 @@ export function ChartInstance({
       <canvas ref={paperLignesCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={xhairCanvasRef} className="pointer-events-none absolute inset-0" />
+      {limiteKrakenVisible && (
+        <div
+          data-chart-status="partial"
+          role="status"
+          className="pointer-events-none absolute bottom-8 left-1/2 z-20 -translate-x-1/2 rounded border border-warn/60 bg-surface/90 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-warn backdrop-blur"
+        >
+          PARTIAL · {MESSAGE_LIMITE_KRAKEN}
+        </div>
+      )}
       <ChartDataStatusOverlay
         state={dataLoad}
         requested={{ exchange, symbol, timeframe }}

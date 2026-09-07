@@ -3,7 +3,7 @@
  * `openInterestFutures`, sélection du dernier jour non vide, parts et Δ vs J-7.
  */
 import { describe, it, expect } from "vitest";
-import { construireModeleOiExchange } from "./derivativesWindow.util";
+import { construireModeleOiExchange, joindreSpreadParTimestamp } from "./derivativesWindow.util";
 import type { JourOiFutures } from "../data/onchain/bgeometrics";
 
 /** Fabrique un jour à partir d'une ventilation brute. */
@@ -78,5 +78,43 @@ describe("construireModeleOiExchange", () => {
   it("renvoie null si aucun jour n'a de données exploitables", () => {
     expect(construireModeleOiExchange([])).toBeNull();
     expect(construireModeleOiExchange([jour("2026-07-20", { openInterestFutures: 1 })])).toBeNull();
+  });
+});
+
+describe("joindreSpreadParTimestamp", () => {
+  it("joint sur timestamp : bucket manquant au début ET au milieu", () => {
+    const foule = [
+      { time: 20, longAccount: 0.6, shortAccount: 0.4 },
+      { time: 30, longAccount: 0.55, shortAccount: 0.45 },
+      { time: 50, longAccount: 0.5, shortAccount: 0.5 },
+    ];
+    const top = [
+      { time: 10, longAccount: 0.7, shortAccount: 0.3 },
+      { time: 20, longAccount: 0.8, shortAccount: 0.2 },
+      { time: 30, longAccount: 0.75, shortAccount: 0.25 },
+      { time: 40, longAccount: 0.9, shortAccount: 0.1 },
+      { time: 50, longAccount: 0.6, shortAccount: 0.4 },
+    ];
+    const joint = joindreSpreadParTimestamp(foule, top);
+    expect(joint.map((p) => p.time)).toEqual([20, 30, 50]);
+    // Net = (long − short) × 100 ; spread = net top − net foule.
+    expect(joint[0]!.spread).toBeCloseTo(40, 10); // 60 − 20
+    expect(joint[1]!.spread).toBeCloseTo(40, 10); // 50 − 10
+    expect(joint[2]!.spread).toBeCloseTo(20, 10); // 20 − 0
+  });
+
+  it("ne joint pas par index : des files de même longueur mais décalées ne se mélangent pas", () => {
+    const foule = [
+      { time: 10, longAccount: 0.6, shortAccount: 0.4 },
+      { time: 30, longAccount: 0.4, shortAccount: 0.6 },
+    ];
+    const top = [
+      { time: 20, longAccount: 0.8, shortAccount: 0.2 },
+      { time: 30, longAccount: 0.7, shortAccount: 0.3 },
+    ];
+    const joint = joindreSpreadParTimestamp(foule, top);
+    expect(joint).toHaveLength(1);
+    expect(joint[0]!.time).toBe(30);
+    expect(joint[0]!.spread).toBeCloseTo(60, 10); // 40 − (−20)
   });
 });

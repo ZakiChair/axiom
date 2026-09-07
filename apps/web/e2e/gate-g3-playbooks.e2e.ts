@@ -1,9 +1,10 @@
 import { test, expect } from "@playwright/test";
+import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
 /**
- * Gate G100 — G3 : « 5 playbooks 1-clic ouvrent layout + panneaux + toggles ».
+ * Gate G100 — G3 : les playbooks ouvrent leurs panneaux en un clic.
  *
- * ⚠ RÉSEAU REQUIS (specs de gate) ; daemon toléré absent. Les fenêtres ouvertes
+ * Réseau et WebSockets entièrement bouchonnés, daemon absent. Les fenêtres ouvertes
  * peuvent afficher leurs états d'erreur/vide internes : le critère automatisé est
  * l'OUVERTURE des fenêtres attendues (role complementary), pas leurs données.
  *
@@ -17,6 +18,7 @@ import { test, expect } from "@playwright/test";
  */
 const PLAYBOOKS_ATTENDUS: { mnemonique: string; fenetres: string[] }[] = [
   { mnemonique: "PLAY-SCALP", fenetres: ["Produits dérivés", "Carnet d'ordres (DOM / depth)"] },
+  { mnemonique: "PLAY-POS", fenetres: ["Produits dérivés", "Radar squeeze", "Screener d'actifs"] },
   { mnemonique: "PLAY-FADE", fenetres: ["Produits dérivés", "Screener d'actifs"] },
   { mnemonique: "PLAY-CVD", fenetres: ["Produits dérivés"] },
   {
@@ -35,6 +37,7 @@ const PLAYBOOKS_ATTENDUS: { mnemonique: string; fenetres: string[] }[] = [
 ];
 
 test.beforeEach(async ({ page }) => {
+  await bouchonnerReseau(page);
   await page.addInitScript(() => {
     window.localStorage.setItem(
       "axiom:onboarding:v1",

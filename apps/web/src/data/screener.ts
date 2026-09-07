@@ -544,6 +544,20 @@ export const BUILTIN_PRESETS: ScreenerPreset[] = [
     builtin: true,
   },
   {
+    id: "builtin:net-short-squeeze",
+    name: "Net short squeeze",
+    tf: "1h",
+    baseConditions: [
+      { kind: "base", field: "volumeUsd24h", op: ">", value: 15_000_000 },
+      { kind: "base", field: "fundingPct", op: "<", value: 0 },
+      { kind: "base", field: "oiChangePct", op: ">", value: 1 },
+      { kind: "base", field: "longShortRatio", op: "<", value: 0.8 },
+    ],
+    indicatorConditions: [],
+    builtin: true,
+    description: "Foule très vendeuse (ratio < 0.8) payant le funding avec OI en hausse : carburant à short squeeze.",
+  },
+  {
     id: "builtin:funding-extreme",
     name: "Funding extrême",
     tf: "1h",

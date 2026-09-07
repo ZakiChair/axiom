@@ -93,6 +93,26 @@ export function redigerErreurTelegram(err: unknown): string {
 /** Délai max d'un appel Telegram (ms). */
 const TIMEOUT_TELEGRAM_MS = 5000;
 
+/** Transports injectables (tests : aucun osascript, aucun fetch réel). */
+export interface TransportsNotify {
+  macos?: (titre: string, corps: string) => void;
+  telegram?: (token: string, chatId: string, texte: string) => Promise<boolean>;
+  chargerTelegram?: () => TelegramConfig | null;
+  fetchTelegram?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+}
+
+let transports: TransportsNotify = {};
+
+/** Remplace les transports de notification (cumulatif). */
+export function injecterTransportsNotify(suite: TransportsNotify): void {
+  transports = { ...transports, ...suite };
+}
+
+/** Restaure les transports réels. */
+export function reinitialiserTransportsNotify(): void {
+  transports = {};
+}
+
 /**
  * Envoie un message Telegram (sendMessage). Timeout 5 s ; toute erreur (réseau,
  * jeton invalide, …) est loguée et renvoyée en `false` sans jamais lever.
@@ -102,10 +122,11 @@ export async function envoyerTelegram(
   chatId: string,
   texte: string,
 ): Promise<boolean> {
+  const fetchImpl = transports.fetchTelegram ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
   const ctrl = new AbortController();
   const minuteur = setTimeout(() => ctrl.abort(), TIMEOUT_TELEGRAM_MS);
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const res = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ chat_id: chatId, text: texte }),
@@ -131,15 +152,26 @@ export function reinitialiserTelegram(): void {
   telegramCache = undefined;
 }
 
+function configTelegram(): TelegramConfig | null {
+  if (transports.chargerTelegram) return transports.chargerTelegram();
+  if (telegramCache === undefined) telegramCache = chargerTelegram();
+  return telegramCache;
+}
+
+/** Relais Telegram seul (indépendant du heartbeat / macOS). Best-effort. */
+export function notifierTelegram(symbol: string, decl: Declenchement): void {
+  const tg = configTelegram();
+  if (!tg) return;
+  const envoyer = transports.telegram ?? envoyerTelegram;
+  void envoyer(tg.token, tg.chatId, formaterTexteTelegram(symbol, decl));
+}
+
 /**
  * Notifie un déclenchement sur tous les canaux disponibles : notification macOS +
  * relais Telegram si configuré. Best-effort : ne lève jamais.
  */
 export function notifierDeclenchement(symbol: string, decl: Declenchement): void {
   const titre = `AXIOM — ${symbol}`;
-  notifierMacOs(titre, decl.message);
-
-  if (telegramCache === undefined) telegramCache = chargerTelegram();
-  const tg = telegramCache;
-  if (tg) void envoyerTelegram(tg.token, tg.chatId, formaterTexteTelegram(symbol, decl));
+  (transports.macos ?? notifierMacOs)(titre, decl.message);
+  notifierTelegram(symbol, decl);
 }

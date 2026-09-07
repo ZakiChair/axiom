@@ -19,7 +19,7 @@ d’auth réseau, rien ne quitte la machine en dehors des appels aux APIs publiq
 
 | | |
 |---|---|
-| **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations, **179 indicateurs** testés |
+| **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations, **187 indicateurs** testés |
 | **Lire le contexte** | **39 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, mouvements de baleines, treemap, options, COT, taux & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
 | **Décider** | screener, playbooks 1-clic, alertes (dont composite ET), backtest en R (stop ATR / sizing risque), coût d’exécution L2 (DOM), stress-test, étude d’évènements, journal, paper trading |
 | **Ne pas décrocher** | alertes onglet fermé (macOS + Telegram optionnel), replay sur dumps officiels Binance, panneau de santé des sources |
@@ -29,7 +29,7 @@ Deux partis pris structurent le produit :
 1. **Le chemin chaud reste direct.** Le front parle **directement** aux WebSockets des exchanges ;
    le daemon `axiomd` ne prend en charge que le lent (APIs à quota, cache, persistance SQLite,
    alertes). L’UI reste utilisable **sans** daemon.
-2. **Les calculs sont du TypeScript pur et testés.** Les 179 indicateurs vivent dans
+2. **Les calculs sont du TypeScript pur et testés.** Les 187 indicateurs vivent dans
    `@axiom/indicators` — pas de WASM, pas de service Python — et sont couverts par des tests
    unitaires et structurels, dont **4 golden tests** contre un oracle `pandas-ta` (ADX,
    SuperTrend, Ichimoku, PSAR ; `scripts/golden/`).
@@ -43,7 +43,7 @@ d’Electron.
 ```
 packages/
   types/         @axiom/types       — contrat de données partagé
-  indicators/    @axiom/indicators  — 179 indicateurs TS pur + golden tests
+  indicators/    @axiom/indicators  — 187 indicateurs TS pur + golden tests
   alerts/        @axiom/alerts      — moteur d’alertes pur (front + daemon)
   backtest/      @axiom/backtest    — moteur de backtest pur
 apps/
@@ -60,8 +60,8 @@ docs/
 
 ## Prérequis
 
-- **Node.js** 20+ et **pnpm** 9 (`packageManager` piné dans `package.json`)
-- **Bun** (daemon + ses tests) : https://bun.sh
+- **Node.js** 22 (référence CI) et **pnpm** 9 (`packageManager` piné dans `package.json`)
+- **Bun 1.3.11** (version épinglée pour le daemon et ses tests) : https://bun.sh
 - Clés API optionnelles dans `apps/web/.env` (voir `apps/web/.env.example`)
 
 ## Installation
@@ -100,6 +100,7 @@ les process lancés par le script.
 | `pnpm typecheck` | `tsc --noEmit` sur le monorepo |
 | `pnpm build` | Build récursif |
 | `pnpm check` | Contrôle qualité local (typecheck + test + build web) |
+| `pnpm check:e2e` | Parcours navigateur hermétiques utilisés en CI (Chromium Playwright requis) |
 
 Fallback dual-terminal (si besoin de séparer les logs) :
 
@@ -125,7 +126,7 @@ Finnhub, Etherscan v2, CoinDesk Data/CCData et CoinGecko) restent dans le `local
 navigateur. OI et funding du graphe disposent d'un repli Binance sans
 clé ; NVT utilise directement les charts publics Blockchain.com.
 
-Le catalogue conserve les 179 indicateurs. Une entrée impossible pour la source, le symbole ou
+Le catalogue conserve les 187 indicateurs. Une entrée impossible pour la source, le symbole ou
 le timeframe courant est désactivée et marquée **UNUSABLE** au lieu de produire un pane vide.
 Les fonctions intrinsèquement locales sont également nommées : REPLAY et WHALES sont
 **UNUSABLE** sur Vercel ; l'historique LIQ et les couches GDELT/UCDP de GLOBE sont **PARTIAL**.
@@ -134,7 +135,7 @@ Les snapshots, LIQHL, les alertes baleines et les notifications onglet fermé n�
 
 ## Fonctionnalités (aperçu)
 
-- **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, 179 indicateurs
+- **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, 187 indicateurs
 - **Terminal** : palette ⌘K, raccourcis, workspaces, fenêtres flottantes + snap + taskbar
 - **Sources** : Binance, Bybit, OKX, Coinbase, Kraken, MEXC, Deribit, Twelve Data, Coinalyze, FRED, etc.
 - **Panneaux** : 39 fenêtres — DES, FUNDX, LIQ, ECO, NEWS, CORR, CHAIN, MAP, PORT, NOTE, EQS, TERM, OMON, DOM, BT, REPLAY, RATE, COT, SEAG, VOL, FUND, BRIEF, GLOBE, STBL, SQZ, CBPREM, NETLIQ, DATA, DIST, EXPY, PAPER, MINE, WHALES, CYCLE, BPL, EVTS, SCEN, CAP, SECT
@@ -145,14 +146,14 @@ Les snapshots, LIQHL, les alertes baleines et les notifications onglet fermé n�
 Les vagues **W0–W3** du plan `docs/superpowers/plans/2026-07-13-cible-100-usd-mois.md` sont **mergées en main** (confiance CVD/badges, `pnpm run up`, onboarding, session strip, alertes edge + funding daemon, playbooks, screener positionnement, bus panneau→chart, import CSV, brief review).
 
 **Gate G100** : le code est *code-complete* et la partie e2e **partiellement automatisée**
-(16 tests Playwright de gate, scripts G5/G9 — baseline 31/33 PASS avec 2 échecs réseau live).
+(tests Playwright de gate et scripts G5/G9 ; voir le rapport de corrections du 2026-09-04).
 Le **noyau manuel reste à dérouler** (G1 tenue 30 min + coupure 90 s, bannière macOS,
 chrono onboarding, jugements visuels) — voir le protocole
 `docs/superpowers/plans/2026-07-22-gate-g100-qa.md` et le plan d'action
 `docs/superpowers/plans/2026-08-24-plan-action-revue-globale.md`. **Aucune nouvelle fenêtre
 avant le verdict** — deux exceptions actées, toutes deux sur demande utilisateur : le 2026-08-25
 (fenêtre WHALES) et le 2026-09-01 (fenêtre BPL + séries TOTAL/TOTAL2/TOTAL3 chartables, chantier
-CAP/BPL) — cf. `BUILD-CONTRACT.md`.
+CAP/BPL). Les exceptions de maintenance et du catalogue positionnement/orderflow du 2026-09-04 sont consignées dans `BUILD-CONTRACT.md`.
 
 ## Secrets
 
@@ -164,22 +165,37 @@ Modèle sans valeurs : `apps/web/.env.example`.
 
 Variables optionnelles du process daemon : `AXIOMD_PORT` (défaut `8787`).
 
+## Conventions de calcul et de notification
+
+Le backtest valorise l'équité à chaque clôture de bougie, positions ouvertes comprises.
+Le drawdown mesure la baisse depuis le plus haut de cette équité ; il ne mesure pas les
+extrêmes intrabar. Les frais d'entrée sont déduits dès l'entrée, les frais de sortie lors
+de la sortie. Les décisions restent exécutées à l'ouverture de la bougie suivante.
+
+Le heartbeat indique la visibilité de l'onglet et sa permission de notification.
+Le navigateur prend en charge la notification native lorsqu'il est visible et autorisé ;
+le daemon assure le relais macOS sinon, ou après expiration du heartbeat. Un ancien
+heartbeat sans capacité déclarée conserve ce relais. Telegram, s'il est configuré,
+reste un canal du daemon indépendant de la présence de l'onglet.
+
 ## Tests & qualité
 
 ```bash
 pnpm check
 # équivalent : typecheck monorepo + tests (vitest / bun:test) + build @axiom/web
+pnpm check:e2e
+# parcours navigateur hermétiques, après installation de Chromium Playwright
 ```
 
 Le gate local **`pnpm check`** reste la référence ; un filet de sécurité distant
 existe en plus dans `.github/workflows/ci.yml` (typecheck + tests + build web sur
-chaque push `main` et PR, étapes découpées avec timeouts individuels, Node 22).
+chaque push `main` et PR, étapes découpées avec timeouts individuels, Node 22 / Bun 1.3.11),
+complété par `pnpm check:e2e`. Les playbooks et les régressions de la revue du 2026-09-04
+sont inclus dans cette sélection sans accès aux API de marché réelles.
 
-Baseline vérifiée le 2026-08-24 : `pnpm check` PASS, **4 012 tests** verts,
-build web PASS (bundle principal 1,10 Mo / 322 ko gzip), `pnpm audit --prod` sans
-vulnérabilité connue, Playwright 31/33 au premier passage (2 échecs réseau live,
-3/3 à la relance). Les tests unitaires couvrent indicateurs, data layer, stores,
-daemon (parse, cache, globe…).
+Les résultats datés des tests, du build et de l'audit des dépendances sont consignés
+dans le [rapport de corrections du 2026-09-04](docs/superpowers/audits/2026-09-04-corrections-revue.md).
+Les tests unitaires couvrent indicateurs, data layer, stores, backtest et daemon.
 
 ## Documentation
 

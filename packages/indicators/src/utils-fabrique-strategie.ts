@@ -29,6 +29,7 @@ import type {
   AnnotationsIndicateur,
   CalcContext,
   Candle,
+  AuxSeriesId,
   IndicatorDef,
   IndicatorInput,
   LabelAnnotation,
@@ -43,6 +44,8 @@ export type EtatStrategie = 1 | 0 | -1;
 export interface SpecStrategie {
   id: string;
   name: string;
+  /** Séries auxiliaires requises, chargées par l'appelant avant le calcul. */
+  aux?: AuxSeriesId[];
   /** Inputs propres à la stratégie, placés AVANT l'input commun `lignesTrades`. */
   inputsStrategie: IndicatorInput[];
   precision?: number;
@@ -171,6 +174,9 @@ export function specStrategie(id: string): SpecStrategie | undefined {
  * ANTI-CYCLE : ne dépend JAMAIS de `./registry` (qui importe les stratégies,
  * qui importent cette fabrique) — passe par `SPECS_STRATEGIES` et reconstruit
  * le def minimal nécessaire à `resolveParams`/`buildCalcContext`.
+ *
+ * Limitation assumée : ce rejeu scripté ne reçoit encore aucune série `aux`.
+ * Les stratégies qui en dépendent restent donc sans trade dans cette campagne.
  */
 export function etatsStrategie(
   defId: string,
@@ -182,6 +188,7 @@ export function etatsStrategie(
   const defMin: IndicatorDef = {
     id: spec.id,
     name: spec.name,
+    ...(spec.aux !== undefined ? { aux: spec.aux } : {}),
     category: "strategy",
     pane: "overlay",
     inputs: [...spec.inputsStrategie, INPUT_LIGNES_TRADES],
@@ -199,6 +206,7 @@ export function defStrategie(spec: SpecStrategie): IndicatorDef {
     id: spec.id,
     name: spec.name,
     ...(spec.validation !== undefined ? { validation: spec.validation } : {}),
+    ...(spec.aux !== undefined ? { aux: spec.aux } : {}),
     category: "strategy",
     pane: "overlay",
     inputs: [...spec.inputsStrategie, INPUT_LIGNES_TRADES],

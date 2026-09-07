@@ -1,6 +1,16 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import type { AlertDef, Declenchement } from "@axiom/alerts";
+import {
+  extraireCanNotify,
+  enregistrerHeartbeat,
+  traiterHeartbeat,
+} from "./alerts";
+import {
+  injecterTransportsNotify,
+  reinitialiserTelegram,
+  reinitialiserTransportsNotify,
+} from "./notify";
 import {
   assetsWhaleFluxActifs,
   assurerTablesAlertes,
@@ -27,6 +37,29 @@ import {
 } from "./alerts";
 import { assurerTableLiquidations } from "./liquidations";
 import { assurerTableWhales } from "./whales";
+
+const telegramAppels: string[] = [];
+
+beforeEach(() => {
+  telegramAppels.length = 0;
+  reinitialiserTelegram();
+  injecterTransportsNotify({
+    macos: () => {
+      throw new Error("macos réel interdit en test");
+    },
+    telegram: async (_token, _chatId, texte) => {
+      telegramAppels.push(texte);
+      return true;
+    },
+    chargerTelegram: () => ({ token: "test-token", chatId: "test-chat" }),
+  });
+});
+
+afterEach(() => {
+  reinitialiserTransportsNotify();
+  reinitialiserTelegram();
+  enregistrerHeartbeat(0);
+});
 
 /** Def d'alerte prix-croise binance, réutilisée dans plusieurs cas. */
 function alertePrix(id: string, symbol: string, niveau: number, sens: "hausse" | "baisse" = "hausse"): AlertDef {
@@ -193,16 +226,65 @@ describe("sommeLiqUsdParMin", () => {
 describe("doitNotifier", () => {
   test("notifie si le dernier heartbeat date de plus de 90 s", () => {
     const maintenant = 1_000_000;
-    expect(doitNotifier(maintenant - SEUIL_HEARTBEAT_MS - 1, maintenant)).toBe(true);
+    expect(doitNotifier(maintenant - SEUIL_HEARTBEAT_MS - 1, maintenant, true)).toBe(true);
   });
 
-  test("silencieux si un heartbeat récent (< 90 s)", () => {
+  test("silencieux si heartbeat récent ET canNotify true", () => {
     const maintenant = 1_000_000;
-    expect(doitNotifier(maintenant - 1_000, maintenant)).toBe(false);
+    expect(doitNotifier(maintenant - 1_000, maintenant, true)).toBe(false);
+  });
+
+  test("relais si heartbeat récent mais canNotify false", () => {
+    const maintenant = 1_000_000;
+    expect(doitNotifier(maintenant - 1_000, maintenant, false)).toBe(true);
+  });
+
+  test("relais fail-safe si heartbeat récent mais canNotify absent (legacy)", () => {
+    const maintenant = 1_000_000;
+    expect(doitNotifier(maintenant - 1_000, maintenant)).toBe(true);
   });
 
   test("jamais de heartbeat (0) avec un temps réel → notifie", () => {
     expect(doitNotifier(0, Date.now())).toBe(true);
+  });
+});
+
+describe("extraireCanNotify / traiterHeartbeat", () => {
+  test("champ absent → undefined (legacy)", () => {
+    expect(extraireCanNotify(undefined)).toBeUndefined();
+    expect(extraireCanNotify({})).toBeUndefined();
+    expect(extraireCanNotify({ visible: true })).toBeUndefined();
+  });
+
+  test("canNotify true / false extraits du JSON", () => {
+    expect(extraireCanNotify({ visible: true, canNotify: true })).toBe(true);
+    expect(extraireCanNotify({ visible: false, canNotify: false })).toBe(false);
+  });
+
+  test("POST JSON canNotify false est mémorisé et provoque un relais", async () => {
+    const req = new Request("http://127.0.0.1:8787/heartbeat", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ visible: false, canNotify: false }),
+    });
+    const res = await traiterHeartbeat(req);
+    expect(res.status).toBe(200);
+    const d = baseAvecAlerte(alertePrix("hb1", "BTCUSDT", 100, "hausse"));
+    const notifs: Declenchement[] = [];
+    evaluerEtPersister("BTCUSDT", TYPES_PRIX, { maintenant: 1_000_000, dernierPrix: 90 }, { db: d, notifier: (_s, decl) => notifs.push(decl) });
+    evaluerEtPersister("BTCUSDT", TYPES_PRIX, { maintenant: 1_000_000, dernierPrix: 110 }, { db: d, notifier: (_s, decl) => notifs.push(decl) });
+    expect(notifs).toHaveLength(1);
+  });
+
+  test("POST sans corps (legacy) → relais fail-safe", async () => {
+    const req = new Request("http://127.0.0.1:8787/heartbeat", { method: "POST" });
+    const res = await traiterHeartbeat(req);
+    expect(res.status).toBe(200);
+    const d = baseAvecAlerte(alertePrix("hb2", "BTCUSDT", 100, "hausse"));
+    const notifs: Declenchement[] = [];
+    evaluerEtPersister("BTCUSDT", TYPES_PRIX, { maintenant: 1_000_000, dernierPrix: 90 }, { db: d, notifier: (_s, decl) => notifs.push(decl) });
+    evaluerEtPersister("BTCUSDT", TYPES_PRIX, { maintenant: 1_000_000, dernierPrix: 110 }, { db: d, notifier: (_s, decl) => notifs.push(decl) });
+    expect(notifs).toHaveLength(1);
   });
 });
 
@@ -280,26 +362,78 @@ describe("evaluerEtPersister (démarrage complet en base)", () => {
     expect(notifs[0]?.symbol).toBe("BTCUSDT");
   });
 
-  test("app ouverte (heartbeat récent) : journalise mais NE notifie PAS", () => {
+  test("app ouverte (heartbeat récent + canNotify true) : journalise mais NE notifie PAS macos", () => {
     const d = baseAvecAlerte(alertePrix("a2", "BTCUSDT", 100, "hausse"));
     const notifs: Declenchement[] = [];
     const notifier = (_symbol: string, decl: Declenchement): void => {
       notifs.push(decl);
     };
 
-    evaluerEtPersister("BTCUSDT", TYPES_PRIX, { maintenant: 1_000_000, dernierPrix: 90 }, { db: d, notifier, dernierHeartbeat: 999_990 });
+    evaluerEtPersister("BTCUSDT", TYPES_PRIX, { maintenant: 1_000_000, dernierPrix: 90 }, { db: d, notifier, dernierHeartbeat: 999_990, canNotify: true });
     const r = evaluerEtPersister(
       "BTCUSDT",
       TYPES_PRIX,
       { maintenant: 1_000_000, dernierPrix: 110 },
-      { db: d, notifier, dernierHeartbeat: 999_990 }, // heartbeat il y a 10 ms → silencieux
+      { db: d, notifier, dernierHeartbeat: 999_990, canNotify: true },
     );
     expect(r).toHaveLength(1); // déclenchement bien produit
 
     const journal = d.query("SELECT notifie FROM alertes_journal").all() as Array<{ notifie: number }>;
     expect(journal).toHaveLength(1);
-    expect(journal[0]?.notifie).toBe(0); // journalisé mais NON notifié
-    expect(notifs).toHaveLength(0); // notifier jamais appelé
+    expect(journal[0]?.notifie).toBe(0); // journalisé mais NON notifié macos
+    expect(notifs).toHaveLength(0); // notifier macos jamais appelé
+  });
+
+  test("canNotify false : relais macos même si heartbeat récent", () => {
+    const d = baseAvecAlerte(alertePrix("a3", "BTCUSDT", 100, "hausse"));
+    const notifs: Declenchement[] = [];
+    const notifier = (_symbol: string, decl: Declenchement): void => {
+      notifs.push(decl);
+    };
+    evaluerEtPersister("BTCUSDT", TYPES_PRIX, { maintenant: 1_000_000, dernierPrix: 90 }, { db: d, notifier, dernierHeartbeat: 999_990, canNotify: false });
+    evaluerEtPersister(
+      "BTCUSDT",
+      TYPES_PRIX,
+      { maintenant: 1_000_000, dernierPrix: 110 },
+      { db: d, notifier, dernierHeartbeat: 999_990, canNotify: false },
+    );
+    expect(notifs).toHaveLength(1);
+    const journal = d.query("SELECT notifie FROM alertes_journal").all() as Array<{ notifie: number }>;
+    expect(journal[0]?.notifie).toBe(1);
+  });
+
+  test("canNotify absent (heartbeat legacy) : relais macos fail-safe", () => {
+    const d = baseAvecAlerte(alertePrix("a4", "BTCUSDT", 100, "hausse"));
+    const notifs: Declenchement[] = [];
+    const notifier = (_symbol: string, decl: Declenchement): void => {
+      notifs.push(decl);
+    };
+    evaluerEtPersister("BTCUSDT", TYPES_PRIX, { maintenant: 1_000_000, dernierPrix: 90 }, { db: d, notifier, dernierHeartbeat: 999_990 });
+    evaluerEtPersister(
+      "BTCUSDT",
+      TYPES_PRIX,
+      { maintenant: 1_000_000, dernierPrix: 110 },
+      { db: d, notifier, dernierHeartbeat: 999_990 },
+    );
+    expect(notifs).toHaveLength(1);
+  });
+
+  test("Telegram part toujours, même si macos est silencieux (canNotify true)", () => {
+    const d = baseAvecAlerte(alertePrix("tg1", "BTCUSDT", 100, "hausse"));
+    const macos: Declenchement[] = [];
+    const notifier = (_s: string, decl: Declenchement): void => {
+      macos.push(decl);
+    };
+    evaluerEtPersister("BTCUSDT", TYPES_PRIX, { maintenant: 1_000_000, dernierPrix: 90 }, { db: d, notifier, dernierHeartbeat: 999_990, canNotify: true });
+    evaluerEtPersister(
+      "BTCUSDT",
+      TYPES_PRIX,
+      { maintenant: 1_000_000, dernierPrix: 110 },
+      { db: d, notifier, dernierHeartbeat: 999_990, canNotify: true },
+    );
+    expect(macos).toHaveLength(0);
+    expect(telegramAppels).toHaveLength(1);
+    expect(telegramAppels[0]).toContain("BTCUSDT");
   });
 
   test("funding-extreme : calibre puis déclenche, journal + notify (heartbeat ancien)", () => {
@@ -409,7 +543,7 @@ describe("evaluerLiqCascadeTick (tick complet en base)", () => {
     const notifier = (_symbol: string, decl: Declenchement): void => {
       notifs.push(decl);
     };
-    const opts = { db: d, notifier, dernierHeartbeat: 999_990 }; // heartbeat il y a 10 ms
+    const opts = { db: d, notifier, dernierHeartbeat: 999_990, canNotify: true };
 
     evaluerLiqCascadeTick(1_000_000, opts); // calibrage à 0 (armée)
     d.query(

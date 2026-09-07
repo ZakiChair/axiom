@@ -418,3 +418,97 @@ describe("plafond journalier appliqué (acquireSlot)", () => {
     vi.useRealTimers();
   });
 });
+
+describe("twelveDataAdapter.fetchKlines — pagination par end_date", () => {
+  const PAGE_A = Date.parse("2026-06-26T14:00:00Z");
+  const PAGE_B = Date.parse("2026-06-26T06:00:00Z");
+
+  function valuesAt(times: number[]): TwelveDataResponse {
+    return {
+      status: "ok",
+      values: times.map((t) => {
+        const iso = new Date(t).toISOString().slice(0, 19).replace("T", " ");
+        return { datetime: iso, open: "1", high: "2", low: "0.5", close: "1.5", volume: "10" };
+      }),
+    };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("borne le cache des pages à 32 entrées sans conserver un repli périmé évincé", async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    const { twelveDataAdapter: adapter } = await import("./twelvedata");
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
+    const fetchMock = vi.fn(async () => Response.json(valuesAt([PAGE_B])));
+    vi.stubGlobal("fetch", fetchMock);
+    for (let i = 0; i < 33; i++) {
+      // Horloge du module isolé : chaque requête dispose de son créneau de quota.
+      vi.setSystemTime(Date.now() + 61_000);
+      await adapter.fetchKlines("BOURNETD", "1m", { limit: 1, endTime: PAGE_A - i * 60_000 });
+    }
+    fetchMock.mockRejectedValue(new Error("amont indisponible"));
+    vi.setSystemTime(Date.now() + 61_000);
+    await expect(adapter.fetchKlines("BOURNETD", "1m", { limit: 1, endTime: PAGE_A })).rejects.toThrow("amont indisponible");
+    expect(fetchMock).toHaveBeenCalledTimes(34);
+  });
+
+  it("transmet end_date UTC et distingue deux pages disjointes par la clé de cache", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      const end = url.searchParams.get("end_date") ?? "";
+      const json = end.includes("06:00") ? valuesAt([PAGE_B, PAGE_B + 60_000]) : valuesAt([PAGE_A, PAGE_A + 60_000]);
+      return Promise.resolve({
+        status: 200,
+        statusText: "OK",
+        json: () => Promise.resolve(json),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const recente = await twelveDataAdapter.fetchKlines("PAGETDA", "1m", { limit: 2, endTime: PAGE_A });
+    const ancienne = await twelveDataAdapter.fetchKlines("PAGETDA", "1m", { limit: 2, endTime: PAGE_B });
+
+    const urls = fetchMock.mock.calls.map(([input]) => new URL(String(input), "http://localhost"));
+    expect(urls).toHaveLength(2);
+    expect(urls[0]!.searchParams.get("end_date")).toMatch(/2026-06-26 14:00:00/);
+    expect(urls[1]!.searchParams.get("end_date")).toMatch(/2026-06-26 06:00:00/);
+    expect(urls[0]!.searchParams.get("end_date")).not.toBe(urls[1]!.searchParams.get("end_date"));
+    expect(recente.map((c) => c.time)).not.toEqual(ancienne.map((c) => c.time));
+  });
+
+  it("ressert le cache pour la même borne (zéro second appel)", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        status: 200,
+        statusText: "OK",
+        json: () => Promise.resolve(valuesAt([PAGE_A])),
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await twelveDataAdapter.fetchKlines("CACHETD", "1m", { limit: 1, endTime: PAGE_A });
+    await twelveDataAdapter.fetchKlines("CACHETD", "1m", { limit: 1, endTime: PAGE_A });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("points hors période → vide (pas de repli sur la queue récente)", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve({
+        status: 200,
+        statusText: "OK",
+        json: () => Promise.resolve(valuesAt([PAGE_A, PAGE_A + 60_000])),
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const hors = await twelveDataAdapter.fetchKlines("HORSTD", "1m", {
+      limit: 2,
+      endTime: PAGE_B,
+    });
+    expect(hors).toEqual([]);
+  });
+});

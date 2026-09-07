@@ -10,9 +10,10 @@
  *     les défs avant chaque évaluation) — un redémarrage ne re-déclenche pas une
  *     condition déjà vraie.
  *  3. Les déclenchements sont journalisés dans `alertes_journal` (exposé GET
- *     /alerts/journal) DANS TOUS LES CAS, et NOTIFIÉS (macOS/Telegram) seulement si
- *     le dernier heartbeat du front date de plus de 90 s (sinon l'app ouverte a déjà
- *     notifié via la Notification API — anti-doublon).
+ *     /alerts/journal) DANS TOUS LES CAS. macOS est relayé sauf heartbeat récent
+ *     AVEC `canNotify: true` (le front notifie alors lui-même). `canNotify` absent
+ *     (heartbeat legacy) ⇒ relais fail-safe. Telegram est TOUJOURS tenté (propriétaire
+ *     daemon, indépendant du heartbeat).
  *
  * Sources : seul `source === "binance"` est couvert (cf. marketFeed.ts). Le feed ne
  * surveille que les symboles ayant une alerte binance active.
@@ -41,7 +42,7 @@ import {
   type Feed,
 } from "./marketFeed";
 import { assurerTableLiquidations } from "./liquidations";
-import { notifierDeclenchement } from "./notify";
+import { notifierDeclenchement, notifierTelegram } from "./notify";
 import type { Routeur } from "./router";
 import { mouvementsRecents } from "./whales";
 
@@ -225,12 +226,28 @@ export function evaluerTick(
 }
 
 /**
- * Décide s'il faut NOTIFIER (macOS/Telegram) : uniquement si le dernier heartbeat du
- * front date de plus de `SEUIL_HEARTBEAT_MS`. `dernierHeartbeat === 0` (jamais reçu)
- * → on notifie (app jamais ouverte). Fonction PURE (testée).
+ * Décide s'il faut relayer macOS : heartbeat périmé (> seuil) OU front incapable
+ * (`canNotify !== true`). Champ `canNotify` absent (legacy) ⇒ relais. PURE (testée).
  */
-export function doitNotifier(dernierHeartbeat: number, maintenant: number, seuil = SEUIL_HEARTBEAT_MS): boolean {
-  return maintenant - dernierHeartbeat > seuil;
+export function doitNotifier(
+  dernierHeartbeat: number,
+  maintenant: number,
+  canNotify?: boolean,
+  seuil = SEUIL_HEARTBEAT_MS,
+): boolean {
+  if (maintenant - dernierHeartbeat > seuil) return true;
+  return canNotify !== true;
+}
+
+/**
+ * Lit `canNotify` d'un corps heartbeat JSON. Champ absent ou corps non-objet
+ * → `undefined` (legacy / fail-safe). Seul `true` strict compte comme capacité.
+ */
+export function extraireCanNotify(corps: unknown): boolean | undefined {
+  if (corps === null || typeof corps !== "object") return undefined;
+  if (!("canNotify" in corps)) return undefined;
+  const capacite = corps as { visible?: unknown; canNotify: unknown };
+  return capacite.visible === true && capacite.canNotify === true;
 }
 
 // ─────────────────────────── Accès SQLite ───────────────────────────
@@ -320,20 +337,25 @@ export function chargerDefs(d: Database): AlertDef[] {
 
 /** Heartbeat courant du front (ms epoch ; 0 = jamais reçu). Mis à jour par POST /heartbeat. */
 let dernierHeartbeat = 0;
+/** Capacité de notification du front (`undefined` = champ absent / legacy). */
+let dernierCanNotify: boolean | undefined;
 
-/** Enregistre un heartbeat du front (app ouverte). */
-export function enregistrerHeartbeat(ts: number = Date.now()): void {
+/** Enregistre un heartbeat du front (app ouverte). `canNotify` omis = legacy. */
+export function enregistrerHeartbeat(ts: number = Date.now(), canNotify?: boolean): void {
   dernierHeartbeat = ts;
+  dernierCanNotify = canNotify;
 }
 
 /** Options d'évaluation (injections pour les tests). */
 export interface OptionsEval {
   /** Base SQLite (défaut : la base globale du daemon). */
   db?: Database;
-  /** Fonction de notification (défaut : notifierDeclenchement — macOS/Telegram). */
+  /** Canal macOS (défaut : notifierDeclenchement — macOS seul si `telegram: false` via split). */
   notifier?: (symbol: string, decl: Declenchement) => void;
   /** Heartbeat à considérer (défaut : la valeur module courante). */
   dernierHeartbeat?: number;
+  /** Capacité front ; omis + heartbeat injecté ⇒ legacy (relais). */
+  canNotify?: boolean;
 }
 
 /**
@@ -355,7 +377,13 @@ export function evaluerEtPersister(
   const res = evaluerTick(defs, symbol, types, ctx);
   if (!res.modifie) return [];
 
-  const notifie = doitNotifier(opts.dernierHeartbeat ?? dernierHeartbeat, ctx.maintenant);
+  const hb = opts.dernierHeartbeat ?? dernierHeartbeat;
+  const canNotify = Object.prototype.hasOwnProperty.call(opts, "canNotify")
+    ? opts.canNotify
+    : opts.dernierHeartbeat !== undefined
+      ? undefined
+      : dernierCanNotify;
+  const relaisMacos = doitNotifier(hb, ctx.maintenant, canNotify);
 
   // Persistance de l'état de ré-armement (uniquement les défs calibrées : arme défini).
   const upsertEtat = d.query("INSERT OR REPLACE INTO alertes_etat (alertId, arme, majA) VALUES (?, ?, ?)");
@@ -364,15 +392,22 @@ export function evaluerEtPersister(
     upsertEtat.run(def.id, def.arme ? 1 : 0, ctx.maintenant);
   }
 
-  // Journalisation (TOUJOURS) + notification (conditionnelle au heartbeat).
+  // Journalisation (TOUJOURS). macOS conditionnel ; Telegram toujours (injecté en test).
   if (res.declenchements.length > 0) {
     const insererJournal = d.query(
       "INSERT INTO alertes_journal (alertId, symbol, ts, valeur, message, notifie) VALUES (?, ?, ?, ?, ?, ?)",
     );
-    const notifier = opts.notifier ?? notifierDeclenchement;
+    const notifierMacos = opts.notifier;
     for (const decl of res.declenchements) {
-      insererJournal.run(decl.alertId, symbol, decl.ts, decl.valeur, decl.message, notifie ? 1 : 0);
-      if (notifie) notifier(symbol, decl);
+      insererJournal.run(decl.alertId, symbol, decl.ts, decl.valeur, decl.message, relaisMacos ? 1 : 0);
+      if (relaisMacos && notifierMacos) {
+        notifierMacos(symbol, decl);
+        notifierTelegram(symbol, decl);
+      } else if (relaisMacos) {
+        notifierDeclenchement(symbol, decl);
+      } else {
+        notifierTelegram(symbol, decl);
+      }
     }
   }
 
@@ -635,9 +670,19 @@ export function enregistrerAlertes(routeur: Routeur): void {
   });
 
   // POST /heartbeat → l'app est ouverte (anti-doublon de notification).
-  routeur.enregistrerPrefixe("/heartbeat", (req) => {
-    if (req.method !== "POST") return json({ erreur: "méthode non permise" }, req, 405);
-    enregistrerHeartbeat();
-    return json({ ok: true }, req);
-  });
+  routeur.enregistrerPrefixe("/heartbeat", (req) => traiterHeartbeat(req));
+}
+
+/** POST /heartbeat — JSON `{visible, canNotify}` ou corps vide (legacy). */
+export async function traiterHeartbeat(req: Request): Promise<Response> {
+  if (req.method !== "POST") return json({ erreur: "méthode non permise" }, req, 405);
+  let canNotify: boolean | undefined;
+  try {
+    const texte = await req.text();
+    if (texte.length > 0) canNotify = extraireCanNotify(JSON.parse(texte) as unknown);
+  } catch {
+    /* corps vide / non-JSON : heartbeat legacy */
+  }
+  enregistrerHeartbeat(Date.now(), canNotify);
+  return json({ ok: true }, req);
 }

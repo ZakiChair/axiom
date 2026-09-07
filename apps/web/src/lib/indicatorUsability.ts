@@ -13,6 +13,8 @@ const SPLIT_VOLUME = new Set([
   "takerBuyRatio",
   "cvdDivergence",
   "cvdSpotPerp",
+  "takerNetPct",
+  "stratSpotBreakout",
 ]);
 
 const VOLUME_FOREX = new Set([

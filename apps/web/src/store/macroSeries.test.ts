@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { macroSeriesStore } from "./macroSeries";
+import { macroSeriesStore, PREFIXE_CACHE, TTL_CACHE_MS } from "./macroSeries";
 import { healthStore } from "./health";
 
 // ⚠️ apps/web tourne sous Vitest en environnement NODE, sans jsdom (convention affirmée
@@ -165,5 +165,55 @@ describe("macroSeriesStore.demanderIndicateur", () => {
     const cles = Object.keys(healthStore.getState().sources).filter((k) => k.startsWith("macro:"));
     // Quatre hôtes, six séries : la clé nomme le fournisseur, jamais l'observation.
     expect(cles.sort()).toEqual(["macro:eurostat", "macro:fred", "macro:oecd", "macro:ons"]);
+  });
+
+  it("ne lance jamais deux chargements en parallèle pour le même indicateur", async () => {
+    const appels = stubParHote();
+    vi.stubGlobal("fetch", appels);
+    const opts = { attendre: () => Promise.resolve() };
+
+    // Deux appels concurrents, sans attendre le premier avant de lancer le second.
+    const p1 = macroSeriesStore.getState().demanderIndicateur("cpi-aa", opts);
+    const p2 = macroSeriesStore.getState().demanderIndicateur("cpi-aa", opts);
+    await Promise.all([p1, p2]);
+
+    const appelsOecd = appels.mock.calls.filter((c) => String(c[0]).includes("sdmx.oecd.org"));
+    // Sans garde de réentrance : chaque appel lance sa propre boucle OCDE (3 + 3 = 6).
+    // Avec la garde : le second appel partage la promesse du premier (3 seulement).
+    expect(appelsOecd).toHaveLength(3);
+  });
+
+  it("ignore une entrée de cache plus vieille que TTL_CACHE_MS et refetch", async () => {
+    const now = Date.now();
+    // Déposée DIRECTEMENT dans le faux localStorage, juste au-delà du TTL.
+    localStorage.setItem(
+      PREFIXE_CACHE + "cpi-aa-jp",
+      JSON.stringify({ ts: now - TTL_CACHE_MS - 1, points: [{ time: now, value: 1.9 }] }),
+    );
+    const appels = stubParHote();
+    vi.stubGlobal("fetch", appels);
+
+    await macroSeriesStore.getState().demanderIndicateur("cpi-aa", { attendre: () => Promise.resolve() });
+
+    const appelsJapon = appels.mock.calls.filter((c) => String(c[0]).includes("JPN"));
+    expect(appelsJapon.length).toBeGreaterThan(0); // cache expiré ignoré : refetch
+    expect(macroSeriesStore.getState().series["cpi-aa-jp"]?.statut).toBe("ok");
+  });
+
+  it("sert une entrée de cache plus fraîche que TTL_CACHE_MS sans refetch", async () => {
+    const now = Date.now();
+    // À l'intérieur du TTL, avec une marge confortable face au temps d'exécution du test.
+    localStorage.setItem(
+      PREFIXE_CACHE + "cpi-aa-jp",
+      JSON.stringify({ ts: now - TTL_CACHE_MS + 1_000, points: [{ time: now, value: 1.9 }] }),
+    );
+    const appels = stubParHote();
+    vi.stubGlobal("fetch", appels);
+
+    await macroSeriesStore.getState().demanderIndicateur("cpi-aa", { attendre: () => Promise.resolve() });
+
+    const appelsJapon = appels.mock.calls.filter((c) => String(c[0]).includes("JPN"));
+    expect(appelsJapon).toHaveLength(0); // cache encore valide : aucun refetch
+    expect(macroSeriesStore.getState().series["cpi-aa-jp"]?.points).toHaveLength(1);
   });
 });

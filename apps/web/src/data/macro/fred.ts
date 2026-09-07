@@ -89,10 +89,14 @@ export function createFredM2Provider(seriesId = "WM2NS", units?: string): IMacro
         file_type: "json",
       });
       // Transformation servie par FRED (« pc1 » = variation sur un an). Purement additif :
-      // les appelants historiques (M2, NETLIQ) ne passent pas `units`, leur URL est
-      // inchangée. Le paramètre traverse les trois proxys — `appendApiKeyIfAbsent`
-      // (daemon/proxy.ts) n'ajoute que `api_key`, `originalQuery` (api/_policy.ts) recopie
-      // tout le reste.
+      // les appelants historiques (M2, NETLIQ) ne passent pas `units`, leur URL reste
+      // identique — verrouillé par le test « n'ajoute aucun paramètre units quand il est
+      // omis » (fred.test.ts).
+      // Le paramètre traverse les trois couches de proxy sans être filtré — VÉRIFIÉ le
+      // 2026-09-06 sur `appendApiKeyIfAbsent` (apps/daemon/src/proxy.ts:34-42, qui n'ajoute
+      // que `api_key` et laisse le reste de la requête intact) et `originalQuery`
+      // (api/_policy.ts:227-245, qui recopie tous les paramètres sauf les deux métadonnées
+      // de route). Si l'une de ces deux fonctions change, revérifier ici.
       if (units !== undefined) params.set("units", units);
       // Clé personnelle → envoyée explicitement (le proxy la détecte et n'injecte
       // PAS le repli). Sans clé, on n'envoie RIEN → le proxy injecte la clé .env.

@@ -32,11 +32,13 @@ import {
 } from "../data/macro/sovereignYields";
 import { chargerTauxDirecteurs, type TauxDirecteur } from "../data/macro/policyRates";
 import { chargerReservesOr, type ReserveOr } from "../data/macro/goldReserves";
+import { macroSeriesStore } from "../store/macroSeries";
+import { INDICATEURS_MACRO, ORDRE_REGIONS, seriesDeIndicateur, type IndicateurMacro } from "../data/macro/catalogueMacro";
 import { CourbeTaux, type SerieCourbe } from "./CourbeTaux";
-import { pointsDeCourbe } from "./courbeTaux.util";
+import { pointsDeCourbe, pointsDeSerieTemporelle } from "./courbeTaux.util";
 import { paysIndisponibles } from "./macroRatesWindow.util";
 import { formatPourcentage, formatEntier, formatDateComplete } from "../lib/format";
-import { BoutonBascule, BoutonRafraichir, EnTeteFenetre, Onglets, Chargement, NoteSource, Segmente, TitreSection, Vide } from "./ui";
+import { BoutonBascule, BoutonRafraichir, EnTeteFenetre, Onglets, Chargement, Fraicheur, NoteSource, Segmente, TitreSection, Vide } from "./ui";
 import { TableTriable } from "./TableTriable";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
@@ -161,13 +163,14 @@ function libelleMaturiteFr(m: string): string {
 
 // ─────────────────────────── Onglets ───────────────────────────
 
-type Onglet = "rendements" | "directeurs" | "or";
+type Onglet = "rendements" | "directeurs" | "or" | "indicateurs";
 type Statut = "idle" | "loading" | "ready";
 
 const ONGLETS: ReadonlyArray<{ id: Onglet; label: string }> = [
   { id: "rendements", label: "Rendements" },
   { id: "directeurs", label: "Taux directeurs" },
   { id: "or", label: "Réserves d'or" },
+  { id: "indicateurs", label: "Indicateurs" },
 ];
 
 /** Bascule Tableau/Courbe de l'onglet Rendements (libellés explicites, style aligné sur les onglets). */
@@ -480,6 +483,110 @@ function VueOr({ data, statut }: { data: ReserveOr[] | null; statut: Statut }) {
   );
 }
 
+/**
+ * Onglet « Indicateurs » — une ligne d'indicateur, six pays en séries superposées.
+ *
+ * Le découpage n'est pas cosmétique : `CourbeTaux` apparie son infobulle par identité
+ * de chaîne et formate son axe Y en pourcentage. UN indicateur (donc une fréquence et
+ * une unité) par graphe est la condition de sa réutilisation.
+ */
+function OngletIndicateurs({
+  indicateur,
+  setIndicateur,
+}: {
+  indicateur: IndicateurMacro;
+  setIndicateur: (i: IndicateurMacro) => void;
+}) {
+  const series = useStore(macroSeriesStore, (s) => s.series);
+
+  useEffect(() => {
+    void macroSeriesStore.getState().demanderIndicateur(indicateur);
+  }, [indicateur]);
+
+  const definitions = seriesDeIndicateur(indicateur);
+  const meta = INDICATEURS_MACRO.find((i) => i.id === indicateur);
+
+  const courbes: SerieCourbe[] = definitions.flatMap((def) => {
+    const etat = series[def.id];
+    if (etat === undefined || etat.points.length === 0) return [];
+    return [
+      {
+        label: def.libelleRegion,
+        points: pointsDeSerieTemporelle(etat.points),
+        couleurTokenIndex: ORDRE_REGIONS.indexOf(def.region) + 1,
+      },
+    ];
+  });
+
+  const chargement = definitions.some((d) => series[d.id]?.statut === "loading");
+
+  return (
+    <div className="flex flex-col gap-3 p-3">
+      <Segmente
+        options={INDICATEURS_MACRO.map((i) => ({ id: i.id, label: i.label, title: i.description }))}
+        actif={indicateur}
+        onChange={setIndicateur}
+      />
+
+      {chargement && courbes.length === 0 ? (
+        <Chargement libelle="Chargement des séries macro…" />
+      ) : courbes.length === 0 ? (
+        <Vide>Aucune série disponible.</Vide>
+      ) : (
+        <CourbeTaux series={courbes} />
+      )}
+
+      {/* Une ligne par région : valeur, fraîcheur, et MOTIF explicite si absente —
+          jamais un tiret muet (règle d'affichage honnête de la spec). */}
+      <div className="flex flex-col gap-1">
+        {definitions.map((def) => {
+          const etat = series[def.id];
+          const dernier = etat?.points[etat.points.length - 1];
+          const majTs = etat?.majTs ?? null;
+          return (
+            <div key={def.id} className="flex items-baseline justify-between gap-2 text-[11px]">
+              <span className="flex items-baseline gap-1.5">
+                <span
+                  className="inline-block h-2 w-2 shrink-0 rounded-full"
+                  style={{ background: `var(--serie-${ORDRE_REGIONS.indexOf(def.region) + 1})` }}
+                  aria-hidden
+                />
+                <span className="text-text">{def.libelleRegion}</span>
+                {def.perimetre !== undefined && (
+                  <span className="text-text-dim">({def.perimetre})</span>
+                )}
+              </span>
+              <span className="flex items-baseline gap-2">
+                {dernier !== undefined ? (
+                  <span className="tabular-nums text-text">{formatPourcentage(dernier.value)}</span>
+                ) : (
+                  <span className="text-warn">{etat?.message ?? "Indisponible."}</span>
+                )}
+                {/* Cadence = durée de période + délai de publication observé, PAS la
+                    durée de période seule. Mensuel : 30 j + ~5 j de délai = 35 j ; le
+                    seuil « attardé » d'etatFraicheur (1,5 × cadence = 52 j) laisse donc
+                    passer un CPI publié à la mi-mois sans crier au retard, tandis que le
+                    bloc chinois gelé depuis février ressort bien « périmé » (4 × cadence
+                    = 140 j). Trimestriel : 90 j + ~10 j. NE PAS arrondir à 30 ou 90. */}
+                <Fraicheur
+                  loading={etat?.statut === "loading"}
+                  majTs={majTs}
+                  cadenceMs={def.frequence === "Q" ? 100 * 24 * 3_600_000 : 35 * 24 * 3_600_000}
+                />
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <NoteSource>
+        {meta?.description} Sources : FRED, Eurostat, OCDE, ONS. Publication mensuelle —
+        cache local 24 h.
+      </NoteSource>
+    </div>
+  );
+}
+
 // ─────────────────────────── Composant principal ───────────────────────────
 
 export function MacroRatesWindow() {
@@ -490,6 +597,11 @@ export function MacroRatesWindow() {
   // (re)montage de la fenêtre. `requete` (bumped par CRVF) force la resynchronisation
   // même si la fenêtre est déjà montée sur un autre onglet/vue.
   const [vue, setVue] = useState<VueRendementsMode>(() => macroRatesViewStore.getState().vue);
+  // Les deux effets ci-dessous (CRVF et Indicateurs) écrivent tous deux `onglet`. Au plus
+  // UN des deux peut jamais passer son garde à un instant donné : `macroRatesViewStore`
+  // garantit `requete` et `requeteIndicateurs` MUTUELLEMENT EXCLUSIFS (chaque commande
+  // remet l'autre compteur à 0 — cf. store/macroRatesView.ts). Ne JAMAIS s'appuyer sur
+  // l'ordre de déclaration de ces deux effets pour arbitrer entre eux.
   const requeteCourbe = useStore(macroRatesViewStore, (s) => s.requete);
   useEffect(() => {
     if (requeteCourbe === 0) return; // état initial, déjà pris en compte par le lazy useState ci-dessus
@@ -497,9 +609,22 @@ export function MacroRatesWindow() {
     setVue("courbe");
   }, [requeteCourbe]);
 
+  // Second canal de requête (cf. store/macroRatesView.ts) : force l'onglet « Indicateurs »
+  // (bouton « série » du calendrier ECO), sans toucher à `vue` — propre à l'onglet
+  // Rendements.
+  const requeteIndicateurs = useStore(macroRatesViewStore, (s) => s.requeteIndicateurs);
+  useEffect(() => {
+    if (requeteIndicateurs === 0) return; // état initial : un montage frais ne détourne pas l'onglet par défaut
+    setOnglet("indicateurs");
+  }, [requeteIndicateurs]);
+
   const [rendements, setRendements] = useState<RendementsSouverainsMulti | null>(null);
   const [taux, setTaux] = useState<TauxDirecteur[] | null>(null);
   const [reserves, setReserves] = useState<ReserveOr[] | null>(null);
+  // Indicateur sélectionné dans l'onglet « Indicateurs » — levé ici pour que `rafraichir`
+  // (bouton d'en-tête, commun aux quatre onglets) connaisse l'indicateur affiché plutôt
+  // que de recharger un indicateur en dur.
+  const [indicateur, setIndicateur] = useState<IndicateurMacro>("cpi-aa");
 
   const [statutR, setStatutR] = useState<Statut>("idle");
   const [statutD, setStatutD] = useState<Statut>("idle");
@@ -548,7 +673,10 @@ export function MacroRatesWindow() {
   const rafraichir = () => {
     if (onglet === "rendements") setStatutR("idle");
     else if (onglet === "directeurs") setStatutD("idle");
-    else setStatutO("idle");
+    else if (onglet === "or") setStatutO("idle");
+    else if (onglet === "indicateurs") {
+      void macroSeriesStore.getState().demanderIndicateur(indicateur, { force: true });
+    }
     setNonce((n) => n + 1);
   };
 
@@ -570,6 +698,9 @@ export function MacroRatesWindow() {
         )}
         {onglet === "directeurs" && <VueDirecteurs data={taux} statut={statutD} />}
         {onglet === "or" && <VueOr data={reserves} statut={statutO} />}
+        {onglet === "indicateurs" && (
+          <OngletIndicateurs indicateur={indicateur} setIndicateur={setIndicateur} />
+        )}
       </div>
     </>
   );

@@ -24,8 +24,10 @@ import { fetchDvol } from "./deribit";
 import { fetchFearGreed, type FearGreed } from "./marketOverview";
 import { fetchToutesLesNews, type NewsItem } from "./news";
 import { resolveTickerSource } from "./ticker";
+import { seriesDeIndicateur } from "./macro/catalogueMacro";
 import { watchlistStore, type WatchlistSource } from "../store/watchlist";
 import { getSoSoValueKey } from "../store/sosovalue";
+import type { EtatSerie } from "../store/macroSeries";
 import {
   debutJourLocalMs,
   pnlRealisePosition,
@@ -158,6 +160,36 @@ export interface SessionBrief {
   ecoPasses: EvenementBrief[] | null;
 }
 
+/** Une ligne macro du point marché : une zone, sa dernière valeur ou son motif d'absence. */
+export interface LigneMacroBrief {
+  region: string;
+  /** Dernière valeur en %, ou `null` si indisponible. */
+  valeur: number | null;
+  /** Motif d'indisponibilité, ou `null`. Jamais de ligne muette. */
+  message: string | null;
+}
+
+/**
+ * Projette l'état des séries macro en lignes de BRIEF. PURE — LIT le cache déjà chargé,
+ * ne déclenche aucun fetch : le point marché est un instantané, pas un chargeur.
+ * Rend `null` (section absente) plutôt qu'un tableau vide quand rien n'est chargé.
+ */
+export function lignesMacroBrief(series: Record<string, EtatSerie>): LigneMacroBrief[] | null {
+  const definitions = seriesDeIndicateur("cpi-aa");
+  const lignes: LigneMacroBrief[] = [];
+  for (const def of definitions) {
+    const etat = series[def.id];
+    if (etat === undefined || etat.statut === "idle") continue;
+    const dernier = etat.points[etat.points.length - 1];
+    lignes.push({
+      region: def.libelleRegion,
+      valeur: dernier?.value ?? null,
+      message: dernier === undefined ? (etat.message ?? "Indisponible.") : null,
+    });
+  }
+  return lignes.length > 0 ? lignes : null;
+}
+
 /**
  * Instantané complet du brief passé à `briefEnMarkdown`. `null` = section absente/en
  * échec (la fonction markdown tolère chaque section manquante indépendamment).
@@ -172,6 +204,8 @@ export interface DonneesBrief {
   news: TitreNews[] | null;
   fearGreed: FearGreed | null;
   dvol: DvolBrief[] | null;
+  /** Inflation a/a des six zones ; `null` si aucune série n'est en cache. */
+  macro: LigneMacroBrief[] | null;
 }
 
 // ─────────────────────────── Fonctions PURES (testées) ───────────────────────────
@@ -415,6 +449,18 @@ export function briefEnMarkdown(
       const delai = ev.time <= now ? "passé" : formatDelai(ev.time, now);
       l.push(`- ${heure} · ${ev.pays} · ${ev.titre} · ${delai}`);
     }
+  l.push("");
+
+  l.push("## Inflation (a/a)");
+  if (d.macro === null) {
+    l.push("_Section indisponible._");
+  } else {
+    for (const ligne of d.macro) {
+      l.push(
+        `- **${ligne.region}** ${ligne.valeur !== null ? formatPourcentage(ligne.valeur) : (ligne.message ?? "indisponible")}`,
+      );
+    }
+  }
   l.push("");
 
   l.push("## Actualités");

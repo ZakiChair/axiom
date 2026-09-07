@@ -39,6 +39,15 @@
  */
 import type { IMacroProvider, MacroFetchOptions, MacroPoint, MacroSeries } from "./types";
 
+/** Échec HTTP d'un appel FRED, porteur du statut — permet à l'appelant de distinguer
+ *  une clé absente (401) d'une panne réelle sans inspecter un message. */
+export class ErreurHttpFred extends Error {
+  constructor(readonly statut: number, statusText: string) {
+    super(`FRED observations ${statut} ${statusText}`);
+    this.name = "ErreurHttpFred";
+  }
+}
+
 // Base SAME-ORIGIN via le proxy de dev Vite (cf. vite.config.ts). L'API FRED ne
 // renvoie AUCUN en-tête CORS : un appel direct depuis le navigateur est bloqué.
 const OBSERVATIONS_URL = "/fredapi/fred/series/observations";
@@ -73,10 +82,11 @@ function toFredDate(ms: number): string {
 }
 
 /**
- * Construit un fournisseur M2 pour une série FRED donnée.
- * @param seriesId identifiant FRED de la série M2 (défaut "WM2NS", M2 US hebdo).
+ * Construit un fournisseur pour une série FRED donnée.
+ * @param seriesId identifiant FRED de la série (défaut "WM2NS", M2 US hebdo).
+ * @param units transformation optionnelle servie par FRED (ex. "pc1" = glissement annuel).
  */
-export function createFredM2Provider(seriesId = "WM2NS"): IMacroProvider {
+export function createFredM2Provider(seriesId = "WM2NS", units?: string): IMacroProvider {
   const id = `fred-${seriesId.toLowerCase()}`;
   return {
     id,
@@ -87,6 +97,16 @@ export function createFredM2Provider(seriesId = "WM2NS"): IMacroProvider {
         series_id: seriesId,
         file_type: "json",
       });
+      // Transformation servie par FRED (« pc1 » = variation sur un an). Purement additif :
+      // les appelants historiques (M2, NETLIQ) ne passent pas `units`, leur URL reste
+      // identique — verrouillé par le test « n'ajoute aucun paramètre units quand il est
+      // omis » (fred.test.ts).
+      // Le paramètre traverse les trois couches de proxy sans être filtré — VÉRIFIÉ le
+      // 2026-09-06 sur `appendApiKeyIfAbsent` (apps/daemon/src/proxy.ts, qui n'ajoute
+      // que `api_key` et laisse le reste de la requête intact) et `originalQuery`
+      // (api/_policy.ts, qui recopie tous les paramètres sauf les deux métadonnées
+      // de route). Si l'une de ces deux fonctions change, revérifier ici.
+      if (units !== undefined) params.set("units", units);
       // Clé personnelle → envoyée explicitement (le proxy la détecte et n'injecte
       // PAS le repli). Sans clé, on n'envoie RIEN → le proxy injecte la clé .env.
       if (key !== undefined) params.set("api_key", key);
@@ -95,7 +115,7 @@ export function createFredM2Provider(seriesId = "WM2NS"): IMacroProvider {
 
       const res = await fetch(`${OBSERVATIONS_URL}?${params.toString()}`, { signal: opts?.signal });
       if (!res.ok) {
-        throw new Error(`FRED observations ${res.status} ${res.statusText}`);
+        throw new ErreurHttpFred(res.status, res.statusText);
       }
       const json = (await res.json()) as FredObservationsResponse;
 

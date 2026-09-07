@@ -330,8 +330,10 @@ export function BriefWindow() {
       news: news.data,
       fearGreed: fearGreed.data,
       dvol: dvol.data,
-      // Relu au clic (comme `session`) pour exporter le cache le plus frais.
-      macro: lignesMacroBrief(macroSeriesStore.getState().series),
+      // NON relu ici (contrairement à `session`, abonné réactivement à ses stores) :
+      // `macro` est un instantané non réactif — le relire ferait diverger l'export de
+      // ce que l'écran a montré.
+      macro,
     };
     const { symbol, exchange } = marketStore.getState();
     notesStore.getState().ajouter({

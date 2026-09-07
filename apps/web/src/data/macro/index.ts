@@ -24,3 +24,17 @@ export {
 export { stablecoinsSupplyProvider } from "./stablecoins";
 
 export { createFredM2Provider, fredM2MonthlyProvider, fredM2WeeklyProvider } from "./fred";
+
+export type {
+  DefinitionSerieMacro,
+  IndicateurMacro,
+  RegionMacro,
+  SourceMacro,
+} from "./catalogueMacro";
+export { CATALOGUE_MACRO, INDICATEURS_MACRO, ORDRE_REGIONS, seriesDeIndicateur } from "./catalogueMacro";
+
+export type { FrequenceMacro } from "./harmonisation";
+export { filtrerFenetre, finDePeriode, periodeVersMs, trierChrono } from "./harmonisation";
+
+export type { ResultatSerieMacro } from "./chargerSerieMacro";
+export { chargerSerieMacro, cleSante } from "./chargerSerieMacro";

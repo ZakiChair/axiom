@@ -18,12 +18,24 @@ const DEVISE_VERS_REGION: Record<string, RegionMacro> = {
   GBP: "UK",
   JPY: "JP",
   CNY: "CN",
-  INR: "IN",
+  INR: "IN", // ForexFactory n'émet jamais d'Inde ; ce mapping est actuellement inatteignable mais ferme correctement (retourne null)
 };
 
-/** Mots-clés de titre → indicateur du catalogue. Premier motif trouvé l'emporte. */
+/**
+ * Motif de titre pour CPI titre → indicateur du catalogue. Reconnaissance exacte,
+ * non par sous-chaîne : la catalogue ne contient QUE l'indice titre (headline),
+ * annuel (y/y). Un bouton vers Core, m/m, ou variant régional ferait mentir l'UI
+ * silencieusement. Appariement par ALLOW-LIST plutôt que deny-list : ancrée à ^…$
+ * contre le titre normalisé (trimé, espaces internes réduits, minuscules), elle
+ * reste robuste contre des intitulés inconnus. Les quatre vraies sources FF du 2026-09-07
+ * qui ne correspondent PAS : "German Final CPI m/m", "Core CPI y/y", "Core CPI m/m",
+ * "CPI m/m" — preuve que la sous-chaîne était trop large.
+ */
 const MOTIFS: ReadonlyArray<{ motif: RegExp; indicateur: "cpi-aa" }> = [
-  { motif: /\bcpi\b|consumer price index/i, indicateur: "cpi-aa" },
+  {
+    motif: /^(cpi|consumer price index)(\s+flash estimate)?\s+y\/y$/i,
+    indicateur: "cpi-aa",
+  },
 ];
 
 /**
@@ -34,7 +46,8 @@ export function serieMacroDe(country: string, title: string): string | null {
   const region = DEVISE_VERS_REGION[country.trim().toUpperCase()];
   if (region === undefined) return null;
 
-  const titre = title.trim();
+  // Normaliser le titre : trimmer, réduire les espaces internes, minuscules pour le regex
+  const titre = title.trim().replace(/\s+/g, " ");
   for (const { motif, indicateur } of MOTIFS) {
     if (!motif.test(titre)) continue;
     const def = CATALOGUE_MACRO.find((d) => d.region === region && d.indicateur === indicateur);

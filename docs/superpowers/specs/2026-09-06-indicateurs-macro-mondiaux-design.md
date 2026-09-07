@@ -71,7 +71,7 @@ approximation, sans périmètre à rattraper.
 | Région | Source | Dataflow / identifiant | Clé | Dernière obs. vérifiée |
 |---|---|---|---|---|
 | US | FRED | `CPIAUCSL` + `units=pc1` | — | 2026-07 · **3,30 %** |
-| EZ | Eurostat | `prc_hicp_minr` | `geo=EA21`, `unit=RCH_A` | **2026-08** |
+| EZ | Eurostat | `prc_hicp_minr` | `freq=M&unit=RCH_A&coicop18=TOTAL&geo=EA21` | 2026-08 · **3,2 %** |
 | UK | ONS | `economy/inflationandpriceindices/timeseries/d7g7/mm23/data` | — | 2026-07 · **2,9 %** |
 | JP | OCDE | `OECD.SDD.TPS,DSD_PRICES_COICOP2018@DF_PRICES_C2018_ALL,1.0` | `JPN.M.N.CPI.PA._T.N.GY` | 2026-07 · **1,9 %** |
 | CN | OCDE | `OECD.SDD.TPS,DSD_PRICES@DF_PRICES_ALL,1.0` | `CHN.M.N.CPI.PA._T.N.GY` | 2026-07 · **0,5 %** |
@@ -123,10 +123,14 @@ mensonger et la fenêtre de reset n'est pas mesurée. D'où : chargement **séqu
 ≥ 2 s, clés précises (aucun joker), aucun retry serré, et un statut de santé « quota » **distinct**
 de « source morte ».
 
-**(c) Eurostat : filtrage dimensionnel obligatoire.** Une requête `prc_hicp_minr` insuffisamment
-filtrée renvoie **plusieurs milliers de valeurs** (tous géos, tous postes COICOP) en HTTP 200 —
-pas une erreur, un payload ingérable. Le jeu a été rebasé (2025=100, ECOICOP v2, code géo
-**EA21**) ; `prc_hicp_manr` et `midx` sont **archivés** (gelés à 2025-12, vérifié).
+**(c) Eurostat : filtrage dimensionnel obligatoire, et noms de dimensions v2.** Une requête
+`prc_hicp_minr` insuffisamment filtrée renvoie **plusieurs milliers de valeurs** en HTTP 200 —
+pas une erreur, un payload ingérable : le poste `coicop18` compte **555 modalités**.
+Le jeu est en ECOICOP v2, ce qui change les noms : la dimension est **`coicop18`** (pas
+`coicop`) et le poste global est **`TOTAL`** (pas `CP00`). Requête complète vérifiée :
+`prc_hicp_minr?freq=M&unit=RCH_A&coicop18=TOTAL&geo=EA21` → 2026-08 = **3,2 %**.
+`prc_hicp_manr` est **archivé** — son propre `label` l'annonce (« HICP - monthly data (annual
+rate of change) **(1997-2025)** ») et il est gelé à 2025-12.
 
 **(d) Eurostat : `value` vide.** Un HTTP 200 avec `value: {}` est un **échec de source**, pas une
 série vide. À traiter comme tel.

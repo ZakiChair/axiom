@@ -593,6 +593,11 @@ export function MacroRatesWindow() {
   // (re)montage de la fenêtre. `requete` (bumped par CRVF) force la resynchronisation
   // même si la fenêtre est déjà montée sur un autre onglet/vue.
   const [vue, setVue] = useState<VueRendementsMode>(() => macroRatesViewStore.getState().vue);
+  // Les deux effets ci-dessous (CRVF et Indicateurs) écrivent tous deux `onglet`. Au plus
+  // UN des deux peut jamais passer son garde à un instant donné : `macroRatesViewStore`
+  // garantit `requete` et `requeteIndicateurs` MUTUELLEMENT EXCLUSIFS (chaque commande
+  // remet l'autre compteur à 0 — cf. store/macroRatesView.ts). Ne JAMAIS s'appuyer sur
+  // l'ordre de déclaration de ces deux effets pour arbitrer entre eux.
   const requeteCourbe = useStore(macroRatesViewStore, (s) => s.requete);
   useEffect(() => {
     if (requeteCourbe === 0) return; // état initial, déjà pris en compte par le lazy useState ci-dessus
@@ -600,9 +605,9 @@ export function MacroRatesWindow() {
     setVue("courbe");
   }, [requeteCourbe]);
 
-  // Second canal de requête, INDÉPENDANT du précédent (cf. store/macroRatesView.ts) :
-  // force l'onglet « Indicateurs » (bouton « série » du calendrier ECO), sans toucher à
-  // `vue` — propre à l'onglet Rendements — ni à l'effet CRVF ci-dessus.
+  // Second canal de requête (cf. store/macroRatesView.ts) : force l'onglet « Indicateurs »
+  // (bouton « série » du calendrier ECO), sans toucher à `vue` — propre à l'onglet
+  // Rendements.
   const requeteIndicateurs = useStore(macroRatesViewStore, (s) => s.requeteIndicateurs);
   useEffect(() => {
     if (requeteIndicateurs === 0) return; // état initial : un montage frais ne détourne pas l'onglet par défaut

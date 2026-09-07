@@ -19,6 +19,9 @@ import { ecoStore, ECO_IMPACTS } from "../store/eco";
 import type { EcoEvent, EcoImpact } from "../data/eco";
 import { navigateTo } from "../lib/navigation";
 import { BoutonRafraichir, EnTeteFenetre } from "./ui";
+import { serieMacroDe } from "../data/macro/ecoVersSerie";
+import { macroSeriesStore } from "../store/macroSeries";
+import { windowManagerStore } from "../store/windowManager";
 import "../chart/ecoMarkers";
 
 /** Libellé court FR d'un impact. */
@@ -88,43 +91,61 @@ function Valeur({ label, value, accent }: { label: string; value?: string; accen
 
 /** Une ligne d'évènement — clic = marqueur vertical sur le chart (bus C2). */
 function Ligne({ ev, passe }: { ev: EcoEvent; passe: boolean }) {
+  // Le bouton « série » est un FRÈRE du bouton de ligne, pas un enfant : imbriquer
+  // deux <button> est du HTML invalide. D'où le conteneur `relative` + position absolue.
+  const idSerie = serieMacroDe(ev.country, ev.title);
   return (
-    <button
-      type="button"
-      onClick={() =>
-        navigateTo({
-          markTime: ev.time,
-          markLabel: `${ev.country} ${ev.title}`,
-          source: "eco",
-        })
-      }
-      title="Marquer sur le chart"
-      className={`grid w-full grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-b border-border px-3 py-2 text-left transition hover:bg-bg ${
-        passe ? "opacity-60" : ""
-      }`}
-    >
-      <div className="flex flex-col items-start gap-1">
-        <span className="whitespace-nowrap tabular-nums text-[11px] text-text-dim">
-          {formatEcheance(ev.time, ev.timeApprox)}
-        </span>
-        <span className="rounded bg-bg px-1.5 py-0.5 text-[10px] font-medium text-text-dim">
-          {ev.country}
-        </span>
-      </div>
-      <div className="min-w-0 space-y-1">
-        <div className="flex items-start justify-between gap-2">
-          <span className="text-xs leading-snug text-text">{ev.title}</span>
-          <ImpactBadge impact={ev.impact} />
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() =>
+          navigateTo({
+            markTime: ev.time,
+            markLabel: `${ev.country} ${ev.title}`,
+            source: "eco",
+          })
+        }
+        title="Marquer sur le chart"
+        className={`grid w-full grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-b border-border px-3 py-2 text-left transition hover:bg-bg ${
+          passe ? "opacity-60" : ""
+        }`}
+      >
+        <div className="flex flex-col items-start gap-1">
+          <span className="whitespace-nowrap tabular-nums text-[11px] text-text-dim">
+            {formatEcheance(ev.time, ev.timeApprox)}
+          </span>
+          <span className="rounded bg-bg px-1.5 py-0.5 text-[10px] font-medium text-text-dim">
+            {ev.country}
+          </span>
         </div>
-        {(ev.actual !== undefined || ev.forecast !== undefined || ev.previous !== undefined) && (
-          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] tabular-nums">
-            <Valeur label="Act." value={ev.actual} accent />
-            <Valeur label="Prév." value={ev.forecast} />
-            <Valeur label="Préc." value={ev.previous} />
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-start justify-between gap-2">
+            <span className="text-xs leading-snug text-text">{ev.title}</span>
+            <ImpactBadge impact={ev.impact} />
           </div>
-        )}
-      </div>
-    </button>
+          {(ev.actual !== undefined || ev.forecast !== undefined || ev.previous !== undefined) && (
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] tabular-nums">
+              <Valeur label="Act." value={ev.actual} accent />
+              <Valeur label="Prév." value={ev.forecast} />
+              <Valeur label="Préc." value={ev.previous} />
+            </div>
+          )}
+        </div>
+      </button>
+      {idSerie !== null && (
+        <button
+          type="button"
+          title="Voir l'historique de cette statistique"
+          className="absolute right-3 bottom-2 rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-dim transition hover:text-text"
+          onClick={() => {
+            windowManagerStore.getState().openWindow("macroRates");
+            void macroSeriesStore.getState().demanderIndicateur("cpi-aa");
+          }}
+        >
+          série
+        </button>
+      )}
+    </div>
   );
 }
 

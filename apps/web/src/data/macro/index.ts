@@ -1,10 +1,13 @@
 /**
  * Point d'entrée des fournisseurs MACRO / « masse monétaire » d'AXIOM.
  *
- * Trois mesures, toutes GRATUITES :
+ * Quatre couches, toutes GRATUITES :
  *   1. Capitalisation totale du marché crypto (CoinGecko)  → coingecko.ts
  *   2. Supply agrégée des stablecoins (DefiLlama)          → stablecoins.ts
  *   3. M2 / liquidité (US extensible, via FRED)            → fred.ts
+ *   4. Catalogue d'indicateurs macro mondiaux (CPI a/a, six zones), ses
+ *      transports et son harmonisation temporelle
+ *      → catalogueMacro.ts, chargerSerieMacro.ts, harmonisation.ts
  *
  * Ne ré-exporte QUE le contenu de ce dossier (macro/) — aucune dépendance
  * vers le reste de apps/web (propriété « chart » dans le BUILD-CONTRACT).

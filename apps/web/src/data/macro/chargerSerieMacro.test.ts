@@ -70,4 +70,27 @@ describe("chargerSerieMacro", () => {
       statut: "panne",
     });
   });
+
+  it("rend un statut « panne » sur un 401 sans clé requise", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve({ ok: false, status: 401, statusText: "Unauthorized" })),
+    );
+    const r = await chargerSerieMacro(DEF_OCDE, Date.UTC(2020, 0, 1));
+    expect(r.statut).toBe("panne");
+  });
+
+  it("transmet le paramètre units au fournisseur FRED", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        urls.push(url);
+        return Promise.resolve({ ok: true, json: async () => ({ observations: [] }) });
+      }),
+    );
+    await chargerSerieMacro(DEF_FRED, Date.UTC(2020, 0, 1));
+    expect(urls[0]).toContain("series_id=CPIAUCSL");
+    expect(urls[0]).toContain("units=pc1");
+  });
 });

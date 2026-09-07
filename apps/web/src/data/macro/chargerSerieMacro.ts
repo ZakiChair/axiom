@@ -11,7 +11,7 @@ import type { DefinitionSerieMacro } from "./catalogueMacro";
 import { chargerSerieEurostat } from "./eurostat";
 import { chargerSerieOecd, ErreurQuotaOecd } from "./oecd";
 import { chargerSerieOns } from "./ons";
-import { createFredM2Provider } from "./fred";
+import { createFredM2Provider, ErreurHttpFred } from "./fred";
 
 /** Issue d'un chargement de série. Aucune exception ne franchit cette frontière. */
 export type ResultatSerieMacro =
@@ -61,9 +61,9 @@ export async function chargerSerieMacro(
     if (e instanceof ErreurQuotaOecd) {
       return { statut: "quota", message: "Quota OCDE — nouvelle tentative différée." };
     }
-    const texte = e instanceof Error ? e.message : String(e);
     // FRED sans clé répond 401 : ce n'est pas une panne, c'est une configuration absente.
-    if (def.cleRequise && /\b401\b/.test(texte)) {
+    // ErreurHttpFred porte le statut HTTP typé — on ne scrute pas le message.
+    if (def.cleRequise && e instanceof ErreurHttpFred && e.statut === 401) {
       return { statut: "sansCle", message: "Clé FRED absente." };
     }
     return { statut: "panne", message: "Source indisponible." };

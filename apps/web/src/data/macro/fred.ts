@@ -39,6 +39,15 @@
  */
 import type { IMacroProvider, MacroFetchOptions, MacroPoint, MacroSeries } from "./types";
 
+/** Échec HTTP d'un appel FRED, porteur du statut — permet à l'appelant de distinguer
+ *  une clé absente (401) d'une panne réelle sans inspecter un message. */
+export class ErreurHttpFred extends Error {
+  constructor(readonly statut: number, statusText: string) {
+    super(`FRED observations ${statut} ${statusText}`);
+    this.name = "ErreurHttpFred";
+  }
+}
+
 // Base SAME-ORIGIN via le proxy de dev Vite (cf. vite.config.ts). L'API FRED ne
 // renvoie AUCUN en-tête CORS : un appel direct depuis le navigateur est bloqué.
 const OBSERVATIONS_URL = "/fredapi/fred/series/observations";
@@ -106,7 +115,7 @@ export function createFredM2Provider(seriesId = "WM2NS", units?: string): IMacro
 
       const res = await fetch(`${OBSERVATIONS_URL}?${params.toString()}`, { signal: opts?.signal });
       if (!res.ok) {
-        throw new Error(`FRED observations ${res.status} ${res.statusText}`);
+        throw new ErreurHttpFred(res.status, res.statusText);
       }
       const json = (await res.json()) as FredObservationsResponse;
 

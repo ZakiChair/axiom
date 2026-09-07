@@ -56,3 +56,10 @@ describe("parseOnsTimeseries", () => {
     expect(() => parseOnsTimeseries({ description: {} }, DEPUIS_2020)).toThrow();
   });
 });
+
+describe("ONS trimestriel", () => {
+  it("lit le PIB réel trimestriel sans exiger de mois ni mélanger les fréquences", () => {
+    const raw = { quarters: [{ year: "2026", quarter: "Q2", value: "712545" }, { year: "2026", quarter: "Q3", value: "NA" }], months: [] };
+    expect(parseOnsTimeseries(raw, DEPUIS_2020, "Q")).toEqual([{ time: Date.UTC(2026, 3, 1), value: 712545 }]);
+  });
+});

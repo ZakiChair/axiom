@@ -1,7 +1,8 @@
 import { defineConfig, loadEnv } from "vite";
 import type { ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
-import { EXTAPI_HOSTS } from "../../shared/extapi-hosts";
+import { EXTAPI_HOSTS, EXTAPI_HOTES_SPECIALISES } from "../../shared/extapi-hosts";
+import { geoProxyDev } from "./vite.geo-proxy";
 import { appendApiKeyIfAbsent } from "./src/data/apiKeyProxy";
 
 // PROXY GÉNÉRIQUE /extapi (Phase 3) — contournement CORS pour APIs sans clé.
@@ -30,7 +31,7 @@ const EXTAPI_USER_AGENT_HOTES: Record<string, string> = {
 // UA navigateur ou SEC-conforme par hôte, timeout 15 s). Cache : seulement en PROD (daemon) —
 // le proxy de dev ne met rien en cache, comme les proxys /fredapi… existants.
 const extapiProxy: Record<string, ProxyOptions> = Object.fromEntries(
-  EXTAPI_HOTES.map((hote) => [
+  EXTAPI_HOTES.filter((hote) => !EXTAPI_HOTES_SPECIALISES.includes(hote)).map((hote) => [
     `/extapi/${hote}`,
     {
       target: `https://${hote}`,
@@ -69,7 +70,7 @@ export default defineConfig(({ mode }) => {
   const TWELVE_DATA_API_BASE = isVercelBuild ? "https://api.twelvedata.com" : "/tdapi";
 
   return {
-  plugins: [react()],
+  plugins: [geoProxyDev(), react()],
   // Expose UNIQUEMENT la PRÉSENCE de la clé .env BGeometrics (booléen), jamais sa valeur :
   // le front bascule alors sur le quota horaire (10 req/h). Voir BG_CLE_ENV_PRESENTE dans
   // data/onchain/bgeometrics.ts ; fixe aussi le déploiement public et la base Twelve Data.

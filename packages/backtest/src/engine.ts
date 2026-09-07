@@ -20,7 +20,7 @@
  */
 
 import type { Candle, IndicatorResult } from "@axiom/types";
-import { computeIndicator, getIndicator } from "@axiom/indicators";
+import { computeIndicator, getIndicator, supportsIndicatorTimeframe } from "@axiom/indicators";
 import type {
   ChampPrix,
   Comparateur,
@@ -300,6 +300,8 @@ export function runBacktest(
   strat: StrategieDef,
   params: ParamsBacktest,
 ): ResultatBacktest {
+  const incompatibilite = raisonTimeframeBacktest([...strat.reglesEntree, ...strat.reglesSortie], params.timeframe);
+  if (incompatibilite) throw new Error(incompatibilite);
   const n = candles.length;
   const cache = new Map<string, IndicatorResult>();
   const entree = compilerRegles(strat.reglesEntree, candles, cache);
@@ -407,6 +409,17 @@ export function runBacktest(
   const equity = construireEquity(trades, candles, params.capitalInitial);
   const stats = calculerStats(trades, equity, candles, params.capitalInitial);
   return { trades, equity, stats, nbBougies: n };
+}
+
+/** Refus explicite avant calcul : un run sans métadonnée n'invente pas l'intervalle. */
+export function raisonTimeframeBacktest(conditions: readonly Condition[], timeframe: ParamsBacktest["timeframe"]): string | null {
+  for (const condition of conditions) {
+    const operandes = condition.type === "comparaison" ? [condition.gauche, condition.droite] : [condition.a, condition.b];
+    for (const op of operandes) {
+      if (op.type === "indicateur" && !supportsIndicatorTimeframe(op.indicateurId, timeframe)) return "RVOL saisonnier : intervalle 1h requis.";
+    }
+  }
+  return null;
 }
 
 // ─────────────────────────── Equity curve & drawdown ───────────────────────────

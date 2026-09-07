@@ -14,6 +14,8 @@
  * composables sans introduire d'expressions arbitraires.
  */
 
+import type { Timeframe } from "@axiom/types";
+
 /** Comparateur numérique (identique au screener/alerts). */
 export type Comparateur = ">" | ">=" | "<" | "<=";
 
@@ -114,6 +116,8 @@ export interface StrategieDef {
 
 /** Paramètres d'exécution (frais / slippage / capital), indépendants de la stratégie. */
 export interface ParamsBacktest {
+  /** TF explicite du run ; requis pour les indicateurs à intervalle contraint. */
+  timeframe?: Timeframe;
   /** Frais par côté (entrée ET sortie), en % du notionnel. */
   fraisPct: number;
   /** Slippage par côté, en % (dégrade le prix de fill). */

@@ -15,6 +15,15 @@ describe("sosoUnusableWithoutKey", () => {
 });
 
 describe("parseEtfFlows (schéma réel SoSoValue currentEtfDataMetrics)", () => {
+  it("ne transforme pas les données nulles/non publiées en flux nul", () => {
+    const r = parseEtfFlows({ data: { list: [null,
+      { ticker: "A", dailyNetInflow: { value: null, status: "3" } },
+      { ticker: "B", dailyNetInflow: { value: "", status: "1" } },
+      { ticker: "C", dailyNetInflow: { value: "10", status: "3" } },
+      { ticker: "D", dailyNetInflow: { value: 0, status: "1" } },
+    ] } });
+    expect(r.parEmetteur).toEqual([{ emetteur: "D", flux: 0 }]);
+  });
   it("parse une réponse valide", () => {
     const json = {
       code: 0,

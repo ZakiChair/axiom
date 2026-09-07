@@ -186,7 +186,7 @@ export function calculerRegime(entrees: EntreesRegime): Regime {
     }
     composants.push({
       id: "stables",
-      libelle: "Impression stablecoins 7 j",
+      libelle: "Variation de l’offre stablecoins 7 j",
       note,
       detail: note === null ? "stables —" : `stables ${v !== null && v >= 0 ? "+" : ""}${v?.toFixed(2)}% 7j (${fmtNote(note)})`,
     });

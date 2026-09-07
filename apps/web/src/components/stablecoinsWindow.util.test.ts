@@ -96,7 +96,7 @@ describe("impressionNette", () => {
     expect(impressionNette(serie, 10)).toBe(30); // 130 - 100
   });
   it("série trop courte pour la fenêtre → null", () => {
-    expect(impressionNette(serie, 30)).toBe(30); // borne avant le 1er point → 1er point
+    expect(impressionNette(serie, 30)).toBeNull();
     expect(impressionNette([], 7)).toBeNull();
     expect(impressionNette([{ time: 0, totalUsd: 1 }], 7)).toBeNull();
   });

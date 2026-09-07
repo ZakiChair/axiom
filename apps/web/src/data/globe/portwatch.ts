@@ -52,6 +52,7 @@ function urlQuery(couche: string, params: Record<string, string>): string {
 
 /** Coerce en nombre fini, sinon null. */
 function nombreOuNull(x: unknown): number | null {
+  if (x === null || x === undefined || x === "" || typeof x === "boolean") return null;
   const n = typeof x === "number" ? x : Number(x);
   return Number.isFinite(n) ? n : null;
 }

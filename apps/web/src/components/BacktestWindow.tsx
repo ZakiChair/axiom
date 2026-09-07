@@ -44,6 +44,7 @@ import { btMarksStore } from "../chart/btMarkers";
 import { MAX_MARQUEURS_BT, tradesTronques } from "../chart/btMarkers.calc";
 import { navigateTo } from "../lib/navigation";
 import type { Timeframe } from "@axiom/types";
+import { supportsIndicatorTimeframe } from "@axiom/indicators";
 import {
   formatDateComplete,
   formatDateCourte,
@@ -129,6 +130,7 @@ function OperandeSelect({
   aria: string;
 }) {
   const { specId, param } = decrireOperande(op);
+  const tf = useStore(backtestStore, s => s.tf);
   const spec = specParId(specId);
   return (
     <span className="flex items-center gap-1">
@@ -140,11 +142,11 @@ function OperandeSelect({
         }}
         aria-label={aria}
       >
-        {CATALOGUE_OPERANDES.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.label}
-          </option>
-        ))}
+        {CATALOGUE_OPERANDES.map((s) => {
+          const op = s.make(s.defaultParam);
+          const compatible = op.type !== "indicateur" || supportsIndicatorTimeframe(op.indicateurId, tf);
+          return <option key={s.id} value={s.id} disabled={!compatible}>{s.label}{compatible ? "" : " · 1h requis"}</option>;
+        })}
       </Select>
       {spec?.paramKey !== undefined && (
         <Input

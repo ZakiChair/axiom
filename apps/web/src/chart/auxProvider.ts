@@ -22,6 +22,8 @@
  * Metrics/DefiLlama sont mono-source) ni du timeframe du graphe (granularité brute
  * fixée : "1hour" / quotidien) ; l'écart de timeframe est absorbé par `alignAux` à la
  * lecture. EXCEPTIONS à la clé `(id, symbole)` :
+ *   - `mark` est fetché au timeframe du graphe et apparié EXACTEMENT par ouverture :
+ *     comparer les clôtures spot/perp exige le même intervalle, sans report entre barres.
  *   - `perpDelta` est un FLUX (delta agresseur par bougie), pas un niveau — il DOIT être
  *     fetché à l'interval du chart (un LOCF sur un flux fabrique un flux faux). Sa clé
  *     intègre donc le timeframe (`perpDelta:${symbole}:${tf}`).
@@ -40,23 +42,6 @@ import { histFunding, histOiUsd } from "../data/referentiels";
 import { stablecoinsSupplyProvider } from "../data/macro/stablecoins";
 import { fetchNvtHistory } from "../data/onchain/blockchainNvt";
 import { fetchCoinMetrics } from "../data/onchain/coinmetrics";
-import {
-  BG_ASOPR,
-  BG_BALANCED_PRICE,
-  BG_BTC_DOMINANCE,
-  BG_CVDD,
-  BG_LTH_SOPR,
-  BG_MVRV,
-  BG_NUPL,
-  BG_PUELL,
-  BG_REALIZED_PRICE,
-  BG_RESERVE_RISK,
-  BG_RHODL,
-  BG_SOPR,
-  BG_STH_SOPR,
-  fetchBgeometricMetrique,
-  type DefMetriqueBg,
-} from "../data/onchain/bgeometrics";
 import { fetchQuarterlyBasisHistory } from "../data/binanceDapi";
 import { fetchLsAccountRatio, fetchLsTopTraderRatio, fetchTakerRatio } from "../data/positioning";
 import { fetchFearGreedHistory } from "../data/marketOverview";
@@ -190,20 +175,22 @@ function toFuturesSymbol(symbol: string): string {
 }
 
 /**
- * Historique mark price 1h via Binance fapi (proxy /extapi). Paginé (limit 1500).
+ * Historique mark au PAS DU GRAPHE via Binance fapi. Pagination arrière, 4500 dernières
+ * barres maximum. Chaque close reste attaché à sa propre bougie ; le bar live contient
+ * uniquement la dernière observation disponible. L'alignement exact interdit tout report
+ * vers une bougie de clôture différente, notamment à travers un trou de données.
  * PURE côté parse ; réseau dans cette fonction uniquement (couche web autorisée).
  */
-async function fetchMarkPriceHistory(symbol: string, since: number): Promise<AuxPoint[]> {
+async function fetchMarkPriceHistory(symbol: string, since: number, interval: string): Promise<AuxPoint[]> {
   const sym = toFuturesSymbol(symbol);
   const out: AuxPoint[] = [];
-  let startTime = since;
   const now = Date.now();
-  // Max ~2 pages pour 90 j × 1h (~2160 barres, plafond API 1500/req).
-  for (let page = 0; page < 3 && startTime < now; page++) {
+  let endTime = now;
+  for (let page = 0; page < 3; page++) {
     const q = new URLSearchParams({
       symbol: sym,
-      interval: "1h",
-      startTime: String(startTime),
+      interval,
+      endTime: String(endTime),
       limit: "1500",
     });
     const res = await fetch(extUrl("fapi.binance.com", `fapi/v1/markPriceKlines?${q}`));
@@ -213,20 +200,19 @@ async function fetchMarkPriceHistory(symbol: string, since: number): Promise<Aux
     }
     const raw: unknown = await res.json();
     if (!Array.isArray(raw) || raw.length === 0) break;
-    let lastT = startTime;
+    let firstT = Infinity;
     for (const row of raw) {
       if (!Array.isArray(row) || row.length < 5) continue;
       const t = Number(row[0]);
       const close = Number(row[4]); // close = mark à la fin de la bougie
-      if (!Number.isFinite(t) || !Number.isFinite(close)) continue;
+      if (!Number.isFinite(t) || !Number.isFinite(close) || close <= 0 || t > now) continue;
       out.push({ time: t, value: close });
-      lastT = t;
+      firstT = Math.min(firstT, t);
     }
-    // Page suivante : juste après la dernière bougie reçue.
-    startTime = lastT + 1;
-    if (raw.length < 1500) break;
+    if (!Number.isFinite(firstT) || firstT <= since || firstT > endTime || raw.length < 1500) break;
+    endTime = firstT - 1;
   }
-  return toPoints(out);
+  return toPoints(out.filter((p) => p.time >= since));
 }
 
 /**
@@ -286,7 +272,7 @@ async function fetchPerpDeltaHistory(
 /**
  * Récupère la série brute d'une famille auxiliaire pour un symbole, normalisée en
  * `AuxPoint[]` triés. Une exception (source injoignable) remonte → cache `error`.
- * `timeframe` n'est utilisé que par `perpDelta` (flux) et `refClose` (niveau apparié),
+ * `timeframe` est utilisé par `mark`, `perpDelta` (flux) et `refClose` (niveau apparié),
  * tous deux fetchés à l'interval du chart ; les autres séries de niveaux gardent leur
  * granularité brute fixe et l'ignorent.
  */
@@ -325,8 +311,8 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
       return toPoints((h ?? []).map((p) => ({ time: p.t, value: p.v })));
     }
     case "mark": {
-      // Mark price perp Binance (gratuit, fapi markPriceKlines 1h) — pour basis spot-perp.
-      return fetchMarkPriceHistory(symbol, since);
+      const interval = timeframeToFapiInterval(timeframe);
+      return interval === undefined ? [] : fetchMarkPriceHistory(symbol, since, interval);
     }
     case "perpDelta": {
       // Delta agresseur perp par bougie (gratuit, fapi klines à l'interval du chart) —
@@ -391,8 +377,9 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
       // quota partagés avec OnchainWindow → aucun appel réseau dupliqué). BTC uniquement :
       // les autres actifs restent vides (dégradation gracieuse).
       if (symbolToAsset(symbol) !== "btc") return [];
-      const def = BG_DEF_PAR_AUX[id];
-      const r = await fetchBgeometricMetrique(def, getBgeometricsKey());
+      const bg = await chargerClientBg();
+      const def = bg[BG_DEF_PAR_AUX[id]];
+      const r = await bg.fetchBgeometricMetrique(def, getBgeometricsKey());
       return toPoints((r?.serie.points ?? []).map((p) => ({ time: p.time, value: p.value })));
     }
     case "quarterlyBasis": {
@@ -413,31 +400,37 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
       return toPoints(await fetchFearGreedHistory(120));
     case "btcDominance": {
       // Dominance BTC GLOBALE (non gatée sur l'actif) — pertinente sur tout chart.
-      const r = await fetchBgeometricMetrique(BG_BTC_DOMINANCE, getBgeometricsKey());
+      const bg = await chargerClientBg();
+      const r = await bg.fetchBgeometricMetrique(bg.BG_BTC_DOMINANCE, getBgeometricsKey());
       return toPoints((r?.serie.points ?? []).map((p) => ({ time: p.time, value: p.value })));
     }
   }
 }
 
+let clientBg: Promise<typeof import("../data/onchain/bgeometrics")> | undefined;
+function chargerClientBg(): Promise<typeof import("../data/onchain/bgeometrics")> {
+  return clientBg ??= import("../data/onchain/bgeometrics").catch((err) => {
+    clientBg = undefined;
+    throw err;
+  });
+}
+
 /** Aux id on-chain → définition BGeometrics correspondante. */
-const BG_DEF_PAR_AUX: Record<
-  | "nupl" | "puell" | "sopr" | "reserveRisk" | "mvrvZ" | "realizedPrice"
-  | "asopr" | "sthSopr" | "lthSopr" | "rhodl" | "cvdd" | "balancedPrice",
-  DefMetriqueBg
-> = {
-  nupl: BG_NUPL,
-  puell: BG_PUELL,
-  sopr: BG_SOPR,
-  reserveRisk: BG_RESERVE_RISK,
-  mvrvZ: BG_MVRV,
-  realizedPrice: BG_REALIZED_PRICE,
-  asopr: BG_ASOPR,
-  sthSopr: BG_STH_SOPR,
-  lthSopr: BG_LTH_SOPR,
-  rhodl: BG_RHODL,
-  cvdd: BG_CVDD,
-  balancedPrice: BG_BALANCED_PRICE,
-};
+// Noms d'exports uniquement : le client à quota n'est chargé qu'au premier besoin.
+const BG_DEF_PAR_AUX = {
+  nupl: "BG_NUPL",
+  puell: "BG_PUELL",
+  sopr: "BG_SOPR",
+  reserveRisk: "BG_RESERVE_RISK",
+  mvrvZ: "BG_MVRV",
+  realizedPrice: "BG_REALIZED_PRICE",
+  asopr: "BG_ASOPR",
+  sthSopr: "BG_STH_SOPR",
+  lthSopr: "BG_LTH_SOPR",
+  rhodl: "BG_RHODL",
+  cvdd: "BG_CVDD",
+  balancedPrice: "BG_BALANCED_PRICE",
+} as const satisfies Record<string, keyof typeof import("../data/onchain/bgeometrics")>;
 
 export class AuxProvider {
   /** Cache brut partagé (singleton) : clé `${id}:${symbole}` → entrée. */
@@ -456,7 +449,7 @@ export class AuxProvider {
     let pending = false;
 
     for (const id of req.ids) {
-      // `perpDelta` (flux) et `refClose` (niveau apparié 1:1) sont fetchés à l'interval du
+      // `mark`, `perpDelta` (flux) et `refClose` sont fetchés à l'intervalle du
       // chart → leur clé intègre le timeframe. `refClose` porte de plus sur le symbole de
       // RÉFÉRENCE (refSymbolStore), pas celui du chart : le fetch ET la clé utilisent
       // `refSymbol` (lu UNE fois ici → cohérence clé/fetch). Changer de refSymbol produit
@@ -464,7 +457,7 @@ export class AuxProvider {
       // que ce refSymbol soit re-sélectionné, puis purgée-si-expirée). Niveaux : inchangés.
       const fetchSymbol = id === "refClose" ? refSymbolStore.getState().refSymbol : req.symbol;
       const key =
-        id === "perpDelta" || id === "refClose"
+        id === "mark" || id === "perpDelta" || id === "refClose"
           ? `${id}:${fetchSymbol}:${req.timeframe}`
           : `${id}:${req.symbol}`;
       let entry = this.cache.get(key);
@@ -489,7 +482,12 @@ export class AuxProvider {
         errorMessage = entry.message;
         continue;
       }
-      aux[id] = alignAux(req.candleTimes, entry.points, AUX_SUR_CLOTURE.has(id));
+      if (id === "mark") {
+        const parOuverture = new Map(entry.points.map((p) => [p.time, p.value]));
+        aux.mark = req.candleTimes.map((t) => parOuverture.get(t));
+      } else {
+        aux[id] = alignAux(req.candleTimes, entry.points, AUX_SUR_CLOTURE.has(id));
+      }
     }
 
     if (errorMessage !== undefined) return { status: "error", message: errorMessage };

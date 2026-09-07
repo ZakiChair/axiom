@@ -17,6 +17,7 @@
  */
 import { createStore } from "zustand/vanilla";
 import type { TradeJournal } from "../data/expy";
+import { miroiterTravailPersonnel } from "../data/daemon";
 
 /** Clé localStorage du journal. Incluse d'office dans l'export/import de sauvegarde. */
 export const EXPY_STORAGE_KEY = "axiom:expy:v1";
@@ -61,7 +62,9 @@ export function chargerTrades(): TradeJournal[] {
 /** Écriture tolérante (quota / mode privé → silencieux : persistance best-effort). */
 function persister(trades: TradeJournal[]): void {
   try {
-    localStorage.setItem(EXPY_STORAGE_KEY, JSON.stringify(trades));
+    const valeur = JSON.stringify(trades);
+    localStorage.setItem(EXPY_STORAGE_KEY, valeur);
+    miroiterTravailPersonnel(EXPY_STORAGE_KEY, valeur);
   } catch {
     /* quota / mode privé : la persistance est best-effort */
   }

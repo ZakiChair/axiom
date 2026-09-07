@@ -203,7 +203,14 @@ export function snapshotQuotidienSiNecessaire(d: Database, now: number = Date.no
 /** Lit le payload d'un snapshot par id (`null` si id inconnu). */
 export function lireSnapshot(d: Database, id: number): EntreeSnapshot[] | null {
   const ligne = d.query("SELECT donnees FROM kv_snapshots WHERE id = ?").get(id) as { donnees: string } | null;
-  return ligne ? deserialiserSnapshot(ligne.donnees) : null;
+  if (!ligne) return null;
+  try {
+    const brut: unknown = JSON.parse(ligne.donnees);
+    if (!Array.isArray(brut)) return null;
+    const entrees = deserialiserSnapshot(ligne.donnees);
+    // Un snapshot endommagé n'est jamais interprété comme une sauvegarde vide.
+    return entrees.length === brut.length ? entrees : null;
+  } catch { return null; }
 }
 
 /**

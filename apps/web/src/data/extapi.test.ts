@@ -65,8 +65,10 @@ describe("estHoteExtapiAutorise", () => {
   it("faux hors whitelist", () => {
     expect(estHoteExtapiAutorise("evil.com")).toBe(false);
   });
-  it("whitelist = 34 hôtes", () => {
-    expect(EXTAPI_WHITELIST.length).toBe(34);
+  it("whitelist étendue aux indices géopolitiques", () => {
+    expect(EXTAPI_WHITELIST).toContain("www.matteoiacoviello.com");
+    expect(EXTAPI_WHITELIST).toContain("www.newyorkfed.org");
+    expect(new Set(EXTAPI_WHITELIST).size).toBe(EXTAPI_WHITELIST.length);
     expect(estHoteExtapiAutorise("api.coinmarketcap.com")).toBe(true);
   });
   it("inclut home.treasury.gov (courbe des taux US)", () => {

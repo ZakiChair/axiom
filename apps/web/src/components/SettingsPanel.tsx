@@ -353,6 +353,7 @@ function SauvegardesSection({ open }: { open: boolean }) {
   const [message, setMessage] = useState<string | null>(null);
   // Snapshot armé pour restauration (confirmation en deux temps).
   const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [enCours, setEnCours] = useState(false);
 
   const rafraichir = useCallback(async () => {
     setSnapshots(await listerSnapshots());
@@ -369,26 +370,33 @@ function SauvegardesSection({ open }: { open: boolean }) {
   }, [open, rafraichir]);
 
   const snapshotImmediat = async () => {
+    if (enCours) return;
+    setEnCours(true);
     setConfirmId(null);
     const meta = await creerSnapshot();
-    setMessage(meta ? "Snapshot créé." : "Échec : daemon indisponible.");
+    setMessage(meta ? "Snapshot créé." : "Échec : l’état local n’a pas pu être sauvegardé auprès du daemon.");
     if (meta) await rafraichir();
+    setEnCours(false);
   };
 
   const restaurer = async (id: number) => {
+    if (enCours) return;
     // 1er clic : on ARME la confirmation ; 2e clic sur le même snapshot : on restaure.
     if (confirmId !== id) {
       setConfirmId(id);
       return;
     }
     setConfirmId(null);
+    setEnCours(true);
     const ok = await restaurerSnapshot(id);
     setMessage(
       ok
-        ? "Restauré. Rechargez la page pour appliquer (les stores hydratent au démarrage)."
-        : "Échec de la restauration.",
+        ? "Restauré. Rechargement de la page…"
+        : "Restauration non terminée. Vérifiez le stockage disponible ; le daemon conserve une sauvegarde de l’état précédent.",
     );
+    if (ok) { window.location.reload(); return; }
     await rafraichir();
+    setEnCours(false);
   };
 
   return (
@@ -397,8 +405,8 @@ function SauvegardesSection({ open }: { open: boolean }) {
         Sauvegardes
       </h3>
       <p className="mt-1 text-[11px] leading-snug text-text-dim">
-        Snapshots quotidiens automatiques du KV daemon (conservés 30 jours). La restauration
-        ré-applique le graphique, la watchlist, la disposition des fenêtres et l'état de session.
+        Sauvegardes quotidiennes du daemon, conservées 30 jours : graphique, jeux d’indicateurs,
+        watchlist, fenêtres, session, notes, dessins, journal de trades, portefeuille, alertes et workspaces.
       </p>
 
       {message !== null && <p className="mt-2 text-[11px] text-accent">{message}</p>}
@@ -418,7 +426,7 @@ function SauvegardesSection({ open }: { open: boolean }) {
       ) : (
         <>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" onClick={() => void snapshotImmediat()} className={BTN_SECONDAIRE}>
+            <button type="button" disabled={enCours} onClick={() => void snapshotImmediat()} className={BTN_SECONDAIRE}>
               Snapshot immédiat
             </button>
             <button type="button" onClick={() => void rafraichir()} className={BTN_SECONDAIRE}>
@@ -445,6 +453,7 @@ function SauvegardesSection({ open }: { open: boolean }) {
                     {confirmId === s.id && <Badge ton="down">écrase l'état actuel</Badge>}
                     <button
                       type="button"
+                      disabled={enCours}
                       onClick={() => void restaurer(s.id)}
                       className={
                         confirmId === s.id
@@ -461,10 +470,10 @@ function SauvegardesSection({ open }: { open: boolean }) {
           )}
 
           <p className="mt-2 text-[10px] leading-snug text-text-dim">
-            La restauration REMPLACE le graphique, la watchlist, la disposition et la session par
-            ce snapshot (l'état actuel est d'abord sauvegardé automatiquement) ; rechargez ensuite.
-            Alertes, notes, portefeuille, workspaces, dessins, thème et clés API ne sont PAS
-            couverts — utilisez l'export manuel de la Toolbar pour une sauvegarde complète.
+            La restauration remplace les données couvertes, retire les ajouts postérieurs puis
+            recharge la page. Une sauvegarde de secours précède le remplacement. Les anciens
+            snapshots ne couvrent que leur périmètre d’origine. Thème et clés API restent locaux ;
+            l’export manuel de la Toolbar couvre aussi ces réglages.
           </p>
         </>
       )}

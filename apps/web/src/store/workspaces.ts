@@ -36,6 +36,7 @@ import { themeStore, THEMES, type ThemeId } from "./theme";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
 import { windowManagerStore, type EtatFenetre } from "./windowManager";
 import { supportedTimeframesFor } from "../data/adapters";
+import { miroiterTravailPersonnel } from "../data/daemon";
 
 const STORAGE_KEY = "axiom:workspaces:v1";
 /** Identifiant réservé du workspace « Défaut » (indestructible, auto-mis à jour). */
@@ -278,7 +279,9 @@ function lireInitial(): Persiste {
 function sauvegarder(state: WorkspacesState): void {
   try {
     const payload: Persiste = { workspaces: state.workspaces, currentId: state.currentId };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    const valeur = JSON.stringify(payload);
+    localStorage.setItem(STORAGE_KEY, valeur);
+    miroiterTravailPersonnel(STORAGE_KEY, valeur);
   } catch {
     /* ignore : best-effort */
   }

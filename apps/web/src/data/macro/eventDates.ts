@@ -19,6 +19,7 @@
  * → cache ; sans cache → [] (le composant EVTS affichera « CPI/NFP indisponibles »).
  */
 import { FOMC_DATES } from "../eco";
+import { getFredKey } from "../../store/macro";
 
 // ─────────────────────────── Types & contrat ───────────────────────────
 
@@ -258,7 +259,9 @@ export async function chargerDatesEvenement(type: TypeEvenement): Promise<DateEv
       sort_order: "asc",
       file_type: "json",
     });
-    // Clé injectée par le proxy /fredapi (.env) : aucune clé côté front.
+    const clePersonnelle = getFredKey();
+    if (clePersonnelle) params.set("api_key", clePersonnelle);
+    // Sans clé personnelle, le proxy peut injecter celle de l'environnement.
     const res = await fetch(`/fredapi/fred/release/dates?${params.toString()}`);
     if (!res.ok) throw new Error(`FRED release/dates ${res.status}`);
     const json = (await res.json()) as unknown;

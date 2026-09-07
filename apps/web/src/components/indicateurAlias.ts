@@ -42,6 +42,7 @@ export const ALIAS_INDICATEURS: Readonly<Record<string, readonly string[]>> = {
   atr: ["volatilite moyenne", "amplitude vraie moyenne", "volatilite"],
   atrPct: ["volatilite en pourcentage", "volatilite"],
   historicalVol: ["volatilite historique", "volatilite realisee", "ecart type"],
+  downsideVariance: ["semivariance", "variance baissiere", "variance haussiere", "risque baissier"],
   stddev: ["ecart type", "dispersion"],
 
   // Momentum et oscillateurs.
@@ -57,6 +58,7 @@ export const ALIAS_INDICATEURS: Readonly<Record<string, readonly string[]>> = {
 
   // Volume et flux d'ordres.
   volume: ["volume", "quantite echangee"],
+  rvolSeasonal: ["volume relatif saisonnier", "volume horaire", "rvol horaire", "saisonnalite volume"],
   obv: ["volume cumule", "volume equilibre", "flux"],
   cvd: ["delta de volume cumule", "flux acheteur vendeur", "flux"],
   mfi: ["flux monetaire", "flux"],

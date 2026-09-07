@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { E2E_ORIGINE, E2E_WS_ORIGINE } from "../origine";
 
 /**
  * Ferme les accès aux API et flux réels. Les specs ajoutent ensuite leurs routes
@@ -6,7 +7,7 @@ import type { Page } from "@playwright/test";
  * et son WebSocket de développement restent accessibles.
  */
 export async function bouchonnerReseau(page: Page): Promise<void> {
-  const origine = "http://localhost:5173";
+  const origine = E2E_ORIGINE;
   await page.route("**/*", async (route) => {
     const requete = route.request();
     const url = new URL(requete.url());
@@ -27,7 +28,7 @@ export async function bouchonnerReseau(page: Page): Promise<void> {
   });
   await page.routeWebSocket("**/*", (socket) => {
     const url = new URL(socket.url());
-    if (url.origin === "ws://localhost:5173") socket.connectToServer();
+    if (url.origin === E2E_WS_ORIGINE) socket.connectToServer();
     else void socket.close();
   });
 }

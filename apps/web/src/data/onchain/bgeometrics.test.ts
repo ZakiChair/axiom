@@ -10,6 +10,11 @@ import {
 } from "./bgeometrics";
 
 describe("parseBgeometrics", () => {
+  it("écarte lignes invalides, timestamps absents et valeurs vides ; déduplique par date", () => {
+    const serie = parseBgeometrics([null, 0, { unixTs: null, sopr: 1 }, { unixTs: "", sopr: 1 },
+      { unixTs: 200, sopr: "" }, { unixTs: 100, sopr: true }, { unixTs: 100, sopr: 2 }, { unixTs: 100, sopr: 3 }], "sopr");
+    expect(serie.points).toEqual([{ time: 100000, value: 3 }]);
+  });
   // bitcoin-data.com renvoie parfois la CHAÎNE "NaN" ou null pour un jour manquant ;
   // unixTs est en SECONDES.
   const json = [

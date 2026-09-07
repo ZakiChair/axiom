@@ -82,7 +82,7 @@ export const WINDOW_REGISTRY = [
   { id: "dom", title: "Carnet d'ordres (DOM / depth)", mnemonic: "DOM", defaultWidth: 560, defaultHeight: 680, groupe: "Marché & dérivés" },
   { id: "backtest", title: "Backtest de stratégie", mnemonic: "BT", defaultWidth: 720, defaultHeight: 680, groupe: "Risque & portefeuille" },
   { id: "replay", title: "Replay de marché", mnemonic: "REPLAY", defaultWidth: 420, defaultHeight: 640, vercel: "unusable", groupe: "Outils" },
-  { id: "macroRates", title: "Taux & Réserves souveraines", mnemonic: "RATE", defaultWidth: 560, defaultHeight: 680, groupe: "Macro & tradfi" },
+  { id: "macroRates", title: "Taux & Réserves souveraines", mnemonic: "RATE", defaultWidth: 800, defaultHeight: 680, groupe: "Macro & tradfi" },
   { id: "cot", title: "Rapport COT (CFTC)", mnemonic: "COT", defaultWidth: 520, defaultHeight: 680, groupe: "Macro & tradfi" },
   { id: "seasonality", title: "Saisonnalité", mnemonic: "SEAG", defaultWidth: 760, defaultHeight: 560, groupe: "Analyse" },
   { id: "vol", title: "Volatilité (cône RV, VRP)", mnemonic: "VOL", defaultWidth: 760, defaultHeight: 560, groupe: "Marché & dérivés" },

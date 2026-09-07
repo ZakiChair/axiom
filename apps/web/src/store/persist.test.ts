@@ -425,6 +425,44 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
 });
 
 describe("importerSauvegarde — remplacement des clés axiom:*", () => {
+  it("l'import d'une ancienne sauvegarde reste prioritaire à la réconciliation du prochain boot", () => {
+    vi.spyOn(Date, "now").mockReturnValueOnce(3000);
+    expect(importerSauvegarde(JSON.stringify({
+      [CHART_KEY]: "graphe importé", [META_KEY]: JSON.stringify({ [CHART_KEY]: 1000 }),
+    }))).toBe(true);
+    expect(decisionsReconcile([CHART_KEY], { [CHART_KEY]: { valeur: "graphe avant import", majA: 2000 } },
+      (key) => localStorage.getItem(key), JSON.parse(localStorage.getItem(META_KEY)!)))
+      .toEqual([{ cle: CHART_KEY, action: "pousser", valeur: "graphe importé" }]);
+    expect(decisionsReconcile([WATCH_KEY], { [WATCH_KEY]: { valeur: "watchlist à retirer", majA: 2000 } },
+      (key) => localStorage.getItem(key), JSON.parse(localStorage.getItem(META_KEY)!)))
+      .toEqual([{ cle: WATCH_KEY, action: "supprimer" }]);
+  });
+  it("quota au milieu du remplacement : résultat faux et ancien état entièrement restauré", () => {
+    localStorage.setItem(CHART_KEY, "ancien graphe");
+    localStorage.setItem("axiom:notes:v1", "notes précieuses");
+    localStorage.setItem("autre:application", "conservée");
+    const set = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = (key, value) => {
+      if (value === "trop volumineux") throw new DOMException("quota", "QuotaExceededError");
+      set(key, value);
+    };
+    expect(importerSauvegarde(JSON.stringify({
+      [CHART_KEY]: "nouveau graphe", "axiom:ajout:v1": "ajout", "axiom:notes:v1": "trop volumineux",
+    }))).toBe(false);
+    expect(localStorage.getItem(CHART_KEY)).toBe("ancien graphe");
+    expect(localStorage.getItem("axiom:notes:v1")).toBe("notes précieuses");
+    expect(localStorage.getItem("axiom:ajout:v1")).toBeNull();
+    expect(localStorage.getItem("autre:application")).toBe("conservée");
+  });
+
+  it("stockage non inscriptible : ne supprime pas les données et credentials existants", () => {
+    localStorage.setItem("axiom:notes:v1", "notes précieuses");
+    localStorage.setItem("axiom:fred-api-key", "personnelle");
+    localStorage.setItem = () => { throw new DOMException("quota", "QuotaExceededError"); };
+    expect(importerSauvegarde('{"axiom:chartState:v1":"{}"}')).toBe(false);
+    expect(localStorage.getItem("axiom:notes:v1")).toBe("notes précieuses");
+    expect(localStorage.getItem("axiom:fred-api-key")).toBe("personnelle");
+  });
   it("purge les clés axiom:* existantes, conserve les autres, écrit celles du fichier", () => {
     localStorage.setItem("axiom:old:v1", "a-purger");
     localStorage.setItem("autre", "a-garder"); // hors préfixe : préservée

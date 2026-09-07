@@ -17,6 +17,8 @@ export interface MacroPoint {
   time: number;
   /** Valeur de la mesure. UNITÉ propre à chaque fournisseur — voir la doc de chacun. */
   value: number;
+  /** Statut statistique fourni par la source, lorsqu'il existe (pas une date de publication). */
+  qualite?: string;
 }
 
 /** Série temporelle macro, triée par `time` croissant. */

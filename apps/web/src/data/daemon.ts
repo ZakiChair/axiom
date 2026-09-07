@@ -19,6 +19,7 @@ import type { Candle } from "@axiom/types";
 import { healthStore } from "../store/health";
 import { IS_VERCEL } from "../lib/deployment";
 import { DAEMON_CAPABILITIES, type DaemonCapability } from "../../../../shared/daemon-capabilities";
+import { CLES_SNAPSHOT, CLES_TERMINAL, CLES_TRAVAIL_PERSONNEL, CLE_PERIMETRE_SNAPSHOT, remplacerClesLocales } from "./sauvegardeLocale";
 
 /** Source santé du lien daemon (affichée dans le panneau « santé des sources »). */
 const SOURCE_SANTE = "axiomd";
@@ -241,6 +242,10 @@ async function sonder(): Promise<boolean> {
     // Silencieux tant que le daemon n'a jamais été détecté ; sinon on signale la perte.
     healthStore.getState().setEtat(SOURCE_SANTE, "closed");
   }
+  if (miroirPersonnelActive) {
+    if (!daemonPret()) miroirPersonnelAReamorcer = true;
+    else if (miroirPersonnelAReamorcer) void reamorcerMiroirPersonnel();
+  }
   return ok;
 }
 
@@ -324,7 +329,26 @@ export async function kvGet(ns: string, cle: string): Promise<unknown | null> {
  * Écrit une valeur KV (sérialisée en JSON). Renvoie l'horodatage `majA` attribué par
  * le daemon (utile pour la réconciliation), ou `null` en cas d'échec silencieux.
  */
+const ecrituresKvEnCours = new Set<Promise<unknown>>();
+const filesKv = new Map<string, Promise<unknown>>();
+function ordonnerEcritureKv<T>(ns: string, cle: string, action: () => Promise<T>): Promise<T> {
+  const id = JSON.stringify([ns, cle]);
+  const precedente = filesKv.get(id);
+  const operation = precedente ? precedente.then(action, action) : action();
+  const ecriture = operation.finally(() => {
+    ecrituresKvEnCours.delete(ecriture);
+    if (filesKv.get(id) === ecriture) filesKv.delete(id);
+  });
+  filesKv.set(id, ecriture);
+  ecrituresKvEnCours.add(ecriture);
+  return ecriture;
+}
 export async function kvPut(ns: string, cle: string, valeur: unknown): Promise<number | null> {
+  if (restaurationEnCours) return null;
+  return await ordonnerEcritureKv(ns, cle, () => ecrireKv(ns, cle, valeur));
+}
+
+async function ecrireKv(ns: string, cle: string, valeur: unknown): Promise<number | null> {
   try {
     const res = await fetch(urlCle(ns, cle), {
       method: "PUT",
@@ -337,6 +361,12 @@ export async function kvPut(ns: string, cle: string, valeur: unknown): Promise<n
   } catch {
     return null;
   }
+}
+
+/** Suppression explicite, utilisée pour les clés absentes d'un import/restauration exact. */
+export async function kvDelete(ns: string, cle: string): Promise<boolean> {
+  if (restaurationEnCours) return false;
+  return await ordonnerEcritureKv(ns, cle, () => fetch(urlCle(ns, cle), { method: "DELETE" }).then((res) => res.ok, () => false));
 }
 
 /** Snapshot complet d'un namespace, ou `null` si daemon injoignable. */
@@ -387,6 +417,7 @@ export async function listerSnapshots(): Promise<MetaSnapshot[] | null> {
 export async function creerSnapshot(): Promise<MetaSnapshot | null> {
   if (!(await detectDaemon("snapshots"))) return null;
   try {
+    if (restaurationEnCours || !(await synchroniserEtatSnapshot())) return null;
     const res = await fetch(urlSnapshots(), { method: "POST" });
     if (!res.ok) return null;
     const corps = (await res.json()) as { id?: unknown; ts?: unknown; taille?: unknown };
@@ -407,13 +438,82 @@ export async function creerSnapshot(): Promise<MetaSnapshot | null> {
  */
 const NS_PERSIST = "persist";
 /** Seules les clés réellement miroitée par store/persist peuvent être réappliquées. */
-const RESTORABLE_PERSIST_KEYS: ReadonlySet<string> = new Set([
-  "axiom:chartState:v1",
-  "axiom:watchlist:v1",
-  "axiom:sessionUi:v1",
-  "axiom:windowManager:v1",
-  "axiom:synthetic:recents:v1",
-]);
+const RESTORABLE_PERSIST_KEYS: ReadonlySet<string> = new Set(CLES_SNAPSHOT);
+let restaurationEnCours = false;
+const miroirsPersonnels = new Map<string, string>();
+let minuteurPersonnel: ReturnType<typeof setTimeout> | undefined;
+let envoiPersonnel: Promise<boolean> = Promise.resolve(true);
+// La simple sonde d'une fonctionnalité ne doit jamais déclencher l'envoi de notes.
+// Activation explicite par enablePersistence → initialiserMiroirPersonnel seulement.
+let miroirPersonnelActive = false;
+let miroirPersonnelAReamorcer = false;
+let amorcagePersonnel: Promise<void> | null = null;
+
+/** Appelé par les sauvegardes des stores et des dessins, jamais par les ticks. */
+export function miroiterTravailPersonnel(cle: string, valeur: string): void {
+  if (!(CLES_TRAVAIL_PERSONNEL as readonly string[]).includes(cle) || restaurationEnCours || !daemonPret()) return;
+  miroirsPersonnels.set(cle, valeur);
+  clearTimeout(minuteurPersonnel);
+  minuteurPersonnel = setTimeout(() => { void viderMiroirPersonnel(); }, 400);
+}
+
+async function viderMiroirPersonnel(): Promise<boolean> {
+  clearTimeout(minuteurPersonnel);
+  minuteurPersonnel = undefined;
+  const valeurs = [...miroirsPersonnels];
+  miroirsPersonnels.clear();
+  // Les lots sont séquentiels : un ancien PUT lent ne peut écraser le suivant.
+  envoiPersonnel = envoiPersonnel.then(async () => {
+    let ok = true;
+    for (const [cle, valeur] of valeurs) if (await kvPut(NS_PERSIST, cle, valeur) === null) ok = false;
+    return ok;
+  });
+  return await envoiPersonnel;
+}
+
+/** Sème les données locales déjà présentes, même sans édition depuis le démarrage. */
+export async function initialiserMiroirPersonnel(): Promise<void> {
+  miroirPersonnelActive = true;
+  miroirPersonnelAReamorcer = true;
+  if (!(await detectDaemon("kv"))) return;
+  await reamorcerMiroirPersonnel();
+}
+
+/** Au retour du daemon, relit localStorage : les éditions hors ligne sont actuelles. */
+function reamorcerMiroirPersonnel(): Promise<void> {
+  if (!miroirPersonnelActive || !miroirPersonnelAReamorcer || restaurationEnCours || !daemonPret()) return Promise.resolve();
+  if (amorcagePersonnel) return amorcagePersonnel;
+  amorcagePersonnel = semerMiroirPersonnel().finally(() => { amorcagePersonnel = null; });
+  return amorcagePersonnel;
+}
+
+async function semerMiroirPersonnel(): Promise<void> {
+  try {
+    const metaImport = JSON.parse(localStorage.getItem("axiom:persistMeta:v1") ?? "{}") as Record<string, unknown>;
+    for (const cle of CLES_TRAVAIL_PERSONNEL) {
+      const valeur = localStorage.getItem(cle);
+      if (valeur !== null) miroiterTravailPersonnel(cle, valeur);
+      else if (typeof metaImport[cle] === "number" && !(await kvDelete(NS_PERSIST, cle))) return;
+    }
+    if (!(await viderMiroirPersonnel())) return;
+    if (await kvPut(NS_PERSIST, CLE_PERIMETRE_SNAPSHOT, CLES_SNAPSHOT) !== null && daemonPret()) miroirPersonnelAReamorcer = false;
+  } catch { /* localStorage inaccessible : aucun envoi supplémentaire */ }
+}
+
+/** Un snapshot manuel doit aussi inclure la dernière édition encore en debounce. */
+async function synchroniserEtatSnapshot(): Promise<boolean> {
+  await viderMiroirPersonnel();
+  await Promise.all(ecrituresKvEnCours);
+  const valeurs = CLES_SNAPSHOT.map((cle) => [cle, localStorage.getItem(cle)] as const);
+  for (const [cle, valeur] of valeurs) {
+    if (valeur !== null) {
+      if (await kvPut(NS_PERSIST, cle, valeur) === null) return false;
+    } else {
+      if (!(await kvDelete(NS_PERSIST, cle))) return false;
+    }
+  }
+  return await kvPut(NS_PERSIST, CLE_PERIMETRE_SNAPSHOT, CLES_SNAPSHOT) !== null;
+}
 
 /** Entrée restaurée renvoyée par l'endpoint restore (valeur déjà JSON-parsée). */
 interface EntreeRestauree {
@@ -437,33 +537,43 @@ interface EntreeRestauree {
  */
 export async function restaurerSnapshot(id: number): Promise<boolean> {
   if (!(await detectDaemon("snapshots"))) return false;
+  if (restaurationEnCours) return false;
+  restaurationEnCours = true;
+  let applique = false;
   try {
+    await Promise.all(ecrituresKvEnCours);
     const res = await fetch(`${urlSnapshots()}/${encodeURIComponent(String(id))}/restore`, {
       method: "POST",
     });
     if (!res.ok) return false;
     const corps = (await res.json()) as { entrees?: unknown };
-    if (Array.isArray(corps.entrees)) {
-      for (const e of corps.entrees) {
+    if (!Array.isArray(corps.entrees)) return false;
+    const valeurs = new Map<string, string>();
+    const perimetre = new Set<string>(CLES_TERMINAL);
+    for (const e of corps.entrees) {
         if (!e || typeof e !== "object") continue;
         const { namespace, cle, valeur } = e as EntreeRestauree;
+        if (namespace === NS_PERSIST && RESTORABLE_PERSIST_KEYS.has(cle) && typeof valeur !== "string") return false;
+        if (namespace === NS_PERSIST && cle === CLE_PERIMETRE_SNAPSHOT && Array.isArray(valeur)) {
+          for (const k of valeur) if (typeof k === "string" && RESTORABLE_PERSIST_KEYS.has(k)) perimetre.add(k);
+        }
         if (
           namespace === NS_PERSIST &&
           typeof cle === "string" &&
           RESTORABLE_PERSIST_KEYS.has(cle) &&
           typeof valeur === "string"
         ) {
-          try {
-            localStorage.setItem(cle, valeur);
-          } catch {
-            /* quota / mode privé : best-effort */
-          }
+          valeurs.set(cle, valeur);
+          perimetre.add(cle);
         }
-      }
     }
-    return true;
+    applique = remplacerClesLocales(valeurs, [...perimetre]);
+    return applique;
   } catch {
     return false;
+  } finally {
+    // Après succès, les anciens debounces restent bloqués jusqu'au rechargement.
+    if (!applique) restaurationEnCours = false;
   }
 }
 

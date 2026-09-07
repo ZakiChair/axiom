@@ -23,6 +23,10 @@ describe("normaliser", () => {
 });
 
 describe("correspondAlias", () => {
+  it("trouve les nouveaux indicateurs par leur usage français", () => {
+    expect(correspondAlias("rvolSeasonal", normaliser("volume horaire"))).toBe(true);
+    expect(correspondAlias("downsideVariance", normaliser("semivariance"))).toBe(true);
+  });
   it("trouve les moyennes mobiles par leur nom français", () => {
     const q = normaliser("moyenne mobile");
     expect(correspondAlias("ema", q)).toBe(true);

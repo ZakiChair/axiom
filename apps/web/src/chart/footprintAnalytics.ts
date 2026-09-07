@@ -145,6 +145,7 @@ export function detectDeltaDivergences(
     const prevCandle = candles[i - 1];
     if (candle === undefined || prevCandle === undefined) {
       out[i] = null;
+      lastDivergence = null;
       continue;
     }
 
@@ -152,6 +153,7 @@ export function detectDeltaDivergences(
     const prevBar = bars[i - 1];
     if (bar === undefined || prevBar === undefined) {
       out[i] = null;
+      lastDivergence = null;
       continue;
     }
 
@@ -159,13 +161,14 @@ export function detectDeltaDivergences(
     const isBull = candle.low < prevCandle.low && bar.delta > 0;
 
     if (isBear) {
-      out[i] = lastDivergence === null ? "bear" : null;
+      out[i] = lastDivergence !== "bear" ? "bear" : null;
       lastDivergence = "bear";
     } else if (isBull) {
-      out[i] = lastDivergence === null ? "bull" : null;
+      out[i] = lastDivergence !== "bull" ? "bull" : null;
       lastDivergence = "bull";
     } else {
       out[i] = null;
+      lastDivergence = null;
     }
   }
 

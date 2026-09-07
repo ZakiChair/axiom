@@ -27,6 +27,23 @@ import type {
   TradeResultat,
 } from "./types";
 
+describe("contrat de timeframe des indicateurs", () => {
+  const strat: StrategieDef = {
+    direction: "long", tailleFixe: 100,
+    reglesEntree: [{ type: "comparaison", gauche: { type: "indicateur", indicateurId: "rvolSeasonal", params: {}, output: "rvol" }, comparateur: ">", droite: { type: "constante", valeur: 0.5 } }],
+    reglesSortie: [],
+  };
+  const candles = Array.from({ length: 24 * 10 }, (_, i): Candle => ({ time: i * 3_600_000, open: 100, high: 100, low: 100, close: 100, volume: 10, closed: true }));
+  it("refuse explicitement RVOL hors H1 ou sans métadonnée de timeframe", () => {
+    for (const timeframe of [undefined, "15m", "4h"] as const) {
+      expect(() => runBacktest(candles, strat, { fraisPct: 0, slippagePct: 0, capitalInitial: 1000, timeframe })).toThrow("1h");
+    }
+  });
+  it("calcule les vrais signaux RVOL si le run porte H1", () => {
+    expect(runBacktest(candles, strat, { fraisPct: 0, slippagePct: 0, capitalInitial: 1000, timeframe: "1h" }).trades.length).toBeGreaterThan(0);
+  });
+});
+
 // ─────────────────────────── Helpers de construction ───────────────────────────
 
 const T = 60_000; // 1 minute par barre

@@ -35,6 +35,27 @@ function livreOk(res: ReturnType<typeof coudre>): OrderBook {
   return res.livre;
 }
 
+describe("invalidation du carnet partagé", () => {
+  it("diffuse le reset aux abonnés et ne rejoue plus le carnet précédent pendant resync", () => {
+    let publish!: (b: OrderBook) => void;
+    let reset: (() => void) | undefined;
+    const mux = creerMultiplexeurDepth((_symbol, cb, onReset) => {
+      publish = cb; reset = onReset; return () => {};
+    });
+    const first = vi.fn(); const firstReset = vi.fn();
+    mux.souscrire("BTCUSDT", first, firstReset);
+    publish(construireLivre(snap(10, [[99, 2]], [[101, 2]])));
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(reset).toBeTypeOf("function");
+    reset?.();
+    expect(firstReset).toHaveBeenCalledTimes(1);
+    const late = vi.fn(); mux.souscrire("BTCUSDT", late);
+    expect(late).not.toHaveBeenCalled();
+    publish(construireLivre(snap(20, [[100, 2]], [[102, 2]])));
+    expect(late).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("construireLivre", () => {
   it("ignore les niveaux de quantité nulle du snapshot", () => {
     const livre = construireLivre(snap(10, [[100, 2], [99, 0]], [[101, 0], [102, 3]]));

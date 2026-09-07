@@ -100,6 +100,16 @@ const CATALOGUE: Record<string, MetaFiabilite> = {
     label: "daily · BGeometrics",
     detail: "Métriques BGeometrics / bitcoin-data.com (daily).",
   },
+  "validatorqueue": {
+    niveau: "partiel",
+    label: "quotidien · ValidatorQueue",
+    detail: "Premier relevé UTC du jour, source publique Ether Alpha sans SLA. Files post-Pectra en ETH ; délais estimés et historique incomplet possibles.",
+  },
+  "sosovalue:historique": {
+    niveau: "partiel",
+    label: "séances publiées · SoSoValue",
+    detail: "Flux et encours ETF quotidiens, mois récent selon l'accès API. Jours non publiés absents ; corrections ultérieures possibles.",
+  },
 
   // ─── Flux marché directs (référence) ─────────────────────────────────────
   "binance:trades": {

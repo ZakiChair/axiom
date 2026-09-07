@@ -1,221 +1,136 @@
-/**
- * Store des séries macroéconomiques — Zustand VANILLA (hors render-loop React).
- *
- * C'est la donnée la PLUS LENTE du terminal : publications mensuelles ou trimestrielles,
- * dont le calendrier ECO annonce déjà la date. D'où, volontairement : aucun `setInterval`,
- * aucun polling, un cache localStorage de 24 h, et un rafraîchissement manuel.
- *
- * SÉQUENCEMENT : l'OCDE renvoie un 429 entre 10 et 12 requêtes rapprochées, et son
- * `retry-after: 0` est mensonger. Les appels OCDE sont donc lancés UN PAR UN, espacés
- * d'au moins 2 s. `attendre` est injectable pour que les tests n'attendent pas vraiment.
- *
- * DÉGRADATION : chaque série a son propre statut. Une source en panne n'empêche jamais
- * les autres courbes d'être tracées, et son motif reste affiché (jamais un tiret muet).
- */
+/** Séries macro : cache explicite, historique conservé en cas d'échec, aucune boucle de polling. */
 import { createStore } from "zustand/vanilla";
 import type { MacroSeries } from "../data/macro/types";
-import {
-  type DefinitionSerieMacro,
-  type IndicateurMacro,
-  seriesDeIndicateur,
-} from "../data/macro/catalogueMacro";
-import { chargerSerieMacro, cleSante } from "../data/macro/chargerSerieMacro";
+import { type DefinitionSerieMacro, type IndicateurMacro, type RegionMacro, seriesDeIndicateur } from "../data/macro/catalogueMacro";
+import { chargerSerieMacro, cleSante, type ResultatSerieMacro } from "../data/macro/chargerSerieMacro";
 import { finDePeriode } from "../data/macro/harmonisation";
+import type { HorizonMacro } from "./macroRatesView";
 import { healthStore } from "./health";
 
-/** Profondeur d'historique récupérée — au-delà, la courbe devient illisible. */
-export const FENETRE_MACRO_MS = 6 * 365 * 24 * 60 * 60 * 1000; // ~6 ans
-/** Durée de validité du cache local. */
-export const TTL_CACHE_MS = 24 * 60 * 60 * 1000;
-/** Espacement minimal entre deux appels OCDE (quota ~10-12 requêtes rapprochées). */
-export const ESPACEMENT_OCDE_MS = 2_000;
-
-/** Exporté pour que les tests puissent déposer/lire une entrée avec la même clé. */
+export const FENETRE_MACRO_MS = 5 * 365.25 * 24 * 3_600_000;
+export const TTL_CACHE_MS = 24 * 3_600_000;
+/** File commune à toutes les familles : changer d'onglet ne contourne pas le quota. */
+export const ESPACEMENT_OCDE_MS = 7_000;
 export const PREFIXE_CACHE = "axiom.macro.serie.";
-
-export type StatutSerie = "idle" | "loading" | "ok" | "quota" | "sansCle" | "panne";
-
+export type StatutSerie = "idle" | "loading" | "ok" | "quota" | "sansCle" | "panne" | "indisponible";
 export interface EtatSerie {
   statut: StatutSerie;
   points: MacroSeries;
-  /**
-   * ms epoch du dernier point ramené en FIN DE PÉRIODE via `finDePeriode` (les points
-   * sont datés en DÉBUT de période par toutes les sources) — alimente la primitive
-   * `Fraicheur`.
-   */
+  /** Fin de la dernière période observée, jamais date de récupération. */
   majTs: number | null;
-  /** Motif d'indisponibilité, affiché tel quel. `null` quand tout va bien. */
   message: string | null;
+  recupereTs?: number;
+  perime?: boolean;
 }
-
-interface EntreeCache {
-  ts: number;
-  points: MacroSeries;
-}
-
+interface EntreeCache { ts: number; depuis: number; signature: string; points: MacroSeries }
 export interface OptionsDemande {
-  /** Ignore le cache. */
   force?: boolean;
-  /** Attente injectable (tests). Défaut : `setTimeout`. */
+  regions?: readonly RegionMacro[];
+  horizonAnnees?: HorizonMacro;
+  signal?: AbortSignal;
   attendre?: (ms: number) => Promise<void>;
 }
-
 export interface MacroSeriesState {
   series: Record<string, EtatSerie>;
   demanderIndicateur: (indicateur: IndicateurMacro, opts?: OptionsDemande) => Promise<void>;
 }
-
-function etatVide(): EtatSerie {
-  return { statut: "idle", points: [], majTs: null, message: null };
-}
-
-/** Lit le cache d'une série ; `null` si absent, illisible ou expiré. */
-function lireCache(id: string, now: number): MacroSeries | null {
+const etatVide = (): EtatSerie => ({ statut: "idle", points: [], majTs: null, message: null });
+const signature = (def: DefinitionSerieMacro): string => JSON.stringify([2, def.source, def.transformation, def.decalageFinMois]);
+function lireCache(def: DefinitionSerieMacro): EntreeCache | null {
   try {
-    const brut = localStorage.getItem(PREFIXE_CACHE + id);
-    if (brut === null) return null;
-    const entree = JSON.parse(brut) as EntreeCache;
-    if (typeof entree.ts !== "number" || !Array.isArray(entree.points)) return null;
-    if (now - entree.ts > TTL_CACHE_MS) return null;
-    return entree.points;
-  } catch {
-    return null; // quota localStorage, JSON corrompu, mode privé…
-  }
+    const entree = JSON.parse(localStorage.getItem(PREFIXE_CACHE + def.id) ?? "null") as EntreeCache | null;
+    if (!entree || entree.signature !== signature(def) || !Number.isFinite(entree.ts) || !Number.isFinite(entree.depuis) || !Array.isArray(entree.points) || !entree.points.length) return null;
+    if (entree.points.some((p) => !Number.isFinite(p.time) || !Number.isFinite(p.value))) return null;
+    return { ...entree, points: entree.points.slice().sort((a, b) => a.time - b.time) };
+  } catch { return null; }
 }
-
-function ecrireCache(id: string, points: MacroSeries, now: number): void {
-  try {
-    localStorage.setItem(PREFIXE_CACHE + id, JSON.stringify({ ts: now, points } satisfies EntreeCache));
-  } catch {
-    // Quota atteint : le cache est un confort, jamais une condition de fonctionnement.
-  }
+function ecrireCache(def: DefinitionSerieMacro, points: MacroSeries, depuis: number, ts: number): void {
+  try { localStorage.setItem(PREFIXE_CACHE + def.id, JSON.stringify({ ts, depuis, signature: signature(def), points } satisfies EntreeCache)); } catch { /* Cache facultatif. */ }
 }
-
-const attendreParDefaut = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * Chargements en cours, un par indicateur — HORS du store (l'aiguillage de réentrance
- * n'est pas un état observable). Sans cette garde, deux appels concurrents à
- * `demanderIndicateur` pour le même indicateur lanceraient chacun leur propre boucle
- * OCDE — sérialisée en interne, mais les DEUX boucles tourneraient EN PARALLÈLE l'une
- * de l'autre, recréant exactement la situation à 10-12 requêtes rapprochées que
- * l'espacement de `ESPACEMENT_OCDE_MS` est censé éviter.
- */
-const chargementsEnCours = new Map<IndicateurMacro, Promise<void>>();
-
+function ttl(def: DefinitionSerieMacro): number { return def.frequence === "D" ? 3_600_000 : def.frequence === "W" ? 6 * 3_600_000 : TTL_CACHE_MS; }
+const attendreParDefaut = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+async function attendreAnnulable(ms: number, attendre: (ms: number) => Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted || ms <= 0) return;
+  let annuler: () => void = () => {};
+  const annulation = new Promise<void>((resolve) => { annuler = resolve; signal?.addEventListener("abort", annuler, { once: true }); });
+  try { await Promise.race([attendre(ms), annulation]); } finally { signal?.removeEventListener("abort", annuler); }
+}
+let fileOecd = Promise.resolve();
+let dernierOecdTs = 0;
+let quotaOecdJusqua = 0;
+function dansFileOecd(charger: () => Promise<ResultatSerieMacro>, opts: OptionsDemande): Promise<ResultatSerieMacro> {
+  const operation = fileOecd.then(async (): Promise<ResultatSerieMacro> => {
+    if (opts.signal?.aborted) return { statut: "annule" };
+    if (Date.now() < quotaOecdJusqua) return { statut: "quota", message: "Quota OCDE — réessayer après une minute." };
+    await attendreAnnulable(Math.max(0, dernierOecdTs + ESPACEMENT_OCDE_MS - Date.now()), opts.attendre ?? attendreParDefaut, opts.signal);
+    if (opts.signal?.aborted) return { statut: "annule" };
+    const resultat = await charger();
+    dernierOecdTs = Date.now();
+    if (resultat.statut === "quota") quotaOecdJusqua = Date.now() + 60_000;
+    return resultat;
+  });
+  fileOecd = operation.then(() => {}, () => {});
+  return operation;
+}
+const chargementsEnCours = new Map<string, { promesse: Promise<void>; signal?: AbortSignal }>();
+const versions = new Map<string, symbol>();
 export const macroSeriesStore = createStore<MacroSeriesState>((set, get) => {
-  async function executerChargement(indicateur: IndicateurMacro, opts?: OptionsDemande): Promise<void> {
-    const attendre = opts?.attendre ?? attendreParDefaut;
-    const force = opts?.force ?? false;
+  const majSerie = (id: string, patch: Partial<EtatSerie>): void => set((s) => ({ series: { ...s.series, [id]: { ...(s.series[id] ?? etatVide()), ...patch } } }));
+  async function executerChargement(indicateur: IndicateurMacro, opts: OptionsDemande): Promise<void> {
+    if (opts.signal?.aborted) return;
     const now = Date.now();
-    const depuis = now - FENETRE_MACRO_MS;
-    const definitions = seriesDeIndicateur(indicateur);
-
-    const majSerie = (id: string, patch: Partial<EtatSerie>): void => {
-      set((s) => ({
-        series: { ...s.series, [id]: { ...(s.series[id] ?? etatVide()), ...patch } },
-      }));
-    };
-
-    // 1) Cache d'abord : ce qui est frais n'est pas redemandé.
-    const aCharger: DefinitionSerieMacro[] = [];
-    for (const def of definitions) {
-      const cache = force ? null : lireCache(def.id, now);
-      if (cache !== null && cache.length > 0) {
-        const dernier = cache[cache.length - 1];
-        majSerie(def.id, {
-          statut: "ok",
-          points: cache,
-          majTs: dernier !== undefined ? finDePeriode(dernier.time, def.frequence) : null,
-          message: null,
-        });
-      } else {
-        majSerie(def.id, { statut: "loading", message: null });
-        aCharger.push(def);
+    // Début de mois stable : deux lectures successives partagent le même cache.
+    const date = new Date(now);
+    const depuis = Date.UTC(date.getUTCFullYear() - (opts.horizonAnnees ?? 5), date.getUTCMonth(), 1);
+    const definitions = seriesDeIndicateur(indicateur).filter((d) => !opts.regions || opts.regions.includes(d.region));
+    const version = Symbol();
+    await Promise.all(definitions.map(async (def) => {
+      versions.set(def.id, version);
+      const cache = lireCache(def);
+      const frais = !!cache && now - cache.ts <= ttl(def) && cache.depuis <= depuis;
+      if (cache && !(get().series[def.id]?.points.length)) {
+        const dernier = cache.points.at(-1)!;
+        majSerie(def.id, { points: cache.points, majTs: finDePeriode(dernier.time, def.frequence, def.decalageFinMois), recupereTs: cache.ts, perime: !frais, statut: "ok", message: null });
       }
-    }
-
-    // 2) Les transports sans quota d'abord, en parallèle ; l'OCDE ensuite, un par un.
-    const rapides = aCharger.filter((d) => d.source.transport !== "oecd");
-    const lents = aCharger.filter((d) => d.source.transport === "oecd");
-
-    const appliquer = (def: DefinitionSerieMacro, r: Awaited<ReturnType<typeof chargerSerieMacro>>): void => {
-      const source = cleSante(def);
-      if (r.statut === "ok") {
-        const dernier = r.points[r.points.length - 1];
-        majSerie(def.id, {
-          statut: "ok",
-          points: r.points,
-          majTs: dernier !== undefined ? finDePeriode(dernier.time, def.frequence) : null,
-          message: null,
-        });
-        ecrireCache(def.id, r.points, now);
-        // Une source REST qui vient de réussir n'est pas « en connexion » : même choix
-        // que `setQuota` (health.ts) — on affiche honnêtement "polling", jamais l'état
-        // par défaut "reconnecting" qui ne quitterait plus jamais ce statut.
-        healthStore.getState().setEtat(source, "polling", { dernierMessageTs: Date.now() });
-      } else {
-        majSerie(def.id, { statut: r.statut, points: [], majTs: null, message: r.message });
-        if (r.statut === "quota") {
-          healthStore.getState().setEtat(source, "polling", { derniereErreur: r.message });
-        } else {
-          healthStore.getState().marquerErreur(source, r.message);
-        }
+      if (frais && !opts.force) {
+        const dernier = cache.points.at(-1)!;
+        majSerie(def.id, { points: cache.points, majTs: finDePeriode(dernier.time, def.frequence, def.decalageFinMois), recupereTs: cache.ts, perime: false, statut: "ok", message: null });
+        return;
       }
-    };
-
-    // Rempart local : `chargerSerieMacro` ne devrait jamais lever, mais si un transport
-    // le fait un jour, cette frontière convertit l'exception en résultat "panne" — la
-    // garantie "une source en panne n'arrête jamais les autres" doit tenir ICI, sans
-    // dépendre du contrat d'un appelé.
-    const chargerProtege = (def: DefinitionSerieMacro): ReturnType<typeof chargerSerieMacro> =>
-      chargerSerieMacro(def, depuis).catch(
-        (): Awaited<ReturnType<typeof chargerSerieMacro>> => ({
-          statut: "panne",
-          // Même message curaté que le chemin normal (chargerSerieMacro.ts) : aucune
-          // URL, format de réponse ou code HTTP ne doit remonter jusqu'à l'utilisateur.
-          message: "Source indisponible.",
-        }),
-      );
-
-    await Promise.all(
-      rapides.map((def) => chargerProtege(def).then((r) => appliquer(def, r))),
-    );
-
-    for (let i = 0; i < lents.length; i++) {
-      if (i > 0) await attendre(ESPACEMENT_OCDE_MS);
-      const def = lents[i];
-      if (def === undefined) continue;
-      appliquer(def, await chargerProtege(def));
-    }
+      const precedent = get().series[def.id] ?? etatVide();
+      majSerie(def.id, { statut: "loading", message: null, ...(cache && !frais ? { perime: true } : {}) });
+      const charger = (): Promise<ResultatSerieMacro> => chargerSerieMacro(def, depuis, opts.signal).catch(() => opts.signal?.aborted ? { statut: "annule" } : { statut: "panne", message: "Source indisponible." });
+      const resultat = def.source.transport === "oecd" ? await dansFileOecd(charger, opts) : await charger();
+      if (versions.get(def.id) !== version) return;
+      if (resultat.statut === "annule" || opts.signal?.aborted) {
+        majSerie(def.id, { ...precedent, statut: precedent.statut === "loading" ? (precedent.points.length ? "ok" : "idle") : precedent.statut });
+        return;
+      }
+      if (resultat.statut === "ok") {
+        const ts = Date.now();
+        const dernier = resultat.points.at(-1)!;
+        majSerie(def.id, { statut: "ok", points: resultat.points, majTs: finDePeriode(dernier.time, def.frequence, def.decalageFinMois), message: null, recupereTs: ts, perime: false });
+        ecrireCache(def, resultat.points, depuis, ts);
+        healthStore.getState().setEtat(cleSante(def), "polling", { dernierMessageTs: ts });
+      } else {
+        majSerie(def.id, { statut: resultat.statut, message: resultat.message, perime: precedent.points.length > 0 });
+        if (resultat.statut === "indisponible") return;
+        if (resultat.statut === "quota") healthStore.getState().setEtat(cleSante(def), "polling", { derniereErreur: resultat.message });
+        else healthStore.getState().marquerErreur(cleSante(def), resultat.message);
+      }
+    }));
   }
-
   return {
     series: {},
-
-    demanderIndicateur: (indicateur, opts) => {
-      const force = opts?.force ?? false;
-      const enCours = chargementsEnCours.get(indicateur);
-
-      if (enCours !== undefined && !force) {
-        // Un chargement est déjà en vol pour cet indicateur : on le PARTAGE plutôt
-        // que d'en démarrer un second (voir le commentaire sur `chargementsEnCours`).
-        return enCours;
-      }
-
-      // `force` avec un chargement en vol : on s'ENCHAÎNE après lui pour que les deux
-      // ne se chevauchent jamais, plutôt que de les laisser tourner en parallèle.
-      const lancement =
-        enCours !== undefined ? enCours.then(() => executerChargement(indicateur, opts)) : executerChargement(indicateur, opts);
-
-      const suivi = lancement.finally(() => {
-        if (chargementsEnCours.get(indicateur) === suivi) {
-          chargementsEnCours.delete(indicateur);
-        }
-      });
-      chargementsEnCours.set(indicateur, suivi);
-      return suivi;
+    demanderIndicateur: (indicateur, opts = {}) => {
+      const cle = JSON.stringify([indicateur, opts.regions?.slice().sort(), opts.horizonAnnees ?? 5]);
+      const enCours = chargementsEnCours.get(cle);
+      const partageable = enCours && !enCours.signal?.aborted && enCours.signal === opts.signal;
+      if (partageable && !opts.force) return enCours.promesse;
+      const lancement = partageable ? enCours.promesse.then(() => executerChargement(indicateur, opts)) : executerChargement(indicateur, opts);
+      const promesse = lancement.finally(() => { if (chargementsEnCours.get(cle)?.promesse === promesse) chargementsEnCours.delete(cle); });
+      chargementsEnCours.set(cle, { promesse, ...(opts.signal ? { signal: opts.signal } : {}) });
+      return promesse;
     },
   };
 });

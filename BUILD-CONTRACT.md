@@ -11,7 +11,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 - **Cible** : terminal pour UN utilisateur (ses propres clés). PAS de multi-tenant, PAS d'auth réseau, PAS de SaaS. Crypto d'abord (spot + perp) ; tradfi/commodités en complément.
 - **Renderer-first** : le premier livrable à valeur est un graphe live à l'écran. **AUCUN backend réseau/multi-tenant (Docker/TimescaleDB/Redis interdits). Un daemon localhost mono-process (`apps/daemon`, Bun + SQLite, port 8787) est autorisé depuis la Phase 2 — proxy/cache/persistance/alertes UNIQUEMENT, jamais sur le chemin chaud du renderer (les WS de marché du front restent directs).** Le front parle directement aux WS publics des exchanges (mode mono-utilisateur assumé) et reste **100 % fonctionnel SANS daemon** (feature-detect `/health` + repli localStorage/proxy Vite). Déviation assumée vs roadmap E1 : les proxys Vite restent en dev (dev sans daemon), le daemon est le chemin de PROD + services additionnels.
 - **Chart** : **KLineChart** figé (pas de lightweight-charts, pas d'abstraction `IChartRenderer` « swap de moteur »). L'overlay orderflow se synchronise sur le viewport de KLineChart. Multi-chart 2×2 : un store par slot ; les overlays doivent être scellés au slot (voir plan 2026-08-24, Lot 3).
-- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**187 indicateurs**). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
+- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**189 indicateurs**). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
 - **Données dérivées (OI/funding/L-S/liquidations)** : **ACHETER** via un `IDerivedDataProvider` (Coinalyze **câblé**, M6 atteint) — NE PAS construire d'AggregationEngine multi-exchange. Trois couches de liquidations distinctes et étiquetées : heatmap *exécutée*, niveaux **EST.** (modèle levier), niveaux **HL réels** (Hyperliquid, non exhaustif).
 - **Trading** : **PAS d'exécution d'ordres** — aucune clé de trading. Le paper trading (`PAPER`) est une simulation locale (hors gate G100/K8). Ne rien implémenter qui touche à des clés de trading réelles.
 - **Sources** : **9 identifiants** (`EXCHANGE_IDS` dans `@axiom/types`) — Binance, Bybit, OKX, Hyperliquid, Coinbase, Kraken, Twelve Data, MEXC, synthetic. Ne pas en ajouter sans nécessité démontrée (non-objectif avant G100).
@@ -42,7 +42,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 
 ## État actuel (2026-09-04)
 - **Chart** live multi-exchange (spot + perp), multi-grille 1/2h/2v/2×2, orderflow/CVD/footprint, volume profile, fibo, dessins.
-- **187 indicateurs** TS purs dans `@axiom/indicators` (dont 30 stratégies étiquetées « non validé ») ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
+- **189 indicateurs** TS purs dans `@axiom/indicators` (dont 30 stratégies étiquetées « non validé ») ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
 - **39 fenêtres** à mnémonique (`WINDOW_REGISTRY`) — dont WHALES (mouvements baleines on-chain + positions top comptes Hyperliquid), ajoutée le 2026-08-25 sur décision utilisateur, et BPL (Bitcoin Power Law), ajoutée le 2026-09-01 avec les séries TOTAL/TOTAL2/TOTAL3 chartables (chantier CAP/BPL) : **écarts ASSUMÉS** au gel « aucune nouvelle fenêtre avant le verdict G100 » (§ ci-dessous).
 - **Daemon** `axiomd` : proxy+cache SQLite, KV/snapshots, candles, alertes (macOS + Telegram), replay dumps Binance, couches GDELT/UCDP, LIQHL Hyperliquid paresseux, collecteur whales (blocs confirmés blockchain.info + Etherscan stables, table `whale_moves`, rétention 30 j). Bind `127.0.0.1:8787`, whitelist `/extapi`, garde Host/Origin/DNS-rebinding.
 - **Vercel** : front + proxy serverless sans secret partagé, whitelist/MIME/DNS durcis. Les clés personnelles restent dans le navigateur. Toute fonction strictement locale est marquée `UNUSABLE`, toute fenêtre partielle `PARTIAL` ; jamais de pane muet.
@@ -51,14 +51,14 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 
 ## Jalons historiques (atteints — ne pas rejouer, ne pas prendre comme périmètre actuel)
 - **M1 — Chart live** (`apps/web`) : Vite+React+TS+Tailwind ; client WS Binance + backfill REST ; rendu KLineChart live ; sélecteur symbole + timeframe ; crosshair. Store marché vanilla. **Atteint.**
-- **M2 — Moteur + 7 indicateurs** (`packages/indicators`) : `IndicatorDef`/`engine.ts` (calcul, helpers SMA/EMA/RMA dans `utils.ts`) ; SMA, EMA, RSI, MACD, Bollinger Bands, Volume, VWAP avec tests vs valeurs de référence (Wilder pour RSI). **Atteint et dépassé** (le catalogue est à 187).
+- **M2 — Moteur + 7 indicateurs** (`packages/indicators`) : `IndicatorDef`/`engine.ts` (calcul, helpers SMA/EMA/RMA dans `utils.ts`) ; SMA, EMA, RSI, MACD, Bollinger Bands, Volume, VWAP avec tests vs valeurs de référence (Wilder pour RSI). **Atteint et dépassé** (le catalogue est à 189).
 - M3 watchlist+persistance locale, M4 spike sync WebGL, M5 CVD+footprint (aggTrade), M6 `IDerivedDataProvider`→Coinalyze : **tous atteints.**
 
 ## Anti-objectifs (NE PAS faire)
 - Ne pas créer de backend **réseau/multi-tenant**, de docker-compose, de schéma DB serveur (le daemon localhost mono-process de la Phase 2 est la SEULE exception, cf. Décisions verrouillées).
 - **Avant le verdict G100** : pas de nouvelle fenêtre, pas de nouveau fournisseur sans remplacement direct d'une source défaillante (exceptions ACTÉES : fournisseurs de capitalisation CMC/CCData, et fournisseurs statistiques publics OCDE/Eurostat/ONS le 2026-09-06 — cf. Décisions verrouillées), pas de migration React/Vite/Zustand/KLineChart majeure (plan 2026-08-24, §12).
 - Ne pas « améliorer » `@axiom/types` ni les configs racine.
-- Ne pas étendre le catalogue d'indicateurs sans nécessité démontrée (le contrat est à 187, pas « plus de 7 » — l'ancien jalon M2 est historique, cf. ci-dessus).
+- Ne pas étendre le catalogue d'indicateurs sans nécessité démontrée (le contrat est à 189, pas « plus de 7 » — l'ancien jalon M2 est historique, cf. ci-dessus).
 
 ### Garde-fous reportés de la roadmap (docs/research/03, §Anti-recommandations)
 Les anti-recommandations #2 (Docker/Redis/TimescaleDB), #3 (proxifier les WS via le daemon) et #6 (abstraction de moteur de chart) sont déjà couvertes ci-dessus et dans les Décisions verrouillées. Les 6 restantes, à respecter tout autant :
@@ -68,3 +68,32 @@ Les anti-recommandations #2 (Docker/Redis/TimescaleDB), #3 (proxifier les WS via
 - Ne pas **reconstruire maison la liquidation heatmap** (modèle propriétaire, gaté 699 $/mois chez CoinGlass → renoncer ou étiqueter toute estimation comme telle).
 - Ne pas intégrer **LunarCrush** (240 $/mois) ni **Santiment free** (données J-30).
 - Ne pas implémenter un **scripting Pine-like** complet.
+
+## Extension demandée le 7 septembre 2026
+
+La reprise demandée par l'utilisateur étend les surfaces existantes MACRO/RATE,
+ECO/BRIEF, GLOBE, CHAIN et DOM. **39 fenêtres, 9 identifiants de marché, aucun
+nouveau backend.** Deux indicateurs OHLCV portent le catalogue à **189** ; les
+**30 stratégies demeurent non validées**. RVOL saisonnier H1 : restriction commune
+au chart, aux alertes (y compris composites/importées) et au backtest.
+
+Les nouveaux fournisseurs statistiques complètent les sources défaillantes. NBS
+utilise un POST de lecture, validé sur catalogue/indicateur/zone/période, dans le
+proxy existant ; la limite réelle de corps est de 64 Kio. BOJ et les sources géo
+sont confinés à leurs chemins de données. Les documents GPR/TPU sont convertis en
+JSON après extraction des seules séries attendues ; aucun HTML amont n'est servi.
+
+Les timestamps d'observation, périodes glissantes, unités, estimations et dates de
+récupération sont distincts. Pas de remplissage d'une absence par zéro, de cumul
+ETF inventé depuis un snapshot, ni d'interprétation mint/burn du changement de
+stock USD STBL. NETLIQ décrit un proxy de liquidité Fed à fréquences mélangées.
+
+Durabilité : écritures KV ordonnées par clé ; imports avec rollback local et
+restauration du périmètre déclaré (configuration et travail personnel). Le daemon
+conserve un snapshot de secours avant restauration. Une panne du stockage
+navigateur peut encore empêcher la réapplication locale : l'opération ne rapporte
+alors pas un succès. Aucun secret/API key n'entre dans le périmètre snapshot.
+
+Vérification et limites : voir [le rapport de revue du 7 septembre](docs/revue-2026-09-07.md). Le protocole
+G100 reste le registre du verdict manuel. Fable 5 n'a pas pu procéder à sa revue
+(quota HTTP 429) ; la revue indépendante GPT n'est pas un visa Fable.

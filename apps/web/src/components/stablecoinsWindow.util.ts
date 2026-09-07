@@ -93,22 +93,22 @@ export function resumePegs(emetteurs: readonly EmetteurStablecoin[]): ResumePegs
 // ─────────────────────────── Impression (Δ supply) ───────────────────────────
 
 /**
- * Impression nette sur `jours` : dernier point − point le plus proche AVANT la borne
- * (dernier point dont time ≤ dernier.time − jours ; à défaut le premier point).
+ * Variation de stock USD sur `jours` : dernier point − observation à la borne.
+ * Sans historique couvrant la période demandée, aucune variation n'est inventée.
  */
 export function impressionNette(serie: PointSupply[], jours: number): number | null {
   if (serie.length < 2) return null;
   const dernier = serie[serie.length - 1]!;
   const borne = dernier.time - jours * JOUR_MS;
-  let reference = serie[0]!;
+  let reference: PointSupply | undefined;
   for (const p of serie) {
     if (p.time <= borne) reference = p;
     else break;
   }
-  return dernier.totalUsd - reference.totalUsd;
+  return reference ? dernier.totalUsd - reference.totalUsd : null;
 }
 
-/** Δ point à point (mint net > 0, burn net < 0) — barres de l'onglet Impression. */
+/** Variation point à point de l'offre valorisée en USD, sans attribution mint/burn. */
 export function serieImpressionQuotidienne(serie: PointSupply[]): { time: number; delta: number }[] {
   const sortie: { time: number; delta: number }[] = [];
   for (let i = 1; i < serie.length; i++) {

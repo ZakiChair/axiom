@@ -88,6 +88,9 @@ import {
   type Domaine,
 } from "../lib/domaineAxe";
 import { useDomaineZoom } from "../hooks/useDomaineZoom";
+import { CohortesBtc } from "./onchain/CohortesBtc";
+import { HistoriqueEtf } from "./onchain/HistoriqueEtf";
+import { FilesStakingEth } from "./onchain/FilesStakingEth";
 
 const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
 
@@ -215,8 +218,8 @@ function sparkDe(serie: SerieMetrique | undefined, n = 60): number[] {
 }
 
 /** Somme des valeurs des N derniers points (cumul de flux sur une fenêtre). */
-function cumulDe(serie: SerieMetrique | undefined, n: number): number {
-  if (serie === undefined) return 0;
+function cumulDe(serie: SerieMetrique | undefined, n: number): number | undefined {
+  if (serie === undefined || serie.points.length < n) return undefined;
   return serie.points.slice(-n).reduce((s, p) => s + p.value, 0);
 }
 
@@ -759,6 +762,8 @@ export function OnchainWindow() {
           </NoteSource>
         </section>
 
+        <CohortesBtc open={open} />
+
         {/* ─────────── ETF ─────────── */}
         <section>
           <TitreSection
@@ -828,8 +833,8 @@ export function OnchainWindow() {
                     <Sparkline values={sparkDe(serie, 90)} color={jour >= 0 ? "--up" : "--down"} />
                   </div>
                   <div className="flex items-center justify-between border-t border-border pt-1 text-[11px] font-medium">
-                    <span className="text-text">Cumul 30 j</span>
-                    <span className={`tabular-nums ${cumul30 >= 0 ? "text-up" : "text-down"}`}>
+                    <span className="text-text">Cumul 30 séances</span>
+                    <span className={`tabular-nums ${(cumul30 ?? 0) >= 0 ? "text-up" : "text-down"}`}>
                       {fmtFluxBtc(cumul30)}
                     </span>
                   </div>
@@ -846,6 +851,7 @@ export function OnchainWindow() {
           ) : (
             <Vide>{etf?.raison ?? "Flux ETF indisponibles."}</Vide>
           )}
+          <HistoriqueEtf open={open} actif={actifEtf} repliBtc={donnees.etfRepli} />
         </section>
 
         {/* ─────────── RÉSEAU ETH ─────────── */}
@@ -910,6 +916,7 @@ export function OnchainWindow() {
               (Réglages ⚙ ou ETHERSCAN_API_KEY dans .env).
             </Vide>
           )}
+          <FilesStakingEth open={open} />
         </section>
 
         {/* ─────────── RÉSEAU SOL ─────────── */}

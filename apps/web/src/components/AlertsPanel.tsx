@@ -17,6 +17,7 @@ import { useMemo, useState } from "react";
 import { useStore } from "zustand";
 import {
   decrireCondition,
+  conditionSupporteTimeframe,
   estFrontOnly,
   validerComposite,
   type Comparateur,
@@ -24,7 +25,7 @@ import {
   type ConditionSimple,
   type SensCroisement,
 } from "@axiom/alerts";
-import { INDICATORS, getIndicator } from "@axiom/indicators";
+import { INDICATORS, getIndicator, supportsIndicatorTimeframe } from "@axiom/indicators";
 import { marketStore } from "../store/market";
 import { alertsStore } from "../store/alerts";
 import { presetAlertsStore, type AlertePreset } from "../store/presetAlerts";
@@ -283,6 +284,10 @@ export function AlertsPanel() {
       // cvd-spot-perp-div — active le pipeline orderflow via le runtime.
       condition = { type: "cvd-spot-perp-div", kind: kindCvd };
     }
+    if (!conditionSupporteTimeframe(condition, marketStore.getState().timeframe)) {
+      setErreurForm("RVOL saisonnier : choisir l’intervalle 1h du graphique.");
+      return;
+    }
     setErreurForm(null);
     if (composer) {
       if (composition.length >= 4) {
@@ -357,6 +362,7 @@ export function AlertsPanel() {
           const derniere = d.declenchements[d.declenchements.length - 1];
           const whaleUnusable = IS_VERCEL && d.condition.type === "whale-flux";
           const frontOnly = estFrontOnly(d);
+          const timeframeUnusable = !conditionSupporteTimeframe(d.condition, d.timeframe);
           return (
             <div
               key={d.id}
@@ -383,6 +389,7 @@ export function AlertsPanel() {
                   <span className="truncate font-medium text-text">{d.symbol}</span>
                   <span className="flex shrink-0 items-center gap-1">
                     {whaleUnusable && <Badge ton="down">UNUSABLE</Badge>}
+                    {timeframeUnusable && <Badge ton="down" title="RVOL saisonnier : recréer cette alerte sur le graphique 1h.">1h requis</Badge>}
                     {frontOnly && (
                       <Badge ton="neutre" title="Évaluée seulement app ouverte (CVD / régime)">
                         front-only
@@ -543,8 +550,8 @@ export function AlertsPanel() {
                 className="min-w-0 flex-1 rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
               >
                 {INDICATEURS_SEUIL.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
+                  <option key={d.id} value={d.id} disabled={!supportsIndicatorTimeframe(d.id, tfCourant)}>
+                    {d.name}{supportsIndicatorTimeframe(d.id, tfCourant) ? "" : " · 1h requis"}
                   </option>
                 ))}
               </select>
@@ -808,6 +815,10 @@ export function AlertsPanel() {
             onClick={() => {
               if (!validerComposite(composition)) {
                 setErreurForm("2 à 4 sous-conditions requises.");
+                return;
+              }
+              if (!conditionSupporteTimeframe({ type: "composite", conditions: composition }, marketStore.getState().timeframe)) {
+                setErreurForm("RVOL saisonnier : choisir l’intervalle 1h avant de créer la composition.");
                 return;
               }
               const aUneBougie = composition.some((c) =>

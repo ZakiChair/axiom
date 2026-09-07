@@ -10,7 +10,7 @@
  * composant passent par `commands/windowPanels.ts` (windowManager only) pour ne
  * pas tirer le graphe chart/canvas au démarrage.
  */
-import { lazy, Suspense, useEffect, useRef, type ComponentType, type LazyExoticComponent } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentType, type LazyExoticComponent } from "react";
 import { useStore } from "zustand";
 import { Toolbar } from "./components/Toolbar";
 import { SessionStrip } from "./components/SessionStrip";
@@ -21,8 +21,6 @@ import { Watchlist } from "./components/Watchlist";
 import { AlertsPanel } from "./components/AlertsPanel";
 import { CompareControl } from "./components/CompareControl";
 import { HealthPanel } from "./components/HealthPanel";
-import { SettingsPanel } from "./components/SettingsPanel";
-import { CommandPalette } from "./components/CommandPalette";
 import { settingsUiStore } from "./store/settings-ui";
 import { ecoCommands } from "./store/eco";
 import { commandes as newsCommands } from "./store/news";
@@ -57,17 +55,16 @@ import { commandes as backtestCommands } from "./store/backtest";
 import { commandes as replayCommands } from "./store/replay";
 import { chartLayoutStore, type ChartLayoutMode } from "./store/chart-layout";
 import { commandes as globeCommands } from "./store/globe-ui";
-import { commandesOnboarding } from "./store/onboarding";
+import { commandesOnboarding, onboardingStore } from "./store/onboarding";
 import { commandesPlaybooks } from "./data/playbooks";
 import { windowPanelCommands } from "./commands/windowPanels";
-import { enregistrerCommandes, type Commande } from "./commands/registry";
+import { enregistrerCommandes, paletteStore, type Commande } from "./commands/registry";
 import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
 import { demarrerAlertes } from "./alerts/runtime";
 import { demarrerMoteurPaper } from "./store/paper";
 import { FloatingWindow } from "./components/FloatingWindow";
 import { Taskbar } from "./components/Taskbar";
 import { SnapOverlay } from "./components/SnapOverlay";
-import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { Toasts } from "./components/Toasts";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { WINDOW_REGISTRY, windowManagerStore, type WindowId } from "./store/windowManager";
@@ -223,8 +220,20 @@ function FenetreFallback() {
   return <div className="p-3 text-xs text-text-dim">Chargement…</div>;
 }
 
+const SettingsPanel = lazy(() => import("./components/SettingsPanel").then(m => ({ default: m.SettingsPanel })));
+const OnboardingOverlay = lazy(() => import("./components/OnboardingOverlay").then(m => ({ default: m.OnboardingOverlay })));
+const CommandPalette = lazy(() => import("./components/CommandPalette").then(m => ({ default: m.CommandPalette })));
+
 export function App() {
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
+  const reglagesOuverts = useStore(settingsUiStore, (s) => s.open);
+  const onboardingTermine = useStore(onboardingStore, (s) => s.completed);
+  const paletteOuverte = useStore(paletteStore, (s) => s.ouvert);
+  const [paletteChargee, setPaletteChargee] = useState(paletteOuverte);
+  const [reglagesCharges, setReglagesCharges] = useState(reglagesOuverts);
+  // Chargé à la première ouverture, puis conservé pour préserver les brouillons.
+  useEffect(() => { if (reglagesOuverts) setReglagesCharges(true); }, [reglagesOuverts]);
+  useEffect(() => { if (paletteOuverte) setPaletteChargee(true); }, [paletteOuverte]);
   const plein = useStore(fullscreenStore, (s) => s.plein);
   const chartAreaRef = useRef<HTMLDivElement>(null);
 
@@ -343,10 +352,10 @@ export function App() {
         );
       })}
       <SnapOverlay />
-      <SettingsPanel />
-      <CommandPalette />
+      <Suspense fallback={null}>{(reglagesOuverts || reglagesCharges) && <SettingsPanel />}</Suspense>
+      <Suspense fallback={null}>{(paletteOuverte || paletteChargee) && <CommandPalette />}</Suspense>
       {/* Premier lancement : 3 étapes (masqué si completed ; ⌘K ONBOARD pour rejouer). */}
-      <OnboardingOverlay />
+      <Suspense fallback={null}>{!onboardingTermine && <OnboardingOverlay />}</Suspense>
       {/* Toasts de feedback (export PNG, workspace, playbook, sauvegarde) — coin bas-droit. */}
       <Toasts />
     </div>

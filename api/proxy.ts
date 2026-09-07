@@ -1,5 +1,8 @@
-import { lookup } from "node:dns/promises";
+import dns from "node:dns/promises";
 import { isIP } from "node:net";
+import { sourceGeoExtraite } from "../shared/extapi-hosts.js";
+import { extraireSeriesGeo } from "../shared/geo-series.js";
+import { NBS_HOST, validerRequeteNbs } from "../shared/nbs-series.js";
 import {
   planProxyRequest,
   PROXY_MAX_REDIRECTS,
@@ -142,7 +145,7 @@ async function validatePublicDestination(target: URL, signal: AbortSignal): Prom
   const host = target.hostname.replace(/^\[|\]$/g, "");
   const addresses = isIP(host)
     ? [host]
-    : (await withAbort(lookup(host, { all: true, verbatim: true }), signal)).map((entry) => entry.address);
+    : (await withAbort(dns.lookup(host, { all: true, verbatim: true }), signal)).map((entry) => entry.address);
   if (addresses.length === 0 || addresses.some((address) => !publicIpAddress(address))) {
     throw new ProxyPolicyError(502, "destination DNS non publique refusée");
   }
@@ -166,7 +169,7 @@ function announcedLength(headers: Headers): number | null {
   const raw = headers.get("content-length");
   if (raw === null || !/^\d+$/.test(raw.trim())) return null;
   const value = Number(raw);
-  return Number.isSafeInteger(value) ? value : null;
+  return Number.isSafeInteger(value) ? value : Number.POSITIVE_INFINITY;
 }
 
 async function requestBody(
@@ -177,21 +180,40 @@ async function requestBody(
   if (plan.method !== "POST") return undefined;
   const announced = announcedLength(request.headers);
   if (announced !== null && announced > PROXY_MAX_REQUEST_BYTES) {
+    await request.body?.cancel().catch(() => undefined);
     throw new ProxyPolicyError(413, "corps de requête trop volumineux");
   }
-  const body = await withAbort(request.arrayBuffer(), signal);
-  if (body.byteLength > PROXY_MAX_REQUEST_BYTES) {
-    throw new ProxyPolicyError(413, "corps de requête trop volumineux");
+  if (request.body === null) return new ArrayBuffer(0);
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await withAbort(reader.read(), signal);
+      if (done) break;
+      total += value.byteLength;
+      if (total > PROXY_MAX_REQUEST_BYTES) throw new ProxyPolicyError(413, "corps de requête trop volumineux");
+      chunks.push(value);
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
   }
-  return body;
+  const body = new Uint8Array(new ArrayBuffer(total));
+  let offset = 0;
+  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+  return body.buffer;
 }
 
 async function responseBody(
   response: Response,
   signal: AbortSignal,
+  maxBytes = PROXY_MAX_RESPONSE_BYTES,
 ): Promise<Uint8Array<ArrayBuffer>> {
   const announced = announcedLength(response.headers);
-  if (announced !== null && announced > PROXY_MAX_RESPONSE_BYTES) {
+  if (announced !== null && announced > maxBytes) {
     await response.body?.cancel().catch(() => undefined);
     throw new ProxyPolicyError(502, "réponse amont trop volumineuse");
   }
@@ -205,7 +227,7 @@ async function responseBody(
       if (done) break;
       if (value === undefined) continue;
       total += value.byteLength;
-      if (total > PROXY_MAX_RESPONSE_BYTES) {
+      if (total > maxBytes) {
         await reader.cancel("réponse amont trop volumineuse").catch(() => undefined);
         throw new ProxyPolicyError(502, "réponse amont trop volumineuse");
       }
@@ -253,13 +275,21 @@ async function fetchUpstream(
     });
     if (!REDIRECT_STATUSES.has(response.status)) return response;
     await response.body?.cancel().catch(() => undefined);
+    if (plan.target.hostname === NBS_HOST) throw new ProxyPolicyError(502, "redirection NBS refusée");
     if (redirects >= PROXY_MAX_REDIRECTS) throw new ProxyPolicyError(502, "trop de redirections amont");
     const location = response.headers.get("location");
     if (location === null) throw new ProxyPolicyError(502, "redirection amont sans destination");
     const redirected = proxyRedirectTarget(location, target, plan.allowedRedirectHosts);
     if (redirected === null) throw new ProxyPolicyError(502, "destination de redirection refusée");
+    if (sourceGeoExtraite(plan.target) &&
+      (redirected.hostname !== plan.target.hostname || redirected.pathname !== plan.target.pathname)) {
+      throw new ProxyPolicyError(502, "chemin de redirection géopolitique refusé");
+    }
     redirects += 1;
     method = redirectedMethod(response.status, method);
+    if (method === "POST" && redirected.pathname !== plan.target.pathname) {
+      throw new ProxyPolicyError(502, "redirection POST vers un autre chemin refusée");
+    }
     if (method === "GET" || method === "HEAD") body = undefined;
     target = redirected;
   }
@@ -286,8 +316,29 @@ async function handle(request: Request): Promise<Response> {
 
   try {
     const body = await requestBody(request, plan, controller.signal);
+    if (plan.target.hostname === NBS_HOST) {
+      let valide = false;
+      try { valide = validerRequeteNbs(JSON.parse(new TextDecoder().decode(body))); } catch { /* JSON invalide */ }
+      if (!valide) throw new ProxyPolicyError(400, "requête statistique NBS invalide");
+    }
     const upstream = await fetchUpstream(plan, request.headers, body, controller.signal);
     const contentType = upstream.headers.get("content-type") ?? "application/octet-stream";
+    const geo = sourceGeoExtraite(plan.target);
+    if (geo) {
+      if (upstream.status !== 200 || contentType.split(";", 1)[0]?.trim().toLowerCase() !== "text/html") {
+        await upstream.body?.cancel().catch(() => undefined);
+        throw new ProxyPolicyError(502, "document géopolitique amont indisponible");
+      }
+      if (plan.method === "HEAD") {
+        await upstream.body?.cancel().catch(() => undefined);
+        return new Response(null, { headers: { "content-type": "application/json; charset=utf-8", "cache-control": plan.cacheControl, ...SECURITY_HEADERS } });
+      }
+      const bytes = await responseBody(upstream, controller.signal, 16 * 1024 * 1024);
+      const series = extraireSeriesGeo(new TextDecoder().decode(bytes), geo);
+      return new Response(plan.method === "HEAD" ? null : JSON.stringify(series), {
+        headers: { "content-type": "application/json; charset=utf-8", "cache-control": plan.cacheControl, ...SECURITY_HEADERS },
+      });
+    }
     if (!proxyMimeAllowed(contentType)) {
       await upstream.body?.cancel().catch(() => undefined);
       return jsonError(502, `type MIME amont refusé : ${contentType.split(";", 1)[0] ?? "inconnu"}`);

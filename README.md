@@ -19,8 +19,8 @@ d’auth réseau, rien ne quitte la machine en dehors des appels aux APIs publiq
 
 | | |
 |---|---|
-| **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations, **187 indicateurs** testés |
-| **Lire le contexte** | **39 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, mouvements de baleines, treemap, options, COT, taux (dont l'onglet inflation mondiale 6 zones) & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
+| **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations, **189 indicateurs** testés |
+| **Lire le contexte** | **39 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, mouvements de baleines, treemap, options, COT, taux (dont 15 familles macro sur 8 zones) & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
 | **Décider** | screener, playbooks 1-clic, alertes (dont composite ET), backtest en R (stop ATR / sizing risque), coût d’exécution L2 (DOM), stress-test, étude d’évènements, journal, paper trading |
 | **Ne pas décrocher** | alertes onglet fermé (macOS + Telegram optionnel), replay sur dumps officiels Binance, panneau de santé des sources |
 
@@ -29,7 +29,7 @@ Deux partis pris structurent le produit :
 1. **Le chemin chaud reste direct.** Le front parle **directement** aux WebSockets des exchanges ;
    le daemon `axiomd` ne prend en charge que le lent (APIs à quota, cache, persistance SQLite,
    alertes). L’UI reste utilisable **sans** daemon.
-2. **Les calculs sont du TypeScript pur et testés.** Les 187 indicateurs vivent dans
+2. **Les calculs sont du TypeScript pur et testés.** Les 189 indicateurs vivent dans
    `@axiom/indicators` — pas de WASM, pas de service Python — et sont couverts par des tests
    unitaires et structurels, dont **4 golden tests** contre un oracle `pandas-ta` (ADX,
    SuperTrend, Ichimoku, PSAR ; `scripts/golden/`).
@@ -43,7 +43,7 @@ d’Electron.
 ```
 packages/
   types/         @axiom/types       — contrat de données partagé
-  indicators/    @axiom/indicators  — 187 indicateurs TS pur + golden tests
+  indicators/    @axiom/indicators  — 189 indicateurs TS pur + golden tests
   alerts/        @axiom/alerts      — moteur d’alertes pur (front + daemon)
   backtest/      @axiom/backtest    — moteur de backtest pur
 apps/
@@ -126,7 +126,7 @@ Finnhub, Etherscan v2, CoinDesk Data/CCData et CoinGecko) restent dans le `local
 navigateur. OI et funding du graphe disposent d'un repli Binance sans
 clé ; NVT utilise directement les charts publics Blockchain.com.
 
-Le catalogue conserve les 187 indicateurs. Une entrée impossible pour la source, le symbole ou
+Le catalogue conserve les 189 indicateurs. Une entrée impossible pour la source, le symbole ou
 le timeframe courant est désactivée et marquée **UNUSABLE** au lieu de produire un pane vide.
 Les fonctions intrinsèquement locales sont également nommées : REPLAY et WHALES sont
 **UNUSABLE** sur Vercel ; l'historique LIQ et les couches GDELT/UCDP de GLOBE sont **PARTIAL**.
@@ -135,11 +135,47 @@ Les snapshots, LIQHL, les alertes baleines et les notifications onglet fermé n�
 
 ## Fonctionnalités (aperçu)
 
-- **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, 187 indicateurs
+- **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, 189 indicateurs
 - **Terminal** : palette ⌘K, raccourcis, workspaces, fenêtres flottantes + snap + taskbar
 - **Sources** : Binance, Bybit, OKX, Coinbase, Kraken, MEXC, Deribit, Twelve Data, Coinalyze, FRED, etc.
 - **Panneaux** : 39 fenêtres — DES, FUNDX, LIQ, ECO, NEWS, CORR, CHAIN, MAP, PORT, NOTE, EQS, TERM, OMON, DOM, BT, REPLAY, RATE, COT, SEAG, VOL, FUND, BRIEF, GLOBE, STBL, SQZ, CBPREM, NETLIQ, DATA, DIST, EXPY, PAPER, MINE, WHALES, CYCLE, BPL, EVTS, SCEN, CAP, SECT
 - **Daemon** : proxy+cache, KV/candles SQLite, alertes (macOS + Telegram optionnel), replay dumps Binance, couches GDELT/UCDP, collecte des mouvements baleines (BTC + stables)
+
+[Bilan des ajouts, sources et vérifications du 7 septembre](docs/revue-2026-09-07.md).
+
+### Fonction MACRO et nouveaux indicateurs
+
+`⌘K → MACRO` ouvre **RATE → Indicateurs**. Choisir une famille, les zones et un
+historique de **1, 5 ou 10 ans**. Huit zones : États-Unis, zone euro, Royaume-Uni,
+Japon, Chine, Inde, Canada et Suisse. `MONEY` conserve l'ancien panneau monétaire.
+
+Les quinze familles couvrent CPI annuel/mensuel, inflation sous-jacente, PPI, PIB
+réel annuel, chômage, production industrielle, change effectif réel, monnaie large,
+taux réel US, breakeven, NFCI, spread HY, inscriptions chômage et SOFR−IORB.
+Les sources, périodes, unités, estimations et retards apparaissent par série.
+Les historiques ont la profondeur réellement publiée ; une sélection de dix ans
+ne crée pas dix ans de données. Les périmètres nationaux restent distincts
+(IPCH/IPC, M2/M3/M4, enquêtes de chômage). ECO ouvre les séries équivalentes et
+BRIEF reprend la sélection, ses périodes et ses réserves.
+
+- **GLOBE** : historiques GPR, TPU, GSCPI et trafic PortWatch par détroit, moyenne
+  sur sept jours et comparaison saisonnière. Sources officielles et millésimes visibles.
+- **CHAIN** : cohortes STH/LTH, capitalisation réalisée et variations 30/90 jours,
+  offre BTC en profit/perte, réserves et netflows des exchanges, historique ETF
+  5/20 séances et files de staking ETH. Les accès BGeometrics/SoSoValue dépendent
+  des droits de la clé ; les groupes se chargent à la demande.
+- **Graphique / DOM** : RVOL saisonnier H1, parts de variance baissière/haussière,
+  OFI, microprix et reconstitution du carnet après retrait de liquidité. Cette dernière
+  mesure reste une heuristique L2 : annulations et exécutions ne sont pas distinguées.
+- **Sauvegardes** : snapshots étendus aux notes, dessins, alertes, journal,
+  portefeuille et espaces de travail ; restauration du périmètre exact. Les clés API
+  sont exclues. Le daemon reste nécessaire pour les sauvegardes durables.
+
+Les deux indicateurs OHLCV sont utilisables dans les alertes et le backtest ; le
+RVOL exige H1 et suffisamment de références antérieures. Les mesures L2 et les
+historiques macro/on-chain de ces panneaux ne deviennent pas des signaux de
+backtest. Les 30 stratégies du catalogue restent **non validées**. Les séries
+révisables ne simulent pas ce qui était connu à une ancienne date de publication.
 
 ### Programme G100 (WTP 100 $/mois) — W0–W3 landés, gate **ouvert**
 

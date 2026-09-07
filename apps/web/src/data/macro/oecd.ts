@@ -48,6 +48,9 @@ export function parseOecdSdmxJson(json: unknown, refAreaAttendu: string): MacroS
   const structures = champ(data, "structures");
   const structure = Array.isArray(structures) ? structures[0] : undefined;
   const dimensions = champ(structure, "dimensions");
+  const attributs = champ(champ(structure, "attributes"), "observation");
+  const positionStatut = Array.isArray(attributs) ? attributs.findIndex((a) => champ(a, "id") === "OBS_STATUS") : -1;
+  const valeursStatut = positionStatut >= 0 && Array.isArray(attributs) ? champ(attributs[positionStatut], "values") : undefined;
 
   const observation = champ(dimensions, "observation");
   const dimTemps = Array.isArray(observation) ? observation[0] : undefined;
@@ -101,7 +104,11 @@ export function parseOecdSdmxJson(json: unknown, refAreaAttendu: string): MacroS
       const raw = Array.isArray(cellule) ? cellule[0] : undefined;
       const value = typeof raw === "number" ? raw : NaN;
       if (!Number.isFinite(value)) continue;
-      points.push({ time, value });
+      const indiceStatut: unknown = Array.isArray(cellule) && positionStatut >= 0 ? cellule[positionStatut + 1] : undefined;
+      const statut = Array.isArray(valeursStatut) && typeof indiceStatut === "number" ? champ(valeursStatut[indiceStatut], "id") : undefined;
+      const noms: Record<string, string> = { E: "estimation", P: "provisoire", B: "rupture de série", I: "imputation" };
+      const qualite = typeof statut === "string" && statut !== "A" ? noms[statut] ?? `statut source : ${statut}` : undefined;
+      points.push({ time, value, ...(qualite ? { qualite } : {}) });
     }
     return trierChrono(points);
   }
@@ -120,9 +127,7 @@ export async function chargerSerieOecd(
   signal?: AbortSignal,
 ): Promise<MacroSeries> {
   const refAreaAttendu = cle.split(".")[0] ?? "";
-  // Format mensuel « YYYY-MM ». Une série trimestrielle OCDE exigerait « YYYY-Qn ».
-  // Le catalogue ne contient actuellement aucune série trimestrielle (tous les CPI sont mensuels),
-  // à revisiter quand un flux trimestriel sera ajouté (ex. PIB prévu dans un lot ultérieur).
+  // La borne ISO mensuelle est acceptée aussi par KEI trimestriel (sonde du 7 septembre 2026).
   const debut = new Date(depuisMs).toISOString().slice(0, 7); // « YYYY-MM »
   const url = `${BASE_OCDE}/${dataflow}/${cle}?startPeriod=${debut}&format=jsondata`;
   const res = await fetch(url, { signal });

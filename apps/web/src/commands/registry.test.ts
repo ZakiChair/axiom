@@ -51,6 +51,8 @@ import {
 import { marketStore } from "../store/market";
 import { indicatorsStore } from "../store/indicators";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
+import { macroRatesViewStore } from "../store/macroRatesView";
+import { windowManagerStore } from "../store/windowManager";
 import { toastsStore, retirerToast } from "../store/toasts";
 // ─── Sources de commandes greffées par App.tsx (`enregistrerCommandes([...])`) ───
 // Ces modules n'enregistrent RIEN eux-mêmes : ils exportent un tableau `Commande[]`
@@ -415,15 +417,22 @@ describe("construireRegistre — commandes attendues présentes", () => {
     expect(registre.filter((c) => c.categorie === "theme")).toHaveLength(5);
   });
 
-  it("la commande MACRO ouvre le menu Indicateurs sur son onglet Macro", () => {
-    // Les mesures macro ayant quitté la sidebar, cette commande ne peut plus faire
-    // défiler vers un panneau : elle DOIT ouvrir l'onglet. Sans ce test, la régression
-    // serait silencieuse (l'ancienne action ne levait pas, elle ne trouvait rien).
+  it("MACRO demande le tableau économique même après une courbe de taux", () => {
+    const ouvrir = vi.spyOn(windowManagerStore.getState(), "openWindow");
+    macroRatesViewStore.getState().demanderCourbe();
+    registre.find((c) => c.id === "panneau:macro")?.action();
+    expect(ouvrir).toHaveBeenCalledWith("macroRates");
+    expect(macroRatesViewStore.getState().requeteIndicateurs).toBeGreaterThan(0);
+    expect(macroRatesViewStore.getState().requete).toBe(0);
+    ouvrir.mockRestore();
+  });
+
+  it("MONEY conserve l'accès aux indicateurs de masse monétaire", () => {
     indicatorMenuUiStore.getState().fermer();
     indicatorMenuUiStore.getState().setOnglet("techniques");
 
-    const macro = registre.find((c) => c.id === "panneau:macro");
-    expect(macro?.mnemonique).toBe("MACRO");
+    const macro = registre.find((c) => c.id === "panneau:money");
+    expect(macro?.mnemonique).toBe("MONEY");
     macro?.action();
 
     expect(indicatorMenuUiStore.getState().open).toBe(true);

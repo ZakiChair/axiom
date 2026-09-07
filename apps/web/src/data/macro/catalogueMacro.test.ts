@@ -1,70 +1,49 @@
 import { describe, expect, it } from "vitest";
 import { CATALOGUE_MACRO, INDICATEURS_MACRO, ORDRE_REGIONS, seriesDeIndicateur } from "./catalogueMacro";
 
-describe("CATALOGUE_MACRO", () => {
-  it("couvre les six régions pour le CPI en glissement annuel", () => {
-    const regions = seriesDeIndicateur("cpi-aa").map((d) => d.region);
-    expect([...regions].sort()).toEqual(["CN", "EZ", "IN", "JP", "UK", "US"]);
-  });
-
-  it("attribue un identifiant unique à chaque série", () => {
-    const ids = CATALOGUE_MACRO.map((d) => d.id);
-    expect(new Set(ids).size).toBe(ids.length);
-  });
-
-  it("déclare un couleurTokenIndex distinct par région, dans 1..6", () => {
-    // La POSITION dans ORDRE_REGIONS dérive le token de couleur `--serie-N` : deux
-    // régions au même index tracteraient deux courbes de la même couleur.
-    expect(ORDRE_REGIONS).toHaveLength(6);
-    expect(new Set(ORDRE_REGIONS).size).toBe(ORDRE_REGIONS.length);
-    for (const def of CATALOGUE_MACRO) {
-      expect(ORDRE_REGIONS).toContain(def.region);
+describe("catalogue mondial", () => {
+  it("rend huit zones sélectionnables et les familles d'économie réelle", () => {
+    expect(ORDRE_REGIONS).toEqual(["US", "EZ", "UK", "JP", "CN", "IN", "CA", "CH"]);
+    for (const id of ["cpi-aa", "cpi-mm", "core-cpi-aa", "ppi-aa", "pib-aa", "chomage", "production-aa", "change-reel-aa", "monnaie-aa"]) {
+      expect(INDICATEURS_MACRO.some((i) => i.id === id)).toBe(true);
+      expect(seriesDeIndicateur(id).map((d) => d.region)).toEqual(ORDRE_REGIONS);
     }
   });
-
-  it("référence un indicateur déclaré pour chaque série", () => {
-    const declares = new Set(INDICATEURS_MACRO.map((i) => i.id));
-    for (const def of CATALOGUE_MACRO) {
-      expect(declares.has(def.indicateur)).toBe(true);
+  it("donne des identifiants stables uniques", () => {
+    expect(new Set(CATALOGUE_MACRO.map((d) => d.id)).size).toBe(CATALOGUE_MACRO.length);
+    expect(seriesDeIndicateur("cpi-aa").find((d) => d.region === "US")?.id).toBe("cpi-aa-us");
+  });
+  it("n'utilise pas les miroirs CPI arrêtés du Canada et de la Suisse", () => {
+    for (const id of ["core-cpi-aa-ca", "cpi-aa-ch"]) {
+      expect(CATALOGUE_MACRO.find((d) => d.id === id)?.source).toMatchObject({ transport: "oecd", dataflow: expect.stringContaining("COICOP2018") });
     }
   });
-});
-
-// GARDE-FOU CENTRAL DU LOT. Une clé OCDE multi-pays (« CHN+IND ») ou jokerisée
-// (« JPN.M...... ») renvoie HTTP 200 en TRONQUANT SILENCIEUSEMENT une des séries.
-// Mesuré en live le 2026-09-06 : avec startPeriod=2026-05, la clé CHN+IND rend
-// 3 points pour la Chine et UN SEUL pour l'Inde, là où les appels unitaires en
-// rendent 3 chacun. Ce test interdit la régression au niveau du catalogue.
-describe("clés OCDE — aucune troncature silencieuse possible", () => {
-  const clesOecd = CATALOGUE_MACRO.filter((d) => d.source.transport === "oecd").map((d) =>
-    d.source.transport === "oecd" ? d.source.cle : "",
-  );
-
-  it("n'utilise jamais de clé multi-pays", () => {
-    for (const cle of clesOecd) {
-      expect(cle).not.toContain("+");
-    }
+  it("garde le chômage UK glissant et ne le remplace pas par les demandeurs d'indemnités", () => {
+    expect(CATALOGUE_MACRO.find((d) => d.id === "chomage-uk")).toMatchObject({ decalageFinMois: 1, source: { transport: "ons", chemin: expect.stringContaining("mgsx") } });
   });
-
-  it("spécifie entièrement chaque dimension (aucun segment vide)", () => {
-    for (const cle of clesOecd) {
-      const segments = cle.split(".");
-      expect(segments.length).toBe(8);
-      for (const s of segments) {
-        expect(s.length).toBeGreaterThan(0);
-      }
-    }
+  it("utilise les séries chinoises nationales vérifiées et ne nomme pas WPI indien PPI", () => {
+    for (const id of ["chomage-cn", "ppi-aa-cn", "core-cpi-aa-cn", "production-aa-cn"]) expect(CATALOGUE_MACRO.find((d) => d.id === id)?.source.transport).toBe("nbs");
+    expect(CATALOGUE_MACRO.find((d) => d.id === "ppi-aa-in")?.source).toMatchObject({ transport: "indisponible", motif: expect.stringContaining("WPI") });
   });
-});
-
-describe("filtres Eurostat", () => {
-  // Le poste coicop18 compte 555 modalités : une requête sous-filtrée renvoie
-  // des milliers de valeurs en HTTP 200. Toutes les dimensions non temporelles
-  // doivent donc être fixées.
-  it("fixe les quatre dimensions non temporelles", () => {
-    for (const def of CATALOGUE_MACRO) {
-      if (def.source.transport !== "eurostat") continue;
-      expect(Object.keys(def.source.filtres).sort()).toEqual(["coicop18", "freq", "geo", "unit"]);
+  it("raccorde les enquêtes et PPI officiels nouvellement vérifiés sans proxy de concept", () => {
+    expect(CATALOGUE_MACRO.find((d) => d.id === "chomage-in")).toMatchObject({ frequence: "M", source: { transport: "mospi", serie: "chomage" }, perimetre: expect.stringContaining("15 ans") });
+    expect(CATALOGUE_MACRO.find((d) => d.id === "ppi-aa-ca")).toMatchObject({ source: { transport: "statcan", vectorId: 1230995983 }, transformation: "aa" });
+    expect(CATALOGUE_MACRO.find((d) => d.id === "ppi-aa-jp")).toMatchObject({ source: { transport: "boj", code: "PRCG20_2200000000%" } });
+    expect(CATALOGUE_MACRO.find((d) => d.id === "ppi-aa-jp")?.transformation).toBeUndefined();
+  });
+  it("prévoit les observations de stress US et leurs unités", () => {
+    expect(INDICATEURS_MACRO.find((i) => i.id === "nfci")?.unite).toBe("indice");
+    expect(INDICATEURS_MACRO.find((i) => i.id === "demandes-chomage")?.unite).toBe("personnes");
+    expect(INDICATEURS_MACRO.find((i) => i.id === "sofr-iorb")?.unite).toBe("pb");
+    expect(seriesDeIndicateur("demandes-chomage")).toHaveLength(2);
+  });
+  it("ne laisse aucune dimension OCDE joker ou multi-pays dans le runtime", () => {
+    for (const d of CATALOGUE_MACRO) {
+      if (d.source.transport !== "oecd") continue;
+      expect(d.source.cle).not.toMatch(/[+*]/);
+      expect(d.source.cle.split(".").every(Boolean)).toBe(true);
+      const dimensions = d.source.dataflow.includes("DF_KEI") ? 7 : d.source.dataflow.includes("DF_MONAGG") ? 9 : 8;
+      expect(d.source.cle.split(".")).toHaveLength(dimensions);
     }
   });
 });

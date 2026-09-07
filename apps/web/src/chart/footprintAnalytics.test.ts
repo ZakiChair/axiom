@@ -194,6 +194,12 @@ describe("detectDeltaDivergences", () => {
     const flags = detectDeltaDivergences([], []);
     expect(flags).toEqual([]);
   });
+
+  it("réarme après une bougie neutre, puis après un changement de sens", () => {
+    const candles = [ck(0, 100, 90, 0), ck(1, 110, 95, 0), ck(2, 105, 96, 0), ck(3, 115, 97, 0), ck(4, 114, 94, 0)];
+    const bars = [-1, -2, 1, -3, 4].map((delta, time) => ({ time, rows: [], poc: 0, vah: 0, val: 0, delta } as FootprintBar));
+    expect(detectDeltaDivergences(candles, bars)).toEqual([null, "bear", null, "bear", "bull"]);
+  });
 });
 
 // ───────────────────────────── ImbalanceFlags (export) ─────────────────────

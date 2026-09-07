@@ -19,6 +19,7 @@ import { useStore } from "zustand";
 import type { Trade } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
+import { healthStore } from "../store/health";
 import { domUiStore, FACTEURS_PAS, NOTIONNELS_COUT, SEUILS_GROS_TRADE } from "../store/dom-ui";
 import { binanceAdapter } from "../data/binance";
 import {
@@ -35,6 +36,7 @@ import {
 import { formatUsd } from "../lib/format";
 import { lireTokensCanvas, POLICE_CANVAS, POLICE_CANVAS_MONO } from "../lib/canvasTokens";
 import { coutExecution, desequilibre, profondeurAPct } from "../data/depthExecution";
+import { DepthMicrostructure, MICRO_CONFIG, type MicrostructureView, type ReconstitutionView } from "../data/depthMicrostructure";
 import { EnTeteFenetre, Onglets, Vide } from "./ui";
 
 /** Nombre MAX de niveaux affichés de chaque côté du mid (LADDER, fenêtre haute). */
@@ -54,6 +56,8 @@ const TAPE_ROW_H = 16;
 const MIN_FRAME_MS = 66;
 /** Hauteur réservée au bandeau de coût (LADDER/DEPTH). */
 const COUT_H = 92;
+/** Mesures dynamiques + paramètres lisibles, également quand le coût est masqué. */
+const MICRO_H = 146;
 /** Échantillons de la sparkline de déséquilibre (1 / s, 60 s). */
 const SPARK_N = 60;
 
@@ -441,6 +445,35 @@ function dessinerCout(
   ctx.fillText(`Binance spot · carnet reçu ${couverture} · descriptif, hors frais`, 6, y0 + h - 8);
 }
 
+function dessinerMicrostructure(ctx: CanvasRenderingContext2D, w: number, y0: number, v: MicrostructureView, tk: Tokens): void {
+  ctx.fillStyle = rgbCss(tk.surface);
+  ctx.fillRect(0, y0, w, MICRO_H);
+  ctx.strokeStyle = rgbCss(tk.border);
+  ctx.beginPath(); ctx.moveTo(0, y0 + 0.5); ctx.lineTo(w, y0 + 0.5); ctx.stroke();
+  ctx.font = POLICE_CANVAS_MONO;
+  ctx.textBaseline = "middle"; ctx.textAlign = "left";
+  let y = y0 + 10;
+  const line = (text: string, color = tk.textDim) => {
+    ctx.fillStyle = rgbCss(color); ctx.fillText(text, 6, y, w - 12); y += 14;
+  };
+  const c = MICRO_CONFIG;
+  const ofi = v.ofi === null ? "—" : `${formatQte(v.ofi)} base / ${v.ofiNormalized?.toFixed(2) ?? "—"} × L1`;
+  line(`OFI ${c.ofiWindowMs / 1000} s : ${ofi}`, tk.text);
+  line(`Microprix / mid : ${v.micropriceBps === null ? "—" : formatBps(v.micropriceBps)}`);
+  line(`OFI n=${v.samples} · ${(v.durationMs / 1000).toFixed(1)} s · minimum ${c.ofiWarmupMs / 1000} s / ${c.ofiMinimum}`);
+  line(`Résilience L2 · heuristique · ±${c.bandBps} bps`, tk.text);
+  const sideLine = (name: string, side: ReconstitutionView) => {
+    const time = side.medianMs === null ? "—" : `${(side.medianMs / 1000).toFixed(2)} s`;
+    const pending = side.pendingMs === null ? `réf.${side.baselineSamples}` : `en cours ${(side.pendingMs / 1000).toFixed(1)}s`;
+    line(`${name} t80 ${time} · n=${side.completed} · cens.${side.censored} · ${pending}`);
+  };
+  sideLine("Bid", v.bid); sideLine("Ask", v.ask);
+  line(`Retrait ≥${c.withdrawalFraction * 100}% ≤${c.withdrawalMaxMs / 1000}s · réf.${c.baselineMs / 1000}s / ${c.baselineMinimum} points`);
+  line(`Retour ${c.recoveryFraction * 100}% ≥${c.recoveryHoldMs / 1000}s · censure ${c.recoveryTimeoutMs / 1000}s`);
+  line(`Médiane ${c.historyMs / 60_000}min / ${c.maxEvents} évts · bande fixe · annulations incluses`);
+  line(v.status === "en direct" ? v.resilienceStatus : v.status);
+}
+
 /** TAPE : time & sales défilant (heure, prix, taille, agresseur coloré). */
 function dessinerTape(ctx: CanvasRenderingContext2D, w: number, h: number, trades: Trade[], seuil: number, tk: Tokens): void {
   if (trades.length === 0) return placeholder(ctx, w, h, tk, "Aucune transaction reçue.");
@@ -493,6 +526,7 @@ export function DomWindow() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const livreRef = useRef<OrderBook | null>(null);
+  const microRef = useRef(new DepthMicrostructure());
   const tradesRef = useRef<Trade[]>([]);
   const sparkRef = useRef<number[]>([]);
   const lastSparkRef = useRef<number>(0);
@@ -522,14 +556,30 @@ export function DomWindow() {
   // — Souscription DEPTH (onglets LADDER/DEPTH) : UNE connexion @depth@100ms. —
   useEffect(() => {
     if (!open || !isBinance || (tab !== "ladder" && tab !== "depth")) return;
-    livreRef.current = null;
+    const reset = () => {
+      livreRef.current = null;
+      microRef.current.reset();
+      sparkRef.current = [];
+      lastSparkRef.current = 0;
+      scheduleRepaint();
+    };
+    reset();
+    const unsubHealth = healthStore.subscribe((state, previous) => {
+      const etat = state.sources["binance:depth"]?.etat;
+      if (etat !== previous.sources["binance:depth"]?.etat && etat !== "connected") reset();
+    });
     const unsub = souscrireDepth(symbol, (livre) => {
       livreRef.current = livre;
+      microRef.current.observe(livre, performance.now());
       scheduleRepaint();
-    });
+    }, reset);
+    // Rafraîchit l'âge même si le flux ne parle plus ; aucun state React sur tick.
+    const timer = setInterval(scheduleRepaint, 1000);
     return () => {
+      clearInterval(timer);
+      unsubHealth();
       unsub();
-      livreRef.current = null;
+      reset();
     };
   }, [open, isBinance, tab, symbol, scheduleRepaint]);
 
@@ -584,10 +634,11 @@ export function DomWindow() {
       if (tab === "tape") {
         dessinerTape(ctx, w, h, tradesRef.current, seuilGrosTrade, tk);
       } else if (!livre) {
-        placeholder(ctx, w, h, tk, "Chargement…");
+        placeholder(ctx, w, Math.max(0, h - MICRO_H), tk, "Synchronisation du carnet…");
+        dessinerMicrostructure(ctx, w, Math.max(0, h - MICRO_H), microRef.current.view(performance.now()), tk);
       } else if (tab === "ladder" || tab === "depth") {
         const afficherCout = coutVisible;
-        const hChart = afficherCout ? Math.max(0, h - COUT_H) : h;
+        const hChart = Math.max(0, h - MICRO_H - (afficherCout ? COUT_H : 0));
         if (tab === "ladder") {
           const pas = pasArrondi(meilleursNiveaux(livre)?.mid ?? 0) * facteurPas;
           dessinerLadder(ctx, w, hChart, livre, pas, tk);
@@ -605,6 +656,7 @@ export function DomWindow() {
           }
         }
         if (afficherCout) dessinerCout(ctx, w, hChart, COUT_H, livre, sparkRef.current, tk);
+        dessinerMicrostructure(ctx, w, h - MICRO_H, microRef.current.view(now), tk);
       }
     };
     paintRef.current = paint;
@@ -612,7 +664,11 @@ export function DomWindow() {
   }, [open, isBinance, tab, sizeTick, themeId, facteurPas, seuilGrosTrade, symbol, coutVisible]);
 
   // Nettoyage du rAF au démontage.
-  useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
+  useEffect(() => () => {
+    cancelAnimationFrame(rafRef.current);
+    // StrictMode remonte les effets : une trame annulée n'est plus « en attente ».
+    rafRef.current = 0;
+  }, []);
 
   return (
     // Panneau dockable à droite, NON MODAL (cf. DerivativesWindow). z-40.
@@ -686,7 +742,8 @@ export function DomWindow() {
       )}
 
       {/* Corps : canvas (Binance) ou message d'indisponibilité. */}
-      <div ref={containerRef} className="relative flex-1 overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={containerRef} className="relative h-full min-h-[340px]">
         {isBinance ? (
           <canvas ref={canvasRef} className="block h-full w-full" />
         ) : (
@@ -697,6 +754,7 @@ export function DomWindow() {
             </Vide>
           </div>
         )}
+      </div>
       </div>
     </>
   );

@@ -13,3 +13,6 @@ export * from "./utils-fabrique-strategie";
 export * from "./orderflow/divergenceSpotPerp";
 export * from "./engine";
 export * from "./registry";
+export * from "./timeframes";
+export { rvolSeasonal } from "./volume/rvolSeasonal";
+export { downsideVariance } from "./volatility/downsideVariance";

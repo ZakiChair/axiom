@@ -26,6 +26,7 @@
  * `createOverlay` sur l'instance FOCUS.
  */
 import { createStore } from "zustand/vanilla";
+import { miroiterTravailPersonnel } from "../data/daemon";
 import { registerOverlay, TooltipShowRule } from "klinecharts";
 import type { Chart as KLineChartInstance, OverlayEvent } from "klinecharts";
 // Effet de bord : enregistre les overlays Fibonacci custom (fibCustom / fibTrend).
@@ -349,7 +350,9 @@ function readAll(): Record<string, SavedOverlay[]> {
 
 /** Écriture brute de la map complète (best-effort géré par l'appelant). */
 function writeAll(all: Record<string, SavedOverlay[]>): void {
-  localStorage.setItem(DRAWINGS_KEY, JSON.stringify(all));
+  const valeur = JSON.stringify(all);
+  localStorage.setItem(DRAWINGS_KEY, valeur);
+  miroiterTravailPersonnel(DRAWINGS_KEY, valeur);
 }
 
 /** Persiste les overlays vivants d'UNE instance sous sa clé « slot:exchange:symbole ». */

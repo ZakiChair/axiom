@@ -21,7 +21,6 @@ import { navigateTo } from "../lib/navigation";
 import { BoutonRafraichir, EnTeteFenetre } from "./ui";
 import { serieMacroDe } from "../data/macro/ecoVersSerie";
 import { CATALOGUE_MACRO } from "../data/macro/catalogueMacro";
-import { macroSeriesStore } from "../store/macroSeries";
 import { windowManagerStore } from "../store/windowManager";
 import { macroRatesViewStore } from "../store/macroRatesView";
 import "../chart/ecoMarkers";
@@ -143,13 +142,14 @@ function Ligne({ ev, passe }: { ev: EcoEvent; passe: boolean }) {
             windowManagerStore.getState().openWindow("macroRates");
             // Force l'onglet Indicateurs (canal séparé de la commande CRVF — RATE
             // s'ouvrirait sinon sur son onglet par défaut « Rendements »).
-            macroRatesViewStore.getState().demanderIndicateurs();
             // La famille est DÉRIVÉE du catalogue plutôt qu'écrite en dur : `idSerie`
             // porte l'id de série complet (ex. "cpi-aa-cn"), pas la famille — les
             // découpler garantirait un mauvais indicateur silencieux le jour où une
             // seconde famille rejoint le catalogue.
             const def = CATALOGUE_MACRO.find((d) => d.id === idSerie);
-            if (def !== undefined) void macroSeriesStore.getState().demanderIndicateur(def.indicateur);
+            if (def !== undefined) {
+              macroRatesViewStore.getState().demanderIndicateurs({ indicateur: def.indicateur, region: def.region });
+            }
           }}
         >
           série
@@ -169,11 +169,21 @@ export function EcoWindow() {
   const pays = useStore(ecoStore, (s) => s.pays);
   const markersEnabled = useStore(ecoStore, (s) => s.markersEnabled);
 
-  // Charge le calendrier à l'ouverture (idempotent : `refresh` sert le cache 12 h sans
-  // requête réseau si frais — respecte « 1 poll par session »).
+  // Vérifie le cache quand le panneau est visible : 5 min autour des publications,
+  // 12 h sinon. La garde réseau du chargeur reste commune au refresh manuel.
   useEffect(() => {
-    if (open && status === "idle") ecoStore.getState().refresh(false);
-  }, [open, status]);
+    if (!open) return;
+    const rafraichir = () => {
+      if (document.visibilityState !== "hidden") ecoStore.getState().refresh(false);
+    };
+    rafraichir();
+    const timer = window.setInterval(rafraichir, 60_000);
+    document.addEventListener("visibilitychange", rafraichir);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", rafraichir);
+    };
+  }, [open]);
 
   // Pays disponibles pour le filtre (dérivé des évènements chargés).
   const paysDispo = Array.from(new Set(events.map((e) => e.country))).sort();

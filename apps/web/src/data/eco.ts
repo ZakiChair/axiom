@@ -6,7 +6,7 @@
  *        → LA source riche (impact, prévision, précédent, actuel) sur la semaine
  *          courante, TOUTES devises. Sans en-tête CORS → proxy générique /extapi.
  *          Débit respecté : au plus 2 fetch / 5 min + cache localStorage 12 h
- *          (1 poll par session en usage normal).
+ *          (5 min autour des publications, 12 h sinon).
  *   2. FRED releases : /fredapi/fred/releases/dates (clé injectée par le proxy)
  *        → calendrier de publication des statistiques US AU-DELÀ de la semaine FF
  *          (schedule à venir). Pas d'impact/prévision côté FRED : on ne RETIENT
@@ -24,6 +24,7 @@
  */
 import { extUrl } from "./extapi";
 import { healthStore } from "../store/health";
+import { getFredKey } from "../store/macro";
 
 // ─────────────────────────── Types ───────────────────────────
 
@@ -309,8 +310,16 @@ export function fusionnerEvenementsEco(
 
 const CACHE_KEY = "axiom:eco:cache:v1";
 const FETCH_LOG_KEY = "axiom:eco:fetchLog:v1";
-/** TTL du cache : 12 h (le calendrier bouge lentement). */
+/** Hors publication, le calendrier peut être conservé 12 h. */
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+/** Les résultats de publication sont revérifiés toutes les cinq minutes, sous quota. */
+const RESULTATS_TTL_MS = 5 * 60 * 1000;
+
+function ttlCalendrier(events: EcoEvent[], now: number): number {
+  return events.some((event) => event.source === "forexfactory" && event.impact !== "holiday"
+    && event.time >= now - 2 * 60 * 60 * 1000 && event.time <= now + 30 * 60 * 1000)
+    ? RESULTATS_TTL_MS : CACHE_TTL_MS;
+}
 /** Garde de débit ForexFactory : au plus 2 fetch par fenêtre de 5 min. */
 const RATE_MAX = 2;
 const RATE_WINDOW_MS = 5 * 60 * 1000;
@@ -421,7 +430,9 @@ async function fetchFredReleases(signal?: AbortSignal): Promise<EcoEvent[]> {
       order_by: "release_date",
       limit: "1000",
     });
-    // Clé injectée par le proxy /fredapi (.env) : on n'envoie AUCUNE clé côté front.
+    // Clé personnelle prioritaire ; sans elle, le proxy local garde son repli .env.
+    const key = getFredKey();
+    if (key) params.set("api_key", key);
     const res = await fetch(`/fredapi/fred/releases/dates?${params.toString()}`, { signal });
     if (!res.ok) throw new Error(`FRED releases ${res.status}`);
     const json = (await res.json()) as unknown;
@@ -458,7 +469,8 @@ export async function chargerEvenementsEco(opts?: {
   signal?: AbortSignal;
 }): Promise<ChargementEco> {
   const cache = lireCache();
-  if (!opts?.force && cache && Date.now() - cache.ts < CACHE_TTL_MS) {
+  if (opts?.signal?.aborted) return { events: cache?.events ?? evenementsFomc(), depuisCache: true };
+  if (!opts?.force && cache && Date.now() - cache.ts < ttlCalendrier(cache.events, Date.now())) {
     return { events: cache.events, depuisCache: true };
   }
   if (!fetchAutorise()) {
@@ -474,6 +486,8 @@ export async function chargerEvenementsEco(opts?: {
     fetchForexFactory(opts?.signal),
     fetchFredReleases(opts?.signal),
   ]);
+  // Une fermeture/annulation ne doit pas publier ni mémoriser une réponse partielle.
+  if (opts?.signal?.aborted) return { events: cache?.events ?? evenementsFomc(), depuisCache: true };
 
   // Les deux sources réseau vides = échec probable : on garde le cache s'il existe.
   if (ff.length === 0 && fred.length === 0 && cache) {

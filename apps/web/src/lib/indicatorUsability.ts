@@ -1,4 +1,5 @@
 import type { ExchangeId, IndicatorDef, Timeframe } from "@axiom/types";
+import { supportsIndicatorTimeframe } from "@axiom/indicators";
 import { tfAtLeast } from "../chart/tfOrder";
 
 export interface ContexteIndicateur {
@@ -78,7 +79,7 @@ export function raisonUnusableIndicateur(
   if (def.minTimeframe !== undefined && !tfAtLeast(timeframe, def.minTimeframe)) {
     return `Nécessite ≥ ${def.minTimeframe}`;
   }
-  if (exchange === "synthetic" && def.id === "volume") {
+  if (exchange === "synthetic" && (def.id === "volume" || def.id === "rvolSeasonal")) {
     return "Volume non défini sur une série synthétique";
   }
   if (SPLIT_VOLUME.has(def.id) && exchange !== "binance") {
@@ -90,6 +91,12 @@ export function raisonUnusableIndicateur(
     (def.category === "volume" || VOLUME_FOREX.has(def.id))
   ) {
     return "Twelve Data ne fournit pas de volume pour le forex";
+  }
+  if (!supportsIndicatorTimeframe(def.id, timeframe)) {
+    return "RVOL saisonnier : nécessite l’intervalle 1h (références en UTC)";
+  }
+  if (def.aux?.includes("mark") && ["3M", "6M", "12M"].includes(timeframe)) {
+    return "Mark perp indisponible pour cet intervalle";
   }
   const actif = actifDe(symbol);
   if (ONCHAIN_BTC.has(def.id) && actif !== "BTC") {

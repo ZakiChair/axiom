@@ -61,7 +61,13 @@ export function parseOecdSdmxJson(json: unknown, refAreaAttendu: string): MacroS
   if (!Array.isArray(dimSeries)) throw new Error("OCDE : dimensions de série absentes");
   const idxRefArea = dimSeries.findIndex((d) => champ(d, "id") === "REF_AREA");
   if (idxRefArea === -1) throw new Error("OCDE : dimension REF_AREA absente");
-  const valeursRefArea = champ(dimSeries[idxRefArea], "values");
+  const dimRefArea = dimSeries[idxRefArea];
+  // Préférer keyPosition si disponible (pour l'ordre d'apparition dans la clé),
+  // tomber sur l'index du tableau uniquement si le champ est absent ou invalide.
+  const keyPosValue = champ(dimRefArea, "keyPosition");
+  const keyPos = Number(keyPosValue);
+  const posRefAreaInKey = Number.isInteger(keyPos) && keyPos >= 0 ? keyPos : idxRefArea;
+  const valeursRefArea = champ(dimRefArea, "values");
   const zones = Array.isArray(valeursRefArea)
     ? valeursRefArea.map((v) => String(champ(v, "id") ?? ""))
     : [];
@@ -75,7 +81,7 @@ export function parseOecdSdmxJson(json: unknown, refAreaAttendu: string): MacroS
 
   for (const [cleSerie, contenu] of Object.entries(series as Record<string, unknown>)) {
     const positions = cleSerie.split(":");
-    const position = Number(positions[idxRefArea]);
+    const position = Number(positions[posRefAreaInKey]);
     if (!Number.isInteger(position)) continue;
     if (zones[position] !== refAreaAttendu) continue;
 
@@ -110,6 +116,9 @@ export async function chargerSerieOecd(
   signal?: AbortSignal,
 ): Promise<MacroSeries> {
   const refAreaAttendu = cle.split(".")[0] ?? "";
+  // Format mensuel « YYYY-MM ». Une série trimestrielle OCDE exigerait « YYYY-Qn ».
+  // Le catalogue ne contient actuellement aucune série trimestrielle (tous les CPI sont mensuels),
+  // à revisiter quand un flux trimestriel sera ajouté (ex. PIB prévu dans un lot ultérieur).
   const debut = new Date(depuisMs).toISOString().slice(0, 7); // « YYYY-MM »
   const url = `${BASE_OCDE}/${dataflow}/${cle}?startPeriod=${debut}&format=jsondata`;
   const res = await fetch(url, { signal });

@@ -69,6 +69,32 @@ describe("parseOecdSdmxJson", () => {
     expect(serie).toHaveLength(3);
   });
 
+  it("sélectionne la série correcte parmi plusieurs zones dans les données", () => {
+    // Construire un fixture avec DEUX séries : une pour CHN, une pour WXOECD.
+    // Vérifie que le parseur lit le bon position dans la clé et sélectionne la bonne zone.
+    const avecDeux = structuredClone(SDMX_CHN);
+    // Ajouter une série pour WXOECD (position 1 dans REF_AREA) avec des valeurs distinctes
+    (avecDeux.data.dataSets[0]!.series as Record<string, unknown>)["1:0:0:0:0:0:0:0"] = {
+      observations: { "0": [2.0, 0], "1": [3.0, 0], "2": [4.0, 0] },
+    };
+
+    // Demander CHN doit retourner les valeurs de CHN, pas WXOECD
+    const serieChn = parseOecdSdmxJson(avecDeux, "CHN");
+    expect(serieChn).toEqual([
+      { time: Date.UTC(2026, 4, 1), value: 1.2 },
+      { time: Date.UTC(2026, 5, 1), value: 1 },
+      { time: Date.UTC(2026, 6, 1), value: 0.5 },
+    ]);
+
+    // Demander WXOECD doit retourner les valeurs de WXOECD, pas CHN
+    const serieWxoecd = parseOecdSdmxJson(avecDeux, "WXOECD");
+    expect(serieWxoecd).toEqual([
+      { time: Date.UTC(2026, 4, 1), value: 2.0 },
+      { time: Date.UTC(2026, 5, 1), value: 4.0 },
+      { time: Date.UTC(2026, 6, 1), value: 3.0 },
+    ]);
+  });
+
   it("lève une erreur explicite quand la zone attendue est absente", () => {
     expect(() => parseOecdSdmxJson(SDMX_CHN, "IND")).toThrow(/IND/);
   });

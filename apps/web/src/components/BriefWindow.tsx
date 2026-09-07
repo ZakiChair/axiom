@@ -30,6 +30,7 @@ import { notesStore } from "../store/notes";
 import { portfolioStore } from "../store/portfolio";
 import { alertsStore } from "../store/alerts";
 import { regimeStore } from "../store/regime";
+import { macroSeriesStore } from "../store/macroSeries";
 import { lectures } from "../data/lecturesBrief";
 import {
   assemblerSession,
@@ -42,6 +43,7 @@ import {
   fetchFundingExtremes,
   fetchNewsBrief,
   fetchWatchlistOvernight,
+  lignesMacroBrief,
   type DonneesBrief,
   type DvolBrief,
   type EtfBrief,
@@ -49,6 +51,7 @@ import {
   type FearGreed,
   type FundingExtreme,
   type LigneDeriv,
+  type LigneMacroBrief,
   type LigneWatchlist,
   type TitreNews,
 } from "../data/brief";
@@ -78,6 +81,7 @@ import { SectionVar } from "./brief/SectionVar";
 import { SectionEtf } from "./brief/SectionEtf";
 import { SectionCot } from "./brief/SectionCot";
 import { SectionEco } from "./brief/SectionEco";
+import { SectionMacro } from "./brief/SectionMacro";
 import { SectionNews } from "./brief/SectionNews";
 import { SectionDvol } from "./brief/SectionDvol";
 
@@ -161,6 +165,7 @@ export function BriefWindow() {
   // Instantanés SYNCHRONES (pas de fetch) calculés en fin de `charger` : null → section absente.
   const [varChart, setVarChart] = useState<VarChart | null>(null);
   const [cot, setCot] = useState<CotChart | null>(null);
+  const [macro, setMacro] = useState<LigneMacroBrief[] | null>(null);
 
   // Garde d'annulation : chaque `charger` incrémente la génération et remplace le
   // contrôleur ; les callbacks des fetchs de la génération précédente sont ignorés
@@ -268,6 +273,10 @@ export function BriefWindow() {
         .slice(0, 3);
       setCot(avecDelta.length > 0 ? { lignes: avecDelta, dateRapport: resumeCot.dateRapport } : null);
     }
+
+    // Inflation a/a (6 zones) : cache du store macro SEUL (aucun réseau déclenché ici,
+    // pas d'abonnement — instantané via getState, comme VaR/COT). Rien en cache → absente.
+    setMacro(lignesMacroBrief(macroSeriesStore.getState().series));
   }, []);
 
   // Charge au montage/ouverture ; annule les fetchs en vol à la fermeture/démontage.
@@ -321,6 +330,8 @@ export function BriefWindow() {
       news: news.data,
       fearGreed: fearGreed.data,
       dvol: dvol.data,
+      // Relu au clic (comme `session`) pour exporter le cache le plus frais.
+      macro: lignesMacroBrief(macroSeriesStore.getState().series),
     };
     const { symbol, exchange } = marketStore.getState();
     notesStore.getState().ajouter({
@@ -391,6 +402,9 @@ export function BriefWindow() {
 
         {/* 4) Événements éco du jour, fort impact. */}
         <SectionEco eco={eco} instant={instant} noteFraicheur={noteFraicheur} />
+
+        {/* Inflation a/a des six zones — cache du store macro, aucun réseau déclenché ici. */}
+        {macro !== null && <SectionMacro macro={macro} />}
 
         {/* 5) Actualités + indice Fear & Greed. */}
         <SectionNews

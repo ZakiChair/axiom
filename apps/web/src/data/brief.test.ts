@@ -8,6 +8,7 @@ import {
   evenementsDuJour,
   evenementsEcoPasses,
   ligneDepuisTicker,
+  lignesMacroBrief,
   top5News,
   tradesClosDuJour,
   type DonneesBrief,
@@ -32,6 +33,35 @@ describe("deltaOiPct", () => {
     expect(deltaOiPct([{ oiUsd: 0 }, { oiUsd: 50 }])).toBeNull();
     expect(deltaOiPct([{ oiUsd: NaN }, { oiUsd: 50 }])).toBeNull();
     expect(deltaOiPct([{ oiUsd: 100 }, { oiUsd: NaN }])).toBeNull();
+  });
+});
+
+// ─────────────────────────── lignesMacroBrief ───────────────────────────
+
+describe("lignesMacroBrief", () => {
+  it("rend une ligne par région, valeur du dernier point", () => {
+    const lignes = lignesMacroBrief({
+      "cpi-aa-us": { statut: "ok", points: [{ time: Date.UTC(2026, 6, 1), value: 3.3 }], majTs: null, message: null },
+      "cpi-aa-ez": { statut: "ok", points: [{ time: Date.UTC(2026, 7, 1), value: 3.2 }], majTs: null, message: null },
+    });
+    expect(lignes).not.toBeNull();
+    expect(lignes!.find((l) => l.region === "États-Unis")?.valeur).toBe(3.3);
+    expect(lignes!.find((l) => l.region === "Zone euro")?.valeur).toBe(3.2);
+  });
+
+  it("porte le motif d'indisponibilité plutôt qu'un vide", () => {
+    const lignes = lignesMacroBrief({
+      "cpi-aa-us": { statut: "sansCle", points: [], majTs: null, message: "Clé FRED absente." },
+    });
+    const us = lignes!.find((l) => l.region === "États-Unis");
+    expect(us?.valeur).toBeNull();
+    expect(us?.message).toBe("Clé FRED absente.");
+  });
+
+  // Le BRIEF LIT le cache, il ne déclenche aucun fetch : sans donnée chargée, la
+  // section est absente plutôt que vide.
+  it("rend null quand aucune série n'est chargée", () => {
+    expect(lignesMacroBrief({})).toBeNull();
   });
 });
 
@@ -271,6 +301,7 @@ function donneesMinimales(): DonneesBrief {
     news: null,
     fearGreed: null,
     dvol: null,
+    macro: null,
   };
 }
 
@@ -316,6 +347,7 @@ describe("briefEnMarkdown", () => {
       news: [{ id: "n1", titre: "Titre récent", source: "coindesk", time: now - 12 * 60 * 1000 }],
       fearGreed: { value: 62, classification: "Greed", time: now },
       dvol: [{ devise: "BTC", valeur: 48.3 }],
+      macro: [{ region: "Zone euro", valeur: 3.2, message: null }],
     };
     const md = briefEnMarkdown(donnees, now);
     expect(md).toContain("# BRIEF — Point marché");
@@ -337,6 +369,8 @@ describe("briefEnMarkdown", () => {
     expect(md).toContain("Titre récent");
     expect(md).toContain("## Volatilité (DVOL)");
     expect(md).toContain("BTC · 48.3 %");
+    expect(md).toContain("## Inflation (a/a)");
+    expect(md).toContain("Zone euro");
   });
 
   it("tolère toutes les sections absentes (null) sans lever", () => {
@@ -349,6 +383,7 @@ describe("briefEnMarkdown", () => {
       news: null,
       fearGreed: null,
       dvol: null,
+      macro: null,
     };
     const md = briefEnMarkdown(vide, now);
     // Les titres de section restent présents, chaque corps signale l'indisponibilité.
@@ -356,8 +391,9 @@ describe("briefEnMarkdown", () => {
     expect(md).toContain("## Watchlist (overnight)");
     expect(md).toContain("## Dérivés");
     expect(md).toContain("## Volatilité (DVOL)");
-    // 6 sections réseau + session = 7
-    expect((md.match(/_Section indisponible._/g) ?? []).length).toBe(7);
+    expect(md).toContain("## Inflation (a/a)");
+    // 7 sections réseau + session = 8
+    expect((md.match(/_Section indisponible._/g) ?? []).length).toBe(8);
     expect(md).not.toContain("Fear & Greed :");
   });
 
@@ -375,6 +411,7 @@ describe("briefEnMarkdown", () => {
       news: null,
       fearGreed: null,
       dvol: null,
+      macro: null,
     };
     const md = briefEnMarkdown(donnees, now);
     expect(md).toContain("CPI passé · passé");
@@ -393,6 +430,7 @@ describe("briefEnMarkdown", () => {
       news: [],
       fearGreed: null,
       dvol: null,
+      macro: null,
     };
     const md = briefEnMarkdown(donnees, now);
     expect(md).toContain("_Aucun trade clôturé aujourd'hui._");
@@ -400,6 +438,21 @@ describe("briefEnMarkdown", () => {
     expect(md).toContain("_Aucun symbole dans la watchlist._");
     expect(md).toContain("_Aucun événement à fort impact aujourd'hui._");
     expect(md).toContain("_Aucune actualité._");
+  });
+
+  it("sérialise la section macro, et la marque indisponible quand elle est absente", () => {
+    // Base : le même instantané minimal que les tests « section Lecture » voisins
+    // (`donneesMinimales`), dont on ne fait varier que le champ `macro`.
+    const avec = briefEnMarkdown(
+      { ...donneesMinimales(), macro: [{ region: "Zone euro", valeur: 3.2, message: null }] },
+      now,
+    );
+    expect(avec).toContain("## Inflation (a/a)");
+    expect(avec).toContain("Zone euro");
+
+    const sans = briefEnMarkdown({ ...donneesMinimales(), macro: null }, now);
+    expect(sans).toContain("## Inflation (a/a)");
+    expect(sans.split("## Inflation (a/a)")[1]).toContain("_Section indisponible._");
   });
 });
 

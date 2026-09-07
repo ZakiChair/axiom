@@ -1,0 +1,69 @@
+import { describe, expect, it } from "vitest";
+import { filtrerFenetre, finDePeriode, periodeVersMs, trierChrono } from "./harmonisation";
+
+describe("periodeVersMs", () => {
+  it("convertit une période mensuelle SDMX en début de mois UTC", () => {
+    expect(periodeVersMs("2026-05")).toBe(Date.UTC(2026, 4, 1));
+    expect(periodeVersMs("2026-12")).toBe(Date.UTC(2026, 11, 1));
+  });
+
+  it("convertit une période trimestrielle en début de trimestre UTC", () => {
+    expect(periodeVersMs("2026-Q1")).toBe(Date.UTC(2026, 0, 1));
+    expect(periodeVersMs("2026-Q2")).toBe(Date.UTC(2026, 3, 1));
+    expect(periodeVersMs("2026-Q4")).toBe(Date.UTC(2026, 9, 1));
+  });
+
+  it("renvoie NaN sur une forme inconnue plutôt que de deviner", () => {
+    expect(periodeVersMs("2026")).toBeNaN();
+    expect(periodeVersMs("2026-13")).toBeNaN();
+    expect(periodeVersMs("2026-Q5")).toBeNaN();
+    expect(periodeVersMs("")).toBeNaN();
+  });
+});
+
+describe("finDePeriode", () => {
+  // Le cas de la spec : un PIB du T2 2026 ne doit pas être jugé périmé le
+  // 2026-09-06 sous prétexte que sa période COMMENCE le 1er avril.
+  it("date un trimestre à son dernier instant", () => {
+    const fin = finDePeriode(Date.UTC(2026, 3, 1), "Q");
+    expect(new Date(fin).toISOString().slice(0, 10)).toBe("2026-06-30");
+  });
+
+  it("date un mois à son dernier instant", () => {
+    const fin = finDePeriode(Date.UTC(2026, 6, 1), "M");
+    expect(new Date(fin).toISOString().slice(0, 10)).toBe("2026-07-31");
+  });
+
+  it("gère le passage d'année et les mois courts", () => {
+    expect(new Date(finDePeriode(Date.UTC(2026, 11, 1), "M")).toISOString().slice(0, 10)).toBe("2026-12-31");
+    expect(new Date(finDePeriode(Date.UTC(2024, 1, 1), "M")).toISOString().slice(0, 10)).toBe("2024-02-29");
+    expect(new Date(finDePeriode(Date.UTC(2026, 9, 1), "Q")).toISOString().slice(0, 10)).toBe("2026-12-31");
+  });
+});
+
+describe("trierChrono", () => {
+  // L'OCDE renvoie ses TIME_PERIOD DANS LE DÉSORDRE — vérifié en live le 2026-09-06 :
+  // ['2026-05', '2026-07', '2026-06']. Sans ce tri, la courbe zigzague.
+  it("trie par temps croissant sans muter l'entrée", () => {
+    const entree = [
+      { time: Date.UTC(2026, 4, 1), value: 1.2 },
+      { time: Date.UTC(2026, 6, 1), value: 0.5 },
+      { time: Date.UTC(2026, 5, 1), value: 1 },
+    ];
+    const copie = [...entree];
+    const sortie = trierChrono(entree);
+    expect(sortie.map((p) => p.value)).toEqual([1.2, 1, 0.5]);
+    expect(entree).toEqual(copie);
+  });
+});
+
+describe("filtrerFenetre", () => {
+  it("garde les points au-delà de la borne incluse", () => {
+    const serie = [
+      { time: Date.UTC(2019, 0, 1), value: 1 },
+      { time: Date.UTC(2020, 0, 1), value: 2 },
+      { time: Date.UTC(2021, 0, 1), value: 3 },
+    ];
+    expect(filtrerFenetre(serie, Date.UTC(2020, 0, 1)).map((p) => p.value)).toEqual([2, 3]);
+  });
+});

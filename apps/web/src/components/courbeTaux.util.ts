@@ -4,6 +4,7 @@
  * `SeasonalityWindow`) pour rester testables indépendamment.
  */
 import type { PointCourbe } from "./CourbeTaux";
+import type { MacroSeries } from "../data/macro/types";
 
 /**
  * `anneesDeMaturite` — conversion PURE d'un libellé de maturité de la courbe des taux
@@ -40,6 +41,53 @@ export function pointsDeCourbe(
     if (taux !== undefined && Number.isFinite(annees)) {
       pts.push({ maturite: m, anneesTri: annees, taux });
     }
+  }
+  return pts;
+}
+
+/** Mois abrégés FR — mêmes libellés que le reste du terminal. */
+const MOIS_ABREGES: readonly string[] = [
+  "janv.",
+  "févr.",
+  "mars",
+  "avr.",
+  "mai",
+  "juin",
+  "juil.",
+  "août",
+  "sept.",
+  "oct.",
+  "nov.",
+  "déc.",
+];
+
+/**
+ * Projette une série TEMPORELLE en points de `CourbeTaux`, dont l'axe X (`anneesTri`)
+ * accepte n'importe quel flottant : on y met des années décimales. Cela évite d'écrire
+ * un second composant canvas — au prix de deux contraintes portées par l'appelant :
+ *
+ *   1. UN GRAPHE = UNE FRÉQUENCE. L'infobulle de `CourbeTaux` apparie les points par
+ *      identité de chaîne sur `maturite` : mélanger du mensuel et du trimestriel
+ *      remplirait les colonnes de « — ».
+ *   2. UN GRAPHE = DES POURCENTAGES. L'axe Y de `CourbeTaux` formate en dur avec « % ».
+ *
+ * Fonction PURE.
+ */
+export function pointsDeSerieTemporelle(serie: MacroSeries): PointCourbe[] {
+  const pts: PointCourbe[] = [];
+  for (const p of serie) {
+    if (!Number.isFinite(p.time) || !Number.isFinite(p.value)) continue;
+    const d = new Date(p.time);
+    const annee = d.getUTCFullYear();
+    const mois = d.getUTCMonth();
+    // Années décimales : l'axe n'a besoin que de la monotonie et d'un espacement juste.
+    const anneesTri = annee + mois / 12;
+    const libelleMois = MOIS_ABREGES[mois] ?? String(mois + 1);
+    pts.push({
+      maturite: `${libelleMois} ${String(annee).slice(2)}`,
+      anneesTri,
+      taux: p.value,
+    });
   }
   return pts;
 }

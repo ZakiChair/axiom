@@ -135,9 +135,12 @@ rate of change) **(1997-2025)** ») et il est gelé à 2025-12.
 **(d) Eurostat : `value` vide.** Un HTTP 200 avec `value: {}` est un **échec de source**, pas une
 série vide. À traiter comme tel.
 
-**(e) ONS : format.** `months[]` avec `{date: "2026 JUL", value: "3.8"}` — mois en anglais,
-valeur en **chaîne**, `"NA"` à filtrer. 451 mois servis, ~122 Ko par série, **sans bornage amont
-possible** : tronquer à 2020-01 **avant** mise en cache. Les clés `quarters`/`years` sont ignorées.
+**(e) ONS : format.** `months[]` avec des entrées telles que
+`{date: "2026 JUL", year: "2026", month: "July", value: "3.8"}` — le parseur lit **`year` et
+`month`** (mois en anglais en toutes lettres), PAS le champ `date` : les deux champs existent
+dans la capture réelle mais `date` n'est jamais consommé. Valeur en **chaîne**, `"NA"` à filtrer.
+451 mois servis, ~122 Ko par série, **sans bornage amont possible** : tronquer à 2020-01 **avant**
+mise en cache. Les clés `quarters`/`years` sont ignorées.
 
 **(f) Japon : dataflow distinct.** Le CPI japonais n'est **pas** dans `DSD_PRICES@DF_PRICES_ALL` :
 il vit dans `DSD_PRICES_COICOP2018@DF_PRICES_C2018_ALL,1.0`. Le transport OCDE doit donc porter
@@ -163,13 +166,22 @@ Catalogue déclaratif + trois transports neufs (OCDE, Eurostat, ONS) + le fetche
   JP 1,9 % · CN 0,5 % · IN ≈ 4,57 %, tous sur 2026-07 sauf EZ.
 - `oecd.test.ts` **échoue** si l'on retire le tri chronologique (fixture aux `TIME_PERIOD`
   volontairement désordonnés).
-- `oecd.test.ts` : une réponse tronquée façon clé multi-pays est **détectée** (garde de complétude
-  sur le nombre de points attendus dans la fenêtre demandée).
+- `catalogueMacro.test.ts` : aucune clé OCDE du catalogue ne contient `+` (multi-pays) ni de
+  segment vide (jokerisée) — la troncature silencieuse (§3.3(a)) est **prévenue au catalogue**,
+  pas détectée au runtime. Préféré à une garde de complétude à l'exécution : la prévention
+  interdit la CAUSE plutôt que d'observer le SYMPTÔME, et une garde sur le nombre de points
+  attendus produirait des faux positifs face à des séries mensuelles amont irrégulières (points
+  manquants, révisions).
 - `eurostat.test.ts` : HTTP 200 à `value: {}` → échec de source, pas série vide.
 - Test 429 OCDE → statut `quota`, message dédié, **jamais** « source morte ».
 - `harmonisation.test.ts` : `finDePeriode("2026-04-01","Q") === 2026-06-30` ; un trimestriel
   T2 2026 au 2026-09-06 ressort **frais**, un mensuel 2026-02 ressort **périmé**.
-- La fenêtre `DATA` liste 4 sources : `macro:fred`, `macro:eurostat`, `macro:oecd`, `macro:ons`.
+- Après un chargement RÉSEAU (pas une lecture de cache), la fenêtre `DATA` liste 4 sources :
+  `macro:fred`, `macro:eurostat`, `macro:oecd`, `macro:ons`. Une lecture de cache (fenêtre de
+  24 h) alimente les séries sans toucher `healthStore` — pattern déjà en vigueur pour
+  `data/eco.ts` — donc un rechargement de page dans la fenêtre de cache montre les six courbes
+  sans qu'aucune source macro n'apparaisse dans `DATA`. Ceci est le comportement voulu, pas un
+  défaut à corriger.
 - Clé FRED absente → état `SansCle` et **5 courbes sur 6** restent tracées, aucune exception.
 - `git diff --stat shared/extapi-hosts.ts apps/daemon/ api/` → **vide**.
 
@@ -180,10 +192,15 @@ Section « Macro » dans `BRIEF` (lit le cache 24 h, ne fetche pas) ; `serieMacr
 pur, réutilisant les motifs déjà écrits dans `impactPublicationFred` (`data/eco.ts:152-173`) ;
 second bouton « série » sur la ligne `ECO`.
 
-**Critères :** `serieMacroDe("USD","Consumer Price Index m/m")` → `cpi-aa-us` ;
+**Critères :** `serieMacroDe("USD","Consumer Price Index m/m")` → `null` (le titre annonce une
+mesure m/m, pas le glissement annuel que sert le catalogue — aucun bouton rendu) ;
 `serieMacroDe("EUR","ZEW Economic Sentiment")` → `null` (aucun bouton rendu) ; un clic sur une
 ligne ECO ouvre l'onglet sur la bonne série ; `briefEnMarkdown` avec `macro: null` rend
 `_Section indisponible._`.
+Le matcher livré est une ALLOW-LIST ancrée sur `y/y` (pas une simple sous-chaîne « CPI ») :
+vérifié sur le flux ForexFactory live du 2026-09-07, un matcher permissif aurait mal aiguillé
+quatre des six lignes CPI réelles de la semaine (« German Final CPI m/m », « Core CPI y/y »,
+« Core CPI m/m », « CPI m/m ») vers la série y/y du catalogue.
 
 ### LOT 3 — Élargissement par configuration seule
 ~130 lignes. **Zéro nouveau transport, zéro nouvel hôte.** Seuls le catalogue et
@@ -223,7 +240,7 @@ sans son étiquette.
 | `apps/web/src/data/macro/eurostat.test.ts` | Mapping index→période, `value` vide, payload non filtré. | 75 |
 | `apps/web/src/data/macro/ons.ts` | Parse `months[]`, mois anglais, valeur chaîne, `"NA"` filtré, troncature à 2020-01 avant cache. | 70 |
 | `apps/web/src/data/macro/ons.test.ts` | Parse, `"NA"`, troncature. | 65 |
-| `apps/web/src/store/macroSeries.ts` | Store vanilla (patron `store/eco.ts`) : état par série, cache localStorage 24 h + garde de débit, `demanderSerie(id)` (patron `macroRatesViewStore.demanderCourbe()`), `healthStore`. | 130 |
+| `apps/web/src/store/macroSeries.ts` | Store vanilla (patron `store/eco.ts`) : état par série, cache localStorage 24 h + garde de débit, `healthStore`. Granularité livrée : `demanderIndicateur(indicateur)`, **par famille** et non par série — une famille (ex. « CPI a/a ») charge ses six régions ensemble, cohérent avec le `Segmente` unique de l'onglet qui sélectionne un indicateur, jamais une série isolée. | 130 |
 | `apps/web/src/data/macro/ecoVersSerie.ts` + `.test.ts` *(lot 2)* | Pont ECO → série, pur. | 60 + 55 |
 
 ### À modifier (~+210 lignes)
@@ -231,9 +248,9 @@ sans son étiquette.
 | Chemin | Modification | ~l |
 |---|---|---|
 | `apps/web/src/data/macro/fred.ts` | `createFredM2Provider(seriesId = "WM2NS", units?: string)` + `if (units !== undefined) params.set("units", units)`. Purement additif : aucun appelant existant ne passe `units`, l'URL de M2/NETLIQ reste bit-à-bit identique. **Ne pas renommer la fonction** (casserait `netliq.ts`). | +4 |
-| `apps/web/src/components/courbeTaux.util.ts` | `pointsDeSerieTemporelle(serie, frequence)` → `PointCourbe[]` (`anneesTri` = années décimales, `maturite` = étiquette « juil. 26 »). Seul domicile possible sans inverser les couches `data/` → `components/`. | +25 |
+| `apps/web/src/components/courbeTaux.util.ts` | `pointsDeSerieTemporelle(serie)` → `PointCourbe[]` (`anneesTri` = années décimales, `maturite` = étiquette « juil. 26 »). Seul domicile possible sans inverser les couches `data/` → `components/`. | +25 |
 | `apps/web/src/components/courbeTaux.util.test.ts` | Monotonie, étiquette, série vide. | +30 |
-| `apps/web/src/components/MacroRatesWindow.tsx` | 4ᵉ onglet « Indicateurs » : `Segmente` (indicateur) + `<CourbeTaux>` (pays en séries) + `TableTriable` + `BoutonRafraichir`. | +140 |
+| `apps/web/src/components/MacroRatesWindow.tsx` | 4ᵉ onglet « Indicateurs » : `Segmente` (indicateur) + `<CourbeTaux>` (pays en séries) + une liste de lignes par région (valeur, fraîcheur, motif si absente) + `BoutonRafraichir`. | +140 |
 | `apps/web/src/data/dataCockpit.ts` | 4 entrées dans `LIBELLES_SOURCE` : `macro:fred` (distinct de `eco:fred`), `macro:eurostat`, `macro:oecd`, `macro:ons`. **Une clé par hôte, jamais par série.** | +4 |
 | `apps/web/src/data/macro/index.ts` | Ré-exports. | +6 |
 | *Lot 2* : `data/brief.ts` (+ `macro: LigneMacroBrief[] \| null` dans `DonneesBrief`), `BriefWindow.tsx`, `EcoWindow.tsx` | Ponts. | +125 |
@@ -299,8 +316,8 @@ source défaillante ».
    au titre du **remplacement direct de sources défaillantes** : les miroirs FRED internationaux
    sont morts (§3.1). `EXCHANGE_IDS` reste à 9 (aucun adaptateur d'exchange concerné).
 
-À consigner dans `BUILD-CONTRACT.md` au même titre que les quatre exceptions précédentes
-(2026-08-25, 09-01, 09-02, 09-04).
+À consigner dans `BUILD-CONTRACT.md`, qui compte désormais **cinq** exceptions ACTÉES
+(2026-08-25, 09-01, 09-02, 09-04, et celle-ci le 09-06).
 
 ## 8. Ce qu'on ne fait pas, et pourquoi
 

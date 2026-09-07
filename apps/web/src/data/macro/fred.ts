@@ -102,9 +102,9 @@ export function createFredM2Provider(seriesId = "WM2NS", units?: string): IMacro
       // identique — verrouillé par le test « n'ajoute aucun paramètre units quand il est
       // omis » (fred.test.ts).
       // Le paramètre traverse les trois couches de proxy sans être filtré — VÉRIFIÉ le
-      // 2026-09-06 sur `appendApiKeyIfAbsent` (apps/daemon/src/proxy.ts:34-42, qui n'ajoute
+      // 2026-09-06 sur `appendApiKeyIfAbsent` (apps/daemon/src/proxy.ts, qui n'ajoute
       // que `api_key` et laisse le reste de la requête intact) et `originalQuery`
-      // (api/_policy.ts:227-245, qui recopie tous les paramètres sauf les deux métadonnées
+      // (api/_policy.ts, qui recopie tous les paramètres sauf les deux métadonnées
       // de route). Si l'une de ces deux fonctions change, revérifier ici.
       if (units !== undefined) params.set("units", units);
       // Clé personnelle → envoyée explicitement (le proxy la détecte et n'injecte

@@ -8,7 +8,14 @@
  *
  * Toute modification se fait ICI uniquement.
  */
+import { NBS_HOST, NBS_CHEMIN } from "./nbs-series.js";
+
 export const EXTAPI_HOSTS: readonly string[] = [
+  NBS_HOST, // Séries mensuelles officielles chinoises : POST de lecture validé
+  "www.stat-search.boj.or.jp", // Statistiques BOJ : seul endpoint public de lecture
+  "api.mospi.gov.in", // PLFS : chômage national indien, lecture GET
+  "www.matteoiacoviello.com", // GPR/TPU : deux documents convertis en JSON uniquement
+  "www.newyorkfed.org", // GSCPI : CSV officiel uniquement
   "nfs.faireconomy.media", // ForexFactory JSON (calendrier éco)
   "www.coindesk.com", // RSS news
   "cointelegraph.com", // RSS news
@@ -46,3 +53,18 @@ export const EXTAPI_HOSTS: readonly string[] = [
   // origine → proxy obligatoire. PortWatch ArcGIS (CORS *) reste en appel direct.
   "opensky-network.org",
 ];
+
+/** Hôtes spécialisés : aucun accès générique à leurs autres pages. */
+export const EXTAPI_HOTES_SPECIALISES: readonly string[] = ["www.matteoiacoviello.com", "www.newyorkfed.org", "www.stat-search.boj.or.jp", "api.mospi.gov.in", NBS_HOST];
+export function extapiCheminAutorise(hote: string, chemin: string): boolean {
+  if (hote === NBS_HOST) return chemin === NBS_CHEMIN;
+  if (hote === "www.stat-search.boj.or.jp") return chemin === "/api/v1/getDataCode";
+  if (hote === "api.mospi.gov.in") return chemin === "/api/plfs/getData";
+  if (hote === "www.matteoiacoviello.com") return chemin === "/gpr.htm" || chemin === "/tpu.htm";
+  if (hote === "www.newyorkfed.org") return chemin === "/medialibrary/research/interactives/data/gscpi/gscpi_interactive_data.csv";
+  return true;
+}
+export function sourceGeoExtraite(url: URL): "gpr" | "tpu" | null {
+  if (url.hostname !== "www.matteoiacoviello.com") return null;
+  return url.pathname === "/gpr.htm" ? "gpr" : url.pathname === "/tpu.htm" ? "tpu" : null;
+}

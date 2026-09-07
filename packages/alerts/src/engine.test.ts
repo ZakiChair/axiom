@@ -51,6 +51,24 @@ function ctxPrix(dernierPrix: number, prixPrecedent?: number): ContexteAlerte {
   return { maintenant: 0, dernierPrix, prixPrecedent };
 }
 
+describe("contrat de timeframe RVOL saisonnier", () => {
+  const candles = Array.from({ length: 24 * 10 }, (_, i) => ({ ...candle(i * 3_600_000, 100), volume: 10 }));
+  const condition: Condition = { type: "indicateur-seuil", indicateurId: "rvolSeasonal", params: {}, output: "rvol", comparateur: ">", valeur: 0.5 };
+  it("ne déclenche ni ne calibre un RVOL sans H1 explicite, y compris en composite", () => {
+    for (const timeframe of [undefined, "15m", "4h"] as const) {
+      for (const c of [condition, { type: "composite", conditions: [condition, { type: "prix-croise", niveau: 90, sens: "hausse" }] }] as Condition[]) {
+        const a = def(c, { timeframe, arme: true });
+        const result = evaluerAlertes([a], { maintenant: 10, dernierPrix: 100, candles });
+        expect(result.declenchements).toHaveLength(0);
+        expect(result.defs[0]).toBe(a);
+      }
+    }
+  });
+  it("évalue le RVOL H1 et laisse les autres indicateurs hérités inchangés", () => {
+    expect(evaluerAlertes([def(condition, { timeframe: "1h", arme: true })], { maintenant: 10, dernierPrix: 100, candles }).declenchements).toHaveLength(1);
+  });
+});
+
 describe("prix-croise — sens hausse", () => {
   it("calibre sans déclencher puis déclenche au franchissement montant, se ré-arme sous le niveau", () => {
     const { fires, defFinale } = piloter(def({ type: "prix-croise", niveau: 100, sens: "hausse" }), [

@@ -2,8 +2,8 @@
  * @axiom/indicators — strategy/premiumSpotPerp.ts
  *
  * Prime spot/perp EN VISUEL sur le chart maître (lot v2.1) : trace la ligne mark
- * price du perp (aux `mark`, chemin basisPct — 1 h LOCF Binance USDT-M, d'où le
- * rendu en marches d'escalier sous H1, assumé) et remplit un RUBAN entre le close
+ * price du perp (aux `mark`, même intervalle Binance USDT-M, appariement exact
+ * des bougies spot/perp, sans report entre barres) et remplit un RUBAN entre le close
  * spot et le mark sur chaque run contigu où |prime| ≥ seuil, avec
  * prime% = 100 × (mark − close) / close. Ruban --up quand le perp est AU-DESSUS
  * (contango), --down en dessous (discount). Un run se coupe sur : trou de donnée,

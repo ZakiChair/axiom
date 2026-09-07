@@ -24,10 +24,12 @@ import { fetchDvol } from "./deribit";
 import { fetchFearGreed, type FearGreed } from "./marketOverview";
 import { fetchToutesLesNews, type NewsItem } from "./news";
 import { resolveTickerSource } from "./ticker";
-import { seriesDeIndicateur } from "./macro/catalogueMacro";
+import { seriesDeIndicateur, INDICATEURS_MACRO, type IndicateurMacro, type RegionMacro, type UniteMacro } from "./macro/catalogueMacro";
 import { watchlistStore, type WatchlistSource } from "../store/watchlist";
 import { getSoSoValueKey } from "../store/sosovalue";
 import type { EtatSerie } from "../store/macroSeries";
+import type { HorizonMacro } from "../store/macroRatesView";
+import { formatPeriodeMacro, serieDansHorizon } from "./macro/presentation";
 import {
   debutJourLocalMs,
   pnlRealisePosition,
@@ -163,6 +165,10 @@ export interface SessionBrief {
 /** Une ligne macro du point marché : une zone, sa dernière valeur ou son motif d'absence. */
 export interface LigneMacroBrief {
   region: string;
+  indicateur?: string;
+  unite?: UniteMacro;
+  periode?: string | null;
+  perimetre?: string;
   /** Dernière valeur en %, ou `null` si indisponible. */
   valeur: number | null;
   /** Motif d'indisponibilité, ou `null`. Jamais de ligne muette. */
@@ -174,20 +180,33 @@ export interface LigneMacroBrief {
  * ne déclenche aucun fetch : le point marché est un instantané, pas un chargeur.
  * Rend `null` (section absente) plutôt qu'un tableau vide quand rien n'est chargé.
  */
-export function lignesMacroBrief(series: Record<string, EtatSerie>): LigneMacroBrief[] | null {
-  const definitions = seriesDeIndicateur("cpi-aa");
+export function lignesMacroBrief(series: Record<string, EtatSerie>, selection: { indicateur: IndicateurMacro; regions?: readonly RegionMacro[]; horizonAnnees?: HorizonMacro } = { indicateur: "cpi-aa" }): LigneMacroBrief[] | null {
+  const famille = INDICATEURS_MACRO.find(i => i.id === selection.indicateur)!;
+  const definitions = seriesDeIndicateur(selection.indicateur).filter(d => !selection.regions || selection.regions.includes(d.region));
   const lignes: LigneMacroBrief[] = [];
   for (const def of definitions) {
     const etat = series[def.id];
     if (etat === undefined || etat.statut === "idle") continue;
-    const dernier = etat.points[etat.points.length - 1];
+    const points = selection.horizonAnnees ? serieDansHorizon(etat.points, selection.horizonAnnees) : etat.points;
+    const dernier = points.at(-1);
     lignes.push({
-      region: def.libelleRegion,
+      region: def.libelleSerie ?? def.libelleRegion,
+      indicateur: famille.label,
+      unite: famille.unite,
+      perimetre: def.perimetre,
+      periode: dernier ? formatPeriodeMacro(dernier.time, def) : null,
       valeur: dernier?.value ?? null,
-      message: dernier === undefined ? (etat.message ?? "Indisponible.") : null,
+      message: dernier === undefined ? (etat.message ?? (etat.points.length > 0 ? "Aucune observation dans l’horizon sélectionné." : "Indisponible.")) : [dernier.qualite, etat.perime ? "Historique conservé · cache périmé" : null, etat.message].filter(Boolean).join(" · ") || null,
     });
   }
   return lignes.length > 0 ? lignes : null;
+}
+
+export function valeurMacroBrief(ligne: LigneMacroBrief): string {
+  if (ligne.valeur === null) return ligne.message ?? "indisponible";
+  const unite = ligne.unite ?? "%";
+  const valeur = unite === "%" ? formatPourcentage(ligne.valeur) : `${ligne.valeur.toLocaleString("fr-FR", { maximumFractionDigits: unite === "personnes" ? 0 : 2 })} ${unite}`;
+  return `${valeur}${ligne.periode ? ` · ${ligne.periode}` : ""}${ligne.perimetre ? ` · ${ligne.perimetre}` : ""}${ligne.message ? ` · ${ligne.message}` : ""}`;
 }
 
 /**
@@ -451,13 +470,13 @@ export function briefEnMarkdown(
     }
   l.push("");
 
-  l.push("## Inflation (a/a)");
+  l.push(`## ${d.macro?.[0]?.indicateur ?? "Macro — sélection"}`);
   if (d.macro === null) {
     l.push("_Section indisponible._");
   } else {
     for (const ligne of d.macro) {
       l.push(
-        `- **${ligne.region}** ${ligne.valeur !== null ? formatPourcentage(ligne.valeur) : (ligne.message ?? "indisponible")}`,
+        `- **${ligne.region}** ${valeurMacroBrief(ligne)}`,
       );
     }
   }

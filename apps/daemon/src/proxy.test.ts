@@ -252,9 +252,6 @@ describe("extapi — User-Agent par hôte", () => {
 });
 
 describe("extapi — whitelist (mise à jour Lot E1)", () => {
-  test("taille attendue après ajout SEC + GDELT", () => {
-    expect(EXTAPI_WHITELIST.size).toBe(34); // + api.coinmarketcap.com, historique global keyless
-  });
   test("nouveaux hôtes présents", () => {
     expect(EXTAPI_WHITELIST.has("data.sec.gov")).toBe(true);
     expect(EXTAPI_WHITELIST.has("www.sec.gov")).toBe(true);

@@ -45,3 +45,21 @@ describe("macroRatesViewStore", () => {
     expect(s.requeteIndicateurs).toBe(1);
   });
 });
+
+describe("sélection macro depuis ECO ou palette", () => {
+  it("ouvre la famille et région demandées sans perdre l'horizon", () => {
+    macroRatesViewStore.getState().selectionnerHorizon(10);
+    macroRatesViewStore.getState().demanderIndicateurs({ indicateur: "pib-aa", region: "CA" });
+    expect(macroRatesViewStore.getState()).toMatchObject({ indicateur: "pib-aa", regions: ["CA"], horizonAnnees: 10, requete: 0 });
+  });
+  it("normalise les zones du filtre en ordre stable, sans doublon", () => {
+    macroRatesViewStore.getState().selectionnerRegions(["CH", "US", "CH"]);
+    expect(macroRatesViewStore.getState().regions).toEqual(["US", "CH"]);
+  });
+});
+
+it("sélectionne US pour une famille US quand la sélection précédente l'exclut", () => {
+  macroRatesViewStore.getState().selectionnerRegions(["CA"]);
+  macroRatesViewStore.getState().selectionnerIndicateur("nfci");
+  expect(macroRatesViewStore.getState().regions).toEqual(["US"]);
+});

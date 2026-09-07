@@ -23,6 +23,8 @@ import { volumeProfileStore } from "../store/volumeProfile";
 import { revenueStore } from "../store/revenue";
 import { derivativesUiStore } from "../store/derivatives-ui";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
+import { windowManagerStore } from "../store/windowManager";
+import { macroRatesViewStore } from "../store/macroRatesView";
 import { settingsUiStore } from "../store/settings-ui";
 import { exportChartImage, clearAllOverlays } from "../chart/drawing";
 import { QUOTE_ASSETS } from "../data/symbol";
@@ -490,6 +492,18 @@ export function construireRegistre(): Commande[] {
     {
       id: "panneau:macro",
       mnemonique: "MACRO",
+      libelle: "Économie mondiale et indicateurs macro",
+      categorie: "panneau",
+      motsCles: ["macro", "inflation", "cpi", "ppi", "pib", "chomage", "economie", "pays", "croissance"],
+      apercu: "Ouvre l'évolution des statistiques économiques par zone",
+      action: () => {
+        macroRatesViewStore.getState().demanderIndicateurs();
+        windowManagerStore.getState().openWindow("macroRates");
+      },
+    },
+    {
+      id: "panneau:money",
+      mnemonique: "MONEY",
       libelle: "Masse monétaire (indicateurs)",
       categorie: "panneau",
       motsCles: ["macro", "masse monetaire", "liquidite", "m2", "stablecoins"],

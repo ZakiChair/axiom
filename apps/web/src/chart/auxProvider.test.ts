@@ -427,3 +427,40 @@ describe("AuxProvider — horodatage des buckets Coinalyze", () => {
     });
   });
 });
+
+describe("AuxProvider — mark apparié à la clôture du même intervalle", () => {
+  const H = 3_600_000;
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+  it("isole H15/H1/H4 et ne compare jamais une clôture horaire à un autre intervalle", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(24 * H);
+    const fetcher = vi.fn(async (url: string) => {
+      const interval = new URL(url, "https://axiom.test").searchParams.get("interval");
+      const pas = interval === "15m" ? H / 4 : interval === "4h" ? 4 * H : H;
+      return new Response(JSON.stringify([0, 1, 2].map((i) => [i * pas, "1", "1", "1", String(100 + pas / H + i), "0", (i + 1) * pas - 1])));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const provider = new AuxProvider();
+    for (const [timeframe, pas] of [["15m", H / 4], ["1h", H], ["4h", 4 * H]] as const) {
+      const req = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe, ids: ["mark" as const], candleTimes: [0, pas, 2 * pas] };
+      await new Promise<void>((resolve) => provider.getAligned(req, resolve));
+      expect(provider.getAligned(req, () => {})).toEqual({ status: "ready", aux: { mark: [100 + pas / H, 101 + pas / H, 102 + pas / H] } });
+    }
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it("la clôture manquante ne reprend pas un mark précédent et les pages partent du récent", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(4 * H);
+    const fetcher = vi.fn(async (_url: string) => new Response(JSON.stringify([[0, 1, 1, 1, 100, 0, H - 1], [2 * H, 1, 1, 1, 120, 0, 3 * H - 1]])));
+    vi.stubGlobal("fetch", fetcher);
+    const provider = new AuxProvider();
+    const req = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const, ids: ["mark" as const], candleTimes: [0, H, 2 * H, 3 * H] };
+    await new Promise<void>((resolve) => provider.getAligned(req, resolve));
+    expect(provider.getAligned(req, () => {})).toEqual({ status: "ready", aux: { mark: [100, undefined, 120, undefined] } });
+    const url = new URL(String(fetcher.mock.calls[0]?.[0]), "https://axiom.test");
+    expect(url.searchParams.get("endTime")).toBe(String(4 * H));
+    expect(url.searchParams.has("startTime")).toBe(false);
+  });
+});

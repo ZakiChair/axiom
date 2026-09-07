@@ -72,7 +72,10 @@ export function parseEurostatJsonStat(json: unknown): MacroSeries {
     if (!Number.isFinite(value)) continue;
     const time = periodeVersMs(periode);
     if (!Number.isFinite(time)) continue;
-    points.push({ time, value });
+    const statut = champ(champ(json, "status"), String(pos));
+    const noms: Record<string, string> = { e: "estimation", p: "provisoire", b: "rupture de série", i: "imputation", d: "définition différente" };
+    const qualite = typeof statut === "string" ? statut.split("").map((c) => noms[c] ?? c).join(", ") : undefined;
+    points.push({ time, value, ...(qualite ? { qualite } : {}) });
   }
   return trierChrono(points);
 }

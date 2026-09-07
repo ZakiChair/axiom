@@ -67,3 +67,36 @@ describe("filtrerFenetre", () => {
     expect(filtrerFenetre(serie, Date.UTC(2020, 0, 1)).map((p) => p.value)).toEqual([2, 3]);
   });
 });
+
+describe("transformations calendaires macro", () => {
+  it("ne confond pas douze observations et douze mois quand un mois manque", async () => {
+    const { variationPeriode } = await import("./harmonisation");
+    const points = [{ time: Date.UTC(2025, 0, 1), value: 100 }, { time: Date.UTC(2025, 2, 1), value: 110 }, { time: Date.UTC(2026, 0, 1), value: 120 }, { time: Date.UTC(2026, 1, 1), value: 130 }];
+    expect(variationPeriode(points, 12)).toEqual([{ time: Date.UTC(2026, 0, 1), value: 20 }]);
+  });
+  it("calcule le PIB a/a sur le même trimestre et garde une baisse", async () => {
+    const { variationPeriode } = await import("./harmonisation");
+    expect(variationPeriode([{ time: Date.UTC(2025, 3, 1), value: 200 }, { time: Date.UTC(2026, 3, 1), value: 190 }], 12)[0]?.value).toBeCloseTo(-5);
+  });
+  it("calcule le m/m exact et écarte un dénominateur nul", async () => {
+    const { variationPeriode } = await import("./harmonisation");
+    expect(variationPeriode([{ time: Date.UTC(2026, 0, 1), value: 0 }, { time: Date.UTC(2026, 1, 1), value: 100 }, { time: Date.UTC(2026, 2, 1), value: 102 }], 1)).toEqual([{ time: Date.UTC(2026, 2, 1), value: 2 }]);
+  });
+  it("date le chômage UK du mois central à la fin du trimestre glissant", () => {
+    expect(new Date(finDePeriode(Date.UTC(2026, 4, 1), "M", 1)).toISOString().slice(0, 10)).toBe("2026-06-30");
+  });
+  it("ne transforme pas les observations journalières et hebdomadaires en fin de mois", () => {
+    expect(finDePeriode(Date.UTC(2026, 8, 4), "D")).toBe(Date.UTC(2026, 8, 4));
+    expect(finDePeriode(Date.UTC(2026, 8, 5), "W")).toBe(Date.UTC(2026, 8, 5));
+  });
+  it("calcule SOFR–IORB uniquement aux dates communes, en points de base", async () => {
+    const { differenceDatesCommunes } = await import("./harmonisation");
+    expect(differenceDatesCommunes([{ time: 1, value: 4.1 }, { time: 2, value: 4.2 }], [{ time: 1, value: 4.3 }, { time: 3, value: 4.4 }], 100)).toEqual([{ time: 1, value: expect.closeTo(-20) }]);
+  });
+});
+
+it("garde le caractère estimé d'une base utilisée dans une variation annuelle", async () => {
+  const { variationPeriode } = await import("./harmonisation");
+  const points = [{ time: Date.UTC(2025, 0, 1), value: 100, qualite: "estimation" }, { time: Date.UTC(2026, 0, 1), value: 110 }];
+  expect(variationPeriode(points, 12)[0]?.qualite).toContain("estimation");
+});

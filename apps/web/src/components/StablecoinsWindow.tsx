@@ -3,7 +3,7 @@
  *
  * Quatre onglets :
  *   Vue d'ensemble — supply totale + Δ (impression nette), dominance (treemap + table).
- *   Impression    — historique de supply agrégée + barres de mint/burn net quotidien.
+ *   Variation     — historique de supply valorisée en USD + écarts quotidiens.
  *   Chaînes       — répartition de la supply par blockchain, historique par chaîne.
  *   Pegs          — écarts vs 1,00 $ en bps avec badges (pegs USD uniquement, cf. util).
  *
@@ -116,7 +116,7 @@ type Statut = "loading" | "ready" | "error";
 
 const ONGLETS: ReadonlyArray<{ id: Onglet; label: string }> = [
   { id: "vue", label: "Vue d'ensemble" },
-  { id: "impression", label: "Impression" },
+  { id: "impression", label: "Variation de l’offre" },
   { id: "chaines", label: "Chaînes" },
   { id: "pegs", label: "Pegs" },
 ];
@@ -324,7 +324,7 @@ const ID_USDT = "1";
 const ID_USDC = "2";
 
 /**
- * Chart combiné : ligne de supply agrégée (moitié haute) + barres de mint/burn net
+ * Chart combiné : ligne de supply agrégée (moitié haute) + barres de variation de stock
  * quotidien (moitié basse, zéro au centre). Impératif, tokens lus au dessin.
  * `domaine` fixe la fenêtre visible sur l'axe X (zoom/pan/préréglage).
  */
@@ -375,7 +375,7 @@ function dessinerImpression(canvas: HTMLCanvasElement, serie: PointSupply[], dom
     ctx.lineWidth = 1;
   }
 
-  // Moitié basse : barres Δ quotidien (mint vert, burn rouge), zéro au centre.
+  // Moitié basse : barres Δ quotidien (hausse verte, baisse rouge), zéro au centre.
   const deltas = serieImpressionQuotidienne(visibles);
   const bDelta = bornes(deltas.map((d) => Math.abs(d.delta)));
   if (bDelta && bDelta.max > 0) {
@@ -395,7 +395,7 @@ function dessinerImpression(canvas: HTMLCanvasElement, serie: PointSupply[], dom
   }
 
   // Repères de dates (début / milieu / fin du domaine) — sans eux, impossible de
-  // savoir à quel jour correspond une barre de mint/burn.
+  // savoir à quel jour correspond une barre de variation.
   ctx.fillStyle = cTextDim;
   ctx.font = POLICE_CANVAS;
   const yLabel = cssH - 3;
@@ -502,7 +502,7 @@ function VueImpression({
     });
   };
 
-  // Top mints / burns 7 j par émetteur (Δ absolu USD, pas %) — qui imprime, qui brûle.
+  // Hausses et baisses de stock sur 7 j par émetteur (Δ absolu USD, pas %).
   const avecDelta = emetteurs
     .filter((e) => e.mcap7jUsd !== null)
     .map((e) => ({ e, dUsd: e.mcapUsd - (e.mcap7jUsd ?? 0) }))
@@ -542,11 +542,11 @@ function VueImpression({
         )}
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <ListeDeltas titre="Top mints 7 j" lignes={mints} />
-        <ListeDeltas titre="Top burns 7 j" lignes={burns} />
+        <ListeDeltas titre="Plus fortes hausses 7 j" lignes={mints} />
+        <ListeDeltas titre="Plus fortes baisses 7 j" lignes={burns} />
       </div>
       <NoteSource>
-        Impression nette = Δ de supply circulante (mint − burn), points journaliers DefiLlama.
+        Variation du stock circulant valorisé en USD · observations journalières DefiLlama. Inclut les effets de change des stablecoins non USD et les changements de couverture ; ce n’est pas une mesure directe des mint/burn.
       </NoteSource>
     </div>
   );
@@ -939,7 +939,7 @@ export function StablecoinsWindow() {
 
   return (
     <>
-      <EnTeteFenetre mnemo="STBL" titre="Stablecoins" sousTitre="Supply, impression, dominance, pegs · DefiLlama" />
+      <EnTeteFenetre mnemo="STBL" titre="Stablecoins" sousTitre="Offre, variations en USD, dominance, pegs · DefiLlama" />
       <Onglets
         options={ONGLETS}
         actif={onglet}

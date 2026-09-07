@@ -13,7 +13,9 @@
  * Rappel BUILD-CONTRACT : le daemon ne proxifie JAMAIS le chemin chaud (les WS de
  * marché du front restent DIRECTS). Ici, uniquement du REST à quota, mis en cache.
  */
-import { EXTAPI_HOSTS } from "../../../shared/extapi-hosts";
+import { EXTAPI_HOSTS, extapiCheminAutorise, sourceGeoExtraite } from "../../../shared/extapi-hosts";
+import { extraireSeriesGeo } from "../../../shared/geo-series";
+import { NBS_HOST, NBS_CHEMIN, validerRequeteNbs } from "../../../shared/nbs-series";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { cleCache, ecrireCache, lireCache, ttlMsPourChemin } from "./cache";
@@ -208,9 +210,12 @@ export async function traiterProxy(
   }
 
   const postSosoAutorise = method === "POST" && route.prefix === "/sosoapi" && SOSO_POST_CHEMINS.has(chemin);
-  if (method !== "GET" && method !== "HEAD" && !postSosoAutorise) {
-    return jsonProxy({ erreur: "méthode non autorisée" }, req, 405, { allow: "GET, HEAD" });
+  const nbs = hoteOriginal === NBS_HOST;
+  const postNbsAutorise = nbs && method === "POST" && chemin === NBS_CHEMIN;
+  if ((nbs && !postNbsAutorise) || (method !== "GET" && method !== "HEAD" && !postSosoAutorise && !postNbsAutorise)) {
+    return jsonProxy({ erreur: "méthode non autorisée" }, req, 405, { allow: nbs ? "POST" : "GET, HEAD" });
   }
+  if (nbs && url.search !== "") return jsonProxy({ erreur: "paramètres NBS refusés" }, req, 400);
   if (method === "POST") {
     const ct = req.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
     if (ct !== "application/json") {
@@ -230,6 +235,11 @@ export async function traiterProxy(
       return jsonProxy({ erreur: statut === 413 ? "corps de requête trop volumineux" : "lecture de requête interrompue" }, req, statut);
     } finally {
       clearTimeout(minuteur);
+    }
+    if (nbs) {
+      let valide = false;
+      try { valide = validerRequeteNbs(JSON.parse(new TextDecoder().decode(corpsReq))); } catch { /* JSON invalide */ }
+      if (!valide) return jsonProxy({ erreur: "requête statistique NBS invalide" }, req, 400);
     }
   }
 
@@ -273,6 +283,7 @@ export async function traiterProxy(
       corps: corpsReq,
       entetesAmont,
       hotesAutorises: new Set([hoteOriginal]),
+      maxRedirections: nbs ? 0 : undefined,
       libelleTimeout: "proxy",
     });
   } catch (err) {
@@ -593,6 +604,7 @@ async function validerDestinationExtapi(
   if (url.username || url.password) throw new ErreurPolitiqueExtapi("identifiants dans l'URL refusés");
   if (url.port && url.port !== "443") throw new ErreurPolitiqueExtapi("port amont refusé (443 requis)");
   const hote = sansCrochets(url.hostname).toLowerCase();
+  if (!extapiCheminAutorise(hote, url.pathname)) throw new ErreurPolitiqueExtapi("chemin amont non autorisé");
   if (!hotesAutorises.has(hote)) throw new ErreurPolitiqueExtapi(`hôte de redirection non autorisé : ${hote}`);
   const adresses = isIP(hote) ? [hote] : await avecSignalExtapi(resoudreHote(hote), signal);
   if (adresses.length === 0) throw new ErreurPolitiqueExtapi(`résolution DNS vide : ${hote}`);
@@ -656,7 +668,10 @@ export async function recupererExtapiSecurise(
 ): Promise<ReponseAmontExtapi> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const resoudreHote = options.resoudreHote ?? resoudreHotePublic;
-  const tailleMax = Math.max(1, options.tailleMaxCorps ?? EXTAPI_TAILLE_MAX_CORPS);
+  const cibleInitiale = new URL(urlInitiale);
+  const geo = sourceGeoExtraite(cibleInitiale);
+  const tailleMax = Math.min(geo ? 16 * 1024 * 1024 : Number.POSITIVE_INFINITY,
+    Math.max(1, options.tailleMaxCorps ?? EXTAPI_TAILLE_MAX_CORPS));
   const maxRedirections = Math.max(0, options.maxRedirections ?? EXTAPI_MAX_REDIRECTIONS);
   const hotesAutorises = options.hotesAutorises ?? EXTAPI_WHITELIST;
   const methodeInitiale = (options.method ?? "GET").toUpperCase();
@@ -725,9 +740,21 @@ export async function recupererExtapiSecurise(
         if (method === "POST" && courante.pathname !== cheminPostAutorise) {
           throw new ErreurPolitiqueExtapi("chemin POST de redirection non autorisé");
         }
+        if (geo && (courante.hostname !== cibleInitiale.hostname || courante.pathname !== cibleInitiale.pathname)) {
+          throw new ErreurPolitiqueExtapi("chemin de redirection géopolitique non autorisé");
+        }
         continue;
       }
       const contentType = amont.headers.get("content-type") ?? "application/octet-stream";
+      if (geo) {
+        if (amont.status !== 200 || contentType.split(";", 1)[0]?.trim().toLowerCase() !== "text/html") {
+          await amont.body?.cancel().catch(() => {});
+          throw new ErreurPolitiqueExtapi("document géopolitique indisponible");
+        }
+        const brut = await lireCorpsExtapiBorne(amont, tailleMax, signal);
+        const series = extraireSeriesGeo(new TextDecoder().decode(brut), geo);
+        return { corps: new TextEncoder().encode(JSON.stringify(series)), contentType: "application/json; charset=utf-8", status: 200, headers: amont.headers };
+      }
       if (!mimeExtapiAutorise(contentType)) {
         await amont.body?.cancel().catch(() => {});
         throw new ErreurPolitiqueExtapi(`type MIME amont refusé : ${contentType.split(";", 1)[0] ?? "inconnu"}`);
@@ -886,11 +913,15 @@ export async function traiterExtapi(req: Request, url: URL, options: OptionsExta
     });
   }
   const parsed = parseExtapiChemin(url.pathname);
-  if (!parsed || !EXTAPI_WHITELIST.has(parsed.hote)) {
+  if (!parsed || !EXTAPI_WHITELIST.has(parsed.hote) || !extapiCheminAutorise(parsed.hote, parsed.reste)) {
     return new Response(
       JSON.stringify({ erreur: "hôte non autorisé", hote: parsed?.hote ?? null }),
       { status: 403, headers: { "content-type": "application/json; charset=utf-8", ...securite, ...cors } },
     );
+  }
+  if (parsed.hote === NBS_HOST) {
+    const prefix = `/extapi/${NBS_HOST}`;
+    return traiterProxy(req, url, { prefix, target: `https://${NBS_HOST}`, rewrite: (chemin) => chemin.slice(prefix.length) }, options);
   }
   if (req.method !== "GET") {
     return new Response(JSON.stringify({ erreur: "méthode non autorisée (GET uniquement)" }), {

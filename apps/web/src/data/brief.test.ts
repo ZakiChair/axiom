@@ -39,6 +39,26 @@ describe("deltaOiPct", () => {
 // ─────────────────────────── lignesMacroBrief ───────────────────────────
 
 describe("lignesMacroBrief", () => {
+  it("préserve le statut statistique et la fraîcheur dans le brief exporté", () => {
+    const ligne = lignesMacroBrief({ "cpi-aa-ez": { statut: "loading", points: [{ time: Date.UTC(2026, 7, 1), value: 2, qualite: "estimation" }], majTs: null, message: null, perime: true } })![0]!;
+    expect(ligne.perimetre).toBe("IPCH · zone euro 21 pays");
+    expect(ligne.message).toContain("estimation");
+    expect(ligne.message).toContain("cache périmé");
+  });
+  it("conserve les trimestres glissants britanniques et le filtre d’horizon", () => {
+    expect(lignesMacroBrief({ "chomage-uk": { statut: "ok", points: [{ time: Date.UTC(2026, 4, 1), value: 4.9 }], majTs: null, message: null } }, { indicateur: "chomage" })?.[0]?.periode).toBe("avr.–juin 2026");
+    const lignes = lignesMacroBrief({ "pib-aa-us": { statut: "ok", points: [{ time: Date.UTC(2000, 0, 1), value: 3 }], majTs: null, message: null } }, { indicateur: "pib-aa", horizonAnnees: 1 });
+    expect(lignes?.[0]).toMatchObject({ valeur: null, periode: null, message: "Aucune observation dans l’horizon sélectionné." });
+  });
+  it("suit la famille et les régions sélectionnées, avec unité et période propres", () => {
+    const lignes = lignesMacroBrief({
+      "cpi-aa-us": { statut: "ok", points: [{ time: Date.UTC(2026, 6, 1), value: 3.3 }], majTs: null, message: null },
+      "nfci-us": { statut: "ok", points: [{ time: Date.UTC(2026, 7, 28), value: -0.5 }], majTs: null, message: null },
+    }, { indicateur: "nfci", regions: ["US"] });
+    expect(lignes).toHaveLength(1);
+    expect(lignes![0]).toMatchObject({ valeur: -0.5, unite: "indice", periode: "28 août 2026", indicateur: "Conditions financières US" });
+    expect(lignesMacroBrief({ "nfci-us": { statut: "ok", points: [], majTs: null, message: null } }, { indicateur: "nfci", regions: ["CH"] })).toBeNull();
+  });
   it("rend une ligne par région, valeur du dernier point", () => {
     const lignes = lignesMacroBrief({
       "cpi-aa-us": { statut: "ok", points: [{ time: Date.UTC(2026, 6, 1), value: 3.3 }], majTs: null, message: null },
@@ -369,7 +389,7 @@ describe("briefEnMarkdown", () => {
     expect(md).toContain("Titre récent");
     expect(md).toContain("## Volatilité (DVOL)");
     expect(md).toContain("BTC · 48.3 %");
-    expect(md).toContain("## Inflation (a/a)");
+    expect(md).toContain("## Macro — sélection");
     expect(md).toContain("Zone euro");
   });
 
@@ -391,7 +411,7 @@ describe("briefEnMarkdown", () => {
     expect(md).toContain("## Watchlist (overnight)");
     expect(md).toContain("## Dérivés");
     expect(md).toContain("## Volatilité (DVOL)");
-    expect(md).toContain("## Inflation (a/a)");
+    expect(md).toContain("## Macro — sélection");
     // 7 sections réseau + session = 8
     expect((md.match(/_Section indisponible._/g) ?? []).length).toBe(8);
     expect(md).not.toContain("Fear & Greed :");
@@ -447,12 +467,12 @@ describe("briefEnMarkdown", () => {
       { ...donneesMinimales(), macro: [{ region: "Zone euro", valeur: 3.2, message: null }] },
       now,
     );
-    expect(avec).toContain("## Inflation (a/a)");
+    expect(avec).toContain("## Macro — sélection");
     expect(avec).toContain("Zone euro");
 
     const sans = briefEnMarkdown({ ...donneesMinimales(), macro: null }, now);
-    expect(sans).toContain("## Inflation (a/a)");
-    expect(sans.split("## Inflation (a/a)")[1]).toContain("_Section indisponible._");
+    expect(sans).toContain("## Macro — sélection");
+    expect(sans.split("## Macro — sélection")[1]).toContain("_Section indisponible._");
   });
 });
 

@@ -59,3 +59,9 @@ describe("parseEurostatJsonStat", () => {
     expect(() => parseEurostatJsonStat(sansTemps)).toThrow();
   });
 });
+
+it("conserve le statut d'estimation de l'IPCH flash", () => {
+  const serie = parseEurostatJsonStat({ ...JSONSTAT_EA, status: { "3": "e" } });
+  expect(serie.at(-1)?.qualite).toBe("estimation");
+  expect(serie[0]?.qualite).toBeUndefined();
+});

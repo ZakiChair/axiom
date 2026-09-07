@@ -5,7 +5,7 @@
  *   1. Capitalisation totale du marché crypto (CoinGecko)  → coingecko.ts
  *   2. Supply agrégée des stablecoins (DefiLlama)          → stablecoins.ts
  *   3. M2 / liquidité (US extensible, via FRED)            → fred.ts
- *   4. Catalogue d'indicateurs macro mondiaux (CPI a/a, six zones), ses
+ *   4. Catalogue d'indicateurs macro mondiaux (15 familles, huit zones), ses
  *      transports et son harmonisation temporelle
  *      → catalogueMacro.ts, chargerSerieMacro.ts, harmonisation.ts
  *

@@ -17,7 +17,7 @@
 import { createStore } from "zustand/vanilla";
 import { validerComposite, type AlertDef, type Condition, type Declenchement, type SensCroisement } from "@axiom/alerts";
 import type { ExchangeId, Timeframe } from "@axiom/types";
-import { daemonPret, kvPut } from "../data/daemon";
+import { daemonPret, kvPut, miroiterTravailPersonnel } from "../data/daemon";
 
 const STORAGE_KEY = "axiom:alerts:v1";
 /** Namespace + clé KV où les défs sont miroitées vers le daemon (Phase 2.E3). */
@@ -154,7 +154,9 @@ export function lireInitial(): Persiste {
 function sauvegarder(state: AlertsState): void {
   try {
     const payload: Persiste = { defs: state.defs, journal: state.journal };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    const valeur = JSON.stringify(payload);
+    localStorage.setItem(STORAGE_KEY, valeur);
+    miroiterTravailPersonnel(STORAGE_KEY, valeur);
   } catch {
     /* ignore */
   }

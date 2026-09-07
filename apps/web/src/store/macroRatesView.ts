@@ -25,8 +25,10 @@
  * l'utilisateur.
  */
 import { createStore } from "zustand/vanilla";
+import { ORDRE_REGIONS, seriesDeIndicateur, type IndicateurMacro, type RegionMacro } from "../data/macro/catalogueMacro";
 
 export type VueRendementsMode = "tableau" | "courbe";
+export type HorizonMacro = 1 | 5 | 10;
 
 export interface MacroRatesViewState {
   vue: VueRendementsMode;
@@ -34,8 +36,14 @@ export interface MacroRatesViewState {
   /** Demande explicite d'ouverture en vue courbe (commande CRVF). Annule une requête Indicateurs en attente. */
   demanderCourbe: () => void;
   requeteIndicateurs: number;
+  indicateur: IndicateurMacro;
+  regions: RegionMacro[];
+  horizonAnnees: HorizonMacro;
+  selectionnerIndicateur: (indicateur: IndicateurMacro) => void;
+  selectionnerRegions: (regions: readonly RegionMacro[]) => void;
+  selectionnerHorizon: (horizon: HorizonMacro) => void;
   /** Demande explicite d'ouverture sur l'onglet Indicateurs (bouton « série » d'ECO). Annule une requête CRVF en attente. */
-  demanderIndicateurs: () => void;
+  demanderIndicateurs: (selection?: { indicateur?: IndicateurMacro; region?: RegionMacro }) => void;
 }
 
 export const macroRatesViewStore = createStore<MacroRatesViewState>((set, get) => ({
@@ -43,5 +51,19 @@ export const macroRatesViewStore = createStore<MacroRatesViewState>((set, get) =
   requete: 0,
   demanderCourbe: () => set({ vue: "courbe", requete: get().requete + 1, requeteIndicateurs: 0 }),
   requeteIndicateurs: 0,
-  demanderIndicateurs: () => set({ requeteIndicateurs: get().requeteIndicateurs + 1, requete: 0 }),
+  indicateur: "cpi-aa",
+  regions: [...ORDRE_REGIONS],
+  horizonAnnees: 5,
+  selectionnerIndicateur: (indicateur) => {
+    const disponibles = ORDRE_REGIONS.filter((r) => seriesDeIndicateur(indicateur).some((d) => d.region === r));
+    set({ indicateur, ...(get().regions.some((r) => disponibles.includes(r)) ? {} : { regions: disponibles }) });
+  },
+  selectionnerRegions: (regions) => set({ regions: ORDRE_REGIONS.filter((r) => regions.includes(r)) }),
+  selectionnerHorizon: (horizonAnnees) => set({ horizonAnnees }),
+  demanderIndicateurs: (selection = {}) => set({
+    requeteIndicateurs: get().requeteIndicateurs + 1,
+    requete: 0,
+    ...(selection.indicateur ? { indicateur: selection.indicateur } : {}),
+    ...(selection.region ? { regions: [selection.region] } : {}),
+  }),
 }));

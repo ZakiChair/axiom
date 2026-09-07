@@ -112,3 +112,10 @@ describe("parseOecdSdmxJson", () => {
     expect(() => parseOecdSdmxJson({ data: { dataSets: [], structures: [] } }, "CHN")).toThrow();
   });
 });
+
+it("conserve l'attribut OBS_STATUS sans l'interpréter comme une valeur", () => {
+  const donnees = structuredClone(SDMX_CHN);
+  const structure = donnees.data.structures[0]! as Record<string, unknown>;
+  structure.attributes = { observation: [{ id: "OBS_STATUS", values: [{ id: "E", name: "Estimated value" }] }] };
+  expect(parseOecdSdmxJson(donnees, "CHN").at(-1)?.qualite).toBe("estimation");
+});

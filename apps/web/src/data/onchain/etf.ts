@@ -25,6 +25,7 @@
 import { healthStore } from "../../store/health";
 import { IS_VERCEL } from "../../lib/deployment";
 import { ecrireCache, estFrais, lireCache } from "./cache";
+import { nombreOnchain } from "./cohorts";
 
 export type ActifEtf = "btc" | "eth" | "sol";
 
@@ -59,9 +60,9 @@ export interface EtfResultat {
 /** Lit un champ `{ value }` SoSoValue (chaîne décimale) en nombre fini, sinon `undefined`. */
 function lireValeur(champ: unknown): number | undefined {
   if (champ === null || typeof champ !== "object") return undefined;
-  const v = (champ as { value?: unknown }).value;
-  const n = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(n) ? n : undefined;
+  const { value, status } = champ as { value?: unknown; status?: unknown };
+  if (status === "3" || status === 3) return undefined;
+  return nombreOnchain(value) ?? undefined;
 }
 
 /** Parse une réponse SoSoValue `currentEtfDataMetrics` en flux par émetteur. PURE, défensive. */
@@ -76,6 +77,7 @@ export function parseEtfFlows(json: unknown): EtfResultat {
 
   const parEmetteur: FluxEmetteur[] = [];
   for (const brut of list) {
+    if (!brut || typeof brut !== "object") continue;
     const it = brut as { ticker?: unknown; dailyNetInflow?: unknown };
     const emetteur = typeof it.ticker === "string" ? it.ticker : undefined;
     const flux = lireValeur(it.dailyNetInflow);

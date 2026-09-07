@@ -25,6 +25,7 @@
 import { ecrireCache, estFrais, lireCache } from "./cache";
 import { healthStore } from "../../store/health";
 import type { PointMetrique, SerieMetrique } from "./coinmetrics";
+import { nombreOnchain } from "./cohorts";
 
 const BASE = "/bgapi/v1";
 const SOURCE_SANTE = "bgeometrics";
@@ -60,7 +61,9 @@ export type BgMetriqueId =
   // Structure de marché : dominance BTC (%). GLOBAL (pas gaté sur l'actif affiché).
   | "btcDominance"
   // Flux ETF spot BTC (repli du panneau ETF) et hashrate réseau.
-  | "etfFlow" | "hashrate";
+  | "etfFlow" | "hashrate"
+  | "sthRealizedPrice" | "lthRealizedPrice" | "realizedCap" | "supplyProfit" | "supplyLoss"
+  | "exchangeNetflow" | "exchangeReserve";
 
 /** Définition d'une métrique BGeometrics (id interne, chemin API, champ JSON, libellé). */
 export interface DefMetriqueBg {
@@ -68,6 +71,7 @@ export interface DefMetriqueBg {
   chemin: string;
   champ: string;
   libelle: string;
+  abonnement?: boolean;
 }
 
 // Défs exportées individuellement (réutilisées par la couche aux du chart, cf. auxProvider).
@@ -96,6 +100,14 @@ export const BG_BTC_DOMINANCE: DefMetriqueBg = { id: "btcDominance", chemin: "bi
 // impossible). Format API PARTICULIER : `unixTs` et `etfFlow` sont des CHAÎNES, week-ends
 // absents (bourse fermée) → parseBgeometrics les gère déjà via Number() sans changement.
 export const BG_ETF_FLOW: DefMetriqueBg = { id: "etfFlow", chemin: "etf-flow-btc", champ: "etfFlow", libelle: "Flux ETF BTC" };
+// Endpoints frais vérifiés, distincts des anciens alias sth-realized-price/lth-realized-price.
+export const BG_STH_REALIZED_PRICE: DefMetriqueBg = { id: "sthRealizedPrice", chemin: "realized-price-sth", champ: "realizedPriceSth", libelle: "Prix réalisé STH" };
+export const BG_LTH_REALIZED_PRICE: DefMetriqueBg = { id: "lthRealizedPrice", chemin: "realized-price-lth", champ: "realizedPriceLth", libelle: "Prix réalisé LTH" };
+export const BG_REALIZED_CAP: DefMetriqueBg = { id: "realizedCap", chemin: "realized-cap", champ: "realizedCap", libelle: "Capitalisation réalisée" };
+export const BG_SUPPLY_PROFIT: DefMetriqueBg = { id: "supplyProfit", chemin: "supply-profit", champ: "supplyProfitBtc", libelle: "Offre en profit" };
+export const BG_SUPPLY_LOSS: DefMetriqueBg = { id: "supplyLoss", chemin: "supply-loss", champ: "supplyLossBtc", libelle: "Offre en perte" };
+export const BG_EXCHANGE_NETFLOW: DefMetriqueBg = { id: "exchangeNetflow", chemin: "exchange-netflow-btc", champ: "exchangeNetflowBtc", libelle: "Flux net exchanges", abonnement: true };
+export const BG_EXCHANGE_RESERVE: DefMetriqueBg = { id: "exchangeReserve", chemin: "exchange-reserve-btc", champ: "exchangeReserveBtc", libelle: "Réserves exchanges", abonnement: true };
 
 export const BG_METRIQUES: readonly DefMetriqueBg[] = [
   BG_MVRV,
@@ -117,20 +129,19 @@ export interface BgResultat {
  * PURE et tolérante : ignore null / "NaN" / valeurs non finies. `unixTs` en SECONDES.
  */
 export function parseBgeometrics(json: unknown, champ: string): SerieMetrique {
-  const points: PointMetrique[] = [];
+  const uniques = new Map<number, PointMetrique>();
   if (Array.isArray(json)) {
     for (const brut of json) {
+      if (!brut || typeof brut !== "object") continue;
       const row = brut as Record<string, unknown>;
-      const time = Number(row["unixTs"]) * 1000;
-      if (!Number.isFinite(time)) continue;
-      const v = row[champ];
-      if (v === null || v === undefined) continue;
-      const value = typeof v === "number" ? v : Number(v);
-      if (!Number.isFinite(value)) continue; // absorbe la chaîne "NaN"
-      points.push({ time, value });
+      const secondes = nombreOnchain(row["unixTs"]);
+      const value = nombreOnchain(row[champ]);
+      if (secondes === null || secondes <= 0 || !Number.isFinite(secondes * 1000) || value === null) continue;
+      const time = secondes * 1000;
+      uniques.set(time, { time, value });
     }
   }
-  points.sort((a, b) => a.time - b.time);
+  const points = [...uniques.values()].sort((a, b) => a.time - b.time);
   return { points, dernier: points.length > 0 ? points[points.length - 1] : undefined };
 }
 
@@ -162,14 +173,18 @@ function lireCompteur(actif: boolean): number {
 
 /** Incrémente le compteur de la fenêtre courante et renvoie la nouvelle valeur. */
 function incrementerCompteur(actif: boolean): number {
-  const cle = cleStockageQuota(actif);
   const n = lireCompteur(actif) + 1;
   try {
-    localStorage.setItem(cle, String(n));
+    for (const horaire of [true, false]) localStorage.setItem(cleStockageQuota(horaire), String(lireCompteur(horaire) + 1));
   } catch {
     /* best-effort */
   }
   return n;
+}
+
+let repriseBg = 0;
+function quotaBgAtteint(actif: boolean): boolean {
+  return Date.now() < repriseBg || lireCompteur(true) >= BG_LIMITE_HEURE || (!actif && lireCompteur(false) >= BG_LIMITE_JOUR);
 }
 
 /** Publie le quota courant (sans incrémenter) dans le store santé. */
@@ -199,18 +214,65 @@ function construireUrl(chemin: string): string {
  * dernier cache — même périmé — si le réseau échoue ; `null` si rien en cache.
  * N'effectue un appel réseau (et n'incrémente le compteur) QUE sur cache absent/périmé.
  */
-export async function fetchBgeometricMetrique(
+export interface BgChargement {
+  resultat: BgResultat | null;
+  statut: "pret" | "quota" | "abonnement" | "erreur" | "annule";
+  raison?: string;
+}
+interface TravailBg { promesse: Promise<BgChargement>; controleur: AbortController; consommateurs: number }
+const chargementsBg = new Map<string, TravailBg>();
+let fileBg: Promise<unknown> = Promise.resolve();
+
+/** Coalescence par métrique et accès ; ordonnancement commun aux consommateurs CHAIN/chart. */
+export function chargerBgeometricMetrique(def: DefMetriqueBg, cle?: string | null, signal?: AbortSignal): Promise<BgChargement> {
+  if (signal?.aborted) return Promise.resolve({ resultat: null, statut: "annule" });
+  const id = `${def.id}:${cle ?? ""}`; // en mémoire uniquement ; jamais journalisé ni persisté
+  let travail = chargementsBg.get(id);
+  if (!travail || travail.controleur.signal.aborted) {
+    const controleur = new AbortController();
+    travail = { controleur, consommateurs: 0, promesse: fileBg.then(() => chargerMetriqueBgUneFois(def, cle, controleur.signal)) };
+    const courant = travail;
+    fileBg = travail.promesse.catch(() => undefined);
+    chargementsBg.set(id, courant);
+    void travail.promesse.finally(() => { if (chargementsBg.get(id) === courant) chargementsBg.delete(id); });
+  }
+  const courant = travail;
+  courant.consommateurs++;
+  return new Promise((resolve) => {
+    let termine = false;
+    const finir = (r: BgChargement) => {
+      if (termine) return;
+      termine = true;
+      signal?.removeEventListener("abort", annuler);
+      courant.consommateurs--;
+      if (!courant.consommateurs) courant.controleur.abort();
+      resolve(r);
+    };
+    const annuler = () => finir({ resultat: null, statut: "annule" });
+    signal?.addEventListener("abort", annuler, { once: true });
+    void courant.promesse.then(finir);
+  });
+}
+
+async function chargerMetriqueBgUneFois(
   def: DefMetriqueBg,
   cle?: string | null,
   signal?: AbortSignal,
-): Promise<BgResultat | null> {
+): Promise<BgChargement> {
+  if (signal?.aborted) return { resultat: null, statut: "annule" };
   const cacheCle = `bg:${def.id}`;
   const cache = await lireCache<SerieMetrique>(cacheCle);
+  if (signal?.aborted) return { resultat: null, statut: "annule" };
+  const resultat = (serie: SerieMetrique, ts: number, perime = false): BgResultat => ({ serie, ts,
+    perime: perime || Date.now() - (serie.dernier?.time ?? 0) > 3 * 86_400_000 });
   if (estFrais(cache, BG_TTL_MS) && cache !== null) {
-    return { serie: cache.donnee, ts: cache.ts, perime: false };
+    return { resultat: resultat(cache.donnee, cache.ts), statut: "pret" };
   }
 
   const actif = cleActive(cle);
+  const repli = cache ? resultat(cache.donnee, cache.ts, true) : null;
+  if (def.abonnement && !actif) return { resultat: repli, statut: "abonnement", raison: "Réservé à un abonnement BGeometrics éligible ; ajoutez votre clé dans Réglages." };
+  if (quotaBgAtteint(actif)) return { resultat: repli, statut: "quota", raison: "Quota BGeometrics atteint ; nouvel essai à la prochaine fenêtre horaire/journalière." };
   const headers: Record<string, string> = {};
   // Clé personnelle envoyée `Bearer` (seul format reconnu) ; le repli .env est injecté
   // côté proxy `/bgapi` quand aucun Authorization n'est envoyé ici.
@@ -219,10 +281,20 @@ export async function fetchBgeometricMetrique(
   try {
     const compteur = incrementerCompteur(actif);
     publierQuotaBg(cle);
-    const res = await fetch(construireUrl(def.chemin), { headers, signal });
+    const res = await fetch(construireUrl(def.chemin), { headers, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) });
+    if (res.status === 403 && def.abonnement) return { resultat: repli, statut: "abonnement", raison: "Cette clé n'a pas accès aux données d'exchanges : abonnement BGeometrics requis." };
+    if (res.status === 429) {
+      const retry = res.headers.get("retry-after");
+      const secondes = retry !== null && /^\d+$/.test(retry) ? Number(retry) : NaN;
+      const date = retry !== null ? Date.parse(retry) : NaN;
+      const delai = Number.isFinite(secondes) ? secondes * 1000 : Number.isFinite(date) ? date - Date.now() : 3600_000;
+      repriseBg = Date.now() + Math.min(86_400_000, Math.max(1000, delai));
+      return { resultat: repli, statut: "quota", raison: "Quota BGeometrics refusé par le fournisseur (429) ; les demandes en attente sont suspendues." };
+    }
     if (!res.ok) throw new Error(`BGeometrics ${def.id} ${res.status}`);
     const json = (await res.json()) as unknown;
     const serie = parseBgeometrics(json, def.champ);
+    if (!serie.dernier) throw new Error(`BGeometrics ${def.id} : historique vide`);
     await ecrireCache(cacheCle, serie);
     healthStore
       .getState()
@@ -230,13 +302,17 @@ export async function fetchBgeometricMetrique(
         dernierMessageTs: Date.now(),
         quota: { utilise: compteur, limite: limiteQuota(actif), fenetre: actif ? "1heure" : "1jour" },
       });
-    return { serie, ts: Date.now(), perime: false };
+    return { resultat: resultat(serie, Date.now()), statut: "pret" };
   } catch (e) {
-    if (signal?.aborted) return cache ? { serie: cache.donnee, ts: cache.ts, perime: true } : null;
+    if (signal?.aborted) return { resultat: null, statut: "annule" };
     healthStore.getState().marquerErreur(SOURCE_SANTE, e instanceof Error ? e.message : "échec");
-    if (cache !== null) return { serie: cache.donnee, ts: cache.ts, perime: true };
-    return null;
+    return { resultat: repli, statut: "erreur", raison: e instanceof Error ? e.message : "BGeometrics injoignable" };
   }
+}
+
+/** Compatibilité des consommateurs existants ; le détail de dégradation est utilisé dans CHAIN. */
+export async function fetchBgeometricMetrique(def: DefMetriqueBg, cle?: string | null, signal?: AbortSignal): Promise<BgResultat | null> {
+  return (await chargerBgeometricMetrique(def, cle, signal)).resultat;
 }
 
 /** Récupère les 3 métriques de valorisation en parallèle (chacune indépendamment cachée). */
@@ -304,6 +380,7 @@ export async function fetchOiFuturesParExchange(
   }
 
   const actif = cleActive(cle);
+  if (quotaBgAtteint(actif)) return cache ? { ts: cache.ts, jours: cache.donnee } : null;
   const headers: Record<string, string> = {};
   if (cle) headers["Authorization"] = `Bearer ${cle}`;
 

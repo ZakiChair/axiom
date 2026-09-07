@@ -6,6 +6,7 @@
 import { Chargement, Vide } from "./ui";
 import { lignesEvenement, sousTitreSelection, titreSelection, type SelectionGlobe } from "./globeDetail.util";
 import type { EvenementDetail } from "../data/globe/types";
+import { PortWatchHistoryPanel } from "./PortWatchHistoryPanel";
 
 export function GlobeDetailPanel({ selection, evenements, onFermer }: {
   selection: SelectionGlobe;
@@ -24,7 +25,7 @@ export function GlobeDetailPanel({ selection, evenements, onFermer }: {
         <button type="button" onClick={onFermer} aria-label="Fermer le détail" className="ml-2 shrink-0 text-text-dim transition hover:text-text">✕</button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-        {selection.type !== "evenement" ? (
+        {selection.type === "chokepoint" ? <PortWatchHistoryPanel chokepoint={selection.chokepoint} /> : selection.type !== "evenement" ? (
           <Vide>Détail agrégé ci-dessus — pas de liste d'événements pour cette couche.</Vide>
         ) : evenements === "chargement" ? (
           <Chargement libelle="Détail de la zone…" />

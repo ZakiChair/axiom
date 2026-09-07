@@ -25,6 +25,7 @@ import type {
   ResultatBacktest,
   StrategieDef,
 } from "@axiom/backtest";
+import { raisonTimeframeBacktest } from "@axiom/backtest";
 import type { Commande } from "../commands/registry";
 import { marketStore } from "./market";
 import {
@@ -123,6 +124,9 @@ export const CATALOGUE_OPERANDES: OperandeSpec[] = [
   indLen("sma", "sma", "SMA", 20),
   indLen("atr", "atr", "ATR", 14),
   indLen("cci", "cci", "CCI", 20),
+  indFixe("rvolSeasonal", "rvol", "RVOL saisonnier H1 (heure UTC)", {}),
+  indLen("downsideVariance", "down", "Variance baissière (%)", 30),
+  indLen("downsideVariance", "up", "Variance haussière (%)", 30),
   indFixe("macd", "macd", "MACD (ligne)", { fast: 12, slow: 26, signal: 9 }),
   indFixe("macd", "signal", "MACD (signal)", { fast: 12, slow: 26, signal: 9 }),
   indFixe("macd", "hist", "MACD (hist)", { fast: 12, slow: 26, signal: 9 }),
@@ -661,6 +665,11 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
     terminateWorker();
     const runId = ++currentRunId;
     const s = get();
+    const incompatibilite = raisonTimeframeBacktest([...s.reglesEntree, ...s.reglesSortie], s.tf);
+    if (incompatibilite) {
+      set({ phase: "error", error: incompatibilite, resultat: null, note: null });
+      return;
+    }
     set({
       phase: "chargement",
       progress: { recuperees: 0, cible: 0 },
@@ -750,6 +759,7 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
         ...(s.risquePct !== null ? { risquePct: s.risquePct } : {}),
       };
       const params: ParamsBacktest = {
+        timeframe: s.tf,
         fraisPct: s.fraisPct,
         slippagePct: s.slippagePct,
         capitalInitial: s.capitalInitial,

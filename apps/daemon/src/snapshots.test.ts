@@ -206,6 +206,13 @@ describe("snapshotQuotidienSiNecessaire", () => {
 });
 
 describe("restaurerSnapshot", () => {
+  test.each(["pas JSON", "{}", "[null]"])("snapshot corrompu %s : ne purge pas le KV", (donnees) => {
+    const d = baseTest();
+    semerKv(d, "persist", "notes", "précieux", 10);
+    const info = d.query("INSERT INTO kv_snapshots (ts, donnees) VALUES (?, ?)").run(1000, donnees);
+    expect(restaurerSnapshot(d, Number(info.lastInsertRowid), 2000)).toBeNull();
+    expect(lireEntreesKv(d)).toEqual([{ namespace: "persist", cle: "notes", valeur: "précieux", majA: 10 }]);
+  });
   test("pré-snapshot auto + remplacement du KV, majA figé à l'instant de restauration", () => {
     const d = baseTest();
     // État initial → snapshot cible.

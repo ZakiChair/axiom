@@ -16,6 +16,12 @@ const binanceBtc: ContexteIndicateur = {
 };
 
 describe("raisonUnusableIndicateur", () => {
+  it("réserve le RVOL saisonnier à H1 avec de vrais volumes et refuse les intervalles mark absents", () => {
+    expect(raisonUnusableIndicateur(def("rvolSeasonal"), { ...binanceBtc, timeframe: "1h" })).toBeNull();
+    expect(raisonUnusableIndicateur(def("rvolSeasonal"), binanceBtc)).toContain("1h");
+    expect(raisonUnusableIndicateur(def("rvolSeasonal"), { ...binanceBtc, exchange: "synthetic", timeframe: "1h" })).toContain("Volume");
+    expect(raisonUnusableIndicateur(def("basisPct"), { ...binanceBtc, timeframe: "3M" })).toContain("intervalle");
+  });
   it("respecte le timeframe minimal", () => {
     expect(
       raisonUnusableIndicateur(def("openInterest"), { ...binanceBtc, timeframe: "15m" }),
@@ -190,8 +196,8 @@ describe("raisonUnusableIndicateur", () => {
     }
   });
 
-  it("accepte les 187 définitions sans lever", () => {
-    expect(INDICATORS).toHaveLength(187);
+  it("accepte les 189 définitions sans lever", () => {
+    expect(INDICATORS).toHaveLength(189);
     for (const indicateur of INDICATORS) {
       expect(() => raisonUnusableIndicateur(indicateur, binanceBtc), indicateur.id).not.toThrow();
     }

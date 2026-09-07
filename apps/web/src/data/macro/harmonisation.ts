@@ -10,7 +10,7 @@
 import type { MacroSeries } from "./types";
 
 /** Fréquence de publication d'une série du catalogue. */
-export type FrequenceMacro = "M" | "Q";
+export type FrequenceMacro = "D" | "W" | "M" | "Q";
 
 /**
  * Convertit une période SDMX / Eurostat en ms UTC du DÉBUT de période.
@@ -35,9 +35,10 @@ export function periodeVersMs(periode: string): number {
  * décalage de +1 mois (M) ou +3 mois (Q) : les mois courts et les bissextiles sont
  * gérés par le calendrier lui-même, sans table.
  */
-export function finDePeriode(debutMs: number, frequence: FrequenceMacro): number {
+export function finDePeriode(debutMs: number, frequence: FrequenceMacro, decalageFinMois = 0): number {
+  if (frequence === "D" || frequence === "W") return debutMs;
   const d = new Date(debutMs);
-  const moisSuivant = d.getUTCMonth() + (frequence === "Q" ? 3 : 1);
+  const moisSuivant = d.getUTCMonth() + (frequence === "Q" ? 3 : 1) + decalageFinMois;
   return Date.UTC(d.getUTCFullYear(), moisSuivant, 0, 23, 59, 59, 999);
 }
 
@@ -49,4 +50,27 @@ export function trierChrono(serie: MacroSeries): MacroSeries {
 /** Points dont l'horodatage est supérieur ou égal à `depuisMs`. */
 export function filtrerFenetre(serie: MacroSeries, depuisMs: number): MacroSeries {
   return serie.filter((p) => p.time >= depuisMs);
+}
+
+/** Variation contre le MÊME mois/trimestre antérieur, jamais contre le Nᵉ point. */
+export function variationPeriode(serie: MacroSeries, mois: 1 | 12): MacroSeries {
+  const parDate = new Map(serie.filter((p) => Number.isFinite(p.value)).map((p) => [p.time, p]));
+  return trierChrono(serie).flatMap((p) => {
+    const date = new Date(p.time);
+    const reference = parDate.get(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - mois, 1));
+    if (reference === undefined || reference.value <= 0 || !Number.isFinite(p.value)) return [];
+    const value = ((p.value - reference.value) * 100) / reference.value;
+    const qualite = [p.qualite, reference.qualite ? `base : ${reference.qualite}` : undefined].filter(Boolean).join(" ; ");
+    return Number.isFinite(value) ? [{ ...p, value, ...(qualite ? { qualite } : {}) }] : [];
+  });
+}
+
+/** Jointure exacte des observations : aucun report d'un taux du jour précédent. */
+export function differenceDatesCommunes(gauche: MacroSeries, droite: MacroSeries, facteur = 1): MacroSeries {
+  const parDate = new Map(droite.map((p) => [p.time, p.value]));
+  return trierChrono(gauche).flatMap((p) => {
+    const d = parDate.get(p.time);
+    const value = d === undefined ? NaN : (p.value - d) * facteur;
+    return Number.isFinite(value) ? [{ time: p.time, value }] : [];
+  });
 }

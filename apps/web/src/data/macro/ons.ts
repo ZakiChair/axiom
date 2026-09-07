@@ -6,15 +6,15 @@
  *
  * En-tête CORS : `Access-Control-Allow-Origin: *` (vérifié le 2026-09-06) → appel DIRECT.
  *
- * Format : un document par série, contenant `years`, `quarters` ET `months`. On ne lit
- * que `months`. Les valeurs sont des CHAÎNES (« 2.9 », parfois « NA ») et le mois est en
+ * Format : un document par série, contenant `years`, `quarters` ET `months`. On lit
+ * `months` ou `quarters` selon la fréquence. Les valeurs sont des CHAÎNES (« 2.9 », parfois « NA ») et le mois est en
  * anglais en toutes lettres dans le champ `month`.
  *
  * VOLUME : la série D7G7 sert 451 mois, ~119 Ko, et l'API n'accepte AUCUN bornage amont.
  * On tronque donc à la fenêtre demandée DÈS le parsing, avant toute mise en cache.
  */
 import type { MacroPoint, MacroSeries } from "./types";
-import { filtrerFenetre, trierChrono } from "./harmonisation";
+import { filtrerFenetre, trierChrono, type FrequenceMacro } from "./harmonisation";
 
 const BASE_ONS = "https://www.ons.gov.uk";
 
@@ -39,9 +39,10 @@ function champ(o: unknown, cle: string): unknown {
 }
 
 /** Convertit un document ONS en série, tronquée à `depuisMs`. PURE. */
-export function parseOnsTimeseries(json: unknown, depuisMs: number): MacroSeries {
-  const mois = champ(json, "months");
-  if (!Array.isArray(mois)) throw new Error("ONS : bloc « months » absent");
+export function parseOnsTimeseries(json: unknown, depuisMs: number, frequence: FrequenceMacro = "M"): MacroSeries {
+  const bloc = frequence === "Q" ? "quarters" : "months";
+  const mois = champ(json, bloc);
+  if (!Array.isArray(mois)) throw new Error(`ONS : bloc « ${bloc} » absent`);
 
   const points: MacroPoint[] = [];
   for (const entree of mois) {
@@ -49,7 +50,10 @@ export function parseOnsTimeseries(json: unknown, depuisMs: number): MacroSeries
     if (typeof bruteAnnee !== "string" || bruteAnnee.trim() === "") continue;
     const annee = Number(bruteAnnee);
     const nomMois = String(champ(entree, "month") ?? "").trim().toLowerCase();
-    const indexMois = MOIS_ANGLAIS[nomMois];
+    const trimestre = /^Q([1-4])$/.exec(String(champ(entree, "quarter") ?? ""));
+    const indexMois = frequence === "Q"
+      ? (trimestre ? (Number(trimestre[1]) - 1) * 3 : undefined)
+      : MOIS_ANGLAIS[nomMois];
     if (!Number.isInteger(annee) || indexMois === undefined) continue;
 
     // « NA » devient NaN et le point est écarté. Une valeur VIDE ou blanche est écartée
@@ -70,8 +74,9 @@ export async function chargerSerieOns(
   chemin: string,
   depuisMs: number,
   signal?: AbortSignal,
+  frequence: FrequenceMacro = "M",
 ): Promise<MacroSeries> {
   const res = await fetch(`${BASE_ONS}/${chemin}`, { signal });
   if (!res.ok) throw new Error(`ONS ${res.status} ${res.statusText}`);
-  return parseOnsTimeseries(await res.json(), depuisMs);
+  return parseOnsTimeseries(await res.json(), depuisMs, frequence);
 }

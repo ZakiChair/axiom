@@ -1,4 +1,5 @@
-import { EXTAPI_HOSTS } from "../shared/extapi-hosts.js";
+import { EXTAPI_HOSTS, extapiCheminAutorise } from "../shared/extapi-hosts.js";
+import { NBS_HOST, NBS_CHEMIN } from "../shared/nbs-series.js";
 
 export const PROXY_TIMEOUT_MS = 15_000;
 export const PROXY_MAX_REDIRECTS = 5;
@@ -142,6 +143,7 @@ export function proxyNavigationForbidden(headers: Headers): boolean {
 }
 
 export function proxyRedirectAllowed(url: URL, allowedHosts: ReadonlySet<string>): boolean {
+  if (!extapiCheminAutorise(url.hostname, url.pathname)) return false;
   return (
     url.protocol === "https:" &&
     url.username === "" &&
@@ -305,8 +307,8 @@ export function planProxyRequest(requestUrl: string, method: string, headers: He
     const slash = path.indexOf("/");
     host = (slash === -1 ? path : path.slice(0, slash)).toLowerCase();
     upstreamPath = slash === -1 ? "" : path.slice(slash + 1);
-    methods = ["GET", "HEAD"];
-    allowedRedirectHosts = EXTAPI_WHITELIST;
+    methods = host === NBS_HOST ? ["POST"] : ["GET", "HEAD"];
+    allowedRedirectHosts = host === NBS_HOST ? new Set([NBS_HOST]) : EXTAPI_WHITELIST;
     if (!proxyExtapiHostAllowed(host)) throw new ProxyPolicyError(403, "hôte proxy non autorisé");
   } else {
     const fixed = FIXED_ROUTES[route];
@@ -319,6 +321,10 @@ export function planProxyRequest(requestUrl: string, method: string, headers: He
     throw new ProxyPolicyError(405, "méthode proxy non autorisée", methods.join(", "));
   }
   if (normalizedMethod === "POST") {
+    const nbs = route === "extapi" && host === NBS_HOST && `/${upstreamPath}` === NBS_CHEMIN;
+    if (!nbs && (route !== "sosoapi" || upstreamPath !== "openapi/v2/etf/currentEtfDataMetrics")) {
+      throw new ProxyPolicyError(405, "POST non autorisé sur ce chemin", "GET, HEAD");
+    }
     const contentType = headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
     if (contentType !== "application/json") throw new ProxyPolicyError(415, "type de requête refusé");
   }
@@ -326,6 +332,7 @@ export function planProxyRequest(requestUrl: string, method: string, headers: He
   const target = new URL(`https://${host}`);
   target.pathname = upstreamPath.length > 0 ? `/${upstreamPath}` : "/";
   const query = originalQuery(source);
+  if (host === NBS_HOST && query.size > 0) throw new ProxyPolicyError(400, "paramètres NBS refusés");
   target.search = query.toString();
   if (!proxyRedirectAllowed(target, allowedRedirectHosts)) {
     throw new ProxyPolicyError(403, "destination proxy refusée");

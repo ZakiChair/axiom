@@ -1,7 +1,7 @@
 /**
  * Fenêtre « NETLIQ » — Liquidité nette de la Fed : WALCL − TGA − RRP sur la fenêtre choisie (1/2/5/10 ans)
  * (séries FRED quotidiennes/hebdo forward-fillées, cf. data/netliq.ts). Niveau de
- * réserves nettes du système : sa PENTE est le signal (impulsion/retrait de liquidité).
+ * proxy de liquidité Fed, distinct des réserves bancaires effectivement détenues.
  *
  * Présentation PURE (patron CbpremWindow) : l'état de données vit dans `netliqStore`
  * (vanilla) ; seul le survol est local à React. Tracé canvas en CSS px sous
@@ -407,7 +407,7 @@ export function NetliqWindow() {
       <EnTeteFenetre
         mnemo="NETLIQ"
         titre="Liquidité nette Fed"
-        sousTitre={`WALCL − TGA − RRP · réserves nettes du système sur ${fenetreAnnees} a`}
+        sousTitre={`WALCL − TGA − RRP · proxy de liquidité Fed sur ${fenetreAnnees} a`}
         actions={
           <div className="flex items-center gap-1.5">
             <Segmente
@@ -505,7 +505,7 @@ export function NetliqWindow() {
 
         <div className="mt-3 flex items-center justify-between">
           <NoteSource>
-            FRED · WALCL − TGA − RRP · quotidien · fenêtre {fenetreAnnees} a
+            FRED · WALCL/TGA hebdomadaires, RRP quotidien · valeurs reportées entre observations · fenêtre {fenetreAnnees} a
             {overlayBtc && btcSerie !== null && " · BTC superposé (échelle propre)"}
           </NoteSource>
           <Fraicheur loading={enCours} majTs={majTs} />

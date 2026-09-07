@@ -32,6 +32,11 @@ const dailyJson = {
 };
 
 describe("parseChokepoints", () => {
+  it("une valeur absente ne devient jamais zéro ni une coordonnée au golfe de Guinée", () => {
+    expect(parseChokepoints({ features: [{ attributes: { portid: "x", lat: null, lon: null } }] }, null)).toEqual([]);
+    const r = parseChokepoints(refJson, { features: [{ attributes: { portid: "chokepoint1", date: "2026-07-05", n_total: null, n_tanker: "", n_cargo: 0 } }] });
+    expect(r[0]).toMatchObject({ nNavires: null, nTankers: null, nCargos: 0 });
+  });
   it("croise référence et journalier en gardant le DERNIER point par chokepoint", () => {
     const cps = parseChokepoints(refJson, dailyJson);
     expect(cps).toHaveLength(4);

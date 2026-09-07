@@ -18,7 +18,7 @@
  */
 import { createStore } from "zustand/vanilla";
 import type { ExchangeId } from "@axiom/types";
-import { daemonPret, kvPut } from "../data/daemon";
+import { daemonPret, kvPut, miroiterTravailPersonnel } from "../data/daemon";
 // Import de TYPE uniquement (élidé au runtime) : la palette est câblée par l'intégrateur.
 import type { Commande } from "../commands/registry";
 import { windowManagerStore, mirrorOpenState } from "./windowManager";
@@ -273,7 +273,9 @@ function lireInitial(): Position[] {
 /** Écriture tolérante (quota / mode privé => silencieux : persistance best-effort). */
 function sauvegarder(positions: Position[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ positions }));
+    const valeur = JSON.stringify({ positions });
+    localStorage.setItem(STORAGE_KEY, valeur);
+    miroiterTravailPersonnel(STORAGE_KEY, valeur);
   } catch {
     /* ignore */
   }

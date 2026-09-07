@@ -45,6 +45,67 @@ function installMockLocalStorage(): Storage {
   return mock;
 }
 
+describe("création de snapshot et travail personnel", () => {
+  beforeEach(() => { vi.resetModules(); installMockLocalStorage(); });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); delete (globalThis as { localStorage?: Storage }).localStorage; });
+
+  it("fige les valeurs locales actuelles avant le POST, sans credentials, et supprime une ancienne clé absente", async () => {
+    const { creerSnapshot } = await import("./daemon");
+    localStorage.setItem("axiom:notes:v1", '{"notes":["récente"]}');
+    localStorage.setItem("axiom:expy:v1", "[]");
+    localStorage.setItem("axiom:api-key:fred", "personnelle");
+    const kv = new Map<string, unknown>([["axiom:drawings:v1", "ancien dessin"]]);
+    vi.stubGlobal("fetch", vi.fn(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/health")) return jsonResponse(HEALTH_COMPLET);
+      if (url.endsWith("/kv/snapshots")) {
+        expect(kv.get("axiom:notes:v1")).toBe('{"notes":["récente"]}');
+        expect(kv.get("axiom:expy:v1")).toBe("[]");
+        expect(kv.has("axiom:drawings:v1")).toBe(false);
+        expect(kv.has("axiom:api-key:fred")).toBe(false);
+        expect(kv.get("@perimetre:v1")).toContain("axiom:notes:v1");
+        return jsonResponse({ id: 8, ts: 10, taille: 100 });
+      }
+      const cle = decodeURIComponent(url.split("/").at(-1)!);
+      if (init?.method === "DELETE") kv.delete(cle);
+      else kv.set(cle, JSON.parse(String(init?.body)));
+      return jsonResponse({ majA: 10, supprime: true });
+    }));
+    expect(await creerSnapshot()).toEqual({ id: 8, ts: 10, taille: 100 });
+  });
+
+  it("n'annonce ni ne crée un snapshot si une écriture de l'état local échoue", async () => {
+    const { creerSnapshot } = await import("./daemon");
+    localStorage.setItem("axiom:notes:v1", "précieux");
+    let cree = false;
+    vi.stubGlobal("fetch", vi.fn(async (input) => {
+      if (String(input).endsWith("/health")) return jsonResponse(HEALTH_COMPLET);
+      if (String(input).endsWith("/kv/snapshots")) { cree = true; return jsonResponse({ id: 8, ts: 10, taille: 100 }); }
+      return jsonResponse({}, 507);
+    }));
+    expect(await creerSnapshot()).toBeNull();
+    expect(cree).toBe(false);
+  });
+
+  it("miroir personnel : coalesce la dernière valeur et refuse toute clé hors périmètre", async () => {
+    const daemon = await import("./daemon");
+    const kv = new Map<string, unknown>();
+    vi.stubGlobal("fetch", vi.fn(async (input, init) => {
+      if (String(input).endsWith("/health")) return jsonResponse(HEALTH_COMPLET);
+      kv.set(decodeURIComponent(String(input).split("/").at(-1)!), JSON.parse(String(init?.body)));
+      return jsonResponse({ majA: 10 });
+    }));
+    await daemon.detectDaemon("kv");
+    vi.useFakeTimers();
+    daemon.miroiterTravailPersonnel("axiom:notes:v1", "première");
+    daemon.miroiterTravailPersonnel("axiom:notes:v1", "dernière");
+    daemon.miroiterTravailPersonnel("axiom:api-key:fred", "personnelle");
+    await vi.advanceTimersByTimeAsync(450);
+    expect(kv.get("axiom:notes:v1")).toBe("dernière");
+    expect(kv.has("axiom:api-key:fred")).toBe(false);
+  });
+});
+
 describe("restaurerSnapshot (client daemon)", () => {
   let localStorage: Storage;
   let restaurerSnapshot: typeof import("./daemon").restaurerSnapshot;
@@ -58,6 +119,94 @@ describe("restaurerSnapshot (client daemon)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
+  it("snapshot vide : retire aussi les clés apparues depuis et préserve credentials et thème", async () => {
+    localStorage.setItem("axiom:watchlist:v1", "watchlist récente");
+    localStorage.setItem("axiom:indicatorSets:v1", "sets récents");
+    localStorage.setItem("axiom:notes:v1", "note récente");
+    localStorage.setItem("axiom:api-key:fred", "personnelle");
+    localStorage.setItem("axiom:theme:v1", "dark");
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(jsonResponse(HEALTH_COMPLET))
+      .mockResolvedValueOnce(jsonResponse({ entrees: [
+        { namespace: "persist", cle: "@perimetre:v1", valeur: ["axiom:notes:v1"] },
+      ] })));
+    expect(await restaurerSnapshot(1)).toBe(true);
+    expect(localStorage.getItem("axiom:watchlist:v1")).toBeNull();
+    expect(localStorage.getItem("axiom:indicatorSets:v1")).toBeNull();
+    expect(localStorage.getItem("axiom:notes:v1")).toBeNull();
+    expect(localStorage.getItem("axiom:api-key:fred")).toBe("personnelle");
+    expect(localStorage.getItem("axiom:theme:v1")).toBe("dark");
+  });
+
+  it("restaure les séries d'indicateurs et tout le travail personnel sérialisé", async () => {
+    const cles = ["indicatorSets", "notes", "drawings", "expy", "portfolio", "alerts", "workspaces"];
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(jsonResponse(HEALTH_COMPLET))
+      .mockResolvedValueOnce(jsonResponse({ entrees: cles.map((cle) => ({
+        namespace: "persist", cle: `axiom:${cle}:v1`, valeur: `ancien ${cle}`,
+      })) })));
+    expect(await restaurerSnapshot(1)).toBe(true);
+    for (const cle of cles) expect(localStorage.getItem(`axiom:${cle}:v1`)).toBe(`ancien ${cle}`);
+  });
+
+  it("quota local : résultat faux, état local antérieur conservé", async () => {
+    localStorage.setItem("axiom:chartState:v1", "ancien");
+    localStorage.setItem("axiom:notes:v1", "précieux");
+    const set = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = (key, value) => {
+      if (value === "trop gros") throw new DOMException("quota", "QuotaExceededError");
+      set(key, value);
+    };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(jsonResponse(HEALTH_COMPLET))
+      .mockResolvedValueOnce(jsonResponse({ entrees: [
+        { namespace: "persist", cle: "axiom:chartState:v1", valeur: "nouveau" },
+        { namespace: "persist", cle: "axiom:notes:v1", valeur: "trop gros" },
+      ] })));
+    expect(await restaurerSnapshot(1)).toBe(false);
+    expect(localStorage.getItem("axiom:chartState:v1")).toBe("ancien");
+    expect(localStorage.getItem("axiom:notes:v1")).toBe("précieux");
+  });
+
+  it("réponse mal formée : résultat faux sans purge locale", async () => {
+    localStorage.setItem("axiom:notes:v1", "précieux");
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(jsonResponse(HEALTH_COMPLET))
+      .mockResolvedValueOnce(jsonResponse({ ok: true })));
+    expect(await restaurerSnapshot(1)).toBe(false);
+    expect(localStorage.getItem("axiom:notes:v1")).toBe("précieux");
+  });
+
+  it("valeur couverte corrompue : ne l'interprète pas comme une suppression", async () => {
+    localStorage.setItem("axiom:chartState:v1", "précieux");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse(HEALTH_COMPLET))
+      .mockResolvedValueOnce(jsonResponse({ entrees: [{ namespace: "persist", cle: "axiom:chartState:v1", valeur: null }] })));
+    expect(await restaurerSnapshot(1)).toBe(false);
+    expect(localStorage.getItem("axiom:chartState:v1")).toBe("précieux");
+  });
+
+  it("attend une écriture déjà partie et bloque les miroirs pendant la restauration", async () => {
+    const daemon = await import("./daemon");
+    let finirPut!: (r: Response) => void;
+    let restaurations = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input, init) => {
+      if (String(input).endsWith("/health")) return jsonResponse(HEALTH_COMPLET);
+      if (init?.method === "PUT") return new Promise<Response>((resolve) => { finirPut = resolve; });
+      restaurations++;
+      return jsonResponse({ entrees: [] });
+    }));
+    await daemon.detectDaemon("kv");
+    const put = daemon.kvPut("persist", "axiom:notes:v1", "édition en vol");
+    const restore = restaurerSnapshot(1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(restaurations).toBe(0);
+    finirPut(jsonResponse({ majA: 10 }));
+    await put;
+    expect(await restore).toBe(true);
+    expect(await daemon.kvPut("persist", "axiom:notes:v1", "debounce ancien")).toBeNull();
+    expect(restaurations).toBe(1);
   });
 
   it("réécrit les entrées persist dans localStorage et ignore les autres namespaces", async () => {

@@ -17,8 +17,8 @@
  *    série), la première évaluation servant de calibrage.
  */
 
-import type { Candle } from "@axiom/types";
-import { computeIndicator, getIndicator } from "@axiom/indicators";
+import type { Candle, Timeframe } from "@axiom/types";
+import { computeIndicator, getIndicator, supportsIndicatorTimeframe } from "@axiom/indicators";
 import { decrireCondition } from "./describe";
 import type {
   AlertDef,
@@ -51,7 +51,7 @@ export function evaluerAlertes(defs: AlertDef[], ctx: ContexteAlerte): ResultatE
   let modifie = false;
 
   const out = defs.map((def) => {
-    if (!def.actif) return def;
+    if (!def.actif || !conditionSupporteTimeframe(def.condition, def.timeframe)) return def;
     const ev = evaluerUne(def, ctx);
     if (ev === null) return def; // condition non évaluable (données manquantes)
     if (!ev.fire && ev.arme === def.arme) return def; // aucun changement
@@ -72,6 +72,12 @@ export function evaluerAlertes(defs: AlertDef[], ctx: ContexteAlerte): ResultatE
   });
 
   return { declenchements, defs: out, modifie };
+}
+
+/** Une condition importée reste non évaluable si son indicateur exige un autre TF. */
+export function conditionSupporteTimeframe(c: Condition, timeframe: Timeframe | undefined): boolean {
+  if (c.type === "composite") return c.conditions.every((part) => conditionSupporteTimeframe(part, timeframe));
+  return c.type !== "indicateur-seuil" && c.type !== "indicateur-croisement" || supportsIndicatorTimeframe(c.indicateurId, timeframe);
 }
 
 /** Aiguille vers l'évaluateur de la condition. */

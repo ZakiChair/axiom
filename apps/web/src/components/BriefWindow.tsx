@@ -31,6 +31,7 @@ import { portfolioStore } from "../store/portfolio";
 import { alertsStore } from "../store/alerts";
 import { regimeStore } from "../store/regime";
 import { macroSeriesStore } from "../store/macroSeries";
+import { macroRatesViewStore } from "../store/macroRatesView";
 import { lectures } from "../data/lecturesBrief";
 import {
   assemblerSession,
@@ -276,7 +277,7 @@ export function BriefWindow() {
 
     // Inflation a/a (6 zones) : cache du store macro SEUL (aucun réseau déclenché ici,
     // pas d'abonnement — instantané via getState, comme VaR/COT). Rien en cache → absente.
-    setMacro(lignesMacroBrief(macroSeriesStore.getState().series));
+    setMacro(lignesMacroBrief(macroSeriesStore.getState().series, macroRatesViewStore.getState()));
   }, []);
 
   // Charge au montage/ouverture ; annule les fetchs en vol à la fermeture/démontage.

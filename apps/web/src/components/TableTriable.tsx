@@ -59,6 +59,7 @@ export function TableTriable<L>({
   vide,
   maxHauteur,
   surClicLigne,
+  ariaLabel,
 }: {
   colonnes: readonly ColonneTable<L>[];
   lignes: readonly L[];
@@ -68,6 +69,7 @@ export function TableTriable<L>({
   vide?: ReactNode;
   maxHauteur?: string;
   surClicLigne?: (ligne: L) => void;
+  ariaLabel?: string;
 }) {
   const grille = colonnes.map((c) => c.largeur ?? "1fr").join(" ");
   const alignementBouton = (c: ColonneTable<L>) =>
@@ -76,6 +78,7 @@ export function TableTriable<L>({
     c.align === "right" ? "text-right" : "text-left";
   const corps = (
     <div
+      role={ariaLabel ? "rowgroup" : undefined}
       style={maxHauteur !== undefined ? { maxHeight: maxHauteur } : undefined}
       className={maxHauteur !== undefined ? "overflow-y-auto" : undefined}
     >
@@ -85,6 +88,7 @@ export function TableTriable<L>({
         lignes.map((l) => (
           <div
             key={cle(l)}
+            role={ariaLabel ? "row" : undefined}
             onClick={surClicLigne !== undefined ? () => surClicLigne(l) : undefined}
             className={`grid items-center gap-2 border-b border-border/50 px-3 py-1.5 text-[11px] last:border-b-0 ${
               surClicLigne !== undefined ? "cursor-pointer hover:bg-surface" : ""
@@ -92,7 +96,7 @@ export function TableTriable<L>({
             style={{ gridTemplateColumns: grille }}
           >
             {colonnes.map((c) => (
-              <span key={c.id} className={`tabular-nums ${c.align === "right" ? "text-right" : ""}`}>
+              <span key={c.id} role={ariaLabel ? "cell" : undefined} className={`tabular-nums ${c.align === "right" ? "text-right" : ""}`}>
                 {c.rendu(l)}
               </span>
             ))}
@@ -102,8 +106,9 @@ export function TableTriable<L>({
     </div>
   );
   return (
-    <section className="rounded-md border border-border bg-bg">
+    <section role={ariaLabel ? "table" : undefined} aria-label={ariaLabel} className="rounded-md border border-border bg-bg">
       <div
+        role={ariaLabel ? "row" : undefined}
         className="grid items-center gap-2 border-b border-border px-3 py-1.5"
         style={{ gridTemplateColumns: grille }}
       >
@@ -121,6 +126,7 @@ export function TableTriable<L>({
           ) : (
             <span
               key={c.id}
+              role={ariaLabel ? "columnheader" : undefined}
               className={`text-[10px] uppercase tracking-wide text-text-dim ${alignementSpan(c)}`}
             >
               {c.label}

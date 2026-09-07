@@ -5,9 +5,9 @@
  * partagée entre la fenêtre — liste — et les marqueurs chart), les filtres d'affichage
  * (impact / pays) et la bascule des marqueurs verticaux. Éphémère : NON persisté
  * (comme derivatives-ui.ts). Les données lentes sont, elles, mises en cache par
- * data/eco.ts (localStorage 12 h) — pas ici.
+ * data/eco.ts (localStorage 5 min près des publications, 12 h sinon) — pas ici.
  *
- * Le calendrier étant BASSE fréquence (1 poll par session), il peut vivre dans le
+ * Le calendrier étant BASSE fréquence (cache cadencé aux publications), il peut vivre dans le
  * state (aucune écriture sur tick) sans enfreindre la règle « données HF hors React ».
  */
 import { createStore } from "zustand/vanilla";

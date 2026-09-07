@@ -20,10 +20,9 @@
  * `workspaces.applyContent`) et on POUSSE ce qui est plus récent côté local. Sans daemon :
  * aucun effet, repli localStorage intégral (zéro régression).
  *
- * Portée du dual-write : SEULES les 3 clés gérées ici (chart / watchlist / session). Le
- * thème (`store/theme`), les alertes (`store/alerts`) et les workspaces (`store/workspaces`)
- * gèrent leur propre persistance localStorage et ne sont PAS (encore) miroités au daemon —
- * ils restent locaux et ne transitent que par l'export/import de sauvegarde.
+ * Les six clés du terminal sont réconciliées ici. Le travail personnel est miroitée
+ * par ses fonctions de sauvegarde dans le même namespace, pour restauration explicite
+ * avec rechargement. Thème et credentials restent hors snapshots.
  *
  * Garde anti-écriture-en-boucle : on N'ÉCRIT PAS sur tick. Les souscriptions ne visent
  * que des stores BASSE fréquence ; celle du marketStore ne sauvegarde que si
@@ -40,8 +39,10 @@ import {
   daemonPret,
   detectDaemon,
   kvPut,
+  kvDelete,
   kvSnapshot,
   type SnapshotKv,
+  initialiserMiroirPersonnel,
 } from "../data/daemon";
 import { supportedTimeframesFor } from "../data/adapters";
 import { defaultParams, migratePersistedIndicators, indicatorsStore } from "./indicators";
@@ -71,6 +72,7 @@ import { windowManagerStore, WINDOW_REGISTRY, type EtatFenetre } from "./windowM
 import { syntheticsStore } from "./synthetics";
 import { estSymboleCapitalisation } from "../data/mcap";
 import { parseSyntheticSymbol } from "../data/synthetic";
+import { CLES_SNAPSHOT, remplacerClesLocales } from "../data/sauvegardeLocale";
 
 const CHART_KEY = "axiom:chartState:v1";
 const WINDOW_MANAGER_KEY = "axiom:windowManager:v1";
@@ -87,7 +89,7 @@ const AXIOM_PREFIX = "axiom:";
 
 /** Namespace KV du daemon où sont miroitées les clés gérées ici. */
 const NS_PERSIST = "persist";
-/** Clés localStorage doublées vers le daemon (les 3 gérées par ce module). */
+/** Clés localStorage réconciliées et hydratables à chaud par ce module. */
 const MANAGED_KEYS: readonly string[] = [CHART_KEY, WATCH_KEY, SESSION_KEY, WINDOW_MANAGER_KEY, SYNTHETIC_RECENTS_KEY, INDICATOR_SETS_KEY];
 /** Horodatages locaux (ms) par clé gérée — arbitre la réconciliation. NON miroité. */
 const META_KEY = "axiom:persistMeta:v1";
@@ -205,7 +207,11 @@ async function viderMiroir(cle: string): Promise<void> {
   const majA = await kvPut(NS_PERSIST, cle, valeur);
   if (majA !== null) {
     const meta = lireMeta();
-    meta[cle] = majA; // horodatage AUTORITAIRE du daemon → stabilise la comparaison
+    // Une réponse ancienne ne doit pas acquitter une édition locale plus récente.
+    // Elle reste prioritaire jusqu'à l'acquittement de sa propre écriture.
+    let toujoursActuelle = false;
+    try { toujoursActuelle = localStorage.getItem(cle) === valeur; } catch { /* stockage indisponible */ }
+    meta[cle] = toujoursActuelle ? majA : Math.max(meta[cle] ?? 0, majA + 1);
     ecrireMeta(meta);
   }
 }
@@ -624,6 +630,7 @@ export function enablePersistence(): void {
   // Persistance durable : réconciliation asynchrone avec le daemon (best-effort, silencieux
   // s'il est absent). Déclenchée APRÈS l'hydratation locale déjà faite (hydrateStores).
   void reconcilierDepuisDaemon();
+  void initialiserMiroirPersonnel();
 }
 
 // ─────────────────────────── Réconciliation daemon (Phase 2.E2) ───────────────────────────
@@ -640,7 +647,8 @@ const HYDRATE_PAR_CLE: Record<string, () => void> = {
 /** Décision de réconciliation pour une clé (adopter le daemon, ou lui pousser le local). */
 export type DecisionReconcile =
   | { cle: string; action: "adopter"; valeur: string; majA: number }
-  | { cle: string; action: "pousser"; valeur: string };
+  | { cle: string; action: "pousser"; valeur: string }
+  | { cle: string; action: "supprimer" };
 
 /**
  * Décide, pour chaque clé gérée, quoi faire au boot en comparant le snapshot du daemon,
@@ -666,6 +674,10 @@ export function decisionsReconcile(
 
     if (d && typeof d.valeur === "string") {
       if (localAbsent) {
+        if ((meta[cle] ?? 0) > d.majA) {
+          decisions.push({ cle, action: "supprimer" });
+          continue;
+        }
         decisions.push({ cle, action: "adopter", valeur: d.valeur, majA: d.majA });
         continue;
       }
@@ -710,6 +722,8 @@ async function reconcilierDepuisDaemon(): Promise<void> {
         setItemSafe(d.cle, d.valeur);
         meta[d.cle] = d.majA;
         aReappliquer.add(d.cle);
+      } else if (d.action === "supprimer") {
+        await kvDelete(NS_PERSIST, d.cle);
       } else {
         const majA = await kvPut(NS_PERSIST, d.cle, d.valeur);
         if (majA !== null) meta[d.cle] = majA;
@@ -771,9 +785,10 @@ export function exporterSauvegarde(): void {
 
 /**
  * Importe une sauvegarde JSON : valide la forme (objet clé→string, uniquement `axiom:*`),
- * PURGE les clés `axiom:*` existantes puis réécrit celles du fichier. Renvoie true si le
+ * Écrit les nouvelles valeurs avant de retirer les clés absentes, avec rollback en
+ * cas de quota. Renvoie true si le
  * remplacement a eu lieu (l'appelant recharge alors la page pour ré-hydrater proprement),
- * false si le contenu est invalide (aucune modification effectuée). Fonction pure des
+ * false si le contenu est invalide ou le stockage refuse le remplacement. Fonction pure des
  * effets d'UI : la confirmation utilisateur est gérée par l'appelant.
  */
 export function importerSauvegarde(json: string): boolean {
@@ -791,13 +806,13 @@ export function importerSauvegarde(json: string): boolean {
   }
   if (valides.length === 0) return false;
 
-  for (const k of axiomKeys()) localStorage.removeItem(k);
-  for (const [k, v] of valides) {
-    try {
-      localStorage.setItem(k, v);
-    } catch {
-      /* quota : best-effort */
-    }
+  try {
+    const valeurs = new Map(valides);
+    // L'import est une nouvelle décision locale, pas une édition datée du fichier.
+    const maintenant = Date.now();
+    valeurs.set(META_KEY, JSON.stringify(Object.fromEntries(CLES_SNAPSHOT.map((cle) => [cle, maintenant]))));
+    return remplacerClesLocales(valeurs, axiomKeys());
+  } catch {
+    return false;
   }
-  return true;
 }

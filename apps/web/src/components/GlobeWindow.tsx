@@ -54,6 +54,7 @@ import {
 } from "../lib/globeRender";
 import { noteConflits, noteEvenements, noteUkraine } from "./globeWindow.util";
 import { GlobeDetailPanel } from "./GlobeDetailPanel";
+import { GlobeIndicesPanel } from "./GlobeIndicesPanel";
 import type { SelectionGlobe } from "./globeDetail.util";
 import { Chargement, EnTeteFenetre, ErreurBloc, NoteSource, Unusable, Vide } from "./ui";
 
@@ -108,6 +109,7 @@ export function GlobeWindow() {
 
   // Panneau détail au clic (basse fréquence : UN setState par clic, jamais par frame).
   const [selection, setSelection] = useState<SelectionGlobe | null>(null); // null = panneau fermé
+  const [indicesOuverts, setIndicesOuverts] = useState(false);
   const [detailZone, setDetailZone] = useState<EvenementDetail[] | "chargement" | null>(null);
 
   // Tout ce que la boucle de dessin consomme vit dans des refs (AUCUN state par frame).
@@ -134,7 +136,7 @@ export function GlobeWindow() {
   //   sauf pendant un drag) puis redessine ; il se re-déclenche lui-même TANT QUE la
   //   rotation auto est active — sinon la boucle s'éteint et tout redraw est à la demande.
   useEffect(() => {
-    if (!open) return;
+    if (!open || indicesOuverts) return;
     const throttle = createRafThrottle(
       () => {
         const canvas = canvasRef.current;
@@ -197,7 +199,7 @@ export function GlobeWindow() {
       throttle.dispose();
       throttleRef.current = null;
     };
-  }, [open]);
+  }, [open, indicesOuverts]);
 
   // — Config basse fréquence → refs, puis redraw (relance la boucle si rotation activée). —
   useEffect(() => {
@@ -479,6 +481,7 @@ export function GlobeWindow() {
 
       {/* Bascules de couches + rotation (chips, pattern MacroRatesWindow). */}
       <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-1.5 text-[11px] text-text-dim">
+        <button type="button" aria-pressed={indicesOuverts} onClick={() => setIndicesOuverts(!indicesOuverts)} className="rounded border border-border px-2 py-0.5 text-text hover:text-accent">GPR · TPU · GSCPI</button>
         <button
           type="button"
           aria-pressed={couches.chokepoints}
@@ -590,6 +593,7 @@ export function GlobeWindow() {
         {selection !== null ? (
           <GlobeDetailPanel selection={selection} evenements={detailZone} onFermer={() => setSelection(null)} />
         ) : null}
+        {indicesOuverts && <GlobeIndicesPanel onFermer={() => setIndicesOuverts(false)} />}
       </div>
 
       {/* Fraîcheur des sources (note de bas de fenêtre standard). */}

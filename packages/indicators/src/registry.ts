@@ -103,6 +103,7 @@ import { ulcerIndex } from "./volatility/ulcerIndex";
 import { hurst } from "./volatility/hurst";
 import { vhf } from "./volatility/vhf";
 import { priceZScore } from "./volatility/priceZScore";
+import { downsideVariance } from "./volatility/downsideVariance";
 
 // — statistical —
 import { rollingCorrelation } from "./statistical/rollingCorrelation";
@@ -125,6 +126,7 @@ import { volumeOsc } from "./volume/volumeOsc";
 import { vwap } from "./volume/vwap";
 import { vwapBands } from "./volume/vwapBands";
 import { relativeVolume } from "./volume/relativeVolume";
+import { rvolSeasonal } from "./volume/rvolSeasonal";
 import { volumeZScore } from "./volume/volumeZScore";
 import { twiggsMf } from "./volume/twiggsMf";
 import { vfi } from "./volume/vfi";
@@ -317,6 +319,7 @@ export const INDICATORS: IndicatorDef[] = [
   hurst,
   vhf,
   priceZScore,
+  downsideVariance,
   // statistical (cross-asset vs symbole de référence)
   rollingCorrelation,
   betaRef,
@@ -337,6 +340,7 @@ export const INDICATORS: IndicatorDef[] = [
   vwap,
   vwapBands,
   relativeVolume,
+  rvolSeasonal,
   volumeZScore,
   twiggsMf,
   vfi,

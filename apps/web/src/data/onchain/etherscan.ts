@@ -50,13 +50,35 @@ export interface ReseauEth {
   gasFast: number | null;
 }
 
-export async function fetchReseauEth(cle: string | null, signal?: AbortSignal): Promise<ReseauEth | null> {
+export interface ResultatReseauEth {
+  donnee: ReseauEth;
+  observeLe: number | null;
+  recupereLe: number | null;
+  perime: boolean;
+  sourceEffective: string;
+  raison?: string;
+}
+
+interface CacheReseauEth {
+  donnee: ReseauEth;
+  observeLe: number | null;
+}
+
+function normaliserCache(donnee: CacheReseauEth | ReseauEth): CacheReseauEth {
+  if ("donnee" in donnee) return donnee;
+  return { donnee, observeLe: null };
+}
+
+export async function fetchReseauEthAvecMeta(cle: string | null, signal?: AbortSignal): Promise<ResultatReseauEth | null> {
   // Clé de cache distincte avec/sans clé API : un résultat PARTIEL obtenu sans clé
   // (mode dégradé 1 req/5 s) ne doit pas court-circuiter pendant 10 min le premier
   // fetch qui suit la saisie d'une clé dans les Réglages.
   const cacheCle = cle !== null ? "eth:reseau" : "eth:reseau:sanscle";
-  const cache = await lireCache<ReseauEth>(cacheCle);
-  if (estFrais(cache, TTL_MS) && cache !== null) return cache.donnee;
+  const cache = await lireCache<CacheReseauEth | ReseauEth>(cacheCle);
+  const cacheNormalise = cache === null ? null : normaliserCache(cache.donnee);
+  if (estFrais(cache, TTL_MS) && cache !== null && cacheNormalise !== null) {
+    return { donnee: cacheNormalise.donnee, observeLe: cacheNormalise.observeLe, recupereLe: cache.ts, perime: false, sourceEffective: "cache Etherscan" };
+  }
 
   try {
     // Clé des Réglages en query si présente (prioritaire) ; sinon le proxy injecte
@@ -85,20 +107,32 @@ export async function fetchReseauEth(cle: string | null, signal?: AbortSignal): 
     // d'une grille de « — » étiquetés live sans issue.
     const toutNul = resultat.supplyEth === null && resultat.nodeCount === null && resultat.gasSafe === null;
     if (toutNul) {
+      const raison = "réponse dégradée (clé absente/invalide ou rate-limit)";
       healthStore
         .getState()
-        .marquerErreur(SOURCE_SANTE, "réponse dégradée (clé absente/invalide ou rate-limit)");
-      return cache?.donnee ?? null;
+        .marquerErreur(SOURCE_SANTE, raison);
+      return cache !== null && cacheNormalise !== null
+        ? { donnee: cacheNormalise.donnee, observeLe: cacheNormalise.observeLe, recupereLe: cache.ts, perime: true, sourceEffective: "cache Etherscan", raison }
+        : null;
     }
+    const recupereLe = Date.now();
     healthStore.getState().setEtat(SOURCE_SANTE, "polling", { dernierMessageTs: Date.now() });
-    await ecrireCache(cacheCle, resultat);
-    return resultat;
+    await ecrireCache(cacheCle, { donnee: resultat, observeLe: recupereLe } satisfies CacheReseauEth);
+    return { donnee: resultat, observeLe: recupereLe, recupereLe, perime: false, sourceEffective: "Etherscan" };
   } catch (e) {
+    const raison = e instanceof Error ? e.message : "échec";
     if (!signal?.aborted) {
       healthStore
         .getState()
-        .marquerErreur(SOURCE_SANTE, e instanceof Error ? e.message : "échec");
+        .marquerErreur(SOURCE_SANTE, raison);
     }
-    return cache?.donnee ?? null;
+    return cache !== null && cacheNormalise !== null
+      ? { donnee: cacheNormalise.donnee, observeLe: cacheNormalise.observeLe, recupereLe: cache.ts, perime: true, sourceEffective: "cache Etherscan", raison }
+      : null;
   }
+}
+
+/** Signature historique conservée pour les consommateurs qui ne lisent que les valeurs. */
+export async function fetchReseauEth(cle: string | null, signal?: AbortSignal): Promise<ReseauEth | null> {
+  return (await fetchReseauEthAvecMeta(cle, signal))?.donnee ?? null;
 }

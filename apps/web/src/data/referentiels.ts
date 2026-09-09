@@ -17,21 +17,32 @@ const TTL_MS = 3_600_000;
 const H_MS = 3_600_000;
 const JOUR_MS = 86_400_000;
 
-const cache = new Map<string, { t: number; data: PointSerie[] }>();
+export interface HistoriqueReferentiel {
+  points: PointSerie[];
+  /** Instant de la dernière acquisition réussie, conservé lors des relectures cache. */
+  recupereLe: number | null;
+  sourceEffective: string;
+}
+
+const cache = new Map<string, { t: number; data: PointSerie[]; sourceEffective: string }>();
 
 /** Mémoïse les SUCCÈS 1 h ; un échec (null) n'est pas caché (retenté au tick suivant). */
 async function memo(
   cle: string,
+  sourceEffective: string,
   loader: () => Promise<PointSerie[] | null>,
-): Promise<PointSerie[] | null> {
+): Promise<HistoriqueReferentiel | null> {
   const hit = cache.get(cle);
   const now = Date.now();
-  if (hit !== undefined && now - hit.t < TTL_MS) return hit.data;
+  if (hit !== undefined && now - hit.t < TTL_MS) {
+    return { points: hit.data, recupereLe: hit.t, sourceEffective: `cache ${hit.sourceEffective}` };
+  }
   try {
     const data = await loader();
     if (data === null || data.length === 0) return null;
-    cache.set(cle, { t: now, data });
-    return data;
+    const recupereLe = Date.now();
+    cache.set(cle, { t: recupereLe, data, sourceEffective });
+    return { points: data, recupereLe, sourceEffective };
   } catch {
     return null;
   }
@@ -94,7 +105,11 @@ export function bucketsHoraires(
 
 /** Funding réglé Binance USDⓈ-M (~90 j à 8 h/règlement), v = fraction. */
 export async function histFunding(symbol: string): Promise<PointSerie[] | null> {
-  return memo(`funding:${symbol}`, async () => {
+  return (await histFundingAvecMeta(symbol))?.points ?? null;
+}
+
+export async function histFundingAvecMeta(symbol: string): Promise<HistoriqueReferentiel | null> {
+  return memo(`funding:${symbol}`, "Binance USDⓈ-M", async () => {
     const url = extUrl(
       "fapi.binance.com",
       `fapi/v1/fundingRate?symbol=${encodeURIComponent(futuresSymbol(symbol))}&limit=270`,
@@ -117,7 +132,11 @@ export async function histFunding(symbol: string): Promise<PointSerie[] | null> 
 
 /** Open Interest notionnel USD 1 h (~20 j), série brute. */
 export async function histOiUsd(symbol: string): Promise<PointSerie[] | null> {
-  return memo(`oiUsd:${symbol}`, async () => {
+  return (await histOiUsdAvecMeta(symbol))?.points ?? null;
+}
+
+export async function histOiUsdAvecMeta(symbol: string): Promise<HistoriqueReferentiel | null> {
+  return memo(`oiUsd:${symbol}`, "Binance USDⓈ-M", async () => {
     const pts = await fetchOpenInterestHist(symbol, "1h", 500);
     return pts.map((p) => ({ t: p.time, v: p.oiUsd }));
   });
@@ -158,7 +177,11 @@ export async function histOiUsdAvecRepli(
 
 /** DVOL Deribit quotidien 90 j (BTC/ETH seulement). */
 export async function histDvol(devise: "BTC" | "ETH"): Promise<PointSerie[] | null> {
-  return memo(`dvol:${devise}`, async () => {
+  return (await histDvolAvecMeta(devise))?.points ?? null;
+}
+
+export async function histDvolAvecMeta(devise: "BTC" | "ETH"): Promise<HistoriqueReferentiel | null> {
+  return memo(`dvol:${devise}`, "Deribit", async () => {
     const pts = await fetchDvolHistory(devise, 90);
     return pts.map((p) => ({ t: p.time, v: p.value }));
   });
@@ -182,7 +205,11 @@ export async function histDvol(devise: "BTC" | "ETH"): Promise<PointSerie[] | nu
  * SILENCIEUSEMENT et le percentile porterait sur moins d'histoire.
  */
 export async function histVolRealisee(symbol: string): Promise<PointSerie[] | null> {
-  return memo(`volRealisee:${symbol}`, async () => {
+  return (await histVolRealiseeAvecMeta(symbol))?.points ?? null;
+}
+
+export async function histVolRealiseeAvecMeta(symbol: string): Promise<HistoriqueReferentiel | null> {
+  return memo(`volRealisee:${symbol}`, "Binance spot", async () => {
     const def = getIndicator("rv");
     if (def === undefined) return null;
     const candles = await binanceAdapter.fetchKlines(symbol, "1d", { limit: 130 });
@@ -200,7 +227,11 @@ export async function histVolRealisee(symbol: string): Promise<PointSerie[] | nu
 
 /** Fear & Greed Alternative.me, 90 j, v = 0..100. */
 export async function histFearGreed(): Promise<PointSerie[] | null> {
-  return memo("fearGreed", async () => {
+  return (await histFearGreedAvecMeta())?.points ?? null;
+}
+
+export async function histFearGreedAvecMeta(): Promise<HistoriqueReferentiel | null> {
+  return memo("fearGreed", "Alternative.me", async () => {
     const pts = await fetchFearGreedHistory(90);
     return pts.map((p) => ({ t: p.time, v: p.value }));
   });
@@ -208,10 +239,10 @@ export async function histFearGreed(): Promise<PointSerie[] | null> {
 
 /** USD liquidé par heure (daemon 30 j). Null si daemon absent/sans capability. */
 export async function histLiqParHeure(symbol: string): Promise<PointSerie[] | null> {
-  return memo(`liqHeure:${symbol}`, async () => {
+  return (await memo(`liqHeure:${symbol}`, "daemon axiomd", async () => {
     const now = Date.now();
     const rows = await liquidationsGet(symbol, { depuis: now - 30 * JOUR_MS, limite: 100_000 });
     if (rows === null) return null;
     return bucketsHoraires(rows.map((r) => ({ t: r.t, usd: r.usd })), now);
-  });
+  }))?.points ?? null;
 }

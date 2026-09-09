@@ -3,6 +3,7 @@ import {
   _viderCacheReferentiels,
   bucketsHoraires,
   deltasFenetre,
+  histFundingAvecMeta,
   histOiUsdAvecRepli,
 } from "./referentiels";
 import type { PointSerie } from "../lib/referentiel";
@@ -18,6 +19,32 @@ vi.mock("./binanceFutures", () => ({
 }));
 
 const H = 3_600_000;
+
+describe("cache daté des référentiels", () => {
+  beforeEach(() => {
+    _viderCacheReferentiels();
+    vi.useFakeTimers();
+  });
+
+  it("conserve l'acquisition réseau initiale lors d'une relecture du cache quinze minutes plus tard", async () => {
+    const t0 = Date.UTC(2026, 8, 9, 10);
+    vi.setSystemTime(t0);
+    const fetcher = vi.fn(async () => Response.json([
+      { fundingTime: t0 - H, fundingRate: "0.0001" },
+      { fundingTime: t0, fundingRate: "0.0002" },
+    ]));
+    vi.stubGlobal("fetch", fetcher);
+    const premier = await histFundingAvecMeta("BTCUSDT");
+    vi.setSystemTime(t0 + 15 * 60_000);
+    const cache = await histFundingAvecMeta("BTCUSDT");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(premier?.recupereLe).toBe(t0);
+    expect(cache?.recupereLe).toBe(t0);
+    expect(cache?.sourceEffective).toBe("cache Binance USDⓈ-M");
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+});
 
 describe("deltasFenetre", () => {
   const base = 1_700_000_000_000;

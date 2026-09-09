@@ -10,13 +10,16 @@ import { agregerFluxEtfRegime, calculerRegime, type Regime } from "../data/regim
 import { cadenceObservee, referentiel, type OptionsReferentiel, type Referentiel, type PointSerie } from "../lib/referentiel";
 import {
   deltasFenetre,
-  histDvol,
-  histFearGreed,
-  histFunding,
-  histOiUsd,
-  histVolRealisee,
+  histDvolAvecMeta,
+  histFearGreedAvecMeta,
+  histFundingAvecMeta,
+  histOiUsdAvecMeta,
+  histVolRealiseeAvecMeta,
+  type HistoriqueReferentiel,
 } from "../data/referentiels";
-import { fetchEtfBrief, fetchWatchlistOvernight } from "../data/brief";
+import { fetchWatchlistOvernight } from "../data/brief";
+import { fetchEtfFlows, type ActifEtf, type EtfResultat } from "../data/onchain/etf";
+import { getSoSoValueKey } from "./sosovalue";
 import { chargerEmetteurs } from "../data/macro/stablecoinsDetail";
 import { chargerVerdictGammaBtc } from "../data/gammaRegime";
 import type { RegimeGamma } from "../data/gexDex";
@@ -96,6 +99,7 @@ function publierQualiteSerie(
   now: number,
   cadenceMs: number | null,
   ageMaxMs: number,
+  recupereLe: number | null,
   acces: QualiteMetrique["acces"] = "public",
 ): void {
   const points = serie?.filter((p) => Number.isFinite(p.t) && p.t <= now && Number.isFinite(p.v)) ?? [];
@@ -126,7 +130,7 @@ function publierQualiteSerie(
     sourceId,
     sourceEffective,
     observeLe,
-    recupereLe: now,
+    recupereLe,
     cadenceMs,
     couverture,
     estime: false,
@@ -138,14 +142,16 @@ function publierQualiteSerie(
 
 export async function rafraichirRegime(): Promise<void> {
   const now = Date.now();
+  const cleEtf = getSoSoValueKey();
+  const actifsEtf: readonly ActifEtf[] = ["btc", "eth", "sol"];
   const [tickers, fg, funding, dvol, volReal, oi, etf, emetteurs, gamma] = await Promise.allSettled([
     fetchWatchlistOvernight(["BTCUSDT", "ETHUSDT"]),
-    histFearGreed(),
-    histFunding("BTCUSDT"),
-    histDvol("BTC"),
-    histVolRealisee("BTCUSDT"),
-    histOiUsd("BTCUSDT"),
-    fetchEtfBrief(),
+    histFearGreedAvecMeta(),
+    histFundingAvecMeta("BTCUSDT"),
+    histDvolAvecMeta("BTC"),
+    histVolRealiseeAvecMeta("BTCUSDT"),
+    histOiUsdAvecMeta("BTCUSDT"),
+    Promise.all(actifsEtf.map((actif) => fetchEtfFlows(actif, cleEtf))),
     chargerEmetteurs(),
     // Verdict gamma dealer BTC : cache TTL 10 min → au plus 1 appel Deribit par cycle 15 min.
     chargerVerdictGammaBtc(now),
@@ -155,11 +161,16 @@ export async function rafraichirRegime(): Promise<void> {
   const nuitBtcPct = lignes.find((l) => l.symbole === "BTCUSDT")?.variation24h ?? null;
   const nuitEthPct = lignes.find((l) => l.symbole === "ETHUSDT")?.variation24h ?? null;
 
-  const serieFg = fg.status === "fulfilled" ? fg.value : null;
-  const serieFunding = funding.status === "fulfilled" ? funding.value : null;
-  const serieDvol = dvol.status === "fulfilled" ? dvol.value : null;
-  const serieVolReal = volReal.status === "fulfilled" ? volReal.value : null;
-  const serieOi = oi.status === "fulfilled" ? oi.value : null;
+  const histFg: HistoriqueReferentiel | null = fg.status === "fulfilled" ? fg.value : null;
+  const histFunding: HistoriqueReferentiel | null = funding.status === "fulfilled" ? funding.value : null;
+  const histDvol: HistoriqueReferentiel | null = dvol.status === "fulfilled" ? dvol.value : null;
+  const histVolReal: HistoriqueReferentiel | null = volReal.status === "fulfilled" ? volReal.value : null;
+  const histOi: HistoriqueReferentiel | null = oi.status === "fulfilled" ? oi.value : null;
+  const serieFg = histFg?.points ?? null;
+  const serieFunding = histFunding?.points ?? null;
+  const serieDvol = histDvol?.points ?? null;
+  const serieVolReal = histVolReal?.points ?? null;
+  const serieOi = histOi?.points ?? null;
 
   const fearGreedCourant = dernier(serieFg, now);
   const fearGreedRef =
@@ -193,7 +204,16 @@ export async function rafraichirRegime(): Promise<void> {
   const deltas24h = serieOi !== null ? deltasFenetre(serieOi, JOUR_MS) : [];
   const deltaOi24hPct = dernier(deltas24h.length > 0 ? deltas24h : null, now);
 
-  const etfRegime = etf.status === "fulfilled" ? agregerFluxEtfRegime(etf.value, now) : null;
+  const etfResultats: EtfResultat[] = etf.status === "fulfilled" ? etf.value : [];
+  const etfRegime = agregerFluxEtfRegime(
+    actifsEtf.map((actif, index) => ({
+      actif,
+      disponible: etfResultats[index]?.disponible ?? false,
+      jour: etfResultats[index]?.jour ?? null,
+      total: etfResultats[index]?.total ?? null,
+    })),
+    now,
+  );
 
   let impressionStablecoins7jPct: number | null = null;
   if (emetteurs.status === "fulfilled") {
@@ -233,14 +253,17 @@ export async function rafraichirRegime(): Promise<void> {
         : null,
   });
 
-  publierQualiteSerie("regime:fear-greed", "Fear & Greed", "alternative-me", "Alternative.me", serieFg, now, JOUR_MS, 3 * JOUR_MS);
-  publierQualiteSerie("regime:funding", "Funding BTC", "binance-futures", "Binance USDⓈ-M", serieFunding, now, cadenceFunding, Math.max(12 * 3_600_000, (cadenceFunding ?? 0) * 2));
-  publierQualiteSerie("regime:dvol", "DVOL BTC", "deribit", "Deribit", serieDvol, now, JOUR_MS, 3 * JOUR_MS);
-  publierQualiteSerie("regime:vol-realisee", "Vol réalisée BTC", "binance", "Binance spot", serieVolReal, now, JOUR_MS, 3 * JOUR_MS);
-  publierQualiteSerie("regime:oi", "Open Interest BTC", "binance-futures", "Binance USDⓈ-M", serieOi, now, 3_600_000, 3 * 3_600_000);
+  publierQualiteSerie("regime:fear-greed", "Fear & Greed", "alternative-me", histFg?.sourceEffective ?? "Alternative.me", serieFg, now, JOUR_MS, 3 * JOUR_MS, histFg?.recupereLe ?? null);
+  publierQualiteSerie("regime:funding", "Funding BTC", "binance-futures", histFunding?.sourceEffective ?? "Binance USDⓈ-M", serieFunding, now, cadenceFunding, Math.max(12 * 3_600_000, (cadenceFunding ?? 0) * 2), histFunding?.recupereLe ?? null);
+  publierQualiteSerie("regime:dvol", "DVOL BTC", "deribit", histDvol?.sourceEffective ?? "Deribit", serieDvol, now, JOUR_MS, 3 * JOUR_MS, histDvol?.recupereLe ?? null);
+  publierQualiteSerie("regime:vol-realisee", "Vol réalisée BTC", "binance", histVolReal?.sourceEffective ?? "Binance spot", serieVolReal, now, JOUR_MS, 3 * JOUR_MS, histVolReal?.recupereLe ?? null);
+  publierQualiteSerie("regime:oi", "Open Interest BTC", "binance-futures", histOi?.sourceEffective ?? "Binance USDⓈ-M", serieOi, now, 3_600_000, 3 * 3_600_000, histOi?.recupereLe ?? null);
   const etfCouverture = etfRegime === null ? null : { disponibles: etfRegime.couverture.presents.length, attendus: etfRegime.couverture.attendus.length };
+  const recupsEtf = etfResultats.map((r) => r.recupereLe).filter((t): t is number => t !== null && t !== undefined && Number.isFinite(t));
+  const recupereEtf = recupsEtf.length > 0 ? Math.max(...recupsEtf) : null;
+  const etfDepuisCache = etfResultats.some((r) => r.sourceEffective?.startsWith("cache "));
   enregistrerQualite("regime:etf", "Flux ETF spot", {
-    sourceId: "sosovalue", sourceEffective: "SoSoValue", observeLe: etfRegime === null ? null : Date.parse(`${etfRegime.jour}T00:00:00Z`), recupereLe: now,
+    sourceId: "sosovalue", sourceEffective: etfDepuisCache ? "cache SoSoValue" : "SoSoValue", observeLe: etfRegime === null ? null : Date.parse(`${etfRegime.jour}T00:00:00Z`), recupereLe: recupereEtf,
     cadenceMs: JOUR_MS, couverture: etfCouverture, estime: false, acces: etfRegime === null ? "indisponible" : "cle",
     statut: etfRegime === null ? "indisponible" : etfRegime.ageJours > 5 ? "perime" : etfCouverture?.disponibles === etfCouverture?.attendus ? "frais" : "partiel",
     ...(etfRegime === null ? { raison: "Aucune séance valide rapportée." } : etfCouverture?.disponibles !== etfCouverture?.attendus ? { raison: "Séance incomplète BTC/ETH/SOL." } : {}),

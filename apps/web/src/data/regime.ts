@@ -7,6 +7,7 @@
  */
 import { formatUsdSigne } from "../lib/format";
 import type { RegimeGamma } from "./gexDex";
+import { analyserJourEtf } from "./onchain/etf";
 
 export type ActifEtfRegime = "btc" | "eth" | "sol";
 const ACTIFS_ETF_REGIME: readonly ActifEtfRegime[] = ["btc", "eth", "sol"];
@@ -34,9 +35,9 @@ export function agregerFluxEtfRegime(
 ): FluxEtfRegime | null {
   const valides = lignes.flatMap((ligne) => {
     if (!ligne.disponible || ligne.total === null || !Number.isFinite(ligne.total) || ligne.jour === null) return [];
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(ligne.jour)) return [];
-    const time = Date.parse(`${ligne.jour}T00:00:00.000Z`);
-    if (!Number.isFinite(time) || new Date(time).toISOString().slice(0, 10) !== ligne.jour || time > now) return [];
+    const analyse = analyserJourEtf(ligne.jour, now);
+    if (analyse.observeLe === null) return [];
+    const time = analyse.observeLe;
     return [{ ...ligne, total: ligne.total, jour: ligne.jour, time }];
   });
   if (valides.length === 0) return null;

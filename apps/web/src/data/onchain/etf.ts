@@ -29,6 +29,24 @@ import { nombreOnchain } from "./cohorts";
 
 export type ActifEtf = "btc" | "eth" | "sol";
 
+export interface AnalyseJourEtf {
+  observeLe: number | null;
+  ageJours: number | null;
+  raison?: string;
+}
+
+/** Validation calendaire UTC commune aux lectures ETF du régime et de CHAIN. */
+export function analyserJourEtf(jour: string | null | undefined, now: number): AnalyseJourEtf {
+  if (jour === null || jour === undefined) return { observeLe: null, ageJours: null, raison: "Date de séance absente." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(jour)) return { observeLe: null, ageJours: null, raison: "Date de séance invalide." };
+  const observeLe = Date.parse(`${jour}T00:00:00.000Z`);
+  if (!Number.isFinite(observeLe) || new Date(observeLe).toISOString().slice(0, 10) !== jour) {
+    return { observeLe: null, ageJours: null, raison: "Date de séance invalide." };
+  }
+  if (observeLe > now) return { observeLe: null, ageJours: null, raison: "Date de séance future rejetée." };
+  return { observeLe, ageJours: Math.floor((now - observeLe) / 86_400_000) };
+}
+
 const BASE = "/sosoapi/openapi/v2/etf/currentEtfDataMetrics";
 export const ETF_TTL_MS = 6 * 60 * 60 * 1000;
 /** Identifiant dans le panneau « Santé sources » (même registre que coinmetrics/mempool). */
@@ -55,6 +73,9 @@ export interface EtfResultat {
   jour?: string;
   parEmetteur?: FluxEmetteur[];
   total?: number;
+  /** Acquisition de cette valeur ; inchangée lors d'une relecture cache. */
+  recupereLe?: number | null;
+  sourceEffective?: string;
 }
 
 /** Lit un champ `{ value }` SoSoValue (chaîne décimale) en nombre fini, sinon `undefined`. */
@@ -122,7 +143,9 @@ export async function fetchEtfFlows(
   }
   const cacheCle = `etf:${actif}`;
   const cache = await lireCache<EtfResultat>(cacheCle);
-  if (estFrais(cache, ETF_TTL_MS) && cache !== null) return cache.donnee;
+  if (estFrais(cache, ETF_TTL_MS) && cache !== null) {
+    return { ...cache.donnee, recupereLe: cache.donnee.recupereLe ?? cache.ts, sourceEffective: "cache SoSoValue" };
+  }
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (cle !== null) headers["x-soso-api-key"] = cle;
@@ -136,14 +159,14 @@ export async function fetchEtfFlows(
       signal,
     });
     if (res.ok) {
-      resultat = parseEtfFlows((await res.json()) as unknown);
+      resultat = { ...parseEtfFlows((await res.json()) as unknown), recupereLe: Date.now(), sourceEffective: "SoSoValue" };
     } else if (res.status === 401 || res.status === 403) {
-      resultat = { disponible: false, raison: RAISON_CLE_SOSOVALUE };
+      resultat = { disponible: false, raison: RAISON_CLE_SOSOVALUE, recupereLe: Date.now(), sourceEffective: "SoSoValue" };
     } else {
-      resultat = { disponible: false, raison: `SoSoValue indisponible (HTTP ${res.status}).` };
+      resultat = { disponible: false, raison: `SoSoValue indisponible (HTTP ${res.status}).`, recupereLe: Date.now(), sourceEffective: "SoSoValue" };
     }
   } catch {
-    resultat = { disponible: false, raison: "SoSoValue injoignable." };
+    resultat = { disponible: false, raison: "SoSoValue injoignable.", recupereLe: null, sourceEffective: "SoSoValue" };
   }
   // Ne jamais mettre en cache un échec (429/HTTP/réseau) : un rate-limit transitoire
   // ne doit pas geler la donnée à "indisponible" pendant tout le TTL de 6 h.

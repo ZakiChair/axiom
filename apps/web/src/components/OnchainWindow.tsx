@@ -52,7 +52,7 @@ import {
   type ActifEtf,
   type EtfResultat,
 } from "../data/onchain/etf";
-import { fetchReseauEth, type ReseauEth } from "../data/onchain/etherscan";
+import { fetchReseauEthAvecMeta, type ReseauEth, type ResultatReseauEth } from "../data/onchain/etherscan";
 import { fetchReseauSol, type ReseauSol } from "../data/onchain/solana";
 import { creerChargeurChain, type SourceChain } from "../data/onchain/chargementChain";
 import { enregistrerQualite, qualiteMetriquesStore } from "../store/qualiteMetriques";
@@ -85,6 +85,7 @@ import {
   Vide,
 } from "./ui";
 import { QualiteMetrique } from "./QualiteMetrique";
+import { qualitesCoinMetrics, traiterPublicationEtfChain, type ValeurPublicationEtf } from "../data/onchain/qualiteChain";
 import {
   domainePourPreset,
   indicesVisibles,
@@ -508,7 +509,7 @@ export function OnchainWindow() {
             return { actif, principal, repli };
           },
         })),
-        { id: "eth", charger: (signal) => fetchReseauEth(getEtherscanKey(), signal) },
+        { id: "eth", charger: (signal) => fetchReseauEthAvecMeta(getEtherscanKey(), signal) },
         { id: "sol", charger: (signal) => fetchReseauSol(signal) },
       ];
       await chargeur.lancer(sources, ({ id, valeur, erreur }) => {
@@ -517,8 +518,9 @@ export function OnchainWindow() {
         if (id === "coinmetrics") {
           const cm = valeur as CoinMetricsResultat | null;
           setDonnees((d) => ({ ...d, cm }));
-          const observeLe = cm === null ? null : Math.max(...Object.values(cm.series).map((s) => s.dernier?.time ?? 0));
-          publierQualiteChain(id, "Coin Metrics BTC", { sourceEffective: cm?.perime ? "cache Coin Metrics" : "Coin Metrics Community", observeLe: observeLe && observeLe > 0 ? observeLe : null, recupereLe: cm?.ts ?? recupereLe, cadenceMs: 86_400_000, couverture: null, estime: false, acces: cm === null ? "indisponible" : "public", statut: cm === null ? "indisponible" : cm.perime ? "perime" : "frais", ...(cm === null || erreur ? { raison: erreur ?? "Coin Metrics indisponible et aucun cache exploitable." } : {}) });
+          for (const entree of qualitesCoinMetrics(cm, recupereLe)) {
+            publierQualiteChain(`coinmetrics:${entree.id}`, entree.libelle, entree.qualite);
+          }
         } else if (id === "bgeometrics") {
           const bg = (valeur ?? {}) as Record<string, BgResultat | null>;
           setDonnees((d) => ({ ...d, bg }));
@@ -535,21 +537,23 @@ export function OnchainWindow() {
           setDonnees((d) => ({ ...d, hr }));
           publierQualiteChain(id, "Hashrate BTC", { sourceId: "mempool", sourceEffective: hr?.perime ? "cache mempool.space" : "mempool.space", observeLe: hr?.donnee.dernier?.time ?? null, recupereLe: hr?.ts ?? recupereLe, cadenceMs: 86_400_000, couverture: hr ? { disponibles: hr.donnee.points.length, attendus: 365 } : null, estime: false, acces: hr === null ? "indisponible" : "public", statut: hr === null ? "indisponible" : hr.perime ? "perime" : "frais", ...(hr === null || erreur ? { raison: erreur ?? "Hashrate indisponible et aucun cache exploitable." } : {}) });
         } else if (id.startsWith("etf-")) {
-          const r = valeur as { actif: ActifEtf; principal: EtfResultat; repli: BgResultat | null } | null;
-          if (r !== null) {
-            etfCycle[r.actif] = r.principal;
-            setDonnees((d) => ({ ...d, etf: { ...d.etf, [r.actif]: r.principal }, ...(r.actif === "btc" ? { etfRepli: r.repli } : {}) }));
-            const repliActif = r.actif === "btc" && !r.principal.disponible
-              ? r.repli?.serie.dernier
-              : undefined;
-            const observeLe = r.principal.jour ? Date.parse(`${r.principal.jour}T00:00:00Z`) : repliActif?.time ?? null;
-            publierQualiteChain(id, `ETF ${r.actif.toUpperCase()}`, { sourceId: repliActif ? "bgeometrics" : "sosovalue", sourceEffective: repliActif ? "BGeometrics (repli)" : "SoSoValue", observeLe: Number.isFinite(observeLe) ? observeLe : null, recupereLe: r.repli?.ts ?? recupereLe, cadenceMs: 86_400_000, couverture: null, estime: false, acces: r.principal.disponible || repliActif ? "cle" : "indisponible", statut: r.principal.disponible ? "frais" : r.repli?.perime ? "perime" : repliActif ? "partiel" : "indisponible", ...(!r.principal.disponible ? { raison: repliActif ? "SoSoValue indisponible ; repli BTC natif." : r.principal.raison ?? "Flux indisponible." } : {}) });
-          }
+          const actif = id.slice(4) as ActifEtf;
+          const r = valeur as ValeurPublicationEtf | null;
+          const precedente = qualiteMetriquesStore.getState().metriques[`chain:${id}`]?.qualite;
+          traiterPublicationEtfChain({
+            actif, valeur: r, erreur, precedente, now: recupereLe,
+            appliquerValeur: (publication) => {
+              etfCycle[publication.actif] = publication.principal;
+              setDonnees((d) => ({ ...d, etf: { ...d.etf, [publication.actif]: publication.principal }, ...(publication.actif === "btc" ? { etfRepli: publication.repli } : {}) }));
+            },
+            appliquerQualite: (qualite) => publierQualiteChain(id, `ETF ${actif.toUpperCase()}`, qualite),
+          });
         } else if (id === "eth") {
-          const eth = valeur as ReseauEth | null;
+          const resultatEth = valeur as ResultatReseauEth | null;
+          const eth = resultatEth?.donnee ?? null;
           setDonnees((d) => ({ ...d, eth }));
           const disponibles = eth === null ? 0 : [eth.supplyEth, eth.nodeCount, eth.gasSafe].filter((v) => v !== null).length;
-          publierQualiteChain(id, "Réseau ETH", { sourceEffective: "Etherscan", observeLe: eth === null ? null : recupereLe, recupereLe, cadenceMs: 60_000, couverture: { disponibles, attendus: 3 }, estime: false, acces: eth === null ? "indisponible" : etherscanHasKey ? "cle" : "public", statut: eth === null ? "indisponible" : disponibles < 3 ? "partiel" : "frais", ...(disponibles > 0 && disponibles < 3 ? { raison: "Réponse Etherscan partielle." } : erreur ? { raison: erreur } : {}) });
+          publierQualiteChain(id, "Réseau ETH", { sourceEffective: resultatEth?.sourceEffective ?? "Etherscan", observeLe: resultatEth?.observeLe ?? null, recupereLe: resultatEth?.recupereLe ?? null, cadenceMs: 60_000, couverture: { disponibles, attendus: 3 }, estime: false, acces: eth === null ? "indisponible" : etherscanHasKey ? "cle" : "public", statut: eth === null ? "indisponible" : resultatEth?.perime ? "perime" : disponibles < 3 ? "partiel" : "frais", ...(resultatEth?.raison ? { raison: resultatEth.raison } : disponibles > 0 && disponibles < 3 ? { raison: "Réponse Etherscan partielle." } : erreur ? { raison: erreur } : {}) });
         } else if (id === "sol") {
           const sol = valeur as ResultatFrais<ReseauSol> | null;
           setDonnees((d) => ({ ...d, sol }));

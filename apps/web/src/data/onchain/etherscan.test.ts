@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchReseauEth, parseEthSupply, parseGasOracle, parseNodeCount } from "./etherscan";
+import { fetchReseauEth, fetchReseauEthAvecMeta, parseEthSupply, parseGasOracle, parseNodeCount } from "./etherscan";
 
 describe("parseEthSupply", () => {
   it("convertit les wei en ETH", () => {
@@ -75,5 +75,28 @@ describe("fetchReseauEth (fetch mocké)", () => {
     expect(r?.gasFast).toBe(3);
     expect(r?.supplyEth).toBeNull();
     expect(r?.nodeCount).toBeNull();
+  });
+
+  it("ressert un cache périmé sans réinventer acquisition/observation et expose le motif", async () => {
+    const t0 = Date.UTC(2020, 0, 1);
+    const maintenant = Date.UTC(2026, 8, 9);
+    const cache = { donnee: { supplyEth: 120_000_000, nodeCount: 8_500, gasSafe: 1, gasPropose: 2, gasFast: 3 }, ts: t0 };
+    const stockage = new Map([["axiom:onchain:eth:reseau", JSON.stringify(cache)]]);
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => stockage.get(k) ?? null,
+      setItem: (k: string, v: string) => void stockage.set(k, v),
+      removeItem: (k: string) => void stockage.delete(k), clear: () => stockage.clear(),
+      key: () => null, get length() { return stockage.size; },
+    });
+    vi.spyOn(Date, "now").mockReturnValue(maintenant);
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("hors ligne"); }));
+    const resultat = await fetchReseauEthAvecMeta("CLE");
+    expect(resultat?.donnee.supplyEth).toBe(120_000_000);
+    expect(resultat?.perime).toBe(true);
+    expect(resultat?.recupereLe).toBe(t0);
+    expect(resultat?.observeLe).toBeNull();
+    expect(resultat?.sourceEffective).toBe("cache Etherscan");
+    expect(resultat?.raison).toContain("hors ligne");
+    vi.restoreAllMocks();
   });
 });

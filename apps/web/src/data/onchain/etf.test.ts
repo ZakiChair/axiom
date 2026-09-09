@@ -1,6 +1,42 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { healthStore } from "../../store/health";
 import { parseEtfFlows, rapporterSanteEtf, sosoUnusableWithoutKey } from "./etf";
+
+function stockage(): Storage {
+  const valeurs = new Map<string, string>();
+  return { getItem: (k) => valeurs.get(k) ?? null, setItem: (k, v) => void valeurs.set(k, v),
+    removeItem: (k) => void valeurs.delete(k), clear: () => valeurs.clear(), key: (i) => [...valeurs.keys()][i] ?? null,
+    get length() { return valeurs.size; } };
+}
+
+describe("fetchEtfFlows — acquisition réelle du cache", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal("localStorage", stockage());
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("ne redaté pas une séance relue depuis le cache", async () => {
+    const t0 = Date.UTC(2026, 8, 9, 10);
+    vi.setSystemTime(t0);
+    const fetcher = vi.fn(async () => Response.json({ data: {
+      dailyNetInflow: { value: "10", lastUpdateDate: "2026-09-08" },
+      list: [{ ticker: "IBIT", dailyNetInflow: { value: "10" } }],
+    } }));
+    vi.stubGlobal("fetch", fetcher);
+    const { fetchEtfFlows } = await import("./etf");
+    const premier = await fetchEtfFlows("btc", "cle");
+    vi.setSystemTime(t0 + 15 * 60_000);
+    const cache = await fetchEtfFlows("btc", "cle");
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(premier.recupereLe).toBe(t0);
+    expect(cache.recupereLe).toBe(t0);
+    expect(cache.sourceEffective).toBe("cache SoSoValue");
+  });
+});
 
 // Schéma RÉEL confirmé par curl direct (2026-07-08) sur
 // POST https://openapi.sosovalue.com/openapi/v2/etf/currentEtfDataMetrics

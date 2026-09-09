@@ -62,6 +62,8 @@ export interface CoinMetricsResultat {
   ts: number;
   /** true si servi depuis un cache PÉRIMÉ (source momentanément injoignable). */
   perime: boolean;
+  sourceEffective?: string;
+  raison?: string;
 }
 
 /** Ligne brute (asset + time + métriques sous forme de chaînes/nulles). */
@@ -153,7 +155,7 @@ export async function fetchCoinMetrics(
   const cle = `cm:${asset}`;
   const cache = await lireCache<CoinMetricsParse>(cle);
   if (estFrais(cache, CM_TTL_MS) && cache !== null) {
-    return { series: cache.donnee, ts: cache.ts, perime: false };
+    return { series: cache.donnee, ts: cache.ts, perime: false, sourceEffective: "cache Coin Metrics" };
   }
 
   try {
@@ -163,12 +165,13 @@ export async function fetchCoinMetrics(
     const series = parseCoinMetrics(json, asset);
     await ecrireCache(cle, series);
     healthStore.getState().setEtat(SOURCE_SANTE, "polling", { dernierMessageTs: Date.now() });
-    return { series, ts: Date.now(), perime: false };
+    return { series, ts: Date.now(), perime: false, sourceEffective: "Coin Metrics Community" };
   } catch (e) {
-    if (signal?.aborted) return cache ? { series: cache.donnee, ts: cache.ts, perime: true } : null;
-    healthStore.getState().marquerErreur(SOURCE_SANTE, e instanceof Error ? e.message : "échec");
+    const raison = e instanceof Error ? e.message : "échec";
+    if (signal?.aborted) return cache ? { series: cache.donnee, ts: cache.ts, perime: true, sourceEffective: "cache Coin Metrics", raison } : null;
+    healthStore.getState().marquerErreur(SOURCE_SANTE, raison);
     // Dégradation : on ressert le dernier cache connu, même périmé.
-    if (cache !== null) return { series: cache.donnee, ts: cache.ts, perime: true };
+    if (cache !== null) return { series: cache.donnee, ts: cache.ts, perime: true, sourceEffective: "cache Coin Metrics", raison };
     return null;
   }
 }

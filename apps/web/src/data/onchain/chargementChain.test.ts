@@ -45,4 +45,25 @@ describe("chargement CHAIN indépendant", () => {
     chargeur.annuler();
     vi.useRealTimers();
   });
+
+  it("annule une promesse pendante avant le timeout sans publication tardive", async () => {
+    vi.useFakeTimers();
+    let liberer!: (value: string) => void;
+    let signalVu: AbortSignal | undefined;
+    const chargeur = creerChargeurChain();
+    const publications: string[] = [];
+    const cycle = chargeur.lancer([{ id: "reseau", charger: async (signal) => {
+      signalVu = signal;
+      return await new Promise<string>((resolve) => { liberer = resolve; });
+    } }], (p) => publications.push(String(p.valeur)));
+    await Promise.resolve();
+    chargeur.annuler();
+    await cycle;
+    expect(signalVu?.aborted).toBe(true);
+    expect(publications).toEqual([]);
+    liberer("trop tard");
+    await Promise.resolve();
+    expect(publications).toEqual([]);
+    vi.useRealTimers();
+  });
 });

@@ -92,12 +92,13 @@ expect(100*((130.658/129.681)**4-1)).toBeCloseTo(3.048,2);
 
 ### Task 5: Évènements, consensus et publications
 
-**Depends:** Task 2. **Files:** `apps/web/src/data/eco.ts`, `data/macro/eventDates.ts`, `lib/evts.ts`, store eco/evts, `components/{EcoWindow,EvtsWindow}.tsx`, nouveau module d’archive locale des publications/consensus et tests.
+**Depends:** Task 2. **Files:** `apps/web/src/data/eco.ts`, `data/macro/eventDates.ts`, `lib/evts.ts`, store eco/evts, `components/{EcoWindow,EvtsWindow}.tsx`, nouveau module d’archive locale des publications/consensus et tests. Compléments attribués après revue : `docs/guides/archives-publications.md` et `apps/web/e2e/revue-evenements.e2e.ts` (cycles d'import et de sélection, port isolé 5241).
 
 **Interfaces:** consommer fonctions ALFRED lot2 et caches existants ; archives sérialisées avec source, heure de collecte et connuDepuis ; aucun secret.
 
 - [ ] Réparer H0 : événement inclus seulement si sa date appartient à l’intervalle réel de la bougie et OHLC attendues continues ; sinon occurrence exclue avec motif.
 - [ ] Historique première publication/révisions ALFRED pour CPI/PCE/NFP/retail ; afficher valeur initiale/révisée et période. Conserver consensus daté observé depuis calendrier courant pour les futures publications ; ne jamais archiver la prévision capturée après annonce comme consensus avant annonce. Pas de fausse archive rétrospective.
+- [ ] Restituer aussi les captures sans communiqué associé. Surprise économique actual−consensus seulement à mesure/unité comparables et capture antérieure : points de pourcentage pour inflation/ventes, milliers pour variation NFP ; un niveau ALFRED n'est pas une création d'emplois. Formats ambigus → indisponible.
 - [ ] Heure effective : transmettre horaires exacts lorsque calendrier sourcé les fournit, garder horaires FRED reconstitués comme approximatifs et exclure du mode intraday strict. Autoriser import JSON d’archives sourcées avec validation d’heure/consensus/valeur/dates si historique public indisponible, modèle d’import explicite et export sans secret ; fonctionnalité opérationnelle, pas fixture présentée comme réel.
 - [ ] ECO ouvre étude EVTS BTC/ETH avec même événement, mesure rendements/volume/vol réalisée avant-après aux horizons5/15/60min et24h quand données couvrent, taille d’échantillon et dates ; association temporelle sans causalité affirmée.
 ```ts
@@ -112,6 +113,8 @@ expect(100*((130.658/129.681)**4-1)).toBeCloseTo(3.048,2);
 **Depends:** Task 1. **Files:** `data/{depthMicrostructure,gexDex,gammaRegime,regime,screener*}.ts`, stores DOM/EQS pertinents, `components/{DomWindow,OptionsWindow,ScreenerWindow}.tsx`, `components/omon/VueGexDex.tsx`, `components/brief/SectionRegime.tsx` ; nouvelles fonctions pures ciblées et tests.
 
 **Interfaces:** données prix/OI/CVD aux temps réels existants, options locales sérialisables compatibles ; qualité lente lot1 pour résumé, aucune écriture React par tick.
+
+Store partagé attribué : `apps/web/src/store/microstructure-diagnostic.ts` et son test, lecteur des interfaces marché/OI existantes, avec acquisition bornée et durée de vie liée aux consommateurs DOM/EQS.
 
 Lire `/private/tmp/axiom-20260909-preparation-microstructure.md` pour les fonctions existantes, le cas gamma arithmétique et la distinction entre zéro du cumul par strike et zéro du profil recalculé en spot.
 

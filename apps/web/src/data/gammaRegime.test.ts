@@ -51,6 +51,26 @@ describe("verdictGammaDepuisChaine", () => {
     );
     expect(res?.gexNetUsd).toBe(0);
     expect(res?.verdict.regime).toBe("indetermine");
+    expect(res?.scenarios.map((s) => s.verdict.regime)).toEqual([
+      "indetermine", "long-gamma", "short-gamma",
+    ]);
+    expect(res?.sensibleAuxHypotheses).toBe(true);
+  });
+
+  it("fige le même spot et la même horloge pour les trois hypothèses", () => {
+    const res = verdictGammaDepuisChaine([
+      opt({ strike: 95_000, type: "call", openInterest: 4 }),
+      opt({ strike: 105_000, type: "put", openInterest: 7 }),
+    ], NOW);
+    expect(res?.scenarios).toHaveLength(3);
+    expect(res?.scenarios.map((s) => s.gexNet)).toEqual([
+      res?.gexNetUsd,
+      res?.scenarios[1]?.gexNet,
+      res?.scenarios[2]?.gexNet,
+    ]);
+    expect(res?.scenarios[1]?.gexNet).toBeGreaterThanOrEqual(0);
+    expect(res?.scenarios[2]?.gexNet).toBeLessThanOrEqual(0);
+    expect(new Set(res?.scenarios.map((s) => s.dexNet)).size).toBe(1);
   });
 
   it("cumul qui change de signe entre deux strikes → flip et distance au flip présents", () => {

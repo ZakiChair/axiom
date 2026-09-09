@@ -11,7 +11,7 @@
  * échéance sélectionnée), infobulle au survol de l'histogramme et courbe compacte du profil
  * GEX(S) sous l'histogramme (crypto uniquement — les greeks CBOE sont figés, non re-simulables).
  */
-import type { MursGamma, VerdictGamma } from "../../data/gexDex";
+import type { MursGamma, ScenarioGamma, VerdictGamma } from "../../data/gexDex";
 import { formatDec, formatPct, formatUsd } from "../../lib/format";
 import { Badge, TuileStat, ErreurBloc, NoteSource, Fraicheur, InfobulleGraphe } from "../ui";
 import { formatStrike } from "./dessins";
@@ -47,10 +47,11 @@ interface Props {
   spotVerdict: number;
   flip: number | null;
   strikePicGex: number | null;
-  /** Verdict market maker (fonction pure verdictGamma) — régime, action, distance au flip. */
+  /** Verdict sous la convention principale — régime, action, distance au flip. */
   verdict: VerdictGamma;
   /** Murs de gamma nommés (mursGamma) — même périmètre que le net/flip. */
   murs: MursGamma;
+  scenariosGamma: ScenarioGamma[];
   /** Zéro du profil GEX(S) (crypto), null si aucun ou en classe actions. */
   flipReel: number | null;
   /** Canvas du profil GEX(S) — rendu seulement en crypto (dessiné par l'orchestrateur). */
@@ -76,6 +77,7 @@ export function VueGexDex({
   strikePicGex,
   verdict,
   murs,
+  scenariosGamma,
   flipReel,
   profilCanvasRef,
   survolBarres,
@@ -182,7 +184,7 @@ export function VueGexDex({
         {/* Tuile VERDICT en tête : le MM doit-il acheter ou vendre le sous-jacent ? */}
         <div className="col-span-2">
           <TuileStat
-            label="Verdict market maker (gamma)"
+            label="Verdict sous hypothèse gamma"
             valeur={libelleVerdict}
             ton={tonVerdict}
             badge={<Badge>{porteeNet}</Badge>}
@@ -248,10 +250,34 @@ export function VueGexDex({
         />
       </div>
 
+      {scenariosGamma.length > 0 && (
+        <div className="mt-3 rounded-md border border-border bg-bg px-2 py-2">
+          <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] text-text-dim">
+            <span className="font-medium text-text">Sensibilité au signe gamma</span>
+            <Badge>mêmes contrats · spot · horloge</Badge>
+          </div>
+          <div className="grid gap-1 text-[10px] md:grid-cols-3">
+            {scenariosGamma.map((scenario) => (
+              <div key={scenario.hypothese} className="rounded border border-border/60 bg-surface px-2 py-1.5">
+                <div className="font-medium text-text">{scenario.libelle}</div>
+                <div className="mt-0.5 tabular-nums text-text-dim">GEX {formatUsd(scenario.gexNet)}</div>
+                <div className="tabular-nums text-text-dim">
+                  flip cumul/strike {formatUsdExact(scenario.flipCumulStrike)}
+                </div>
+                <div className="text-text-dim">verdict {scenario.verdict.regime}</div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[10px] text-text-dim">
+            Scénarios de convention, pas des positions dealer observées. Le DEX conserve son delta signé.
+          </p>
+        </div>
+      )}
+
       <div className="mt-3">
         <NoteSource>
           {classe === "crypto"
-            ? "GEX/DEX calculés côté client (Black-Scholes sur IV mark Deribit, OI en unités de base, multiplicateur 1). Convention : dealers long les calls, short les puts — le signe du GEX en dépend. Histogramme et pic |GEX| : échéance sélectionnée, strikes < 0,5 % du max masqués. Net, gamma flip, murs, verdict et profil GEX(S) : toutes échéances (profil = GEX net recalculé à spot simulé, IV et échéances inchangées)."
+            ? "GEX/DEX calculés côté client (Black-Scholes sur IV mark Deribit, OI en unités de base, multiplicateur 1). La convention calls+/puts− et les variantes tous-long/tous-short sont des hypothèses, pas une observation des portefeuilles dealers. Histogramme et pic |GEX| : échéance sélectionnée. Net, flip cumul/strike, murs, verdict et profil GEX(S) : toutes échéances ; le flip réel du profil est le zéro du GEX recalculé en spot."
             : "Greeks pré-calculés CBOE (multiplicateur 100) — toutes les métriques portent sur l'échéance sélectionnée. Convention : dealers long les calls, short les puts — le signe du GEX en dépend. GEX = Σ(Γc·OIc − Γp·OIp)·S²·0,01·mult ; DEX = Σ(Δ·OI)·S·mult. Histogramme : strikes < 0,5 % du max masqués. Pas de profil GEX(S) : greeks figés, non re-simulables."}
         </NoteSource>
       </div>

@@ -1,5 +1,251 @@
 import { mediane, type OrderBook } from "./depth";
 
+export interface PointDiagnostic { t: number; v: number }
+export type SigneDiagnostic = "hausse" | "baisse" | "neutre";
+
+export interface ConfigurationDiagnostic {
+  /** Étendue temporelle analysée ; aucune observation antérieure n'est conservée. */
+  fenetreMs: number;
+  minimumObservations: number;
+  /** Part de la fenêtre réellement couverte par premier→dernier point. */
+  couvertureMin: number;
+  seuilPrixPct: number;
+  seuilOiPct: number;
+  /** Delta CVD en quantité de base, jamais un pourcentage d'un cumul arbitraire. */
+  seuilCvdBase: number;
+  persistanceMs: number;
+  trouResetMs: number;
+  /** Cadences attendues, utilisées pour détecter les trous internes. */
+  cadencePrixCvdMs: number;
+  cadenceOiMs: number;
+  /** Âge maximal de la dernière observation commune. */
+  ageMaxMs: number;
+}
+
+export const CONFIG_DIAGNOSTIC_DEFAUT: ConfigurationDiagnostic = {
+  fenetreMs: 60 * 60_000,
+  minimumObservations: 6,
+  couvertureMin: 0.8,
+  seuilPrixPct: 0.5,
+  seuilOiPct: 1,
+  seuilCvdBase: 0,
+  persistanceMs: 2 * 60_000,
+  trouResetMs: 10 * 60_000,
+  cadencePrixCvdMs: 5 * 60_000,
+  cadenceOiMs: 5 * 60_000,
+  ageMaxMs: 10 * 60_000,
+};
+
+export interface LectureDiagnostic {
+  disponible: boolean;
+  variation: number | null;
+  signe: SigneDiagnostic | null;
+  observations: number;
+  couverture: number;
+  unite: string;
+}
+
+export interface DiagnosticPrixOiCvd {
+  code: string | null;
+  libelle: string;
+  prix: LectureDiagnostic;
+  oi: LectureDiagnostic;
+  cvd: LectureDiagnostic;
+  qualite: "complet" | "incomplet";
+  bornesCommunes: { debut: number; fin: number } | null;
+}
+
+/** Sous-ensemble structurel de Candle : garde ce calcul indépendant du rendu chart. */
+export interface BougieDiagnostic {
+  time: number;
+  close: number;
+  buyVolume?: number;
+  sellVolume?: number;
+}
+
+/**
+ * Extrait le prix et un CVD honnête d'un buffer borné. Si UNE bougie retenue ne
+ * porte pas les deux volumes agressifs, tout le CVD devient indisponible.
+ */
+export function extrairePrixEtCvdReel(
+  candles: readonly BougieDiagnostic[],
+  now: number,
+  fenetreMs: number,
+  cadenceMs = 0,
+): { prix: PointDiagnostic[]; cvdReel: PointDiagnostic[] | null } {
+  const debut = now - fenetreMs;
+  const retenues = candles
+    .map((c) => ({ c, disponibleLe: c.time + Math.max(0, cadenceMs) }))
+    .filter(({ c, disponibleLe }) => Number.isFinite(disponibleLe) && disponibleLe >= debut && disponibleLe <= now && Number.isFinite(c.close) && c.close > 0)
+    .sort((a, b) => a.disponibleLe - b.disponibleLe);
+  const prix = retenues.map(({ c, disponibleLe }) => ({ t: disponibleLe, v: c.close }));
+  if (retenues.some((c) =>
+    !Number.isFinite(c.c.buyVolume) || !Number.isFinite(c.c.sellVolume)
+    || (c.c.buyVolume ?? -1) < 0 || (c.c.sellVolume ?? -1) < 0,
+  )) return { prix, cvdReel: null };
+  let cumul = 0;
+  const cvdReel = retenues.map(({ c, disponibleLe }) => {
+    cumul += c.buyVolume! - c.sellVolume!;
+    return { t: disponibleLe, v: cumul };
+  });
+  return { prix, cvdReel };
+}
+
+function nettoyerSerie(
+  serie: readonly PointDiagnostic[] | null,
+  now: number,
+  config: ConfigurationDiagnostic,
+  strictementPositif: boolean,
+): PointDiagnostic[] {
+  if (serie === null || !(config.fenetreMs > 0)) return [];
+  const debut = now - config.fenetreMs;
+  const parTemps = new Map<number, number>();
+  for (const p of serie) {
+    if (!Number.isFinite(p.t) || p.t < debut || p.t > now || !Number.isFinite(p.v)) continue;
+    if (strictementPositif && p.v <= 0) continue;
+    parTemps.set(p.t, p.v);
+  }
+  return [...parTemps].sort(([a], [b]) => a - b).map(([t, v]) => ({ t, v }));
+}
+
+function lireVariation(
+  serie: readonly PointDiagnostic[] | null,
+  now: number,
+  config: ConfigurationDiagnostic,
+  seuil: number,
+  unite: string,
+  mode: "pourcentage" | "delta",
+  strictementPositif: boolean,
+  cadenceMs: number,
+  bornes: { debut: number; fin: number } | null,
+): LectureDiagnostic {
+  const points = nettoyerSerie(serie, now, config, strictementPositif)
+    .filter((p) => bornes === null || (p.t >= bornes.debut && p.t <= bornes.fin));
+  const premier = points[0];
+  const dernier = points.at(-1);
+  const span = premier && dernier ? Math.max(0, dernier.t - premier.t) : 0;
+  const cadence = Number.isFinite(cadenceMs) && cadenceMs > 0 ? cadenceMs : config.fenetreMs;
+  const attendus = span > 0 ? Math.floor(span / cadence) + 1 : 0;
+  const densite = attendus > 0 ? Math.min(1, points.length / attendus) : 0;
+  const couvertureTemps = Math.min(1, span / config.fenetreMs);
+  const couverture = Math.min(couvertureTemps, densite);
+  let trouInterne = false;
+  for (let i = 1; i < points.length; i++) {
+    if (points[i]!.t - points[i - 1]!.t > cadence * 1.5) { trouInterne = true; break; }
+  }
+  const ageValide = dernier !== undefined && now >= dernier.t && now - dernier.t <= config.ageMaxMs;
+  const disponible = Boolean(
+    premier && dernier
+    && points.length >= Math.max(2, config.minimumObservations)
+    && couverture >= config.couvertureMin
+    && !trouInterne
+    && ageValide,
+  );
+  if (!disponible || !premier || !dernier) {
+    return { disponible: false, variation: null, signe: null, observations: points.length, couverture, unite };
+  }
+  const variation = mode === "pourcentage"
+    ? ((dernier.v / premier.v) - 1) * 100
+    : dernier.v - premier.v;
+  const absSeuil = Math.max(0, Number.isFinite(seuil) ? seuil : 0);
+  const signe: SigneDiagnostic = variation > absSeuil
+    ? "hausse"
+    : variation < -absSeuil
+      ? "baisse"
+      : "neutre";
+  return { disponible: true, variation, signe, observations: points.length, couverture, unite };
+}
+
+const GLYPHE_SIGNE: Record<SigneDiagnostic, string> = { hausse: "↑", baisse: "↓", neutre: "→" };
+const CODE_SIGNE: Record<SigneDiagnostic, string> = { hausse: "+", baisse: "-", neutre: "0" };
+
+/**
+ * Lecture pure d'un même intervalle prix spot / OI perp en quantité / CVD spot réel.
+ * Une série absente ou trop courte rend le triplet indisponible : elle n'est jamais
+ * remplacée par zéro. Le CVD est exprimé comme delta de cumul en quantité de base.
+ */
+export function diagnostiquerPrixOiCvd(
+  series: {
+    prix: readonly PointDiagnostic[] | null;
+    oiQuantite: readonly PointDiagnostic[] | null;
+    cvdReel: readonly PointDiagnostic[] | null;
+  },
+  config: ConfigurationDiagnostic,
+  now: number,
+): DiagnosticPrixOiCvd {
+  const propres = [
+    nettoyerSerie(series.prix, now, config, true),
+    nettoyerSerie(series.oiQuantite, now, config, true),
+    nettoyerSerie(series.cvdReel, now, config, false),
+  ];
+  const bornesCommunes = propres.every((s) => s.length > 0)
+    ? {
+      debut: Math.max(...propres.map((s) => s[0]!.t)),
+      fin: Math.min(...propres.map((s) => s.at(-1)!.t)),
+    }
+    : null;
+  const bornes = bornesCommunes !== null && bornesCommunes.fin >= bornesCommunes.debut ? bornesCommunes : null;
+  const prix = lireVariation(series.prix, now, config, config.seuilPrixPct, "%", "pourcentage", true, config.cadencePrixCvdMs, bornes);
+  const oi = lireVariation(series.oiQuantite, now, config, config.seuilOiPct, "%", "pourcentage", true, config.cadenceOiMs, bornes);
+  const cvd = lireVariation(series.cvdReel, now, config, config.seuilCvdBase, "quantité base", "delta", false, config.cadencePrixCvdMs, bornes);
+  if (!prix.disponible || !oi.disponible || !cvd.disponible || prix.signe === null || oi.signe === null || cvd.signe === null) {
+    return { code: null, libelle: "Diagnostic incomplet", prix, oi, cvd, qualite: "incomplet", bornesCommunes: bornes };
+  }
+  return {
+    code: `prix${CODE_SIGNE[prix.signe]}|oi${CODE_SIGNE[oi.signe]}|cvd${CODE_SIGNE[cvd.signe]}`,
+    libelle: `Prix ${GLYPHE_SIGNE[prix.signe]} · OI ${GLYPHE_SIGNE[oi.signe]} · CVD ${GLYPHE_SIGNE[cvd.signe]}`,
+    prix,
+    oi,
+    cvd,
+    qualite: "complet",
+    bornesCommunes: bornes,
+  };
+}
+
+export interface VuePersistanceDiagnostic {
+  code: string | null;
+  confirme: boolean;
+  persistanceMs: number;
+}
+
+/** Confirmation temporelle indépendante de la cadence d'échantillonnage. */
+export class PersistanceDiagnostic {
+  private code: string | null = null;
+  private depuis: number | null = null;
+  private dernier: number | null = null;
+
+  constructor(private readonly dureeMs: number, private readonly trouResetMs: number) {}
+
+  reset(): void { this.code = null; this.depuis = null; this.dernier = null; }
+  deconnecter(): void { this.reset(); }
+
+  observe(code: string | null, now: number): VuePersistanceDiagnostic {
+    if (!Number.isFinite(now) || code === null) {
+      this.reset();
+      return this.view(now);
+    }
+    const trou = this.dernier !== null && (now < this.dernier || now - this.dernier > this.trouResetMs);
+    if (trou || code !== this.code || this.depuis === null) {
+      this.code = code;
+      this.depuis = now;
+    }
+    this.dernier = now;
+    return this.view(now);
+  }
+
+  view(now: number): VuePersistanceDiagnostic {
+    if (this.code === null || this.depuis === null || this.dernier === null || !Number.isFinite(now)) {
+      return { code: null, confirme: false, persistanceMs: 0 };
+    }
+    if (now < this.dernier || now - this.dernier > this.trouResetMs) {
+      this.reset();
+      return { code: null, confirme: false, persistanceMs: 0 };
+    }
+    const persistanceMs = Math.max(0, now - this.depuis);
+    return { code: this.code, confirme: persistanceMs >= this.dureeMs, persistanceMs };
+  }
+}
+
 /** Paramètres fixes, exposés dans le DOM ; aucune donnée persistée ni extrapolée. */
 export const MICRO_CONFIG = {
   ofiWindowMs: 30_000, ofiWarmupMs: 5_000, ofiMinimum: 20,

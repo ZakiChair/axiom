@@ -73,11 +73,13 @@ export interface EntreesRegime {
   etf?: FluxEtfRegime | null;
   /** Δ supply stablecoins 7 j en % de la supply, ou null. */
   impressionStablecoins7jPct: number | null;
-  /**
-   * Régime gamma des dealers BTC (verdict OMON, toutes échéances) + GEX net USD,
-   * ou null. Hypothèse retail standard : dealers long les calls, short les puts.
-   */
-  regimeGammaBtc: { regime: RegimeGamma; gexNetUsd: number } | null;
+  /** Régime gamma BTC sous convention calls+/puts−, avec variantes non observées. */
+  regimeGammaBtc: {
+    regime: RegimeGamma;
+    gexNetUsd: number;
+    /** Conventions alternatives, explicitement hypothétiques et non observées. */
+    hypotheses?: Array<{ libelle: string; regime: RegimeGamma }>;
+  } | null;
 }
 
 export interface ComposantRegime {
@@ -87,6 +89,8 @@ export interface ComposantRegime {
   note: number | null;
   /** « F&G 72 (+1) » — affiché dans le title de la pastille et le détail BRIEF. */
   detail: string;
+  /** Contribution arithmétique au score final : note / nombre de notes disponibles. */
+  contribution?: number | null;
 }
 
 export type LibelleRegime =
@@ -111,6 +115,19 @@ export interface Regime {
    * d'une ligne (revue du 2026-08-01 § 6.4).
    */
   couverture: { disponibles: number; total: number };
+  signes: { positifs: number; negatifs: number; neutres: number; opposes: number };
+  poidsVolatilite: { disponibles: number; totalDisponibles: number; fraction: number };
+  stabilite: {
+    score: number;
+    seuilsMoins20: LibelleRegime;
+    reference: LibelleRegime;
+    seuilsPlus20: LibelleRegime;
+    stable: boolean;
+  };
+  sensibiliteGamma: {
+    change: boolean;
+    lectures: Array<{ libelle: string; regime: RegimeGamma }>;
+  } | null;
 }
 
 /** Bornes du score composite — écrites dans le formulaire d'alerte, jamais là où on lit. */
@@ -134,6 +151,15 @@ export const MIN_COMPOSANTS = 3;
 
 function fmtNote(note: number): string {
   return note >= 0 ? `+${note}` : `${note}`;
+}
+
+function classerScore(score: number, disponibles: number, facteurSeuils = 1): LibelleRegime {
+  if (disponibles < MIN_COMPOSANTS) return "indéterminé";
+  if (score >= 1.2 * facteurSeuils) return "risk-on tendu";
+  if (score >= 0.4 * facteurSeuils) return "risk-on";
+  if (score > -0.4 * facteurSeuils) return "neutre";
+  if (score > -1.2 * facteurSeuils) return "risk-off";
+  return "risk-off marqué";
 }
 
 export function calculerRegime(entrees: EntreesRegime): Regime {
@@ -198,7 +224,7 @@ export function calculerRegime(entrees: EntreesRegime): Regime {
     // des seuils asymétriques seraient un arbitrage caché dans le score.
     //
     // Conséquence de pondération ASSUMÉE : la volatilité pèse 2 notes
-    // sur 8 (25 % du score), et les deux sont corrélées —
+    // sur 8 (25 % du poids quand les huit répondent), et les deux sont corrélées —
     // en régime de stress elles chargent le score dans le même sens. C'est le
     // comportement voulu (vol implicite ET réalisée élevées = environnement
     // réellement hostile), mais toute relecture historique de la pastille doit
@@ -292,19 +318,42 @@ export function calculerRegime(entrees: EntreesRegime): Regime {
 
   const notes = composants.map((c) => c.note).filter((n): n is number => n !== null);
   const score = notes.length > 0 ? notes.reduce((s, n) => s + n, 0) / notes.length : 0;
-  let libelle: LibelleRegime;
-  if (notes.length < MIN_COMPOSANTS) libelle = "indéterminé";
-  else if (score >= 1.2) libelle = "risk-on tendu";
-  else if (score >= 0.4) libelle = "risk-on";
-  else if (score > -0.4) libelle = "neutre";
-  else if (score > -1.2) libelle = "risk-off";
-  else libelle = "risk-off marqué";
+  const libelle = classerScore(score, notes.length);
+  const composantsAvecContributions = composants.map((c) => ({
+    ...c,
+    contribution: c.note === null || notes.length === 0 ? null : c.note / notes.length,
+  }));
+  const positifs = notes.filter((n) => n > 0).length;
+  const negatifs = notes.filter((n) => n < 0).length;
+  const neutres = notes.filter((n) => n === 0).length;
+  const volDisponibles = composants.filter((c) => (c.id === "dvol" || c.id === "volRealisee") && c.note !== null).length;
+  const seuilsMoins20 = classerScore(score, notes.length, 0.8);
+  const seuilsPlus20 = classerScore(score, notes.length, 1.2);
 
   return {
     score,
     libelle,
-    composants,
+    composants: composantsAvecContributions,
     couverture: { disponibles: notes.length, total: composants.length },
+    signes: { positifs, negatifs, neutres, opposes: Math.min(positifs, negatifs) },
+    poidsVolatilite: {
+      disponibles: volDisponibles,
+      totalDisponibles: notes.length,
+      fraction: notes.length > 0 ? volDisponibles / notes.length : 0,
+    },
+    stabilite: {
+      score,
+      seuilsMoins20,
+      reference: libelle,
+      seuilsPlus20,
+      stable: seuilsMoins20 === libelle && seuilsPlus20 === libelle,
+    },
+    sensibiliteGamma: entrees.regimeGammaBtc?.hypotheses
+      ? {
+        lectures: entrees.regimeGammaBtc.hypotheses,
+        change: new Set(entrees.regimeGammaBtc.hypotheses.map((h) => h.regime)).size > 1,
+      }
+      : null,
   };
 }
 

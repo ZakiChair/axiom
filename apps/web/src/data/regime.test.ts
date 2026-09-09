@@ -137,6 +137,22 @@ describe("calculerRegime — notes par composant", () => {
     expect(detail({ regime: "indetermine", gexNetUsd: 0 })).toBe("γ dealers indéterminé (net $0.00) (+0)");
     expect(detail(null)).toBe("γ dealers —");
   });
+  it("signale quand le verdict gamma dépend de l'hypothèse de signe", () => {
+    const r = calculerRegime({
+      ...VIDE,
+      regimeGammaBtc: {
+        regime: "indetermine",
+        gexNetUsd: 0,
+        hypotheses: [
+          { libelle: "Calls + / puts −", regime: "indetermine" },
+          { libelle: "Tous long gamma", regime: "long-gamma" },
+          { libelle: "Tous short gamma", regime: "short-gamma" },
+        ],
+      },
+    });
+    expect(r.sensibiliteGamma?.change).toBe(true);
+    expect(r.sensibiliteGamma?.lectures).toHaveLength(3);
+  });
 });
 
 describe("calculerRegime — score et libellé", () => {
@@ -207,6 +223,49 @@ describe("calculerRegime — score et libellé", () => {
     expect(avecEquilibreGamma.score).toBeCloseTo(4 / 3, 6);
     const sansGamma = calculerRegime({ ...deuxSources, regimeGammaBtc: null });
     expect(sansGamma.libelle).toBe("indéterminé");
+  });
+
+  it("expose contribution note/n, signes opposés et poids des deux volatilités corrélées", () => {
+    const r = calculerRegime({
+      ...VIDE,
+      directionBtc24hPct: 5,
+      fearGreed: 10,
+      dvolBtcPercentile: 90,
+      volRealiseeBtcPercentile: 90,
+    });
+    expect(r.composants.find((c) => c.id === "btc24h")?.contribution).toBeCloseTo(2 / 4);
+    expect(r.signes).toEqual({ positifs: 1, negatifs: 3, neutres: 0, opposes: 1 });
+    expect(r.poidsVolatilite).toEqual({ disponibles: 2, totalDisponibles: 4, fraction: 0.5 });
+  });
+
+  it("évalue les mêmes notes avec seuils de verdict −20 % et +20 %", () => {
+    const r = calculerRegime({
+      ...VIDE,
+      directionBtc24hPct: 1.5,
+      fearGreed: 60,
+      dvolBtcPercentile: 70,
+    });
+    // score 2/3 : risk-on aux seuils 0,32 et 0,40, mais neutre au seuil 0,48 ?
+    expect(r.stabilite.seuilsMoins20).toBe("risk-on");
+    expect(r.stabilite.reference).toBe("risk-on");
+    expect(r.stabilite.seuilsPlus20).toBe("risk-on");
+    expect(r.stabilite.stable).toBe(true);
+
+    const frontiere = calculerRegime({
+      directionBtc24hPct: 5, // +2
+      fearGreed: 80, // +2
+      fundingBtcPercentile: 95, // -1
+      dvolBtcPercentile: 70, // 0
+      volRealiseeBtcPercentile: 70, // 0
+      fluxEtfJourUsd: 60_000_000, // +1
+      impressionStablecoins7jPct: 0, // 0
+      regimeGammaBtc: { regime: "short-gamma", gexNetUsd: -1 }, // -1 => somme 3/8
+    });
+    expect(frontiere.stabilite.seuilsMoins20).toBe("risk-on");
+    expect(frontiere.stabilite.reference).toBe("neutre");
+    expect(frontiere.stabilite.seuilsPlus20).toBe("neutre");
+    expect(frontiere.stabilite.stable).toBe(false);
+    expect(frontiere.stabilite.score).toBeCloseTo(frontiere.score);
   });
 });
 

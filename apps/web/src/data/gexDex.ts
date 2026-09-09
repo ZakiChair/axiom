@@ -41,6 +41,19 @@ export interface GexDexPoint {
   dex: number;
 }
 
+export type HypotheseSigneGamma = "convention" | "tous-long" | "tous-short";
+
+export interface ScenarioGamma {
+  hypothese: HypotheseSigneGamma;
+  libelle: string;
+  points: GexDexPoint[];
+  gexNet: number;
+  dexNet: number;
+  /** Zéro du cumul par strike ; distinct du zéro du profil GEX recalculé en spot. */
+  flipCumulStrike: number | null;
+  verdict: VerdictGamma;
+}
+
 /**
  * Agrège GEX/DEX par strike à partir de jambes porteuses de greeks. Fonction PURE.
  * Ignore les jambes/valeurs non finies (dégradation gracieuse). Renvoie une liste triée
@@ -50,16 +63,21 @@ export function aggregateGexDex(
   legs: OptionGreekLeg[],
   spot: number,
   contractMultiplier: number,
+  hypothese: HypotheseSigneGamma = "convention",
 ): GexDexPoint[] {
-  if (!Number.isFinite(spot) || spot <= 0) return [];
+  if (!Number.isFinite(spot) || spot <= 0 || !Number.isFinite(contractMultiplier) || contractMultiplier <= 0) return [];
   const parStrike = new Map<number, { gammaSigne: number; deltaSigne: number }>();
   for (const l of legs) {
     if (!Number.isFinite(l.strike) || l.strike <= 0) continue;
+    // Le chemin historique reste tolérant (valeur non finie → contribution nulle).
+    // `comparerHypothesesGamma` applique, lui, la validation stricte commune aux
+    // trois scénarios avant d'appeler cette agrégation.
     const oi = Number.isFinite(l.openInterest) ? l.openInterest : 0;
     const g = Number.isFinite(l.gamma) ? l.gamma : 0;
     const d = Number.isFinite(l.delta) ? l.delta : 0;
     const cur = parStrike.get(l.strike) ?? { gammaSigne: 0, deltaSigne: 0 };
-    cur.gammaSigne += (l.type === "call" ? g : -g) * oi; // gamma_call − gamma_put
+    const signeGamma = hypothese === "tous-long" ? 1 : hypothese === "tous-short" ? -1 : l.type === "call" ? 1 : -1;
+    cur.gammaSigne += signeGamma * g * oi;
     cur.deltaSigne += d * oi; // delta déjà signé (put négatif)
     parStrike.set(l.strike, cur);
   }
@@ -72,6 +90,62 @@ export function aggregateGexDex(
       dex: v.deltaSigne * facteurDelta,
     }))
     .sort((a, b) => a.strike - b.strike);
+}
+
+const LIBELLES_HYPOTHESE: Record<HypotheseSigneGamma, string> = {
+  convention: "Calls + / puts −",
+  "tous-long": "Tous long gamma",
+  "tous-short": "Tous short gamma",
+};
+
+/** Trois conventions de signe sur le même univers, spot, OI, multiplicateur et DEX. */
+export function comparerHypothesesGamma(
+  legs: OptionGreekLeg[],
+  spot: number,
+  contractMultiplier: number,
+): ScenarioGamma[] {
+  if (!Number.isFinite(spot) || spot <= 0 || !Number.isFinite(contractMultiplier) || contractMultiplier <= 0) return [];
+  const valides = legs.filter((l) =>
+    Number.isFinite(l.strike) && l.strike > 0
+    && Number.isFinite(l.openInterest) && l.openInterest >= 0
+    && Number.isFinite(l.gamma) && l.gamma >= 0,
+  );
+  return (["convention", "tous-long", "tous-short"] as const).map((hypothese) => {
+    const points = aggregateGexDex(valides, spot, contractMultiplier, hypothese);
+    const gexNet = points.reduce((s, p) => s + p.gex, 0);
+    const dexNet = points.reduce((s, p) => s + p.dex, 0);
+    const sommeAbs = points.reduce((s, p) => s + Math.abs(p.gex), 0);
+    const flipCumulStrike = gammaFlip(points);
+    return {
+      hypothese,
+      libelle: LIBELLES_HYPOTHESE[hypothese],
+      points,
+      gexNet,
+      dexNet,
+      flipCumulStrike,
+      verdict: verdictGamma(gexNet, spot, flipCumulStrike, sommeAbs),
+    };
+  });
+}
+
+/** Même horloge et mêmes contrats crypto pour les trois hypothèses. */
+export function comparerHypothesesGammaCrypto(
+  points: CryptoOptionInput[],
+  spot: number,
+  nowMs: number,
+): ScenarioGamma[] {
+  const legs: OptionGreekLeg[] = points.map((p) => {
+    const t = (p.expiryMs - nowMs) / MS_PAR_AN;
+    const g = bsGreeks(spot, p.strike, t, p.markIv / 100, p.interestRate);
+    return {
+      strike: p.strike,
+      type: p.type,
+      openInterest: p.openInterest,
+      delta: p.type === "call" ? g.deltaCall : g.deltaPut,
+      gamma: g.gamma,
+    };
+  });
+  return comparerHypothesesGamma(legs, spot, 1);
 }
 
 /** Input minimal d'une option crypto pour le calcul GEX/DEX (compatible OptionPoint). */

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateGexDex,
+  comparerHypothesesGamma,
   computeCryptoGexDex,
   gammaFlip,
   gexParStrikeToutesEcheances,
@@ -76,6 +77,34 @@ describe("aggregateGexDex", () => {
     ];
     expect(aggregateGexDex(legs, 0, 1)).toEqual([]);
     expect(aggregateGexDex(legs, NaN, 1)).toEqual([]);
+  });
+});
+
+describe("hypothèses de signe gamma", () => {
+  it("reproduit le contrôle indépendant −1 / +3 / −3 USD par 1 % et garde le DEX identique", () => {
+    const legs: OptionGreekLeg[] = [
+      { strike: 90, type: "call", openInterest: 10, delta: 0.6, gamma: 0.001 },
+      { strike: 110, type: "put", openInterest: 20, delta: -0.4, gamma: 0.001 },
+    ];
+    const scenarios = comparerHypothesesGamma(legs, 100, 1);
+    expect(scenarios.map((s) => s.gexNet)).toEqual([-1, 3, -3]);
+    expect(new Set(scenarios.map((s) => s.dexNet)).size).toBe(1);
+    // Convention : cumul +1 au strike 90 puis −1 au strike 110 → zéro à 100.
+    // Les scénarios uniformes restent d'un seul signe et n'ont aucun flip.
+    expect(scenarios.map((s) => s.flipCumulStrike)).toEqual([100, null, null]);
+    expect(scenarios.map((s) => s.verdict.regime)).toEqual([
+      "short-gamma", "long-gamma", "short-gamma",
+    ]);
+  });
+
+  it("compare strictement le même univers et rejette OI/gamma/multiplicateur invalides", () => {
+    const legs: OptionGreekLeg[] = [
+      { strike: 100, type: "call", openInterest: -1, delta: 0.5, gamma: 0.01 },
+      { strike: 110, type: "put", openInterest: 2, delta: -0.4, gamma: -0.01 },
+      { strike: 120, type: "call", openInterest: 3, delta: 0.3, gamma: Number.NaN },
+    ];
+    expect(comparerHypothesesGamma(legs, 100, 1).every((s) => s.points.length === 0)).toBe(true);
+    expect(comparerHypothesesGamma(legs, 100, 0)).toEqual([]);
   });
 });
 

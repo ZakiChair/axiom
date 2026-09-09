@@ -103,9 +103,41 @@ export function SectionRegime({ regime, majTs }: { regime: Regime | null; majTs:
             <Badge ton={tonNote(c.note)}>
               {c.note === null ? "—" : c.note > 0 ? `+${c.note}` : String(c.note)}
             </Badge>
+            <span className="w-28 text-right tabular-nums text-[10px] text-text-dim">
+              {c.contribution === null || c.contribution === undefined
+                ? "—"
+                : `${c.note}/${couverture.disponibles} = ${c.contribution >= 0 ? "+" : ""}${c.contribution.toFixed(2)}`}
+            </span>
           </li>
         ))}
       </ul>
+
+      <div className="grid gap-1 rounded border border-border bg-bg px-2 py-1.5 text-[10px] text-text-dim md:grid-cols-2">
+        <span>
+          Signes : +{regime.signes.positifs} / −{regime.signes.negatifs} / 0 {regime.signes.neutres}
+          {` · ${regime.signes.opposes} paire(s) opposée(s)`}
+        </span>
+        <span>
+          Vol corrélée : {regime.poidsVolatilite.disponibles}/{regime.poidsVolatilite.totalDisponibles}
+          {` (${(regime.poidsVolatilite.fraction * 100).toFixed(0)} % du poids disponible)`}
+        </span>
+        <span className="md:col-span-2">
+          Stabilité seuils −20 % / référence / +20 % : {regime.stabilite.seuilsMoins20} / {regime.stabilite.reference} / {regime.stabilite.seuilsPlus20}
+          {regime.stabilite.stable ? " · stable" : " · verdict sensible"}
+        </span>
+        <span className="md:col-span-2">
+          Paliers bas/haut testés : 0,32/0,96 · 0,40/1,20 · 0,48/1,44, avec le même score observé.
+        </span>
+      </div>
+
+      {regime.sensibiliteGamma && (
+        <div className="rounded border border-border bg-bg px-2 py-1.5 text-[10px] text-text-dim">
+          <span className="font-medium text-text">Gamma : </span>
+          {regime.sensibiliteGamma.lectures.map((h) => `${h.libelle} = ${h.regime}`).join(" · ")}
+          {regime.sensibiliteGamma.change ? " · verdict sensible à l’hypothèse" : " · verdict invariant"}
+          <span> · scénarios non observés</span>
+        </div>
+      )}
 
       {qualites.length > 0 ? (
         <details open={qualites.some(([, entree]) => entree.qualite.statut !== "frais")} className="rounded border border-border bg-bg px-2 py-1.5">

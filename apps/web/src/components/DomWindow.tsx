@@ -37,6 +37,11 @@ import { formatUsd } from "../lib/format";
 import { lireTokensCanvas, POLICE_CANVAS, POLICE_CANVAS_MONO } from "../lib/canvasTokens";
 import { coutExecution, desequilibre, profondeurAPct } from "../data/depthExecution";
 import { DepthMicrostructure, MICRO_CONFIG, type MicrostructureView, type ReconstitutionView } from "../data/depthMicrostructure";
+import {
+  microstructureDiagnosticStore,
+  retenirDiagnosticMicrostructure,
+  type CoutDiagnostic,
+} from "../store/microstructure-diagnostic";
 import { EnTeteFenetre, Onglets, Vide } from "./ui";
 
 /** Nombre MAX de niveaux affichés de chaque côté du mid (LADDER, fenêtre haute). */
@@ -505,6 +510,87 @@ function dessinerTape(ctx: CanvasRenderingContext2D, w: number, h: number, trade
   });
 }
 
+function coutTexte(c: CoutDiagnostic, cote: "achat" | "vente"): string {
+  const bps = cote === "achat" ? c.achatBps : c.venteBps;
+  const couvert = cote === "achat" ? c.achatCouvert : c.venteCouvert;
+  if (bps === null) return "—";
+  return couvert ? formatBps(bps) : "> carnet";
+}
+
+function heureDiagnostic(ms: number): string {
+  return new Date(ms).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Diagnostic lent partagé : monté dans DOM et EQS, collecteur ref-counté. */
+export function PanneauDiagnosticMicrostructure({ reglages = true }: { reglages?: boolean }) {
+  const config = useStore(microstructureDiagnosticStore, (s) => s.config);
+  const vue = useStore(microstructureDiagnosticStore, (s) => s.vue);
+  const setConfig = useStore(microstructureDiagnosticStore, (s) => s.setConfig);
+  const reset = useStore(microstructureDiagnosticStore, (s) => s.reset);
+
+  useEffect(() => retenirDiagnosticMicrostructure(), []);
+
+  const lecture = vue.diagnostic;
+  const variation = (v: number | null, unite: string) =>
+    v === null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)} ${unite}`;
+  return (
+    <section className="space-y-1.5 border-b border-border bg-bg px-3 py-2 text-[10px] text-text-dim">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium text-text">Prix / OI / CVD · {vue.symbole}</span>
+        <span className={lecture?.qualite === "complet" ? "text-up" : "text-warn"}>
+          {lecture?.qualite === "complet" ? "qualité complète" : "qualité incomplète"}
+        </span>
+        <span>{vue.statut}</span>
+        <span className="ml-auto tabular-nums">
+          {vue.persistance.confirme ? "confirmé" : "en attente"} {(vue.persistance.persistanceMs / 1000).toFixed(0)} s
+        </span>
+        <button type="button" className="rounded border border-border px-1.5 py-0.5 hover:text-text" onClick={reset}>
+          Reset
+        </button>
+      </div>
+      <div className="grid grid-cols-3 gap-1 tabular-nums">
+        <span>Prix {variation(lecture?.prix.variation ?? null, "%")}</span>
+        <span>OI qté {variation(lecture?.oi.variation ?? null, "%")}</span>
+        <span>CVD {variation(lecture?.cvd.variation ?? null, "base")}</span>
+        <span>couv. {lecture ? `${(lecture.prix.couverture * 100).toFixed(0)} % · n=${lecture.prix.observations}` : "—"}</span>
+        <span>couv. {lecture ? `${(lecture.oi.couverture * 100).toFixed(0)} % · n=${lecture.oi.observations}` : "—"}</span>
+        <span>couv. {lecture ? `${(lecture.cvd.couverture * 100).toFixed(0)} % · n=${lecture.cvd.observations}` : "—"}</span>
+      </div>
+      <div className="tabular-nums">
+        Bornes communes : {lecture?.bornesCommunes
+          ? `${heureDiagnostic(lecture.bornesCommunes.debut)}–${heureDiagnostic(lecture.bornesCommunes.fin)}`
+          : "indisponibles"}
+      </div>
+      {reglages && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <label>Fenêtre <select className="rounded border border-border bg-surface px-1" value={config.fenetreMs} onChange={(e) => setConfig({ fenetreMs: Number(e.target.value) })}>
+            <option value={30 * 60_000}>30 min</option><option value={60 * 60_000}>1 h</option><option value={4 * 60 * 60_000}>4 h</option>
+          </select></label>
+          <label>prix ±<input className="w-12 rounded border border-border bg-surface px-1" type="number" step="0.1" value={config.seuilPrixPct} onChange={(e) => setConfig({ seuilPrixPct: Number(e.target.value) })} />%</label>
+          <label>OI ±<input className="w-12 rounded border border-border bg-surface px-1" type="number" step="0.1" value={config.seuilOiPct} onChange={(e) => setConfig({ seuilOiPct: Number(e.target.value) })} />%</label>
+          <label>CVD ±<input className="w-14 rounded border border-border bg-surface px-1" type="number" step="1" value={config.seuilCvdBase} onChange={(e) => setConfig({ seuilCvdBase: Number(e.target.value) })} /> base</label>
+          <label>n min <input className="w-11 rounded border border-border bg-surface px-1" type="number" min="2" value={config.minimumObservations} onChange={(e) => setConfig({ minimumObservations: Number(e.target.value) })} /></label>
+          <label>couv. <input className="w-12 rounded border border-border bg-surface px-1" type="number" min="50" max="100" value={Math.round(config.couvertureMin * 100)} onChange={(e) => setConfig({ couvertureMin: Number(e.target.value) / 100 })} />%</label>
+          <label>persistance <select className="rounded border border-border bg-surface px-1" value={config.persistanceMs} onChange={(e) => setConfig({ persistanceMs: Number(e.target.value) })}>
+            <option value={0}>0</option><option value={60_000}>1 min</option><option value={120_000}>2 min</option><option value={300_000}>5 min</option>
+          </select></label>
+          <label>reset trou <select className="rounded border border-border bg-surface px-1" value={config.trouResetMs} onChange={(e) => setConfig({ trouResetMs: Number(e.target.value) })}>
+            <option value={5 * 60_000}>5 min</option><option value={10 * 60_000}>10 min</option><option value={15 * 60_000}>15 min</option><option value={30 * 60_000}>30 min</option>
+          </select></label>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-x-3 tabular-nums">
+        {vue.couts.length === 0 ? <span>Coût d’exécution : carnet en synchronisation</span> : vue.couts.map((c) => (
+          <span key={c.notionnelUsd}>{formatUsd(c.notionnelUsd)} : achat {coutTexte(c, "achat")} · vente {coutTexte(c, "vente")}</span>
+        ))}
+      </div>
+      <p>
+        {vue.provenance.prix} · {vue.provenance.oi} · {vue.provenance.cvd}. Spot et perp sont des instruments distincts ; absence ≠ 0. Coûts descriptifs hors frais.
+      </p>
+    </section>
+  );
+}
+
 // ─────────────────────────── Composant ───────────────────────────
 
 export function DomWindow() {
@@ -740,6 +826,8 @@ export function DomWindow() {
           )}
         </div>
       )}
+
+      <PanneauDiagnosticMicrostructure />
 
       {/* Corps : canvas (Binance) ou message d'indisponibilité. */}
       <div className="min-h-0 flex-1 overflow-auto">

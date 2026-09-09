@@ -1,7 +1,7 @@
 /**
  * Régime de marché : assemble les entrées du score composite (data/regime.ts)
  * depuis les caches TTL 1 h de data/referentiels.ts + fetchers existants (+ le
- * verdict gamma dealer BTC, cache TTL 10 min de data/gammaRegime.ts),
+ * verdict gamma BTC sous conventions de signe, cache TTL 10 min de data/gammaRegime.ts),
  * toutes en Promise.allSettled (une source en échec → composant null).
  * Poller 15 min (pattern startMacroHistoryPolling), démarré dans main.tsx.
  */
@@ -189,7 +189,7 @@ export async function rafraichirRegime(): Promise<void> {
     histOiUsdAvecMeta("BTCUSDT"),
     Promise.all(actifsEtf.map((actif) => fetchEtfFlows(actif, cleEtf))),
     chargerEmetteurs(),
-    // Verdict gamma dealer BTC : cache TTL 10 min → au plus 1 appel Deribit par cycle 15 min.
+    // Verdict gamma BTC sous hypothèses : cache TTL 10 min → au plus 1 appel par cycle 15 min.
     chargerVerdictGammaBtc(now),
   ]);
 
@@ -285,7 +285,14 @@ export async function rafraichirRegime(): Promise<void> {
     impressionStablecoins7jPct,
     regimeGammaBtc:
       verdictBtc !== null
-        ? { regime: verdictBtc.verdict.regime, gexNetUsd: verdictBtc.gexNetUsd }
+        ? {
+          regime: verdictBtc.verdict.regime,
+          gexNetUsd: verdictBtc.gexNetUsd,
+          hypotheses: verdictBtc.scenarios.map((scenario) => ({
+            libelle: scenario.libelle,
+            regime: scenario.verdict.regime,
+          })),
+        }
         : null,
   });
 

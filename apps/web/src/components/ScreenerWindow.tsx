@@ -61,6 +61,7 @@ import {
   Vide,
 } from "./ui";
 import { TableTriable, trierLignes, type ColonneTable, type TriTable } from "./TableTriable";
+import { PanneauDiagnosticMicrostructure } from "./DomWindow";
 
 /**
  * Presets « scénario » : teinte du glyphe directionnel (▲▼↔◆), portée par le premier
@@ -657,6 +658,12 @@ export function ScreenerWindow() {
           actif={vue}
           onChange={setVue}
         />
+      </div>
+
+      <div className="px-4 pt-3">
+        <div className="overflow-hidden rounded-md border border-border">
+          <PanneauDiagnosticMicrostructure />
+        </div>
       </div>
 
       {vue === "signaux" ? (

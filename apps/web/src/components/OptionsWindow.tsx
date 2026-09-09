@@ -24,6 +24,8 @@ import {
 } from "../data/deribit";
 import {
   aggregateGexDex,
+  comparerHypothesesGamma,
+  comparerHypothesesGammaCrypto,
   computeCryptoGexDex,
   gexParStrikeToutesEcheances,
   gammaFlip,
@@ -33,6 +35,7 @@ import {
   EQUITY_CONTRACT_MULTIPLIER,
   type GexDexPoint,
   type ProfilGexSpot,
+  type ScenarioGamma,
 } from "../data/gexDex";
 import { calculerSkew25d } from "../data/skew";
 import { termStructureIv, type PointTermIv } from "../data/termIv";
@@ -413,6 +416,18 @@ export function OptionsWindow() {
   );
   // Murs de gamma nommés — même périmètre que le net (toutes éch. crypto / éch. sélectionnée actions).
   const murs = useMemo(() => mursGamma(sourceNet), [sourceNet]);
+  const scenariosGamma = useMemo<ScenarioGamma[]>(() => {
+    if (vue !== "gexdex" || !Number.isFinite(spotVerdict)) return [];
+    if (classe === "crypto") {
+      return comparerHypothesesGammaCrypto(chain, spotVerdict, Date.now());
+    }
+    if (!cboeChaine || cboeExpiry === null) return [];
+    return comparerHypothesesGamma(
+      cboeOptionsToLegs(cboeChaine.options, cboeExpiry),
+      spotVerdict,
+      EQUITY_CONTRACT_MULTIPLIER,
+    );
+  }, [vue, classe, chain, spotVerdict, cboeChaine, cboeExpiry]);
 
   // Profil GEX(S) — crypto uniquement : GEX net recalculé par Black-Scholes sur 41 spots
   // simulés ±15 % autour du spot de la chaîne (IV/échéances inchangées ; Date.now() au bord
@@ -869,6 +884,7 @@ export function OptionsWindow() {
             strikePicGex={strikePicGex}
             verdict={verdict}
             murs={murs}
+            scenariosGamma={scenariosGamma}
             flipReel={profilGex?.flipReel ?? null}
             profilCanvasRef={profilCanvasRef}
             survolBarres={survolBarres}

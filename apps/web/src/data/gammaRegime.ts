@@ -1,5 +1,5 @@
 /**
- * Verdict gamma dealer BTC pour le régime composite (REGIME) et le chapeau BRIEF.
+ * Verdict gamma BTC sous conventions de signe pour le régime composite et BRIEF.
  *
  * Câblage du verdict OMON v2.6 (data/gexDex.ts) hors de la fenêtre options : la chaîne
  * Deribit BTC complète (1 appel agrégé, throttle géré par data/deribit.ts) est agrégée
@@ -17,10 +17,9 @@
  */
 import { fetchDeribitOptionChain } from "./deribit";
 import {
-  gammaFlip,
-  gexParStrikeToutesEcheances,
-  verdictGamma,
+  comparerHypothesesGammaCrypto,
   type CryptoOptionInput,
+  type ScenarioGamma,
   type VerdictGamma,
 } from "./gexDex";
 
@@ -30,13 +29,17 @@ export type PointChaineGamma = CryptoOptionInput & {
   underlying: number;
 };
 
-/** Verdict gamma dealer BTC résumé pour REGIME/BRIEF. */
+/** Verdict gamma BTC résumé sous hypothèse pour REGIME/BRIEF. */
 export interface VerdictGammaBtc {
   verdict: VerdictGamma;
   /** GEX net toutes échéances (USD par 1 % de mouvement du spot). */
   gexNetUsd: number;
   /** Spot de la chaîne (même définition que `spotChaine` d'OptionsWindow). */
   spot: number;
+  /** Trois conventions calculées sur la même chaîne, le même spot et le même nowMs. */
+  scenarios: ScenarioGamma[];
+  /** Vrai dès que les conventions ne donnent pas toutes le même verdict. */
+  sensibleAuxHypotheses: boolean;
 }
 
 /**
@@ -50,15 +53,16 @@ export function verdictGammaDepuisChaine(
 ): VerdictGammaBtc | null {
   const spot = chaine.map((p) => p.underlying).find((v) => Number.isFinite(v) && v > 0) ?? NaN;
   if (!Number.isFinite(spot)) return null;
-  const parStrike = gexParStrikeToutesEcheances([...chaine], spot, nowMs);
-  let gexNet = 0;
-  let sommeAbs = 0;
-  for (const p of parStrike) {
-    gexNet += p.gex;
-    sommeAbs += Math.abs(p.gex);
-  }
-  const flip = gammaFlip(parStrike);
-  return { verdict: verdictGamma(gexNet, spot, flip, sommeAbs), gexNetUsd: gexNet, spot };
+  const scenarios = comparerHypothesesGammaCrypto([...chaine], spot, nowMs);
+  const convention = scenarios.find((s) => s.hypothese === "convention");
+  if (!convention) return null;
+  return {
+    verdict: convention.verdict,
+    gexNetUsd: convention.gexNet,
+    spot,
+    scenarios,
+    sensibleAuxHypotheses: new Set(scenarios.map((s) => s.verdict.regime)).size > 1,
+  };
 }
 
 /** TTL du cache (10 min) : < poll REGIME 15 min → au plus 1 appel Deribit par cycle. */
@@ -72,7 +76,7 @@ export function _viderCacheGammaRegime(): void {
 }
 
 /**
- * Verdict gamma dealer BTC courant : chaîne Deribit BTC (1 appel agrégé) → verdict.
+ * Verdict gamma BTC courant sous trois hypothèses : chaîne Deribit → verdicts.
  * Succès mémoïsé TTL_MS ; échec → null (jamais caché, jamais d'exception propagée).
  */
 export async function chargerVerdictGammaBtc(nowMs: number): Promise<VerdictGammaBtc | null> {

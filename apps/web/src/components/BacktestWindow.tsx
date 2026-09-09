@@ -1181,8 +1181,8 @@ export function BacktestWindow() {
             <p className="text-[10px] text-text-dim">
               Funding réglé USDⓈ-M avec mark fourni au règlement ; règlement avant fills à timestamp égal.
               {couvertureFunding === null
-                ? " Couverture chargée au lancement ; le run échoue si elle est absente."
-                : ` ${couvertureFunding.nombre} règlements du ${formatDateHeure(couvertureFunding.debutMs)} au ${formatDateHeure(couvertureFunding.finMs)}.`}
+                ? " Le calcul s'arrête au dernier mois clos ; le run échoue si les archives ou un règlement REST ne concordent pas."
+                : ` Couverture vérifiée sur ${couvertureFunding.moisArchives.join(", ")} : ${couvertureFunding.nombre} règlements entre ${formatDateHeure(couvertureFunding.debutMs)} et ${formatDateHeure(couvertureFunding.finMs)} (cadences archivées : ${couvertureFunding.intervallesHeures.length > 0 ? couvertureFunding.intervallesHeures.map((heures) => `${heures} h`).join(", ") : "aucune échéance"}).`}
             </p>
           )}
           {profondeurInsuffisante && (

@@ -204,6 +204,19 @@ describe("funding perp linéaire", () => {
     )).toThrow("timeframe");
   });
 
+  it.each([2.5, 10])("refuse une fin de données à %sh incohérente avec le close H3", (finHeures) => {
+    const H = 3_600_000;
+    expect(() => runBacktest(
+      [barre(0, 100, 100), barre(H, 100, 100), barre(2 * H, 100, 100)],
+      { reglesEntree: [compareClose(">", 0)], reglesSortie: [], direction: "long", tailleFixe: 100 },
+      {
+        timeframe: "1h", fraisPct: 0, slippagePct: 0, capitalInitial: 1000,
+        finDonneesMs: finHeures * H,
+        funding: { modele: "perp-lineaire", reglements: [{ temps: 8 * H, taux: 0.01, mark: 100, tempsMark: 8 * H }] },
+      },
+    )).toThrow("incohérente");
+  });
+
   it("n'invente pas une clôture à l'open suivant lorsqu'une série contient un trou", () => {
     const H = 3_600_000;
     const resultat = runBacktest(
@@ -261,6 +274,28 @@ describe("borne de début hors échantillon", () => {
       { ...SANS_FRICTION, debutEvaluationMs: 5 },
     );
     expect(resultat.trades[0]?.tempsEntree).toBe(5);
+  });
+});
+
+describe("fin effective spot explicite", () => {
+  it("transmet le close réel au trade final sans changer le contrat historique implicite", () => {
+    const H = 3_600_000;
+    const candles = [barre(0, 100, 100), barre(H, 100, 100), barre(2 * H, 101, 101)];
+    const strat: StrategieDef = { reglesEntree: [compareClose(">", 0)], reglesSortie: [], direction: "long", tailleFixe: 100 };
+    const explicite = runBacktest(candles, strat, { ...SANS_FRICTION, timeframe: "1h", finDonneesMs: 3 * H });
+    const implicite = runBacktest(candles, strat, { ...SANS_FRICTION, timeframe: "1h" });
+    expect(explicite.trades[0]?.instantSortieEffectif).toBe(3 * H);
+    expect(explicite.trades[0]?.dureeMs).toBe(2 * H);
+    expect(implicite.trades[0]?.instantSortieEffectif).toBeUndefined();
+  });
+
+  it("refuse aussi une fin explicite spot incohérente", () => {
+    const H = 3_600_000;
+    expect(() => runBacktest(
+      [barre(0, 100, 100), barre(H, 100, 100)],
+      { reglesEntree: [], reglesSortie: [], direction: "long", tailleFixe: 100 },
+      { ...SANS_FRICTION, timeframe: "1h", finDonneesMs: 10 * H },
+    )).toThrow("incohérente");
   });
 });
 

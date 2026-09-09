@@ -13,5 +13,13 @@
     "engineSha256": "ca54d0c9bfa8c0ea1766d7d63ef778fe807b3061465df297c5887cfc70f2a41b"
   },
   "auditCausaliteComplementaire": "Refus explicite des sorties pivotHighLow.pivotHigh/pivotLow, confirmées par des barres futures ; protocole et résultats OOS inchangés car aucune règle de campagne ne les utilise.",
+  "correctionRevueR1": {
+    "raison": "finDonneesMs est désormais exigée à la clôture exacte de la dernière bougie pour tout run explicite ; le trade final spot transmet instantSortieEffectif afin d'annualiser le Sharpe sur la même borne. Le transport funding vérifie séparément sa couverture par archives mensuelles officielles et n'affecte pas la campagne spot.",
+    "protocoleModifie": false,
+    "donneesModifiees": false,
+    "runnerSha256": "29a30b2423cbdef5c1eb0d5a89f76d090ba568273cfc956a2f1eca505b6c59f9",
+    "engineAvantSha256": "ca54d0c9bfa8c0ea1766d7d63ef778fe807b3061465df297c5887cfc70f2a41b",
+    "engineApresSha256": "d9ba9bca925c3edbe6f4b03cf291cd0342273826d4ce080edf45f8af37214ac0"
+  },
   "recalcul": "Les mêmes quatre séries OHLCV, règles, paramètres, coûts, seed et bornes du manifeste sont relus depuis le cache dont chaque SHA-256 est revérifié."
 }

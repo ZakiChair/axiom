@@ -341,8 +341,8 @@ function cloturerTrade(
     ...(calculFunding === null ? {} : {
       funding,
       reglementsFunding: calculFunding.reglements,
-      instantSortieEffectif,
     }),
+    ...(calculFunding !== null || instantSortieEffectif !== tempsSortie ? { instantSortieEffectif } : {}),
     dureeBarres: indexSortie - pos.indexEntree,
     dureeMs: instantSortieEffectif - pos.tempsEntree,
     risqueInitial,
@@ -406,17 +406,21 @@ export function runBacktest(
   if (params.debutEvaluationMs !== undefined && !Number.isFinite(params.debutEvaluationMs)) {
     throw new Error("debutEvaluationMs doit être fini.");
   }
-  if (params.funding !== undefined) {
-    if (!Number.isFinite(params.finDonneesMs) || params.finDonneesMs === undefined) {
-      throw new Error("Funding actif : finDonneesMs réelle requise.");
-    }
+  if (params.funding !== undefined && params.finDonneesMs === undefined) {
+    throw new Error("Funding actif : finDonneesMs réelle requise.");
+  }
+  if (params.finDonneesMs !== undefined) {
+    if (!Number.isFinite(params.finDonneesMs)) throw new Error("finDonneesMs doit être finie.");
     const dernierOpen = candles[n - 1]?.time;
-    if (dernierOpen !== undefined && params.finDonneesMs <= dernierOpen) {
-      throw new Error("Funding actif : finDonneesMs doit suivre l'open de la dernière bougie.");
+    const dureeTimeframe = dureeTimeframeFixeMs(params.timeframe);
+    if (dureeTimeframe === null) {
+      throw new Error("finDonneesMs explicite : timeframe fixe requis pour dater la clôture.");
     }
-    if (dureeTimeframeFixeMs(params.timeframe) === null) {
-      throw new Error("Funding actif : timeframe fixe explicite requis pour dater chaque clôture.");
+    if (dernierOpen === undefined || params.finDonneesMs !== dernierOpen + dureeTimeframe) {
+      throw new Error("finDonneesMs incohérente avec la clôture de la dernière bougie et le timeframe.");
     }
+  }
+  if (params.funding !== undefined) {
     validerReglementsFunding(params.funding.reglements);
   }
   const cache = new Map<string, IndicatorResult>();

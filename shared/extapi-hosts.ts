@@ -31,6 +31,7 @@ export const EXTAPI_HOSTS: readonly string[] = [
   "www.deribit.com", // options / term structure (public, sans clé)
   "dapi.binance.com", // Binance COIN-M (term structure)
   "fapi.binance.com", // Binance USD-M (dérivés : funding, top trader L/S)
+  "data.binance.vision", // Archives funding mensuelles BTC/ETH, chemins strictement bornés ci-dessous
   "api.coingecko.com", // CoinGecko (treemap, catégories)
   "api.fiscaldata.treasury.gov", // US Treasury Fiscal Data (rendements souverains US)
   "home.treasury.gov", // US Treasury Daily Par Yield Curve CSV
@@ -62,6 +63,9 @@ export function extapiCheminAutorise(hote: string, chemin: string): boolean {
   if (hote === "api.mospi.gov.in") return chemin === "/api/plfs/getData";
   if (hote === "www.matteoiacoviello.com") return chemin === "/gpr.htm" || chemin === "/tpu.htm";
   if (hote === "www.newyorkfed.org") return chemin === "/medialibrary/research/interactives/data/gscpi/gscpi_interactive_data.csv";
+  if (hote === "data.binance.vision") {
+    return /^\/data\/futures\/um\/monthly\/fundingRate\/(BTCUSDT|ETHUSDT)\/\1-fundingRate-\d{4}-(?:0[1-9]|1[0-2])\.zip(?:\.CHECKSUM)?$/.test(chemin);
+  }
   return true;
 }
 export function sourceGeoExtraite(url: URL): "gpr" | "tpu" | null {

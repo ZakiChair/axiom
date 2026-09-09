@@ -39,6 +39,7 @@ import {
 import {
   accumulerKlinesPerpBinance,
   fetchReglementsFundingBinance,
+  finFenetreFundingArchivee,
   type CouvertureFundingBacktest,
 } from "../data/backtestFunding";
 import type { WorkerRequest, WorkerResponse } from "../workers/backtest.worker";
@@ -694,7 +695,12 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
 
     const ctrl = new AbortController();
     abort = ctrl;
-    const jusqua = Date.now();
+    const maintenant = Date.now();
+    // Les archives mensuelles constituent l'attestation des échéances. Une
+    // fenêtre perp s'arrête donc avant le mois courant, encore non publié.
+    const jusqua = s.modeFunding === "binance-reel"
+      ? finFenetreFundingArchivee(maintenant)
+      : maintenant;
     const plage = PLAGES.find((p) => p.id === s.plage) ?? PLAGES[1]!;
     const depuis = jusqua - plage.ms;
 
@@ -744,8 +750,12 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
           return;
         }
         try {
-          historiqueFunding = await fetchReglementsFundingBinance(s.symbol, candles[0]!.time, finDonneesMs);
+          historiqueFunding = await fetchReglementsFundingBinance(s.symbol, candles[0]!.time, finDonneesMs, fetch, {
+            signal: ctrl.signal,
+            maintenantMs: maintenant,
+          });
         } catch (err) {
+          if (err instanceof DOMException && err.name === "AbortError") return;
           if (runId !== currentRunId) return;
           set({
             phase: "error",

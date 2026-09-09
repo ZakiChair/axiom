@@ -58,6 +58,7 @@ describe("parseReleaseDates", () => {
         { date: "2025-06-11", release_id: 10 }, // doublon → écarté
         { date: "pas-une-date", release_id: 10 }, // format invalide → ignoré
         { date: "2025-13-99", release_id: 10 }, // format OK mais date impossible → ignoré
+        { date: "2025-02-30", release_id: 10 }, // Date.parse normaliserait vers mars → doit être ignoré
         { date: 20250815, release_id: 10 }, // non-chaîne → ignoré
       ],
     };

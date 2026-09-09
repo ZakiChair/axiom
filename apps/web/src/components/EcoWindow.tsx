@@ -24,7 +24,7 @@ import { CATALOGUE_MACRO } from "../data/macro/catalogueMacro";
 import { windowManagerStore } from "../store/windowManager";
 import { macroRatesViewStore } from "../store/macroRatesView";
 import { evtsUiStore } from "../store/evts";
-import { typePublicationDepuisTitre } from "../data/macro/publicationArchive";
+import { typePublicationDepuisEvenement } from "../data/macro/publicationArchive";
 import "../chart/ecoMarkers";
 
 /** Libellé court FR d'un impact. */
@@ -97,7 +97,7 @@ function Ligne({ ev, passe }: { ev: EcoEvent; passe: boolean }) {
   // Le bouton « série » est un FRÈRE du bouton de ligne, pas un enfant : imbriquer
   // deux <button> est du HTML invalide. D'où le conteneur `relative` + position absolue.
   const idSerie = serieMacroDe(ev.country, ev.title);
-  const typeEvts = typePublicationDepuisTitre(ev.title);
+  const identiteEvts = typePublicationDepuisEvenement(ev.country, ev.title);
   return (
     <div className="relative">
       <button
@@ -158,12 +158,12 @@ function Ligne({ ev, passe }: { ev: EcoEvent; passe: boolean }) {
           série
         </button>
       )}
-      {typeEvts !== null && (
+      {identiteEvts !== null && (
         <button
           type="button"
           title="Étudier la réaction BTC/ETH autour de cette publication"
           className="absolute right-14 bottom-2 rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-dim transition hover:text-text"
-          onClick={() => evtsUiStore.getState().ouvrirEvenement(typeEvts, ev.time, ev.timeApprox === true)}
+          onClick={() => evtsUiStore.getState().ouvrirEvenement({ ...identiteEvts, id: ev.id, title: ev.title, time: ev.time, timeApprox: ev.timeApprox === true, source: ev.source })}
         >
           EVTS
         </button>

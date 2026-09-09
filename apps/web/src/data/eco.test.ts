@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   chargerEvenementsEco,
+  capturerConsensusCalendrier,
   evenementsFomc,
   fusionnerEvenementsEco,
   impactPublicationFred,
@@ -10,6 +11,7 @@ import {
   rangImpact,
   type EcoEvent,
 } from "./eco";
+import { lireCapturesConsensus } from "./macro/publicationArchive";
 
 describe("mapImpactFf", () => {
   it("mappe les libellés ForexFactory (insensible à la casse)", () => {
@@ -205,5 +207,28 @@ describe("chargerEvenementsEco (sans réseau / sans localStorage)", () => {
     const r = await chargerEvenementsEco({ force: true });
     expect(Array.isArray(r.events)).toBe(true);
     expect(r.events.some((e) => e.source === "fomc")).toBe(true);
+  });
+});
+
+describe("capturerConsensusCalendrier", () => {
+  it("archive un consensus US compatible avant annonce, pas un CPI étranger ou après H0", () => {
+    const memoire = new Map<string, string>();
+    (globalThis as { localStorage?: Storage }).localStorage = {
+      getItem: (key) => memoire.get(key) ?? null,
+      setItem: (key, value) => { memoire.set(key, value); },
+      removeItem: (key) => { memoire.delete(key); },
+      clear: () => memoire.clear(),
+      key: () => null,
+      get length() { return memoire.size; },
+    };
+    const publication = Date.parse("2026-10-14T12:30:00Z");
+    const events: EcoEvent[] = [
+      { id: "ff-us", time: publication, country: "USD", title: "CPI m/m", impact: "high", source: "forexfactory", forecast: "0.2%" },
+      { id: "ff-gbp", time: publication, country: "GBP", title: "CPI m/m", impact: "high", source: "forexfactory", forecast: "0.2%" },
+    ];
+    expect(capturerConsensusCalendrier(events, publication - 60_000)).toBe(1);
+    expect(lireCapturesConsensus()).toHaveLength(1);
+    expect(capturerConsensusCalendrier(events, publication)).toBe(0);
+    delete (globalThis as { localStorage?: Storage }).localStorage;
   });
 });

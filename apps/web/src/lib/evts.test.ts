@@ -125,33 +125,38 @@ describe("agregerFenetres", () => {
 });
 
 describe("calculerReactionEvenement", () => {
-  it("mesure rendement, volume, volatilité et couverture aux horizons 5/15/60 min et 24 h", () => {
+  it("inclut la minute H0, garde les horizons courts et sépare avant/après", () => {
     const base = Date.UTC(2026, 8, 4, 12, 30);
-    const minutes = Array.from({ length: 1441 }, (_, i) => ({
-      time: base + i * 60_000,
-      open: 100 + i / 10,
-      high: 100 + i / 10,
-      low: 100 + i / 10,
-      close: 100 + i / 10,
-      volume: 2,
-    }));
-    const result = calculerReactionEvenement(minutes, base + 30_000);
+    const minutes = Array.from({ length: 1_507 }, (_, i) => {
+      const time = base - 1_441 * 60_000 + i * 60_000;
+      const apresH0 = time >= base;
+      return { time, open: apresH0 ? 200 : 100, high: apresH0 ? 200 : 100, low: 100, close: apresH0 ? 200 : 100, volume: 2 };
+    });
+    const result = calculerReactionEvenement(minutes, base);
 
     expect("horizons" in result).toBe(true);
     if (!("horizons" in result)) return;
     expect(result.horizons.map((h) => h.minutes)).toEqual([5, 15, 60, 1440]);
-    expect(result.horizons[0]).toMatchObject({ couverture: 5, volume: 10 });
-    expect(result.horizons[0]?.rendementPct).toBeCloseTo(0.5, 10);
-    expect(result.horizons.every((h) => h.volatilitePct !== null)).toBe(true);
+    expect(result.horizons[0]).toMatchObject({ apres: { couverture: 5, volume: 10, rendementPct: 100 }, avant: { couverture: 5, rendementPct: 0 } });
+    expect(result.horizons[2]).toMatchObject({ apres: { couverture: 60, complet: true } });
+    expect(result.horizons[3]).toMatchObject({ apres: { couverture: 66, complet: false } });
   });
 
-  it("ne prétend pas mesurer 24 h quand une minute manque", () => {
+  it("n'efface pas +5m quand un trou tardif rend seulement +24h incomplet", () => {
     const base = Date.UTC(2026, 8, 4, 12, 30);
-    const minutes = Array.from({ length: 1441 }, (_, i) => c(base + i * 60_000, 100 + i));
-    minutes.splice(1000, 1);
-    expect(calculerReactionEvenement(minutes, base + 30_000)).toEqual<OccurrenceExclue>({
-      eventTime: base + 30_000,
-      raison: "trou-ohcl",
+    const minutes = Array.from({ length: 2_881 }, (_, i) => c(base - 1_441 * 60_000 + i * 60_000, 100 + i));
+    minutes.splice(2_000, 1);
+    const result = calculerReactionEvenement(minutes, base);
+    expect("horizons" in result).toBe(true);
+    if (!("horizons" in result)) return;
+    expect(result.horizons[0]?.apres).toMatchObject({ couverture: 5, complet: true });
+    expect(result.horizons[3]?.apres).toMatchObject({ complet: false });
+  });
+
+  it("signale l'incertitude d'une heure intraminute au lieu de fabriquer un prix à la seconde", () => {
+    expect(calculerReactionEvenement([c(Date.UTC(2026, 8, 4, 12, 30), 100)], Date.UTC(2026, 8, 4, 12, 30, 30))).toEqual({
+      eventTime: Date.UTC(2026, 8, 4, 12, 30, 30),
+      raison: "heure-intraminute",
     });
   });
 });

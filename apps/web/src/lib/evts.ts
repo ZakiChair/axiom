@@ -24,7 +24,7 @@ export interface FenetreAlignee {
 
 export interface OccurrenceExclue {
   eventTime: number;
-  raison: "fenetre-incomplete" | "fetch-echec" | "h0-absent" | "trou-ohcl";
+  raison: "fenetre-incomplete" | "fetch-echec" | "h0-absent" | "trou-ohcl" | "heure-intraminute";
 }
 
 /**
@@ -72,12 +72,17 @@ export function alignerFenetre(
 
 export interface ReactionHorizon {
   minutes: 5 | 15 | 60 | 1440;
-  /** Nombre de minutes post-annonce effectivement continues. */
+  avant: MetriqueReaction;
+  apres: MetriqueReaction;
+}
+
+export interface MetriqueReaction {
+  /** Nombre de minutes effectivement continues dans l'intervalle demandé. */
   couverture: number;
+  attendu: number;
+  complet: boolean;
   rendementPct: number | null;
-  /** Volume cumulé des minutes postérieures à H0, dans l'unité de l'exchange. */
   volume: number | null;
-  /** Écart-type population des retours minute à minute, en %. */
   volatilitePct: number | null;
 }
 
@@ -89,50 +94,57 @@ export interface ReactionEvenement {
 const HORIZONS_REACTION = [5, 15, 60, 1440] as const;
 
 /**
- * Mesure une réaction sur des bougies M1 continues. Les données insuffisantes ne sont pas
- * extrapolées : l'occurrence entière est écartée afin qu'une séance partielle ne devienne
- * pas une fausse mesure 24 h.
+ * Référence d'une annonce exactement à la minute : dernier close AVANT H0. La minute H0
+ * appartient à l'après ; +N utilise le close de la dernière bougie ouverte avant H0+N.
+ * Chaque côté/horizon conserve sa couverture propre, sans transformer une absence en zéro.
  */
 export function calculerReactionEvenement(
   candles: Candle[],
   eventTime: number,
 ): ReactionEvenement | OccurrenceExclue {
-  const h0 = candles.findIndex((candle) => candle.time <= eventTime && eventTime < candle.time + 60_000);
-  if (h0 < 0) return { eventTime, raison: "h0-absent" };
-  const segment = candles.slice(h0, h0 + 1441);
-  if (segment.length !== 1441) return { eventTime, raison: "trou-ohcl" };
-  for (let index = 0; index < segment.length; index++) {
-    const courant = segment[index];
-    const precedent = segment[index - 1];
-    if (
-      courant === undefined ||
-      !Number.isFinite(courant.close) ||
-      !Number.isFinite(courant.volume) ||
-      (precedent !== undefined && courant.time !== precedent.time + 60_000)
-    ) {
-      return { eventTime, raison: "trou-ohcl" };
-    }
+  const minute = 60_000;
+  if (eventTime % minute !== 0) return { eventTime, raison: "heure-intraminute" };
+  const parTemps = new Map(candles.map((candle) => [candle.time, candle]));
+  if (!estBougieValide(parTemps.get(eventTime)) || !estBougieValide(parTemps.get(eventTime - minute))) {
+    return { eventTime, raison: "h0-absent" };
   }
-  const base = segment[0]!.close;
-  if (!Number.isFinite(base) || base === 0) return { eventTime, raison: "trou-ohcl" };
   return {
     eventTime,
     horizons: HORIZONS_REACTION.map((minutes) => {
-      const fin = segment[minutes]!;
-      const post = segment.slice(1, minutes + 1);
-      const retours = post.flatMap((candle, index) => {
-        const precedent = segment[index]!;
-        return precedent.close > 0 && candle.close > 0 ? [candle.close / precedent.close - 1] : [];
-      });
       return {
         minutes,
-        couverture: minutes,
-        rendementPct: (fin.close / base - 1) * 100,
-        volume: post.reduce((somme, candle) => somme + candle.volume, 0),
-        volatilitePct: ecartTypePopulation(retours) * 100,
+        avant: mesurerIntervalleReaction(parTemps, eventTime - (minutes + 1) * minute, minutes),
+        apres: mesurerIntervalleReaction(parTemps, eventTime - minute, minutes),
       };
     }),
   };
+}
+
+function estBougieValide(candle: Candle | undefined): candle is Candle {
+  return candle !== undefined && Number.isFinite(candle.close) && candle.close > 0 && Number.isFinite(candle.volume) && candle.volume >= 0;
+}
+
+/** `referenceTime` est le close précédent le premier intervalle, puis `attendu` bougies M1. */
+function mesurerIntervalleReaction(parTemps: ReadonlyMap<number, Candle>, referenceTime: number, attendu: number): MetriqueReaction {
+  const minute = 60_000;
+  const reference = parTemps.get(referenceTime);
+  if (!estBougieValide(reference)) return { couverture: 0, attendu, complet: false, rendementPct: null, volume: null, volatilitePct: null };
+  let precedent = reference;
+  let dernier = reference;
+  let volume = 0;
+  const retours: number[] = [];
+  let couverture = 0;
+  for (let index = 1; index <= attendu; index += 1) {
+    const courant = parTemps.get(referenceTime + index * minute);
+    if (!estBougieValide(courant)) break;
+    volume += courant.volume;
+    retours.push(courant.close / precedent.close - 1);
+    precedent = courant;
+    dernier = courant;
+    couverture += 1;
+  }
+  if (couverture === 0) return { couverture, attendu, complet: false, rendementPct: null, volume: null, volatilitePct: null };
+  return { couverture, attendu, complet: couverture === attendu, rendementPct: (dernier.close / reference.close - 1) * 100, volume, volatilitePct: ecartTypePopulation(retours) * 100 };
 }
 
 /** Pas minimal observé, réservé aux appels historiques ; EVTS transmet toujours son TF. */

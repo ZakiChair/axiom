@@ -25,7 +25,7 @@
 import { extUrl } from "./extapi";
 import { healthStore } from "../store/health";
 import { getFredKey } from "../store/macro";
-import { conserverConsensusAvantAnnonce, typePublicationDepuisTitre } from "./macro/publicationArchive";
+import { conserverConsensusAvantAnnonce, typePublicationDepuisEvenement } from "./macro/publicationArchive";
 
 // ─────────────────────────── Types ───────────────────────────
 
@@ -457,6 +457,26 @@ export interface ChargementEco {
   brideDebit?: boolean;
 }
 
+/** Capture uniquement les prévisions ForexFactory identifiées US, avant leur publication. */
+export function capturerConsensusCalendrier(events: readonly EcoEvent[], collecte: number): number {
+  let captures = 0;
+  for (const event of events) {
+    const identite = typePublicationDepuisEvenement(event.country, event.title);
+    if (identite === null || event.source !== "forexfactory" || event.forecast === undefined) continue;
+    if (conserverConsensusAvantAnnonce({
+      id: event.id,
+      ...identite,
+      title: event.title,
+      publishedAt: event.time,
+      timeApprox: event.timeApprox === true,
+      consensus: { value: event.forecast },
+      source: { nom: "ForexFactory", url: "https://www.forexfactory.com/calendar" },
+      collectedAt: collecte,
+    })) captures += 1;
+  }
+  return captures;
+}
+
 /**
  * Charge le calendrier fusionné (effet de bord : fetch + cache + santé).
  *  - cache frais (<12 h) et pas de `force` → renvoyé tel quel, aucun réseau ;
@@ -498,19 +518,7 @@ export async function chargerEvenementsEco(opts?: {
   const events = fusionnerEvenementsEco(ff, fred, evenementsFomc());
   // Le calendrier courant est la seule source de consensus pour le futur. Une collecte
   // postérieure à H0 est refusée dans le module d'archive, sans réécriture rétroactive.
-  const collecte = Date.now();
-  for (const event of events) {
-    const type = typePublicationDepuisTitre(event.title);
-    if (type === null || event.forecast === undefined) continue;
-    conserverConsensusAvantAnnonce({
-      id: event.id,
-      type,
-      publishedAt: event.time,
-      consensus: event.forecast,
-      source: { nom: event.source === "forexfactory" ? "ForexFactory" : event.source, url: "https://www.forexfactory.com/calendar" },
-      collectedAt: collecte,
-    });
-  }
+  capturerConsensusCalendrier(events, Date.now());
   ecrireCache(events);
   return { events, depuisCache: false };
 }

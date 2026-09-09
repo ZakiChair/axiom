@@ -1,8 +1,8 @@
 /**
  * Dates d'évènements macro (EVTS — étude d'évènements).
  *
- * Fournit les horodatages EXACTS de publication de trois évènements qui font bouger
- * le marché, pour aligner la performance du prix autour de leurs dernières occurrences :
+ * Fournit les jours de publication et, seulement quand une archive le source, l'heure
+ * exacte de quelques évènements qui font bouger le marché :
  *   - CPI US  (indice des prix à la consommation) — release FRED id 10, publié 08:30 ET ;
  *   - NFP     (Employment Situation / paie non agricole) — release FRED id 50, 08:30 ET ;
  *   - FOMC    (décision de taux directeur) — statique, décision publiée 14:00 ET.
@@ -86,8 +86,8 @@ const HEURE_LOCALE_ET: Record<TypeEvenement, { h: number; min: number }> = {
 };
 
 /**
- * Horodatage UTC exact de la publication de `type` le jour `ymd`. Convertit l'heure ET
- * en UTC selon le DST US (EDT = UTC-4 en été, EST = UTC-5 en hiver). Fonction PURE.
+ * Heure UTC reconstituée de `type` le jour `ymd`, jamais une heure attestée par FRED.
+ * Convertit la convention ET en UTC selon le DST US. Fonction PURE.
  *
  * ⚠️ Approximation connue : les deux baisses d'urgence de mars 2020 (2020-03-03,
  * 2020-03-15) n'ont PAS été annoncées à 14:00 ET — on les ancre quand même à 14:00 ET
@@ -98,6 +98,14 @@ export function tsPublicationUtc(ymd: string, type: TypeEvenement): number {
   const { h, min } = HEURE_LOCALE_ET[type];
   const decalageUtc = estEteUs(ymd) ? 4 : 5; // EDT = UTC-4, EST = UTC-5
   return jour + ((h + decalageUtc) * 60 + min) * 60 * 1000;
+}
+
+function estDateCivile(ymd: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd);
+  if (!match) return false;
+  const [annee, mois, jour] = match.slice(1).map(Number);
+  const date = new Date(Date.UTC(annee!, mois! - 1, jour!));
+  return date.getUTCFullYear() === annee && date.getUTCMonth() === mois! - 1 && date.getUTCDate() === jour;
 }
 
 // ─────────────────────────── Parsing FRED release/dates ───────────────────────────
@@ -119,7 +127,7 @@ export function parseReleaseDates(donnees: unknown, type: TypeEvenement): DateEv
   const parYmd = new Map<string, DateEvenement>();
   for (const r of liste) {
     const ymd = typeof r?.date === "string" ? r.date : "";
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd) || parYmd.has(ymd)) continue;
+    if (!estDateCivile(ymd) || parYmd.has(ymd)) continue;
     const time = tsPublicationUtc(ymd, type);
     if (!Number.isFinite(time)) continue; // ex. « 2025-13-99 » → NaN → ignoré
     parYmd.set(ymd, { time, ymd, timeApprox: true, source: "fred" });

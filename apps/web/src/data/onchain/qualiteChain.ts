@@ -43,6 +43,7 @@ export function qualitesCoinMetrics(resultat: CoinMetricsResultat | null, now: n
         observeLe,
         recupereLe: resultat?.ts ?? null,
         cadenceMs: JOUR_MS,
+        ageMaxMs: 3 * JOUR_MS,
         couverture: null,
         estime: false,
         acces: resultat === null ? "indisponible" : "public",
@@ -74,6 +75,7 @@ export function qualitePublicationEtf(
       observeLe: precedente?.observeLe ?? null,
       recupereLe: precedente?.recupereLe ?? null,
       cadenceMs: JOUR_MS,
+      ageMaxMs: 5 * JOUR_MS,
       couverture: null,
       estime: false,
       acces: precedente?.acces ?? "indisponible",
@@ -86,7 +88,7 @@ export function qualitePublicationEtf(
     const observeLe = repli.serie.dernier.time <= now ? repli.serie.dernier.time : null;
     return {
       sourceId: "bgeometrics", sourceEffective: repli.perime ? "cache BGeometrics (repli)" : "BGeometrics (repli)",
-      observeLe, recupereLe: repli.ts, cadenceMs: JOUR_MS, couverture: null, estime: false, acces: "cle",
+      observeLe, recupereLe: repli.ts, cadenceMs: JOUR_MS, ageMaxMs: 5 * JOUR_MS, couverture: null, estime: false, acces: "cle",
       statut: repli.perime || observeLe === null || now - observeLe > 5 * JOUR_MS ? "perime" : "partiel",
       raison: observeLe === null ? "Observation future du repli rejetée." : "SoSoValue indisponible ; repli BTC natif.",
     };
@@ -94,13 +96,14 @@ export function qualitePublicationEtf(
   const analyse = analyserJourEtf(valeur.principal.jour, now);
   if (!valeur.principal.disponible) {
     return { sourceId: "sosovalue", sourceEffective: valeur.principal.sourceEffective ?? "SoSoValue", observeLe: null,
-      recupereLe: valeur.principal.recupereLe ?? null, cadenceMs: JOUR_MS, couverture: null, estime: false, acces: "indisponible",
+      recupereLe: valeur.principal.recupereLe ?? null, cadenceMs: JOUR_MS, ageMaxMs: 5 * JOUR_MS, couverture: null, estime: false, acces: "indisponible",
       statut: "indisponible", raison: erreur ?? valeur.principal.raison ?? "Flux indisponible." };
   }
   const perime = analyse.ageJours !== null && analyse.ageJours > 5;
   return {
     sourceId: "sosovalue", sourceEffective: valeur.principal.sourceEffective ?? "SoSoValue",
-    observeLe: analyse.observeLe, recupereLe: valeur.principal.recupereLe ?? null, cadenceMs: JOUR_MS, couverture: null,
+    // analyserJourEtf compte les jours entiers : expire au début du sixième jour.
+    observeLe: analyse.observeLe, recupereLe: valeur.principal.recupereLe ?? null, cadenceMs: JOUR_MS, ageMaxMs: 6 * JOUR_MS - 1, couverture: null,
     estime: false, acces: "cle", statut: analyse.observeLe === null ? "partiel" : perime ? "perime" : "frais",
     ...(analyse.raison ? { raison: analyse.raison } : perime ? { raison: "Séance ETF âgée de plus de cinq jours calendaires." } : {}),
   };

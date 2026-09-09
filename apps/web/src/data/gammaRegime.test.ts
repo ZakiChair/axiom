@@ -1,8 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { verdictGammaDepuisChaine, type PointChaineGamma } from "./gammaRegime";
 
 const NOW = 1_700_000_000_000;
 const ECHEANCE = NOW + 30 * 86_400_000; // 30 j — T > 0, greeks finis.
+
+afterEach(() => vi.useRealTimers());
 
 /** Option synthétique : IV 60 %, OI 10, spot 100 000, échéance 30 j (surchargables). */
 function opt(
@@ -111,14 +113,19 @@ describe("chargerVerdictGammaBtc — cache TTL 10 min, succès seulement", () =>
     _viderCacheGammaRegime();
 
     const chaine = [opt({ strike: 95_000, type: "call" })];
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW + 1_000);
     fetchMock.mockResolvedValueOnce(chaine as never);
     const r1 = await chargerVerdictGammaBtc(NOW);
     expect(r1?.verdict.regime).toBe("long-gamma");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(r1?.recupereLe).toBe(NOW + 1_000);
 
     // Dans le TTL : servi du cache, AUCUN nouvel appel réseau.
+    vi.setSystemTime(NOW + 60_000);
     const r2 = await chargerVerdictGammaBtc(NOW + 60_000);
     expect(r2).toBe(r1);
+    expect(r2?.recupereLe).toBe(NOW + 1_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     // TTL expiré : re-fetch. Un ÉCHEC renvoie null sans être caché…
@@ -129,9 +136,11 @@ describe("chargerVerdictGammaBtc — cache TTL 10 min, succès seulement", () =>
 
     // …et le tick suivant RETENTE immédiatement (l'échec n'a pas empoisonné le cache).
     fetchMock.mockResolvedValueOnce(chaine as never);
+    vi.setSystemTime(NOW + 700_500);
     const r4 = await chargerVerdictGammaBtc(NOW + 700_001);
     expect(r4?.verdict.regime).toBe("long-gamma");
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(r4?.recupereLe).toBe(NOW + 700_500);
 
     _viderCacheGammaRegime();
   });

@@ -1,9 +1,13 @@
-import type { QualiteMetrique as Qualite } from "../data/qualiteMetrique";
-import { formatDateComplete } from "../lib/format";
+import { actualiserQualite, type QualiteMetrique as Qualite } from "../data/qualiteMetrique";
+import { useHorloge } from "../lib/horloge";
 import { Badge } from "./ui";
 
+const formatDateUtc = new Intl.DateTimeFormat("fr-FR", {
+  day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC",
+});
+
 function dateOuTiret(ts: number | null): string {
-  return ts === null || !Number.isFinite(ts) ? "—" : formatDateComplete(ts);
+  return ts === null || !Number.isFinite(ts) ? "—" : `${formatDateUtc.format(ts)} UTC`;
 }
 
 function cadence(ms: number | null): string {
@@ -13,7 +17,9 @@ function cadence(ms: number | null): string {
   return `${Math.round(ms / 60_000)} min`;
 }
 
-export function QualiteMetrique({ qualite }: { qualite: Qualite }) {
+export function QualiteMetrique({ qualite: releve }: { qualite: Qualite }) {
+  const now = useHorloge();
+  const qualite = actualiserQualite(releve, now);
   const ton = qualite.statut === "frais" ? "neutre" : qualite.statut === "indisponible" ? "down" : "warn";
   return (
     <div className="space-y-0.5 text-[10px] leading-snug text-text-dim">

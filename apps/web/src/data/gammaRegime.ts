@@ -68,7 +68,12 @@ export function verdictGammaDepuisChaine(
 /** TTL du cache (10 min) : < poll REGIME 15 min → au plus 1 appel Deribit par cycle. */
 const TTL_MS = 600_000;
 
-let cache: { t: number; data: VerdictGammaBtc } | null = null;
+export interface VerdictGammaBtcCharge extends VerdictGammaBtc {
+  /** Réception réelle de la chaîne ; une lecture du cache conserve cette date. */
+  recupereLe: number;
+}
+
+let cache: { t: number; data: VerdictGammaBtcCharge } | null = null;
 
 /** Vide le cache (tests). */
 export function _viderCacheGammaRegime(): void {
@@ -79,14 +84,15 @@ export function _viderCacheGammaRegime(): void {
  * Verdict gamma BTC courant sous trois hypothèses : chaîne Deribit → verdicts.
  * Succès mémoïsé TTL_MS ; échec → null (jamais caché, jamais d'exception propagée).
  */
-export async function chargerVerdictGammaBtc(nowMs: number): Promise<VerdictGammaBtc | null> {
-  if (cache !== null && nowMs - cache.t < TTL_MS) return cache.data;
+export async function chargerVerdictGammaBtc(nowMs: number): Promise<VerdictGammaBtcCharge | null> {
+  if (cache !== null && nowMs >= cache.t && nowMs - cache.t < TTL_MS) return cache.data;
   try {
     const chaine = await fetchDeribitOptionChain("BTC");
     const res = verdictGammaDepuisChaine(chaine, nowMs);
     if (res === null) return null;
-    cache = { t: nowMs, data: res };
-    return res;
+    const data = { ...res, recupereLe: Date.now() };
+    cache = { t: nowMs, data };
+    return data;
   } catch {
     return null;
   }

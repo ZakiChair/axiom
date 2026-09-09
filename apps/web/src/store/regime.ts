@@ -168,6 +168,7 @@ function publierQualiteSerie(
     observeLe,
     recupereLe,
     cadenceMs,
+    ageMaxMs,
     couverture,
     estime: false,
     acces: observeLe === null ? "indisponible" : acces,
@@ -305,19 +306,19 @@ export async function rafraichirRegime(): Promise<void> {
   const metadataEtf = metadataEtfRegime(actifsEtf, etfResultats, etfRegime);
   enregistrerQualite("regime:etf", "Flux ETF spot", {
     sourceId: "sosovalue", sourceEffective: metadataEtf.sourceEffective, observeLe: etfRegime === null ? null : Date.parse(`${etfRegime.jour}T00:00:00Z`), recupereLe: metadataEtf.recupereLe,
-    cadenceMs: JOUR_MS, couverture: etfCouverture, estime: false, acces: etfRegime === null ? "indisponible" : "cle",
+    cadenceMs: JOUR_MS, ageMaxMs: 6 * JOUR_MS - 1, couverture: etfCouverture, estime: false, acces: etfRegime === null ? "indisponible" : "cle",
     statut: etfRegime === null ? "indisponible" : etfRegime.ageJours > 5 ? "perime" : etfCouverture?.disponibles === etfCouverture?.attendus ? "frais" : "partiel",
     ...(etfRegime === null ? { raison: "Aucune séance valide rapportée." } : etfCouverture?.disponibles !== etfCouverture?.attendus ? { raison: "Séance incomplète BTC/ETH/SOL." } : {}),
   });
   enregistrerQualite("regime:stablecoins", "Offre stablecoins 7 j", {
-    sourceId: "defillama", sourceEffective: "DefiLlama", observeLe: null, recupereLe: now,
+    sourceId: "defillama", sourceEffective: "DefiLlama", observeLe: null, recupereLe: null,
     cadenceMs: JOUR_MS, couverture: null, estime: false, acces: emetteurs.status === "fulfilled" ? "public" : "indisponible", statut: emetteurs.status === "fulfilled" ? "partiel" : "indisponible",
-    raison: emetteurs.status === "fulfilled" ? "La liste courante ne fournit pas de date d'observation globale." : "Chargement des stablecoins en échec.",
+    raison: emetteurs.status === "fulfilled" ? "La liste courante ne fournit pas de date d'observation globale ; acquisition du cache non transmise." : "Chargement des stablecoins en échec.",
   });
   enregistrerQualite("regime:gamma", "Gamma dealers BTC", {
-    sourceId: "deribit", sourceEffective: "Deribit", observeLe: verdictBtc === null ? null : now, recupereLe: now,
-    cadenceMs: 15 * 60_000, couverture: null, estime: true, acces: verdictBtc === null ? "indisponible" : "public", statut: verdictBtc === null ? "indisponible" : "frais",
-    ...(verdictBtc === null ? { raison: "Chaîne d'options ou verdict indisponible." } : {}),
+    sourceId: "deribit", sourceEffective: "Deribit", observeLe: null, recupereLe: verdictBtc?.recupereLe ?? null,
+    cadenceMs: 15 * 60_000, couverture: null, estime: true, acces: verdictBtc === null ? "indisponible" : "public", statut: verdictBtc === null ? "indisponible" : "partiel",
+    raison: verdictBtc === null ? "Chaîne d'options ou verdict indisponible." : "Horodatage de marché de la chaîne non transmis ; acquisition réelle conservée, y compris depuis le cache.",
   });
 
   regimeStore.setState({

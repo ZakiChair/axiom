@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { qualitesCoinMetrics, qualitePublicationEtf, traiterPublicationEtfChain, type ValeurPublicationEtf } from "./qualiteChain";
-import type { QualiteMetrique } from "../qualiteMetrique";
+import { actualiserQualite, type QualiteMetrique } from "../qualiteMetrique";
 
 const JOUR = 86_400_000;
 const NOW = Date.UTC(2026, 8, 9, 12);
@@ -24,6 +24,15 @@ describe("publication qualité Coin Metrics", () => {
 });
 
 describe("publication qualité ETF CHAIN", () => {
+  it("conserve la règle des cinq jours entiers jusqu'au changement de jour UTC", () => {
+    const observation = Date.UTC(2026, 8, 4);
+    const q = qualitePublicationEtf("btc", { actif: "btc", principal: {
+      disponible: true, total: 100, jour: "2026-09-04", recupereLe: NOW,
+    }, repli: null }, undefined, undefined, NOW);
+    expect(q.statut).toBe("frais");
+    expect(actualiserQualite(q, observation + 6 * JOUR - 1).statut).toBe("frais");
+    expect(actualiserQualite(q, observation + 6 * JOUR).statut).toBe("perime");
+  });
   const precedente: QualiteMetrique = {
     sourceId: "sosovalue", sourceEffective: "cache SoSoValue", observeLe: NOW - 10 * JOUR,
     recupereLe: NOW - 9 * JOUR, cadenceMs: JOUR, couverture: null, estime: false, acces: "cle", statut: "perime",

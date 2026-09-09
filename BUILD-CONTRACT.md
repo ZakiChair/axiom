@@ -116,3 +116,27 @@ pour le correctif de sécurité ; aucune nouvelle dépendance runtime. Les
 absences de consensus, heure exacte, abonnement ou quantité sous-jacente
 sont explicites. Le registre G100 conserve uniquement les contrôles réellement
 exécutés et observés.
+
+Précisions de réalisation :
+
+- Le catalogue macro compte 24 familles et 88 définitions, dont 86 raccordées.
+  Les données FRED révisées et les vues ALFRED connues à une date utilisent des
+  caches distincts ; la date quotidienne ALFRED ne devient pas une heure d'annonce.
+- Le relais DefiLlama Pro est limité à trois chemins GET validés. La clé
+  personnelle n'entre ni dans le state, ni dans les exports/snapshots ; le relais
+  retire son en-tête et ne suit pas de redirection. Sans droits, l'accès reste explicite.
+- Le funding historique vérifié emploie les archives mensuelles Binance BTC/ETH,
+  leur checksum et les échéances REST correspondantes. Le proxy autorise seulement
+  les chemins précis `.zip`/`.CHECKSUM` de ces archives ; aucune cadence passée
+  n'est déduite des seuls réglages actuels.
+- DOM/EQS partagent un diagnostic du symbole maître, spot/CVD 5 minutes et OI
+  perp en quantité. Il est retenu à la demande et réinitialisé aux discontinuités ;
+  il n'ajoute pas de recorder permanent. Les trois signes gamma sont des hypothèses.
+- Le budget initial prévu est bloquant : 1 220 000 octets bruts et 360 000 gzip
+  niveau 9, imports statiques transitifs et préchargements dédupliqués. Les ressources
+  chargées à la demande sont mesurées séparément. Vite/React/Zustand/KLineChart restent
+  sur leurs versions de référence.
+
+Les preuves à jour figurent dans le
+[bilan du chantier](docs/superpowers/progress/2026-09-09-revue-integrale.md) ; les
+résultats et la décision WTP du gate demeurent exclusivement dans son registre.

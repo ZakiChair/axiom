@@ -23,7 +23,7 @@ Rendre les lectures du terminal vérifiables par date, source et couverture ; co
 13. WHALES : labels datés et sourcés, entités/transferts internes, couverture inconnue et trous de collecte ; aucune vente ou change BTC certain inféré d’un simple transfert.
 14. CAP/SECT : unlocks réels, ratios au flottant/volume avec dénominateurs datés, historique des bridges avec état de droits réel.
 15. BT et validation : funding aux règlements, bootstrap par blocs, franchissement de ruine vs terminal négatif, signaux causaux, oracles supplémentaires, campagne OOS figée avec coûts/sensibilité et journal de versions.
-16. Maintenance : Vitest 4.1.11, absence de l’avis remonté et tests ; budget bloquant du JS initial effectif ; mesure de performance d’un workspace représentatif. CLI Vercel déjà mis à jour et vérifié 59.14.0.
+16. Maintenance : Vitest 4.1.11, absence de l’avis remonté et tests ; budget bloquant du JS initial effectif ; mesure de performance d’un workspace représentatif. CLI Vercel mis à jour et vérifié 59.15.0 (actualisation du 9 septembre après la première mise à jour 59.14.0).
 17. Usage : parcours donnée→lecture→alerte→journal, restauration effective, contrôles G100 exécutés et consignés honnêtement, dont visibilité et réseau réels si réalisables.
 
 ## Contraintes globales

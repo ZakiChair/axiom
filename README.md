@@ -14,13 +14,14 @@ des fenêtres flottantes avec snap et taskbar, des workspaces commutables — le
 process local unique et **vos** clés API.
 
 **Pour qui.** Un opérateur qui veut lire le marché crypto (spot + perp) *et* son contexte macro
-depuis un seul écran, sans abonnement ni compte. Ce n’est pas un SaaS : pas de multi-tenant, pas
-d’auth réseau, rien ne quitte la machine en dehors des appels aux APIs publiques.
+depuis un seul écran, avec des sources publiques et ses accès personnels optionnels. Ce n’est
+pas un SaaS : pas de multi-tenant ni d’auth réseau. Les appels aux fournisseurs utilisent les
+droits de l’opérateur ; certains historiques exigent une clé ou un abonnement.
 
 | | |
 |---|---|
 | **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations, **189 indicateurs** testés |
-| **Lire le contexte** | **39 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, mouvements de baleines, treemap, options, COT, taux (dont 15 familles macro sur 8 zones) & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
+| **Lire le contexte** | **39 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, mouvements de baleines, treemap, options, COT, taux (dont 24 familles macro sur 8 zones) & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
 | **Décider** | screener, playbooks 1-clic, alertes (dont composite ET), backtest en R (stop ATR / sizing risque), coût d’exécution L2 (DOM), stress-test, étude d’évènements, journal, paper trading |
 | **Ne pas décrocher** | alertes onglet fermé (macOS + Telegram optionnel), replay sur dumps officiels Binance, panneau de santé des sources |
 
@@ -31,8 +32,9 @@ Deux partis pris structurent le produit :
    alertes). L’UI reste utilisable **sans** daemon.
 2. **Les calculs sont du TypeScript pur et testés.** Les 189 indicateurs vivent dans
    `@axiom/indicators` — pas de WASM, pas de service Python — et sont couverts par des tests
-   unitaires et structurels, dont **4 golden tests** contre un oracle `pandas-ta` (ADX,
-   SuperTrend, Ichimoku, PSAR ; `scripts/golden/`).
+   unitaires et structurels, dont **4 indicateurs comparés à un oracle `pandas-ta`** (ADX,
+   SuperTrend, Ichimoku, PSAR ; `scripts/golden/`), des oracles analytiques ATR/RSI/Bollinger/RVOL
+   et des vérifications de causalité par préfixe.
 
 **Hors périmètre assumé** : pas d’exécution d’ordres réels (aucune clé de trading). Le paper
 trading (`PAPER`) est une simulation locale déjà présente ; pas de multi-utilisateur, pas
@@ -120,9 +122,9 @@ pnpm prod
 ## Déploiement Vercel
 
 Le build Vercel sert le front et un proxy serverless restreint aux hôtes de
-`shared/extapi-hosts.ts`. Aucun secret partagé n'est injecté dans ce proxy public : les **neuf
+`shared/extapi-hosts.ts`. Aucun secret partagé n'est injecté dans ce proxy public : les **dix
 clés** saisissables dans **Réglages** (Coinalyze, Twelve Data, FRED, BGeometrics, SoSoValue,
-Finnhub, Etherscan v2, CoinDesk Data/CCData et CoinGecko) restent dans le `localStorage` du
+Finnhub, Etherscan v2, CoinDesk Data/CCData, CoinGecko et DefiLlama Pro) restent dans le `localStorage` du
 navigateur. OI et funding du graphe disposent d'un repli Binance sans
 clé ; NVT utilise directement les charts publics Blockchain.com.
 
@@ -149,9 +151,12 @@ Les snapshots, LIQHL, les alertes baleines et les notifications onglet fermé n�
 historique de **1, 5 ou 10 ans**. Huit zones : États-Unis, zone euro, Royaume-Uni,
 Japon, Chine, Inde, Canada et Suisse. `MONEY` conserve l'ancien panneau monétaire.
 
-Les quinze familles couvrent CPI annuel/mensuel, inflation sous-jacente, PPI, PIB
+Les vingt-quatre familles couvrent CPI annuel/mensuel, inflation sous-jacente, PPI, PIB
 réel annuel, chômage, production industrielle, change effectif réel, monnaie large,
-taux réel US, breakeven, NFCI, spread HY, inscriptions chômage et SOFR−IORB.
+taux réel US, breakeven, NFCI, spread HY, inscriptions chômage et SOFR−IORB, ainsi que
+PCE sous-jacent (niveau, annuel, trois/six mois annualisés), emploi non agricole
+(variation mensuelle, moyenne trois mois) et ventes au détail nominales (niveau, mensuel, annuel).
+Le catalogue contient 88 définitions, dont 86 raccordées ; deux absences restent explicites.
 Les sources, périodes, unités, estimations et retards apparaissent par série.
 Les historiques ont la profondeur réellement publiée ; une sélection de dix ans
 ne crée pas dix ans de données. Les périmètres nationaux restent distincts
@@ -163,7 +168,7 @@ BRIEF reprend la sélection, ses périodes et ses réserves.
 - **CHAIN** : cohortes STH/LTH, capitalisation réalisée et variations 30/90 jours,
   offre BTC en profit/perte, réserves et netflows des exchanges, historique ETF
   5/20 séances et files de staking ETH. Les accès BGeometrics/SoSoValue dépendent
-  des droits de la clé ; les groupes se chargent à la demande.
+  des droits de la clé ; les groupes partagent les données avec la vue commune des flux.
 - **Graphique / DOM** : RVOL saisonnier H1, parts de variance baissière/haussière,
   OFI, microprix et reconstitution du carnet après retrait de liquidité. Cette dernière
   mesure reste une heuristique L2 : annulations et exécutions ne sont pas distinguées.
@@ -175,21 +180,41 @@ Les deux indicateurs OHLCV sont utilisables dans les alertes et le backtest ; le
 RVOL exige H1 et suffisamment de références antérieures. Les mesures L2 et les
 historiques macro/on-chain de ces panneaux ne deviennent pas des signaux de
 backtest. Les 30 stratégies du catalogue restent **non validées**. Les séries
-révisables ne simulent pas ce qui était connu à une ancienne date de publication.
+révisables courantes ne simulent pas ce qui était connu à une ancienne date de publication ;
+la vue ALFRED décrite ci-dessous utilise explicitement un millésime.
 
-### Programme G100 (WTP 100 $/mois) — W0–W3 landés, gate **ouvert**
+### Lectures et vérifications du 9 septembre
+
+| Ouvrir | Utilisation et limites |
+|---|---|
+| **DATA / BRIEF / CHAIN** | Consulter source effective, date d’observation, récupération, couverture et droits. Un cache ancien conserve sa date et une donnée absente ne vaut pas zéro. |
+| **MACRO / EVTS** | Choisir une date « connue au » pour FRED/ALFRED et comparer première publication et révision. ALFRED fournit un jour, sans heure intrajournalière. |
+| **NETLIQ** | Lire TGA Treasury DTS et les contributions Fed/RRP/TGA avec leurs dates ; la comparaison hebdomadaire utilise une période commune. |
+| **CHAIN / BRIEF / STBL** | Comparer flux ETF, stock stablecoin et capital réalisé. Les ratios ETF utilisent l’encours de leur séance ; les percentiles exigent une profondeur suffisante. Les alertes de flux conservent leur observation et leur source dans le journal, avec le front actif même si les panneaux sont fermés. |
+| **CHAIN / STBL / SECT** | Comparer Ethereum, Solana, Base et Arbitrum : TVL, DEX, stablecoins USD, frais et revenus, dates et variations 30/90/365 jours. Les séries monétaires ne représentent pas des quantités corrigées de l’effet de prix. |
+| **ECO → EVTS** | Ouvrir une annonce comparable, importer des archives sourcées, consulter consensus daté et surprise, puis réaction BTC/ETH avant/après 5/15/60 minutes et 24 heures. L’heure est explicite en UTC ; une fenêtre OHLC trouée reste partielle. [Schéma d’import](docs/guides/archives-publications.md). |
+| **DOM / EQS** | Diagnostic du symbole maître Binance : prix/CVD spot 5 min et OI perp en quantité, période commune, seuils et persistance réglables. Les coûts L2 sont distincts, hors frais, et deviennent indisponibles si le carnet vieillit. |
+| **OMON / BRIEF** | Comparer les hypothèses gamma calls+/puts−, tous longs et tous shorts sur le même univers. Leur désaccord signale une sensibilité au modèle ; la couverture n’est pas une probabilité de réussite. |
+| **WHALES** | Examiner entités, origine et ancienneté des labels, transferts internes et trous de collecte. Un transfert vers un exchange ne prouve pas une vente. |
+| **CAP / SECT** | Utiliser unlocks et bridges avec une clé DefiLlama Pro, ou importer un calendrier sourcé. Ratios au flottant et au volume uniquement avec dénominateurs disponibles et datés. |
+| **BT** | Inclure les règlements de funding vérifiés et les coûts ; comparer bootstrap par blocs, franchissement d’un seuil de ruine et capital terminal négatif. Les règles utilisant des sorties anticipatrices sont refusées. |
+
+La campagne hors échantillon figée porte sur BTC/ETH, 1 h/4 h, du 29 juillet au
+9 septembre 2026, avec trois règles, coûts et sensibilité des paramètres. Son résultat
+est **non concluant** ; les 30 stratégies restent non validées. Le manifeste et les
+résultats sont dans `scripts/oos/`. Les contrôles et accès réellement éprouvés sont
+consignés dans le [bilan de réalisation](docs/superpowers/progress/2026-09-09-revue-integrale.md).
+
+### Programme G100 — protocole d’usage
 
 Les vagues **W0–W3** du plan `docs/superpowers/plans/2026-07-13-cible-100-usd-mois.md` sont **mergées en main** (confiance CVD/badges, `pnpm run up`, onboarding, session strip, alertes edge + funding daemon, playbooks, screener positionnement, bus panneau→chart, import CSV, brief review).
 
-**Gate G100** : le code est *code-complete* et la partie e2e **partiellement automatisée**
-(tests Playwright de gate et scripts G5/G9 ; voir le rapport de corrections du 2026-09-04).
-Le **noyau manuel reste à dérouler** (G1 tenue 30 min + coupure 90 s, bannière macOS,
-chrono onboarding, jugements visuels) — voir le protocole
-`docs/superpowers/plans/2026-07-22-gate-g100-qa.md` et le plan d'action
-`docs/superpowers/plans/2026-08-24-plan-action-revue-globale.md`. **Aucune nouvelle fenêtre
-avant le verdict** — deux exceptions actées, toutes deux sur demande utilisateur : le 2026-08-25
-(fenêtre WHALES) et le 2026-09-01 (fenêtre BPL + séries TOTAL/TOTAL2/TOTAL3 chartables, chantier
-CAP/BPL). Les exceptions de maintenance et du catalogue positionnement/orderflow du 2026-09-04 sont consignées dans `BUILD-CONTRACT.md`.
+Les tests Playwright de gate et scripts G5/G9 couvrent les parcours automatisables.
+La tenue de trente minutes, la coupure réelle de quatre-vingt-dix secondes, la bannière
+macOS et les observations visuelles ont des critères propres. Le
+[registre G100](docs/superpowers/plans/2026-07-22-gate-g100-qa.md) est l’unique référence
+de leurs résultats et de la décision WTP. Les extensions demandées par le propriétaire
+et leurs limites sont consignées dans `BUILD-CONTRACT.md`.
 
 ## Secrets
 

@@ -153,11 +153,11 @@ Lire `/private/tmp/axiom-20260909-preparation-pro.md`. Les documents officiels s
 
 **Depends:** attendre fin des mutations de dépendances/tests des autres lots. **Files:** package.json concernés, pnpm-lock.yaml, scripts/ci.sh, .github/workflows/ci.yml, `apps/web/vite.config.ts` pour activer le manifeste de build si nécessaire, nouveau script/test budget build, e2e nouvelles fonctionnalités et Playwright configuration minimale. Un dépassement impose d'identifier l'import responsable et de remonter les fichiers applicatifs précis au contrôleur avant correction ciblée ; pas de changement de framework.
 
-- [ ] Passer les quatre Vitest3.2.7 à4.1.11, respecter Node/Vite existants ; lire migration4 officielle, corriger uniquement incompatibilités réelles. Aucun nouveau runtime. Audit puis suite globale.
-- [ ] Budget initial JS bloquant à **1 220 000 octets bruts / 360 000 gzip niveau9** (base mesurée1162478/342187), entrée HTML/modulepreloads et imports statiques transitifs dédupliqués via manifest Vite ; dynamique mesuré séparément. Le fichier absent/malformed échoue, dépassement échoue. Tests vrai mini graphe et dépassement, pas test recopiant constante.
-- [ ] Mesurer workspace représentatif depuis build prod : navigation aux nouveaux panneaux, durée des interactions et longues tâches, ressources réellement chargées ; tester état source indisponible et données réelles disponibles, garder hermétique distinct du live. Si budget dépassé corriger la dépendance causale, ne pas relever la limite en douce.
-- [ ] E2E nouveaux parcours : ETF partiel, CHAIN source lente+rotationclé, MACRO additions/asof, TGA, flux/rotation/unlocks sans clé, macroévènements, DOMgammaWHALES, backtestmodes. Port dédié `AXIOM_E2E_PORT=5239`, fixtures datées explicitement hermétiques.
-- [ ] `pnpm check`, `AXIOM_E2E_PORT=5239 pnpm check:e2e`, `pnpm audit --json`, rapport résultats exacts, commit. La revue indépendante peut demander correctifs dédiés.
+- [x] Passer les quatre Vitest3.2.7 à4.1.11, respecter Node/Vite existants ; lire migration4 officielle, corriger uniquement incompatibilités réelles. Aucun nouveau runtime. Audit puis suite globale.
+- [x] Budget initial JS bloquant à **1 220 000 octets bruts / 360 000 gzip niveau9** (base mesurée1162478/342187), entrée HTML/modulepreloads et imports statiques transitifs dédupliqués via manifest Vite ; dynamique mesuré séparément. Le fichier absent/malformed échoue, dépassement échoue. Tests vrai mini graphe et dépassement, pas test recopiant constante.
+- [x] Mesurer workspace représentatif depuis build prod : navigation aux nouveaux panneaux, durée des interactions et longues tâches, ressources réellement chargées ; tester état source indisponible et données réelles disponibles, garder hermétique distinct du live. Si budget dépassé corriger la dépendance causale, ne pas relever la limite en douce.
+- [x] E2E nouveaux parcours : ETF partiel, CHAIN source lente+rotationclé, MACRO additions/asof, TGA, flux/rotation/unlocks sans clé, macroévènements, DOMgammaWHALES, backtestmodes. Port dédié `AXIOM_E2E_PORT=5239`, fixtures datées explicitement hermétiques.
+- [x] `pnpm check`, `AXIOM_E2E_PORT=5239 pnpm check:e2e`, `pnpm audit --json`, rapport résultats exacts, commit. La revue indépendante peut demander correctifs dédiés.
 
 ### Task 9: QA réelle, documentation et livraison
 

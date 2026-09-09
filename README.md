@@ -174,7 +174,9 @@ BRIEF reprend la sélection, ses périodes et ses réserves.
   mesure reste une heuristique L2 : annulations et exécutions ne sont pas distinguées.
 - **Sauvegardes** : snapshots étendus aux notes, dessins, alertes, journal,
   portefeuille et espaces de travail ; restauration du périmètre exact. Les clés API
-  sont exclues. Le daemon reste nécessaire pour les sauvegardes durables.
+  sont exclues des snapshots et de l’export JSON. Importer une ancienne sauvegarde
+  ne remplace pas les clés déjà configurées localement. Le daemon reste nécessaire
+  pour les sauvegardes durables.
 
 Les deux indicateurs OHLCV sont utilisables dans les alertes et le backtest ; le
 RVOL exige H1 et suffisamment de références antérieures. Les mesures L2 et les
@@ -187,7 +189,7 @@ la vue ALFRED décrite ci-dessous utilise explicitement un millésime.
 
 | Ouvrir | Utilisation et limites |
 |---|---|
-| **DATA / BRIEF / CHAIN** | Consulter source effective, date d’observation, récupération, couverture et droits. Un cache ancien conserve sa date et une donnée absente ne vaut pas zéro. |
+| **DATA / BRIEF / CHAIN** | Consulter source effective, date d’observation, récupération, couverture et droits. Un cache ancien conserve sa date, le badge vieillit même sans nouvelle collecte et une donnée absente ne vaut pas zéro. Les heures affichées sont en UTC. |
 | **MACRO / EVTS** | Choisir une date « connue au » pour FRED/ALFRED et comparer première publication et révision. ALFRED fournit un jour, sans heure intrajournalière. |
 | **NETLIQ** | Lire TGA Treasury DTS et les contributions Fed/RRP/TGA avec leurs dates ; la comparaison hebdomadaire utilise une période commune. |
 | **CHAIN / BRIEF / STBL** | Comparer flux ETF, stock stablecoin et capital réalisé. Les ratios ETF utilisent l’encours de leur séance ; les percentiles exigent une profondeur suffisante. Les alertes de flux conservent leur observation et leur source dans le journal, avec le front actif même si les panneaux sont fermés. |
@@ -196,14 +198,25 @@ la vue ALFRED décrite ci-dessous utilise explicitement un millésime.
 | **DOM / EQS** | Diagnostic du symbole maître Binance : prix/CVD spot 5 min et OI perp en quantité, période commune, seuils et persistance réglables. Les coûts L2 sont distincts, hors frais, et deviennent indisponibles si le carnet vieillit. |
 | **OMON / BRIEF** | Comparer les hypothèses gamma calls+/puts−, tous longs et tous shorts sur le même univers. Leur désaccord signale une sensibilité au modèle ; la couverture n’est pas une probabilité de réussite. |
 | **WHALES** | Examiner entités, origine et ancienneté des labels, transferts internes et trous de collecte. Un transfert vers un exchange ne prouve pas une vente. |
-| **CAP / SECT** | Utiliser unlocks et bridges avec une clé DefiLlama Pro, ou importer un calendrier sourcé. Ratios au flottant et au volume uniquement avec dénominateurs disponibles et datés. |
-| **BT** | Inclure les règlements de funding vérifiés et les coûts ; comparer bootstrap par blocs, franchissement d’un seuil de ruine et capital terminal négatif. Les règles utilisant des sorties anticipatrices sont refusées. |
+| **CAP / SECT** | Utiliser unlocks et bridges avec une clé DefiLlama Pro, ou importer un [calendrier sourcé](docs/guides/calendriers-unlocks.md). Ratios au flottant et au volume uniquement avec dénominateurs disponibles et datés. |
+| **BT** | Inclure les règlements de funding vérifiés et les coûts ; comparer bootstrap par blocs, franchissement d’un seuil de ruine et capital terminal négatif. Les règles utilisant des sorties anticipatrices sont refusées. Le funding réel couvre BTCUSDT/ETHUSDT, les mois clos uniquement et au plus 26 mois ; une preuve d’archives ou de couverture incomplète bloque le calcul. |
 
 La campagne hors échantillon figée porte sur BTC/ETH, 1 h/4 h, du 29 juillet au
 9 septembre 2026, avec trois règles, coûts et sensibilité des paramètres. Son résultat
 est **non concluant** ; les 30 stratégies restent non validées. Le manifeste et les
 résultats sont dans `scripts/oos/`. Les contrôles et accès réellement éprouvés sont
 consignés dans le [bilan de réalisation](docs/superpowers/progress/2026-09-09-revue-integrale.md).
+Le mode funding réel vérifie les sommes CHECKSUM des archives mensuelles et la
+concordance des échéances et taux avec le REST Binance ; il ne simule ni marge
+ni liquidation. La fréquence de règlement vient des données, pas d’une hypothèse
+systématique de huit heures.
+
+Pour reproduire l’audit figé avec Bun : `bun scripts/valider-hors-echantillon.ts`.
+Le script vérifie le hash du manifeste, réutilise son cache OHLCV contrôlé ou
+télécharge les bougies publiques Binance, puis réécrit
+`scripts/oos/resultat-2026-09-09.json` et `scripts/oos/rapport-2026-09-09.md`.
+Les hashes du code et la date de recalcul sont enregistrés ; relancer la campagne
+ne crée pas un nouvel échantillon réservé.
 
 ### Programme G100 — protocole d’usage
 

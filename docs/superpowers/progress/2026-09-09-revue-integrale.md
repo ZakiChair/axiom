@@ -1,6 +1,6 @@
 # Réalisation de la revue globale du 9 septembre 2026
 
-Travail en cours sur `feat/revue-integrale-20260909`, worktree
+Réalisation achevée sur `feat/revue-integrale-20260909`, worktree
 `.worktrees/revue-integrale-20260909`, base `94164d5`.
 La demande du propriétaire couvre l'ensemble de la [revue](../../revue-2026-09-09.md).
 Le [plan](../plans/2026-09-09-revue-integrale.md) et la
@@ -22,7 +22,7 @@ implémentation par lots et revue indépendante.
 | 13–14 : WHALES, unlocks et bridges | 7 | Approuvé à `9e7f07f` ; accès personnel Pro absent |
 | 15 : backtest, causalité, funding et OOS | 3 | Approuvé après corrections, tête `1517f7d` ; campagne non concluante |
 | 16 : maintenance et budgets | 8 | Approuvé : maintenance `e536af9`, compléments `ddaad34`/`834ef41`/`1c28f2d` ; CI40 réussie |
-| 17 : parcours réel et restauration | 9 | Restauration réelle et parcours exécutés ; tenue visible en cours, registre G100 actualisé séparément |
+| 17 : parcours réel et restauration | 9 | QA réelle terminée et limites consignées ; restauration effective, registre G100 actualisé |
 
 ## Vérifications disponibles
 
@@ -93,13 +93,15 @@ implémentation par lots et revue indépendante.
 - Le budget initial a révélé que les alertes chargeaient les transports on-chain
   au démarrage. L’import différé les charge au premier panneau ou à la première
   alerte active. Le plafond reste fixé à 1 220 000 octets bruts et 360 000 gzip
-  niveau 9. Mesure finale : 1 208 365 octets bruts / 356 789 gzip niveau 9 ;
-  imports dynamiques séparés : 846 806 / 309 654 octets.
+  niveau 9. Mesure finale à `716245f` : 1 208 365 octets bruts / 356 784 gzip niveau 9 ;
+  imports dynamiques séparés : 846 979 / 309 653 octets.
 
 - `50184e9` rend le schéma d’import des unlocks accessible sans clé ni token.
   Le guide canonique décrit le format strict et les dénominateurs, avec un exemple
   explicitement synthétique. Le vrai parseur accepte cet exemple et garde les
-  ratios absents ; le GET du Markdown servi par Vite est vérifié en navigateur.
+  ratios absents ; le GET du Markdown servi par Vite puis par le daemon de
+  production est vérifié : 5 369 octets, SHA-256
+  `36df7f2c78c3efd5a6a6cbf5ce1887ca9e1f48c15ad4bdf2e0b8afcbf5e1ad4e`.
 - La revue du plan a relevé une couverture E2E incomplète malgré les 35 parcours
   verts. Les compléments CHAIN (source lente/rotation de clé), MACRO/ALFRED,
   TGA et économie comparée sont ajoutés pour fermer ce manque. Le parcours
@@ -111,7 +113,7 @@ implémentation par lots et revue indépendante.
   indépendants en 4,6 secondes. La sélection CI complète à `1c28f2d` réussit :
   **40/40** en 1,2 minute, log `/private/tmp/axiom-lot8-final-e2e.log`.
 
-## Validation assemblée avant les essais réels
+## Validation assemblée
 
 - `pnpm check` réussit : 5 213 tests (733 indicateurs, 53 alertes, 79 backtest,
   513 daemon, 3 835 web), contrôles de types et build avec budget bloquant.
@@ -163,7 +165,8 @@ implémentation par lots et revue indépendante.
 Le [registre G100](../plans/2026-07-22-gate-g100-qa.md) demeure le seul document
 portant les statuts de gate et la décision WTP. Les contrôles automatisés,
 observations visuelles et limites d’accès sont distingués des tests hermétiques.
-La clôture de la tenue visible et l’onboarding restent en cours à cette étape.
+La tenue visible et le parcours d’onboarding instrumenté sont terminés.
+Les observations natives ou humaines non obtenues restent explicitement séparées.
 
 
 ## Restauration réellement exécutée — 10 septembre, production locale
@@ -182,3 +185,22 @@ de QA. Le script daemon seul dispose également de sa preuve de journalisation,
 puis nettoie sa définition et son état. Telegram n’était pas configuré dans cette
 base de travail ; aucun message à un tiers n’a été envoyé. Les limites des gestes
 physiques et de la notification native sont consignées uniquement dans le registre.
+
+
+## Clôture de la réalisation
+
+Le dernier `pnpm check`, exécuté sur l’arbre propre `716245f`, confirme les
+5 213 tests, les types et le budget final. La sélection CI finale comporte
+40 parcours, tous réussis en une passe. La revue indépendante a vérifié les
+correctifs, les compléments de couverture et les preuves de production.
+
+Le navigateur de production a ensuite chargé les vingt séries économiques
+DefiLlama réelles, datées du 9 septembre, avec le nouveau bundle et sans
+`Illegal invocation`. Les guides sont réellement servis par le daemon. Les
+ressources de QA créées pour cette session sont nettoyées : onglets/profil
+temporaires, daemon, `.env` de QA et base SQLite du worktree.
+
+Les limites restantes sont explicites : aucun accès authentifié DefiLlama Pro
+ni abonnement souscrit, campagne OOS non concluante et stratégies non validées,
+observations humaines/natives absentes consignées dans le registre. Le travail
+reste local ; aucun push ni déploiement n’est effectué.

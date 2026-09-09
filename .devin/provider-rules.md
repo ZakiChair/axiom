@@ -38,7 +38,7 @@
 
 ## Contrat de workflow
 
-1. **L'orchestrateur** lit le plan courant (`docs/superpowers/plans/2026-09-01-corrections-revue-complete.md`), découpe le lot en briefs, et assigne chaque brief à **un seul** développeur.
+1. **L'orchestrateur** lit le plan courant (`docs/superpowers/plans/2026-09-09-revue-integrale.md`), découpe le lot en briefs, et assigne chaque brief à **un seul** développeur.
 2. **Le développeur** écrit le test qui reproduit le défaut (quand possible), implémente, vérifie `pnpm check`, et rend un rapport (état, tests, diff).
 3. **Le réviseur** revoit le diff du lot (code + tests) ; tout ce qui touche la sécurité est revu **systématiquement**.
 4. **L'orchestrateur** vérifie la conformité au plan, puis décide du commit ou du retour au développeur.

@@ -4,8 +4,8 @@ Ce fichier est la **source de vérité** des conventions et du périmètre. Il p
 Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 
 > **Routage multi-modèles** : avant d'agir, lire aussi `.devin/provider-rules.md`
-> (matrice action → provider : Fable orchestre, Opus revoit, GPT-sol/DeepSeek
-> implémentent sur brief).
+> (rôles d’orchestration, développement et revue indépendante ; aucun modèle
+> exclusif ni visa Fable requis).
 
 ## Décisions verrouillées (branche PERSO mono-utilisateur)
 - **Cible** : terminal pour UN utilisateur (ses propres clés). PAS de multi-tenant, PAS d'auth réseau, PAS de SaaS. Crypto d'abord (spot + perp) ; tradfi/commodités en complément.
@@ -97,3 +97,22 @@ alors pas un succès. Aucun secret/API key n'entre dans le périmètre snapshot.
 Vérification et limites : voir [le rapport de revue du 7 septembre](docs/revue-2026-09-07.md). Le protocole
 G100 reste le registre du verdict manuel. Fable 5 n'a pas pu procéder à sa revue
 (quota HTTP 429) ; la revue indépendante GPT n'est pas un visa Fable.
+
+## Extension autorisée le 9 septembre 2026
+
+Le propriétaire demande la réalisation de tous les points de la revue globale et
+a supprimé la réservation des rôles à Fable. Le plan courant est
+`docs/superpowers/plans/2026-09-09-revue-integrale.md`. L’orchestrateur GPT peut
+planifier et arbitrer ; les changements sont revus par un agent indépendant.
+
+Sont autorisés dans les surfaces existantes : qualité par métrique, extensions
+FRED/ALFRED, Treasury DTS, économie des chaînes, raccordements DefiLlama Pro
+conditionnés à un accès personnel valide, outils d’évènements, microstructure,
+gamma, WHALES et validation des signaux. Aucun achat, ordre réel, nouveau
+backend, fenêtre supplémentaire ou recorder tick permanent. Les types locaux
+et interfaces du package backtest peuvent évoluer de façon compatible ;
+`@axiom/types` reste inchangé. Vitest **4.1.11** et le lockfile sont autorisés
+pour le correctif de sécurité ; aucune nouvelle dépendance runtime. Les
+absences de consensus, heure exacte, abonnement ou quantité sous-jacente
+sont explicites. Le registre G100 conserve uniquement les contrôles réellement
+exécutés et observés.

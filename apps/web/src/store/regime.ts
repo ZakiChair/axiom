@@ -6,7 +6,7 @@
  * Poller 15 min (pattern startMacroHistoryPolling), démarré dans main.tsx.
  */
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { agregerFluxEtfRegime, calculerRegime, type Regime } from "../data/regime";
+import { agregerFluxEtfRegime, calculerRegime, type FluxEtfRegime, type Regime } from "../data/regime";
 import { cadenceObservee, referentiel, type OptionsReferentiel, type Referentiel, type PointSerie } from "../lib/referentiel";
 import {
   deltasFenetre,
@@ -64,6 +64,42 @@ export const regimeStore: StoreApi<RegimeState> = createStore<RegimeState>(() =>
 
 const JOUR_MS = 86_400_000;
 const POLL_MS = 15 * 60_000;
+
+export interface MetadataEtfRegime {
+  recupereLe: number | null;
+  sourceEffective: string;
+}
+
+/** Métadonnées des seules valeurs qui composent la séance retenue par l'agrégat. */
+export function metadataEtfRegime(
+  actifs: readonly ActifEtf[],
+  resultats: readonly EtfResultat[],
+  agregat: FluxEtfRegime | null,
+): MetadataEtfRegime {
+  if (agregat === null) return { recupereLe: null, sourceEffective: "SoSoValue" };
+  const contributeurs = actifs.flatMap((actif, index) => {
+    const resultat = resultats[index];
+    if (
+      resultat === undefined
+      || !agregat.couverture.presents.includes(actif)
+      || !resultat.disponible
+      || resultat.jour !== agregat.jour
+      || resultat.total === undefined
+      || !Number.isFinite(resultat.total)
+    ) return [];
+    return [resultat];
+  });
+  const acquisitions = contributeurs.map((resultat) => resultat.recupereLe);
+  const recupereLe = acquisitions.length > 0 && acquisitions.every((ts): ts is number => ts !== null && ts !== undefined && Number.isFinite(ts))
+    ? Math.min(...acquisitions)
+    : null;
+  const depuisCache = contributeurs.some((resultat) => resultat.sourceEffective?.startsWith("cache "));
+  const sources = [...new Set(contributeurs.map((resultat) => resultat.sourceEffective).filter((source): source is string => Boolean(source)))];
+  return {
+    recupereLe,
+    sourceEffective: depuisCache ? "cache SoSoValue" : sources.length === 1 ? sources[0] ?? "SoSoValue" : "SoSoValue",
+  };
+}
 
 function dernierPoint(serie: PointSerie[] | null, now = Date.now()): PointSerie | null {
   const p = serie
@@ -259,11 +295,9 @@ export async function rafraichirRegime(): Promise<void> {
   publierQualiteSerie("regime:vol-realisee", "Vol réalisée BTC", "binance", histVolReal?.sourceEffective ?? "Binance spot", serieVolReal, now, JOUR_MS, 3 * JOUR_MS, histVolReal?.recupereLe ?? null);
   publierQualiteSerie("regime:oi", "Open Interest BTC", "binance-futures", histOi?.sourceEffective ?? "Binance USDⓈ-M", serieOi, now, 3_600_000, 3 * 3_600_000, histOi?.recupereLe ?? null);
   const etfCouverture = etfRegime === null ? null : { disponibles: etfRegime.couverture.presents.length, attendus: etfRegime.couverture.attendus.length };
-  const recupsEtf = etfResultats.map((r) => r.recupereLe).filter((t): t is number => t !== null && t !== undefined && Number.isFinite(t));
-  const recupereEtf = recupsEtf.length > 0 ? Math.max(...recupsEtf) : null;
-  const etfDepuisCache = etfResultats.some((r) => r.sourceEffective?.startsWith("cache "));
+  const metadataEtf = metadataEtfRegime(actifsEtf, etfResultats, etfRegime);
   enregistrerQualite("regime:etf", "Flux ETF spot", {
-    sourceId: "sosovalue", sourceEffective: etfDepuisCache ? "cache SoSoValue" : "SoSoValue", observeLe: etfRegime === null ? null : Date.parse(`${etfRegime.jour}T00:00:00Z`), recupereLe: recupereEtf,
+    sourceId: "sosovalue", sourceEffective: metadataEtf.sourceEffective, observeLe: etfRegime === null ? null : Date.parse(`${etfRegime.jour}T00:00:00Z`), recupereLe: metadataEtf.recupereLe,
     cadenceMs: JOUR_MS, couverture: etfCouverture, estime: false, acces: etfRegime === null ? "indisponible" : "cle",
     statut: etfRegime === null ? "indisponible" : etfRegime.ageJours > 5 ? "perime" : etfCouverture?.disponibles === etfCouverture?.attendus ? "frais" : "partiel",
     ...(etfRegime === null ? { raison: "Aucune séance valide rapportée." } : etfCouverture?.disponibles !== etfCouverture?.attendus ? { raison: "Séance incomplète BTC/ETH/SOL." } : {}),

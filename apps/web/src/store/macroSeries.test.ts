@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { macroSeriesStore, PREFIXE_CACHE, TTL_CACHE_MS } from "./macroSeries";
 import { healthStore } from "./health";
+import { CATALOGUE_MACRO } from "../data/macro/catalogueMacro";
 
 // ⚠️ apps/web tourne sous Vitest en environnement NODE, sans jsdom (convention affirmée
 // dans tout le dépôt). `localStorage` n'existe donc pas : on installe le faux Storage
@@ -341,6 +342,34 @@ describe("vues ALFRED isolées par cutoff", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reponseAlfred(100)));
     await macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], horizonAnnees: 5, connuLe: "2020-01-15" });
     expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain("observation_start=2015-01-01");
+  });
+
+  it("refuse un cache ALFRED v2 frais dont CPI était un niveau sous une unité %", async () => {
+    const cutoff = "2026-08-15";
+    const def = CATALOGUE_MACRO.find((d) => d.id === "cpi-aa-us")!;
+    const signatureV2 = JSON.stringify([2, def.source, def.transformation, def.decalageFinMois]);
+    localStorage.setItem(`${PREFIXE_CACHE}cpi-aa-us.alfred-${cutoff}`, JSON.stringify({
+      ts: Date.now(), depuis: Date.UTC(2021, 7, 1), signature: signatureV2,
+      points: [{ time: Date.UTC(2026, 6, 1), value: 330 }],
+    }));
+    const appel = vi.fn().mockResolvedValue({ ok: true, status: 200, statusText: "OK", json: async () => ({ observations: [{ date: "2026-07-01", value: "3.2", realtime_start: cutoff, realtime_end: cutoff }] }) });
+    vi.stubGlobal("fetch", appel);
+    await macroSeriesStore.getState().demanderIndicateur("cpi-aa", { regions: ["US"], connuLe: cutoff });
+    expect(appel).toHaveBeenCalledTimes(1);
+    expect(macroSeriesStore.getState().series["cpi-aa-us"]).toMatchObject({ statut: "ok", points: [{ value: 3.2 }], perime: false });
+  });
+
+  it("n'utilise pas un cache v2 expiré comme historique de secours après une panne", async () => {
+    const cutoff = "2026-08-15";
+    const def = CATALOGUE_MACRO.find((d) => d.id === "cpi-aa-us")!;
+    const signatureV2 = JSON.stringify([2, def.source, def.transformation, def.decalageFinMois]);
+    localStorage.setItem(`${PREFIXE_CACHE}cpi-aa-us.alfred-${cutoff}`, JSON.stringify({
+      ts: Date.now() - TTL_CACHE_MS - 1, depuis: Date.UTC(2021, 7, 1), signature: signatureV2,
+      points: [{ time: Date.UTC(2026, 6, 1), value: 330 }],
+    }));
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("hors ligne")));
+    await macroSeriesStore.getState().demanderIndicateur("cpi-aa", { regions: ["US"], connuLe: cutoff });
+    expect(macroSeriesStore.getState().series["cpi-aa-us"]).toMatchObject({ statut: "panne", points: [], perime: false });
   });
 });
 

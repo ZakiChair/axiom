@@ -39,7 +39,15 @@ export interface MacroSeriesState {
   demanderIndicateur: (indicateur: IndicateurMacro, opts?: OptionsDemande) => Promise<void>;
 }
 const etatVide = (contexteConnuLe: string | null = null): EtatSerie => ({ statut: "idle", points: [], majTs: null, message: null, contexteConnuLe });
-const signature = (def: DefinitionSerieMacro): string => JSON.stringify([2, def.source, def.transformation, def.decalageFinMois]);
+/**
+ * V3 invalide uniquement les caches FRED v2 : ils peuvent avoir été écrits avant la
+ * propagation de `units` vers ALFRED. Les transports non-FRED conservent V2.
+ */
+const signature = (def: DefinitionSerieMacro): string => JSON.stringify(
+  def.source.transport === "fred"
+    ? [3, def.source, def.source.units ?? null, def.transformation, def.decalageFinMois]
+    : [2, def.source, def.transformation, def.decalageFinMois],
+);
 function cleCache(def: DefinitionSerieMacro, connuLe?: string | null): string { return PREFIXE_CACHE + def.id + (connuLe ? `.alfred-${connuLe}` : ""); }
 function lireCache(def: DefinitionSerieMacro, connuLe?: string | null): EntreeCache | null {
   try {

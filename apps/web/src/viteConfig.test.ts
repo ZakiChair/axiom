@@ -50,3 +50,10 @@ describe("gardes proxy Vite — aucun relais après refus", () => {
     expect(retour).toBe(url);
   });
 });
+
+describe("build Vite", () => {
+  it("émet le manifeste utilisé par le contrôle de budget", () => {
+    const usine = viteConfig as unknown as (env: { mode: string }) => { build?: { manifest?: boolean } };
+    expect(usine({ mode: "production" }).build?.manifest).toBe(true);
+  });
+});

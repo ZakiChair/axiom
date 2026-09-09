@@ -100,6 +100,9 @@ export default defineConfig(({ mode }) => {
   // les imports paresseux (d3-geo/topojson dans GlobeWindow) : les regrouper ici les
   // ferait charger au démarrage.
   build: {
+    // Le contrôle de budget suit le graphe réellement initial (index.html, preloads,
+    // imports statiques) grâce à ce manifeste, sans confondre les vues paresseuses.
+    manifest: true,
     rollupOptions: {
       output: {
         manualChunks: (id: string) => {

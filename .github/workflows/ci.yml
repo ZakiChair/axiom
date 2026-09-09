@@ -60,7 +60,7 @@ jobs:
         run: pnpm --filter @axiom/web test
         timeout-minutes: 8 # observé ~87 s sur runner
 
-      - name: build web
+      - name: build web et budget JS initial
         run: pnpm --filter @axiom/web build
         timeout-minutes: 5 # observé ~2,3 s en local
 
@@ -84,4 +84,6 @@ jobs:
       # s'ajoute à cette liste.
       - name: e2e hermétiques (playwright)
         run: pnpm check:e2e
+        env:
+          AXIOM_E2E_PORT: 5239
         timeout-minutes: 6

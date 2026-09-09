@@ -1,4 +1,6 @@
 import type { QualiteMetrique } from "../qualiteMetrique";
+import { AGE_MAX_FLUX_MS } from "./fluxCapitaux.contract";
+export { AGE_MAX_FLUX_MS } from "./fluxCapitaux.contract";
 import { getBgeometricsKey } from "../../store/onchain";
 import { getSoSoValueKey } from "../../store/sosovalue";
 import type { PointSupply } from "../macro/stablecoinsDetail";
@@ -17,7 +19,6 @@ import type { PointMetrique } from "./coinmetrics";
 import type { ActifEtf } from "./etf";
 
 const JOUR_MS = 86_400_000;
-export const AGE_MAX_FLUX_MS = 5 * JOUR_MS;
 const HEURE_MS = 3_600_000;
 const STABLECOINS_URL = "https://stablecoins.llama.fi/stablecoincharts/all";
 export type MetriqueFluxId =
@@ -101,6 +102,7 @@ export function qualifierMetriqueFlux(
     observeLe,
     recupereLe: source.recupereLe,
     cadenceMs: JOUR_MS,
+    ageMaxMs: AGE_MAX_FLUX_MS,
     couverture,
     estime: false,
     acces: source.acces,

@@ -66,7 +66,7 @@ import { histFunding } from "../data/referentiels";
 import { executerScreener } from "../data/screenerRun";
 import { SCREENER_POSITION_CAP } from "../data/screener";
 import { extUrl } from "../data/extapi";
-import { AGE_MAX_FLUX_MS } from "../data/onchain/fluxCapitaux";
+import { AGE_MAX_FLUX_MS } from "../data/onchain/fluxCapitaux.contract";
 import { fluxCapitauxStore, garderFluxCapitauxPourAlertes } from "../store/fluxCapitaux";
 
 /** Types de condition évalués sur la clôture de bougie (nécessitent les bougies). */

@@ -1,5 +1,5 @@
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { chargerFluxCapitaux, type VueFluxCapitaux } from "../data/onchain/fluxCapitaux";
+import type { VueFluxCapitaux } from "../data/onchain/fluxCapitaux";
 import { enregistrerQualite } from "./qualiteMetriques";
 import { bgeometricsKeyStore } from "./onchain";
 import { soSoValueKeyStore } from "./sosovalue";
@@ -18,9 +18,18 @@ export interface GestionnaireFluxCapitaux {
   invaliderAcces: () => Promise<void>;
 }
 
+/**
+ * Le runtime d'alertes est présent dès le démarrage, mais la collecte lente ne doit
+ * charger ses transports qu'au premier panneau ou à la première alerte active.
+ */
+async function chargerFluxCapitauxParDefaut(signal?: AbortSignal): Promise<VueFluxCapitaux> {
+  const { chargerFluxCapitaux } = await import("../data/onchain/fluxCapitaux");
+  return chargerFluxCapitaux(signal);
+}
+
 /** Gestionnaire testable : coalescence, timer unique et annulation au dernier consommateur. */
 export function creerGestionnaireFluxCapitaux(
-  charger: (signal?: AbortSignal) => Promise<VueFluxCapitaux> = chargerFluxCapitaux,
+  charger: (signal?: AbortSignal) => Promise<VueFluxCapitaux> = chargerFluxCapitauxParDefaut,
   periodeMs = 60 * 60_000,
 ): GestionnaireFluxCapitaux {
   const store = createStore<FluxCapitauxState>(() => ({ donnees: null, chargement: false, erreur: null }));

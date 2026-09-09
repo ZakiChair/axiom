@@ -7,6 +7,7 @@ import { formatPourcentage, formatUsd, VALEUR_ABSENTE } from "../lib/format";
 import { defillamaKeyStore } from "../store/defillamaKey";
 import { enregistrerQualite } from "../store/qualiteMetriques";
 import { QualiteMetrique } from "./QualiteMetrique";
+import { TableTriable, type ColonneTable } from "./TableTriable";
 import { Badge, Bouton, Chargement, ErreurBloc, Input, NoteSource } from "./ui";
 
 type Mode = "unlocks" | "bridges";
@@ -14,6 +15,10 @@ type Mode = "unlocks" | "bridges";
 function telecharger(nom: string, texte: string): void {
   const url = URL.createObjectURL(new Blob([texte], { type: "application/json" }));
   const a = document.createElement("a"); a.href = url; a.download = nom; a.click(); URL.revokeObjectURL(url);
+}
+
+function dateUtc(time: number): string {
+  return new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeZone: "UTC" }).format(time);
 }
 
 export function DefillamaProPanel({ initialMode = "unlocks" }: { initialMode?: Mode }) {
@@ -122,9 +127,31 @@ export function DefillamaProPanel({ initialMode = "unlocks" }: { initialMode?: M
         ? "Date d'observation du calendrier non fournie par le contrat ; chaque dénominateur garde sa propre date."
         : bridgePerime ? "La dernière observation quotidienne disponible a plus de deux cadences."
           : !hasKey ? "Accès non configuré : clé personnelle DefiLlama Pro requise, ou importez un calendrier sourcé." : undefined;
-  const qualite = { sourceId: importDisponible ? "import:unlocks" : `defillama-pro:${mode}`, sourceEffective: importDisponible ? "Import calendrier (schéma validé) + sources incluses" : mode === "unlocks" ? "DefiLlama Pro + contexte marché CoinGecko" : "DefiLlama Pro", observeLe: mode === "unlocks" ? null : observationBridge, recupereLe: mode === "unlocks" ? recupereUnlocks : recupereBridges, cadenceMs: mode === "bridges" ? 86_400_000 : null, couverture: null, estime: false, acces: (importDisponible ? "public" : "abonnement") as "public" | "abonnement", statut, raison };
+  const qualite = { sourceId: importDisponible ? "import:unlocks" : `defillama-pro:${mode}`, sourceEffective: importDisponible ? "Import calendrier (schéma validé) + sources incluses" : mode === "unlocks" ? "DefiLlama Pro + contexte marché CoinGecko" : "DefiLlama Pro", observeLe: mode === "unlocks" ? null : observationBridge, recupereLe: mode === "unlocks" ? recupereUnlocks : recupereBridges, cadenceMs: mode === "bridges" ? 86_400_000 : null, ageMaxMs: mode === "bridges" ? 2 * 86_400_000 : null, couverture: null, estime: false, acces: (importDisponible ? "public" : "abonnement") as "public" | "abonnement", statut, raison };
 
   useEffect(() => { enregistrerQualite(`defillama:${mode}`, mode === "unlocks" ? "Calendrier unlocks" : "Flux bridges", qualite); }, [mode, qualite.sourceId, qualite.observeLe, qualite.recupereLe, qualite.statut]);
+
+  const colonnesUnlocks: ColonneTable<TokenUnlock>[] = [
+    { id: "token", label: "Token", largeur: "1.2fr", rendu: (t) => <><span className="text-text">{t.nom}</span><span className="block">{t.sources.map((source) => <a key={source} href={source} target="_blank" rel="noreferrer" className="mr-2 text-accent underline">source</a>)}{sourceUnlocks === "pro" && <button className="text-accent underline" onClick={() => void chargerDetail(t.id)}>notes / niveaux cumulés</button>}</span></> },
+    { id: "date", label: "Prochain unlock", largeur: "0.8fr", rendu: (t) => t.prochaineDate ? `${dateUtc(t.prochaineDate)} UTC` : VALEUR_ABSENTE },
+    { id: "quantite", label: "Quantité / notionnel", align: "right", largeur: "1.25fr", rendu: (t) => {
+      const quantite = t.prochaineQuantite; const prix = t.denominateurs.prixUsd;
+      const notionnel = quantite !== null && prix !== null ? quantite * prix.valeur : null;
+      return <>{quantite ?? VALEUR_ABSENTE} tokens<br />{notionnel === null ? VALEUR_ABSENTE : <>{formatUsd(notionnel)}<br /><span className="text-text-dim">{prix!.source} · {dateUtc(prix!.observeLe)} UTC</span></>}</>;
+    } },
+    { id: "ratios", label: "Ratios / dénominateurs", align: "right", largeur: "1.5fr", rendu: (t) => {
+      const quantite = t.prochaineQuantite; const prix = t.denominateurs.prixUsd; const volume = t.denominateurs.volume24hUsd; const flottant = t.denominateurs.flottantAjuste;
+      const ratios = quantite === null ? { pctFlottant: null, pctVolume24h: null } : calculerRatiosUnlock(quantite, flottant?.valeur ?? null, volume?.valeur ?? null, prix?.valeur ?? null);
+      return <>% flottant {ratios.pctFlottant === null ? VALEUR_ABSENTE : formatPourcentage(ratios.pctFlottant, 2)}{flottant && <><br /><a href={flottant.source} target="_blank" rel="noreferrer" className="text-accent underline">source flottant</a><span className="text-text-dim"> · {dateUtc(flottant.observeLe)} UTC</span></>}<br />% volume 24 h {ratios.pctVolume24h === null ? VALEUR_ABSENTE : formatPourcentage(ratios.pctVolume24h, 2)}{volume && <><br /><span className="text-text-dim">{volume.source} · {dateUtc(volume.observeLe)} UTC</span></>}</>;
+    } },
+    { id: "type", label: "Type", largeur: "0.65fr", rendu: (t) => { const type = typeProchainUnlock(t); return <Badge ton={type === "cliff" ? "warn" : "neutre"}>{type === "cliff" ? "cliff" : type === "lineaire" ? "linéaire" : "type inconnu"}</Badge>; } },
+  ];
+  const colonnesBridges: ColonneTable<BridgeVolume>[] = [
+    { id: "date", label: "Date", rendu: (b) => `${dateUtc(b.date)} UTC` },
+    { id: "entrants", label: "Entrants", align: "right", rendu: (b) => b.entrantsUsd === null ? VALEUR_ABSENTE : formatUsd(b.entrantsUsd) },
+    { id: "sortants", label: "Sortants", align: "right", rendu: (b) => b.sortantsUsd === null ? VALEUR_ABSENTE : formatUsd(b.sortantsUsd) },
+    { id: "net", label: "Net", align: "right", rendu: (b) => b.netUsd === null ? VALEUR_ABSENTE : formatUsd(b.netUsd) },
+  ];
 
   return <section className="space-y-2 rounded border border-border bg-bg/40 p-2 text-[11px]">
     <div className="flex flex-wrap items-center gap-2">
@@ -136,9 +163,9 @@ export function DefillamaProPanel({ initialMode = "unlocks" }: { initialMode?: M
     </div>
     <QualiteMetrique qualite={qualite} />
     {loading && <Chargement libelle="Chargement DefiLlama Pro…" />}{erreur && <ErreurBloc>{erreur}</ErreurBloc>}
-    {mode === "unlocks" && visibles.length > 0 && <div className="max-h-40 overflow-auto"><table className="w-full"><tbody>{visibles.map((t) => { const q = t.prochaineQuantite; const prix = t.denominateurs.prixUsd; const volume = t.denominateurs.volume24hUsd; const flottant = t.denominateurs.flottantAjuste; const typeProchain = typeProchainUnlock(t); const ratios = q === null ? { pctFlottant: null, pctVolume24h: null } : calculerRatiosUnlock(q, flottant?.valeur ?? null, volume?.valeur ?? null, prix?.valeur ?? null); const notionnel = q !== null && prix !== null ? q * prix.valeur : null; return <tr key={t.id} className="border-t border-border"><td className="py-1"><span className="text-text">{t.nom}</span><div>{t.sources.map((s) => <a key={s} href={s} target="_blank" rel="noreferrer" className="mr-2 text-accent underline">source</a>)}{sourceUnlocks === "pro" && <button className="text-accent underline" onClick={() => void chargerDetail(t.id)}>notes / niveaux cumulés</button>}</div></td><td>{t.prochaineDate ? new Date(t.prochaineDate).toLocaleDateString("fr-FR") : VALEUR_ABSENTE}</td><td className="text-right">{q ?? VALEUR_ABSENTE} tokens<br />{notionnel === null ? VALEUR_ABSENTE : <>{formatUsd(notionnel)}<br /><span className="text-text-dim">{prix!.source} · {new Date(prix!.observeLe).toLocaleDateString("fr-FR")}</span></>}</td><td className="text-right">% flottant {ratios.pctFlottant === null ? VALEUR_ABSENTE : formatPourcentage(ratios.pctFlottant, 2)}{flottant && <><br /><a href={flottant.source} target="_blank" rel="noreferrer" className="text-accent underline">source flottant</a><span className="text-text-dim"> · {new Date(flottant.observeLe).toLocaleDateString("fr-FR")}</span></>}<br />% volume 24 h {ratios.pctVolume24h === null ? VALEUR_ABSENTE : formatPourcentage(ratios.pctVolume24h, 2)}{volume && <><br /><span className="text-text-dim">{volume.source} · {new Date(volume.observeLe).toLocaleDateString("fr-FR")}</span></>}</td><td><Badge ton={typeProchain === "cliff" ? "warn" : "neutre"}>{typeProchain === "cliff" ? "cliff" : typeProchain === "lineaire" ? "linéaire" : "type inconnu"}</Badge></td></tr>; })}</tbody></table></div>}
+    {mode === "unlocks" && visibles.length > 0 && <TableTriable ariaLabel="Calendrier des prochains unlocks" colonnes={colonnesUnlocks} lignes={visibles} cle={(token) => token.id} maxHauteur="10rem" />}
     {detailCourant && <div className="rounded border border-border p-2 text-text-dim"><p>{detailCourant.notes.length ? detailCourant.notes.join(" · ") : "Aucune note fournisseur."}</p><p>{detailCourant.seriesCumulees.length} série(s) de niveaux cumulés — aucune conversion automatique en cliff.</p></div>}
-    {mode === "bridges" && bridgesCourants.length > 0 && <div className="max-h-40 overflow-auto"><table className="w-full"><tbody>{bridgesCourants.slice(-30).reverse().map((b) => <tr key={b.date} className="border-t border-border"><td>{new Date(b.date).toLocaleDateString("fr-FR")}</td><td className="text-right">entrants {b.entrantsUsd === null ? VALEUR_ABSENTE : formatUsd(b.entrantsUsd)}</td><td className="text-right">sortants {b.sortantsUsd === null ? VALEUR_ABSENTE : formatUsd(b.sortantsUsd)}</td><td className="text-right">net {b.netUsd === null ? VALEUR_ABSENTE : formatUsd(b.netUsd)}</td></tr>)}</tbody></table></div>}
+    {mode === "bridges" && bridgesCourants.length > 0 && <TableTriable ariaLabel="Volumes quotidiens des bridges" colonnes={colonnesBridges} lignes={bridgesCourants.slice(-30).reverse()} cle={(bridge) => String(bridge.date)} maxHauteur="10rem" />}
     <NoteSource>{mode === "unlocks" ? "circSupply = offre circulante fournisseur, jamais présentée comme flottant ajusté. Les niveaux cumulés du détail ne sont pas convertis en cliffs." : "Historique quotidien par chaîne · entrants − sortants en USD. Ce net ne mesure pas les flux internes d’un protocole."}</NoteSource>
   </section>;
 }

@@ -741,6 +741,25 @@ async function reconcilierDepuisDaemon(): Promise<void> {
 
 // ─────────────────────────── Sauvegarde complète (export / import JSON) ───────────────────────────
 
+/** Dix credentials fournisseurs ; FRED conserve aussi un ancien emplacement encore lu. */
+const CLES_CREDENTIALS_LOCALES: ReadonlySet<string> = new Set([
+  "axiom:coinalyze:key",
+  "axiom:twelvedata:key",
+  "axiom:ccdata:key",
+  "axiom:finnhub:key",
+  "axiom:sosovalue:key",
+  "axiom:bgeometrics:key",
+  "axiom:etherscan:key",
+  "axiom:fred:key",
+  "axiom.fred.apiKey",
+  "axiom.coingecko.demoApiKey",
+  "axiom.defillama.proApiKey",
+]);
+
+function estCredentialLocal(cle: string): boolean {
+  return CLES_CREDENTIALS_LOCALES.has(cle);
+}
+
 /** Recense les clés `axiom:*` présentes dans localStorage. */
 function axiomKeys(): string[] {
   const keys: string[] = [];
@@ -753,20 +772,14 @@ function axiomKeys(): string[] {
 
 /**
  * Exporte l'état `axiom:*` de localStorage en un fichier JSON horodaté (téléchargement
- * navigateur) : chart, watchlist, session, workspaces, thème, alertes, dessins, et les
- * clés API préfixées `axiom:` — Coinalyze, Twelve Data, FRED, CCData… — EN CLAIR. C'est
- * le seul artefact du terminal conçu pour quitter la machine : l'appelant DOIT demander
- * confirmation (cf. `exporterSauvegardeAvecFeedback`, Toolbar).
- *
- * HORS PÉRIMÈTRE (le filtre est strictement le préfixe `axiom:`) : la clé Demo CoinGecko,
- * stockée sous `axiom.coingecko.demoApiKey` (points, pas deux-points — emplacement imposé
- * par ses lecteurs `data/marketOverview.ts` et `data/macro/coingecko.ts`). Elle est donc à
- * ressaisir après un import sur un autre poste ; sans elle les fenêtres de capitalisation
- * retombent sur le quota public (fonctionnel, seulement plus lent).
+ * navigateur) : chart, watchlist, session, workspaces, thème, alertes et dessins.
+ * Tous les emplacements de credentials fournisseurs sont exclus, y compris ceux qui
+ * utilisent historiquement le préfixe `axiom:`. Ils restent locaux et doivent être
+ * ressaisis sur un autre poste.
  */
 export function exporterSauvegarde(): void {
   const dump: Record<string, string> = {};
-  for (const k of axiomKeys()) {
+  for (const k of axiomKeys().filter((cle) => !estCredentialLocal(cle))) {
     const v = localStorage.getItem(k);
     if (v !== null) dump[k] = v;
   }
@@ -785,7 +798,8 @@ export function exporterSauvegarde(): void {
 
 /**
  * Importe une sauvegarde JSON : valide la forme (objet clé→string, uniquement `axiom:*`),
- * Écrit les nouvelles valeurs avant de retirer les clés absentes, avec rollback en
+ * ignore les credentials d'anciens fichiers et préserve toujours leurs valeurs locales.
+ * Écrit les nouvelles valeurs avant de retirer les autres clés absentes, avec rollback en
  * cas de quota. Renvoie true si le
  * remplacement a eu lieu (l'appelant recharge alors la page pour ré-hydrater proprement),
  * false si le contenu est invalide ou le stockage refuse le remplacement. Fonction pure des
@@ -802,7 +816,7 @@ export function importerSauvegarde(json: string): boolean {
 
   const valides: [string, string][] = [];
   for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
-    if (k.startsWith(AXIOM_PREFIX) && typeof v === "string") valides.push([k, v]);
+    if (k.startsWith(AXIOM_PREFIX) && !estCredentialLocal(k) && typeof v === "string") valides.push([k, v]);
   }
   if (valides.length === 0) return false;
 
@@ -811,7 +825,7 @@ export function importerSauvegarde(json: string): boolean {
     // L'import est une nouvelle décision locale, pas une édition datée du fichier.
     const maintenant = Date.now();
     valeurs.set(META_KEY, JSON.stringify(Object.fromEntries(CLES_SNAPSHOT.map((cle) => [cle, maintenant]))));
-    return remplacerClesLocales(valeurs, axiomKeys());
+    return remplacerClesLocales(valeurs, axiomKeys().filter((cle) => !estCredentialLocal(cle)));
   } catch {
     return false;
   }

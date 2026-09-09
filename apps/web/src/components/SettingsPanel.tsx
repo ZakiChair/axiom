@@ -184,11 +184,10 @@ function ApiKeyField({
 }
 
 /**
- * Section « Sauvegardes » : snapshots quotidiens versionnés du KV daemon. La restauration
- * ré-applique l'espace de travail miroité au daemon (graphique, watchlist, disposition des
- * fenêtres, état de session) — cf. store/persist.ts. Alertes, notes, portefeuille,
- * workspaces, dessins, thème et clés API ne sont PAS ré-appliqués : pour une sauvegarde
- * complète, utiliser l'export/import manuel de la Toolbar.
+ * Section « Sauvegardes » : snapshots quotidiens versionnés du KV daemon. Chaque
+ * restauration ré-applique le périmètre enregistré dans ce snapshot ; les anciens
+ * snapshots restent donc limités aux types de données couverts lors de leur création.
+ * Thème et credentials restent locaux. Cf. store/persist.ts.
  *
  * Feature-detect : `listerSnapshots()` renvoie `null` si le daemon est absent → on
  * affiche l'état indisponible (le front reste 100 % fonctionnel sans daemon). La
@@ -474,7 +473,7 @@ function SauvegardesSection({ open }: { open: boolean }) {
             La restauration remplace les données couvertes, retire les ajouts postérieurs puis
             recharge la page. Une sauvegarde de secours précède le remplacement. Les anciens
             snapshots ne couvrent que leur périmètre d’origine. Thème et clés API restent locaux ;
-            l’export manuel de la Toolbar couvre aussi ces réglages.
+            l’export manuel de la Toolbar exclut les credentials, à ressaisir sur un autre poste.
           </p>
         </>
       )}

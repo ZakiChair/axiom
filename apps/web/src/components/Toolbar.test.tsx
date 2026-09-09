@@ -1,10 +1,8 @@
 /**
  * Garde de sécurité de l'export de sauvegarde (revue 2026-09, A/B).
  *
- * Le fichier exporté est le SEUL artefact du terminal conçu pour quitter la machine et
- * il embarque les clés API en clair : il doit donc être précédé d'une confirmation, sur
- * le modèle de celle de l'import. L'aperçu ⌘K doit porter le même avertissement, et ne
- * plus promettre « tout le terminal » (la clé CoinGecko est hors préfixe `axiom:`).
+ * Le fichier exporté exclut les credentials locaux : l'action est directe et son
+ * aperçu indique que les clés devront être ressaisies.
  *
  * Env vitest node (pas de jsdom dans apps/web) : on stub le strict nécessaire de
  * `document`/`window` pour que la chaîne d'imports de Toolbar s'évalue, et on n'exerce
@@ -59,44 +57,29 @@ function commandeExport() {
   return cmd;
 }
 
-describe("export de sauvegarde — confirmation obligatoire", () => {
+describe("export de sauvegarde sans credential", () => {
   beforeEach(() => {
     vi.mocked(exporterSauvegarde).mockClear();
     confirmSpy.mockClear();
     confirmSpy.mockReturnValue(true);
   });
 
-  it("n'exporte RIEN si l'utilisateur annule la confirmation", () => {
-    confirmSpy.mockReturnValue(false);
-    commandeExport().action();
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(exporterSauvegarde).not.toHaveBeenCalled();
-  });
-
-  it("exporte une fois la confirmation acceptée", () => {
+  it("exporte directement, sans confirmation devenue inutile", () => {
     commandeExport().action();
     expect(exporterSauvegarde).toHaveBeenCalledTimes(1);
-  });
-
-  it("avertit des clés API en clair, du dépôt et du dossier synchronisé", () => {
-    commandeExport().action();
-    const message = String(confirmSpy.mock.calls[0]?.[0] ?? "");
-    expect(message).toMatch(/clés API/i);
-    expect(message).toMatch(/clair/i);
-    expect(message).toMatch(/dépôt/i);
-    expect(message).toMatch(/synchronisé/i);
+    expect(confirmSpy).not.toHaveBeenCalled();
   });
 });
 
 describe("aperçu ⌘K de l'export", () => {
-  it("porte le même avertissement (clés API en clair)", () => {
+  it("porte la même promesse d'exclusion des clés API", () => {
     const apercu = commandeExport().apercu ?? "";
     expect(apercu).toMatch(/clés API/i);
-    expect(apercu).toMatch(/clair/i);
+    expect(apercu).toMatch(/exclues/i);
   });
 
-  it("ne promet plus « tout le terminal » : CoinGecko est hors export", () => {
+  it("prévient que les clés devront être ressaisies", () => {
     const apercu = commandeExport().apercu ?? "";
-    expect(apercu).toMatch(/coingecko/i);
+    expect(apercu).toMatch(/ressaisir/i);
   });
 });

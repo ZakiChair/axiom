@@ -58,6 +58,11 @@ const CHART_KEY = "axiom:chartState:v1";
 const WATCH_KEY = "axiom:watchlist:v1";
 const SESSION_KEY = "axiom:sessionUi:v1";
 const META_KEY = "axiom:persistMeta:v1";
+const CLES_CREDENTIALS = [
+  "axiom:coinalyze:key", "axiom:twelvedata:key", "axiom:ccdata:key", "axiom:finnhub:key",
+  "axiom:sosovalue:key", "axiom:bgeometrics:key", "axiom:etherscan:key", "axiom:fred:key",
+  "axiom.fred.apiKey", "axiom.coingecko.demoApiKey", "axiom.defillama.proApiKey",
+] as const;
 
 /** Mock localStorage en mémoire (environnement de test Node, pas de DOM ici). */
 function installMockLocalStorage(): Storage {
@@ -457,11 +462,11 @@ describe("importerSauvegarde — remplacement des clés axiom:*", () => {
 
   it("stockage non inscriptible : ne supprime pas les données et credentials existants", () => {
     localStorage.setItem("axiom:notes:v1", "notes précieuses");
-    localStorage.setItem("axiom:fred-api-key", "personnelle");
+    localStorage.setItem("axiom:fred:key", "personnelle");
     localStorage.setItem = () => { throw new DOMException("quota", "QuotaExceededError"); };
     expect(importerSauvegarde('{"axiom:chartState:v1":"{}"}')).toBe(false);
     expect(localStorage.getItem("axiom:notes:v1")).toBe("notes précieuses");
-    expect(localStorage.getItem("axiom:fred-api-key")).toBe("personnelle");
+    expect(localStorage.getItem("axiom:fred:key")).toBe("personnelle");
   });
   it("purge les clés axiom:* existantes, conserve les autres, écrit celles du fichier", () => {
     localStorage.setItem("axiom:old:v1", "a-purger");
@@ -477,6 +482,19 @@ describe("importerSauvegarde — remplacement des clés axiom:*", () => {
     expect(localStorage.getItem("axiom:x")).toBe("y");
     expect(localStorage.getItem("autre")).toBe("a-garder"); // hors préfixe : intacte
     expect(localStorage.getItem("hors:prefixe")).toBeNull(); // clé sans préfixe axiom: ignorée
+  });
+
+  it("ignore les credentials d'une ancienne sauvegarde et préserve les clés locales", () => {
+    CLES_CREDENTIALS.forEach((key, index) => localStorage.setItem(key, `locale-${index}`));
+    localStorage.setItem("axiom:notes:v1", "anciennes notes");
+
+    expect(importerSauvegarde(JSON.stringify({
+      ...Object.fromEntries(CLES_CREDENTIALS.map((key, index) => [key, `ancienne-${index}`])),
+      "axiom:notes:v1": "notes importées",
+    }))).toBe(true);
+
+    CLES_CREDENTIALS.forEach((key, index) => expect(localStorage.getItem(key)).toBe(`locale-${index}`));
+    expect(localStorage.getItem("axiom:notes:v1")).toBe("notes importées");
   });
 
   it("refuse un JSON invalide, un tableau ou un objet sans clé axiom: (aucun changement)", () => {
@@ -518,14 +536,16 @@ describe("exporterSauvegarde — périmètre réel du fichier téléchargé", ()
     return JSON.parse(await (capture as Blob).text()) as Record<string, string>;
   }
 
-  it("embarque les clés API `axiom:*` EN CLAIR (d'où la confirmation avant export)", async () => {
-    localStorage.setItem("axiom:coinalyze:key", "SECRET-COINALYZE");
-    localStorage.setItem("axiom:fred:key", "SECRET-FRED");
+  it("exclut tous les credentials utilisés et conserve les données personnelles", async () => {
+    CLES_CREDENTIALS.forEach((key, index) => localStorage.setItem(key, `credential-${index}`));
+    localStorage.setItem(CHART_KEY, '{"symbol":"BTCUSDT"}');
+    localStorage.setItem("axiom:notes:v1", "analyse personnelle");
 
     const dump = await capturerExport();
 
-    expect(dump["axiom:coinalyze:key"]).toBe("SECRET-COINALYZE");
-    expect(dump["axiom:fred:key"]).toBe("SECRET-FRED");
+    expect(CLES_CREDENTIALS.every((key) => dump[key] === undefined)).toBe(true);
+    expect(dump[CHART_KEY]).toBe('{"symbol":"BTCUSDT"}');
+    expect(dump["axiom:notes:v1"]).toBe("analyse personnelle");
   });
 
   it("n'embarque PAS la clé CoinGecko : elle est hors préfixe `axiom:` (promesse corrigée)", async () => {

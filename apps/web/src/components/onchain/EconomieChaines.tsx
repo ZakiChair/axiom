@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
-import { partsADateCommune, type MetriqueEconomie, type SerieEconomie } from "../../data/onchain/economieChaines";
+import { partsADateCommune, type EconomieChaine, type MetriqueEconomie, type SerieEconomie } from "../../data/onchain/economieChaines";
 import { economieChainesStore, retenirEconomieChaines } from "../../store/economieChaines";
 import { formatPct, formatUsd } from "../../lib/format";
 import { Badge, Chargement, ErreurBloc, NoteSource, TitreSection, Vide } from "../ui";
+import { TableTriable, type ColonneTable } from "../TableTriable";
 import { CourbeOnchain, dateObservation } from "./HistoriqueCommun";
 
 const SERIES: Array<{ id: MetriqueEconomie; label: string }> = [
@@ -28,6 +29,23 @@ export function VueEconomieChaines({ donnees, chargement, erreur, titre = true }
   const [horizon, setHorizon] = useState<Horizon>(30);
   if (!donnees && chargement) return <Chargement libelle="Économie des chaînes…" />;
   if (!donnees) return erreur ? <ErreurBloc>{erreur}</ErreurBloc> : <Vide>Économie des chaînes indisponible.</Vide>;
+  const colonnes: ColonneTable<EconomieChaine>[] = [
+    { id: "chaine", label: "Chaîne", largeur: "0.9fr", rendu: (chaine) => <span className="font-medium text-text">{chaine.libelle}</span> },
+    ...SERIES.map(({ id, label }): ColonneTable<EconomieChaine> => ({
+      id,
+      label,
+      align: "right",
+      largeur: "1.25fr",
+      rendu: (chaine) => {
+        const serie = chaine[id]; const delta = variation(serie, horizon);
+        return <span className="align-top tabular-nums">
+          {serie.disponible ? <><span>{formatUsd(serie.resume.niveau)}</span><br/><span className={delta === null ? "text-text-dim" : delta >= 0 ? "text-up" : "text-down"}>{formatPct(delta)}</span>{serie.perime && <Badge ton="warn">périmé</Badge>}</> : <span className="text-text-dim">indisponible</span>}
+          <span className="mt-0.5 block text-[8px] leading-tight text-text-dim">obs. {dateSerie(serie.resume.observeLe)}<br/>récup. {dateSerie(serie.recupereLe)}<br/>{serie.source}</span>
+          {serie.raison && <span className="block text-[8px] leading-tight text-warn">{serie.raison}</span>}
+        </span>;
+      },
+    })),
+  ];
   return <section className="space-y-2">
     {titre && <TitreSection>Économie des chaînes</TitreSection>}
     <div className="flex items-center gap-1">
@@ -35,19 +53,7 @@ export function VueEconomieChaines({ donnees, chargement, erreur, titre = true }
         className={`rounded border px-2 py-0.5 text-[10px] ${horizon === jours ? "border-accent text-accent" : "border-border text-text-dim"}`}>{jours} j</button>)}
       {chargement && <span className="text-[10px] text-text-dim">actualisation…</span>}
     </div>
-    <div className="overflow-x-auto">
-      <table className="w-full text-[10px]">
-        <thead><tr className="text-left text-text-dim"><th className="py-1">Chaîne</th>{SERIES.map((s) => <th key={s.id} className="px-1 py-1 text-right">{s.label}</th>)}</tr></thead>
-        <tbody>{donnees.chaines.map((chaine) => <tr key={chaine.id} className="border-t border-border">
-          <td className="py-1 font-medium text-text">{chaine.libelle}</td>
-          {SERIES.map(({ id }) => { const serie = chaine[id]; const delta = variation(serie, horizon); return <td key={id} className="px-1 py-1 text-right align-top tabular-nums">
-            {serie.disponible ? <><span>{formatUsd(serie.resume.niveau)}</span><br/><span className={delta === null ? "text-text-dim" : delta >= 0 ? "text-up" : "text-down"}>{formatPct(delta)}</span>{serie.perime && <Badge ton="warn">périmé</Badge>}</> : <span className="text-text-dim">indisponible</span>}
-            <span className="mt-0.5 block text-[8px] leading-tight text-text-dim">obs. {dateSerie(serie.resume.observeLe)}<br/>récup. {dateSerie(serie.recupereLe)}<br/>{serie.source}</span>
-            {serie.raison && <span className="block text-[8px] leading-tight text-warn">{serie.raison}</span>}
-          </td>; })}
-        </tr>)}</tbody>
-      </table>
-    </div>
+    <div className="overflow-x-auto"><TableTriable ariaLabel="Économie comparée des chaînes" colonnes={colonnes} lignes={donnees.chaines} cle={(chaine) => chaine.id} /></div>
     <div className="grid gap-2 md:grid-cols-2">
       {SERIES.map(({ id, label }) => {
         const parts = partsADateCommune(donnees.chaines, id);

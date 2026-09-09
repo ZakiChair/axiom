@@ -9,6 +9,8 @@ import { enregistrerQualite } from "../store/qualiteMetriques";
 import { QualiteMetrique } from "./QualiteMetrique";
 import { TableTriable, type ColonneTable } from "./TableTriable";
 import { Badge, Bouton, Chargement, ErreurBloc, Input, NoteSource } from "./ui";
+// Le guide reste canonique dans docs/ ; Vite le publie comme asset versionné au build.
+import guideCalendriersUnlocksUrl from "../../../../docs/guides/calendriers-unlocks.md?url&no-inline";
 
 type Mode = "unlocks" | "bridges";
 
@@ -159,7 +161,7 @@ export function DefillamaProPanel({ initialMode = "unlocks" }: { initialMode?: M
       <Bouton onClick={() => setMode("bridges")} variante={mode === "bridges" ? "primaire" : undefined}>Bridges</Bouton>
       {mode === "unlocks" ? <Input value={filtre} onChange={(e) => setFiltre(e.target.value)} placeholder="Token…" className="w-32" /> : <Input value={chain} onChange={(e) => setChain(e.target.value)} placeholder="Chaîne" className="w-32" />}
       <Bouton disabled={!hasKey || loading} onClick={() => void (mode === "unlocks" ? chargerUnlocks() : chargerBridges())}>Charger</Bouton>
-      {mode === "unlocks" && <><Bouton disabled={!tokensCourants.length} onClick={() => telecharger("axiom-unlocks-source.json", exporterCalendrier(tokensCourants))}>Exporter</Bouton><Bouton onClick={() => inputFichier.current?.click()}>Importer</Bouton><input ref={inputFichier} type="file" accept="application/json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void importerFichier(f); e.target.value = ""; }} /></>}
+      {mode === "unlocks" && <><Bouton disabled={!tokensCourants.length} onClick={() => telecharger("axiom-unlocks-source.json", exporterCalendrier(tokensCourants))}>Exporter</Bouton><Bouton onClick={() => inputFichier.current?.click()}>Importer</Bouton><a className="text-accent underline" href={guideCalendriersUnlocksUrl} target="_blank" rel="noreferrer">Schéma d’import</a><input ref={inputFichier} type="file" accept="application/json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void importerFichier(f); e.target.value = ""; }} /></>}
     </div>
     <QualiteMetrique qualite={qualite} />
     {loading && <Chargement libelle="Chargement DefiLlama Pro…" />}{erreur && <ErreurBloc>{erreur}</ErreurBloc>}

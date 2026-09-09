@@ -36,6 +36,15 @@ test("DefiLlama Pro sans clé conserve l'accès honnête et importe un calendrie
   await expect(panneau.getByRole("button", { name: "Charger" })).toBeDisabled();
   await expect(panneau.getByText("indisponible", { exact: true })).toBeVisible();
   await expect(panneau).toContainText("clé personnelle DefiLlama Pro requise, ou importez un calendrier sourcé");
+  const guide = panneau.getByRole("link", { name: "Schéma d’import" });
+  await expect(guide).toBeVisible();
+  const hrefGuide = await guide.getAttribute("href");
+  expect(hrefGuide).not.toBeNull();
+  const reponseGuide = await page.request.get(new URL(hrefGuide!, page.url()).href);
+  expect(reponseGuide.ok()).toBe(true);
+  const markdownGuide = await reponseGuide.text();
+  expect(markdownGuide).toContain("# Calendriers d’unlocks sourcés");
+  expect(markdownGuide).toContain('"sourcesValidees": true');
 
   const dateUnlock = Date.parse("2026-10-15T08:00:00Z");
   const observation = Date.parse("2026-09-09T12:00:00Z");

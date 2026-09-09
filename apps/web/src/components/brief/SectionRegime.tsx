@@ -19,6 +19,9 @@
 import type { Regime } from "../../data/regime";
 import { fiabiliteRegime, SCORE_MAX, SCORE_MIN, tonRegime } from "../../data/regime";
 import { Badge, Fraicheur, TitreSection } from "../ui";
+import { useStore } from "zustand";
+import { qualiteMetriquesStore } from "../../store/qualiteMetriques";
+import { QualiteMetrique } from "../QualiteMetrique";
 
 /** Classes de ton du libellé de régime — littérales, pour survivre à la purge Tailwind. */
 const CLASSE_TON_REGIME: Record<"up" | "down" | "neutre", string> = {
@@ -36,6 +39,10 @@ function tonNote(note: number | null): "up" | "down" | "neutre" {
 }
 
 export function SectionRegime({ regime, majTs }: { regime: Regime | null; majTs: number | null }) {
+  const registreQualite = useStore(qualiteMetriquesStore, (s) => s.metriques);
+  const qualites = Object.entries(registreQualite)
+    .filter(([id]) => id.startsWith("regime:"))
+    .sort(([a], [b]) => a.localeCompare(b));
   if (regime === null) return null;
   const { couverture } = regime;
   const fiabilite = fiabiliteRegime(couverture);
@@ -99,6 +106,20 @@ export function SectionRegime({ regime, majTs }: { regime: Regime | null; majTs:
           </li>
         ))}
       </ul>
+
+      {qualites.length > 0 ? (
+        <details open={qualites.some(([, entree]) => entree.qualite.statut !== "frais")} className="rounded border border-border bg-bg px-2 py-1.5">
+          <summary className="cursor-pointer text-[10px] font-medium text-text-dim">Qualité des métriques lentes</summary>
+          <div className="mt-1.5 grid gap-1.5 md:grid-cols-2">
+            {qualites.map(([id, entree]) => (
+              <div key={id} className="rounded bg-surface px-2 py-1">
+                <p className="text-[10px] font-medium text-text">{entree.libelle}</p>
+                <QualiteMetrique qualite={entree.qualite} />
+              </div>
+            ))}
+          </div>
+        </details>
+      ) : null}
 
       <p className="text-[10px] text-text-dim">
         Moyenne des composants disponibles. La volatilité pèse deux notes (implicite et

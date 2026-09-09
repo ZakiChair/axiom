@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculerRegime, tonRegime, type EntreesRegime } from "./regime";
+import { agregerFluxEtfRegime, calculerRegime, tonRegime, type EntreesRegime } from "./regime";
 
 const VIDE: EntreesRegime = {
   directionBtc24hPct: null,
@@ -74,6 +74,52 @@ describe("calculerRegime — notes par composant", () => {
   it("detail ETF via le formateur standard (montant signé)", () => {
     const etf = calculerRegime({ ...VIDE, fluxEtfJourUsd: 161_000_000 }).composants.find((c) => c.id === "etf");
     expect(etf?.detail).toContain("+$161");
+  });
+
+  it("ne mélange pas les séances ETF et suspend la note tant que BTC/ETH/SOL ne coïncident pas", () => {
+    const now = Date.UTC(2026, 8, 9, 12);
+    const etf = agregerFluxEtfRegime([
+      { actif: "btc", disponible: true, total: 100_000_000, jour: "2026-09-08" },
+      { actif: "eth", disponible: true, total: -200_000_000, jour: "2026-09-07" },
+      { actif: "sol", disponible: false, total: null, jour: null },
+    ], now);
+    const composant = calculerRegime({ ...VIDE, etf }).composants.find((c) => c.id === "etf");
+    expect(etf?.jour).toBe("2026-09-08");
+    expect(etf?.totalUsd).toBe(100_000_000);
+    expect(etf?.couverture).toEqual({ presents: ["btc"], attendus: ["btc", "eth", "sol"] });
+    expect(composant?.note).toBeNull();
+    expect(composant?.detail).toContain("séance du 2026-09-08");
+    expect(composant?.detail).toContain("1/3");
+    expect(composant?.detail).toContain("BTC +$100");
+    expect(composant?.detail).toContain("ETH −$200");
+  });
+
+  it("note seulement une séance ETF complète âgée d'au plus cinq jours", () => {
+    const lignes = [
+      { actif: "btc" as const, disponible: true, total: 100_000_000, jour: "2026-09-03" },
+      { actif: "eth" as const, disponible: true, total: -20_000_000, jour: "2026-09-03" },
+      { actif: "sol" as const, disponible: true, total: 1_000_000, jour: "2026-09-03" },
+    ];
+    const frais = agregerFluxEtfRegime(lignes, Date.UTC(2026, 8, 8, 23, 59));
+    const perime = agregerFluxEtfRegime(lignes, Date.UTC(2026, 8, 9, 0, 1));
+    expect(calculerRegime({ ...VIDE, etf: frais }).composants.find((c) => c.id === "etf")?.note).toBe(1);
+    expect(calculerRegime({ ...VIDE, etf: perime }).composants.find((c) => c.id === "etf")?.note).toBeNull();
+  });
+
+  it("ignore une date ETF future pour choisir la dernière séance valide", () => {
+    const etf = agregerFluxEtfRegime([
+      { actif: "btc", disponible: true, total: 10, jour: "2026-09-08" },
+      { actif: "eth", disponible: true, total: 20, jour: "2026-09-10" },
+      { actif: "sol", disponible: true, total: 30, jour: "date-invalide" },
+    ], Date.UTC(2026, 8, 9, 12));
+    expect(etf?.jour).toBe("2026-09-08");
+    expect(etf?.couverture.presents).toEqual(["btc"]);
+  });
+
+  it("rejette une date ETF calendaire impossible", () => {
+    expect(agregerFluxEtfRegime([
+      { actif: "btc", disponible: true, total: 10, jour: "2026-02-31" },
+    ], Date.UTC(2026, 8, 9))).toBeNull();
   });
   it("gamma dealers : long +1, short −1, indéterminé 0, absent null (pas de ±2)", () => {
     const note = (regimeGammaBtc: EntreesRegime["regimeGammaBtc"]) =>

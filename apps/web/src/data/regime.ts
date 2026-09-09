@@ -8,6 +8,53 @@
 import { formatUsdSigne } from "../lib/format";
 import type { RegimeGamma } from "./gexDex";
 
+export type ActifEtfRegime = "btc" | "eth" | "sol";
+const ACTIFS_ETF_REGIME: readonly ActifEtfRegime[] = ["btc", "eth", "sol"];
+const JOUR_MS = 86_400_000;
+
+export interface LigneEtfRegime {
+  actif: ActifEtfRegime;
+  disponible: boolean;
+  total: number | null;
+  jour: string | null;
+}
+
+export interface FluxEtfRegime {
+  jour: string;
+  totalUsd: number;
+  ageJours: number;
+  couverture: { presents: ActifEtfRegime[]; attendus: readonly ActifEtfRegime[] };
+  parActif: Partial<Record<ActifEtfRegime, { totalUsd: number; jour: string }>>;
+}
+
+/** Assemble uniquement les actifs portant la dernière séance UTC valide et non future. */
+export function agregerFluxEtfRegime(
+  lignes: readonly LigneEtfRegime[],
+  now: number,
+): FluxEtfRegime | null {
+  const valides = lignes.flatMap((ligne) => {
+    if (!ligne.disponible || ligne.total === null || !Number.isFinite(ligne.total) || ligne.jour === null) return [];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ligne.jour)) return [];
+    const time = Date.parse(`${ligne.jour}T00:00:00.000Z`);
+    if (!Number.isFinite(time) || new Date(time).toISOString().slice(0, 10) !== ligne.jour || time > now) return [];
+    return [{ ...ligne, total: ligne.total, jour: ligne.jour, time }];
+  });
+  if (valides.length === 0) return null;
+  const reference = valides.reduce((max, ligne) => Math.max(max, ligne.time), Number.NEGATIVE_INFINITY);
+  const jour = new Date(reference).toISOString().slice(0, 10);
+  const seance = valides.filter((ligne) => ligne.jour === jour);
+  const parActif: FluxEtfRegime["parActif"] = {};
+  for (const ligne of valides) parActif[ligne.actif] = { totalUsd: ligne.total, jour: ligne.jour };
+  const presents = ACTIFS_ETF_REGIME.filter((actif) => seance.some((ligne) => ligne.actif === actif));
+  return {
+    jour,
+    totalUsd: seance.reduce((s, ligne) => s + ligne.total, 0),
+    ageJours: Math.floor((now - reference) / JOUR_MS),
+    couverture: { presents, attendus: ACTIFS_ETF_REGIME },
+    parActif,
+  };
+}
+
 export interface EntreesRegime {
   /** Variation BTC 24 h en % (ticker Binance), ou null. */
   directionBtc24hPct: number | null;
@@ -21,6 +68,8 @@ export interface EntreesRegime {
   volRealiseeBtcPercentile: number | null;
   /** Flux ETF spot BTC+ETH+SOL de la veille, en USD, ou null. */
   fluxEtfJourUsd: number | null;
+  /** Lecture datée/couverte ; prioritaire sur le champ historique ci-dessus si fournie. */
+  etf?: FluxEtfRegime | null;
   /** Δ supply stablecoins 7 j en % de la supply, ou null. */
   impressionStablecoins7jPct: number | null;
   /**
@@ -166,16 +215,28 @@ export function calculerRegime(entrees: EntreesRegime): Regime {
     });
   }
   {
-    const v = entrees.fluxEtfJourUsd;
+    const etf = entrees.etf;
+    const complet = etf !== undefined && etf !== null && etf.couverture.presents.length === etf.couverture.attendus.length;
+    const v = etf === undefined ? entrees.fluxEtfJourUsd : complet && etf !== null && etf.ageJours <= 5 ? etf.totalUsd : null;
+    const detailsActifs = etf === undefined || etf === null
+      ? ""
+      : ACTIFS_ETF_REGIME.flatMap((actif) => {
+        const ligne = etf.parActif[actif];
+        return ligne ? [`${actif.toUpperCase()} ${formatUsdSigne(ligne.totalUsd)} (${ligne.jour})`] : [];
+      }).join(" · ");
     let note: number | null = null;
     if (v !== null && Number.isFinite(v)) {
       note = v > 50_000_000 ? 1 : v < -50_000_000 ? -1 : 0;
     }
     composants.push({
       id: "etf",
-      libelle: "Flux ETF veille",
+      libelle: etf ? `Flux ETF · séance du ${etf.jour}` : "Flux ETF",
       note,
-      detail: note === null ? "ETF —" : `ETF ${formatUsdSigne(v)} (${fmtNote(note)})`,
+      detail: etf === undefined
+        ? note === null ? "ETF —" : `ETF ${formatUsdSigne(v)} (${fmtNote(note)})`
+        : etf === null
+          ? "ETF —"
+          : `ETF séance du ${etf.jour} · ${etf.couverture.presents.length}/${etf.couverture.attendus.length} actifs${note === null ? "" : ` · ${formatUsdSigne(etf.totalUsd)} (${fmtNote(note)})`}${detailsActifs ? ` · ${detailsActifs}` : ""}`,
     });
   }
   {

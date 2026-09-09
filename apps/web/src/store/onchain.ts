@@ -73,6 +73,8 @@ export interface BgeometricsKeyState {
    * Sans aucune clé, la source reste utilisable (quota IP réduit).
    */
   hasKey: boolean;
+  /** Compteur sans secret, incrémenté même lors d'une rotation vraie→vraie. */
+  version: number;
   /** Enregistre une clé personnelle (localStorage). Vide => équivaut à clearKey. */
   setKey: (key: string) => void;
   /** Supprime la clé personnelle. */
@@ -81,17 +83,18 @@ export interface BgeometricsKeyState {
 
 export const bgeometricsKeyStore = createStore<BgeometricsKeyState>((set) => ({
   hasKey: readKey() !== null,
+  version: 0,
 
   setKey: (key) => {
     const k = key.trim();
     const value = k.length > 0 ? k : null;
     writeKey(value);
-    set({ hasKey: value !== null });
+    set((s) => ({ hasKey: value !== null, version: s.version + 1 }));
   },
 
   clearKey: () => {
     writeKey(null);
-    set({ hasKey: false });
+    set((s) => ({ hasKey: false, version: s.version + 1 }));
   },
 }));
 

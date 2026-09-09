@@ -4,8 +4,8 @@
  * Grille de widgets compacts (valeur + sparkline canvas + libellé + fraîcheur + étiquette
  * de fiabilité) en cinq sections : RÉSEAU BTC, VALORISATION, ETF, RÉSEAU ETH, RÉSEAU SOL.
  * Données LENTES (daily pour l'essentiel) → récupérées à l'ouverture, mises en cache
- * (6 h / 24 h), et redégradées proprement (cache périmé étiqueté, jamais d'erreur console
- * en boucle).
+ * (6 h / 24 h), publiées indépendamment puis réactualisées chaque minute tant que la
+ * fenêtre reste ouverte (les caches bornent les appels daily et les quotas).
  *
  * Sources : Coin Metrics community (sans clé), BGeometrics/bitcoin-data.com (clé optionnelle),
  * mempool.space (direct), SoSoValue via proxy /sosoapi (ETF spot BTC/ETH/SOL — clé Réglages
@@ -54,6 +54,9 @@ import {
 } from "../data/onchain/etf";
 import { fetchReseauEth, type ReseauEth } from "../data/onchain/etherscan";
 import { fetchReseauSol, type ReseauSol } from "../data/onchain/solana";
+import { creerChargeurChain, type SourceChain } from "../data/onchain/chargementChain";
+import { enregistrerQualite, qualiteMetriquesStore } from "../store/qualiteMetriques";
+import type { QualiteMetrique as Qualite } from "../data/qualiteMetrique";
 import {
   formatCompact,
   formatUsd,
@@ -70,6 +73,7 @@ import {
   Badge,
   BadgeFiabilite,
   BarrePeriodes,
+  BoutonRafraichir,
   EnTeteFenetre,
   Fraicheur,
   InfobulleGraphe,
@@ -80,6 +84,7 @@ import {
   TuileStat,
   Vide,
 } from "./ui";
+import { QualiteMetrique } from "./QualiteMetrique";
 import {
   domainePourPreset,
   indicesVisibles,
@@ -441,9 +446,18 @@ const VIDE: EtatDonnees = {
   sol: null,
 };
 
+function publierQualiteChain(
+  id: string,
+  libelle: string,
+  qualite: Omit<Qualite, "sourceId"> & { sourceId?: string },
+): void {
+  enregistrerQualite(`chain:${id}`, libelle, { ...qualite, sourceId: qualite.sourceId ?? id });
+}
+
 export function OnchainWindow() {
   const open = useStore(onchainUiStore, (s) => s.open);
   const bgHasKey = useStore(bgeometricsKeyStore, (s) => s.hasKey);
+  const bgVersion = useStore(bgeometricsKeyStore, (s) => s.version);
   const soSoHasKey = useStore(soSoValueKeyStore, (s) => s.hasKey);
   const etherscanHasKey = useStore(etherscanKeyStore, (s) => s.hasKey);
   // `version` (et non `hasKey`) en dépendance d'effet : remplacer une clé existante
@@ -451,6 +465,10 @@ export function OnchainWindow() {
   const soSoVersion = useStore(soSoValueKeyStore, (s) => s.version);
   const etherscanVersion = useStore(etherscanKeyStore, (s) => s.version);
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
+  const registreQualite = useStore(qualiteMetriquesStore, (s) => s.metriques);
+  const qualitesChain = Object.entries(registreQualite)
+    .filter(([id]) => id.startsWith("chain:"))
+    .sort(([a], [b]) => a.localeCompare(b));
 
   const [donnees, setDonnees] = useState<EtatDonnees>(VIDE);
   const [loading, setLoading] = useState(false);
@@ -458,6 +476,7 @@ export function OnchainWindow() {
   // Horodatage du dernier cycle de fetch complet — alimente le <Fraicheur> du slot actions
   // (convention CorrWindow/DerivativesWindow).
   const [majTs, setMajTs] = useState<number | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     if (!open) {
@@ -466,60 +485,94 @@ export function OnchainWindow() {
       setMajTs(null);
       return;
     }
-    const ctrl = new AbortController();
+    const chargeur = creerChargeurChain();
     let ignore = false;
 
     const charger = async () => {
+      if (chargeur.enCours()) return;
       setLoading(true);
       const cleSoSo = getSoSoValueKey();
-      // Le réseau SOL dépend d'un RPC public sans clé, à latence imprévisible : il
-      // alimente sa section seul, HORS de la barrière Promise.all, pour que ses aléas
-      // ne retardent jamais les autres sections.
-      void fetchReseauSol(ctrl.signal).then((sol) => {
-        if (!ignore) setDonnees((d) => ({ ...d, sol }));
+      const etfCycle: Partial<Record<ActifEtf, EtfResultat>> = {};
+      const sources: SourceChain<unknown>[] = [
+        { id: "coinmetrics", charger: (signal) => fetchCoinMetrics("btc", signal) },
+        { id: "bgeometrics", charger: (signal) => fetchBgeometrics(getBgeometricsKey(), signal) },
+        { id: "mempool", charger: (signal) => fetchMempoolReseau(signal) },
+        { id: "hashrate", charger: (signal) => fetchHashrate(signal) },
+        ...ACTIFS_ETF.map((actif): SourceChain<unknown> => ({
+          id: `etf-${actif}`,
+          charger: async (signal) => {
+            const principal = await fetchEtfFlows(actif, cleSoSo, signal);
+            const repli = actif === "btc" && !principal.disponible
+              ? await fetchBgeometricMetrique(BG_ETF_FLOW, getBgeometricsKey(), signal)
+              : null;
+            return { actif, principal, repli };
+          },
+        })),
+        { id: "eth", charger: (signal) => fetchReseauEth(getEtherscanKey(), signal) },
+        { id: "sol", charger: (signal) => fetchReseauSol(signal) },
+      ];
+      await chargeur.lancer(sources, ({ id, valeur, erreur }) => {
+        if (ignore) return;
+        const recupereLe = Date.now();
+        if (id === "coinmetrics") {
+          const cm = valeur as CoinMetricsResultat | null;
+          setDonnees((d) => ({ ...d, cm }));
+          const observeLe = cm === null ? null : Math.max(...Object.values(cm.series).map((s) => s.dernier?.time ?? 0));
+          publierQualiteChain(id, "Coin Metrics BTC", { sourceEffective: cm?.perime ? "cache Coin Metrics" : "Coin Metrics Community", observeLe: observeLe && observeLe > 0 ? observeLe : null, recupereLe: cm?.ts ?? recupereLe, cadenceMs: 86_400_000, couverture: null, estime: false, acces: cm === null ? "indisponible" : "public", statut: cm === null ? "indisponible" : cm.perime ? "perime" : "frais", ...(cm === null || erreur ? { raison: erreur ?? "Coin Metrics indisponible et aucun cache exploitable." } : {}) });
+        } else if (id === "bgeometrics") {
+          const bg = (valeur ?? {}) as Record<string, BgResultat | null>;
+          setDonnees((d) => ({ ...d, bg }));
+          for (const def of BG_METRIQUES) {
+            const resultat = bg[def.id] ?? null;
+            publierQualiteChain(`bg:${def.id}`, def.libelle, { sourceId: "bgeometrics", sourceEffective: resultat?.perime ? "cache BGeometrics" : "BGeometrics", observeLe: resultat?.serie.dernier?.time ?? null, recupereLe: resultat?.ts ?? recupereLe, cadenceMs: 86_400_000, couverture: resultat ? { disponibles: resultat.serie.points.length, attendus: 120 } : null, estime: false, acces: resultat === null ? "indisponible" : bgHasKey || BG_CLE_ENV_PRESENTE ? "cle" : "public", statut: resultat === null ? "indisponible" : resultat.perime ? "perime" : resultat.serie.points.length < 20 ? "en-construction" : "frais", ...(resultat === null || erreur ? { raison: erreur ?? "Métrique BGeometrics indisponible ou quota épuisé." } : {}) });
+          }
+        } else if (id === "mempool") {
+          const mp = valeur as ResultatFrais<MempoolReseau> | null;
+          setDonnees((d) => ({ ...d, mp }));
+          publierQualiteChain(id, "Réseau BTC live", { sourceEffective: mp?.perime ? "cache mempool.space" : "mempool.space", observeLe: mp?.ts ?? null, recupereLe: mp?.ts ?? recupereLe, cadenceMs: 60_000, couverture: mp ? { disponibles: 2, attendus: 2 } : null, estime: false, acces: mp === null ? "indisponible" : "public", statut: mp === null ? "indisponible" : mp.perime ? "perime" : "frais", ...(mp === null || erreur ? { raison: erreur ?? "mempool.space indisponible et aucun cache exploitable." } : {}) });
+        } else if (id === "hashrate") {
+          const hr = valeur as ResultatFrais<SerieMetrique> | null;
+          setDonnees((d) => ({ ...d, hr }));
+          publierQualiteChain(id, "Hashrate BTC", { sourceId: "mempool", sourceEffective: hr?.perime ? "cache mempool.space" : "mempool.space", observeLe: hr?.donnee.dernier?.time ?? null, recupereLe: hr?.ts ?? recupereLe, cadenceMs: 86_400_000, couverture: hr ? { disponibles: hr.donnee.points.length, attendus: 365 } : null, estime: false, acces: hr === null ? "indisponible" : "public", statut: hr === null ? "indisponible" : hr.perime ? "perime" : "frais", ...(hr === null || erreur ? { raison: erreur ?? "Hashrate indisponible et aucun cache exploitable." } : {}) });
+        } else if (id.startsWith("etf-")) {
+          const r = valeur as { actif: ActifEtf; principal: EtfResultat; repli: BgResultat | null } | null;
+          if (r !== null) {
+            etfCycle[r.actif] = r.principal;
+            setDonnees((d) => ({ ...d, etf: { ...d.etf, [r.actif]: r.principal }, ...(r.actif === "btc" ? { etfRepli: r.repli } : {}) }));
+            const repliActif = r.actif === "btc" && !r.principal.disponible
+              ? r.repli?.serie.dernier
+              : undefined;
+            const observeLe = r.principal.jour ? Date.parse(`${r.principal.jour}T00:00:00Z`) : repliActif?.time ?? null;
+            publierQualiteChain(id, `ETF ${r.actif.toUpperCase()}`, { sourceId: repliActif ? "bgeometrics" : "sosovalue", sourceEffective: repliActif ? "BGeometrics (repli)" : "SoSoValue", observeLe: Number.isFinite(observeLe) ? observeLe : null, recupereLe: r.repli?.ts ?? recupereLe, cadenceMs: 86_400_000, couverture: null, estime: false, acces: r.principal.disponible || repliActif ? "cle" : "indisponible", statut: r.principal.disponible ? "frais" : r.repli?.perime ? "perime" : repliActif ? "partiel" : "indisponible", ...(!r.principal.disponible ? { raison: repliActif ? "SoSoValue indisponible ; repli BTC natif." : r.principal.raison ?? "Flux indisponible." } : {}) });
+          }
+        } else if (id === "eth") {
+          const eth = valeur as ReseauEth | null;
+          setDonnees((d) => ({ ...d, eth }));
+          const disponibles = eth === null ? 0 : [eth.supplyEth, eth.nodeCount, eth.gasSafe].filter((v) => v !== null).length;
+          publierQualiteChain(id, "Réseau ETH", { sourceEffective: "Etherscan", observeLe: eth === null ? null : recupereLe, recupereLe, cadenceMs: 60_000, couverture: { disponibles, attendus: 3 }, estime: false, acces: eth === null ? "indisponible" : etherscanHasKey ? "cle" : "public", statut: eth === null ? "indisponible" : disponibles < 3 ? "partiel" : "frais", ...(disponibles > 0 && disponibles < 3 ? { raison: "Réponse Etherscan partielle." } : erreur ? { raison: erreur } : {}) });
+        } else if (id === "sol") {
+          const sol = valeur as ResultatFrais<ReseauSol> | null;
+          setDonnees((d) => ({ ...d, sol }));
+          publierQualiteChain(id, "Réseau SOL", { sourceEffective: sol?.perime ? "cache RPC/CoinGecko" : "RPC PublicNode + CoinGecko", observeLe: sol?.ts ?? null, recupereLe: sol?.ts ?? recupereLe, cadenceMs: 60_000, couverture: null, estime: false, acces: sol === null ? "indisponible" : "public", statut: sol === null ? "indisponible" : sol.perime ? "perime" : "frais", ...(erreur ? { raison: erreur } : {}) });
+        }
       });
-      const [cm, bg, mp, hr, btcEtf, ethEtf, solEtf, eth] = await Promise.all([
-        fetchCoinMetrics("btc", ctrl.signal),
-        fetchBgeometrics(getBgeometricsKey(), ctrl.signal),
-        fetchMempoolReseau(ctrl.signal),
-        fetchHashrate(ctrl.signal),
-        fetchEtfFlows("btc", cleSoSo, ctrl.signal),
-        fetchEtfFlows("eth", cleSoSo, ctrl.signal),
-        fetchEtfFlows("sol", cleSoSo, ctrl.signal),
-        fetchReseauEth(getEtherscanKey(), ctrl.signal),
-      ]);
       if (ignore) return;
-      // Santé « sosovalue » agrégée sur le cycle complet (3 actifs) — une seule
-      // écriture, hors cycles annulés, pour un état déterministe dans le panneau Santé.
-      rapporterSanteEtf([btcEtf, ethEtf, solEtf]);
-      // Repli ETF BTC : bitcoin-data.com fetché SEULEMENT si SoSoValue BTC a échoué (absence
-      // de clé / 401 / réseau) — jamais de double coût quand SoSoValue répond.
-      const etfRepli = btcEtf.disponible
-        ? null
-        : await fetchBgeometricMetrique(BG_ETF_FLOW, getBgeometricsKey(), ctrl.signal);
-      if (ignore) return; // 2e garde : le repli a pu s'attendre après une fermeture/annulation.
-      setDonnees((d) => ({
-        cm,
-        bg,
-        mp,
-        hr,
-        etf: { btc: btcEtf, eth: ethEtf, sol: solEtf },
-        etfRepli,
-        eth,
-        sol: d.sol,
-      }));
+      const etfRapportes = ACTIFS_ETF.map((actif) => etfCycle[actif]).filter((r): r is EtfResultat => r !== undefined);
+      if (etfRapportes.length > 0) rapporterSanteEtf(etfRapportes);
       setMajTs(Date.now());
       setLoading(false);
     };
 
     void charger();
+    const timer = window.setInterval(() => void charger(), 60_000);
     return () => {
       ignore = true;
-      ctrl.abort();
+      window.clearInterval(timer);
+      chargeur.annuler();
     };
     // Versions de clé en dépendance : re-fetch quand une clé est saisie, REMPLACÉE ou
     // retirée (hasKey seul raterait le remplacement d'une clé existante).
-  }, [open, bgHasKey, soSoVersion, etherscanVersion]);
+  }, [open, bgVersion, soSoVersion, etherscanVersion, refreshTick]);
 
   const cm = donnees.cm;
   const adr = cm?.series["AdrActCnt"];
@@ -558,11 +611,24 @@ export function OnchainWindow() {
         mnemo="CHAIN"
         titre="On-chain"
         sousTitre="Coin Metrics · BGeometrics · mempool.space · SoSoValue · Etherscan · RPC Solana · CoinGecko"
-        actions={<Fraicheur loading={loading} majTs={majTs} />}
+        actions={<span className="flex items-center gap-2"><Fraicheur loading={loading} majTs={majTs} /><BoutonRafraichir onClick={() => setRefreshTick((n) => n + 1)} disabled={loading} /></span>}
       />
       {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        {qualitesChain.length > 0 ? (
+          <details open={qualitesChain.some(([, entree]) => entree.qualite.statut !== "frais")} className="space-y-1.5 rounded border border-border bg-bg px-2 py-1.5">
+            <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-wide text-text-dim">Qualité des blocs</summary>
+            <div className="mt-1.5 grid gap-1.5 md:grid-cols-2">
+              {qualitesChain.map(([id, entree]) => (
+                <div key={id} className="rounded bg-surface px-2 py-1.5">
+                  <p className="text-[10px] font-medium text-text">{entree.libelle}</p>
+                  <QualiteMetrique qualite={entree.qualite} />
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
         {/* ─────────── RÉSEAU BTC ─────────── */}
         <section>
           <TitreSection>Réseau BTC</TitreSection>

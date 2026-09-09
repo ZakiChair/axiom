@@ -52,9 +52,63 @@ describe("referentiel", () => {
       { t: now - 3 * JOUR_MS, v: Number.NaN },
       { t: now, v: 3 },
     ];
-    const ref = referentiel(serie, 2, now);
+    const ref = referentiel(serie, 2, now, { minObservations: 2 });
     expect(ref?.n).toBe(2);
     expect(ref?.percentile).toBe(50);
+  });
+
+  it("mesure la profondeur entre premier et dernier point, séparément de l'âge", () => {
+    const serie = Array.from({ length: 20 }, (_, i) => ({
+      t: now - (30 - i) * JOUR_MS,
+      v: i + 1,
+    }));
+    const ref = referentiel(serie, 10, now);
+    expect(ref?.profondeurJours).toBe(19);
+    expect(ref?.ageJours).toBe(11);
+  });
+
+  it("refuse deux observations anciennes rapprochées au lieu de compter leur âge comme profondeur", () => {
+    expect(
+      referentiel(
+        [
+          { t: now - 30 * JOUR_MS, v: 1 },
+          { t: now - 29 * JOUR_MS, v: 2 },
+        ],
+        2,
+        now,
+      ),
+    ).toBeNull();
+  });
+
+  it("écarte timestamps invalides, futurs et doublons avant de compter les observations", () => {
+    const serie = Array.from({ length: 20 }, (_, i) => ({ t: now - (20 - i) * JOUR_MS, v: i + 1 }));
+    serie.push(
+      { t: Number.NaN, v: 999 },
+      { t: now + JOUR_MS, v: 999 },
+      { t: serie[0]!.t, v: 100 },
+    );
+    const ref = referentiel(serie, 10, now);
+    expect(ref?.n).toBe(20);
+    expect(ref?.percentile).toBe(42.5);
+  });
+
+  it("demande 20 observations par défaut et refuse une couverture connue trop trouée", () => {
+    const dixNeuf = Array.from({ length: 19 }, (_, i) => ({ t: now - (19 - i) * JOUR_MS, v: i }));
+    expect(referentiel(dixNeuf, 10, now)).toBeNull();
+
+    const trouee = Array.from({ length: 20 }, (_, i) => ({ t: now - (40 - i * 2) * JOUR_MS, v: i }));
+    expect(referentiel(trouee, 10, now, { cadenceAttendueMs: JOUR_MS })).toBeNull();
+  });
+
+  it("expose la couverture de cadence et permet un minimum explicite compatible", () => {
+    const serie = Array.from({ length: 8 }, (_, i) => ({ t: now - (7 - i) * JOUR_MS, v: i }));
+    const ref = referentiel(serie, 4, now, { cadenceAttendueMs: JOUR_MS, minObservations: 2 });
+    expect(ref?.couverture).toEqual({ disponibles: 8, attendus: 8 });
+  });
+
+  it("refuse une dernière observation périmée quand un âge maximal est fourni", () => {
+    const serie = Array.from({ length: 20 }, (_, i) => ({ t: now - (30 - i) * JOUR_MS, v: i }));
+    expect(referentiel(serie, 10, now, { ageMaxMs: 5 * JOUR_MS })).toBeNull();
   });
 });
 

@@ -6,8 +6,8 @@
  * Poller 15 min (pattern startMacroHistoryPolling), démarré dans main.tsx.
  */
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { calculerRegime, type Regime } from "../data/regime";
-import { referentiel, type Referentiel, type PointSerie } from "../lib/referentiel";
+import { agregerFluxEtfRegime, calculerRegime, type Regime } from "../data/regime";
+import { cadenceObservee, referentiel, type OptionsReferentiel, type Referentiel, type PointSerie } from "../lib/referentiel";
 import {
   deltasFenetre,
   histDvol,
@@ -20,6 +20,8 @@ import { fetchEtfBrief, fetchWatchlistOvernight } from "../data/brief";
 import { chargerEmetteurs } from "../data/macro/stablecoinsDetail";
 import { chargerVerdictGammaBtc } from "../data/gammaRegime";
 import type { RegimeGamma } from "../data/gexDex";
+import { enregistrerQualite } from "./qualiteMetriques";
+import type { QualiteMetrique } from "../data/qualiteMetrique";
 
 /** Données « courantes » du chapeau BRIEF (dérivées du même rafraîchissement). */
 export interface Chapeau {
@@ -60,17 +62,78 @@ export const regimeStore: StoreApi<RegimeState> = createStore<RegimeState>(() =>
 const JOUR_MS = 86_400_000;
 const POLL_MS = 15 * 60_000;
 
-function dernier(serie: PointSerie[] | null): number | null {
-  const p = serie?.[serie.length - 1];
-  return p !== undefined && Number.isFinite(p.v) ? p.v : null;
+function dernierPoint(serie: PointSerie[] | null, now = Date.now()): PointSerie | null {
+  const p = serie
+    ?.filter((point) => Number.isFinite(point.t) && point.t <= now && Number.isFinite(point.v))
+    .sort((a, b) => a.t - b.t)
+    .at(-1);
+  return p ?? null;
+}
+
+function dernier(serie: PointSerie[] | null, now = Date.now()): number | null {
+  const p = dernierPoint(serie, now);
+  return p !== null && Number.isFinite(p.v) ? p.v : null;
 }
 
 /** Percentile de la dernière valeur dans sa propre série (null si réf. en construction). */
-function percentileCourant(serie: PointSerie[] | null, now: number): number | null {
-  const v = dernier(serie);
+export function percentileCourant(
+  serie: PointSerie[] | null,
+  now: number,
+  options: OptionsReferentiel = {},
+): number | null {
+  const v = dernier(serie, now);
   if (serie === null || v === null) return null;
-  const ref = referentiel(serie, v, now);
+  const ref = referentiel(serie, v, now, options);
   return ref === null ? null : ref.percentile;
+}
+
+function publierQualiteSerie(
+  id: string,
+  libelle: string,
+  sourceId: string,
+  sourceEffective: string,
+  serie: PointSerie[] | null,
+  now: number,
+  cadenceMs: number | null,
+  ageMaxMs: number,
+  acces: QualiteMetrique["acces"] = "public",
+): void {
+  const points = serie?.filter((p) => Number.isFinite(p.t) && p.t <= now && Number.isFinite(p.v)) ?? [];
+  const dates = [...new Set(points.map((p) => p.t))].sort((a, b) => a - b);
+  const observeLe = dates.at(-1) ?? null;
+  const attendus = cadenceMs !== null && dates.length > 1
+    ? Math.floor((dates.at(-1)! - dates[0]!) / cadenceMs) + 1
+    : null;
+  const couverture = attendus === null ? null : { disponibles: dates.length, attendus };
+  const age = observeLe === null ? Number.POSITIVE_INFINITY : now - observeLe;
+  const tropPeu = dates.length < 20;
+  const troue = couverture !== null && couverture.attendus > 0 && couverture.disponibles / couverture.attendus < 0.8;
+  const statut: QualiteMetrique["statut"] = observeLe === null
+    ? "indisponible"
+    : age > ageMaxMs
+      ? "perime"
+      : tropPeu
+        ? "en-construction"
+        : troue
+          ? "partiel"
+          : "frais";
+  const raison = observeLe === null ? "Aucune observation exploitable."
+    : age > ageMaxMs ? "Dernière observation trop ancienne pour le régime."
+      : tropPeu ? `${dates.length}/20 observations minimales.`
+        : troue ? "Couverture temporelle insuffisante."
+          : undefined;
+  enregistrerQualite(id, libelle, {
+    sourceId,
+    sourceEffective,
+    observeLe,
+    recupereLe: now,
+    cadenceMs,
+    couverture,
+    estime: false,
+    acces: observeLe === null ? "indisponible" : acces,
+    statut,
+    ...(raison ? { raison } : {}),
+  });
 }
 
 export async function rafraichirRegime(): Promise<void> {
@@ -98,19 +161,23 @@ export async function rafraichirRegime(): Promise<void> {
   const serieVolReal = volReal.status === "fulfilled" ? volReal.value : null;
   const serieOi = oi.status === "fulfilled" ? oi.value : null;
 
-  const fearGreedCourant = dernier(serieFg);
+  const fearGreedCourant = dernier(serieFg, now);
   const fearGreedRef =
     serieFg !== null && fearGreedCourant !== null
-      ? referentiel(serieFg, fearGreedCourant, now)
+      ? referentiel(serieFg, fearGreedCourant, now, { cadenceAttendueMs: JOUR_MS, ageMaxMs: 3 * JOUR_MS })
       : null;
 
-  const fundingBtcRate = dernier(serieFunding);
+  const cadenceFunding = serieFunding === null ? null : cadenceObservee(serieFunding, now);
+  const fundingBtcRate = dernier(serieFunding, now);
   const fundingRef =
     serieFunding !== null && fundingBtcRate !== null
-      ? referentiel(serieFunding, fundingBtcRate, now)
+      ? referentiel(serieFunding, fundingBtcRate, now, {
+        ...(cadenceFunding !== null ? { cadenceAttendueMs: cadenceFunding } : {}),
+        ageMaxMs: Math.max(12 * 3_600_000, (cadenceFunding ?? 0) * 2),
+      })
       : null;
 
-  const dvolCourant = dernier(serieDvol);
+  const dvolCourant = dernier(serieDvol, now);
   const avantDernierDvolBrut = serieDvol?.[serieDvol.length - 2]?.v;
   const avantDernierDvol =
     avantDernierDvolBrut !== undefined && Number.isFinite(avantDernierDvolBrut)
@@ -119,16 +186,14 @@ export async function rafraichirRegime(): Promise<void> {
   const dvolDeltaPts =
     dvolCourant !== null && avantDernierDvol !== null ? dvolCourant - avantDernierDvol : null;
   const dvolRef =
-    serieDvol !== null && dvolCourant !== null ? referentiel(serieDvol, dvolCourant, now) : null;
+    serieDvol !== null && dvolCourant !== null
+      ? referentiel(serieDvol, dvolCourant, now, { cadenceAttendueMs: JOUR_MS, ageMaxMs: 3 * JOUR_MS })
+      : null;
 
   const deltas24h = serieOi !== null ? deltasFenetre(serieOi, JOUR_MS) : [];
-  const deltaOi24hPct = dernier(deltas24h.length > 0 ? deltas24h : null);
+  const deltaOi24hPct = dernier(deltas24h.length > 0 ? deltas24h : null, now);
 
-  let fluxEtfJourUsd: number | null = null;
-  if (etf.status === "fulfilled") {
-    const dispo = etf.value.filter((e) => e.disponible && e.total !== null);
-    if (dispo.length > 0) fluxEtfJourUsd = dispo.reduce((s, e) => s + (e.total ?? 0), 0);
-  }
+  const etfRegime = etf.status === "fulfilled" ? agregerFluxEtfRegime(etf.value, now) : null;
 
   let impressionStablecoins7jPct: number | null = null;
   if (emetteurs.status === "fulfilled") {
@@ -153,15 +218,42 @@ export async function rafraichirRegime(): Promise<void> {
   const regime = calculerRegime({
     directionBtc24hPct: nuitBtcPct,
     fearGreed: fearGreedCourant,
-    fundingBtcPercentile: percentileCourant(serieFunding, now),
-    dvolBtcPercentile: percentileCourant(serieDvol, now),
-    volRealiseeBtcPercentile: percentileCourant(serieVolReal, now),
-    fluxEtfJourUsd,
+    fundingBtcPercentile: percentileCourant(serieFunding, now, {
+      ...(cadenceFunding !== null ? { cadenceAttendueMs: cadenceFunding } : {}),
+      ageMaxMs: Math.max(12 * 3_600_000, (cadenceFunding ?? 0) * 2),
+    }),
+    dvolBtcPercentile: percentileCourant(serieDvol, now, { cadenceAttendueMs: JOUR_MS, ageMaxMs: 3 * JOUR_MS }),
+    volRealiseeBtcPercentile: percentileCourant(serieVolReal, now, { cadenceAttendueMs: JOUR_MS, ageMaxMs: 3 * JOUR_MS }),
+    fluxEtfJourUsd: null,
+    etf: etfRegime,
     impressionStablecoins7jPct,
     regimeGammaBtc:
       verdictBtc !== null
         ? { regime: verdictBtc.verdict.regime, gexNetUsd: verdictBtc.gexNetUsd }
         : null,
+  });
+
+  publierQualiteSerie("regime:fear-greed", "Fear & Greed", "alternative-me", "Alternative.me", serieFg, now, JOUR_MS, 3 * JOUR_MS);
+  publierQualiteSerie("regime:funding", "Funding BTC", "binance-futures", "Binance USDⓈ-M", serieFunding, now, cadenceFunding, Math.max(12 * 3_600_000, (cadenceFunding ?? 0) * 2));
+  publierQualiteSerie("regime:dvol", "DVOL BTC", "deribit", "Deribit", serieDvol, now, JOUR_MS, 3 * JOUR_MS);
+  publierQualiteSerie("regime:vol-realisee", "Vol réalisée BTC", "binance", "Binance spot", serieVolReal, now, JOUR_MS, 3 * JOUR_MS);
+  publierQualiteSerie("regime:oi", "Open Interest BTC", "binance-futures", "Binance USDⓈ-M", serieOi, now, 3_600_000, 3 * 3_600_000);
+  const etfCouverture = etfRegime === null ? null : { disponibles: etfRegime.couverture.presents.length, attendus: etfRegime.couverture.attendus.length };
+  enregistrerQualite("regime:etf", "Flux ETF spot", {
+    sourceId: "sosovalue", sourceEffective: "SoSoValue", observeLe: etfRegime === null ? null : Date.parse(`${etfRegime.jour}T00:00:00Z`), recupereLe: now,
+    cadenceMs: JOUR_MS, couverture: etfCouverture, estime: false, acces: etfRegime === null ? "indisponible" : "cle",
+    statut: etfRegime === null ? "indisponible" : etfRegime.ageJours > 5 ? "perime" : etfCouverture?.disponibles === etfCouverture?.attendus ? "frais" : "partiel",
+    ...(etfRegime === null ? { raison: "Aucune séance valide rapportée." } : etfCouverture?.disponibles !== etfCouverture?.attendus ? { raison: "Séance incomplète BTC/ETH/SOL." } : {}),
+  });
+  enregistrerQualite("regime:stablecoins", "Offre stablecoins 7 j", {
+    sourceId: "defillama", sourceEffective: "DefiLlama", observeLe: null, recupereLe: now,
+    cadenceMs: JOUR_MS, couverture: null, estime: false, acces: emetteurs.status === "fulfilled" ? "public" : "indisponible", statut: emetteurs.status === "fulfilled" ? "partiel" : "indisponible",
+    raison: emetteurs.status === "fulfilled" ? "La liste courante ne fournit pas de date d'observation globale." : "Chargement des stablecoins en échec.",
+  });
+  enregistrerQualite("regime:gamma", "Gamma dealers BTC", {
+    sourceId: "deribit", sourceEffective: "Deribit", observeLe: verdictBtc === null ? null : now, recupereLe: now,
+    cadenceMs: 15 * 60_000, couverture: null, estime: true, acces: verdictBtc === null ? "indisponible" : "public", statut: verdictBtc === null ? "indisponible" : "frais",
+    ...(verdictBtc === null ? { raison: "Chaîne d'options ou verdict indisponible." } : {}),
   });
 
   regimeStore.setState({

@@ -22,6 +22,8 @@ import { healthStore, type QuotaSource, type SanteSource } from "../store/health
 import { dotClass, etatLabel, formatQuota } from "./HealthPanel";
 import { trierSources, formatFraicheur } from "../data/dataCockpit";
 import { Badge, EnTeteFenetre, NoteSource, Vide } from "./ui";
+import { qualiteMetriquesStore } from "../store/qualiteMetriques";
+import { QualiteMetrique } from "./QualiteMetrique";
 
 /**
  * Signature de re-rendu : change quand la composition, l'état, le quota ou l'erreur d'une
@@ -69,6 +71,8 @@ function BarreQuota({ quota }: { quota: QuotaSource }) {
 export function DataWindow() {
   // Abonnement piloté par la signature (hors `dernierMessageTs`) — cf. en-tête.
   const signature = useStore(healthStore, (s) => signatureRegistre(s.sources));
+  const registreQualite = useStore(qualiteMetriquesStore, (s) => s.metriques);
+  const qualites = Object.entries(registreQualite).sort(([a], [b]) => a.localeCompare(b));
 
   // Tick d'affichage 10 s : force un re-rendu pour rafraîchir les fraîcheurs relatives
   // sans dépendre du flot de messages WS (que la signature ignore volontairement).
@@ -135,6 +139,20 @@ export function DataWindow() {
             ))}
           </ul>
         )}
+
+        {qualites.length > 0 ? (
+          <section className="mt-4 space-y-1.5">
+            <h3 className="text-[10px] font-semibold uppercase tracking-wide text-text-dim">Qualité par métrique</h3>
+            <ul className="grid gap-1.5 md:grid-cols-2">
+              {qualites.map(([id, entree]) => (
+                <li key={id} className="rounded border border-border bg-bg px-2 py-1.5">
+                  <p className="text-[11px] font-medium text-text">{entree.libelle}</p>
+                  <QualiteMetrique qualite={entree.qualite} />
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
         <div className="mt-3">
           <NoteSource>

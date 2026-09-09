@@ -16,14 +16,40 @@ export interface Referentiel {
   percentile: number;
   /** Profondeur couverte par la série, en jours (réelle, pas nominale). */
   profondeurJours: number;
+  /** Âge de la dernière observation, distinct de la profondeur historique. */
+  ageJours?: number;
   /** Nombre de points utilisés. */
   n: number;
+  /** Couverture de la cadence attendue, quand celle-ci est connue. */
+  couverture?: { disponibles: number; attendus: number } | null;
 }
 
 /** Sous ce seuil de profondeur, le percentile serait trompeur → « réf. en construction ». */
 export const PROFONDEUR_MIN_JOURS = 5;
+export const OBSERVATIONS_MIN = 20;
+export const COUVERTURE_MIN = 0.8;
 
 const JOUR_MS = 86_400_000;
+
+export interface OptionsReferentiel {
+  minObservations?: number;
+  profondeurMinJours?: number;
+  cadenceAttendueMs?: number;
+  couvertureMin?: number;
+  ageMaxMs?: number;
+}
+
+/** Cadence médiane réellement observée entre points valides et distincts. */
+export function cadenceObservee(serie: readonly PointSerie[], now = Date.now()): number | null {
+  const temps = [...new Set(serie
+    .map((p) => p.t)
+    .filter((t) => Number.isFinite(t) && t <= now))]
+    .sort((a, b) => a - b);
+  const ecarts = temps.slice(1).map((t, i) => t - temps[i]!).filter((d) => d > 0).sort((a, b) => a - b);
+  if (ecarts.length === 0) return null;
+  const milieu = Math.floor(ecarts.length / 2);
+  return ecarts.length % 2 === 1 ? ecarts[milieu]! : (ecarts[milieu - 1]! + ecarts[milieu]!) / 2;
+}
 
 /**
  * Rang percentile MI-DISTANCE : (strictement sous + ties / 2) / n × 100, 0..100.
@@ -50,17 +76,36 @@ export function referentiel(
   serie: readonly PointSerie[],
   valeur: number,
   now: number,
+  options: OptionsReferentiel = {},
 ): Referentiel | null {
-  const finis = serie.filter((p) => Number.isFinite(p.v));
-  if (finis.length < 2 || !Number.isFinite(valeur)) return null;
-  let plusAncien = Number.POSITIVE_INFINITY;
-  for (const p of finis) if (p.t < plusAncien) plusAncien = p.t;
-  const profondeurJours = (now - plusAncien) / JOUR_MS;
-  if (!(profondeurJours >= PROFONDEUR_MIN_JOURS)) return null;
+  if (!Number.isFinite(now) || !Number.isFinite(valeur)) return null;
+  const uniques = new Map<number, PointSerie>();
+  for (const p of serie) {
+    if (!Number.isFinite(p.t) || p.t > now || !Number.isFinite(p.v)) continue;
+    uniques.set(p.t, p);
+  }
+  const finis = [...uniques.values()].sort((a, b) => a.t - b.t);
+  const minObservations = options.minObservations ?? OBSERVATIONS_MIN;
+  if (finis.length < Math.max(2, minObservations)) return null;
+  const premier = finis[0]!;
+  const dernier = finis[finis.length - 1]!;
+  const profondeurJours = (dernier.t - premier.t) / JOUR_MS;
+  const ageJours = Math.max(0, now - dernier.t) / JOUR_MS;
+  if (!(profondeurJours >= (options.profondeurMinJours ?? PROFONDEUR_MIN_JOURS))) return null;
+  if (options.ageMaxMs !== undefined && now - dernier.t > options.ageMaxMs) return null;
+  let couverture: Referentiel["couverture"] = null;
+  const cadence = options.cadenceAttendueMs;
+  if (cadence !== undefined && Number.isFinite(cadence) && cadence > 0) {
+    const attendus = Math.floor((dernier.t - premier.t) / cadence) + 1;
+    couverture = { disponibles: finis.length, attendus };
+    if (attendus > 0 && finis.length / attendus < (options.couvertureMin ?? COUVERTURE_MIN)) return null;
+  }
   return {
     percentile: rangPercentile(finis.map((p) => p.v), valeur),
     profondeurJours,
+    ageJours,
     n: finis.length,
+    couverture,
   };
 }
 

@@ -30,9 +30,9 @@
  *
  * Note périmètre : le thème (`store/theme`) et les alertes (`store/alerts`) gèrent leur
  * propre persistance dans leur module respectif ; ils ne sont donc pas re-persistés ici,
- * mais leurs clés `axiom:*` sont bien couvertes par l'export/import de sauvegarde. Seule
- * exception connue : la clé Demo CoinGecko (`axiom.coingecko.demoApiKey`, hors préfixe)
- * est HORS export — cf. `exporterSauvegarde`.
+ * mais leurs clés `axiom:*` sont bien couvertes par l'export/import de sauvegarde.
+ * Tous les credentials fournisseurs sont exclus du fichier et préservés à l'import,
+ * quel que soit leur préfixe — cf. `exporterSauvegarde`.
  */
 import { EXCHANGE_IDS, type ChartState, type ExchangeId, type Timeframe } from "@axiom/types";
 import {

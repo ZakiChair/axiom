@@ -166,3 +166,61 @@ describe("monteCarloTrades — forme du résultat", () => {
     expect(res.cheminsPercentiles.p95).toHaveLength(pnls.length);
   });
 });
+
+describe("monteCarloTrades — bootstrap par blocs et ruine en trajectoire", () => {
+  function rngSequence(values: number[]): () => number {
+    let i = 0;
+    return () => values[i++] ?? 0;
+  }
+
+  it("rééchantillonne des blocs mobiles non circulaires et tronque le dernier", () => {
+    const res = monteCarloTrades(
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+      1,
+      rngSequence([0, 0.5, 0.999, 0.125]),
+      100,
+      { mode: "blocs", tailleBloc: 3 },
+    )!;
+    expect(res.cheminsPercentiles.p50).toEqual([101, 103, 106, 111, 117, 124, 132, 141, 151, 153]);
+    expect(res.equityFinale.p50).toBe(153);
+    expect(res.maxDrawdown.p50).toBe(0);
+  });
+
+  it("L=n restitue exactement la trajectoire observée", () => {
+    const res = monteCarloTrades([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 1, rngSequence([0.999]), 100, { mode: "blocs", tailleBloc: 10 })!;
+    expect(res.cheminsPercentiles.p50).toEqual([101, 103, 106, 110, 115, 121, 128, 136, 145, 155]);
+  });
+
+  it("L=1 conserve exactement la séquence iid", () => {
+    const pnls = [1, -2, 3, -4, 5, -6, 7, -8, 9, -10];
+    const iid = monteCarloTrades(pnls, 3, mulberry32(42), 100);
+    const blocs = monteCarloTrades(pnls, 3, mulberry32(42), 100, { mode: "blocs", tailleBloc: 1 });
+    expect(blocs).toEqual(iid);
+  });
+
+  it("distingue franchissement de ruine et capital final négatif", () => {
+    const res = monteCarloTrades(
+      [-120, 150, 0, 0, 0, 0, 0, 0, 0, 0],
+      1,
+      rngSequence([0, 0.1, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2]),
+      100,
+    )!;
+    expect(res.probRuine).toBe(1);
+    expect(res.probFinaleNegative).toBe(0);
+    expect(res.maxDrawdown.p50).toBeCloseTo(1.2, 12);
+  });
+
+  it("compte une equity exactement nulle comme ruine, mais pas comme finale négative", () => {
+    const res = monteCarloTrades([-100, 100, 0, 0, 0, 0, 0, 0, 0, 0], 1, rngSequence([0, 0.1, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2, 0.2]), 100)!;
+    expect(res.probRuine).toBe(1);
+    expect(res.probFinaleNegative).toBe(0);
+  });
+
+  it("refuse les entrées non finies, capital invalide, bloc invalide et RNG hors domaine", () => {
+    expect(() => monteCarloTrades([...Array(9).fill(0), Number.NaN], 1, () => 0, 100)).toThrow("PnL");
+    expect(() => monteCarloTrades(Array(10).fill(0), 1, () => 0, 0)).toThrow("capitalInitial");
+    expect(() => monteCarloTrades(Array(10).fill(0), Number.NaN, () => 0, 100)).toThrow("nChemins");
+    expect(() => monteCarloTrades(Array(10).fill(0), 1, () => 0, 100, { mode: "blocs", tailleBloc: 0 })).toThrow("tailleBloc");
+    expect(() => monteCarloTrades(Array(10).fill(0), 1, () => 1, 100)).toThrow("RNG");
+  });
+});

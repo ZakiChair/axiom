@@ -14,7 +14,7 @@ fichiers déjà générés — elle ne lance jamais Python.
 ```bash
 cd scripts/golden
 python3 -m venv .venv          # environnement virtuel local, jamais committé
-.venv/bin/pip install pandas-ta-classic
+.venv/bin/pip install -r requirements.txt
 ```
 
 ## (Re)générer les golden
@@ -30,6 +30,7 @@ committées) et réécrit :
 - `packages/indicators/src/golden/supertrend.golden.json`
 - `packages/indicators/src/golden/ichimoku.golden.json`
 - `packages/indicators/src/golden/psar.golden.json`
+- `packages/indicators/src/golden/manifest.json` (hashes, versions, paramètres et conventions)
 
 Chaque fichier a la forme `{ params, series: { colonnePandasTa: (number|null)[] } }`.
 
@@ -46,4 +47,6 @@ Chaque fichier a la forme `{ params, series: { colonnePandasTa: (number|null)[] 
 | `ichimoku`   | `ta.ichimoku(high, low, close, tenkan=9, kijun=26, senkou=52)` | `ITS_9`, `IKS_26`, `ISA_9`, `ISB_26`, `ICS_26` |
 | `psar`       | `ta.psar(high, low, af0=0.02, af=0.02, max_af=0.2)` (SANS `close`, voir commentaire dans `generate.py`) | `PSARl_0.02_0.2`, `PSARs_0.02_0.2` |
 
-Version testée : `pandas-ta-classic==0.6.52` (Python 3.14).
+Versions figées : Python `3.14.6` et les paquets exacts de `requirements.txt`.
+Le manifeste enregistre aussi le SHA-256 de la fixture OHLCV et du générateur ;
+une régénération avec un autre environnement produit donc une provenance visible.

@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
 import {
+  calculerFundingTrade,
   calculerStats,
   construireEquity,
   runBacktest,
@@ -81,6 +82,173 @@ function compareClose(comparateur: ">" | ">=" | "<" | "<=", niveau: number): Con
 
 /** Paramètres « sans friction » (frais et slippage nuls). */
 const SANS_FRICTION: ParamsBacktest = { fraisPct: 0, slippagePct: 0, capitalInitial: 10_000 };
+
+describe("funding perp linéaire", () => {
+  it("applique le signe long/short, y compris avec un taux négatif", () => {
+    const reglements = [
+      { temps: 8, taux: 0.001, mark: 100, tempsMark: 8 },
+      { temps: 16, taux: -0.002, mark: 120, tempsMark: 16 },
+    ];
+    const long = calculerFundingTrade("long", 2, 1, 16, reglements);
+    const short = calculerFundingTrade("short", 2, 1, 16, reglements);
+    expect(long.reglements).toEqual([{ temps: 8, cout: 0.2 }, { temps: 16, cout: -0.48 }]);
+    expect(short.reglements).toEqual([{ temps: 8, cout: -0.2 }, { temps: 16, cout: 0.48 }]);
+    expect(long.total).toBeCloseTo(-0.28, 12);
+    expect(short.total).toBeCloseTo(0.28, 12);
+    expect(() => calculerFundingTrade("long", 0, 1, 16, reglements)).toThrow("positive");
+  });
+
+  it("respecte règlement puis fills aux bornes réelles", () => {
+    const reglements = [0, 8, 16].map((temps) => ({ temps, taux: 0.001, mark: 100, tempsMark: temps }));
+    expect(calculerFundingTrade("long", 1, 7.59, 8.01, reglements).total).toBeCloseTo(0.1, 12);
+    expect(calculerFundingTrade("long", 1, 8, 15.59, reglements).total).toBe(0);
+    expect(calculerFundingTrade("long", 1, 8, 16, reglements).total).toBeCloseTo(0.1, 12);
+    expect(calculerFundingTrade("long", 1, 7, 8, reglements).total).toBeCloseTo(0.1, 12);
+  });
+
+  it("refuse un mark connu après son règlement", () => {
+    expect(() => calculerFundingTrade("long", 1, 6, 9, [
+      { temps: 8, taux: 0.01, mark: 105, tempsMark: 8.01 },
+    ])).toThrow("tempsMark");
+  });
+
+  it("intègre frais et funding séparément dans le PnL et le R", () => {
+    const H = 3_600_000;
+    const candles = [
+      barre(0, 100, 100),
+      barre(H, 100, 100),
+      barre(2 * H, 110, 110),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [compareClose(">", 0)],
+      reglesSortie: [],
+      direction: "long",
+      stopPct: 10,
+      tailleFixe: 200,
+    };
+    const resultat = runBacktest(candles, strat, {
+      fraisPct: 0.1,
+      slippagePct: 0,
+      capitalInitial: 1000,
+      timeframe: "1h",
+      finDonneesMs: 3 * H,
+      funding: {
+        modele: "perp-lineaire",
+        reglements: [
+          { temps: 1.5 * H, taux: 0.001, mark: 100, tempsMark: 1.5 * H },
+          { temps: 3 * H, taux: -0.002, mark: 120, tempsMark: 3 * H },
+        ],
+      },
+    });
+    const trade = resultat.trades[0]!;
+    expect(trade.frais).toBeCloseTo(0.42, 12);
+    expect(trade.funding).toBeCloseTo(-0.28, 12);
+    expect(trade.pnl).toBeCloseTo(19.86, 12);
+    expect(trade.instantSortieEffectif).toBe(3 * H);
+    expect(resultat.fundingTotal).toBeCloseTo(-0.28, 12);
+    expect(resultat.equity.at(-1)!.equity).toBeCloseTo(1019.86, 12);
+    expect(resultat.equity.at(-1)!.equity).toBeCloseTo(1000 + resultat.stats.pnlTotal, 12);
+  });
+
+  it("reproduit le cas court complet du contrat : funding reçu puis PnL net", () => {
+    const H = 3_600_000;
+    const resultat = runBacktest(
+      [barre(0, 100, 100), barre(H, 100, 100), barre(2 * H, 110, 110)],
+      { reglesEntree: [compareClose(">", 0)], reglesSortie: [], direction: "short", tailleFixe: 200 },
+      {
+        timeframe: "1h", fraisPct: 0.1, slippagePct: 0, capitalInitial: 1000, finDonneesMs: 3 * H,
+        funding: { modele: "perp-lineaire", reglements: [
+          { temps: 1.5 * H, taux: 0.001, mark: 100, tempsMark: 1.5 * H },
+          { temps: 3 * H, taux: -0.002, mark: 120, tempsMark: 3 * H },
+        ] },
+      },
+    );
+    const trade = resultat.trades[0]!;
+    expect(trade.funding).toBeCloseTo(0.28, 12);
+    expect(trade.frais).toBeCloseTo(0.42, 12);
+    expect(trade.pnl).toBeCloseTo(-20.70, 12);
+  });
+
+  it("inclut le règlement au close réel de la dernière bougie", () => {
+    const H = 3_600_000;
+    const resultat = runBacktest(
+      [barre(6 * H, 100, 100), barre(7 * H, 100, 100)],
+      { reglesEntree: [compareClose(">", 0)], reglesSortie: [], direction: "long", tailleFixe: 100 },
+      {
+        timeframe: "1h",
+        fraisPct: 0,
+        slippagePct: 0,
+        capitalInitial: 1000,
+        finDonneesMs: 8 * H,
+        funding: { modele: "perp-lineaire", reglements: [{ temps: 8 * H, taux: 0.001, mark: 100, tempsMark: 8 * H }] },
+      },
+    );
+    expect(resultat.trades[0]!.funding).toBeCloseTo(0.1, 12);
+    expect(resultat.trades[0]!.pnl).toBeCloseTo(-0.1, 12);
+    expect(resultat.equity.at(-1)!.equity).toBeCloseTo(999.9, 12);
+  });
+
+  it("exige une fin de données réelle quand le funding est actif", () => {
+    expect(() => runBacktest(
+      [barre(0, 100, 100), barre(1, 100, 100)],
+      { reglesEntree: [], reglesSortie: [], direction: "long", tailleFixe: 100 },
+      { ...SANS_FRICTION, funding: { modele: "perp-lineaire", reglements: [] } },
+    )).toThrow("finDonneesMs");
+  });
+
+  it("exige le timeframe qui borne chaque clôture quand le funding est actif", () => {
+    expect(() => runBacktest(
+      [barre(0, 100, 100), barre(1, 100, 100)],
+      { reglesEntree: [], reglesSortie: [], direction: "long", tailleFixe: 100 },
+      { ...SANS_FRICTION, finDonneesMs: 2, funding: { modele: "perp-lineaire", reglements: [] } },
+    )).toThrow("timeframe");
+  });
+
+  it("n'invente pas une clôture à l'open suivant lorsqu'une série contient un trou", () => {
+    const H = 3_600_000;
+    const resultat = runBacktest(
+      [barre(6 * H, 100, 100), barre(7 * H, 100, 100), barre(10 * H, 100, 100)],
+      { reglesEntree: [compareClose(">", 0)], reglesSortie: [], direction: "long", tailleFixe: 100 },
+      {
+        timeframe: "1h", fraisPct: 0, slippagePct: 0, capitalInitial: 1000, finDonneesMs: 11 * H,
+        funding: { modele: "perp-lineaire", reglements: [
+          { temps: 9 * H, taux: 0.001, mark: 100, tempsMark: 9 * H },
+          { temps: 11 * H, taux: 0.001, mark: 100, tempsMark: 11 * H },
+        ] },
+      },
+    );
+    expect(resultat.equity.find((point) => point.temps === 7 * H)?.equity).toBe(1000);
+    expect(resultat.equity.at(-1)?.equity).toBeCloseTo(999.8, 12);
+  });
+});
+
+describe("opérandes causaux", () => {
+  it("refuse les sorties qui projettent une valeur future sur une barre passée", () => {
+    const nonCausale: StrategieDef = {
+      reglesEntree: [{
+        type: "comparaison",
+        gauche: { type: "indicateur", indicateurId: "ichimoku", params: {}, output: "chikou" },
+        comparateur: ">",
+        droite: { type: "constante", valeur: 0 },
+      }],
+      reglesSortie: [], direction: "long", tailleFixe: 100,
+    };
+    expect(() => runBacktest(Array.from({ length: 80 }, (_, i) => barre(i, 100 + i, 100 + i)), nonCausale, SANS_FRICTION))
+      .toThrow("non causale");
+  });
+});
+
+describe("borne de début hors échantillon", () => {
+  it("utilise le warmup pour les indicateurs mais démarre à plat à la borne", () => {
+    const candles = Array.from({ length: 8 }, (_, i) => barre(i, 100 + i, 100 + i));
+    const resultat = runBacktest(
+      candles,
+      { reglesEntree: [compareClose(">", 0)], reglesSortie: [], direction: "long", tailleFixe: 100 },
+      { ...SANS_FRICTION, debutEvaluationMs: 5 },
+    );
+    expect(resultat.trades[0]?.tempsEntree).toBe(5);
+  });
+});
 
 // ─────────────────────────── 1. Exécution à l'open de N+1 (no look-ahead) ───────────────────────────
 
@@ -485,6 +653,17 @@ describe("équité valorisée à chaque clôture", () => {
 // ─────────────────────────── 10. Statistiques (fonctions pures) ───────────────────────────
 
 describe("statistiques agrégées", () => {
+  it("utilise la clôture effective de la dernière bougie pour l'exposition", () => {
+    const H = 3_600_000;
+    const trade: TradeResultat = {
+      sens: "long", tempsEntree: 0, prixEntree: 100, tempsSortie: H, prixSortie: 100,
+      raison: "fin-donnees", quantite: 1, pnl: 0, pnlPct: 0, frais: 0,
+      dureeBarres: 1, dureeMs: 2 * H, risqueInitial: null, r: null,
+    };
+    const candles = [barre(0, 100, 100), barre(H, 100, 100)];
+    expect(calculerStats([trade], [], candles, 1000, 2 * H).expositionPct).toBe(100);
+  });
+
   it("calcule win rate, profit factor, drawdown, PnL et exposition", () => {
     // 3 trades fabriqués : +100 (+10 %), -50 (-5 %), +30 (+3 %). Capital = 1000.
     const mk = (

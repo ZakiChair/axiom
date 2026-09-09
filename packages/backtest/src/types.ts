@@ -118,12 +118,36 @@ export interface StrategieDef {
 export interface ParamsBacktest {
   /** TF explicite du run ; requis pour les indicateurs à intervalle contraint. */
   timeframe?: Timeframe;
+  /** Borne incluse des fills mesurés ; les bougies antérieures servent uniquement au warmup. */
+  debutEvaluationMs?: number;
   /** Frais par côté (entrée ET sortie), en % du notionnel. */
   fraisPct: number;
   /** Slippage par côté, en % (dégrade le prix de fill). */
   slippagePct: number;
   /** Capital initial (base de l'equity curve, du drawdown et du rendement total). */
   capitalInitial: number;
+  /** Instant réel de clôture de la dernière bougie (ms epoch). Requis avec funding. */
+  finDonneesMs?: number;
+  /** Règlements historiques d'un perp linéaire, taux exprimés en fraction. */
+  funding?: {
+    modele: "perp-lineaire";
+    reglements: readonly ReglementFunding[];
+  };
+}
+
+/** Funding réglé réellement et mark connu au plus tard à l'instant du règlement. */
+export interface ReglementFunding {
+  temps: number;
+  /** Fraction : 0,0001 = 0,01 %. Un taux négatif est autorisé. */
+  taux: number;
+  mark: number;
+  tempsMark: number;
+}
+
+export interface CoutFunding {
+  temps: number;
+  /** Positif = débit, négatif = crédit. */
+  cout: number;
 }
 
 /** Sens effectif d'une position ouverte. */
@@ -138,7 +162,7 @@ export type SensPosition = "long" | "short";
  */
 export type RaisonSortie = "regle" | "stop" | "target" | "fin-donnees";
 
-/** Un trade clôturé (prix de fill = slippage inclus ; pnl = net de frais). */
+/** Un trade clôturé (prix de fill = slippage inclus ; pnl = net de frais et funding). */
 export interface TradeResultat {
   sens: SensPosition;
   /** ms epoch de l'OPEN de la bougie de fill d'entrée. */
@@ -152,15 +176,21 @@ export interface TradeResultat {
   raison: RaisonSortie;
   /** Quantité en base (tailleFixe / prixEntree). */
   quantite: number;
-  /** PnL net (frais + slippage inclus), en cotation. */
+  /** PnL net (frais + slippage + funding inclus), en cotation. */
   pnl: number;
   /** PnL net rapporté à la taille engagée (pnl / tailleFixe · 100). */
   pnlPct: number;
   /** Frais totaux des deux côtés, en cotation. */
   frais: number;
+  /** Funding signé séparé des commissions : positif = débit, négatif = crédit. */
+  funding?: number;
+  /** Journal des règlements effectivement portés par la position. */
+  reglementsFunding?: readonly CoutFunding[];
+  /** Instant réel du fill ; pour fin-données, clôture réelle de la dernière bougie. */
+  instantSortieEffectif?: number;
   /** Durée en nombre de bougies (index de sortie − index d'entrée). */
   dureeBarres: number;
-  /** Durée en ms (tempsSortie − tempsEntree). */
+  /** Durée en ms jusqu'au fill effectif ou au close réel de fin de données. */
   dureeMs: number;
   /**
    * Risque initial en cotation (`quantite × |prixEntree − niveauStop|`). `null` si
@@ -168,7 +198,7 @@ export interface TradeResultat {
    */
   risqueInitial: number | null;
   /**
-   * R net = `pnl / risqueInitial` (frais + slippage inclus). `null` si pas de stop.
+   * R net = `pnl / risqueInitial` (frais + slippage + funding inclus). `null` si pas de stop.
    */
   r: number | null;
 }
@@ -221,4 +251,6 @@ export interface ResultatBacktest {
   stats: StatsBacktest;
   /** Nombre de bougies (clôturées) effectivement testées. */
   nbBougies: number;
+  /** Somme signée du funding des trades, présente seulement si le modèle est activé. */
+  fundingTotal?: number;
 }

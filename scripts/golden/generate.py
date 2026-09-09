@@ -18,15 +18,19 @@ même dossier, au format :
 """
 
 import json
+import hashlib
 import math
 import pathlib
+import platform
 
+import numpy as np
 import pandas as pd
 import pandas_ta_classic as ta
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 GOLDEN_DIR = ROOT / "packages" / "indicators" / "src" / "golden"
 FIXTURE_PATH = GOLDEN_DIR / "fixture-ohlcv.json"
+GENERATOR_PATH = pathlib.Path(__file__).resolve()
 
 
 def load_fixture() -> pd.DataFrame:
@@ -51,6 +55,42 @@ def write_golden(name: str, params: dict, series: dict) -> None:
     path = GOLDEN_DIR / f"{name}.golden.json"
     with open(path, "w") as f:
         json.dump(payload, f, indent=2)
+    print(f"écrit {path.relative_to(ROOT)}")
+
+
+def sha256(path: pathlib.Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def write_manifest(params: dict) -> None:
+    payload = {
+        "schema": "axiom-indicator-oracle-v1",
+        "fixture": {
+            "path": str(FIXTURE_PATH.relative_to(ROOT)),
+            "sha256": sha256(FIXTURE_PATH),
+            "bougies": 300,
+        },
+        "generateur": {
+            "path": str(GENERATOR_PATH.relative_to(ROOT)),
+            "sha256": sha256(GENERATOR_PATH),
+        },
+        "versions": {
+            "python": platform.python_version(),
+            "numpy": np.__version__,
+            "pandas": pd.__version__,
+            "pandasTaClassic": ta.__version__,
+        },
+        "params": params,
+        "conventions": {
+            "nan": "null dans les JSON",
+            "psar": "high/low uniquement, argument close omis",
+            "comparaison": "masques, longueurs et nombres de points contrôlés par golden.test.ts",
+        },
+    }
+    path = GOLDEN_DIR / "manifest.json"
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+        f.write("\n")
     print(f"écrit {path.relative_to(ROOT)}")
 
 
@@ -125,6 +165,13 @@ def main() -> None:
             "PSARs_0.02_0.2": series_to_list(psar_df["PSARs_0.02_0.2"]),
         },
     )
+
+    write_manifest({
+        "adx": adx_params,
+        "supertrend": st_params,
+        "ichimoku": ich_params,
+        "psar": psar_params,
+    })
 
 
 if __name__ == "__main__":

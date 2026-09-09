@@ -1,0 +1,42 @@
+{
+  "schema": "axiom-indicator-oracle-v1",
+  "fixture": {
+    "path": "packages/indicators/src/golden/fixture-ohlcv.json",
+    "sha256": "7e0319553b787d312149b4aead9a0d2d7b690225a70aee8cb60e0ddad96f1b7e",
+    "bougies": 300
+  },
+  "generateur": {
+    "path": "scripts/golden/generate.py",
+    "sha256": "22d7d4083b7dc8af569dd28bfe3f120c179e9fcf31c1fc1a5e85cecdd1146b45"
+  },
+  "versions": {
+    "python": "3.14.6",
+    "numpy": "2.5.1",
+    "pandas": "3.0.5",
+    "pandasTaClassic": "0.6.52"
+  },
+  "params": {
+    "adx": {
+      "length": 14
+    },
+    "supertrend": {
+      "length": 10,
+      "multiplier": 3
+    },
+    "ichimoku": {
+      "tenkan": 9,
+      "kijun": 26,
+      "senkou": 52,
+      "displacement": 26
+    },
+    "psar": {
+      "step": 0.02,
+      "max": 0.2
+    }
+  },
+  "conventions": {
+    "nan": "null dans les JSON",
+    "psar": "high/low uniquement, argument close omis",
+    "comparaison": "masques, longueurs et nombres de points contr\u00f4l\u00e9s par golden.test.ts"
+  }
+}

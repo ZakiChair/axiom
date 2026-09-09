@@ -32,8 +32,25 @@ import adxGolden from "./adx.golden.json";
 import supertrendGolden from "./supertrend.golden.json";
 import ichimokuGolden from "./ichimoku.golden.json";
 import psarGolden from "./psar.golden.json";
+import oracleManifest from "./manifest.json";
 
 const candles = fixtureRaw as Candle[];
+
+describe("provenance de l'oracle offline", () => {
+  it("fige fixture, générateur, versions et paramètres", () => {
+    expect(oracleManifest.fixture.sha256).toBe("7e0319553b787d312149b4aead9a0d2d7b690225a70aee8cb60e0ddad96f1b7e");
+    expect(oracleManifest.fixture.bougies).toBe(candles.length);
+    expect(oracleManifest.versions).toEqual({
+      python: "3.14.6", numpy: "2.5.1", pandas: "3.0.5", pandasTaClassic: "0.6.52",
+    });
+    expect(oracleManifest.params).toEqual({
+      adx: { length: 14 }, supertrend: { length: 10, multiplier: 3 },
+      ichimoku: { tenkan: 9, kijun: 26, senkou: 52, displacement: 26 },
+      psar: { step: 0.02, max: 0.2 },
+    });
+    expect(oracleManifest.generateur.sha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
 
 /**
  * Compare deux séries point à point à partir du premier index où LES DEUX
@@ -45,19 +62,24 @@ function expectSeriesCloseTo(
   ours: Array<number | undefined>,
   golden: Array<number | null | undefined>,
   precision: number,
-  skipUntil = 0
+  skipUntil: number,
+  expectedCompared: number,
 ): void {
+  expect(ours).toHaveLength(golden.length);
   let compared = 0;
   for (let i = 0; i < ours.length; i++) {
     const a = ours[i];
     const b = golden[i];
-    if (i < skipUntil || a === undefined || b === null || b === undefined) {
+    if (i < skipUntil) continue;
+    if (b === null || b === undefined) {
+      expect(a, `masque inattendu à l'index ${i}`).toBeUndefined();
       continue;
     }
+    expect(a, `valeur manquante à l'index ${i}`).toBeDefined();
     expect(a).toBeCloseTo(b, precision);
     compared++;
   }
-  expect(compared).toBeGreaterThan(0);
+  expect(compared).toBe(expectedCompared);
 }
 
 function getSeries(
@@ -82,8 +104,8 @@ describe("ADX vs pandas-ta-classic adx(14)", () => {
     // d'écart d'amorçage (index 13) — exclu naturellement car `ours[13]` est
     // `undefined` (aucune tolérance élargie). À partir de 14, écart max observé
     // ~1.4e-14 (bruit flottant), largement sous la tolérance toBeCloseTo(6).
-    expectSeriesCloseTo(getSeries(series, "plusDI"), adxGolden.series.DMP_14, 6);
-    expectSeriesCloseTo(getSeries(series, "minusDI"), adxGolden.series.DMN_14, 6);
+    expectSeriesCloseTo(getSeries(series, "plusDI"), adxGolden.series.DMP_14, 6, 14, 286);
+    expectSeriesCloseTo(getSeries(series, "minusDI"), adxGolden.series.DMN_14, 6, 14, 286);
   });
 
   it("ADX : amorçage du second lissage RMA — 236 premiers points exclus (index 27 à 262)", () => {
@@ -107,7 +129,7 @@ describe("ADX vs pandas-ta-classic adx(14)", () => {
     // toBeCloseTo(6)) à partir de l'index 263, avec une marge de sécurité
     // ~5x (écart max observé ensuite : 9.42e-8, aucune régression ultérieure
     // jusqu'à l'index 299).
-    expectSeriesCloseTo(getSeries(series, "adx"), adxGolden.series.ADX_14, 6, 263);
+    expectSeriesCloseTo(getSeries(series, "adx"), adxGolden.series.ADX_14, 6, 263, 37);
   });
 });
 
@@ -141,21 +163,27 @@ describe("SuperTrend vs pandas-ta-classic supertrend(10,3)", () => {
     // passe sous 1e-7 (marge ~5x sous la tolérance toBeCloseTo(6) = 5e-7) à
     // partir de l'index 199, écart max observé ensuite : 9.89e-8, aucune
     // régression jusqu'à l'index 299.
-    expectSeriesCloseTo(getSeries(series, "line"), supertrendGolden.series["SUPERT_10_3.0"], 6, 199);
+    expectSeriesCloseTo(getSeries(series, "line"), supertrendGolden.series["SUPERT_10_3.0"], 6, 199, 101);
   });
 
   it("direction : matches SUPERTd_10_3.0 exactement (+1/-1)", () => {
     const ours = getSeries(series, "direction");
     const golden = supertrendGolden.series["SUPERTd_10_3.0"];
+    expect(ours).toHaveLength(golden.length);
     let compared = 0;
     for (let i = 0; i < ours.length; i++) {
       const a = ours[i];
       const b = golden[i];
-      if (a === undefined || b === null || b === undefined) continue;
+      if (i < 9) {
+        expect(a, `masque direction à l'index ${i}`).toBeUndefined();
+        continue;
+      }
+      expect(a, `direction manquante à l'index ${i}`).toBeDefined();
+      expect(b, `oracle direction manquant à l'index ${i}`).not.toBeNull();
       expect(a).toBe(b);
       compared++;
     }
-    expect(compared).toBeGreaterThan(0);
+    expect(compared).toBe(291);
   });
 });
 
@@ -175,19 +203,19 @@ describe("Ichimoku vs pandas-ta-classic ichimoku(9,26,52)", () => {
   // ni lissage — les deux implémentations s'accordent bit-exactement dès leur
   // premier index commun défini, pour les 5 lignes (écart max observé : 0.0).
   it("tenkan : matches ITS_9", () => {
-    expectSeriesCloseTo(getSeries(series, "tenkan"), ichimokuGolden.series.ITS_9, 6);
+    expectSeriesCloseTo(getSeries(series, "tenkan"), ichimokuGolden.series.ITS_9, 6, 0, 292);
   });
   it("kijun : matches IKS_26", () => {
-    expectSeriesCloseTo(getSeries(series, "kijun"), ichimokuGolden.series.IKS_26, 6);
+    expectSeriesCloseTo(getSeries(series, "kijun"), ichimokuGolden.series.IKS_26, 6, 0, 275);
   });
   it("spanA (Senkou A) : matches ISA_9", () => {
-    expectSeriesCloseTo(getSeries(series, "spanA"), ichimokuGolden.series.ISA_9, 6);
+    expectSeriesCloseTo(getSeries(series, "spanA"), ichimokuGolden.series.ISA_9, 6, 0, 249);
   });
   it("spanB (Senkou B) : matches ISB_26", () => {
-    expectSeriesCloseTo(getSeries(series, "spanB"), ichimokuGolden.series.ISB_26, 6);
+    expectSeriesCloseTo(getSeries(series, "spanB"), ichimokuGolden.series.ISB_26, 6, 0, 223);
   });
   it("chikou : matches ICS_26", () => {
-    expectSeriesCloseTo(getSeries(series, "chikou"), ichimokuGolden.series.ICS_26, 6);
+    expectSeriesCloseTo(getSeries(series, "chikou"), ichimokuGolden.series.ICS_26, 6, 0, 274);
   });
 });
 
@@ -212,6 +240,6 @@ describe("PSAR vs pandas-ta-classic psar(0.02, 0.2)", () => {
     const gl = psarGolden.series["PSARl_0.02_0.2"];
     const gs = psarGolden.series["PSARs_0.02_0.2"];
     const combined: Array<number | null> = gl.map((v, i) => (v !== null ? v : gs[i] ?? null));
-    expectSeriesCloseTo(getSeries(series, "psar"), combined, 6, 22);
+    expectSeriesCloseTo(getSeries(series, "psar"), combined, 6, 22, 278);
   });
 });

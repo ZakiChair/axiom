@@ -666,6 +666,8 @@ function ConeCanvas({ mc, capital }: { mc: ResultatMonteCarlo; capital: number }
  */
 function MonteCarloSection({ resultat, busy }: { resultat: ResultatBacktest; busy: boolean }) {
   const [mc, setMc] = useState<ResultatMonteCarlo | null>(null);
+  const [mode, setMode] = useState<"iid" | "blocs">("blocs");
+  const [tailleBloc, setTailleBloc] = useState(5);
   const trades = resultat.trades;
   // Capital effectif du run (equity[0]) — pas le champ store, éditable après coup.
   const capital = resultat.equity[0]?.equity ?? 0;
@@ -674,7 +676,10 @@ function MonteCarloSection({ resultat, busy }: { resultat: ResultatBacktest; bus
 
   const lancer = (): void => {
     const pnls = trades.map((t) => t.pnl);
-    setMc(monteCarloTrades(pnls, MC_CHEMINS, mulberry32(MC_SEED), capital));
+    setMc(monteCarloTrades(pnls, MC_CHEMINS, mulberry32(MC_SEED), capital, {
+      mode,
+      tailleBloc: mode === "blocs" ? Math.max(1, Math.min(trades.length, Math.floor(tailleBloc))) : 1,
+    }));
   };
 
   return (
@@ -698,6 +703,23 @@ function MonteCarloSection({ resultat, busy }: { resultat: ResultatBacktest; bus
       >
         Monte-Carlo · rééchantillonnage des PnL
       </TitreSection>
+
+      <div className="flex flex-wrap items-center gap-2 text-[10px] text-text-dim">
+        <label className="flex items-center gap-1">
+          Bootstrap
+          <Select value={mode} onChange={(e) => setMode(e.target.value as "iid" | "blocs")} aria-label="Mode Monte-Carlo">
+            <option value="blocs">blocs contigus</option>
+            <option value="iid">iid</option>
+          </Select>
+        </label>
+        {mode === "blocs" && (
+          <label className="flex items-center gap-1">
+            Longueur
+            <Input type="number" min={1} max={Math.max(1, trades.length)} value={tailleBloc} onChange={(e) => setTailleBloc(Number(e.target.value))} className="w-14 tabular-nums" aria-label="Longueur des blocs Monte-Carlo" />
+          </label>
+        )}
+        <span>seed {MC_SEED} · DD en fraction du capital initial</span>
+      </div>
 
       {mc !== null && (
         <div className="space-y-2">
@@ -728,10 +750,16 @@ function MonteCarloSection({ resultat, busy }: { resultat: ResultatBacktest; bus
               title="95e percentile du drawdown maximal, en % du capital initial"
             />
             <TuileStat
-              label="Prob. ruine"
+              label="P(chemin ≤ 0)"
               valeur={formatPourcentage(mc.probRuine * 100, 1)}
               ton={mc.probRuine > 0 ? "down" : undefined}
-              title="Part des chemins finissant avec une equity négative"
+              title="Part des chemins ayant atteint une equity nulle ou négative au moins une fois"
+            />
+            <TuileStat
+              label="P(final < 0)"
+              valeur={formatPourcentage(mc.probFinaleNegative * 100, 1)}
+              ton={mc.probFinaleNegative > 0 ? "down" : undefined}
+              title="Part des chemins dont l'equity terminale est strictement négative"
             />
           </div>
         </div>
@@ -750,6 +778,15 @@ const RAISON_LABEL: Record<TradeResultat["raison"], string> = {
 };
 
 const COLONNES_TRADES: ColonneTable<TradeResultat>[] = [
+  {
+    id: "funding",
+    label: "Funding",
+    align: "right",
+    largeur: "0.8fr",
+    triable: true,
+    valeurTri: (tr) => tr.funding ?? 0,
+    rendu: (tr) => <span className="text-right tabular-nums text-text-dim">{tr.funding === undefined ? "—" : formatDec(tr.funding)}</span>,
+  },
   {
     id: "sens",
     label: "Sens",
@@ -778,7 +815,7 @@ const COLONNES_TRADES: ColonneTable<TradeResultat>[] = [
     align: "right",
     rendu: (tr) => (
       <span className="text-right tabular-nums text-text-dim">
-        {formatDateHeure(tr.tempsSortie)}
+        {formatDateHeure(tr.instantSortieEffectif ?? tr.tempsSortie)}
         <span className="ml-1 text-text">{formatPrice(tr.prixSortie)}</span>
         <span className="ml-1 text-[9px] uppercase">{RAISON_LABEL[tr.raison]}</span>
       </span>
@@ -930,6 +967,11 @@ function StatsGrid({ resultat }: { resultat: ResultatBacktest }) {
         <TuileStat label="Facteur de profit" valeur={formatPF(s.profitFactor)} />
         <TuileStat label="Sharpe (annualisé)" valeur={formatDec(s.sharpe)} />
       </div>
+      {resultat.fundingTotal !== undefined && (
+        <p className="text-[10px] text-text-dim">
+          Funding signé séparé des commissions : {formatDec(resultat.fundingTotal)} (positif = débit, négatif = crédit).
+        </p>
+      )}
       <div className="grid grid-cols-3 gap-1.5">
         <TuileStat label="Trades" valeur={String(s.nbTrades)} />
         <TuileStat label="Taux de réussite" valeur={formatPourcentage(s.winRatePct, 1)} />
@@ -968,6 +1010,8 @@ export function BacktestWindow() {
   const fraisPct = useStore(backtestStore, (s) => s.fraisPct);
   const slippagePct = useStore(backtestStore, (s) => s.slippagePct);
   const capitalInitial = useStore(backtestStore, (s) => s.capitalInitial);
+  const modeFunding = useStore(backtestStore, (s) => s.modeFunding);
+  const couvertureFunding = useStore(backtestStore, (s) => s.couvertureFunding);
   const reglesEntree = useStore(backtestStore, (s) => s.reglesEntree);
   const reglesSortie = useStore(backtestStore, (s) => s.reglesSortie);
 
@@ -983,6 +1027,7 @@ export function BacktestWindow() {
   const setFraisPct = useStore(backtestStore, (s) => s.setFraisPct);
   const setSlippagePct = useStore(backtestStore, (s) => s.setSlippagePct);
   const setCapitalInitial = useStore(backtestStore, (s) => s.setCapitalInitial);
+  const setModeFunding = useStore(backtestStore, (s) => s.setModeFunding);
   const addEntree = useStore(backtestStore, (s) => s.addEntree);
   const updateEntree = useStore(backtestStore, (s) => s.updateEntree);
   const removeEntree = useStore(backtestStore, (s) => s.removeEntree);
@@ -1079,6 +1124,13 @@ export function BacktestWindow() {
                 aria-label="Symbole"
               />
             </label>
+            <label className="flex items-center gap-1 text-[10px] text-text-dim">
+              Funding
+              <Select value={modeFunding} onChange={(e) => setModeFunding(e.target.value as "aucun" | "binance-reel")} aria-label="Modèle de funding">
+                <option value="aucun">non appliqué (spot)</option>
+                <option value="binance-reel">réel Binance perp</option>
+              </Select>
+            </label>
             <button
               type="button"
               onClick={importerDepuisChart}
@@ -1125,6 +1177,14 @@ export function BacktestWindow() {
               Charger 2 ans 1d
             </button>
           </div>
+          {modeFunding === "binance-reel" && (
+            <p className="text-[10px] text-text-dim">
+              Funding réglé USDⓈ-M avec mark fourni au règlement ; règlement avant fills à timestamp égal.
+              {couvertureFunding === null
+                ? " Couverture chargée au lancement ; le run échoue si elle est absente."
+                : ` ${couvertureFunding.nombre} règlements du ${formatDateHeure(couvertureFunding.debutMs)} au ${formatDateHeure(couvertureFunding.finMs)}.`}
+            </p>
+          )}
           {profondeurInsuffisante && (
             <p className="text-[11px] text-down" role="status">
               Historique insuffisant : {nbBougiesChargees} bougie
@@ -1342,7 +1402,7 @@ export function BacktestWindow() {
           {error !== null && <ErreurBloc>{error}</ErreurBloc>}
           <NoteSource>
             Honnêteté : signaux sur bougies CLÔTURÉES, exécution à l'OPEN de la bougie suivante,
-            stop/objectif sur la clôture (pas d'intrabar). Frais et slippage appliqués aux deux côtés.
+            stop/objectif évalués à la clôture puis exécutés à l'open suivant (pas d'intrabar). Frais et slippage appliqués aux deux côtés.
           </NoteSource>
         </section>
 

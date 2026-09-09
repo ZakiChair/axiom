@@ -26,10 +26,12 @@ import type {
   Comparateur,
   Condition,
   Direction,
+  CoutFunding,
   Operande,
   ParamsBacktest,
   PointEquity,
   RaisonSortie,
+  ReglementFunding,
   SensPosition,
   StatsBacktest,
   StrategieDef,
@@ -40,8 +42,48 @@ import type {
 /** Millisecondes dans une année (base 365,25 j) — pour l'annualisation du Sharpe. */
 const MS_PAR_AN = 365.25 * 24 * 60 * 60 * 1000;
 
+/** Durées fixes autorisées pour dater les clôtures sans inférer depuis l'open suivant. */
+const DUREE_TIMEFRAME_MS: Partial<Record<NonNullable<ParamsBacktest["timeframe"]>, number>> = {
+  "1s": 1_000, "5s": 5_000, "15s": 15_000,
+  "1m": 60_000, "3m": 180_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000,
+  "1h": 3_600_000, "2h": 7_200_000, "4h": 14_400_000, "6h": 21_600_000,
+  "12h": 43_200_000, "1d": 86_400_000, "3d": 259_200_000, "1w": 604_800_000,
+};
+
+function dureeTimeframeFixeMs(timeframe: ParamsBacktest["timeframe"]): number | null {
+  return timeframe === undefined ? null : DUREE_TIMEFRAME_MS[timeframe] ?? null;
+}
+
 /** Une série alignée sur les bougies : valeur ou undefined (amorce indicateur, champ absent). */
 type Serie = Array<number | undefined>;
+
+const SORTIES_NON_CAUSALES = new Set([
+  "ichimoku:chikou",
+  "fractals:up",
+  "fractals:down",
+  "zigzag:zigzag",
+]);
+
+function operandes(conditions: readonly Condition[]): Operande[] {
+  const resultat: Operande[] = [];
+  for (const condition of conditions) {
+    if (condition.type === "comparaison") resultat.push(condition.gauche, condition.droite);
+    else resultat.push(condition.a, condition.b);
+  }
+  return resultat;
+}
+
+/** Refuse les séries qui réécrivent une barre après observation de son futur. */
+export function raisonOperandeNonCausale(conditions: readonly Condition[]): string | null {
+  for (const op of operandes(conditions)) {
+    if (op.type !== "indicateur") continue;
+    const cle = `${op.indicateurId}:${op.output}`;
+    if (SORTIES_NON_CAUSALES.has(cle)) {
+      return `Sortie non causale interdite en backtest : ${cle}.`;
+    }
+  }
+  return null;
+}
 
 // ─────────────────────────── Compilation des conditions ───────────────────────────
 
@@ -206,6 +248,50 @@ interface PositionOuverte {
   niveauStop: number | null;
 }
 
+function validerReglementsFunding(reglements: readonly ReglementFunding[]): void {
+  let precedent = Number.NEGATIVE_INFINITY;
+  for (const r of reglements) {
+    if (!Number.isFinite(r.temps) || r.temps <= precedent) {
+      throw new Error("Funding invalide : timestamps strictement croissants et uniques requis.");
+    }
+    if (!Number.isFinite(r.taux)) throw new Error("Funding invalide : taux fini requis.");
+    if (!Number.isFinite(r.mark) || r.mark <= 0) throw new Error("Funding invalide : mark fini et positif requis.");
+    if (!Number.isFinite(r.tempsMark) || r.tempsMark > r.temps) {
+      throw new Error("Funding invalide : tempsMark doit être fini et antérieur ou égal au règlement.");
+    }
+    precedent = r.temps;
+  }
+}
+
+/**
+ * Funding d'un perp linéaire. Convention de simultanéité : règlement puis fills,
+ * donc `entrée < règlement <= sortie effective`.
+ */
+export function calculerFundingTrade(
+  sens: SensPosition,
+  quantite: number,
+  tempsEntree: number,
+  instantSortieEffectif: number,
+  reglements: readonly ReglementFunding[],
+): { total: number; reglements: CoutFunding[] } {
+  validerReglementsFunding(reglements);
+  if (!Number.isFinite(quantite) || quantite <= 0) throw new Error("Funding invalide : quantité finie et positive requise.");
+  if (!Number.isFinite(tempsEntree) || !Number.isFinite(instantSortieEffectif) || instantSortieEffectif < tempsEntree) {
+    throw new Error("Funding invalide : bornes temporelles finies et ordonnées requises.");
+  }
+  const signe = sens === "long" ? 1 : -1;
+  const journal: CoutFunding[] = [];
+  let total = 0;
+  for (const r of reglements) {
+    if (r.temps <= tempsEntree) continue;
+    if (r.temps > instantSortieEffectif) break;
+    const cout = signe * Math.abs(quantite) * r.mark * r.taux;
+    journal.push({ temps: r.temps, cout });
+    total += cout;
+  }
+  return { total, reglements: journal };
+}
+
 /**
  * Clôt une position et produit le trade net. PnL brut = qté · (sortie − entrée) pour un
  * long (inversé pour un short) ; frais = fraisPct sur le notionnel de CHAQUE côté.
@@ -214,6 +300,7 @@ function cloturerTrade(
   pos: PositionOuverte,
   prixSortie: number,
   tempsSortie: number,
+  instantSortieEffectif: number,
   indexSortie: number,
   raison: RaisonSortie,
   strat: StrategieDef,
@@ -226,7 +313,11 @@ function cloturerTrade(
       ? pos.quantite * (prixSortie - pos.prixEntree)
       : pos.quantite * (pos.prixEntree - prixSortie);
   const frais = (notionnelEntree + notionnelSortie) * (params.fraisPct / 100);
-  const pnl = brut - frais;
+  const calculFunding = params.funding === undefined
+    ? null
+    : calculerFundingTrade(pos.sens, pos.quantite, pos.tempsEntree, instantSortieEffectif, params.funding.reglements);
+  const funding = calculFunding?.total ?? 0;
+  const pnl = brut - frais - funding;
   const notionnel = pos.quantite * pos.prixEntree;
   const pnlPct = notionnel > 0 ? (pnl / notionnel) * 100 : 0;
   const distanceStop =
@@ -245,8 +336,13 @@ function cloturerTrade(
     pnl,
     pnlPct,
     frais,
+    ...(calculFunding === null ? {} : {
+      funding,
+      reglementsFunding: calculFunding.reglements,
+      instantSortieEffectif,
+    }),
     dureeBarres: indexSortie - pos.indexEntree,
-    dureeMs: tempsSortie - pos.tempsEntree,
+    dureeMs: instantSortieEffectif - pos.tempsEntree,
     risqueInitial,
     r,
   };
@@ -300,9 +396,27 @@ export function runBacktest(
   strat: StrategieDef,
   params: ParamsBacktest,
 ): ResultatBacktest {
+  const nonCausale = raisonOperandeNonCausale([...strat.reglesEntree, ...strat.reglesSortie]);
+  if (nonCausale) throw new Error(nonCausale);
   const incompatibilite = raisonTimeframeBacktest([...strat.reglesEntree, ...strat.reglesSortie], params.timeframe);
   if (incompatibilite) throw new Error(incompatibilite);
   const n = candles.length;
+  if (params.debutEvaluationMs !== undefined && !Number.isFinite(params.debutEvaluationMs)) {
+    throw new Error("debutEvaluationMs doit être fini.");
+  }
+  if (params.funding !== undefined) {
+    if (!Number.isFinite(params.finDonneesMs) || params.finDonneesMs === undefined) {
+      throw new Error("Funding actif : finDonneesMs réelle requise.");
+    }
+    const dernierOpen = candles[n - 1]?.time;
+    if (dernierOpen !== undefined && params.finDonneesMs <= dernierOpen) {
+      throw new Error("Funding actif : finDonneesMs doit suivre l'open de la dernière bougie.");
+    }
+    if (dureeTimeframeFixeMs(params.timeframe) === null) {
+      throw new Error("Funding actif : timeframe fixe explicite requis pour dater chaque clôture.");
+    }
+    validerReglementsFunding(params.funding.reglements);
+  }
   const cache = new Map<string, IndicatorResult>();
   const entree = compilerRegles(strat.reglesEntree, candles, cache);
   const sortie = compilerRegles(strat.reglesSortie, candles, cache);
@@ -327,6 +441,7 @@ export function runBacktest(
     const barreDecision = candles[i];
     const barreFill = candles[i + 1];
     if (barreDecision === undefined || barreFill === undefined) continue;
+    if (params.debutEvaluationMs !== undefined && barreFill.time < params.debutEvaluationMs) continue;
 
     if (pos === null) {
       // À plat : décider une éventuelle ouverture.
@@ -386,7 +501,7 @@ export function runBacktest(
       const raison = decisionSortie(pos, barreDecision.close, strat, entree, sortie, i, direction);
       if (raison !== null) {
         const prixSortie = fillSortie(barreFill.open, pos.sens, params.slippagePct);
-        trades.push(cloturerTrade(pos, prixSortie, barreFill.time, i + 1, raison, strat, params));
+        trades.push(cloturerTrade(pos, prixSortie, barreFill.time, barreFill.time, i + 1, raison, strat, params));
         pos = null;
         // Pas de réouverture sur la même barre : un éventuel retournement (les-deux) aura
         // lieu à une itération ULTÉRIEURE (préserve « une position à la fois »).
@@ -400,15 +515,30 @@ export function runBacktest(
     if (derniere !== undefined) {
       const prixSortie = fillSortie(derniere.close, pos.sens, params.slippagePct);
       trades.push(
-        cloturerTrade(pos, prixSortie, derniere.time, n - 1, "fin-donnees", strat, params),
+        cloturerTrade(
+          pos,
+          prixSortie,
+          derniere.time,
+          params.finDonneesMs ?? derniere.time,
+          n - 1,
+          "fin-donnees",
+          strat,
+          params,
+        ),
       );
       pos = null;
     }
   }
 
-  const equity = construireEquity(trades, candles, params.capitalInitial);
-  const stats = calculerStats(trades, equity, candles, params.capitalInitial);
-  return { trades, equity, stats, nbBougies: n };
+  const candlesMesure = params.debutEvaluationMs === undefined
+    ? candles
+    : candles.filter((candle) => candle.time >= params.debutEvaluationMs!);
+  const equity = construireEquity(trades, candlesMesure, params.capitalInitial, params);
+  const stats = calculerStats(trades, equity, candlesMesure, params.capitalInitial, params.finDonneesMs);
+  const fundingTotal = params.funding === undefined
+    ? undefined
+    : trades.reduce((s, trade) => s + (trade.funding ?? 0), 0);
+  return { trades, equity, stats, nbBougies: candlesMesure.length, ...(fundingTotal === undefined ? {} : { fundingTotal }) };
 }
 
 /** Refus explicite avant calcul : un run sans métadonnée n'invente pas l'intervalle. */
@@ -433,13 +563,15 @@ export function construireEquity(
   trades: TradeResultat[],
   candles: Candle[],
   capitalInitial: number,
+  params?: Pick<ParamsBacktest, "timeframe" | "finDonneesMs" | "funding">,
 ): PointEquity[] {
   const t0 = candles[0]?.time ?? 0;
   const points: PointEquity[] = [{ temps: t0, equity: capitalInitial, drawdownPct: 0 }];
   let capital = capitalInitial;
   let pic = capitalInitial;
   let indexTrade = 0;
-  for (const bougie of candles) {
+  for (let indexBougie = 0; indexBougie < candles.length; indexBougie++) {
+    const bougie = candles[indexBougie]!;
     // Les sorties ordinaires sont exécutées à l'open de cette barre. La sortie
     // fin-donnees se fait à son close : dans les deux cas, le PnL est réalisé au
     // point de clôture. Le net du trade inclut déjà les frais des DEUX côtés.
@@ -458,7 +590,17 @@ export function construireEquity(
       // les frais d'entrée sans modifier le format public de TradeResultat.
       const sommePrix = ouverte.prixEntree + ouverte.prixSortie;
       const fraisEntree = sommePrix > 0 ? ouverte.frais * ouverte.prixEntree / sommePrix : 0;
-      equity += latent - fraisEntree;
+      let fundingEcoule = 0;
+      if (ouverte.reglementsFunding !== undefined) {
+        const duree = dureeTimeframeFixeMs(params?.timeframe);
+        if (duree === null) throw new Error("Funding actif : timeframe fixe explicite requis pour dater chaque clôture.");
+        const derniereBougie = indexBougie === candles.length - 1;
+        const finEffective = derniereBougie ? params?.finDonneesMs ?? bougie.time + duree : bougie.time + duree;
+        for (const reglement of ouverte.reglementsFunding) {
+          if (reglement.temps <= finEffective) fundingEcoule += reglement.cout;
+        }
+      }
+      equity += latent - fraisEntree - fundingEcoule;
     }
     if (equity > pic) pic = equity;
     const dd = pic > 0 ? ((pic - equity) / pic) * 100 : 0;
@@ -502,6 +644,7 @@ export function calculerStats(
   equity: PointEquity[],
   candles: Candle[],
   capitalInitial: number,
+  finDonneesMs?: number,
 ): StatsBacktest {
   const nbTrades = trades.length;
   const gagnants = trades.filter((t) => t.pnl > 0);
@@ -523,7 +666,7 @@ export function calculerStats(
   const rendements = trades.map((t) => t.pnlPct / 100);
   const premier = trades[0];
   const dernier = trades[nbTrades - 1];
-  const spanMs = premier && dernier ? dernier.tempsSortie - premier.tempsEntree : 0;
+  const spanMs = premier && dernier ? (dernier.instantSortieEffectif ?? dernier.tempsSortie) - premier.tempsEntree : 0;
   const anneesSpan = spanMs > 0 ? spanMs / MS_PAR_AN : 0;
   const tradesParAn = anneesSpan > 0 ? nbTrades / anneesSpan : nbTrades;
   const sharpe = sharpeAnnualise(rendements, tradesParAn);
@@ -531,8 +674,9 @@ export function calculerStats(
   // Exposition : somme des durées en position / durée totale de la série.
   let sommeDuree = 0;
   for (const t of trades) sommeDuree += t.dureeMs;
-  const dureeTotale =
-    candles.length > 1 ? (candles[candles.length - 1]?.time ?? 0) - (candles[0]?.time ?? 0) : 0;
+  const dureeTotale = candles.length > 0
+    ? (finDonneesMs ?? candles[candles.length - 1]?.time ?? 0) - (candles[0]?.time ?? 0)
+    : 0;
   const expositionPct = dureeTotale > 0 ? (sommeDuree / dureeTotale) * 100 : 0;
 
   let sommeR = 0;

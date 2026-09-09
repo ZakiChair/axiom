@@ -31,13 +31,19 @@ import { marketStore } from "./market";
 import {
   accumulerKlines,
   BACKTEST_TIMEFRAMES,
+  dureeTimeframeMs,
   precharger2ans1d,
   SEUIL_PROFONDEUR_BT,
   type ProgressionAccumulation,
 } from "../data/backtestData";
+import {
+  accumulerKlinesPerpBinance,
+  fetchReglementsFundingBinance,
+  type CouvertureFundingBacktest,
+} from "../data/backtestFunding";
 import type { WorkerRequest, WorkerResponse } from "../workers/backtest.worker";
 import { windowManagerStore, mirrorOpenState } from "./windowManager";
-import { signatureRun, type ConfigRun } from "./backtestSignature";
+import { signatureRun, type ConfigRun, type ModeFundingBacktest } from "./backtestSignature";
 
 export { BACKTEST_TIMEFRAMES, SEUIL_PROFONDEUR_BT };
 
@@ -480,6 +486,7 @@ export interface BacktestState {
   fraisPct: number;
   slippagePct: number;
   capitalInitial: number;
+  modeFunding: ModeFundingBacktest;
   reglesEntree: Condition[];
   reglesSortie: Condition[];
 
@@ -495,6 +502,7 @@ export interface BacktestState {
   setFraisPct: (v: number) => void;
   setSlippagePct: (v: number) => void;
   setCapitalInitial: (v: number) => void;
+  setModeFunding: (v: ModeFundingBacktest) => void;
   addEntree: () => void;
   updateEntree: (index: number, cond: Condition) => void;
   removeEntree: (index: number) => void;
@@ -521,6 +529,7 @@ export interface BacktestState {
   signatureRun: string | null;
   error: string | null;
   note: string | null;
+  couvertureFunding: CouvertureFundingBacktest | null;
   /** Dernier nombre de bougies accumulées (run ou précharge 2a/1d) ; null = jamais. */
   nbBougiesChargees: number | null;
   run: () => void;
@@ -557,6 +566,7 @@ export function configCourante(s: BacktestState): ConfigRun {
     fraisPct: s.fraisPct,
     slippagePct: s.slippagePct,
     capitalInitial: s.capitalInitial,
+    modeFunding: s.modeFunding,
     reglesEntree: s.reglesEntree,
     reglesSortie: s.reglesSortie,
   };
@@ -580,6 +590,7 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
   fraisPct: 0.05,
   slippagePct: 0.02,
   capitalInitial: 10_000,
+  modeFunding: "aucun",
   reglesEntree: [condEntreeDefaut()],
   reglesSortie: [condSortieDefaut()],
 
@@ -595,6 +606,7 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
   setFraisPct: (v) => set({ fraisPct: v }),
   setSlippagePct: (v) => set({ slippagePct: v }),
   setCapitalInitial: (v) => set({ capitalInitial: v }),
+  setModeFunding: (modeFunding) => set({ modeFunding }),
 
   addEntree: () => set((s) => ({ reglesEntree: [...s.reglesEntree, condEntreeDefaut()] })),
   updateEntree: (index, cond) =>
@@ -657,6 +669,7 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
   signatureRun: null,
   error: null,
   note: null,
+  couvertureFunding: null,
   nbBougiesChargees: null,
 
   run: () => {
@@ -676,6 +689,7 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
       resultat: null,
       error: null,
       note: null,
+      couvertureFunding: null,
     });
 
     const ctrl = new AbortController();
@@ -687,12 +701,19 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
     void (async () => {
       let candles: Candle[];
       try {
-        candles = await accumulerKlines(s.symbol, s.tf, depuis, jusqua, {
-          signal: ctrl.signal,
-          onProgress: (p) => {
-            if (runId === currentRunId) set({ progress: p });
-          },
-        });
+        candles = s.modeFunding === "binance-reel"
+          ? await accumulerKlinesPerpBinance(s.symbol, s.tf, depuis, jusqua, {
+              signal: ctrl.signal,
+              onProgress: (recuperees) => {
+                if (runId === currentRunId) set({ progress: { recuperees, cible: 0 } });
+              },
+            })
+          : await accumulerKlines(s.symbol, s.tf, depuis, jusqua, {
+              signal: ctrl.signal,
+              onProgress: (p) => {
+                if (runId === currentRunId) set({ progress: p });
+              },
+            });
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return; // annulation propre
         if (runId !== currentRunId) return;
@@ -711,14 +732,40 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
         return;
       }
 
+      const dureeBougie = dureeTimeframeMs(s.tf);
+      const derniere = candles.at(-1);
+      const finDonneesMs = dureeBougie === null || derniere === undefined
+        ? null
+        : derniere.time + dureeBougie;
+      let historiqueFunding: Awaited<ReturnType<typeof fetchReglementsFundingBinance>> | null = null;
+      if (s.modeFunding === "binance-reel") {
+        if (finDonneesMs === null) {
+          set({ phase: "error", error: "Fin réelle des bougies indéterminable : funding non calculé." });
+          return;
+        }
+        try {
+          historiqueFunding = await fetchReglementsFundingBinance(s.symbol, candles[0]!.time, finDonneesMs);
+        } catch (err) {
+          if (runId !== currentRunId) return;
+          set({
+            phase: "error",
+            error: `Funding historique indisponible : ${err instanceof Error ? err.message : String(err)}`,
+            couvertureFunding: null,
+          });
+          return;
+        }
+      }
+      if (runId !== currentRunId) return;
+
       const profondeurFaible = candles.length < SEUIL_PROFONDEUR_BT;
-      const noteBase = `${candles.length} bougies · ${s.symbol} ${s.tf}`;
+      const noteBase = `${candles.length} bougies · ${s.symbol} ${s.tf} · ${s.modeFunding === "binance-reel" ? "Binance perp" : "Binance spot"}`;
       set({
         phase: "calcul",
         nbBougiesChargees: candles.length,
         note: profondeurFaible
           ? `${noteBase} · profondeur faible (< ${SEUIL_PROFONDEUR_BT}) — « Charger 2 ans 1d » recommandé`
           : noteBase,
+        couvertureFunding: historiqueFunding?.couverture ?? null,
       });
 
       // Instanciation À LA DEMANDE (jamais à l'import) → Vite bundle le worker en chunk.
@@ -763,6 +810,10 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
         fraisPct: s.fraisPct,
         slippagePct: s.slippagePct,
         capitalInitial: s.capitalInitial,
+        ...(historiqueFunding !== null && finDonneesMs !== null ? {
+          finDonneesMs,
+          funding: { modele: "perp-lineaire" as const, reglements: historiqueFunding.reglements },
+        } : {}),
       };
       const request: WorkerRequest = { type: "run", runId, candles, strat, params };
       w.postMessage(request);

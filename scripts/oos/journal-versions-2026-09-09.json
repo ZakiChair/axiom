@@ -1,0 +1,14 @@
+{
+  "manifesteSha256": "9b3d1c764946c61311467a79c846158759c9deb76c5489364fdaf6c577a749f4",
+  "catalogueDefinitionsObservees": 30,
+  "catalogueDefinitionsSha256": "bb2be68ee85ce1de5f75acabb9fa5bb586cb3b674ccf97c9ec555ed31f246349",
+  "baseCommit": "b66db837e9bf39e8b17ea5994e11b11c87c450a2",
+  "pnpmLockSha256": "5e7ba89c7d5299cc8159b11218d04663c2a6431a6732b42a945206bd67aef3b3",
+  "runtime": { "bun": "1.3.11", "node": "26.7.0", "pnpm": "9.12.0" },
+  "oracleOffline": {
+    "pandasTaClassic": "0.6.52",
+    "pythonDocumente": "3.14",
+    "dependanceRuntime": false
+  },
+  "note": "Journal écrit après gel du manifeste et avant toute acquisition/calcul OOS ; les hashes de données seront consignés dans le résultat sans modifier le protocole."
+}

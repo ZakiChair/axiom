@@ -1,0 +1,16 @@
+{
+  "schema": "axiom-oos-correction-v1",
+  "manifesteSha256": "9b3d1c764946c61311467a79c846158759c9deb76c5489364fdaf6c577a749f4",
+  "protocoleModifie": false,
+  "donneesModifiees": false,
+  "raison": "L'equity funding utilisait l'open suivant comme fin de bougie. En présence d'un trou, cela pouvait débiter trop tôt un règlement. La correction date chaque clôture par le timeframe fixe explicite et emploie finDonneesMs pour la dernière clôture et l'exposition.",
+  "avant": {
+    "runnerSha256": "74910d2528c1dd7f8f8458472c89a22bb36e89dbb94fcf74ece764c7344b61ca",
+    "engineSha256": "1c7f4a0fe70e4bd166324dbc001a8873a88ac910535b691d80634a793f9e176f"
+  },
+  "apres": {
+    "runnerSha256": "29a30b2423cbdef5c1eb0d5a89f76d090ba568273cfc956a2f1eca505b6c59f9",
+    "engineSha256": "b4b9959c2e660016c34d00b0afad7bc3564edf5e76008e298e39b72e4019dbae"
+  },
+  "recalcul": "Les mêmes quatre séries OHLCV, règles, paramètres, coûts, seed et bornes du manifeste sont relus depuis le cache dont chaque SHA-256 est revérifié."
+}

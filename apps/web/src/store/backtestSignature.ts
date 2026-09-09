@@ -17,6 +17,7 @@ import type { Timeframe } from "@axiom/types";
 
 /** Plages du builder (déclarée dans store/backtest.ts ; ré-exprimée ici pour éviter un cycle). */
 type PlageId = "3m" | "6m" | "1a" | "2a";
+export type ModeFundingBacktest = "aucun" | "binance-reel";
 
 /** Tout ce qui change le résultat d'un run. */
 export interface ConfigRun {
@@ -32,6 +33,7 @@ export interface ConfigRun {
   fraisPct: number;
   slippagePct: number;
   capitalInitial: number;
+  modeFunding: ModeFundingBacktest;
   reglesEntree: Condition[];
   reglesSortie: Condition[];
 }
@@ -55,6 +57,7 @@ export function signatureRun(c: ConfigRun): string {
     c.fraisPct,
     c.slippagePct,
     c.capitalInitial,
+    c.modeFunding,
     c.reglesEntree,
     c.reglesSortie,
   ]);

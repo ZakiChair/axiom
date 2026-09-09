@@ -20,6 +20,7 @@ const base: ConfigRun = {
   fraisPct: 0.05,
   slippagePct: 0.02,
   capitalInitial: 10_000,
+  modeFunding: "aucun",
   reglesEntree: [
     { type: "comparaison", gauche: { type: "prix", champ: "close" }, comparateur: ">", droite: { type: "constante", valeur: 0 } },
   ],
@@ -48,6 +49,7 @@ describe("signatureRun", () => {
     ["frais", { fraisPct: 0.1 }],
     ["slippage", { slippagePct: 0.05 }],
     ["capital", { capitalInitial: 50_000 }],
+    ["funding", { modeFunding: "binance-reel" as const }],
     ["règles de sortie", { reglesSortie: base.reglesEntree }],
   ])("change quand %s change", (_libelle, patch) => {
     expect(signatureRun({ ...base, ...patch })).not.toBe(signatureRun(base));

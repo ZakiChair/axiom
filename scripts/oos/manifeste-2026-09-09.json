@@ -1,0 +1,98 @@
+{
+  "schema": "axiom-oos-v1",
+  "figeLeUtc": "2026-09-09T19:27:00Z",
+  "statutIndependance": "holdout historique ; absence de consultation antérieure non attestée",
+  "fenetre": {
+    "debutInclus": "2026-07-29T00:00:00Z",
+    "finExclue": "2026-09-09T00:00:00Z",
+    "warmupBougies": 200,
+    "decisionAvantDebut": false,
+    "liquidationFin": "dernier close dont l'instant est <= finExclue"
+  },
+  "cellules": [
+    { "symbol": "BTCUSDT", "timeframe": "1h" },
+    { "symbol": "BTCUSDT", "timeframe": "4h" },
+    { "symbol": "ETHUSDT", "timeframe": "1h" },
+    { "symbol": "ETHUSDT", "timeframe": "4h" }
+  ],
+  "marche": {
+    "type": "spot",
+    "source": "Binance Spot",
+    "endpoint": "https://api.binance.com/api/v3/klines",
+    "funding": "non applicable",
+    "tailleFixeQuote": 1000,
+    "capitalInitialQuote": 10000
+  },
+  "execution": {
+    "signal": "close de bougie clôturée",
+    "fill": "open de la bougie suivante",
+    "stops": "évalués au close, fill open suivant",
+    "retournement": "retour à plat ; réouverture au plus tôt sur une barre ultérieure",
+    "coutsParCotePct": [
+      { "id": "x1-central", "frais": 0.05, "slippage": 0.02 },
+      { "id": "x2", "frais": 0.1, "slippage": 0.04 },
+      { "id": "x3", "frais": 0.15, "slippage": 0.06 }
+    ]
+  },
+  "strategies": [
+    {
+      "id": "ema-9-21",
+      "direction": "les-deux",
+      "definition": "EMA rapide > EMA lente = long ; EMA rapide < EMA lente = short",
+      "params": { "rapide": 9, "lente": 21 },
+      "sensibilitesOatPct": [-20, 20],
+      "arrondis": "entier le plus proche, minimum 1"
+    },
+    {
+      "id": "rsi-14-reversion",
+      "direction": "long",
+      "definition": "croisement RSI au-dessus de 30 = entrée ; RSI >= 70 = sortie",
+      "params": { "length": 14, "entree": 30, "sortie": 70 },
+      "sensibilitesOatPct": [-20, 20],
+      "arrondis": "length entier >=1 ; seuils bornés [0,100]"
+    },
+    {
+      "id": "supertrend-10-3",
+      "direction": "les-deux",
+      "definition": "direction Supertrend positive = long ; négative = short",
+      "params": { "period": 10, "multiplier": 3 },
+      "sensibilitesOatPct": [-20, 20],
+      "arrondis": "period entier >=1 ; multiplier à 0,1"
+    }
+  ],
+  "catalogueStrategieObserve": [
+    "rsiDivergence", "macdDivergence", "stochDivergence", "mfiDivergence", "obvDivergence",
+    "cvdDivergence", "cvdSpotPerp", "premiumSpotPerp", "stratCroisementMM", "stratRsiReversion",
+    "stratMacdCross", "stratSupertrend", "stratDonchian", "stratBollingerReversion", "stratDivergenceRsi",
+    "stratSqueezeBreakout", "stratIchimokuKumo", "stratMmAdx", "stratPsar", "stratChampion",
+    "stratSupertrendAdx", "stratMmRsi", "stratSqueezeKumo", "stratMacdSupertrend", "stratPsarAdx",
+    "stratTripleConfirmation", "stratRsiRange", "stratNetPositionFade", "stratSmartMoneyDivergence", "stratSpotBreakout"
+  ],
+  "monteCarlo": {
+    "seed": 20260909,
+    "chemins": 1000,
+    "modePrincipal": { "mode": "blocs", "tailleBloc": 5 },
+    "sensibilites": [{ "mode": "blocs", "tailleBloc": 3 }, { "mode": "blocs", "tailleBloc": 10 }, { "mode": "iid", "tailleBloc": 1 }],
+    "minimumTrades": 10,
+    "ruine": "min(E0..En) <= 0",
+    "finaleNegative": "En < 0",
+    "drawdown": "(pic-capital)/capitalInitial, fraction"
+  },
+  "criteres": {
+    "minimumTradesFermesParCellule": 30,
+    "expectancyNetteStrictementPositive": "dans les 4 cellules aux coûts x1 et x3",
+    "cellulesCompletes": true,
+    "fuiteTemporelleConnue": false,
+    "labelAutomatiqueStrategieValidee": false,
+    "selectionApresResultats": false
+  },
+  "versions": {
+    "baseCommit": "b66db837e9bf39e8b17ea5994e11b11c87c450a2",
+    "pnpmLockSha256": "5e7ba89c7d5299cc8159b11218d04663c2a6431a6732b42a945206bd67aef3b3",
+    "bun": "1.3.11",
+    "node": "26.7.0",
+    "pnpm": "9.12.0",
+    "oracles": { "pandasTaClassic": "0.6.52", "pythonDocumente": "3.14", "runtimePython": false }
+  },
+  "acquisitionDansResultat": ["url", "horodatageUtc", "nombre", "premierOpen", "dernierClose", "sha256Ohlcv"]
+}

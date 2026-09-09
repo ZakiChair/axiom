@@ -4,11 +4,11 @@
  * Rééchantillonnage Monte-Carlo (bootstrap AVEC remise) des PnL de trades d'un backtest.
  * À partir de la liste des PnL réalisés (champ `pnl` de `TradeResultat`, en cotation) et
  * du capital initial (`ParamsBacktest.capitalInitial`), on simule `nChemins` réordonnancements
- * possibles de la même population de trades : chaque chemin tire, AVEC remise, autant de PnL
- * qu'il y a de trades, et cumule un chemin d'equity (capital + PnL cumulés).
+ * possibles de la même population de trades : mode iid historique, ou moving block bootstrap
+ * non circulaire qui préserve localement l'ordre de blocs contigus.
  *
  * On en extrait le cône de percentiles d'equity (p5/p50/p95 par pas), les percentiles de
- * l'equity finale, ceux du max drawdown et la probabilité de ruine.
+ * l'equity finale, ceux du max drawdown, P(min equity <= 0) et P(final < 0).
  *
  * Module PUR et sans I/O : le générateur aléatoire est INJECTÉ (jamais Math.random ici), ce
  * qui rend tout déterministe à seed fixe.
@@ -35,10 +35,18 @@ export interface ResultatMonteCarlo {
   equityFinale: { p5: number; p25: number; p50: number; p75: number; p95: number };
   /** Percentiles du max drawdown, en FRACTION du capital initial (0.25 = −25 %). */
   maxDrawdown: { p50: number; p95: number };
-  /** Part des chemins finissant avec une equity < 0. */
+  /** Part des chemins ayant franchi une equity <= 0 au moins une fois. */
   probRuine: number;
+  /** Part des chemins finissant strictement avec une equity < 0. */
+  probFinaleNegative: number;
   /** Equity cumulée par pas (longueur = nb trades) pour tracer le cône. */
   cheminsPercentiles: { p5: number[]; p50: number[]; p95: number[] };
+}
+
+export interface OptionsMonteCarlo {
+  mode?: "iid" | "blocs";
+  /** Longueur du moving block bootstrap non circulaire. */
+  tailleBloc?: number;
 }
 
 /**
@@ -73,9 +81,20 @@ export function monteCarloTrades(
   nChemins: number,
   rng: () => number,
   capitalInitial: number,
+  options: OptionsMonteCarlo = {},
 ): ResultatMonteCarlo | null {
   const nTrades = pnls.length;
   if (nTrades < 10) return null;
+  if (pnls.some((pnl) => !Number.isFinite(pnl))) throw new Error("PnL finis requis.");
+  if (!Number.isFinite(capitalInitial) || capitalInitial <= 0) throw new Error("capitalInitial fini et positif requis.");
+  if (!Number.isFinite(nChemins)) throw new Error("nChemins fini requis.");
+
+  const mode = options.mode ?? "iid";
+  const tailleBloc = options.tailleBloc ?? 1;
+  if (mode !== "iid" && mode !== "blocs") throw new Error("Mode Monte-Carlo invalide.");
+  if (!Number.isInteger(tailleBloc) || tailleBloc < 1 || tailleBloc > nTrades) {
+    throw new Error(`tailleBloc entière requise dans [1, ${nTrades}].`);
+  }
 
   // Borne le nombre de chemins à [1, 2000].
   const chemins = Math.max(1, Math.min(2000, Math.floor(nChemins)));
@@ -85,16 +104,34 @@ export function monteCarloTrades(
   const equitesFinales = new Array<number>(chemins);
   const drawdowns = new Array<number>(chemins);
   let nbRuine = 0;
+  let nbFinaleNegative = 0;
+
+  const tirer = (): number => {
+    const valeur = rng();
+    if (!Number.isFinite(valeur) || valeur < 0 || valeur >= 1) {
+      throw new Error("RNG doit renvoyer une valeur finie dans [0, 1).");
+    }
+    return valeur;
+  };
 
   for (let c = 0; c < chemins; c++) {
     let capital = capitalInitial;
     let pic = capitalInitial; // pic initialisé au capital : une 1re perte compte comme drawdown
     let ddMax = 0;
+    let ruine = false;
+    const chemin: number[] = [];
+    if (mode === "iid" || tailleBloc === 1) {
+      for (let i = 0; i < nTrades; i++) chemin.push(pnls[Math.floor(tirer() * nTrades)]!);
+    } else {
+      while (chemin.length < nTrades) {
+        const debut = Math.floor(tirer() * (nTrades - tailleBloc + 1));
+        for (let j = 0; j < tailleBloc && chemin.length < nTrades; j++) chemin.push(pnls[debut + j]!);
+      }
+    }
     for (let i = 0; i < nTrades; i++) {
-      // Tirage AVEC remise : exactement un rng() par trade rééchantillonné.
-      const idx = Math.floor(rng() * nTrades);
-      capital += pnls[idx]!;
+      capital += chemin[i]!;
       equityParPas[i]![c] = capital;
+      if (capital <= 0) ruine = true;
       if (capital > pic) pic = capital;
       // Drawdown rapporté au CAPITAL INITIAL (pas au pic) — convention du contrôleur.
       const dd = (pic - capital) / capitalInitial;
@@ -102,7 +139,8 @@ export function monteCarloTrades(
     }
     equitesFinales[c] = capital;
     drawdowns[c] = ddMax;
-    if (capital < 0) nbRuine++;
+    if (ruine) nbRuine++;
+    if (capital < 0) nbFinaleNegative++;
   }
 
   // Percentiles de l'equity finale.
@@ -137,6 +175,7 @@ export function monteCarloTrades(
     equityFinale,
     maxDrawdown,
     probRuine: nbRuine / chemins,
+    probFinaleNegative: nbFinaleNegative / chemins,
     cheminsPercentiles: { p5, p50, p95 },
   };
 }

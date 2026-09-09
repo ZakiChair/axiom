@@ -57,6 +57,11 @@ const TF_MS: Partial<Record<Timeframe, number>> = {
   "12h": 43_200_000, "1d": 86_400_000, "3d": 259_200_000, "1w": 604_800_000,
 };
 
+/** Durée native exacte des timeframes proposés au backtest. */
+export function dureeTimeframeMs(tf: Timeframe): number | null {
+  return TF_MS[tf] ?? null;
+}
+
 /** Progression d'une accumulation (bougies obtenues / cible estimée). */
 export interface ProgressionAccumulation {
   recuperees: number;

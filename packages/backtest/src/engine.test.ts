@@ -236,6 +236,20 @@ describe("opérandes causaux", () => {
     expect(() => runBacktest(Array.from({ length: 80 }, (_, i) => barre(i, 100 + i, 100 + i)), nonCausale, SANS_FRICTION))
       .toThrow("non causale");
   });
+
+  it.each(["pivotHigh", "pivotLow"] as const)("refuse pivotHighLow.%s confirmé par des barres futures", (output) => {
+    const nonCausale: StrategieDef = {
+      reglesEntree: [{
+        type: "comparaison",
+        gauche: { type: "indicateur", indicateurId: "pivotHighLow", params: { bars: 5 }, output },
+        comparateur: ">",
+        droite: { type: "constante", valeur: 0 },
+      }],
+      reglesSortie: [], direction: "long", tailleFixe: 100,
+    };
+    expect(() => runBacktest(Array.from({ length: 20 }, (_, i) => barre(i, 100 + i, 100 + i)), nonCausale, SANS_FRICTION))
+      .toThrow("non causale");
+  });
 });
 
 describe("borne de début hors échantillon", () => {

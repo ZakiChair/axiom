@@ -10,7 +10,8 @@
   },
   "apres": {
     "runnerSha256": "29a30b2423cbdef5c1eb0d5a89f76d090ba568273cfc956a2f1eca505b6c59f9",
-    "engineSha256": "b4b9959c2e660016c34d00b0afad7bc3564edf5e76008e298e39b72e4019dbae"
+    "engineSha256": "ca54d0c9bfa8c0ea1766d7d63ef778fe807b3061465df297c5887cfc70f2a41b"
   },
+  "auditCausaliteComplementaire": "Refus explicite des sorties pivotHighLow.pivotHigh/pivotLow, confirmées par des barres futures ; protocole et résultats OOS inchangés car aucune règle de campagne ne les utilise.",
   "recalcul": "Les mêmes quatre séries OHLCV, règles, paramètres, coûts, seed et bornes du manifeste sont relus depuis le cache dont chaque SHA-256 est revérifié."
 }

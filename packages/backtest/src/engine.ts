@@ -61,6 +61,8 @@ const SORTIES_NON_CAUSALES = new Set([
   "ichimoku:chikou",
   "fractals:up",
   "fractals:down",
+  "pivotHighLow:pivotHigh",
+  "pivotHighLow:pivotLow",
   "zigzag:zigzag",
 ]);
 

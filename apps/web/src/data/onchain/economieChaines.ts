@@ -226,7 +226,10 @@ async function chargerUrl(
     try {
       const timeout = AbortSignal.timeout(options.timeoutMs);
       const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
-      const response = await options.fetcher(url, { signal });
+      // Un appel comme méthode d'options transmettrait cet objet comme `this` :
+      // le fetch natif des navigateurs refuse ce receveur (« Illegal invocation »).
+      const fetcher = options.fetcher;
+      const response = await fetcher(url, { signal });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const serie = parser(await response.json()).filter((p) => p.time <= options.now());
       if (serie.length === 0) throw new Error("historique vide");

@@ -10,6 +10,8 @@ function tuile(partiel: Partial<CoinTile> & Pick<CoinTile, "id" | "symbol">): Co
     name: partiel.symbol,
     mcapUsd: 0,
     price: 1,
+    volume24hUsd: null,
+    observeLe: null,
     changePct24h: 0,
     changePct7j: 0,
     changePct30j: 0,

@@ -276,7 +276,7 @@ async function fetchUpstream(
     if (!REDIRECT_STATUSES.has(response.status)) return response;
     await response.body?.cancel().catch(() => undefined);
     if (plan.target.hostname === NBS_HOST) throw new ProxyPolicyError(502, "redirection NBS refusée");
-    if (redirects >= PROXY_MAX_REDIRECTS) throw new ProxyPolicyError(502, "trop de redirections amont");
+    if (redirects >= (plan.maxRedirects ?? PROXY_MAX_REDIRECTS)) throw new ProxyPolicyError(502, "redirection amont refusée");
     const location = response.headers.get("location");
     if (location === null) throw new ProxyPolicyError(502, "redirection amont sans destination");
     const redirected = proxyRedirectTarget(location, target, plan.allowedRedirectHosts);
@@ -322,6 +322,11 @@ async function handle(request: Request): Promise<Response> {
       if (!valide) throw new ProxyPolicyError(400, "requête statistique NBS invalide");
     }
     const upstream = await fetchUpstream(plan, request.headers, body, controller.signal);
+    if (plan.route === "defillamapro" && (upstream.status < 200 || upstream.status >= 300)) {
+      await upstream.body?.cancel().catch(() => undefined);
+      const message = upstream.status === 401 ? "clé DefiLlama Pro refusée" : upstream.status === 402 || upstream.status === 403 ? "abonnement DefiLlama Pro requis ou accès refusé" : upstream.status === 429 ? "quota DefiLlama Pro atteint" : "amont DefiLlama Pro indisponible";
+      return jsonError(upstream.status, message);
+    }
     const contentType = upstream.headers.get("content-type") ?? "application/octet-stream";
     const geo = sourceGeoExtraite(plan.target);
     if (geo) {

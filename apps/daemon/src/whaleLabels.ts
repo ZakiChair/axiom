@@ -18,6 +18,19 @@
  */
 import type { DirectionWhale } from "@axiom/alerts";
 
+export interface AttributionAdresse {
+  entite: string;
+  source: string;
+  verifieLe: string | null;
+  confiance: "faible" | "moyenne" | "forte";
+}
+
+const SOURCE_HISTORIQUE = "liste statique historique AXIOM (origine documentaire non conservée)";
+
+function entiteDepuisLabel(label: string): string {
+  return label.replace(/\s*\([^)]*\)\s*$/, "");
+}
+
 /** Adresses ETH connues (clés en minuscules) → étiquette exchange. */
 export const LABELS_ETH: Readonly<Record<string, string>> = {
   // Binance (hot wallets 14/15/16 + cold wallet 8 — étiquettes publiques Etherscan).
@@ -58,6 +71,14 @@ export function etiqueterAdresse(chain: "btc" | "eth", adresse: string): string 
   return LABELS_BTC[adresse] ?? null;
 }
 
+/** Attribution honnête : l'origine et la date n'étaient pas conservées dans la liste historique. */
+export function attributionAdresse(chain: "btc" | "eth", adresse: string): AttributionAdresse | null {
+  const label = etiqueterAdresse(chain, adresse);
+  return label === null ? null : {
+    entite: entiteDepuisLabel(label), source: SOURCE_HISTORIQUE, verifieLe: null, confiance: "faible",
+  };
+}
+
 /**
  * Direction d'un mouvement d'après les étiquettes source/destination :
  * vers un exchange = « depot » (offre potentielle), depuis un exchange = « retrait »
@@ -65,7 +86,9 @@ export function etiqueterAdresse(chain: "btc" | "eth", adresse: string): string 
  * « inconnu » (wallet à wallet). Fonction PURE.
  */
 export function etiqueterDirection(deLabel: string | null, versLabel: string | null): DirectionWhale {
-  if (deLabel !== null && versLabel !== null) return "interne";
+  if (deLabel !== null && versLabel !== null) {
+    return entiteDepuisLabel(deLabel) === entiteDepuisLabel(versLabel) ? "interne" : "inconnu";
+  }
   if (versLabel !== null) return "depot";
   if (deLabel !== null) return "retrait";
   return "inconnu";

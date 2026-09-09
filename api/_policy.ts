@@ -1,5 +1,6 @@
 import { EXTAPI_HOSTS, extapiCheminAutorise } from "../shared/extapi-hosts.js";
 import { NBS_HOST, NBS_CHEMIN } from "../shared/nbs-series.js";
+import { DEFILLAMA_PRO_HEADER, DEFILLAMA_PRO_HOST, cheminDefillamaAmont, cleDefillamaValide } from "../shared/defillama-proxy.js";
 
 export const PROXY_TIMEOUT_MS = 15_000;
 export const PROXY_MAX_REDIRECTS = 5;
@@ -29,7 +30,8 @@ export type ProxyRouteId =
   | "sosoapi"
   | "bgapi"
   | "ethscanapi"
-  | "ccdataapi";
+  | "ccdataapi"
+  | "defillamapro";
 
 interface FixedRoute {
   host: string;
@@ -45,6 +47,7 @@ const FIXED_ROUTES: Readonly<Record<Exclude<ProxyRouteId, "extapi">, FixedRoute>
   bgapi: { host: "bitcoin-data.com", methods: ["GET", "HEAD"] },
   ethscanapi: { host: "api.etherscan.io", methods: ["GET", "HEAD"] },
   ccdataapi: { host: "min-api.cryptocompare.com", methods: ["GET", "HEAD"] },
+  defillamapro: { host: DEFILLAMA_PRO_HOST, methods: ["GET"] },
 };
 
 const ROUTE_IDS: readonly ProxyRouteId[] = [
@@ -57,6 +60,7 @@ const ROUTE_IDS: readonly ProxyRouteId[] = [
   "bgapi",
   "ethscanapi",
   "ccdataapi",
+  "defillamapro",
 ];
 const ROUTES = new Set<ProxyRouteId>(ROUTE_IDS);
 const EXTAPI_WHITELIST: ReadonlySet<string> = new Set(EXTAPI_HOSTS);
@@ -122,6 +126,7 @@ export interface ProxyPlan {
   allowedRedirectHosts: ReadonlySet<string>;
   privateResponse: boolean;
   cacheControl: string;
+  maxRedirects?: number;
 }
 
 export function proxyExtapiHostAllowed(host: string): boolean {
@@ -284,7 +289,7 @@ export function proxyRequestHasCredential(query: URLSearchParams, headers: Heade
     const normalized = key.toLowerCase();
     return normalized === "apikey" || normalized.includes("api_key");
   });
-  return credentialQuery || headers.has("authorization") || headers.has("x-soso-api-key");
+  return credentialQuery || headers.has("authorization") || headers.has("x-soso-api-key") || headers.has(DEFILLAMA_PRO_HEADER);
 }
 
 export function proxyCacheControl(method: string, query: URLSearchParams, headers: Headers): string {
@@ -316,6 +321,16 @@ export function planProxyRequest(requestUrl: string, method: string, headers: He
     upstreamPath = path;
     methods = fixed.methods;
     allowedRedirectHosts = new Set([host]);
+    if (route === "defillamapro") {
+      const key = headers.get(DEFILLAMA_PRO_HEADER);
+      if (!cleDefillamaValide(key)) throw new ProxyPolicyError(401, "clé DefiLlama Pro absente ou invalide");
+      const localQuery = originalQuery(source).toString();
+      const allowedPath = cheminDefillamaAmont(`/defillamapro/${path}`, localQuery ? `?${localQuery}` : "");
+      if (allowedPath === null) throw new ProxyPolicyError(404, "chemin DefiLlama Pro refusé");
+      const [pathname, search = ""] = allowedPath.split("?", 2);
+      upstreamPath = `${encodeURIComponent(key)}${pathname}`;
+      source.search = search;
+    }
   }
   if (!methods.includes(normalizedMethod)) {
     throw new ProxyPolicyError(405, "méthode proxy non autorisée", methods.join(", "));
@@ -334,7 +349,7 @@ export function planProxyRequest(requestUrl: string, method: string, headers: He
   const query = originalQuery(source);
   if (host === NBS_HOST && query.size > 0) throw new ProxyPolicyError(400, "paramètres NBS refusés");
   target.search = query.toString();
-  if (!proxyRedirectAllowed(target, allowedRedirectHosts)) {
+  if (route !== "defillamapro" && !proxyRedirectAllowed(target, allowedRedirectHosts)) {
     throw new ProxyPolicyError(403, "destination proxy refusée");
   }
 
@@ -347,5 +362,6 @@ export function planProxyRequest(requestUrl: string, method: string, headers: He
     allowedRedirectHosts,
     privateResponse,
     cacheControl: proxyCacheControl(normalizedMethod, query, headers),
+    maxRedirects: route === "defillamapro" ? 0 : undefined,
   };
 }

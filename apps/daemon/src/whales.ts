@@ -36,7 +36,7 @@ import { entetesCors } from "./cors";
 import { getDb } from "./db";
 import { assurerTableKv } from "./hyperliquid";
 import type { Routeur } from "./router";
-import { etiqueterAdresse, etiqueterDirection } from "./whaleLabels";
+import { attributionAdresse, etiqueterAdresse, etiqueterDirection, type AttributionAdresse } from "./whaleLabels";
 
 /** Seuil de COLLECTE (USD) : sous ce notionnel, un transfert n'est pas persisté. */
 export const SEUIL_COLLECTE_USD = 1_000_000;
@@ -96,6 +96,8 @@ export interface MouvementWhale {
   /** Étiquette exchange de la source (liste curée), ou null. */
   deLabel: string | null;
   versLabel: string | null;
+  deAttribution?: AttributionAdresse | null;
+  versAttribution?: AttributionAdresse | null;
   direction: DirectionWhale;
 }
 
@@ -118,8 +120,43 @@ export function assurerTableWhales(d: Database): void {
     versLabel TEXT,
     direction TEXT NOT NULL
   )`);
+  for (const colonne of ["deAttribution", "versAttribution"] as const) {
+    try { d.run(`ALTER TABLE whale_moves ADD COLUMN ${colonne} TEXT`); } catch { /* migration déjà appliquée */ }
+  }
+  migrerDirectionsEtAttributionsWhales(d);
   d.run("CREATE INDEX IF NOT EXISTS whale_lookup ON whale_moves (t)");
   d.run("CREATE INDEX IF NOT EXISTS whale_asset ON whale_moves (asset, t)");
+}
+
+/**
+ * Corrige une seule fois les lignes créées avant la distinction d'entité : l'ancien
+ * code disait `interne` dès que les deux extrémités étaient connues, même entre deux
+ * exchanges différents. La migration ajoute aussi la provenance honnête aux labels
+ * historiques encore présents, puis pose un marqueur persistant dans le KV existant.
+ */
+export function migrerDirectionsEtAttributionsWhales(d: Database): void {
+  assurerTableKv(d);
+  const deja = d.query("SELECT 1 FROM kv WHERE namespace = ? AND cle = ?").get("whales-schema", "directions-attributions-v2");
+  if (deja) return;
+  const rows = d.query("SELECT id,chain,de,vers,deLabel,versLabel,direction FROM whale_moves")
+    .all() as Array<Pick<MouvementWhale, "id" | "chain" | "de" | "vers" | "deLabel" | "versLabel" | "direction">>;
+  const update = d.query("UPDATE whale_moves SET direction = ?, deAttribution = ?, versAttribution = ? WHERE id = ?");
+  const tx = d.transaction(() => {
+    for (const row of rows) {
+      const chain = row.chain === "btc" ? "btc" : "eth";
+      const deAttribution = attributionAdresse(chain, row.de);
+      const versAttribution = attributionAdresse(chain, row.vers);
+      update.run(
+        etiqueterDirection(row.deLabel, row.versLabel),
+        deAttribution ? JSON.stringify(deAttribution) : null,
+        versAttribution ? JSON.stringify(versAttribution) : null,
+        row.id,
+      );
+    }
+    d.query("INSERT OR REPLACE INTO kv (namespace, cle, valeur, majA) VALUES (?, ?, ?, ?)")
+      .run("whales-schema", "directions-attributions-v2", "1", Date.now());
+  });
+  tx();
 }
 
 /** Renvoie la base globale en garantissant (une fois) l'existence de la table. */
@@ -136,12 +173,13 @@ function db(): Database {
 export function insererMouvements(d: Database, lot: readonly MouvementWhale[]): void {
   if (lot.length === 0) return;
   const inserer = d.query(
-    `INSERT OR IGNORE INTO whale_moves (id, t, chain, asset, qty, usd, de, vers, deLabel, versLabel, direction)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO whale_moves (id, t, chain, asset, qty, usd, de, vers, deLabel, versLabel, direction, deAttribution, versAttribution)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const tx = d.transaction((ms: readonly MouvementWhale[]) => {
     for (const m of ms) {
-      inserer.run(m.id, m.t, m.chain, m.asset, m.qty, m.usd, m.de, m.vers, m.deLabel, m.versLabel, m.direction);
+      inserer.run(m.id, m.t, m.chain, m.asset, m.qty, m.usd, m.de, m.vers, m.deLabel, m.versLabel, m.direction,
+        m.deAttribution ? JSON.stringify(m.deAttribution) : null, m.versAttribution ? JSON.stringify(m.versAttribution) : null);
     }
   });
   tx(lot);
@@ -159,7 +197,7 @@ export function purgerMouvements(d: Database, avantMs: number): void {
 export function mouvementsRecents(d: Database, asset: string, depuisMs: number): MouvementWhale[] {
   assurerTableWhales(d);
   return d
-    .query("SELECT * FROM whale_moves WHERE asset = ? AND t >= ? ORDER BY t ASC")
+    .query("SELECT id,t,chain,asset,qty,usd,de,vers,deLabel,versLabel,direction FROM whale_moves WHERE asset = ? AND t >= ? ORDER BY t ASC")
     .all(asset.toUpperCase(), depuisMs) as MouvementWhale[];
 }
 
@@ -318,6 +356,8 @@ export function versMouvementBtc(tx: TxBtc, prixBtc: number, seuilUsd: number): 
     vers: versPrincipal,
     deLabel,
     versLabel,
+    deAttribution: attributionAdresse("btc", de),
+    versAttribution: attributionAdresse("btc", versPrincipal),
     direction: etiqueterDirection(deLabel, versLabel),
   };
 }
@@ -450,6 +490,8 @@ export function versMouvementErc20(log: LogTransfert, asset: string, seuilUsd: n
     vers: log.vers,
     deLabel,
     versLabel,
+    deAttribution: attributionAdresse("eth", log.de),
+    versAttribution: attributionAdresse("eth", log.vers),
     direction: etiqueterDirection(deLabel, versLabel),
   };
 }
@@ -576,6 +618,7 @@ let dernierBlocBtcTraite: number | null = null;
 export async function pollBtc(fetchImpl: typeof fetch = fetch, dInjecte?: Database): Promise<void> {
   const d = dInjecte ?? db();
   if (dInjecte !== undefined) assurerTableWhales(dInjecte);
+  if (dernierBlocBtcTraite === null) dernierBlocBtcTraite = lireKvNombre(d, "dernierBlocBtc");
   try {
     const resTete = await fetchImpl(URL_LATEST_BLOCK, { signal: AbortSignal.timeout(15_000) });
     if (!resTete.ok) throw new Error(`latestblock HTTP ${resTete.status}`);
@@ -583,8 +626,12 @@ export async function pollBtc(fetchImpl: typeof fetch = fetch, dInjecte?: Databa
     if (tete === null) throw new Error("latestblock illisible");
 
     const hauteurs = hauteursARattraper(dernierBlocBtcTraite, tete.height);
+    if (dernierBlocBtcTraite !== null && hauteurs[0] !== undefined && hauteurs[0] > dernierBlocBtcTraite + 1) {
+      noterTrou(d, "btc", dernierBlocBtcTraite + 1, hauteurs[0] - 1, "rattrapage borné");
+    }
     if (hauteurs.length === 0) {
       sante.dernierPollBtcTs = Date.now();
+      ecrireKvNombre(d, "dernierSuccesBtc", sante.dernierPollBtcTs);
       sante.erreurBtc = null;
       return; // aucun nouveau bloc : poll abouti quand même (santé fraîche)
     }
@@ -613,8 +660,10 @@ export async function pollBtc(fetchImpl: typeof fetch = fetch, dInjecte?: Databa
       insererMouvements(d, lot);
       dernierBlocBtcTraite = hauteur;
       sante.dernierBlocBtc = hauteur;
+      ecrireKvNombre(d, "dernierBlocBtc", hauteur);
     }
     sante.dernierPollBtcTs = Date.now();
+    ecrireKvNombre(d, "dernierSuccesBtc", sante.dernierPollBtcTs);
     sante.erreurBtc = null;
   } catch (err) {
     sante.erreurBtc = err instanceof Error ? err.message : String(err);
@@ -669,6 +718,48 @@ export function ecrireDernierBloc(d: Database, bloc: number): void {
   );
 }
 
+export interface ContinuiteWhales {
+  btc: { curseur: number | null; dernierSucces: number | null; trous: Array<{ de: number; a: number; raison: string }>; finalite: string };
+  eth: { curseur: number | null; dernierSucces: number | null; trous: Array<{ de: number; a: number; raison: string }>; finalite: string };
+}
+
+function lireKvNombre(d: Database, cle: string): number | null {
+  assurerTableKv(d);
+  const row = d.query("SELECT valeur FROM kv WHERE namespace = ? AND cle = ?").get("whales", cle) as { valeur: string } | null;
+  if (!row) return null;
+  const n = Number(row.valeur); return Number.isFinite(n) ? n : null;
+}
+
+function ecrireKvNombre(d: Database, cle: string, valeur: number): void {
+  assurerTableKv(d);
+  d.query("INSERT INTO kv (namespace, cle, valeur, majA) VALUES (?, ?, ?, ?) ON CONFLICT(namespace, cle) DO UPDATE SET valeur=excluded.valeur, majA=excluded.majA")
+    .run("whales", cle, String(valeur), Date.now());
+}
+
+function lireTrous(d: Database, chain: "btc" | "eth"): Array<{ de: number; a: number; raison: string }> {
+  assurerTableKv(d);
+  const row = d.query("SELECT valeur FROM kv WHERE namespace = ? AND cle = ?").get("whales", `trous-${chain}`) as { valeur: string } | null;
+  try {
+    const value = row ? JSON.parse(row.valeur) : [];
+    return Array.isArray(value) ? value.slice(-20) : [];
+  } catch { return []; }
+}
+
+function noterTrou(d: Database, chain: "btc" | "eth", de: number, a: number, raison: string): void {
+  if (a < de) return;
+  const trous = [...lireTrous(d, chain), { de, a, raison }].slice(-20);
+  d.query("INSERT OR REPLACE INTO kv (namespace, cle, valeur, majA) VALUES (?, ?, ?, ?)")
+    .run("whales", `trous-${chain}`, JSON.stringify(trous), Date.now());
+}
+
+export function lireContinuiteWhales(d: Database): ContinuiteWhales {
+  const finalite = "risque de réorganisation; aucune finalité immédiate garantie";
+  return {
+    btc: { curseur: lireKvNombre(d, "dernierBlocBtc"), dernierSucces: lireKvNombre(d, "dernierSuccesBtc"), trous: lireTrous(d, "btc"), finalite },
+    eth: { curseur: lireDernierBloc(d), dernierSucces: lireKvNombre(d, "dernierSuccesEth"), trous: lireTrous(d, "eth"), finalite },
+  };
+}
+
 /** URL Etherscan v2 (chainid=1) avec clé optionnelle. */
 function urlEtherscan(params: Record<string, string>, cle: string): string {
   const q = new URLSearchParams({ chainid: "1", ...params });
@@ -705,13 +796,16 @@ export async function pollEtherscan(
     const blocCourant = nombreHex(jsonBloc.result);
     if (blocCourant === null || blocCourant <= 0) throw new Error("eth_blockNumber illisible");
 
-    const fenetre = fenetreBlocs(lireDernierBloc(d), blocCourant);
+    const dernier = lireDernierBloc(d);
+    const fenetre = fenetreBlocs(dernier, blocCourant);
     if (fenetre === null) {
       // Rien de nouveau : poll abouti quand même (santé fraîche).
       sante.dernierPollEthTs = Date.now();
+      ecrireKvNombre(d, "dernierSuccesEth", sante.dernierPollEthTs);
       sante.erreurEth = null;
       return;
     }
+    if (dernier !== null && fenetre.de > dernier + 1) noterTrou(d, "eth", dernier + 1, fenetre.de - 1, "rattrapage borné");
 
     const lot: MouvementWhale[] = [];
     let curseur = fenetre.a;
@@ -750,6 +844,7 @@ export async function pollEtherscan(
     ecrireDernierBloc(d, curseur);
     sante.dernierBlocEth = curseur;
     sante.dernierPollEthTs = Date.now();
+    ecrireKvNombre(d, "dernierSuccesEth", sante.dernierPollEthTs);
     sante.erreurEth = null;
   } catch (err) {
     sante.erreurEth = redigerErreurWhales(err instanceof Error ? err.message : err);
@@ -840,8 +935,12 @@ export function traiterWhales(req: Request, url: URL, dInjecte?: Database): Resp
     }
     sql += " ORDER BY t DESC LIMIT ?";
     params.push(limite);
-    const mouvements = d.query(sql).all(...params) as MouvementWhale[];
-    return json({ mouvements, sante }, req);
+    const mouvements = (d.query(sql).all(...params) as Array<MouvementWhale & { deAttribution?: string | null; versAttribution?: string | null }>).map((m) => ({
+      ...m,
+      deAttribution: typeof m.deAttribution === "string" ? JSON.parse(m.deAttribution) : null,
+      versAttribution: typeof m.versAttribution === "string" ? JSON.parse(m.versAttribution) : null,
+    }));
+    return json({ mouvements, sante, continuite: lireContinuiteWhales(d) }, req);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     return json({ erreur: "erreur interne whales", detail }, req, 500);

@@ -1,9 +1,10 @@
 import { defineConfig, loadEnv } from "vite";
 import type { ProxyOptions } from "vite";
 import react from "@vitejs/plugin-react";
-import { EXTAPI_HOSTS, EXTAPI_HOTES_SPECIALISES } from "../../shared/extapi-hosts";
+import { EXTAPI_HOSTS, EXTAPI_HOTES_SPECIALISES, extapiCheminAutorise } from "../../shared/extapi-hosts";
 import { geoProxyDev } from "./vite.geo-proxy";
 import { appendApiKeyIfAbsent } from "./src/data/apiKeyProxy";
+import { DEFILLAMA_PRO_HEADER, DEFILLAMA_PRO_HOST, cheminDefillamaAmont, cleDefillamaValide } from "../../shared/defillama-proxy";
 
 // PROXY GÉNÉRIQUE /extapi (Phase 3) — contournement CORS pour APIs sans clé.
 // Route `/extapi/<hote>/<chemin…>` → `https://<hote>/<chemin…>` pour les hôtes
@@ -37,6 +38,19 @@ const extapiProxy: Record<string, ProxyOptions> = Object.fromEntries(
       target: `https://${hote}`,
       changeOrigin: true,
       rewrite: (chemin: string) => chemin.replace(`/extapi/${hote}`, ""),
+      bypass: (req, res) => {
+        if (res === undefined) return;
+        const url = new URL(req.url ?? "", "http://axiom.local");
+        const upstreamPath = url.pathname.replace(`/extapi/${hote}`, "") || "/";
+        if (!extapiCheminAutorise(hote, upstreamPath)) {
+          res.statusCode = 403;
+          res.setHeader("content-type", "application/json; charset=utf-8");
+          res.end(JSON.stringify({ erreur: "chemin proxy non autorisé" }));
+          // Vite 6 poursuit vers proxy.web quand bypass renvoie undefined, même après
+          // res.end(). Une chaîne lui fait constater writableEnded puis couper le réseau.
+          return req.url ?? "/";
+        }
+      },
       headers: { "User-Agent": EXTAPI_USER_AGENT_HOTES[hote] ?? EXTAPI_USER_AGENT },
       timeout: 15_000,
       proxyTimeout: 15_000,
@@ -182,6 +196,54 @@ export default defineConfig(({ mode }) => {
         rewrite: (path) => path.replace(/^\/ccdataapi/, ""),
         timeout: 15_000,
         proxyTimeout: 15_000,
+      },
+      "/defillamapro": {
+        target: `https://${DEFILLAMA_PRO_HOST}`,
+        changeOrigin: true,
+        secure: true,
+        followRedirects: false,
+        selfHandleResponse: true,
+        rewrite: (path) => {
+          const url = new URL(path, "http://axiom.local");
+          return cheminDefillamaAmont(url.pathname, url.search) ?? "/__axiom_refuse__";
+        },
+        bypass: (req, res) => {
+          if (res === undefined) return;
+          const url = new URL(req.url ?? "", "http://axiom.local");
+          const key = typeof req.headers[DEFILLAMA_PRO_HEADER] === "string" ? req.headers[DEFILLAMA_PRO_HEADER] : null;
+          const status = req.method !== "GET" ? 405 : !cleDefillamaValide(key) ? 401 : cheminDefillamaAmont(url.pathname, url.search) === null ? 404 : null;
+          if (status !== null) {
+            res.statusCode = status;
+            res.setHeader("content-type", "application/json; charset=utf-8");
+            res.setHeader("cache-control", "private, no-store");
+            res.end(JSON.stringify({ erreur: status === 401 ? "clé DefiLlama Pro absente ou invalide" : status === 405 ? "méthode Pro non autorisée" : "chemin DefiLlama Pro refusé" }));
+            return req.url ?? "/";
+          }
+        },
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq, req) => {
+            const key = req.headers[DEFILLAMA_PRO_HEADER];
+            if (typeof key === "string" && cleDefillamaValide(key)) proxyReq.path = `/${encodeURIComponent(key)}${proxyReq.path}`;
+            proxyReq.removeHeader(DEFILLAMA_PRO_HEADER);
+          });
+          proxy.on("proxyRes", (proxyRes, _req, res) => {
+            res.setHeader("cache-control", "private, no-store");
+            const status = proxyRes.statusCode ?? 502;
+            if (status < 200 || status >= 300) {
+              proxyRes.resume(); res.statusCode = status;
+              res.setHeader("content-type", "application/json; charset=utf-8");
+              res.end(JSON.stringify({ erreur: status === 401 ? "clé DefiLlama Pro refusée" : status === 402 || status === 403 ? "abonnement DefiLlama Pro requis ou accès refusé" : status === 429 ? "quota DefiLlama Pro atteint" : "amont DefiLlama Pro indisponible" }));
+              return;
+            }
+            res.statusCode = status;
+            res.setHeader("content-type", proxyRes.headers["content-type"] ?? "application/json; charset=utf-8");
+            proxyRes.pipe(res);
+          });
+          proxy.on("error", (_error, _req, res) => {
+            if ("writeHead" in res && !res.headersSent) res.writeHead(502, { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store" });
+            if ("end" in res) res.end(JSON.stringify({ erreur: "amont DefiLlama Pro injoignable" }));
+          });
+        },
       },
       // MEXC (exchange crypto, inclut des ACTIONS TOKENISÉES : AAPLXUSDT, TSLAONUSDT…).
       // API spot v3 compatible Binance, KEYLESS pour les données publiques, mais SANS

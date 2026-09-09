@@ -9,6 +9,7 @@ import {
   mapperReponseWhales,
   raccourcirAdresse,
   statsWhales,
+  grouperParEntite,
   type MouvementWhale,
 } from "./whales";
 
@@ -25,6 +26,8 @@ function mouvement(over: Partial<MouvementWhale> = {}): MouvementWhale {
     vers: "1Destinataire",
     deLabel: null,
     versLabel: null,
+    deAttribution: null,
+    versAttribution: null,
     direction: "inconnu",
     ...over,
   };
@@ -112,6 +115,8 @@ describe("statsWhales", () => {
       totalUsd: 8_000_000,
       nb: 3,
       maxUsd: 5_000_000,
+      connus: 0,
+      inconnus: 3,
     });
   });
 
@@ -123,7 +128,22 @@ describe("statsWhales", () => {
       totalUsd: 0,
       nb: 0,
       maxUsd: 0,
+      connus: 0,
+      inconnus: 0,
     });
+  });
+
+  it("compte séparément les attributions connues et inconnues", () => {
+    const stats = statsWhales([mouvement({ deLabel: "Binance" }), mouvement()]);
+    expect(stats.connus).toBe(1);
+    expect(stats.inconnus).toBe(1);
+  });
+});
+
+describe("grouperParEntite", () => {
+  it("agrège les deux bouts connus sans attribuer les inconnus", () => {
+    expect(grouperParEntite([mouvement({ usd: 3, deLabel: "Binance", versLabel: "Binance (cold)", direction: "interne" })]))
+      .toEqual([{ entite: "Binance", usd: 3, mouvements: 1 }]);
   });
 });
 

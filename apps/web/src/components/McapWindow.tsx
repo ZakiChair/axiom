@@ -62,6 +62,7 @@ import {
   ticksValeurs,
   type VuesMcap,
 } from "./mcapWindow.util";
+import { DefillamaProPanel } from "./DefillamaProPanel";
 
 /** Les trois graphiques, du haut vers le bas. */
 type GrapheId = "total" | "total3" | "dom";
@@ -373,6 +374,7 @@ export function McapWindow() {
   const majTs = useStore(mcapStore, (s) => s.majTs);
 
   const [survol, setSurvol] = useState<Survol | null>(null);
+  const [proOuvert, setProOuvert] = useState(false);
 
   // Prolongement au premier affichage (TTL 10 min côté store : deux appels au plus).
   useEffect(() => {
@@ -426,14 +428,15 @@ export function McapWindow() {
         titre="Capitalisation & dominance"
         sousTitre="TOTAL · TOTAL3 · dominances — reconstruction top 100 recalibrée"
         actions={
-          <BoutonRafraichir
+          <div className="flex items-center gap-2"><Bouton onClick={() => setProOuvert((v) => !v)}>Unlocks / bridges</Bouton><BoutonRafraichir
             onClick={() => void mcapStore.getState().prolonger(true)}
             disabled={backfill.enCours}
-          />
+          /></div>
         }
       />
 
       <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
+        {proOuvert && <div className="mb-2 shrink-0"><DefillamaProPanel /></div>}
         {backfill.enCours ? (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
             <Chargement

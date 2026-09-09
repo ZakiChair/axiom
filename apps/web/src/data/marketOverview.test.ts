@@ -79,6 +79,8 @@ describe("parseMarkets", () => {
       { id: "a", symbol: "a", name: "A", market_cap: 100, price_change_percentage_24h: null },
     ]);
     expect(at(tiles, 0).changePct24h).toBe(0);
+    expect(at(tiles, 0).volume24hUsd).toBeNull();
+    expect(at(tiles, 0).observeLe).toBeNull();
   });
 
   it("parse les périodes 7 j / 30 j (champs *_in_currency) ; absentes ou null → NULL (jamais 0)", () => {
@@ -101,6 +103,12 @@ describe("parseMarkets", () => {
     // « +0.00% » en vert (revue Lot 3). Le Δ24 h garde sa convention 0 (MAP).
     expect(at(tiles, 1).changePct7j).toBeNull();
     expect(at(tiles, 1).changePct30j).toBeNull();
+  });
+
+  it("conserve le volume 24 h réel par token pour les ratios unlocks", () => {
+    const tile = at(parseMarkets([{ id: "a", symbol: "a", market_cap: 100, current_price: 2, total_volume: 40, last_updated: "2026-09-09T12:00:00Z" }]), 0);
+    expect(tile.volume24hUsd).toBe(40);
+    expect(tile.observeLe).toBe(Date.parse("2026-09-09T12:00:00Z"));
   });
 
   it("entrée non-tableau → liste vide", () => {

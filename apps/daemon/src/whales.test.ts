@@ -10,6 +10,7 @@ import {
   insererMouvements,
   LIMITE_MAX,
   lireDernierBloc,
+  lireContinuiteWhales,
   montantNetBtc,
   mouvementsRecents,
   nombreHex,
@@ -234,6 +235,13 @@ describe("versMouvementErc20", () => {
       vers: ETH_BINANCE,
       deLabel: null,
       versLabel: "Binance",
+      deAttribution: null,
+      versAttribution: {
+        entite: "Binance",
+        source: "liste statique historique AXIOM (origine documentaire non conservée)",
+        verifieLe: null,
+        confiance: "faible",
+      },
       direction: "depot",
     });
     expect(versMouvementErc20({ ...log, qty: 999_999 }, "USDT", 1_000_000)).toBeNull();
@@ -283,6 +291,24 @@ function mouvement(id: string, t: number, over: Partial<MouvementWhale> = {}): M
 }
 
 describe("stockage whale_moves", () => {
+  it("migre une ancienne direction interne entre deux entités et ajoute sa provenance", () => {
+    const d = new Database(":memory:");
+    d.run(`CREATE TABLE whale_moves (
+      id TEXT PRIMARY KEY, t INTEGER NOT NULL, chain TEXT NOT NULL, asset TEXT NOT NULL,
+      qty REAL NOT NULL, usd REAL NOT NULL, de TEXT NOT NULL, vers TEXT NOT NULL,
+      deLabel TEXT, versLabel TEXT, direction TEXT NOT NULL
+    )`);
+    d.query("INSERT INTO whale_moves VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "legacy", T0, "btc", "BTC", 20, 2_000_000,
+      BTC_BINANCE, "3JZq4atUahhuA9rLhXLMhhTo133J9rF97j", "Binance (cold)", "Bitfinex (cold)", "interne",
+    );
+    assurerTableWhales(d);
+    const row = d.query("SELECT direction,deAttribution,versAttribution FROM whale_moves WHERE id = ?").get("legacy") as { direction: string; deAttribution: string; versAttribution: string };
+    expect(row.direction).toBe("inconnu");
+    expect(JSON.parse(row.deAttribution).entite).toBe("Binance");
+    expect(JSON.parse(row.versAttribution).entite).toBe("Bitfinex");
+  });
+
   it("insère idempotent (OR IGNORE), relit par actif, purge par rétention", () => {
     const d = new Database(":memory:");
     assurerTableWhales(d);
@@ -329,6 +355,15 @@ describe("traiterWhales — GET /whales/recent", () => {
     const mauvaise = new URL("http://127.0.0.1:8787/whales/autre");
     const res = traiterWhales(new Request(mauvaise, { method: "GET" }), mauvaise, new Database(":memory:"));
     expect(res.status).toBe(404);
+  });
+
+  it("expose un curseur persisté et les limites de finalité", () => {
+    const d = new Database(":memory:");
+    assurerTableWhales(d);
+    ecrireDernierBloc(d, 90);
+    const continuite = lireContinuiteWhales(d);
+    expect(continuite.eth.curseur).toBe(90);
+    expect(continuite.eth.finalite).toContain("aucune finalité immédiate");
   });
 });
 

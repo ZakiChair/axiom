@@ -24,13 +24,16 @@ import {
   mapperReponsePositions,
   mapperReponseWhales,
   statsWhales,
+  grouperParEntite,
   raccourcirAdresse,
   type MouvementWhale,
   type PositionHl,
   type ReponseHlPositions,
   type SanteWhales,
+  type ContinuiteChaine,
 } from "../data/whales";
 import { formatCompact, formatHeure, formatPrice, formatUsd } from "../lib/format";
+import { enregistrerQualite } from "../store/qualiteMetriques";
 import { IS_VERCEL } from "../lib/deployment";
 import { TableTriable, trierLignes, type ColonneTable, type TriTable } from "./TableTriable";
 import {
@@ -48,6 +51,7 @@ import {
   Vide,
   type TonBadge,
 } from "./ui";
+import { QualiteMetrique } from "./QualiteMetrique";
 
 /** Cadence de lecture du fil (la collecte daemon est continue, la lecture peut être lente). */
 const PERIODE_POLL_MS = 30_000;
@@ -102,7 +106,7 @@ function LigneMouvement({ m }: { m: MouvementWhale }) {
       <span className="w-16 shrink-0 text-right font-medium text-text" title={`${formatCompact(m.qty)} ${m.asset}`}>
         {formatUsd(m.usd)}
       </span>
-      <span className="min-w-0 flex-1 truncate text-text-dim" title={`${m.de} → ${m.vers}`}>
+      <span className="min-w-0 flex-1 truncate text-text-dim" title={`${m.de} → ${m.vers} · ${m.deAttribution?.source ?? m.versAttribution?.source ?? "attribution inconnue"} · vérifié le ${m.deAttribution?.verifieLe ?? m.versAttribution?.verifieLe ?? "inconnu"}`}>
         <span className={m.deLabel !== null ? "text-accent" : ""}>{libelleBout(m.de, m.deLabel)}</span>
         <span> → </span>
         <span className={m.versLabel !== null ? "text-accent" : ""}>{libelleBout(m.vers, m.versLabel)}</span>
@@ -152,6 +156,7 @@ function OngletFlux() {
   const [mouvements, setMouvements] = useState<MouvementWhale[]>([]);
   const [sante, setSante] = useState<SanteWhales | null>(null);
   const [majTs, setMajTs] = useState<number | null>(null);
+  const [continuite, setContinuite] = useState<{ btc: ContinuiteChaine; eth: ContinuiteChaine } | null>(null);
   const [seuilId, setSeuilId] = useState<string>("1m");
   const [asset, setAsset] = useState<string>("tous");
 
@@ -181,7 +186,10 @@ function OngletFlux() {
       }
       setMouvements(reponse.mouvements);
       setSante(reponse.sante);
+      setContinuite(reponse.continuite);
       setMajTs(Date.now());
+      const recupereLe = Date.now();
+      enregistrerQualite("whales:onchain", "Mouvements baleines on-chain", { sourceId: "whales:daemon", sourceEffective: "blockchain.info + Etherscan v2", observeLe: reponse.mouvements.reduce<number | null>((max, m) => max === null || m.t > max ? m.t : max, null), recupereLe, cadenceMs: PERIODE_POLL_MS, couverture: null, estime: true, acces: reponse.sante.clePresente ? "cle" : "public", statut: "partiel", raison: "Couverture exhaustive inconnue : BTC natif et USDT/USDC Ethereum seulement ; trous bornés exposés séparément." });
       setStatut("ok");
     };
     void charger();
@@ -190,6 +198,7 @@ function OngletFlux() {
   }, [seuilUsd, asset]);
 
   const stats = statsWhales(mouvements);
+  const entites = grouperParEntite(mouvements).slice(0, 5);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
@@ -226,6 +235,10 @@ function OngletFlux() {
               title="Dépôts − retraits sur la fenêtre affichée : positif = pression d'offre potentielle." />
             <TuileStat label="Plus gros transfert" valeur={formatUsd(stats.maxUsd)} title={`${stats.nb} mouvements affichés`} />
           </div>
+          <div className="flex flex-wrap items-center gap-2 text-[10px] text-text-dim">
+            <Badge ton="neutre">attribués {stats.connus}</Badge><Badge ton="warn">inconnus {stats.inconnus}</Badge>
+            {entites.map((e) => <span key={e.entite}>{e.entite} · {e.mouvements} · {formatUsd(e.usd)}</span>)}
+          </div>
 
           {mouvements.length === 0 ? (
             <Vide>Aucun mouvement ≥ {formatUsd(seuilUsd)} collecté sur la fenêtre (rétention 30 j).</Vide>
@@ -238,13 +251,17 @@ function OngletFlux() {
           )}
 
           {sante !== null && <SanteCollecteur sante={sante} />}
+          <QualiteMetrique qualite={{ sourceId: "whales:daemon", sourceEffective: "blockchain.info + Etherscan v2", observeLe: mouvements.reduce<number | null>((max, m) => max === null || m.t > max ? m.t : max, null), recupereLe: majTs, cadenceMs: PERIODE_POLL_MS, couverture: null, estime: true, acces: sante?.clePresente ? "cle" : "public", statut: "partiel", raison: "Couverture exhaustive inconnue ; actifs et trous de collecte explicités ci-dessous." }} />
+          {continuite !== null && <div className="text-[10px] text-text-dim">
+            BTC curseur {continuite.btc.curseur ?? "—"}, dernier succès {continuite.btc.dernierSucces ? new Date(continuite.btc.dernierSucces).toLocaleString("fr-FR") : "—"}, trous {continuite.btc.trous.length} · ETH curseur {continuite.eth.curseur ?? "—"}, dernier succès {continuite.eth.dernierSucces ? new Date(continuite.eth.dernierSucces).toLocaleString("fr-FR") : "—"}, trous {continuite.eth.trous.length}. {continuite.btc.finalite}
+          </div>}
         </>
       )}
 
       <NoteSource>
         Couverture v1 : BTC natif (blocs confirmés blockchain.info ~10 min, montant net estimé hors change)
         + USDT/USDC ERC-20 (Etherscan, clé requise, ~90 s) ≥ 1 M$. ETH natif et autres chaînes non couverts.
-        Étiquettes dépôt/retrait : liste curée de wallets exchange publics, non exhaustive.{" "}
+        Étiquettes : liste statique historique AXIOM ; provenance documentaire et date de vérification non conservées, confiance faible. Interne seulement si les deux extrémités ont la même entité connue. Aucun transfert BTC n’est affirmé comme vente ou change. Pagination 300 lignes, collecte et rattrapage bornés.{" "}
         <BadgeFiabilite niveau="estimation" label="estimation" title="Montants BTC nets heuristiques ; directions dépendantes d'une liste d'adresses curée." />
       </NoteSource>
     </div>

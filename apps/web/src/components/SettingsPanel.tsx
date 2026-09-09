@@ -27,6 +27,7 @@ import { finnhubKeyStore } from "../store/finnhub";
 import { etherscanKeyStore } from "../store/etherscan";
 import { coingeckoKeyStore } from "../store/coingecko";
 import { ccdataKeyStore } from "../store/ccdata";
+import { defillamaKeyStore } from "../store/defillamaKey";
 import { risqueStore } from "../store/risque";
 import { refSymbolStore } from "../store/refSymbol";
 import { fetchPairs } from "../data/pairs";
@@ -520,6 +521,9 @@ export function SettingsPanel() {
   const ccdataHasKey = useStore(ccdataKeyStore, (s) => s.hasKey);
   const ccdataSetKey = useStore(ccdataKeyStore, (s) => s.setKey);
   const ccdataClearKey = useStore(ccdataKeyStore, (s) => s.clearKey);
+  const defillamaHasKey = useStore(defillamaKeyStore, (s) => s.hasKey);
+  const defillamaSetKey = useStore(defillamaKeyStore, (s) => s.setKey);
+  const defillamaClearKey = useStore(defillamaKeyStore, (s) => s.clearKey);
 
   const panelRef = useRef<HTMLDivElement | null>(null);
 
@@ -692,6 +696,17 @@ export function SettingsPanel() {
               hasKey={cgHasKey}
               onSave={cgSetKey}
               onClear={cgClearKey}
+            />
+            <ApiKeyField
+              name="DefiLlama Pro"
+              purpose="Unlocks et historique des bridges. Abonnement payant requis ; AXIOM utilise seulement une clé personnelle déjà obtenue et n’effectue aucun achat."
+              domain="pro-api.llama.fi, via la route locale sécurisée /defillamapro"
+              signupUrl="https://defillama.com/pro"
+              signupLabel="Informations Pro"
+              placeholder="Clé DefiLlama Pro"
+              hasKey={defillamaHasKey}
+              onSave={defillamaSetKey}
+              onClear={defillamaClearKey}
             />
           </div>
 

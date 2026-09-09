@@ -49,6 +49,10 @@ export interface CoinTile {
   mcapUsd: number;
   /** Dernier prix (USD). */
   price: number;
+  /** Volume spot/agrégé 24 h fourni pour ce token, null si absent de l'ancien cache. */
+  volume24hUsd: number | null;
+  /** Horodatage d'observation CoinGecko de cette ligne, distinct du fetchedAt du cache. */
+  observeLe: number | null;
   /** Variation 24 h (%) — couleur de la tuile. */
   changePct24h: number;
   /** Variation 7 j (%) — sert SECT ; NULL si CoinGecko renvoie null (pièce trop
@@ -151,6 +155,8 @@ interface MarketRaw {
   /** Présents seulement avec `price_change_percentage=24h,7d,30d` dans la requête. */
   price_change_percentage_7d_in_currency?: unknown;
   price_change_percentage_30d_in_currency?: unknown;
+  total_volume?: unknown;
+  last_updated?: unknown;
 }
 
 /**
@@ -171,6 +177,8 @@ export function parseMarkets(json: unknown): CoinTile[] {
       name: typeof raw.name === "string" ? raw.name : symbol,
       mcapUsd,
       price: num(raw.current_price),
+      volume24hUsd: numOuNull(raw.total_volume),
+      observeLe: typeof raw.last_updated === "string" && Number.isFinite(Date.parse(raw.last_updated)) ? Date.parse(raw.last_updated) : null,
       changePct24h: num(raw.price_change_percentage_24h),
       changePct7j: numOuNull(raw.price_change_percentage_7d_in_currency),
       changePct30j: numOuNull(raw.price_change_percentage_30d_in_currency),
@@ -323,7 +331,7 @@ async function getJson(url: string, signal?: AbortSignal): Promise<unknown> {
 export async function fetchMarketOverview(signal?: AbortSignal): Promise<MarketOverview> {
   const cached = readCache<MarketOverview>(CACHE_KEY);
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
-    return { ...cached, stale: false };
+    return { ...cached, coins: cached.coins.map((coin) => ({ ...coin, volume24hUsd: coin.volume24hUsd ?? null, observeLe: coin.observeLe ?? null })), stale: false };
   }
 
   const [globalR, marketsR, categoriesR] = await Promise.allSettled([
@@ -356,8 +364,14 @@ export async function fetchMarketOverview(signal?: AbortSignal): Promise<MarketO
   // Échec des données essentielles : santé en erreur, repli gracieux sur le cache périmé.
   const reason = globalR.status === "rejected" ? globalR.reason : (marketsR as PromiseRejectedResult).reason;
   healthStore.getState().marquerErreur(HEALTH_SOURCE, reason instanceof Error ? reason.message : String(reason));
-  if (cached) return { ...cached, stale: true };
+  if (cached) return { ...cached, coins: cached.coins.map((coin) => ({ ...coin, volume24hUsd: coin.volume24hUsd ?? null, observeLe: coin.observeLe ?? null })), stale: true };
   throw reason instanceof Error ? reason : new Error(String(reason));
+}
+
+/** Dernier contexte marché déjà mis en cache, sans aucun appel réseau supplémentaire. */
+export function lireContexteMarcheCache(): { coins: CoinTile[]; fetchedAt: number } | null {
+  const cached = readCache<MarketOverview>(CACHE_KEY);
+  return cached ? { fetchedAt: cached.fetchedAt, coins: cached.coins.map((coin) => ({ ...coin, volume24hUsd: coin.volume24hUsd ?? null, observeLe: coin.observeLe ?? null })) } : null;
 }
 
 /**

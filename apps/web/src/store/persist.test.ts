@@ -537,6 +537,13 @@ describe("exporterSauvegarde — périmètre réel du fichier téléchargé", ()
     expect(dump["axiom.coingecko.demoApiKey"]).toBeUndefined();
     expect(Object.keys(dump).every((k) => k.startsWith("axiom:"))).toBe(true);
   });
+  it("n'embarque jamais la clé DefiLlama Pro hors préfixe", async () => {
+    localStorage.setItem("axiom.defillama.proApiKey", "SECRET-DEFILLAMA");
+    localStorage.setItem(CHART_KEY, "{}");
+    const dump = await capturerExport();
+    expect(JSON.stringify(dump)).not.toContain("SECRET-DEFILLAMA");
+    expect(dump["axiom.defillama.proApiKey"]).toBeUndefined();
+  });
 });
 
 describe("decisionsReconcile — arbitrage local ↔ daemon (last-write-wins)", () => {

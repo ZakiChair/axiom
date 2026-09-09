@@ -30,8 +30,13 @@ export interface MouvementWhale {
   vers: string;
   deLabel: string | null;
   versLabel: string | null;
+  deAttribution?: AttributionAdresse | null;
+  versAttribution?: AttributionAdresse | null;
   direction: DirectionWhale;
 }
+
+export interface AttributionAdresse { entite: string; source: string; verifieLe: string | null; confiance: "faible" | "moyenne" | "forte" }
+export interface ContinuiteChaine { curseur: number | null; dernierSucces: number | null; trous: Array<{ de: number; a: number; raison: string }>; finalite: string }
 
 /** Santé du collecteur daemon (affichée en pied de fenêtre — fraîcheur honnête). */
 export interface SanteWhales {
@@ -52,6 +57,7 @@ export interface SanteWhales {
 export interface ReponseWhales {
   mouvements: MouvementWhale[];
   sante: SanteWhales;
+  continuite: { btc: ContinuiteChaine; eth: ContinuiteChaine } | null;
 }
 
 // ─────────────────────────── Mapping PUR (testé) ───────────────────────────
@@ -103,9 +109,12 @@ export function mapperReponseWhales(brut: unknown): ReponseWhales | null {
       vers: m.vers,
       deLabel: typeof m.deLabel === "string" ? m.deLabel : null,
       versLabel: typeof m.versLabel === "string" ? m.versLabel : null,
+      deAttribution: attributionValide(m.deAttribution) ? m.deAttribution : null,
+      versAttribution: attributionValide(m.versAttribution) ? m.versAttribution : null,
       direction: m.direction,
     });
   }
+  const c = o.continuite as Record<string, unknown> | undefined;
   return {
     mouvements,
     sante: {
@@ -118,7 +127,20 @@ export function mapperReponseWhales(brut: unknown): ReponseWhales | null {
       erreurEth: typeof s.erreurEth === "string" ? s.erreurEth : null,
       clePresente: s.clePresente === true,
     },
+    continuite: c && continuiteValide(c.btc) && continuiteValide(c.eth) ? { btc: c.btc, eth: c.eth } : null,
   };
+}
+
+function attributionValide(v: unknown): v is AttributionAdresse {
+  if (!v || typeof v !== "object") return false;
+  const a = v as Record<string, unknown>;
+  return typeof a.entite === "string" && typeof a.source === "string" && (a.verifieLe === null || typeof a.verifieLe === "string") && ["faible", "moyenne", "forte"].includes(String(a.confiance));
+}
+
+function continuiteValide(v: unknown): v is ContinuiteChaine {
+  if (!v || typeof v !== "object") return false;
+  const c = v as Record<string, unknown>;
+  return (c.curseur === null || typeof c.curseur === "number") && (c.dernierSucces === null || typeof c.dernierSucces === "number") && Array.isArray(c.trous) && typeof c.finalite === "string";
 }
 
 // ─────────────────────────── Positions Hyperliquid ───────────────────────────
@@ -210,6 +232,8 @@ export interface StatsWhales {
   totalUsd: number;
   nb: number;
   maxUsd: number;
+  connus: number;
+  inconnus: number;
 }
 
 /** Agrège dépôts/retraits/total/max d'un lot de mouvements. PURE. */
@@ -218,11 +242,13 @@ export function statsWhales(mouvements: readonly MouvementWhale[]): StatsWhales 
   let retraitUsd = 0;
   let totalUsd = 0;
   let maxUsd = 0;
+  let connus = 0;
   for (const m of mouvements) {
     if (m.direction === "depot") depotUsd += m.usd;
     else if (m.direction === "retrait") retraitUsd += m.usd;
     totalUsd += m.usd;
     if (m.usd > maxUsd) maxUsd = m.usd;
+    if (m.deLabel !== null || m.versLabel !== null) connus += 1;
   }
   return {
     depotUsd,
@@ -231,7 +257,22 @@ export function statsWhales(mouvements: readonly MouvementWhale[]): StatsWhales 
     totalUsd,
     nb: mouvements.length,
     maxUsd,
+    connus,
+    inconnus: mouvements.length - connus,
   };
+}
+
+export function grouperParEntite(mouvements: readonly MouvementWhale[]): Array<{ entite: string; usd: number; mouvements: number }> {
+  const map = new Map<string, { usd: number; ids: Set<string> }>();
+  for (const m of mouvements) {
+    const entites = new Set([m.deAttribution?.entite ?? m.deLabel?.replace(/\s*\([^)]*\)$/, ""), m.versAttribution?.entite ?? m.versLabel?.replace(/\s*\([^)]*\)$/, "")].filter((x): x is string => Boolean(x)));
+    for (const entite of entites) {
+      const current = map.get(entite) ?? { usd: 0, ids: new Set<string>() };
+      if (!current.ids.has(m.id)) { current.ids.add(m.id); current.usd += m.usd; }
+      map.set(entite, current);
+    }
+  }
+  return [...map].map(([entite, v]) => ({ entite, usd: v.usd, mouvements: v.ids.size })).sort((a, b) => b.usd - a.usd);
 }
 
 /**

@@ -79,6 +79,14 @@
       "destination": "/api/proxy?__axiom_route=ccdataapi&__axiom_path=:path/"
     },
     {
+      "source": "/defillamapro/:path*",
+      "destination": "/api/proxy?__axiom_route=defillamapro&__axiom_path=:path"
+    },
+    {
+      "source": "/defillamapro/:path*/",
+      "destination": "/api/proxy?__axiom_route=defillamapro&__axiom_path=:path/"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

@@ -54,6 +54,7 @@ describe("proxy Vercel", () => {
       "/bgapi/:path*",
       "/ethscanapi/:path*",
       "/ccdataapi/:path*",
+      "/defillamapro/:path*",
     ];
     const fallbackIndex = config.rewrites.findIndex((rewrite) => rewrite.destination === "/index.html");
     const proxyRewrites = config.rewrites.slice(0, fallbackIndex);
@@ -117,6 +118,16 @@ describe("proxy Vercel", () => {
     ] as const) {
       expect(planProxyRequest(url(route, "v1/data"), "GET", new Headers()).target.hostname).toBe(host);
     }
+  });
+
+  test("DefiLlama Pro accepte uniquement les trois chemins, reste privé et ne relaie pas la clé en en-tête", () => {
+    const headers = new Headers({ "x-defillama-pro-key": "CLESECRETE" });
+    const plan = planProxyRequest(url("defillamapro", "bridgevolume/Ethereum", "id=2"), "GET", headers);
+    expect(plan.target.toString()).toBe("https://pro-api.llama.fi/CLESECRETE/bridges/bridgevolume/Ethereum?id=2");
+    expect(plan.upstreamHeaders.has("x-defillama-pro-key")).toBe(false);
+    expect(plan.cacheControl).toBe("private, no-store");
+    expect(plan.maxRedirects).toBe(0);
+    expect(policyError(() => planProxyRequest(url("defillamapro", "api/entities"), "GET", headers)).status).toBe(404);
   });
 
   test("refuse traversée et encodages imbriqués du chemin", () => {

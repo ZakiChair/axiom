@@ -22,6 +22,7 @@ import { cleCache, ecrireCache, lireCache, ttlMsPourChemin } from "./cache";
 import { entetesCors } from "./cors";
 import type { ProxyKeys } from "./env";
 import type { Routeur } from "./router";
+import { DEFILLAMA_PRO_HEADER, DEFILLAMA_PRO_HOST, cheminDefillamaAmont, cleDefillamaValide, redigerSecretDefillama } from "../../../shared/defillama-proxy";
 
 /**
  * Ajoute `<paramName>=<key>` à la query d'un chemin proxifié UNIQUEMENT si la
@@ -844,6 +845,30 @@ export async function traiterCcData(
   });
 }
 
+export async function traiterDefillamaPro(req: Request, url: URL, options: OptionsExtapi = {}): Promise<Response> {
+  const headers = { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store", ...ENTETES_SECURITE_EXTAPI, ...entetesCors(req) };
+  if (requeteNavigationExtapiInterdite(req)) return new Response(JSON.stringify({ erreur: "navigation Pro interdite" }), { status: 403, headers });
+  if (req.method !== "GET") return new Response(JSON.stringify({ erreur: "méthode Pro non autorisée" }), { status: 405, headers: { ...headers, allow: "GET" } });
+  const key = req.headers.get(DEFILLAMA_PRO_HEADER);
+  if (!cleDefillamaValide(key)) return new Response(JSON.stringify({ erreur: "clé DefiLlama Pro absente ou invalide" }), { status: 401, headers });
+  const path = cheminDefillamaAmont(url.pathname, url.search);
+  if (path === null) return new Response(JSON.stringify({ erreur: "chemin DefiLlama Pro refusé" }), { status: 404, headers });
+  try {
+    const upstream = await recupererExtapiSecurise(`https://${DEFILLAMA_PRO_HOST}/${encodeURIComponent(key)}${path}`, {
+      ...options, hotesAutorises: new Set([DEFILLAMA_PRO_HOST]), maxRedirections: 0,
+      entetesAmont: { accept: "application/json" },
+    });
+    if (upstream.status < 200 || upstream.status >= 300) {
+      const erreur = upstream.status === 401 ? "clé DefiLlama Pro refusée" : upstream.status === 402 || upstream.status === 403 ? "abonnement DefiLlama Pro requis ou accès refusé" : upstream.status === 429 ? "quota DefiLlama Pro atteint" : "amont DefiLlama Pro indisponible";
+      return new Response(JSON.stringify({ erreur }), { status: upstream.status, headers });
+    }
+    return new Response(upstream.corps, { status: upstream.status, headers: { ...headers, "content-type": upstream.contentType } });
+  } catch (error) {
+    const detail = redigerSecretDefillama(error instanceof Error ? error.message : error, key);
+    return new Response(JSON.stringify({ erreur: "amont DefiLlama Pro injoignable", detail }), { status: 502, headers });
+  }
+}
+
 /** TTL cache /extapi par défaut (RSS et calendriers sont lents). */
 const EXTAPI_TTL_DEFAUT_MS = 120_000;
 /** TTL cache réduit pour les dérivés Binance (données quasi temps réel). */
@@ -1010,6 +1035,7 @@ export function enregistrerProxy(routeur: Routeur, cles: ProxyKeys): void {
   // /ccdataapi : gestionnaire DÉDIÉ durci (validation Apikey + gardes /extapi), PAS une
   // RouteProxy générique — traiterCcData recalcule cible, réécriture et validation lui-même.
   routeur.enregistrerPrefixe("/ccdataapi", (req, url) => traiterCcData(req, url));
+  routeur.enregistrerPrefixe("/defillamapro", (req, url) => traiterDefillamaPro(req, url));
   // Proxy générique /extapi (Phase 3) : hôtes whitelistés, GET only, cache TTL.
   routeur.enregistrerPrefixe("/extapi", (req, url) => traiterExtapi(req, url));
 }

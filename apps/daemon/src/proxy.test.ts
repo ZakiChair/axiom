@@ -10,6 +10,7 @@ import {
   recupererExtapiSecurise,
   requeteNavigationExtapiInterdite,
   traiterCcData,
+  traiterDefillamaPro,
   traiterExtapi,
   traiterProxy,
   ttlMsExtapi,
@@ -214,6 +215,40 @@ describe("traiterCcData — proxy authentifié durci", () => {
     expect((await traiterCcData(navigation, new URL(navigation.url), options)).status).toBe(403);
     expect((await traiterCcData(invalide, new URL(invalide.url), options)).status).toBe(401);
     expect(appels).toBe(0);
+  });
+});
+
+describe("traiterDefillamaPro — credential isolé et allowlist exacte", () => {
+  test("construit le chemin fournisseur seulement après validation et impose no-store", async () => {
+    let cible = "";
+    const req = new Request("http://localhost:8787/defillamapro/emission/hyperliquid", { headers: { "x-defillama-pro-key": "CLESECRETE" } });
+    const response = await traiterDefillamaPro(req, new URL(req.url), {
+      fetchImpl: (async (url: RequestInfo | URL) => { cible = String(url); return new Response("{}", { headers: { "content-type": "application/json" } }); }) as typeof fetch,
+      resoudreHote: async () => ["104.18.7.88"],
+    });
+    expect(cible).toBe("https://pro-api.llama.fi/CLESECRETE/api/emission/hyperliquid");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  test("refuse hors allowlist et expurge la clé de toute erreur", async () => {
+    const bad = new Request("http://localhost:8787/defillamapro/api/entities", { headers: { "x-defillama-pro-key": "CLESECRETE" } });
+    expect((await traiterDefillamaPro(bad, new URL(bad.url))).status).toBe(404);
+    const req = new Request("http://localhost:8787/defillamapro/emissions", { headers: { "x-defillama-pro-key": "CLESECRETE" } });
+    const response = await traiterDefillamaPro(req, new URL(req.url), {
+      fetchImpl: (async () => { throw new Error("échec https://pro-api.llama.fi/CLESECRETE/api/emissions"); }) as unknown as typeof fetch,
+      resoudreHote: async () => ["104.18.7.88"],
+    });
+    expect(await response.text()).not.toContain("CLESECRETE");
+  });
+
+  test("ne relaie pas le corps d'erreur amont susceptible de contenir la clé", async () => {
+    const req = new Request("http://localhost:8787/defillamapro/emissions", { headers: { "x-defillama-pro-key": "CLESECRETE" } });
+    const response = await traiterDefillamaPro(req, new URL(req.url), {
+      fetchImpl: (async () => new Response('{"error":"https://pro-api.llama.fi/CLESECRETE/api/emissions"}', { status: 401 })) as unknown as typeof fetch,
+      resoudreHote: async () => ["104.18.7.88"],
+    });
+    expect(response.status).toBe(401);
+    expect(await response.text()).not.toContain("CLESECRETE");
   });
 });
 

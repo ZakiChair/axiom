@@ -34,6 +34,7 @@ import {
   NoteSource,
   Vide,
 } from "./ui";
+import { DefillamaProPanel } from "./DefillamaProPanel";
 
 /** Cadence de rafraîchissement (le cache 5 min partagé absorbe les appels réseau). */
 const REFRESH_MS = 5 * 60_000;
@@ -110,6 +111,7 @@ export function SectWindow() {
   const [groupeSel, setGroupeSel] = useState<string | null>(null);
   const [triGroupes, setTriGroupes] = useState<TriTable | null>({ colonne: "cap", dir: -1 });
   const [triMembres, setTriMembres] = useState<TriTable | null>({ colonne: "cap", dir: -1 });
+  const [proOuvert, setProOuvert] = useState(false);
 
   // — Chargement via le pipeline overview (cache 5 min, repli cache périmé) —
   useEffect(() => {
@@ -256,15 +258,16 @@ export function SectWindow() {
           </span>
         }
         actions={
-          <BoutonRafraichir
+          <div className="flex items-center gap-2"><Bouton onClick={() => setProOuvert((v) => !v)}>Unlocks / bridges</Bouton><BoutonRafraichir
             onClick={() => setTick((t) => t + 1)}
             disabled={loading}
             title="Rafraîchir (cache CoinGecko 5 min partagé avec MAP)"
-          />
+          /></div>
         }
       />
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
+        {proOuvert && <DefillamaProPanel initialMode="bridges" />}
         {error !== null && <ErreurBloc>{error}</ErreurBloc>}
 
         {overview === null ? (

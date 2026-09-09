@@ -96,6 +96,8 @@ import {
 import { useDomaineZoom } from "../hooks/useDomaineZoom";
 import { CohortesBtc } from "./onchain/CohortesBtc";
 import { HistoriqueEtf } from "./onchain/HistoriqueEtf";
+import { FluxCapitaux } from "./onchain/FluxCapitaux";
+import { EconomieChaines } from "./onchain/EconomieChaines";
 import { FilesStakingEth } from "./onchain/FilesStakingEth";
 
 const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
@@ -1095,6 +1097,9 @@ export function OnchainWindow() {
             />
           </div>
         </section>
+
+        <FluxCapitaux />
+        <EconomieChaines />
       </div>
     </>
   );

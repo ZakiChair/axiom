@@ -72,6 +72,7 @@ import {
 } from "./brief/commun";
 import { SectionChapeau } from "./brief/SectionChapeau";
 import { SectionRegime } from "./brief/SectionRegime";
+import { SectionFluxCapitaux } from "./brief/SectionFluxCapitaux";
 import { SectionBreadth } from "./brief/SectionBreadth";
 import { SectionSession } from "./brief/SectionSession";
 import { SectionWatchlist } from "./brief/SectionWatchlist";
@@ -398,6 +399,7 @@ export function BriefWindow() {
 
         {/* 3) Flux ETF de la veille (SoSoValue). */}
         <SectionEtf etf={etf} noteFraicheur={noteFraicheur} />
+        <SectionFluxCapitaux />
 
         {/* COT (semaine) — cache legacy SEUL : 3 instruments au |Δ hebdo net| max.
             Absente si le cache COT est vide (aucun réseau déclenché ici). */}

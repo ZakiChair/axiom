@@ -569,6 +569,56 @@ describe("whale-flux", () => {
   });
 });
 
+describe("flux-capitaux-seuil", () => {
+  const condition: Condition = {
+    type: "flux-capitaux-seuil",
+    metrique: "stablecoins-variation-7j",
+    comparateur: ">=",
+    valeur: 2,
+  };
+  const maintenant = Date.UTC(2026, 8, 9, 12);
+  const instantane = (valeur: number, observeLe = maintenant - 86_400_000) => ({
+    metrique: "stablecoins-variation-7j" as const,
+    valeur,
+    unite: "%",
+    observeLe,
+    recupereLe: maintenant,
+    source: "DefiLlama",
+    cadenceMs: 86_400_000,
+    ageMaxMs: 3 * 86_400_000,
+    statut: "frais" as const,
+  });
+
+  it("calibre puis déclenche et journalise la source, l'unité et la date d'observation", () => {
+    const d0 = def(condition);
+    const calibre = evaluerAlertes([d0], { maintenant, dernierPrix: 0, fluxCapitaux: instantane(1) });
+    const d1 = calibre.defs[0]!;
+    const resultat = evaluerAlertes([d1], { maintenant: maintenant + 1, dernierPrix: 0, fluxCapitaux: instantane(3) });
+    expect(resultat.declenchements).toEqual([{
+      alertId: d0.id,
+      ts: maintenant + 1,
+      valeur: 3,
+      message: "Variation stablecoins 7 j ≥ 2 %",
+      instantane: { unite: "%", observeLe: maintenant - 86_400_000, source: "DefiLlama" },
+    }]);
+  });
+
+  it("ignore un instantané absent, périmé, futur ou de qualité insuffisante", () => {
+    const alerte = def(condition, { arme: true });
+    const contextes: ContexteAlerte[] = [
+      { maintenant, dernierPrix: 0 },
+      { maintenant, dernierPrix: 0, fluxCapitaux: instantane(3, maintenant - 4 * 86_400_000) },
+      { maintenant, dernierPrix: 0, fluxCapitaux: instantane(3, maintenant + 1) },
+      { maintenant, dernierPrix: 0, fluxCapitaux: { ...instantane(3), statut: "partiel" } },
+    ];
+    for (const contexte of contextes) {
+      const resultat = evaluerAlertes([alerte], contexte);
+      expect(resultat.modifie).toBe(false);
+      expect(resultat.defs[0]).toBe(alerte);
+    }
+  });
+});
+
 describe("filtrage du lot", () => {
   it("laisse les defs inactives inchangées (même référence)", () => {
     const inactive = def({ type: "prix-croise", niveau: 100, sens: "hausse" }, { actif: false });
@@ -582,6 +632,7 @@ describe("estFrontOnly", () => {
   it("repère CVD et régime, y compris en sous-condition", () => {
     expect(estFrontOnly(def({ type: "prix-croise", niveau: 1, sens: "hausse" }))).toBe(false);
     expect(estFrontOnly(def({ type: "cvd-spot-perp-div", kind: "les-deux" }))).toBe(true);
+    expect(estFrontOnly(def({ type: "flux-capitaux-seuil", metrique: "exchange-netflow", comparateur: "<", valeur: 0 }))).toBe(true);
     expect(
       estFrontOnly(
         def({

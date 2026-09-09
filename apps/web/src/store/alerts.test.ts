@@ -180,6 +180,35 @@ describe("lireInitial — hydratation par élément (un item corrompu est écart
     expect(etat.defs.map((d) => d.id)).toEqual(["ok"]);
     expect(etat.journal).toHaveLength(1);
   });
+
+  it("valide strictement métrique, comparateur et seuil d'une alerte flux importée", () => {
+    localStorage.setItem(
+      "axiom:alerts:v1",
+      JSON.stringify({
+        defs: [
+          { id: "ok", symbol: "BTCUSDT", source: "binance", condition: { type: "flux-capitaux-seuil", metrique: "exchange-netflow", comparateur: "<", valeur: -1000 }, actif: true, declenchements: [] },
+          { id: "m", symbol: "BTCUSDT", source: "binance", condition: { type: "flux-capitaux-seuil", metrique: "inconnue", comparateur: "<", valeur: 1 }, actif: true, declenchements: [] },
+          { id: "c", symbol: "BTCUSDT", source: "binance", condition: { type: "flux-capitaux-seuil", metrique: "exchange-netflow", comparateur: "=", valeur: 1 }, actif: true, declenchements: [] },
+          { id: "n", symbol: "BTCUSDT", source: "binance", condition: { type: "flux-capitaux-seuil", metrique: "exchange-netflow", comparateur: ">", valeur: "NaN" }, actif: true, declenchements: [] },
+        ],
+        journal: [],
+      }),
+    );
+    expect(lireInitial().defs.map((d) => d.id)).toEqual(["ok"]);
+  });
+
+  it("écarte les instantanés de journal dont date, unité ou source feraient casser le rendu", () => {
+    localStorage.setItem("axiom:alerts:v1", JSON.stringify({
+      defs: [],
+      journal: [
+        { alertId: "ok", ts: 1, valeur: 2, message: "m", instantane: { unite: "%", observeLe: 1, source: "DefiLlama" } },
+        { alertId: "date", ts: 1, valeur: 2, message: "m", instantane: { unite: "%", observeLe: 1e100, source: "DefiLlama" } },
+        { alertId: "unite", ts: 1, valeur: 2, message: "m", instantane: { unite: "", observeLe: 1, source: "DefiLlama" } },
+        { alertId: "source", ts: 1, valeur: 2, message: "m", instantane: { unite: "%", observeLe: 1, source: "" } },
+      ],
+    }));
+    expect(lireInitial().journal.map((d) => d.alertId)).toEqual(["ok"]);
+  });
 });
 
 describe("timeframe de la définition (conditions de bougie)", () => {

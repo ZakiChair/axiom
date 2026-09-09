@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useStore } from "zustand";
-import { fetchEtfHistory, resumerEtfHistory, type HistoriqueEtf as DonneeHistoriqueEtf } from "../../data/onchain/etfHistory";
+import { fetchEtfHistory, historiqueRatiosEtf, resumerEtfHistory, type HistoriqueEtf as DonneeHistoriqueEtf } from "../../data/onchain/etfHistory";
 import type { ActifEtf } from "../../data/onchain/etf";
 import type { BgResultat } from "../../data/onchain/bgeometrics";
 import { getSoSoValueKey, soSoValueKeyStore } from "../../store/sosovalue";
@@ -22,14 +22,18 @@ export function VueHistoriqueEtf({ resultat, repliBtc }: { resultat: DonneeHisto
     </div>;
   }
   const r = resumerEtfHistory(resultat.points); const dernier = resultat.points.at(-1)!;
+  const ratios = historiqueRatiosEtf(resultat.points);
   return <div className="mt-2 space-y-2">
     <div className="grid grid-cols-2 gap-2">
       {[{ n: 5, cumul: r.cumul5 }, { n: 20, cumul: r.cumul20 }].map(({ n, cumul }) => <TuileStat key={n} label={`Cumul ${n} séances`}
         valeur={formatUsd(cumul ?? undefined)} pied={cumul === null ? "Historique insuffisant ou séance sans flux publié" : undefined} />)}
       <TuileStat label="Encours du jour publié" valeur={formatUsd(dernier.encoursUsd ?? undefined)} />
       <TuileStat label="Flux / encours du jour" valeur={r.ratioJourPct === null ? "—" : `${r.ratioJourPct.toFixed(2)} %`} />
+      <TuileStat label="Percentile du ratio" valeur={ratios.referentiel ? `p${Math.round(ratios.referentiel.percentile)}` : "—"}
+        pied={ratios.referentiel ? `${ratios.referentiel.n} séances · ${Math.round(ratios.referentiel.profondeurJours)} j` : "Réf. en construction (minimum 20 ratios exacts)"} />
     </div>
     <CourbeOnchain points={resultat.points.map(p => ({ time: p.time, value: p.fluxUsd }))} label="Flux nets ETF publiés" unite="USD" zero ecartMaxJours={4} />
+    <CourbeOnchain points={ratios.points} label="Ratio flux / encours par séance" unite="% AUM/j" zero ecartMaxJours={4} />
     <ProvenanceOnchain source="SoSoValue" sourceId="sosovalue:historique" observation={dernier.time} recuperation={resultat.ts} perime={resultat.perime} />
     {resultat.raison && <NoteSource>{resultat.raison}</NoteSource>}
     <NoteSource>{r.observations} séances reçues, dernier mois disponible selon l'accès API. Week-ends et jours fériés exclus ;

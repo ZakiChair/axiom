@@ -40,6 +40,7 @@ interface EvalCondition {
   arme: boolean | undefined;
   /** Valeur ayant servi à la décision (rapportée dans le déclenchement). */
   valeur: number;
+  instantane?: Declenchement["instantane"];
 }
 
 /**
@@ -63,6 +64,7 @@ export function evaluerAlertes(defs: AlertDef[], ctx: ContexteAlerte): ResultatE
         ts: ctx.maintenant,
         valeur: ev.valeur,
         message: def.message ?? decrireCondition(def.condition),
+        ...(ev.instantane ? { instantane: ev.instantane } : {}),
       });
     }
     const declenchementsMaj = ev.fire
@@ -102,6 +104,8 @@ function evaluerUne(def: AlertDef, ctx: ContexteAlerte): EvalCondition | null {
       return evalRegimeSeuil(def, c, ctx);
     case "whale-flux":
       return evalWhaleFlux(def, c, ctx);
+    case "flux-capitaux-seuil":
+      return evalFluxCapitaux(def, c, ctx);
     case "composite":
       return evalComposite(def, c, ctx);
   }
@@ -127,14 +131,14 @@ export function typesDeDef(def: AlertDef): ReadonlySet<string> {
 export function validerComposite(conditions: readonly Condition[]): conditions is ConditionSimple[] {
   if (conditions.length < 2 || conditions.length > 4) return false;
   for (const c of conditions) {
-    if (c.type === "composite" || c.type === "whale-flux") return false;
+    if (c.type === "composite" || c.type === "whale-flux" || c.type === "flux-capitaux-seuil") return false;
     if (c.type === "prix-croise" && c.sens === "les-deux") return false;
   }
   return true;
 }
 
 /** Types que le daemon n'évalue pas (pipeline orderflow / score de régime). */
-const TYPES_FRONT_ONLY = new Set(["cvd-spot-perp-div", "regime-seuil"]);
+const TYPES_FRONT_ONLY = new Set(["cvd-spot-perp-div", "regime-seuil", "flux-capitaux-seuil"]);
 
 /**
  * true si la def (atomique ou composite) porte CVD spot/perp ou un seuil de régime :
@@ -244,6 +248,8 @@ function etatCondition(
       }
       return { satisfaite: max >= c.seuilUsd, valeur: max };
     }
+    case "flux-capitaux-seuil":
+      return null;
     case "composite":
       return null;
   }
@@ -398,6 +404,27 @@ function evalWhaleFlux(
   return etatOuNull(def, etatCondition(c, ctx));
 }
 
+function evalFluxCapitaux(
+  def: AlertDef,
+  c: Extract<Condition, { type: "flux-capitaux-seuil" }>,
+  ctx: ContexteAlerte,
+): EvalCondition | null {
+  const instantane = ctx.fluxCapitaux;
+  if (!instantane || instantane.metrique !== c.metrique || instantane.statut !== "frais") return null;
+  if (!Number.isFinite(instantane.valeur) || !Number.isFinite(instantane.observeLe) ||
+    !Number.isFinite(instantane.recupereLe) || !Number.isFinite(instantane.cadenceMs) ||
+    !Number.isFinite(instantane.ageMaxMs) || instantane.cadenceMs <= 0 || instantane.ageMaxMs <= 0) return null;
+  if (instantane.observeLe > ctx.maintenant || instantane.recupereLe > ctx.maintenant ||
+    ctx.maintenant - instantane.observeLe > instantane.ageMaxMs) return null;
+  const r = frontArme(def.arme, comparer(instantane.valeur, c.comparateur, c.valeur));
+  return {
+    fire: r.fire,
+    arme: r.arme,
+    valeur: instantane.valeur,
+    instantane: { unite: instantane.unite, observeLe: instantane.observeLe, source: instantane.source },
+  };
+}
+
 /**
  * Composite ET : `satisfaite = ∧ etatCondition(cᵢ)`. Forme invalide (n hors [2,4],
  * imbrication, `whale-flux`, `prix-croise les-deux`) ou UNE sous-condition non
@@ -415,7 +442,7 @@ function evalComposite(
   for (const sc of sous) {
     // Garde runtime (hydratation JSON) : ConditionSimple exclut ces types à la compilation.
     const t = (sc as Condition).type;
-    if (t === "composite" || t === "whale-flux") return null;
+    if (t === "composite" || t === "whale-flux" || t === "flux-capitaux-seuil") return null;
     if (sc.type === "prix-croise" && sc.sens === "les-deux") return null;
     const etat = etatCondition(sc, ctx);
     if (etat === null) return null;

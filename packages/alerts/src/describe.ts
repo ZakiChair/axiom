@@ -95,6 +95,20 @@ export function decrireCondition(condition: Condition): string {
             : "toutes directions";
       return `Baleine ≥ ${formaterMontant(seuilUsd)} $ (${dir})`;
     }
+    case "flux-capitaux-seuil": {
+      const libelles = {
+        "etf-btc-ratio": ["ETF BTC flux / encours séance", "% AUM/j"],
+        "etf-eth-ratio": ["ETF ETH flux / encours séance", "% AUM/j"],
+        "etf-sol-ratio": ["ETF SOL flux / encours séance", "% AUM/j"],
+        "stablecoins-variation-7j": ["Variation stablecoins 7 j", "%"],
+        "realized-cap-variation-30j": ["Capitalisation réalisée BTC 30 j", "%"],
+        "realized-cap-variation-90j": ["Capitalisation réalisée BTC 90 j", "%"],
+        "exchange-netflow": ["Flux net exchanges BTC", "BTC/j"],
+      } as const;
+      const [libelle, unite] = libelles[condition.metrique];
+      const op = condition.comparateur === "<=" ? "≤" : condition.comparateur === ">=" ? "≥" : condition.comparateur;
+      return `${libelle} ${op} ${condition.valeur} ${unite}`;
+    }
     case "composite":
       return condition.conditions.map(decrireCondition).join(" ET ");
   }

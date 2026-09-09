@@ -128,6 +128,15 @@ describe("decrireCondition", () => {
     );
   });
 
+  it("décrit une métrique lente avec période, seuil et unité", () => {
+    expect(decrireCondition({
+      type: "flux-capitaux-seuil",
+      metrique: "etf-btc-ratio",
+      comparateur: "<=",
+      valeur: -0.5,
+    })).toBe("ETF BTC flux / encours séance ≤ -0.5 % AUM/j");
+  });
+
   it("composite joint par ET", () => {
     expect(
       decrireCondition({

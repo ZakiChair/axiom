@@ -40,7 +40,7 @@
  * lot D3) ET `liq-cascade` (tick 10 s sur sa table `liquidations` ingérée Bybit+OKX,
  * tous les symboles d'alerte — ingestion d'un nouveau symbole ≤60 s). Restent FRONT-ONLY
  * (dormants côté daemon) : CVD spot/perp-div (pas de pipeline orderflow), `regime-seuil`
- * (score non calculé en v1) et les alertes de preset.
+ * (score non calculé en v1), `flux-capitaux-seuil` (loader commun local) et les alertes de preset.
  *
  * Un déclenchement → journal du store + notification système (Notification API) + bip
  * discret (WebAudio, aucun fichier binaire). AUCUNE donnée haute fréquence ne transite
@@ -66,6 +66,8 @@ import { histFunding } from "../data/referentiels";
 import { executerScreener } from "../data/screenerRun";
 import { SCREENER_POSITION_CAP } from "../data/screener";
 import { extUrl } from "../data/extapi";
+import { AGE_MAX_FLUX_MS } from "../data/onchain/fluxCapitaux";
+import { fluxCapitauxStore, garderFluxCapitauxPourAlertes } from "../store/fluxCapitaux";
 
 /** Types de condition évalués sur la clôture de bougie (nécessitent les bougies). */
 const TYPES_BOUGIE = new Set(["variation-pct", "indicateur-seuil", "indicateur-croisement"]);
@@ -99,6 +101,9 @@ function appliquerResultat(lot: AlertDef[], ctx: ContexteAlerte): void {
   const store = alertsStore.getState();
   store.appliquerMisesAJour(res.defs); // fusion par id (n'écrase pas les defs hors lot)
   for (const d of res.declenchements) {
+    // Une autre subscription synchrone peut supprimer ou désactiver la définition
+    // pendant l'application des états. Ne pas notifier un ancien snapshot de defs.
+    if (!alertsStore.getState().defs.some((courante) => courante.id === d.alertId && courante.actif)) continue;
     store.ajouterJournal(d);
     notifier(d);
   }
@@ -507,6 +512,64 @@ function creerRuntime(): Unsubscribe {
 
   const unsubRegime = regimeStore.subscribe(evaluerRegime);
 
+  // ── Flux de capitaux lents : store commun CHAIN/BRIEF/STBL ────────────────
+  // Le gestionnaire conserve son poll horaire même si tous les panneaux sont fermés,
+  // tant qu'une définition active en dépend. Le moteur revalide âge et qualité.
+  let evaluationFluxEnCours = false;
+  let relancerEvaluationFlux = false;
+  const evaluerFluxCapitaux = (): void => {
+    if (evaluationFluxEnCours) {
+      relancerEvaluationFlux = true;
+      return;
+    }
+    evaluationFluxEnCours = true;
+    try {
+      do {
+        relancerEvaluationFlux = false;
+        const donnees = fluxCapitauxStore.getState().donnees;
+        if (!donnees) break;
+        const defsAvantPasse = alertsStore.getState().defs;
+        for (const metrique of donnees.metriques) {
+          if (metrique.valeur === null || !Number.isFinite(metrique.valeur) || !metrique.qualite ||
+            metrique.observeLe === null || metrique.qualite.recupereLe === null ||
+            metrique.qualite.cadenceMs === null) continue;
+          // Relire à chaque métrique : une subscription synchrone peut supprimer,
+          // désactiver ou ajouter une définition pendant l'application précédente.
+          const lot = alertsStore.getState().defs.filter((d) => d.actif && d.condition.type === "flux-capitaux-seuil" && d.condition.metrique === metrique.id);
+          if (lot.length === 0) continue;
+          const condition = lot[0]!.condition;
+          if (condition.type !== "flux-capitaux-seuil") continue;
+          appliquerResultat(lot, {
+            maintenant: Date.now(),
+            dernierPrix: 0,
+            fluxCapitaux: {
+              metrique: condition.metrique,
+              valeur: metrique.valeur,
+              unite: metrique.unite,
+              observeLe: metrique.observeLe,
+              recupereLe: metrique.qualite.recupereLe,
+              source: metrique.qualite.sourceEffective,
+              cadenceMs: metrique.qualite.cadenceMs,
+              ageMaxMs: AGE_MAX_FLUX_MS,
+              statut: metrique.qualite.statut,
+            },
+          });
+        }
+        if (alertsStore.getState().defs !== defsAvantPasse) relancerEvaluationFlux = true;
+      } while (relancerEvaluationFlux);
+    } finally {
+      evaluationFluxEnCours = false;
+    }
+  };
+  const resyncFluxCapitaux = (): void => {
+    const active = alertsStore.getState().defs.some((d) => d.actif && d.condition.type === "flux-capitaux-seuil");
+    garderFluxCapitauxPourAlertes(active);
+    if (active) evaluerFluxCapitaux();
+  };
+  const unsubFluxCapitaux = fluxCapitauxStore.subscribe((state, precedent) => {
+    if (state.donnees !== precedent.donnees) evaluerFluxCapitaux();
+  });
+
   // ── Alertes de PRESET : scan périodique + diff d'entrée dans l'ensemble ────
   // Chaque alerte active relance `executerScreener` (snapshot de ses filtres) à sa
   // période propre ; les symboles ENTRANTS (absents du scan précédent) hors cooldown
@@ -598,16 +661,19 @@ function creerRuntime(): Unsubscribe {
   resyncLiqCascade();
   resyncPreset();
   resyncCvd();
+  resyncFluxCapitaux();
   // Calibrage CVD sur l'état déjà publié (si orderflow déjà actif).
   for (const sym of Object.keys(cvdDivergenceStore.getState().bySymbol)) {
     evaluerCvdSymbol(marketStore.getState().exchange, sym);
   }
   evaluerRegime(); // calibrage régime sur le score déjà publié
-  const unsubAlerts = alertsStore.subscribe(() => {
+  const unsubAlerts = alertsStore.subscribe((state, precedent) => {
+    if (state.defs === precedent.defs) return;
     resyncTicker(); // re-route si la liste des symboles change
     resyncFunding();
     resyncLiqCascade();
     resyncCvd();
+    resyncFluxCapitaux();
     evaluerRegime(); // calibre une def régime nouvellement ajoutée
   });
   const unsubMarket = marketStore.subscribe(onMarket);
@@ -624,6 +690,8 @@ function creerRuntime(): Unsubscribe {
     unsubTicker();
     unsubCvd();
     unsubRegime();
+    unsubFluxCapitaux();
+    garderFluxCapitauxPourAlertes(false);
     unsubPreset();
     stopHeartbeat();
     if (fundingTimer !== undefined) clearInterval(fundingTimer);

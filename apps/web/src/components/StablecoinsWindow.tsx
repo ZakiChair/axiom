@@ -76,6 +76,8 @@ import {
   type Domaine,
 } from "../lib/domaineAxe";
 import { useDomaineZoom } from "../hooks/useDomaineZoom";
+import { FluxCapitaux } from "./onchain/FluxCapitaux";
+import { EconomieChaines } from "./onchain/EconomieChaines";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -972,6 +974,8 @@ export function StablecoinsWindow() {
               )}
               {onglet === "chaines" && <VueChaines emetteurs={emetteurs} />}
               {onglet === "pegs" && <VuePegs emetteurs={emetteurs} onSelect={setEmetteurSelId} />}
+              {onglet === "vue" && <div className="mt-4"><FluxCapitaux /></div>}
+              {onglet === "chaines" && <div className="mt-4"><EconomieChaines /></div>}
             </>
           )
         )}

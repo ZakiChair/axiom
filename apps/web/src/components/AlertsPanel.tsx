@@ -865,7 +865,7 @@ export function AlertsPanel() {
                 const cible = cibleAlerte(defs, d.alertId);
                 const contenu = (
                   <>
-                    <span className="truncate text-text-dim">{d.message}</span>
+                    <span className="min-w-0 truncate text-text-dim">{d.message}{d.instantane ? ` · ${d.valeur.toLocaleString("fr-FR")} ${d.instantane.unite} · obs. ${new Date(d.instantane.observeLe).toISOString().slice(0, 10)} · ${d.instantane.source}` : ""}</span>
                     <span className="shrink-0 tabular-nums text-text-dim">{formatHeure(d.ts)}</span>
                   </>
                 );

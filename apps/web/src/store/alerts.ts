@@ -114,7 +114,24 @@ function estAlertDefValide(v: unknown): v is AlertDef {
   if (typeof d.symbol !== "string" || typeof d.source !== "string") return false;
   if (typeof d.actif !== "boolean") return false;
   if (!d.condition || typeof d.condition !== "object") return false;
-  if (typeof (d.condition as Record<string, unknown>).type !== "string") return false;
+  const condition = d.condition as Record<string, unknown>;
+  if (typeof condition.type !== "string") return false;
+  const typesConnus = new Set([
+    "prix-croise", "variation-pct", "indicateur-seuil", "indicateur-croisement",
+    "funding-extreme", "cvd-spot-perp-div", "liq-cascade", "regime-seuil",
+    "whale-flux", "flux-capitaux-seuil", "composite",
+  ]);
+  if (!typesConnus.has(condition.type)) return false;
+  if (condition.type === "flux-capitaux-seuil") {
+    const metriques = new Set([
+      "etf-btc-ratio", "etf-eth-ratio", "etf-sol-ratio", "stablecoins-variation-7j",
+      "realized-cap-variation-30j", "realized-cap-variation-90j", "exchange-netflow",
+    ]);
+    const comparateurs = new Set([">", ">=", "<", "<="]);
+    if (typeof condition.metrique !== "string" || !metriques.has(condition.metrique) ||
+      typeof condition.comparateur !== "string" || !comparateurs.has(condition.comparateur) ||
+      typeof condition.valeur !== "number" || !Number.isFinite(condition.valeur)) return false;
+  }
   if (!Array.isArray(d.declenchements) || !d.declenchements.every((t) => typeof t === "number")) return false;
   return true;
 }
@@ -123,11 +140,24 @@ function estAlertDefValide(v: unknown): v is AlertDef {
 function estDeclenchementValide(v: unknown): v is Declenchement {
   if (typeof v !== "object" || v === null) return false;
   const d = v as Record<string, unknown>;
+  const instantane = d.instantane;
+  const observation = typeof instantane === "object" && instantane !== null
+    ? (instantane as Record<string, unknown>).observeLe
+    : undefined;
+  const instantaneValide = instantane === undefined || (
+    typeof instantane === "object" && instantane !== null &&
+    typeof (instantane as Record<string, unknown>).unite === "string" && (instantane as Record<string, unknown>).unite !== "" &&
+    typeof (instantane as Record<string, unknown>).source === "string" && (instantane as Record<string, unknown>).source !== "" &&
+    typeof observation === "number" &&
+    Number.isFinite(observation) &&
+    !Number.isNaN(new Date(observation).getTime())
+  );
   return (
     typeof d.alertId === "string" &&
-    typeof d.ts === "number" &&
-    typeof d.valeur === "number" &&
-    typeof d.message === "string"
+    typeof d.ts === "number" && Number.isFinite(d.ts) && !Number.isNaN(new Date(d.ts).getTime()) &&
+    typeof d.valeur === "number" && Number.isFinite(d.valeur) &&
+    typeof d.message === "string" &&
+    instantaneValide
   );
 }
 

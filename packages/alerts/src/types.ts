@@ -139,6 +139,24 @@ export interface ConditionWhaleFlux {
   direction: "depot" | "retrait" | "tous";
 }
 
+/** Métriques lentes de la vue commune CHAIN/BRIEF/STBL pouvant porter un seuil. */
+export type MetriqueFluxCapitaux =
+  | "etf-btc-ratio"
+  | "etf-eth-ratio"
+  | "etf-sol-ratio"
+  | "stablecoins-variation-7j"
+  | "realized-cap-variation-30j"
+  | "realized-cap-variation-90j"
+  | "exchange-netflow";
+
+/** Seuil sur un instantané lent global, évalué uniquement par le runtime front. */
+export interface ConditionFluxCapitauxSeuil {
+  type: "flux-capitaux-seuil";
+  metrique: MetriqueFluxCapitaux;
+  comparateur: Comparateur;
+  valeur: number;
+}
+
 /**
  * Condition atomique (tout sauf composition). Union fermée : toute nouvelle
  * condition s'ajoute ICI, puis à `Condition` via `| ConditionComposite`.
@@ -152,13 +170,14 @@ export type ConditionAtomique =
   | ConditionCvdSpotPerpDiv
   | ConditionLiqCascade
   | ConditionRegimeSeuil
-  | ConditionWhaleFlux;
+  | ConditionWhaleFlux
+  | ConditionFluxCapitauxSeuil;
 
 /**
  * Sous-condition admise dans une composition (tout sauf `whale-flux` : convention
  * de portage `symbol = actif` incompatible avec un def porté par une paire).
  */
-export type ConditionSimple = Exclude<ConditionAtomique, ConditionWhaleFlux>;
+export type ConditionSimple = Exclude<ConditionAtomique, ConditionWhaleFlux | ConditionFluxCapitauxSeuil>;
 
 /**
  * ET conjonctif de 2 à 4 sous-conditions, évaluées dans le MÊME contexte (même
@@ -250,6 +269,21 @@ export interface ContexteAlerte {
    * tableau vide → un vrai « aucun mouvement » (ré-arme la condition).
    */
   whaleMouvements?: MouvementWhaleCtx[];
+  /** Instantané lent global injecté par le loader commun des flux. */
+  fluxCapitaux?: InstantaneFluxCapitauxCtx;
+}
+
+export interface InstantaneFluxCapitauxCtx {
+  metrique: MetriqueFluxCapitaux;
+  valeur: number;
+  unite: string;
+  observeLe: number;
+  recupereLe: number;
+  source: string;
+  cadenceMs: number;
+  /** Âge maximal autorisé, recalculé par le moteur à chaque évaluation. */
+  ageMaxMs: number;
+  statut: "frais" | "perime" | "partiel" | "indisponible" | "en-construction";
 }
 
 /** Un mouvement baleine de la fenêtre récente (contexte de `whale-flux`). */
@@ -269,6 +303,8 @@ export interface Declenchement {
   valeur: number;
   /** Message résolu (message de la def, sinon description auto de la condition). */
   message: string;
+  /** Preuve sérialisable de la donnée lente ayant motivé le déclenchement. */
+  instantane?: { unite: string; observeLe: number; source: string };
 }
 
 /** Résultat d'une passe d'évaluation. */

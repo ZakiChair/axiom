@@ -26,6 +26,15 @@ describe("compléments CHAIN : unités et disponibilités", () => {
     expect(html).toContain("séances publiées · SoSoValue");
     expect(html).toContain("2026-09-04");
   });
+  it("affiche le percentile du ratio seulement avec vingt séances exactes", () => {
+    const fin = Math.floor(Date.now() / 86_400_000) * 86_400_000;
+    const points = Array.from({ length: 20 }, (_, i) => ({ time: fin - (19 - i) * 86_400_000, fluxUsd: i + 1, encoursUsd: 100 }));
+    const html = renderToStaticMarkup(<VueHistoriqueEtf resultat={{ ts: fin, perime: false, points }} />);
+    expect(html).toContain("Percentile du ratio");
+    expect(html).toContain("p98");
+    expect(html).toContain("20 séances");
+    expect(html).toContain("Ratio flux / encours par séance");
+  });
   it("un repli ETF BTC ne se présente jamais comme des dollars", () => {
     const html = renderToStaticMarkup(<VueHistoriqueEtf resultat={{ points: [], ts: 0, perime: true, raison: "Clé absente" }}
       repliBtc={{ ts: 1, perime: true, serie: { points: Array.from({ length: 5 }, (_, i) => ({ time: Date.UTC(2026, 8, i + 1), value: 2 })) } }} />);

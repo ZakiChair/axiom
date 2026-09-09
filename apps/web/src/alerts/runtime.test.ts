@@ -9,13 +9,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AlertDef } from "@axiom/alerts";
 import type { Candle } from "@axiom/types";
 
-const { executerScreenerMock, subscribeTickersMock, daemonSupporteMock, detectDaemonMock, urlDaemonMock } =
+const { executerScreenerMock, subscribeTickersMock, daemonSupporteMock, detectDaemonMock, urlDaemonMock, chargerFluxMock } =
   vi.hoisted(() => ({
     executerScreenerMock: vi.fn(),
     subscribeTickersMock: vi.fn((..._args: unknown[]) => () => {}),
     daemonSupporteMock: vi.fn(() => false),
     detectDaemonMock: vi.fn(async () => false),
     urlDaemonMock: vi.fn((chemin: string) => chemin),
+    chargerFluxMock: vi.fn(() => new Promise(() => {})),
   }));
 vi.mock("../data/ticker", async (importOriginal) => {
   const original = await importOriginal<typeof import("../data/ticker")>();
@@ -35,6 +36,10 @@ vi.mock("../data/coinalyze", () => ({
   },
 }));
 vi.mock("../data/screenerRun", () => ({ executerScreener: executerScreenerMock }));
+vi.mock("../data/onchain/fluxCapitaux", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../data/onchain/fluxCapitaux")>();
+  return { ...original, chargerFluxCapitaux: chargerFluxMock };
+});
 vi.mock("../chart/liquidationMarkers", () => ({
   fluxLiqRetenu: () => false,
   liqEventsStore: { getState: () => ({ events: [] }), subscribe: () => () => {} },
@@ -48,6 +53,7 @@ import { alertsStore } from "../store/alerts";
 import { marketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
 import { presetAlertsStore, type AlertePreset } from "../store/presetAlerts";
+import { fluxCapitauxStore } from "../store/fluxCapitaux";
 
 /** Bougie plate au prix donné (les champs OHLC égaux suffisent au moteur). */
 function bougie(time: number, close: number, closed: boolean): Candle {
@@ -70,6 +76,7 @@ beforeEach(() => {
   marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1m", candles: [] });
   orderflowStore.setState({ enabled: false, cvdSpotPerp: false });
   presetAlertsStore.setState({ alertes: [] });
+  fluxCapitauxStore.setState({ donnees: null, chargement: false, erreur: null });
   subscribeTickersMock.mockClear();
   daemonSupporteMock.mockReset();
   daemonSupporteMock.mockReturnValue(false);
@@ -79,6 +86,120 @@ beforeEach(() => {
   urlDaemonMock.mockImplementation((chemin: string) => chemin);
   executerScreenerMock.mockReset();
   executerScreenerMock.mockResolvedValue({ rows: [] });
+});
+
+describe("alerte lente de flux sans panneau ouvert", () => {
+  const metriquesFlux = (ids: readonly ("stablecoins-variation-7j" | "realized-cap-variation-30j" | "realized-cap-variation-90j")[], valeur: number, maintenant: number) => ids.map((id) => ({
+    id, libelle: id, valeur, unite: "%", periode: "jour", observeLe: maintenant, source: "source", alerte: true,
+    qualite: { sourceId: id, sourceEffective: "source", observeLe: maintenant, recupereLe: maintenant, cadenceMs: 86_400_000,
+      couverture: null, estime: false, acces: "public" as const, statut: "frais" as const },
+  }));
+  const defsFlux = (ids: readonly ("stablecoins-variation-7j" | "realized-cap-variation-30j" | "realized-cap-variation-90j")[]) => ids.map((id) => ({
+    id, symbol: "BTCUSDT", source: "binance" as const,
+    condition: { type: "flux-capitaux-seuil" as const, metrique: id, comparateur: ">=" as const, valeur: 2 }, actif: true, declenchements: [],
+  }));
+
+  it("évalue le store commun et conserve l'instantané explicatif dans le journal", () => {
+    const maintenant = Date.UTC(2026, 8, 9, 12);
+    vi.spyOn(Date, "now").mockReturnValue(maintenant);
+    alertsStore.setState({
+      defs: [{
+        id: "flux",
+        symbol: "BTCUSDT",
+        source: "binance",
+        condition: { type: "flux-capitaux-seuil", metrique: "stablecoins-variation-7j", comparateur: ">=", valeur: 2 },
+        actif: true,
+        declenchements: [],
+      }],
+      journal: [],
+    });
+    const metrique = {
+      id: "stablecoins-variation-7j" as const,
+      libelle: "Variation stablecoins",
+      valeur: 1,
+      unite: "%",
+      periode: "7 j",
+      observeLe: maintenant - 86_400_000,
+      source: "DefiLlama",
+      alerte: true,
+      qualite: {
+        sourceId: "flux:stablecoins-variation-7j",
+        sourceEffective: "DefiLlama",
+        observeLe: maintenant - 86_400_000,
+        recupereLe: maintenant,
+        cadenceMs: 86_400_000,
+        couverture: null,
+        estime: false,
+        acces: "public" as const,
+        statut: "frais" as const,
+      },
+    };
+    fluxCapitauxStore.setState({ donnees: { recupereLe: maintenant, metriques: [metrique] }, chargement: false, erreur: null });
+
+    stop = demarrerAlertes();
+    expect(alertsStore.getState().defs[0]?.arme).toBe(true);
+    fluxCapitauxStore.setState({ donnees: { recupereLe: maintenant, metriques: [{ ...metrique, valeur: 3 }] } });
+
+    expect(alertsStore.getState().journal[0]).toMatchObject({
+      alertId: "flux",
+      valeur: 3,
+      instantane: { unite: "%", observeLe: maintenant - 86_400_000, source: "DefiLlama" },
+    });
+  });
+
+  it("journalise une seule fois plusieurs franchissements du même snapshot", () => {
+    const maintenant = Date.UTC(2026, 8, 9, 12);
+    vi.spyOn(Date, "now").mockReturnValue(maintenant);
+    const ids = ["stablecoins-variation-7j", "realized-cap-variation-30j"] as const;
+    alertsStore.setState({ defs: defsFlux(ids), journal: [] });
+    fluxCapitauxStore.setState({ donnees: { recupereLe: maintenant, metriques: metriquesFlux(ids, 1, maintenant) } });
+    stop = demarrerAlertes();
+    fluxCapitauxStore.setState({ donnees: { recupereLe: maintenant, metriques: metriquesFlux(ids, 3, maintenant) } });
+    expect(alertsStore.getState().journal.map((d) => d.alertId).sort()).toEqual([...ids].sort());
+  });
+
+  it("ne journalise pas les alertes supprimées ou désactivées pendant une mise à jour", () => {
+    const maintenant = Date.UTC(2026, 8, 9, 12);
+    vi.spyOn(Date, "now").mockReturnValue(maintenant);
+    const ids = ["stablecoins-variation-7j", "realized-cap-variation-30j", "realized-cap-variation-90j"] as const;
+    alertsStore.setState({ defs: defsFlux(ids), journal: [] });
+    fluxCapitauxStore.setState({ donnees: { recupereLe: maintenant, metriques: metriquesFlux(ids, 1, maintenant) } });
+    stop = demarrerAlertes();
+    let applique = false;
+    const arreter = alertsStore.subscribe((state) => {
+      if (!applique && state.defs.find((d) => d.id === ids[0])?.arme === false) {
+        applique = true;
+        alertsStore.getState().supprimer(ids[1]);
+        alertsStore.getState().basculerActif(ids[2]);
+      }
+    });
+    fluxCapitauxStore.setState({ donnees: { recupereLe: maintenant, metriques: metriquesFlux(ids, 3, maintenant) } });
+    arreter();
+    expect(alertsStore.getState().journal.map((d) => d.alertId)).toEqual([ids[0]]);
+  });
+
+  it("calibre une définition ajoutée pendant une mise à jour sans doublon", () => {
+    const maintenant = Date.UTC(2026, 8, 9, 12);
+    vi.spyOn(Date, "now").mockReturnValue(maintenant);
+    const ids = ["stablecoins-variation-7j"] as const;
+    alertsStore.setState({ defs: defsFlux(ids), journal: [] });
+    fluxCapitauxStore.setState({ donnees: { recupereLe: maintenant, metriques: metriquesFlux(ids, 1, maintenant) } });
+    let ajoute = false;
+    const arreter = alertsStore.subscribe((state) => {
+      if (!ajoute && state.defs[0]?.arme === true) {
+        ajoute = true;
+        alertsStore.getState().ajouter({ symbol: "BTCUSDT", source: "binance",
+          condition: { type: "flux-capitaux-seuil", metrique: ids[0], comparateur: ">=", valeur: 2 } });
+      }
+    });
+    stop = demarrerAlertes();
+    arreter();
+    expect(alertsStore.getState().defs).toHaveLength(2);
+    expect(alertsStore.getState().defs.every((d) => d.arme === true)).toBe(true);
+    fluxCapitauxStore.setState({ donnees: { recupereLe: maintenant, metriques: metriquesFlux(ids, 3, maintenant) } });
+    expect(new Set(alertsStore.getState().journal.map((d) => d.alertId)).size).toBe(2);
+    expect(alertsStore.getState().journal).toHaveLength(2);
+  });
 });
 
 describe("identité d'alerte (source, symbole)", () => {

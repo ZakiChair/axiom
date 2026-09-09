@@ -35,6 +35,7 @@ import {
   Vide,
 } from "./ui";
 import { DefillamaProPanel } from "./DefillamaProPanel";
+import { EconomieChaines } from "./onchain/EconomieChaines";
 
 /** Cadence de rafraîchissement (le cache 5 min partagé absorbe les appels réseau). */
 const REFRESH_MS = 5 * 60_000;
@@ -268,6 +269,7 @@ export function SectWindow() {
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
         {proOuvert && <DefillamaProPanel initialMode="bridges" />}
+        <EconomieChaines />
         {error !== null && <ErreurBloc>{error}</ErreurBloc>}
 
         {overview === null ? (

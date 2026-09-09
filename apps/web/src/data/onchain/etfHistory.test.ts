@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseEtfHistory, resumerEtfHistory } from "./etfHistory";
+import { historiqueRatiosEtf, parseEtfHistory, resumerEtfHistory } from "./etfHistory";
 describe("historique ETF publié", () => {
   it("parse le format actuel snake_case et conserve une séance manquante", () => {
     const rows = parseEtfHistory({ code: 0, data: [
@@ -19,5 +19,19 @@ describe("historique ETF publié", () => {
     expect(resumerEtfHistory(rows.slice(-5)).cumul20).toBeNull();
     expect(resumerEtfHistory([...rows.slice(0, -1), { time: 20, fluxUsd: null, encoursUsd: 0 }]))
       .toMatchObject({ cumul5: null, cumul20: null, ratioJourPct: null });
+  });
+  it("situe le ratio dans au moins 20 séances exactes sans reconstruire les encours absents", () => {
+    const now = Date.UTC(2026, 8, 30);
+    const jour = 86_400_000;
+    const rows = Array.from({ length: 21 }, (_, i) => ({
+      time: now - (20 - i) * jour,
+      fluxUsd: i + 1,
+      encoursUsd: i === 4 ? null : 100,
+    }));
+    const ratios = historiqueRatiosEtf(rows, now);
+    expect(ratios.points).toHaveLength(20);
+    expect(ratios.points[4]?.time).toBe(now - 15 * jour);
+    expect(ratios.referentiel).toMatchObject({ n: 20, profondeurJours: 20, percentile: 97.5 });
+    expect(historiqueRatiosEtf(rows.slice(1), now).referentiel).toBeNull();
   });
 });

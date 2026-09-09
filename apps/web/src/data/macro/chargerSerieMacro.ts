@@ -12,7 +12,8 @@ import { chargerSerieEurostat } from "./eurostat";
 import { chargerSerieOecd, ErreurQuotaOecd } from "./oecd";
 import { chargerSerieOns } from "./ons";
 import { createFredM2Provider, ErreurHttpFred } from "./fred";
-import { differenceDatesCommunes, variationPeriode } from "./harmonisation";
+import { chargerVueAlfred } from "./alfred";
+import { differenceDatesCommunes, variationAnnualisee, variationPeriode, variationsEmploi } from "./harmonisation";
 import { chargerSerieNbs } from "./nbs";
 import { chargerSerieMospi } from "./mospi";
 import { chargerSerieStatcan } from "./statcan";
@@ -37,21 +38,30 @@ export async function chargerSerieMacro(
   def: DefinitionSerieMacro,
   depuisMs: number,
   signal?: AbortSignal,
+  connuLe?: string | null,
 ): Promise<ResultatSerieMacro> {
   if (signal?.aborted) return { statut: "annule" };
   if (def.source.transport === "indisponible") return { statut: "indisponible", message: def.source.motif };
   const debut = new Date(depuisMs);
-  if (def.transformation) debut.setUTCMonth(debut.getUTCMonth() - (def.transformation === "aa" ? 12 : 1), 1);
+  if (def.transformation) {
+    const moisRetour = def.transformation === "aa" ? 12 : def.transformation === "annualise6m" ? 6 : def.transformation === "annualise3m" ? 3 : def.transformation.startsWith("emploi-") ? 3 : 1;
+    debut.setUTCMonth(debut.getUTCMonth() - moisRetour, 1);
+  }
   const depuisSource = debut.getTime();
   try {
     const source = def.source;
     let points: MacroSeries;
     switch (source.transport) {
       case "fred": {
-        points = await createFredM2Provider(source.seriesId, source.units).fetchSeries({
-          start: depuisSource,
-          signal,
-        });
+        if (connuLe) {
+          const observations = await chargerVueAlfred(source.seriesId, connuLe, { debut: new Date(depuisSource).toISOString().slice(0, 10), signal });
+          points = observations.map((o) => ({ time: Date.parse(`${o.periode}T00:00:00Z`), value: o.valeur, qualite: `ALFRED · vue journalière au ${connuLe}` }));
+        } else {
+          points = await createFredM2Provider(source.seriesId, source.units).fetchSeries({
+            start: depuisSource,
+            signal,
+          });
+        }
         break;
       }
       case "ecartFred": {
@@ -83,7 +93,11 @@ export async function chargerSerieMacro(
         break;
     }
     if (signal?.aborted) return { statut: "annule" };
-    if (def.transformation) points = variationPeriode(points, def.transformation === "aa" ? 12 : 1);
+    if (def.transformation === "aa" || def.transformation === "mm") points = variationPeriode(points, def.transformation === "aa" ? 12 : 1);
+    else if (def.transformation === "annualise3m") points = variationAnnualisee(points, 3);
+    else if (def.transformation === "annualise6m") points = variationAnnualisee(points, 6);
+    else if (def.transformation === "emploi-variation") points = variationsEmploi(points).variation;
+    else if (def.transformation === "emploi-moyenne3m") points = variationsEmploi(points).moyenne3m;
     points = points.filter((p) => p.time >= depuisMs && p.time <= Date.now());
     if (points.length === 0) {
       return { statut: "panne", message: "Source sans donnée sur la période." };

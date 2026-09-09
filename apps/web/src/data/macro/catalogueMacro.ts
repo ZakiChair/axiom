@@ -11,8 +11,8 @@ export const ORDRE_REGIONS: readonly RegionMacro[] = ["US", "EZ", "UK", "JP", "C
 export const REGIONS_MACRO: Record<RegionMacro, string> = {
   US: "États-Unis", EZ: "Zone euro", UK: "Royaume-Uni", JP: "Japon", CN: "Chine", IN: "Inde", CA: "Canada", CH: "Suisse",
 };
-export type IndicateurMacro = "cpi-aa" | "cpi-mm" | "core-cpi-aa" | "ppi-aa" | "pib-aa" | "chomage" | "production-aa" | "change-reel-aa" | "monnaie-aa" | "taux-reel-us" | "breakeven-us" | "nfci" | "hy-oas" | "demandes-chomage" | "sofr-iorb";
-export type UniteMacro = "%" | "indice" | "personnes" | "pb";
+export type IndicateurMacro = "cpi-aa" | "cpi-mm" | "core-cpi-aa" | "ppi-aa" | "pib-aa" | "chomage" | "production-aa" | "change-reel-aa" | "monnaie-aa" | "taux-reel-us" | "breakeven-us" | "nfci" | "hy-oas" | "demandes-chomage" | "sofr-iorb" | "pce-niveau" | "pce-aa" | "pce-3m" | "pce-6m" | "emploi-variation" | "emploi-moyenne3m" | "retail-niveau" | "retail-mm" | "retail-aa";
+export type UniteMacro = "%" | "indice" | "personnes" | "pb" | "indice-2017=100" | "milliers" | "millions-usd-nominaux";
 export type SourceMacro =
   | { transport: "fred"; seriesId: string; units?: string }
   | { transport: "oecd"; dataflow: string; cle: string }
@@ -34,7 +34,7 @@ export interface DefinitionSerieMacro {
   source: SourceMacro;
   cleRequise: boolean;
   perimetre?: string;
-  transformation?: "aa" | "mm";
+  transformation?: "aa" | "mm" | "annualise3m" | "annualise6m" | "emploi-variation" | "emploi-moyenne3m";
   /** ONS MGSX est daté au mois CENTRAL de son trimestre glissant. */
   decalageFinMois?: number;
 }
@@ -55,6 +55,15 @@ export const INDICATEURS_MACRO: readonly DefinitionIndicateurMacro[] = [
   { id: "hy-oas", label: "Spread crédit HY US", unite: "%", description: "ICE BofA US High Yield Option-Adjusted Spread, exprimé en points de pourcentage." },
   { id: "demandes-chomage", label: "Inscriptions chômage US", unite: "personnes", description: "Demandes initiales hebdomadaires désaisonnalisées et moyenne officielle sur quatre semaines." },
   { id: "sofr-iorb", label: "SOFR − IORB", unite: "pb", description: "Écart entre SOFR et rémunération des réserves, en points de base, uniquement aux dates communes." },
+  { id: "pce-niveau", label: "PCE sous-jacent", unite: "indice-2017=100", description: "Indice PCE hors alimentation et énergie, désaisonnalisé, base 2017=100." },
+  { id: "pce-aa", label: "PCE sous-jacent (a/a)", unite: "%", description: "Variation annuelle de l'indice PCE sous-jacent désaisonnalisé." },
+  { id: "pce-3m", label: "PCE sous-jacent (3 m annualisé)", unite: "%", description: "Variation sur trois mois civils annualisée de l'indice PCE sous-jacent." },
+  { id: "pce-6m", label: "PCE sous-jacent (6 m annualisé)", unite: "%", description: "Variation sur six mois civils annualisée de l'indice PCE sous-jacent." },
+  { id: "emploi-variation", label: "Emploi non agricole (m/m)", unite: "milliers", description: "Variation mensuelle PAYEMS, en milliers de personnes." },
+  { id: "emploi-moyenne3m", label: "Emploi non agricole (moyenne 3 m)", unite: "milliers", description: "Moyenne des trois variations PAYEMS mensuelles consécutives, en milliers par mois." },
+  { id: "retail-niveau", label: "Ventes au détail", unite: "millions-usd-nominaux", description: "Ventes avancées RSAFS, millions de dollars courants, désaisonnalisées." },
+  { id: "retail-mm", label: "Ventes au détail (m/m)", unite: "%", description: "Variation mensuelle nominale de RSAFS." },
+  { id: "retail-aa", label: "Ventes au détail (a/a)", unite: "%", description: "Variation annuelle nominale de RSAFS." },
 ];
 
 const PRIX = "OECD.SDD.TPS,DSD_PRICES@DF_PRICES_ALL,1.0";
@@ -108,6 +117,15 @@ export const CATALOGUE_MACRO: readonly DefinitionSerieMacro[] = [
   definir("demandes-chomage", "US", fred("ICSA"), { frequence: "W", libelleSerie: "US · demandes initiales" }),
   definir("demandes-chomage", "US", fred("IC4WSA"), { id: "demandes-chomage-us-4s", frequence: "W", libelleSerie: "US · moyenne 4 semaines" }),
   definir("sofr-iorb", "US", { transport: "ecartFred", gauche: "SOFR", droite: "IORB", facteur: 100 }, { frequence: "D", perimetre: "taux effectifs à dates communes" }),
+  definir("pce-niveau", "US", fred("PCEPILFE"), { frequence: "M", perimetre: "indice 2017=100 · désaisonnalisé · BEA" }),
+  definir("pce-aa", "US", fred("PCEPILFE"), { frequence: "M", transformation: "aa", perimetre: "indice PCE hors alimentation/énergie · désaisonnalisé · a/a" }),
+  definir("pce-3m", "US", fred("PCEPILFE"), { frequence: "M", transformation: "annualise3m", perimetre: "indice PCE hors alimentation/énergie · désaisonnalisé · 3 mois annualisé" }),
+  definir("pce-6m", "US", fred("PCEPILFE"), { frequence: "M", transformation: "annualise6m", perimetre: "indice PCE hors alimentation/énergie · désaisonnalisé · 6 mois annualisé" }),
+  definir("emploi-variation", "US", fred("PAYEMS"), { frequence: "M", transformation: "emploi-variation", perimetre: "enquête établissements · désaisonnalisé · milliers" }),
+  definir("emploi-moyenne3m", "US", fred("PAYEMS"), { frequence: "M", transformation: "emploi-moyenne3m", perimetre: "enquête établissements · désaisonnalisé · moyenne de trois variations consécutives · milliers/mois" }),
+  definir("retail-niveau", "US", fred("RSAFS"), { frequence: "M", perimetre: "ventes avancées · désaisonnalisées · millions USD nominaux" }),
+  definir("retail-mm", "US", fred("RSAFS"), { frequence: "M", transformation: "mm", perimetre: "ventes avancées · désaisonnalisées · variation m/m nominale" }),
+  definir("retail-aa", "US", fred("RSAFS"), { frequence: "M", transformation: "aa", perimetre: "ventes avancées · désaisonnalisées · variation a/a nominale" }),
 ];
 
 /** Séries dans l'ordre stable des zones (une famille US peut comporter deux courbes). */

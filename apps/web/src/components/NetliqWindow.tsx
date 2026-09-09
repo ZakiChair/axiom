@@ -20,7 +20,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { netliqStore } from "../store/netliq";
-import { fetchKlines1dPagine, type FenetreNetliq, type PointNetliq } from "../data/netliq";
+import { fetchKlines1dPagine, type FenetreNetliq, type PointNetliqHebdomadaire } from "../data/netliq";
 import { lireTokenCanvas, rgbaTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { formatDateCourte, formatEntier, formatUsd, VALEUR_ABSENTE } from "../lib/format";
 import { normaliserSerieOverlay, ticksMd } from "./netliqWindow.util";
@@ -144,7 +144,7 @@ interface DomaineY {
  * contenir 0), plus une marge de respiration de 12 %. `minData`/`maxData` sont les
  * extrêmes bruts (positions des deux repères pointillés).
  */
-function domaineY(serie: readonly PointNetliq[]): DomaineY {
+function domaineY(serie: readonly PointNetliqHebdomadaire[]): DomaineY {
   let minData = Infinity;
   let maxData = -Infinity;
   for (const p of serie) {
@@ -164,7 +164,7 @@ function yAt(g: Geometrie, v: number, dom: DomaineY): number {
 
 function dessiner(
   canvas: HTMLCanvasElement,
-  serie: readonly PointNetliq[],
+  serie: readonly PointNetliqHebdomadaire[],
   btcRaw: readonly { t: number; close: number }[] | null,
 ): void {
   const ctx = canvas.getContext("2d");
@@ -299,7 +299,7 @@ function dessiner(
 interface Survol {
   xPix: number;
   largeur: number;
-  point: PointNetliq;
+  point: PointNetliqHebdomadaire;
   /** Clôture BTC du jour survolé (si overlay actif et point disponible), sinon null. */
   btcClose: number | null;
   /** Variation netliq vs point précédent (teintée), null au premier point. */
@@ -313,6 +313,7 @@ export function NetliqWindow() {
   const erreur = useStore(netliqStore, (s) => s.erreur);
   const majTs = useStore(netliqStore, (s) => s.majTs);
   const fenetreAnnees = useStore(netliqStore, (s) => s.fenetreAnnees);
+  const provenanceTga = useStore(netliqStore, (s) => s.provenanceTga);
 
   const [survol, setSurvol] = useState<Survol | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -497,6 +498,19 @@ export function NetliqWindow() {
                         },
                       ]
                     : []),
+                  {
+                    label: "Sources",
+                    valeur: `W ${survol.point.datesSource.walcl.slice(5)} · TGA ${survol.point.datesSource.tga.slice(5)} · RRP ${survol.point.datesSource.rrp.slice(5)}`,
+                    couleur: lireTokenCanvas("--text-dim", "#94a3b8"),
+                  },
+                  ...(survol.point.contributions
+                    ? [{
+                        label: "Contrib.",
+                        valeur: `W ${formatMdSigne(survol.point.contributions.walcl)} · TGA ${formatMdSigne(survol.point.contributions.tga)} · RRP ${formatMdSigne(survol.point.contributions.rrp)}`,
+                        couleur: lireTokenCanvas("--text-dim", "#94a3b8"),
+                      }]
+                    : []),
+                  ...survol.point.reports.map((report) => ({ label: "Report", valeur: report, couleur: lireTokenCanvas("--warn", "#fbbf24") })),
                 ]}
               />
             )}
@@ -505,7 +519,7 @@ export function NetliqWindow() {
 
         <div className="mt-3 flex items-center justify-between">
           <NoteSource>
-            FRED · WALCL/TGA hebdomadaires, RRP quotidien · valeurs reportées entre observations · fenêtre {fenetreAnnees} a
+            WALCL hebdomadaire · TGA {provenanceTga ?? "en attente"} · RRP quotidien · vue ancrée WALCL, reports et dates sources visibles · fenêtre {fenetreAnnees} a
             {overlayBtc && btcSerie !== null && " · BTC superposé (échelle propre)"}
           </NoteSource>
           <Fraicheur loading={enCours} majTs={majTs} />

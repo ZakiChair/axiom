@@ -10,6 +10,11 @@ describe("présentation des séries macro", () => {
     expect(formatValeurMacro(1, "pb")).toBe("1,00 pb");
     expect(formatValeurMacro(-2.4, "%")).toBe("−2,40 %");
   });
+  it("affiche les unités macro natives sans les assimiler à des pourcentages", () => {
+    expect(formatValeurMacro(130.658, "indice-2017=100")).toBe("130,658 (2017=100)");
+    expect(formatValeurMacro(83.333, "milliers")).toBe("83,333 milliers");
+    expect(formatValeurMacro(763602, "millions-usd-nominaux")).toMatch(/^763\s?602 M\$ nominaux$/u);
+  });
   it("affiche la période trimestrielle et le vrai trimestre glissant britannique", () => {
     const uk = CATALOGUE_MACRO.find((d) => d.id === "chomage-uk")!;
     const gdp = CATALOGUE_MACRO.find((d) => d.id === "pib-aa-us")!;

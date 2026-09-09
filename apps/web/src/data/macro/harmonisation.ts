@@ -65,6 +65,44 @@ export function variationPeriode(serie: MacroSeries, mois: 1 | 12): MacroSeries 
   });
 }
 
+/**
+ * Taux annualisé sur 3 ou 6 mois, contre le même mois civil antérieur. Une absence
+ * dans le calendrier ou un niveau non strictement positif invalide le point : on ne
+ * remplace jamais une période manquante par le nième point précédent.
+ */
+export function variationAnnualisee(serie: MacroSeries, mois: 3 | 6): MacroSeries {
+  const parDate = new Map(serie.filter((p) => Number.isFinite(p.value)).map((p) => [p.time, p]));
+  const exposant = 12 / mois;
+  return trierChrono(serie).flatMap((p) => {
+    const date = new Date(p.time);
+    const reference = parDate.get(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - mois, 1));
+    if (!reference || p.value <= 0 || reference.value <= 0 || !Number.isFinite(p.value)) return [];
+    const value = 100 * ((p.value / reference.value) ** exposant - 1);
+    return Number.isFinite(value) ? [{ ...p, value }] : [];
+  });
+}
+
+/** Variations PAYEMS en milliers et moyenne des trois variations mensuelles consécutives. */
+export function variationsEmploi(serie: MacroSeries): { variation: MacroSeries; moyenne3m: MacroSeries } {
+  const niveaux = trierChrono(serie).filter((p) => Number.isFinite(p.value));
+  const parDate = new Map(niveaux.map((p) => [p.time, p]));
+  const variation = niveaux.flatMap((p) => {
+    const date = new Date(p.time);
+    const precedent = parDate.get(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 1, 1));
+    if (!precedent) return [];
+    return [{ ...p, value: p.value - precedent.value }];
+  });
+  const parVariation = new Map(variation.map((p) => [p.time, p]));
+  const moyenne3m = variation.flatMap((p) => {
+    const date = new Date(p.time);
+    const v1 = parVariation.get(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 1, 1));
+    const v2 = parVariation.get(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 2, 1));
+    if (!v1 || !v2) return [];
+    return [{ ...p, value: (v2.value + v1.value + p.value) / 3 }];
+  });
+  return { variation, moyenne3m };
+}
+
 /** Jointure exacte des observations : aucun report d'un taux du jour précédent. */
 export function differenceDatesCommunes(gauche: MacroSeries, droite: MacroSeries, facteur = 1): MacroSeries {
   const parDate = new Map(droite.map((p) => [p.time, p.value]));

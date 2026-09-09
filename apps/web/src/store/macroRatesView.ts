@@ -39,9 +39,11 @@ export interface MacroRatesViewState {
   indicateur: IndicateurMacro;
   regions: RegionMacro[];
   horizonAnnees: HorizonMacro;
+  connuLe: string | null;
   selectionnerIndicateur: (indicateur: IndicateurMacro) => void;
   selectionnerRegions: (regions: readonly RegionMacro[]) => void;
   selectionnerHorizon: (horizon: HorizonMacro) => void;
+  selectionnerConnuLe: (connuLe: string | null) => void;
   /** Demande explicite d'ouverture sur l'onglet Indicateurs (bouton « série » d'ECO). Annule une requête CRVF en attente. */
   demanderIndicateurs: (selection?: { indicateur?: IndicateurMacro; region?: RegionMacro }) => void;
 }
@@ -54,12 +56,14 @@ export const macroRatesViewStore = createStore<MacroRatesViewState>((set, get) =
   indicateur: "cpi-aa",
   regions: [...ORDRE_REGIONS],
   horizonAnnees: 5,
+  connuLe: null,
   selectionnerIndicateur: (indicateur) => {
     const disponibles = ORDRE_REGIONS.filter((r) => seriesDeIndicateur(indicateur).some((d) => d.region === r));
     set({ indicateur, ...(get().regions.some((r) => disponibles.includes(r)) ? {} : { regions: disponibles }) });
   },
   selectionnerRegions: (regions) => set({ regions: ORDRE_REGIONS.filter((r) => regions.includes(r)) }),
   selectionnerHorizon: (horizonAnnees) => set({ horizonAnnees }),
+  selectionnerConnuLe: (connuLe) => set({ connuLe }),
   demanderIndicateurs: (selection = {}) => set({
     requeteIndicateurs: get().requeteIndicateurs + 1,
     requete: 0,

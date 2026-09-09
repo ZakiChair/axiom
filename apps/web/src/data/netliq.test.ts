@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MacroSeries } from "./macro/types";
-import { fetchKlines1dPagine, fetchSeriesNetliq, normaliserSerie, serieNetliq, statsNetliq } from "./netliq";
+import { fetchKlines1dPagine, fetchSeriesNetliq, normaliserSerie, serieNetliq, serieNetliqHebdomadaire, statsNetliq } from "./netliq";
 import type { PointFred } from "./netliq";
 import { createFredM2Provider } from "./macro/fred";
 import { binanceAdapter } from "./binance";
@@ -93,6 +93,23 @@ describe("serieNetliq — netliq = walcl − tga − rrp, axe = union des 3 jamb
 
   it("renvoie une série vide si une jambe est vide (jamais amorcée)", () => {
     expect(serieNetliq([pf("2026-01-07", 6000)], [], [pf("2026-01-07", 100)])).toEqual([]);
+  });
+});
+
+describe("serieNetliqHebdomadaire — vue comparable et provenance", () => {
+  it("ancre chaque point à WALCL et expose les dates sources et contributions signées", () => {
+    const serie = serieNetliqHebdomadaire(
+      [pf("2026-01-07", 6000), pf("2026-01-14", 6100)],
+      [pf("2026-01-06", 900), pf("2026-01-13", 950)],
+      [pf("2026-01-07", 100), pf("2026-01-08", 101), pf("2026-01-14", 108)],
+    );
+    expect(serie).toEqual([
+      { date: "2026-01-07", netliq: 5000, datesSource: { walcl: "2026-01-07", tga: "2026-01-06", rrp: "2026-01-07" }, reports: ["TGA reporté depuis le 06/01"], contributions: null },
+      { date: "2026-01-14", netliq: 5042, datesSource: { walcl: "2026-01-14", tga: "2026-01-13", rrp: "2026-01-14" }, reports: ["TGA reporté depuis le 13/01"], contributions: { walcl: 100, tga: -50, rrp: -8 } },
+    ]);
+  });
+  it("n'émet aucun point hebdomadaire si une jambe n'était pas encore connue", () => {
+    expect(serieNetliqHebdomadaire([pf("2026-01-07", 6000)], [pf("2026-01-08", 900)], [pf("2026-01-07", 100)])).toEqual([]);
   });
 });
 

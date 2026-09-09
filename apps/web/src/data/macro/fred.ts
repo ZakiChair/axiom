@@ -63,7 +63,7 @@ interface FredObservationsResponse {
  * `undefined` = pas de clé côté front → le proxy /fredapi injectera la clé de repli
  * (.env). On ne committe plus de clé « par défaut » dans le source.
  */
-function resolveFredKey(opts?: MacroFetchOptions): string | undefined {
+export function lireCleFred(opts?: MacroFetchOptions): string | undefined {
   if (opts?.apiKey) return opts.apiKey;
   try {
     if (typeof localStorage !== "undefined") {
@@ -92,7 +92,7 @@ export function createFredM2Provider(seriesId = "WM2NS", units?: string): IMacro
     id,
 
     async fetchSeries(opts?: MacroFetchOptions): Promise<MacroSeries> {
-      const key = resolveFredKey(opts);
+      const key = lireCleFred(opts);
       const params = new URLSearchParams({
         series_id: seriesId,
         file_type: "json",

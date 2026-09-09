@@ -40,6 +40,7 @@
  */
 import { createFredM2Provider } from "./macro/fred";
 import type { MacroSeries } from "./macro/types";
+import { chargerSerieTgaTreasury } from "./macro/treasury";
 import { binanceAdapter } from "./binance";
 
 /** Fenêtre d'observation NETLIQ, en années calendaires. Défaut applicatif : 2 a. */
@@ -105,6 +106,14 @@ export interface PointNetliq {
   netliq: number;
 }
 
+export interface PointNetliqHebdomadaire extends PointNetliq {
+  datesSource: { walcl: string; tga: string; rrp: string };
+  /** Jambes conservées depuis une observation antérieure à l'ancre WALCL. */
+  reports: string[];
+  /** ΔWALCL − ΔTGA − ΔRRP entre deux ancres hebdomadaires comparables. */
+  contributions: { walcl: number; tga: number; rrp: number } | null;
+}
+
 /** Durée en millisecondes de la fenêtre delta4s (≈ 4 semaines / 28 jours). */
 const MS_28_JOURS = 28 * 24 * 60 * 60 * 1000;
 
@@ -129,6 +138,15 @@ function valeurLocf(jambeTriee: PointFred[], date: string): number | null {
     else break;
   }
   return valeur;
+}
+
+function pointLocf(jambeTriee: PointFred[], date: string): PointFred | null {
+  let point: PointFred | null = null;
+  for (const candidat of jambeTriee) {
+    if (candidat.date <= date) point = candidat;
+    else break;
+  }
+  return point;
 }
 
 /**
@@ -159,6 +177,37 @@ export function serieNetliq(walcl: PointFred[], tga: PointFred[], rrp: PointFred
     serie.push({ date, netliq: vw - vt - vr });
   }
   return serie;
+}
+
+/**
+ * Vue comparable : une observation par date WALCL hebdomadaire. Les TGA DTS et RRP
+ * sont reportés seulement jusqu'à l'ancre, avec leur date effective conservée.
+ */
+export function serieNetliqHebdomadaire(walcl: PointFred[], tga: PointFred[], rrp: PointFred[]): PointNetliqHebdomadaire[] {
+  const w = trierParDate(walcl);
+  const t = trierParDate(tga);
+  const r = trierParDate(rrp);
+  const resultat: PointNetliqHebdomadaire[] = [];
+  for (const walclPoint of w) {
+    const tgaPoint = pointLocf(t, walclPoint.date);
+    const rrpPoint = pointLocf(r, walclPoint.date);
+    if (!tgaPoint || !rrpPoint) continue;
+    const precedent = resultat.at(-1);
+    const reports = [
+      ...(tgaPoint.date !== walclPoint.date ? [`TGA reporté depuis le ${tgaPoint.date.slice(8, 10)}/${tgaPoint.date.slice(5, 7)}`] : []),
+      ...(rrpPoint.date !== walclPoint.date ? [`RRP reporté depuis le ${rrpPoint.date.slice(8, 10)}/${rrpPoint.date.slice(5, 7)}`] : []),
+    ];
+    resultat.push({
+      date: walclPoint.date,
+      netliq: walclPoint.valeur - tgaPoint.valeur - rrpPoint.valeur,
+      datesSource: { walcl: walclPoint.date, tga: tgaPoint.date, rrp: rrpPoint.date },
+      reports,
+      contributions: precedent
+        ? { walcl: walclPoint.valeur - (w.find((p) => p.date === precedent.datesSource.walcl)?.valeur ?? walclPoint.valeur), tga: -(tgaPoint.valeur - (pointLocf(t, precedent.date)?.valeur ?? tgaPoint.valeur)), rrp: -(rrpPoint.valeur - (pointLocf(r, precedent.date)?.valeur ?? rrpPoint.valeur)) }
+        : null,
+    });
+  }
+  return resultat;
 }
 
 /**
@@ -206,14 +255,18 @@ export function statsNetliq(serie: PointNetliq[]): {
 export async function fetchSeriesNetliq(
   nowMs: number,
   annees: FenetreNetliq,
-): Promise<{ walcl: PointFred[]; tga: PointFred[]; rrp: PointFred[] }> {
+): Promise<{ walcl: PointFred[]; tga: PointFred[]; rrp: PointFred[]; provenanceTga?: "Treasury DTS" | "FRED WTREGEN (repli)" }> {
   const debutMs = ilYaNAns(nowMs, annees);
-  const [walcl, tga, rrp] = await Promise.all([
+  const debut = versDateIso(debutMs);
+  const fin = versDateIso(nowMs);
+  const [walcl, rrp, tgaDts] = await Promise.all([
     fetchSerieFred(SERIE_WALCL, debutMs, FACTEUR_MILLIONS_VERS_MILLIARDS),
-    fetchSerieFred(SERIE_TGA, debutMs, FACTEUR_MILLIONS_VERS_MILLIARDS),
     fetchSerieFred(SERIE_RRP, debutMs, FACTEUR_DEJA_MILLIARDS),
+    chargerSerieTgaTreasury({ debut, fin }).catch(() => null),
   ]);
-  return { walcl, tga, rrp };
+  if (tgaDts?.points.length) return { walcl, tga: normaliserSerie(tgaDts.points, 1), rrp, provenanceTga: "Treasury DTS" };
+  const tga = await fetchSerieFred(SERIE_TGA, debutMs, FACTEUR_MILLIONS_VERS_MILLIARDS);
+  return { walcl, tga, rrp, provenanceTga: "FRED WTREGEN (repli)" };
 }
 
 /**

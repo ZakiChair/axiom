@@ -22,10 +22,10 @@
 import { createStore } from "zustand/vanilla";
 import {
   fetchSeriesNetliq,
-  serieNetliq,
+  serieNetliqHebdomadaire,
   statsNetliq,
   type FenetreNetliq,
-  type PointNetliq,
+  type PointNetliqHebdomadaire,
 } from "../data/netliq";
 
 /** TTL du cache en mémoire : 12 heures en millisecondes. */
@@ -62,7 +62,7 @@ function ecrireFenetre(annees: FenetreNetliq): void {
 export interface NetliqState {
   /** true pendant un run (désactive le bouton Rafraîchir). */
   enCours: boolean;
-  serie: PointNetliq[];
+  serie: PointNetliqHebdomadaire[];
   stats: ReturnType<typeof statsNetliq> | null;
   /** Message d'erreur affichable si un fetch échoue, sinon null — NON destructif. */
   erreur: string | null;
@@ -70,6 +70,8 @@ export interface NetliqState {
   majTs: number | null;
   /** Fenêtre d'observation courante (années), persistée. */
   fenetreAnnees: FenetreNetliq;
+  /** Origine réellement chargée du TGA quotidien, ou repli FRED hebdomadaire. */
+  provenanceTga: "Treasury DTS" | "FRED WTREGEN (repli)" | null;
   /** Collecte + calcul. `force` (bouton Rafraîchir) court-circuite le TTL 12 h. */
   run: (force?: boolean) => Promise<void>;
   /**
@@ -90,13 +92,14 @@ export const netliqStore = createStore<NetliqState>((set, get) => ({
   erreur: null,
   majTs: null,
   fenetreAnnees: lireFenetre(),
+  provenanceTga: null,
 
   setFenetre: (annees) => {
     if (get().fenetreAnnees === annees) return; // fenêtre inchangée → rien à faire
     ecrireFenetre(annees);
     // Invalidation au changement de fenêtre : serie/stats/majTs remis à zéro AVANT le run
     // forcé — sans quoi le skip TTL pourrait servir la série de l'ancienne fenêtre.
-    set({ fenetreAnnees: annees, serie: [], stats: null, majTs: null });
+    set({ fenetreAnnees: annees, serie: [], stats: null, majTs: null, provenanceTga: null });
     void get().run(true);
   },
 
@@ -132,7 +135,7 @@ export const netliqStore = createStore<NetliqState>((set, get) => ({
     }
     if (runId !== currentRunId) return;
 
-    const serie = serieNetliq(series.walcl, series.tga, series.rrp);
+    const serie = serieNetliqHebdomadaire(series.walcl, series.tga, series.rrp);
     const stats = statsNetliq(serie);
 
     if (serie.length === 0 && get().serie.length > 0) {
@@ -143,6 +146,6 @@ export const netliqStore = createStore<NetliqState>((set, get) => ({
     }
 
     // Succès : série/stats mises à jour, `erreur` effacée, fraîcheur horodatée (base du TTL).
-    set({ enCours: false, serie, stats, erreur: null, majTs: Date.now() });
+    set({ enCours: false, serie, stats, erreur: null, majTs: Date.now(), provenanceTga: series.provenanceTga ?? "FRED WTREGEN (repli)" });
   },
 }));

@@ -27,6 +27,10 @@ export {
 export { stablecoinsSupplyProvider } from "./stablecoins";
 
 export { createFredM2Provider, fredM2MonthlyProvider, fredM2WeeklyProvider } from "./fred";
+export type { ObservationAlfred, OptionsAlfred } from "./alfred";
+export { chargerPremieresPublicationsAlfred, chargerVueAlfred } from "./alfred";
+export type { SerieTgaTreasury, OptionsTgaTreasury } from "./treasury";
+export { chargerSerieTgaTreasury, extraireTgaDts } from "./treasury";
 
 export type {
   DefinitionSerieMacro,
@@ -37,7 +41,7 @@ export type {
 export { CATALOGUE_MACRO, INDICATEURS_MACRO, ORDRE_REGIONS, seriesDeIndicateur } from "./catalogueMacro";
 
 export type { FrequenceMacro } from "./harmonisation";
-export { filtrerFenetre, finDePeriode, periodeVersMs, trierChrono } from "./harmonisation";
+export { filtrerFenetre, finDePeriode, periodeVersMs, trierChrono, variationAnnualisee, variationsEmploi } from "./harmonisation";
 
 export type { ResultatSerieMacro } from "./chargerSerieMacro";
 export { chargerSerieMacro, cleSante } from "./chargerSerieMacro";

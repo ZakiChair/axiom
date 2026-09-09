@@ -4,8 +4,13 @@ import type { FrequenceMacro } from "./harmonisation";
 import type { HorizonMacro } from "../../store/macroRatesView";
 
 export function formatValeurMacro(value: number, unite: UniteMacro, signe = false): string {
-  const nombre = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: unite === "personnes" ? 0 : 2, maximumFractionDigits: unite === "personnes" ? 0 : 2, ...(signe ? { signDisplay: "exceptZero" as const } : {}) }).format(value).replace(/-/g, "−");
-  return nombre + (unite === "%" || unite === "pb" ? ` ${unite}` : "");
+  const decimales = unite === "personnes" || unite === "millions-usd-nominaux" ? 0 : unite === "indice-2017=100" || unite === "milliers" ? 3 : 2;
+  const nombre = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: decimales, maximumFractionDigits: decimales, ...(signe ? { signDisplay: "exceptZero" as const } : {}) }).format(value).replace(/-/g, "−");
+  if (unite === "%" || unite === "pb") return `${nombre} ${unite}`;
+  if (unite === "indice-2017=100") return `${nombre} (2017=100)`;
+  if (unite === "milliers") return `${nombre} milliers`;
+  if (unite === "millions-usd-nominaux") return `${nombre} M$ nominaux`;
+  return nombre;
 }
 const mois = (ts: number): string => new Intl.DateTimeFormat("fr-FR", { month: "short", timeZone: "UTC" }).format(ts);
 export function formatPeriodeMacro(time: number, def: Pick<DefinitionSerieMacro, "frequence" | "decalageFinMois">): string {

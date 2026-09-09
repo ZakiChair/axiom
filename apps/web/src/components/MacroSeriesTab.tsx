@@ -80,16 +80,18 @@ export function MacroSeriesTab({ refreshToken = 0 }: { refreshToken?: number }) 
   const indicateur = useStore(macroRatesViewStore, (s) => s.indicateur);
   const regions = useStore(macroRatesViewStore, (s) => s.regions);
   const horizon = useStore(macroRatesViewStore, (s) => s.horizonAnnees);
+  const connuLe = useStore(macroRatesViewStore, (s) => s.connuLe);
   const dernierRefresh = useRef(refreshToken);
   useEffect(() => {
     const ctrl = new AbortController();
     const force = dernierRefresh.current !== refreshToken;
     dernierRefresh.current = refreshToken;
-    void macroSeriesStore.getState().demanderIndicateur(indicateur, { regions, horizonAnnees: horizon, signal: ctrl.signal, force });
+    void macroSeriesStore.getState().demanderIndicateur(indicateur, { regions, horizonAnnees: horizon, signal: ctrl.signal, force, connuLe });
     return () => ctrl.abort();
-  }, [indicateur, regions, horizon, refreshToken]);
+  }, [indicateur, regions, horizon, refreshToken, connuLe]);
   const definitions = useMemo(() => seriesDeIndicateur(indicateur), [indicateur]);
   const visibles = definitions.filter((d) => regions.includes(d.region));
+  const compatibleAlfred = visibles.length === 1 && visibles[0]?.source.transport === "fred";
   const meta = INDICATEURS_MACRO.find((i) => i.id === indicateur)!;
   const courbes: CourbeMacro[] = visibles.map((def) => ({ def, points: serieDansHorizon(series[def.id]?.points ?? [], horizon), couleur: couleur(def.region), ...(tirets(def) ? { tirets: tirets(def) } : {}) }));
   const chargement = visibles.some((d) => series[d.id]?.statut === "loading");
@@ -114,6 +116,9 @@ export function MacroSeriesTab({ refreshToken = 0 }: { refreshToken?: number }) 
           </select>
         </label>
         <Segmente options={HORIZONS} actif={horizon} onChange={(h) => macroRatesViewStore.getState().selectionnerHorizon(h)} />
+        {compatibleAlfred && <label className="flex items-center gap-1 text-[10px] text-text-dim">Connu au
+          <input aria-label="Connu au ALFRED" type="date" value={connuLe ?? ""} onChange={(event) => macroRatesViewStore.getState().selectionnerConnuLe(event.target.value || null)} className="rounded border border-border bg-surface px-1 py-1 text-text" />
+        </label>}
       </div>
       <div className="flex flex-wrap gap-1" role="group" aria-label="Zones macro">
         {ORDRE_REGIONS.map((region) => <BoutonBascule key={region} actif={regions.includes(region)} disabled={!definitions.some((d) => d.region === region)} title={REGIONS_MACRO[region]} onClick={() => macroRatesViewStore.getState().selectionnerRegions(regions.includes(region) ? regions.filter((r) => r !== region) : [...regions, region])}>{region}</BoutonBascule>)}
@@ -127,7 +132,7 @@ export function MacroSeriesTab({ refreshToken = 0 }: { refreshToken?: number }) 
           <TableTriable ariaLabel="Observations macro par zone" colonnes={colonnes} lignes={courbes} cle={c => c.def.id} />
         </div>
       </div>
-      <NoteSource>Dates = périodes observées, distinctes de la récupération. Date de première publication non fournie ; valeurs susceptibles de révision. Cache : 1 h pour les séries quotidiennes, 6 h pour les hebdomadaires, 24 h pour les mensuelles et trimestrielles. FRED nécessite une clé configurée. Les périmètres nationaux diffèrent ; aucune donnée n'est interpolée.</NoteSource>
+      <NoteSource>Dates = périodes observées, distinctes de la récupération. {connuLe && compatibleAlfred ? `Vue ALFRED au ${connuLe}, granularité quotidienne ; cette réponse ne fournit pas l'heure ni une première publication authentifiée.` : "Date de première publication non fournie ; valeurs susceptibles de révision."} Cache isolé par millésime : 1 h pour les séries quotidiennes, 6 h pour les hebdomadaires, 24 h pour les mensuelles et trimestrielles. FRED nécessite une clé configurée. Les périmètres nationaux diffèrent ; aucune donnée n'est interpolée.</NoteSource>
     </div>
   );
 }

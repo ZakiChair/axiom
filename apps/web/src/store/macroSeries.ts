@@ -29,6 +29,8 @@ export interface OptionsDemande {
   horizonAnnees?: HorizonMacro;
   signal?: AbortSignal;
   attendre?: (ms: number) => Promise<void>;
+  /** Vue ALFRED au jour indiqué pour les seules séries FRED compatibles. */
+  connuLe?: string | null;
 }
 export interface MacroSeriesState {
   series: Record<string, EtatSerie>;
@@ -36,16 +38,17 @@ export interface MacroSeriesState {
 }
 const etatVide = (): EtatSerie => ({ statut: "idle", points: [], majTs: null, message: null });
 const signature = (def: DefinitionSerieMacro): string => JSON.stringify([2, def.source, def.transformation, def.decalageFinMois]);
-function lireCache(def: DefinitionSerieMacro): EntreeCache | null {
+function cleCache(def: DefinitionSerieMacro, connuLe?: string | null): string { return PREFIXE_CACHE + def.id + (connuLe ? `.alfred-${connuLe}` : ""); }
+function lireCache(def: DefinitionSerieMacro, connuLe?: string | null): EntreeCache | null {
   try {
-    const entree = JSON.parse(localStorage.getItem(PREFIXE_CACHE + def.id) ?? "null") as EntreeCache | null;
+    const entree = JSON.parse(localStorage.getItem(cleCache(def, connuLe) ?? "null") as string) as EntreeCache | null;
     if (!entree || entree.signature !== signature(def) || !Number.isFinite(entree.ts) || !Number.isFinite(entree.depuis) || !Array.isArray(entree.points) || !entree.points.length) return null;
     if (entree.points.some((p) => !Number.isFinite(p.time) || !Number.isFinite(p.value))) return null;
     return { ...entree, points: entree.points.slice().sort((a, b) => a.time - b.time) };
   } catch { return null; }
 }
-function ecrireCache(def: DefinitionSerieMacro, points: MacroSeries, depuis: number, ts: number): void {
-  try { localStorage.setItem(PREFIXE_CACHE + def.id, JSON.stringify({ ts, depuis, signature: signature(def), points } satisfies EntreeCache)); } catch { /* Cache facultatif. */ }
+function ecrireCache(def: DefinitionSerieMacro, points: MacroSeries, depuis: number, ts: number, connuLe?: string | null): void {
+  try { localStorage.setItem(cleCache(def, connuLe), JSON.stringify({ ts, depuis, signature: signature(def), points } satisfies EntreeCache)); } catch { /* Cache facultatif. */ }
 }
 function ttl(def: DefinitionSerieMacro): number { return def.frequence === "D" ? 3_600_000 : def.frequence === "W" ? 6 * 3_600_000 : TTL_CACHE_MS; }
 const attendreParDefaut = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -86,7 +89,7 @@ export const macroSeriesStore = createStore<MacroSeriesState>((set, get) => {
     const version = Symbol();
     await Promise.all(definitions.map(async (def) => {
       versions.set(def.id, version);
-      const cache = lireCache(def);
+      const cache = lireCache(def, opts.connuLe);
       const frais = !!cache && now - cache.ts <= ttl(def) && cache.depuis <= depuis;
       if (cache && !(get().series[def.id]?.points.length)) {
         const dernier = cache.points.at(-1)!;
@@ -99,7 +102,7 @@ export const macroSeriesStore = createStore<MacroSeriesState>((set, get) => {
       }
       const precedent = get().series[def.id] ?? etatVide();
       majSerie(def.id, { statut: "loading", message: null, ...(cache && !frais ? { perime: true } : {}) });
-      const charger = (): Promise<ResultatSerieMacro> => chargerSerieMacro(def, depuis, opts.signal).catch(() => opts.signal?.aborted ? { statut: "annule" } : { statut: "panne", message: "Source indisponible." });
+      const charger = (): Promise<ResultatSerieMacro> => chargerSerieMacro(def, depuis, opts.signal, opts.connuLe).catch(() => opts.signal?.aborted ? { statut: "annule" } : { statut: "panne", message: "Source indisponible." });
       const resultat = def.source.transport === "oecd" ? await dansFileOecd(charger, opts) : await charger();
       if (versions.get(def.id) !== version) return;
       if (resultat.statut === "annule" || opts.signal?.aborted) {
@@ -110,7 +113,7 @@ export const macroSeriesStore = createStore<MacroSeriesState>((set, get) => {
         const ts = Date.now();
         const dernier = resultat.points.at(-1)!;
         majSerie(def.id, { statut: "ok", points: resultat.points, majTs: finDePeriode(dernier.time, def.frequence, def.decalageFinMois), message: null, recupereTs: ts, perime: false });
-        ecrireCache(def, resultat.points, depuis, ts);
+        ecrireCache(def, resultat.points, depuis, ts, opts.connuLe);
         healthStore.getState().setEtat(cleSante(def), "polling", { dernierMessageTs: ts });
       } else {
         majSerie(def.id, { statut: resultat.statut, message: resultat.message, perime: precedent.points.length > 0 });
@@ -123,7 +126,7 @@ export const macroSeriesStore = createStore<MacroSeriesState>((set, get) => {
   return {
     series: {},
     demanderIndicateur: (indicateur, opts = {}) => {
-      const cle = JSON.stringify([indicateur, opts.regions?.slice().sort(), opts.horizonAnnees ?? 5]);
+      const cle = JSON.stringify([indicateur, opts.regions?.slice().sort(), opts.horizonAnnees ?? 5, opts.connuLe ?? null]);
       const enCours = chargementsEnCours.get(cle);
       const partageable = enCours && !enCours.signal?.aborted && enCours.signal === opts.signal;
       if (partageable && !opts.force) return enCours.promesse;

@@ -37,6 +37,19 @@ describe("catalogue mondial", () => {
     expect(INDICATEURS_MACRO.find((i) => i.id === "sofr-iorb")?.unite).toBe("pb");
     expect(seriesDeIndicateur("demandes-chomage")).toHaveLength(2);
   });
+  it("catalogue les familles PCE, emploi et retail avec leurs unités natives explicites", () => {
+    const attendus = [
+      ["pce-niveau", "indice-2017=100", "PCEPILFE"], ["pce-aa", "%", "PCEPILFE"], ["pce-3m", "%", "PCEPILFE"], ["pce-6m", "%", "PCEPILFE"],
+      ["emploi-variation", "milliers", "PAYEMS"], ["emploi-moyenne3m", "milliers", "PAYEMS"],
+      ["retail-niveau", "millions-usd-nominaux", "RSAFS"], ["retail-mm", "%", "RSAFS"], ["retail-aa", "%", "RSAFS"],
+    ] as const;
+    for (const [id, unite, seriesId] of attendus) {
+      expect(INDICATEURS_MACRO.find((i) => i.id === id)?.unite).toBe(unite);
+      expect(CATALOGUE_MACRO.find((d) => d.indicateur === id)).toMatchObject({ region: "US", frequence: "M", source: { transport: "fred", seriesId } });
+    }
+    expect(CATALOGUE_MACRO.find((d) => d.indicateur === "pce-niveau")?.perimetre).toContain("désaisonnalisé");
+    expect(CATALOGUE_MACRO.find((d) => d.indicateur === "retail-niveau")?.perimetre).toContain("nominaux");
+  });
   it("ne laisse aucune dimension OCDE joker ou multi-pays dans le runtime", () => {
     for (const d of CATALOGUE_MACRO) {
       if (d.source.transport !== "oecd") continue;

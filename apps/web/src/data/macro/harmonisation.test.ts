@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filtrerFenetre, finDePeriode, periodeVersMs, trierChrono } from "./harmonisation";
+import { filtrerFenetre, finDePeriode, periodeVersMs, trierChrono, variationAnnualisee, variationsEmploi } from "./harmonisation";
 
 describe("periodeVersMs", () => {
   it("convertit une période mensuelle SDMX en début de mois UTC", () => {
@@ -69,6 +69,44 @@ describe("filtrerFenetre", () => {
 });
 
 describe("transformations calendaires macro", () => {
+  it("annualise PCE sur trois mois civils consécutifs", () => {
+    const points = [
+      { time: Date.UTC(2026, 3, 1), value: 129.681 },
+      { time: Date.UTC(2026, 6, 1), value: 130.658 },
+    ];
+    expect(variationAnnualisee(points, 3)[0]?.value).toBeCloseTo(3.048, 2);
+  });
+  it("refuse une annualisation quand un mois civil requis manque ou le niveau est négatif", () => {
+    expect(variationAnnualisee([
+      { time: Date.UTC(2026, 0, 1), value: 100 },
+      { time: Date.UTC(2026, 4, 1), value: 102 },
+      { time: Date.UTC(2026, 6, 1), value: -103 },
+    ], 3)).toEqual([]);
+  });
+  it("calcule PAYEMS en milliers et sa moyenne sur trois différences consécutives", () => {
+    const points = [
+      { time: Date.UTC(2026, 0, 1), value: 100_000 },
+      { time: Date.UTC(2026, 1, 1), value: 100_100 },
+      { time: Date.UTC(2026, 2, 1), value: 100_300 },
+      { time: Date.UTC(2026, 3, 1), value: 100_250 },
+    ];
+    expect(variationsEmploi(points)).toEqual({
+      variation: [
+        { time: Date.UTC(2026, 1, 1), value: 100 },
+        { time: Date.UTC(2026, 2, 1), value: 200 },
+        { time: Date.UTC(2026, 3, 1), value: -50 },
+      ],
+      moyenne3m: [{ time: Date.UTC(2026, 3, 1), value: 83.33333333333333 }],
+    });
+  });
+  it("ne calcule pas la moyenne emploi si les quatre mois requis ne sont pas consécutifs", () => {
+    expect(variationsEmploi([
+      { time: Date.UTC(2026, 0, 1), value: 100 },
+      { time: Date.UTC(2026, 1, 1), value: 110 },
+      { time: Date.UTC(2026, 3, 1), value: 120 },
+      { time: Date.UTC(2026, 4, 1), value: 130 },
+    ]).moyenne3m).toEqual([]);
+  });
   it("ne confond pas douze observations et douze mois quand un mois manque", async () => {
     const { variationPeriode } = await import("./harmonisation");
     const points = [{ time: Date.UTC(2025, 0, 1), value: 100 }, { time: Date.UTC(2025, 2, 1), value: 110 }, { time: Date.UTC(2026, 0, 1), value: 120 }, { time: Date.UTC(2026, 1, 1), value: 130 }];

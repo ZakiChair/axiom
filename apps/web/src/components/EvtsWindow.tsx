@@ -28,15 +28,27 @@ import {
   fenetreFetch,
   libelleStatParType,
   statsEvts,
+  calculerReactionEvenement,
   type AgregatEvts,
   type FenetreAlignee,
   type OccurrenceExclue,
+  type ReactionEvenement,
 } from "../lib/evts";
 import { lireTokenCanvas, POLICE_CANVAS, rgbaTokenCanvas } from "../lib/canvasTokens";
 import { formatDateComplete, formatPct, formatPourcentage } from "../lib/format";
 import { marketStore } from "../store/market";
 import { evtsUiStore } from "../store/evts";
 import { windowManagerStore } from "../store/windowManager";
+import {
+  chargerVersionsAlfredPublication,
+  chargerHistoriqueVersionsAlfred,
+  ecrireArchivesPublications,
+  exporterArchivesPublications,
+  importerArchivesPublications,
+  lireArchivesPublications,
+  type ArchivePublication,
+  type VersionHistoriqueAlfred,
+} from "../data/macro/publicationArchive";
 import { Chargement, EnTeteFenetre, ErreurBloc, TuileStat, NoteSource, Segmente, Vide } from "./ui";
 
 // ─────────────────────────── Contrôles ───────────────────────────
@@ -94,11 +106,22 @@ async function calculerEvts(
   demiFenetre: number,
   n: number,
   signal: AbortSignal,
+  selection?: { time: number; timeApprox: boolean },
 ): Promise<ResultatCalcul> {
   const dates = await chargerDatesEvenement(type);
   if (signal.aborted) return { datesVides: false, resultats: [] };
 
-  const passes = derniersPasses(dates, Date.now(), n);
+  const strictIntraday = tf === "1h";
+  const candidates = selection
+    ? dates.filter((date) => date.time === selection.time).concat(
+      dates.some((date) => date.time === selection.time) ? [] : [{ time: selection.time, ymd: new Date(selection.time).toISOString().slice(0, 10), timeApprox: selection.timeApprox, source: "import" as const }],
+    )
+    : dates;
+  const passes = derniersPasses(
+    strictIntraday ? candidates.filter((date) => !date.timeApprox) : candidates,
+    Date.now(),
+    n,
+  );
   if (passes.length === 0) return { datesVides: true, resultats: [] };
 
   const adapter = getAdapter(exchange);
@@ -108,13 +131,30 @@ async function calculerEvts(
       try {
         const { limit, endTime } = fenetreFetch(d.time, demiFenetre, tfMs);
         const candles: Candle[] = await adapter.fetchKlines(symbol, tf, { limit, endTime });
-        return alignerFenetre(candles, d.time, demiFenetre);
+        return alignerFenetre(candles, d.time, demiFenetre, tfMs);
       } catch {
         return { eventTime: d.time, raison: "fetch-echec" };
       }
     }),
   );
   return { datesVides: false, resultats };
+}
+
+async function calculerReactionsBtcEth(eventTime: number): Promise<Record<"BTC" | "ETH", ReactionEvenement | OccurrenceExclue>> {
+  const adapter = getAdapter("binance");
+  const endTime = eventTime + 1_442 * 60_000;
+  const [btc, eth] = await Promise.all(["BTCUSDT", "ETHUSDT"].map(async (symbol) => {
+    try {
+      const candles = await adapter.fetchKlines(symbol, "1m", { limit: 1_450, endTime });
+      return calculerReactionEvenement(candles, eventTime);
+    } catch {
+      return { eventTime, raison: "fetch-echec" } as OccurrenceExclue;
+    }
+  }));
+  return {
+    BTC: btc ?? { eventTime, raison: "fetch-echec" },
+    ETH: eth ?? { eventTime, raison: "fetch-echec" },
+  };
 }
 
 // ─────────────────────────── Rendu canvas ───────────────────────────
@@ -263,13 +303,19 @@ export function EvtsWindow() {
   const [statut, setStatut] = useState<Statut>("idle");
   const [datesVides, setDatesVides] = useState(false);
   const [resultats, setResultats] = useState<(FenetreAlignee | OccurrenceExclue)[]>([]);
+  const [reactions, setReactions] = useState<Record<"BTC" | "ETH", ReactionEvenement | OccurrenceExclue> | null>(null);
+  const [publications, setPublications] = useState<ArchivePublication[]>([]);
+  const [historiqueAlfred, setHistoriqueAlfred] = useState<VersionHistoriqueAlfred[]>([]);
+  const [messageArchive, setMessageArchive] = useState<string | null>(null);
+  const selection = useStore(evtsUiStore, (s) => s.selection);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const ctrl = new AbortController();
     setStatut("loading");
-    void calculerEvts(exchange, symbol, type, tf, demiFenetre, n, ctrl.signal)
+    void calculerEvts(exchange, symbol, type, tf, demiFenetre, n, ctrl.signal, selection && selection.type === type ? selection : undefined)
       .then((out) => {
         if (ctrl.signal.aborted) return;
         setDatesVides(out.datesVides);
@@ -291,7 +337,53 @@ export function EvtsWindow() {
         }
       });
     return () => ctrl.abort();
-  }, [open, type, tf, demiFenetre, n, symbol, exchange]);
+  }, [open, type, tf, demiFenetre, n, symbol, exchange, selection]);
+
+  useEffect(() => {
+    if (selection !== null) setType(selection.type);
+  }, [selection]);
+
+  useEffect(() => {
+    if (!open) return;
+    const archive = lireArchivesPublications().filter((item) => item.type === type).at(-1);
+    const cible = selection?.type === type ? selection : archive;
+    if (!cible || cible.timeApprox) {
+      setReactions(null);
+      return;
+    }
+    let annule = false;
+    const eventTime = "time" in cible ? cible.time : cible.publishedAt;
+    void calculerReactionsBtcEth(eventTime).then((valeurs) => {
+      if (!annule) setReactions(valeurs);
+    });
+    return () => { annule = true; };
+  }, [open, type, selection]);
+
+  useEffect(() => {
+    if (!open) return;
+    let annule = false;
+    const connuLe = new Date().toISOString().slice(0, 10);
+    void Promise.all(
+      lireArchivesPublications()
+        .filter((archive) => archive.type === type)
+        .map((archive) => chargerVersionsAlfredPublication(archive, connuLe)),
+    ).then((archives) => {
+      if (!annule) setPublications(archives);
+    });
+    return () => { annule = true; };
+  }, [open, type]);
+
+  useEffect(() => {
+    if (!open || type === "fomc") {
+      setHistoriqueAlfred([]);
+      return;
+    }
+    let annule = false;
+    void chargerHistoriqueVersionsAlfred(type, new Date().toISOString().slice(0, 10), 6).then((versions) => {
+      if (!annule) setHistoriqueAlfred(versions);
+    });
+    return () => { annule = true; };
+  }, [open, type]);
 
   const fenetres = useMemo(
     () => resultats.filter((r): r is FenetreAlignee => "points" in r),
@@ -315,7 +407,29 @@ export function EvtsWindow() {
   const noteSource =
     type === "fomc"
       ? "Dates FOMC : calendrier officiel de la Réserve fédérale (statique). Heures 14:00 ET → UTC, DST approx."
-      : `Dates ${labelType} : FRED release/dates. Heures 08:30 ET → UTC, DST approx.`;
+      : `Dates ${labelType} : archives BLS/import sourcées à l'heure exacte quand disponibles ; FRED release/dates est reconstitué et exclu de l'intraday strict.`;
+
+  const exporter = (): void => {
+    const contenu = exporterArchivesPublications(lireArchivesPublications());
+    const url = URL.createObjectURL(new Blob([contenu], { type: "application/json" }));
+    const lien = document.createElement("a");
+    lien.href = url;
+    lien.download = "axiom-publications-eco.json";
+    lien.click();
+    URL.revokeObjectURL(url);
+    setMessageArchive("Archive exportée sans secret.");
+  };
+
+  const importer = async (file: File | undefined): Promise<void> => {
+    if (!file) return;
+    try {
+      const archives = importerArchivesPublications(await file.text());
+      if (!ecrireArchivesPublications(archives)) throw new Error("stockage local indisponible");
+      setMessageArchive(`${archives.length} archive(s) importée(s), source et dates validées.`);
+    } catch (err) {
+      setMessageArchive(`Import refusé : ${err instanceof Error ? err.message : "format invalide"}`);
+    }
+  };
 
   return (
     <>
@@ -351,7 +465,12 @@ export function EvtsWindow() {
           <div className="min-w-[110px]">
             <Segmente options={OPTIONS_N} actif={n} onChange={setN} />
           </div>
+          <button type="button" className="rounded border border-border px-2 text-[10px] text-text-dim hover:text-text" onClick={() => importRef.current?.click()}>Importer archive</button>
+          <button type="button" className="rounded border border-border px-2 text-[10px] text-text-dim hover:text-text" onClick={exporter}>Exporter archive</button>
+          <input ref={importRef} type="file" accept="application/json" className="hidden" onChange={(event) => { void importer(event.target.files?.[0]); event.currentTarget.value = ""; }} />
         </div>
+
+        {messageArchive !== null && <div className="text-[11px] text-text-dim">{messageArchive}</div>}
 
         {statut === "loading" && <Chargement />}
         {statut === "error" && (
@@ -386,6 +505,47 @@ export function EvtsWindow() {
                 <TuileStat disposition="inline" label="Vol. post" valeur={formatPourcentage(stats.volPost, 1)} />
                 <TuileStat disposition="inline" label="Min" valeur={formatPct(stats.min, 1)} couleur="var(--down)" />
                 <TuileStat disposition="inline" label="Max" valeur={formatPct(stats.max, 1)} couleur="var(--up)" />
+              </div>
+            )}
+
+            {reactions !== null && (
+              <div className="rounded border border-border px-2 py-1.5 text-[11px]">
+                <div className="mb-1 text-text-dim">Réactions BTC/ETH, association temporelle sans causalité affirmée · M1 continue requise</div>
+                {(["BTC", "ETH"] as const).map((actif) => {
+                  const reaction = reactions[actif];
+                  if (!("horizons" in reaction)) return <div key={actif}>{actif} : {libelleRaison(reaction.raison)}</div>;
+                  return <div key={actif} className="flex flex-wrap gap-x-3 gap-y-0.5 tabular-nums">
+                    <span className="font-medium">{actif}</span>
+                    {reaction.horizons.map((horizon) => (
+                      <span key={horizon.minutes}>+{horizon.minutes === 1440 ? "24h" : `${horizon.minutes}m`} {formatPct(horizon.rendementPct ?? 0, 2)} · vol {formatPourcentage(horizon.volatilitePct ?? 0, 2)} · V {horizon.volume?.toFixed(2) ?? "—"} · cov {horizon.couverture}/{horizon.minutes}</span>
+                    ))}
+                  </div>;
+                })}
+              </div>
+            )}
+
+            {publications.length > 0 && (
+              <div className="rounded border border-border px-2 py-1.5 text-[11px]">
+                <div className="mb-1 text-text-dim">Publication et versions — période distincte du jour d'annonce</div>
+                {publications.map((publication) => (
+                  <div key={publication.id} className="flex flex-wrap gap-x-2 gap-y-0.5">
+                    <a className="text-accent hover:underline" href={publication.source.url} target="_blank" rel="noreferrer">{publication.period} · source</a>
+                    <span>initiale {publication.valeurInitiale ? `${publication.valeurInitiale.value} ${publication.valeurInitiale.unit}` : `${publication.actual.value} ${publication.actual.unit}`}</span>
+                    <span>révisée {publication.valeurRevisée ? `${publication.valeurRevisée.value} ${publication.valeurRevisée.unit}` : "indisponible"}</span>
+                    <span>consensus {publication.consensusAvantAnnonce === null ? "historique non archivé" : String(publication.consensusAvantAnnonce.value)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {historiqueAlfred.length > 0 && (
+              <div className="rounded border border-border px-2 py-1.5 text-[11px]">
+                <div className="mb-1 text-text-dim">ALFRED : première publication / révision par période · heure indisponible (jour seulement)</div>
+                {historiqueAlfred.map((version) => (
+                  <div key={`${version.type}-${version.period}`} className="flex flex-wrap gap-x-2 tabular-nums">
+                    <span>{version.period}</span><span>initiale {version.valeurInitiale}</span><span>révisée {version.valeurRevisée ?? "—"}</span>
+                  </div>
+                ))}
               </div>
             )}
 

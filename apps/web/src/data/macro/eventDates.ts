@@ -9,7 +9,8 @@
  *
  * Sources :
  *   - CPI / NFP : dates HISTORIQUES + FUTURES via FRED `release/dates` (proxy /fredapi déjà
- *     câblé, cf. data/eco.ts). Exactes et complètes 2020 → présent, sans liste à maintenir.
+ *     câblé, cf. data/eco.ts). FRED fournit le jour, l'heure ET est reconstituée et marquée
+ *     approximative ; les archives BLS/import sourcées la remplacent lorsqu'elles existent.
  *   - FOMC : dates de décision codées en dur (aucun réseau) — l'historique 2020-2025 curé
  *     depuis les pages officielles de la Réserve fédérale + le futur 2026-2027 réutilisé
  *     depuis data/eco.ts (`FOMC_DATES`, source unique — pas de recopie).
@@ -20,16 +21,19 @@
  */
 import { FOMC_DATES } from "../eco";
 import { getFredKey } from "../../store/macro";
+import { lireArchivesPublications, type TypePublication } from "./publicationArchive";
 
 // ─────────────────────────── Types & contrat ───────────────────────────
 
 /** Type d'évènement étudié. */
-export type TypeEvenement = "cpi" | "nfp" | "fomc";
+export type TypeEvenement = TypePublication | "fomc";
 
 /** Liste ordonnée des types (contrôles UI + libellés). */
 export const TYPES_EVENEMENT: { id: TypeEvenement; label: string }[] = [
   { id: "cpi", label: "CPI US" },
   { id: "nfp", label: "NFP" },
+  { id: "pce", label: "PCE US" },
+  { id: "retail", label: "Ventes détail US" },
   { id: "fomc", label: "FOMC" },
 ];
 
@@ -39,6 +43,9 @@ export interface DateEvenement {
   time: number;
   /** Jour de publication « YYYY-MM-DD » (clé lisible + regroupement). */
   ymd: string;
+  /** FRED date seulement ses publications : l'heure reconstituée ne passe pas en intraday strict. */
+  timeApprox: boolean;
+  source: "bls" | "fred" | "fomc" | "import";
 }
 
 // ─────────────────────────── DST US (heure d'été, règle post-2007) ───────────────────────────
@@ -73,6 +80,8 @@ export function estEteUs(ymd: string): boolean {
 const HEURE_LOCALE_ET: Record<TypeEvenement, { h: number; min: number }> = {
   cpi: { h: 8, min: 30 }, // 08:30 ET
   nfp: { h: 8, min: 30 }, // 08:30 ET
+  pce: { h: 8, min: 30 },
+  retail: { h: 8, min: 30 },
   fomc: { h: 14, min: 0 }, // 14:00 ET (communiqué de décision)
 };
 
@@ -113,7 +122,7 @@ export function parseReleaseDates(donnees: unknown, type: TypeEvenement): DateEv
     if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd) || parYmd.has(ymd)) continue;
     const time = tsPublicationUtc(ymd, type);
     if (!Number.isFinite(time)) continue; // ex. « 2025-13-99 » → NaN → ignoré
-    parYmd.set(ymd, { time, ymd });
+    parYmd.set(ymd, { time, ymd, timeApprox: true, source: "fred" });
   }
   return [...parYmd.values()].sort((a, b) => a.time - b.time);
 }
@@ -194,7 +203,7 @@ function datesFomc(): DateEvenement[] {
   const parYmd = new Map<string, DateEvenement>();
   for (const ymd of [...FOMC_DATES_HISTO, ...FOMC_DATES]) {
     if (parYmd.has(ymd)) continue; // dédoublonnage défensif (les deux listes ne se recouvrent pas)
-    parYmd.set(ymd, { time: tsPublicationUtc(ymd, "fomc"), ymd });
+    parYmd.set(ymd, { time: tsPublicationUtc(ymd, "fomc"), ymd, timeApprox: true, source: "fomc" });
   }
   return [...parYmd.values()].sort((a, b) => a.time - b.time);
 }
@@ -202,7 +211,12 @@ function datesFomc(): DateEvenement[] {
 // ─────────────────────────── Chargement (fetch + cache) ───────────────────────────
 
 /** Release FRED par type (CPI = 10, NFP / Employment Situation = 50). */
-const RELEASE_ID: Record<Exclude<TypeEvenement, "fomc">, number> = { cpi: 10, nfp: 50 };
+const RELEASE_ID: Record<Exclude<TypeEvenement, "fomc">, number> = {
+  cpi: 10,
+  nfp: 50,
+  pce: 54,
+  retail: 51,
+};
 
 /** TTL du cache : 24 h (le calendrier des publications bouge lentement). */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -210,6 +224,29 @@ const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 interface CacheDates {
   ts: number;
   dates: DateEvenement[];
+}
+
+function ymdPublication(time: number): string {
+  return new Date(time).toISOString().slice(0, 10);
+}
+
+/** Archives explicites (BLS ou import sourcé) prioritaires sur une date FRED approximée. */
+function datesArchives(type: Exclude<TypeEvenement, "fomc">): DateEvenement[] {
+  return lireArchivesPublications()
+    .filter((archive) => archive.type === type)
+    .map((archive) => ({
+      time: archive.publishedAt,
+      ymd: ymdPublication(archive.publishedAt),
+      timeApprox: archive.timeApprox,
+      source: archive.source.nom.startsWith("Bureau of Labor Statistics") ? "bls" as const : "import" as const,
+    }));
+}
+
+function fusionnerDatesExactes(exactes: DateEvenement[], approx: DateEvenement[]): DateEvenement[] {
+  const parJour = new Map<string, DateEvenement>();
+  for (const date of approx) parJour.set(date.ymd, date);
+  for (const date of exactes) parJour.set(date.ymd, date);
+  return [...parJour.values()].sort((a, b) => a.time - b.time);
 }
 
 /** Lecture tolérante du cache (localStorage absent / JSON corrompu → null). Patron eco.ts. */
@@ -220,7 +257,16 @@ function lireCache(cle: string): CacheDates | null {
     if (!raw) return null;
     const p = JSON.parse(raw) as Partial<CacheDates> | null;
     if (!p || typeof p.ts !== "number" || !Array.isArray(p.dates)) return null;
-    return { ts: p.ts, dates: p.dates as DateEvenement[] };
+    const dates = p.dates.filter((date): date is DateEvenement => {
+      if (typeof date !== "object" || date === null) return false;
+      const item = date as Partial<DateEvenement>;
+      return Number.isFinite(item.time)
+        && typeof item.ymd === "string"
+        && typeof item.timeApprox === "boolean"
+        && (item.source === "bls" || item.source === "fred" || item.source === "fomc" || item.source === "import");
+    });
+    if (dates.length !== p.dates.length) return null;
+    return { ts: p.ts, dates };
   } catch {
     return null;
   }
@@ -246,9 +292,12 @@ function ecrireCache(cle: string, dates: DateEvenement[]): void {
 export async function chargerDatesEvenement(type: TypeEvenement): Promise<DateEvenement[]> {
   if (type === "fomc") return datesFomc();
 
-  const cle = `axiom:evts:dates:v1:${type}`;
+  const exactes = datesArchives(type);
+
+  // v2 exige explicitement l'incertitude de l'heure ; v1 pouvait faire passer FRED en intraday.
+  const cle = `axiom:evts:dates:v2:${type}`;
   const cache = lireCache(cle);
-  if (cache && Date.now() - cache.ts < CACHE_TTL_MS) return cache.dates;
+  if (cache && Date.now() - cache.ts < CACHE_TTL_MS) return fusionnerDatesExactes(exactes, cache.dates);
 
   try {
     const params = new URLSearchParams({
@@ -267,8 +316,8 @@ export async function chargerDatesEvenement(type: TypeEvenement): Promise<DateEv
     const json = (await res.json()) as unknown;
     const dates = parseReleaseDates(json, type);
     if (dates.length > 0) ecrireCache(cle, dates);
-    return dates;
+    return fusionnerDatesExactes(exactes, dates);
   } catch {
-    return cache?.dates ?? []; // cache périmé en repli, sinon vide
+    return fusionnerDatesExactes(exactes, cache?.dates ?? []); // cache périmé en repli
   }
 }

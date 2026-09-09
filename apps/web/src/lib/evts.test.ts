@@ -4,6 +4,7 @@ import type { FenetreAlignee, OccurrenceExclue } from "./evts";
 import {
   agregerFenetres,
   alignerFenetre,
+  calculerReactionEvenement,
   derniersPasses,
   fenetreFetch,
   libelleStatParType,
@@ -66,10 +67,10 @@ describe("alignerFenetre", () => {
   it("exclut quand aucune bougie ne couvre l'évènement (avant la première)", () => {
     const eventTime = base - H; // aucune bougie ≤ eventTime
     const res = alignerFenetre(candles, eventTime, 2);
-    expect(res).toEqual<OccurrenceExclue>({ eventTime, raison: "fenetre-incomplete" });
+    expect(res).toEqual<OccurrenceExclue>({ eventTime, raison: "h0-absent" });
   });
 
-  it("trou entre bougies : H0 = dernière bougie ≤ eventTime, alignement par index", () => {
+  it("exclut H0 quand l'évènement tombe dans un trou OHLC plutôt que de le décaler", () => {
     // Trou : les bougies 3h et 4h manquent (saut de 2h à 5h).
     const trou: Candle[] = [
       c(base + 0 * H, 10),
@@ -81,15 +82,19 @@ describe("alignerFenetre", () => {
       c(base + 8 * H, 70),
     ];
     const eventTime = base + 3 * H + H / 2; // 3h30 → dans le trou
-    const res = alignerFenetre(trou, eventTime, 2) as FenetreAlignee;
+    const res = alignerFenetre(trou, eventTime, 2);
 
-    expect("points" in res).toBe(true);
-    // H0 = index 2 (bougie 2h, close 30), dernière ≤ eventTime malgré le trou.
-    expect(res.points).toHaveLength(5);
-    expect(res.points.find((p) => p.offset === 0)?.ratio).toBe(1);
-    // Offset +1 = index 3 (bougie 5h, close 40) : l'alignement suit les index, pas le temps.
-    expect(res.points.find((p) => p.offset === 1)?.ratio).toBeCloseTo(40 / 30, 12);
-    expect(res.points.find((p) => p.offset === -1)?.ratio).toBeCloseTo(20 / 30, 12);
+    expect(res).toEqual<OccurrenceExclue>({ eventTime, raison: "h0-absent" });
+  });
+
+  it("exclut une fenêtre dont les bougies postérieures ne sont pas continues", () => {
+    const trouPost = candles.filter((_, i) => i !== 53);
+    const eventTime = base + 50 * H + H / 2;
+
+    expect(alignerFenetre(trouPost, eventTime, 3)).toEqual<OccurrenceExclue>({
+      eventTime,
+      raison: "trou-ohcl",
+    });
   });
 });
 
@@ -116,6 +121,38 @@ describe("agregerFenetres", () => {
 
   it("renvoie des tableaux vides pour une liste vide", () => {
     expect(agregerFenetres([])).toEqual({ offsets: [], mediane: [], p25: [], p75: [] });
+  });
+});
+
+describe("calculerReactionEvenement", () => {
+  it("mesure rendement, volume, volatilité et couverture aux horizons 5/15/60 min et 24 h", () => {
+    const base = Date.UTC(2026, 8, 4, 12, 30);
+    const minutes = Array.from({ length: 1441 }, (_, i) => ({
+      time: base + i * 60_000,
+      open: 100 + i / 10,
+      high: 100 + i / 10,
+      low: 100 + i / 10,
+      close: 100 + i / 10,
+      volume: 2,
+    }));
+    const result = calculerReactionEvenement(minutes, base + 30_000);
+
+    expect("horizons" in result).toBe(true);
+    if (!("horizons" in result)) return;
+    expect(result.horizons.map((h) => h.minutes)).toEqual([5, 15, 60, 1440]);
+    expect(result.horizons[0]).toMatchObject({ couverture: 5, volume: 10 });
+    expect(result.horizons[0]?.rendementPct).toBeCloseTo(0.5, 10);
+    expect(result.horizons.every((h) => h.volatilitePct !== null)).toBe(true);
+  });
+
+  it("ne prétend pas mesurer 24 h quand une minute manque", () => {
+    const base = Date.UTC(2026, 8, 4, 12, 30);
+    const minutes = Array.from({ length: 1441 }, (_, i) => c(base + i * 60_000, 100 + i));
+    minutes.splice(1000, 1);
+    expect(calculerReactionEvenement(minutes, base + 30_000)).toEqual<OccurrenceExclue>({
+      eventTime: base + 30_000,
+      raison: "trou-ohcl",
+    });
   });
 });
 

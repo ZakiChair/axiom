@@ -24,30 +24,42 @@ export interface FenetreAlignee {
 
 export interface OccurrenceExclue {
   eventTime: number;
-  raison: "fenetre-incomplete" | "fetch-echec";
+  raison: "fenetre-incomplete" | "fetch-echec" | "h0-absent" | "trou-ohcl";
 }
 
 /**
  * Aligne les bougies autour d'un évènement.
  *
- * H0 = dernière bougie dont l'open time ≤ eventTime (la bougie qui COUVRE l'évènement) ;
- * l'alignement suit les INDEX (pas le temps), donc un trou entre bougies décale H0 mais
- * la fenêtre reste [i−N, i+N]. Si aucune bougie ne couvre l'évènement ou si la fenêtre
- * déborde des bornes disponibles, l'occurrence est exclue (`fenetre-incomplete`).
+ * H0 est uniquement la bougie de l'intervalle réel `[open, open + tfMs)`, et toutes les
+ * bougies de `[H0−N, H0+N]` doivent être continues. Une absence ne peut donc jamais
+ * décaler H0 vers la dernière bougie précédente.
  */
 export function alignerFenetre(
   candles: Candle[],
   eventTime: number,
   demiFenetre: number,
+  tfMs?: number,
 ): FenetreAlignee | OccurrenceExclue {
-  // Dernière bougie ≤ eventTime (candles supposées triées par temps croissant).
-  let h0 = -1;
-  for (let i = 0; i < candles.length; i++) {
-    const candle = candles[i];
-    if (candle !== undefined && candle.time <= eventTime) h0 = i;
-  }
-  if (h0 < 0 || h0 - demiFenetre < 0 || h0 + demiFenetre >= candles.length) {
+  const pas = tfMs ?? infererPas(candles);
+  if (!Number.isFinite(pas) || pas <= 0) return { eventTime, raison: "h0-absent" };
+  const h0 = candles.findIndex((candle) =>
+    Number.isFinite(candle.time) && candle.time <= eventTime && eventTime < candle.time + pas,
+  );
+  if (h0 < 0) return { eventTime, raison: "h0-absent" };
+  if (h0 - demiFenetre < 0 || h0 + demiFenetre >= candles.length) {
     return { eventTime, raison: "fenetre-incomplete" };
+  }
+
+  for (let index = h0 - demiFenetre; index <= h0 + demiFenetre; index++) {
+    const courant = candles[index];
+    const precedent = index > h0 - demiFenetre ? candles[index - 1] : undefined;
+    if (
+      courant === undefined ||
+      !Number.isFinite(courant.close) ||
+      (precedent !== undefined && courant.time !== precedent.time + pas)
+    ) {
+      return { eventTime, raison: "trou-ohcl" };
+    }
   }
 
   const base = candles[h0]!.close;
@@ -56,6 +68,84 @@ export function alignerFenetre(
     points.push({ offset, ratio: candles[h0 + offset]!.close / base });
   }
   return { eventTime, points };
+}
+
+export interface ReactionHorizon {
+  minutes: 5 | 15 | 60 | 1440;
+  /** Nombre de minutes post-annonce effectivement continues. */
+  couverture: number;
+  rendementPct: number | null;
+  /** Volume cumulé des minutes postérieures à H0, dans l'unité de l'exchange. */
+  volume: number | null;
+  /** Écart-type population des retours minute à minute, en %. */
+  volatilitePct: number | null;
+}
+
+export interface ReactionEvenement {
+  eventTime: number;
+  horizons: ReactionHorizon[];
+}
+
+const HORIZONS_REACTION = [5, 15, 60, 1440] as const;
+
+/**
+ * Mesure une réaction sur des bougies M1 continues. Les données insuffisantes ne sont pas
+ * extrapolées : l'occurrence entière est écartée afin qu'une séance partielle ne devienne
+ * pas une fausse mesure 24 h.
+ */
+export function calculerReactionEvenement(
+  candles: Candle[],
+  eventTime: number,
+): ReactionEvenement | OccurrenceExclue {
+  const h0 = candles.findIndex((candle) => candle.time <= eventTime && eventTime < candle.time + 60_000);
+  if (h0 < 0) return { eventTime, raison: "h0-absent" };
+  const segment = candles.slice(h0, h0 + 1441);
+  if (segment.length !== 1441) return { eventTime, raison: "trou-ohcl" };
+  for (let index = 0; index < segment.length; index++) {
+    const courant = segment[index];
+    const precedent = segment[index - 1];
+    if (
+      courant === undefined ||
+      !Number.isFinite(courant.close) ||
+      !Number.isFinite(courant.volume) ||
+      (precedent !== undefined && courant.time !== precedent.time + 60_000)
+    ) {
+      return { eventTime, raison: "trou-ohcl" };
+    }
+  }
+  const base = segment[0]!.close;
+  if (!Number.isFinite(base) || base === 0) return { eventTime, raison: "trou-ohcl" };
+  return {
+    eventTime,
+    horizons: HORIZONS_REACTION.map((minutes) => {
+      const fin = segment[minutes]!;
+      const post = segment.slice(1, minutes + 1);
+      const retours = post.flatMap((candle, index) => {
+        const precedent = segment[index]!;
+        return precedent.close > 0 && candle.close > 0 ? [candle.close / precedent.close - 1] : [];
+      });
+      return {
+        minutes,
+        couverture: minutes,
+        rendementPct: (fin.close / base - 1) * 100,
+        volume: post.reduce((somme, candle) => somme + candle.volume, 0),
+        volatilitePct: ecartTypePopulation(retours) * 100,
+      };
+    }),
+  };
+}
+
+/** Pas minimal observé, réservé aux appels historiques ; EVTS transmet toujours son TF. */
+function infererPas(candles: Candle[]): number {
+  let pas = Infinity;
+  for (let i = 1; i < candles.length; i++) {
+    const precedent = candles[i - 1];
+    const courant = candles[i];
+    if (precedent === undefined || courant === undefined) continue;
+    const ecart = courant.time - precedent.time;
+    if (ecart > 0 && ecart < pas) pas = ecart;
+  }
+  return pas;
 }
 
 export interface AgregatEvts {

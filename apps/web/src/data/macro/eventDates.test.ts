@@ -81,10 +81,12 @@ describe("parseReleaseDates", () => {
 // ─────────────────────────── TYPES_EVENEMENT (contrat) ───────────────────────────
 
 describe("TYPES_EVENEMENT", () => {
-  it("expose les trois types avec leurs libellés", () => {
+  it("expose CPI, NFP, PCE, retail et FOMC avec leurs libellés", () => {
     expect(TYPES_EVENEMENT).toEqual([
       { id: "cpi", label: "CPI US" },
       { id: "nfp", label: "NFP" },
+      { id: "pce", label: "PCE US" },
+      { id: "retail", label: "Ventes détail US" },
       { id: "fomc", label: "FOMC" },
     ]);
   });
@@ -123,7 +125,12 @@ describe("chargerDatesEvenement('fomc')", () => {
 // ─────────────────────────── chargerDatesEvenement — dégradation CPI/NFP ───────────────────────────
 
 describe("chargerDatesEvenement('cpi') sans réseau", () => {
-  it("dégrade proprement : renvoie [] sans lever d'exception (fetch injoignable en env node)", async () => {
-    await expect(chargerDatesEvenement("cpi")).resolves.toEqual([]);
+  it("conserve l'archive BLS exacte sans lever d'exception", async () => {
+    await expect(chargerDatesEvenement("cpi")).resolves.toContainEqual({
+      time: Date.parse("2026-08-12T12:30:00Z"),
+      ymd: "2026-08-12",
+      timeApprox: false,
+      source: "bls",
+    });
   });
 });

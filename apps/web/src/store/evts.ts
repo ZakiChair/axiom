@@ -17,6 +17,9 @@ export interface EvtsUiState {
   openEvts: () => void;
   closeEvts: () => void;
   toggleEvts: () => void;
+  /** Occurrence demandée depuis ECO ; l'étude ne substitue jamais une autre date. */
+  selection: { type: TypeEvenement; time: number; timeApprox: boolean } | null;
+  ouvrirEvenement: (type: TypeEvenement, time: number, timeApprox: boolean) => void;
   /** Retour forward médian par type d'évènement (« méd +24 h : -0.8% »), pour la fenêtre
    *  BRIEF et le suffixe des marqueurs ECO (Task 4). `symbole` = le symbole SUR LEQUEL la
    *  stat a été calculée (marché courant, éventuellement un symbole de groupe) : les
@@ -32,6 +35,11 @@ export const evtsUiStore = createStore<EvtsUiState>((set) => ({
   openEvts: () => windowManagerStore.getState().openWindow("evts"),
   closeEvts: () => windowManagerStore.getState().closeWindow("evts"),
   toggleEvts: () => windowManagerStore.getState().toggleWindow("evts"),
+  selection: null,
+  ouvrirEvenement: (type, time, timeApprox) => {
+    set({ selection: { type, time, timeApprox } });
+    windowManagerStore.getState().openWindow("evts");
+  },
   statsParType: {},
   setStatParType: (type, symbole, libelle) =>
     set((s) => ({ statsParType: { ...s.statsParType, [type]: { symbole, libelle } } })),

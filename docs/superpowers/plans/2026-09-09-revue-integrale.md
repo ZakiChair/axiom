@@ -72,7 +72,9 @@ expect(100*((130.658/129.681)**4-1)).toBeCloseTo(3.048,2);
 
 ### Task 4: Flux communs et économie des chaînes
 
-**Depends:** Task 1 ; ne pas changer ses signatures. **Files:** nouveaux `data/onchain/{fluxCapitaux,economieChaines}.ts` et tests, store lent associé ; `components/onchain/{FluxCapitaux,EconomieChaines}.tsx` ; branchements `OnchainWindow.tsx`, `components/brief/SectionOnchain.tsx` (ou section équivalente existante), `StablecoinsWindow.tsx`, `SectorsWindow.tsx` (retrouver noms réels) ; `data/onchain/etfHistory.ts` si ratios historiques requis.
+**Depends:** Task 1 ; ne pas changer ses signatures. **Files:** nouveaux `data/onchain/{fluxCapitaux,economieChaines}.ts` et tests, store lent associé ; `components/onchain/{FluxCapitaux,EconomieChaines}.tsx` ; branchements `OnchainWindow.tsx`, `BriefWindow.tsx`, nouvelle `components/brief/SectionFluxCapitaux.tsx`, `StablecoinsWindow.tsx`, `SectWindow.tsx` ; `data/onchain/etfHistory.ts` si ratios historiques requis.
+
+**Fichiers alertes autorisés si nécessaire :** `packages/alerts/src/{types,engine,describe}.ts`, `apps/web/src/alerts/runtime.ts`, `apps/web/src/store/alerts.ts` et validateur/import réellement associé, `components/AlertsPanel.tsx` et tests ciblés. Pour les métriques non couvertes par les conditions existantes, une condition lente front uniquement est autorisée dans @axiom/alerts (aucun changement @axiom/types), avec validation import/export et journal explicatif. Le daemon sans contexte ignore la condition. Lire `/private/tmp/axiom-20260909-preparation-alertes-flux.md` pour les points d'intégration et la collecte commune aux vues/alertes actives.
 
 **Interfaces:** consommer QualiteMetrique/enregistrerQualite du lot1. Un même loader/cache sert les trois vues de flux, aucune triple collecte identique.
 
@@ -88,7 +90,7 @@ expect(100*((130.658/129.681)**4-1)).toBeCloseTo(3.048,2);
 
 ### Task 5: Évènements, consensus et publications
 
-**Depends:** Task 2. **Files:** `apps/web/src/data/{eco,evts,eventStudies}.ts` (noms réels), store eco/evts, `components/{EcoWindow,EvtsWindow}.tsx`, nouveau module d’archive locale des publications/consensus et tests.
+**Depends:** Task 2. **Files:** `apps/web/src/data/eco.ts`, `data/macro/eventDates.ts`, `lib/evts.ts`, store eco/evts, `components/{EcoWindow,EvtsWindow}.tsx`, nouveau module d’archive locale des publications/consensus et tests.
 
 **Interfaces:** consommer fonctions ALFRED lot2 et caches existants ; archives sérialisées avec source, heure de collecte et connuDepuis ; aucun secret.
 
@@ -100,13 +102,16 @@ expect(100*((130.658/129.681)**4-1)).toBeCloseTo(3.048,2);
 // consensus capturé après publishedAt → consensusAvantAnnonce=null.
 // Événement 08:30 et bougies 08:00 puis09:00 en M1 → H0 exclu, pas08:00.
 ```
+- [ ] Lire `/private/tmp/axiom-20260909-preparation-evenements.md` : contient deux heures officielles vérifiées utilisables comme historique initial réel, et le piège des variations de niveaux révisés. Inclure cet historique sourcé dans le produit avec ses limites ; aucune donnée de consensus inventée.
 - [ ] Tests archivage/versions/temps/FXDST/absence/couverture/réaction, typecheck, commit et rapport des sources réellement observées.
 
 ### Task 6: Microstructure, gamma et interprétation du régime
 
-**Depends:** Task 1. **Files:** `data/{depthMicrostructure,gexDex,gammaRegime,regime,screener*}.ts`, stores DOM/EQS pertinents, `components/{DomWindow,OptionsMonitorWindow,EquityScreenerWindow}.tsx` (noms réels), `components/brief/SectionRegime.tsx` ; nouvelles fonctions pures ciblées et tests.
+**Depends:** Task 1. **Files:** `data/{depthMicrostructure,gexDex,gammaRegime,regime,screener*}.ts`, stores DOM/EQS pertinents, `components/{DomWindow,OptionsWindow,ScreenerWindow}.tsx`, `components/omon/VueGexDex.tsx`, `components/brief/SectionRegime.tsx` ; nouvelles fonctions pures ciblées et tests.
 
 **Interfaces:** données prix/OI/CVD aux temps réels existants, options locales sérialisables compatibles ; qualité lente lot1 pour résumé, aucune écriture React par tick.
+
+Lire `/private/tmp/axiom-20260909-preparation-microstructure.md` pour les fonctions existantes, le cas gamma arithmétique et la distinction entre zéro du cumul par strike et zéro du profil recalculé en spot.
 
 - [ ] Configurations prix/OI/CVD : signe/variation sur fenêtre bornée, min observations, couverture et persistance calculée à temps continu ; désaccords distincts prix↑/OI↑/CVD↓ etc ; pas d’OI ou CVD de fallback silencieux. EQS n’a pas recorderCVD : disponibilité dépend d’historique réel du symbole, proposer diagnostic du symbole suivi plutôt qu’inventer du CVD universel.
 - [ ] UI DOM et EQS expose fenêtre/seuils/persistance, coût d’exécution et qualité ; reset changement exchange/symbole/reconnexion/trou. Tests flux neutre, réarmement, déconnexion et unités.
@@ -119,9 +124,13 @@ expect(100*((130.658/129.681)**4-1)).toBeCloseTo(3.048,2);
 
 ### Task 7: WHALES, unlocks et bridges
 
-**Files:** `apps/daemon/src/whales.ts`, migrations/persistance ciblées et tests ; `apps/web/src/data/whales.ts`, store et `components/WhalesWindow.tsx` ; nouveaux `data/onchain/defillamaPro.ts`, `store/defillamaKey.ts`, panneau ciblé unlocks/bridges ; `SettingsPanel.tsx`, `CapWindow.tsx`, `SectorsWindow.tsx` (noms réels) ; politique proxy `shared/extapi-hosts.ts` et routes existantes seulement si nécessaire pour authentification. Coordination SECT avec lot4 : ne pas modifier même fichier simultanément ; composants d’abord, branchement après accord contrôleur.
+**Depends:** interface qualité du lot1 ; branchement SECT après les mutations du lot4.
+
+**Files:** `apps/daemon/src/whales.ts`, migrations/persistance ciblées et tests ; `apps/web/src/data/whales.ts`, store et `components/WhalesWindow.tsx` ; nouveaux `data/onchain/defillamaPro.ts`, `store/defillamaKey.ts`, panneau ciblé unlocks/bridges ; `SettingsPanel.tsx`, `McapWindow.tsx`, `SectWindow.tsx` ; politique proxy `shared/extapi-hosts.ts` et routes existantes seulement si nécessaire pour authentification. Coordination SECT avec lot4 : ne pas modifier même fichier simultanément ; composants d’abord, branchement après accord contrôleur.
 
 **Interfaces:** labels `{entite,source,verifieLe,confiance}` associés aux adresses existantes ; état de continuité explicite. Clé DefiLlama Pro en localStorage via getter, store expose présence/version uniquement. Qualité du lot1 si disponible, sinon import après.
+
+Lire `/private/tmp/axiom-20260909-preparation-pro.md`. Les documents officiels sont déjà disponibles dans `/private/tmp/axiom-20260909-llms-pro.txt` et `/private/tmp/axiom-20260909-defillama-openapi-pro.json` ; extraire uniquement les schémas des trois endpoints retenus. Distinguer offre circulante (`circSupply`) et flottant ajusté réellement connu.
 
 - [ ] WHALES : enrichir labels statiques de provenance/date réelles (origine actuelle explicitée, date inconnue reste inconnue) ; grouper par entité, marquer interne si deux adresses même entité connue, stats connus/inconnus. Curseur/dernier succès persisté et trous de collecte exposés, pagination bornée et risque de reorg sans prétendre finalité immédiate. Pas d’auto-label de change BTC.
 - [ ] DefiLlama Pro : vérifier docs officielles et contrat réel, endpoints `/api/emissions`, `/api/emission/{protocol}`, bridges sous `/bridges/...`, clé dans chemin du fournisseur ne doit jamais apparaître dans erreurs, logs ou état. Route dédiée à allowlist de chemins bornés si proxy nécessaire, revue sécurité. Pas de clé ni abonnement = UI état d’accès ; aucune souscription.
@@ -135,7 +144,7 @@ expect(100*((130.658/129.681)**4-1)).toBeCloseTo(3.048,2);
 
 ### Task 8: Maintenance, budgets et parcours navigateur
 
-**Depends:** attendre fin des mutations de dépendances/tests des autres lots. **Files:** package.json concernés, pnpm-lock.yaml, scripts/ci.sh, .github/workflows/ci.yml, nouveau script/test budget build, e2e nouvelles fonctionnalités et Playwright configuration minimale.
+**Depends:** attendre fin des mutations de dépendances/tests des autres lots. **Files:** package.json concernés, pnpm-lock.yaml, scripts/ci.sh, .github/workflows/ci.yml, `apps/web/vite.config.ts` pour activer le manifeste de build si nécessaire, nouveau script/test budget build, e2e nouvelles fonctionnalités et Playwright configuration minimale. Un dépassement impose d'identifier l'import responsable et de remonter les fichiers applicatifs précis au contrôleur avant correction ciblée ; pas de changement de framework.
 
 - [ ] Passer les quatre Vitest3.2.7 à4.1.11, respecter Node/Vite existants ; lire migration4 officielle, corriger uniquement incompatibilités réelles. Aucun nouveau runtime. Audit puis suite globale.
 - [ ] Budget initial JS bloquant à **1 220 000 octets bruts / 360 000 gzip niveau9** (base mesurée1162478/342187), entrée HTML/modulepreloads et imports statiques transitifs dédupliqués via manifest Vite ; dynamique mesuré séparément. Le fichier absent/malformed échoue, dépassement échoue. Tests vrai mini graphe et dépassement, pas test recopiant constante.

@@ -17,10 +17,10 @@ implémentation par lots et revue indépendante.
 | 1–4 : ETF, référentiels, CHAIN, qualité | 1 | Approuvé après corrections, tête `cef9bb1` |
 | 5–7 : macro, ALFRED, TGA/NETLIQ | 2 | Approuvé après corrections, tête `fa24839` |
 | 8–9 : flux communs et économie des chaînes | 4 | Implémentation en cours sur les interfaces approuvées du lot 1 |
-| 10 : ECO/EVTS, publications et réactions | 5 | Première implémentation `557f731` ; corrections de revue requises |
+| 10 : ECO/EVTS, publications et réactions | 5 | Première implémentation `557f731` ; corrections de revue en cours |
 | 11–12 : DOM/EQS, gamma et régime | 6 | Préparation des sources et conventions effectuée |
 | 13–14 : WHALES, unlocks et bridges | 7 | Implémentation en cours ; accès personnel Pro absent |
-| 15 : backtest, causalité, funding et OOS | 3 | Campagne réalisée ; corrections de revue sur le funding en cours |
+| 15 : backtest, causalité, funding et OOS | 3 | Approuvé après corrections, tête `1517f7d` ; campagne non concluante |
 | 16 : maintenance et budgets | 8 | CLI Vercel59.14.0 vérifié ; CI/build après intégration |
 | 17 : parcours réel et restauration | 9 | Préconditions de QA inspectées ; exécution finale à venir |
 
@@ -47,6 +47,12 @@ implémentation par lots et revue indépendante.
   des défauts de couverture et de bornes des réactions M1, de restitution du
   consensus et de validation des archives. Ils doivent être corrigés avant
   validation du parcours ECO/EVTS.
+- Lot 3 : revue des correctifs approuvée à `1517f7d`, 79 tests backtest et
+  54 tests web ciblés réussis, typecheck du package réussi. Le loader a été
+  vérifié indépendamment sur les archives réelles BTC/ETH et refuse une
+  échéance REST supprimée. Les résultats OOS sont identiques après recalcul ;
+  seul le hash de l'engine et l'horodatage du résultat changent. La campagne
+  reste non concluante et les 30 stratégies globalement non validées.
 
 ## Accès et observations des sources
 

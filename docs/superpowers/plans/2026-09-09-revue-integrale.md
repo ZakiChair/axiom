@@ -132,6 +132,8 @@ Lire `/private/tmp/axiom-20260909-preparation-microstructure.md` pour les foncti
 
 **Interfaces:** labels `{entite,source,verifieLe,confiance}` associés aux adresses existantes ; état de continuité explicite. Clé DefiLlama Pro en localStorage via getter, store expose présence/version uniquement. Qualité du lot1 si disponible, sinon import après.
 
+**Précision des dénominateurs :** l'extension additive du module existant `data/marketOverview.ts` et de son test est autorisée pour prix, `total_volume` et `last_updated` CoinGecko. Préserver transport/cache et identité ; les anciens caches sans champ restent incomplets. Un flottant ajusté importé exige sa propre provenance et date. Prix/volume courants contextualisent un événement futur et ne deviennent pas des données connues à sa date historique.
+
 Lire `/private/tmp/axiom-20260909-preparation-pro.md`. Les documents officiels sont déjà disponibles dans `/private/tmp/axiom-20260909-llms-pro.txt` et `/private/tmp/axiom-20260909-defillama-openapi-pro.json` ; extraire uniquement les schémas des trois endpoints retenus. Distinguer offre circulante (`circSupply`) et flottant ajusté réellement connu.
 
 - [ ] WHALES : enrichir labels statiques de provenance/date réelles (origine actuelle explicitée, date inconnue reste inconnue) ; grouper par entité, marquer interne si deux adresses même entité connue, stats connus/inconnus. Curseur/dernier succès persisté et trous de collecte exposés, pagination bornée et risque de reorg sans prétendre finalité immédiate. Pas d’auto-label de change BTC.

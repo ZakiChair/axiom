@@ -38,6 +38,25 @@ describe("cleSante", () => {
 });
 
 describe("chargerSerieMacro", () => {
+  it("conserve units dans une vue ALFRED CPI a/a ou m/m", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      urls.push(url);
+      return { ok: true, status: 200, statusText: "OK", json: async () => ({ observations: [{ date: "2026-07-01", value: "3.2", realtime_start: "2026-08-15", realtime_end: "2026-08-15" }] }) };
+    }));
+    const aa = await chargerSerieMacro(DEF_FRED, Date.UTC(2026, 0, 1), undefined, "2026-08-15");
+    const mm = await chargerSerieMacro({ ...DEF_FRED, source: { transport: "fred", seriesId: "CPIAUCSL", units: "pch" } }, Date.UTC(2026, 0, 1), undefined, "2026-08-15");
+    expect(aa).toMatchObject({ statut: "ok", points: [{ value: 3.2 }] });
+    expect(mm).toMatchObject({ statut: "ok", points: [{ value: 3.2 }] });
+    expect(urls.some((url) => url.includes("units=pc1"))).toBe(true);
+    expect(urls.some((url) => url.includes("units=pch"))).toBe(true);
+  });
+
+  it("écarte les niveaux nuls ou négatifs des nouvelles variations", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, statusText: "OK", json: async () => ({ observations: [{ date: "2026-01-01", value: "100" }, { date: "2026-02-01", value: "-5" }] }) })));
+    const r = await chargerSerieMacro({ ...DEF_FRED, indicateur: "retail-mm", source: { transport: "fred", seriesId: "RSAFS" }, transformation: "mm" }, 0);
+    expect(r).toMatchObject({ statut: "panne", message: "Source sans donnée sur la période." });
+  });
   it("rend un statut « quota » distinct sur un 429 OCDE", async () => {
     vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({ ok: false, status: 429, statusText: "" })));
     const r = await chargerSerieMacro(DEF_OCDE, Date.UTC(2020, 0, 1));

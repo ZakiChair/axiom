@@ -19,6 +19,8 @@ export interface OptionsAlfred {
   signal?: AbortSignal;
   debut?: string;
   fin?: string;
+  /** Transformation FRED (pc1, pch, …), identique à la vue courante. */
+  units?: string;
 }
 
 interface ReponseAlfred {
@@ -26,19 +28,25 @@ interface ReponseAlfred {
 }
 
 function assertDate(value: string, nom: string): void {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(`${value}T00:00:00Z`))) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
     throw new Error(`${nom} doit être une date YYYY-MM-DD valide.`);
   }
+  const [annee, mois, jour] = match.slice(1).map(Number);
+  const date = new Date(Date.UTC(annee!, mois! - 1, jour!));
+  if (date.getUTCFullYear() !== annee || date.getUTCMonth() !== mois! - 1 || date.getUTCDate() !== jour) throw new Error(`${nom} doit être une date YYYY-MM-DD valide.`);
 }
 
 function construireParams(seriesId: string, opts: OptionsAlfred, realtimeStart: string, realtimeEnd: string, outputType?: "4"): URLSearchParams {
   if (!seriesId.trim()) throw new Error("seriesId ALFRED requis.");
   if (opts.debut) assertDate(opts.debut, "debut");
   if (opts.fin) assertDate(opts.fin, "fin");
+  if (opts.debut && opts.fin && opts.debut > opts.fin) throw new Error("debut doit précéder fin.");
   const params = new URLSearchParams({ series_id: seriesId, file_type: "json", realtime_start: realtimeStart, realtime_end: realtimeEnd });
   if (opts.debut) params.set("observation_start", opts.debut);
   if (opts.fin) params.set("observation_end", opts.fin);
   if (outputType) params.set("output_type", outputType);
+  if (opts.units) params.set("units", opts.units);
   const key = lireCleFred();
   if (key) params.set("api_key", key);
   return params;
@@ -55,6 +63,7 @@ async function charger(params: URLSearchParams, signal?: AbortSignal): Promise<O
       assertDate(observation.date, "periode");
       assertDate(observation.realtime_start, "realtime_start");
       assertDate(observation.realtime_end, "realtime_end");
+      if (observation.realtime_start > observation.realtime_end) return [];
     } catch {
       return [];
     }

@@ -31,4 +31,19 @@ describe("DTS Treasury TGA", () => {
     expect(String(url)).toContain("page%5Bsize%5D=1000");
     expect(options?.signal).toBeInstanceOf(AbortSignal);
   });
+
+  it("concatène deux pages bornées avant de parser les points", async () => {
+    const appel = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ record_date: "2026-09-03", account_type: "Treasury General Account (TGA) Closing Balance", open_today_bal: "800000" }], meta: { "total-pages": 2 } }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ record_date: "2026-09-04", account_type: "Treasury General Account (TGA) Closing Balance", open_today_bal: "888923" }], meta: { "total-pages": 2 } }) });
+    vi.stubGlobal("fetch", appel);
+    await expect(chargerSerieTgaTreasury({ debut: "2026-09-01", fin: "2026-09-05" })).resolves.toMatchObject({ points: [{ value: 800 }, { value: 888.923 }] });
+    expect(appel).toHaveBeenCalledTimes(2);
+    expect(String(appel.mock.calls[1]?.[0])).toContain("page%5Bnumber%5D=2");
+  });
+
+  it("rejette les dates civiles impossibles et les bornes inversées", async () => {
+    await expect(chargerSerieTgaTreasury({ debut: "2026-02-30" })).rejects.toThrow(/YYYY-MM-DD/);
+    await expect(chargerSerieTgaTreasury({ debut: "2026-09-05", fin: "2026-09-01" })).rejects.toThrow(/debut.*fin/i);
+  });
 });

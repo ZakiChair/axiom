@@ -54,7 +54,7 @@ export async function chargerSerieMacro(
     switch (source.transport) {
       case "fred": {
         if (connuLe) {
-          const observations = await chargerVueAlfred(source.seriesId, connuLe, { debut: new Date(depuisSource).toISOString().slice(0, 10), signal });
+          const observations = await chargerVueAlfred(source.seriesId, connuLe, { debut: new Date(depuisSource).toISOString().slice(0, 10), signal, units: source.units });
           points = observations.map((o) => ({ time: Date.parse(`${o.periode}T00:00:00Z`), value: o.valeur, qualite: `ALFRED · vue journalière au ${connuLe}` }));
         } else {
           points = await createFredM2Provider(source.seriesId, source.units).fetchSeries({
@@ -93,12 +93,14 @@ export async function chargerSerieMacro(
         break;
     }
     if (signal?.aborted) return { statut: "annule" };
-    if (def.transformation === "aa" || def.transformation === "mm") points = variationPeriode(points, def.transformation === "aa" ? 12 : 1);
+    const nouvelleVariation = def.indicateur === "pce-aa" || def.indicateur === "retail-mm" || def.indicateur === "retail-aa";
+    if (def.transformation === "aa" || def.transformation === "mm") points = variationPeriode(points, def.transformation === "aa" ? 12 : 1, nouvelleVariation ? { couvertureMensuelle: true, niveauxStrictementPositifs: true } : undefined);
     else if (def.transformation === "annualise3m") points = variationAnnualisee(points, 3);
     else if (def.transformation === "annualise6m") points = variationAnnualisee(points, 6);
     else if (def.transformation === "emploi-variation") points = variationsEmploi(points).variation;
     else if (def.transformation === "emploi-moyenne3m") points = variationsEmploi(points).moyenne3m;
-    points = points.filter((p) => p.time >= depuisMs && p.time <= Date.now());
+    const jusqueMs = connuLe ? Date.parse(`${connuLe}T00:00:00Z`) : Date.now();
+    points = points.filter((p) => p.time >= depuisMs && p.time <= jusqueMs);
     if (points.length === 0) {
       return { statut: "panne", message: "Source sans donnée sur la période." };
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { serieDansHorizon, formatValeurMacro, formatPeriodeMacro, segmentsMacro } from "./macroSeriesTab.util";
+import { contexteSourcesMacro, serieDansHorizon, formatValeurMacro, formatPeriodeMacro, segmentsMacro } from "./macroSeriesTab.util";
 import { CATALOGUE_MACRO } from "../data/macro/catalogueMacro";
 
 describe("présentation des séries macro", () => {
@@ -25,6 +25,17 @@ describe("présentation des séries macro", () => {
     const serie = [{ time: Date.UTC(2024, 1, 1), value: 1 }, { time: Date.UTC(2026, 1, 1), value: 2 }];
     expect(serieDansHorizon(serie, 1, Date.UTC(2026, 8, 7))).toEqual([serie[1]]);
     expect(serieDansHorizon(serie, 5, Date.UTC(2026, 8, 7))).toEqual(serie);
+  });
+  it("ancre l'horizon historique au cutoff, pas à aujourd'hui", () => {
+    const serie = [{ time: Date.UTC(2015, 0, 1), value: 1 }, { time: Date.UTC(2019, 11, 1), value: 2 }, { time: Date.UTC(2021, 0, 1), value: 3 }];
+    expect(serieDansHorizon(serie, 5, Date.UTC(2020, 0, 15))).toEqual([serie[0], serie[1]]);
+  });
+  it("rend le contexte ALFRED visible pour FRED tout en signalant les autres sources courantes", () => {
+    const fred = CATALOGUE_MACRO.find((d) => d.id === "pce-niveau-us")!;
+    const oecd = CATALOGUE_MACRO.find((d) => d.id === "cpi-aa-jp")!;
+    expect(contexteSourcesMacro([fred, oecd], "2025-01-01")).toContain("FRED : vue ALFRED au 2025-01-01");
+    expect(contexteSourcesMacro([fred, oecd], "2025-01-01")).toContain("Autres sources : données courantes");
+    expect(contexteSourcesMacro([fred, CATALOGUE_MACRO.find((d) => d.id === "demandes-chomage-us-4s")!], "2025-01-01")).toContain("FRED : vue ALFRED au 2025-01-01");
   });
   it("interrompt une courbe mensuelle lorsqu'une observation manque", () => {
     const points = [{ time: Date.UTC(2026, 0, 1), value: 1 }, { time: Date.UTC(2026, 2, 1), value: 3 }];

@@ -32,6 +32,13 @@ export function serieDansHorizon(points: MacroSeries, horizon: HorizonMacro, now
   const debut = Date.UTC(date.getUTCFullYear() - horizon, date.getUTCMonth(), 1);
   return points.filter((p) => p.time >= debut && p.time <= now);
 }
+/** Contexte explicite lorsqu'un cutoff ALFRED ne couvre qu'une partie des sources visibles. */
+export function contexteSourcesMacro(definitions: readonly Pick<DefinitionSerieMacro, "source">[], connuLe: string | null): string {
+  if (!connuLe) return "Sources courantes.";
+  const fred = definitions.some((d) => d.source.transport === "fred");
+  const autres = definitions.some((d) => d.source.transport !== "fred");
+  return [fred ? `FRED : vue ALFRED au ${connuLe}, granularité quotidienne.` : "", autres ? "Autres sources : données courantes." : ""].filter(Boolean).join(" ");
+}
 /** Les mois/trimestres absents coupent le tracé, sans interpolation à travers un trou. */
 export function segmentsMacro(points: MacroSeries, frequence: FrequenceMacro): MacroSeries[] {
   const segments: MacroSeries[] = [];

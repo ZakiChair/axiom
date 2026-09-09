@@ -519,7 +519,7 @@ export function NetliqWindow() {
 
         <div className="mt-3 flex items-center justify-between">
           <NoteSource>
-            WALCL hebdomadaire · TGA {provenanceTga ?? "en attente"} · RRP quotidien · vue ancrée WALCL, reports et dates sources visibles · fenêtre {fenetreAnnees} a
+            WALCL hebdomadaire · TGA {provenanceTga ?? "en attente"} · RRP quotidien · reconstruction sur jours d'observation, pas sur disponibilités historiques · vue ancrée WALCL, reports et dates sources visibles · fenêtre {fenetreAnnees} a
             {overlayBtc && btcSerie !== null && " · BTC superposé (échelle propre)"}
           </NoteSource>
           <Fraicheur loading={enCours} majTs={majTs} />

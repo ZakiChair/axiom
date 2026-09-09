@@ -72,15 +72,22 @@ describe("transformations calendaires macro", () => {
   it("annualise PCE sur trois mois civils consécutifs", () => {
     const points = [
       { time: Date.UTC(2026, 3, 1), value: 129.681 },
+      { time: Date.UTC(2026, 4, 1), value: 129.8 },
+      { time: Date.UTC(2026, 5, 1), value: 130.1 },
       { time: Date.UTC(2026, 6, 1), value: 130.658 },
     ];
     expect(variationAnnualisee(points, 3)[0]?.value).toBeCloseTo(3.048, 2);
   });
-  it("refuse une annualisation quand un mois civil requis manque ou le niveau est négatif", () => {
+  it("refuse une annualisation quand un mois civil intermédiaire requis manque ou le niveau est négatif", () => {
     expect(variationAnnualisee([
       { time: Date.UTC(2026, 0, 1), value: 100 },
-      { time: Date.UTC(2026, 4, 1), value: 102 },
-      { time: Date.UTC(2026, 6, 1), value: -103 },
+      { time: Date.UTC(2026, 3, 1), value: 102 },
+    ], 3)).toEqual([]);
+    expect(variationAnnualisee([
+      { time: Date.UTC(2026, 0, 1), value: 100 },
+      { time: Date.UTC(2026, 1, 1), value: 102 },
+      { time: Date.UTC(2026, 2, 1), value: 103 },
+      { time: Date.UTC(2026, 3, 1), value: -103 },
     ], 3)).toEqual([]);
   });
   it("calcule PAYEMS en milliers et sa moyenne sur trois différences consécutives", () => {

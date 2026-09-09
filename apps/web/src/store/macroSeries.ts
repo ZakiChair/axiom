@@ -21,6 +21,8 @@ export interface EtatSerie {
   message: string | null;
   recupereTs?: number;
   perime?: boolean;
+  /** null = source courante; sinon millésime ALFRED affiché. */
+  contexteConnuLe?: string | null;
 }
 interface EntreeCache { ts: number; depuis: number; signature: string; points: MacroSeries }
 export interface OptionsDemande {
@@ -36,7 +38,7 @@ export interface MacroSeriesState {
   series: Record<string, EtatSerie>;
   demanderIndicateur: (indicateur: IndicateurMacro, opts?: OptionsDemande) => Promise<void>;
 }
-const etatVide = (): EtatSerie => ({ statut: "idle", points: [], majTs: null, message: null });
+const etatVide = (contexteConnuLe: string | null = null): EtatSerie => ({ statut: "idle", points: [], majTs: null, message: null, contexteConnuLe });
 const signature = (def: DefinitionSerieMacro): string => JSON.stringify([2, def.source, def.transformation, def.decalageFinMois]);
 function cleCache(def: DefinitionSerieMacro, connuLe?: string | null): string { return PREFIXE_CACHE + def.id + (connuLe ? `.alfred-${connuLe}` : ""); }
 function lireCache(def: DefinitionSerieMacro, connuLe?: string | null): EntreeCache | null {
@@ -82,41 +84,49 @@ export const macroSeriesStore = createStore<MacroSeriesState>((set, get) => {
   async function executerChargement(indicateur: IndicateurMacro, opts: OptionsDemande): Promise<void> {
     if (opts.signal?.aborted) return;
     const now = Date.now();
-    // Début de mois stable : deux lectures successives partagent le même cache.
-    const date = new Date(now);
-    const depuis = Date.UTC(date.getUTCFullYear() - (opts.horizonAnnees ?? 5), date.getUTCMonth(), 1);
     const definitions = seriesDeIndicateur(indicateur).filter((d) => !opts.regions || opts.regions.includes(d.region));
     const version = Symbol();
     await Promise.all(definitions.map(async (def) => {
       versions.set(def.id, version);
-      const cache = lireCache(def, opts.connuLe);
+      const contexteConnuLe = def.source.transport === "fred" ? (opts.connuLe ?? null) : null;
+      const ancre = contexteConnuLe ? Date.parse(`${contexteConnuLe}T00:00:00Z`) : now;
+      const date = new Date(ancre);
+      const depuis = Date.UTC(date.getUTCFullYear() - (opts.horizonAnnees ?? 5), date.getUTCMonth(), 1);
+      const actuel = get().series[def.id];
+      const memeContexte = (actuel?.contexteConnuLe ?? null) === contexteConnuLe;
+      const cache = lireCache(def, contexteConnuLe);
       const frais = !!cache && now - cache.ts <= ttl(def) && cache.depuis <= depuis;
-      if (cache && !(get().series[def.id]?.points.length)) {
+      if (cache && (!actuel?.points.length || !memeContexte)) {
         const dernier = cache.points.at(-1)!;
-        majSerie(def.id, { points: cache.points, majTs: finDePeriode(dernier.time, def.frequence, def.decalageFinMois), recupereTs: cache.ts, perime: !frais, statut: "ok", message: null });
+        majSerie(def.id, { points: cache.points, majTs: finDePeriode(dernier.time, def.frequence, def.decalageFinMois), recupereTs: cache.ts, perime: !frais, statut: "ok", message: null, contexteConnuLe });
       }
       if (frais && !opts.force) {
         const dernier = cache.points.at(-1)!;
-        majSerie(def.id, { points: cache.points, majTs: finDePeriode(dernier.time, def.frequence, def.decalageFinMois), recupereTs: cache.ts, perime: false, statut: "ok", message: null });
+        majSerie(def.id, { points: cache.points, majTs: finDePeriode(dernier.time, def.frequence, def.decalageFinMois), recupereTs: cache.ts, perime: false, statut: "ok", message: null, contexteConnuLe });
         return;
       }
-      const precedent = get().series[def.id] ?? etatVide();
-      majSerie(def.id, { statut: "loading", message: null, ...(cache && !frais ? { perime: true } : {}) });
-      const charger = (): Promise<ResultatSerieMacro> => chargerSerieMacro(def, depuis, opts.signal, opts.connuLe).catch(() => opts.signal?.aborted ? { statut: "annule" } : { statut: "panne", message: "Source indisponible." });
+      // Après restauration du cache du même contexte, relire l'état : `actuel` a été
+      // capturé avant cette restauration et ne doit pas effacer l'historique valide.
+      const etatApresCache = get().series[def.id];
+      const precedent = etatApresCache && (etatApresCache.contexteConnuLe ?? null) === contexteConnuLe
+        ? etatApresCache
+        : etatVide(contexteConnuLe);
+      majSerie(def.id, { ...precedent, statut: "loading", message: null, contexteConnuLe, ...(cache && !frais ? { perime: true } : {}) });
+      const charger = (): Promise<ResultatSerieMacro> => chargerSerieMacro(def, depuis, opts.signal, contexteConnuLe).catch(() => opts.signal?.aborted ? { statut: "annule" } : { statut: "panne", message: "Source indisponible." });
       const resultat = def.source.transport === "oecd" ? await dansFileOecd(charger, opts) : await charger();
       if (versions.get(def.id) !== version) return;
       if (resultat.statut === "annule" || opts.signal?.aborted) {
-        majSerie(def.id, { ...precedent, statut: precedent.statut === "loading" ? (precedent.points.length ? "ok" : "idle") : precedent.statut });
+        majSerie(def.id, { ...precedent, statut: precedent.statut === "loading" ? (precedent.points.length ? "ok" : "idle") : precedent.statut, contexteConnuLe });
         return;
       }
       if (resultat.statut === "ok") {
         const ts = Date.now();
         const dernier = resultat.points.at(-1)!;
-        majSerie(def.id, { statut: "ok", points: resultat.points, majTs: finDePeriode(dernier.time, def.frequence, def.decalageFinMois), message: null, recupereTs: ts, perime: false });
-        ecrireCache(def, resultat.points, depuis, ts, opts.connuLe);
+        majSerie(def.id, { statut: "ok", points: resultat.points, majTs: finDePeriode(dernier.time, def.frequence, def.decalageFinMois), message: null, recupereTs: ts, perime: false, contexteConnuLe });
+        ecrireCache(def, resultat.points, depuis, ts, contexteConnuLe);
         healthStore.getState().setEtat(cleSante(def), "polling", { dernierMessageTs: ts });
       } else {
-        majSerie(def.id, { statut: resultat.statut, message: resultat.message, perime: precedent.points.length > 0 });
+        majSerie(def.id, { ...precedent, statut: resultat.statut, message: resultat.message, perime: precedent.points.length > 0, contexteConnuLe });
         if (resultat.statut === "indisponible") return;
         if (resultat.statut === "quota") healthStore.getState().setEtat(cleSante(def), "polling", { derniereErreur: resultat.message });
         else healthStore.getState().marquerErreur(cleSante(def), resultat.message);

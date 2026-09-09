@@ -53,12 +53,15 @@ export function filtrerFenetre(serie: MacroSeries, depuisMs: number): MacroSerie
 }
 
 /** Variation contre le MÊME mois/trimestre antérieur, jamais contre le Nᵉ point. */
-export function variationPeriode(serie: MacroSeries, mois: 1 | 12): MacroSeries {
+export function variationPeriode(serie: MacroSeries, mois: 1 | 12, options: { couvertureMensuelle?: boolean; niveauxStrictementPositifs?: boolean } = {}): MacroSeries {
   const parDate = new Map(serie.filter((p) => Number.isFinite(p.value)).map((p) => [p.time, p]));
   return trierChrono(serie).flatMap((p) => {
     const date = new Date(p.time);
     const reference = parDate.get(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - mois, 1));
-    if (reference === undefined || reference.value <= 0 || !Number.isFinite(p.value)) return [];
+    const couvert = !options.couvertureMensuelle || Array.from({ length: mois + 1 }, (_, decalage) =>
+      parDate.has(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - decalage, 1)),
+    ).every(Boolean);
+    if (reference === undefined || reference.value <= 0 || !Number.isFinite(p.value) || (options.niveauxStrictementPositifs && p.value <= 0) || !couvert) return [];
     const value = ((p.value - reference.value) * 100) / reference.value;
     const qualite = [p.qualite, reference.qualite ? `base : ${reference.qualite}` : undefined].filter(Boolean).join(" ; ");
     return Number.isFinite(value) ? [{ ...p, value, ...(qualite ? { qualite } : {}) }] : [];
@@ -76,7 +79,10 @@ export function variationAnnualisee(serie: MacroSeries, mois: 3 | 6): MacroSerie
   return trierChrono(serie).flatMap((p) => {
     const date = new Date(p.time);
     const reference = parDate.get(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - mois, 1));
-    if (!reference || p.value <= 0 || reference.value <= 0 || !Number.isFinite(p.value)) return [];
+    const couvert = Array.from({ length: mois + 1 }, (_, decalage) =>
+      parDate.has(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - decalage, 1)),
+    ).every(Boolean);
+    if (!reference || p.value <= 0 || reference.value <= 0 || !Number.isFinite(p.value) || !couvert) return [];
     const value = 100 * ((p.value / reference.value) ** exposant - 1);
     return Number.isFinite(value) ? [{ ...p, value }] : [];
   });

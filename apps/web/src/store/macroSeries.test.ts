@@ -287,6 +287,63 @@ describe("fenêtre, cache conservé et annulation", () => {
   });
 });
 
+describe("vues ALFRED isolées par cutoff", () => {
+  const cutoffA = "2026-08-15";
+  const cutoffB = "2025-01-01";
+  const reponseAlfred = (valeur: number) => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => ({ observations: [{ date: "2024-12-01", value: String(valeur), realtime_start: cutoffA, realtime_end: cutoffA }] }),
+  });
+
+  it("vide immédiatement la vue précédente pendant le chargement d'un autre millésime", async () => {
+    let terminer!: () => void;
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(reponseAlfred(100))
+      .mockImplementationOnce(() => new Promise((resolve) => { terminer = () => resolve(reponseAlfred(90)); })));
+    await macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], connuLe: cutoffA });
+    const chargement = macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], connuLe: cutoffB, force: true });
+    expect(macroSeriesStore.getState().series["pce-niveau-us"]).toMatchObject({ statut: "loading", points: [], contexteConnuLe: cutoffB });
+    terminer();
+    await chargement;
+  });
+
+  it("ne conserve pas des points d'un autre cutoff après une panne ou une annulation", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(reponseAlfred(100)).mockRejectedValueOnce(new Error("hors ligne")));
+    await macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], connuLe: cutoffA });
+    await macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], connuLe: cutoffB, force: true });
+    expect(macroSeriesStore.getState().series["pce-niveau-us"]).toMatchObject({ statut: "panne", points: [], contexteConnuLe: cutoffB });
+
+    const ctrl = new AbortController();
+    let commence!: () => void;
+    const debut = new Promise<void>((resolve) => { commence = resolve; });
+    vi.stubGlobal("fetch", vi.fn((_url, opts: RequestInit) => new Promise((_resolve, reject) => {
+      commence();
+      opts.signal?.addEventListener("abort", () => reject(new DOMException("Annulé", "AbortError")));
+    })));
+    const p = macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], connuLe: cutoffB, force: true, signal: ctrl.signal });
+    await debut;
+    ctrl.abort();
+    await p;
+    expect(macroSeriesStore.getState().series["pce-niveau-us"]).toMatchObject({ statut: "panne", points: [], contexteConnuLe: cutoffB });
+  });
+
+  it("n'affiche pas le cache ALFRED d'un autre cutoff lorsque le nouveau chargement échoue", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(reponseAlfred(100)).mockRejectedValueOnce(new Error("hors ligne")));
+    await macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], connuLe: cutoffA });
+    macroSeriesStore.setState({ series: {} });
+    await macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], connuLe: cutoffB });
+    expect(macroSeriesStore.getState().series["pce-niveau-us"]).toMatchObject({ statut: "panne", points: [], contexteConnuLe: cutoffB });
+  });
+
+  it("ancre la requête historique à connuLe", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reponseAlfred(100)));
+    await macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], horizonAnnees: 5, connuLe: "2020-01-15" });
+    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain("observation_start=2015-01-01");
+  });
+});
+
 it("restaure un historique expiré après remontage même si le fournisseur tombe", async () => {
   vi.stubGlobal("fetch", stubParHote());
   await macroSeriesStore.getState().demanderIndicateur("cpi-aa", { regions: ["UK"] });

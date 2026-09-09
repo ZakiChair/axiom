@@ -24,7 +24,11 @@ export interface SerieTgaTreasury {
 export interface OptionsTgaTreasury { debut?: string; fin?: string; signal?: AbortSignal; }
 
 function estDateIso(date: string | undefined): date is string {
-  return !!date && /^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(`${date}T00:00:00Z`));
+  const match = date && /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match) return false;
+  const [annee, mois, jour] = match.slice(1).map(Number);
+  const civil = new Date(Date.UTC(annee!, mois! - 1, jour!));
+  return civil.getUTCFullYear() === annee && civil.getUTCMonth() === mois! - 1 && civil.getUTCDate() === jour;
 }
 function nombreMillions(value: string | undefined): number | null {
   if (!value || value === "null") return null;
@@ -56,6 +60,7 @@ function signalBorne(signal?: AbortSignal): AbortSignal {
 export async function chargerSerieTgaTreasury(options: OptionsTgaTreasury = {}): Promise<SerieTgaTreasury> {
   if (options.debut && !estDateIso(options.debut)) throw new Error("debut Treasury doit être YYYY-MM-DD.");
   if (options.fin && !estDateIso(options.fin)) throw new Error("fin Treasury doit être YYYY-MM-DD.");
+  if (options.debut && options.fin && options.debut > options.fin) throw new Error("debut Treasury doit précéder fin.");
   const lignes: LigneDts[] = [];
   for (let page = 1; page <= MAX_PAGES; page++) {
     const params = new URLSearchParams({ "page[number]": String(page), "page[size]": String(TAILLE_PAGE), sort: "record_date" });

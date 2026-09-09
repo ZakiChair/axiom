@@ -5,7 +5,7 @@ import { INDICATEURS_MACRO, ORDRE_REGIONS, REGIONS_MACRO, seriesDeIndicateur, ty
 import type { MacroSeries } from "../data/macro/types";
 import { macroSeriesStore } from "../store/macroSeries";
 import { macroRatesViewStore, type HorizonMacro } from "../store/macroRatesView";
-import { formatPeriodeMacro, formatValeurMacro, segmentsMacro, serieDansHorizon } from "./macroSeriesTab.util";
+import { contexteSourcesMacro, formatPeriodeMacro, formatValeurMacro, segmentsMacro, serieDansHorizon } from "./macroSeriesTab.util";
 import { BoutonBascule, Fraicheur, NoteSource, Segmente, Vide } from "./ui";
 import { TableTriable, type ColonneTable } from "./TableTriable";
 
@@ -91,9 +91,9 @@ export function MacroSeriesTab({ refreshToken = 0 }: { refreshToken?: number }) 
   }, [indicateur, regions, horizon, refreshToken, connuLe]);
   const definitions = useMemo(() => seriesDeIndicateur(indicateur), [indicateur]);
   const visibles = definitions.filter((d) => regions.includes(d.region));
-  const compatibleAlfred = visibles.length === 1 && visibles[0]?.source.transport === "fred";
+  const compatibleAlfred = visibles.some((d) => d.source.transport === "fred");
   const meta = INDICATEURS_MACRO.find((i) => i.id === indicateur)!;
-  const courbes: CourbeMacro[] = visibles.map((def) => ({ def, points: serieDansHorizon(series[def.id]?.points ?? [], horizon), couleur: couleur(def.region), ...(tirets(def) ? { tirets: tirets(def) } : {}) }));
+  const courbes: CourbeMacro[] = visibles.map((def) => ({ def, points: serieDansHorizon(series[def.id]?.points ?? [], horizon, def.source.transport === "fred" && connuLe ? Date.parse(`${connuLe}T00:00:00Z`) : Date.now()), couleur: couleur(def.region), ...(tirets(def) ? { tirets: tirets(def) } : {}) }));
   const chargement = visibles.some((d) => series[d.id]?.statut === "loading");
   const colonnes: ColonneTable<CourbeMacro>[] = [
     { id: "zone", label: "Zone / périmètre", largeur: "minmax(135px,1.2fr)", rendu: c => <><span className="flex items-center gap-1.5 text-text"><svg width="14" height="4" aria-hidden><line x1="0" x2="14" y1="2" y2="2" stroke={c.couleur} strokeWidth="2" strokeDasharray={c.tirets} /></svg>{c.def.libelleSerie ?? c.def.libelleRegion}</span><span className="block text-[10px] leading-snug text-text-dim">{c.def.perimetre}</span></> },
@@ -132,7 +132,7 @@ export function MacroSeriesTab({ refreshToken = 0 }: { refreshToken?: number }) 
           <TableTriable ariaLabel="Observations macro par zone" colonnes={colonnes} lignes={courbes} cle={c => c.def.id} />
         </div>
       </div>
-      <NoteSource>Dates = périodes observées, distinctes de la récupération. {connuLe && compatibleAlfred ? `Vue ALFRED au ${connuLe}, granularité quotidienne ; cette réponse ne fournit pas l'heure ni une première publication authentifiée.` : "Date de première publication non fournie ; valeurs susceptibles de révision."} Cache isolé par millésime : 1 h pour les séries quotidiennes, 6 h pour les hebdomadaires, 24 h pour les mensuelles et trimestrielles. FRED nécessite une clé configurée. Les périmètres nationaux diffèrent ; aucune donnée n'est interpolée.</NoteSource>
+      <NoteSource>Dates = périodes observées, distinctes de la récupération. {contexteSourcesMacro(visibles, compatibleAlfred ? connuLe : null)} {connuLe && compatibleAlfred && "Cette réponse ne fournit pas l'heure ni une première publication authentifiée."} Cache isolé par millésime : 1 h pour les séries quotidiennes, 6 h pour les hebdomadaires, 24 h pour les mensuelles et trimestrielles. FRED nécessite une clé configurée. Les périmètres nationaux diffèrent ; aucune donnée n'est interpolée.</NoteSource>
     </div>
   );
 }

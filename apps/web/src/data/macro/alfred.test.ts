@@ -23,6 +23,12 @@ describe("ALFRED", () => {
     expect(url).toContain("observation_end=2026-07-01");
   });
 
+  it("transmet units à ALFRED pour conserver la transformation FRED", async () => {
+    reponse([{ date: "2026-07-01", value: "2.9", realtime_start: "2026-08-15", realtime_end: "2026-08-15" }]);
+    await chargerVueAlfred("CPIAUCSL", "2026-08-15", { units: "pc1" });
+    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain("units=pc1");
+  });
+
   it("écarte une version qui commence après le cutoff, même si le fournisseur la renvoie", async () => {
     reponse([
       { date: "2026-07-01", value: "130.658", realtime_start: "2026-08-28", realtime_end: "9999-12-31" },
@@ -45,5 +51,13 @@ describe("ALFRED", () => {
     vi.stubGlobal("fetch", appel);
     await expect(chargerVueAlfred("PCEPILFE", "2026-8-15")).rejects.toThrow(/YYYY-MM-DD/);
     expect(appel).not.toHaveBeenCalled();
+  });
+
+  it("rejette une date civile impossible, des bornes inversées et un intervalle realtime inversé", async () => {
+    const appel = vi.fn(async () => ({ ok: true, status: 200, statusText: "OK", json: async () => ({ observations: [{ date: "2026-06-01", value: "1", realtime_start: "2026-09-02", realtime_end: "2026-09-01" }] }) }));
+    vi.stubGlobal("fetch", appel);
+    await expect(chargerVueAlfred("PCEPILFE", "2026-02-30")).rejects.toThrow(/YYYY-MM-DD/);
+    await expect(chargerVueAlfred("PCEPILFE", "2026-08-15", { debut: "2026-08-02", fin: "2026-08-01" })).rejects.toThrow(/debut.*fin/i);
+    await expect(chargerVueAlfred("PCEPILFE", "2026-09-02")).resolves.toEqual([]);
   });
 });

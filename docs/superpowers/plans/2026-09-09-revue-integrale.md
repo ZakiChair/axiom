@@ -58,6 +58,8 @@ expect(100*((130.658/129.681)**4-1)).toBeCloseTo(3.048,2);
 
 **Interfaces:** lire le contrat du réviseur `/private/tmp/axiom-20260909-contrat-math.md` avant implémentation. Étendre `ParamsBacktest` de façon optionnelle pour règlements de funding et exposer frais funding séparés dans trades/résultat sans changer les anciens résultats sans funding. Monte-Carlo conserve le mode iid et sa métrique terminale, ajoute mode blocs et probabilité de franchissement en trajectoire.
 
+**Correction de couverture après revue :** autoriser `shared/extapi-hosts.ts` et tests ciblés pour les seules archives officielles Binance mensuelles fundingRate BTCUSDT/ETHUSDT et leurs CHECKSUM. Extraction ZIP native bornée, sans dépendance runtime ; vérifier SHA-256, calendrier historique et concordance des dates/taux avec REST, dont proviennent les marks. Mois courant non archivé signalé explicitement ; historique clos réellement utilisable dans BT. Réutiliser le proxy existant ; le propriétaire de `vite.config.ts` sérialise son garde de chemin en développement. Ne pas extrapoler une cadence universelle depuis `fundingInfo` courant.
+
 - [ ] Écrire les cas numériques indépendants du contrat et reproduire les sorties anticipatives signalées ; les sorties chart projetées/rétro-déplacées ne doivent pas fournir le futur aux règles de stratégie. Pas de masquage général de tests.
 - [ ] Funding appliqué uniquement aux positions ouvertes aux instants concernés, avec convention entrée/sortie écrite, taux/mark réellement connus, signe long/short ; ne pas approximer un mark futur. UI permet choix funding réel pour perps supportés et affiche couverture/absence ; stops évalués à clôture clairement indiqués.
 - [ ] Bootstrap blocs contigus avec longueur configurable bornée et graine déterministe ; 10 trades minimum, max 2000 simulations maintenus. Mesure distincte `P(capital final < 0)` et `P(min capital <= seuil)`.
@@ -124,9 +126,9 @@ Lire `/private/tmp/axiom-20260909-preparation-microstructure.md` pour les foncti
 
 ### Task 7: WHALES, unlocks et bridges
 
-**Depends:** interface qualité du lot1 ; branchement SECT après les mutations du lot4.
+**Depends:** interface qualité du lot1 ; mutations de SECT sérialisées avec le lot4, dans l'ordre de disponibilité des composants.
 
-**Files:** `apps/daemon/src/whales.ts`, migrations/persistance ciblées et tests ; `apps/web/src/data/whales.ts`, store et `components/WhalesWindow.tsx` ; nouveaux `data/onchain/defillamaPro.ts`, `store/defillamaKey.ts`, panneau ciblé unlocks/bridges ; `SettingsPanel.tsx`, `McapWindow.tsx`, `SectWindow.tsx` ; politique proxy `shared/extapi-hosts.ts` et routes existantes seulement si nécessaire pour authentification. Coordination SECT avec lot4 : ne pas modifier même fichier simultanément ; composants d’abord, branchement après accord contrôleur.
+**Files:** `apps/daemon/src/whales.ts`, migrations/persistance ciblées et tests ; `apps/web/src/data/whales.ts`, store et `components/WhalesWindow.tsx` ; nouveaux `data/onchain/defillamaPro.ts`, `store/defillamaKey.ts`, panneau ciblé unlocks/bridges ; `SettingsPanel.tsx`, `McapWindow.tsx`, `SectWindow.tsx` ; politique proxy `shared/extapi-hosts.ts` et routes existantes seulement si nécessaire pour authentification. Coordination SECT avec lot4 : ne pas modifier même fichier simultanément ; composants d'abord, publication explicite de la prise/libération du fichier au contrôleur.
 
 **Interfaces:** labels `{entite,source,verifieLe,confiance}` associés aux adresses existantes ; état de continuité explicite. Clé DefiLlama Pro en localStorage via getter, store expose présence/version uniquement. Qualité du lot1 si disponible, sinon import après.
 

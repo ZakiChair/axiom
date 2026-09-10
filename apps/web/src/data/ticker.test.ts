@@ -17,8 +17,10 @@ import {
   parseMessageTicker,
   resolveTickerSource,
   subscribeTickers,
+  subscribeWatchlistBars,
   TICKER_HEALTH,
 } from "./ticker";
+import { binanceAdapter } from "./binance";
 import { healthStore } from "../store/health";
 
 describe("isTradfiSymbol", () => {
@@ -296,5 +298,32 @@ describe("subscribeTickers — enregistrement au registre santé (panneau DATA)"
 
     unsubB();
     expect(healthStore.getState().sources[TICKER_HEALTH]?.etat).toBe("closed");
+  });
+});
+
+describe("subscribeWatchlistBars — symboles de capitalisation exclus de Binance", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("n'interroge PAS les klines Binance pour TOTAL/TOTAL2/TOTAL3", () => {
+    // Ces symboles n'existent pas chez Binance : la requête repartait pour un 400
+    // « Invalid symbol », que le navigateur requalifiait en erreur CORS.
+    const klines = vi.spyOn(binanceAdapter, "fetchKlines").mockResolvedValue([]);
+
+    const stop = subscribeWatchlistBars(["TOTAL", "TOTAL2", "TOTAL3"], () => {});
+    stop();
+
+    expect(klines).not.toHaveBeenCalled();
+  });
+
+  it("continue d'interroger les symboles Binance réels du même lot", async () => {
+    const klines = vi.spyOn(binanceAdapter, "fetchKlines").mockResolvedValue([]);
+
+    const stop = subscribeWatchlistBars(["BTCUSDT", "TOTAL"], () => {});
+    await Promise.resolve();
+    stop();
+
+    expect(klines.mock.calls.map(([symbole]) => symbole)).toEqual(["BTCUSDT"]);
   });
 });

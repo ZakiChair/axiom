@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import viteConfig from "../vite.config";
 
 type Bypass = (req: { url?: string; method?: string; headers: Record<string, string | undefined> }, res: ReponseFactice) => unknown;
@@ -48,6 +48,55 @@ describe("gardes proxy Vite — aucun relais après refus", () => {
     expect(res.statusCode).toBe(403);
     expect(res.writableEnded).toBe(true);
     expect(retour).toBe(url);
+  });
+});
+
+describe("garde /sosoapi — aucune requête sortante sans clé", () => {
+  const cleInitiale = process.env.SOSOVALUE_API_KEY;
+  afterEach(() => {
+    if (cleInitiale === undefined) delete process.env.SOSOVALUE_API_KEY;
+    else process.env.SOSOVALUE_API_KEY = cleInitiale;
+  });
+
+  it("répond 401 localement quand aucune clé n'est disponible", () => {
+    // Sans clé, l'amont répond 401 à coup sûr : on ne laisse pas partir la requête.
+    // C'est ce qui évite les lignes « [vite] http proxy error » au terminal, Vite
+    // enregistrant son propre logger d'erreur APRÈS `configure`.
+    process.env.SOSOVALUE_API_KEY = "";
+    const url = "/sosoapi/openapi/v2/etf/currentEtfDataMetrics";
+    const res = reponse();
+
+    const retour = bypassPour("/sosoapi")({ url, method: "POST", headers: {} }, res);
+
+    expect(res.statusCode).toBe(401);
+    expect(res.writableEnded).toBe(true);
+    expect(retour).toBe(url); // coupe le relais, comme les autres gardes du fichier
+  });
+
+  it("laisse relayer dès qu'une clé de Réglages accompagne la requête", () => {
+    process.env.SOSOVALUE_API_KEY = "";
+    const res = reponse();
+
+    const retour = bypassPour("/sosoapi")(
+      { url: "/sosoapi/openapi/v2/etf/currentEtfDataMetrics", method: "POST", headers: { "x-soso-api-key": "CLESECRETE" } },
+      res,
+    );
+
+    expect(res.writableEnded).toBe(false);
+    expect(retour).toBeUndefined();
+  });
+
+  it("laisse relayer quand la clé vient de .env", () => {
+    process.env.SOSOVALUE_API_KEY = "CLEENV";
+    const res = reponse();
+
+    const retour = bypassPour("/sosoapi")(
+      { url: "/sosoapi/openapi/v2/etf/currentEtfDataMetrics", method: "POST", headers: {} },
+      res,
+    );
+
+    expect(res.writableEnded).toBe(false);
+    expect(retour).toBeUndefined();
   });
 });
 

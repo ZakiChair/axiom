@@ -257,7 +257,7 @@ describe("NEWS_FEEDS — invariants de configuration", () => {
 
   it("expose les flux macro/tradfi du bandeau (Bloomberg, CNBC, Finnhub forex)", () => {
     const parId = new Map(NEWS_FEEDS.map((f) => [f.id, f]));
-    expect(parId.get("bloomberg")).toMatchObject({ host: "feeds.bloomberg.com", path: "economics/news.rss" });
+    expect(parId.get("bloomberg")).toMatchObject({ host: "www.bloomberg.com", path: "feeds/economics/news.rss" });
     expect(parId.get("cnbc")).toMatchObject({ host: "www.cnbc.com", path: "id/20910258/device/rss/rss.html" });
     expect(parId.get("finnhubfx")).toMatchObject({ kind: "finnhub", category: "forex" });
     expect(parId.get("finnhub")).toMatchObject({ kind: "finnhub", category: "general" });

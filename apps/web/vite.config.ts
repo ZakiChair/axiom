@@ -160,6 +160,25 @@ export default defineConfig(({ mode }) => {
         target: "https://openapi.sosovalue.com",
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/sosoapi/, ""),
+        // Sans clé (ni Réglages ni .env), l'amont répond 401 à coup sûr : on répond
+        // nous-mêmes, sans toucher au réseau. C'est le SEUL levier qui supprime les lignes
+        // « [vite] http proxy error » du terminal : Vite enregistre son propre handler
+        // d'erreur APRÈS `configure` et journalise la stack quoi qu'on y branche.
+        bypass: (req, res) => {
+          if (res === undefined) return;
+          const cle = typeof req.headers["x-soso-api-key"] === "string" ? req.headers["x-soso-api-key"] : "";
+          if (cle.length === 0 && SOSOVALUE_API_KEY.length === 0) {
+            res.statusCode = 401;
+            res.setHeader("content-type", "application/json; charset=utf-8");
+            res.end(JSON.stringify({ erreur: "clé SoSoValue absente" }));
+            // Comme /extapi : une chaîne fait constater writableEnded à Vite et coupe le réseau.
+            return req.url ?? "/";
+          }
+        },
+        // Borne l'attente quand une clé EST présente : sans elle, une coupure réseau
+        // laisse le socket pendre jusqu'au timeout TCP de l'OS.
+        timeout: 15_000,
+        proxyTimeout: 15_000,
         configure: (proxy) => {
           proxy.on("proxyReq", (proxyReq) => {
             if (SOSOVALUE_API_KEY.length > 0 && !proxyReq.getHeader("x-soso-api-key")) {

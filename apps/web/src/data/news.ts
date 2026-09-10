@@ -78,8 +78,11 @@ export interface NewsFeed {
  *  - Blockworks : hôte `blockworks.com` (l'ancien `blockworks.co/feed` redirige
  *    en 308 vers ce domaine — hôte suivi + whitelists /extapi mises à jour
  *    2026-07-09) ; sert de l'Atom, couvert par parseFeed.
- *  - Bloomberg : `feeds.bloomberg.com/economics/news.rss` — verticale macro « economics »
- *    (vérifiée 200 le 2026-07-10, cf. docs/research/05) ; RSS 2.0 standard.
+ *  - Bloomberg : `www.bloomberg.com/feeds/economics/news.rss` — verticale macro
+ *    « economics » ; RSS 2.0 standard. On vise la destination FINALE : `feeds.bloomberg.com`
+ *    redirige en 301 vers elle, or le proxy /extapi de dev ne suit pas les redirections —
+ *    le 301 remontait au navigateur, qui repassait alors sous contrôle CORS et butait sur
+ *    l'en-tête `Access-Control-Allow-Origin: localhost` (invalide) posé par Bloomberg.
  *  - CNBC : `id/20910258/device/rss/rss.html` — verticale « Economy » (vérifiée 200 ;
  *    exige un UA navigateur, déjà envoyé par défaut par le proxy /extapi).
  * Bloomberg/CNBC ne sont PAS des API documentées pérennes : enrichissement dégradable
@@ -91,7 +94,7 @@ export const NEWS_FEEDS: readonly NewsFeed[] = [
   { id: "theblock", label: "The Block", host: "www.theblock.co", path: "rss.xml", color: "#4f8cff" },
   { id: "decrypt", label: "Decrypt", host: "decrypt.co", path: "feed", color: "#22c55e" },
   { id: "blockworks", label: "Blockworks", host: "blockworks.com", path: "feed", color: "#a855f7" },
-  { id: "bloomberg", label: "Bloomberg", host: "feeds.bloomberg.com", path: "economics/news.rss", color: "#6366f1" },
+  { id: "bloomberg", label: "Bloomberg", host: "www.bloomberg.com", path: "feeds/economics/news.rss", color: "#6366f1" },
   { id: "cnbc", label: "CNBC", host: "www.cnbc.com", path: "id/20910258/device/rss/rss.html", color: "#ef4444" },
   // Finnhub `/news` — appelé DIRECT (CORS ouvert), clé requise (cf. store/finnhub).
   // host/path ignorés pour ce `kind` (l'URL est construite dans fetchFlux) — laissés vides

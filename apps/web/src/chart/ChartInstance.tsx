@@ -986,6 +986,12 @@ export function ChartInstance({
           !sameMarketIdentity(marketIdentity(current), requestedIdentity)
         ) return;
 
+        // Un backfill vide n'est pas un succès : sans cette garde, `completeDataLoad`
+        // passe le slot en « ready », l'overlay se démonte et le graphe reste muet sans
+        // recours. On rejoint le chemin d'erreur déjà écrit (overlay + « Réessayer »).
+        // Vaut UNIQUEMENT pour le backfill initial : dans `chargerPlusAncien`, un tableau
+        // vide est le signal normal de fin d'historique.
+        if (candles.length === 0) throw new Error("historique vide");
         chart.setPriceVolumePrecision(derivePricePrecision(candles), 0);
         chart.applyNewData(candles.map(toKLineData));
         // Le store et la série deviennent « ready » dans le même tour JS. Si l'identité

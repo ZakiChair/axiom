@@ -18,6 +18,7 @@
 import type { Candle, Unsubscribe } from "@axiom/types";
 import { fetchQuotes } from "./twelvedata";
 import { binanceAdapter } from "./binance";
+import { estSymboleCapitalisation } from "./mcap";
 import { TWELVEDATA_SYMBOLS } from "./pairs";
 import { pollLoop } from "./pollLoop";
 import { splitSymbol } from "./symbol";
@@ -526,8 +527,14 @@ export function subscribeWatchlistBars(
   cb: (bars: WatchlistBars) => void
 ): Unsubscribe {
   const explicit = watchlistStore.getState().sources;
+  // TOTAL/TOTAL2/TOTAL3 n'existent pas chez Binance : la requête part pour un 400
+  // « Invalid symbol », que le navigateur requalifie en erreur CORS (la réponse d'erreur
+  // Binance n'a pas d'en-tête ACAO). Leur historique vient du panneau Capitalisation.
   const binance = symbols.filter(
-    (s) => resolveTickerSource(s, explicit[s]) === "binance" && !s.includes("/")
+    (s) =>
+      resolveTickerSource(s, explicit[s]) === "binance" &&
+      !s.includes("/") &&
+      !estSymboleCapitalisation(s)
   );
   if (binance.length === 0) return () => {};
 

@@ -84,7 +84,8 @@ test("GLOBE montre les historiques GPR/TPU/GSCPI avec unités et millésime", as
   await expect(panel.getByRole("img", { name: "Évolution de GSCPI, en écarts-types" })).toBeVisible();
   await expect(panel).toContainText("édition 2026-09");
   await expect(panel).toContainText("1,06 écarts-types");
-  await panel.screenshot({ path: "/private/tmp/axiom-20260907-geo.png" });
+  // Dossier de sortie Playwright du test : existe sur toute plateforme (« /private/tmp » est macOS).
+  await panel.screenshot({ path: test.info().outputPath("geo.png") });
 });
 
 test("NBS : chômage, PPI, inflation sous-jacente et production chinoise sans clé", async ({ page }) => {
@@ -112,7 +113,7 @@ test("NBS : chômage, PPI, inflation sous-jacente et production chinoise sans cl
     await expect(table).toContainText("juil. 2026");
   }
   expect(posts).toBeGreaterThanOrEqual(4);
-  await macro.screenshot({ path: "/private/tmp/axiom-20260907-macro.png" });
+  await macro.screenshot({ path: test.info().outputPath("macro.png") });
 });
 
 test("MACRO : chômage indien, PPI canadien calculé et PPI japonais natif", async ({ page }) => {

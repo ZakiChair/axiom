@@ -290,7 +290,10 @@ export function PairSearch({
       )}
 
       {open && pairsError && !showBuilder && (
-        <div className="absolute left-0 top-full z-20 mt-1 w-44 rounded border border-border bg-bg px-2 py-1 text-xs text-text-dim shadow-lg">
+        // Avis purement informatif : il partage la position de la liste d'options et ne
+        // doit pas intercepter les clics (les symboles de capitalisation restent
+        // sélectionnables même sans catalogue — attrapé sur un runner CI sans accès Binance).
+        <div className="pointer-events-none absolute left-0 top-full z-20 mt-1 w-44 rounded border border-border bg-bg px-2 py-1 text-xs text-text-dim shadow-lg">
           Catalogue indisponible
         </div>
       )}

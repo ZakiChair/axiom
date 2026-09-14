@@ -102,6 +102,12 @@ test.beforeEach(async ({ page }) => {
 
 test.describe("avec historique reconstruit", () => {
   test.beforeEach(async ({ page }) => {
+    // Catalogue Binance bouchonné : sans lui, un runner sans accès à api.binance.com
+    // (bloqué géographiquement depuis les runners GitHub US) affiche « Catalogue
+    // indisponible » par-dessus la liste d'options — le parcours doit rester hermétique.
+    await page.route("**/api.binance.com/api/v3/exchangeInfo*", (route) => route.fulfill({
+      json: { symbols: [{ symbol: "BTCUSDT", status: "TRADING" }, { symbol: "ETHUSDT", status: "TRADING" }] },
+    }));
     await page.addInitScript(
       ([hist, dominances, macroHist]) => {
         window.localStorage.setItem("axiom:mcap:v1", hist as string);

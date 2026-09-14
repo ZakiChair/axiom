@@ -10,7 +10,7 @@ import type { PointTermIv } from "../../data/termIv";
 import type { PointMouvementAttendu } from "../../data/mouvementAttendu";
 import type { SegmentVolForward } from "../../data/volForward";
 import { useMemo } from "react";
-import { formatPct, formatPourcentage, formatEntier, formatUsd, VALEUR_ABSENTE } from "../../lib/format";
+import { formatDateComplete, formatPct, formatPourcentage, formatEntier, formatUsd, VALEUR_ABSENTE } from "../../lib/format";
 import { Badge, ErreurBloc, NoteSource, Fraicheur, InfobulleGraphe } from "../ui";
 import { TableTriable, type ColonneTable } from "../TableTriable";
 import { joursAvant, TERMIV_PAD_L, TERMIV_PAD_R } from "./dessins";
@@ -90,8 +90,8 @@ const COLONNES_MOUVEMENT: ColonneTable<LigneMouvement>[] = [
     label: "σ fwd →",
     align: "right",
     largeur: "1.2fr",
-    // Trois lignes courtes (colonne étroite) : σ fwd, move 1σ de la fenêtre ou motif du « — »,
-    // événements ECO et part attribuable estimée.
+    // Lignes courtes (colonne étroite) : σ fwd, move 1σ de la fenêtre ou motif du « — »,
+    // événements ECO et part attribuable estimée, puis « calendrier non couvert » s'il y a lieu.
     rendu: ({ segment: s }) => {
       if (s === null) return VALEUR_ABSENTE;
       const evenements = libellesEvenements(s);
@@ -107,6 +107,7 @@ const COLONNES_MOUVEMENT: ColonneTable<LigneMouvement>[] = [
               {s.moveEvenementPct !== null && ` ≈${plusMoins(formatPourcentage(s.moveEvenementPct, 2))}`}
             </span>
           )}
+          {s.calendrierNonCouvert && <span className="block text-text-dim">calendrier non couvert</span>}
         </>
       );
     },
@@ -125,6 +126,8 @@ interface Props {
   termIvPoints: PointTermIv[];
   mouvements: PointMouvementAttendu[];
   segments: SegmentVolForward[];
+  /** Fin de couverture du calendrier ECO chargé (`finCouvertureCalendrier`), null sans source datée. */
+  finCouvertureEco: number | null;
 }
 
 export function VueTermIv({
@@ -139,6 +142,7 @@ export function VueTermIv({
   termIvPoints,
   mouvements,
   segments,
+  finCouvertureEco,
 }: Props) {
   const pointSurvol = survolTermIv === null ? undefined : termIvPoints[survolTermIv];
   // Retrouvé par échéance, pas par index : les deux listes n'omettent pas les mêmes échéances.
@@ -151,6 +155,13 @@ export function VueTermIv({
     () => mouvements.map((m) => ({ ...m, segment: segments.find((s) => s.debutMs === m.expiryMs) ?? null })),
     [mouvements, segments],
   );
+  const noteCouverture =
+    finCouvertureEco === null
+      ? "Calendrier ECO sans publication ForexFactory ou FRED chargée (dates FOMC statiques seules) : " +
+        "toutes les fenêtres « calendrier non couvert », sans part d'événement."
+      : `Calendrier ECO couvert jusqu'au ${formatDateComplete(finCouvertureEco)} (dernière publication ` +
+        "ForexFactory ou FRED chargée, dates FOMC statiques au-delà) : fenêtre finissant après = " +
+        "« calendrier non couvert », sans part d'événement ni place dans σ base.";
   return (
     <div className={visible ? undefined : "hidden"}>
       <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
@@ -217,6 +228,7 @@ export function VueTermIv({
                                   : `≈${plusMoins(formatPourcentage(segmentSurvol.moveEvenementPct, 2))}`,
                             },
                           ]),
+                      ...(segmentSurvol.calendrierNonCouvert ? [{ label: "Calendrier", valeur: "non couvert" }] : []),
                     ]),
               ]}
             />
@@ -275,7 +287,7 @@ export function VueTermIv({
           échéance a moins de 12 h masquées. Événements ECO USD à fort impact situés dans la
           fenêtre (« Évt » : autre publication, détail dans ECO). Part d&apos;événement ≈ √(σ fwd²
           − σ base²) × √(Δt/365 j), σ base = médiane des σ fwd des fenêtres de 7 j au plus sans
-          événement : estimation, lue seulement sur ces fenêtres courtes. IV des quotidiennes peu
+          événement : estimation, lue seulement sur ces fenêtres courtes. {noteCouverture} IV des quotidiennes peu
           adossée à l&apos;OI : ±2,5 à 3 pts d&apos;incertitude sur σ fwd, amplifiée quand Δt = 1 j.
           Mesure risque-neutre, prime de variance incluse.
         </NoteSource>

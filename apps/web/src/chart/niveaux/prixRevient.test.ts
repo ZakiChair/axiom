@@ -3,14 +3,18 @@
  * sur la fixture CoinGecko (845 050 BTC pour 64 267 830 000 $ → 76 052,10 $) calculé par le
  * contrat du couloir CHAIN (`resumerTresoreries`), suffixe « (périmé) », aucune ligne sans
  * coût, éligibilité BTC coté en dollar, module CHAIN chargé au seul abonnement, rafraîchissement
- * horaire et toasts explicites (une fois par cause).
+ * horaire, ligne conservée datée après un échec et toasts explicites (une fois par cause).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ResultatFrais } from "../../data/onchain/mempool";
 import { resumerTresoreries, type TresoreriesBtc } from "../../data/onchain/tresoreriesBtc";
+import { formatDateHeure } from "../../lib/format";
 import { RAFRAICHISSEMENT_PRIX_REVIENT_MS, creerSourcePrixRevient, lignesPrixRevient, type ModuleTresoreries } from "./prixRevient";
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 const BTC = { exchange: "binance" as const, symbol: "BTCUSDT" };
 const FIXTURE: TresoreriesBtc = {
@@ -21,7 +25,9 @@ const FIXTURE: TresoreriesBtc = {
     { nom: "Metaplanet", symbole: "3350.T", avoirsBtc: 43_000, coutTotalUsd: 3_810_765_023.48 },
   ],
 };
-const frais = (donnee: TresoreriesBtc = FIXTURE, perime = false): ResultatFrais<TresoreriesBtc> => ({ donnee, ts: 1, perime });
+/** Date de récupération des réponses factices (15/09/2026 10:00 UTC). */
+const RECUPERE = Date.UTC(2026, 8, 15, 10, 0);
+const frais = (donnee: TresoreriesBtc = FIXTURE, perime = false, ts = RECUPERE): ResultatFrais<TresoreriesBtc> => ({ donnee, ts, perime });
 
 /** Module CHAIN factice : réponses successives (la dernière se répète), vrai `resumerTresoreries`. */
 function moduleFactice(reponses: (ResultatFrais<TresoreriesBtc> | null | Error)[]) {
@@ -56,6 +62,14 @@ describe("lignesPrixRevient", () => {
 
   it("résultat périmé : suffixe « (périmé) »", () => {
     expect(lignesPrixRevient(76_052.1, true).map((l) => l.label)).toEqual(["Coût Strategy (périmé)"]);
+  });
+
+  it("ligne conservée après un échec : suffixe « (conservée du <date de récupération>) », qui prime sur « (périmé) »", () => {
+    for (const perime of [false, true]) {
+      expect(lignesPrixRevient(76_052.1, perime, RECUPERE)).toEqual([
+        { price: 76_052.1, label: `Coût Strategy (conservée du ${formatDateHeure(RECUPERE)})`, couleur: "--text-dim", emphase: "forte" },
+      ]);
+    }
   });
 
   it("coût absent, nul, négatif ou non fini : aucune ligne", () => {
@@ -104,26 +118,38 @@ describe("creerSourcePrixRevient", () => {
     expect(sourceUsd.getLignes().map((l) => l.label)).toEqual(["Coût Strategy (périmé)"]);
   });
 
-  it("rafraîchit toutes les heures ; échec : toast unique, ligne conservée ; succès puis échec : nouveau toast ; désabonnement coupe tout", async () => {
+  it("rafraîchit toutes les heures ; relecture null ou en échec : ligne conservée datée et toast unique qui le dit ; succès puis échec : nouveau toast ; désabonnement coupe tout", async () => {
     vi.useFakeTimers();
-    const m = moduleFactice([frais(), null, null, frais(FIXTURE, true), null]);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const plusTard = RECUPERE + 3 * RAFRAICHISSEMENT_PRIX_REVIENT_MS;
+    const m = moduleFactice([frais(), null, new Error("CoinGecko 429"), frais(FIXTURE, true, plusTard), null]);
     const toasts: string[] = [];
     const source = creerSourcePrixRevient(BTC, { module: m.module, toast: (t) => toasts.push(t) });
-    const unsub = source.subscribe(() => {});
+    let notifs = 0;
+    const unsub = source.subscribe(() => (notifs += 1));
     await flush();
-    const lignes = source.getLignes();
-    expect(lignes).toHaveLength(1);
+    const [ligne] = source.getLignes();
+    expect(ligne?.label).toBe("Coût Strategy");
 
+    // Relecture null puis rejet : même ligne, suffixée de la date du dernier succès, notifiée.
     await vi.advanceTimersByTimeAsync(RAFRAICHISSEMENT_PRIX_REVIENT_MS);
+    expect(source.getLignes()).toEqual([{ ...ligne, label: `Coût Strategy (conservée du ${formatDateHeure(RECUPERE)})` }]);
+    expect(notifs).toBe(2);
     await vi.advanceTimersByTimeAsync(RAFRAICHISSEMENT_PRIX_REVIENT_MS);
     expect(m.c.chargements).toBe(3);
-    expect(source.getLignes()).toEqual(lignes);
-    expect(toasts).toEqual(["Coût Strategy : trésoreries CoinGecko indisponibles, nouvel essai dans 1 h"]);
+    expect(source.getLignes().map((l) => l.label)).toEqual([`Coût Strategy (conservée du ${formatDateHeure(RECUPERE)})`]);
+    expect(toasts).toEqual([
+      `Coût Strategy : trésoreries CoinGecko indisponibles, ligne du ${formatDateHeure(RECUPERE)} conservée, nouvel essai dans 1 h`,
+    ]);
 
     await vi.advanceTimersByTimeAsync(RAFRAICHISSEMENT_PRIX_REVIENT_MS);
     expect(source.getLignes().map((l) => l.label)).toEqual(["Coût Strategy (périmé)"]);
     await vi.advanceTimersByTimeAsync(RAFRAICHISSEMENT_PRIX_REVIENT_MS);
-    expect(toasts).toHaveLength(2);
+    expect(source.getLignes().map((l) => l.label)).toEqual([`Coût Strategy (conservée du ${formatDateHeure(plusTard)})`]);
+    expect(toasts).toEqual([
+      `Coût Strategy : trésoreries CoinGecko indisponibles, ligne du ${formatDateHeure(RECUPERE)} conservée, nouvel essai dans 1 h`,
+      `Coût Strategy : trésoreries CoinGecko indisponibles, ligne du ${formatDateHeure(plusTard)} conservée, nouvel essai dans 1 h`,
+    ]);
 
     unsub();
     await vi.advanceTimersByTimeAsync(5 * RAFRAICHISSEMENT_PRIX_REVIENT_MS);
@@ -159,6 +185,38 @@ describe("creerSourcePrixRevient", () => {
     unsub();
     expect(source.getLignes()).toEqual([]);
     expect(toasts).toEqual(["Coût Strategy : trésoreries CoinGecko indisponibles, nouvel essai dans 1 h"]);
+  });
+
+  it("rejet de module() ou de chargerTresoreriesBtc après le désabonnement, ligne déjà tracée : ni toast ni notification", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const etape of ["module", "chargerTresoreriesBtc"] as const) {
+      let rejeter: (err: Error) => void = () => {};
+      const differe = () => new Promise<never>((_, rej) => (rejeter = rej));
+      let imports = 0;
+      const mod: ModuleTresoreries = {
+        chargerTresoreriesBtc: () => (imports > 1 && etape === "chargerTresoreriesBtc" ? differe() : Promise.resolve(frais())),
+        resumerTresoreries,
+      };
+      const toasts: string[] = [];
+      const source = creerSourcePrixRevient(BTC, {
+        module: () => (++imports > 1 && etape === "module" ? differe() : Promise.resolve(mod)),
+        toast: (t) => toasts.push(t),
+      });
+      let notifs = 0;
+      const unsub = source.subscribe(() => (notifs += 1));
+      await flush();
+      expect(notifs).toBe(1);
+      // Relecture horaire en vol, désabonnement, puis rejet.
+      await vi.advanceTimersByTimeAsync(RAFRAICHISSEMENT_PRIX_REVIENT_MS);
+      expect(imports).toBe(2);
+      unsub();
+      rejeter(new Error(`${etape} rejeté`));
+      await flush();
+      expect(notifs).toBe(1);
+      expect(toasts).toEqual([]);
+      expect(source.getLignes().map((l) => l.label)).toEqual(["Coût Strategy"]);
+    }
   });
 
   it("désabonnement avant la réponse : aucune notification ni toast", async () => {

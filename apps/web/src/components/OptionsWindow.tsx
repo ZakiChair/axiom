@@ -40,7 +40,7 @@ import {
 import { calculerSkew25d } from "../data/skew";
 import { termStructureIv, type PointTermIv } from "../data/termIv";
 import { mouvementsAttendus, type PointMouvementAttendu } from "../data/mouvementAttendu";
-import { libelleCourtEvenement, volsForward, type SegmentVolForward } from "../data/volForward";
+import { finCouvertureCalendrier, libelleCourtEvenement, volsForward, type SegmentVolForward } from "../data/volForward";
 import { courbeProbaImplicite, lireProbasNiveau, niveauParDefaut, prixCourant } from "../data/probaImplicite";
 import { histDvol } from "../data/referentiels";
 import { ivRank } from "../data/ivRank";
@@ -742,11 +742,13 @@ export function OptionsWindow() {
         .map((e) => ({ time: e.time, libelle: libelleCourtEvenement(e.title) })),
     [evenementsEco],
   );
+  // Couverture du calendrier chargé (toutes devises et impacts, hors FOMC statiques).
+  const finCouvertureEco = useMemo(() => finCouvertureCalendrier(evenementsEco), [evenementsEco]);
   // Vol forward entre échéances consécutives de la courbe (mêmes IV ATM que le tracé) et part
   // d'événement — fonction pure de data/volForward, nowMs injecté au bord.
   const segmentsFwd = useMemo<SegmentVolForward[]>(
-    () => (vue === "termiv" ? volsForward(termIvPoints, Date.now(), evenementsVol) : []),
-    [vue, termIvPoints, evenementsVol],
+    () => (vue === "termiv" ? volsForward(termIvPoints, Date.now(), evenementsVol, finCouvertureEco) : []),
+    [vue, termIvPoints, evenementsVol, finCouvertureEco],
   );
 
   // Redessine la term structure (données/vue/DVOL/survol ; thème repeint via majTs, tokens lus au dessin).
@@ -1017,6 +1019,7 @@ export function OptionsWindow() {
           termIvPoints={termIvPoints}
           mouvements={mouvements}
           segments={segmentsFwd}
+          finCouvertureEco={finCouvertureEco}
         />
       </div>
     </>

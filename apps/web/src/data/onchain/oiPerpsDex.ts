@@ -35,7 +35,11 @@ export const OI_DEX_OBSERVATION_MAX_MS = 2 * JOUR_MS;
 export interface OiPerpsDex {
   /** USD, dernier point de la catégorie Derivatives. */
   niveau: number;
-  /** ms, 00:00 UTC du dernier point (jour en cours, actualisé en continu). */
+  /**
+   * ms, 00:00 UTC du dernier point de la série : jour UTC en cours (actualisé en continu) ou
+   * jour antérieur (point du jour absent ou sans valeur Derivatives) ; périmé au-delà de 2 jours
+   * (`observationPerimee`).
+   */
   observation: number;
   /** En %, signe conservé, à périmètre constant ; null si le point de base manque. */
   delta7jPct: number | null;

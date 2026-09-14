@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  finCouvertureCalendrier,
   libelleCourtEvenement,
   volsForward,
   DT_BASE_MAX_JOURS,
@@ -12,6 +13,8 @@ const NOW = Date.UTC(2026, 0, 1);
 const UN_AN = 365 * 24 * 60 * 60 * 1000;
 const JOUR = 24 * 60 * 60 * 1000;
 const HEURE = 3_600_000;
+/** Calendrier ECO couvert au-delà de toutes les fenêtres des tests (sauf tests de couverture). */
+const COUVERT = NOW + UN_AN;
 
 /**
  * Points de term structure dont les vols forward consécutives valent exactement `fwds` (%) :
@@ -38,7 +41,7 @@ describe("volsForward", () => {
       { expiryMs: NOW + 0.1 * UN_AN, ivAtm: 30 },
       { expiryMs: NOW + 0.2 * UN_AN, ivAtm: 40 },
     ];
-    const [s] = volsForward(points, NOW, []);
+    const [s] = volsForward(points, NOW, [], COUVERT);
     expect(s?.debutMs).toBe(points[0]?.expiryMs);
     expect(s?.finMs).toBe(points[1]?.expiryMs);
     expect(s?.dtJours).toBeCloseTo(36.5, 9);
@@ -54,7 +57,7 @@ describe("volsForward", () => {
       { expiryMs: NOW + 0.1 * UN_AN, ivAtm: 50 },
       { expiryMs: NOW + 0.2 * UN_AN, ivAtm: 30 },
     ];
-    const [s] = volsForward(points, NOW, []);
+    const [s] = volsForward(points, NOW, [], COUVERT);
     expect(s?.sigmaFwd).toBeNull();
     expect(s?.varianceNegative).toBe(true);
     expect(s?.move1SigmaPct).toBeNull();
@@ -64,12 +67,12 @@ describe("volsForward", () => {
   it("masque les fenêtres dont une échéance a moins de 12 h de vie", () => {
     expect(SEUIL_MASQUE_MS).toBe(12 * HEURE);
     const fin = NOW + 5 * JOUR;
-    const [masque] = volsForward([{ expiryMs: NOW + 11 * HEURE, ivAtm: 40 }, { expiryMs: fin, ivAtm: 40 }], NOW, []);
+    const [masque] = volsForward([{ expiryMs: NOW + 11 * HEURE, ivAtm: 40 }, { expiryMs: fin, ivAtm: 40 }], NOW, [], COUVERT);
     expect(masque?.masque).toBe(true);
     expect(masque?.sigmaFwd).toBeNull();
     expect(masque?.varianceNegative).toBe(false);
     expect(masque?.move1SigmaPct).toBeNull();
-    const [visible] = volsForward([{ expiryMs: NOW + 13 * HEURE, ivAtm: 40 }, { expiryMs: fin, ivAtm: 40 }], NOW, []);
+    const [visible] = volsForward([{ expiryMs: NOW + 13 * HEURE, ivAtm: 40 }, { expiryMs: fin, ivAtm: 40 }], NOW, [], COUVERT);
     expect(visible?.masque).toBe(false);
     expect(visible?.sigmaFwd).toBeCloseTo(40, 9);
   });
@@ -85,7 +88,7 @@ describe("volsForward", () => {
     const surDebut: EvenementVol = { time: debut, libelle: "au début" };
     const surFin: EvenementVol = { time: fin, libelle: "à la fin" };
     const apres: EvenementVol = { time: fin + HEURE, libelle: "après" };
-    const [s] = volsForward(points, NOW, [surDebut, dedans, surFin, apres]);
+    const [s] = volsForward(points, NOW, [surDebut, dedans, surFin, apres], COUVERT);
     expect(s?.evenements).toEqual([dedans, surFin]);
   });
 
@@ -94,7 +97,7 @@ describe("volsForward", () => {
     // Fenêtres d'un jour : 34 %, 50 % (FOMC), 36 %, 35,7 %.
     const points = pointsDepuisFwd(debut, 40, [34, 50, 36, 35.7], [1, 1, 1, 1]);
     const fomc: EvenementVol = { time: debut + JOUR + 10 * HEURE, libelle: "Décision FOMC (taux directeur)" };
-    const segments = volsForward(points, NOW, [fomc]);
+    const segments = volsForward(points, NOW, [fomc], COUVERT);
     expect(segments.map((s) => s.sigmaFwd)).toEqual([
       expect.closeTo(34, 9),
       expect.closeTo(50, 9),
@@ -114,7 +117,7 @@ describe("volsForward", () => {
     // 34 % sur 1 j ; 50 % sur 5 j (FOMC) ; 36 % et 35,7 % sur 1 j → σ base = médiane(34 ; 36 ; 35,7) = 35,7.
     const points = pointsDepuisFwd(debut, 40, [34, 50, 36, 35.7], [1, 5, 1, 1]);
     const fomc: EvenementVol = { time: debut + 3 * JOUR, libelle: "FOMC" };
-    const segments = volsForward(points, NOW, [fomc]);
+    const segments = volsForward(points, NOW, [fomc], COUVERT);
     const evt = segments[1];
     expect(evt?.dtJours).toBeCloseTo(5, 9);
     expect(evt?.evenements).toEqual([fomc]);
@@ -132,7 +135,7 @@ describe("volsForward", () => {
       { time: debut + JOUR + HEURE, libelle: "FOMC" },
       { time: debut + 40 * JOUR, libelle: "CPI" },
     ];
-    const segments = volsForward(points, NOW, evenements);
+    const segments = volsForward(points, NOW, evenements, COUVERT);
     // La fenêtre de 30 j à 60 % n'entre pas dans la médiane : base toujours 35,7.
     expect(segments[1]?.moveEvenementPct).toBeCloseTo(Math.sqrt(50 * 50 - 35.7 * 35.7) / Math.sqrt(365), 9);
     // Fenêtre de 30 j avec événement : l'excès de variance mêle la pente de la courbe, pas de part lue.
@@ -144,7 +147,7 @@ describe("volsForward", () => {
   it("σ base indisponible (aucune fenêtre courte sans événement exploitable) : part d'événement null", () => {
     const debut = NOW + 2 * JOUR;
     const points = pointsDepuisFwd(debut, 40, [50], [1]);
-    const [s] = volsForward(points, NOW, [{ time: debut + HEURE, libelle: "FOMC" }]);
+    const [s] = volsForward(points, NOW, [{ time: debut + HEURE, libelle: "FOMC" }], COUVERT);
     expect(s?.sigmaFwd).toBeCloseTo(50, 9);
     expect(s?.moveEvenementPct).toBeNull();
   });
@@ -152,13 +155,67 @@ describe("volsForward", () => {
   it("σ fwd sous la base : part d'événement nulle, bornée à 0", () => {
     const debut = NOW + 2 * JOUR;
     const points = pointsDepuisFwd(debut, 40, [40, 30], [1, 1]);
-    const segments = volsForward(points, NOW, [{ time: debut + JOUR + HEURE, libelle: "CPI" }]);
+    const segments = volsForward(points, NOW, [{ time: debut + JOUR + HEURE, libelle: "CPI" }], COUVERT);
     expect(segments[1]?.moveEvenementPct).toBe(0);
   });
 
+  it("calendrier non couvert au-delà de la couverture : fenêtre exclue de σ base, borne incluse", () => {
+    const debut = NOW + 2 * JOUR;
+    // Fenêtres d'un jour : 34 %, 50 % (FOMC), 36 %, 35,7 %, puis 20 % sans événement APRÈS la couverture.
+    const points = pointsDepuisFwd(debut, 40, [34, 50, 36, 35.7, 20], [1, 1, 1, 1, 1]);
+    const fomc: EvenementVol = { time: debut + JOUR + HEURE, libelle: "FOMC" };
+    const couverture = points[4]!.expiryMs; // fin de la 4ᵉ fenêtre : couverte (borne incluse)
+    const segments = volsForward(points, NOW, [fomc], couverture);
+    expect(segments.map((s) => s.calendrierNonCouvert)).toEqual([false, false, false, false, true]);
+    // La fenêtre à 20 % n'est pas vérifiée sans événement : σ base = médiane(34 ; 36 ; 35,7) = 35,7,
+    // pas médiane(34 ; 36 ; 35,7 ; 20) = 34,85.
+    expect(segments[1]?.moveEvenementPct).toBeCloseTo(Math.sqrt(50 * 50 - 35.7 * 35.7) / Math.sqrt(365), 9);
+    expect(segments[4]?.sigmaFwd).toBeCloseTo(20, 9);
+    expect(segments[4]?.moveEvenementPct).toBeNull();
+  });
+
+  it("événement connu dans une fenêtre non couverte : listé, mais aucune part d'événement", () => {
+    const debut = NOW + 2 * JOUR;
+    // 34 %, 36 % couvertes et sans événement (σ base 35) ; 50 % avec FOMC, après la couverture.
+    const points = pointsDepuisFwd(debut, 40, [34, 36, 50], [1, 1, 1]);
+    const fomc: EvenementVol = { time: debut + 2 * JOUR + HEURE, libelle: "FOMC" };
+    const segments = volsForward(points, NOW, [fomc], points[2]!.expiryMs);
+    expect(segments[2]?.calendrierNonCouvert).toBe(true);
+    expect(segments[2]?.evenements).toEqual([fomc]);
+    expect(segments[2]?.sigmaFwd).toBeCloseTo(50, 9);
+    expect(segments[2]?.moveEvenementPct).toBeNull();
+  });
+
+  it("calendrier sans source datée (couverture null) : toutes les fenêtres non couvertes, aucune part", () => {
+    const debut = NOW + 2 * JOUR;
+    const points = pointsDepuisFwd(debut, 40, [34, 50, 36], [1, 1, 1]);
+    const segments = volsForward(points, NOW, [{ time: debut + JOUR + HEURE, libelle: "FOMC" }], null);
+    expect(segments.map((s) => s.calendrierNonCouvert)).toEqual([true, true, true]);
+    expect(segments.map((s) => s.moveEvenementPct)).toEqual([null, null, null]);
+    expect(segments[1]?.evenements).toHaveLength(1);
+  });
+
   it("moins de deux points : aucun segment", () => {
-    expect(volsForward([], NOW, [])).toEqual([]);
-    expect(volsForward([{ expiryMs: NOW + JOUR, ivAtm: 40 }], NOW, [])).toEqual([]);
+    expect(volsForward([], NOW, [], COUVERT)).toEqual([]);
+    expect(volsForward([{ expiryMs: NOW + JOUR, ivAtm: 40 }], NOW, [], COUVERT)).toEqual([]);
+  });
+});
+
+describe("finCouvertureCalendrier", () => {
+  it("dernier événement daté par ForexFactory ou FRED (toutes devises et impacts) ; FOMC statiques exclus", () => {
+    expect(
+      finCouvertureCalendrier([
+        { time: 10, source: "forexfactory" },
+        { time: 30, source: "fred" },
+        { time: 99, source: "fomc" },
+        { time: 20, source: "forexfactory" },
+      ]),
+    ).toBe(30);
+  });
+
+  it("aucune source datée (FOMC statiques seuls, calendrier vide) : null", () => {
+    expect(finCouvertureCalendrier([{ time: 99, source: "fomc" }])).toBeNull();
+    expect(finCouvertureCalendrier([])).toBeNull();
   });
 });
 

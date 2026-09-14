@@ -173,6 +173,24 @@ export function dessinerSmile(
 export const BARRES_PAD_L = 46;
 export const BARRES_PAD_R = 10;
 
+/**
+ * Graduations Y dont l'étiquette reste lisible : prises dans l'ordre (priorité décroissante),
+ * écartée toute valeur à moins de `ecartMinPx` d'une étiquette déjà retenue (police canvas 10 px).
+ * Ne touche ni l'échelle ni les lignes de grille. PURE.
+ */
+export function graduationsLisibles(
+  valeurs: readonly number[],
+  py: (v: number) => number,
+  ecartMinPx = 12,
+): { valeur: number; y: number }[] {
+  const retenues: { valeur: number; y: number }[] = [];
+  for (const valeur of valeurs) {
+    const y = py(valeur);
+    if (retenues.every((g) => Math.abs(g.y - y) >= ecartMinPx)) retenues.push({ valeur, y });
+  }
+  return retenues;
+}
+
 /** Sous-ensemble des points dont l'exposition |gex ou dex| dépasse 0,5 % du max — même
  * base pour le tracé (dessinerBarres) et le domaine de l'axe (domaineActionsGexDex). */
 export function filtrerAuSeuil(points: GexDexPoint[], metrique: "gex" | "dex"): GexDexPoint[] {
@@ -242,7 +260,8 @@ export function dessinerBarres(
   const px = (s: number) => padL + valeurVersPixel(domaine, s, plotW);
   const py = (v: number) => padT + (1 - (v - yLo) / yRange) * plotH;
 
-  // Grille + étiquettes Y (exposition compacte).
+  // Grille + étiquettes Y (exposition compacte). Bornes prioritaires : l'étiquette du zéro trop
+  // proche d'une borne (petite exposition d'un côté) ou confondue avec elle n'est pas écrite.
   ctx.font = POLICE_CANVAS;
   ctx.lineWidth = 1;
   for (const v of [yHi, 0, yLo]) {
@@ -252,9 +271,9 @@ export function dessinerBarres(
     ctx.moveTo(padL, y);
     ctx.lineTo(cssW - padR, y);
     ctx.stroke();
-    ctx.fillStyle = couleurDim;
-    ctx.fillText(formatUsd(v), 2, y + 3);
   }
+  ctx.fillStyle = couleurDim;
+  for (const { valeur, y } of graduationsLisibles([yHi, yLo, 0], py)) ctx.fillText(formatUsd(valeur), 2, y + 3);
   // Étiquettes X (bornes du domaine visible).
   ctx.fillStyle = couleurDim;
   ctx.fillText(formatStrike(domaine.min), padL, cssH - 6);

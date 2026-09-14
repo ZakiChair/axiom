@@ -320,6 +320,11 @@ test("Backtest distingue bootstrap, spot sans funding et absence du funding rée
   await fenetre.getByRole("button", { name: "Lancer le backtest" }).click();
   await expect(fenetre.getByText("Terminé", { exact: true })).toBeVisible();
   await expect(fenetre).not.toContainText("Funding signé séparé des commissions");
+  // Tenue par moitié : la section et ses deux colonnes (PnL global + une tuile par moitié).
+  await expect(fenetre.getByText("Tenue par moitié · walk-forward", { exact: true })).toBeVisible();
+  await expect(fenetre.getByText(/^1re moitié · /)).toBeVisible();
+  await expect(fenetre.getByText(/^2e moitié · /)).toBeVisible();
+  await expect(fenetre.getByText("PnL net", { exact: true })).toHaveCount(3);
 
   const modeMonteCarlo = fenetre.getByLabel("Mode Monte-Carlo");
   await expect(modeMonteCarlo).toHaveValue("blocs");

@@ -15,15 +15,17 @@ import {
   type NiveauxOverlaysState,
 } from "../niveauxOverlays";
 import { creerSourceNiveauxCles } from "./niveauxCles";
+import { creerSourceNiveauxOptions } from "./niveauxOptions";
 
 export type FabriqueSource = (ctx: ContexteNiveaux) => FournisseurLignes;
 
 export const FABRIQUES: Record<CleOverlayNiveaux, FabriqueSource> = {
   niveauxCles: (ctx) => creerSourceNiveauxCles(ctx),
+  niveauxOptions: (ctx) => creerSourceNiveauxOptions(ctx),
 };
 
 /** Ordre d'agrégation = priorité de fusion (couleur de la première ligne d'un groupe). */
-export const ORDRE_SOURCES: readonly CleOverlayNiveaux[] = ["niveauxCles"];
+export const ORDRE_SOURCES: readonly CleOverlayNiveaux[] = ["niveauxCles", "niveauxOptions"];
 
 /**
  * Fusionne les lignes de même prix (écart relatif ≤ `tolRel`) : étiquettes jointes par « · »

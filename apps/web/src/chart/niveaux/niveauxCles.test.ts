@@ -31,6 +31,7 @@ function serie(debut: number, fin: number, f: (t: number) => { open: number; hig
 function storeFamilles(familles: FamilleNiveauxCles[]): StoreApi<NiveauxOverlaysState> {
   return createStore<NiveauxOverlaysState>((set) => ({
     niveauxCles: true,
+    niveauxOptions: false,
     familles,
     basculer: () => {},
     setActif: (cle, actif) => set({ [cle]: actif } as Partial<NiveauxOverlaysState>),

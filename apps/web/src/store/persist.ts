@@ -426,6 +426,8 @@ interface PersistedSession {
   niveauxCles: boolean;
   /** Familles affichées des niveaux clés (sous-ensemble NON VIDE de J, S, M, T). */
   niveauxClesFamilles: FamilleNiveauxCles[];
+  /** Bascule des niveaux d'options Deribit sur le chart maître (chart/niveauxOverlays). */
+  niveauxOptions: boolean;
   macroOverlays: MacroOverlayId[];
   /** Dénominateur choisi pour le bouton de ratio scindé du bandeau (÷ETH / ÷SOL). */
   denominateur: DenominateurId;
@@ -450,6 +452,7 @@ function currentSession(): PersistedSession {
     distOverlay: distOverlayStore.getState().actif,
     niveauxCles: niveauxOverlaysStore.getState().niveauxCles,
     niveauxClesFamilles: niveauxOverlaysStore.getState().familles,
+    niveauxOptions: niveauxOverlaysStore.getState().niveauxOptions,
     macroOverlays: macroOverlayStore.getState().enabled,
     denominateur: denominateurStore.getState().denominateur,
     sections: uiSectionsStore.getState().open,
@@ -505,6 +508,7 @@ function hydrateSession(): void {
   if (typeof p.niveauxCles === "boolean") niveauxOverlaysStore.getState().setActif("niveauxCles", p.niveauxCles);
   // Familles : le setter filtre les inconnues, réordonne et ignore une liste vide.
   if (Array.isArray(p.niveauxClesFamilles)) niveauxOverlaysStore.getState().setFamilles(p.niveauxClesFamilles);
+  if (typeof p.niveauxOptions === "boolean") niveauxOverlaysStore.getState().setActif("niveauxOptions", p.niveauxOptions);
 
   if (Array.isArray(p.macroOverlays)) {
     // setEnabled filtre lui-même les ids inconnus (unique()) — on borne malgré tout ici.

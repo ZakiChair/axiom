@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 import { createStore, type StoreApi } from "zustand/vanilla";
-import { creerFournisseurComposite, fusionnerLignes, type FabriqueSource } from "./composite";
+import { FABRIQUES, ORDRE_SOURCES, creerFournisseurComposite, fusionnerLignes, type FabriqueSource } from "./composite";
 import type { NiveauxOverlaysState } from "../niveauxOverlays";
 import type { LigneNiveau } from "../niveauxLignes";
 
@@ -20,6 +20,7 @@ function ligne(price: number, label: string, emphase: LigneNiveau["emphase"] = "
 function storeIsole(): StoreApi<NiveauxOverlaysState> {
   return createStore<NiveauxOverlaysState>((set, get) => ({
     niveauxCles: false,
+    niveauxOptions: false,
     familles: ["J", "S"],
     basculer: (cle) => set({ [cle]: !get()[cle] } as Partial<NiveauxOverlaysState>),
     setActif: (cle, actif) => set({ [cle]: actif } as Partial<NiveauxOverlaysState>),
@@ -102,6 +103,30 @@ describe("creerFournisseurComposite", () => {
     expect(notifs).toBe(avant + 1);
     expect(src.c.abonnements).toBe(1);
     unsub();
+  });
+
+  it("sources indépendantes : niveaux clés puis options agrégés dans l'ordre, l'une OFF n'éteint pas l'autre", () => {
+    const cles = sourceFactice([ligne(80_000, "PDH")]);
+    const options = sourceFactice([ligne(80_000, "Call wall γ", "forte", "--up"), ligne(77_000, "Put wall γ", "forte", "--down")]);
+    const f = creerFournisseurComposite(CTX, { niveauxCles: cles.fabrique, niveauxOptions: options.fabrique }, store);
+    const unsub = f.subscribe(() => {});
+    store.getState().setActif("niveauxOptions", true);
+    expect(cles.c.creations).toBe(0);
+    expect(f.getLignes().map((l) => l.label)).toEqual(["Call wall γ", "Put wall γ"]);
+
+    store.getState().setActif("niveauxCles", true);
+    expect(f.getLignes().map((l) => l.label)).toEqual(["PDH·Call wall γ", "Put wall γ"]);
+
+    store.getState().setActif("niveauxCles", false);
+    expect(options.c.desabonnements).toBe(0);
+    expect(f.getLignes().map((l) => l.label)).toEqual(["Call wall γ", "Put wall γ"]);
+    unsub();
+    expect(options.c.desabonnements).toBe(1);
+  });
+
+  it("fabriques réelles : une par overlay, niveaux clés prioritaires dans la fusion", () => {
+    expect(ORDRE_SOURCES).toEqual(["niveauxCles", "niveauxOptions"]);
+    expect(Object.keys(FABRIQUES).sort()).toEqual([...ORDRE_SOURCES].sort());
   });
 
   it("le désabonnement global libère aussi l'écoute du store", () => {

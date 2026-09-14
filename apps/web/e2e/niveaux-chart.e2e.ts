@@ -4,11 +4,13 @@ import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 import { BTCUSDT_1D } from "../src/chart/niveaux/btcusdt1d.fixture";
 
 /**
- * Niveaux clés sur le chart maître, réseau fermé : bougies 1d RÉELLES (sonde BTCUSDT du
- * 14/09/2026) et bougies 1m synthétiques oscillant entre 76 000 et 81 000 pour que les
- * niveaux du jour et de la semaine tombent dans l'échelle. Activation par la palette, lignes
- * lues par l'accroche du clic droit (seules les lignes réellement peintes sont accrochables),
- * alerte au niveau exact, persistance après rechargement.
+ * Overlays de niveaux sur le chart maître, réseau fermé : bougies 1d RÉELLES (sonde BTCUSDT
+ * du 14/09/2026) et bougies 1m synthétiques oscillant entre 76 000 et 81 000 pour que les
+ * niveaux tombent dans l'échelle. Activation par la palette, lignes lues par l'accroche du
+ * clic droit (seules les lignes réellement peintes sont accrochables).
+ *  - Niveaux clés : alerte au niveau exact, persistance après rechargement.
+ *  - Niveaux d'options : chaîne Deribit synthétique, murs γ, deux flips distincts, max pain
+ *    de l'échéance dominante fusionné avec le put wall de même prix.
  */
 const MAINTENANT = Date.parse("2026-09-14T18:00:00Z");
 const MINUTE = 60_000;
@@ -41,6 +43,9 @@ async function bouchonnerBougies(page: Page): Promise<void> {
 
 async function commande(page: Page, texte: string): Promise<void> {
   await expect(page.getByRole("banner").getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
+  // Souris hors de la liste : laissée au milieu du chart par un clic droit, elle survolerait
+  // un résultat de la palette et en changerait la sélection avant Entrée.
+  await page.mouse.move(0, 0);
   await page.keyboard.press("ControlOrMeta+k");
   await page.getByPlaceholder(/^Commande/).fill(texte);
   // La liste filtrée doit présenter la commande avant validation (sinon Enter part à vide).
@@ -156,4 +161,73 @@ test("niveaux clés : activation palette, lignes accrochables, alerte au niveau 
   await expect.poll(() => enteteAuPrix(page, 77_450)).toContain("PDH");
   await commande(page, "NIVCLE");
   await expect.poll(() => enteteAuPrix(page, 77_450)).not.toContain("PDH");
+});
+
+/**
+ * Chaîne BTC synthétique (IV 45 %, spot 79 000). À 18:00 UTC le calcul du lot (composition des
+ * fonctions d'OMON, vérifiée en test unitaire) donne : call wall 80 000, put wall 77 000,
+ * flip GEX(S) 76 254,02, flip cumulé 79 507,22, max pain 25SEP26 (Σ OI 1 600) 77 000.
+ */
+const OPTIONS_BTC = (
+  [
+    ["BTC-25SEP26-80000-C", 800],
+    ["BTC-25SEP26-77000-P", 600],
+    ["BTC-25SEP26-84000-C", 100],
+    ["BTC-25SEP26-72000-P", 100],
+    ["BTC-18SEP26-81000-C", 50],
+    ["BTC-18SEP26-76000-P", 50],
+  ] as const
+).map(([instrument_name, open_interest]) => ({
+  instrument_name,
+  mark_iv: 45,
+  open_interest,
+  underlying_price: 79_000,
+  interest_rate: 0,
+  volume: 1,
+  mark_price: 0.01,
+}));
+
+test("niveaux d'options : activation palette, murs, flips et max pain accrochables, scellés à BTC", async ({ page }) => {
+  const modulesOptions: string[] = [];
+  page.on("request", (requete) => {
+    if (requete.url().includes("/src/chart/niveaux/niveauxOptions.ts")) modulesOptions.push(requete.url());
+  });
+  await bouchonnerBougies(page);
+  await page.route("https://www.deribit.com/api/v2/public/**", async (route) => {
+    const url = new URL(route.request().url());
+    const optionsBtc = url.pathname.endsWith("/get_book_summary_by_currency")
+      && url.searchParams.get("kind") === "option"
+      && url.searchParams.get("currency") === "BTC";
+    if (optionsBtc) await route.fulfill({ json: { jsonrpc: "2.0", result: OPTIONS_BTC } });
+    else await route.fulfill({ status: 503, json: { error: "fixture Deribit absente" } });
+  });
+  await page.goto("/");
+  await attendreChart(page);
+
+  expect(await enteteAuPrix(page, 80_000)).not.toContain("Call wall");
+  expect(modulesOptions).toEqual([]);
+
+  await commande(page, "OPTNIV");
+  await expect.poll(() => enteteAuPrix(page, 80_000), { timeout: 20_000 }).toBe("Call wall γ · Prix 80,000.00");
+  expect(modulesOptions.length).toBeGreaterThan(0);
+  // Put wall et max pain de l'échéance dominante au même strike : une seule ligne, deux noms.
+  expect(await enteteAuPrix(page, 77_000)).toBe("Put wall γ·Max pain 25SEP26 · Prix 77,000.00");
+  // Deux flips aux noms distincts, à 3 000 $ l'un de l'autre.
+  expect(await enteteAuPrix(page, 79_507.22)).toBe("Flip cumulé · Prix 79,507.22");
+  expect(await enteteAuPrix(page, 76_254.02)).toBe("Flip GEX(S) · Prix 76,254.02");
+  const session = await page.evaluate(() => JSON.parse(localStorage.getItem("axiom:sessionUi:v1") ?? "{}"));
+  expect(session).toMatchObject({ niveauxOptions: true, niveauxCles: false });
+
+  // ETHUSDT : chaîne ETH indisponible → toast, et aucune ligne BTC ne subsiste.
+  await page.getByRole("banner").getByRole("button", { name: "ETHUSDT", exact: true }).click();
+  await expect(page.getByText("Niveaux d'options : chaîne Deribit ETH indisponible, nouvel essai dans 10 min")).toBeVisible();
+  await attendreChart(page);
+  expect(await enteteAuPrix(page, 80_000)).not.toContain("Call wall");
+
+  // Retour BTC puis désactivation par la palette.
+  await page.getByRole("banner").getByRole("button", { name: "BTCUSDT", exact: true }).click();
+  await attendreChart(page);
+  await expect.poll(() => enteteAuPrix(page, 80_000)).toContain("Call wall γ");
+  await commande(page, "OPTNIV");
+  await expect.poll(() => enteteAuPrix(page, 80_000)).not.toContain("Call wall");
 });

@@ -14,13 +14,15 @@ import type { Commande } from "../commands/registry";
 import type { FournisseurLignes } from "./niveauxLignes";
 
 /** Overlays pilotés par ce socle (les lots suivants ajoutent leurs clés). */
-export type CleOverlayNiveaux = "niveauxCles";
+export type CleOverlayNiveaux = "niveauxCles" | "niveauxOptions";
 /** Familles des niveaux clés : jour, semaine, mois, trimestre (UTC). */
 export type FamilleNiveauxCles = "J" | "S" | "M" | "T";
 export const FAMILLES_NIVEAUX_CLES: readonly FamilleNiveauxCles[] = ["J", "S", "M", "T"];
 
 export interface NiveauxOverlaysState {
   niveauxCles: boolean;
+  /** Murs γ, flips et max pain Deribit (BTC/ETH). */
+  niveauxOptions: boolean;
   /** Familles affichées — jamais vide, ordre canonique J, S, M, T ; défaut J + S. */
   familles: FamilleNiveauxCles[];
   basculer: (cle: CleOverlayNiveaux) => void;
@@ -37,6 +39,7 @@ const canoniques = (garder: (f: FamilleNiveauxCles) => boolean): FamilleNiveauxC
 
 export const niveauxOverlaysStore: StoreApi<NiveauxOverlaysState> = createStore<NiveauxOverlaysState>((set, get) => ({
   niveauxCles: false,
+  niveauxOptions: false,
   familles: ["J", "S"],
   basculer: (cle) => set({ [cle]: !get()[cle] }),
   setActif: (cle, actif) => set({ [cle]: actif }),
@@ -53,7 +56,7 @@ export const niveauxOverlaysStore: StoreApi<NiveauxOverlaysState> = createStore<
 
 /** Au moins un overlay de niveaux est allumé (PURE). */
 export function overlaysNiveauxActifs(s: NiveauxOverlaysState): boolean {
-  return s.niveauxCles;
+  return s.niveauxCles || s.niveauxOptions;
 }
 
 /** Identité capturée du slot hôte. */
@@ -113,4 +116,13 @@ export const commandesNiveauxOverlays: Commande[] = [
     motsCles: [],
     action: () => niveauxOverlaysStore.getState().basculerFamille(f),
   })),
+  {
+    id: "action:niveaux-options",
+    mnemonique: "OPTNIV",
+    libelle: "Niveaux d'options Deribit (murs γ, flips, max pain) — activer / désactiver",
+    categorie: "action",
+    motsCles: ["gex", "max pain"],
+    apercu: "BTC/ETH · convention calls + / puts −",
+    action: () => niveauxOverlaysStore.getState().basculer("niveauxOptions"),
+  },
 ];

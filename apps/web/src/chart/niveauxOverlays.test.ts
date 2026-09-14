@@ -17,6 +17,7 @@ import type { FournisseurLignes, LigneNiveau } from "./niveauxLignes";
 
 beforeEach(() => {
   niveauxOverlaysStore.getState().setActif("niveauxCles", false);
+  niveauxOverlaysStore.getState().setActif("niveauxOptions", false);
   niveauxOverlaysStore.getState().setFamilles(["J", "S"]);
 });
 
@@ -24,6 +25,7 @@ describe("niveauxOverlaysStore — bascules et familles", () => {
   it("défaut OFF, familles J + S", () => {
     const s = niveauxOverlaysStore.getState();
     expect(s.niveauxCles).toBe(false);
+    expect(s.niveauxOptions).toBe(false);
     expect(s.familles).toEqual(["J", "S"]);
     expect(overlaysNiveauxActifs(s)).toBe(false);
   });
@@ -34,6 +36,14 @@ describe("niveauxOverlaysStore — bascules et familles", () => {
     expect(overlaysNiveauxActifs(niveauxOverlaysStore.getState())).toBe(true);
     niveauxOverlaysStore.getState().setActif("niveauxCles", false);
     expect(overlaysNiveauxActifs(niveauxOverlaysStore.getState())).toBe(false);
+  });
+
+  it("les niveaux d'options suffisent à activer l'overlay, indépendamment des niveaux clés", () => {
+    niveauxOverlaysStore.getState().basculer("niveauxOptions");
+    const s = niveauxOverlaysStore.getState();
+    expect(s.niveauxOptions).toBe(true);
+    expect(s.niveauxCles).toBe(false);
+    expect(overlaysNiveauxActifs(s)).toBe(true);
   });
 
   it("basculerFamille ajoute en ordre canonique et allume les niveaux clés", () => {
@@ -62,9 +72,9 @@ describe("niveauxOverlaysStore — bascules et familles", () => {
 });
 
 describe("commandesNiveauxOverlays", () => {
-  it("une commande de bascule NIVCLE et une par famille, ids et mnémoniques uniques", () => {
+  it("NIVCLE, une commande par famille et OPTNIV, ids et mnémoniques uniques", () => {
     const mnemos = commandesNiveauxOverlays.map((c) => c.mnemonique);
-    expect(mnemos).toEqual(["NIVCLE", ...FAMILLES_NIVEAUX_CLES.map((f) => `NIVCLE-${f}`)]);
+    expect(mnemos).toEqual(["NIVCLE", ...FAMILLES_NIVEAUX_CLES.map((f) => `NIVCLE-${f}`), "OPTNIV"]);
     expect(new Set(commandesNiveauxOverlays.map((c) => c.id)).size).toBe(commandesNiveauxOverlays.length);
   });
 
@@ -77,6 +87,16 @@ describe("commandesNiveauxOverlays", () => {
     parMnemo("NIVCLE-M").action();
     expect(niveauxOverlaysStore.getState().familles).toEqual(["J", "S", "M"]);
     expect(niveauxOverlaysStore.getState().niveauxCles).toBe(true);
+  });
+
+  it("OPTNIV bascule les niveaux d'options et rappelle la convention de signe", () => {
+    const optniv = commandesNiveauxOverlays.find((c) => c.mnemonique === "OPTNIV")!;
+    expect(optniv.apercu).toContain("calls + / puts −");
+    optniv.action();
+    expect(niveauxOverlaysStore.getState().niveauxOptions).toBe(true);
+    expect(niveauxOverlaysStore.getState().niveauxCles).toBe(false);
+    optniv.action();
+    expect(niveauxOverlaysStore.getState().niveauxOptions).toBe(false);
   });
 });
 

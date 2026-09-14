@@ -18,7 +18,8 @@ export function VueHistoriqueEtf({ resultat, repliBtc }: { resultat: DonneeHisto
       <div className="grid grid-cols-2 gap-2">{[5, 20].map(n => <TuileStat key={n} label={`Cumul ${n} séances`} valeur={valeurUnite(cumul(n), "BTC")}
         pied={cumul(n) === null ? "Historique insuffisant" : undefined} />)}</div>
       <CourbeOnchain points={points} label="Flux ETF BTC publiés" unite="BTC" zero ecartMaxJours={4} />
-      <ProvenanceOnchain source="BGeometrics (repli)" observation={points.at(-1)?.time} recuperation={repliBtc.ts} perime={repliBtc.perime} />
+      <ProvenanceOnchain source="BGeometrics (repli)" observation={points.at(-1)?.time} recuperation={repliBtc.ts}
+        perime={repliBtc.repli || Date.now() - (points.at(-1)?.time ?? 0) > 5 * 86_400_000} />
     </div>;
   }
   const r = resumerEtfHistory(resultat.points); const dernier = resultat.points.at(-1)!;

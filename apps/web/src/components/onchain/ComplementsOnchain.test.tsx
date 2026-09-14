@@ -37,7 +37,7 @@ describe("compléments CHAIN : unités et disponibilités", () => {
   });
   it("un repli ETF BTC ne se présente jamais comme des dollars", () => {
     const html = renderToStaticMarkup(<VueHistoriqueEtf resultat={{ points: [], ts: 0, perime: true, raison: "Clé absente" }}
-      repliBtc={{ ts: 1, perime: true, serie: { points: Array.from({ length: 5 }, (_, i) => ({ time: Date.UTC(2026, 8, i + 1), value: 2 })) } }} />);
+      repliBtc={{ ts: 1, perime: true, repli: true, serie: { points: Array.from({ length: 5 }, (_, i) => ({ time: Date.UTC(2026, 8, i + 1), value: 2 })) } }} />);
     expect(html).toContain("10.00 BTC");
     expect(html).toContain("BGeometrics");
     expect(html).toContain("Aucun ratio USD");

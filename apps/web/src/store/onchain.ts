@@ -5,7 +5,8 @@
  *  1. `onchainUiStore` : état d'ouverture de la fenêtre non modale (comme derivatives-ui).
  *     Éphémère → NON persisté.
  *  2. `bgeometricsKeyStore` : présence d'une clé BGeometrics (bitcoin-data.com). La clé est
- *     OPTIONNELLE (la source fonctionne sans clé, quota 15 req/jour ; la clé relève le quota).
+ *     OPTIONNELLE (la source fonctionne sans clé, quota IP ~15 req/jour ; une clé gratuite
+ *     plafonne aussi à 10 req/heure et 15 req/jour — seule une offre payante relève le quota).
  *     Comme coinalyze/fred : on ne place JAMAIS la VALEUR de la clé dans le state (ni rendue
  *     ni loggée) — elle vit dans localStorage et n'est lue qu'à la demande via `getBgeometricsKey`.
  *
@@ -15,6 +16,8 @@
 import { createStore } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
 import { windowManagerStore, mirrorOpenState } from "./windowManager";
+// Module sans dépendance : n'embarque pas le client BGeometrics dans le bundle initial.
+import { oublierRefusAbonnementBg } from "../data/onchain/refusAbonnementBg";
 
 // ─────────────────────────── UI (ouverture de la fenêtre CHAIN) ───────────────────────────
 
@@ -69,7 +72,8 @@ export interface BgeometricsKeyState {
   /**
    * true si une clé PERSONNELLE est configurée. Comme coinalyze/fred, BGeometrics dispose
    * désormais d'un repli .env (proxy `/bgapi`, en-tête `Bearer`) : `hasKey` ne reflète donc
-   * que la clé personnelle (prioritaire) — un repli .env peut relever le quota même sans elle.
+   * que la clé personnelle (prioritaire) — un repli .env donne accès même sans elle, avec les
+   * mêmes plafonds de l'offre gratuite (10 req/heure et 15 req/jour).
    * Sans aucune clé, la source reste utilisable (quota IP réduit).
    */
   hasKey: boolean;
@@ -89,11 +93,14 @@ export const bgeometricsKeyStore = createStore<BgeometricsKeyState>((set) => ({
     const k = key.trim();
     const value = k.length > 0 ? k : null;
     writeKey(value);
+    // Le refus d'abonnement mémorisé valait pour l'ancienne clé.
+    oublierRefusAbonnementBg();
     set((s) => ({ hasKey: value !== null, version: s.version + 1 }));
   },
 
   clearKey: () => {
     writeKey(null);
+    oublierRefusAbonnementBg();
     set((s) => ({ hasKey: false, version: s.version + 1 }));
   },
 }));

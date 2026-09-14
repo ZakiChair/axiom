@@ -54,6 +54,30 @@ export function qualitesCoinMetrics(resultat: CoinMetricsResultat | null, now: n
   });
 }
 
+/** Date UTC « JJ/MM/AAAA » d'une observation quotidienne. */
+const dateUtc = (time: number): string =>
+  new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(time);
+
+/**
+ * Qualité d'une tuile Valorisation BGeometrics. « cache » seulement pour une valeur resservie
+ * faute d'appel abouti (`repli`) ; une donnée fraîchement récupérée mais ancienne signale une
+ * source en retard, avec la date de sa dernière observation publiée. Le statut « perime » est inchangé.
+ */
+export function qualiteBgeometrics(resultat: BgResultat | null, erreur: string | undefined, avecCle: boolean, recupereLe: number): QualiteMetrique {
+  const dernier = resultat?.serie.dernier;
+  const raison = resultat === null || erreur ? erreur ?? "Métrique BGeometrics indisponible ou quota épuisé."
+    : resultat.perime && !resultat.repli && dernier ? `Dernière observation publiée par BGeometrics : ${dateUtc(dernier.time)} (source en retard).`
+      : undefined;
+  return {
+    sourceId: "bgeometrics", sourceEffective: resultat?.repli ? "cache BGeometrics" : "BGeometrics",
+    observeLe: dernier?.time ?? null, recupereLe: resultat?.ts ?? recupereLe, cadenceMs: JOUR_MS, ageMaxMs: 3 * JOUR_MS,
+    couverture: resultat ? { disponibles: resultat.serie.points.length, attendus: 120 } : null, estime: false,
+    acces: resultat === null ? "indisponible" : avecCle ? "cle" : "public",
+    statut: resultat === null ? "indisponible" : resultat.perime ? "perime" : resultat.serie.points.length < 20 ? "en-construction" : "frais",
+    ...(raison ? { raison } : {}),
+  };
+}
+
 export interface ValeurPublicationEtf {
   actif: ActifEtf;
   principal: EtfResultat;
@@ -87,9 +111,10 @@ export function qualitePublicationEtf(
   if (repli?.serie.dernier) {
     const observeLe = repli.serie.dernier.time <= now ? repli.serie.dernier.time : null;
     return {
-      sourceId: "bgeometrics", sourceEffective: repli.perime ? "cache BGeometrics (repli)" : "BGeometrics (repli)",
+      sourceId: "bgeometrics", sourceEffective: repli.repli ? "cache BGeometrics (repli)" : "BGeometrics (repli)",
       observeLe, recupereLe: repli.ts, cadenceMs: JOUR_MS, ageMaxMs: 5 * JOUR_MS, couverture: null, estime: false, acces: "cle",
-      statut: repli.perime || observeLe === null || now - observeLe > 5 * JOUR_MS ? "perime" : "partiel",
+      // Règle des séances ETF (5 j) : `repli.perime` bascule dès 3 j, faux positif chaque lendemain de week-end.
+      statut: repli.repli || observeLe === null || now - observeLe > 5 * JOUR_MS ? "perime" : "partiel",
       raison: observeLe === null ? "Observation future du repli rejetée." : "SoSoValue indisponible ; repli BTC natif.",
     };
   }

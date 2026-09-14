@@ -321,6 +321,7 @@ describe("AuxProvider.getAligned", () => {
       serie: { points: [{ time: 1000, value: 1 }], dernier: { time: 1000, value: 1 } },
       ts: 0,
       perime: false,
+      repli: false,
     });
     const p = new AuxProvider();
     const req = {

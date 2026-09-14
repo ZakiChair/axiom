@@ -628,7 +628,7 @@ export function SettingsPanel() {
             />
             <ApiKeyField
               name="BGeometrics (on-chain)"
-              purpose="Valorisation BTC — MVRV Z-Score, SOPR, NUPL. Optionnelle : la source marche sans clé (quota 15 req/jour) ; une clé relève ce quota."
+              purpose="Valorisation BTC — MVRV Z-Score, SOPR, NUPL. Optionnelle : la source marche sans clé (quota IP ~15 req/jour). Une clé gratuite plafonne aussi à 10 req/heure et 15 req/jour ; seule une offre payante relève le quota."
               domain="bitcoin-data.com"
               signupUrl="https://bitcoin-data.com"
               signupLabel="Clé gratuite"

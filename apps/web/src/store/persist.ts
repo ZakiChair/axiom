@@ -73,6 +73,7 @@ import { syntheticsStore } from "./synthetics";
 import { estSymboleCapitalisation } from "../data/mcap";
 import { parseSyntheticSymbol } from "../data/synthetic";
 import { CLES_SNAPSHOT, remplacerClesLocales } from "../data/sauvegardeLocale";
+import { CLE_GENERATION_ABONNEMENT, CLE_REFUS_ABONNEMENT } from "../data/onchain/refusAbonnementBg";
 
 const CHART_KEY = "axiom:chartState:v1";
 const WINDOW_MANAGER_KEY = "axiom:windowManager:v1";
@@ -760,6 +761,14 @@ function estCredentialLocal(cle: string): boolean {
   return CLES_CREDENTIALS_LOCALES.has(cle);
 }
 
+/** États liés à la clé BGeometrics du poste (refus d'abonnement mémorisé) : traités comme les credentials. */
+const ETATS_LOCAUX_NON_EXPORTES: ReadonlySet<string> = new Set([CLE_REFUS_ABONNEMENT, CLE_GENERATION_ABONNEMENT]);
+
+/** Clé jamais exportée ni importée, et préservée localement lors d'un import. */
+function resteSurLePoste(cle: string): boolean {
+  return estCredentialLocal(cle) || ETATS_LOCAUX_NON_EXPORTES.has(cle);
+}
+
 /** Recense les clés `axiom:*` présentes dans localStorage. */
 function axiomKeys(): string[] {
   const keys: string[] = [];
@@ -775,11 +784,12 @@ function axiomKeys(): string[] {
  * navigateur) : chart, watchlist, session, workspaces, thème, alertes et dessins.
  * Tous les emplacements de credentials fournisseurs sont exclus, y compris ceux qui
  * utilisent historiquement le préfixe `axiom:`. Ils restent locaux et doivent être
- * ressaisis sur un autre poste.
+ * ressaisis sur un autre poste. La mémoire BGeometrics du refus d'abonnement, liée à la clé
+ * du poste, est exclue de la même façon.
  */
 export function exporterSauvegarde(): void {
   const dump: Record<string, string> = {};
-  for (const k of axiomKeys().filter((cle) => !estCredentialLocal(cle))) {
+  for (const k of axiomKeys().filter((cle) => !resteSurLePoste(cle))) {
     const v = localStorage.getItem(k);
     if (v !== null) dump[k] = v;
   }
@@ -816,7 +826,7 @@ export function importerSauvegarde(json: string): boolean {
 
   const valides: [string, string][] = [];
   for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
-    if (k.startsWith(AXIOM_PREFIX) && !estCredentialLocal(k) && typeof v === "string") valides.push([k, v]);
+    if (k.startsWith(AXIOM_PREFIX) && !resteSurLePoste(k) && typeof v === "string") valides.push([k, v]);
   }
   if (valides.length === 0) return false;
 
@@ -825,7 +835,7 @@ export function importerSauvegarde(json: string): boolean {
     // L'import est une nouvelle décision locale, pas une édition datée du fichier.
     const maintenant = Date.now();
     valeurs.set(META_KEY, JSON.stringify(Object.fromEntries(CLES_SNAPSHOT.map((cle) => [cle, maintenant]))));
-    return remplacerClesLocales(valeurs, axiomKeys().filter((cle) => !estCredentialLocal(cle)));
+    return remplacerClesLocales(valeurs, axiomKeys().filter((cle) => !resteSurLePoste(cle)));
   } catch {
     return false;
   }

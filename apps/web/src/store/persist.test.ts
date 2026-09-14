@@ -497,6 +497,23 @@ describe("importerSauvegarde — remplacement des clés axiom:*", () => {
     expect(localStorage.getItem("axiom:notes:v1")).toBe("notes importées");
   });
 
+  it("ignore la mémoire BGeometrics de refus d'abonnement d'un autre poste et préserve celle du poste", () => {
+    const refus = "axiom:onchain:bg:abonnement-refuse";
+    const generation = "axiom:onchain:bg:abonnement-generation";
+    localStorage.setItem(refus, "memoire-locale");
+    localStorage.setItem(generation, "2");
+
+    expect(importerSauvegarde(JSON.stringify({
+      [refus]: JSON.stringify({ echeance: Date.now() + 3_600_000, acces: "perso" }),
+      [generation]: "9",
+      "axiom:notes:v1": "notes importées",
+    }))).toBe(true);
+
+    expect(localStorage.getItem(refus)).toBe("memoire-locale");
+    expect(localStorage.getItem(generation)).toBe("2");
+    expect(localStorage.getItem("axiom:notes:v1")).toBe("notes importées");
+  });
+
   it("refuse un JSON invalide, un tableau ou un objet sans clé axiom: (aucun changement)", () => {
     localStorage.setItem("axiom:garde:v1", "intact");
 
@@ -563,6 +580,15 @@ describe("exporterSauvegarde — périmètre réel du fichier téléchargé", ()
     const dump = await capturerExport();
     expect(JSON.stringify(dump)).not.toContain("SECRET-DEFILLAMA");
     expect(dump["axiom.defillama.proApiKey"]).toBeUndefined();
+  });
+  it("n'embarque pas la mémoire BGeometrics de refus d'abonnement, propre à la clé de ce poste", async () => {
+    localStorage.setItem("axiom:onchain:bg:abonnement-refuse", JSON.stringify({ echeance: Date.now() + 3_600_000, acces: "perso" }));
+    localStorage.setItem("axiom:onchain:bg:abonnement-generation", "3");
+    localStorage.setItem(CHART_KEY, "{}");
+    const dump = await capturerExport();
+    expect(dump["axiom:onchain:bg:abonnement-refuse"]).toBeUndefined();
+    expect(dump["axiom:onchain:bg:abonnement-generation"]).toBeUndefined();
+    expect(dump[CHART_KEY]).toBe("{}");
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { qualitesCoinMetrics, qualitePublicationEtf, traiterPublicationEtfChain, type ValeurPublicationEtf } from "./qualiteChain";
+import { qualiteBgeometrics, qualitesCoinMetrics, qualitePublicationEtf, traiterPublicationEtfChain, type ValeurPublicationEtf } from "./qualiteChain";
 import { actualiserQualite, type QualiteMetrique } from "../qualiteMetrique";
 
 const JOUR = 86_400_000;
@@ -20,6 +20,38 @@ describe("publication qualité Coin Metrics", () => {
     expect(entrees.find((e) => e.id === "AdrActCnt")?.qualite.statut).toBe("perime");
     expect(entrees.find((e) => e.id === "TxCnt")?.qualite.observeLe).toBe(NOW - JOUR);
     expect(entrees.find((e) => e.id === "TxCnt")?.qualite.raison).toContain("future");
+  });
+});
+
+describe("publication qualité BGeometrics (Valorisation)", () => {
+  const serie = (time: number, n = 25) => {
+    const points = Array.from({ length: n }, (_, i) => ({ time: time - (n - 1 - i) * JOUR, value: i }));
+    return { points, dernier: points.at(-1) };
+  };
+
+  it("source en retard : donnée récupérée maintenant, ni cache ni repli, raison datée en UTC", () => {
+    // 23 h 30 UTC : le 07/09 en UTC, déjà le 08/09 à Paris.
+    const q = qualiteBgeometrics({ serie: serie(Date.UTC(2026, 8, 7, 23, 30)), ts: NOW, perime: true, repli: false }, undefined, true, NOW);
+    expect(q.sourceEffective).toBe("BGeometrics");
+    expect(q.statut).toBe("perime");
+    expect(q.raison).toBe("Dernière observation publiée par BGeometrics : 07/09/2026 (source en retard).");
+    expect(q.acces).toBe("cle");
+  });
+
+  it("valeur resservie après échec : cache BGeometrics, sans raison « source en retard »", () => {
+    const q = qualiteBgeometrics({ serie: serie(NOW - JOUR), ts: NOW - 30 * 3600_000, perime: true, repli: true }, undefined, true, NOW);
+    expect(q.sourceEffective).toBe("cache BGeometrics");
+    expect(q.statut).toBe("perime");
+    expect(q.raison ?? "").not.toContain("source en retard");
+  });
+
+  it("frais sans raison ; absent indisponible avec motif", () => {
+    const frais = qualiteBgeometrics({ serie: serie(NOW - JOUR), ts: NOW, perime: false, repli: false }, undefined, false, NOW);
+    expect(frais).toMatchObject({ sourceEffective: "BGeometrics", statut: "frais", acces: "public" });
+    expect(frais.raison).toBeUndefined();
+    const absent = qualiteBgeometrics(null, undefined, true, NOW);
+    expect(absent).toMatchObject({ statut: "indisponible", acces: "indisponible", recupereLe: NOW });
+    expect(absent.raison).toContain("indisponible");
   });
 });
 
@@ -59,6 +91,28 @@ describe("publication qualité ETF CHAIN", () => {
     expect(qualite?.statut).toBe("indisponible");
     expect(qualite?.observeLe).toBe(Date.UTC(2026, 8, 8));
     expect(qualite?.recupereLe).toBe(NOW - 1000);
+  });
+
+  it.each([
+    [false, "BGeometrics (repli)"],
+    [true, "cache BGeometrics (repli)"],
+  ] as const)("repli BTC resservi=%s : source effective %s, statut périmé inchangé", (estRepli, source) => {
+    const dernier = { time: NOW - 10 * JOUR, value: 5 };
+    const q = qualitePublicationEtf("btc", { actif: "btc", principal: { disponible: false, raison: "SoSoValue HS" },
+      repli: { serie: { points: [dernier], dernier }, ts: NOW - 1000, perime: true, repli: estRepli } }, undefined, undefined, NOW);
+    expect(q.sourceEffective).toBe(source);
+    expect(q.statut).toBe("perime");
+  });
+
+  it.each([
+    [false, "partiel"],
+    [true, "perime"],
+  ] as const)("repli BTC observé il y a 4 j (lendemain de week-end), resservi=%s : statut %s selon la règle ETF de 5 jours", (estRepli, statut) => {
+    const dernier = { time: NOW - 4 * JOUR, value: 5 };
+    // `perime` vaut true dès 3 jours côté BGeometrics ; seule la séance ETF (5 j) ou un cache resservi compte ici.
+    const q = qualitePublicationEtf("btc", { actif: "btc", principal: { disponible: false, raison: "SoSoValue HS" },
+      repli: { serie: { points: [dernier], dernier }, ts: NOW - 1000, perime: true, repli: estRepli } }, undefined, undefined, NOW);
+    expect(q.statut).toBe(statut);
   });
 
   it.each([

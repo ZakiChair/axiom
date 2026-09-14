@@ -15,23 +15,31 @@
  *   - Clé de REPLI .env (BGEOMETRICS_API_KEY) : injectée par le proxy `/bgapi` si le front
  *     n'envoie aucun Authorization. Sa seule PRÉSENCE est exposée au bundle via
  *     `BG_CLE_ENV_PRESENTE` (booléen `define` — JAMAIS la valeur).
- *   - Quota : clé active (personnelle OU .env) → ~10 req/HEURE (compteur horaire, « x/10 h ») ;
- *     sinon quota IP ~15 req/JOUR (compteur journalier, « x/15 j »).
- *   - CACHE 24 h OBLIGATOIRE par métrique (3 métriques → 3 req/jour, largement sous la limite).
+ *   - Quota : clé active (personnelle OU .env) → offre gratuite 10 req/HEURE ET 15 req/JOUR
+ *     (santé : « x/10 h · y/15 j », les deux plafonds bloquent) ; sinon quota IP
+ *     ~15 req/JOUR (« x/15 j »). Une clé gratuite ne relève PAS le plafond journalier : seules
+ *     les offres payantes le relèvent.
+ *   - CACHE 24 h OBLIGATOIRE par métrique.
+ *   - ABONNEMENT : un 403 sur une métrique `abonnement` (données d'exchanges) est mémorisé
+ *     24 h en localStorage avec le seul TYPE d'accès (« perso » / « env », jamais la valeur de
+ *     la clé) ; pendant ce délai, les métriques `abonnement` répondent sans appel réseau ni
+ *     compteur. Changer ou retirer la clé personnelle efface cette mémoire (cf. refusAbonnementBg) ;
+ *     un 403 obtenu avec une clé remplacée entre-temps n'y est pas réécrit.
  *
  * ⚠️ VALEURS : le champ peut valoir la CHAÎNE "NaN" (jour manquant) → le parseur l'ignore.
  * `unixTs` est en SECONDES.
  */
 import { ecrireCache, estFrais, lireCache } from "./cache";
-import { healthStore } from "../../store/health";
+import { healthStore, type QuotaSource } from "../../store/health";
 import type { PointMetrique, SerieMetrique } from "./coinmetrics";
 import { nombreOnchain } from "./cohorts";
+import { CLE_REFUS_ABONNEMENT, generationRefusAbonnementBg } from "./refusAbonnementBg";
 
 const BASE = "/bgapi/v1";
 const SOURCE_SANTE = "bgeometrics";
 /** TTL de cache : 24 h (quota 15 req/jour). */
 export const BG_TTL_MS = 24 * 60 * 60 * 1000;
-/** Limite journalière indicative (quota IP, sans clé — affichée en quota santé). */
+/** Limite journalière : quota IP sans clé, et plafond de l'offre gratuite avec clé. */
 export const BG_LIMITE_JOUR = 15;
 /** Limite horaire indicative quand une clé est active (personnelle ou .env). */
 export const BG_LIMITE_HEURE = 10;
@@ -121,7 +129,10 @@ export const BG_METRIQUES: readonly DefMetriqueBg[] = [
 export interface BgResultat {
   serie: SerieMetrique;
   ts: number;
+  /** Cache resservi faute d'appel réseau abouti (quota, abonnement, 429, erreur) OU dernière observation > 3 jours. */
   perime: boolean;
+  /** true SEULEMENT pour un cache resservi faute d'appel réseau abouti ; distingue un cache d'une source en retard. */
+  repli: boolean;
 }
 
 /**
@@ -183,18 +194,49 @@ function incrementerCompteur(actif: boolean): number {
 }
 
 let repriseBg = 0;
-function quotaBgAtteint(actif: boolean): boolean {
-  return Date.now() < repriseBg || lireCompteur(true) >= BG_LIMITE_HEURE || (!actif && lireCompteur(false) >= BG_LIMITE_JOUR);
+/** Horaire ET journalier, même avec clé : l'offre gratuite plafonne à 10 req/h et 15 req/jour. */
+function quotaBgAtteint(): boolean {
+  return Date.now() < repriseBg || lireCompteur(true) >= BG_LIMITE_HEURE || lireCompteur(false) >= BG_LIMITE_JOUR;
+}
+
+// ─────────────────────────── Mémoire du refus d'abonnement (403) ───────────────────────────
+
+const RAISON_ABONNEMENT_REFUSE = "Cette clé n'a pas accès aux données d'exchanges : abonnement BGeometrics requis.";
+type AccesBg = "perso" | "env";
+
+/** Mémorise un 403 d'abonnement 24 h : échéance + TYPE d'accès uniquement (jamais la clé). */
+function memoriserRefusAbonnement(acces: AccesBg): void {
+  try {
+    localStorage.setItem(CLE_REFUS_ABONNEMENT, JSON.stringify({ echeance: Date.now() + BG_TTL_MS, acces }));
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Refus d'abonnement encore valide pour ce type d'accès ? (best-effort) */
+function refusAbonnementMemorise(acces: AccesBg): boolean {
+  try {
+    const brut = JSON.parse(localStorage.getItem(CLE_REFUS_ABONNEMENT) ?? "null") as { echeance?: unknown; acces?: unknown } | null;
+    return brut !== null && brut.acces === acces && typeof brut.echeance === "number" && Date.now() < brut.echeance;
+  } catch {
+    return false;
+  }
+}
+
+/** Quota santé : fenêtre principale, plus la part journalière avec clé (son plafond bloque aussi). */
+function quotaSante(actif: boolean, utilise: number): QuotaSource {
+  return {
+    utilise,
+    limite: limiteQuota(actif),
+    fenetre: actif ? "1hour" : "1jour",
+    ...(actif ? { jour: { utilise: lireCompteur(false), limite: BG_LIMITE_JOUR } } : {}),
+  };
 }
 
 /** Publie le quota courant (sans incrémenter) dans le store santé. */
 export function publierQuotaBg(cle?: string | null): void {
   const actif = cleActive(cle);
-  healthStore.getState().setQuota(SOURCE_SANTE, {
-    utilise: lireCompteur(actif),
-    limite: limiteQuota(actif),
-    fenetre: actif ? "1heure" : "1jour",
-  });
+  healthStore.getState().setQuota(SOURCE_SANTE, quotaSante(actif, lireCompteur(actif)));
 }
 
 // ─────────────────────────── Fetch ───────────────────────────
@@ -230,7 +272,9 @@ export function chargerBgeometricMetrique(def: DefMetriqueBg, cle?: string | nul
   let travail = chargementsBg.get(id);
   if (!travail || travail.controleur.signal.aborted) {
     const controleur = new AbortController();
-    travail = { controleur, consommateurs: 0, promesse: fileBg.then(() => chargerMetriqueBgUneFois(def, cle, controleur.signal)) };
+    // Génération lue avec la clé : un changement de clé pendant l'attente ou l'appel invalide le 403.
+    const generation = generationRefusAbonnementBg();
+    travail = { controleur, consommateurs: 0, promesse: fileBg.then(() => chargerMetriqueBgUneFois(def, cle, controleur.signal, generation)) };
     const courant = travail;
     fileBg = travail.promesse.catch(() => undefined);
     chargementsBg.set(id, courant);
@@ -256,15 +300,16 @@ export function chargerBgeometricMetrique(def: DefMetriqueBg, cle?: string | nul
 
 async function chargerMetriqueBgUneFois(
   def: DefMetriqueBg,
-  cle?: string | null,
-  signal?: AbortSignal,
+  cle: string | null | undefined,
+  signal: AbortSignal | undefined,
+  generation: number,
 ): Promise<BgChargement> {
   if (signal?.aborted) return { resultat: null, statut: "annule" };
   const cacheCle = `bg:${def.id}`;
   const cache = await lireCache<SerieMetrique>(cacheCle);
   if (signal?.aborted) return { resultat: null, statut: "annule" };
-  const resultat = (serie: SerieMetrique, ts: number, perime = false): BgResultat => ({ serie, ts,
-    perime: perime || Date.now() - (serie.dernier?.time ?? 0) > 3 * 86_400_000 });
+  const resultat = (serie: SerieMetrique, ts: number, repli = false): BgResultat => ({ serie, ts, repli,
+    perime: repli || Date.now() - (serie.dernier?.time ?? 0) > 3 * 86_400_000 });
   if (estFrais(cache, BG_TTL_MS) && cache !== null) {
     return { resultat: resultat(cache.donnee, cache.ts), statut: "pret" };
   }
@@ -272,7 +317,10 @@ async function chargerMetriqueBgUneFois(
   const actif = cleActive(cle);
   const repli = cache ? resultat(cache.donnee, cache.ts, true) : null;
   if (def.abonnement && !actif) return { resultat: repli, statut: "abonnement", raison: "Réservé à un abonnement BGeometrics éligible ; ajoutez votre clé dans Réglages." };
-  if (quotaBgAtteint(actif)) return { resultat: repli, statut: "quota", raison: "Quota BGeometrics atteint ; nouvel essai à la prochaine fenêtre horaire/journalière." };
+  const acces: AccesBg = cle ? "perso" : "env";
+  // Refus déjà constaté pour ce type d'accès : ni appel réseau ni consommation de quota.
+  if (def.abonnement && refusAbonnementMemorise(acces)) return { resultat: repli, statut: "abonnement", raison: RAISON_ABONNEMENT_REFUSE };
+  if (quotaBgAtteint()) return { resultat: repli, statut: "quota", raison: "Quota BGeometrics atteint ; nouvel essai à la prochaine fenêtre horaire/journalière." };
   const headers: Record<string, string> = {};
   // Clé personnelle envoyée `Bearer` (seul format reconnu) ; le repli .env est injecté
   // côté proxy `/bgapi` quand aucun Authorization n'est envoyé ici.
@@ -282,7 +330,11 @@ async function chargerMetriqueBgUneFois(
     const compteur = incrementerCompteur(actif);
     publierQuotaBg(cle);
     const res = await fetch(construireUrl(def.chemin), { headers, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) });
-    if (res.status === 403 && def.abonnement) return { resultat: repli, statut: "abonnement", raison: "Cette clé n'a pas accès aux données d'exchanges : abonnement BGeometrics requis." };
+    if (res.status === 403 && def.abonnement) {
+      // Mémoire effacée depuis la capture de la clé (nouvelle clé) : ce refus ne la concerne pas.
+      if (generationRefusAbonnementBg() === generation) memoriserRefusAbonnement(acces);
+      return { resultat: repli, statut: "abonnement", raison: RAISON_ABONNEMENT_REFUSE };
+    }
     if (res.status === 429) {
       const retry = res.headers.get("retry-after");
       const secondes = retry !== null && /^\d+$/.test(retry) ? Number(retry) : NaN;
@@ -300,7 +352,7 @@ async function chargerMetriqueBgUneFois(
       .getState()
       .setEtat(SOURCE_SANTE, "polling", {
         dernierMessageTs: Date.now(),
-        quota: { utilise: compteur, limite: limiteQuota(actif), fenetre: actif ? "1heure" : "1jour" },
+        quota: quotaSante(actif, compteur),
       });
     return { resultat: resultat(serie, Date.now()), statut: "pret" };
   } catch (e) {
@@ -380,7 +432,7 @@ export async function fetchOiFuturesParExchange(
   }
 
   const actif = cleActive(cle);
-  if (quotaBgAtteint(actif)) return cache ? { ts: cache.ts, jours: cache.donnee } : null;
+  if (quotaBgAtteint()) return cache ? { ts: cache.ts, jours: cache.donnee } : null;
   const headers: Record<string, string> = {};
   if (cle) headers["Authorization"] = `Bearer ${cle}`;
 
@@ -393,7 +445,7 @@ export async function fetchOiFuturesParExchange(
     await ecrireCache(cacheCle, jours);
     healthStore.getState().setEtat(SOURCE_SANTE, "polling", {
       dernierMessageTs: Date.now(),
-      quota: { utilise: compteur, limite: limiteQuota(actif), fenetre: actif ? "1heure" : "1jour" },
+      quota: quotaSante(actif, compteur),
     });
     return { ts: Date.now(), jours };
   } catch (e) {

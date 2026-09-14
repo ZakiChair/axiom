@@ -86,7 +86,7 @@ import {
   Vide,
 } from "./ui";
 import { QualiteMetrique } from "./QualiteMetrique";
-import { qualitesCoinMetrics, traiterPublicationEtfChain, type ValeurPublicationEtf } from "../data/onchain/qualiteChain";
+import { qualiteBgeometrics, qualitesCoinMetrics, traiterPublicationEtfChain, type ValeurPublicationEtf } from "../data/onchain/qualiteChain";
 import {
   domainePourPreset,
   indicesVisibles,
@@ -535,7 +535,7 @@ export function OnchainWindow() {
           setDonnees((d) => ({ ...d, bg }));
           for (const def of BG_METRIQUES) {
             const resultat = bg[def.id] ?? null;
-            publierQualiteChain(`bg:${def.id}`, def.libelle, { sourceId: "bgeometrics", sourceEffective: resultat?.perime ? "cache BGeometrics" : "BGeometrics", observeLe: resultat?.serie.dernier?.time ?? null, recupereLe: resultat?.ts ?? recupereLe, cadenceMs: 86_400_000, ageMaxMs: 3 * 86_400_000, couverture: resultat ? { disponibles: resultat.serie.points.length, attendus: 120 } : null, estime: false, acces: resultat === null ? "indisponible" : bgHasKey || BG_CLE_ENV_PRESENTE ? "cle" : "public", statut: resultat === null ? "indisponible" : resultat.perime ? "perime" : resultat.serie.points.length < 20 ? "en-construction" : "frais", ...(resultat === null || erreur ? { raison: erreur ?? "Métrique BGeometrics indisponible ou quota épuisé." } : {}) });
+            publierQualiteChain(`bg:${def.id}`, def.libelle, qualiteBgeometrics(resultat, erreur, bgHasKey || BG_CLE_ENV_PRESENTE, recupereLe));
           }
         } else if (id === "mempool") {
           const mp = valeur as ResultatFrais<MempoolReseau> | null;
@@ -609,10 +609,10 @@ export function OnchainWindow() {
   // indisponible passe alors à côté du titre de section, pas dans le corps.
   const etfIndisponible = !etfPrincipal && !etfRepliDispo;
   // Quota BGeometrics EFFECTIF pour le texte du panneau (bloc affiché sans clé perso) :
-  // la seule présence d'une clé de repli .env fait basculer le quota IP 15/jour → 10/heure.
+  // clé serveur .env → offre gratuite 10 req/heure ET 15 req/jour ; sinon quota IP ~15 req/jour.
   const bgQuotaTexte = BG_CLE_ENV_PRESENTE
-    ? `${BG_LIMITE_HEURE} req/heure`
-    : `${BG_LIMITE_JOUR} req/jour`;
+    ? `${BG_LIMITE_HEURE} req/heure et ${BG_LIMITE_JOUR} req/jour`
+    : `~${BG_LIMITE_JOUR} req/jour`;
   const eth = donnees.eth;
   // Mode dégradé sans clé Etherscan (1 req/5 s) : gas présent mais supply/nœuds null —
   // le CTA « clé Etherscan ⚙ » doit rester proposé tant qu'un champ manque.
@@ -763,7 +763,9 @@ export function OnchainWindow() {
                   type="button"
                   onClick={openSettings}
                   className="text-[10px] text-accent hover:underline"
-                  title={`Clé gratuite sur bitcoin-data.com — quota actuel ${bgQuotaTexte}, cache 24 h`}
+                  title={BG_CLE_ENV_PRESENTE
+                    ? `Clé serveur active — offre gratuite ${bgQuotaTexte}, cache 24 h ; seule une offre payante relève le quota`
+                    : `Quota IP ${bgQuotaTexte}, cache 24 h ; une clé gratuite plafonne aussi à ${BG_LIMITE_HEURE} req/heure et ${BG_LIMITE_JOUR} req/jour`}
                 >
                   clé BGeometrics ⚙
                 </button>
@@ -795,7 +797,7 @@ export function OnchainWindow() {
                     <>
                       <span className="truncate" />
                       <span className="flex shrink-0 items-center gap-1">
-                        {r?.perime ? <Badge ton="warn">cache périmé</Badge> : null}
+                        {r?.repli ? <Badge ton="warn">cache périmé</Badge> : r?.perime ? <Badge ton="warn">source en retard</Badge> : null}
                         {texteFraicheur(loading, r?.serie.dernier?.time ?? null, Date.now(), "quotidien")}
                       </span>
                     </>
@@ -854,8 +856,9 @@ export function OnchainWindow() {
           </div>
           {!bgHasKey && (
             <p className="mt-2 text-[10px] leading-snug text-text-dim">
-              MVRV Z-Score / SOPR / NUPL affichés sans clé (quota {bgQuotaTexte}, cache 24 h).
-              Une clé gratuite sur bitcoin-data.com relève le quota.
+              {BG_CLE_ENV_PRESENTE
+                ? `Métriques servies via la clé serveur : offre gratuite ${bgQuotaTexte}, cache 24 h. Seule une offre payante relève le quota.`
+                : `Sans clé serveur : quota IP ${bgQuotaTexte}, cache 24 h. Une clé gratuite plafonne aussi à ${BG_LIMITE_HEURE} req/heure et ${BG_LIMITE_JOUR} req/jour.`}
             </p>
           )}
           <NoteSource>
@@ -943,7 +946,8 @@ export function OnchainWindow() {
                   <div className="flex items-center justify-between gap-2">
                     <NoteSource>bitcoin-data.com (repli)</NoteSource>
                     <span className="flex shrink-0 items-center gap-1 text-[10px] text-text-dim">
-                      {donnees.etfRepli.perime ? <Badge ton="warn">cache périmé</Badge> : null}
+                      {/* Séances boursières seulement : retard au-delà de la règle ETF de 5 jours (week-end, férié). */}
+                      {donnees.etfRepli.repli ? <Badge ton="warn">cache périmé</Badge> : Date.now() - serie.dernier!.time > 5 * 86_400_000 ? <Badge ton="warn">source en retard</Badge> : null}
                       {formatDateComplete(serie.dernier!.time)}
                     </span>
                   </div>

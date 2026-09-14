@@ -44,9 +44,10 @@ test("CHAIN : flux commun coalescé, ETF partiel, groupes différés et files ET
   await expect(chain).toContainText("Charger un groupe à la demande");
   await expect(chain).toContainText("Flux de capitaux alignés");
   await expect.poll(() => etf).toBe(3);
-  await expect.poll(() => bg.length).toBe(5);
+  // Le 403 de netflow est mémorisé (24 h, même type d'accès) : reserve n'est plus demandée.
+  await expect.poll(() => bg.length).toBe(4);
   expect(bg.map((path) => path.split("/").at(-1)).sort()).toEqual([
-    "exchange-netflow-btc", "exchange-reserve-btc", "realized-cap", "realized-price-lth", "realized-price-sth",
+    "exchange-netflow-btc", "realized-cap", "realized-price-lth", "realized-price-sth",
   ]);
   await expect(chain).toContainText("Flux ETF ETH");
   await expect(chain).toContainText("indisponible");
@@ -60,11 +61,11 @@ test("CHAIN : flux commun coalescé, ETF partiel, groupes différés et files ET
   await expect(chain).toContainText("abonnement BGeometrics requis");
   await chain.getByRole("button", { name: "Capital réalisé", exact: true }).click();
   await expect(chain).toContainText("Historique insuffisant : date de référence absente");
-  // Le 403 sans cache peut être retenté par le clic explicite Exchanges, mais ne doit
-  // jamais se répéter seul en boucle entre deux actions utilisateur.
-  expect(bg).toHaveLength(7);
+  // Refus d'abonnement mémorisé : même le clic explicite Exchanges ne consomme plus de
+  // requête (le message vient de la mémoire), et rien ne se répète seul entre deux actions.
+  expect(bg).toHaveLength(4);
   await page.waitForTimeout(500);
-  expect(bg).toHaveLength(7);
+  expect(bg).toHaveLength(4);
   await chain.getByRole("button", { name: "Historique ETF BTC", exact: true }).click();
   await expect(chain).toContainText("-10.00 %");
   await expect(chain).toContainText("Historique insuffisant ou séance sans flux publié");
@@ -112,3 +113,37 @@ test("CHAIN : le groupe Exchanges réutilise les métriques communes quand leur 
   await expect(chain).toContainText("100.00 BTC");
   expect(bg).toHaveLength(5);
 });
+
+for (const [joursEtf, badgeEtf] of [[4, null], [6, "source en retard"]] as const) {
+  test(`CHAIN : badges de fraîcheur BGeometrics — tuiles et repli ETF observé il y a ${joursEtf} j`, async ({ page }) => {
+    await bouchonnerReseau(page); // SoSoValue et /bgapi non fournis : 503, jamais de réseau réel
+    await page.addInitScript((jours) => {
+      const JOUR = 86_400_000;
+      localStorage.setItem("axiom:onboarding:v1", JSON.stringify({ completed: true, step: 0 }));
+      const cache = (id: string, ageCache: number, ageObservation: number) => {
+        const points = [3, 2, 1, 0].map((i) => ({ time: Date.now() - ageObservation - i * JOUR, value: 100 + i }));
+        localStorage.setItem(`axiom:onchain:bg:${id}`, JSON.stringify({ ts: Date.now() - ageCache, donnee: { points, dernier: points.at(-1) } }));
+      };
+      cache("mvrv", 0, 4 * JOUR); // récupéré à l'instant, source en retard
+      cache("sopr", 25 * 3_600_000, 3_600_000); // cache expiré resservi après échec
+      cache("etfFlow", 0, jours * JOUR); // repli ETF BTC (SoSoValue indisponible)
+    }, joursEtf);
+    await page.goto("/");
+    await page.getByRole("button", { name: "Fonctions" }).click();
+    await page.getByRole("menuitem", { name: /On-chain/ }).click();
+    const chain = page.getByRole("complementary", { name: "On-chain", exact: true });
+    const tuile = (libelle: string) =>
+      chain.locator("div.flex-col", { has: page.locator("span.uppercase", { hasText: new RegExp(`^${libelle}$`) }) }).last();
+
+    await expect(tuile("MVRV Z-Score")).toContainText("source en retard");
+    await expect(tuile("MVRV Z-Score")).not.toContainText("cache périmé");
+    await expect(tuile("SOPR")).toContainText("cache périmé");
+    await expect(tuile("SOPR")).not.toContainText("source en retard");
+
+    const repliEtf = chain.locator("div", { hasText: /^bitcoin-data\.com \(repli\)/ }).last();
+    await expect(repliEtf).toBeVisible();
+    await expect(repliEtf).not.toContainText("cache périmé");
+    if (badgeEtf === null) await expect(repliEtf).not.toContainText("source en retard");
+    else await expect(repliEtf).toContainText(badgeEtf);
+  });
+}

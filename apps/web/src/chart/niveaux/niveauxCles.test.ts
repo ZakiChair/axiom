@@ -257,14 +257,145 @@ describe("creerSourceNiveauxCles", () => {
     expect(source.getLignes()).toEqual([]);
   });
 
-  it("historique chargé mais aucun niveau calculable : toast explicite", async () => {
+  it("historique chargé mais aucun niveau calculable (bougie du jour absente aussi) : toast explicite et nouvel essai", async () => {
     const d = deps(async () => FIXTURE.slice(-1).map((b) => ({ ...b, time: Date.UTC(2026, 7, 1) })));
     const source = creerSourceNiveauxCles(CTX, d);
     const unsub = source.subscribe(() => {});
     await vi.advanceTimersByTimeAsync(0);
     expect(source.getLignes()).toEqual([]);
-    expect(toasts).toEqual(["Niveaux clés : historique 1d insuffisant pour BTCUSDT (binance)"]);
+    expect(toasts).toEqual([
+      "Niveaux clés : historique 1d insuffisant et bougie du jour absente pour BTCUSDT (binance), nouveaux essais espacés de 5 min à 1 h",
+    ]);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(d.charger).toHaveBeenCalledTimes(2);
+    expect(toasts).toHaveLength(1);
     unsub();
+  });
+
+  /** FIXTURE (qui s'arrête au 14/09) prolongée de bougies plates jusqu'au jour UTC de `nowMs` inclus. */
+  function avecJour(nowMs: number): Candle[] {
+    const out = [...FIXTURE];
+    const jour = Math.floor(nowMs / JOUR) * JOUR;
+    for (let t = out[out.length - 1]!.time + JOUR; t <= jour; t += JOUR) {
+      const c = out[out.length - 1]!.close;
+      out.push({ time: t, open: c, high: c, low: c, close: c, volume: 0 });
+    }
+    return out;
+  }
+
+  it("échec après un succès, au jour suivant : l'échec est de nouveau signalé (drapeau remis à zéro)", async () => {
+    const reponses: (Candle[] | null)[] = [];
+    const d = deps(async (_e, _s, nowMs) => (reponses.shift() === null ? null : avecJour(nowMs)));
+    reponses.push([], null, [], null);
+    const source = creerSourceNiveauxCles(CTX, d);
+    const unsub = source.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(source.getLignes().length).toBeGreaterThan(0);
+    expect(toasts).toEqual([]);
+
+    // 15/09 00:00:05 : échec → lignes retirées, toast.
+    await vi.advanceTimersByTimeAsync(6 * 3_600_000 + 5_000);
+    expect(d.charger).toHaveBeenCalledTimes(2);
+    expect(source.getLignes()).toEqual([]);
+    expect(toasts).toHaveLength(1);
+
+    // 00:05:05 : succès.
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(d.charger).toHaveBeenCalledTimes(3);
+    expect(source.getLignes().length).toBeGreaterThan(0);
+
+    // 16/09 00:00:05 : nouvel échec → lignes retirées ET nouveau toast (jamais d'overlay muet).
+    await vi.advanceTimersByTimeAsync(Date.UTC(2026, 8, 16, 0, 0, 5) - Date.now());
+    expect(d.charger).toHaveBeenCalledTimes(4);
+    expect(d.charger.mock.calls[3]?.[2]).toBe(Date.UTC(2026, 8, 16, 0, 0, 5));
+    expect(source.getLignes()).toEqual([]);
+    expect(toasts).toHaveLength(2);
+    expect(toasts[1]).toBe("Niveaux clés : bougies 1d de BTCUSDT (binance) indisponibles, nouvel essai dans 5 min");
+    unsub();
+  });
+
+  it("bougie du jour pas encore publiée : lignes sans OJ/OS, un toast, nouvel essai à 5 min, puis minuit une fois publiée", async () => {
+    const lundi = Date.UTC(2026, 8, 14, 0, 0, 5);
+    vi.setSystemTime(lundi);
+    const sansJour = FIXTURE.filter((b) => b.time < Date.UTC(2026, 8, 14));
+    const d = deps(async () => sansJour);
+    const source = creerSourceNiveauxCles(CTX, d);
+    const unsub = source.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(source.getLignes().map((l) => l.label)).toEqual(["PDH", "PDL", "PDC", "PWH", "PWL"]);
+    expect(toasts).toEqual([
+      "Niveaux clés : bougie 1d du jour absente pour BTCUSDT (binance), ouverture du jour non tracée ; nouveaux essais espacés de 5 min à 1 h",
+    ]);
+
+    // La bougie du jour paraît : l'essai de 00:05:05 la trouve.
+    d.charger.mockImplementation(async () => FIXTURE);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(d.charger).toHaveBeenCalledTimes(2);
+    expect(d.charger.mock.calls[1]?.[2]).toBe(Date.UTC(2026, 8, 14, 0, 5, 5));
+    expect(source.getLignes().map((l) => l.label)).toEqual(["PDH", "PDL", "PDC", "OJ", "PWH", "PWL", "OS"]);
+    expect(toasts).toHaveLength(1);
+
+    // Plus d'essai toutes les 5 min : prochain chargement au minuit UTC suivant.
+    await vi.advanceTimersByTimeAsync(Date.UTC(2026, 8, 15, 0, 0, 4) - Date.now());
+    expect(d.charger).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(d.charger).toHaveBeenCalledTimes(3);
+    expect(d.charger.mock.calls[2]?.[2]).toBe(Date.UTC(2026, 8, 15, 0, 0, 5));
+    unsub();
+  });
+
+  it("bougie du jour durablement absente (marché fermé) : essais espacés 5, 10, 20, 40 min puis toutes les heures, un seul toast", async () => {
+    const samedi = Date.UTC(2026, 8, 12, 10);
+    vi.setSystemTime(samedi);
+    const d = deps(async () => FIXTURE.filter((b) => b.time < Date.UTC(2026, 8, 12)));
+    const source = creerSourceNiveauxCles(CTX, d);
+    const unsub = source.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    const MIN = 60_000;
+    for (const delai of [5, 10, 20, 40, 60, 60]) {
+      await vi.advanceTimersByTimeAsync(delai * MIN - 1);
+      const avant = d.charger.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(1);
+      expect(d.charger.mock.calls.length).toBe(avant + 1);
+    }
+    expect(d.charger).toHaveBeenCalledTimes(7);
+    expect(toasts).toHaveLength(1);
+    unsub();
+  });
+
+  it("un essai espacé ne dépasse jamais minuit UTC : les niveaux de la veille sont retirés à l'heure", async () => {
+    vi.setSystemTime(Date.UTC(2026, 8, 12, 23, 30));
+    const d = deps(async (_e, _s, nowMs) => FIXTURE.filter((b) => b.time < Math.floor(nowMs / JOUR) * JOUR));
+    const source = creerSourceNiveauxCles(CTX, d);
+    const unsub = source.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(5 * 60_000); // 23:35 → prochain essai demandé à +10 min, borné à 00:00:05
+    await vi.advanceTimersByTimeAsync(Date.UTC(2026, 8, 13, 0, 0, 5) - Date.now());
+    expect(d.charger.mock.calls.at(-1)?.[2]).toBe(Date.UTC(2026, 8, 13, 0, 0, 5));
+    // Nouveau jour : l'espacement repart de 5 min (la bougie du jour paraît d'ordinaire vite).
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(d.charger.mock.calls.at(-1)?.[2]).toBe(Date.UTC(2026, 8, 13, 0, 5, 5));
+    unsub();
+  });
+
+  it("toast « historique insuffisant » évalué sur les familles choisies, pas sur toutes", async () => {
+    const recent = FIXTURE.slice(-20); // se termine par la bougie du jour : OJ présente
+    const seulT = deps(async () => recent, ["T"]);
+    const sourceT = creerSourceNiveauxCles(CTX, seulT);
+    const unsubT = sourceT.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sourceT.getLignes()).toEqual([]);
+    expect(toasts).toEqual(["Niveaux clés : historique 1d insuffisant pour BTCUSDT (binance)"]);
+    unsubT();
+
+    toasts = [];
+    const seulJ = deps(async () => recent, ["J"]);
+    const sourceJ = creerSourceNiveauxCles(CTX, seulJ);
+    const unsubJ = sourceJ.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sourceJ.getLignes().length).toBeGreaterThan(0);
+    expect(toasts).toEqual([]);
+    unsubJ();
   });
 
   it("symbole sans bougies 1d UTC : toast explicite et aucun chargement", async () => {

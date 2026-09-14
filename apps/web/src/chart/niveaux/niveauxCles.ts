@@ -26,6 +26,8 @@ import { bougiesJourDisponibles, chargerBougiesJour, msAvantProchainJourUtc } fr
 const JOUR_MS = 86_400_000;
 /** Nouvel essai après un échec de chargement. */
 const REESSAI_MS = 5 * 60_000;
+/** Plafond des essais espacés quand seule la bougie du jour manque. */
+const HEURE_MS = 60 * 60_000;
 /** Marge après minuit UTC avant de recharger (la bougie du nouveau jour doit exister). */
 const MARGE_JOUR_MS = 5_000;
 
@@ -128,7 +130,12 @@ export interface DepsSourceNiveauxCles {
 /**
  * Source « niveaux clés » d'un slot : charge les bougies 1d au subscribe, recalcule au
  * changement de jour UTC (en retirant d'abord les lignes de la veille), réessaie toutes les
- * 5 min après un échec. Toujours un toast quand rien ne peut être tracé (jamais d'overlay muet).
+ * 5 min après un échec. Bougie du jour absente (pas encore publiée, ou marché fermé sur une
+ * source d'actions) : lignes disponibles tracées, essais espacés de 5 min à 1 h pour ménager
+ * les quotas, espacement remis à 5 min à chaque nouveau jour. Aucun essai ne dépasse minuit
+ * UTC. Toujours un toast quand quelque chose ne peut pas être tracé (jamais d'overlay muet) ;
+ * les essais répétés d'une même cause ne le répètent pas. Si l'historique est aussi
+ * insuffisant pour les familles choisies, les deux causes partagent le même toast.
  */
 export function creerSourceNiveauxCles(ctx: ContexteNiveaux, deps: DepsSourceNiveauxCles = {}): FournisseurLignes {
   const charger = deps.charger ?? chargerBougiesJour;
@@ -147,28 +154,47 @@ export function creerSourceNiveauxCles(ctx: ContexteNiveaux, deps: DepsSourceNiv
         return () => {};
       }
       let annule = false;
-      let echecSignale = false;
+      /** Dernière cause signalée par toast ; remise à null dès qu'un chargement est complet. */
+      let causeSignalee: string | null = null;
+      let delaiJourAbsent = REESSAI_MS;
       let minuteur: ReturnType<typeof setTimeout> | undefined;
       const charge = (): void => {
         const now = maintenant();
         if (niveaux !== null && niveaux.ancreJourMs !== utcDayOf(now) * JOUR_MS) {
           niveaux = null; // niveaux de la veille : jamais affichés comme ceux du jour
+          delaiJourAbsent = REESSAI_MS; // la bougie d'un nouveau jour paraît d'ordinaire en quelques minutes
           onChange();
         }
+        const minuit = msAvantProchainJourUtc(now) + MARGE_JOUR_MS;
+        const signalerEtReessayer = (cause: string, delaiMs: number): void => {
+          if (cause !== causeSignalee) toast(`Niveaux clés : ${cause}`);
+          causeSignalee = cause;
+          minuteur = setTimeout(charge, Math.min(delaiMs, minuit));
+        };
         void charger(ctx.exchange, ctx.symbol, now).then((bougies) => {
           if (annule) return;
           if (bougies === null) {
-            if (!echecSignale) toast(`Niveaux clés : bougies 1d de ${marche} indisponibles, nouvel essai dans 5 min`);
-            echecSignale = true;
-            minuteur = setTimeout(charge, REESSAI_MS);
+            signalerEtReessayer(`bougies 1d de ${marche} indisponibles, nouvel essai dans 5 min`, REESSAI_MS);
             return;
           }
           niveaux = calculerNiveauxCles(bougies, now);
-          if (lignesNiveauxCles(niveaux, FAMILLES_NIVEAUX_CLES).length === 0) {
-            toast(`Niveaux clés : historique 1d insuffisant pour ${marche}`);
-          }
           onChange();
-          minuteur = setTimeout(charge, msAvantProchainJourUtc(now) + MARGE_JOUR_MS);
+          const vide = lignesNiveauxCles(niveaux, store.getState().familles).length === 0;
+          if (niveaux.ouvertureJour === null) {
+            const espaces = "nouveaux essais espacés de 5 min à 1 h";
+            signalerEtReessayer(
+              vide
+                ? `historique 1d insuffisant et bougie du jour absente pour ${marche}, ${espaces}`
+                : `bougie 1d du jour absente pour ${marche}, ouverture du jour non tracée ; ${espaces}`,
+              delaiJourAbsent,
+            );
+            delaiJourAbsent = Math.min(2 * delaiJourAbsent, HEURE_MS);
+            return;
+          }
+          if (vide) toast(`Niveaux clés : historique 1d insuffisant pour ${marche}`);
+          causeSignalee = null;
+          delaiJourAbsent = REESSAI_MS;
+          minuteur = setTimeout(charge, minuit);
         });
       };
       charge();

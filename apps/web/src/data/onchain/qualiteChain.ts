@@ -2,6 +2,8 @@ import type { QualiteMetrique } from "../qualiteMetrique";
 import { analyserJourEtf, type ActifEtf, type EtfResultat } from "./etf";
 import type { BgResultat, DefMetriqueBg } from "./bgeometrics";
 import type { CoinMetricsParse, CoinMetricsResultat } from "./coinmetrics";
+import type { ResultatFrais } from "./mempool";
+import type { ReseauEthCm } from "./reseauEthCm";
 
 const JOUR_MS = 86_400_000;
 
@@ -52,6 +54,34 @@ export function qualitesCoinMetrics(resultat: CoinMetricsResultat | null, now: n
       },
     };
   });
+}
+
+/**
+ * Qualité du bloc Réseau ETH · Coin Metrics (un seul fetch, quatre blocs). L'observation est la
+ * plus ancienne des blocs disponibles ; le statut flash et le périmètre révisable sont rappelés.
+ */
+export function qualiteReseauEthCm(resultat: ResultatFrais<ReseauEthCm> | null, erreur: string | undefined, now: number): QualiteMetrique {
+  const r = resultat?.donnee;
+  const disponibles = r ? [r.reserve !== null, r.fluxNet.length > 0, r.emission.pctAn30 !== null, r.prixRealise.prixRealiseUsd !== null].filter(Boolean).length : 0;
+  const observeLe = r?.derniereObservation ?? null;
+  const statut: QualiteMetrique["statut"] = resultat === null ? "indisponible"
+    : resultat.perime || observeLe === null || now - observeLe > 3 * JOUR_MS ? "perime"
+      : disponibles < 4 ? "partiel" : "frais";
+  const raison = erreur ?? (resultat === null ? "Coin Metrics ETH indisponible et aucun cache exploitable."
+    : r?.flash ? "Statut flash Coin Metrics : flux et réserve exchanges révisables ; périmètre d'adresses révisable." : undefined);
+  return {
+    sourceId: "coinmetrics",
+    sourceEffective: resultat?.perime ? "cache Coin Metrics" : "Coin Metrics Community",
+    observeLe,
+    recupereLe: resultat?.ts ?? null,
+    cadenceMs: JOUR_MS,
+    ageMaxMs: 3 * JOUR_MS,
+    couverture: resultat === null ? null : { disponibles, attendus: 4 },
+    estime: false,
+    acces: resultat === null ? "indisponible" : "public",
+    statut,
+    ...(raison ? { raison } : {}),
+  };
 }
 
 /** Date UTC « JJ/MM/AAAA » d'une observation quotidienne. */

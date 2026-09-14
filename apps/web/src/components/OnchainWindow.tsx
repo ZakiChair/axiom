@@ -11,7 +11,9 @@
  * mempool.space (direct), SoSoValue via proxy /sosoapi (ETF spot BTC/ETH/SOL — clé Réglages
  * prioritaire, sinon repli SOSOVALUE_API_KEY du .env), Etherscan v2 via proxy /ethscanapi
  * (réseau ETH — même régime, repli ETHERSCAN_API_KEY ; répond même sans clé en mode
- * dégradé 1 req/5 s), réseau SOL SANS clé (RPC PublicNode + supply CoinGecko —
+ * dégradé 1 req/5 s), RÉSEAU ETH multi-source : Etherscan (gas, supply, nœuds) + Coin Metrics
+ * community (réserve et flux exchanges, émission nette, prix réalisé — un seul fetch, échec
+ * indépendant d'Etherscan), réseau SOL SANS clé (RPC PublicNode + supply CoinGecko —
  * cf. data/onchain/solana.ts).
  *
  * Règle d'or (doc 02) : chaque widget porte un BadgeFiabilite honnête via
@@ -55,6 +57,7 @@ import {
 import { fetchReseauEthAvecMeta, type ReseauEth, type ResultatReseauEth } from "../data/onchain/etherscan";
 import { fetchReseauSol, type ReseauSol } from "../data/onchain/solana";
 import { fetchThermocap } from "../data/onchain/thermocap";
+import { fetchReseauEthCm, type ReseauEthCm } from "../data/onchain/reseauEthCm";
 import { creerChargeurChain, type SourceChain } from "../data/onchain/chargementChain";
 import { enregistrerQualite, qualiteMetriquesStore } from "../store/qualiteMetriques";
 import type { QualiteMetrique as Qualite } from "../data/qualiteMetrique";
@@ -86,7 +89,7 @@ import {
   Vide,
 } from "./ui";
 import { QualiteMetrique } from "./QualiteMetrique";
-import { motifPeremptionBg, qualiteBgeometrics, qualitesCoinMetrics, traiterPublicationEtfChain, type ValeurPublicationEtf } from "../data/onchain/qualiteChain";
+import { motifPeremptionBg, qualiteBgeometrics, qualiteReseauEthCm, qualitesCoinMetrics, traiterPublicationEtfChain, type ValeurPublicationEtf } from "../data/onchain/qualiteChain";
 import {
   domainePourPreset,
   indicesVisibles,
@@ -100,6 +103,7 @@ import { HistoriqueEtf } from "./onchain/HistoriqueEtf";
 import { FluxCapitaux } from "./onchain/FluxCapitaux";
 import { EconomieChaines } from "./onchain/EconomieChaines";
 import { FilesStakingEth } from "./onchain/FilesStakingEth";
+import { VueReseauEthCm } from "./onchain/ReseauEthCm";
 import { Mineurs } from "./onchain/Mineurs";
 import { ActiviteDex } from "./onchain/ActiviteDex";
 
@@ -442,6 +446,8 @@ interface EtatDonnees {
   /** Repli BTC bitcoin-data.com (flux ETF en BTC), chargé UNIQUEMENT si SoSoValue BTC échoue. */
   etfRepli: BgResultat | null;
   eth: ReseauEth | null;
+  /** Réseau ETH Coin Metrics (quotidien, cache 6 h), indépendant d'Etherscan. */
+  ethCm: ResultatFrais<ReseauEthCm> | null;
   sol: ResultatFrais<ReseauSol> | null;
 }
 
@@ -454,6 +460,7 @@ const VIDE: EtatDonnees = {
   etf: { btc: null, eth: null, sol: null },
   etfRepli: null,
   eth: null,
+  ethCm: null,
   sol: null,
 };
 
@@ -521,6 +528,7 @@ export function OnchainWindow() {
           },
         })),
         { id: "eth", charger: (signal) => fetchReseauEthAvecMeta(getEtherscanKey(), signal) },
+        { id: "eth-coinmetrics", charger: (signal) => fetchReseauEthCm(signal) },
         { id: "sol", charger: (signal) => fetchReseauSol(signal) },
       ];
       await chargeur.lancer(sources, ({ id, valeur, erreur }) => {
@@ -568,7 +576,11 @@ export function OnchainWindow() {
           const eth = resultatEth?.donnee ?? null;
           setDonnees((d) => ({ ...d, eth }));
           const disponibles = eth === null ? 0 : [eth.supplyEth, eth.nodeCount, eth.gasSafe].filter((v) => v !== null).length;
-          publierQualiteChain(id, "Réseau ETH", { sourceEffective: resultatEth?.sourceEffective ?? "Etherscan", observeLe: resultatEth?.observeLe ?? null, recupereLe: resultatEth?.recupereLe ?? null, cadenceMs: 60_000, ageMaxMs: 10 * 60_000, couverture: { disponibles, attendus: 3 }, estime: false, acces: eth === null ? "indisponible" : etherscanHasKey ? "cle" : "public", statut: eth === null ? "indisponible" : resultatEth?.perime ? "perime" : disponibles < 3 ? "partiel" : "frais", ...(resultatEth?.raison ? { raison: resultatEth.raison } : disponibles > 0 && disponibles < 3 ? { raison: "Réponse Etherscan partielle." } : erreur ? { raison: erreur } : {}) });
+          publierQualiteChain(id, "Réseau ETH · Etherscan", { sourceEffective: resultatEth?.sourceEffective ?? "Etherscan", observeLe: resultatEth?.observeLe ?? null, recupereLe: resultatEth?.recupereLe ?? null, cadenceMs: 60_000, ageMaxMs: 10 * 60_000, couverture: { disponibles, attendus: 3 }, estime: false, acces: eth === null ? "indisponible" : etherscanHasKey ? "cle" : "public", statut: eth === null ? "indisponible" : resultatEth?.perime ? "perime" : disponibles < 3 ? "partiel" : "frais", ...(resultatEth?.raison ? { raison: resultatEth.raison } : disponibles > 0 && disponibles < 3 ? { raison: "Réponse Etherscan partielle." } : erreur ? { raison: erreur } : {}) });
+        } else if (id === "eth-coinmetrics") {
+          const ethCm = valeur as ResultatFrais<ReseauEthCm> | null;
+          setDonnees((d) => ({ ...d, ethCm }));
+          publierQualiteChain(id, "Réseau ETH · Coin Metrics", qualiteReseauEthCm(ethCm, erreur, recupereLe));
         } else if (id === "sol") {
           const sol = valeur as ResultatFrais<ReseauSol> | null;
           setDonnees((d) => ({ ...d, sol }));
@@ -981,12 +993,14 @@ export function OnchainWindow() {
                     clé Etherscan ⚙
                   </button>
                 )}
-                {ethIndisponible && <BadgeFiabilite meta={META_INDISPONIBLE} />}
+                {/* Section multi-source : indisponible seulement si Etherscan ET Coin Metrics manquent. */}
+                {ethIndisponible && donnees.ethCm === null && <BadgeFiabilite meta={META_INDISPONIBLE} />}
               </>
             }
           >
             Réseau ETH
           </TitreSection>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-text-dim">Etherscan</p>
           {eth !== null || loading ? (
             <div className="grid grid-cols-2 gap-2">
               <TuileStat
@@ -1026,6 +1040,7 @@ export function OnchainWindow() {
               (Réglages ⚙ ou ETHERSCAN_API_KEY dans .env).
             </Vide>
           )}
+          <VueReseauEthCm resultat={donnees.ethCm} loading={loading} />
           <FilesStakingEth open={open} />
         </section>
 

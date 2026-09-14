@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { motifPeremptionBg, qualiteBgeometrics, qualitesCoinMetrics, qualitePublicationEtf, traiterPublicationEtfChain, type ValeurPublicationEtf } from "./qualiteChain";
+import { motifPeremptionBg, qualiteBgeometrics, qualiteReseauEthCm, qualitesCoinMetrics, qualitePublicationEtf, traiterPublicationEtfChain, type ValeurPublicationEtf } from "./qualiteChain";
+import type { ReseauEthCm } from "./reseauEthCm";
 import { BG_MVRV, BG_NUPL, BG_PUELL, BG_RESERVE_RISK, BG_SOPR } from "./bgeometrics";
 import { actualiserQualite, type QualiteMetrique } from "../qualiteMetrique";
 
@@ -179,5 +180,49 @@ describe("publication qualité ETF CHAIN", () => {
     }, repli: null }, undefined, undefined, NOW);
     expect(q.statut).toBe(statut);
     expect(q.recupereLe).toBe(NOW - 1000);
+  });
+});
+
+describe("publication qualité Réseau ETH · Coin Metrics", () => {
+  const reseau = (surcharge: Partial<ReseauEthCm> = {}): ReseauEthCm => ({
+    reserve: { stockEth: 15_451_535, partOffrePct: 12.66, observeLe: NOW - JOUR, variations: [] },
+    fluxNet: [{ time: NOW - JOUR, value: -11_744 }],
+    emission: { pctAn7: 0.874, pctAn30: 0.867, pctAn365: 0.813, fraisTotaux30Eth: 5_174.6, observeLe: NOW - JOUR },
+    prixRealise: { prixRealiseUsd: 2_263.72, spotCmUsd: 2_475.49, ecartSpotPct: 9.35, mvrv: 1.0935, observeLe: NOW - JOUR },
+    flash: true,
+    derniereObservation: NOW - JOUR,
+    ...surcharge,
+  });
+
+  it("frais avec statut flash : quatre blocs, raison de révision, source Coin Metrics", () => {
+    const q = qualiteReseauEthCm({ donnee: reseau(), ts: NOW - 1000, perime: false }, undefined, NOW);
+    expect(q).toMatchObject({
+      sourceId: "coinmetrics", sourceEffective: "Coin Metrics Community", observeLe: NOW - JOUR, recupereLe: NOW - 1000,
+      cadenceMs: JOUR, ageMaxMs: 3 * JOUR, couverture: { disponibles: 4, attendus: 4 }, estime: false, acces: "public", statut: "frais",
+    });
+    expect(q.raison).toContain("Statut flash Coin Metrics");
+    expect(q.raison).toContain("périmètre d'adresses révisable");
+    expect(q.raison).not.toContain("brûl");
+  });
+
+  it("cache périmé ou observation de plus de 3 jours : périmé", () => {
+    const cache = qualiteReseauEthCm({ donnee: reseau({ flash: false }), ts: NOW - 8 * 3_600_000, perime: true }, undefined, NOW);
+    expect(cache).toMatchObject({ sourceEffective: "cache Coin Metrics", statut: "perime" });
+    const vieux = qualiteReseauEthCm({ donnee: reseau({ derniereObservation: NOW - 4 * JOUR }), ts: NOW, perime: false }, undefined, NOW);
+    expect(vieux.statut).toBe("perime");
+  });
+
+  it("blocs manquants : partiel avec la couverture réelle", () => {
+    const q = qualiteReseauEthCm({ donnee: reseau({
+      reserve: null, fluxNet: [], prixRealise: { prixRealiseUsd: null, spotCmUsd: null, ecartSpotPct: null, mvrv: null, observeLe: null },
+    }), ts: NOW, perime: false }, undefined, NOW);
+    expect(q).toMatchObject({ statut: "partiel", couverture: { disponibles: 1, attendus: 4 } });
+  });
+
+  it("aucun résultat : indisponible avec motif, erreur du chargeur prioritaire", () => {
+    const q = qualiteReseauEthCm(null, undefined, NOW);
+    expect(q).toMatchObject({ statut: "indisponible", acces: "indisponible", observeLe: null, recupereLe: null, couverture: null });
+    expect(q.raison).toContain("Coin Metrics ETH indisponible");
+    expect(qualiteReseauEthCm(null, "Délai réseau dépassé", NOW).raison).toBe("Délai réseau dépassé");
   });
 });

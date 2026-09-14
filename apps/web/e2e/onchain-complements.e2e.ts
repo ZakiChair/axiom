@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
 const JOUR_MS = 86_400_000;
@@ -153,6 +153,93 @@ test("CHAIN : le groupe Exchanges réutilise le flux net Coin Metrics de la vue 
   await expect(chain).toContainText("−$25.20M");
   expect(cmFlux).toBe(1);
   expect(bg).toHaveLength(3);
+});
+
+const METRIQUES_ETH_CM = "CapMrktCurUSD,CapMVRVCur,SplyCur,SplyExNtv,FlowInExNtv,FlowOutExNtv,FeeTotNtv";
+
+/**
+ * 800 jours ETH Coin Metrics finissant à J-1 (7 métriques en chaînes, flux et réserve en statut flash) :
+ * flux net −1 000 ETH/j, réserve cohérente sauf une marche de périmètre de +500 000 ETH à J−100 ;
+ * offre finale 122 317 100 ETH → prix réalisé 2 258,63 $, spot CM 2 469,92 $, réserve 12,84 % de l'offre.
+ */
+function lignesEthCm(): unknown[] {
+  const dernier = Math.floor(Date.now() / JOUR_MS) * JOUR_MS - JOUR_MS;
+  return Array.from({ length: 800 }, (_, i) => ({
+    asset: "eth", time: new Date(dernier - (799 - i) * JOUR_MS).toISOString(),
+    CapMrktCurUSD: "302112948927.53", CapMVRVCur: "1.093547895553364955", SplyCur: String(120_000_000 + 2_900 * i),
+    SplyExNtv: String(16_000_000 - 1_000 * i + (i >= 699 ? 500_000 : 0)), "SplyExNtv-status": "flash",
+    FlowInExNtv: "100000", "FlowInExNtv-status": "flash", FlowOutExNtv: "101000", "FlowOutExNtv-status": "flash",
+    FeeTotNtv: "170",
+  }));
+}
+
+async function ouvrirChainSansCle(page: Page) {
+  await page.addInitScript(() => localStorage.setItem("axiom:onboarding:v1", JSON.stringify({ completed: true, step: 0 })));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Fonctions" }).click();
+  await page.getByRole("menuitem", { name: /On-chain/ }).click();
+  const chain = page.getByRole("complementary", { name: "On-chain", exact: true });
+  const section = chain.locator("section", { has: page.locator("h3", { hasText: "Réseau ETH" }) });
+  // Fin du cycle de chargement : le badge « indisponible » du titre n'est évalué qu'après.
+  const cycleTermine = () => expect(chain.getByRole("button", { name: /Rafraîchir/ })).toBeEnabled();
+  return { chain, section, titre: section.locator("h3").first(), cycleTermine };
+}
+
+test("CHAIN : réseau ETH multi-source — Coin Metrics présent quand Etherscan échoue, un seul fetch", async ({ page }) => {
+  await bouchonnerReseau(page); // Etherscan et le reste : 503
+  let cmEth = 0;
+  await page.route("**/community-api.coinmetrics.io/**", route => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("assets") !== "eth") return route.fallback();
+    cmEth++;
+    expect(url.searchParams.get("metrics")).toBe(METRIQUES_ETH_CM);
+    return route.fulfill({ json: { data: lignesEthCm() } });
+  });
+  const { chain, titre, section, cycleTermine } = await ouvrirChainSansCle(page);
+  await expect(section).toContainText("Réserve exchanges ETH");
+  await expect(section).toContainText("Coin Metrics Community");
+  await expect(section).toContainText("12.84 % de l'offre");
+  await expect(section).toContainText("(périmètre)");
+  await expect(section).toContainText("Émission nette ETH (30 j)");
+  await expect(section).toContainText("frais totaux 30 j");
+  await expect(section).toContainText("Prix réalisé ETH");
+  await expect(section).toContainText("$2,258.63");
+  await expect(section).toContainText("spot CM $2,469.92");
+  await expect(section).toContainText("MVRV 1.09");
+  await expect(section).toContainText("flash");
+  await expect(section).toContainText("Flux net 30 j");
+  await expect(section).toContainText("Périmètre d'adresses révisable");
+  await expect(section).not.toContainText("brûl");
+  await expect(section).not.toContainText("plus bas");
+  // Etherscan reste signalé indisponible dans son bloc, mais la section n'est pas déclarée indisponible.
+  await expect(section).toContainText("Etherscan injoignable");
+  await cycleTermine();
+  await expect(titre).not.toContainText("indisponible");
+  const qualite = chain.locator("details", { hasText: "Qualité des blocs" });
+  await expect(qualite).toContainText("Réseau ETH · Coin Metrics");
+  await expect(qualite).toContainText("Réseau ETH · Etherscan");
+  // Un seul téléchargement ETH partagé par toutes les tuiles, sans relance immédiate.
+  await page.waitForTimeout(500);
+  expect(cmEth).toBe(1);
+});
+
+test("CHAIN : un échec Coin Metrics ETH n'efface pas les tuiles Etherscan", async ({ page }) => {
+  await bouchonnerReseau(page); // Coin Metrics : 503
+  await page.route("**/ethscanapi/**", route => {
+    const action = new URL(route.request().url()).searchParams.get("action");
+    const result = action === "ethsupply" ? "122041617227161976986449678"
+      : action === "gasoracle" ? { SafeGasPrice: "0.5", ProposeGasPrice: "0.6", FastGasPrice: "0.7" }
+        : { TotalNodeCount: "7000" };
+    return route.fulfill({ json: { status: "1", message: "OK", result } });
+  });
+  const { chain, titre, section, cycleTermine } = await ouvrirChainSansCle(page);
+  await expect(section).toContainText("Réseau ETH Coin Metrics indisponible.");
+  await expect(section).toContainText("Gas recommandé");
+  await expect(section).toContainText("0.70 Gwei");
+  await expect(section).toContainText("122.04M");
+  await cycleTermine();
+  await expect(titre).not.toContainText("indisponible");
+  await expect(chain.locator("details", { hasText: "Qualité des blocs" })).toContainText("Coin Metrics ETH indisponible et aucun cache exploitable.");
 });
 
 for (const [joursEtf, badgeEtf] of [[4, null], [6, "source en retard"]] as const) {

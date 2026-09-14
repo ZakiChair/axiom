@@ -20,6 +20,8 @@ import { FENETRE_JOURS, statsCycle, type SerieCycle } from "../data/cycle";
 import { COMPARE_PALETTE } from "../store/compare";
 import { lireTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { zoneMvrvZ } from "../lib/zonesOnchain";
+import { BG_MVRV } from "../data/onchain/bgeometrics";
+import { motifPeremptionBg } from "../data/onchain/qualiteChain";
 import { formatDateCourte, formatDec, formatEntier, VALEUR_ABSENTE } from "../lib/format";
 import {
   Badge,
@@ -32,12 +34,14 @@ import {
   TuileStat,
   NoteSource,
   Vide,
-  type TonBadge,
 } from "./ui";
 import { TableTriable, type ColonneTable } from "./TableTriable";
 
 /** Un jour en millisecondes (dates de halving et de sommet reconstruites depuis le jour post-halving). */
 const JOUR_MS = 86_400_000;
+
+/** Badge du MVRV Z-Score selon le motif de péremption BGeometrics (mêmes libellés que CHAIN). */
+const BADGE_MOTIF_BG = { cache: "cache périmé", embargo: "embargo 7 j", retard: "source en retard" } as const;
 
 /**
  * Métadonnées par cycle : plancher (drawdown top→bottom) HISTORIQUE documenté (constantes,
@@ -262,12 +266,6 @@ function indiceAuJour(s: SerieCycle, jour: number): number | null {
   return ecartMin <= 20 ? meilleur : null;
 }
 
-/** Ton du MVRV Z-Score (zones canoniques). Pour le ratio de repli : neutre. */
-function tonMvrv(v: number, zscore: boolean): TonBadge {
-  if (!zscore) return "neutre";
-  return zoneMvrvZ(v)?.ton ?? "neutre";
-}
-
 export function CycleWindow() {
   const enCours = useStore(cycleStore, (s) => s.enCours);
   const series = useStore(cycleStore, (s) => s.series);
@@ -299,7 +297,7 @@ export function CycleWindow() {
 
   const courant = useMemo(() => cycleCourant(series), [series]);
   const statsCourant = useMemo(
-    () => (courant ? statsCycle(courant.points) : null),
+    () => (courant ? statsCycle(courant.points, courant.clos) : null),
     [courant],
   );
 
@@ -334,6 +332,10 @@ export function CycleWindow() {
   const joursDepuisHalving = statsCourant?.jourCourant ?? null;
   const drawdownCourant = statsCourant?.drawdownDepuisTopPct ?? null;
   const msProchainHalving = halving?.msEstimes ?? null;
+  // MVRV Z-Score BGeometrics seul (pas de repli) ; le motif signale embargo J-7, cache ou retard.
+  const valeurMvrv = mvrv?.serie.dernier?.value ?? null;
+  const zoneMvrv = valeurMvrv !== null ? zoneMvrvZ(valeurMvrv) : null;
+  const motifMvrv = motifPeremptionBg(mvrv, BG_MVRV);
 
   const colonnesCycles: ColonneTable<SerieCycle>[] = useMemo(
     () => [
@@ -355,7 +357,7 @@ export function CycleWindow() {
         id: "sommet",
         label: "Sommet",
         rendu: (s) => {
-          const st = statsCycle(s.points);
+          const st = statsCycle(s.points, s.clos);
           return (
             <span className="text-text-dim">
               {Number.isFinite(st.topJour) ? formatDateCourte(s.halvingMs + st.topJour * JOUR_MS) : VALEUR_ABSENTE}
@@ -367,7 +369,7 @@ export function CycleWindow() {
         id: "x",
         label: "×",
         rendu: (s) => {
-          const st = statsCycle(s.points);
+          const st = statsCycle(s.points, s.clos);
           return Number.isFinite(st.topIndice) ? `×${formatDec(st.topIndice, 1)}` : VALEUR_ABSENTE;
         },
       },
@@ -375,7 +377,7 @@ export function CycleWindow() {
         id: "jour",
         label: "Jour",
         rendu: (s) => {
-          const st = statsCycle(s.points);
+          const st = statsCycle(s.points, s.clos);
           return (
             <span className="text-text-dim">
               {Number.isFinite(st.topJour) ? `${formatEntier(st.topJour)} j` : VALEUR_ABSENTE}
@@ -399,7 +401,7 @@ export function CycleWindow() {
         id: "courant",
         label: "Courant",
         rendu: (s) => {
-          const st = statsCycle(s.points);
+          const st = statsCycle(s.points, s.clos);
           return Number.isFinite(st.indiceCourant) ? `×${formatDec(st.indiceCourant, 2)}` : VALEUR_ABSENTE;
         },
       },
@@ -444,13 +446,12 @@ export function CycleWindow() {
         />
         <TuileStat
           disposition="inline"
-          label={mvrv?.zscore === false ? "MVRV (ratio)" : "MVRV Z-Score"}
-          valeur={mvrv !== null ? formatDec(mvrv.valeur, 2) : VALEUR_ABSENTE}
-          // Le badge de zone (froid/chaud/surchauffe) n'a de sens QUE sur le Z-Score : les
-          // seuils canoniques ne s'appliquent pas au ratio de repli → pas de badge pour lui.
+          label="MVRV Z-Score"
+          valeur={valeurMvrv !== null ? formatDec(valeurMvrv, 2) : VALEUR_ABSENTE}
+          badge={motifMvrv !== null ? <Badge ton="warn">{BADGE_MOTIF_BG[motifMvrv]}</Badge> : undefined}
           extra={
-            mvrv !== null && mvrv.zscore ? (
-              <Badge ton={tonMvrv(mvrv.valeur, true)}>{zoneMvrvZ(mvrv.valeur)?.libelle ?? "—"}</Badge>
+            valeurMvrv !== null ? (
+              <Badge ton={zoneMvrv?.ton ?? "neutre"}>{zoneMvrv?.libelle ?? VALEUR_ABSENTE}</Badge>
             ) : undefined
           }
         />
@@ -510,13 +511,14 @@ export function CycleWindow() {
                 lignes={[...series].sort((a, b) => a.halvingIndex - b.halvingIndex)}
                 cle={(s) => String(s.halvingIndex)}
                 maxHauteur="10rem"
+                ariaLabel="Cycles BTC"
               />
             </div>
 
             <div className="mt-2 flex items-center justify-between gap-2">
               <NoteSource>
                 Coin Metrics · PriceUSD daily depuis 2010 · les cycles passés ne préjugent pas du
-                courant ; tops historiques 368/525/549/481 j post-halving · planchers documentés
+                courant · sommet d'un cycle clos = plus haut avant son creux baissier · planchers documentés
               </NoteSource>
               <Fraicheur loading={enCours} majTs={majTs} />
             </div>

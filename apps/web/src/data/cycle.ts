@@ -5,9 +5,11 @@
  * on exprime le prix en INDICE relatif (prix / prix au jour du halving). Superposés en
  * échelle log, les 4 cycles deviennent comparables (l'ampleur des mouvements, pas leur
  * niveau absolu). Le cycle courant s'arrête naturellement à la dernière donnée ; chaque
- * cycle passé est borné au HALVING SUIVANT (les cycles réels durent 1319/1402/1440 j,
- * moins que la fenêtre max 1500 j : sans cette borne, le début du cycle suivant —
- * ex. l'ATH pré-halving de mars 2024 — contaminerait le sommet du cycle précédent).
+ * cycle passé est borné à la VEILLE DU HALVING SUIVANT (les cycles réels durent
+ * 1319/1402/1440 j, moins que la fenêtre max 1500 j) : cette borne évite le CHEVAUCHEMENT
+ * avec le cycle suivant, mais n'isole pas le sommet — l'ATH pré-halving du 2024-03-13
+ * (jour 1402) tombe dans la fenêtre du cycle 2020. Pour un cycle CLOS, `statsCycle(…, true)`
+ * cherche donc le sommet avant le creux baissier (plus haut précédant le repli maximal).
  *
  * ⚠️ Aucun cycle passé ne préjuge du courant — l'histoire n'est qu'un repère, pas un modèle.
  * Fonctions NaN-safe : les entrées non finies sont ignorées (l'UI affiche « — »).
@@ -43,6 +45,8 @@ export interface SerieCycle {
   halvingIndex: number;
   /** Date du halving en ms epoch (UTC). */
   halvingMs: number;
+  /** true si un halving suivant existe : cycle passé, borné à la veille de ce halving. */
+  clos: boolean;
   /** Points alignés (jour 0 = halving), triés par jour croissant, bornés au halving
    *  suivant (cycles passés) et à la fenêtre max 0..1500 j. */
   points: PointCycle[];
@@ -54,7 +58,8 @@ export interface StatsCycle {
   topIndice: number;
   /** Jour post-halving du sommet. */
   topJour: number;
-  /** Repli du dernier point vs sommet, en % (≤ 0). */
+  /** Écart du dernier point au sommet retenu, en %. ≤ 0 pour le cycle courant ; peut être
+   *  POSITIF pour un cycle clos dont la fin repasse au-dessus du sommet d'avant le creux. */
   drawdownDepuisTopPct: number;
   /** Indice au dernier point observé. */
   indiceCourant: number;
@@ -68,9 +73,10 @@ export interface StatsCycle {
  * Pour chaque halving : `base` = prix du premier point de jour ≥ 0 (le jour 0 exact s'il
  * existe, sinon le plus proche après le halving) ; `indice = prix / base` (donc 1 au jour
  * de base) ; fenêtre retenue 0..min(1500, veille du halving suivant) — un cycle passé
- * s'arrête STRICTEMENT avant son successeur, sinon son sommet serait contaminé par le
- * début du cycle suivant. Un halving sans point exploitable (aucune donnée après lui,
- * ou base non finie / ≤ 0) ne produit PAS de série.
+ * (`clos`) s'arrête STRICTEMENT avant son successeur : pas de chevauchement entre séries.
+ * La borne n'exclut pas un ATH pré-halving du cycle suivant (2024-03-13, jour 1402 du
+ * cycle 2020) : c'est `statsCycle(points, clos)` qui écarte ce pic. Un halving sans point
+ * exploitable (aucune donnée après lui, ou base non finie / ≤ 0) ne produit PAS de série.
  *
  * La troncature du cycle courant « à aujourd'hui » découle du filtre sans horloge
  * injectée : les données du cycle courant s'arrêtent d'elles-mêmes au dernier point.
@@ -103,17 +109,29 @@ export function decouperCycles(points: readonly PointMetrique[]): SerieCycle[] {
     if (!Number.isFinite(base) || base <= 0) continue;
 
     const pointsCycle = bruts.map((p) => ({ jour: p.jour, indice: p.indice / base }));
-    series.push({ halvingIndex: i + 1, halvingMs, points: pointsCycle });
+    series.push({ halvingIndex: i + 1, halvingMs, clos: suivantMs !== undefined, points: pointsCycle });
   }
 
   return series;
 }
 
 /**
- * Statistiques d'un cycle : sommet (indice/jour), état courant (dernier point) et repli
- * depuis le sommet en %. PURE et NaN-safe : une série vide renvoie des NaN (l'UI affiche « — »).
+ * Statistiques d'un cycle : sommet (indice/jour), état courant (dernier point) et écart du
+ * dernier point au sommet en %. PURE et NaN-safe : les indices non finis sont ignorés, une
+ * série vide renvoie des NaN (l'UI affiche « — »).
+ *
+ * Deux règles de sommet :
+ * - cycle courant (`clos = false`, défaut) : maximum de la série (première occurrence) ;
+ *   un nouvel ATH suivi d'un repli reste le sommet comparé.
+ * - cycle CLOS (`clos = true`) : plus haut glissant au moment du REPLI MAXIMAL (minimum du
+ *   ratio indice / plus haut glissant). En cas d'égalité de ratio, le plus récent l'emporte
+ *   (`<=`) : une série monotone croissante (repli nul partout) a pour sommet son dernier
+ *   point. Réel : sommets 2013-12-04, 2017-12-16, 2021-11-08 (et non l'ATH du 2024-03-13).
+ *   Limite : si le krach post-sommet était moins profond qu'un krach antérieur de la même
+ *   fenêtre, la règle retiendrait le pic de ce krach antérieur — jamais observé (2013 :
+ *   −70 % en avril, puis −84,5 % après le sommet de décembre).
  */
-export function statsCycle(serie: readonly PointCycle[]): StatsCycle {
+export function statsCycle(serie: readonly PointCycle[], clos = false): StatsCycle {
   if (serie.length === 0) {
     return {
       topIndice: NaN,
@@ -126,10 +144,30 @@ export function statsCycle(serie: readonly PointCycle[]): StatsCycle {
 
   let topIndice = -Infinity;
   let topJour = NaN;
-  for (const p of serie) {
-    if (Number.isFinite(p.indice) && p.indice > topIndice) {
-      topIndice = p.indice;
-      topJour = p.jour;
+  if (clos) {
+    // Passe unique : plus haut glissant, puis ratio au plus haut ; le minimum fixe le sommet.
+    let picIndice = -Infinity;
+    let picJour = NaN;
+    let meilleurRatio = Infinity;
+    for (const p of serie) {
+      if (!Number.isFinite(p.indice)) continue;
+      if (p.indice > picIndice) {
+        picIndice = p.indice;
+        picJour = p.jour;
+      }
+      const ratio = p.indice / picIndice;
+      if (ratio <= meilleurRatio) {
+        meilleurRatio = ratio;
+        topIndice = picIndice;
+        topJour = picJour;
+      }
+    }
+  } else {
+    for (const p of serie) {
+      if (Number.isFinite(p.indice) && p.indice > topIndice) {
+        topIndice = p.indice;
+        topJour = p.jour;
+      }
     }
   }
 

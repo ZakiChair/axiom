@@ -66,13 +66,24 @@ describe("decouperCycles", () => {
     expect(jours.every((j) => j >= 0 && j <= 1439)).toBe(true);
   });
 
-  it("ne laisse pas l'ATH pré-halving suivant contaminer le sommet d'un cycle passé", () => {
-    // H3 plat à 8 000 avec un pic à 73 000 au jour 1445 (= mars 2024, cycle suivant) :
-    // le pic est HORS cycle 3 (borné 1439) — son top reste celui des données internes.
+  it("borne le cycle 3 au jour 1439 (un pic post-halving 2024 n'y entre pas)", () => {
+    // H3 plat à 8 000 avec un pic à 73 000 au jour 1445 (après le halving du 2024-04-20) :
+    // le pic est HORS cycle 3 (borné 1439) — son maximum reste celui des données internes.
     const pts = serieSynthetique(HALVINGS[2]!, 0, 2000, (j) => (j === 1445 ? 73_000 : 8_000 + j));
     const c3 = cycle(decouperCycles(pts), 3);
     expect(c3).toBeDefined();
     expect(Math.max(...c3!.points.map((p) => p.indice))).toBeCloseTo((8_000 + 1439) / 8_000, 6);
+  });
+
+  it("marque clos les cycles suivis d'un halving (H1..H3) et ouvert le cycle courant (H4)", () => {
+    const pts = serieSynthetique(HALVINGS[0]!, 0, Math.round((HALVINGS[3]! - HALVINGS[0]!) / JOUR) + 10, () => 100);
+    const series = decouperCycles(pts);
+    expect(series.map((s) => [s.halvingIndex, s.clos])).toEqual([
+      [1, true],
+      [2, true],
+      [3, true],
+      [4, false],
+    ]);
   });
 
   it("laisse le cycle courant se terminer à la dernière donnée (< 1500 j)", () => {
@@ -137,6 +148,112 @@ describe("statsCycle", () => {
     const s = statsCycle([]);
     expect(Number.isNaN(s.topIndice)).toBe(true);
     expect(Number.isNaN(s.indiceCourant)).toBe(true);
+  });
+});
+
+describe("statsCycle — cycle clos : sommet = plus haut précédant le repli maximal", () => {
+  /** Interpolation linéaire de l'indice entre ancres `[jour, indice]` (un point par jour). */
+  function formeCycle(ancres: readonly (readonly [number, number])[]): PointCycle[] {
+    const points: PointCycle[] = [];
+    for (let k = 0; k < ancres.length - 1; k += 1) {
+      const [j0, v0] = ancres[k]!;
+      const [j1, v1] = ancres[k + 1]!;
+      for (let j = j0; j < j1; j += 1) points.push({ jour: j, indice: v0 + ((v1 - v0) * (j - j0)) / (j1 - j0) });
+    }
+    const [jf, vf] = ancres[ancres.length - 1]!;
+    points.push({ jour: jf, indice: vf });
+    return points;
+  }
+
+  // Forme du cycle 2020 : pic ×7,86 (j 546), creux ×1,83 (j 912), remontée ×8,51 (j 1402), fin ×7,42 (j 1439).
+  const cycle2020 = formeCycle([
+    [0, 1],
+    [546, 7.86],
+    [912, 1.83],
+    [1402, 8.51],
+    [1439, 7.42],
+  ]);
+
+  it("retient le pic avant le creux baissier, pas l'ATH pré-halving suivant", () => {
+    const s = statsCycle(cycle2020, true);
+    expect(s.topJour).toBe(546);
+    expect(s.topIndice).toBeCloseTo(7.86, 10);
+    // Dernier point au-dessus du sommet retenu : repli POSITIF (7,42 / 7,86 − 1).
+    expect(s.drawdownDepuisTopPct).toBeCloseTo((7.42 / 7.86 - 1) * 100, 6);
+    expect(s.jourCourant).toBe(1439);
+  });
+
+  it("cycle courant (clos = false, défaut) : sommet = maximum courant", () => {
+    expect(statsCycle(cycle2020).topJour).toBe(1402);
+    expect(statsCycle(cycle2020, false).topIndice).toBeCloseTo(8.51, 10);
+  });
+
+  it("série monotone croissante : sommet au dernier point (égalité des replis nuls → le plus récent)", () => {
+    const s = statsCycle(formeCycle([[0, 1], [300, 4]]), true);
+    expect(s.topJour).toBe(300);
+    expect(s.topIndice).toBe(4);
+    expect(s.drawdownDepuisTopPct).toBe(0);
+  });
+
+  it("égalité de replis maximaux : garde le pic du repli le plus récent", () => {
+    const s = statsCycle(
+      [
+        { jour: 0, indice: 1 },
+        { jour: 10, indice: 4 },
+        { jour: 20, indice: 2 }, // repli −50 % depuis ×4
+        { jour: 30, indice: 6 },
+        { jour: 40, indice: 3 }, // repli −50 % depuis ×6 (même profondeur, plus récent)
+      ],
+      true,
+    );
+    expect(s.topJour).toBe(30);
+    expect(s.topIndice).toBe(6);
+  });
+
+  it("ignore les indices non finis et reste NaN-safe sur une série vide", () => {
+    const s = statsCycle(
+      [
+        { jour: 0, indice: Number.NaN },
+        { jour: 1, indice: 1 },
+        { jour: 2, indice: 3 },
+        { jour: 3, indice: Number.NaN },
+        { jour: 4, indice: 1.5 },
+      ],
+      true,
+    );
+    expect(s.topJour).toBe(2);
+    expect(Number.isNaN(statsCycle([], true).topIndice)).toBe(true);
+    expect(Number.isNaN(statsCycle([], true).topJour)).toBe(true);
+  });
+
+  it("PriceUSD réaliste : le Cycle 2020 culmine le 2021-11-08 et non le 2024-03-13", () => {
+    // Interpolation log-linéaire quotidienne entre prix réels Coin Metrics (00:00 UTC).
+    const ancres: [number, number][] = [
+      [Date.UTC(2020, 4, 11), 8_600],
+      [Date.UTC(2021, 10, 8), 67_541.76],
+      [Date.UTC(2022, 10, 9), 15_758],
+      [Date.UTC(2024, 2, 13), 73_081.58],
+      [Date.UTC(2024, 3, 20), 64_000],
+      [Date.UTC(2024, 4, 20), 67_000],
+    ];
+    const pts: PointMetrique[] = [];
+    for (let k = 0; k < ancres.length - 1; k += 1) {
+      const [t0, p0] = ancres[k]!;
+      const [t1, p1] = ancres[k + 1]!;
+      const n = Math.round((t1 - t0) / JOUR);
+      for (let i = 0; i < n; i += 1) {
+        pts.push({ time: t0 + i * JOUR, value: Math.exp(Math.log(p0) + ((Math.log(p1) - Math.log(p0)) * i) / n) });
+      }
+    }
+    const c3 = cycle(decouperCycles(pts), 3)!;
+    expect(c3.clos).toBe(true);
+    const dateSommet = (clos: boolean) =>
+      new Date(c3.halvingMs + statsCycle(c3.points, clos).topJour * JOUR).toISOString().slice(0, 10);
+    expect(dateSommet(c3.clos)).toBe("2021-11-08");
+    expect(statsCycle(c3.points, c3.clos).topJour).toBe(546);
+    expect(statsCycle(c3.points, c3.clos).topIndice).toBeCloseTo(67_541.76 / 8_600, 6);
+    // Sans la règle des cycles clos, l'ATH pré-halving 2024 (jour 1402) serait retenu.
+    expect(dateSommet(false)).toBe("2024-03-13");
   });
 });
 

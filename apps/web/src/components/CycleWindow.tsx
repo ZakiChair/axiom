@@ -37,6 +37,7 @@ import {
   Vide,
 } from "./ui";
 import { TableTriable, type ColonneTable } from "./TableTriable";
+import { VueModelesPrix } from "./cycle/ModelesPrix";
 
 /** Un jour en millisecondes (dates de halving et de sommet reconstruites depuis le jour post-halving). */
 const JOUR_MS = 86_400_000;
@@ -274,6 +275,7 @@ export function CycleWindow() {
   const enCours = useStore(cycleStore, (s) => s.enCours);
   const series = useStore(cycleStore, (s) => s.series);
   const ath = useStore(cycleStore, (s) => s.ath);
+  const modeles = useStore(cycleStore, (s) => s.modeles);
   const mayer = useStore(cycleStore, (s) => s.mayer);
   const mvrv = useStore(cycleStore, (s) => s.mvrv);
   const halving = useStore(cycleStore, (s) => s.halving);
@@ -562,6 +564,8 @@ export function CycleWindow() {
                 ariaLabel="Cycles BTC"
               />
             </div>
+
+            <VueModelesPrix modeles={modeles} />
 
             <div className="mt-2 flex items-center justify-between gap-2">
               <NoteSource>

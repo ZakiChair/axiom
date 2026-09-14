@@ -7,6 +7,7 @@ import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
  * Correctif A : sommet d'un cycle clos cherché avant son creux baissier.
  * Correctif B : MVRV Z-Score BGeometrics seul, aucune requête Coin Metrics hors PriceUSD.
  * Lot 5 : distance à l'ATH alignée sur le pic, comparée au même J+N depuis les pics passés.
+ * Lot 6 : modèles de prix (multiple 200 semaines, prix / SMA 2 ans, Pi Cycle Bottom).
  */
 test.use({ timezoneId: "Europe/Paris" });
 
@@ -78,6 +79,11 @@ function tuile(fenetre: Locator, libelle: string): Locator {
   return fenetre.getByText(libelle).locator("..");
 }
 
+/** Tuile empilée par son libellé exact (libellé et badge en en-tête, valeur puis pied dessous). */
+function tuileEmpilee(section: Locator, libelle: string): Locator {
+  return section.getByText(libelle, { exact: true }).locator("../..");
+}
+
 test("CYCLE : sommet du Cycle 2020 avant son creux, MVRV « — » sans requête Coin Metrics hors PriceUSD", async ({ page }) => {
   const metriquesCm = await preparer(page);
   const fenetre = await ouvrirCycle(page);
@@ -145,4 +151,32 @@ test("CYCLE : distance à l'ATH alignée sur le pic et repli au même J+N depuis
   // Aucune projection des cycles passés sur le courant ; le chart garde sa hauteur (le corps défile).
   await expect(fenetre).not.toContainText("fenêtre des planchers");
   expect((await fenetre.locator("canvas").boundingBox())!.height).toBeGreaterThanOrEqual(200);
+});
+
+test("CYCLE : modèles de prix (multiple 200 semaines, prix / SMA 2 ans, Pi Cycle Bottom) sans écraser le chart", async ({ page }) => {
+  const metriquesCm = await preparer(page);
+  const fenetre = await ouvrirCycle(page);
+  const section = fenetre.locator("section").filter({ hasText: "Modèles de prix" });
+
+  // Attendus calculés hors implémentation sur la fixture (e2e-attendus) : SMA 1 400 j, SMA 730 j,
+  // EMA 150 j contre 0,745 × SMA 471 j ; la fixture produit un épisode synthétique en 2026.
+  const multiple = tuileEmpilee(section, "Multiple 200 semaines");
+  await expect(multiple).toContainText("1.10");
+  await expect(multiple).toContainText("pct 24");
+  await expect(multiple).toContainText("31 j au-dessus");
+  await expect(multiple).toContainText("Prix / SMA 2 ans 0.84");
+  await expect(multiple).toContainText("231 j en dessous");
+  const pi = tuileEmpilee(section, "Pi Cycle Bottom");
+  await expect(pi).toContainText("+2.8%");
+  await expect(pi).toContainText("pas de signal");
+  await expect(pi).toContainText("dernier signal 2026-07-05");
+  await expect(section).toContainText("n = 4 signaux");
+  await expect(section).toContainText("2022-07-26 → 2023-04-01");
+  await expect(section).toContainText("ne prévoit");
+  await expect(section).not.toContainText("5×");
+
+  // Le chart garde sa hauteur malgré la section ; seules des requêtes PriceUSD vont à Coin Metrics.
+  expect((await fenetre.locator("canvas").boundingBox())!.height).toBeGreaterThanOrEqual(200);
+  expect(metriquesCm.length).toBeGreaterThan(0);
+  expect(metriquesCm.every((m) => m === "PriceUSD")).toBe(true);
 });

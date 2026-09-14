@@ -5,7 +5,8 @@
  *   1. PRIMAIRE — historique PriceUSD complet (Coin Metrics) → `decouperCycles` → 4 séries
  *      alignées jour-0. Le CHART ne dépend QUE de ça ; tout le reste est best-effort.
  *   2. Dérivés des mêmes prix, calculés une fois par run (jamais au rendu) : distance à l'ATH
- *      alignée sur le pic (`distanceAth`) et Mayer Multiple.
+ *      alignée sur le pic (`distanceAth`), modèles de prix (`calculerModelesPrix`) et Mayer
+ *      Multiple.
  *   3. Best-effort — halving countdown (`fetchMempoolReseau`/`computeHalving`), MVRV Z-Score
  *      (BGeometrics seul, « — » si indisponible). Un échec de ces extras laisse « — » sans
  *      casser le chart.
@@ -17,6 +18,7 @@
 import { createStore } from "zustand/vanilla";
 import { decouperCycles, mayerMultiple, type SerieCycle } from "../data/cycle";
 import { distanceAth, type DistanceAth } from "../data/cycleAth";
+import { calculerModelesPrix, type ModelesPrix } from "../data/modelesPrix";
 import { fetchCoinMetricsPriceUSDComplet, type PointMetrique } from "../data/onchain/coinmetrics";
 import { fetchMempoolReseau, type Halving } from "../data/onchain/mempool";
 import { BG_MVRV, fetchBgeometricMetrique, type BgResultat } from "../data/onchain/bgeometrics";
@@ -34,6 +36,8 @@ export interface CycleState {
   points: PointMetrique[];
   /** Distance à l'ATH et repli au même J+N depuis les pics passés, null si aucun prix exploitable. */
   ath: DistanceAth | null;
+  /** Multiple 200 semaines, prix / SMA 2 ans et Pi Cycle Bottom ; null avant le premier run réussi. */
+  modeles: ModelesPrix | null;
   /** Mayer Multiple (dernier prix / MM200), null si indisponible. */
   mayer: number | null;
   /** MVRV Z-Score BGeometrics (résultat complet : valeur, `ts`, `perime`, `repli` pour la
@@ -73,6 +77,7 @@ export const cycleStore = createStore<CycleState>((set, get) => ({
   series: [],
   points: [],
   ath: null,
+  modeles: null,
   mayer: null,
   mvrv: null,
   halving: null,
@@ -114,6 +119,7 @@ export const cycleStore = createStore<CycleState>((set, get) => ({
     const series = decouperCycles(resultat.points);
     const mayer = mayerMultiple(resultat.points);
     const ath = distanceAth(resultat.points);
+    const modeles = calculerModelesPrix(resultat.points);
 
     // Extras best-effort en parallèle : leur échec ne bloque pas le chart.
     const [reseau, mvrv] = await Promise.all([
@@ -132,6 +138,7 @@ export const cycleStore = createStore<CycleState>((set, get) => ({
       series,
       points: resultat.points,
       ath,
+      modeles,
       mayer,
       mvrv,
       halving: reseau?.donnee.halving ?? null,

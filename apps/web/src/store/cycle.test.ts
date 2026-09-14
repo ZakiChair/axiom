@@ -54,6 +54,7 @@ afterEach(() => {
     series: [],
     points: [],
     ath: null,
+    modeles: null,
     mayer: null,
     mvrv: null,
     halving: null,
@@ -125,5 +126,28 @@ describe("cycleStore — distance à l'ATH (calculée dans run)", () => {
     expect(ath.joursDepuisAth).toBe(9);
     expect(ath.cyclesPasses[3]!.repliPct).toBeCloseTo(-9, 10);
     expect(ath.cyclesPasses[1]).toBeNull();
+  });
+});
+
+describe("cycleStore — modèles de prix (calculés dans run)", () => {
+  it("calcule les trois modèles une fois par run sur un historique suffisant", async () => {
+    bg.mockResolvedValue(null);
+    const debut = Date.UTC(2020, 4, 11);
+    const points = Array.from({ length: 1500 }, (_, i) => ({ time: debut + i * JOUR, value: 10_000 + 20 * i }));
+    prix.mockResolvedValue({ points, ts: 1, perime: false });
+    await cycleStore.getState().run(true);
+    const { modeles } = cycleStore.getState();
+    expect(modeles).not.toBeNull();
+    // Série croissante : prix au-dessus de ses moyennes depuis le premier ratio calculable.
+    expect(modeles!.multiple200Semaines!.ratio).toBeGreaterThan(1);
+    expect(modeles!.multiple200Semaines!.sequence).toEqual({ sens: "dessus", jours: 101, depuisMs: debut + 1399 * JOUR });
+    expect(modeles!.ratio2Ans).not.toBeNull();
+    expect(modeles!.piCycleBottom).not.toBeNull();
+  });
+
+  it("historique trop court : chaque modèle reste null, jamais une valeur inventée", async () => {
+    bg.mockResolvedValue(null);
+    await cycleStore.getState().run(true);
+    expect(cycleStore.getState().modeles).toEqual({ multiple200Semaines: null, ratio2Ans: null, piCycleBottom: null });
   });
 });

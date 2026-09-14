@@ -106,6 +106,13 @@ describe("chargerBougiesJour", () => {
     expect(f.appels).toHaveLength(2);
   });
 
+  it("série sans la bougie du jour : servie mais non cachée (l'ouverture du jour est redemandée)", async () => {
+    const f = depsFactices({ reponse: async () => [bougie(Date.UTC(2026, 8, 12)), bougie(Date.UTC(2026, 8, 13))] });
+    expect(await chargerBougiesJour("binance", "BTCUSDT", NOW, f.deps)).toHaveLength(2);
+    await chargerBougiesJour("binance", "BTCUSDT", NOW, f.deps);
+    expect(f.appels).toHaveLength(2);
+  });
+
   it("synthétique ou sans 1d → null sans aucun appel", async () => {
     const f = depsFactices({ tfs: ["1m", "1h"] });
     expect(await chargerBougiesJour("synthetic", "BTCUSDT|ETHUSDT", NOW, f.deps)).toBeNull();

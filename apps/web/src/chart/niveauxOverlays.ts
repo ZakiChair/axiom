@@ -14,7 +14,7 @@ import type { Commande } from "../commands/registry";
 import type { FournisseurLignes } from "./niveauxLignes";
 
 /** Overlays pilotés par ce socle (les lots suivants ajoutent leurs clés). */
-export type CleOverlayNiveaux = "niveauxCles" | "niveauxOptions";
+export type CleOverlayNiveaux = "niveauxCles" | "niveauxOptions" | "bandesImplicites";
 /** Familles des niveaux clés : jour, semaine, mois, trimestre (UTC). */
 export type FamilleNiveauxCles = "J" | "S" | "M" | "T";
 export const FAMILLES_NIVEAUX_CLES: readonly FamilleNiveauxCles[] = ["J", "S", "M", "T"];
@@ -23,6 +23,8 @@ export interface NiveauxOverlaysState {
   niveauxCles: boolean;
   /** Murs γ, flips et max pain Deribit (BTC/ETH). */
   niveauxOptions: boolean;
+  /** Bandes ±1σ/±2σ jour et semaine du DVOL Deribit (BTC/ETH). */
+  bandesImplicites: boolean;
   /** Familles affichées — jamais vide, ordre canonique J, S, M, T ; défaut J + S. */
   familles: FamilleNiveauxCles[];
   basculer: (cle: CleOverlayNiveaux) => void;
@@ -40,6 +42,7 @@ const canoniques = (garder: (f: FamilleNiveauxCles) => boolean): FamilleNiveauxC
 export const niveauxOverlaysStore: StoreApi<NiveauxOverlaysState> = createStore<NiveauxOverlaysState>((set, get) => ({
   niveauxCles: false,
   niveauxOptions: false,
+  bandesImplicites: false,
   familles: ["J", "S"],
   basculer: (cle) => set({ [cle]: !get()[cle] }),
   setActif: (cle, actif) => set({ [cle]: actif }),
@@ -56,7 +59,7 @@ export const niveauxOverlaysStore: StoreApi<NiveauxOverlaysState> = createStore<
 
 /** Au moins un overlay de niveaux est allumé (PURE). */
 export function overlaysNiveauxActifs(s: NiveauxOverlaysState): boolean {
-  return s.niveauxCles || s.niveauxOptions;
+  return s.niveauxCles || s.niveauxOptions || s.bandesImplicites;
 }
 
 /** Identité capturée du slot hôte. */
@@ -97,6 +100,10 @@ export function creerFournisseurNiveauxSlot(
   };
 }
 
+/** Ce que mesurent les bandes implicites (aperçu EMOVE et bouton de DIST). */
+export const NOTE_BANDES_IMPLICITES =
+  "amplitude payée par les options, pas une borne — ≈ 78 % des clôtures quotidiennes dans ±1σ (déc. 2023 – sept. 2026)";
+
 const NOMS_FAMILLES: Record<FamilleNiveauxCles, string> = { J: "jour", S: "semaine", M: "mois", T: "trimestre" };
 
 export const commandesNiveauxOverlays: Commande[] = [
@@ -124,5 +131,14 @@ export const commandesNiveauxOverlays: Commande[] = [
     motsCles: ["gex", "max pain"],
     apercu: "BTC/ETH · convention calls + / puts −",
     action: () => niveauxOverlaysStore.getState().basculer("niveauxOptions"),
+  },
+  {
+    id: "action:bandes-implicites",
+    mnemonique: "EMOVE",
+    libelle: "Bandes implicites ±1σ/±2σ jour et semaine (DVOL Deribit) — activer / désactiver",
+    categorie: "action",
+    motsCles: ["dvol", "sigma"],
+    apercu: `BTC/ETH · ${NOTE_BANDES_IMPLICITES}`,
+    action: () => niveauxOverlaysStore.getState().basculer("bandesImplicites"),
   },
 ];

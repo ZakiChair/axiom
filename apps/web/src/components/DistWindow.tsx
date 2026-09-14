@@ -21,6 +21,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { distOverlayStore } from "../chart/distLignes";
+import { NOTE_BANDES_IMPLICITES, niveauxOverlaysStore } from "../chart/niveauxOverlays";
 import { distVar, HORIZONS, type NiveauxVar } from "../data/distVar";
 import { formatPrice, formatPct } from "../lib/format";
 import { Badge, BoutonBascule, BoutonRafraichir, EnTeteFenetre, Chargement, ErreurBloc, Fraicheur, NoteSource, Vide } from "./ui";
@@ -85,6 +86,7 @@ export function DistWindow() {
   const dataLoad = useStore(marketStore, (s) => s.dataLoad);
   // Overlay des bandes VaR sur le chart maître (toggle persisté, défaut OFF).
   const overlayActif = useStore(distOverlayStore, (s) => s.actif);
+  const bandesImplicitesActives = useStore(niveauxOverlaysStore, (s) => s.bandesImplicites);
 
   // Compteur de rafraîchissement : sa hausse force la re-lecture du snapshot de bougies
   // (capte la dernière bougie mise à jour en direct, hors abonnement haute fréquence).
@@ -171,6 +173,14 @@ export function DistWindow() {
               title="Afficher les bandes VaR sur le chart maître"
             >
               Bandes VaR
+            </BoutonBascule>
+            {/* Bandes ±1σ/±2σ du DVOL Deribit (implicite), à lire face aux bandes VaR (réalisé). */}
+            <BoutonBascule
+              actif={bandesImplicitesActives}
+              onClick={() => niveauxOverlaysStore.getState().basculer("bandesImplicites")}
+              title={`Bandes ±1σ/±2σ jour et semaine du DVOL Deribit (BTC/ETH) sur le chart maître : ${NOTE_BANDES_IMPLICITES}`}
+            >
+              Bandes implicites
             </BoutonBascule>
             <BoutonRafraichir onClick={rafraichir} />
           </span>

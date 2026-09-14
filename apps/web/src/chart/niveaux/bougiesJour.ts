@@ -55,7 +55,9 @@ export function chargerBougiesJour(
     .then((bougies) => (bougies.length > 0 && estAligneUtc(bougies) ? bougies : null))
     .catch(() => null)
     .then((bougies) => {
-      if (bougies === null) cache.delete(cle);
+      // Sans la bougie du jour (pas encore publiée juste après minuit), l'ouverture du jour
+      // manque : la série est servie mais redemandée au prochain appel.
+      if (bougies?.some((b) => utcDayOf(b.time) === utcDayOf(nowMs)) !== true) cache.delete(cle);
       return bougies;
     });
   cache.set(cle, promesse);

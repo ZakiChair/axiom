@@ -7,6 +7,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   FAMILLES_NIVEAUX_CLES,
+  NOTE_BANDES_IMPLICITES,
   commandesNiveauxOverlays,
   creerFournisseurNiveauxSlot,
   niveauxOverlaysStore,
@@ -18,6 +19,7 @@ import type { FournisseurLignes, LigneNiveau } from "./niveauxLignes";
 beforeEach(() => {
   niveauxOverlaysStore.getState().setActif("niveauxCles", false);
   niveauxOverlaysStore.getState().setActif("niveauxOptions", false);
+  niveauxOverlaysStore.getState().setActif("bandesImplicites", false);
   niveauxOverlaysStore.getState().setFamilles(["J", "S"]);
 });
 
@@ -26,6 +28,7 @@ describe("niveauxOverlaysStore — bascules et familles", () => {
     const s = niveauxOverlaysStore.getState();
     expect(s.niveauxCles).toBe(false);
     expect(s.niveauxOptions).toBe(false);
+    expect(s.bandesImplicites).toBe(false);
     expect(s.familles).toEqual(["J", "S"]);
     expect(overlaysNiveauxActifs(s)).toBe(false);
   });
@@ -43,6 +46,14 @@ describe("niveauxOverlaysStore — bascules et familles", () => {
     const s = niveauxOverlaysStore.getState();
     expect(s.niveauxOptions).toBe(true);
     expect(s.niveauxCles).toBe(false);
+    expect(overlaysNiveauxActifs(s)).toBe(true);
+  });
+
+  it("les bandes implicites suffisent à activer l'overlay", () => {
+    niveauxOverlaysStore.getState().basculer("bandesImplicites");
+    const s = niveauxOverlaysStore.getState();
+    expect(s.bandesImplicites).toBe(true);
+    expect(s.niveauxCles || s.niveauxOptions).toBe(false);
     expect(overlaysNiveauxActifs(s)).toBe(true);
   });
 
@@ -72,9 +83,9 @@ describe("niveauxOverlaysStore — bascules et familles", () => {
 });
 
 describe("commandesNiveauxOverlays", () => {
-  it("NIVCLE, une commande par famille et OPTNIV, ids et mnémoniques uniques", () => {
+  it("NIVCLE, une commande par famille, OPTNIV et EMOVE, ids et mnémoniques uniques", () => {
     const mnemos = commandesNiveauxOverlays.map((c) => c.mnemonique);
-    expect(mnemos).toEqual(["NIVCLE", ...FAMILLES_NIVEAUX_CLES.map((f) => `NIVCLE-${f}`), "OPTNIV"]);
+    expect(mnemos).toEqual(["NIVCLE", ...FAMILLES_NIVEAUX_CLES.map((f) => `NIVCLE-${f}`), "OPTNIV", "EMOVE"]);
     expect(new Set(commandesNiveauxOverlays.map((c) => c.id)).size).toBe(commandesNiveauxOverlays.length);
   });
 
@@ -97,6 +108,20 @@ describe("commandesNiveauxOverlays", () => {
     expect(niveauxOverlaysStore.getState().niveauxCles).toBe(false);
     optniv.action();
     expect(niveauxOverlaysStore.getState().niveauxOptions).toBe(false);
+  });
+
+  it("EMOVE bascule les bandes implicites et dit honnêtement ce qu'elles mesurent", () => {
+    const emove = commandesNiveauxOverlays.find((c) => c.mnemonique === "EMOVE")!;
+    expect(NOTE_BANDES_IMPLICITES).toBe(
+      "amplitude payée par les options, pas une borne — ≈ 78 % des clôtures quotidiennes dans ±1σ (déc. 2023 – sept. 2026)",
+    );
+    expect(emove.apercu).toContain(NOTE_BANDES_IMPLICITES);
+    expect(emove.apercu).toContain("BTC/ETH");
+    emove.action();
+    expect(niveauxOverlaysStore.getState().bandesImplicites).toBe(true);
+    expect(niveauxOverlaysStore.getState().niveauxCles).toBe(false);
+    emove.action();
+    expect(niveauxOverlaysStore.getState().bandesImplicites).toBe(false);
   });
 });
 

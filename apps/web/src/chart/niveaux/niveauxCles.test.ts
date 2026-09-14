@@ -32,6 +32,7 @@ function storeFamilles(familles: FamilleNiveauxCles[]): StoreApi<NiveauxOverlays
   return createStore<NiveauxOverlaysState>((set) => ({
     niveauxCles: true,
     niveauxOptions: false,
+    bandesImplicites: false,
     familles,
     basculer: () => {},
     setActif: (cle, actif) => set({ [cle]: actif } as Partial<NiveauxOverlaysState>),

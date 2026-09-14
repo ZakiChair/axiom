@@ -21,6 +21,7 @@ function storeIsole(): StoreApi<NiveauxOverlaysState> {
   return createStore<NiveauxOverlaysState>((set, get) => ({
     niveauxCles: false,
     niveauxOptions: false,
+    bandesImplicites: false,
     familles: ["J", "S"],
     basculer: (cle) => set({ [cle]: !get()[cle] } as Partial<NiveauxOverlaysState>),
     setActif: (cle, actif) => set({ [cle]: actif } as Partial<NiveauxOverlaysState>),
@@ -125,7 +126,7 @@ describe("creerFournisseurComposite", () => {
   });
 
   it("fabriques réelles : une par overlay, niveaux clés prioritaires dans la fusion", () => {
-    expect(ORDRE_SOURCES).toEqual(["niveauxCles", "niveauxOptions"]);
+    expect(ORDRE_SOURCES).toEqual(["niveauxCles", "niveauxOptions", "bandesImplicites"]);
     expect(Object.keys(FABRIQUES).sort()).toEqual([...ORDRE_SOURCES].sort());
   });
 

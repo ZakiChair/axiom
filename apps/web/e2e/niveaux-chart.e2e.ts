@@ -11,6 +11,8 @@ import { BTCUSDT_1D } from "../src/chart/niveaux/btcusdt1d.fixture";
  *  - Niveaux clés : alerte au niveau exact, persistance après rechargement.
  *  - Niveaux d'options : chaîne Deribit synthétique, murs γ, deux flips distincts, max pain
  *    de l'échéance dominante fusionné avec le put wall de même prix.
+ *  - Bandes implicites : DVOL quotidien bouchonné, activation depuis DIST, bandes jour et
+ *    semaine ancrées sur l'ouverture, désactivation par la palette.
  */
 const MAINTENANT = Date.parse("2026-09-14T18:00:00Z");
 const MINUTE = 60_000;
@@ -230,4 +232,60 @@ test("niveaux d'options : activation palette, murs, flips et max pain accrochabl
   await expect.poll(() => enteteAuPrix(page, 80_000)).toContain("Call wall γ");
   await commande(page, "OPTNIV");
   await expect.poll(() => enteteAuPrix(page, 80_000)).not.toContain("Call wall");
+});
+
+/**
+ * DVOL BTC quotidien sondé le 14/09/2026 : bougie du 13/09 close à 38,89 (IV observée à
+ * l'ouverture du jour et du lundi 14/09), bougie du 14/09 en cours (37,92, jamais utilisée).
+ * Ancre 76 842,01 → +1σ J 78 406,20 ; +2σ J 79 970,40 ; +1σ S 80 980,47.
+ */
+const DVOL_BTC = [
+  [Date.UTC(2026, 8, 12), 39.8, 40.1, 39.2, 39.4],
+  [Date.UTC(2026, 8, 13), 39.4, 39.9, 38.7, 38.89],
+  [Date.UTC(2026, 8, 14), 38.89, 39.2, 37.8, 37.92],
+];
+
+test("bandes implicites : bouton de DIST, lignes jour et semaine accrochables, scellées à BTC, palette", async ({ page }) => {
+  await bouchonnerBougies(page);
+  await page.route("https://www.deribit.com/api/v2/public/**", async (route) => {
+    const url = new URL(route.request().url());
+    const dvolBtc = url.pathname.endsWith("/get_volatility_index_data")
+      && url.searchParams.get("currency") === "BTC"
+      && url.searchParams.get("resolution") === "86400";
+    if (dvolBtc) await route.fulfill({ json: { jsonrpc: "2.0", result: { data: DVOL_BTC, continuation: null } } });
+    else await route.fulfill({ status: 503, json: { error: "fixture Deribit absente" } });
+  });
+  await page.goto("/");
+  await attendreChart(page);
+  expect(await enteteAuPrix(page, 78_406.2)).not.toContain("σ");
+
+  // Activation depuis DIST, à côté des bandes VaR ; le title dit ce que mesurent les bandes.
+  await commande(page, "DIST");
+  const dist = page.locator('[role="complementary"][aria-label="Distribution des rendements (VaR)"]');
+  const bouton = dist.getByRole("button", { name: "Bandes implicites" });
+  await expect(bouton).toHaveAttribute("aria-pressed", "false");
+  await expect(bouton).toHaveAttribute("title", /amplitude payée par les options, pas une borne — ≈ 78 % des clôtures quotidiennes dans ±1σ \(déc\. 2023 – sept\. 2026\)/);
+  await bouton.click();
+  await expect(bouton).toHaveAttribute("aria-pressed", "true");
+  await dist.getByTitle("Fermer").click();
+  await expect(dist).toHaveCount(0);
+
+  await expect.poll(() => enteteAuPrix(page, 78_406.2), { timeout: 20_000 }).toBe("+1σ J (DVOL) · Prix 78,406.20");
+  expect(await enteteAuPrix(page, 79_970.4)).toBe("+2σ J (DVOL) · Prix 79,970.40");
+  expect(await enteteAuPrix(page, 80_980.47)).toBe("+1σ S (DVOL) · Prix 80,980.47");
+  const session = await page.evaluate(() => JSON.parse(localStorage.getItem("axiom:sessionUi:v1") ?? "{}"));
+  expect(session).toMatchObject({ bandesImplicites: true, niveauxCles: false, niveauxOptions: false });
+
+  // ETHUSDT (sans historique 1d dans la fixture) : absence expliquée, aucune bande BTC ne subsiste.
+  await page.getByRole("banner").getByRole("button", { name: "ETHUSDT", exact: true }).click();
+  await expect(page.getByText("Bandes implicites : bougies 1d de ETHUSDT (binance) indisponibles, nouvel essai dans 5 min")).toBeVisible();
+  await attendreChart(page);
+  expect(await enteteAuPrix(page, 78_406.2)).not.toContain("σ");
+
+  // Retour BTC puis désactivation par la palette.
+  await page.getByRole("banner").getByRole("button", { name: "BTCUSDT", exact: true }).click();
+  await attendreChart(page);
+  await expect.poll(() => enteteAuPrix(page, 78_406.2)).toContain("+1σ J (DVOL)");
+  await commande(page, "EMOVE");
+  await expect.poll(() => enteteAuPrix(page, 78_406.2)).not.toContain("σ");
 });

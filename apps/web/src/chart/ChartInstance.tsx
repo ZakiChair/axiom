@@ -34,6 +34,7 @@ import { useStore } from "zustand";
 import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { getAdapter, supportedTimeframesFor } from "../data/adapters";
 import { prepareResyncApply } from "../data/resync";
+import { dataLoadErrorMessage } from "./dataLoadErrorMessage";
 import { adaptateurReplayActif } from "../data/replayFeed";
 import { estSymboleCapitalisation } from "../data/mcap";
 import { parseSyntheticSymbol } from "../data/synthetic";
@@ -532,16 +533,6 @@ export function avecDelai<T>(
     handle = undefined;
   };
   return { promesse: Promise.race([travail, garde]).finally(annuler), annuler };
-}
-
-/** Message volontairement stable : le détail technique reste dans la console/Health. */
-function dataLoadErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.name === "AbortError") return "Chargement annulé.";
-  if (error instanceof Error && error.name === "ErreurCcData") return error.message;
-  if (error instanceof Error && /timeout|timed out|délai/i.test(error.message)) {
-    return "La source n’a pas répondu dans le délai prévu.";
-  }
-  return "La source n’a pas pu fournir l’historique demandé.";
 }
 
 export function ChartInstance({

@@ -16,7 +16,9 @@ describe("section Mineurs de CHAIN", () => {
       <VueMineurs hashrate={{ points: hashrate, dernier: hashrate.at(-1) }} revenus={{ donnee: revenus, ts: debut + 90 * JOUR, perime: false }} />,
     );
     expect(html).toContain("Capitulation");
-    expect(html).toContain("croisement baissier le");
+    expect(html).toContain("croisement ↓ 2026-");
+    // SMA 30 = 500 (30 derniers jours), SMA 60 = (30 × 800 + 30 × 500) / 60 = 650.
+    expect(html).toContain("SMA 500.0 EH/s / 650.0 EH/s");
     expect(html).toContain("80.00 $/PH/j");
     expect(html).toContain("revenus / j $40.00M");
     expect(html).toContain("blockchain.info");

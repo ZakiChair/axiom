@@ -52,19 +52,19 @@ export function VueMineurs({
       <TitreSection>Mineurs</TitreSection>
       <div className="grid grid-cols-2 gap-2">
         <TuileStat
-          label={`Hash Ribbons (SMA ${RIBBONS_COURTE} / ${RIBBONS_LONGUE} j)`}
+          label={`Hash Ribbons (${RIBBONS_COURTE}/${RIBBONS_LONGUE} j)`}
           valeur={etat?.texte ?? "—"}
           ton={rubans.etat === "capitulation" ? "down" : rubans.etat === "reprise" ? "up" : undefined}
           badge={etat === null ? undefined : <Badge ton={etat.ton}>hashrate</Badge>}
           pied={
             <>
-              <span className="truncate">
-                {`courte ${ehs(rubans.courte.at(-1)?.value)} · longue ${ehs(rubans.longue.at(-1)?.value)}`}
+              <span className="truncate" title="SMA courte / SMA longue du hashrate">
+                {`SMA ${ehs(rubans.courte.at(-1)?.value)} / ${ehs(rubans.longue.at(-1)?.value)}`}
               </span>
-              <span className="shrink-0">
+              <span className="shrink-0" title="Dernier croisement des rubans">
                 {rubans.croisement === null
                   ? ""
-                  : `croisement ${rubans.croisement.sens} le ${dateObservation(rubans.croisement.time)}`}
+                  : `croisement ${rubans.croisement.sens === "haussier" ? "↑" : "↓"} ${dateObservation(rubans.croisement.time)}`}
               </span>
             </>
           }

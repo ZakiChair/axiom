@@ -55,6 +55,13 @@ describe("chargerMetriquesOnchain", () => {
     expect(v).toEqual({ hashprice: 40, thermocap: 16.5 });
   });
 
+  it("un cache PÉRIMÉ (échec réseau ou quota) laisse la métrique ABSENTE, hashprice compris", async () => {
+    bg.mockResolvedValue({ serie: { points: [], dernier: { time: 1, value: 9 } }, ts: 1, perime: true });
+    hashrate.mockResolvedValue({ donnee: { points: [{ time: 3 * JOUR, value: 1000e18 }] }, ts: 1, perime: true });
+    const v = await chargerMetriquesOnchain(new Set(["mvrv-z", "hashprice", "frais-sat-vb"]));
+    expect(v).toEqual({ "frais-sat-vb": 12 });
+  });
+
   it("une source indisponible ou en échec laisse sa métrique ABSENTE (jamais 0)", async () => {
     bg.mockResolvedValue(null);
     revenus.mockRejectedValue(new Error("réseau"));

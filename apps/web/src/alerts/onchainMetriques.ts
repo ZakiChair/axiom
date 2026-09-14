@@ -7,8 +7,10 @@
  * (rien dans le bundle d'entrée tant qu'aucune alerte on-chain n'existe) et ne charge
  * que les métriques REQUISES par les alertes actives (quota BGeometrics).
  *
- * Une métrique indisponible reste ABSENTE du résultat (condition non évaluable côté
- * moteur, armement figé) — jamais remplacée par 0.
+ * Une métrique indisponible OU PÉRIMÉE (cache resservi après échec réseau / quota) reste
+ * ABSENTE du résultat (condition non évaluable côté moteur, armement figé) — jamais
+ * remplacée par 0 ni par une valeur vieille de plusieurs jours (même règle que
+ * `flux-capitaux-seuil`, qui refuse tout statut autre que « frais »).
  */
 import type { MetriqueOnchainAlerte } from "@axiom/alerts";
 import {
@@ -45,21 +47,33 @@ export async function chargerMetriquesOnchain(
   const cle = getBgeometricsKey();
   for (const [m, def] of DEFS_BG) {
     if (!requises.has(m)) continue;
-    taches.push(fetchBgeometricMetrique(def, cle, signal).then((r) => poser(out, m, r?.serie.dernier?.value)));
+    taches.push(
+      fetchBgeometricMetrique(def, cle, signal).then((r) => {
+        if (r !== null && !r.perime) poser(out, m, r.serie.dernier?.value);
+      }),
+    );
   }
   if (requises.has("thermocap")) {
-    taches.push(fetchThermocap(signal).then((r) => poser(out, "thermocap", r?.donnee.dernier?.value)));
+    taches.push(
+      fetchThermocap(signal).then((r) => {
+        if (r !== null && !r.perime) poser(out, "thermocap", r.donnee.dernier?.value);
+      }),
+    );
   }
   if (requises.has("hashprice")) {
     taches.push(
       Promise.all([fetchHashrate(signal), fetchRevenusMineurs(signal)]).then(([hr, rev]) => {
-        if (hr === null || rev === null) return;
+        if (hr === null || rev === null || hr.perime || rev.perime) return;
         poser(out, "hashprice", calculerHashprice(rev.donnee, hr.donnee.points).dernier?.value);
       }),
     );
   }
   if (requises.has("frais-sat-vb")) {
-    taches.push(fetchMempoolReseau(signal).then((r) => poser(out, "frais-sat-vb", r?.donnee.fees.fastestFee)));
+    taches.push(
+      fetchMempoolReseau(signal).then((r) => {
+        if (r !== null && !r.perime) poser(out, "frais-sat-vb", r.donnee.fees.fastestFee);
+      }),
+    );
   }
   await Promise.allSettled(taches);
   return out;

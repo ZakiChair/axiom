@@ -59,7 +59,7 @@ export function VueTresoreriesBtc({
           label="Total détenu"
           valeur={`${formatEntier(r.totalBtc)} BTC`}
           couleur="var(--serie-1)"
-          pied={<span className="truncate">{r.nbSocietes} sociétés détentrices</span>}
+          pied={<span className="truncate">{`${societes(r.nbSocietes)} détentrice${r.nbSocietes > 1 ? "s" : ""}`}</span>}
         />
         <TuileStat
           label="Strategy"

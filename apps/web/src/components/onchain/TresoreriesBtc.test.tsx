@@ -70,4 +70,9 @@ describe("tuile Trésoreries d'entreprises BTC de CHAIN", () => {
     expect(html).toContain("Trésoreries d'entreprises indisponibles (CoinGecko).");
     expect(html).toContain("avoirs déclaratifs non horodatés");
   });
+
+  it("une seule société détentrice : accord au singulier", () => {
+    const donnee = { totalBtc: 800, valeurUsd: 64_000_000, societes: [DONNEE.societes[0]!] };
+    expect(rendu({ resultat: { donnee, ts: 1, perime: false } })).toContain("1 société détentrice<");
+  });
 });

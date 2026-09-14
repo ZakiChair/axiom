@@ -54,6 +54,7 @@ import {
 } from "../data/onchain/etf";
 import { fetchReseauEthAvecMeta, type ReseauEth, type ResultatReseauEth } from "../data/onchain/etherscan";
 import { fetchReseauSol, type ReseauSol } from "../data/onchain/solana";
+import { fetchThermocap } from "../data/onchain/thermocap";
 import { creerChargeurChain, type SourceChain } from "../data/onchain/chargementChain";
 import { enregistrerQualite, qualiteMetriquesStore } from "../store/qualiteMetriques";
 import type { QualiteMetrique as Qualite } from "../data/qualiteMetrique";
@@ -432,6 +433,8 @@ interface EtatDonnees {
   bg: Record<string, BgResultat | null>;
   mp: ResultatFrais<MempoolReseau> | null;
   hr: ResultatFrais<SerieMetrique> | null;
+  /** Thermocap multiple (Coin Metrics, historique complet, cache 24 h). */
+  thermocap: ResultatFrais<SerieMetrique> | null;
   etf: Record<ActifEtf, EtfResultat | null>;
   /** Repli BTC bitcoin-data.com (flux ETF en BTC), chargé UNIQUEMENT si SoSoValue BTC échoue. */
   etfRepli: BgResultat | null;
@@ -444,6 +447,7 @@ const VIDE: EtatDonnees = {
   bg: {},
   mp: null,
   hr: null,
+  thermocap: null,
   etf: { btc: null, eth: null, sol: null },
   etfRepli: null,
   eth: null,
@@ -502,6 +506,7 @@ export function OnchainWindow() {
         { id: "bgeometrics", charger: (signal) => fetchBgeometrics(getBgeometricsKey(), signal) },
         { id: "mempool", charger: (signal) => fetchMempoolReseau(signal) },
         { id: "hashrate", charger: (signal) => fetchHashrate(signal) },
+        { id: "thermocap", charger: (signal) => fetchThermocap(signal) },
         ...ACTIFS_ETF.map((actif): SourceChain<unknown> => ({
           id: `etf-${actif}`,
           charger: async (signal) => {
@@ -539,6 +544,10 @@ export function OnchainWindow() {
           const hr = valeur as ResultatFrais<SerieMetrique> | null;
           setDonnees((d) => ({ ...d, hr }));
           publierQualiteChain(id, "Hashrate BTC", { sourceId: "mempool", sourceEffective: hr?.perime ? "cache mempool.space" : "mempool.space", observeLe: hr?.donnee.dernier?.time ?? null, recupereLe: hr?.ts ?? recupereLe, cadenceMs: 86_400_000, ageMaxMs: 3 * 86_400_000, couverture: hr ? { disponibles: hr.donnee.points.length, attendus: 365 } : null, estime: false, acces: hr === null ? "indisponible" : "public", statut: hr === null ? "indisponible" : hr.perime ? "perime" : "frais", ...(hr === null || erreur ? { raison: erreur ?? "Hashrate indisponible et aucun cache exploitable." } : {}) });
+        } else if (id === "thermocap") {
+          const th = valeur as ResultatFrais<SerieMetrique> | null;
+          setDonnees((d) => ({ ...d, thermocap: th }));
+          publierQualiteChain(id, "Thermocap multiple", { sourceId: "coinmetrics", sourceEffective: th?.perime ? "cache Coin Metrics" : "Coin Metrics Community", observeLe: th?.donnee.dernier?.time ?? null, recupereLe: th?.ts ?? recupereLe, cadenceMs: 86_400_000, ageMaxMs: 3 * 86_400_000, couverture: th ? { disponibles: th.donnee.points.length, attendus: 5_000 } : null, estime: false, acces: th === null ? "indisponible" : "public", statut: th === null ? "indisponible" : th.perime ? "perime" : "frais", ...(th === null || erreur ? { raison: erreur ?? "Thermocap indisponible et aucun cache exploitable." } : {}) });
         } else if (id.startsWith("etf-")) {
           const actif = id.slice(4) as ActifEtf;
           const r = valeur as ValeurPublicationEtf | null;
@@ -587,6 +596,7 @@ export function OnchainWindow() {
   const feeNtv = cm?.series["FeeTotNtv"];
   const mcap = cm?.series["CapMrktCurUSD"];
   const mvrvRatio = cm?.series["CapMVRVCur"];
+  const thermocap = donnees.thermocap?.donnee;
   const cmDaily = texteFraicheur(loading, adr?.dernier?.time ?? tx?.dernier?.time ?? null, Date.now(), "quotidien");
 
   const mp = donnees.mp?.donnee;
@@ -820,6 +830,22 @@ export function OnchainWindow() {
                   <span className="flex shrink-0 items-center gap-1">
                     {cm?.perime ? <Badge ton="warn">cache périmé</Badge> : null}
                     {cmDaily}
+                  </span>
+                </>
+              }
+            />
+            <TuileStat
+              label="Thermocap multiple"
+              valeur={formatDec(thermocap?.dernier?.value, 1)}
+              couleur="var(--serie-5)"
+              badge={<BadgeFiabilite meta={META_COINMETRICS} />}
+              extra={sparkDe(thermocap, 365).length >= 2 ? <Sparkline values={sparkDe(thermocap, 365)} color="--serie-5" /> : undefined}
+              pied={
+                <>
+                  <span className="truncate">cap. ÷ émission cumulée (hors frais)</span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    {donnees.thermocap?.perime ? <Badge ton="warn">cache périmé</Badge> : null}
+                    {texteFraicheur(loading, thermocap?.dernier?.time ?? null, Date.now(), "quotidien")}
                   </span>
                 </>
               }

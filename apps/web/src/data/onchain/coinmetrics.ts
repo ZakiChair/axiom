@@ -177,6 +177,35 @@ export async function fetchCoinMetrics(
 }
 
 /**
+ * Lignes BRUTES de l'historique complet (depuis 2010) des métriques demandées, toutes
+ * pages confondues : `page_size=10000` couvre ~5 900 points en une requête ; si l'amont
+ * plafonne la page, `next_page_url` est suivi jusqu'à MAX_PAGES. Sans cache : chaque
+ * appelant met en cache SA donnée dérivée (prix complet, thermocap…).
+ */
+export async function chargerLignesCoinMetrics(
+  metriques: readonly string[],
+  signal?: AbortSignal,
+): Promise<unknown[]> {
+  const params = new URLSearchParams({
+    assets: "btc",
+    metrics: metriques.join(","),
+    frequency: "1d",
+    page_size: "10000",
+    start_time: DEBUT_HISTORIQUE,
+  });
+  let url: string | null = `${BASE}?${params.toString()}`;
+  const lignes: unknown[] = [];
+  for (let page = 0; page < MAX_PAGES && url !== null; page += 1) {
+    const res = await fetch(url, { signal });
+    if (!res.ok) throw new Error(`Coin Metrics ${metriques.join(",")} ${res.status}`);
+    const json = (await res.json()) as { data?: unknown; next_page_url?: unknown };
+    if (Array.isArray(json.data)) lignes.push(...json.data);
+    url = typeof json.next_page_url === "string" ? json.next_page_url : null;
+  }
+  return lignes;
+}
+
+/**
  * Récupère l'HISTORIQUE COMPLET du prix BTC (PriceUSD, daily, depuis 2010) — fetch DÉDIÉ
  * pour la fenêtre CYCLE, indépendant du fetch CHAIN (qui reste sur 200 jours). Cache 24 h
  * (clé `cm:priceusd:full`), dégradation gracieuse identique aux autres sources.
@@ -194,26 +223,8 @@ export async function fetchCoinMetricsPriceUSDComplet(
     return { points: cache.donnee, ts: cache.ts, perime: false };
   }
 
-  const params = new URLSearchParams({
-    assets: "btc",
-    metrics: "PriceUSD",
-    frequency: "1d",
-    page_size: "10000",
-    start_time: DEBUT_HISTORIQUE,
-  });
-  let url: string | null = `${BASE}?${params.toString()}`;
-
   try {
-    // Accumule les lignes brutes de toutes les pages, puis parse une seule fois.
-    const lignes: unknown[] = [];
-    for (let page = 0; page < MAX_PAGES && url !== null; page += 1) {
-      const res = await fetch(url, { signal });
-      if (!res.ok) throw new Error(`Coin Metrics PriceUSD ${res.status}`);
-      const json = (await res.json()) as { data?: unknown; next_page_url?: unknown };
-      if (Array.isArray(json.data)) lignes.push(...json.data);
-      url = typeof json.next_page_url === "string" ? json.next_page_url : null;
-    }
-
+    const lignes = await chargerLignesCoinMetrics(["PriceUSD"], signal);
     const series = parseCoinMetrics({ data: lignes }, "btc", ["PriceUSD"]);
     const points = series["PriceUSD"]?.points ?? [];
     if (points.length === 0) throw new Error("Coin Metrics PriceUSD vide");

@@ -39,6 +39,7 @@ import {
 } from "../data/gexDex";
 import { calculerSkew25d } from "../data/skew";
 import { termStructureIv, type PointTermIv } from "../data/termIv";
+import { mouvementsAttendus, type PointMouvementAttendu } from "../data/mouvementAttendu";
 import { histDvol } from "../data/referentiels";
 import { ivRank } from "../data/ivRank";
 import { bandeStrikes, construireGrilleOi, type GrilleOi } from "../data/oiHeatmap";
@@ -668,6 +669,13 @@ export function OptionsWindow() {
     [vue, chain, spotChaine],
   );
 
+  // Mouvement attendu par échéance (straddle ATM au forward + EM IV) — même garde de vue que la
+  // term structure ; fonction pure de data/mouvementAttendu, nowMs injecté au bord.
+  const mouvements = useMemo<PointMouvementAttendu[]>(
+    () => (vue === "termiv" ? mouvementsAttendus(chain, Date.now()) : []),
+    [vue, chain],
+  );
+
   // Redessine la term structure (données/vue/DVOL/survol ; thème repeint via majTs, tokens lus au dessin).
   useEffect(() => {
     if (!open || vue !== "termiv") return;
@@ -920,6 +928,7 @@ export function OptionsWindow() {
           onSortieTermIv={() => setSurvolTermIv(null)}
           survolTermIv={survolTermIv}
           termIvPoints={termIvPoints}
+          mouvements={mouvements}
         />
       </div>
     </>

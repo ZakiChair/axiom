@@ -252,7 +252,17 @@ function originalQuery(source: URL): URLSearchParams {
   return query;
 }
 
-export function proxyUpstreamHeaders(headers: Headers, destinationHost: string, method: string): Headers {
+/** Variables d'environnement lues par la politique (repli de clé côté serveur). */
+export interface ProxyEnv {
+  BGEOMETRICS_API_KEY?: string;
+}
+
+export function proxyUpstreamHeaders(
+  headers: Headers,
+  destinationHost: string,
+  method: string,
+  env: ProxyEnv = process.env,
+): Headers {
   const host = destinationHost.toLowerCase();
   const upstream = new Headers({
     accept: headers.get("accept") ?? "*/*",
@@ -270,6 +280,13 @@ export function proxyUpstreamHeaders(headers: Headers, destinationHost: string, 
     /^Bearer\s+\S+$/i.test(authorization)
   ) {
     upstream.set("authorization", authorization);
+  }
+  // Repli SERVEUR BGeometrics : sans clé personnelle côté client, la clé de la variable
+  // d'environnement (jamais exposée au navigateur) porte le quota horaire pour tous les
+  // visiteurs du déploiement — même principe que le proxy Vite de dev et le daemon.
+  const repliBg = env.BGEOMETRICS_API_KEY ?? "";
+  if (host === "bitcoin-data.com" && !upstream.has("authorization") && repliBg.length > 0 && repliBg.length <= 512) {
+    upstream.set("authorization", `Bearer ${repliBg}`);
   }
   if (
     host === "min-api.cryptocompare.com" &&
@@ -298,7 +315,7 @@ export function proxyCacheControl(method: string, query: URLSearchParams, header
     : "private, no-store";
 }
 
-export function planProxyRequest(requestUrl: string, method: string, headers: Headers): ProxyPlan {
+export function planProxyRequest(requestUrl: string, method: string, headers: Headers, env: ProxyEnv = process.env): ProxyPlan {
   if (proxyNavigationForbidden(headers)) throw new ProxyPolicyError(403, "destination navigateur refusée");
   const source = new URL(requestUrl);
   const { route, path } = routeAndPath(source);
@@ -358,7 +375,7 @@ export function planProxyRequest(requestUrl: string, method: string, headers: He
     route,
     target,
     method: normalizedMethod,
-    upstreamHeaders: proxyUpstreamHeaders(headers, host, normalizedMethod),
+    upstreamHeaders: proxyUpstreamHeaders(headers, host, normalizedMethod, env),
     allowedRedirectHosts,
     privateResponse,
     cacheControl: proxyCacheControl(normalizedMethod, query, headers),

@@ -37,7 +37,11 @@ describe("proxy Vercel", () => {
     const handlerSource = await Bun.file(new URL("../../../api/proxy.ts", import.meta.url)).text();
     expect(policySource).not.toMatch(/export\s+default/);
     expect(handlerSource).toContain("export default { fetch: handle }");
-    expect(`${policySource}\n${handlerSource}`).not.toMatch(/\b(?:process|Bun|Deno)\.env\b/);
+    // Exception ACTÉE (BUILD-CONTRACT, 2026-09-14) : la seule lecture d'environnement admise
+    // est le repli BGeometrics, via le paramètre par défaut typé `ProxyEnv` (une variable).
+    const sansRepliBg = `${policySource}\n${handlerSource}`.replace(/env: ProxyEnv = process\.env/g, "");
+    expect(sansRepliBg).not.toMatch(/\b(?:process|Bun|Deno)\.env\b/);
+    expect(policySource).toContain("BGEOMETRICS_API_KEY?: string;");
   });
 
   test("place les neuf rewrites avant le fallback SPA", async () => {
@@ -289,5 +293,32 @@ describe("proxy Vercel", () => {
     ]) expect(publicIpAddress(address)).toBe(false);
     expect(publicIpAddress("8.8.8.8")).toBe(true);
     expect(publicIpAddress("2606:4700:4700::1111")).toBe(true);
+  });
+});
+
+describe("repli serveur BGeometrics (BGEOMETRICS_API_KEY)", () => {
+  const env = { BGEOMETRICS_API_KEY: "repli-serveur" };
+
+  test("sans clé client : le proxy porte la clé d'environnement vers bitcoin-data.com", () => {
+    const plan = planProxyRequest(url("bgapi", "v1/sopr"), "GET", new Headers(), env);
+    expect(plan.upstreamHeaders.get("authorization")).toBe("Bearer repli-serveur");
+    // Aucune clé côté client : la réponse reste publiquement cachable (la clé n'y figure pas).
+    expect(plan.privateResponse).toBe(false);
+    expect(plan.cacheControl).toBe("public, max-age=60, s-maxage=60");
+  });
+
+  test("une clé personnelle du client reste prioritaire", () => {
+    const plan = planProxyRequest(url("bgapi", "v1/sopr"), "GET", new Headers({ authorization: "Bearer personnelle" }), env);
+    expect(plan.upstreamHeaders.get("authorization")).toBe("Bearer personnelle");
+    expect(plan.privateResponse).toBe(true);
+  });
+
+  test("la clé d'environnement ne fuit vers aucun autre hôte, et rien sans variable", () => {
+    const extapi = planProxyRequest(url("extapi", "api.alternative.me/fng/"), "GET", new Headers(), env);
+    expect(extapi.upstreamHeaders.has("authorization")).toBe(false);
+    const ccdata = planProxyRequest(url("ccdataapi", "data/price"), "GET", new Headers(), env);
+    expect(ccdata.upstreamHeaders.has("authorization")).toBe(false);
+    const sansEnv = planProxyRequest(url("bgapi", "v1/sopr"), "GET", new Headers(), {});
+    expect(sansEnv.upstreamHeaders.has("authorization")).toBe(false);
   });
 });

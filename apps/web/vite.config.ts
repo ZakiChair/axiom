@@ -88,8 +88,10 @@ export default defineConfig(({ mode }) => {
   // Expose UNIQUEMENT la PRÉSENCE de la clé .env BGeometrics (booléen), jamais sa valeur :
   // le front bascule alors sur le quota horaire (10 req/h). Voir BG_CLE_ENV_PRESENTE dans
   // data/onchain/bgeometrics.ts ; fixe aussi le déploiement public et la base Twelve Data.
+  // Sur Vercel, la même variable est portée par api/proxy.ts (repli serveur) : le drapeau
+  // suit donc la présence de la clé quel que soit le déploiement.
   define: {
-    __BG_CLE_ENV__: JSON.stringify(!isVercelBuild && BGEOMETRICS_API_KEY !== ""),
+    __BG_CLE_ENV__: JSON.stringify(BGEOMETRICS_API_KEY !== ""),
     "import.meta.env.VITE_AXIOM_DEPLOYMENT": JSON.stringify(AXIOM_DEPLOYMENT),
     "import.meta.env.VITE_TWELVE_DATA_API_BASE": JSON.stringify(TWELVE_DATA_API_BASE),
   },

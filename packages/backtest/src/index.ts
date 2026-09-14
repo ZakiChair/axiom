@@ -9,3 +9,4 @@
 export * from "./types";
 export * from "./engine";
 export * from "./monteCarlo";
+export * from "./walkForward";

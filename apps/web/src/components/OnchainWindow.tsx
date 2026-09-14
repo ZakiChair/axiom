@@ -101,6 +101,7 @@ import { FluxCapitaux } from "./onchain/FluxCapitaux";
 import { EconomieChaines } from "./onchain/EconomieChaines";
 import { FilesStakingEth } from "./onchain/FilesStakingEth";
 import { Mineurs } from "./onchain/Mineurs";
+import { ActiviteDex } from "./onchain/ActiviteDex";
 
 const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
 
@@ -627,7 +628,7 @@ export function OnchainWindow() {
       <EnTeteFenetre
         mnemo="CHAIN"
         titre="On-chain"
-        sousTitre="Coin Metrics · BGeometrics · mempool.space · blockchain.info · SoSoValue · Etherscan · RPC Solana · CoinGecko"
+        sousTitre="Coin Metrics · BGeometrics · mempool.space · blockchain.info · DefiLlama · SoSoValue · Etherscan · RPC Solana · CoinGecko"
         actions={<span className="flex items-center gap-2"><Fraicheur loading={loading} majTs={majTs} /><BoutonRafraichir onClick={() => setRefreshTick((n) => n + 1)} disabled={loading} /></span>}
       />
       {/* Croix de fermeture retirée — fournie par le chrome FloatingWindow */}
@@ -1127,6 +1128,7 @@ export function OnchainWindow() {
           </div>
         </section>
 
+        <ActiviteDex open={open} />
         <FluxCapitaux />
         <EconomieChaines />
       </div>

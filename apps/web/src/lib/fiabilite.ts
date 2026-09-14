@@ -110,6 +110,11 @@ const CATALOGUE: Record<string, MetaFiabilite> = {
     label: "quotidien · blockchain.info",
     detail: "Revenus quotidiens des mineurs (subvention + frais, valorisés au prix du jour) — série daily publique, sans SLA.",
   },
+  "defillama": {
+    niveau: "partiel",
+    label: "quotidien · DefiLlama",
+    detail: "Agrégats publics DefiLlama (volumes DEX, TVL, frais) — actualisés en continu, sans SLA ; total 24 h CoinGecko.",
+  },
   "sosovalue:historique": {
     niveau: "partiel",
     label: "séances publiées · SoSoValue",

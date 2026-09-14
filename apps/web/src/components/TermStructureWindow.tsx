@@ -312,7 +312,7 @@ export function TermStructureWindow() {
     btc: number | null;
     eth: number | null;
   } | null>(null);
-  const { refCanvas, domaine } = useDomaineZoom(bornes, () => setSurvol(null));
+  const { refCanvas, domaine } = useDomaineZoom(bornes, () => setSurvol(null), { gauche: TERM_PAD_L, droite: TERM_PAD_R });
   const onSurvol = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (domaine === null) return;
     const rect = e.currentTarget.getBoundingClientRect();

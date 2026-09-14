@@ -188,7 +188,7 @@ export function CourbeTaux({ series }: { series: SerieCourbe[] }): JSX.Element {
   // Déclaré avant useDomaineZoom : son setter est référencé par l'onGeste qui vide le
   // survol après un zoom/pan/double-clic (sinon le trait reste figé sur l'ancien point).
   const [survol, setSurvol] = useState<{ xPix: number; largeur: number; maturite: string } | null>(null);
-  const { refCanvas, domaine } = useDomaineZoom(bornes, () => setSurvol(null));
+  const { refCanvas, domaine } = useDomaineZoom(bornes, () => setSurvol(null), { gauche: RATE_PAD_L, droite: RATE_PAD_R });
   const onSurvol = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (domaine === null) return;
     const rect = e.currentTarget.getBoundingClientRect();

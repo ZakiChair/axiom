@@ -312,7 +312,7 @@ export function OptionsWindow() {
   // avant useDomaineZoom : son setter est référencé par l'onGeste qui vide le survol après
   // un zoom/pan/double-clic (sinon le trait reste figé sur l'ancien point, cf. lot revue finale).
   const [survolSmile, setSurvolSmile] = useState<SurvolSmile | null>(null);
-  const { refCanvas, domaine } = useDomaineZoom(strikesBornes, () => setSurvolSmile(null));
+  const { refCanvas, domaine } = useDomaineZoom(strikesBornes, () => setSurvolSmile(null), { gauche: SMILE_PAD_L, droite: SMILE_PAD_R });
 
   // Chaîne CBOE : chargée + pollée UNIQUEMENT en vue GEX/DEX « Actions » (dégradation gracieuse
   // totale — fetchCboeChain renvoie null en cas d'échec, jamais d'exception).

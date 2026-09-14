@@ -18,13 +18,15 @@ import type {
   Condition,
   Direction,
   Operande,
+  PartageMoities,
   PointEquity,
   ResultatBacktest,
   ResultatMonteCarlo,
   SensCroisement,
+  StatsMoitie,
   TradeResultat,
 } from "@axiom/backtest";
-import { monteCarloTrades, mulberry32 } from "@axiom/backtest";
+import { monteCarloTrades, mulberry32, partagerResultatMoities } from "@axiom/backtest";
 import {
   backtestStore,
   BACKTEST_TIMEFRAMES,
@@ -310,7 +312,12 @@ function RulesSection({
 const PAD_X = 6;
 
 /** Dessine l'equity curve (haut) + le drawdown (bas) sur le canvas, fenêtrés sur `domaine`. */
-function dessinerEquity(canvas: HTMLCanvasElement, resultat: ResultatBacktest, domaine: Domaine): void {
+function dessinerEquity(
+  canvas: HTMLCanvasElement,
+  resultat: ResultatBacktest,
+  domaine: Domaine,
+  frontiere: number | null,
+): void {
   const ctx = canvas.getContext("2d");
   if (ctx === null) return;
   const dpr = window.devicePixelRatio || 1;
@@ -426,6 +433,19 @@ function dessinerEquity(canvas: HTMLCanvasElement, resultat: ResultatBacktest, d
   ctx.lineTo(largeur, hEquity);
   ctx.stroke();
 
+  // Frontière walk-forward (bougie médiane) : même repère que la section « Tenue par
+  // moitié », pour lire sur la courbe où la 2e moitié commence.
+  if (frontiere !== null && frontiere >= domaine.min && frontiere <= domaine.max) {
+    const xFrontiere = xAt(frontiere);
+    ctx.strokeStyle = colDim;
+    ctx.setLineDash([2, 4]);
+    ctx.beginPath();
+    ctx.moveTo(xFrontiere, pad);
+    ctx.lineTo(xFrontiere, plotH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
   // Labels dates domaine.min/max en bas — dans la marge padB, sans chevaucher le drawdown.
   ctx.fillStyle = colDim;
   ctx.font = POLICE_CANVAS;
@@ -443,7 +463,7 @@ interface SurvolEquity {
 }
 
 /** Canvas de l'equity curve : zoom/pan/périodes/curseur via le kit domaineAxe. */
-function EquityCanvas({ resultat }: { resultat: ResultatBacktest }) {
+function EquityCanvas({ resultat, frontiere }: { resultat: ResultatBacktest; frontiere: number | null }) {
   const points = resultat.equity;
   const bornes = useMemo<Domaine | null>(
     () =>
@@ -459,7 +479,7 @@ function EquityCanvas({ resultat }: { resultat: ResultatBacktest }) {
   const { refCanvas, domaine, setDomaine } = useDomaineZoom(bornes, () => {
     setPresetId(null);
     setSurvol(null);
-  });
+  }, { gauche: PAD_X, droite: PAD_X });
 
   // (Ré)applique le préréglage actif à chaque nouveau run (bornes changent) — le hook
   // vient de réinitialiser le domaine au tout, on le resserre sur le preset courant.
@@ -477,12 +497,12 @@ function EquityCanvas({ resultat }: { resultat: ResultatBacktest }) {
     // quand même tourner pour afficher son message « trop peu de bougies » (le domaine de
     // repli n'est jamais lu : le early-return de la fonction survient avant tout usage).
     const d = domaine ?? { min: 0, max: 1 };
-    const redraw = (): void => dessinerEquity(canvas, resultat, d);
+    const redraw = (): void => dessinerEquity(canvas, resultat, d, frontiere);
     redraw();
     const ro = new ResizeObserver(redraw);
     ro.observe(canvas);
     return () => ro.disconnect();
-  }, [resultat, domaine]);
+  }, [resultat, domaine, frontiere]);
 
   const onSurvol = (e: React.MouseEvent<HTMLCanvasElement>): void => {
     if (domaine === null || points.length < 2) return;
@@ -995,6 +1015,63 @@ function StatsGrid({ resultat }: { resultat: ResultatBacktest }) {
   );
 }
 
+// ─────────────────────────── Section walk-forward ───────────────────────────
+
+/** Colonne d'une moitié : bornes de dates, puis les mêmes lectures que la grille globale. */
+function ColonneMoitie({ titre, m }: { titre: string; m: StatsMoitie }) {
+  const peuDeTrades = m.nbTrades < MC_MIN_TRADES;
+  return (
+    <div
+      className={`space-y-1 ${peuDeTrades ? "opacity-60" : ""}`}
+      title={peuDeTrades ? `Moins de ${MC_MIN_TRADES} trades : lecture indicative` : undefined}
+    >
+      <p className="text-[10px] text-text-dim">
+        {titre} · {formatDateCourte(m.debut)} → {formatDateCourte(m.fin)}
+      </p>
+      <TuileStat
+        label="PnL net"
+        valeur={`${formatDec(m.pnlTotal)} (${formatPct(m.pnlTotalPct)})`}
+        ton={m.pnlTotal >= 0 ? "up" : "down"}
+        disposition="inline"
+      />
+      <TuileStat label="Trades" valeur={String(m.nbTrades)} disposition="inline" />
+      <TuileStat label="Taux de réussite" valeur={formatPourcentage(m.winRatePct, 1)} disposition="inline" />
+      <TuileStat label="Facteur de profit" valeur={formatPF(m.profitFactor)} disposition="inline" />
+      <TuileStat label="Drawdown max" valeur={formatPourcentage(m.maxDrawdownPct, 1)} ton="down" disposition="inline" />
+      <TuileStat
+        label="Expectancy R"
+        valeur={m.expectancyR === null ? "—" : formatDec(m.expectancyR)}
+        ton={m.expectancyR !== null && m.expectancyR < 0 ? "down" : m.expectancyR !== null ? "up" : undefined}
+        disposition="inline"
+      />
+    </div>
+  );
+}
+
+/**
+ * Tenue par moitié temporelle : la frontière est la bougie médiane du run, chaque moitié
+ * est agrégée séparément par `partagerResultatMoities` (@axiom/backtest, pur). Un edge
+ * qui ne tient que sur une moitié est suspect d'ajustement à l'échantillon. Ce n'est PAS
+ * une optimisation in/out-of-sample (aucun paramètre n'est réglé sur la 1re moitié) :
+ * juste un découpage du run déjà exécuté, sans second calcul.
+ */
+function WalkForwardSection({ partage }: { partage: PartageMoities }) {
+  return (
+    <section className="space-y-2 rounded-md border border-border bg-bg px-3 py-2.5">
+      <TitreSection>Tenue par moitié · walk-forward</TitreSection>
+      <div className="grid grid-cols-2 gap-1.5">
+        <ColonneMoitie titre="1re moitié" m={partage.m1} />
+        <ColonneMoitie titre="2e moitié" m={partage.m2} />
+      </div>
+      <NoteSource>
+        Frontière = bougie médiane du run ({formatDateHeure(partage.frontiere)}), tracée en pointillés sur
+        l'équité. Un trade est rangé par sa date d'entrée ; le PnL est rapporté à l'équité au début de
+        chaque moitié et le drawdown recalculé dans la moitié. Une moitié sous {MC_MIN_TRADES} trades est grisée.
+      </NoteSource>
+    </section>
+  );
+}
+
 // ─────────────────────────── Panneau principal ───────────────────────────
 
 export function BacktestWindow() {
@@ -1043,6 +1120,9 @@ export function BacktestWindow() {
   const phase = useStore(backtestStore, (s) => s.phase);
   const progress = useStore(backtestStore, (s) => s.progress);
   const resultat = useStore(backtestStore, (s) => s.resultat);
+  // Découpage walk-forward du run courant (pur, O(bougies + trades)) — partagé entre la
+  // ligne de frontière de l'équité et la section « Tenue par moitié ».
+  const partage = useMemo(() => (resultat === null ? null : partagerResultatMoities(resultat)), [resultat]);
   const error = useStore(backtestStore, (s) => s.error);
   const note = useStore(backtestStore, (s) => s.note);
   const nbBougiesChargees = useStore(backtestStore, (s) => s.nbBougiesChargees);
@@ -1411,7 +1491,8 @@ export function BacktestWindow() {
           <div className="space-y-3">
             <EnTeteResultat resultat={resultat} />
             <StatsGrid resultat={resultat} />
-            <EquityCanvas resultat={resultat} />
+            <EquityCanvas resultat={resultat} frontiere={partage?.frontiere ?? null} />
+            {partage !== null && <WalkForwardSection partage={partage} />}
             <MonteCarloSection resultat={resultat} busy={busy} />
             <TradesTable trades={resultat.trades} symbol={symbol} tf={tf} />
           </div>

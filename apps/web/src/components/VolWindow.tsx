@@ -204,10 +204,23 @@ function serieRv(data: VolData): { time: number; value: number }[] {
   return rv;
 }
 
+/** Marges du panneau séries : libellés d'axe Y à gauche, respiration à droite. */
+const SERIES_PAD_L = 34;
+const SERIES_PAD_R = 8;
+
 /** Géométrie du panneau séries (moitié droite du canvas, quand IV disponible) — partagée
- *  entre `draw` (rendu) et le survol du composant hôte (conversion pixel↔temps identique). */
-function panneauSeries(largeurCanvas: number): { x0: number; w: number } {
-  return { x0: largeurCanvas / 2 + 4, w: largeurCanvas / 2 - 8 };
+ *  entre `draw` (rendu), le survol du composant hôte et les marges du hook de zoom
+ *  (conversion pixel↔temps identique aux trois endroits). */
+function panneauSeries(largeurCanvas: number): { x0: number; w: number; left: number; plotW: number } {
+  const x0 = largeurCanvas / 2 + 4;
+  const w = largeurCanvas / 2 - 8;
+  return { x0, w, left: x0 + SERIES_PAD_L, plotW: w - SERIES_PAD_L - SERIES_PAD_R };
+}
+
+/** Marges du tracé temporel pour useDomaineZoom : tout ce qui n'est pas le panneau séries. */
+function margesSeries(largeurCanvas: number): { gauche: number; droite: number } {
+  const sp = panneauSeries(largeurCanvas);
+  return { gauche: sp.left, droite: largeurCanvas - sp.left - sp.plotW };
 }
 
 /** Séries RV30 et DVOL superposées sur le domaine visible (2 polylignes, échelle commune). */
@@ -244,9 +257,9 @@ function drawSeries(
   vMin -= marge;
   vMax += marge;
 
-  const left = x0 + 34;
+  const left = x0 + SERIES_PAD_L;
   const bottom = y0 + h - 18;
-  const plotW = w - 42;
+  const plotW = w - SERIES_PAD_L - SERIES_PAD_R;
   const plotH = h - 40;
   const xAt = (t: number): number => left + valeurVersPixel(domaine, t, plotW);
   const yAt = (v: number): number => bottom - ((v - vMin) / (vMax - vMin)) * plotH;
@@ -375,7 +388,7 @@ export function VolWindow() {
   const { refCanvas, domaine, setDomaine } = useDomaineZoom(bornes, () => {
     setPresetId(null);
     setSurvol(null);
-  });
+  }, margesSeries);
 
   useEffect(() => {
     if (!open) return;
@@ -430,9 +443,7 @@ export function VolWindow() {
       setSurvol(null);
       return;
     }
-    const left = sp.x0 + 34;
-    const plotW = sp.w - 42;
-    const t = pixelVersValeur(domaine, xLocal - left, plotW);
+    const t = pixelVersValeur(domaine, xLocal - sp.left, sp.plotW);
     setSurvol({
       xPix: xLocal,
       largeur: rect.width,

@@ -79,3 +79,25 @@ export function domainePourPreset(bornes: Domaine, jours: number | null): Domain
   if (jours === null) return { ...bornes };
   return clampDomaine({ min: bornes.max - jours * JOUR_MS, max: bornes.max }, bornes);
 }
+
+/** Marges d'axe réservées de part et d'autre du tracé, en pixels CSS. */
+export interface MargesTrace {
+  gauche: number;
+  droite: number;
+}
+
+/**
+ * Origine et largeur du TRACÉ (hors marges d'axe) dans un canvas de `largeurCanvas` px.
+ * Les marges peuvent dépendre de la largeur (panneau proportionnel, cf. VOL) ; absentes
+ * = tracé pleine largeur. Largeur plancher à 1 px (jamais de division par zéro). Sans
+ * cette zone, le pivot de la molette et la vitesse du pan se calculent sur le canvas
+ * entier et dérivent d'autant que les libellés d'axe occupent de place.
+ */
+export function zoneTrace(
+  largeurCanvas: number,
+  marges?: MargesTrace | ((largeurCanvas: number) => MargesTrace),
+): { gauche: number; largeur: number } {
+  const m = typeof marges === "function" ? marges(largeurCanvas) : marges;
+  const gauche = m?.gauche ?? 0;
+  return { gauche, largeur: Math.max(1, largeurCanvas - gauche - (m?.droite ?? 0)) };
+}

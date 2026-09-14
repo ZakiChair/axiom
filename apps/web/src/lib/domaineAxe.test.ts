@@ -8,6 +8,7 @@ import {
   indicesVisibles,
   pixelVersValeur,
   valeurVersPixel,
+  zoneTrace,
   zoomerDomaine,
   type Domaine,
 } from "./domaineAxe";
@@ -83,5 +84,21 @@ describe("domainePourPreset", () => {
   });
   it("préréglage plus large que les données → les bornes", () => {
     expect(domainePourPreset({ min: 0, max: 10 * JOUR_MS }, 30)).toEqual({ min: 0, max: 10 * JOUR_MS });
+  });
+});
+
+describe("zoneTrace", () => {
+  it("sans marges, le tracé occupe tout le canvas", () => {
+    expect(zoneTrace(400)).toEqual({ gauche: 0, largeur: 400 });
+  });
+  it("retranche les marges fixes des deux côtés", () => {
+    expect(zoneTrace(400, { gauche: 34, droite: 8 })).toEqual({ gauche: 34, largeur: 358 });
+  });
+  it("accepte des marges fonction de la largeur (panneau proportionnel)", () => {
+    const marges = (largeur: number) => ({ gauche: largeur / 2 + 38, droite: 12 });
+    expect(zoneTrace(600, marges)).toEqual({ gauche: 338, largeur: 250 });
+  });
+  it("plancher la largeur à 1 px quand les marges dévorent le canvas", () => {
+    expect(zoneTrace(30, { gauche: 34, droite: 8 })).toEqual({ gauche: 34, largeur: 1 });
   });
 });

@@ -15,8 +15,8 @@
  * Endpoint non contractuel → dégradation gracieuse TOTALE : tout échec/format inattendu
  * renvoie null (la section Actions disparaît, la fenêtre crypto n'est jamais cassée).
  *
- * Fonctions PURES testées (cboe.test.ts) : parseCboeOptionSymbol, cboeExpiries, cboeOptionsToLegs,
- * cheminOptionsCboe, normaliserChaineCboe, heureNewYorkVersUtcMs, niveauCrypto.
+ * Fonctions PURES testées (cboe.test.ts) : parseCboeOptionSymbol, cboeExpiries, echeanceCboeRetenue,
+ * cboeOptionsToLegs, cheminOptionsCboe, normaliserChaineCboe, heureNewYorkVersUtcMs, niveauCrypto.
  */
 import { binanceAdapter } from "./binance";
 import { fetchJsonExt } from "./binanceDapi";
@@ -122,25 +122,40 @@ export interface CboeChain {
   resume: ResumeCboe;
 }
 
+/** Échéance listée : nombre d'options et présence d'au moins un gamma fini > 0. */
+export interface EcheanceCboe {
+  expiryMs: number;
+  count: number;
+  avecGamma: boolean;
+}
+
 /**
  * Échéances distinctes présentes dans la chaîne, futures (avec tolérance d'un jour pour les
  * expirations du jour même — les options actions expirent en séance, pas à 00:00 UTC), triées
  * croissant, avec le nombre d'options. `nowMs` injecté (fonction PURE).
  */
-export function cboeExpiries(
-  options: CboeOption[],
-  nowMs: number,
-): { expiryMs: number; count: number }[] {
-  const parExp = new Map<number, number>();
+export function cboeExpiries(options: CboeOption[], nowMs: number): EcheanceCboe[] {
+  const parExp = new Map<number, EcheanceCboe>();
   for (const o of options) {
     const parsed = parseCboeOptionSymbol(o.option);
     if (!parsed) continue;
     if (parsed.expiryMs < nowMs - MS_PAR_JOUR) continue; // ignore le passé (grâce 1 j)
-    parExp.set(parsed.expiryMs, (parExp.get(parsed.expiryMs) ?? 0) + 1);
+    const e = parExp.get(parsed.expiryMs) ?? { expiryMs: parsed.expiryMs, count: 0, avecGamma: false };
+    e.count += 1;
+    if (Number.isFinite(o.gamma) && o.gamma > 0) e.avecGamma = true;
+    parExp.set(parsed.expiryMs, e);
   }
-  return [...parExp.entries()]
-    .map(([expiryMs, count]) => ({ expiryMs, count }))
-    .sort((a, b) => a.expiryMs - b.expiryMs);
+  return [...parExp.values()].sort((a, b) => a.expiryMs - b.expiryMs);
+}
+
+/**
+ * Échéance retenue : le choix manuel tant qu'il est listé (même sans greeks), sinon la première
+ * échéance avec un gamma — après la clôture de New York, la grâce d'un jour garde l'échéance du
+ * jour, expirée, aux gammas nuls —, à défaut la première. Fonction PURE.
+ */
+export function echeanceCboeRetenue(echeances: EcheanceCboe[], choix: number | null): number | null {
+  if (echeances.some((e) => e.expiryMs === choix)) return choix;
+  return (echeances.find((e) => e.avecGamma) ?? echeances[0])?.expiryMs ?? null;
 }
 
 /**

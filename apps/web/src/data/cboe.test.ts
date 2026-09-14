@@ -4,6 +4,7 @@ import {
   cboeExpiries,
   cboeOptionsToLegs,
   cheminOptionsCboe,
+  echeanceCboeRetenue,
   heureNewYorkVersUtcMs,
   niveauCrypto,
   normaliserChaineCboe,
@@ -79,8 +80,8 @@ describe("cboeExpiries", () => {
   it("liste les échéances futures distinctes, triées, avec comptage", () => {
     const exp = cboeExpiries(opts, now);
     expect(exp).toEqual([
-      { expiryMs: Date.UTC(2026, 6, 17), count: 2 },
-      { expiryMs: Date.UTC(2026, 8, 18), count: 1 },
+      { expiryMs: Date.UTC(2026, 6, 17), count: 2, avecGamma: true },
+      { expiryMs: Date.UTC(2026, 8, 18), count: 1, avecGamma: true },
     ]);
   });
 
@@ -93,6 +94,70 @@ describe("cboeExpiries", () => {
     );
     expect(exp).toHaveLength(1);
     expect(exp[0]?.expiryMs).toBe(Date.UTC(2026, 6, 17));
+  });
+
+  it("marque sans gamma une échéance dont aucun gamma n'est fini et > 0 (liste inchangée)", () => {
+    const exp = cboeExpiries(
+      [
+        { option: "SPX260717C06000000", open_interest: 1, delta: 0, gamma: 0, iv: 0.3 },
+        { option: "SPX260717P06000000", open_interest: 1, delta: 0, gamma: NaN, iv: 0.3 },
+        { option: "SPX260918C06000000", open_interest: 1, delta: 0.5, gamma: 0, iv: 0.3 },
+        { option: "SPX260918P06000000", open_interest: 1, delta: -0.5, gamma: 0.002, iv: 0.3 },
+      ],
+      now,
+    );
+    expect(exp).toEqual([
+      { expiryMs: Date.UTC(2026, 6, 17), count: 2, avecGamma: false },
+      { expiryMs: Date.UTC(2026, 8, 18), count: 2, avecGamma: true },
+    ]);
+  });
+});
+
+describe("echeanceCboeRetenue", () => {
+  // Mardi 2026-09-15 21:00 UTC, après la clôture de New York : l'échéance du jour reste listée
+  // (grâce d'un jour) mais ses gammas CBOE sont nuls.
+  const apresCloture = Date.UTC(2026, 8, 15, 21, 0, 0);
+  const jour = Date.UTC(2026, 8, 15);
+  const suivante = Date.UTC(2026, 8, 16);
+  const echeances = cboeExpiries(
+    [
+      { option: "IBIT260915C00045000", open_interest: 9000, delta: 1, gamma: 0, iv: 0 },
+      { option: "IBIT260915P00045000", open_interest: 9000, delta: 0, gamma: 0, iv: 0 },
+      { option: "IBIT260916C00045000", open_interest: 100, delta: 0.5, gamma: 0.2, iv: 0.4 },
+      { option: "IBIT260918P00040000", open_interest: 100, delta: -0.3, gamma: 0.05, iv: 0.4 },
+    ],
+    apresCloture,
+  );
+
+  it("par défaut, saute l'échéance du jour à gammas nuls et retient la suivante", () => {
+    expect(echeances.map((e) => e.expiryMs)[0]).toBe(jour);
+    expect(echeanceCboeRetenue(echeances, null)).toBe(suivante);
+  });
+
+  it("aucune échéance avec gamma : retient la première, marquée sans gamma (mention)", () => {
+    const sansGreeks = cboeExpiries(
+      [
+        { option: "SPX260915C06000000", open_interest: 1, delta: 0, gamma: 0, iv: 0 },
+        { option: "SPX260918C06000000", open_interest: 1, delta: 0, gamma: 0, iv: 0 },
+      ],
+      apresCloture,
+    );
+    expect(echeanceCboeRetenue(sansGreeks, null)).toBe(jour);
+    expect(sansGreeks[0]?.avecGamma).toBe(false);
+  });
+
+  it("garde un choix manuel encore listé, même sans gamma", () => {
+    expect(echeanceCboeRetenue(echeances, jour)).toBe(jour);
+    expect(echeanceCboeRetenue(echeances, Date.UTC(2026, 8, 18))).toBe(Date.UTC(2026, 8, 18));
+  });
+
+  it("choix manuel disparu de la liste : repli sur la première échéance avec gamma", () => {
+    expect(echeanceCboeRetenue(echeances, Date.UTC(2026, 8, 11))).toBe(suivante);
+  });
+
+  it("aucune échéance : null", () => {
+    expect(echeanceCboeRetenue([], null)).toBeNull();
+    expect(echeanceCboeRetenue([], jour)).toBeNull();
   });
 });
 

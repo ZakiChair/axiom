@@ -179,9 +179,9 @@ test("Smile : P(clôture > K à T) risque-neutre (Breeden-Litzenberger centré) 
 });
 
 /** Option CBOE brute (symbole OCC, greeks CBOE). */
-function optionCboe(racine: string, cp: "C" | "P", strike: number, oi: number, volume: number, gamma: number) {
+function optionCboe(racine: string, cp: "C" | "P", strike: number, oi: number, volume: number, gamma: number, date = "260918") {
   return {
-    option: `${racine}260918${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
+    option: `${racine}${date}${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
     open_interest: oi,
     volume,
     delta: cp === "C" ? 0.5 : -0.5,
@@ -308,4 +308,81 @@ test("GEX/DEX Actions : IBIT différé converti en niveaux BTC au dernier échan
   // SPX (ticker par défaut) garde « _SPX.json » ; les ETF n'utilisent jamais le préfixe (403).
   expect(cheminsCboe).toContain("_SPX.json");
   expect(cheminsCboe.filter((c) => c === "_IBIT.json" || c === "_ETHA.json")).toEqual([]);
+});
+
+test("GEX/DEX Actions : après la clôture, l'échéance CBOE par défaut saute celle du jour aux gammas nuls", async ({ page }) => {
+  // Mardi 17:00 à New York : l'échéance IBIT du jour (15/09) reste listée (grâce d'un jour) mais
+  // CBOE publie des gammas nuls ; la suivante (16/09, échéances quotidiennes) porte les greeks.
+  const instant = Date.parse("2026-09-15T21:00:00Z");
+  await page.clock.setFixedTime(new Date(instant));
+  const jour = Date.UTC(2026, 8, 15);
+  const suivante = Date.UTC(2026, 8, 16);
+
+  // 16/09, GEX/(S²·0,01·100) : 40 → −200 (put wall) ; 44 → −50 ; 46 → +600 (call wall) ; 50 → +50.
+  // 15/09 : OI massif à 42 et 48 mais gammas nuls — des résidus sans murs ni flip.
+  const ibit = {
+    timestamp: "2026-09-15 20:15:00",
+    data: {
+      current_price: 45,
+      iv30: 38.8,
+      last_trade_time: "2026-09-15T16:00:00",
+      options: [
+        optionCboe("IBIT", "C", 42, 50_000, 900, 0, "260915"),
+        optionCboe("IBIT", "P", 42, 50_000, 900, 0, "260915"),
+        optionCboe("IBIT", "C", 48, 50_000, 900, 0, "260915"),
+        optionCboe("IBIT", "P", 48, 50_000, 900, 0, "260915"),
+        optionCboe("IBIT", "P", 40, 2000, 10, 0.1, "260916"),
+        optionCboe("IBIT", "P", 44, 1000, 10, 0.05, "260916"),
+        optionCboe("IBIT", "C", 46, 3000, 10, 0.2, "260916"),
+        optionCboe("IBIT", "C", 50, 500, 10, 0.1, "260916"),
+      ],
+    },
+  };
+  await page.route("https://cdn.cboe.com/api/global/delayed_quotes/options/**", async (route) => {
+    const nom = new URL(route.request().url()).pathname.split("/").at(-1) ?? "";
+    if (nom === "IBIT.json") return route.fulfill({ json: ibit });
+    return route.fulfill({ status: 403, json: { error: "chemin CBOE non prévu" } });
+  });
+  const dernierEchangeUtc = Date.UTC(2026, 8, 15, 20, 0, 0);
+  await page.route("**/api.binance.com/api/v3/klines*", async (route) => {
+    const p = new URL(route.request().url()).searchParams;
+    if (p.get("symbol") === "BTCUSDT" && p.get("endTime") === String(dernierEchangeUtc)) {
+      return route.fulfill({
+        json: [[dernierEchangeUtc, "79990", "80010", "79980", "80000", "1", dernierEchangeUtc + 59_999, "80000", 1, "0", "0", "0"]],
+      });
+    }
+    return route.fulfill({ status: 503, json: { error: "bougie non prévue" } });
+  });
+
+  await page.goto("/");
+  await commande(page, "OMON");
+  const fenetre = page.getByRole("complementary", { name: "Options (smile IV, max pain)" });
+  await fenetre.getByRole("button", { name: "GEX/DEX", exact: true }).click();
+  await fenetre.getByRole("button", { name: "Actions", exact: true }).click();
+  await fenetre.getByRole("button", { name: "IBIT", exact: true }).click();
+
+  const tuile = (label: string) =>
+    fenetre.locator("div.rounded-md").filter({ hasText: new RegExp(`^${label}`), visible: true });
+  const selecteur = fenetre.getByLabel("Échéance CBOE");
+  const mention = fenetre.getByText("Échéance expirée ou sans greeks : gammas CBOE tous nuls.");
+
+  // Défaut : l'échéance du 16/09, murs convertis au ratio 80 000 / 45.
+  await expect(tuile("Call wall")).toContainText("$46");
+  await expect(selecteur).toHaveValue(String(suivante));
+  await expect(mention).toHaveCount(0);
+  await expect(tuile("Call wall")).toContainText("≈ $81,778 BTC");
+  await expect(tuile("Put wall")).toContainText("$40");
+  await expect(tuile("Put wall")).toContainText("≈ $71,111 BTC");
+
+  // La liste garde l'échéance du jour (grâce d'un jour inchangée).
+  await expect(selecteur.locator("option")).toHaveCount(2);
+  await expect(selecteur.locator(`option[value="${jour}"]`)).toHaveCount(1);
+
+  // Sélection manuelle du jour : retenue, mention visible, aucun mur calculé sur les résidus.
+  await selecteur.selectOption(String(jour));
+  await expect(selecteur).toHaveValue(String(jour));
+  await expect(mention).toBeVisible();
+  await expect(tuile("Call wall")).toContainText("—");
+  await expect(tuile("Put wall")).toContainText("—");
+  await expect(tuile("Gamma flip")).not.toContainText("$");
 });

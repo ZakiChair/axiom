@@ -50,6 +50,7 @@ import {
   SOUS_JACENT_ETF,
   cboeExpiries,
   cboeOptionsToLegs,
+  echeanceCboeRetenue,
   estEtfCrypto,
   fetchCboeChain,
   niveauCrypto,
@@ -231,7 +232,8 @@ export function OptionsWindow() {
   const [cboeChaine, setCboeChaine] = useState<CboeChain | null>(null);
   // ETF : prix du sous-jacent crypto au dernier échange de l'ETF (null = conversion masquée).
   const [cboeRefCrypto, setCboeRefCrypto] = useState<number | null>(null);
-  const [cboeExpiry, setCboeExpiry] = useState<number | null>(null);
+  // Échéance CBOE choisie dans le sélecteur (null = aucun choix : sélection par défaut).
+  const [cboeChoix, setCboeChoix] = useState<number | null>(null);
   const [cboeErreur, setCboeErreur] = useState<string | null>(null);
   const [cboeLoading, setCboeLoading] = useState(false);
 
@@ -371,21 +373,17 @@ export function OptionsWindow() {
     };
   }, [open, vue, classe, cboeTicker]);
 
-  // Échéances CBOE disponibles + sélection de la plus proche (même logique que Deribit).
+  // Échéances CBOE disponibles + échéance retenue : le choix manuel s'il est encore listé, sinon
+  // la plus proche AVEC gamma (après la clôture, celle du jour reste listée, gammas nuls).
   const cboeEcheances = useMemo(
     () => (cboeChaine ? cboeExpiries(cboeChaine.options, Date.now()) : []),
     [cboeChaine],
   );
-  useEffect(() => {
-    if (cboeEcheances.length === 0) {
-      setCboeExpiry(null);
-      return;
-    }
-    setCboeExpiry((prev) => {
-      if (prev !== null && cboeEcheances.some((e) => e.expiryMs === prev)) return prev;
-      return cboeEcheances[0]?.expiryMs ?? null;
-    });
-  }, [cboeEcheances]);
+  const cboeExpiry = useMemo(
+    () => echeanceCboeRetenue(cboeEcheances, cboeChoix),
+    [cboeEcheances, cboeChoix],
+  );
+  const cboeSansGreeks = cboeEcheances.some((e) => e.expiryMs === cboeExpiry && !e.avecGamma);
 
   // Exposition GEX/DEX par strike : crypto (Black-Scholes client-side) ou actions (greeks CBOE).
   const gexDexSpot = classe === "crypto" ? underlying : (cboeChaine?.spot ?? NaN);
@@ -915,7 +913,7 @@ export function OptionsWindow() {
             />
             <Select
               value={cboeExpiry ?? ""}
-              onChange={(e) => setCboeExpiry(Number(e.target.value))}
+              onChange={(e) => setCboeChoix(Number(e.target.value))}
               aria-label="Échéance CBOE"
               className="flex-1"
             >
@@ -932,6 +930,10 @@ export function OptionsWindow() {
               ))}
             </Select>
           </div>
+        )}
+        {/* Hors du libellé : un <select> natif prend la largeur de son option la plus longue. */}
+        {vue === "gexdex" && classe === "actions" && cboeSansGreeks && (
+          <p className="-mt-2 mb-3 text-[10px] text-warn">Échéance expirée ou sans greeks : gammas CBOE tous nuls.</p>
         )}
 
         {/* ─────────── Vue SMILE (existante) — bloc TOUJOURS monté (canvas useDomaineZoom), cf. VueSmile ─────────── */}

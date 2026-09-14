@@ -68,6 +68,7 @@ import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
 import { liqMarksStore, type LiqHeatMode, type Granularite } from "../chart/liquidationMarkers";
 import { liqEstStore, LEVIERS } from "../chart/liquidationEstimates";
 import { distOverlayStore } from "../chart/distLignes";
+import { niveauxOverlaysStore, type FamilleNiveauxCles } from "../chart/niveauxOverlays";
 import { windowManagerStore, WINDOW_REGISTRY, type EtatFenetre } from "./windowManager";
 import { syntheticsStore } from "./synthetics";
 import { estSymboleCapitalisation } from "../data/mcap";
@@ -421,6 +422,10 @@ interface PersistedSession {
   liqLeviers: number[];
   /** Bascule de l'overlay des bandes VaR sur le chart maître (chart/distLignes). */
   distOverlay: boolean;
+  /** Bascule des niveaux clés périodiques sur le chart maître (chart/niveauxOverlays). */
+  niveauxCles: boolean;
+  /** Familles affichées des niveaux clés (sous-ensemble NON VIDE de J, S, M, T). */
+  niveauxClesFamilles: FamilleNiveauxCles[];
   macroOverlays: MacroOverlayId[];
   /** Dénominateur choisi pour le bouton de ratio scindé du bandeau (÷ETH / ÷SOL). */
   denominateur: DenominateurId;
@@ -443,6 +448,8 @@ function currentSession(): PersistedSession {
     liqEstimates: liqEstStore.getState().actif,
     liqLeviers: liqEstStore.getState().leviers,
     distOverlay: distOverlayStore.getState().actif,
+    niveauxCles: niveauxOverlaysStore.getState().niveauxCles,
+    niveauxClesFamilles: niveauxOverlaysStore.getState().familles,
     macroOverlays: macroOverlayStore.getState().enabled,
     denominateur: denominateurStore.getState().denominateur,
     sections: uiSectionsStore.getState().open,
@@ -495,6 +502,9 @@ function hydrateSession(): void {
     if (valides.length > 0) liqEstStore.getState().setLeviers(valides);
   }
   if (typeof p.distOverlay === "boolean") distOverlayStore.getState().setActif(p.distOverlay);
+  if (typeof p.niveauxCles === "boolean") niveauxOverlaysStore.getState().setActif("niveauxCles", p.niveauxCles);
+  // Familles : le setter filtre les inconnues, réordonne et ignore une liste vide.
+  if (Array.isArray(p.niveauxClesFamilles)) niveauxOverlaysStore.getState().setFamilles(p.niveauxClesFamilles);
 
   if (Array.isArray(p.macroOverlays)) {
     // setEnabled filtre lui-même les ids inconnus (unique()) — on borne malgré tout ici.
@@ -623,6 +633,7 @@ export function enablePersistence(): void {
   liqMarksStore.subscribe(saveSessionUi);
   liqEstStore.subscribe(saveSessionUi);
   distOverlayStore.subscribe(saveSessionUi);
+  niveauxOverlaysStore.subscribe(saveSessionUi);
   macroOverlayStore.subscribe(saveSessionUi);
   denominateurStore.subscribe(saveSessionUi);
   uiSectionsStore.subscribe(saveSessionUi);

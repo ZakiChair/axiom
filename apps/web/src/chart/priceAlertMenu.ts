@@ -9,6 +9,9 @@
  *
  * Coordonnées : client → relatives au chart (absolute) → `convertFromPixel` pane
  * `candle_pane` pour obtenir le prix Y de l'échelle courante (linéaire / log / %).
+ *
+ * ACCROCHE (lot A) : un clic à ±6 px d'une ligne de niveau (overlays du chart maître)
+ * propose l'alerte au prix EXACT de cette ligne, étiquette en en-tête et en message.
  */
 import type { Chart as KLineChartInstance } from "klinecharts";
 import type { SensCroisement } from "@axiom/alerts";
@@ -38,6 +41,33 @@ export interface PriceAlertMarket {
 export interface ItemMenuAlertePrix {
   sens: SensCroisement;
   label: string;
+}
+
+/** Ligne de niveau accrochable par le clic droit. */
+export interface LigneAccrochable {
+  price: number;
+  label: string;
+}
+
+/**
+ * PURE — ligne dont le Y est le plus proche de `yClic` à `tolerancePx` près (la première
+ * en cas d'égalité), sinon null.
+ */
+export function ligneAccrochee(
+  yClic: number,
+  candidats: readonly { y: number; ligne: LigneAccrochable }[],
+  tolerancePx = 6,
+): LigneAccrochable | null {
+  let meilleure: LigneAccrochable | null = null;
+  let ecartMin = Infinity;
+  for (const { y, ligne } of candidats) {
+    const ecart = Math.abs(y - yClic);
+    if (ecart <= tolerancePx && ecart < ecartMin) {
+      meilleure = ligne;
+      ecartMin = ecart;
+    }
+  }
+  return meilleure;
 }
 
 /**
@@ -125,8 +155,9 @@ export function creerAlerteDepuisMenu(
   market: PriceAlertMarket,
   niveau: number,
   sens: SensCroisement,
+  message?: string,
 ): void {
-  const nouvelle = alertePrixAuNiveau(market.symbol, market.source, niveau, sens);
+  const nouvelle = alertePrixAuNiveau(market.symbol, market.source, niveau, sens, message);
   alertsStore.getState().ajouter(nouvelle);
   uiSectionsStore.getState().setOpen(SECTION_ALERTES, true);
 }
@@ -154,6 +185,7 @@ function afficherMenu(
   clientY: number,
   niveau: number,
   market: PriceAlertMarket,
+  libelle?: string,
 ): void {
   fermerMenu();
 
@@ -175,9 +207,9 @@ function afficherMenu(
     "color:var(--text)",
   ].join(";");
 
-  // En-tête discret (niveau).
+  // En-tête discret (ligne accrochée éventuelle + niveau).
   const header = document.createElement("div");
-  header.textContent = `Prix ${formaterNiveauCourt(niveau)}`;
+  header.textContent = `${libelle ? `${libelle} · ` : ""}Prix ${formaterNiveauCourt(niveau)}`;
   header.style.cssText =
     "padding:0.25rem 0.6rem 0.35rem;font-size:10px;color:var(--text-dim);border-bottom:1px solid var(--border);margin-bottom:0.15rem";
   menu.appendChild(header);
@@ -207,7 +239,7 @@ function afficherMenu(
     btn.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      creerAlerteDepuisMenu(market, niveau, item.sens);
+      creerAlerteDepuisMenu(market, niveau, item.sens, libelle && `${libelle} ${market.symbol}`);
       fermerMenu(); // retire DOM + listeners window
     });
     menu.appendChild(btn);
@@ -262,13 +294,14 @@ function afficherMenu(
 
 /**
  * Attache le gestionnaire clic-droit sur le DOM chart. Renvoie un teardown.
- * `getMarket` est relu à chaque clic (symbole/source du slot peuvent changer
- * sans remonter l'instance KLineChart — effet DONNÉES).
+ * `getMarket` et `getLignes` sont relus à chaque clic (symbole/source et lignes du slot
+ * peuvent changer sans remonter l'instance KLineChart — effet DONNÉES).
  */
 export function bindPriceAlertMenu(
   chart: KLineChartInstance,
   chartDom: HTMLElement,
   getMarket: () => PriceAlertMarket,
+  getLignes: () => readonly LigneAccrochable[] = () => [],
 ): () => void {
   const onContextMenu = (e: MouseEvent): void => {
     const niveau = prixAuClic(chart, chartDom, e.clientX, e.clientY);
@@ -278,7 +311,13 @@ export function bindPriceAlertMenu(
     }
     e.preventDefault();
     e.stopPropagation();
-    afficherMenu(e.clientX, e.clientY, niveau, getMarket());
+    // Même conversion que le rendu des lignes (niveauxLignes.ts) et même origine que prixAuClic.
+    const candidats = getLignes().map((ligne) => ({
+      y: (chart.convertToPixel({ value: ligne.price }, { paneId: CANDLE_PANE_ID, absolute: true }) as { y?: number }).y ?? NaN,
+      ligne,
+    }));
+    const ligne = ligneAccrochee(e.clientY - chartDom.getBoundingClientRect().top, candidats);
+    afficherMenu(e.clientX, e.clientY, ligne?.price ?? niveau, getMarket(), ligne?.label);
   };
 
   chartDom.addEventListener("contextmenu", onContextMenu);

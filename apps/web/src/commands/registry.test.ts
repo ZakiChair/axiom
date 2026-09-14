@@ -76,6 +76,7 @@ import { commandes as liqEstCommandes } from "../chart/liquidationEstimates";
 import { commandes as hlLiqCommandes } from "../data/hyperliquidLiq";
 import { commandes as whaleCommandes } from "../chart/whaleBubbles";
 import { commandes as depthHeatCommandes } from "../chart/depthHeat";
+import { commandesNiveauxOverlays } from "../chart/niveauxOverlays";
 import { commandes as domCommandes } from "../store/dom-ui";
 import { commandes as backtestCommandes } from "../store/backtest";
 import { commandes as replayCommandes } from "../store/replay";
@@ -105,6 +106,7 @@ const SOURCES_GREFFEES: Record<string, readonly Commande[]> = {
   "data/hyperliquidLiq": hlLiqCommandes,
   "chart/whaleBubbles": whaleCommandes,
   "chart/depthHeat": depthHeatCommandes,
+  "chart/niveauxOverlays": commandesNiveauxOverlays,
   "store/dom-ui": domCommandes,
   "store/backtest": backtestCommandes,
   "store/replay": replayCommandes,

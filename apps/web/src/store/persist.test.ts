@@ -43,6 +43,7 @@ import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore } from "../chart/Chart";
 import { liqMarksStore } from "../chart/liquidationMarkers";
 import { liqEstStore } from "../chart/liquidationEstimates";
+import { niveauxOverlaysStore } from "../chart/niveauxOverlays";
 import {
   hydrateStores,
   saveChartState,
@@ -99,6 +100,8 @@ beforeEach(() => {
   liqMarksStore.getState().setActif(false);
   liqMarksStore.getState().setMode("intensite");
   liqEstStore.getState().setActif(false);
+  niveauxOverlaysStore.getState().setActif("niveauxCles", false);
+  niveauxOverlaysStore.getState().setFamilles(["J", "S"]);
   macroOverlayStore.getState().setEnabled([]);
   denominateurStore.getState().setDenominateur(DENOMINATEUR_DEFAUT);
   uiSectionsStore.getState().setAll({});
@@ -357,6 +360,8 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
         liqHeatmap: true,
         liqHeatmapMode: "dominance",
         liqEstimates: true,
+        niveauxCles: true,
+        niveauxClesFamilles: ["T", "J", "M"],
         macroOverlays: ["m2", "stablecoins"],
         denominateur: "SOL",
         sections: { Alertes: true, Watchlist: false },
@@ -373,6 +378,8 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(liqMarksStore.getState().actif).toBe(true);
     expect(liqMarksStore.getState().mode).toBe("dominance");
     expect(liqEstStore.getState().actif).toBe(true);
+    expect(niveauxOverlaysStore.getState().niveauxCles).toBe(true);
+    expect(niveauxOverlaysStore.getState().familles).toEqual(["J", "M", "T"]);
     expect(compareStore.getState().symbols.map((c) => c.symbol)).toEqual(["ETHUSDT", "SOLUSDT"]);
     // setEnabled réordonne selon MACRO_OVERLAYS = ["crypto-total","stablecoins","m2"].
     expect(macroOverlayStore.getState().enabled).toEqual(["stablecoins", "m2"]);
@@ -392,6 +399,8 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
         macroOverlays: ["m2", "inexistant"], // "inexistant" filtré
         denominateur: "DOGE", // hors DENOMINATEURS -> ignoré (reste le défaut ETH)
         sections: { A: 1 }, // valeur non booléenne -> écartée
+        niveauxCles: "oui", // pas un booléen -> ignoré (reste OFF)
+        niveauxClesFamilles: ["X", 3], // aucune famille connue -> ignoré (reste J + S)
       })
     );
 
@@ -404,6 +413,8 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(macroOverlayStore.getState().enabled).toEqual(["m2"]);
     expect(denominateurStore.getState().denominateur).toBe(DENOMINATEUR_DEFAUT);
     expect(uiSectionsStore.getState().open).toEqual({});
+    expect(niveauxOverlaysStore.getState().niveauxCles).toBe(false);
+    expect(niveauxOverlaysStore.getState().familles).toEqual(["J", "S"]);
   });
 
   it("saveSessionUi sérialise l'instantané courant des stores de session", () => {
@@ -414,6 +425,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     priceScaleStore.getState().setType("percentage");
     denominateurStore.getState().setDenominateur("SOL");
     uiSectionsStore.getState().setOpen("Macro", false);
+    niveauxOverlaysStore.getState().basculerFamille("T");
 
     saveSessionUi();
 
@@ -426,6 +438,8 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(raw.priceScale).toBe("percentage");
     expect(raw.denominateur).toBe("SOL");
     expect(raw.sections).toEqual({ Macro: false });
+    expect(raw.niveauxCles).toBe(true);
+    expect(raw.niveauxClesFamilles).toEqual(["J", "S", "T"]);
   });
 });
 

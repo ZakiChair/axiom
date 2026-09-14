@@ -71,9 +71,10 @@ import { VolumeProfileController } from "./volumeProfile";
 import { LiquidationHeatController } from "./liquidationHeat";
 import { liqMarksStore } from "./liquidationMarkers";
 import { DepthHeatController, depthHeatStore } from "./depthHeat";
-import { NiveauxLignesController } from "./niveauxLignes";
+import { NiveauxLignesController, type LigneNiveau } from "./niveauxLignes";
 import { distOverlayStore, fournisseurDistLignes } from "./distLignes";
 import { paperOverlayStore, fournisseurPaperLignes } from "./paperLignes";
+import { creerFournisseurNiveauxSlot, niveauxOverlaysStore, overlaysNiveauxActifs, type NiveauxOverlaysState } from "./niveauxOverlays";
 import { RevenueController } from "./revenue";
 import { MacroController } from "./macro";
 import { DerivativesChartController } from "./derivatives";
@@ -489,6 +490,8 @@ interface SlotMount {
   paneHeaders: PaneHeaders;
   overlayLegend: OverlayLegend;
   updateThrottle: RafThrottle;
+  /** Lignes des overlays de niveaux accrochables par le clic droit (renseignées par l'effet DONNÉES). */
+  accroche: { lignes: () => readonly LigneNiveau[] };
   // Zoom/décalage de l'instance juste après `init()`, avant toute interaction utilisateur.
   // klinecharts ne réinitialise JAMAIS barSpace/offsetRightDistance sur `applyNewData` (seul
   // le range visible l'est) : au changement d'ACTIF (pas juste de TF), il faut revenir
@@ -551,6 +554,7 @@ export function ChartInstance({
   const depthHeatCanvasRef = useRef<HTMLCanvasElement>(null); // heatmap carnet BOOK (maître)
   const distLignesCanvasRef = useRef<HTMLCanvasElement>(null); // lignes VaR DIST (maître)
   const paperLignesCanvasRef = useRef<HTMLCanvasElement>(null); // lignes ordres PAPER (maître)
+  const niveauxCanvasRef = useRef<HTMLCanvasElement>(null); // overlays de niveaux (maître)
   const xhairCanvasRef = useRef<HTMLCanvasElement>(null); // crosshair synchronisé inter-slots
 
   // Objets à vie longue (instance KLineChart + indicateurs + en-têtes + throttle des ticks),
@@ -804,11 +808,18 @@ export function ChartInstance({
 
     // ── Clic-droit pane prix → alerte prix-croise (lot B4) ─────────────────
     // getMarket lit le store injecté à chaque clic (symbole/source survivent au
-    // change d'actif sans remonter l'instance KLineChart).
-    const unbindPriceAlert = bindPriceAlertMenu(chart, chartDom, () => {
-      const s = store.getState();
-      return { symbol: s.symbol, source: s.exchange };
-    });
+    // change d'actif sans remonter l'instance KLineChart). Les lignes accrochables
+    // sont celles de l'overlay de niveaux du run DONNÉES courant (vide sinon).
+    const accroche = { lignes: (): readonly LigneNiveau[] => [] };
+    const unbindPriceAlert = bindPriceAlertMenu(
+      chart,
+      chartDom,
+      () => {
+        const s = store.getState();
+        return { symbol: s.symbol, source: s.exchange };
+      },
+      () => accroche.lignes(),
+    );
 
     // Publie les objets à vie longue vers l'effet DONNÉES.
     mountRef.current = {
@@ -817,6 +828,7 @@ export function ChartInstance({
       paneHeaders,
       overlayLegend,
       updateThrottle,
+      accroche,
       defaultBarSpace: chart.getBarSpace(),
       defaultOffsetRight: chart.getOffsetRightDistance(),
     };
@@ -867,7 +879,7 @@ export function ChartInstance({
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
-    const { chart, indicators, paneHeaders, overlayLegend, updateThrottle, defaultBarSpace, defaultOffsetRight } =
+    const { chart, indicators, paneHeaders, overlayLegend, updateThrottle, accroche, defaultBarSpace, defaultOffsetRight } =
       mount;
     const container = containerRef.current;
     const canvas = canvasRef.current;
@@ -876,8 +888,9 @@ export function ChartInstance({
     const depthHeatCanvas = depthHeatCanvasRef.current;
     const distLignesCanvas = distLignesCanvasRef.current;
     const paperLignesCanvas = paperLignesCanvasRef.current;
+    const niveauxCanvas = niveauxCanvasRef.current;
     if (!container || !canvas || !vpCanvas || !liqCanvas || !depthHeatCanvas) return;
-    if (!distLignesCanvas || !paperLignesCanvas) return;
+    if (!distLignesCanvas || !paperLignesCanvas || !niveauxCanvas) return;
 
     // Capture immuable de l'identité + révision de requête. Le store vide son buffer
     // AVANT tout appel réseau ; le chart impératif est vidé dans le même cycle. Une réponse,
@@ -951,6 +964,7 @@ export function ChartInstance({
     let depthHeat: DepthHeatController | null = null;
     let distLignes: NiveauxLignesController | null = null;
     let paperLignes: NiveauxLignesController | null = null;
+    let niveauxLignes: NiveauxLignesController | null = null;
     let revenue: RevenueController | null = null;
     let macro: MacroController | null = null;
     let derivativesChart: DerivativesChartController | null = null;
@@ -960,6 +974,7 @@ export function ChartInstance({
     let unsubscribeDepthHeat: (() => void) | null = null;
     let unsubscribeDistLignes: (() => void) | null = null;
     let unsubscribePaperLignes: (() => void) | null = null;
+    let unsubscribeNiveaux: (() => void) | null = null;
     let unsubscribeRevenue: (() => void) | null = null;
     let unsubscribeMacro: (() => void) | null = null;
     let unsubscribeMacroHistory: (() => void) | null = null;
@@ -996,6 +1011,15 @@ export function ChartInstance({
       paperLignes = new NiveauxLignesController(chart, container, paperLignesCanvas, fournisseurPaperLignes);
       paperLignes.setEnabled(paperOverlayStore.getState().actif);
       unsubscribePaperLignes = paperOverlayStore.subscribe((state) => paperLignes?.setEnabled(state.actif));
+
+      // Overlays de niveaux (niveaux clés…) : fournisseur scellé à l'identité CAPTURÉE de ce run,
+      // code des sources chargé à la première activation, coupé en rejeu (niveaux live ≠ jour rejoué).
+      niveauxLignes = new NiveauxLignesController(chart, container, niveauxCanvas, creerFournisseurNiveauxSlot({ exchange, symbol }));
+      const appliquerNiveaux = (state: NiveauxOverlaysState): void =>
+        niveauxLignes?.setEnabled(replayGen === 0 && overlaysNiveauxActifs(state));
+      appliquerNiveaux(niveauxOverlaysStore.getState());
+      unsubscribeNiveaux = niveauxOverlaysStore.subscribe(appliquerNiveaux);
+      accroche.lignes = () => niveauxLignes?.lignesAffichees() ?? [];
 
       revenue = new RevenueController(chart, symbol);
       revenue.setEnabled(revenueStore.getState().enabled);
@@ -1309,6 +1333,8 @@ export function ChartInstance({
       unsubscribeDepthHeat?.();
       unsubscribeDistLignes?.();
       unsubscribePaperLignes?.();
+      unsubscribeNiveaux?.();
+      accroche.lignes = () => [];
       unsubscribeRevenue?.();
       unsubscribeMacro?.();
       unsubscribeMacroHistory?.();
@@ -1320,6 +1346,7 @@ export function ChartInstance({
       depthHeat?.dispose();
       distLignes?.dispose();
       paperLignes?.dispose();
+      niveauxLignes?.dispose();
       volumeProfile?.dispose();
       compare?.dispose();
       orderflow?.dispose();
@@ -1407,6 +1434,7 @@ export function ChartInstance({
       <canvas ref={depthHeatCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={distLignesCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={paperLignesCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
+      <canvas ref={niveauxCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={canvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
       <canvas ref={xhairCanvasRef} className="pointer-events-none absolute inset-0" />
       {limiteKrakenVisible && (

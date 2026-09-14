@@ -122,6 +122,11 @@ export class NiveauxLignesController {
     this.stop();
   }
 
+  /** Lignes mémoïsées actuellement peintes ([] à l'arrêt) — accroche du clic droit. */
+  lignesAffichees(): readonly LigneNiveau[] {
+    return this.running ? this.lignes : [];
+  }
+
   private start(): void {
     this.running = true;
     this.dirty = true;

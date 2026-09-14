@@ -353,6 +353,13 @@ export class OrderflowController {
     // Si le backfill est déjà présent, on lance les trades tout de suite ;
     // sinon onCandles() (appelé après backfill) déclenchera ensureTrades().
     if (this.store.getState().candles.length > 0) this.ensureTrades();
+    // Dimensionne le bucket AVANT la première frame : `loop()` rend de façon synchrone et
+    // les bougies du backfill n'ont aucun tick live, donc toutes passent par le chemin
+    // approché — qui génère (high − low) / bucketSize lignes CHACUNE. Avec le défaut 0,01,
+    // une bougie BTC en produit ~1,1 million (108 M sur la fenêtre) : fil principal gelé,
+    // onglet tué. `recomputeBucket()` n'arrivait sinon qu'après, via `onCandles()` ou la
+    // reprise de `resolveTick()` (await /exchangeInfo sur binance).
+    this.recomputeBucket();
     this.loop();
   }
 

@@ -47,6 +47,13 @@ describe("tbillInterpole", () => {
     expect(tbillInterpole(COURBE, 283.5)).toBeCloseTo(4.279421, 5);
     expect(tbillInterpole(COURBE, 365)).toBeCloseTo(4.397306, 5);
   });
+  it("taux simple plat au-delà du dernier nœud présent (formule du Trésor non prolongée)", () => {
+    expect(tbillInterpole(COURBE, 400)).toBeCloseTo(4.397306, 5);
+    expect(tbillInterpole(COURBE, 740)).toBeCloseTo(4.397306, 5);
+    // Sans « 1 Yr », le dernier nœud est « 6 Mo » (182,5 j, identité) : plat à 4,12.
+    const c = parseTreasuryYieldCurveCsv(`Date,"3 Mo","6 Mo"\n09/11/2026,4.07,4.12`)[0]!;
+    expect(tbillInterpole(c, 300)).toBeCloseTo(4.12, 10);
+  });
   it("n'utilise que les maturités présentes (colonne « 1.5 Month » vide)", () => {
     const c = parseTreasuryYieldCurveCsv(`Date,"1 Mo","1.5 Month","2 Mo","3 Mo"\n01/02/2025,4.45,,4.36,4.36`)[0]!;
     // 1 Mo (30,4 j, 4.45) → 2 Mo (60,8 j, 4.36) : 45,6 j est le milieu.

@@ -593,9 +593,10 @@ export function TermStructureWindow() {
             en fin de jour ouvré à New York), convertie en taux simple act/365 ; portage = basis −
             T-bill de même durée, échéances &lt; {JOURS_MIN_PORTAGE} j exclues. Tuiles : basis
             interpolé à {JOURS_MATURITE_CONSTANTE} j entre les deux échéances encadrantes d'une
-            même source (Deribit, sinon Binance COIN-M). Le T-bill n'est pas le coût de
-            financement réel d'un basis trade, et l'open interest des futures datés Deribit reste
-            faible face au CME.
+            même source (Deribit, sinon Binance COIN-M). Le repli Binance COIN-M interpole entre le
+            trimestriel courant et le suivant : sous 30 j, le basis annualisé du courant est bruité et
+            peut décaler la tuile. Le T-bill n'est pas le coût de financement réel d'un basis trade,
+            et l'open interest des futures datés Deribit reste faible face au CME.
           </NoteSource>
         </div>
       </div>

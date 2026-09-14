@@ -88,6 +88,7 @@ test("TERM superpose le T-bill US et lit le portage excédentaire à 90 j (Derib
   await expect(tuileEth).not.toContainText(" pt");
 
   await expect(fenetre).toContainText("basis interpolé à 90 j entre les deux échéances encadrantes");
+  await expect(fenetre).toContainText("repli Binance COIN-M interpole entre le trimestriel courant et le suivant");
   await expect(fenetre).toContainText("Le T-bill n'est pas le coût de financement réel");
   await expect(fenetre).toContainText("faible face au CME");
 

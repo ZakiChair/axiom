@@ -13,7 +13,8 @@
  *     on en tire le taux simple ((1 + i/2)·(1 + (t − 182,5)·i/365) − 1)·365/t (365 j : i + i²/4).
  *   - interpolation linéaire en jours du BEY entre les maturités PRÉSENTES dans la ligne
  *     (une colonne vide, ex. « 1.5 Month » en 2025, n'est pas un nœud), puis conversion au
- *     terme visé ; plat sous la première maturité et au-delà de la dernière (1 an).
+ *     terme visé ; taux simple plat sous la première maturité et au-delà de la dernière
+ *     présente (1 an en général : conversion faite à la durée de ce nœud).
  *   - échéances à moins de 7 j exclues : l'annualisation y explose (15SEP26 à −7,84 %/an
  *     à 0,5 j, sonde du 2026-09-14).
  *
@@ -102,7 +103,9 @@ export function tbillInterpole(courbe: CourbeRendements, jours: number): number 
       break;
     }
   }
-  return tauxSimpleDepuisBey(bey, jours);
+  // Au-delà du dernier nœud, conversion à SA durée : taux simple plat (la formule du Trésor
+  // ne vaut que jusqu'à 1 an ; sous le premier nœud, ≤ 182,5 j, l'identité le rend déjà plat).
+  return tauxSimpleDepuisBey(bey, Math.min(jours, dernier[0]));
 }
 
 /**

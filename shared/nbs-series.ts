@@ -44,7 +44,7 @@ export function validerRequeteNbs(body: unknown, nowMs = Date.now()): body is Re
   if (!body || typeof body !== "object" || Array.isArray(body)) return false;
   const r = body as Record<string, unknown>;
   const cles = ["cid", "indicatorIds", "daCatalogId", "das", "showType", "dts", "rootId"];
-  if (Object.keys(r).length !== cles.length || !cles.every((c) => Object.hasOwn(r, c))) return false;
+  if (Object.keys(r).length !== cles.length || !cles.every((c) => Object.prototype.hasOwnProperty.call(r, c))) return false;
   if (r.daCatalogId !== "" || r.showType !== "1" || r.rootId !== NBS_RACINE) return false;
   if (!Array.isArray(r.indicatorIds) || r.indicatorIds.length !== 1) return false;
   const segment = Object.values(CATALOGUE_NBS).flat().find((s) => s.cid === r.cid && s.indicateur === (r.indicatorIds as unknown[])[0]);

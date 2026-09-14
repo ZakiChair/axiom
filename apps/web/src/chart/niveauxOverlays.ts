@@ -14,7 +14,7 @@ import type { Commande } from "../commands/registry";
 import type { FournisseurLignes } from "./niveauxLignes";
 
 /** Overlays pilotés par ce socle (les lots suivants ajoutent leurs clés). */
-export type CleOverlayNiveaux = "niveauxCles" | "niveauxOptions" | "bandesImplicites";
+export type CleOverlayNiveaux = "niveauxCles" | "niveauxOptions" | "bandesImplicites" | "prixRevient";
 /** Familles des niveaux clés : jour, semaine, mois, trimestre (UTC). */
 export type FamilleNiveauxCles = "J" | "S" | "M" | "T";
 export const FAMILLES_NIVEAUX_CLES: readonly FamilleNiveauxCles[] = ["J", "S", "M", "T"];
@@ -25,6 +25,8 @@ export interface NiveauxOverlaysState {
   niveauxOptions: boolean;
   /** Bandes ±1σ/±2σ jour et semaine du DVOL Deribit (BTC/ETH). */
   bandesImplicites: boolean;
+  /** Ligne « Coût Strategy » des trésoreries CoinGecko (BTC). */
+  prixRevient: boolean;
   /** Familles affichées — jamais vide, ordre canonique J, S, M, T ; défaut J + S. */
   familles: FamilleNiveauxCles[];
   basculer: (cle: CleOverlayNiveaux) => void;
@@ -43,6 +45,7 @@ export const niveauxOverlaysStore: StoreApi<NiveauxOverlaysState> = createStore<
   niveauxCles: false,
   niveauxOptions: false,
   bandesImplicites: false,
+  prixRevient: false,
   familles: ["J", "S"],
   basculer: (cle) => set({ [cle]: !get()[cle] }),
   setActif: (cle, actif) => set({ [cle]: actif }),
@@ -59,7 +62,7 @@ export const niveauxOverlaysStore: StoreApi<NiveauxOverlaysState> = createStore<
 
 /** Au moins un overlay de niveaux est allumé (PURE). */
 export function overlaysNiveauxActifs(s: NiveauxOverlaysState): boolean {
-  return s.niveauxCles || s.niveauxOptions || s.bandesImplicites;
+  return s.niveauxCles || s.niveauxOptions || s.bandesImplicites || s.prixRevient;
 }
 
 /** Identité capturée du slot hôte. */
@@ -106,13 +109,14 @@ export const NOTE_BANDES_IMPLICITES =
 
 const NOMS_FAMILLES: Record<FamilleNiveauxCles, string> = { J: "jour", S: "semaine", M: "mois", T: "trimestre" };
 
+/** Mots-clés limités à ceux absents des libellés (budget initial : rognage prévu du plan). */
 export const commandesNiveauxOverlays: Commande[] = [
   {
     id: "action:niveaux-cles",
     mnemonique: "NIVCLE",
     libelle: "Niveaux clés (veille, semaine, mois, ouvertures) — activer / désactiver",
     categorie: "action",
-    motsCles: ["pdh", "pdl", "ouverture"],
+    motsCles: ["pdh", "pdl"],
     action: () => niveauxOverlaysStore.getState().basculer("niveauxCles"),
   },
   ...FAMILLES_NIVEAUX_CLES.map((f): Commande => ({
@@ -128,7 +132,7 @@ export const commandesNiveauxOverlays: Commande[] = [
     mnemonique: "OPTNIV",
     libelle: "Niveaux d'options Deribit (murs γ, flips, max pain) — activer / désactiver",
     categorie: "action",
-    motsCles: ["gex", "max pain"],
+    motsCles: ["gex"],
     apercu: "BTC/ETH · convention calls + / puts −",
     action: () => niveauxOverlaysStore.getState().basculer("niveauxOptions"),
   },
@@ -137,8 +141,17 @@ export const commandesNiveauxOverlays: Commande[] = [
     mnemonique: "EMOVE",
     libelle: "Bandes implicites ±1σ/±2σ jour et semaine (DVOL Deribit) — activer / désactiver",
     categorie: "action",
-    motsCles: ["dvol", "sigma"],
+    motsCles: [],
     apercu: `BTC/ETH · ${NOTE_BANDES_IMPLICITES}`,
     action: () => niveauxOverlaysStore.getState().basculer("bandesImplicites"),
+  },
+  {
+    id: "action:prix-revient",
+    mnemonique: "TRESCOUT",
+    libelle: "Prix de revient Strategy (trésoreries BTC)",
+    categorie: "action",
+    motsCles: [],
+    apercu: "avoirs déclaratifs non horodatés",
+    action: () => niveauxOverlaysStore.getState().basculer("prixRevient"),
   },
 ];

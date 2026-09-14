@@ -430,6 +430,8 @@ interface PersistedSession {
   niveauxOptions: boolean;
   /** Bascule des bandes implicites DVOL sur le chart maître (chart/niveauxOverlays). */
   bandesImplicites: boolean;
+  /** Bascule de la ligne « Coût Strategy » sur le chart maître (chart/niveauxOverlays). */
+  prixRevientTresoreries: boolean;
   macroOverlays: MacroOverlayId[];
   /** Dénominateur choisi pour le bouton de ratio scindé du bandeau (÷ETH / ÷SOL). */
   denominateur: DenominateurId;
@@ -456,6 +458,7 @@ function currentSession(): PersistedSession {
     niveauxClesFamilles: niveauxOverlaysStore.getState().familles,
     niveauxOptions: niveauxOverlaysStore.getState().niveauxOptions,
     bandesImplicites: niveauxOverlaysStore.getState().bandesImplicites,
+    prixRevientTresoreries: niveauxOverlaysStore.getState().prixRevient,
     macroOverlays: macroOverlayStore.getState().enabled,
     denominateur: denominateurStore.getState().denominateur,
     sections: uiSectionsStore.getState().open,
@@ -513,6 +516,7 @@ function hydrateSession(): void {
   if (Array.isArray(p.niveauxClesFamilles)) niveauxOverlaysStore.getState().setFamilles(p.niveauxClesFamilles);
   if (typeof p.niveauxOptions === "boolean") niveauxOverlaysStore.getState().setActif("niveauxOptions", p.niveauxOptions);
   if (typeof p.bandesImplicites === "boolean") niveauxOverlaysStore.getState().setActif("bandesImplicites", p.bandesImplicites);
+  if (typeof p.prixRevientTresoreries === "boolean") niveauxOverlaysStore.getState().setActif("prixRevient", p.prixRevientTresoreries);
 
   if (Array.isArray(p.macroOverlays)) {
     // setEnabled filtre lui-même les ids inconnus (unique()) — on borne malgré tout ici.

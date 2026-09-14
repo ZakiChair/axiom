@@ -20,6 +20,7 @@ beforeEach(() => {
   niveauxOverlaysStore.getState().setActif("niveauxCles", false);
   niveauxOverlaysStore.getState().setActif("niveauxOptions", false);
   niveauxOverlaysStore.getState().setActif("bandesImplicites", false);
+  niveauxOverlaysStore.getState().setActif("prixRevient", false);
   niveauxOverlaysStore.getState().setFamilles(["J", "S"]);
 });
 
@@ -29,6 +30,7 @@ describe("niveauxOverlaysStore — bascules et familles", () => {
     expect(s.niveauxCles).toBe(false);
     expect(s.niveauxOptions).toBe(false);
     expect(s.bandesImplicites).toBe(false);
+    expect(s.prixRevient).toBe(false);
     expect(s.familles).toEqual(["J", "S"]);
     expect(overlaysNiveauxActifs(s)).toBe(false);
   });
@@ -54,6 +56,14 @@ describe("niveauxOverlaysStore — bascules et familles", () => {
     const s = niveauxOverlaysStore.getState();
     expect(s.bandesImplicites).toBe(true);
     expect(s.niveauxCles || s.niveauxOptions).toBe(false);
+    expect(overlaysNiveauxActifs(s)).toBe(true);
+  });
+
+  it("la ligne Coût Strategy suffit à activer l'overlay", () => {
+    niveauxOverlaysStore.getState().basculer("prixRevient");
+    const s = niveauxOverlaysStore.getState();
+    expect(s.prixRevient).toBe(true);
+    expect(s.niveauxCles || s.niveauxOptions || s.bandesImplicites).toBe(false);
     expect(overlaysNiveauxActifs(s)).toBe(true);
   });
 
@@ -83,9 +93,9 @@ describe("niveauxOverlaysStore — bascules et familles", () => {
 });
 
 describe("commandesNiveauxOverlays", () => {
-  it("NIVCLE, une commande par famille, OPTNIV et EMOVE, ids et mnémoniques uniques", () => {
+  it("NIVCLE, une commande par famille, OPTNIV, EMOVE et TRESCOUT, ids et mnémoniques uniques", () => {
     const mnemos = commandesNiveauxOverlays.map((c) => c.mnemonique);
-    expect(mnemos).toEqual(["NIVCLE", ...FAMILLES_NIVEAUX_CLES.map((f) => `NIVCLE-${f}`), "OPTNIV", "EMOVE"]);
+    expect(mnemos).toEqual(["NIVCLE", ...FAMILLES_NIVEAUX_CLES.map((f) => `NIVCLE-${f}`), "OPTNIV", "EMOVE", "TRESCOUT"]);
     expect(new Set(commandesNiveauxOverlays.map((c) => c.id)).size).toBe(commandesNiveauxOverlays.length);
   });
 
@@ -122,6 +132,17 @@ describe("commandesNiveauxOverlays", () => {
     expect(niveauxOverlaysStore.getState().niveauxCles).toBe(false);
     emove.action();
     expect(niveauxOverlaysStore.getState().bandesImplicites).toBe(false);
+  });
+
+  it("TRESCOUT bascule la ligne Coût Strategy et rappelle que les avoirs sont déclaratifs", () => {
+    const trescout = commandesNiveauxOverlays.find((c) => c.mnemonique === "TRESCOUT")!;
+    expect(trescout.libelle).toBe("Prix de revient Strategy (trésoreries BTC)");
+    expect(trescout.apercu).toBe("avoirs déclaratifs non horodatés");
+    trescout.action();
+    expect(niveauxOverlaysStore.getState().prixRevient).toBe(true);
+    expect(niveauxOverlaysStore.getState().niveauxCles).toBe(false);
+    trescout.action();
+    expect(niveauxOverlaysStore.getState().prixRevient).toBe(false);
   });
 });
 

@@ -33,6 +33,7 @@ function storeFamilles(familles: FamilleNiveauxCles[]): StoreApi<NiveauxOverlays
     niveauxCles: true,
     niveauxOptions: false,
     bandesImplicites: false,
+    prixRevient: false,
     familles,
     basculer: () => {},
     setActif: (cle, actif) => set({ [cle]: actif } as Partial<NiveauxOverlaysState>),

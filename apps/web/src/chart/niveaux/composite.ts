@@ -17,6 +17,7 @@ import {
 import { creerSourceNiveauxCles } from "./niveauxCles";
 import { creerSourceNiveauxOptions } from "./niveauxOptions";
 import { creerSourceBandesImplicites } from "./bandesImplicites";
+import { creerSourcePrixRevient } from "./prixRevient";
 
 export type FabriqueSource = (ctx: ContexteNiveaux) => FournisseurLignes;
 
@@ -24,10 +25,11 @@ export const FABRIQUES: Record<CleOverlayNiveaux, FabriqueSource> = {
   niveauxCles: (ctx) => creerSourceNiveauxCles(ctx),
   niveauxOptions: (ctx) => creerSourceNiveauxOptions(ctx),
   bandesImplicites: (ctx) => creerSourceBandesImplicites(ctx),
+  prixRevient: (ctx) => creerSourcePrixRevient(ctx),
 };
 
 /** Ordre d'agrégation = priorité de fusion (couleur de la première ligne d'un groupe). */
-export const ORDRE_SOURCES: readonly CleOverlayNiveaux[] = ["niveauxCles", "niveauxOptions", "bandesImplicites"];
+export const ORDRE_SOURCES: readonly CleOverlayNiveaux[] = ["niveauxCles", "niveauxOptions", "bandesImplicites", "prixRevient"];
 
 /**
  * Fusionne les lignes de même prix (écart relatif ≤ `tolRel`) : étiquettes jointes par « · »

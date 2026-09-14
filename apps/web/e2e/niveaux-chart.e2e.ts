@@ -13,6 +13,8 @@ import { BTCUSDT_1D } from "../src/chart/niveaux/btcusdt1d.fixture";
  *    de l'échéance dominante fusionné avec le put wall de même prix.
  *  - Bandes implicites : DVOL quotidien bouchonné, activation depuis DIST, bandes jour et
  *    semaine ancrées sur l'ouverture, désactivation par la palette.
+ *  - Coût Strategy : trésoreries CoinGecko bouchonnées, activation par la palette, ligne
+ *    scellée à BTC, désactivation depuis la tuile de CHAIN.
  */
 const MAINTENANT = Date.parse("2026-09-14T18:00:00Z");
 const MINUTE = 60_000;
@@ -288,4 +290,84 @@ test("bandes implicites : bouton de DIST, lignes jour et semaine accrochables, s
   await expect.poll(() => enteteAuPrix(page, 78_406.2)).toContain("+1σ J (DVOL)");
   await commande(page, "EMOVE");
   await expect.poll(() => enteteAuPrix(page, 78_406.2)).not.toContain("σ");
+});
+
+/**
+ * Trésoreries CoinGecko (forme de `companies/public_treasury/bitcoin`, même fixture que
+ * onchain-complements) : Strategy 845 050 BTC pour 64 267 830 000 $ → coût moyen 76 052,10 $.
+ */
+const SPOT_TRESORERIES = 79_175.91;
+const TRESORERIES_BTC = {
+  total_holdings: 941_581,
+  total_value_usd: 941_581 * SPOT_TRESORERIES,
+  market_cap_dominance: 4.48,
+  companies: (
+    [
+      ["Strategy", "MSTR.US", 845_050, 64_267_830_000],
+      ["Twenty One Capital", "XXI.US", 43_514, 0],
+      ["Linekong Interactive", "8267.HK", 17, 17 * 634.71],
+      ["Metaplanet", "3350.T", 43_000, 3_810_765_023.48],
+      ["Société B", "B.US", 10_000, 600_000_000],
+    ] as const
+  ).map(([name, symbol, total_holdings, total_entry_value_usd]) => ({
+    name,
+    symbol,
+    country: "XX",
+    total_holdings,
+    total_entry_value_usd,
+    total_current_value_usd: total_holdings * SPOT_TRESORERIES,
+  })),
+};
+
+test("coût Strategy : activation palette, ligne accrochable, scellée à BTC, bouton de la tuile CHAIN", async ({ page }) => {
+  // Source du chart et module CHAIN : chargés à la seule activation.
+  const modules: string[] = [];
+  page.on("request", (requete) => {
+    if (/\/src\/(chart\/niveaux\/prixRevient|data\/onchain\/tresoreriesBtc)\.ts/.test(requete.url())) modules.push(requete.url());
+  });
+  await bouchonnerBougies(page);
+  let appels = 0;
+  await page.route("**/api.coingecko.com/api/v3/companies/public_treasury/bitcoin*", async (route) => {
+    appels += 1;
+    await route.fulfill({ json: TRESORERIES_BTC });
+  });
+  await page.goto("/");
+  await attendreChart(page);
+  expect(await enteteAuPrix(page, 76_052.1)).not.toContain("Coût Strategy");
+  expect(modules).toEqual([]);
+
+  await commande(page, "TRESCOUT");
+  await expect.poll(() => enteteAuPrix(page, 76_052.1), { timeout: 20_000 }).toBe("Coût Strategy · Prix 76,052.10");
+  expect(modules.some((url) => url.includes("/src/chart/niveaux/prixRevient.ts"))).toBe(true);
+  expect(modules.some((url) => url.includes("/src/data/onchain/tresoreriesBtc.ts"))).toBe(true);
+  const session = await page.evaluate(() => JSON.parse(localStorage.getItem("axiom:sessionUi:v1") ?? "{}"));
+  expect(session).toMatchObject({ prixRevientTresoreries: true, niveauxCles: false, niveauxOptions: false, bandesImplicites: false });
+
+  // ETHUSDT : coût en dollar par BTC, non éligible → toast, et aucune ligne BTC ne subsiste.
+  await page.getByRole("banner").getByRole("button", { name: "ETHUSDT", exact: true }).click();
+  await expect(page.getByText("Coût Strategy : BTC coté en dollar seulement (trésoreries CoinGecko), pas ETHUSDT")).toBeVisible();
+  await attendreChart(page);
+  expect(await enteteAuPrix(page, 76_052.1)).not.toContain("Coût Strategy");
+
+  await page.getByRole("banner").getByRole("button", { name: "BTCUSDT", exact: true }).click();
+  await attendreChart(page);
+  await expect.poll(() => enteteAuPrix(page, 76_052.1)).toBe("Coût Strategy · Prix 76,052.10");
+
+  // Désactivation depuis la tuile Strategy de CHAIN, qui reflète la bascule de la palette.
+  await page.keyboard.press("Escape"); // menu d'alerte laissé ouvert par le dernier clic droit
+  await page.getByRole("button", { name: "Fonctions" }).click();
+  await page.getByRole("menuitem", { name: /On-chain/ }).click();
+  const chain = page.getByRole("complementary", { name: "On-chain", exact: true });
+  const bouton = chain
+    .locator("section", { has: page.locator("h3", { hasText: "Trésoreries d'entreprises BTC" }) })
+    .getByRole("button", { name: "Ligne sur le chart" });
+  await expect(bouton).toHaveAttribute("aria-pressed", "true");
+  await expect(bouton).toHaveAttribute("title", /pas un seuil de liquidation/);
+  await bouton.click();
+  await expect(bouton).toHaveAttribute("aria-pressed", "false");
+  await chain.getByTitle("Fermer").click();
+  await expect(chain).toHaveCount(0);
+  await expect.poll(() => enteteAuPrix(page, 76_052.1)).not.toContain("Coût Strategy");
+  // Un seul appel CoinGecko : chart et tuile partagent le cache 6 h du module CHAIN.
+  expect(appels).toBe(1);
 });

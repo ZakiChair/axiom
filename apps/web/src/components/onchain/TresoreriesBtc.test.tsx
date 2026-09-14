@@ -90,6 +90,15 @@ describe("tuile Trésoreries d'entreprises BTC de CHAIN", () => {
     expect(html).toContain(" · CoinGecko trésoreries 429");
   });
 
+  it("bouton « Ligne sur le chart » de la tuile Strategy relié à la bascule du chart maître", () => {
+    const basculer = () => {};
+    const off = rendu({ resultat: { donnee: DONNEE, ts: 1, perime: false }, ligneChart: { actif: false, basculer } });
+    expect(off).toMatch(/<button[^>]*aria-pressed="false"[^>]*>Ligne sur le chart<\/button>/);
+    expect(off).toContain("Ligne « Coût Strategy » sur le chart maître (BTC coté en dollar)");
+    const on = rendu({ resultat: { donnee: DONNEE, ts: 1, perime: false }, ligneChart: { actif: true, basculer } });
+    expect(on).toMatch(/<button[^>]*aria-pressed="true"[^>]*>● Ligne sur le chart<\/button>/);
+  });
+
   it("une seule société détentrice : accord au singulier", () => {
     const donnee = { totalBtc: 800, valeurUsd: 64_000_000, societes: [DONNEE.societes[0]!] };
     expect(rendu({ resultat: { donnee, ts: 1, perime: false } })).toContain("1 société détentrice<");

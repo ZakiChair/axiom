@@ -3,9 +3,12 @@
  * les sociétés cotées, prix de revient de Strategy et coût pondéré, sociétés sous leur coût et
  * sensibilité à −10/−20/−30 %. Données déclaratives CoinGecko non horodatées (badge partiel
  * permanent). Vue PURE testée en rendu statique + conteneur qui charge à l'ouverture
- * (un appel, cache 6 h dans `data/onchain/tresoreriesBtc.ts`).
+ * (un appel, cache 6 h dans `data/onchain/tresoreriesBtc.ts`) et relie le bouton « Ligne sur
+ * le chart » à la bascule de la ligne « Coût Strategy » du chart maître.
  */
 import { useEffect, useState } from "react";
+import { useStore } from "zustand";
+import { niveauxOverlaysStore } from "../../chart/niveauxOverlays";
 import type { ResultatFrais } from "../../data/onchain/mempool";
 import { qualiteTresoreriesBtc } from "../../data/onchain/qualiteChain";
 import {
@@ -19,7 +22,7 @@ import {
 import type { MetaFiabilite } from "../../lib/fiabilite";
 import { formatEntier, formatPct, formatPourcentage, formatPrice } from "../../lib/format";
 import { enregistrerQualite } from "../../store/qualiteMetriques";
-import { Badge, BadgeFiabilite, NoteSource, TitreSection, TuileStat, Vide } from "../ui";
+import { Badge, BadgeFiabilite, BoutonBascule, NoteSource, TitreSection, TuileStat, Vide } from "../ui";
 import { dateObservation } from "./HistoriqueCommun";
 
 /** Méta locale : CoinGecko n'est pas au catalogue de fiabilité (« source inconnue » sinon). */
@@ -36,11 +39,14 @@ export function VueTresoreriesBtc({
   resultat,
   loading = false,
   raison,
+  ligneChart,
 }: {
   resultat: ResultatFrais<DonneesTresoreries> | null;
   loading?: boolean;
   /** Motif du dernier échec CoinGecko (code HTTP, réseau, réponse illisible). */
   raison?: string;
+  /** Bascule de la ligne « Coût Strategy » du chart maître. */
+  ligneChart?: { actif: boolean; basculer: () => void };
 }) {
   const titre = (
     <TitreSection extra={<BadgeFiabilite meta={META_TRESORERIES} />}>Trésoreries d'entreprises BTC</TitreSection>
@@ -70,6 +76,15 @@ export function VueTresoreriesBtc({
           label="Strategy"
           valeur={s === null ? "—" : `${formatEntier(s.avoirsBtc)} BTC`}
           couleur="var(--serie-2)"
+          badge={ligneChart && (
+            <BoutonBascule
+              actif={ligneChart.actif}
+              onClick={ligneChart.basculer}
+              title="Ligne « Coût Strategy » sur le chart maître (BTC coté en dollar) : coût moyen déclaratif, pas un seuil de liquidation"
+            >
+              Ligne sur le chart
+            </BoutonBascule>
+          )}
           extra={
             <span className="text-[10px] text-text-dim">
               {seuil === null ? "" : seuil >= 0 ? "déjà sous son coût" : `passe sous son coût à ${formatPct(seuil)}`}
@@ -135,6 +150,7 @@ export function VueTresoreriesBtc({
 export function TresoreriesBtc({ open }: { open: boolean }) {
   const [charge, setCharge] = useState<ChargeTresoreries | null>(null);
   const [loading, setLoading] = useState(false);
+  const ligneActive = useStore(niveauxOverlaysStore, (s) => s.prixRevient);
   useEffect(() => {
     if (!open) {
       setCharge(null);
@@ -150,5 +166,12 @@ export function TresoreriesBtc({ open }: { open: boolean }) {
     }, () => {});
     return () => ctrl.abort();
   }, [open]);
-  return <VueTresoreriesBtc resultat={charge?.resultat ?? null} loading={loading} raison={charge?.raison} />;
+  return (
+    <VueTresoreriesBtc
+      resultat={charge?.resultat ?? null}
+      loading={loading}
+      raison={charge?.raison}
+      ligneChart={{ actif: ligneActive, basculer: () => niveauxOverlaysStore.getState().basculer("prixRevient") }}
+    />
+  );
 }

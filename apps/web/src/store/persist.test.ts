@@ -103,6 +103,7 @@ beforeEach(() => {
   niveauxOverlaysStore.getState().setActif("niveauxCles", false);
   niveauxOverlaysStore.getState().setActif("niveauxOptions", false);
   niveauxOverlaysStore.getState().setActif("bandesImplicites", false);
+  niveauxOverlaysStore.getState().setActif("prixRevient", false);
   niveauxOverlaysStore.getState().setFamilles(["J", "S"]);
   macroOverlayStore.getState().setEnabled([]);
   denominateurStore.getState().setDenominateur(DENOMINATEUR_DEFAUT);
@@ -366,6 +367,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
         niveauxClesFamilles: ["T", "J", "M"],
         niveauxOptions: true,
         bandesImplicites: true,
+        prixRevientTresoreries: true,
         macroOverlays: ["m2", "stablecoins"],
         denominateur: "SOL",
         sections: { Alertes: true, Watchlist: false },
@@ -386,6 +388,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(niveauxOverlaysStore.getState().familles).toEqual(["J", "M", "T"]);
     expect(niveauxOverlaysStore.getState().niveauxOptions).toBe(true);
     expect(niveauxOverlaysStore.getState().bandesImplicites).toBe(true);
+    expect(niveauxOverlaysStore.getState().prixRevient).toBe(true);
     expect(compareStore.getState().symbols.map((c) => c.symbol)).toEqual(["ETHUSDT", "SOLUSDT"]);
     // setEnabled réordonne selon MACRO_OVERLAYS = ["crypto-total","stablecoins","m2"].
     expect(macroOverlayStore.getState().enabled).toEqual(["stablecoins", "m2"]);
@@ -409,6 +412,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
         niveauxClesFamilles: ["X", 3], // aucune famille connue -> ignoré (reste J + S)
         niveauxOptions: 1, // pas un booléen -> ignoré (reste OFF)
         bandesImplicites: "true", // pas un booléen -> ignoré (reste OFF)
+        prixRevientTresoreries: 1, // pas un booléen -> ignoré (reste OFF)
       })
     );
 
@@ -425,6 +429,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(niveauxOverlaysStore.getState().familles).toEqual(["J", "S"]);
     expect(niveauxOverlaysStore.getState().niveauxOptions).toBe(false);
     expect(niveauxOverlaysStore.getState().bandesImplicites).toBe(false);
+    expect(niveauxOverlaysStore.getState().prixRevient).toBe(false);
   });
 
   it("saveSessionUi sérialise l'instantané courant des stores de session", () => {
@@ -438,6 +443,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     niveauxOverlaysStore.getState().basculerFamille("T");
     niveauxOverlaysStore.getState().basculer("niveauxOptions");
     niveauxOverlaysStore.getState().basculer("bandesImplicites");
+    niveauxOverlaysStore.getState().basculer("prixRevient");
 
     saveSessionUi();
 
@@ -454,6 +460,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(raw.niveauxClesFamilles).toEqual(["J", "S", "T"]);
     expect(raw.niveauxOptions).toBe(true);
     expect(raw.bandesImplicites).toBe(true);
+    expect(raw.prixRevientTresoreries).toBe(true);
   });
 });
 

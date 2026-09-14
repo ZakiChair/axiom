@@ -33,11 +33,11 @@ export function parseBlockchainChart(json: unknown): NvtPoint[] {
   return points.sort((a, b) => a.time - b.time || a.value - b.value);
 }
 
-function utcDay(time: number): number {
+export function utcDay(time: number): number {
   return Math.floor(time / DAY_MS) * DAY_MS;
 }
 
-function latestPointByUtcDay(points: readonly NvtPoint[]): Map<number, NvtPoint> {
+export function latestPointByUtcDay(points: readonly NvtPoint[]): Map<number, NvtPoint> {
   const byDay = new Map<number, NvtPoint>();
   for (const point of points) {
     if (!Number.isFinite(point.time) || !Number.isFinite(point.value)) continue;

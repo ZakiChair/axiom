@@ -105,6 +105,11 @@ const CATALOGUE: Record<string, MetaFiabilite> = {
     label: "quotidien · ValidatorQueue",
     detail: "Premier relevé UTC du jour, source publique Ether Alpha sans SLA. Files post-Pectra en ETH ; délais estimés et historique incomplet possibles.",
   },
+  "blockchain-info": {
+    niveau: "partiel",
+    label: "quotidien · blockchain.info",
+    detail: "Revenus quotidiens des mineurs (subvention + frais, valorisés au prix du jour) — série daily publique, sans SLA.",
+  },
   "sosovalue:historique": {
     niveau: "partiel",
     label: "séances publiées · SoSoValue",

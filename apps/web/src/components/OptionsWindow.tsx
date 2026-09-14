@@ -41,6 +41,7 @@ import { calculerSkew25d } from "../data/skew";
 import { termStructureIv, type PointTermIv } from "../data/termIv";
 import { mouvementsAttendus, type PointMouvementAttendu } from "../data/mouvementAttendu";
 import { libelleCourtEvenement, volsForward, type SegmentVolForward } from "../data/volForward";
+import { courbeProbaImplicite, lireProbasNiveau, niveauParDefaut } from "../data/probaImplicite";
 import { histDvol } from "../data/referentiels";
 import { ivRank } from "../data/ivRank";
 import { bandeStrikes, construireGrilleOi, type GrilleOi } from "../data/oiHeatmap";
@@ -298,6 +299,21 @@ export function OptionsWindow() {
   const dvolIvRank = useMemo(
     () => (dvol === null || dvolHistorique === null ? null : ivRank(dvolHistorique, dvol)),
     [dvolHistorique, dvol],
+  );
+
+  // Probabilités implicites de l'échéance sélectionnée (Breeden-Litzenberger centré, fonction pure
+  // de data/probaImplicite, nowMs injecté au bord). Niveau saisi ; vide = forward arrondi, remis
+  // à vide au changement de devise (un niveau BTC n'a pas de sens en ETH).
+  const courbeProba = useMemo(
+    () => (vue === "smile" ? courbeProbaImplicite(pointsEcheance, Date.now()) : null),
+    [vue, pointsEcheance],
+  );
+  const [niveauProba, setNiveauProba] = useState("");
+  useEffect(() => setNiveauProba(""), [devise]);
+  const niveauDefaut = courbeProba === null ? null : niveauParDefaut(courbeProba.forward);
+  const lectureProba = useMemo(
+    () => lireProbasNiveau(courbeProba, niveauProba.trim() === "" ? niveauDefaut : Number(niveauProba)),
+    [courbeProba, niveauProba, niveauDefaut],
   );
 
   // Domaine d'axe strike (smile) : bornes = min/max des strikes de l'échéance sélectionnée —
@@ -743,6 +759,7 @@ export function OptionsWindow() {
       ivPut: put && Number.isFinite(put.markIv) && put.markIv > 0 ? put.markIv : null,
       oiCall: call ? call.openInterest : null,
       oiPut: put ? put.openInterest : null,
+      ...lireProbasNiveau(courbeProba, strike),
     });
   };
 
@@ -895,6 +912,10 @@ export function OptionsWindow() {
           skew25={skew25}
           pcVolRatio={pcVolRatio}
           notionnelOi={notionnelOi}
+          niveauProba={niveauProba}
+          onNiveauProba={setNiveauProba}
+          niveauDefaut={niveauDefaut}
+          lectureProba={lectureProba}
         />
 
         {/* ─────────── Vue GEX/DEX (montée conditionnellement) ─────────── */}

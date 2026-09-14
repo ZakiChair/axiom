@@ -7,13 +7,15 @@
  * l'orchestrateur ; ce fichier ne reçoit que des props. ZÉRO changement de rendu.
  */
 import type { Skew25d } from "../../data/skew";
+import type { LectureProbasNiveau } from "../../data/probaImplicite";
 import { formatUsd, formatDec, formatPct, formatPourcentage, formatEntier } from "../../lib/format";
-import { TuileStat, ErreurBloc, NoteSource, Fraicheur, InfobulleGraphe } from "../ui";
+import { TuileStat, ErreurBloc, NoteSource, Fraicheur, InfobulleGraphe, Input } from "../ui";
 import { formatStrike } from "./dessins";
 import { formatUsdExact } from "./format";
 
-/** Point du smile survolé — calls et puts sont deux OptionPoint séparés, d'où jusqu'à 4 lignes. */
-export interface SurvolSmile {
+/** Point du smile survolé — calls et puts sont deux OptionPoint séparés, d'où jusqu'à 4 lignes
+ *  (plus les deux probabilités implicites au strike survolé). */
+export interface SurvolSmile extends LectureProbasNiveau {
   xPix: number;
   largeur: number;
   strike: number;
@@ -40,7 +42,16 @@ interface Props {
   skew25: Skew25d | null;
   pcVolRatio: number;
   notionnelOi: number;
+  /** Niveau saisi (texte brut) ; vide = niveauDefaut. */
+  niveauProba: string;
+  onNiveauProba: (v: string) => void;
+  /** Forward de l'échéance arrondi (null sans courbe exploitable). */
+  niveauDefaut: number | null;
+  lectureProba: LectureProbasNiveau;
 }
+
+/** Probabilité [0 ; 1] en %, « — » si absente (jamais un zéro de remplissage). */
+const formatProba = (p: number | null): string => formatPourcentage(p === null ? null : 100 * p, 1);
 
 export function VueSmile({
   visible,
@@ -59,6 +70,10 @@ export function VueSmile({
   skew25,
   pcVolRatio,
   notionnelOi,
+  niveauProba,
+  onNiveauProba,
+  niveauDefaut,
+  lectureProba,
 }: Props) {
   return (
     <div className={visible ? undefined : "hidden"}>
@@ -91,6 +106,8 @@ export function VueSmile({
                 { label: "IV put", valeur: formatPourcentage(survolSmile.ivPut, 1), couleur: "var(--down)" },
                 { label: "OI call", valeur: formatDec(survolSmile.oiCall, 2) },
                 { label: "OI put", valeur: formatDec(survolSmile.oiPut, 2) },
+                { label: "P(clôture > K à T)", valeur: formatProba(survolSmile.pCloture) },
+                { label: "P(toucher) log-normal", valeur: formatProba(survolSmile.pToucher) },
               ]}
             />
           )}
@@ -156,6 +173,26 @@ export function VueSmile({
           }
         />
         <TuileStat disposition="inline" label="Notionnel OI (toutes éch.)" valeur={formatUsd(notionnelOi)} />
+        {/* Probabilité implicite d'un niveau : P(clôture) en tuile, P(toucher) en infobulle
+            (maths et lectures distinctes, jamais présentées côte à côte comme équivalentes). */}
+        <div className="col-span-2 flex items-center gap-2">
+          <Input
+            type="number"
+            aria-label="Niveau de prix"
+            placeholder={niveauDefaut === null ? "niveau (USD)" : String(niveauDefaut)}
+            value={niveauProba}
+            onChange={(e) => onNiveauProba(e.target.value)}
+            className="w-28"
+          />
+          <div className="flex-1">
+            <TuileStat
+              disposition="inline"
+              label="P(clôture > K à T), risque-neutre"
+              valeur={formatProba(lectureProba.pCloture)}
+              title={`P(toucher avant T), modèle log-normal : ${formatProba(lectureProba.pToucher)}`}
+            />
+          </div>
+        </div>
       </div>
 
       <div className="mt-3">
@@ -163,6 +200,14 @@ export function VueSmile({
           Max pain calculé côté client (min. de valeur intrinsèque versée aux détenteurs).
           Skew 25Δ = IV(call 25Δ) − IV(put 25Δ), deltas Black-Scholes côté client
           (négatif = puts chers). Données Deribit, ~1 min.
+        </NoteSource>
+        <NoteSource>
+          P(clôture &gt; K à T) : Breeden-Litzenberger, pentes des prix de call entre strikes voisins
+          affectées au milieu de l&apos;intervalle, interpolées, bornées à [0 ; 1], monotonie imposée ; marks
+          Deribit × forward (surface modèle, pas des cotations) ; mesure risque-neutre, pas une
+          probabilité réelle ; « — » hors de la grille de strikes. Niveau vide = forward de l&apos;échéance
+          arrondi. P(toucher avant T), en infobulle : modèle log-normal sans dérive,
+          2·Φ(−|ln(K/F)| / σ ATM·√T), qui surestime en pratique le taux de contact observé.
         </NoteSource>
       </div>
     </div>

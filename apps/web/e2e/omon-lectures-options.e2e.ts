@@ -133,3 +133,45 @@ test("Term IV : mouvement attendu par échéance (straddle ATM au forward, ±1σ
   await expect(fenetre).toContainText("variance additive entre échéances consécutives");
   await expect(fenetre).toContainText("±2,5 à 3 pts d'incertitude sur σ fwd");
 });
+
+test("Smile : P(clôture > K à T) risque-neutre (Breeden-Litzenberger centré) et P(toucher) log-normal en infobulle", async ({ page }) => {
+  const instant = Date.parse("2026-09-15T00:00:00Z");
+  await page.clock.setFixedTime(new Date(instant));
+  // 16SEP26 (32 h), forward 100 000, IV 35 : prix de call USD reconstruits (put OTM sous F) :
+  // C(95k) = 0,005·F + 5 000 = 5 500 ; C(100k) = 1 000 ; C(105k) = 500
+  // → pentes 0,9 au milieu 97 500 et 0,1 au milieu 102 500.
+  await routerDeribit(page, echeance("16SEP26", 35, 0.01), instant);
+
+  await page.goto("/");
+  await commande(page, "OMON");
+  const fenetre = page.getByRole("complementary", { name: "Options (smile IV, max pain)" });
+  const niveau = fenetre.getByLabel("Niveau de prix");
+  const tuile = fenetre.getByTitle(/^P\(toucher avant T\), modèle log-normal : /);
+
+  // Niveau vide = forward arrondi (100 000) : interpolation 0,9 → 0,1 à mi-chemin ; K = F → contact certain.
+  await expect(niveau).toHaveAttribute("placeholder", "100000");
+  await expect(tuile).toContainText("P(clôture > K à T), risque-neutre");
+  await expect(tuile).toContainText("50.0 %");
+  await expect(tuile).toHaveAttribute("title", "P(toucher avant T), modèle log-normal : 100.0 %");
+
+  // Au milieu 97 500 : 0,9 ; P(toucher) = 2·Φ(−|ln 0,975| / (0,35·√(32 h / 365 j))) ≈ 23,1 %.
+  await niveau.fill("97500");
+  await expect(tuile).toContainText("90.0 %");
+  await expect(tuile).toHaveAttribute("title", "P(toucher avant T), modèle log-normal : 23.1 %");
+
+  // Hors de la grille des milieux : absence affichée, jamais un zéro.
+  await niveau.fill("110000");
+  await expect(tuile).toContainText("—");
+  await expect(tuile).not.toContainText("%");
+
+  // Infobulle du smile au strike survolé (centre du tracé → 100 000).
+  const canvas = fenetre.locator("canvas").first();
+  const boite = await canvas.boundingBox();
+  if (boite === null) throw new Error("canvas du smile absent");
+  await page.mouse.move(boite.x + boite.width / 2, boite.y + boite.height / 2);
+  await expect(fenetre.getByText("Strike 100K")).toBeVisible();
+  await expect(fenetre.getByText("P(clôture > K à T) : 50.0 %")).toBeVisible();
+  await expect(fenetre.getByText("P(toucher) log-normal : 100.0 %")).toBeVisible();
+
+  await expect(fenetre).toContainText("mesure risque-neutre, pas une probabilité réelle");
+});

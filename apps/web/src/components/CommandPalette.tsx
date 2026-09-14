@@ -24,6 +24,7 @@ import {
   type NavCommande,
 } from "../commands/registry";
 import { RACCOURCIS_AIDE, lignesMnemoniques } from "../commands/hotkeys";
+import { URL_SIGNALER_PROBLEME } from "../lib/lienRetours";
 
 /** Entrée d'historique persistée (id de commande + texte de saisie pour rejouer la navigation). */
 interface EntreeHistorique {
@@ -247,7 +248,15 @@ export function CommandPalette() {
               ))}
             </div>
             <div className="border-t border-border px-4 py-2 text-[10px] text-text-dim">
-              Échap pour fermer · ⌘K pour les commandes
+              Échap pour fermer · ⌘K pour les commandes ·{" "}
+              <a
+                href={URL_SIGNALER_PROBLEME}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent hover:underline"
+              >
+                Signaler un problème
+              </a>
             </div>
           </div>
         ) : (

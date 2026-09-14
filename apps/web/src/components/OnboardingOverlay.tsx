@@ -20,6 +20,7 @@ import {
 } from "../store/onboarding";
 import { coinalyzeKeyStore } from "../store/coinalyze";
 import { BTN_SECONDAIRE } from "./ui";
+import { URL_SIGNALER_PROBLEME } from "../lib/lienRetours";
 
 /** Clé locale « présence clé perso » sans exposer la valeur (coinalyze hasKey est toujours true). */
 const COINALYZE_KEY_LS = "axiom:coinalyze:key";
@@ -233,6 +234,16 @@ export function OnboardingOverlay() {
               </button>
               <p className="text-[11px]">
                 Ensuite : ⌘K → ONBOARD pour rejouer ce parcours, ou AIDE pour les raccourcis.
+                Un bug, une idée ?{" "}
+                <a
+                  href={URL_SIGNALER_PROBLEME}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-accent hover:underline"
+                >
+                  Signalez-le sur GitHub
+                </a>
+                .
               </p>
             </>
           )}

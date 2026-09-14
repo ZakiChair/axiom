@@ -260,4 +260,12 @@ describe("publication qualité Trésoreries BTC · CoinGecko", () => {
     expect(absent).toMatchObject({ statut: "indisponible", acces: "indisponible", recupereLe: null, couverture: null });
     expect(absent.raison).toContain("CoinGecko");
   });
+
+  it("motif d'échec propagé : 429 sur cache resservi, 401 sans cache", () => {
+    const perime = qualiteTresoreriesBtc({ donnee, ts: NOW - 7 * 3_600_000, perime: true }, "cle", "CoinGecko trésoreries 429");
+    expect(perime.raison).toContain("Cache resservi · CoinGecko trésoreries 429.");
+    expect(perime.raison).toContain("non horodatés");
+    const absent = qualiteTresoreriesBtc(null, "cle", "CoinGecko trésoreries 401");
+    expect(absent.raison).toBe("Trésoreries CoinGecko indisponibles (CoinGecko trésoreries 401) et aucun cache exploitable.");
+  });
 });

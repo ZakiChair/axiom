@@ -88,9 +88,10 @@ export function qualiteReseauEthCm(resultat: ResultatFrais<ReseauEthCm> | null, 
 /**
  * Qualité du bloc Trésoreries BTC · CoinGecko. Avoirs déclaratifs NON horodatés : l'observation
  * reste inconnue, le statut n'est donc jamais « frais » (partiel, périmé si cache resservi) ;
- * la couverture compte les sociétés à coût connu parmi les détentrices.
+ * la couverture compte les sociétés à coût connu parmi les détentrices. `erreur` : motif du
+ * dernier échec CoinGecko (ex. « CoinGecko trésoreries 401 »), pour distinguer clé refusée et quota.
  */
-export function qualiteTresoreriesBtc(resultat: ResultatFrais<TresoreriesBtc> | null, acces: "cle" | "public"): QualiteMetrique {
+export function qualiteTresoreriesBtc(resultat: ResultatFrais<TresoreriesBtc> | null, acces: "cle" | "public", erreur?: string): QualiteMetrique {
   const societes = resultat?.donnee.societes ?? [];
   return {
     sourceId: "coingecko",
@@ -104,8 +105,8 @@ export function qualiteTresoreriesBtc(resultat: ResultatFrais<TresoreriesBtc> | 
     acces: resultat === null ? "indisponible" : acces,
     statut: resultat === null ? "indisponible" : resultat.perime ? "perime" : "partiel",
     raison: resultat === null
-      ? "Trésoreries CoinGecko indisponibles (quota, erreur ou réponse illisible) et aucun cache exploitable."
-      : `${resultat.perime ? "Cache resservi après échec CoinGecko. " : ""}Avoirs déclaratifs non horodatés par CoinGecko (déclarations jusqu'à J-14).`,
+      ? `Trésoreries CoinGecko indisponibles (${erreur ?? "quota, erreur ou réponse illisible"}) et aucun cache exploitable.`
+      : `${resultat.perime ? `Cache resservi · ${erreur ?? "échec CoinGecko"}. ` : ""}Avoirs déclaratifs non horodatés par CoinGecko (déclarations jusqu'à J-14).`,
   };
 }
 

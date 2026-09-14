@@ -11,7 +11,8 @@
  * et les valeurs aberrantes) ; coût pondéré = Σ entrées ÷ Σ avoirs des sociétés à coût connu.
  *
  * Un seul appel, cache 6 h (clé `cg:tresoreries:btc`), un téléchargement en vol partagé,
- * cache périmé resservi sur échec (429, 5xx, réseau, réponse illisible), null sinon.
+ * cache périmé resservi sur échec (429, 5xx, réseau, réponse illisible), null sinon ; le motif
+ * de l'échec (ex. « CoinGecko trésoreries 401 ») est conservé pour la qualité et la tuile.
  * Contrat lu par le couloir chart (ligne « Coût Strategy ») : `chargerTresoreriesBtc`,
  * `resumerTresoreries`, `strategy.coutMoyenUsd`, `coutPondereUsd`.
  */
@@ -142,12 +143,18 @@ export function accesTresoreries(): "cle" | "public" {
   return resolveDemoKey() ? "cle" : "public";
 }
 
-let enCours: Promise<ResultatFrais<TresoreriesBtc> | null> | null = null;
+/** Résultat du chargement (null sans donnée exploitable) et motif du dernier échec CoinGecko. */
+export interface ChargeTresoreries {
+  resultat: ResultatFrais<TresoreriesBtc> | null;
+  raison?: string;
+}
 
-async function telecharger(): Promise<ResultatFrais<TresoreriesBtc> | null> {
+let enCours: Promise<ChargeTresoreries> | null = null;
+
+async function telecharger(): Promise<ChargeTresoreries> {
   const cache = await lireCache<TresoreriesBtc>(CLE_CACHE);
   if (cache !== null && estFrais(cache, TRESORERIES_TTL_MS)) {
-    return { donnee: cache.donnee, ts: cache.ts, perime: false };
+    return { resultat: { donnee: cache.donnee, ts: cache.ts, perime: false } };
   }
   try {
     const res = await fetch(withDemoKey(URL_TRESORERIES_BTC), { signal: AbortSignal.timeout(DELAI_MS) });
@@ -155,9 +162,12 @@ async function telecharger(): Promise<ResultatFrais<TresoreriesBtc> | null> {
     const donnee = parseTresoreriesBtc((await res.json()) as unknown);
     if (donnee === null) throw new Error("CoinGecko trésoreries illisibles");
     await ecrireCache(CLE_CACHE, donnee);
-    return { donnee, ts: Date.now(), perime: false };
-  } catch {
-    return cache !== null ? { donnee: cache.donnee, ts: cache.ts, perime: true } : null;
+    return { resultat: { donnee, ts: Date.now(), perime: false } };
+  } catch (e) {
+    return {
+      resultat: cache !== null ? { donnee: cache.donnee, ts: cache.ts, perime: true } : null,
+      raison: e instanceof Error ? e.message : "échec CoinGecko",
+    };
   }
 }
 
@@ -166,11 +176,16 @@ async function telecharger(): Promise<ResultatFrais<TresoreriesBtc> | null> {
  * `signal` n'abandonne que l'attente de cet appelant (rejet AbortError) : le téléchargement
  * partagé continue pour les autres, borné par son délai.
  */
-export async function chargerTresoreriesBtc(signal?: AbortSignal): Promise<ResultatFrais<TresoreriesBtc> | null> {
+export async function chargerTresoreriesBtcAvecRaison(signal?: AbortSignal): Promise<ChargeTresoreries> {
   enCours ??= telecharger().finally(() => {
     enCours = null;
   });
-  const resultat = await enCours;
+  const charge = await enCours;
   if (signal?.aborted) throw new DOMException("Chargement des trésoreries abandonné", "AbortError");
-  return resultat;
+  return charge;
+}
+
+/** Contrat inchangé (couloir chart) : le résultat seul, sans motif. */
+export async function chargerTresoreriesBtc(signal?: AbortSignal): Promise<ResultatFrais<TresoreriesBtc> | null> {
+  return (await chargerTresoreriesBtcAvecRaison(signal)).resultat;
 }

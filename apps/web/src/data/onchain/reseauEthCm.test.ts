@@ -222,6 +222,7 @@ describe("fetchReseauEthCm : un seul fetch ETH, cache 6 h, dégradation", () => 
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("demande les 7 métriques ETH sur 800 j en une requête et met en cache la donnée dérivée", async () => {
@@ -265,5 +266,32 @@ describe("fetchReseauEthCm : un seul fetch ETH, cache 6 h, dégradation", () => 
     const r = await fetchReseauEthCm();
     expect(r).toMatchObject({ perime: true, ts: NOW - 7 * 3_600_000 });
     expect(r?.donnee.reserve?.stockEth).toBe(donnee.reserve?.stockEth);
+  });
+
+  it("Coin Metrics muet : le chargeur CHAIN publie le cache périmé AVANT son délai de 15 s (pas « Délai réseau dépassé »)", async () => {
+    // AbortSignal.timeout n'est pas simulé par les faux minuteurs : on le rebranche sur setTimeout simulé.
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    vi.setSystemTime(NOW);
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const ctrl = new AbortController();
+      setTimeout(() => ctrl.abort(new DOMException("signal timed out", "TimeoutError")), ms);
+      return ctrl.signal;
+    });
+    const { fetchReseauEthCm, calculerReseauEthCm: calculer } = await import("./reseauEthCm");
+    const { creerChargeurChain } = await import("./chargementChain");
+    const donnee = calculer(seriesSynthetiques(40), true);
+    localStorage.setItem(CLE, JSON.stringify({ ts: NOW - 7 * 3_600_000, donnee }));
+    // Fetch qui ne répond jamais mais respecte son signal, comme le fetch réel.
+    vi.stubGlobal("fetch", vi.fn((_url: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+    })));
+    const publications: unknown[] = [];
+    void creerChargeurChain().lancer([{ id: "eth-coinmetrics", charger: (signal) => fetchReseauEthCm(signal) }], (p) => publications.push(p));
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(publications).toEqual([
+      { id: "eth-coinmetrics", valeur: expect.objectContaining({ perime: true, ts: NOW - 7 * 3_600_000 }) },
+    ]);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(publications).toHaveLength(1);
   });
 });

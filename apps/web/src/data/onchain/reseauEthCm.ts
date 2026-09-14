@@ -36,6 +36,11 @@ export const METRIQUES_ETH_CM = [
 /** Marche de périmètre : |Δréserve − flux net| d'UN jour au-delà de 0,5 % du stock de la veille. */
 export const SEUIL_MARCHE_PERIMETRE_PCT = 0.5;
 const HORIZONS = [30, 90, 365] as const;
+/**
+ * Délai interne (< 15 s du chargeur CHAIN) : le catch ci-dessous ressert le cache périmé AVANT que
+ * la course du chargeur ne rejette « Délai réseau dépassé » et ne publie null.
+ */
+const DELAI_MS = 14_000;
 
 export interface VariationReserve {
   jours: 30 | 90 | 365;
@@ -147,7 +152,8 @@ export async function fetchReseauEthCm(signal?: AbortSignal): Promise<ResultatFr
   if (estFrais(cache, CM_TTL_MS) && cache !== null) return { donnee: cache.donnee, ts: cache.ts, perime: false };
   try {
     const debut = new Date(Date.now() - FENETRE_FLUX_JOURS * JOUR_MS).toISOString().slice(0, 10);
-    const lignes = await chargerLignesCoinMetrics(METRIQUES_ETH_CM, signal, { asset: "eth", debut });
+    const delai = AbortSignal.timeout(DELAI_MS);
+    const lignes = await chargerLignesCoinMetrics(METRIQUES_ETH_CM, signal ? AbortSignal.any([signal, delai]) : delai, { asset: "eth", debut });
     const flash = ["FlowInExNtv", "FlowOutExNtv", "SplyExNtv"].some((m) => dernierStatutCm(lignes, m) === "flash");
     const donnee = calculerReseauEthCm(parseCoinMetrics({ data: lignes }, "eth", METRIQUES_ETH_CM), flash);
     if (donnee.derniereObservation === null) throw new Error("Coin Metrics ETH vide");

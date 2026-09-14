@@ -71,6 +71,25 @@ describe("tuile Trésoreries d'entreprises BTC de CHAIN", () => {
     expect(html).toContain("avoirs déclaratifs non horodatés");
   });
 
+  it("Strategy introuvable sous MSTR.US : identification ratée distinguée d'un coût non publié", () => {
+    const renommee = { ...DONNEE, societes: DONNEE.societes.map((s) => (s.nom === "Strategy" ? { ...s, symbole: "MSTR" } : s)) };
+    const absente = rendu({ resultat: { donnee: renommee, ts: 1, perime: false } });
+    expect(absente).toContain("absente de la liste CoinGecko (MSTR.US)");
+    expect(absente).not.toContain("coût non publié");
+    const sansCout = { ...DONNEE, societes: DONNEE.societes.map((s) => (s.nom === "Strategy" ? { ...s, coutTotalUsd: null } : s)) };
+    const html = rendu({ resultat: { donnee: sansCout, ts: 1, perime: false } });
+    expect(html).toContain("coût non publié");
+    expect(html).not.toContain("absente de la liste");
+  });
+
+  it("motif d'échec CoinGecko affiché : sans donnée, et à côté du cache périmé", () => {
+    expect(rendu({ resultat: null, raison: "CoinGecko trésoreries 401" }))
+      .toContain("Trésoreries d'entreprises indisponibles (CoinGecko trésoreries 401).");
+    const html = rendu({ resultat: { donnee: DONNEE, ts: 1, perime: true }, raison: "CoinGecko trésoreries 429" });
+    expect(html).toContain("cache périmé");
+    expect(html).toContain(" · CoinGecko trésoreries 429");
+  });
+
   it("une seule société détentrice : accord au singulier", () => {
     const donnee = { totalBtc: 800, valeurUsd: 64_000_000, societes: [DONNEE.societes[0]!] };
     expect(rendu({ resultat: { donnee, ts: 1, perime: false } })).toContain("1 société détentrice<");

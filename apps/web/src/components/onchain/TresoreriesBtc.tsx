@@ -10,8 +10,10 @@ import type { ResultatFrais } from "../../data/onchain/mempool";
 import { qualiteTresoreriesBtc } from "../../data/onchain/qualiteChain";
 import {
   accesTresoreries,
-  chargerTresoreriesBtc,
+  chargerTresoreriesBtcAvecRaison,
   resumerTresoreries,
+  SYMBOLE_STRATEGY,
+  type ChargeTresoreries,
   type TresoreriesBtc as DonneesTresoreries,
 } from "../../data/onchain/tresoreriesBtc";
 import type { MetaFiabilite } from "../../lib/fiabilite";
@@ -33,9 +35,12 @@ const societes = (n: number) => `${n} société${n > 1 ? "s" : ""}`;
 export function VueTresoreriesBtc({
   resultat,
   loading = false,
+  raison,
 }: {
   resultat: ResultatFrais<DonneesTresoreries> | null;
   loading?: boolean;
+  /** Motif du dernier échec CoinGecko (code HTTP, réseau, réponse illisible). */
+  raison?: string;
 }) {
   const titre = (
     <TitreSection extra={<BadgeFiabilite meta={META_TRESORERIES} />}>Trésoreries d'entreprises BTC</TitreSection>
@@ -44,7 +49,7 @@ export function VueTresoreriesBtc({
     return (
       <section>
         {titre}
-        <Vide>{loading ? "Chargement des trésoreries CoinGecko…" : "Trésoreries d'entreprises indisponibles (CoinGecko)."}</Vide>
+        <Vide>{loading ? "Chargement des trésoreries CoinGecko…" : `Trésoreries d'entreprises indisponibles (${raison ?? "CoinGecko"}).`}</Vide>
       </section>
     );
   }
@@ -72,7 +77,9 @@ export function VueTresoreriesBtc({
           }
           pied={
             <span className="truncate">
-              {s?.coutMoyenUsd == null ? "coût non publié" : `coût moyen ${usd(s.coutMoyenUsd)} · prix implicite ${formatPct(s.ecartSpotPct)}`}
+              {s === null
+                ? `absente de la liste CoinGecko (${SYMBOLE_STRATEGY})`
+                : s.coutMoyenUsd == null ? "coût non publié" : `coût moyen ${usd(s.coutMoyenUsd)} · prix implicite ${formatPct(s.ecartSpotPct)}`}
             </span>
           }
         />
@@ -119,29 +126,29 @@ export function VueTresoreriesBtc({
         implicite CoinGecko (valeur ÷ avoirs), pas un cours live. Coût retenu entre 1 000 et 200 000 $/BTC : les
         sociétés sans coût publié ou aberrant sont exclues du coût pondéré et des décomptes.
         {` · CoinGecko · récupéré ${dateObservation(resultat.ts)}`}
-        {resultat.perime && <> · <Badge ton="warn">cache périmé</Badge></>}
+        {resultat.perime && <> · <Badge ton="warn">cache périmé</Badge>{raison ? ` · ${raison}` : ""}</>}
       </NoteSource>
     </section>
   );
 }
 
 export function TresoreriesBtc({ open }: { open: boolean }) {
-  const [resultat, setResultat] = useState<ResultatFrais<DonneesTresoreries> | null>(null);
+  const [charge, setCharge] = useState<ChargeTresoreries | null>(null);
   const [loading, setLoading] = useState(false);
   useEffect(() => {
     if (!open) {
-      setResultat(null);
+      setCharge(null);
       return;
     }
     const ctrl = new AbortController();
     setLoading(true);
     // Un abandon (fermeture) rejette l'attente : ni état ni qualité publiés pour ce cycle.
-    void chargerTresoreriesBtc(ctrl.signal).then((r) => {
-      setResultat(r);
+    void chargerTresoreriesBtcAvecRaison(ctrl.signal).then((c) => {
+      setCharge(c);
       setLoading(false);
-      enregistrerQualite("chain:tresoreries-btc", "Trésoreries BTC · CoinGecko", qualiteTresoreriesBtc(r, accesTresoreries()));
+      enregistrerQualite("chain:tresoreries-btc", "Trésoreries BTC · CoinGecko", qualiteTresoreriesBtc(c.resultat, accesTresoreries(), c.raison));
     }, () => {});
     return () => ctrl.abort();
   }, [open]);
-  return <VueTresoreriesBtc resultat={resultat} loading={loading} />;
+  return <VueTresoreriesBtc resultat={charge?.resultat ?? null} loading={loading} raison={charge?.raison} />;
 }

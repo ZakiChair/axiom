@@ -192,16 +192,28 @@ describe("chargerTresoreriesBtc : un appel, cache 6 h, coalescence, repli périm
     expect((await b)!.donnee.totalBtc).toBe(941_581);
   });
 
-  it.each([429, 503])("HTTP %i avec cache expiré → cache resservi « périmé »", async (status) => {
+  it.each([429, 503])("HTTP %i avec cache expiré → cache resservi « périmé », motif conservé", async (status) => {
     const ancien = Date.now() - 7 * 3_600_000;
     localStorage.setItem(CLE_CACHE, JSON.stringify({ ts: ancien, donnee: parseTresoreriesBtc(FIXTURE) }));
     const fetcher = vi.fn<typeof fetch>(async () => reponse(status, { status: { error_code: status } }));
     vi.stubGlobal("fetch", fetcher);
-    const { chargerTresoreriesBtc } = await import("./tresoreriesBtc");
-    const r = await chargerTresoreriesBtc();
+    const { chargerTresoreriesBtcAvecRaison } = await import("./tresoreriesBtc");
+    const { resultat: r, raison } = await chargerTresoreriesBtcAvecRaison();
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(r).toMatchObject({ perime: true, ts: ancien });
     expect(r!.donnee.totalBtc).toBe(941_581);
+    expect(raison).toBe(`CoinGecko trésoreries ${status}`);
+  });
+
+  it("clé Demo refusée (HTTP 401) sans cache : null et motif distinct d'un quota ; succès : aucun motif", async () => {
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => reponse(401, { status: { error_code: 401 } })));
+    const mod = await import("./tresoreriesBtc");
+    expect(await mod.chargerTresoreriesBtcAvecRaison()).toEqual({ resultat: null, raison: "CoinGecko trésoreries 401" });
+    expect(await mod.chargerTresoreriesBtc()).toBeNull();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () => reponse(200)));
+    const ok = await mod.chargerTresoreriesBtcAvecRaison();
+    expect(ok.resultat).toMatchObject({ perime: false });
+    expect(ok.raison).toBeUndefined();
   });
 
   it("échec sans cache (HTTP 503 ou réponse illisible) → null, sans exception", async () => {

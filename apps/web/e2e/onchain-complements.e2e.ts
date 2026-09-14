@@ -345,7 +345,7 @@ test("CHAIN : trésoreries d'entreprises BTC — HTTP 429 ressert le cache expir
   const { chain } = await ouvrirChainSansCle(page);
   const section = chain.locator("section", { has: page.locator("h3", { hasText: "Trésoreries d'entreprises BTC" }) });
   await expect(section).toContainText("coût moyen $75,000.00 · prix implicite +6.67%");
-  await expect(section).toContainText("cache périmé");
-  await expect(chain.locator("details", { hasText: "Qualité des blocs" })).toContainText("Cache resservi après échec CoinGecko.");
+  await expect(section).toContainText("cache périmé · CoinGecko trésoreries 429");
+  await expect(chain.locator("details", { hasText: "Qualité des blocs" })).toContainText("Cache resservi · CoinGecko trésoreries 429.");
   expect(appels).toBe(1);
 });

@@ -88,6 +88,8 @@ export const windowPanelCommands: Commande[] = [
       "spx",
       "ndx",
       "vix",
+      "ibit",
+      "etha",
     ],
     apercu: "Ouvre / ferme le moniteur d'options (smile, GEX/DEX crypto & actions)",
     action: basculer("options"),

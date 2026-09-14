@@ -1,10 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Candle } from "@axiom/types";
 import {
   cboeExpiries,
   cboeOptionsToLegs,
+  cheminOptionsCboe,
+  heureNewYorkVersUtcMs,
+  niveauCrypto,
+  normaliserChaineCboe,
   parseCboeOptionSymbol,
+  prixCryptoAuDernierEchange,
   type CboeOption,
 } from "./cboe";
+import { binanceAdapter } from "./binance";
+
+vi.mock("./binance", () => ({ binanceAdapter: { fetchKlines: vi.fn() } }));
 
 describe("parseCboeOptionSymbol", () => {
   it("parse un call SPX réel (SPX260717C06530000 → strike 6530)", () => {
@@ -115,5 +124,162 @@ describe("cboeOptionsToLegs", () => {
       delta: 0,
       gamma: 0,
     });
+  });
+});
+
+describe("cheminOptionsCboe", () => {
+  it("garde le préfixe « _ » des indices et l'omet pour les ETF (_IBIT.json répond 403)", () => {
+    expect(cheminOptionsCboe("SPX")).toBe("api/global/delayed_quotes/options/_SPX.json");
+    expect(cheminOptionsCboe("VIX")).toBe("api/global/delayed_quotes/options/_VIX.json");
+    expect(cheminOptionsCboe("IBIT")).toBe("api/global/delayed_quotes/options/IBIT.json");
+    expect(cheminOptionsCboe("ETHA")).toBe("api/global/delayed_quotes/options/ETHA.json");
+  });
+});
+
+describe("normaliserChaineCboe", () => {
+  // Spot 44,825 : bande ±25 % = [33,62 ; 56,03] → 30 et 60 hors bande, 45 et 50 conservés.
+  const option = (option: string, open_interest: number, volume: number) => ({
+    option,
+    open_interest,
+    volume,
+    delta: 0.5,
+    gamma: 0.1,
+    iv: 0.4,
+  });
+  const brut = (data: Record<string, unknown>) => ({
+    timestamp: "2026-09-14 19:28:16",
+    data: {
+      current_price: 44.825,
+      iv30: 38.795,
+      last_trade_time: "2026-09-14T15:13:15",
+      options: [
+        option("IBIT260918C00030000", 100, 10),
+        option("IBIT260918P00030000", 300, 5),
+        option("IBIT260918C00045000", 1000, 40),
+        option("IBIT260918P00045000", 500, 20),
+        option("IBIT260918C00050000", 2000, 50),
+        option("IBIT260918P00050000", 200, 25),
+        option("IBIT260918C00060000", 900, 0),
+        option("IBIT260918P00060000", 0, 0),
+      ],
+      ...data,
+    },
+  });
+
+  it("ETF : ne garde que les strikes à ±25 % du prix de l'ETF, avec IV30 et dernier échange", () => {
+    const chaine = normaliserChaineCboe(brut({}), "IBIT");
+    expect(chaine?.spot).toBe(44.825);
+    expect(chaine?.iv30).toBe(38.795);
+    expect(chaine?.dernierEchangeNy).toBe("2026-09-14T15:13:15");
+    expect(chaine?.options.map((o) => o.option)).toEqual([
+      "IBIT260918C00045000",
+      "IBIT260918P00045000",
+      "IBIT260918C00050000",
+      "IBIT260918P00050000",
+    ]);
+  });
+
+  it("calcule les agrégats P/C sur la chaîne COMPLÈTE, avant le filtre", () => {
+    expect(normaliserChaineCboe(brut({}), "IBIT")?.resume).toEqual({
+      oiCalls: 100 + 1000 + 2000 + 900,
+      oiPuts: 300 + 500 + 200 + 0,
+      volCalls: 10 + 40 + 50 + 0,
+      volPuts: 5 + 20 + 25 + 0,
+    });
+  });
+
+  it("indices : aucun filtre de strikes (VIX, SPX inchangés)", () => {
+    expect(normaliserChaineCboe(brut({}), "SPX")?.options).toHaveLength(8);
+  });
+
+  it("IV30 et dernier échange absents → NaN et null, jamais zéro", () => {
+    const chaine = normaliserChaineCboe(brut({ iv30: undefined, last_trade_time: undefined }), "IBIT");
+    expect(chaine?.iv30).toBeNaN();
+    expect(chaine?.dernierEchangeNy).toBeNull();
+  });
+
+  it("spot invalide ou options vides → null", () => {
+    expect(normaliserChaineCboe(brut({ current_price: 0 }), "IBIT")).toBeNull();
+    expect(normaliserChaineCboe(brut({ options: [] }), "IBIT")).toBeNull();
+    expect(normaliserChaineCboe(null, "IBIT")).toBeNull();
+  });
+});
+
+describe("heureNewYorkVersUtcMs", () => {
+  it("convertit l'heure de New York sans offset en UTC (EDT l'été, EST l'hiver)", () => {
+    expect(heureNewYorkVersUtcMs("2026-09-14T15:13:15")).toBe(Date.UTC(2026, 8, 14, 19, 13, 15));
+    expect(heureNewYorkVersUtcMs("2026-12-14T15:00:00")).toBe(Date.UTC(2026, 11, 14, 20, 0, 0));
+  });
+
+  it("gère les jours de changement d'heure (8 mars et 1er novembre 2026)", () => {
+    expect(heureNewYorkVersUtcMs("2026-03-08T01:30:00")).toBe(Date.UTC(2026, 2, 8, 6, 30, 0));
+    expect(heureNewYorkVersUtcMs("2026-03-08T12:00:00")).toBe(Date.UTC(2026, 2, 8, 16, 0, 0));
+    expect(heureNewYorkVersUtcMs("2026-11-01T12:00:00")).toBe(Date.UTC(2026, 10, 1, 17, 0, 0));
+  });
+
+  it("format invalide → null", () => {
+    expect(heureNewYorkVersUtcMs("garbage")).toBeNull();
+    expect(heureNewYorkVersUtcMs("2026-13-40T15:00:00")).toBeNull();
+    expect(heureNewYorkVersUtcMs("2026-09-14 15:13:15")).toBeNull();
+  });
+});
+
+describe("niveauCrypto", () => {
+  it("convertit un strike ETF en niveau crypto par ratio de prix (strike × crypto / ETF)", () => {
+    expect(niveauCrypto(45, 44.825, 79152.01)).toBeCloseTo(79461.03, 1);
+    expect(niveauCrypto(50, 44.825, 79152.01)).toBeCloseTo(88290.03, 1);
+    expect(niveauCrypto(44.5, 44.825, 79152.01)).toBeCloseTo(78578.13, 1);
+  });
+
+  it("entrée absente ou invalide → null (conversion masquée, jamais le spot courant)", () => {
+    expect(niveauCrypto(45, 44.825, null)).toBeNull();
+    expect(niveauCrypto(null, 44.825, 79152.01)).toBeNull();
+    expect(niveauCrypto(45, 0, 79152.01)).toBeNull();
+    expect(niveauCrypto(45, 44.825, Number.NaN)).toBeNull();
+  });
+});
+
+describe("prixCryptoAuDernierEchange", () => {
+  const fetchKlines = vi.mocked(binanceAdapter.fetchKlines);
+  const bougie = (time: number, close: number): Candle => ({
+    time,
+    open: close,
+    high: close,
+    low: close,
+    close,
+    volume: 1,
+  });
+
+  beforeEach(() => fetchKlines.mockReset());
+
+  it("lit la clôture de la bougie 1m BTCUSDT qui contient le dernier échange (heure NY → UTC)", async () => {
+    const ts = Date.UTC(2026, 8, 11, 20, 0, 30);
+    fetchKlines.mockResolvedValueOnce([bougie(Date.UTC(2026, 8, 11, 20, 0, 0), 80_000)]);
+    await expect(prixCryptoAuDernierEchange("IBIT", "2026-09-11T16:00:30")).resolves.toBe(80_000);
+    expect(fetchKlines).toHaveBeenCalledWith("BTCUSDT", "1m", { limit: 1, endTime: ts });
+  });
+
+  it("mémorise par dernier échange : aucun nouvel appel tant qu'il ne change pas", async () => {
+    fetchKlines.mockResolvedValue([bougie(Date.UTC(2026, 8, 11, 20, 0, 0), 2_500)]);
+    await expect(prixCryptoAuDernierEchange("ETHA", "2026-09-11T16:00:00")).resolves.toBe(2_500);
+    await expect(prixCryptoAuDernierEchange("ETHA", "2026-09-11T16:00:00")).resolves.toBe(2_500);
+    expect(fetchKlines).toHaveBeenCalledTimes(1);
+    expect(fetchKlines).toHaveBeenCalledWith("ETHUSDT", "1m", expect.anything());
+  });
+
+  it("échec réseau → null sans exception, et l'échec n'est pas mémorisé", async () => {
+    fetchKlines.mockRejectedValueOnce(new Error("Binance REST 503"));
+    await expect(prixCryptoAuDernierEchange("IBIT", "2026-09-12T10:00:00")).resolves.toBeNull();
+    fetchKlines.mockResolvedValueOnce([bougie(Date.UTC(2026, 8, 12, 14, 0, 0), 81_000)]);
+    await expect(prixCryptoAuDernierEchange("IBIT", "2026-09-12T10:00:00")).resolves.toBe(81_000);
+    expect(fetchKlines).toHaveBeenCalledTimes(2);
+  });
+
+  it("bougie absente ou qui ne contient pas l'instant (trou Binance) → null", async () => {
+    fetchKlines.mockResolvedValueOnce([]);
+    await expect(prixCryptoAuDernierEchange("IBIT", "2026-09-13T10:00:00")).resolves.toBeNull();
+    fetchKlines.mockResolvedValueOnce([bougie(Date.UTC(2026, 8, 13, 13, 0, 0), 81_000)]);
+    await expect(prixCryptoAuDernierEchange("IBIT", "2026-09-13T10:00:00")).resolves.toBeNull();
+    await expect(prixCryptoAuDernierEchange("IBIT", "garbage")).resolves.toBeNull();
   });
 });

@@ -18,9 +18,10 @@ import { formatUsd } from "../../lib/format";
 import { lireTokenCanvas, POLICE_CANVAS, rgbaTokenCanvas } from "../../lib/canvasTokens";
 import { indicesVisibles, valeurVersPixel, type Domaine } from "../../lib/domaineAxe";
 
-/** Formatte un strike de façon compacte (ex. 78 000 → 78K). */
+/** Formatte un strike de façon compacte (ex. 78 000 → 78K ; 44,5 reste « 44.5 », distinct de 45). */
 export function formatStrike(v: number): string {
   if (v >= 1000) return `${(v / 1000).toFixed(0)}K`;
+  if (!Number.isInteger(v)) return String(Number(v.toFixed(2)));
   return v.toFixed(v < 10 ? 1 : 0);
 }
 

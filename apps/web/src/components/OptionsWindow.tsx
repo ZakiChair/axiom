@@ -47,9 +47,13 @@ import { ivRank } from "../data/ivRank";
 import { bandeStrikes, construireGrilleOi, type GrilleOi } from "../data/oiHeatmap";
 import {
   CBOE_TICKERS,
+  SOUS_JACENT_ETF,
   cboeExpiries,
   cboeOptionsToLegs,
+  estEtfCrypto,
   fetchCboeChain,
+  niveauCrypto,
+  prixCryptoAuDernierEchange,
   type CboeChain,
   type CboeTicker,
 } from "../data/cboe";
@@ -80,7 +84,7 @@ import {
 } from "./omon/dessins";
 // Sous-vues présentationnelles (JSX extrait, découpe v1.9) — toute la logique reste ici.
 import { VueSmile, type SurvolSmile } from "./omon/VueSmile";
-import { VueGexDex, type SurvolBarres } from "./omon/VueGexDex";
+import { VueGexDex, type LectureEtf, type SurvolBarres } from "./omon/VueGexDex";
 import { VueHeatmap } from "./omon/VueHeatmap";
 import { VueTermIv } from "./omon/VueTermIv";
 
@@ -140,6 +144,8 @@ export const commandes: Commande[] = [
 // ─────────────────────────── Constantes ───────────────────────────
 
 const REFRESH_MS = 60_000; // ~1 min.
+// ETF CBOE (IBIT/ETHA) : ~1,2 Mo par appel pour une cotation différée d'environ 15 min.
+const REFRESH_ETF_MS = 5 * 60_000;
 const DEVISES = ["BTC", "ETH"] as const;
 type Devise = (typeof DEVISES)[number];
 
@@ -223,6 +229,8 @@ export function OptionsWindow() {
   // Chaîne CBOE (indices actions) — chargée seulement en GEX/DEX « Actions ».
   const [cboeTicker, setCboeTicker] = useState<CboeTicker>("SPX");
   const [cboeChaine, setCboeChaine] = useState<CboeChain | null>(null);
+  // ETF : prix du sous-jacent crypto au dernier échange de l'ETF (null = conversion masquée).
+  const [cboeRefCrypto, setCboeRefCrypto] = useState<number | null>(null);
   const [cboeExpiry, setCboeExpiry] = useState<number | null>(null);
   const [cboeErreur, setCboeErreur] = useState<string | null>(null);
   const [cboeLoading, setCboeLoading] = useState(false);
@@ -334,20 +342,26 @@ export function OptionsWindow() {
   const { refCanvas, domaine } = useDomaineZoom(strikesBornes, () => setSurvolSmile(null), { gauche: SMILE_PAD_L, droite: SMILE_PAD_R });
 
   // Chaîne CBOE : chargée + pollée UNIQUEMENT en vue GEX/DEX « Actions » (dégradation gracieuse
-  // totale — fetchCboeChain renvoie null en cas d'échec, jamais d'exception).
+  // totale — fetchCboeChain renvoie null en cas d'échec, jamais d'exception). ETF : le prix de
+  // référence crypto est attendu AVANT de poser l'état, pour que chaîne et ratio arrivent ensemble.
   useEffect(() => {
     if (!open || vue !== "gexdex" || classe !== "actions") return;
     let ignore = false;
     const charger = async () => {
       setCboeLoading(true);
       const chaine = await fetchCboeChain(cboeTicker);
+      const ref =
+        chaine && estEtfCrypto(chaine.ticker) && chaine.dernierEchangeNy
+          ? await prixCryptoAuDernierEchange(chaine.ticker, chaine.dernierEchangeNy)
+          : null;
       if (ignore) return;
       setCboeChaine(chaine);
+      setCboeRefCrypto(ref);
       setCboeErreur(chaine ? null : "Chaîne CBOE indisponible (endpoint non contractuel).");
       setCboeLoading(false);
     };
     void charger();
-    const timer = setInterval(charger, REFRESH_MS);
+    const timer = setInterval(charger, estEtfCrypto(cboeTicker) ? REFRESH_ETF_MS : REFRESH_MS);
     return () => {
       ignore = true;
       clearInterval(timer);
@@ -435,6 +449,24 @@ export function OptionsWindow() {
   );
   // Murs de gamma nommés — même périmètre que le net (toutes éch. crypto / éch. sélectionnée actions).
   const murs = useMemo(() => mursGamma(sourceNet), [sourceNet]);
+
+  // Lecture ETF spot crypto (IBIT/ETHA) : ratio de conversion, P/C et notionnel de la chaîne
+  // complète (agrégats pris avant le filtre ±25 %). Null hors ETF. Sous-jacent dérivé de la
+  // chaîne affichée, jamais du ticker sélectionné (qui la précède pendant le chargement).
+  const lectureEtf = useMemo<LectureEtf | null>(() => {
+    if (classe !== "actions" || !cboeChaine || !estEtfCrypto(cboeChaine.ticker)) return null;
+    const { oiCalls, oiPuts, volCalls, volPuts } = cboeChaine.resume;
+    return {
+      sousJacent: SOUS_JACENT_ETF[cboeChaine.ticker],
+      prixEtf: cboeChaine.spot,
+      prixCrypto: cboeRefCrypto,
+      dernierEchangeNy: cboeChaine.dernierEchangeNy,
+      iv30: cboeChaine.iv30,
+      pcOi: oiCalls > 0 ? oiPuts / oiCalls : Number.NaN,
+      pcVol: volCalls > 0 ? volPuts / volCalls : Number.NaN,
+      notionnelUsd: (oiCalls + oiPuts) * EQUITY_CONTRACT_MULTIPLIER * cboeChaine.spot,
+    };
+  }, [classe, cboeChaine, cboeRefCrypto]);
   const scenariosGamma = useMemo<ScenarioGamma[]>(() => {
     if (vue !== "gexdex" || !Number.isFinite(spotVerdict)) return [];
     if (classe === "crypto") {
@@ -575,6 +607,7 @@ export function OptionsWindow() {
       dex: best.dex,
       oiCall: oi?.call ?? null,
       oiPut: oi?.put ?? null,
+      niveauCrypto: lectureEtf ? niveauCrypto(best.strike, lectureEtf.prixEtf, lectureEtf.prixCrypto) : null,
     });
   };
 
@@ -869,7 +902,11 @@ export function OptionsWindow() {
         {vue === "gexdex" && classe === "actions" && (
           <div className="mb-3 flex items-center gap-2">
             <Segmente
-              options={CBOE_TICKERS.map((t) => ({ id: t, label: t }))}
+              options={CBOE_TICKERS.map((t) => ({
+                id: t,
+                label: t,
+                title: estEtfCrypto(t) ? `ETF spot ${SOUS_JACENT_ETF[t]} : niveaux convertis en prix ${SOUS_JACENT_ETF[t]}` : undefined,
+              }))}
               actif={cboeTicker}
               onChange={setCboeTicker}
             />
@@ -938,6 +975,7 @@ export function OptionsWindow() {
             murs={murs}
             scenariosGamma={scenariosGamma}
             flipReel={profilGex?.flipReel ?? null}
+            etf={lectureEtf}
             profilCanvasRef={profilCanvasRef}
             survolBarres={survolBarres}
             onSurvolBarres={onSurvolBarres}

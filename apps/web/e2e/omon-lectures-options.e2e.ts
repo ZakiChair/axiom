@@ -175,3 +175,135 @@ test("Smile : P(clôture > K à T) risque-neutre (Breeden-Litzenberger centré) 
 
   await expect(fenetre).toContainText("mesure risque-neutre, pas une probabilité réelle");
 });
+
+/** Option CBOE brute (symbole OCC, greeks CBOE). */
+function optionCboe(racine: string, cp: "C" | "P", strike: number, oi: number, volume: number, gamma: number) {
+  return {
+    option: `${racine}260918${cp}${String(Math.round(strike * 1000)).padStart(8, "0")}`,
+    open_interest: oi,
+    volume,
+    delta: cp === "C" ? 0.5 : -0.5,
+    gamma,
+    iv: 0.4,
+  };
+}
+
+test("GEX/DEX Actions : IBIT différé converti en niveaux BTC au dernier échange, ETHA masqué sans bougie Binance", async ({ page }) => {
+  // Samedi : marché US fermé, cotation figée au dernier échange du vendredi 16:00 NY (20:00 UTC).
+  const instant = Date.parse("2026-09-12T12:00:00Z");
+  await page.clock.setFixedTime(new Date(instant));
+
+  // IBIT à 45 $ : bande ±25 % = [33,75 ; 56,25]. Le strike 30 (puts massifs) est hors bande :
+  // exclu du GEX (sinon put wall), mais compté dans le P/C de la chaîne complète.
+  // GEX/(S²·0,01·100) : 40 → −45 ; 44,5 → −380 (put wall) ; 45 → +100 ; 50 → +490 (call wall).
+  // Cumul −45, −425, −325, +165 → flip = 45 + 325/490 × 5 ≈ 48,32 $.
+  const ibit = {
+    timestamp: "2026-09-11 20:15:00",
+    data: {
+      current_price: 45,
+      iv30: 38.8,
+      last_trade_time: "2026-09-11T16:00:00",
+      options: [
+        optionCboe("IBIT", "C", 30, 0, 10, 0.1),
+        optionCboe("IBIT", "P", 30, 5000, 100, 0.1),
+        optionCboe("IBIT", "C", 40, 100, 10, 0.05),
+        optionCboe("IBIT", "P", 40, 1000, 10, 0.05),
+        optionCboe("IBIT", "C", 44.5, 100, 10, 0.2),
+        optionCboe("IBIT", "P", 44.5, 2000, 10, 0.2),
+        optionCboe("IBIT", "C", 45, 1000, 10, 0.2),
+        optionCboe("IBIT", "P", 45, 500, 10, 0.2),
+        optionCboe("IBIT", "C", 50, 5000, 10, 0.1),
+        optionCboe("IBIT", "P", 50, 100, 10, 0.1),
+      ],
+    },
+  };
+  const etha = {
+    timestamp: "2026-09-11 20:15:00",
+    data: {
+      current_price: 20,
+      iv30: 52.4,
+      last_trade_time: "2026-09-11T16:00:00",
+      options: [
+        optionCboe("ETHA", "C", 18, 100, 5, 0.1),
+        optionCboe("ETHA", "P", 18, 800, 5, 0.1),
+        optionCboe("ETHA", "C", 22, 900, 5, 0.1),
+        optionCboe("ETHA", "P", 22, 50, 5, 0.1),
+      ],
+    },
+  };
+  const cheminsCboe: string[] = [];
+  await page.route("https://cdn.cboe.com/api/global/delayed_quotes/options/**", async (route) => {
+    const nom = new URL(route.request().url()).pathname.split("/").at(-1) ?? "";
+    cheminsCboe.push(nom);
+    if (nom === "IBIT.json") return route.fulfill({ json: ibit });
+    if (nom === "ETHA.json") return route.fulfill({ json: etha });
+    return route.fulfill({ status: 403, json: { error: "chemin CBOE non prévu" } });
+  });
+  // Seule la bougie 1m BTCUSDT du dernier échange est servie ; ETHUSDT échoue (conversion masquée).
+  const dernierEchangeUtc = Date.UTC(2026, 8, 11, 20, 0, 0);
+  await page.route("**/api.binance.com/api/v3/klines*", async (route) => {
+    const p = new URL(route.request().url()).searchParams;
+    if (
+      p.get("symbol") === "BTCUSDT" &&
+      p.get("interval") === "1m" &&
+      p.get("limit") === "1" &&
+      p.get("endTime") === String(dernierEchangeUtc)
+    ) {
+      return route.fulfill({
+        json: [[dernierEchangeUtc, "79990", "80010", "79980", "80000", "1", dernierEchangeUtc + 59_999, "80000", 1, "0", "0", "0"]],
+      });
+    }
+    return route.fulfill({ status: 503, json: { error: "bougie non prévue" } });
+  });
+
+  await page.goto("/");
+  await commande(page, "OMON");
+  const fenetre = page.getByRole("complementary", { name: "Options (smile IV, max pain)" });
+  await fenetre.getByRole("button", { name: "GEX/DEX", exact: true }).click();
+  await fenetre.getByRole("button", { name: "Actions", exact: true }).click();
+  await fenetre.getByRole("button", { name: "IBIT", exact: true }).click();
+
+  // Tuiles visibles de la vue GEX/DEX (Smile, toujours montée mais masquée, a ses propres P/C et notionnel).
+  const tuile = (label: string) =>
+    fenetre.locator("div.rounded-md").filter({ hasText: new RegExp(`^${label}`), visible: true });
+  await expect(fenetre).toContainText("différé ~15 min — marché US fermé nuits et week-ends");
+  await expect(fenetre).toContainText("dernier échange 2026-09-11 16:00:00 (heure de New York)");
+
+  // Niveaux convertis au ratio 80 000 / 45 ; petits strikes fractionnaires non arrondis.
+  await expect(tuile("Spot(?!↔)")).toContainText("≈ $80,000 BTC");
+  await expect(tuile("Call wall")).toContainText("$50");
+  await expect(tuile("Call wall")).toContainText("≈ $88,889 BTC");
+  await expect(tuile("Put wall")).toContainText("$44.5");
+  await expect(tuile("Put wall")).toContainText("≈ $79,111 BTC");
+  await expect(tuile("Gamma flip")).toContainText("$48.32");
+  await expect(tuile("Gamma flip")).toContainText("indicatif");
+  await expect(tuile("Gamma flip")).toContainText("≈ $85,896 BTC");
+  // P/C de la chaîne complète (strike 30 compris) : OI 8 600 / 6 200 ; volume 140 / 50.
+  await expect(tuile("P/C \\(OI\\)")).toContainText("1.39");
+  await expect(tuile("P/C \\(Vol\\)")).toContainText("2.80");
+  await expect(tuile("IV30 \\(CBOE\\)")).toContainText("38.8 %");
+  // Notionnel = 14 800 contrats × 100 × 45 $ ≈ 832,5 BTC au prix de référence.
+  await expect(tuile("Notionnel OI")).toContainText("$66.60M");
+  await expect(tuile("Notionnel OI")).toContainText("≈ 833 BTC");
+
+  // Infobulle de l'histogramme au bord droit du tracé (strike 50).
+  const canvas = fenetre.locator("canvas").filter({ visible: true }).first();
+  const boite = await canvas.boundingBox();
+  if (boite === null) throw new Error("histogramme GEX absent");
+  await page.mouse.move(boite.x + boite.width - 12, boite.y + boite.height / 2);
+  await expect(fenetre.getByText("Strike 50", { exact: true })).toBeVisible();
+  await expect(fenetre.getByText("≈ BTC : $88,889")).toBeVisible();
+
+  // ETHA : bougie ETHUSDT indisponible → conversion masquée, jamais le spot courant.
+  await fenetre.getByRole("button", { name: "ETHA", exact: true }).click();
+  await expect(tuile("Spot(?!↔)")).toContainText("$20");
+  await expect(tuile("Spot(?!↔)")).toContainText("≈ — ETH");
+  await expect(tuile("Call wall")).toContainText("≈ — ETH");
+  await expect(fenetre).toContainText("conversion en ETH indisponible");
+
+  expect(cheminsCboe).toContain("IBIT.json");
+  expect(cheminsCboe).toContain("ETHA.json");
+  // SPX (ticker par défaut) garde « _SPX.json » ; les ETF n'utilisent jamais le préfixe (403).
+  expect(cheminsCboe).toContain("_SPX.json");
+  expect(cheminsCboe.filter((c) => c === "_IBIT.json" || c === "_ETHA.json")).toEqual([]);
+});

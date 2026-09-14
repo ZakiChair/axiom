@@ -12,7 +12,8 @@
  * GEX(S) sous l'histogramme (crypto uniquement — les greeks CBOE sont figés, non re-simulables).
  */
 import type { MursGamma, ScenarioGamma, VerdictGamma } from "../../data/gexDex";
-import { formatDec, formatPct, formatUsd } from "../../lib/format";
+import { niveauCrypto } from "../../data/cboe";
+import { formatDec, formatEntier, formatPct, formatPourcentage, formatUsd } from "../../lib/format";
 import { Badge, TuileStat, ErreurBloc, NoteSource, Fraicheur, InfobulleGraphe } from "../ui";
 import { formatStrike } from "./dessins";
 import { formatUsdExact } from "./format";
@@ -26,6 +27,25 @@ export interface SurvolBarres {
   dex: number;
   oiCall: number | null;
   oiPut: number | null;
+  /** Strike converti en niveau crypto (ETF seulement), null sinon ou si la référence manque. */
+  niveauCrypto: number | null;
+}
+
+/** Lecture d'un ETF spot crypto (IBIT → BTC, ETHA → ETH) en classe Actions. */
+export interface LectureEtf {
+  sousJacent: "BTC" | "ETH";
+  prixEtf: number;
+  /** Clôture Binance 1m au dernier échange de l'ETF ; null = conversion masquée. */
+  prixCrypto: number | null;
+  /** Heure du dernier échange (New York, sans offset), null si absente. */
+  dernierEchangeNy: string | null;
+  /** IV30 CBOE (%). */
+  iv30: number;
+  /** Ratios put/call de la chaîne complète (NaN si aucun call). */
+  pcOi: number;
+  pcVol: number;
+  /** Σ OI × 100 × prix de l'ETF, chaîne complète (USD). */
+  notionnelUsd: number;
 }
 
 interface Props {
@@ -56,6 +76,8 @@ interface Props {
   flipReel: number | null;
   /** Canvas du profil GEX(S) — rendu seulement en crypto (dessiné par l'orchestrateur). */
   profilCanvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
+  /** Lecture ETF (IBIT/ETHA) : conversions en niveaux crypto et tuiles dédiées ; null sinon. */
+  etf: LectureEtf | null;
   survolBarres: SurvolBarres | null;
   onSurvolBarres: (e: React.MouseEvent<HTMLCanvasElement>) => void;
   onSortieBarres: () => void;
@@ -80,6 +102,7 @@ export function VueGexDex({
   scenariosGamma,
   flipReel,
   profilCanvasRef,
+  etf,
   survolBarres,
   onSurvolBarres,
   onSortieBarres,
@@ -104,6 +127,14 @@ export function VueGexDex({
   // entiers en actions.
   const decOi = classe === "crypto" ? 2 : 0;
 
+  // ETF : niveau crypto équivalent affiché à côté du strike (« ≈ — BTC » si la référence manque).
+  const converti = (strike: number | null) =>
+    etf ? (
+      <span className="text-[10px] text-text-dim">
+        ≈ {formatUsdExact(niveauCrypto(strike, etf.prixEtf, etf.prixCrypto))} {etf.sousJacent}
+      </span>
+    ) : undefined;
+
   return (
     <>
       <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
@@ -116,7 +147,13 @@ export function VueGexDex({
 
       {classe === "actions" && (
         <div className="mb-3 rounded-md border border-border bg-bg px-3 py-1.5 text-[10px] text-text-dim">
-          CBOE — données différées (~15 min), endpoint non contractuel.
+          {etf
+            ? `CBOE — différé ~15 min — marché US fermé nuits et week-ends · dernier échange ${
+                etf.dernierEchangeNy?.replace("T", " ") ?? "—"
+              } (heure de New York) · niveaux ≈ ${etf.sousJacent} par ratio de prix au dernier échange (pas la NAV)${
+                etf.prixCrypto === null ? ` · conversion en ${etf.sousJacent} indisponible (bougie Binance absente)` : ""
+              } · endpoint non contractuel.`
+            : "CBOE — données différées (~15 min), endpoint non contractuel."}
         </div>
       )}
 
@@ -152,6 +189,7 @@ export function VueGexDex({
                 },
                 { label: "OI calls", valeur: formatDec(survolBarres.oiCall, decOi) },
                 { label: "OI puts", valeur: formatDec(survolBarres.oiPut, decOi) },
+                ...(etf ? [{ label: `≈ ${etf.sousJacent}`, valeur: formatUsdExact(survolBarres.niveauCrypto) }] : []),
               ]}
             />
           )}
@@ -210,12 +248,26 @@ export function VueGexDex({
           label="Spot"
           badge={<Badge>{porteeNet}</Badge>}
           valeur={formatUsdExact(spotVerdict)}
+          extra={converti(spotVerdict)}
         />
         <TuileStat
           disposition="inline"
           label="Gamma flip"
-          badge={<Badge>{porteeNet}</Badge>}
+          badge={
+            <>
+              <Badge>{porteeNet}</Badge>
+              {etf && (
+                <Badge
+                  ton="warn"
+                  title="Sur une chaîne d'ETF, le cumul du GEX par strike change souvent de signe plusieurs fois (cinq fois sur l'échéance IBIT du 18/09 sondée) : premier passage instable, les murs sont plus robustes."
+                >
+                  indicatif
+                </Badge>
+              )}
+            </>
+          }
           valeur={formatUsdExact(flip)}
+          extra={converti(flip)}
         />
         <TuileStat
           disposition="inline"
@@ -235,19 +287,51 @@ export function VueGexDex({
           label="Call wall"
           badge={<Badge>{porteeNet}</Badge>}
           valeur={formatUsdExact(murs.callWall)}
+          extra={converti(murs.callWall)}
         />
         <TuileStat
           disposition="inline"
           label="Put wall"
           badge={<Badge>{porteeNet}</Badge>}
           valeur={formatUsdExact(murs.putWall)}
+          extra={converti(murs.putWall)}
         />
         <TuileStat
           disposition="inline"
           label="Strike |GEX| max"
           badge={<Badge>échéance sélectionnée</Badge>}
           valeur={formatUsdExact(strikePicGex)}
+          extra={converti(strikePicGex)}
         />
+        {etf && (
+          <>
+            <TuileStat
+              disposition="inline"
+              label="P/C (OI)"
+              badge={<Badge>chaîne complète</Badge>}
+              valeur={formatDec(etf.pcOi, 2)}
+            />
+            <TuileStat
+              disposition="inline"
+              label="P/C (Vol)"
+              badge={<Badge>chaîne complète</Badge>}
+              valeur={formatDec(etf.pcVol, 2)}
+              title="Volume du fichier CBOE : consolidé toutes places ou propre au CBOE, non vérifié"
+            />
+            <TuileStat disposition="inline" label="IV30 (CBOE)" valeur={formatPourcentage(etf.iv30, 1)} />
+            <TuileStat
+              disposition="inline"
+              label="Notionnel OI"
+              badge={<Badge>chaîne complète</Badge>}
+              valeur={formatUsd(etf.notionnelUsd)}
+              extra={
+                <span className="text-[10px] text-text-dim">
+                  ≈ {etf.prixCrypto === null ? "—" : formatEntier(etf.notionnelUsd / etf.prixCrypto)} {etf.sousJacent}
+                </span>
+              }
+            />
+          </>
+        )}
       </div>
 
       {scenariosGamma.length > 0 && (
@@ -279,6 +363,8 @@ export function VueGexDex({
           {classe === "crypto"
             ? "GEX/DEX calculés côté client (Black-Scholes sur IV mark Deribit, OI en unités de base, multiplicateur 1). La convention calls+/puts− et les variantes tous-long/tous-short sont des hypothèses, pas une observation des portefeuilles dealers. Histogramme et pic |GEX| : échéance sélectionnée. Net, flip cumul/strike, murs, verdict et profil GEX(S) : toutes échéances ; le flip réel du profil est le zéro du GEX recalculé en spot."
             : "Greeks pré-calculés CBOE (multiplicateur 100) — toutes les métriques portent sur l'échéance sélectionnée. Convention : dealers long les calls, short les puts — le signe du GEX en dépend. GEX = Σ(Γc·OIc − Γp·OIp)·S²·0,01·mult ; DEX = Σ(Δ·OI)·S·mult. Histogramme : strikes < 0,5 % du max masqués. Pas de profil GEX(S) : greeks figés, non re-simulables."}
+          {etf &&
+            ` ETF ${etf.sousJacent} : strikes conservés à ±25 % du prix de l'ETF (P/C et notionnel sur la chaîne complète) ; OI OCC mis à jour une fois par jour ; volume consolidé ou propre au CBOE : non vérifié. Niveau ≈ ${etf.sousJacent} = strike × clôture Binance 1 min au dernier échange ÷ prix de l'ETF : approximation, pas la NAV (frais, prime ou décote) ; « — » si la bougie manque, jamais le cours courant.`}
         </NoteSource>
       </div>
     </>

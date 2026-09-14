@@ -12,6 +12,8 @@
  *
  * Sans clé API : aucun appel, aucune erreur bloquante — la fenêtre invite à
  * saisir une clé dans les Réglages (stockée localement, jamais loggée).
+ * Hors clé et hors exchange : OI BTC par exchange (BGeometrics) et OI perps DEX quotidien
+ * tous actifs (DefiLlama), deux sections repliables chargées au premier dépliage.
  *
  * Émetteur de symbole de groupe (v1, seule fenêtre à écrire) : le champ symbole de
  * l'en-tête diffuse via `windowManagerStore.setGroupSymbol(groupColor, valeur)` quand
@@ -64,6 +66,7 @@ import { referentiel, type Referentiel } from "../lib/referentiel";
 import { getBgeometricsKey } from "../store/onchain";
 import { fetchOiFuturesParExchange, type JourOiFutures } from "../data/onchain/bgeometrics";
 import { construireModeleOiExchange, joindreSpreadParTimestamp } from "./derivativesWindow.util";
+import { SectionOiPerpsDex } from "./OiPerpsDexSection";
 import { BadgeFiabilite, BarreProgression, EnTeteFenetre, ErreurBloc, Fraicheur, TuileStat, RefBadge, SansCle, Vide } from "./ui";
 
 /** Période d'agrégation du long/short ratio et fenêtre des liquidations affichées. */
@@ -760,6 +763,10 @@ export function DerivativesWindow() {
               </div>
             )}
           </section>
+
+          {/* OI perps DEX (quotidien, tous actifs) — DefiLlama, INDÉPENDANT de la clé
+              Coinalyze et de l'exchange : hors des branches ci-dessus. Repliable, fetch lazy. */}
+          <SectionOiPerpsDex />
         </div>
     </>
   );

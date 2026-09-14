@@ -28,6 +28,8 @@ const trade = (over: Partial<TradeResultat> = {}): TradeResultat => ({
   dureeMs: 1_000,
   risqueInitial: null,
   r: null,
+  maePct: 0,
+  mfePct: 0,
   ...over,
 });
 

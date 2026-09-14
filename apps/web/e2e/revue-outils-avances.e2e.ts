@@ -325,6 +325,11 @@ test("Backtest distingue bootstrap, spot sans funding et absence du funding rée
   await expect(fenetre.getByText(/^1re moitié · /)).toBeVisible();
   await expect(fenetre.getByText(/^2e moitié · /)).toBeVisible();
   await expect(fenetre.getByText("PnL net", { exact: true })).toHaveCount(3);
+  // Excursions MAE / MFE : moyennes dans la grille et colonnes de la table des trades.
+  await expect(fenetre.getByText(/^MAE moyenne/)).toBeVisible();
+  // Les colonnes triables sont des boutons d'en-tête (TableTriable).
+  await expect(fenetre.getByRole("button", { name: "MAE", exact: true })).toBeVisible();
+  await expect(fenetre.getByRole("button", { name: "MFE", exact: true })).toBeVisible();
 
   const modeMonteCarlo = fenetre.getByLabel("Mode Monte-Carlo");
   await expect(modeMonteCarlo).toHaveValue("blocs");

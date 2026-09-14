@@ -201,6 +201,15 @@ export interface TradeResultat {
    * R net = `pnl / risqueInitial` (frais + slippage + funding inclus). `null` si pas de stop.
    */
   r: number | null;
+  /**
+   * Pire excursion adverse pendant la détention, en % du prix d'entrée (≤ 0) : plus bas des
+   * lows pour un long, plus haut des highs pour un short. Barres DÉTENUES seulement : la barre
+   * de fill de sortie n'en fait pas partie (sortie à son open) ; la dernière barre d'une
+   * sortie fin-donnees en fait partie (marquée à son close).
+   */
+  maePct: number;
+  /** Meilleure excursion favorable pendant la détention, en % du prix d'entrée (≥ 0). */
+  mfePct: number;
 }
 
 /** Un point d'équité valorisé à chaque clôture de bougie, plus un point initial. */
@@ -242,6 +251,10 @@ export interface StatsBacktest {
   sommeR: number;
   /** Expectancy R = sommeR / nbTradesR (null si aucun trade à R). Convention EXPY : R=0 compté. */
   expectancyR: number | null;
+  /** Moyenne des MAE des trades (≤ 0), en % du prix d'entrée ; 0 sans trade. */
+  maeMoyenPct: number;
+  /** Moyenne des MFE des trades (≥ 0), en % du prix d'entrée ; 0 sans trade. */
+  mfeMoyenPct: number;
 }
 
 /** Résultat complet d'un backtest. */

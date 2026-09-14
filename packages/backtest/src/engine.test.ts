@@ -707,7 +707,7 @@ describe("statistiques agrégées", () => {
     const trade: TradeResultat = {
       sens: "long", tempsEntree: 0, prixEntree: 100, tempsSortie: H, prixSortie: 100,
       raison: "fin-donnees", quantite: 1, pnl: 0, pnlPct: 0, frais: 0,
-      dureeBarres: 1, dureeMs: 2 * H, risqueInitial: null, r: null,
+      dureeBarres: 1, dureeMs: 2 * H, risqueInitial: null, r: null, maePct: 0, mfePct: 0,
     };
     const candles = [barre(0, 100, 100), barre(H, 100, 100)];
     expect(calculerStats([trade], [], candles, 1000, 2 * H).expositionPct).toBe(100);
@@ -735,6 +735,8 @@ describe("statistiques agrégées", () => {
       dureeMs: tSortie - tEntree,
       risqueInitial: null,
       r: null,
+      maePct: 0,
+      mfePct: 0,
     });
     const trades = [mk(100, 10, 0, 1000), mk(-50, -5, 1000, 2000), mk(30, 3, 2000, 3000)];
     const candles = [barre(0, 100, 100), barre(1000, 100, 100), barre(2000, 100, 100), barre(3000, 100, 100)];
@@ -767,7 +769,7 @@ describe("statistiques agrégées", () => {
     const gagnant: TradeResultat = {
       sens: "long", tempsEntree: 0, prixEntree: 100, tempsSortie: 1000, prixSortie: 110,
       raison: "regle", quantite: 10, pnl: 100, pnlPct: 10, frais: 0, dureeBarres: 1, dureeMs: 1000,
-      risqueInitial: null, r: null,
+      risqueInitial: null, r: null, maePct: 0, mfePct: 0,
     };
     const candles = [barre(0, 100, 100), barre(1000, 100, 100)];
     const s1 = calculerStats([gagnant], construireEquity([gagnant], candles, 1000), candles, 1000);
@@ -943,5 +945,86 @@ describe("sizing en % de risque", () => {
     expect(trade.r).not.toBeNull();
     expect(trade.r!).toBeLessThan(-1); // frais dans le R
     expect(trade.frais).toBeGreaterThan(0);
+  });
+});
+
+// ─────────────────────────── 12. Excursions MAE / MFE ───────────────────────────
+
+describe("excursions MAE / MFE", () => {
+  const stratLong: StrategieDef = {
+    direction: "long", tailleFixe: 100,
+    reglesEntree: [compareClose(">", 100)],
+    reglesSortie: [compareClose("<", 100)],
+  };
+  const stratShort: StrategieDef = {
+    direction: "short", tailleFixe: 100,
+    reglesEntree: [compareClose("<", 100)],
+    reglesSortie: [compareClose(">", 100)],
+  };
+
+  it("long : pire creux et meilleur pic sur les barres détenues, hors barre de fill de sortie", () => {
+    const candles = [
+      bougie(t(0), 100, 101, 99, 101), // décision d'entrée (close > 100)
+      bougie(t(1), 100, 110, 95, 105), // fill à l'open 100 ; barre détenue
+      bougie(t(2), 105, 120, 98, 99), // détenue ; close < 100 → décision de sortie
+      bougie(t(3), 99, 130, 50, 99), // fill de sortie à l'open : ses extrêmes NE comptent PAS
+      bougie(t(4), 99, 99, 99, 99),
+    ];
+    const { trades, stats } = runBacktest(candles, stratLong, SANS_FRICTION);
+    expect(trades).toHaveLength(1);
+    expect(trades[0]!.mfePct).toBeCloseTo(20, 9); // 120 / 100 − 1
+    expect(trades[0]!.maePct).toBeCloseTo(-5, 9); // 95 / 100 − 1
+    expect(stats.mfeMoyenPct).toBeCloseTo(20, 9);
+    expect(stats.maeMoyenPct).toBeCloseTo(-5, 9);
+  });
+
+  it("short : les rôles des extrêmes s'inversent", () => {
+    const candles = [
+      bougie(t(0), 100, 101, 99, 99), // décision d'entrée short (close < 100)
+      bougie(t(1), 100, 108, 90, 95), // fill à l'open 100
+      bougie(t(2), 95, 104, 85, 101), // close > 100 → décision de sortie
+      bougie(t(3), 101, 200, 10, 101), // barre de fill : ignorée
+      bougie(t(4), 101, 101, 101, 101),
+    ];
+    const { trades } = runBacktest(candles, stratShort, SANS_FRICTION);
+    expect(trades).toHaveLength(1);
+    expect(trades[0]!.maePct).toBeCloseTo(-8, 9); // (100 − 108) / 100
+    expect(trades[0]!.mfePct).toBeCloseTo(15, 9); // (100 − 85) / 100
+  });
+
+  it("fin de données : la dernière barre, marquée à son close, compte dans l'excursion", () => {
+    const candles = [
+      bougie(t(0), 100, 101, 99, 101),
+      bougie(t(1), 100, 105, 97, 102),
+      bougie(t(2), 102, 111, 96, 103), // dernière barre : position marquée à son close
+    ];
+    const { trades } = runBacktest(candles, stratLong, SANS_FRICTION);
+    expect(trades).toHaveLength(1);
+    expect(trades[0]!.raison).toBe("fin-donnees");
+    expect(trades[0]!.mfePct).toBeCloseTo(11, 9);
+    expect(trades[0]!.maePct).toBeCloseTo(-4, 9);
+  });
+
+  it("la MAE est bornée à 0 par le haut et la MFE à 0 par le bas", () => {
+    const monte = [
+      bougie(t(0), 100, 101, 98, 101),
+      bougie(t(1), 100, 104, 100, 103),
+      bougie(t(2), 103, 106, 102, 105),
+    ];
+    // Long qui ne repasse jamais sous son entrée : MAE = 0.
+    const long = runBacktest(monte, stratLong, SANS_FRICTION).trades[0]!;
+    expect(long.maePct).toBe(0);
+    expect(long.mfePct).toBeCloseTo(6, 9);
+    // Short entré à 100 (close 99 en t0), sorti à l'open de t2 (close 103 > 100 en t1) :
+    // une seule barre détenue, qui ne passe jamais sous 100 → MFE = 0, MAE = −4 %.
+    const short = runBacktest([bougie(t(0), 100, 101, 98, 99), monte[1]!, monte[2]!], stratShort, SANS_FRICTION).trades[0]!;
+    expect(short.mfePct).toBe(0);
+    expect(short.maePct).toBeCloseTo(-4, 9);
+  });
+
+  it("moyennes nulles sans trade", () => {
+    const s0 = calculerStats([], [], [], 1000);
+    expect(s0.maeMoyenPct).toBe(0);
+    expect(s0.mfeMoyenPct).toBe(0);
   });
 });

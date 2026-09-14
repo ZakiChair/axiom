@@ -295,8 +295,39 @@ export function calculerFundingTrade(
 }
 
 /**
+ * Excursions d'une position sur les barres DÉTENUES `[indexEntree, indexFinExclusif[`, en %
+ * du prix d'entrée : MAE = pire mouvement adverse (≤ 0), MFE = meilleur mouvement favorable
+ * (≥ 0), tous deux bornés à 0 (une position qui ne repasse jamais sous son entrée a une MAE
+ * nulle). PURE.
+ */
+function excursions(
+  sens: SensPosition,
+  prixEntree: number,
+  candles: Candle[],
+  indexEntree: number,
+  indexFinExclusif: number,
+): { maePct: number; mfePct: number } {
+  let plusHaut = -Infinity;
+  let plusBas = Infinity;
+  for (let j = indexEntree; j < indexFinExclusif; j++) {
+    const b = candles[j];
+    if (b === undefined) continue;
+    if (b.high > plusHaut) plusHaut = b.high;
+    if (b.low < plusBas) plusBas = b.low;
+  }
+  if (!(prixEntree > 0) || !Number.isFinite(plusHaut) || !Number.isFinite(plusBas)) return { maePct: 0, mfePct: 0 };
+  const versHaut = ((plusHaut - prixEntree) / prixEntree) * 100;
+  const versBas = ((plusBas - prixEntree) / prixEntree) * 100;
+  return sens === "long"
+    ? { maePct: Math.min(0, versBas), mfePct: Math.max(0, versHaut) }
+    : { maePct: Math.min(0, -versHaut), mfePct: Math.max(0, -versBas) };
+}
+
+/**
  * Clôt une position et produit le trade net. PnL brut = qté · (sortie − entrée) pour un
  * long (inversé pour un short) ; frais = fraisPct sur le notionnel de CHAQUE côté.
+ * `indexFinExclusif` borne les barres détenues pour les excursions : la barre de fill
+ * d'une sortie ordinaire (`indexSortie`), ou `n` pour une sortie fin-donnees.
  */
 function cloturerTrade(
   pos: PositionOuverte,
@@ -307,6 +338,8 @@ function cloturerTrade(
   raison: RaisonSortie,
   strat: StrategieDef,
   params: ParamsBacktest,
+  candles: Candle[],
+  indexFinExclusif: number,
 ): TradeResultat {
   const notionnelEntree = pos.quantite * pos.prixEntree; // ≈ strat.tailleFixe
   const notionnelSortie = pos.quantite * prixSortie;
@@ -347,6 +380,7 @@ function cloturerTrade(
     dureeMs: instantSortieEffectif - pos.tempsEntree,
     risqueInitial,
     r,
+    ...excursions(pos.sens, pos.prixEntree, candles, pos.indexEntree, indexFinExclusif),
   };
 }
 
@@ -507,7 +541,7 @@ export function runBacktest(
       const raison = decisionSortie(pos, barreDecision.close, strat, entree, sortie, i, direction);
       if (raison !== null) {
         const prixSortie = fillSortie(barreFill.open, pos.sens, params.slippagePct);
-        trades.push(cloturerTrade(pos, prixSortie, barreFill.time, barreFill.time, i + 1, raison, strat, params));
+        trades.push(cloturerTrade(pos, prixSortie, barreFill.time, barreFill.time, i + 1, raison, strat, params, candles, i + 1));
         pos = null;
         // Pas de réouverture sur la même barre : un éventuel retournement (les-deux) aura
         // lieu à une itération ULTÉRIEURE (préserve « une position à la fois »).
@@ -530,6 +564,8 @@ export function runBacktest(
           "fin-donnees",
           strat,
           params,
+          candles,
+          n,
         ),
       );
       pos = null;
@@ -710,5 +746,7 @@ export function calculerStats(
     nbTradesR,
     sommeR,
     expectancyR: nbTradesR > 0 ? sommeR / nbTradesR : null,
+    maeMoyenPct: moyenne(trades.map((t) => t.maePct)),
+    mfeMoyenPct: moyenne(trades.map((t) => t.mfePct)),
   };
 }

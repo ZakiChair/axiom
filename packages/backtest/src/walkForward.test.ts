@@ -34,6 +34,8 @@ function trade(entree: number, sortie: number, pnl: number, r: number | null): T
     dureeMs: t(sortie) - t(entree),
     risqueInitial: r === null ? null : 10,
     r,
+    maePct: 0,
+    mfePct: 0,
   };
 }
 
@@ -45,7 +47,7 @@ function point(i: number, equity: number): PointEquity {
 const STATS_NULLES: StatsBacktest = {
   nbTrades: 0, nbGagnants: 0, nbPerdants: 0, winRatePct: 0, profitFactor: 0, pnlTotal: 0,
   pnlTotalPct: 0, maxDrawdownPct: 0, sharpe: 0, expositionPct: 0, gainMoyenPct: 0,
-  perteMoyennePct: 0, nbTradesR: 0, sommeR: 0, expectancyR: null,
+  perteMoyennePct: 0, nbTradesR: 0, sommeR: 0, expectancyR: null, maeMoyenPct: 0, mfeMoyenPct: 0,
 };
 
 /**

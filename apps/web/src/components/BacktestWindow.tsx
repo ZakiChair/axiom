@@ -877,6 +877,24 @@ const COLONNES_TRADES: ColonneTable<TradeResultat>[] = [
     ),
   },
   {
+    id: "maePct",
+    label: "MAE",
+    align: "right",
+    largeur: "0.7fr",
+    triable: true,
+    valeurTri: (tr) => tr.maePct,
+    rendu: (tr) => <span className="text-right tabular-nums text-down">{formatPct(tr.maePct)}</span>,
+  },
+  {
+    id: "mfePct",
+    label: "MFE",
+    align: "right",
+    largeur: "0.7fr",
+    triable: true,
+    valeurTri: (tr) => tr.mfePct,
+    rendu: (tr) => <span className="text-right tabular-nums text-up">{formatPct(tr.mfePct)}</span>,
+  },
+  {
     id: "r",
     label: "R",
     align: "right",
@@ -1006,6 +1024,14 @@ function StatsGrid({ resultat }: { resultat: ResultatBacktest }) {
           ton={s.expectancyR !== null && s.expectancyR < 0 ? "down" : s.expectancyR !== null ? "up" : undefined}
         />
       </div>
+      <p
+        className="text-[10px] text-text-dim"
+        title="Excursions pendant la détention, en % du prix d'entrée, sur les barres détenues (hors barre de fill de sortie)"
+      >
+        MAE moyenne <span className="text-down">{formatPct(s.maeMoyenPct)}</span> · MFE moyenne{" "}
+        <span className="text-up">{formatPct(s.mfeMoyenPct)}</span> — pire creux / meilleur pic pendant la détention,
+        en % de l'entrée.
+      </p>
       {s.expectancyR !== null && (
         <p className="text-[10px] text-text-dim">
           R net (frais + slippage), risque initial = distance au stop à l'entrée · n={s.nbTradesR} · ΣR={formatDec(s.sommeR)}

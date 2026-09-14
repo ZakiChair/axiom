@@ -374,7 +374,7 @@ export function OptionsWindow() {
   }, [open, vue, classe, cboeTicker]);
 
   // Échéances CBOE disponibles + échéance retenue : le choix manuel s'il est encore listé, sinon
-  // la plus proche AVEC gamma (après la clôture, celle du jour reste listée, gammas nuls).
+  // la plus proche NON expirée (après 16:00 à New York, celle du jour reste listée, greeks résiduels).
   const cboeEcheances = useMemo(
     () => (cboeChaine ? cboeExpiries(cboeChaine.options, Date.now()) : []),
     [cboeChaine],
@@ -383,7 +383,7 @@ export function OptionsWindow() {
     () => echeanceCboeRetenue(cboeEcheances, cboeChoix),
     [cboeEcheances, cboeChoix],
   );
-  const cboeSansGreeks = cboeEcheances.some((e) => e.expiryMs === cboeExpiry && !e.avecGamma);
+  const cboeExpiree = cboeEcheances.some((e) => e.expiryMs === cboeExpiry && e.expiree);
 
   // Exposition GEX/DEX par strike : crypto (Black-Scholes client-side) ou actions (greeks CBOE).
   const gexDexSpot = classe === "crypto" ? underlying : (cboeChaine?.spot ?? NaN);
@@ -932,8 +932,8 @@ export function OptionsWindow() {
           </div>
         )}
         {/* Hors du libellé : un <select> natif prend la largeur de son option la plus longue. */}
-        {vue === "gexdex" && classe === "actions" && cboeSansGreeks && (
-          <p className="-mt-2 mb-3 text-[10px] text-warn">Échéance expirée ou sans greeks : gammas CBOE tous nuls.</p>
+        {vue === "gexdex" && classe === "actions" && cboeExpiree && (
+          <p className="-mt-2 mb-3 text-[10px] text-warn">Échéance expirée (16:00 NY passée) : greeks CBOE résiduels, murs et flip non significatifs.</p>
         )}
 
         {/* ─────────── Vue SMILE (existante) — bloc TOUJOURS monté (canvas useDomaineZoom), cf. VueSmile ─────────── */}

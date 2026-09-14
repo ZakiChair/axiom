@@ -80,8 +80,8 @@ describe("cboeExpiries", () => {
   it("liste les échéances futures distinctes, triées, avec comptage", () => {
     const exp = cboeExpiries(opts, now);
     expect(exp).toEqual([
-      { expiryMs: Date.UTC(2026, 6, 17), count: 2, avecGamma: true },
-      { expiryMs: Date.UTC(2026, 8, 18), count: 1, avecGamma: true },
+      { expiryMs: Date.UTC(2026, 6, 17), count: 2, expiree: false },
+      { expiryMs: Date.UTC(2026, 8, 18), count: 1, expiree: false },
     ]);
   });
 
@@ -96,62 +96,61 @@ describe("cboeExpiries", () => {
     expect(exp[0]?.expiryMs).toBe(Date.UTC(2026, 6, 17));
   });
 
-  it("marque sans gamma une échéance dont aucun gamma n'est fini et > 0 (liste inchangée)", () => {
-    const exp = cboeExpiries(
-      [
-        { option: "SPX260717C06000000", open_interest: 1, delta: 0, gamma: 0, iv: 0.3 },
-        { option: "SPX260717P06000000", open_interest: 1, delta: 0, gamma: NaN, iv: 0.3 },
-        { option: "SPX260918C06000000", open_interest: 1, delta: 0.5, gamma: 0, iv: 0.3 },
-        { option: "SPX260918P06000000", open_interest: 1, delta: -0.5, gamma: 0.002, iv: 0.3 },
-      ],
-      now,
-    );
-    expect(exp).toEqual([
-      { expiryMs: Date.UTC(2026, 6, 17), count: 2, avecGamma: false },
-      { expiryMs: Date.UTC(2026, 8, 18), count: 2, avecGamma: true },
-    ]);
+  it("marque expirée l'échéance dès 16:00 à New York le jour même (EDT l'été, EST l'hiver), liste inchangée", () => {
+    const option = (date: string) => ({ option: `SPXW${date}C06000000`, open_interest: 1, delta: 0.5, gamma: 0.01, iv: 0.3 });
+    const expiree = (date: string, nowMs: number) => cboeExpiries([option(date)], nowMs)[0]?.expiree;
+    expect(expiree("260914", Date.UTC(2026, 8, 14, 19, 59, 59))).toBe(false);
+    expect(expiree("260914", Date.UTC(2026, 8, 14, 20, 0, 0))).toBe(true);
+    expect(expiree("261214", Date.UTC(2026, 11, 14, 20, 59, 59))).toBe(false);
+    expect(expiree("261214", Date.UTC(2026, 11, 14, 21, 0, 0))).toBe(true);
   });
 });
 
 describe("echeanceCboeRetenue", () => {
-  // Mardi 2026-09-15 21:00 UTC, après la clôture de New York : l'échéance du jour reste listée
-  // (grâce d'un jour) mais ses gammas CBOE sont nuls.
-  const apresCloture = Date.UTC(2026, 8, 15, 21, 0, 0);
-  const jour = Date.UTC(2026, 8, 15);
+  // Profil RÉEL d'IBIT relevé le lundi 2026-09-14 à 18:53 à New York (22:53:44 UTC) : l'échéance
+  // du jour, expirée, reste listée (grâce d'un jour) avec des gammas RÉSIDUELS non nuls près du
+  // spot 44,51 et des deltas saturés aux ailes ; la suivante est le mercredi 16/09 (IBIT : lundi,
+  // mercredi, vendredi).
+  const soir = Date.UTC(2026, 8, 14, 22, 53, 44);
+  const jour = Date.UTC(2026, 8, 14);
   const suivante = Date.UTC(2026, 8, 16);
-  const echeances = cboeExpiries(
-    [
-      { option: "IBIT260915C00045000", open_interest: 9000, delta: 1, gamma: 0, iv: 0 },
-      { option: "IBIT260915P00045000", open_interest: 9000, delta: 0, gamma: 0, iv: 0 },
-      { option: "IBIT260916C00045000", open_interest: 100, delta: 0.5, gamma: 0.2, iv: 0.4 },
-      { option: "IBIT260918P00040000", open_interest: 100, delta: -0.3, gamma: 0.05, iv: 0.4 },
-    ],
-    apresCloture,
-  );
+  const chaine: CboeOption[] = [
+    { option: "IBIT260914C00042000", open_interest: 1772, delta: 1, gamma: 0, iv: 0 },
+    { option: "IBIT260914P00044000", open_interest: 3496, delta: -0.0102, gamma: 0.0744, iv: 1.8569 },
+    { option: "IBIT260914C00045000", open_interest: 6747, delta: 0.1339, gamma: 1.4548, iv: 0.8588 },
+    { option: "IBIT260914P00045000", open_interest: 1360, delta: -0.8859, gamma: 1.4139, iv: 0.8589 },
+    { option: "IBIT260914P00047000", open_interest: 16, delta: -1, gamma: 0, iv: 7.994 },
+    { option: "IBIT260916C00046000", open_interest: 6577, delta: 0.2596, gamma: 0.1918, iv: 0.5083 },
+    { option: "IBIT260916P00043000", open_interest: 12712, delta: -0.1191, gamma: 0.1217, iv: 0.4886 },
+    { option: "IBIT260918C00045000", open_interest: 100, delta: 0.5, gamma: 0.2, iv: 0.4 },
+  ];
+  const echeances = cboeExpiries(chaine, soir);
 
-  it("par défaut, saute l'échéance du jour à gammas nuls et retient la suivante", () => {
-    expect(echeances.map((e) => e.expiryMs)[0]).toBe(jour);
+  it("par défaut, après 16:00 à New York, saute l'échéance du jour aux gammas résiduels et retient la suivante", () => {
+    expect(echeances.map((e) => [e.expiryMs, e.expiree])).toEqual([
+      [jour, true],
+      [suivante, false],
+      [Date.UTC(2026, 8, 18), false],
+    ]);
     expect(echeanceCboeRetenue(echeances, null)).toBe(suivante);
   });
 
-  it("aucune échéance avec gamma : retient la première, marquée sans gamma (mention)", () => {
-    const sansGreeks = cboeExpiries(
-      [
-        { option: "SPX260915C06000000", open_interest: 1, delta: 0, gamma: 0, iv: 0 },
-        { option: "SPX260918C06000000", open_interest: 1, delta: 0, gamma: 0, iv: 0 },
-      ],
-      apresCloture,
-    );
-    expect(echeanceCboeRetenue(sansGreeks, null)).toBe(jour);
-    expect(sansGreeks[0]?.avecGamma).toBe(false);
+  it("en séance (15:59:59 à New York), l'échéance du jour reste le défaut (0DTE)", () => {
+    expect(echeanceCboeRetenue(cboeExpiries(chaine, Date.UTC(2026, 8, 14, 19, 59, 59)), null)).toBe(jour);
   });
 
-  it("garde un choix manuel encore listé, même sans gamma", () => {
+  it("toutes les échéances listées expirées : retient la première, marquée expirée (mention)", () => {
+    const seule = cboeExpiries(chaine.slice(0, 5), soir);
+    expect(echeanceCboeRetenue(seule, null)).toBe(jour);
+    expect(seule[0]?.expiree).toBe(true);
+  });
+
+  it("garde un choix manuel encore listé, même expiré", () => {
     expect(echeanceCboeRetenue(echeances, jour)).toBe(jour);
     expect(echeanceCboeRetenue(echeances, Date.UTC(2026, 8, 18))).toBe(Date.UTC(2026, 8, 18));
   });
 
-  it("choix manuel disparu de la liste : repli sur la première échéance avec gamma", () => {
+  it("choix manuel disparu de la liste : repli sur la première échéance non expirée", () => {
     expect(echeanceCboeRetenue(echeances, Date.UTC(2026, 8, 11))).toBe(suivante);
   });
 

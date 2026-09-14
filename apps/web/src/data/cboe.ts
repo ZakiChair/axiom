@@ -122,17 +122,19 @@ export interface CboeChain {
   resume: ResumeCboe;
 }
 
-/** Échéance listée : nombre d'options et présence d'au moins un gamma fini > 0. */
+/** Échéance listée : nombre d'options et séance d'expiration close (16:00 à New York passée). */
 export interface EcheanceCboe {
   expiryMs: number;
   count: number;
-  avecGamma: boolean;
+  expiree: boolean;
 }
 
 /**
  * Échéances distinctes présentes dans la chaîne, futures (avec tolérance d'un jour pour les
  * expirations du jour même — les options actions expirent en séance, pas à 00:00 UTC), triées
- * croissant, avec le nombre d'options. `nowMs` injecté (fonction PURE).
+ * croissant, avec le nombre d'options. `expiree` dès 16:00 à New York le jour d'échéance : les
+ * séries qui expirent cessent d'échanger à 16:00, indices compris (SPXW 16:00:00, NDXP 15:59:59
+ * relevés le 2026-09-14), puis CBOE publie des greeks résiduels. `nowMs` injecté (fonction PURE).
  */
 export function cboeExpiries(options: CboeOption[], nowMs: number): EcheanceCboe[] {
   const parExp = new Map<number, EcheanceCboe>();
@@ -140,22 +142,26 @@ export function cboeExpiries(options: CboeOption[], nowMs: number): EcheanceCboe
     const parsed = parseCboeOptionSymbol(o.option);
     if (!parsed) continue;
     if (parsed.expiryMs < nowMs - MS_PAR_JOUR) continue; // ignore le passé (grâce 1 j)
-    const e = parExp.get(parsed.expiryMs) ?? { expiryMs: parsed.expiryMs, count: 0, avecGamma: false };
+    let e = parExp.get(parsed.expiryMs);
+    if (!e) {
+      const cloture = heureNewYorkVersUtcMs(`${new Date(parsed.expiryMs).toISOString().slice(0, 10)}T16:00:00`);
+      e = { expiryMs: parsed.expiryMs, count: 0, expiree: cloture !== null && nowMs >= cloture };
+      parExp.set(parsed.expiryMs, e);
+    }
     e.count += 1;
-    if (Number.isFinite(o.gamma) && o.gamma > 0) e.avecGamma = true;
-    parExp.set(parsed.expiryMs, e);
   }
   return [...parExp.values()].sort((a, b) => a.expiryMs - b.expiryMs);
 }
 
 /**
- * Échéance retenue : le choix manuel tant qu'il est listé (même sans greeks), sinon la première
- * échéance avec un gamma — après la clôture de New York, la grâce d'un jour garde l'échéance du
- * jour, expirée, aux gammas nuls —, à défaut la première. Fonction PURE.
+ * Échéance retenue : le choix manuel tant qu'il est listé (même expiré), sinon la première
+ * échéance non expirée — après la clôture de New York, la grâce d'un jour garde l'échéance du
+ * jour, dont les gammas résiduels donneraient des murs et un flip factices —, à défaut la
+ * première. Fonction PURE.
  */
 export function echeanceCboeRetenue(echeances: EcheanceCboe[], choix: number | null): number | null {
   if (echeances.some((e) => e.expiryMs === choix)) return choix;
-  return (echeances.find((e) => e.avecGamma) ?? echeances[0])?.expiryMs ?? null;
+  return (echeances.find((e) => !e.expiree) ?? echeances[0])?.expiryMs ?? null;
 }
 
 /**

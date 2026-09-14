@@ -149,21 +149,33 @@ const MATURITES_ECB: ReadonlyArray<{ label: string; sdmx: string }> = [
   { label: "30 Yr", sdmx: "SR_30Y" },
 ];
 
+/** CSV d'une année civile : `null` si la réponse HTTP n'est pas OK, sinon les lignes parsées. */
+async function chargerAnneeUS(annee: number, signal?: AbortSignal): Promise<CourbeRendements[] | null> {
+  const chemin =
+    `resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/${annee}/all` +
+    `?type=daily_treasury_yield_curve&field_tdr_date_value=${annee}&_format=csv`;
+  const res = await fetch(extUrl("home.treasury.gov", chemin), { signal });
+  if (!res.ok) return null;
+  return parseTreasuryYieldCurveCsv(await res.text());
+}
+
 /**
  * Charge la courbe des taux US de l'année courante (effet de bord : fetch CSV texte).
  * L'année est résolue ICI (hors fonction pure). Dégradation gracieuse : renvoie []
  * en cas d'échec réseau/HTTP.
+ *
+ * Repli sur l'année N−1 UNIQUEMENT quand le CSV de l'année courante répond 200 sans
+ * aucune ligne : avant la première publication de janvier, le Trésor sert l'année
+ * nouvelle vide (sonde du 2026-09-14 sur 2027 : HTTP 200, 0 octet, text/csv). Une
+ * panne (HTTP non OK, réseau) ne déclenche pas de seconde requête.
  */
 export async function chargerRendementsUS(signal?: AbortSignal): Promise<CourbeRendements[]> {
   const annee = new Date().getFullYear();
   try {
-    const chemin =
-      `resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/${annee}/all` +
-      `?type=daily_treasury_yield_curve&field_tdr_date_value=${annee}&_format=csv`;
-    const res = await fetch(extUrl("home.treasury.gov", chemin), { signal });
-    if (!res.ok) return [];
-    const csv = await res.text();
-    return parseTreasuryYieldCurveCsv(csv);
+    const courante = await chargerAnneeUS(annee, signal);
+    if (courante === null) return [];
+    if (courante.length > 0) return courante;
+    return (await chargerAnneeUS(annee - 1, signal)) ?? [];
   } catch {
     return [];
   }

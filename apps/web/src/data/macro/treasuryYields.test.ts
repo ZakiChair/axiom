@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  chargerRendementsUS,
   deltaJour,
   parseEcbObsValue,
   parseTreasuryYieldCurveCsv,
@@ -83,5 +84,61 @@ YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y,B,U2,EUR,4F,G_N_A,SV_C_YM,SR_10Y,2026-07-02,
   });
   it("OBS_VALUE non numérique → null", () => {
     expect(parseEcbObsValue("KEY,OBS_VALUE\nx,NA")).toBeNull();
+  });
+});
+
+describe("chargerRendementsUS", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    vi.useFakeTimers();
+    // Midi UTC le 2 janvier : même année civile dans tous les fuseaux usuels.
+    vi.setSystemTime(new Date("2027-01-02T12:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("année courante non vide : une seule requête, sur l'année courante", async () => {
+    fetchMock.mockResolvedValue({ ok: true, text: async () => CSV_US });
+    const rows = await chargerRendementsUS();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toContain("/2027/all");
+    expect(rows).toEqual(parseTreasuryYieldCurveCsv(CSV_US));
+  });
+
+  it("CSV de l'année courante en HTTP 200 vide (janvier) : repli sur l'année N−1", async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, text: async () => "" })
+      .mockResolvedValueOnce({ ok: true, text: async () => CSV_US });
+    const rows = await chargerRendementsUS();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("/2026/all");
+    expect(String(fetchMock.mock.calls[1]![0])).toContain("field_tdr_date_value=2026");
+    expect(rows).toEqual(parseTreasuryYieldCurveCsv(CSV_US));
+  });
+
+  it("panne HTTP de l'année courante : [] sans seconde requête", async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 503, text: async () => "" });
+    expect(await chargerRendementsUS()).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("repli N−1 lui-même en panne : []", async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, text: async () => "" })
+      .mockResolvedValueOnce({ ok: false, status: 503, text: async () => "" });
+    expect(await chargerRendementsUS()).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("fetch rejeté : []", async () => {
+    fetchMock.mockRejectedValue(new Error("réseau"));
+    expect(await chargerRendementsUS()).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

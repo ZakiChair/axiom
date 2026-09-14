@@ -5,7 +5,8 @@
  * datés de Binance COIN-M et de Deribit (deux sources, un même axe). Lit en toutes lettres
  * le régime de marché (contango / backwardation / plat) par actif. Superpose en pointillés
  * les instantanés J-1 et J-7, sauvegardés via le daemon /kv (repli localStorage) — pour voir
- * la déformation de la courbe dans le temps.
+ * la déformation de la courbe dans le temps. Superpose aussi la courbe du T-bill US (tirets
+ * longs) et lit le PORTAGE EXCÉDENTAIRE (basis − T-bill de même durée, portageExcedentaire.ts).
  *
  * Données LENTES (~1 min) : elles vivent dans le state React (comme MacroPanel) ; le canvas
  * est redessiné impérativement à chaque mise à jour. Le polling ne tourne QUE fenêtre ouverte.
@@ -23,11 +24,21 @@ import {
 import { fetchDeribitTermStructure } from "../data/deribit";
 import { daemonPret, detectDaemon, kvGet, kvPut } from "../data/daemon";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
-import { formatDateCourte, formatPct, VALEUR_ABSENTE } from "../lib/format";
+import { formatDateComplete, formatDateCourte, formatPct, VALEUR_ABSENTE } from "../lib/format";
 import { lireTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { type Domaine, indicesVisibles, pixelVersValeur, valeurVersPixel } from "../lib/domaineAxe";
 import { useDomaineZoom } from "../hooks/useDomaineZoom";
-import { EnTeteFenetre, ErreurBloc, NoteSource, Fraicheur, InfobulleGraphe } from "./ui";
+import type { CourbeRendements } from "../data/macro/treasuryYields";
+import {
+  calculerPortage,
+  chargerCourbeTbill,
+  dateCourbeUsVersMs,
+  echantillonsTbill,
+  JOURS_MATURITE_CONSTANTE,
+  JOURS_MIN_PORTAGE,
+  portageMaturiteConstante,
+} from "../data/portageExcedentaire";
+import { EnTeteFenetre, ErreurBloc, NoteSource, Fraicheur, InfobulleGraphe, TuileStat } from "./ui";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -63,6 +74,15 @@ const PREFIXE_LS = "axiom:termstructure:";
  * pixel↔échéance que px(ms), sinon le trait/tooltip survolé dérive de la courbe tracée). */
 const TERM_PAD_L = 40;
 const TERM_PAD_R = 10;
+/** Tirets longs de la courbe T-bill US, distincts de J-1 [5, 4] et de J-7 [2, 3]. */
+const TIRETS_TBILL = [6, 3];
+const LIBELLE_SOURCE = { deribit: "Deribit", binance: "Binance COIN-M" } as const;
+
+/** Écart en points de % signé (« +0.70 pt »), ou « — » si non fini. */
+function formatPoints(v: number | null): string {
+  if (v === null || !Number.isFinite(v)) return VALEUR_ABSENTE;
+  return `${v >= 0 ? "+" : ""}${v.toFixed(2)} pt`;
+}
 
 // ─────────────────────────── Instantané J-1 / J-7 ───────────────────────────
 
@@ -150,8 +170,14 @@ interface CourbeActif {
  * Dessine les courbes de basis (axe X = date d'échéance zoomable, axe Y = basis annualisé %).
  * Points live en trait plein, J-1 en tirets, J-7 en pointillés fins. Ligne zéro repère de
  * neutralité. `domaine` = fenêtre d'échéances visible (zoom/pan `useDomaineZoom` côté hôte).
+ * `tbill` = courbe T-bill US déjà échantillonnée sur le domaine (tirets longs, incluse dans l'échelle).
  */
-function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>, domaine: Domaine): void {
+function dessiner(
+  canvas: HTMLCanvasElement,
+  data: Record<Actif, CourbeActif>,
+  domaine: Domaine,
+  tbill: { ms: number; pct: number }[],
+): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
@@ -191,7 +217,10 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>, d
   };
   const visiblesBTC = visiblesDe(data.BTC.live);
   const visiblesETH = visiblesDe(data.ETH.live);
-  const ysVisibles = [...visiblesBTC, ...visiblesETH].map((p) => p.basisAnnualise * 100);
+  const ysVisibles = [
+    ...[...visiblesBTC, ...visiblesETH].map((p) => p.basisAnnualise * 100),
+    ...tbill.map((p) => p.pct),
+  ];
   let yMin = Math.min(0, ...ysVisibles);
   let yMax = Math.max(0, ...ysVisibles);
   if (yMax === yMin) yMax = yMin + 1;
@@ -266,6 +295,17 @@ function dessiner(canvas: HTMLCanvasElement, data: Record<Actif, CourbeActif>, d
       .sort((a, b) => a.e - b.e)
       .map((s) => ({ x: px(s.e), y: py(clampY(s.b * 100)) }));
 
+  // T-bill US sous les courbes d'actifs (tracées ensuite, donc au-dessus), token de thème.
+  const cTbill = lireTokenCanvas("--text", "#e5e5e5");
+  const tbillProj = tbill.map((p) => ({ x: px(p.ms), y: py(clampY(p.pct)) }));
+  tracer(tbillProj, cTbill, 1.2, TIRETS_TBILL, 0.85, false);
+  const dernierTbill = tbillProj.at(-1);
+  if (dernierTbill) {
+    const txt = "T-bill US";
+    ctx.fillStyle = cTbill;
+    ctx.fillText(txt, Math.max(padL, dernierTbill.x - ctx.measureText(txt).width), dernierTbill.y - 4);
+  }
+
   const visiblesParActif: Record<Actif, PointBasis[]> = { BTC: visiblesBTC, ETH: visiblesETH };
   for (const actif of ACTIFS) {
     const c = data[actif];
@@ -292,6 +332,8 @@ export function TermStructureWindow() {
   const [loading, setLoading] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
   const [majTs, setMajTs] = useState<number | null>(null);
+  // Courbe T-bill US (donnée lente, publiée 1×/jour ouvré US) ; null tant qu'indisponible.
+  const [courbeTbill, setCourbeTbill] = useState<CourbeRendements | null>(null);
 
   // Bornes de l'axe X (échéances) = min/max des expiryMs des DEUX actifs live.
   const bornes = useMemo<Domaine | null>(() => {
@@ -302,6 +344,20 @@ export function TermStructureWindow() {
     if (max === min) max = min + 86_400_000;
     return { min, max };
   }, [courbes]);
+  // Portage excédentaire par échéance (≥ 7 j) et à maturité constante 90 j, par actif.
+  const portage = useMemo(() => {
+    const parActif = {
+      BTC: calculerPortage(courbes.BTC.live, courbeTbill),
+      ETH: calculerPortage(courbes.ETH.live, courbeTbill),
+    };
+    return {
+      parActif,
+      constant: {
+        BTC: portageMaturiteConstante(parActif.BTC, courbeTbill),
+        ETH: portageMaturiteConstante(parActif.ETH, courbeTbill),
+      },
+    };
+  }, [courbes, courbeTbill]);
   // Curseur (survol) : échéance la plus proche, basis BTC/ETH à cette échéance. Déclaré
   // avant useDomaineZoom : son setter est référencé par l'onGeste qui vide le survol après
   // un zoom/pan/double-clic (sinon le trait reste figé sur l'ancien point).
@@ -311,6 +367,9 @@ export function TermStructureWindow() {
     echeance: number;
     btc: number | null;
     eth: number | null;
+    tbill: number | null;
+    portageBtc: number | null;
+    portageEth: number | null;
   } | null>(null);
   const { refCanvas, domaine } = useDomaineZoom(bornes, () => setSurvol(null), { gauche: TERM_PAD_L, droite: TERM_PAD_R });
   const onSurvol = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -331,12 +390,17 @@ export function TermStructureWindow() {
     if (echeance === null) return;
     const btc = courbes.BTC.live.find((p) => p.expiryMs === echeance) ?? null;
     const eth = courbes.ETH.live.find((p) => p.expiryMs === echeance) ?? null;
+    const portageBtc = portage.parActif.BTC.find((p) => p.expiryMs === echeance) ?? null;
+    const portageEth = portage.parActif.ETH.find((p) => p.expiryMs === echeance) ?? null;
     setSurvol({
       xPix: TERM_PAD_L + valeurVersPixel(domaine, echeance, plotW),
       largeur: rect.width,
       echeance,
       btc: btc ? btc.basisAnnualise : null,
       eth: eth ? eth.basisAnnualise : null,
+      tbill: (portageBtc ?? portageEth)?.tbillPct ?? null,
+      portageBtc: portageBtc?.excesPt ?? null,
+      portageEth: portageEth?.excesPt ?? null,
     });
   };
 
@@ -354,6 +418,8 @@ export function TermStructureWindow() {
         ETH: { live: [], j1: null, j7: null },
       };
       let auMoinsUne = false;
+      // Un seul appel par cycle (mémo 1 h) ; ne rejette jamais, une panne ne remplit pas `erreur`.
+      const promesseTbill = chargerCourbeTbill(Date.now());
 
       for (const actif of ACTIFS) {
         const [binance, deribit, j1, j7] = await Promise.allSettled([
@@ -377,8 +443,11 @@ export function TermStructureWindow() {
         };
       }
 
+      const tbill = await promesseTbill;
+
       if (ignore) return;
       setCourbes(resultat);
+      setCourbeTbill(tbill);
       setErreur(auMoinsUne ? null : "Structure par terme indisponible pour le moment.");
       setMajTs(Date.now());
       setLoading(false);
@@ -396,16 +465,21 @@ export function TermStructureWindow() {
   useEffect(() => {
     if (!open) return;
     const canvas = refCanvas.current;
-    if (canvas && domaine) dessiner(canvas, courbes, domaine);
-  }, [open, courbes, domaine]);
+    if (canvas && domaine) {
+      dessiner(canvas, courbes, domaine, majTs !== null ? echantillonsTbill(courbeTbill, majTs, domaine) : []);
+    }
+  }, [open, courbes, domaine, courbeTbill, majTs]);
 
   return (
     <>
-      <EnTeteFenetre mnemo="TERM" titre="Structure par terme" sousTitre="Basis annualisé · Binance COIN-M + Deribit" />
+      <EnTeteFenetre mnemo="TERM" titre="Structure par terme" sousTitre="Basis annualisé · Binance COIN-M + Deribit · T-bill US" />
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
         <div className="mb-3 flex items-center justify-between rounded-md border border-border bg-bg px-3 py-2 text-[11px] text-text-dim">
-          <span>BTC / ETH · basis (future − spot)/spot p.a.</span>
+          <span>
+            BTC / ETH · basis (future − spot)/spot p.a.
+            {courbeTbill ? ` · T-bill US au ${formatDateComplete(dateCourbeUsVersMs(courbeTbill.date))}` : ""}
+          </span>
           <Fraicheur loading={loading} majTs={majTs} />
         </div>
 
@@ -439,6 +513,13 @@ export function TermStructureWindow() {
                     valeur: survol.eth !== null ? formatPct(survol.eth * 100, 2) : VALEUR_ABSENTE,
                     couleur: COULEUR.ETH,
                   },
+                  {
+                    label: "T-bill US",
+                    valeur: formatPct(survol.tbill, 2, { signe: false }),
+                    couleur: "var(--text)",
+                  },
+                  { label: "Portage BTC", valeur: formatPoints(survol.portageBtc), couleur: COULEUR.BTC },
+                  { label: "Portage ETH", valeur: formatPoints(survol.portageEth), couleur: COULEUR.ETH },
                 ]}
               />
             )}
@@ -467,10 +548,54 @@ export function TermStructureWindow() {
           ))}
         </div>
 
+        <div className="mt-3 space-y-2">
+          {ACTIFS.map((actif) => {
+            const c = portage.constant[actif];
+            return (
+              <TuileStat
+                key={actif}
+                label={`Portage excédentaire ${JOURS_MATURITE_CONSTANTE} j · ${actif}`}
+                valeur={formatPoints(c?.excesPt ?? null)}
+                title={
+                  `Basis interpolé linéairement à ${JOURS_MATURITE_CONSTANTE} j entre les deux échéances ` +
+                  `d'une même source qui encadrent cette durée (Deribit, sinon Binance COIN-M), moins le ` +
+                  `T-bill US à ${JOURS_MATURITE_CONSTANTE} j ; taux simple act/365 des deux côtés.`
+                }
+                pied={
+                  c ? (
+                    <>
+                      <span>
+                        {LIBELLE_SOURCE[c.source]} · {c.avant.instrument}
+                        {c.apres !== c.avant ? ` ↔ ${c.apres.instrument}` : ""}
+                      </span>
+                      <span>T-bill {formatPct(c.tbillPct, 2, { signe: false })}</span>
+                    </>
+                  ) : (
+                    <span>
+                      {!courbeTbill
+                        ? "courbe T-bill US indisponible"
+                        : courbes[actif].live.length === 0
+                          ? "basis indisponible"
+                          : `aucune paire d'échéances encadrant ${JOURS_MATURITE_CONSTANTE} j`}
+                    </span>
+                  )
+                }
+              />
+            );
+          })}
+        </div>
+
         <div className="mt-3">
           <NoteSource>
             Trait plein = aujourd'hui · tirets = J-1 · pointillés = J-7 (instantanés locaux,
-            daemon /kv sinon localStorage). Sources Binance COIN-M + Deribit, ~1 min.
+            daemon /kv sinon localStorage). Sources Binance COIN-M + Deribit, ~1 min. Tirets
+            longs neutres = T-bill US (courbe des rendements au pair du Trésor américain, publiée
+            en fin de jour ouvré à New York), convertie en taux simple act/365 ; portage = basis −
+            T-bill de même durée, échéances &lt; {JOURS_MIN_PORTAGE} j exclues. Tuiles : basis
+            interpolé à {JOURS_MATURITE_CONSTANTE} j entre les deux échéances encadrantes d'une
+            même source (Deribit, sinon Binance COIN-M). Le T-bill n'est pas le coût de
+            financement réel d'un basis trade, et l'open interest des futures datés Deribit reste
+            faible face au CME.
           </NoteSource>
         </div>
       </div>

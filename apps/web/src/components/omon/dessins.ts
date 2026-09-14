@@ -12,6 +12,7 @@
 import type { OptionPoint } from "../../data/deribit";
 import type { GexDexPoint } from "../../data/gexDex";
 import type { PointTermIv } from "../../data/termIv";
+import type { SegmentVolForward } from "../../data/volForward";
 import { intensiteCellule, type GrilleOi } from "../../data/oiHeatmap";
 import { formatUsd } from "../../lib/format";
 import { lireTokenCanvas, POLICE_CANVAS, rgbaTokenCanvas } from "../../lib/canvasTokens";
@@ -603,13 +604,16 @@ export const TERMIV_PAD_B = 22;
  * ligne IV ATM (accent) sur l'échelle de gauche, ligne RR25 (segments/points up si ≥ 0, down
  * sinon) sur une échelle PROPRE à droite, ligne horizontale pointillée du DVOL (sur l'échelle IV,
  * libellée) et annotation de pente contango/backwardation (premier vs dernier point). DPR, tokens
- * lus au dessin. `survol` = index du point survolé (anneau d'emphase), ou null.
+ * lus au dessin. `survol` = index du point survolé (anneau d'emphase), ou null. `segments` = vols
+ * forward entre échéances consécutives : trait pointillé (échelle IV) entre les deux points et
+ * libellé court des événements ECO de la fenêtre ; rien pour les fenêtres masquées.
  */
 export function dessinerTermIv(
   canvas: HTMLCanvasElement,
   points: PointTermIv[],
   dvol: number | null,
   survol: number | null,
+  segments: readonly SegmentVolForward[] = [],
 ): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
@@ -634,6 +638,7 @@ export function dessinerTermIv(
   const couleurUp = lireTokenCanvas("--up", "#2dc08e");
   const couleurDown = lireTokenCanvas("--down", "#f92855");
   const couleurBg = lireTokenCanvas("--bg", "#0a0a0a");
+  const couleurSerie3 = lireTokenCanvas("--serie-3", "#f59e0b");
 
   ctx.font = POLICE_CANVAS;
 
@@ -652,6 +657,12 @@ export function dessinerTermIv(
   if (Number.isFinite(dvol)) {
     ivMin = Math.min(ivMin, dvol as number);
     ivMax = Math.max(ivMax, dvol as number);
+  }
+  // Élargie aux vols forward tracées (null = masquée ou incohérente, jamais tracée).
+  for (const s of segments) {
+    if (s.sigmaFwd === null) continue;
+    ivMin = Math.min(ivMin, s.sigmaFwd);
+    ivMax = Math.max(ivMax, s.sigmaFwd);
   }
   if (ivMax === ivMin) ivMax = ivMin + 1;
   const margeIv = (ivMax - ivMin) * 0.1;
@@ -743,6 +754,38 @@ export function dessinerTermIv(
       ctx.beginPath();
       ctx.arc(px(i), pyRr(p.rr25), 2, 0, Math.PI * 2);
       ctx.fill();
+    }
+  }
+
+  // Vols forward (échelle IV) : trait pointillé du point i au point i+1, et libellé court des
+  // événements ECO de la fenêtre en haut du tracé (sous l'annotation de pente) s'il tient dans la
+  // colonne, sinon simple repère. Fenêtres masquées (< 12 h) : rien.
+  for (let i = 0; i < n - 1; i++) {
+    const s = segments.find((seg) => seg.debutMs === points[i]?.expiryMs);
+    if (!s || s.masque) continue;
+    if (s.sigmaFwd !== null) {
+      const y = pyIv(s.sigmaFwd);
+      ctx.strokeStyle = couleurSerie3;
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([2, 2]);
+      ctx.beginPath();
+      ctx.moveTo(px(i), y);
+      ctx.lineTo(px(i + 1), y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    if (s.evenements.length > 0) {
+      const milieu = (px(i) + px(i + 1)) / 2;
+      const libelles = [...new Set(s.evenements.map((e) => e.libelle))];
+      const premier = libelles[0] ?? "";
+      const txt = libelles.length > 1 ? `${premier}+` : premier;
+      const larg = ctx.measureText(txt).width;
+      ctx.fillStyle = couleurSerie3;
+      if (larg <= colW - 4) {
+        ctx.fillText(txt, milieu - larg / 2, padT + 10);
+      } else {
+        ctx.fillRect(milieu - 1, padT + 2, 2, 6);
+      }
     }
   }
 

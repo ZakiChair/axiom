@@ -68,12 +68,17 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("Term IV : mouvement attendu par échéance (straddle ATM au forward, ±1σ IV, échéance bruitée)", async ({ page }) => {
+test("Term IV : mouvement attendu par échéance (straddle ATM au forward, ±1σ IV, échéance bruitée) et vol forward", async ({ page }) => {
   const instant = Date.parse("2026-09-15T00:00:00Z");
   await page.clock.setFixedTime(new Date(instant));
   await routerDeribit(
     page,
-    [...echeance("16SEP26", 35, 0.01), ...echeance("17SEP26", 50, 0.015), ...echeance("18SEP26", 36, 0.02)],
+    [
+      ...echeance("16SEP26", 35, 0.01),
+      ...echeance("17SEP26", 50, 0.015),
+      ...echeance("18SEP26", 36, 0.02),
+      ...echeance("25SEP26", 40, 0.03),
+    ],
     instant,
   );
 
@@ -110,4 +115,21 @@ test("Term IV : mouvement attendu par échéance (straddle ATM au forward, ±1σ
 
   await expect(fenetre).toContainText("F ± straddle ≈ ±0,8σ");
   await expect(fenetre).toContainText("pas ±1σ ni 68 %");
+
+  // Vol forward (IV ATM au spot commun 100 000) ; calendrier ECO hors réseau = FOMC statiques,
+  // décision du 16/09 à 18:30 UTC dans ]16SEP 08:00 ; 17SEP 08:00].
+  // 16→17 : (50²·56 − 35²·32)/24 = 4200 → 64,8 % ; move 1σ = 64,8/√365 ≈ 3,39 % ;
+  // σ base = 18→25 (seule fenêtre ≤ 7 j sans événement) = √[(40²·248 − 36²·80)/168] ≈ 41,77 % ;
+  // part FOMC ≈ √(4200 − 1744,8)/√365 ≈ 2,59 %.
+  await expect(proche.getByRole("cell").last()).toHaveText("64.8 %±3.39 %FOMC ≈±2.59 %");
+  // 17→18 : (36²·80 − 50²·56)/24 < 0 → incohérence, jamais un zéro.
+  await expect(milieu.getByRole("cell").last()).toHaveText("—var. < 0");
+  // 18→25 : 7 j sans événement ; move 1σ = 41,77 × √(7/365) ≈ 5,78 %.
+  await expect(loin.getByRole("cell").last()).toHaveText("41.8 %±5.78 %");
+  // Dernière échéance : aucune fenêtre suivante.
+  const derniere = table.getByRole("row").filter({ hasText: "$94,000–$106,000" });
+  await expect(derniere.getByRole("cell").last()).toHaveText("—");
+
+  await expect(fenetre).toContainText("variance additive entre échéances consécutives");
+  await expect(fenetre).toContainText("±2,5 à 3 pts d'incertitude sur σ fwd");
 });

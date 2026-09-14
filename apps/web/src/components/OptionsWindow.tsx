@@ -40,6 +40,7 @@ import {
 import { calculerSkew25d } from "../data/skew";
 import { termStructureIv, type PointTermIv } from "../data/termIv";
 import { mouvementsAttendus, type PointMouvementAttendu } from "../data/mouvementAttendu";
+import { libelleCourtEvenement, volsForward, type SegmentVolForward } from "../data/volForward";
 import { histDvol } from "../data/referentiels";
 import { ivRank } from "../data/ivRank";
 import { bandeStrikes, construireGrilleOi, type GrilleOi } from "../data/oiHeatmap";
@@ -52,6 +53,7 @@ import {
   type CboeTicker,
 } from "../data/cboe";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
+import { ecoStore } from "../store/eco";
 import { valeurVersPixel, pixelVersValeur, type Domaine } from "../lib/domaineAxe";
 import { useDomaineZoom } from "../hooks/useDomaineZoom";
 import { EnTeteFenetre, Segmente, Select } from "./ui";
@@ -676,12 +678,33 @@ export function OptionsWindow() {
     [vue, chain],
   );
 
+  // Calendrier ECO (store déjà partagé avec la fenêtre ECO et les marqueurs chart) : chargé
+  // seulement s'il est vide, via le cache et la garde de débit (refresh non forcé).
+  const evenementsEco = useStore(ecoStore, (s) => s.events);
+  useEffect(() => {
+    if (!open || vue !== "termiv") return;
+    if (ecoStore.getState().events.length === 0) ecoStore.getState().refresh(false);
+  }, [open, vue]);
+  const evenementsVol = useMemo(
+    () =>
+      evenementsEco
+        .filter((e) => e.impact === "high" && e.country === "USD")
+        .map((e) => ({ time: e.time, libelle: libelleCourtEvenement(e.title) })),
+    [evenementsEco],
+  );
+  // Vol forward entre échéances consécutives de la courbe (mêmes IV ATM que le tracé) et part
+  // d'événement — fonction pure de data/volForward, nowMs injecté au bord.
+  const segmentsFwd = useMemo<SegmentVolForward[]>(
+    () => (vue === "termiv" ? volsForward(termIvPoints, Date.now(), evenementsVol) : []),
+    [vue, termIvPoints, evenementsVol],
+  );
+
   // Redessine la term structure (données/vue/DVOL/survol ; thème repeint via majTs, tokens lus au dessin).
   useEffect(() => {
     if (!open || vue !== "termiv") return;
     const canvas = termIvCanvasRef.current;
-    if (canvas) dessinerTermIv(canvas, termIvPoints, dvol, survolTermIv);
-  }, [open, vue, termIvPoints, dvol, survolTermIv, majTs]);
+    if (canvas) dessinerTermIv(canvas, termIvPoints, dvol, survolTermIv, segmentsFwd);
+  }, [open, vue, termIvPoints, dvol, survolTermIv, segmentsFwd, majTs]);
 
   // Point survolé : inverse la géométrie (colonne ordinale depuis les pixels) — MÊMES paddings que
   // le dessin (TERMIV_PAD_*), leçon HEATMAP_PAD.
@@ -929,6 +952,7 @@ export function OptionsWindow() {
           survolTermIv={survolTermIv}
           termIvPoints={termIvPoints}
           mouvements={mouvements}
+          segments={segmentsFwd}
         />
       </div>
     </>

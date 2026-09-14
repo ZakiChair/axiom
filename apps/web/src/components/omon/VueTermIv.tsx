@@ -8,6 +8,8 @@
  */
 import type { PointTermIv } from "../../data/termIv";
 import type { PointMouvementAttendu } from "../../data/mouvementAttendu";
+import type { SegmentVolForward } from "../../data/volForward";
+import { useMemo } from "react";
 import { formatPct, formatPourcentage, formatEntier, formatUsd, VALEUR_ABSENTE } from "../../lib/format";
 import { Badge, ErreurBloc, NoteSource, Fraicheur, InfobulleGraphe } from "../ui";
 import { TableTriable, type ColonneTable } from "../TableTriable";
@@ -19,7 +21,22 @@ function plusMoins(texte: string): string {
   return texte === VALEUR_ABSENTE ? texte : `±${texte}`;
 }
 
-const COLONNES_MOUVEMENT: ColonneTable<PointMouvementAttendu>[] = [
+/** Ligne du tableau : mouvement attendu de l'échéance + vol forward vers l'échéance suivante. */
+type LigneMouvement = PointMouvementAttendu & { segment: SegmentVolForward | null };
+
+/** Libellés courts distincts des événements de la fenêtre (« FOMC, CPI »). */
+function libellesEvenements(s: SegmentVolForward): string {
+  return [...new Set(s.evenements.map((e) => e.libelle))].join(", ");
+}
+
+/** σ fwd en %, ou « — » avec le motif (fenêtre masquée, variance forward négative). */
+function valeurSigmaFwd(s: SegmentVolForward): string {
+  if (s.masque) return `${VALEUR_ABSENTE} (< 12 h)`;
+  if (s.varianceNegative) return `${VALEUR_ABSENTE} (variance < 0)`;
+  return formatPourcentage(s.sigmaFwd, 1);
+}
+
+const COLONNES_MOUVEMENT: ColonneTable<LigneMouvement>[] = [
   {
     id: "echeance",
     label: "Échéance",
@@ -68,6 +85,32 @@ const COLONNES_MOUVEMENT: ColonneTable<PointMouvementAttendu>[] = [
         ? VALEUR_ABSENTE
         : `${formatUsdExact(p.borneBasse)}–${formatUsdExact(p.borneHaute)}`,
   },
+  {
+    id: "fwd",
+    label: "σ fwd →",
+    align: "right",
+    largeur: "1.2fr",
+    // Trois lignes courtes (colonne étroite) : σ fwd, move 1σ de la fenêtre ou motif du « — »,
+    // événements ECO et part attribuable estimée.
+    rendu: ({ segment: s }) => {
+      if (s === null) return VALEUR_ABSENTE;
+      const evenements = libellesEvenements(s);
+      return (
+        <>
+          <span className="block">{formatPourcentage(s.sigmaFwd, 1)}</span>
+          <span className="block text-text-dim">
+            {s.masque ? "< 12 h" : s.varianceNegative ? "var. < 0" : plusMoins(formatPourcentage(s.move1SigmaPct, 2))}
+          </span>
+          {evenements !== "" && (
+            <span className="block text-serie-3">
+              {evenements}
+              {s.moveEvenementPct !== null && ` ≈${plusMoins(formatPourcentage(s.moveEvenementPct, 2))}`}
+            </span>
+          )}
+        </>
+      );
+    },
+  },
 ];
 
 interface Props {
@@ -81,6 +124,7 @@ interface Props {
   survolTermIv: number | null;
   termIvPoints: PointTermIv[];
   mouvements: PointMouvementAttendu[];
+  segments: SegmentVolForward[];
 }
 
 export function VueTermIv({
@@ -94,11 +138,19 @@ export function VueTermIv({
   survolTermIv,
   termIvPoints,
   mouvements,
+  segments,
 }: Props) {
   const pointSurvol = survolTermIv === null ? undefined : termIvPoints[survolTermIv];
   // Retrouvé par échéance, pas par index : les deux listes n'omettent pas les mêmes échéances.
   const mouvementSurvol =
     pointSurvol === undefined ? undefined : mouvements.find((m) => m.expiryMs === pointSurvol.expiryMs);
+  // Fenêtre qui PART de l'échéance survolée (la dernière échéance n'en a pas).
+  const segmentSurvol =
+    pointSurvol === undefined ? undefined : segments.find((s) => s.debutMs === pointSurvol.expiryMs);
+  const lignes = useMemo<LigneMouvement[]>(
+    () => mouvements.map((m) => ({ ...m, segment: segments.find((s) => s.debutMs === m.expiryMs) ?? null })),
+    [mouvements, segments],
+  );
   return (
     <div className={visible ? undefined : "hidden"}>
       <div className="mb-3 flex items-center justify-between text-[11px] text-text-dim">
@@ -148,6 +200,24 @@ export function VueTermIv({
                 { label: "Nb strikes", valeur: formatEntier(termIvPoints[survolTermIv]!.nbStrikes) },
                 { label: "Move 1σ (IV)", valeur: plusMoins(formatPourcentage(mouvementSurvol?.emIvPct, 2)) },
                 { label: "Straddle", valeur: plusMoins(formatPourcentage(mouvementSurvol?.straddlePct, 2)) },
+                ...(segmentSurvol === undefined
+                  ? []
+                  : [
+                      { label: "σ fwd → suiv.", valeur: valeurSigmaFwd(segmentSurvol), couleur: "var(--serie-3)" },
+                      { label: "Move 1σ fenêtre", valeur: plusMoins(formatPourcentage(segmentSurvol.move1SigmaPct, 2)) },
+                      ...(segmentSurvol.evenements.length === 0
+                        ? []
+                        : [
+                            { label: "Évt", valeur: libellesEvenements(segmentSurvol) },
+                            {
+                              label: "Part évt (estim.)",
+                              valeur:
+                                segmentSurvol.moveEvenementPct === null
+                                  ? VALEUR_ABSENTE
+                                  : `≈${plusMoins(formatPourcentage(segmentSurvol.moveEvenementPct, 2))}`,
+                            },
+                          ]),
+                    ]),
               ]}
             />
           )}
@@ -166,13 +236,17 @@ export function VueTermIv({
           <span className="inline-block h-1.5 w-3 rounded bg-down" />
           RR25 &lt; 0
         </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block w-3 border-t border-dashed border-serie-3" />
+          σ fwd
+        </span>
       </div>
 
       <div className="mt-3">
         <div className="mb-1 text-[11px] text-text-dim">Mouvement attendu d&apos;ici chaque échéance</div>
-        <TableTriable<PointMouvementAttendu>
+        <TableTriable<LigneMouvement>
           colonnes={COLONNES_MOUVEMENT}
-          lignes={mouvements}
+          lignes={lignes}
           cle={(p) => String(p.expiryMs)}
           ariaLabel="Mouvement attendu par échéance"
           maxHauteur="12rem"
@@ -193,6 +267,17 @@ export function VueTermIv({
           (≈ 57 % en log-normal ; 65–66 % observé sur BTC à 7 et 30 j, DVOL en proxy), pas ±1σ
           ni 68 %. Marks Deribit (prix modèle), mesure risque-neutre : surestime en moyenne
           l&apos;amplitude réalisée, aucune direction. Échéances à moins de 2 jours bruitées.
+        </NoteSource>
+        <NoteSource>
+          Vol forward (pointillé, colonne σ fwd →) : variance additive entre échéances consécutives
+          de la courbe, σ fwd² = (σ₂²T₂ − σ₁²T₁)/(T₂ − T₁), IV ATM ancrée sur le spot commun ;
+          « — » si la variance forward est négative (surface incohérente) ; fenêtres dont une
+          échéance a moins de 12 h masquées. Événements ECO USD à fort impact situés dans la
+          fenêtre (« Évt » : autre publication, détail dans ECO). Part d&apos;événement ≈ √(σ fwd²
+          − σ base²) × √(Δt/365 j), σ base = médiane des σ fwd des fenêtres de 7 j au plus sans
+          événement : estimation, lue seulement sur ces fenêtres courtes. IV des quotidiennes peu
+          adossée à l&apos;OI : ±2,5 à 3 pts d&apos;incertitude sur σ fwd, amplifiée quand Δt = 1 j.
+          Mesure risque-neutre, prime de variance incluse.
         </NoteSource>
       </div>
     </div>

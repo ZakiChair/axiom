@@ -32,11 +32,10 @@ import type { Chart as KLineChartInstance, Crosshair, KLineData } from "klinecha
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
-import { getAdapter } from "../data/adapters";
+import { getAdapter, supportedTimeframesFor } from "../data/adapters";
 import { prepareResyncApply } from "../data/resync";
 import { adaptateurReplayActif } from "../data/replayFeed";
 import { estSymboleCapitalisation } from "../data/mcap";
-import { TIMEFRAMES_CAPITALISATION } from "../data/mcapCandles";
 import { parseSyntheticSymbol } from "../data/synthetic";
 import { replayStore } from "../store/replay";
 import {
@@ -55,7 +54,7 @@ import { revenueStore } from "../store/revenue";
 import { macroOverlayStore } from "../store/macro-overlays";
 import { macroHistoryStore } from "../store/macroHistory";
 import { themeStore } from "../store/theme";
-import { chartLayoutStore } from "../store/chart-layout";
+import { chartLayoutStore, visibleSlotCount } from "../store/chart-layout";
 import { refSymbolStore } from "../store/refSymbol";
 import { ccdataKeyStore } from "../store/ccdata";
 import { getIndicator } from "@axiom/indicators";
@@ -313,8 +312,6 @@ export function creerOrdonnanceurExtension(params: ParamsOrdonnanceurExtension):
   return { demander };
 }
 
-/** Timeframes proposés dans l'en-tête d'un slot secondaire (sous-ensemble commun). */
-const SECONDARY_TFS: Timeframe[] = ["1m", "5m", "15m", "1h", "4h", "1d"];
 /** Sources proposées dans l'en-tête d'un slot secondaire. */
 const SECONDARY_SOURCES: { id: ExchangeId; label: string }[] = [
   { id: "binance", label: "Binance" },
@@ -620,6 +617,20 @@ export function ChartInstance({
 
     const chart = init(chartDom);
     if (!chart) return;
+    // Le contrôleur de navigation n'alourdit pas le chargement initial en mono-vue.
+    let viewportDisposed = false;
+    let viewportDemande = false;
+    let unbindViewportSync = (): void => {};
+    const chargerViewportSync = (): void => {
+      const options = chartLayoutStore.getState();
+      if (viewportDemande || !options.syncViewport || visibleSlotCount(options.layout) < 2) return;
+      viewportDemande = true;
+      void import("./viewportSync").then(({ bindViewportSync }) => {
+        if (!viewportDisposed) unbindViewportSync = bindViewportSync(chart, store, slot);
+      }).catch(() => { viewportDemande = false; });
+    };
+    chargerViewportSync();
+    const unsubscribeViewportOptions = chartLayoutStore.subscribe(chargerViewportSync);
 
     // Thème (bougies/grille/axes/crosshair + fond) — appliqué puis réabonné.
     applyChartTheme(chart, chartDom);
@@ -662,6 +673,18 @@ export function ChartInstance({
     const candleReadout = new CandleReadout(chart, container);
 
     // ── Crosshair synchronisé inter-slots ──────────────────────────────────
+    let pointeurPresent = false;
+    let dernierX: number | null = null;
+    const slotLive = (position: number): boolean => {
+      const replay = replayStore.getState();
+      return position >= 0 && position < visibleSlotCount(chartLayoutStore.getState().layout) &&
+        !((replay.active || replay.identityTransition) && replay.slot === position);
+    };
+    const effacerReticule = (): void => {
+      if (crosshairSyncStore.getState().source === slot) {
+        crosshairSyncStore.setState({ time: null, source: -1 });
+      }
+    };
     const drawSyncedCrosshair = (): void => {
       const ctx = xhairCanvas.getContext("2d");
       if (!ctx) return;
@@ -680,7 +703,14 @@ export function ChartInstance({
       ctx.clearRect(0, 0, cssW, cssH);
 
       const { time, source } = crosshairSyncStore.getState();
-      if (time === null || source === slot) return; // rien à tracer (ou c'est nous la source)
+      const state = store.getState();
+      if (time === null || source === slot || !chartLayoutStore.getState().syncCrosshair ||
+          !slotLive(slot) || !slotLive(source) ||
+          !isMarketDataReady(state, marketIdentity(state), state.dataLoad.requestId)) return;
+      const data = chart.getDataList();
+      // Ne pas placer une ligne sur la première/dernière bougie d'un historique
+      // qui ne couvre pas la date pointée (convertToPixel choisit sinon la plus proche).
+      if (!data.length || time < data[0]!.timestamp || time > data.at(-1)!.timestamp) return;
       const px = chart.convertToPixel(
         { timestamp: time },
         { paneId: CANDLE_PANE_ID, absolute: true },
@@ -718,7 +748,12 @@ export function ChartInstance({
     // Ce slot survolé publie le timestamp pointé ; les autres tracent la ligne.
     const onCrosshair = (data?: Crosshair): void => {
       const t = data?.kLineData?.timestamp;
-      crosshairSyncStore.setState({ time: typeof t === "number" ? t : null, source: slot });
+      dernierX = typeof data?.x === "number" ? data.x : null;
+      // Les ajustements de viewport recalculent aussi le crosshair : seule la vue
+      // réellement survolée publie, sinon une cible réémettrait à la place de la source.
+      if (pointeurPresent && chartLayoutStore.getState().syncCrosshair && slotLive(slot)) {
+        crosshairSyncStore.setState({ time: typeof t === "number" ? t : null, source: slot });
+      }
       // Encart de lecture : bougie pointée + pixel du curseur (masqué hors survol).
       if (data?.kLineData && typeof data.x === "number" && typeof data.y === "number") {
         candleReadout.montrer(data.kLineData, data.x, data.y);
@@ -726,11 +761,43 @@ export function ChartInstance({
         candleReadout.cacher();
       }
     };
+    const onPointerEnter = (): void => { pointeurPresent = true; };
+    const onPointerLeave = (): void => {
+      pointeurPresent = false;
+      dernierX = null;
+      effacerReticule();
+      candleReadout.cacher();
+    };
+    chartDom.addEventListener("pointerenter", onPointerEnter);
+    chartDom.addEventListener("pointerleave", onPointerLeave);
     chart.subscribeAction(ActionType.OnCrosshairChange, onCrosshair);
     // Redessine la ligne synchronisée quand le crosshair partagé change OU quand le
     // viewport de CE slot bouge (le x du timestamp se recalcule).
     const unsubscribeXhairStore = crosshairSyncStore.subscribe(() => xhairThrottle.trigger());
-    const onXhairViewport = (): void => xhairThrottle.trigger();
+    const unsubscribeXhairOptions = chartLayoutStore.subscribe((state, prev) => {
+      if (state.syncCrosshair !== prev.syncCrosshair || state.layout !== prev.layout) {
+        if (!state.syncCrosshair || !slotLive(slot)) effacerReticule();
+        xhairThrottle.trigger();
+      }
+    });
+    const unsubscribeXhairReplay = replayStore.subscribe((state, prev) => {
+      if (state.active !== prev.active || state.identityTransition !== prev.identityTransition) {
+        if (!slotLive(slot)) effacerReticule();
+        xhairThrottle.trigger();
+      }
+    });
+    const onXhairViewport = (): void => {
+      // Le moteur recalcule la bougie sous un pointeur immobile sans notifier
+      // OnCrosshairChange. Reconvertir son x après navigation évite une date figée.
+      const state = store.getState();
+      if (pointeurPresent && dernierX !== null && chartLayoutStore.getState().syncCrosshair &&
+          slotLive(slot) && isMarketDataReady(state, marketIdentity(state), state.dataLoad.requestId)) {
+        const points = chart.convertFromPixel([{ x: dernierX }], { paneId: CANDLE_PANE_ID });
+        const point = Array.isArray(points) ? points[0] : points;
+        crosshairSyncStore.setState({ time: point?.timestamp ?? null, source: slot });
+      }
+      xhairThrottle.trigger();
+    };
     chart.subscribeAction(ActionType.OnScroll, onXhairViewport);
     chart.subscribeAction(ActionType.OnZoom, onXhairViewport);
     chart.subscribeAction(ActionType.OnVisibleRangeChange, onXhairViewport);
@@ -770,6 +837,9 @@ export function ChartInstance({
       // partir AVANT `dispose(chart)`. On invoque donc EXPLICITEMENT le teardown données ici
       // (idempotent) pendant que le chart est encore vivant, puis on démonte l'instance.
       teardownDataRef.current?.();
+      viewportDisposed = true;
+      unsubscribeViewportOptions();
+      unbindViewportSync();
       unbindPriceAlert();
       unsubscribeTheme();
       unsubscribePaneHeaders();
@@ -778,7 +848,12 @@ export function ChartInstance({
       overlayLegend.dispose();
       measureTool.dispose();
       candleReadout.dispose();
+      chartDom.removeEventListener("pointerenter", onPointerEnter);
+      chartDom.removeEventListener("pointerleave", onPointerLeave);
+      effacerReticule();
       unsubscribeXhairStore();
+      unsubscribeXhairOptions();
+      unsubscribeXhairReplay();
       chart.unsubscribeAction(ActionType.OnCrosshairChange, onCrosshair);
       chart.unsubscribeAction(ActionType.OnScroll, onXhairViewport);
       chart.unsubscribeAction(ActionType.OnZoom, onXhairViewport);
@@ -1446,11 +1521,7 @@ function SecondaryHeader({
   onChangeTimeframe?: (tf: Timeframe) => void;
   onChangeExchange?: (ex: ExchangeId) => void;
 }) {
-  const spec = exchange === "synthetic" ? parseSyntheticSymbol(symbol) : null;
-  const timeframes = exchange === "synthetic" &&
-      (estSymboleCapitalisation(symbol) || spec?.exA === "mcap" || spec?.exB === "mcap")
-    ? TIMEFRAMES_CAPITALISATION
-    : SECONDARY_TFS;
+  const timeframes = supportedTimeframesFor(exchange, symbol);
   return (
     <div className="pointer-events-auto absolute left-1 top-1 z-20 flex items-center gap-1 rounded bg-surface/80 px-1 py-0.5 text-[10px] backdrop-blur">
       <input

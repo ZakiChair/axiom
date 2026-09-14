@@ -4,10 +4,16 @@ import {
   BTC_GENESIS_MS,
   JOUR_MS,
   ajusterBtcPowerLaw,
+  bornesLogPrixBtcPowerLaw,
+  courbeBtcPowerLaw,
+  logJoursBtc,
   intervallesBtcPowerLaw,
   percentileBtcPowerLaw,
   prixQuantileBtcPowerLaw,
   prixTendanceBtcPowerLaw,
+  reperesAxeBtcPowerLaw,
+  ticksPrixBtcPowerLaw,
+  timeDepuisLogJours,
 } from "./btcPowerLaw";
 
 function point(x: number, logPrix: number): PointMetrique {
@@ -109,5 +115,141 @@ describe("bandes de présence historiques", () => {
   it("renvoie NaN pour une date ou un prix non projetable", () => {
     expect(Number.isNaN(prixTendanceBtcPowerLaw(modele, BTC_GENESIS_MS))).toBe(true);
     expect(Number.isNaN(percentileBtcPowerLaw(modele, cible, 0))).toBe(true);
+  });
+});
+
+describe("axe log10(jours)", () => {
+  it("fait l'aller-retour entre horodatage et abscisse logarithmique", () => {
+    const time = BTC_GENESIS_MS + 1_234 * JOUR_MS;
+    expect(logJoursBtc(time)).toBeCloseTo(Math.log10(1_234), 12);
+    expect(timeDepuisLogJours(logJoursBtc(time))).toBeCloseTo(time, 3);
+  });
+
+  it("renvoie NaN avant la genèse", () => {
+    expect(Number.isNaN(logJoursBtc(BTC_GENESIS_MS))).toBe(true);
+    expect(Number.isNaN(logJoursBtc(BTC_GENESIS_MS - JOUR_MS))).toBe(true);
+  });
+});
+
+describe("courbeBtcPowerLaw", () => {
+  const modele = ajusterBtcPowerLaw([point(1, 5), point(2, 8), point(3, 11), point(4, 14)])!;
+
+  it("échantillonne uniformément en log10(jours) entre les bornes demandées", () => {
+    const courbe = courbeBtcPowerLaw(modele, 2, 4, 5);
+    expect(courbe).toHaveLength(5);
+    expect(courbe.map((p) => logJoursBtc(p.time))).toEqual([
+      expect.closeTo(2, 9),
+      expect.closeTo(2.5, 9),
+      expect.closeTo(3, 9),
+      expect.closeTo(3.5, 9),
+      expect.closeTo(4, 9),
+    ]);
+  });
+
+  it("reprend exactement la tendance et les quantiles analytiques", () => {
+    const courbe = courbeBtcPowerLaw(modele, 2, 4, 3);
+    const milieu = courbe[1]!;
+    expect(milieu.tendance).toBeCloseTo(prixTendanceBtcPowerLaw(modele, milieu.time), 6);
+    expect(milieu.q5).toBeCloseTo(prixQuantileBtcPowerLaw(modele, milieu.time, 5), 6);
+    expect(milieu.q95).toBeCloseTo(prixQuantileBtcPowerLaw(modele, milieu.time, 95), 6);
+  });
+
+  it("garde au moins deux points et plafonne l'échantillonnage", () => {
+    expect(courbeBtcPowerLaw(modele, 2, 4, 1)).toHaveLength(2);
+    expect(courbeBtcPowerLaw(modele, 2, 4, 10_000)).toHaveLength(2_000);
+  });
+
+  it("renvoie une courbe vide pour une fenêtre non traçable", () => {
+    expect(courbeBtcPowerLaw(modele, 4, 2, 10)).toEqual([]);
+    expect(courbeBtcPowerLaw(modele, Number.NaN, 4, 10)).toEqual([]);
+  });
+});
+
+describe("bornesLogPrixBtcPowerLaw", () => {
+  const modele = ajusterBtcPowerLaw([point(1, 5), point(2, 8), point(3, 11), point(4, 14)])!;
+
+  it("englobe les prix visibles et les quantiles extrêmes, marge comprise", () => {
+    const courbe = courbeBtcPowerLaw(modele, 2, 3, 2);
+    const bornes = bornesLogPrixBtcPowerLaw([point(2.5, 9.5)], courbe)!;
+    const basCourbe = Math.min(...courbe.map((p) => Math.log10(p.q5)));
+    const hautCourbe = Math.max(...courbe.map((p) => Math.log10(p.q95)));
+    expect(bornes.yMin).toBeLessThan(Math.min(basCourbe, 9.5));
+    expect(bornes.yMax).toBeGreaterThan(Math.max(hautCourbe, 9.5));
+    const brut = Math.max(hautCourbe, 9.5) - Math.min(basCourbe, 9.5);
+    expect(bornes.yMax - bornes.yMin).toBeCloseTo(brut * 1.1, 9);
+  });
+
+  it("tient sans prix visible et refuse un ensemble entièrement vide", () => {
+    const courbe = courbeBtcPowerLaw(modele, 2, 3, 2);
+    expect(bornesLogPrixBtcPowerLaw([], courbe)).not.toBeNull();
+    expect(bornesLogPrixBtcPowerLaw([], [])).toBeNull();
+  });
+});
+
+describe("reperesAxeBtcPowerLaw", () => {
+  const bornes = (debut: number, fin: number) =>
+    reperesAxeBtcPowerLaw(logJoursBtc(debut), logJoursBtc(fin));
+
+  it("place des 1ers janvier au-delà de trois ans de fenêtre", () => {
+    const reperes = bornes(Date.UTC(2013, 0, 1), Date.UTC(2017, 0, 1));
+    expect(reperes.granularite).toBe("annee");
+    expect(reperes.times).toEqual([2013, 2014, 2015, 2016, 2017].map((a) => Date.UTC(a, 0, 1)));
+  });
+
+  it("bascule sur les débuts de mois entre trois mois et trois ans", () => {
+    const reperes = bornes(Date.UTC(2013, 0, 15), Date.UTC(2013, 5, 1));
+    expect(reperes.granularite).toBe("mois");
+    expect(reperes.times).toEqual([0, 1, 2, 3, 4, 5].map((m) => Date.UTC(2013, m, 1)));
+  });
+
+  it("bascule sur les jours sous trois mois — un zoom profond garde des repères", () => {
+    const reperes = bornes(Date.UTC(2013, 2, 10), Date.UTC(2013, 3, 9));
+    expect(reperes.granularite).toBe("jour");
+    expect(reperes.times).toHaveLength(31);
+    expect(reperes.times[0]).toBe(Date.UTC(2013, 2, 10));
+    expect(reperes.times[30]).toBe(Date.UTC(2013, 3, 9));
+  });
+
+  it("renvoie des repères strictement croissants et couvrant la fenêtre", () => {
+    for (const fenetre of [
+      [Date.UTC(2010, 6, 18), Date.UTC(2076, 0, 1)],
+      [Date.UTC(2020, 0, 1), Date.UTC(2021, 6, 1)],
+      [Date.UTC(2015, 4, 3), Date.UTC(2015, 4, 25)],
+    ] as const) {
+      const { times } = bornes(fenetre[0], fenetre[1]);
+      expect(times.length).toBeGreaterThan(1);
+      expect(times.every((t, i) => i === 0 || t > times[i - 1]!)).toBe(true);
+      expect(times.some((t) => t >= fenetre[0] && t <= fenetre[1])).toBe(true);
+    }
+  });
+
+  it("refuse une fenêtre non traçable", () => {
+    expect(reperesAxeBtcPowerLaw(4, 2).times).toEqual([]);
+    expect(reperesAxeBtcPowerLaw(Number.NaN, 4).times).toEqual([]);
+  });
+});
+
+describe("ticksPrixBtcPowerLaw", () => {
+  it("reste sur les mêmes décennies quand la vue glisse — pas de saut de parité", () => {
+    const pasDeuxDecennies = ticksPrixBtcPowerLaw(-1.3, 9);
+    const apresLegerGlissement = ticksPrixBtcPowerLaw(-1.25, 9.05);
+    expect(pasDeuxDecennies).toEqual(apresLegerGlissement);
+    expect(pasDeuxDecennies).toEqual([1, 1e2, 1e4, 1e6, 1e8]);
+  });
+
+  it("affine les mantisses à mesure que la plage se resserre", () => {
+    expect(ticksPrixBtcPowerLaw(3, 4.5)).toEqual([1e3, 2e3, 5e3, 1e4, 2e4]);
+    expect(ticksPrixBtcPowerLaw(0.65, 1.05)).toEqual([5, 6, 7, 8, 9, 10]);
+  });
+
+  it("ne sort jamais de la plage demandée et refuse une plage vide", () => {
+    for (const [bas, haut] of [[-1.3, 9], [3, 4.5], [0.65, 1.05], [2.4, 2.9]] as const) {
+      for (const tick of ticksPrixBtcPowerLaw(bas, haut)) {
+        expect(Math.log10(tick)).toBeGreaterThanOrEqual(bas - 1e-12);
+        expect(Math.log10(tick)).toBeLessThanOrEqual(haut + 1e-12);
+      }
+    }
+    expect(ticksPrixBtcPowerLaw(4, 2)).toEqual([]);
+    expect(ticksPrixBtcPowerLaw(Number.NaN, 2)).toEqual([]);
   });
 });

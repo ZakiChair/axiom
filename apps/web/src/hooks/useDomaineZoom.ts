@@ -9,6 +9,8 @@
  * Le domaine visible se réinitialise quand les bornes changent (nouvelle série).
  * `onGeste` est appelé à chaque interaction manuelle — les fenêtres s'en servent
  * pour désactiver le bouton de période actif (« plage personnalisée »).
+ * `marges` = pixels réservés aux libellés d'axes à gauche/droite du tracé ; sans elles
+ * le pivot de la molette est décalé de la marge sur les graphes à axe Y étiqueté.
  */
 import { useEffect, useRef, useState } from "react";
 import {
@@ -21,6 +23,7 @@ import {
 export function useDomaineZoom(
   bornes: Domaine | null,
   onGeste?: () => void,
+  marges?: { gauche: number; droite: number },
 ): {
   refCanvas: React.RefObject<HTMLCanvasElement>;
   domaine: Domaine | null;
@@ -36,6 +39,14 @@ export function useDomaineZoom(
   bornesRef.current = bornes;
   const onGesteRef = useRef(onGeste);
   onGesteRef.current = onGeste;
+  const margesRef = useRef(marges);
+  margesRef.current = marges;
+
+  /** Origine et largeur du tracé (hors marges d'axes) dans le repère du canvas. */
+  const trace = (rect: DOMRect): { gauche: number; largeur: number } => {
+    const gauche = margesRef.current?.gauche ?? 0;
+    return { gauche, largeur: Math.max(1, rect.width - gauche - (margesRef.current?.droite ?? 0)) };
+  };
 
   // Nouvelle série (bornes changent) → plage personnalisée obsolète, on repart du tout.
   useEffect(() => {
@@ -57,7 +68,8 @@ export function useDomaineZoom(
       if (d === null || b === null) return;
       e.preventDefault();
       const rect = cvs.getBoundingClientRect();
-      const pivot = pixelVersValeur(d, e.clientX - rect.left, rect.width);
+      const t = trace(rect);
+      const pivot = pixelVersValeur(d, e.clientX - rect.left - t.gauche, t.largeur);
       const facteur = Math.exp(-e.deltaY * 0.002); // deltaY < 0 (haut) = zoom avant
       setDomaine(zoomerDomaine(d, facteur, pivot, b));
       onGesteRef.current?.();
@@ -77,7 +89,7 @@ export function useDomaineZoom(
       const dx = e.clientX - panDepuisX;
       if (dx === 0) return;
       panDepuisX = e.clientX;
-      setDomaine(deplacerDomaine(d, (-dx / Math.max(1, rect.width)) * (d.max - d.min), b));
+      setDomaine(deplacerDomaine(d, (-dx / trace(rect).largeur) * (d.max - d.min), b));
       onGesteRef.current?.();
     };
     const surPointerFin = (e: PointerEvent): void => {

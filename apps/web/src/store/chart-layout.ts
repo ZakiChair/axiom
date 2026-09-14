@@ -24,6 +24,8 @@ import { exchangeForSymbol, normalizeMarketSymbol } from "./market";
 /** Modes de disposition : 1 seul, 2 côte-à-côte, 2 empilés, 2×2. */
 export type ChartLayoutMode = "1" | "2h" | "2v" | "2x2";
 
+export type ChartSyncOption = "syncTimeframe" | "syncViewport" | "syncCrosshair";
+
 /** Nombre de slots VISIBLES par mode (slot 0 inclus). */
 export const VISIBLE_SLOTS: Record<ChartLayoutMode, number> = {
   "1": 1,
@@ -71,10 +73,15 @@ export interface ChartLayoutState {
   focus: number;
   /** Liaison des symboles : changer un symbole propage aux autres slots visibles. */
   linked: boolean;
+  /** Préférences indépendantes : comparaison d'actifs sans lier leurs symboles. */
+  syncTimeframe: boolean;
+  syncViewport: boolean;
+  syncCrosshair: boolean;
 
   setLayout: (mode: ChartLayoutMode) => void;
   setFocus: (slot: number) => void;
   toggleLinked: () => void;
+  setSyncOption: (option: ChartSyncOption, enabled: boolean) => void;
   /** Modifie la config d'un slot SECONDAIRE (index de grille 1..3). */
   setSlotMarket: (slot: number, config: SlotConfig) => void;
   setSlotSymbol: (slot: number, symbol: string) => void;
@@ -89,6 +96,9 @@ interface Persisted {
   layout: ChartLayoutMode;
   slots: [SlotConfig, SlotConfig, SlotConfig];
   linked: boolean;
+  syncTimeframe: boolean;
+  syncViewport: boolean;
+  syncCrosshair: boolean;
 }
 
 const LAYOUT_MODES: readonly ChartLayoutMode[] = ["1", "2h", "2v", "2x2"];
@@ -152,7 +162,10 @@ export function sanitizeSlotConfig(raw: unknown, fallback: SlotConfig): SlotConf
 
 /** Lecture tolérante de l'état persisté (localStorage indispo / JSON corrompu → défauts). */
 function hydrate(): Persisted {
-  const base: Persisted = { layout: "1", slots: DEFAULT_SLOTS, linked: false };
+  const base: Persisted = {
+    layout: "1", slots: DEFAULT_SLOTS, linked: false,
+    syncTimeframe: false, syncViewport: false, syncCrosshair: true,
+  };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return base;
@@ -167,7 +180,12 @@ function hydrate(): Persisted {
       sanitizeSlotConfig(slotsRaw[1], DEFAULT_SLOTS[1]),
       sanitizeSlotConfig(slotsRaw[2], DEFAULT_SLOTS[2]),
     ];
-    return { layout, slots, linked: p.linked === true };
+    return {
+      layout, slots, linked: p.linked === true,
+      syncTimeframe: p.syncTimeframe === true,
+      syncViewport: p.syncViewport === true,
+      syncCrosshair: typeof p.syncCrosshair === "boolean" ? p.syncCrosshair : true,
+    };
   } catch {
     return base;
   }
@@ -180,6 +198,9 @@ function persist(state: ChartLayoutState): void {
       layout: state.layout,
       slots: state.slots,
       linked: state.linked,
+      syncTimeframe: state.syncTimeframe,
+      syncViewport: state.syncViewport,
+      syncCrosshair: state.syncCrosshair,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch {
@@ -234,6 +255,9 @@ export const chartLayoutStore = createStore<ChartLayoutState>((set, get) => ({
   slots: initial.slots,
   focus: clampFocus(0, initial.layout),
   linked: initial.linked,
+  syncTimeframe: initial.syncTimeframe,
+  syncViewport: initial.syncViewport,
+  syncCrosshair: initial.syncCrosshair,
 
   setLayout: (mode) =>
     set((s) => ({ layout: mode, focus: clampFocus(s.focus, mode) })),
@@ -241,6 +265,9 @@ export const chartLayoutStore = createStore<ChartLayoutState>((set, get) => ({
   setFocus: (slot) => set((s) => ({ focus: clampFocus(slot, s.layout) })),
 
   toggleLinked: () => set((s) => ({ linked: !s.linked })),
+
+  setSyncOption: (option, enabled) =>
+    set((s) => s[option] === enabled ? s : { [option]: enabled }),
 
   setSlotMarket: (slot, config) =>
     set((s) => ({ slots: patchSlot(s.slots, slot, config) })),

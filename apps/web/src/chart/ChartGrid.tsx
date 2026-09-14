@@ -14,7 +14,7 @@
  * Les stores locaux vivent dans un ref (créés une fois) : changer de layout MONTE/DÉMONTE
  * les ChartInstance secondaires (dispose rigoureux) mais préserve leur config.
  */
-import { useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { useStore } from "zustand";
 import type { ExchangeId, Timeframe } from "@axiom/types";
 import {
@@ -29,7 +29,7 @@ import {
   type ChartLayoutMode,
 } from "../store/chart-layout";
 import { replayStore } from "../store/replay";
-import { masterLinkSource, propagerMarche } from "../store/chart-linking";
+import { demarrerSyncTimeframes, masterLinkSource, propagerMarche } from "../store/chart-linking";
 import { demarrerSyncFenetres } from "../store/sync";
 import { setFocusChart } from "./drawing";
 import { Chart } from "./Chart";
@@ -51,6 +51,8 @@ const LAYOUT_BUTTONS: { mode: ChartLayoutMode; label: string; title: string }[] 
   { mode: "2x2", label: "2×2", title: "Grille 2×2" },
 ];
 
+const ChartSyncControls = lazy(() => import("./ChartSyncControls"));
+
 export function ChartGrid() {
   const layout = useStore(chartLayoutStore, (s) => s.layout);
   const linked = useStore(chartLayoutStore, (s) => s.linked);
@@ -63,6 +65,8 @@ export function ChartGrid() {
     storesRef.current = [createMarketStore(s[0]), createMarketStore(s[1]), createMarketStore(s[2])];
   }
   const stores = storesRef.current;
+
+  useEffect(() => demarrerSyncTimeframes(), []);
 
   // Config déclarative (chart-layout) → store local de chaque secondaire (ne pousse que
   // les champs modifiés → n'induit une ré-init de ChartInstance que si nécessaire).
@@ -170,6 +174,11 @@ export function ChartGrid() {
         >
           ⛓
         </button>
+        {count > 1 && (
+          <Suspense fallback={null}>
+            <ChartSyncControls />
+          </Suspense>
+        )}
       </div>
 
       <div className={`grid h-full w-full gap-px bg-border ${GRID_CLASS[layout]}`}>

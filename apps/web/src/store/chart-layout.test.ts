@@ -3,7 +3,7 @@
  * et logique du store (bornage du focus au mode, patch des slots secondaires, liaison).
  * Aucun DOM requis (la persistance localStorage est best-effort et tolère son absence).
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   chartLayoutStore,
   linkedTargets,
@@ -17,11 +17,61 @@ beforeEach(() => {
     layout: "1",
     focus: 0,
     linked: false,
+    syncTimeframe: false,
+    syncViewport: false,
+    syncCrosshair: true,
     slots: [
       { exchange: "binance", symbol: "ETHUSDT", timeframe: "1m" },
       { exchange: "binance", symbol: "SOLUSDT", timeframe: "1m" },
       { exchange: "binance", symbol: "BNBUSDT", timeframe: "1m" },
     ],
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe("chartLayoutStore — persistance de la synchronisation", () => {
+  async function restaurer(payload: unknown) {
+    const storage = new Map<string, string>();
+    if (payload !== undefined) storage.set("axiom:chartLayout:v1", JSON.stringify(payload));
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+    });
+    vi.resetModules();
+    const { chartLayoutStore: restored } = await import("./chart-layout");
+    return { restored, storage };
+  }
+
+  it("migre une disposition v1 sans activer les unités ni le zoom", async () => {
+    const { restored } = await restaurer({ layout: "2h", linked: true });
+    expect(restored.getState()).toMatchObject({
+      layout: "2h", linked: true,
+      syncTimeframe: false, syncViewport: false, syncCrosshair: true,
+    });
+  });
+
+  it("restaure des booléens valides et écarte les valeurs corrompues", async () => {
+    const { restored } = await restaurer({
+      syncTimeframe: "true", syncViewport: 1, syncCrosshair: "false",
+    });
+    expect(restored.getState()).toMatchObject({
+      syncTimeframe: false, syncViewport: false, syncCrosshair: true,
+    });
+  });
+
+  it("conserve les trois préférences après rechargement", async () => {
+    const { restored, storage } = await restaurer(undefined);
+    restored.getState().setSyncOption("syncTimeframe", true);
+    restored.getState().setSyncOption("syncViewport", true);
+    restored.getState().setSyncOption("syncCrosshair", false);
+    const persisted = JSON.parse(storage.get("axiom:chartLayout:v1") ?? "{}");
+    const { restored: reloaded } = await restaurer(persisted);
+    expect(reloaded.getState()).toMatchObject({
+      syncTimeframe: true, syncViewport: true, syncCrosshair: false,
+    });
   });
 });
 

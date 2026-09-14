@@ -50,7 +50,7 @@ Binance, source par défaut. Un testeur américain concluait que l'application e
   (355 670 octets gzip pour 360 000, marge 4 330 ≥ 3 ko exigés par la variance zlib du
   runner GitHub).
 - `pnpm check:e2e` : 51 parcours hermétiques verts (1,2 min).
-- GitHub Actions run `34819008044` sur `2024ed3` : succès (deuxième run vert consécutif sur `main`).
+- GitHub Actions run `34819008044` sur `2024ed3` : succès (troisième run vert consécutif sur `main`, après `34816202729` et `34816695192`).
 - Déploiement `dpl_AqGzzRmpKFFDgYSifhUHEsHYdmCr` (09:41, prébuilt) ; l'alias sert
   `index-C21-vqMl.js`, identique au build local.
 - `curl` de l'alias : les six balises de carte présentes ; `apercu-terminal.jpg` → HTTP 200,

@@ -252,10 +252,11 @@ function originalQuery(source: URL): URLSearchParams {
   return query;
 }
 
-/** Variables d'environnement lues par la politique (repli de clé côté serveur). */
-export interface ProxyEnv {
-  BGEOMETRICS_API_KEY?: string;
-}
+/**
+ * Variables d'environnement lues par la politique (repli de clé côté serveur). Forme
+ * indexée = celle de l'environnement Node ; UNE seule variable est consultée : BGEOMETRICS_API_KEY.
+ */
+export type ProxyEnv = Readonly<Record<string, string | undefined>>;
 
 export function proxyUpstreamHeaders(
   headers: Headers,
@@ -284,7 +285,7 @@ export function proxyUpstreamHeaders(
   // Repli SERVEUR BGeometrics : sans clé personnelle côté client, la clé de la variable
   // d'environnement (jamais exposée au navigateur) porte le quota horaire pour tous les
   // visiteurs du déploiement — même principe que le proxy Vite de dev et le daemon.
-  const repliBg = env.BGEOMETRICS_API_KEY ?? "";
+  const repliBg = env["BGEOMETRICS_API_KEY"] ?? "";
   if (host === "bitcoin-data.com" && !upstream.has("authorization") && repliBg.length > 0 && repliBg.length <= 512) {
     upstream.set("authorization", `Bearer ${repliBg}`);
   }

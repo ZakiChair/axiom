@@ -41,7 +41,8 @@ describe("proxy Vercel", () => {
     // est le repli BGeometrics, via le paramètre par défaut typé `ProxyEnv` (une variable).
     const sansRepliBg = `${policySource}\n${handlerSource}`.replace(/env: ProxyEnv = process\.env/g, "");
     expect(sansRepliBg).not.toMatch(/\b(?:process|Bun|Deno)\.env\b/);
-    expect(policySource).toContain("BGEOMETRICS_API_KEY?: string;");
+    expect(policySource.match(/\benv\[/g)).toHaveLength(1);
+    expect(policySource).toContain('env["BGEOMETRICS_API_KEY"]');
   });
 
   test("place les neuf rewrites avant le fallback SPA", async () => {

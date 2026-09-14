@@ -11,8 +11,8 @@ export const ORDRE_REGIONS: readonly RegionMacro[] = ["US", "EZ", "UK", "JP", "C
 export const REGIONS_MACRO: Record<RegionMacro, string> = {
   US: "États-Unis", EZ: "Zone euro", UK: "Royaume-Uni", JP: "Japon", CN: "Chine", IN: "Inde", CA: "Canada", CH: "Suisse",
 };
-export type IndicateurMacro = "cpi-aa" | "cpi-mm" | "core-cpi-aa" | "ppi-aa" | "pib-aa" | "chomage" | "production-aa" | "change-reel-aa" | "monnaie-aa" | "taux-reel-us" | "breakeven-us" | "nfci" | "hy-oas" | "demandes-chomage" | "sofr-iorb" | "pce-niveau" | "pce-aa" | "pce-3m" | "pce-6m" | "emploi-variation" | "emploi-moyenne3m" | "retail-niveau" | "retail-mm" | "retail-aa";
-export type UniteMacro = "%" | "indice" | "personnes" | "pb" | "indice-2017=100" | "milliers" | "millions-usd-nominaux";
+export type IndicateurMacro = "cpi-aa" | "cpi-mm" | "core-cpi-aa" | "ppi-aa" | "pib-aa" | "chomage" | "production-aa" | "change-reel-aa" | "monnaie-aa" | "dette-pib" | "taux-reel-us" | "breakeven-us" | "nfci" | "hy-oas" | "demandes-chomage" | "sofr-iorb" | "pce-niveau" | "pce-aa" | "pce-3m" | "pce-6m" | "emploi-variation" | "emploi-moyenne3m" | "retail-niveau" | "retail-mm" | "retail-aa";
+export type UniteMacro = "%" | "pourcent-pib" | "indice" | "personnes" | "pb" | "indice-2017=100" | "milliers" | "millions-usd-nominaux";
 export type SourceMacro =
   | { transport: "fred"; seriesId: string; units?: string }
   | { transport: "oecd"; dataflow: string; cle: string }
@@ -49,6 +49,7 @@ export const INDICATEURS_MACRO: readonly DefinitionIndicateurMacro[] = [
   { id: "production-aa", label: "Production industrielle (a/a)", unite: "%", description: "Volume de la production industrielle contre le même mois de l'année précédente." },
   { id: "change-reel-aa", label: "Change effectif réel (a/a)", unite: "%", description: "Panier large BIS : variation annuelle de l'indice réel. Une hausse indique une appréciation réelle." },
   { id: "monnaie-aa", label: "Monnaie large (a/a)", unite: "%", description: "Croissance des agrégats nationaux. M2, M3 et M4 ont des périmètres différents ; aucun total mondial." },
+  { id: "dette-pib", label: "Cycle de la dette à long terme", unite: "pourcent-pib", description: "Crédit total au secteur non financier rapporté au PIB : ménages, entreprises non financières et administrations publiques ; secteur financier exclu. Ce ratio permet de lire l’endettement sur plusieurs décennies, sans dater mécaniquement un supercycle ni fournir un signal d’achat. Une baisse peut refléter la croissance du PIB, sans baisse de la dette nominale ; la valorisation de marché influence aussi le ratio. Historique disponible variable selon la zone et révisable." },
   { id: "taux-reel-us", label: "Taux réel US 10 ans", unite: "%", description: "Rendement des obligations US indexées sur l'inflation, maturité constante 10 ans (DFII10)." },
   { id: "breakeven-us", label: "Breakeven US 10 ans", unite: "%", description: "Écart de rendements nominal/réel à 10 ans ; intègre anticipations d'inflation et primes de marché." },
   { id: "nfci", label: "Conditions financières US", unite: "indice", description: "Chicago Fed NFCI. Positif : conditions plus restrictives que la moyenne historique ; indice révisable." },
@@ -70,6 +71,9 @@ const PRIX = "OECD.SDD.TPS,DSD_PRICES@DF_PRICES_ALL,1.0";
 const PRIX_2018 = "OECD.SDD.TPS,DSD_PRICES_COICOP2018@DF_PRICES_C2018_ALL,1.0";
 const KEI = "OECD.SDD.STES,DSD_KEI@DF_KEI,4.0";
 const ISO: Record<RegionMacro, string> = { US: "USA", EZ: "EA20", UK: "GBR", JP: "JPN", CN: "CHN", IN: "IND", CA: "CAN", CH: "CHE" };
+// BIS : C = secteur non financier total (public + privé), A = tous prêteurs.
+// Séries trimestrielles en % du PIB, à valeur de marché et ajustées des ruptures.
+const DETTE_PIB_BIS: Record<RegionMacro, string> = { US: "QUSCAM770A", EZ: "QXMCAM770A", UK: "QGBCAM770A", JP: "QJPCAM770A", CN: "QCNCAM770A", IN: "QINCAM770A", CA: "QCACAM770A", CH: "QCHCAM770A" };
 const fred = (seriesId: string, units?: string): SourceMacro => ({ transport: "fred", seriesId, ...(units ? { units } : {}) });
 const oecd = (dataflow: string, cle: string): SourceMacro => ({ transport: "oecd", dataflow, cle });
 const ons = (theme: string, cdid: string, dataset: string): SourceMacro => ({ transport: "ons", chemin: `${theme}/timeseries/${cdid}/${dataset}/data` });
@@ -105,6 +109,7 @@ const mondiales = ORDRE_REGIONS.flatMap((r): DefinitionSerieMacro[] => {
     definir("production-aa", r, ip, { perimetre: r === "CN" ? "valeur ajoutée · entreprises au-dessus du seuil national · brut · janvier/février non individualisés" : r === "UK" ? "B–E · volume désaisonnalisé" : r === "EZ" ? "B–D · CVS-CJO" : "industrie hors construction · désaisonnalisé", ...(r === "UK" || r === "EZ" ? { transformation: "aa" } : {}) }),
     definir("change-reel-aa", r, fred(reer[r], "pc1"), { perimetre: "BIS · réel · panier large" }),
     definir("monnaie-aa", r, money, { perimetre: r === "US" ? "M2 · désaisonnalisé" : r === "CN" ? "M2 · brut" : r === "EZ" ? "M3 · zone euro 20 pays · brut" : r === "UK" ? "M4 · brut" : r === "IN" || r === "CH" ? "M3 · brut" : r === "JP" ? "M3 · désaisonnalisé" : "monnaie large OCDE · désaisonnalisé", ...(r !== "US" && r !== "JP" && r !== "CA" ? { transformation: "aa" } : {}) }),
+    definir("dette-pib", r, fred(DETTE_PIB_BIS[r]), { frequence: "Q", perimetre: "BIS · crédit non financier public + privé · tous prêteurs · valeur de marché · ajusté des ruptures · non désaisonnalisé" }),
   ];
 });
 

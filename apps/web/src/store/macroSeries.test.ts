@@ -44,6 +44,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   delete (globalThis as { localStorage?: Storage }).localStorage;
 });
@@ -228,6 +229,32 @@ describe("fenêtre, cache conservé et annulation", () => {
     expect(Object.keys(macroSeriesStore.getState().series)).toEqual(["cpi-aa-uk"]);
   });
 
+  it("élargit le cache de 30 à 60 ans puis Max, et réutilise Max pour 30 ans", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2026, 8, 11));
+    const appels = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ observations: [
+      { date: "1960-01-01", value: "90" },
+      { date: "1966-09-01", value: "95" },
+      { date: "1996-09-01", value: "100" },
+      { date: "2026-07-01", value: "150" },
+    ] }) });
+    vi.stubGlobal("fetch", appels);
+    await macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], horizonAnnees: 30 });
+    expect(String(appels.mock.calls[0]?.[0])).toContain("observation_start=1996-09-01");
+    expect(macroSeriesStore.getState().series["pce-niveau-us"]?.points.map((p) => p.value)).toEqual([100, 150]);
+
+    await macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], horizonAnnees: 60 });
+    expect(String(appels.mock.calls[1]?.[0])).toContain("observation_start=1966-09-01");
+    expect(macroSeriesStore.getState().series["pce-niveau-us"]?.points.map((p) => p.value)).toEqual([95, 100, 150]);
+
+    await macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], horizonAnnees: "max" });
+    expect(String(appels.mock.calls[2]?.[0])).toContain("observation_start=1900-01-01");
+    expect(macroSeriesStore.getState().series["pce-niveau-us"]?.points.map((p) => p.value)).toEqual([90, 95, 100, 150]);
+    macroSeriesStore.setState({ series: {} });
+    await macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], horizonAnnees: 30 });
+    expect(appels).toHaveBeenCalledTimes(3);
+    expect(macroSeriesStore.getState().series["pce-niveau-us"]?.points[0]?.time).toBe(Date.UTC(1960, 0, 1));
+  });
+
   it("conserve le dernier historique valide en signalant un refresh échoué", async () => {
     vi.stubGlobal("fetch", stubParHote());
     await macroSeriesStore.getState().demanderIndicateur("cpi-aa", { regions: ["UK"] });
@@ -342,6 +369,21 @@ describe("vues ALFRED isolées par cutoff", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reponseAlfred(100)));
     await macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], horizonAnnees: 5, connuLe: "2020-01-15" });
     expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain("observation_start=2015-01-01");
+  });
+
+  it("charge Max depuis 1900 et respecte un cutoff ALFRED avant 1970", async () => {
+    const cutoff = "1965-06-15";
+    const appel = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ observations: [
+      { date: "1960-01-01", value: "90", realtime_start: cutoff, realtime_end: cutoff },
+      { date: cutoff, value: "95", realtime_start: cutoff, realtime_end: cutoff },
+      { date: "1965-06-16", value: "100", realtime_start: cutoff, realtime_end: cutoff },
+      { date: "1961-01-01", value: "200", realtime_start: "1966-01-01", realtime_end: "9999-12-31" },
+    ] }) });
+    vi.stubGlobal("fetch", appel);
+    await macroSeriesStore.getState().demanderIndicateur("pce-niveau", { regions: ["US"], horizonAnnees: "max", connuLe: cutoff });
+    expect(String(appel.mock.calls[0]?.[0])).toContain("observation_start=1900-01-01");
+    expect(String(appel.mock.calls[0]?.[0])).toContain("realtime_start=1965-06-15&realtime_end=1965-06-15");
+    expect(macroSeriesStore.getState().series["pce-niveau-us"]).toMatchObject({ statut: "ok", contexteConnuLe: cutoff, points: [{ time: Date.UTC(1960, 0, 1), value: 90 }, { time: Date.UTC(1965, 5, 15), value: 95 }] });
   });
 
   it("refuse un cache ALFRED v2 frais dont CPI était un niveau sous une unité %", async () => {

@@ -4,7 +4,7 @@ import type { MacroSeries } from "../data/macro/types";
 import { type DefinitionSerieMacro, type IndicateurMacro, type RegionMacro, seriesDeIndicateur } from "../data/macro/catalogueMacro";
 import { chargerSerieMacro, cleSante, type ResultatSerieMacro } from "../data/macro/chargerSerieMacro";
 import { finDePeriode } from "../data/macro/harmonisation";
-import type { HorizonMacro } from "./macroRatesView";
+import { debutHorizonMacro, type HorizonMacro } from "../data/macro/horizon";
 import { healthStore } from "./health";
 
 export const FENETRE_MACRO_MS = 5 * 365.25 * 24 * 3_600_000;
@@ -98,8 +98,7 @@ export const macroSeriesStore = createStore<MacroSeriesState>((set, get) => {
       versions.set(def.id, version);
       const contexteConnuLe = def.source.transport === "fred" ? (opts.connuLe ?? null) : null;
       const ancre = contexteConnuLe ? Date.parse(`${contexteConnuLe}T00:00:00Z`) : now;
-      const date = new Date(ancre);
-      const depuis = Date.UTC(date.getUTCFullYear() - (opts.horizonAnnees ?? 5), date.getUTCMonth(), 1);
+      const depuis = debutHorizonMacro(opts.horizonAnnees ?? 5, ancre);
       const actuel = get().series[def.id];
       const memeContexte = (actuel?.contexteConnuLe ?? null) === contexteConnuLe;
       const cache = lireCache(def, contexteConnuLe);

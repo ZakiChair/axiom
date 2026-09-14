@@ -29,7 +29,7 @@ import { watchlistStore, type WatchlistSource } from "../store/watchlist";
 import { getSoSoValueKey } from "../store/sosovalue";
 import type { EtatSerie } from "../store/macroSeries";
 import type { HorizonMacro } from "../store/macroRatesView";
-import { formatPeriodeMacro, serieDansHorizon } from "./macro/presentation";
+import { formatPeriodeMacro, formatValeurMacro, serieDansHorizon } from "./macro/presentation";
 import {
   debutJourLocalMs,
   pnlRealisePosition,
@@ -187,7 +187,8 @@ export function lignesMacroBrief(series: Record<string, EtatSerie>, selection: {
   for (const def of definitions) {
     const etat = series[def.id];
     if (etat === undefined || etat.statut === "idle") continue;
-    const points = selection.horizonAnnees ? serieDansHorizon(etat.points, selection.horizonAnnees) : etat.points;
+    const ancre = etat.contexteConnuLe ? Date.parse(`${etat.contexteConnuLe}T00:00:00Z`) : Date.now();
+    const points = selection.horizonAnnees ? serieDansHorizon(etat.points, selection.horizonAnnees, ancre) : etat.points;
     const dernier = points.at(-1);
     lignes.push({
       region: def.libelleSerie ?? def.libelleRegion,
@@ -205,7 +206,7 @@ export function lignesMacroBrief(series: Record<string, EtatSerie>, selection: {
 export function valeurMacroBrief(ligne: LigneMacroBrief): string {
   if (ligne.valeur === null) return ligne.message ?? "indisponible";
   const unite = ligne.unite ?? "%";
-  const valeur = unite === "%" ? formatPourcentage(ligne.valeur) : `${ligne.valeur.toLocaleString("fr-FR", { maximumFractionDigits: unite === "personnes" ? 0 : 2 })} ${unite}`;
+  const valeur = unite === "%" ? formatPourcentage(ligne.valeur) : unite === "pourcent-pib" ? formatValeurMacro(ligne.valeur, unite) : `${ligne.valeur.toLocaleString("fr-FR", { maximumFractionDigits: unite === "personnes" ? 0 : 2 })} ${unite}`;
   return `${valeur}${ligne.periode ? ` · ${ligne.periode}` : ""}${ligne.perimetre ? ` · ${ligne.perimetre}` : ""}${ligne.message ? ` · ${ligne.message}` : ""}`;
 }
 

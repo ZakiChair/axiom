@@ -13,6 +13,24 @@ describe("catalogue mondial", () => {
     expect(new Set(CATALOGUE_MACRO.map((d) => d.id)).size).toBe(CATALOGUE_MACRO.length);
     expect(seriesDeIndicateur("cpi-aa").find((d) => d.region === "US")?.id).toBe("cpi-aa-us");
   });
+  it("raccorde la dette totale non financière BIS au PIB sans substitution par les seules sociétés", () => {
+    expect(INDICATEURS_MACRO.find((i) => i.id === "dette-pib")).toMatchObject({ unite: "pourcent-pib" });
+    const series = seriesDeIndicateur("dette-pib");
+    expect(series.map((d) => [d.region, d.source])).toEqual([
+      ["US", { transport: "fred", seriesId: "QUSCAM770A" }],
+      ["EZ", { transport: "fred", seriesId: "QXMCAM770A" }],
+      ["UK", { transport: "fred", seriesId: "QGBCAM770A" }],
+      ["JP", { transport: "fred", seriesId: "QJPCAM770A" }],
+      ["CN", { transport: "fred", seriesId: "QCNCAM770A" }],
+      ["IN", { transport: "fred", seriesId: "QINCAM770A" }],
+      ["CA", { transport: "fred", seriesId: "QCACAM770A" }],
+      ["CH", { transport: "fred", seriesId: "QCHCAM770A" }],
+    ]);
+    for (const serie of series) {
+      expect(serie).toMatchObject({ frequence: "Q", cleRequise: true });
+      expect(serie.transformation).toBeUndefined();
+    }
+  });
   it("n'utilise pas les miroirs CPI arrêtés du Canada et de la Suisse", () => {
     for (const id of ["core-cpi-aa-ca", "cpi-aa-ch"]) {
       expect(CATALOGUE_MACRO.find((d) => d.id === id)?.source).toMatchObject({ transport: "oecd", dataflow: expect.stringContaining("COICOP2018") });

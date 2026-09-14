@@ -140,3 +140,21 @@ Précisions de réalisation :
 Les preuves à jour figurent dans le
 [bilan du chantier](docs/superpowers/progress/2026-09-09-revue-integrale.md) ; les
 résultats et la décision WTP du gate demeurent exclusivement dans son registre.
+
+## Indicateur demandé le 11 septembre 2026
+
+La demande du propriétaire ajoute « Cycle de la dette à long terme » dans
+MACRO / RATE → Indicateurs. Le catalogue macro passe à **25 familles et
+96 définitions, dont 94 raccordées** ; le catalogue technique reste à 189.
+Les huit séries BIS/FRED `CAM770A` donnent le crédit total au secteur non
+financier (public et privé) en % du PIB. Elles sont trimestrielles, en valeur
+de marché, ajustées des ruptures et révisables. Aucun score ni datation
+automatique du supercycle n’est déduit du ratio.
+
+Cette famille dispose des horizons 30 ans, 60 ans et Max, avec couverture
+réellement disponible par zone. Max peut inclure des dates avant 1970 ; les
+bornes de chargement et d’affichage respectent aussi les vues ALFRED. La clé
+FRED existante reste requise. Aucun nouveau fournisseur, proxy, backend,
+dépendance ou fenêtre. Voir le
+[plan et les sources](docs/superpowers/plans/2026-09-11-cycle-dette-long-terme.md)
+et le [rapport de vérification](docs/superpowers/progress/2026-09-11-cycle-dette-long-terme.md).

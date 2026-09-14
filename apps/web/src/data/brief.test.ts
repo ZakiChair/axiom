@@ -9,6 +9,7 @@ import {
   evenementsEcoPasses,
   ligneDepuisTicker,
   lignesMacroBrief,
+  valeurMacroBrief,
   top5News,
   tradesClosDuJour,
   type DonneesBrief,
@@ -39,6 +40,14 @@ describe("deltaOiPct", () => {
 // ─────────────────────────── lignesMacroBrief ───────────────────────────
 
 describe("lignesMacroBrief", () => {
+  it("exprime le ratio de dette en pourcentage du PIB dans le brief", () => {
+    const ligne = lignesMacroBrief({ "dette-pib-us": { statut: "ok", points: [{ time: Date.UTC(2025, 9, 1), value: 123.45 }], majTs: null, message: null } }, { indicateur: "dette-pib", regions: ["US"], horizonAnnees: "max" })![0]!;
+    expect(valeurMacroBrief(ligne)).toContain("123,45 % du PIB · T4 2025");
+  });
+  it("ancre l’horizon du brief sur le millésime ALFRED même avant 1970", () => {
+    const ligne = lignesMacroBrief({ "dette-pib-us": { statut: "ok", points: [{ time: Date.UTC(1965, 3, 1), value: 120 }], majTs: null, message: null, contexteConnuLe: "1965-08-01" } }, { indicateur: "dette-pib", regions: ["US"], horizonAnnees: 30 })![0]!;
+    expect(ligne).toMatchObject({ valeur: 120, periode: "T2 1965" });
+  });
   it("préserve le statut statistique et la fraîcheur dans le brief exporté", () => {
     const ligne = lignesMacroBrief({ "cpi-aa-ez": { statut: "loading", points: [{ time: Date.UTC(2026, 7, 1), value: 2, qualite: "estimation" }], majTs: null, message: null, perime: true } })![0]!;
     expect(ligne.perimetre).toBe("IPCH · zone euro 21 pays");

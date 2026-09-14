@@ -26,9 +26,10 @@
  */
 import { createStore } from "zustand/vanilla";
 import { ORDRE_REGIONS, seriesDeIndicateur, type IndicateurMacro, type RegionMacro } from "../data/macro/catalogueMacro";
+import type { HorizonMacro } from "../data/macro/horizon";
 
 export type VueRendementsMode = "tableau" | "courbe";
-export type HorizonMacro = 1 | 5 | 10;
+export type { HorizonMacro } from "../data/macro/horizon";
 
 export interface MacroRatesViewState {
   vue: VueRendementsMode;
@@ -48,6 +49,12 @@ export interface MacroRatesViewState {
   demanderIndicateurs: (selection?: { indicateur?: IndicateurMacro; region?: RegionMacro }) => void;
 }
 
+function horizonPourIndicateur(etat: MacroRatesViewState, indicateur: IndicateurMacro): HorizonMacro {
+  if (indicateur === etat.indicateur) return etat.horizonAnnees;
+  if (indicateur === "dette-pib") return "max";
+  return etat.horizonAnnees === "max" || etat.horizonAnnees > 10 ? 5 : etat.horizonAnnees;
+}
+
 export const macroRatesViewStore = createStore<MacroRatesViewState>((set, get) => ({
   vue: "tableau",
   requete: 0,
@@ -59,15 +66,16 @@ export const macroRatesViewStore = createStore<MacroRatesViewState>((set, get) =
   connuLe: null,
   selectionnerIndicateur: (indicateur) => {
     const disponibles = ORDRE_REGIONS.filter((r) => seriesDeIndicateur(indicateur).some((d) => d.region === r));
-    set({ indicateur, ...(get().regions.some((r) => disponibles.includes(r)) ? {} : { regions: disponibles }) });
+    const etat = get();
+    set({ indicateur, horizonAnnees: horizonPourIndicateur(etat, indicateur), ...(etat.regions.some((r) => disponibles.includes(r)) ? {} : { regions: disponibles }) });
   },
   selectionnerRegions: (regions) => set({ regions: ORDRE_REGIONS.filter((r) => regions.includes(r)) }),
   selectionnerHorizon: (horizonAnnees) => set({ horizonAnnees }),
   selectionnerConnuLe: (connuLe) => set({ connuLe }),
-  demanderIndicateurs: (selection = {}) => set({
-    requeteIndicateurs: get().requeteIndicateurs + 1,
+  demanderIndicateurs: (selection = {}) => set((etat) => ({
+    requeteIndicateurs: etat.requeteIndicateurs + 1,
     requete: 0,
-    ...(selection.indicateur ? { indicateur: selection.indicateur } : {}),
+    ...(selection.indicateur ? { indicateur: selection.indicateur, horizonAnnees: horizonPourIndicateur(etat, selection.indicateur) } : {}),
     ...(selection.region ? { regions: [selection.region] } : {}),
-  }),
+  })),
 }));

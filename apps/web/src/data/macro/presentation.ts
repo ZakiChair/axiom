@@ -1,12 +1,13 @@
 import type { DefinitionSerieMacro, UniteMacro } from "./catalogueMacro";
 import type { MacroSeries } from "./types";
 import type { FrequenceMacro } from "./harmonisation";
-import type { HorizonMacro } from "../../store/macroRatesView";
+import { debutHorizonMacro, type HorizonMacro } from "./horizon";
 
 export function formatValeurMacro(value: number, unite: UniteMacro, signe = false): string {
   const decimales = unite === "personnes" || unite === "millions-usd-nominaux" ? 0 : unite === "indice-2017=100" || unite === "milliers" ? 3 : 2;
   const nombre = new Intl.NumberFormat("fr-FR", { minimumFractionDigits: decimales, maximumFractionDigits: decimales, ...(signe ? { signDisplay: "exceptZero" as const } : {}) }).format(value).replace(/-/g, "−");
   if (unite === "%" || unite === "pb") return `${nombre} ${unite}`;
+  if (unite === "pourcent-pib") return `${nombre} % du PIB`;
   if (unite === "indice-2017=100") return `${nombre} (2017=100)`;
   if (unite === "milliers") return `${nombre} milliers`;
   if (unite === "millions-usd-nominaux") return `${nombre} M$ nominaux`;
@@ -28,8 +29,7 @@ export function formatPeriodeMacro(time: number, def: Pick<DefinitionSerieMacro,
   return new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(time);
 }
 export function serieDansHorizon(points: MacroSeries, horizon: HorizonMacro, now = Date.now()): MacroSeries {
-  const date = new Date(now);
-  const debut = Date.UTC(date.getUTCFullYear() - horizon, date.getUTCMonth(), 1);
+  const debut = debutHorizonMacro(horizon, now);
   return points.filter((p) => p.time >= debut && p.time <= now);
 }
 /** Contexte explicite lorsqu'un cutoff ALFRED ne couvre qu'une partie des sources visibles. */

@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { macroRatesViewStore } from "./macroRatesView";
 
+beforeEach(() => {
+  macroRatesViewStore.setState({ vue: "tableau", requete: 0, requeteIndicateurs: 0, indicateur: "cpi-aa", regions: ["US"], horizonAnnees: 5, connuLe: null });
+});
+
 // `demanderCourbe` (CRVF) et `demanderIndicateurs` (bouton « série » d'ECO) pilotent tous
 // deux le même `onglet` de MacroRatesWindow via deux compteurs MUTUELLEMENT EXCLUSIFS — cf.
 // le commentaire du fichier source. Ces tests épinglent l'exclusion mutuelle : sans elle,
@@ -8,10 +12,6 @@ import { macroRatesViewStore } from "./macroRatesView";
 // de MacroRatesWindow (elle est démontée à la fermeture), en concurrence avec la commande
 // la plus récente.
 describe("macroRatesViewStore", () => {
-  beforeEach(() => {
-    macroRatesViewStore.setState({ vue: "tableau", requete: 0, requeteIndicateurs: 0 });
-  });
-
   it("demanderCourbe() bascule en vue courbe, incrémente requete, laisse requeteIndicateurs à 0", () => {
     macroRatesViewStore.getState().demanderCourbe();
     const s = macroRatesViewStore.getState();
@@ -62,4 +62,41 @@ it("sélectionne US pour une famille US quand la sélection précédente l'exclu
   macroRatesViewStore.getState().selectionnerRegions(["CA"]);
   macroRatesViewStore.getState().selectionnerIndicateur("nfci");
   expect(macroRatesViewStore.getState().regions).toEqual(["US"]);
+});
+
+describe.each(["selectionnerIndicateur", "demanderIndicateurs"] as const)("horizon dette via %s", (action) => {
+  const selectionner = (indicateur: "dette-pib" | "cpi-aa") => {
+    if (action === "selectionnerIndicateur") macroRatesViewStore.getState().selectionnerIndicateur(indicateur);
+    else macroRatesViewStore.getState().demanderIndicateurs({ indicateur });
+  };
+
+  it("ouvre l'historique maximal à l'entrée dans la famille dette", () => {
+    macroRatesViewStore.getState().selectionnerHorizon(10);
+    selectionner("dette-pib");
+    expect(macroRatesViewStore.getState()).toMatchObject({ indicateur: "dette-pib", horizonAnnees: "max" });
+  });
+
+  it.each([30, 60, "max"] as const)("ramène l'horizon %s à 5 ans en quittant la dette", (horizonAnnees) => {
+    macroRatesViewStore.setState({ indicateur: "dette-pib", horizonAnnees });
+    selectionner("cpi-aa");
+    expect(macroRatesViewStore.getState()).toMatchObject({ indicateur: "cpi-aa", horizonAnnees: 5 });
+  });
+
+  it.each([1, 5, 10] as const)("conserve l'horizon %s en quittant la dette", (horizonAnnees) => {
+    macroRatesViewStore.setState({ indicateur: "dette-pib", horizonAnnees });
+    selectionner("cpi-aa");
+    expect(macroRatesViewStore.getState().horizonAnnees).toBe(horizonAnnees);
+  });
+
+  it("ne réinitialise pas l'horizon quand la même famille dette est redemandée", () => {
+    macroRatesViewStore.setState({ indicateur: "dette-pib", horizonAnnees: 60 });
+    selectionner("dette-pib");
+    expect(macroRatesViewStore.getState().horizonAnnees).toBe(60);
+  });
+});
+
+it("une commande sans nouvelle famille conserve l'horizon de dette", () => {
+  macroRatesViewStore.setState({ indicateur: "dette-pib", horizonAnnees: 30 });
+  macroRatesViewStore.getState().demanderIndicateurs({ region: "CA" });
+  expect(macroRatesViewStore.getState()).toMatchObject({ indicateur: "dette-pib", horizonAnnees: 30, regions: ["CA"], requeteIndicateurs: 1 });
 });

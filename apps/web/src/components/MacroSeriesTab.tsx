@@ -11,11 +11,12 @@ import { TableTriable, type ColonneTable } from "./TableTriable";
 
 type CourbeMacro = { def: DefinitionSerieMacro; points: MacroSeries; couleur: string; tirets?: string };
 const HORIZONS: ReadonlyArray<{ id: HorizonMacro; label: string }> = [{ id: 1, label: "1 an" }, { id: 5, label: "5 ans" }, { id: 10, label: "10 ans" }];
+const HORIZONS_DETTE: typeof HORIZONS = [...HORIZONS, { id: 30, label: "30 ans" }, { id: 60, label: "60 ans" }, { id: "max", label: "Max" }];
 const couleur = (region: RegionMacro): string => `var(--serie-${ORDRE_REGIONS.indexOf(region) % 6 + 1})`;
 const tirets = (def: DefinitionSerieMacro): string | undefined => ORDRE_REGIONS.indexOf(def.region) >= 6 || def.id.endsWith("-4s") ? "5 3" : undefined;
 function sourceLabel(def: DefinitionSerieMacro): string {
   const s = def.source;
-  if (s.transport === "fred") return `FRED · ${s.seriesId}`;
+  if (s.transport === "fred") return `${def.indicateur === "dette-pib" ? "BIS · " : ""}FRED · ${s.seriesId}`;
   if (s.transport === "ecartFred") return `FRED · ${s.gauche} − ${s.droite}`;
   if (s.transport === "oecd") return "OCDE";
   if (s.transport === "eurostat") return "Eurostat";
@@ -29,7 +30,7 @@ function sourceLabel(def: DefinitionSerieMacro): string {
 function cadence(def: DefinitionSerieMacro): number {
   return ({ D: 3, W: 10, M: 35, Q: 100 }[def.frequence]) * 86_400_000;
 }
-function EvolutionMacro({ courbes, unite, label }: { courbes: CourbeMacro[]; unite: UniteMacro; label: string }) {
+function EvolutionMacro({ courbes, unite, label, horizon }: { courbes: CourbeMacro[]; unite: UniteMacro; label: string; horizon: HorizonMacro }) {
   const [survol, setSurvol] = useState<number | null>(null);
   const points = courbes.flatMap((c) => c.points);
   if (!points.length) return <div className="flex h-56 items-center justify-center"><Vide>Aucune série disponible sur la période sélectionnée.</Vide></div>;
@@ -42,27 +43,29 @@ function EvolutionMacro({ courbes, unite, label }: { courbes: CourbeMacro[]; uni
   const marge = (maxV - minV || 1) * 0.1;
   const bas = minV - marge;
   const haut = maxV + marge;
-  const x = (t: number) => 68 + (t - minT) / (maxT - minT || 1) * 588;
+  const gauche = unite === "pourcent-pib" ? 108 : 68;
+  const largeur = 656 - gauche;
+  const x = (t: number) => gauche + (t - minT) / (maxT - minT || 1) * largeur;
   const y = (v: number) => 12 + (haut - v) / (haut - bas) * 190;
-  const axeDate = (ts: number): string => new Intl.DateTimeFormat("fr-FR", { month: "short", year: "2-digit", timeZone: "UTC" }).format(ts);
+  const axeDate = (ts: number): string => new Intl.DateTimeFormat("fr-FR", horizon === "max" || horizon >= 30 ? { year: "numeric", timeZone: "UTC" } : { month: "short", year: "2-digit", timeZone: "UTC" }).format(ts);
   return (
     <div>
       <svg viewBox="0 0 680 228" className="block w-full" role="img" aria-label={`Évolution · ${label}`} onMouseLeave={() => setSurvol(null)} onMouseMove={(event) => {
         const rect = event.currentTarget.getBoundingClientRect();
-        const cible = minT + ((event.clientX - rect.left) / rect.width * 680 - 68) / 588 * (maxT - minT);
+        const cible = minT + ((event.clientX - rect.left) / rect.width * 680 - gauche) / largeur * (maxT - minT);
         setSurvol(times.reduce((a, b) => Math.abs(b - cible) < Math.abs(a - cible) ? b : a, times[0]!));
       }}>
-        <title>{label} · unité : {unite}. Valeurs et périodes disponibles dans le tableau.</title>
+        <title>{label} · unité : {unite === "pourcent-pib" ? "% du PIB" : unite}. Valeurs et périodes disponibles dans le tableau.</title>
         {Array.from({ length: 5 }, (_, i) => bas + (haut - bas) * i / 4).map((v, i) => <g key={i}>
-          <line x1={68} x2={656} y1={y(v)} y2={y(v)} stroke="var(--border)" opacity="0.5" />
-          <text x={62} y={y(v) + 3} textAnchor="end" fill="var(--text-dim)" fontSize={10}>{unite === "personnes" ? new Intl.NumberFormat("fr-FR", { notation: "compact", maximumFractionDigits: 1 }).format(v) : formatValeurMacro(v, unite)}</text>
+          <line x1={gauche} x2={656} y1={y(v)} y2={y(v)} stroke="var(--border)" opacity="0.5" />
+          <text x={gauche - 6} y={y(v) + 3} textAnchor="end" fill="var(--text-dim)" fontSize={10}>{unite === "personnes" ? new Intl.NumberFormat("fr-FR", { notation: "compact", maximumFractionDigits: 1 }).format(v) : formatValeurMacro(v, unite)}</text>
         </g>)}
         {courbes.map((c) => <g key={c.def.id} fill="none" stroke={c.couleur} strokeWidth={1.6} strokeDasharray={c.tirets}>
           {segmentsMacro(c.points, c.def.frequence).map((segment, i) => segment.length === 1
             ? <circle key={i} cx={x(segment[0]!.time)} cy={y(segment[0]!.value)} r={2} fill={c.couleur} />
             : <polyline key={i} points={segment.map((p) => `${x(p.time)},${y(p.value)}`).join(" ")} />)}
         </g>)}
-        {(minT === maxT ? [0] : [0, 1, 2, 3, 4]).map((i) => <text key={i} x={68 + 588 * i / 4} y={222} textAnchor={i === 0 ? "start" : i === 4 ? "end" : "middle"} fill="var(--text-dim)" fontSize={10}>{axeDate(minT + (maxT - minT) * i / 4)}</text>)}
+        {(minT === maxT ? [0] : [0, 1, 2, 3, 4]).map((i) => <text key={i} x={gauche + largeur * i / 4} y={222} textAnchor={i === 0 ? "start" : i === 4 ? "end" : "middle"} fill="var(--text-dim)" fontSize={10}>{axeDate(minT + (maxT - minT) * i / 4)}</text>)}
         {survol !== null && <line x1={x(survol)} x2={x(survol)} y1={12} y2={202} stroke="var(--text-dim)" strokeDasharray="3 3" />}
       </svg>
       <div className="flex min-h-6 flex-wrap gap-x-3 gap-y-1 text-[10px] text-text-dim" aria-live="polite">
@@ -93,18 +96,21 @@ export function MacroSeriesTab({ refreshToken = 0 }: { refreshToken?: number }) 
   const visibles = definitions.filter((d) => regions.includes(d.region));
   const compatibleAlfred = visibles.some((d) => d.source.transport === "fred");
   const meta = INDICATEURS_MACRO.find((i) => i.id === indicateur)!;
+  const dette = indicateur === "dette-pib";
+  const historiqueComplet = dette && horizon === "max";
   const courbes: CourbeMacro[] = visibles.map((def) => ({ def, points: serieDansHorizon(series[def.id]?.points ?? [], horizon, def.source.transport === "fred" && connuLe ? Date.parse(`${connuLe}T00:00:00Z`) : Date.now()), couleur: couleur(def.region), ...(tirets(def) ? { tirets: tirets(def) } : {}) }));
   const chargement = visibles.some((d) => series[d.id]?.statut === "loading");
   const colonnes: ColonneTable<CourbeMacro>[] = [
     { id: "zone", label: "Zone / périmètre", largeur: "minmax(135px,1.2fr)", rendu: c => <><span className="flex items-center gap-1.5 text-text"><svg width="14" height="4" aria-hidden><line x1="0" x2="14" y1="2" y2="2" stroke={c.couleur} strokeWidth="2" strokeDasharray={c.tirets} /></svg>{c.def.libelleSerie ?? c.def.libelleRegion}</span><span className="block text-[10px] leading-snug text-text-dim">{c.def.perimetre}</span></> },
-    { id: "derniere", label: "Dernière", largeur: "85px", rendu: c => <>{c.points.at(-1) ? formatValeurMacro(c.points.at(-1)!.value, meta.unite) : "—"}{c.points.at(-1)?.qualite && <span className="block text-[10px] text-warn">{c.points.at(-1)!.qualite}</span>}</> },
-    { id: "precedente", label: "Précédente", largeur: "85px", rendu: c => c.points.at(-2) ? <>{formatValeurMacro(c.points.at(-2)!.value, meta.unite)}<span className="block text-[10px]">{formatPeriodeMacro(c.points.at(-2)!.time, c.def)}</span></> : "—" },
-    { id: "variation", label: "Variation", largeur: "75px", rendu: c => c.points.length < 2 ? "—" : `${formatValeurMacro(c.points.at(-1)!.value - c.points.at(-2)!.value, meta.unite === "%" ? "indice" : meta.unite, true)}${meta.unite === "%" ? " pt" : ""}` },
+    { id: "derniere", label: "Dernière", largeur: dette ? "120px" : "85px", rendu: c => <>{c.points.at(-1) ? formatValeurMacro(c.points.at(-1)!.value, meta.unite) : "—"}{c.points.at(-1)?.qualite && <span className="block text-[10px] text-warn">{c.points.at(-1)!.qualite}</span>}</> },
+    { id: "precedente", label: "Précédente", largeur: dette ? "120px" : "85px", rendu: c => c.points.at(-2) ? <>{formatValeurMacro(c.points.at(-2)!.value, meta.unite)}<span className="block text-[10px]">{formatPeriodeMacro(c.points.at(-2)!.time, c.def)}</span></> : "—" },
+    { id: "variation", label: "Variation", largeur: dette ? "110px" : "75px", rendu: c => c.points.length < 2 ? "—" : `${formatValeurMacro(c.points.at(-1)!.value - c.points.at(-2)!.value, meta.unite === "%" || meta.unite === "pourcent-pib" ? "indice" : meta.unite, true)}${meta.unite === "pourcent-pib" ? " pt de PIB" : meta.unite === "%" ? " pt" : ""}` },
     { id: "periode", label: "Période", largeur: "90px", rendu: c => <>{c.points.at(-1) ? formatPeriodeMacro(c.points.at(-1)!.time, c.def) : "—"}<span className="block"><Fraicheur loading={series[c.def.id]?.statut === "loading"} majTs={series[c.def.id]?.majTs ?? null} cadenceMs={cadence(c.def)} /></span></> },
+    ...(historiqueComplet ? [{ id: "historique", label: "Historique disponible", largeur: "170px", rendu: (c: CourbeMacro) => c.points.length ? `${formatPeriodeMacro(c.points[0]!.time, c.def)} – ${formatPeriodeMacro(c.points.at(-1)!.time, c.def)}` : "—" }] : []),
     { id: "source", label: "Source / état", largeur: "minmax(145px,1fr)", rendu: c => {
       const etat = series[c.def.id];
       const message = etat?.message ?? (c.def.source.transport === "indisponible" ? c.def.source.motif : etat?.statut === "loading" ? "Chargement…" : "En attente.");
-      return <span className="text-[10px] leading-snug text-text-dim">{sourceLabel(c.def)}{etat?.recupereTs !== undefined && <span className="block">Récupéré le {new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(etat.recupereTs)}</span>}{etat?.perime && <span className="block text-warn">Historique conservé · cache périmé</span>}{(!c.points.length || etat?.message) && <span className="block text-warn">{message}</span>}</span>;
+      return <span className="text-[10px] leading-snug text-text-dim">{c.def.source.transport === "fred" ? <a href={`https://fred.stlouisfed.org/series/${encodeURIComponent(c.def.source.seriesId)}`} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">{sourceLabel(c.def)}</a> : sourceLabel(c.def)}{etat?.recupereTs !== undefined && <span className="block">Récupéré le {new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(etat.recupereTs)}</span>}{etat?.perime && <span className="block text-warn">Historique conservé · cache périmé</span>}{(!c.points.length || etat?.message) && <span className="block text-warn">{message}</span>}</span>;
     } },
   ];
   return (
@@ -115,7 +121,7 @@ export function MacroSeriesTab({ refreshToken = 0 }: { refreshToken?: number }) 
             {INDICATEURS_MACRO.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}
           </select>
         </label>
-        <Segmente options={HORIZONS} actif={horizon} onChange={(h) => macroRatesViewStore.getState().selectionnerHorizon(h)} />
+        <Segmente options={dette ? HORIZONS_DETTE : HORIZONS} actif={horizon} onChange={(h) => macroRatesViewStore.getState().selectionnerHorizon(h)} />
         {compatibleAlfred && <label className="flex items-center gap-1 text-[10px] text-text-dim">Connu au
           <input aria-label="Connu au ALFRED" type="date" value={connuLe ?? ""} onChange={(event) => macroRatesViewStore.getState().selectionnerConnuLe(event.target.value || null)} className="rounded border border-border bg-surface px-1 py-1 text-text" />
         </label>}
@@ -125,10 +131,10 @@ export function MacroSeriesTab({ refreshToken = 0 }: { refreshToken?: number }) 
         <button type="button" className="px-2 text-[10px] text-accent hover:underline" onClick={() => macroRatesViewStore.getState().selectionnerRegions(definitions.map((d) => d.region))}>Toutes les zones</button>
       </div>
       <p className="text-[11px] text-text-dim">{meta.description}</p>
-      {visibles.length === 0 ? <Vide>Sélectionnez au moins une zone.</Vide> : <EvolutionMacro key={`${indicateur}-${horizon}`} courbes={courbes} unite={meta.unite} label={meta.label} />}
+      {visibles.length === 0 ? <Vide>Sélectionnez au moins une zone.</Vide> : <EvolutionMacro key={`${indicateur}-${horizon}`} courbes={courbes} unite={meta.unite} label={meta.label} horizon={horizon} />}
       {chargement && <p role="status" className="text-[10px] text-text-dim">Chargement des séries macro… Les appels OCDE sont espacés pour respecter le quota.</p>}
       <div className="overflow-x-auto">
-        <div className="min-w-[640px]">
+        <div className={historiqueComplet ? "min-w-[1080px]" : dette ? "min-w-[900px]" : "min-w-[640px]"}>
           <TableTriable ariaLabel="Observations macro par zone" colonnes={colonnes} lignes={courbes} cle={c => c.def.id} />
         </div>
       </div>

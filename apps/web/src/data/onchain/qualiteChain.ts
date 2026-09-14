@@ -4,6 +4,7 @@ import type { BgResultat, DefMetriqueBg } from "./bgeometrics";
 import type { CoinMetricsParse, CoinMetricsResultat } from "./coinmetrics";
 import type { ResultatFrais } from "./mempool";
 import type { ReseauEthCm } from "./reseauEthCm";
+import type { TresoreriesBtc } from "./tresoreriesBtc";
 
 const JOUR_MS = 86_400_000;
 
@@ -81,6 +82,30 @@ export function qualiteReseauEthCm(resultat: ResultatFrais<ReseauEthCm> | null, 
     acces: resultat === null ? "indisponible" : "public",
     statut,
     ...(raison ? { raison } : {}),
+  };
+}
+
+/**
+ * Qualité du bloc Trésoreries BTC · CoinGecko. Avoirs déclaratifs NON horodatés : l'observation
+ * reste inconnue, le statut n'est donc jamais « frais » (partiel, périmé si cache resservi) ;
+ * la couverture compte les sociétés à coût connu parmi les détentrices.
+ */
+export function qualiteTresoreriesBtc(resultat: ResultatFrais<TresoreriesBtc> | null, acces: "cle" | "public"): QualiteMetrique {
+  const societes = resultat?.donnee.societes ?? [];
+  return {
+    sourceId: "coingecko",
+    sourceEffective: resultat?.perime ? "cache CoinGecko" : "CoinGecko",
+    observeLe: null,
+    recupereLe: resultat?.ts ?? null,
+    cadenceMs: 6 * 3_600_000,
+    ageMaxMs: null,
+    couverture: resultat === null ? null : { disponibles: societes.filter((s) => s.coutTotalUsd !== null).length, attendus: societes.length },
+    estime: false,
+    acces: resultat === null ? "indisponible" : acces,
+    statut: resultat === null ? "indisponible" : resultat.perime ? "perime" : "partiel",
+    raison: resultat === null
+      ? "Trésoreries CoinGecko indisponibles (quota, erreur ou réponse illisible) et aucun cache exploitable."
+      : `${resultat.perime ? "Cache resservi après échec CoinGecko. " : ""}Avoirs déclaratifs non horodatés par CoinGecko (déclarations jusqu'à J-14).`,
   };
 }
 

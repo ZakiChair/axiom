@@ -281,3 +281,71 @@ for (const [joursEtf, badgeEtf] of [[4, null], [6, "source en retard"]] as const
     else await expect(repliEtf).toContainText(badgeEtf);
   });
 }
+
+const URL_TRESORERIES = "**/api.coingecko.com/api/v3/companies/public_treasury/bitcoin*";
+const SPOT_TRESORERIES = 79_175.91;
+
+/** Cinq sociétés (Strategy, Twenty One sans coût, Linekong à coût aberrant, Metaplanet au-dessus du prix, une en dessous). */
+function fixtureTresoreries() {
+  const societe = (name: string, symbol: string, total_holdings: number, total_entry_value_usd: number) =>
+    ({ name, symbol, country: "XX", total_holdings, total_entry_value_usd, total_current_value_usd: total_holdings * SPOT_TRESORERIES });
+  return {
+    total_holdings: 941_581, total_value_usd: 941_581 * SPOT_TRESORERIES, market_cap_dominance: 4.48,
+    companies: [
+      societe("Strategy", "MSTR.US", 845_050, 64_267_830_000),
+      societe("Twenty One Capital", "XXI.US", 43_514, 0),
+      societe("Linekong Interactive", "8267.HK", 17, 17 * 634.71),
+      societe("Metaplanet", "3350.T", 43_000, 3_810_765_023.48),
+      societe("Société B", "B.US", 10_000, 600_000_000),
+    ],
+  };
+}
+
+test("CHAIN : trésoreries d'entreprises BTC — un appel CoinGecko, prix de revient et sensibilité", async ({ page }) => {
+  await bouchonnerReseau(page);
+  let appels = 0;
+  await page.route(URL_TRESORERIES, route => {
+    appels++;
+    return route.fulfill({ json: fixtureTresoreries() });
+  });
+  const { chain, cycleTermine } = await ouvrirChainSansCle(page);
+  const section = chain.locator("section", { has: page.locator("h3", { hasText: "Trésoreries d'entreprises BTC" }) });
+  await expect(section).toContainText("avoirs déclaratifs non horodatés (jusqu'à J-14)");
+  await expect(section).toContainText("5 sociétés détentrices");
+  await expect(section.getByText(/^941\s581 BTC$/)).toBeVisible();
+  await expect(section).toContainText("coût moyen $76,052.10 · prix implicite +4.11%");
+  await expect(section).toContainText("passe sous son coût à -3.95%");
+  await expect(section).toContainText("$76,475.25");
+  await expect(section).toContainText("3 sociétés · couverture 95.38 % des BTC");
+  await expect(section).toContainText("$79,175.91");
+  await expect(section).toContainText("prix implicite CoinGecko");
+  await expect(section).toContainText("−10 % ($71,258.32) : 2 sociétés");
+  await expect(section).toContainText("−30 % ($55,423.14) : 3 sociétés");
+  await expect(section).toContainText("pas un seuil de liquidation");
+  await expect(section).not.toContainText("source inconnue");
+  await expect(section).not.toContainText("périmé");
+  await cycleTermine();
+  await expect(chain.locator("details", { hasText: "Qualité des blocs" })).toContainText("Trésoreries BTC · CoinGecko");
+  // Un seul appel malgré le double montage du mode strict (téléchargement partagé, abandon du premier montage).
+  await page.waitForTimeout(500);
+  expect(appels).toBe(1);
+});
+
+test("CHAIN : trésoreries d'entreprises BTC — HTTP 429 ressert le cache expiré marqué périmé", async ({ page }) => {
+  await bouchonnerReseau(page);
+  await page.addInitScript(() => {
+    const donnee = { totalBtc: 1_000, valeurUsd: 80_000_000, societes: [{ nom: "Strategy", symbole: "MSTR.US", avoirsBtc: 800, coutTotalUsd: 60_000_000 }] };
+    localStorage.setItem("axiom:onchain:cg:tresoreries:btc", JSON.stringify({ ts: Date.now() - 7 * 3_600_000, donnee }));
+  });
+  let appels = 0;
+  await page.route(URL_TRESORERIES, route => {
+    appels++;
+    return route.fulfill({ status: 429, json: { status: { error_code: 429, error_message: "rate limit" } } });
+  });
+  const { chain } = await ouvrirChainSansCle(page);
+  const section = chain.locator("section", { has: page.locator("h3", { hasText: "Trésoreries d'entreprises BTC" }) });
+  await expect(section).toContainText("coût moyen $75,000.00 · prix implicite +6.67%");
+  await expect(section).toContainText("cache périmé");
+  await expect(chain.locator("details", { hasText: "Qualité des blocs" })).toContainText("Cache resservi après échec CoinGecko.");
+  expect(appels).toBe(1);
+});

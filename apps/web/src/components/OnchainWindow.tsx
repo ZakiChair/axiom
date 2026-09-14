@@ -14,7 +14,8 @@
  * dégradé 1 req/5 s), RÉSEAU ETH multi-source : Etherscan (gas, supply, nœuds) + Coin Metrics
  * community (réserve et flux exchanges, émission nette, prix réalisé — un seul fetch, échec
  * indépendant d'Etherscan), réseau SOL SANS clé (RPC PublicNode + supply CoinGecko —
- * cf. data/onchain/solana.ts).
+ * cf. data/onchain/solana.ts), trésoreries d'entreprises BTC (CoinGecko public_treasury,
+ * déclaratif non horodaté — un appel, cache 6 h).
  *
  * Règle d'or (doc 02) : chaque widget porte un BadgeFiabilite honnête via
  * `metaSource` / métas partagées (fiable · partiel · estimation · indisponible).
@@ -106,6 +107,7 @@ import { FilesStakingEth } from "./onchain/FilesStakingEth";
 import { VueReseauEthCm } from "./onchain/ReseauEthCm";
 import { Mineurs } from "./onchain/Mineurs";
 import { ActiviteDex } from "./onchain/ActiviteDex";
+import { TresoreriesBtc } from "./onchain/TresoreriesBtc";
 
 const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
 /** Badge des tuiles Valorisation selon le motif de péremption BGeometrics. */
@@ -1153,6 +1155,7 @@ export function OnchainWindow() {
 
         <ActiviteDex open={open} />
         <FluxCapitaux />
+        <TresoreriesBtc open={open} />
         <EconomieChaines />
       </div>
     </>

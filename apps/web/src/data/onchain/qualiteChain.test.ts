@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { motifPeremptionBg, qualiteBgeometrics, qualiteReseauEthCm, qualitesCoinMetrics, qualitePublicationEtf, traiterPublicationEtfChain, type ValeurPublicationEtf } from "./qualiteChain";
+import { motifPeremptionBg, qualiteBgeometrics, qualiteReseauEthCm, qualitesCoinMetrics, qualitePublicationEtf, qualiteTresoreriesBtc, traiterPublicationEtfChain, type ValeurPublicationEtf } from "./qualiteChain";
 import type { ReseauEthCm } from "./reseauEthCm";
+import type { TresoreriesBtc } from "./tresoreriesBtc";
 import { BG_MVRV, BG_NUPL, BG_PUELL, BG_RESERVE_RISK, BG_SOPR } from "./bgeometrics";
 import { actualiserQualite, type QualiteMetrique } from "../qualiteMetrique";
 
@@ -224,5 +225,39 @@ describe("publication qualité Réseau ETH · Coin Metrics", () => {
     expect(q).toMatchObject({ statut: "indisponible", acces: "indisponible", observeLe: null, recupereLe: null, couverture: null });
     expect(q.raison).toContain("Coin Metrics ETH indisponible");
     expect(qualiteReseauEthCm(null, "Délai réseau dépassé", NOW).raison).toBe("Délai réseau dépassé");
+  });
+});
+
+describe("publication qualité Trésoreries BTC · CoinGecko", () => {
+  const donnee: TresoreriesBtc = {
+    totalBtc: 1_000,
+    valeurUsd: 80_000_000,
+    societes: [
+      { nom: "Strategy", symbole: "MSTR.US", avoirsBtc: 800, coutTotalUsd: 60_000_000 },
+      { nom: "Sans coût", symbole: "S.US", avoirsBtc: 150, coutTotalUsd: null },
+      { nom: "Autre", symbole: "A.US", avoirsBtc: 50, coutTotalUsd: 4_000_000 },
+    ],
+  };
+
+  it("jamais « frais » : avoirs non horodatés, observation inconnue, couverture des coûts connus", () => {
+    const q = qualiteTresoreriesBtc({ donnee, ts: NOW, perime: false }, "public");
+    expect(q).toMatchObject({
+      sourceId: "coingecko", sourceEffective: "CoinGecko", observeLe: null, recupereLe: NOW, cadenceMs: 6 * 3_600_000,
+      ageMaxMs: null, couverture: { disponibles: 2, attendus: 3 }, estime: false, acces: "public", statut: "partiel",
+    });
+    expect(q.raison).toContain("non horodatés");
+    expect(q.raison).toContain("J-14");
+    // La projection de lecture ne peut pas le rendre frais ni périmé faute d'observation datée.
+    expect(actualiserQualite(q, NOW + 30 * JOUR).statut).toBe("partiel");
+    expect(qualiteTresoreriesBtc({ donnee, ts: NOW, perime: false }, "cle").acces).toBe("cle");
+  });
+
+  it("cache resservi : périmé ; absent : indisponible avec motif", () => {
+    const perime = qualiteTresoreriesBtc({ donnee, ts: NOW - 7 * 3_600_000, perime: true }, "public");
+    expect(perime).toMatchObject({ sourceEffective: "cache CoinGecko", statut: "perime", recupereLe: NOW - 7 * 3_600_000 });
+    expect(perime.raison).toContain("non horodatés");
+    const absent = qualiteTresoreriesBtc(null, "cle");
+    expect(absent).toMatchObject({ statut: "indisponible", acces: "indisponible", recupereLe: null, couverture: null });
+    expect(absent.raison).toContain("CoinGecko");
   });
 });

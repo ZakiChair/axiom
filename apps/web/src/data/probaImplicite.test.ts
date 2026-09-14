@@ -3,6 +3,7 @@ import {
   courbeProbaImplicite,
   lireProbasNiveau,
   niveauParDefaut,
+  prixCourant,
   probaClotureAuDessus,
   probaToucher,
   type CourbeProbaImplicite,
@@ -204,18 +205,20 @@ describe("courbeProbaImplicite — bornes, monotonie et refus", () => {
   });
 });
 
-describe("probaToucher — barrière log-normale sans dérive", () => {
-  it("K = F : contact certain", () => {
-    expect(probaToucher(F, F, 60, T)).toBeCloseTo(1, 12);
+describe("probaToucher — barrière log-normale sans dérive, depuis le prix courant S", () => {
+  const S = 100_000;
+
+  it("K = S : contact certain", () => {
+    expect(probaToucher(S, S, 60, T)).toBeCloseTo(1, 12);
   });
 
-  it("K à ±1σ (F·e^{±σ√T}) : 2·Φ(−1) ≈ 0,3173", () => {
-    const k = F * Math.exp(SIGMA * Math.sqrt(T));
-    expect(probaToucher(k, F, 60, T)).toBeCloseTo(0.3173, 4);
-    expect(probaToucher(F * Math.exp(-SIGMA * Math.sqrt(T)), F, 60, T)).toBeCloseTo(0.3173, 4);
+  it("K à ±1σ (S·e^{±σ√T}) : 2·Φ(−1) ≈ 0,3173", () => {
+    const k = S * Math.exp(SIGMA * Math.sqrt(T));
+    expect(probaToucher(k, S, 60, T)).toBeCloseTo(0.3173, 4);
+    expect(probaToucher(S * Math.exp(-SIGMA * Math.sqrt(T)), S, 60, T)).toBeCloseTo(0.3173, 4);
   });
 
-  it("entrées invalides : null (σ ≤ 0, T ≤ 0, niveau ou forward ≤ 0, non finis)", () => {
+  it("entrées invalides : null (σ ≤ 0, T ≤ 0, niveau ou prix courant ≤ 0, non finis)", () => {
     expect(probaToucher(F, F, 0, T)).toBeNull();
     expect(probaToucher(F, F, 60, 0)).toBeNull();
     expect(probaToucher(0, F, 60, T)).toBeNull();
@@ -229,19 +232,67 @@ describe("lireProbasNiveau — les deux lectures d'un niveau", () => {
     NOW,
   );
 
-  it("P(clôture) interpolée et P(toucher) à l'IV ATM de la courbe", () => {
-    const l = lireProbasNiveau(c, 105_000);
+  it("P(clôture) interpolée et P(toucher) à l'IV ATM de la courbe, depuis le prix courant", () => {
+    const l = lireProbasNiveau(c, 105_000, F);
     expect(l.pCloture).toBeCloseTo(0.23, 9);
     expect(l.pToucher).toBeCloseTo(probaToucher(105_000, F, 50, T)!, 12);
   });
 
+  it("forward de l'échéance ≠ prix courant : P(toucher) mesure la distance au prix courant, pas au forward", () => {
+    // Échéance lointaine en contango : forward 104 000, prix courant 100 000, IV 50 %.
+    const lointaine = courbeProbaImplicite(
+      chaineCalls([[90_000, 16_000], [100_000, 8_000], [110_000, 3_000], [120_000, 1_000]]).map((p) => ({
+        ...p,
+        underlying: 104_000,
+        markPrice: (p.markPrice * F) / 104_000,
+        markIv: 50,
+      })),
+      NOW,
+    )!;
+    expect(lointaine.forward).toBe(104_000);
+    const auForward = lireProbasNiveau(lointaine, 104_000, F);
+    // K = F n'est pas un contact certain : ln(1,04) / (0,5·√0,25) = 0,1569 → 2·Φ(−0,1569) ≈ 87,5 %.
+    expect(auForward.pToucher).toBeCloseTo(probaToucher(104_000, F, 50, T)!, 12);
+    expect(auForward.pToucher).toBeCloseTo(2 * normCdf(-Math.log(1.04) / (0.5 * Math.sqrt(T))), 12);
+    expect(auForward.pToucher!).toBeLessThan(0.9);
+    // K = S : contact certain ; P(clôture) reste lue sur la courbe de l'échéance (forward 104 000).
+    const auPrix = lireProbasNiveau(lointaine, F, F);
+    expect(auPrix.pToucher).toBeCloseTo(1, 12);
+    expect(auPrix.pCloture).toBeCloseTo(probaClotureAuDessus(lointaine, F)!, 12);
+  });
+
+  it("prix courant absent : P(toucher) null (jamais le forward de l'échéance en remplacement)", () => {
+    const l = lireProbasNiveau(c, 105_000, null);
+    expect(l.pCloture).toBeCloseTo(0.23, 9);
+    expect(l.pToucher).toBeNull();
+    expect(lireProbasNiveau(c, 105_000, Number.NaN).pToucher).toBeNull();
+  });
+
   it("courbe absente, niveau absent ou ≤ 0 : les deux null ; hors grille : P(toucher) seule", () => {
-    expect(lireProbasNiveau(null, 100_000)).toEqual({ pCloture: null, pToucher: null });
-    expect(lireProbasNiveau(c, null)).toEqual({ pCloture: null, pToucher: null });
-    expect(lireProbasNiveau(c, 0)).toEqual({ pCloture: null, pToucher: null });
-    const hors = lireProbasNiveau(c, 120_000);
+    expect(lireProbasNiveau(null, 100_000, F)).toEqual({ pCloture: null, pToucher: null });
+    expect(lireProbasNiveau(c, null, F)).toEqual({ pCloture: null, pToucher: null });
+    expect(lireProbasNiveau(c, 0, F)).toEqual({ pCloture: null, pToucher: null });
+    const hors = lireProbasNiveau(c, 120_000, F);
     expect(hors.pCloture).toBeNull();
     expect(hors.pToucher).not.toBeNull();
+  });
+});
+
+describe("prixCourant — forward de l'échéance non expirée la plus proche (≈ index)", () => {
+  it("indépendant de l'ordre de la chaîne : l'échéance la plus proche l'emporte", () => {
+    const proche = pt({ expiryMs: NOW + 3_600_000, underlying: 100_010 });
+    const lointaine = pt({ expiryMs: EXP, underlying: 104_000 });
+    expect(prixCourant([lointaine, proche], NOW)).toBe(100_010);
+    expect(prixCourant([proche, lointaine], NOW)).toBe(100_010);
+  });
+
+  it("ignore les échéances expirées et les forwards invalides ; null si aucun", () => {
+    const expiree = pt({ expiryMs: NOW, underlying: 99_000 });
+    const sansForward = pt({ expiryMs: NOW + 3_600_000, underlying: Number.NaN });
+    const suivante = pt({ expiryMs: EXP, underlying: 104_000 });
+    expect(prixCourant([expiree, sansForward, suivante], NOW)).toBe(104_000);
+    expect(prixCourant([expiree, sansForward], NOW)).toBeNull();
+    expect(prixCourant([], NOW)).toBeNull();
   });
 });
 

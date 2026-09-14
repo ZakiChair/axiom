@@ -109,6 +109,20 @@ describe("volsForward", () => {
     expect(segments[0]?.moveEvenementPct).toBeNull();
   });
 
+  it("fenêtre à événement de plusieurs jours (≤ 7 j) : part mise à l'échelle √(Δt/365), pas /√365", () => {
+    const debut = NOW + 2 * JOUR;
+    // 34 % sur 1 j ; 50 % sur 5 j (FOMC) ; 36 % et 35,7 % sur 1 j → σ base = médiane(34 ; 36 ; 35,7) = 35,7.
+    const points = pointsDepuisFwd(debut, 40, [34, 50, 36, 35.7], [1, 5, 1, 1]);
+    const fomc: EvenementVol = { time: debut + 3 * JOUR, libelle: "FOMC" };
+    const segments = volsForward(points, NOW, [fomc]);
+    const evt = segments[1];
+    expect(evt?.dtJours).toBeCloseTo(5, 9);
+    expect(evt?.evenements).toEqual([fomc]);
+    expect(evt?.sigmaFwd).toBeCloseTo(50, 9);
+    expect(evt?.move1SigmaPct).toBeCloseTo(50 * Math.sqrt(5 / 365), 9); // ≈ 5,85 %
+    expect(evt?.moveEvenementPct).toBeCloseTo(Math.sqrt(50 * 50 - 35.7 * 35.7) * Math.sqrt(5 / 365), 9); // ≈ 4,10 %
+  });
+
   it("σ base ignore les fenêtres longues ; aucune part d'événement lue sur une fenêtre > 7 j", () => {
     expect(DT_BASE_MAX_JOURS).toBe(7);
     const debut = NOW + 2 * JOUR;

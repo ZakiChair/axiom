@@ -41,7 +41,7 @@ import { calculerSkew25d } from "../data/skew";
 import { termStructureIv, type PointTermIv } from "../data/termIv";
 import { mouvementsAttendus, type PointMouvementAttendu } from "../data/mouvementAttendu";
 import { libelleCourtEvenement, volsForward, type SegmentVolForward } from "../data/volForward";
-import { courbeProbaImplicite, lireProbasNiveau, niveauParDefaut } from "../data/probaImplicite";
+import { courbeProbaImplicite, lireProbasNiveau, niveauParDefaut, prixCourant } from "../data/probaImplicite";
 import { histDvol } from "../data/referentiels";
 import { ivRank } from "../data/ivRank";
 import { bandeStrikes, construireGrilleOi, type GrilleOi } from "../data/oiHeatmap";
@@ -316,12 +316,15 @@ export function OptionsWindow() {
     () => (vue === "smile" ? courbeProbaImplicite(pointsEcheance, Date.now()) : null),
     [vue, pointsEcheance],
   );
+  // P(toucher) part du prix COURANT (forward de l'échéance la plus proche ≈ index), pas du forward
+  // de l'échéance sélectionnée (revue indépendante : +5 à 9 pts au-delà de 3 mois).
+  const prixProba = useMemo(() => (vue === "smile" ? prixCourant(chain, Date.now()) : null), [vue, chain]);
   const [niveauProba, setNiveauProba] = useState("");
   useEffect(() => setNiveauProba(""), [devise]);
   const niveauDefaut = courbeProba === null ? null : niveauParDefaut(courbeProba.forward);
   const lectureProba = useMemo(
-    () => lireProbasNiveau(courbeProba, niveauProba.trim() === "" ? niveauDefaut : Number(niveauProba)),
-    [courbeProba, niveauProba, niveauDefaut],
+    () => lireProbasNiveau(courbeProba, niveauProba.trim() === "" ? niveauDefaut : Number(niveauProba), prixProba),
+    [courbeProba, niveauProba, niveauDefaut, prixProba],
   );
 
   // Domaine d'axe strike (smile) : bornes = min/max des strikes de l'échéance sélectionnée —
@@ -792,7 +795,7 @@ export function OptionsWindow() {
       ivPut: put && Number.isFinite(put.markIv) && put.markIv > 0 ? put.markIv : null,
       oiCall: call ? call.openInterest : null,
       oiPut: put ? put.openInterest : null,
-      ...lireProbasNiveau(courbeProba, strike),
+      ...lireProbasNiveau(courbeProba, strike, prixProba),
     });
   };
 

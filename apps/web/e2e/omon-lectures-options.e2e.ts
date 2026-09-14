@@ -148,7 +148,8 @@ test("Smile : P(clôture > K à T) risque-neutre (Breeden-Litzenberger centré) 
   const niveau = fenetre.getByLabel("Niveau de prix");
   const tuile = fenetre.getByTitle(/^P\(toucher avant T\), modèle log-normal : /);
 
-  // Niveau vide = forward arrondi (100 000) : interpolation 0,9 → 0,1 à mi-chemin ; K = F → contact certain.
+  // Niveau vide = forward arrondi (100 000) : interpolation 0,9 → 0,1 à mi-chemin ; échéance unique, donc
+  // prix courant S = forward : K = S → contact certain (F ≠ S couvert par probaImplicite.test.ts).
   await expect(niveau).toHaveAttribute("placeholder", "100000");
   await expect(tuile).toContainText("P(clôture > K à T), risque-neutre");
   await expect(tuile).toContainText("50.0 %");
@@ -174,6 +175,7 @@ test("Smile : P(clôture > K à T) risque-neutre (Breeden-Litzenberger centré) 
   await expect(fenetre.getByText("P(toucher) log-normal : 100.0 %")).toBeVisible();
 
   await expect(fenetre).toContainText("mesure risque-neutre, pas une probabilité réelle");
+  await expect(fenetre).toContainText("S = prix courant");
 });
 
 /** Option CBOE brute (symbole OCC, greeks CBOE). */

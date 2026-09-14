@@ -47,13 +47,15 @@ describe("mouvementsAttendus", () => {
     expect(p?.borneHaute).toBeCloseTo(104_000, 6);
   });
 
-  it("convertit au forward DE L'ÉCHÉANCE (pas un spot commun)", () => {
-    const chain = [
-      pt({ type: "call", underlying: 102_000, strike: 102_000 }),
-      pt({ type: "put", underlying: 102_000, strike: 102_000 }),
-    ];
+  it("convertit au forward DE L'ÉCHÉANCE (ni un spot commun, ni le strike ATM)", () => {
+    // Forward 102 400 ≠ strike ATM 102 000 : une conversion au strike donnerait 4 080, pas 4 096.
+    const chain = [102_000, 103_000].flatMap((strike) => [
+      pt({ type: "call", underlying: 102_400, strike }),
+      pt({ type: "put", underlying: 102_400, strike }),
+    ]);
     const [p] = mouvementsAttendus(chain, NOW);
-    expect(p?.straddleUsd).toBeCloseTo(0.04 * 102_000, 6);
+    expect(p?.strikeAtm).toBe(102_000);
+    expect(p?.straddleUsd).toBeCloseTo(0.04 * 102_400, 6);
   });
 
   it("strike ATM = le plus proche du forward (en dessous puis au-dessus)", () => {

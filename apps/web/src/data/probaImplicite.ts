@@ -13,8 +13,11 @@
  *   3. bornée à [0 ; 1], puis monotonie imposée (balayage croissant, pᵢ = min(pᵢ, pᵢ₋₁)) ;
  *   4. lecture par interpolation linéaire entre milieux, null hors de la grille.
  *
- * P(toucher K avant T), MODÈLE LOG-NORMAL : barrière sans dérive, 2·Φ(−|ln(K/F)| / (σ√T)), σ =
- * IV ATM de l'échéance (source unique d'IV). Surestime en pratique le taux de contact observé.
+ * P(toucher K avant T), MODÈLE LOG-NORMAL : barrière sans dérive, 2·Φ(−|ln(K/S)| / (σ√T)), σ =
+ * IV ATM de l'échéance (source unique d'IV), S = prix COURANT (correction de la revue : un contact
+ * part du prix d'aujourd'hui ; le forward d'une échéance lointaine porte la dérive de portage, soit
+ * 5 à 9 pts d'erreur au-delà de 3 mois). S = forward de l'échéance non expirée la plus proche
+ * (≈ index, sans fetch). Surestime en pratique le taux de contact observé.
  *
  * LIMITES : mesure risque-neutre, pas une probabilité réelle ; marks = surface modèle Deribit,
  * pas des cotations ; précision bornée par l'écart entre strikes (2 000 à 5 000 USD loin de la
@@ -114,25 +117,46 @@ export function probaClotureAuDessus(courbe: CourbeProbaImplicite, niveau: numbe
   return probas.at(-1) ?? null;
 }
 
-/** Barrière log-normale sans dérive : min(1, 2·Φ(−|ln(K/F)| / (σ√T))), σ = ivPct/100. Null si entrée invalide. */
-export function probaToucher(niveau: number, forward: number, ivPct: number, t: number): number | null {
-  if (![niveau, forward, ivPct, t].every((v) => Number.isFinite(v) && v > 0)) return null;
-  return Math.min(1, 2 * normCdf(-Math.abs(Math.log(niveau / forward)) / ((ivPct / 100) * Math.sqrt(t))));
+/** Barrière log-normale sans dérive : min(1, 2·Φ(−|ln(K/S)| / (σ√T))), S = prix courant, σ = ivPct/100. Null si entrée invalide. */
+export function probaToucher(niveau: number, prixS: number, ivPct: number, t: number): number | null {
+  if (![niveau, prixS, ivPct, t].every((v) => Number.isFinite(v) && v > 0)) return null;
+  return Math.min(1, 2 * normCdf(-Math.abs(Math.log(niveau / prixS)) / ((ivPct / 100) * Math.sqrt(t))));
+}
+
+/**
+ * Prix courant S : forward de l'échéance non expirée la plus proche (≈ index Deribit), indépendant
+ * de l'ordre de la chaîne. Null si aucune échéance future n'a de forward fini et positif.
+ */
+export function prixCourant(chain: readonly OptionPoint[], nowMs: number): number | null {
+  let meilleur: OptionPoint | null = null;
+  for (const p of chain) {
+    if (p.expiryMs <= nowMs || !(Number.isFinite(p.underlying) && p.underlying > 0)) continue;
+    if (meilleur === null || p.expiryMs < meilleur.expiryMs) meilleur = p;
+  }
+  return meilleur === null ? null : meilleur.underlying;
 }
 
 export interface LectureProbasNiveau {
   /** P(clôture > K à T), risque-neutre ; null hors grille. */
   pCloture: number | null;
-  /** P(toucher K avant T), modèle log-normal à l'IV ATM de la courbe. */
+  /** P(toucher K avant T), modèle log-normal à l'IV ATM de la courbe, depuis le prix courant ; null sans prix courant. */
   pToucher: number | null;
 }
 
-/** Les deux lectures d'un niveau (niveau saisi ou strike survolé) ; null si courbe absente ou niveau ≤ 0. */
-export function lireProbasNiveau(courbe: CourbeProbaImplicite | null, niveau: number | null): LectureProbasNiveau {
+/**
+ * Les deux lectures d'un niveau (niveau saisi ou strike survolé) ; null si courbe absente ou niveau ≤ 0.
+ * P(clôture) se lit sur la courbe de l'échéance ; P(toucher) part de `prixS` (cf. `prixCourant`),
+ * jamais du forward de l'échéance en remplacement.
+ */
+export function lireProbasNiveau(
+  courbe: CourbeProbaImplicite | null,
+  niveau: number | null,
+  prixS: number | null,
+): LectureProbasNiveau {
   if (courbe === null || niveau === null || !(niveau > 0)) return { pCloture: null, pToucher: null };
   return {
     pCloture: probaClotureAuDessus(courbe, niveau),
-    pToucher: courbe.ivAtm === null ? null : probaToucher(niveau, courbe.forward, courbe.ivAtm, courbe.t),
+    pToucher: courbe.ivAtm === null || prixS === null ? null : probaToucher(niveau, prixS, courbe.ivAtm, courbe.t),
   };
 }
 

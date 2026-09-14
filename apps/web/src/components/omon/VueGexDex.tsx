@@ -150,7 +150,7 @@ export function VueGexDex({
           {etf
             ? `CBOE — différé ~15 min — marché US fermé nuits et week-ends · dernier échange ${
                 etf.dernierEchangeNy?.replace("T", " ") ?? "—"
-              } (heure de New York) · niveaux ≈ ${etf.sousJacent} par ratio de prix au dernier échange (pas la NAV)${
+              } (heure de New York) · niveaux ≈ ${etf.sousJacent} : prix crypto au dernier échange ÷ prix courant de l'ETF (pas la NAV)${
                 etf.prixCrypto === null ? ` · conversion en ${etf.sousJacent} indisponible (bougie Binance absente)` : ""
               } · endpoint non contractuel.`
             : "CBOE — données différées (~15 min), endpoint non contractuel."}
@@ -364,7 +364,7 @@ export function VueGexDex({
             ? "GEX/DEX calculés côté client (Black-Scholes sur IV mark Deribit, OI en unités de base, multiplicateur 1). La convention calls+/puts− et les variantes tous-long/tous-short sont des hypothèses, pas une observation des portefeuilles dealers. Histogramme et pic |GEX| : échéance sélectionnée. Net, flip cumul/strike, murs, verdict et profil GEX(S) : toutes échéances ; le flip réel du profil est le zéro du GEX recalculé en spot."
             : "Greeks pré-calculés CBOE (multiplicateur 100) — toutes les métriques portent sur l'échéance sélectionnée. Convention : dealers long les calls, short les puts — le signe du GEX en dépend. GEX = Σ(Γc·OIc − Γp·OIp)·S²·0,01·mult ; DEX = Σ(Δ·OI)·S·mult. Histogramme : strikes < 0,5 % du max masqués. Pas de profil GEX(S) : greeks figés, non re-simulables."}
           {etf &&
-            ` ETF ${etf.sousJacent} : strikes conservés à ±25 % du prix de l'ETF (P/C et notionnel sur la chaîne complète) ; OI OCC mis à jour une fois par jour ; volume consolidé ou propre au CBOE : non vérifié. Niveau ≈ ${etf.sousJacent} = strike × clôture Binance 1 min au dernier échange ÷ prix de l'ETF : approximation, pas la NAV (frais, prime ou décote) ; « — » si la bougie manque, jamais le cours courant.`}
+            ` ETF ${etf.sousJacent} : strikes conservés à ±25 % du prix de l'ETF (P/C et notionnel sur la chaîne complète) ; OI OCC mis à jour une fois par jour ; volume consolidé ou propre au CBOE : non vérifié. Niveau ≈ ${etf.sousJacent} = strike × clôture Binance 1 min au dernier échange ÷ prix courant de l'ETF (hors séance, il peut s'écarter de la clôture de séance) : approximation, pas la NAV (frais, prime ou décote) ; « — » si la bougie manque, jamais le cours crypto courant.`}
         </NoteSource>
       </div>
     </>

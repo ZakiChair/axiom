@@ -207,7 +207,8 @@ export function VueSmile({
           Deribit × forward (surface modèle, pas des cotations) ; mesure risque-neutre, pas une
           probabilité réelle ; « — » hors de la grille de strikes. Niveau vide = forward de l&apos;échéance
           arrondi. P(toucher avant T), en infobulle : modèle log-normal sans dérive,
-          2·Φ(−|ln(K/F)| / σ ATM·√T), qui surestime en pratique le taux de contact observé.
+          2·Φ(−|ln(K/S)| / σ ATM·√T), S = prix courant (forward de l&apos;échéance la plus proche, ≈ index),
+          qui surestime en pratique le taux de contact observé.
         </NoteSource>
       </div>
     </div>

@@ -15,7 +15,7 @@
  * de Phase 2) ; ce store n'est qu'un conteneur d'état + un journal.
  */
 import { createStore } from "zustand/vanilla";
-import { validerComposite, type AlertDef, type Condition, type Declenchement, type SensCroisement } from "@axiom/alerts";
+import { METRIQUES_ONCHAIN_ALERTE, validerComposite, type AlertDef, type Condition, type Declenchement, type SensCroisement } from "@axiom/alerts";
 import type { ExchangeId, Timeframe } from "@axiom/types";
 import { daemonPret, kvPut, miroiterTravailPersonnel } from "../data/daemon";
 
@@ -119,7 +119,7 @@ function estAlertDefValide(v: unknown): v is AlertDef {
   const typesConnus = new Set([
     "prix-croise", "variation-pct", "indicateur-seuil", "indicateur-croisement",
     "funding-extreme", "cvd-spot-perp-div", "liq-cascade", "regime-seuil",
-    "whale-flux", "flux-capitaux-seuil", "composite",
+    "whale-flux", "flux-capitaux-seuil", "onchain-seuil", "composite",
   ]);
   if (!typesConnus.has(condition.type)) return false;
   if (condition.type === "flux-capitaux-seuil") {
@@ -127,6 +127,13 @@ function estAlertDefValide(v: unknown): v is AlertDef {
       "etf-btc-ratio", "etf-eth-ratio", "etf-sol-ratio", "stablecoins-variation-7j",
       "realized-cap-variation-30j", "realized-cap-variation-90j", "exchange-netflow",
     ]);
+    const comparateurs = new Set([">", ">=", "<", "<="]);
+    if (typeof condition.metrique !== "string" || !metriques.has(condition.metrique) ||
+      typeof condition.comparateur !== "string" || !comparateurs.has(condition.comparateur) ||
+      typeof condition.valeur !== "number" || !Number.isFinite(condition.valeur)) return false;
+  }
+  if (condition.type === "onchain-seuil") {
+    const metriques = new Set<string>(METRIQUES_ONCHAIN_ALERTE);
     const comparateurs = new Set([">", ">=", "<", "<="]);
     if (typeof condition.metrique !== "string" || !metriques.has(condition.metrique) ||
       typeof condition.comparateur !== "string" || !comparateurs.has(condition.comparateur) ||

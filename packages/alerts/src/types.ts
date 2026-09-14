@@ -117,6 +117,28 @@ export interface ConditionRegimeSeuil {
   valeur: number;
 }
 
+/**
+ * Métriques on-chain LENTES (daily) ouvertes aux alertes : valorisation BGeometrics
+ * (MVRV Z-Score, SOPR, NUPL), thermocap multiple et hashprice (Coin Metrics, mempool.space,
+ * blockchain.info) et frais recommandés du mempool (sat/vB). Source unique : le panneau
+ * d'alertes et le runtime dérivent leurs listes d'ici.
+ */
+export const METRIQUES_ONCHAIN_ALERTE = ["mvrv-z", "sopr", "nupl", "thermocap", "hashprice", "frais-sat-vb"] as const;
+export type MetriqueOnchainAlerte = (typeof METRIQUES_ONCHAIN_ALERTE)[number];
+
+/**
+ * Seuil sur une métrique on-chain (daily). Condition GLOBALE (portée par BTCUSDT/binance
+ * par convention, comme `regime-seuil`), évaluée par le runtime FRONT uniquement à partir
+ * des caches de CHAIN (poll lent) ; non composable en v1. Une métrique absente du contexte
+ * rend la condition non évaluable (aucun déclenchement, armement figé).
+ */
+export interface ConditionOnchainSeuil {
+  type: "onchain-seuil";
+  metrique: MetriqueOnchainAlerte;
+  comparateur: Comparateur;
+  valeur: number;
+}
+
 /** Direction HEURISTIQUE d'un mouvement baleine vis-à-vis des exchanges (liste curée). */
 export type DirectionWhale = "depot" | "retrait" | "interne" | "inconnu";
 
@@ -170,6 +192,7 @@ export type ConditionAtomique =
   | ConditionCvdSpotPerpDiv
   | ConditionLiqCascade
   | ConditionRegimeSeuil
+  | ConditionOnchainSeuil
   | ConditionWhaleFlux
   | ConditionFluxCapitauxSeuil;
 
@@ -177,7 +200,7 @@ export type ConditionAtomique =
  * Sous-condition admise dans une composition (tout sauf `whale-flux` : convention
  * de portage `symbol = actif` incompatible avec un def porté par une paire).
  */
-export type ConditionSimple = Exclude<ConditionAtomique, ConditionWhaleFlux | ConditionFluxCapitauxSeuil>;
+export type ConditionSimple = Exclude<ConditionAtomique, ConditionWhaleFlux | ConditionFluxCapitauxSeuil | ConditionOnchainSeuil>;
 
 /**
  * ET conjonctif de 2 à 4 sous-conditions, évaluées dans le MÊME contexte (même
@@ -262,6 +285,12 @@ export interface ContexteAlerte {
    * le score en v1) : absent → condition non évaluable, aucun déclenchement.
    */
   regimeScore?: number;
+  /**
+   * Dernières valeurs des métriques on-chain (daily) — requises pour `onchain-seuil`.
+   * Injectées par le runtime FRONT (poll lent sur les caches de CHAIN) ; une métrique
+   * absente rend la condition qui la vise non évaluable.
+   */
+  onchainMetriques?: Partial<Record<MetriqueOnchainAlerte, number>>;
   /**
    * Mouvements baleines de l'actif sur la fenêtre récente (10 min par convention de
    * l'appelant) — requis pour `whale-flux`. Injecté par le DAEMON uniquement (requête

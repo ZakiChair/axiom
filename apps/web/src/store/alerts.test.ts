@@ -197,6 +197,22 @@ describe("lireInitial — hydratation par élément (un item corrompu est écart
     expect(lireInitial().defs.map((d) => d.id)).toEqual(["ok"]);
   });
 
+  it("valide strictement métrique, comparateur et seuil d'une alerte on-chain importée", () => {
+    localStorage.setItem(
+      "axiom:alerts:v1",
+      JSON.stringify({
+        defs: [
+          { id: "ok", symbol: "BTCUSDT", source: "binance", condition: { type: "onchain-seuil", metrique: "mvrv-z", comparateur: ">=", valeur: 7 }, actif: true, declenchements: [] },
+          { id: "m", symbol: "BTCUSDT", source: "binance", condition: { type: "onchain-seuil", metrique: "exchange-netflow", comparateur: ">=", valeur: 7 }, actif: true, declenchements: [] },
+          { id: "c", symbol: "BTCUSDT", source: "binance", condition: { type: "onchain-seuil", metrique: "sopr", comparateur: "==", valeur: 1 }, actif: true, declenchements: [] },
+          { id: "n", symbol: "BTCUSDT", source: "binance", condition: { type: "onchain-seuil", metrique: "hashprice", comparateur: "<", valeur: "35" }, actif: true, declenchements: [] },
+        ],
+        journal: [],
+      }),
+    );
+    expect(lireInitial().defs.map((d) => d.id)).toEqual(["ok"]);
+  });
+
   it("écarte les instantanés de journal dont date, unité ou source feraient casser le rendu", () => {
     localStorage.setItem("axiom:alerts:v1", JSON.stringify({
       defs: [],

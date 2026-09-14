@@ -102,6 +102,8 @@ function evaluerUne(def: AlertDef, ctx: ContexteAlerte): EvalCondition | null {
       return evalLiqCascade(def, c, ctx);
     case "regime-seuil":
       return evalRegimeSeuil(def, c, ctx);
+    case "onchain-seuil":
+      return evalOnchainSeuil(def, c, ctx);
     case "whale-flux":
       return evalWhaleFlux(def, c, ctx);
     case "flux-capitaux-seuil":
@@ -131,14 +133,14 @@ export function typesDeDef(def: AlertDef): ReadonlySet<string> {
 export function validerComposite(conditions: readonly Condition[]): conditions is ConditionSimple[] {
   if (conditions.length < 2 || conditions.length > 4) return false;
   for (const c of conditions) {
-    if (c.type === "composite" || c.type === "whale-flux" || c.type === "flux-capitaux-seuil") return false;
+    if (c.type === "composite" || c.type === "whale-flux" || c.type === "flux-capitaux-seuil" || c.type === "onchain-seuil") return false;
     if (c.type === "prix-croise" && c.sens === "les-deux") return false;
   }
   return true;
 }
 
 /** Types que le daemon n'évalue pas (pipeline orderflow / score de régime). */
-const TYPES_FRONT_ONLY = new Set(["cvd-spot-perp-div", "regime-seuil", "flux-capitaux-seuil"]);
+const TYPES_FRONT_ONLY = new Set(["cvd-spot-perp-div", "regime-seuil", "flux-capitaux-seuil", "onchain-seuil"]);
 
 /**
  * true si la def (atomique ou composite) porte CVD spot/perp ou un seuil de régime :
@@ -235,6 +237,11 @@ function etatCondition(
     }
     case "regime-seuil": {
       const v = ctx.regimeScore;
+      if (v === undefined || !Number.isFinite(v)) return null;
+      return { satisfaite: comparer(v, c.comparateur, c.valeur), valeur: v };
+    }
+    case "onchain-seuil": {
+      const v = ctx.onchainMetriques?.[c.metrique];
       if (v === undefined || !Number.isFinite(v)) return null;
       return { satisfaite: comparer(v, c.comparateur, c.valeur), valeur: v };
     }
@@ -385,6 +392,18 @@ function evalLiqCascade(
 function evalRegimeSeuil(
   def: AlertDef,
   c: Extract<Condition, { type: "regime-seuil" }>,
+  ctx: ContexteAlerte
+): EvalCondition | null {
+  return etatOuNull(def, etatCondition(c, ctx));
+}
+
+/**
+ * Métrique on-chain (daily) : dernière valeur injectée par le runtime FRONT, comparée au
+ * seuil. Ré-armement standard : la métrique doit repasser du côté opposé du seuil.
+ */
+function evalOnchainSeuil(
+  def: AlertDef,
+  c: Extract<Condition, { type: "onchain-seuil" }>,
   ctx: ContexteAlerte
 ): EvalCondition | null {
   return etatOuNull(def, etatCondition(c, ctx));

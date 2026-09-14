@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
-import { estFrontOnly, evaluerAlertes, typesDeDef } from "./engine";
+import { estFrontOnly, evaluerAlertes, typesDeDef, validerComposite } from "./engine";
 import type { AlertDef, Condition, ConditionSimple, ContexteAlerte } from "./types";
 
 /** Bougie plate (open=high=low=close) au temps `time`. */
@@ -731,5 +731,52 @@ describe("composite", () => {
     const sansBougies = def({ type: "composite", conditions: [rsiSeuil, croise] });
     const res = evaluerAlertes([sansBougies], { maintenant: 0, dernierPrix: 1 });
     expect(res.defs[0]).toBe(sansBougies);
+  });
+});
+
+describe("onchain-seuil", () => {
+  const cond: Condition = { type: "onchain-seuil", metrique: "mvrv-z", comparateur: ">=", valeur: 7 };
+  function ctxChain(onchainMetriques?: ContexteAlerte["onchainMetriques"]): ContexteAlerte {
+    return { maintenant: 1, dernierPrix: 0, onchainMetriques };
+  }
+
+  it("calibre puis déclenche au franchissement du seuil, se ré-arme au retour en dessous", () => {
+    const { fires, defFinale } = piloter(def(cond), [
+      ctxChain({ "mvrv-z": 3.2 }), // sous le seuil → calibrage armé
+      ctxChain({ "mvrv-z": 7.4 }), // ≥ 7 → DÉCLENCHE
+      ctxChain({ "mvrv-z": 8.1 }), // toujours au-dessus → rien (désarmée)
+      ctxChain({ "mvrv-z": 5 }), // repasse en dessous → ré-armement
+      ctxChain({ "mvrv-z": 7 }), // bord exact (≥) → DÉCLENCHE
+    ]);
+    expect(fires).toEqual([false, true, false, false, true]);
+    expect(defFinale.declenchements).toHaveLength(2);
+  });
+
+  it("non évaluable sans la métrique demandée (autre métrique, contexte absent, NaN)", () => {
+    const { fires } = piloter(def(cond), [
+      ctxChain({ sopr: 1.2 }),
+      ctxChain(undefined),
+      ctxChain({ "mvrv-z": Number.NaN }),
+    ]);
+    expect(fires).toEqual([false, false, false]);
+  });
+
+  it("ne déclenche PAS immédiatement si le seuil est déjà franchi à la création", () => {
+    const { fires } = piloter(def(cond), [ctxChain({ "mvrv-z": 9 }), ctxChain({ "mvrv-z": 9.5 })]);
+    expect(fires).toEqual([false, false]);
+  });
+
+  it("chaque métrique du catalogue est lue sous sa propre clé", () => {
+    const frais: Condition = { type: "onchain-seuil", metrique: "frais-sat-vb", comparateur: ">", valeur: 50 };
+    const { fires } = piloter(def(frais), [
+      ctxChain({ "frais-sat-vb": 12, "mvrv-z": 99 }),
+      ctxChain({ "frais-sat-vb": 80, "mvrv-z": 99 }),
+    ]);
+    expect(fires).toEqual([false, true]);
+  });
+
+  it("évaluée par le front seulement et non composable", () => {
+    expect(estFrontOnly(def(cond))).toBe(true);
+    expect(validerComposite([cond, { type: "prix-croise", niveau: 1, sens: "hausse" }])).toBe(false);
   });
 });

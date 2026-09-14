@@ -149,3 +149,20 @@ describe("decrireCondition", () => {
     ).toBe("Prix franchit 100 à la hausse ET Funding extrême (short crowded, |z|≥2)");
   });
 });
+
+describe("onchain-seuil (libellé)", () => {
+  it("nomme la métrique, comparateur lisible, unité dans le libellé", () => {
+    expect(decrireCondition({ type: "onchain-seuil", metrique: "mvrv-z", comparateur: ">=", valeur: 7 })).toBe(
+      "MVRV Z-Score ≥ 7",
+    );
+    expect(decrireCondition({ type: "onchain-seuil", metrique: "frais-sat-vb", comparateur: ">", valeur: 50 })).toBe(
+      "Frais BTC (sat/vB) > 50",
+    );
+    expect(decrireCondition({ type: "onchain-seuil", metrique: "hashprice", comparateur: "<=", valeur: 35.5 })).toBe(
+      "Hashprice ($/PH/j) ≤ 35.5",
+    );
+    expect(decrireCondition({ type: "onchain-seuil", metrique: "thermocap", comparateur: "<", valeur: -0.5 })).toBe(
+      "Thermocap multiple < −0.5",
+    );
+  });
+});

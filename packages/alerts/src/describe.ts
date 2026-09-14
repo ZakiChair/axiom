@@ -5,7 +5,7 @@
  * moteur quand la def n'en fournit pas, et de libellé dans le panneau UI. PURE.
  */
 
-import type { Condition } from "./types";
+import type { Condition, MetriqueOnchainAlerte } from "./types";
 
 /** Formatte une durée en ms de façon compacte (« 15 min », « 4 h », « 2 j »). */
 export function formaterDuree(ms: number): string {
@@ -28,6 +28,16 @@ function formaterMontant(usd: number): string {
 }
 
 /** Description française d'une condition (courte, dense). */
+/** Libellés FR des métriques on-chain ouvertes aux alertes (panneau + descriptions). */
+export const LIBELLES_METRIQUE_ONCHAIN: Record<MetriqueOnchainAlerte, string> = {
+  "mvrv-z": "MVRV Z-Score",
+  sopr: "SOPR",
+  nupl: "NUPL",
+  thermocap: "Thermocap multiple",
+  hashprice: "Hashprice ($/PH/j)",
+  "frais-sat-vb": "Frais BTC (sat/vB)",
+};
+
 export function decrireCondition(condition: Condition): string {
   switch (condition.type) {
     case "prix-croise": {
@@ -84,6 +94,11 @@ export function decrireCondition(condition: Condition): string {
       // Symbole de comparaison lisible (≤/≥) et signe moins typographique (−).
       const op = comparateur === "<=" ? "≤" : comparateur === ">=" ? "≥" : comparateur;
       return `régime ${op} ${String(valeur).replace("-", "−")}`;
+    }
+    case "onchain-seuil": {
+      const { metrique, comparateur, valeur } = condition;
+      const op = comparateur === "<=" ? "≤" : comparateur === ">=" ? "≥" : comparateur;
+      return `${LIBELLES_METRIQUE_ONCHAIN[metrique]} ${op} ${String(valeur).replace("-", "−")}`;
     }
     case "whale-flux": {
       const { seuilUsd, direction } = condition;

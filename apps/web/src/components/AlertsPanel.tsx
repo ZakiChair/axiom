@@ -19,8 +19,11 @@ import {
   decrireCondition,
   conditionSupporteTimeframe,
   estFrontOnly,
+  LIBELLES_METRIQUE_ONCHAIN,
+  METRIQUES_ONCHAIN_ALERTE,
   validerComposite,
   type Comparateur,
+  type MetriqueOnchainAlerte,
   type Condition,
   type ConditionSimple,
   type SensCroisement,
@@ -51,6 +54,7 @@ type TypeAlerte =
   | "cvd-spot-perp-div"
   | "liq-cascade"
   | "regime-seuil"
+  | "onchain-seuil"
   | "whale-flux";
 
 /** Symbole porteur neutre d'une alerte GLOBALE (regime-seuil, indépendante du symbole). */
@@ -157,6 +161,10 @@ export function AlertsPanel() {
   // regime-seuil : comparateur + valeur (−2..+2), score composite de régime.
   const [comparateurRegime, setComparateurRegime] = useState<Comparateur>("<=");
   const [valeurRegime, setValeurRegime] = useState("-1.2");
+  // onchain-seuil : métrique quotidienne + comparateur + seuil, condition globale.
+  const [metriqueOnchain, setMetriqueOnchain] = useState<MetriqueOnchainAlerte>("mvrv-z");
+  const [comparateurOnchain, setComparateurOnchain] = useState<Comparateur>(">=");
+  const [valeurOnchain, setValeurOnchain] = useState("7");
   // whale-flux : actif surveillé + seuil d'UN transfert (USD) + filtre de direction.
   const [actifWhale, setActifWhale] = useState<string>("BTC");
   const [seuilWhale, setSeuilWhale] = useState("10000000");
@@ -199,8 +207,8 @@ export function AlertsPanel() {
 
   const soumettre = () => {
     if (IS_VERCEL && type === "whale-flux") return;
-    if (composer && (type === "whale-flux" || (type === "prix-croise" && sens === "les-deux"))) {
-      setErreurForm("Type non composable (whale-flux / prix ↕).");
+    if (composer && (type === "whale-flux" || type === "onchain-seuil" || (type === "prix-croise" && sens === "les-deux"))) {
+      setErreurForm("Type non composable (whale-flux / on-chain / prix ↕).");
       return;
     }
     let condition: Condition;
@@ -272,6 +280,13 @@ export function AlertsPanel() {
         return;
       }
       condition = { type: "regime-seuil", comparateur: comparateurRegime, valeur: v };
+    } else if (type === "onchain-seuil") {
+      const v = Number(valeurOnchain);
+      if (!Number.isFinite(v)) {
+        setErreurForm("Seuil on-chain requis.");
+        return;
+      }
+      condition = { type: "onchain-seuil", metrique: metriqueOnchain, comparateur: comparateurOnchain, valeur: v };
     } else if (type === "whale-flux") {
       // whale-flux : seuil d'UN transfert (USD) strictement positif requis.
       const s = Number(seuilWhale);
@@ -301,7 +316,7 @@ export function AlertsPanel() {
     // regime-seuil est GLOBAL : porté par un symbole neutre (BTCUSDT/binance).
     // whale-flux est porté par l'ACTIF surveillé (convention @axiom/alerts, source binance).
     const cible =
-      type === "regime-seuil"
+      type === "regime-seuil" || type === "onchain-seuil"
         ? PORTEUR_GLOBAL
         : type === "whale-flux"
           ? { symbol: actifWhale, source: "binance" as const }
@@ -491,6 +506,7 @@ export function AlertsPanel() {
             <option value="cvd-spot-perp-div">CVD S/P</option>
             <option value="liq-cascade">Cascade liq</option>
             <option value="regime-seuil">Régime</option>
+            <option value="onchain-seuil">On-chain</option>
             <option value="whale-flux">Baleines</option>
           </select>
         </div>
@@ -750,6 +766,49 @@ export function AlertsPanel() {
           </div>
         )}
 
+        {type === "onchain-seuil" && (
+          <div className="space-y-1.5">
+            <div className="flex gap-1.5">
+              <select
+                value={metriqueOnchain}
+                onChange={(e) => setMetriqueOnchain(e.target.value as MetriqueOnchainAlerte)}
+                title="Métrique on-chain quotidienne (fenêtre CHAIN)"
+                className="min-w-0 flex-1 rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+              >
+                {METRIQUES_ONCHAIN_ALERTE.map((m) => (
+                  <option key={m} value={m}>
+                    {LIBELLES_METRIQUE_ONCHAIN[m]}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={comparateurOnchain}
+                onChange={(e) => setComparateurOnchain(e.target.value as Comparateur)}
+                className="rounded border border-border bg-bg px-1 py-1 text-xs text-text outline-none focus:border-text-dim"
+              >
+                {COMPARATEURS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+              <input
+                value={valeurOnchain}
+                onChange={(e) => setValeurOnchain(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && soumettre()}
+                inputMode="decimal"
+                placeholder="Seuil"
+                title="Seuil dans l'unité de la métrique (ex. MVRV-Z 7, hashprice 35 $/PH/j, frais 50 sat/vB)"
+                className="w-24 rounded border border-border bg-bg px-2 py-1 text-xs tabular-nums text-text outline-none placeholder:text-text-dim focus:border-text-dim"
+              />
+            </div>
+            <p className="px-0.5 text-[10px] text-text-dim">
+              Alerte globale sur une métrique quotidienne (caches CHAIN, évaluation toutes les
+              15 min). App ouverte uniquement ; MVRV-Z / SOPR / NUPL soumis au quota BGeometrics.
+            </p>
+          </div>
+        )}
+
         {type === "whale-flux" && (
           <div className="space-y-1.5">
             {IS_VERCEL && (
@@ -805,6 +864,8 @@ export function AlertsPanel() {
             ? `+ Ajouter à la composition (${composition.length}/4)`
             : type === "regime-seuil"
               ? "Ajouter (régime global)"
+              : type === "onchain-seuil"
+                ? "Ajouter (on-chain global)"
               : type === "whale-flux"
                 ? `Ajouter (baleines ${actifWhale})`
                 : `Ajouter sur ${symboleEffectif}`}

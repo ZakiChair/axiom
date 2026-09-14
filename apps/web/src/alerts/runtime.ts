@@ -48,7 +48,7 @@
  *
  * Aucune modification de Chart.tsx : on lit `marketStore` en aval, sans le piloter.
  */
-import { evaluerAlertes, typesDeDef, type AlertDef, type ContexteAlerte, type Declenchement } from "@axiom/alerts";
+import { evaluerAlertes, typesDeDef, type AlertDef, type ContexteAlerte, type Declenchement, type MetriqueOnchainAlerte } from "@axiom/alerts";
 import type { Unsubscribe } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { fluxLiqRetenu, liqEventsStore } from "../chart/liquidationMarkers";
@@ -80,6 +80,8 @@ function defPorte(def: AlertDef, type: string): boolean {
 
 /** Période de poll funding (ms) — lent, hors chemin chaud. */
 const FUNDING_POLL_MS = 60_000;
+/** Période d'évaluation des alertes on-chain (ms) — métriques quotidiennes, caches CHAIN. */
+const ONCHAIN_POLL_MS = 15 * 60_000;
 /** Période d'évaluation de `liq-cascade` (ms) — le poll fait aussi RETOMBER la fenêtre
  *  glissante sous le seuil (ré-armement) quand le flux se calme. */
 const LIQ_CASCADE_POLL_MS = 5_000;
@@ -655,6 +657,57 @@ function creerRuntime(): Unsubscribe {
     }
   };
 
+  // ── Métriques on-chain lentes : alertes `onchain-seuil` ───────────────────
+  // Poll 15 min sur les caches de CHAIN ; chargeur importé À LA DEMANDE (rien dans le
+  // bundle d'entrée sans alerte on-chain). Une métrique absente laisse sa condition non
+  // évaluable (armement figé, aucun faux déclenchement). Condition GLOBALE : lot par TYPE.
+  let onchainTimer: ReturnType<typeof setInterval> | undefined;
+  let onchainEnCours = false;
+  let onchainCleRequises = "";
+  let onchainDerniereEval = 0;
+  const metriquesOnchainRequises = (): Set<MetriqueOnchainAlerte> => {
+    const requises = new Set<MetriqueOnchainAlerte>();
+    for (const d of alertsStore.getState().defs) {
+      if (d.actif && d.condition.type === "onchain-seuil") requises.add(d.condition.metrique);
+    }
+    return requises;
+  };
+  const evaluerOnchain = async (): Promise<void> => {
+    if (onchainEnCours) return;
+    const requises = metriquesOnchainRequises();
+    if (requises.size === 0) return;
+    onchainEnCours = true;
+    try {
+      const { chargerMetriquesOnchain } = await import("./onchainMetriques");
+      const onchainMetriques = await chargerMetriquesOnchain(requises);
+      onchainDerniereEval = Date.now();
+      // Relire le lot : une def a pu être retirée ou désactivée pendant le chargement.
+      const lot = alertsStore.getState().defs.filter((d) => d.actif && d.condition.type === "onchain-seuil");
+      appliquerResultat(lot, { maintenant: Date.now(), dernierPrix: 0, onchainMetriques });
+    } catch (err) {
+      console.error("[AXIOM] alertes on-chain : chargement des métriques échoué", err);
+    } finally {
+      onchainEnCours = false;
+    }
+  };
+  const resyncOnchain = (): void => {
+    const requises = metriquesOnchainRequises();
+    if (requises.size === 0) {
+      if (onchainTimer !== undefined) clearInterval(onchainTimer);
+      onchainTimer = undefined;
+      onchainCleRequises = "";
+      return;
+    }
+    if (onchainTimer === undefined) onchainTimer = setInterval(() => void evaluerOnchain(), ONCHAIN_POLL_MS);
+    const cle = [...requises].sort().join(",");
+    // Évaluation immédiate seulement si l'ensemble des métriques change (nouvelle alerte)
+    // ou si le dernier passage date : un déclenchement quelconque ne relance rien.
+    if (cle !== onchainCleRequises || Date.now() - onchainDerniereEval >= ONCHAIN_POLL_MS) {
+      onchainCleRequises = cle;
+      void evaluerOnchain();
+    }
+  };
+
   // Démarrage : souscriptions + calibrage immédiat contre l'état courant.
   resyncTicker();
   resyncFunding();
@@ -662,6 +715,7 @@ function creerRuntime(): Unsubscribe {
   resyncPreset();
   resyncCvd();
   resyncFluxCapitaux();
+  resyncOnchain();
   // Calibrage CVD sur l'état déjà publié (si orderflow déjà actif).
   for (const sym of Object.keys(cvdDivergenceStore.getState().bySymbol)) {
     evaluerCvdSymbol(marketStore.getState().exchange, sym);
@@ -674,6 +728,7 @@ function creerRuntime(): Unsubscribe {
     resyncLiqCascade();
     resyncCvd();
     resyncFluxCapitaux();
+    resyncOnchain();
     evaluerRegime(); // calibre une def régime nouvellement ajoutée
   });
   const unsubMarket = marketStore.subscribe(onMarket);
@@ -696,6 +751,7 @@ function creerRuntime(): Unsubscribe {
     stopHeartbeat();
     if (fundingTimer !== undefined) clearInterval(fundingTimer);
     if (liqCascadeTimer !== undefined) clearInterval(liqCascadeTimer);
+    if (onchainTimer !== undefined) clearInterval(onchainTimer);
     for (const timer of timersPreset.values()) clearInterval(timer);
     timersPreset.clear();
     dernierEnsemble.clear();

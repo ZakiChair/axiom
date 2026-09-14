@@ -4,9 +4,11 @@
  * Un run (patron du store NETLIQ, sans fenêtre paramétrable) :
  *   1. PRIMAIRE — historique PriceUSD complet (Coin Metrics) → `decouperCycles` → 4 séries
  *      alignées jour-0. Le CHART ne dépend QUE de ça ; tout le reste est best-effort.
- *   2. Best-effort — Mayer Multiple (dérivé des mêmes prix), halving countdown
- *      (`fetchMempoolReseau`/`computeHalving`), MVRV Z-Score (BGeometrics seul, « — » si
- *      indisponible). Un échec de ces extras laisse « — » sans casser le chart.
+ *   2. Dérivés des mêmes prix, calculés une fois par run (jamais au rendu) : distance à l'ATH
+ *      alignée sur le pic (`distanceAth`) et Mayer Multiple.
+ *   3. Best-effort — halving countdown (`fetchMempoolReseau`/`computeHalving`), MVRV Z-Score
+ *      (BGeometrics seul, « — » si indisponible). Un échec de ces extras laisse « — » sans
+ *      casser le chart.
  *
  * Invariants NETLIQ repris : erreur NON destructive (série conservée pendant un retry),
  * garde vide (une réponse vide n'écrase pas des séries valides), garde de péremption
@@ -14,7 +16,8 @@
  */
 import { createStore } from "zustand/vanilla";
 import { decouperCycles, mayerMultiple, type SerieCycle } from "../data/cycle";
-import { fetchCoinMetricsPriceUSDComplet } from "../data/onchain/coinmetrics";
+import { distanceAth, type DistanceAth } from "../data/cycleAth";
+import { fetchCoinMetricsPriceUSDComplet, type PointMetrique } from "../data/onchain/coinmetrics";
 import { fetchMempoolReseau, type Halving } from "../data/onchain/mempool";
 import { BG_MVRV, fetchBgeometricMetrique, type BgResultat } from "../data/onchain/bgeometrics";
 import { getBgeometricsKey } from "./onchain";
@@ -27,6 +30,10 @@ export interface CycleState {
   enCours: boolean;
   /** Les 4 cycles alignés jour-0 (source unique du chart et du tableau). */
   series: SerieCycle[];
+  /** Historique PriceUSD brut (quotidien, 00:00 UTC) du dernier run réussi. */
+  points: PointMetrique[];
+  /** Distance à l'ATH et repli au même J+N depuis les pics passés, null si aucun prix exploitable. */
+  ath: DistanceAth | null;
   /** Mayer Multiple (dernier prix / MM200), null si indisponible. */
   mayer: number | null;
   /** MVRV Z-Score BGeometrics (résultat complet : valeur, `ts`, `perime`, `repli` pour la
@@ -64,6 +71,8 @@ async function chargerMvrv(signal?: AbortSignal): Promise<BgResultat | null> {
 export const cycleStore = createStore<CycleState>((set, get) => ({
   enCours: false,
   series: [],
+  points: [],
+  ath: null,
   mayer: null,
   mvrv: null,
   halving: null,
@@ -104,6 +113,7 @@ export const cycleStore = createStore<CycleState>((set, get) => ({
 
     const series = decouperCycles(resultat.points);
     const mayer = mayerMultiple(resultat.points);
+    const ath = distanceAth(resultat.points);
 
     // Extras best-effort en parallèle : leur échec ne bloque pas le chart.
     const [reseau, mvrv] = await Promise.all([
@@ -120,6 +130,8 @@ export const cycleStore = createStore<CycleState>((set, get) => ({
     set({
       enCours: false,
       series,
+      points: resultat.points,
+      ath,
       mayer,
       mvrv,
       halving: reseau?.donnee.halving ?? null,

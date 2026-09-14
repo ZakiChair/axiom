@@ -49,7 +49,17 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  cycleStore.setState({ enCours: false, series: [], mayer: null, mvrv: null, halving: null, erreur: null, majTs: null });
+  cycleStore.setState({
+    enCours: false,
+    series: [],
+    points: [],
+    ath: null,
+    mayer: null,
+    mvrv: null,
+    halving: null,
+    erreur: null,
+    majTs: null,
+  });
 });
 
 describe("cycleStore — MVRV Z-Score (BGeometrics seul)", () => {
@@ -87,5 +97,33 @@ describe("cycleStore — MVRV Z-Score (BGeometrics seul)", () => {
     await cycleStore.getState().run(true);
     expect(cycleStore.getState().mvrv).toBeNull();
     expect(cmMetriques).not.toHaveBeenCalled();
+  });
+});
+
+describe("cycleStore — distance à l'ATH (calculée dans run)", () => {
+  it("expose les points bruts et la distance à l'ATH ; un pic passé hors données reste null", async () => {
+    bg.mockResolvedValue(null);
+    await cycleStore.getState().run(true);
+    const etat = cycleStore.getState();
+    // historique() croît : ATH au dernier point, aucun pic passé couvert par les données.
+    expect(etat.points).toHaveLength(300);
+    expect(etat.ath).not.toBeNull();
+    expect(etat.ath!.athMs).toBe(etat.points[299]!.time);
+    expect(etat.ath!.joursDepuisAth).toBe(0);
+    expect(etat.ath!.repliMaxPct).toBe(0);
+    expect(etat.ath!.cyclesPasses).toEqual({ 1: null, 2: null, 3: null });
+  });
+
+  it("compare au même J+N depuis le pic 2021 quand l'historique le couvre", async () => {
+    bg.mockResolvedValue(null);
+    const pic2021 = Date.UTC(2021, 10, 8);
+    const avant = Array.from({ length: 20 }, (_, i) => ({ time: pic2021 + i * JOUR, value: 100 - i }));
+    const courant = historique().map((p, i) => (i === 290 ? { ...p, value: 200_000 } : p));
+    prix.mockResolvedValue({ points: [...avant, ...courant], ts: 1, perime: false });
+    await cycleStore.getState().run(true);
+    const ath = cycleStore.getState().ath!;
+    expect(ath.joursDepuisAth).toBe(9);
+    expect(ath.cyclesPasses[3]!.repliPct).toBeCloseTo(-9, 10);
+    expect(ath.cyclesPasses[1]).toBeNull();
   });
 });

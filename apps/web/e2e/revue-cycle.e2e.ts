@@ -6,6 +6,7 @@ import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
  * quotidienne entre prix réels Coin Metrics à 00:00 UTC), BGeometrics et mempool bouchonnés.
  * Correctif A : sommet d'un cycle clos cherché avant son creux baissier.
  * Correctif B : MVRV Z-Score BGeometrics seul, aucune requête Coin Metrics hors PriceUSD.
+ * Lot 5 : distance à l'ATH alignée sur le pic, comparée au même J+N depuis les pics passés.
  */
 test.use({ timezoneId: "Europe/Paris" });
 
@@ -116,4 +117,32 @@ test("CYCLE : MVRV Z-Score BGeometrics à J-7 affiché avec la mention « embarg
   await expect(mvrv).toContainText("embargo 7 j");
   expect(requetesBg).toHaveLength(1);
   expect(metriquesCm.every((m) => m === "PriceUSD")).toBe(true);
+});
+
+test("CYCLE : distance à l'ATH alignée sur le pic et repli au même J+N depuis les pics passés", async ({ page }) => {
+  await preparer(page);
+  const fenetre = await ouvrirCycle(page);
+  const table = fenetre.getByRole("table", { name: "Cycles BTC" });
+
+  // Fixture : ATH 124 824,45 $ le 2025-10-06, dernier point 2026-09-13 (J+342), plus bas le 2026-06-30.
+  const jours = tuile(fenetre, "Jours depuis l'ATH");
+  await expect(jours).toContainText("342 j");
+  await expect(jours).toContainText("2025-10-06");
+  await expect(jours).toHaveAttribute("title", /124.824 \$ le 2025-10-06/);
+  const repliMax = tuile(fenetre, "Repli max depuis l'ATH");
+  await expect(repliMax).toContainText("-53.1 %");
+  await expect(repliMax).toContainText("2026-06-30");
+
+  // Colonne alignée sur le pic : même J+342 depuis 2013-12-04, 2017-12-16, 2021-11-08 ; cycle courant = repli actuel.
+  await expect(table.getByRole("columnheader", { name: "Repli à J+342 post-pic" })).toBeVisible();
+  const ligne = (cycle: string): Locator => table.getByRole("row").filter({ hasText: cycle });
+  await expect(ligne("Cycle 2012")).toContainText("-79.2 %");
+  await expect(ligne("Cycle 2016")).toContainText("-81.9 %");
+  await expect(ligne("Cycle 2020")).toContainText("-74.3 %");
+  await expect(ligne("Cycle 2024")).toContainText("-38.5 %");
+  await expect(ligne("Cycle 2024")).toContainText("max -53.1 %");
+
+  // Aucune projection des cycles passés sur le courant ; le chart garde sa hauteur (le corps défile).
+  await expect(fenetre).not.toContainText("fenêtre des planchers");
+  expect((await fenetre.locator("canvas").boundingBox())!.height).toBeGreaterThanOrEqual(200);
 });

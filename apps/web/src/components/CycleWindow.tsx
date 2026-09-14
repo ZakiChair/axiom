@@ -17,6 +17,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { cycleStore } from "../store/cycle";
 import { FENETRE_JOURS, statsCycle, type SerieCycle } from "../data/cycle";
+import type { RangPic } from "../data/cycleAth";
 import { COMPARE_PALETTE } from "../store/compare";
 import { lireTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { zoneMvrvZ } from "../lib/zonesOnchain";
@@ -39,6 +40,9 @@ import { TableTriable, type ColonneTable } from "./TableTriable";
 
 /** Un jour en millisecondes (dates de halving et de sommet reconstruites depuis le jour post-halving). */
 const JOUR_MS = 86_400_000;
+
+/** Date ISO UTC « AAAA-MM-JJ » (points PriceUSD datés à 00:00 UTC, lisible sans fuseau). */
+const dateIso = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 
 /** Badge du MVRV Z-Score selon le motif de péremption BGeometrics (mêmes libellés que CHAIN). */
 const BADGE_MOTIF_BG = { cache: "cache périmé", embargo: "embargo 7 j", retard: "source en retard" } as const;
@@ -269,6 +273,7 @@ function indiceAuJour(s: SerieCycle, jour: number): number | null {
 export function CycleWindow() {
   const enCours = useStore(cycleStore, (s) => s.enCours);
   const series = useStore(cycleStore, (s) => s.series);
+  const ath = useStore(cycleStore, (s) => s.ath);
   const mayer = useStore(cycleStore, (s) => s.mayer);
   const mvrv = useStore(cycleStore, (s) => s.mvrv);
   const halving = useStore(cycleStore, (s) => s.halving);
@@ -386,6 +391,26 @@ export function CycleWindow() {
         },
       },
       {
+        // Alignée sur le PIC : repli au même J+N depuis le pic de chaque cycle passé ; cycle courant = repli actuel.
+        id: "repliPic",
+        label: ath !== null ? `Repli à J+${ath.joursDepuisAth} post-pic` : "Repli à J+N post-pic",
+        rendu: (s) => {
+          const r =
+            ath === null
+              ? null
+              : s.clos
+                ? (ath.cyclesPasses[s.halvingIndex as RangPic] ?? null)
+                : { repliPct: ath.repliCourantPct, repliMaxPct: ath.repliMaxPct };
+          if (r === null) return VALEUR_ABSENTE;
+          return (
+            <span className={r.repliPct < 0 ? "text-down" : undefined}>
+              {formatDec(r.repliPct, 1)} %
+              <span className="block text-[9px] text-text-dim">max {formatDec(r.repliMaxPct, 1)} %</span>
+            </span>
+          );
+        },
+      },
+      {
         id: "plancher",
         label: "Plancher hist.",
         rendu: (s) => {
@@ -406,7 +431,7 @@ export function CycleWindow() {
         },
       },
     ],
-    [courant],
+    [courant, ath],
   );
 
   return (
@@ -418,7 +443,7 @@ export function CycleWindow() {
         actions={<BoutonRafraichir onClick={rafraichir} disabled={enCours} />}
       />
 
-      {/* Tuiles : jours depuis halving 2024, drawdown vs ATH, Mayer, MVRV, countdown halving. */}
+      {/* Tuiles : jours depuis halving 2024, drawdown vs ATH, distance à l'ATH, Mayer, MVRV, countdown halving. */}
       <div className="grid shrink-0 grid-cols-2 gap-2 border-b border-border px-4 py-3 sm:grid-cols-3">
         <TuileStat
           disposition="inline"
@@ -437,6 +462,29 @@ export function CycleWindow() {
             drawdownCourant !== null && drawdownCourant < 0
               ? lireTokenCanvas("--down", "#f92855")
               : undefined
+          }
+        />
+        <TuileStat
+          disposition="inline"
+          label="Jours depuis l'ATH"
+          valeur={ath !== null ? `${formatEntier(ath.joursDepuisAth)} j` : VALEUR_ABSENTE}
+          title={
+            ath !== null
+              ? `ATH quotidien PriceUSD : ${formatEntier(ath.athPrix)} $ le ${dateIso(ath.athMs)} · dernier point ${dateIso(ath.dernierMs)}`
+              : undefined
+          }
+          extra={
+            ath !== null ? <span className="text-[10px] text-text-dim">{dateIso(ath.athMs)}</span> : undefined
+          }
+        />
+        <TuileStat
+          disposition="inline"
+          label="Repli max depuis l'ATH"
+          valeur={ath !== null ? `${formatDec(ath.repliMaxPct, 1)} %` : VALEUR_ABSENTE}
+          ton={ath !== null && ath.repliMaxPct < 0 ? "down" : undefined}
+          title={ath !== null ? "Plus bas quotidien PriceUSD depuis l'ATH, en écart à l'ATH" : undefined}
+          extra={
+            ath !== null ? <span className="text-[10px] text-text-dim">{dateIso(ath.repliMaxMs)}</span> : undefined
           }
         />
         <TuileStat
@@ -478,7 +526,7 @@ export function CycleWindow() {
           <Vide>Aucun cycle exploitable. Réessayez avec Rafraîchir.</Vide>
         ) : (
           <>
-            <div className="relative min-h-0 flex-1">
+            <div className="relative min-h-[220px] flex-1">
               {erreur !== null && (
                 <div className="pointer-events-none absolute inset-x-0 top-0 z-20 rounded border border-down/40 bg-surface/90 px-2 py-1 text-[10px] text-down">
                   {erreur}
@@ -518,7 +566,9 @@ export function CycleWindow() {
             <div className="mt-2 flex items-center justify-between gap-2">
               <NoteSource>
                 Coin Metrics · PriceUSD daily depuis 2010 · les cycles passés ne préjugent pas du
-                courant · sommet d'un cycle clos = plus haut avant son creux baissier · planchers documentés
+                courant · sommet d'un cycle clos = plus haut avant son creux baissier · planchers documentés ·
+                repli post-pic au même J+N depuis les pics quotidiens 2013-12-04, 2017-12-16, 2021-11-08 (pas
+                intrajournaliers ; 3 cycles, sans valeur prédictive)
               </NoteSource>
               <Fraicheur loading={enCours} majTs={majTs} />
             </div>

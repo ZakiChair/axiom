@@ -2,21 +2,23 @@ import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import {
   BG_STH_REALIZED_PRICE, BG_LTH_REALIZED_PRICE, BG_REALIZED_CAP, BG_SUPPLY_PROFIT, BG_SUPPLY_LOSS,
-  BG_EXCHANGE_NETFLOW, BG_EXCHANGE_RESERVE, chargerBgeometricMetrique, type BgChargement, type DefMetriqueBg,
+  chargerBgeometricMetrique, type BgChargement, type DefMetriqueBg,
 } from "../../data/onchain/bgeometrics";
 import { ecartPrixRealise, offreEnProfit, variationCalendaire } from "../../data/onchain/cohorts";
+import { chargerFluxExchangesBtc, type FluxExchangesCharge } from "../../data/onchain/fluxExchangesCm";
 import { subscribeTickers } from "../../data/ticker";
 import { bgeometricsKeyStore, getBgeometricsKey } from "../../store/onchain";
-import { settingsUiStore } from "../../store/settings-ui";
 import { formatUsd } from "../../lib/format";
 import { Badge, NoteSource, TitreSection, TuileStat, Vide } from "../ui";
+import { VueFluxNetExchanges } from "./FluxNetExchanges";
 import { boutonHistorique, CourbeOnchain, dateObservation, ProvenanceOnchain, valeurUnite } from "./HistoriqueCommun";
 
 const GROUPES = {
   cohortes: { label: "Cohortes", defs: [BG_STH_REALIZED_PRICE, BG_LTH_REALIZED_PRICE], unite: "USD" },
   capital: { label: "Capital réalisé", defs: [BG_REALIZED_CAP], unite: "USD" },
   offre: { label: "Profit / perte", defs: [BG_SUPPLY_PROFIT, BG_SUPPLY_LOSS], unite: "BTC" },
-  exchanges: { label: "Exchanges", defs: [BG_EXCHANGE_NETFLOW, BG_EXCHANGE_RESERVE], unite: "BTC" },
+  // Flux nets Coin Metrics (chargés à part) ; la réserve labellisée dérive et n'est pas affichée.
+  exchanges: { label: "Exchanges", defs: [], unite: "BTC" },
 } satisfies Record<string, { label: string; defs: DefMetriqueBg[]; unite: string }>;
 type Groupe = keyof typeof GROUPES;
 
@@ -38,6 +40,13 @@ export function CohortesBtc({ open }: { open: boolean }) {
     }
     return () => ctrl.abort();
   }, [open, groupe, cleEtat]);
+  const [fluxBtc, setFluxBtc] = useState<FluxExchangesCharge | null>(null);
+  useEffect(() => {
+    if (!open || groupe !== "exchanges") return;
+    let actif = true; setFluxBtc(null);
+    void chargerFluxExchangesBtc().then(r => { if (actif) setFluxBtc(r); });
+    return () => { actif = false; };
+  }, [open, groupe]);
   useEffect(() => {
     if (!open || groupe !== "cohortes") return;
     setSpot(null); spotRecu.current = null;
@@ -71,7 +80,7 @@ export function CohortesBtc({ open }: { open: boolean }) {
             <TuileStat label={def.libelle} valeur={selection.unite === "USD" ? formatUsd(r?.serie.dernier?.value) : valeurUnite(r?.serie.dernier?.value, selection.unite)}
               badge={r?.perime ? <Badge ton="warn">périmé</Badge> : undefined}
               pied={groupe === "cohortes" ? `Écart spot : ${distance === null ? "—" : `${distance >= 0 ? "+" : ""}${distance.toFixed(2)} %`}` : undefined} />
-            {r && <CourbeOnchain points={r.serie.points} label={def.libelle} unite={selection.unite} zero={def.id === "exchangeNetflow"} />}
+            {r && <CourbeOnchain points={r.serie.points} label={def.libelle} unite={selection.unite} />}
             {!chargement ? <Vide>Chargement…</Vide> : chargement.raison ? <NoteSource>{chargement.raison}</NoteSource> : null}
             {r && <ProvenanceOnchain source="BGeometrics" observation={r.serie.dernier?.time} recuperation={r.ts} perime={r.perime} />}
           </div>;
@@ -85,9 +94,13 @@ export function CohortesBtc({ open }: { open: boolean }) {
           pied={offre ? `Profit / (profit + perte) · ${dateObservation(offre.time)}` : "Attente d'observations à date commune"} />}
       </div>
       {groupe === "exchanges" ? <>
-        <button type="button" className={boutonHistorique} onClick={() => settingsUiStore.getState().openSettings()}>Clé BGeometrics ⚙</button>
-        <NoteSource>Accès avec abonnement éligible. Netflow = entrées moins sorties des adresses labellisées exchanges (BTC).
-          Les labels sont incomplets et révisables ; une entrée ne prouve pas une vente. Les réserves suivent le périmètre du fournisseur.</NoteSource>
+        <VueFluxNetExchanges actif="BTC" net={fluxBtc?.points ?? []} netUsd={fluxBtc?.pointsUsd} flash={fluxBtc?.flash ?? false} loading={fluxBtc === null} />
+        {fluxBtc && <ProvenanceOnchain source="Coin Metrics Community · labels Coin Metrics" sourceId="coinmetrics"
+          observation={fluxBtc.points.at(-1)?.time} recuperation={fluxBtc.recupereLe} perime={fluxBtc.perime} />}
+        {fluxBtc?.raison && <NoteSource>{fluxBtc.raison}</NoteSource>}
+        <NoteSource>Flux net = entrées − sorties des adresses labellisées exchanges par Coin Metrics (BTC natif et USD du jour).
+          Labels incomplets, périmètre révisable ; une entrée ne prouve pas une vente. Statut flash : valeurs récentes révisables.
+          Réserve non affichée : le stock labellisé s'écarte des flux cumulés depuis avril 2026.</NoteSource>
       </> : <NoteSource>Mesures quotidiennes BGeometrics, révisables. STH : détenteurs court terme ; LTH : long terme.
         Les calculs conservent les dates publiées et restent absents si les références manquent.</NoteSource>}
     </div>}

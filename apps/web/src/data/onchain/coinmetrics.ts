@@ -12,8 +12,10 @@
  *   Les métriques demandées à l'origine FeeTotUSD / CapRealUSD / NVTAdj renvoient un
  *   403 « not available with supplied credentials » sur le tier community → REMPLACÉES
  *   par leurs équivalents gratuits (FeeTotNtv en BTC, CapMVRVCur = ratio MVRV courant).
- *   ⚠️ ETH : la plupart de ces métriques sont `null` en community (couverture BTC only) ;
- *   le parseur ignore proprement les valeurs nulles → l'UI affiche « — ».
+ *   ETH est servi en community (vérifié en réel le 2026-09-14) : CapMVRVCur, CapMrktCurUSD,
+ *   SplyCur, FlowInExNtv / FlowOutExNtv, SplyExNtv, FeeTotNtv… depuis 2015. Les séries de
+ *   flux et de réserve exchanges (BTC comme ETH) sont en statut « flash » (révisables) ;
+ *   CapRealUSD reste refusé (403). Le parseur ignore les valeurs nulles → l'UI affiche « — ».
  *
  * FORME DE RÉPONSE :
  *   { data: [ { asset, time: "<ISO>", <Metric>: "<nombre|null>", … }, … ] }
@@ -177,21 +179,23 @@ export async function fetchCoinMetrics(
 }
 
 /**
- * Lignes BRUTES de l'historique complet (depuis 2010) des métriques demandées, toutes
- * pages confondues : `page_size=10000` couvre ~5 900 points en une requête ; si l'amont
- * plafonne la page, `next_page_url` est suivi jusqu'à MAX_PAGES. Sans cache : chaque
- * appelant met en cache SA donnée dérivée (prix complet, thermocap…).
+ * Lignes BRUTES de l'historique (depuis `debut`, 2010 par défaut ; actif `asset`, BTC par
+ * défaut) des métriques demandées, toutes pages confondues : `page_size=10000` couvre
+ * ~5 900 points en une requête ; si l'amont plafonne la page, `next_page_url` est suivi
+ * jusqu'à MAX_PAGES. Sans cache : chaque appelant met en cache SA donnée dérivée (prix
+ * complet, thermocap, flux exchanges…).
  */
 export async function chargerLignesCoinMetrics(
   metriques: readonly string[],
   signal?: AbortSignal,
+  options: { asset?: string; debut?: string } = {},
 ): Promise<unknown[]> {
   const params = new URLSearchParams({
-    assets: "btc",
+    assets: options.asset ?? "btc",
     metrics: metriques.join(","),
     frequency: "1d",
     page_size: "10000",
-    start_time: DEBUT_HISTORIQUE,
+    start_time: options.debut ?? DEBUT_HISTORIQUE,
   });
   let url: string | null = `${BASE}?${params.toString()}`;
   const lignes: unknown[] = [];

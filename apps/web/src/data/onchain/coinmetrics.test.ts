@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseCoinMetrics } from "./coinmetrics";
 
 describe("parseCoinMetrics", () => {
@@ -37,5 +37,49 @@ describe("parseCoinMetrics", () => {
   it("renvoie des séries vides sur données absentes/malformées", () => {
     expect(parseCoinMetrics(null, "btc", metriques)["AdrActCnt"]?.points).toEqual([]);
     expect(parseCoinMetrics({ data: "nope" }, "btc", metriques)["TxCnt"]?.dernier).toBeUndefined();
+  });
+});
+
+function stockage(): Storage {
+  const m = new Map<string, string>();
+  return {
+    getItem: (k) => m.get(k) ?? null,
+    setItem: (k, v) => void m.set(k, v),
+    removeItem: (k) => void m.delete(k),
+    clear: () => m.clear(),
+    key: (i) => [...m.keys()][i] ?? null,
+    get length() {
+      return m.size;
+    },
+  };
+}
+
+describe("chargerLignesCoinMetrics : actif et début paramétrables", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubGlobal("localStorage", stockage());
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("demande l'actif et la date de début passés en option", async () => {
+    const { chargerLignesCoinMetrics } = await import("./coinmetrics");
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: [{ asset: "eth", time: "2026-09-13T00:00:00Z" }] }));
+    vi.stubGlobal("fetch", fetcher);
+    const lignes = await chargerLignesCoinMetrics(["FlowInExNtv"], undefined, { asset: "eth", debut: "2024-07-01" });
+    expect(lignes).toHaveLength(1);
+    const url = String(fetcher.mock.calls[0]?.[0]);
+    expect(url).toContain("assets=eth");
+    expect(url).toContain("start_time=2024-07-01");
+    expect(url).toContain("page_size=10000");
+  });
+
+  it("conserve BTC depuis 2010 par défaut", async () => {
+    const { chargerLignesCoinMetrics } = await import("./coinmetrics");
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: [] }));
+    vi.stubGlobal("fetch", fetcher);
+    await chargerLignesCoinMetrics(["PriceUSD"]);
+    const url = String(fetcher.mock.calls[0]?.[0]);
+    expect(url).toContain("assets=btc");
+    expect(url).toContain("start_time=2010-07-01");
   });
 });

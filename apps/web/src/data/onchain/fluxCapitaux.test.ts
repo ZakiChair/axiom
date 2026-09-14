@@ -1,5 +1,24 @@
-import { describe, expect, it } from "vitest";
-import { _viderCacheStablecoinsFlux, alignerFluxCapitaux, chargerStablecoinsFlux, lireAccordsFlux, qualifierMetriqueFlux, variationSurHorizon, type MetriqueFluxCapitaux } from "./fluxCapitaux";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { _viderCacheStablecoinsFlux, alignerFluxCapitaux, chargerFluxCapitaux, chargerStablecoinsFlux, lireAccordsFlux, qualifierMetriqueFlux, variationSurHorizon, type MetriqueFluxCapitaux } from "./fluxCapitaux";
+import type { FluxExchangesCharge } from "./fluxExchangesCm";
+
+const fluxCm = vi.hoisted(() => ({ charge: null as FluxExchangesCharge | null }));
+const bgAppels = vi.hoisted(() => [] as string[]);
+vi.mock("./fluxExchangesCm", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./fluxExchangesCm")>()),
+  chargerFluxExchangesBtc: vi.fn(async () => fluxCm.charge!),
+}));
+vi.mock("./bgeometrics", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./bgeometrics")>()),
+  chargerBgeometricMetrique: vi.fn(async (def: { chemin: string }) => {
+    bgAppels.push(def.chemin);
+    return { resultat: null, statut: "erreur" as const, raison: "BGeometrics bouchonné" };
+  }),
+}));
+vi.mock("./etfHistory", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./etfHistory")>()),
+  fetchEtfHistory: vi.fn(async () => ({ points: [], ts: 0, perime: false })),
+}));
 
 describe("vue commune des flux de capitaux", () => {
   it("conserve unités, périodes et indisponibilités au lieu de fabriquer un score", () => {
@@ -23,7 +42,6 @@ describe("vue commune des flux de capitaux", () => {
       ],
       sthRealizedPrice: [],
       exchangeNetflow: [],
-      exchangeReserve: [],
     });
 
     expect(resultat.metriques.map((m) => [m.id, m.valeur, m.unite, m.periode])).toEqual([
@@ -41,7 +59,6 @@ describe("vue commune des flux de capitaux", () => {
       ["sth-realized-price", null, "USD/BTC", "niveau"],
       ["lth-realized-price", null, "USD/BTC", "niveau"],
       ["exchange-netflow", null, "BTC/j", "jour"],
-      ["exchange-reserve", null, "BTC", "niveau"],
     ]);
     expect("score" in resultat).toBe(false);
   });
@@ -83,7 +100,7 @@ describe("vue commune des flux de capitaux", () => {
       { date: String(now / 1000), totalCirculatingUSD: { peggedUSD: null, peggedEUR: 0 } },
     ])) });
     const vue = alignerFluxCapitaux({ now, etf: { btc: [], eth: [], sol: [] }, stablecoins: charge.points,
-      realizedCap: [], sthRealizedPrice: [], exchangeNetflow: [], exchangeReserve: [] });
+      realizedCap: [], sthRealizedPrice: [], exchangeNetflow: [] });
     const variation = vue.metriques.find((m) => m.id === "stablecoins-variation-7j")!;
     expect(charge).toMatchObject({ disponible: false, raison: "historique vide" });
     expect(vue.metriques.find((m) => m.id === "stablecoins-stock")?.valeur).toBeNull();
@@ -119,5 +136,40 @@ describe("vue commune des flux de capitaux", () => {
       .toMatchObject({ statut: "perime", raison: "Dernière observation trop ancienne" });
     expect(qualifierMetriqueFlux("flux:x", "DefiLlama", now, now, 1, { ...source, perime: true, repli: true, raison: "Cache périmé · HTTP 503" }, null))
       .toMatchObject({ statut: "perime", sourceEffective: "cache DefiLlama", raison: "Cache périmé · HTTP 503" });
+    // Une raison permanente de la source (statut flash) ne masque pas l'âge de l'observation.
+    expect(qualifierMetriqueFlux("flux:x", "Coin Metrics Community", now - 10 * 86_400_000, now, 1, { ...source, raison: "Statut flash" }, null))
+      .toMatchObject({ statut: "perime", raison: "Statut flash · Dernière observation trop ancienne" });
+  });
+
+  describe("flux net BTC des exchanges", () => {
+    afterEach(() => { vi.unstubAllGlobals(); bgAppels.length = 0; fluxCm.charge = null; });
+
+    it("lit le flux net chez Coin Metrics, étiqueté, frais et alertable ; ni réserve ni appel BGeometrics exchange", async () => {
+      _viderCacheStablecoinsFlux();
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 503 })));
+      const hier = Math.floor(Date.now() / 86_400_000) * 86_400_000 - 86_400_000;
+      fluxCm.charge = { points: [{ time: hier - 86_400_000, value: 12 }, { time: hier, value: -2_187 }], pointsUsd: [],
+        flash: true, recupereLe: Date.now(), disponible: true, perime: false };
+      const vue = await chargerFluxCapitaux();
+      const netflow = vue.metriques.find((m) => m.id === "exchange-netflow");
+      expect(netflow).toMatchObject({ valeur: -2_187, unite: "BTC/j", observeLe: hier, source: "Coin Metrics Community", alerte: true });
+      expect(netflow?.libelle).toContain("labels Coin Metrics");
+      expect(netflow?.qualite).toMatchObject({ sourceEffective: "Coin Metrics Community", statut: "frais", acces: "public" });
+      expect(netflow?.qualite?.raison).toContain("périmètre révisable");
+      expect(netflow?.qualite?.raison).toContain("flash");
+      expect(vue.metriques.some((m) => (m.id as string) === "exchange-reserve")).toBe(false);
+      expect(bgAppels.length).toBeGreaterThan(0);
+      expect(bgAppels.filter((chemin) => chemin.startsWith("exchange-"))).toEqual([]);
+    });
+
+    it("Coin Metrics indisponible : valeur absente, statut indisponible, jamais zéro", async () => {
+      _viderCacheStablecoinsFlux();
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 503 })));
+      fluxCm.charge = { points: [], pointsUsd: [], flash: false, recupereLe: Date.now(), disponible: false, perime: false, raison: "Coin Metrics 503" };
+      const netflow = (await chargerFluxCapitaux()).metriques.find((m) => m.id === "exchange-netflow");
+      expect(netflow?.valeur).toBeNull();
+      expect(netflow?.qualite).toMatchObject({ statut: "indisponible" });
+      expect(netflow?.qualite?.raison).toContain("Coin Metrics 503");
+    });
   });
 });

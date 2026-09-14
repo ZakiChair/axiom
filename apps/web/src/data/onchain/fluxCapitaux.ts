@@ -6,8 +6,6 @@ import { getSoSoValueKey } from "../../store/sosovalue";
 import type { PointSupply } from "../macro/stablecoinsDetail";
 import { parseHistoriqueStablecoinChaine } from "./economieChaines";
 import {
-  BG_EXCHANGE_NETFLOW,
-  BG_EXCHANGE_RESERVE,
   BG_LTH_REALIZED_PRICE,
   BG_REALIZED_CAP,
   BG_STH_REALIZED_PRICE,
@@ -15,6 +13,7 @@ import {
   type DefMetriqueBg,
 } from "./bgeometrics";
 import { fetchEtfHistory, historiqueRatiosEtf, type JourEtf } from "./etfHistory";
+import { chargerFluxExchangesBtc } from "./fluxExchangesCm";
 import type { PointMetrique } from "./coinmetrics";
 import type { ActifEtf } from "./etf";
 
@@ -25,7 +24,7 @@ export type MetriqueFluxId =
   | `etf-${ActifEtf}-flow` | `etf-${ActifEtf}-ratio`
   | "stablecoins-stock" | "stablecoins-variation-7j"
   | "realized-cap-stock" | "realized-cap-variation-30j" | "realized-cap-variation-90j"
-  | "sth-realized-price" | "lth-realized-price" | "exchange-netflow" | "exchange-reserve";
+  | "sth-realized-price" | "lth-realized-price" | "exchange-netflow";
 export interface MetriqueFluxCapitaux {
   id: MetriqueFluxId;
   libelle: string;
@@ -46,8 +45,8 @@ export interface EntreesFluxCapitaux {
   realizedCap: PointMetrique[];
   sthRealizedPrice: PointMetrique[];
   lthRealizedPrice?: PointMetrique[];
+  /** Flux net quotidien BTC des exchanges (labels Coin Metrics) ; la réserve n'est pas publiée. */
   exchangeNetflow: PointMetrique[];
-  exchangeReserve: PointMetrique[];
 }
 
 function dernierValide<T extends { time: number }>(serie: readonly T[], now: number): T | null {
@@ -107,7 +106,7 @@ export function qualifierMetriqueFlux(
     estime: false,
     acces: source.acces,
     statut,
-    ...((source.raison ?? raisonAge) ? { raison: source.raison ?? raisonAge } : {}),
+    ...((source.raison ?? raisonAge) ? { raison: [source.raison, raisonAge].filter(Boolean).join(" · ") } : {}),
   };
 }
 
@@ -180,7 +179,6 @@ export function alignerFluxCapitaux(entrees: EntreesFluxCapitaux): VueFluxCapita
   const dernierSth = dernierValide(entrees.sthRealizedPrice, entrees.now);
   const dernierLth = dernierValide(entrees.lthRealizedPrice ?? [], entrees.now);
   const dernierNetflow = dernierValide(entrees.exchangeNetflow, entrees.now);
-  const dernierReserve = dernierValide(entrees.exchangeReserve, entrees.now);
   const etf = (["btc", "eth", "sol"] as const).flatMap((actif): MetriqueFluxCapitaux[] => {
     const dernier = dernierValide(entrees.etf[actif], entrees.now);
     const ratio = historiqueRatiosEtf(entrees.etf[actif], entrees.now).points.at(-1);
@@ -202,8 +200,7 @@ export function alignerFluxCapitaux(entrees: EntreesFluxCapitaux): VueFluxCapita
       { id: "realized-cap-variation-90j", libelle: "Capitalisation réalisée BTC", valeur: variationSurHorizon(entrees.realizedCap, entrees.now, 90), unite: "%", periode: "90 j", observeLe: dernierCap?.time ?? null, source: "BGeometrics", alerte: true },
       { id: "sth-realized-price", libelle: "Prix réalisé STH", valeur: dernierSth?.value ?? null, unite: "USD/BTC", periode: "niveau", observeLe: dernierSth?.time ?? null, source: "BGeometrics", alerte: false },
       { id: "lth-realized-price", libelle: "Prix réalisé LTH", valeur: dernierLth?.value ?? null, unite: "USD/BTC", periode: "niveau", observeLe: dernierLth?.time ?? null, source: "BGeometrics", alerte: false },
-      { id: "exchange-netflow", libelle: "Flux net exchanges", valeur: dernierNetflow?.value ?? null, unite: "BTC/j", periode: "jour", observeLe: dernierNetflow?.time ?? null, source: "BGeometrics", alerte: true },
-      { id: "exchange-reserve", libelle: "Réserves exchanges", valeur: dernierReserve?.value ?? null, unite: "BTC", periode: "niveau", observeLe: dernierReserve?.time ?? null, source: "BGeometrics", alerte: false },
+      { id: "exchange-netflow", libelle: "Flux net exchanges BTC (labels Coin Metrics)", valeur: dernierNetflow?.value ?? null, unite: "BTC/j", periode: "jour", observeLe: dernierNetflow?.time ?? null, source: "Coin Metrics Community", alerte: true },
     ],
   };
 }
@@ -262,13 +259,16 @@ async function chargerBg(def: DefMetriqueBg, signal?: AbortSignal): Promise<Seri
 /** Charge une fois les données partagées par CHAIN, BRIEF, STBL et le runtime d'alertes. */
 export async function chargerFluxCapitaux(signal?: AbortSignal): Promise<VueFluxCapitaux> {
   const now = Date.now();
-  const [btc, eth, sol, stable, cap, sth, lth, netflow, reserve] = await Promise.all([
+  const [btc, eth, sol, stable, cap, sth, lth, flux] = await Promise.all([
     fetchEtfHistory("btc", getSoSoValueKey(), signal), fetchEtfHistory("eth", getSoSoValueKey(), signal), fetchEtfHistory("sol", getSoSoValueKey(), signal),
     chargerStablecoinsFlux({ signal }), chargerBg(BG_REALIZED_CAP, signal), chargerBg(BG_STH_REALIZED_PRICE, signal), chargerBg(BG_LTH_REALIZED_PRICE, signal),
-    chargerBg(BG_EXCHANGE_NETFLOW, signal), chargerBg(BG_EXCHANGE_RESERVE, signal),
+    chargerFluxExchangesBtc(),
   ]);
+  // Flux seuls (la réserve labellisée dérive) ; libellé du périmètre et statut flash toujours visibles.
+  const netflow: SourceFlux = { recupereLe: flux.recupereLe, disponible: flux.disponible, perime: flux.perime, repli: flux.repli, acces: "public",
+    raison: [flux.raison, "Labels Coin Metrics, périmètre révisable", flux.flash ? "Statut flash : valeurs récentes révisables" : undefined].filter(Boolean).join(" · ") };
   const vue = alignerFluxCapitaux({ now, etf: { btc: btc.points, eth: eth.points, sol: sol.points }, stablecoins: stable.points,
-    realizedCap: cap.points, sthRealizedPrice: sth.points, lthRealizedPrice: lth.points, exchangeNetflow: netflow.points, exchangeReserve: reserve.points });
+    realizedCap: cap.points, sthRealizedPrice: sth.points, lthRealizedPrice: lth.points, exchangeNetflow: flux.points });
   const etfResultats = { btc, eth, sol };
   for (const metrique of vue.metriques) {
     let source: SourceFlux = { recupereLe: stable.recupereLe, disponible: stable.disponible, perime: stable.perime, repli: stable.repli,
@@ -290,7 +290,6 @@ export async function chargerFluxCapitaux(signal?: AbortSignal): Promise<VueFlux
     } else if (metrique.id === "sth-realized-price") source = sth;
     else if (metrique.id === "lth-realized-price") source = lth;
     else if (metrique.id === "exchange-netflow") source = netflow;
-    else if (metrique.id === "exchange-reserve") source = reserve;
     else if (metrique.id === "stablecoins-variation-7j") couverture = couvertureHorizon(stable.points.map((p) => ({ time: p.time, value: p.totalUsd })), now, 7);
     metrique.qualite = qualifierMetriqueFlux(`flux:${metrique.id}`, metrique.source, metrique.observeLe, now, metrique.valeur, source, couverture);
   }

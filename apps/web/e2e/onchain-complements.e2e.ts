@@ -1,6 +1,23 @@
 import { expect, test } from "@playwright/test";
 import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
+const JOUR_MS = 86_400_000;
+const METRIQUES_FLUX_CM = "FlowInExNtv,FlowOutExNtv,FlowInExUSD,FlowOutExUSD";
+
+/** 800 jours de flux exchanges BTC Coin Metrics finissant à J-1 (valeurs en chaînes, statut flash) ; dernier flux net −420 BTC. */
+function lignesFluxCm(): unknown[] {
+  const dernier = Math.floor(Date.now() / JOUR_MS) * JOUR_MS - JOUR_MS;
+  return Array.from({ length: 800 }, (_, i) => {
+    const net = i === 799 ? -420 : (i % 7) * 100 - 300;
+    const entree = 10_000 + net;
+    return {
+      asset: "btc", time: new Date(dernier - (799 - i) * JOUR_MS).toISOString(),
+      FlowInExNtv: String(entree), "FlowInExNtv-status": "flash", FlowOutExNtv: "10000", "FlowOutExNtv-status": "flash",
+      FlowInExUSD: String(entree * 60_000), FlowOutExUSD: String(10_000 * 60_000),
+    };
+  });
+}
+
 test("CHAIN : flux commun coalescé, ETF partiel, groupes différés et files ETH", async ({ page }) => {
   await bouchonnerReseau(page);
   await page.addInitScript(() => {
@@ -11,11 +28,16 @@ test("CHAIN : flux commun coalescé, ETF partiel, groupes différés et files ET
     for (const id of ["mvrv", "sopr", "nupl", "puell", "reserveRisk"])
       localStorage.setItem(`axiom:onchain:bg:${id}`, JSON.stringify({ ts: Date.now(), donnee: { points: [dernier], dernier } }));
   });
-  const bg: string[] = []; let eth = 0; let etf = 0;
+  const bg: string[] = []; let eth = 0; let etf = 0; let cmFlux = 0;
   const jour = new Date().toISOString().slice(0, 10);
+  await page.route("**/community-api.coinmetrics.io/**", route => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("assets") !== "btc" || url.searchParams.get("metrics") !== METRIQUES_FLUX_CM) return route.fallback();
+    cmFlux++;
+    return route.fulfill({ json: { data: lignesFluxCm() } });
+  });
   await page.route("**/bgapi/v1/**", route => {
     const url = new URL(route.request().url()); bg.push(url.pathname);
-    if (url.pathname.includes("exchange-")) return route.fulfill({ status: 403, json: { error: "subscription required" } });
     const champ = url.pathname.includes("realized-price-sth") ? "realizedPriceSth"
       : url.pathname.includes("realized-price-lth") ? "realizedPriceLth" : "realizedCap";
     return route.fulfill({ json: [{ unixTs: Date.now() / 1000, [champ]: 100 }] });
@@ -44,11 +66,13 @@ test("CHAIN : flux commun coalescé, ETF partiel, groupes différés et files ET
   await expect(chain).toContainText("Charger un groupe à la demande");
   await expect(chain).toContainText("Flux de capitaux alignés");
   await expect.poll(() => etf).toBe(3);
-  // Le 403 de netflow est mémorisé (24 h, même type d'accès) : reserve n'est plus demandée.
-  await expect.poll(() => bg.length).toBe(4);
+  // Le flux net des exchanges vient de Coin Metrics : BGeometrics ne sert plus que les séries réalisées.
+  await expect.poll(() => bg.length).toBe(3);
   expect(bg.map((path) => path.split("/").at(-1)).sort()).toEqual([
-    "exchange-netflow-btc", "realized-cap", "realized-price-lth", "realized-price-sth",
+    "realized-cap", "realized-price-lth", "realized-price-sth",
   ]);
+  await expect(chain).toContainText("Flux net exchanges BTC (labels Coin Metrics) · jour");
+  await expect(chain).toContainText("Labels Coin Metrics, périmètre révisable · Statut flash");
   await expect(chain).toContainText("Flux ETF ETH");
   await expect(chain).toContainText("indisponible");
 
@@ -58,14 +82,21 @@ test("CHAIN : flux commun coalescé, ETF partiel, groupes différés et files ET
   await expect(chain.getByText("Écart spot : +20.00 %").first()).toBeVisible();
   expect(bg.filter(p => p.includes("realized-price-"))).toHaveLength(2);
   await chain.getByRole("button", { name: "Exchanges", exact: true }).click();
-  await expect(chain).toContainText("abonnement BGeometrics requis");
+  await expect(chain).toContainText("z-score flux 30 j (730 j)");
+  await expect(chain).toContainText("Coin Metrics Community · labels Coin Metrics");
+  await expect(chain).toContainText("Statut flash : valeurs récentes révisables");
+  await expect(chain).not.toContainText("abonnement BGeometrics requis");
+  await expect(chain).not.toContainText("Accès avec abonnement éligible");
+  // Un seul téléchargement Coin Metrics pour la vue commune et le groupe Exchanges
+  // (coalescence en vol, puis cache 6 h de la série dérivée).
+  expect(cmFlux).toBe(1);
   await chain.getByRole("button", { name: "Capital réalisé", exact: true }).click();
   await expect(chain).toContainText("Historique insuffisant : date de référence absente");
-  // Refus d'abonnement mémorisé : même le clic explicite Exchanges ne consomme plus de
-  // requête (le message vient de la mémoire), et rien ne se répète seul entre deux actions.
-  expect(bg).toHaveLength(4);
+  // Le clic Exchanges ne consomme aucun quota BGeometrics, et rien ne se répète seul entre deux actions.
+  expect(bg).toHaveLength(3);
   await page.waitForTimeout(500);
-  expect(bg).toHaveLength(4);
+  expect(bg).toHaveLength(3);
+  expect(cmFlux).toBe(1);
   await chain.getByRole("button", { name: "Historique ETF BTC", exact: true }).click();
   await expect(chain).toContainText("-10.00 %");
   await expect(chain).toContainText("Historique insuffisant ou séance sans flux publié");
@@ -77,7 +108,7 @@ test("CHAIN : flux commun coalescé, ETF partiel, groupes différés et files ET
   expect(eth).toBe(1);
 });
 
-test("CHAIN : le groupe Exchanges réutilise les métriques communes quand leur réponse est disponible", async ({ page }) => {
+test("CHAIN : le groupe Exchanges réutilise le flux net Coin Metrics de la vue commune", async ({ page }) => {
   await bouchonnerReseau(page);
   await page.addInitScript(() => {
     localStorage.setItem("axiom:onboarding:v1", JSON.stringify({ completed: true, step: 0 }));
@@ -87,14 +118,18 @@ test("CHAIN : le groupe Exchanges réutilise les métriques communes quand leur 
     for (const id of ["mvrv", "sopr", "nupl", "puell", "reserveRisk"])
       localStorage.setItem(`axiom:onchain:bg:${id}`, JSON.stringify({ ts: Date.now(), donnee: { points: [dernier], dernier } }));
   });
-  const bg: string[] = [];
+  const bg: string[] = []; let cmFlux = 0;
+  await page.route("**/community-api.coinmetrics.io/**", route => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("assets") !== "btc" || url.searchParams.get("metrics") !== METRIQUES_FLUX_CM) return route.fallback();
+    cmFlux++;
+    return route.fulfill({ json: { data: lignesFluxCm() } });
+  });
   await page.route("**/bgapi/v1/**", route => {
     const chemin = new URL(route.request().url()).pathname;
     bg.push(chemin);
-    const champ = chemin.includes("exchange-netflow") ? "exchangeNetflowBtc"
-      : chemin.includes("exchange-reserve") ? "exchangeReserveBtc"
-        : chemin.includes("realized-price-sth") ? "realizedPriceSth"
-          : chemin.includes("realized-price-lth") ? "realizedPriceLth" : "realizedCap";
+    const champ = chemin.includes("realized-price-sth") ? "realizedPriceSth"
+      : chemin.includes("realized-price-lth") ? "realizedPriceLth" : "realizedCap";
     return route.fulfill({ json: [{ unixTs: Date.now() / 1000, [champ]: 100 }] });
   });
   await page.route("**/etfs/summary-history?*", route => route.fulfill({ json: [] }));
@@ -107,11 +142,17 @@ test("CHAIN : le groupe Exchanges réutilise les métriques communes quand leur 
   await page.getByRole("button", { name: "Fonctions" }).click();
   await page.getByRole("menuitem", { name: /On-chain/ }).click();
   const chain = page.getByRole("complementary", { name: "On-chain", exact: true });
-  await expect.poll(() => bg.length).toBe(5);
+  await expect.poll(() => bg.length).toBe(3);
+  await expect.poll(() => cmFlux).toBe(1);
+  // Observation J-1 fraîche : l'alerte flux-capitaux-seuil « exchange-netflow » devient créable.
+  await expect(chain.locator("article", { hasText: "Flux net exchanges BTC (labels Coin Metrics) · jour" })
+    .getByRole("button", { name: "Créer une alerte" })).toBeEnabled();
 
   await chain.getByRole("button", { name: "Exchanges", exact: true }).click();
-  await expect(chain).toContainText("100.00 BTC");
-  expect(bg).toHaveLength(5);
+  await expect(chain.getByText(/^[-−]420 BTC$/)).toBeVisible();
+  await expect(chain).toContainText("−$25.20M");
+  expect(cmFlux).toBe(1);
+  expect(bg).toHaveLength(3);
 });
 
 for (const [joursEtf, badgeEtf] of [[4, null], [6, "source en retard"]] as const) {

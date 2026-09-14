@@ -86,7 +86,7 @@ import {
   Vide,
 } from "./ui";
 import { QualiteMetrique } from "./QualiteMetrique";
-import { qualiteBgeometrics, qualitesCoinMetrics, traiterPublicationEtfChain, type ValeurPublicationEtf } from "../data/onchain/qualiteChain";
+import { motifPeremptionBg, qualiteBgeometrics, qualitesCoinMetrics, traiterPublicationEtfChain, type ValeurPublicationEtf } from "../data/onchain/qualiteChain";
 import {
   domainePourPreset,
   indicesVisibles,
@@ -104,6 +104,8 @@ import { Mineurs } from "./onchain/Mineurs";
 import { ActiviteDex } from "./onchain/ActiviteDex";
 
 const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
+/** Badge des tuiles Valorisation selon le motif de péremption BGeometrics. */
+const BADGE_MOTIF_BG = { cache: "cache périmé", embargo: "embargo 7 j", retard: "source en retard" } as const;
 
 // ─────────────────────────── Formatage ───────────────────────────
 // Le formatage générique (compact, USD, décimales, entiers, pourcentage, date)
@@ -535,7 +537,7 @@ export function OnchainWindow() {
           setDonnees((d) => ({ ...d, bg }));
           for (const def of BG_METRIQUES) {
             const resultat = bg[def.id] ?? null;
-            publierQualiteChain(`bg:${def.id}`, def.libelle, qualiteBgeometrics(resultat, erreur, bgHasKey || BG_CLE_ENV_PRESENTE, recupereLe));
+            publierQualiteChain(`bg:${def.id}`, def.libelle, qualiteBgeometrics(resultat, erreur, bgHasKey || BG_CLE_ENV_PRESENTE, recupereLe, def));
           }
         } else if (id === "mempool") {
           const mp = valeur as ResultatFrais<MempoolReseau> | null;
@@ -778,6 +780,7 @@ export function OnchainWindow() {
             {BG_METRIQUES.map((def) => {
               const r = donnees.bg[def.id] ?? null;
               const zone = zonePourMetrique(def.id, r?.serie.dernier?.value);
+              const motif = motifPeremptionBg(r, def);
               return (
                 <TuileStat
                   key={def.id}
@@ -797,7 +800,7 @@ export function OnchainWindow() {
                     <>
                       <span className="truncate" />
                       <span className="flex shrink-0 items-center gap-1">
-                        {r?.repli ? <Badge ton="warn">cache périmé</Badge> : r?.perime ? <Badge ton="warn">source en retard</Badge> : null}
+                        {motif ? <Badge ton="warn">{BADGE_MOTIF_BG[motif]}</Badge> : null}
                         {texteFraicheur(loading, r?.serie.dernier?.time ?? null, Date.now(), "quotidien")}
                       </span>
                     </>
@@ -859,6 +862,7 @@ export function OnchainWindow() {
               {BG_CLE_ENV_PRESENTE
                 ? `Métriques servies via la clé serveur : offre gratuite ${bgQuotaTexte}, cache 24 h. Seule une offre payante relève le quota.`
                 : `Sans clé serveur : quota IP ${bgQuotaTexte}, cache 24 h. Une clé gratuite plafonne aussi à ${BG_LIMITE_HEURE} req/heure et ${BG_LIMITE_JOUR} req/jour.`}
+              {" MVRV Z-Score, SOPR, NUPL et Puell sont servis à J-7 par l'offre gratuite (les 7 derniers jours sont réservés aux abonnés BGeometrics)."}
             </p>
           )}
           <NoteSource>

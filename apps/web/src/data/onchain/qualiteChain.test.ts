@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { qualiteBgeometrics, qualitesCoinMetrics, qualitePublicationEtf, traiterPublicationEtfChain, type ValeurPublicationEtf } from "./qualiteChain";
+import { motifPeremptionBg, qualiteBgeometrics, qualitesCoinMetrics, qualitePublicationEtf, traiterPublicationEtfChain, type ValeurPublicationEtf } from "./qualiteChain";
+import { BG_MVRV, BG_NUPL, BG_PUELL, BG_RESERVE_RISK, BG_SOPR } from "./bgeometrics";
 import { actualiserQualite, type QualiteMetrique } from "../qualiteMetrique";
 
 const JOUR = 86_400_000;
@@ -31,27 +32,79 @@ describe("publication qualité BGeometrics (Valorisation)", () => {
 
   it("source en retard : donnée récupérée maintenant, ni cache ni repli, raison datée en UTC", () => {
     // 23 h 30 UTC : le 07/09 en UTC, déjà le 08/09 à Paris.
-    const q = qualiteBgeometrics({ serie: serie(Date.UTC(2026, 8, 7, 23, 30)), ts: NOW, perime: true, repli: false }, undefined, true, NOW);
+    const q = qualiteBgeometrics({ serie: serie(Date.UTC(2026, 8, 7, 23, 30)), ts: NOW, perime: true, repli: false }, undefined, true, NOW, BG_MVRV);
     expect(q.sourceEffective).toBe("BGeometrics");
     expect(q.statut).toBe("perime");
     expect(q.raison).toBe("Dernière observation publiée par BGeometrics : 07/09/2026 (source en retard).");
     expect(q.acces).toBe("cle");
   });
 
+  it("embargo de l'offre gratuite : raison dédiée datée en UTC, source et statut inchangés", () => {
+    // 23 h 30 UTC : le 01/09 en UTC, déjà le 02/09 à Paris ; âge 7,5 j.
+    const q = qualiteBgeometrics({ serie: serie(Date.UTC(2026, 8, 1, 23, 30)), ts: NOW, perime: true, repli: false }, undefined, true, NOW, BG_MVRV);
+    expect(q.sourceEffective).toBe("BGeometrics");
+    expect(q.statut).toBe("perime");
+    expect(q.raison).toBe("Offre gratuite BGeometrics : les 7 derniers jours sont réservés aux abonnés (dernière observation accessible : 01/09/2026).");
+  });
+
   it("valeur resservie après échec : cache BGeometrics, sans raison « source en retard »", () => {
-    const q = qualiteBgeometrics({ serie: serie(NOW - JOUR), ts: NOW - 30 * 3600_000, perime: true, repli: true }, undefined, true, NOW);
+    const q = qualiteBgeometrics({ serie: serie(NOW - JOUR), ts: NOW - 30 * 3600_000, perime: true, repli: true }, undefined, true, NOW, BG_MVRV);
     expect(q.sourceEffective).toBe("cache BGeometrics");
     expect(q.statut).toBe("perime");
     expect(q.raison ?? "").not.toContain("source en retard");
   });
 
   it("frais sans raison ; absent indisponible avec motif", () => {
-    const frais = qualiteBgeometrics({ serie: serie(NOW - JOUR), ts: NOW, perime: false, repli: false }, undefined, false, NOW);
+    const frais = qualiteBgeometrics({ serie: serie(NOW - JOUR), ts: NOW, perime: false, repli: false }, undefined, false, NOW, BG_MVRV);
     expect(frais).toMatchObject({ sourceEffective: "BGeometrics", statut: "frais", acces: "public" });
     expect(frais.raison).toBeUndefined();
-    const absent = qualiteBgeometrics(null, undefined, true, NOW);
+    const absent = qualiteBgeometrics(null, undefined, true, NOW, BG_MVRV);
     expect(absent).toMatchObject({ statut: "indisponible", acces: "indisponible", recupereLe: NOW });
     expect(absent.raison).toContain("indisponible");
+  });
+});
+
+describe("motif de péremption BGeometrics (badge et raison)", () => {
+  const resultat = (ageJours: number, perime: boolean, repli = false) => {
+    const dernier = { time: NOW - ageJours * JOUR, value: 1 };
+    return { serie: { points: [dernier], dernier }, ts: NOW, perime, repli };
+  };
+
+  it("embargo posé uniquement sur MVRV Z-Score, SOPR, NUPL et Puell", () => {
+    expect([BG_MVRV, BG_SOPR, BG_NUPL, BG_PUELL].every((def) => def.embargo === true)).toBe(true);
+    expect(BG_RESERVE_RISK.embargo).toBeUndefined();
+  });
+
+  it("cache resservi : « cache », même pour une métrique sous embargo à 7 j", () => {
+    expect(motifPeremptionBg(resultat(7, true, true), BG_MVRV)).toBe("cache");
+  });
+
+  it.each([7, 8.2, 6, 9])("métrique sous embargo observée il y a %s j : « embargo »", (age) => {
+    expect(motifPeremptionBg(resultat(age, true), BG_MVRV)).toBe("embargo");
+  });
+
+  it.each([4, 12])("métrique sous embargo observée il y a %s j : « retard »", (age) => {
+    expect(motifPeremptionBg(resultat(age, true), BG_MVRV)).toBe("retard");
+  });
+
+  it("cache frais écrit avant la mise à jour de 05 h UTC, consulté 20 h 30 plus tard : toujours « embargo »", () => {
+    // Appel abouti le 15/09 à 04:30 UTC : dernier point accessible le 07/09 00:00 (8,19 j) ; consulté le 16/09 à 01:00 (9,04 j).
+    const dernier = { time: Date.UTC(2026, 8, 7), value: 1 };
+    const cacheFrais = { serie: { points: [dernier], dernier }, ts: Date.UTC(2026, 8, 15, 4, 30), perime: true, repli: false };
+    const consultation = Date.UTC(2026, 8, 16, 1, 0);
+    expect(motifPeremptionBg(cacheFrais, BG_MVRV)).toBe("embargo");
+    expect(qualiteBgeometrics(cacheFrais, undefined, true, consultation, BG_MVRV).raison).toBe(
+      "Offre gratuite BGeometrics : les 7 derniers jours sont réservés aux abonnés (dernière observation accessible : 07/09/2026).",
+    );
+  });
+
+  it("métrique sans embargo (Reserve Risk) observée il y a 7 j : « retard »", () => {
+    expect(motifPeremptionBg(resultat(7, true), BG_RESERVE_RISK)).toBe("retard");
+  });
+
+  it("donnée fraîche ou absente : aucun motif", () => {
+    expect(motifPeremptionBg(resultat(1, false), BG_MVRV)).toBeNull();
+    expect(motifPeremptionBg(null, BG_MVRV)).toBeNull();
   });
 });
 

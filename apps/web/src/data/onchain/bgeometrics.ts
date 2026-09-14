@@ -20,6 +20,8 @@
  *     ~15 req/JOUR (« x/15 j »). Une clé gratuite ne relève PAS le plafond journalier : seules
  *     les offres payantes le relèvent.
  *   - CACHE 24 h OBLIGATOIRE par métrique.
+ *   - EMBARGO (offre gratuite, depuis le 2026-09-11) : MVRV Z-Score, SOPR, NUPL et Puell
+ *     s'arrêtent à J-7 ; les 7 derniers jours sont réservés aux abonnés (défs `embargo`).
  *   - ABONNEMENT : un 403 sur une métrique `abonnement` (données d'exchanges) est mémorisé
  *     24 h en localStorage avec le seul TYPE d'accès (« perso » / « env », jamais la valeur de
  *     la clé) ; pendant ce délai, les métriques `abonnement` répondent sans appel réseau ni
@@ -80,13 +82,17 @@ export interface DefMetriqueBg {
   champ: string;
   libelle: string;
   abonnement?: boolean;
+  /** Série limitée à J-7 par l'offre gratuite (embargo payant des 7 derniers jours). */
+  embargo?: true;
 }
 
 // Défs exportées individuellement (réutilisées par la couche aux du chart, cf. auxProvider).
-export const BG_MVRV: DefMetriqueBg = { id: "mvrv", chemin: "mvrv-zscore", champ: "mvrvZscore", libelle: "MVRV Z-Score" };
-export const BG_SOPR: DefMetriqueBg = { id: "sopr", chemin: "sopr", champ: "sopr", libelle: "SOPR" };
-export const BG_NUPL: DefMetriqueBg = { id: "nupl", chemin: "nupl", champ: "nupl", libelle: "NUPL" };
-export const BG_PUELL: DefMetriqueBg = { id: "puell", chemin: "puell-multiple", champ: "puellMultiple", libelle: "Puell Multiple" };
+// Embargo en vigueur depuis le 2026-09-11 (changelog v1.7 « the most recent 7 days now require an
+// active paid subscription ») ; sonde du 2026-09-14 : `/last` répond `delayed: true`. Séries à J-7 sans abonnement.
+export const BG_MVRV: DefMetriqueBg = { id: "mvrv", chemin: "mvrv-zscore", champ: "mvrvZscore", libelle: "MVRV Z-Score", embargo: true };
+export const BG_SOPR: DefMetriqueBg = { id: "sopr", chemin: "sopr", champ: "sopr", libelle: "SOPR", embargo: true };
+export const BG_NUPL: DefMetriqueBg = { id: "nupl", chemin: "nupl", champ: "nupl", libelle: "NUPL", embargo: true };
+export const BG_PUELL: DefMetriqueBg = { id: "puell", chemin: "puell-multiple", champ: "puellMultiple", libelle: "Puell Multiple", embargo: true };
 export const BG_RESERVE_RISK: DefMetriqueBg = { id: "reserveRisk", chemin: "reserve-risk", champ: "reserveRisk", libelle: "Reserve Risk" };
 // Realized Price : prix moyen d'acquisition on-chain (USD). Overlay prix — hors panneau
 // valorisation OnchainWindow (BG_METRIQUES), consommé uniquement par la couche aux.

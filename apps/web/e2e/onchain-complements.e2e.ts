@@ -124,7 +124,8 @@ for (const [joursEtf, badgeEtf] of [[4, null], [6, "source en retard"]] as const
         const points = [3, 2, 1, 0].map((i) => ({ time: Date.now() - ageObservation - i * JOUR, value: 100 + i }));
         localStorage.setItem(`axiom:onchain:bg:${id}`, JSON.stringify({ ts: Date.now() - ageCache, donnee: { points, dernier: points.at(-1) } }));
       };
-      cache("mvrv", 0, 4 * JOUR); // récupéré à l'instant, source en retard
+      cache("mvrv", 0, 7 * JOUR); // récupéré à l'instant, embargo 7 j de l'offre gratuite
+      cache("nupl", 0, 4 * JOUR); // sous embargo mais observé il y a 4 j : source en retard
       cache("sopr", 25 * 3_600_000, 3_600_000); // cache expiré resservi après échec
       cache("etfFlow", 0, jours * JOUR); // repli ETF BTC (SoSoValue indisponible)
     }, joursEtf);
@@ -135,8 +136,13 @@ for (const [joursEtf, badgeEtf] of [[4, null], [6, "source en retard"]] as const
     const tuile = (libelle: string) =>
       chain.locator("div.flex-col", { has: page.locator("span.uppercase", { hasText: new RegExp(`^${libelle}$`) }) }).last();
 
-    await expect(tuile("MVRV Z-Score")).toContainText("source en retard");
+    await expect(tuile("MVRV Z-Score")).toContainText("embargo 7 j");
+    await expect(tuile("MVRV Z-Score")).not.toContainText("source en retard");
     await expect(tuile("MVRV Z-Score")).not.toContainText("cache périmé");
+    await expect(chain).toContainText("Offre gratuite BGeometrics : les 7 derniers jours sont réservés aux abonnés"); // raison MVRV (Qualité des blocs)
+    await expect(tuile("NUPL")).toContainText("source en retard");
+    await expect(tuile("NUPL")).not.toContainText("embargo 7 j");
+    await expect(chain).toContainText("les 7 derniers jours sont réservés aux abonnés BGeometrics");
     await expect(tuile("SOPR")).toContainText("cache périmé");
     await expect(tuile("SOPR")).not.toContainText("source en retard");
 

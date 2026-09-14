@@ -1,6 +1,6 @@
 import type { QualiteMetrique } from "../qualiteMetrique";
 import { analyserJourEtf, type ActifEtf, type EtfResultat } from "./etf";
-import type { BgResultat } from "./bgeometrics";
+import type { BgResultat, DefMetriqueBg } from "./bgeometrics";
 import type { CoinMetricsParse, CoinMetricsResultat } from "./coinmetrics";
 
 const JOUR_MS = 86_400_000;
@@ -59,15 +59,32 @@ const dateUtc = (time: number): string =>
   new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(time);
 
 /**
- * Qualité d'une tuile Valorisation BGeometrics. « cache » seulement pour une valeur resservie
- * faute d'appel abouti (`repli`) ; une donnée fraîchement récupérée mais ancienne signale une
- * source en retard, avec la date de sa dernière observation publiée. Le statut « perime » est inchangé.
+ * Motif d'affichage d'un résultat BGeometrics périmé. PURE. « cache » : valeur resservie faute
+ * d'appel abouti ; « embargo » : métrique sous embargo dont la dernière observation avait 6 à 9 jours
+ * AU MOMENT DE L'APPEL (`ts` : appel réseau ou écriture du cache frais 24 h, jamais le rendu) :
+ * J-7 livré à 00:00 UTC, mis à jour vers 05 h UTC, donc 7 à ~8,2 j à l'appel ; « retard » : tout autre âge excessif.
  */
-export function qualiteBgeometrics(resultat: BgResultat | null, erreur: string | undefined, avecCle: boolean, recupereLe: number): QualiteMetrique {
+export function motifPeremptionBg(resultat: BgResultat | null, def: DefMetriqueBg): "cache" | "embargo" | "retard" | null {
+  if (resultat === null) return null;
+  if (resultat.repli) return "cache";
+  if (!resultat.perime) return null;
+  const age = resultat.ts - (resultat.serie.dernier?.time ?? 0);
+  return def.embargo && age >= 6 * JOUR_MS && age <= 9 * JOUR_MS ? "embargo" : "retard";
+}
+
+/**
+ * Qualité d'une tuile Valorisation BGeometrics. « cache » seulement pour une valeur resservie
+ * faute d'appel abouti (`repli`) ; une donnée fraîchement récupérée mais ancienne signale l'embargo
+ * de l'offre gratuite ou une source en retard (cf. motifPeremptionBg), avec la date de sa dernière
+ * observation. Le statut « perime » est inchangé.
+ */
+export function qualiteBgeometrics(resultat: BgResultat | null, erreur: string | undefined, avecCle: boolean, recupereLe: number, def: DefMetriqueBg): QualiteMetrique {
   const dernier = resultat?.serie.dernier;
+  const motif = motifPeremptionBg(resultat, def);
   const raison = resultat === null || erreur ? erreur ?? "Métrique BGeometrics indisponible ou quota épuisé."
-    : resultat.perime && !resultat.repli && dernier ? `Dernière observation publiée par BGeometrics : ${dateUtc(dernier.time)} (source en retard).`
-      : undefined;
+    : motif === "embargo" && dernier ? `Offre gratuite BGeometrics : les 7 derniers jours sont réservés aux abonnés (dernière observation accessible : ${dateUtc(dernier.time)}).`
+      : motif === "retard" && dernier ? `Dernière observation publiée par BGeometrics : ${dateUtc(dernier.time)} (source en retard).`
+        : undefined;
   return {
     sourceId: "bgeometrics", sourceEffective: resultat?.repli ? "cache BGeometrics" : "BGeometrics",
     observeLe: dernier?.time ?? null, recupereLe: resultat?.ts ?? recupereLe, cadenceMs: JOUR_MS, ageMaxMs: 3 * JOUR_MS,

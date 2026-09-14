@@ -17,6 +17,8 @@ import { Badge, BadgeFiabilite, BarreProgression, NoteSource, TuileStat, Vide } 
 // de l'entrée (+37 o gzip mesurés), hors du budget initial de ce lot (0 octet).
 
 const JOUR_MS = 86_400_000;
+/** Part du total courant exclue du Δ à périmètre constant au-delà de laquelle on l'affiche. */
+const SEUIL_EXCLU_PCT = 1;
 const jourIso = (t: number) => (Number.isFinite(t) && t > 0 ? new Date(t).toISOString().slice(0, 10) : "—");
 
 function classeVariation(v: number | null): string {
@@ -67,6 +69,11 @@ export function VueOiPerpsDex({
   }
   const d = resultat.donnee;
   const ecartRecord = (d.niveau / d.record.valeur - 1) * 100;
+  const provisoire = jourIso(d.observation) === jourIso(Date.now());
+  const exclusions = [
+    ["7 j", d.exclu7jPct],
+    ["30 j", d.exclu30jPct],
+  ] as const;
   return (
     <div className="space-y-1.5">
       <TuileStat
@@ -82,6 +89,15 @@ export function VueOiPerpsDex({
           <span className={classeVariation(d.delta30jPct)}>30 j {formatPct(d.delta30jPct, 1)}</span>
         </span>
       </div>
+      {exclusions.map(
+        ([horizon, exclu]) =>
+          exclu !== null &&
+          exclu > SEUIL_EXCLU_PCT && (
+            <p key={horizon} className="px-1 text-[10px] text-text-dim">
+              {horizon} · périmètre constant : {formatPourcentage(exclu, 1)} du total actuel exclu (protocoles apparus)
+            </p>
+          ),
+      )}
       <div className="space-y-0.5">
         <div className="flex items-baseline justify-between gap-2 px-1 text-[11px]">
           <span className="text-text-dim">Part d'Hyperliquid Perps</span>
@@ -111,12 +127,13 @@ export function VueOiPerpsDex({
       </NoteSource>
       <NoteSource>
         OI de tous actifs (pas le seul BTC) des protocoles classés « Derivatives » par DefiLlama ;
-        exclus : marchés prédictifs, dérivés de taux, interfaces (tradeXYZ, HIP-3). Dernier point
-        = jour UTC en cours, actualisé en continu : provisoire. Périmètre DefiLlama révisable
-        (protocoles ajoutés ou reclassés) ; un protocole sans valeur un jour donné minore ce jour.
-        DefiLlama compte Hyperliquid Perps ≈ +29 % au-dessus de Σ OI × prix mark de l'API
-        Hyperliquid (mesure du 2026-09-14) : lire la part comme un ordre de grandeur. Variations
-        et record sur tout l'historique ; courbe : 120 derniers jours.
+        exclus : marchés prédictifs, dérivés de taux, interfaces (tradeXYZ, HIP-3).
+        {provisoire && " Dernier point = jour UTC en cours, actualisé en continu : provisoire."} Périmètre
+        DefiLlama révisable (protocoles ajoutés ou reclassés) ; un protocole sans valeur un jour donné
+        minore ce jour. DefiLlama compte Hyperliquid Perps ≈ +29 % au-dessus de Σ OI × prix mark de
+        l'API Hyperliquid (mesure du 2026-09-14) : lire la part comme un ordre de grandeur. Δ7j et
+        Δ30j à périmètre constant (protocoles présents aux deux dates) ; niveau, part et record :
+        total DefiLlama de chaque jour, sur tout l'historique ; courbe : 120 derniers jours.
       </NoteSource>
     </div>
   );

@@ -1,14 +1,15 @@
 /**
  * OI des perps DEX (DefiLlama `/overview/open-interest`, ventilation par protocole).
  *
- * Référence réelle (charge sondée le 2026-09-14 vers 22:26, point du jour encore en
- * cours d'actualisation) : catégorie Derivatives ≈ 23,29 Md$, Δ7j ≈ −2,5 %, Δ30j ≈ +27,7 %,
- * part d'Hyperliquid Perps ≈ 59,3 %, record 26 552 157 325 $ le 2025-10-05, soit ≈ 344 jours
- * avant le dernier point : hors des 120 points affichés. Les fixtures ci-dessous sont
- * synthétiques.
+ * Référence réelle (charge sondée le 2026-09-14 à 22:39 UTC, point du jour encore en
+ * cours d'actualisation, 80 protocoles) : catégorie Derivatives ≈ 23,18 Md$ ; Δ7j −2,96 %
+ * à périmètre constant (−2,94 % brut, 0,02 % du total exclu) ; Δ30j +22,98 % à périmètre
+ * constant contre +27,09 % brut (3,25 % du total exclu, surtout edgeX V2 apparu le
+ * 2026-08-16) ; part d'Hyperliquid Perps ≈ 59,6 % ; record 26 552 157 325 $ le 2025-10-05,
+ * hors des 120 points affichés. Les fixtures ci-dessous sont synthétiques.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NOM_HYPERLIQUID, parseOiPerpsDex, variationPct } from "./oiPerpsDex";
+import { NOM_HYPERLIQUID, observationPerimee, parseOiPerpsDex, variationPerimetreConstant } from "./oiPerpsDex";
 
 const JOUR_S = 86_400;
 /** 00:00 UTC. */
@@ -52,12 +53,40 @@ describe("parseOiPerpsDex", () => {
     const r = parseOiPerpsDex({ protocols: PROTOCOLES, totalDataChartBreakdown: ventilation(40, standard) });
     expect(r?.delta7jPct).toBeCloseTo((niveau(39) / niveau(32) - 1) * 100, 10);
     expect(r?.delta30jPct).toBeCloseTo((niveau(39) / niveau(9) - 1) * 100, 10);
+    expect(r?.exclu7jPct).toBe(0);
+    expect(r?.exclu30jPct).toBe(0);
+  });
+
+  it("Δ à périmètre constant : protocoles apparus ou disparus exclus des deux dates ; niveau et part au périmètre courant", () => {
+    const protocoles = [
+      ...PROTOCOLES,
+      { name: "edgeX V2", category: "Derivatives" },
+      { name: "edgeX Perps", category: "Derivatives" },
+    ];
+    // edgeX V2 apparaît au jour 20 (300), edgeX Perps disparaît après le jour 15 (200).
+    const migration = (i: number) => ({
+      ...standard(i),
+      ...(i >= 20 ? { "edgeX V2": 300 } : {}),
+      ...(i <= 15 ? { "edgeX Perps": 200 } : {}),
+    });
+    const r = parseOiPerpsDex({ protocols: protocoles, totalDataChartBreakdown: ventilation(40, migration) });
+    expect(r?.niveau).toBe(niveau(39) + 300);
+    expect(r?.partHyperliquidPct).toBeCloseTo((639 / 1339) * 100, 10);
+    // J-30 (jour 9) : edgeX V2 absent, edgeX Perps présent → les deux exclus.
+    expect(r?.delta30jPct).toBeCloseTo((niveau(39) / niveau(9) - 1) * 100, 10);
+    expect(r?.exclu30jPct).toBeCloseTo((300 / 1339) * 100, 10);
+    // J-7 (jour 32) : edgeX V2 présent aux deux dates → compté.
+    expect(r?.delta7jPct).toBeCloseTo((1339 / 1332 - 1) * 100, 10);
+    expect(r?.exclu7jPct).toBe(0);
+    // Le record reste au périmètre courant de chaque jour.
+    expect(r?.record).toEqual({ valeur: 1339, time: ms(39) });
   });
 
   it("Δ null si l'historique est trop court ou si le jour de base manque (jamais d'index décalé)", () => {
     const court = parseOiPerpsDex({ protocols: PROTOCOLES, totalDataChartBreakdown: ventilation(20, standard) });
     expect(court?.delta7jPct).not.toBeNull();
     expect(court?.delta30jPct).toBeNull();
+    expect(court?.exclu30jPct).toBeNull();
     const tresCourt = parseOiPerpsDex({ protocols: PROTOCOLES, totalDataChartBreakdown: ventilation(5, standard) });
     expect(tresCourt?.delta7jPct).toBeNull();
     const trou = ventilation(40, standard).filter(([ts]) => ts !== T0 + 32 * JOUR_S);
@@ -128,13 +157,28 @@ describe("parseOiPerpsDex", () => {
   });
 });
 
-describe("variationPct", () => {
-  const J = 86_400_000;
-  it("base absente ou non positive : null", () => {
-    expect(variationPct([], 7)).toBeNull();
-    expect(variationPct([{ time: 0, value: 0 }, { time: 7 * J, value: 5 }], 7)).toBeNull();
-    expect(variationPct([{ time: J, value: 2 }, { time: 7 * J, value: 5 }], 7)).toBeNull();
-    expect(variationPct([{ time: 0, value: 4 }, { time: 7 * J, value: 5 }], 7)).toBeCloseTo(25, 10);
+describe("variationPerimetreConstant", () => {
+  it("seuls les protocoles présents aux deux dates ; part du total courant exclue", () => {
+    const r = variationPerimetreConstant({ A: 5, B: 2 }, { A: 4, C: 10 });
+    expect(r?.pct).toBeCloseTo(25, 10);
+    expect(r?.excluPct).toBeCloseTo((2 / 7) * 100, 10);
+    // Valeur 0 à la base : protocole présent (valeur finie), compté.
+    expect(variationPerimetreConstant({ A: 5, B: 3 }, { A: 4, B: 0 })?.pct).toBeCloseTo(100, 10);
+  });
+
+  it("base absente ou somme commune non positive : null", () => {
+    expect(variationPerimetreConstant({ A: 5 }, undefined)).toBeNull();
+    expect(variationPerimetreConstant({ A: 5 }, { B: 4 })).toBeNull();
+    expect(variationPerimetreConstant({ A: 5 }, { A: 0 })).toBeNull();
+  });
+});
+
+describe("observationPerimee", () => {
+  const H = 3_600_000;
+  it("périmée au-delà de 2 jours seulement", () => {
+    expect(observationPerimee(0, 47 * H)).toBe(false);
+    expect(observationPerimee(0, 48 * H)).toBe(false);
+    expect(observationPerimee(0, 49 * H)).toBe(true);
   });
 });
 
@@ -156,8 +200,13 @@ describe("fetchOiPerpsDex : ventilation, cache dérivé 1 h, dégradation", () =
   beforeEach(() => {
     vi.resetModules();
     vi.stubGlobal("localStorage", stockage());
+    // Horloge 10 h après le dernier point des fixtures (observation fraîche).
+    vi.setSystemTime(ms(39) + 10 * 3_600_000);
   });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
 
   it("demande la ventilation par protocole, met en cache le résultat dérivé seulement", async () => {
     const { fetchOiPerpsDex } = await import("./oiPerpsDex");
@@ -173,17 +222,33 @@ describe("fetchOiPerpsDex : ventilation, cache dérivé 1 h, dégradation", () =
     expect(url).toContain("excludeTotalDataChart=true");
     expect(url).not.toContain("excludeTotalDataChartBreakdown");
 
-    const brut = localStorage.getItem("axiom:onchain:dex:oi-perps");
+    const brut = localStorage.getItem("axiom:onchain:dex:oi-perps:v2");
     expect(brut).not.toBeNull();
     expect(brut).not.toContain("totalDataChartBreakdown");
     expect(brut).not.toContain("Kalshi");
     expect(Object.keys((JSON.parse(brut!) as { donnee: object }).donnee).sort()).toEqual(
-      ["delta30jPct", "delta7jPct", "niveau", "observation", "partHyperliquidPct", "record", "serie"],
+      ["delta30jPct", "delta7jPct", "exclu30jPct", "exclu7jPct", "niveau", "observation", "partHyperliquidPct", "record", "serie"],
     );
 
     const r2 = await fetchOiPerpsDex();
     expect(r2?.donnee).toEqual(r?.donnee);
+    expect(r2?.perime).toBe(false);
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("observation de plus de 2 jours : périmée, au réseau comme au cache frais", async () => {
+    const { fetchOiPerpsDex } = await import("./oiPerpsDex");
+    vi.setSystemTime(ms(39) + 49 * 3_600_000);
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      Response.json({ protocols: PROTOCOLES, totalDataChartBreakdown: ventilation(40, standard) }),
+    );
+    vi.stubGlobal("fetch", fetcher);
+    const r = await fetchOiPerpsDex();
+    expect(r?.perime).toBe(true);
+    expect(r?.donnee.niveau).toBe(niveau(39));
+    const r2 = await fetchOiPerpsDex();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(r2?.perime).toBe(true);
   });
 
   it("HTTP 503 ou charge inexploitable : null sans écrire de cache", async () => {
@@ -192,7 +257,7 @@ describe("fetchOiPerpsDex : ventilation, cache dérivé 1 h, dégradation", () =
     expect(await fetchOiPerpsDex()).toBeNull();
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ totalDataChart: [] })));
     expect(await fetchOiPerpsDex()).toBeNull();
-    expect(localStorage.getItem("axiom:onchain:dex:oi-perps")).toBeNull();
+    expect(localStorage.getItem("axiom:onchain:dex:oi-perps:v2")).toBeNull();
   });
 
   it("source en échec : le cache périmé est resservi, étiqueté périmé", async () => {
@@ -203,11 +268,13 @@ describe("fetchOiPerpsDex : ventilation, cache dérivé 1 h, dégradation", () =
       observation: 1,
       delta7jPct: null,
       delta30jPct: null,
+      exclu7jPct: null,
+      exclu30jPct: null,
       partHyperliquidPct: null,
       record: { valeur: 3, time: 1 },
       serie: [],
     };
-    localStorage.setItem("axiom:onchain:dex:oi-perps", JSON.stringify({ donnee, ts: 0 }));
+    localStorage.setItem("axiom:onchain:dex:oi-perps:v2", JSON.stringify({ donnee, ts: 0 }));
     const r = await fetchOiPerpsDex();
     expect(r?.perime).toBe(true);
     expect(r?.donnee).toEqual(donnee);

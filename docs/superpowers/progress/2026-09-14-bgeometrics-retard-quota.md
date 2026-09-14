@@ -48,6 +48,8 @@ incrément/effacement ; réordonnancement netflow/reserve dans `fluxCapitaux.ts`
 
 ## Limites connues
 
+- Compteur client figé sur l'offre gratuite (10 req/heure, 15 req/jour) pour toute clé : une clé
+  personnelle d'offre payante resterait bridée côté client (déjà vrai pour l'horaire, accentué par le plafond journalier).
 - DataWindow : la jauge de quota ne lit que la fenêtre principale (texte correct, barre horaire).
 - Clé serveur remplacée côté Vercel : une mémoire `env` reste valide jusqu'à 24 h.
 - Course entre onglets sur la mémoire d'abonnement : fenêtre réduite, non fermée (pas de verrou localStorage).

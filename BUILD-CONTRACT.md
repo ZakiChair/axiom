@@ -47,7 +47,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 - **Daemon** `axiomd` : proxy+cache SQLite, KV/snapshots, candles, alertes (macOS + Telegram), replay dumps Binance, couches GDELT/UCDP, LIQHL Hyperliquid paresseux, collecteur whales (blocs confirmés blockchain.info + Etherscan stables, table `whale_moves`, rétention 30 j). Bind `127.0.0.1:8787`, whitelist `/extapi`, garde Host/Origin/DNS-rebinding.
 - **Vercel** : front + proxy serverless sans secret partagé, whitelist/MIME/DNS durcis. Les clés personnelles restent dans le navigateur. **Exception ACTÉE le 2026-09-14** (demande utilisateur, test communautaire) : une seule variable serveur, `BGEOMETRICS_API_KEY`, portée par `api/proxy.ts` vers bitcoin-data.com quand le client n'envoie aucune clé — clé gratuite et révocable, plafonds de l'offre gratuite (10 req/heure et 15 req/jour) partagés par les visiteurs, jamais exposée au navigateur ; toute autre clé reste personnelle (test structurel `apps/daemon/src/vercelProxy.test.ts`). Toute fonction strictement locale est marquée `UNUSABLE`, toute fenêtre partielle `PARTIAL` ; jamais de pane muet.
 - **Paper trading** (`PAPER`) : moteur de simulation locale présent, hors gate G100.
-- **Gate G100** : code-complete, e2e partiellement automatisés, **verdict manuel ouvert** (voir `docs/superpowers/plans/2026-07-22-gate-g100-qa.md` et plan d'action 2026-08-24). **Aucune nouvelle fenêtre ni fonctionnalité de surface avant le verdict** — sept exceptions ACTÉES : le 2026-08-25 (fenêtre WHALES + alerte `whale-flux`, demande utilisateur explicite), le 2026-09-01 (fenêtre BPL + séries TOTAL/TOTAL2/TOTAL3 chartables, chantier CAP/BPL demandé par l'utilisateur) le 2026-09-02 (lot v2.7 « Décider » : alerte composite, backtest en R, coût d'exécution DOM — aucune fenêtre, aucun fournisseur, aucun indicateur, spec `docs/superpowers/specs/2026-09-02-lot-v27-decider-design.md`) et le 2026-09-04 (catalogue positionnement/orderflow et PLAY-POS, cf. Conventions), et le 2026-09-06 (onglet « Indicateurs » de la fenêtre RATE + trois fournisseurs statistiques publics sans clé — OCDE, Eurostat, ONS — au titre du remplacement des miroirs FRED internationaux démantelés ; spec `docs/superpowers/specs/2026-09-06-indicateurs-macro-mondiaux-design.md`), et le 2026-09-07 (fenêtre BPL : horizon de projection porté à +50 ans et navigation zoom/pan du graphe ; synchronisation des vues de la grille multi-chart — unités de temps, zoom/défilement, réticule — plan `docs/superpowers/plans/2026-09-07-synchronisation-multivue.md` ; demandes utilisateur explicites — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau), et le 2026-09-14 (fenêtre BT : section « Tenue par moitié » — découpage walk-forward de lecture du run exécuté, `partagerResultatMoities` dans `@axiom/backtest`, frontière tracée sur l'équité ; excursions MAE/MFE par trade calculées par le moteur sur les barres détenues, colonnes de la table et moyennes de la grille ; demande utilisateur « nouvelle fonction pertinente » — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau ; puis, le même jour, lot ON-CHAIN sur demande utilisateur « nouvelle fonction pertinente on-chain » + « Go » : sections « Mineurs » (Hash Ribbons SMA 30/60 j, hashprice) et « Activité DEX » (volume DEX 24 h, part du volume total) et tuile « Thermocap multiple » dans la fenêtre CHAIN, alerte globale `onchain-seuil` front-only sur six métriques quotidiennes — aucune fenêtre, aucun fournisseur (hôtes déjà autorisés : mempool.space, blockchain.info, Coin Metrics community, DefiLlama, CoinGecko), aucun indicateur graphique nouveau) ; le gel reste la règle pour toute autre surface.
+- **Gate G100** : code-complete, e2e partiellement automatisés, **verdict manuel ouvert** (voir `docs/superpowers/plans/2026-07-22-gate-g100-qa.md` et plan d'action 2026-08-24). **Aucune nouvelle fenêtre ni fonctionnalité de surface avant le verdict** — sept exceptions ACTÉES : le 2026-08-25 (fenêtre WHALES + alerte `whale-flux`, demande utilisateur explicite), le 2026-09-01 (fenêtre BPL + séries TOTAL/TOTAL2/TOTAL3 chartables, chantier CAP/BPL demandé par l'utilisateur) le 2026-09-02 (lot v2.7 « Décider » : alerte composite, backtest en R, coût d'exécution DOM — aucune fenêtre, aucun fournisseur, aucun indicateur, spec `docs/superpowers/specs/2026-09-02-lot-v27-decider-design.md`) et le 2026-09-04 (catalogue positionnement/orderflow et PLAY-POS, cf. Conventions), et le 2026-09-06 (onglet « Indicateurs » de la fenêtre RATE + trois fournisseurs statistiques publics sans clé — OCDE, Eurostat, ONS — au titre du remplacement des miroirs FRED internationaux démantelés ; spec `docs/superpowers/specs/2026-09-06-indicateurs-macro-mondiaux-design.md`), et le 2026-09-07 (fenêtre BPL : horizon de projection porté à +50 ans et navigation zoom/pan du graphe ; synchronisation des vues de la grille multi-chart — unités de temps, zoom/défilement, réticule — plan `docs/superpowers/plans/2026-09-07-synchronisation-multivue.md` ; demandes utilisateur explicites — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau), et le 2026-09-14 (fenêtre BT : section « Tenue par moitié » — découpage walk-forward de lecture du run exécuté, `partagerResultatMoities` dans `@axiom/backtest`, frontière tracée sur l'équité ; excursions MAE/MFE par trade calculées par le moteur sur les barres détenues, colonnes de la table et moyennes de la grille ; demande utilisateur « nouvelle fonction pertinente » — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau ; puis, le même jour, lot ON-CHAIN sur demande utilisateur « nouvelle fonction pertinente on-chain » + « Go » : sections « Mineurs » (Hash Ribbons SMA 30/60 j, hashprice) et « Activité DEX » (volume DEX 24 h, part du volume total) et tuile « Thermocap multiple » dans la fenêtre CHAIN, alerte globale `onchain-seuil` front-only sur six métriques quotidiennes — aucune fenêtre, aucun fournisseur (hôtes déjà autorisés : mempool.space, blockchain.info, Coin Metrics community, DefiLlama, CoinGecko), aucun indicateur graphique nouveau ; enfin, le même jour, chantier « indicateurs gratuits vérifiés » sur « Go pour tous les lots » du propriétaire après recherche sondée — cf. section « Chantier autorisé le 14 septembre 2026 » — aucune fenêtre, aucun fournisseur, aucun hôte, aucun indicateur graphique nouveau) ; le gel reste la règle pour toute autre surface.
 
 ## Jalons historiques (atteints — ne pas rejouer, ne pas prendre comme périmètre actuel)
 - **M1 — Chart live** (`apps/web`) : Vite+React+TS+Tailwind ; client WS Binance + backfill REST ; rendu KLineChart live ; sélecteur symbole + timeframe ; crosshair. Store marché vanilla. **Atteint.**
@@ -158,3 +158,41 @@ FRED existante reste requise. Aucun nouveau fournisseur, proxy, backend,
 dépendance ou fenêtre. Voir le
 [plan et les sources](docs/superpowers/plans/2026-09-11-cycle-dette-long-terme.md)
 et le [rapport de vérification](docs/superpowers/progress/2026-09-11-cycle-dette-long-terme.md).
+
+## Chantier autorisé le 14 septembre 2026
+
+Le propriétaire a donné son « Go pour tous les lots » après une recherche
+sondée : requêtes HTTP réelles sans clé, vérification adversariale de chaque
+candidat, douze fonctions retenues. Le chantier étend UNIQUEMENT des surfaces
+existantes : chart maître (bandes de mouvement attendu implicite, niveaux clés
+périodiques, niveaux d'options, ligne « Coût Strategy » — couches chargées à la
+demande, chart maître seulement), OMON (options IBIT/ETHA du CBOE, mouvement
+attendu par échéance, probabilités implicites, vol forward d'événement), TERM
+(portage excédentaire basis − T-bill US), CYCLE (distance à l'ATH, modèles de
+prix, correctifs du sommet des cycles passés et du repli MVRV), CHAIN (réseau
+ETH et flux nets BTC des exchanges via Coin Metrics community, trésoreries
+d'entreprises CoinGecko) et DES (open interest des perps DEX, DefiLlama).
+**39 fenêtres, 189 indicateurs, 9 identifiants de marché, `@axiom/types`
+inchangé, aucune dépendance.**
+
+Aucun hôte nouveau : `cdn.cboe.com`, `www.deribit.com`, `api.binance.com`,
+`community-api.coinmetrics.io`, `api.coingecko.com`, `api.llama.fi` et
+`home.treasury.gov` sont déjà autorisés (liste `/extapi` ou appel direct à CORS
+ouvert). Décisions du propriétaire : Coin Metrics community est admis pour le
+réseau ETH (BGeometrics n'a pas d'ETH) et pour les **flux** nets BTC des
+exchanges ; la réserve BTC des exchanges n'est pas affichée (dérive du périmètre
+d'adresses). La règle « aucun substitut Coin Metrics » reste entière pour
+MVRV-Z, SOPR, NUPL et Puell BTC, et CYCLE perd son repli `CapMVRVCur`.
+
+Les limites sont affichées, jamais corrigées en silence : mouvement attendu et
+probabilités = mesures risque-neutres, pas des prévisions ; options IBIT/ETHA
+différées et fermées hors séance US ; avoirs des trésoreries non horodatés ; OI
+DEX tous actifs, compté ≈ +29 % au-dessus de l'API Hyperliquid ; données Coin
+Metrics « flash » révisables. Restent exclus sans nouvel amendement : l'OI
+agrégé multi-venues (AggregationEngine interdit) et tout remplacement des
+séries BGeometrics.
+
+Le budget initial reste bloquant (1 220 000 octets bruts, 360 000 gzip ; marge
+de départ 9 249 bruts et 3 179 gzip) : toute logique nouvelle vit dans des
+chunks chargés à la demande. Voir le
+[plan](docs/superpowers/plans/2026-09-14-indicateurs-gratuits.md).

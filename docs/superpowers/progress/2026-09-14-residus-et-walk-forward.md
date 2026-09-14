@@ -74,4 +74,101 @@ Exception G100 consignée dans `BUILD-CONTRACT.md` (septième).
 - Les deux lots restaurés reprennent les preuves du 7 septembre (plan multivue,
   mémoire de session BPL) ; ils ont été revalidés par la CI et les parcours e2e
   d'aujourd'hui, pas réinspectés à l'œil.
-- Aucun push, aucun déploiement. G100 manuel toujours ouvert.
+- À cette première clôture : aucun push, aucun déploiement (voir la suite du même
+  jour ci-dessous). G100 manuel toujours ouvert.
+
+## Suite du même jour : MAE/MFE, budget de la CI GitHub et déploiement
+
+Demande du propriétaire : continuer d'améliorer l'outil, intégrer dans `main`,
+redéployer sur Vercel. Il n'y avait aucune branche à fusionner : les commits
+étaient déjà sur `main`, ils ont été poussés sur `origin/main`.
+
+### Excursions MAE / MFE (`f0eb0f8`)
+
+Dernière brique manquante du lot « vérité du backtest » (revue du 20 août). Le
+moteur calcule pour chaque trade la pire excursion adverse (MAE, ≤ 0) et la
+meilleure excursion favorable (MFE, ≥ 0), en % du prix d'entrée, sur les barres
+réellement détenues : la barre de fill d'une sortie ordinaire est exclue (sortie
+à son open), la dernière barre d'une sortie fin-donnees est incluse (marquée à
+son close) ; long et short symétriques, bornes à 0. Cinq tests à valeurs
+calculées à la main dans `engine.test.ts` ; `calculerStats` expose les moyennes.
+La fenêtre BT ajoute deux colonnes triables à la table des trades et une ligne
+de moyennes sous les gains/pertes ; le parcours e2e du backtest vérifie la
+section walk-forward, les colonnes et la ligne de moyennes.
+
+### Budget JS de la CI GitHub (`f21f44e`)
+
+Le run GitHub du premier push (`34814380665`) a échoué à l'étape « build web et
+budget JS initial » : **360 051 octets gzip pour un plafond de 360 000**, alors
+que le même arbre mesurait 358 677 en local et 357 309 sous le bundler Vercel.
+Le zlib du runner Linux produit environ 1,4 ko de plus que celui de macOS, et le
+lot multivue restauré (+3 840 octets bruts dans le chunk d'entrée) avait consommé
+la marge. Le run précédent sur `main` (`34458925098`, 10 septembre) échouait
+déjà, à l'étape Playwright.
+
+Correctif sans toucher au plafond, après classement des sources du chunk
+d'entrée par `vite build --sourcemap` :
+
+| Mesure | Bruts | Gzip |
+|---|---|---|
+| Avant (local, `f0eb0f8`) | 1 213 645 | 358 677 |
+| `demarrerSyncTimeframes` extrait dans `store/chart-sync-timeframes.ts`, chargé à la demande par ChartGrid | 1 212 285 | 358 226 |
+| + composant de spike M4 chargé paresseusement depuis `main.tsx` | 1 205 821 | 355 531 |
+| Bundler Vercel, même arbre | | 354 110 |
+
+Leçon consignée : viser au moins 3 ko de marge locale sous le plafond gzip, la
+CI GitHub étant le juge de paix.
+
+### Déploiements Vercel
+
+Chemin retenu : `vercel pull --environment=production`, `vercel build --prod`
+puis `vercel deploy --prebuilt --prod`. Seule la sortie `.vercel/output` est
+envoyée : aucun `.env`, aucune base locale, aucun worktree — la copie filtrée
+du 11 septembre n'est plus nécessaire. Aucun avertissement TS2550 dans les deux
+builds (correctif `313ed62` sur le chemin Vercel).
+
+| Déploiement | Commit | ID | Statut |
+|---|---|---|---|
+| 08:40 | `f0eb0f8` | `dpl_XuViDuuaRSyUTTMLcxUWuF22VW22` | Ready, alias attaché, remplacé |
+| 08:51 | `f21f44e` | `dpl_8sN8LW2iZ5DioASMMSvJSte6ET48` | Ready, alias attaché, remplacé |
+| 09:08 | `9e10a38` | `dpl_G24oKoLxwHNppb75MnjjYwQQBFE9` | Ready, alias attaché, **courant** |
+
+Alias : [AXIOM](https://axiom-iota-vert.vercel.app). Contrôles après
+publication du deuxième déploiement : alias HTTP 200 ; script d'entrée servi
+`index-CPkA4IxH.js` identique au build local ; chunks paresseux
+`chart-sync-timeframes` et `WebGLSyncSpike` présents ; proxy FRED sur
+`/fredapi/fred/series/observations` : HTTP 400 de l'amont (clé absente), donc
+fonction et module partagé opérationnels. Sur le premier déploiement, parcours
+réel dans Chrome : ⌘K → BT, preset « Croisement EMA 9/21 » sur Binance live
+(BTCUSDT 1 h, 6 mois, 98 trades, PnL −100,96) : section « Tenue par moitié »
+identique au relevé local (51/47 trades, −1,36 % / +0,35 %), MAE moyenne
+−0,90 %, MFE moyenne +1,63 %, colonnes MAE/MFE présentes. Le second déploiement
+ne change que le découpage des chunks ; il a été contrôlé par les vérifications
+HTTP ci-dessus, pas rejoué dans Chrome.
+
+Le troisième déploiement (`9e10a38`, script d'entrée `index-1j-O6e-y.js`
+identique au build local, alias HTTP 200, proxy FRED HTTP 400 amont) ne porte
+que le correctif de l'avis de catalogue ci-dessous.
+
+### Parcours hermétiques sur GitHub (`9e10a38`)
+
+Le run du second push (`34815169456`) a passé le budget (l'étape « build web et
+budget JS initial » est verte) mais a échoué à l'étape « e2e hermétiques » sur
+deux causes propres au runner Linux, toutes deux antérieures à la session (le
+run du 10 septembre échouait déjà à cette étape) :
+
+- `macro-globale.e2e.ts` écrivait deux captures dans `/private/tmp/…`, un chemin
+  qui n'existe que sur macOS (ENOENT sur Linux) → dossier de sortie Playwright du
+  test (`test.info().outputPath`).
+- `gate-v25-cap-dominance.e2e.ts` ne pouvait pas cliquer l'option TOTAL3 : sans
+  accès à `api.binance.com` (bloqué géographiquement depuis les runners US), la
+  recherche de paire affiche « Catalogue indisponible » **par-dessus la liste
+  d'options**, et cet avis interceptait les clics. Défaut produit réel : sans
+  catalogue, les symboles de capitalisation n'étaient plus sélectionnables à la
+  souris. L'avis est désormais `pointer-events-none` (reproduit et prouvé en local
+  avec `exchangeInfo` en HTTP 451, parcours jetable non conservé) et le parcours
+  bouchonne `exchangeInfo` pour rester hermétique.
+
+Run GitHub Actions du troisième push : `34816202729`, **succès** en 5 min 16 s
+(typecheck, tests daemon/paquets/web, build et budget, 51 parcours hermétiques).
+Premier run vert sur `main` depuis au moins le 10 septembre.

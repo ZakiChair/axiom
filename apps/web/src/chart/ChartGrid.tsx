@@ -29,7 +29,7 @@ import {
   type ChartLayoutMode,
 } from "../store/chart-layout";
 import { replayStore } from "../store/replay";
-import { demarrerSyncTimeframes, masterLinkSource, propagerMarche } from "../store/chart-linking";
+import { masterLinkSource, propagerMarche } from "../store/chart-linking";
 import { demarrerSyncFenetres } from "../store/sync";
 import { setFocusChart } from "./drawing";
 import { Chart } from "./Chart";
@@ -66,7 +66,20 @@ export function ChartGrid() {
   }
   const stores = storesRef.current;
 
-  useEffect(() => demarrerSyncTimeframes(), []);
+  // Liaison des unités chargée à la demande : hors du chargement initial (budget JS
+  // d'entrée) ; l'alignement depuis le focus se fait dès l'arrivée du module.
+  useEffect(() => {
+    let arreter: (() => void) | null = null;
+    let demonte = false;
+    void import("../store/chart-sync-timeframes").then(({ demarrerSyncTimeframes }) => {
+      if (demonte) return;
+      arreter = demarrerSyncTimeframes();
+    });
+    return () => {
+      demonte = true;
+      arreter?.();
+    };
+  }, []);
 
   // Config déclarative (chart-layout) → store local de chaque secondaire (ne pousse que
   // les champs modifiés → n'induit une ré-init de ChartInstance que si nécessaire).

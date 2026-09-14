@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ExchangeId } from "@axiom/types";
 import { chartLayoutStore } from "./chart-layout";
-import { demarrerSyncTimeframes } from "./chart-linking";
+import { demarrerSyncTimeframes } from "./chart-sync-timeframes";
 import { marketIdentity, marketStore } from "./market";
 import { replayStore } from "./replay";
 

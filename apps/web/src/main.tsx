@@ -1,8 +1,7 @@
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { WebGLSyncSpike } from "./spike/WebGLSyncSpike";
 import { enablePersistence, hydrateStores } from "./store/persist";
 import { startMacroHistoryPolling } from "./store/macroHistory";
 import { seedMacroHistoryFromPersistedMcap } from "./store/mcap";
@@ -32,13 +31,23 @@ const rootElement = document.getElementById("root");
 if (!rootElement) throw new Error("Élément #root introuvable dans index.html");
 
 // Montage isolé du SPIKE M4 : http://localhost:5173/#spike monte <WebGLSyncSpike/>,
-// sinon l'app normale. Branchement minimal volontaire (ne touche à rien d'autre).
+// sinon l'app normale. Chargé à la demande : le spike ne pèse pas sur le chargement
+// initial de l'application (budget JS d'entrée).
 const isSpike = window.location.hash === "#spike";
+const WebGLSyncSpike = lazy(() =>
+  import("./spike/WebGLSyncSpike").then((m) => ({ default: m.WebGLSyncSpike })),
+);
 
 createRoot(rootElement).render(
   <StrictMode>
     <ErrorBoundary scope="AXIOM">
-      {isSpike ? <WebGLSyncSpike /> : <App />}
+      {isSpike ? (
+        <Suspense fallback={null}>
+          <WebGLSyncSpike />
+        </Suspense>
+      ) : (
+        <App />
+      )}
     </ErrorBoundary>
   </StrictMode>
 );

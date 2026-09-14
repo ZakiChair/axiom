@@ -147,6 +147,10 @@ test("CYCLE : distance à l'ATH alignée sur le pic et repli au même J+N depuis
   await expect(ligne("Cycle 2020")).toContainText("-74.3 %");
   await expect(ligne("Cycle 2024")).toContainText("-38.5 %");
   await expect(ligne("Cycle 2024")).toContainText("max -53.1 %");
+  // Les 4 lignes tiennent sans défilement interne : la sous-ligne « max » ne coupe pas le cycle courant.
+  const corps = table.getByRole("rowgroup");
+  const hauteurs = await corps.evaluate((e) => ({ visible: e.clientHeight, contenu: e.scrollHeight }));
+  expect(hauteurs.contenu).toBeLessThanOrEqual(hauteurs.visible + 1);
 
   // Aucune projection des cycles passés sur le courant ; le chart garde sa hauteur (le corps défile).
   await expect(fenetre).not.toContainText("fenêtre des planchers");
@@ -172,6 +176,9 @@ test("CYCLE : modèles de prix (multiple 200 semaines, prix / SMA 2 ans, Pi Cycl
   await expect(pi).toContainText("dernier signal 2026-07-05");
   await expect(section).toContainText("n = 4 signaux");
   await expect(section).toContainText("2022-07-26 → 2023-04-01");
+  // Note tirée des épisodes : signal 2022 présent ; l'épisode du 2026-07-05 tombe 5 j après le plus bas.
+  await expect(section).toContainText("celui de 2022 précédait le creux de 4 mois");
+  await expect(section).not.toContainText("a pas été signalé");
   await expect(section).toContainText("ne prévoit");
   await expect(section).not.toContainText("5×");
 
@@ -179,4 +186,20 @@ test("CYCLE : modèles de prix (multiple 200 semaines, prix / SMA 2 ans, Pi Cycl
   expect((await fenetre.locator("canvas").boundingBox())!.height).toBeGreaterThanOrEqual(200);
   expect(metriquesCm.length).toBeGreaterThan(0);
   expect(metriquesCm.every((m) => m === "PriceUSD")).toBe(true);
+});
+
+test.describe("à l'ouest d'UTC", () => {
+  test.use({ timezoneId: "America/New_York" });
+
+  test("CYCLE : date du sommet en UTC, identique à la note des pics quotidiens", async ({ page }) => {
+    await preparer(page);
+    const fenetre = await ouvrirCycle(page);
+    const table = fenetre.getByRole("table", { name: "Cycles BTC" });
+    const ligne = (cycle: string): Locator => table.getByRole("row").filter({ hasText: cycle });
+    await expect(ligne("Cycle 2020")).toContainText("546 j");
+    await expect(ligne("Cycle 2012")).toContainText("04/12");
+    await expect(ligne("Cycle 2016")).toContainText("16/12");
+    await expect(ligne("Cycle 2020")).toContainText("08/11");
+    await expect(fenetre).toContainText("2013-12-04, 2017-12-16, 2021-11-08");
+  });
 });

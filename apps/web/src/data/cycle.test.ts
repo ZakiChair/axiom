@@ -178,9 +178,16 @@ describe("statsCycle — cycle clos : sommet = plus haut précédant le repli ma
     const s = statsCycle(cycle2020, true);
     expect(s.topJour).toBe(546);
     expect(s.topIndice).toBeCloseTo(7.86, 10);
-    // Dernier point au-dessus du sommet retenu : repli POSITIF (7,42 / 7,86 − 1).
+    // Dernier point sous le sommet retenu : −5,6 % (7,42 / 7,86 − 1).
     expect(s.drawdownDepuisTopPct).toBeCloseTo((7.42 / 7.86 - 1) * 100, 6);
     expect(s.jourCourant).toBe(1439);
+  });
+
+  it("cycle clos fini au-dessus du sommet d'avant le creux : écart POSITIF", () => {
+    const s = statsCycle(formeCycle([[0, 1], [100, 5], [200, 2], [300, 6]]), true);
+    expect(s.topJour).toBe(100);
+    expect(s.topIndice).toBe(5);
+    expect(s.drawdownDepuisTopPct).toBeCloseTo(20, 10);
   });
 
   it("cycle courant (clos = false, défaut) : sommet = maximum courant", () => {

@@ -52,7 +52,6 @@ afterEach(() => {
   cycleStore.setState({
     enCours: false,
     series: [],
-    points: [],
     ath: null,
     modeles: null,
     mayer: null,
@@ -102,14 +101,15 @@ describe("cycleStore — MVRV Z-Score (BGeometrics seul)", () => {
 });
 
 describe("cycleStore — distance à l'ATH (calculée dans run)", () => {
-  it("expose les points bruts et la distance à l'ATH ; un pic passé hors données reste null", async () => {
+  it("expose la distance à l'ATH sans conserver l'historique brut ; un pic passé hors données reste null", async () => {
     bg.mockResolvedValue(null);
     await cycleStore.getState().run(true);
     const etat = cycleStore.getState();
+    // Aucun consommateur de l'historique brut : il n'est pas gardé dans l'état.
+    expect(etat).not.toHaveProperty("points");
     // historique() croît : ATH au dernier point, aucun pic passé couvert par les données.
-    expect(etat.points).toHaveLength(300);
     expect(etat.ath).not.toBeNull();
-    expect(etat.ath!.athMs).toBe(etat.points[299]!.time);
+    expect(etat.ath!.athMs).toBe(Date.UTC(2024, 3, 20) + 299 * JOUR);
     expect(etat.ath!.joursDepuisAth).toBe(0);
     expect(etat.ath!.repliMaxPct).toBe(0);
     expect(etat.ath!.cyclesPasses).toEqual({ 1: null, 2: null, 3: null });

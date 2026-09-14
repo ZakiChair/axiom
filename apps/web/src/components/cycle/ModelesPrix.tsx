@@ -13,6 +13,7 @@ import {
   PI_COEFFICIENT,
   PI_EMA_JOURS,
   PI_SMA_JOURS,
+  type EpisodePiCycle,
   type ModelesPrix,
   type RatioMoyenne,
   type SequenceRatio,
@@ -22,6 +23,16 @@ import { Badge, NoteSource, TitreSection, TuileStat } from "../ui";
 
 /** Date ISO UTC « AAAA-MM-JJ » (points PriceUSD datés à 00:00 UTC, lisible sans fuseau). */
 const dateIso = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+
+/** Tolérance autour d'un épisode Pi Cycle Bottom pour le dire proche du plus bas (30 j). */
+const TOLERANCE_SIGNAL_MS = 30 * 86_400_000;
+
+/** true si le plus bas tombe dans un épisode à 30 j près (épisode en cours : ouvert à droite). */
+function plusBasSignale(episodes: readonly EpisodePiCycle[], plusBasMs: number): boolean {
+  return episodes.some(
+    (e) => e.entreeMs - TOLERANCE_SIGNAL_MS <= plusBasMs && plusBasMs <= (e.sortieMs ?? Infinity) + TOLERANCE_SIGNAL_MS,
+  );
+}
 
 /** Côté de la moyenne en toutes lettres. */
 const cote = (s: SequenceRatio): string => (s.sens === "dessus" ? "au-dessus" : "en dessous");
@@ -37,7 +48,11 @@ function detailRatio(libelle: string, r: RatioMoyenne): string {
   return `${libelle} ${formatEntier(r.moyenne)} $${pct} · ${cote(r.sequence)} depuis le ${dateIso(r.sequence.depuisMs)}`;
 }
 
-export function VueModelesPrix({ modeles }: { modeles: ModelesPrix | null }) {
+/**
+ * `plusBasMs` : date du plus bas quotidien depuis l'ATH (tuile « Repli max depuis l'ATH »), null sans
+ * repli. Il sert seulement à dire, d'après les épisodes, si ce plus bas a été signalé.
+ */
+export function VueModelesPrix({ modeles, plusBasMs }: { modeles: ModelesPrix | null; plusBasMs: number | null }) {
   const m200 = modeles?.multiple200Semaines ?? null;
   const m2ans = modeles?.ratio2Ans ?? null;
   const pi = modeles?.piCycleBottom ?? null;
@@ -49,8 +64,13 @@ export function VueModelesPrix({ modeles }: { modeles: ModelesPrix | null }) {
     .filter((t) => t !== null)
     .join("\n");
 
-  // Croisements historiques lus dans les données ; le contexte (calage, 2022, 2026) est documenté.
+  // Croisements historiques lus dans les données ; chaque clause de contexte n'apparaît que si les
+  // épisodes la confirment (signal 2022 présent ; aucun épisode à 30 j ou moins du plus bas).
   const signaux = pi?.episodes ?? [];
+  const contexte = [
+    signaux.some((e) => new Date(e.entreeMs).getUTCFullYear() === 2022) ? "celui de 2022 précédait le creux de 4 mois" : null,
+    plusBasMs !== null && !plusBasSignale(signaux, plusBasMs) ? `le plus bas du ${dateIso(plusBasMs)} n'a pas été signalé` : null,
+  ].filter((c) => c !== null);
   const notePi =
     pi === null
       ? ""
@@ -58,7 +78,7 @@ export function VueModelesPrix({ modeles }: { modeles: ModelesPrix | null }) {
           signaux.length > 0
             ? ` (${signaux.map((e) => `${dateIso(e.entreeMs)} → ${e.sortieMs !== null ? dateIso(e.sortieMs) : "en cours"}`).join(" · ")})`
             : ""
-        } ; celui de 2022 précédait le creux de 4 mois, le plus bas du 2026-06-30 n'a pas été signalé`;
+        }${contexte.length > 0 ? ` ; ${contexte.join(", ")}` : ""}`;
 
   const dernierEpisode = signaux.at(-1);
 

@@ -19,7 +19,7 @@ import { createStore } from "zustand/vanilla";
 import { decouperCycles, mayerMultiple, type SerieCycle } from "../data/cycle";
 import { distanceAth, type DistanceAth } from "../data/cycleAth";
 import { calculerModelesPrix, type ModelesPrix } from "../data/modelesPrix";
-import { fetchCoinMetricsPriceUSDComplet, type PointMetrique } from "../data/onchain/coinmetrics";
+import { fetchCoinMetricsPriceUSDComplet } from "../data/onchain/coinmetrics";
 import { fetchMempoolReseau, type Halving } from "../data/onchain/mempool";
 import { BG_MVRV, fetchBgeometricMetrique, type BgResultat } from "../data/onchain/bgeometrics";
 import { getBgeometricsKey } from "./onchain";
@@ -32,8 +32,6 @@ export interface CycleState {
   enCours: boolean;
   /** Les 4 cycles alignés jour-0 (source unique du chart et du tableau). */
   series: SerieCycle[];
-  /** Historique PriceUSD brut (quotidien, 00:00 UTC) du dernier run réussi. */
-  points: PointMetrique[];
   /** Distance à l'ATH et repli au même J+N depuis les pics passés, null si aucun prix exploitable. */
   ath: DistanceAth | null;
   /** Multiple 200 semaines, prix / SMA 2 ans et Pi Cycle Bottom ; null avant le premier run réussi. */
@@ -75,7 +73,6 @@ async function chargerMvrv(signal?: AbortSignal): Promise<BgResultat | null> {
 export const cycleStore = createStore<CycleState>((set, get) => ({
   enCours: false,
   series: [],
-  points: [],
   ath: null,
   modeles: null,
   mayer: null,
@@ -136,7 +133,6 @@ export const cycleStore = createStore<CycleState>((set, get) => ({
     set({
       enCours: false,
       series,
-      points: resultat.points,
       ath,
       modeles,
       mayer,

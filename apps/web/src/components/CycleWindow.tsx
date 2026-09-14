@@ -45,6 +45,12 @@ const JOUR_MS = 86_400_000;
 /** Date ISO UTC « AAAA-MM-JJ » (points PriceUSD datés à 00:00 UTC, lisible sans fuseau). */
 const dateIso = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 
+/** Date courte UTC « JJ/MM » : même jour que les dates ISO de la note, quel que soit le fuseau. */
+function dateCourteUtc(ms: number): string {
+  const iso = dateIso(ms);
+  return `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+}
+
 /** Badge du MVRV Z-Score selon le motif de péremption BGeometrics (mêmes libellés que CHAIN). */
 const BADGE_MOTIF_BG = { cache: "cache périmé", embargo: "embargo 7 j", retard: "source en retard" } as const;
 
@@ -367,7 +373,7 @@ export function CycleWindow() {
           const st = statsCycle(s.points, s.clos);
           return (
             <span className="text-text-dim">
-              {Number.isFinite(st.topJour) ? formatDateCourte(s.halvingMs + st.topJour * JOUR_MS) : VALEUR_ABSENTE}
+              {Number.isFinite(st.topJour) ? dateCourteUtc(s.halvingMs + st.topJour * JOUR_MS) : VALEUR_ABSENTE}
             </span>
           );
         },
@@ -560,12 +566,11 @@ export function CycleWindow() {
                 colonnes={colonnesCycles}
                 lignes={[...series].sort((a, b) => a.halvingIndex - b.halvingIndex)}
                 cle={(s) => String(s.halvingIndex)}
-                maxHauteur="10rem"
                 ariaLabel="Cycles BTC"
               />
             </div>
 
-            <VueModelesPrix modeles={modeles} />
+            <VueModelesPrix modeles={modeles} plusBasMs={ath !== null && ath.repliMaxPct < 0 ? ath.repliMaxMs : null} />
 
             <div className="mt-2 flex items-center justify-between gap-2">
               <NoteSource>

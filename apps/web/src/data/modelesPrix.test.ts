@@ -74,6 +74,20 @@ describe("piCycleBottom", () => {
     expect(p.episodes).toEqual([]);
   });
 
+  it("EMA 150 j par récurrence (k = 2/151, amorce = SMA des 150 premiers points), distincte de la SMA 150 j", () => {
+    // Paliers : 75 à 50 puis 75 à 150 (amorce 100), 330 à 100 (l'EMA reste 100), 10 à 200.
+    // Une rampe linéaire ne suffit pas : amorcée par la SMA, l'EMA y égale exactement la SMA 150 j.
+    const prix = [...Array(75).fill(50), ...Array(75).fill(150), ...Array(330).fill(100), ...Array(10).fill(200)];
+    const p = piCycleBottom(quotidien(prix))!;
+    const ema150 = 200 - 100 * (149 / 151) ** 10; // ≈ 112,4828
+    const sma150 = (140 * 100 + 10 * 200) / 150; // ≈ 106,6667 : valeur d'une SMA à la place de l'EMA
+    const sma471 = (56 * 50 + 75 * 150 + 330 * 100 + 10 * 200) / 471; // ≈ 104,1401
+    expect(p.ema150).toBeCloseTo(ema150, 6);
+    expect(p.ema150).not.toBeCloseTo(sma150, 0);
+    expect(p.seuil).toBeCloseTo(PI_COEFFICIENT * sma471, 6);
+    expect(p.ratio).toBeCloseTo(ema150 / (PI_COEFFICIENT * sma471), 6);
+  });
+
   it("renvoie null sous 471 prix exploitables", () => {
     expect(piCycleBottom(quotidien(Array(470).fill(100)))).toBeNull();
     expect(piCycleBottom(quotidien(Array(471).fill(100)))).not.toBeNull();

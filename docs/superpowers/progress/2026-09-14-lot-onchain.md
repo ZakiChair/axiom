@@ -74,5 +74,10 @@ par le tier community ; blockchain.info sans point pour le jour courant).
 - Thermocap : émission antérieure au 2010-07-18 négligée (prix quasi nul), frais exclus.
 - Alertes on-chain : app ouverte uniquement (front-only), non composables, quota BGeometrics
   partagé pour MVRV-Z / SOPR / NUPL.
-- Flux nets vers les exchanges, offre LTH/STH, vagues HODL : hors de portée sans clé
-  Glassnode (plan avec accès API) ou CryptoQuant.
+- Offre LTH/STH, vagues HODL : hors de portée sans clé Glassnode (plan avec accès API)
+  ou CryptoQuant.
+- Correction du même jour : les flux nets vers les exchanges ne sont PAS hors de portée.
+  Coin Metrics community sert `FlowInExNtv`, `FlowOutExNtv` et `SplyExNtv` sans clé
+  depuis 2011-04-24 (sondé le 2026-09-14) ; les flux sont raccordés par le chantier
+  « indicateurs gratuits vérifiés » (`docs/superpowers/plans/2026-09-14-indicateurs-gratuits.md`),
+  la réserve reste non affichée (dérive du périmètre d'adresses).

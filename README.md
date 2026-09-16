@@ -20,7 +20,7 @@ droits de l’opérateur ; certains historiques exigent une clé ou un abonnemen
 
 | | |
 |---|---|
-| **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations, **189 indicateurs** testés |
+| **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations, **200 indicateurs** testés |
 | **Lire le contexte** | **39 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, mouvements de baleines, treemap, options, COT, taux (dont 24 familles macro sur 8 zones) & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
 | **Décider** | screener, playbooks 1-clic, alertes (dont composite ET), backtest en R (stop ATR / sizing risque), coût d’exécution L2 (DOM), stress-test, étude d’évènements, journal, paper trading |
 | **Ne pas décrocher** | alertes onglet fermé (macOS + Telegram optionnel), replay sur dumps officiels Binance, panneau de santé des sources |
@@ -30,7 +30,7 @@ Deux partis pris structurent le produit :
 1. **Le chemin chaud reste direct.** Le front parle **directement** aux WebSockets des exchanges ;
    le daemon `axiomd` ne prend en charge que le lent (APIs à quota, cache, persistance SQLite,
    alertes). L’UI reste utilisable **sans** daemon.
-2. **Les calculs sont du TypeScript pur et testés.** Les 189 indicateurs vivent dans
+2. **Les calculs sont du TypeScript pur et testés.** Les 200 indicateurs vivent dans
    `@axiom/indicators` — pas de WASM, pas de service Python — et sont couverts par des tests
    unitaires et structurels, dont **4 indicateurs comparés à un oracle `pandas-ta`** (ADX,
    SuperTrend, Ichimoku, PSAR ; `scripts/golden/`), des oracles analytiques ATR/RSI/Bollinger/RVOL
@@ -45,7 +45,7 @@ d’Electron.
 ```
 packages/
   types/         @axiom/types       — contrat de données partagé
-  indicators/    @axiom/indicators  — 189 indicateurs TS pur + golden tests
+  indicators/    @axiom/indicators  — 200 indicateurs TS pur + golden tests
   alerts/        @axiom/alerts      — moteur d’alertes pur (front + daemon)
   backtest/      @axiom/backtest    — moteur de backtest pur
 apps/
@@ -128,7 +128,7 @@ Finnhub, Etherscan v2, CoinDesk Data/CCData, CoinGecko et DefiLlama Pro) restent
 navigateur. OI et funding du graphe disposent d'un repli Binance sans
 clé ; NVT utilise directement les charts publics Blockchain.com.
 
-Le catalogue conserve les 189 indicateurs. Une entrée impossible pour la source, le symbole ou
+Le catalogue conserve les 200 indicateurs. Une entrée impossible pour la source, le symbole ou
 le timeframe courant est désactivée et marquée **UNUSABLE** au lieu de produire un pane vide.
 Les fonctions intrinsèquement locales sont également nommées : REPLAY et WHALES sont
 **UNUSABLE** sur Vercel ; l'historique LIQ et les couches GDELT/UCDP de GLOBE sont **PARTIAL**.
@@ -137,7 +137,7 @@ Les snapshots, LIQHL, les alertes baleines et les notifications onglet fermé n�
 
 ## Fonctionnalités (aperçu)
 
-- **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, 189 indicateurs
+- **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, 200 indicateurs
 - **Terminal** : palette ⌘K, raccourcis, workspaces, fenêtres flottantes + snap + taskbar
 - **Sources** : Binance, Bybit, OKX, Coinbase, Kraken, MEXC, Deribit, Twelve Data, Coinalyze, FRED, etc.
 - **Panneaux** : 39 fenêtres — DES, FUNDX, LIQ, ECO, NEWS, CORR, CHAIN, MAP, PORT, NOTE, EQS, TERM, OMON, DOM, BT, REPLAY, RATE, COT, SEAG, VOL, FUND, BRIEF, GLOBE, STBL, SQZ, CBPREM, NETLIQ, DATA, DIST, EXPY, PAPER, MINE, WHALES, CYCLE, BPL, EVTS, SCEN, CAP, SECT
@@ -191,6 +191,7 @@ la vue ALFRED décrite ci-dessous utilise explicitement un millésime.
 |---|---|
 | **DATA / BRIEF / CHAIN** | Consulter source effective, date d’observation, récupération, couverture et droits. Un cache ancien conserve sa date, le badge vieillit même sans nouvelle collecte et une donnée absente ne vaut pas zéro. Les heures affichées sont en UTC. |
 | **MACRO / EVTS** | Choisir une date « connue au » pour FRED/ALFRED et comparer première publication et révision. ALFRED fournit un jour, sans heure intrajournalière. |
+| **BRIEF** | Concordance multi-échelle (15 m / 1 h / 4 h / 1 j du symbole du chart) : tendance vs EMA 50, RSI 14, ATR 14 %, Δ 20 barres et compteur d'alignement. Lecture descriptive — un alignement n'est pas un signal ; une échelle en échec reste « — ». |
 | **NETLIQ** | Lire TGA Treasury DTS et les contributions Fed/RRP/TGA avec leurs dates ; la comparaison hebdomadaire utilise une période commune. |
 | **CHAIN / BRIEF / STBL** | Comparer flux ETF, stock stablecoin et capital réalisé. Les ratios ETF utilisent l’encours de leur séance ; les percentiles exigent une profondeur suffisante. Les alertes de flux conservent leur observation et leur source dans le journal, avec le front actif même si les panneaux sont fermés. |
 | **CHAIN / STBL / SECT** | Comparer Ethereum, Solana, Base et Arbitrum : TVL, DEX, stablecoins USD, frais et revenus, dates et variations 30/90/365 jours. Les séries monétaires ne représentent pas des quantités corrigées de l’effet de prix. |
@@ -245,6 +246,13 @@ Le backtest valorise l'équité à chaque clôture de bougie, positions ouvertes
 Le drawdown mesure la baisse depuis le plus haut de cette équité ; il ne mesure pas les
 extrêmes intrabar. Les frais d'entrée sont déduits dès l'entrée, les frais de sortie lors
 de la sortie. Les décisions restent exécutées à l'ouverture de la bougie suivante.
+
+Par défaut, le stop et l'objectif sont jugés à la **clôture** (un pic intrabar qui se
+referme ne déclenche rien). La case **Intrabar** du panneau BT les juge sur le **high/low**
+des barres détenues : fill au niveau touché, à l'ouverture si la barre ouvre au-delà (gap),
+et **stop prioritaire** quand les deux niveaux tombent dans la même barre — convention
+conservatrice, OHLC ne dit pas l'ordre des touches. Les sorties par règle gardent le
+modèle clôture → ouverture suivante, et les résultats sans la case restent identiques.
 
 Le heartbeat indique la visibilité de l'onglet et sa permission de notification.
 Le navigateur prend en charge la notification native lorsqu'il est visible et autorisé ;

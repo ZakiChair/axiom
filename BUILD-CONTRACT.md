@@ -11,7 +11,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 - **Cible** : terminal pour UN utilisateur (ses propres clés). PAS de multi-tenant, PAS d'auth réseau, PAS de SaaS. Crypto d'abord (spot + perp) ; tradfi/commodités en complément.
 - **Renderer-first** : le premier livrable à valeur est un graphe live à l'écran. **AUCUN backend réseau/multi-tenant (Docker/TimescaleDB/Redis interdits). Un daemon localhost mono-process (`apps/daemon`, Bun + SQLite, port 8787) est autorisé depuis la Phase 2 — proxy/cache/persistance/alertes UNIQUEMENT, jamais sur le chemin chaud du renderer (les WS de marché du front restent directs).** Le front parle directement aux WS publics des exchanges (mode mono-utilisateur assumé) et reste **100 % fonctionnel SANS daemon** (feature-detect `/health` + repli localStorage/proxy Vite). Déviation assumée vs roadmap E1 : les proxys Vite restent en dev (dev sans daemon), le daemon est le chemin de PROD + services additionnels.
 - **Chart** : **KLineChart** figé (pas de lightweight-charts, pas d'abstraction `IChartRenderer` « swap de moteur »). L'overlay orderflow se synchronise sur le viewport de KLineChart. Multi-chart 2×2 : un store par slot ; les overlays doivent être scellés au slot (voir plan 2026-08-24, Lot 3).
-- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**189 indicateurs**). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
+- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**200 indicateurs**). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
 - **Données dérivées (OI/funding/L-S/liquidations)** : **ACHETER** via un `IDerivedDataProvider` (Coinalyze **câblé**, M6 atteint) — NE PAS construire d'AggregationEngine multi-exchange. Trois couches de liquidations distinctes et étiquetées : heatmap *exécutée*, niveaux **EST.** (modèle levier), niveaux **HL réels** (Hyperliquid, non exhaustif).
 - **Trading** : **PAS d'exécution d'ordres** — aucune clé de trading. Le paper trading (`PAPER`) est une simulation locale (hors gate G100/K8). Ne rien implémenter qui touche à des clés de trading réelles.
 - **Sources** : **9 identifiants** (`EXCHANGE_IDS` dans `@axiom/types`) — Binance, Bybit, OKX, Hyperliquid, Coinbase, Kraken, Twelve Data, MEXC, synthetic. Ne pas en ajouter sans nécessité démontrée (non-objectif avant G100).
@@ -42,7 +42,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 
 ## État actuel (2026-09-04)
 - **Chart** live multi-exchange (spot + perp), multi-grille 1/2h/2v/2×2, orderflow/CVD/footprint, volume profile, fibo, dessins.
-- **189 indicateurs** TS purs dans `@axiom/indicators` (dont 30 stratégies étiquetées « non validé ») ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
+- **200 indicateurs** TS purs dans `@axiom/indicators` (dont 30 stratégies étiquetées « non validé ») ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
 - **39 fenêtres** à mnémonique (`WINDOW_REGISTRY`) — dont WHALES (mouvements baleines on-chain + positions top comptes Hyperliquid), ajoutée le 2026-08-25 sur décision utilisateur, et BPL (Bitcoin Power Law), ajoutée le 2026-09-01 avec les séries TOTAL/TOTAL2/TOTAL3 chartables (chantier CAP/BPL) : **écarts ASSUMÉS** au gel « aucune nouvelle fenêtre avant le verdict G100 » (§ ci-dessous).
 - **Daemon** `axiomd` : proxy+cache SQLite, KV/snapshots, candles, alertes (macOS + Telegram), replay dumps Binance, couches GDELT/UCDP, LIQHL Hyperliquid paresseux, collecteur whales (blocs confirmés blockchain.info + Etherscan stables, table `whale_moves`, rétention 30 j). Bind `127.0.0.1:8787`, whitelist `/extapi`, garde Host/Origin/DNS-rebinding.
 - **Vercel** : front + proxy serverless sans secret partagé, whitelist/MIME/DNS durcis. Les clés personnelles restent dans le navigateur. **Exception ACTÉE le 2026-09-14** (demande utilisateur, test communautaire) : une seule variable serveur, `BGEOMETRICS_API_KEY`, portée par `api/proxy.ts` vers bitcoin-data.com quand le client n'envoie aucune clé — clé gratuite et révocable, plafonds de l'offre gratuite (10 req/heure et 15 req/jour) partagés par les visiteurs, jamais exposée au navigateur ; toute autre clé reste personnelle (test structurel `apps/daemon/src/vercelProxy.test.ts`). Toute fonction strictement locale est marquée `UNUSABLE`, toute fenêtre partielle `PARTIAL` ; jamais de pane muet.
@@ -58,7 +58,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 - Ne pas créer de backend **réseau/multi-tenant**, de docker-compose, de schéma DB serveur (le daemon localhost mono-process de la Phase 2 est la SEULE exception, cf. Décisions verrouillées).
 - **Avant le verdict G100** : pas de nouvelle fenêtre, pas de nouveau fournisseur sans remplacement direct d'une source défaillante (exceptions ACTÉES : fournisseurs de capitalisation CMC/CCData, et fournisseurs statistiques publics OCDE/Eurostat/ONS le 2026-09-06 — cf. Décisions verrouillées), pas de migration React/Vite/Zustand/KLineChart majeure (plan 2026-08-24, §12).
 - Ne pas « améliorer » `@axiom/types` ni les configs racine.
-- Ne pas étendre le catalogue d'indicateurs sans nécessité démontrée (le contrat est à 189, pas « plus de 7 » — l'ancien jalon M2 est historique, cf. ci-dessus).
+- Ne pas étendre le catalogue d'indicateurs sans nécessité démontrée (le contrat est à 200, pas « plus de 7 » — l'ancien jalon M2 est historique, cf. ci-dessus).
 
 ### Garde-fous reportés de la roadmap (docs/research/03, §Anti-recommandations)
 Les anti-recommandations #2 (Docker/Redis/TimescaleDB), #3 (proxifier les WS via le daemon) et #6 (abstraction de moteur de chart) sont déjà couvertes ci-dessus et dans les Décisions verrouillées. Les 6 restantes, à respecter tout autant :
@@ -196,3 +196,68 @@ Le budget initial reste bloquant (1 220 000 octets bruts, 360 000 gzip ; marge
 de départ 9 249 bruts et 3 179 gzip) : toute logique nouvelle vit dans des
 chunks chargés à la demande. Voir le
 [plan](docs/superpowers/plans/2026-09-14-indicateurs-gratuits.md).
+
+## Extension autorisée le 16 septembre 2026
+
+Le propriétaire a demandé d'implémenter les indicateurs et fonctions proposés
+par la revue de la veille (« go implémenter les indicateurs et fonction
+suggérés ») : dix indicateurs, trois fonctions et trois gains d'observabilité.
+Le catalogue technique passe à **200 indicateurs** (190 + 10) ; les **39
+fenêtres**, les **9 identifiants de marché**, `@axiom/types`, les dépendances et
+la liste d'hôtes `/extapi` restent inchangés. Aucune nouvelle fenêtre.
+
+Indicateurs ajoutés (TS pur, `@axiom/indicators`, un fichier et un test par def) :
+
+| Id | Catégorie | Contenu et limite affichée |
+|---|---|---|
+| `vpin` | orderflow | Toxicité du flux par buckets de VOLUME (`|Σq|/V` moyen, q = split taker) ; approximations assumées : ordre intra-barre inconnu, split réparti proportionnellement — lit des régimes, pas un instant. Dépend du split taker : **UNUSABLE hors Binance**, comme le CVD |
+| `cointegrationAdf` | statistical | Engle-Granger roulant vs `refClose` : t de l'ADF augmenté sur le résidu, repère −3,34 (5 %, N=2, constante — approximation de MacKinnon). Distribution non standard et biais de petit échantillon documentés |
+| `spreadHalfLife` | statistical | Demi-vie de retour à la moyenne du spread log (barres) + β de couverture, même noyau (`utils-cointegration.ts`) |
+| `corwinSchultz` | volatility | Spread effectif estimé sur les ranges de deux barres consécutives (borné à 0) ; sur carnet crypto à tick fin, l'historique est bruité — le DOM reste la référence instantanée |
+| `amihudIlliq` | volume | Illiquidité d'Amihud (×10⁶), `|r|/DV` moyen, repli `close × volume` |
+| `kyleLambda` | orderflow | λ de Kyle en points de base par unité de déséquilibre taker normalisé ; dépend du split taker → **UNUSABLE hors Binance** |
+| `garmanKlassVol` | volatility | Estimateur OHLC (borne à 0 pour données incohérentes uniquement) |
+| `rogersSatchellVol` | volatility | Estimateur OHLC sans dérive |
+| `yangZhangVol` | volatility | Estimateur OHLC + saut overnight (variances de population, convention du package) |
+| `skewKurt` | volatility | Skew et kurtosis d'excès des rendements log (garde de variance relative) |
+
+Fonctions :
+
+- **BT — mode intrabar** (`params.intrabar`, case à cocher, défaut OFF) : stop et
+  objectif jugés sur le **high/low** des barres détenues, au niveau touché, ou à
+  l'OPEN si la barre ouvre au-delà (gap) ; **stop prioritaire** si les deux sont
+  touchés dans la même barre (convention conservatrice, OHLC ne dit pas l'ordre).
+  Les sorties par RÈGLE gardent le modèle clôture → open+1. Défaut absent =
+  résultats historiques reproductibles à l'identique ; `intrabar` entre dans la
+  signature de run (résultat périmé si la case change).
+- **BRIEF — concordance multi-échelle** : section « Concordance multi-échelle »
+  (15 m / 1 h / 4 h / 1 j du symbole du chart) : tendance close vs EMA 50, RSI 14,
+  ATR 14 en % et Δ sur 20 barres, avec compteur d'alignement. Lecture
+  DESCRIPTIVE — un alignement n'est pas un signal ; une échelle en échec reste
+  « — » sans invalider les autres.
+- **Observabilité** : `/health` expose `collecteurs.whales` et
+  `collecteurs.globe` (dernier rafraîchissement réussi GDELT/UCDP) en plus de
+  `liquidations`, ainsi que `base.octets` (taille logique SQLite) — champs à 0 si
+  la base est indisponible, la sonde ne casse jamais. Le proxy met un **hôte en
+  quarantaine après un 429** (durée = `Retry-After`, secondes ou date HTTP,
+  bornée à 15 min, repli 60 s), répond 429 localement pendant la quarantaine et
+  **propage `retry-after`** au client (l'en-tête amont était perdu). La
+  navigation des panneaux cible désormais le **slot focus** de la grille
+  (slot 0 = maître inchangé ; slot secondaire = config du slot), au lieu de
+  forcer le slot 0.
+
+Budget : les additions coûtaient ~12,7 ko bruts au chemin d'entrée. Le
+**contrôleur de heatmap des liquidations** (classe + commande LIQMODE + helpers
+de couleur) est sorti du chunk d'entrée — commande déplacée vers
+`chart/liquidationMarkers.ts`, helpers purs extraits dans `chart/rampesHeat.ts`,
+classe chargée par `import()` à la **première activation** (défaut OFF) comme les
+couches de niveaux. Mesure locale après intégration : **1 205 532 octets bruts et
+355 386 gzip** (marges 14 468 / 4 614), soit ~10,5 ko bruts et ~3,2 ko gzip SOUS
+la mesure d'avant chantier. Le plafond reste inchangé.
+
+Limites à ne pas masquer : VPIN et λ de Kyle sont des mesures par bougies
+(approximations du tick) et Binance-only ; la cointégration garde un biais de
+petit échantillon et un repère critique approximatif ; le mode intrabar ne
+simule ni l'ordre réel des touches ni la profondeur (le fill au niveau suppose
+une exécution au prix du stop) ; la quarantaine 429 est par hôte et par
+processus (pas de persistance).

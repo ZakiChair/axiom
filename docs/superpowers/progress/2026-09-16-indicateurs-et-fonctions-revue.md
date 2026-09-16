@@ -55,6 +55,12 @@ d'avant chantier (1 216 010 / 358 605). Plafond inchangé.
   alertes 76, backtest 109, daemon 524, web 4 443 — comptes src+dist confondus
   pour les paquets) ; build web ; budget **PASS**.
 - `pnpm check:e2e` : **73 parcours hermétiques** verts (1,7 min).
+- Push : `5006f9c..e14dc03` sur `origin/main` (6 commits, avance rapide).
+  Run GitHub Actions du push : `35134619496`, **succès** en 5 min 26 s
+  (typecheck, tests daemon/paquets/web, build et budget, 73 parcours
+  hermétiques). Budget mesuré par le runner Linux : **1 205 532 bruts /
+  356 635 gzip**, marge **3 365 octets gzip** — contre 42 octets avant le
+  chantier, l'objectif de ≥ 3 ko est retrouvé sur le juge de paix.
 - Navigateur (serveur de dev, données Binance live) :
   - BRIEF : section « Concordance multi-échelle · BTCUSDT », alignement 1/4
     (hausse en 1 j), 15 min baisse RSI 44,1 ATR 0,25 % Δ −0,4 % / 1 h baisse

@@ -22,7 +22,7 @@ import { compterEntrees } from "./cache";
 import { enregistrerCandles } from "./candles";
 import { entetesCors, entetesCorsRejet, reponsePreflight, requeteLocaleAutorisee } from "./cors";
 import { chargerCles } from "./env";
-import { demarrerBoucleGlobe, enregistrerGlobe } from "./globe";
+import { demarrerBoucleGlobe, enregistrerGlobe, santeGlobe } from "./globe";
 import { enregistrerHl } from "./hyperliquid";
 import { enregistrerKv } from "./kv";
 import { demarrerBoucleLiquidations, santeLiqFeed } from "./liqFeed";
@@ -32,7 +32,8 @@ import { enregistrerReplay } from "./replay";
 import { Routeur } from "./router";
 import { demarrerBoucleSnapshots, enregistrerSnapshots } from "./snapshots";
 import { distExiste, servirStatique } from "./static";
-import { demarrerBoucleWhales, enregistrerWhales } from "./whales";
+import { demarrerBoucleWhales, enregistrerWhales, santeWhales } from "./whales";
+import { getDb, tailleBaseOctets } from "./db";
 import { DAEMON_CAPABILITIES } from "../../../shared/daemon-capabilities";
 
 const HOSTNAME = "127.0.0.1";
@@ -59,6 +60,18 @@ const routeur = new Routeur();
 // cross-origin ; sans `Access-Control-Allow-Origin`, la détection échouerait alors
 // même que le daemon tourne.
 routeur.enregistrerPrefixe("/health", (req) => {
+  // Base : taille logique + santé des collecteurs lents. Défensif — une base
+  // indisponible ne doit PAS faire échouer la sonde (le front bascule alors sans
+  // daemon) : les champs concernés retombent à 0.
+  let base: { octets: number } = { octets: 0 };
+  let globe: { gdeltMajTs: number; ucdpMajTs: number } = { gdeltMajTs: 0, ucdpMajTs: 0 };
+  try {
+    const d = getDb();
+    base = { octets: tailleBaseOctets(d) };
+    globe = santeGlobe(d);
+  } catch {
+    /* base indisponible : champs à 0, la sonde répond quand même */
+  }
   const corps = JSON.stringify({
     ok: true,
     service: "axiomd",
@@ -68,8 +81,10 @@ routeur.enregistrerPrefixe("/health", (req) => {
     uptime: process.uptime(),
     cache: { entrees: compterEntrees() },
     // Santé des collecteurs de FOND : sans elle, un flux muet depuis des jours ne se
-    // voit sur aucune surface (seul `liquidations` est branché ici pour l'instant).
-    collecteurs: { liquidations: santeLiqFeed() },
+    // voit sur aucune surface. Liquidations (mémoire), baleines (mémoire) et globe
+    // (dernier rafraîchissement réussi par source, en base).
+    collecteurs: { liquidations: santeLiqFeed(), whales: santeWhales(), globe },
+    base,
     dist: distExiste(),
   });
   return new Response(corps, {

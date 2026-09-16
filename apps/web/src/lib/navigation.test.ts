@@ -12,6 +12,10 @@ import { describe, expect, it, vi } from "vitest";
 const etat = vi.hoisted(() => ({
   chartActif: null as unknown,
   candles: [] as unknown[],
+  /** Slot focus de la grille (0 = maître) — piloté par les tests de cible. */
+  focus: 0,
+  /** Appels enregistrés sur les setters (maître et slots secondaires). */
+  appels: [] as string[],
 }));
 
 vi.mock("klinecharts", () => ({ registerOverlay: () => {} }));
@@ -20,15 +24,22 @@ vi.mock("../chart/drawing", () => ({
   setFocusChart: () => {},
 }));
 vi.mock("../store/chart-layout", () => ({
-  chartLayoutStore: { getState: () => ({ setFocus: () => {} }) },
+  chartLayoutStore: {
+    getState: () => ({
+      focus: etat.focus,
+      setSlotExchange: (slot: number, exchange: string) => etat.appels.push(`slot:${slot}:exchange:${exchange}`),
+      setSlotSymbol: (slot: number, symbol: string) => etat.appels.push(`slot:${slot}:symbol:${symbol}`),
+      setSlotTimeframe: (slot: number, tf: string) => etat.appels.push(`slot:${slot}:tf:${tf}`),
+    }),
+  },
 }));
 vi.mock("../store/market", () => ({
   marketStore: {
     getState: () => ({
       candles: etat.candles,
-      setExchange: () => {},
-      setSymbol: () => {},
-      setTimeframe: () => {},
+      setExchange: (exchange: string) => etat.appels.push(`maitre:exchange:${exchange}`),
+      setSymbol: (symbol: string) => etat.appels.push(`maitre:symbol:${symbol}`),
+      setTimeframe: (tf: string) => etat.appels.push(`maitre:tf:${tf}`),
     }),
     subscribe: () => () => {},
   },
@@ -130,8 +141,25 @@ function fauxChart() {
   };
 }
 
+describe("cible de la navigation (slot focus)", () => {
+  it("slot 0 : applique au marché MAÎTRE", () => {
+    etat.focus = 0;
+    etat.appels = [];
+    navigateTo({ source: "eqs", symbol: "ETHUSDT", exchange: "binance", timeframe: "15m" });
+    expect(etat.appels).toEqual(["maitre:exchange:binance", "maitre:symbol:ETHUSDT", "maitre:tf:15m"]);
+  });
+
+  it("slot secondaire focus : applique à CE slot, jamais au maître", () => {
+    etat.focus = 2;
+    etat.appels = [];
+    navigateTo({ source: "news", symbol: "SOLUSDT", timeframe: "4h" });
+    expect(etat.appels).toEqual(["slot:2:symbol:SOLUSDT", "slot:2:tf:4h"]);
+  });
+});
+
 describe("marqueur de navigation en grille multi-chart", () => {
   it("retire le marqueur sur l'ANCIEN porteur quand le focus change", () => {
+    etat.focus = 0;
     const chartA = fauxChart();
     const chartB = fauxChart();
     etat.candles = [{ timestamp: 1 }];

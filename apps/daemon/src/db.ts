@@ -67,6 +67,17 @@ export function ratioFreelist(d: Database): number {
 }
 
 /**
+ * Taille logique du fichier SQLite en octets (`page_count × page_size`), exposée par
+ * `/health`. C'est la taille de la BASE, pas du fichier sur disque (WAL à part) : elle
+ * suffit à voir une dérive de rétention. Base vide → 0.
+ */
+export function tailleBaseOctets(d: Database): number {
+  const { page_count: pages } = d.query("PRAGMA page_count").get() as { page_count: number };
+  const { page_size: taillePage } = d.query("PRAGMA page_size").get() as { page_size: number };
+  return pages * taillePage;
+}
+
+/**
  * Récupère l'espace disque laissé par les purges de rétention SI la freelist dépasse
  * `seuil`. Renvoie vrai si un compactage a eu lieu.
  *
@@ -93,11 +104,9 @@ export function compacterSiNecessaire(
   tailleMaxOctets = TAILLE_MAX_VACUUM_OCTETS,
 ): boolean {
   if (ratioFreelist(d) < seuil) return false;
-  const { page_count: pages } = d.query("PRAGMA page_count").get() as { page_count: number };
-  const { page_size: taillePage } = d.query("PRAGMA page_size").get() as { page_size: number };
-  if (pages * taillePage > tailleMaxOctets) {
+  if (tailleBaseOctets(d) > tailleMaxOctets) {
     console.warn(
-      `[axiomd] compactage sauté : base de ${((pages * taillePage) / 1_048_576).toFixed(0)} Mo ` +
+      `[axiomd] compactage sauté : base de ${(tailleBaseOctets(d) / 1_048_576).toFixed(0)} Mo ` +
         "au-delà de la borne du VACUUM synchrone (event loop bloquante)",
     );
     return false;

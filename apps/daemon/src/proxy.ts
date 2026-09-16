@@ -183,6 +183,63 @@ function pathnameAmont(route: RouteProxy, url: URL): string {
   return q === -1 ? reecrit : reecrit.slice(0, q);
 }
 
+// ─────────────────────────── Quota amont (429 / Retry-After) ───────────────────────────
+//
+// Plusieurs amonts proxifiés sont à quota (FRED, Coinalyze, Twelve Data, BGeometrics,
+// SoSoValue…). Sans politique, un 429 est retransmis tel quel et le front — qui
+// réessaie — retape l'amont pendant toute la fenêtre de quota : la clé reste épuisée
+// et le terminal affiche des erreurs en boucle. On retient donc l'échéance annoncée
+// par l'amont (Retry-After, secondes ou date HTTP) et on répond 429 localement
+// jusqu'à elle, en PROPAGEANT `retry-after` (l'en-tête amont était perdu : les
+// en-têtes de réponse sont reconstruits).
+
+/** Cooldown par hôte : instant (ms epoch) jusqu'auquel l'amont est en quarantaine. */
+const cooldownsQuota = new Map<string, number>();
+
+/** Repli quand l'amont répond 429 sans Retry-After exploitable. */
+export const COOLDOWN_QUOTA_DEFAUT_MS = 60_000;
+
+/** Plafond : un Retry-After absurde (24 h) ne doit pas condamner l'hôte pour la session. */
+export const COOLDOWN_QUOTA_MAX_MS = 15 * 60_000;
+
+/** Durée d'un en-tête Retry-After (secondes ou date HTTP), bornée et jamais nulle. PURE. */
+export function dureeRetryAfter(valeur: string | null, maintenant: number = Date.now()): number {
+  if (valeur !== null) {
+    const secondes = Number(valeur.trim());
+    if (Number.isFinite(secondes) && secondes > 0) {
+      return Math.min(COOLDOWN_QUOTA_MAX_MS, Math.round(secondes * 1000));
+    }
+    const date = Date.parse(valeur);
+    if (Number.isFinite(date)) {
+      const delta = date - maintenant;
+      if (delta > 0) return Math.min(COOLDOWN_QUOTA_MAX_MS, delta);
+    }
+  }
+  return COOLDOWN_QUOTA_DEFAUT_MS;
+}
+
+/** Millisecondes restantes de cooldown pour un hôte (0 = libre). PURE. */
+export function cooldownRestant(hote: string, maintenant: number = Date.now()): number {
+  const jusquA = cooldownsQuota.get(hote) ?? 0;
+  return Math.max(0, jusquA - maintenant);
+}
+
+/** Met l'hôte en quarantaine selon son Retry-After ; renvoie la durée retenue (ms). */
+export function enregistrerQuotaEpuise(
+  hote: string,
+  retryAfter: string | null,
+  maintenant: number = Date.now(),
+): number {
+  const ms = dureeRetryAfter(retryAfter, maintenant);
+  cooldownsQuota.set(hote, maintenant + ms);
+  return ms;
+}
+
+/** Vide les cooldowns (tests). */
+export function reinitialiserCooldownsQuota(): void {
+  cooldownsQuota.clear();
+}
+
 /**
  * Traite une requête de proxy fixe : mêmes gardes que /extapi (GET/HEAD, POST JSON
  * SoSoValue borné, redirects sur l'hôte original, MIME inerte, DNS public).
@@ -273,6 +330,17 @@ export async function traiterProxy(
   const ctReq = req.headers.get("content-type");
   if (method === "POST" && ctReq) entetesAmont["content-type"] = ctReq;
 
+  // Quota amont épuisé : réponse LOCALE sans toucher au réseau (le front réessaie).
+  const resteQuota = cooldownRestant(hoteOriginal);
+  if (resteQuota > 0) {
+    return jsonProxy(
+      { erreur: "quota amont épuisé", retryAfterSec: Math.ceil(resteQuota / 1000) },
+      req,
+      429,
+      { "retry-after": String(Math.ceil(resteQuota / 1000)) },
+    );
+  }
+
   let amont: ReponseAmontExtapi;
   try {
     amont = await recupererExtapiSecurise(urlAmont, {
@@ -310,12 +378,21 @@ export async function traiterProxy(
     }
   }
 
+  // Quota amont signalé : quarantaine de l'hôte pour la durée annoncée, et
+  // propagation de `retry-after` au client (sinon il ne sait pas quand réessayer).
+  const retryAfterAmont = amont.headers.get("retry-after");
+  if (amont.status === 429 || (amont.status === 503 && retryAfterAmont !== null)) {
+    const ms = enregistrerQuotaEpuise(hoteOriginal, retryAfterAmont);
+    console.warn(`[axiomd] quota amont épuisé sur ${hoteOriginal} : pause ${Math.ceil(ms / 1000)} s`);
+  }
+
   const statutSansCorps = method === "HEAD" || amont.status === 204 || amont.status === 205 || amont.status === 304;
   return new Response(statutSansCorps ? null : amont.corps, {
     status: amont.status,
     headers: {
       "content-type": amont.contentType,
       "x-axiomd-cache": "miss",
+      ...(retryAfterAmont === null ? {} : { "retry-after": retryAfterAmont }),
       ...securite,
       ...cors,
     },

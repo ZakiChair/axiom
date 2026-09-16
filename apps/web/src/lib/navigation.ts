@@ -253,22 +253,36 @@ export function demarrerNavMarkers(): void {
 // ─────────────────────────── API publique à effets ───────────────────────────
 
 /**
- * Applique une intention de navigation au chart maître.
- * Ordre : exchange → symbole → TF (comme `appliquerNavigation` palette) ;
- * focus slot 0 ; marqueur vertical + scroll si `markTime` valide.
+ * Applique une intention de navigation au chart FOCUS de la grille (slot 0 = maître).
+ * Ordre : exchange → symbole → TF (comme `appliquerNavigation` palette) ; marqueur
+ * vertical + scroll si `markTime` valide.
+ *
+ * Cible : le slot FOCUS — slot 0 → `marketStore` (identité maître, comme avant) ;
+ * slot secondaire → config du slot (`chartLayoutStore.slots`). Avant ce correctif le
+ * focus était forcé sur 0 : une navigation depuis EQS/NEWS/ECO ramenait toujours le
+ * slot maître au premier plan et changeait SON symbole, même quand l'opérateur
+ * travaillait sur un slot secondaire.
  */
 export function navigateTo(intent: NavIntent): void {
   demarrerNavMarkers();
 
   const champs = champsMarche(intent);
-  const m = marketStore.getState();
-  if (champs.exchange !== undefined) m.setExchange(champs.exchange);
-  if (champs.symbol !== undefined) m.setSymbol(champs.symbol);
-  if (champs.timeframe !== undefined) m.setTimeframe(champs.timeframe);
+  const slot = chartLayoutStore.getState().focus;
+  if (slot === 0) {
+    const m = marketStore.getState();
+    if (champs.exchange !== undefined) m.setExchange(champs.exchange);
+    if (champs.symbol !== undefined) m.setSymbol(champs.symbol);
+    if (champs.timeframe !== undefined) m.setTimeframe(champs.timeframe);
+  } else {
+    // `patchSlot` infère la source depuis le symbole quand elle n'est pas fournie.
+    const layout = chartLayoutStore.getState();
+    if (champs.exchange !== undefined) layout.setSlotExchange(slot, champs.exchange);
+    if (champs.symbol !== undefined) layout.setSlotSymbol(slot, champs.symbol);
+    if (champs.timeframe !== undefined) layout.setSlotTimeframe(slot, champs.timeframe);
+  }
 
-  // Focus chart maître (slot 0) — panneau → chart visible.
-  chartLayoutStore.getState().setFocus(0);
-  setFocusChart(0);
+  // Le chart actif (dessins, marqueur, scroll) suit le slot focus.
+  setFocusChart(slot);
 
   if (markTimeValide(intent.markTime)) {
     const label = etiquetteMarqueur(intent);

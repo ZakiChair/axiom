@@ -591,6 +591,16 @@ export function reinitialiserWhales(): void {
 }
 
 /**
+ * Copie de l'état de santé du collecteur, pour `/health` (même modèle que
+ * `santeLiqFeed`) : un flux muet depuis des jours doit se voir sur la sonde, pas
+ * seulement dans la fenêtre WHALES. Copie superficielle : l'appelant ne peut pas
+ * muter l'état interne.
+ */
+export function santeWhales(): SanteWhales {
+  return { ...sante };
+}
+
+/**
  * Rend une erreur du collecteur SÛRE à journaliser : la convertit en CHAÎNE (Bun
  * imprimerait sinon les champs annexes de l'objet, dont `path` = l'URL appelée) puis
  * expurge la clé Etherscan de la query string. Sans quoi ETHERSCAN_API_KEY finit en

@@ -363,3 +363,20 @@ export function demarrerBoucleGlobe(): () => void {
 export function enregistrerGlobe(routeur: Routeur): void {
   routeur.enregistrerPrefixe("/globe", (req, url) => traiterGlobe(req, url));
 }
+
+/**
+ * Horodatage du dernier rafraîchissement RÉUSSI par source (ms epoch, 0 = jamais),
+ * lu depuis les métadonnées `globe_meta`. Pour `/health` : la boucle GDELT tourne
+ * toutes les 15 min — une source muette doit se voir sans ouvrir GLOBE.
+ * Défensif : tables absentes (base fraîche, tests) ou ligne illisible → 0.
+ */
+export function santeGlobe(d: Database): { gdeltMajTs: number; ucdpMajTs: number } {
+  const lire = (cle: string): number => {
+    try {
+      return lireMeta(d, cle)?.majA ?? 0;
+    } catch {
+      return 0;
+    }
+  };
+  return { gdeltMajTs: lire("gdelt"), ucdpMajTs: lire("ucdp") };
+}

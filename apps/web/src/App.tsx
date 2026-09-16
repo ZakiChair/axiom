@@ -35,7 +35,6 @@ import { commandes as derivChartCommands } from "./store/derivatives-chart";
 // (effet de bord d'import).
 import { commandes as marksCommands } from "./chart/tradeMarkers";
 import { commandes as liqMarksCommands } from "./chart/liquidationMarkers";
-import { commandes as liqModeCommands } from "./chart/liquidationHeat";
 // Bulles de prints baleines SUR le chart : l'import démarre aussi le contrôleur
 // (effet de bord d'import).
 import { commandes as whaleCommands } from "./chart/whaleBubbles";
@@ -117,7 +116,6 @@ enregistrerCommandes([
   ...derivChartCommands,
   ...marksCommands,
   ...liqMarksCommands,
-  ...liqModeCommands,
   ...liqEstCommands,
   ...hlLiqCommands,
   ...whaleCommands,

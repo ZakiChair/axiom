@@ -30,8 +30,8 @@ vi.mock("../chart/drawing", () => ({
   setFocusChart: () => {},
 }));
 // klinecharts (build UMD exigeant `window`) : stubs pour importer les modules chart —
-// tradeMarkers et lib/navigation appellent registerOverlay ; liquidationHeat importe
-// ActionType/DomPosition (lus uniquement dans des méthodes jamais exécutées ici).
+// tradeMarkers et lib/navigation appellent registerOverlay ; les contrôleurs de heatmap
+// importent ActionType/DomPosition (lus uniquement dans des méthodes jamais exécutées ici).
 vi.mock("klinecharts", () => ({
   registerOverlay: () => {},
   ActionType: {},
@@ -71,7 +71,6 @@ import { commandesSignaux } from "../store/signaux";
 import { commandes as derivChartCommandes } from "../store/derivatives-chart";
 import { commandes as marksCommandes } from "../chart/tradeMarkers";
 import { commandes as liqMarksCommandes } from "../chart/liquidationMarkers";
-import { commandes as liqModeCommandes } from "../chart/liquidationHeat";
 import { commandes as liqEstCommandes } from "../chart/liquidationEstimates";
 import { commandes as hlLiqCommandes } from "../data/hyperliquidLiq";
 import { commandes as whaleCommandes } from "../chart/whaleBubbles";
@@ -100,8 +99,7 @@ const SOURCES_GREFFEES: Record<string, readonly Commande[]> = {
   "store/signaux": commandesSignaux,
   "store/derivatives-chart": derivChartCommandes,
   "chart/tradeMarkers": marksCommandes,
-  "chart/liquidationMarkers": liqMarksCommandes,
-  "chart/liquidationHeat": liqModeCommandes,
+  "chart/liquidationMarkers": liqMarksCommandes, // LIQMARK + LIQMODE (déplacée de liquidationHeat)
   "chart/liquidationEstimates": liqEstCommandes,
   "data/hyperliquidLiq": hlLiqCommandes,
   "chart/whaleBubbles": whaleCommandes,

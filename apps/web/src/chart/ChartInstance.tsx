@@ -68,7 +68,10 @@ import { OverlayLegend } from "./overlayLegend";
 import { OrderflowController, TICK_MIN_INTERVAL_MS } from "./orderflow";
 import { CompareController } from "./compare";
 import { VolumeProfileController } from "./volumeProfile";
-import { LiquidationHeatController } from "./liquidationHeat";
+// Contrôleur de heatmap des liquidations : TYPE seulement ici — la classe est chargée à
+// la PREMIÈRE ACTIVATION (import() dynamique). Le chunk d'entrée n'embarque plus ~25 ko
+// de heatmap pour une couche éteinte par défaut (budget JS initial, cf. scripts/verifier-budget-build.mjs).
+import type { LiquidationHeatController } from "./liquidationHeat";
 import { liqMarksStore } from "./liquidationMarkers";
 import { DepthHeatController, depthHeatStore } from "./depthHeat";
 import { NiveauxLignesController, type LigneNiveau } from "./niveauxLignes";
@@ -958,6 +961,11 @@ export function ChartInstance({
     const unsubscribeOrderflow = orderflowStore.subscribe(ensureOrderflow);
 
     // ── Contrôleurs LOURDS : slot MAÎTRE uniquement (lisent les stores globaux) ──
+    // Garde anti-course : les callbacks asynchrones (backfill, pagination, resync, chargement
+    // paresseux des contrôleurs) ne doivent rien faire après le teardown. Sert aussi de garde
+    // d'idempotence au teardown lui-même. Déclarée AVANT les contrôleurs : `assurerLiqHeat`
+    // la lit dès la première activation.
+    let cancelled = false;
     let compare: CompareController | null = null;
     let volumeProfile: VolumeProfileController | null = null;
     let liqHeat: LiquidationHeatController | null = null;
@@ -989,10 +997,24 @@ export function ChartInstance({
       unsubscribeVolumeProfile = volumeProfileStore.subscribe((state) => volumeProfile?.setEnabled(state.enabled));
 
       // Heatmap liquidations 2D (canvas) : lit le buffer d'événements publié par le singleton
-      // WS de liquidationMarkers ; la bascule LIQMARK pilote son activation.
-      liqHeat = new LiquidationHeatController(chart, container, liqCanvas);
-      liqHeat.setEnabled(liqMarksStore.getState().actif);
-      unsubscribeLiqHeat = liqMarksStore.subscribe((state) => liqHeat?.setEnabled(state.actif));
+      // WS de liquidationMarkers ; la bascule LIQMARK pilote son activation. Chargement
+      // PARESSEUX : la classe n'est importée qu'à la première activation (défaut OFF) —
+      // le canvas et les stores restent, seul le contrôleur attend.
+      const assurerLiqHeat = async (): Promise<void> => {
+        if (liqHeat !== null || cancelled) return;
+        const { LiquidationHeatController } = await import("./liquidationHeat");
+        if (cancelled) return;
+        liqHeat = new LiquidationHeatController(chart, container, liqCanvas);
+        liqHeat.setEnabled(liqMarksStore.getState().actif);
+      };
+      unsubscribeLiqHeat = liqMarksStore.subscribe((state) => {
+        if (!state.actif) {
+          liqHeat?.setEnabled(false);
+          return;
+        }
+        void assurerLiqHeat().then(() => liqHeat?.setEnabled(true));
+      });
+      if (liqMarksStore.getState().actif) void assurerLiqHeat();
 
       // Heatmap de liquidité du carnet (BOOK) : lit le buffer de colonnes échantillonnées
       // (demarrerDepthHeat, greffé ailleurs) ; la bascule `depthHeatStore.actif` pilote l'affichage.
@@ -1040,9 +1062,8 @@ export function ChartInstance({
     // (derivatives.ts) pour ne pas doubler les appels quand deux slots partagent le même actif.
     derivativesChart = new DerivativesChartController(chart, symbol, store);
 
-    // Garde anti-course : les callbacks asynchrones (backfill, pagination, resync) ne doivent
-    // rien faire après le teardown. Sert aussi de garde d'idempotence au teardown lui-même.
-    let cancelled = false;
+    // Garde anti-course : déclarée plus haut (avant les contrôleurs, dont le chargement
+    // paresseux la lit dès la première activation).
     let unsubscribe: Unsubscribe | null = null;
     let unsubscribeExtensionChaud: (() => void) | null = null;
     setLimiteKrakenVisible(false);

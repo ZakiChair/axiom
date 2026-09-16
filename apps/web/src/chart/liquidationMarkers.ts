@@ -577,6 +577,17 @@ export const commandes: Commande[] = [
     apercu: "Peint le profil des liquidations perp (bandes par niveau de prix) sur le graphe",
     action: () => liqMarksStore.getState().basculer(),
   },
+  // LIQMODE vivait dans chart/liquidationHeat.ts : déplacée ici pour que le CONTRÔLEUR de
+  // heatmap (chunk paresseux) ne soit plus tiré dans le chunk d'entrée par la palette ⌘K.
+  {
+    id: "action:liqmode",
+    mnemonique: "LIQMODE",
+    libelle: "Heatmap liquidations — mode intensité / dominance",
+    categorie: "action",
+    motsCles: ["liquidations", "heatmap", "dominance", "long", "short", "mode", "intensite", "liqmode"],
+    apercu: "Bascule la coloration des cellules : intensité totale (viridis) ou dominance long/short",
+    action: () => liqMarksStore.getState().basculerMode(),
+  },
 ];
 
 demarrerLiquidationMarkers();

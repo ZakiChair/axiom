@@ -28,7 +28,7 @@ import { agregerNiveaux, meilleursNiveaux, pasArrondi, souscrireDepth, type Nive
 import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
 import { lireTokenCanvas } from "../lib/canvasTokens";
-import { couleurRampeArrets, estFondClair, rampePourTheme } from "./liquidationHeat";
+import { couleurRampeArrets, estFondClair, rampePourTheme } from "./rampesHeat";
 import type { Commande } from "../commands/registry";
 
 /** Nombre de niveaux agrégés conservés PAR CÔTÉ (bid/ask) dans chaque colonne. Convention

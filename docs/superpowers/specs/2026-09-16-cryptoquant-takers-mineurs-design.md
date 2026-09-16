@@ -195,8 +195,8 @@ UTC ignoré (seuls des jours clos) ; ligne invalide ignorée, jamais tout le lot
 et dédoublonnage par jour.
 
 **Cadence et quota** : fenêtre glissante **10 req / 60 s**, acquisitions **sérialisées** dans une
-file unique partagée par les 13 séries (copie de `acquireSlot`, `data/coinalyze.ts:76-124`,
-`RATE_LIMIT = 10`) ; chaque créneau publie `healthStore.setQuota("cryptoquant", { utilise,
+file unique partagée par les 13 séries (copie adaptée d'`acquireSlot`, `data/coinalyze.ts:106-132`,
+où `RATE_LIMIT` vaut 40 ; ici `LIMITE_MIN = 10`) ; chaque créneau publie `healthStore.setQuota("cryptoquant", { utilise,
 limite: 10, fenetre: "1min" })` (le panneau DATA affiche « x/10 min ») ; correction par les
 en-têtes relayés : `x-ratelimit-remaining: 0` → la file attend `x-ratelimit-reset` secondes
 avant le créneau suivant. DES (4) et CHAIN (9) tiennent chacune sous 10 ; ouvertes dans la
@@ -241,7 +241,8 @@ raison, aucun log, aucune URL ne contient jamais la clé** (test I9).
 **Emplacements** : une clé **par série** (13), jamais un blob (le KV daemon plafonne à
 1 048 576 o par valeur, `apps/daemon/src/kv.ts:28`) : localStorage `axiom:onchain:cq:<serie>:v1`
 et KV daemon namespace `onchain`, clé `cq:<serie>:v1` (convention `data/onchain/cache.ts:18-19`,
-constante `NS_ONCHAIN` exportée).
+constantes privées `NS = "onchain"` et `PREFIXE_LS = "axiom:onchain:"` de `cache.ts:18-19`,
+redéclarées localement par le client pour ne pas toucher `cache.ts`).
 
 **Payload** (clés courtes nommées, valeurs **fournisseur brutes**, rien de dérivé) :
 
@@ -312,7 +313,7 @@ nécessaire. SQLite daemon : `kv_snapshots` copie tout le KV chaque jour, réten
   (importé par `ui.tsx`, donc initial ; marge runner ≈ 3 365 gzip).
 - Qualité CHAIN (B2) : `enregistrerQualite("chain:mineurs-cotes", "Mineurs cotés ·
   CryptoQuant", …)` — `observeLe` = J-1 max reçu, `recupereLe` = dernière lecture,
-  `cadenceMs` 86 400 000, `ageMaxMs` 2 j, `couverture { disponibles: sociétés avec ligne J-1,
+  `cadenceMs` 86 400 000, `ageMaxMs` 3 j (voir §12), `couverture { disponibles: sociétés avec ligne J-1,
   attendus: 9 }`, `acces "cle"`, statut « frais » à 9/9 sans trou récupérable, « partiel » si
   trous ou couverture < 9, « périmé » si J-1 absent > 2 j, « indisponible » sans clé et archive
   vide — visible dans « Qualité des blocs ».
@@ -696,3 +697,26 @@ retient un défaut, à contester à la relecture :
 | Fiabilité et santé | Badge local, libellé dans DATA seulement (bundle initial préservé) |
 | Comparaison Binance | Hors lot |
 | Noms des sociétés | Infobulle avec noms usuels |
+
+## 12. Arbitrages de planification (2026-09-16)
+
+Le plan `docs/superpowers/plans/2026-09-16-cryptoquant-takers-mineurs.md` a été rédigé zone par
+zone contre le code réel, puis vérifié ; l'orchestrateur a tranché les points suivants, qui
+précisent ou corrigent la spec :
+
+| Point | Arbitrage |
+|---|---|
+| `situer` | Vit dans `components/fluxTakers.util.ts` (exporté), pas dans le client : la vue ne peut importer aucune valeur du client sans créer un chunk préchargé par l'entrée |
+| `RAISON_CLE_CRYPTOQUANT`, `messageSansCleCq(vercel)` | Vivent dans `store/cryptoquant.ts` (module déjà partagé par Réglages, DES, CHAIN et le client) ; le client les ré-exporte |
+| Budget | Le store devient un chunk partagé : delta initial attendu ≤ ~40 o gzip par sous-lot, porte ≤ ~150 o sur B1 ; seule la limite 360 000 est bloquante. Mesures consignées en sections `### Budget <étape>` avec le JSON complet |
+| Qualité CHAIN | `ageMaxMs` = 3 j (précédent des séries quotidiennes de CHAIN ; `observeLe` à 00:00 UTC du jour clos) |
+| Bouton Réglages | Affiché aussi pour une clé refusée (401) ; le complément `.env`/Vercel seulement pour la clé absente |
+| Proxys locaux | « En-tête client s'il est valide, sinon `.env` » (Vite injecte aussi sur en-tête invalide) ; Vercel contrôle la méthode d'abord (POST sans clé → 405) |
+| Archive de version inconnue | Statut `erreur`, zéro appel, rien réécrit, bandeau |
+| File de requêtes | `enAttente` = demandes en attente d'un créneau ; `repriseTs` couvre le 429 et `x-ratelimit-remaining: 0` |
+| Libellé DATA | `cryptoquant: "CryptoQuant"` dans `data/dataCockpit.ts` (module paresseux) |
+| Signaux d'archive | Stockage plein, copie daemon non écrite, absence de daemon, archive illisible remplacée et badge périmé visibles dans les deux sections |
+| Tri CHAIN | Interactif, état dans le conteneur, défaut BTC J-1 décroissant |
+| Quota affiché | « x/10 min » dans DATA ; la section affiche « 10 req/min » (la file n'expose pas le compteur) |
+| `BUILD-CONTRACT.md:50` | « sept exceptions ACTÉES » devient « des exceptions ACTÉES » |
+| Errata | `NS_ONCHAIN` n'existe pas (constantes privées de `cache.ts`) ; `acquireSlot` est en `coinalyze.ts:106-132` ; `resteSurLePoste` en `persist.ts:791-793` ; le prédicat Bearer en `api/_policy.ts:276-284` |

@@ -34,6 +34,8 @@ export interface ConfigRun {
   slippagePct: number;
   capitalInitial: number;
   modeFunding: ModeFundingBacktest;
+  /** Stops/objectifs évalués intrabar (high/low) — change le résultat, donc signé. */
+  intrabar: boolean;
   reglesEntree: Condition[];
   reglesSortie: Condition[];
 }
@@ -58,6 +60,7 @@ export function signatureRun(c: ConfigRun): string {
     c.slippagePct,
     c.capitalInitial,
     c.modeFunding,
+    c.intrabar,
     c.reglesEntree,
     c.reglesSortie,
   ]);

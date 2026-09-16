@@ -9,7 +9,8 @@
  * trades triable.
  *
  * Étiquette d'honnêteté affichée en permanence : « bougies clôturées, exécution open+1,
- * pas d'intrabar » (cf. le contrat du moteur @axiom/backtest/engine.ts).
+ * pas d'intrabar » — la variante intrabar (case à cocher, défaut OFF) est nommée dans le
+ * sous-titre et dans la note (cf. le contrat du moteur @axiom/backtest/engine.ts).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
@@ -1114,6 +1115,7 @@ export function BacktestWindow() {
   const slippagePct = useStore(backtestStore, (s) => s.slippagePct);
   const capitalInitial = useStore(backtestStore, (s) => s.capitalInitial);
   const modeFunding = useStore(backtestStore, (s) => s.modeFunding);
+  const intrabar = useStore(backtestStore, (s) => s.intrabar);
   const couvertureFunding = useStore(backtestStore, (s) => s.couvertureFunding);
   const reglesEntree = useStore(backtestStore, (s) => s.reglesEntree);
   const reglesSortie = useStore(backtestStore, (s) => s.reglesSortie);
@@ -1131,6 +1133,7 @@ export function BacktestWindow() {
   const setSlippagePct = useStore(backtestStore, (s) => s.setSlippagePct);
   const setCapitalInitial = useStore(backtestStore, (s) => s.setCapitalInitial);
   const setModeFunding = useStore(backtestStore, (s) => s.setModeFunding);
+  const setIntrabar = useStore(backtestStore, (s) => s.setIntrabar);
   const addEntree = useStore(backtestStore, (s) => s.addEntree);
   const updateEntree = useStore(backtestStore, (s) => s.updateEntree);
   const removeEntree = useStore(backtestStore, (s) => s.removeEntree);
@@ -1169,7 +1172,7 @@ export function BacktestWindow() {
       <EnTeteFenetre
         mnemo="BT"
         titre="Backtest"
-        sousTitre="Bougies clôturées · exécution open+1 · pas d'intrabar"
+        sousTitre={intrabar ? "Bougies clôturées · exécution open+1 · stop/objectif intrabar" : "Bougies clôturées · exécution open+1 · pas d'intrabar"}
       />
 
       <div className="space-y-3 px-4 py-3">
@@ -1380,6 +1383,18 @@ export function BacktestWindow() {
                 aria-label="Slippage en pourcentage"
               />
             </label>
+            <label
+              className="flex items-center gap-1 text-[10px] text-text-dim"
+              title="Stop et objectif jugés sur le high/low de chaque barre détenue (au niveau touché, ou à l'ouverture si la barre ouvre au-delà). Stop prioritaire si les deux sont touchés dans la même barre. Décoché : évaluation à la clôture, comme avant."
+            >
+              <input
+                type="checkbox"
+                checked={intrabar}
+                onChange={(e) => setIntrabar(e.target.checked)}
+                aria-label="Stops et objectifs intrabar (high/low)"
+              />
+              Intrabar
+            </label>
             <label className="flex items-center gap-1 text-[10px] text-text-dim">
               Stop
               <Select
@@ -1507,8 +1522,11 @@ export function BacktestWindow() {
           {note !== null && <p className="text-[10px] text-text-dim">{note}</p>}
           {error !== null && <ErreurBloc>{error}</ErreurBloc>}
           <NoteSource>
-            Honnêteté : signaux sur bougies CLÔTURÉES, exécution à l'OPEN de la bougie suivante,
-            stop/objectif évalués à la clôture puis exécutés à l'open suivant (pas d'intrabar). Frais et slippage appliqués aux deux côtés.
+            Honnêteté : signaux sur bougies CLÔTURÉES, exécution à l'OPEN de la bougie suivante,{" "}
+            {intrabar
+              ? "stop/objectif sur le high/low des barres détenues (au niveau touché, stop prioritaire dans la même barre)."
+              : "stop/objectif évalués à la clôture puis exécutés à l'open suivant (pas d'intrabar)."}{" "}
+            Frais et slippage appliqués aux deux côtés.
           </NoteSource>
         </section>
 

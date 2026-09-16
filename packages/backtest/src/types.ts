@@ -107,7 +107,7 @@ export interface StrategieDef {
    * sinon ignoré (repli `tailleFixe`). Fraction du capital INITIAL, non composée.
    */
   risquePct?: number;
-  /** Objectif en % du prix d'entrée (évalué sur la CLÔTURE, sans intrabar). Omis = pas d'objectif. */
+  /** Objectif en % du prix d'entrée (évalué sur la CLÔTURE, ou intrabar si `params.intrabar`). Omis = pas d'objectif. */
   targetPct?: number;
   direction: Direction;
   /** Taille fixe par position, en NOTIONNEL de cotation (ex. 1000 = 1000 USDT engagés). */
@@ -133,6 +133,14 @@ export interface ParamsBacktest {
     modele: "perp-lineaire";
     reglements: readonly ReglementFunding[];
   };
+  /**
+   * Stops et objectifs évalués INTRABAR (high/low de chaque barre détenue) au lieu de la
+   * clôture. Convention conservatrice : stop exécuté avant l'objectif si les deux sont
+   * touchés dans la même barre, et fill à l'OPEN quand la barre ouvre au-delà du niveau
+   * (gap). Les sorties par RÈGLE restent clôture → open+1. Omis/false = modèle historique
+   * (clôture seule), résultats reproductibles à l'identique.
+   */
+  intrabar?: boolean;
 }
 
 /** Funding réglé réellement et mark connu au plus tard à l'instant du règlement. */
@@ -156,8 +164,8 @@ export type SensPosition = "long" | "short";
 /**
  * Raison de clôture d'un trade :
  *  - "regle"       : `reglesSortie` (ou signal inverse en mode les-deux) satisfait ;
- *  - "stop"        : stop touché à la clôture ;
- *  - "target"      : objectif touché à la clôture ;
+ *  - "stop"        : stop touché (à la clôture, ou intrabar si `params.intrabar`) ;
+ *  - "target"      : objectif touché (à la clôture, ou intrabar si `params.intrabar`) ;
  *  - "fin-donnees" : position encore ouverte à la fin de la série (marquée au dernier close).
  */
 export type RaisonSortie = "regle" | "stop" | "target" | "fin-donnees";

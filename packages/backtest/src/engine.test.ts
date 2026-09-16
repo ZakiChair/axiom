@@ -470,6 +470,163 @@ describe("objectif évalué sur la clôture, jamais intrabar", () => {
   });
 });
 
+// ─────────────────────────── 4bis. Mode intrabar (high/low) ───────────────────────────
+
+describe("mode intrabar : stop et objectif sur le high/low des barres détenues", () => {
+  it("stoppe au NIVEAU sur un low qui se referme (même série qu'en mode clôture)", () => {
+    // Identique au test « stop sur la clôture » : barre 3, low 90 < 95 mais close 98.
+    // En mode clôture : stop seulement à la barre 4 (close 94) → sortie à 93 (barre 5).
+    // En mode intrabar : stop À LA BARRE 3, au niveau 95 (la barre a ouvert à 100 > 95).
+    const candles = [
+      barre(t(0), 99, 99),
+      barre(t(1), 101, 101),
+      barre(t(2), 100, 100), // fill entrée = 100 ; stop = 95
+      bougie(t(3), 100, 101, 90, 98), // low 90 perce 95
+      bougie(t(4), 97, 97, 94, 94),
+      barre(t(5), 93, 93),
+      barre(t(6), 93, 93),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, "hausse")],
+      reglesSortie: [],
+      direction: "long",
+      stopPct: 5,
+      tailleFixe: 1000,
+    };
+    const clôture = runBacktest(candles, strat, SANS_FRICTION);
+    expect(clôture.trades[0]!.prixSortie).toBe(93);
+    expect(clôture.trades[0]!.tempsSortie).toBe(t(5));
+
+    const intrabar = runBacktest(candles, strat, { ...SANS_FRICTION, intrabar: true });
+    expect(intrabar.trades).toHaveLength(1);
+    const trade = intrabar.trades[0]!;
+    expect(trade.raison).toBe("stop");
+    expect(trade.prixSortie).toBe(95); // le NIVEAU, pas l'open suivant
+    expect(trade.tempsSortie).toBe(t(3));
+    expect(trade.dureeBarres).toBe(1); // barre d'entrée (2) → barre de sortie (3)
+    // qté = 10 ; pnl = 10·(95−100) = −50 (contre −70 en mode clôture).
+    expect(trade.pnl).toBeCloseTo(-50, 8);
+  });
+
+  it("atteint l'objectif au NIVEAU sur un high qui se referme", () => {
+    const candles = [
+      barre(t(0), 99, 99),
+      barre(t(1), 101, 101),
+      barre(t(2), 100, 100), // entrée = 100 ; objectif 10 % = 110
+      bougie(t(3), 100, 115, 100, 105), // high 115 ≥ 110, close 105
+      bougie(t(4), 108, 112, 108, 111),
+      barre(t(5), 112, 112),
+      barre(t(6), 112, 112),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, "hausse")],
+      reglesSortie: [],
+      direction: "long",
+      targetPct: 10,
+      tailleFixe: 1000,
+    };
+    const r = runBacktest(candles, strat, { ...SANS_FRICTION, intrabar: true });
+    const trade = r.trades[0]!;
+    expect(trade.raison).toBe("target");
+    expect(trade.prixSortie).toBeCloseTo(110, 8); // 100·(1 + 10/100) — arrondi flottant
+    expect(trade.tempsSortie).toBe(t(3));
+    expect(trade.pnl).toBeCloseTo(100, 8); // 10·(110−100)
+  });
+
+  it("stop PRIORITAIRE quand les deux niveaux sont touchés dans la même barre", () => {
+    const candles = [
+      barre(t(0), 99, 99),
+      barre(t(1), 101, 101),
+      barre(t(2), 100, 100), // entrée = 100 ; stop 95, objectif 110
+      bougie(t(3), 100, 112, 94, 106), // high 112 ≥ 110 ET low 94 ≤ 95
+      barre(t(4), 106, 106),
+      barre(t(5), 106, 106),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, "hausse")],
+      reglesSortie: [],
+      direction: "long",
+      stopPct: 5,
+      targetPct: 10,
+      tailleFixe: 1000,
+    };
+    const r = runBacktest(candles, strat, { ...SANS_FRICTION, intrabar: true });
+    const trade = r.trades[0]!;
+    expect(trade.raison).toBe("stop");
+    expect(trade.prixSortie).toBe(95);
+  });
+
+  it("gap à l'ouverture sous le stop : fill à l'OPEN, jamais au niveau", () => {
+    const candles = [
+      barre(t(0), 99, 99),
+      barre(t(1), 101, 101),
+      barre(t(2), 100, 100), // entrée = 100 ; stop 95
+      bougie(t(3), 92, 93, 90, 92), // ouvre à 92 (gap sous 95)
+      barre(t(4), 92, 92),
+      barre(t(5), 92, 92),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, "hausse")],
+      reglesSortie: [],
+      direction: "long",
+      stopPct: 5,
+      tailleFixe: 1000,
+    };
+    const r = runBacktest(candles, strat, { ...SANS_FRICTION, intrabar: true });
+    const trade = r.trades[0]!;
+    expect(trade.raison).toBe("stop");
+    expect(trade.prixSortie).toBe(92); // open de la barre 3, pas 95
+    expect(trade.pnl).toBeCloseTo(-80, 8); // 10·(92−100)
+  });
+
+  it("short : stop sur un high, objectif sur un low", () => {
+    const candles = [
+      barre(t(0), 101, 101),
+      barre(t(1), 99, 99), // cross down à i=1
+      barre(t(2), 100, 100), // fill entrée short = 100 ; stop 5 % = 105
+      bougie(t(3), 100, 106, 99, 104), // high 106 ≥ 105 → stop au niveau
+      barre(t(4), 104, 104),
+      barre(t(5), 104, 104),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, "baisse")],
+      reglesSortie: [],
+      direction: "short",
+      stopPct: 5,
+      tailleFixe: 1000,
+    };
+    const r = runBacktest(candles, strat, { ...SANS_FRICTION, intrabar: true });
+    const trade = r.trades[0]!;
+    expect(trade.sens).toBe("short");
+    expect(trade.raison).toBe("stop");
+    expect(trade.prixSortie).toBe(105);
+    expect(trade.pnl).toBeCloseTo(-50, 8); // 10·(100−105)
+  });
+
+  it("les sorties par RÈGLE restent clôture → open+1 même en mode intrabar", () => {
+    const candles = [
+      barre(t(0), 99, 99),
+      barre(t(1), 101, 101),
+      barre(t(2), 100, 100),
+      barre(t(3), 100, 100),
+      bougie(t(4), 100, 101, 99, 99), // close 99 < 100 → règle de sortie à i=4
+      barre(t(5), 98, 98), // fill à l'open suivant
+      barre(t(6), 98, 98),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, "hausse")],
+      reglesSortie: [croiseClose(100, "baisse")],
+      direction: "long",
+      tailleFixe: 1000,
+    };
+    const r = runBacktest(candles, strat, { ...SANS_FRICTION, intrabar: true });
+    const trade = r.trades[0]!;
+    expect(trade.raison).toBe("regle");
+    expect(trade.prixSortie).toBe(98);
+    expect(trade.tempsSortie).toBe(t(5));
+  });
+});
+
 // ─────────────────────────── 5. Direction short ───────────────────────────
 
 describe("direction short", () => {

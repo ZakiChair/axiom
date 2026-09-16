@@ -11,6 +11,12 @@
  *   3. Stop et objectif sont évalués sur la CLÔTURE (PAS d'intrabar) puis exécutés à
  *      l'open suivant : un pic/creux intrabar qui ne se referme pas au-delà du seuil ne
  *      déclenche RIEN. Choix conservateur et cohérent avec l'étiquette « pas d'intrabar ».
+ *   3bis. `params.intrabar` (optionnel, défaut ABSENT = comportement 3) évalue stop et
+ *      objectif sur le HIGH/LOW des barres DÉTENUES, au niveau touché — la barre
+ *      d'entrée incluse (le fill d'entrée est à son open, donc antérieur au high/low).
+ *      Convention conservatrice : si stop ET objectif sont touchés dans la même barre,
+ *      le STOP est exécuté d'abord ; une barre qui ouvre au-delà du niveau (gap) remplit
+ *      à l'OPEN, pas au niveau. Les sorties par RÈGLE gardent le modèle clôture → open+1.
  *   4. Une seule position à la fois (pas de pyramidage). La position encore ouverte à la
  *      fin de la série est marquée au dernier close (raison "fin-donnees").
  *
@@ -390,6 +396,10 @@ function cloturerTrade(
  * Décide si une position doit être clôturée à la CLÔTURE de la barre `i` (pas d'intrabar).
  * Priorité : stop, puis objectif, puis règle de sortie. En mode "les-deux", une position
  * longue se ferme sur signal SHORT (reglesSortie), une courte sur signal LONG (reglesEntree).
+ *
+ * `evaluerNiveaux = false` (mode `params.intrabar`) : stop et objectif sont traités par
+ * `sortieIntrabar` sur le high/low — cette fonction ne décide plus que la RÈGLE, sinon le
+ * même niveau serait jugé deux fois (une fois en intrabar, une fois à la clôture).
  */
 function decisionSortie(
   pos: PositionOuverte,
@@ -399,12 +409,13 @@ function decisionSortie(
   sortie: ConditionCompilee[],
   i: number,
   direction: Direction,
+  evaluerNiveaux: boolean,
 ): RaisonSortie | null {
-  if (pos.niveauStop !== null) {
+  if (evaluerNiveaux && pos.niveauStop !== null) {
     const touche = pos.sens === "long" ? cloture <= pos.niveauStop : cloture >= pos.niveauStop;
     if (touche) return "stop";
   }
-  if (strat.targetPct !== undefined && strat.targetPct > 0) {
+  if (evaluerNiveaux && strat.targetPct !== undefined && strat.targetPct > 0) {
     const seuil =
       pos.sens === "long"
         ? pos.prixEntree * (1 + strat.targetPct / 100)
@@ -419,6 +430,41 @@ function decisionSortie(
         : toutesVraies(entree, i)
       : toutesVraies(sortie, i);
   return signalFermeture ? "regle" : null;
+}
+
+/**
+ * Stop ou objectif touché DANS la barre (mode `params.intrabar`), sur son high/low.
+ * Renvoie la raison et le prix BRUT (slippage appliqué par l'appelant) :
+ *  - niveau touché → fill AU NIVEAU (un ordre stop devient market au toucher) ;
+ *  - barre ouverte au-delà (gap) → fill à l'OPEN, jamais au niveau : un long stoppé
+ *    sous son stop, un short stoppé au-dessus, un objectif atteint mieux que prévu ;
+ *  - stop prioritaire si les deux niveaux sont touchés dans la même barre (conservateur :
+ *    on ne peut pas savoir lequel est venu en premier avec des bougies OHLC).
+ */
+function sortieIntrabar(
+  pos: PositionOuverte,
+  barre: Candle,
+  strat: StrategieDef,
+): { raison: RaisonSortie; prix: number } | null {
+  if (pos.niveauStop !== null) {
+    const touche = pos.sens === "long" ? barre.low <= pos.niveauStop : barre.high >= pos.niveauStop;
+    if (touche) {
+      const prix = pos.sens === "long" ? Math.min(pos.niveauStop, barre.open) : Math.max(pos.niveauStop, barre.open);
+      return { raison: "stop", prix };
+    }
+  }
+  if (strat.targetPct !== undefined && strat.targetPct > 0) {
+    const seuil =
+      pos.sens === "long"
+        ? pos.prixEntree * (1 + strat.targetPct / 100)
+        : pos.prixEntree * (1 - strat.targetPct / 100);
+    const touche = pos.sens === "long" ? barre.high >= seuil : barre.low <= seuil;
+    if (touche) {
+      const prix = pos.sens === "long" ? Math.max(seuil, barre.open) : Math.min(seuil, barre.open);
+      return { raison: "target", prix };
+    }
+  }
+  return null;
 }
 
 // ─────────────────────────── Boucle principale ───────────────────────────
@@ -537,15 +583,31 @@ export function runBacktest(
         }
       }
     } else {
-      // En position : décider une éventuelle clôture (à la clôture de la barre i).
-      const raison = decisionSortie(pos, barreDecision.close, strat, entree, sortie, i, direction);
-      if (raison !== null) {
-        const prixSortie = fillSortie(barreFill.open, pos.sens, params.slippagePct);
-        trades.push(cloturerTrade(pos, prixSortie, barreFill.time, barreFill.time, i + 1, raison, strat, params, candles, i + 1));
+      // En position. Mode intrabar : stop/objectif d'abord, sur le high/low de la barre
+      // (la position est détenue dès son open d'entrée — `indexEntree <= i`).
+      const intrabar = params.intrabar === true && pos.indexEntree <= i
+        ? sortieIntrabar(pos, barreDecision, strat)
+        : null;
+      if (intrabar !== null) {
+        const prixSortie = fillSortie(intrabar.prix, pos.sens, params.slippagePct);
+        // Barre i = barre de fill : elle est DÉTENUE (excursions incluses, `i + 1`), et
+        // l'instant de sortie effectif reste borné à son open (aucun règlement de funding
+        // postérieur n'est imputé à la position).
+        trades.push(
+          cloturerTrade(pos, prixSortie, barreDecision.time, barreDecision.time, i, intrabar.raison, strat, params, candles, i + 1),
+        );
         pos = null;
-        // Pas de réouverture sur la même barre : un éventuel retournement (les-deux) aura
-        // lieu à une itération ULTÉRIEURE (préserve « une position à la fois »).
+      } else {
+        // Sinon : décision à la CLÔTURE de la barre i, exécutée à l'open suivant.
+        const raison = decisionSortie(pos, barreDecision.close, strat, entree, sortie, i, direction, params.intrabar !== true);
+        if (raison !== null) {
+          const prixSortie = fillSortie(barreFill.open, pos.sens, params.slippagePct);
+          trades.push(cloturerTrade(pos, prixSortie, barreFill.time, barreFill.time, i + 1, raison, strat, params, candles, i + 1));
+          pos = null;
+        }
       }
+      // Pas de réouverture sur la même barre : un éventuel retournement (les-deux) aura
+      // lieu à une itération ULTÉRIEURE (préserve « une position à la fois »).
     }
   }
 

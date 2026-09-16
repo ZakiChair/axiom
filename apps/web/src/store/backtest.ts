@@ -488,6 +488,8 @@ export interface BacktestState {
   slippagePct: number;
   capitalInitial: number;
   modeFunding: ModeFundingBacktest;
+  /** Stops/objectifs sur le high/low des barres détenues (défaut : clôture seule). */
+  intrabar: boolean;
   reglesEntree: Condition[];
   reglesSortie: Condition[];
 
@@ -504,6 +506,7 @@ export interface BacktestState {
   setSlippagePct: (v: number) => void;
   setCapitalInitial: (v: number) => void;
   setModeFunding: (v: ModeFundingBacktest) => void;
+  setIntrabar: (v: boolean) => void;
   addEntree: () => void;
   updateEntree: (index: number, cond: Condition) => void;
   removeEntree: (index: number) => void;
@@ -568,6 +571,7 @@ export function configCourante(s: BacktestState): ConfigRun {
     slippagePct: s.slippagePct,
     capitalInitial: s.capitalInitial,
     modeFunding: s.modeFunding,
+    intrabar: s.intrabar,
     reglesEntree: s.reglesEntree,
     reglesSortie: s.reglesSortie,
   };
@@ -592,6 +596,7 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
   slippagePct: 0.02,
   capitalInitial: 10_000,
   modeFunding: "aucun",
+  intrabar: false,
   reglesEntree: [condEntreeDefaut()],
   reglesSortie: [condSortieDefaut()],
 
@@ -608,6 +613,7 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
   setSlippagePct: (v) => set({ slippagePct: v }),
   setCapitalInitial: (v) => set({ capitalInitial: v }),
   setModeFunding: (modeFunding) => set({ modeFunding }),
+  setIntrabar: (v) => set({ intrabar: v }),
 
   addEntree: () => set((s) => ({ reglesEntree: [...s.reglesEntree, condEntreeDefaut()] })),
   updateEntree: (index, cond) =>
@@ -820,6 +826,7 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
         fraisPct: s.fraisPct,
         slippagePct: s.slippagePct,
         capitalInitial: s.capitalInitial,
+        ...(s.intrabar ? { intrabar: true } : {}),
         ...(historiqueFunding !== null && finDonneesMs !== null ? {
           finDonneesMs,
           funding: { modele: "perp-lineaire" as const, reglements: historiqueFunding.reglements },

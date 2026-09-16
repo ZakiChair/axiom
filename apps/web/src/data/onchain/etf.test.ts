@@ -122,6 +122,115 @@ describe("parseEtfFlows (schéma réel SoSoValue currentEtfDataMetrics)", () => 
     expect(r.parEmetteur?.map((e) => e.emetteur)).toEqual(["ARKB", "IBIT", "BITB", "HODL", "GBTC"]);
   });
 
+  // Fixture RÉDUITE (3 fonds) d'une réponse réelle du 2026-09-15 (type us-btc-spot) : les
+  // fractions SoSoValue (part de la capitalisation, prime/décote, frais) sont exposées ×100.
+  const REPONSE_REELLE = {
+    code: 0,
+    msg: null,
+    traceId: null,
+    data: {
+      totalNetAssets: { value: "95716988283.2459999600000000", lastUpdateDate: "2026-09-15", status: "1" },
+      totalNetAssetsPercentage: { value: "0.06275858", lastUpdateDate: "2026-09-15", status: "1" },
+      dailyNetInflow: { value: "-450329418.7100000000000000", lastUpdateDate: "2026-09-15", status: "1" },
+      cumNetInflow: { value: "54885848662.9279983356500000", lastUpdateDate: "2026-09-15", status: "1" },
+      dailyTotalValueTraded: { value: "4346558481.4000000000000000", lastUpdateDate: "2026-09-15", status: "1" },
+      totalTokenHoldings: { value: "1260520.19998050", lastUpdateDate: "2026-09-15", status: "1" },
+      list: [
+        {
+          id: 1746110179689463810,
+          ticker: "IBIT",
+          institute: "BlackRock ",
+          fee: { value: "0.00250000", lastUpdateDate: "2026-09-15", status: "1" },
+          netAssetsPercentage: { value: "0.03906797", lastUpdateDate: "2026-09-15", status: "1" },
+          netAssets: { value: "59584956800.0000000000000000", lastUpdateDate: "2026-09-15", status: "1" },
+          dailyNetInflow: { value: "-161691280.0000000000000000", lastUpdateDate: "2026-09-15", status: "1" },
+          cumNetInflow: { value: "63976600063.6599987745000000", lastUpdateDate: "2026-09-15", status: "1" },
+          dailyValueTraded: { value: "3328760000.0000000000000000", lastUpdateDate: "2026-09-15", status: "1" },
+          discountPremiumRate: { value: "0.0024881984977791483", lastUpdateDate: "2026-09-15", status: "1" },
+        },
+        {
+          id: 1746110179697852417,
+          ticker: "FBTC",
+          institute: "Fidelity",
+          fee: { value: "0.00000000", lastUpdateDate: "2026-09-15", status: "1" },
+          netAssetsPercentage: { value: "0.00865117", lastUpdateDate: "2026-09-15", status: "1" },
+          netAssets: { value: "13194434472.8320000000000000", lastUpdateDate: "2026-09-15", status: "1" },
+          dailyNetInflow: { value: "-214754800.0000000000000000", lastUpdateDate: "2026-09-15", status: "1" },
+          cumNetInflow: { value: "10120528736.9499998597000000", lastUpdateDate: "2026-09-15", status: "1" },
+          dailyValueTraded: { value: "425269700.0000000000000000", lastUpdateDate: "2026-09-15", status: "1" },
+          discountPremiumRate: { value: "0.001840192861812584", lastUpdateDate: "2026-09-15", status: "1" },
+        },
+        {
+          id: 1746110179697852418,
+          ticker: "ARKB",
+          institute: "Ark & 21Shares",
+          fee: { value: "0.00210000", lastUpdateDate: "2026-09-15", status: "1" },
+          netAssetsPercentage: { value: "0.00158727", lastUpdateDate: "2026-09-15", status: "1" },
+          netAssets: { value: "2420846354.9000000000000000", lastUpdateDate: "2026-09-15", status: "1" },
+          dailyNetInflow: { value: "-17381727.2100000000000000", lastUpdateDate: "2026-09-15", status: "1" },
+          cumNetInflow: { value: "1163146450.4849999813000000", lastUpdateDate: "2026-09-15", status: "1" },
+          dailyValueTraded: { value: "127368400.0000000000000000", lastUpdateDate: "2026-09-15", status: "1" },
+          discountPremiumRate: { value: "0.0015517899731207763", lastUpdateDate: "2026-09-15", status: "1" },
+        },
+      ],
+    },
+  };
+
+  it("lit les champs par fonds et globaux (encours, part de la capitalisation ×100, cumul, volume, prime, frais)", () => {
+    const r = parseEtfFlows(REPONSE_REELLE);
+    expect(r.disponible).toBe(true);
+    // Tri par |flux| inchangé : FBTC (−214 M) devant IBIT (−161 M) devant ARKB (−17 M).
+    expect(r.parEmetteur?.map((e) => e.emetteur)).toEqual(["FBTC", "IBIT", "ARKB"]);
+    expect(r.total).toBeCloseTo(-393_827_807.21);
+    const ibit = r.parEmetteur?.[1];
+    expect(ibit?.flux).toBe(-161_691_280);
+    expect(ibit?.encoursUsd).toBe(59_584_956_800);
+    // netAssetsPercentage = part de la CAPITALISATION du BTC détenue par ce fonds, pas de l'encours ETF.
+    expect(ibit?.partCapitalisationPct).toBeCloseTo(3.906797);
+    expect(ibit?.cumulUsd).toBeCloseTo(63_976_600_063.66);
+    expect(ibit?.volumeUsd).toBe(3_328_760_000);
+    expect(ibit?.primeDecotePct).toBeCloseTo(0.2488);
+    expect(ibit?.fraisPct).toBeCloseTo(0.25);
+    // Frais réellement nuls (FBTC, status 1) : un vrai zéro est conservé.
+    expect(r.parEmetteur?.[0]?.fraisPct).toBe(0);
+    expect(r.encoursTotalUsd).toBeCloseTo(95_716_988_283.246);
+    expect(r.partCapitalisationTotalePct).toBeCloseTo(6.275858);
+    expect(r.avoirsTotal).toBeCloseTo(1_260_520.2);
+    expect(r.volumeTotalUsd).toBeCloseTo(4_346_558_481.4);
+    expect(r.cumulTotalUsd).toBeCloseTo(54_885_848_662.93);
+  });
+
+  it("champ non publié (status 3) ou absent → clé omise, jamais 0 ; flux et total inchangés", () => {
+    const r = parseEtfFlows({
+      data: {
+        dailyNetInflow: { value: "-30", lastUpdateDate: "2026-09-15", status: "1" },
+        totalNetAssets: { value: "1000", lastUpdateDate: "2026-09-15", status: "3" },
+        totalTokenHoldings: { value: "1260520.2", lastUpdateDate: "2026-09-15", status: "1" },
+        list: [
+          {
+            ticker: "IBIT",
+            dailyNetInflow: { value: "-20", status: "1" },
+            netAssets: { value: "500", status: "3" },
+            cumNetInflow: { value: "700", status: "1" },
+            discountPremiumRate: { value: null, status: "1" },
+          },
+          { ticker: "FBTC", dailyNetInflow: { value: "-10", status: "1" } },
+        ],
+      },
+    });
+    expect(r.total).toBe(-30);
+    const ibit = r.parEmetteur?.[0];
+    expect(ibit?.flux).toBe(-20);
+    expect(ibit?.cumulUsd).toBe(700);
+    expect(ibit).not.toHaveProperty("encoursUsd");
+    expect(ibit).not.toHaveProperty("primeDecotePct");
+    expect(ibit).not.toHaveProperty("fraisPct");
+    expect(r.parEmetteur?.[1]).toStrictEqual({ emetteur: "FBTC", flux: -10 });
+    expect(r.avoirsTotal).toBeCloseTo(1_260_520.2);
+    expect(r).not.toHaveProperty("encoursTotalUsd");
+    expect(r).not.toHaveProperty("volumeTotalUsd");
+  });
+
   it("ignore les entrées de la liste sans ticker ou avec netInflow non numérique", () => {
     const json = {
       data: {

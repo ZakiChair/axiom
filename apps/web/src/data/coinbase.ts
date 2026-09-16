@@ -18,6 +18,11 @@
  *
  * Limites notables :
  *   - REST candles : 350 bougies max ; start/end requis (UNIX secondes) -> calculés depuis limit+tf.
+ *     Le paramètre `limit` n'est PAS envoyé : vérifié le 2026-09-16 (BTC-USD, ONE_HOUR, sans clé),
+ *     sa présence fait IGNORER start/end — l'API renvoie les `limit` DERNIÈRES bougies, et la
+ *     pagination arrière par `endTime` (cbprem, défilement des charts, EVTS, saisonnalité) recevait
+ *     toujours la même page. Sans `limit`, la fenêtre est honorée jusqu'à 350 bougies exactement ;
+ *     au-delà : HTTP 400 « number of candles requested should be less than 350 ».
  *   - market_trades : `side` = côté du MAKER -> on INVERSE pour obtenir l'agresseur (taker).
  *   - Bougies live agrégées : open/high/low/close/volume/delta issus des trades LIVE uniquement
  *     (l'historique vient du backfill REST) ; la clôture est posée au franchissement de bucket.
@@ -192,7 +197,7 @@ export const coinbaseAdapter: IExchangeAdapter = {
       granularity: gran,
       start: String(startSec),
       end: String(endSec),
-      limit: String(limit),
+      // PAS de `limit` : sa présence fait ignorer start/end (cf. en-tête, vérifié 2026-09-16).
     });
 
     const res = await fetch(

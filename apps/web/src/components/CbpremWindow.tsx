@@ -2,6 +2,10 @@
  * Fenêtre « CBPREM » — Premium Coinbase : gap % du spot Coinbase vs Binance sur
  * ~30 j (klines 1h), proxy de la demande institutionnelle US (cf. data/cbprem.ts).
  * Premium positif = Coinbase paie plus cher (demande US) ; négatif = décote.
+ * Deux lectures au choix (segmenté) : « Ajusté USDT » (défaut, jambe Binance convertie
+ * en USD par le taux USDT/USD Kraken — peg neutralisé, doc 02 § B7) ou « Brute » (USD vs
+ * USDT, inclut l'écart de peg). Si l'ajustement est indisponible, le segmenté est neutralisé
+ * sur Brute et une note discrète le dit ; la `NoteSource` dit la vérité selon le mode.
  *
  * Présentation PURE (patron SqueezeWindow) : l'état de données vit dans `cbpremStore`
  * (vanilla) ; seul le survol est local à React. Le tracé suit le patron canvas des
@@ -315,6 +319,11 @@ export function CbpremWindow() {
   const stats = useStore(cbpremStore, (s) => s.stats);
   const erreur = useStore(cbpremStore, (s) => s.erreur);
   const majTs = useStore(cbpremStore, (s) => s.majTs);
+  const mode = useStore(cbpremStore, (s) => s.mode);
+  // Booléen dérivé (pas la série elle-même) : le composant ne re-rend que si la disponibilité change.
+  const ajusteeDispo = useStore(cbpremStore, (s) => s.serieAjustee.length > 0);
+  const ecartPegPct = useStore(cbpremStore, (s) => s.ecartPegPct);
+  const noteAjustement = useStore(cbpremStore, (s) => s.noteAjustement);
 
   const [survol, setSurvol] = useState<Survol | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -373,6 +382,20 @@ export function CbpremWindow() {
 
   const courant = stats?.courant ?? null;
 
+  // Segmenté de lecture. `Segmente` (ui.tsx) n'a pas de prop `disabled` : quand l'ajustée est
+  // indisponible, le store force déjà `mode = "brute"` et ignore `setMode("ajuste")` ; on
+  // neutralise en plus le contrôle visuellement (convention `disabled:opacity-40`) et au pointeur.
+  const segmenteMode = (
+    <Segmente
+      options={[
+        { id: "ajuste", label: "Ajusté USDT", title: "Jambe Binance convertie en USD (USDT/USD Kraken) — peg neutralisé" },
+        { id: "brute", label: "Brute", title: "USD vs USDT — inclut l'écart de peg USDT" },
+      ] as const}
+      actif={mode}
+      onChange={(m) => cbpremStore.getState().setMode(m)}
+    />
+  );
+
   return (
     <>
       <EnTeteFenetre
@@ -389,13 +412,25 @@ export function CbpremWindow() {
               actif={base}
               onChange={(b) => cbpremStore.getState().setBase(b)}
             />
+            {ajusteeDispo ? (
+              segmenteMode
+            ) : (
+              // <div> (pas <span>) : `Segmente` rend un <div>, un bloc dans un inline serait invalide.
+              <div
+                className="pointer-events-none opacity-40"
+                aria-disabled="true"
+                title="Ajustement USDT indisponible — prime brute seule"
+              >
+                {segmenteMode}
+              </div>
+            )}
             <BoutonRafraichir onClick={rafraichir} disabled={enCours} />
           </>
         }
       />
 
-      {/* Bandeau de synthèse : premium courant teinté, moyenne 7 j, z-score 30 j. */}
-      <div className="flex shrink-0 items-center gap-4 border-b border-border px-4 py-2 text-[11px]">
+      {/* Bandeau de synthèse : premium courant teinté, moyenne 7 j, z-score 30 j, écart de peg. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-4 border-b border-border px-4 py-2 text-[11px]">
         <span className="flex items-center gap-1.5">
           <span className="text-text-dim">Premium</span>
           <Badge ton={tonPremium(courant)}>{formatPct(courant, 3)}</Badge>
@@ -406,13 +441,18 @@ export function CbpremWindow() {
         <span className="text-text-dim">
           Z 30j <span className="tabular-nums text-text">{formatDec(stats?.z30j ?? null, 2)}</span>
         </span>
+        <span className="text-text-dim" title="(USDT/USD − 1) × 100 au dernier point aligné, source Kraken">
+          Écart USDT/USD <span className="tabular-nums text-text">{formatPct(ecartPegPct, 3)}</span>
+        </span>
+        {/* Note d'ajustement : discrète (dim, en bout de bandeau), seulement si l'ajustée manque. */}
+        {noteAjustement !== null && <span className="ml-auto text-[10px] text-text-dim">{noteAjustement}</span>}
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col px-4 py-3">
         {erreur !== null && serie.length === 0 ? (
           <ErreurBloc>{erreur}</ErreurBloc>
         ) : enCours && serie.length === 0 ? (
-          <Chargement libelle="Collecte klines Coinbase / Binance…" />
+          <Chargement libelle="Collecte klines Coinbase / Binance / Kraken…" />
         ) : serie.length === 0 ? (
           <Vide>Aucun premium exploitable (klines communes Coinbase/Binance requises). Réessayez avec Rafraîchir.</Vide>
         ) : (
@@ -464,8 +504,11 @@ export function CbpremWindow() {
         )}
 
         <div className="mt-3 flex items-center justify-between">
+          {/* La note dit la vérité selon le mode : peg neutralisé (ajusté) ou inclus (brute). */}
           <NoteSource>
-            Coinbase vs Binance · klines 1h · 30 j · USD vs USDT — inclut l'écart de peg
+            {mode === "ajuste"
+              ? "Coinbase vs Binance × USDT/USD Kraken · klines 1h · 30 j — peg neutralisé"
+              : "Coinbase vs Binance · klines 1h · 30 j · USD vs USDT — inclut l'écart de peg"}
           </NoteSource>
           <Fraicheur loading={enCours} majTs={majTs} />
         </div>

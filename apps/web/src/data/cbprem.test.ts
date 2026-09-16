@@ -4,7 +4,15 @@
  * Les valeurs attendues sont justifiées en commentaire.
  */
 import { describe, it, expect } from "vitest";
-import { bandesPremium, serieCbprem, statsPremium, zPoint, type PointPremium } from "./cbprem";
+import {
+  bandesPremium,
+  ecartPegDernierPoint,
+  serieCbprem,
+  serieCbpremAjustee,
+  statsPremium,
+  zPoint,
+  type PointPremium,
+} from "./cbprem";
 
 const JOUR_MS = 24 * 3_600_000;
 
@@ -71,6 +79,126 @@ describe("serieCbprem — alignement par openTime", () => {
   it("entrées vides ou totalement disjointes → série vide", () => {
     expect(serieCbprem([], [])).toEqual([]);
     expect(serieCbprem([{ t: 1, close: 100 }], [{ t: 2, close: 100 }])).toEqual([]);
+  });
+});
+
+describe("serieCbpremAjustee — premium neutralisé du peg USDT (doc 02 § B7)", () => {
+  it("k = 1 partout ⇒ sortie IDENTIQUE à serieCbprem (mêmes points, mêmes valeurs, même ordre)", () => {
+    // Mêmes entrées scramblées que le premier test de serieCbprem ; USDT/USD à 1 sur
+    // tous les openTime (y compris ceux sans contrepartie) : l'ajustement est neutre.
+    const klinesCb = [
+      { t: 3_000, close: 301 },
+      { t: 9_999, close: 999 },
+      { t: 1_000, close: 101 },
+    ];
+    const klinesBn = [
+      { t: 2_000, close: 200 },
+      { t: 3_000, close: 300 },
+      { t: 1_000, close: 100 },
+    ];
+    const klinesUsdt = [
+      { t: 9_999, close: 1 },
+      { t: 3_000, close: 1 },
+      { t: 2_000, close: 1 },
+      { t: 1_000, close: 1 },
+    ];
+    expect(serieCbpremAjustee(klinesCb, klinesBn, klinesUsdt)).toEqual(serieCbprem(klinesCb, klinesBn));
+  });
+
+  it("convertit la jambe Binance en USD : premium = (cb − bn·k) / (bn·k) × 100 ; point sans k OMIS", () => {
+    const klinesCb = [
+      { t: 1_000, close: 101 },
+      { t: 2_000, close: 101 }, // pas de k à t=2000 → exclu (pas d'interpolation)
+      { t: 3_000, close: 99.8 },
+    ];
+    const klinesBn = [
+      { t: 1_000, close: 100 },
+      { t: 2_000, close: 100 },
+      { t: 3_000, close: 100 },
+    ];
+    const klinesUsdt = [
+      { t: 1_000, close: 0.998 },
+      { t: 3_000, close: 0.998 },
+    ];
+    const serie = serieCbpremAjustee(klinesCb, klinesBn, klinesUsdt);
+    expect(serie.map((p) => p.t)).toEqual([1_000, 3_000]);
+    // t=1000 : bn·k = 99.8 ; (101 − 99.8) / 99.8 × 100 = 120 / 99.8 = 1.2024048096192384.
+    // (Le brut donnerait 1 % : le peg à −0,2 % gonfle bien le premium ajusté.)
+    expect(serie[0]?.premiumPct).toBeCloseTo(1.2024048096192384, 9);
+    // t=3000 : cb = bn·k exactement → premium nul une fois le peg neutralisé.
+    expect(serie[1]?.premiumPct).toBeCloseTo(0, 9);
+  });
+
+  it("omet les points où k ≤ 0 ou n'est pas fini (NaN/Infinity), mêmes gardes cb/bn que serieCbprem", () => {
+    const klinesCb = [
+      { t: 1, close: 100 }, // k=0 → exclu
+      { t: 2, close: 100 }, // k négatif → exclu
+      { t: 3, close: 100 }, // k=NaN → exclu
+      { t: 4, close: 100 }, // k=Infinity → exclu
+      { t: 5, close: 100 }, // bn=0 → exclu (garde héritée)
+      { t: 6, close: NaN }, // cb non fini → exclu (garde héritée)
+      { t: 7, close: 100 }, // seul point valide
+    ];
+    const klinesBn = [
+      { t: 1, close: 100 },
+      { t: 2, close: 100 },
+      { t: 3, close: 100 },
+      { t: 4, close: 100 },
+      { t: 5, close: 0 },
+      { t: 6, close: 100 },
+      { t: 7, close: 100 },
+    ];
+    const klinesUsdt = [
+      { t: 1, close: 0 },
+      { t: 2, close: -1 },
+      { t: 3, close: NaN },
+      { t: 4, close: Infinity },
+      { t: 5, close: 1 },
+      { t: 6, close: 1 },
+      { t: 7, close: 1 },
+    ];
+    const serie = serieCbpremAjustee(klinesCb, klinesBn, klinesUsdt);
+    expect(serie).toEqual([{ t: 7, premiumPct: 0 }]);
+    for (const p of serie) expect(Number.isFinite(p.premiumPct)).toBe(true);
+  });
+
+  it("entrées vides ou sans openTime commun aux TROIS séries → série vide", () => {
+    expect(serieCbpremAjustee([], [], [])).toEqual([]);
+    expect(
+      serieCbpremAjustee([{ t: 1, close: 100 }], [{ t: 1, close: 100 }], [{ t: 2, close: 1 }]),
+    ).toEqual([]);
+  });
+});
+
+describe("ecartPegDernierPoint — écart de peg USDT/USD au dernier point aligné", () => {
+  it("(k − 1) × 100 avec k = close USDT/USD à l'openTime du DERNIER point de la série", () => {
+    const serie: PointPremium[] = [
+      { t: 1_000, premiumPct: 0.5 },
+      { t: 2_000, premiumPct: 0.4 },
+    ];
+    const klinesUsdt = [
+      { t: 1_000, close: 1.001 }, // pas le dernier → ignoré
+      { t: 2_000, close: 0.998 }, // dernier : (0.998 − 1) × 100 = −0.2
+    ];
+    expect(ecartPegDernierPoint(serie, klinesUsdt)).toBeCloseTo(-0.2, 9);
+  });
+
+  it("openTime USDT dupliqué : la DERNIÈRE close l'emporte, comme dans serieCbpremAjustee (Map.set)", () => {
+    // Jamais observé chez Kraken, mais les deux fonctions doivent lire le MÊME k : la série
+    // ajustée retient la dernière close par t (Map.set), l'écart affiché doit en faire autant.
+    const klinesUsdt = [
+      { t: 2_000, close: 1.001 }, // doublon écrasé
+      { t: 2_000, close: 0.998 }, // dernière close → k retenu
+    ];
+    const serie = serieCbpremAjustee([{ t: 2_000, close: 100 }], [{ t: 2_000, close: 100 }], klinesUsdt);
+    // bn·k = 99.8 : (100 − 99.8) / 99.8 × 100 = 0.2004008016032064 (k = 0.998, pas 1.001).
+    expect(serie[0]?.premiumPct).toBeCloseTo(0.2004008016032064, 9);
+    expect(ecartPegDernierPoint(serie, klinesUsdt)).toBeCloseTo(-0.2, 9);
+  });
+
+  it("null si la série est vide ou si aucune close USDT n'existe à l'openTime du dernier point", () => {
+    expect(ecartPegDernierPoint([], [{ t: 1_000, close: 1 }])).toBeNull();
+    expect(ecartPegDernierPoint([{ t: 2_000, premiumPct: 0 }], [{ t: 1_000, close: 1 }])).toBeNull();
   });
 });
 

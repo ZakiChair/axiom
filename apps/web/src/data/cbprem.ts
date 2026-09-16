@@ -4,8 +4,10 @@
  * POURQUOI : le gap % entre le spot Coinbase et le spot Binance est un proxy de
  * la demande institutionnelle US (Coinbase = plateforme dominante côté US) —
  * premium positif = Coinbase paie plus cher (demande US) ; négatif = décote.
- * NB : Coinbase cote en USD, Binance en USDT — le signal est donc USD vs USDT et
- * inclut l'écart de peg USDT (pas un pur écart Coinbase/Binance en devise identique).
+ * NB : Coinbase cote en USD, Binance en USDT — le signal BRUT (`serieCbprem`) est donc
+ * USD vs USDT et inclut l'écart de peg USDT (pas un pur écart Coinbase/Binance en devise
+ * identique). `serieCbpremAjustee` neutralise ce peg avec un taux USDT/USD de référence
+ * (doc 02 § B7) ; le store expose les deux et affiche l'ajustée par défaut.
  * Aucun fetch ici : les effets réseau vivent dans store/cbprem.ts (Task 2).
  */
 
@@ -44,6 +46,66 @@ export function serieCbprem(
   }
   out.sort((a, b) => a.t - b.t);
   return out;
+}
+
+/**
+ * Variante de `serieCbprem` NEUTRALISANT le peg USDT (doc 02 § B7) : la jambe Binance
+ * (cotée USDT) est convertie en USD par le taux de référence k = close USDT/USD au même
+ * openTime, avant le calcul du premium. Pour chaque openTime commun aux TROIS séries :
+ *   premium = (cb − bn × k) / (bn × k) × 100.
+ * Dénominateur bn × k (les DEUX jambes en USD) plutôt que bn seul comme dans la formule
+ * B7 : les deux résultats diffèrent d'un facteur k exactement (nôtre = B7 / k), soit un
+ * écart relatif 1/k − 1 SUR LA VALEUR DU PREMIUM (~0,1 % du premium pour k = 0,999 ;
+ * ~0,08 % pour le 0,99924 observé le 2026-09-16) —
+ * négligeable ; notre forme est un vrai écart relatif en USD, homogène avec `serieCbprem`
+ * (avec k = 1 partout la sortie lui est identique). Gardes de `serieCbprem` (cb/bn finis,
+ * bn > 0) PLUS : point OMIS si k manque à ce t, n'est pas fini, ou est ≤ 0 — jamais
+ * d'interpolation. Sortie triée par t croissant. PURE.
+ */
+export function serieCbpremAjustee(
+  klinesCb: readonly { t: number; close: number }[],
+  klinesBn: readonly { t: number; close: number }[],
+  klinesUsdt: readonly { t: number; close: number }[],
+): PointPremium[] {
+  const bnParT = new Map<number, number>();
+  for (const k of klinesBn) bnParT.set(k.t, k.close);
+  const usdtParT = new Map<number, number>();
+  for (const k of klinesUsdt) usdtParT.set(k.t, k.close);
+
+  const out: PointPremium[] = [];
+  for (const cb of klinesCb) {
+    const bnClose = bnParT.get(cb.t);
+    const k = usdtParT.get(cb.t);
+    if (bnClose === undefined || k === undefined) continue;
+    if (!Number.isFinite(cb.close) || !Number.isFinite(bnClose) || bnClose <= 0) continue;
+    if (!Number.isFinite(k) || k <= 0) continue;
+    const bnUsd = bnClose * k;
+    out.push({ t: cb.t, premiumPct: ((cb.close - bnUsd) / bnUsd) * 100 });
+  }
+  out.sort((a, b) => a.t - b.t);
+  return out;
+}
+
+/**
+ * Écart de peg USDT/USD (en %) au DERNIER point de la série ajustée : `(k − 1) × 100`
+ * avec k = close USDT/USD à ce même openTime (k = 0,99924 → −0,076 %). Null si la série
+ * est vide ou si aucune close USDT n'existe à ce t (entrées incohérentes : la série
+ * ajustée n'a de point qu'aux t où k est valide). En cas d'openTime dupliqué, la DERNIÈRE
+ * close l'emporte — même k que `serieCbpremAjustee` (Map.set), sinon l'écart affiché ne
+ * correspondrait pas au premium tracé. Précondition : série triée chrono (garantie par
+ * `serieCbpremAjustee`). PURE.
+ */
+export function ecartPegDernierPoint(
+  serieAjustee: readonly PointPremium[],
+  klinesUsdt: readonly { t: number; close: number }[],
+): number | null {
+  const dernier = serieAjustee[serieAjustee.length - 1];
+  if (dernier === undefined) return null;
+  let k: number | undefined;
+  for (const u of klinesUsdt) {
+    if (u.t === dernier.t) k = u.close; // pas de sortie anticipée : dernière occurrence retenue
+  }
+  return k === undefined ? null : (k - 1) * 100;
 }
 
 /**

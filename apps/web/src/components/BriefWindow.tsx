@@ -60,6 +60,7 @@ import { fetchBreadth, type ResumBreadth } from "../data/breadth";
 import { collecterSqueeze } from "../store/squeeze";
 import type { PointRadar } from "../data/squeeze";
 import { distVar } from "../data/distVar";
+import { chargerMultiEchelle, type EchelleLue } from "../data/multiEchelle";
 import { lireResumeLegacyCache, type LigneCotCategorie } from "../store/cot";
 import { deltaSemaines } from "../data/cot";
 import { formatHeureMinute } from "../lib/format";
@@ -86,6 +87,7 @@ import { SectionEco } from "./brief/SectionEco";
 import { SectionMacro } from "./brief/SectionMacro";
 import { SectionNews } from "./brief/SectionNews";
 import { SectionDvol } from "./brief/SectionDvol";
+import { SectionMultiEchelle } from "./brief/SectionMultiEchelle";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -164,6 +166,9 @@ export function BriefWindow() {
   const [news, setNews] = useState<Section<TitreNews[]>>(EN_ATTENTE);
   const [fearGreed, setFearGreed] = useState<Section<FearGreed>>(EN_ATTENTE);
   const [dvol, setDvol] = useState<Section<DvolBrief[]>>(EN_ATTENTE);
+  const [multiEchelle, setMultiEchelle] = useState<Section<EchelleLue[]>>(EN_ATTENTE);
+  /** Symbole des échelles AU CHARGEMENT (le titre ne suit pas un changement de symbole non rechargé). */
+  const [symboleEchelles, setSymboleEchelles] = useState("");
   // Instantanés SYNCHRONES (pas de fetch) calculés en fin de `charger` : null → section absente.
   const [varChart, setVarChart] = useState<VarChart | null>(null);
   const [cot, setCot] = useState<CotChart | null>(null);
@@ -201,6 +206,7 @@ export function BriefWindow() {
     setNews(EN_ATTENTE);
     setFearGreed(EN_ATTENTE);
     setDvol(EN_ATTENTE);
+    setMultiEchelle(EN_ATTENTE);
 
     /** Branche une promesse de section sur son setter, sous garde d'annulation. */
     const lancer = <T,>(p: Promise<T>, set: (s: Section<T>) => void): Promise<void> => {
@@ -216,6 +222,8 @@ export function BriefWindow() {
     };
 
     const symboles = watchlistStore.getState().symbols;
+    const marcheMtf = marketStore.getState();
+    setSymboleEchelles(marcheMtf.symbol);
     const taches = [
       lancer(
         fetchBreadth().then((b) => {
@@ -242,6 +250,10 @@ export function BriefWindow() {
         setFearGreed,
       ),
       lancer(fetchDvolBrief(), setDvol),
+      lancer(
+        chargerMultiEchelle(marcheMtf.exchange, marcheMtf.symbol, ctrl.signal),
+        setMultiEchelle,
+      ),
     ];
     // Toutes les sections réglées → on rouvre « Rafraîchir » (sauf génération périmée).
     void Promise.allSettled(taches).then(() => {
@@ -392,6 +404,14 @@ export function BriefWindow() {
 
         {/* 2) Dérivés — funding + prochain règlement + ΔOI 24 h (BTC/ETH/SOL). */}
         <SectionDerivs derivs={derivs} instant={instant} noteFraicheur={noteFraicheur} />
+
+        {/* Concordance multi-échelle — 15 m/1 h/4 h/1 j du symbole du chart (Binance REST).
+            Lecture descriptive : un alignement n'est pas un signal. */}
+        <SectionMultiEchelle
+          multiEchelle={multiEchelle}
+          symbole={symboleEchelles}
+          noteFraicheur={noteFraicheur}
+        />
 
         {/* VaR chart — VaR95/99 20 b du chart maître (distribution empirique, instantané).
             Absente sous 300 bougies (échantillon insuffisant, cf. distVar). */}

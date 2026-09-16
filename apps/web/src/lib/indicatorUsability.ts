@@ -16,10 +16,20 @@ const SPLIT_VOLUME = new Set([
   "cvdSpotPerp",
   "takerNetPct",
   "stratSpotBreakout",
+  "vpin",
+  "kyleLambda",
 ]);
 
-/** Indicateurs dont le calcul repose sur le volume réel des bougies (0/absent en synthétique). */
-const VOLUME_REEL = new Set(["volume", "rvolSeasonal", "trappedVolume"]);
+/** Indicateurs dont le calcul repose sur le volume réel des bougies (0/absent en synthétique).
+ *  Exporté : `chart/indicators.ts` écarte les mêmes defs du chart synthétique (source unique). */
+export const VOLUME_REEL: ReadonlySet<string> = new Set([
+  "volume",
+  "rvolSeasonal",
+  "trappedVolume",
+  "amihudIlliq",
+  "vpin",
+  "kyleLambda",
+]);
 
 const VOLUME_FOREX = new Set([
   "vwma",

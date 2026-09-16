@@ -37,7 +37,7 @@ import { chartCapaciteStore } from "../store/chartCapacite";
 import { dessinerAnnotationsPane } from "./annotationsPane";
 import { AnnotationsPrix, masquerTooltipAnnotation } from "./annotationsPrix";
 import { auxProvider } from "./auxProvider";
-import { raisonUnusableIndicateur } from "../lib/indicatorUsability";
+import { raisonUnusableIndicateur, VOLUME_REEL } from "../lib/indicatorUsability";
 import {
   computeKey,
   formatInstanceLabel,
@@ -405,7 +405,7 @@ export class ChartIndicators {
     // les candles et l'exchange lors d'une résolution aux asynchrone.
     this.latestArgs = [instances, candles, exchange];
     const effectiveInstances = exchange === "synthetic"
-      ? instances.filter((i) => i.defId !== "volume" && i.defId !== "trappedVolume")
+      ? instances.filter((i) => !VOLUME_REEL.has(i.defId))
       : instances;
     const wanted = new Set(effectiveInstances.map((i) => i.instanceId));
 
@@ -555,7 +555,7 @@ export class ChartIndicators {
     // Dernier tuple connu (Task 14) : lu par `onAuxReady`, cf. `sync`.
     this.latestArgs = [instances, candles, exchange];
     const effectiveInstances = exchange === "synthetic"
-      ? instances.filter((i) => i.defId !== "volume" && i.defId !== "trappedVolume")
+      ? instances.filter((i) => !VOLUME_REEL.has(i.defId))
       : instances;
     for (const inst of effectiveInstances) {
       const info = this.active.get(inst.instanceId);

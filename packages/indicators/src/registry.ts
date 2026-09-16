@@ -104,11 +104,18 @@ import { hurst } from "./volatility/hurst";
 import { vhf } from "./volatility/vhf";
 import { priceZScore } from "./volatility/priceZScore";
 import { downsideVariance } from "./volatility/downsideVariance";
+import { garmanKlassVol } from "./volatility/garmanKlassVol";
+import { rogersSatchellVol } from "./volatility/rogersSatchellVol";
+import { yangZhangVol } from "./volatility/yangZhangVol";
+import { skewKurt } from "./volatility/skewKurt";
+import { corwinSchultz } from "./volatility/corwinSchultz";
 
 // — statistical —
 import { rollingCorrelation } from "./statistical/rollingCorrelation";
 import { betaRef } from "./statistical/betaRef";
 import { spreadZScore } from "./statistical/spreadZScore";
+import { cointegrationAdf } from "./statistical/cointegrationAdf";
+import { spreadHalfLife } from "./statistical/spreadHalfLife";
 
 // — volume —
 import { adLine } from "./volume/adLine";
@@ -130,6 +137,8 @@ import { rvolSeasonal } from "./volume/rvolSeasonal";
 import { volumeZScore } from "./volume/volumeZScore";
 import { twiggsMf } from "./volume/twiggsMf";
 import { vfi } from "./volume/vfi";
+import { amihudIlliq } from "./volume/amihudIlliq";
+import { kyleLambda } from "./volume/kyleLambda";
 
 // — orderflow —
 import { cvd } from "./orderflow/cvd";
@@ -138,6 +147,7 @@ import { takerBuyRatio } from "./orderflow/takerBuyRatio";
 import { netVolume } from "./orderflow/netVolume";
 import { takerNetPct } from "./orderflow/takerNetPct";
 import { trappedVolume } from "./orderflow/trappedVolume";
+import { vpin } from "./orderflow/vpin";
 
 // — billwilliams —
 import { alligator } from "./billwilliams/alligator";
@@ -321,10 +331,17 @@ export const INDICATORS: IndicatorDef[] = [
   vhf,
   priceZScore,
   downsideVariance,
+  garmanKlassVol,
+  rogersSatchellVol,
+  yangZhangVol,
+  skewKurt,
+  corwinSchultz,
   // statistical (cross-asset vs symbole de référence)
   rollingCorrelation,
   betaRef,
   spreadZScore,
+  cointegrationAdf,
+  spreadHalfLife,
   // volume (classique)
   adLine,
   anchoredVwap,
@@ -345,6 +362,8 @@ export const INDICATORS: IndicatorDef[] = [
   volumeZScore,
   twiggsMf,
   vfi,
+  amihudIlliq,
+  kyleLambda,
   // orderflow (menu dédié — edge crypto)
   cvd,
   volumeDelta,
@@ -352,6 +371,7 @@ export const INDICATORS: IndicatorDef[] = [
   netVolume,
   takerNetPct,
   trappedVolume,
+  vpin,
   // billwilliams
   alligator,
   fractals,

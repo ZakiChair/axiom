@@ -49,6 +49,8 @@ describe("raisonUnusableIndicateur", () => {
     "cvdSpotPerp",
     "takerNetPct",
     "stratSpotBreakout",
+    "vpin",
+    "kyleLambda",
   ])(
     "%s exige les volumes split de Binance",
     (id) => {
@@ -197,8 +199,8 @@ describe("raisonUnusableIndicateur", () => {
     }
   });
 
-  it("accepte les 190 définitions sans lever", () => {
-    expect(INDICATORS).toHaveLength(190);
+  it("accepte les 200 définitions sans lever", () => {
+    expect(INDICATORS).toHaveLength(200);
     for (const indicateur of INDICATORS) {
       expect(() => raisonUnusableIndicateur(indicateur, binanceBtc), indicateur.id).not.toThrow();
     }

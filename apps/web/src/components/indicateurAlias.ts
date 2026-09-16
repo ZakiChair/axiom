@@ -44,6 +44,11 @@ export const ALIAS_INDICATEURS: Readonly<Record<string, readonly string[]>> = {
   historicalVol: ["volatilite historique", "volatilite realisee", "ecart type"],
   downsideVariance: ["semivariance", "variance baissiere", "variance haussiere", "risque baissier"],
   stddev: ["ecart type", "dispersion"],
+  garmanKlassVol: ["volatilite garman klass", "volatilite ohlc", "volatilite"],
+  rogersSatchellVol: ["volatilite rogers satchell", "volatilite sans derive", "volatilite ohlc", "volatilite"],
+  yangZhangVol: ["volatilite yang zhang", "volatilite overnight", "volatilite ohlc", "volatilite"],
+  skewKurt: ["asymetrie", "skew", "kurtosis", "queues epaisses", "moments"],
+  corwinSchultz: ["spread corwin schultz", "spread effectif", "fourchette estimee", "liquidite"],
 
   // Momentum et oscillateurs.
   rsi: ["force relative", "surachat survente", "oscillateur"],
@@ -60,6 +65,9 @@ export const ALIAS_INDICATEURS: Readonly<Record<string, readonly string[]>> = {
   volume: ["volume", "quantite echangee"],
   rvolSeasonal: ["volume relatif saisonnier", "volume horaire", "rvol horaire", "saisonnalite volume"],
   trappedVolume: ["volume piege", "longs pieges", "shorts pieges", "positions bloquees", "volume nord sud", "trapped"],
+  vpin: ["toxicite du flux", "volume synchronise", "delit initie", "flux informe", "vpin"],
+  kyleLambda: ["lambda de kyle", "impact de prix", "cout impact", "liquidite", "profondeur"],
+  amihudIlliq: ["illiquidite", "amihud", "impact par volume", "liquidite"],
   obv: ["volume cumule", "volume equilibre", "flux"],
   cvd: ["delta de volume cumule", "flux acheteur vendeur", "flux"],
   mfi: ["flux monetaire", "flux"],
@@ -72,6 +80,13 @@ export const ALIAS_INDICATEURS: Readonly<Record<string, readonly string[]>> = {
   zigzag: ["zig zag", "retournement", "vagues"],
   pivotHighLow: ["points pivots", "sommets et creux", "retournement"],
   fractals: ["fractales", "sommets et creux"],
+
+  // Statistiques croisées (vs symbole de référence).
+  rollingCorrelation: ["correlation glissante", "correlation", "couple"],
+  betaRef: ["beta", "sensibilite", "couple"],
+  spreadZScore: ["z score du spread", "ecart normalise", "pair trading", "couple"],
+  cointegrationAdf: ["cointegration", "engle granger", "adf", "stationnarite", "pair trading"],
+  spreadHalfLife: ["demi vie", "retour a la moyenne", "half life", "pair trading", "couverture"],
 };
 
 /**

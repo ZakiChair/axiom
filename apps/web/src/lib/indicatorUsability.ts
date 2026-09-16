@@ -18,6 +18,9 @@ const SPLIT_VOLUME = new Set([
   "stratSpotBreakout",
 ]);
 
+/** Indicateurs dont le calcul repose sur le volume réel des bougies (0/absent en synthétique). */
+const VOLUME_REEL = new Set(["volume", "rvolSeasonal", "trappedVolume"]);
+
 const VOLUME_FOREX = new Set([
   "vwma",
   "easeOfMovement",
@@ -25,6 +28,7 @@ const VOLUME_FOREX = new Set([
   "mfi",
   "marketFacilitationIndex",
   "netVolume",
+  "trappedVolume",
   "mfiDivergence",
   "obvDivergence",
 ]);
@@ -79,7 +83,7 @@ export function raisonUnusableIndicateur(
   if (def.minTimeframe !== undefined && !tfAtLeast(timeframe, def.minTimeframe)) {
     return `Nécessite ≥ ${def.minTimeframe}`;
   }
-  if (exchange === "synthetic" && (def.id === "volume" || def.id === "rvolSeasonal")) {
+  if (exchange === "synthetic" && VOLUME_REEL.has(def.id)) {
     return "Volume non défini sur une série synthétique";
   }
   if (SPLIT_VOLUME.has(def.id) && exchange !== "binance") {

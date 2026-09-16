@@ -405,7 +405,7 @@ export class ChartIndicators {
     // les candles et l'exchange lors d'une résolution aux asynchrone.
     this.latestArgs = [instances, candles, exchange];
     const effectiveInstances = exchange === "synthetic"
-      ? instances.filter((i) => i.defId !== "volume")
+      ? instances.filter((i) => i.defId !== "volume" && i.defId !== "trappedVolume")
       : instances;
     const wanted = new Set(effectiveInstances.map((i) => i.instanceId));
 
@@ -555,7 +555,7 @@ export class ChartIndicators {
     // Dernier tuple connu (Task 14) : lu par `onAuxReady`, cf. `sync`.
     this.latestArgs = [instances, candles, exchange];
     const effectiveInstances = exchange === "synthetic"
-      ? instances.filter((i) => i.defId !== "volume")
+      ? instances.filter((i) => i.defId !== "volume" && i.defId !== "trappedVolume")
       : instances;
     for (const inst of effectiveInstances) {
       const info = this.active.get(inst.instanceId);

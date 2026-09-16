@@ -59,6 +59,7 @@ export const ALIAS_INDICATEURS: Readonly<Record<string, readonly string[]>> = {
   // Volume et flux d'ordres.
   volume: ["volume", "quantite echangee"],
   rvolSeasonal: ["volume relatif saisonnier", "volume horaire", "rvol horaire", "saisonnalite volume"],
+  trappedVolume: ["volume piege", "longs pieges", "shorts pieges", "positions bloquees", "volume nord sud", "trapped"],
   obv: ["volume cumule", "volume equilibre", "flux"],
   cvd: ["delta de volume cumule", "flux acheteur vendeur", "flux"],
   mfi: ["flux monetaire", "flux"],

@@ -137,6 +137,7 @@ import { volumeDelta } from "./orderflow/volumeDelta";
 import { takerBuyRatio } from "./orderflow/takerBuyRatio";
 import { netVolume } from "./orderflow/netVolume";
 import { takerNetPct } from "./orderflow/takerNetPct";
+import { trappedVolume } from "./orderflow/trappedVolume";
 
 // — billwilliams —
 import { alligator } from "./billwilliams/alligator";
@@ -350,6 +351,7 @@ export const INDICATORS: IndicatorDef[] = [
   takerBuyRatio,
   netVolume,
   takerNetPct,
+  trappedVolume,
   // billwilliams
   alligator,
   fractals,

@@ -499,6 +499,22 @@ describe("production des mineurs cotés : vue, en-tête et conteneur", () => {
     expect(qBudget.raison).toBe(RAISON_BUDGET_CREDITS);
     expect(qBudget.sourceEffective).toBe("archive locale CryptoQuant");
 
+    // Deux cases restantes de la matrice libellé × archive : 402 AVEC archive, plafond SANS archive.
+    const epuisesArchive = avecArchiveJ2("credits", RAISON_CREDITS_EPUISES_CQ, true);
+    expect(resume({ chargements: epuisesArchive })).toBe("crédits CryptoQuant épuisés");
+    const vueEpuisesArchive = vue({ chargements: epuisesArchive });
+    expect(vueEpuisesArchive).toContain("archive servie");
+    expect(vueEpuisesArchive).toContain(RAISON_CREDITS_EPUISES_CQ);
+    expect(vueEpuisesArchive).toContain("2026-09-14 (J-2) · 9/9 sociétés");
+    const budgetSansArchive = sansArchive("credits", RAISON_BUDGET_CREDITS);
+    expect(resume({ chargements: budgetSansArchive })).toBe("budget de crédits atteint");
+    const vueBudgetSansArchive = vue({ chargements: budgetSansArchive });
+    expect(vueBudgetSansArchive).toContain("Budget de crédits CryptoQuant atteint (≈ 8990/10 000 sur 31 j, ce navigateur)");
+    expect(vueBudgetSansArchive).not.toContain('role="table"');
+    const qBudgetSansArchive = qualiteMineursCotes(budgetSansArchive, MAINTENANT);
+    expect(qBudgetSansArchive.statut).toBe("indisponible");
+    expect(qBudgetSansArchive.raison).toBe(RAISON_BUDGET_CREDITS);
+
     // Un 402 l'emporte sur le plafond quand les deux raisons coexistent (refus du fournisseur).
     const melange = { ...budget, [serie("mara")]: epuises[serie("mara")] };
     expect(resume({ chargements: melange })).toBe("crédits CryptoQuant épuisés");

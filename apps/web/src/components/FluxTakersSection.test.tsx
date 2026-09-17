@@ -316,6 +316,15 @@ describe("section DES « Flux takers toutes places »", () => {
     expect(sansArchive).toContain(RAISON_CREDITS_EPUISES_CQ);
     expect(sansArchive).toContain("Série non encore archivée.");
     expect(sansArchive).not.toContain("aucune archive locale");
+    // Quatrième case de la matrice libellé × archive : plafond sans archive.
+    const budgetSansArchive = rendre({
+      chargements: {
+        "taker:spot:btc": chargement("taker:spot:btc", { statut: "credits", raison: RAISON_BUDGET_CREDITS }),
+      },
+    });
+    expect(budgetSansArchive).toContain("Budget de crédits CryptoQuant atteint (≈ 8990/10 000 sur 31 j, ce navigateur)");
+    expect(budgetSansArchive).toContain("Série non encore archivée.");
+    expect(budgetSansArchive).not.toContain("Ouvrir les réglages");
     // En-tête : le 402 se distingue du plafond ; `credits` passe devant le texte d'archive.
     expect(resumeEnTeteFluxTakers(props(avecRaison(RAISON_CREDITS_EPUISES_CQ, true)))).toBe("crédits CryptoQuant épuisés");
     expect(resumeEnTeteFluxTakers(props(avecRaison(RAISON_BUDGET_CREDITS, false)))).toBe("budget de crédits atteint");

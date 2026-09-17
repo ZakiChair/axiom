@@ -395,7 +395,11 @@ const CLE_CREDITS = "axiom:cryptoquant:credits:v1";
 /** `x-credit-cost` hors de [0, 1 000] ou non entier : en-tête ignoré, coût par défaut. */
 const COUT_CREDITS_MAX = 1_000;
 
-/** Copie mémoire, source de vérité de la session : une écriture en échec ne la perd pas. */
+/**
+ * Copie mémoire du module : REPLI quand une écriture est refusée (elle n'est pas perdue), PAS la
+ * source unique entre instances — deux onglets AXIOM partagent un seul `localStorage` et doivent
+ * tous deux compter. Toute écriture est additive sur la valeur stockée, relue au passage.
+ */
 let joursCredits: Record<string, number> | null = null;
 
 /**
@@ -408,14 +412,12 @@ function dansFenetreCredits(jour: string, aujourdhui: string): boolean {
 }
 
 /**
- * Lecture PARESSEUSE, au premier besoin seulement : illisible ou de version inconnue → vide
- * (remplacé à la prochaine écriture) ; un jour ou un total absurde est ignoré un par un, comme
- * au parseur d'archive, pour que la somme reste un entier de crédits.
+ * Lecture TOLÉRANTE de la valeur stockée, SANS effet de bord (aucun cache) : illisible ou de
+ * version inconnue → vide (remplacé à la prochaine écriture) ; un jour ou un total absurde est
+ * ignoré un par un, comme au parseur d'archive, pour que la somme reste un entier de crédits.
  */
-function creditsMemoire(): Record<string, number> {
-  if (joursCredits !== null) return joursCredits;
+function lireCreditsStockes(): Record<string, number> {
   const jours: Record<string, number> = {};
-  joursCredits = jours;
   try {
     const brut = localStorage.getItem(CLE_CREDITS);
     if (brut === null) return jours;
@@ -430,6 +432,23 @@ function creditsMemoire(): Record<string, number> {
     // Illisible (JSON cassé, stockage refusé) : traité comme vide.
   }
   return jours;
+}
+
+/** Copie mémoire, amorcée PARESSEUSEMENT au premier besoin par la valeur stockée. */
+function creditsMemoire(): Record<string, number> {
+  if (joursCredits === null) joursCredits = lireCreditsStockes();
+  return joursCredits;
+}
+
+/**
+ * Réconcilie la copie mémoire avec la valeur stockée, jour par jour par le MAXIMUM : une autre
+ * instance du module (second onglet) a pu écrire depuis l'amorçage. La mémoire ne l'emporte que
+ * lorsque l'écriture de CET onglet a échoué — le repli du §13 est conservé — et la réconciliation
+ * ne peut jamais gonfler la somme.
+ */
+function reconcilierCredits(): void {
+  const memoire = creditsMemoire();
+  for (const [jour, n] of Object.entries(lireCreditsStockes())) memoire[jour] = Math.max(memoire[jour] ?? 0, n);
 }
 
 /** Somme entière consommée sur la fenêtre ; les jours écartés ne comptent plus, sans écriture. */
@@ -448,17 +467,27 @@ function coutCredits(entete: string | null): number {
   return n <= COUT_CREDITS_MAX ? n : COUT_CREDITS_DEFAUT_CQ;
 }
 
-/** Impute le coût au jour UTC courant, élague la fenêtre, puis écrit (échec toléré). */
+/**
+ * Impute le coût au jour UTC courant, élague la fenêtre, puis écrit (échec toléré). L'écriture est
+ * ADDITIVE sur la valeur STOCKÉE, relue au passage : un écrasement total effacerait ce qu'un autre
+ * onglet a dépensé depuis l'amorçage de la copie mémoire. La mémoire est incrémentée SÉPARÉMENT —
+ * sans quoi deux écritures refusées de suite perdraient un coût — puis réconciliée.
+ */
 function comptabiliserCredits(entete: string | null): void {
   const aujourdhui = jourUtc(Date.now());
-  const jours = creditsMemoire();
-  jours[aujourdhui] = (jours[aujourdhui] ?? 0) + coutCredits(entete);
+  const cout = coutCredits(entete);
+  const memoire = creditsMemoire();
+  memoire[aujourdhui] = (memoire[aujourdhui] ?? 0) + cout;
+  const jours = lireCreditsStockes();
+  jours[aujourdhui] = (jours[aujourdhui] ?? 0) + cout;
   for (const jour of Object.keys(jours)) if (!dansFenetreCredits(jour, aujourdhui)) delete jours[jour];
   try {
     localStorage.setItem(CLE_CREDITS, JSON.stringify({ v: 1, jours }));
   } catch {
-    // Stockage refusé : la copie mémoire reste la source de vérité de la session.
+    // Stockage refusé : la copie mémoire, incrémentée ci-dessus, reste le repli de la session.
   }
+  for (const jour of Object.keys(memoire)) if (!dansFenetreCredits(jour, aujourdhui)) delete memoire[jour];
+  reconcilierCredits();
 }
 
 // --- Cadence : file unique 10 req / 60 s ---
@@ -765,6 +794,9 @@ async function chargerUneFois(serie: SerieCq, signal: AbortSignal): Promise<Char
     if (refusCredits !== null && refusCredits.version === version && maintenant - refusCredits.ts < MEMOIRE_CREDITS_MS) {
       return fin("credits", RAISON_CREDITS_EPUISES_CQ, false);
     }
+    // Relecture OBLIGATOIRE : sans elle, un onglet à la copie mémoire périmée dépasserait encore
+    // le plafond d'un appel avant de se recaler (`getItem` est synchrone et bon marché).
+    reconcilierCredits();
     const somme = sommeCredits(maintenant);
     return somme + COUT_CREDITS_DEFAUT_CQ > PLAFOND_CREDITS_CQ ? fin("credits", raisonBudgetCreditsCq(somme), false) : null;
   };

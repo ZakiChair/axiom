@@ -804,6 +804,44 @@ describe("CryptoQuant : budget de crédits (§13, C1 à C4, C6)", () => {
     expect(healthStore.getState().sources.cryptoquant?.quota?.credits?.utilise).toBe(15);
   });
 
+  it("deux instances du module, un seul localStorage : les coûts s'additionnent (deux onglets)", async () => {
+    // Deux onglets AXIOM = deux instances du module sur le MÊME navigateur. L'écriture doit être
+    // ADDITIVE sur la valeur STOCKÉE, sinon la dernière écriture efface la consommation de l'autre.
+    const a = await import("./cryptoquant");
+    const santeA = await sante();
+    // Séries DISTINCTES : sinon l'archive partagée (J-1 fusionné) court-circuite l'appel suivant.
+    poser(arch(plage(-30, -2), null, 8, "taker:spot:btc"));
+    poser(arch(plage(-30, -2), null, 8, "taker:swap:btc"));
+    poser(arch(plage(-30, -2), null, 8, "taker:spot:eth"));
+    reseau(api200);
+    expect(await a.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: true });
+    expect(credits()).toEqual({ v: 1, jours: { [J(0)]: 15 } });
+    // Seconde instance : `resetModules` SANS re-stubber `localStorage` (le navigateur est le même).
+    vi.resetModules();
+    const b = await import("./cryptoquant");
+    reseau(api200);
+    expect(await b.chargerSerieCq("taker:swap:btc")).toMatchObject({ statut: "pret", appel: true });
+    expect(credits()).toEqual({ v: 1, jours: { [J(0)]: 30 } });
+    // Retour à la première instance : sa copie mémoire est périmée, elle ne doit rien écraser.
+    reseau(api200);
+    expect(await a.chargerSerieCq("taker:spot:eth")).toMatchObject({ statut: "pret", appel: true });
+    expect(credits()).toEqual({ v: 1, jours: { [J(0)]: 45 } });
+    // Copie mémoire de l'instance A réconciliée sur la valeur stockée : plus de minoration.
+    expect(santeA.getState().sources.cryptoquant?.quota?.credits?.utilise).toBe(45);
+  });
+
+  it("plafond : le compteur est RELU avant le contrôle (un autre onglet a dépensé depuis)", async () => {
+    const cq = await import("./cryptoquant");
+    // Copie mémoire amorcée à vide par le premier chargement du module…
+    poser(arch(plage(-30, -2), null));
+    // …puis un autre onglet dépense 8 990 crédits : le plafond doit voir la valeur stockée.
+    poserCredits({ [J(-1)]: 8_990 });
+    const f = reseau(aucun);
+    const r = await cq.chargerSerieCq("taker:spot:btc");
+    expect(r).toMatchObject({ statut: "credits", raison: cq.raisonBudgetCreditsCq(8_990), appel: false });
+    expect([appels(f).length, cq.etatFileCq()]).toEqual([0, { enAttente: 0, repriseTs: null }]);
+  });
+
   it("premier chargement du module : somme nulle → aucune ligne de santé publiée", async () => {
     await import("./cryptoquant");
     expect((await sante()).getState().sources.cryptoquant).toBeUndefined();

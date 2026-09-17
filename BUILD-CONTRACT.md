@@ -303,7 +303,13 @@ DES + CHAIN ; plafond 9 000 / 31 j. (5) L'agrégat multi-places du fournisseur e
 quel — aucun AggregationEngine, spot et perp jamais additionnés, composition des places non
 documentée et affichée comme limite. (6) BGeometrics reste la source unique de MVRV-Z,
 SOPR, NUPL et Puell : CryptoQuant n'y est jamais substitué et ne fournit ici aucune
-métrique de valorisation. (7) Aucune fenêtre (39), aucun indicateur graphique (200),
+métrique de valorisation. (6 bis) Découvrabilité (décision du propriétaire, 2026-09-18) :
+DEUX entrées de NAVIGATION vers ces sections déjà livrées — `CQTAKR` (groupe « Marché &
+dérivés ») et `CQMINE` (« On-chain & stablecoins ») — dans le menu « Fonctions » ET dans la
+palette ⌘K ; un clic ouvre la fenêtre hôte (DES / CHAIN), déplie la section visée et la fait
+défiler à l'écran, badge « nouveau » jusqu'au premier clic. AUCUNE fenêtre nouvelle (le
+registre reste à 39), aucun indicateur, aucun appel `/cqapi` de plus : le client charge au
+montage de la fenêtre, jamais au dépliage. (7) Aucune fenêtre (39), aucun indicateur graphique (200),
 aucune dépendance, `EXCHANGE_IDS` à 9 ; tout code nouveau vit dans des chunks chargés à la
 demande ; le budget initial reste bloquant (1 220 000 octets bruts, 360 000 gzip), mesures
 avant/après consignées dans le rapport du lot. Exclus sans nouvel amendement : toute autre

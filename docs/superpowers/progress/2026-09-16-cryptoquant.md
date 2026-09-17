@@ -1723,3 +1723,71 @@ bundle initial** par la vague : toutes les corrections vivent dans des chunks pa
 (`cryptoquant.ts`, `FluxTakersSection.tsx`, `onchain/MineursCotes.tsx`). Delta du lot entier
 depuis la référence du plan (1 206 265 / 355 686) : **+183 o brut / +52 o gzip**, sous la cible
 souple de ~60 o gzip, 4 262 o gzip de marge sous le plafond bloquant.
+
+## Entrées « Fonctions » et ⌘K (décision du propriétaire, 2026-09-18)
+
+### Décision et comportement
+
+Les deux sections CryptoQuant n'étaient atteignables qu'en dépliant la bonne section d'une
+fenêtre déjà ouverte. Le propriétaire demande **deux entrées de NAVIGATION** — aucune fenêtre
+nouvelle, aucun indicateur nouveau :
+
+| Mnémonique | Libellé | Cible |
+|---|---|---|
+| `CQTAKR` | `Flux takers toutes places (CryptoQuant)` | DES (`derivatives`) → `SectionFluxTakers` |
+| `CQMINE` | `Production des mineurs cotés (CryptoQuant)` | CHAIN (`onchain`) → `MineursCotes` |
+
+Chacune vit dans le menu « Fonctions » (groupes « Marché & dérivés » et « On-chain &
+stablecoins », **à la suite** des fenêtres du groupe : le tri par mnémonique du registre ne
+porte pas sur ces entrées spéciales, comme `TICKER` dans « Outils ») **et** dans la palette ⌘K
+(`panneau:cq-takers`, `panneau:cq-mineurs`). Un clic ouvre la fenêtre hôte, déplie la section
+visée, la fait défiler à l'écran (`scrollIntoView({ block: "start" })`) et éteint son badge
+« nouveau » (clés `axiom:seen:section:cq-takers` / `…:cq-mineurs` — **jamais** un id de fenêtre,
+qui éteindrait le badge de DES ou de CHAIN).
+
+Mécanique : un magasin d'intention minuscule (`apps/web/src/store/cryptoquantUi.ts`,
+zustand vanilla) porte `cible: "takers" | "mineurs" | null`, `demander()` (marque vu, ouvre la
+fenêtre, pose la cible) et `consommer(cible)` qui n'efface **que sa propre** cible — les deux
+sections peuvent être montées ensemble, celle qui n'est pas visée ne doit pas effacer la demande
+de l'autre. `ENTREES_CQ` y est la source unique du mnémonique, du libellé, de la clé de badge et
+de la fenêtre hôte : le menu et ⌘K la lisent au lieu de recopier ces littéraux.
+
+Deux points non évidents, tous deux couverts par un test :
+
+- l'ouverture est **dérivée au rendu** (`ouvert || demandee`), pas posée par un effet : les tests
+  web tournent en environnement node (`renderToStaticMarkup`), où aucun effet ne s'exécute. L'effet
+  ne fait que pérenniser l'état local, défiler et consommer ;
+- `useStore` de zustand v4 rend l'état **initial** hors navigateur (`getServerState ??
+  getInitialState`) : une demande posée avant le rendu y serait invisible. D'où `useCibleCq()`,
+  qui s'abonne pour le re-render mais lit l'état **courant**.
+
+Le clic sur l'en-tête consomme aussi la demande, sans quoi replier la section juste ouverte
+serait impossible. **Aucun appel `/cqapi` de plus** : le client charge au montage de la fenêtre,
+jamais au dépliage — assertion explicite du parcours e2e.
+
+### Budget mesuré — cible souple dépassée, à arbitrer
+
+Trois builds locaux, même machine, plafond bloquant 1 220 000 o brut / 360 000 o gzip :
+
+| Mesure | Brut | Gzip | Delta gzip |
+|---|---|---|---|
+| Base (`cbe454a`) | 1 206 448 | 355 738 | — |
+| Entrée menu + magasin seuls | 1 207 259 | 356 030 | +292 |
+| Livré (menu + magasin + ⌘K) | 1 207 813 | **356 199** | **+461** |
+
+La base locale retombe **à l'octet** sur les chiffres du rapport précédent, la comparaison est
+donc valide. Le résultat **dépasse la cible souple de +150 o gzip** fixée au lot : +461 o, dont
++169 pour les deux commandes ⌘K (`motsCles` et `apercu` compris) et +292 pour l'entrée de menu,
+le magasin et le badge. Le runner partait de ~3 014 o de marge : il en garde **~2 553**, le
+contrôle de budget reste vert.
+
+Pourquoi ne pas avoir allégé davantage : les deux leviers cités au lot ne rendent presque rien.
+(1) Raccourcir les libellés — ce sont ceux de la décision, ils n'apparaissent **qu'une fois** dans
+le chunk (source unique `ENTREES_CQ`) : « Flux takers (CryptoQuant) » économiserait ~13 o brut.
+(2) Fusionner le magasin dans un module déjà présent : Rollup concatène l'entrée en un seul
+chunk, une frontière de module n'y coûte que sa comptabilité d'export — les deux mesures
+ci-dessus le montrent, les octets suivent le **contenu** (745 o de source retirés → 554 o brut /
+169 o gzip), pas le nombre de modules. Le reste du coût est le contenu demandé lui-même :
+libellés, mnémoniques, `motsCles` prescrits, aperçus et le magasin. **À arbitrer par le
+propriétaire** s'il veut repasser sous +150 : la seule coupe qui rendrait vraiment des octets est
+de retirer un des deux canaux (⌘K : −169 o gzip) ou les `motsCles`/`apercu` des commandes.

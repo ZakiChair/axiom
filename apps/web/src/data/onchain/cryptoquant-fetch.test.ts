@@ -150,3 +150,100 @@ describe("CryptoQuant : persistance locale ∪ KV (I1, I4)", () => {
     expect(await cq.ecrireArchiveCq("taker:spot:btc", arch([J(-1)], 7), "absente")).toEqual({ local: false, kv: true });
   });
 });
+
+// --- File 10 req / 60 s (tâche 12) ---
+const vider = async () => { for (let i = 0; i < 200; i++) await Promise.resolve(); };
+const avancer = async (ms: number) => { await vi.advanceTimersByTimeAsync(ms); await vider(); };
+
+describe("CryptoQuant : file 10 req / 60 s (I6, I7)", () => {
+  beforeEach(() => { reinitialiser(); vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }); vi.setSystemTime(T0); });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+  it("13 demandes : 10 créneaux immédiats, 3 après 60 s ; quota publié ; abonnés notifiés", async () => {
+    const cq = await import("./cryptoquant");
+    const { healthStore } = await import("../../store/health");
+    const notifie = vi.fn();
+    cq.abonnerFileCq(notifie);
+    let acquis = 0;
+    const s = new AbortController().signal;
+    const toutes = Array.from({ length: 13 }, () => cq.acquerirCreneauCq(s).then((ok) => { acquis += ok ? 1 : 0; return ok; }));
+    await vider();
+    expect([acquis, cq.etatFileCq()]).toEqual([10, { enAttente: 3, repriseTs: null }]);
+    expect(healthStore.getState().sources.cryptoquant?.quota).toEqual({ utilise: 10, limite: 10, fenetre: "1min" });
+    await avancer(59_999);
+    expect(acquis).toBe(10);
+    await avancer(1);
+    expect(await Promise.all(toutes)).toEqual(Array.from({ length: 13 }, () => true));
+    expect(healthStore.getState().sources.cryptoquant?.quota?.utilise).toBe(3);
+    expect(notifie).toHaveBeenCalled();
+  });
+
+  it("x-ratelimit-remaining 0 + reset 42 : la suivante part après 42 s", async () => {
+    const cq = await import("./cryptoquant");
+    const s = new AbortController().signal;
+    await cq.acquerirCreneauCq(s);
+    cq.noterReponseCq(new Response(null, { headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "42" } }));
+    let ok = false;
+    void cq.acquerirCreneauCq(s).then((r) => { ok = r; });
+    await avancer(41_999);
+    expect(ok).toBe(false);
+    await avancer(1);
+    expect(ok).toBe(true);
+  });
+
+  it("etatFileCq : enAttente = demandes sans créneau ; repriseTs = reprise la plus tardive (429 ou remaining 0)", async () => {
+    const cq = await import("./cryptoquant");
+    const notifie = vi.fn();
+    cq.abonnerFileCq(notifie);
+    const s = new AbortController().signal;
+    expect(await cq.acquerirCreneauCq(s)).toBe(true);
+    // Créneau obtenu = requête en vol : elle ne compte plus.
+    expect(cq.etatFileCq()).toEqual({ enAttente: 0, repriseTs: null });
+    notifie.mockClear();
+    cq.noterReponseCq(new Response(null, { headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "42" } }));
+    expect([cq.etatFileCq(), notifie.mock.calls.length > 0]).toEqual([{ enAttente: 0, repriseTs: T0 + 42_000 }, true]);
+    cq.noterReponseCq(new Response(null, { status: 429, headers: { "x-ratelimit-reset": "5" } }));
+    expect(cq.etatFileCq().repriseTs).toBe(T0 + 42_000);
+    cq.noterReponseCq(new Response(null, { status: 429, headers: { "x-ratelimit-reset": "100" } }));
+    expect(cq.etatFileCq().repriseTs).toBe(T0 + 100_000);
+    let ok = false;
+    void cq.acquerirCreneauCq(s).then((r) => { ok = r; });
+    await vider();
+    expect([ok, cq.etatFileCq()]).toEqual([false, { enAttente: 1, repriseTs: T0 + 100_000 }]);
+    notifie.mockClear();
+    await avancer(100_000);
+    expect([ok, cq.etatFileCq()]).toEqual([true, { enAttente: 0, repriseTs: null }]);
+    expect(notifie).toHaveBeenCalled();
+  });
+
+  it("429 : demande en file conservée puis reprise ; reset absurde 1e9 → 15 min ; bornes et repli 60 s", async () => {
+    const cq = await import("./cryptoquant");
+    const s = new AbortController().signal;
+    cq.noterReponseCq(new Response(null, { status: 429, headers: { "x-ratelimit-reset": "1000000000" } }));
+    expect(cq.etatFileCq()).toEqual({ enAttente: 0, repriseTs: T0 + 900_000 });
+    let ok = false;
+    void cq.acquerirCreneauCq(s).then((r) => { ok = r; });
+    await avancer(899_999);
+    expect([ok, cq.etatFileCq().enAttente]).toEqual([false, 1]);
+    await avancer(1);
+    expect([ok, cq.etatFileCq()]).toEqual([true, { enAttente: 0, repriseTs: null }]);
+    for (const [entetes, delai] of [[{}, 60_000], [{ "retry-after": "5" }, 5_000], [{ "x-ratelimit-reset": "0" }, 1_000]] as const) {
+      cq.noterReponseCq(new Response(null, { status: 429, headers: entetes }));
+      expect(cq.etatFileCq().repriseTs).toBe(Date.now() + delai);
+    }
+  });
+
+  it("annulation pendant l'attente : false, aucun créneau consommé", async () => {
+    const cq = await import("./cryptoquant");
+    const { healthStore } = await import("../../store/health");
+    const libre = new AbortController().signal;
+    for (let i = 0; i < 10; i++) await cq.acquerirCreneauCq(libre);
+    const ctrl = new AbortController();
+    const attente = cq.acquerirCreneauCq(ctrl.signal);
+    ctrl.abort();
+    expect([await attente, cq.etatFileCq().enAttente]).toEqual([false, 0]);
+    await avancer(60_000);
+    await cq.acquerirCreneauCq(libre);
+    expect(healthStore.getState().sources.cryptoquant?.quota?.utilise).toBe(1);
+  });
+});

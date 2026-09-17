@@ -4,6 +4,7 @@
  * Aucune raison, aucun journal, aucune URL ne porte la clé.
  */
 import { CRYPTOQUANT_PREFIXE, IDS_MINEURS_CQ, type IdMineurCq } from "../../../../../shared/cryptoquant-proxy";
+import { healthStore } from "../../store/health";
 import { IS_VERCEL } from "../../lib/deployment";
 import { detectDaemon, kvPut, urlDaemon } from "../daemon";
 import { dateOnchain, nombreOnchain } from "./cohorts";
@@ -329,4 +330,130 @@ export async function ecrireArchiveCq(serie: SerieCq, archive: ArchiveCq, kv: Et
   if (kv === "sans-daemon") return { local, kv: null };
   if (kv === "erreur" || texte.length > TAILLE_MAX_KV) return { local, kv: false };
   return { local, kv: (await kvPut(NS_KV, cleKv(serie), archive)) !== null };
+}
+
+// --- Cadence : file unique 10 req / 60 s ---
+
+const SOURCE_SANTE = "cryptoquant";
+/** Offre BASIC : 10 req/min (copie adaptée d'`acquireSlot`, `data/coinalyze.ts`). */
+const LIMITE_MIN = 10;
+const FENETRE_MS = 60_000;
+const REPRISE_MIN_MS = 1_000;
+const REPRISE_MAX_MS = 15 * 60_000;
+
+const horodatages: number[] = [];
+let chaine: Promise<unknown> = Promise.resolve();
+let enAttente = 0;
+/** 429 : les demandes en file attendent, les nouvelles répondent `quota`. */
+let repriseTs: number | null = null;
+/** `x-ratelimit-remaining: 0` : retarde le créneau suivant (0 = aucune pause). */
+let pauseJusquaTs = 0;
+const abonnes = new Set<() => void>();
+
+function notifier(): void {
+  for (const cb of abonnes) {
+    try {
+      cb();
+    } catch {
+      /* abonné défaillant ignoré */
+    }
+  }
+}
+
+function attendre(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    const fin = () => {
+      clearTimeout(minuteur);
+      signal.removeEventListener("abort", fin);
+      resolve();
+    };
+    const minuteur = setTimeout(fin, Math.max(0, ms));
+    signal.addEventListener("abort", fin, { once: true });
+  });
+}
+
+/** File sérialisée des 13 séries ; quota publié à chaque créneau ; annulée → `false` sans créneau. */
+export function acquerirCreneauCq(signal: AbortSignal): Promise<boolean> {
+  enAttente++;
+  notifier();
+  const tour = chaine.then(async (): Promise<boolean> => {
+    try {
+      for (;;) {
+        if (signal.aborted) return false;
+        const now = Date.now();
+        if (repriseTs !== null && now >= repriseTs) {
+          repriseTs = null;
+          notifier();
+        }
+        if (pauseJusquaTs !== 0 && now >= pauseJusquaTs) {
+          pauseJusquaTs = 0;
+          notifier();
+        }
+        const pause = Math.max(repriseTs ?? 0, pauseJusquaTs);
+        if (now < pause) {
+          await attendre(pause - now, signal);
+          continue;
+        }
+        while (horodatages.length > 0) {
+          const plusAncien = horodatages[0];
+          if (plusAncien === undefined || now - plusAncien < FENETRE_MS) break;
+          horodatages.shift();
+        }
+        if (horodatages.length < LIMITE_MIN) {
+          horodatages.push(now);
+          healthStore.getState().setQuota(SOURCE_SANTE, { utilise: horodatages.length, limite: LIMITE_MIN, fenetre: "1min" });
+          return true;
+        }
+        const plusAncien = horodatages[0];
+        await attendre(plusAncien === undefined ? FENETRE_MS : FENETRE_MS - (now - plusAncien), signal);
+      }
+    } finally {
+      enAttente--;
+      notifier();
+    }
+  });
+  chaine = tour.catch(() => undefined);
+  return tour;
+}
+
+function secondesEntete(valeur: string | null): number | null {
+  if (valeur === null || !/^\d+$/.test(valeur.trim())) return null;
+  const s = Number(valeur.trim());
+  return Number.isFinite(s) ? s : null;
+}
+
+function borner(secondes: number): number {
+  return Math.min(REPRISE_MAX_MS, Math.max(REPRISE_MIN_MS, secondes * 1000));
+}
+
+/** 429 → suspension bornée [1 s, 15 min] (reset, sinon retry-after, sinon 60 s) ; remaining 0 → pause. */
+export function noterReponseCq(res: Response): void {
+  const now = Date.now();
+  const reset = secondesEntete(res.headers.get("x-ratelimit-reset"));
+  if (res.status === 429) {
+    repriseTs = now + borner(reset ?? secondesEntete(res.headers.get("retry-after")) ?? 60);
+    notifier();
+    return;
+  }
+  if (res.headers.get("x-ratelimit-remaining")?.trim() === "0") {
+    pauseJusquaTs = Math.max(pauseJusquaTs, now + borner(reset ?? 60));
+    notifier();
+  }
+}
+
+/** `enAttente` : demandes sans créneau (ni requête en vol, ni consommateur coalescé) ; `repriseTs` : reprise la plus tardive (429 ou `remaining: 0`). */
+export function etatFileCq(): { enAttente: number; repriseTs: number | null } {
+  const reprise = Math.max(repriseTs ?? 0, pauseJusquaTs);
+  return { enAttente, repriseTs: reprise > Date.now() ? reprise : null };
+}
+
+export function abonnerFileCq(cb: () => void): () => void {
+  abonnes.add(cb);
+  return () => {
+    abonnes.delete(cb);
+  };
 }

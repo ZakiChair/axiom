@@ -146,3 +146,111 @@ Commande : `pnpm --filter @axiom/web build` (HEAD `a56700e`, mesure locale macOS
   }
 }
 ```
+
+### Budget après B1-3
+
+Commande : `pnpm --filter @axiom/web build` (bloc imprimé par `scripts/verifier-budget-build.mjs`, rejoué tel quel sur `apps/web/dist`).
+
+```json
+{
+  "limites": {
+    "octetsBruts": 1220000,
+    "octetsGzip": 360000,
+    "niveauGzip": 9
+  },
+  "initial": {
+    "fichiers": [
+      "assets/index-CvA2TH_T.js",
+      "assets/indicators-DMDb8A8f.js",
+      "assets/vendor-klinecharts-B5HFhIGv.js",
+      "assets/vendor-react-BPWy1Tn9.js"
+    ],
+    "octetsBruts": 1206170,
+    "octetsGzip": 355617
+  },
+  "dynamique": {
+    "fichiers": [
+      "assets/BacktestWindow-CflNv483.js",
+      "assets/BriefWindow-DFC5CKn9.js",
+      "assets/BtcPowerLawWindow-C8klMKe9.js",
+      "assets/CbpremWindow-B8XODOWi.js",
+      "assets/ChartSyncControls-oQVR8L1O.js",
+      "assets/CommandPalette-B43hfLk0.js",
+      "assets/CorrWindow-CNWQJ5IE.js",
+      "assets/CotWindow-_dnKfv73.js",
+      "assets/CycleWindow-CodZoAtS.js",
+      "assets/DataWindow-XXbhpPou.js",
+      "assets/DefillamaProPanel-C05BKgVY.js",
+      "assets/DerivativesWindow-ByaJ-1rZ.js",
+      "assets/DistWindow-DqnnKORw.js",
+      "assets/DomWindow-aPn0Alt2.js",
+      "assets/EcoWindow-CcQpSJPl.js",
+      "assets/EconomieChaines-Dhv4deYP.js",
+      "assets/EvtsWindow-BijIisDx.js",
+      "assets/ExpyWindow-DtHHWtQ-.js",
+      "assets/FluxCapitaux-BDp065r4.js",
+      "assets/FundWindow-8jxnme6x.js",
+      "assets/FundingMatrixWindow-CrgxDUzU.js",
+      "assets/GlobeWindow-A-38sQTz.js",
+      "assets/LiquidationsWindow-CyyVNsAA.js",
+      "assets/MacroRatesWindow-BK-xKifN.js",
+      "assets/MarketMapWindow-caYziwBy.js",
+      "assets/McapWindow-xYmqmEBd.js",
+      "assets/MineWindow-DDg5PzKO.js",
+      "assets/NetliqWindow-DdI-Z2Ds.js",
+      "assets/NewsWindow-eDnWdYsu.js",
+      "assets/NotesWindow-D-3uFRUE.js",
+      "assets/OnboardingOverlay-hZxMd3Ci.js",
+      "assets/OnchainWindow-DFYSyk74.js",
+      "assets/OptionsWindow-DCWhLzPs.js",
+      "assets/PaperWindow-CU9P-9Tv.js",
+      "assets/PortfolioWindow-BnuPykiV.js",
+      "assets/QualiteMetrique-Bo16JgZF.js",
+      "assets/ReplayWindow-DzMvZ3j4.js",
+      "assets/ScenWindow-BU_FP5tO.js",
+      "assets/ScreenerWindow-CvxnoCws.js",
+      "assets/SeasonalityWindow-D348crBF.js",
+      "assets/SectWindow-OrOkQ8Wc.js",
+      "assets/SettingsPanel-D8Gb9ykx.js",
+      "assets/SqueezeWindow-MQBWAtyO.js",
+      "assets/StablecoinsWindow-cwadWlC2.js",
+      "assets/TableTriable-PzR6DNM2.js",
+      "assets/TermStructureWindow-C-gPiAMb.js",
+      "assets/VolWindow-CBx5DYL5.js",
+      "assets/WebGLSyncSpike-C6HAozDd.js",
+      "assets/WhalesWindow-DBPAnH_u.js",
+      "assets/bgeometrics-CwBfqZAg.js",
+      "assets/chart-sync-timeframes-B5x5sK4B.js",
+      "assets/composite-ncBiL0v-.js",
+      "assets/corr-BeX07IIJ.js",
+      "assets/cot-DJDOWYBk.js",
+      "assets/csv-DChTGBa8.js",
+      "assets/defillamaKey-DNlE8kXN.js",
+      "assets/economieChaines-i_z13b0v.js",
+      "assets/etherscan-Dgh5-pCF.js",
+      "assets/expy-3I9sQwqM.js",
+      "assets/fluxCapitaux-BdqS1gUV.js",
+      "assets/fundingCrossExchange-CA3IE_fT.js",
+      "assets/lienRetours-Bo4sHoSC.js",
+      "assets/liquidationHeat-DqdR_9tR.js",
+      "assets/macroSeries-Dto5xWah.js",
+      "assets/mempool-CKZwIJIZ.js",
+      "assets/onchainMetriques-BMNs69Ki.js",
+      "assets/portRisque-OTN0j4lY.js",
+      "assets/qualiteChain-BpX2QYau.js",
+      "assets/squeezeWindow.util-CS38dTmm.js",
+      "assets/thermocap-CV1WVS1g.js",
+      "assets/treasuryYields-D4QcvnFb.js",
+      "assets/treemap-D9x5LE-E.js",
+      "assets/tresoreriesBtc-BsTOUFSC.js",
+      "assets/useDomaineZoom-Bxy48dSr.js",
+      "assets/viewportSync-CDykrb4H.js",
+      "assets/volCone-BZveA2ku.js"
+    ],
+    "octetsBruts": 982093,
+    "octetsGzip": 360457
+  }
+}
+```
+
+Store `store/cryptoquant.ts` dans `.vite/manifest.json` : aucun chunk partagé, store inclus dans `assets/SettingsPanel-D8Gb9ykx.js`. Delta initial depuis « Budget avant B1 » : +22 o gzip, +65 o bruts ; marge gzip locale 4383 o.

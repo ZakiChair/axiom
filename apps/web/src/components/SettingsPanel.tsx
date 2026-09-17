@@ -28,6 +28,7 @@ import { etherscanKeyStore } from "../store/etherscan";
 import { coingeckoKeyStore } from "../store/coingecko";
 import { ccdataKeyStore } from "../store/ccdata";
 import { defillamaKeyStore } from "../store/defillamaKey";
+import { cryptoquantKeyStore } from "../store/cryptoquant";
 import { risqueStore } from "../store/risque";
 import { refSymbolStore } from "../store/refSymbol";
 import { fetchPairs } from "../data/pairs";
@@ -524,6 +525,10 @@ export function SettingsPanel() {
   const defillamaSetKey = useStore(defillamaKeyStore, (s) => s.setKey);
   const defillamaClearKey = useStore(defillamaKeyStore, (s) => s.clearKey);
 
+  const cryptoquantHasKey = useStore(cryptoquantKeyStore, (s) => s.hasKey);
+  const cryptoquantSetKey = useStore(cryptoquantKeyStore, (s) => s.setKey);
+  const cryptoquantClearKey = useStore(cryptoquantKeyStore, (s) => s.clearKey);
+
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Échap ferme — écouteur actif UNIQUEMENT quand le panneau est ouvert.
@@ -706,6 +711,19 @@ export function SettingsPanel() {
               hasKey={defillamaHasKey}
               onSave={defillamaSetKey}
               onClear={defillamaClearKey}
+            />
+            <ApiKeyField
+              name="CryptoQuant (takers et mineurs cotés)"
+              purpose={IS_VERCEL
+                ? "Flux takers toutes places (DES) et production des mineurs cotés (CHAIN), offre BASIC : clé personnelle requise — aucun repli serveur, licence personnelle."
+                : "Flux takers toutes places (DES) et production des mineurs cotés (CHAIN), offre BASIC : repli CRYPTOQUANT_API_KEY de .env pour le proxy Vite et le daemon local uniquement ; une clé saisie ici reste prioritaire."}
+              domain="api.cryptoquant.com, via la route locale /cqapi"
+              signupUrl="https://cryptoquant.com"
+              signupLabel="Offres CryptoQuant"
+              placeholder="Clé API CryptoQuant (personnelle)"
+              hasKey={cryptoquantHasKey}
+              onSave={cryptoquantSetKey}
+              onClear={cryptoquantClearKey}
             />
           </div>
 

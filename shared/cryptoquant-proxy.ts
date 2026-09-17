@@ -3,9 +3,10 @@
  *
  * Consommateurs (ne jamais dupliquer la liste ailleurs) :
  *   1. api/_policy.ts                          — fonction Vercel (import suffixé « .js »)
- *   2. apps/daemon/src/proxy.ts                — daemon 127.0.0.1 (import sans extension)
- *   3. apps/web/vite.config.ts                 — proxy de dev (import sans extension)
- *   4. apps/web/src/data/onchain/cryptoquant.ts — identifiants des sociétés (client)
+ *   2. api/proxy.ts                            — fonction Vercel, relais des en-têtes (« .js »)
+ *   3. apps/daemon/src/proxy.ts                — daemon 127.0.0.1 (import sans extension)
+ *   4. apps/web/vite.config.ts                 — proxy de dev (import sans extension)
+ *   5. apps/web/src/data/onchain/cryptoquant.ts — identifiants des sociétés (client)
  *
  * Liste FERMÉE : trois chemins éligibles à l'offre BASIC, fenêtre journalière
  * obligatoire, `limit` entier 1..30, jamais `from`/`to` (le fournisseur refuse toute

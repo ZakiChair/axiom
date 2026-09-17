@@ -27,12 +27,18 @@ const MINEURS: ReadonlySet<string> = new Set<string>(IDS_MINEURS_CQ);
 const MOTIF_LIMIT = /^[1-9]\d?$/;
 const LIMIT_MAX = 30;
 
-/** En-tête `Authorization: Bearer <jeton>` recevable (casse du schéma indifférente). */
+/**
+ * En-tête `Authorization: Bearer <jeton>` recevable : exactement `Bearer` (casse indifférente),
+ * UNE espace, puis un jeton de caractères ASCII visibles (0x21-0x7E). Refuse CR/LF, tabulation,
+ * espaces multiples, NBSP et tout caractère Unicode : un en-tête construit depuis une valeur
+ * stockée donne ainsi un 401 local plutôt qu'une exception du runtime à l'émission. Plus strict
+ * que le relais Bearer BGeometrics de la fonction Vercel, laissé tel quel.
+ */
 export function cleCryptoQuantValide(authorization: string | null | undefined): authorization is string {
   return (
     typeof authorization === "string" &&
     authorization.length <= LONGUEUR_MAX_AUTORISATION &&
-    /^Bearer\s+\S+$/i.test(authorization)
+    /^Bearer [\x21-\x7E]+$/i.test(authorization)
   );
 }
 

@@ -22,10 +22,12 @@ describe("shared/cryptoquant-proxy — constantes", () => {
     expect([...IDS_MINEURS_CQ]).toEqual(["bitf", "cipher", "clsk", "core", "hive", "iren", "mara", "riot", "wulf"]);
   });
 
-  test("le module partagé n'importe rien", async () => {
+  test("le module partagé n'importe rien et ne lit aucun environnement (il est embarqué par la fonction Vercel)", async () => {
     const source = await Bun.file(new URL("../../../shared/cryptoquant-proxy.ts", import.meta.url)).text();
     expect(source).not.toMatch(/^\s*import\b/m);
     expect(source).not.toMatch(/\brequire\(/);
+    expect(source).not.toMatch(/\b(?:process|Bun|Deno)\.env\b/);
+    expect(source).not.toMatch(/\bimport\.meta\.env\b/);
   });
 });
 
@@ -99,15 +101,21 @@ describe("cheminCryptoQuantAmont — refusés (null)", () => {
     { nom: "préfixe seul", chemin: "/cqapi", requete: BTC },
     { nom: "préfixe collé au chemin", chemin: "/cqapiv2/market/cq/spot/trade", requete: BTC },
     { nom: "slash final", chemin: `${SPOT}/`, requete: BTC },
+    { nom: "double barre après le préfixe", chemin: "/cqapi//v2/market/cq/spot/trade", requete: BTC },
+    { nom: "double barre au milieu du chemin", chemin: "/cqapi/v2/market//cq/spot/trade", requete: BTC },
     { nom: "casse du chemin", chemin: "/cqapi/v2/market/cq/SPOT/trade", requete: BTC },
     { nom: "séparateur encodé", chemin: "/cqapi/v2/market/cq/spot%2Ftrade", requete: BTC },
-    { nom: "segment de traversée", chemin: "/cqapi/v2/market/cq/spot/../swap/trade", requete: BTC },
+    { nom: "chaîne contenant .. (non normalisée)", chemin: "/cqapi/v2/market/cq/spot/../swap/trade", requete: BTC },
     { nom: "symbole hors liste", chemin: SPOT, requete: "?symbol=sol_all&window=day&limit=30" },
     { nom: "symbole d'une seule place", chemin: SPOT, requete: "?symbol=btc_usd&window=day" },
     { nom: "symbole en majuscules", chemin: SPOT, requete: "?symbol=BTC_ALL&window=day" },
     { nom: "symbole absent", chemin: SPOT, requete: "?window=day&limit=30" },
     { nom: "miner sur un chemin taker", chemin: SPOT, requete: "?miner=mara&window=day" },
     { nom: "symbol sur le chemin mineurs", chemin: MINEURS, requete: "?symbol=btc_all&window=day" },
+    { nom: "symbol et miner ensemble (spot)", chemin: SPOT, requete: "?symbol=btc_all&miner=mara&window=day&limit=30" },
+    { nom: "miner et symbol ensemble (perp)", chemin: SWAP, requete: "?miner=mara&symbol=eth_all&window=day" },
+    { nom: "miner et symbol ensemble (mineurs)", chemin: MINEURS, requete: "?miner=mara&symbol=btc_all&window=day&limit=30" },
+    { nom: "symbol puis miner ensemble (mineurs)", chemin: MINEURS, requete: "?symbol=btc_all&miner=mara&window=day" },
     { nom: "société inconnue", chemin: MINEURS, requete: "?miner=inconnu&window=day" },
     { nom: "société en majuscules", chemin: MINEURS, requete: "?miner=MARA&window=day" },
     { nom: "société absente", chemin: MINEURS, requete: "?window=day&limit=30" },
@@ -146,10 +154,11 @@ describe("cheminCryptoQuantAmont — refusés (null)", () => {
 });
 
 describe("cleCryptoQuantValide", () => {
-  test("accepte un Bearer non vide, casse indifférente, jusqu'à 512 caractères", () => {
+  test("accepte « Bearer », une espace et un jeton ASCII visible, casse du schéma indifférente, jusqu'à 512 caractères", () => {
     const limite = `Bearer ${"x".repeat(505)}`;
     expect(limite).toHaveLength(512);
-    for (const valeur of ["Bearer abc", "bearer abc", "BEARER abc", "Bearer   abc", "Bearer\tabc", limite]) {
+    const visibles = Array.from({ length: 0x7e - 0x21 + 1 }, (_, i) => String.fromCharCode(0x21 + i)).join("");
+    for (const valeur of ["Bearer abc", "bearer abc", "BEARER abc", `Bearer ${visibles}`, limite]) {
       expect(cleCryptoQuantValide(valeur)).toBe(true);
     }
   });
@@ -171,5 +180,23 @@ describe("cleCryptoQuantValide", () => {
     ]) {
       expect(cleCryptoQuantValide(valeur)).toBe(false);
     }
+  });
+
+  test.each([
+    { nom: "saut de ligne comme séparateur", valeur: "Bearer\ntok" },
+    { nom: "retour chariot comme séparateur", valeur: "Bearer\rtok" },
+    { nom: "CR/LF puis en-tête injecté", valeur: "Bearer \r\nX-Inj: 1" },
+    { nom: "saut de ligne dans le jeton", valeur: "Bearer tok\nX-Inj: 1" },
+    { nom: "tabulation comme séparateur", valeur: "Bearer\ttok" },
+    { nom: "double espace", valeur: "Bearer  tok" },
+    { nom: "triple espace", valeur: "Bearer   tok" },
+    { nom: "NBSP (U+00A0) comme séparateur", valeur: "Bearer tok" },
+    { nom: "NBSP (U+00A0) dans le jeton", valeur: "Bearer to k" },
+    { nom: "espace de largeur nulle (U+200B) dans le jeton", valeur: "Bearer to​k" },
+    { nom: "caractère non ASCII dans le jeton", valeur: "Bearer tokén" },
+    { nom: "caractère de contrôle DEL dans le jeton", valeur: "Bearer tok" },
+    { nom: "tabulation finale", valeur: "Bearer tok\t" },
+  ])("refuse un en-tête mal formé : $nom", ({ valeur }) => {
+    expect(cleCryptoQuantValide(valeur)).toBe(false);
   });
 });

@@ -384,11 +384,24 @@ describe("route CryptoQuant /cqapi (licence personnelle, liste fermée)", () => 
       [CHEMIN, "symbol=btc_all&window=day&inconnu=1"],
       [CHEMIN, "symbol=btc_all&symbol=btc_all&window=day"],
       [`${CHEMIN}/`, QUERY],
+      [`/${CHEMIN}`, QUERY],
+      [`//${CHEMIN}`, QUERY],
+      ["v2/market//cq/spot/trade", QUERY],
     ] as const) {
       const error = policyError(() => planProxyRequest(url("cqapi", path, query), "GET", bearer()));
       expect(error.status).toBe(404);
       expect(error.message).toBe("chemin CryptoQuant refusé");
     }
+  });
+
+  test("route publique /cqapi//… : 404 comme le daemon et Vite, après les contrôles 405 et 401", () => {
+    const publique = `https://axiom.test/cqapi//${CHEMIN}?${QUERY}`;
+    const refus = policyError(() => planProxyRequest(publique, "GET", bearer()));
+    expect(refus.status).toBe(404);
+    expect(refus.message).toBe("chemin CryptoQuant refusé");
+    expect(policyError(() => planProxyRequest(`https://axiom.test/cqapi///${CHEMIN}?${QUERY}`, "GET", bearer())).status).toBe(404);
+    expect(policyError(() => planProxyRequest(publique, "GET", new Headers())).status).toBe(401);
+    expect(policyError(() => planProxyRequest(publique, "POST", bearer())).status).toBe(405);
   });
 
   test("POST et HEAD : 405 allow GET, avec ou sans clé", () => {

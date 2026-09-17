@@ -13,7 +13,8 @@
  *            traiterCryptoQuant, liste fermée (shared/cryptoquant-proxy.ts), JAMAIS en cache
  *
  * Rappel BUILD-CONTRACT : le daemon ne proxifie JAMAIS le chemin chaud (les WS de
- * marché du front restent DIRECTS). Ici, uniquement du REST à quota, mis en cache.
+ * marché du front restent DIRECTS). Ici, uniquement du REST à quota. Le cache SQLite ne sert
+ * que les routes de la table et /extapi ; /ccdataapi, /defillamapro et /cqapi n'y passent pas.
  */
 import { EXTAPI_HOSTS, extapiCheminAutorise, sourceGeoExtraite } from "../../../shared/extapi-hosts";
 import { extraireSeriesGeo } from "../../../shared/geo-series";

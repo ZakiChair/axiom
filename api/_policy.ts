@@ -224,9 +224,15 @@ export function proxyRouteFromPathname(pathname: string): { route: ProxyRouteId;
   return null;
 }
 
-function routeAndPath(source: URL): { route: ProxyRouteId; path: string } {
+/**
+ * `path` : chemin validé, barres initiales retirées. `rawPath` : même chemin AVANT ce retrait,
+ * pour les routes à liste fermée qui doivent refuser `/<route>//…` comme le daemon et Vite.
+ */
+function routeAndPath(source: URL): { route: ProxyRouteId; path: string; rawPath: string } {
   const publicRoute = proxyRouteFromPathname(source.pathname);
-  if (publicRoute !== null) return { route: publicRoute.route, path: safePath(publicRoute.path) };
+  if (publicRoute !== null) {
+    return { route: publicRoute.route, path: safePath(publicRoute.path), rawPath: publicRoute.path };
+  }
   const routeValues = source.searchParams.getAll(PROXY_ROUTE_PARAM);
   const pathValues = source.searchParams.getAll(PROXY_PATH_PARAM);
   const route = routeValues[0];
@@ -234,7 +240,8 @@ function routeAndPath(source: URL): { route: ProxyRouteId; path: string } {
     throw new ProxyPolicyError(404, "route proxy inconnue");
   }
   if (pathValues.length !== 1) throw new ProxyPolicyError(400, "chemin proxy invalide");
-  return { route, path: safePath(pathValues[0] ?? null) };
+  const rawPath = pathValues[0] ?? null;
+  return { route, path: safePath(rawPath), rawPath: rawPath ?? "" };
 }
 
 function originalQuery(source: URL): URLSearchParams {
@@ -330,7 +337,7 @@ export function proxyCacheControl(method: string, query: URLSearchParams, header
 export function planProxyRequest(requestUrl: string, method: string, headers: Headers, env: ProxyEnv = process.env): ProxyPlan {
   if (proxyNavigationForbidden(headers)) throw new ProxyPolicyError(403, "destination navigateur refusée");
   const source = new URL(requestUrl);
-  const { route, path } = routeAndPath(source);
+  const { route, path, rawPath } = routeAndPath(source);
   const normalizedMethod = method.toUpperCase();
 
   let host: string;
@@ -371,7 +378,9 @@ export function planProxyRequest(requestUrl: string, method: string, headers: He
         throw new ProxyPolicyError(401, "clé CryptoQuant personnelle requise");
       }
       const localQuery = originalQuery(source).toString();
-      const allowedPath = cheminCryptoQuantAmont(`/cqapi/${path}`, localQuery ? `?${localQuery}` : "");
+      // Chemin BRUT (barres initiales conservées) : `/cqapi//…` est refusé en 404, comme le
+      // daemon et Vite qui comparent le pathname tel quel ; `safePath` l'a déjà validé.
+      const allowedPath = cheminCryptoQuantAmont(`/cqapi/${rawPath}`, localQuery ? `?${localQuery}` : "");
       if (allowedPath === null) throw new ProxyPolicyError(404, "chemin CryptoQuant refusé");
       const [pathname = "", search = ""] = allowedPath.split("?", 2);
       // `target.pathname` est reconstruit plus bas avec un « / » initial.

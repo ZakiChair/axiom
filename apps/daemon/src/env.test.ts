@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { parseEnv } from "./env";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { chargerCles, parseEnv } from "./env";
 
 describe("parseEnv", () => {
   test("parse des paires KEY=val simples", () => {
@@ -34,5 +37,29 @@ describe("parseEnv", () => {
     const env = parseEnv("pasdegal\n=valeur\nOK=1");
     expect(env.OK).toBe("1");
     expect(Object.keys(env)).toEqual(["OK"]);
+  });
+});
+
+describe("chargerCles — repli CryptoQuant (proxy /cqapi local)", () => {
+  test("parseEnv lit CRYPTOQUANT_API_KEY", () => {
+    expect(parseEnv("CRYPTOQUANT_API_KEY=abc").CRYPTOQUANT_API_KEY).toBe("abc");
+  });
+
+  test("chargerCles expose CRYPTOQUANT_API_KEY depuis le fichier .env", () => {
+    const dossier = mkdtempSync(join(tmpdir(), "axiom-env-"));
+    try {
+      const chemin = join(dossier, ".env");
+      writeFileSync(chemin, "BGEOMETRICS_API_KEY=bg\nCRYPTOQUANT_API_KEY=abc\n");
+      const cles = chargerCles(chemin);
+      expect(cles.CRYPTOQUANT_API_KEY).toBe("abc");
+      expect(cles.BGEOMETRICS_API_KEY).toBe("bg");
+    } finally {
+      rmSync(dossier, { recursive: true, force: true });
+    }
+  });
+
+  test("fichier absent : chaîne vide, jamais undefined", () => {
+    const absent = join(tmpdir(), `axiom-env-absent-${process.pid}`, ".env");
+    expect(chargerCles(absent).CRYPTOQUANT_API_KEY).toBe("");
   });
 });

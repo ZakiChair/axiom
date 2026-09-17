@@ -98,8 +98,10 @@ le module client `apps/web/src/data/onchain/cryptoquant.ts`.
 import) :
 
 - `CRYPTOQUANT_HOST = "api.cryptoquant.com"` ;
-- `cleCryptoQuantValide(authorization)` : `^Bearer\s+\S+$` (casse indifférente), ≤ 512
-  caractères — même prédicat que `api/_policy.ts:277-284` ;
+- `cleCryptoQuantValide(authorization)` : `^Bearer [\x21-\x7E]+$` (casse indifférente), ≤ 512
+  caractères — plus strict que le prédicat BGeometrics de `api/_policy.ts:277-284` (amendé
+  par la revue finale : une seule espace, jeton en ASCII visible, ni CR/LF ni Unicode) ;
+  le client l'applique aussi à la clé personnelle avant tout appel ;
 - `cheminCryptoQuantAmont(pathname, search): string | null` : retire `/cqapi`, n'accepte
   **que** `/v2/market/cq/spot/trade` et `/v2/market/cq/swap/trade` avec `symbol` ∈
   {`btc_all`, `eth_all`}, et `/v1/btc/miner-data/companies` avec `miner` ∈ {les 9 ids} ;

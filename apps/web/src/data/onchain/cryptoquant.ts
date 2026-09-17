@@ -645,8 +645,8 @@ export function abonnerFileCq(cb: () => void): () => void {
 declare const __CQ_CLE_ENV__: boolean;
 const CQ_CLE_ENV_PRESENTE: boolean = typeof __CQ_CLE_ENV__ !== "undefined" ? __CQ_CLE_ENV__ : false;
 
-/** Reprise après un appel réussi sans J-1. */
-const REPRISE_MS = 6 * 3600_000;
+/** Reprise après un appel réussi sans J-1, ou après une réponse 200 vide/invalide (§13, C5, C6). */
+const REPRISE_MS = 12 * 3600_000;
 const TIMEOUT_MS = 15_000;
 
 /** Définie dans le store (module déjà partagé par Réglages, DES et CHAIN), jamais recopiée ici. */
@@ -686,6 +686,12 @@ let refusCle: { version: number; raison: string } | null = null;
 /** 402 : mémoire GLOBALE (toutes familles), valable 24 h — un nouvel essai est gratuit. */
 const MEMOIRE_CREDITS_MS = 24 * 3600_000;
 let refusCredits: { version: number; ts: number } | null = null;
+/**
+ * 200 vide ou invalide : facturé (§13) mais sans `majTs` à faire progresser (l'archive ne change
+ * pas) ; sans cette mémoire PAR SÉRIE, la même série serait rappelée à chaque ouverture. Soumise
+ * à la même reprise `REPRISE_MS` que `majTs` (C6). En mémoire de session seulement (jamais persistée).
+ */
+const reponseVideTs = new Map<SerieCq, number>();
 
 function familleSerie(serie: SerieCq): FamilleCq {
   return estSerieMineur(serie) ? "mineurs" : "taker";
@@ -746,6 +752,9 @@ async function chargerUneFois(serie: SerieCq, signal: AbortSignal): Promise<Char
   // `majTs` futur (horloge d'un poste en avance, ou relu tel via `unionArchives`) traité comme expiré :
   // sinon la différence négative reste `< REPRISE_MS` indéfiniment et gèle la série.
   if (archive !== null && archive.majTs !== null && archive.majTs <= now && now - archive.majTs < REPRISE_MS) return fin("pret", raisonLecture, false);
+  // Même reprise pour la dernière réponse 200 vide/invalide de cette série (§13, C6).
+  const videTs = reponseVideTs.get(serie);
+  if (videTs !== undefined && videTs <= now && now - videTs < REPRISE_MS) return fin("pret", raisonLecture, false);
   /**
    * §13 : mémoire du 402 puis plafond de crédits, contrôlés AVANT le créneau (une série dans sa
    * reprise reste `pret` sans appel) puis de nouveau APRÈS l'avoir obtenu — une autre série a pu
@@ -806,6 +815,9 @@ async function chargerUneFois(serie: SerieCq, signal: AbortSignal): Promise<Char
     }
     const lignes = parserLignes(serie, (await res.json()) as unknown, aujourdhui);
     if (lignes.length === 0) {
+      // Facturé (comptabiliserCredits ci-dessus) mais archive inchangée : mémorisée par série pour
+      // que la reprise 12 h s'applique aussi à cette heure (§13, C6), sans toucher à `majTs`.
+      reponseVideTs.set(serie, Date.now());
       healthStore.getState().marquerErreur(SOURCE_SANTE, "CryptoQuant : réponse vide ou invalide");
       return fin("erreur", RAISON_ERREUR_CRYPTOQUANT, true);
     }

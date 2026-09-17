@@ -377,7 +377,7 @@ const api200Entetes = (headers: Record<string, string>) => () =>
   Response.json({ status: { code: 200 }, result: { data: plage(-30, -1).reverse().map(brute) } }, { headers });
 const statut = (status: number, message = "", headers: Record<string, string> = {}) => Response.json({ status: { code: status, message } }, { status, headers });
 const appels = (f: ReturnType<typeof reseau>) => f.mock.calls.filter(([u]) => String(u).startsWith("/cqapi/"));
-const SIX_H = 6 * 3600_000;
+const DOUZE_H = 12 * 3600_000;
 const SECRET = "CLE-TEST-SECRETE";
 /** Horloge réelle pour `setTimeout` (seul `Date` est simulé ici) : laisse avancer les promesses jusqu'à la condition. */
 const jusqua = async (condition: () => boolean) => {
@@ -388,16 +388,18 @@ describe("CryptoQuant : chargerSerieCq (I5, I7, I9, I10)", () => {
   beforeEach(() => { reinitialiser(); cle.valeur = "perso"; vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(T0); });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.doUnmock("../../lib/deployment"); });
 
-  it("J-1 archivé ou appel < 6 h → 0 appel ; ≥ 6 h → 1 appel exact, fusion écrite, santé polling", async () => {
+  it("C5 — J-1 archivé ou appel < 12 h → 0 appel ; ≥ 12 h → 1 appel exact, fusion écrite, santé polling", async () => {
     const cq = await import("./cryptoquant");
     const { healthStore } = await import("../../store/health");
     const f = reseau(api200);
     poser(arch(plage(-30, -1), 0));
     expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", raison: null, appel: false, diagnostic: { hierPresent: true } });
-    poser(arch(plage(-40, -2), T0 - SIX_H + 1));
+    // now − 11 h 59 (1 ms sous le seuil) : reprise active, 0 appel.
+    poser(arch(plage(-40, -2), T0 - DOUZE_H + 1));
     expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: false });
     expect(appels(f)).toHaveLength(0);
-    poser(arch(plage(-40, -2), T0 - SIX_H));
+    // now − 12 h pile : reprise échue, 1 appel.
+    poser(arch(plage(-40, -2), T0 - DOUZE_H));
     const r = await cq.chargerSerieCq("taker:spot:btc");
     expect(appels(f)).toEqual([["/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30",
       expect.objectContaining({ cache: "no-store", redirect: "error", headers: { accept: "application/json", Authorization: "Bearer perso" }, signal: expect.any(AbortSignal) })]]);
@@ -423,7 +425,7 @@ describe("CryptoQuant : chargerSerieCq (I5, I7, I9, I10)", () => {
   ] as const)("échec %s : erreur, majTs inchangé, archive servie, santé en erreur", async (_n, api) => {
     const cq = await import("./cryptoquant");
     const { healthStore } = await import("../../store/health");
-    const avant = arch(plage(-30, -2), T0 - SIX_H);
+    const avant = arch(plage(-30, -2), T0 - DOUZE_H);
     poser(avant);
     reseau(api);
     const r = await cq.chargerSerieCq("taker:spot:btc");
@@ -489,7 +491,7 @@ describe("CryptoQuant : chargerSerieCq (I5, I7, I9, I10)", () => {
   it("KV 400 j : kvPut reçoit 401 j après l'appel ; version inconnue locale ou KV : erreur, 0 appel, rien réécrit", async () => {
     let cq = await import("./cryptoquant");
     detecter.mockResolvedValue(true);
-    reseau(api200, kvOk(arch(plage(-401, -2), T0 - SIX_H)));
+    reseau(api200, kvOk(arch(plage(-401, -2), T0 - DOUZE_H)));
     expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", persistance: { local: true, kv: true } });
     expect(Object.keys((kvPutMock.mock.calls[0]?.[2] as ArchiveCq).jours)).toHaveLength(401);
     vi.resetModules();
@@ -651,7 +653,7 @@ const credits = () => JSON.parse(localStorage.getItem(CLE_CREDITS) ?? "null") as
 const poserCredits = (jours: Record<string, unknown>) => localStorage.setItem(CLE_CREDITS, JSON.stringify({ v: 1, jours }));
 const sante = async () => (await import("../../store/health")).healthStore;
 
-describe("CryptoQuant : budget de crédits (§13, C1 à C4)", () => {
+describe("CryptoQuant : budget de crédits (§13, C1 à C4, C6)", () => {
   beforeEach(() => { reinitialiser(); cle.valeur = "perso"; vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(T0); });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -837,5 +839,27 @@ describe("CryptoQuant : budget de crédits (§13, C1 à C4)", () => {
     await tourner();
     expect(seconde).toMatchObject({ statut: "credits", raison: raison(cq), appel: false });
     expect(appels(f)).toHaveLength(1);
+  });
+
+  it("C6 — 200 vide : facturé, archive inchangée, heure mémorisée par série sous la même reprise 12 h", async () => {
+    const cq = await import("./cryptoquant");
+    // majTs déjà à 12 h pile : la reprise sur `majTs` seule LAISSERAIT partir un appel — isole le
+    // nouveau mécanisme (mémoire de la réponse vide), qui ne dépend pas de `majTs`.
+    const avant = arch(plage(-30, -2), T0 - DOUZE_H);
+    poser(avant);
+    const f = reseau(() => Response.json({ status: { code: 200 }, result: { data: [] } }));
+    const r = await cq.chargerSerieCq("taker:spot:btc");
+    expect(r).toMatchObject({ statut: "erreur", raison: cq.RAISON_ERREUR_CRYPTOQUANT, appel: true });
+    expect([r.archive, relire()]).toEqual([avant, avant]);
+    expect(credits()).toEqual({ v: 1, jours: { [J(0)]: 15 } });
+    expect(appels(f)).toHaveLength(1);
+    // now − 11 h 59 depuis la réponse vide : reprise active, 0 appel, archive et compteur inchangés.
+    vi.setSystemTime(T0 + DOUZE_H - 1);
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: false });
+    expect([appels(f).length, relire(), credits()]).toEqual([1, avant, { v: 1, jours: { [J(0)]: 15 } }]);
+    // now − 12 h pile depuis la réponse vide : reprise échue, nouvel appel.
+    vi.setSystemTime(T0 + DOUZE_H);
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "erreur", appel: true });
+    expect(appels(f)).toHaveLength(2);
   });
 });

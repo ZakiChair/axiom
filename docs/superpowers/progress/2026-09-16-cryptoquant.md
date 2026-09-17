@@ -1074,6 +1074,7 @@ Marges de ce tableau : locales. Estimation runner, par la méthode de « Budget 
 - ≈ 3 167 gzip à la base du lot (4 405 − 1 238) ;
 - ≈ 3 125 gzip après le lot, à `3fa31e6` (4 363 − 1 238) ;
 - ≈ 3 076 gzip après la vague de correction finale : budget initial final **1 206 265 octets bruts / 355 686 gzip**, mesuré par `pnpm check` à l'étape D (marge locale 4 314 ; 4 314 − 1 238). Voir « Revue finale de branche ».
+- **Mesure réelle du runner, fin de branche (2026-09-17, PR #5, run GitHub `35277267661`, commit `696b54a`) : initial `1 206 448` octets bruts / `356 986` gzip, soit une marge de `3 014` octets gzip sous le plafond bloquant de 360 000.** L'estimation (≈ 3 076 après le lot crédits, marge locale 4 262 − écart 1 248) était juste à 62 octets près ; l'écart runner − local vaut ici 356 986 − 355 738 = **1 248**. La marge passe tout juste le seuil de vigilance d'environ 3 000 (spec I11) : **le prochain lot qui touche le chemin d'entrée doit d'abord libérer des octets** (porte I11 : retirer en premier le libellé DATA de `data/dataCockpit.ts`), ou mesurer sur le runner avant de committer.
 
 Les 3 365 gzip ont été mesurés sur le runner à `e14dc03`, avant trois commits de code hors lot (`7542bee`, `f8ef08f`, `278c452`) : ce n'est pas la marge du lot. Seuil de vigilance ~3 000 gzip (spec I11) : il reste environ 76 octets gzip sur le runner ; au prochain ajout au chemin d'entrée, retirer d'abord le libellé DATA. Budget du premier run GitHub de la branche : non relevé (branche non poussée) ; à lire au premier push.
 

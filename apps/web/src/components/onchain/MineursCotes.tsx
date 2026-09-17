@@ -10,7 +10,7 @@
  * `chunkCryptoquant.test.ts`). Les messages « clé requise » viennent du store de clé, déjà
  * partagé par les Réglages, DES et le client.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { IdMineurCq } from "../../../../../shared/cryptoquant-proxy";
 import type { ChargementCq, LigneCq, LigneMineur, SerieCq } from "../../data/onchain/cryptoquant";
@@ -19,6 +19,7 @@ import { IS_VERCEL } from "../../lib/deployment";
 import { formatDec, formatUsd } from "../../lib/format";
 import { useHorloge } from "../../lib/horloge";
 import { cryptoquantKeyStore, messageSansCleCq, RAISON_CLE_CRYPTOQUANT } from "../../store/cryptoquant";
+import { cryptoquantUiStore, useCibleCq } from "../../store/cryptoquantUi";
 import { enregistrerQualite } from "../../store/qualiteMetriques";
 import { TableTriable, trierLignes, type ColonneTable, type TriTable } from "../TableTriable";
 import { Badge, BadgeFiabilite, NoteSource, SansCle, Vide } from "../ui";
@@ -633,6 +634,10 @@ export function EnTeteMineursCotes({
  */
 export function MineursCotes({ onOuvrirReglages }: { onOuvrirReglages: () => void }) {
   const [ouvert, setOuvert] = useState(false);
+  // Entrée CQMINE (menu « Fonctions » / ⌘K) : demande DÉRIVÉE au rendu, jamais posée par un
+  // effet — les tests de rendu statique (environnement node) n'en exécutent aucun.
+  const demandee = useCibleCq() === "mineurs";
+  const refSection = useRef<HTMLDivElement | null>(null);
   const [tri, setTri] = useState<TriTable>(TRI_DEFAUT);
   const [chargements, setChargements] = useState<Chargements>({});
   const [enCours, setEnCours] = useState(true);
@@ -688,11 +693,32 @@ export function MineursCotes({ onOuvrirReglages }: { onOuvrirReglages: () => voi
     };
   }, [version]);
 
+  // Demande de l'entrée CQMINE : le dépliage est déjà à l'écran (dérivé ci-dessous) ; cet
+  // effet le rend PERSISTANT, amène la sous-section sous les yeux et rend la main au magasin.
+  // Aucun appel réseau n'en découle : les neuf séries sont chargées au montage de la fenêtre.
+  useEffect(() => {
+    if (!demandee) return;
+    setOuvert(true);
+    const noeud = refSection.current;
+    // Garde d'environnement : `scrollIntoView` n'existe ni en node, ni sur tous les jsdom.
+    if (noeud !== null && typeof noeud.scrollIntoView === "function") {
+      noeud.scrollIntoView({ block: "start" });
+    }
+    cryptoquantUiStore.getState().consommer("mineurs");
+  }, [demandee]);
+
+  // Une demande en cours déplie dès le PREMIER rendu ; le clic sur l'en-tête la consomme,
+  // sinon replier serait impossible.
+  const ouvertEffectif = ouvert || demandee;
+
   return (
-    <div className="mt-3 space-y-1">
+    <div ref={refSection} className="mt-3 space-y-1">
       <EnTeteMineursCotes
-        ouvert={ouvert}
-        onBasculer={() => setOuvert((v) => !v)}
+        ouvert={ouvertEffectif}
+        onBasculer={() => {
+          setOuvert((v) => !v);
+          cryptoquantUiStore.getState().consommer("mineurs");
+        }}
         chargements={chargements}
         enCours={enCours}
         recues={recues}
@@ -701,7 +727,7 @@ export function MineursCotes({ onOuvrirReglages }: { onOuvrirReglages: () => voi
         now={now}
         onOuvrirReglages={onOuvrirReglages}
       />
-      {ouvert && (
+      {ouvertEffectif && (
         <VueMineursCotes
           chargements={chargements}
           enCours={enCours}

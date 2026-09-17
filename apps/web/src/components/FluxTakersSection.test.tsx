@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ArchiveCq, ChargementCq, DiagnosticCq, LigneTaker, SerieCq } from "../data/onchain/cryptoquant";
 import { RAISON_CLE_CRYPTOQUANT } from "../store/cryptoquant";
+import { cryptoquantUiStore } from "../store/cryptoquantUi";
 import {
   RAISON_CREDITS_EPUISES_CQ,
   resumeEnTeteFluxTakers,
@@ -515,6 +516,45 @@ describe("section DES « Flux takers toutes places »", () => {
     expect(html).toContain("chargement…");
     expect(html).not.toContain("Ratio taker");
     expect(html).not.toContain("Archive locale");
+    expect(clientEvalue).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Entrée CQTAKR (menu « Fonctions » et ⌘K, décision du propriétaire du 2026-09-18) : la
+ * demande vit dans `cryptoquantUiStore`. Les effets ne s'exécutent JAMAIS en environnement
+ * node (`renderToStaticMarkup`) : l'ouverture est donc DÉRIVÉE au rendu, ce que ce bloc
+ * vérifie — la section visée est déjà dépliée au PREMIER rendu, sans attendre d'effet.
+ */
+describe("dépliage demandé par l'entrée CQTAKR", () => {
+  afterEach(() => {
+    cryptoquantUiStore.setState({ cible: null });
+  });
+
+  it("cible « takers » : section dépliée et contenu rendu au premier rendu", () => {
+    cryptoquantUiStore.setState({ cible: "takers" });
+    const html = renderToStaticMarkup(<SectionFluxTakers onOuvrirReglages={() => undefined} />);
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain("Actif des flux takers");
+    expect(html).toContain("Chargement des flux takers…");
+  });
+
+  it("cible « mineurs » : la section DES reste repliée (la demande visait CHAIN)", () => {
+    cryptoquantUiStore.setState({ cible: "mineurs" });
+    const html = renderToStaticMarkup(<SectionFluxTakers onOuvrirReglages={() => undefined} />);
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain("Actif des flux takers");
+  });
+
+  it("cible nulle : section repliée (aucune demande en cours)", () => {
+    expect(cryptoquantUiStore.getState().cible).toBeNull();
+    const html = renderToStaticMarkup(<SectionFluxTakers onOuvrirReglages={() => undefined} />);
+    expect(html).toContain('aria-expanded="false"');
+  });
+
+  it("le dépliage ne charge rien de plus : le client reste non évalué", () => {
+    cryptoquantUiStore.setState({ cible: "takers" });
+    renderToStaticMarkup(<SectionFluxTakers onOuvrirReglages={() => undefined} />);
     expect(clientEvalue).not.toHaveBeenCalled();
   });
 });

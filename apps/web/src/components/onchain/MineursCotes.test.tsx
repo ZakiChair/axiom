@@ -5,6 +5,7 @@ import { IDS_MINEURS_CQ, type IdMineurCq } from "../../../../../shared/cryptoqua
 import type { ArchiveCq, ChargementCq, DiagnosticCq, LigneMineur, SerieCq } from "../../data/onchain/cryptoquant";
 import { actualiserQualite } from "../../data/qualiteMetrique";
 import { RAISON_CLE_CRYPTOQUANT } from "../../store/cryptoquant";
+import { cryptoquantUiStore } from "../../store/cryptoquantUi";
 import {
   construireModeleMineurs,
   EnTeteMineursCotes,
@@ -694,6 +695,37 @@ describe("production des mineurs cotés : vue, en-tête et conteneur", () => {
     expect(html).toContain("Production des mineurs cotés");
     expect(html).not.toContain('role="table"');
     expect(html).not.toContain("Σ");
+  });
+
+  /**
+   * Entrée CQMINE (menu « Fonctions » et ⌘K, décision du propriétaire du 2026-09-18) : le
+   * dépliage est DÉRIVÉ du magasin d'intention au rendu — les tests web tournent en
+   * environnement node, où aucun effet ne s'exécute.
+   */
+  describe("dépliage demandé par l'entrée CQMINE", () => {
+    afterEach(() => {
+      cryptoquantUiStore.setState({ cible: null });
+    });
+
+    it("cible « mineurs » : sous-section dépliée et contenu rendu au premier rendu", () => {
+      cryptoquantUiStore.setState({ cible: "mineurs" });
+      const html = renderToStaticMarkup(<MineursCotes onOuvrirReglages={() => {}} />);
+      expect(html).toContain('aria-expanded="true"');
+      expect(html).toContain("Chargement de la production des mineurs cotés…");
+    });
+
+    it("cible « takers » : la sous-section CHAIN reste repliée (la demande visait DES)", () => {
+      cryptoquantUiStore.setState({ cible: "takers" });
+      const html = renderToStaticMarkup(<MineursCotes onOuvrirReglages={() => {}} />);
+      expect(html).toContain('aria-expanded="false"');
+      expect(html).not.toContain("Chargement de la production des mineurs cotés…");
+    });
+
+    it("cible nulle : sous-section repliée (aucune demande en cours)", () => {
+      expect(cryptoquantUiStore.getState().cible).toBeNull();
+      const html = renderToStaticMarkup(<MineursCotes onOuvrirReglages={() => {}} />);
+      expect(html).toContain('aria-expanded="false"');
+    });
   });
 
   it("source : le client n'est chargé que par import(), client et module partagé importés en type seulement", () => {

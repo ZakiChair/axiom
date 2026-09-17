@@ -13,6 +13,8 @@ import { liqMarksStore } from "../chart/liquidationMarkers";
 import { derivativesUiStore } from "../store/derivatives-ui";
 // Bandeau ticker (pas une fenêtre Launchpad) + disposition grille.
 import { tickerBandStore } from "../store/tickerBand";
+// Navigation vers les deux sections CryptoQuant (ni fenêtre, ni indicateur nouveau).
+import { cryptoquantUiStore, ENTREES_CQ, type CibleCq } from "../store/cryptoquantUi";
 import {
   estNouvelle,
   menuWindowsGroupees,
@@ -181,22 +183,57 @@ const TICKER_ENTREE = {
   libelle: "Bandeau news défilant",
   ouvrir: () => tickerBandStore.getState().basculer(),
 };
+
+/**
+ * Entrée de NAVIGATION vers une section CryptoQuant déjà livrée (décision du propriétaire du
+ * 2026-09-18) : ni fenêtre du registre (`id` absent), ni indicateur nouveau. Le magasin
+ * d'intention ouvre la fenêtre hôte et la section visée se déplie puis défile à l'écran.
+ * Mnémonique et libellé viennent de `ENTREES_CQ` (source unique, partagée avec ⌘K) ; le
+ * badge « nouveau » a sa propre clé, sans quoi il s'éteindrait avec DES ou CHAIN.
+ */
+function entreeCq(cible: CibleCq): EntreeFonction {
+  const e = ENTREES_CQ[cible];
+  return {
+    mnemonique: e.mnemonique,
+    libelle: e.libelle,
+    nouveau: true,
+    badgeId: e.badge,
+    ouvrir: () => cryptoquantUiStore.getState().demander(cible),
+  };
+}
 type EntreeFonction = {
   id?: WindowId;
   mnemonique: string;
   libelle: string;
   nouveau?: boolean;
+  /** Clé du badge « nouveau » d'une entrée SANS fenêtre (sinon `id` en tient lieu). */
+  badgeId?: string;
   vercel?: DisponibiliteVercel;
   ouvrir: () => void;
 };
+
+/**
+ * Badge « nouveau » d'une entrée du menu Fonctions : la clé « vue » est `badgeId` pour une
+ * entrée SANS fenêtre (CQTAKR/CQMINE, qui ne doivent pas éteindre le badge de DES ni de
+ * CHAIN), sinon l'id de la fenêtre. Sans clé (TICKER), aucun badge. Exportée pour les tests.
+ */
+export function entreeNeuve(f: EntreeFonction): boolean {
+  const cle = f.badgeId ?? f.id;
+  return f.nouveau === true && cle !== undefined && estNouvelle(cle);
+}
 
 /**
  * Menu Fonctions GROUPÉ par thème (sections dérivées du registre). Il déroulait
  * jusqu'ici 37 entrées à plat dans l'ordre d'implémentation, au-delà de la hauteur du
  * panneau (revue du 2026-08-01 § 6.1). TICKER, qui n'est pas une fenêtre du registre,
  * rejoint « Outils ».
+ *
+ * Les entrées spéciales (TICKER, CQTAKR, CQMINE) sont ajoutées À LA SUITE des fenêtres de
+ * leur groupe : le tri par mnémonique de `menuWindowsGroupees()` ne porte que sur le
+ * registre, et les intercaler par ordre alphabétique les noierait parmi les fenêtres.
+ * Exporté pour les tests (aucun rendu React possible en environnement node).
  */
-const SECTIONS_FONCTIONS: { groupe: string; entrees: EntreeFonction[] }[] = menuWindowsGroupees().map(
+export const SECTIONS_FONCTIONS: { groupe: string; entrees: EntreeFonction[] }[] = menuWindowsGroupees().map(
   (section) => ({
     groupe: section.groupe,
     entrees: [
@@ -209,6 +246,8 @@ const SECTIONS_FONCTIONS: { groupe: string; entrees: EntreeFonction[] }[] = menu
         ouvrir: () => windowManagerStore.getState().openWindow(w.id),
       })),
       ...(section.groupe === "Outils" ? [TICKER_ENTREE] : []),
+      ...(section.groupe === "Marché & dérivés" ? [entreeCq("takers")] : []),
+      ...(section.groupe === "On-chain & stablecoins" ? [entreeCq("mineurs")] : []),
     ],
   })
 );
@@ -253,10 +292,8 @@ function FonctionsMenu() {
                     {f.vercel === "unusable" ? "UNUSABLE" : "PARTIAL"}
                   </Badge>
                 )}
-                {/* Badge « nouveau » (fenêtres récentes) jusqu'à la 1ère ouverture. */}
-                {f.nouveau && f.id !== undefined && estNouvelle(f.id) && (
-                  <Badge ton="accent">nouveau</Badge>
-                )}
+                {/* Badge « nouveau » jusqu'à la 1ère ouverture / au 1er clic. */}
+                {entreeNeuve(f) && <Badge ton="accent">nouveau</Badge>}
               </button>
             ))}
           </div>

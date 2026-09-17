@@ -14,7 +14,7 @@
  * symbole et de l'exchange. Courbe et sparkline LOCALES : un module commun DES/CHAIN
  * créerait un chunk préchargé par l'entrée.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type { ChargementCq, DiagnosticCq, SerieCq } from "../data/onchain/cryptoquant";
 import { IS_VERCEL } from "../lib/deployment";
@@ -30,6 +30,7 @@ import {
 } from "../lib/format";
 import { useHorloge } from "../lib/horloge";
 import { cryptoquantKeyStore, messageSansCleCq, RAISON_CLE_CRYPTOQUANT } from "../store/cryptoquant";
+import { cryptoquantUiStore, useCibleCq } from "../store/cryptoquantUi";
 import {
   construireModeleFluxTakers,
   serieTaker,
@@ -413,6 +414,10 @@ export function SectionFluxTakers({ onOuvrirReglages }: { onOuvrirReglages: () =
   // Rotation de clé (setKey/clearKey) → nouvelle passe ; la valeur de la clé n'est jamais lue ici.
   const version = useStore(cryptoquantKeyStore, (s) => s.version);
   const [ouvert, setOuvert] = useState(false);
+  // Entrée CQTAKR (menu « Fonctions » / ⌘K) : la demande est DÉRIVÉE au rendu, jamais posée
+  // par un effet — les tests de rendu statique (environnement node) n'en exécutent aucun.
+  const demandee = useCibleCq() === "takers";
+  const refSection = useRef<HTMLElement | null>(null);
   const [selection, setSelection] = useState<SelectionTaker>({ actif: "btc", marche: "spot" });
   const [chargements, setChargements] = useState<Partial<Record<SerieCq, ChargementCq>>>({});
   const [enCours, setEnCours] = useState(true);
@@ -478,6 +483,20 @@ export function SectionFluxTakers({ onOuvrirReglages }: { onOuvrirReglages: () =
     };
   }, [version, jourCourant]);
 
+  // Demande de l'entrée CQTAKR : le dépliage est déjà à l'écran (dérivé ci-dessus) ; cet effet
+  // le rend PERSISTANT (état local), amène la section sous les yeux et rend la main au magasin.
+  // Aucun appel réseau n'en découle : les séries sont chargées au montage de la fenêtre.
+  useEffect(() => {
+    if (!demandee) return;
+    setOuvert(true);
+    const noeud = refSection.current;
+    // Garde d'environnement : `scrollIntoView` n'existe ni en node, ni sur tous les jsdom.
+    if (noeud !== null && typeof noeud.scrollIntoView === "function") {
+      noeud.scrollIntoView({ block: "start" });
+    }
+    cryptoquantUiStore.getState().consommer("takers");
+  }, [demandee]);
+
   // Compte à rebours de reprise après un 429 : un rendu par seconde jusqu'à l'échéance (l'horloge
   // partagée ne bat que toutes les 10 s ; chaque rendu relit l'heure réelle).
   useEffect(() => {
@@ -504,12 +523,19 @@ export function SectionFluxTakers({ onOuvrirReglages }: { onOuvrirReglages: () =
     echecClient,
   };
 
+  // Une demande en cours déplie la section DÈS le premier rendu (l'effet ci-dessus ne fait
+  // que pérenniser l'état) ; le clic sur l'en-tête la consomme, sinon replier serait impossible.
+  const ouvertEffectif = ouvert || demandee;
+
   return (
-    <section className="mt-3 rounded-md border border-border bg-bg">
+    <section ref={refSection} className="mt-3 rounded-md border border-border bg-bg">
       <button
         type="button"
-        onClick={() => setOuvert((v) => !v)}
-        aria-expanded={ouvert}
+        onClick={() => {
+          setOuvert((v) => !v);
+          cryptoquantUiStore.getState().consommer("takers");
+        }}
+        aria-expanded={ouvertEffectif}
         className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
       >
         <span className="text-[10px] uppercase tracking-wide text-text-dim">
@@ -517,10 +543,10 @@ export function SectionFluxTakers({ onOuvrirReglages }: { onOuvrirReglages: () =
         </span>
         <span className="flex shrink-0 items-center gap-2 text-[10px] tabular-nums text-text-dim">
           <span>{resumeEnTeteFluxTakers(props)}</span>
-          <span className="text-[11px]">{ouvert ? "▾" : "▸"}</span>
+          <span className="text-[11px]">{ouvertEffectif ? "▾" : "▸"}</span>
         </span>
       </button>
-      {ouvert && (
+      {ouvertEffectif && (
         <div className="border-t border-border px-3 py-2">
           <VueFluxTakers {...props} />
         </div>

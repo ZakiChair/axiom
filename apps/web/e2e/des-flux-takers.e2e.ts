@@ -371,6 +371,47 @@ test("DES : 401 CryptoQuant — clé refusée affichée avec l'accès aux Régla
   expect(await lireArchive(page)).toBeNull();
 });
 
+test("DES : l'entrée CQTAKR du menu Fonctions ouvre DES, déplie les flux takers et n'appelle rien de plus", async ({ page }) => {
+  // Décision du propriétaire du 2026-09-18 : entrée de NAVIGATION, aucune fenêtre nouvelle.
+  const appels = await preparer(page);
+  await page.goto("/");
+
+  // Badge « nouveau » avant le premier clic (clé `axiom:seen:section:cq-takers` absente).
+  await page.getByRole("button", { name: "Fonctions" }).click();
+  const entree = page.getByRole("menuitem", { name: /CQTAKR/ });
+  await expect(entree).toContainText("Flux takers toutes places (CryptoQuant)");
+  await expect(entree).toContainText("nouveau");
+  await entree.click();
+
+  // La fenêtre DES s'ouvre ET la section est déjà dépliée (aucun second geste).
+  const des = page.getByRole("complementary", { name: "Produits dérivés" });
+  await expect(des).toBeVisible({ timeout: 15_000 });
+  const bouton = des.getByRole("button", { name: /Flux takers toutes places/i });
+  await expect(bouton).toHaveAttribute("aria-expanded", "true");
+  const section = des
+    .locator("section")
+    .filter({ has: page.getByRole("button", { name: /Flux takers toutes places/i }) });
+  await expect(section).toContainText("0.98");
+  await expect(section).toContainText("observation 2026-09-15 (J-1)");
+
+  // AUCUN appel de plus que les quatre du montage : le dépliage ne charge rien (le client
+  // charge au montage de la fenêtre, pas à l'ouverture de la section).
+  await expect.poll(() => appels.length).toBe(4);
+  await page.waitForTimeout(300);
+  expect(appels).toHaveLength(4);
+
+  // La demande est consommée : le clic sur l'en-tête replie toujours la section.
+  await bouton.click();
+  await expect(bouton).toHaveAttribute("aria-expanded", "false");
+  expect(appels).toHaveLength(4);
+
+  // Badge éteint après le premier clic (la section est « vue »).
+  await page.getByRole("button", { name: "Fonctions" }).click();
+  const revisitee = page.getByRole("menuitem", { name: /CQTAKR/ });
+  await expect(revisitee).toBeVisible();
+  await expect(revisitee).not.toContainText("nouveau");
+});
+
 test("DES : client CryptoQuant introuvable (import() rejeté) — en-tête et vue le disent, aucun appel, archive intacte", async ({ page }) => {
   const appels = await preparer(page, { archive: true });
   const interceptees = await rendreClientIntrouvable(page);

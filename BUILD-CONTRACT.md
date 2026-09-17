@@ -289,7 +289,12 @@ le client fusionne les jours nouveaux dans une archive versionnée par série (l
 `axiom:onchain:cq:<serie>:v1` + KV daemon `onchain/cq:<serie>:v1`, union des deux, jamais
 destructive, hors export/import de sauvegarde) ; la fenêtre fournisseur de 30 j sans
 rattrapage impose d'afficher la date de début de l'archive, ses jours manquants et ses
-jours définitivement perdus ; aucun collecteur daemon. (4) Requêtes toujours
+jours définitivement perdus ; aucun collecteur daemon. Le COMPTEUR de crédits
+`axiom:cryptoquant:credits:v1` (valeur `{ "v": 1, "jours": {…} }`, élagué à 31 jours UTC,
+écriture additive sur la valeur stockée pour que deux onglets comptent tous deux) est un
+état LOCAL au navigateur : exclu de l'export comme la clé, ni écrasé ni purgé à l'import
+(`ETATS_LOCAUX_NON_EXPORTES` de `apps/web/src/store/persist.ts`) — c'est ce qui rend vraie
+la mention « par navigateur » de la règle (4). (4) Requêtes toujours
 `window=day&limit=30` sans `from` ; cadencement client 10 req/min visible (« en attente du
 quota »), garde « J-1 déjà archivé → aucun appel » et reprise 12 h (amendement §13,
 2026-09-17), plafond de sécurité de 9 000 crédits sur une fenêtre glissante de 31 jours UTC

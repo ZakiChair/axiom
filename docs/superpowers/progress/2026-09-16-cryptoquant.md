@@ -1468,9 +1468,15 @@ sur l'ancienne valeur jusqu'à ce que la fenêtre minute expire (jusqu'à 60 s p
 (quelques appels par jour). Corrigé en ajoutant `credits.utilise` à la signature ; `panelSignature`
 exportée pour un test PURE dédié (le projet ne teste pas le rendu React — cf. l'en-tête du fichier
 de test — mais cette fonction est une logique pure comme `formatQuota`/`degradedLevel`).
-`apps/web/src/components/DataWindow.tsx` a la même logique dupliquée (`signatureRegistre`,
-`DataWindow.tsx:33-43`, même bug) mais n'est pas un fichier attribué à cette tâche : **non
-corrigé ici**, signalé pour un arbitrage/lot séparé.
+`apps/web/src/components/DataWindow.tsx` porte la même logique de signature dupliquée
+(`signatureRegistre`, `DataWindow.tsx:33-43`) mais n'est pas un fichier attribué à cette tâche :
+**non corrigé ici**. *Précision de la revue finale (R4) : la conséquence n'y est PAS la même.*
+`DataWindow` force un re-rendu toutes les 10 s (`setInterval(() => setTick(n => n + 1), 10_000)`,
+`DataWindow.tsx:79-83`) et relit le registre frais à chaque rendu : le segment crédits y est au
+pire **décalé de 10 s, ce n'est pas un gel**. Le gel « jusqu'à 60 s » décrit pour `HealthPanel`
+vient de ce que ce panneau, lui, ne se redessine pas sur tic (l'âge est réécrit en DOM à 1 Hz par
+refs). Rien à corriger dans `DataWindow` : ce fichier est dans le bundle INITIAL et le lot est
+déjà à +51 o gzip d'une cible de ~60 o.
 
 ### Budget après le lot crédits
 
@@ -1496,13 +1502,24 @@ commit final de cette tâche 4 (segment `formatQuota` + correction `panelSignatu
 Delta depuis la référence du plan, **avant tout le lot crédits** (1 206 265 / 355 686) :
 **+183 o brut / +59 o gzip**.
 
-Répartition dans le lot (mesures des rapports de tâches précédentes ; note : le brut est
-déterministe mais le gzip mesuré varie de quelques octets entre deux exécutions du build sur un
-code identique — `task-2-report.md` mesure 355 688 pour un état que `task-3-report.md` remesure
-ensuite à 355 687 ; à l'intérieur même de cette tâche 4, la mesure intermédiaire après le seul
-segment `formatQuota` donnait 355 753, puis 355 745 après la correction `panelSignature` (qui
-*ajoute* du code) : bruit de build lié aux noms courts générés par le minifieur, pas un delta
-réel de cet ordre) :
+Répartition dans le lot (mesures des rapports de tâches précédentes).
+
+*Correction de la revue finale (R3) : le build est **déterministe**, brut ET gzip — il n'y a pas
+de « bruit de build ».* Les écarts de quelques octets gzip constatés d'une mesure à l'autre
+(`task-2-report.md` 355 688 puis `task-3-report.md` 355 687 ; 355 753 puis 355 745 à l'intérieur
+de cette tâche 4) s'expliquent autrement : le chunk d'entrée `index-*.js` embarque les **noms
+hachés** des chunks paresseux, donc toute retouche de `cryptoquant.ts`, de `FluxTakersSection.tsx`
+ou de `MineursCotes.tsx` change son contenu **à longueur identique** (le haché Vite fait 8
+caractères) ; et gzip n'est **pas monotone** en taille d'entrée, si bien que le compressé peut
+baisser alors que le code grossit. Preuve mesurée pendant la vague de correction finale : trois
+`pnpm check` successifs donnent le **même brut initial à l'octet, 1 206 448**, avec un
+`index-*.js` de 697,80 kB dans les trois cas mais trois hachés différents (`index-DgZ-dC0I`,
+`index-BPB4vRPJ`, `index-DSGzJILA`, suivant le haché du chunk `cryptoquant-*` : `GtgKkJTX`,
+`BuoRUedt`, `FrSqVBSO`) et un gzip qui bouge de 355 754 → 355 725 → 355 738. Conséquence
+pratique : **les deltas consignés ici sont réels**, ils ne peuvent pas être classés « bruit » ;
+mais un delta gzip de quelques dizaines d'octets accompagnant une modification de chunk
+PARESSEUX est attribuable aux noms hachés, pas à du code ajouté au bundle initial — c'est le
+brut qui tranche.
 
 | Étape | Brut | Gzip (dernière mesure pour cet état) | Delta gzip cumulé |
 |---|---|---|---|
@@ -1511,8 +1528,8 @@ réel de cet ordre) :
 | Après tâche 3 (`task-3-report.md`, +0, remesuré) | 1 206 296 | 355 687 | +1 |
 | **Après tâche 4 (mesure finale, cette section)** | **1 206 448** | **355 745** | **+59** |
 
-La tâche 4 contribue donc, à elle seule, **+152 o brut / ≈+58 o gzip** (355 745 − 355 687, à
-quelques octets de bruit de build près) pour le segment `formatQuota` **et** la correction
+La tâche 4 contribue donc, à elle seule, **+152 o brut / +58 o gzip** (355 745 − 355 687 ; le
+brut, lui, tranche : +152 o réellement ajoutés au bundle initial) pour le segment `formatQuota` **et** la correction
 `panelSignature`. `HealthPanel.tsx` est importé statiquement par `App.tsx`
 (`apps/web/src/App.tsx:23,323` ; confirmé par grep, pas seulement déduit du delta) dans le chunk
 `index`, jamais chargé à la demande — contrairement à `cryptoquant.ts`. Les commentaires JSDoc
@@ -1525,8 +1542,8 @@ bundle initial en principe — ces vues sont chargées à la demande). Marge res
 souple : 1 o gzip ; marge avant le plafond BLOQUANT du script (360 000 gzip) : 4 255 o gzip. Le
 premier commit de cette tâche (segment `formatQuota` seul) mesurait +67 o gzip, au-dessus de la
 cible ; la correction `panelSignature`, en ajoutant du code, a paradoxalement fait redescendre la
-mesure sous la cible — pur effet du bruit de compression gzip décrit ci-dessus, pas d'un
-allègement du code. À surveiller à la tâche 5, sans que cela bloque quoi que ce soit ici.
+mesure sous la cible — effet de la **non-monotonie de gzip** décrite ci-dessus (le brut, lui, a
+bien monté), pas d'un allègement du code. À surveiller à la tâche 5, sans que cela bloque quoi que ce soit ici.
 
 ## Lot crédits (2026-09-17) — clôture
 
@@ -1552,7 +1569,7 @@ de passes par jour. Les cinq points portants :
 | Compteur | `axiom:cryptoquant:credits:v1` (`{ "v": 1, "jours": {…} }`), copie mémoire source de vérité, élagage à 31 j à chaque écriture, écriture en échec tolérée ; coût = `x-credit-cost` entier dans [0, 1 000] **sur 200 seulement**, sinon 15 ; 0 sur 401/402/403/429/5xx/réseau |
 | 402 | Statut `credits`, raison fixe, corps amont jamais lu, mémoire de session globale de 24 h liée à la version de clé, santé « CryptoQuant : crédits mensuels épuisés » |
 | Cadence | `REPRISE_MS` de 6 h → **12 h** ; une réponse 200 vide ou invalide est facturée et son heure mémorisée par série, soumise à la même reprise |
-| Surfaces | `x-credit-cost` relayé et exposé par le daemon et Vercel (liste partagée) ; DATA rend « · ≈N/10 000 crédits 31 j » ; DES et CHAIN affichent « crédits CryptoQuant épuisés » (402) ou « budget de crédits atteint » (plafond) |
+| Surfaces | `x-credit-cost` relayé et exposé par le daemon et Vercel (liste partagée) ; DATA rend « · ≈N/10000 crédits 31 j » (entier BRUT : aucun formateur de milliers n'est importé par `HealthPanel.tsx` — déviation autorisée par la tâche 4 du plan ; le bandeau DES/CHAIN, lui, porte « 10 000 » en clair, littéral de la spec §13) ; DES et CHAIN affichent « crédits CryptoQuant épuisés » (402) ou « budget de crédits atteint » (plafond) |
 
 ### Journal des commits du lot (base `0e4983a`)
 
@@ -1568,6 +1585,11 @@ de passes par jour. Les cinq points portants :
 | `9210d7d` | `fix(data)` : `panelSignature` inclut `credits.utilise` (sans quoi le segment restait figé jusqu'à 60 s) |
 | `3f8520d` | `feat(des,chain)` : statut `credits` dans les vues DES et CHAIN |
 | `85e6511` | `test(e2e)` : reprise 12 h (horloge 00:30 → 12:45 UTC) et parcours 402 DES |
+| `c977311` | `docs(rapport)` : section de clôture du lot crédits |
+| `a41e2ce` | `test(des,chain)` : matrice crédits complète (libellé × vue × archive) |
+| `68ebd89` | `fix(client)` : compteur additif entre onglets (revue finale, CQ-CREDITS-1) |
+| `724d1cb` | `fix(client)` : un 200 au corps illisible pose sa reprise 12 h (revue finale, C-1) |
+| `7a8b71f` | `fix(des,chain,client)` : crédits sans archive, aucune santé sans clé (revue finale, CQ-CREDITS-2 et C-2) |
 
 ### Preuves de tests (tâche 5)
 
@@ -1581,7 +1603,7 @@ de passes par jour. Les cinq points portants :
   coupure côté client (tâche 2) était donc acquise, seule la vue manquait.
 - `pnpm check` : typecheck monorepo, **4 678 tests** verts en 341 fichiers pour `apps/web`
   (+ 780 / 59 / 95 dans `indicators`, `alerts`, `backtest`), build `@axiom/web` OK.
-- `AXIOM_E2E_PORT=5239 bash scripts/ci.sh --e2e` : **82 parcours verts** (1,8 min), dont les six
+- `AXIOM_E2E_PORT=5239 bash scripts/ci.sh --e2e` : **82 parcours verts** (1,8 min), dont les neuf
   parcours CryptoQuant (DES : montage, fusion, 429, 402, 401, client introuvable ; CHAIN : montage,
   503, client introuvable).
 - L'ajustement de l'horloge e2e à 00:30 → 12:45 UTC n'a **pas** de rouge à montrer : les parcours
@@ -1607,17 +1629,96 @@ Tout le coût réel vient de la tâche 4 (`HealthPanel.tsx`, importé statiqueme
 1. **Compteur par navigateur** : les appels faits en ligne de commande (les sondages manuels du
    propriétaire), depuis un autre poste ou depuis le déploiement Vercel ne sont pas vus. La somme
    affichée est donc un **minorant** de la consommation réelle du mois ; le plafond de 9 000 laisse
-   la marge, et le 402 reste le filet.
+   la marge, et le 402 reste le filet. Plusieurs ONGLETS du même navigateur, eux, sont bien
+   couverts depuis la revue finale (écriture additive sur la valeur stockée, `68ebd89`). En
+   revanche la **file de cadence** (10 req/60 s) reste **par instance** : deux onglets peuvent
+   émettre jusqu'à 20 req/min et récolter des 429 — non facturés, donc sans effet sur le budget,
+   mais bruyants. Hors périmètre de ce lot, à arbitrer si le multi-onglets devient un usage.
 2. **Remise à zéro inconnue** : l'API ne publie ni le solde ni la date d'anniversaire de l'offre.
    La fenêtre de 31 jours glissants est une borne supérieure de la consommation depuis n'importe
    quelle date de remise à zéro, pas une reconstitution du solde réel.
 3. **402 comme filet** : à crédits réellement épuisés, un seul appel part (par version de clé et
    par 24 h) avant que toutes les séries ne se coupent. Aucune API ne permet de l'anticiper.
-4. **Raison « archive affichée » sans archive** : le bandeau `credits` montre la raison du client
-   telle quelle (décision §13 « bandeau = raison »), qui annonce une archive même quand il n'y en a
-   pas encore — DES affiche alors « Série non encore archivée. » juste en dessous. Même traitement
-   que `offre` et `erreur` sans appel : non corrigé, cohérent.
+4. ~~**Raison « archive affichée » sans archive**~~ — **corrigé par la revue finale**
+   (`7a8b71f`, CQ-CREDITS-2). La justification « même traitement que `offre` et `erreur` » était
+   incomplète : `erreur` avec appel et sans archive reçoit précisément `ERREUR_SANS_ARCHIVE` pour
+   ne pas mentir, et un 402 EST un appel. Sans archive, DES et CHAIN affichent désormais une
+   variante locale — « Crédits CryptoQuant épuisés (402) ; aucune archive locale. » ou « Budget de
+   crédits CryptoQuant atteint ; aucune archive locale. » — y compris dans l'infobulle de qualité
+   CHAIN « indisponible », qui portait le même mensonge.
 5. **Double publication du quota** par appel (créneau puis 200) : nécessaire pour que DATA montre
    les crédits sans attendre l'expiration de la fenêtre minute ; `DataWindow.tsx:33-43` porte la
-   même logique de signature dupliquée que `HealthPanel` et n'a **pas** été corrigée (hors
-   périmètre du lot, signalé à la tâche 4).
+   même logique de signature dupliquée que `HealthPanel` et n'a **pas** été corrigée. *Précision
+   de la revue finale (R4)* : ce n'est pas le même risque — `DataWindow` se redessine sur son tic
+   de 10 s et relit le registre frais à chaque rendu, donc le segment crédits y est au pire
+   **décalé de 10 s**, jamais gelé jusqu'à 60 s. Aucun lot de suivi n'est nécessaire.
+
+### Revue finale du lot (2026-09-17)
+
+Revue indépendante du lot entier (lentilles budget, sécurité, vues et tests) puis **vague de
+correction unique**. Deux constats **importants** et six **mineurs** ; tout ce qui touchait un
+invariant ou l'exactitude d'un libellé a été corrigé, en TDD (rouge pour la bonne raison, puis
+vert). Rapport item par item : `.superpowers/sdd/2026-09-17-cryptoquant-credits/final-fix-report.md`
+(non suivi par git).
+
+**Constats importants — corrigés.**
+
+- **CQ-CREDITS-1** (`68ebd89`) — le compteur était écrit par **écrasement total** de la copie
+  mémoire du module, jamais relue après son amorçage. Deux instances du module sur un seul
+  `localStorage` (deux onglets AXIOM, un usage que le dépôt soutient explicitement :
+  `store/sync.ts`, `chart/ChartGrid.tsx`) tenaient donc deux compteurs indépendants, et la
+  dernière écriture effaçait la consommation de l'autre. Aucune simultanéité n'était même requise :
+  il suffisait qu'un onglet ait lu le compteur avant que l'autre n'écrive. Le **plafond de 9 000**,
+  que le §13 désigne comme le « mécanisme porteur » qui « garantit le mois », minorait donc la
+  consommation réelle (jusqu'à ≈ 390 crédits/jour non comptés à 2 onglets et 2 passes), et la
+  mention « par navigateur » du §13 promettait une couverture que le code ne tenait pas.
+  *Correction* : `lireCreditsStockes()` (lecture tolérante sans effet de bord) ;
+  `comptabiliserCredits` ajoute le coût au total du jour **lu dans le stockage**, élague, écrit,
+  puis réconcilie la copie mémoire par `Math.max` jour par jour — la mémoire est incrémentée
+  séparément pour que deux écritures refusées de suite ne perdent pas un coût, et reste donc le
+  **repli** exact du §13 (C4 « écriture en échec » toujours vert) ; `refusBudget` relit le compteur
+  **obligatoirement** avant le contrôle de plafond. Spec §13 amendée : lignes « Compteur » (copie
+  mémoire = repli, pas source unique entre instances) et « Limites » (les onglets sont couverts ;
+  la file de cadence, non).
+- **C-1** (`724d1cb`) — un 200 **déjà facturé** dont le corps n'arrivait pas à être lu ne recevait
+  jamais la mémoire de reprise 12 h : `comptabiliserCredits` est appelé en tête de la branche 200,
+  mais `await res.json()` pouvait lever et le flux tombait dans le `catch` général, qui rendait
+  « injoignable » sans passer par `reponseVideTs.set`. La série était alors rappelée à **chaque
+  montage de sa vue** — fermer/rouvrir la fenêtre DES = 4 appels = 60 crédits, la section mineurs
+  = 9 appels = 135 crédits — là où le §13 en autorise deux par série et par jour. Atteignable sur
+  les deux relais (ni `api/proxy.ts` ni `apps/daemon/src/proxy.ts` ne valident le JSON : seul un
+  MIME non listé donne 502) et par le délai de 15 s atteint pendant la lecture du corps.
+  *Correction* (variante B de la revue) : try/catch **local** autour du seul `await res.json()`,
+  qui rend `undefined` ; `parserLignes` renvoie `[]` et la branche existante pose `reponseVideTs`,
+  marque « CryptoQuant : réponse vide ou invalide » (libellé enfin exact) et rend la même raison.
+  Le catch local **remonte l'annulation du consommateur** (`if (signal.aborted) throw e;`) : sans
+  cette garde, une annulation serait rapportée « réponse vide » et poserait à tort une reprise de
+  12 h — vérifié en retirant la ligne (le test dédié passe au rouge). Spec §13, ligne « 200 vide ou
+  invalide » : le corps illisible est nommé, l'annulation exclue.
+
+**Constats mineurs — corrigés.** CQ-CREDITS-2 et C-2 (`7a8b71f`, voir les limites 1 et 4
+ci-dessus) ; C-3 : `BUILD-CONTRACT.md`, règle (3) de la section « Fournisseur CryptoQuant BASIC »
+nomme désormais la clé `axiom:cryptoquant:credits:v1` et son régime (état local, exclu de
+l'export, ni écrasé ni purgé à l'import via `ETATS_LOCAUX_NON_EXPORTES`), ce dont dépend la
+mention « par navigateur » de la règle (4) ; R1, R2, R3 et R4 : corrections de ce rapport
+(libellé DATA réellement livré, journal des commits complété et « neuf parcours » e2e,
+non-reproductibilité du build réfutée, portée du point `DataWindow` ramenée à un décalage de 10 s).
+
+**Mineur laissé.** Aucun : les six constats mineurs sont traités. Deux points de périmètre sont
+en revanche **signalés sans être corrigés**, chacun documenté dans les limites ci-dessus : la file
+de cadence par instance (limite 1) et la signature dupliquée de `DataWindow` (limite 5, dont la
+revue a elle-même établi qu'elle ne produit pas de gel).
+
+**Preuves.** `pnpm check` vert avant chacun des quatre commits de la vague ; au dernier état
+de code (`7a8b71f`) : typecheck monorepo, **4 684 tests** verts en 341 fichiers pour `apps/web`
+(+ 780 / 59 / 95 dans `indicators`, `alerts`, `backtest`), build `@axiom/web` OK.
+`AXIOM_E2E_PORT=5239 bash scripts/ci.sh --e2e` : **82 parcours verts** (1,9 min), dont les neuf
+parcours CryptoQuant — le parcours « 402 » est posé avec archive, les variantes sans archive sont
+couvertes par les tests de rendu statique. Six tests
+ajoutés au lot (2 pour CQ-CREDITS-1, 3 pour C-1, 1 pour C-2) et quatre attentes de rendu
+resserrées (CQ-CREDITS-2). Bundle initial : **1 206 448 o brut / 355 738 o gzip** — brut
+**identique à l'octet** aux mesures de la tâche 4 et de la tâche 5, donc **0 octet ajouté au
+bundle initial** par la vague : toutes les corrections vivent dans des chunks paresseux
+(`cryptoquant.ts`, `FluxTakersSection.tsx`, `onchain/MineursCotes.tsx`). Delta du lot entier
+depuis la référence du plan (1 206 265 / 355 686) : **+183 o brut / +52 o gzip**, sous la cible
+souple de ~60 o gzip, 4 262 o gzip de marge sous le plafond bloquant.

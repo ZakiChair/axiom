@@ -4,6 +4,8 @@
  * Aucune raison, aucun journal, aucune URL ne porte la clé.
  */
 import { CRYPTOQUANT_PREFIXE, IDS_MINEURS_CQ, type IdMineurCq } from "../../../../../shared/cryptoquant-proxy";
+import { IS_VERCEL } from "../../lib/deployment";
+import { detectDaemon, kvPut, urlDaemon } from "../daemon";
 import { dateOnchain, nombreOnchain } from "./cohorts";
 
 // --- Catalogue ---
@@ -225,4 +227,106 @@ export function diagnostiquer(archive: ArchiveCq | null, aujourdhuiUtc: string):
   }
   const perime = dernier === null || jourVersMs(aujourdhuiUtc) - jourVersMs(dernier) > 2 * JOUR_MS;
   return { debut, dernier, hierPresent: presents.has(decalerJour(aujourdhuiUtc, -1)), manquantsFenetre, perdus, perime };
+}
+
+// --- Persistance (localStorage ∪ KV daemon) ---
+
+/** Mêmes namespace et préfixe que `data/onchain/cache.ts` (non exportés là-bas). */
+const NS_KV = "onchain";
+
+/** Clé localStorage d'une série ; le préfixe `axiom:onchain:cq:` est exclu des sauvegardes (`resteSurLePoste`). */
+export function cleLocale(serie: SerieCq): string {
+  return `axiom:onchain:cq:${serie}:v1`;
+}
+
+/** Clé KV daemon d'une série (namespace `onchain`). */
+export function cleKv(serie: SerieCq): string {
+  return `cq:${serie}:v1`;
+}
+
+/** Le daemon refuse au-delà de 1 048 576 caractères. */
+const TAILLE_MAX_KV = 900_000;
+const TIMEOUT_KV_MS = 5_000;
+
+/** `kv` : null = pas de daemon, false = lecture ou écriture KV en échec. */
+export interface PersistanceCq { local: boolean; kv: boolean | null }
+export type EtatKvCq = "sans-daemon" | "absente" | "erreur" | "presente";
+export interface LectureArchiveCq {
+  archive: ArchiveCq | null;
+  versionInconnue: boolean;
+  localIllisible: boolean;
+  kv: EtatKvCq;
+  persistance: PersistanceCq;
+}
+
+function lireLocal(serie: SerieCq): string | null {
+  try {
+    return localStorage.getItem(cleLocale(serie));
+  } catch {
+    return null;
+  }
+}
+
+function ecrireLocal(serie: SerieCq, texte: string): boolean {
+  try {
+    localStorage.setItem(cleLocale(serie), texte);
+    return true;
+  } catch {
+    // Stockage plein : signalé par `local: false`.
+    return false;
+  }
+}
+
+/** Tri-état par fetch brut (`kvGet` confond 404 et erreur). */
+async function lireKv(serie: SerieCq): Promise<{ etat: "absente" | "erreur" } | { etat: "presente"; decodage: DecodageCq }> {
+  try {
+    const res = await fetch(urlDaemon(`/kv/${encodeURIComponent(NS_KV)}/${encodeURIComponent(cleKv(serie))}`), { cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_KV_MS) });
+    if (res.status === 404) return { etat: "absente" };
+    if (!res.ok) return { etat: "erreur" };
+    const corps = (await res.json()) as unknown;
+    if (!estObjet(corps) || !("valeur" in corps)) return { etat: "erreur" };
+    return { etat: "presente", decodage: validerArchive(corps["valeur"], serie) };
+  } catch {
+    return { etat: "erreur" };
+  }
+}
+
+function enrichit(union: ArchiveCq, local: ArchiveCq | null): boolean {
+  if (local === null) return union.majTs !== null || Object.keys(union.jours).length > 0;
+  return Object.keys(union.jours).length > Object.keys(local.jours).length || (union.majTs ?? 0) > (local.majTs ?? 0);
+}
+
+/** Local ∪ KV (jamais sur Vercel), réécriture locale si enrichie ; version inconnue jamais écrite. */
+export async function lireArchiveCq(serie: SerieCq): Promise<LectureArchiveCq> {
+  const daemon = !IS_VERCEL && (await detectDaemon("kv"));
+  const local = decoderArchive(lireLocal(serie), serie);
+  let kv: EtatKvCq = "sans-daemon";
+  let archiveKv: ArchiveCq | null = null;
+  let kvVersionInconnue = false;
+  if (daemon) {
+    const lu = await lireKv(serie);
+    kv = lu.etat;
+    if (lu.etat === "presente") {
+      if (lu.decodage.etat === "ok") archiveKv = lu.decodage.archive;
+      if (lu.decodage.etat === "versionInconnue") kvVersionInconnue = true;
+    }
+  }
+  const persistanceKv = kv === "sans-daemon" ? null : kv !== "erreur";
+  const versionInconnue = local.etat === "versionInconnue" || kvVersionInconnue;
+  const localIllisible = local.etat === "illisible";
+  if (versionInconnue) return { archive: null, versionInconnue, localIllisible, kv, persistance: { local: true, kv: persistanceKv } };
+  const archiveLocale = local.etat === "ok" ? local.archive : null;
+  const archive = unionArchives(archiveLocale, archiveKv);
+  let localOk = true;
+  if (archive !== null && enrichit(archive, archiveLocale)) localOk = ecrireLocal(serie, JSON.stringify(archive));
+  return { archive, versionInconnue, localIllisible, kv, persistance: { local: localOk, kv: persistanceKv } };
+}
+
+/** Jamais de `kvPut` après une lecture KV en erreur ni au-delà de 900 000 caractères. */
+export async function ecrireArchiveCq(serie: SerieCq, archive: ArchiveCq, kv: EtatKvCq): Promise<PersistanceCq> {
+  const texte = JSON.stringify(archive);
+  const local = ecrireLocal(serie, texte);
+  if (kv === "sans-daemon") return { local, kv: null };
+  if (kv === "erreur" || texte.length > TAILLE_MAX_KV) return { local, kv: false };
+  return { local, kv: (await kvPut(NS_KV, cleKv(serie), archive)) !== null };
 }

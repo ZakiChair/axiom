@@ -119,6 +119,34 @@ describe("route CryptoQuant /cqapi (handler complet)", () => {
     expect(await reponse.text()).not.toContain("CLE-TEST-SECRETE");
   });
 
+  test("200 amont : x-credit-cost relayé, en-tête non listé filtré (C7)", async () => {
+    const { default: proxyFunction } = await import("../../../api/proxy");
+    const corps = { status: { code: 200, message: "success" }, result: { window: "DAY", data: [] } };
+    globalThis.fetch = (async () =>
+      Response.json(corps, {
+        status: 200,
+        headers: {
+          "x-ratelimit-limit": "10",
+          "x-ratelimit-remaining": "9",
+          "x-ratelimit-reset": "6",
+          "x-credit-cost": "15",
+          "x-autre-entete": "non-relaye",
+        },
+      })) as unknown as typeof fetch;
+
+    const reponse = await proxyFunction.fetch(
+      new Request(url("cqapi", CHEMIN, QUERY), { headers: { authorization: "Bearer CLE-TEST-SECRETE" } }),
+    );
+    expect(reponse.status).toBe(200);
+    expect(reponse.headers.get("x-ratelimit-limit")).toBe("10");
+    expect(reponse.headers.get("x-ratelimit-remaining")).toBe("9");
+    expect(reponse.headers.get("x-ratelimit-reset")).toBe("6");
+    expect(reponse.headers.get("x-credit-cost")).toBe("15");
+    expect(reponse.headers.has("x-autre-entete")).toBe(false);
+    expect(reponse.headers.get("cache-control")).toBe("private, no-store");
+    expect(await reponse.json()).toEqual(corps);
+  });
+
   test("429 amont : statut, trois en-têtes de quota et corps relayés, réponse privée", async () => {
     const { default: proxyFunction } = await import("../../../api/proxy");
     const corps = { status: { code: 429, message: "Too Many Requests" } };

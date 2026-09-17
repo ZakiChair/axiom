@@ -906,11 +906,12 @@ describe("traiterCryptoQuant — licence personnelle, liste fermée, jamais en c
         "x-ratelimit-limit": "10",
         "x-ratelimit-remaining": "9",
         "x-ratelimit-reset": "6",
+        "x-credit-cost": "15",
         "x-autre": "non-relaye",
       },
     });
 
-  test("URL amont exacte, Bearer personnel relayé, redirect manual, private no-store, quota exposé", async () => {
+  test("URL amont exacte, Bearer personnel relayé, redirect manual, private no-store, quota et coût crédits exposés (C7)", async () => {
     const { appels, fetchImpl } = amontSimule(reponse200);
     const req = new Request(LOCAL, {
       headers: { authorization: "Bearer CLE-TEST-SECRETE", origin: "http://localhost:5173" },
@@ -924,10 +925,11 @@ describe("traiterCryptoQuant — licence personnelle, liste fermée, jamais en c
     expect(rep.headers.get("x-ratelimit-limit")).toBe("10");
     expect(rep.headers.get("x-ratelimit-remaining")).toBe("9");
     expect(rep.headers.get("x-ratelimit-reset")).toBe("6");
+    expect(rep.headers.get("x-credit-cost")).toBe("15");
     expect(rep.headers.has("x-autre")).toBe(false);
     expect(rep.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
     expect(rep.headers.get("access-control-expose-headers")).toBe(
-      "x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-reset",
+      "x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-reset, x-credit-cost",
     );
     expect(await rep.json()).toEqual(corps200);
   });
@@ -1029,7 +1031,7 @@ describe("traiterCryptoQuant — licence personnelle, liste fermée, jamais en c
     expect(JSON.parse(corps)).toMatchObject({ erreur: "amont CryptoQuant refusé" });
   });
 
-  test("429 JSON amont : statut, corps et trois en-têtes x-ratelimit-* relayés", async () => {
+  test("429 JSON amont : statut, corps et trois en-têtes x-ratelimit-* relayés (aucun x-credit-cost amont, échec non facturé)", async () => {
     const corps = { status: { code: 429, message: "Too Many Requests" } };
     const { appels, fetchImpl } = amontSimule(
       () =>
@@ -1051,8 +1053,9 @@ describe("traiterCryptoQuant — licence personnelle, liste fermée, jamais en c
     expect(rep.headers.get("x-ratelimit-limit")).toBe("10");
     expect(rep.headers.get("x-ratelimit-remaining")).toBe("0");
     expect(rep.headers.get("x-ratelimit-reset")).toBe("42");
+    expect(rep.headers.has("x-credit-cost")).toBe(false);
     expect(rep.headers.get("access-control-expose-headers")).toBe(
-      "x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-reset",
+      "x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-reset, x-credit-cost",
     );
     expect(rep.headers.get("cache-control")).toBe("private, no-store");
     expect(await rep.json()).toEqual(corps);

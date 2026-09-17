@@ -26,7 +26,7 @@ import { entetesCors } from "./cors";
 import type { ProxyKeys } from "./env";
 import type { Routeur } from "./router";
 import { DEFILLAMA_PRO_HEADER, DEFILLAMA_PRO_HOST, cheminDefillamaAmont, cleDefillamaValide, redigerSecretDefillama } from "../../../shared/defillama-proxy";
-import { CRYPTOQUANT_HOST, CRYPTOQUANT_PREFIXE, cheminCryptoQuantAmont, cleCryptoQuantValide } from "../../../shared/cryptoquant-proxy";
+import { CRYPTOQUANT_HOST, CRYPTOQUANT_PREFIXE, ENTETES_RELAYES_CQ, cheminCryptoQuantAmont, cleCryptoQuantValide } from "../../../shared/cryptoquant-proxy";
 
 /**
  * Ajoute `<paramName>=<key>` à la query d'un chemin proxifié UNIQUEMENT si la
@@ -950,9 +950,6 @@ export async function traiterDefillamaPro(req: Request, url: URL, options: Optio
   }
 }
 
-/** En-têtes de quota CryptoQuant recopiés vers le client (ensemble FERMÉ). */
-const ENTETES_QUOTA_CRYPTOQUANT = ["x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset"] as const;
-
 /**
  * /cqapi — CryptoQuant BASIC (licence PERSONNELLE). Gestionnaire dédié, hors table
  * `construireRoutesProxy` et hors cache SQLite : `cleCache` ignore Authorization, une
@@ -1010,9 +1007,9 @@ export async function traiterCryptoQuant(
   const entetes: Record<string, string> = {
     ...headers,
     "content-type": amont.contentType,
-    "access-control-expose-headers": ENTETES_QUOTA_CRYPTOQUANT.join(", "),
+    "access-control-expose-headers": ENTETES_RELAYES_CQ.join(", "),
   };
-  for (const nom of ENTETES_QUOTA_CRYPTOQUANT) {
+  for (const nom of ENTETES_RELAYES_CQ) {
     const valeur = amont.headers.get(nom);
     if (valeur !== null) entetes[nom] = valeur;
   }

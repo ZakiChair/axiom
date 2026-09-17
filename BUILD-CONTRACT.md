@@ -265,8 +265,9 @@ processus (pas de persistance).
 ### Fournisseur CryptoQuant BASIC (décision du propriétaire, 2026-09-16)
 
 Le propriétaire a souscrit l'offre BASIC de CryptoQuant (licence PERSONNELLE ; 10 req/min ;
-10 000 req/mois ; fenêtre journalière seule ; 30 jours glissants, `limit` ≤ 30, `from`
-antérieur à 30 j refusé ; aucune donnée on-chain, réservée au plan Professional) et
+10 000 crédits/mois (15 par appel réussi observé le 2026-09-17) ; fenêtre journalière seule ;
+30 jours glissants, `limit` ≤ 30, `from` antérieur à 30 j refusé ; aucune donnée on-chain,
+réservée au plan Professional) et
 demande son raccordement à deux sections existantes : **DES — « Flux takers toutes
 places »** (agrégat multi-places `spot/trade` et `swap/trade`, `btc_all`/`eth_all` : ratio
 taker achat/vente, Δ taker en quote, volumes, VWAP, lus contre l'historique accumulé côté
@@ -281,7 +282,7 @@ sans clé personnelle sur Vercel : aucun appel, « clé personnelle requise » ;
 « une seule variable serveur `BGEOMETRICS_API_KEY` » reste intacte. (2) Route dédiée
 `/cqapi` à liste FERMÉE (`shared/cryptoquant-proxy.ts`) sur les trois chemins — Vite,
 daemon, fonction Vercel — GET seul, `Authorization: Bearer` relayé, `private, no-store`,
-zéro redirection, en-têtes `x-ratelimit-*` relayés ; aucun ajout à `shared/extapi-hosts.ts`,
+zéro redirection, en-têtes `x-ratelimit-*` et `x-credit-cost` relayés ; aucun ajout à `shared/extapi-hosts.ts`,
 CSP inchangée, aucune entrée de cache proxy (`TTL_SECONDES_PAR_PREFIXE` inchangé) :
 l'archive côté client est le cache. (3) Archive CÔTÉ CLIENT : à l'ouverture des fenêtres,
 le client fusionne les jours nouveaux dans une archive versionnée par série (localStorage
@@ -290,8 +291,10 @@ destructive, hors export/import de sauvegarde) ; la fenêtre fournisseur de 30 j
 rattrapage impose d'afficher la date de début de l'archive, ses jours manquants et ses
 jours définitivement perdus ; aucun collecteur daemon. (4) Requêtes toujours
 `window=day&limit=30` sans `from` ; cadencement client 10 req/min visible (« en attente du
-quota »), garde « J-1 déjà archivé → aucun appel » et reprise 6 h — ≈ 390 req/mois nominal,
-≤ 1 560 en pire cas, sur 10 000. (5) L'agrégat multi-places du fournisseur est CONSOMMÉ tel
+quota »), garde « J-1 déjà archivé → aucun appel » et reprise 12 h (amendement §13,
+2026-09-17), plafond de sécurité de 9 000 crédits sur une fenêtre glissante de 31 jours UTC
+(par navigateur), 402 explicite à crédits mensuels épuisés — ≈ 195 crédits par passe
+DES + CHAIN ; plafond 9 000 / 31 j. (5) L'agrégat multi-places du fournisseur est CONSOMMÉ tel
 quel — aucun AggregationEngine, spot et perp jamais additionnés, composition des places non
 documentée et affichée comme limite. (6) BGeometrics reste la source unique de MVRV-Z,
 SOPR, NUPL et Puell : CryptoQuant n'y est jamais substitué et ne fournit ici aucune

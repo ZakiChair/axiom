@@ -17,6 +17,13 @@ export const CRYPTOQUANT_PREFIXE = "/cqapi";
 export const IDS_MINEURS_CQ = ["bitf", "cipher", "clsk", "core", "hive", "iren", "mara", "riot", "wulf"] as const;
 export type IdMineurCq = (typeof IDS_MINEURS_CQ)[number];
 
+/**
+ * En-têtes amont recopiés vers le client — liste FERMÉE, source UNIQUE pour le daemon et la
+ * fonction Vercel (plus de liste recopiée dans chaque proxy). `x-credit-cost` (§13 budget de
+ * crédits, amendement 2026-09-17) rejoint les trois en-têtes de quota historiques.
+ */
+export const ENTETES_RELAYES_CQ = ["x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset", "x-credit-cost"] as const;
+
 /** Même borne que le relais Bearer BGeometrics de la fonction Vercel. */
 const LONGUEUR_MAX_AUTORISATION = 512;
 const CHEMINS_TAKER: ReadonlySet<string> = new Set(["/v2/market/cq/spot/trade", "/v2/market/cq/swap/trade"]);

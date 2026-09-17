@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { sourceGeoExtraite } from "../shared/extapi-hosts.js";
 import { extraireSeriesGeo } from "../shared/geo-series.js";
 import { NBS_HOST, validerRequeteNbs } from "../shared/nbs-series.js";
+import { ENTETES_RELAYES_CQ } from "../shared/cryptoquant-proxy.js";
 import {
   planProxyRequest,
   PROXY_MAX_REDIRECTS,
@@ -355,10 +356,11 @@ async function handle(request: Request): Promise<Response> {
       ...SECURITY_HEADERS,
     });
     if (plan.route === "cqapi") {
-      // Quota CryptoQuant (10 req/min) : ensemble FERMÉ d'en-têtes amont recopiés pour la
-      // cadence du client. Le corps amont (status.message) est relayé tel quel plus bas —
-      // contrairement à defillamapro, la clé voyage en en-tête et jamais dans l'URL.
-      for (const nom of ["x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset"]) {
+      // Quota et coût crédits CryptoQuant (§13) : ensemble FERMÉ d'en-têtes amont recopiés,
+      // liste unique partagée avec le daemon (shared/cryptoquant-proxy.ts). Le corps amont
+      // (status.message) est relayé tel quel plus bas — contrairement à defillamapro, la clé
+      // voyage en en-tête et jamais dans l'URL.
+      for (const nom of ENTETES_RELAYES_CQ) {
         const valeur = upstream.headers.get(nom);
         if (valeur !== null) responseHeaders.set(nom, valeur);
       }

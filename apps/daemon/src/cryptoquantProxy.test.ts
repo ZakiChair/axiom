@@ -6,6 +6,7 @@ import { describe, expect, test } from "bun:test";
 import {
   CRYPTOQUANT_HOST,
   CRYPTOQUANT_PREFIXE,
+  ENTETES_RELAYES_CQ,
   IDS_MINEURS_CQ,
   cheminCryptoQuantAmont,
   cleCryptoQuantValide,
@@ -28,6 +29,19 @@ describe("shared/cryptoquant-proxy — constantes", () => {
     expect(source).not.toMatch(/\brequire\(/);
     expect(source).not.toMatch(/\b(?:process|Bun|Deno)\.env\b/);
     expect(source).not.toMatch(/\bimport\.meta\.env\b/);
+  });
+
+  test("ENTETES_RELAYES_CQ : liste FERMÉE des quatre en-têtes amont, dans l'ordre — source unique pour le daemon et Vercel (plus de liste recopiée)", async () => {
+    expect([...ENTETES_RELAYES_CQ]).toEqual([
+      "x-ratelimit-limit",
+      "x-ratelimit-remaining",
+      "x-ratelimit-reset",
+      "x-credit-cost",
+    ]);
+    const daemonSource = await Bun.file(new URL("../../../apps/daemon/src/proxy.ts", import.meta.url)).text();
+    const vercelSource = await Bun.file(new URL("../../../api/proxy.ts", import.meta.url)).text();
+    expect(daemonSource).not.toMatch(/"x-ratelimit-limit"/);
+    expect(vercelSource).not.toMatch(/"x-ratelimit-limit"/);
   });
 });
 

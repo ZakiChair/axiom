@@ -61,6 +61,13 @@ const ERREUR_SANS_ARCHIVE = "CryptoQuant injoignable ; aucune archive locale.";
  */
 export const RAISON_CREDITS_EPUISES_CQ =
   "Crédits mensuels CryptoQuant épuisés (402) : plus d'appel avant la remise à zéro mensuelle ; archive affichée.";
+/**
+ * Bandeaux `credits` SANS archive : les deux raisons du §13 se terminent par « archive affichée »,
+ * ce qui serait un mensonge au-dessus de « Série non encore archivée. » — même parade que
+ * `ERREUR_SANS_ARCHIVE`, et un 402 EST un appel.
+ */
+const CREDITS_EPUISES_SANS_ARCHIVE = "Crédits CryptoQuant épuisés (402) ; aucune archive locale.";
+const BUDGET_CREDITS_SANS_ARCHIVE = "Budget de crédits CryptoQuant atteint ; aucune archive locale.";
 
 const OPTIONS_ACTIF: ReadonlyArray<{ id: ActifTaker; label: string }> = [
   { id: "btc", label: "BTC" },
@@ -294,9 +301,13 @@ export function VueFluxTakers({
   const bandeau =
     c.statut === "erreur" && c.appel && m.jour === null
       ? ERREUR_SANS_ARCHIVE
-      : c.statut === "quota" || c.statut === "offre" || c.statut === "credits" || c.statut === "erreur"
-        ? (c.raison ?? "CryptoQuant indisponible ; archive affichée.")
-        : null;
+      : c.statut === "credits" && m.jour === null
+        ? c.raison === RAISON_CREDITS_EPUISES_CQ
+          ? CREDITS_EPUISES_SANS_ARCHIVE
+          : BUDGET_CREDITS_SANS_ARCHIVE
+        : c.statut === "quota" || c.statut === "offre" || c.statut === "credits" || c.statut === "erreur"
+          ? (c.raison ?? "CryptoQuant indisponible ; archive affichée.")
+          : null;
   const tonRatio = m.ratio === null ? undefined : m.ratio >= 1 ? "up" : "down";
   const sparkRatio = m.courbe
     .map((p) => p.valeur)

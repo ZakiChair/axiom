@@ -842,6 +842,15 @@ describe("CryptoQuant : budget de crédits (§13, C1 à C4, C6)", () => {
     expect([appels(f).length, cq.etatFileCq()]).toEqual([0, { enAttente: 0, repriseTs: null }]);
   });
 
+  it("premier chargement du module : somme non nulle mais AUCUN chemin de clé → aucune ligne de santé (I10)", async () => {
+    // Clé retirée des Réglages (ou Vercel sans clé perso) après usage : le compteur survit 31 j,
+    // mais DATA ne doit pas annoncer « cryptoquant · polling » pour une source qui n'appellera pas.
+    cle.valeur = null;
+    poserCredits({ [J(-1)]: 195 });
+    await import("./cryptoquant");
+    expect((await sante()).getState().sources.cryptoquant).toBeUndefined();
+  });
+
   it("premier chargement du module : somme nulle → aucune ligne de santé publiée", async () => {
     await import("./cryptoquant");
     expect((await sante()).getState().sources.cryptoquant).toBeUndefined();

@@ -920,5 +920,8 @@ export function chargerSerieCq(serie: SerieCq, signal?: AbortSignal): Promise<Ch
  * Premier chargement du module (DES ou CHAIN ouvre sa section) : le budget déjà consommé sur ce
  * navigateur est publié dans DATA sans attendre un créneau. Somme NULLE : rien n'est publié, pour
  * ne pas créer une ligne de santé « cryptoquant » alors qu'aucun appel n'a eu lieu (I9, I10).
+ * SANS chemin de clé non plus (condition complémentaire EXACTE de `cle-requise` ci-dessus) : le
+ * compteur survit 31 j à un retrait de clé, et `setQuota` amorcerait la source à « polling » —
+ * DATA annoncerait une collecte active pour une source qui ne peut plus appeler.
  */
-if (sommeCredits(Date.now()) > 0) publierQuota();
+if (sommeCredits(Date.now()) > 0 && (getCryptoquantKey() !== null || (CQ_CLE_ENV_PRESENTE && !IS_VERCEL))) publierQuota();

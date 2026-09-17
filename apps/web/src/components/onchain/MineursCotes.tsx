@@ -88,6 +88,25 @@ function raisonsEchec(recus: readonly ChargementCq[]): string[] {
   return [...new Set(recus.flatMap((c) => (c.statut !== "pret" && c.raison !== null ? [c.raison] : [])))];
 }
 
+/**
+ * Mêmes raisons, mais celles de `credits` remplacées par leur variante sans archive. Substitution
+ * par STATUT : la raison du plafond porte la somme consommée, elle n'est donc pas un littéral.
+ */
+function raisonsSansArchive(recus: readonly ChargementCq[]): string[] {
+  const credits = new Set(recus.flatMap((c) => (c.statut === "credits" && c.raison !== null ? [c.raison] : [])));
+  return [
+    ...new Set(
+      raisonsEchec(recus).map((r) =>
+        !credits.has(r)
+          ? r
+          : r === RAISON_CREDITS_EPUISES_CQ
+            ? CREDITS_EPUISES_SANS_ARCHIVE
+            : BUDGET_CREDITS_SANS_ARCHIVE,
+      ),
+    ),
+  ];
+}
+
 const union = (listes: ReadonlyArray<readonly string[]>): string[] => [...new Set(listes.flat())].sort();
 
 export interface LigneSociete {
@@ -213,7 +232,7 @@ export function qualiteMineursCotes(chargements: Chargements, now: number): Qual
         ? raisons.join(" ")
         : undefined
       : !avecDonnees
-        ? raisons[0] ?? "Aucune ligne CryptoQuant archivée."
+        ? raisonsSansArchive(recus)[0] ?? "Aucune ligne CryptoQuant archivée."
         : morceaux.join(" ");
   return {
     sourceId: "cryptoquant",
@@ -263,6 +282,12 @@ const CLIENT_NON_CHARGE = "Client CryptoQuant non chargé (réseau ou mise à jo
  */
 export const RAISON_CREDITS_EPUISES_CQ =
   "Crédits mensuels CryptoQuant épuisés (402) : plus d'appel avant la remise à zéro mensuelle ; archive affichée.";
+/**
+ * Raisons `credits` SANS archive : les deux raisons du §13 se terminent par « archive affichée »,
+ * ce qui serait un mensonge dans un bloc vide (et dans l'infobulle de qualité « indisponible »).
+ */
+const CREDITS_EPUISES_SANS_ARCHIVE = "Crédits CryptoQuant épuisés (402) ; aucune archive locale.";
+const BUDGET_CREDITS_SANS_ARCHIVE = "Budget de crédits CryptoQuant atteint ; aucune archive locale.";
 
 const COLONNES: ReadonlyArray<ColonneTable<LigneSociete>> = [
   {
@@ -408,9 +433,11 @@ export function VueMineursCotes({
         </div>
       );
     }
+    // Bloc VIDE : les raisons `credits` prennent leur variante sans archive (§13 « archive affichée »).
+    const sansArchive = raisonsSansArchive(recus);
     return (
       <div className="mt-2">
-        <Vide>{raisons.length > 0 ? raisons.join(" ") : "Aucune ligne CryptoQuant archivée."}</Vide>
+        <Vide>{sansArchive.length > 0 ? sansArchive.join(" ") : "Aucune ligne CryptoQuant archivée."}</Vide>
       </div>
     );
   }

@@ -475,7 +475,10 @@ describe("production des mineurs cotés : vue, en-tête et conteneur", () => {
     const epuises = sansArchive("credits", RAISON_CREDITS_EPUISES_CQ, true);
     expect(resume({ chargements: epuises })).toBe("crédits CryptoQuant épuisés");
     const html = vue({ chargements: epuises });
-    expect(html).toContain(RAISON_CREDITS_EPUISES_CQ);
+    // Variante LOCALE sans archive : la raison du client annonce « archive affichée », faux dans
+    // un bloc vide (même correction que le bandeau DES).
+    expect(html).toContain("Crédits CryptoQuant épuisés (402) ; aucune archive locale.");
+    expect(html).not.toContain("archive affichée");
     expect(html).not.toContain("Ouvrir les réglages");
     expect(html).not.toContain('role="table"');
     const tete = entete({ chargements: epuises });
@@ -483,7 +486,7 @@ describe("production des mineurs cotés : vue, en-tête et conteneur", () => {
     expect(tete).not.toContain("clé CryptoQuant ⚙");
     const q = qualiteMineursCotes(epuises, MAINTENANT);
     expect(q.statut).toBe("indisponible");
-    expect(q.raison).toBe(RAISON_CREDITS_EPUISES_CQ);
+    expect(q.raison).toBe("Crédits CryptoQuant épuisés (402) ; aucune archive locale.");
     expect(q.sourceEffective).toBe("archive locale CryptoQuant");
     expect(q.couverture).toEqual({ disponibles: 0, attendus: 9 });
 
@@ -509,11 +512,12 @@ describe("production des mineurs cotés : vue, en-tête et conteneur", () => {
     const budgetSansArchive = sansArchive("credits", RAISON_BUDGET_CREDITS);
     expect(resume({ chargements: budgetSansArchive })).toBe("budget de crédits atteint");
     const vueBudgetSansArchive = vue({ chargements: budgetSansArchive });
-    expect(vueBudgetSansArchive).toContain("Budget de crédits CryptoQuant atteint (≈ 8990/10 000 sur 31 j, ce navigateur)");
+    expect(vueBudgetSansArchive).toContain("Budget de crédits CryptoQuant atteint ; aucune archive locale.");
+    expect(vueBudgetSansArchive).not.toContain("8990");
     expect(vueBudgetSansArchive).not.toContain('role="table"');
     const qBudgetSansArchive = qualiteMineursCotes(budgetSansArchive, MAINTENANT);
     expect(qBudgetSansArchive.statut).toBe("indisponible");
-    expect(qBudgetSansArchive.raison).toBe(RAISON_BUDGET_CREDITS);
+    expect(qBudgetSansArchive.raison).toBe("Budget de crédits CryptoQuant atteint ; aucune archive locale.");
 
     // Un 402 l'emporte sur le plafond quand les deux raisons coexistent (refus du fournisseur).
     const melange = { ...budget, [serie("mara")]: epuises[serie("mara")] };

@@ -900,4 +900,53 @@ describe("CryptoQuant : budget de crédits (§13, C1 à C4, C6)", () => {
     expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "erreur", appel: true });
     expect(appels(f)).toHaveLength(2);
   });
+
+  it.each([
+    ["corps vide", ""],
+    ["JSON tronqué", "{"],
+  ] as const)("C6 — 200 facturé au corps ILLISIBLE (%s) : « réponse vide ou invalide », reprise 12 h posée", async (_n, corps) => {
+    const cq = await import("./cryptoquant");
+    const healthStore = await sante();
+    // Même montage que le 200 vide : `majTs` à 12 h pile ne bloque rien, seule la nouvelle mémoire le fait.
+    const avant = arch(plage(-30, -2), T0 - DOUZE_H);
+    poser(avant);
+    const f = reseau(() => new Response(corps, { status: 200, headers: { "content-type": "application/json" } }));
+    const r = await cq.chargerSerieCq("taker:spot:btc");
+    expect(r).toMatchObject({ statut: "erreur", raison: cq.RAISON_ERREUR_CRYPTOQUANT, appel: true });
+    expect([r.archive, relire()]).toEqual([avant, avant]);
+    expect(credits()).toEqual({ v: 1, jours: { [J(0)]: 15 } });
+    expect(healthStore.getState().sources.cryptoquant?.derniereErreur).toBe("CryptoQuant : réponse vide ou invalide");
+    // Sans la mémoire, la série repartirait à CHAQUE montage de sa vue, à 15 crédits l'appel.
+    vi.setSystemTime(T0 + DOUZE_H - 1);
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: false });
+    expect([appels(f).length, credits()]).toEqual([1, { v: 1, jours: { [J(0)]: 15 } }]);
+    vi.setSystemTime(T0 + DOUZE_H);
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "erreur", appel: true });
+    expect(appels(f)).toHaveLength(2);
+  });
+
+  it("annulation PENDANT la lecture du corps : annulé, facturé, aucune reprise 12 h posée", async () => {
+    const cq = await import("./cryptoquant");
+    const healthStore = await sante();
+    poser(arch(plage(-30, -2), null));
+    // Corps tenu ouvert : `res.json()` reste en attente jusqu'à la fermeture, après l'annulation.
+    let fermer = () => {};
+    const flux = new ReadableStream<Uint8Array>({ start: (c) => { fermer = () => c.close(); } });
+    const f = reseau(() => new Response(flux, { status: 200, headers: { "content-type": "application/json" } }));
+    const ctrl = new AbortController();
+    const p = cq.chargerSerieCq("taker:spot:btc", ctrl.signal);
+    await jusqua(() => appels(f).length === 1);
+    ctrl.abort();
+    expect(await p).toMatchObject({ statut: "erreur", raison: cq.RAISON_ANNULE_CRYPTOQUANT });
+    fermer();
+    // `res.json()` rejette alors sur un corps vide : laisse la passe interne se dénouer.
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+    // Le 200 est arrivé : facturé. Mais une annulation n'est PAS une réponse vide.
+    expect(credits()).toEqual({ v: 1, jours: { [J(0)]: 15 } });
+    expect(healthStore.getState().sources.cryptoquant?.derniereErreur).toBeUndefined();
+    // Aucune mémoire de reprise : la série reste rappelable tout de suite.
+    const g = reseau(api200);
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: true });
+    expect(appels(g)).toHaveLength(1);
+  });
 });

@@ -845,7 +845,20 @@ async function chargerUneFois(serie: SerieCq, signal: AbortSignal): Promise<Char
       healthStore.getState().marquerErreur(SOURCE_SANTE, `CryptoQuant HTTP ${res.status}`);
       return fin("erreur", RAISON_ERREUR_CRYPTOQUANT, true);
     }
-    const lignes = parserLignes(serie, (await res.json()) as unknown, aujourdhui);
+    /**
+     * §13 : un 200 est déjà FACTURÉ ci-dessus. Un corps illisible (vide ou tronqué relayé tel quel
+     * par le proxy, délai dépassé pendant la lecture) doit donc suivre le chemin « réponse vide ou
+     * invalide » — sans quoi il repart sans aucune mémoire de reprise, à chaque montage de la vue.
+     */
+    let corps: unknown;
+    try {
+      corps = await res.json();
+    } catch (e) {
+      // Annulation par le CONSOMMATEUR : remontée telle quelle, sinon elle serait rapportée
+      // « réponse vide » et poserait à tort une reprise de 12 h sur une passe jamais lue.
+      if (signal.aborted) throw e;
+    }
+    const lignes = parserLignes(serie, corps, aujourdhui);
     if (lignes.length === 0) {
       // Facturé (comptabiliserCredits ci-dessus) mais archive inchangée : mémorisée par série pour
       // que la reprise 12 h s'applique aussi à cette heure (§13, C6), sans toucher à `majTs`.

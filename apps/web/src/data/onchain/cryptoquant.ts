@@ -538,7 +538,9 @@ async function chargerUneFois(serie: SerieCq, signal: AbortSignal): Promise<Char
   if (offre !== undefined && offre.version === version) return fin("offre", offre.raison, false);
   const now = Date.now();
   if (repriseTs !== null && now < repriseTs) return fin("quota", raisonQuota(repriseTs - now), false);
-  if (archive !== null && archive.majTs !== null && now - archive.majTs < REPRISE_MS) return fin("pret", raisonLecture, false);
+  // `majTs` futur (horloge d'un poste en avance, ou relu tel via `unionArchives`) traité comme expiré :
+  // sinon la différence négative reste `< REPRISE_MS` indéfiniment et gèle la série.
+  if (archive !== null && archive.majTs !== null && archive.majTs <= now && now - archive.majTs < REPRISE_MS) return fin("pret", raisonLecture, false);
   if (!(await acquerirCreneauCq(signal))) return fin("erreur", RAISON_ANNULE_CRYPTOQUANT, false);
 
   // Clé personnelle seulement ; sans elle, le proxy Vite/daemon injecte le repli `.env`.

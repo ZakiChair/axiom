@@ -283,6 +283,16 @@ describe("CryptoQuant : chargerSerieCq (I5, I7, I9, I10)", () => {
     expect(healthStore.getState().sources.cryptoquant).toMatchObject({ etat: "polling", quota: { utilise: 1, limite: 10, fenetre: "1min" } });
   });
 
+  it("majTs futur (horloge en avance, corrigée depuis) : traité comme expiré → 1 appel, majTs réécrit à l'heure courante", async () => {
+    const cq = await import("./cryptoquant");
+    const f = reseau(api200);
+    poser(arch(plage(-30, -2), T0 + 40 * 86_400_000));
+    const r = await cq.chargerSerieCq("taker:spot:btc");
+    expect(appels(f)).toHaveLength(1);
+    expect(r).toMatchObject({ statut: "pret", appel: true });
+    expect(relire()?.majTs).toBe(T0);
+  });
+
   it.each([
     ["réseau", () => { throw new TypeError("échec"); }],
     ["HTTP 500", () => new Response("panne", { status: 500 })],

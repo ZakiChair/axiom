@@ -7,11 +7,12 @@ donc le foyer du rationnel de l'en-tête `Content-Security-Policy-Report-Only` p
 
 ## Pourquoi une CSP
 
-Le front déployé détient dans le `localStorage` du navigateur les **neuf clés personnelles**
+Le front déployé détient dans le `localStorage` du navigateur les **onze clés personnelles**
 saisies dans Réglages (Coinalyze, Twelve Data, FRED, BGeometrics, Finnhub, CoinDesk Data,
-CoinGecko Demo, Etherscan, SoSoValue). Aucune n'est un secret partagé côté serveur — c'est le
-choix mono-utilisateur du contrat — mais une injection de script sur la page les exfiltrerait
-toutes. La CSP est la seule barrière qui reste à ce niveau.
+CoinGecko Demo, Etherscan, SoSoValue, DefiLlama Pro, CryptoQuant ; liste de référence :
+`CLES_CREDENTIALS_LOCALES` de `apps/web/src/store/persist.ts`). Aucune n'est un secret partagé
+côté serveur — c'est le choix mono-utilisateur du contrat — mais une injection de script sur
+la page les exfiltrerait toutes. La CSP est la seule barrière qui reste à ce niveau.
 
 ## Pourquoi Report-Only, délibérément
 
@@ -49,3 +50,10 @@ nouvelle source de données doit être répercutée ici **et** dans `shared/exta
 être dérivées l'une de l'autre : `extapi-hosts` autorise le proxy à sortir, la CSP autorise
 le navigateur à parler. Un oubli côté CSP se manifestera d'abord comme une ligne
 `[Report Only]` en console, et comme une requête bloquée après la bascule.
+
+Les routes proxy **à préfixe** (`/extapi`, `/fredapi`, `/coinalyzeapi`, `/tdapi`, `/mexcapi`,
+`/sosoapi`, `/bgapi`, `/ethscanapi`, `/ccdataapi`, `/defillamapro`, `/cqapi`) sont servies par
+la même origine — réécritures de `vercel.json` vers `api/proxy.ts` — et relèvent donc de
+`'self'` : elles n'entrent pas dans `connect-src`. La route `/cqapi` (CryptoQuant BASIC,
+2026-09-16) n'a demandé aucun ajout à la politique ni à `shared/extapi-hosts.ts` ; seul un
+appel direct du navigateur vers un nouvel hôte exige une entrée ici.

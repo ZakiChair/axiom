@@ -326,6 +326,7 @@ describe("proxy /cqapi — CryptoQuant BASIC (licence personnelle)", () => {
 
   it.each([
     ["espace interne", "abc def"],
+    ["saut de ligne initial (avalé par l'ancien \\s+)", "\nabc"],
     ["saut de ligne développé par dotenv", "abc\ndef"],
     ["retour chariot", "abc\rdef"],
     ["NBSP", "abc def"],

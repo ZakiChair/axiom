@@ -254,3 +254,116 @@ Commande : `pnpm --filter @axiom/web build` (bloc imprimé par `scripts/verifier
 ```
 
 Store `store/cryptoquant.ts` dans `.vite/manifest.json` : aucun chunk partagé, store inclus dans `assets/SettingsPanel-D8Gb9ykx.js`. Delta initial depuis « Budget avant B1 » : +22 o gzip, +65 o bruts ; marge gzip locale 4383 o.
+
+### Budget après B1
+
+Commande : `set -o pipefail; pnpm --filter @axiom/web build 2>&1 | tee logs/axiom-b1-build.log` (poste local, commit `f40a8ac` de la tâche 15 ; bloc extrait du journal par la tâche 16, étape 5)
+
+```json
+{
+  "limites": {
+    "octetsBruts": 1220000,
+    "octetsGzip": 360000,
+    "niveauGzip": 9
+  },
+  "initial": {
+    "fichiers": [
+      "assets/index-DXzf3wFU.js",
+      "assets/indicators-DMDb8A8f.js",
+      "assets/vendor-klinecharts-B5HFhIGv.js",
+      "assets/vendor-react-BPWy1Tn9.js"
+    ],
+    "octetsBruts": 1206209,
+    "octetsGzip": 355644
+  },
+  "dynamique": {
+    "fichiers": [
+      "assets/BacktestWindow-8UetSkBt.js",
+      "assets/BriefWindow-CqSWK1II.js",
+      "assets/BtcPowerLawWindow-CoEb2WWa.js",
+      "assets/CbpremWindow-CagrBimT.js",
+      "assets/ChartSyncControls-BuiSnL-M.js",
+      "assets/CommandPalette-CNvjeiH-.js",
+      "assets/CorrWindow-D4tl2tAP.js",
+      "assets/CotWindow-DSsULWzX.js",
+      "assets/CycleWindow-BXnI9PT_.js",
+      "assets/DataWindow-BRigbTqm.js",
+      "assets/DefillamaProPanel-BdI90Knx.js",
+      "assets/DerivativesWindow-DKgfpi5o.js",
+      "assets/DistWindow-Cd7JbrOh.js",
+      "assets/DomWindow-B1TSj2Gj.js",
+      "assets/EcoWindow-ClLsyrVG.js",
+      "assets/EconomieChaines-C4V0MUR9.js",
+      "assets/EvtsWindow-BpmL8dY1.js",
+      "assets/ExpyWindow-DJe_NiBR.js",
+      "assets/FluxCapitaux-PlWlJ8YY.js",
+      "assets/FundWindow-DumAVM04.js",
+      "assets/FundingMatrixWindow-dfK8XJAx.js",
+      "assets/GlobeWindow-CFtYzsEP.js",
+      "assets/LiquidationsWindow-D7wU5568.js",
+      "assets/MacroRatesWindow-BvTQQyPz.js",
+      "assets/MarketMapWindow-D0xYgSLq.js",
+      "assets/McapWindow-BjFgzcVU.js",
+      "assets/MineWindow-Cc5mEgro.js",
+      "assets/NetliqWindow-BIQgG5Di.js",
+      "assets/NewsWindow-6JkQdoEk.js",
+      "assets/NotesWindow-Xx_LS_Cp.js",
+      "assets/OnboardingOverlay-BSK-GKEl.js",
+      "assets/OnchainWindow-BdIB8bYX.js",
+      "assets/OptionsWindow-DKsWmYg-.js",
+      "assets/PaperWindow-Cjs1MJOK.js",
+      "assets/PortfolioWindow-CBlURXjv.js",
+      "assets/QualiteMetrique-CTzzcv5x.js",
+      "assets/ReplayWindow-D8HmTaEY.js",
+      "assets/ScenWindow-C1HQIYld.js",
+      "assets/ScreenerWindow-CgvQjbeN.js",
+      "assets/SeasonalityWindow-DM1C8QDF.js",
+      "assets/SectWindow-DrAqWN3w.js",
+      "assets/SettingsPanel-1SnCSMxq.js",
+      "assets/SqueezeWindow-C6klttcw.js",
+      "assets/StablecoinsWindow-D1e7KS6y.js",
+      "assets/TableTriable-C3xzzbxK.js",
+      "assets/TermStructureWindow-YXMb5BdO.js",
+      "assets/VolWindow-DIAwMNn1.js",
+      "assets/WebGLSyncSpike-CuOM8BW1.js",
+      "assets/WhalesWindow-CZ-bzKjM.js",
+      "assets/bgeometrics-B7-yYyRJ.js",
+      "assets/chart-sync-timeframes-ClE3pJ1O.js",
+      "assets/composite-DudimCMB.js",
+      "assets/corr-Bu44P6VV.js",
+      "assets/cot-RL4di_O8.js",
+      "assets/cryptoquant-CWb-gmgq.js",
+      "assets/cryptoquant-DWizfmto.js",
+      "assets/csv-DChTGBa8.js",
+      "assets/defillamaKey-DNlpN_t3.js",
+      "assets/economieChaines-i_z13b0v.js",
+      "assets/etherscan-BjzfDxuR.js",
+      "assets/expy-3I9sQwqM.js",
+      "assets/fluxCapitaux-C7e3zBhq.js",
+      "assets/fundingCrossExchange-Dsg8l63z.js",
+      "assets/lienRetours-Bo4sHoSC.js",
+      "assets/liquidationHeat-C9RKaXwz.js",
+      "assets/macroSeries-XcxPApdP.js",
+      "assets/mempool-C3qerS1D.js",
+      "assets/onchainMetriques-b18bpRK_.js",
+      "assets/portRisque-CJzNYyIN.js",
+      "assets/qualiteChain-BnnjF5A2.js",
+      "assets/squeezeWindow.util-BqNVn_Xn.js",
+      "assets/thermocap-D8tN-A8I.js",
+      "assets/treasuryYields-mO6YeKd1.js",
+      "assets/treemap-D9x5LE-E.js",
+      "assets/tresoreriesBtc-C2pAEgpM.js",
+      "assets/useDomaineZoom-Bxy48dSr.js",
+      "assets/viewportSync-B4b5tSXQ.js",
+      "assets/volCone-BZveA2ku.js"
+    ],
+    "octetsBruts": 1005687,
+    "octetsGzip": 369308
+  }
+}
+```
+
+- Delta initial : +27 gzip / +39 bruts depuis « après B1-3 » (attendu ≤ ~40 gzip : nom du chunk partagé du store dans `__vite__mapDeps`) ; +49 gzip / +104 bruts sur l'ensemble de B1 depuis « avant B1 » (porte d'acceptation ≤ ~150 gzip).
+- Marge locale 4356 gzip ; marge runner estimée 3118 gzip (écart runner − local du 2026-09-16 : 356 635 − 355 397 = 1 238, `docs/superpowers/progress/2026-09-16-indicateurs-et-fonctions-revue.md:49` et `:62`). Seules les limites 1220000 bruts / 360000 gzip bloquent le build.
+- Chunk partagé du store (`.vite/manifest.json`, importé par DES) : `assets/cryptoquant-DWizfmto.js`.
+- Client CryptoQuant : `assets/cryptoquant-CWb-gmgq.js`, entrée dynamique chargée par DES via `import()`, hors du graphe statique de l'entrée ; aucun fichier initial ne contient « Flux takers toutes places » ; garde-fou `apps/web/src/chunkCryptoquant.test.ts` vert.

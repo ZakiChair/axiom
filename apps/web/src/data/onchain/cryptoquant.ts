@@ -3,7 +3,7 @@
  * importé uniquement par `await import()` depuis DES et CHAIN. Parties pures puis orchestrateur.
  * Aucune raison, aucun journal, aucune URL ne porte la clé.
  */
-import { CRYPTOQUANT_PREFIXE, IDS_MINEURS_CQ, type IdMineurCq } from "../../../../../shared/cryptoquant-proxy";
+import { CRYPTOQUANT_PREFIXE, IDS_MINEURS_CQ, cleCryptoQuantValide, type IdMineurCq } from "../../../../../shared/cryptoquant-proxy";
 import { RAISON_CLE_CRYPTOQUANT, cryptoquantKeyStore, getCryptoquantKey } from "../../store/cryptoquant";
 import { healthStore } from "../../store/health";
 import { IS_VERCEL } from "../../lib/deployment";
@@ -90,7 +90,14 @@ function ligneMineurFournisseur(l: Record<string, unknown>): LigneMineur | null 
   };
 }
 
-/** Lignes croissantes, dédoublonnées ; `code ≠ 200` → [] ; jours ≥ aujourd'hui et lignes invalides ignorés un par un. */
+/**
+ * Profondeur maximale d'une réponse : avec `limit=30`, le fournisseur ne remonte jamais au-delà
+ * (il refuse toute date antérieure à 30 j). Un jour plus ancien (valeur zéro `0001-01-01`, epoch
+ * `1970-01-01`…) est une anomalie : l'archiver polluerait la copie locale et la KV sans retour.
+ */
+const JOURS_MAX_REPONSE = 40;
+
+/** Lignes croissantes, dédoublonnées ; `code ≠ 200` → [] ; jours ≥ aujourd'hui ou < J-40 et lignes invalides ignorés un par un. */
 export function parserLignes(serie: SerieCq, json: unknown, aujourdhuiUtc: string): Array<{ jour: string; ligne: LigneCq }> {
   if (!estObjet(json)) return [];
   const status = json["status"];
@@ -99,11 +106,12 @@ export function parserLignes(serie: SerieCq, json: unknown, aujourdhuiUtc: strin
   const data = result["data"];
   if (!Array.isArray(data)) return [];
   const mineur = estSerieMineur(serie);
+  const plancher = decalerJour(aujourdhuiUtc, -JOURS_MAX_REPONSE);
   const parJour = new Map<string, LigneCq>();
   for (const brut of data) {
     if (!estObjet(brut)) continue;
     const jour = jourFournisseur(typeof brut["datetime"] === "string" ? brut["datetime"] : brut["date"]);
-    if (jour === null || jour >= aujourdhuiUtc) continue;
+    if (jour === null || jour >= aujourdhuiUtc || jour < plancher) continue;
     const ligne = mineur ? ligneMineurFournisseur(brut) : ligneTakerFournisseur(brut);
     if (ligne !== null) parJour.set(jour, ligne);
   }
@@ -179,8 +187,12 @@ function ligneMineurStockee(v: unknown): LigneMineur | null {
   return { r: v["r"], cr, om, cm, usd, cmu, px, decl, prec };
 }
 
-/** Archive déjà parsée (local ou `valeur` KV) ; version 1 : un jour invalide est ignoré, pas le blob. */
-function validerArchive(valeur: unknown, serie: SerieCq): DecodageCq {
+/**
+ * Archive déjà parsée (local ou `valeur` KV) ; version 1 : un jour invalide est ignoré, pas le blob.
+ * Un jour ≥ aujourd'hui UTC (journée non close, écrite par un poste à l'horloge en avance) est
+ * ignoré comme au parseur ; la copie stockée n'est pas réécrite pour autant.
+ */
+function validerArchive(valeur: unknown, serie: SerieCq, aujourdhuiUtc: string): DecodageCq {
   if (!estObjet(valeur)) return { etat: "illisible" };
   const version = valeur["version"];
   if (typeof version === "number" && Number.isInteger(version) && version > 1) return { etat: "versionInconnue" };
@@ -190,14 +202,14 @@ function validerArchive(valeur: unknown, serie: SerieCq): DecodageCq {
   const mineur = estSerieMineur(serie);
   const jours: Record<string, LigneCq> = {};
   for (const [jour, brut] of Object.entries(joursBruts)) {
-    if (dateOnchain(jour) === null) continue;
+    if (dateOnchain(jour) === null || jour >= aujourdhuiUtc) continue;
     const ligne = mineur ? ligneMineurStockee(brut) : ligneTakerStockee(brut);
     if (ligne !== null) jours[jour] = ligne;
   }
   return { etat: "ok", archive: { version: 1, serie, majTs, jours: trierJours(jours) } };
 }
 
-export function decoderArchive(brut: string | null, serie: SerieCq): DecodageCq {
+export function decoderArchive(brut: string | null, serie: SerieCq, aujourdhuiUtc: string = jourUtc(Date.now())): DecodageCq {
   if (brut === null) return { etat: "absente" };
   let valeur: unknown;
   try {
@@ -205,7 +217,7 @@ export function decoderArchive(brut: string | null, serie: SerieCq): DecodageCq 
   } catch {
     return { etat: "illisible" };
   }
-  return validerArchive(valeur, serie);
+  return validerArchive(valeur, serie, aujourdhuiUtc);
 }
 
 export interface DiagnosticCq { debut: string | null; dernier: string | null; hierPresent: boolean; manquantsFenetre: string[]; perdus: string[]; perime: boolean }
@@ -250,7 +262,7 @@ export function cleKv(serie: SerieCq): string {
 const TAILLE_MAX_KV = 900_000;
 const TIMEOUT_KV_MS = 5_000;
 
-/** `kv` : null = pas de daemon, false = lecture ou écriture KV en échec. */
+/** `kv` : null = pas de daemon, false = lecture ou écriture KV en échec (délai dépassé compris). */
 export interface PersistanceCq { local: boolean; kv: boolean | null }
 export type EtatKvCq = "sans-daemon" | "absente" | "erreur" | "presente";
 export interface LectureArchiveCq {
@@ -280,17 +292,35 @@ function ecrireLocal(serie: SerieCq, texte: string): boolean {
 }
 
 /** Tri-état par fetch brut (`kvGet` confond 404 et erreur). */
-async function lireKv(serie: SerieCq): Promise<{ etat: "absente" | "erreur" } | { etat: "presente"; decodage: DecodageCq }> {
+async function lireKv(serie: SerieCq, aujourdhuiUtc: string): Promise<{ etat: "absente" | "erreur" } | { etat: "presente"; decodage: DecodageCq }> {
   try {
     const res = await fetch(urlDaemon(`/kv/${encodeURIComponent(NS_KV)}/${encodeURIComponent(cleKv(serie))}`), { cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_KV_MS) });
     if (res.status === 404) return { etat: "absente" };
     if (!res.ok) return { etat: "erreur" };
     const corps = (await res.json()) as unknown;
     if (!estObjet(corps) || !("valeur" in corps)) return { etat: "erreur" };
-    return { etat: "presente", decodage: validerArchive(corps["valeur"], serie) };
+    return { etat: "presente", decodage: validerArchive(corps["valeur"], serie, aujourdhuiUtc) };
   } catch {
     return { etat: "erreur" };
   }
+}
+
+/** Résout `repli` si `promesse` ne s'est pas réglée dans `ms` ; la minuterie est toujours libérée. */
+function avecDelai<T>(promesse: Promise<T>, ms: number, repli: T): Promise<T> {
+  return new Promise((resolve) => {
+    const minuteur = setTimeout(() => resolve(repli), ms);
+    const regler = (v: T) => {
+      clearTimeout(minuteur);
+      resolve(v);
+    };
+    promesse.then(regler, () => regler(repli));
+  });
+}
+
+/** `kvPut` sous la garde de taille, borné comme la lecture (`TIMEOUT_KV_MS`) : `true` seulement si le daemon a confirmé. */
+async function ecrireKvBornee(serie: SerieCq, archive: ArchiveCq, texte: string): Promise<boolean> {
+  if (texte.length > TAILLE_MAX_KV) return false;
+  return (await avecDelai(kvPut(NS_KV, cleKv(serie), archive), TIMEOUT_KV_MS, null)) !== null;
 }
 
 function enrichit(union: ArchiveCq, local: ArchiveCq | null): boolean {
@@ -298,22 +328,26 @@ function enrichit(union: ArchiveCq, local: ArchiveCq | null): boolean {
   return Object.keys(union.jours).length > Object.keys(local.jours).length || (union.majTs ?? 0) > (local.majTs ?? 0);
 }
 
-/** Local ∪ KV (jamais sur Vercel), réécriture locale si enrichie ; version inconnue jamais écrite. */
+/**
+ * Local ∪ KV (jamais sur Vercel), réécriture locale si enrichie ; version inconnue jamais écrite.
+ * KV joignable mais sans la série : amorcée avec l'union non vide, `persistance.kv` reflète l'écriture.
+ */
 export async function lireArchiveCq(serie: SerieCq): Promise<LectureArchiveCq> {
+  const aujourdhui = jourUtc(Date.now());
   const daemon = !IS_VERCEL && (await detectDaemon("kv"));
-  const local = decoderArchive(lireLocal(serie), serie);
+  const local = decoderArchive(lireLocal(serie), serie, aujourdhui);
   let kv: EtatKvCq = "sans-daemon";
   let archiveKv: ArchiveCq | null = null;
   let kvVersionInconnue = false;
   if (daemon) {
-    const lu = await lireKv(serie);
+    const lu = await lireKv(serie, aujourdhui);
     kv = lu.etat;
     if (lu.etat === "presente") {
       if (lu.decodage.etat === "ok") archiveKv = lu.decodage.archive;
       if (lu.decodage.etat === "versionInconnue") kvVersionInconnue = true;
     }
   }
-  const persistanceKv = kv === "sans-daemon" ? null : kv !== "erreur";
+  let persistanceKv = kv === "sans-daemon" ? null : kv !== "erreur";
   const versionInconnue = local.etat === "versionInconnue" || kvVersionInconnue;
   const localIllisible = local.etat === "illisible";
   if (versionInconnue) return { archive: null, versionInconnue, localIllisible, kv, persistance: { local: true, kv: persistanceKv } };
@@ -321,16 +355,20 @@ export async function lireArchiveCq(serie: SerieCq): Promise<LectureArchiveCq> {
   const archive = unionArchives(archiveLocale, archiveKv);
   let localOk = true;
   if (archive !== null && enrichit(archive, archiveLocale)) localOk = ecrireLocal(serie, JSON.stringify(archive));
+  // Sans amorçage, une KV vide passerait pour une copie durable jusqu'au prochain appel réussi.
+  if (kv === "absente" && archive !== null && Object.keys(archive.jours).length > 0) {
+    persistanceKv = await ecrireKvBornee(serie, archive, JSON.stringify(archive));
+  }
   return { archive, versionInconnue, localIllisible, kv, persistance: { local: localOk, kv: persistanceKv } };
 }
 
-/** Jamais de `kvPut` après une lecture KV en erreur ni au-delà de 900 000 caractères. */
+/** Jamais de `kvPut` après une lecture KV en erreur ni au-delà de 900 000 caractères ; écriture bornée à `TIMEOUT_KV_MS`. */
 export async function ecrireArchiveCq(serie: SerieCq, archive: ArchiveCq, kv: EtatKvCq): Promise<PersistanceCq> {
   const texte = JSON.stringify(archive);
   const local = ecrireLocal(serie, texte);
   if (kv === "sans-daemon") return { local, kv: null };
-  if (kv === "erreur" || texte.length > TAILLE_MAX_KV) return { local, kv: false };
-  return { local, kv: (await kvPut(NS_KV, cleKv(serie), archive)) !== null };
+  if (kv === "erreur") return { local, kv: false };
+  return { local, kv: await ecrireKvBornee(serie, archive, texte) };
 }
 
 // --- Cadence : file unique 10 req / 60 s ---
@@ -349,6 +387,8 @@ let enAttente = 0;
 let repriseTs: number | null = null;
 /** `x-ratelimit-remaining: 0` : retarde le créneau suivant (0 = aucune pause). */
 let pauseJusquaTs = 0;
+/** Republication du quota à l'expiration du plus ancien horodatage ; absente quand la fenêtre est vide. */
+let minuteurQuota: ReturnType<typeof setTimeout> | undefined;
 const abonnes = new Set<() => void>();
 
 function notifier(): void {
@@ -377,7 +417,34 @@ function attendre(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-/** File sérialisée des 13 séries ; quota publié à chaque créneau ; annulée → `false` sans créneau. */
+/** Retire les horodatages sortis de la fenêtre glissante de 60 s. */
+function purgerHorodatages(now: number): void {
+  while (horodatages.length > 0) {
+    const plusAncien = horodatages[0];
+    if (plusAncien === undefined || now - plusAncien < FENETRE_MS) break;
+    horodatages.shift();
+  }
+}
+
+/**
+ * Publie le quota (fenêtre DATA) et se replanifie à l'expiration du plus ancien horodatage :
+ * le compte redescend sans attendre le créneau suivant. Toute minuterie précédente est annulée ;
+ * aucune ne reste une fois la fenêtre vide.
+ */
+function publierQuota(): void {
+  clearTimeout(minuteurQuota);
+  minuteurQuota = undefined;
+  healthStore.getState().setQuota(SOURCE_SANTE, { utilise: horodatages.length, limite: LIMITE_MIN, fenetre: "1min" });
+  const plusAncien = horodatages[0];
+  if (plusAncien === undefined) return;
+  minuteurQuota = setTimeout(() => {
+    minuteurQuota = undefined;
+    purgerHorodatages(Date.now());
+    publierQuota();
+  }, Math.max(0, plusAncien + FENETRE_MS - Date.now()));
+}
+
+/** File sérialisée des 13 séries ; quota publié à chaque créneau puis à chaque expiration ; annulée → `false` sans créneau. */
 export function acquerirCreneauCq(signal: AbortSignal): Promise<boolean> {
   enAttente++;
   notifier();
@@ -399,14 +466,10 @@ export function acquerirCreneauCq(signal: AbortSignal): Promise<boolean> {
           await attendre(pause - now, signal);
           continue;
         }
-        while (horodatages.length > 0) {
-          const plusAncien = horodatages[0];
-          if (plusAncien === undefined || now - plusAncien < FENETRE_MS) break;
-          horodatages.shift();
-        }
+        purgerHorodatages(now);
         if (horodatages.length < LIMITE_MIN) {
           horodatages.push(now);
-          healthStore.getState().setQuota(SOURCE_SANTE, { utilise: horodatages.length, limite: LIMITE_MIN, fenetre: "1min" });
+          publierQuota();
           return true;
         }
         const plusAncien = horodatages[0];
@@ -427,21 +490,38 @@ function secondesEntete(valeur: string | null): number | null {
   return Number.isFinite(s) ? s : null;
 }
 
-function borner(secondes: number): number {
-  return Math.min(REPRISE_MAX_MS, Math.max(REPRISE_MIN_MS, secondes * 1000));
+/** Seuils de `x-ratelimit-reset` : au-delà, la valeur est un epoch (ms, puis s) et non un délai. */
+const EPOCH_MS_MIN = 1e12;
+const EPOCH_S_MIN = 1e9;
+
+/** Délai restant (ms) annoncé par `x-ratelimit-reset` : epoch en ms (> 1e12), epoch en s (> 1e9), sinon secondes relatives. */
+function delaiReset(valeur: string | null, now: number): number | null {
+  const n = secondesEntete(valeur);
+  if (n === null) return null;
+  if (n > EPOCH_MS_MIN) return n - now;
+  if (n > EPOCH_S_MIN) return n * 1000 - now;
+  return n * 1000;
 }
 
-/** 429 → suspension bornée [1 s, 15 min] (reset, sinon retry-after, sinon 60 s) ; remaining 0 → pause. */
+function borner(ms: number): number {
+  return Math.min(REPRISE_MAX_MS, Math.max(REPRISE_MIN_MS, ms));
+}
+
+/**
+ * 429 → suspension bornée [1 s, 15 min] (reset, sinon retry-after, sinon 60 s) ; remaining 0 → pause.
+ * Les deux échéances ne reculent jamais : un 429 plus court ne raccourcit pas une reprise annoncée.
+ */
 export function noterReponseCq(res: Response): void {
   const now = Date.now();
-  const reset = secondesEntete(res.headers.get("x-ratelimit-reset"));
+  const reset = delaiReset(res.headers.get("x-ratelimit-reset"), now);
   if (res.status === 429) {
-    repriseTs = now + borner(reset ?? secondesEntete(res.headers.get("retry-after")) ?? 60);
+    const retry = secondesEntete(res.headers.get("retry-after"));
+    repriseTs = Math.max(repriseTs ?? 0, now + borner(reset ?? (retry ?? 60) * 1000));
     notifier();
     return;
   }
   if (res.headers.get("x-ratelimit-remaining")?.trim() === "0") {
-    pauseJusquaTs = Math.max(pauseJusquaTs, now + borner(reset ?? 60));
+    pauseJusquaTs = Math.max(pauseJusquaTs, now + borner(reset ?? 60_000));
     notifier();
   }
 }
@@ -498,7 +578,11 @@ function versionCle(): number {
   return cryptoquantKeyStore.getState().version;
 }
 
-/** `status.message` amont (403), borné, jamais s'il contient la clé. */
+/**
+ * `status.message` amont (403), borné, affiché seulement avec une clé PERSONNELLE vérifiable et
+ * absente du message. Sans elle (repli `.env`), le client ignore la clé injectée par le proxy et
+ * ne peut pas exclure qu'elle soit recopiée : message par défaut.
+ */
 async function raisonOffre(res: Response, cle: string | null): Promise<string> {
   try {
     const corps = (await res.json()) as unknown;
@@ -506,7 +590,7 @@ async function raisonOffre(res: Response, cle: string | null): Promise<string> {
     const brut = estObjet(status) && typeof status["message"] === "string" ? status["message"].trim() : "";
     // Test d'inclusion de la clé sur le message ENTIER, avant tout troncage : sinon une clé qui
     // tombe sur la coupure de 200 caractères y survit en partie et un fragment fuit dans la raison.
-    if (brut === "" || (cle !== null && brut.includes(cle))) return RAISON_OFFRE_DEFAUT;
+    if (brut === "" || cle === null || brut.includes(cle)) return RAISON_OFFRE_DEFAUT;
     const message = brut.slice(0, 200);
     return `Offre CryptoQuant insuffisante : ${message}`;
   } catch {
@@ -520,7 +604,8 @@ function chargementAnnule(serie: SerieCq): ChargementCq {
 
 /** Ordre §4.3 ; l'archive existante est toujours renvoyée. */
 async function chargerUneFois(serie: SerieCq, signal: AbortSignal): Promise<ChargementCq> {
-  const aujourdhui = jourUtc(Date.now());
+  // Recalculé après le créneau : l'attente (jusqu'à 15 min après un 429) peut franchir minuit UTC.
+  let aujourdhui = jourUtc(Date.now());
   const lecture = await lireArchiveCq(serie);
   let archive = lecture.archive;
   let persistance = lecture.persistance;
@@ -532,6 +617,9 @@ async function chargerUneFois(serie: SerieCq, signal: AbortSignal): Promise<Char
   if (diagnostiquer(archive, aujourdhui).hierPresent) return fin("pret", raisonLecture, false);
   const cle = getCryptoquantKey();
   if (cle === null && !(CQ_CLE_ENV_PRESENTE && !IS_VERCEL)) return fin("cle-requise", RAISON_CLE_CRYPTOQUANT, false);
+  // En-tête impossible (caractère invisible collé, clé trop longue) : `fetch` lèverait avant tout
+  // envoi et la série passerait pour « injoignable ». Refus local, sans créneau ni appel.
+  if (cle !== null && !cleCryptoQuantValide(`Bearer ${cle}`)) return fin("cle-requise", RAISON_CLE_REFUSEE_CRYPTOQUANT, false);
   const version = versionCle();
   if (refusCle !== null && refusCle.version === version) return fin("cle-requise", refusCle.raison, false);
   const offre = refusOffre.get(familleSerie(serie));
@@ -542,6 +630,7 @@ async function chargerUneFois(serie: SerieCq, signal: AbortSignal): Promise<Char
   // sinon la différence négative reste `< REPRISE_MS` indéfiniment et gèle la série.
   if (archive !== null && archive.majTs !== null && archive.majTs <= now && now - archive.majTs < REPRISE_MS) return fin("pret", raisonLecture, false);
   if (!(await acquerirCreneauCq(signal))) return fin("erreur", RAISON_ANNULE_CRYPTOQUANT, false);
+  aujourdhui = jourUtc(Date.now());
 
   // Clé personnelle seulement ; sans elle, le proxy Vite/daemon injecte le repli `.env`.
   const headers: Record<string, string> = { accept: "application/json" };

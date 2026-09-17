@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ArchiveCq, LigneTaker, SerieCq } from "./cryptoquant";
+import type { ArchiveCq, ChargementCq, LigneTaker, SerieCq } from "./cryptoquant";
 
 // Daemon et store de clé pilotés par le test.
 const { detecter, kvPutMock, cle } = vi.hoisted(() => ({
@@ -51,7 +51,7 @@ function reinitialiser(): void {
 
 describe("CryptoQuant : persistance locale ∪ KV (I1, I4)", () => {
   beforeEach(reinitialiser);
-  afterEach(() => { vi.unstubAllGlobals(); vi.doUnmock("../../lib/deployment"); });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.doUnmock("../../lib/deployment"); });
 
   it("emplacements figés : clé locale sous le préfixe exclu des sauvegardes (tâche 7), clé KV par série", async () => {
     const cq = await import("./cryptoquant");
@@ -149,10 +149,72 @@ describe("CryptoQuant : persistance locale ∪ KV (I1, I4)", () => {
     kvPutMock.mockResolvedValue(1);
     expect(await cq.ecrireArchiveCq("taker:spot:btc", arch([J(-1)], 7), "absente")).toEqual({ local: false, kv: true });
   });
+
+  it("jours ≥ aujourd'hui UTC (local ou KV) ignorés à la lecture, archive stockée non réécrite", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T0);
+    const cq = await import("./cryptoquant");
+    const stockee = arch([J(-2), J(0), J(1)], 10);
+    poser(stockee);
+    const setItem = vi.spyOn(localStorage, "setItem");
+    reseau(aucun);
+    expect(Object.keys((await cq.lireArchiveCq("taker:spot:btc")).archive?.jours ?? {})).toEqual([J(-2)]);
+    // Jour non clos seul en KV : ni servi, ni compté comme un enrichissement.
+    detecter.mockResolvedValue(true);
+    reseau(aucun, kvOk(arch([J(-2), J(0)], 5)));
+    expect(Object.keys((await cq.lireArchiveCq("taker:spot:btc")).archive?.jours ?? {})).toEqual([J(-2)]);
+    // Série au J-1 archivé : le « dernier jour » affiché n'est jamais un jour non clos.
+    detecter.mockResolvedValue(false);
+    poser(arch([J(-1), J(0), J(1)], 10));
+    setItem.mockClear();
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: false, diagnostic: { dernier: J(-1), hierPresent: true } });
+    expect([setItem.mock.calls.length, kvPutMock.mock.calls.length, Object.keys(relire()?.jours ?? {})]).toEqual([0, 0, [J(-1), J(0), J(1)]]);
+  });
+
+  it("écriture KV sans réponse : bornée à 5 s comme la lecture, kv false, série rendue", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.setSystemTime(T0);
+    cle.valeur = "perso";
+    const cq = await import("./cryptoquant");
+    detecter.mockResolvedValue(true);
+    kvPutMock.mockReturnValue(new Promise<number | null>(() => {}));
+    reseau(api200);
+    let r: ChargementCq | undefined;
+    void cq.chargerSerieCq("taker:spot:btc").then((x) => { r = x; });
+    await tourner();
+    await avancer(4_999);
+    expect([r, kvPutMock.mock.calls.length]).toEqual([undefined, 1]);
+    await avancer(1);
+    expect(r).toMatchObject({ statut: "pret", appel: true, persistance: { local: true, kv: false } });
+    expect(Object.keys(relire()?.jours ?? {})).toHaveLength(30);
+  });
+
+  it("KV joignable mais vide : amorcée par l'union locale non vide, kv reflète l'écriture réelle", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(T0);
+    const cq = await import("./cryptoquant");
+    detecter.mockResolvedValue(true);
+    const f = reseau(aucun);
+    // Union vide : rien à amorcer.
+    expect((await cq.lireArchiveCq("taker:spot:btc")).persistance).toEqual({ local: true, kv: true });
+    expect(kvPutMock).not.toHaveBeenCalled();
+    // Archive locale de 200 j contenant J-1 (collectée sans daemon) : un seul kvPut de l'union.
+    poser(arch(plage(-200, -1), 10));
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: false, persistance: { local: true, kv: true } });
+    const [ns, cleKv, valeur] = kvPutMock.mock.calls[0] ?? [];
+    expect([kvPutMock.mock.calls.length, ns, cleKv, Object.keys((valeur as ArchiveCq).jours).length]).toEqual([1, "onchain", "cq:taker:spot:btc:v1", 200]);
+    expect(appels(f)).toHaveLength(0);
+    // Écriture refusée par le daemon : signalée, jamais « copie durable ».
+    kvPutMock.mockClear().mockResolvedValue(null);
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", persistance: { local: true, kv: false } });
+    expect(kvPutMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 // --- File 10 req / 60 s (tâche 12) ---
 const vider = async () => { for (let i = 0; i < 200; i++) await Promise.resolve(); };
+/** Tours de boucle réels (`setImmediate` n'est jamais simulé ici) : laisse les corps `Response` se lire. */
+const tourner = async () => { for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r)); };
 const avancer = async (ms: number) => { await vi.advanceTimersByTimeAsync(ms); await vider(); };
 
 describe("CryptoQuant : file 10 req / 60 s (I6, I7)", () => {
@@ -230,7 +292,64 @@ describe("CryptoQuant : file 10 req / 60 s (I6, I7)", () => {
     for (const [entetes, delai] of [[{}, 60_000], [{ "retry-after": "5" }, 5_000], [{ "x-ratelimit-reset": "0" }, 1_000]] as const) {
       cq.noterReponseCq(new Response(null, { status: 429, headers: entetes }));
       expect(cq.etatFileCq().repriseTs).toBe(Date.now() + delai);
+      // Reprise échue avant le 429 suivant : sinon la plus tardive des deux est gardée.
+      await avancer(delai);
     }
+  });
+
+  it("429 long puis 429 court : la reprise ne recule pas", async () => {
+    const cq = await import("./cryptoquant");
+    cq.noterReponseCq(new Response(null, { status: 429, headers: { "x-ratelimit-reset": "600" } }));
+    cq.noterReponseCq(new Response(null, { status: 429, headers: { "retry-after": "5" } }));
+    expect(cq.etatFileCq().repriseTs).toBe(T0 + 600_000);
+    let ok = false;
+    void cq.acquerirCreneauCq(new AbortController().signal).then((r) => { ok = r; });
+    await avancer(599_999);
+    expect(ok).toBe(false);
+    await avancer(1);
+    expect(ok).toBe(true);
+  });
+
+  it.each([
+    ["epoch en millisecondes", String(T0 + 30_000)],
+    ["epoch en secondes", String(T0 / 1000 + 30)],
+    ["secondes relatives", "30"],
+  ])("x-ratelimit-reset en %s → reprise dans 30 s (429 et remaining 0)", async (_n, reset) => {
+    const cq = await import("./cryptoquant");
+    cq.noterReponseCq(new Response(null, { headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": reset } }));
+    expect(cq.etatFileCq().repriseTs).toBe(T0 + 30_000);
+    cq.noterReponseCq(new Response(null, { status: 429, headers: { "x-ratelimit-reset": reset } }));
+    expect(cq.etatFileCq().repriseTs).toBe(T0 + 30_000);
+  });
+
+  it("x-ratelimit-reset en epoch : bornes conservées (passé → 1 s, lointain → 15 min)", async () => {
+    const cq = await import("./cryptoquant");
+    cq.noterReponseCq(new Response(null, { status: 429, headers: { "x-ratelimit-reset": String(T0 / 1000 - 3600) } }));
+    expect(cq.etatFileCq().repriseTs).toBe(T0 + 1_000);
+    await avancer(1_000);
+    cq.noterReponseCq(new Response(null, { status: 429, headers: { "x-ratelimit-reset": String(T0 + 86_400_000) } }));
+    expect(cq.etatFileCq().repriseTs).toBe(T0 + 1_000 + 900_000);
+  });
+
+  it("quota DATA : redescend quand les créneaux sortent de la fenêtre de 60 s, minuterie unique puis aucune", async () => {
+    const cq = await import("./cryptoquant");
+    const { healthStore } = await import("../../store/health");
+    const utilise = () => healthStore.getState().sources.cryptoquant?.quota?.utilise;
+    const s = new AbortController().signal;
+    await cq.acquerirCreneauCq(s);
+    await avancer(10_000);
+    await cq.acquerirCreneauCq(s);
+    // La republication précédente est annulée : une seule minuterie en attente.
+    expect([utilise(), vi.getTimerCount()]).toEqual([2, 1]);
+    await avancer(49_999);
+    expect(utilise()).toBe(2);
+    await avancer(1);
+    expect([utilise(), vi.getTimerCount()]).toEqual([1, 1]);
+    await avancer(9_999);
+    expect(utilise()).toBe(1);
+    await avancer(1);
+    // Fenêtre vide : quota publié à 0 et plus aucune minuterie.
+    expect([utilise(), vi.getTimerCount()]).toEqual([0, 0]);
   });
 
   it("annulation pendant l'attente : false, aucun créneau consommé", async () => {
@@ -418,6 +537,44 @@ describe("CryptoQuant : chargerSerieCq (I5, I7, I9, I10)", () => {
     expect((await cq.chargerSerieCq("taker:spot:btc")).statut).toBe("pret");
     expect(appels(f)[0]?.[1]?.headers).toEqual({ accept: "application/json" });
   });
+
+  it("minuit franchi pendant l'attente du créneau : jour recalculé, la ligne devenue J-1 est gardée", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.setSystemTime(Date.UTC(2026, 8, 16, 23, 59, 30));
+    const cq = await import("./cryptoquant");
+    const libre = new AbortController().signal;
+    for (let i = 0; i < 10; i++) await cq.acquerirCreneauCq(libre);
+    poser(arch(plage(-30, -2), null));
+    // Réponse servie après minuit : elle publie la journée du 16, close depuis.
+    const f = reseau(() => Response.json({ status: { code: 200 }, result: { data: plage(-30, 0).reverse().map(brute) } }));
+    let r: ChargementCq | undefined;
+    void cq.chargerSerieCq("taker:spot:btc").then((x) => { r = x; });
+    await tourner();
+    await avancer(59_999);
+    expect([appels(f).length, r]).toEqual([0, undefined]);
+    await avancer(1);
+    await tourner();
+    expect(appels(f)).toHaveLength(1);
+    expect(r).toMatchObject({ statut: "pret", appel: true, diagnostic: { dernier: J(0), hierPresent: true, perime: false } });
+    expect(Object.keys(relire()?.jours ?? {})).toEqual(plage(-30, 0));
+  });
+
+  it("clé personnelle hors ASCII visible (U+200B) : clé refusée avant tout créneau, 0 appel", async () => {
+    cle.valeur = "abc\u200Bdef";
+    const cq = await import("./cryptoquant");
+    const { healthStore } = await import("../../store/health");
+    poser(arch(plage(-30, -2), null));
+    const f = reseau(aucun);
+    const r = await cq.chargerSerieCq("taker:spot:btc");
+    expect(r).toMatchObject({ statut: "cle-requise", raison: "Clé CryptoQuant refusée (Réglages ⚙).", appel: false });
+    expect(Object.keys(r.archive?.jours ?? {})).toHaveLength(29);
+    expect([f.mock.calls.length, cq.etatFileCq(), healthStore.getState().sources.cryptoquant]).toEqual([0, { enAttente: 0, repriseTs: null }, undefined]);
+    // Clé corrigée (nouvelle version) : l'appel part.
+    const { cryptoquantKeyStore } = await import("../../store/cryptoquant");
+    cryptoquantKeyStore.getState().setKey("perso");
+    reseau(api200);
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: true });
+  });
 });
 
 describe("CryptoQuant : la clé n'apparaît nulle part (I8)", () => {
@@ -463,5 +620,23 @@ describe("CryptoQuant : la clé n'apparaît nulle part (I8)", () => {
     const fragment = SECRET.slice(0, 8);
     const traces = [...f.mock.calls.map(([u]) => String(u)), r, healthStore.getState().sources, cq.etatFileCq()].map((t) => JSON.stringify(t));
     expect(traces.filter((t) => t.includes(fragment))).toEqual([]);
+  });
+
+  it("clé .env (drapeau vrai, clé personnelle nulle) : message 403 amont jamais affiché ni mémorisé", async () => {
+    cle.valeur = null;
+    vi.stubGlobal("__CQ_CLE_ENV__", true);
+    const cq = await import("./cryptoquant");
+    const { healthStore } = await import("../../store/health");
+    // Le client ignore la clé injectée par le proxy : il ne peut pas vérifier que le message ne la recopie pas.
+    const marqueur = "MARQUEUR-ENV";
+    const f = reseau(() => statut(403, `Invalid key ${marqueur}`));
+    const res = [await cq.chargerSerieCq("taker:spot:btc"), await cq.chargerSerieCq("taker:swap:eth")];
+    expect(res).toMatchObject([
+      { statut: "offre", appel: true, raison: "Offre CryptoQuant insuffisante pour cette série (403)." },
+      { statut: "offre", appel: false, raison: "Offre CryptoQuant insuffisante pour cette série (403)." },
+    ]);
+    expect([appels(f).length, appels(f)[0]?.[1]?.headers]).toEqual([1, { accept: "application/json" }]);
+    const traces = [...res, cq.etatFileCq(), healthStore.getState().sources].map((t) => JSON.stringify(t));
+    expect(traces.filter((t) => t.includes(marqueur))).toEqual([]);
   });
 });

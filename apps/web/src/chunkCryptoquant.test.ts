@@ -2,12 +2,13 @@
  * Garde-fou « chunk à la demande » du client CryptoQuant (spec 2026-09-16, invariant I11).
  *
  * `data/onchain/cryptoquant.ts` n'est chargé que par `import()` depuis les sections DES et
- * CHAIN. Un import statique hors de `data/onchain/` le ferait entrer dans un chunk partagé
- * dont le nom s'ajoute aux préchargements de l'entrée (budget initial bloquant). Les imports
- * de TYPES sont effacés à la compilation et restent permis ; un import mixte
- * (`import { a, type B }`) reste un import de valeur et est refusé. Le store de clé
- * `store/cryptoquant.ts` porte le même nom de fichier mais n'est pas le client. Les fichiers
- * de test ne sont pas bundlés : hors périmètre.
+ * CHAIN. Un import statique depuis n'importe quel autre module, y compris un voisin de
+ * `data/onchain/` (import transitif), le ferait entrer dans un chunk partagé dont le nom
+ * s'ajoute aux préchargements de l'entrée (budget initial bloquant). Seul le client lui-même
+ * est exempté. Les imports de TYPES sont effacés à la compilation et restent permis ; un
+ * import mixte (`import { a, type B }`) reste un import de valeur et est refusé. Le store de
+ * clé `store/cryptoquant.ts` porte le même nom de fichier mais n'est pas le client. Les
+ * fichiers de test (dont ceux du client) ne sont pas bundlés : hors périmètre.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
@@ -22,6 +23,9 @@ const IMPORT_TYPE =
   /\b(?:import\s+type\s+(?:\{[^}]*\}|\*\s+as\s+\w+|\w+)|export\s+type\s*\{[^}]*\})\s*from\s*["'][^"']*["']/g;
 /** Spécificateurs statiques : `from "x"` (import ou ré-export) et `import "x"` (effet de bord). */
 const SPECIFIANT_STATIQUE = /\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']/g;
+
+/** Le client lui-même, seul fichier source exempté. */
+const FICHIER_CLIENT = `${CIBLE}.ts`;
 
 /** Chemin src-relatif, sans extension, d'un spécificateur relatif ; `null` pour un paquet. */
 function resoudre(fichier: string, specifiant: string): string | null {
@@ -77,9 +81,12 @@ describe("client CryptoQuant chargé à la demande", () => {
     ).toHaveLength(1);
   });
 
-  it("aucun fichier hors data/onchain/ n'importe statiquement le client", () => {
+  it("aucun fichier source, voisins de data/onchain/ compris, n'importe statiquement le client", () => {
+    expect(sources().filter((f) => f.startsWith("data/onchain/cryptoquant"))).toEqual([FICHIER_CLIENT]);
+    // Voisin de data/onchain/ : un import transitif est refusé comme les autres.
+    expect(importsStatiquesDuClient("data/onchain/mineurs.ts", 'import { SERIES_MINEURS } from "./cryptoquant";')).toHaveLength(1);
     const fautes = sources()
-      .filter((f) => !f.startsWith("data/onchain/"))
+      .filter((f) => f !== FICHIER_CLIENT)
       .flatMap((f) => importsStatiquesDuClient(f, readFileSync(join(SRC, f), "utf8")));
     expect(fautes).toEqual([]);
   });

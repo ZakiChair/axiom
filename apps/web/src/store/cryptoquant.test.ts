@@ -11,6 +11,10 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const CLE = "axiom:cryptoquant:key";
+/** Spécificateurs statiques : `import|export … from` (guillemets ou apostrophes) et `import "…"` (effet de bord). */
+const SPECIFIANT_STATIQUE = /\b(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']/g;
+const specifiants = (texte: string): string[] =>
+  [...texte.matchAll(SPECIFIANT_STATIQUE)].map((m) => m[1] ?? m[2] ?? "");
 const SECRET = "CLE-TEST-SECRETE";
 
 function stockage(): Storage {
@@ -160,10 +164,19 @@ describe("clé CryptoQuant personnelle", () => {
     expect(vercel).not.toContain("CRYPTOQUANT_API_KEY");
   });
 
+  it("détecteur d'imports : ré-export, import à effet de bord, apostrophes, multi-lignes", () => {
+    expect(specifiants(`export { kvPut } from '../data/daemon';`)).toEqual(["../data/daemon"]);
+    expect(specifiants(`export * from "../data/daemon";`)).toEqual(["../data/daemon"]);
+    expect(specifiants(`import "../data/daemon";\nimport '../data/cache';`)).toEqual(["../data/daemon", "../data/cache"]);
+    expect(specifiants(`import { a } from '../data/x';`)).toEqual(["../data/x"]);
+    expect(specifiants(`import type {\n  A,\n} from "../data/y";`)).toEqual(["../data/y"]);
+    // Mots proches dans un commentaire : ni « ré-exporte », ni « importent ».
+    expect(specifiants(`// le client ré-exporte la constante, les vues l'importent d'ici.\nconst x = 1;`)).toEqual([]);
+  });
+
   it("n'importe aucun module de données (seul zustand/vanilla, aucun chargement dynamique)", () => {
     const source = readFileSync(fileURLToPath(new URL("./cryptoquant.ts", import.meta.url)), "utf8");
-    const imports = [...source.matchAll(/^\s*import\s[^;]*?from\s+"([^"]+)"/gm)].map((m) => m[1]);
-    expect(imports).toEqual(["zustand/vanilla"]);
+    expect(specifiants(source)).toEqual(["zustand/vanilla"]);
     expect(source).not.toMatch(/import\(/);
   });
 });

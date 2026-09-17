@@ -55,6 +55,13 @@ describe("CryptoQuant : parserLignes (I2)", () => {
     expect(jours(parserLignes("taker:spot:btc", env(data), AUJ))).toEqual(["2026-09-15"]);
     expect(parserLignes("mineur:mara", env([{ ...MARA, total_rewards: null }]), AUJ)).toEqual([]);
   });
+  it("jours antérieurs à J-40 écartés (valeur zéro, epoch, J-41) ; J-40 et J-1 gardés", () => {
+    const data = [{ ...BTC, datetime: "0001-01-01 00:00:00" }, { ...BTC, datetime: "1970-01-01 00:00:00" },
+      { ...BTC, datetime: "2026-08-06 00:00:00" }, BTC];
+    expect(jours(parserLignes("taker:spot:btc", env(data), AUJ))).toEqual(["2026-09-15"]);
+    expect(jours(parserLignes("taker:spot:btc", env([{ ...BTC, datetime: "2026-08-07 00:00:00" }]), AUJ))).toEqual(["2026-08-07"]);
+    expect(jours(parserLignes("mineur:mara", env([{ ...MARA, date: "1970-01-01" }, MARA]), AUJ))).toEqual(["2026-09-15"]);
+  });
   it("status.code ≠ 200, data absent ou corps non objet → []", () => {
     expect(parserLignes("taker:spot:btc", env([BTC], 403), AUJ)).toEqual([]);
     expect(parserLignes("taker:spot:btc", { status: { code: 200 }, result: {} }, AUJ)).toEqual([]);
@@ -103,6 +110,12 @@ describe("CryptoQuant : decoderArchive (I4)", () => {
     const mineur = { version: 1, serie: "mineur:mara", majTs: "hier", jours: { [J(-1)]: L_MARA, [J(-2)]: { ...L_MARA, usd: "3.8M" } } };
     expect(decoderArchive(JSON.stringify(mineur), "mineur:mara"))
       .toEqual({ etat: "ok", archive: { version: 1, serie: "mineur:mara", majTs: null, jours: { [J(-1)]: L_MARA } } });
+  });
+  it("jours ≥ aujourd'hui UTC ignorés au décodage, comme au parseur", () => {
+    expect(decoderArchive(JSON.stringify(arch([J(-1), J(0), J(1)], 42)), "taker:spot:btc", AUJ))
+      .toEqual({ etat: "ok", archive: arch([J(-1)], 42) });
+    expect(diagnostiquer((decoderArchive(JSON.stringify(arch([J(-2), J(0), J(1)], 42)), "taker:spot:btc", AUJ) as { archive: ArchiveCq }).archive, AUJ))
+      .toMatchObject({ dernier: J(-2), hierPresent: false });
   });
 });
 

@@ -175,7 +175,8 @@ export function resumeEnTeteFluxTakers(
   if (c.statut === "offre") return "offre CryptoQuant insuffisante";
   const nbJours = Object.keys(c.archive?.jours ?? {}).length;
   const dernier = c.diagnostic.dernier;
-  if (dernier === null || nbJours === 0) return c.statut === "erreur" ? "CryptoQuant injoignable" : "archive vide";
+  if (dernier === null || nbJours === 0)
+    return c.statut === "erreur" ? (c.appel ? "CryptoQuant injoignable" : "erreur CryptoQuant") : "archive vide";
   const archive = `archive ${nbJours} j · ${c.diagnostic.hierPresent ? "J-1" : "dernier"} ${dernier}`;
   return c.statut === "erreur" ? `CryptoQuant injoignable · ${archive}` : archive;
 }
@@ -400,7 +401,11 @@ export function SectionFluxTakers({ onOuvrirReglages }: { onOuvrirReglages: () =
         majFile();
       }
       if (vivant) setEnCours(false);
-    })();
+    })().catch(() => {
+      // Chunk introuvable (échec de l'import()) ou abonnerFileCq en erreur : sans ce repli, la
+      // section resterait sur « chargement… » indéfiniment (rejet non intercepté).
+      if (vivant) setEnCours(false);
+    });
     return () => {
       vivant = false;
       ctrl.abort();

@@ -359,6 +359,21 @@ describe("section DES « Flux takers toutes places »", () => {
       ),
     ).toBe("clé CryptoQuant refusée");
     expect(resumeEnTeteFluxTakers(props())).toBe("archive 28 j · J-1 2026-09-15");
+    // Version inconnue : erreur sans archive ET sans appel réseau (le client court-circuite
+    // avant toute requête) — l'en-tête ne doit pas prétendre à une panne réseau.
+    expect(
+      resumeEnTeteFluxTakers(
+        props({
+          chargements: { "taker:spot:btc": chargement("taker:spot:btc", { statut: "erreur", raison: RAISON_VERSION }) },
+        }),
+      ),
+    ).toBe("erreur CryptoQuant");
+    // Erreur réseau sans archive (appel réellement parti) : « injoignable » est honnête ici.
+    expect(
+      resumeEnTeteFluxTakers(
+        props({ chargements: { "taker:spot:btc": chargement("taker:spot:btc", { statut: "erreur", appel: true }) } }),
+      ),
+    ).toBe("CryptoQuant injoignable");
   });
 
   it("section repliée par défaut : bouton seul, aucun contenu, client jamais évalué", () => {

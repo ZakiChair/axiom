@@ -1095,7 +1095,24 @@ Instantané à la clôture (`3fa31e6`). État final, après la vague de correcti
 
 ### Preuve manuelle du propriétaire (hors CI, clé personnelle, jamais depuis un agent)
 
-**Statut au 2026-09-17 : non réalisée — en attente du propriétaire ; aucun agent ne l'exécute.** Les cases ci-dessous ne sont pas cochées. Le propriétaire décide si la fusion de la branche attend cette preuve (spec §9 : curl du propriétaire et valeur de `x-ratelimit-reset`).
+**Statut au 2026-09-17 (17:34-17:45 UTC) : partiellement réalisée par l'agent orchestrateur, sur autorisation explicite du propriétaire** (« Utilise la clé que je t'ai transmise, ce n'est rien c'est juste de la lecture »). La clé a été lue depuis un fichier temporaire hors dépôt (droits 600, supprimé ensuite), passée à curl par `-H @fichier`, jamais écrite dans le dépôt, les journaux ni un `.env`. Serveurs du worktree : daemon `127.0.0.1:8787`, Vite `127.0.0.1:5241` (`--host 127.0.0.1 --port 5241`, le port 5173 étant pris par une autre session). Le classifieur de sécurité de Claude Code a ensuite refusé un appel avec la clé : la session navigateur, le contrôle « clé requise » et les replis `.env` réels restent à faire par le propriétaire (cases non cochées).
+
+Résultats relevés :
+
+| Contrôle | Daemon 8787 | Vite 5241 |
+|---|---|---|
+| Sans en-tête (pas de `.env`) | 401 local `clé CryptoQuant personnelle requise`, `private, no-store` | 401 local, même corps |
+| Bearer, taker | 200 spot `btc_all`, 29 lignes, `x-ratelimit-limit: 10`, `remaining: 9`, `reset: 6`, `private, no-store`, `Access-Control-Expose-Headers` fermé | 200 swap `eth_all`, mêmes `x-ratelimit-*`, `private, no-store` |
+| Chemin hors liste | 404 local `chemin CryptoQuant refusé` | 404 local |
+| POST | 405 local, `allow: GET` | 405 local, `allow: GET` |
+| Mineurs cotés | 200 `mara`, 29 lignes | 200 `riot`, 29 lignes ; 200 `mara` `limit=3` |
+| Vercel | aucune `CRYPTOQUANT_API_KEY` (`vercel env ls` : seule `BGEOMETRICS_API_KEY`, Production) | — |
+
+- **`x-ratelimit-reset` réel : `6`**, nombre de secondes relatif (identique au sondage du 2026-09-16) ; la lecture en secondes de `noterReponseCq` est confirmée.
+- **Format réel conforme au parseur** : 29 lignes du 2026-09-16 (J-1, déjà publié à 17:34 UTC) au 2026-08-19, ordre décroissant, jour en cours absent ; taker `datetime` `AAAA-MM-JJ 00:00:00` et tous les champs lus par `parserTaker` présents ; mineur `date` `AAAA-MM-JJ`, `total_rewards`, `total_daily_rewards_closing_usd`, `accumulated_monthly_rewards_closing_usd`, `closing_usd` présents (`reported_production` et `report_accuracy` à `null`).
+- Vite relaie tous les en-têtes amont (`server: cloudflare`, `x-request-id`, CSP amont, `x-credit-cost`…), le daemon seulement sa liste fermée : écart connu, poste de développement seulement.
+- **Constat nouveau — crédits.** Chaque réponse 200 porte **`x-credit-cost: 15`**, pour 29 lignes comme pour 3 (`mara`, `limit=3`). D'après la documentation CryptoQuant (`docs.cryptoquant.com/guides/api-credits.md`, `guides/faq.md`), l'offre Basic reçoit **10 000 crédits par mois** (et non 10 000 requêtes), remis à zéro à la date d'inscription sans report ; le coût dépend des lignes et du type de données ; les appels en échec ne sont pas facturés ; à crédits épuisés, l'API répond **402**. Soit environ 666 appels réussis par mois. Une journée normale (DES 4 + CHAIN 9 appels, J-1 déjà publié) coûte 195 crédits, soit ≈ 5 850 par mois ; une seconde passe quotidienne (J-1 pas encore publié à la première ouverture, reprise 6 h) doublerait la dépense et épuiserait le mois vers le 25e jour. Aujourd'hui le client traite un 402 comme une erreur réseau (« injoignable »), sans mémoire de session. Suite proposée au propriétaire : voir la section « Suite — budget de crédits ».
+- Coût de cette preuve : 5 appels réussis, 75 crédits.
 
 Préparation :
 
@@ -1108,20 +1125,20 @@ Préparation :
 - **Daemon.** Le lancer avec `pnpm daemon` ; il écoute sur `127.0.0.1:8787`.
 - **URL.** Les écrire entre apostrophes : sans elles, le shell interprète `&`.
 
-- [ ] Sans en-tête → 401 (ou 200 si `CRYPTOQUANT_API_KEY` est renseignée dans `apps/web/.env`) :
+- [x] Sans en-tête → 401 (ou 200 si `CRYPTOQUANT_API_KEY` est renseignée dans `apps/web/.env`) :
   `curl -i 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30'`
-- [ ] Avec Bearer → 200, en-têtes `x-ratelimit-limit`, `x-ratelimit-remaining`, `x-ratelimit-reset` et `cache-control: private, no-store` :
+- [x] Avec Bearer → 200, en-têtes `x-ratelimit-limit`, `x-ratelimit-remaining`, `x-ratelimit-reset` et `cache-control: private, no-store` :
   `printf 'Authorization: Bearer %s\n' "$CQ_CLE" | curl -i -H @- 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30'`
-- [ ] Chemin hors liste → 404 (refus local, aucun appel amont) :
+- [x] Chemin hors liste → 404 (refus local, aucun appel amont) :
   `printf 'Authorization: Bearer %s\n' "$CQ_CLE" | curl -i -H @- 'http://127.0.0.1:8787/cqapi/v1/btc/exchange-flows/netflow?exchange=all_exchange&window=day'`
-- [ ] POST → 405 `allow: GET` :
+- [x] POST → 405 `allow: GET` :
   `printf 'Authorization: Bearer %s\n' "$CQ_CLE" | curl -i -X POST -H @- 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30'`
-- [ ] Mineurs cotés → 200 :
+- [x] Mineurs cotés → 200 :
   `printf 'Authorization: Bearer %s\n' "$CQ_CLE" | curl -i -H @- 'http://127.0.0.1:8787/cqapi/v1/btc/miner-data/companies?miner=mara&window=day&limit=30'`
-- [ ] Même série sur le serveur Vite, avec les mêmes statuts attendus. `apps/web/vite.config.ts` ne fixe pas `server.host` : Vite écoute sur `localhost`, qui peut ne répondre qu'en IPv6 (`::1`). Deux façons de faire :
+- [x] Même série sur le serveur Vite, avec les mêmes statuts attendus. `apps/web/vite.config.ts` ne fixe pas `server.host` : Vite écoute sur `localhost`, qui peut ne répondre qu'en IPv6 (`::1`). Deux façons de faire :
   - lancer `pnpm dev` et remplacer `http://127.0.0.1:8787` par `http://localhost:5173` (URL du README) ;
   - ou lancer `pnpm dev --host 127.0.0.1`, comme `apps/web/playwright.config.ts`, et utiliser `http://127.0.0.1:5173`.
-- [ ] Projet Vercel : **aucune** variable `CRYPTOQUANT_API_KEY` (`vercel env ls`, environnements Production, Preview et Development).
+- [x] Projet Vercel : **aucune** variable `CRYPTOQUANT_API_KEY` (`vercel env ls`, environnements Production, Preview et Development).
 - [ ] Session navigateur : panneau DATA « CryptoQuant x/10 min » ; première ouverture de DES → 4 appels `/cqapi` (onglet Réseau), réouverture → 0 ; première ouverture de CHAIN → 9 appels, réouverture → 0.
 - [ ] Clé requise. Le court-circuit « J-1 archivé » (spec §4.3, étape 2) passe avant le test de la clé : ce contrôle ne s'observe que dans certaines conditions.
   - Conditions :
@@ -1132,9 +1149,9 @@ Préparation :
   - Hors de ces conditions :
     - si J-1 est déjà archivé : archive J-1 affichée, zéro appel, aucun badge ;
     - si `apps/web/.env` contient la clé : l'appel part avec la clé `.env` injectée par le proxy local, et aucun badge ne s'affiche.
-- [ ] Valeur réelle de `x-ratelimit-reset` (secondes ; `6` observé lors du sondage du 2026-09-16) :
+- [x] Valeur réelle de `x-ratelimit-reset` (secondes ; `6` observé lors du sondage du 2026-09-16) :
   `printf 'Authorization: Bearer %s\n' "$CQ_CLE" | curl -s -D - -o /dev/null -H @- 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30' | grep -i '^x-ratelimit-'`
-  Valeur réelle de `x-ratelimit-reset` : en attente de la preuve manuelle du propriétaire (commande ci-dessus).
+  Valeur réelle de `x-ratelimit-reset` : **`6`** (secondes relatives), relevée le 2026-09-17 sur les quatre appels réussis, daemon comme Vite.
 - [ ] Fin de session : `unset CQ_CLE`.
 
 ### Écarts actés à la spec (arbitrages du 2026-09-16)
@@ -1422,4 +1439,12 @@ Budget initial final, mesuré par `pnpm check` à l'étape D : **1 206 265 octet
   | `fusionner` garde l'ancienne valeur | fusion DES | vert | rouge sur le 2026-08-17 |
   | `setEchecClient(true)` retiré | cas « client introuvable » | — | rouges : en-têtes « série non encore archivée » (DES) et « archive vide » (CHAIN) |
 
-- Preuve manuelle du propriétaire : toujours en attente (voir sa section).
+- Preuve manuelle : réalisée en partie le 2026-09-17 sur autorisation du propriétaire (voir sa section). Restent la session navigateur, le contrôle « clé requise » et les replis `.env` réels.
+
+## Suite — budget de crédits (décision du propriétaire en attente)
+
+La preuve du 2026-09-17 montre que le quota mensuel Basic se compte en **crédits** (10 000 par mois, `x-credit-cost: 15` par appel réussi), non en requêtes : la spec (§2) supposait 10 000 requêtes. Pistes, à arbitrer par le propriétaire avant tout code :
+
+1. **402 explicite** : statut dédié « crédits CryptoQuant épuisés jusqu'à la remise à zéro mensuelle », mémorisé pour la session (zéro nouvel appel), santé DATA marquée ; aujourd'hui un 402 s'affiche « injoignable ».
+2. **Compteur de crédits local** : somme des `x-credit-cost` (ou 15 par appel réussi si l'en-tête manque ; le daemon et Vercel ne le relaient pas encore) sur le mois, affichée dans DATA, avec un plafond de sécurité qui suspend les appels automatiques.
+3. **Moins de passes par jour** : quand une réponse 200 ne contient pas encore J-1, ne pas relancer au bout de 6 h mais une seule fois plus tard dans la journée UTC (ou à heure fixe), pour tenir ≈ 195 crédits par jour.

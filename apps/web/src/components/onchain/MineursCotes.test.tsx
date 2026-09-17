@@ -13,6 +13,7 @@ import {
   LIBELLE_QUALITE_MINEURS,
   MineursCotes,
   qualiteMineursCotes,
+  RAISON_CREDITS_EPUISES_CQ,
   resumeEnTeteMineurs,
   VueMineursCotes,
   type ParametresResumeMineurs,
@@ -252,7 +253,7 @@ describe("production des mineurs cotés : modèle et qualité", () => {
       diagnostic: diagnostic({ dernier: "2026-09-14", hierPresent: false }),
     });
     const m = construireModeleMineurs(chargements, MAINTENANT);
-    // Absence du jour de référence : la série peut simplement ne pas avoir été relue (reprise 6 h).
+    // Absence du jour de référence : la série peut simplement ne pas avoir été relue (reprise 12 h).
     expect(m.lignes.find((l) => l.id === "mara")).toMatchObject({
       ligne: null,
       motif: "Aucune ligne archivée pour le 2026-09-15 (non encore relue ou non publiée).",
@@ -305,6 +306,13 @@ const entete = (surcharge: Partial<PropsEnTeteMineursCotes>): string =>
   renderToStaticMarkup(<EnTeteMineursCotes ouvert={false} onBasculer={() => {}} {...PROPS_VUE} {...surcharge} />);
 /** Raison d'une clé personnelle refusée (401), affichée telle quelle. */
 const RAISON_REFUS = "Clé CryptoQuant refusée (Réglages ⚙).";
+/**
+ * Plafond de crédits (§13) : raison VARIABLE (la somme consommée), que la vue reconnaît « par
+ * défaut » — tout `credits` dont la raison n'est pas celle du 402. Celle du 402 vient du littéral
+ * EXPORTÉ par la vue, comparé à l'export du client par `components/raisonsCreditsCq.test.ts`.
+ */
+const RAISON_BUDGET_CREDITS =
+  "Budget de crédits CryptoQuant atteint (≈ 8990/10 000 sur 31 j, ce navigateur) : appels suspendus pour préserver le mois ; archive affichée.";
 
 /** Neuf séries au même statut, sans archive (`appel` : la requête est-elle réellement partie ?). */
 function sansArchive(statut: ChargementCq["statut"], raison: string, appel = false): Chargements {
@@ -460,6 +468,43 @@ describe("production des mineurs cotés : vue, en-tête et conteneur", () => {
     expect(html).not.toContain("Ouvrir les réglages");
     expect(html).not.toContain('role="table"');
     expect(entete({ chargements: refus })).not.toContain("clé CryptoQuant ⚙");
+  });
+
+  it("crédits (§13) : 402 et plafond — en-tête distinct, raison servie, qualité en échec, aucun CTA", () => {
+    // 402 sans archive : indisponible avec la raison, jamais un CTA Réglages (rien à régler).
+    const epuises = sansArchive("credits", RAISON_CREDITS_EPUISES_CQ, true);
+    expect(resume({ chargements: epuises })).toBe("crédits CryptoQuant épuisés");
+    const html = vue({ chargements: epuises });
+    expect(html).toContain(RAISON_CREDITS_EPUISES_CQ);
+    expect(html).not.toContain("Ouvrir les réglages");
+    expect(html).not.toContain('role="table"');
+    const tete = entete({ chargements: epuises });
+    expect(tete).toContain("crédits CryptoQuant épuisés");
+    expect(tete).not.toContain("clé CryptoQuant ⚙");
+    const q = qualiteMineursCotes(epuises, MAINTENANT);
+    expect(q.statut).toBe("indisponible");
+    expect(q.raison).toBe(RAISON_CREDITS_EPUISES_CQ);
+    expect(q.sourceEffective).toBe("archive locale CryptoQuant");
+    expect(q.couverture).toEqual({ disponibles: 0, attendus: 9 });
+
+    // Plafond local avec archive J-2 : autre libellé, archive servie et raison conservée.
+    const budget = avecArchiveJ2("credits", RAISON_BUDGET_CREDITS, false);
+    expect(resume({ chargements: budget })).toBe("budget de crédits atteint");
+    const avecArchive = vue({ chargements: budget });
+    expect(avecArchive).toContain("archive servie");
+    expect(avecArchive).toContain("Budget de crédits CryptoQuant atteint (≈ 8990/10 000 sur 31 j, ce navigateur)");
+    expect(avecArchive).toContain("2026-09-14 (J-2) · 9/9 sociétés");
+    const qBudget = qualiteMineursCotes(budget, MAINTENANT);
+    expect(qBudget.statut).toBe("frais");
+    expect(qBudget.raison).toBe(RAISON_BUDGET_CREDITS);
+    expect(qBudget.sourceEffective).toBe("archive locale CryptoQuant");
+
+    // Un 402 l'emporte sur le plafond quand les deux raisons coexistent (refus du fournisseur).
+    const melange = { ...budget, [serie("mara")]: epuises[serie("mara")] };
+    expect(resume({ chargements: melange })).toBe("crédits CryptoQuant épuisés");
+    // Une clé requise sans archive reste prioritaire : c'est le seul état actionnable.
+    const avecCle = { ...epuises, [serie("riot")]: sansCle()[serie("riot")] };
+    expect(resume({ chargements: avecCle })).toBe("clé personnelle requise");
   });
 
   it("en-tête : bouton replié, état de collecte, CTA réservé aux séries « clé requise »", () => {

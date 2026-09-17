@@ -52,6 +52,15 @@ const MENTION_PERP = "unités fournisseur, champ inverse non documenté";
 const CLIENT_NON_CHARGE = "Client CryptoQuant non chargé (réseau ou mise à jour d'AXIOM) ; rechargez la page.";
 /** Bandeau d'une erreur après appel sans aucune archive : la raison du client, elle, annonce une archive affichée. */
 const ERREUR_SANS_ARCHIVE = "CryptoQuant injoignable ; aucune archive locale.";
+/**
+ * Raison FIXE du 402 (spec §13), RECOPIÉE du client comme les autres textes partagés : importer
+ * sa VALEUR ferait entrer le client dans un chunk préchargé par l'entrée
+ * (`chunkCryptoquant.test.ts`). L'autre raison de `credits` — le plafond local — porte la somme
+ * consommée et n'est donc pas un littéral : la vue la reconnaît par défaut. Contrat tenu par
+ * `raisonsCreditsCq.test.ts`, qui compare ce littéral à l'export du client.
+ */
+export const RAISON_CREDITS_EPUISES_CQ =
+  "Crédits mensuels CryptoQuant épuisés (402) : plus d'appel avant la remise à zéro mensuelle ; archive affichée.";
 
 const OPTIONS_ACTIF: ReadonlyArray<{ id: ActifTaker; label: string }> = [
   { id: "btc", label: "BTC" },
@@ -191,6 +200,10 @@ export function resumeEnTeteFluxTakers(
   }
   if (c.statut === "cle-requise") return c.raison === null || c.raison === RAISON_CLE_CRYPTOQUANT ? "clé personnelle requise" : "clé CryptoQuant refusée";
   if (c.statut === "offre") return "offre CryptoQuant insuffisante";
+  // `credits` (§13) : refus SANS appel, placé comme « offre ». Refus du fournisseur (402, raison
+  // fixe) ou plafond local de crédits (raison variable) : deux libellés, jamais le texte d'archive.
+  if (c.statut === "credits")
+    return c.raison === RAISON_CREDITS_EPUISES_CQ ? "crédits CryptoQuant épuisés" : "budget de crédits atteint";
   const nbJours = Object.keys(c.archive?.jours ?? {}).length;
   const dernier = c.diagnostic.dernier;
   if (dernier === null || nbJours === 0)
@@ -281,7 +294,7 @@ export function VueFluxTakers({
   const bandeau =
     c.statut === "erreur" && c.appel && m.jour === null
       ? ERREUR_SANS_ARCHIVE
-      : c.statut === "quota" || c.statut === "offre" || c.statut === "erreur"
+      : c.statut === "quota" || c.statut === "offre" || c.statut === "credits" || c.statut === "erreur"
         ? (c.raison ?? "CryptoQuant indisponible ; archive affichée.")
         : null;
   const tonRatio = m.ratio === null ? undefined : m.ratio >= 1 ? "up" : "down";

@@ -3,7 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ArchiveCq, ChargementCq, DiagnosticCq, LigneTaker, SerieCq } from "../data/onchain/cryptoquant";
 import { RAISON_CLE_CRYPTOQUANT } from "../store/cryptoquant";
-import { resumeEnTeteFluxTakers, SectionFluxTakers, VueFluxTakers, type PropsVueFluxTakers } from "./FluxTakersSection";
+import {
+  RAISON_CREDITS_EPUISES_CQ,
+  resumeEnTeteFluxTakers,
+  SectionFluxTakers,
+  VueFluxTakers,
+  type PropsVueFluxTakers,
+} from "./FluxTakersSection";
 
 // Espion d'évaluation du client CryptoQuant : la fabrique ne s'exécute qu'à l'import RÉEL du
 // module. Ce fichier n'en importe que des types (effacés) et le rendu statique ne lance aucun
@@ -24,6 +30,13 @@ const NOW = Date.UTC(2026, 8, 16, 12);
 const RAISON_REFUSEE = "Clé CryptoQuant refusée (Réglages ⚙).";
 const RAISON_ILLISIBLE = "Archive locale CryptoQuant illisible : remplacée à la prochaine écriture.";
 const RAISON_VERSION = "Archive CryptoQuant écrite par une version plus récente d'AXIOM : ni lue ni réécrite.";
+/**
+ * Plafond de crédits (§13) : raison VARIABLE (la somme consommée), non recopiée dans la vue, qui
+ * la reconnaît « par défaut » — tout `credits` dont la raison n'est pas celle du 402. La raison du
+ * 402, elle, vient du littéral EXPORTÉ par la vue (`raisonsCreditsCq.test.ts` le compare au client).
+ */
+const RAISON_BUDGET_CREDITS =
+  "Budget de crédits CryptoQuant atteint (≈ 8990/10 000 sur 31 j, ce navigateur) : appels suspendus pour préserver le mois ; archive affichée.";
 const jourIso = (t: number) => new Date(t).toISOString().slice(0, 10);
 
 function ligne(p: Partial<LigneTaker> = {}): LigneTaker {
@@ -276,6 +289,40 @@ describe("section DES « Flux takers toutes places »", () => {
     expect(version).toContain("écrite par une version plus récente d&#x27;AXIOM");
     expect(version).toContain("border-down/40");
     expect(version).toContain("Série non encore archivée.");
+  });
+
+  it("crédits (§13) : 402 et plafond — en-tête distinct, bandeau = raison, archive servie, aucun CTA", () => {
+    const avecRaison = (raison: string, appel: boolean): Partial<PropsVueFluxTakers> => ({
+      chargements: { "taker:spot:btc": { ...PRET, statut: "credits", raison, appel } },
+    });
+    // 402 : raison fixe du client, bandeau d'erreur au-dessus de l'archive servie.
+    const epuises = rendre(avecRaison(RAISON_CREDITS_EPUISES_CQ, true)).replaceAll("&#x27;", "'");
+    expect(epuises).toContain(RAISON_CREDITS_EPUISES_CQ);
+    expect(epuises).toContain("border-down/40");
+    expect(epuises).toContain("0.98");
+    expect(epuises).not.toContain("Ouvrir les réglages");
+    expect(epuises).not.toContain("clé requise pour actualiser");
+    // Plafond local : raison variable (somme entière), même traitement.
+    const budget = rendre(avecRaison(RAISON_BUDGET_CREDITS, false));
+    expect(budget).toContain("Budget de crédits CryptoQuant atteint (≈ 8990/10 000 sur 31 j, ce navigateur)");
+    expect(budget).toContain("border-down/40");
+    expect(budget).toContain("$12.01B");
+    // Sans archive : la raison reste affichée (aucun appel n'est promis), le corps dit l'archive vide.
+    const sansArchive = rendre({
+      chargements: {
+        "taker:spot:btc": chargement("taker:spot:btc", { statut: "credits", raison: RAISON_CREDITS_EPUISES_CQ, appel: true }),
+      },
+    }).replaceAll("&#x27;", "'");
+    expect(sansArchive).toContain(RAISON_CREDITS_EPUISES_CQ);
+    expect(sansArchive).toContain("Série non encore archivée.");
+    expect(sansArchive).not.toContain("aucune archive locale");
+    // En-tête : le 402 se distingue du plafond ; `credits` passe devant le texte d'archive.
+    expect(resumeEnTeteFluxTakers(props(avecRaison(RAISON_CREDITS_EPUISES_CQ, true)))).toBe("crédits CryptoQuant épuisés");
+    expect(resumeEnTeteFluxTakers(props(avecRaison(RAISON_BUDGET_CREDITS, false)))).toBe("budget de crédits atteint");
+    // Une série en attente de quota reste prioritaire (l'ordre des branches ne change pas).
+    expect(
+      resumeEnTeteFluxTakers(props({ ...avecRaison(RAISON_CREDITS_EPUISES_CQ, true), enCours: true, recues: 1, file: { enAttente: 3, repriseTs: null } })),
+    ).toBe("1/4 reçues · en attente du quota");
   });
 
   it("sans clé et archive vide : SansCle avec le repli local et le lien Réglages", () => {

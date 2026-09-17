@@ -134,7 +134,7 @@ export function construireModeleMineurs(chargements: Chargements, now: number): 
           ? charge.raison
           : jourRef === null
             ? "Aucune ligne archivée."
-            : // Pas forcément impubliée : la série a pu ne pas être relue (reprise de 6 h du client).
+            : // Pas forcément impubliée : la série a pu ne pas être relue (reprise de 12 h du client).
               `Aucune ligne archivée pour le ${jourRef} (non encore relue ou non publiée).`;
     return { id, nom: NOMS_SOCIETES[id], ligne: estLigneMineur(brute) ? brute : null, motif };
   });
@@ -253,6 +253,16 @@ const tiret = (motif: string) => <span title={motif}>—</span>;
  * navigateur a mis l'échec en cache).
  */
 const CLIENT_NON_CHARGE = "Client CryptoQuant non chargé (réseau ou mise à jour d'AXIOM) ; rechargez la page.";
+
+/**
+ * Raison FIXE du 402 (spec §13), RECOPIÉE du client comme les autres textes partagés : importer
+ * sa VALEUR ferait entrer le client dans un chunk préchargé par l'entrée
+ * (`chunkCryptoquant.test.ts`). L'autre raison de `credits` — le plafond local — porte la somme
+ * consommée et n'est donc pas un littéral : la vue la reconnaît par défaut. Contrat tenu par
+ * `components/raisonsCreditsCq.test.ts`, qui compare ce littéral à l'export du client.
+ */
+export const RAISON_CREDITS_EPUISES_CQ =
+  "Crédits mensuels CryptoQuant épuisés (402) : plus d'appel avant la remise à zéro mensuelle ; archive affichée.";
 
 const COLONNES: ReadonlyArray<ColonneTable<LigneSociete>> = [
   {
@@ -498,8 +508,8 @@ export type ParametresResumeMineurs = Pick<
  * Résumé du côté droit de l'en-tête, visible section repliée (état par défaut), agrégé sur les
  * neuf séries. PUR. Mêmes états que DES (spec §5.2), jamais une chaîne vide (§4.3). Ordre :
  * collecte en cours ; client non chargé ; quota à reprise future ; clé requise sans archive (seul
- * état actionnable, porte le CTA) ; quota écoulé ; offre ; erreur sans archive ; erreur après
- * appel avec archive ; texte d'archive.
+ * état actionnable, porte le CTA) ; quota écoulé ; offre ; crédits (§13) ; erreur sans archive ;
+ * erreur après appel avec archive ; texte d'archive.
  */
 export function resumeEnTeteMineurs({
   chargements,
@@ -526,6 +536,14 @@ export function resumeEnTeteMineurs({
   // Le client ne relance pas la collecte à l'expiration du 429 : l'honnêteté est de le dire.
   if (enQuota) return "quota atteint, réessai à la prochaine ouverture";
   if (avecStatut("offre").length > 0) return "offre CryptoQuant insuffisante";
+  // `credits` (§13) : refus SANS appel, placé comme « offre ». Un 402 (raison fixe) l'emporte sur
+  // le plafond local : c'est le refus du fournisseur, et il vaut pour toutes les séries.
+  const credits = avecStatut("credits");
+  if (credits.length > 0) {
+    return credits.some((c) => c.raison === RAISON_CREDITS_EPUISES_CQ)
+      ? "crédits CryptoQuant épuisés"
+      : "budget de crédits atteint";
+  }
   const erreurs = avecStatut("erreur");
   // Une erreur sans appel (archive d'une version plus récente) n'est pas une panne réseau.
   const injoignable = erreurs.some((c) => c.appel);

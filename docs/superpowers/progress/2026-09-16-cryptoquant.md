@@ -859,3 +859,253 @@ Contrôles I11 (B2) : client `assets/cryptoquant-zr9BtcXT.js` en entrée dynamiq
 Chunk partagé du store (`.vite/manifest.json`) : `assets/cryptoquant-D1SH6W9Y.js` ; nom présent dans `__vite__mapDeps` de l'entrée : oui.
 
 Delta initial depuis « Budget après B1 » : -7 o gzip (attendu ≤ ~40 o gzip par sous-lot ; porte d'acceptation ≤ ~150 o gzip sur l'ensemble de B1 ; seule la limite 360 000 est bloquante) ; marge gzip locale 4363 o.
+
+## Clôture (tâche 20)
+
+### Journal des commits (depuis la spec `2d45426`)
+
+| Commit | Sujet |
+|---|---|
+| `39d0a00` | docs(plan): plan d'implémentation CryptoQuant BASIC et arbitrages de planification dans la spec |
+| `a56700e` | docs(plan): corrections du pré-vol — exécution séquentielle, racine du worktree, motifs de synthèse, écarts actés, renvois à la spec §12 |
+| `3bf6298` | docs(contrat,csp,rapport): exception CryptoQuant BASIC du 2026-09-16 — clé personnelle, route /cqapi, archive côté client |
+| `3d66546` | feat(shared): liste fermée de la route /cqapi — trois chemins CryptoQuant BASIC, window=day, limit ≤ 30 |
+| `615d9bc` | feat(vercel): route /cqapi — Bearer personnel seul, liste fermée, zéro redirection, quota relayé |
+| `fe911c2` | feat(daemon): route /cqapi — gestionnaire dédié, repli .env local, quota relayé, jamais en cache |
+| `e9bb6bc` | feat(vite): proxy de dev /cqapi — refus locaux, repli .env hors Vercel, réponse privée |
+| `5ce75c2` | feat(cryptoquant): store de la clé personnelle et message « clé requise » (sans import data) |
+| `361dad8` | feat(cryptoquant): clé et archives CryptoQuant exclues des sauvegardes JSON |
+| `e375e17` | feat(cryptoquant): champ de clé CryptoQuant dans les Réglages et budget après B1-3 |
+| `760136d` | feat(cryptoquant): catalogue des 13 séries et parseur des jours clos |
+| `ea915d6` | feat(cryptoquant): archive par série — fusion non destructive, union, décodage tolérant, trous dérivés |
+| `5d236b9` | feat(cryptoquant): archive locale ∪ KV daemon — lecture tri-état, écriture gardée |
+| `1adc077` | feat(cryptoquant): file unique 10 req/min, correction x-ratelimit et reprise 429 bornée |
+| `7e0ba84` | feat(cryptoquant): orchestrateur — court-circuit J-1, reprise 6 h, refus de session, non-fuite de la clé, libellé DATA |
+| `937d860` | fix(cryptoquant): raisonOffre teste la clé sur le message entier avant troncage à 200 |
+| `767df42` | fix(cryptoquant): un majTs futur n'empêche plus la reprise 6 h |
+| `84e0175` | feat(des): modèle pur des flux takers toutes places et classement situer (CryptoQuant) |
+| `bff0ffd` | feat(des): section repliable flux takers toutes places (CryptoQuant) chargée au montage |
+| `f40a8ac` | fix(des): repli d'erreur sur l'import du client taker et libellé honnête sans appel réseau |
+| `c07eb15` | test(budget): garde-fou du client CryptoQuant à la demande et mesure du budget après B1 |
+| `57898a2` | test(e2e): DES flux takers toutes places — montage, archive, 429 et 401 hermétiques |
+| `976b5f3` | docs(rapport): revue indépendante B1 — flux takers CryptoQuant acceptés |
+| `9034a3b` | feat(chain): production des mineurs cotés CryptoQuant dans la section Mineurs |
+| `d008175` | fix(chain): repli honnête sur le rejet de l'import() du client CryptoQuant dans Mineurs cotés |
+| `83d7393` | fix(chain): corrections de la revue indépendante B2 |
+| `2ff3b44` | test(chain): parcours e2e des mineurs cotés — neuf appels au montage, aucun à la réouverture |
+
+Le commit de clôture (`docs(rapport): clôture CryptoQuant — preuves, budget avant/après, parcours e2e et preuve manuelle`) suit cette liste.
+
+### Vérification finale
+
+`pnpm check` puis `bash scripts/ci.sh --e2e`, lignes de synthèse :
+
+```text
+==> [ci] typecheck
+==> [ci] test
+packages/indicators test:  Test Files  206 passed (206)
+packages/indicators test:       Tests  780 passed (780)
+packages/alerts test:  Test Files  2 passed (2)
+packages/alerts test:       Tests  59 passed (59)
+packages/backtest test:  Test Files  4 passed (4)
+packages/backtest test:       Tests  95 passed (95)
+apps/daemon test:  608 pass
+apps/daemon test:  0 fail
+apps/daemon test: Ran 608 tests across 32 files. [513.00ms]
+apps/web test:  Test Files  340 passed (340)
+apps/web test:       Tests  4598 passed (4598)
+==> [ci] build @axiom/web
+==> [ci] OK
+  79 passed (1.8m)
+```
+
+### Budget final
+
+Commande : `pnpm check` (build `pnpm --filter @axiom/web build` de `scripts/ci.sh:35`, tâche 20 ; JSON réimprimé tel quel par `node scripts/verifier-budget-build.mjs apps/web/dist` sur le même `dist`).
+
+```json
+{
+  "limites": {
+    "octetsBruts": 1220000,
+    "octetsGzip": 360000,
+    "niveauGzip": 9
+  },
+  "initial": {
+    "fichiers": [
+      "assets/index-BOKxOn2m.js",
+      "assets/indicators-DMDb8A8f.js",
+      "assets/vendor-klinecharts-B5HFhIGv.js",
+      "assets/vendor-react-BPWy1Tn9.js"
+    ],
+    "octetsBruts": 1206212,
+    "octetsGzip": 355637
+  },
+  "dynamique": {
+    "fichiers": [
+      "assets/BacktestWindow-DmvlsxDD.js",
+      "assets/BriefWindow-Bs7zmkMk.js",
+      "assets/BtcPowerLawWindow-MSGZEN-J.js",
+      "assets/CbpremWindow-DxFo6jT3.js",
+      "assets/ChartSyncControls-C5fyqNtv.js",
+      "assets/CommandPalette-BUsGi4vK.js",
+      "assets/CorrWindow-8X9ypZrP.js",
+      "assets/CotWindow-BneP5ymo.js",
+      "assets/CycleWindow-CgTHqand.js",
+      "assets/DataWindow-DRSmJ8qg.js",
+      "assets/DefillamaProPanel-Dxe9TU6F.js",
+      "assets/DerivativesWindow-DrnOA6uT.js",
+      "assets/DistWindow-DcdbaXvC.js",
+      "assets/DomWindow-D2_iAGcd.js",
+      "assets/EcoWindow-C7D4WtzI.js",
+      "assets/EconomieChaines-CyhSP03H.js",
+      "assets/EvtsWindow-BoJUxQ9d.js",
+      "assets/ExpyWindow-DYPNI2du.js",
+      "assets/FluxCapitaux-BWx0H876.js",
+      "assets/FundWindow-CcPjp8Ju.js",
+      "assets/FundingMatrixWindow-BD-nfVT3.js",
+      "assets/GlobeWindow-SzlxWPHA.js",
+      "assets/LiquidationsWindow-CQWgx1GM.js",
+      "assets/MacroRatesWindow-CzJoLTLn.js",
+      "assets/MarketMapWindow-DhqZiJ4o.js",
+      "assets/McapWindow-CVDZ4m7o.js",
+      "assets/MineWindow-DAEcQ2u_.js",
+      "assets/NetliqWindow-BydTO59o.js",
+      "assets/NewsWindow-B8SxFwYN.js",
+      "assets/NotesWindow-BpDS-R_5.js",
+      "assets/OnboardingOverlay-C60I16IS.js",
+      "assets/OnchainWindow-6UealTc3.js",
+      "assets/OptionsWindow-D-MUvVnm.js",
+      "assets/PaperWindow-BVeKfRS7.js",
+      "assets/PortfolioWindow-CTAaTVxU.js",
+      "assets/QualiteMetrique-BrA9YWZb.js",
+      "assets/ReplayWindow-B6ps0krq.js",
+      "assets/ScenWindow-DMfurOjm.js",
+      "assets/ScreenerWindow-o4UkgDHK.js",
+      "assets/SeasonalityWindow-CR6Oq_Is.js",
+      "assets/SectWindow-DsCsy05p.js",
+      "assets/SettingsPanel-BlujH0lZ.js",
+      "assets/SqueezeWindow-Bx0BQERp.js",
+      "assets/StablecoinsWindow-CSa3_teR.js",
+      "assets/TableTriable-C-cgIuiG.js",
+      "assets/TermStructureWindow-6Zmttf-O.js",
+      "assets/VolWindow-K9Q0RtGM.js",
+      "assets/WebGLSyncSpike-gk5cdEXX.js",
+      "assets/WhalesWindow-DxCleRgP.js",
+      "assets/bgeometrics-DFZf7eli.js",
+      "assets/chart-sync-timeframes-BjdLF6zU.js",
+      "assets/composite-tP0ZcnLI.js",
+      "assets/corr-B_X11ZaJ.js",
+      "assets/cot-CawrzmbY.js",
+      "assets/cryptoquant-D1SH6W9Y.js",
+      "assets/cryptoquant-zr9BtcXT.js",
+      "assets/csv-DChTGBa8.js",
+      "assets/defillamaKey-DiCIx3Vw.js",
+      "assets/economieChaines-i_z13b0v.js",
+      "assets/etherscan-g8V-PYHm.js",
+      "assets/expy-3I9sQwqM.js",
+      "assets/fluxCapitaux-BOHlp1vJ.js",
+      "assets/fundingCrossExchange-wJB5ktQL.js",
+      "assets/lienRetours-Bo4sHoSC.js",
+      "assets/liquidationHeat-Du3NHdqC.js",
+      "assets/macroSeries-Sho-_KdO.js",
+      "assets/mempool-7GkD8Txt.js",
+      "assets/onchainMetriques-PcyvAT77.js",
+      "assets/portRisque-Bi-CynnM.js",
+      "assets/qualiteChain-DsYRT7VQ.js",
+      "assets/squeezeWindow.util-CMxdrcHl.js",
+      "assets/thermocap-Db3JVufw.js",
+      "assets/treasuryYields-Bhqd6VfU.js",
+      "assets/treemap-D9x5LE-E.js",
+      "assets/tresoreriesBtc-Ij_nll_q.js",
+      "assets/useDomaineZoom-Bxy48dSr.js",
+      "assets/viewportSync-IhawcF2X.js",
+      "assets/volCone-BZveA2ku.js"
+    ],
+    "octetsBruts": 1016836,
+    "octetsGzip": 373028
+  }
+}
+```
+
+### Tableau du budget JS initial (avant/après)
+
+Gzip niveau 9 ; plafonds 1 220 000 octets bruts et 360 000 octets gzip. Valeurs lues dans les blocs json des sections « Budget … » ci-dessus.
+
+| Mesure | Octets bruts | Octets gzip | Δ gzip depuis « avant B1 » | Marge gzip locale |
+|---|---|---|---|---|
+| Budget avant B1 | 1206105 | 355595 | 0 | 4405 |
+| Budget après B1-3 | 1206170 | 355617 | +22 | 4383 |
+| Budget après B1 | 1206209 | 355644 | +49 | 4356 |
+| Budget après B2 | 1206212 | 355637 | +42 | 4363 |
+| Budget final | 1206212 | 355637 | +42 | 4363 |
+
+Delta de B1 (après B1 − avant B1) : +49 o gzip (porte d'acceptation ≤ ~150 o gzip). Delta de B2 (après B2 − après B1) : -7 o gzip (attendu ≤ ~40 o gzip). Seule la limite 360 000 o gzip est bloquante.
+
+Marge locale ; la marge mesurée sur le runner GitHub est plus faible (≈ 3 365 gzip avant le lot).
+
+### Parcours e2e du lot (sortie Playwright)
+
+```text
+  ✓   1 [chromium] › e2e/chain-mineurs-cotes.e2e.ts:106:1 › CHAIN : mineurs cotés — neuf appels au montage, lecture et tri au dépliage, aucun appel ensuite (3.2s)
+  ✓   2 [chromium] › e2e/chain-mineurs-cotes.e2e.ts:185:1 › CHAIN : mineurs cotés — une société en 503, Σ partielle et couverture 8/9 (1.1s)
+  ✓   8 [chromium] › e2e/des-flux-takers.e2e.ts:153:1 › DES : flux takers chargés au montage (4 appels), repliés par défaut, sans appel sur segmentés, source ni réouverture (1.4s)
+  ✓   9 [chromium] › e2e/des-flux-takers.e2e.ts:233:1 › DES : archive locale antérieure fusionnée sans doublon (début 2026-08-07) (586ms)
+  ✓  10 [chromium] › e2e/des-flux-takers.e2e.ts:250:1 › DES : 429 CryptoQuant — délai de reprise affiché, archive servie et non réécrite (879ms)
+  ✓  11 [chromium] › e2e/des-flux-takers.e2e.ts:278:1 › DES : 401 CryptoQuant — clé refusée affichée avec l'accès aux Réglages, un seul appel, rien d'archivé (888ms)
+```
+
+- `apps/web/e2e/des-flux-takers.e2e.ts` (tâche 17) : parcours DES décrits par la spec §6 (4 appels au montage, section repliée, segmentés sans appel, archive locale sans `from`, réouverture sans appel, 429, 401).
+- `apps/web/e2e/chain-mineurs-cotes.e2e.ts` (tâche 19) : ouverture de CHAIN → exactement 9 appels `miner=<id>&window=day&limit=30`, `Authorization: Bearer` relayé, bouton replié ; « Qualité des blocs » → « Mineurs cotés · CryptoQuant », couverture 9/9, partiel (jour manquant de HIVE) ; archive HIVE de 29 jours ; dépliage → 9 lignes, « 49.05 », « 396.96 », « $3.84M », « non publié », « 123.00 BTC », Σ 130.00 BTC/j, courbe ; tri par société décroissant puis croissant ; repli/dépliage puis fermeture/réouverture → toujours 9 appels. Second parcours : WULF en 503 → « Σ partielle 8/9 », couverture 8/9, « archive servie ».
+
+### Preuve manuelle du propriétaire (hors CI, clé personnelle, jamais depuis un agent)
+
+Saisir la clé sans l'afficher ni l'inscrire dans l'historique : `read -rs CQ_CLE && export CQ_CLE`. Daemon lancé (`pnpm daemon`, `127.0.0.1:8787`). Les URL sont entre apostrophes : sans elles, le shell interprète `&`.
+
+- [ ] Sans en-tête → 401 (ou 200 si `CRYPTOQUANT_API_KEY` est renseignée dans `apps/web/.env`) :
+  `curl -i 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30'`
+- [ ] Avec Bearer → 200, en-têtes `x-ratelimit-limit`, `x-ratelimit-remaining`, `x-ratelimit-reset` et `cache-control: private, no-store` :
+  `curl -i -H "Authorization: Bearer $CQ_CLE" 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30'`
+- [ ] Chemin hors liste → 404 (refus local, aucun appel amont) :
+  `curl -i -H "Authorization: Bearer $CQ_CLE" 'http://127.0.0.1:8787/cqapi/v1/btc/exchange-flows/netflow?exchange=all_exchange&window=day'`
+- [ ] POST → 405 `allow: GET` :
+  `curl -i -X POST -H "Authorization: Bearer $CQ_CLE" 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30'`
+- [ ] Mineurs cotés → 200 :
+  `curl -i -H "Authorization: Bearer $CQ_CLE" 'http://127.0.0.1:8787/cqapi/v1/btc/miner-data/companies?miner=mara&window=day&limit=30'`
+- [ ] Même série sur `pnpm dev` (Vite, `127.0.0.1:5173`) : les commandes ci-dessus en remplaçant `http://127.0.0.1:8787` par `http://127.0.0.1:5173`, mêmes statuts.
+- [ ] Projet Vercel : **aucune** variable `CRYPTOQUANT_API_KEY` (`vercel env ls`, environnements Production, Preview et Development).
+- [ ] Session navigateur : panneau DATA « CryptoQuant x/10 min » ; première ouverture de DES → 4 appels `/cqapi` (onglet Réseau), réouverture → 0 ; première ouverture de CHAIN → 9 appels, réouverture → 0 ; retrait de la clé dans les Réglages → « clé requise pour actualiser » avec l'archive affichée.
+- [ ] Valeur réelle de `x-ratelimit-reset` (secondes ; `6` observé lors du sondage du 2026-09-16) :
+  `curl -s -D - -o /dev/null -H "Authorization: Bearer $CQ_CLE" 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30' | grep -i '^x-ratelimit-'`
+  Valeur réelle de `x-ratelimit-reset` : en attente de la preuve manuelle du propriétaire (commande ci-dessus).
+- [ ] Fin de session : `unset CQ_CLE`.
+
+### Écarts actés à la spec (arbitrages du 2026-09-16)
+
+- Qualité CHAIN « Mineurs cotés · CryptoQuant » : `ageMaxMs` vaut 3 jours, conformément à la spec §4.5 amendée (§12) ; la version initiale de la spec disait 2 jours. La couverture compte les sociétés ayant une ligne au dernier jour archivé commun (jour de référence), et non strictement J-1 (§12). Les observations sont datées à 00:00 UTC du jour clos : 3 j équivaut au seuil « dernier jour antérieur à aujourd'hui − 2 j » de `diagnostiquer`. C'est aussi le délai des séries quotidiennes de CHAIN (`apps/web/src/components/OnchainWindow.tsx:560` pour le hashrate et `:564` pour le thermocap, relevés à `2d45426`).
+- Bouton Réglages aussi sur une clé refusée (401) :
+  - `SansCle` affiche le bouton pour tout statut `cle-requise` à archive vide, en DES comme en CHAIN ;
+  - en CHAIN, le CTA d'en-tête « clé CryptoQuant ⚙ » suit la même règle ;
+  - le complément `.env`/Vercel (`messageSansCleCq`) ne s'ajoute qu'à « Clé CryptoQuant personnelle requise (Réglages ⚙) » ; une clé refusée affiche sa raison telle quelle.
+- Proxys locaux (Vite, daemon) : la clé est l'en-tête client s'il est valide, sinon `CRYPTOQUANT_API_KEY` de `.env`. Vite injecte aussi `.env` quand l'en-tête est présent mais invalide. Vercel : un POST sans clé répond 405, car la méthode est contrôlée avant la clé.
+- Archive de version inconnue : statut `erreur`, raison `RAISON_VERSION_CRYPTOQUANT`, zéro appel, rien n'est réécrit en local ni en KV. Un bandeau l'affiche dans les vues.
+- Table CHAIN triable par l'utilisateur : BTC J-1 décroissant par défaut ; l'état du tri vit dans le conteneur `MineursCotes`, la vue reste pure.
+- Affichage DES (tâche 15) : « vs méd. 30 j » au format `formatPct(v, 1)` ; VWAP en `$` + `formatPrice` ; taille d'archive en jours archivés ; quota « 10 req/min (compteur dans DATA) » ; en perp, base et VWAP en infobulle du volume.
+- Un majTs situé dans le futur est traité comme expiré par la reprise 6 h (garde ajoutée à la tâche 13).
+
+### Errata de la spec (relevés à `2d45426`)
+
+- `NS_ONCHAIN` n'existe pas : `apps/web/src/data/onchain/cache.ts:18` déclare `const NS = "onchain"`, non exporté.
+- `acquireSlot` de Coinalyze se trouve en `apps/web/src/data/coinalyze.ts:106-132`, avec `RATE_LIMIT = 40` (`:49`), et non en `:76-124` avec 10. La file CryptoQuant en reprend le principe avec 10 req / 60 s.
+- `resteSurLePoste` se trouve en `apps/web/src/store/persist.ts:791-793` (la spec indique `:790-792`).
+- Le prédicat Bearer de la fonction Vercel se trouve en `api/_policy.ts:276-284` (la spec §4.1 indique `:277-284`).
+- Le quota « x/10 min » s'affiche dans le panneau DATA, pas dans la section DES, alors que la maquette §5.1 le plaçait en pied de section.
+- §4.3 (ligne 237) : la non-fuite de la clé est l'invariant I8 (§6), non I9.
+
+### Limites connues
+
+- Collecte dépendante de l'usage : une série ne s'archive que si DES ou CHAIN est ouverte ; plus de 30 jours sans ouverture = jours perdus définitivement (affichés).
+- Heure de publication de J-1 inconnue : la reprise 6 h peut repousser la collecte de J-1 au lendemain (trou récupérable dans la fenêtre).
+- Archive hors sauvegarde JSON ; sur un poste sans daemon, vider le stockage du navigateur la perd (mention affichée dans les deux vues).
+- Sémantique non documentée, affichée brute : composition de `btc_all`/`eth_all`, `inverse` et unités des swaps inverses, `reported_production`/`report_accuracy`, remise à zéro de `accumulated_monthly_rewards`.
+- Noms usuels des neuf sociétés en infobulle : connaissance générale, non issue du sondage.
+- Deux onglets peuvent dépasser 10 req/min : 429 puis reprise automatique.

@@ -401,10 +401,10 @@ export function VueMineursCotes({
 
   const s = m.somme;
   const entete =
-    m.jourRef === null
+    m.jourRef === null || m.retardJours === null
       ? ""
       : [
-          `${m.jourRef} (J-${m.retardJours ?? 0})`,
+          `${m.jourRef} (J-${m.retardJours})`,
           `${m.disponibles}/${ATTENDUES} sociétés`,
           ...(s === null
             ? [`Σ partielle ${m.disponibles}/${ATTENDUES}`]

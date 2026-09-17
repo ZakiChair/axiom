@@ -3,13 +3,13 @@ import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
 /**
  * DES : section « Flux takers toutes places » (CryptoQuant BASIC, clé personnelle, archive
- * côté client). Réseau bouchonné, horloge figée au 2026-09-16 12:00 UTC (J-1 = 2026-09-15),
+ * côté client). Réseau bouchonné, horloge figée au 2026-09-16 00:30 UTC (J-1 = 2026-09-15),
  * clé factice posée avant le chargement. Vérifie : quatre appels au MONTAGE de la fenêtre
  * alors que la section est repliée ; requêtes `window=day&limit=30` sans `from`/`to`, clé en
  * en-tête seulement ; aucun appel sur les segmentés ni le changement de source ; aucun appel
- * à la réouverture 6 h 30 plus tard, le même jour UTC (seul le court-circuit J-1 joue) ;
+ * à la réouverture 12 h 15 plus tard, le même jour UTC (seul le court-circuit J-1 joue) ;
  * archive locale fusionnée avec la fenêtre fournisseur (jours communs : valeur fournisseur) ;
- * 429 et 401 affichés après un seul appel, sans perdre ni réécrire l'archive ; client
+ * 429, 401 et 402 affichés après un seul appel, sans perdre ni réécrire l'archive ; client
  * CryptoQuant introuvable (import() rejeté) annoncé comme tel.
  *
  * L'horloge figée gèle `Date.now()` : la fenêtre glissante 10 req/min ne se purge pas tant
@@ -112,7 +112,9 @@ async function preparer(
   options: { archive?: boolean; reponse?: (marche: Marche, symbole: Symbole) => Reponse } = {},
 ): Promise<Appel[]> {
   await bouchonnerReseau(page);
-  await page.clock.setFixedTime(new Date("2026-09-16T12:00:00Z"));
+  // 00:30 UTC : la réouverture du premier parcours peut avancer de plus de 12 h (reprise §13)
+  // sans changer de jour UTC, condition pour que seul le court-circuit J-1 explique zéro appel.
+  await page.clock.setFixedTime(new Date("2026-09-16T00:30:00Z"));
   await page.addInitScript(
     ({ cle, cleArchive, archive }) => {
       localStorage.setItem("axiom:onboarding:v1", JSON.stringify({ completed: true, step: 0 }));
@@ -248,11 +250,11 @@ test("DES : flux takers chargés au montage (4 appels), repliés par défaut, sa
   expect(appels).toHaveLength(4);
 
   // Fermeture puis réouverture : J-1 archivé pour les quatre séries → aucun appel. L'horloge
-  // avance d'abord de 6 h 30 sans changer de jour UTC (J-1 reste le 2026-09-15) : la reprise
-  // 6 h est écoulée et la fenêtre de 60 s purgée, si bien que seul le court-circuit J-1
-  // explique zéro appel.
-  await page.clock.setFixedTime(new Date("2026-09-16T18:30:00Z"));
-  expect(await page.evaluate(() => Date.now())).toBe(Date.UTC(2026, 8, 16, 18, 30));
+  // avance d'abord de 12 h 15 sans changer de jour UTC (J-1 reste le 2026-09-15) : la reprise
+  // de 12 h (§13) est écoulée et la fenêtre de 60 s purgée, si bien que seul le court-circuit
+  // J-1 explique zéro appel.
+  await page.clock.setFixedTime(new Date("2026-09-16T12:45:00Z"));
+  expect(await page.evaluate(() => Date.now())).toBe(Date.UTC(2026, 8, 16, 12, 45));
   await des.getByTitle("Fermer").click();
   await expect(des).toHaveCount(0);
   await page.getByRole("button", { name: "Produits dérivés" }).click();
@@ -283,7 +285,7 @@ test("DES : archive locale antérieure fusionnée sans doublon, jours communs à
   expect(dates[0]).toBe("2026-08-07");
   expect(dates[dates.length - 1]).toBe("2026-09-15");
   expect(dates).not.toContain("2026-09-01");
-  expect(archive.majTs).toBe(Date.UTC(2026, 8, 16, 12));
+  expect(archive.majTs).toBe(Date.UTC(2026, 8, 16, 0, 30));
   // Jours communs : la ligne fournisseur remplace la ligne archivée.
   for (const jour of ["2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20"]) {
     expect(jours[jour], jour).toMatchObject({ bsr: 1, qv: 11_500_000_000 });
@@ -318,6 +320,37 @@ test("DES : 429 CryptoQuant — délai de reprise affiché, archive servie et no
   const apres = JSON.parse((await lireArchive(page)) ?? "{}") as { majTs?: number; jours?: Record<string, unknown> };
   expect(apres.majTs).toBe(archivePrealable().majTs);
   expect(Object.keys(apres.jours ?? {}).sort()).toEqual(Object.keys(archivePrealable().jours).sort());
+});
+
+test("DES : 402 CryptoQuant — crédits mensuels épuisés, un seul appel, archive servie, corps amont jamais affiché", async ({ page }) => {
+  // Le corps du 402 n'est jamais lu par le client (§13) : ce marqueur ne doit apparaître nulle part.
+  const MARQUEUR_CORPS = "corps amont du 402 jamais affiche";
+  const appels = await preparer(page, {
+    archive: true,
+    reponse: () => ({
+      status: 402,
+      json: { status: { code: 402, message: MARQUEUR_CORPS } },
+    }),
+  });
+  const { bouton, section } = await ouvrirDes(page);
+
+  // Premier appel refusé → mémoire de session globale : les trois autres séries ne partent pas.
+  await expect.poll(() => appels.length).toBe(1);
+  await expect(bouton).toContainText("crédits CryptoQuant épuisés");
+  await bouton.click();
+  await expect(section).toContainText("Crédits mensuels CryptoQuant épuisés (402)");
+  await expect(section).toContainText("plus d'appel avant la remise à zéro mensuelle");
+  await expect(section).toContainText("Archive locale depuis 2026-08-07");
+  await expect(section).toContainText("0.96");
+  await expect(section).not.toContainText(MARQUEUR_CORPS);
+  // Ni clé ni offre en cause : aucun accès aux Réglages n'est proposé.
+  await expect(section.getByRole("button", { name: "Ouvrir les réglages ⚙" })).toHaveCount(0);
+
+  await page.waitForTimeout(300);
+  expect(appels).toHaveLength(1);
+  // 402 : aucune écriture de l'archive (mêmes jours, même majTs) et aucun crédit compté.
+  expect(JSON.parse((await lireArchive(page)) ?? "null")).toEqual(archivePrealable());
+  expect(await page.evaluate(() => localStorage.getItem("axiom:cryptoquant:credits:v1"))).toBeNull();
 });
 
 test("DES : 401 CryptoQuant — clé refusée affichée avec l'accès aux Réglages, un seul appel, rien d'archivé", async ({ page }) => {

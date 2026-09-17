@@ -3,18 +3,22 @@ import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
 /**
  * CHAIN : sous-section « Production des mineurs cotés » (CryptoQuant BASIC, clé personnelle).
- * Réseau bouchonné, horloge figée au 2026-09-16 12:00 UTC : sous horloge figée, la fenêtre
+ * Réseau bouchonné, horloge figée au 2026-09-16 00:30 UTC : sous horloge figée, la fenêtre
  * glissante du client (10 req / 60 s) ne se purge pas tant qu'elle n'est pas avancée, d'où une
  * spec séparée de DES (9 appels ici, 4 là-bas, chacune sous 10). Vérifie : exactement neuf
  * appels au MONTAGE de CHAIN, bouton replié, requêtes fermées `window=day&limit=30` sans `from`,
  * clé personnelle relayée ; au dépliage, les neuf sociétés (MARA non publiée, RIOT publiée, HIVE
  * sans ligne le 2026-09-10), Σ, courbe et tri interactif ; qualité publiée ; aucun appel de plus
- * au repli/dépliage ni à la réouverture 6 h 30 plus tard, le même jour UTC (seul le
+ * au repli/dépliage ni à la réouverture 12 h 15 plus tard, le même jour UTC (seul le
  * court-circuit J-1 joue) ; une société en 503 donne une Σ partielle et une couverture 8/9 ;
  * client CryptoQuant introuvable (import() rejeté) annoncé dans l'en-tête et la vue.
  */
 const JOUR_MS = 86_400_000;
-const MAINTENANT = new Date("2026-09-16T12:00:00Z");
+/**
+ * 00:30 UTC : la réouverture du premier parcours avance de plus de 12 h (reprise §13) sans
+ * changer de jour UTC, condition pour que seul le court-circuit J-1 explique zéro appel.
+ */
+const MAINTENANT = new Date("2026-09-16T00:30:00Z");
 const J1 = Date.UTC(2026, 8, 15);
 const IDS = ["bitf", "cipher", "clsk", "core", "hive", "iren", "mara", "riot", "wulf"] as const;
 type IdMineur = (typeof IDS)[number];
@@ -194,11 +198,11 @@ test("CHAIN : mineurs cotés — neuf appels au montage, lecture et tri au dépl
   expect(appels).toHaveLength(9);
 
   // Fermeture puis réouverture de CHAIN : J-1 archivé pour les neuf séries → zéro appel.
-  // L'horloge avance d'abord de 6 h 30 sans changer de jour UTC (J-1 reste le 2026-09-15) :
-  // la reprise 6 h est écoulée et la fenêtre de 60 s purgée, si bien que seul le
+  // L'horloge avance d'abord de 12 h 15 sans changer de jour UTC (J-1 reste le 2026-09-15) :
+  // la reprise de 12 h (§13) est écoulée et la fenêtre de 60 s purgée, si bien que seul le
   // court-circuit J-1 explique zéro appel.
-  await page.clock.setFixedTime(new Date("2026-09-16T18:30:00Z"));
-  expect(await page.evaluate(() => Date.now())).toBe(Date.UTC(2026, 8, 16, 18, 30));
+  await page.clock.setFixedTime(new Date("2026-09-16T12:45:00Z"));
+  expect(await page.evaluate(() => Date.now())).toBe(Date.UTC(2026, 8, 16, 12, 45));
   await chain.getByTitle("Fermer").click();
   await expect(chain).toHaveCount(0);
   await page.getByRole("button", { name: "Fonctions" }).click();

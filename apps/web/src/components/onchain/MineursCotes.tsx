@@ -239,6 +239,15 @@ const abreger = (jours: readonly string[]): string =>
 
 const tiret = (motif: string) => <span title={motif}>—</span>;
 
+/**
+ * Rejet de l'`await import()` du client (chunk introuvable : coupure réseau ou redéploiement —
+ * l'ancien chunk haché n'existe plus, le navigateur peut garder l'échec en cache). Aucune ligne
+ * n'a été lue, contrairement à une archive réellement vide : le libellé ne doit jamais mentionner
+ * « archive ». Un rechargement récupère le nouveau chunk (rouvrir CHAIN ne suffit pas si le
+ * navigateur a mis l'échec en cache).
+ */
+const CLIENT_NON_CHARGE = "Client CryptoQuant non chargé (réseau ou mise à jour d'AXIOM) ; rechargez la page.";
+
 const COLONNES: ReadonlyArray<ColonneTable<LigneSociete>> = [
   {
     id: "societe",
@@ -324,6 +333,8 @@ export interface PropsVueMineursCotes {
   tri?: TriTable | null;
   /** Clic d'en-tête ; absent = en-têtes non cliquables (rendu statique). */
   onTri?: (tri: TriTable) => void;
+  /** `await import()` du client rejeté ce cycle (chunk introuvable) : aucune ligne n'a été lue. */
+  echecClient?: boolean;
 }
 
 /** Contenu déplié de la sous-section. PURE et sans état (rendu statique testé). */
@@ -336,6 +347,7 @@ export function VueMineursCotes({
   onOuvrirReglages,
   tri = TRI_DEFAUT,
   onTri,
+  echecClient = false,
 }: PropsVueMineursCotes) {
   const m = construireModeleMineurs(chargements, now);
   const recus = recusDe(chargements);
@@ -346,6 +358,16 @@ export function VueMineursCotes({
       {`${recues}/${ATTENDUES} reçues · ${file.enAttente > 0 ? "en attente du quota CryptoQuant (10 req/min)" : "chargement…"}`}
     </NoteSource>
   ) : null;
+
+  // Rejet de l'import() du client (chunk introuvable) : rien n'a été lu, donc jamais la même
+  // branche qu'une archive vide (§4.3 de la spec : jamais un chargement muet).
+  if (echecClient) {
+    return (
+      <div className="mt-2">
+        <Vide>{CLIENT_NON_CHARGE}</Vide>
+      </div>
+    );
+  }
 
   if (m.archive.jours === 0) {
     if (enCours) {
@@ -477,6 +499,7 @@ export function EnTeteMineursCotes({
   file,
   now,
   onOuvrirReglages,
+  echecClient = false,
 }: PropsEnTeteMineursCotes) {
   const m = construireModeleMineurs(chargements, now);
   const recus = recusDe(chargements);
@@ -490,15 +513,17 @@ export function EnTeteMineursCotes({
     ? file.enAttente > 0
       ? `${recues}/${ATTENDUES} reçues · en attente du quota`
       : "chargement…"
-    : repriseS !== null
-      ? `quota atteint, reprise ${repriseS} s`
-      : cleRequise && m.archive.jours === 0
-        ? cleAbsente
-          ? "clé personnelle requise"
-          : "clé CryptoQuant refusée"
-        : m.jourRef !== null && m.retardJours !== null
-          ? `archive ${m.archive.jours} j · J-${m.retardJours} ${m.jourRef}`
-          : "";
+    : echecClient
+      ? "client CryptoQuant non chargé"
+      : repriseS !== null
+        ? `quota atteint, reprise ${repriseS} s`
+        : cleRequise && m.archive.jours === 0
+          ? cleAbsente
+            ? "clé personnelle requise"
+            : "clé CryptoQuant refusée"
+          : m.jourRef !== null && m.retardJours !== null
+            ? `archive ${m.archive.jours} j · J-${m.retardJours} ${m.jourRef}`
+            : "";
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <button type="button" className={boutonHistorique} aria-expanded={ouvert} onClick={onBasculer}>
@@ -537,6 +562,7 @@ export function MineursCotes({ onOuvrirReglages }: { onOuvrirReglages: () => voi
     enAttente: 0,
     repriseTs: null,
   });
+  const [echecClient, setEchecClient] = useState(false);
   const version = useStore(cryptoquantKeyStore, (s) => s.version);
   const now = useHorloge();
 
@@ -545,6 +571,7 @@ export function MineursCotes({ onOuvrirReglages }: { onOuvrirReglages: () => voi
     const abonnement: { fin: (() => void) | null } = { fin: null };
     setEnCours(true);
     setRecues(0);
+    setEchecClient(false);
     void (async () => {
       const cq = await import("../../data/onchain/cryptoquant");
       if (ctrl.signal.aborted) return;
@@ -568,8 +595,13 @@ export function MineursCotes({ onOuvrirReglages }: { onOuvrirReglages: () => voi
       setEnCours(false);
       enregistrerQualite(ID_QUALITE_MINEURS, LIBELLE_QUALITE_MINEURS, qualiteMineursCotes(recus, Date.now()));
     })().catch(() => {
-      // Abandon pendant une attente ou chunk introuvable : rien n'est publié pour ce cycle.
-      if (!ctrl.signal.aborted) setEnCours(false);
+      // Démontage pendant une attente : silencieux (le composant disparaît). Rejet réel de
+      // l'import() (chunk introuvable : coupure réseau ou redéploiement) : rien n'est publié pour
+      // ce cycle, mais la vue et l'en-tête doivent le dire — jamais un chargement muet (spec §4.3).
+      if (!ctrl.signal.aborted) {
+        setEnCours(false);
+        setEchecClient(true);
+      }
     });
     return () => {
       ctrl.abort();
@@ -586,6 +618,7 @@ export function MineursCotes({ onOuvrirReglages }: { onOuvrirReglages: () => voi
         enCours={enCours}
         recues={recues}
         file={file}
+        echecClient={echecClient}
         now={now}
         onOuvrirReglages={onOuvrirReglages}
       />
@@ -595,6 +628,7 @@ export function MineursCotes({ onOuvrirReglages }: { onOuvrirReglages: () => voi
           enCours={enCours}
           recues={recues}
           file={file}
+          echecClient={echecClient}
           now={now}
           onOuvrirReglages={onOuvrirReglages}
           tri={tri}

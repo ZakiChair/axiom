@@ -488,6 +488,18 @@ describe("production des mineurs cotés : vue, en-tête et conteneur", () => {
     expect(croissant.indexOf(">MARA<")).toBeLessThan(croissant.indexOf(">BITF<"));
   });
 
+  it("échec de l'import() du client (chunk introuvable) : libellé honnête, ni archive fausse ni en-tête muet", () => {
+    // `chargements` reste vide : rien n'a été lu, contrairement à une archive réellement vide.
+    const html = vue({ echecClient: true });
+    expect(html).toContain("Client CryptoQuant non chargé (réseau ou mise à jour d'AXIOM) ; rechargez la page.");
+    expect(html).not.toContain("Aucune ligne CryptoQuant archivée");
+    expect(html).not.toContain('role="table"');
+    expect(html).not.toContain("archive");
+    const tete = entete({ echecClient: true });
+    expect(tete).toContain("client CryptoQuant non chargé");
+    expect(tete).not.toContain("clé CryptoQuant ⚙");
+  });
+
   it("conteneur : sous-section repliée par défaut, aucun contenu rendu", () => {
     const html = renderToStaticMarkup(<MineursCotes onOuvrirReglages={() => {}} />);
     expect(html).toContain('aria-expanded="false"');

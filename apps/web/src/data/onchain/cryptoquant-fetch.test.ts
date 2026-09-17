@@ -436,4 +436,22 @@ describe("CryptoQuant : la clé n'apparaît nulle part (I8)", () => {
       ...consoles.flatMap((s) => s.mock.calls), healthStore.getState().sources, cq.etatFileCq()].map((t) => JSON.stringify(t));
     expect(traces.filter((t) => t.includes(SECRET))).toEqual([]);
   });
+
+  it("message 403 tronqué à 200 caractères : la coupure ne doit pas laisser passer un fragment de la clé", async () => {
+    const cq = await import("./cryptoquant");
+    const { healthStore } = await import("../../store/health");
+    // La clé tombe exactement sur la coupure à 200 caractères : sans lire le message en entier
+    // avant de tronquer, le test d'inclusion de la clé échoue et un fragment fuit dans la raison.
+    const message = `${"x".repeat(190)} ${SECRET}`;
+    const f = reseau(() => statut(403, message));
+    const r = await cq.chargerSerieCq("taker:spot:btc");
+    expect(r).toMatchObject({ statut: "offre", raison: "Offre CryptoQuant insuffisante pour cette série (403)." });
+    // Même famille (taker), mémorisé en session par `refusOffre` : la raison observée ici est
+    // bien celle gardée pour la famille, pas seulement celle du premier appel.
+    expect(await cq.chargerSerieCq("taker:swap:eth")).toMatchObject({ statut: "offre", appel: false,
+      raison: "Offre CryptoQuant insuffisante pour cette série (403)." });
+    const fragment = SECRET.slice(0, 8);
+    const traces = [...f.mock.calls.map(([u]) => String(u)), r, healthStore.getState().sources, cq.etatFileCq()].map((t) => JSON.stringify(t));
+    expect(traces.filter((t) => t.includes(fragment))).toEqual([]);
+  });
 });

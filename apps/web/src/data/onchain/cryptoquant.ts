@@ -503,8 +503,11 @@ async function raisonOffre(res: Response, cle: string | null): Promise<string> {
   try {
     const corps = (await res.json()) as unknown;
     const status = estObjet(corps) ? corps["status"] : null;
-    const message = estObjet(status) && typeof status["message"] === "string" ? status["message"].trim().slice(0, 200) : "";
-    if (message === "" || (cle !== null && message.includes(cle))) return RAISON_OFFRE_DEFAUT;
+    const brut = estObjet(status) && typeof status["message"] === "string" ? status["message"].trim() : "";
+    // Test d'inclusion de la clé sur le message ENTIER, avant tout troncage : sinon une clé qui
+    // tombe sur la coupure de 200 caractères y survit en partie et un fragment fuit dans la raison.
+    if (brut === "" || (cle !== null && brut.includes(cle))) return RAISON_OFFRE_DEFAUT;
+    const message = brut.slice(0, 200);
     return `Offre CryptoQuant insuffisante : ${message}`;
   } catch {
     return RAISON_OFFRE_DEFAUT;

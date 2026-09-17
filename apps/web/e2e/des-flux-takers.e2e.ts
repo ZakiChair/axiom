@@ -6,14 +6,16 @@ import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
  * côté client). Réseau bouchonné, horloge figée au 2026-09-16 12:00 UTC (J-1 = 2026-09-15),
  * clé factice posée avant le chargement. Vérifie : quatre appels au MONTAGE de la fenêtre
  * alors que la section est repliée ; requêtes `window=day&limit=30` sans `from`/`to`, clé en
- * en-tête seulement ; aucun appel sur les segmentés, le changement de source ni la
- * réouverture (J-1 archivé) ; archive locale fusionnée sans doublon ; 429 et 401 affichés
- * après un seul appel, sans perdre ni réécrire l'archive.
+ * en-tête seulement ; aucun appel sur les segmentés ni le changement de source ; aucun appel
+ * à la réouverture 6 h 30 plus tard, le même jour UTC (seul le court-circuit J-1 joue) ;
+ * archive locale fusionnée avec la fenêtre fournisseur (jours communs : valeur fournisseur) ;
+ * 429 et 401 affichés après un seul appel, sans perdre ni réécrire l'archive ; client
+ * CryptoQuant introuvable (import() rejeté) annoncé comme tel.
  *
- * L'horloge figée gèle `Date.now()` : la fenêtre glissante 10 req/min ne se purge jamais,
- * d'où une spec séparée de CHAIN (4 appels ici, 9 là-bas, chacun sous 10). Le cas « sans
- * clé » n'est pas hermétique en e2e (le serveur de dev lit apps/web/.env) : il est couvert
- * en unitaire.
+ * L'horloge figée gèle `Date.now()` : la fenêtre glissante 10 req/min ne se purge pas tant
+ * qu'elle n'est pas avancée, d'où une spec séparée de CHAIN (4 appels ici, 9 là-bas, chacun
+ * sous 10). Le cas « sans clé » n'est pas hermétique en e2e (le serveur de dev lit
+ * apps/web/.env) : il est couvert en unitaire.
  */
 const CLE = "CLE-E2E-FACTICE";
 const CLE_ARCHIVE_SPOT_BTC = "axiom:onchain:cq:taker:spot:btc:v1";
@@ -68,11 +70,15 @@ function reponseFournisseur(marche: Marche, symbole: Symbole) {
   return { status: { code: 200, message: "success" }, result: { window: "DAY", data } };
 }
 
-/** Archive spot BTC d'une session antérieure : dix jours du 2026-08-07 au 2026-08-16. */
+/**
+ * Archive spot BTC d'une session antérieure : quatorze jours du 2026-08-07 au 2026-08-20. Les
+ * quatre derniers (08-17 → 08-20) recouvrent la fenêtre fournisseur avec des valeurs distinctes
+ * (`bsr` 0.9643 et `qv` 11 G$ ici, 1 et 11,5 G$ chez le fournisseur hors J-1).
+ */
 function archivePrealable() {
   const jours: Record<string, Record<string, number>> = {};
-  for (let i = 1; i <= 10; i++) {
-    jours[jourIso(Date.UTC(2026, 7, 17) - i * JOUR_MS)] = {
+  for (let i = 0; i < 14; i++) {
+    jours[jourIso(Date.UTC(2026, 7, 7) + i * JOUR_MS)] = {
       n: 11_000_000,
       bv: 150_000,
       qv: 11_000_000_000,
@@ -87,7 +93,7 @@ function archivePrealable() {
       sc: 5_500_000,
     };
   }
-  return { version: 1, serie: "taker:spot:btc", majTs: Date.UTC(2026, 7, 17, 6), jours };
+  return { version: 1, serie: "taker:spot:btc", majTs: Date.UTC(2026, 7, 21, 6), jours };
 }
 
 interface Appel {
@@ -144,6 +150,27 @@ async function ouvrirDes(page: Page) {
     .locator("section")
     .filter({ has: page.getByRole("button", { name: /Flux takers toutes places/i }) });
   return { des, bouton, section };
+}
+
+/**
+ * Module du client tel que le demande l'`import()` de la section : les e2e tournent sur le
+ * serveur Vite de développement (`playwright.config.ts`), qui sert le fichier source, et non
+ * sur le build (chunk `cryptoquant-*.js`). Chemin exact : le store de clé
+ * (`/src/store/cryptoquant.ts`, import statique de la vue) doit continuer de se charger.
+ */
+const MODULE_CLIENT = "/src/data/onchain/cryptoquant.ts";
+
+/** Fait échouer le chargement du client (404, comme un chunk évincé) ; renvoie les URL interceptées. */
+async function rendreClientIntrouvable(page: Page): Promise<string[]> {
+  const interceptees: string[] = [];
+  await page.route(
+    (url) => url.pathname === MODULE_CLIENT,
+    (route) => {
+      interceptees.push(route.request().url());
+      return route.fulfill({ status: 404, contentType: "text/plain", body: "module introuvable" });
+    },
+  );
+  return interceptees;
 }
 
 async function lireArchive(page: Page): Promise<string | null> {
@@ -220,7 +247,12 @@ test("DES : flux takers chargés au montage (4 appels), repliés par défaut, sa
   await expect(section).toContainText("0.95");
   expect(appels).toHaveLength(4);
 
-  // Fermeture puis réouverture : J-1 archivé pour les quatre séries → aucun appel.
+  // Fermeture puis réouverture : J-1 archivé pour les quatre séries → aucun appel. L'horloge
+  // avance d'abord de 6 h 30 sans changer de jour UTC (J-1 reste le 2026-09-15) : la reprise
+  // 6 h est écoulée et la fenêtre de 60 s purgée, si bien que seul le court-circuit J-1
+  // explique zéro appel.
+  await page.clock.setFixedTime(new Date("2026-09-16T18:30:00Z"));
+  expect(await page.evaluate(() => Date.now())).toBe(Date.UTC(2026, 8, 16, 18, 30));
   await des.getByTitle("Fermer").click();
   await expect(des).toHaveCount(0);
   await page.getByRole("button", { name: "Produits dérivés" }).click();
@@ -230,7 +262,7 @@ test("DES : flux takers chargés au montage (4 appels), repliés par défaut, sa
   expect(appels).toHaveLength(4);
 });
 
-test("DES : archive locale antérieure fusionnée sans doublon (début 2026-08-07)", async ({ page }) => {
+test("DES : archive locale antérieure fusionnée sans doublon, jours communs à la valeur fournisseur (début 2026-08-07)", async ({ page }) => {
   const appels = await preparer(page, { archive: true });
   const { bouton, section } = await ouvrirDes(page);
   await expect.poll(() => appels.length).toBe(4);
@@ -239,12 +271,25 @@ test("DES : archive locale antérieure fusionnée sans doublon (début 2026-08-0
   await expect(section).toContainText("38 j archivés");
   await expect(section).toContainText("0.98");
 
-  const brut = (await lireArchive(page)) ?? "";
-  const dates = brut.match(/"\d{4}-\d{2}-\d{2}"/g) ?? [];
+  // Archive préalable (08-07 → 08-20, 14 j) et fenêtre fournisseur (08-17 → 09-15 sans le 1er
+  // ni le 2 septembre, 28 j) se recouvrent sur quatre jours : 14 + 28 − 4 = 38 jours.
+  const archive = JSON.parse((await lireArchive(page)) ?? "{}") as {
+    majTs?: number;
+    jours?: Record<string, { bsr?: number; qv?: number }>;
+  };
+  const jours = archive.jours ?? {};
+  const dates = Object.keys(jours);
   expect(dates).toHaveLength(38);
-  expect(new Set(dates).size).toBe(dates.length);
-  expect(dates).toContain('"2026-08-07"');
-  expect(dates).toContain('"2026-09-15"');
+  expect(dates[0]).toBe("2026-08-07");
+  expect(dates[dates.length - 1]).toBe("2026-09-15");
+  expect(dates).not.toContain("2026-09-01");
+  expect(archive.majTs).toBe(Date.UTC(2026, 8, 16, 12));
+  // Jours communs : la ligne fournisseur remplace la ligne archivée.
+  for (const jour of ["2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20"]) {
+    expect(jours[jour], jour).toMatchObject({ bsr: 1, qv: 11_500_000_000 });
+  }
+  // Jour seulement archivé : conservé tel quel.
+  expect(jours["2026-08-16"]).toMatchObject({ bsr: 0.9643, qv: 11_000_000_000 });
 });
 
 test("DES : 429 CryptoQuant — délai de reprise affiché, archive servie et non réécrite", async ({ page }) => {
@@ -269,7 +314,7 @@ test("DES : 429 CryptoQuant — délai de reprise affiché, archive servie et no
   // Spec §4.3 étape 4 : après le 429, les trois autres séries répondent « quota » sans appel.
   await page.waitForTimeout(300);
   expect(appels).toHaveLength(1);
-  // 429 : aucune écriture de l'archive — toujours les dix mêmes jours et le même majTs.
+  // 429 : aucune écriture de l'archive — toujours les quatorze mêmes jours et le même majTs.
   const apres = JSON.parse((await lireArchive(page)) ?? "{}") as { majTs?: number; jours?: Record<string, unknown> };
   expect(apres.majTs).toBe(archivePrealable().majTs);
   expect(Object.keys(apres.jours ?? {}).sort()).toEqual(Object.keys(archivePrealable().jours).sort());
@@ -291,4 +336,23 @@ test("DES : 401 CryptoQuant — clé refusée affichée avec l'accès aux Régla
   expect(appels).toHaveLength(1);
   expect(appels.every((a) => !a.url.includes(CLE))).toBe(true);
   expect(await lireArchive(page)).toBeNull();
+});
+
+test("DES : client CryptoQuant introuvable (import() rejeté) — en-tête et vue le disent, aucun appel, archive intacte", async ({ page }) => {
+  const appels = await preparer(page, { archive: true });
+  const interceptees = await rendreClientIntrouvable(page);
+  const { bouton, section } = await ouvrirDes(page);
+
+  // Une archive locale existe, mais seul le client sait la lire : l'en-tête ne prétend pas
+  // « série non encore archivée ».
+  await expect(bouton).toContainText("client CryptoQuant non chargé");
+  expect(interceptees.length).toBeGreaterThan(0);
+  await bouton.click();
+  await expect(section).toContainText(
+    "Client CryptoQuant non chargé (réseau ou mise à jour d'AXIOM) ; rechargez la page.",
+  );
+  await expect(section).not.toContainText("non encore archivée");
+  await expect(section.getByRole("button", { name: "ETH", exact: true })).toBeVisible();
+  expect(appels).toHaveLength(0);
+  expect(JSON.parse((await lireArchive(page)) ?? "null")).toEqual(archivePrealable());
 });

@@ -34,7 +34,8 @@ Décision du propriétaire : les deux, dans cet ordre, sans nouvelle fenêtre.
 
 **Offre BASIC** (documentation officielle et 403 observés) : licence **personnelle** ;
 **10 req/min** (en-têtes `x-ratelimit-limit: 10`, `x-ratelimit-remaining`, `x-ratelimit-reset`
-= secondes restantes, `6` observé) ; **10 000 req/mois** ; fenêtre **journalière seule**
+= secondes restantes, `6` observé) ; **10 000 CRÉDITS/mois** (et non requêtes : erratum du
+2026-09-17, voir §13) ; fenêtre **journalière seule**
 (`window=hour` → 403) ; **30 jours glissants** (`limit` plafonné à 30 lignes ; `from` antérieur
 à 30 j → HTTP 400 « Out of allowed request range ») ; **aucune donnée on-chain** (exchange-flows,
 flow-indicator, market-indicator dont MVRV/SOPR, network-indicator, miner-flows → 403
@@ -223,7 +224,9 @@ chaque série de la section, en boucle séquentielle avec affichage progressif :
 
 Arithmétique : nominal 13 appels/jour ≈ **390 req/mois** ; pire cas (J-1 jamais présent avant
 la reprise, fenêtres rouvertes en permanence) 13 × 4 × 30 = **1 560/mois** sur 10 000. Pas de
-plafond mensuel bloquant (YAGNI) ; les chiffres sont consignés ici.
+plafond mensuel bloquant (YAGNI) ; les chiffres sont consignés ici. **Remplacé par le §13**
+(2026-09-17) : le quota se compte en crédits (15 par appel réussi), la reprise passe à 12 h et
+un plafond de crédits suspend les appels automatiques.
 
 **Réponses** : 200 → parse → fusion → écriture → `healthStore.setEtat("cryptoquant",
 "polling")` → `pret` ; **401** → `cle-requise` (« Clé CryptoQuant refusée (Réglages ⚙) ») ;
@@ -724,3 +727,50 @@ précisent ou corrigent la spec :
 | Quota affiché | « x/10 min » dans DATA ; la section affiche « 10 req/min » (la file n'expose pas le compteur) |
 | `BUILD-CONTRACT.md:50` | « sept exceptions ACTÉES » devient « des exceptions ACTÉES » |
 | Errata | `NS_ONCHAIN` n'existe pas (constantes privées de `cache.ts`) ; `acquireSlot` est en `coinalyze.ts:106-132` ; `resteSurLePoste` en `persist.ts:791-793` ; le prédicat Bearer en `api/_policy.ts:276-284` |
+
+## 13. Budget de crédits (amendement du 2026-09-17, décision du propriétaire)
+
+**Constat** (rapport, section « Preuve manuelle », commit `f519c28`) : chaque réponse 200 porte
+`x-credit-cost: 15`, pour 29 lignes comme pour 3. La documentation CryptoQuant
+(`docs.cryptoquant.com/guides/api-credits.md`, `guides/faq.md`) établit que l'offre Basic reçoit
+**10 000 crédits par mois**, remis à zéro à la date d'inscription (inconnue du client), sans
+report ; le coût dépend des lignes et du type de données ; **les appels en échec ne sont pas
+facturés** ; à crédits épuisés, l'API répond **402**. Une passe DES + CHAIN coûte 13 × 15 =
+195 crédits ; 30 jours × 2 passes = 11 700 > 10 000. Le propriétaire a choisi le « lot budget
+complet » : 402 explicite, compteur de crédits dans DATA avec plafond de sécurité, moins de
+passes par jour.
+
+| Point | Décision |
+|---|---|
+| Mécanisme porteur | Le **plafond** garantit le mois ; la cadence ne fait que réduire le coût |
+| Plafond | `PLAFOND_CREDITS_CQ = 9 000` sur une **fenêtre glissante de 31 jours UTC** (borne supérieure de la consommation depuis la remise à zéro, quelle qu'en soit la date, pour ce navigateur). Avant le créneau, puis de nouveau après l'avoir obtenu : si `somme31j + COUT_CREDITS_DEFAUT_CQ > PLAFOND_CREDITS_CQ` → statut `credits`, raison `RAISON_BUDGET_CREDITS_CQ` (« Budget de crédits CryptoQuant atteint (≈ N/10 000 sur 31 j, ce navigateur) : appels suspendus pour préserver le mois ; archive affichée. »), zéro appel, créneau non consommé |
+| Coût d'un appel | Sur **200 seulement** : `x-credit-cost` entier dans [0, 1 000] ; sinon (absent, vide, non entier, hors bornes) `COUT_CREDITS_DEFAUT_CQ = 15`. 401, 402, 403, 429, 5xx, erreur réseau : 0 |
+| Compteur | Clé localStorage **`axiom:cryptoquant:credits:v1`** (hors du préfixe d'archive `axiom:onchain:cq:`), valeur `{ "v": 1, "jours": { "AAAA-MM-JJ": crédits } }`, élaguée aux 31 derniers jours UTC à chaque écriture. Copie en mémoire du module, source de vérité de la session (une écriture en échec ne la perd pas). Illisible ou de version inconnue → traité comme vide, remplacé à la prochaine écriture. **Reste sur le poste** : ni exporté ni remplacé par l'import de sauvegarde (`persist.ts`, comme la clé) |
+| 402 | Nouveau `StatutCq` **`"credits"`** ; raison fixe `RAISON_CREDITS_EPUISES_CQ` = « Crédits mensuels CryptoQuant épuisés (402) : plus d'appel avant la remise à zéro mensuelle ; archive affichée. » ; jamais le corps amont. Mémoire de session **globale** (toutes familles), liée à la version de clé comme `refusCle`, valable **24 h** (un nouvel essai est gratuit), effacée par `setKey`/`clearKey`. Santé : `marquerErreur("cryptoquant", "CryptoQuant : crédits mensuels épuisés")` |
+| Ordre §4.3 | Inchangé jusqu'à la reprise ; les contrôles « mémoire 402 active » puis « plafond » se placent **après** la reprise (étape 5) et **avant** le créneau : une série dans sa reprise reste `pret` sans appel |
+| Reprise | `REPRISE_MS` passe de 6 h à **12 h** : au plus deux passes réussies par série et par jour UTC (J-1 observé publié vers 17:30-18:00 UTC) |
+| 200 vide ou invalide | Facturé (compté) ; l'heure de la réponse est mémorisée en session par série et soumise à la même reprise 12 h (fin du nouvel appel à chaque ouverture) ; l'archive n'est pas modifiée |
+| Relais | `x-credit-cost` rejoint la liste fermée relayée par le daemon et Vercel, et `Access-Control-Expose-Headers` ; Vite le relaie déjà |
+| DATA | `QuotaSource` gagne un segment optionnel `credits?: { utilise: number; limite: number; jours: number }`, rendu par `formatQuota` en « · ≈N/10 000 crédits 31 j » ; publié par le client à chaque créneau, à chaque 200 et au premier chargement du module. Delta du bundle initial mesuré, visé ≤ ~60 o gzip |
+| Vues | DES et CHAIN traitent `credits` comme un refus sans appel : en-tête « crédits CryptoQuant épuisés » (402) ou « budget de crédits atteint » (plafond), placé comme « offre » dans l'ordre des branches ; bandeau = raison ; archive affichée ; qualité CHAIN sans archive : indisponible avec la raison |
+| Limites | Compteur **par navigateur** : les curl, un autre poste ou le déploiement Vercel ne sont pas vus ; le 402 reste le filet. Pas de lecture du solde réel (aucune API documentée) |
+
+**Tests exigés** :
+
+- **C1** — 402 → `credits`, raison fixe, aucune trace du corps ; les séries suivantes des deux
+  familles → `credits` sans fetch ; après 24 h (horloge simulée) → un fetch ; `setKey` efface la
+  mémoire.
+- **C2** — 200 avec `x-credit-cost: 15` → +15 au jour UTC courant ; sans en-tête → +15 ; `abc`,
+  `-1`, `1001`, `1.5` → +15 ; 401, 402, 403, 429, 500, erreur réseau → +0.
+- **C3** — jours récents totalisant 8 990 → série suivante `credits` (raison budget), zéro fetch,
+  créneau non consommé ; un jour vieux de plus de 31 jours n'est pas compté et disparaît à
+  l'écriture suivante.
+- **C4** — compteur illisible ou `v` inconnue → vide puis remplacé ; écriture en échec → la
+  somme de la session inclut quand même l'appel.
+- **C5** — reprise : `majTs` à `now − 11 h 59` → 0 fetch ; `now − 12 h` → 1 fetch.
+- **C6** — 200 vide → +15 crédits ; nouvelle passe dans les 12 h → 0 fetch ; archive inchangée.
+- **C7** — daemon et Vercel relaient et exposent `x-credit-cost` ; un en-tête amont non listé
+  reste filtré.
+- **C8** — `formatQuota` rend le segment crédits ; DES et CHAIN rendent les libellés `credits` ;
+  `persist.ts` n'exporte ni n'écrase `axiom:cryptoquant:credits:v1` ; e2e DES : 402 sur la
+  première série → aucun autre appel CryptoQuant, en-tête « crédits CryptoQuant épuisés ».

@@ -63,6 +63,7 @@ const CLES_CREDENTIALS = [
   "axiom:coinalyze:key", "axiom:twelvedata:key", "axiom:ccdata:key", "axiom:finnhub:key",
   "axiom:sosovalue:key", "axiom:bgeometrics:key", "axiom:etherscan:key", "axiom:fred:key",
   "axiom.fred.apiKey", "axiom.coingecko.demoApiKey", "axiom.defillama.proApiKey",
+  "axiom:cryptoquant:key",
 ] as const;
 
 /** Mock localStorage en mémoire (environnement de test Node, pas de DOM ici). */
@@ -549,6 +550,40 @@ describe("importerSauvegarde — remplacement des clés axiom:*", () => {
     expect(localStorage.getItem("axiom:notes:v1")).toBe("notes importées");
   });
 
+  it("préserve la clé CryptoQuant du poste et ignore celle d'un ancien fichier", () => {
+    localStorage.setItem("axiom:cryptoquant:key", "CLE-TEST-SECRETE");
+
+    expect(importerSauvegarde(JSON.stringify({
+      "axiom:cryptoquant:key": "cle-d-un-autre-poste",
+      "axiom:notes:v1": "notes importées",
+    }))).toBe(true);
+
+    expect(localStorage.getItem("axiom:cryptoquant:key")).toBe("CLE-TEST-SECRETE");
+    expect(localStorage.getItem("axiom:notes:v1")).toBe("notes importées");
+  });
+
+  it("ne supprime ni ne remplace les archives CryptoQuant du poste (préfixe axiom:onchain:cq:)", () => {
+    const spotBtc = "axiom:onchain:cq:taker:spot:btc:v1";
+    const mara = "axiom:onchain:cq:mineur:mara:v1";
+    const archiveSpot = JSON.stringify({ version: 1, serie: "taker:spot:btc", majTs: 1_789_580_000_000, jours: {} });
+    localStorage.setItem(spotBtc, archiveSpot);
+    localStorage.setItem(mara, "archive-mara-locale");
+
+    // Fichier qui ne contient pas l'archive : l'import ne doit pas la purger.
+    expect(importerSauvegarde(JSON.stringify({ "axiom:notes:v1": "notes importées" }))).toBe(true);
+    expect(localStorage.getItem(spotBtc)).toBe(archiveSpot);
+    expect(localStorage.getItem(mara)).toBe("archive-mara-locale");
+
+    // Fichier d'un autre poste qui en contient une : ignorée, la copie locale reste.
+    expect(importerSauvegarde(JSON.stringify({
+      [mara]: "archive-mara-etrangere",
+      "axiom:notes:v1": "autres notes",
+    }))).toBe(true);
+    expect(localStorage.getItem(mara)).toBe("archive-mara-locale");
+    expect(localStorage.getItem(spotBtc)).toBe(archiveSpot);
+    expect(localStorage.getItem("axiom:notes:v1")).toBe("autres notes");
+  });
+
   it("refuse un JSON invalide, un tableau ou un objet sans clé axiom: (aucun changement)", () => {
     localStorage.setItem("axiom:garde:v1", "intact");
 
@@ -623,6 +658,27 @@ describe("exporterSauvegarde — périmètre réel du fichier téléchargé", ()
     const dump = await capturerExport();
     expect(dump["axiom:onchain:bg:abonnement-refuse"]).toBeUndefined();
     expect(dump["axiom:onchain:bg:abonnement-generation"]).toBeUndefined();
+    expect(dump[CHART_KEY]).toBe("{}");
+  });
+  it("n'embarque jamais la clé CryptoQuant personnelle", async () => {
+    localStorage.setItem("axiom:cryptoquant:key", "CLE-TEST-SECRETE");
+    localStorage.setItem(CHART_KEY, "{}");
+    const dump = await capturerExport();
+    expect(JSON.stringify(dump)).not.toContain("CLE-TEST-SECRETE");
+    expect(dump["axiom:cryptoquant:key"]).toBeUndefined();
+    expect(dump[CHART_KEY]).toBe("{}");
+  });
+  it("n'embarque pas les archives CryptoQuant (licence personnelle) et garde les autres caches on-chain", async () => {
+    localStorage.setItem(
+      "axiom:onchain:cq:taker:spot:btc:v1",
+      JSON.stringify({ version: 1, serie: "taker:spot:btc", majTs: 1, jours: {} }),
+    );
+    localStorage.setItem("axiom:onchain:cq:mineur:mara:v1", "{}");
+    localStorage.setItem("axiom:onchain:mempool:v1", "{}");
+    localStorage.setItem(CHART_KEY, "{}");
+    const dump = await capturerExport();
+    expect(Object.keys(dump).filter((k) => k.startsWith("axiom:onchain:cq:"))).toEqual([]);
+    expect(dump["axiom:onchain:mempool:v1"]).toBe("{}");
     expect(dump[CHART_KEY]).toBe("{}");
   });
 });

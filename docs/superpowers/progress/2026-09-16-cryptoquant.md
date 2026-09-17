@@ -35,11 +35,12 @@ contient une ligne « Commande : … » puis le bloc JSON complet imprimé par
 `scripts/verifier-budget-build.mjs`, le script que lance `pnpm --filter @axiom/web build`
 (champs `initial.octetsBruts` et `initial.octetsGzip` pour le chemin d'entrée). Le tableau
 avant/après est dérivé de ces blocs à la clôture du lot. Mesures locales macOS ; le juge de
-paix reste le runner GitHub (marge runner ≈ 3 365 gzip au 2026-09-16). Seuls les plafonds du
-script sont bloquants ; delta initial attendu ≤ ~40 octets gzip par sous-lot (nom du chunk
-partagé du store ajouté à `__vite__mapDeps`), porte d'acceptation ≤ ~150 octets gzip sur
-l'ensemble de B1 ; si la marge runner tombait sous ~3 000 gzip, retirer d'abord le libellé
-DATA.
+paix reste le runner GitHub (marge runner ≈ 3 365 gzip mesurée le 2026-09-16 sur `e14dc03`,
+avant trois commits de code hors lot ; estimations à jour sous « Tableau du budget JS initial
+(avant/après) »). Seuls les plafonds du script sont bloquants ; delta initial attendu
+≤ ~40 octets gzip par sous-lot (nom du chunk partagé du store ajouté à `__vite__mapDeps`),
+porte d'acceptation ≤ ~150 octets gzip sur l'ensemble de B1 ; si la marge runner tombait sous
+~3 000 gzip, retirer d'abord le libellé DATA.
 
 ### Budget avant B1
 
@@ -515,7 +516,7 @@ Chaque point est conforme, sauf s'il figure sous « Écarts relevés ». Les sor
 
 ### Commandes lancées
 
-Journal complet : `logs/axiom-b1-revue.log`.
+Journal complet : `logs/axiom-b1-revue.log` (journal local non suivi par git : `*.log` est ignoré ; les sorties utiles sont recopiées ci-dessous).
 
 ```text
 ### A1
@@ -860,6 +861,32 @@ Chunk partagé du store (`.vite/manifest.json`) : `assets/cryptoquant-D1SH6W9Y.j
 
 Delta initial depuis « Budget après B1 » : -7 o gzip (attendu ≤ ~40 o gzip par sous-lot ; porte d'acceptation ≤ ~150 o gzip sur l'ensemble de B1 ; seule la limite 360 000 est bloquante) ; marge gzip locale 4363 o.
 
+### Revue indépendante B2
+
+- Verdict : **ACCEPTÉ**, rendu par le contrôleur après la correction `83d7393`.
+- Réviseur : Claude Opus 5 (1M context). C'est un agent relecteur distinct du développeur des tâches 18 et 19 (rôle Réviseur, `.devin/provider-rules.md:33` et `:51`).
+- Objet revu, le 2026-09-17 :
+  - la sous-section CHAIN à l'état `d008175` (`MineursCotes.tsx`, `MineursCotes.test.tsx`, `Mineurs.tsx`) ;
+  - le diff de la tâche 19 : parcours e2e, porte `scripts/ci.sh --e2e` et « Budget après B2 ».
+- Source : registre local de la tâche 19 (`.superpowers/`, non suivi par git). Cette section en est la trace durable.
+
+Points de la grille (sept points, tous confirmés après la correction) :
+
+| Point | Contrôle | Résultat |
+|---|---|---|
+| 1 | Sommes d'affichage : Σ seulement si les 9 sociétés ont une ligne (`sommeOuNull`, sinon `null`) ; la courbe Σ n'a ni moyenne ni report d'un autre jour. | confirmé |
+| 2 | `null` jamais 0 : production déclarée nulle → « non publié » ; société sans ligne → tiret avec motif ; aucun `?? 0` ni `\|\| 0` dans `MineursCotes.tsx`. | contesté au premier passage, puis confirmé après `83d7393` |
+| 3 | Couverture partielle : `partiel` si moins de 9 sociétés ou s'il manque un jour ; `perime` seulement si toutes les séries archivées sont périmées ; `ageMaxMs` de 3 j justifié et testé. | confirmé |
+| 4 | Aucun écart en % : production déclarée et cumul du mois affichés bruts. | confirmé |
+| 5 | Bundle : client et module partagé en `import type` seulement ; un seul `await import("../../data/onchain/cryptoquant")` ; contrôles I11 revérifiés sur le manifeste réel. | confirmé |
+| 6 | Effet : abandon vérifié après l'import et après chaque série ; qualité publiée une seule fois, après la boucle ; nettoyage (abandon et désabonnement de la file). | confirmé |
+| 7 | Signaux et tri : cinq signaux rendus et testés ; bouton Réglages pour tout `cle-requise` ; complément `.env`/Vercel pour la seule clé absente ; tri porté par le conteneur. | confirmé (classement des sociétés sans ligne non revérifié : `trierLignes` et `TableTriable` sont hors du diff) |
+
+- Point 2, premier passage : `MineursCotes.tsx:407` contenait `m.retardJours ?? 0`, un motif interdit par la grille. Le relecteur a jugé le risque réel nul, car ce repli ne pouvait pas s'appliquer à une valeur CryptoQuant manquante, mais la lettre de la grille n'était pas respectée.
+- Correction `83d7393` (`fix(chain): corrections de la revue indépendante B2`, une ligne) : l'en-tête reste vide si `retardJours` est nul, et le repli `?? 0` disparaît.
+- Budget après la correction : le cycle a été rejoué, et « Budget après B2 » ci-dessus est la nouvelle mesure. Le gzip initial passe de 355 661 à 355 637 octets. L'écart vient des nouveaux hash de chunks, pas du code.
+- Écart restant : aucun.
+
 ## Clôture (tâche 20)
 
 ### Journal des commits (depuis la spec `2d45426`)
@@ -1029,7 +1056,7 @@ Commande : `pnpm check` (build `pnpm --filter @axiom/web build` de `scripts/ci.s
 
 ### Tableau du budget JS initial (avant/après)
 
-Gzip niveau 9 ; plafonds 1 220 000 octets bruts et 360 000 octets gzip. Valeurs lues dans les blocs json des sections « Budget … » ci-dessus.
+Gzip niveau 9 ; plafonds 1 220 000 octets bruts et 360 000 octets gzip. Valeurs lues dans les blocs json des sections « Budget … » (ci-dessus, et « Budget après la vague de correction finale » sous « Revue finale de branche »).
 
 | Mesure | Octets bruts | Octets gzip | Δ gzip depuis « avant B1 » | Marge gzip locale |
 |---|---|---|---|---|
@@ -1037,13 +1064,22 @@ Gzip niveau 9 ; plafonds 1 220 000 octets bruts et 360 000 octets gzip. Valeurs 
 | Budget après B1-3 | 1206170 | 355617 | +22 | 4383 |
 | Budget après B1 | 1206209 | 355644 | +49 | 4356 |
 | Budget après B2 | 1206212 | 355637 | +42 | 4363 |
-| Budget final | 1206212 | 355637 | +42 | 4363 |
+| Budget final (clôture `3fa31e6`) | 1206212 | 355637 | +42 | 4363 |
+| Budget après la vague de correction finale | 1206265 | 355686 | +91 | 4314 |
 
-Delta de B1 (après B1 − avant B1) : +49 o gzip (porte d'acceptation ≤ ~150 o gzip). Delta de B2 (après B2 − après B1) : -7 o gzip (attendu ≤ ~40 o gzip). Seule la limite 360 000 o gzip est bloquante.
+Delta de B1 (après B1 − avant B1) : +49 o gzip (porte d'acceptation ≤ ~150 o gzip). Delta de B2 (après B2 − après B1) : -7 o gzip (attendu ≤ ~40 o gzip). Delta de la vague de correction (après la vague − final) : +49 o gzip, dont +38 à l'étape C (chunk `horloge` ajouté aux dépendances préchargées de DES). Seule la limite 360 000 o gzip est bloquante.
 
-Marge locale ; la marge mesurée sur le runner GitHub est plus faible (≈ 3 365 gzip avant le lot).
+Marges de ce tableau : locales. Estimation runner, par la méthode de « Budget après B1 » (marge locale − 1 238, écart runner − local mesuré le 2026-09-16 : 356 635 − 355 397) :
+
+- ≈ 3 167 gzip à la base du lot (4 405 − 1 238) ;
+- ≈ 3 125 gzip après le lot, à `3fa31e6` (4 363 − 1 238) ;
+- ≈ 3 076 gzip après la vague de correction finale : budget initial final **1 206 265 octets bruts / 355 686 gzip**, mesuré par `pnpm check` à l'étape D (marge locale 4 314 ; 4 314 − 1 238). Voir « Revue finale de branche ».
+
+Les 3 365 gzip ont été mesurés sur le runner à `e14dc03`, avant trois commits de code hors lot (`7542bee`, `f8ef08f`, `278c452`) : ce n'est pas la marge du lot. Seuil de vigilance ~3 000 gzip (spec I11) : il reste environ 76 octets gzip sur le runner ; au prochain ajout au chemin d'entrée, retirer d'abord le libellé DATA. Budget du premier run GitHub de la branche : non relevé (branche non poussée) ; à lire au premier push.
 
 ### Parcours e2e du lot (sortie Playwright)
+
+Instantané à la clôture (`3fa31e6`). État final, après la vague de correction (8 parcours, titres et lignes à jour) : « Contrôles » sous « Revue finale de branche ».
 
 ```text
   ✓   1 [chromium] › e2e/chain-mineurs-cotes.e2e.ts:106:1 › CHAIN : mineurs cotés — neuf appels au montage, lecture et tri au dépliage, aucun appel ensuite (3.2s)
@@ -1059,23 +1095,45 @@ Marge locale ; la marge mesurée sur le runner GitHub est plus faible (≈ 3 365
 
 ### Preuve manuelle du propriétaire (hors CI, clé personnelle, jamais depuis un agent)
 
-Saisir la clé sans l'afficher ni l'inscrire dans l'historique : `read -rs CQ_CLE && export CQ_CLE`. Daemon lancé (`pnpm daemon`, `127.0.0.1:8787`). Les URL sont entre apostrophes : sans elles, le shell interprète `&`.
+**Statut au 2026-09-17 : non réalisée — en attente du propriétaire ; aucun agent ne l'exécute.** Les cases ci-dessous ne sont pas cochées. Le propriétaire décide si la fusion de la branche attend cette preuve (spec §9 : curl du propriétaire et valeur de `x-ratelimit-reset`).
+
+Préparation :
+
+- **Saisie de la clé.** Utiliser `read -rs CQ_CLE`, sans `export` : la clé ne s'affiche pas et n'entre pas dans l'historique.
+  - La variable reste propre au shell courant.
+  - `pnpm daemon`, `pnpm dev` et les autres processus lancés ensuite n'en héritent pas.
+- **Passage de la clé à curl.** L'en-tête `Authorization` passe par l'entrée standard (`printf … | curl -H @-`, curl ≥ 7.55).
+  - `printf` est une commande interne du shell.
+  - La clé n'apparaît donc jamais dans les arguments d'un processus visibles par `ps`.
+- **Daemon.** Le lancer avec `pnpm daemon` ; il écoute sur `127.0.0.1:8787`.
+- **URL.** Les écrire entre apostrophes : sans elles, le shell interprète `&`.
 
 - [ ] Sans en-tête → 401 (ou 200 si `CRYPTOQUANT_API_KEY` est renseignée dans `apps/web/.env`) :
   `curl -i 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30'`
 - [ ] Avec Bearer → 200, en-têtes `x-ratelimit-limit`, `x-ratelimit-remaining`, `x-ratelimit-reset` et `cache-control: private, no-store` :
-  `curl -i -H "Authorization: Bearer $CQ_CLE" 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30'`
+  `printf 'Authorization: Bearer %s\n' "$CQ_CLE" | curl -i -H @- 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30'`
 - [ ] Chemin hors liste → 404 (refus local, aucun appel amont) :
-  `curl -i -H "Authorization: Bearer $CQ_CLE" 'http://127.0.0.1:8787/cqapi/v1/btc/exchange-flows/netflow?exchange=all_exchange&window=day'`
+  `printf 'Authorization: Bearer %s\n' "$CQ_CLE" | curl -i -H @- 'http://127.0.0.1:8787/cqapi/v1/btc/exchange-flows/netflow?exchange=all_exchange&window=day'`
 - [ ] POST → 405 `allow: GET` :
-  `curl -i -X POST -H "Authorization: Bearer $CQ_CLE" 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30'`
+  `printf 'Authorization: Bearer %s\n' "$CQ_CLE" | curl -i -X POST -H @- 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30'`
 - [ ] Mineurs cotés → 200 :
-  `curl -i -H "Authorization: Bearer $CQ_CLE" 'http://127.0.0.1:8787/cqapi/v1/btc/miner-data/companies?miner=mara&window=day&limit=30'`
-- [ ] Même série sur `pnpm dev` (Vite, `127.0.0.1:5173`) : les commandes ci-dessus en remplaçant `http://127.0.0.1:8787` par `http://127.0.0.1:5173`, mêmes statuts.
+  `printf 'Authorization: Bearer %s\n' "$CQ_CLE" | curl -i -H @- 'http://127.0.0.1:8787/cqapi/v1/btc/miner-data/companies?miner=mara&window=day&limit=30'`
+- [ ] Même série sur le serveur Vite, avec les mêmes statuts attendus. `apps/web/vite.config.ts` ne fixe pas `server.host` : Vite écoute sur `localhost`, qui peut ne répondre qu'en IPv6 (`::1`). Deux façons de faire :
+  - lancer `pnpm dev` et remplacer `http://127.0.0.1:8787` par `http://localhost:5173` (URL du README) ;
+  - ou lancer `pnpm dev --host 127.0.0.1`, comme `apps/web/playwright.config.ts`, et utiliser `http://127.0.0.1:5173`.
 - [ ] Projet Vercel : **aucune** variable `CRYPTOQUANT_API_KEY` (`vercel env ls`, environnements Production, Preview et Development).
-- [ ] Session navigateur : panneau DATA « CryptoQuant x/10 min » ; première ouverture de DES → 4 appels `/cqapi` (onglet Réseau), réouverture → 0 ; première ouverture de CHAIN → 9 appels, réouverture → 0 ; retrait de la clé dans les Réglages → « clé requise pour actualiser » avec l'archive affichée.
+- [ ] Session navigateur : panneau DATA « CryptoQuant x/10 min » ; première ouverture de DES → 4 appels `/cqapi` (onglet Réseau), réouverture → 0 ; première ouverture de CHAIN → 9 appels, réouverture → 0.
+- [ ] Clé requise. Le court-circuit « J-1 archivé » (spec §4.3, étape 2) passe avant le test de la clé : ce contrôle ne s'observe que dans certaines conditions.
+  - Conditions :
+    - une série dont J-1 n'est pas encore archivé, par exemple le lendemain d'une session, avant d'ouvrir DES ;
+    - `apps/web/.env` sans `CRYPTOQUANT_API_KEY` ;
+    - la clé retirée dans les Réglages, puis DES ouvert.
+  - Attendu : badge « clé requise pour actualiser » et archive affichée.
+  - Hors de ces conditions :
+    - si J-1 est déjà archivé : archive J-1 affichée, zéro appel, aucun badge ;
+    - si `apps/web/.env` contient la clé : l'appel part avec la clé `.env` injectée par le proxy local, et aucun badge ne s'affiche.
 - [ ] Valeur réelle de `x-ratelimit-reset` (secondes ; `6` observé lors du sondage du 2026-09-16) :
-  `curl -s -D - -o /dev/null -H "Authorization: Bearer $CQ_CLE" 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30' | grep -i '^x-ratelimit-'`
+  `printf 'Authorization: Bearer %s\n' "$CQ_CLE" | curl -s -D - -o /dev/null -H @- 'http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30' | grep -i '^x-ratelimit-'`
   Valeur réelle de `x-ratelimit-reset` : en attente de la preuve manuelle du propriétaire (commande ci-dessus).
 - [ ] Fin de session : `unset CQ_CLE`.
 
@@ -1109,3 +1167,259 @@ Saisir la clé sans l'afficher ni l'inscrire dans l'historique : `read -rs CQ_CL
 - Sémantique non documentée, affichée brute : composition de `btc_all`/`eth_all`, `inverse` et unités des swaps inverses, `reported_production`/`report_accuracy`, remise à zéro de `accumulated_monthly_rewards`.
 - Noms usuels des neuf sociétés en infobulle : connaissance générale, non issue du sondage.
 - Deux onglets peuvent dépasser 10 req/min : 429 puis reprise automatique.
+
+## Revue finale de branche
+
+La revue du 2026-09-17 porte sur `3fa31e6`, soit la branche `chantier/cryptoquant` depuis la spec `2d45426`.
+
+Méthode :
+- six relecteurs Claude Opus 5, un par zone : proxys, sécurité, client, DES, CHAIN, e2e et documentation ;
+- puis une vérification adverse de chaque constat : réalité, scénario, preuve, sévérité et correction recommandée.
+
+Verdicts par zone :
+- proxys et sécurité : prêts ;
+- client, DES, CHAIN, e2e et documentation : prêts avec corrections.
+
+**Aucun constat critique. Quatre constats importants, tous corrigés.** Les mineurs retenus sont corrigés par une vague unique, en quatre étapes successives à partir de `3fa31e6` :
+- A : proxys ;
+- B : client ;
+- C : vues ;
+- D : e2e et rapport.
+
+### Importants corrigés
+
+| Constat | Défaut | Correction |
+|---|---|---|
+| `client:P1` | Aucune borne basse sur la date fournisseur : un jour aberrant (`0001-01-01`, `1970-01-01`) polluait l'archive locale et la KV, sans retour possible. | `dd07c93` : `parserLignes` écarte les jours antérieurs à J-40 (`JOURS_MAX_REPONSE = 40`). |
+| `client:P2` | Avec la seule clé `.env`, le message d'un 403 amont s'affichait sans filtre (invariant I8). | `dd07c93` : le message amont ne s'affiche que si la clé personnelle est connue et absente du message ; sinon, raison par défaut. |
+| `des:P1` | En DES, un rejet de l'`import()` du client s'affichait « série non encore archivée ». | `cf97439` : état `echecClient` et libellé « client CryptoQuant non chargé » ; parcours e2e `9f66edd`. |
+| `chain:P1` | L'en-tête CHAIN restait muet sur une offre insuffisante, une erreur ou un quota écoulé ; l'échec était invisible quand une archive existait. | `3d35aa7` : fonction pure `resumeEnTeteMineurs`, une branche par état, chaque branche testée. |
+
+### Mineurs corrigés
+
+**Étape A — proxys** (`be42d79`, `a58f03c`)
+- Vite `/cqapi` refuse en 403 les navigations, les requêtes cross-site et les destinations actives.
+- Vite valide la clé `.env` une seule fois, avec le prédicat du daemon.
+- Vite n'accepte aucune redirection : un 3xx devient un 502 sans `Location`. `cookie`, `referer` et `set-cookie` sont retirés.
+- Vercel refuse `/cqapi//…`.
+- Le prédicat Bearer est désormais strict : `^Bearer [\x21-\x7E]+$`, au plus 512 caractères.
+- Le verrou « zéro lecture d'environnement » couvre aussi `process.env`, `Bun.env` et `Deno.env`.
+- Nouveaux tests : `symbol` et `miner` dans la même requête ; 302 et 429 du daemon.
+
+**Étape B — client** (`dd07c93`)
+- Les jours `>=` aujourd'hui sont ignorés au décodage.
+- `aujourdhui` est recalculé après l'obtention du créneau.
+- Un 429 ne fait jamais reculer la reprise.
+- `x-ratelimit-reset` est lu comme un epoch en ms, un epoch en s ou un délai relatif.
+- L'écriture KV est bornée à 5 s.
+- Une KV vide est amorcée avec l'union locale.
+- Une clé saisie invalide donne « clé refusée », sans appel.
+- Le quota « x/10 min » redescend quand la fenêtre se vide.
+- Les garde-fous de chunk et d'import du store sont durcis.
+
+**Étape C — vues** (`cf97439`, `3d35aa7`)
+- DES :
+  - horloge partagée, avec une nouvelle passe au changement de jour UTC ;
+  - bandeau « aucune archive locale » ;
+  - légende min/max calculée sur les données.
+- CHAIN :
+  - source « CryptoQuant BASIC » seulement après un appel réussi ;
+  - raison conservée en « frais » ;
+  - motif « non encore relue ou non publiée ».
+
+**Étape D — e2e et rapport** (`9f66edd`, puis le commit `docs(rapport)` qui suit cette liste)
+- Réouverture sans appel 6 h 30 plus tard, le même jour UTC : seul le court-circuit J-1 peut expliquer zéro appel.
+- Fusion vérifiée sur quatre jours communs.
+- Un cas « client CryptoQuant introuvable » par section.
+- Preuve manuelle réécrite : statut, conditions de « clé requise », URL Vite, clé passée par l'entrée standard.
+- Revue indépendante B2 consignée.
+- Estimation de la marge runner corrigée.
+- Journal local signalé comme non suivi.
+
+### Mineurs laissés en l'état
+
+- **429 ou 5xx amont en `text/html`.** Vercel et le daemon le changent en 502, sans `x-ratelimit-*`.
+  - Raisons : le format réel des 429 CryptoQuant n'est pas établi, et l'aide du daemon est partagée avec d'autres fournisseurs.
+  - La preuve manuelle du propriétaire tranchera.
+- **Corps d'un 403 relayé tel quel par le daemon et Vite.**
+  - Le client ne l'affiche plus sans clé personnelle vérifiable (correction B2 de la vague).
+  - Il reste visible dans les outils réseau du navigateur du propriétaire, sur 127.0.0.1, pour une clé déjà en clair dans son `.env`.
+- **Points du registre non promus**, cosmétiques ou bornés :
+  - `jourFournisseur` plus strict que `slice(0,10)` ;
+  - pas d'écouteur `storage` multi-onglets ;
+  - un 401 sur la clé `.env` donne le message « personnelle requise » ;
+  - un 200 vide est redemandé à chaque ouverture ;
+  - une demande annulée est comptée dans `enAttente` ;
+  - un `majTs` futur reste en KV (un appel par passe, sans gel) ;
+  - `file.enAttente` est commune aux 13 séries (spec §10) ;
+  - pas de remise à zéro des chargements à la rotation de clé ;
+  - try/catch inutile en DES ;
+  - tirets Σ sans infobulle ;
+  - badge « périmé » calculé avec `some`, qualité avec `every` ;
+  - « J-1 en attente (n/9) » compte aussi les séries en quota, en erreur ou sans clé ;
+  - libellé « clé requise » sur un bandeau mixte ;
+  - tri `null` et `SansCle` sur Vercel non testés ;
+  - modèle CHAIN recalculé deux fois par rendu ;
+  - accessibilité du tableau CHAIN (`columnheader`, `aria-sort`) ;
+  - `waitForTimeout` utilisé comme preuve négative ;
+  - sélecteur `div.bg-surface`.
+
+### Budget après la vague de correction finale
+
+Commande : `pnpm check` (build `pnpm --filter @axiom/web build` de `scripts/ci.sh:35`, étape D de la vague ; JSON imprimé par `scripts/verifier-budget-build.mjs`, identique sur les deux passages de l'étape, avant `9f66edd` et avant le commit `docs(rapport)`).
+
+```json
+{
+  "limites": {
+    "octetsBruts": 1220000,
+    "octetsGzip": 360000,
+    "niveauGzip": 9
+  },
+  "initial": {
+    "fichiers": [
+      "assets/index-5JsoAXen.js",
+      "assets/indicators-DMDb8A8f.js",
+      "assets/vendor-klinecharts-B5HFhIGv.js",
+      "assets/vendor-react-BPWy1Tn9.js"
+    ],
+    "octetsBruts": 1206265,
+    "octetsGzip": 355686
+  },
+  "dynamique": {
+    "fichiers": [
+      "assets/BacktestWindow-MuZRCPNw.js",
+      "assets/BriefWindow-DazAYtGr.js",
+      "assets/BtcPowerLawWindow-BCpY7mzU.js",
+      "assets/CbpremWindow-Bz7u_dkn.js",
+      "assets/ChartSyncControls-C1z83N7t.js",
+      "assets/CommandPalette-CWooJQfE.js",
+      "assets/CorrWindow-BlJrasya.js",
+      "assets/CotWindow-CrQThFZj.js",
+      "assets/CycleWindow-DLn8LBg-.js",
+      "assets/DataWindow-7zAQZJqK.js",
+      "assets/DefillamaProPanel-BrD9aGCh.js",
+      "assets/DerivativesWindow-DOwK3NCb.js",
+      "assets/DistWindow-BZ23hiXM.js",
+      "assets/DomWindow-B9ay6wYq.js",
+      "assets/EcoWindow-Sbn8eWS4.js",
+      "assets/EconomieChaines-Aqqa1Bsu.js",
+      "assets/EvtsWindow-uOK4Bmzg.js",
+      "assets/ExpyWindow-CIK9Skjt.js",
+      "assets/FluxCapitaux-D2Q_OY5Q.js",
+      "assets/FundWindow-B-G_7mnb.js",
+      "assets/FundingMatrixWindow-B6PM2w6L.js",
+      "assets/GlobeWindow-DrjpqTVw.js",
+      "assets/LiquidationsWindow-CKQ2xprs.js",
+      "assets/MacroRatesWindow-BBrfcLjF.js",
+      "assets/MarketMapWindow-KW5Whmgc.js",
+      "assets/McapWindow-BrxIYnE9.js",
+      "assets/MineWindow-BpGcY9Zk.js",
+      "assets/NetliqWindow-CFLZmnsC.js",
+      "assets/NewsWindow-Bo5-EKKB.js",
+      "assets/NotesWindow-CIjYrjv-.js",
+      "assets/OnboardingOverlay-C0cBCcqf.js",
+      "assets/OnchainWindow-BBdAG62X.js",
+      "assets/OptionsWindow-BVLWzsjX.js",
+      "assets/PaperWindow-BWHqWXOu.js",
+      "assets/PortfolioWindow-Dq3zXRgT.js",
+      "assets/QualiteMetrique-CY5YIKHO.js",
+      "assets/ReplayWindow-BJ5aFEoF.js",
+      "assets/ScenWindow-Rkiy8dq1.js",
+      "assets/ScreenerWindow-BUGvP2Ks.js",
+      "assets/SeasonalityWindow-B1_2hB6_.js",
+      "assets/SectWindow-DwjE-4Fy.js",
+      "assets/SettingsPanel-BKbIERHO.js",
+      "assets/SqueezeWindow-ZC7sA_JC.js",
+      "assets/StablecoinsWindow-CK_As6de.js",
+      "assets/TableTriable-DR-9eKBE.js",
+      "assets/TermStructureWindow-CdGcWsWX.js",
+      "assets/VolWindow-DeMqqPvJ.js",
+      "assets/WebGLSyncSpike-CYwoDPRH.js",
+      "assets/WhalesWindow-t4wlEWSX.js",
+      "assets/bgeometrics-DsnFNPLz.js",
+      "assets/chart-sync-timeframes-CReN7yrx.js",
+      "assets/composite-BRZzuF3o.js",
+      "assets/corr-iDBvqMEW.js",
+      "assets/cot-DAUYItK1.js",
+      "assets/cryptoquant-BiPFeca_.js",
+      "assets/cryptoquant-CL-Euadw.js",
+      "assets/csv-DChTGBa8.js",
+      "assets/defillamaKey-w65eMbpN.js",
+      "assets/economieChaines-i_z13b0v.js",
+      "assets/etherscan-DZMAmNgI.js",
+      "assets/expy-3I9sQwqM.js",
+      "assets/fluxCapitaux-BYBF7znl.js",
+      "assets/fundingCrossExchange-DGhRx7_c.js",
+      "assets/horloge-B5kycDh1.js",
+      "assets/lienRetours-Bo4sHoSC.js",
+      "assets/liquidationHeat-DcCDM5Lf.js",
+      "assets/macroSeries-CgJwjFe8.js",
+      "assets/mempool-BIizKZuY.js",
+      "assets/onchainMetriques-CAvmVhUN.js",
+      "assets/portRisque-D1OBcCE_.js",
+      "assets/qualiteChain-B09JoMLq.js",
+      "assets/squeezeWindow.util-b1SkKz1T.js",
+      "assets/thermocap-ByFKPheH.js",
+      "assets/treasuryYields-DdRuQ3ii.js",
+      "assets/treemap-D9x5LE-E.js",
+      "assets/tresoreriesBtc-BoXt6OFl.js",
+      "assets/useDomaineZoom-Bxy48dSr.js",
+      "assets/viewportSync-Dx3Gnz4B.js",
+      "assets/volCone-BZveA2ku.js"
+    ],
+    "octetsBruts": 1018998,
+    "octetsGzip": 373863
+  }
+}
+```
+
+Budget initial final, mesuré par `pnpm check` à l'étape D : **1 206 265 octets bruts / 355 686 gzip** (plafonds : 1 220 000 / 360 000).
+- Fichiers initiaux : `index`, `indicators`, `vendor-klinecharts`, `vendor-react`. Aucun chunk CryptoQuant n'en fait partie.
+- Évolution au fil de la vague :
+
+| Étape | Gzip initial | Cause |
+|---|---|---|
+| Clôture `3fa31e6` et étape A | 355 637 | — |
+| Étape B | 355 648 | hash des chunks CryptoQuant |
+| Étape C | 355 686 | chunk `horloge` ajouté aux dépendances préchargées de DES |
+| Étape D | 355 686 | inchangé : les e2e n'entrent pas dans le bundle |
+
+- Marge locale : 4 314 gzip. Marge runner estimée : ≈ 3 076 gzip, pour un seuil de vigilance d'environ 3 000 (détail sous « Tableau du budget JS initial (avant/après) »).
+
+### Contrôles
+
+- `pnpm check`, avant `9f66edd` puis avant le commit `docs(rapport)` : **vert**. Typecheck OK, build OK.
+
+  | Paquet | Fichiers | Tests |
+  |---|---|---|
+  | indicators | 206 | 780 |
+  | alerts | 2 | 59 |
+  | backtest | 4 | 95 |
+  | daemon | 32 | 630 (0 échec) |
+  | web | 340 | 4 643 |
+
+- `AXIOM_E2E_PORT=5239 bash scripts/ci.sh --e2e`, sur `9f66edd` : **81 passed (1.8m)**, aucun échec ni nouvel essai. Parcours du lot :
+
+```text
+  ✓   1 [chromium] › e2e/chain-mineurs-cotes.e2e.ts:129:1 › CHAIN : mineurs cotés — neuf appels au montage, lecture et tri au dépliage, aucun appel ensuite (3.3s)
+  ✓   2 [chromium] › e2e/chain-mineurs-cotes.e2e.ts:213:1 › CHAIN : mineurs cotés — une société en 503, Σ partielle et couverture 8/9 (1.2s)
+  ✓   3 [chromium] › e2e/chain-mineurs-cotes.e2e.ts:241:1 › CHAIN : mineurs cotés — client CryptoQuant introuvable (import() rejeté), en-tête et vue le disent, aucun appel (720ms)
+  ✓   9 [chromium] › e2e/des-flux-takers.e2e.ts:180:1 › DES : flux takers chargés au montage (4 appels), repliés par défaut, sans appel sur segmentés, source ni réouverture (1.4s)
+  ✓  10 [chromium] › e2e/des-flux-takers.e2e.ts:265:1 › DES : archive locale antérieure fusionnée sans doublon, jours communs à la valeur fournisseur (début 2026-08-07) (589ms)
+  ✓  11 [chromium] › e2e/des-flux-takers.e2e.ts:295:1 › DES : 429 CryptoQuant — délai de reprise affiché, archive servie et non réécrite (879ms)
+  ✓  12 [chromium] › e2e/des-flux-takers.e2e.ts:323:1 › DES : 401 CryptoQuant — clé refusée affichée avec l'accès aux Réglages, un seul appel, rien d'archivé (923ms)
+  ✓  13 [chromium] › e2e/des-flux-takers.e2e.ts:341:1 › DES : client CryptoQuant introuvable (import() rejeté) — en-tête et vue le disent, aucun appel, archive intacte (612ms)
+```
+
+- Serveur des parcours : Vite de développement (`pnpm dev --host 127.0.0.1`).
+  - Le client est demandé à `/src/data/onchain/cryptoquant.ts` (ressource `script`, sans paramètre).
+  - Les cas « client introuvable » répondent 404 sur ce chemin exact.
+- Preuves rouges, par mutation temporaire annulée avant le commit :
+
+  | Mutation | Parcours | Avant la vague | Avec les parcours de la vague |
+  |---|---|---|---|
+  | Court-circuit J-1 neutralisé | réouverture DES et CHAIN | verts | rouges : 8 appels au lieu de 4, 18 au lieu de 9 |
+  | `fusionner` garde l'ancienne valeur | fusion DES | vert | rouge sur le 2026-08-17 |
+  | `setEchecClient(true)` retiré | cas « client introuvable » | — | rouges : en-têtes « série non encore archivée » (DES) et « archive vide » (CHAIN) |
+
+- Preuve manuelle du propriétaire : toujours en attente (voir sa section).

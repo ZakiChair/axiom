@@ -1456,57 +1456,74 @@ Décision du propriétaire mise en œuvre (options 1 et 2 ci-dessus) par les tâ
 segment crédits dans `formatQuota` (`apps/web/src/components/HealthPanel.tsx`), seule surface DATA
 concernée (le type `QuotaSource.credits` existe déjà, posé par la tâche 2 en type seul).
 
+**Correction associée, dans le même fichier** : `panelSignature` (la signature qui décide si le
+panneau « Santé sources » se redessine) n'incluait que `utilise/limite/jour.utilise` du quota, pas
+`credits.utilise`. Or `cryptoquant.ts` publie le quota **deux fois par appel** avec le même
+`utilise` (fenêtre minute inchangée) : une fois au créneau (`horodatages.push` puis
+`publierQuota()`), une fois à la réponse (`comptabiliserCredits` puis `publierQuota()` de nouveau,
+`cryptoquant.ts:792-793`) — seul `credits.utilise` diffère entre les deux. Avec l'ancienne
+signature, cette seconde publication ne déclenchait aucun rendu : le segment crédits restait figé
+sur l'ancienne valeur jusqu'à ce que la fenêtre minute expire (jusqu'à 60 s plus tard,
+`FENETRE_MS`), ce qui aurait rendu le segment crédits pratiquement invisible en usage normal
+(quelques appels par jour). Corrigé en ajoutant `credits.utilise` à la signature ; `panelSignature`
+exportée pour un test PURE dédié (le projet ne teste pas le rendu React — cf. l'en-tête du fichier
+de test — mais cette fonction est une logique pure comme `formatQuota`/`degradedLevel`).
+`apps/web/src/components/DataWindow.tsx` a la même logique dupliquée (`signatureRegistre`,
+`DataWindow.tsx:33-43`, même bug) mais n'est pas un fichier attribué à cette tâche : **non
+corrigé ici**, signalé pour un arbitrage/lot séparé.
+
 ### Budget après le lot crédits
 
 Mesuré par `pnpm check` (build `@axiom/web`, script `scripts/verifier-budget-build.mjs`), après le
-commit de cette tâche 4 :
+commit final de cette tâche 4 (segment `formatQuota` + correction `panelSignature`) :
 
 ```json
 {
   "limites": { "octetsBruts": 1220000, "octetsGzip": 360000, "niveauGzip": 9 },
   "initial": {
     "fichiers": [
-      "assets/index-DTXMdqIE.js",
+      "assets/index-D1x_ABc_.js",
       "assets/indicators-DMDb8A8f.js",
       "assets/vendor-klinecharts-B5HFhIGv.js",
       "assets/vendor-react-BPWy1Tn9.js"
     ],
-    "octetsBruts": 1206394,
-    "octetsGzip": 355753
+    "octetsBruts": 1206448,
+    "octetsGzip": 355745
   }
 }
 ```
 
 Delta depuis la référence du plan, **avant tout le lot crédits** (1 206 265 / 355 686) :
-**+129 o brut / +67 o gzip**.
+**+183 o brut / +59 o gzip**.
 
 Répartition dans le lot (mesures des rapports de tâches précédentes ; note : le brut est
-déterministe mais le gzip mesuré varie de ±1 o entre deux exécutions du build sur le même code —
-`task-2-report.md` mesure 355 688, `task-3-report.md` remesure ensuite 355 687 pour ce même état ;
-bruit de build, pas un delta réel) :
+déterministe mais le gzip mesuré varie de quelques octets entre deux exécutions du build sur un
+code identique — `task-2-report.md` mesure 355 688 pour un état que `task-3-report.md` remesure
+ensuite à 355 687 ; à l'intérieur même de cette tâche 4, la mesure intermédiaire après le seul
+segment `formatQuota` donnait 355 753, puis 355 745 après la correction `panelSignature` (qui
+*ajoute* du code) : bruit de build lié aux noms courts générés par le minifieur, pas un delta
+réel de cet ordre) :
 
-| Étape | Brut | Gzip (mesure la plus récente pour cet état) | Delta gzip cumulé |
+| Étape | Brut | Gzip (dernière mesure pour cet état) | Delta gzip cumulé |
 |---|---|---|---|
 | Avant le lot (référence plan) | 1 206 265 | 355 686 | — |
 | Après tâches 1-2 (`task-2-report.md`) | 1 206 296 | 355 688 | +2 |
 | Après tâche 3 (`task-3-report.md`, +0, remesuré) | 1 206 296 | 355 687 | +1 |
-| **Après tâche 4 (cette mesure)** | **1 206 394** | **355 753** | **+67** |
+| **Après tâche 4 (mesure finale, cette section)** | **1 206 448** | **355 745** | **+59** |
 
-La tâche 4 contribue donc, à elle seule, **+98 o brut / ≈+66 o gzip** (355 753 − 355 687, à ±1 o de
-bruit de build près) : le segment crédits de
-`formatQuota` (une branche ternaire supplémentaire, littéraux FR compris) est le seul changement de
-cette tâche dans le bundle initial (`HealthPanel.tsx` est importé statiquement par la sidebar, donc
-dans le chunk `index`, jamais chargé à la demande — contrairement à `cryptoquant.ts`). Le
-commentaire JSDoc ajouté n'entre pas dans ce coût : les commentaires sont retirés par le build de
-production.
+La tâche 4 contribue donc, à elle seule, **+152 o brut / ≈+58 o gzip** (355 745 − 355 687, à
+quelques octets de bruit de build près) pour le segment `formatQuota` **et** la correction
+`panelSignature`. `HealthPanel.tsx` est importé statiquement par `App.tsx`
+(`apps/web/src/App.tsx:23,323` ; confirmé par grep, pas seulement déduit du delta) dans le chunk
+`index`, jamais chargé à la demande — contrairement à `cryptoquant.ts`. Les commentaires JSDoc
+ajoutés n'entrent pas dans ce coût : retirés par le build de production.
 
-**Écart consigné (non bloquant)** : la cible « delta visé ≤ ~60 o gzip pour tout le lot » (plan,
-« Contraintes globales ») est dépassée de 7 o gzip (+67 au lieu de ≤ 60) dès cette tâche 4, alors
-qu'il reste encore la tâche 5 (statuts `credits` dans DES et CHAIN, avec leurs propres littéraux de
-raison recopiés). Le plafond BLOQUANT du script (`verifier-budget-build.mjs`, 360 000 gzip) reste
-lui largement respecté : marge de 4 247 o gzip après cette tâche. Je n'ai rien réduit pour rentrer
-sous les 60 o : le texte du segment (« · ≈{utilise}/{limite} crédits {jours} j ») est celui imposé
-littéralement par le plan et la spec §13, et aucun formateur de milliers n'était déjà importé par
-`HealthPanel.tsx` (consigne du plan : ne pas en ajouter un pour ce seul usage). À arbitrer par le
-propriétaire ou l'orchestrateur du lot avant la tâche 5 si le dépassement de la cible souple pose
-problème ; le budget dur, lui, n'est pas en cause.
+**Cible de budget** : « delta visé ≤ ~60 o gzip pour tout le lot » (plan, « Contraintes globales »)
+— **respectée** à ce stade (+59 ≤ 60), alors qu'il reste encore la tâche 5 (statuts `credits` dans
+DES et CHAIN, avec leurs propres littéraux de raison recopiés, qui ajouteront un peu de code hors
+bundle initial en principe — ces vues sont chargées à la demande). Marge restante avant la cible
+souple : 1 o gzip ; marge avant le plafond BLOQUANT du script (360 000 gzip) : 4 255 o gzip. Le
+premier commit de cette tâche (segment `formatQuota` seul) mesurait +67 o gzip, au-dessus de la
+cible ; la correction `panelSignature`, en ajoutant du code, a paradoxalement fait redescendre la
+mesure sous la cible — pur effet du bruit de compression gzip décrit ci-dessus, pas d'un
+allègement du code. À surveiller à la tâche 5, sans que cela bloque quoi que ce soit ici.

@@ -6,7 +6,7 @@
  * désormais partagé et testé dans lib/format.test.ts.
  */
 import { describe, it, expect } from "vitest";
-import { dotClass, sourceLabel, formatQuota, degradedLevel, etatLabel } from "./HealthPanel";
+import { dotClass, sourceLabel, formatQuota, degradedLevel, etatLabel, panelSignature } from "./HealthPanel";
 import type { SanteSource } from "../store/health";
 
 /** Fabrique une SanteSource minimale pour les tests de degradedLevel. */
@@ -70,6 +70,26 @@ describe("formatQuota", () => {
         credits: { utilise: 195, limite: 10000, jours: 31 },
       })
     ).toBe("3/8 min · 142/800 j · ≈195/10000 crédits 31 j");
+  });
+});
+
+describe("panelSignature (régression : le compteur de crédits doit déclencher un re-rendu)", () => {
+  it("change quand seul `credits.utilise` change, sans que `utilise/limite/jour` bougent", () => {
+    // Reproduit exactement `publierQuota()` (cryptoquant.ts) : à chaque créneau ET à chaque 200,
+    // avec `utilise` (fenêtre minute) identique entre les deux publications (la fenêtre n'a pas
+    // encore expiré). Si la signature ignore `credits`, le panneau ne se redessine pas au 200 et
+    // le segment DATA reste affiché jusqu'à 60 s en retard (prochaine expiration de fenêtre).
+    const avant: SanteSource = {
+      source: "cryptoquant",
+      etat: "polling",
+      dernierMessageTs: 0,
+      quota: { utilise: 1, limite: 10, fenetre: "1min", credits: { utilise: 195, limite: 10000, jours: 31 } },
+    };
+    const apres: SanteSource = {
+      ...avant,
+      quota: { ...avant.quota!, credits: { utilise: 210, limite: 10000, jours: 31 } },
+    };
+    expect(panelSignature({ cryptoquant: avant })).not.toBe(panelSignature({ cryptoquant: apres }));
   });
 });
 

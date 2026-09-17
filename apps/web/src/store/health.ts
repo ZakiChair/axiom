@@ -37,6 +37,13 @@ export interface QuotaSource {
    * Data : 8 req/min ET ~800 crédits/jour). Affichée en second segment (« … · 142/800 j »).
    */
   jour?: { utilise: number; limite: number };
+  /**
+   * Composante CRÉDITS optionnelle, sur une fenêtre GLISSANTE de `jours` jours UTC (ex.
+   * CryptoQuant BASIC : 10 000 crédits/mois, 15 par appel réussi). `utilise` est ce que CE
+   * navigateur a consommé, pas un solde lu chez le fournisseur. Affichée en segment
+   * (« … · ≈195/10000 crédits 31 j »).
+   */
+  credits?: { utilise: number; limite: number; jours: number };
 }
 
 /** Santé d'une source à un instant donné. */

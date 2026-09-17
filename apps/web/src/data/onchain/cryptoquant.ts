@@ -5,7 +5,7 @@
  */
 import { CRYPTOQUANT_PREFIXE, IDS_MINEURS_CQ, cleCryptoQuantValide, type IdMineurCq } from "../../../../../shared/cryptoquant-proxy";
 import { RAISON_CLE_CRYPTOQUANT, cryptoquantKeyStore, getCryptoquantKey } from "../../store/cryptoquant";
-import { healthStore } from "../../store/health";
+import { healthStore, type QuotaSource } from "../../store/health";
 import { IS_VERCEL } from "../../lib/deployment";
 import { detectDaemon, kvPut, urlDaemon } from "../daemon";
 import { dateOnchain, nombreOnchain } from "./cohorts";
@@ -371,6 +371,96 @@ export async function ecrireArchiveCq(serie: SerieCq, archive: ArchiveCq, kv: Et
   return { local, kv: await ecrireKvBornee(serie, archive, texte) };
 }
 
+// --- Budget de crédits (spec §13) ---
+
+/**
+ * L'offre BASIC reçoit 10 000 CRÉDITS par mois, remis à zéro à la date d'inscription (inconnue
+ * du client, sans report) ; un appel réussi coûte 15 crédits (constat du 2026-09-17), un appel
+ * en échec n'est pas facturé, et à crédits épuisés l'API répond 402. Aucune API ne donne le
+ * solde : le client compte donc ce QU'IL consomme sur une fenêtre glissante de 31 jours UTC —
+ * borne supérieure de la consommation depuis n'importe quelle date de remise à zéro — et
+ * suspend ses appels au plafond de sécurité, qui garde une marge sous les 10 000.
+ *
+ * Compteur PAR NAVIGATEUR : les appels faits en ligne de commande, depuis un autre poste ou
+ * depuis le déploiement Vercel ne sont pas vus ; le 402 reste le filet.
+ */
+export const PLAFOND_CREDITS_CQ = 9_000;
+export const COUT_CREDITS_DEFAUT_CQ = 15;
+/** Quota mensuel de l'offre, publié dans DATA (le libellé du budget porte « 10 000 » en clair). */
+const LIMITE_CREDITS_MOIS = 10_000;
+/** Fenêtre glissante : le jour UTC courant et les 30 précédents. */
+const FENETRE_CREDITS_JOURS = 31;
+/** Hors du préfixe d'archive `axiom:onchain:cq:` ; reste sur le poste (`store/persist.ts`). */
+const CLE_CREDITS = "axiom:cryptoquant:credits:v1";
+/** `x-credit-cost` hors de [0, 1 000] ou non entier : en-tête ignoré, coût par défaut. */
+const COUT_CREDITS_MAX = 1_000;
+
+/** Copie mémoire, source de vérité de la session : une écriture en échec ne la perd pas. */
+let joursCredits: Record<string, number> | null = null;
+
+/**
+ * Jour retenu par la fenêtre : ni sorti par l'ancienneté, ni POSTÉRIEUR au jour courant. Un jour
+ * futur (écrit par un poste à l'horloge en avance, comme au parseur d'archive) ne sortirait
+ * jamais de la fenêtre et gonflerait la somme indéfiniment : ignoré, puis élagué.
+ */
+function dansFenetreCredits(jour: string, aujourdhui: string): boolean {
+  return jour >= decalerJour(aujourdhui, -(FENETRE_CREDITS_JOURS - 1)) && jour <= aujourdhui;
+}
+
+/**
+ * Lecture PARESSEUSE, au premier besoin seulement : illisible ou de version inconnue → vide
+ * (remplacé à la prochaine écriture) ; un jour ou un total absurde est ignoré un par un, comme
+ * au parseur d'archive, pour que la somme reste un entier de crédits.
+ */
+function creditsMemoire(): Record<string, number> {
+  if (joursCredits !== null) return joursCredits;
+  const jours: Record<string, number> = {};
+  joursCredits = jours;
+  try {
+    const brut = localStorage.getItem(CLE_CREDITS);
+    if (brut === null) return jours;
+    const valeur = JSON.parse(brut) as unknown;
+    if (!estObjet(valeur) || valeur["v"] !== 1) return jours;
+    const stockes = valeur["jours"];
+    if (!estObjet(stockes)) return jours;
+    for (const [jour, n] of Object.entries(stockes)) {
+      if (dateOnchain(jour) !== null && typeof n === "number" && Number.isInteger(n) && n >= 0) jours[jour] = n;
+    }
+  } catch {
+    // Illisible (JSON cassé, stockage refusé) : traité comme vide.
+  }
+  return jours;
+}
+
+/** Somme entière consommée sur la fenêtre ; les jours écartés ne comptent plus, sans écriture. */
+function sommeCredits(now: number): number {
+  const aujourdhui = jourUtc(now);
+  let somme = 0;
+  for (const [jour, n] of Object.entries(creditsMemoire())) if (dansFenetreCredits(jour, aujourdhui)) somme += n;
+  return somme;
+}
+
+/** Coût facturé d'une réponse 200 : `x-credit-cost` entier dans [0, 1 000], sinon 15. */
+function coutCredits(entete: string | null): number {
+  const brut = entete?.trim() ?? "";
+  if (!/^\d+$/.test(brut)) return COUT_CREDITS_DEFAUT_CQ;
+  const n = Number(brut);
+  return n <= COUT_CREDITS_MAX ? n : COUT_CREDITS_DEFAUT_CQ;
+}
+
+/** Impute le coût au jour UTC courant, élague la fenêtre, puis écrit (échec toléré). */
+function comptabiliserCredits(entete: string | null): void {
+  const aujourdhui = jourUtc(Date.now());
+  const jours = creditsMemoire();
+  jours[aujourdhui] = (jours[aujourdhui] ?? 0) + coutCredits(entete);
+  for (const jour of Object.keys(jours)) if (!dansFenetreCredits(jour, aujourdhui)) delete jours[jour];
+  try {
+    localStorage.setItem(CLE_CREDITS, JSON.stringify({ v: 1, jours }));
+  } catch {
+    // Stockage refusé : la copie mémoire reste la source de vérité de la session.
+  }
+}
+
 // --- Cadence : file unique 10 req / 60 s ---
 
 const SOURCE_SANTE = "cryptoquant";
@@ -426,6 +516,16 @@ function purgerHorodatages(now: number): void {
   }
 }
 
+/** Fenêtre minute (file) et budget de crédits (§13) : une seule publication, jamais deux. */
+function quotaCq(): QuotaSource {
+  return {
+    utilise: horodatages.length,
+    limite: LIMITE_MIN,
+    fenetre: "1min",
+    credits: { utilise: sommeCredits(Date.now()), limite: LIMITE_CREDITS_MOIS, jours: FENETRE_CREDITS_JOURS },
+  };
+}
+
 /**
  * Publie le quota (fenêtre DATA) et se replanifie à l'expiration du plus ancien horodatage :
  * le compte redescend sans attendre le créneau suivant. Toute minuterie précédente est annulée ;
@@ -434,7 +534,7 @@ function purgerHorodatages(now: number): void {
 function publierQuota(): void {
   clearTimeout(minuteurQuota);
   minuteurQuota = undefined;
-  healthStore.getState().setQuota(SOURCE_SANTE, { utilise: horodatages.length, limite: LIMITE_MIN, fenetre: "1min" });
+  healthStore.getState().setQuota(SOURCE_SANTE, quotaCq());
   const plusAncien = horodatages[0];
   if (plusAncien === undefined) return;
   minuteurQuota = setTimeout(() => {
@@ -558,17 +658,34 @@ export const RAISON_VERSION_CRYPTOQUANT = "Archive CryptoQuant écrite par une v
 export const RAISON_ANNULE_CRYPTOQUANT = "Chargement CryptoQuant annulé.";
 const RAISON_OFFRE_DEFAUT = "Offre CryptoQuant insuffisante pour cette série (403).";
 
+/**
+ * Les deux raisons du statut `credits` (§13). CONTRAT avec les vues : DES et CHAIN les
+ * RECOPIENT en littéraux locaux et n'importent aucune VALEUR de ce module — il doit rester dans
+ * son chunk chargé à la demande (`chunkCryptoquant.test.ts`). Leurs tests comparent ces
+ * littéraux à ces exports ; toute retouche du texte doit donc rester synchrone des deux côtés.
+ */
+export const RAISON_CREDITS_EPUISES_CQ =
+  "Crédits mensuels CryptoQuant épuisés (402) : plus d'appel avant la remise à zéro mensuelle ; archive affichée.";
+
+/** `n` = somme entière consommée sur la fenêtre ; « 10 000 » en clair (= `LIMITE_CREDITS_MOIS`). */
+export function raisonBudgetCreditsCq(n: number): string {
+  return `Budget de crédits CryptoQuant atteint (≈ ${n}/10 000 sur 31 j, ce navigateur) : appels suspendus pour préserver le mois ; archive affichée.`;
+}
+
 function raisonQuota(restantMs: number): string {
   return `Quota CryptoQuant atteint (429) ; nouvel essai dans ${Math.max(1, Math.ceil(restantMs / 1000))} s.`;
 }
 
-export type StatutCq = "pret" | "cle-requise" | "quota" | "offre" | "erreur";
+export type StatutCq = "pret" | "cle-requise" | "quota" | "offre" | "credits" | "erreur";
 export interface ChargementCq { serie: SerieCq; statut: StatutCq; raison: string | null; archive: ArchiveCq | null; diagnostic: DiagnosticCq; persistance: PersistanceCq; appel: boolean }
 
 /** Refus mémorisés en session pour la `version` de clé qui les a produits. */
 type FamilleCq = "taker" | "mineurs";
 const refusOffre = new Map<FamilleCq, { version: number; raison: string }>();
 let refusCle: { version: number; raison: string } | null = null;
+/** 402 : mémoire GLOBALE (toutes familles), valable 24 h — un nouvel essai est gratuit. */
+const MEMOIRE_CREDITS_MS = 24 * 3600_000;
+let refusCredits: { version: number; ts: number } | null = null;
 
 function familleSerie(serie: SerieCq): FamilleCq {
   return estSerieMineur(serie) ? "mineurs" : "taker";
@@ -629,8 +746,25 @@ async function chargerUneFois(serie: SerieCq, signal: AbortSignal): Promise<Char
   // `majTs` futur (horloge d'un poste en avance, ou relu tel via `unionArchives`) traité comme expiré :
   // sinon la différence négative reste `< REPRISE_MS` indéfiniment et gèle la série.
   if (archive !== null && archive.majTs !== null && archive.majTs <= now && now - archive.majTs < REPRISE_MS) return fin("pret", raisonLecture, false);
+  /**
+   * §13 : mémoire du 402 puis plafond de crédits, contrôlés AVANT le créneau (une série dans sa
+   * reprise reste `pret` sans appel) puis de nouveau APRÈS l'avoir obtenu — une autre série a pu
+   * répondre entre-temps. Dans les deux cas, zéro appel.
+   */
+  const refusBudget = (): ChargementCq | null => {
+    const maintenant = Date.now();
+    if (refusCredits !== null && refusCredits.version === version && maintenant - refusCredits.ts < MEMOIRE_CREDITS_MS) {
+      return fin("credits", RAISON_CREDITS_EPUISES_CQ, false);
+    }
+    const somme = sommeCredits(maintenant);
+    return somme + COUT_CREDITS_DEFAUT_CQ > PLAFOND_CREDITS_CQ ? fin("credits", raisonBudgetCreditsCq(somme), false) : null;
+  };
+  const refusAvantCreneau = refusBudget();
+  if (refusAvantCreneau !== null) return refusAvantCreneau;
   if (!(await acquerirCreneauCq(signal))) return fin("erreur", RAISON_ANNULE_CRYPTOQUANT, false);
   aujourdhui = jourUtc(Date.now());
+  const refusApresCreneau = refusBudget();
+  if (refusApresCreneau !== null) return refusApresCreneau;
 
   // Clé personnelle seulement ; sans elle, le proxy Vite/daemon injecte le repli `.env`.
   const headers: Record<string, string> = { accept: "application/json" };
@@ -643,6 +777,12 @@ async function chargerUneFois(serie: SerieCq, signal: AbortSignal): Promise<Char
       signal: AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]),
     });
     noterReponseCq(res);
+    // Seul un 200 est facturé (§13) ; le coût est lu AVANT tout accès au corps, et une réponse
+    // vide ou invalide compte donc comme les autres.
+    if (res.status === 200) {
+      comptabiliserCredits(res.headers.get("x-credit-cost"));
+      publierQuota();
+    }
     if (res.status === 401) {
       const raison = cle !== null ? RAISON_CLE_REFUSEE_CRYPTOQUANT : RAISON_CLE_CRYPTOQUANT;
       if (versionCle() === version) refusCle = { version, raison };
@@ -654,6 +794,12 @@ async function chargerUneFois(serie: SerieCq, signal: AbortSignal): Promise<Char
       return fin("offre", raison, true);
     }
     if (res.status === 429) return fin("quota", raisonQuota((repriseTs ?? Date.now()) - Date.now()), true);
+    // Crédits mensuels épuisés : raison FIXE, le corps amont n'est jamais lu.
+    if (res.status === 402) {
+      if (versionCle() === version) refusCredits = { version, ts: Date.now() };
+      healthStore.getState().marquerErreur(SOURCE_SANTE, "CryptoQuant : crédits mensuels épuisés");
+      return fin("credits", RAISON_CREDITS_EPUISES_CQ, true);
+    }
     if (res.status !== 200) {
       healthStore.getState().marquerErreur(SOURCE_SANTE, `CryptoQuant HTTP ${res.status}`);
       return fin("erreur", RAISON_ERREUR_CRYPTOQUANT, true);
@@ -712,3 +858,10 @@ export function chargerSerieCq(serie: SerieCq, signal?: AbortSignal): Promise<Ch
     void courant.promesse.then(finir);
   });
 }
+
+/**
+ * Premier chargement du module (DES ou CHAIN ouvre sa section) : le budget déjà consommé sur ce
+ * navigateur est publié dans DATA sans attendre un créneau. Somme NULLE : rien n'est publié, pour
+ * ne pas créer une ligne de santé « cryptoquant » alors qu'aucun appel n'a eu lieu (I9, I10).
+ */
+if (sommeCredits(Date.now()) > 0) publierQuota();

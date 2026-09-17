@@ -231,7 +231,8 @@ describe("CryptoQuant : file 10 req / 60 s (I6, I7)", () => {
     const toutes = Array.from({ length: 13 }, () => cq.acquerirCreneauCq(s).then((ok) => { acquis += ok ? 1 : 0; return ok; }));
     await vider();
     expect([acquis, cq.etatFileCq()]).toEqual([10, { enAttente: 3, repriseTs: null }]);
-    expect(healthStore.getState().sources.cryptoquant?.quota).toEqual({ utilise: 10, limite: 10, fenetre: "1min" });
+    // Segment crédits publié avec le quota minute (§13) : rien consommé ici, donc 0.
+    expect(healthStore.getState().sources.cryptoquant?.quota).toEqual({ utilise: 10, limite: 10, fenetre: "1min", credits: { utilise: 0, limite: 10_000, jours: 31 } });
     await avancer(59_999);
     expect(acquis).toBe(10);
     await avancer(1);
@@ -371,6 +372,9 @@ describe("CryptoQuant : file 10 req / 60 s (I6, I7)", () => {
 const brute = (jour: string) => ({ datetime: `${jour} 00:00:00`, trade_count: 1, base_volume: 2, quote_volume: 3, base_buy_volume: 4,
   quote_buy_volume: 5, base_sell_volume: 6, quote_sell_volume: 7, vwap: 8, buy_ratio: 0.5, buy_sell_ratio: 1, buy_count: 9, sell_count: 10 });
 const api200 = () => Response.json({ status: { code: 200 }, result: { data: plage(-30, -1).reverse().map(brute) } });
+/** Même 200 que `api200`, avec les en-têtes de réponse voulus (`x-credit-cost`). */
+const api200Entetes = (headers: Record<string, string>) => () =>
+  Response.json({ status: { code: 200 }, result: { data: plage(-30, -1).reverse().map(brute) } }, { headers });
 const statut = (status: number, message = "", headers: Record<string, string> = {}) => Response.json({ status: { code: status, message } }, { status, headers });
 const appels = (f: ReturnType<typeof reseau>) => f.mock.calls.filter(([u]) => String(u).startsWith("/cqapi/"));
 const SIX_H = 6 * 3600_000;
@@ -638,5 +642,200 @@ describe("CryptoQuant : la clé n'apparaît nulle part (I8)", () => {
     expect([appels(f).length, appels(f)[0]?.[1]?.headers]).toEqual([1, { accept: "application/json" }]);
     const traces = [...res, cq.etatFileCq(), healthStore.getState().sources].map((t) => JSON.stringify(t));
     expect(traces.filter((t) => t.includes(marqueur))).toEqual([]);
+  });
+});
+
+// --- Budget de crédits (§13, tâche 2) ---
+const CLE_CREDITS = "axiom:cryptoquant:credits:v1";
+const credits = () => JSON.parse(localStorage.getItem(CLE_CREDITS) ?? "null") as { v: number; jours: Record<string, number> } | null;
+const poserCredits = (jours: Record<string, unknown>) => localStorage.setItem(CLE_CREDITS, JSON.stringify({ v: 1, jours }));
+const sante = async () => (await import("../../store/health")).healthStore;
+
+describe("CryptoQuant : budget de crédits (§13, C1 à C4)", () => {
+  beforeEach(() => { reinitialiser(); cle.valeur = "perso"; vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(T0); });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+  it.each([
+    ["x-credit-cost: 15", { "x-credit-cost": "15" }, 15],
+    ["sans en-tête", {}, 15],
+    ["x-credit-cost: 7 (coût réel moindre)", { "x-credit-cost": "7" }, 7],
+    ["x-credit-cost: 0", { "x-credit-cost": "0" }, 0],
+    ["x-credit-cost: 1000 (borne haute)", { "x-credit-cost": "1000" }, 1_000],
+    ["x-credit-cost: abc", { "x-credit-cost": "abc" }, 15],
+    ["x-credit-cost vide", { "x-credit-cost": " " }, 15],
+    ["x-credit-cost: -1", { "x-credit-cost": "-1" }, 15],
+    ["x-credit-cost: 1.5", { "x-credit-cost": "1.5" }, 15],
+    ["x-credit-cost: 1001", { "x-credit-cost": "1001" }, 15],
+  ] as const)("C2 — 200 (%s) : coût compté au jour UTC courant et publié dans DATA", async (_n, entetes, attendu) => {
+    const cq = await import("./cryptoquant");
+    const healthStore = await sante();
+    poser(arch(plage(-30, -2), null));
+    reseau(api200Entetes({ ...entetes }));
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: true });
+    expect(credits()).toEqual({ v: 1, jours: { [J(0)]: attendu } });
+    expect(healthStore.getState().sources.cryptoquant?.quota).toEqual({ utilise: 1, limite: 10, fenetre: "1min",
+      credits: { utilise: attendu, limite: 10_000, jours: 31 } });
+  });
+
+  it.each([
+    ["401", () => statut(401, "", { "x-credit-cost": "15" })],
+    ["402", () => statut(402, "", { "x-credit-cost": "15" })],
+    ["403", () => statut(403, "Professional plan and above", { "x-credit-cost": "15" })],
+    ["429", () => statut(429, "", { "x-credit-cost": "15", "retry-after": "1" })],
+    ["500", () => new Response("panne", { status: 500, headers: { "x-credit-cost": "15" } })],
+    ["réseau", () => { throw new TypeError("échec"); }],
+  ] as const)("C2 — échec %s : 0 crédit compté, compteur jamais écrit", async (_n, api) => {
+    const cq = await import("./cryptoquant");
+    const healthStore = await sante();
+    poser(arch(plage(-30, -2), null));
+    reseau(api);
+    expect((await cq.chargerSerieCq("taker:spot:btc")).appel).toBe(true);
+    expect(credits()).toBeNull();
+    expect(healthStore.getState().sources.cryptoquant?.quota?.credits?.utilise).toBe(0);
+  });
+
+  it("C1 — 402 : statut credits, raison fixe, santé, mémoire globale 24 h, effacée par setKey ; corps jamais lu", async () => {
+    const cq = await import("./cryptoquant");
+    const healthStore = await sante();
+    const { cryptoquantKeyStore } = await import("../../store/cryptoquant");
+    const MARQUEUR = "MARQUEUR-CORPS-402";
+    poser(arch(plage(-30, -2), null));
+    const setItem = vi.spyOn(localStorage, "setItem");
+    const f = reseau(() => statut(402, MARQUEUR));
+    const r = await cq.chargerSerieCq("taker:spot:btc");
+    expect(r).toMatchObject({ statut: "credits", raison: cq.RAISON_CREDITS_EPUISES_CQ, appel: true });
+    expect(r.raison).toBe("Crédits mensuels CryptoQuant épuisés (402) : plus d'appel avant la remise à zéro mensuelle ; archive affichée.");
+    expect(Object.keys(r.archive?.jours ?? {})).toHaveLength(29);
+    expect(healthStore.getState().sources.cryptoquant).toMatchObject({ etat: "error", derniereErreur: "CryptoQuant : crédits mensuels épuisés" });
+    // Mémoire GLOBALE : l'autre famille ne rappelle pas, sans consommer de créneau.
+    expect(await cq.chargerSerieCq("mineur:mara")).toMatchObject({ statut: "credits", raison: cq.RAISON_CREDITS_EPUISES_CQ, appel: false });
+    expect([appels(f).length, cq.etatFileCq()]).toEqual([1, { enAttente: 0, repriseTs: null }]);
+    // 24 h moins 1 ms : toujours mémorisé ; 24 h : un nouvel essai est gratuit.
+    vi.setSystemTime(T0 + 24 * 3600_000 - 1);
+    expect(await cq.chargerSerieCq("taker:swap:btc")).toMatchObject({ statut: "credits", appel: false });
+    vi.setSystemTime(T0 + 24 * 3600_000);
+    expect(await cq.chargerSerieCq("taker:swap:btc")).toMatchObject({ statut: "credits", appel: true });
+    expect(appels(f)).toHaveLength(2);
+    // Rotation de clé : mémoire abandonnée comme `refusCle`.
+    cryptoquantKeyStore.getState().setKey("nouvelle");
+    expect(await cq.chargerSerieCq("mineur:riot")).toMatchObject({ statut: "credits", appel: true });
+    expect(appels(f)).toHaveLength(3);
+    // Aucun crédit compté, aucune trace du corps amont.
+    expect(credits()).toBeNull();
+    const traces = [...f.mock.calls.map(([u]) => String(u)), r, cq.etatFileCq(), healthStore.getState().sources, ...setItem.mock.calls].map((t) => JSON.stringify(t));
+    expect(traces.filter((t) => t.includes(MARQUEUR))).toEqual([]);
+  });
+
+  it("C3 — 8 990 crédits sur 31 j : credits (raison budget avec la somme entière), 0 fetch, créneau non consommé", async () => {
+    poserCredits({ [J(-45)]: 5_000, [J(-3)]: 4_000, [J(-2)]: 4_000, [J(-1)]: 990 });
+    const cq = await import("./cryptoquant");
+    const healthStore = await sante();
+    poser(arch(plage(-30, -2), null));
+    const f = reseau(aucun);
+    const r = await cq.chargerSerieCq("taker:spot:btc");
+    expect(r).toMatchObject({ statut: "credits", raison: cq.raisonBudgetCreditsCq(8_990), appel: false });
+    expect(r.raison).toBe("Budget de crédits CryptoQuant atteint (≈ 8990/10 000 sur 31 j, ce navigateur) : appels suspendus pour préserver le mois ; archive affichée.");
+    expect(Object.keys(r.archive?.jours ?? {})).toHaveLength(29);
+    expect([appels(f).length, cq.etatFileCq()]).toEqual([0, { enAttente: 0, repriseTs: null }]);
+    // Publié dès le premier chargement du module (somme non nulle), sans créneau.
+    expect(healthStore.getState().sources.cryptoquant?.quota).toEqual({ utilise: 0, limite: 10, fenetre: "1min",
+      credits: { utilise: 8_990, limite: 10_000, jours: 31 } });
+    // 8 985 : 8 985 + 15 = 9 000 ≤ plafond → l'appel part.
+    vi.resetModules();
+    vi.stubGlobal("localStorage", stockage());
+    poserCredits({ [J(-1)]: 8_985 });
+    const cq2 = await import("./cryptoquant");
+    poser(arch(plage(-30, -2), null));
+    const g = reseau(api200);
+    expect(await cq2.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: true });
+    expect(appels(g)).toHaveLength(1);
+  });
+
+  it("constantes figées (§13) : plafond 9 000 et coût par défaut 15", async () => {
+    const cq = await import("./cryptoquant");
+    expect([cq.PLAFOND_CREDITS_CQ, cq.COUT_CREDITS_DEFAUT_CQ]).toEqual([9_000, 15]);
+  });
+
+  it("C3 — fenêtre 31 j = jour courant + 30 précédents : J-30 compté, J-31 et un jour futur ignorés puis élagués", async () => {
+    poserCredits({ [J(-31)]: 300, [J(-30)]: 45, [J(-1)]: 15, [J(40)]: 8_000 });
+    const cq = await import("./cryptoquant");
+    const healthStore = await sante();
+    expect(healthStore.getState().sources.cryptoquant?.quota?.credits?.utilise).toBe(60);
+    poser(arch(plage(-30, -2), null));
+    reseau(api200);
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: true });
+    expect(credits()).toEqual({ v: 1, jours: { [J(-30)]: 45, [J(-1)]: 15, [J(0)]: 15 } });
+    expect(healthStore.getState().sources.cryptoquant?.quota?.credits?.utilise).toBe(75);
+  });
+
+  it("C4 — compteur illisible, `v` inconnue ou valeurs absurdes → vide puis remplacé", async () => {
+    localStorage.setItem(CLE_CREDITS, "{pas du json");
+    let cq = await import("./cryptoquant");
+    poser(arch(plage(-30, -2), null));
+    reseau(api200);
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: true });
+    expect(credits()).toEqual({ v: 1, jours: { [J(0)]: 15 } });
+    // `v` inconnue : 9 000 crédits NON lus (sinon le plafond bloquerait l'appel), fichier remplacé.
+    vi.resetModules();
+    vi.stubGlobal("localStorage", stockage());
+    localStorage.setItem(CLE_CREDITS, JSON.stringify({ v: 2, jours: { [J(-1)]: 9_000 } }));
+    cq = await import("./cryptoquant");
+    poser(arch(plage(-30, -2), null));
+    reseau(api200);
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: true });
+    expect(credits()).toEqual({ v: 1, jours: { [J(0)]: 15 } });
+    // Jour ou valeur absurde (négatif, non entier, non numérique, clé qui n'est pas un jour) : ignoré.
+    vi.resetModules();
+    vi.stubGlobal("localStorage", stockage());
+    poserCredits({ [J(-1)]: -5, [J(-2)]: 1.5, [J(-3)]: "abc", [J(-4)]: 20, "pas-un-jour": 9_000 });
+    await import("./cryptoquant");
+    expect((await sante()).getState().sources.cryptoquant?.quota?.credits?.utilise).toBe(20);
+  });
+
+  it("C4 — écriture du compteur en échec : la somme de la session inclut quand même l'appel", async () => {
+    const cq = await import("./cryptoquant");
+    const healthStore = await sante();
+    poser(arch(plage(-30, -2), null));
+    localStorage.setItem = () => { throw new DOMException("quota", "QuotaExceededError"); };
+    reseau(api200);
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: true, persistance: { local: false } });
+    expect(healthStore.getState().sources.cryptoquant?.quota?.credits?.utilise).toBe(15);
+  });
+
+  it("premier chargement du module : somme nulle → aucune ligne de santé publiée", async () => {
+    await import("./cryptoquant");
+    expect((await sante()).getState().sources.cryptoquant).toBeUndefined();
+  });
+
+  it.each([
+    ["le plafond franchi par la série précédente (200)", api200, (cq: typeof import("./cryptoquant")): string => cq.raisonBudgetCreditsCq(9_000)],
+    ["un 402 reçu par la série précédente", () => statut(402), (cq: typeof import("./cryptoquant")): string => cq.RAISON_CREDITS_EPUISES_CQ],
+  ] as const)("créneau obtenu après %s : re-contrôle, aucun fetch, statut credits", async (_n, reponse, raison) => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.setSystemTime(T0);
+    poserCredits({ [J(-1)]: 8_985 });
+    const cq = await import("./cryptoquant");
+    const libre = new AbortController().signal;
+    for (let i = 0; i < 9; i++) await cq.acquerirCreneauCq(libre);
+    let repondre = (_r: Response) => {};
+    const f = reseau((u) => {
+      if (u.includes("btc_all")) return new Promise<Response>((r) => { repondre = r; });
+      throw new Error("appel CryptoQuant inattendu");
+    });
+    const premiere = cq.chargerSerieCq("taker:spot:btc");
+    await tourner();
+    expect(appels(f)).toHaveLength(1);
+    // Dernière série : aucun créneau libre (10/10), elle attend — ses deux contrôles sont déjà passés.
+    let seconde: ChargementCq | undefined;
+    void cq.chargerSerieCq("mineur:mara").then((x) => { seconde = x; });
+    await tourner();
+    expect([cq.etatFileCq().enAttente, seconde]).toEqual([1, undefined]);
+    repondre(reponse());
+    await tourner();
+    expect((await premiere).statut).toBe(reponse === api200 ? "pret" : "credits");
+    await avancer(60_000);
+    await tourner();
+    expect(seconde).toMatchObject({ statut: "credits", raison: raison(cq), appel: false });
+    expect(appels(f)).toHaveLength(1);
   });
 });

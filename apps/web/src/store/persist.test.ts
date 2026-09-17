@@ -562,6 +562,24 @@ describe("importerSauvegarde — remplacement des clés axiom:*", () => {
     expect(localStorage.getItem("axiom:notes:v1")).toBe("notes importées");
   });
 
+  it("préserve le compteur de crédits CryptoQuant du poste (spec §13) et ignore celui d'un autre poste", () => {
+    const compteur = "axiom:cryptoquant:credits:v1";
+    const local = JSON.stringify({ v: 1, jours: { "2026-09-16": 195 } });
+    localStorage.setItem(compteur, local);
+
+    // Fichier sans le compteur : l'import ne doit pas le purger (le plafond mentirait).
+    expect(importerSauvegarde(JSON.stringify({ "axiom:notes:v1": "notes importées" }))).toBe(true);
+    expect(localStorage.getItem(compteur)).toBe(local);
+
+    // Fichier d'un autre poste qui en contient un : ignoré, la consommation locale reste.
+    expect(importerSauvegarde(JSON.stringify({
+      [compteur]: JSON.stringify({ v: 1, jours: { "2026-09-16": 9_000 } }),
+      "axiom:notes:v1": "autres notes",
+    }))).toBe(true);
+    expect(localStorage.getItem(compteur)).toBe(local);
+    expect(localStorage.getItem("axiom:notes:v1")).toBe("autres notes");
+  });
+
   it("ne supprime ni ne remplace les archives CryptoQuant du poste (préfixe axiom:onchain:cq:)", () => {
     const spotBtc = "axiom:onchain:cq:taker:spot:btc:v1";
     const mara = "axiom:onchain:cq:mineur:mara:v1";
@@ -679,6 +697,13 @@ describe("exporterSauvegarde — périmètre réel du fichier téléchargé", ()
     const dump = await capturerExport();
     expect(Object.keys(dump).filter((k) => k.startsWith("axiom:onchain:cq:"))).toEqual([]);
     expect(dump["axiom:onchain:mempool:v1"]).toBe("{}");
+    expect(dump[CHART_KEY]).toBe("{}");
+  });
+  it("n'embarque pas le compteur de crédits CryptoQuant (propre à ce navigateur, spec §13)", async () => {
+    localStorage.setItem("axiom:cryptoquant:credits:v1", JSON.stringify({ v: 1, jours: { "2026-09-16": 195 } }));
+    localStorage.setItem(CHART_KEY, "{}");
+    const dump = await capturerExport();
+    expect(dump["axiom:cryptoquant:credits:v1"]).toBeUndefined();
     expect(dump[CHART_KEY]).toBe("{}");
   });
 });

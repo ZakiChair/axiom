@@ -1075,6 +1075,7 @@ Marges de ce tableau : locales. Estimation runner, par la méthode de « Budget 
 - ≈ 3 125 gzip après le lot, à `3fa31e6` (4 363 − 1 238) ;
 - ≈ 3 076 gzip après la vague de correction finale : budget initial final **1 206 265 octets bruts / 355 686 gzip**, mesuré par `pnpm check` à l'étape D (marge locale 4 314 ; 4 314 − 1 238). Voir « Revue finale de branche ».
 - **Mesure réelle du runner, fin de branche (2026-09-17, PR #5, run GitHub `35277267661`, commit `696b54a`) : initial `1 206 448` octets bruts / `356 986` gzip, soit une marge de `3 014` octets gzip sous le plafond bloquant de 360 000.** L'estimation (≈ 3 076 après le lot crédits, marge locale 4 262 − écart 1 248) était juste à 62 octets près ; l'écart runner − local vaut ici 356 986 − 355 738 = **1 248**. La marge passe tout juste le seuil de vigilance d'environ 3 000 (spec I11) : **le prochain lot qui touche le chemin d'entrée doit d'abord libérer des octets** (porte I11 : retirer en premier le libellé DATA de `data/dataCockpit.ts`), ou mesurer sur le runner avant de committer.
+- **Marge de référence PÉRIMÉE depuis le lot « Fonctions » du 2026-09-18 : lire ≈ 2 553 gzip, pas 3 014.** Les `3 014` ci-dessus restent la mesure runner exacte à `696b54a` (elle n'est pas retouchée : c'est un relevé). Mais le lot du 2026-09-18 a ajouté **+461 o gzip** au chemin d'entrée (local 355 738 → 356 199, recontrôlé à `c6fbc46` : `1 207 813` bruts / `356 199` gzip) : avec l'écart runner − local de `1 248`, le runner est estimé à `357 447`, soit **≈ 2 553 o de marge** sous 360 000. Le seuil de vigilance I11 (~3 000) est donc **franchi** et la porte I11 n'a **pas** été appliquée avant cet ajout : tout lot suivant qui touche le chemin d'entrée libère des octets d'abord, ou mesure sur le runner avant de committer. La consommation elle-même reste **à arbitrer** (voir « Entrées “Fonctions” et ⌘K » → « Budget mesuré »).
 
 Les 3 365 gzip ont été mesurés sur le runner à `e14dc03`, avant trois commits de code hors lot (`7542bee`, `f8ef08f`, `278c452`) : ce n'est pas la marge du lot. Seuil de vigilance ~3 000 gzip (spec I11) : il reste environ 76 octets gzip sur le runner ; au prochain ajout au chemin d'entrée, retirer d'abord le libellé DATA. Budget du premier run GitHub de la branche : non relevé (branche non poussée) ; à lire au premier push.
 
@@ -1791,3 +1792,33 @@ ci-dessus le montrent, les octets suivent le **contenu** (745 o de source retir�
 libellés, mnémoniques, `motsCles` prescrits, aperçus et le magasin. **À arbitrer par le
 propriétaire** s'il veut repasser sous +150 : la seule coupe qui rendrait vraiment des octets est
 de retirer un des deux canaux (⌘K : −169 o gzip) ou les `motsCles`/`apercu` des commandes.
+
+### Décision attendue du propriétaire — budget du lot (tour de correction 1, 2026-09-18)
+
+La revue indépendante a retenu ce dépassement comme constat important : le lot disait
+« au-delà, allège… et dis-le », et renvoyer l'arbitrage n'est pas l'avoir tranché. Recontrôle du
+tour de correction 1 (`bash scripts/ci.sh` complet à `c6fbc46`, `logs/tour1-check-1.log` ;
+rejoué sur l'état commité, `logs/tour1-check-3.log`) : `==> [ci] OK`, 343 fichiers / 4 713 tests
+web verts (632 daemon, 780 indicateurs, 59 alertes, 95 backtest) et budget initial `1 207 813`
+bruts / `356 199` gzip — la mesure du livré retrouvée à l'octet.
+
+| Option | Delta gzip | Ce qu'il faut accepter |
+|---|---|---|
+| (a) acter la consommation (état livré) | **+461** | marge runner ≈ 2 553 sous 360 000 ; le prochain lot touchant le chemin d'entrée part de moins |
+| (b) retirer le canal ⌘K | **+292** (mesuré, `logs/build-sans-ck.log`) | encore au-dessus de +150, et la moitié « palette » de la décision du 2026-09-18 disparaît. Fait à peser : la demande verbatim du propriétaire (« mets les dans fonctions ») ne nommait que le menu ; le canal ⌘K vient du brief du lot |
+| (c) raccourcir les libellés, retirer `motsCles`/`apercu` | non mesuré séparément ; majoré par les 169 o des deux commandes entières | libellés et `motsCles` sont prescrits par la décision |
+
+Constat mesuré : **aucune option ne repasse sous +150 sans supprimer une entrée** — le canal menu
+seul coûte déjà +292. La cible souple était hors d'atteinte pour le périmètre décidé (deux
+canaux, libellés exacts, `motsCles` prescrits) : c'est pourquoi le tour de correction n'a rien
+retouché à l'aveugle dans le code (la revue n'y a d'ailleurs trouvé aucun défaut fonctionnel).
+Tant que le propriétaire n'a pas tranché, la livraison reste en l'état, plafond bloquant
+respecté ; la marge de référence citée en fin de branche est corrigée au tableau du budget
+(3 014 → ≈ 2 553).
+
+### Rectification — nombre de tests du commit `c437aaa`
+
+Le message de `c437aaa` annonce « 29 tests ajoutés … et un parcours e2e ». Le diff en compte
+**28** tests unitaires (`git diff c437aaa~1 c437aaa | grep -c '^+ *it('` → 28) **plus** un
+parcours e2e (`test(`), soit **29 au total**, pas 29 + 1. Le commit est poussé (PR #5) : son
+message n'est pas réécrit, la rectification vit ici.

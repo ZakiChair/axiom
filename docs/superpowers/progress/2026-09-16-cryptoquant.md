@@ -367,3 +367,379 @@ Commande : `set -o pipefail; pnpm --filter @axiom/web build 2>&1 | tee logs/axio
 - Marge locale 4356 gzip ; marge runner estimée 3118 gzip (écart runner − local du 2026-09-16 : 356 635 − 355 397 = 1 238, `docs/superpowers/progress/2026-09-16-indicateurs-et-fonctions-revue.md:49` et `:62`). Seules les limites 1220000 bruts / 360000 gzip bloquent le build.
 - Chunk partagé du store (`.vite/manifest.json`, importé par DES) : `assets/cryptoquant-DWizfmto.js`.
 - Client CryptoQuant : `assets/cryptoquant-CWb-gmgq.js`, entrée dynamique chargée par DES via `import()`, hors du graphe statique de l'entrée ; aucun fichier initial ne contient « Flux takers toutes places » ; garde-fou `apps/web/src/chunkCryptoquant.test.ts` vert.
+
+## Porte locale B1
+
+Commit `57898a2`, base `2d45426` (commit initial de la spec ; la liste inclut la spec amendée et le plan).
+
+Commande : `set -o pipefail; NO_COLOR=1 pnpm check 2>&1 | tee logs/axiom-b1-check.log`
+
+```text
+==> [ci] typecheck
+==> [ci] test
+packages/indicators test:  Test Files  206 passed (206)
+packages/indicators test:       Tests  780 passed (780)
+packages/alerts test:  Test Files  2 passed (2)
+packages/alerts test:       Tests  59 passed (59)
+packages/backtest test:  Test Files  4 passed (4)
+packages/backtest test:       Tests  95 passed (95)
+apps/daemon test:  608 pass
+apps/daemon test:  0 fail
+apps/daemon test: Ran 608 tests across 32 files. [649.00ms]
+apps/web test:  Test Files  339 passed (339)
+apps/web test:       Tests  4575 passed (4575)
+==> [ci] build @axiom/web
+==> [ci] OK
+```
+
+Commande : `set -o pipefail; NO_COLOR=1 pnpm check:e2e 2>&1 | tee logs/axiom-b1-e2e.log`
+
+```text
+  77 passed (1.7m)
+```
+
+Commande : `git log --oneline 2d45426..HEAD`
+
+```text
+57898a2 test(e2e): DES flux takers toutes places — montage, archive, 429 et 401 hermétiques
+c07eb15 test(budget): garde-fou du client CryptoQuant à la demande et mesure du budget après B1
+f40a8ac fix(des): repli d'erreur sur l'import du client taker et libellé honnête sans appel réseau
+bff0ffd feat(des): section repliable flux takers toutes places (CryptoQuant) chargée au montage
+84e0175 feat(des): modèle pur des flux takers toutes places et classement situer (CryptoQuant)
+767df42 fix(cryptoquant): un majTs futur n'empêche plus la reprise 6 h
+937d860 fix(cryptoquant): raisonOffre teste la clé sur le message entier avant troncage à 200
+7e0ba84 feat(cryptoquant): orchestrateur — court-circuit J-1, reprise 6 h, refus de session, non-fuite de la clé, libellé DATA
+1adc077 feat(cryptoquant): file unique 10 req/min, correction x-ratelimit et reprise 429 bornée
+5d236b9 feat(cryptoquant): archive locale ∪ KV daemon — lecture tri-état, écriture gardée
+ea915d6 feat(cryptoquant): archive par série — fusion non destructive, union, décodage tolérant, trous dérivés
+760136d feat(cryptoquant): catalogue des 13 séries et parseur des jours clos
+e375e17 feat(cryptoquant): champ de clé CryptoQuant dans les Réglages et budget après B1-3
+361dad8 feat(cryptoquant): clé et archives CryptoQuant exclues des sauvegardes JSON
+5ce75c2 feat(cryptoquant): store de la clé personnelle et message « clé requise » (sans import data)
+e9bb6bc feat(vite): proxy de dev /cqapi — refus locaux, repli .env hors Vercel, réponse privée
+fe911c2 feat(daemon): route /cqapi — gestionnaire dédié, repli .env local, quota relayé, jamais en cache
+615d9bc feat(vercel): route /cqapi — Bearer personnel seul, liste fermée, zéro redirection, quota relayé
+3d66546 feat(shared): liste fermée de la route /cqapi — trois chemins CryptoQuant BASIC, window=day, limit ≤ 30
+3bf6298 docs(contrat,csp,rapport): exception CryptoQuant BASIC du 2026-09-16 — clé personnelle, route /cqapi, archive côté client
+a56700e docs(plan): corrections du pré-vol — exécution séquentielle, racine du worktree, motifs de synthèse, écarts actés, renvois à la spec §12
+39d0a00 docs(plan): plan d'implémentation CryptoQuant BASIC et arbitrages de planification dans la spec
+```
+
+Commande : `git diff --stat 2d45426..HEAD`
+
+```text
+ BUILD-CONTRACT.md                                  |   55 +-
+ api/_policy.ts                                     |   34 +-
+ api/proxy.ts                                       |    9 +
+ apps/daemon/src/cache.test.ts                      |    7 +
+ apps/daemon/src/cryptoquantProxy.test.ts           |  175 +
+ apps/daemon/src/env.test.ts                        |   29 +-
+ apps/daemon/src/env.ts                             |    6 +
+ apps/daemon/src/proxy.test.ts                      |  220 +-
+ apps/daemon/src/proxy.ts                           |   76 +
+ apps/daemon/src/vercelProxy.redirection.test.ts    |   82 +-
+ apps/daemon/src/vercelProxy.test.ts                |  139 +-
+ apps/daemon/tsconfig.json                          |    2 +-
+ apps/web/.env.example                              |    8 +-
+ apps/web/e2e/des-flux-takers.e2e.ts                |  294 +
+ apps/web/src/chunkCryptoquant.test.ts              |   91 +
+ apps/web/src/components/DerivativesWindow.tsx      |   11 +-
+ apps/web/src/components/FluxTakersSection.test.tsx |  388 +
+ apps/web/src/components/FluxTakersSection.tsx      |  463 +
+ .../components/SettingsPanel.cryptoquant.test.ts   |   47 +
+ apps/web/src/components/SettingsPanel.tsx          |   18 +
+ apps/web/src/components/fluxTakers.util.test.ts    |  189 +
+ apps/web/src/components/fluxTakers.util.ts         |  165 +
+ apps/web/src/data/dataCockpit.test.ts              |    6 +
+ apps/web/src/data/dataCockpit.ts                   |    1 +
+ .../web/src/data/onchain/cryptoquant-fetch.test.ts |  467 +
+ apps/web/src/data/onchain/cryptoquant.test.ts      |  120 +
+ apps/web/src/data/onchain/cryptoquant.ts           |  625 ++
+ apps/web/src/store/cryptoquant.test.ts             |  169 +
+ apps/web/src/store/cryptoquant.ts                  |   83 +
+ apps/web/src/store/persist.test.ts                 |   56 +
+ apps/web/src/store/persist.ts                      |   23 +-
+ apps/web/src/viteConfig.test.ts                    |  156 +
+ apps/web/tsconfig.json                             |    2 +-
+ apps/web/vite.config.ts                            |   76 +
+ docs/csp-vercel.md                                 |   16 +-
+ .../plans/2026-09-16-cryptoquant-takers-mineurs.md | 8971 ++++++++++++++++++++
+ .../superpowers/progress/2026-09-16-cryptoquant.md |  369 +
+ ...2026-09-16-cryptoquant-takers-mineurs-design.md |   34 +-
+ scripts/ci.sh                                      |    2 +-
+ shared/cryptoquant-proxy.ts                        |   71 +
+ vercel.json                                        |    8 +
+ 41 files changed, 13726 insertions(+), 37 deletions(-)
+```
+
+## Revue indépendante B1
+
+- Verdict : **ACCEPTÉ**
+- Réviseur : Claude Opus 5 (1M context), agent réviseur distinct des développeurs des tâches 1 à 17 (rôle Réviseur, `.devin/provider-rules.md:34` et `:51`)
+- Commit revu : `57898a2`, base `2d45426`, le 2026-09-17
+
+### Points contrôlés
+
+Chaque point est conforme, sauf s'il figure sous « Écarts relevés ». Les sorties brutes suivent, dans le même ordre.
+
+| Point | Contrôle |
+|---|---|
+| A1 | aucun `CRYPTOQUANT_API_KEY` dans `api/` ni `vercel.json` : aucun repli serveur sur Vercel |
+| A2 | une seule lecture `env[` dans `api/_policy.ts` |
+| A3 | test structurel Vercel identique aux lignes 34-46 d'origine |
+| A4 | store de clé dans les composants : imports, `version` dans DES, `hasKey`/`setKey`/`clearKey` dans Réglages, test structurel de la tâche 8 |
+| A5 | `getCryptoquantKey` absent de tout fichier non-test hors store et client |
+| A6 | tests de fuite (marqueur de clé factice des tâches 6, 7 et 13) présents (store, persist, client) et verts |
+| A7 | clé seulement dans l'en-tête `Authorization`, aucun `console.` dans le client |
+| A8 | `__CQ_CLE_ENV__` booléen gardé par `isVercelBuild` |
+| A9 | e2e : clé en en-tête, absente des URL et de l'archive |
+| B1 | tests Bun du module partagé, du daemon et de Vercel verts |
+| B2 | tests du proxy de dev Vite verts |
+| B3 | liste fermée portée par `shared/cryptoquant-proxy.ts` et appelée par les trois proxys |
+| B4 | 401 avant tout fetch, 404 hors liste, 405 `allow: GET`, zéro redirection, `private, no-store`, quotas et corps relayés |
+| B5 | aucun cache proxy pour `/cqapi` |
+| B6 | `shared/extapi-hosts.ts` et `apps/daemon/src/cache.ts` inchangés |
+| B7 | `vercel.json` : deux rewrites avant le repli SPA, CSP inchangée |
+| C1 | tests du client et des stores verts (I1 à I8, I10) |
+| C2 | écritures gardées, aucun jour supprimé, conflit au `majTs` le plus grand, une clé par série |
+| C3 | e2e DES verts : union sans doublon, 429 sans réécriture, 401 en un appel |
+| C4 | archive hors sauvegarde JSON (`resteSurLePoste`) |
+| C5 | clé exclue des exports (`CLES_CREDENTIALS_LOCALES`) |
+| D1 | budget après B1 consigné au format unique, deltas lus, chunk partagé du store nommé |
+| D2 | build courant : manifeste sans erreur, client à la demande |
+| D3 | garde-fou du chunk et vues verts |
+| E1 | lectures fournisseur sans recalcul, spot et perp jamais additionnés, aucune comparaison Binance, jamais « 0 » inventé |
+| E2 | BGeometrics seule source de valorisation |
+| E3 | ni dépendance, ni `EXCHANGE_IDS`, ni fenêtre |
+| E4 | porte locale B1 consignée |
+
+### Commandes lancées
+
+Journal complet : `logs/axiom-b1-revue.log`.
+
+```text
+### A1
+(code 1)
+### A2
+api/_policy.ts:1
+(code 0)
+### A3
+(code 0)
+### A4
+apps/web/src/components/FluxTakersSection.tsx:31:import { cryptoquantKeyStore, messageSansCleCq, RAISON_CLE_CRYPTOQUANT } from "../store/cryptoquant";
+apps/web/src/components/FluxTakersSection.tsx:359:  const version = useStore(cryptoquantKeyStore, (s) => s.version);
+apps/web/src/components/SettingsPanel.cryptoquant.test.ts:18:    expect(SOURCE).toContain('import { cryptoquantKeyStore } from "../store/cryptoquant";');
+apps/web/src/components/SettingsPanel.cryptoquant.test.ts:23:    expect(SOURCE).toContain("useStore(cryptoquantKeyStore, (s) => s.hasKey)");
+apps/web/src/components/SettingsPanel.cryptoquant.test.ts:24:    expect(SOURCE).toContain("useStore(cryptoquantKeyStore, (s) => s.setKey)");
+apps/web/src/components/SettingsPanel.cryptoquant.test.ts:25:    expect(SOURCE).toContain("useStore(cryptoquantKeyStore, (s) => s.clearKey)");
+apps/web/src/components/SettingsPanel.cryptoquant.test.ts:26:    expect(SOURCE).not.toContain("getCryptoquantKey");
+apps/web/src/components/SettingsPanel.tsx:31:import { cryptoquantKeyStore } from "../store/cryptoquant";
+apps/web/src/components/SettingsPanel.tsx:528:  const cryptoquantHasKey = useStore(cryptoquantKeyStore, (s) => s.hasKey);
+apps/web/src/components/SettingsPanel.tsx:529:  const cryptoquantSetKey = useStore(cryptoquantKeyStore, (s) => s.setKey);
+apps/web/src/components/SettingsPanel.tsx:530:  const cryptoquantClearKey = useStore(cryptoquantKeyStore, (s) => s.clearKey);
+(code 0)
+### A5
+apps/web/src/components/SettingsPanel.cryptoquant.test.ts:26:    expect(SOURCE).not.toContain("getCryptoquantKey");
+(code 0)
+### A6
+apps/web/src/data/onchain/cryptoquant-fetch.test.ts:1
+apps/web/src/store/cryptoquant.test.ts:1
+apps/web/src/store/persist.test.ts:4
+apps/web/src/viteConfig.test.ts:10
+(code 0)
+### A7
+apps/web/src/data/onchain/cryptoquant.ts:548:  if (cle !== null) headers["Authorization"] = `Bearer ${cle}`;
+(code 0)
+### A8
+apps/web/vite.config.ts:88:  const CQ_CLE_ENV = !isVercelBuild && CRYPTOQUANT_API_KEY !== "";
+apps/web/vite.config.ts:103:    __CQ_CLE_ENV__: JSON.stringify(CQ_CLE_ENV),
+(code 0)
+### A9
+apps/web/e2e/des-flux-takers.e2e.ts:181:    expect(appel.url).not.toContain(CLE);
+apps/web/e2e/des-flux-takers.e2e.ts:182:    expect(appel.authorization).toBe(`Bearer ${CLE}`);
+apps/web/e2e/des-flux-takers.e2e.ts:210:  expect(brut).not.toContain(CLE);
+(code 0)
+### B1
+
+
+ 196 pass
+ 0 fail
+ 611 expect() calls
+Ran 196 tests across 6 files. [186.00ms]
+(code 0)
+### B2
+
+ Test Files  1 passed (1)
+      Tests  20 passed (20)
+   Start at  14:02:22
+   Duration  229ms (transform 60ms, setup 0ms, import 130ms, tests 20ms, environment 0ms)
+
+(code 0)
+### B3
+api/_policy.ts:4:import { CRYPTOQUANT_HOST, cheminCryptoQuantAmont, cleCryptoQuantValide } from "../shared/cryptoquant-proxy.js";
+api/_policy.ts:374:      const allowedPath = cheminCryptoQuantAmont(`/cqapi/${path}`, localQuery ? `?${localQuery}` : "");
+apps/daemon/src/proxy.ts:28:import { CRYPTOQUANT_HOST, CRYPTOQUANT_PREFIXE, cheminCryptoQuantAmont, cleCryptoQuantValide } from "../../../shared/cryptoquant-proxy";
+apps/daemon/src/proxy.ts:982:  const chemin = cheminCryptoQuantAmont(url.pathname, url.search);
+apps/web/vite.config.ts:8:import { CRYPTOQUANT_HOST, cheminCryptoQuantAmont, cleCryptoQuantValide } from "../../shared/cryptoquant-proxy";
+apps/web/vite.config.ts:291:          return cheminCryptoQuantAmont(url.pathname, url.search) ?? "/__axiom_refuse__";
+apps/web/vite.config.ts:304:                : cheminCryptoQuantAmont(url.pathname, url.search) === null
+(code 0)
+shared/cryptoquant-proxy.ts:11: * obligatoire, `limit` entier 1..30, jamais `from`/`to` (le fournisseur refuse toute
+shared/cryptoquant-proxy.ts:24:const SYMBOLES_TAKER: ReadonlySet<string> = new Set(["btc_all", "eth_all"]);
+shared/cryptoquant-proxy.ts:42: * refusée ; la query de sortie est reconstruite dans l'ordre symbol|miner, window, limit.
+shared/cryptoquant-proxy.ts:56:    if (cle !== cleSujet && cle !== "window" && cle !== "limit") return null; // from, to, inconnue, casse
+shared/cryptoquant-proxy.ts:62:  if (params.get("window") !== "day") return null;
+shared/cryptoquant-proxy.ts:63:  const limit = params.get("limit");
+shared/cryptoquant-proxy.ts:64:  if (limit !== null && (!MOTIF_LIMIT.test(limit) || Number(limit) > LIMIT_MAX)) return null;
+shared/cryptoquant-proxy.ts:68:  sortie.set("window", "day");
+shared/cryptoquant-proxy.ts:69:  if (limit !== null) sortie.set("limit", limit);
+(code 0)
+### B4
+api/_policy.ts:135:  maxRedirects?: number;
+api/_policy.ts:327:    : "private, no-store";
+api/_policy.ts:413:    maxRedirects: route === "defillamapro" || route === "cqapi" ? 0 : undefined,
+api/proxy.ts:161:        "cache-control": "private, no-store",
+api/proxy.ts:279:    if (redirects >= (plan.maxRedirects ?? PROXY_MAX_REDIRECTS)) throw new ProxyPolicyError(502, "redirection amont refusée");
+api/proxy.ts:361:      for (const nom of ["x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset"]) {
+apps/daemon/src/proxy.ts:358:      maxRedirections: nbs ? 0 : undefined,
+apps/daemon/src/proxy.ts:507:  maxRedirections?: number;
+apps/daemon/src/proxy.ts:756:  const maxRedirections = Math.max(0, options.maxRedirections ?? EXTAPI_MAX_REDIRECTIONS);
+apps/daemon/src/proxy.ts:812:        if (redirections >= maxRedirections) throw new ErreurPolitiqueExtapi("trop de redirections amont");
+apps/daemon/src/proxy.ts:860:    "cache-control": "private, no-store",
+apps/daemon/src/proxy.ts:915:    "cache-control": "private, no-store",
+apps/daemon/src/proxy.ts:929:  const headers = { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store", ...ENTETES_SECURITE_EXTAPI, ...entetesCors(req) };
+apps/daemon/src/proxy.ts:938:      ...options, hotesAutorises: new Set([DEFILLAMA_PRO_HOST]), maxRedirections: 0,
+apps/daemon/src/proxy.ts:953:const ENTETES_QUOTA_CRYPTOQUANT = ["x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset"] as const;
+apps/daemon/src/proxy.ts:970:    "cache-control": "private, no-store",
+apps/daemon/src/proxy.ts:992:      maxRedirections: 0,
+apps/web/vite.config.ts:251:            res.setHeader("cache-control", "private, no-store");
+apps/web/vite.config.ts:263:            res.setHeader("cache-control", "private, no-store");
+apps/web/vite.config.ts:276:            if ("writeHead" in res && !res.headersSent) res.writeHead(502, { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store" });
+apps/web/vite.config.ts:310:            res.setHeader("cache-control", "private, no-store");
+apps/web/vite.config.ts:337:            // (un res.setHeader serait écrasé). Les x-ratelimit-* passent tels quels.
+apps/web/vite.config.ts:338:            proxyRes.headers["cache-control"] = "private, no-store";
+apps/web/vite.config.ts:342:              res.writeHead(502, { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store" });
+(code 0)
+### B5
+apps/daemon/src/cache.test.ts:31:  test("/cqapi n'est jamais mis en cache : la clé de cache ignore Authorization", () => {
+apps/daemon/src/cache.test.ts:33:    expect(ttlMsPourChemin("/cqapi/v2/market/cq/spot/trade")).toBe(0);
+apps/daemon/src/cache.test.ts:34:    expect(ttlMsPourChemin("/cqapi/v1/btc/miner-data/companies")).toBe(0);
+apps/daemon/src/cache.test.ts:35:    expect(ttlMsPourChemin("/cqapi")).toBe(0);
+(code 0)
+### B6
+(code 0)
+### B7
+diff --git a/vercel.json b/vercel.json
+index 1e1d245..f094444 100644
+--- a/vercel.json
++++ b/vercel.json
+@@ -86,6 +86,14 @@
+       "source": "/defillamapro/:path*/",
+       "destination": "/api/proxy?__axiom_route=defillamapro&__axiom_path=:path/"
+     },
++    {
++      "source": "/cqapi/:path*",
++      "destination": "/api/proxy?__axiom_route=cqapi&__axiom_path=:path"
++    },
++    {
++      "source": "/cqapi/:path*/",
++      "destination": "/api/proxy?__axiom_route=cqapi&__axiom_path=:path/"
++    },
+     {
+       "source": "/(.*)",
+       "destination": "/index.html"
+(code 0)
+0
+(code 1)
+### C1
+
+ Test Files  83 passed (83)
+      Tests  1040 passed (1040)
+   Start at  14:03:04
+   Duration  1.84s (transform 8.14s, setup 0ms, import 12.28s, tests 1.60s, environment 4ms)
+
+(code 0)
+### C2
+apps/web/src/data/onchain/cryptoquant.ts:10:import { detectDaemon, kvPut, urlDaemon } from "../daemon";
+apps/web/src/data/onchain/cryptoquant.ts:274:    localStorage.setItem(cleLocale(serie), texte);
+apps/web/src/data/onchain/cryptoquant.ts:327:/** Jamais de `kvPut` après une lecture KV en erreur ni au-delà de 900 000 caractères. */
+apps/web/src/data/onchain/cryptoquant.ts:333:  return { local, kv: (await kvPut(NS_KV, cleKv(serie), archive)) !== null };
+(code 0)
+### C3
+Running 4 tests using 1 worker
+
+  ✓  1 [chromium] › e2e/des-flux-takers.e2e.ts:153:1 › DES : flux takers chargés au montage (4 appels), repliés par défaut, sans appel sur segmentés, source ni réouverture (2.9s)
+  ✓  2 [chromium] › e2e/des-flux-takers.e2e.ts:233:1 › DES : archive locale antérieure fusionnée sans doublon (début 2026-08-07) (652ms)
+  ✓  3 [chromium] › e2e/des-flux-takers.e2e.ts:250:1 › DES : 429 CryptoQuant — délai de reprise affiché, archive servie et non réécrite (936ms)
+  ✓  4 [chromium] › e2e/des-flux-takers.e2e.ts:278:1 › DES : 401 CryptoQuant — clé refusée affichée avec l'accès aux Réglages, un seul appel, rien d'archivé (933ms)
+
+  4 passed (6.3s)
+(code 0)
+### C4
+apps/web/src/store/persist.ts:795: * Archives CryptoQuant par série (`axiom:onchain:cq:<serie>:v1`, spec 2026-09-16 §4.4) :
+apps/web/src/store/persist.ts:800:const PREFIXE_ARCHIVE_CRYPTOQUANT = "axiom:onchain:cq:";
+apps/web/src/store/persist.ts:828: * (`axiom:onchain:cq:*`, licence personnelle) : leur durabilité vient du KV daemon.
+(code 0)
+### C5
+apps/web/src/store/persist.ts:784:  "axiom:cryptoquant:key",
+(code 0)
+### D1
+44:### Budget avant B1
+150:### Budget après B1-3
+258:### Budget après B1
+366:- Delta initial : +27 gzip / +39 bruts depuis « après B1-3 » (attendu ≤ ~40 gzip : nom du chunk partagé du store dans `__vite__mapDeps`) ; +49 gzip / +104 bruts sur l'ensemble de B1 depuis « avant B1 » (porte d'acceptation ≤ ~150 gzip).
+367:- Marge locale 4356 gzip ; marge runner estimée 3118 gzip (écart runner − local du 2026-09-16 : 356 635 − 355 397 = 1 238, `docs/superpowers/progress/2026-09-16-indicateurs-et-fonctions-revue.md:49` et `:62`). Seules les limites 1220000 bruts / 360000 gzip bloquent le build.
+368:- Chunk partagé du store (`.vite/manifest.json`, importé par DES) : `assets/cryptoquant-DWizfmto.js`.
+369:- Client CryptoQuant : `assets/cryptoquant-CWb-gmgq.js`, entrée dynamique chargée par DES via `import()`, hors du graphe statique de l'entrée ; aucun fichier initial ne contient « Flux takers toutes places » ; garde-fou `apps/web/src/chunkCryptoquant.test.ts` vert.
+(code 0)
+### D2
+(code 0)
+0
+(code 1)
+{"entree":"index.html","grapheStatique":4,"client":"assets/cryptoquant-CWb-gmgq.js","des":"assets/DerivativesWindow-DKgfpi5o.js","storePartage":["assets/cryptoquant-DWizfmto.js"]}
+(code 0)
+### D3
+
+ Test Files  3 passed (3)
+      Tests  31 passed (31)
+   Start at  14:05:25
+   Duration  271ms (transform 121ms, setup 0ms, import 164ms, tests 55ms, environment 0ms)
+
+(code 0)
+### E1
+apps/web/src/components/fluxTakers.util.ts:128:    somme += l.qbv - l.qsv;
+apps/web/src/components/fluxTakers.util.ts:156:    deltaQuote: fini(ligne.qbv - ligne.qsv),
+(code 0)
+apps/web/src/components/fluxTakers.util.ts:35:  vwap: number | null;
+apps/web/src/components/fluxTakers.util.ts:52:  return "bsr" in ligne;
+apps/web/src/components/fluxTakers.util.ts:103:    vwap: null,
+apps/web/src/components/fluxTakers.util.ts:145:    courbe.push({ jour: j, valeur: l === undefined ? null : fini(l.bsr) });
+apps/web/src/components/fluxTakers.util.ts:150:    ratio: fini(ligne.bsr),
+apps/web/src/components/fluxTakers.util.ts:153:      entrees.map(([, l]) => l.bsr),
+apps/web/src/components/fluxTakers.util.ts:154:      ligne.bsr,
+apps/web/src/components/fluxTakers.util.ts:161:    vwap: fini(ligne.vwap),
+(code 0)
+apps/web/src/components/FluxTakersSection.tsx:13: * jamais recalculés, aucune comparaison Binance. Indépendante de la clé Coinalyze, du
+(code 0)
+### E2
+(code 1)
+### E3
+(code 0)
+### E4
+1
+(code 0)
+```
+
+### Écarts actés par l'orchestrateur (rappel, non bloquants)
+
+- `situer` vit dans `apps/web/src/components/fluxTakers.util.ts`, et plus dans le client.
+- `RAISON_CLE_CRYPTOQUANT` et `messageSansCleCq` vivent dans `apps/web/src/store/cryptoquant.ts` ; le client les ré-exporte.
+- Bouton Réglages aussi sur une clé refusée (401) ; complément `.env`/Vercel seulement pour l'absence de clé.
+- Proxys locaux : en-tête client s'il est valide, sinon `.env`. Vercel : POST sans clé → 405, méthode contrôlée d'abord.
+- Archive de version inconnue : statut `erreur`, zéro appel, rien réécrit, bandeau dans la vue.
+- `etatFileCq().enAttente` ne compte que les demandes en attente d'un créneau ; `repriseTs` couvre le 429 et `x-ratelimit-remaining: 0`.
+- Archive illisible remplacée : détectée par la forme `statut "pret"` + `raison` non nulle, le client n'exposant cette raison qu'en valeur.
+
+### Écarts relevés
+
+- Aucun.

@@ -46,6 +46,7 @@ const LIBELLES_SOURCE: Record<string, string> = {
   "cot:cftc": "CFTC (COT)",
   bgeometrics: "BGeometrics",
   coinmetrics: "Coin Metrics",
+  cryptoquant: "CryptoQuant",
   etherscan: "Etherscan",
   mempool: "mempool.space",
   sosovalue: "SoSoValue",

@@ -247,3 +247,193 @@ describe("CryptoQuant : file 10 req / 60 s (I6, I7)", () => {
     expect(healthStore.getState().sources.cryptoquant?.quota?.utilise).toBe(1);
   });
 });
+
+// --- Orchestrateur (tâche 13) ---
+const brute = (jour: string) => ({ datetime: `${jour} 00:00:00`, trade_count: 1, base_volume: 2, quote_volume: 3, base_buy_volume: 4,
+  quote_buy_volume: 5, base_sell_volume: 6, quote_sell_volume: 7, vwap: 8, buy_ratio: 0.5, buy_sell_ratio: 1, buy_count: 9, sell_count: 10 });
+const api200 = () => Response.json({ status: { code: 200 }, result: { data: plage(-30, -1).reverse().map(brute) } });
+const statut = (status: number, message = "", headers: Record<string, string> = {}) => Response.json({ status: { code: status, message } }, { status, headers });
+const appels = (f: ReturnType<typeof reseau>) => f.mock.calls.filter(([u]) => String(u).startsWith("/cqapi/"));
+const SIX_H = 6 * 3600_000;
+const SECRET = "CLE-TEST-SECRETE";
+/** Horloge réelle pour `setTimeout` (seul `Date` est simulé ici) : laisse avancer les promesses jusqu'à la condition. */
+const jusqua = async (condition: () => boolean) => {
+  for (let i = 0; i < 100 && !condition(); i++) await new Promise((r) => setTimeout(r, 0));
+};
+
+describe("CryptoQuant : chargerSerieCq (I5, I7, I9, I10)", () => {
+  beforeEach(() => { reinitialiser(); cle.valeur = "perso"; vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(T0); });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.doUnmock("../../lib/deployment"); });
+
+  it("J-1 archivé ou appel < 6 h → 0 appel ; ≥ 6 h → 1 appel exact, fusion écrite, santé polling", async () => {
+    const cq = await import("./cryptoquant");
+    const { healthStore } = await import("../../store/health");
+    const f = reseau(api200);
+    poser(arch(plage(-30, -1), 0));
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", raison: null, appel: false, diagnostic: { hierPresent: true } });
+    poser(arch(plage(-40, -2), T0 - SIX_H + 1));
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", appel: false });
+    expect(appels(f)).toHaveLength(0);
+    poser(arch(plage(-40, -2), T0 - SIX_H));
+    const r = await cq.chargerSerieCq("taker:spot:btc");
+    expect(appels(f)).toEqual([["/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30",
+      expect.objectContaining({ cache: "no-store", redirect: "error", headers: { accept: "application/json", Authorization: "Bearer perso" }, signal: expect.any(AbortSignal) })]]);
+    expect(r).toMatchObject({ statut: "pret", appel: true, persistance: { local: true, kv: null }, diagnostic: { debut: J(-40), dernier: J(-1), manquantsFenetre: [] } });
+    expect([relire()?.majTs, Object.keys(relire()?.jours ?? {}).length]).toEqual([T0, 40]);
+    expect(healthStore.getState().sources.cryptoquant).toMatchObject({ etat: "polling", quota: { utilise: 1, limite: 10, fenetre: "1min" } });
+  });
+
+  it.each([
+    ["réseau", () => { throw new TypeError("échec"); }],
+    ["HTTP 500", () => new Response("panne", { status: 500 })],
+    ["HTTP 400", () => statut(400, "Out of allowed request range")],
+  ] as const)("échec %s : erreur, majTs inchangé, archive servie, santé en erreur", async (_n, api) => {
+    const cq = await import("./cryptoquant");
+    const { healthStore } = await import("../../store/health");
+    const avant = arch(plage(-30, -2), T0 - SIX_H);
+    poser(avant);
+    reseau(api);
+    const r = await cq.chargerSerieCq("taker:spot:btc");
+    expect(r).toMatchObject({ statut: "erreur", raison: "CryptoQuant injoignable ; archive affichée.", appel: true });
+    expect([r.archive, relire(), healthStore.getState().sources.cryptoquant?.etat]).toEqual([avant, avant, "error"]);
+  });
+
+  it("429 : quota, aucune écriture, série suivante en quota sans appel", async () => {
+    const cq = await import("./cryptoquant");
+    poser(arch(plage(-30, -2), null));
+    const setItem = vi.spyOn(localStorage, "setItem");
+    const f = reseau(() => statut(429, "", { "x-ratelimit-reset": "30" }));
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "quota", raison: "Quota CryptoQuant atteint (429) ; nouvel essai dans 30 s.", appel: true });
+    expect(await cq.chargerSerieCq("mineur:riot")).toMatchObject({ statut: "quota", appel: false });
+    expect([appels(f).length, setItem.mock.calls.length, kvPutMock.mock.calls.length]).toEqual([1, 0, 0]);
+  });
+
+  it("403 taker mémorisé par famille, effacé par setKey ; 401 → clé refusée, mémorisé jusqu'à la rotation", async () => {
+    const cq = await import("./cryptoquant");
+    const { cryptoquantKeyStore } = await import("../../store/cryptoquant");
+    let f = reseau((u) => (u.includes("/market/") ? statut(403, "Professional plan and above") : Response.json({ status: { code: 200 }, result: { data: [{ date: J(-1), total_rewards: 1 }] } })));
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "offre", raison: "Offre CryptoQuant insuffisante : Professional plan and above" });
+    expect(await cq.chargerSerieCq("taker:swap:eth")).toMatchObject({ statut: "offre", appel: false });
+    expect(await cq.chargerSerieCq("mineur:mara")).toMatchObject({ statut: "pret", appel: true });
+    cryptoquantKeyStore.getState().setKey("nouvelle");
+    expect(await cq.chargerSerieCq("taker:swap:eth")).toMatchObject({ statut: "offre", appel: true });
+    expect(appels(f)).toHaveLength(3);
+    f = reseau(() => statut(401, "Unauthorized"));
+    expect(await cq.chargerSerieCq("mineur:riot")).toMatchObject({ statut: "cle-requise", raison: "Clé CryptoQuant refusée (Réglages ⚙).", appel: true });
+    expect(await cq.chargerSerieCq("mineur:wulf")).toMatchObject({ statut: "cle-requise", appel: false });
+    cryptoquantKeyStore.getState().clearKey();
+    expect(await cq.chargerSerieCq("mineur:wulf")).toMatchObject({ statut: "cle-requise", raison: cq.RAISON_CLE_CRYPTOQUANT, appel: false });
+    cryptoquantKeyStore.getState().setKey("autre");
+    await cq.chargerSerieCq("mineur:wulf");
+    expect(appels(f)).toHaveLength(2);
+  });
+
+  it("coalescence : 2 consommateurs = 1 appel, aucun « en attente » ; annulation avant le créneau : 0 appel, 0 créneau", async () => {
+    const cq = await import("./cryptoquant");
+    const { healthStore } = await import("../../store/health");
+    let repondre = (_r: Response) => {};
+    let f = reseau(() => new Promise<Response>((r) => { repondre = r; }));
+    const deux = Promise.all([cq.chargerSerieCq("taker:spot:btc"), cq.chargerSerieCq("taker:spot:btc")]);
+    await jusqua(() => appels(f).length > 0);
+    // Requête en vol + consommateur coalescé : ni l'une ni l'autre n'attend un créneau.
+    expect([appels(f).length, cq.etatFileCq()]).toEqual([1, { enAttente: 0, repriseTs: null }]);
+    repondre(api200());
+    const [a, b] = await deux;
+    expect([appels(f).length, a.statut, b.statut]).toEqual([1, "pret", "pret"]);
+    healthStore.getState().retirer("cryptoquant");
+    let liberer = (_v: boolean) => {};
+    detecter.mockReturnValueOnce(new Promise<boolean>((r) => { liberer = r; }));
+    f = reseau(api200);
+    const ctrl = new AbortController();
+    const annule = cq.chargerSerieCq("taker:spot:eth", ctrl.signal);
+    ctrl.abort();
+    expect(await annule).toMatchObject({ statut: "erreur", raison: "Chargement CryptoQuant annulé.", appel: false });
+    liberer(false);
+    await new Promise((r) => setTimeout(r, 0));
+    expect([appels(f).length, healthStore.getState().sources.cryptoquant]).toEqual([0, undefined]);
+  });
+
+  it("KV 400 j : kvPut reçoit 401 j après l'appel ; version inconnue locale ou KV : erreur, 0 appel, rien réécrit", async () => {
+    let cq = await import("./cryptoquant");
+    detecter.mockResolvedValue(true);
+    reseau(api200, kvOk(arch(plage(-401, -2), T0 - SIX_H)));
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "pret", persistance: { local: true, kv: true } });
+    expect(Object.keys((kvPutMock.mock.calls[0]?.[2] as ArchiveCq).jours)).toHaveLength(401);
+    vi.resetModules();
+    kvPutMock.mockClear();
+    vi.stubGlobal("localStorage", stockage());
+    localStorage.setItem(CLE_BTC, JSON.stringify({ version: 2 }));
+    const setItem = vi.spyOn(localStorage, "setItem");
+    cq = await import("./cryptoquant");
+    const f = reseau(api200);
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "erreur", raison: cq.RAISON_VERSION_CRYPTOQUANT, archive: null, appel: false });
+    expect([appels(f).length, setItem.mock.calls.length, kvPutMock.mock.calls.length]).toEqual([0, 0, 0]);
+    // Version inconnue côté KV, archive locale saine : servie vide, rien réécrit ni en local ni en KV.
+    vi.resetModules();
+    vi.stubGlobal("localStorage", stockage());
+    poser(arch(plage(-30, -2), null));
+    const setItemKv = vi.spyOn(localStorage, "setItem");
+    cq = await import("./cryptoquant");
+    const g = reseau(api200, kvOk({ version: 3 }));
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "erreur", raison: cq.RAISON_VERSION_CRYPTOQUANT, archive: null, appel: false });
+    expect([appels(g).length, setItemKv.mock.calls.length, kvPutMock.mock.calls.length]).toEqual([0, 0, 0]);
+    expect(relire()?.jours).toEqual(arch(plage(-30, -2), null).jours);
+  });
+
+  it("I9 — Vercel sans clé perso (drapeau env vrai) : 0 fetch, 0 créneau, aucun accès KV, archive servie", async () => {
+    cle.valeur = null;
+    vi.stubGlobal("__CQ_CLE_ENV__", true);
+    vi.doMock("../../lib/deployment", () => ({ IS_VERCEL: true }));
+    const cq = await import("./cryptoquant");
+    const { healthStore } = await import("../../store/health");
+    detecter.mockResolvedValue(true);
+    poser(arch(plage(-30, -2), null));
+    const f = reseau(aucun);
+    const r = await cq.chargerSerieCq("taker:spot:btc");
+    expect(r).toMatchObject({ statut: "cle-requise", raison: "Clé CryptoQuant personnelle requise (Réglages ⚙).", appel: false });
+    expect([Object.keys(r.archive?.jours ?? {}).length, f.mock.calls.length, detecter.mock.calls.length]).toEqual([29, 0, 0]);
+    expect(healthStore.getState().sources.cryptoquant).toBeUndefined();
+  });
+
+  it("I10 — local sans clé : 0 fetch sans drapeau ; drapeau vrai → fetch SANS Authorization", async () => {
+    cle.valeur = null;
+    let cq = await import("./cryptoquant");
+    let f = reseau(aucun);
+    expect(await cq.chargerSerieCq("taker:spot:btc")).toMatchObject({ statut: "cle-requise", archive: null });
+    expect(f).not.toHaveBeenCalled();
+    vi.resetModules();
+    vi.stubGlobal("__CQ_CLE_ENV__", true);
+    cq = await import("./cryptoquant");
+    f = reseau(api200);
+    expect((await cq.chargerSerieCq("taker:spot:btc")).statut).toBe("pret");
+    expect(appels(f)[0]?.[1]?.headers).toEqual({ accept: "application/json" });
+  });
+});
+
+describe("CryptoQuant : la clé n'apparaît nulle part (I8)", () => {
+  beforeEach(() => { reinitialiser(); cle.valeur = SECRET; vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(T0); });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it("ni URL, ni raison, ni stockage, ni KV, ni console, ni santé", async () => {
+    const cq = await import("./cryptoquant");
+    const { healthStore } = await import("../../store/health");
+    const consoles = (["log", "info", "warn", "error", "debug"] as const).map((m) => vi.spyOn(console, m).mockImplementation(() => {}));
+    const setItem = vi.spyOn(localStorage, "setItem");
+    detecter.mockResolvedValue(true);
+    const f = reseau((u) => {
+      if (u.includes("btc_all")) return api200();
+      if (u.includes("eth_all")) return statut(403, `Invalid key ${SECRET}`);
+      if (u.includes("mara")) return new Response(`erreur ${SECRET}`, { status: 500 });
+      if (u.includes("riot")) throw new TypeError(`échec ${SECRET}`);
+      return statut(429, SECRET, { "retry-after": "5" });
+    });
+    const res: Awaited<ReturnType<typeof cq.chargerSerieCq>>[] = [];
+    for (const s of ["taker:spot:btc", "taker:spot:eth", "mineur:mara", "mineur:riot", "mineur:wulf"] as const) res.push(await cq.chargerSerieCq(s));
+    expect(res.map((r) => r.statut)).toEqual(["pret", "offre", "erreur", "erreur", "quota"]);
+    expect(appels(f)[0]?.[1]?.headers).toMatchObject({ Authorization: `Bearer ${SECRET}` });
+    expect(kvPutMock).toHaveBeenCalled();
+    const traces = [...f.mock.calls.map(([u]) => String(u)), ...res, ...setItem.mock.calls, ...kvPutMock.mock.calls,
+      ...consoles.flatMap((s) => s.mock.calls), healthStore.getState().sources, cq.etatFileCq()].map((t) => JSON.stringify(t));
+    expect(traces.filter((t) => t.includes(SECRET))).toEqual([]);
+  });
+});

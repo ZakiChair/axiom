@@ -4,6 +4,7 @@
  * Aucune raison, aucun journal, aucune URL ne porte la clé.
  */
 import { CRYPTOQUANT_PREFIXE, IDS_MINEURS_CQ, type IdMineurCq } from "../../../../../shared/cryptoquant-proxy";
+import { RAISON_CLE_CRYPTOQUANT, cryptoquantKeyStore, getCryptoquantKey } from "../../store/cryptoquant";
 import { healthStore } from "../../store/health";
 import { IS_VERCEL } from "../../lib/deployment";
 import { detectDaemon, kvPut, urlDaemon } from "../daemon";
@@ -456,4 +457,164 @@ export function abonnerFileCq(cb: () => void): () => void {
   return () => {
     abonnes.delete(cb);
   };
+}
+
+// --- Orchestrateur ---
+
+/** PRÉSENCE d'une clé `.env` côté proxy (define Vite, jamais la valeur). */
+declare const __CQ_CLE_ENV__: boolean;
+const CQ_CLE_ENV_PRESENTE: boolean = typeof __CQ_CLE_ENV__ !== "undefined" ? __CQ_CLE_ENV__ : false;
+
+/** Reprise après un appel réussi sans J-1. */
+const REPRISE_MS = 6 * 3600_000;
+const TIMEOUT_MS = 15_000;
+
+/** Définie dans le store (module déjà partagé par Réglages, DES et CHAIN), jamais recopiée ici. */
+export { RAISON_CLE_CRYPTOQUANT } from "../../store/cryptoquant";
+export const RAISON_CLE_REFUSEE_CRYPTOQUANT = "Clé CryptoQuant refusée (Réglages ⚙).";
+export const RAISON_ERREUR_CRYPTOQUANT = "CryptoQuant injoignable ; archive affichée.";
+export const RAISON_ARCHIVE_ILLISIBLE_CRYPTOQUANT = "Archive locale CryptoQuant illisible : remplacée à la prochaine écriture.";
+export const RAISON_VERSION_CRYPTOQUANT = "Archive CryptoQuant écrite par une version plus récente d'AXIOM : ni lue ni réécrite.";
+export const RAISON_ANNULE_CRYPTOQUANT = "Chargement CryptoQuant annulé.";
+const RAISON_OFFRE_DEFAUT = "Offre CryptoQuant insuffisante pour cette série (403).";
+
+function raisonQuota(restantMs: number): string {
+  return `Quota CryptoQuant atteint (429) ; nouvel essai dans ${Math.max(1, Math.ceil(restantMs / 1000))} s.`;
+}
+
+export type StatutCq = "pret" | "cle-requise" | "quota" | "offre" | "erreur";
+export interface ChargementCq { serie: SerieCq; statut: StatutCq; raison: string | null; archive: ArchiveCq | null; diagnostic: DiagnosticCq; persistance: PersistanceCq; appel: boolean }
+
+/** Refus mémorisés en session pour la `version` de clé qui les a produits. */
+type FamilleCq = "taker" | "mineurs";
+const refusOffre = new Map<FamilleCq, { version: number; raison: string }>();
+let refusCle: { version: number; raison: string } | null = null;
+
+function familleSerie(serie: SerieCq): FamilleCq {
+  return estSerieMineur(serie) ? "mineurs" : "taker";
+}
+
+function versionCle(): number {
+  return cryptoquantKeyStore.getState().version;
+}
+
+/** `status.message` amont (403), borné, jamais s'il contient la clé. */
+async function raisonOffre(res: Response, cle: string | null): Promise<string> {
+  try {
+    const corps = (await res.json()) as unknown;
+    const status = estObjet(corps) ? corps["status"] : null;
+    const message = estObjet(status) && typeof status["message"] === "string" ? status["message"].trim().slice(0, 200) : "";
+    if (message === "" || (cle !== null && message.includes(cle))) return RAISON_OFFRE_DEFAUT;
+    return `Offre CryptoQuant insuffisante : ${message}`;
+  } catch {
+    return RAISON_OFFRE_DEFAUT;
+  }
+}
+
+function chargementAnnule(serie: SerieCq): ChargementCq {
+  return { serie, statut: "erreur", raison: RAISON_ANNULE_CRYPTOQUANT, archive: null, diagnostic: diagnostiquer(null, jourUtc(Date.now())), persistance: { local: true, kv: null }, appel: false };
+}
+
+/** Ordre §4.3 ; l'archive existante est toujours renvoyée. */
+async function chargerUneFois(serie: SerieCq, signal: AbortSignal): Promise<ChargementCq> {
+  const aujourdhui = jourUtc(Date.now());
+  const lecture = await lireArchiveCq(serie);
+  let archive = lecture.archive;
+  let persistance = lecture.persistance;
+  const fin = (statut: StatutCq, raison: string | null, appel: boolean): ChargementCq =>
+    ({ serie, statut, raison, archive, diagnostic: diagnostiquer(archive, aujourdhui), persistance, appel });
+  const raisonLecture = lecture.localIllisible ? RAISON_ARCHIVE_ILLISIBLE_CRYPTOQUANT : null;
+
+  if (lecture.versionInconnue) return fin("erreur", RAISON_VERSION_CRYPTOQUANT, false);
+  if (diagnostiquer(archive, aujourdhui).hierPresent) return fin("pret", raisonLecture, false);
+  const cle = getCryptoquantKey();
+  if (cle === null && !(CQ_CLE_ENV_PRESENTE && !IS_VERCEL)) return fin("cle-requise", RAISON_CLE_CRYPTOQUANT, false);
+  const version = versionCle();
+  if (refusCle !== null && refusCle.version === version) return fin("cle-requise", refusCle.raison, false);
+  const offre = refusOffre.get(familleSerie(serie));
+  if (offre !== undefined && offre.version === version) return fin("offre", offre.raison, false);
+  const now = Date.now();
+  if (repriseTs !== null && now < repriseTs) return fin("quota", raisonQuota(repriseTs - now), false);
+  if (archive !== null && archive.majTs !== null && now - archive.majTs < REPRISE_MS) return fin("pret", raisonLecture, false);
+  if (!(await acquerirCreneauCq(signal))) return fin("erreur", RAISON_ANNULE_CRYPTOQUANT, false);
+
+  // Clé personnelle seulement ; sans elle, le proxy Vite/daemon injecte le repli `.env`.
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (cle !== null) headers["Authorization"] = `Bearer ${cle}`;
+  try {
+    const res = await fetch(cheminSerie(serie), {
+      headers,
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.any([signal, AbortSignal.timeout(TIMEOUT_MS)]),
+    });
+    noterReponseCq(res);
+    if (res.status === 401) {
+      const raison = cle !== null ? RAISON_CLE_REFUSEE_CRYPTOQUANT : RAISON_CLE_CRYPTOQUANT;
+      if (versionCle() === version) refusCle = { version, raison };
+      return fin("cle-requise", raison, true);
+    }
+    if (res.status === 403) {
+      const raison = await raisonOffre(res, cle);
+      if (versionCle() === version) refusOffre.set(familleSerie(serie), { version, raison });
+      return fin("offre", raison, true);
+    }
+    if (res.status === 429) return fin("quota", raisonQuota((repriseTs ?? Date.now()) - Date.now()), true);
+    if (res.status !== 200) {
+      healthStore.getState().marquerErreur(SOURCE_SANTE, `CryptoQuant HTTP ${res.status}`);
+      return fin("erreur", RAISON_ERREUR_CRYPTOQUANT, true);
+    }
+    const lignes = parserLignes(serie, (await res.json()) as unknown, aujourdhui);
+    if (lignes.length === 0) {
+      healthStore.getState().marquerErreur(SOURCE_SANTE, "CryptoQuant : réponse vide ou invalide");
+      return fin("erreur", RAISON_ERREUR_CRYPTOQUANT, true);
+    }
+    archive = fusionner(archive, serie, lignes, Date.now());
+    persistance = await ecrireArchiveCq(serie, archive, lecture.kv);
+    healthStore.getState().setEtat(SOURCE_SANTE, "polling", { dernierMessageTs: Date.now() });
+    return fin("pret", raisonLecture, true);
+  } catch {
+    if (signal.aborted) return fin("erreur", RAISON_ANNULE_CRYPTOQUANT, true);
+    // Message fixe : jamais `e.message`.
+    healthStore.getState().marquerErreur(SOURCE_SANTE, "CryptoQuant injoignable");
+    return fin("erreur", RAISON_ERREUR_CRYPTOQUANT, true);
+  }
+}
+
+interface TravailCq { promesse: Promise<ChargementCq>; controleur: AbortController; consommateurs: number }
+const travaux = new Map<SerieCq, TravailCq>();
+
+/** Coalescence par série ; le départ du dernier consommateur annule la passe. */
+export function chargerSerieCq(serie: SerieCq, signal?: AbortSignal): Promise<ChargementCq> {
+  if (signal?.aborted) return Promise.resolve(chargementAnnule(serie));
+  let travail = travaux.get(serie);
+  if (travail === undefined || travail.controleur.signal.aborted) {
+    const controleur = new AbortController();
+    const nouveau: TravailCq = {
+      controleur,
+      consommateurs: 0,
+      promesse: chargerUneFois(serie, controleur.signal).catch((): ChargementCq => ({ ...chargementAnnule(serie), raison: RAISON_ERREUR_CRYPTOQUANT })),
+    };
+    travaux.set(serie, nouveau);
+    void nouveau.promesse.then(() => {
+      if (travaux.get(serie) === nouveau) travaux.delete(serie);
+    });
+    travail = nouveau;
+  }
+  const courant = travail;
+  courant.consommateurs++;
+  return new Promise((resolve) => {
+    let termine = false;
+    const finir = (r: ChargementCq) => {
+      if (termine) return;
+      termine = true;
+      signal?.removeEventListener("abort", annuler);
+      courant.consommateurs--;
+      if (courant.consommateurs === 0) courant.controleur.abort();
+      resolve(r);
+    };
+    const annuler = () => finir(chargementAnnule(serie));
+    signal?.addEventListener("abort", annuler, { once: true });
+    void courant.promesse.then(finir);
+  });
 }

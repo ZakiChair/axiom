@@ -105,6 +105,12 @@ describe("libelleSource", () => {
     expect(libelleSource("sosovalue")).toBe("SoSoValue");
   });
 
+  it("nomme CryptoQuant (client à la demande : santé polling/erreur, quota 10/1min)", () => {
+    expect(libelleSource("cryptoquant")).toBe("CryptoQuant");
+    const [row] = trierSources({ cq: { source: "cryptoquant", etat: "polling", dernierMessageTs: 1_000, quota: { utilise: 4, limite: 10, fenetre: "1min" } } }, 2_000);
+    expect([row?.libelle, row?.quota]).toEqual(["CryptoQuant", { utilise: 4, limite: 10, fenetre: "1min" }]);
+  });
+
   it("retombe sur sourceLabel pour les exchanges WS connus", () => {
     expect(libelleSource("binance")).toBe("Binance");
     expect(libelleSource("binance:trades")).toBe("Binance · trades");

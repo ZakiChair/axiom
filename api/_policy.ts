@@ -1,6 +1,7 @@
 import { EXTAPI_HOSTS, extapiCheminAutorise } from "../shared/extapi-hosts.js";
 import { NBS_HOST, NBS_CHEMIN } from "../shared/nbs-series.js";
 import { DEFILLAMA_PRO_HEADER, DEFILLAMA_PRO_HOST, cheminDefillamaAmont, cleDefillamaValide } from "../shared/defillama-proxy.js";
+import { CRYPTOQUANT_HOST, cheminCryptoQuantAmont, cleCryptoQuantValide } from "../shared/cryptoquant-proxy.js";
 
 export const PROXY_TIMEOUT_MS = 15_000;
 export const PROXY_MAX_REDIRECTS = 5;
@@ -31,7 +32,8 @@ export type ProxyRouteId =
   | "bgapi"
   | "ethscanapi"
   | "ccdataapi"
-  | "defillamapro";
+  | "defillamapro"
+  | "cqapi";
 
 interface FixedRoute {
   host: string;
@@ -48,8 +50,11 @@ const FIXED_ROUTES: Readonly<Record<Exclude<ProxyRouteId, "extapi">, FixedRoute>
   ethscanapi: { host: "api.etherscan.io", methods: ["GET", "HEAD"] },
   ccdataapi: { host: "min-api.cryptocompare.com", methods: ["GET", "HEAD"] },
   defillamapro: { host: DEFILLAMA_PRO_HOST, methods: ["GET"] },
+  // CryptoQuant BASIC (licence personnelle) : lecture seule, liste fermée dans planProxyRequest.
+  cqapi: { host: CRYPTOQUANT_HOST, methods: ["GET"] },
 };
 
+// Liste NON vérifiée par le typage : toute nouvelle route doit y figurer (sinon 404 silencieux).
 const ROUTE_IDS: readonly ProxyRouteId[] = [
   "extapi",
   "fredapi",
@@ -61,6 +66,7 @@ const ROUTE_IDS: readonly ProxyRouteId[] = [
   "ethscanapi",
   "ccdataapi",
   "defillamapro",
+  "cqapi",
 ];
 const ROUTES = new Set<ProxyRouteId>(ROUTE_IDS);
 const EXTAPI_WHITELIST: ReadonlySet<string> = new Set(EXTAPI_HOSTS);
@@ -297,6 +303,11 @@ export function proxyUpstreamHeaders(
   ) {
     upstream.set("authorization", authorization);
   }
+  // CryptoQuant BASIC (licence PERSONNELLE) : seul le Bearer du client est relayé, et
+  // uniquement vers son hôte. Aucun repli serveur : ce bloc ne lit aucune variable.
+  if (host === CRYPTOQUANT_HOST && cleCryptoQuantValide(authorization)) {
+    upstream.set("authorization", authorization);
+  }
   const contentType = headers.get("content-type");
   if (method.toUpperCase() === "POST" && contentType !== null) upstream.set("content-type", contentType);
   return upstream;
@@ -349,6 +360,25 @@ export function planProxyRequest(requestUrl: string, method: string, headers: He
       upstreamPath = `${encodeURIComponent(key)}${pathname}`;
       source.search = search;
     }
+    if (route === "cqapi") {
+      // CryptoQuant BASIC : méthode, clé personnelle puis liste FERMÉE, tous refusés
+      // localement AVANT l'amont (même ordre que le proxy Vite et le daemon). Jamais de
+      // repli serveur : sans Bearer valide, 401 même si une variable existe sur le déploiement.
+      if (!methods.includes(normalizedMethod)) {
+        throw new ProxyPolicyError(405, "méthode proxy non autorisée", methods.join(", "));
+      }
+      if (!cleCryptoQuantValide(headers.get("authorization"))) {
+        throw new ProxyPolicyError(401, "clé CryptoQuant personnelle requise");
+      }
+      const localQuery = originalQuery(source).toString();
+      const allowedPath = cheminCryptoQuantAmont(`/cqapi/${path}`, localQuery ? `?${localQuery}` : "");
+      if (allowedPath === null) throw new ProxyPolicyError(404, "chemin CryptoQuant refusé");
+      const [pathname = "", search = ""] = allowedPath.split("?", 2);
+      // `target.pathname` est reconstruit plus bas avec un « / » initial.
+      upstreamPath = pathname.replace(/^\/+/, "");
+      // La query normalisée remplace la query entrante (relue par originalQuery ci-dessous).
+      source.search = search;
+    }
   }
   if (!methods.includes(normalizedMethod)) {
     throw new ProxyPolicyError(405, "méthode proxy non autorisée", methods.join(", "));
@@ -380,6 +410,6 @@ export function planProxyRequest(requestUrl: string, method: string, headers: He
     allowedRedirectHosts,
     privateResponse,
     cacheControl: proxyCacheControl(normalizedMethod, query, headers),
-    maxRedirects: route === "defillamapro" ? 0 : undefined,
+    maxRedirects: route === "defillamapro" || route === "cqapi" ? 0 : undefined,
   };
 }

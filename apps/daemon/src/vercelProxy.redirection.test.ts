@@ -12,9 +12,12 @@ mock.module("node:dns/promises", () => ({
   default: { lookup: async () => [{ address: "93.184.216.34", family: 4 }] },
 }));
 
-function url(route: string, path: string): string {
+function url(route: string, path: string, query = ""): string {
   const params = new URLSearchParams({ __axiom_route: route, __axiom_path: path });
   params.append("path", path);
+  if (query) {
+    for (const [key, value] of new URLSearchParams(query)) params.append(key, value);
+  }
   return `https://axiom.test/api/proxy?${params}`;
 }
 
@@ -78,5 +81,82 @@ describe("repli BGeometrics et redirections (handler)", () => {
     );
     expect(reponse.status).toBe(200);
     expect(appels).toEqual(["Bearer personnelle"]);
+  });
+});
+
+describe("route CryptoQuant /cqapi (handler complet)", () => {
+  const CHEMIN = "v2/market/cq/spot/trade";
+  const QUERY = "symbol=btc_all&window=day&limit=30";
+  const cqOriginal = process.env["CRYPTOQUANT_API_KEY"];
+
+  beforeEach(() => {
+    // Une variable posée par erreur sur le déploiement ne doit JAMAIS servir de repli.
+    process.env["CRYPTOQUANT_API_KEY"] = "repli-interdit";
+  });
+  afterEach(() => {
+    globalThis.fetch = fetchOriginal;
+    if (cqOriginal === undefined) delete process.env["CRYPTOQUANT_API_KEY"];
+    else process.env["CRYPTOQUANT_API_KEY"] = cqOriginal;
+  });
+
+  test("302 amont : refusé (502) après un seul appel, la clé n'est jamais renvoyée au client", async () => {
+    const { default: proxyFunction } = await import("../../../api/proxy");
+    const appels: string[] = [];
+    globalThis.fetch = (async (entree: string | URL | Request, init?: RequestInit) => {
+      const cible = new URL(entree instanceof Request ? entree.url : String(entree));
+      appels.push(`${cible.href} ${new Headers(init?.headers).get("authorization") ?? "-"}`);
+      return new Response(null, {
+        status: 302,
+        headers: { location: `https://api.cryptoquant.com/${CHEMIN}?${QUERY}` },
+      });
+    }) as typeof fetch;
+
+    const reponse = await proxyFunction.fetch(
+      new Request(url("cqapi", CHEMIN, QUERY), { headers: { authorization: "Bearer CLE-TEST-SECRETE" } }),
+    );
+    expect(reponse.status).toBe(502);
+    expect(appels).toEqual([`https://api.cryptoquant.com/${CHEMIN}?${QUERY} Bearer CLE-TEST-SECRETE`]);
+    expect(await reponse.text()).not.toContain("CLE-TEST-SECRETE");
+  });
+
+  test("429 amont : statut, trois en-têtes de quota et corps relayés, réponse privée", async () => {
+    const { default: proxyFunction } = await import("../../../api/proxy");
+    const corps = { status: { code: 429, message: "Too Many Requests" } };
+    globalThis.fetch = (async () =>
+      Response.json(corps, {
+        status: 429,
+        headers: {
+          "x-ratelimit-limit": "10",
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": "42",
+          "x-autre-entete": "non-relaye",
+        },
+      })) as unknown as typeof fetch;
+
+    const reponse = await proxyFunction.fetch(
+      new Request(url("cqapi", CHEMIN, QUERY), { headers: { authorization: "Bearer CLE-TEST-SECRETE" } }),
+    );
+    expect(reponse.status).toBe(429);
+    expect(reponse.headers.get("x-ratelimit-limit")).toBe("10");
+    expect(reponse.headers.get("x-ratelimit-remaining")).toBe("0");
+    expect(reponse.headers.get("x-ratelimit-reset")).toBe("42");
+    expect(reponse.headers.has("x-autre-entete")).toBe(false);
+    expect(reponse.headers.get("cache-control")).toBe("private, no-store");
+    expect(await reponse.json()).toEqual(corps);
+  });
+
+  test("sans clé personnelle : 401 local et zéro appel, malgré la variable serveur", async () => {
+    const { default: proxyFunction } = await import("../../../api/proxy");
+    let appels = 0;
+    globalThis.fetch = (async () => {
+      appels += 1;
+      return Response.json({});
+    }) as unknown as typeof fetch;
+
+    const reponse = await proxyFunction.fetch(new Request(url("cqapi", CHEMIN, QUERY)));
+    expect(reponse.status).toBe(401);
+    expect(appels).toBe(0);
+    expect(reponse.headers.get("cache-control")).toBe("private, no-store");
+    expect(await reponse.json()).toEqual({ erreur: "clé CryptoQuant personnelle requise", statut: 401 });
   });
 });

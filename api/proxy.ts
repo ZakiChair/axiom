@@ -354,6 +354,15 @@ async function handle(request: Request): Promise<Response> {
       "x-axiom-proxy": "vercel",
       ...SECURITY_HEADERS,
     });
+    if (plan.route === "cqapi") {
+      // Quota CryptoQuant (10 req/min) : ensemble FERMÉ d'en-têtes amont recopiés pour la
+      // cadence du client. Le corps amont (status.message) est relayé tel quel plus bas —
+      // contrairement à defillamapro, la clé voyage en en-tête et jamais dans l'URL.
+      for (const nom of ["x-ratelimit-limit", "x-ratelimit-remaining", "x-ratelimit-reset"]) {
+        const valeur = upstream.headers.get(nom);
+        if (valeur !== null) responseHeaders.set(nom, valeur);
+      }
+    }
     if (plan.method === "HEAD" || BODYLESS_STATUSES.has(upstream.status)) {
       await upstream.body?.cancel().catch(() => undefined);
       return new Response(null, { status: upstream.status, headers: responseHeaders });

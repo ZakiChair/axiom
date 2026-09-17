@@ -48,6 +48,29 @@ describe("formatQuota", () => {
       formatQuota({ utilise: 3, limite: 8, fenetre: "1min", jour: { utilise: 142, limite: 800 } })
     ).toBe("3/8 min · 142/800 j");
   });
+
+  it("fenêtre principale + composante crédits (CryptoQuant BASIC), sans jour", () => {
+    expect(
+      formatQuota({
+        utilise: 3,
+        limite: 10,
+        fenetre: "1min",
+        credits: { utilise: 195, limite: 10000, jours: 31 },
+      })
+    ).toBe("3/10 min · ≈195/10000 crédits 31 j");
+  });
+
+  it("fenêtre principale + jour + crédits (tous les segments cumulés)", () => {
+    expect(
+      formatQuota({
+        utilise: 3,
+        limite: 8,
+        fenetre: "1min",
+        jour: { utilise: 142, limite: 800 },
+        credits: { utilise: 195, limite: 10000, jours: 31 },
+      })
+    ).toBe("3/8 min · 142/800 j · ≈195/10000 crédits 31 j");
+  });
 });
 
 describe("degradedLevel", () => {

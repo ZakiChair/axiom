@@ -80,12 +80,18 @@ const FENETRE_ABBR: Record<string, string> = { "1min": "min", "1hour": "h", "1jo
 
 /**
  * Quota lisible : « 3/8 min » (fenêtre principale) + « · 142/800 j » si composante
- * journalière connue (Twelve Data). PURE.
+ * journalière connue (Twelve Data) + « · ≈195/10000 crédits 31 j » si composante
+ * crédits connue (CryptoQuant BASIC, §13 spec — compteur par navigateur, pas un
+ * solde fournisseur). Entiers bruts (pas de séparateur de milliers : aucun
+ * formateur de ce type n'est importé par ce fichier). PURE.
  */
 export function formatQuota(q: QuotaSource): string {
   const unit = FENETRE_ABBR[q.fenetre] ?? q.fenetre;
   const base = `${q.utilise}/${q.limite} ${unit}`;
-  return q.jour ? `${base} · ${q.jour.utilise}/${q.jour.limite} j` : base;
+  const avecJour = q.jour ? `${base} · ${q.jour.utilise}/${q.jour.limite} j` : base;
+  return q.credits
+    ? `${avecJour} · ≈${q.credits.utilise}/${q.credits.limite} crédits ${q.credits.jours} j`
+    : avecJour;
 }
 
 /**

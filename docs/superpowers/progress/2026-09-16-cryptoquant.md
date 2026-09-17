@@ -1448,3 +1448,65 @@ La preuve du 2026-09-17 montre que le quota mensuel Basic se compte en **crédit
 1. **402 explicite** : statut dédié « crédits CryptoQuant épuisés jusqu'à la remise à zéro mensuelle », mémorisé pour la session (zéro nouvel appel), santé DATA marquée ; aujourd'hui un 402 s'affiche « injoignable ».
 2. **Compteur de crédits local** : somme des `x-credit-cost` (ou 15 par appel réussi si l'en-tête manque ; le daemon et Vercel ne le relaient pas encore) sur le mois, affichée dans DATA, avec un plafond de sécurité qui suspend les appels automatiques.
 3. **Moins de passes par jour** : quand une réponse 200 ne contient pas encore J-1, ne pas relancer au bout de 6 h mais une seule fois plus tard dans la journée UTC (ou à heure fixe), pour tenir ≈ 195 crédits par jour.
+
+## Tâche 4 (2026-09-17) — DATA : segment crédits
+
+Décision du propriétaire mise en œuvre (options 1 et 2 ci-dessus) par les tâches 1 à 3 du plan
+`docs/superpowers/plans/2026-09-17-cryptoquant-credits.md`. Cette tâche 4 ajoute le rendu du
+segment crédits dans `formatQuota` (`apps/web/src/components/HealthPanel.tsx`), seule surface DATA
+concernée (le type `QuotaSource.credits` existe déjà, posé par la tâche 2 en type seul).
+
+### Budget après le lot crédits
+
+Mesuré par `pnpm check` (build `@axiom/web`, script `scripts/verifier-budget-build.mjs`), après le
+commit de cette tâche 4 :
+
+```json
+{
+  "limites": { "octetsBruts": 1220000, "octetsGzip": 360000, "niveauGzip": 9 },
+  "initial": {
+    "fichiers": [
+      "assets/index-DTXMdqIE.js",
+      "assets/indicators-DMDb8A8f.js",
+      "assets/vendor-klinecharts-B5HFhIGv.js",
+      "assets/vendor-react-BPWy1Tn9.js"
+    ],
+    "octetsBruts": 1206394,
+    "octetsGzip": 355753
+  }
+}
+```
+
+Delta depuis la référence du plan, **avant tout le lot crédits** (1 206 265 / 355 686) :
+**+129 o brut / +67 o gzip**.
+
+Répartition dans le lot (mesures des rapports de tâches précédentes ; note : le brut est
+déterministe mais le gzip mesuré varie de ±1 o entre deux exécutions du build sur le même code —
+`task-2-report.md` mesure 355 688, `task-3-report.md` remesure ensuite 355 687 pour ce même état ;
+bruit de build, pas un delta réel) :
+
+| Étape | Brut | Gzip (mesure la plus récente pour cet état) | Delta gzip cumulé |
+|---|---|---|---|
+| Avant le lot (référence plan) | 1 206 265 | 355 686 | — |
+| Après tâches 1-2 (`task-2-report.md`) | 1 206 296 | 355 688 | +2 |
+| Après tâche 3 (`task-3-report.md`, +0, remesuré) | 1 206 296 | 355 687 | +1 |
+| **Après tâche 4 (cette mesure)** | **1 206 394** | **355 753** | **+67** |
+
+La tâche 4 contribue donc, à elle seule, **+98 o brut / ≈+66 o gzip** (355 753 − 355 687, à ±1 o de
+bruit de build près) : le segment crédits de
+`formatQuota` (une branche ternaire supplémentaire, littéraux FR compris) est le seul changement de
+cette tâche dans le bundle initial (`HealthPanel.tsx` est importé statiquement par la sidebar, donc
+dans le chunk `index`, jamais chargé à la demande — contrairement à `cryptoquant.ts`). Le
+commentaire JSDoc ajouté n'entre pas dans ce coût : les commentaires sont retirés par le build de
+production.
+
+**Écart consigné (non bloquant)** : la cible « delta visé ≤ ~60 o gzip pour tout le lot » (plan,
+« Contraintes globales ») est dépassée de 7 o gzip (+67 au lieu de ≤ 60) dès cette tâche 4, alors
+qu'il reste encore la tâche 5 (statuts `credits` dans DES et CHAIN, avec leurs propres littéraux de
+raison recopiés). Le plafond BLOQUANT du script (`verifier-budget-build.mjs`, 360 000 gzip) reste
+lui largement respecté : marge de 4 247 o gzip après cette tâche. Je n'ai rien réduit pour rentrer
+sous les 60 o : le texte du segment (« · ≈{utilise}/{limite} crédits {jours} j ») est celui imposé
+littéralement par le plan et la spec §13, et aucun formateur de milliers n'était déjà importé par
+`HealthPanel.tsx` (consigne du plan : ne pas en ajouter un pour ce seul usage). À arbitrer par le
+propriétaire ou l'orchestrateur du lot avant la tâche 5 si le dépassement de la cible souple pose
+problème ; le budget dur, lui, n'est pas en cause.

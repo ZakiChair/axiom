@@ -28,6 +28,7 @@ import {
   formatUsdSigne,
   VALEUR_ABSENTE,
 } from "../lib/format";
+import { useHorloge } from "../lib/horloge";
 import { cryptoquantKeyStore, messageSansCleCq, RAISON_CLE_CRYPTOQUANT } from "../store/cryptoquant";
 import {
   construireModeleFluxTakers,
@@ -43,6 +44,14 @@ const JOUR_MS = 86_400_000;
 /** Séries chargées par la section (spot/perp × BTC/ETH). */
 const NB_SERIES_TAKER = 4;
 const MENTION_PERP = "unités fournisseur, champ inverse non documenté";
+/**
+ * Rejet de l'`await import()` du client (coupure réseau, ou chunk évincé après un redéploiement) :
+ * rien n'a été lu, le libellé ne mentionne donc jamais « archive ». Même texte que CHAIN, recopié
+ * ici : l'importer depuis MineursCotes lierait les deux chunks.
+ */
+const CLIENT_NON_CHARGE = "Client CryptoQuant non chargé (réseau ou mise à jour d'AXIOM) ; rechargez la page.";
+/** Bandeau d'une erreur après appel sans aucune archive : la raison du client, elle, annonce une archive affichée. */
+const ERREUR_SANS_ARCHIVE = "CryptoQuant injoignable ; aucune archive locale.";
 
 const OPTIONS_ACTIF: ReadonlyArray<{ id: ActifTaker; label: string }> = [
   { id: "btc", label: "BTC" },
@@ -70,6 +79,8 @@ export interface PropsVueFluxTakers {
   file: { enAttente: number; repriseTs: number | null };
   now: number;
   onOuvrirReglages: () => void;
+  /** `await import()` du client rejeté ce cycle (chunk introuvable) : aucune série n'a été lue. */
+  echecClient?: boolean;
 }
 
 /** Mini-courbe de tendance récente (SVG inline) — copie locale de celle de DES. */
@@ -99,8 +110,11 @@ function CourbeTakers({ points }: { points: ModeleFluxTakers["courbe"] }) {
   const temps = (jour: string) => Date.parse(`${jour}T00:00:00Z`);
   const x0 = temps(premier.jour);
   const x1 = temps(dernier.jour);
-  const min = Math.min(1, ...valides.map((p) => p.valeur));
-  const max = Math.max(1, ...valides.map((p) => p.valeur));
+  // Légende = plage des DONNÉES ; l'axe l'élargit à 1.00 pour garder le pointillé visible.
+  const minDonnees = Math.min(...valides.map((p) => p.valeur));
+  const maxDonnees = Math.max(...valides.map((p) => p.valeur));
+  const min = Math.min(1, minDonnees);
+  const max = Math.max(1, maxDonnees);
   const x = (jour: string) => 4 + ((temps(jour) - x0) / (x1 - x0 || 1)) * 292;
   const y = (v: number) => 56 - ((v - min) / (max - min || 1)) * 48;
   let rupture = true;
@@ -122,7 +136,7 @@ function CourbeTakers({ points }: { points: ModeleFluxTakers["courbe"] }) {
       </svg>
       <figcaption className="flex justify-between gap-1 text-[9px] text-text-dim">
         <span>{premier.jour}</span>
-        <span>{`${formatDec(min, 2)} → ${formatDec(max, 2)}`}</span>
+        <span>{`${formatDec(minDonnees, 2)} → ${formatDec(maxDonnees, 2)}`}</span>
         <span>{dernier.jour}</span>
       </figcaption>
     </figure>
@@ -138,8 +152,11 @@ function ligneSituation(partPct: number | null, s: ModeleFluxTakers["situation"]
   );
 }
 
-/** Ligne d'archive : début, taille et trois états de trous (J-1 absent n'est jamais un trou). */
-function ligneArchive(d: DiagnosticCq, nbJours: number): string {
+/**
+ * Ligne d'archive : début, taille et trois états de trous (J-1 absent n'est jamais un trou).
+ * `hierPresent` est jugé à l'heure du rendu, pas repris du diagnostic figé au chargement.
+ */
+function ligneArchive(d: DiagnosticCq, nbJours: number, hierPresent: boolean): string {
   const k = d.manquantsFenetre.length;
   const p = d.perdus.length;
   const morceaux = [
@@ -148,7 +165,7 @@ function ligneArchive(d: DiagnosticCq, nbJours: number): string {
     `${k} ${k > 1 ? "manquants" : "manquant"} dans la fenêtre`,
     p === 0 ? "0 perdu" : `${p} ${p > 1 ? "perdus (définitifs)" : "perdu (définitif)"}`,
   ];
-  if (!d.hierPresent) morceaux.push("J-1 en attente de publication");
+  if (!hierPresent) morceaux.push("J-1 en attente de publication");
   return morceaux.join(" · ");
 }
 
@@ -165,6 +182,7 @@ export function resumeEnTeteFluxTakers(
   p: Omit<PropsVueFluxTakers, "onSelection" | "onOuvrirReglages">,
 ): string {
   if (p.enCours && p.file.enAttente > 0) return `${p.recues}/${p.attendues} reçues · en attente du quota`;
+  if (p.echecClient) return "client CryptoQuant non chargé";
   const c = p.chargements[serieTaker(p.selection)];
   if (c === undefined) return p.enCours ? "chargement…" : "série non encore archivée";
   if (c.statut === "quota") {
@@ -177,7 +195,8 @@ export function resumeEnTeteFluxTakers(
   const dernier = c.diagnostic.dernier;
   if (dernier === null || nbJours === 0)
     return c.statut === "erreur" ? (c.appel ? "CryptoQuant injoignable" : "erreur CryptoQuant") : "archive vide";
-  const archive = `archive ${nbJours} j · ${c.diagnostic.hierPresent ? "J-1" : "dernier"} ${dernier}`;
+  // « J-1 » jugé à l'heure du rendu : une fenêtre ouverte depuis la veille ne l'affirme plus.
+  const archive = `archive ${nbJours} j · ${dernier === jourIso(p.now - JOUR_MS) ? "J-1" : "dernier"} ${dernier}`;
   return c.statut === "erreur" ? `CryptoQuant injoignable · ${archive}` : archive;
 }
 
@@ -191,6 +210,7 @@ export function VueFluxTakers({
   file,
   now,
   onOuvrirReglages,
+  echecClient = false,
 }: PropsVueFluxTakers) {
   const hier = jourIso(now - JOUR_MS);
   const c = chargements[serieTaker(selection)];
@@ -226,6 +246,15 @@ export function VueFluxTakers({
     </p>
   );
 
+  if (echecClient) {
+    return (
+      <div className="space-y-2">
+        {selecteurs}
+        <Vide>{CLIENT_NON_CHARGE}</Vide>
+      </div>
+    );
+  }
+
   if (c === undefined) {
     return (
       <div className="space-y-2">
@@ -250,9 +279,11 @@ export function VueFluxTakers({
   }
 
   const bandeau =
-    c.statut === "quota" || c.statut === "offre" || c.statut === "erreur"
-      ? (c.raison ?? "CryptoQuant indisponible ; archive affichée.")
-      : null;
+    c.statut === "erreur" && c.appel && m.jour === null
+      ? ERREUR_SANS_ARCHIVE
+      : c.statut === "quota" || c.statut === "offre" || c.statut === "erreur"
+        ? (c.raison ?? "CryptoQuant indisponible ; archive affichée.")
+        : null;
   const tonRatio = m.ratio === null ? undefined : m.ratio >= 1 ? "up" : "down";
   const sparkRatio = m.courbe
     .map((p) => p.valeur)
@@ -339,7 +370,7 @@ export function VueFluxTakers({
           )}
           <CourbeTakers points={m.courbe} />
           <p className="px-1 text-[10px] text-text-dim" title={titreTrous(c.diagnostic)}>
-            {ligneArchive(c.diagnostic, nbJours)}
+            {ligneArchive(c.diagnostic, nbJours, m.jour === hier)}
           </p>
         </>
       )}
@@ -366,23 +397,29 @@ export function SectionFluxTakers({ onOuvrirReglages }: { onOuvrirReglages: () =
     enAttente: 0,
     repriseTs: null,
   });
-  const [now, setNow] = useState(() => Date.now());
+  const [echecClient, setEchecClient] = useState(false);
+  // Horloge partagée (un tic toutes les 10 s, comme CHAIN) : « J-1 » suit l'heure réelle.
+  const now = useHorloge();
+  // Seul le changement de jour UTC relance une passe (diagnostic et « périmé » recalculés) ;
+  // les tics de l'horloge ne font que redessiner.
+  const jourCourant = jourIso(now);
+  const [, redessiner] = useState(0);
 
-  // Chargement au MONTAGE (et à chaque rotation de clé) : boucle séquentielle, affichage
-  // progressif série par série. Le client est importé à la demande ; démontage → annulation.
+  // Chargement au MONTAGE (puis à chaque rotation de clé et à chaque nouveau jour UTC) : boucle
+  // séquentielle, affichage progressif série par série. Le client est importé à la demande ;
+  // démontage → annulation.
   useEffect(() => {
     const ctrl = new AbortController();
     const abonnement: { arreter: () => void } = { arreter: () => undefined };
     let vivant = true;
     setEnCours(true);
     setRecues(0);
+    setEchecClient(false);
     void (async () => {
       const cq = await import("../data/onchain/cryptoquant");
       if (!vivant) return;
       const majFile = () => {
-        if (!vivant) return;
-        setFile(cq.etatFileCq());
-        setNow(Date.now());
+        if (vivant) setFile(cq.etatFileCq());
       };
       abonnement.arreter = cq.abonnerFileCq(majFile);
       majFile();
@@ -403,23 +440,28 @@ export function SectionFluxTakers({ onOuvrirReglages }: { onOuvrirReglages: () =
       if (vivant) setEnCours(false);
     })().catch(() => {
       // Chunk introuvable (échec de l'import()) ou abonnerFileCq en erreur : sans ce repli, la
-      // section resterait sur « chargement… » indéfiniment (rejet non intercepté).
-      if (vivant) setEnCours(false);
+      // section resterait sur « chargement… » indéfiniment (rejet non intercepté). Rien n'a été
+      // lu : la vue et l'en-tête le disent au lieu d'afficher « série non encore archivée ».
+      if (vivant) {
+        setEnCours(false);
+        setEchecClient(true);
+      }
     });
     return () => {
       vivant = false;
       ctrl.abort();
       abonnement.arreter();
     };
-  }, [version]);
+  }, [version, jourCourant]);
 
-  // Compte à rebours de reprise après un 429 : une mise à jour par seconde jusqu'à l'échéance.
+  // Compte à rebours de reprise après un 429 : un rendu par seconde jusqu'à l'échéance (l'horloge
+  // partagée ne bat que toutes les 10 s ; chaque rendu relit l'heure réelle).
   useEffect(() => {
     const reprise = file.repriseTs;
     if (reprise === null || reprise <= Date.now()) return undefined;
     const id = setInterval(() => {
       const t = Date.now();
-      setNow(t);
+      redessiner(t);
       if (t >= reprise) clearInterval(id);
     }, 1000);
     return () => clearInterval(id);
@@ -435,6 +477,7 @@ export function SectionFluxTakers({ onOuvrirReglages }: { onOuvrirReglages: () =
     file,
     now,
     onOuvrirReglages,
+    echecClient,
   };
 
   return (

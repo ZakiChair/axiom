@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ArchiveCq, ChargementCq, DiagnosticCq, LigneTaker, SerieCq } from "../data/onchain/cryptoquant";
@@ -308,6 +309,78 @@ describe("section DES « Flux takers toutes places »", () => {
     expect(html).toContain("0.98");
     expect(html).not.toContain("Ouvrir les réglages");
     expect(html).not.toContain("illisible");
+  });
+
+  it("erreur après appel sans archive : bandeau local « aucune archive locale », jamais « archive affichée »", () => {
+    const html = rendre({
+      chargements: {
+        "taker:spot:btc": chargement("taker:spot:btc", {
+          statut: "erreur",
+          raison: "CryptoQuant injoignable ; archive affichée.",
+          appel: true,
+        }),
+      },
+    });
+    expect(html).toContain("CryptoQuant injoignable ; aucune archive locale.");
+    expect(html).not.toContain("archive affichée");
+    expect(html).toContain("border-down/40");
+    expect(html).toContain("Série non encore archivée.");
+    // Avec une archive servie, la raison du client reste exacte et s'affiche telle quelle.
+    const avecArchive = rendre({
+      chargements: {
+        "taker:spot:btc": { ...PRET, statut: "erreur", raison: "CryptoQuant injoignable ; archive affichée." },
+      },
+    });
+    expect(avecArchive).toContain("CryptoQuant injoignable ; archive affichée.");
+    expect(avecArchive).not.toContain("aucune archive locale");
+  });
+
+  it("échec de l'import() du client (chunk introuvable) : libellé honnête dans la vue et l'en-tête", () => {
+    // `chargements` reste vide : rien n'a été lu, contrairement à une série réellement non archivée.
+    const html = rendre({ chargements: {}, enCours: false, echecClient: true }).replaceAll("&#x27;", "'");
+    expect(html).toContain("Client CryptoQuant non chargé (réseau ou mise à jour d'AXIOM) ; rechargez la page.");
+    expect(html).not.toContain("non encore archivée");
+    expect(html).toContain('aria-label="Actif des flux takers"');
+    expect(resumeEnTeteFluxTakers(props({ chargements: {}, enCours: false, echecClient: true }))).toBe(
+      "client CryptoQuant non chargé",
+    );
+    // Sans échec du client, une série absente reste « non encore archivée » dans l'en-tête.
+    expect(resumeEnTeteFluxTakers(props({ chargements: {}, enCours: false }))).toBe("série non encore archivée");
+  });
+
+  it("horloge vivante : « J-1 » de l'en-tête et du corps suit l'heure du rendu, pas celle du chargement", () => {
+    // Même chargement (diagnostic calculé le 16), rendu le 18 à 10 h UTC : le 15 n'est plus J-1.
+    const plusTard = Date.UTC(2026, 8, 18, 10);
+    expect(resumeEnTeteFluxTakers(props({ now: plusTard }))).toBe("archive 28 j · dernier 2026-09-15");
+    const html = rendre({ now: plusTard });
+    expect(html).toContain("observation 2026-09-15 · récupéré 2026-09-16");
+    expect(html).not.toContain("(J-1)");
+    expect(html).toContain("J-1 en attente de publication");
+    // Conteneur : horloge partagée, et une nouvelle passe au seul changement de jour UTC.
+    const source = readFileSync(new URL("./FluxTakersSection.tsx", import.meta.url), "utf8");
+    expect(source).toContain("const now = useHorloge();");
+    expect(source).toContain("}, [version, jourCourant]);");
+    expect(source).not.toContain("setNow(");
+  });
+
+  it("légende de la courbe : min et max des données, jamais la plage d'axe forcée à 1.00", () => {
+    const ratios: Record<string, Partial<LigneTaker>> = {
+      "2026-09-10": { bsr: 1.02 },
+      "2026-09-11": { bsr: 1.04 },
+      "2026-09-12": { bsr: 1.1 },
+      "2026-09-13": { bsr: 1.05 },
+      "2026-09-14": { bsr: 1.03 },
+      "2026-09-15": { bsr: 1.06 },
+    };
+    const hausse = archive("taker:spot:btc", "2026-09-10", "2026-09-15", [], ratios);
+    const html = rendre({
+      chargements: { "taker:spot:btc": chargement("taker:spot:btc", { archive: hausse, diagnostic: DIAG_SPOT_BTC }) },
+    });
+    expect(html).toMatch(/min 1\.02 · méd\. [\d.]+ · max 1\.10/);
+    expect(html).toContain("1.02 → 1.10");
+    expect(html).not.toContain("1.00 → 1.10");
+    // Le pointillé à 1.00 reste tracé : l'axe, lui, inclut toujours 1.00.
+    expect(html).toContain('stroke-dasharray="3 3"');
   });
 
   it("série sélectionnée absente : « Série non encore archivée. »", () => {

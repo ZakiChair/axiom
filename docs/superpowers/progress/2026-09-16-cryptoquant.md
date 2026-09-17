@@ -1527,3 +1527,97 @@ premier commit de cette tâche (segment `formatQuota` seul) mesurait +67 o gzip,
 cible ; la correction `panelSignature`, en ajoutant du code, a paradoxalement fait redescendre la
 mesure sous la cible — pur effet du bruit de compression gzip décrit ci-dessus, pas d'un
 allègement du code. À surveiller à la tâche 5, sans que cela bloque quoi que ce soit ici.
+
+## Lot crédits (2026-09-17) — clôture
+
+### Constat
+
+Le sondage manuel du propriétaire (section « Preuve manuelle », commit `f519c28`) a montré que le
+quota mensuel de l'offre Basic se compte en **crédits**, non en requêtes : chaque réponse 200 porte
+`x-credit-cost: 15`, pour 29 lignes comme pour 3, et la documentation CryptoQuant
+(`guides/api-credits.md`, `guides/faq.md`) donne **10 000 crédits/mois** remis à zéro à la date
+d'inscription (inconnue du client), sans report, les appels en échec non facturés et un **402**
+à crédits épuisés. Une passe DES + CHAIN coûte 13 × 15 = **195 crédits** : 30 jours × 2 passes =
+11 700 > 10 000. La spec §2 supposait 10 000 requêtes/mois : l'arithmétique du contrat de build
+était donc fausse d'un facteur 15.
+
+### Décisions du propriétaire (spec §13, autorité du lot)
+
+Option « lot budget complet » : 402 explicite, compteur de crédits avec plafond de sécurité, moins
+de passes par jour. Les cinq points portants :
+
+| Point | Mise en œuvre |
+|---|---|
+| Plafond | `PLAFOND_CREDITS_CQ = 9 000` sur 31 jours UTC glissants (borne supérieure de la consommation depuis n'importe quelle remise à zéro) ; contrôlé avant le créneau **et** après l'avoir obtenu ; zéro appel, créneau non consommé |
+| Compteur | `axiom:cryptoquant:credits:v1` (`{ "v": 1, "jours": {…} }`), copie mémoire source de vérité, élagage à 31 j à chaque écriture, écriture en échec tolérée ; coût = `x-credit-cost` entier dans [0, 1 000] **sur 200 seulement**, sinon 15 ; 0 sur 401/402/403/429/5xx/réseau |
+| 402 | Statut `credits`, raison fixe, corps amont jamais lu, mémoire de session globale de 24 h liée à la version de clé, santé « CryptoQuant : crédits mensuels épuisés » |
+| Cadence | `REPRISE_MS` de 6 h → **12 h** ; une réponse 200 vide ou invalide est facturée et son heure mémorisée par série, soumise à la même reprise |
+| Surfaces | `x-credit-cost` relayé et exposé par le daemon et Vercel (liste partagée) ; DATA rend « · ≈N/10 000 crédits 31 j » ; DES et CHAIN affichent « crédits CryptoQuant épuisés » (402) ou « budget de crédits atteint » (plafond) |
+
+### Journal des commits du lot (base `0e4983a`)
+
+| Commit | Objet |
+|---|---|
+| `49b87d5` | `docs(spec)` : §13 (402, plafond glissant, reprise 12 h), tests C1 à C8 |
+| `0e4983a` | `docs(plan)` : plan d'exécution en 5 tâches |
+| `329a599` | `fix(proxy)` : `x-credit-cost` relayé par le daemon et Vercel (liste partagée `ENTETES_RELAYES_CQ`) |
+| `8b58abf` | `docs(proxy)` : consommateurs de `shared/cryptoquant-proxy.ts` |
+| `717d1ce` | `feat(client)` : budget de crédits — 402 explicite, compteur glissant 31 j, plafond 9 000 |
+| `0010c9c` | `feat(client)` : reprise 12 h et réponse vide mémorisée |
+| `7e14cca` | `feat(data)` : segment crédits dans DATA (`formatQuota`) |
+| `9210d7d` | `fix(data)` : `panelSignature` inclut `credits.utilise` (sans quoi le segment restait figé jusqu'à 60 s) |
+| `3f8520d` | `feat(des,chain)` : statut `credits` dans les vues DES et CHAIN |
+| `85e6511` | `test(e2e)` : reprise 12 h (horloge 00:30 → 12:45 UTC) et parcours 402 DES |
+
+### Preuves de tests (tâche 5)
+
+- Rouge puis vert, unitaire : `FluxTakersSection.test.tsx`, `onchain/MineursCotes.test.tsx` et le
+  nouveau `components/raisonsCreditsCq.test.ts` — 3 échecs attendus (littéral de raison absent des
+  vues ; en-tête CHAIN renvoyant « archive vide » au lieu de « crédits CryptoQuant épuisés »), puis
+  52 tests verts sur ces trois fichiers plus `chunkCryptoquant.test.ts` (le client n'est toujours
+  importé qu'en type par les vues, et en valeur par les seuls fichiers de test, hors bundle).
+- Rouge puis vert, e2e : `des-flux-takers.e2e.ts` « 402 CryptoQuant » échouait sur l'en-tête
+  (`archive 14 j · dernier 2026-08-20`) alors que le comptage d'appels était **déjà** à 1 — la
+  coupure côté client (tâche 2) était donc acquise, seule la vue manquait.
+- `pnpm check` : typecheck monorepo, **4 678 tests** verts en 341 fichiers pour `apps/web`
+  (+ 780 / 59 / 95 dans `indicators`, `alerts`, `backtest`), build `@axiom/web` OK.
+- `AXIOM_E2E_PORT=5239 bash scripts/ci.sh --e2e` : **82 parcours verts** (1,8 min), dont les six
+  parcours CryptoQuant (DES : montage, fusion, 429, 402, 401, client introuvable ; CHAIN : montage,
+  503, client introuvable).
+- L'ajustement de l'horloge e2e à 00:30 → 12:45 UTC n'a **pas** de rouge à montrer : les parcours
+  passaient avant et après. Sans lui, le commentaire « seul le court-circuit J-1 explique zéro
+  appel » devenait un mensonge (un saut de 6 h 30 n'épuise plus une reprise de 12 h) : c'est une
+  correction d'intention de test, pas de comportement.
+
+### Budget après la tâche 5
+
+Initial mesuré par `pnpm check` après le commit `3f8520d` : **1 206 448 o brut / 355 737 o gzip**
+(limites bloquantes 1 220 000 / 360 000). Le brut est **identique** à la mesure de la tâche 4
+(1 206 448) et le gzip varie de −8 o : la tâche 5 ajoute **0 octet** au bundle initial, comme
+prévu — `FluxTakersSection.tsx` (via `DerivativesWindow`) et `onchain/MineursCotes.tsx` (via
+`OnchainWindow`) sont tous deux chargés à la demande par `App.tsx:147,158`, leurs littéraux
+recopiés vivent dans ces chunks-là.
+
+Delta du lot entier depuis la référence du plan (1 206 265 / 355 686) : **+183 o brut / +51 o
+gzip** — sous la cible souple de ~60 o gzip, avec 4 263 o gzip de marge sous le plafond bloquant.
+Tout le coût réel vient de la tâche 4 (`HealthPanel.tsx`, importé statiquement par l'entrée).
+
+### Limites connues (à répéter en revue)
+
+1. **Compteur par navigateur** : les appels faits en ligne de commande (les sondages manuels du
+   propriétaire), depuis un autre poste ou depuis le déploiement Vercel ne sont pas vus. La somme
+   affichée est donc un **minorant** de la consommation réelle du mois ; le plafond de 9 000 laisse
+   la marge, et le 402 reste le filet.
+2. **Remise à zéro inconnue** : l'API ne publie ni le solde ni la date d'anniversaire de l'offre.
+   La fenêtre de 31 jours glissants est une borne supérieure de la consommation depuis n'importe
+   quelle date de remise à zéro, pas une reconstitution du solde réel.
+3. **402 comme filet** : à crédits réellement épuisés, un seul appel part (par version de clé et
+   par 24 h) avant que toutes les séries ne se coupent. Aucune API ne permet de l'anticiper.
+4. **Raison « archive affichée » sans archive** : le bandeau `credits` montre la raison du client
+   telle quelle (décision §13 « bandeau = raison »), qui annonce une archive même quand il n'y en a
+   pas encore — DES affiche alors « Série non encore archivée. » juste en dessous. Même traitement
+   que `offre` et `erreur` sans appel : non corrigé, cohérent.
+5. **Double publication du quota** par appel (créneau puis 200) : nécessaire pour que DATA montre
+   les crédits sans attendre l'expiration de la fenêtre minute ; `DataWindow.tsx:33-43` porte la
+   même logique de signature dupliquée que `HealthPanel` et n'a **pas** été corrigée (hors
+   périmètre du lot, signalé à la tâche 4).

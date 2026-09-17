@@ -1,12 +1,16 @@
 /**
  * Section « Mineurs » de CHAIN : Hash Ribbons (SMA 30 / 60 j du hashrate mempool.space,
  * déjà chargé par la fenêtre — aucun second appel) et hashprice (revenus mineurs
- * blockchain.info rapportés au hashrate du même jour UTC).
+ * blockchain.info rapportés au hashrate du même jour UTC), puis la sous-section
+ * « Production des mineurs cotés » (CryptoQuant) passée en `children`.
  *
  * Vue PURE `VueMineurs` (testée en rendu statique) + conteneur `Mineurs` qui charge les
  * revenus à l'ouverture (cache 6 h, dégradation gracieuse dans `data/onchain/mineurs.ts`).
+ * `MineursCotes` garde son propre état, hors de l'effet des revenus : son court-circuit
+ * « J-1 archivé → zéro appel » rend chaque montage de CHAIN sans coût.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { useStore } from "zustand";
 import type { PointMetrique, SerieMetrique } from "../../data/onchain/coinmetrics";
 import type { ResultatFrais } from "../../data/onchain/mempool";
 import {
@@ -18,8 +22,10 @@ import {
   type EtatRibbons,
 } from "../../data/onchain/mineurs";
 import { formatDec, formatUsd } from "../../lib/format";
+import { settingsUiStore } from "../../store/settings-ui";
 import { Badge, NoteSource, TitreSection, TuileStat, Vide, type TonBadge } from "../ui";
 import { CourbeOnchain, dateObservation, ProvenanceOnchain } from "./HistoriqueCommun";
+import { MineursCotes } from "./MineursCotes";
 
 const ETATS: Record<EtatRibbons, { texte: string; ton: TonBadge }> = {
   capitulation: { texte: "Capitulation", ton: "down" },
@@ -36,10 +42,13 @@ export function VueMineurs({
   hashrate,
   revenus,
   loading = false,
+  children,
 }: {
   hashrate: SerieMetrique | null;
   revenus: ResultatFrais<PointMetrique[]> | null;
   loading?: boolean;
+  /** Sous-section rendue après la courbe et la provenance, avant la note de source. */
+  children?: ReactNode;
 }) {
   const points = hashrate?.points ?? [];
   const rubans = calculerHashRibbons(points);
@@ -97,6 +106,7 @@ export function VueMineurs({
           perime={revenus.perime}
         />
       )}
+      {children}
       <NoteSource>
         Hash Ribbons : capitulation quand la SMA {RIBBONS_COURTE} j du hashrate passe sous la SMA {RIBBONS_LONGUE} j,
         reprise pendant 30 j après le croisement inverse. Hashprice = revenus quotidiens des mineurs
@@ -109,6 +119,8 @@ export function VueMineurs({
 export function Mineurs({ open, hashrate }: { open: boolean; hashrate: ResultatFrais<SerieMetrique> | null }) {
   const [revenus, setRevenus] = useState<ResultatFrais<PointMetrique[]> | null>(null);
   const [loading, setLoading] = useState(false);
+  // OnchainWindow ne transmet pas `openSettings` à la section : lecture directe du store UI.
+  const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
   useEffect(() => {
     if (!open) {
       setRevenus(null);
@@ -123,5 +135,9 @@ export function Mineurs({ open, hashrate }: { open: boolean; hashrate: ResultatF
     });
     return () => ctrl.abort();
   }, [open]);
-  return <VueMineurs hashrate={hashrate?.donnee ?? null} revenus={revenus} loading={loading} />;
+  return (
+    <VueMineurs hashrate={hashrate?.donnee ?? null} revenus={revenus} loading={loading}>
+      {open && <MineursCotes onOuvrirReglages={openSettings} />}
+    </VueMineurs>
+  );
 }

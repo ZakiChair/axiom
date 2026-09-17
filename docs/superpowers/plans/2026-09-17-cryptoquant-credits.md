@@ -10,7 +10,7 @@
 
 ## Contraintes globales
 
-- Français partout ; TDD (test rouge pour la bonne raison, puis vert) ; `pnpm check` vert avant CHAQUE commit ; commits terminés par `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`.
+- Français partout ; TDD (test rouge pour la bonne raison, puis vert) ; `pnpm check` vert avant CHAQUE commit ; commits terminés par une ligne `Co-Authored-By:` qui nomme le modèle ayant réellement produit le commit (arbitrage du 2026-09-17 : l'exactitude de l'attribution primait sur l'uniformité demandée d'abord ; le lot porte donc des lignes Opus 5 et Sonnet 5).
 - Constantes exactes (§13) : `PLAFOND_CREDITS_CQ = 9_000`, `COUT_CREDITS_DEFAUT_CQ = 15`, borne de `x-credit-cost` [0, 1 000] entier, fenêtre 31 jours UTC, clé `axiom:cryptoquant:credits:v1`, valeur `{ "v": 1, "jours": { "AAAA-MM-JJ": n } }`, mémoire 402 valable 24 h, `REPRISE_MS = 12 h`.
 - Libellés exacts (§13) : `RAISON_CREDITS_EPUISES_CQ` = « Crédits mensuels CryptoQuant épuisés (402) : plus d'appel avant la remise à zéro mensuelle ; archive affichée. » ; `RAISON_BUDGET_CREDITS_CQ` = « Budget de crédits CryptoQuant atteint (≈ N/10 000 sur 31 j, ce navigateur) : appels suspendus pour préserver le mois ; archive affichée. » (N = somme entière) ; santé « CryptoQuant : crédits mensuels épuisés » ; en-têtes de section « crédits CryptoQuant épuisés » et « budget de crédits atteint » ; segment DATA « · ≈N/10 000 crédits 31 j ».
 - Aucune clé réelle ni marqueur de clé dans un fichier commité ; aucune variable CryptoQuant dans `api/` ; le client ne se charge dans les vues que par `await import("../data/onchain/cryptoquant")` (littéral exact) et n'y est importé qu'en `import type`.

@@ -88,7 +88,7 @@ Tirée des blocs **Fichiers** des tâches (numéros de ligne retirés). Chaque f
 | B2 section CHAIN | 18, 19 | `### Budget après B2`, e2e `chain-mineurs-cotes`, **revue indépendante B2** (tâche 19) |
 | Clôture | 20 | `pnpm check` + `scripts/ci.sh --e2e`, rapport complet, écarts actés, mémoire projet (orchestrateur) |
 
-Les tâches 3, 4 et 5 touchent des fichiers disjoints et peuvent être confiées à trois développeurs en parallèle, après la tâche 2. Toutes les autres sont séquentielles.
+Toutes les tâches sont séquentielles. Les tâches 3, 4 et 5 touchent des fichiers disjoints, mais la tâche 4 laisse le typecheck du daemon rouge entre ses étapes, les tâches 3 et 5 exigent un typecheck vert, et les trois committent dans le même index : elles s'exécutent l'une après l'autre.
 
 ---
 
@@ -2082,7 +2082,7 @@ git commit -m "feat(vite): proxy de dev /cqapi — refus locaux, repli .env hors
 
 ## Zone C — Clé personnelle, exclusion des sauvegardes, Réglages (B1-3)
 
-Toutes les commandes se lancent depuis la racine du dépôt (`/Users/zakichair/Projects/axiom`). Vitest tourne en environnement **node** (aucun bloc `test` dans `apps/web/vite.config.ts`, pas de jsdom) : `localStorage` n'existe pas et se bouchonne, comme dans `store/onchain.test.ts` et `store/persist.test.ts`.
+Toutes les commandes se lancent depuis la racine du dépôt, c'est-à-dire la racine du worktree d'exécution (jamais le checkout principal s'il diffère). Vitest tourne en environnement **node** (aucun bloc `test` dans `apps/web/vite.config.ts`, pas de jsdom) : `localStorage` n'existe pas et se bouchonne, comme dans `store/onchain.test.ts` et `store/persist.test.ts`.
 
 ---
 
@@ -2636,7 +2636,7 @@ EOF
   - `cryptoquantKeyStore` de la Tâche 6, sélecteurs `s.hasKey`, `s.setKey`, `s.clearKey`.
   - `IS_VERCEL`, déjà importé à `SettingsPanel.tsx:34` et défini à `apps/web/src/lib/deployment.ts:7`.
   - `ApiKeyField` local (`SettingsPanel.tsx:45-184`), dont les props vérifiées sont `name`, `purpose`, `domain`, `signupUrl`, `signupLabel`, `placeholder`, `hasKey`, `onSave`, `onClear`.
-  - la section `### Budget avant B1` du rapport, écrite par la tâche 1 au format D1 : titre, ligne « Commande : … », puis bloc de code `json` complet.
+  - la section `### Budget avant B1` du rapport, écrite par la tâche 1 au format unifié des budgets (spec §12) : titre, ligne « Commande : … », puis bloc de code `json` complet.
 - Produit : aucun export. Libellés stables pour les e2e des Zones E/F :
   - nom du bloc « CryptoQuant (takers et mineurs cotés) » ;
   - placeholder « Clé API CryptoQuant (personnelle) » ;
@@ -2743,7 +2743,7 @@ import { cryptoquantKeyStore } from "../store/cryptoquant";
   Tests voisins (ratchets UI, garde-fous couleurs, stores) : `pnpm --filter @axiom/web exec vitest run src/components/uiConventions.test.ts src/lib/gardeFous.test.ts src/components/Toolbar.test.tsx src/store`
   Typecheck : `pnpm --filter @axiom/web typecheck`. Attendu : aucune erreur.
 
-- [ ] **Étape 5 : mesurer le budget après B1-3.** Suivre le format unique du rapport (D1) et les attentes de budget (D5).
+- [ ] **Étape 5 : mesurer le budget après B1-3.** Suivre le format unique du rapport et les attentes de budget (spec §12).
 
   (a) Construire. La commande imprime, après la sortie Vite, le JSON de `scripts/verifier-budget-build.mjs`.
 
@@ -2756,11 +2756,11 @@ pnpm --filter @axiom/web build
   (b) Consigner la section `### Budget après B1-3` à la fin du rapport. Elle contient une ligne « Commande : … », puis le bloc de code `json` **complet**. Ce bloc est le même JSON que celui du build : le script est rejoué tel quel sur le `apps/web/dist` que la commande (a) vient de produire. Aucun `| tee` n'est utilisé ici. Si vous en ajoutez un pour garder la sortie, faites précéder la commande de `set -o pipefail;`.
 
 ````bash
-{
+node scripts/verifier-budget-build.mjs apps/web/dist > "${TMPDIR:-/tmp}/axiom-budget-b1-3.json" && {
   printf '\n### Budget après B1-3\n\nCommande : `pnpm --filter @axiom/web build` (bloc imprimé par `scripts/verifier-budget-build.mjs`, rejoué tel quel sur `apps/web/dist`).\n\n```json\n'
-  node scripts/verifier-budget-build.mjs apps/web/dist
+  cat "${TMPDIR:-/tmp}/axiom-budget-b1-3.json"
   printf '```\n'
-} >> docs/superpowers/progress/2026-09-16-cryptoquant.md
+} >> docs/superpowers/progress/2026-09-16-cryptoquant.md; echo "(code $?)"
 ````
 
   (c) Consigner le chunk du store et le delta initial, **après** le bloc json. Cette ligne ne gêne pas la lecture des blocs par les tâches 16 et 20. Le script lit les blocs json des sections `### Budget avant B1` (écrite par la tâche 1) et `### Budget après B1-3`, ainsi que `apps/web/dist/.vite/manifest.json`. Il ajoute une ligne au rapport et l'imprime.
@@ -2803,7 +2803,7 @@ tail -n 3 docs/superpowers/progress/2026-09-16-cryptoquant.md
   Lecture du résultat :
   - À ce stade, seul `SettingsPanel` (paresseux, `App.tsx:224`) importe le store. Rollup l'inclut donc normalement dans le chunk `SettingsPanel-….js`, sans créer `_cryptoquant-….js`. Le chunk partagé du store n'apparaît qu'une fois la section DES branchée : le client et la section l'importent aussi (tâches 13 à 15). Précédent : `_defillamaKey-….js`, partagé par les Réglages, `DefillamaProPanel.tsx` et `data/onchain/defillamaPro.ts`. La tâche 16 consigne ce nom.
   - Si un chunk partagé apparaît déjà ici, le noter tel quel. Chercher alors l'importateur supplémentaire avec `git grep -n "store/cryptoquant" -- apps/web/src`. Attendu : seul `SettingsPanel.tsx` l'importe. Les autres occurrences sont des commentaires (`persist.ts`) ou des chaînes de test (`SettingsPanel.cryptoquant.test.ts`).
-  - Attentes de budget (D5) : « delta initial attendu ≤ ~40 o gzip par sous-lot (nom de chunk partagé) ; porte d'acceptation ≤ ~150 o gzip sur l'ensemble de B1 ; seule la limite 360 000 est bloquante ». Ici, le delta vient surtout des deux littéraux et du `startsWith` ajoutés à `persist.ts`, qui est dans le chemin d'entrée. Un delta supérieur à ~40 o gzip ne bloque pas : l'expliquer dans le rapport. La porte des ~150 o gzip sur l'ensemble de B1 est contrôlée en tâche 16.
+  - Attentes de budget (spec §12) : « delta initial attendu ≤ ~40 o gzip par sous-lot (nom de chunk partagé) ; porte d'acceptation ≤ ~150 o gzip sur l'ensemble de B1 ; seule la limite 360 000 est bloquante ». Ici, le delta vient surtout des deux littéraux et du `startsWith` ajoutés à `persist.ts`, qui est dans le chemin d'entrée. Un delta supérieur à ~40 o gzip ne bloque pas : l'expliquer dans le rapport. La porte des ~150 o gzip sur l'ensemble de B1 est contrôlée en tâche 16.
 
 - [ ] **Étape 6 : contrôle manuel.**
   1. Lancer `pnpm dev` et ouvrir l'URL affichée par Vite. Ouvrir ensuite les Réglages avec le bouton ⚙ « Ouvrir les réglages », en tête du panneau latéral « Panneaux » (`App.tsx:308-318`). Ce panneau est visible hors mode plein écran, à partir de la largeur `sm`.
@@ -2829,7 +2829,7 @@ EOF
 
 ## Zone D — client CryptoQuant
 
-> Prérequis : Zone A (`shared/cryptoquant-proxy.ts` : `CRYPTOQUANT_PREFIXE`, `IDS_MINEURS_CQ`, `IdMineurCq`, `cheminCryptoQuantAmont`, fichier ajouté à `include` de `apps/web/tsconfig.json` ; define `__CQ_CLE_ENV__`) et tâche 6 (`store/cryptoquant.ts` : `getCryptoquantKey`, `cryptoquantKeyStore`, `RAISON_CLE_CRYPTOQUANT`, `messageSansCleCq` — arbitrage D4 : la raison « clé requise » vit dans le store, le client ne fait que la ré-exporter en tâche 13). `situer` n'appartient pas au client (arbitrage D3 : `components/fluxTakers.util.ts`, tâche 14). Commandes lancées depuis la racine (pnpm exécute vitest dans `apps/web`). Les lignes citées pour les fichiers créés ici sont celles obtenues en collant les blocs dans l'ordre. Sous vitest, un define sans point devient une propriété de `globalThis` : les tests posent `vi.stubGlobal("__CQ_CLE_ENV__", false)` (ou `true`) avant `await import("./cryptoquant")` (patron `bgeometrics-fetch.test.ts` : `vi.resetModules()` puis import dynamique).
+> Prérequis : Zone A (`shared/cryptoquant-proxy.ts` : `CRYPTOQUANT_PREFIXE`, `IDS_MINEURS_CQ`, `IdMineurCq`, `cheminCryptoQuantAmont`, fichier ajouté à `include` de `apps/web/tsconfig.json` ; define `__CQ_CLE_ENV__`) et tâche 6 (`store/cryptoquant.ts` : `getCryptoquantKey`, `cryptoquantKeyStore`, `RAISON_CLE_CRYPTOQUANT`, `messageSansCleCq` — spec §12 : la raison « clé requise » vit dans le store, le client ne fait que la ré-exporter en tâche 13). `situer` n'appartient pas au client (spec §12 : `components/fluxTakers.util.ts`, tâche 14). Commandes lancées depuis la racine (pnpm exécute vitest dans `apps/web`). Les lignes citées pour les fichiers créés ici sont celles obtenues en collant les blocs dans l'ordre. Sous vitest, un define sans point devient une propriété de `globalThis` : les tests posent `vi.stubGlobal("__CQ_CLE_ENV__", false)` (ou `true`) avant `await import("./cryptoquant")` (patron `bgeometrics-fetch.test.ts` : `vi.resetModules()` puis import dynamique).
 
 ### Tâche 9 : catalogue, jourUtc, cheminSerie, parserLignes
 
@@ -2839,7 +2839,7 @@ EOF
 
 **Interfaces :**
 - Consomme : Zone A — `CRYPTOQUANT_PREFIXE`, `IDS_MINEURS_CQ`, `IdMineurCq`, `cheminCryptoQuantAmont(pathname, search): string | null` ; `data/onchain/cohorts.ts:2-11` — `nombreOnchain(v: unknown): number | null`, `dateOnchain(v: unknown): number | null`.
-- Produit : `SerieCq`, `SERIES_TAKER`, `SERIES_MINEURS`, `LigneTaker`, `LigneMineur`, `LigneCq`, `ArchiveCq`, `jourUtc(ms): string`, `cheminSerie(serie): string`, `parserLignes(serie, json, aujourdhuiUtc): Array<{ jour: string; ligne: LigneCq }>` (signatures du contrat) ; internes `estSerieMineur`, `estObjet`. Aucune définition locale de `RAISON_CLE_CRYPTOQUANT` (D4 : définie en tâche 6 dans le store, ré-exportée par le client en tâche 13).
+- Produit : `SerieCq`, `SERIES_TAKER`, `SERIES_MINEURS`, `LigneTaker`, `LigneMineur`, `LigneCq`, `ArchiveCq`, `jourUtc(ms): string`, `cheminSerie(serie): string`, `parserLignes(serie, json, aujourdhuiUtc): Array<{ jour: string; ligne: LigneCq }>` (signatures du contrat) ; internes `estSerieMineur`, `estObjet`. Aucune définition locale de `RAISON_CLE_CRYPTOQUANT` (spec §12 : définie en tâche 6 dans le store, ré-exportée par le client en tâche 13).
 
 - [ ] **Étape 1 : écrire le test qui échoue** — créer `cryptoquant.test.ts` (fixtures : spot BTC 2026-09-15 de la spec §4.4, MARA 2026-09-15 de la spec §2) :
 
@@ -3047,7 +3047,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Interfaces :**
 - Consomme : tâche 9 — `jourUtc`, `estObjet`, `estSerieMineur`, types ; `dateOnchain`.
-- Produit : `fusionner`, `unionArchives` (égalité de `majTs` → `a`, la copie locale), `DecodageCq`, `decoderArchive`, `DiagnosticCq`, `diagnostiquer` (signatures du contrat). Arbitrage D3 : `situer` n'est **pas** dans le client (ni code ni test ici) ; il est exporté par `apps/web/src/components/fluxTakers.util.ts` et testé en tâche 14. Interne `validerArchive(valeur: unknown, serie: SerieCq): DecodageCq` pour la `valeur` déjà parsée du KV (tâche 11) ; internes `JOUR_MS`, `jourVersMs`, `decalerJour`, `trierJours`.
+- Produit : `fusionner`, `unionArchives` (égalité de `majTs` → `a`, la copie locale), `DecodageCq`, `decoderArchive`, `DiagnosticCq`, `diagnostiquer` (signatures du contrat). Arbitrage (spec §12) : `situer` n'est **pas** dans le client (ni code ni test ici) ; il est exporté par `apps/web/src/components/fluxTakers.util.ts` et testé en tâche 14. Interne `validerArchive(valeur: unknown, serie: SerieCq): DecodageCq` pour la `valeur` déjà parsée du KV (tâche 11) ; internes `JOUR_MS`, `jourVersMs`, `decalerJour`, `trierJours`.
 
 - [ ] **Étape 1 : écrire le test qui échoue** — remplacer les lignes 3-6 de `cryptoquant.test.ts` par :
 
@@ -3244,7 +3244,7 @@ export function diagnostiquer(archive: ArchiveCq | null, aujourdhuiUtc: string):
 }
 ```
 
-- [ ] **Étape 4 : lancer le test et vérifier qu'il passe** — `pnpm --filter @axiom/web exec vitest run src/data/onchain/cryptoquant.test.ts` (11 verts : catalogue, I2, I1 fusion/union, I4 décodage, I3) puis `pnpm --filter @axiom/web typecheck`. Contrôle D3 : `rg -n "situer" apps/web/src/data/onchain/` ne renvoie rien.
+- [ ] **Étape 4 : lancer le test et vérifier qu'il passe** — `pnpm --filter @axiom/web exec vitest run src/data/onchain/cryptoquant.test.ts` (11 verts : catalogue, I2, I1 fusion/union, I4 décodage, I3) puis `pnpm --filter @axiom/web typecheck`. Contrôle « `situer` hors du client » : `rg -n "situer" apps/web/src/data/onchain/` ne renvoie rien.
 
 - [ ] **Étape 5 : commit**
 
@@ -3264,7 +3264,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Interfaces :**
 - Consomme : tâche 10 — `decoderArchive`, `validerArchive`, `unionArchives` ; `data/daemon.ts` — `detectDaemon(exigence?)` (`:257-276`, faux sans sonde sur Vercel), `urlDaemon(chemin)` (`:191-193`), `kvPut(ns, cle, valeur): Promise<number | null>` (`:346-349`, sérialisation par `ecrireKv` `:351-364`) ; `lib/deployment.ts:7` — `IS_VERCEL` ; KV réel `apps/daemon/src/kv.ts:116-128` (200 → `{ namespace, cle, valeur, majA }`, `valeur` déjà parsée ; 404 → `{ erreur: "absent" }`) et `:28` (1 048 576).
-- Produit : `PersistanceCq` (`kv` : `null` = pas de daemon, `false` = lecture ou écriture KV en échec), `EtatKvCq = "sans-daemon" | "absente" | "erreur" | "presente"`, `LectureArchiveCq { archive; versionInconnue; localIllisible; kv; persistance }`, `lireArchiveCq(serie): Promise<LectureArchiveCq>`, `ecrireArchiveCq(serie, archive, kv: EtatKvCq): Promise<PersistanceCq>` ; `cleLocale(serie: SerieCq): string` → `axiom:onchain:cq:<serie>:v1` et `cleKv(serie: SerieCq): string` → `cq:<serie>:v1` (namespace KV `onchain`), **exportées** (arbitrage D10 : noms camelCase actés à la place du `CLE_LOCALE` illustratif du contrat ; un test fige `cleLocale("taker:spot:btc") === "axiom:onchain:cq:taker:spot:btc:v1"`, préfixe exclu des sauvegardes par `resteSurLePoste` en tâche 7, où il n'est pas exporté : le lien est donc un littéral figé des deux côtés). Le mock de `../../store/cryptoquant` part du vrai module (`importOriginal`, patron `chart/orderflow.bucket.test.ts:47-48`) : `RAISON_CLE_CRYPTOQUANT` (D4, utilisée par le client en tâche 13) et `messageSansCleCq` y restent réels, seuls `getCryptoquantKey` et `cryptoquantKeyStore` sont pilotés. Le test fournit `reinitialiser`, `reseau`, `arch`, `poser`, `relire`, `kvOk`, `aucun`, `detecter`, `kvPutMock`, `cle`, `T0`, `J`, `plage`, `L`, `CLE_BTC`, `stockage` aux tâches 12-13.
+- Produit : `PersistanceCq` (`kv` : `null` = pas de daemon, `false` = lecture ou écriture KV en échec), `EtatKvCq = "sans-daemon" | "absente" | "erreur" | "presente"`, `LectureArchiveCq { archive; versionInconnue; localIllisible; kv; persistance }`, `lireArchiveCq(serie): Promise<LectureArchiveCq>`, `ecrireArchiveCq(serie, archive, kv: EtatKvCq): Promise<PersistanceCq>` ; `cleLocale(serie: SerieCq): string` → `axiom:onchain:cq:<serie>:v1` et `cleKv(serie: SerieCq): string` → `cq:<serie>:v1` (namespace KV `onchain`), **exportées** (noms camelCase actés à la place du `CLE_LOCALE` illustratif du contrat ; un test fige `cleLocale("taker:spot:btc") === "axiom:onchain:cq:taker:spot:btc:v1"`, préfixe exclu des sauvegardes par `resteSurLePoste` en tâche 7, où il n'est pas exporté : le lien est donc un littéral figé des deux côtés). Le mock de `../../store/cryptoquant` part du vrai module (`importOriginal`, patron `chart/orderflow.bucket.test.ts:47-48`) : `RAISON_CLE_CRYPTOQUANT` (spec §12, utilisée par le client en tâche 13) et `messageSansCleCq` y restent réels, seuls `getCryptoquantKey` et `cryptoquantKeyStore` sont pilotés. Le test fournit `reinitialiser`, `reseau`, `arch`, `poser`, `relire`, `kvOk`, `aucun`, `detecter`, `kvPutMock`, `cle`, `T0`, `J`, `plage`, `L`, `CLE_BTC`, `stockage` aux tâches 12-13.
 
 - [ ] **Étape 1 : écrire le test qui échoue** — créer `cryptoquant-fetch.test.ts` (mocks : patrons `data/extapi.test.ts:5-9` et `alerts/runtime.test.ts:25-31` ; `IS_VERCEL` par `vi.doMock` comme `store/coinalyze.test.ts:24-50` ; stockage plein comme `store/persist.test.ts:501`) :
 
@@ -3279,7 +3279,7 @@ const { detecter, kvPutMock, cle } = vi.hoisted(() => ({
   cle: { valeur: null as string | null, version: 0 },
 }));
 vi.mock("../daemon", () => ({ detectDaemon: detecter, urlDaemon: (c: string) => `http://d${c}`, kvPut: kvPutMock }));
-// Vrai store (D4 : `RAISON_CLE_CRYPTOQUANT` réel, ré-exporté par le client) ; clé et version pilotées.
+// Vrai store (`RAISON_CLE_CRYPTOQUANT` réel, ré-exporté par le client) ; clé et version pilotées.
 vi.mock("../../store/cryptoquant", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../store/cryptoquant")>()),
   getCryptoquantKey: () => cle.valeur,
@@ -3324,7 +3324,7 @@ describe("CryptoQuant : persistance locale ∪ KV (I1, I4)", () => {
   beforeEach(reinitialiser);
   afterEach(() => { vi.unstubAllGlobals(); vi.doUnmock("../../lib/deployment"); });
 
-  it("D10 — emplacements figés : clé locale sous le préfixe exclu des sauvegardes (tâche 7), clé KV par série", async () => {
+  it("emplacements figés : clé locale sous le préfixe exclu des sauvegardes (tâche 7), clé KV par série", async () => {
     const cq = await import("./cryptoquant");
     expect(cq.cleLocale("taker:spot:btc")).toBe("axiom:onchain:cq:taker:spot:btc:v1");
     expect(cq.cleLocale("taker:spot:btc")).toBe(CLE_BTC);
@@ -3423,7 +3423,7 @@ describe("CryptoQuant : persistance locale ∪ KV (I1, I4)", () => {
 });
 ```
 
-- [ ] **Étape 2 : lancer le test et vérifier qu'il échoue** — `pnpm --filter @axiom/web exec vitest run src/data/onchain/cryptoquant-fetch.test.ts` → 8 tests rouges `TypeError: cq.cleLocale is not a function` (test D10) et `TypeError: cq.lireArchiveCq is not a function` (ou `cq.ecrireArchiveCq`) pour les 7 autres.
+- [ ] **Étape 2 : lancer le test et vérifier qu'il échoue** — `pnpm --filter @axiom/web exec vitest run src/data/onchain/cryptoquant-fetch.test.ts` → 8 tests rouges `TypeError: cq.cleLocale is not a function` (test des emplacements figés) et `TypeError: cq.lireArchiveCq is not a function` (ou `cq.ecrireArchiveCq`) pour les 7 autres.
 
 - [ ] **Étape 3 : implémentation minimale** — remplacer les lignes 6-7 de `cryptoquant.ts` par :
 
@@ -3562,7 +3562,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 **Interfaces :**
 - Consomme : `store/health.ts:99-107` — `healthStore.getState().setQuota(source, { utilise, limite, fenetre })` ; patron `acquireSlot` `data/coinalyze.ts:106-132`.
 - Produit : `acquerirCreneauCq(signal: AbortSignal): Promise<boolean>` (`false` = annulée, aucun créneau), `noterReponseCq(res: Response): void`, `etatFileCq(): { enAttente: number; repriseTs: number | null }`, `abonnerFileCq(cb: () => void): () => void` (contrat) ; internes `SOURCE_SANTE = "cryptoquant"`, `repriseTs` (429), `pauseJusquaTs` (`x-ratelimit-remaining: 0`). Une demande déjà en file pendant un 429 attend puis repart dans l'ordre ; une nouvelle passe répond `quota` (tâche 13, sur le seul `repriseTs` du 429 : la pause `remaining: 0` fait attendre la file, elle ne refuse rien).
-- Sémantique de `etatFileCq()` (arbitrage D12) : `enAttente` compte **uniquement** les demandes qui attendent un créneau — décrément dès le créneau obtenu, donc ni la requête en vol, ni les consommateurs coalescés (ils n'appellent jamais `acquerirCreneauCq`, contrôle en tâche 13) ; `repriseTs` = horodatage de reprise **le plus tardif** entre la suspension 429 et la pause `x-ratelimit-remaining: 0`, `null` s'il est passé. Les abonnés sont notifiés à la pose et à la levée de chacune des deux.
+- Sémantique de `etatFileCq()` (spec §12) : `enAttente` compte **uniquement** les demandes qui attendent un créneau — décrément dès le créneau obtenu, donc ni la requête en vol, ni les consommateurs coalescés (ils n'appellent jamais `acquerirCreneauCq`, contrôle en tâche 13) ; `repriseTs` = horodatage de reprise **le plus tardif** entre la suspension 429 et la pause `x-ratelimit-remaining: 0`, `null` s'il est passé. Les abonnés sont notifiés à la pose et à la levée de chacune des deux.
 
 - [ ] **Étape 1 : écrire le test qui échoue** — ajouter en fin de `cryptoquant-fetch.test.ts` :
 
@@ -3608,7 +3608,7 @@ describe("CryptoQuant : file 10 req / 60 s (I6, I7)", () => {
     expect(ok).toBe(true);
   });
 
-  it("D12 — etatFileCq : enAttente = demandes sans créneau ; repriseTs = reprise la plus tardive (429 ou remaining 0)", async () => {
+  it("etatFileCq : enAttente = demandes sans créneau ; repriseTs = reprise la plus tardive (429 ou remaining 0)", async () => {
     const cq = await import("./cryptoquant");
     const notifie = vi.fn();
     cq.abonnerFileCq(notifie);
@@ -3805,7 +3805,7 @@ export function abonnerFileCq(cb: () => void): () => void {
 }
 ```
 
-- [ ] **Étape 4 : lancer le test et vérifier qu'il passe** — `pnpm --filter @axiom/web exec vitest run src/data/onchain/cryptoquant-fetch.test.ts src/data/coinalyze.test.ts src/store/health.test.ts` (13 verts dans `cryptoquant-fetch.test.ts` : 8 de la tâche 11, puis I6 rafale 10 + 3 et quota publié, reset 42 s, I7 429 borné à 15 min, annulation, D12 ; `coinalyze.test.ts` et `health.test.ts` inchangés et verts) puis `pnpm --filter @axiom/web typecheck`.
+- [ ] **Étape 4 : lancer le test et vérifier qu'il passe** — `pnpm --filter @axiom/web exec vitest run src/data/onchain/cryptoquant-fetch.test.ts src/data/coinalyze.test.ts src/store/health.test.ts` (13 verts dans `cryptoquant-fetch.test.ts` : 8 de la tâche 11, puis I6 rafale 10 + 3 et quota publié, reset 42 s, I7 429 borné à 15 min, annulation, file de requêtes ; `coinalyze.test.ts` et `health.test.ts` inchangés et verts) puis `pnpm --filter @axiom/web typecheck`.
 
 - [ ] **Étape 5 : commit**
 
@@ -3821,15 +3821,15 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 **Fichiers :**
 - Modifier : `apps/web/src/data/onchain/cryptoquant.ts:8` (import inséré avant) et `:460` (ajout en fin de fichier → lignes 461-620)
 - Modifier : `apps/web/src/data/onchain/cryptoquant-fetch.test.ts:249` (ajout en fin de fichier → lignes 250-439)
-- Modifier : `apps/web/src/data/dataCockpit.ts:48` (ligne insérée après → ligne 49, libellé DATA — arbitrage D13)
+- Modifier : `apps/web/src/data/dataCockpit.ts:48` (ligne insérée après → ligne 49, libellé DATA — spec §12)
 - Modifier : `apps/web/src/data/dataCockpit.test.ts:106` (test inséré après → lignes 107-112)
 - Tester : `apps/web/src/data/onchain/cryptoquant-fetch.test.ts`, `apps/web/src/data/dataCockpit.test.ts`
 
 **Interfaces :**
-- Consomme : tâche 6 — `getCryptoquantKey()`, `cryptoquantKeyStore.getState().version` (mémoire des refus comparée à la version, sans abonnement), `RAISON_CLE_CRYPTOQUANT` (arbitrage D4 : importée du store pour l'usage local et ré-exportée telle quelle, aucune copie) ; tâches 9-12 ; `store/health.ts:56-60` — `setEtat`, `marquerErreur` ; coalescence `bgeometrics.ts:275-305`, signal `bgeometrics.ts:338`, garde `typeof` `bgeometrics.ts:53-55` ; `data/dataCockpit.ts:31-55` — `LIBELLES_SOURCE` (non exporté), lu par `libelleSource` (`:58-60`) et `trierSources` (`:68`) ; module importé par la seule fenêtre DATA (`components/DataWindow.tsx:23`), elle-même paresseuse (`App.tsx:204`).
-- Produit : `StatutCq`, `ChargementCq`, `chargerSerieCq(serie, signal?)` (contrat) ; ré-export `export { RAISON_CLE_CRYPTOQUANT } from "../../store/cryptoquant";` (D4, le contrat du client reste vrai) ; raisons exportées `RAISON_CLE_REFUSEE_CRYPTOQUANT`, `RAISON_ERREUR_CRYPTOQUANT`, `RAISON_ARCHIVE_ILLISIBLE_CRYPTOQUANT`, `RAISON_VERSION_CRYPTOQUANT`, `RAISON_ANNULE_CRYPTOQUANT`. Ordre : archive → version inconnue (`erreur`, 0 appel) → J-1 présent → clé active (`clé perso` ou `__CQ_CLE_ENV__ && !IS_VERCEL`) → refus 401/403 de session → 429 en cours → `majTs` < 6 h → créneau → fetch. Un consommateur annulé reçoit `erreur` + `RAISON_ANNULE_CRYPTOQUANT`. Libellé DATA `cryptoquant` → « CryptoQuant » (D13).
-- Arbitrage D9 (acté, consigné au rapport en tâche 20) : archive de version inconnue, locale **ou** KV → `statut "erreur"`, raison `RAISON_VERSION_CRYPTOQUANT`, **zéro appel**, rien réécrit (ni `setItem` ni `kvPut`) ; les vues (tâches 15 et 18) l'affichent en bandeau.
-- Arbitrage D12 : deux consommateurs coalescés d'une même série pendant la requête en vol → `etatFileCq()` vaut `{ enAttente: 0, repriseTs: null }` (contrôlé dans le test de coalescence).
+- Consomme : tâche 6 — `getCryptoquantKey()`, `cryptoquantKeyStore.getState().version` (mémoire des refus comparée à la version, sans abonnement), `RAISON_CLE_CRYPTOQUANT` (spec §12 : importée du store pour l'usage local et ré-exportée telle quelle, aucune copie) ; tâches 9-12 ; `store/health.ts:56-60` — `setEtat`, `marquerErreur` ; coalescence `bgeometrics.ts:275-305`, signal `bgeometrics.ts:338`, garde `typeof` `bgeometrics.ts:53-55` ; `data/dataCockpit.ts:31-55` — `LIBELLES_SOURCE` (non exporté), lu par `libelleSource` (`:58-60`) et `trierSources` (`:68`) ; module importé par la seule fenêtre DATA (`components/DataWindow.tsx:23`), elle-même paresseuse (`App.tsx:204`).
+- Produit : `StatutCq`, `ChargementCq`, `chargerSerieCq(serie, signal?)` (contrat) ; ré-export `export { RAISON_CLE_CRYPTOQUANT } from "../../store/cryptoquant";` (spec §12, le contrat du client reste vrai) ; raisons exportées `RAISON_CLE_REFUSEE_CRYPTOQUANT`, `RAISON_ERREUR_CRYPTOQUANT`, `RAISON_ARCHIVE_ILLISIBLE_CRYPTOQUANT`, `RAISON_VERSION_CRYPTOQUANT`, `RAISON_ANNULE_CRYPTOQUANT`. Ordre : archive → version inconnue (`erreur`, 0 appel) → J-1 présent → clé active (`clé perso` ou `__CQ_CLE_ENV__ && !IS_VERCEL`) → refus 401/403 de session → 429 en cours → `majTs` < 6 h → créneau → fetch. Un consommateur annulé reçoit `erreur` + `RAISON_ANNULE_CRYPTOQUANT`. Libellé DATA `cryptoquant` → « CryptoQuant » (spec §12).
+- Arbitrage (spec §12, consigné au rapport en tâche 20) : archive de version inconnue, locale **ou** KV → `statut "erreur"`, raison `RAISON_VERSION_CRYPTOQUANT`, **zéro appel**, rien réécrit (ni `setItem` ni `kvPut`) ; les vues (tâches 15 et 18) l'affichent en bandeau.
+- Arbitrage (spec §12) : deux consommateurs coalescés d'une même série pendant la requête en vol → `etatFileCq()` vaut `{ enAttente: 0, repriseTs: null }` (contrôlé dans le test de coalescence).
 
 - [ ] **Étape 1 : écrire le test qui échoue** — ajouter en fin de `cryptoquant-fetch.test.ts` :
 
@@ -3915,7 +3915,7 @@ describe("CryptoQuant : chargerSerieCq (I5, I7, I9, I10)", () => {
     expect(appels(f)).toHaveLength(2);
   });
 
-  it("coalescence : 2 consommateurs = 1 appel, aucun « en attente » (D12) ; annulation avant le créneau : 0 appel, 0 créneau", async () => {
+  it("coalescence : 2 consommateurs = 1 appel, aucun « en attente » ; annulation avant le créneau : 0 appel, 0 créneau", async () => {
     const cq = await import("./cryptoquant");
     const { healthStore } = await import("../../store/health");
     let repondre = (_r: Response) => {};
@@ -3940,7 +3940,7 @@ describe("CryptoQuant : chargerSerieCq (I5, I7, I9, I10)", () => {
     expect([appels(f).length, healthStore.getState().sources.cryptoquant]).toEqual([0, undefined]);
   });
 
-  it("KV 400 j : kvPut reçoit 401 j après l'appel ; version inconnue locale ou KV (D9) : erreur, 0 appel, rien réécrit", async () => {
+  it("KV 400 j : kvPut reçoit 401 j après l'appel ; version inconnue locale ou KV : erreur, 0 appel, rien réécrit", async () => {
     let cq = await import("./cryptoquant");
     detecter.mockResolvedValue(true);
     reseau(api200, kvOk(arch(plage(-401, -2), T0 - SIX_H)));
@@ -4199,9 +4199,9 @@ export function chargerSerieCq(serie: SerieCq, signal?: AbortSignal): Promise<Ch
 }
 ```
 
-- [ ] **Étape 4 : lancer le test et vérifier qu'il passe** — `pnpm --filter @axiom/web exec vitest run src/data/onchain/` (35 tests CryptoQuant verts : 11 dans `cryptoquant.test.ts`, 24 dans `cryptoquant-fetch.test.ts` dont I5, I7, I8, I9, I10, D9 et D12 ; voisins `bgeometrics-fetch`, `historiques-fetch` verts), puis `pnpm --filter @axiom/web typecheck`. Contrôles : `rg -n 'from "[^"]*onchain/cryptoquant"' apps/web/src` ne renvoie rien ; `rg -n 'const RAISON_CLE_CRYPTOQUANT' apps/web/src` ne renvoie qu'une ligne, la définition de `apps/web/src/store/cryptoquant.ts` (D4 : aucune copie dans le client).
+- [ ] **Étape 4 : lancer le test et vérifier qu'il passe** — `pnpm --filter @axiom/web exec vitest run src/data/onchain/` (35 tests CryptoQuant verts : 11 dans `cryptoquant.test.ts`, 24 dans `cryptoquant-fetch.test.ts` dont I5, I7, I8, I9, I10, version inconnue et file de requêtes ; voisins `bgeometrics-fetch`, `historiques-fetch` verts), puis `pnpm --filter @axiom/web typecheck`. Contrôles : `rg -n 'from "[^"]*onchain/cryptoquant"' apps/web/src` ne renvoie rien ; `rg -n 'const RAISON_CLE_CRYPTOQUANT' apps/web/src` ne renvoie qu'une ligne, la définition de `apps/web/src/store/cryptoquant.ts` (spec §12 : aucune copie dans le client).
 
-- [ ] **Étape 5 : écrire le test qui échoue (libellé DATA, arbitrage D13)** — dans `apps/web/src/data/dataCockpit.test.ts`, insérer après la ligne 106 (fin du premier `it` du bloc `describe("libelleSource")`, patron des lignes 101-106) :
+- [ ] **Étape 5 : écrire le test qui échoue (libellé DATA, spec §12)** — dans `apps/web/src/data/dataCockpit.test.ts`, insérer après la ligne 106 (fin du premier `it` du bloc `describe("libelleSource")`, patron des lignes 101-106) :
 
 ```ts
 
@@ -6707,7 +6707,7 @@ Chaque point est conforme, sauf s'il figure sous « Écarts relevés ». Les sor
 | A3 | test structurel Vercel identique aux lignes 34-46 d'origine |
 | A4 | store de clé dans les composants : imports, \`version\` dans DES, \`hasKey\`/\`setKey\`/\`clearKey\` dans Réglages, test structurel de la tâche 8 |
 | A5 | \`getCryptoquantKey\` absent de tout fichier non-test hors store et client |
-| A6 | tests de fuite \`CLE-TEST-SECRETE\` présents (store, persist, client) et verts |
+| A6 | tests de fuite (marqueur de clé factice des tâches 6, 7 et 13) présents (store, persist, client) et verts |
 | A7 | clé seulement dans l'en-tête \`Authorization\`, aucun \`console.\` dans le client |
 | A8 | \`__CQ_CLE_ENV__\` booléen gardé par \`isVercelBuild\` |
 | A9 | e2e : clé en en-tête, absente des URL et de l'archive |
@@ -7316,8 +7316,8 @@ export function qualiteMineursCotes(chargements: Chargements, now: number): Qual
     cadenceMs: JOUR_MS,
     // Observation datée au DÉBUT du jour clos (00:00 UTC) : 3 j équivaut à « dernier jour
     // antérieur à aujourd'hui − 2 j », le seuil de `diagnostiquer`, et reprend le délai des séries
-    // quotidiennes de CHAIN (hashrate, thermocap). Les 2 j de la spec §4.5 signaleraient « périmé »
-    // chaque matin où J-1 n'est pas encore publié : écart acté le 2026-09-16.
+    // quotidiennes de CHAIN (hashrate, thermocap). Avec 2 j, le bloc serait « périmé » chaque matin
+    // où J-1 n'est pas encore publié (spec §4.5 amendée, §12).
     ageMaxMs: 3 * JOUR_MS,
     couverture: { disponibles: m.disponibles, attendus: ATTENDUES },
     estime: false,
@@ -8649,7 +8649,7 @@ Consigner la mesure au format commun du rapport :
 ````bash
 PREUVES_B2="${TMPDIR:-/tmp}/axiom-b2"
 {
-  printf '\n### Budget après B2\n\nCommande : `pnpm --filter @axiom/web build` (tâche 19, sous-section CHAIN et spec e2e livrées ; JSON réimprimé tel quel par `node scripts/verifier-budget-build.mjs apps/web/dist` sur le même `dist`).\n\n```json\n'
+  printf '\n## B2 — production des mineurs cotés\n\n### Budget après B2\n\nCommande : `pnpm --filter @axiom/web build` (tâche 19, sous-section CHAIN et spec e2e livrées ; JSON réimprimé tel quel par `node scripts/verifier-budget-build.mjs apps/web/dist` sur le même `dist`).\n\n```json\n'
   cat "$PREUVES_B2/budget.json"
   printf '```\n\n'
   cat "$PREUVES_B2/i11-b2.md"
@@ -8774,8 +8774,8 @@ RAPPORT=docs/superpowers/progress/2026-09-16-cryptoquant.md
   printf '\n## Clôture (tâche 20)\n\n### Journal des commits (depuis la spec `2d45426`)\n\n| Commit | Sujet |\n|---|---|\n'
   git log --reverse --format='| `%h` | %s |' 2d45426..HEAD
   printf '\nLe commit de clôture (`docs(rapport): clôture CryptoQuant — preuves, budget avant/après, parcours e2e et preuve manuelle`) suit cette liste.\n\n### Vérification finale\n\n`pnpm check` puis `bash scripts/ci.sh --e2e`, lignes de synthèse :\n\n```text\n'
-  grep -E '==> \[ci\]|Test Files|^ +Tests +[0-9]|^ *[0-9]+ (pass|fail)$|^Ran [0-9]+ tests' "$PREUVES/check.log"
-  grep -E '^ *[0-9]+ (passed|failed|flaky|skipped)' "$PREUVES/e2e.log"
+  grep -E '==> \[ci\]|Test Files|Tests\s+[0-9]|[0-9]+ (pass|fail)\b|Ran [0-9]+ tests|Erreur budget build' "$PREUVES/check.log"
+  grep -E '[0-9]+ (passed|failed|flaky|skipped|did not run)\b' "$PREUVES/e2e.log"
   printf '```\n\n### Budget final\n\nCommande : `pnpm check` (build `pnpm --filter @axiom/web build` de `scripts/ci.sh:35`, tâche 20 ; JSON réimprimé tel quel par `node scripts/verifier-budget-build.mjs apps/web/dist` sur le même `dist`).\n\n```json\n'
   cat "$PREUVES/budget-final.json"
   printf '```\n'
@@ -8889,7 +8889,7 @@ Saisir la clé sans l'afficher ni l'inscrire dans l'historique : `read -rs CQ_CL
 
 ### Écarts actés à la spec (arbitrages du 2026-09-16)
 
-- Qualité CHAIN « Mineurs cotés · CryptoQuant » : `ageMaxMs` vaut 3 jours au lieu des 2 jours de la spec §4.5. Les observations sont datées à 00:00 UTC du jour clos : 3 j équivaut au seuil « dernier jour antérieur à aujourd'hui − 2 j » de `diagnostiquer`. C'est aussi le délai des séries quotidiennes de CHAIN (`apps/web/src/components/OnchainWindow.tsx:560` pour le hashrate et `:564` pour le thermocap, relevés à `2d45426`).
+- Qualité CHAIN « Mineurs cotés · CryptoQuant » : `ageMaxMs` vaut 3 jours, conformément à la spec §4.5 amendée (§12) ; la version initiale de la spec disait 2 jours. La couverture compte les sociétés ayant une ligne au dernier jour archivé commun (jour de référence), et non strictement J-1 (§12). Les observations sont datées à 00:00 UTC du jour clos : 3 j équivaut au seuil « dernier jour antérieur à aujourd'hui − 2 j » de `diagnostiquer`. C'est aussi le délai des séries quotidiennes de CHAIN (`apps/web/src/components/OnchainWindow.tsx:560` pour le hashrate et `:564` pour le thermocap, relevés à `2d45426`).
 - Bouton Réglages aussi sur une clé refusée (401) :
   - `SansCle` affiche le bouton pour tout statut `cle-requise` à archive vide, en DES comme en CHAIN ;
   - en CHAIN, le CTA d'en-tête « clé CryptoQuant ⚙ » suit la même règle ;
@@ -8897,6 +8897,7 @@ Saisir la clé sans l'afficher ni l'inscrire dans l'historique : `read -rs CQ_CL
 - Proxys locaux (Vite, daemon) : la clé est l'en-tête client s'il est valide, sinon `CRYPTOQUANT_API_KEY` de `.env`. Vite injecte aussi `.env` quand l'en-tête est présent mais invalide. Vercel : un POST sans clé répond 405, car la méthode est contrôlée avant la clé.
 - Archive de version inconnue : statut `erreur`, raison `RAISON_VERSION_CRYPTOQUANT`, zéro appel, rien n'est réécrit en local ni en KV. Un bandeau l'affiche dans les vues.
 - Table CHAIN triable par l'utilisateur : BTC J-1 décroissant par défaut ; l'état du tri vit dans le conteneur `MineursCotes`, la vue reste pure.
+- Affichage DES (tâche 15) : « vs méd. 30 j » au format `formatPct(v, 1)` ; VWAP en `$` + `formatPrice` ; taille d'archive en jours archivés ; quota « 10 req/min (compteur dans DATA) » ; en perp, base et VWAP en infobulle du volume.
 
 ### Errata de la spec (relevés à `2d45426`)
 
@@ -8960,7 +8961,7 @@ test -f "$NOTE"
   git log --reverse --format='- `%h` %s' 2d45426..HEAD
   cat <<'EOF'
 
-Écarts actés à la spec : qualité CHAIN `ageMaxMs` 3 j (spec 2 j) ; bouton Réglages aussi sur clé refusée (401) ; proxys locaux « en-tête client s'il est valide, sinon `.env` » et POST Vercel sans clé → 405 ; archive de version inconnue → `erreur`, zéro appel, rien réécrit ; table CHAIN triable. Reste au propriétaire : la preuve manuelle (curl daemon et Vite, absence de `CRYPTOQUANT_API_KEY` sur Vercel) et la valeur réelle de `x-ratelimit-reset`, à inscrire dans le rapport.
+Écarts actés à la spec : qualité CHAIN `ageMaxMs` 3 j (spec amendée) et couverture au jour de référence ; affichage DES (formats, quota dans DATA) ; bouton Réglages aussi sur clé refusée (401) ; proxys locaux « en-tête client s'il est valide, sinon `.env` » et POST Vercel sans clé → 405 ; archive de version inconnue → `erreur`, zéro appel, rien réécrit ; table CHAIN triable. Reste au propriétaire : la preuve manuelle (curl daemon et Vite, absence de `CRYPTOQUANT_API_KEY` sur Vercel) et la valeur réelle de `x-ratelimit-reset`, à inscrire dans le rapport.
 EOF
 } >> "$NOTE"
 tail -n 25 "$NOTE"

@@ -717,6 +717,8 @@ précisent ou corrigent la spec :
 | Libellé DATA | `cryptoquant: "CryptoQuant"` dans `data/dataCockpit.ts` (module paresseux) |
 | Signaux d'archive | Stockage plein, copie daemon non écrite, absence de daemon, archive illisible remplacée et badge périmé visibles dans les deux sections |
 | Tri CHAIN | Interactif, état dans le conteneur, défaut BTC J-1 décroissant |
+| Couverture CHAIN | Sociétés ayant une ligne au dernier jour archivé commun (« jour de référence », affiché J-n), et non strictement J-1 : avant la publication de J-1, un tableau strict n'afficherait que des « — » |
+| Exécution | Tâches strictement séquentielles (les tâches 3, 4 et 5 partagent l'index git et l'état du typecheck) |
 | Quota affiché | « x/10 min » dans DATA ; la section affiche « 10 req/min » (la file n'expose pas le compteur) |
 | `BUILD-CONTRACT.md:50` | « sept exceptions ACTÉES » devient « des exceptions ACTÉES » |
 | Errata | `NS_ONCHAIN` n'existe pas (constantes privées de `cache.ts`) ; `acquireSlot` est en `coinalyze.ts:106-132` ; `resteSurLePoste` en `persist.ts:791-793` ; le prédicat Bearer en `api/_policy.ts:276-284` |

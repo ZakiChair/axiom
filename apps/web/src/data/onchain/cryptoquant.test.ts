@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { cheminCryptoQuantAmont } from "../../../../../shared/cryptoquant-proxy";
 import {
-  SERIES_MINEURS, SERIES_TAKER, cheminSerie, jourUtc, parserLignes,
-  type LigneMineur, type LigneTaker,
+  SERIES_MINEURS, SERIES_TAKER, cheminSerie, decoderArchive, diagnostiquer, fusionner, jourUtc, parserLignes, unionArchives,
+  type ArchiveCq, type LigneMineur, type LigneTaker,
 } from "./cryptoquant";
 
 const AUJ = "2026-09-16";
@@ -60,5 +60,61 @@ describe("CryptoQuant : parserLignes (I2)", () => {
     expect(parserLignes("taker:spot:btc", { status: { code: 200 }, result: {} }, AUJ)).toEqual([]);
     expect(parserLignes("taker:spot:btc", { result: { data: [BTC] } }, AUJ)).toEqual([]);
     expect(parserLignes("taker:spot:btc", [BTC], AUJ)).toEqual([]);
+  });
+});
+
+// --- Archive (tâche 10) ---
+const J = (n: number): string => jourUtc(Date.UTC(2026, 8, 16) + n * 86_400_000); // J(-1) = hier
+const plage = (de: number, a: number): string[] => Array.from({ length: a - de + 1 }, (_, i) => J(de + i));
+const arch = (js: string[], majTs: number | null, vwap = 1): ArchiveCq =>
+  ({ version: 1, serie: "taker:spot:btc", majTs, jours: Object.fromEntries(js.map((j) => [j, { ...L_BTC, vwap }])) });
+const vwap = (a: ArchiveCq | null, j: string) => (a?.jours[j] as LigneTaker | undefined)?.vwap;
+
+describe("CryptoQuant : fusionner et unionArchives (I1)", () => {
+  it("{J-40..J-2} + {J-30..J-1} : J-1 ajouté, J-2..J-30 remplacés, J-31..J-40 conservés ; vide → inchangé", () => {
+    const avant = arch(plage(-40, -2), 100);
+    const apres = fusionner(avant, "taker:spot:btc", plage(-30, -1).map((jour) => ({ jour, ligne: { ...L_BTC, vwap: 2 } })), 500);
+    expect(Object.keys(apres.jours)).toEqual(plage(-40, -1));
+    expect([vwap(apres, J(-1)), vwap(apres, J(-30)), vwap(apres, J(-31)), apres.majTs]).toEqual([2, 2, 1, 500]);
+    expect(fusionner(avant, "taker:spot:btc", [], 999)).toEqual(avant);
+    expect(fusionner(null, "mineur:mara", [], 9)).toEqual({ version: 1, serie: "mineur:mara", majTs: null, jours: {} });
+  });
+  it("union : tous les jours, conflit → majTs le plus grand, null ignoré", () => {
+    const local = arch([J(-3), J(-2)], 100, 1);
+    const kv = arch([J(-2), J(-1)], 200, 2);
+    const u = unionArchives(local, kv);
+    expect([Object.keys(u?.jours ?? {}), vwap(u, J(-2)), u?.majTs]).toEqual([[J(-3), J(-2), J(-1)], 2, 200]);
+    expect(vwap(unionArchives({ ...kv, majTs: 50 }, local), J(-2))).toBe(1);
+    expect([unionArchives(null, kv), unionArchives(null, null)]).toEqual([kv, null]);
+  });
+});
+
+describe("CryptoQuant : decoderArchive (I4)", () => {
+  it("absente, illisible, version inconnue, série ou forme inattendue", () => {
+    const d = (v: unknown) => decoderArchive(typeof v === "string" ? v : JSON.stringify(v), "taker:spot:btc").etat;
+    expect(decoderArchive(null, "taker:spot:btc").etat).toBe("absente");
+    expect([d("{pas du json"), d({ version: 2 }), d({ ...arch([], 1), serie: "taker:spot:eth" }), d({ version: 1, serie: "taker:spot:btc" })])
+      .toEqual(["illisible", "versionInconnue", "illisible", "illisible"]);
+  });
+  it("version 1 : seul le jour invalide est ignoré ; null mineur conservés ; majTs invalide → null", () => {
+    const brut = { ...arch([], 42), jours: { [J(-3)]: L_BTC, "2026-02-30": L_BTC, [J(-2)]: { ...L_BTC, vwap: "1" }, [J(-1)]: L_BTC } };
+    expect(decoderArchive(JSON.stringify(brut), "taker:spot:btc"))
+      .toEqual({ etat: "ok", archive: { ...arch([], 42), jours: { [J(-3)]: L_BTC, [J(-1)]: L_BTC } } });
+    const mineur = { version: 1, serie: "mineur:mara", majTs: "hier", jours: { [J(-1)]: L_MARA, [J(-2)]: { ...L_MARA, usd: "3.8M" } } };
+    expect(decoderArchive(JSON.stringify(mineur), "mineur:mara"))
+      .toEqual({ etat: "ok", archive: { version: 1, serie: "mineur:mara", majTs: null, jours: { [J(-1)]: L_MARA } } });
+  });
+});
+
+describe("CryptoQuant : diagnostiquer (I3)", () => {
+  it("{J-60..J-45} puis {J-30..J-1} → début J-60, 14 perdus, 0 manquant ; sans J-10 → 1 manquant", () => {
+    expect(diagnostiquer(arch([...plage(-60, -45), ...plage(-30, -1)], 1), AUJ))
+      .toEqual({ debut: J(-60), dernier: J(-1), hierPresent: true, manquantsFenetre: [], perdus: plage(-44, -31), perime: false });
+    expect(diagnostiquer(arch(plage(-30, -1).filter((j) => j !== J(-10)), 1), AUJ)).toMatchObject({ manquantsFenetre: [J(-10)], perdus: [] });
+  });
+  it("hier absent non compté ; périmé au-delà de 2 j ; archive vide → début null", () => {
+    expect(diagnostiquer(arch(plage(-30, -2), 1), AUJ)).toMatchObject({ hierPresent: false, manquantsFenetre: [], perime: false });
+    expect(diagnostiquer(arch(plage(-30, -3), 1), AUJ).perime).toBe(true);
+    expect(diagnostiquer(null, AUJ)).toEqual({ debut: null, dernier: null, hierPresent: false, manquantsFenetre: [], perdus: [], perime: true });
   });
 });

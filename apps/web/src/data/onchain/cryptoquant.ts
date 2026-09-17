@@ -108,3 +108,121 @@ export function parserLignes(serie: SerieCq, json: unknown, aujourdhuiUtc: strin
     return ligne === undefined ? [] : [{ jour, ligne }];
   });
 }
+
+// --- Archive (pure) ---
+
+const JOUR_MS = 86_400_000;
+
+function jourVersMs(jour: string): number {
+  return Date.parse(`${jour}T00:00:00Z`);
+}
+
+function decalerJour(jour: string, n: number): string {
+  return jourUtc(jourVersMs(jour) + n * JOUR_MS);
+}
+
+function trierJours(jours: Record<string, LigneCq>): Record<string, LigneCq> {
+  const trie: Record<string, LigneCq> = {};
+  for (const jour of Object.keys(jours).sort()) {
+    const ligne = jours[jour];
+    if (ligne !== undefined) trie[jour] = ligne;
+  }
+  return trie;
+}
+
+/** La ligne reçue remplace celle du jour, aucun jour supprimé ; réponse vide → inchangée. */
+export function fusionner(archive: ArchiveCq | null, serie: SerieCq, lignes: ReadonlyArray<{ jour: string; ligne: LigneCq }>, now: number): ArchiveCq {
+  const base: ArchiveCq = archive ?? { version: 1, serie, majTs: null, jours: {} };
+  if (lignes.length === 0) return base;
+  const jours: Record<string, LigneCq> = { ...base.jours };
+  for (const { jour, ligne } of lignes) jours[jour] = ligne;
+  return { version: 1, serie, majTs: now, jours: trierJours(jours) };
+}
+
+/** Conflit → copie au `majTs` le plus grand (égalité → `a`, la copie locale). */
+export function unionArchives(a: ArchiveCq | null, b: ArchiveCq | null): ArchiveCq | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  const aGagne = (a.majTs ?? -1) >= (b.majTs ?? -1);
+  const [perdante, gagnante] = aGagne ? [b, a] : [a, b];
+  return { version: 1, serie: a.serie, majTs: gagnante.majTs ?? perdante.majTs, jours: trierJours({ ...perdante.jours, ...gagnante.jours }) };
+}
+
+export type DecodageCq = { etat: "absente" } | { etat: "illisible" } | { etat: "versionInconnue" } | { etat: "ok"; archive: ArchiveCq };
+
+function fini(v: unknown): v is number {
+  return typeof v === "number" && Number.isFinite(v);
+}
+function finiOuNull(v: unknown): number | null | undefined {
+  if (v === null || v === undefined) return null;
+  return fini(v) ? v : undefined;
+}
+
+function ligneTakerStockee(v: unknown): LigneTaker | null {
+  if (!estObjet(v)) return null;
+  const { n, bv, qv, bbv, qbv, bsv, qsv, vwap, br, bsr, bc, sc } = v;
+  if (!fini(n) || !fini(bv) || !fini(qv) || !fini(bbv) || !fini(qbv) || !fini(bsv) || !fini(qsv)
+    || !fini(vwap) || !fini(br) || !fini(bsr) || !fini(bc) || !fini(sc)) return null;
+  return { n, bv, qv, bbv, qbv, bsv, qsv, vwap, br, bsr, bc, sc };
+}
+
+function ligneMineurStockee(v: unknown): LigneMineur | null {
+  if (!estObjet(v) || !fini(v["r"])) return null;
+  const cr = finiOuNull(v["cr"]), om = finiOuNull(v["om"]), cm = finiOuNull(v["cm"]), usd = finiOuNull(v["usd"]);
+  const cmu = finiOuNull(v["cmu"]), px = finiOuNull(v["px"]), decl = finiOuNull(v["decl"]), prec = finiOuNull(v["prec"]);
+  if (cr === undefined || om === undefined || cm === undefined || usd === undefined
+    || cmu === undefined || px === undefined || decl === undefined || prec === undefined) return null;
+  return { r: v["r"], cr, om, cm, usd, cmu, px, decl, prec };
+}
+
+/** Archive déjà parsée (local ou `valeur` KV) ; version 1 : un jour invalide est ignoré, pas le blob. */
+function validerArchive(valeur: unknown, serie: SerieCq): DecodageCq {
+  if (!estObjet(valeur)) return { etat: "illisible" };
+  const version = valeur["version"];
+  if (typeof version === "number" && Number.isInteger(version) && version > 1) return { etat: "versionInconnue" };
+  const joursBruts = valeur["jours"];
+  if (version !== 1 || valeur["serie"] !== serie || !estObjet(joursBruts)) return { etat: "illisible" };
+  const majTs = fini(valeur["majTs"]) ? valeur["majTs"] : null;
+  const mineur = estSerieMineur(serie);
+  const jours: Record<string, LigneCq> = {};
+  for (const [jour, brut] of Object.entries(joursBruts)) {
+    if (dateOnchain(jour) === null) continue;
+    const ligne = mineur ? ligneMineurStockee(brut) : ligneTakerStockee(brut);
+    if (ligne !== null) jours[jour] = ligne;
+  }
+  return { etat: "ok", archive: { version: 1, serie, majTs, jours: trierJours(jours) } };
+}
+
+export function decoderArchive(brut: string | null, serie: SerieCq): DecodageCq {
+  if (brut === null) return { etat: "absente" };
+  let valeur: unknown;
+  try {
+    valeur = JSON.parse(brut);
+  } catch {
+    return { etat: "illisible" };
+  }
+  return validerArchive(valeur, serie);
+}
+
+export interface DiagnosticCq { debut: string | null; dernier: string | null; hierPresent: boolean; manquantsFenetre: string[]; perdus: string[]; perime: boolean }
+
+/** Trous entre `debut` et avant-hier : perdus (< J-30) ou manquants ; hier absent n'est jamais un trou. */
+export function diagnostiquer(archive: ArchiveCq | null, aujourdhuiUtc: string): DiagnosticCq {
+  const jours = archive === null ? [] : Object.keys(archive.jours).sort();
+  const presents = new Set(jours);
+  const debut = jours[0] ?? null;
+  const dernier = jours[jours.length - 1] ?? null;
+  const avantHier = decalerJour(aujourdhuiUtc, -2);
+  const limitePerdus = decalerJour(aujourdhuiUtc, -30);
+  const manquantsFenetre: string[] = [];
+  const perdus: string[] = [];
+  if (debut !== null) {
+    for (let jour = debut; jour <= avantHier; jour = decalerJour(jour, 1)) {
+      if (presents.has(jour)) continue;
+      if (jour < limitePerdus) perdus.push(jour);
+      else manquantsFenetre.push(jour);
+    }
+  }
+  const perime = dernier === null || jourVersMs(aujourdhuiUtc) - jourVersMs(dernier) > 2 * JOUR_MS;
+  return { debut, dernier, hierPresent: presents.has(decalerJour(aujourdhuiUtc, -1)), manquantsFenetre, perdus, perime };
+}

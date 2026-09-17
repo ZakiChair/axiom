@@ -134,7 +134,8 @@ export function construireModeleMineurs(chargements: Chargements, now: number): 
           ? charge.raison
           : jourRef === null
             ? "Aucune ligne archivée."
-            : `Aucune ligne publiée pour le ${jourRef}.`;
+            : // Pas forcément impubliée : la série a pu ne pas être relue (reprise de 6 h du client).
+              `Aucune ligne archivée pour le ${jourRef} (non encore relue ou non publiée).`;
     return { id, nom: NOMS_SOCIETES[id], ligne: estLigneMineur(brute) ? brute : null, motif };
   });
   const presentes = lignes.flatMap((l) => (l.ligne === null ? [] : [l.ligne]));
@@ -184,7 +185,9 @@ export function construireModeleMineurs(chargements: Chargements, now: number): 
  * Qualité du bloc « Mineurs cotés · CryptoQuant ». PURE. Indisponible sans aucune ligne archivée ;
  * périmée si toutes les séries archivées ont leur dernier jour antérieur à aujourd'hui − 2 j ;
  * partielle sous 9/9 ou avec un jour manquant récupérable ; fraîche sinon (J-1 en attente de
- * publication n'est pas un trou).
+ * publication n'est pas un trou). Le statut juge les DONNÉES (§4.5) : une archive fraîche servie
+ * pendant une panne reste « frais », mais garde la raison de l'échec et ne se dit « CryptoQuant
+ * BASIC » que si au moins une série a été réellement rafraîchie ce cycle (appel réussi).
  */
 export function qualiteMineursCotes(chargements: Chargements, now: number): QualiteMetrique {
   const m = construireModeleMineurs(chargements, now);
@@ -206,13 +209,16 @@ export function qualiteMineursCotes(chargements: Chargements, now: number): Qual
   morceaux.push(...raisons);
   const raison =
     statut === "frais"
-      ? undefined
+      ? raisons.length > 0
+        ? raisons.join(" ")
+        : undefined
       : !avecDonnees
         ? raisons[0] ?? "Aucune ligne CryptoQuant archivée."
         : morceaux.join(" ");
   return {
     sourceId: "cryptoquant",
-    sourceEffective: recus.some((c) => c.appel) ? "CryptoQuant BASIC" : "archive locale CryptoQuant",
+    // `appel` vaut aussi pour un 401/403/429/5xx ou une erreur réseau : seul un appel « prêt » est live.
+    sourceEffective: recus.some((c) => c.appel && c.statut === "pret") ? "CryptoQuant BASIC" : "archive locale CryptoQuant",
     observeLe: m.jourRef === null ? null : tempsJour(m.jourRef),
     recupereLe: m.recupereLe,
     cadenceMs: JOUR_MS,
@@ -483,12 +489,61 @@ export function VueMineursCotes({
   );
 }
 
+export type ParametresResumeMineurs = Pick<
+  PropsVueMineursCotes,
+  "chargements" | "enCours" | "recues" | "file" | "now" | "echecClient"
+>;
+
+/**
+ * Résumé du côté droit de l'en-tête, visible section repliée (état par défaut), agrégé sur les
+ * neuf séries. PUR. Mêmes états que DES (spec §5.2), jamais une chaîne vide (§4.3). Ordre :
+ * collecte en cours ; client non chargé ; quota à reprise future ; clé requise sans archive (seul
+ * état actionnable, porte le CTA) ; quota écoulé ; offre ; erreur sans archive ; erreur après
+ * appel avec archive ; texte d'archive.
+ */
+export function resumeEnTeteMineurs({
+  chargements,
+  enCours,
+  recues,
+  file,
+  now,
+  echecClient = false,
+}: ParametresResumeMineurs): string {
+  if (enCours) return file.enAttente > 0 ? `${recues}/${ATTENDUES} reçues · en attente du quota` : "chargement…";
+  if (echecClient) return "client CryptoQuant non chargé";
+  const m = construireModeleMineurs(chargements, now);
+  const recus = recusDe(chargements);
+  const avecStatut = (statut: ChargementCq["statut"]) => recus.filter((c) => c.statut === statut);
+  // Reprise affichée seulement si une série est en quota (429) : une pause `remaining: 0` seule n'en est pas un.
+  const enQuota = avecStatut("quota").length > 0;
+  if (enQuota && file.repriseTs !== null && file.repriseTs > now) {
+    return `quota atteint, reprise ${Math.ceil((file.repriseTs - now) / 1000)} s`;
+  }
+  const cles = avecStatut("cle-requise");
+  if (cles.length > 0 && m.archive.jours === 0) {
+    return cles.some((c) => c.raison === RAISON_CLE_CRYPTOQUANT) ? "clé personnelle requise" : "clé CryptoQuant refusée";
+  }
+  // Le client ne relance pas la collecte à l'expiration du 429 : l'honnêteté est de le dire.
+  if (enQuota) return "quota atteint, réessai à la prochaine ouverture";
+  if (avecStatut("offre").length > 0) return "offre CryptoQuant insuffisante";
+  const erreurs = avecStatut("erreur");
+  // Une erreur sans appel (archive d'une version plus récente) n'est pas une panne réseau.
+  const injoignable = erreurs.some((c) => c.appel);
+  if (m.jourRef === null || m.retardJours === null) {
+    if (erreurs.length > 0) return injoignable ? "CryptoQuant injoignable" : "erreur CryptoQuant";
+    return "archive vide";
+  }
+  const archive = `archive ${m.archive.jours} j · J-${m.retardJours} ${m.jourRef}`;
+  return injoignable ? `CryptoQuant injoignable · ${archive}` : archive;
+}
+
 export type PropsEnTeteMineursCotes = PropsVueMineursCotes & { ouvert: boolean; onBasculer: () => void };
 
 /**
- * Ligne d'en-tête toujours visible : bouton replié par défaut, état de collecte à droite et CTA
- * « clé CryptoQuant ⚙ » dès qu'une série attend une clé (absente ou refusée par le fournisseur) ;
- * jamais sur un quota, une offre ou une panne, où les Réglages ne changeraient rien.
+ * Ligne d'en-tête toujours visible : bouton replié par défaut, état de collecte à droite
+ * (`resumeEnTeteMineurs`) et CTA « clé CryptoQuant ⚙ » dès qu'une série attend une clé (absente
+ * ou refusée par le fournisseur) ; jamais sur un quota, une offre ou une panne, où les Réglages ne
+ * changeraient rien.
  */
 export function EnTeteMineursCotes({
   ouvert,
@@ -501,29 +556,8 @@ export function EnTeteMineursCotes({
   onOuvrirReglages,
   echecClient = false,
 }: PropsEnTeteMineursCotes) {
-  const m = construireModeleMineurs(chargements, now);
-  const recus = recusDe(chargements);
-  const cleRequise = recus.some((c) => c.statut === "cle-requise");
-  const cleAbsente = recus.some((c) => c.statut === "cle-requise" && c.raison === RAISON_CLE_CRYPTOQUANT);
-  // Reprise affichée seulement si une série est en quota (429) : une pause `remaining: 0` seule n'en est pas un.
-  const enQuota = recus.some((c) => c.statut === "quota");
-  const repriseS =
-    enQuota && file.repriseTs !== null && file.repriseTs > now ? Math.ceil((file.repriseTs - now) / 1000) : null;
-  const etat = enCours
-    ? file.enAttente > 0
-      ? `${recues}/${ATTENDUES} reçues · en attente du quota`
-      : "chargement…"
-    : echecClient
-      ? "client CryptoQuant non chargé"
-      : repriseS !== null
-        ? `quota atteint, reprise ${repriseS} s`
-        : cleRequise && m.archive.jours === 0
-          ? cleAbsente
-            ? "clé personnelle requise"
-            : "clé CryptoQuant refusée"
-          : m.jourRef !== null && m.retardJours !== null
-            ? `archive ${m.archive.jours} j · J-${m.retardJours} ${m.jourRef}`
-            : "";
+  const cleRequise = recusDe(chargements).some((c) => c.statut === "cle-requise");
+  const etat = resumeEnTeteMineurs({ chargements, enCours, recues, file, now, echecClient });
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <button type="button" className={boutonHistorique} aria-expanded={ouvert} onClick={onBasculer}>
@@ -540,7 +574,7 @@ export function EnTeteMineursCotes({
             clé CryptoQuant ⚙
           </button>
         )}
-        {etat !== "" && <span>{etat}</span>}
+        <span>{etat}</span>
       </span>
     </div>
   );

@@ -13,7 +13,9 @@ import {
   LIBELLE_QUALITE_MINEURS,
   MineursCotes,
   qualiteMineursCotes,
+  resumeEnTeteMineurs,
   VueMineursCotes,
+  type ParametresResumeMineurs,
   type PropsEnTeteMineursCotes,
   type PropsVueMineursCotes,
 } from "./MineursCotes";
@@ -250,13 +252,41 @@ describe("production des mineurs cotés : modèle et qualité", () => {
       diagnostic: diagnostic({ dernier: "2026-09-14", hierPresent: false }),
     });
     const m = construireModeleMineurs(chargements, MAINTENANT);
+    // Absence du jour de référence : la série peut simplement ne pas avoir été relue (reprise 6 h).
     expect(m.lignes.find((l) => l.id === "mara")).toMatchObject({
       ligne: null,
-      motif: "Aucune ligne publiée pour le 2026-09-15.",
+      motif: "Aucune ligne archivée pour le 2026-09-15 (non encore relue ou non publiée).",
     });
     const q = qualiteMineursCotes(chargements, MAINTENANT);
     expect(q.statut).toBe("partiel");
     expect(q.raison).toBe("8/9 sociétés au 2026-09-15.");
+  });
+
+  it("neuf erreurs réseau avec archive J-2 : source « archive locale », raison conservée en « frais »", () => {
+    const pannes: Chargements = {};
+    for (const id of IDS_SOCIETES) {
+      pannes[serie(id)] = chargement(id, {
+        statut: "erreur",
+        raison: "CryptoQuant injoignable ; archive affichée.",
+        archive: archive(id, JOURS.slice(0, -1)),
+        diagnostic: diagnostic({ dernier: "2026-09-14", hierPresent: false }),
+        appel: true,
+      });
+    }
+    const q = qualiteMineursCotes(pannes, MAINTENANT);
+    expect(q.statut).toBe("frais");
+    expect(q.couverture).toEqual({ disponibles: 9, attendus: 9 });
+    expect(q.sourceEffective).toBe("archive locale CryptoQuant");
+    expect(q.raison).toBe("CryptoQuant injoignable ; archive affichée.");
+    // Réouverture servie par l'archive (J-1 déjà archivé, aucun appel) : source locale, sans raison.
+    const relus: Chargements = {};
+    for (const id of IDS_SOCIETES) relus[serie(id)] = chargement(id, { appel: false });
+    const qRelus = qualiteMineursCotes(relus, MAINTENANT);
+    expect(qRelus.sourceEffective).toBe("archive locale CryptoQuant");
+    expect(qRelus.raison).toBeUndefined();
+    // Un seul appel réussi suffit à nommer la source live.
+    const unAppel = { ...pannes, [serie("mara")]: chargement("mara") };
+    expect(qualiteMineursCotes(unAppel, MAINTENANT).sourceEffective).toBe("CryptoQuant BASIC");
   });
 });
 
@@ -276,8 +306,8 @@ const entete = (surcharge: Partial<PropsEnTeteMineursCotes>): string =>
 /** Raison d'une clé personnelle refusée (401), affichée telle quelle. */
 const RAISON_REFUS = "Clé CryptoQuant refusée (Réglages ⚙).";
 
-/** Neuf séries au même statut, sans archive. */
-function sansArchive(statut: ChargementCq["statut"], raison: string): Chargements {
+/** Neuf séries au même statut, sans archive (`appel` : la requête est-elle réellement partie ?). */
+function sansArchive(statut: ChargementCq["statut"], raison: string, appel = false): Chargements {
   const resultat: Chargements = {};
   for (const id of IDS_SOCIETES) {
     resultat[serie(id)] = chargement(id, {
@@ -285,11 +315,38 @@ function sansArchive(statut: ChargementCq["statut"], raison: string): Chargement
       raison,
       archive: null,
       diagnostic: diagnostic({ debut: null, dernier: null, hierPresent: false, perime: true }),
-      appel: false,
+      appel,
     });
   }
   return resultat;
 }
+
+/** Neuf séries au même statut avec une archive arrêtée à J-2 (2026-09-14, 29 jours). */
+function avecArchiveJ2(statut: ChargementCq["statut"], raison: string, appel: boolean): Chargements {
+  const resultat: Chargements = {};
+  for (const id of IDS_SOCIETES) {
+    resultat[serie(id)] = chargement(id, {
+      statut,
+      raison,
+      archive: archive(id, JOURS.slice(0, -1)),
+      diagnostic: diagnostic({ dernier: "2026-09-14", hierPresent: false }),
+      appel,
+    });
+  }
+  return resultat;
+}
+
+const PROPS_RESUME: ParametresResumeMineurs = {
+  chargements: {},
+  enCours: false,
+  recues: 9,
+  file: { enAttente: 0, repriseTs: null },
+  now: MAINTENANT,
+};
+const resume = (surcharge: Partial<ParametresResumeMineurs>): string =>
+  resumeEnTeteMineurs({ ...PROPS_RESUME, ...surcharge });
+const RAISON_RESEAU = "CryptoQuant injoignable ; archive affichée.";
+const RAISON_QUOTA = "Quota CryptoQuant atteint (429) ; nouvel essai dans 30 s.";
 
 describe("production des mineurs cotés : vue, en-tête et conteneur", () => {
   beforeEach(() => vi.setSystemTime(MAINTENANT));
@@ -429,6 +486,72 @@ describe("production des mineurs cotés : vue, en-tête et conteneur", () => {
       "2/9 reçues · en attente du quota",
     );
     expect(entete({ enCours: true, recues: 0 })).toContain("chargement…");
+  });
+
+  it("résumé d'en-tête : une branche par état, dans l'ordre de priorité, jamais muet", () => {
+    // 1. Collecte en cours (file d'attente ou non), quel que soit le reste.
+    expect(resume({ enCours: true, recues: 2, file: { enAttente: 3, repriseTs: null } })).toBe(
+      "2/9 reçues · en attente du quota",
+    );
+    expect(resume({ enCours: true, recues: 0, echecClient: true })).toBe("chargement…");
+    // 2. Client non chargé : rien n'a été lu.
+    expect(resume({ echecClient: true, chargements: sansArchive("erreur", RAISON_RESEAU, true) })).toBe(
+      "client CryptoQuant non chargé",
+    );
+    // 3. Quota avec reprise à venir, même devant une clé requise.
+    const quotaCle = sansArchive("cle-requise", RAISON_CLE_CRYPTOQUANT);
+    quotaCle[serie("mara")] = sansArchive("quota", RAISON_QUOTA, true)[serie("mara")];
+    expect(resume({ chargements: quotaCle, file: { enAttente: 0, repriseTs: MAINTENANT + 42_000 } })).toBe(
+      "quota atteint, reprise 42 s",
+    );
+    // 4. Clé requise sans archive (absente, puis refusée).
+    expect(resume({ chargements: sansCle() })).toBe("clé personnelle requise");
+    expect(resume({ chargements: sansArchive("cle-requise", RAISON_REFUS) })).toBe("clé CryptoQuant refusée");
+    // 5. Quota dont la reprise est passée (scénario 3), sans puis avec archive.
+    const reprisePassee = { enAttente: 0, repriseTs: MAINTENANT - 5_000 };
+    expect(resume({ chargements: sansArchive("quota", RAISON_QUOTA, true), file: reprisePassee })).toBe(
+      "quota atteint, réessai à la prochaine ouverture",
+    );
+    const quotaArchive = tous();
+    quotaArchive[serie("mara")] = chargement("mara", { statut: "quota", raison: RAISON_QUOTA });
+    expect(resume({ chargements: quotaArchive })).toBe("quota atteint, réessai à la prochaine ouverture");
+    // 6. Offre refusée (scénario 1), sans puis avec archive.
+    expect(resume({ chargements: sansArchive("offre", "Professional plan and above", true) })).toBe(
+      "offre CryptoQuant insuffisante",
+    );
+    expect(resume({ chargements: avecArchiveJ2("offre", "Professional plan and above", false) })).toBe(
+      "offre CryptoQuant insuffisante",
+    );
+    // 7. Erreur sans archive (scénario 2) : injoignable après appel, erreur sans appel (version inconnue).
+    expect(resume({ chargements: sansArchive("erreur", RAISON_RESEAU, true) })).toBe("CryptoQuant injoignable");
+    expect(
+      resume({ chargements: sansArchive("erreur", "Archive CryptoQuant écrite par une version plus récente d'AXIOM : ni lue ni réécrite.") }),
+    ).toBe("erreur CryptoQuant");
+    // 8. Erreur après appel avec archive (scénario 4) : l'échec est dit devant l'archive.
+    expect(resume({ chargements: avecArchiveJ2("erreur", RAISON_RESEAU, true) })).toBe(
+      "CryptoQuant injoignable · archive 29 j · J-2 2026-09-14",
+    );
+    // 9. Sinon : texte d'archive (y compris clé requise avec archive) ; jamais une chaîne vide.
+    expect(resume({ chargements: tous() })).toBe("archive 30 j · J-1 2026-09-15");
+    const cleArchive = tous();
+    cleArchive[serie("mara")] = chargement("mara", { statut: "cle-requise", raison: RAISON_REFUS });
+    expect(resume({ chargements: cleArchive })).toBe("archive 30 j · J-1 2026-09-15");
+    expect(resume({ chargements: sansArchive("pret", "") })).toBe("archive vide");
+  });
+
+  it("en-tête replié : les quatre scénarios de la revue affichent leur état, jamais un span vide", () => {
+    const reprisePassee = { enAttente: 0, repriseTs: MAINTENANT - 5_000 };
+    const cas: Array<[Partial<PropsEnTeteMineursCotes>, string]> = [
+      [{ chargements: sansArchive("offre", "Professional plan and above", true) }, "offre CryptoQuant insuffisante"],
+      [{ chargements: sansArchive("erreur", RAISON_RESEAU, true) }, "CryptoQuant injoignable"],
+      [{ chargements: sansArchive("quota", RAISON_QUOTA, true), file: reprisePassee }, "quota atteint, réessai à la prochaine ouverture"],
+      [{ chargements: avecArchiveJ2("erreur", RAISON_RESEAU, true) }, "CryptoQuant injoignable · archive 29 j · J-2 2026-09-14"],
+    ];
+    for (const [surcharge, attendu] of cas) {
+      const html = entete(surcharge);
+      expect(html).toContain(`<span>${attendu}</span>`);
+      expect(html).not.toContain("clé CryptoQuant ⚙");
+    }
   });
 
   it("signaux d'archive : stockage plein, copie daemon non écrite, archive illisible remplacée, périmé", async () => {

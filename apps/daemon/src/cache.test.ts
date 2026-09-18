@@ -28,6 +28,13 @@ describe("ttlMsPourChemin", () => {
     expect(ttlMsPourChemin("/mexcapifaux")).toBe(0); // pas un vrai préfixe
   });
 
+  test("/cqapi n'est jamais mis en cache : la clé de cache ignore Authorization", () => {
+    // Une réponse obtenue avec une clé personnelle serait resservie à une autre clé.
+    expect(ttlMsPourChemin("/cqapi/v2/market/cq/spot/trade")).toBe(0);
+    expect(ttlMsPourChemin("/cqapi/v1/btc/miner-data/companies")).toBe(0);
+    expect(ttlMsPourChemin("/cqapi")).toBe(0);
+  });
+
   test("les constantes de TTL sont celles documentées", () => {
     expect(TTL_SECONDES_PAR_PREFIXE).toEqual({
       "/fredapi": 3600,

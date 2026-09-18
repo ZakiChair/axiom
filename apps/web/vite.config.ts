@@ -5,6 +5,7 @@ import { EXTAPI_HOSTS, EXTAPI_HOTES_SPECIALISES, extapiCheminAutorise } from "..
 import { geoProxyDev } from "./vite.geo-proxy";
 import { appendApiKeyIfAbsent } from "./src/data/apiKeyProxy";
 import { DEFILLAMA_PRO_HEADER, DEFILLAMA_PRO_HOST, cheminDefillamaAmont, cleDefillamaValide } from "../../shared/defillama-proxy";
+import { CRYPTOQUANT_HOST, cheminCryptoQuantAmont, cleCryptoQuantValide } from "../../shared/cryptoquant-proxy";
 
 // PROXY GÉNÉRIQUE /extapi (Phase 3) — contournement CORS pour APIs sans clé.
 // Route `/extapi/<hote>/<chemin…>` → `https://<hote>/<chemin…>` pour les hôtes
@@ -27,6 +28,27 @@ const EXTAPI_USER_AGENT_HOTES: Record<string, string> = {
   "data.sec.gov": EXTAPI_USER_AGENT_SEC,
   "www.sec.gov": EXTAPI_USER_AGENT_SEC,
 };
+
+// Destinations Fetch capables d'interpréter le corps comme contenu actif. COPIE VERBATIM de
+// DESTINATIONS_NAVIGATION_INTERDITES (apps/daemon/src/proxy.ts) — import cross-package interdit ;
+// viteConfig.test.ts relit la source du daemon pour vérifier que chaque valeur est refusée ici.
+const CQ_DESTINATIONS_INTERDITES: ReadonlySet<string> = new Set([
+  "document",
+  "iframe",
+  "frame",
+  "script",
+  "worker",
+  "sharedworker",
+  "serviceworker",
+  "object",
+  "embed",
+  "style",
+]);
+
+/** En-tête Fetch Metadata normalisé comme le daemon et la fonction Vercel. */
+function enteteFetch(valeur: string | string[] | undefined): string {
+  return (typeof valeur === "string" ? valeur : "").trim().toLowerCase();
+}
 
 // Génère les entrées de proxy Vite `/extapi/<hote>` → `https://<hote>` (strip du préfixe,
 // UA navigateur ou SEC-conforme par hôte, timeout 15 s). Cache : seulement en PROD (daemon) —
@@ -79,7 +101,16 @@ export default defineConfig(({ mode }) => {
   const SOSOVALUE_API_KEY = loadEnv(mode, process.cwd(), "").SOSOVALUE_API_KEY ?? "";
   const ETHERSCAN_API_KEY = loadEnv(mode, process.cwd(), "").ETHERSCAN_API_KEY ?? "";
   const BGEOMETRICS_API_KEY = loadEnv(mode, process.cwd(), "").BGEOMETRICS_API_KEY ?? "";
+  // CryptoQuant BASIC (licence PERSONNELLE) : repli réservé au proxy de dev et au daemon local.
+  const CRYPTOQUANT_API_KEY = loadEnv(mode, process.cwd(), "").CRYPTOQUANT_API_KEY ?? "";
   const isVercelBuild = process.env.VERCEL === "1";
+  // Repli CryptoQuant validé UNE fois, avec le prédicat du daemon : une clé `.env` mal formée
+  // (espace, saut de ligne développé par dotenv, Unicode, trop longue) est traitée comme
+  // absente — ni relais, ni injection (setHeader lèverait sur CR/LF), drapeau faux.
+  const CQ_REPLI = cleCryptoQuantValide(`Bearer ${CRYPTOQUANT_API_KEY}`) ? `Bearer ${CRYPTOQUANT_API_KEY}` : null;
+  // `loadEnv` lit aussi process.env : une variable posée par erreur dans l'environnement de
+  // build Vercel ne doit jamais faire croire au client qu'un repli existe (appels puis 401).
+  const CQ_CLE_ENV = !isVercelBuild && CQ_REPLI !== null;
   const AXIOM_DEPLOYMENT = isVercelBuild ? "vercel" : "local";
   const TWELVE_DATA_API_BASE = isVercelBuild ? "https://api.twelvedata.com" : "/tdapi";
 
@@ -92,6 +123,9 @@ export default defineConfig(({ mode }) => {
   // suit donc la présence de la clé quel que soit le déploiement.
   define: {
     __BG_CLE_ENV__: JSON.stringify(BGEOMETRICS_API_KEY !== ""),
+    // CryptoQuant : PRÉSENCE du repli local seulement (booléen), jamais sa valeur ; toujours
+    // faux sur un build Vercel (aucun repli serveur, licence personnelle).
+    __CQ_CLE_ENV__: JSON.stringify(CQ_CLE_ENV),
     "import.meta.env.VITE_AXIOM_DEPLOYMENT": JSON.stringify(AXIOM_DEPLOYMENT),
     "import.meta.env.VITE_TWELVE_DATA_API_BASE": JSON.stringify(TWELVE_DATA_API_BASE),
   },
@@ -266,6 +300,96 @@ export default defineConfig(({ mode }) => {
           proxy.on("error", (_error, _req, res) => {
             if ("writeHead" in res && !res.headersSent) res.writeHead(502, { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store" });
             if ("end" in res) res.end(JSON.stringify({ erreur: "amont DefiLlama Pro injoignable" }));
+          });
+        },
+      },
+      // CryptoQuant BASIC (licence PERSONNELLE) — liste FERMÉE partagée avec le daemon et la
+      // fonction Vercel (shared/cryptoquant-proxy.ts). Refus locaux AVANT le réseau ; un
+      // Bearer personnel valide reste prioritaire sur le repli `.env`.
+      "/cqapi": {
+        target: `https://${CRYPTOQUANT_HOST}`,
+        changeOrigin: true,
+        secure: true,
+        followRedirects: false,
+        rewrite: (path) => {
+          const url = new URL(path, "http://axiom.local");
+          return cheminCryptoQuantAmont(url.pathname, url.search) ?? "/__axiom_refuse__";
+        },
+        // UN SEUL bypass : navigation, cross-site ou destination active (403), méthode (405),
+        // clé disponible (401), liste fermée (404) — mêmes gardes que le daemon et Vercel.
+        bypass: (req, res) => {
+          if (res === undefined) return;
+          const url = new URL(req.url ?? "", "http://axiom.local");
+          const entete = typeof req.headers.authorization === "string" ? req.headers.authorization : null;
+          const cleDisponible = cleCryptoQuantValide(entete) || CQ_REPLI !== null;
+          const navigationInterdite =
+            enteteFetch(req.headers["sec-fetch-mode"]) === "navigate" ||
+            enteteFetch(req.headers["sec-fetch-site"]) === "cross-site" ||
+            CQ_DESTINATIONS_INTERDITES.has(enteteFetch(req.headers["sec-fetch-dest"]));
+          const status = navigationInterdite
+            ? 403
+            : req.method !== "GET"
+              ? 405
+              : !cleDisponible
+                ? 401
+                : cheminCryptoQuantAmont(url.pathname, url.search) === null
+                  ? 404
+                  : null;
+          if (status !== null) {
+            res.statusCode = status;
+            res.setHeader("content-type", "application/json; charset=utf-8");
+            res.setHeader("cache-control", "private, no-store");
+            if (status === 405) res.setHeader("allow", "GET");
+            res.end(
+              JSON.stringify({
+                erreur:
+                  status === 403
+                    ? "navigation CryptoQuant interdite"
+                    : status === 405
+                      ? "méthode CryptoQuant non autorisée"
+                      : status === 401
+                        ? "clé CryptoQuant personnelle requise"
+                        : "chemin CryptoQuant refusé",
+              }),
+            );
+            // Vite 6 poursuit vers proxy.web quand bypass renvoie undefined, même après res.end().
+            return req.url ?? "/";
+          }
+        },
+        timeout: 15_000,
+        proxyTimeout: 15_000,
+        configure: (proxy) => {
+          proxy.on("proxyReq", (proxyReq) => {
+            // Hygiène alignée sur le daemon et Vercel : les cookies de localhost (tous ports) et
+            // le Referer du navigateur ne partent pas chez le fournisseur.
+            proxyReq.removeHeader("cookie");
+            proxyReq.removeHeader("referer");
+            const entete = proxyReq.getHeader("authorization");
+            if (!cleCryptoQuantValide(typeof entete === "string" ? entete : null) && CQ_REPLI !== null) {
+              proxyReq.setHeader("Authorization", CQ_REPLI);
+            }
+          });
+          proxy.on("proxyRes", (proxyRes, _req, res) => {
+            const statut = proxyRes.statusCode ?? 502;
+            if (statut >= 300 && statut < 400) {
+              // Zéro redirection, comme le daemon et Vercel : 502 local, sans Location. http-proxy
+              // émet `proxyRes` AVANT de recopier statut et en-têtes (gardé par !res.headersSent)
+              // et avant de relayer le corps (gardé par !res.finished) : répondre ici suffit.
+              proxyRes.resume();
+              res.writeHead(502, { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store" });
+              res.end(JSON.stringify({ erreur: "redirection amont CryptoQuant refusée" }));
+              return;
+            }
+            // Écrit sur la réponse AMONT : http-proxy recopie ses en-têtes après cet évènement
+            // (un res.setHeader serait écrasé). Les x-ratelimit-* passent tels quels.
+            delete proxyRes.headers["set-cookie"];
+            proxyRes.headers["cache-control"] = "private, no-store";
+          });
+          proxy.on("error", (_error, _req, res) => {
+            if ("writeHead" in res && !res.headersSent) {
+              res.writeHead(502, { "content-type": "application/json; charset=utf-8", "cache-control": "private, no-store" });
+            }
+            if ("end" in res) res.end(JSON.stringify({ erreur: "amont CryptoQuant injoignable" }));
           });
         },
       },

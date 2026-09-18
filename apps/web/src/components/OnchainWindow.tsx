@@ -108,6 +108,7 @@ import { VueReseauEthCm } from "./onchain/ReseauEthCm";
 import { Mineurs } from "./onchain/Mineurs";
 import { ActiviteDex } from "./onchain/ActiviteDex";
 import { TresoreriesBtc } from "./onchain/TresoreriesBtc";
+import { TableauEtfFonds } from "./onchain/TableauEtfFonds";
 
 const ACTIFS_ETF: readonly ActifEtf[] = ["btc", "eth", "sol"];
 /** Badge des tuiles Valorisation selon le motif de péremption BGeometrics. */
@@ -919,20 +920,7 @@ export function OnchainWindow() {
             />
           </div>
           {etfPrincipal && etf && etf.parEmetteur ? (
-            <div className="space-y-1 rounded-md border border-border bg-bg px-3 py-2">
-              {etf.parEmetteur.map((e) => (
-                <div key={e.emetteur} className="flex items-center justify-between text-[11px]">
-                  <span className="text-text-dim">{e.emetteur}</span>
-                  <span className={`tabular-nums ${e.flux >= 0 ? "text-up" : "text-down"}`}>
-                    {formatUsd(e.flux)}
-                  </span>
-                </div>
-              ))}
-              <div className="mt-1 flex items-center justify-between border-t border-border pt-1 text-[11px] font-medium">
-                <span className="text-text">Cumul {etf.jour ?? ""}</span>
-                <span className="tabular-nums text-text">{formatUsd(etf.total)}</span>
-              </div>
-            </div>
+            <TableauEtfFonds etf={etf} actif={actifEtf} />
           ) : etfRepliDispo && donnees.etfRepli?.serie.dernier ? (
             // Repli bitcoin-data.com (SoSoValue indisponible pour BTC). Flux en BTC natif
             // (unité prouvée) — teinté +/- selon le sens, sparkline 90 j, cumul 30 j.

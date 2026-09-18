@@ -10,11 +10,22 @@
  * leurs commandes exportées depuis ces modules.
  */
 import type { Commande } from "./registry";
+import { cryptoquantUiStore, ENTREES_CQ, type CibleCq } from "../store/cryptoquantUi";
 import { windowManagerStore } from "../store/windowManager";
 
 /** Bascule d’ouverture d’une fenêtre du registre Launchpad. */
 function basculer(id: string): () => void {
   return () => windowManagerStore.getState().toggleWindow(id);
+}
+
+/**
+ * NAVIGATION vers une section CryptoQuant déjà livrée (décision du propriétaire du
+ * 2026-09-18) : la fenêtre hôte est ouverte par le magasin d'intention, qui demande à la
+ * section de se déplier et de défiler à l'écran. Ce n'est PAS une bascule de fenêtre : DES
+ * et CHAIN gardent leurs propres commandes (`panneau:derives`, `panneau:onchain`).
+ */
+function naviguerCq(cible: CibleCq): () => void {
+  return () => cryptoquantUiStore.getState().demander(cible);
 }
 
 /** Commandes panneau pilotées par le gestionnaire de fenêtres. */
@@ -575,6 +586,26 @@ export const windowPanelCommands: Commande[] = [
     ],
     apercu: "Ouvre / ferme le flux de liquidations perp Binance (long/short)",
     action: basculer("liquidations"),
+  },
+
+  // ─── Sections CryptoQuant (navigation intra-fenêtre, aucune fenêtre nouvelle) ───
+  {
+    id: "panneau:cq-takers",
+    mnemonique: ENTREES_CQ.takers.mnemonique,
+    libelle: ENTREES_CQ.takers.libelle,
+    categorie: "panneau",
+    motsCles: ["takers", "taker", "flux", "cryptoquant", "acheteur", "vendeur", "vwap"],
+    apercu: "Ouvre DES et déplie les flux takers",
+    action: naviguerCq("takers"),
+  },
+  {
+    id: "panneau:cq-mineurs",
+    mnemonique: ENTREES_CQ.mineurs.mnemonique,
+    libelle: ENTREES_CQ.mineurs.libelle,
+    categorie: "panneau",
+    motsCles: ["mineurs", "mineur", "cotes", "production", "mara", "riot", "cryptoquant"],
+    apercu: "Ouvre CHAIN et déplie les mineurs cotés",
+    action: naviguerCq("mineurs"),
   },
 
   // ─── Gestion globale des fenêtres (agit sur toutes les fenêtres à la fois) ───

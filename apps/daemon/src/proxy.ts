@@ -9,9 +9,12 @@
  *   /ethscanapi   → https://api.etherscan.io         (clé apikey si absente)
  *   /bgapi → bitcoin-data.com (Bearer)
  *   /ccdataapi → min-api.cryptocompare.com (Apikey) — gestionnaire dédié traiterCcData, hors table
+ *   /cqapi → api.cryptoquant.com (Bearer personnel, repli .env local) — gestionnaire dédié
+ *            traiterCryptoQuant, liste fermée (shared/cryptoquant-proxy.ts), JAMAIS en cache
  *
  * Rappel BUILD-CONTRACT : le daemon ne proxifie JAMAIS le chemin chaud (les WS de
- * marché du front restent DIRECTS). Ici, uniquement du REST à quota, mis en cache.
+ * marché du front restent DIRECTS). Ici, uniquement du REST à quota. Le cache SQLite ne sert
+ * que les routes de la table et /extapi ; /ccdataapi, /defillamapro et /cqapi n'y passent pas.
  */
 import { EXTAPI_HOSTS, extapiCheminAutorise, sourceGeoExtraite } from "../../../shared/extapi-hosts";
 import { extraireSeriesGeo } from "../../../shared/geo-series";
@@ -23,6 +26,7 @@ import { entetesCors } from "./cors";
 import type { ProxyKeys } from "./env";
 import type { Routeur } from "./router";
 import { DEFILLAMA_PRO_HEADER, DEFILLAMA_PRO_HOST, cheminDefillamaAmont, cleDefillamaValide, redigerSecretDefillama } from "../../../shared/defillama-proxy";
+import { CRYPTOQUANT_HOST, CRYPTOQUANT_PREFIXE, ENTETES_RELAYES_CQ, cheminCryptoQuantAmont, cleCryptoQuantValide } from "../../../shared/cryptoquant-proxy";
 
 /**
  * Ajoute `<paramName>=<key>` à la query d'un chemin proxifié UNIQUEMENT si la
@@ -946,6 +950,73 @@ export async function traiterDefillamaPro(req: Request, url: URL, options: Optio
   }
 }
 
+/**
+ * /cqapi — CryptoQuant BASIC (licence PERSONNELLE). Gestionnaire dédié, hors table
+ * `construireRoutesProxy` et hors cache SQLite : `cleCache` ignore Authorization, une
+ * réponse obtenue avec une clé serait resservie à une autre ; l'archive côté client est le
+ * cache. Refus locaux, tous AVANT le réseau : navigation 403, méthode 405, clé 401 (en-tête
+ * personnel valide prioritaire, sinon repli `.env` de ce daemon 127.0.0.1), chemin 404.
+ */
+export async function traiterCryptoQuant(
+  req: Request,
+  url: URL,
+  cleEnv: string,
+  options: OptionsExtapi = {},
+): Promise<Response> {
+  const headers: Record<string, string> = {
+    "content-type": "application/json; charset=utf-8",
+    "cache-control": "private, no-store",
+    ...ENTETES_SECURITE_EXTAPI,
+    ...entetesCors(req),
+  };
+  const refus = (status: number, erreur: string, extra: Record<string, string> = {}): Response =>
+    new Response(JSON.stringify({ erreur }), { status, headers: { ...headers, ...extra } });
+
+  if (requeteNavigationExtapiInterdite(req)) return refus(403, "navigation CryptoQuant interdite");
+  if (req.method !== "GET") return refus(405, "méthode CryptoQuant non autorisée", { allow: "GET" });
+  const entete = req.headers.get("authorization");
+  const authorization = cleCryptoQuantValide(entete) ? entete : cleEnv.length > 0 ? `Bearer ${cleEnv}` : null;
+  if (!cleCryptoQuantValide(authorization)) return refus(401, "clé CryptoQuant personnelle requise");
+  const chemin = cheminCryptoQuantAmont(url.pathname, url.search);
+  if (chemin === null) return refus(404, "chemin CryptoQuant refusé");
+
+  let amont: ReponseAmontExtapi;
+  try {
+    amont = await recupererExtapiSecurise(`https://${CRYPTOQUANT_HOST}${chemin}`, {
+      ...options,
+      method: "GET",
+      entetesAmont: { accept: "application/json", authorization },
+      hotesAutorises: new Set([CRYPTOQUANT_HOST]),
+      maxRedirections: 0,
+      libelleTimeout: "/cqapi",
+    });
+  } catch (err) {
+    // Détail expurgé : le jeton ne doit apparaître dans aucune réponse, même si un message
+    // d'erreur le recopiait (patron redigerSecretDefillama).
+    const jeton = authorization.replace(/^Bearer\s+/i, "");
+    const detail = (err instanceof Error ? err.message : String(err)).split(jeton).join("***");
+    return new Response(
+      JSON.stringify({
+        erreur: err instanceof ErreurPolitiqueExtapi ? "amont CryptoQuant refusé" : "amont CryptoQuant injoignable",
+        detail,
+      }),
+      { status: 502, headers },
+    );
+  }
+
+  const entetes: Record<string, string> = {
+    ...headers,
+    "content-type": amont.contentType,
+    "access-control-expose-headers": ENTETES_RELAYES_CQ.join(", "),
+  };
+  for (const nom of ENTETES_RELAYES_CQ) {
+    const valeur = amont.headers.get(nom);
+    if (valeur !== null) entetes[nom] = valeur;
+  }
+  const statutSansCorps = amont.status === 204 || amont.status === 205 || amont.status === 304;
+  return new Response(statutSansCorps ? null : amont.corps, { status: amont.status, headers: entetes });
+}
+
 /** TTL cache /extapi par défaut (RSS et calendriers sont lents). */
 const EXTAPI_TTL_DEFAUT_MS = 120_000;
 /** TTL cache réduit pour les dérivés Binance (données quasi temps réel). */
@@ -1113,6 +1184,9 @@ export function enregistrerProxy(routeur: Routeur, cles: ProxyKeys): void {
   // RouteProxy générique — traiterCcData recalcule cible, réécriture et validation lui-même.
   routeur.enregistrerPrefixe("/ccdataapi", (req, url) => traiterCcData(req, url));
   routeur.enregistrerPrefixe("/defillamapro", (req, url) => traiterDefillamaPro(req, url));
+  // /cqapi : CryptoQuant BASIC (licence personnelle) — gestionnaire DÉDIÉ, liste fermée,
+  // repli `.env` local seulement, JAMAIS de cache SQLite (la clé de cache ignore Authorization).
+  routeur.enregistrerPrefixe(CRYPTOQUANT_PREFIXE, (req, url) => traiterCryptoQuant(req, url, cles.CRYPTOQUANT_API_KEY));
   // Proxy générique /extapi (Phase 3) : hôtes whitelistés, GET only, cache TTL.
   routeur.enregistrerPrefixe("/extapi", (req, url) => traiterExtapi(req, url));
 }

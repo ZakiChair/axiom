@@ -21,6 +21,11 @@ export interface ProxyKeys {
   SOSOVALUE_API_KEY: string;
   ETHERSCAN_API_KEY: string;
   BGEOMETRICS_API_KEY: string;
+  /**
+   * CryptoQuant BASIC (licence PERSONNELLE) : repli de la route /cqapi pour ce daemon lié
+   * à 127.0.0.1 UNIQUEMENT. Aucune variable équivalente n'existe côté Vercel.
+   */
+  CRYPTOQUANT_API_KEY: string;
 }
 
 /**
@@ -76,5 +81,6 @@ export function chargerCles(cheminEnv: string = CHEMIN_ENV_DEFAUT): ProxyKeys {
     SOSOVALUE_API_KEY: env.SOSOVALUE_API_KEY ?? "",
     ETHERSCAN_API_KEY: env.ETHERSCAN_API_KEY ?? "",
     BGEOMETRICS_API_KEY: env.BGEOMETRICS_API_KEY ?? "",
+    CRYPTOQUANT_API_KEY: env.CRYPTOQUANT_API_KEY ?? "",
   };
 }

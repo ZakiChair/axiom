@@ -80,12 +80,18 @@ const FENETRE_ABBR: Record<string, string> = { "1min": "min", "1hour": "h", "1jo
 
 /**
  * Quota lisible : « 3/8 min » (fenêtre principale) + « · 142/800 j » si composante
- * journalière connue (Twelve Data). PURE.
+ * journalière connue (Twelve Data) + « · ≈195/10000 crédits 31 j » si composante
+ * crédits connue (CryptoQuant BASIC, §13 spec — compteur par navigateur, pas un
+ * solde fournisseur). Entiers bruts (pas de séparateur de milliers : aucun
+ * formateur de ce type n'est importé par ce fichier). PURE.
  */
 export function formatQuota(q: QuotaSource): string {
   const unit = FENETRE_ABBR[q.fenetre] ?? q.fenetre;
   const base = `${q.utilise}/${q.limite} ${unit}`;
-  return q.jour ? `${base} · ${q.jour.utilise}/${q.jour.limite} j` : base;
+  const avecJour = q.jour ? `${base} · ${q.jour.utilise}/${q.jour.limite} j` : base;
+  return q.credits
+    ? `${avecJour} · ≈${q.credits.utilise}/${q.credits.limite} crédits ${q.credits.jours} j`
+    : avecJour;
 }
 
 /**
@@ -104,16 +110,20 @@ export function degradedLevel(sources: Record<string, SanteSource>): "error" | "
 }
 
 /**
- * Signature de re-rendu : change quand la composition, l'état, le quota ou l'erreur
- * d'une source change — mais PAS quand seul `dernierMessageTs` bouge (géré en DOM).
+ * Signature de re-rendu : change quand la composition, l'état, le quota (fenêtre principale,
+ * jour ou crédits — §13) ou l'erreur d'une source change — mais PAS quand seul
+ * `dernierMessageTs` bouge (géré en DOM). Exportée pour test PURE (régression silencieuse sinon :
+ * un segment de quota qui change sans faire bouger la signature reste affiché figé).
  */
-function panelSignature(sources: Record<string, SanteSource>): string {
+export function panelSignature(sources: Record<string, SanteSource>): string {
   return Object.keys(sources)
     .sort()
     .map((k) => {
       const s = sources[k];
       if (!s) return k;
-      const q = s.quota ? `${s.quota.utilise}/${s.quota.limite}/${s.quota.jour?.utilise ?? ""}` : "";
+      const q = s.quota
+        ? `${s.quota.utilise}/${s.quota.limite}/${s.quota.jour?.utilise ?? ""}/${s.quota.credits?.utilise ?? ""}`
+        : "";
       return `${k}|${s.etat}|${q}|${s.derniereErreur ?? ""}`;
     })
     .join(";");

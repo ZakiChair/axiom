@@ -1,23 +1,27 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   adresseIpPublique,
   appendApiKeyIfAbsent,
   construireRoutesProxy,
   construireUrlAmontExtapi,
+  enregistrerProxy,
   EXTAPI_WHITELIST,
   mimeExtapiAutorise,
   parseExtapiChemin,
   recupererExtapiSecurise,
   requeteNavigationExtapiInterdite,
   traiterCcData,
+  traiterCryptoQuant,
   traiterDefillamaPro,
   traiterExtapi,
   traiterProxy,
   ttlMsExtapi,
   userAgentPourHote,
+  type FetchExtapi,
   type RouteProxy,
 } from "./proxy";
 import type { ProxyKeys } from "./env";
+import { Routeur } from "./router";
 
 const CLES: ProxyKeys = {
   FRED_API_KEY: "fredkey",
@@ -26,6 +30,7 @@ const CLES: ProxyKeys = {
   SOSOVALUE_API_KEY: "sosokey",
   ETHERSCAN_API_KEY: "ethkey",
   BGEOMETRICS_API_KEY: "bgkey",
+  CRYPTOQUANT_API_KEY: "cqkey",
 };
 
 function routePar(prefix: string): RouteProxy {
@@ -137,6 +142,12 @@ describe("construireRoutesProxy — cibles et réécritures", () => {
     // cible/réécriture/validation lui-même : une entrée RouteProxy serait du code mort
     // (rewrite et entetesAmont jamais exécutés en production).
     expect(construireRoutesProxy(CLES).some((route) => route.prefix === "/ccdataapi")).toBe(false);
+  });
+
+  test("aucune route générique /cqapi : le préfixe est servi par traiterCryptoQuant seul", () => {
+    // Une RouteProxy passerait par traiterProxy, donc par le cache SQLite dont la clé
+    // ignore Authorization : une réponse obtenue avec une clé serait resservie à une autre.
+    expect(construireRoutesProxy(CLES).some((route) => route.prefix === "/cqapi")).toBe(false);
   });
 });
 
@@ -858,5 +869,285 @@ describe("traiterProxy — politique des proxys fixes (réutilise /extapi)", () 
         url: "https://openapi.sosovalue.com/openapi/v2/etf/currentEtfDataMetrics",
       },
     ]);
+  });
+});
+
+describe("traiterCryptoQuant — licence personnelle, liste fermée, jamais en cache", () => {
+  const LOCAL = "http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30";
+  const CIBLE = "https://api.cryptoquant.com/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30";
+  const resoudrePublic = async (): Promise<readonly string[]> => ["104.18.10.10"];
+
+  interface AppelAmont {
+    url: string;
+    authorization: string | null;
+    redirect: RequestRedirect | undefined;
+  }
+
+  /** Amont simulé : mémorise l'URL, l'Authorization et le mode de redirection de chaque appel. */
+  function amontSimule(repondre: () => Response): { appels: AppelAmont[]; fetchImpl: FetchExtapi } {
+    const appels: AppelAmont[] = [];
+    const fetchImpl: FetchExtapi = async (input, init) => {
+      appels.push({
+        url: String(input),
+        authorization: new Headers(init?.headers).get("authorization"),
+        redirect: init?.redirect,
+      });
+      return repondre();
+    };
+    return { appels, fetchImpl };
+  }
+
+  const corps200 = { status: { code: 200, message: "success" }, result: { window: "DAY", data: [] } };
+  const reponse200 = (): Response =>
+    new Response(JSON.stringify(corps200), {
+      headers: {
+        "content-type": "application/json",
+        "cache-control": "public, max-age=600",
+        "x-ratelimit-limit": "10",
+        "x-ratelimit-remaining": "9",
+        "x-ratelimit-reset": "6",
+        "x-credit-cost": "15",
+        "x-autre": "non-relaye",
+      },
+    });
+
+  test("URL amont exacte, Bearer personnel relayé, redirect manual, private no-store, quota et coût crédits exposés (C7)", async () => {
+    const { appels, fetchImpl } = amontSimule(reponse200);
+    const req = new Request(LOCAL, {
+      headers: { authorization: "Bearer CLE-TEST-SECRETE", origin: "http://localhost:5173" },
+    });
+    const rep = await traiterCryptoQuant(req, new URL(req.url), "envkey", { fetchImpl, resoudreHote: resoudrePublic });
+
+    expect(rep.status).toBe(200);
+    expect(appels).toEqual([{ url: CIBLE, authorization: "Bearer CLE-TEST-SECRETE", redirect: "manual" }]);
+    expect(rep.headers.get("cache-control")).toBe("private, no-store");
+    expect(rep.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(rep.headers.get("x-ratelimit-limit")).toBe("10");
+    expect(rep.headers.get("x-ratelimit-remaining")).toBe("9");
+    expect(rep.headers.get("x-ratelimit-reset")).toBe("6");
+    expect(rep.headers.get("x-credit-cost")).toBe("15");
+    expect(rep.headers.has("x-autre")).toBe(false);
+    expect(rep.headers.get("access-control-allow-origin")).toBe("http://localhost:5173");
+    expect(rep.headers.get("access-control-expose-headers")).toBe(
+      "x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-reset, x-credit-cost",
+    );
+    expect(await rep.json()).toEqual(corps200);
+  });
+
+  test("normalise la query amont (ordre miner, window, limit)", async () => {
+    const { appels, fetchImpl } = amontSimule(reponse200);
+    const req = new Request("http://127.0.0.1:8787/cqapi/v1/btc/miner-data/companies?limit=30&window=day&miner=mara", {
+      headers: { authorization: "Bearer CLE-TEST-SECRETE" },
+    });
+    const rep = await traiterCryptoQuant(req, new URL(req.url), "", { fetchImpl, resoudreHote: resoudrePublic });
+    expect(rep.status).toBe(200);
+    expect(appels.map((appel) => appel.url)).toEqual([
+      "https://api.cryptoquant.com/v1/btc/miner-data/companies?miner=mara&window=day&limit=30",
+    ]);
+  });
+
+  test("relaie le statut et le corps d'un refus amont (403 d'offre)", async () => {
+    const corps = { status: { code: 403, message: "This metric requires Professional plan and above." } };
+    const { fetchImpl } = amontSimule(
+      () => new Response(JSON.stringify(corps), { status: 403, headers: { "content-type": "application/json" } }),
+    );
+    const req = new Request(LOCAL, { headers: { authorization: "Bearer CLE-TEST-SECRETE" } });
+    const rep = await traiterCryptoQuant(req, new URL(req.url), "", { fetchImpl, resoudreHote: resoudrePublic });
+    expect(rep.status).toBe(403);
+    expect(rep.headers.get("cache-control")).toBe("private, no-store");
+    expect(await rep.json()).toEqual(corps);
+  });
+
+  test("refus 403, 405, 401 puis 404 AVANT tout fetch", async () => {
+    const { appels, fetchImpl } = amontSimule(reponse200);
+    const options = { fetchImpl, resoudreHote: resoudrePublic };
+    const bearer = { authorization: "Bearer CLE-TEST-SECRETE" };
+    const cas: Array<{ req: Request; cleEnv: string; statut: number }> = [
+      { req: new Request(LOCAL, { headers: { ...bearer, "sec-fetch-mode": "navigate" } }), cleEnv: "envkey", statut: 403 },
+      { req: new Request(LOCAL, { headers: { ...bearer, "sec-fetch-dest": "script" } }), cleEnv: "envkey", statut: 403 },
+      { req: new Request(LOCAL, { method: "POST", headers: bearer }), cleEnv: "envkey", statut: 405 },
+      { req: new Request(LOCAL, { method: "HEAD", headers: bearer }), cleEnv: "envkey", statut: 405 },
+      // Méthode contrôlée avant la clé : un POST sans aucune clé reste un 405.
+      { req: new Request(LOCAL, { method: "POST" }), cleEnv: "", statut: 405 },
+      { req: new Request(LOCAL), cleEnv: "", statut: 401 },
+      { req: new Request(LOCAL, { headers: { authorization: "Apikey CLE-TEST-SECRETE" } }), cleEnv: "", statut: 401 },
+      { req: new Request(LOCAL, { headers: { authorization: `Bearer ${"x".repeat(600)}` } }), cleEnv: "", statut: 401 },
+      // Clé avant chemin : un chemin hors liste sans aucune clé reste un 401.
+      { req: new Request("http://127.0.0.1:8787/cqapi/v1/btc/market-indicator/mvrv?window=day"), cleEnv: "", statut: 401 },
+      // Repli `.env` mal formé : traité comme absent (401 local, aucune exception d'en-tête).
+      { req: new Request(LOCAL), cleEnv: "\nenvkey", statut: 401 },
+      { req: new Request(LOCAL), cleEnv: "env\nkey", statut: 401 },
+      { req: new Request(LOCAL), cleEnv: "env key", statut: 401 },
+      {
+        req: new Request("http://127.0.0.1:8787/cqapi/v1/btc/exchange-flows/reserve?exchange=all_exchange&window=day", { headers: bearer }),
+        cleEnv: "envkey",
+        statut: 404,
+      },
+      { req: new Request(`${LOCAL}&from=20260901`, { headers: bearer }), cleEnv: "envkey", statut: 404 },
+      { req: new Request("http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=sol_all&window=day"), cleEnv: "envkey", statut: 404 },
+      {
+        req: new Request("http://127.0.0.1:8787/cqapi//v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30", { headers: bearer }),
+        cleEnv: "envkey",
+        statut: 404,
+      },
+      {
+        req: new Request("http://127.0.0.1:8787/cqapi/v2/market/cq/spot/trade?symbol=btc_all&miner=mara&window=day", { headers: bearer }),
+        cleEnv: "envkey",
+        statut: 404,
+      },
+    ];
+    for (const { req, cleEnv, statut } of cas) {
+      const rep = await traiterCryptoQuant(req, new URL(req.url), cleEnv, options);
+      expect(rep.status).toBe(statut);
+      expect(rep.headers.get("cache-control")).toBe("private, no-store");
+      expect(rep.headers.get("allow")).toBe(statut === 405 ? "GET" : null);
+      expect(await rep.text()).not.toContain("CLE-TEST-SECRETE");
+    }
+    expect(appels).toHaveLength(0);
+  });
+
+  test("zéro redirection : un 302 amont donne un 502 après un seul appel, sans jeton ni Location", async () => {
+    const { appels, fetchImpl } = amontSimule(
+      () =>
+        new Response("<p>déplacé</p>", {
+          status: 302,
+          headers: {
+            location: "https://api.cryptoquant.com/v1/btc/market-indicator/mvrv?window=day",
+            "content-type": "text/html",
+            "set-cookie": "amont=1",
+          },
+        }),
+    );
+    const req = new Request(LOCAL, { headers: { authorization: "Bearer CLE-TEST-SECRETE" } });
+    const rep = await traiterCryptoQuant(req, new URL(req.url), "", { fetchImpl, resoudreHote: resoudrePublic });
+    expect(rep.status).toBe(502);
+    expect(appels).toEqual([{ url: CIBLE, authorization: "Bearer CLE-TEST-SECRETE", redirect: "manual" }]);
+    expect(rep.headers.get("location")).toBeNull();
+    expect(rep.headers.get("set-cookie")).toBeNull();
+    expect(rep.headers.get("cache-control")).toBe("private, no-store");
+    const corps = await rep.text();
+    expect(corps).not.toContain("CLE-TEST-SECRETE");
+    expect(corps).not.toContain("déplacé");
+    expect(JSON.parse(corps)).toMatchObject({ erreur: "amont CryptoQuant refusé" });
+  });
+
+  test("429 JSON amont : statut, corps et trois en-têtes x-ratelimit-* relayés (aucun x-credit-cost amont, échec non facturé)", async () => {
+    const corps = { status: { code: 429, message: "Too Many Requests" } };
+    const { appels, fetchImpl } = amontSimule(
+      () =>
+        new Response(JSON.stringify(corps), {
+          status: 429,
+          headers: {
+            "content-type": "application/json",
+            "x-ratelimit-limit": "10",
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-reset": "42",
+            "retry-after": "42",
+          },
+        }),
+    );
+    const req = new Request(LOCAL, { headers: { authorization: "Bearer CLE-TEST-SECRETE", origin: "http://localhost:5173" } });
+    const rep = await traiterCryptoQuant(req, new URL(req.url), "", { fetchImpl, resoudreHote: resoudrePublic });
+    expect(appels).toHaveLength(1);
+    expect(rep.status).toBe(429);
+    expect(rep.headers.get("x-ratelimit-limit")).toBe("10");
+    expect(rep.headers.get("x-ratelimit-remaining")).toBe("0");
+    expect(rep.headers.get("x-ratelimit-reset")).toBe("42");
+    expect(rep.headers.has("x-credit-cost")).toBe(false);
+    expect(rep.headers.get("access-control-expose-headers")).toBe(
+      "x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-reset, x-credit-cost",
+    );
+    expect(rep.headers.get("cache-control")).toBe("private, no-store");
+    expect(await rep.json()).toEqual(corps);
+  });
+
+  test("repli .env sans en-tête, en-tête invalide remplacé, en-tête personnel prioritaire", async () => {
+    const { appels, fetchImpl } = amontSimule(reponse200);
+    const options = { fetchImpl, resoudreHote: resoudrePublic };
+    const sansEntete = new Request(LOCAL);
+    const invalide = new Request(LOCAL, { headers: { authorization: "Basic xyz" } });
+    const perso = new Request(LOCAL, { headers: { authorization: "Bearer perso" } });
+    expect((await traiterCryptoQuant(sansEntete, new URL(sansEntete.url), "envkey", options)).status).toBe(200);
+    expect((await traiterCryptoQuant(invalide, new URL(invalide.url), "envkey", options)).status).toBe(200);
+    expect((await traiterCryptoQuant(perso, new URL(perso.url), "envkey", options)).status).toBe(200);
+    expect(appels.map((appel) => appel.authorization)).toEqual(["Bearer envkey", "Bearer envkey", "Bearer perso"]);
+  });
+
+  test("aucune sortie console ni réponse ne contient l'Authorization", async () => {
+    const sorties: string[] = [];
+    const capturer = (...args: unknown[]): void => {
+      sorties.push(args.map((arg) => (arg instanceof Error ? `${arg.message} ${arg.stack ?? ""}` : String(arg))).join(" "));
+    };
+    const espions = [
+      spyOn(console, "log").mockImplementation(capturer),
+      spyOn(console, "info").mockImplementation(capturer),
+      spyOn(console, "warn").mockImplementation(capturer),
+      spyOn(console, "error").mockImplementation(capturer),
+      spyOn(console, "debug").mockImplementation(capturer),
+    ];
+    try {
+      const perso = new Request(LOCAL, { headers: { authorization: "Bearer CLE-TEST-SECRETE" } });
+      const panne = await traiterCryptoQuant(perso, new URL(perso.url), "", {
+        fetchImpl: async () => {
+          throw new Error("échec amont avec Bearer CLE-TEST-SECRETE");
+        },
+        resoudreHote: resoudrePublic,
+      });
+      expect(panne.status).toBe(502);
+      expect(await panne.text()).not.toContain("CLE-TEST-SECRETE");
+
+      const repli = new Request(LOCAL);
+      const panneRepli = await traiterCryptoQuant(repli, new URL(repli.url), "CLE-ENV-SECRETE", {
+        fetchImpl: async () => {
+          throw new Error("échec amont avec Bearer CLE-ENV-SECRETE");
+        },
+        resoudreHote: resoudrePublic,
+      });
+      expect(panneRepli.status).toBe(502);
+      expect(await panneRepli.text()).not.toContain("CLE-ENV-SECRETE");
+
+      const encore = new Request(LOCAL, { headers: { authorization: "Bearer CLE-TEST-SECRETE" } });
+      const succes = await traiterCryptoQuant(encore, new URL(encore.url), "", {
+        fetchImpl: amontSimule(reponse200).fetchImpl,
+        resoudreHote: resoudrePublic,
+      });
+      expect(succes.status).toBe(200);
+    } finally {
+      for (const espion of espions) espion.mockRestore();
+    }
+    expect(sorties.join("\n")).not.toContain("CLE-TEST-SECRETE");
+    expect(sorties.join("\n")).not.toContain("CLE-ENV-SECRETE");
+  });
+
+  test("le corps de traiterCryptoQuant ne référence ni lireCache ni ecrireCache (lecture de la source)", async () => {
+    // Des espions de cache injectés par les options ne prouveraient rien : un appel direct
+    // aux fonctions importées de ./cache les contournerait. On lit donc la source, de la
+    // déclaration jusqu'à la fonction de premier niveau suivante.
+    const source = await Bun.file(new URL("./proxy.ts", import.meta.url)).text();
+    const declaration = "export async function traiterCryptoQuant(";
+    const debut = source.indexOf(declaration);
+    expect(debut).toBeGreaterThan(-1);
+    const reste = source.slice(debut + declaration.length);
+    const fin = reste.search(/\n(?:export )?(?:async )?function \w+[(<]/);
+    expect(fin).toBeGreaterThan(0);
+    const corps = reste.slice(0, fin);
+    // Garde-fou du découpage : une tranche vide ou mal placée passerait sinon.
+    expect(corps).toContain("cheminCryptoQuantAmont(");
+    expect(corps).toContain("recupererExtapiSecurise(");
+    expect(corps).not.toContain("lireCache");
+    expect(corps).not.toContain("ecrireCache");
+  });
+
+  test("enregistrerProxy branche /cqapi sur traiterCryptoQuant (refus locaux, sans réseau)", async () => {
+    const routeur = new Routeur();
+    enregistrerProxy(routeur, CLES);
+    const adresse = new URL(LOCAL);
+    const post = await routeur.gerer(new Request(adresse, { method: "POST" }), adresse);
+    expect(post?.status).toBe(405);
+    expect(post?.headers.get("allow")).toBe("GET");
+    // Repli « cqkey » présent dans CLES : le refus vient de la liste fermée, pas de la clé.
+    const horsListe = new URL("http://127.0.0.1:8787/cqapi/v1/btc/market-indicator/mvrv?window=day");
+    const refus = await routeur.gerer(new Request(horsListe), horsListe);
+    expect(refus?.status).toBe(404);
   });
 });

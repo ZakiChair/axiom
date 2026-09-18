@@ -87,6 +87,14 @@
       "destination": "/api/proxy?__axiom_route=defillamapro&__axiom_path=:path/"
     },
     {
+      "source": "/cqapi/:path*",
+      "destination": "/api/proxy?__axiom_route=cqapi&__axiom_path=:path"
+    },
+    {
+      "source": "/cqapi/:path*/",
+      "destination": "/api/proxy?__axiom_route=cqapi&__axiom_path=:path/"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

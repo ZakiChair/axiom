@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import { sourceGeoExtraite } from "../shared/extapi-hosts.js";
 import { extraireSeriesGeo } from "../shared/geo-series.js";
 import { NBS_HOST, validerRequeteNbs } from "../shared/nbs-series.js";
+import { ENTETES_RELAYES_CQ } from "../shared/cryptoquant-proxy.js";
 import {
   planProxyRequest,
   PROXY_MAX_REDIRECTS,
@@ -354,6 +355,16 @@ async function handle(request: Request): Promise<Response> {
       "x-axiom-proxy": "vercel",
       ...SECURITY_HEADERS,
     });
+    if (plan.route === "cqapi") {
+      // Quota et coût crédits CryptoQuant (§13) : ensemble FERMÉ d'en-têtes amont recopiés,
+      // liste unique partagée avec le daemon (shared/cryptoquant-proxy.ts). Le corps amont
+      // (status.message) est relayé tel quel plus bas — contrairement à defillamapro, la clé
+      // voyage en en-tête et jamais dans l'URL.
+      for (const nom of ENTETES_RELAYES_CQ) {
+        const valeur = upstream.headers.get(nom);
+        if (valeur !== null) responseHeaders.set(nom, valeur);
+      }
+    }
     if (plan.method === "HEAD" || BODYLESS_STATUSES.has(upstream.status)) {
       await upstream.body?.cancel().catch(() => undefined);
       return new Response(null, { status: upstream.status, headers: responseHeaders });

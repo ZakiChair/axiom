@@ -9,6 +9,7 @@ import {
   proxyNavigationForbidden,
   proxyRedirectAllowed,
   proxyRedirectTarget,
+  proxyUpstreamHeaders,
 } from "../../../api/_policy";
 
 function url(route: string, path: string, query = ""): string {
@@ -45,7 +46,7 @@ describe("proxy Vercel", () => {
     expect(policySource).toContain('env["BGEOMETRICS_API_KEY"]');
   });
 
-  test("place les neuf rewrites avant le fallback SPA", async () => {
+  test("place les onze rewrites avant le fallback SPA", async () => {
     const config = (await Bun.file(new URL("../../../vercel.json", import.meta.url)).json()) as {
       rewrites: Array<{ source: string; destination: string }>;
     };
@@ -60,6 +61,7 @@ describe("proxy Vercel", () => {
       "/ethscanapi/:path*",
       "/ccdataapi/:path*",
       "/defillamapro/:path*",
+      "/cqapi/:path*",
     ];
     const fallbackIndex = config.rewrites.findIndex((rewrite) => rewrite.destination === "/index.html");
     const proxyRewrites = config.rewrites.slice(0, fallbackIndex);
@@ -110,18 +112,21 @@ describe("proxy Vercel", () => {
     expect(publicPlan.privateResponse).toBe(true);
   });
 
-  test("fixe l'autorité des huit routes spécifiques", () => {
-    for (const [route, host] of [
-      ["fredapi", "api.stlouisfed.org"],
-      ["coinalyzeapi", "api.coinalyze.net"],
-      ["tdapi", "api.twelvedata.com"],
-      ["mexcapi", "api.mexc.com"],
-      ["sosoapi", "openapi.sosovalue.com"],
-      ["bgapi", "bitcoin-data.com"],
-      ["ethscanapi", "api.etherscan.io"],
-      ["ccdataapi", "min-api.cryptocompare.com"],
+  test("fixe l'autorité des neuf routes spécifiques", () => {
+    const bearer = new Headers({ authorization: "Bearer personnelle" });
+    for (const [route, host, path, query, headers] of [
+      ["fredapi", "api.stlouisfed.org", "v1/data", "", new Headers()],
+      ["coinalyzeapi", "api.coinalyze.net", "v1/data", "", new Headers()],
+      ["tdapi", "api.twelvedata.com", "v1/data", "", new Headers()],
+      ["mexcapi", "api.mexc.com", "v1/data", "", new Headers()],
+      ["sosoapi", "openapi.sosovalue.com", "v1/data", "", new Headers()],
+      ["bgapi", "bitcoin-data.com", "v1/data", "", new Headers()],
+      ["ethscanapi", "api.etherscan.io", "v1/data", "", new Headers()],
+      ["ccdataapi", "min-api.cryptocompare.com", "v1/data", "", new Headers()],
+      // CryptoQuant : liste fermée et Bearer personnel obligatoires (sinon 404 ou 401).
+      ["cqapi", "api.cryptoquant.com", "v2/market/cq/spot/trade", "symbol=btc_all&window=day&limit=30", bearer],
     ] as const) {
-      expect(planProxyRequest(url(route, "v1/data"), "GET", new Headers()).target.hostname).toBe(host);
+      expect(planProxyRequest(url(route, path, query), "GET", headers).target.hostname).toBe(host);
     }
   });
 
@@ -321,5 +326,128 @@ describe("repli serveur BGeometrics (BGEOMETRICS_API_KEY)", () => {
     expect(ccdata.upstreamHeaders.has("authorization")).toBe(false);
     const sansEnv = planProxyRequest(url("bgapi", "v1/sopr"), "GET", new Headers(), {});
     expect(sansEnv.upstreamHeaders.has("authorization")).toBe(false);
+  });
+});
+
+describe("route CryptoQuant /cqapi (licence personnelle, liste fermée)", () => {
+  const CHEMIN = "v2/market/cq/spot/trade";
+  const QUERY = "symbol=btc_all&window=day&limit=30";
+  const CIBLE = "https://api.cryptoquant.com/v2/market/cq/spot/trade?symbol=btc_all&window=day&limit=30";
+  // Variables serveur posées par erreur : aucune ne doit servir de repli CryptoQuant.
+  const envServeur = { BGEOMETRICS_API_KEY: "repli-serveur", CRYPTOQUANT_API_KEY: "repli-cq-interdit" };
+  const bearer = (): Headers =>
+    new Headers({ authorization: "Bearer CLE-TEST-SECRETE", cookie: "session=secret", "x-extra": "interdit" });
+
+  test("GET sans Authorization : 401 local, y compris avec des variables serveur", () => {
+    for (const env of [{}, envServeur]) {
+      const error = policyError(() => planProxyRequest(url("cqapi", CHEMIN, QUERY), "GET", new Headers(), env));
+      expect(error.status).toBe(401);
+      expect(error.message).toBe("clé CryptoQuant personnelle requise");
+    }
+  });
+
+  test("Bearer personnel : cible exacte, en-tête relayé, sans cookie, privé, zéro redirection", () => {
+    const plan = planProxyRequest(url("cqapi", CHEMIN, QUERY), "GET", bearer(), envServeur);
+    expect(plan.route).toBe("cqapi");
+    expect(plan.method).toBe("GET");
+    expect(plan.target.toString()).toBe(CIBLE);
+    expect(plan.upstreamHeaders.get("authorization")).toBe("Bearer CLE-TEST-SECRETE");
+    expect(plan.upstreamHeaders.has("cookie")).toBe(false);
+    expect(plan.upstreamHeaders.has("x-extra")).toBe(false);
+    expect(plan.cacheControl).toBe("private, no-store");
+    expect(plan.privateResponse).toBe(true);
+    expect(plan.maxRedirects).toBe(0);
+    expect([...plan.allowedRedirectHosts]).toEqual(["api.cryptoquant.com"]);
+  });
+
+  test("route publique et forme réécrite : même cible ; query normalisée sur les trois chemins", () => {
+    const publique = planProxyRequest(`https://axiom.test/cqapi/${CHEMIN}?${QUERY}`, "GET", bearer());
+    expect(publique.target.toString()).toBe(CIBLE);
+    expect(
+      planProxyRequest(url("cqapi", "v2/market/cq/swap/trade", "window=day&symbol=eth_all"), "GET", bearer())
+        .target.toString(),
+    ).toBe("https://api.cryptoquant.com/v2/market/cq/swap/trade?symbol=eth_all&window=day");
+    expect(
+      planProxyRequest(url("cqapi", "v1/btc/miner-data/companies", "limit=30&window=day&miner=mara"), "GET", bearer())
+        .target.toString(),
+    ).toBe("https://api.cryptoquant.com/v1/btc/miner-data/companies?miner=mara&window=day&limit=30");
+  });
+
+  test("404 pour tout chemin ou paramètre hors liste fermée", () => {
+    for (const [path, query] of [
+      ["v1/btc/exchange-flows/reserve", "exchange=all_exchange&window=day"],
+      [CHEMIN, "symbol=sol_all&window=day&limit=30"],
+      ["v1/btc/miner-data/companies", "miner=inconnu&window=day&limit=30"],
+      [CHEMIN, "symbol=btc_all&window=hour&limit=30"],
+      [CHEMIN, "symbol=btc_all&window=day&limit=31"],
+      [CHEMIN, "symbol=btc_all&window=day&from=20260901"],
+      [CHEMIN, "symbol=btc_all&window=day&inconnu=1"],
+      [CHEMIN, "symbol=btc_all&symbol=btc_all&window=day"],
+      [`${CHEMIN}/`, QUERY],
+      [`/${CHEMIN}`, QUERY],
+      [`//${CHEMIN}`, QUERY],
+      ["v2/market//cq/spot/trade", QUERY],
+    ] as const) {
+      const error = policyError(() => planProxyRequest(url("cqapi", path, query), "GET", bearer()));
+      expect(error.status).toBe(404);
+      expect(error.message).toBe("chemin CryptoQuant refusé");
+    }
+  });
+
+  test("route publique /cqapi//… : 404 comme le daemon et Vite, après les contrôles 405 et 401", () => {
+    const publique = `https://axiom.test/cqapi//${CHEMIN}?${QUERY}`;
+    const refus = policyError(() => planProxyRequest(publique, "GET", bearer()));
+    expect(refus.status).toBe(404);
+    expect(refus.message).toBe("chemin CryptoQuant refusé");
+    expect(policyError(() => planProxyRequest(`https://axiom.test/cqapi///${CHEMIN}?${QUERY}`, "GET", bearer())).status).toBe(404);
+    expect(policyError(() => planProxyRequest(publique, "GET", new Headers())).status).toBe(401);
+    expect(policyError(() => planProxyRequest(publique, "POST", bearer())).status).toBe(405);
+  });
+
+  test("POST et HEAD : 405 allow GET, avec ou sans clé", () => {
+    for (const method of ["POST", "HEAD"]) {
+      for (const headers of [new Headers(), bearer()]) {
+        const error = policyError(() => planProxyRequest(url("cqapi", CHEMIN, QUERY), method, headers));
+        expect(error.status).toBe(405);
+        expect(error.allow).toBe("GET");
+      }
+    }
+  });
+
+  test("Apikey, Basic, jeton vide ou en-tête de plus de 512 caractères : 401", () => {
+    for (const authorization of [
+      "Apikey CLE-TEST-SECRETE",
+      "Basic CLE-TEST-SECRETE",
+      "Bearer",
+      `Bearer ${"x".repeat(600)}`,
+    ]) {
+      const error = policyError(() =>
+        planProxyRequest(url("cqapi", CHEMIN, QUERY), "GET", new Headers({ authorization }), envServeur),
+      );
+      expect(error.status).toBe(401);
+    }
+  });
+
+  test("aucune variable serveur ne part vers api.cryptoquant.com, le Bearer ne part vers aucun autre hôte fixe", () => {
+    const plan = planProxyRequest(
+      url("cqapi", CHEMIN, QUERY),
+      "GET",
+      new Headers({ authorization: "Bearer personnelle" }),
+      envServeur,
+    );
+    expect(plan.upstreamHeaders.get("authorization")).toBe("Bearer personnelle");
+    expect(proxyUpstreamHeaders(new Headers(), "api.cryptoquant.com", "GET", envServeur).has("authorization")).toBe(false);
+    expect(
+      proxyUpstreamHeaders(new Headers({ authorization: "Apikey x" }), "api.cryptoquant.com", "GET", envServeur)
+        .has("authorization"),
+    ).toBe(false);
+    expect(
+      planProxyRequest(
+        url("fredapi", "fred/series/observations"),
+        "GET",
+        new Headers({ authorization: "Bearer personnelle" }),
+        envServeur,
+      ).upstreamHeaders.has("authorization"),
+    ).toBe(false);
   });
 });

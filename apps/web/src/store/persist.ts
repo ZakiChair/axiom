@@ -765,7 +765,7 @@ async function reconcilierDepuisDaemon(): Promise<void> {
 
 // ─────────────────────────── Sauvegarde complète (export / import JSON) ───────────────────────────
 
-/** Dix credentials fournisseurs ; FRED conserve aussi un ancien emplacement encore lu. */
+/** Onze credentials fournisseurs ; FRED conserve aussi un ancien emplacement encore lu. */
 const CLES_CREDENTIALS_LOCALES: ReadonlySet<string> = new Set([
   "axiom:coinalyze:key",
   "axiom:twelvedata:key",
@@ -778,18 +778,45 @@ const CLES_CREDENTIALS_LOCALES: ReadonlySet<string> = new Set([
   "axiom.fred.apiKey",
   "axiom.coingecko.demoApiKey",
   "axiom.defillama.proApiKey",
+  // Littéral volontaire (= CLE_STOCKAGE_CRYPTOQUANT) : importer store/cryptoquant tirerait
+  // ce store dans le chemin d'entrée, alors que seuls des modules paresseux le lisent
+  // (Réglages, sections DES et CHAIN, client CryptoQuant).
+  "axiom:cryptoquant:key",
 ]);
 
 function estCredentialLocal(cle: string): boolean {
   return CLES_CREDENTIALS_LOCALES.has(cle);
 }
 
-/** États liés à la clé BGeometrics du poste (refus d'abonnement mémorisé) : traités comme les credentials. */
-const ETATS_LOCAUX_NON_EXPORTES: ReadonlySet<string> = new Set([CLE_REFUS_ABONNEMENT, CLE_GENERATION_ABONNEMENT]);
+/**
+ * États d'un fournisseur propres à CE poste, traités comme les credentials : refus d'abonnement
+ * BGeometrics mémorisé (lié à la clé du poste), et compteur de crédits CryptoQuant
+ * (`axiom:cryptoquant:credits:v1`, spec 2026-09-16 §13) — il mesure la consommation de CE
+ * navigateur, qui sert de plafond de sécurité : l'exporter ou l'importer ferait mentir le
+ * plafond du poste receveur, dans un sens comme dans l'autre. Littéral volontaire : le client
+ * CryptoQuant reste dans son chunk chargé à la demande.
+ */
+const ETATS_LOCAUX_NON_EXPORTES: ReadonlySet<string> = new Set([
+  CLE_REFUS_ABONNEMENT,
+  CLE_GENERATION_ABONNEMENT,
+  "axiom:cryptoquant:credits:v1",
+]);
+
+/**
+ * Archives CryptoQuant par série (`axiom:onchain:cq:<serie>:v1`, spec 2026-09-16 §4.4) :
+ * données obtenues sous licence PERSONNELLE, jamais exportées ; un import ne doit ni les
+ * remplacer ni les purger (une sauvegarde ancienne raccourcirait l'archive). Littéral
+ * volontaire : le client CryptoQuant reste dans son chunk chargé à la demande.
+ */
+const PREFIXE_ARCHIVE_CRYPTOQUANT = "axiom:onchain:cq:";
 
 /** Clé jamais exportée ni importée, et préservée localement lors d'un import. */
 function resteSurLePoste(cle: string): boolean {
-  return estCredentialLocal(cle) || ETATS_LOCAUX_NON_EXPORTES.has(cle);
+  return (
+    estCredentialLocal(cle) ||
+    ETATS_LOCAUX_NON_EXPORTES.has(cle) ||
+    cle.startsWith(PREFIXE_ARCHIVE_CRYPTOQUANT)
+  );
 }
 
 /** Recense les clés `axiom:*` présentes dans localStorage. */
@@ -808,7 +835,9 @@ function axiomKeys(): string[] {
  * Tous les emplacements de credentials fournisseurs sont exclus, y compris ceux qui
  * utilisent historiquement le préfixe `axiom:`. Ils restent locaux et doivent être
  * ressaisis sur un autre poste. La mémoire BGeometrics du refus d'abonnement, liée à la clé
- * du poste, est exclue de la même façon.
+ * du poste, est exclue de la même façon, ainsi que les archives CryptoQuant
+ * (`axiom:onchain:cq:*`, licence personnelle) : leur durabilité vient du KV daemon. Le compteur
+ * de crédits CryptoQuant est exclu aussi : il ne mesure que CE navigateur (spec §13).
  */
 export function exporterSauvegarde(): void {
   const dump: Record<string, string> = {};

@@ -47,8 +47,10 @@ const windowStub = {
 (globalThis as unknown as { window: unknown }).window = windowStub;
 
 const { exporterSauvegarde } = await import("../store/persist");
-await import("./Toolbar"); // enregistre les commandes ⌘K à l'import
+const { SECTIONS_FONCTIONS, entreeNeuve } = await import("./Toolbar"); // enregistre aussi les commandes ⌘K
 const { construireRegistre } = await import("../commands/registry");
+const { cryptoquantUiStore, ENTREES_CQ } = await import("../store/cryptoquantUi");
+const { windowManagerStore } = await import("../store/windowManager");
 
 /** La commande ⌘K d'export (enregistrée par Toolbar via `enregistrerCommandes`). */
 function commandeExport() {
@@ -81,5 +83,94 @@ describe("aperçu ⌘K de l'export", () => {
   it("prévient que les clés devront être ressaisies", () => {
     const apercu = commandeExport().apercu ?? "";
     expect(apercu).toMatch(/ressaisir/i);
+  });
+});
+
+/**
+ * Menu « Fonctions » : les deux entrées de NAVIGATION CryptoQuant (décision du propriétaire
+ * du 2026-09-18). Elles ne sont PAS des fenêtres du registre — elles posent une cible dans le
+ * magasin d'intention, qui ouvre la fenêtre hôte et fait déplier la section visée.
+ *
+ * Pas de rendu React ici (environnement node, patron du reste du fichier) : les entrées sont
+ * lues dans `SECTIONS_FONCTIONS` et leur `ouvrir()` est exécuté contre les stores RÉELS.
+ */
+describe("menu Fonctions : entrées de navigation CryptoQuant", () => {
+  /** Entrées d'un groupe du menu, ou `[]` si le groupe n'existe pas. */
+  function entrees(groupe: string) {
+    return SECTIONS_FONCTIONS.find((s) => s.groupe === groupe)?.entrees ?? [];
+  }
+  function entree(groupe: string, mnemonique: string) {
+    const e = entrees(groupe).find((f) => f.mnemonique === mnemonique);
+    if (!e) throw new Error(`entrée ${mnemonique} absente du groupe « ${groupe} »`);
+    return e;
+  }
+
+  beforeEach(() => {
+    cryptoquantUiStore.setState({ cible: null });
+  });
+
+  it("CQTAKR vit dans « Marché & dérivés », en fin de groupe, avec son libellé exact", () => {
+    const groupe = entrees("Marché & dérivés");
+    const e = entree("Marché & dérivés", "CQTAKR");
+    expect(e.libelle).toBe("Flux takers toutes places (CryptoQuant)");
+    // Entrée spéciale : le tri par mnémonique du registre ne s'applique pas, elle suit les
+    // fenêtres du groupe (comme TICKER dans « Outils »).
+    expect(groupe[groupe.length - 1]?.mnemonique).toBe("CQTAKR");
+  });
+
+  it("CQMINE vit dans « On-chain & stablecoins », en fin de groupe, avec son libellé exact", () => {
+    const groupe = entrees("On-chain & stablecoins");
+    const e = entree("On-chain & stablecoins", "CQMINE");
+    expect(e.libelle).toBe("Production des mineurs cotés (CryptoQuant)");
+    expect(groupe[groupe.length - 1]?.mnemonique).toBe("CQMINE");
+  });
+
+  it("aucune des deux entrées n'est une fenêtre du registre ; leur badge a son propre id", () => {
+    const takers = entree("Marché & dérivés", "CQTAKR");
+    const mineurs = entree("On-chain & stablecoins", "CQMINE");
+    for (const e of [takers, mineurs]) {
+      expect(e.id).toBeUndefined();
+      expect(e.nouveau).toBe(true);
+    }
+    expect(takers.badgeId).toBe(ENTREES_CQ.takers.badge);
+    expect(mineurs.badgeId).toBe(ENTREES_CQ.mineurs.badge);
+  });
+
+  it("badge « nouveau » affiché avant le 1er clic, éteint après, et seulement pour sa section", () => {
+    const valeurs = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => valeurs.get(k) ?? null,
+      setItem: (k: string, v: string) => void valeurs.set(k, v),
+      removeItem: (k: string) => void valeurs.delete(k),
+      clear: () => valeurs.clear(),
+      key: () => null,
+      length: 0,
+    });
+    try {
+      const takers = entree("Marché & dérivés", "CQTAKR");
+      const mineurs = entree("On-chain & stablecoins", "CQMINE");
+      expect(entreeNeuve(takers)).toBe(true);
+      expect(entreeNeuve(mineurs)).toBe(true);
+      takers.ouvrir();
+      expect(entreeNeuve(takers)).toBe(false);
+      // L'autre entrée garde son badge : les clés « vue » sont distinctes.
+      expect(entreeNeuve(mineurs)).toBe(true);
+      // Une entrée sans clé de badge (TICKER) n'en affiche jamais.
+      expect(entreeNeuve({ mnemonique: "TICKER", libelle: "x", nouveau: true, ouvrir: () => {} })).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("ouvrir() : CQTAKR demande la section takers et ouvre DES", () => {
+    entree("Marché & dérivés", "CQTAKR").ouvrir();
+    expect(cryptoquantUiStore.getState().cible).toBe("takers");
+    expect(windowManagerStore.getState().windows["derivatives"]?.open).toBe(true);
+  });
+
+  it("ouvrir() : CQMINE demande la section mineurs et ouvre CHAIN", () => {
+    entree("On-chain & stablecoins", "CQMINE").ouvrir();
+    expect(cryptoquantUiStore.getState().cible).toBe("mineurs");
+    expect(windowManagerStore.getState().windows["onchain"]?.open).toBe(true);
   });
 });

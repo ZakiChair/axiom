@@ -18,7 +18,14 @@ import { describe, it, expect, vi } from "vitest";
 
 // Journal des `toggleWindow(id)` déclenchés. `vi.hoisted` : `vi.mock` est remonté au-dessus
 // des imports, la fabrique ne peut donc pas fermer sur une const déclarée normalement.
-const { fenetresBasculees } = vi.hoisted(() => ({ fenetresBasculees: [] as string[] }));
+// `fenetresOuvertes` est un journal SÉPARÉ : les commandes de NAVIGATION intra-fenêtre
+// (CQTAKR / CQMINE, décision du 2026-09-18) ouvrent leur fenêtre hôte via `openWindow` sans
+// jamais la basculer — elles ne comptent donc pas comme couverture ⌘K de DES ni de CHAIN,
+// qui gardent leurs propres commandes (cf. FENETRES_COMMANDEES_AILLEURS).
+const { fenetresBasculees, fenetresOuvertes } = vi.hoisted(() => ({
+  fenetresBasculees: [] as string[],
+  fenetresOuvertes: [] as string[],
+}));
 
 // Seul `windowManagerStore` est remplacé : le reste du module (dont WINDOW_REGISTRY) est
 // le vrai. Les actions globales (WMIN/WALL/WTILE/WCASC/WCLOSE) sont neutralisées — en
@@ -31,6 +38,9 @@ vi.mock("../store/windowManager", async (importOriginal) => {
       getState: () => ({
         toggleWindow: (id: string) => {
           fenetresBasculees.push(id);
+        },
+        openWindow: (id: string) => {
+          fenetresOuvertes.push(id);
         },
         minimizeAll: () => {},
         restoreAll: () => {},
@@ -100,5 +110,16 @@ describe("couverture ⌘K du registre de fenêtres", () => {
   it("windowPanels.ts ne bascule aucune fenêtre absente du registre", () => {
     // Sens inverse : un renommage d'id dans le registre laisserait ici un `basculer()` mort.
     expect([...idsCouverts].filter((id) => !idsRegistre.has(id))).toEqual([]);
+  });
+
+  it("les navigations intra-fenêtre OUVRENT leur hôte sans la basculer", () => {
+    // CQTAKR déplie une section de DES, CQMINE une sous-section de CHAIN : une bascule
+    // FERMERAIT la fenêtre déjà ouverte (l'inverse de l'effet attendu) et compterait à tort
+    // comme couverture ⌘K de DES / CHAIN.
+    expect([...new Set(fenetresOuvertes)].sort()).toEqual(["derivatives", "onchain"]);
+    expect(fenetresBasculees).not.toContain("derivatives");
+    expect(fenetresBasculees).not.toContain("onchain");
+    // Toute fenêtre seulement ouverte doit exister dans le registre.
+    expect([...new Set(fenetresOuvertes)].filter((id) => !idsRegistre.has(id))).toEqual([]);
   });
 });

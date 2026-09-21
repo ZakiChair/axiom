@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { indexSerie, parseHexRgb, POLICE_CANVAS, POLICE_CANVAS_MONO } from "./canvasTokens";
+import { couleurDeclaree, indexSerie, parseHexRgb, POLICE_CANVAS, POLICE_CANVAS_MONO } from "./canvasTokens";
 
 // serieCanvas/lireTokenCanvas exigent le DOM (vitest node) : on teste leurs
 // briques pures — le cycle modulo des séries et le parseur hex.
@@ -23,6 +23,24 @@ describe("parseHexRgb", () => {
   it("rejette les non-hex", () => {
     expect(parseHexRgb("rgb(1,2,3)")).toBeNull();
     expect(parseHexRgb("")).toBeNull();
+  });
+});
+
+describe("couleurDeclaree — couleur sémantique d'une sortie d'indicateur", () => {
+  it("absente → repli (cycle de série)", () => {
+    expect(couleurDeclaree(undefined, () => "TOKEN", () => "REPLI")).toBe("REPLI");
+  });
+  it("token `--xxx` → lecteur appelé avec (token, repli)", () => {
+    const appels: Array<[string, string]> = [];
+    const res = couleurDeclaree("--down", (nom, repli) => (appels.push([nom, repli]), "#ef4444"), () => "REPLI");
+    expect(res).toBe("#ef4444");
+    expect(appels).toEqual([["--down", "REPLI"]]);
+  });
+  it("littéral → renvoyé tel quel, lecteur non appelé", () => {
+    let appele = false;
+    const res = couleurDeclaree("#f59e0b", () => (appele = true, "X"), () => "REPLI");
+    expect(res).toBe("#f59e0b");
+    expect(appele).toBe(false);
   });
 });
 

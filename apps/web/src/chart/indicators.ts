@@ -31,7 +31,7 @@ import { registerIndicator, IndicatorSeries } from "klinecharts";
 import type { Chart, IndicatorFigure, IndicatorTooltipData, TooltipLegend } from "klinecharts";
 import type { Candle, ExchangeId, IndicatorDef, IndicatorResult, Timeframe } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
-import { serieCanvas } from "../lib/canvasTokens";
+import { couleurDeclaree, lireTokenCanvas, serieCanvas } from "../lib/canvasTokens";
 import { hauteursCorrigees, paneMax } from "./paneBudget";
 import { chartCapaciteStore } from "../store/chartCapacite";
 import { dessinerAnnotationsPane } from "./annotationsPane";
@@ -133,7 +133,11 @@ function ensureRegistered(def: IndicatorDef, name: string, instanceId: string): 
     //    car `registered` interdit de réenregistrer ce `name`.
     // La couleur suit donc l'ENTITÉ ; `i` (rang de la sortie) ne fait que décaler les
     // sorties d'un même indicateur multi-séries (MACD, BOLL) autour de SA teinte.
-    const styles = () => ({ color: serieCanvas(couleurInstance(instanceId) + i) });
+    // Une sortie peut déclarer une couleur sémantique du thème (`--up`/`--down`)
+    // via `IndicatorOutput.color` : le cycle de série reste le repli.
+    const styles = () => ({
+      color: couleurDeclaree(o.color, lireTokenCanvas, () => serieCanvas(couleurInstance(instanceId) + i)),
+    });
     // Mapping déclaratif PlotStyle (@axiom/types) -> figure KLineChart :
     //  - histogram -> barres (référence 0) ;
     //  - points    -> marqueurs circulaires (SAR, fractals, pivotHighLow…) ;

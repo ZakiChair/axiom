@@ -64,7 +64,7 @@ export const ALIAS_INDICATEURS: Readonly<Record<string, readonly string[]>> = {
   // Volume et flux d'ordres.
   volume: ["volume", "quantite echangee"],
   rvolSeasonal: ["volume relatif saisonnier", "volume horaire", "rvol horaire", "saisonnalite volume"],
-  trappedVolume: ["volume piege", "longs pieges", "shorts pieges", "positions bloquees", "volume nord sud", "trapped"],
+  trappedVolume: ["volume piege", "longs pieges", "shorts pieges", "positions bloquees", "volume nord sud", "trapped", "agressif", "taker", "sous l eau"],
   vpin: ["toxicite du flux", "volume synchronise", "delit initie", "flux informe", "vpin"],
   kyleLambda: ["lambda de kyle", "impact de prix", "cout impact", "liquidite", "profondeur"],
   amihudIlliq: ["illiquidite", "amihud", "impact par volume", "liquidite"],

@@ -63,6 +63,23 @@ export function parseHexRgb(c: string): [number, number, number] | null {
   return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as [number, number, number];
 }
 
+/**
+ * Résout la couleur déclarée d'une sortie (`IndicatorOutput.color`) :
+ *  - absente        → `repli()` (cycle de série, comportement historique) ;
+ *  - token `--xxx`  → `lireToken(couleur, repli())` (couleur sémantique du thème) ;
+ *  - littéral (hex…) → la couleur telle quelle, `lireToken` non appelé.
+ * PURE : le lecteur de token et le repli sont injectés — testable sans DOM.
+ */
+export function couleurDeclaree(
+  couleur: string | undefined,
+  lireToken: (nom: string, repli: string) => string,
+  repli: () => string,
+): string {
+  if (couleur === undefined) return repli();
+  if (couleur.startsWith("--")) return lireToken(couleur, repli());
+  return couleur;
+}
+
 /** Token couleur résolu en `rgba(r,g,b,alpha)` — remplissages canvas semi-transparents. */
 export function rgbaTokenCanvas(nom: string, alpha: number, repli: string): string {
   const brut = lireTokenCanvas(nom, repli);

@@ -51,6 +51,7 @@ describe("raisonUnusableIndicateur", () => {
     "stratSpotBreakout",
     "vpin",
     "kyleLambda",
+    "trappedVolume",
   ])(
     "%s exige les volumes split de Binance",
     (id) => {
@@ -75,7 +76,6 @@ describe("raisonUnusableIndicateur", () => {
       "mfi",
       "marketFacilitationIndex",
       "netVolume",
-      "trappedVolume",
       "mfiDivergence",
       "obvDivergence",
     ]);

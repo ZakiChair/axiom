@@ -18,6 +18,7 @@ const SPLIT_VOLUME = new Set([
   "stratSpotBreakout",
   "vpin",
   "kyleLambda",
+  "trappedVolume",
 ]);
 
 /** Indicateurs dont le calcul repose sur le volume réel des bougies (0/absent en synthétique).
@@ -38,7 +39,6 @@ const VOLUME_FOREX = new Set([
   "mfi",
   "marketFacilitationIndex",
   "netVolume",
-  "trappedVolume",
   "mfiDivergence",
   "obvDivergence",
 ]);

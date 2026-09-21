@@ -70,6 +70,17 @@ export interface SanteCollecteurLiq {
   dernierMessageTs: number;
   /** Dernière erreur du collecteur (message court), null si la dernière opération a réussi. */
   derniereErreur: string | null;
+  /**
+   * Source PARTIELLE (Hyperliquid : makers + vault seulement — hlLiqFeed.ts). Vrai
+   * seulement si `=== true` ; absente sur un daemon ancien. Une venue partielle
+   * vivante ne doit PAS empêcher `collecteurLiqMuet` de détecter la mort des venues
+   * complètes (Bybit/OKX), dont l'historique fait foi pour le repli Coinalyze.
+   */
+  partiel?: boolean;
+  /** Part du flux couverte (∈ [0,1]) ou null en mesure — venues partielles seulement. */
+  couverture?: number | null;
+  /** Adresses suivies (venues partielles à souscriptions par utilisateur). */
+  adressesSuivies?: number;
 }
 
 /** Santé du collecteur de liquidations : démarrage de la boucle + une entrée par venue. */
@@ -102,10 +113,21 @@ export function parseSanteCollecteurs(payload: unknown): SanteLiquidationsDaemon
     if (nom === "demarreTs" || !valeur || typeof valeur !== "object") continue;
     const v = valeur as Record<string, unknown>;
     if (typeof v.dernierMessageTs !== "number") continue;
-    venues[nom] = {
+    const entree: SanteCollecteurLiq = {
       dernierMessageTs: v.dernierMessageTs,
       derniereErreur: typeof v.derniereErreur === "string" ? v.derniereErreur : null,
     };
+    // Champs OPTIONNELS des venues partielles (daemon récent) — lus tolérant.
+    if (v.partiel === true) entree.partiel = true;
+    if (typeof v.couverture === "number" && Number.isFinite(v.couverture) && v.couverture >= 0 && v.couverture <= 1) {
+      entree.couverture = v.couverture;
+    } else if (v.couverture === null) {
+      entree.couverture = null;
+    }
+    if (typeof v.adressesSuivies === "number" && Number.isFinite(v.adressesSuivies)) {
+      entree.adressesSuivies = v.adressesSuivies;
+    }
+    venues[nom] = entree;
   }
   return { demarreTs: brut.demarreTs, venues };
 }
@@ -135,17 +157,20 @@ export function venuesMuettes(
 }
 
 /**
- * Le collecteur est-il ENTIÈREMENT muet (toutes les venues) ? Dans ce cas son historique
- * vide n'est pas une vérité sur le marché, et l'amorce du front peut se replier sur le
- * fournisseur tiers. PURE (testée).
+ * Le collecteur est-il ENTIÈREMENT muet ? Ne compte QUE les venues NON partielles :
+ * une source partielle vivante (Hyperliquid, makers + vault seulement) ne doit pas
+ * masquer la mort de Bybit+OKX, dont l'historique fait foi pour le repli Coinalyze.
+ * Sans venue complète déclarée → non muet (rien à juger). PURE (testée).
  */
 export function collecteurLiqMuet(
   sante: SanteLiquidationsDaemon | null,
   maintenant: number,
 ): boolean {
   if (sante === null) return false;
-  const nb = Object.keys(sante.venues).length;
-  return nb > 0 && venuesMuettes(sante, maintenant).length === nb;
+  const completes = Object.keys(sante.venues).filter((v) => sante.venues[v]?.partiel !== true);
+  if (completes.length === 0) return false;
+  const muettes = new Set(venuesMuettes(sante, maintenant).map((m) => m.venue));
+  return completes.every((v) => muettes.has(v));
 }
 
 /**
@@ -692,6 +717,8 @@ export interface OptionsLiquidationsGet {
   depuis?: number;
   jusqua?: number;
   limite?: number;
+  /** Filtre exact de venue (ex. "hyperliquid" pour le poll HL de liquidationMarkers). */
+  venue?: string;
 }
 
 /**
@@ -710,6 +737,7 @@ export async function liquidationsGet(
     if (opts.depuis !== undefined) params.set("depuis", String(opts.depuis));
     if (opts.jusqua !== undefined) params.set("jusqua", String(opts.jusqua));
     if (opts.limite !== undefined) params.set("limite", String(opts.limite));
+    if (opts.venue !== undefined) params.set("venue", opts.venue);
     const query = params.toString();
     const res = await fetch(urlLiquidations(symbole) + (query ? `?${query}` : ""));
     if (!res.ok) return null;

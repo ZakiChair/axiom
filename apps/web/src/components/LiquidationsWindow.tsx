@@ -40,7 +40,7 @@ import { liqEstStore, LEVIERS } from "../chart/liquidationEstimates";
 import { flasherNiveau } from "../chart/liquidationHeat";
 import { orderflowStore } from "../store/orderflow";
 import { getActiveChart } from "../chart/drawing";
-import { liquidationsGet, type LiqDaemon } from "../data/daemon";
+import { liquidationsGet, santeLiquidationsDaemon, type LiqDaemon } from "../data/daemon";
 import { histLiqParHeure } from "../data/referentiels";
 import { referentiel, type PointSerie } from "../lib/referentiel";
 import { IS_VERCEL } from "../lib/deployment";
@@ -75,6 +75,7 @@ import {
   daemonVersEvenements,
   filtrerFenetre,
   grouperCascades,
+  libelleSourceHl,
   magnitudeRelative,
   statsLiquidations,
   topLiquidations,
@@ -490,7 +491,7 @@ function ContenuLive() {
     return () => clearInterval(timer);
   }, []);
 
-  const { stats, buckets, feed, feedMaxUsd, derniereMajTs } = useMemo(() => {
+  const { stats, buckets, feed, feedMaxUsd, derniereMajTs, libelleHl } = useMemo(() => {
     const nowMs = Date.now();
     const depuisMs = nowMs - FENETRE_MS[fenetre];
     // Événements RÉELS uniquement : le seed Coinalyze (approx) est réservé à la heatmap.
@@ -510,7 +511,10 @@ function ContenuLive() {
     // Horodatage du dernier événement réel du buffer (`reels` est chronologique croissant) —
     // aucun nouvel abonnement : dérivé du même tableau que les stats.
     const derniereMajTs = reels[reels.length - 1]?.time ?? null;
-    return { stats, buckets, feed, feedMaxUsd, derniereMajTs };
+    // Honnêteté de la source Hyperliquid (partielle, différée) — santé SYNCHRONE de la
+    // dernière sonde /health, aucun appel réseau supplémentaire.
+    const libelleHl = libelleSourceHl(santeLiquidationsDaemon(), nowMs);
+    return { stats, buckets, feed, feedMaxUsd, derniereMajTs, libelleHl };
     // `rev` et `horloge` pilotent le recalcul (le store vanilla mute hors React).
   }, [rev, horloge, fenetre, symbol]);
 
@@ -622,6 +626,11 @@ function ContenuLive() {
           </div>
         )}
 
+        {/* Honnêteté de la source Hyperliquid (partielle, minage daemon, ≤ 30 s). */}
+        {libelleHl !== null && (
+          <div className="mt-2 text-[10px] text-text-dim">{libelleHl}</div>
+        )}
+
         <Histogramme buckets={buckets} />
       </div>
 
@@ -679,6 +688,8 @@ function ContenuLive() {
             sur la fenêtre glissante choisie ; feed = dernières liquidations du buffer (cascades
             de même côté espacées de moins de 2 s groupées en ×N — cliquer pour le détail).
             Cliquer une liquidation la montre sur le graphe (recentrage + flash de la bande).
+            Hyperliquid via le daemon local : fills des principaux makers et du vault HLP
+            Liquidator (source PARTIELLE — couverture mesurée affichée ; différé ≤ 30 s).
           </NoteSource>
         </div>
       </div>

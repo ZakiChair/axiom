@@ -45,6 +45,7 @@ import {
   bucketIndex,
   candleContenant,
   couleurViridis,
+  dernierTempsVenue,
   deserialiserEvenements,
   fusionnerEvenements,
   liqEventsStore,
@@ -199,6 +200,19 @@ describe("fusionnerEvenements (fusion + dédoublonnage)", () => {
     const a: LiqEvent[] = [{ time: 1000, side: "long", price: 64000, qty: 1, usd: 1, venue: "bybit" }];
     const b: LiqEvent[] = [{ time: 1000, side: "long", price: 64000, qty: 1, usd: 1, venue: "binance" }];
     expect(fusionnerEvenements(a, b)).toHaveLength(2);
+  });
+});
+
+describe("dernierTempsVenue (curseur du poll HL)", () => {
+  it("renvoie le plus grand time de la venue, null si absente", () => {
+    const events: LiqEvent[] = [
+      { time: 3000, side: "long", price: 1, qty: 1, usd: 1, venue: "hyperliquid" },
+      { time: 5000, side: "long", price: 1, qty: 1, usd: 1, venue: "bybit" },
+      { time: 4000, side: "short", price: 1, qty: 1, usd: 1, venue: "hyperliquid" },
+    ];
+    expect(dernierTempsVenue(events, "hyperliquid")).toBe(4000);
+    expect(dernierTempsVenue(events, "okx")).toBeNull();
+    expect(dernierTempsVenue([], "hyperliquid")).toBeNull();
   });
 });
 

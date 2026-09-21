@@ -7,7 +7,7 @@
  * FROID l'historique des liquidations (table `liquidations`, cf. liquidations.ts).
  * Aucun rendu, aucun partage avec le front — celui-ci reste 100 % direct.
  *
- * DEUX connexions WS indépendantes (même machinerie `connecterBoucleWs`) :
+ * TROIS connexions WS indépendantes (même machinerie `connecterBoucleWs`) :
  *  - BYBIT `wss://stream.bybit.com/v5/public/linear` : souscription `allLiquidation.<SYM>`
  *    PAR symbole surveillé ; un changement d'ensemble re-souscrit (reconnexion).
  *  - OKX `wss://ws.okx.com:8443/ws/v5/public` : souscription GLOBALE
@@ -16,6 +16,9 @@
  *    symboles (seul le filtre change) → la WS reste ouverte tant qu'au moins un symbole est
  *    mappable. `sz` OKX est en CONTRATS → qty = sz × ctVal (fetch REST au démarrage +
  *    refresh 24 h, mémoïsé par instId).
+ *  - HYPERLIQUID `wss://api.hyperliquid.xyz/ws` (cf. hlLiqFeed.ts) : pas de flux public
+ *    de liquidations → on lit les `userFills` des plus gros makers + du vault HLP
+ *    Liquidator (« minage officiel PARTIEL » — sa santé porte `partiel: true`).
  *
  * La liste des symboles = KV (namespace « liq », clé « symboles ») ∪ symboles des alertes
  * `liq-cascade` ACTIVES (KV « alerts »/« defs », cf. fusionnerSymbolesLiq), pollée toutes
@@ -37,6 +40,12 @@
 import type { AlertDef } from "@axiom/alerts";
 import { lireDefsKv, symbolesLiqCascadeActifs } from "./alerts";
 import { getDb } from "./db";
+import {
+  creerFeedLiquidationsHl,
+  reinitialiserSanteHl,
+  santeCollecteurHl,
+  type SanteCollecteurHl,
+} from "./hlLiqFeed";
 import { insererLiquidations, purgerLiquidations, type LiqFil } from "./liquidations";
 import { connecterBoucleWs } from "./wsLoop";
 
@@ -215,9 +224,11 @@ export interface SanteLiqFeed {
   demarreTs: number;
   bybit: SanteCollecteurLiq;
   okx: SanteCollecteurLiq;
+  /** Collecteur HL (source PARTIELLE — `partiel: true` est contractuel). */
+  hyperliquid: SanteCollecteurHl;
 }
 
-const sante: SanteLiqFeed = {
+const sante: Omit<SanteLiqFeed, "hyperliquid"> = {
   demarreTs: 0,
   bybit: { dernierMessageTs: 0, derniereErreur: null },
   okx: { dernierMessageTs: 0, derniereErreur: null },
@@ -225,7 +236,8 @@ const sante: SanteLiqFeed = {
 
 /** Santé courante du flux — exposée par /health et par GET /liquidations/:symbole. */
 export function santeLiqFeed(): SanteLiqFeed {
-  return sante;
+  // La santé HL vit dans son module (anti-cycle) : composée ici à la lecture.
+  return { ...sante, hyperliquid: santeCollecteurHl() };
 }
 
 /** Réinitialise l'état de santé (tests ; cf. reinitialiserWhales de whales.ts). */
@@ -233,6 +245,7 @@ export function reinitialiserSanteLiqFeed(): void {
   sante.demarreTs = 0;
   sante.bybit = { dernierMessageTs: 0, derniereErreur: null };
   sante.okx = { dernierMessageTs: 0, derniereErreur: null };
+  reinitialiserSanteHl();
 }
 
 // ─────────────────────────── Lecture KV (pattern lireDefsKv de alerts.ts) ───────────────────────────
@@ -520,6 +533,7 @@ export function demarrerBoucleLiquidations(): () => void {
   sante.demarreTs = Date.now(); // borne basse du « muet depuis X » côté interface
   const feed = creerFeedLiquidations(); // Bybit
   const feedOkx = creerFeedLiquidationsOkx(); // OKX (2e connexion indépendante)
+  const feedHl = creerFeedLiquidationsHl(); // Hyperliquid (3e, source partielle makers+vault)
 
   const rafraichir = (): void => {
     try {
@@ -528,6 +542,7 @@ export function demarrerBoucleLiquidations(): () => void {
       feed.setSymboles(symboles);
       feedOkx.setSymboles(symboles);
       feedOkx.retenterCtVal?.(); // ≤60 s entre deux tentatives sur un ctVal manquant
+      feedHl.setSymboles(symboles);
     } catch (err) {
       console.error("[axiomd] rafraîchissement des symboles liquidations échoué :", err);
     }
@@ -550,5 +565,6 @@ export function demarrerBoucleLiquidations(): () => void {
     clearInterval(minuteurPurge);
     feed.arreter();
     feedOkx.arreter();
+    feedHl.arreter();
   };
 }

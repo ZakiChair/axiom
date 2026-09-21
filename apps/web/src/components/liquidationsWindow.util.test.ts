@@ -5,13 +5,15 @@
  */
 import { describe, expect, it } from "vitest";
 import type { LiqEvent } from "../chart/liquidationMarkers";
-import type { LiqDaemon } from "../data/daemon";
+import type { LiqDaemon, SanteLiquidationsDaemon } from "../data/daemon";
+import { SEUIL_COLLECTEUR_MUET_MS } from "../data/daemon";
 import {
   bucketsTemporels,
   couvreFenetre,
   daemonVersEvenements,
   filtrerFenetre,
   grouperCascades,
+  libelleSourceHl,
   magnitudeRelative,
   statsLiquidations,
   topLiquidations,
@@ -228,5 +230,59 @@ describe("magnitudeRelative", () => {
   });
   it("maxUsd ≤ 0 → 0 (pas de NaN)", () => {
     expect(magnitudeRelative(100, 0)).toBe(0);
+  });
+});
+
+describe("libelleSourceHl (honnêteté de la source Hyperliquid)", () => {
+  const NOW = 10_000_000;
+  function santeHl(hl: Record<string, unknown>): SanteLiquidationsDaemon {
+    return {
+      demarreTs: NOW - 10 * 60_000,
+      venues: {
+        hyperliquid: {
+          dernierMessageTs: NOW - 5_000,
+          derniereErreur: null,
+          partiel: true,
+          couverture: 0.55,
+          adressesSuivies: 10,
+          ...hl,
+        },
+      },
+    };
+  }
+
+  it("null sans santé daemon ou sans venue hyperliquid", () => {
+    expect(libelleSourceHl(null, NOW)).toBeNull();
+    expect(
+      libelleSourceHl(
+        { demarreTs: NOW, venues: { bybit: { dernierMessageTs: NOW, derniereErreur: null } } },
+        NOW,
+      ),
+    ).toBeNull();
+  });
+
+  it("venue vivante : adresses suivies + couverture mesurée + différé", () => {
+    expect(libelleSourceHl(santeHl({}), NOW)).toBe(
+      "Hyperliquid : 10 adresses suivies · couverture ≈ 55 % du flux makers · différé ≤ 30 s",
+    );
+  });
+
+  it("couverture null → « couverture en mesure » ; erreur ajoutée en fin", () => {
+    expect(
+      libelleSourceHl(
+        santeHl({ couverture: null, derniereErreur: "limite : 10 users" }),
+        NOW,
+      ),
+    ).toBe(
+      "Hyperliquid : 10 adresses suivies · couverture en mesure · différé ≤ 30 s · limite : 10 users",
+    );
+  });
+
+  it("venue muette (> seuil, bornée au démarrage) → « flux muet depuis N min »", () => {
+    const muet = santeHl({ dernierMessageTs: 0 });
+    const now = NOW - 10 * 60_000 + SEUIL_COLLECTEUR_MUET_MS + 60_000;
+    expect(libelleSourceHl(muet, now)).toBe(
+      `Hyperliquid : flux muet depuis ${Math.round((SEUIL_COLLECTEUR_MUET_MS + 60_000) / 60_000)} min`,
+    );
   });
 });

@@ -16,7 +16,8 @@
  *
  * Routes :
  *   POST /liquidations/:symbole                         → lot insert idempotent (corps = JSON [{t,venue,side,price,qty,usd}])
- *   GET  /liquidations/:symbole?depuis&jusqua&limite     → liquidations triées par t croissant
+ *   GET  /liquidations/:symbole?depuis&jusqua&limite&venue → liquidations triées par t croissant
+ *        (`venue` optionnel : filtre exact, ex. "hyperliquid" pour le poll HL du front)
  */
 import type { Database } from "bun:sqlite";
 import { entetesCors } from "./cors";
@@ -127,9 +128,14 @@ export interface RequeteLiqs {
   depuis: number | null;
   jusqua: number | null;
   limite: number;
+  /** Filtre exact de venue (ex. "hyperliquid") ; null = toutes venues. */
+  venue: string | null;
 }
 
-/** Extrait `depuis`/`jusqua`/`limite` d'une query, avec bornage. Fonction PURE. */
+/** Forme acceptée d'un filtre `venue` (anti-injection défensive : le paramètre est bindé, mais on borne quand même). */
+const VENUE_RE = /^[a-z0-9_-]{1,32}$/i;
+
+/** Extrait `depuis`/`jusqua`/`limite`/`venue` d'une query, avec bornage. Fonction PURE. */
 export function parseRequeteLiqs(params: URLSearchParams): RequeteLiqs {
   const nombre = (v: string | null): number | null => {
     if (v === null) return null;
@@ -139,7 +145,9 @@ export function parseRequeteLiqs(params: URLSearchParams): RequeteLiqs {
   const limiteBrute = nombre(params.get("limite"));
   const limite =
     limiteBrute === null ? LIMITE_DEFAUT : Math.max(1, Math.min(LIMITE_MAX, Math.floor(limiteBrute)));
-  return { depuis: nombre(params.get("depuis")), jusqua: nombre(params.get("jusqua")), limite };
+  const venueBrute = params.get("venue");
+  const venue = venueBrute !== null && VENUE_RE.test(venueBrute) ? venueBrute : null;
+  return { depuis: nombre(params.get("depuis")), jusqua: nombre(params.get("jusqua")), limite, venue };
 }
 
 /**
@@ -204,9 +212,13 @@ export async function traiterLiquidations(req: Request, url: URL): Promise<Respo
   }
 
   if (req.method === "GET") {
-    const { depuis, jusqua, limite } = parseRequeteLiqs(url.searchParams);
+    const { depuis, jusqua, limite, venue } = parseRequeteLiqs(url.searchParams);
     let sql = "SELECT t, venue, side, price, qty, usd FROM liquidations WHERE symbole = ?";
     const params: Array<string | number> = [symbole];
+    if (venue !== null) {
+      sql += " AND venue = ?";
+      params.push(venue);
+    }
     if (depuis !== null) {
       sql += " AND t >= ?";
       params.push(depuis);

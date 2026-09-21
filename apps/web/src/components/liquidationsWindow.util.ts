@@ -8,7 +8,8 @@
  * Aucun accès store/DOM : tout est injecté (events, bornes de temps), tout est testé.
  */
 import type { LiqEvent } from "../chart/liquidationMarkers";
-import type { LiqDaemon } from "../data/daemon";
+import type { LiqDaemon, SanteLiquidationsDaemon } from "../data/daemon";
+import { SEUIL_COLLECTEUR_MUET_MS } from "../data/daemon";
 
 /** Ne garde que les événements de la fenêtre glissante (time ≥ depuisMs). PURE. */
 export function filtrerFenetre(events: LiqEvent[], depuisMs: number): LiqEvent[] {
@@ -221,4 +222,33 @@ export function magnitudeRelative(usd: number, maxUsd: number): number {
   if (!(maxUsd > 0)) return 0;
   const t = Math.log1p(Math.max(0, usd)) / Math.log1p(maxUsd);
   return t < 0 ? 0 : t > 1 ? 1 : t;
+}
+
+/**
+ * Ligne d'honnêteté de la source Hyperliquid (minage daemon, PARTIELLE) pour la
+ * fenêtre LIQ : `null` si la santé daemon est inconnue ou sans venue `hyperliquid` ;
+ * « flux muet depuis N min » si la venue n'a rien dit depuis SEUIL_COLLECTEUR_MUET_MS
+ * (borné au démarrage du daemon) ; sinon adresses suivies + couverture mesurée
+ * (null → « couverture en mesure ») + différé du poll. `derniereErreur` est ajoutée
+ * en fin quand elle existe. PURE.
+ */
+export function libelleSourceHl(
+  sante: SanteLiquidationsDaemon | null,
+  now: number,
+): string | null {
+  const hl = sante?.venues["hyperliquid"];
+  if (sante === null || hl === undefined) return null;
+  const muetDepuis = now - Math.max(hl.dernierMessageTs, sante.demarreTs);
+  let libelle: string;
+  if (muetDepuis > SEUIL_COLLECTEUR_MUET_MS) {
+    libelle = `Hyperliquid : flux muet depuis ${Math.round(muetDepuis / 60_000)} min`;
+  } else {
+    const couv =
+      hl.couverture == null
+        ? "couverture en mesure"
+        : `couverture ≈ ${Math.round(hl.couverture * 100)} % du flux makers`;
+    libelle = `Hyperliquid : ${hl.adressesSuivies ?? "?"} adresses suivies · ${couv} · différé ≤ 30 s`;
+  }
+  if (hl.derniereErreur !== null) libelle += ` · ${hl.derniereErreur}`;
+  return libelle;
 }

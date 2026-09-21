@@ -29,8 +29,12 @@
  *     (mémoïsé par instId ; les liq reçues avant le ctVal sont bufferisées puis rejouées).
  *   Ces conventions long/short sont figées par des tests (les inverser fausserait en silence).
  *
- * HYPERLIQUID — NON implémenté (décision explicite, pas un oubli) : pas de flux public de
- * liquidations documenté à ce jour côté Hyperliquid (seul un flux `trades`/L2 existe).
+ * HYPERLIQUID — implémenté côté DAEMON (`apps/daemon/src/hlLiqFeed.ts`) : pas de topic
+ * public de liquidations, elles sont minées à froid depuis les fills (`userFills`) des
+ * principaux makers et du vault HLP Liquidator — source PARTIELLE (couverture mesurée
+ * dans la santé du collecteur) et différée ≤ ~30 s. Le front les consomme par
+ * `GET /liquidations/:symbole?venue=hyperliquid` (poll dans `chart/liquidationMarkers.ts`).
+ * Ce module-ci reste le flux DIRECT Bybit + OKX.
  *
  * Flux LIVE only (aucun historique) : on accumule depuis la souscription, comme footprint/CVD.
  *

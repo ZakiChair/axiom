@@ -429,6 +429,96 @@ describe("santé des collecteurs de fond (liquidations)", () => {
     expect(collecteurLiqMuet(null, Date.now())).toBe(false);
   });
 
+  it("parseSanteCollecteurs lit les champs OPTIONNELS des venues partielles (HL)", () => {
+    const sante = parseSanteCollecteurs({
+      collecteurs: {
+        liquidations: {
+          demarreTs: 1_000_000,
+          hyperliquid: {
+            dernierMessageTs: 1_500_000,
+            derniereErreur: null,
+            partiel: true,
+            couverture: 0.55,
+            adressesSuivies: 10,
+          },
+        },
+      },
+    });
+    expect(sante?.venues["hyperliquid"]).toEqual({
+      dernierMessageTs: 1_500_000,
+      derniereErreur: null,
+      partiel: true,
+      couverture: 0.55,
+      adressesSuivies: 10,
+    });
+    // Tolérant : couverture null (en mesure) conservée, hors [0,1] ou non booléen ignorés.
+    const sante2 = parseSanteCollecteurs({
+      collecteurs: {
+        liquidations: {
+          demarreTs: 1_000_000,
+          hyperliquid: {
+            dernierMessageTs: 1_500_000,
+            derniereErreur: null,
+            partiel: "oui",
+            couverture: 2,
+          },
+        },
+      },
+    });
+    expect(sante2?.venues["hyperliquid"]).toEqual({
+      dernierMessageTs: 1_500_000,
+      derniereErreur: null,
+    });
+    const sante3 = parseSanteCollecteurs({
+      collecteurs: {
+        liquidations: {
+          demarreTs: 1_000_000,
+          hyperliquid: { dernierMessageTs: 1_500_000, derniereErreur: null, couverture: null },
+        },
+      },
+    });
+    expect(sante3?.venues["hyperliquid"]?.couverture).toBeNull();
+  });
+
+  it("collecteurLiqMuet : une venue PARTIELLE vivante ne masque pas la mort des venues complètes", () => {
+    // bybit + okx muettes, hyperliquid vivante mais partielle → collecteur « muet » :
+    // l'historique HL partiel ne fait pas foi pour le repli Coinalyze.
+    const sante = parseSanteCollecteurs({
+      collecteurs: {
+        liquidations: {
+          demarreTs: 1_000_000,
+          bybit: { dernierMessageTs: 1_000_000, derniereErreur: null },
+          okx: { dernierMessageTs: 1_000_000, derniereErreur: null },
+          hyperliquid: { dernierMessageTs: 9_999_999, derniereErreur: null, partiel: true },
+        },
+      },
+    });
+    const now = 1_000_000 + SEUIL_COLLECTEUR_MUET_MS + 1;
+    expect(collecteurLiqMuet(sante, now)).toBe(true);
+    // Sans champ partiel, hyperliquid compte comme venue complète vivante → pas muet.
+    const sante2 = parseSanteCollecteurs({
+      collecteurs: {
+        liquidations: {
+          demarreTs: 1_000_000,
+          bybit: { dernierMessageTs: 1_000_000, derniereErreur: null },
+          okx: { dernierMessageTs: 1_000_000, derniereErreur: null },
+          hyperliquid: { dernierMessageTs: 9_999_999, derniereErreur: null },
+        },
+      },
+    });
+    expect(collecteurLiqMuet(sante2, now)).toBe(false);
+    // Seules venues partielles déclarées → rien à juger → false.
+    const sante3 = parseSanteCollecteurs({
+      collecteurs: {
+        liquidations: {
+          demarreTs: 1_000_000,
+          hyperliquid: { dernierMessageTs: 0, derniereErreur: null, partiel: true },
+        },
+      },
+    });
+    expect(collecteurLiqMuet(sante3, now)).toBe(false);
+  });
+
   it("la sonde /health mémorise la santé des collecteurs (aucun appel réseau de plus)", async () => {
     vi.resetModules();
     const mod = await import("./daemon");

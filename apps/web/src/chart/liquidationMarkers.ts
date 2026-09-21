@@ -17,6 +17,13 @@
  * RENDU (heatmap 2D canvas) est assuré par `LiquidationHeatController` (liquidationHeat.ts),
  * câblé dans ChartInstance et abonné à ce store.
  *
+ * HYPERLIQUID : pas de flux public de liquidations — le daemon les mine à froid (fills
+ * des makers + vault HLP Liquidator, source PARTIELLE, cf. apps/daemon/src/hlLiqFeed.ts).
+ * Le front les récupère par POLL toutes les 30 s (`GET /liquidations/:symbole?venue=
+ * hyperliquid`, marge de recouvrement 60 s — la déduplication de fusion fait le reste),
+ * différé ≤ ~30 s. Ces événements ne passent JAMAIS par `enAttentePush` (ils viennent
+ * déjà du daemon — pas de dual-write en boucle).
+ *
  * Fonctions PURES (taille de bucket, index, colormap viridis, sérialisation v2, fusion,
  * borne FIFO, seed Coinalyze) exportées et testées ; couplage KLineChart non testé.
  */
@@ -28,6 +35,7 @@ import { subscribeLiquidations, type Liquidation } from "../data/liquidations";
 import { fetchLiquidationHistory, type LiquidationHistPoint } from "../data/coinalyze";
 import {
   collecteurLiqMuet,
+  daemonSupporte,
   liquidationsGet,
   liquidationsPush,
   santeLiquidationsDaemon,
@@ -180,6 +188,15 @@ export function bornerEvenements(events: LiqEvent[], max: number): LiqEvent[] {
   return events.length <= max ? events : events.slice(events.length - max);
 }
 
+/** Dernier `time` d'un événement de `venue` dans le buffer, ou null. PURE (poll HL). */
+export function dernierTempsVenue(events: readonly LiqEvent[], venue: string): number | null {
+  let max: number | null = null;
+  for (const ev of events) {
+    if (ev.venue === venue && (max === null || ev.time > max)) max = ev.time;
+  }
+  return max;
+}
+
 // ─────────────────────────── Amorçage historique (Coinalyze) — fonctions pures ───────────────────────────
 
 /** Bougie CONTENANT `time` (plus grand temps de bougie ≤ time), ou undefined. PURE. */
@@ -310,6 +327,45 @@ let savePending = false;
 let enAttentePush: LiqEvent[] = [];
 let pushTimer: ReturnType<typeof setTimeout> | null = null;
 let pushPending = false;
+
+/**
+ * Poll des liquidations Hyperliquid minées par le daemon (source PARTIELLE — makers +
+ * vault ; différé ≤ ~30 s) : cadence 30 s, marge de recouvrement 60 s (la fusion
+ * dédoublonne). Inerte si le daemon n'annonce pas la capability `liquidations`.
+ */
+export const PERIODE_POLL_HL_MS = 30_000;
+export const MARGE_POLL_HL_MS = 60_000;
+let minuteurHl: ReturnType<typeof setInterval> | null = null;
+
+async function pollHl(symbol: string): Promise<void> {
+  if (!daemonSupporte("liquidations")) return;
+  const depuis =
+    (dernierTempsVenue(evenements, "hyperliquid") ?? Date.now() - PERIODE_POLL_HL_MS) -
+    MARGE_POLL_HL_MS;
+  const rows = await liquidationsGet(symbol, { depuis, venue: "hyperliquid" });
+  // Garde anti-course : le symbole a pu changer pendant l'attente → on jette.
+  if (symboleAbonne !== symbol || rows === null || rows.length === 0) return;
+  evenements = bornerEvenements(
+    fusionnerEvenements(evenements, rows.map(depuisDaemon)),
+    MAX_EVENTS,
+  );
+  publier();
+  planifierSauvegarde();
+}
+
+function demarrerPollHl(): void {
+  if (minuteurHl !== null) return;
+  minuteurHl = setInterval(() => {
+    if (symboleAbonne !== null) void pollHl(symboleAbonne);
+  }, PERIODE_POLL_HL_MS);
+}
+
+function arreterPollHl(): void {
+  if (minuteurHl !== null) {
+    clearInterval(minuteurHl);
+    minuteurHl = null;
+  }
+}
 
 /** Pousse l'état courant du buffer dans le store vanilla (bump `rev`, calcule `enAttente`). */
 function publier(): void {
@@ -520,11 +576,13 @@ function sync(): void {
     }
     symboleAbonne = null;
     evenements = [];
+    arreterPollHl();
     publier();
     return;
   }
   if (symboleAbonne !== symbol) {
     if (abonnement) abonnement();
+    arreterPollHl(); // le poll HL suit le symbole abonné (changé ci-dessous)
     if (symboleAbonne !== null) {
       flushPush(symboleAbonne);
       flushSauvegarde(symboleAbonne);
@@ -535,6 +593,8 @@ function sync(): void {
     evenements = chargerProfil(symbol);
     publier();
     abonnement = subscribeLiquidations(symbol, (l) => ajouterLive(l));
+    // Poll HL (daemon, source partielle — cf. en-tête) : suit l'abonnement.
+    demarrerPollHl();
     // Seed daemon (puis repli Coinalyze) — asynchrone, gardé anti-course.
     void amorcerSeed(symbol);
     return;

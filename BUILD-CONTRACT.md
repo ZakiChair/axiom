@@ -12,7 +12,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 - **Renderer-first** : le premier livrable à valeur est un graphe live à l'écran. **AUCUN backend réseau/multi-tenant (Docker/TimescaleDB/Redis interdits). Un daemon localhost mono-process (`apps/daemon`, Bun + SQLite, port 8787) est autorisé depuis la Phase 2 — proxy/cache/persistance/alertes UNIQUEMENT, jamais sur le chemin chaud du renderer (les WS de marché du front restent directs).** Le front parle directement aux WS publics des exchanges (mode mono-utilisateur assumé) et reste **100 % fonctionnel SANS daemon** (feature-detect `/health` + repli localStorage/proxy Vite). Déviation assumée vs roadmap E1 : les proxys Vite restent en dev (dev sans daemon), le daemon est le chemin de PROD + services additionnels.
 - **Chart** : **KLineChart** figé (pas de lightweight-charts, pas d'abstraction `IChartRenderer` « swap de moteur »). L'overlay orderflow se synchronise sur le viewport de KLineChart. Multi-chart 2×2 : un store par slot ; les overlays doivent être scellés au slot (voir plan 2026-08-24, Lot 3).
 - **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**200 indicateurs**). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
-- **Données dérivées (OI/funding/L-S/liquidations)** : **ACHETER** via un `IDerivedDataProvider` (Coinalyze **câblé**, M6 atteint) — NE PAS construire d'AggregationEngine multi-exchange. Trois couches de liquidations distinctes et étiquetées : heatmap *exécutée*, niveaux **EST.** (modèle levier), niveaux **HL réels** (Hyperliquid, non exhaustif).
+- **Données dérivées (OI/funding/L-S/liquidations)** : **ACHETER** via un `IDerivedDataProvider` (Coinalyze **câblé**, M6 atteint) — NE PAS construire d'AggregationEngine multi-exchange. Trois couches de liquidations distinctes et étiquetées : heatmap *exécutée*, niveaux **EST.** (modèle levier), niveaux **HL réels** (Hyperliquid, non exhaustif). Depuis le 2026-09-21, la heatmap exécutée reçoit aussi une venue `hyperliquid` **PARTIELLE** (fills des makers suivis, couverture mesurée affichée — cf. « Corrections et extension demandées le 21 septembre 2026 »).
 - **Trading** : **PAS d'exécution d'ordres** — aucune clé de trading. Le paper trading (`PAPER`) est une simulation locale (hors gate G100/K8). Ne rien implémenter qui touche à des clés de trading réelles.
 - **Sources** : **9 identifiants** (`EXCHANGE_IDS` dans `@axiom/types`) — Binance, Bybit, OKX, Hyperliquid, Coinbase, Kraken, Twelve Data, MEXC, synthetic. Ne pas en ajouter sans nécessité démontrée (non-objectif avant G100).
 - **Fournisseurs de capitalisation (exception ACTÉE le 2026-09-01, même statut que WHALES)** : l'historique TOTAL/TOTAL2/TOTAL3 et la fenêtre BPL sont servis par l'endpoint public `api.coinmarketcap.com/data-api` (sans clé, via `/extapi`), avec repli CryptoCompare/CCData `min-api.cryptocompare.com` (clé personnelle navigateur, route dédiée `/ccdataapi` daemon + Vercel) puis CoinGecko local. `EXCHANGE_IDS` reste à 9 (l'adaptateur de capitalisation est de source `synthetic`). Aucun autre fournisseur sans amendement du contrat (amendements : fournisseurs statistiques publics le 2026-09-06, CryptoQuant BASIC le 2026-09-16 — cf. « Extension autorisée le 16 septembre 2026 »).
@@ -322,3 +322,46 @@ de `reported_production`/`report_accuracy` non confirmée (affichées brutes, sa
 calculé) ; `accumulated_monthly_rewards` est le cumul du fournisseur (non recalculé) ;
 l'archive dépend de l'usage (pas de collecteur) et, sur un poste sans daemon, vider le
 stockage du navigateur la perd.
+
+## Corrections et extension demandées le 21 septembre 2026
+
+Le propriétaire a signalé des chiffres « longs/shorts piégés » incohérents et demandé que les
+liquidations proviennent d'Hyperliquid, intégrées « de façon lisible et belle » au graphe.
+**39 fenêtres, 200 indicateurs, 9 identifiants de marché, aucune dépendance, `@axiom/types`
+inchangé.**
+
+1. **Volume piégé (`trappedVolume`) — calcul corrigé** (`59452a2`). L'indicateur distribuait le
+   volume TOTAL de chaque bougie de part et d'autre du close courant : au plus haut 24 h de
+   BTCUSDT 15m, 100 % du volume de la fenêtre était déclaré « shorts piégés ». Il ne compte plus
+   que le volume **agressif** (taker) : `trappedLong = Σ buyVolume × fracAbove`,
+   `trappedShort = −Σ sellVolume × (1 − fracAbove)` ; bougie sans split ignorée, fenêtre sans
+   aucun split → `undefined`. Dépend du split taker → **UNUSABLE hors Binance** (comme CVD,
+   VPIN, λ de Kyle). Le champ existant `IndicatorOutput.color` est désormais honoré par le pont
+   KLineChart (`couleurDeclaree`) : `--down` au nord, `--up` au sud.
+2. **Bulles de clusters de liquidations (`LIQBUL`)** (`c7c254f`). Une bulle PAR CELLULE de la
+   grille agrégée (≥ P70 des totaux, rayon ∝ √USD, côté dominant, étiquettes des 4 plus
+   grosses), dessinée dans le contrôleur de heatmap déjà chargé à la demande — aucun module
+   nouveau dans le chunk d'entrée ; bascule persistée (défaut ON), bouton « Bulles » de la
+   fenêtre LIQ, mini-légende. Budget d'entrée mesuré : 356 432 / 360 000 octets gzip.
+3. **Source Hyperliquid des liquidations exécutées — minage officiel PARTIEL** (décision du
+   propriétaire parmi trois options ; plan
+   `docs/superpowers/plans/2026-09-21-liquidations-hyperliquid.md`). Hyperliquid n'a **aucun
+   flux public de liquidations** ; elles n'existent que dans les fills des adresses impliquées.
+   Le daemon (`apps/daemon/src/hlLiqFeed.ts`, ingestion À FROID, même statut que le collecteur
+   Bybit/OKX) suit sur **une** WS officielle les `trades` des coins surveillés pour classer les
+   makers, puis les `userFills` du vault HLP Liquidator et des **9** makers les mieux classés
+   (10 utilisateurs uniques = plafond HL ; rotation 5 min avec hystérésis ; aucun appel REST) ;
+   chaque fill portant `liquidation.liquidatedUser` devient une ligne `liquidations` de venue
+   `hyperliquid` (convention de côté figée par test). Le front la consomme par
+   `GET /liquidations/:symbole?venue=hyperliquid` toutes les 30 s (jamais de dual-write
+   retour). Règles d'honnêteté : santé `partiel: true` avec `couverture` MESURÉE (part du
+   volume maker absorbée par les adresses suivies) affichée dans la fenêtre LIQ (« N adresses
+   suivies · couverture ≈ X % · différé ≤ 30 s ») ; une venue partielle est **exclue** du
+   calcul « collecteur muet » (la mort de Bybit + OKX reste visible et déclenche le repli
+   Coinalyze) ; jamais présentée comme exhaustive ; indisponible sans daemon (Vercel). Aucun
+   fournisseur nouveau (Hyperliquid est l'un des 9), aucun AggregationEngine (une seule venue,
+   consommée telle quelle), aucune fenêtre, aucun indicateur. Preuve réelle du 2026-09-21 :
+   10 souscriptions `userFills` acceptées sans `error` HL, couverture mesurée ≈ 48–50 % du flux
+   makers (BTC/ETH/SOL, 30 min). Budget d'entrée mesuré après le lot : **356 979 / 360 000
+   octets gzip** (marge 3 021, au seuil de vigilance I11 ≈ 3 000) : le prochain lot touchant le
+   chemin d'entrée doit d'abord libérer des octets.

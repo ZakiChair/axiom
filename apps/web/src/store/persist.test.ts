@@ -100,6 +100,7 @@ beforeEach(() => {
   // setActif(false) coupe aussi le singleton (clearInterval OI) laissé actif par un test précédent.
   liqMarksStore.getState().setActif(false);
   liqMarksStore.getState().setMode("intensite");
+  liqMarksStore.getState().setBulles(true); // défaut ON
   liqEstStore.getState().setActif(false);
   niveauxOverlaysStore.getState().setActif("niveauxCles", false);
   niveauxOverlaysStore.getState().setActif("niveauxOptions", false);
@@ -363,6 +364,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
         revenue: true,
         liqHeatmap: true,
         liqHeatmapMode: "dominance",
+        liqBulles: false,
         liqEstimates: true,
         niveauxCles: true,
         niveauxClesFamilles: ["T", "J", "M"],
@@ -384,6 +386,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(revenueStore.getState().enabled).toBe(true);
     expect(liqMarksStore.getState().actif).toBe(true);
     expect(liqMarksStore.getState().mode).toBe("dominance");
+    expect(liqMarksStore.getState().bulles).toBe(false);
     expect(liqEstStore.getState().actif).toBe(true);
     expect(niveauxOverlaysStore.getState().niveauxCles).toBe(true);
     expect(niveauxOverlaysStore.getState().familles).toEqual(["J", "M", "T"]);
@@ -405,6 +408,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
         orderflow: "oui", // pas un booléen -> ignoré (reste false)
         refSymbol: 42, // pas une chaîne -> ignoré (reste le défaut)
         liqHeatmapMode: "arc-en-ciel", // mode inconnu -> ignoré (reste intensite)
+        liqBulles: "oui", // pas un booléen -> ignoré (reste le défaut true)
         priceScale: "diagonale", // échelle inconnue -> ignorée (reste normal)
         macroOverlays: ["m2", "inexistant"], // "inexistant" filtré
         denominateur: "DOGE", // hors DENOMINATEURS -> ignoré (reste le défaut ETH)
@@ -422,6 +426,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(orderflowStore.getState().enabled).toBe(false);
     expect(refSymbolStore.getState().refSymbol).toBe(REF_SYMBOL_DEFAUT);
     expect(liqMarksStore.getState().mode).toBe("intensite");
+    expect(liqMarksStore.getState().bulles).toBe(true);
     expect(priceScaleStore.getState().type).toBe("normal");
     expect(macroOverlayStore.getState().enabled).toEqual(["m2"]);
     expect(denominateurStore.getState().denominateur).toBe(DENOMINATEUR_DEFAUT);
@@ -438,6 +443,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     refSymbolStore.getState().setRefSymbol("ethusdt");
     liqMarksStore.getState().setActif(true);
     liqMarksStore.getState().setMode("dominance");
+    liqMarksStore.getState().setBulles(false);
     priceScaleStore.getState().setType("percentage");
     denominateurStore.getState().setDenominateur("SOL");
     uiSectionsStore.getState().setOpen("Macro", false);
@@ -453,6 +459,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(raw.refSymbol).toBe("ETHUSDT");
     expect(raw.liqHeatmap).toBe(true);
     expect(raw.liqHeatmapMode).toBe("dominance");
+    expect(raw.liqBulles).toBe(false);
     expect(raw.liqEstimates).toBe(false);
     expect(raw.priceScale).toBe("percentage");
     expect(raw.denominateur).toBe("SOL");

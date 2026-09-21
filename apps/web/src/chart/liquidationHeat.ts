@@ -239,6 +239,71 @@ export function cellSousCurseur(
   return grid.cells.get(`${c.time}:${bucketIdx}`) ?? null;
 }
 
+// ─────────────────────────── Bulles de clusters (rendu « CoinGlass ») ───────────────────────────
+
+/** Une bulle à dessiner : une CELLULE de la grille retenue comme cluster significatif. */
+export interface BulleLiq {
+  candleTime: number;
+  bucketIdx: number;
+  /** Total USD de la cellule (longUsd + shortUsd). */
+  usd: number;
+  /** Côté DOMINANT en USD (égalité → "long") — pilote la teinte (--down/--up). */
+  side: "long" | "short";
+  /** Rayon en px CSS : rMin + (rMax − rMin) × √(usd / maxUsd) — la racine comprime les cascades. */
+  rayon: number;
+  /** Temps du dernier événement de la cellule — pilote le fade-in (cf. alphaFadeIn). */
+  dernierTime?: number;
+}
+
+/**
+ * Sélectionne les bulles à peindre depuis la grille agrégée : une bulle PAR CELLULE
+ * (bougie × bucket), pas par événement — une cascade donne UNE grosse bulle au lieu de
+ * 200 cercles superposés.
+ *
+ * Sélection : ne garder que les cellules dont le total USD atteint le QUANTILE EMPIRIQUE
+ * `quantile` des totaux (tri croissant, index `min(n − 1, floor(q × n))`) — la plus grosse
+ * cellule est TOUJOURS retenue (le quantile ne peut pas dépasser le max), puis tri
+ * décroissant et plafond `maxBulles`. `rayon` ∝ √usd normalisé sur la plus grosse cellule
+ * RETENUE ∈ [rMin, rMax]. Grille sans cellule à total > 0 → []. PURE.
+ */
+export function bullesDepuisGrille(
+  grid: LiqGrid,
+  quantile = 0.7,
+  maxBulles = 300,
+  rMin = 2.5,
+  rMax = 14,
+): BulleLiq[] {
+  const cellules = [...grid.cells.values()]
+    .map((cell) => ({ cell, total: cell.longUsd + cell.shortUsd }))
+    .filter((e) => e.total > 0);
+  if (cellules.length === 0) return [];
+
+  const totaux = cellules.map((e) => e.total).sort((a, b) => a - b);
+  const q = quantile < 0 ? 0 : quantile > 1 ? 1 : quantile;
+  // Quantile empirique : index floor(q × n) borné à n−1 — q=0,7 sur 5 cellules vise le
+  // 4e total (seuil haut), q=1 vise le dernier (seule la plus grosse cellule reste).
+  const seuil = totaux[Math.min(totaux.length - 1, Math.floor(q * totaux.length))] ?? 0;
+
+  const retenues = cellules
+    .filter((e) => e.total >= seuil)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, maxBulles);
+  const maxUsd = retenues[0]?.total ?? 0;
+  if (!(maxUsd > 0)) return [];
+
+  return retenues.map(({ cell, total }) => {
+    const bulle: BulleLiq = {
+      candleTime: cell.candleTime,
+      bucketIdx: cell.bucketIdx,
+      usd: total,
+      side: cell.longUsd >= cell.shortUsd ? "long" : "short",
+      rayon: rMin + (rMax - rMin) * Math.sqrt(total / maxUsd),
+    };
+    if (cell.dernierTime !== undefined) bulle.dernierTime = cell.dernierTime;
+    return bulle;
+  });
+}
+
 // Couleurs/alpha des heatmaps : extraites dans ./rampesHeat (partagées avec depthHeat.ts,
 // qui reste dans le chunk d'entrée). Ré-exportées ici pour les tests et les appelants
 // historiques — l'implémentation vit dans rampesHeat.ts.
@@ -712,6 +777,8 @@ export class LiquidationHeatController {
     //    dépend pas de la taille (le regroupement se fait au rendu), d'où pas de `niveauxObsoletes`.
     this.unsubMode = liqMarksStore.subscribe((s, prev) => {
       if (s.mode !== prev.mode) this.dirty = true;
+      // Bascule des bulles : repaint SEUL — la grille agrégée est inchangée.
+      if (s.bulles !== prev.bulles) this.dirty = true;
       if (s.granularite !== prev.granularite) {
         this.grilleObsolete = true;
         this.dirty = true;
@@ -1036,6 +1103,14 @@ export class LiquidationHeatController {
       this.dessinerCellulesRects(grid, largeurs, mode, tokens, now);
     }
 
+    // Bulles de clusters (rendu « CoinGlass ») : une bulle PAR CELLULE significative
+    // (≥ P70 des totaux, cf. bullesDepuisGrille), rayon ∝ √notionnel, teinte du côté
+    // dominant (longs liquidés = ventes forcées → --down ; shorts → --up). Dessinées
+    // APRÈS les cellules (fond de densité) et AVANT les bandes du profil latéral.
+    if (liqMarksStore.getState().bulles) {
+      this.dessinerBulles(grid, largeurs, tokens, now, main);
+    }
+
     // Bandes latérales du profil par prix : largeur ∝ intensité log (max 12 % du pane), SPLIT
     // proportionnel — shorts (rachats forcés) teinte `--up`, longs (ventes forcées) teinte
     // `--down`. Ancre décalée vers l'intérieur de la largeur VP quand le Volume Profile est
@@ -1156,6 +1231,77 @@ export class LiquidationHeatController {
       alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, this.dernierBumpTs, now);
       ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha.toFixed(3)})`;
       ctx.fillRect(col.x0, y0, Math.max(1, col.x1 - col.x0), Math.max(1, y1 - y0));
+    }
+  }
+
+  /**
+   * Bulles de clusters (« CoinGlass ») : cercles posés au milieu de la colonne de bougie et
+   * au CENTRE du bucket de prix, rayon ∝ √notionnel (`bullesDepuisGrille`, pure et testée).
+   * Remplissage rgba de la teinte du côté dominant (alpha 0.35 modulé par l'atténuation
+   * footprint et le fade-in des cellules fraîches — les nouvelles liquidations « apparaissent »),
+   * contour 1 px opaque de la même teinte. Appelé SOUS le clip du pane ; une bulle entièrement
+   * hors du rectangle du pane n'est pas tracée. Les 4 plus grosses portent une pilule
+   * « formatUsd » à droite (repliée à gauche si elle déborde du bord droit).
+   */
+  private dessinerBulles(
+    grid: LiqGrid,
+    largeurs: Map<number, { x0: number; x1: number }>,
+    tokens: Tokens,
+    now: number,
+    main: Bounding,
+  ): void {
+    const ctx = this.ctx;
+    const { left, top, width, height } = main;
+    const xRight = left + width;
+    const yBas = top + height;
+    // Même atténuation ×0.5 que les cellules quand le footprint est actif (couches superposées).
+    const footprintActif = orderflowStore.getState().enabled;
+    const dessinees: Array<{ x: number; y: number; rayon: number; usd: number }> = [];
+    for (const b of bullesDepuisGrille(grid)) {
+      const col = largeurs.get(b.candleTime);
+      if (col === undefined) continue;
+      const x = (col.x0 + col.x1) / 2;
+      const y = this.toPx({ value: (b.bucketIdx + 0.5) * grid.taille }).y;
+      if (y === undefined || !Number.isFinite(y)) continue;
+      if (x + b.rayon < left || x - b.rayon > xRight || y + b.rayon < top || y - b.rayon > yBas) continue;
+      const rgb = b.side === "long" ? tokens.downRgb : tokens.upRgb;
+      let alpha = attenuationFootprint(0.35, footprintActif);
+      alpha = alphaFadeIn(alpha, b.dernierTime, this.tsDemarrage, this.dernierBumpTs, now);
+      ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(x, y, b.rayon, 0, Math.PI * 2);
+      ctx.fill();
+      // Contour 1 px opaque de la même teinte : la bulle reste lisible sur la heatmap.
+      ctx.strokeStyle = b.side === "long" ? tokens.down : tokens.up;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      dessinees.push({ x, y, rayon: b.rayon, usd: b.usd });
+    }
+
+    // Étiquettes des 4 plus grosses bulles : pilule « USD » à droite de la bulle
+    // (x + rayon + 4), repliée à gauche si elle déborde du bord droit du pane —
+    // même style que les labels de clusters du profil (surface 0.96 / border / text 9 px).
+    ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    const candidats = dessinees
+      .sort((a, b) => b.usd - a.usd)
+      .slice(0, 4)
+      .map((d) => ({ ...d, poids: d.usd }));
+    for (const item of dechevaucher(candidats, 14)) {
+      const label = formatUsd(item.usd);
+      const w = ctx.measureText(label).width;
+      let xPilule = item.x + item.rayon + 4;
+      if (xPilule + w + 6 > xRight) xPilule = item.x - item.rayon - 4 - (w + 6);
+      ctx.fillStyle = tokens.surface;
+      ctx.globalAlpha = 0.96;
+      ctx.fillRect(xPilule, item.y - 7, w + 6, 14);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = tokens.border;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(xPilule, item.y - 7, w + 6, 14);
+      ctx.fillStyle = tokens.text;
+      ctx.fillText(label, xPilule + 3, item.y);
     }
   }
 
@@ -1746,6 +1892,15 @@ export class LiquidationHeatController {
       ctx.fillStyle = tokens.textDim;
       ctx.fillText("longs", x, ymid);
       yb -= 14;
+
+      // (b bis) mini-légende des bulles de clusters — quand la couche est active.
+      if (liqMarksStore.getState().bulles) {
+        ctx.textAlign = "right";
+        ctx.textBaseline = "bottom";
+        ctx.fillStyle = tokens.textDim;
+        ctx.fillText("● bulles = clusters ≥ P70 · rayon ∝ √USD", xRight - 4, yb);
+        yb -= 14;
+      }
     }
 
     // (c) légende EST — dessinée dès que la couche est active (étiquetage non contournable),

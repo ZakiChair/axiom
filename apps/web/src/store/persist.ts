@@ -416,6 +416,8 @@ interface PersistedSession {
   liqHeatmapMode: LiqHeatMode;
   /** Granularité des buckets de prix de la heatmap (½× / 1× / 2× — facteur de tailleBucket). */
   liqGranularite: Granularite;
+  /** Bascule des bulles de clusters de liquidations sur le graphe (rayon ∝ √notionnel). */
+  liqBulles: boolean;
   /** Bascule niveaux de liquidation estimés (chart/liquidationEstimates). */
   liqEstimates: boolean;
   /** Leviers cochés du modèle de niveaux estimés (sous-ensemble NON VIDE de LEVIERS). */
@@ -451,6 +453,7 @@ function currentSession(): PersistedSession {
     liqHeatmap: liqMarksStore.getState().actif,
     liqHeatmapMode: liqMarksStore.getState().mode,
     liqGranularite: liqMarksStore.getState().granularite,
+    liqBulles: liqMarksStore.getState().bulles,
     liqEstimates: liqEstStore.getState().actif,
     liqLeviers: liqEstStore.getState().leviers,
     distOverlay: distOverlayStore.getState().actif,
@@ -501,6 +504,8 @@ function hydrateSession(): void {
   if (p.liqGranularite === 0.5 || p.liqGranularite === 1 || p.liqGranularite === 2) {
     liqMarksStore.getState().setGranularite(p.liqGranularite);
   }
+  // Bulles de clusters : valeur non booléenne → ignorée (reste le défaut true).
+  if (typeof p.liqBulles === "boolean") liqMarksStore.getState().setBulles(p.liqBulles);
   if (typeof p.liqEstimates === "boolean") liqEstStore.getState().setActif(p.liqEstimates);
   // Leviers estimés : garder les nombres ∈ LEVIERS ; non vide (le setter réordonne
   // canoniquement et ignore une liste vide/invalide — garde : au moins un levier reste).

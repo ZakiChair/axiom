@@ -240,6 +240,8 @@ export interface LiqMarksState {
   mode: LiqHeatMode;
   /** Granularité des buckets de prix (multiplie `tailleBucket`) — persistée (store/persist.ts). */
   granularite: Granularite;
+  /** Bulles de clusters sur le graphe (rayon ∝ √notionnel) — persistée (store/persist.ts). */
+  bulles: boolean;
   basculer: () => void;
   /** Force l'état ON/OFF (idempotent) — hydratation persistée (cf. store/persist.ts). */
   setActif: (actif: boolean) => void;
@@ -249,17 +251,24 @@ export interface LiqMarksState {
   basculerMode: () => void;
   /** Force la granularité (idempotent) — hydratation persistée (cf. store/persist.ts). */
   setGranularite: (granularite: Granularite) => void;
+  /** Force la bascule des bulles (idempotent) — hydratation persistée (cf. store/persist.ts). */
+  setBulles: (bulles: boolean) => void;
+  /** Alterne bulles on/off (commande ⌘K LIQBUL). */
+  basculerBulles: () => void;
 }
 
 export const liqMarksStore = createStore<LiqMarksState>((set, get) => ({
   actif: false,
   mode: "intensite",
   granularite: 1,
+  bulles: true,
   basculer: () => set({ actif: !get().actif }),
   setActif: (actif) => set({ actif }),
   setMode: (mode) => set({ mode }),
   basculerMode: () => set({ mode: get().mode === "intensite" ? "dominance" : "intensite" }),
   setGranularite: (granularite) => set({ granularite }),
+  setBulles: (bulles) => set({ bulles }),
+  basculerBulles: () => set({ bulles: !get().bulles }),
 }));
 
 // ─────────────────────────── Store des événements (buffer borné, vanilla) ───────────────────────────
@@ -587,6 +596,15 @@ export const commandes: Commande[] = [
     motsCles: ["liquidations", "heatmap", "dominance", "long", "short", "mode", "intensite", "liqmode"],
     apercu: "Bascule la coloration des cellules : intensité totale (viridis) ou dominance long/short",
     action: () => liqMarksStore.getState().basculerMode(),
+  },
+  {
+    id: "action:liqbulles",
+    mnemonique: "LIQBUL",
+    libelle: "Heatmap liquidations — bulles de clusters (afficher / masquer)",
+    categorie: "action",
+    motsCles: ["liquidations", "bulles", "bubbles", "clusters", "heatmap", "liqbul"],
+    apercu: "Affiche ou masque les bulles de clusters de liquidations sur le graphe",
+    action: () => liqMarksStore.getState().basculerBulles(),
   },
 ];
 

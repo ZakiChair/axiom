@@ -110,6 +110,7 @@ const FENETRE_MS: Record<FenetreId, number> = {
 const VENUES: Record<string, { court: string; long: string; ton: TonBadge }> = {
   bybit: { court: "BYB", long: "Bybit", ton: "accent" },
   okx: { court: "OKX", long: "OKX", ton: "neutre" },
+  hyperliquid: { court: "HL", long: "Hyperliquid", ton: "up" },
 };
 
 /** Présentation d'une venue, avec repli générique (venues inconnues du daemon). */
@@ -183,6 +184,27 @@ function SelecteurMode() {
       onChange={setMode}
       ariaLabel="Mode de coloration de la heatmap"
     />
+  );
+}
+
+/**
+ * Bascule « Bulles » : affiche/masque les bulles de clusters de liquidations sur le graphe
+ * (rayon ∝ √notionnel, cf. `bullesDepuisGrille` dans chart/liquidationHeat.ts). Visible
+ * SEULEMENT quand « Sur le graphe » est actif — comme SelecteurMode (commande ⌘K LIQBUL).
+ */
+function ToggleBulles() {
+  const actif = useStore(liqMarksStore, (s) => s.actif);
+  const bulles = useStore(liqMarksStore, (s) => s.bulles);
+  const basculerBulles = useStore(liqMarksStore, (s) => s.basculerBulles);
+  if (!actif) return null;
+  return (
+    <BoutonBascule
+      actif={bulles}
+      onClick={basculerBulles}
+      title="Bulles de liquidations sur le graphe — clusters significatifs, rayon ∝ √notionnel"
+    >
+      Bulles
+    </BoutonBascule>
   );
 }
 
@@ -537,6 +559,7 @@ function ContenuLive() {
         <SelecteurFenetre fenetre={fenetre} onChange={setFenetre} />
         <ToggleChart />
         <SelecteurMode />
+        <ToggleBulles />
         <ToggleEstimes />
       </div>
 

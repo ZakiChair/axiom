@@ -50,6 +50,7 @@ import {
   clusteriserNiveauxHl,
   libelleLegendeHl,
   dechevaucher,
+  bullesDepuisGrille,
   liqFlashStore,
   flasherNiveau,
   type LiqGrid,
@@ -680,5 +681,64 @@ describe("libelleLegendeHl — la couche LIQHL nomme toujours son état", () => 
 
   it("échec réseau / réponse illisible → erreur DOUCE", () => {
     expect(libelleLegendeHl("erreur", 0, 0, 0)).toBe("LIQ HL RÉELS — source indisponible");
+  });
+});
+
+describe("bullesDepuisGrille — sélection des bulles de clusters", () => {
+  /** Grille de cellules synthétiques : une cellule par total USD donné (tout en longs). */
+  function grilleDe(totaux: number[]): LiqGrid {
+    const cells = new Map();
+    totaux.forEach((t, i) => {
+      cells.set(`${i}:${i}`, { candleTime: i, bucketIdx: i, longUsd: t, shortUsd: 0, count: 1 });
+    });
+    return { cells, taille: 1, maxUsd: Math.max(0, ...totaux) };
+  }
+
+  it("grille vide → []", () => {
+    expect(bullesDepuisGrille(grilleDe([]))).toEqual([]);
+  });
+
+  it("le quantile filtre les cellules sous le seuil", () => {
+    // Totaux 1,2,3,4,5 : q=0,7 → index floor(0,7×5)=3 → seuil 4 → cellules 4 et 5.
+    const bulles = bullesDepuisGrille(grilleDe([1, 2, 3, 4, 5]), 0.7);
+    expect(bulles.map((b) => b.usd)).toEqual([5, 4]); // ordre décroissant
+  });
+
+  it("la plus grosse cellule est toujours retenue, même à q=1", () => {
+    const bulles = bullesDepuisGrille(grilleDe([1, 2, 100]), 1);
+    expect(bulles).toHaveLength(1);
+    expect(bulles[0]?.usd).toBe(100);
+  });
+
+  it("rayon : max → rMax, ¼ du max → rMin + (rMax − rMin)/2", () => {
+    const bulles = bullesDepuisGrille(grilleDe([100, 25]), 0, 300, 2.5, 14);
+    const max = bulles.find((b) => b.usd === 100);
+    const quart = bulles.find((b) => b.usd === 25);
+    expect(max?.rayon).toBeCloseTo(14);
+    expect(quart?.rayon).toBeCloseTo(2.5 + (14 - 2.5) / 2);
+  });
+
+  it("side = dominant en USD (égalité → long)", () => {
+    // Totaux 100 / 100 / 50 : la grille porte le split long/short de chaque cellule.
+    const grille: LiqGrid = {
+      cells: new Map([
+        ["0:0", { candleTime: 0, bucketIdx: 0, longUsd: 60, shortUsd: 40, count: 1 }],
+        ["1:1", { candleTime: 1, bucketIdx: 1, longUsd: 40, shortUsd: 60, count: 1 }],
+        ["2:2", { candleTime: 2, bucketIdx: 2, longUsd: 25, shortUsd: 25, count: 1 }],
+      ]),
+      taille: 1,
+      maxUsd: 100,
+    };
+    const bulles = bullesDepuisGrille(grille, 0);
+    const par = (time: number) => bulles.find((b) => b.candleTime === time)?.side;
+    expect(par(0)).toBe("long"); // 60L > 40S
+    expect(par(1)).toBe("short"); // 40L < 60S
+    expect(par(2)).toBe("long"); // égalité → long
+  });
+
+  it("plafonne au nombre max de bulles", () => {
+    const bulles = bullesDepuisGrille(grilleDe([1, 2, 3, 4, 5, 6, 7]), 0, 3);
+    expect(bulles).toHaveLength(3);
+    expect(bulles.map((b) => b.usd)).toEqual([7, 6, 5]);
   });
 });

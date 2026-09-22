@@ -38,6 +38,8 @@ import {
 } from "../chart/liquidationMarkers";
 import { liqEstStore, LEVIERS } from "../chart/liquidationEstimates";
 import { flasherNiveau } from "../chart/liquidationHeat";
+import { hlHeatStore, assurerHeat, definirCollecte } from "../data/hyperliquidHeat";
+import { basePerp } from "../data/symbol";
 import { orderflowStore } from "../store/orderflow";
 import { getActiveChart } from "../chart/drawing";
 import { liquidationsGet, santeLiquidationsDaemon, type LiqDaemon } from "../data/daemon";
@@ -75,6 +77,7 @@ import {
   daemonVersEvenements,
   filtrerFenetre,
   grouperCascades,
+  libelleCollecteHeat,
   libelleSourceHl,
   magnitudeRelative,
   statsLiquidations,
@@ -226,6 +229,56 @@ function ToggleEstimes() {
     >
       Niveaux estimés
     </BoutonBascule>
+  );
+}
+
+/**
+ * Ligne « Heatmap HL » de l'onglet Live : état de la collecte d'instantanés de niveaux
+ * RÉELS Hyperliquid (daemon opt-in, instantané 5 min, rétention 14 j, couverture OI
+ * MESURÉE — échantillon du leaderboard, jamais exhaustif) + bascule « Collecte daemon »
+ * (drapeau KV `hl/heat`, cf. data/hyperliquidHeat.ts). Lit `hlHeatStore` — module
+ * PARESSEUX comme cette fenêtre : rien n'est tiré dans le chunk d'entrée.
+ */
+function CollecteHeatmapHl({ now }: { now: number }) {
+  const collecte = useStore(hlHeatStore, (s) => s.collecte);
+  const nbInstantanes = useStore(hlHeatStore, (s) => s.instantanes.length);
+  const couverture = useStore(
+    hlHeatStore,
+    (s) => s.instantanes[s.instantanes.length - 1]?.couverture ?? null,
+  );
+
+  // Demande non bloquante de la plage 14 j du coin courant — idempotente : le
+  // contrôleur du chart (LIQHL) appelle la même fonction sur le même store.
+  useEffect(() => {
+    if (IS_VERCEL) return;
+    const demander = (): void => {
+      const coin = basePerp(marketStore.getState().symbol);
+      if (coin !== null) {
+        assurerHeat({ coin, pasMs: 5 * 60_000, depuisMs: Date.now() - 14 * 24 * 3_600_000 });
+      }
+    };
+    demander();
+    const timer = setInterval(demander, 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  if (IS_VERCEL) {
+    return (
+      <Unusable raison="La collecte d'instantanés HL dépend du daemon local axiomd, indisponible sur Vercel." />
+    );
+  }
+  const actif = collecte?.actif ?? false;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-text-dim">
+      <span>{libelleCollecteHeat(collecte, nbInstantanes, couverture, now)}</span>
+      <BoutonBascule
+        actif={actif}
+        onClick={() => void definirCollecte(!actif)}
+        title="Collecte daemon des instantanés de niveaux HL (drapeau KV hl/heat — instantané toutes les 5 min, rétention 14 j)"
+      >
+        Collecte daemon
+      </BoutonBascule>
+    </div>
   );
 }
 
@@ -630,6 +683,9 @@ function ContenuLive() {
         {libelleHl !== null && (
           <div className="mt-2 text-[10px] text-text-dim">{libelleHl}</div>
         )}
+
+        {/* Collecte heatmap HL (instantanés daemon) : état mesuré + bascule drapeau. */}
+        <CollecteHeatmapHl now={Date.now()} />
 
         <Histogramme buckets={buckets} />
       </div>

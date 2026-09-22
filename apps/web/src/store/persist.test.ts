@@ -43,6 +43,7 @@ import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore } from "../chart/Chart";
 import { liqMarksStore } from "../chart/liquidationMarkers";
 import { liqEstStore } from "../chart/liquidationEstimates";
+import { hlLiqStore } from "../data/hyperliquidLiq";
 import { niveauxOverlaysStore } from "../chart/niveauxOverlays";
 import {
   hydrateStores,
@@ -102,6 +103,7 @@ beforeEach(() => {
   liqMarksStore.getState().setMode("intensite");
   liqMarksStore.getState().setBulles(true); // défaut ON
   liqEstStore.getState().setActif(false);
+  hlLiqStore.getState().setActif(false);
   niveauxOverlaysStore.getState().setActif("niveauxCles", false);
   niveauxOverlaysStore.getState().setActif("niveauxOptions", false);
   niveauxOverlaysStore.getState().setActif("bandesImplicites", false);
@@ -366,6 +368,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
         liqHeatmapMode: "dominance",
         liqBulles: false,
         liqEstimates: true,
+        liqHl: true,
         niveauxCles: true,
         niveauxClesFamilles: ["T", "J", "M"],
         niveauxOptions: true,
@@ -388,6 +391,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(liqMarksStore.getState().mode).toBe("dominance");
     expect(liqMarksStore.getState().bulles).toBe(false);
     expect(liqEstStore.getState().actif).toBe(true);
+    expect(hlLiqStore.getState().actif).toBe(true);
     expect(niveauxOverlaysStore.getState().niveauxCles).toBe(true);
     expect(niveauxOverlaysStore.getState().familles).toEqual(["J", "M", "T"]);
     expect(niveauxOverlaysStore.getState().niveauxOptions).toBe(true);
@@ -444,6 +448,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     liqMarksStore.getState().setActif(true);
     liqMarksStore.getState().setMode("dominance");
     liqMarksStore.getState().setBulles(false);
+    hlLiqStore.getState().setActif(true);
     priceScaleStore.getState().setType("percentage");
     denominateurStore.getState().setDenominateur("SOL");
     uiSectionsStore.getState().setOpen("Macro", false);
@@ -461,6 +466,7 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(raw.liqHeatmapMode).toBe("dominance");
     expect(raw.liqBulles).toBe(false);
     expect(raw.liqEstimates).toBe(false);
+    expect(raw.liqHl).toBe(true);
     expect(raw.priceScale).toBe("percentage");
     expect(raw.denominateur).toBe("SOL");
     expect(raw.sections).toEqual({ Macro: false });

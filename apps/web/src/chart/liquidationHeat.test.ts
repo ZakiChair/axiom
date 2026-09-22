@@ -23,6 +23,9 @@ vi.mock("../data/daemon", () => ({
   // Couche LIQHL : liquidationHeat importe data/hyperliquidLiq, qui tire ces deux helpers.
   hlLiqLevelsGet: async () => null,
   daemonSupporteHl: () => false,
+  // Heatmap HL : data/hyperliquidHeat (module paresseux importé par le contrôleur).
+  hlLiqHeatGet: async () => null,
+  kvPut: async () => null,
 }));
 
 import type { Candle } from "@axiom/types";
@@ -49,6 +52,10 @@ import {
   filtrerNiveauxHl,
   clusteriserNiveauxHl,
   libelleLegendeHl,
+  pasBougieMs,
+  construireGrilleHl,
+  compterTrous,
+  libelleLegendeHlHeat,
   dechevaucher,
   bullesDepuisGrille,
   liqFlashStore,
@@ -682,6 +689,10 @@ describe("libelleLegendeHl — la couche LIQHL nomme toujours son état", () => 
   it("échec réseau / réponse illisible → erreur DOUCE", () => {
     expect(libelleLegendeHl("erreur", 0, 0, 0)).toBe("LIQ HL RÉELS — source indisponible");
   });
+
+  it("fetch en vol → « chargement… » (et pas « aucun niveau », faux pendant le scan)", () => {
+    expect(libelleLegendeHl("chargement", 0, 0, 0)).toBe("LIQ HL RÉELS — chargement…");
+  });
 });
 
 describe("bullesDepuisGrille — sélection des bulles de clusters", () => {
@@ -740,5 +751,153 @@ describe("bullesDepuisGrille — sélection des bulles de clusters", () => {
     const bulles = bullesDepuisGrille(grilleDe([1, 2, 3, 4, 5, 6, 7]), 0, 3);
     expect(bulles).toHaveLength(3);
     expect(bulles.map((b) => b.usd)).toEqual([7, 6, 5]);
+  });
+});
+
+// ───────────── Heatmap HL (instantanés daemon) — fonctions pures ─────────────
+
+/** Instantané HL minimal pour les tests de grille. */
+function snap(ts: number, niveaux: Array<[number, "long" | "short", number]> = []): import("../data/hyperliquidHeat").InstantaneHlHeat {
+  return {
+    ts,
+    niveaux: niveaux.map(([px, side, usd]) => ({ px, side, usd })),
+    longUsd: 0,
+    shortUsd: 0,
+    nLong: 0,
+    nShort: 0,
+    oiUsd: null,
+    adresses: 474,
+    couverture: null,
+  };
+}
+
+describe("pasBougieMs — pas médian des bougies visibles", () => {
+  it("renvoie la médiane des écarts consécutifs (robuste aux trous)", () => {
+    const candles = [
+      candle({ time: 0, close: 100 }),
+      candle({ time: 60_000, close: 100 }),
+      candle({ time: 120_000, close: 100 }),
+      candle({ time: 600_000, close: 100 }), // trou : médiane reste 60 s
+      candle({ time: 660_000, close: 100 }),
+    ];
+    expect(pasBougieMs(candles, 0, 5)).toBe(60_000);
+    // Plage limitée : seuls les écarts de la plage comptent.
+    expect(pasBougieMs(candles, 3, 5)).toBe(60_000);
+  });
+
+  it("plancher 60 s (bougies plus denses ou plage vide)", () => {
+    const ticks = [candle({ time: 0, close: 1 }), candle({ time: 5_000, close: 1 })];
+    expect(pasBougieMs(ticks, 0, 2)).toBe(60_000);
+    expect(pasBougieMs([], 0, 0)).toBe(60_000);
+  });
+});
+
+describe("construireGrilleHl — instantané par bougie, report ≤ 2 pas", () => {
+  // Bougies 1 min : time 0, 60 000, 120 000. Instantanés à ts = 5 000 puis 115 000.
+  const candles = [
+    candle({ time: 0, close: 100 }),
+    candle({ time: 60_000, close: 100 }),
+    candle({ time: 120_000, close: 100 }),
+  ];
+  const pas = 300_000;
+
+  it("retient le DERNIER instantané ≤ fin de bougie et répartit long/short par bucket", () => {
+    const instantanes = [
+      snap(5_000, [
+        [100, "long", 500],
+        [100, "short", 200],
+      ]),
+      snap(115_000, [[100.05, "long", 900]]), // tailleBucket(100)=0,1 → bucket 1000/1000
+    ];
+    const grid = construireGrilleHl(instantanes, candles, 0, 3, pas);
+    expect(grid).not.toBeNull();
+    // Bougie 0 (fin 60 000) → snap 5 000 ; bougie 1 (fin 120 000) → snap 115 000 ;
+    // bougie 2 (fin 180 000) → snap 115 000 (encore ≤ fin, et ≥ time − 2 pas).
+    const b0 = grid?.cells.get("0:1000");
+    const b1 = grid?.cells.get("60000:1000");
+    const b2 = grid?.cells.get("120000:1000");
+    expect(b0?.longUsd).toBe(500);
+    expect(b0?.shortUsd).toBe(200);
+    expect(b0?.nLong).toBe(1);
+    expect(b0?.nShort).toBe(1);
+    expect(b1?.longUsd).toBe(900);
+    expect(b1?.dernierTime).toBe(115_000);
+    expect(b2?.longUsd).toBe(900);
+    expect(grid?.maxUsd).toBe(900);
+  });
+
+  it("laisse la colonne VIDE quand le dernier instantané a plus de 2 pas de retard", () => {
+    // Instantané à ts = 0 ; bougie à 1 200 000 (time − 2×pas = 600 000 > 0 → trop vieux).
+    const lointaines = [
+      candle({ time: 1_200_000, close: 100 }),
+      candle({ time: 1_260_000, close: 100 }),
+    ];
+    const grid = construireGrilleHl([snap(0, [[100, "long", 500]])], lointaines, 0, 2, pas);
+    expect(grid).toBeNull();
+  });
+
+  it("écarte les niveaux inexploitables et respecte les bornes de la plage", () => {
+    const instantanes = [snap(5_000, [[100, "long", 500], [Number.NaN, "long", 1], [0, "short", 9]])];
+    const grid = construireGrilleHl(instantanes, candles, 0, 3, pas);
+    // px NaN / 0 écartés → une seule cellule (long 500).
+    expect(grid?.cells.size).toBe(3); // bougies 0, 1 et 2 réutilisent le même instantané (≤ 2 pas)
+    expect(grid?.cells.get("0:1000")?.count).toBe(1);
+    // Plage [1,3) : la bougie 0 n'est pas remplie.
+    const partiel = construireGrilleHl(instantanes, candles, 1, 3, pas);
+    expect(partiel?.cells.has("0:1000")).toBe(false);
+    expect(partiel?.cells.size).toBe(2);
+  });
+
+  it("renvoie null sans instantané ni cellule", () => {
+    expect(construireGrilleHl([], candles, 0, 3, pas)).toBeNull();
+    expect(construireGrilleHl([snap(0)], candles, 0, 3, pas)).toBeNull();
+  });
+});
+
+describe("compterTrous — interruptions de collecte dans la fenêtre", () => {
+  const pas = 300_000;
+  const s = (ts: number) => snap(ts);
+
+  it("compte un trou par écart > 3 pas entre instantanés de la fenêtre", () => {
+    const instantanes = [s(0), s(1_000_000), s(1_300_000), s(3_000_000)];
+    // 0→1 000 000 (>3 pas) et 1 300 000→3 000 000 (>3 pas) ; 1 000 000→1 300 000 ok.
+    expect(compterTrous(instantanes, -100, 3_100_000, pas)).toBe(2);
+  });
+
+  it("trou initial seulement si la collecte avait déjà commencé (premierTs < debut)", () => {
+    const instantanes = [s(2_000_000)];
+    // premierTs connu AVANT la fenêtre + premier instantané > 3 pas après debut → trou.
+    expect(compterTrous(instantanes, 1_000_000, 3_000_000, pas, 500_000)).toBe(1);
+    // Collecte commencée DANS la fenêtre (premierTs ≥ debut) → pas de trou initial.
+    expect(compterTrous(instantanes, 0, 3_000_000, pas, 2_000_000)).toBe(0);
+    expect(compterTrous(instantanes, 0, 3_000_000, pas, null)).toBe(0);
+  });
+
+  it("ignore les instantanés hors fenêtre", () => {
+    const instantanes = [s(0), s(5_000_000)];
+    expect(compterTrous(instantanes, 0, 1_000_000, pas)).toBe(0);
+  });
+});
+
+describe("libelleLegendeHlHeat — légende raison comprise", () => {
+  it("annonce la raison pour chaque état non ok", () => {
+    expect(libelleLegendeHlHeat("sans-daemon", 0, 0, null, 300_000, 0, false)).toContain("daemon axiomd");
+    expect(libelleLegendeHlHeat("erreur", 0, 0, null, 300_000, 0, false)).toContain("source indisponible");
+    expect(libelleLegendeHlHeat("inactif", 0, 0, null, 300_000, 0, false)).toContain("reprendre dans LIQ");
+    expect(libelleLegendeHlHeat("vide", 0, 0, null, 300_000, 0, true)).toContain("collecte active");
+  });
+
+  it("libellé nominal : instantanés, adresses, couverture OI mesurée et pas", () => {
+    const l = libelleLegendeHlHeat("ok", 42, 474, 0.23, 300_000, 0, true);
+    expect(l).toContain("HL HEATMAP");
+    expect(l).toContain("42 instantanés");
+    expect(l).toContain("474 adresses");
+    expect(l).toContain("23 % OI");
+    expect(l).toContain("pas 5 min");
+  });
+
+  it("« couverture en mesure » quand l'OI est inconnue, et trous signalés", () => {
+    expect(libelleLegendeHlHeat("ok", 5, 474, null, 300_000, 0, true)).toContain("couverture en mesure");
+    expect(libelleLegendeHlHeat("ok", 5, 474, 0.2, 300_000, 2, true)).toContain("2 trous = daemon éteint");
   });
 });

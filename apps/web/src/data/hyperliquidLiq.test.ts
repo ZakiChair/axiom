@@ -116,3 +116,24 @@ describe("commande LIQHL sur Vercel", () => {
     expect(notifier).not.toHaveBeenCalled();
   });
 });
+
+// ───────── États transitoires du singleton (fetch en vol → « chargement ») ─────────
+
+// Le fetch daemon est bloqué en vol : l'activation (ou le changement de coin) doit poser
+// « chargement » — jamais « vide », qui mentirait (« aucun niveau ») pendant le scan ~50 s.
+vi.mock("./daemon", () => ({
+  hlLiqLevelsGet: vi.fn(() => new Promise(() => {})),
+  daemonSupporteHl: () => true,
+  kvPut: async () => 1,
+}));
+
+import { hlLiqStore, demarrerHyperliquidLiq } from "./hyperliquidLiq";
+
+describe("sync — l'état transitoire dit la vérité", () => {
+  it("activation avec fetch en vol → etat « chargement », pas « vide »", () => {
+    demarrerHyperliquidLiq();
+    hlLiqStore.getState().setActif(true);
+    expect(hlLiqStore.getState().etat).toBe("chargement");
+    hlLiqStore.getState().setActif(false);
+  });
+});

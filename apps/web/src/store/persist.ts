@@ -67,6 +67,7 @@ import { uiSectionsStore } from "./ui-sections";
 import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
 import { liqMarksStore, type LiqHeatMode, type Granularite } from "../chart/liquidationMarkers";
 import { liqEstStore, LEVIERS } from "../chart/liquidationEstimates";
+import { hlLiqStore } from "../data/hyperliquidLiq";
 import { distOverlayStore } from "../chart/distLignes";
 import { niveauxOverlaysStore, type FamilleNiveauxCles } from "../chart/niveauxOverlays";
 import { windowManagerStore, WINDOW_REGISTRY, type EtatFenetre } from "./windowManager";
@@ -422,6 +423,8 @@ interface PersistedSession {
   liqEstimates: boolean;
   /** Leviers cochés du modèle de niveaux estimés (sous-ensemble NON VIDE de LEVIERS). */
   liqLeviers: number[];
+  /** Bascule niveaux de liquidation RÉELS Hyperliquid + heatmap d'instantanés (LIQHL). */
+  liqHl: boolean;
   /** Bascule de l'overlay des bandes VaR sur le chart maître (chart/distLignes). */
   distOverlay: boolean;
   /** Bascule des niveaux clés périodiques sur le chart maître (chart/niveauxOverlays). */
@@ -456,6 +459,7 @@ function currentSession(): PersistedSession {
     liqBulles: liqMarksStore.getState().bulles,
     liqEstimates: liqEstStore.getState().actif,
     liqLeviers: liqEstStore.getState().leviers,
+    liqHl: hlLiqStore.getState().actif,
     distOverlay: distOverlayStore.getState().actif,
     niveauxCles: niveauxOverlaysStore.getState().niveauxCles,
     niveauxClesFamilles: niveauxOverlaysStore.getState().familles,
@@ -515,6 +519,8 @@ function hydrateSession(): void {
     );
     if (valides.length > 0) liqEstStore.getState().setLeviers(valides);
   }
+  // LIQHL : même régime que LIQEST — `setActif` est relayé au singleton (fetch daemon).
+  if (typeof p.liqHl === "boolean") hlLiqStore.getState().setActif(p.liqHl);
   if (typeof p.distOverlay === "boolean") distOverlayStore.getState().setActif(p.distOverlay);
   if (typeof p.niveauxCles === "boolean") niveauxOverlaysStore.getState().setActif("niveauxCles", p.niveauxCles);
   // Familles : le setter filtre les inconnues, réordonne et ignore une liste vide.
@@ -649,6 +655,7 @@ export function enablePersistence(): void {
   revenueStore.subscribe(saveSessionUi);
   liqMarksStore.subscribe(saveSessionUi);
   liqEstStore.subscribe(saveSessionUi);
+  hlLiqStore.subscribe(saveSessionUi);
   distOverlayStore.subscribe(saveSessionUi);
   niveauxOverlaysStore.subscribe(saveSessionUi);
   macroOverlayStore.subscribe(saveSessionUi);

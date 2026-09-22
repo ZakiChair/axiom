@@ -11,13 +11,20 @@
  * (chart/liquidationEstimates.ts).
  *
  * Ce module tient le CLIENT (mapping + décision d'état, PURS et testés) et le STORE + son
- * singleton de rafraîchissement ; le RENDU (barres horizontales au bord droit) est assuré par
- * `LiquidationHeatController` (chart/liquidationHeat.ts), comme pour les niveaux ESTIMÉS.
+ * singleton de rafraîchissement ; le RENDU (barres horizontales au bord droit + heatmap
+ * des instantanés historiques) est assuré par `LiquidationHeatController`
+ * (chart/liquidationHeat.ts), comme pour les niveaux ESTIMÉS.
+ *
+ * À l'ACTIVATION de la couche, le front pose aussi le drapeau KV `hl/heat` du daemon
+ * (UNE fois par activation, best-effort) : c'est lui qui enclenche la collecte d'
+ * instantanés historiques (`hlLiqHeat.ts` côté daemon, heatmap LIQHL côté chart).
+ * Aucune écriture au passage à OFF — la collecte reste un choix daemon persistant,
+ * pilotable depuis la fenêtre LIQ (« Collecte daemon »).
  */
 import { createStore } from "zustand/vanilla";
 import type { StoreApi } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
-import { hlLiqLevelsGet, daemonSupporteHl } from "./daemon";
+import { hlLiqLevelsGet, daemonSupporteHl, kvPut } from "./daemon";
 import { basePerp } from "./symbol";
 import { IS_VERCEL } from "../lib/deployment";
 import { marketStore } from "../store/market";
@@ -87,8 +94,13 @@ export function mapperReponseHl(brut: unknown): ReponseHlLiq | null {
   return { ts: o.ts, coin: o.coin, adressesScannees: adresses, niveaux };
 }
 
-/** État affiché de la couche (une seule raison à la fois, cf. légende du contrôleur). */
-export type EtatHl = "ok" | "sans-daemon" | "vide" | "erreur";
+/**
+ * État affiché de la couche (une seule raison à la fois, cf. légende du contrôleur).
+ * `chargement` est posé par `sync()` au lancement d'un fetch (activation ou changement
+ * de coin) et remplacé par l'état décidé à la réponse — sinon la légende affichait
+ * « aucun niveau pour ce symbole » pendant toute la requête, ce qui est faux.
+ */
+export type EtatHl = "ok" | "sans-daemon" | "vide" | "erreur" | "chargement";
 
 /**
  * État à afficher : la capability prime (sans daemon, aucune réponse ne peut être vraie —
@@ -136,10 +148,25 @@ const REFRESH_MS = 4 * 60 * 1000;
 
 let coinActif: string | null = null;
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
+/** Le drapeau KV `hl/heat` (collecte d'instantanés historiques) n'est posé qu'UNE fois
+ *  par activation de la couche — jamais au OFF (cf. en-tête). */
+let drapeauHeatPose = false;
+
+/**
+ * Pose le drapeau de collecte heatmap HL côté daemon, best-effort et UNE fois par
+ * activation. Lu APRÈS un fetch : `hlLiqLevelsGet` a sondé /health, la capability `hl`
+ * est alors à jour même si elle était inconnue à la bascule.
+ */
+function assurerDrapeauHeat(): void {
+  if (drapeauHeatPose || !daemonSupporteHl()) return;
+  drapeauHeatPose = true;
+  void kvPut("hl", "heat", { actif: true, majTs: Date.now() });
+}
 
 /** Interroge le daemon (best-effort) et publie si le coin n'a pas changé entre-temps. */
 async function rafraichir(coin: string): Promise<void> {
   const brut = await hlLiqLevelsGet(coin);
+  assurerDrapeauHeat();
   const reponse = brut === null ? null : mapperReponseHl(brut);
   // Lu APRÈS l'appel : `hlLiqLevelsGet` a sondé /health, la capability est donc à jour.
   const etat = deciderEtatHl(daemonSupporteHl(), reponse);
@@ -169,12 +196,16 @@ function sync(): void {
       refreshTimer = null;
     }
     coinActif = null;
+    drapeauHeatPose = false; // la prochaine activation re-posera le drapeau si besoin
     hlLiqStore.setState(VIDE);
     return;
   }
   if (coinActif !== coin) {
     coinActif = coin;
-    hlLiqStore.setState(VIDE); // évite d'afficher les niveaux de l'ancien coin pendant le fetch
+    // État « chargement » plutôt que VIDE (« vide » = aucun niveau, un mensonge pendant
+    // le fetch — le scan daemon peut durer ~50 s à froid) ; on purge quand même les
+    // niveaux de l'ancien coin pour ne pas les afficher sous le nouveau symbole.
+    hlLiqStore.setState({ ...VIDE, etat: "chargement" });
     void rafraichir(coin);
     if (refreshTimer === null) {
       refreshTimer = setInterval(() => {

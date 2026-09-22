@@ -241,6 +241,59 @@ export function seedDepuisCoinalyze(
   return out;
 }
 
+/** Jour UTC `YYYY-MM-DD` d'un timestamp. PURE (locale). */
+function jourUtc(ts: number): string {
+  return new Date(ts).toISOString().slice(0, 10);
+}
+
+/**
+ * Jours UTC (`YYYY-MM-DD`) de la fenêtre [depuis, jusqua] SANS AUCUN événement d'une
+ * venue autre que « coinalyze » — les seeds approx ne comptent pas comme couverture
+ * réelle : ce sont précisément ces jours-là que le repli Coinalyze ciblé vient combler
+ * (jours où le collecteur du daemon n'a rien vu, ex. daemon éteint). PURE.
+ */
+export function joursSansEvenements(
+  events: readonly LiqEvent[],
+  depuis: number,
+  jusqua: number,
+  now: number,
+): Set<string> {
+  const couverts = new Set<string>();
+  for (const ev of events) {
+    if (ev.venue === "coinalyze") continue;
+    if (ev.time >= depuis && ev.time <= jusqua) couverts.add(jourUtc(ev.time));
+  }
+  // Le jour UTC COURANT est exclu : il est partiel — des événements réels arriveront
+  // encore, et un seed approx y ferait doublon avec le flux en direct.
+  const jourCourant = jourUtc(now);
+  const jours = new Set<string>();
+  for (let t = Math.floor(depuis / 86_400_000) * 86_400_000; t <= jusqua; t += 86_400_000) {
+    const j = jourUtc(t);
+    if (j !== jourCourant && !couverts.has(j)) jours.add(j);
+  }
+  return jours;
+}
+
+/** Ne garde que les événements seed tombant un jour UTC de `jours`. PURE. */
+export function filtrerSeedSurJours(
+  seed: LiqEvent[],
+  jours: ReadonlySet<string>,
+): LiqEvent[] {
+  return seed.filter((ev) => jours.has(jourUtc(ev.time)));
+}
+
+/**
+ * Nombre de jours UTC DISTINCTS couverts par des événements `approx` (seed Coinalyze)
+ * du buffer — affiché en légende « Coinalyze ≈ sur N j » (honnêteté du repli). PURE.
+ */
+export function joursApproxDansEvenements(events: readonly LiqEvent[]): number {
+  const jours = new Set<string>();
+  for (const ev of events) {
+    if (ev.approx === true) jours.add(jourUtc(ev.time));
+  }
+  return jours.size;
+}
+
 // ─────────────────────────── Bascule (store vanilla local) ───────────────────────────
 
 /** Mode de coloration des CELLULES de la heatmap : intensité totale (viridis) ou
@@ -486,8 +539,30 @@ async function amorcerSeed(symbol: string): Promise<void> {
       publier();
       sauverProfil(symbol);
     }
-    // Collecteur VIVANT → son historique fait foi, pas de repli. Muet → on continue.
-    if (!collecteurLiqMuet(santeLiquidationsDaemon(), Date.now())) return;
+    // Collecteur VIVANT → son historique fait foi pour les jours couverts ; on complète
+    // quand même les JOURS SANS événement réel par un repli Coinalyze CIBLÉ (jours où le
+    // collecteur n'a rien vu — ex. daemon éteint) plutôt que de laisser la heatmap vide.
+    if (!collecteurLiqMuet(santeLiquidationsDaemon(), Date.now())) {
+      const maintenant = Date.now();
+      const joursManquants = joursSansEvenements(
+        evenements,
+        maintenant - SEED_WINDOW_MS,
+        maintenant,
+        maintenant,
+      );
+      if (joursManquants.size === 0) return;
+      const history = await fetchLiquidationHistory(symbol, maintenant - SEED_WINDOW_MS);
+      if (symboleAbonne !== symbol || history.length === 0) return;
+      const seed = filtrerSeedSurJours(
+        seedDepuisCoinalyze(history, marketStore.getState().candles),
+        joursManquants,
+      );
+      if (seed.length === 0) return;
+      evenements = bornerEvenements(fusionnerEvenements(evenements, seed), MAX_EVENTS);
+      publier();
+      sauverProfil(symbol);
+      return;
+    }
   }
   // Daemon absent ET buffer vide → repli Coinalyze (sinon on garde le buffer persisté).
   if (evenements.length > 0) return;

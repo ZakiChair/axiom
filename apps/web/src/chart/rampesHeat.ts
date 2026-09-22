@@ -83,6 +83,25 @@ const RAMPE_MATRIX: ReadonlyArray<readonly [number, number, number]> = [
 const VIRIDIS_INVERSE: ReadonlyArray<readonly [number, number, number]> = [...VIRIDIS].reverse();
 
 /**
+ * Rampe AMBRE dédiée à la heatmap des NIVEAUX HL RÉELS (instantanés historiques collectés
+ * par le daemon, `GET /hl/liqheat/:coin`) : brun très sombre → ambre franc → presque
+ * blanc. Couleur DISTINCTE de la rampe du thème (qui peint les liquidations EXÉCUTÉES) :
+ * les deux couches peuvent coexister sans se confondre — données mesurées ≠ flux live.
+ */
+export const RAMPE_HL_AMBRE: ReadonlyArray<readonly [number, number, number]> = [
+  [60, 30, 0],
+  [160, 90, 10],
+  [240, 160, 40],
+  [255, 220, 120],
+  [255, 250, 220],
+];
+/** Rampe HL INVERSÉE pour fonds clairs (même logique que `VIRIDIS_INVERSE` : le sombre
+ *  devient le maximum — l'ambre pâle serait illisible sur fond clair). */
+export const RAMPE_HL_AMBRE_INVERSEE: ReadonlyArray<readonly [number, number, number]> = [
+  ...RAMPE_HL_AMBRE,
+].reverse();
+
+/**
  * Arrêts RVB (5 crans comme VIRIDIS) de la rampe de couleur ESTHÉTIQUE du thème actif — c'est
  * un choix par thème, PAS un réglage utilisateur : `bloomberg` → noir→ambre, `matrix` →
  * noir→vert néon, `dark`/`aurora` → viridis direct, `cute` (et tout thème à FOND CLAIR) →

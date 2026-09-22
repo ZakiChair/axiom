@@ -13,6 +13,7 @@ import {
   daemonVersEvenements,
   filtrerFenetre,
   grouperCascades,
+  libelleCollecteHeat,
   libelleSourceHl,
   magnitudeRelative,
   statsLiquidations,
@@ -284,5 +285,43 @@ describe("libelleSourceHl (honnêteté de la source Hyperliquid)", () => {
     expect(libelleSourceHl(muet, now)).toBe(
       `Hyperliquid : flux muet depuis ${Math.round((SEUIL_COLLECTEUR_MUET_MS + 60_000) / 60_000)} min`,
     );
+  });
+});
+
+describe("libelleCollecteHeat — ligne de collecte des instantanés HL", () => {
+  const now = Date.UTC(2024, 0, 10, 12);
+  const collecte = {
+    actif: true,
+    dernierInstantaneTs: now - 4 * 60_000,
+    periodeMs: 300_000,
+    retentionMs: 14 * 24 * 3_600_000,
+    premierTs: now - 2 * 86_400_000,
+  };
+
+  it("daemon jamais joint / collecte arrêtée : raison explicite", () => {
+    expect(libelleCollecteHeat(null, 0, null, now)).toContain("daemon axiomd");
+    expect(libelleCollecteHeat({ ...collecte, actif: false }, 0, null, now)).toContain(
+      "collecte daemon arrêtée",
+    );
+  });
+
+  it("collecte active : depuis, instantanés, rétention, dernier âge, couverture mesurée", () => {
+    const l = libelleCollecteHeat(collecte, 42, 0.23, now);
+    expect(l).toContain("Heatmap HL : collecte daemon active depuis");
+    expect(l).toContain("42 instantanés (14 j)");
+    expect(l).toContain("dernier il y a 4 min");
+    expect(l).toContain("couverture ≈ 23 % OI");
+  });
+
+  it("aucun instantané / couverture inconnue : « jamais » et « couverture en mesure »", () => {
+    const l = libelleCollecteHeat(
+      { ...collecte, dernierInstantaneTs: 0, premierTs: null },
+      0,
+      null,
+      now,
+    );
+    expect(l).toContain("0 instantané");
+    expect(l).toContain("dernier jamais");
+    expect(l).toContain("couverture en mesure");
   });
 });

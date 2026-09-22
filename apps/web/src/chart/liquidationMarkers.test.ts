@@ -48,6 +48,9 @@ import {
   dernierTempsVenue,
   deserialiserEvenements,
   fusionnerEvenements,
+  joursApproxDansEvenements,
+  joursSansEvenements,
+  filtrerSeedSurJours,
   liqEventsStore,
   liqMarksStore,
   retenirFluxLiq,
@@ -348,7 +351,9 @@ describe("amorce du buffer — repli tiers quand le collecteur daemon est MUET",
     relacher();
   });
 
-  it("daemon qui répond VIDE et collecteur VIVANT → aucun repli (l'historique daemon fait foi)", async () => {
+  it("daemon VIDE et collecteur VIVANT → repli Coinalyze CIBLÉ sur les jours sans événement réel", async () => {
+    // Collecteur vivant : l'historique daemon fait foi pour les jours qu'il couvre ;
+    // les jours SANS aucun événement réel sont complétés par Coinalyze (filtré).
     liqGetSpy.mockResolvedValue([]);
     santeSpy.mockReturnValue({
       demarreTs: Date.now(),
@@ -357,9 +362,85 @@ describe("amorce du buffer — repli tiers quand le collecteur daemon est MUET",
     coinalyzeSpy.mockResolvedValue([{ time: 1500, longUsd: 3000, shortUsd: 0 }]);
 
     const relacher = retenirFluxLiq();
-    await vi.waitFor(() => expect(liqGetSpy).toHaveBeenCalled());
-    expect(coinalyzeSpy).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(coinalyzeSpy).toHaveBeenCalled());
+    // Le point de 1970 ne tombe sur aucun jour manquant de la fenêtre 7 j → filtré.
     expect(liqEventsStore.getState().events).toEqual([]);
     relacher();
+  });
+
+  it("collecteur vivant + jour récent manquant → le seed Coinalyze de CE jour est gardé", async () => {
+    // Un événement réel daemon aujourd'hui + un point Coinalyze d'hier : hier est un
+    // jour manquant → le seed est conservé ; aujourd'hui (couvert) n'est pas re-seedé.
+    liqGetSpy.mockResolvedValue([
+      { time: Date.now() - 60_000, side: "long", price: 100, qty: 1, usd: 50, venue: "bybit" },
+    ]);
+    santeSpy.mockReturnValue({
+      demarreTs: Date.now(),
+      venues: { bybit: { dernierMessageTs: Date.now(), derniereErreur: null } },
+    });
+    coinalyzeSpy.mockResolvedValue([
+      { time: Date.now() - 26 * 3_600_000, longUsd: 3000, shortUsd: 0 },
+    ]);
+
+    const relacher = retenirFluxLiq();
+    await vi.waitFor(() =>
+      expect(liqEventsStore.getState().events.some((e) => e.venue === "coinalyze")).toBe(true),
+    );
+    const evts = liqEventsStore.getState().events;
+    expect(evts.some((e) => e.venue === "bybit")).toBe(true);
+    expect(evts.filter((e) => e.venue === "coinalyze")).toHaveLength(1);
+    expect(evts.find((e) => e.venue === "coinalyze")?.approx).toBe(true);
+    relacher();
+  });
+});
+
+// ───────── Repli Coinalyze par jour (collecteur vivant, jours manquants) ─────────
+
+describe("joursSansEvenements / filtrerSeedSurJours / joursApproxDansEvenements", () => {
+  const t = (j: number, h = 12) => Date.UTC(2024, 0, j, h);
+  const ev = (
+    partial: Partial<LiqEvent> & Pick<LiqEvent, "time" | "side" | "price" | "usd">,
+  ): LiqEvent => ({ qty: 1, venue: "test", ...partial });
+
+  it("liste les jours UTC de la fenêtre sans événement de venue réelle", () => {
+    const events = [
+      ev({ time: t(2), side: "long", price: 1, usd: 1 }), // venue "test" → jour 2 couvert
+      ev({ time: t(4), side: "short", price: 1, usd: 1, venue: "coinalyze", approx: true }),
+      // approx seul → le jour 4 reste « sans événement réel »
+    ];
+    const jours = joursSansEvenements(events, t(1, 0), t(5, 0), t(5, 12));
+    expect(jours.has("2024-01-02")).toBe(false);
+    expect(jours.has("2024-01-03")).toBe(true);
+    expect(jours.has("2024-01-04")).toBe(true);
+    // Le jour courant (2024-01-05) est EXCLU même sans événement : il est partiel,
+    // des événements réels arriveront — un seed approx y ferait doublon.
+    expect(jours.has("2024-01-05")).toBe(false);
+    expect(jours.size).toBe(3); // jours 1, 3, 4
+  });
+
+  it("fenêtre vide → set vide", () => {
+    expect(joursSansEvenements([], t(3), t(1), t(5)).size).toBe(0);
+  });
+
+  it("filtrerSeedSurJours ne garde que les seeds tombant un jour demandé", () => {
+    const seed = [
+      ev({ time: t(1), side: "long", price: 1, usd: 10, venue: "coinalyze", approx: true }),
+      ev({ time: t(2), side: "long", price: 1, usd: 20, venue: "coinalyze", approx: true }),
+      ev({ time: t(3), side: "long", price: 1, usd: 30, venue: "coinalyze", approx: true }),
+    ];
+    const gardes = filtrerSeedSurJours(seed, new Set(["2024-01-02", "2024-01-03"]));
+    expect(gardes.map((e) => e.usd)).toEqual([20, 30]);
+    expect(filtrerSeedSurJours(seed, new Set())).toEqual([]);
+  });
+
+  it("joursApproxDansEvenements compte les jours UTC distincts couverts par l'approx", () => {
+    const events = [
+      ev({ time: t(1), side: "long", price: 1, usd: 1, approx: true }),
+      ev({ time: t(1, 20), side: "short", price: 1, usd: 1, approx: true }), // même jour
+      ev({ time: t(3), side: "long", price: 1, usd: 1, approx: true }),
+      ev({ time: t(3), side: "long", price: 1, usd: 1 }), // réel : ignoré du compteur approx
+    ];
+    expect(joursApproxDansEvenements(events)).toBe(2);
+    expect(joursApproxDansEvenements([])).toBe(0);
   });
 });

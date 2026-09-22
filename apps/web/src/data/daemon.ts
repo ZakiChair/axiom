@@ -809,6 +809,41 @@ export function daemonSupporteHl(): boolean {
   return daemonSupporte("hl");
 }
 
+/** Filtres de lecture de l'historique d'instantanés HL (traduits en query). */
+export interface OptionsHlHeatGet {
+  depuis?: number;
+  jusqua?: number;
+  /** Pas de sous-échantillonnage côté daemon (ms) — le dernier instantané de chaque seau est gardé. */
+  pas?: number;
+}
+
+/**
+ * Lit l'historique des instantanés de niveaux de liquidation HL d'un coin
+ * (`GET /hl/liqheat/:coin`, collecteur opt-in du daemon) — charge utile BRUTE, dont la
+ * VALIDATION de forme vit dans `data/hyperliquidHeat.ts` (pure et testée, convention
+ * `hlLiqLevelsGet`). Même régime : sonde `hl` d'abord, `null` en échec — best-effort.
+ */
+export async function hlLiqHeatGet(
+  coin: string,
+  opts: OptionsHlHeatGet = {},
+): Promise<unknown | null> {
+  if (!(await detectDaemon("hl"))) return null;
+  try {
+    const params = new URLSearchParams();
+    if (opts.depuis !== undefined) params.set("depuis", String(opts.depuis));
+    if (opts.jusqua !== undefined) params.set("jusqua", String(opts.jusqua));
+    if (opts.pas !== undefined) params.set("pas", String(opts.pas));
+    const query = params.toString();
+    const res = await fetch(
+      `${baseDaemon()}/hl/liqheat/${encodeURIComponent(coin)}${query ? `?${query}` : ""}`,
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Pousse un lot de liquidations au daemon (insert idempotent). Best-effort SANS sonde
  * (comme `candlesPush`) : renvoie `false` en cas d'échec silencieux. Le format de fil du

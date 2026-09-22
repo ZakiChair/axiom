@@ -73,6 +73,8 @@ import { VolumeProfileController } from "./volumeProfile";
 // de heatmap pour une couche éteinte par défaut (budget JS initial, cf. scripts/verifier-budget-build.mjs).
 import type { LiquidationHeatController } from "./liquidationHeat";
 import { liqMarksStore } from "./liquidationMarkers";
+import { liqEstStore } from "./liquidationEstimates";
+import { hlLiqStore } from "../data/hyperliquidLiq";
 import { DepthHeatController, depthHeatStore } from "./depthHeat";
 import { NiveauxLignesController, type LigneNiveau } from "./niveauxLignes";
 import { distOverlayStore, fournisseurDistLignes } from "./distLignes";
@@ -979,6 +981,8 @@ export function ChartInstance({
     let unsubscribeCompare: (() => void) | null = null;
     let unsubscribeVolumeProfile: (() => void) | null = null;
     let unsubscribeLiqHeat: (() => void) | null = null;
+    let unsubscribeLiqHeatEst: (() => void) | null = null;
+    let unsubscribeLiqHeatHl: (() => void) | null = null;
     let unsubscribeDepthHeat: (() => void) | null = null;
     let unsubscribeDistLignes: (() => void) | null = null;
     let unsubscribePaperLignes: (() => void) | null = null;
@@ -1014,7 +1018,23 @@ export function ChartInstance({
         }
         void assurerLiqHeat().then(() => liqHeat?.setEnabled(true));
       });
-      if (liqMarksStore.getState().actif) void assurerLiqHeat();
+      // Les couches sœurs LIQEST / LIQHL partagent le MÊME contrôleur (reconcile()
+      // interne) mais ne passent pas par setEnabled : on instancie donc le contrôleur
+      // dès que l'UNE des trois bascules passe ON, sinon LIQEST/LIQHL resteraient sans
+      // rendu tant que LIQMARK n'a jamais été activé.
+      unsubscribeLiqHeatEst = liqEstStore.subscribe((state) => {
+        if (state.actif) void assurerLiqHeat();
+      });
+      unsubscribeLiqHeatHl = hlLiqStore.subscribe((state) => {
+        if (state.actif) void assurerLiqHeat();
+      });
+      if (
+        liqMarksStore.getState().actif ||
+        liqEstStore.getState().actif ||
+        hlLiqStore.getState().actif
+      ) {
+        void assurerLiqHeat();
+      }
 
       // Heatmap de liquidité du carnet (BOOK) : lit le buffer de colonnes échantillonnées
       // (demarrerDepthHeat, greffé ailleurs) ; la bascule `depthHeatStore.actif` pilote l'affichage.
@@ -1351,6 +1371,8 @@ export function ChartInstance({
       unsubscribeCompare?.();
       unsubscribeVolumeProfile?.();
       unsubscribeLiqHeat?.();
+      unsubscribeLiqHeatEst?.();
+      unsubscribeLiqHeatHl?.();
       unsubscribeDepthHeat?.();
       unsubscribeDistLignes?.();
       unsubscribePaperLignes?.();

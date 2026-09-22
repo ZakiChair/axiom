@@ -10,6 +10,8 @@
 import type { LiqEvent } from "../chart/liquidationMarkers";
 import type { LiqDaemon, SanteLiquidationsDaemon } from "../data/daemon";
 import { SEUIL_COLLECTEUR_MUET_MS } from "../data/daemon";
+import type { CollecteHeat } from "../data/hyperliquidHeat";
+import { formatAge, formatDateHeure } from "../lib/format";
 
 /** Ne garde que les événements de la fenêtre glissante (time ≥ depuisMs). PURE. */
 export function filtrerFenetre(events: LiqEvent[], depuisMs: number): LiqEvent[] {
@@ -251,4 +253,34 @@ export function libelleSourceHl(
   }
   if (hl.derniereErreur !== null) libelle += ` · ${hl.derniereErreur}`;
   return libelle;
+}
+
+/**
+ * Ligne d'honnêteté de la collecte HEATMAP HL (instantanés de niveaux réels, daemon
+ * opt-in) pour la fenêtre LIQ : « collecte daemon active depuis <date> · N instantanés
+ * (R j) · dernier il y a <durée> · couverture ≈ X % OI ». `collecte` null (daemon
+ * jamais joint) → « nécessite le daemon axiomd » ; collecte arrêtée → raison explicite
+ * plutôt qu'une ligne muette. `derniereCouverture` = couverture mesurée du dernier
+ * instantané (null → « couverture en mesure »). PURE.
+ */
+export function libelleCollecteHeat(
+  collecte: CollecteHeat | null,
+  nbInstantanes: number,
+  derniereCouverture: number | null,
+  now: number,
+): string {
+  if (collecte === null) return "Heatmap HL : nécessite le daemon axiomd";
+  if (!collecte.actif) return "Heatmap HL : collecte daemon arrêtée";
+  const depuis =
+    collecte.premierTs !== null && collecte.premierTs > 0
+      ? formatDateHeure(collecte.premierTs)
+      : "à l'instant";
+  const dernier =
+    collecte.dernierInstantaneTs > 0 ? formatAge(collecte.dernierInstantaneTs, now) : "jamais";
+  const retentionJ = Math.round(collecte.retentionMs / 86_400_000);
+  const couv =
+    derniereCouverture === null
+      ? "couverture en mesure"
+      : `couverture ≈ ${Math.round(derniereCouverture * 100)} % OI`;
+  return `Heatmap HL : collecte daemon active depuis ${depuis} · ${nbInstantanes} instantané${nbInstantanes > 1 ? "s" : ""} (${retentionJ} j) · dernier ${dernier} · ${couv}`;
 }

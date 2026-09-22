@@ -23,6 +23,7 @@ import {
   VIRIDIS,
   liqEventsStore,
   liqMarksStore,
+  joursApproxDansEvenements,
   type LiqEvent,
   type LiqHeatMode,
 } from "./liquidationMarkers";
@@ -34,12 +35,20 @@ import {
   type NiveauConsomme,
 } from "./liquidationEstimates";
 import { hlLiqStore, type EtatHl } from "../data/hyperliquidLiq";
+import {
+  assurerHeat,
+  arreterHeat,
+  hlHeatStore,
+  type EtatHeat,
+  type InstantaneHlHeat,
+} from "../data/hyperliquidHeat";
+import { basePerp } from "../data/symbol";
 import type { Commande } from "../commands/registry";
 import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
 import { orderflowStore } from "../store/orderflow";
 import { volumeProfileStore } from "../store/volumeProfile";
-import { formatHeureMinute, formatPrice, formatUsd } from "../lib/format";
+import { formatDateHeure, formatHeureMinute, formatPrice, formatUsd } from "../lib/format";
 import { lireTokenCanvas } from "../lib/canvasTokens";
 
 /** Cellule agrégée : une bougie × un bucket de prix. */
@@ -50,8 +59,12 @@ export interface LiqCell {
   shortUsd: number;
   count: number;
   /** Temps du dernier événement agrégé dans la cellule (max des `time`) — pilote le fade-in
-   *  des cellules fraîches au RENDER (cf. `alphaFadeIn`) ; absent si la cellule est vide. */
+   *  des cellules fraîches au RENDER (cf. `alphaFadeIn`) ; absent si la cellule est vide.
+   *  Sur la grille HL, porte le `ts` de l'instantané retenu (affiché dans le tooltip). */
   dernierTime?: number;
+  /** Nombre de niveaux par côté — renseigné par la grille HL (tooltip « (n) »). */
+  nLong?: number;
+  nShort?: number;
 }
 
 /** Grille complète : cellules indexées par `${candleTime}:${bucketIdx}` + méta. */
@@ -315,6 +328,8 @@ import {
   estFondClair,
   parseCssColor,
   rampePourTheme,
+  RAMPE_HL_AMBRE,
+  RAMPE_HL_AMBRE_INVERSEE,
 } from "./rampesHeat";
 export {
   alphaFadeIn,
@@ -482,10 +497,169 @@ export function libelleLegendeHl(
   nbClustersVisibles: number,
 ): string {
   if (etat === "sans-daemon") return "LIQ HL RÉELS — nécessite le daemon axiomd";
+  if (etat === "chargement") return "LIQ HL RÉELS — chargement…";
   if (etat === "erreur") return "LIQ HL RÉELS — source indisponible";
   if (etat === "vide") return "LIQ HL RÉELS — aucun niveau pour ce symbole";
   if (nbClustersVisibles === 0) return "LIQ HL RÉELS — aucun niveau dans ±40 %";
   return `LIQ HL RÉELS — ${adressesScannees} adresses · ${nbPositions} positions`;
+}
+
+// ───────────── Heatmap des instantanés HL (LIQHL) — fonctions PURES ─────────────
+
+/** Pas minimal de collecte côté daemon (5 min) : plancher du `pas` demandé à la route. */
+export const PERIODE_SNAP_HL_MS = 5 * 60_000;
+/** Report admissible d'un instantané sur une bougie, en multiples du pas (2 périodes). */
+const HL_REPORT_MAX_PAS = 2;
+
+/**
+ * Pas temporel des bougies de la plage [from, to) : MÉDIANE des écarts consécutifs
+ * (robuste aux trous de données — une session interrompue ne décale pas le pas),
+ * plancher 60 000 ms. PURE.
+ */
+export function pasBougieMs(candles: Candle[], from: number, to: number): number {
+  const ecarts: number[] = [];
+  for (let i = Math.max(1, from + 1); i < to && i < candles.length; i++) {
+    const a = candles[i - 1];
+    const b = candles[i];
+    if (a !== undefined && b !== undefined && b.time > a.time) ecarts.push(b.time - a.time);
+  }
+  const mediane = ecarts.sort((x, y) => x - y)[Math.floor(ecarts.length / 2)];
+  return Math.max(60_000, mediane ?? 0);
+}
+
+/**
+ * Grille HL : pour chaque bougie d'index i ∈ [from, to), retient le DERNIER instantané
+ * dont `ts ≤ fin de bougie` (`time + pasBougie`) ET `ts ≥ time − 2 × pasMs` — au-delà de
+ * 2 périodes de report la colonne reste VIDE (un instantané trop vieux ne mesure plus
+ * le carnet au temps de la bougie). Les niveaux du snapshot retenu sont répartis par
+ * bucket (`tailleBucket(close dernière bougie) × facteurTaille`, même taille que la
+ * grille exécutée) en séparant long/short ; `dernierTime` porte le `ts` de l'instantané
+ * (tooltip) et `nLong`/`nShort` le nombre de niveaux de chaque côté. `instantanes` est
+ * attendu trié par ts croissant (cf. `fusionnerInstantanes`) : le curseur ne recule
+ * donc jamais. Renvoie `null` si la plage est vide ou ne produit aucune cellule. PURE.
+ */
+export function construireGrilleHl(
+  instantanes: readonly InstantaneHlHeat[],
+  candles: Candle[],
+  from: number,
+  to: number,
+  pasMs: number,
+  facteurTaille = 1,
+): LiqGrid | null {
+  if (to - from < 1 || !(pasMs > 0)) return null;
+  const dernier = candles[to - 1];
+  if (dernier === undefined) return null;
+  const taille = tailleBucket(dernier.close) * facteurTaille;
+  if (!(taille > 0)) return null;
+  const pasBougie = pasBougieMs(candles, from, to);
+
+  const cells = new Map<string, LiqCell>();
+  let curseur = -1; // dernier instantané avec ts ≤ fin de bougie courante (croissant avec i)
+  for (let i = from; i < to; i++) {
+    const c = candles[i];
+    if (c === undefined) continue;
+    const fin = c.time + pasBougie;
+    while (curseur + 1 < instantanes.length) {
+      const s = instantanes[curseur + 1];
+      if (s === undefined || s.ts > fin) break;
+      curseur += 1;
+    }
+    const snap = curseur >= 0 ? instantanes[curseur] : undefined;
+    if (snap === undefined || snap.ts < c.time - HL_REPORT_MAX_PAS * pasMs) continue;
+    for (const n of snap.niveaux) {
+      if (!(n.px > 0) || !Number.isFinite(n.usd)) continue;
+      const bucketIdx = bucketIndex(n.px, taille);
+      const cle = `${c.time}:${bucketIdx}`;
+      let cell = cells.get(cle);
+      if (cell === undefined) {
+        cell = { candleTime: c.time, bucketIdx, longUsd: 0, shortUsd: 0, count: 0 };
+        cells.set(cle, cell);
+      }
+      if (n.side === "long") {
+        cell.longUsd += n.usd;
+        cell.nLong = (cell.nLong ?? 0) + 1;
+      } else {
+        cell.shortUsd += n.usd;
+        cell.nShort = (cell.nShort ?? 0) + 1;
+      }
+      cell.count += 1;
+      if (cell.dernierTime === undefined || snap.ts > cell.dernierTime) cell.dernierTime = snap.ts;
+    }
+  }
+
+  if (cells.size === 0) return null;
+  let maxUsd = 0;
+  for (const cell of cells.values()) {
+    const total = cell.longUsd + cell.shortUsd;
+    if (total > maxUsd) maxUsd = total;
+  }
+  return { cells, taille, maxUsd };
+}
+
+/**
+ * Compte les TROUS de collecte dans [debut, fin] : un trou par écart > 3 × pasMs entre
+ * instantanés consécutifs de la fenêtre, PLUS le trou initial quand le premier
+ * instantané arrive > 3 pas après `debut` ALORS QUE la collecte avait déjà commencé
+ * (`premierTs < debut` — sinon l'absence en tête signifie juste « pas encore collecté »).
+ * Ces trous matérialisent les périodes où le daemon était éteint (légende « T trous »).
+ * PURE.
+ */
+export function compterTrous(
+  instantanes: readonly InstantaneHlHeat[],
+  debut: number,
+  fin: number,
+  pasMs: number,
+  premierTs: number | null = null,
+): number {
+  if (!(pasMs > 0)) return 0;
+  const seuil = 3 * pasMs;
+  let trous = 0;
+  let precedent: number | null = null;
+  for (const s of instantanes) {
+    if (s.ts < debut || s.ts > fin) continue;
+    if (precedent === null) {
+      if (premierTs !== null && premierTs < debut && s.ts - debut > seuil) trous += 1;
+    } else if (s.ts - precedent > seuil) {
+      trous += 1;
+    }
+    precedent = s.ts;
+  }
+  return trous;
+}
+
+/**
+ * Libellé de la légende HL HEATMAP, RAISON COMPRISE (même exigence que `libelleLegendeHl`).
+ * ⚠️ HONNÊTETÉ : « couverture ≈ Y % OI » annonce la part MESURÉE de l'open interest
+ * couverte par l'échantillon du leaderboard — jamais le carnet entier ; « T trous =
+ * daemon éteint » signale les interruptions de collecte au lieu de les masquer. PURE.
+ */
+export function libelleLegendeHlHeat(
+  etat: EtatHeat,
+  nbInstantanes: number,
+  adresses: number,
+  couverture: number | null,
+  pasMs: number,
+  trous: number,
+  collecteActive: boolean,
+  premierTs: number | null = null,
+): string {
+  if (etat === "sans-daemon") return "HL HEATMAP — nécessite le daemon axiomd";
+  if (etat === "erreur") return "HL HEATMAP — source indisponible";
+  if (etat === "inactif") return "HL HEATMAP — collecte daemon arrêtée — reprendre dans LIQ";
+  if (etat === "vide") {
+    return collecteActive
+      ? `HL HEATMAP — aucun instantané encore (collecte active${
+          premierTs !== null ? ` depuis ${formatDateHeure(premierTs)}` : ""
+        })`
+      : "HL HEATMAP — aucun instantané encore";
+  }
+  const couv =
+    couverture === null
+      ? "couverture en mesure"
+      : `couverture ≈ ${Math.round(couverture * 100)} % OI`;
+  let libelle = `HL HEATMAP (niveaux réels) — ${nbInstantanes} instantanés · ${adresses} adresses · ${couv} · pas ${Math.round(pasMs / 60_000)} min`;
+  if (trous > 0) libelle += ` · ${trous} trous = daemon éteint`;
+  return libelle;
 }
 
 // ─────────────────────────── Flash de bande (lien feed→chart) ───────────────────────────
@@ -578,6 +752,19 @@ interface Tokens {
   downRgb: [number, number, number];
   /** Teinte EST du thème, résolue 1×/frame (cf. `teinteEstPourTheme`). */
   estRgb: readonly [number, number, number];
+  /** Rampe ambre de la heatmap HL (inversée sur fond clair), résolue 1×/frame. */
+  rampeHl: ReadonlyArray<readonly [number, number, number]>;
+}
+
+/** Paramètres de rendu alternatifs des cellules — la heatmap HL (instantanés daemon)
+ *  réutilise le même rendu que les cellules exécutées mais avec la rampe AMBRE, un alpha
+ *  plus franc (niveaux DEBOUT, pas un flux passé) et SANS fade-in (un instantané n'est
+ *  pas un événement « frais »). */
+interface OptionsCellules {
+  rampe?: ReadonlyArray<readonly [number, number, number]>;
+  alphaMin?: number;
+  alphaMax?: number;
+  sansFade?: boolean;
 }
 
 /** Constantes de repli RVB pour les teintes up/down si le token du thème n'est pas parsable (#10b981 / #ef4444). */
@@ -623,6 +810,16 @@ export class LiquidationHeatController {
    */
   private grilleObsolete = true;
   private derniereGrille: LiqGrid | null = null;
+  /**
+   * Grille HL (instantanés historiques du daemon) mémoïsée comme la grille exécutée :
+   * mêmes invalidations via `markDirty` (données/viewport/granularité) PLUS chaque
+   * publication de `hlHeatStore` — les instantanés arrivent hors du flux liquidations.
+   */
+  private grilleHlObsolete = true;
+  private derniereGrilleHl: LiqGrid | null = null;
+  private unsubHeat: (() => void) | null = null;
+  /** Suit la transition LIQHL → OFF : `arreterHeat` coupe alors le minuteur du store. */
+  private hlEtaitActif = false;
   /**
    * Cache SYMÉTRIQUE à la grille pour les niveaux ESTIMÉS (calcul O(pointsOI × bougies)) :
    * recalculé seulement sur les mêmes signaux que la grille (données/viewport/OI/symbole via
@@ -671,6 +868,7 @@ export class LiquidationHeatController {
 
   private readonly markDirty = (): void => {
     this.grilleObsolete = true;
+    this.grilleHlObsolete = true;
     this.niveauxObsoletes = true;
     this.dirty = true;
   };
@@ -789,6 +987,12 @@ export class LiquidationHeatController {
     this.unsubOrderflow = orderflowStore.subscribe((s, prev) => {
       if (s.enabled !== prev.enabled) this.dirty = true;
     });
+    // Publication d'instantanés HL (fetch toutes les 5 min tant que LIQHL est actif) :
+    // la grille HL est à reconstruire, puis un repaint — comme un changement de données.
+    this.unsubHeat = hlHeatStore.subscribe(() => {
+      this.grilleHlObsolete = true;
+      this.dirty = true;
+    });
     // Redimensionnement du conteneur (resize fenêtre, toggle sidebar…) : aucun
     // scroll/zoom/tick ne le signale autrement, d'où l'observer dédié.
     this.resizeObserver = new ResizeObserver(this.markDirty);
@@ -816,6 +1020,12 @@ export class LiquidationHeatController {
     this.unsubMode = null;
     this.unsubOrderflow?.();
     this.unsubOrderflow = null;
+    this.unsubHeat?.();
+    this.unsubHeat = null;
+    // Coupe le minuteur et vide le store HL : sans contrôleur actif, rien ne consomme
+    // les instantanés (LIQHL OFF ou contrôleur arrêté).
+    arreterHeat();
+    this.hlEtaitActif = false;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.animeJusqua = 0;
@@ -823,6 +1033,8 @@ export class LiquidationHeatController {
     this.dernierCrosshair = null;
     this.derniereGrille = null;
     this.grilleObsolete = true;
+    this.derniereGrilleHl = null;
+    this.grilleHlObsolete = true;
     this.derniersNiveaux = null;
     this.derniersConsommes = null;
     this.niveauxObsoletes = true;
@@ -911,13 +1123,24 @@ export class LiquidationHeatController {
       upRgb: parseCssColor(up) ?? UP_RGB_FALLBACK,
       downRgb: parseCssColor(down) ?? DOWN_RGB_FALLBACK,
       estRgb: teinteEstPourTheme(themeStore.getState().theme),
+      rampeHl: fondClair ? RAMPE_HL_AMBRE_INVERSEE : RAMPE_HL_AMBRE,
     };
 
-    // Deux couches INDÉPENDANTES sur le même canvas : heatmap RÉELLE (LIQMARK) et niveaux
-    // ESTIMÉS (LIQEST). Chacune est activable seule (cf. reconcile()).
+    // Trois couches INDÉPENDANTES sur le même canvas : heatmap RÉELLE (LIQMARK), niveaux
+    // ESTIMÉS (LIQEST) et niveaux RÉELS HL (LIQHL — barres + heatmap d'instantanés).
     const heatActif = liqMarksStore.getState().actif;
     const estActif = liqEstStore.getState().actif;
     const hlActif = hlLiqStore.getState().actif;
+    // Transition LIQHL → OFF : coupe le minuteur de rafraîchissement et vide le store.
+    if (!hlActif && this.hlEtaitActif) arreterHeat();
+    this.hlEtaitActif = hlActif;
+    if (hlActif) {
+      // Alimente l'historique d'instantanés SANS bloquer le rendu (fetch incrémental).
+      this.assurerHeatVue();
+      // La heatmap des instantanés est peinte D'ABORD : les cellules exécutées (données
+      // live) passent par-dessus — le flux récent prime la mesure historique.
+      this.dessinerHeatmapHl(main, tokens, heatActif);
+    }
     if (heatActif) this.dessinerHeatmap(main, tokens);
     if (estActif) this.dessinerNiveauxEstimes(main, tokens);
     // Remis à zéro À CHAQUE frame : sans couche HL peinte, la légende ne doit pas réutiliser
@@ -1018,6 +1241,103 @@ export class LiquidationHeatController {
   }
 
   /**
+   * Demande non bloquante de l'historique d'instantanés HL couvrant la plage VISIBLE :
+   * coin = base perp du symbole (« BTC »), pas = max(5 min, pas des bougies visibles),
+   * borne basse = première bougie visible − 2 pas de report (cf. construireGrilleHl).
+   * Idempotente — appelée à chaque frame tant que LIQHL est actif.
+   */
+  private assurerHeatVue(): void {
+    const candles = marketStore.getState().candles;
+    const range = this.chart.getVisibleRange();
+    const from = Math.max(0, range.from);
+    const to = Math.min(candles.length, range.to);
+    const premier = candles[from];
+    if (to - from < 1 || premier === undefined) return;
+    const coin = basePerp(marketStore.getState().symbol);
+    if (coin === null) return;
+    const pas = Math.max(PERIODE_SNAP_HL_MS, pasBougieMs(candles, from, to));
+    assurerHeat({ coin, pasMs: pas, depuisMs: premier.time - HL_REPORT_MAX_PAS * pas });
+  }
+
+  /**
+   * Couche HEATMAP HL (LIQHL) : peint les niveaux de liquidation RÉELS des INSTANTANÉS
+   * historiques collectés par le daemon (`hlHeatStore`, top leaderboard — ÉCHANTILLON
+   * dont la couverture mesurée est affichée en légende). Peinte AVANT la heatmap des
+   * liquidations exécutées : le flux live reste par-dessus.
+   *
+   * Rendu = mêmes cellules que la grille exécutée (rects précis / lissé « CoinGlass »)
+   * paramétrées par la RAMPE AMBRE (`RAMPE_HL_AMBRE`, inversée sur fond clair), intensité
+   * log normalisée sur la grille HL, alpha plus franc (0.15 → 0.85 : niveaux DEBOUT, pas
+   * un flux passé), atténuation footprint conservée, SANS fade-in (un instantané n'est
+   * pas un événement frais). La grille est mémoïsée (`grilleHlObsolete`, invalidations
+   * identiques à la grille exécutée + chaque publication de `hlHeatStore`).
+   *
+   * Tooltip : seulement si AUCUNE cellule exécutée n'est sous le curseur (le tooltip
+   * réel de `dessinerHeatmap` garde la priorité).
+   */
+  private dessinerHeatmapHl(main: Bounding, tokens: Tokens, heatActif: boolean): void {
+    const instantanes = hlHeatStore.getState().instantanes;
+    if (instantanes.length === 0) return;
+
+    const candles = marketStore.getState().candles;
+    const range = this.chart.getVisibleRange();
+    const from = Math.max(0, range.from);
+    const to = Math.min(candles.length, range.to);
+    if (to - from < 1) return;
+
+    if (this.grilleHlObsolete) {
+      const pas = Math.max(PERIODE_SNAP_HL_MS, pasBougieMs(candles, from, to));
+      this.derniereGrilleHl = construireGrilleHl(
+        instantanes,
+        candles,
+        from,
+        to,
+        pas,
+        liqMarksStore.getState().granularite,
+      );
+      this.grilleHlObsolete = false;
+    }
+    const grid = this.derniereGrilleHl;
+    if (grid === null) return;
+
+    const { largeurs, colonneParTime, largeurRef } = this.colonnesVisibles(candles, from, to);
+    const ctx = this.ctx;
+    const { left, top, width, height } = main;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(left, top, width, height);
+    ctx.clip();
+
+    const now = Date.now();
+    const opts: OptionsCellules = {
+      rampe: tokens.rampeHl,
+      alphaMin: 0.15,
+      alphaMax: 0.85,
+      sansFade: true,
+    };
+    const lissage = largeurRef < SEUIL_LISSAGE_PX;
+    if (
+      !lissage ||
+      !this.dessinerCellulesLissees(
+        grid, candles, from, to, largeurs, colonneParTime, "intensite", tokens, now, opts,
+      )
+    ) {
+      this.dessinerCellulesRects(grid, largeurs, "intensite", tokens, now, opts);
+    }
+    ctx.restore();
+
+    // Tooltip HL hors clip : seulement si aucune cellule EXÉCUTÉE n'est sous le curseur.
+    const survolReel =
+      heatActif && this.derniereGrille !== null
+        ? this.cellSurvolee(this.derniereGrille, candles)
+        : null;
+    if (survolReel === null) {
+      const survolHl = this.cellSurvolee(grid, candles);
+      if (survolHl !== null) this.dessinerTooltipHl(survolHl, grid, main, tokens);
+    }
+  }
+
+  /**
    * Couche HEATMAP RÉELLE : grille temps×prix (viridis log) + profil latéral long/short +
    * tooltip de survol, depuis les liquidations RÉELLEMENT exécutées (liqEventsStore).
    */
@@ -1061,26 +1381,7 @@ export class LiquidationHeatController {
     // Bords ENTIERS PARTAGÉS par colonne (x0/x1 arrondis) : deux cellules adjacentes partagent
     // exactement le même bord entier → plus de couture d'anti-aliasing (fine grille sombre).
     // La cellule est CENTRÉE sur x ; la dernière bougie réutilise la largeur de l'avant-dernière.
-    // On note au passage l'index de COLONNE de chaque bougie (0..n-1 dans la plage visible) pour
-    // le rendu lissé offscreen (1 colonne = 1 pixel du petit canvas).
-    const largeurs = new Map<number, { x0: number; x1: number }>();
-    const colonneParTime = new Map<number, number>();
-    let prevW = FALLBACK_CELL_W;
-    for (let i = from; i < to; i++) {
-      const c = candles[i];
-      if (c === undefined) continue;
-      colonneParTime.set(c.time, i - from);
-      const x = this.toPx({ timestamp: c.time }).x;
-      if (x === undefined || !Number.isFinite(x)) continue;
-      const suivant = i + 1 < to ? candles[i + 1] : undefined;
-      let w = prevW;
-      if (suivant !== undefined) {
-        const xn = this.toPx({ timestamp: suivant.time }).x;
-        if (xn !== undefined && Number.isFinite(xn)) w = Math.max(1, xn - x);
-      }
-      prevW = w;
-      largeurs.set(c.time, { x0: Math.round(x - w / 2), x1: Math.round(x + w / 2) });
-    }
+    const { largeurs, colonneParTime, largeurRef: prevW } = this.colonnesVisibles(candles, from, to);
 
     ctx.save();
     ctx.beginPath();
@@ -1186,14 +1487,54 @@ export class LiquidationHeatController {
   }
 
   /**
+   * Bords de colonnes partagés des bougies visibles : `{x0, x1}` entiers par bougie
+   * (cellule CENTRÉE sur x, dernière bougie = largeur de l'avant-dernière), index de
+   * colonne `0..n-1` par `candle.time` (rendu lissé offscreen : 1 colonne = 1 pixel) et
+   * `largeurRef` = dernier espacement mesuré (représentatif de l'espacement uniforme
+   * klinecharts — pilote le seuil de lissage). Factorise le calcul commun aux heatmaps
+   * exécutée et HL (instantanés).
+   */
+  private colonnesVisibles(
+    candles: Candle[],
+    from: number,
+    to: number,
+  ): {
+    largeurs: Map<number, { x0: number; x1: number }>;
+    colonneParTime: Map<number, number>;
+    largeurRef: number;
+  } {
+    const largeurs = new Map<number, { x0: number; x1: number }>();
+    const colonneParTime = new Map<number, number>();
+    let prevW = FALLBACK_CELL_W;
+    for (let i = from; i < to; i++) {
+      const c = candles[i];
+      if (c === undefined) continue;
+      colonneParTime.set(c.time, i - from);
+      const x = this.toPx({ timestamp: c.time }).x;
+      if (x === undefined || !Number.isFinite(x)) continue;
+      const suivant = i + 1 < to ? candles[i + 1] : undefined;
+      let w = prevW;
+      if (suivant !== undefined) {
+        const xn = this.toPx({ timestamp: suivant.time }).x;
+        if (xn !== undefined && Number.isFinite(xn)) w = Math.max(1, xn - x);
+      }
+      prevW = w;
+      largeurs.set(c.time, { x0: Math.round(x - w / 2), x1: Math.round(x + w / 2) });
+    }
+    return { largeurs, colonneParTime, largeurRef: prevW };
+  }
+
+  /**
    * Rendu CELLULE À CELLULE (bougies larges ≥ SEUIL_LISSAGE_PX) : un fillRect par cellule,
    * rampe theme-aware d'intensité log. Alpha borné [0.15, 0.55] pour ne pas masquer le prix
-   * sous les cascades. Bords entiers (x0/x1 partagés par colonne ; yTop/yBot arrondis par
-   * bucket → mêmes bords que le bucket voisin).
+   * sous les cascades (bornes réglables via `opts` — la heatmap HL monte à 0.85). Bords
+   * entiers (x0/x1 partagés par colonne ; yTop/yBot arrondis par bucket → mêmes bords que
+   * le bucket voisin).
    * Mode « dominance » : la teinte remplace la rampe du thème — shorts liquidés dominants =
    * `--up` (rachats forcés), longs = `--down` (ventes forcées), même sémantique que le profil
    * latéral — et l'alpha d'intensité est modulé par |deseq| (cellule équilibrée pâle, cellule
-   * très déséquilibrée franche). `now` : fade-in des cellules fraîches (cf. alphaFadeIn).
+   * très déséquilibrée franche). `now` : fade-in des cellules fraîches (cf. alphaFadeIn,
+   * sauté quand `opts.sansFade` — les instantanés HL ne sont pas des événements).
    */
   private dessinerCellulesRects(
     grid: LiqGrid,
@@ -1201,11 +1542,14 @@ export class LiquidationHeatController {
     mode: LiqHeatMode,
     tokens: Tokens,
     now: number,
+    opts?: OptionsCellules,
   ): void {
     const ctx = this.ctx;
     // Atténuation ×0.5 si le footprint est actif : lue 1×/frame (les deux couches se
     // superposent sur les mêmes bougies — cf. attenuationFootprint).
     const footprintActif = orderflowStore.getState().enabled;
+    const aMin = opts?.alphaMin ?? 0.15;
+    const aMax = opts?.alphaMax ?? 0.55;
     for (const cell of grid.cells.values()) {
       const col = largeurs.get(cell.candleTime);
       if (col === undefined) continue;
@@ -1222,13 +1566,15 @@ export class LiquidationHeatController {
       if (mode === "dominance") {
         const d = desequilibre(cell.longUsd, cell.shortUsd);
         rgb = d >= 0 ? tokens.upRgb : tokens.downRgb;
-        alpha = (0.15 + 0.4 * t) * (0.35 + 0.65 * Math.abs(d));
+        alpha = (aMin + (aMax - aMin) * t) * (0.35 + 0.65 * Math.abs(d));
       } else {
-        rgb = couleurRampeArrets(t, tokens.rampe);
-        alpha = 0.15 + 0.4 * t;
+        rgb = couleurRampeArrets(t, opts?.rampe ?? tokens.rampe);
+        alpha = aMin + (aMax - aMin) * t;
       }
       alpha = attenuationFootprint(alpha, footprintActif);
-      alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, this.dernierBumpTs, now);
+      if (opts?.sansFade !== true) {
+        alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, this.dernierBumpTs, now);
+      }
       ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha.toFixed(3)})`;
       ctx.fillRect(col.x0, y0, Math.max(1, col.x1 - col.x0), Math.max(1, y1 - y0));
     }
@@ -1331,6 +1677,7 @@ export class LiquidationHeatController {
     mode: LiqHeatMode,
     tokens: Tokens,
     now: number,
+    opts?: OptionsCellules,
   ): boolean {
     const dims = dimensionsGrilleVisible(grid, from, to);
     if (dims === null) return false;
@@ -1378,6 +1725,8 @@ export class LiquidationHeatController {
     // Atténuation ×0.5 si le footprint est actif : lue 1×/frame (l'atténuation est encodée
     // dans le canal alpha du pixel, pas au globalAlpha du blit — cf. attenuationFootprint).
     const footprintActif = orderflowStore.getState().enabled;
+    const aMin = opts?.alphaMin ?? 0.15;
+    const aMax = opts?.alphaMax ?? 0.55;
     for (const cell of grid.cells.values()) {
       const colonne = colonneParTime.get(cell.candleTime);
       if (colonne === undefined) continue;
@@ -1388,13 +1737,15 @@ export class LiquidationHeatController {
       if (mode === "dominance") {
         const d = desequilibre(cell.longUsd, cell.shortUsd);
         rgb = d >= 0 ? tokens.upRgb : tokens.downRgb;
-        alpha = (0.15 + 0.4 * t) * (0.35 + 0.65 * Math.abs(d));
+        alpha = (aMin + (aMax - aMin) * t) * (0.35 + 0.65 * Math.abs(d));
       } else {
-        rgb = couleurRampeArrets(t, tokens.rampe);
-        alpha = 0.15 + 0.4 * t;
+        rgb = couleurRampeArrets(t, opts?.rampe ?? tokens.rampe);
+        alpha = aMin + (aMax - aMin) * t;
       }
       alpha = attenuationFootprint(alpha, footprintActif);
-      alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, this.dernierBumpTs, now);
+      if (opts?.sansFade !== true) {
+        alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, this.dernierBumpTs, now);
+      }
       const o = (ligne * colonnes + colonne) * 4;
       px[o] = rgb[0];
       px[o + 1] = rgb[1];
@@ -1533,12 +1884,6 @@ export class LiquidationHeatController {
    * droit, au-dessus près du bas). Ne dessine rien hors du pane prix ou sans cellule survolée.
    */
   private dessinerTooltip(cell: LiqCell, grid: LiqGrid, main: Bounding, tokens: Tokens): void {
-    const cross = this.dernierCrosshair;
-    if (cross === null) return;
-    const cx = cross.x;
-    const cy = cross.y;
-    if (cx === undefined || cy === undefined) return;
-
     const total = cell.longUsd + cell.shortUsd;
     const prixBas = cell.bucketIdx * grid.taille;
     const prixHaut = (cell.bucketIdx + 1) * grid.taille;
@@ -1550,16 +1895,59 @@ export class LiquidationHeatController {
     };
     const nb = `${cell.count} événement${cell.count > 1 ? "s" : ""}`;
     const txt = tokens.text;
-    const lignes: Array<{ texte: string; couleur: string }> = [
-      {
-        texte: `Liquidations ${formatHeureMinute(cell.candleTime)} · ${formatPrice(prixBas)}–${formatPrice(prixHaut)}`,
-        couleur: txt,
-      },
-      { texte: `Total   ${formatUsd(total)}  (${nb})`, couleur: txt },
-      // Longs liquidés = ventes forcées → teinte `--down` ; shorts → `--up` (cf. profil latéral).
-      { texte: `Longs   ${formatUsd(cell.longUsd)}  ${barre(cell.longUsd)}`, couleur: tokens.down },
-      { texte: `Shorts  ${formatUsd(cell.shortUsd)}  ${barre(cell.shortUsd)}`, couleur: tokens.up },
-    ];
+    this.dessinerBoiteTooltip(
+      [
+        {
+          texte: `Liquidations ${formatHeureMinute(cell.candleTime)} · ${formatPrice(prixBas)}–${formatPrice(prixHaut)}`,
+          couleur: txt,
+        },
+        { texte: `Total   ${formatUsd(total)}  (${nb})`, couleur: txt },
+        // Longs liquidés = ventes forcées → teinte `--down` ; shorts → `--up` (cf. profil latéral).
+        { texte: `Longs   ${formatUsd(cell.longUsd)}  ${barre(cell.longUsd)}`, couleur: tokens.down },
+        { texte: `Shorts  ${formatUsd(cell.shortUsd)}  ${barre(cell.shortUsd)}`, couleur: tokens.up },
+      ],
+      main,
+      tokens,
+    );
+  }
+
+  /**
+   * Tooltip de la heatmap HL (instantanés) : une pilule d'UNE ligne — « HL niveaux
+   * réels · <prix du bucket> · longs $X (n) · shorts $Y (n) · instantané HH:MM » —
+   * distincte du tooltip des liquidations exécutées (cellule = niveaux mesurés, pas un
+   * flux). `cell.dernierTime` porte le ts de l'instantané retenu (cf. construireGrilleHl).
+   */
+  private dessinerTooltipHl(cell: LiqCell, grid: LiqGrid, main: Bounding, tokens: Tokens): void {
+    const prix = (cell.bucketIdx + 0.5) * grid.taille;
+    const tsTxt = cell.dernierTime === undefined ? "—" : formatHeureMinute(cell.dernierTime);
+    this.dessinerBoiteTooltip(
+      [
+        {
+          texte: `HL niveaux réels · ${formatPrice(prix)} · longs ${formatUsd(cell.longUsd)} (${cell.nLong ?? 0}) · shorts ${formatUsd(cell.shortUsd)} (${cell.nShort ?? 0}) · instantané ${tsTxt}`,
+          couleur: tokens.text,
+        },
+      ],
+      main,
+      tokens,
+    );
+  }
+
+  /**
+   * Boîte de tooltip commune (fond `--surface`, bord `--border`, texte 11 px mono) :
+   * affiche les `lignes` près du crosshair, repliée pour rester dans le pane prix.
+   * Factorise le dessin entre le tooltip des liquidations exécutées et celui de la
+   * heatmap HL. Ne dessine rien sans crosshair dans le pane.
+   */
+  private dessinerBoiteTooltip(
+    lignes: Array<{ texte: string; couleur: string }>,
+    main: Bounding,
+    tokens: Tokens,
+  ): void {
+    const cross = this.dernierCrosshair;
+    if (cross === null) return;
+    const cx = cross.x;
+    const cy = cross.y;
+    if (cx === undefined || cy === undefined) return;
 
     const ctx = this.ctx;
     ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
@@ -1860,9 +2248,16 @@ export class LiquidationHeatController {
       ctx.fillText(maxTxt, xRight - 4, yb); // borne haute (maxUsd / « shorts ») à droite de la barre
       ctx.fillText(dominance ? "longs" : "0", barLeft - 4, yb); // borne basse à gauche de la barre
       yb -= 13;
-      // caption
+      // caption — « Coinalyze ≈ sur N j » annonce la part du buffer issue du repli
+      // historique approximé (jours sans événement réel, cf. joursSansEvenements).
+      const joursApprox = joursApproxDansEvenements(liqEventsStore.getState().events);
+      const suffixeApprox = joursApprox > 0 ? ` · Coinalyze ≈ sur ${joursApprox} j` : "";
       ctx.fillStyle = tokens.textDim;
-      ctx.fillText(`Liq heatmap (exécutées) · ${dominance ? "dominance" : "log"}`, xRight - 4, yb);
+      ctx.fillText(
+        `Liq heatmap (exécutées) · ${dominance ? "dominance" : "log"}${suffixeApprox}`,
+        xRight - 4,
+        yb,
+      );
       yb -= 14;
 
       // (b) mini-légende profil « ▮ shorts ▮ longs » (shorts = --up, longs = --down).
@@ -1934,6 +2329,47 @@ export class LiquidationHeatController {
       ctx.fillStyle = tokens.textDim;
       ctx.fillText(
         libelleLegendeHl(hl.etat, hl.adressesScannees, hl.niveaux.length, this.clustersHlVisibles),
+        xRight - 4,
+        yb,
+      );
+      yb -= 14;
+
+      // (c ter) légende HL HEATMAP (instantanés historiques) : nb d'instantanés, adresses
+      // scannées, couverture MESURÉE de l'OI et trous de collecte (« daemon éteint ») —
+      // l'échantillonnage du leaderboard n'est jamais présenté comme exhaustif.
+      const heat = hlHeatStore.getState();
+      const candlesLeg = marketStore.getState().candles;
+      const rangeLeg = this.chart.getVisibleRange();
+      const fromLeg = Math.max(0, rangeLeg.from);
+      const toLeg = Math.min(candlesLeg.length, rangeLeg.to);
+      const premierLeg = candlesLeg[fromLeg];
+      const derniereLeg = candlesLeg[toLeg - 1];
+      const pasLeg =
+        toLeg - fromLeg >= 1 ? Math.max(PERIODE_SNAP_HL_MS, pasBougieMs(candlesLeg, fromLeg, toLeg)) : PERIODE_SNAP_HL_MS;
+      const dernierSnap = heat.instantanes[heat.instantanes.length - 1];
+      const trous =
+        premierLeg !== undefined && derniereLeg !== undefined
+          ? compterTrous(
+              heat.instantanes,
+              premierLeg.time,
+              derniereLeg.time + pasLeg,
+              pasLeg,
+              heat.collecte?.premierTs ?? null,
+            )
+          : 0;
+      const ambre = couleurRampeArrets(0.65, tokens.rampeHl);
+      ctx.fillStyle = `rgba(${ambre[0]},${ambre[1]},${ambre[2]},0.95)`;
+      ctx.fillText(
+        libelleLegendeHlHeat(
+          heat.etat,
+          heat.instantanes.length,
+          dernierSnap?.adresses ?? 0,
+          dernierSnap?.couverture ?? null,
+          pasLeg,
+          trous,
+          heat.collecte?.actif ?? false,
+          heat.collecte?.premierTs ?? null,
+        ),
         xRight - 4,
         yb,
       );

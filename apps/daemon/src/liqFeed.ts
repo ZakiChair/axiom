@@ -37,6 +37,7 @@
  *   - Bybit : S="Sell" (taker vend) → LONG liquidé ; S="Buy" (taker rachète) → SHORT liquidé.
  *   - OKX   : posSide (long/short) PRIORITAIRE ; repli side (sell→long, buy→short liquidé).
  */
+import type { Database } from "bun:sqlite";
 import type { AlertDef } from "@axiom/alerts";
 import { lireDefsKv, symbolesLiqCascadeActifs } from "./alerts";
 import { getDb } from "./db";
@@ -255,9 +256,9 @@ export function reinitialiserSanteLiqFeed(): void {
  * table absente (le front n'a jamais écrit) ou JSON corrompu → `undefined` (le repli
  * défaut est appliqué par `symbolesSurveilles`). Même pattern que `lireDefsKv`.
  */
-function lireKvLiqBrut(): unknown {
+function lireKvLiqBrut(d: Database): unknown {
   try {
-    const ligne = getDb()
+    const ligne = d
       .query("SELECT valeur FROM kv WHERE namespace = ? AND cle = ?")
       .get("liq", "symboles") as { valeur: string } | null;
     if (!ligne) return undefined;
@@ -265,6 +266,15 @@ function lireKvLiqBrut(): unknown {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Ensemble de symboles surveillés, fusion complète : KV `liq/symboles` (repli
+ * défaut inclus) ∪ symboles des alertes `liq-cascade` ACTIVES. Partagée entre
+ * la boucle d'ingestion et le collecteur hlLiqHeat (mêmes coins → `coinHl`).
+ */
+export function symbolesSurveillesLiq(d: Database): string[] {
+  return fusionnerSymbolesLiq(lireKvLiqBrut(d), lireDefsKv(d));
 }
 
 // ─────────────────────────── Ingestion d'un message ───────────────────────────
@@ -538,7 +548,7 @@ export function demarrerBoucleLiquidations(): () => void {
   const rafraichir = (): void => {
     try {
       // KV `liq/symboles` ∪ symboles des alertes liq-cascade actives (KV `alerts/defs`).
-      const symboles = fusionnerSymbolesLiq(lireKvLiqBrut(), lireDefsKv(getDb()));
+      const symboles = symbolesSurveillesLiq(getDb());
       feed.setSymboles(symboles);
       feedOkx.setSymboles(symboles);
       feedOkx.retenterCtVal?.(); // ≤60 s entre deux tentatives sur un ctVal manquant

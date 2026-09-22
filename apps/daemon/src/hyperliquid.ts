@@ -25,11 +25,13 @@
  * liquidationPx non-null, fini, > 0, et positionValue ≥ 1000 $.
  *
  * INVARIANT (BUILD-CONTRACT) : stockage/service à froid — jamais sur le chemin
- * chaud du renderer. Aucune boucle de fond : tout est déclenché par la requête.
+ * chaud du renderer. Aucune boucle sauf le collecteur opt-in de hlLiqHeat.ts
+ * (drapeau KV `hl/heat`) ; tout le reste est déclenché par la requête.
  */
 import { Database } from "bun:sqlite";
 import { entetesCors } from "./cors";
 import { getDb } from "./db";
+import { traiterHlHeat } from "./hlLiqHeat";
 import type { Routeur } from "./router";
 
 export const URL_LEADERBOARD = "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard";
@@ -44,10 +46,15 @@ export const TTL_INSTANTANE_MS = 5 * 60_000;
 /** Plancher de valeur notionnelle : sous ce seuil, un liquidationPx est du bruit. */
 export const SEUIL_VALEUR_USD = 1000;
 
-/** Requêtes `clearinghouseState` en vol simultanément (quota HL ~1200 weight/min). */
-const CONCURRENCE = 8;
+/**
+ * Requêtes `clearinghouseState` en vol simultanément. Avec le pool élargi
+ * (~500 adresses) : 4 en vol + 100 ms entre lots ≈ 950 poids en pointe étalés
+ * sur ≥ 1 min, ~200/min en moyenne (quota HL ~1200 weight/min/IP,
+ * clearinghouseState ≈ 2) — un scan complet tient en ≈ 1–2 min.
+ */
+const CONCURRENCE = 4;
 /** Micro-pause entre deux lots (lissage du quota). */
-const PAUSE_LOT_MS = 50;
+const PAUSE_LOT_MS = 100;
 /** Le leaderboard pèse 34 Mo : bornage large, seulement contre une réponse aberrante. */
 const TAILLE_MAX_LEADERBOARD = 80 * 1024 * 1024;
 const TIMEOUT_LEADERBOARD_MS = 60_000;
@@ -126,6 +133,61 @@ export function extraireTopAdresses(donnees: unknown, n: number = TAILLE_POOL): 
   }
   valides.sort((a, b) => b.valeur - a.valeur);
   return valides.slice(0, n).map((v) => v.addr);
+}
+
+/** Fenêtre `windowPerformances` dont le `vlm` classe le pool complémentaire. */
+const FENETRE_VOLUME_POOL = "week";
+
+/**
+ * Pool élargi d'adresses à scanner : union ordonnée du top `nValeur` par
+ * `accountValue` décroissant (les plus gros comptes) puis des adresses du top
+ * `nVolume` par volume hebdomadaire (`windowPerformances` fenêtre « week » →
+ * `vlm` décroissant) non déjà retenues. Fonction PURE.
+ *
+ * POURQUOI le volume : le top accountValue est peu leviérisé (liquidationPx
+ * lointain ou null) ; les gros TRADEURS du leaderboard portent des positions
+ * liqudables plus près du prix. Mesure du 2026-09-22 : intersection top-150
+ * valeur ∩ top-150 volume jour = 19 adresses — le complément est substantiel.
+ *
+ * `windowPerformances` est un tableau de paires `[nom, {pnl, roi, vlm}]`.
+ * Les lignes sans adresse `0x…40 hex` ou sans valeur numérique sont écartées ;
+ * un JSON inattendu renvoie [].
+ */
+export function extrairePool(donnees: unknown, nValeur = 150, nVolume = 350): string[] {
+  const lignes = (donnees as { leaderboardRows?: unknown } | null)?.leaderboardRows;
+  if (!Array.isArray(lignes)) return [];
+  const parValeur: Array<{ addr: string; score: number }> = [];
+  const parVolume: Array<{ addr: string; score: number }> = [];
+  for (const ligne of lignes) {
+    const addr = (ligne as { ethAddress?: unknown } | null)?.ethAddress;
+    if (typeof addr !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(addr)) continue;
+    const valeur = nombre((ligne as { accountValue?: unknown }).accountValue);
+    if (valeur !== null) parValeur.push({ addr, score: valeur });
+    // fenêtre « week » → vlm (volume), sous-forme de paires [nom, stats].
+    const fenetres = (ligne as { windowPerformances?: unknown }).windowPerformances;
+    if (Array.isArray(fenetres)) {
+      const entree = fenetres.find(
+        (f): f is [unknown, unknown] => Array.isArray(f) && f[0] === FENETRE_VOLUME_POOL,
+      );
+      const vlm = nombre((entree?.[1] as { vlm?: unknown } | null | undefined)?.vlm);
+      if (vlm !== null) parVolume.push({ addr, score: vlm });
+    }
+  }
+  parValeur.sort((a, b) => b.score - a.score);
+  parVolume.sort((a, b) => b.score - a.score);
+  const retenues = new Set<string>();
+  const pool: string[] = [];
+  for (const { addr } of parValeur.slice(0, Math.max(0, nValeur))) {
+    if (retenues.has(addr)) continue;
+    retenues.add(addr);
+    pool.push(addr);
+  }
+  for (const { addr } of parVolume.slice(0, Math.max(0, nVolume))) {
+    if (retenues.has(addr)) continue;
+    retenues.add(addr);
+    pool.push(addr);
+  }
+  return pool;
 }
 
 /**
@@ -260,7 +322,7 @@ export async function chargerPool(
     if (cl !== null && Number(cl) > TAILLE_MAX_LEADERBOARD) throw new Error("leaderboard trop volumineux");
     const texte = await res.text();
     if (texte.length > TAILLE_MAX_LEADERBOARD) throw new Error("leaderboard trop volumineux");
-    const adresses = extraireTopAdresses(JSON.parse(texte));
+    const adresses = extrairePool(JSON.parse(texte));
     // Réponse vide/inattendue : ne JAMAIS écraser un bon pool persisté.
     if (adresses.length === 0) throw new Error("leaderboard sans ligne exploitable");
     ecrirePool(d, adresses, now);
@@ -270,8 +332,20 @@ export async function chargerPool(
   }
 }
 
-/** Interroge `clearinghouseState` pour une adresse ; null si l'appel échoue. */
-async function etatCompte(addr: string, fetchImpl: typeof fetch): Promise<PositionLiq[] | null> {
+/** Résultat d'un `clearinghouseState` : positions, échec isolé, ou limite de quota. */
+interface ResultatEtat {
+  /** Positions extraites ; null si l'appel a échoué (adresse ignorée). */
+  positions: PositionLiq[] | null;
+  /** true si l'amont a répondu HTTP 429 (quota) — l'instantané doit s'arrêter là. */
+  limite: boolean;
+}
+
+/**
+ * Interroge `clearinghouseState` pour une adresse. Un HTTP 429 est distingué des
+ * autres échecs (`limite`) : il signale que le quota est atteint et que continuer
+ * les lots suivants ne produirait que des erreurs.
+ */
+async function etatCompte(addr: string, fetchImpl: typeof fetch): Promise<ResultatEtat> {
   try {
     const res = await fetchImpl(URL_INFO, {
       method: "POST",
@@ -279,35 +353,52 @@ async function etatCompte(addr: string, fetchImpl: typeof fetch): Promise<Positi
       body: JSON.stringify({ type: "clearinghouseState", user: addr }),
       signal: AbortSignal.timeout(TIMEOUT_ETAT_MS),
     });
-    if (!res.ok) return null;
-    return parserEtatCompte(await res.json(), addr);
+    if (res.status === 429) return { positions: null, limite: true };
+    if (!res.ok) return { positions: null, limite: false };
+    return { positions: parserEtatCompte(await res.json(), addr), limite: false };
   } catch {
-    return null; // échec d'UNE adresse : ignorée, jamais d'échec global
+    return { positions: null, limite: false }; // échec d'UNE adresse : ignorée, jamais d'échec global
   }
 }
 
 /**
  * Construit l'instantané des positions du pool : lots de CONCURRENCE requêtes en
  * vol, micro-pause entre lots. Une adresse en échec est simplement ignorée et ne
- * compte pas dans `adressesScannees`.
+ * compte pas dans `adressesScannees`. Un 429 amont interrompt le reste de
+ * l'instantané : les lots non envoyés ne sont PAS lancés (les adresses restantes
+ * ne comptent pas dans `adressesScannees`).
  */
 export async function construireInstantane(
   adresses: readonly string[],
   fetchImpl: typeof fetch = fetch,
   now: number = Date.now(),
 ): Promise<InstantaneHL> {
+  const debut = Date.now(); // horloge réelle (≠ `now`, horodatage logique de l'instantané)
   const positions: PositionLiq[] = [];
   let adressesScannees = 0;
+  let limite429 = false;
   for (let i = 0; i < adresses.length; i += CONCURRENCE) {
     if (i > 0) await new Promise((r) => setTimeout(r, PAUSE_LOT_MS));
     const lot = adresses.slice(i, i + CONCURRENCE);
     const resultats = await Promise.all(lot.map((a) => etatCompte(a, fetchImpl)));
     for (const r of resultats) {
-      if (r === null) continue;
+      if (r.limite) {
+        limite429 = true;
+        continue;
+      }
+      if (r.positions === null) continue;
       adressesScannees += 1;
-      positions.push(...r);
+      positions.push(...r.positions);
     }
+    if (limite429) break; // quota atteint : on n'envoie plus les lots restants
   }
+  // Durée réelle du scan : la cadence (CONCURRENCE/PAUSE_LOT_MS) est réglée sur
+  // cette mesure — une ligne de log par instantané construit.
+  const dureeS = Math.max(0, (Date.now() - debut) / 1000);
+  console.log(
+    `[axiomd] instantané HL : ${adressesScannees} adresses en ${dureeS.toFixed(1)} s` +
+      (limite429 ? " (interrompu sur 429)" : ""),
+  );
   return { ts: now, adressesScannees, parCoin: agregerParCoin(positions) };
 }
 
@@ -323,14 +414,33 @@ export function reinitialiserHl(): void {
   instantaneEnVol = null;
 }
 
-/** Instantané frais (< 5 min) ou reconstruit ; `null` si aucun pool n'est disponible. */
-function obtenirInstantane(d: Database, fetchImpl: typeof fetch, now: number): Promise<InstantaneHL | null> {
-  if (cacheInstantane !== null && now - cacheInstantane.ts < TTL_INSTANTANE_MS) {
+/**
+ * Instantané frais (< 5 min) ou reconstruit ; `null` si aucun pool n'est
+ * disponible. `options.forcer` ignore le cache (un nouvel instantané est
+ * construit) mais rejoint quand même une construction déjà en vol — utilisé par
+ * le collecteur hlLiqHeat qui veut un point de données NEUF à chaque cycle.
+ */
+export function obtenirInstantane(
+  d: Database,
+  fetchImpl: typeof fetch,
+  now: number,
+  options?: { forcer?: boolean },
+): Promise<InstantaneHL | null> {
+  if (options?.forcer !== true && cacheInstantane !== null && now - cacheInstantane.ts < TTL_INSTANTANE_MS) {
     return Promise.resolve(cacheInstantane);
   }
   // Une construction est déjà en vol : on s'y raccroche (deux fenêtres ouvrant BTC
-  // et ETH en même temps ne doivent pas lancer 2 × 150 requêtes amont).
-  if (instantaneEnVol !== null) return instantaneEnVol;
+  // et ETH en même temps ne doivent pas lancer 2 × 150 requêtes amont). Sauf si un
+  // cache (même PÉRIMÉ) existe : une lecture /hl/liqlevels ne doit JAMAIS attendre
+  // un scan de plusieurs minutes ni tomber dans l'idleTimeout de Bun.serve — on
+  // sert le périmé immédiat (la construction en vol le remplacera). `forcer`
+  // (collecteur heatmap) ignore ce repli : il VEUT un point neuf.
+  if (instantaneEnVol !== null) {
+    if (options?.forcer !== true && cacheInstantane !== null) {
+      return Promise.resolve(cacheInstantane);
+    }
+    return instantaneEnVol;
+  }
   const p = (async (): Promise<InstantaneHL | null> => {
     const adresses = await chargerPool(d, fetchImpl, now);
     if (adresses.length === 0) return null;
@@ -384,7 +494,20 @@ export async function traiterHl(
   const segments = url.pathname.split("/").filter((s) => s.length > 0);
   // segments[0] === "hl" (garanti par le préfixe de route)
   const vue = segments[1];
-  if (vue !== "liqlevels" && vue !== "positions") return json({ erreur: "chemin inconnu" }, req, 404);
+  if (vue !== "liqlevels" && vue !== "positions" && vue !== "liqheat") {
+    return json({ erreur: "chemin inconnu" }, req, 404);
+  }
+  if (vue === "liqheat") {
+    // Historique des instantanés collectés (collecteur opt-in hlLiqHeat) —
+    // lecture de table locale uniquement, AUCUN appel amont.
+    try {
+      const d = dInjecte ?? getDb();
+      return traiterHlHeat(req, url, d, now);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      return json({ erreur: "erreur interne hl", detail }, req, 500);
+    }
+  }
   if (segments.length !== 3) return json({ erreur: "coin requis" }, req, 400);
   let coin: string;
   try {

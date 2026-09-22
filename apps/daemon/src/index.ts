@@ -23,6 +23,7 @@ import { enregistrerCandles } from "./candles";
 import { entetesCors, entetesCorsRejet, reponsePreflight, requeteLocaleAutorisee } from "./cors";
 import { chargerCles } from "./env";
 import { demarrerBoucleGlobe, enregistrerGlobe, santeGlobe } from "./globe";
+import { demarrerBoucleHlHeat, santeHlHeat } from "./hlLiqHeat";
 import { enregistrerHl } from "./hyperliquid";
 import { enregistrerKv } from "./kv";
 import { demarrerBoucleLiquidations, santeLiqFeed } from "./liqFeed";
@@ -83,7 +84,7 @@ routeur.enregistrerPrefixe("/health", (req) => {
     // Santé des collecteurs de FOND : sans elle, un flux muet depuis des jours ne se
     // voit sur aucune surface. Liquidations (mémoire), baleines (mémoire) et globe
     // (dernier rafraîchissement réussi par source, en base).
-    collecteurs: { liquidations: santeLiqFeed(), whales: santeWhales(), globe },
+    collecteurs: { liquidations: santeLiqFeed(), whales: santeWhales(), globe, hlHeat: santeHlHeat() },
     base,
     dist: distExiste(),
   });
@@ -138,6 +139,11 @@ const serveur = Bun.serve({
   hostname: HOSTNAME,
   port: PORT,
   fetch: gestionnaire,
+  // 120 s : le premier GET /hl/liqlevels après un boot (ou après purge du cache) rejoint
+  // la construction d'instantané en vol (~50 s à ~475 adresses) — le défaut de 10 s de
+  // Bun tuerait la requête en cours de route. Le client front n'impose pas de timeout
+  // propre sur cet appel (fetch nu, cf. data/daemon.ts::hlLiqLevelsGet).
+  idleTimeout: 120,
   error(err) {
     console.error("[axiomd] erreur non gérée :", err);
     return new Response("Erreur interne du daemon", { status: 500 });
@@ -158,6 +164,11 @@ demarrerBoucleGlobe();
 
 // Boucle d'ingestion liquidations (WS Bybit à froid) — jamais sur le chemin chaud du renderer.
 demarrerBoucleLiquidations();
+
+// Collecteur opt-in des instantanés de niveaux de liquidation HL (drapeau KV
+// `hl/heat`, posé par l'activation de la couche LIQHL) — à froid uniquement ;
+// sans drapeau, aucune requête amont n'est émise.
+demarrerBoucleHlHeat();
 
 // Boucle de collecte des mouvements baleines (WS blockchain.info + poll Etherscan à froid)
 // — jamais sur le chemin chaud du renderer.

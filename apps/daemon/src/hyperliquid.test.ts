@@ -6,7 +6,9 @@ import {
   chargerPool,
   construireInstantane,
   enregistrerHl,
+  extrairePool,
   extraireTopAdresses,
+  obtenirInstantane,
   parserEtatCompte,
   reinitialiserHl,
   SEUIL_VALEUR_USD,
@@ -112,6 +114,134 @@ describe("extraireTopAdresses (pure)", () => {
     expect(extraireTopAdresses(null, 150)).toEqual([]);
     expect(extraireTopAdresses({}, 150)).toEqual([]);
     expect(extraireTopAdresses({ leaderboardRows: "nope" }, 150)).toEqual([]);
+  });
+});
+
+describe("extrairePool (pure) — union top accountValue ∪ top volume « week »", () => {
+  const A4 = "0x4444444444444444444444444444444444444444";
+  const A5 = "0x5555555555555555555555555555555555555555";
+  const ligne = (addr: string, accountValue: string, vlmWeek?: string): unknown => ({
+    ethAddress: addr,
+    accountValue,
+    ...(vlmWeek !== undefined
+      ? {
+          windowPerformances: [
+            ["day", { pnl: "0", roi: "0", vlm: "1" }],
+            ["week", { pnl: "0", roi: "0", vlm: vlmWeek }],
+            ["month", { pnl: "0", roi: "0", vlm: "999999" }],
+          ],
+        }
+      : {}),
+  });
+
+  test("union ordonnée : top valeur d'abord, puis complément volume non déjà retenu", () => {
+    const donnees = {
+      leaderboardRows: [
+        ligne(A1, "1000", "5"), // top valeur ET présent en volume
+        ligne(A2, "900", "500"),
+        ligne(A3, "100", "9000"), // faible valeur, gros volume
+        ligne(A4, "50"), // sans windowPerformances : valeur seule
+        ligne(A5, "10", "400"),
+      ],
+    };
+    // nValeur=2 → [A1, A2] ; nVolume=3 → top vlm [A3(9000), A2(500), A5(400)] → A3, A5 ajoutés (A2 déjà retenu).
+    expect(extrairePool(donnees, 2, 3)).toEqual([A1, A2, A3, A5]);
+  });
+
+  test("tri numérique du vlm (pas lexicographique) ; lignes invalides écartées", () => {
+    const donnees = {
+      leaderboardRows: [
+        { ethAddress: "invalide", accountValue: "999999", windowPerformances: [["week", { vlm: "999999" }]] },
+        ligne(A1, "10", "9"),
+        ligne(A2, "10", "10000"),
+        ligne(A3, "10", "abc"),
+      ],
+    };
+    expect(extrairePool(donnees, 0, 10)).toEqual([A2, A1]); // A3 : vlm non numérique écarté
+    expect(extrairePool(null)).toEqual([]);
+    expect(extrairePool({ leaderboardRows: "nope" })).toEqual([]);
+  });
+
+  test("chargerPool persiste le pool ÉLARGI en KV hl/pool", async () => {
+    const d = baseTest();
+    const fetchImpl = (async (entree: RequestInfo | URL) => {
+      if (String(entree) !== URL_LEADERBOARD) throw new Error("URL inattendue");
+      return new Response(
+        JSON.stringify({
+          leaderboardRows: [
+            { ethAddress: A1, accountValue: "1000", windowPerformances: [["week", { vlm: "5" }]] },
+            { ethAddress: A2, accountValue: "10", windowPerformances: [["week", { vlm: "5000" }]] },
+          ],
+        }),
+      );
+    }) as typeof fetch;
+    expect(await chargerPool(d, fetchImpl, T0)).toEqual([A1, A2]);
+    const ligne = d.query("SELECT valeur FROM kv WHERE namespace = 'hl' AND cle = 'pool'").get() as { valeur: string };
+    expect(JSON.parse(ligne.valeur).adresses).toEqual([A1, A2]);
+  });
+});
+
+describe("arrêt sur 429 amont", () => {
+  test("les lots restants ne sont PAS envoyés ; les adresses restantes ne comptent pas", async () => {
+    const appels: string[] = [];
+    const fetchImpl = (async (entree: RequestInfo | URL, init?: RequestInit) => {
+      const user = (JSON.parse(String(init?.body ?? "{}")) as { user?: string }).user ?? "";
+      appels.push(user);
+      if (user === A2) return new Response("quota", { status: 429 });
+      return new Response(JSON.stringify(etat([])));
+    }) as typeof fetch;
+    // CONCURRENCE=4 : lot 1 = [A1..A4] → A2 est 429 → la 5e adresse ne part jamais.
+    const adresses = [A1, A2, A3, "0x4444444444444444444444444444444444444444", "0x5555555555555555555555555555555555555555"];
+    const inst = await construireInstantane(adresses, fetchImpl, T0);
+    expect(appels).toEqual([A1, A2, A3, "0x4444444444444444444444444444444444444444"]);
+    expect(inst.adressesScannees).toBe(3);
+  });
+});
+
+describe("obtenirInstantane({ forcer })", () => {
+  test("forcer ignore le cache frais mais rejoint une construction en vol", async () => {
+    reinitialiserHl();
+    const d = baseTest();
+    const { fetchImpl, appels } = stubHl({ adresses: [A1], etats: { [A1]: etat([pos()]) } });
+    await obtenirInstantane(d, fetchImpl, T0); // remplit le cache
+    const nb = appels.length;
+    // Cache frais : sans forcer, aucun appel de plus.
+    await obtenirInstantane(d, fetchImpl, T0 + 60_000);
+    expect(appels.length).toBe(nb);
+    // forcer : nouvel instantané malgré le cache frais (pool encore frais → 0 leaderboard).
+    const inst = await obtenirInstantane(d, fetchImpl, T0 + 60_000, { forcer: true });
+    expect(inst?.ts).toBe(T0 + 60_000);
+    expect(appels.filter((a) => a === "leaderboard")).toHaveLength(1);
+    expect(appels.filter((a) => a.startsWith("info:")).length).toBeGreaterThan(1);
+  });
+
+  test("construction en vol + cache périmé → le cache est servi IMMÉDIATEMENT (jamais d'attente)", async () => {
+    reinitialiserHl();
+    const d = baseTest();
+    // 1) Remplit le cache avec un instantané valide à T0.
+    const { fetchImpl } = stubHl({ adresses: [A1], etats: { [A1]: etat([pos()]) } });
+    const premier = await obtenirInstantane(d, fetchImpl, T0);
+    expect(premier?.ts).toBe(T0);
+    // 2) Nouvelle construction EN VOL dont le fetch ne résout jamais (scan infini).
+    const fetchPendu = (async () => new Promise<Response>(() => {})) as unknown as typeof fetch;
+    const enVol = obtenirInstantane(d, fetchPendu, T0 + TTL_INSTANTANE_MS + 1, { forcer: true });
+    void enVol;
+    // 3) Lecture non forcée pendant la construction : le cache PÉRIMÉ est servi
+    //    sans rejoindre la construction (le fetch pendu ne résoudrait jamais).
+    const servi = await obtenirInstantane(d, fetchPendu, T0 + TTL_INSTANTANE_MS + 2);
+    expect(servi?.ts).toBe(T0); // cache périmé, pas le résultat d'un scan infini
+    // 4) Sans AUCUN cache, on rejoint la construction en vol (comportement inchangé).
+    reinitialiserHl();
+    let resolue = false;
+    const attente = obtenirInstantane(d, fetchPendu, T0, { forcer: true });
+    const jointure = obtenirInstantane(d, fetchPendu, T0).then((r) => {
+      resolue = true;
+      return r;
+    });
+    void attente;
+    await Promise.resolve(); // microtâches seulement : la jointure ne peut pas avoir résolu
+    expect(resolue).toBe(false);
+    void jointure;
   });
 });
 

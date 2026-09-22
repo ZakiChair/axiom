@@ -1,6 +1,8 @@
 import type { ExchangeId, IndicatorDef, Timeframe } from "@axiom/types";
 import { supportsIndicatorTimeframe } from "@axiom/indicators";
 import { tfAtLeast } from "../chart/tfOrder";
+import { coinalyzeKeyStore } from "../store/coinalyze";
+import { daemonSupporte } from "../data/daemon";
 
 export interface ContexteIndicateur {
   exchange: ExchangeId;
@@ -59,6 +61,13 @@ const ONCHAIN_BTC = new Set([
   "cvdd",
   "balancedPrice",
   "ssr",
+  // — Lot 2 : hashrate + métriques de cycle BGeometrics (BTC uniquement)
+  "hashRibbons",
+  "mvrvCohortes",
+  "nrpl",
+  "vddMultiple",
+  "aviv",
+  "offreEnProfit",
 ]);
 
 const AUX_PERP = new Set([
@@ -121,6 +130,14 @@ export function raisonUnusableIndicateur(
   }
   if (def.aux?.some((id) => AUX_PERP.has(id)) && !symboleUsdtCompatible(exchange, symbol)) {
     return "Nécessite un symbole crypto USDT compatible";
+  }
+  // Flux liquidations Coinalyze : `hasKey` reflète déjà le repli `.env` du proxy
+  // local (même prédicat que `rawFetch("oi")` dans chart/auxProvider.ts).
+  if (def.id === "liqParBougie" && !coinalyzeKeyStore.getState().hasKey) {
+    return "Nécessite une clé Coinalyze";
+  }
+  if (def.id === "hlWhalesNet" && !daemonSupporte("hl")) {
+    return "Nécessite le daemon axiomd (collecte des niveaux HL)";
   }
   return null;
 }

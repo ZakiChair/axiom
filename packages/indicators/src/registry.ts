@@ -198,6 +198,18 @@ import { netPositioningIndex } from "./derivatives/netPositioningIndex";
 import { netPositioningTopTrader } from "./derivatives/netPositioningTopTrader";
 import { smartRetailSpread } from "./derivatives/smartRetailSpread";
 import { squeezePressureIndex } from "./derivatives/squeezePressureIndex";
+// — Lot 2 : on-chain/HL — flux liquidations Coinalyze, hashrate mempool.space,
+//   métriques de cycle BGeometrics, funding + positionnement Hyperliquid
+import { liqParBougie } from "./derivatives/liqParBougie";
+import { hashRibbons } from "./derivatives/hashRibbons";
+import { mvrvCohortes } from "./derivatives/mvrvCohortes";
+import { nrpl } from "./derivatives/nrpl";
+import { vddMultiple } from "./derivatives/vddMultiple";
+import { aviv } from "./derivatives/aviv";
+import { offreEnProfit } from "./derivatives/offreEnProfit";
+import { hlFunding } from "./derivatives/hlFunding";
+import { fundingSpreadHl } from "./derivatives/fundingSpreadHl";
+import { hlWhalesNet } from "./derivatives/hlWhalesNet";
 
 // — stratégies (v2.1 — divergences & spot/perp reclassés) —
 import { rsiDivergence } from "./strategy/rsiDivergence";
@@ -419,6 +431,16 @@ export const INDICATORS: IndicatorDef[] = [
   netPositioningTopTrader,
   smartRetailSpread,
   squeezePressureIndex,
+  liqParBougie,
+  hashRibbons,
+  mvrvCohortes,
+  nrpl,
+  vddMultiple,
+  aviv,
+  offreEnProfit,
+  hlFunding,
+  fundingSpreadHl,
+  hlWhalesNet,
   // — stratégies (v2.1 — divergences & spot/perp reclassés)
   rsiDivergence,
   macdDivergence,

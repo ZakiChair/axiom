@@ -1,7 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { INDICATORS, getIndicator } from "@axiom/indicators";
 import type { IndicatorDef } from "@axiom/types";
+
+// `daemonSupporte` est l'état de la DERNIÈRE sonde /health — stubbé : ce test pilote
+// le verdict sans dépendre d'un daemon réel.
+vi.mock("../data/daemon", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../data/daemon")>();
+  return { ...actual, daemonSupporte: vi.fn(() => false) };
+});
+
+import { daemonSupporte } from "../data/daemon";
+import { coinalyzeKeyStore } from "../store/coinalyze";
 import { raisonUnusableIndicateur, type ContexteIndicateur } from "./indicatorUsability";
+
+const daemonSupporteMock = vi.mocked(daemonSupporte);
 
 function def(id: string): IndicatorDef {
   const found = getIndicator(id);
@@ -117,6 +129,13 @@ describe("raisonUnusableIndicateur", () => {
       "cvdd",
       "balancedPrice",
       "ssr",
+      // Lot 2 : hashrate + métriques de cycle BGeometrics.
+      "hashRibbons",
+      "mvrvCohortes",
+      "nrpl",
+      "vddMultiple",
+      "aviv",
+      "offreEnProfit",
     ];
     for (const id of ids) {
       expect(
@@ -199,8 +218,31 @@ describe("raisonUnusableIndicateur", () => {
     }
   });
 
-  it("accepte les 200 définitions sans lever", () => {
-    expect(INDICATORS).toHaveLength(200);
+  it("liqParBougie exige une clé Coinalyze utilisable", () => {
+    coinalyzeKeyStore.setState({ hasKey: false });
+    expect(
+      raisonUnusableIndicateur(def("liqParBougie"), { ...binanceBtc, timeframe: "1h" }),
+    ).toBe("Nécessite une clé Coinalyze");
+    coinalyzeKeyStore.setState({ hasKey: true });
+    expect(
+      raisonUnusableIndicateur(def("liqParBougie"), { ...binanceBtc, timeframe: "1h" }),
+    ).toBeNull();
+  });
+
+  it("hlWhalesNet exige le daemon axiomd", () => {
+    daemonSupporteMock.mockReturnValue(false);
+    expect(
+      raisonUnusableIndicateur(def("hlWhalesNet"), { ...binanceBtc, timeframe: "1h" }),
+    ).toBe("Nécessite le daemon axiomd (collecte des niveaux HL)");
+    daemonSupporteMock.mockReturnValue(true);
+    expect(
+      raisonUnusableIndicateur(def("hlWhalesNet"), { ...binanceBtc, timeframe: "1h" }),
+    ).toBeNull();
+    daemonSupporteMock.mockReturnValue(false);
+  });
+
+  it("accepte les 210 définitions sans lever", () => {
+    expect(INDICATORS).toHaveLength(210);
     for (const indicateur of INDICATORS) {
       expect(() => raisonUnusableIndicateur(indicateur, binanceBtc), indicateur.id).not.toThrow();
     }

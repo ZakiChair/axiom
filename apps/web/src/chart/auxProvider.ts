@@ -37,7 +37,11 @@
  */
 import { alignAux } from "@axiom/indicators";
 import type { AuxSeries, AuxSeriesId, ExchangeId, Timeframe } from "@axiom/types";
-import { coinalyzeProvider } from "../data/coinalyze";
+import { coinalyzeProvider, fetchLiquidationHistory } from "../data/coinalyze";
+import type { CoinalyzeInterval, LiquidationHistPoint } from "../data/coinalyze";
+import { hlLiqHeatGet } from "../data/daemon";
+import { basePerp } from "../data/symbol";
+import { dureeTimeframeMs } from "../data/backtestData";
 import { histFunding, histOiUsd } from "../data/referentiels";
 import { stablecoinsSupplyProvider } from "../data/macro/stablecoins";
 import { fetchNvtHistory } from "../data/onchain/blockchainNvt";
@@ -105,6 +109,23 @@ const TTL_MS: Record<AuxSeriesId, number> = {
   lsTopTrader: 5 * 60_000, // ratio positions top traders
   lsTaker: 5 * 60_000, // ratio taker acheteur/vendeur
   fearGreed: 60 * 60_000, // Fear & Greed global (Alternative.me, journalier)
+  // Flux de liquidations par bougie (Coinalyze, à l'interval du chart) — cadence flux.
+  liqLongUsd: 60_000,
+  liqShortUsd: 60_000,
+  // Hashrate réseau BTC (mempool.space, journalier — le client a son propre cache 6 h).
+  hashrate: 60 * 60_000,
+  // Métriques de cycle BGeometrics (journalier ; cache 24 h + quota interne en primaire).
+  sthMvrv: 60 * 60_000,
+  lthMvrv: 60 * 60_000,
+  nrplUsd: 60 * 60_000,
+  vddMultiple: 60 * 60_000,
+  aviv: 60 * 60_000,
+  supplyProfit: 60 * 60_000,
+  supplyLoss: 60 * 60_000,
+  // Funding horaire Hyperliquid + positionnement net des gros comptes HL (daemon) —
+  // cadence proche temps réel, comme `funding`.
+  hlFunding: 60_000,
+  hlWhalesNet: 60_000,
 };
 /** Durée de mémorisation d'un échec de fetch (anti retry-tempête). */
 const ERROR_TTL_MS = 30_000;
@@ -128,7 +149,63 @@ const COINALYZE_BUCKET_MS = 60 * 60_000;
  * l'ouverture : appariées 1:1 (`perpDelta`, `refClose`) ou horodatées au début de leur
  * période (séries quotidiennes), le mode clôture leur ferait lire la période suivante.
  */
-const AUX_SUR_CLOTURE: ReadonlySet<AuxSeriesId> = new Set<AuxSeriesId>(["oi", "funding"]);
+const AUX_SUR_CLOTURE: ReadonlySet<AuxSeriesId> = new Set<AuxSeriesId>([
+  "oi",
+  "funding",
+  // `hlFunding` porte l'instant de règlement horaire ; `hlWhalesNet` l'instant de
+  // l'instantané daemon — tous deux connus À leur ts → alignés sur la clôture.
+  "hlFunding",
+  "hlWhalesNet",
+]);
+
+/**
+ * Timeframe du chart → intervalle Coinalyze `liquidation-history` + durée du bucket.
+ * Un tf sans équivalent Coinalyze (1w, 1M, 3m, sous-minute…) → absent → série vide.
+ */
+const INTERVALLE_LIQ: Partial<Record<Timeframe, { interval: CoinalyzeInterval; ms: number }>> = {
+  "1m": { interval: "1min", ms: 60_000 },
+  "5m": { interval: "5min", ms: 300_000 },
+  "15m": { interval: "15min", ms: 900_000 },
+  "30m": { interval: "30min", ms: 1_800_000 },
+  "1h": { interval: "1hour", ms: 3_600_000 },
+  "2h": { interval: "2hour", ms: 7_200_000 },
+  "4h": { interval: "4hour", ms: 14_400_000 },
+  "6h": { interval: "6hour", ms: 21_600_000 },
+  "12h": { interval: "12hour", ms: 43_200_000 },
+  "1d": { interval: "daily", ms: 86_400_000 },
+};
+/**
+ * Plafond de points MESURÉ sur `liquidation-history` (sonde réelle 2026-09-22 via le
+ * proxy : 30 j en `5min` → 2 545 points ≈ 8,8 j effectifs ; 14 j → 2 468 ; 3 j en
+ * `1min` → 1 271 ; 90 j → 0). La fenêtre `since` est donc bornée à
+ * `LIQ_POINTS_MAX × durée du bucket` — au-delà l'API tronque la tête de la série.
+ */
+const LIQ_POINTS_MAX = 2500;
+
+/**
+ * Promesse partagée du fetch `liquidation-history` : `liqLongUsd` ET `liqShortUsd`
+ * (def `liqParBougie`) consomment LA MÊME série — une seule requête par (symbole, tf),
+ * purgée à la résolution (le TTL `Entry` prend ensuite le relais).
+ */
+const liqFluxEnVol = new Map<string, Promise<LiquidationHistPoint[]>>();
+
+function fetchLiqFlux(
+  symbol: string,
+  timeframe: Timeframe,
+  depuis: number,
+  interval: CoinalyzeInterval,
+): Promise<LiquidationHistPoint[]> {
+  const key = `${symbol}:${timeframe}`;
+  let p = liqFluxEnVol.get(key);
+  if (p === undefined) {
+    p = fetchLiquidationHistory(symbol, depuis, interval);
+    liqFluxEnVol.set(key, p);
+    void p.finally(() => {
+      if (liqFluxEnVol.get(key) === p) liqFluxEnVol.delete(key);
+    });
+  }
+  return p;
+}
 
 /** Entrée de cache pour une clé `(id, symbole)`. */
 type Entry =
@@ -372,7 +449,14 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
     case "lthSopr":
     case "rhodl":
     case "cvdd":
-    case "balancedPrice": {
+    case "balancedPrice":
+    case "sthMvrv":
+    case "lthMvrv":
+    case "nrplUsd":
+    case "vddMultiple":
+    case "aviv":
+    case "supplyProfit":
+    case "supplyLoss": {
       // Métriques on-chain BTC (bitcoin-data.com). Réutilise le fetch dédié (cache 24h +
       // quota partagés avec OnchainWindow → aucun appel réseau dupliqué). BTC uniquement :
       // les autres actifs restent vides (dégradation gracieuse).
@@ -404,6 +488,60 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
       const r = await bg.fetchBgeometricMetrique(bg.BG_BTC_DOMINANCE, getBgeometricsKey());
       return toPoints((r?.serie.points ?? []).map((p) => ({ time: p.time, value: p.value })));
     }
+    case "liqLongUsd":
+    case "liqShortUsd": {
+      // Flux de liquidations EXÉCUTÉES par bougie (≠ niveau) : fetché à l'intervalle
+      // du chart et apparié 1:1 (clé `id:symbole:tf`, patron `perpDelta`). Sans clé
+      // Coinalyze → [] ; tf non mappable → []. Les deux ids partagent UN seul fetch
+      // (`fetchLiqFlux`). `pt.time` = DÉBUT du bucket (openTime) → alignement ouverture.
+      if (!coinalyzeKeyStore.getState().hasKey) return [];
+      const m = INTERVALLE_LIQ[timeframe];
+      if (m === undefined) return [];
+      const depuis = Math.max(since, Date.now() - LIQ_POINTS_MAX * m.ms);
+      const pts = await fetchLiqFlux(symbol, timeframe, depuis, m.interval);
+      return toPoints(
+        pts.map((p) => ({ time: p.time, value: id === "liqLongUsd" ? p.longUsd : p.shortUsd })),
+      );
+    }
+    case "hashrate": {
+      // Hashrate réseau BTC (mempool.space /mining/hashrate/1y, cache 6 h interne).
+      // Module PARESSEUX : chargé au premier besoin (patron `chargerClientBg`).
+      if (symbolToAsset(symbol) !== "btc") return [];
+      const mp = await chargerMempool();
+      const r = await mp.fetchHashrate();
+      return toPoints((r?.donnee.points ?? []).map((p) => ({ time: p.time, value: p.value })));
+    }
+    case "hlFunding": {
+      // Funding HORAIRE Hyperliquid (fraction) — appel direct api.hyperliquid.xyz,
+      // module paresseux `data/hyperliquidFunding`. Coin de base du symbole (BTC…).
+      const coin = basePerp(symbol);
+      if (coin === null) return [];
+      const mod = await chargerHlFunding();
+      return toPoints(await mod.fetchHlFundingHistory(coin, since));
+    }
+    case "hlWhalesNet": {
+      // Positionnement net des gros comptes HL : 100 × (long − short) / (long + short)
+      // par instantané du collecteur daemon (`/hl/liqheat`). ÉCHANTILLON du leaderboard,
+      // jamais le marché entier. Pas ≥ 5 min (cadence de collecte) → clé avec tf.
+      const coin = basePerp(symbol);
+      if (coin === null) return [];
+      const pas = Math.max(5 * 60_000, dureeTimeframeMs(timeframe) ?? 0);
+      const brut = await hlLiqHeatGet(coin, {
+        depuis: Date.now() - 14 * 24 * 3_600_000,
+        pas,
+      });
+      if (brut === null) return [];
+      const mod = await import("../data/hyperliquidHeat");
+      const rep = mod.mapperReponseHeat(brut);
+      if (rep === null) return [];
+      const pts: AuxPoint[] = [];
+      for (const s of rep.instantanes) {
+        const total = s.longUsd + s.shortUsd;
+        if (total <= 0) continue;
+        pts.push({ time: s.ts, value: (100 * (s.longUsd - s.shortUsd)) / total });
+      }
+      return toPoints(pts);
+    }
   }
 }
 
@@ -430,7 +568,32 @@ const BG_DEF_PAR_AUX = {
   rhodl: "BG_RHODL",
   cvdd: "BG_CVDD",
   balancedPrice: "BG_BALANCED_PRICE",
+  sthMvrv: "BG_STH_MVRV",
+  lthMvrv: "BG_LTH_MVRV",
+  nrplUsd: "BG_NRPL_USD",
+  vddMultiple: "BG_VDD_MULTIPLE",
+  aviv: "BG_AVIV",
+  supplyProfit: "BG_SUPPLY_PROFIT",
+  supplyLoss: "BG_SUPPLY_LOSS",
 } as const satisfies Record<string, keyof typeof import("../data/onchain/bgeometrics")>;
+
+let clientMempool: Promise<typeof import("../data/onchain/mempool")> | undefined;
+/** Client mempool.space (hashrate) — paresseux : hors du chunk d'entrée (patron ci-dessus). */
+function chargerMempool(): Promise<typeof import("../data/onchain/mempool")> {
+  return clientMempool ??= import("../data/onchain/mempool").catch((err) => {
+    clientMempool = undefined;
+    throw err;
+  });
+}
+
+let clientHlFunding: Promise<typeof import("../data/hyperliquidFunding")> | undefined;
+/** Funding horaire HL — paresseux : hors du chunk d'entrée. */
+function chargerHlFunding(): Promise<typeof import("../data/hyperliquidFunding")> {
+  return clientHlFunding ??= import("../data/hyperliquidFunding").catch((err) => {
+    clientHlFunding = undefined;
+    throw err;
+  });
+}
 
 export class AuxProvider {
   /** Cache brut partagé (singleton) : clé `${id}:${symbole}` → entrée. */
@@ -456,10 +619,12 @@ export class AuxProvider {
       // une clé différente → miss → refetch (l'ancienne entrée reste dans la Map jusqu'à ce
       // que ce refSymbol soit re-sélectionné, puis purgée-si-expirée). Niveaux : inchangés.
       const fetchSymbol = id === "refClose" ? refSymbolStore.getState().refSymbol : req.symbol;
-      const key =
-        id === "mark" || id === "perpDelta" || id === "refClose"
-          ? `${id}:${fetchSymbol}:${req.timeframe}`
-          : `${id}:${req.symbol}`;
+      // Séries dont le fetch dépend de l'intervalle du chart : `mark`/`refClose`
+      // (appariement 1:1 par ouverture), `perpDelta`/`liqLongUsd`/`liqShortUsd`
+      // (FLUX — un LOCF les fausserait), `hlWhalesNet` (le `pas` dépend du tf).
+      const key = CLE_AVEC_TF.has(id)
+        ? `${id}:${fetchSymbol}:${req.timeframe}`
+        : `${id}:${req.symbol}`;
       let entry = this.cache.get(key);
 
       // Purge d'une entrée ready/error expirée → force un re-fetch au besoin.
@@ -518,6 +683,20 @@ export class AuxProvider {
     );
   }
 }
+
+/**
+ * Séries fetchées À L'INTERVALLE DU CHART → leur clé de cache porte le timeframe
+ * (cf. en-tête : flux `perpDelta`/`liq*Usd`, appariements `mark`/`refClose`, et
+ * `hlWhalesNet` dont le `pas` daemon dépend du tf).
+ */
+const CLE_AVEC_TF: ReadonlySet<AuxSeriesId> = new Set<AuxSeriesId>([
+  "mark",
+  "perpDelta",
+  "refClose",
+  "liqLongUsd",
+  "liqShortUsd",
+  "hlWhalesNet",
+]);
 
 /** Singleton module : cache brut partagé entre tous les slots/graphes. */
 export const auxProvider = new AuxProvider();

@@ -73,7 +73,9 @@ export type BgMetriqueId =
   // Flux ETF spot BTC (repli du panneau ETF) et hashrate réseau.
   | "etfFlow" | "hashrate"
   | "sthRealizedPrice" | "lthRealizedPrice" | "realizedCap" | "supplyProfit" | "supplyLoss"
-  | "exchangeNetflow" | "exchangeReserve";
+  | "exchangeNetflow" | "exchangeReserve"
+  // Cohortes / cycles lus sur plusieurs années (aux chart-only, hors panneau OnchainWindow).
+  | "sthMvrv" | "lthMvrv" | "nrplUsd" | "vddMultiple" | "aviv";
 
 /** Définition d'une métrique BGeometrics (id interne, chemin API, champ JSON, libellé). */
 export interface DefMetriqueBg {
@@ -84,6 +86,13 @@ export interface DefMetriqueBg {
   abonnement?: boolean;
   /** Série limitée à J-7 par l'offre gratuite (embargo payant des 7 derniers jours). */
   embargo?: true;
+  /**
+   * Profondeur d'historique demandée (jours) — défaut `FENETRE_JOURS` (120 j). Les
+   * métriques de cycle (MVRV de cohortes, NRPL, VDD, AVIV) demandent 1 460 j : les
+   * cycles se lisent sur des années et un appel coûte le même quota quelle que soit
+   * la plage (max de l'offre gratuite).
+   */
+  fenetreJours?: number;
 }
 
 // Défs exportées individuellement (réutilisées par la couche aux du chart, cf. auxProvider).
@@ -122,6 +131,16 @@ export const BG_SUPPLY_PROFIT: DefMetriqueBg = { id: "supplyProfit", chemin: "su
 export const BG_SUPPLY_LOSS: DefMetriqueBg = { id: "supplyLoss", chemin: "supply-loss", champ: "supplyLossBtc", libelle: "Offre en perte" };
 export const BG_EXCHANGE_NETFLOW: DefMetriqueBg = { id: "exchangeNetflow", chemin: "exchange-netflow-btc", champ: "exchangeNetflowBtc", libelle: "Flux net exchanges", abonnement: true };
 export const BG_EXCHANGE_RESERVE: DefMetriqueBg = { id: "exchangeReserve", chemin: "exchange-reserve-btc", champ: "exchangeReserveBtc", libelle: "Réserves exchanges", abonnement: true };
+// Cohortes / cycles (aux chart uniquement — hors panneau OnchainWindow, donc absents de
+// BG_METRIQUES). Champs JSON vérifiés par appel réel `GET /bgapi/v1/<chemin>/last` le
+// 2026-09-22 : sthMvrv, lthMvrv, nrplUsd, aviv répondent `delayed: true` (embargo J-7) ;
+// vdd-multiple répond frais (J-1) → pas d'embargo. `fenetreJours: 1460` = max offre
+// gratuite : les cycles se lisent sur des années, à quota identique.
+export const BG_STH_MVRV: DefMetriqueBg = { id: "sthMvrv", chemin: "sth-mvrv", champ: "sthMvrv", libelle: "MVRV STH", embargo: true, fenetreJours: 1460 };
+export const BG_LTH_MVRV: DefMetriqueBg = { id: "lthMvrv", chemin: "lth-mvrv", champ: "lthMvrv", libelle: "MVRV LTH", embargo: true, fenetreJours: 1460 };
+export const BG_NRPL_USD: DefMetriqueBg = { id: "nrplUsd", chemin: "nrpl-usd", champ: "nrplUsd", libelle: "NRPL (USD)", embargo: true, fenetreJours: 1460 };
+export const BG_VDD_MULTIPLE: DefMetriqueBg = { id: "vddMultiple", chemin: "vdd-multiple", champ: "vddMultiple", libelle: "VDD Multiple", fenetreJours: 1460 };
+export const BG_AVIV: DefMetriqueBg = { id: "aviv", chemin: "aviv", champ: "aviv", libelle: "AVIV", embargo: true, fenetreJours: 1460 };
 
 export const BG_METRIQUES: readonly DefMetriqueBg[] = [
   BG_MVRV,
@@ -247,9 +266,15 @@ export function publierQuotaBg(cle?: string | null): void {
 
 // ─────────────────────────── Fetch ───────────────────────────
 
-function construireUrl(chemin: string): string {
+/**
+ * URL de l'endpoint `/api/<chemin>` bornée `startday/endday` (YYYY-MM-DD UTC) sur
+ * `fenetreJours` jours — les métriques de cycle (MVRV cohortes, NRPL, VDD, AVIV)
+ * demandent 1460 j (max de l'offre gratuite), les autres gardent `FENETRE_JOURS`.
+ * Exportée pour le test de fenêtre.
+ */
+export function construireUrl(chemin: string, fenetreJours: number = FENETRE_JOURS): string {
   const fin = new Date();
-  const debut = new Date(fin.getTime() - FENETRE_JOURS * 86_400_000);
+  const debut = new Date(fin.getTime() - fenetreJours * 86_400_000);
   const params = new URLSearchParams({
     startday: debut.toISOString().slice(0, 10),
     endday: fin.toISOString().slice(0, 10),
@@ -335,7 +360,7 @@ async function chargerMetriqueBgUneFois(
   try {
     const compteur = incrementerCompteur(actif);
     publierQuotaBg(cle);
-    const res = await fetch(construireUrl(def.chemin), { headers, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) });
+    const res = await fetch(construireUrl(def.chemin, def.fenetreJours), { headers, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) });
     if (res.status === 403 && def.abonnement) {
       // Mémoire effacée depuis la capture de la clé (nouvelle clé) : ce refus ne la concerne pas.
       if (generationRefusAbonnementBg() === generation) memoriserRefusAbonnement(acces);

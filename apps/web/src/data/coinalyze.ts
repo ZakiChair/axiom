@@ -43,7 +43,7 @@ const COINALYZE_INTERVALS = [
   "12hour",
   "daily",
 ] as const;
-type CoinalyzeInterval = (typeof COINALYZE_INTERVALS)[number];
+export type CoinalyzeInterval = (typeof COINALYZE_INTERVALS)[number];
 
 /** Fenêtre glissante de débit : au plus 40 requêtes / 60 s (1 symbole par appel → poids 1). */
 const RATE_LIMIT = 40;
@@ -359,6 +359,7 @@ export interface LiquidationHistPoint {
 export async function fetchLiquidationHistory(
   symbol: string,
   sinceMs: number,
+  interval: CoinalyzeInterval = LIQ_INTERVAL,
 ): Promise<LiquidationHistPoint[]> {
   try {
     const cs = toCoinalyzeSymbol(symbol);
@@ -366,7 +367,7 @@ export async function fetchLiquidationHistory(
     const from = Math.floor(sinceMs / 1000);
     const res = await request<HistoryResponse<LiqHistoryPoint>[]>("liquidation-history", {
       symbols: cs,
-      interval: LIQ_INTERVAL,
+      interval,
       from: String(from),
       to: String(to),
       convert_to_usd: "true",

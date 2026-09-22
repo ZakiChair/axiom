@@ -107,3 +107,43 @@ describe("filtrerFrontieres8h", () => {
     expect(filtrerFrontieres8h([])).toEqual([]);
   });
 });
+
+// ───────── Lot 2 : `fetchLiquidationHistory` à intervalle paramétrable ─────────
+describe("fetchLiquidationHistory — intervalle optionnel", () => {
+  it("propage l'intervalle demandé dans la requête (défaut 5min)", async () => {
+    const { fetchLiquidationHistory } = await import("./coinalyze");
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      urls.push(String(url));
+      return new Response(
+        JSON.stringify([{ symbol: "BTCUSDT_PERP.A", history: [{ t: 1790000000, l: 12.5, s: 3 }] }]),
+      );
+    }));
+    try {
+      const pts = await fetchLiquidationHistory("BTCUSDT", 1_700_000_000_000, "15min");
+      expect(new URL(urls[0] ?? "", "https://axiom.test").searchParams.get("interval")).toBe("15min");
+      expect(pts).toEqual([{ time: 1790000000 * 1000, longUsd: 12.5, shortUsd: 3 }]);
+      urls.length = 0;
+      await fetchLiquidationHistory("BTCUSDT", 1_700_000_000_000); // défaut
+      expect(new URL(urls[0] ?? "", "https://axiom.test").searchParams.get("interval")).toBe("5min");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("dégradation gracieuse : HTTP non-OK et réponse vide → []", async () => {
+    const { fetchLiquidationHistory } = await import("./coinalyze");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 500 })));
+    try {
+      expect(await fetchLiquidationHistory("BTCUSDT", 0, "1hour")).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify([]))));
+    try {
+      expect(await fetchLiquidationHistory("BTCUSDT", 0, "daily")).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});

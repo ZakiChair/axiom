@@ -118,6 +118,17 @@ export const SOUS_GROUPES_DERIVES: Record<string, "perp" | "onchain" | "position
   netPositioningTopTrader: "positionnement",
   smartRetailSpread: "positionnement",
   squeezePressureIndex: "perp",
+  // — Lot 2 : flux liquidations, hashrate, métriques de cycle BG, HL —
+  liqParBougie: "perp",
+  hashRibbons: "onchain",
+  mvrvCohortes: "onchain",
+  nrpl: "onchain",
+  vddMultiple: "onchain",
+  aviv: "onchain",
+  offreEnProfit: "onchain",
+  hlFunding: "perp",
+  fundingSpreadHl: "perp",
+  hlWhalesNet: "positionnement",
 };
 
 const LIBELLES_SOUS_GROUPES_DERIVES: Record<"perp" | "onchain" | "positionnement", string> = {

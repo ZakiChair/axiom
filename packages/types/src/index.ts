@@ -205,7 +205,22 @@ export type AuxSeriesId =
   // (corrélation, bêta, spread z-score vs référence).
   | "refClose"
   // Sentiment global crypto : Fear & Greed Index (Alternative.me, 0-100).
-  | "fearGreed";
+  | "fearGreed"
+  // Flux de liquidations exécutées par bougie (Coinalyze `liquidation-history`, USD,
+  // à l'intervalle du chart — clé `id:symbole:tf` comme `perpDelta`).
+  | "liqLongUsd" | "liqShortUsd"
+  // Hashrate réseau BTC en H/s (mempool.space `/mining/hashrate/1y`, journalier).
+  | "hashrate"
+  // Métriques de cycle on-chain BTC (BGeometrics, journalier) : MVRV des cohortes
+  // court/long terme, profits-pertes réalisés nets USD, VDD Multiple, AVIV, offre
+  // en profit/perte (unités BTC — le ratio est calculé par le def `offreEnProfit`).
+  | "sthMvrv" | "lthMvrv" | "nrplUsd" | "vddMultiple" | "aviv"
+  | "supplyProfit" | "supplyLoss"
+  // Funding HORAIRE Hyperliquid (fraction, `fundingHistory` — appel direct API).
+  | "hlFunding"
+  // Positionnement net des gros comptes HL (%, −100…+100) depuis les instantanés de
+  // niveaux collectés par le daemon (`/hl/liqheat`) — échantillon du leaderboard.
+  | "hlWhalesNet";
 
 /**
  * Séries auxiliaires DÉJÀ alignées sur les bougies (même longueur, même index).

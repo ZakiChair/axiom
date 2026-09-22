@@ -122,3 +122,56 @@ describe("quota BGeometrics", () => {
     expect(cleActive("ma-cle-perso")).toBe(true);
   });
 });
+
+// ───────── Lot 2 : métriques de cycle (champs réels sondés le 2026-09-22) ─────────
+describe("défs BGeometrics Lot 2", () => {
+  it("parse le champ JSON propre à chaque endpoint (stamps s → ms)", async () => {
+    const { BG_STH_MVRV, BG_LTH_MVRV, BG_NRPL_USD, BG_VDD_MULTIPLE, BG_AVIV } =
+      await import("./bgeometrics");
+    const defs = [
+      [BG_STH_MVRV, 1.06],
+      [BG_LTH_MVRV, 1.55],
+      [BG_NRPL_USD, -129_445_415.71],
+      [BG_VDD_MULTIPLE, 0.6575],
+      [BG_AVIV, 0.974769],
+    ] as const;
+    for (const [def, valeur] of defs) {
+      const serie = parseBgeometrics(
+        [{ d: "2026-09-15", unixTs: 1789430400, [def.champ]: valeur }],
+        def.champ,
+      );
+      expect(serie.points).toEqual([{ time: 1789430400 * 1000, value: valeur }]);
+    }
+  });
+
+  it("embargo J-7 posé sauf sur vddMultiple (réponse `/last` fraîche au sondage)", async () => {
+    const m = await import("./bgeometrics");
+    expect(m.BG_STH_MVRV.embargo).toBe(true);
+    expect(m.BG_LTH_MVRV.embargo).toBe(true);
+    expect(m.BG_NRPL_USD.embargo).toBe(true);
+    expect(m.BG_AVIV.embargo).toBe(true);
+    expect(m.BG_VDD_MULTIPLE.embargo).toBeUndefined();
+  });
+
+  it("fenetreJours 1460 élargit `startday` à ~4 ans ; défaut = 120 j", async () => {
+    const { construireUrl } = await import("./bgeometrics");
+    const joursDe = (url: string) => {
+      const q = new URL(url, "https://axiom.test").searchParams;
+      const debut = Date.parse(`${q.get("startday")}T00:00:00Z`);
+      const fin = Date.parse(`${q.get("endday")}T00:00:00Z`);
+      return (fin - debut) / 86_400_000;
+    };
+    expect(joursDe(construireUrl("sth-mvrv", 1460))).toBe(1460);
+    expect(joursDe(construireUrl("mvrv-zscore"))).toBe(120); // défaut inchangé
+    expect(construireUrl("aviv", 1460)).toContain("/bgapi/v1/aviv?");
+  });
+
+  it("fenetreJours est bien renseigné sur les 5 nouvelles défs uniquement", async () => {
+    const m = await import("./bgeometrics");
+    const nouvelles = [m.BG_STH_MVRV, m.BG_LTH_MVRV, m.BG_NRPL_USD, m.BG_VDD_MULTIPLE, m.BG_AVIV];
+    for (const def of nouvelles) expect(def.fenetreJours).toBe(1460);
+    // Les définitions historiques n'ont pas été élargies (quota = par requête, pas par jour).
+    expect(m.BG_MVRV.fenetreJours).toBeUndefined();
+    expect(m.BG_SUPPLY_PROFIT.fenetreJours).toBeUndefined();
+  });
+});

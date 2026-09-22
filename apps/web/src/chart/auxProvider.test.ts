@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AuxSeriesId, FundingRate, OpenInterest } from "@axiom/types";
+import type { AuxSeriesId, FundingRate, OpenInterest, Timeframe } from "@axiom/types";
 
 // Mocks des fournisseurs sous-jacents (pattern extapi/mexc.test) — hissés par Vitest
 // avant les imports statiques. On stub UNIQUEMENT ce que consomme l'AuxProvider.
@@ -9,6 +9,7 @@ vi.mock("../data/coinalyze", () => ({
     fetchOpenInterestHistory: vi.fn(),
     fetchFundingRateHistory: vi.fn(),
   },
+  fetchLiquidationHistory: vi.fn(),
 }));
 vi.mock("../data/macro/stablecoins", () => ({
   stablecoinsSupplyProvider: { fetchSeries: vi.fn() },
@@ -27,9 +28,22 @@ vi.mock("../data/referentiels", () => ({
   histFunding: vi.fn(),
   histOiUsd: vi.fn(),
 }));
+vi.mock("../data/onchain/mempool", () => ({
+  fetchHashrate: vi.fn(),
+}));
+vi.mock("../data/hyperliquidFunding", () => ({
+  fetchHlFundingHistory: vi.fn(),
+}));
+vi.mock("../data/daemon", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../data/daemon")>();
+  return { ...actual, hlLiqHeatGet: vi.fn() };
+});
 
 import { AuxProvider } from "./auxProvider";
-import { coinalyzeProvider } from "../data/coinalyze";
+import { coinalyzeProvider, fetchLiquidationHistory } from "../data/coinalyze";
+import { fetchHashrate } from "../data/onchain/mempool";
+import { fetchHlFundingHistory } from "../data/hyperliquidFunding";
+import { hlLiqHeatGet } from "../data/daemon";
 import { stablecoinsSupplyProvider } from "../data/macro/stablecoins";
 import { fetchBgeometricMetrique } from "../data/onchain/bgeometrics";
 import { fetchCoinMetrics } from "../data/onchain/coinmetrics";
@@ -45,6 +59,10 @@ const bgFetchMock = vi.mocked(fetchBgeometricMetrique);
 const bgKeyMock = vi.mocked(getBgeometricsKey);
 const fundingFallbackMock = vi.mocked(histFunding);
 const oiFallbackMock = vi.mocked(histOiUsd);
+const liqHistMock = vi.mocked(fetchLiquidationHistory);
+const mempoolMock = vi.mocked(fetchHashrate);
+const hlFundingMock = vi.mocked(fetchHlFundingHistory);
+const hlHeatMock = vi.mocked(hlLiqHeatGet);
 
 /** Point OpenInterest de test (seul `oiUsd` est lu par l'AuxProvider). */
 function oiPoint(time: number, oiUsd: number): OpenInterest {
@@ -463,5 +481,138 @@ describe("AuxProvider — mark apparié à la clôture du même intervalle", () 
     const url = new URL(String(fetcher.mock.calls[0]?.[0]), "https://axiom.test");
     expect(url.searchParams.get("endTime")).toBe(String(4 * H));
     expect(url.searchParams.has("startTime")).toBe(false);
+  });
+});
+
+/**
+ * Lot 2 — nouvelles séries aux : flux liquidations Coinalyze à l'intervalle du
+ * chart, hashrate mempool (BTC), métriques BGeometrics, funding + whales HL.
+ */
+describe("AuxProvider — Lot 2 (liq flux, hashrate, BG, HL)", () => {
+  const req = (ids: AuxSeriesId[], symbol = "BTCUSDT", timeframe: Timeframe = "5m") => ({
+    exchange: "binance" as const,
+    symbol,
+    timeframe,
+    ids,
+    candleTimes: [1000],
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    coinalyzeKeyStore.setState({ hasKey: true });
+    oiFallbackMock.mockResolvedValue(null);
+    fundingFallbackMock.mockResolvedValue(null);
+    liqHistMock.mockResolvedValue([
+      { time: 500, longUsd: 100, shortUsd: 50 },
+      { time: 1500, longUsd: 20, shortUsd: 80 },
+    ]);
+    mempoolMock.mockResolvedValue({
+      donnee: { points: [{ time: 1000, value: 6.2e20 }] },
+      ts: 0,
+      perime: false,
+    });
+    hlFundingMock.mockResolvedValue([{ time: 900, value: 0.00002 }]);
+    hlHeatMock.mockResolvedValue({
+      coin: "BTC",
+      pas: 300_000,
+      collecte: { actif: true, dernierInstantaneTs: 1500, periodeMs: 300_000, retentionMs: 0, premierTs: 500 },
+      instantanes: [
+        { ts: 500, niveaux: [], longUsd: 60, shortUsd: 40, nLong: 1, nShort: 1, oiUsd: null, adresses: 1 },
+        { ts: 1500, niveaux: [], longUsd: 0, shortUsd: 0, nLong: 0, nShort: 0, oiUsd: null, adresses: 1 },
+        { ts: 2000, niveaux: [], longUsd: 30, shortUsd: 70, nLong: 1, nShort: 1, oiUsd: null, adresses: 1 },
+      ],
+    });
+  });
+
+  it("liqLongUsd/liqShortUsd : intervalle du chart propagé, UN seul fetch partagé", async () => {
+    const p = new AuxProvider();
+    const r = req(["liqLongUsd", "liqShortUsd"], "BTCUSDT", "5m");
+    await new Promise<void>((resolve) => {
+      let n = 2;
+      p.getAligned(r, () => { if (--n === 0) resolve(); });
+    });
+    expect(liqHistMock).toHaveBeenCalledTimes(1);
+    // 5m → "5min" ; le `since` est borné au plafond mesuré (2500 buckets).
+    const [sym, since, interval] = liqHistMock.mock.calls[0] ?? [];
+    expect(sym).toBe("BTCUSDT");
+    expect(interval).toBe("5min");
+    expect(since).toBeGreaterThanOrEqual(Date.now() - 2500 * 300_000 - 1000);
+    const status = p.getAligned(r, () => {});
+    expect(status.status).toBe("ready");
+    if (status.status === "ready") {
+      expect(status.aux.liqLongUsd?.[0]).toBe(100); // point 500 → bougie ouvrant à 0..500
+      expect(status.aux.liqShortUsd?.[0]).toBe(50);
+    }
+  });
+
+  it("liq* : sans clé Coinalyze → série vide sans requête ; tf non mappable → []", async () => {
+    coinalyzeKeyStore.setState({ hasKey: false });
+    const p = new AuxProvider();
+    await new Promise<void>((resolve) => p.getAligned(req(["liqLongUsd"]), resolve));
+    expect(liqHistMock).not.toHaveBeenCalled();
+    const p2 = new AuxProvider();
+    const r = req(["liqShortUsd"], "BTCUSDT", "1w");
+    await new Promise<void>((resolve) => p2.getAligned(r, resolve));
+    expect(liqHistMock).not.toHaveBeenCalled();
+    expect(p2.getAligned(r, () => {})).toEqual({ status: "ready", aux: { liqShortUsd: [undefined] } });
+  });
+
+  it("hashrate : points mempool (s→ms convertis), non-BTC → aucun fetch", async () => {
+    const p = new AuxProvider();
+    await new Promise<void>((resolve) => p.getAligned(req(["hashrate"]), resolve));
+    expect(mempoolMock).toHaveBeenCalledTimes(1);
+    const status = p.getAligned(req(["hashrate"]), () => {});
+    expect(status.status).toBe("ready");
+    if (status.status === "ready") expect(status.aux.hashrate?.[0]).toBe(6.2e20);
+    const p2 = new AuxProvider();
+    await new Promise<void>((resolve) => p2.getAligned(req(["hashrate"], "ETHUSDT"), resolve));
+    expect(mempoolMock).toHaveBeenCalledTimes(1); // toujours 1 : jamais appelé pour ETH
+  });
+
+  it("séries BGeometrics Lot 2 : defs résolues par BG_DEF_PAR_AUX", async () => {
+    const ids = ["sthMvrv", "lthMvrv", "nrplUsd", "vddMultiple", "aviv", "supplyProfit", "supplyLoss"] as const;
+    bgFetchMock.mockResolvedValue({
+      serie: { points: [{ time: 500, value: 1.2 }], dernier: { time: 500, value: 1.2 } },
+      ts: 0,
+      perime: false,
+      repli: false,
+    });
+    const p = new AuxProvider();
+    const r = req([...ids], "BTCUSDT", "1d");
+    await new Promise<void>((resolve) => {
+      let n = ids.length;
+      p.getAligned(r, () => { if (--n === 0) resolve(); });
+    });
+    expect(bgFetchMock).toHaveBeenCalledTimes(ids.length);
+    expect(bgFetchMock.mock.calls.map(([def]) => def.id).sort()).toEqual([...ids].sort());
+  });
+
+  it("hlFunding : coin de base dérivé, points recopiés", async () => {
+    const p = new AuxProvider();
+    await new Promise<void>((resolve) => p.getAligned(req(["hlFunding"], "ETHUSDT", "1h"), resolve));
+    expect(hlFundingMock).toHaveBeenCalledWith("ETH", expect.any(Number));
+    const status = p.getAligned(req(["hlFunding"], "ETHUSDT", "1h"), () => {});
+    expect(status.status).toBe("ready");
+  });
+
+  it("hlWhalesNet : 100×(l−s)/(l+s), somme nulle écartée, pas = max(5min, tf)", async () => {
+    const p = new AuxProvider();
+    await new Promise<void>((resolve) => p.getAligned(req(["hlWhalesNet"], "BTCUSDT", "1h"), resolve));
+    expect(hlHeatMock).toHaveBeenCalledWith("BTC", expect.objectContaining({ pas: 3_600_000 }));
+    const status = p.getAligned(req(["hlWhalesNet"], "BTCUSDT", "1h"), () => {});
+    expect(status.status).toBe("ready");
+    if (status.status === "ready") {
+      // Instantané ts=500 : (60−40)/100 → +20 ; ts=1500 somme 0 → écarté ; ts=2000 → −40.
+      // Alignement clôture sur bougie [0, pas) : la valeur connue ≤ 1000 est +20.
+      expect(status.aux.hlWhalesNet?.[0]).toBe(20);
+    }
+  });
+
+  it("hlWhalesNet : daemon absent (null) → série vide", async () => {
+    hlHeatMock.mockResolvedValue(null);
+    const p = new AuxProvider();
+    const r = req(["hlWhalesNet"]);
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: { hlWhalesNet: [undefined] } });
   });
 });

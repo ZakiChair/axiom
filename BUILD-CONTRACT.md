@@ -11,8 +11,8 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 - **Cible** : terminal pour UN utilisateur (ses propres clés). PAS de multi-tenant, PAS d'auth réseau, PAS de SaaS. Crypto d'abord (spot + perp) ; tradfi/commodités en complément.
 - **Renderer-first** : le premier livrable à valeur est un graphe live à l'écran. **AUCUN backend réseau/multi-tenant (Docker/TimescaleDB/Redis interdits). Un daemon localhost mono-process (`apps/daemon`, Bun + SQLite, port 8787) est autorisé depuis la Phase 2 — proxy/cache/persistance/alertes UNIQUEMENT, jamais sur le chemin chaud du renderer (les WS de marché du front restent directs).** Le front parle directement aux WS publics des exchanges (mode mono-utilisateur assumé) et reste **100 % fonctionnel SANS daemon** (feature-detect `/health` + repli localStorage/proxy Vite). Déviation assumée vs roadmap E1 : les proxys Vite restent en dev (dev sans daemon), le daemon est le chemin de PROD + services additionnels.
 - **Chart** : **KLineChart** figé (pas de lightweight-charts, pas d'abstraction `IChartRenderer` « swap de moteur »). L'overlay orderflow se synchronise sur le viewport de KLineChart. Multi-chart 2×2 : un store par slot ; les overlays doivent être scellés au slot (voir plan 2026-08-24, Lot 3).
-- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**200 indicateurs**). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
-- **Données dérivées (OI/funding/L-S/liquidations)** : **ACHETER** via un `IDerivedDataProvider` (Coinalyze **câblé**, M6 atteint) — NE PAS construire d'AggregationEngine multi-exchange. Trois couches de liquidations distinctes et étiquetées : heatmap *exécutée*, niveaux **EST.** (modèle levier), niveaux **HL réels** (Hyperliquid, non exhaustif). Depuis le 2026-09-21, la heatmap exécutée reçoit aussi une venue `hyperliquid` **PARTIELLE** (fills des makers suivis, couverture mesurée affichée — cf. « Corrections et extension demandées le 21 septembre 2026 »).
+- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**210 indicateurs** depuis le 2026-09-22, cf. « Revue et extension du 22 septembre 2026 »). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
+- **Données dérivées (OI/funding/L-S/liquidations)** : **ACHETER** via un `IDerivedDataProvider` (Coinalyze **câblé**, M6 atteint) — NE PAS construire d'AggregationEngine multi-exchange. Trois couches de liquidations distinctes et étiquetées : heatmap *exécutée*, niveaux **EST.** (modèle levier), niveaux **HL réels** (Hyperliquid, non exhaustif). Depuis le 2026-09-21, la heatmap exécutée reçoit aussi une venue `hyperliquid` **PARTIELLE** (fills des makers suivis, couverture mesurée affichée — cf. « Corrections et extension demandées le 21 septembre 2026 »). Depuis le 2026-09-22, la couche HL réels est aussi une **heatmap temps × prix des instantanés** collectés par le daemon (opt-in, couverture mesurée en % de l'OI — cf. « Revue et extension du 22 septembre 2026 »).
 - **Trading** : **PAS d'exécution d'ordres** — aucune clé de trading. Le paper trading (`PAPER`) est une simulation locale (hors gate G100/K8). Ne rien implémenter qui touche à des clés de trading réelles.
 - **Sources** : **9 identifiants** (`EXCHANGE_IDS` dans `@axiom/types`) — Binance, Bybit, OKX, Hyperliquid, Coinbase, Kraken, Twelve Data, MEXC, synthetic. Ne pas en ajouter sans nécessité démontrée (non-objectif avant G100).
 - **Fournisseurs de capitalisation (exception ACTÉE le 2026-09-01, même statut que WHALES)** : l'historique TOTAL/TOTAL2/TOTAL3 et la fenêtre BPL sont servis par l'endpoint public `api.coinmarketcap.com/data-api` (sans clé, via `/extapi`), avec repli CryptoCompare/CCData `min-api.cryptocompare.com` (clé personnelle navigateur, route dédiée `/ccdataapi` daemon + Vercel) puis CoinGecko local. `EXCHANGE_IDS` reste à 9 (l'adaptateur de capitalisation est de source `synthetic`). Aucun autre fournisseur sans amendement du contrat (amendements : fournisseurs statistiques publics le 2026-09-06, CryptoQuant BASIC le 2026-09-16 — cf. « Extension autorisée le 16 septembre 2026 »).
@@ -42,7 +42,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 
 ## État actuel (2026-09-04)
 - **Chart** live multi-exchange (spot + perp), multi-grille 1/2h/2v/2×2, orderflow/CVD/footprint, volume profile, fibo, dessins.
-- **200 indicateurs** TS purs dans `@axiom/indicators` (dont 30 stratégies étiquetées « non validé ») ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
+- **210 indicateurs** TS purs dans `@axiom/indicators` (dont 30 stratégies étiquetées « non validé ») ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
 - **39 fenêtres** à mnémonique (`WINDOW_REGISTRY`) — dont WHALES (mouvements baleines on-chain + positions top comptes Hyperliquid), ajoutée le 2026-08-25 sur décision utilisateur, et BPL (Bitcoin Power Law), ajoutée le 2026-09-01 avec les séries TOTAL/TOTAL2/TOTAL3 chartables (chantier CAP/BPL) : **écarts ASSUMÉS** au gel « aucune nouvelle fenêtre avant le verdict G100 » (§ ci-dessous).
 - **Daemon** `axiomd` : proxy+cache SQLite, KV/snapshots, candles, alertes (macOS + Telegram), replay dumps Binance, couches GDELT/UCDP, LIQHL Hyperliquid paresseux, collecteur whales (blocs confirmés blockchain.info + Etherscan stables, table `whale_moves`, rétention 30 j). Bind `127.0.0.1:8787`, whitelist `/extapi`, garde Host/Origin/DNS-rebinding.
 - **Vercel** : front + proxy serverless sans secret partagé, whitelist/MIME/DNS durcis. Les clés personnelles restent dans le navigateur. **Exception ACTÉE le 2026-09-14** (demande utilisateur, test communautaire) : une seule variable serveur, `BGEOMETRICS_API_KEY`, portée par `api/proxy.ts` vers bitcoin-data.com quand le client n'envoie aucune clé — clé gratuite et révocable, plafonds de l'offre gratuite (10 req/heure et 15 req/jour) partagés par les visiteurs, jamais exposée au navigateur ; toute autre clé reste personnelle (test structurel `apps/daemon/src/vercelProxy.test.ts`). Toute fonction strictement locale est marquée `UNUSABLE`, toute fenêtre partielle `PARTIAL` ; jamais de pane muet. La clé CryptoQuant (2026-09-16) relève de cette règle : personnelle, saisie dans les Réglages, repli `.env` pour le proxy Vite et le daemon `127.0.0.1` uniquement, JAMAIS de variable serveur sur Vercel (le test structurel continue d'exiger exactement une lecture d'environnement).
@@ -365,3 +365,77 @@ inchangé.**
    makers (BTC/ETH/SOL, 30 min). Budget d'entrée mesuré après le lot : **356 979 / 360 000
    octets gzip** (marge 3 021, au seuil de vigilance I11 ≈ 3 000) : le prochain lot touchant le
    chemin d'entrée doit d'abord libérer des octets.
+
+## Revue et extension du 22 septembre 2026
+
+Le propriétaire a demandé une revue d'AXIOM, l'intégration « correcte » des liquidations Hyperliquid
+sur le graphe (carte thermique) et de nouveaux indicateurs on-chain depuis les sources déjà admises ;
+il a validé les trois lots proposés (plan `docs/superpowers/plans/2026-09-22-heatmap-hl-indicateurs-onchain.md`,
+rapport `docs/superpowers/progress/2026-09-22-heatmap-hl-indicateurs-onchain.md`). **39 fenêtres,
+210 indicateurs, 9 identifiants de marché, aucune dépendance, aucun fournisseur nouveau.**
+
+1. **Défauts corrigés par la revue.** (a) Les couches LIQEST/LIQHL restaient MUETTES après un
+   changement de symbole ou un rechargement tant que LIQMARK n'avait jamais été activée : le contrôleur
+   de heatmap partagé n'était instancié que par LIQMARK — il l'est désormais dès qu'UNE des trois
+   bascules est active. (b) LIQHL est persistée (`sessionUi.liqHl`) comme LIQEST. (c) La heatmap
+   exécutée ne dépend plus uniquement de l'uptime du daemon : quand le collecteur est vivant mais que
+   des JOURS UTC de la fenêtre de 7 j n'ont aucun événement réel, le repli Coinalyze (approx) comble
+   CES jours seulement (jour courant exclu) et la légende l'annonce (« Coinalyze ≈ sur N j »). (d) Le
+   premier `/hl/liqlevels` après le boot attendait la construction de l'instantané et mourait au
+   `idleTimeout` Bun de 10 s (porté à 120 s ; un instantané en vol sert le cache périmé sans attendre).
+2. **Heatmap Hyperliquid des niveaux de liquidation RÉELS** (couche LIQHL, décision du propriétaire :
+   collecteur daemon opt-in). Le daemon (`apps/daemon/src/hlLiqHeat.ts`) prend toutes les 5 min un
+   instantané des positions du pool et l'écrit dans `hl_liq_instantanes` (une ligne par coin surveillé
+   — mêmes symboles que le collecteur de liquidations —, niveaux `[px, side, usd]`, totaux long/short,
+   OI HL du coin via `metaAndAssetCtxs`, adresses scannées ; rétention 14 j). La collecte n'existe que
+   si le drapeau KV `hl/heat` vaut `{ actif: true }` — posé par l'activation de LIQHL, retirable depuis
+   la fenêtre LIQ (« Collecte daemon ») : sans drapeau, aucun leaderboard (34 Mo) ni requête de compte.
+   Le **pool** passe de « top‑150 par `accountValue` » à « top‑150 `accountValue` ∪ top‑350 volume
+   hebdomadaire » (≤ 500 adresses, `clearinghouseState` 4 en vol / 100 ms → ≈ 50 s par instantané,
+   ≈ 200 poids/min en moyenne sous le quota 1 200 ; un 429 interrompt l'instantané) : mesure du
+   2026-09-22 sur BTC, 18 → 114 positions à `liquidationPx` exploitable et **couverture ≈ 23 % de l'OI
+   HL** (formule affichée : `(Σ long + Σ short) / (2 × OI)`, l'OI comptant un côté). Route
+   `GET /hl/liqheat/:coin?depuis&jusqua&pas` (dernier instantané par seau `pas`, ≤ 2 000). Le front
+   (`data/hyperliquidHeat.ts`, chunk paresseux) peint les instantanés en cellules temps × prix (rampe
+   AMBRE distincte du viridis des liquidations exécutées, dernier instantané ≤ fin de bougie, report
+   ≤ 2 pas, colonne vide au-delà), garde les barres du dernier instantané au bord droit, et affiche
+   « HL HEATMAP (niveaux réels) — N instantanés · X adresses · couverture ≈ Y % OI · pas … · T trous =
+   daemon éteint ». Règles d'honnêteté : ÉCHANTILLON du leaderboard jamais présenté comme exhaustif ;
+   trous d'historique = daemon éteint, visibles ; indisponible sans daemon (Vercel). Aucun
+   AggregationEngine (une venue, ses positions telles quelles), aucune fenêtre, `EXCHANGE_IDS` à 9.
+   La fenêtre WHALES, qui lit le même instantané, voit donc désormais « gros comptes ET gros tradeurs ».
+3. **Dix indicateurs** (TS pur, `@axiom/indicators`, un fichier et un test par def, catalogue 200 →
+   210). Séries aux ajoutées à `AuxSeriesId` (`@axiom/types`, écart signalé comme aux lots précédents) :
+   `liqLongUsd`, `liqShortUsd`, `hashrate`, `sthMvrv`, `lthMvrv`, `nrplUsd`, `vddMultiple`, `aviv`,
+   `supplyProfit`, `supplyLoss`, `hlFunding`, `hlWhalesNet`.
+
+   | Id | Contenu et limite affichée |
+   |---|---|
+   | `liqParBougie` | Liquidations par bougie (Coinalyze `liquidation-history` à l'intervalle du chart, flux apparié 1:1) : histogrammes shorts (+) / longs (−) + net. Clé Coinalyze requise, perp Binance, intervalle non couvert → UNUSABLE |
+   | `hashRibbons` | Hash Ribbons : RATIO SMA 30 / SMA 60 du hashrate (mempool.space, sans quota — croisement lu au passage par 1,0 ; valeurs absolues dans CHAIN) + régime (−1 capitulation, +1 reprise 10 barres, 0). BTC, ≥ 1d, 1 an d'historique |
+   | `mvrvCohortes` | MVRV STH / LTH (BGeometrics `sth-mvrv`, `lth-mvrv`). BTC, ≥ 1d |
+   | `nrpl` | Profits / pertes réalisés nets USD (BGeometrics `nrpl-usd`) : histogrammes signés + SMA 7. BTC, ≥ 1d |
+   | `vddMultiple` | VDD Multiple (BGeometrics). BTC, ≥ 1d |
+   | `aviv` | AVIV (BGeometrics). BTC, ≥ 1d |
+   | `offreEnProfit` | % de l'offre en profit = `100 × sp / (sp + sl)` (BGeometrics `supply-profit`/`supply-loss`, défs et cache partagés avec CHAIN). BTC, ≥ 1d |
+   | `hlFunding` | Funding Hyperliquid annualisé (`fundingHistory`, horaire, appel direct, multi-actif HL) |
+   | `fundingSpreadHl` | Écart de funding HL − Binance en points de % annualisés (`(hl × 24 − binance × 3) × 365 × 100`) |
+   | `hlWhalesNet` | Positionnement net des gros comptes HL suivis, `100 × (L − S) / (L + S)` par instantané du collecteur. Daemon + collecte requis ; échantillon (couverture en légende HL) |
+
+   Règles : les cinq séries BGeometrics nouvelles sont chargées à la demande (pose de l'indicateur),
+   cache 24 h, fenêtre 4 ans (offre gratuite), champ JSON vérifié par un appel réel chacun ; elles
+   consomment le même quota 15/j que CHAIN — un utilisateur qui pose tout le catalogue le même jour
+   atteint le plafond et voit « quota » (jamais un pane muet). BGeometrics reste la source unique de
+   MVRV-Z, SOPR, NUPL et Puell ; Coin Metrics n'y est pas substitué. Aucune série CryptoQuant.
+4. **Budget d'entrée.** Préalable obligatoire (marge 3 021 o gzip avant le chantier) : `AlertsPanel`
+   chargé par `React.lazy` (comme les fenêtres) et `data/backtestFunding` en `import()` au premier
+   run — 1 210 126 / 356 979 → 1 176 378 / 347 934 (bruts / gzip). Mesure après les trois lots :
+   **1 187 537 / 350 745** (marges 32 463 / 9 255 ; plafond 1 220 000 / 360 000 inchangé et
+   bloquant). `pnpm check` vert : indicators 1 450, alerts 76, backtest 109, daemon 679, web 4 792.
+
+Limites à ne pas masquer : la heatmap HL n'a d'historique que quand le daemon tourne avec le drapeau
+posé (trous affichés) et ne voit que les positions dont `liquidationPx` est exploitable (les comptes
+en marge croisée très collatéralisés en sont absents) ; la couverture est mesurée, pas garantie ;
+`hlWhalesNet` lit le même échantillon ; `liqParBougie` dépend de la profondeur d'historique que
+Coinalyze accorde à chaque intervalle (règle mesurée dans `auxProvider.ts`) ; le régime Hash Ribbons
+est une lecture descriptive, pas un signal validé.

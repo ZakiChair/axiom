@@ -36,12 +36,9 @@ import {
   SEUIL_PROFONDEUR_BT,
   type ProgressionAccumulation,
 } from "../data/backtestData";
-import {
-  accumulerKlinesPerpBinance,
-  fetchReglementsFundingBinance,
-  finFenetreFundingArchivee,
-  type CouvertureFundingBacktest,
-} from "../data/backtestFunding";
+// `../data/backtestFunding` est chargé en import() dynamique dans le bloc asynchrone
+// du run (hors budget initial) ; seul le type reste statique.
+import type { CouvertureFundingBacktest, HistoriqueFundingBacktest } from "../data/backtestFunding";
 import type { WorkerRequest, WorkerResponse } from "../workers/backtest.worker";
 import { windowManagerStore, mirrorOpenState } from "./windowManager";
 import { signatureRun, type ConfigRun, type ModeFundingBacktest } from "./backtestSignature";
@@ -702,19 +699,31 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
     const ctrl = new AbortController();
     abort = ctrl;
     const maintenant = Date.now();
-    // Les archives mensuelles constituent l'attestation des échéances. Une
-    // fenêtre perp s'arrête donc avant le mois courant, encore non publié.
-    const jusqua = s.modeFunding === "binance-reel"
-      ? finFenetreFundingArchivee(maintenant)
-      : maintenant;
-    const plage = PLAGES.find((p) => p.id === s.plage) ?? PLAGES[1]!;
-    const depuis = jusqua - plage.ms;
 
     void (async () => {
+      // Chunk « funding réel » chargé à la demande (archives mensuelles + klins
+      // perp) : hors du budget initial, seul un run binance-reel le justifie.
+      let bf: typeof import("../data/backtestFunding");
+      try {
+        bf = await import("../data/backtestFunding");
+      } catch {
+        if (runId !== currentRunId) return;
+        set({ phase: "error", error: "Module de funding indisponible (chargement)." });
+        return;
+      }
+      if (runId !== currentRunId) return;
+      // Les archives mensuelles constituent l'attestation des échéances. Une
+      // fenêtre perp s'arrête donc avant le mois courant, encore non publié.
+      const jusqua = s.modeFunding === "binance-reel"
+        ? bf.finFenetreFundingArchivee(maintenant)
+        : maintenant;
+      const plage = PLAGES.find((p) => p.id === s.plage) ?? PLAGES[1]!;
+      const depuis = jusqua - plage.ms;
+
       let candles: Candle[];
       try {
         candles = s.modeFunding === "binance-reel"
-          ? await accumulerKlinesPerpBinance(s.symbol, s.tf, depuis, jusqua, {
+          ? await bf.accumulerKlinesPerpBinance(s.symbol, s.tf, depuis, jusqua, {
               signal: ctrl.signal,
               onProgress: (recuperees) => {
                 if (runId === currentRunId) set({ progress: { recuperees, cible: 0 } });
@@ -749,14 +758,14 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
       const finDonneesMs = dureeBougie === null || derniere === undefined
         ? null
         : derniere.time + dureeBougie;
-      let historiqueFunding: Awaited<ReturnType<typeof fetchReglementsFundingBinance>> | null = null;
+      let historiqueFunding: HistoriqueFundingBacktest | null = null;
       if (s.modeFunding === "binance-reel") {
         if (finDonneesMs === null) {
           set({ phase: "error", error: "Fin réelle des bougies indéterminable : funding non calculé." });
           return;
         }
         try {
-          historiqueFunding = await fetchReglementsFundingBinance(s.symbol, candles[0]!.time, finDonneesMs, fetch, {
+          historiqueFunding = await bf.fetchReglementsFundingBinance(s.symbol, candles[0]!.time, finDonneesMs, fetch, {
             signal: ctrl.signal,
             maintenantMs: maintenant,
           });

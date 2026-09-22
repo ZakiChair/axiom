@@ -18,7 +18,6 @@ import { TickerBand } from "./components/TickerBand";
 import { DrawingToolbar } from "./components/DrawingToolbar";
 import { ChartGrid } from "./chart/ChartGrid";
 import { Watchlist } from "./components/Watchlist";
-import { AlertsPanel } from "./components/AlertsPanel";
 import { CompareControl } from "./components/CompareControl";
 import { HealthPanel } from "./components/HealthPanel";
 import { settingsUiStore } from "./store/settings-ui";
@@ -222,8 +221,31 @@ function FenetreFallback() {
 }
 
 const SettingsPanel = lazy(() => import("./components/SettingsPanel").then(m => ({ default: m.SettingsPanel })));
+// Panneau Alertes de la sidebar : lazy comme les fenêtres (chunk hors budget initial).
+// Le runtime d'alertes (`demarrerAlertes`) reste statique — le module n'a aucun effet
+// de bord nécessaire au boot.
+const AlertsPanel = lazy(() => import("./components/AlertsPanel").then(m => ({ default: m.AlertsPanel })));
 const OnboardingOverlay = lazy(() => import("./components/OnboardingOverlay").then(m => ({ default: m.OnboardingOverlay })));
 const CommandPalette = lazy(() => import("./components/CommandPalette").then(m => ({ default: m.CommandPalette })));
+
+/** Repli Suspense d'AlertsPanel : en-tête « Alertes » statique, même hauteur/typo
+ *  que le header de `SidebarSection` replié (son état par défaut). */
+function AlertsPanelFallback() {
+  return (
+    <section className="flex shrink-0 flex-col border-t border-border">
+      <header className="flex items-center justify-between gap-2 px-3 py-2">
+        <span className="flex items-center gap-1.5">
+          <span aria-hidden className="w-2 text-[9px] leading-none text-text-dim">
+            ▶
+          </span>
+          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim">
+            Alertes
+          </span>
+        </span>
+      </header>
+    </section>
+  );
+}
 
 export function App() {
   const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
@@ -318,7 +340,9 @@ export function App() {
               </button>
             </div>
             <Watchlist />
-            <AlertsPanel />
+            <Suspense fallback={<AlertsPanelFallback />}>
+              <AlertsPanel />
+            </Suspense>
             <CompareControl />
             <HealthPanel />
           </aside>

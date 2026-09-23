@@ -677,8 +677,10 @@ describe("acquisitions asynchrones et échéance", () => {
     const horloge = vi.spyOn(Date, "now").mockReturnValue(now);
     let liberer!: (value: { rate: number }) => void;
     coinalyzeFundingMock.mockImplementationOnce(() => new Promise((resolve) => { liberer = resolve; }));
-    const fetchMock = vi.fn(async () => Response.json({}));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => Response.json({}));
     vi.stubGlobal("fetch", fetchMock);
+    daemonSupporteMock.mockReturnValue(true);
+    detectDaemonMock.mockResolvedValue(true);
     alertsStore.setState({ defs: [{
       id: "funding-repli", symbol: "BTCUSDT", source: "binance",
       condition: { type: "funding-extreme", seuilAbs: 0.001, sens: "long-crowded" },
@@ -686,10 +688,20 @@ describe("acquisitions asynchrones et échéance", () => {
     }], journal: [] });
     stop = demarrerAlertes();
     await vi.waitFor(() => expect(coinalyzeFundingMock).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/heartbeat"))).toBe(true));
     horloge.mockReturnValue(now + 1_000);
     liberer({ rate: 0.002 });
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const chemins = fetchMock.mock.calls.map(([url]) => {
+      const parsed = new URL(String(url), "http://test.invalid");
+      return `${parsed.host}${parsed.pathname}`;
+    });
+    const appelsFunding = fetchMock.mock.calls.map(([url]) => String(url)).filter((url) =>
+      url.includes("fapi/v1/premiumIndex") || url.includes("fapi/v1/fundingRate"));
+    expect(appelsFunding, `Appels sans query : ${JSON.stringify(chemins)}`).toEqual([
+      expect.stringContaining("premiumIndex?symbol=BTCUSDT"),
+    ]);
+    expect(coinalyzeFundingMock).toHaveBeenCalledTimes(1);
     expect(coinalyzeHistoryMock).not.toHaveBeenCalled();
     expect(alertsStore.getState().journal).toHaveLength(0);
   });

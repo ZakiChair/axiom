@@ -14,7 +14,11 @@ export interface OptionsQuadrants { regions: readonly RegionMacro[]; connuLe?: s
 
 /** Le dernier mois commun avec ses deux axes calculés ; « stable » reste calculé. */
 export function dernierMoisCommunCalcule(zone: ZoneQuadrants): PointQuadrant | null {
-  return zone.points.findLast((point) => point.croissance.sens !== "inconnu" && point.inflation.sens !== "inconnu") ?? null;
+  for (let i = zone.points.length - 1; i >= 0; i--) {
+    const point = zone.points[i]!;
+    if (point.croissance.sens !== "inconnu" && point.inflation.sens !== "inconnu") return point;
+  }
+  return null;
 }
 
 const EPSILON_PP = 1e-9;

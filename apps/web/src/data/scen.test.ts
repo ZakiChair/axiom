@@ -160,7 +160,7 @@ describe("brutesDepuisPaper", () => {
     ouvertTs: 0,
   };
 
-  it("mappe symbol→symbole, force source « binance » (décision consignée)", () => {
+  it("mappe symbol→symbole et conserve le repli Binance pour anciennes positions sans source", () => {
     const positions: PositionPaper[] = [
       { ...base, id: "p1", symbol: "ETHUSDT" },
       { ...base, id: "p2", symbol: "BTCUSDT", direction: "short", taille: 0.2, prixEntree: 62_000 },
@@ -169,6 +169,9 @@ describe("brutesDepuisPaper", () => {
       { symbole: "ETHUSDT", source: "binance", direction: "long", taille: 1, prixEntree: 3_000 },
       { symbole: "BTCUSDT", source: "binance", direction: "short", taille: 0.2, prixEntree: 62_000 },
     ]);
+  });
+  it("préserve la source explicite PAPER même avec un ticker homonyme", () => {
+    expect(brutesDepuisPaper([{ ...base, id: "p3", symbol: "BTCUSDT", source: "bybit" }])[0]?.source).toBe("bybit");
   });
 });
 

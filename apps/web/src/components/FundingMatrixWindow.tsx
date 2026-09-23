@@ -17,6 +17,7 @@ import { formatPct } from "../lib/format";
 
 const RAFRAICHISSEMENT_MS = 60_000;
 const FundingHistory = lazy(() => import("./FundingHistory").then((m) => ({ default: m.FundingHistory })));
+const CarryPanel = lazy(() => import("./fundx/CarryPanel").then((m) => ({ default: m.CarryPanel })));
 
 /** Classe de couleur selon le signe (funding > 0 = longs paient). */
 function couleurSigne(v: number): string {
@@ -72,7 +73,7 @@ export function FundingMatrixWindow() {
   const [chargement, setChargement] = useState(true);
   const [injoignable, setInjoignable] = useState(false);
   const [majTs, setMajTs] = useState<number | null>(null);
-  const [vue, setVue] = useState<"live" | "historique">("live");
+  const [vue, setVue] = useState<"live" | "historique" | "carry">("live");
 
   useEffect(() => {
     let annule = false;
@@ -126,8 +127,10 @@ export function FundingMatrixWindow() {
             className="rounded border border-border px-2 py-1 text-xs">Instantané live</button>
           <button type="button" aria-pressed={vue === "historique"} onClick={() => setVue("historique")}
             className="rounded border border-border px-2 py-1 text-xs">Historique 7/30/90 j</button>
+          <button type="button" aria-pressed={vue === "carry"} onClick={() => setVue("carry")}
+            className="rounded border border-border px-2 py-1 text-xs">Carry spot/perp</button>
         </nav>
-        {vue === "historique" ? <Suspense fallback={<Chargement />}><FundingHistory symbol={symbol} exchange={exchange} /></Suspense> : <>
+        {vue === "historique" ? <Suspense fallback={<Chargement />}><FundingHistory symbol={symbol} exchange={exchange} /></Suspense> : vue === "carry" ? <Suspense fallback={<Chargement />}><CarryPanel symboleCourant={symbol} /></Suspense> : <>
         {spread !== null && (
           <TuileStat
             disposition="inline"
@@ -156,7 +159,7 @@ export function FundingMatrixWindow() {
           <Vide>Aucun funding disponible (symbole non listé en perp USDT sur ces venues ?)</Vide>
         )}
         <NoteSource>
-          APR = taux × (24 / intervalle) × 365. Binance/Bybit/OKX règlent /8 h, Hyperliquid /1 h.
+          APR = taux × (24 / intervalle) × 365. Cadence CEX dérivée si disponible, 8 h standard en repli ; Hyperliquid règle /1 h.
           Écart = APR max − APR min entre venues ; ≥ 10 points d'APR = tension de financement
           inter-venues (arbitrage/positionnement asymétrique). ● vert = APR max, ● rouge = APR min.
         </NoteSource>

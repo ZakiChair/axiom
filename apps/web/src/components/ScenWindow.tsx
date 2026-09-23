@@ -10,13 +10,12 @@
  *
  * Modèle ASSUMÉ (spec) : P&L = poids · β · choc, approximation 1-facteur — ordres de grandeur.
  */
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 import { windowManagerStore, mirrorOpenState } from "../store/windowManager";
 import { portfolioStore } from "../store/portfolio";
 import { paperStore } from "../store/paper";
-import { viderCacheSeries } from "../data/corr";
 import {
   FACTEURS,
   PRESETS_SCEN,
@@ -33,6 +32,7 @@ import {
 } from "../data/scen";
 import { formatDec, formatUsd, VALEUR_ABSENTE } from "../lib/format";
 import { Badge, BoutonRafraichir, BTN_SECONDAIRE, Chargement, EnTeteFenetre, ErreurBloc, Fraicheur, NoteSource, Vide } from "./ui";
+const ScenMultifactorPanel = lazy(() => import("./scen/ScenMultifactorPanel").then((m) => ({ default: m.ScenMultifactorPanel })));
 
 // ─────────────────────────── Store UI (vanilla, éphémère) ───────────────────────────
 
@@ -95,6 +95,7 @@ export function ScenWindow() {
   const signature = `${sigPortefeuille}#${sigPaper}`;
 
   const [chocs, setChocs] = useState<Record<FacteurId, number>>(CHOCS_ZERO);
+  const [mode, setMode] = useState<"simple" | "multi">("simple");
   const [nonce, setNonce] = useState(0); // bump = re-collecte forcée (« Recalculer β »)
   const [collecte, setCollecte] = useState<CollecteScen | null>(null);
   const [loading, setLoading] = useState(false);
@@ -115,7 +116,7 @@ export function ScenWindow() {
   // Collecte au premier open + sur changement des positions ou « Recalculer β » (nonce). Le
   // drapeau `ignore` écarte les résultats d'une collecte périmée (course entre deux collectes).
   useEffect(() => {
-    if (!open) return;
+    if (!open || mode !== "simple") return;
     if (brutes.length === 0) {
       setCollecte(null);
       setLoading(false);
@@ -141,7 +142,7 @@ export function ScenWindow() {
     return () => {
       ignore = true;
     };
-  }, [open, signature, nonce]);
+  }, [open, signature, nonce, mode]);
 
   // Application du scénario : PURE & synchrone (aucun fetch) — se rejoue à chaque changement
   // de choc comme de collecte.
@@ -152,7 +153,6 @@ export function ScenWindow() {
 
   const recalculer = () => {
     viderCacheFacteurs(); // séries facteurs (BTC/ETH/DXY/SPX/Or)
-    viderCacheSeries(); // séries positions (cache corr partagé)
     setNonce((k) => k + 1);
   };
 
@@ -165,8 +165,8 @@ export function ScenWindow() {
       <EnTeteFenetre
         mnemo="SCEN"
         titre="Stress-test"
-        sousTitre={`Scénarios multi-facteurs · β ${FENETRE_JOURS} j · approximation 1-facteur`}
-        actions={
+        sousTitre={mode === "simple" ? `Scénario 1 facteur par position · β ${FENETRE_JOURS} j` : "Régression conjointe · facteurs sélectionnés"}
+        actions={mode === "simple" ?
           <>
             <Fraicheur loading={loading} majTs={majTs} />
             <BoutonRafraichir
@@ -175,11 +175,16 @@ export function ScenWindow() {
               title="Vider les caches de séries et recalculer les bêtas"
             />
           </>
-        }
+        : null}
       />
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
-        {vide ? (
+        <nav aria-label="Mode de scénario" className="mb-3 flex gap-2">
+          <button type="button" aria-pressed={mode === "simple"} onClick={() => setMode("simple")} className={BTN_SECONDAIRE}>1 facteur</button>
+          <button type="button" aria-pressed={mode === "multi"} onClick={() => setMode("multi")} className={BTN_SECONDAIRE}>Multifacteur</button>
+        </nav>
+        {mode === "multi" ? <Suspense fallback={<Chargement />}><ScenMultifactorPanel positions={brutes} /></Suspense> :
+        vide ? (
           <Vide>
             Aucune position ouverte (portefeuille + paper). Ouvrez une position pour lancer un stress-test.
           </Vide>

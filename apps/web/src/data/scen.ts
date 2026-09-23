@@ -19,7 +19,7 @@
 
 import type { Candle, ExchangeId } from "@axiom/types";
 import { getAdapter } from "./adapters";
-import { alignerSeries, chargerSerie, fenetrer, logRendements, type SerieCloture } from "./corr";
+import { alignerSeries, fenetrer, logRendements, type SerieCloture } from "./corr";
 import {
   risquePortefeuille,
   serieRendementsPortefeuille,
@@ -81,6 +81,7 @@ export function facteurDe(symbole: string, source: ExchangeId): FacteurId {
 /** Position enrichie pour le scénario : poids signé ($) + facteur + bêta (null si indisponible). */
 export interface PositionScen {
   symbole: string;
+  source?: ExchangeId;
   poidsUsd: number; // signé, short < 0
   facteur: FacteurId;
   beta: number | null;
@@ -182,7 +183,7 @@ export function mergePresetEnRecord(chocs: Partial<Record<FacteurId, number>>): 
 // Fetch des klines 1 j puis assemblage. Les FACTEURS sont récupérés directement via leur
 // adaptateur (getAdapter(source).fetchKlines) et NON via chargerSerie : la résolution de
 // source par la watchlist n'est pas fiable pour SPY/UUP/GLD hors watchlist. Les séries des
-// POSITIONS passent par chargerSerie (cache session corr). Échec d'un facteur ⇒ toutes les
+// POSITIONS passent par l'adaptateur de leur source exacte. Échec d'un facteur ⇒ toutes les
 // positions rattachées ont β null ; échec d'un symbole ⇒ β null (repli prix d'entrée pour le
 // poids). Les calculs restent les fonctions pures ci-dessus.
 
@@ -212,15 +213,14 @@ export function brutesDepuisPortefeuille(positions: readonly Position[]): Positi
 }
 
 /**
- * Adaptateur paper trading → entrées brutes. DÉCISION consignée : le store paper ne mémorise
- * pas d'exchange et ses symboles sont crypto → la source est fixée à "binance" (même adaptateur
- * de klines 1 j que le reste du terminal). Le champ `symbol` (anglais) devient `symbole`. PURE
- * (testée). Les positions paper sont toutes ouvertes (les clôtures deviennent des exécutions).
+ * Adaptateur paper trading → entrées brutes. Les positions modernes gardent leur source
+ * explicite ; les anciens enregistrements sans source conservent le repli Binance historique.
+ * Le champ `symbol` devient `symbole`. Les positions paper sont toutes ouvertes.
  */
 export function brutesDepuisPaper(positions: readonly PositionPaper[]): PositionBrute[] {
   return positions.map((p): PositionBrute => ({
     symbole: p.symbol,
-    source: "binance",
+    source: p.source ?? "binance",
     direction: p.direction,
     taille: p.taille,
     prixEntree: p.prixEntree,
@@ -320,18 +320,22 @@ export async function collecterScen(
   const seriesFacteurs = new Map<FacteurId, SerieCloture[]>();
   await Promise.all(facteursUniques.map(async (f) => seriesFacteurs.set(f.id, await chargerFacteur(f))));
 
-  // 2. Séries positions (uniques) via chargerSerie (cache session corr), pool concurrence 4.
-  const symbolesUniques = [...new Set(positions.map((p) => p.symbole))];
+  // 2. Séries positions uniques par source + symbole, pool concurrence 4.
+  const identite = (p: Pick<PositionBrute, "symbole" | "source">) => JSON.stringify([p.source, p.symbole]);
+  const symbolesUniques = [...new Map(positions.map((p) => [identite(p), p])).values()];
   const seriesPositions = new Map<string, SerieCloture[]>();
-  await mapPool(symbolesUniques, CONCURRENCE, async (s) => {
-    seriesPositions.set(s, await chargerSerie(s));
+  await mapPool(symbolesUniques, CONCURRENCE, async (p) => {
+    try {
+      const candles = await getAdapter(p.source).fetchKlines(p.symbole, "1d", { limit: KLINE_LIMIT });
+      seriesPositions.set(identite(p), klinesVersSerie(candles));
+    } catch { seriesPositions.set(identite(p), []); }
   });
 
   // 3. Assemblage des positions (poids + β) et diagnostic des exclusions.
   const exclues: { symbole: string; raison: string }[] = [];
   const positionsScen: PositionScen[] = positions.map((p, i) => {
     const f = facteurParPosition[i]!;
-    const serieActif = seriesPositions.get(p.symbole) ?? [];
+    const serieActif = seriesPositions.get(identite(p)) ?? [];
     const dernierClose = serieActif[serieActif.length - 1]?.close ?? p.prixEntree; // repli prix d'entrée
     const poidsUsd = signe(p.direction) * p.taille * dernierClose;
     const serieFacteur = seriesFacteurs.get(f.id) ?? [];
@@ -346,7 +350,7 @@ export async function collecterScen(
       beta = betaRoulant(serieActif, serieFacteur, fenetreJours);
       if (beta === null) exclues.push({ symbole: p.symbole, raison: `moins de 30 jours communs avec ${f.label}` });
     }
-    return { symbole: p.symbole, poidsUsd, facteur: f.id, beta };
+    return { symbole: p.symbole, source: p.source, poidsUsd, facteur: f.id, beta };
   });
 
   // 4. VaR95 du portefeuille sur les MÊMES séries positions (poids agrégés par symbole pour
@@ -354,7 +358,8 @@ export async function collecterScen(
   //    série entrent dans la VaR et dans son Σ|poids|.
   const poidsParSymbole = new Map<string, number>();
   for (const ps of positionsScen) {
-    poidsParSymbole.set(ps.symbole, (poidsParSymbole.get(ps.symbole) ?? 0) + ps.poidsUsd);
+    const key = JSON.stringify([ps.source, ps.symbole]);
+    poidsParSymbole.set(key, (poidsParSymbole.get(key) ?? 0) + ps.poidsUsd);
   }
   const seriesActifs: SerieActif[] = [];
   const poids: PoidsPosition[] = [];

@@ -188,6 +188,27 @@ actions qu'elle prend en charge et affiche leur résultat.
 
 [Détail des quatre lots et de leurs vérifications](docs/revue-2026-09-23-quatre-lots.md).
 
+### Analyse multidomaine
+
+Les fenêtres existantes proposent huit lectures complémentaires :
+
+| Accès | Fonction |
+|---|---|
+| **MACRO / RATE** | Quadrants croissance/inflation au dernier mois complet commun, transitions et contexte PIB distinct. |
+| **DOM** | Coût d’exécution courant, médiane et P95 sur 1/5/15 minutes pour un montant dans la devise de cotation ; durée et couverture visibles. |
+| **CHAIN** | Rotation historique Ethereum/Solana/Base/Arbitrum : parts, variations 30/90 jours, persistance et comparaison au token lorsqu’il existe. |
+| **GLOBE** | Scénario de transmission d’un événement sourcé vers un canal économique et les instruments reconnus de la watchlist. |
+| **BRIEF** | Synthèse datée, référence enregistrée, changements et divergences descriptives, export de l’instantané affiché. |
+| **SCEN** | Sensibilités multifactorielles estimées ensemble, qualité du modèle et chocs hypothétiques de prix ou de taux réel. |
+| **FUNDX** | Carry net spot/perp Binance BTC/ETH : profondeur d’entrée, quatre frais, funding et hypothèses de sortie. |
+| **EXPY** | Résultats des trades par contexte figé au signal, effectifs et exclusions ; les anciens dossiers restent sans contexte prouvé. |
+
+Ces lectures montrent leurs sources, périodes et limites. Les observations
+révisables, scénarios conditionnels et résultats descriptifs ne constituent pas
+une stratégie validée. Aucun ordre réel n’est envoyé.
+
+[Méthodes, limites et vérifications](docs/revue-2026-09-23-analyse-multidomaine.md).
+
 ### Fonction MACRO et nouveaux indicateurs
 
 `⌘K → MACRO` ouvre **RATE → Indicateurs**. Choisir une famille, les zones et un

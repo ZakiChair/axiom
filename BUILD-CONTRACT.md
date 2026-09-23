@@ -560,3 +560,27 @@ règle de proxy ajoutée ; changements préexistants conservés, aucun commit ou
 Les tests navigateur utilisent des réponses simulées et ne valent pas verdict manuel
 G100. Le daemon utilisateur reste sur son processus initial ; redémarrage nécessaire
 pour charger le nouveau code serveur. Rapport : `docs/revue-2026-09-23-quatre-lots.md`.
+
+
+## Analyse multidomaine autorisée le 23 septembre 2026
+
+Après la proposition de huit fonctions complémentaires, le propriétaire a demandé
+« Go pour les points mentionnés ». Le périmètre est décrit dans la
+[conception](docs/superpowers/specs/2026-09-23-analyse-multidomaine-design.md),
+le [plan](docs/superpowers/plans/2026-09-23-analyse-multidomaine.md) et le
+[contrat de calcul](docs/superpowers/specs/2026-09-23-analyse-multidomaine-contrat.md).
+
+Cette exception de surface couvre les quadrants croissance/inflation de RATE,
+la stabilité du coût d’exécution dans DOM, la rotation de la cohorte fixe de
+CHAIN, les scénarios de transmission de GLOBE, une synthèse datée dans BRIEF,
+l’association multifacteur de SCEN, le carry net dans FUNDX et les résultats
+EXPY par contexte figé au signal. Les 39 fenêtres, 214 indicateurs et neuf
+identifiants de marché restent inchangés ; aucun fournisseur, secret, service
+ou dépendance supplémentaire n’est autorisé par ce chantier.
+
+Les nouveaux panneaux sont chargés à la demande. Le registre partagé conserve
+uniquement des lectures bornées avec source, période, fraîcheur et preuve. La
+capture au signal est synchrone et ne charge jamais rétrospectivement une donnée.
+Les calculs descriptifs, données révisées, hypothèses de scénario et observations
+réellement disponibles demeurent identifiables. Les limites de bundle initial
+restent 1 220 000 octets bruts et 360 000 octets gzip.

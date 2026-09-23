@@ -59,7 +59,7 @@ Oracle : A=100, B=100 puis A=120, B=180 : A croît de 20 %, sa part passe de 50 
 
 Séparer trois objets : événement rapporté, canal économique supposé, mouvement de marché observé. Une chaîne « événement → énergie → inflation → taux → actif » est une hypothèse de transmission ; ses flèches ne sont pas des causalités estimées. Nommer la zone, le canal, l'exposition et les conditions d'invalidation ; aucun score monétaire de perte sans modèle identifié.
 
-Dates distinctes : occurrence annoncée, première publication connue, ingestion. Dédupliquer les reprises du même événement et qualifier les sources contradictoires. Avant/après : mesurer aux timestamps de marché valides, avec source et horizon identiques, sans combler une fermeture de marché par un prix futur. Sans prix d'avant publication connu ou sans heures fiables : pas de réaction chiffrée. La corrélation simultanée ne valide pas le canal supposé.
+Dates distinctes : occurrence annoncée, première publication connue, ingestion. Dédupliquer les reprises du même événement et qualifier les sources contradictoires. Avant/après : mesurer aux timestamps de marché valides, avec source et horizon identiques, sans combler une fermeture de marché par un prix futur. Sans prix d'avant publication connu ou sans heures fiables : pas de réaction intraday chiffrée. Si seule la date du jour est connue, une comparaison quotidienne avant/après est admise avec dates de séances explicites, premier point strictement antérieur au jour et dernier point clos, couverture et réserves visibles ; elle décrit une variation autour de l'événement, jamais une réaction causale à sa publication. La corrélation simultanée ne valide pas le canal supposé.
 
 ## 5. Contradictions BRIEF
 

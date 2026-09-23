@@ -15,7 +15,8 @@
 import type { Declenchement } from "@axiom/alerts";
 import type { ExchangeId } from "@axiom/types";
 import { extUrl } from "./extapi";
-import { snapshotAnalyseEnMarkdown, type SnapshotAnalyse } from "./analyseSynthese";
+import { snapshotAnalyseEnMarkdown } from "./analyseSnapshotExport";
+import type { SnapshotAnalyse } from "./analyseSynthese";
 import { parsePremiumIndex } from "./screener";
 import { fetchOpenInterestHist } from "./binanceFutures";
 import { coinalyzeProvider, fetchPredictedFundingRate } from "./coinalyze";

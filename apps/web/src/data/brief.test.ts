@@ -19,6 +19,7 @@ import {
 import type { EcoEvent } from "./eco";
 import type { NewsItem } from "./news";
 import type { Position } from "../store/portfolio";
+import { creerSnapshotAnalyse } from "./analyseSynthese";
 
 // ─────────────────────────── deltaOiPct ───────────────────────────
 
@@ -486,6 +487,13 @@ describe("briefEnMarkdown", () => {
 });
 
 describe("briefEnMarkdown — section Lecture", () => {
+  it("sérialise exactement le snapshot d'analyse affiché, sans relire le registre", () => {
+    const snapshot = creerSnapshotAnalyse([{ id: "macro:US", domaine: "quadrant", nature: "observation", conclusion: "US : inflation ralentit", tags: [{ cle: "quadrant", valeur: "stable" }], instrument: null, horizon: { depuis: 100, jusqua: 200 }, unite: null, valeur: null, source: "FRED", observeLe: 200, recupereLe: 300, validiteJusqua: null, statut: "partiel", couverture: { presentes: 2, attendues: 2 }, limites: [], preuve: { fenetre: "RATE", reference: "production-aa-us/cpi-aa-us" } }], 400);
+    const md = briefEnMarkdown(donneesMinimales(), 400, [], snapshot);
+    expect(md).toContain("## Analyse multidomaine");
+    expect(md).toContain("US : inflation ralentit");
+    expect(md).toContain("FRED");
+  });
   it("insère ## Lecture en tête quand des phrases sont fournies", () => {
     const md = briefEnMarkdown(donneesMinimales(), 1_700_000_000_000, [
       "Nuit calme (BTC +0.2%).",

@@ -88,6 +88,8 @@ import { SectionMacro } from "./brief/SectionMacro";
 import { SectionNews } from "./brief/SectionNews";
 import { SectionDvol } from "./brief/SectionDvol";
 import { SectionMultiEchelle } from "./brief/SectionMultiEchelle";
+import { SectionAnalyse } from "./brief/SectionAnalyse";
+import { analyseBriefStore } from "../store/analyseBrief";
 
 // ─────────────────────────── Store UI (vanilla, éphémère, non persisté) ───────────────────────────
 
@@ -155,6 +157,7 @@ export function BriefWindow() {
   // Chargement en cours : désactive « Rafraîchir » (le ref garde le clic synchrone contre
   // l'empilement de générations de fetchs — quota Coinalyze partagé avec DERIV).
   const [enChargement, setEnChargement] = useState(false);
+  const [analyseRefreshToken, setAnalyseRefreshToken] = useState(0);
 
   const [breadth, setBreadth] = useState<Section<ResumBreadth>>(EN_ATTENTE);
   const [squeeze, setSqueeze] = useState<Section<PointRadar[]>>(EN_ATTENTE);
@@ -192,6 +195,7 @@ export function BriefWindow() {
     const ctrl = new AbortController();
     ctrlRef.current = ctrl;
     const gen = ++genRef.current;
+    setAnalyseRefreshToken((value) => value + 1);
     const vivant = (): boolean => genRef.current === gen && !ctrl.signal.aborted;
 
     const now = Date.now();
@@ -353,7 +357,7 @@ export function BriefWindow() {
     notesStore.getState().ajouter({
       symbole: symbol,
       source: exchange,
-      texte: briefEnMarkdown(donnees, now, phrasesLecture),
+      texte: briefEnMarkdown(donnees, now, phrasesLecture, analyseBriefStore.getState().courant),
       tags: ["brief", "session"],
     });
     setExporte(true);
@@ -430,6 +434,7 @@ export function BriefWindow() {
 
         {/* Inflation a/a des six zones — cache du store macro, aucun réseau déclenché ici. */}
         {macro !== null && <SectionMacro macro={macro} />}
+        <SectionAnalyse refreshToken={analyseRefreshToken} />
 
         {/* 5) Actualités + indice Fear & Greed. */}
         <SectionNews

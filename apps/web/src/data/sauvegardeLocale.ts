@@ -7,7 +7,7 @@ export const CLES_TRAVAIL_PERSONNEL = [
   "axiom:notes:v1", "axiom:drawings:v1", "axiom:expy:v1",
   "axiom:portfolio:v1", "axiom:alerts:v1", "axiom:workspaces:v1",
   "axiom:paper:v1", "axiom:backtest:v1", "axiom:backtest:history:v1",
-  "axiom:decisionDossiers:v1",
+  "axiom:decisionDossiers:v1", "axiom:analyseBrief:v1",
 ] as const;
 export const CLES_SNAPSHOT: readonly string[] = [...CLES_TERMINAL, ...CLES_TRAVAIL_PERSONNEL];
 /** Les anciens snapshots sans ce marqueur ne couvraient pas le travail personnel. */

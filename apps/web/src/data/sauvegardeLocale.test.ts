@@ -3,7 +3,7 @@ import { CLES_SNAPSHOT, CLES_TRAVAIL_PERSONNEL, remplacerClesLocales } from "./s
 
 describe("sauvegarde des décisions et simulations", () => {
   it("inclut dossiers, PAPER, versions et presets BT sans capturer les credentials", () => {
-    const attendues = ["axiom:decisionDossiers:v1", "axiom:paper:v1", "axiom:backtest:history:v1", "axiom:backtest:v1"];
+    const attendues = ["axiom:decisionDossiers:v1", "axiom:paper:v1", "axiom:backtest:history:v1", "axiom:backtest:v1", "axiom:analyseBrief:v1"];
     for (const cle of attendues) {
       expect(CLES_TRAVAIL_PERSONNEL).toContain(cle);
       expect(CLES_SNAPSHOT).toContain(cle);

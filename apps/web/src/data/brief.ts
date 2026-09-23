@@ -15,6 +15,7 @@
 import type { Declenchement } from "@axiom/alerts";
 import type { ExchangeId } from "@axiom/types";
 import { extUrl } from "./extapi";
+import { snapshotAnalyseEnMarkdown, type SnapshotAnalyse } from "./analyseSynthese";
 import { parsePremiumIndex } from "./screener";
 import { fetchOpenInterestHist } from "./binanceFutures";
 import { coinalyzeProvider, fetchPredictedFundingRate } from "./coinalyze";
@@ -368,6 +369,7 @@ export function briefEnMarkdown(
   d: DonneesBrief,
   now: number,
   lecture?: readonly string[],
+  analyse?: SnapshotAnalyse | null,
 ): string {
   const l: string[] = [];
   l.push(`# BRIEF — Point marché · ${formatDateComplete(now)} ${formatHeureMinute(now)}`);
@@ -498,6 +500,7 @@ export function briefEnMarkdown(
   else for (const v of d.dvol) l.push(`- ${v.devise} · ${v.valeur === null ? VALEUR_ABSENTE : formatPourcentage(v.valeur, 1)}`);
   l.push("");
 
+  if (analyse) { l.push(snapshotAnalyseEnMarkdown(analyse)); l.push(""); }
   l.push("_Sources : Binance, Coinalyze, SoSoValue, ForexFactory/FRED, flux news, Deribit._");
   return l.join("\n");
 }

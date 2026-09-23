@@ -5,6 +5,7 @@ import { creerSnapshotAnalyse, validerSnapshotAnalyse, type SnapshotAnalyse } fr
 import { lectureDivergenceRotationPrix, qualifierRotationPrix } from "../data/analyseSynthese";
 import { capturerLectures, remplacerLectures } from "./analyseMultidomaine";
 import type { ResultatQuadrants } from "../data/macro/quadrants";
+import type { RegionMacro } from "../data/macro/catalogueMacro";
 import type { EconomieChainesResultat, ChaineEconomieId } from "../data/onchain/economieChaines";
 import type { PrixRotation } from "../data/onchain/prixRotation";
 
@@ -15,7 +16,8 @@ interface EtatAnalyseBrief {
   pending: SnapshotAnalyse | null;
   erreur: string | null;
   archiveInvalide: string | null;
-  chargements: { quadrant: "attente" | "chargement" | "pret" | "erreur"; rotation: "attente" | "chargement" | "pret" | "erreur"; divergence: "attente" | "chargement" | "pret" | "erreur" };
+  chargements: { quadrant: "attente" | "chargement" | "partiel" | "pret" | "erreur"; rotation: "attente" | "chargement" | "pret" | "erreur"; divergence: "attente" | "chargement" | "pret" | "erreur" };
+  macroZones: { total: number; pretes: number; attente: number; indisponibles: number };
   publierCourant: (lectures: readonly LectureAnalyse[], creeLe: number) => boolean;
   chargerReference: () => void;
   enregistrerReference: () => boolean;
@@ -27,6 +29,7 @@ const copie = (snapshot: SnapshotAnalyse) => structuredClone(snapshot);
 export const analyseBriefStore = createStore<EtatAnalyseBrief>((set, get) => ({
   courant: null, reference: null, pending: null, erreur: null, archiveInvalide: null,
   chargements: { quadrant: "attente", rotation: "attente", divergence: "attente" },
+  macroZones: { total: 0, pretes: 0, attente: 0, indisponibles: 0 },
   publierCourant(lectures, creeLe) {
     try {
       const courant = creerSnapshotAnalyse(lectures, creeLe);
@@ -77,7 +80,9 @@ export const analyseBriefStore = createStore<EtatAnalyseBrief>((set, get) => ({
 }));
 
 export interface ChargeursAnalyseBrief {
-  chargerMacro?: (signal: AbortSignal) => Promise<ResultatQuadrants | null>;
+  chargerMacro?: (region: RegionMacro, signal: AbortSignal) => Promise<ResultatQuadrants | null>;
+  regionsMacro?: readonly RegionMacro[];
+  delaiMacroMs?: number;
   chargerEconomie?: () => Promise<EconomieChainesResultat | null>;
   chargerPrix?: (id: ChaineEconomieId, debut: number, fin: number, maintenant: number) => Promise<PrixRotation | null>;
   maintenant?: () => number;
@@ -86,10 +91,10 @@ let generation = 0;
 let controleur: AbortController | null = null;
 const IDS_PRIX = ["ethereum", "solana", "arbitrum"] as const;
 
-async function macroParDefaut(signal: AbortSignal): Promise<ResultatQuadrants | null> {
-  const [{ chargerQuadrants }, { ORDRE_REGIONS }] = await Promise.all([import("../data/macro/quadrants"), import("../data/macro/catalogueMacro")]);
+async function macroParDefaut(region: RegionMacro, signal: AbortSignal): Promise<ResultatQuadrants | null> {
+  const { chargerQuadrants } = await import("../data/macro/quadrants");
   if (signal.aborted) return null;
-  return chargerQuadrants({ regions: ORDRE_REGIONS, connuLe: null, signal });
+  return chargerQuadrants({ regions: [region], connuLe: null, signal });
 }
 async function economieParDefaut(): Promise<EconomieChainesResultat | null> {
   const { actualiserEconomieChaines, economieChainesStore } = await import("./economieChaines");
@@ -105,7 +110,7 @@ export function annulerActualisationAnalyseBrief(): void {
   generation += 1;
   controleur?.abort();
   controleur = null;
-  analyseBriefStore.setState({ chargements: { quadrant: "attente", rotation: "attente", divergence: "attente" } });
+  analyseBriefStore.setState({ chargements: { quadrant: "attente", rotation: "attente", divergence: "attente" }, macroZones: { total: 0, pretes: 0, attente: 0, indisponibles: 0 } });
 }
 
 /** Actualise les seules familles macro/on-chain à la demande ; DOM/GLOBE restent acquis. */
@@ -121,19 +126,61 @@ export async function actualiserAnalyseBrief(chargeurs: ChargeursAnalyseBrief = 
     const instant = now();
     analyseBriefStore.getState().publierCourant(capturerLectures(instant), instant);
   };
-  analyseBriefStore.setState({ chargements: { quadrant: "chargement", rotation: "chargement", divergence: "chargement" } });
+  analyseBriefStore.setState({ chargements: { quadrant: "chargement", rotation: "chargement", divergence: "chargement" }, macroZones: { total: 0, pretes: 0, attente: 0, indisponibles: 0 } });
   publier();
   const macro = (async () => {
     try {
-      const resultat = await (chargeurs.chargerMacro ?? macroParDefaut)(ctrl.signal);
+      const [{ ORDRE_REGIONS }, { lecturesQuadrants }] = await Promise.all([import("../data/macro/catalogueMacro"), import("../data/macro/quadrants")]);
       if (!actif()) return;
-      if (resultat === null) throw new Error("Familles macro indisponibles.");
-      const { lecturesQuadrants } = await import("../data/macro/quadrants");
-      if (!actif()) return;
-      const lectures = lecturesQuadrants(resultat);
-      remplacerLectures("quadrant", lectures);
-      analyseBriefStore.setState((s) => ({ chargements: { ...s.chargements, quadrant: lectures.length ? "pret" : "erreur" } }));
-      publier();
+      const regions = chargeurs.regionsMacro ?? ORDRE_REGIONS;
+      const delai = Number.isFinite(chargeurs.delaiMacroMs) ? Math.max(1, chargeurs.delaiMacroMs!) : 120_000;
+      const terminees = new Map<RegionMacro, "prete" | "indisponible">();
+      const locaux = new Set<AbortController>();
+      const annulerLocaux = () => { for (const local of locaux) local.abort(); };
+      ctrl.signal.addEventListener("abort", annulerLocaux, { once: true });
+      analyseBriefStore.setState((s) => ({ macroZones: { total: regions.length, pretes: 0, attente: regions.length, indisponibles: 0 }, chargements: { ...s.chargements, quadrant: regions.length ? "chargement" : "erreur" } }));
+      const actualiserProgression = () => {
+        const pretes = [...terminees.values()].filter((etat) => etat === "prete").length;
+        const indisponibles = terminees.size - pretes;
+        const attente = regions.length - terminees.size;
+        const statut = attente > 0 ? pretes > 0 ? "partiel" : "chargement" : indisponibles === 0 ? "pret" : pretes > 0 ? "partiel" : "erreur";
+        analyseBriefStore.setState((s) => ({ macroZones: { total: regions.length, pretes, attente, indisponibles }, chargements: { ...s.chargements, quadrant: statut } }));
+      };
+      try {
+        await Promise.all(regions.map(async (region) => {
+          const local = new AbortController();
+          locaux.add(local);
+          if (ctrl.signal.aborted) local.abort();
+          type Issue = { type: "resultat"; valeur: ResultatQuadrants | null } | { type: "erreur" | "delai" | "annule" };
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          let annuler = () => {};
+          const limite = new Promise<Issue>((resolve) => {
+            annuler = () => resolve({ type: "annule" });
+            local.signal.addEventListener("abort", annuler, { once: true });
+            timer = setTimeout(() => { resolve({ type: "delai" }); local.abort(); }, delai);
+            if (local.signal.aborted) annuler();
+          });
+          const acquisition: Promise<Issue> = Promise.resolve().then(() => local.signal.aborted ? { type: "annule" } as Issue : (chargeurs.chargerMacro ?? macroParDefaut)(region, local.signal).then((valeur): Issue => ({ type: "resultat", valeur }), (): Issue => ({ type: "erreur" }))).catch((): Issue => ({ type: "erreur" }));
+          const issue = await Promise.race([acquisition, limite]);
+          if (timer !== undefined) clearTimeout(timer);
+          local.signal.removeEventListener("abort", annuler);
+          locaux.delete(local);
+          if (!actif()) return;
+          const zone = issue.type === "resultat" ? issue.valeur?.regions.find((item) => item.region === region) : null;
+          const lectures = zone && issue.type === "resultat" && issue.valeur ? lecturesQuadrants({ ...issue.valeur, regions: [zone] }) : [];
+          if (lectures.length > 0) {
+            const reference = `production-aa-${region.toLowerCase()}/cpi-aa-${region.toLowerCase()}`;
+            const autres = capturerLectures(now()).filter((lecture) => lecture.domaine === "quadrant" && lecture.preuve.reference !== reference);
+            remplacerLectures("quadrant", [...autres, ...lectures]);
+            publier();
+          }
+          terminees.set(region, lectures.some((lecture) => lecture.statut !== "indisponible") ? "prete" : "indisponible");
+          actualiserProgression();
+        }));
+      } finally {
+        ctrl.signal.removeEventListener("abort", annulerLocaux);
+        annulerLocaux();
+      }
     } catch {
       if (actif()) analyseBriefStore.setState((s) => ({ chargements: { ...s.chargements, quadrant: "erreur" } }));
     }

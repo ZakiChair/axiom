@@ -38,7 +38,7 @@ export function SectionAnalyse({ refreshToken }: { refreshToken: number }) {
   const colonnes: ColonneTable<LigneDomaine>[] = [
     { id: "domaine", label: "Domaine", largeur: "1.1fr", rendu: ({ id, label }) => {
       const chargement = id === "quadrant" ? etat.chargements.quadrant : id === "rotation" ? etat.chargements.rotation : id === "divergence" ? etat.chargements.divergence : null;
-      return <><span className="block font-medium text-text">{label}</span><span className="block text-text-dim">{chargement === "chargement" ? "Actualisation…" : chargement === "erreur" ? "Source indisponible" : chargement === "pret" ? "Actualisé" : id === "liquidite" || id === "geo" ? "Acquis seulement" : "En attente"}</span></>;
+      return <><span className="block font-medium text-text">{label}</span><span className="block text-text-dim">{chargement === "chargement" ? "Actualisation…" : chargement === "partiel" ? "Partiel" : chargement === "erreur" ? "Source indisponible" : chargement === "pret" ? "Actualisé" : id === "liquidite" || id === "geo" ? "Acquis seulement" : "En attente"}</span>{id === "quadrant" && etat.macroZones.total > 0 && <span className="block text-text-dim">{etat.macroZones.pretes}/{etat.macroZones.total} zones prêtes · {etat.macroZones.attente} en attente · {etat.macroZones.indisponibles} indisponibles</span>}</>;
     } },
     { id: "constat", label: "Constat / horizon", largeur: "2.4fr", rendu: ({ id }) => {
       const lectures = lecturesDomaine(id);

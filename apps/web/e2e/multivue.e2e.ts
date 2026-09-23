@@ -322,13 +322,17 @@ test("unités longues disponibles et persistées dans les vues double et quadrup
 test("le menu secondaire respecte les unités disponibles pour sa source", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Deux empilés", exact: true }).last().click();
-  const source = page.getByRole("combobox", { name: "Source du slot", exact: true });
+  const restaurerSlot = (exchange: "kraken" | "coinbase") => page.evaluate(async (source) => {
+    const importer = new Function("return import('/src/store/chart-layout.ts')") as () => Promise<{ chartLayoutStore: { getState: () => { setSlotMarket: (slot: number, m: { exchange: string; symbol: string; timeframe: "1m" | "1w" }) => void } } }>;
+    (await importer()).chartLayoutStore.getState().setSlotMarket(1, { exchange: source, symbol: "BTCUSD", timeframe: source === "kraken" ? "1m" : "1w" });
+  }, exchange);
+  await expect(page.getByRole("combobox", { name: "Source du slot", exact: true })).toHaveCount(0);
   const timeframe = page.getByRole("combobox", { name: "Timeframe du slot", exact: true });
-  await source.selectOption("kraken");
+  await restaurerSlot("kraken");
   await expect(timeframe.locator('option[value="1w"]')).toHaveCount(1);
   await expect(timeframe.locator('option[value="1M"]')).toHaveCount(0);
   await timeframe.selectOption("1w");
-  await source.selectOption("coinbase");
+  await restaurerSlot("coinbase");
   await expect(timeframe.locator('option[value="1w"]')).toHaveCount(0);
   await expect(timeframe).toHaveValue("1m");
 });

@@ -98,8 +98,8 @@ export function demarrerSyncFenetres(): () => void {
     applying = true;
     try {
       if (msg.kind === "symbol") {
-        marketStore.getState().setExchange(msg.exchange);
-        marketStore.getState().setSymbol(msg.symbol);
+        const m = marketStore.getState();
+        m.setMarket({ exchange: msg.exchange, symbol: msg.symbol, timeframe: m.timeframe });
       } else {
         themeStore.getState().setTheme(msg.theme);
       }

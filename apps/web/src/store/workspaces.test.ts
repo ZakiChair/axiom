@@ -102,6 +102,24 @@ beforeEach(() => {
 });
 
 describe("workspacesStore — enregistrer / appliquer", () => {
+  it("restaure l’identité HL enregistrée en une mutation sans la réinterpréter spot", () => {
+    workspacesStore.setState({
+      workspaces: [
+        { id: DEFAULT_WORKSPACE_ID, name: "Défaut", content: contenuVierge() },
+        { id: "hl-ancien", name: "Perp HL", content: { ...contenuVierge(), exchange: "hyperliquid", symbol: "BTCUSDT", timeframe: "4h" } },
+      ],
+      currentId: DEFAULT_WORKSPACE_ID,
+    });
+    const identites: unknown[] = [];
+    const stop = marketStore.subscribe((s) => identites.push({ exchange: s.exchange, symbol: s.symbol, timeframe: s.timeframe }));
+    try {
+      workspacesStore.getState().apply("hl-ancien");
+      expect(identites).toEqual([{ exchange: "hyperliquid", symbol: "BTCUSDT", timeframe: "4h" }]);
+    } finally {
+      stop();
+    }
+  });
+
   it("saveAs capture l'agencement courant et devient le workspace courant", () => {
     marketStore.getState().setSymbol("ETHUSDT");
     marketStore.getState().setTimeframe("4h");

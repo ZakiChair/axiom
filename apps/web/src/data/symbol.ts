@@ -70,6 +70,11 @@ export function basePerp(symbol: string): string | null {
   const s = symbol.trim().toUpperCase();
   if (s.length === 0 || s.includes("|")) return null; // vide ou synthétique
 
+  if (s.endsWith("-PERP")) {
+    const coin = s.slice(0, -5);
+    return /^[A-Z0-9]{2,20}$/.test(coin) ? (ALIAS_BASE[coin] ?? coin) : null;
+  }
+
   // Tiret Coinbase ramené au séparateur explicite déjà géré par splitSymbol.
   const normalise = s.replace("-", "/");
   let base: string;
@@ -80,4 +85,13 @@ export function basePerp(symbol: string): string | null {
   }
   if (!/^[A-Z0-9]{2,10}$/.test(base)) return null;
   return ALIAS_BASE[base] ?? base;
+}
+
+
+/** Conserve la casse native des coins HL (ex. kPEPE), issue du catalogue public. */
+const COINS_HL = new Map<string, string>();
+export function registerHyperliquidCoin(coin: string): void { COINS_HL.set(coin.toUpperCase(), coin); }
+export function hyperliquidCoin(symbol: string): string {
+  const coin = symbol.toUpperCase().endsWith("-PERP") ? symbol.slice(0, -5) : splitSymbol(symbol, "Hyperliquid").base;
+  return COINS_HL.get(coin.toUpperCase()) ?? coin;
 }

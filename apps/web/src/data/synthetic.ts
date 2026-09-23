@@ -26,7 +26,7 @@ export interface SyntheticSpec {
 
 /** Sources autorisées comme jambe : marchés câblés historiques + pseudo-source `mcap`. */
 const LEG_EXCHANGES: ReadonlySet<string> = new Set([
-  "binance", "kraken", "coinbase", "twelvedata", "mexc", "mcap",
+  "binance", "kraken", "coinbase", "twelvedata", "mexc", "bybit", "okx", "hyperliquid", "mcap",
 ]);
 
 function splitLeg(leg: string): { ex: SyntheticLegSource; sym: string } | null {

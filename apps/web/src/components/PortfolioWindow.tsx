@@ -210,8 +210,8 @@ export function PortfolioWindow() {
 
   /** Change le symbole du graphe (et restaure la source d'origine de la position). */
   const voirSurChart = (p: Position) => {
-    marketStore.getState().setExchange(p.source);
-    marketStore.getState().setSymbol(p.symbole);
+    const m = marketStore.getState();
+    m.setMarket({ exchange: p.source, symbol: p.symbole, timeframe: m.timeframe });
   };
 
   /** Ouvre le sélecteur de fichier CSV (import dry-run). */

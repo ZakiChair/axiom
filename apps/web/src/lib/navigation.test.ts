@@ -27,6 +27,7 @@ vi.mock("../store/chart-layout", () => ({
   chartLayoutStore: {
     getState: () => ({
       focus: etat.focus,
+      slots: [{ exchange: "binance", symbol: "BTCUSDT", timeframe: "1m" }, { exchange: "binance", symbol: "BTCUSDT", timeframe: "1m" }],
       setSlotExchange: (slot: number, exchange: string) => etat.appels.push(`slot:${slot}:exchange:${exchange}`),
       setSlotSymbol: (slot: number, symbol: string) => etat.appels.push(`slot:${slot}:symbol:${symbol}`),
       setSlotTimeframe: (slot: number, tf: string) => etat.appels.push(`slot:${slot}:tf:${tf}`),
@@ -37,6 +38,9 @@ vi.mock("../store/market", () => ({
   marketStore: {
     getState: () => ({
       candles: etat.candles,
+      setMarket: ({ exchange, symbol, timeframe }: { exchange: string; symbol: string; timeframe: string }) => {
+        etat.appels.push(`maitre:exchange:${exchange}`, `maitre:symbol:${symbol}`, `maitre:tf:${timeframe}`);
+      },
       setExchange: (exchange: string) => etat.appels.push(`maitre:exchange:${exchange}`),
       setSymbol: (symbol: string) => etat.appels.push(`maitre:symbol:${symbol}`),
       setTimeframe: (tf: string) => etat.appels.push(`maitre:tf:${tf}`),

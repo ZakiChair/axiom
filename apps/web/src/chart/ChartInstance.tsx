@@ -33,6 +33,8 @@ import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { getAdapter, supportedTimeframesFor } from "../data/adapters";
+import { resolveMarketCandidates } from "../data/marketRouting";
+import { chargerAvecRepli, type MarcheCharge } from "./routageMarche";
 import { prepareResyncApply } from "../data/resync";
 import { dataLoadErrorMessage } from "./dataLoadErrorMessage";
 import { adaptateurReplayActif } from "../data/replayFeed";
@@ -320,15 +322,7 @@ export function creerOrdonnanceurExtension(params: ParamsOrdonnanceurExtension):
 }
 
 /** Sources proposées dans l'en-tête d'un slot secondaire. */
-const SECONDARY_SOURCES: { id: ExchangeId; label: string }[] = [
-  { id: "binance", label: "Binance" },
-  { id: "coinbase", label: "Coinbase" },
-  { id: "kraken", label: "Kraken" },
-  { id: "mexc", label: "MEXC" },
-  { id: "twelvedata", label: "TwelveData" },
-  // Affiché seulement quand le slot porte déjà une série construite via la palette SYN.
-  { id: "synthetic", label: "Synthétique" },
-];
+
 
 /**
  * Dernier viewport connu (zoom + décalage droit) PAR SLOT, capturé AVANT `dispose()`.
@@ -515,7 +509,6 @@ export interface ChartInstanceProps {
   /** Édition de la config (slots secondaires) — link-aware côté ChartGrid. */
   onChangeSymbol?: (symbol: string) => void;
   onChangeTimeframe?: (tf: Timeframe) => void;
-  onChangeExchange?: (ex: ExchangeId) => void;
 }
 
 /** Délai maximal du backfill REST initial (chien de garde du gate G1) — ms. */
@@ -549,7 +542,6 @@ export function ChartInstance({
   role,
   onChangeSymbol,
   onChangeTimeframe,
-  onChangeExchange,
 }: ChartInstanceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<HTMLDivElement>(null);
@@ -568,6 +560,8 @@ export function ChartInstance({
   // (voir l'effet MONTAGE pour la raison d'ordre React).
   const mountRef = useRef<SlotMount | null>(null);
   const teardownDataRef = useRef<(() => void) | null>(null);
+  // Un repli réussi est repris au cycle de sa nouvelle identité, sans refaire le REST.
+  const marchePrepareRef = useRef<MarcheCharge | null>(null);
 
   const exchange = useStore(store, (s) => s.exchange);
   const symbol = useStore(store, (s) => s.symbol);
@@ -1096,33 +1090,50 @@ export function ChartInstance({
     // 1) Backfill REST, puis 2) live WS.
     // La résolution de l'adaptateur passe elle aussi dans la chaîne Promise : une source
     // persistée invalide qui ferait lever `getAdapter` devient un état d'erreur récupérable.
+    const prepared = marchePrepareRef.current;
+    marchePrepareRef.current = null;
+    const chargerBougies = (identity: MarketIdentity) => {
+      const adapter = replayAdapter ?? getAdapter(identity.exchange);
+      const { promesse, annuler } = avecDelai(
+        adapter.fetchKlines(identity.symbol, identity.timeframe, { limit: 500 }),
+        BACKFILL_TIMEOUT_MS,
+      );
+      if (cancelled) annuler();
+      else annulerDelaiBackfill = annuler;
+      return promesse;
+    };
     Promise.resolve()
-      .then(() => replayAdapter ?? getAdapter(exchange))
-      .then((adapter) => {
-        const { promesse, annuler } = avecDelai(
-          adapter.fetchKlines(symbol, timeframe, { limit: 500 }),
-          BACKFILL_TIMEOUT_MS,
-        );
-        // Le teardown a pu passer pendant la résolution de l'adaptateur : on coupe
-        // tout de suite plutôt que de laisser un minuteur orphelin 20 s.
-        if (cancelled) annuler();
-        else annulerDelaiBackfill = annuler;
-        return promesse.then((candles) => ({ adapter, candles }));
+      .then(async () => {
+        if (cancelled) return null;
+        if (replayAdapter) {
+          const candles = await chargerBougies(requestedIdentity);
+          if (candles.length === 0) throw new Error("historique vide");
+          return { identity: requestedIdentity, candles };
+        }
+        if (prepared && sameMarketIdentity(prepared.identity, requestedIdentity)) return prepared;
+        const candidates = await resolveMarketCandidates(requestedIdentity);
+        return chargerAvecRepli(candidates, chargerBougies, () => {
+          const state = store.getState();
+          return cancelled || state.dataLoad.requestId !== requestId ||
+            !sameMarketIdentity(marketIdentity(state), requestedIdentity);
+        });
       })
-      .then(({ adapter, candles }) => {
-        if (cancelled) return;
+      .then((result) => {
+        if (cancelled || result === null) return;
         const current = store.getState();
         if (
           current.dataLoad.requestId !== requestId ||
           !sameMarketIdentity(marketIdentity(current), requestedIdentity)
         ) return;
-
-        // Un backfill vide n'est pas un succès : sans cette garde, `completeDataLoad`
-        // passe le slot en « ready », l'overlay se démonte et le graphe reste muet sans
-        // recours. On rejoint le chemin d'erreur déjà écrit (overlay + « Réessayer »).
-        // Vaut UNIQUEMENT pour le backfill initial : dans `chargerPlusAncien`, un tableau
-        // vide est le signal normal de fin d'historique.
-        if (candles.length === 0) throw new Error("historique vide");
+        // Les contrôleurs, capacités, dessins et abonnements ferment l'identité du cycle.
+        // Publier d'abord celle effectivement chargée puis recréer ces consommateurs.
+        if (!sameMarketIdentity(result.identity, requestedIdentity)) {
+          marchePrepareRef.current = result;
+          current.setMarket(result.identity);
+          return;
+        }
+        const { candles } = result;
+        const adapter = replayAdapter ?? getAdapter(exchange);
         chart.setPriceVolumePrecision(derivePricePrecision(candles), 0);
         chart.applyNewData(candles.map(toKLineData));
         // Le store et la série deviennent « ready » dans le même tour JS. Si l'identité
@@ -1469,7 +1480,6 @@ export function ChartInstance({
           timeframe={timeframe}
           onChangeSymbol={onChangeSymbol}
           onChangeTimeframe={onChangeTimeframe}
-          onChangeExchange={onChangeExchange}
         />
       )}
       <canvas ref={vpCanvasRef} className="pointer-events-none absolute inset-0" style={{ display: "none" }} />
@@ -1574,14 +1584,12 @@ function SecondaryHeader({
   timeframe,
   onChangeSymbol,
   onChangeTimeframe,
-  onChangeExchange,
 }: {
   exchange: ExchangeId;
   symbol: string;
   timeframe: Timeframe;
   onChangeSymbol?: (symbol: string) => void;
   onChangeTimeframe?: (tf: Timeframe) => void;
-  onChangeExchange?: (ex: ExchangeId) => void;
 }) {
   const timeframes = supportedTimeframesFor(exchange, symbol);
   return (
@@ -1608,18 +1616,9 @@ function SecondaryHeader({
           </option>
         ))}
       </select>
-      <select
-        aria-label="Source du slot"
-        value={exchange}
-        onChange={(e) => onChangeExchange?.(e.target.value as ExchangeId)}
-        className="rounded bg-bg px-0.5 py-0.5 text-text outline-none"
-      >
-        {SECONDARY_SOURCES.filter((s) => s.id !== "synthetic" || exchange === "synthetic").map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.label}
-          </option>
-        ))}
-      </select>
+      <span title="Source sélectionnée automatiquement" className="px-1 text-text-dim">
+        Auto · {exchange}
+      </span>
     </div>
   );
 }

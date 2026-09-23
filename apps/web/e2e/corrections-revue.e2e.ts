@@ -205,7 +205,11 @@ test("limite Kraken visible (PARTIAL) après chargement", async ({ page }) => {
   await page.goto("/");
   await attendreCompte(page, LIMIT_INITIAL);
 
-  await page.getByLabel("Source").selectOption("kraken");
+  // Restaure la provenance d’une session Kraken pour vérifier sa limite d’historique.
+  await page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { setMarket: (m: { exchange: "kraken"; symbol: string; timeframe: "1m" }) => void } } }>;
+    (await importer()).marketStore.getState().setMarket({ exchange: "kraken", symbol: "BTCUSDT", timeframe: "1m" });
+  });
   const badge = page.locator('[data-chart-status="partial"]');
   await expect(badge).toBeVisible({ timeout: 20_000 });
   await expect(badge).toContainText(/720/);

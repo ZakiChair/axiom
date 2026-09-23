@@ -3,6 +3,7 @@ import { supportsIndicatorTimeframe } from "@axiom/indicators";
 import { tfAtLeast } from "../chart/tfOrder";
 import { coinalyzeKeyStore } from "../store/coinalyze";
 import { daemonSupporte } from "../data/daemon";
+import { basePerp } from "../data/symbol";
 
 export interface ContexteIndicateur {
   exchange: ExchangeId;
@@ -83,6 +84,8 @@ const AUX_PERP = new Set([
 const QUOTES = ["FDUSD", "USDT", "USDC", "BUSD", "USD", "EUR", "GBP", "BTC", "ETH"];
 
 function actifDe(symbol: string): string {
+  const actif = basePerp(symbol);
+  if (actif !== null) return actif;
   const normalise = symbol.trim().toUpperCase();
   const slash = normalise.indexOf("/");
   if (slash > 0) return normalise.slice(0, slash);

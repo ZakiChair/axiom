@@ -99,3 +99,11 @@ describe("basePerp — base normalisée pour un perp USDT", () => {
     expect(basePerp("/USD")).toBeNull(); // base vide
   });
 });
+
+describe("identité perp explicite", () => {
+  it("conserve l'actif pour les lecteurs dérivés sans inventer une quote spot", () => {
+    expect(basePerp("BTC-PERP")).toBe("BTC");
+    expect(basePerp("XBT-PERP")).toBe("BTC");
+    expect(basePerp("-PERP")).toBeNull();
+  });
+});

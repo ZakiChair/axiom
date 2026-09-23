@@ -19,9 +19,10 @@
  * sinon Binance par défaut). Ce défaut couvre les entrées historiques / persistées en clair.
  */
 import { createStore } from "zustand/vanilla";
+import type { ExchangeId } from "@axiom/types";
 
 /** Sources câblées pouvant alimenter un ticker de watchlist (cf. data/adapters.ts). */
-export type WatchlistSource = "binance" | "kraken" | "coinbase" | "mexc" | "twelvedata";
+export type WatchlistSource = ExchangeId;
 
 /** Identifiant stable du groupe par défaut (jamais supprimable s'il reste seul). */
 export const PRINCIPAL_GROUP_ID = "principal";
@@ -48,6 +49,8 @@ export interface WatchlistState {
 
   /** Ajoute un symbole au GROUPE ACTIF ; `source` optionnelle fige sa provenance (sinon inférée). */
   add: (symbol: string, source?: WatchlistSource) => void;
+  /** Provenance résolue automatiquement, y compris sans transport ticker disponible. */
+  setSource: (symbol: string, source: WatchlistSource) => void;
   /** Retire un symbole du GROUPE ACTIF (et purge sa source s'il ne figure plus dans aucun groupe). */
   remove: (symbol: string) => void;
   /** Déplace un symbole dans le groupe actif : dir=-1 (monter) / +1 (descendre). */
@@ -115,6 +118,12 @@ export const watchlistStore = createStore<WatchlistState>((set, get) => ({
     );
     const sources = source ? { ...get().sources, [s]: source } : get().sources;
     set({ groups: nextGroups, sources, symbols: activeSymbols(nextGroups, activeGroupId) });
+  },
+
+  setSource: (symbol, source) => {
+    const state = get();
+    if (!existsAnywhere(state.groups, symbol) || state.sources[symbol] === source) return;
+    set({ sources: { ...state.sources, [symbol]: source } });
   },
 
   remove: (symbol) => {

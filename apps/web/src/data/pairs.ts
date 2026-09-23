@@ -7,8 +7,8 @@
  * partout (store marché, watchlist). Chaque adaptateur reconvertit ensuite vers son
  * propre format (Kraken "BTC/USD", Coinbase "BTC-USD").
  *
- * Cache mémoire par source : un seul fetch par exchange et par session (la liste est
- * stable). Un échec est évincé du cache pour autoriser une nouvelle tentative.
+ * Cache mémoire par source : succès valables cinq minutes, requêtes simultanées
+ * dédupliquées. Échecs et listes vides sont réessayables.
  *
  * Sources :
  *  - Binance  : GET /api/v3/exchangeInfo            -> symbols[].symbol (status "TRADING").
@@ -16,6 +16,7 @@
  *  - Coinbase : GET /api/v3/brokerage/market/products -> products[].product_id "BASE-QUOTE" (SPOT).
  */
 import type { ExchangeId } from "@axiom/types";
+import { registerHyperliquidCoin, splitSymbol } from "./symbol";
 
 const BINANCE_EXCHANGE_INFO = "https://api.binance.com/api/v3/exchangeInfo";
 const KRAKEN_ASSET_PAIRS = "https://api.kraken.com/0/public/AssetPairs";
@@ -30,25 +31,34 @@ const MEXC_EXCHANGE_INFO = "/mexcapi/api/v3/exchangeInfo";
  */
 const KRAKEN_ASSET_ALIAS: Record<string, string> = { XBT: "BTC", XDG: "DOGE" };
 
-/** Cache par source (la promesse est mémorisée pour dédupliquer les appels concurrents). */
-const cache = new Map<ExchangeId, Promise<string[]>>();
+const CACHE_TTL_MS = 5 * 60_000;
+const cache = new Map<ExchangeId, { value: string[]; expires: number }>();
+const pendingPairs = new Map<ExchangeId, Promise<string[]>>();
+
+/** Le catalogue agrégé ne doit pas prolonger la durée de vie d'une source déjà en cache. */
+export function pairsCacheExpiresAt(exchange: ExchangeId): number | undefined {
+  return cache.get(exchange)?.expires;
+}
 
 /**
  * Renvoie (et met en cache) la liste des symboles de la source, au format d'entrée
- * concaténé. En cas d'échec, l'entrée de cache est purgée pour permettre un réessai.
+ * concaténé. `force` renouvelle un résultat terminé, sans doubler un appel en cours.
  */
-export function fetchPairs(exchange: ExchangeId): Promise<string[]> {
+export function fetchPairs(exchange: ExchangeId, options: { force?: boolean } = {}): Promise<string[]> {
+  const inFlight = pendingPairs.get(exchange);
+  if (inFlight) return inFlight;
   const cached = cache.get(exchange);
-  if (cached) return cached;
-  const pending = loadPairs(exchange).catch((err) => {
-    cache.delete(exchange);
-    throw err;
-  });
-  cache.set(exchange, pending);
+  if (!options.force && cached && cached.expires > Date.now()) return Promise.resolve(cached.value);
+  cache.delete(exchange);
+  const pending = loadPairs(exchange).then((value) => {
+    if (value.length > 0) cache.set(exchange, { value, expires: Date.now() + CACHE_TTL_MS });
+    return value;
+  }).finally(() => { pendingPairs.delete(exchange); });
+  pendingPairs.set(exchange, pending);
   return pending;
 }
 
-/** Aiguillage par source (repli Binance pour toute source non câblée). */
+/** Chaque catalogue décrit uniquement les instruments de sa propre source. */
 function loadPairs(exchange: ExchangeId): Promise<string[]> {
   switch (exchange) {
     case "kraken":
@@ -61,8 +71,16 @@ function loadPairs(exchange: ExchangeId): Promise<string[]> {
       return Promise.resolve([...TWELVEDATA_SYMBOLS]);
     case "mexc":
       return loadMexcPairs();
-    default:
+    case "binance":
       return loadBinancePairs();
+    case "bybit":
+      return loadBybitPairs();
+    case "okx":
+      return loadOkxPairs();
+    case "hyperliquid":
+      return loadHyperliquidPairs();
+    case "synthetic":
+      return Promise.resolve([]);
   }
 }
 
@@ -72,7 +90,7 @@ function loadPairs(exchange: ExchangeId): Promise<string[]> {
  * n'importe quelle paire. Format Binance concaténé, déjà compatible avec l'adaptateur.
  */
 async function loadMexcPairs(): Promise<string[]> {
-  const res = await fetch(MEXC_EXCHANGE_INFO);
+  const res = await catalogueFetch(MEXC_EXCHANGE_INFO);
   if (!res.ok) throw new Error(`MEXC exchangeInfo ${res.status} ${res.statusText}`);
   const data = (await res.json()) as {
     symbols?: Array<{ symbol?: string; status?: string; isSpotTradingAllowed?: boolean }>;
@@ -88,18 +106,22 @@ async function loadMexcPairs(): Promise<string[]> {
 }
 
 /**
- * Catalogue tradfi CURÉ (format Twelve Data). Indices & commodités sont servis par leurs
- * ETF (le plan gratuit ne couvre pas les futures/indices bruts, mais l'ETF suit le
- * sous-jacent de près). Forex au format "BASE/QUOTE". Non exhaustif — saisie libre OK.
+ * Catalogue tradfi CURÉ (format Twelve Data). Les ETF, actions, matières premières
+ * spot et forex restent des instruments distincts. L'accès aux historiques dépend
+ * de l'abonnement fournisseur. Non exhaustif — saisie libre OK.
  */
 export const TWELVEDATA_SYMBOLS: string[] = [
   // Indices via ETF (S&P500→SPY, Nasdaq100→QQQ, Dow→DIA, Russell2000→IWM, EAFE→EFA,
   // émergents→EEM, Europe→VGK, Japon→EWJ).
   "SPY", "QQQ", "DIA", "IWM", "EFA", "EEM", "VGK", "EWJ",
+  // ETF crypto : instruments TradFi distincts de leurs sous-jacents.
+  "GBTC", "IBIT", "ETHA", "ETHE",
   // Commodités via ETF (or→GLD, argent→SLV, pétrole WTI→USO, Brent→BNO, gaz→UNG,
   // cuivre→CPER, platine→PPLT, palladium→PALL, agriculture→DBA, large→DBC, blé→WEAT,
   // maïs→CORN, sucre→CANE).
   "GLD", "SLV", "USO", "BNO", "UNG", "CPER", "PPLT", "PALL", "DBA", "DBC", "WEAT", "CORN", "CANE",
+  // Pétrole WTI spot, distinct de l'ETF USO et de l'action WTI.
+  "WTI/USD",
   // Dollar US via ETF (proxy DXY pour les synthétiques BTC/DXY).
   "UUP",
   // Forex (BASE/QUOTE)
@@ -107,11 +129,17 @@ export const TWELVEDATA_SYMBOLS: string[] = [
   "NZD/USD", "EUR/GBP", "EUR/JPY", "USD/CNY", "USD/MXN",
   // Actions US
   "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "NFLX", "AMD", "INTC",
-  "JPM", "V", "MA", "DIS", "KO", "PEP", "XOM", "BA", "WMT", "BABA",
+  "JPM", "V", "MA", "DIS", "KO", "PEP", "XOM", "BA", "WMT", "BABA", "WTI",
 ].sort();
 
+/** Aide à la recherche uniquement : ne réécrit ni symboles stockés ni requêtes de prix. */
+export const TRADFI_SEARCH_METADATA: Readonly<Record<string, { label: string; aliases: readonly string[] }>> = {
+  "WTI/USD": { label: "Pétrole WTI — spot", aliases: ["USOIL"] },
+  WTI: { label: "W&T Offshore — action", aliases: [] },
+};
+
 async function loadBinancePairs(): Promise<string[]> {
-  const res = await fetch(BINANCE_EXCHANGE_INFO);
+  const res = await catalogueFetch(BINANCE_EXCHANGE_INFO);
   if (!res.ok) throw new Error(`Binance exchangeInfo ${res.status} ${res.statusText}`);
   const data = (await res.json()) as { symbols?: Array<{ symbol?: string; status?: string }> };
   const out: string[] = [];
@@ -122,7 +150,7 @@ async function loadBinancePairs(): Promise<string[]> {
 }
 
 async function loadKrakenPairs(): Promise<string[]> {
-  const res = await fetch(KRAKEN_ASSET_PAIRS);
+  const res = await catalogueFetch(KRAKEN_ASSET_PAIRS);
   if (!res.ok) throw new Error(`Kraken AssetPairs ${res.status} ${res.statusText}`);
   const data = (await res.json()) as {
     error?: string[];
@@ -147,7 +175,7 @@ async function loadKrakenPairs(): Promise<string[]> {
 }
 
 async function loadCoinbasePairs(): Promise<string[]> {
-  const res = await fetch(COINBASE_PRODUCTS);
+  const res = await catalogueFetch(COINBASE_PRODUCTS);
   if (!res.ok) throw new Error(`Coinbase products ${res.status} ${res.statusText}`);
   const data = (await res.json()) as {
     products?: Array<{ product_id?: string; product_type?: string; trading_disabled?: boolean }>;
@@ -160,4 +188,70 @@ async function loadCoinbasePairs(): Promise<string[]> {
     out.push(p.product_id.replace("-", "")); // "BTC-USD" -> "BTCUSD"
   }
   return out.sort();
+}
+
+
+/** Borne le réseau ET la lecture JSON ; un serveur muet ne bloque pas les autres places. */
+const CATALOGUE_TIMEOUT_MS = 12_000;
+async function catalogueFetch(url: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      fetch(url, { ...init, signal: controller.signal }).then(async (res) => {
+        // Consommer le corps sous le même délai, sans changer l'interface des chargeurs.
+        const data: unknown = await res.json();
+        return { ok: res.ok, status: res.status, statusText: res.statusText, json: async () => data } as Response;
+      }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => { controller.abort(); reject(new Error("Catalogue indisponible (délai dépassé)")); }, CATALOGUE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally { if (timer !== undefined) clearTimeout(timer); }
+}
+
+// API officielles : bybit-exchange.github.io/docs/v5/market/instrument (spot sans pagination).
+async function loadBybitPairs(): Promise<string[]> {
+  const res = await catalogueFetch("https://api.bybit.com/v5/market/instruments-info?category=spot");
+  if (!res.ok) throw new Error(`Catalogue Bybit ${res.status}`);
+  const data = await res.json() as { retCode?: number; result?: { list?: Array<{ symbol?: string; status?: string }> } };
+  if (data.retCode !== 0) throw new Error("Catalogue Bybit indisponible");
+  return (data.result?.list ?? []).filter((p) => p.status === "Trading" && typeof p.symbol === "string")
+    .map((p) => p.symbol!).sort();
+}
+
+// www.okx.com/docs-v5/en/#rest-api-public-data-get-instruments — SPOT uniquement.
+async function loadOkxPairs(): Promise<string[]> {
+  const res = await catalogueFetch("https://www.okx.com/api/v5/public/instruments?instType=SPOT");
+  if (!res.ok) throw new Error(`Catalogue OKX ${res.status}`);
+  const data = await res.json() as { code?: string; data?: Array<{ instId?: string; instType?: string; state?: string }> };
+  if (data.code !== "0") throw new Error("Catalogue OKX indisponible");
+  return (data.data ?? []).filter((p) => p.instType === "SPOT" && p.state === "live" && typeof p.instId === "string")
+    .map((p) => p.instId!.replace("-", "")).sort();
+}
+
+// hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/perpetuals
+async function loadHyperliquidPairs(): Promise<string[]> {
+  const res = await catalogueFetch("https://api.hyperliquid.xyz/info", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "meta" }),
+  });
+  if (!res.ok) throw new Error(`Catalogue Hyperliquid ${res.status}`);
+  const data = await res.json() as { universe?: Array<{ name?: string; isDelisted?: boolean }> };
+  if (!Array.isArray(data.universe)) throw new Error("Catalogue Hyperliquid indisponible");
+  return data.universe.filter((p) => typeof p.name === "string" && !p.isDelisted).map((p) => {
+    registerHyperliquidCoin(p.name!);
+    return `${p.name!.toUpperCase()}-PERP`;
+  }).sort();
+}
+
+const DEVISES_FOREX = new Set(["USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD", "CNY", "MXN", "SEK", "NOK", "DKK", "HKD", "SGD", "ZAR", "TRY", "INR", "BRL", "PLN"]);
+/** Actions/ETF libres et forex explicite : ne confond pas XBT/USD avec EUR/USD. */
+export function isTradfiMarketSymbol(symbol: string): boolean {
+  const s = symbol.trim().toUpperCase();
+  if (s.endsWith("-PERP") || s.includes("|")) return false;
+  if (TWELVEDATA_SYMBOLS.includes(s) || /[\^=.]/.test(s)) return true;
+  const [base, quote] = s.split("/");
+  if (base && quote && DEVISES_FOREX.has(base) && DEVISES_FOREX.has(quote)) return true;
+  try { splitSymbol(s.replace("-", "/"), "actif"); return false; }
+  catch { return /^[A-Z][A-Z0-9]{0,9}$/.test(s); }
 }

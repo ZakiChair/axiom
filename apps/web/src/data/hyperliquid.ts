@@ -22,7 +22,7 @@
  *   - WS        : https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket
  */
 import type { Candle, IExchangeAdapter, Timeframe, Trade, Unsubscribe } from "@axiom/types";
-import { splitSymbol } from "./symbol";
+import { hyperliquidCoin } from "./symbol";
 import { connectWsLoop } from "./wsLoop";
 
 const INFO_URL = "https://api.hyperliquid.xyz/info";
@@ -63,7 +63,7 @@ const HL_TF_MS: Partial<Record<Timeframe, number>> = {
 
 /** Coin Hyperliquid depuis un symbole d'entrée (ex. "BTCUSDT" -> "BTC"). */
 function hlCoin(symbol: string): string {
-  return splitSymbol(symbol, "Hyperliquid").base;
+  return hyperliquidCoin(symbol);
 }
 
 /** Intervalle HL pour un tf, ou erreur si non supporté. */

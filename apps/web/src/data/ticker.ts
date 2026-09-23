@@ -5,6 +5,8 @@
  *  - kraken     : POLLING REST /0/public/Ticker (30 s), 1 requête par symbole ;
  *  - coinbase   : POLLING REST market/products GROUPÉ (30 s), 1 requête pour le lot ;
  *  - mexc       : POLLING REST /ticker/24hr (30 s, via proxy), 1 requête par symbole ;
+ *  - okx/bybit  : POLLING REST ticker SPOT groupé (30 s) ;
+ *  - hyperliquid : contexte groupé + dernier trade public par coin (30 s) ;
  *  - twelvedata : POLLING /quote groupé (~60 s), GATÉ sur les heures de marché — inutile
  *    de brûler le quota (~800 crédits/j) la nuit / le week-end marché fermé (roadmap 0.4d).
  *
@@ -15,13 +17,14 @@
  *
  * Mises à jour : l'appelant les écrit IMPÉRATIVEMENT dans le DOM (aucun state React).
  */
-import type { Candle, Unsubscribe } from "@axiom/types";
+import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { fetchQuotes } from "./twelvedata";
-import { binanceAdapter } from "./binance";
+import { getAdapter } from "./adapters";
+import { resolveMarketCandidates, type ResolvedMarket } from "./marketRouting";
 import { estSymboleCapitalisation } from "./mcap";
 import { TWELVEDATA_SYMBOLS } from "./pairs";
 import { pollLoop } from "./pollLoop";
-import { splitSymbol } from "./symbol";
+import { basePerp, splitSymbol } from "./symbol";
 import { connectWsLoop } from "./wsLoop";
 import { watchlistStore, type WatchlistSource } from "../store/watchlist";
 import { healthStore } from "../store/health";
@@ -71,6 +74,8 @@ export function isTradfiSymbol(symbol: string): boolean {
  */
 export function resolveTickerSource(symbol: string, explicit?: WatchlistSource): WatchlistSource {
   if (explicit) return explicit;
+  if (symbol.toUpperCase().endsWith("-PERP")) return "hyperliquid";
+  if (estSymboleCapitalisation(symbol) || symbol.includes("|")) return "synthetic";
   return isTradfiSymbol(symbol) ? "twelvedata" : "binance";
 }
 
@@ -81,6 +86,9 @@ const TICKER_SOURCES: ReadonlySet<string> = new Set<WatchlistSource>([
   "coinbase",
   "mexc",
   "twelvedata",
+  "okx",
+  "bybit",
+  "hyperliquid",
 ]);
 
 /** Garde runtime utilisée par les consommateurs qui partent d'un `ExchangeId` plus large. */
@@ -133,7 +141,7 @@ function errText(err: unknown): string {
 export interface TickerUpdate {
   symbol: string; // ex. "BTCUSDT" ou "SPY"
   price: number; // dernier prix
-  changePercent: number; // variation 24 h en %
+  changePercent: number; // variation 24 h en % ; NaN si la référence est absente
   /** Volume 24 h en devise de cotation (USD/USDT…), quand la source le fournit. */
   quoteVolume?: number;
 }
@@ -170,14 +178,15 @@ export function parseMessageTicker(data: string): TickerUpdate | null {
     console.error("[AXIOM] Message ticker Binance illisible", err);
     return null;
   }
-  const d = msg.data;
+  const d = msg?.data;
   if (!d || typeof d.s !== "string") return null;
-  const quoteVolume = Number(d.q);
+  const price = positiveNumber(d.c);
+  if (price === undefined) return null;
   return {
     symbol: d.s,
-    price: Number(d.c),
-    changePercent: Number(d.P),
-    quoteVolume: Number.isFinite(quoteVolume) ? quoteVolume : undefined,
+    price,
+    changePercent: finiteNumber(d.P) ?? NaN,
+    quoteVolume: quoteVolumeNumber(d.q),
   };
 }
 
@@ -237,8 +246,107 @@ function subscribeBinanceTickers(
 const KRAKEN_TICKER_URL = "https://api.kraken.com/0/public/Ticker";
 const COINBASE_PRODUCTS_URL = "https://api.coinbase.com/api/v3/brokerage/market/products";
 const MEXC_TICKER_URL = "/mexcapi/api/v3/ticker/24hr"; // via proxy (cf. vite.config.ts)
+const BINANCE_TICKER_URL = "https://api.binance.com/api/v3/ticker/24hr";
+const OKX_TICKERS_URL = "https://www.okx.com/api/v5/market/tickers?instType=SPOT";
+const BYBIT_TICKERS_URL = "https://api.bybit.com/v5/market/tickers?category=spot";
+const HL_INFO_URL = "https://api.hyperliquid.xyz/info";
 /** Bases dont l'altname REST Kraken diffère du ticker courant (Bitcoin=XBT, Dogecoin=XDG). */
 const KRAKEN_REST_BASE: Record<string, string> = { BTC: "XBT", DOGE: "XDG" };
+
+/** Ne transforme jamais null, chaîne vide ou booléen en donnée financière. */
+function finiteNumber(value: unknown): number | undefined {
+  if ((typeof value !== "string" && typeof value !== "number") || value === "" || (typeof value === "string" && value.trim() === "")) return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function positiveNumber(value: unknown): number | undefined {
+  const number = finiteNumber(value);
+  return number !== undefined && number > 0 ? number : undefined;
+}
+
+function quoteVolumeNumber(value: unknown): number | undefined {
+  const number = finiteNumber(value);
+  return number !== undefined && number >= 0 ? number : undefined;
+}
+
+function changeSince(price: number, previous: unknown): number {
+  const reference = positiveNumber(previous);
+  const pct = reference === undefined ? NaN : ((price - reference) / reference) * 100;
+  return Number.isFinite(pct) ? pct : NaN;
+}
+
+/** OKX SPOT : volCcy24h est déjà le volume quote, vol24h est le volume base. */
+async function fetchOkxTickers(symbols: string[], signal?: AbortSignal): Promise<TickerUpdate[]> {
+  const byInstrument = new Map<string, string>();
+  for (const symbol of symbols) {
+    try {
+      const { base, quote } = splitSymbol(symbol.replace("-", "/"), "OKX");
+      byInstrument.set(`${base}-${quote}`, symbol);
+    } catch { /* Symbole hors du marché spot. */ }
+  }
+  if (!byInstrument.size) return [];
+  const res = await fetch(OKX_TICKERS_URL, { signal });
+  if (!res.ok) throw new Error(`OKX ticker ${res.status}`);
+  const json = await res.json() as { code?: string; data?: Array<{ instId?: string; instType?: string; last?: string; open24h?: string; volCcy24h?: string }> };
+  if (json?.code !== "0" || !Array.isArray(json.data)) return [];
+  return json.data.flatMap((row) => {
+    const symbol = byInstrument.get(row?.instId ?? "");
+    const price = positiveNumber(row?.last);
+    if (!symbol || price === undefined || (row.instType && row.instType !== "SPOT")) return [];
+    return [{ symbol, price, changePercent: changeSince(price, row.open24h), quoteVolume: quoteVolumeNumber(row.volCcy24h) }];
+  });
+}
+
+/** Bybit SPOT : turnover24h est le volume quote ; aucune conversion base × dernier prix. */
+async function fetchBybitTickers(symbols: string[], signal?: AbortSignal): Promise<TickerUpdate[]> {
+  const requested = new Map(symbols.map((symbol) => [symbol.toUpperCase(), symbol]));
+  const res = await fetch(BYBIT_TICKERS_URL, { signal });
+  if (!res.ok) throw new Error(`Bybit ticker ${res.status}`);
+  const json = await res.json() as { retCode?: number; result?: { category?: string; list?: Array<{ symbol?: string; lastPrice?: string; prevPrice24h?: string; turnover24h?: string }> } };
+  if (json?.retCode !== 0 || json.result?.category !== "spot" || !Array.isArray(json.result.list)) return [];
+  return json.result.list.flatMap((row) => {
+    const symbol = requested.get(row?.symbol ?? "");
+    const price = positiveNumber(row?.lastPrice);
+    if (!symbol || price === undefined) return [];
+    return [{ symbol, price, changePercent: changeSince(price, row.prevPrice24h), quoteVolume: quoteVolumeNumber(row.turnover24h) }];
+  });
+}
+
+async function fetchHlInfo(body: object, signal?: AbortSignal): Promise<unknown> {
+  const res = await fetch(HL_INFO_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
+  if (!res.ok) throw new Error(`Hyperliquid ticker ${res.status}`);
+  return res.json();
+}
+
+/**
+ * Contexte HL groupé, puis dernier trade réel par coin (recentTrades, tri par time).
+ * La variation compare ce dernier trade à prevDayPx ; dayNtlVlm est le notionnel
+ * fourni par HL. Le markPx et le midPx ne deviennent jamais un dernier prix échangé.
+ */
+async function fetchHyperliquidTickers(symbols: string[], signal?: AbortSignal): Promise<TickerUpdate[]> {
+  const json = await fetchHlInfo({ type: "metaAndAssetCtxs" }, signal) as [
+    { universe?: Array<{ name?: string; isDelisted?: boolean }> },
+    Array<{ prevDayPx?: string; dayNtlVlm?: string }>,
+  ];
+  if (!Array.isArray(json) || !Array.isArray(json[0]?.universe) || !Array.isArray(json[1])) return [];
+  const universe = json[0].universe;
+  const settled = await Promise.all(symbols.map(async (symbol): Promise<TickerUpdate | null> => {
+    const base = basePerp(symbol);
+    const index = universe.findIndex((entry) => entry?.name?.toUpperCase() === base && !entry.isDelisted);
+    const coin = universe[index]?.name;
+    if (!coin || signal?.aborted) return null;
+    const trades = await fetchHlInfo({ type: "recentTrades", coin }, signal) as Array<{ coin?: string; px?: string; time?: number }>;
+    if (!Array.isArray(trades)) return null;
+    const latest = trades.filter((t) => t?.coin === coin && positiveNumber(t.px) !== undefined && positiveNumber(t.time) !== undefined)
+      .sort((a, b) => Number(b.time) - Number(a.time))[0];
+    const price = positiveNumber(latest?.px);
+    if (price === undefined) return null;
+    const ctx = json[1][index];
+    return { symbol, price, changePercent: changeSince(price, ctx?.prevDayPx), quoteVolume: quoteVolumeNumber(ctx?.dayNtlVlm) };
+  }).map((pending) => pending.catch(() => null)));
+  return settled.filter((value): value is TickerUpdate => value !== null);
+}
 
 /**
  * Ticker Kraken pour UN symbole. `c[0]` = dernier prix, `o` = ouverture du JOUR (la variation
@@ -264,8 +372,8 @@ async function fetchKrakenTicker(symbol: string, signal?: AbortSignal): Promise<
   const key = Object.keys(result)[0]; // Kraken renvoie la clé canonique (≠ altname) → 1re clé
   if (key === undefined) return null;
   const t = result[key];
-  const last = Number(t?.c?.[0]);
-  if (!Number.isFinite(last)) return null;
+  const last = positiveNumber(t?.c?.[0]);
+  if (last === undefined) return null;
   const open = Number(t?.o);
   const changePercent = Number.isFinite(open) && open !== 0 ? ((last - open) / open) * 100 : 0;
   return { symbol, price: last, changePercent };
@@ -299,8 +407,8 @@ async function fetchCoinbaseTickers(symbols: string[], signal?: AbortSignal): Pr
   for (const p of data.products ?? []) {
     const sym = p.product_id ? byProduct.get(p.product_id) : undefined;
     if (sym === undefined) continue;
-    const price = Number(p.price);
-    if (!Number.isFinite(price)) continue;
+    const price = positiveNumber(p.price);
+    if (price === undefined) continue;
     const pct = Number(p.price_percentage_change_24h);
     out.push({ symbol: sym, price, changePercent: Number.isFinite(pct) ? pct : 0 });
   }
@@ -311,45 +419,98 @@ async function fetchCoinbaseTickers(symbols: string[], signal?: AbortSignal): Pr
  * Ticker MEXC pour UN symbole (API spot v3 compatible Binance → `priceChangePercent`
  * déjà en pourcentage). Renvoie null (sans lever) si le symbole est inconnu / illisible.
  */
-async function fetchMexcTicker(symbol: string, signal?: AbortSignal): Promise<TickerUpdate | null> {
+async function fetchSpotTicker(symbol: string, signal?: AbortSignal, url = MEXC_TICKER_URL): Promise<TickerUpdate | null> {
   const params = new URLSearchParams({ symbol: symbol.toUpperCase() });
-  const res = await fetch(`${MEXC_TICKER_URL}?${params}`, { signal });
+  const res = await fetch(`${url}?${params}`, { signal });
   if (!res.ok) return null; // 400 MEXC pour un symbole inconnu → pas de prix
   const t = (await res.json()) as {
+    symbol?: string;
     lastPrice?: string;
     priceChangePercent?: string;
     quoteVolume?: string;
   };
-  const price = Number(t.lastPrice);
-  if (!Number.isFinite(price)) return null;
-  const pct = Number(t.priceChangePercent);
-  const quoteVolume = Number(t.quoteVolume);
+  const price = positiveNumber(t?.lastPrice);
+  if (price === undefined || (t.symbol !== undefined && t.symbol !== symbol.toUpperCase())) return null;
   return {
     symbol,
     price,
-    changePercent: Number.isFinite(pct) ? pct : 0,
-    quoteVolume: Number.isFinite(quoteVolume) ? quoteVolume : undefined,
+    changePercent: finiteNumber(t.priceChangePercent) ?? NaN,
+    quoteVolume: quoteVolumeNumber(t.quoteVolume),
   };
+}
+
+/** Snapshot de la même provenance que le flux, partagé par le poller et la sonde. */
+async function fetchTickerSnapshots(source: WatchlistSource, symbols: string[], signal?: AbortSignal): Promise<TickerUpdate[]> {
+  if (signal?.aborted) return [];
+  if (source === "coinbase") return fetchCoinbaseTickers(symbols, signal);
+  if (source === "okx") return fetchOkxTickers(symbols, signal);
+  if (source === "bybit") return fetchBybitTickers(symbols, signal);
+  if (source === "hyperliquid") return fetchHyperliquidTickers(symbols, signal);
+  if (source === "twelvedata") return (await fetchQuotes(symbols)).filter((q) => positiveNumber(q.price) !== undefined);
+  if (source !== "kraken" && source !== "mexc" && source !== "binance") return [];
+  const settled = await Promise.all(symbols.map((symbol) => (
+    source === "kraken" ? fetchKrakenTicker(symbol, signal) : fetchSpotTicker(symbol, signal, source === "binance" ? BINANCE_TICKER_URL : MEXC_TICKER_URL)
+  ).catch(() => null)));
+  return settled.filter((u): u is TickerUpdate => u !== null);
+}
+
+/** Borne aussi les APIs qui ne propagent pas encore AbortSignal (catalogue/quotes TD). */
+function bounded<T>(work: (signal: AbortSignal) => Promise<T>, timeoutMs: number, parent?: AbortSignal): Promise<T | undefined> {
+  if (parent?.aborted) return Promise.resolve(undefined);
+  return new Promise((resolve) => {
+    const controller = new AbortController();
+    let finished = false;
+    const finish = (value?: T) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      parent?.removeEventListener("abort", cancel);
+      controller.abort();
+      resolve(value);
+    };
+    const cancel = () => finish();
+    const timer = setTimeout(cancel, timeoutMs);
+    parent?.addEventListener("abort", cancel, { once: true });
+    try { void work(controller.signal).then(finish, cancel); }
+    catch { cancel(); }
+  });
+}
+
+/**
+ * Confirme un candidat par un prix > 0 de CET instrument avant de mémoriser sa source.
+ * 2,5 s par sonde, 30 s au total : catalogue (12 s) + six places spot (15 s).
+ * Aucun résultat après annulation ;
+ * une source spéculative ne reste pas marquée ainsi une fois son prix réellement reçu.
+ */
+export function resolveTickerMarket(
+  identity: { exchange?: ExchangeId; symbol: string; timeframe: Timeframe },
+  signal?: AbortSignal,
+): Promise<ResolvedMarket | undefined> {
+  return bounded(async (active) => {
+    const candidates = await resolveMarketCandidates(identity);
+    for (const candidate of candidates) {
+      if (active.aborted) return undefined;
+      if (!isTickerSource(candidate.exchange)) continue;
+      const quotes = await bounded((probe) => fetchTickerSnapshots(candidate.exchange, [candidate.symbol], probe), 2_500, active);
+      if (active.aborted) return undefined;
+      if (quotes?.some((quote) => quote.symbol === candidate.symbol && positiveNumber(quote.price) !== undefined)) {
+        return { exchange: candidate.exchange, symbol: candidate.symbol, timeframe: candidate.timeframe };
+      }
+    }
+    return undefined;
+  }, 30_000, signal);
 }
 
 /** Poller REST mutualisé (une boucle par source) pour les tickers crypto Kraken/Coinbase/MEXC. */
 function pollCryptoTickers(
-  source: "kraken" | "coinbase" | "mexc",
+  source: "kraken" | "coinbase" | "mexc" | "okx" | "bybit" | "hyperliquid",
   symbols: string[],
   cb: (update: TickerUpdate) => void
 ): Unsubscribe {
   if (symbols.length === 0) return () => {};
   return pollLoop(
     async (signal, isCancelled) => {
-      let updates: TickerUpdate[];
-      if (source === "coinbase") {
-        updates = await fetchCoinbaseTickers(symbols, signal); // groupé
-      } else {
-        const fetchOne = source === "kraken" ? fetchKrakenTicker : fetchMexcTicker;
-        // Une erreur par symbole ne doit pas faire échouer tout le lot → catch individuel.
-        const settled = await Promise.all(symbols.map((s) => fetchOne(s, signal).catch(() => null)));
-        updates = settled.filter((u): u is TickerUpdate => u !== null);
-      }
+      const updates = await fetchTickerSnapshots(source, symbols, signal);
       if (isCancelled()) return;
       for (const u of updates) cb(u);
     },
@@ -419,6 +580,10 @@ export function groupTickerSymbolsBySource(
     coinbase: [],
     mexc: [],
     twelvedata: [],
+    bybit: [],
+    okx: [],
+    hyperliquid: [],
+    synthetic: [],
   };
   for (const symbol of symbols) {
     groups[resolveTickerSource(symbol, forcedSource ?? sourcesBySymbol[symbol])].push(symbol);
@@ -428,7 +593,7 @@ export function groupTickerSymbolsBySource(
 
 /**
  * Souscrit aux tickers des `symbols`. Par défaut, chacun est routé depuis sa provenance
- * watchlist ou par inférence. `options.source` permet à un consommateur lié à un marché
+ * watchlist ou confirmé par une sonde de prix. `options.source` permet à un consommateur lié à un marché
  * précis (le bandeau du chart) de forcer exactement cette source sans dépendre de la watchlist.
  * `cb` est invoquée à chaque mise à jour. Renvoie le désabonnement de tous les flux.
  */
@@ -440,7 +605,8 @@ export function subscribeTickers(
   if (symbols.length === 0) return () => {};
 
   const explicit = watchlistStore.getState().sources;
-  const groups = groupTickerSymbolsBySource(symbols, explicit, options.source);
+  const known = symbols.filter((symbol) => options.source !== undefined || explicit[symbol] !== undefined);
+  const groups = groupTickerSymbolsBySource(known, explicit, options.source);
 
   // Binance : WS combiné. On écarte tout symbole à « / » qui casserait l'URL du stream.
   const binanceWs = groups.binance.filter((s) => !s.includes("/"));
@@ -450,8 +616,24 @@ export function subscribeTickers(
     pollCryptoTickers("kraken", groups.kraken, cb),
     pollCryptoTickers("coinbase", groups.coinbase, cb),
     pollCryptoTickers("mexc", groups.mexc, cb),
+    pollCryptoTickers("okx", groups.okx, cb),
+    pollCryptoTickers("bybit", groups.bybit, cb),
+    pollCryptoTickers("hyperliquid", groups.hyperliquid, cb),
     pollTradfiQuotes(groups.twelvedata, cb),
   ];
+
+  // Les consommateurs hors watchlist bénéficient aussi de la résolution automatique.
+  // Aucune socket Binance spéculative ; la source forcée, elle, reste exacte et immédiate.
+  for (const symbol of symbols.filter((s) => !known.includes(s))) {
+    let resolved = false;
+    unsubs.push(pollLoop(async (signal, isCancelled) => {
+      if (resolved) return;
+      const market = await resolveTickerMarket({ symbol, timeframe: "1h" }, signal);
+      if (!market || isCancelled()) return;
+      resolved = true;
+      unsubs.push(subscribeTickers([market.symbol], (update) => cb({ ...update, symbol }), { source: market.exchange }));
+    }, CRYPTO_TICKER_POLL_MS, { immediate: true }));
+  }
 
   return () => {
     for (const u of unsubs) u();
@@ -517,37 +699,34 @@ export function computeBarStats(hourly: Candle[]): BarStats | null {
 }
 
 /**
- * Souscrit au rafraîchissement LENT (5 min) des statistiques enrichies des `symbols` routés
- * BINANCE (les seuls disposant ici de klines horaires spot ; un symbole à « / » est écarté,
- * comme dans le stream ticker). `cb` est invoquée par symbole à chaque cycle. Renvoie une
- * fonction de désabonnement. Les symboles non-Binance restent sans Δ% 1h/7j ni sparkline.
+ * Rafraîchit les statistiques sur les klines de la provenance confirmée (5 min).
+ * Sans provenance, la même sonde de prix que le ticker tranche avant tout backfill.
  */
 export function subscribeWatchlistBars(
   symbols: string[],
   cb: (bars: WatchlistBars) => void
 ): Unsubscribe {
   const explicit = watchlistStore.getState().sources;
-  // TOTAL/TOTAL2/TOTAL3 n'existent pas chez Binance : la requête part pour un 400
-  // « Invalid symbol », que le navigateur requalifie en erreur CORS (la réponse d'erreur
-  // Binance n'a pas d'en-tête ACAO). Leur historique vient du panneau Capitalisation.
-  const binance = symbols.filter(
-    (s) =>
-      resolveTickerSource(s, explicit[s]) === "binance" &&
-      !s.includes("/") &&
-      !estSymboleCapitalisation(s)
-  );
-  if (binance.length === 0) return () => {};
+  const markets = new Map<string, ResolvedMarket>();
+  const eligible = symbols.filter((symbol) => !estSymboleCapitalisation(symbol) && !symbol.includes("|"));
+  for (const symbol of eligible) {
+    const exchange = explicit[symbol];
+    if (exchange && isTickerSource(exchange)) markets.set(symbol, { exchange, symbol, timeframe: "1h" });
+  }
+  if (eligible.length === 0) return () => {};
 
   return pollLoop(
-    async (_signal, isCancelled) => {
+    async (signal, isCancelled) => {
       // Une erreur par symbole ne doit pas faire échouer tout le lot → catch individuel.
       const results = await Promise.all(
-        binance.map((s) =>
-          binanceAdapter
-            .fetchKlines(s, "1h", { limit: HOURLY_KLINE_LIMIT })
-            .then((klines) => ({ symbol: s, stats: computeBarStats(klines) }))
-            .catch(() => null)
-        )
+        eligible.map(async (symbol) => {
+          const market = markets.get(symbol) ?? await resolveTickerMarket({ symbol, timeframe: "1h" }, signal);
+          if (!market || isCancelled()) return null;
+          markets.set(symbol, market);
+          if (market.exchange === "twelvedata" && !isMarketOpen(classifyTradfi(symbol), new Date())) return null;
+          const klines = await getAdapter(market.exchange).fetchKlines(market.symbol, "1h", { limit: HOURLY_KLINE_LIMIT });
+          return { symbol, stats: computeBarStats(klines) };
+        }).map((pending) => pending.catch(() => null))
       );
       if (isCancelled()) return;
       for (const r of results) {

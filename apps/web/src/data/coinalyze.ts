@@ -25,6 +25,7 @@ import type {
   OpenInterest,
 } from "@axiom/types";
 import { healthStore } from "../store/health";
+import { basePerp } from "./symbol";
 
 // Base SAME-ORIGIN via le proxy de dev Vite (cf. vite.config.ts). L'appel direct
 // à https://api.coinalyze.net/v1/ est bloqué par le navigateur (aucun en-tête CORS).
@@ -156,12 +157,13 @@ async function request<T>(path: string, params: Record<string, string>): Promise
  * Mappe un symbole Binance (spot, ex. « BTCUSDT ») vers l'identifiant Coinalyze
  * du perpétuel Binance USDⓈ-M correspondant : suffixe `_PERP.A` (`.A` = Binance).
  * Si l'entrée est déjà un identifiant Coinalyze (contient un `.`), on la renvoie
- * inchangée.
+ * inchangée. Un perp explicite (`BTC-PERP`) utilise la référence dérivée Binance USDT.
  */
 export function toCoinalyzeSymbol(binanceSymbol: string): string {
   const s = binanceSymbol.trim().toUpperCase();
   if (s.includes(".")) return s;
-  return `${s}_PERP.A`;
+  const base = s.endsWith("-PERP") ? basePerp(s) : null;
+  return `${base === null ? s : `${base}USDT`}_PERP.A`;
 }
 
 /**

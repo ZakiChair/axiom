@@ -1,8 +1,8 @@
 /**
- * Toolbar — sélecteurs source / symbole / timeframe, branchés sur le store marché vanilla.
+ * Toolbar — sélection automatique du marché, symbole / timeframe, branchés sur le store marché vanilla.
  * Un changement re-déclenche backfill + souscription côté Chart (effet [exchange, symbol, tf]).
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useStore } from "zustand";
 import type { ExchangeId, Timeframe } from "@axiom/types";
 import { marketStore } from "../store/market";
@@ -33,7 +33,6 @@ import { priceScaleStore, type PriceScaleType } from "../chart/Chart";
 import { exportChartImage } from "../chart/drawing";
 import { pousserToast } from "../store/toasts";
 import { settingsUiStore } from "../store/settings-ui";
-import { twelveDataKeyStore } from "../store/twelvedata";
 import { IS_VERCEL } from "../lib/deployment";
 import { raccourciPour, raccourciTimeframe } from "../commands/hotkeys";
 import { IndicatorMenu } from "./IndicatorMenu";
@@ -142,10 +141,6 @@ enregistrerCommandes([
 /** Presets symbole selon le type de source (crypto / tradfi / MEXC tokenisé). */
 const CRYPTO_PRESETS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
 const TRADFI_PRESETS = ["SPY", "GLD", "EUR/USD"]; // S&P500 (ETF), or (ETF), EUR/USD
-const MEXC_PRESETS = ["AAPLXUSDT", "TSLAONUSDT", "SPYXUSDT"]; // actions tokenisées
-/** Symbole par défaut au passage crypto ↔ tradfi. */
-const DEFAULT_CRYPTO_SYMBOL = "BTCUSDT";
-const DEFAULT_TRADFI_SYMBOL = "SPY";
 
 // "m" = minute, "M" = mois (1M/3M/6M/12M). 1w & 1M sont natifs Binance ;
 // 3M/6M/12M sont agrégés côté client depuis le mensuel (voir binance.ts).
@@ -497,7 +492,6 @@ export function Toolbar() {
   const exchange = useStore(marketStore, (s) => s.exchange);
   const symbol = useStore(marketStore, (s) => s.symbol);
   const timeframe = useStore(marketStore, (s) => s.timeframe);
-  const setExchange = useStore(marketStore, (s) => s.setExchange);
   const setSymbol = useStore(marketStore, (s) => s.setSymbol);
   const setTimeframe = useStore(marketStore, (s) => s.setTimeframe);
   const orderflowEnabled = useStore(orderflowStore, (s) => s.enabled);
@@ -509,8 +503,6 @@ export function Toolbar() {
   const liqActif = useStore(liqMarksStore, (s) => s.actif);
   const toggleLiq = useStore(liqMarksStore, (s) => s.basculer);
   const openDerivatives = useStore(derivativesUiStore, (s) => s.openDerivatives);
-  const twelveDataHasKey = useStore(twelveDataKeyStore, (s) => s.hasKey);
-  const openSettings = useStore(settingsUiStore, (s) => s.openSettings);
   const priceScale = useStore(priceScaleStore, (s) => s.type);
   const setPriceScale = useStore(priceScaleStore, (s) => s.setType);
 
@@ -522,79 +514,30 @@ export function Toolbar() {
   const isMexc = exchange === "mexc";
   const isSynthetic = exchange === "synthetic";
   // MEXC = catalogue crypto + actions tokenisées → presets dédiés ; sinon crypto/tradfi.
-  const presets = isTradfi ? TRADFI_PRESETS : isMexc ? MEXC_PRESETS : CRYPTO_PRESETS;
+  const presets = [...CRYPTO_PRESETS, ...TRADFI_PRESETS];
+  const dataStatus = useStore(marketStore, (s) => s.dataLoad.status);
   // Sources SANS flux tick (polling REST) → orderflow/footprint indisponibles.
   const noTradeStream = isTradfi || isMexc || isSynthetic;
-
-  /**
-   * Changement de source : si le TF courant n'est pas supporté par la nouvelle source,
-   * on retombe sur 1h (commun à toutes). En FRANCHISSANT la frontière crypto ↔ tradfi,
-   * on réinitialise le symbole (un "BTCUSDT" n'existe pas en tradfi, et inversement).
-   * Idem en quittant MEXC avec un preset d'action tokenisée (AAPLXUSDT…) sélectionné :
-   * ce symbole n'existe sur AUCUNE autre source et casserait silencieusement le backfill.
-   */
-  const onChangeExchange = (next: ExchangeId) => {
-    if (IS_VERCEL && next === "twelvedata" && !twelveDataHasKey) {
-      pousserToast("UNUSABLE — clé Twelve Data requise sur Vercel");
-      openSettings();
-      return;
-    }
-    const wasTradfi = exchange === "twelvedata";
-    const willBeTradfi = next === "twelvedata";
-    const wasMexcOnlySymbol =
-      exchange === "mexc" && next !== "mexc" && (MEXC_PRESETS as readonly string[]).includes(symbol);
-    setExchange(next);
-    if (willBeTradfi && !wasTradfi) setSymbol(DEFAULT_TRADFI_SYMBOL);
-    else if (!willBeTradfi && (wasTradfi || wasMexcOnlySymbol)) setSymbol(DEFAULT_CRYPTO_SYMBOL);
-    const supported = supportedTimeframesFor(next, next === "synthetic" ? symbol : "");
-    if (!supported.includes(timeframe)) setTimeframe("1h");
-  };
-
-  useEffect(() => {
-    if (!IS_VERCEL || twelveDataHasKey || exchange !== "twelvedata") return;
-    setExchange("binance");
-    setSymbol(DEFAULT_CRYPTO_SYMBOL);
-    if (!supportedTimeframesFor("binance", "").includes(timeframe)) setTimeframe("1h");
-    pousserToast("UNUSABLE — clé Twelve Data requise sur Vercel");
-    openSettings();
-  }, [exchange, openSettings, setExchange, setSymbol, setTimeframe, timeframe, twelveDataHasKey]);
 
   return (
     <>
     <header className="flex flex-wrap items-center gap-3 border-b border-neutral-800 bg-neutral-950 px-4 py-2">
       <span className="axiom-wordmark font-semibold tracking-wide text-text">AXIOM</span>
 
-      {/* Sélecteur de source. */}
-      <select
-        value={exchange}
-        onChange={(e) => onChangeExchange(e.target.value as ExchangeId)}
-        className={CLASSES_CHAMP}
-        aria-label="Source"
-      >
-        {EXCHANGES.map((ex) => (
-          <option key={ex.id} value={ex.id}>
-            {ex.id === "twelvedata" && IS_VERCEL && !twelveDataHasKey
-              ? `${ex.label} — UNUSABLE sans clé`
-              : ex.label}
-          </option>
-        ))}
-      </select>
+      <span aria-label="Source automatique" className="text-[11px] text-text-dim" title="La source est choisie automatiquement selon l’actif et les données disponibles">
+        {dataStatus === "ready" ? `Auto · ${exchangeLabel(exchange)}` : dataStatus === "error" ? "Auto · indisponible" : "Auto · recherche…"}
+      </span>
 
-      {/* Recherche de paires (catalogue de la source courante) + saisie libre. */}
+      {/* Recherche unifiée des actifs disponibles. */}
       <PairSearch />
 
-      {/* Presets symbole (adaptés à la source : crypto ou tradfi). */}
+      {/* Accès directs crypto / tradfi ; routage automatique au chargement. */}
       <div className="flex gap-1">
         {presets.map((preset) => (
           <button
             key={preset}
             type="button"
-            onClick={() => {
-              // Un preset crypto est un ticker Binance : quitter la source virtuelle
-              // synthetic, sinon état incohérent (symbole normal × adapter synthétique).
-              if (isSynthetic) setExchange("binance");
-              setSymbol(preset);
-            }}
+            onClick={() => setSymbol(preset)}
             className={`rounded px-2 py-1 text-xs ${
               symbol === preset
                 ? "bg-neutral-200 text-neutral-900"

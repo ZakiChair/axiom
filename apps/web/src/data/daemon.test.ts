@@ -275,6 +275,21 @@ describe("liquidations (client daemon)", () => {
     vi.unstubAllGlobals();
   });
 
+  it("le perp explicite lit et alimente la clé du collecteur existant", async () => {
+    const lignes = [{ t: 1000, venue: "hyperliquid", side: "long" as const, price: 42000, qty: 0.5, usd: 21000 }];
+    const fetchMock = vi.fn().mockImplementation(async (url: string) => url.endsWith("/health")
+      ? jsonResponse({ ...HEALTH_COMPLET, capabilities: [...HEALTH_COMPLET.capabilities, "liquidations"] })
+      : jsonResponse({ liquidations: lignes }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await liquidationsGet("BTC-PERP", { venue: "hyperliquid" })).toEqual(lignes);
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/liquidations/BTCUSDT?venue=hyperliquid");
+    expect(await liquidationsPush("BTC-PERP", lignes)).toBe(true);
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain("/liquidations/BTCUSDT");
+    await liquidationsGet("BTCUSDC");
+    expect(String(fetchMock.mock.calls[3]?.[0])).toContain("/liquidations/BTCUSDC");
+  });
+
   it("GET : sonde d'abord puis renvoie le tableau de la réponse {liquidations:[...]}", async () => {
     const healthLiq = {
       ...HEALTH_COMPLET,

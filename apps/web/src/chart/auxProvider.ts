@@ -40,7 +40,7 @@ import type { AuxSeries, AuxSeriesId, ExchangeId, Timeframe } from "@axiom/types
 import { coinalyzeProvider, fetchLiquidationHistory } from "../data/coinalyze";
 import type { CoinalyzeInterval, LiquidationHistPoint } from "../data/coinalyze";
 import { hlLiqHeatGet } from "../data/daemon";
-import { basePerp } from "../data/symbol";
+import { basePerp, hyperliquidCoin } from "../data/symbol";
 import { dureeTimeframeMs } from "../data/backtestData";
 import { histFunding, histOiUsd } from "../data/referentiels";
 import { stablecoinsSupplyProvider } from "../data/macro/stablecoins";
@@ -241,6 +241,8 @@ function toPoints(raw: AuxPoint[]): AuxPoint[] {
  * vides (dégradation gracieuse, jamais d'erreur).
  */
 function symbolToAsset(symbol: string): string {
+  const actif = basePerp(symbol);
+  if (actif !== null) return actif.toLowerCase();
   const s = symbol.trim().toUpperCase();
   const base = s.replace(/(USDT|USDC|FDUSD|BUSD|USD)$/, "");
   return (base.length > 0 ? base : s).toLowerCase();
@@ -517,7 +519,7 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
       const coin = basePerp(symbol);
       if (coin === null) return [];
       const mod = await chargerHlFunding();
-      return toPoints(await mod.fetchHlFundingHistory(coin, since));
+      return toPoints(await mod.fetchHlFundingHistory(hyperliquidCoin(`${coin}-PERP`), since));
     }
     case "hlWhalesNet": {
       // Positionnement net des gros comptes HL : 100 × (long − short) / (long + short)

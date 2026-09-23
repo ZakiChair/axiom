@@ -9,6 +9,7 @@
 import { createStore } from "zustand/vanilla";
 import type { StoreApi } from "zustand/vanilla";
 import type { Candle, ExchangeId, Timeframe } from "@axiom/types";
+import { isTradfiMarketSymbol } from "../data/pairs";
 import { estSymboleCapitalisation } from "../data/mcap";
 import { parseSyntheticSymbol } from "../data/synthetic";
 
@@ -160,9 +161,12 @@ export function exchangeForSymbol(
   if (estSymboleCapitalisation(nextSymbol) || parseSyntheticSymbol(nextSymbol) !== null) {
     return "synthetic";
   }
+  if (nextSymbol.endsWith("-PERP")) return "hyperliquid";
+  if (isTradfiMarketSymbol(nextSymbol)) return "twelvedata";
+  if (state.exchange === "twelvedata" || state.exchange === "hyperliquid") return "binance";
   if (state.exchange !== "synthetic") return state.exchange;
   const sourcePrecedente = parseSyntheticSymbol(state.symbol)?.exA;
-  return sourcePrecedente === undefined || sourcePrecedente === "mcap"
+  return sourcePrecedente === undefined || sourcePrecedente === "mcap" || sourcePrecedente === "twelvedata" || sourcePrecedente === "hyperliquid"
     ? "binance"
     : sourcePrecedente;
 }

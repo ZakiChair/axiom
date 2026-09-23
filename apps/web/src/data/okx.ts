@@ -27,13 +27,15 @@
  *   - REST candles : https://www.okx.com/docs-v5/en/#order-book-trading-market-data-get-candlesticks
  *   - WS candle    : https://www.okx.com/docs-v5/en/#public-data-websocket-candlesticks-channel
  *   - WS trades    : https://www.okx.com/docs-v5/en/#public-data-websocket-trades-channel
+ *   - WS business : https://www.okx.com/en-eu/help/changes-to-v5-api-websocket-subscription-parameter-and-url
  */
 import type { Candle, IExchangeAdapter, Timeframe, Trade, Unsubscribe } from "@axiom/types";
 import { splitSymbol } from "./symbol";
 import { connectWsLoop } from "./wsLoop";
 
 const REST_CANDLES_URL = "https://www.okx.com/api/v5/market/candles";
-const WS_URL = "wss://ws.okx.com:8443/ws/v5/public";
+const WS_CANDLES_URL = "wss://ws.okx.com:8443/ws/v5/business";
+const WS_TRADES_URL = "wss://ws.okx.com:8443/ws/v5/public";
 
 /** Fenêtre re-fetchée au resync post-reconnexion. */
 const RESYNC_KLINE_LIMIT = 300;
@@ -168,7 +170,7 @@ export const okxAdapter: IExchangeAdapter = {
       : undefined;
 
     return connectWsLoop({
-      url: WS_URL,
+      url: WS_CANDLES_URL,
       source: "okx",
       onReconnected,
       onOpen: (ws) => ws.send(sub),
@@ -192,7 +194,7 @@ export const okxAdapter: IExchangeAdapter = {
     const sub = JSON.stringify({ op: "subscribe", args: [{ channel: "trades", instId }] });
 
     return connectWsLoop({
-      url: WS_URL,
+      url: WS_TRADES_URL,
       source: "okx:trades",
       onOpen: (ws) => ws.send(sub),
       onMessage: (data) => {

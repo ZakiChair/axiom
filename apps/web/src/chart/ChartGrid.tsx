@@ -16,7 +16,7 @@
  */
 import { lazy, Suspense, useEffect, useRef } from "react";
 import { useStore } from "zustand";
-import type { ExchangeId, Timeframe } from "@axiom/types";
+import type { Timeframe } from "@axiom/types";
 import {
   createMarketStore,
   marketIdentity,
@@ -102,6 +102,20 @@ export function ChartGrid() {
     return chartLayoutStore.subscribe(sync);
   }, [stores]);
 
+  // Le chargement automatique peut retenir un autre fournisseur ou normaliser le TF.
+  // Sauvegarder cette identité effective évite qu'un focus/layout réinjecte l'ancienne.
+  useEffect(() => {
+    const unsubs = stores.map((store, index) => store.subscribe((state) => {
+      const slot = index + 1;
+      const replay = replayStore.getState();
+      if (state.dataLoad.status !== "ready" || ((replay.active || replay.identityTransition) && replay.slot === slot)) return;
+      const cfg = chartLayoutStore.getState().slots[index];
+      if (!cfg || (cfg.exchange === state.exchange && cfg.symbol === state.symbol && cfg.timeframe === state.timeframe)) return;
+      chartLayoutStore.getState().setSlotMarket(slot, marketIdentity(state));
+    }));
+    return () => { for (const unsub of unsubs) unsub(); };
+  }, [stores]);
+
   // Registre de dessin aligné sur le focus (couvre les changements programmatiques :
   // bornage au rétrécissement du layout, etc. ; le clic direct est géré dans ChartInstance).
   useEffect(() => {
@@ -128,18 +142,12 @@ export function ChartGrid() {
     onChangeSymbol: (symbol: string) => {
       const cfg = chartLayoutStore.getState().slots[slot - 1];
       if (!cfg) return;
-      chartLayoutStore.getState().setSlotMarket(slot, { ...cfg, symbol });
+      chartLayoutStore.getState().setSlotSymbol(slot, symbol);
       const next = chartLayoutStore.getState().slots[slot - 1];
       if (next) propagerMarche(slot, next);
     },
     onChangeTimeframe: (tf: Timeframe) => chartLayoutStore.getState().setSlotTimeframe(slot, tf),
-    onChangeExchange: (ex: ExchangeId) => {
-      const cfg = chartLayoutStore.getState().slots[slot - 1];
-      if (!cfg) return;
-      chartLayoutStore.getState().setSlotMarket(slot, { ...cfg, exchange: ex });
-      const next = chartLayoutStore.getState().slots[slot - 1];
-      if (next) propagerMarche(slot, next);
-    },
+
   });
 
   const onToggleLink = (): void => {

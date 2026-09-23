@@ -25,6 +25,14 @@ droits de l’opérateur ; certains historiques exigent une clé ou un abonnemen
 | **Décider** | screener, playbooks 1-clic, alertes (dont composite ET), backtest en R (stop ATR / sizing risque), coût d’exécution L2 (DOM), stress-test, étude d’évènements, journal, paper trading |
 | **Ne pas décrocher** | alertes onglet fermé (macOS + Telegram optionnel), replay sur dumps officiels Binance, panneau de santé des sources |
 
+**Sources automatiques** : choisissez un actif dans la recherche commune ; AXIOM
+sélectionne une source disponible et indique sa provenance. En cas d'échec de
+l'historique, il essaie une autre source compatible, sans changer la devise ni
+remplacer un marché comptant par un perpétuel. Les contrats Hyperliquid apparaissent
+explicitement sous la forme `BTC-PERP`. Les deux jambes des ratios sont également
+résolues automatiquement ; les accès nécessitant une clé restent personnels.
+Voir le [rapport de revue](docs/revue-2026-09-23-sources-automatiques.md).
+
 Deux partis pris structurent le produit :
 
 1. **Le chemin chaud reste direct.** Le front parle **directement** aux WebSockets des exchanges ;

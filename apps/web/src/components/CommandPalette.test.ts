@@ -57,9 +57,8 @@ describe("devraitAvoirNavProeminent — navigation proéminente en tête", () =>
     expect(devraitAvoirNavProeminent("4H", nav, registre)).toBe(true);
   });
 
-  it("retourne true quand la saisie contient une source explicite", () => {
-    const nav = { source: "binance" as const };
-    expect(devraitAvoirNavProeminent("BINANCE", nav, registre)).toBe(true);
+  it("ne propose plus une navigation vers un fournisseur seul", () => {
+    expect(construireItemsRecherche("BINANCE", registre).some((i) => i.cmd.id === "nav")).toBe(false);
   });
 
   it("retourne true quand la saisie a plusieurs tokens", () => {

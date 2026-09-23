@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
 /**
  * Smoke e2e AXIOM — amorce structurelle (Lot review). Ces tests valident que le
@@ -104,12 +105,16 @@ test("le menu Fonctions ouvre la fenêtre Liquidations (LIQ)", async ({ page }) 
   expect(erreurs).toEqual([]);
 });
 
-test("bascule vers Bybit (CORS-ouvert) et charge le chart via l'adaptateur", async ({ page }) => {
+test("restaure une session Bybit et conserve un chart utilisable", async ({ page }) => {
   const erreurs: string[] = [];
   page.on("pageerror", (e) => erreurs.push(String(e)));
   await page.goto("/");
-  // Sélecteur de source (Toolbar) — Bybit est une option dérivée d'EXCHANGES.
-  await page.getByRole("combobox", { name: "Source" }).selectOption("bybit");
+  // Provenance persistée d'une session existante ; aucun sélecteur de source.
+  await page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { setMarket: (m: { exchange: "bybit"; symbol: string; timeframe: "1m" }) => void } } }>;
+    (await importer()).marketStore.getState().setMarket({ exchange: "bybit", symbol: "BTCUSDT", timeframe: "1m" });
+  });
+  await expect(page.getByRole("combobox", { name: "Source", exact: true })).toHaveCount(0);
   // Le chart se réinstancie sur la nouvelle source ; le canvas reste rendu.
   await expect(page.locator("canvas").first()).toBeVisible({ timeout: 20_000 });
   // Aucune exception non catchée au changement de source (câblage adaptateur sain).
@@ -129,9 +134,10 @@ test("le chart principal AFFICHE les bougies du backfill (prix du bandeau dériv
     // [openTime, open, high, low, close, volume, closeTime, quoteVol, trades, buyBase, buyQuote, ignore]
     return [t, "42000", "42200", "41900", CLOSE_FIXE, "1000", t + MINUTE - 1, "100000", 100, "500", "50000", "0"];
   });
-  await page.routeWebSocket("**/*", () => {});
-  // Repli générique AVANT la route klines : la plus récente/spécifique gagne (cf. gate-lot3-corr).
-  await page.route("**/api.binance.com/**", (route) => route.fulfill({ json: [] }));
+  await bouchonnerReseau(page);
+  await page.route("**/api.binance.com/api/v3/exchangeInfo*", (route) => route.fulfill({
+    json: { symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT"].map((symbol) => ({ symbol, status: "TRADING" })) },
+  }));
   await page.route("**/api.binance.com/api/v3/klines*", (route) => route.fulfill({ json: lignes }));
 
   await page.goto("/");

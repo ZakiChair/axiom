@@ -117,6 +117,25 @@ describe("chartLayoutStore — focus", () => {
 });
 
 describe("chartLayoutStore — slots secondaires", () => {
+  it("conserve une identité HL explicite même si la source du slot est inchangée", () => {
+    chartLayoutStore.setState({ slots: [
+      { exchange: "hyperliquid", symbol: "BTCUSDT", timeframe: "1h" },
+      { exchange: "binance", symbol: "SOLUSDT", timeframe: "1m" },
+      { exchange: "binance", symbol: "BNBUSDT", timeframe: "1m" },
+    ] });
+    chartLayoutStore.getState().setSlotMarket(1, { exchange: "hyperliquid", symbol: "ETHUSDT", timeframe: "4h" });
+    expect(chartLayoutStore.getState().slots[0]).toEqual({ exchange: "hyperliquid", symbol: "ETHUSDT", timeframe: "4h" });
+  });
+
+  it("une sélection de symbole seule distingue perp explicite et spot, même sur un ancien slot HL", () => {
+    chartLayoutStore.getState().setSlotSymbol(1, "BTC-PERP");
+    expect(chartLayoutStore.getState().slots[0]).toMatchObject({ exchange: "hyperliquid", symbol: "BTC-PERP" });
+    chartLayoutStore.getState().setSlotMarket(1, { exchange: "hyperliquid", symbol: "BTCUSDT", timeframe: "1h" });
+    expect(chartLayoutStore.getState().slots[0]).toMatchObject({ exchange: "hyperliquid", symbol: "BTCUSDT" });
+    chartLayoutStore.getState().setSlotSymbol(1, "BTCUSDT");
+    expect(chartLayoutStore.getState().slots[0]).toMatchObject({ exchange: "binance", symbol: "BTCUSDT" });
+  });
+
   it("patche le symbole d'un slot secondaire (grille 1..3) en majuscules", () => {
     chartLayoutStore.getState().setSlotSymbol(1, "adausdt");
     expect(chartLayoutStore.getState().slots[0].symbol).toBe("ADAUSDT");
@@ -169,6 +188,11 @@ describe("chartLayoutStore — slots secondaires", () => {
 
 describe("sanitizeSlotConfig", () => {
   const fallback = { exchange: "binance" as const, symbol: "ETHUSDT", timeframe: "1m" as const };
+
+  it("restaure une ancienne identité HL sans la transformer en spot", () => {
+    expect(sanitizeSlotConfig({ exchange: "hyperliquid", symbol: "BTCUSDT", timeframe: "1h" }, fallback))
+      .toEqual({ exchange: "hyperliquid", symbol: "BTCUSDT", timeframe: "1h" });
+  });
 
   it("rejette une source injectée depuis un stockage corrompu", () => {
     expect(sanitizeSlotConfig({ exchange: "evil", symbol: "BTCUSDT", timeframe: "1m" }, fallback)).toEqual(
@@ -233,7 +257,7 @@ describe("chartLayoutStore — dérivation de source sur symbole synthétique (p
     expect(slot.symbol).toBe("ETHUSD");
   });
 
-  it("le chemin ChartGrid (setSlotMarket avec exchange INCHANGÉ, spread d'en-tête) dérive aussi", () => {
+  it("une identité incohérente source réelle / symbole TOTAL est réparée", () => {
     chartLayoutStore
       .getState()
       .setSlotMarket(1, { exchange: "binance", symbol: "TOTAL", timeframe: "1h" });
@@ -247,7 +271,7 @@ describe("chartLayoutStore — dérivation de source sur symbole synthétique (p
     expect(chartLayoutStore.getState().slots[0].exchange).toBe("kraken");
   });
 
-  it("pick source explicite pendant TOTAL, puis symbole changé : compromis « cohérence-au-repos » épinglé (diverge du maître transitoire — ACCEPTÉ, cf. task-C.4-report.md)", () => {
+  it("une source réelle sur TOTAL reste synthétique ; sélectionner ensuite le spot quitte TOTAL", () => {
     // Étape 1 : slot déjà synthetic+TOTAL.
     chartLayoutStore.getState().setSlotSymbol(1, "TOTAL");
     const s1 = chartLayoutStore.getState().slots[0];
@@ -265,14 +289,9 @@ describe("chartLayoutStore — dérivation de source sur symbole synthétique (p
     const s2 = chartLayoutStore.getState().slots[0];
     expect(s2).toEqual({ exchange: "synthetic", symbol: "TOTAL", timeframe: "1h" }); // pick neutralisé
 
-    // Étape 3 : l'utilisateur tape ensuite « ETHUSD » — l'en-tête spreade l'état RÉEL s2
-    // (exchange:"synthetic" INCHANGÉ dans ce patch, le kraken de l'étape 2 n'a jamais été
-    // retenu) : ce n'est donc PAS un changement de source explicite, patchSlot dérive comme
-    // une sortie de TOTAL normale. TOTAL n'a pas de jambe A (parseSyntheticSymbol("TOTAL")
-    // est null, ce n'est pas un ratio) → repli sur Binance, PAS kraken : le pick de l'étape 2
-    // est définitivement perdu, il faut re-choisir la venue APRÈS avoir changé le symbole.
-    // Couple épinglé = ce que le code fait réellement (vérifié par exécution).
-    chartLayoutStore.getState().setSlotMarket(1, { ...s2, symbol: "ETHUSD" });
+    // Une sélection neuve n’embarque aucune source ; le routage distingue ce geste
+    // de la restauration d’une identité complète par setSlotMarket.
+    chartLayoutStore.getState().setSlotSymbol(1, "ETHUSD");
     const s3 = chartLayoutStore.getState().slots[0];
     expect(s3).toEqual({ exchange: "binance", symbol: "ETHUSD", timeframe: "1h" });
   });

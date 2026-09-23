@@ -47,7 +47,7 @@ import {
 import { supportedTimeframesFor } from "../data/adapters";
 import { defaultParams, migratePersistedIndicators, indicatorsStore } from "./indicators";
 import { indicatorSetsStore, migrerJeuxPersistes } from "./indicatorSets";
-import { marketStore } from "./market";
+import { exchangeForSymbol, marketStore } from "./market";
 import {
   watchlistStore,
   DEFAULT_WATCHLIST,
@@ -579,27 +579,21 @@ function hydrateChart(): void {
       persisted.exchange === "synthetic" &&
       (typeof persisted.symbol !== "string" ||
         (!estSymboleCapitalisation(persisted.symbol) && parseSyntheticSymbol(persisted.symbol) === null));
-    if (
-      !syntheticIncoherent &&
-      typeof persisted.exchange === "string" &&
-      RESTORABLE_EXCHANGES.includes(persisted.exchange)
-    ) {
-      marketStore.getState().setExchange(persisted.exchange);
-    }
-    if (!syntheticIncoherent && typeof persisted.symbol === "string" && persisted.symbol.length > 0) {
-      marketStore.getState().setSymbol(persisted.symbol);
-    }
+    const courant = marketStore.getState();
+    const symbolePersisté = persisted.symbol;
+    const symboleRestaurable = !syntheticIncoherent && typeof symbolePersisté === "string" && symbolePersisté.length > 0;
+    const symbol = symboleRestaurable ? symbolePersisté : courant.symbol;
+    const exchange = !syntheticIncoherent && typeof persisted.exchange === "string" && RESTORABLE_EXCHANGES.includes(persisted.exchange)
+      ? persisted.exchange : symboleRestaurable ? exchangeForSymbol(courant, symbol) : courant.exchange;
     // TF validé contre la capacité RÉELLE de la source restaurée (même garde que les
     // slots secondaires, cf. sanitizeSlotConfig) : un TF étranger (« 5x », ou retiré
     // d'une version future) ferait partir le backfill avec un interval invalide →
     // graphe maître en erreur à chaque boot. Hors référentiel → on garde le TF courant.
-    if (typeof persisted.timeframe === "string") {
-      const { exchange, symbol } = marketStore.getState();
-      const supportes = supportedTimeframesFor(exchange, symbol) as readonly string[];
-      if (supportes.includes(persisted.timeframe)) {
-        marketStore.getState().setTimeframe(persisted.timeframe as Timeframe);
-      }
-    }
+    const supportes = supportedTimeframesFor(exchange, symbol) as readonly string[];
+    const timeframe = typeof persisted.timeframe === "string" && supportes.includes(persisted.timeframe)
+      ? persisted.timeframe as Timeframe : courant.timeframe;
+    // Une identité restaurée porte déjà sa source : ne pas la réinterpréter via setSymbol.
+    courant.setMarket({ exchange, symbol, timeframe });
     // Migration/validation des indicateurs (filtre les defId disparus, backfille les params,
     // attribue des instanceId stables) — fonction PURE exportée par store/indicators.
     indicatorsStore.getState().setAll(migratePersistedIndicators(persisted.indicators));

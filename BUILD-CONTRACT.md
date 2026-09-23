@@ -20,6 +20,16 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 
 ## Conventions
 
+**Simplification demandée le 23 septembre 2026 :** le propriétaire demande une revue
+du projet et la sélection automatique des sources selon l'actif. Les fournisseurs
+restent les neuf identifiants existants. La recherche, les slots et le constructeur
+de ratios ne demandent plus de choisir un fournisseur ; le routage garde la devise
+et la nature de l'instrument, et affiche la provenance effective. Aucun repli spot
+vers perpétuel, ni action vers action tokenisée. Les erreurs, conditions d'accès et
+capacités manquantes restent explicites. Les paramètres de calcul OHLC, les clés
+personnelles et la provenance historique conservent leur sens. Voir la
+[conception](docs/superpowers/specs/2026-09-23-sources-automatiques-design.md).
+
 **Exceptions ACTÉES le 2026-09-04 — corrections demandées par le propriétaire, plan validé par Fable 5 :**
 
 - Les `package.json` et le lockfile peuvent être modifiés pour corriger les avis de sécurité de l'outillage : Vite **6.4.3**, Vitest **3.2.7**, plugin React **4.7.0**, PostCSS **8.5.28**, résolutions transitives nanoid **3.3.18** et browserslist **4.28.9**. Aucune nouvelle dépendance runtime.

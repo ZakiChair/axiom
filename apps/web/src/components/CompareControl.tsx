@@ -43,6 +43,7 @@ export function CompareControl() {
         ) : (
           <PairSearch onPick={add} placeholder="Ajouter à comparer" />
         )}
+        <p className="mt-1 px-1 text-[10px] text-text-dim">Actifs disponibles sur le marché affiché uniquement.</p>
       </div>
 
       {symbols.length > 0 && (

@@ -234,6 +234,17 @@ describe("identité d'alerte (source, symbole)", () => {
     expect(alertsStore.getState().defs.find((d) => d.id === "coinbase")?.arme).toBeUndefined();
   });
 
+  it.each(["okx", "bybit", "hyperliquid"] as const)("utilise le ticker %s et conserve l'identité de l'alerte", (source) => {
+    const symbol = source === "hyperliquid" ? "BTC-PERP" : "BTCUSDT";
+    alertsStore.setState({ defs: [{ ...prix(source, source), symbol }, prix("binance", "binance")], journal: [] });
+    stop = demarrerAlertes();
+    const onSource = callbackTicker(source);
+    onSource({ symbol, price: 100, changePercent: 0 });
+    onSource({ symbol, price: 110, changePercent: 10 });
+    expect(alertsStore.getState().journal.map((d) => d.alertId)).toEqual([source]);
+    expect(alertsStore.getState().defs.find((d) => d.id === "binance")?.arme).toBeUndefined();
+  });
+
   it("une clôture Binance ne déclenche que la def de bougie Binance", () => {
     const t0 = Date.now() - 180_000;
     const variation = (id: string, source: AlertDef["source"]): AlertDef => ({
@@ -316,10 +327,11 @@ describe("identité d'alerte (source, symbole)", () => {
 
   it("évalue une def prix sans route ticker sur les clôtures du chart de cette source", () => {
     const t0 = Date.now() - 180_000;
-    alertsStore.setState({ defs: [prix("okx", "okx")], journal: [] });
+    const symbol = "binance:BTCUSDT|/|binance:ETHUSDT";
+    alertsStore.setState({ defs: [{ ...prix("ratio", "synthetic"), symbol }], journal: [] });
     marketStore.setState({
-      exchange: "okx",
-      symbol: "BTCUSDT",
+      exchange: "synthetic",
+      symbol,
       timeframe: "1m",
       candles: [bougie(t0, 100, true), bougie(t0 + 60_000, 100, true)],
     });
@@ -329,7 +341,7 @@ describe("identité d'alerte (source, symbole)", () => {
     });
 
     expect(subscribeTickersMock).not.toHaveBeenCalled();
-    expect(alertsStore.getState().journal.map((d) => d.alertId)).toEqual(["okx"]);
+    expect(alertsStore.getState().journal.map((d) => d.alertId)).toEqual(["ratio"]);
   });
 
   it("un ticker à 100 n'est pas écrasé par un funding hors chart : prix sous 90 reste faux", async () => {

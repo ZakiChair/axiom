@@ -137,6 +137,17 @@ const MIROIR_COMMANDES_INLINE: { id: string; mnemonique: string; source: string 
 ];
 
 describe("parseNavigation — symbole + timeframe + source, ordre libre", () => {
+  it("reconnaît les actifs tradfi sans qualifier une source", () => {
+    expect(parseNavigation("SPY 1D")).toEqual({ symbol: "SPY", timeframe: "1d" });
+    expect(parseNavigation("AAPL")).toEqual({ symbol: "AAPL" });
+    expect(parseNavigation("TOTAL")).toEqual({ symbol: "TOTAL" });
+    expect(parseNavigation("IBM TD")).toEqual({ symbol: "IBM" });
+    expect(parseNavigation("IBM")).toEqual({ symbol: "IBM" });
+    expect(parseNavigation("PLTR")).toEqual({ symbol: "PLTR" });
+    expect(parseNavigation("COIN")).toEqual({ symbol: "COIN" });
+    expect(parseNavigation("BTC-PERP")).toEqual({ symbol: "BTC-PERP" });
+  });
+
   it("complète une base crypto nue en …USDT", () => {
     // « BTC » → base sans cotation → complétée en BTCUSDT.
     expect(parseNavigation("BTC")).toEqual({ symbol: "BTCUSDT" });
@@ -150,7 +161,6 @@ describe("parseNavigation — symbole + timeframe + source, ordre libre", () => 
     expect(parseNavigation("4h sol binance")).toEqual({
       symbol: "SOLUSDT",
       timeframe: "4h",
-      source: "binance",
     });
   });
 
@@ -164,12 +174,13 @@ describe("parseNavigation — symbole + timeframe + source, ordre libre", () => 
     expect(parseNavigation("ETH 1MO")).toEqual({ symbol: "ETHUSDT", timeframe: "1M" });
   });
 
-  it("n'ajoute pas de cotation en source tradfi (SPY reste SPY)", () => {
-    expect(parseNavigation("SPY TRADFI")).toEqual({ symbol: "SPY", source: "twelvedata" });
+  it("tolère les anciens qualificatifs sans imposer leur fournisseur", () => {
+    expect(parseNavigation("SPY TRADFI")).toEqual({ symbol: "SPY" });
+    expect(parseNavigation("BINANCE")).toBeNull();
   });
 
   it("conserve un symbole au format à slash (EUR/USD)", () => {
-    expect(parseNavigation("EUR/USD TD")).toEqual({ symbol: "EUR/USD", source: "twelvedata" });
+    expect(parseNavigation("EUR/USD TD")).toEqual({ symbol: "EUR/USD" });
   });
 
   it("gère un préfixe numérique (1000PEPE → 1000PEPEUSDT)", () => {
@@ -215,10 +226,7 @@ describe("appliquerNavigation — garde du toast de changement de paire", () => 
     try {
       const avant = marketStore.getState();
       const identiteAvant = { exchange: avant.exchange, symbol: avant.symbol, timeframe: avant.timeframe };
-      const nav: NavCommande =
-        identiteAvant.exchange === "kraken"
-          ? { source: "binance", symbol: "ETHUSDT", timeframe: "4h" }
-          : { source: "kraken", symbol: "ETHUSDT", timeframe: "4h" };
+      const nav: NavCommande = { symbol: "ETHUSDT", timeframe: "4h" };
 
       appliquerNavigation(nav);
 
@@ -348,7 +356,8 @@ describe("commandes tf:* et navigation — garde des TF supportés (parité avec
     const toastIdsAvant = new Set(toastsStore.getState().toasts.map((t) => t.id));
     try {
       // Kraken ne supporte pas 3d (adapters.ts) : « BTC 3D KRAKEN » via ⌘K.
-      appliquerNavigation({ source: "kraken", symbol: "ETHUSD", timeframe: "3d" });
+      marketStore.setState({ exchange: "kraken" });
+      appliquerNavigation({ symbol: "ETHUSD", timeframe: "3d" });
 
       expect(marketStore.getState().exchange).toBe("kraken");
       expect(marketStore.getState().symbol).toBe("ETHUSD");

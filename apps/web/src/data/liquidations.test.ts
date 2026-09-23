@@ -39,6 +39,12 @@ describe("parseBybitLiquidation", () => {
 });
 
 describe("okxInstFamily", () => {
+  it("résout la référence USDT du perp explicite sans modifier une cotation connue", () => {
+    expect(okxInstFamily("BTC-PERP")).toBe("BTC-USDT");
+    expect(okxInstFamily("ETH-PERP")).toBe("ETH-USDT");
+    expect(okxInstFamily("BTCUSDC")).toBe("BTC-USDC");
+    expect(okxInstFamily("ETHUSD")).toBe("ETH-USD");
+  });
   it("BTCUSDT → BTC-USDT", () => {
     expect(okxInstFamily("BTCUSDT")).toBe("BTC-USDT");
   });
@@ -115,7 +121,8 @@ describe("subscribeLiquidations — garde anti-course OKX (cb après unsubscribe
     constructor(public url: string) {
       MockWebSocket.instances.push(this);
     }
-    send(): void {}
+    messages: string[] = [];
+    send(message: string): void { this.messages.push(message); }
     close(): void {
       if (this.closed) return;
       this.closed = true;
@@ -151,6 +158,25 @@ describe("subscribeLiquidations — garde anti-course OKX (cb après unsubscribe
   afterEach(() => {
     vi.unstubAllGlobals();
     resoudreCtVal = null;
+  });
+
+  it("BTC-PERP reçoit les liquidations Bybit du sous-jacent BTCUSDT", () => {
+    const cb = vi.fn();
+    const stop = subscribeLiquidations("BTC-PERP", cb);
+    try {
+      const bybit = MockWebSocket.instances.find((w) => w.url.includes("bybit"));
+      bybit?.ouvrir();
+      expect(bybit?.messages.map((message) => JSON.parse(message))).toContainEqual({
+        op: "subscribe", args: ["allLiquidation.BTCUSDT"],
+      });
+      bybit?.envoyer(JSON.stringify({
+        topic: "allLiquidation.BTCUSDT",
+        data: [{ T: 1000, s: "BTCUSDT", S: "Sell", v: "2", p: "100" }],
+      }));
+      expect(cb).toHaveBeenCalledWith({ time: 1000, side: "long", qty: 2, price: 100, notionalUsd: 200, venue: "bybit" });
+    } finally {
+      stop();
+    }
   });
 
   it("liq OKX bufferisée + unsubscribe avant résolution du ctVal → cb PAS appelé après", async () => {

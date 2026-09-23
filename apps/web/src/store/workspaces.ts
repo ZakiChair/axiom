@@ -108,9 +108,7 @@ function snapshot(): WorkspaceContent {
 /** Applique un contenu de workspace aux stores (via leurs setters — pas de reload). */
 function applyContent(c: WorkspaceContent): void {
   const m = marketStore.getState();
-  m.setExchange(c.exchange);
-  m.setSymbol(c.symbol);
-  m.setTimeframe(c.timeframe);
+  m.setMarket({ exchange: c.exchange, symbol: c.symbol, timeframe: c.timeframe });
   indicatorsStore.getState().setAll(c.indicators);
   orderflowStore.getState().setEnabled(c.orderflow);
   volumeProfileStore.getState().setEnabled(c.volumeProfile);

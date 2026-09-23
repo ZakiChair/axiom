@@ -13,10 +13,35 @@ vi.mock("./theme", () => ({
   themeStore: { getState: () => ({ setTheme: () => {} }), subscribe: () => () => {} },
 }));
 
-import { interpretMessage } from "./sync";
+import { demarrerSyncFenetres, interpretMessage } from "./sync";
+import { marketStore } from "./market";
 
 const ME = "win-me";
 const OTHER = "win-other";
+
+it("applique une identité HL distante atomiquement sans la renvoyer au canal", () => {
+  marketStore.setState({ exchange: "binance", symbol: "ETHUSDT", timeframe: "4h" });
+  const postMessage = vi.fn();
+  let canal: { onmessage: ((event: MessageEvent) => void) | null } | undefined;
+  vi.stubGlobal("BroadcastChannel", class {
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    postMessage = postMessage;
+    close() {}
+    constructor() { canal = this; }
+  });
+  const identites: unknown[] = [];
+  const stopMarche = marketStore.subscribe((s) => identites.push({ exchange: s.exchange, symbol: s.symbol, timeframe: s.timeframe }));
+  const stopSync = demarrerSyncFenetres();
+  try {
+    canal?.onmessage?.({ data: { kind: "symbol", sender: OTHER, exchange: "hyperliquid", symbol: "BTCUSDT" } } as MessageEvent);
+    expect(identites).toEqual([{ exchange: "hyperliquid", symbol: "BTCUSDT", timeframe: "4h" }]);
+    expect(postMessage).not.toHaveBeenCalled();
+  } finally {
+    stopSync();
+    stopMarche();
+    vi.unstubAllGlobals();
+  }
+});
 
 describe("interpretMessage", () => {
   it("ignore nos propres messages (anti-boucle)", () => {

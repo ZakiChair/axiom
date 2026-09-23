@@ -1,12 +1,8 @@
 /**
  * Registre des adaptateurs d'exchange + capacités de timeframe par source.
  *
- * - getAdapter(exchange) : renvoie l'IExchangeAdapter de la source demandée
- *   (binance / kraken / coinbase / mexc / twelvedata). LÈVE une erreur explicite pour
- *   toute source non câblée (bybit/okx/deribit présents dans ExchangeId mais sans
- *   adaptateur ici) — le repli silencieux vers Binance masquait des paires servies par
- *   la mauvaise source. L'UI de sélection (Toolbar) ne propose QUE les sources câblées et
- *   la persistance ne restaure que RESTORABLE_EXCHANGES : ce throw est un garde-fou.
+ * - getAdapter(exchange) : adaptateur de la provenance effective. La sélection
+ *   automatique et ses replis vivent dans marketRouting, sans substitution muette ici.
  * - SUPPORTED_TIMEFRAMES : source de vérité des TF réellement honorés par CHAQUE
  *   adaptateur (issu de leurs en-têtes). Sert au grisage des boutons TF et au repli
  *   automatique quand on change de source vers un TF non supporté.

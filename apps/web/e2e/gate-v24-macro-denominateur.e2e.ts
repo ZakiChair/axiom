@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { bouchonnerReseau } from "./helpers/reseau-bouchonne";
 
 /**
  * Gate e2e du lot v2.4 — onglet « Macro » du menu Indicateurs + bouton de dénominateur.
@@ -16,6 +17,18 @@ import { test, expect } from "@playwright/test";
  * quota Twelve Data ni réseau réel.
  */
 test.beforeEach(async ({ page }) => {
+  await bouchonnerReseau(page);
+  await page.route("**/api.binance.com/api/v3/exchangeInfo*", (route) => route.fulfill({
+    json: { symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT"].map((symbol) => ({ symbol, status: "TRADING" })) },
+  }));
+  // Les deux jambes d'un ratio couvrent exactement les mêmes jours : ce parcours
+  // doit charger un véritable historique SYN avant de tester le détoggle.
+  await page.route("**/api.binance.com/api/v3/klines*", (route) => route.fulfill({
+    json: [28, 29, 30].map((day) => {
+      const t = Date.UTC(2026, 6, day);
+      return [t, "60000", "60100", "59900", "60050", "100", t + 86_400_000 - 1, "1000", 4, "50", "500", "0"];
+    }),
+  }));
   await page.addInitScript(() => {
     window.localStorage.setItem(
       "axiom:onboarding:v1",
@@ -56,7 +69,7 @@ test("cocher une mesure macro met à jour le compteur de l'onglet", async ({ pag
   await expect(page.getByRole("button", { name: "Macro 1" })).toBeVisible();
 });
 
-test("la commande MACRO du Launchpad ouvre l'onglet Macro (palette refermée)", async ({ page }) => {
+test("la commande MONEY du Launchpad ouvre l'onglet Macro (palette refermée)", async ({ page }) => {
   await page.goto("/");
   // Attendre le montage AVANT la frappe : l'écouteur ⌘K est posé par un effet React,
   // une pression trop précoce se perd (constaté — le test échouait à ce point).
@@ -64,7 +77,7 @@ test("la commande MACRO du Launchpad ouvre l'onglet Macro (palette refermée)", 
   // ⌘K : le registre prouve en unitaire que l'action mute le store ; SEUL le navigateur
   // prouve que la palette se referme et ne recouvre pas le panneau ouvert.
   await page.keyboard.press("ControlOrMeta+k");
-  await page.getByPlaceholder(/^Commande/).fill("MACRO");
+  await page.getByPlaceholder(/^Commande/).fill("MONEY");
   await page.keyboard.press("Enter");
 
   await expect(page.getByPlaceholder(/^Commande/)).toHaveCount(0);
@@ -120,8 +133,7 @@ test("bandeau tradfi : ÷BTC apparaît sur GLD, pose le SYN cross-source, détog
   await bouchonnerTwelveData(page);
   await page.goto("/");
 
-  // Basculer la source sur TradFi (le symbole retombe sur SPY), puis preset GLD.
-  await page.getByLabel("Source").selectOption("twelvedata");
+  // L’actif GLD suffit : le fournisseur est choisi automatiquement.
   await page.getByRole("button", { name: "GLD", exact: true }).click();
 
   // Lot D : le bouton ÷BTC apparaît sur un symbole tradfi (composition cross-source).
@@ -132,9 +144,11 @@ test("bandeau tradfi : ÷BTC apparaît sur GLD, pose le SYN cross-source, détog
   // Le bandeau affiche le label du SYN cross-source : GLD ÷ réf canonique Binance.
   await expect(page.getByText("GLD / BTCUSDT")).toBeVisible({ timeout: 15_000 });
 
+  await expect(page.locator("[data-chart-status]")).toHaveCount(0);
+
   // Détoggle : retour à la jambe A (GLD sur TradFi), le bouton reste proposé.
   await boutonBtc.click();
   await expect(page.getByText("GLD / BTCUSDT")).toHaveCount(0);
-  await expect(page.getByLabel("Source")).toHaveValue("twelvedata");
+  await expect(page.getByLabel("Source automatique", { exact: true })).toContainText("Twelve Data");
   await expect(boutonBtc).toBeVisible();
 });

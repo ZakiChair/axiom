@@ -5,9 +5,19 @@ import {
   parseOiHistory,
   deltaDepuisKlinesPerp,
   timeframeToFapiInterval,
+  futuresSymbol,
 } from "./binanceFutures";
 import type { Timeframe } from "@axiom/types";
 import { aggTradeToTrade, type BinanceAggTrade } from "./binance";
+
+describe("futuresSymbol — référence dérivée Binance", () => {
+  it("résout le perp explicite par actif tout en conservant une cotation explicite", () => {
+    expect(futuresSymbol("BTC-PERP")).toBe("BTCUSDT");
+    expect(futuresSymbol("eth-perp")).toBe("ETHUSDT");
+    expect(futuresSymbol("BTCUSDC")).toBe("BTCUSDC");
+    expect(futuresSymbol("BTCEUR")).toBe("BTCEUR");
+  });
+});
 
 /**
  * Fixtures = formes RÉELLES capturées sur fapi.binance.com/futures/data

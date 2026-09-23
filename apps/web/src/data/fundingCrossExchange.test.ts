@@ -52,6 +52,12 @@ describe("parsers de funding", () => {
     expect(parseHyperliquidFunding(json, "SOL")).toBeNull(); // coin absent
     expect(parseHyperliquidFunding([{ universe: [] }], "BTC")).toBeNull(); // tuple incomplet
   });
+  it("Hyperliquid : retrouve le nom natif kPEPE depuis le symbole de chart en majuscules", () => {
+    expect(parseHyperliquidFunding([
+      { universe: [{ name: "PEPE" }, { name: "kPEPE" }] },
+      [{ funding: "0.00001" }, { funding: "0.00003" }],
+    ], "KPEPE")).toBe(0.00003);
+  });
 });
 
 describe("parsers d'intervalle de funding (heures)", () => {
@@ -112,6 +118,20 @@ function reponsesSymboleInconnu(url: string): Response {
 describe("fetchFundingMatrix — échecs remontés à l'appelant", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("retrouve les références de l’actif BTC-PERP dans les quatre venues", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      urls.push(url);
+      return reponsesSymboleInconnu(url);
+    });
+    const res = await fetchFundingMatrix("BTC-PERP");
+    expect(res.venues.map((v) => v.exchange)).toEqual(["hyperliquid"]);
+    expect(res.echecs).toBe(0);
+    expect(urls.some((url) => url.includes("premiumIndex?symbol=BTCUSDT"))).toBe(true);
+    expect(urls.some((url) => url.includes("tickers?category=linear&symbol=BTCUSDT"))).toBe(true);
+    expect(urls.some((url) => url.includes("funding-rate?instId=BTC-USDT-SWAP"))).toBe(true);
   });
 
   it("quatre venues injoignables → 0 venue mais 4 échecs (panne réseau, PAS « non listé »)", async () => {

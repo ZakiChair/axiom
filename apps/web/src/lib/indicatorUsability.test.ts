@@ -28,6 +28,15 @@ const binanceBtc: ContexteIndicateur = {
 };
 
 describe("raisonUnusableIndicateur", () => {
+  it("reconnaît l’actif on-chain et trimestriel des perpétuels explicites", () => {
+    const btc = { exchange: "hyperliquid", symbol: "BTC-PERP", timeframe: "1d" } as const;
+    expect(raisonUnusableIndicateur(def("mvrv"), btc)).toBeNull();
+    expect(raisonUnusableIndicateur(def("quarterlyBasis"), btc)).toBeNull();
+    expect(raisonUnusableIndicateur(def("quarterlyBasis"), { ...btc, symbol: "ETH-PERP" })).toBeNull();
+    expect(raisonUnusableIndicateur(def("mvrv"), { ...btc, symbol: "ETH-PERP" })).toContain("uniquement pour BTC");
+    expect(raisonUnusableIndicateur(def("basisPct"), btc)).toContain("USDT compatible");
+  });
+
   it("réserve le RVOL saisonnier à H1 avec de vrais volumes et refuse les intervalles mark absents", () => {
     expect(raisonUnusableIndicateur(def("rvolSeasonal"), { ...binanceBtc, timeframe: "1h" })).toBeNull();
     expect(raisonUnusableIndicateur(def("rvolSeasonal"), binanceBtc)).toContain("1h");

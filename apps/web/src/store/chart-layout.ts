@@ -20,6 +20,8 @@ import { createStore } from "zustand/vanilla";
 import { EXCHANGE_IDS, type ExchangeId, type Timeframe } from "@axiom/types";
 import { supportedTimeframesFor } from "../data/adapters";
 import { exchangeForSymbol, normalizeMarketSymbol } from "./market";
+import { parseSyntheticSymbol } from "../data/synthetic";
+import { estSymboleCapitalisation } from "../data/mcap";
 
 /** Modes de disposition : 1 seul, 2 côte-à-côte, 2 empilés, 2×2. */
 export type ChartLayoutMode = "1" | "2h" | "2v" | "2x2";
@@ -128,25 +130,11 @@ export function sanitizeSlotConfig(raw: unknown, fallback: SlotConfig): SlotConf
     rawSymbol.length > 0 && rawSymbol.length <= 200
       ? normalizeMarketSymbol(rawSymbol)
       : fallback.symbol;
-  // Répare une incohérence persistée AVANT ce correctif (source réelle + symbole
-  // synthétique, ex. binance+TOTAL, écrit par l'ancienne validation qui contrôlait
-  // exchange et symbol indépendamment) : même prédicat que le maître (market.ts
-  // exchangeForSymbol) — un symbole TOTAL*/ratio/SYN impose `synthetic`, quelle que
-  // soit la source persistée. Volontairement à SENS UNIQUE : une source déjà
-  // `synthetic` garde son traitement existant (symbole synthétique mal formé →
-  // rejet en bloc sur `fallback`, cf. tests) — l'appel n'est fait que quand la
-  // source persistée n'est pas déjà `synthetic`, donc sans effet sur ce cas-là.
-  //
-  // Compromis ACCEPTÉ (cf. task-C.4-report.md) : une source posée explicitement dans
-  // patchSlot gagne, SAUF si elle rendrait le couple invalide AU REPOS (ex. kraken
-  // choisi pendant que le symbole reste TOTAL) — ce filet la neutralise vers
-  // `synthetic`. Le maître, lui, tolère l'incohérence transitoirement EN MÉMOIRE
-  // (setExchange n'y dérive jamais) car il ne persiste pas à chaque mutation ; le
-  // slot secondaire persiste sa config à chaque `set()`, donc ne peut pas se permettre
-  // ce répit. Conséquence assumée : le pick explicite est perdu, il faut re-choisir la
-  // venue APRÈS avoir changé le symbole (épinglé dans chart-layout.test.ts).
-  const exchange =
-    exchangeBrute !== "synthetic" ? exchangeForSymbol({ exchange: exchangeBrute, symbol }, symbol) : exchangeBrute;
+  // Répare uniquement les anciens couples source réelle / symbole synthétique.
+  // Toute autre identité persistée garde sa source, notamment les perps HL historiques
+  // encore nommés BTCUSDT ; le chargeur les migrera ensuite vers BTC-PERP.
+  const exchange = estSymboleCapitalisation(symbol) || parseSyntheticSymbol(symbol) !== null
+    ? "synthetic" : exchangeBrute;
   const supported = supportedTimeframesFor(exchange, symbol);
   // Un synthétique illisible (ou toute combinaison sans capacité) est rejeté en bloc.
   if (supported.length === 0) return fallback;
@@ -228,17 +216,10 @@ function patchSlot(
   if (cur === undefined) return slots;
   const next = slots.slice() as [SlotConfig, SlotConfig, SlotConfig];
   const symbol = patch.symbol !== undefined ? normalizeMarketSymbol(patch.symbol) : cur.symbol;
-  // Changement de SYMBOLE sans changement de SOURCE explicite : même dérivation que le
-  // maître (market.ts exchangeForSymbol) — TOTAL/SYN encodé ⇒ `synthetic`, quitter un
-  // ratio ⇒ source de la jambe A. Sans elle, « TOTAL » tapé dans l'en-tête d'un slot
-  // binance produisait binance+TOTAL, accepté et PERSISTÉ (pane en erreur à chaque
-  // boot, propagé au maître via la liaison). Une source posée EXPLICITEMENT gagne ICI —
-  // sauf si le couple résultant reste invalide au repos : `sanitizeSlotConfig` (filet
-  // final, ci-dessus) la neutralise alors vers `synthetic` (compromis ACCEPTÉ, cf.
-  // task-C.4-report.md et son commentaire).
-  const exchangeExplicite = patch.exchange !== undefined && patch.exchange !== cur.exchange;
+  // setSlotSymbol = choix utilisateur automatique ; setSlotMarket = identité connue
+  // (restauration, liaison, source effective). Une source inchangée reste explicite.
   const exchange =
-    !exchangeExplicite && symbol !== cur.symbol
+    patch.exchange === undefined && patch.symbol !== undefined
       ? exchangeForSymbol({ exchange: cur.exchange, symbol: cur.symbol }, symbol)
       : (patch.exchange ?? cur.exchange);
   next[i] = sanitizeSlotConfig(

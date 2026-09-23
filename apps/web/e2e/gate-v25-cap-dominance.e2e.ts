@@ -182,7 +182,7 @@ test.describe("avec historique reconstruit", () => {
     await expect(page.getByRole("button", { name: /^Indicateurs/ })).toBeVisible();
 
     await page.getByRole("combobox", { name: "Rechercher une paire" }).fill("TOTAL3");
-    await page.getByRole("option", { name: "TOTAL3", exact: true }).click();
+    await page.getByRole("option", { name: /^TOTAL3\b/ }).click();
 
     await expect(page.getByText("TOTAL3", { exact: true })).toBeVisible();
     await expect(page.getByText("CoinMarketCap · daily", { exact: true })).toBeVisible();

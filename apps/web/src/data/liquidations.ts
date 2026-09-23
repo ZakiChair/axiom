@@ -43,7 +43,7 @@
  *   - REST instruments      : https://www.okx.com/docs-v5/en/#public-data-rest-api-get-instruments
  */
 import type { Unsubscribe } from "@axiom/types";
-import { splitSymbol } from "./symbol";
+import { basePerp, splitSymbol } from "./symbol";
 import { connectWsLoop } from "./wsLoop";
 
 const WS_URL = "wss://stream.bybit.com/v5/public/linear";
@@ -120,9 +120,16 @@ export function resumerLiquidations(liqs: Liquidation[]): ResumeLiquidations {
   return { longUsd, shortUsd, total, partLong: total > 0 ? longUsd / total : null };
 }
 
-/** Symbole perp Bybit linear (BTCUSDT-style). Retire un éventuel suffixe PERP. */
+/** Référence USDT des liquidations par actif ; garde la cotation déjà explicite. */
+function toPerpSymbol(symbol: string): string {
+  const s = symbol.trim().toUpperCase();
+  const base = s.endsWith("-PERP") ? basePerp(s) : null;
+  return base === null ? s : `${base}USDT`;
+}
+
+/** Symbole perp Bybit linear (BTCUSDT-style). Retire les anciens suffixes PERP. */
 function bybitPerpSymbol(symbol: string): string {
-  return symbol.trim().toUpperCase().replace(/_PERP$/i, "").replace(/PERP$/i, "");
+  return toPerpSymbol(symbol).replace(/_PERP$/i, "").replace(/PERP$/i, "");
 }
 
 /** S'abonne au flux de liquidations perp Bybit du symbole. `cb` reçoit chaque liquidation. */
@@ -187,7 +194,7 @@ interface OkxInstrumentsResponse {
  * PURE & exportée (figée par test).
  */
 export function okxInstFamily(symbol: string): string {
-  const { base, quote } = splitSymbol(symbol, "OKX");
+  const { base, quote } = splitSymbol(toPerpSymbol(symbol), "OKX");
   return `${base}-${quote}`;
 }
 

@@ -49,6 +49,13 @@ describe("groupLiquidationBuckets", () => {
 });
 
 describe("chunkCoinalyzeSymbols (batch B2)", () => {
+  it("résout le perp explicite vers la référence Binance et préserve les identifiants Coinalyze", () => {
+    expect(toCoinalyzeSymbol("BTC-PERP")).toBe("BTCUSDT_PERP.A");
+    expect(toCoinalyzeSymbol("ETH-PERP")).toBe("ETHUSDT_PERP.A");
+    expect(toCoinalyzeSymbol("BTCUSDC")).toBe("BTCUSDC_PERP.A");
+    expect(toCoinalyzeSymbol("BTCUSDT_PERP.6")).toBe("BTCUSDT_PERP.6");
+  });
+
   it("mappe Binance → Coinalyze et découpe en paquets", () => {
     expect(toCoinalyzeSymbol("btcusdt")).toBe("BTCUSDT_PERP.A");
     const chunks = chunkCoinalyzeSymbols(["BTCUSDT", "ETHUSDT", "SOLUSDT"], 2);

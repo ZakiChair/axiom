@@ -254,8 +254,8 @@ export function demarrerNavMarkers(): void {
 
 /**
  * Applique une intention de navigation au chart FOCUS de la grille (slot 0 = maître).
- * Ordre : exchange → symbole → TF (comme `appliquerNavigation` palette) ; marqueur
- * vertical + scroll si `markTime` valide.
+ * Une identité source/symbole explicite est appliquée atomiquement ; un symbole seul
+ * passe par le routage automatique. Marqueur vertical + scroll si `markTime` valide.
  *
  * Cible : le slot FOCUS — slot 0 → `marketStore` (identité maître, comme avant) ;
  * slot secondaire → config du slot (`chartLayoutStore.slots`). Avant ce correctif le
@@ -270,15 +270,24 @@ export function navigateTo(intent: NavIntent): void {
   const slot = chartLayoutStore.getState().focus;
   if (slot === 0) {
     const m = marketStore.getState();
-    if (champs.exchange !== undefined) m.setExchange(champs.exchange);
-    if (champs.symbol !== undefined) m.setSymbol(champs.symbol);
-    if (champs.timeframe !== undefined) m.setTimeframe(champs.timeframe);
+    if (champs.exchange !== undefined && champs.symbol !== undefined) {
+      m.setMarket({ exchange: champs.exchange, symbol: champs.symbol, timeframe: champs.timeframe ?? m.timeframe });
+    } else {
+      if (champs.exchange !== undefined) m.setExchange(champs.exchange);
+      if (champs.symbol !== undefined) m.setSymbol(champs.symbol);
+      if (champs.timeframe !== undefined) m.setTimeframe(champs.timeframe);
+    }
   } else {
     // `patchSlot` infère la source depuis le symbole quand elle n'est pas fournie.
     const layout = chartLayoutStore.getState();
-    if (champs.exchange !== undefined) layout.setSlotExchange(slot, champs.exchange);
-    if (champs.symbol !== undefined) layout.setSlotSymbol(slot, champs.symbol);
-    if (champs.timeframe !== undefined) layout.setSlotTimeframe(slot, champs.timeframe);
+    const courant = layout.slots[slot - 1];
+    if (courant !== undefined && champs.exchange !== undefined && champs.symbol !== undefined) {
+      layout.setSlotMarket(slot, { exchange: champs.exchange, symbol: champs.symbol, timeframe: champs.timeframe ?? courant.timeframe });
+    } else {
+      if (champs.exchange !== undefined) layout.setSlotExchange(slot, champs.exchange);
+      if (champs.symbol !== undefined) layout.setSlotSymbol(slot, champs.symbol);
+      if (champs.timeframe !== undefined) layout.setSlotTimeframe(slot, champs.timeframe);
+    }
   }
 
   // Le chart actif (dessins, marqueur, scroll) suit le slot focus.

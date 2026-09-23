@@ -20,6 +20,7 @@ import type { Timeframe, Trade, Unsubscribe } from "@axiom/types";
 import { healthStore } from "../store/health";
 import { aggTradeToTrade, type BinanceAggTrade } from "./binance";
 import { connectWsLoop } from "./wsLoop";
+import { basePerp } from "./symbol";
 
 /** Base des endpoints publics de données dérivées Binance USDⓈ-M. */
 const BASE_URL = "https://fapi.binance.com/futures/data";
@@ -260,9 +261,11 @@ export function timeframeToFapiInterval(tf: Timeframe): string | undefined {
 
 // ---------- Méthodes publiques ----------
 
-/** Symbole perpétuel USDⓈ-M (identique au symbole spot pour les paires USDT/USDC). */
+/** Référence dérivée Binance : perp explicite → USDT ; cotation déjà donnée conservée. */
 export function futuresSymbol(symbol: string): string {
-  return symbol.trim().toUpperCase();
+  const s = symbol.trim().toUpperCase();
+  const base = s.endsWith("-PERP") ? basePerp(s) : null;
+  return base === null ? s : `${base}USDT`;
 }
 
 /** Ratio L/S des COMPTES globaux (sentiment de la masse des comptes). */

@@ -12,7 +12,7 @@
  * navigateur. registry.test.ts les neutralise via vi.mock pour tester les fonctions pures.
  */
 import { createStore } from "zustand/vanilla";
-import type { ExchangeId, Timeframe } from "@axiom/types";
+import type { Timeframe } from "@axiom/types";
 import { INDICATORS } from "@axiom/indicators";
 import { marketStore } from "../store/market";
 import { indicatorsStore } from "../store/indicators";
@@ -28,6 +28,7 @@ import { macroRatesViewStore } from "../store/macroRatesView";
 import { settingsUiStore } from "../store/settings-ui";
 import { exportChartImage, clearAllOverlays } from "../chart/drawing";
 import { QUOTE_ASSETS } from "../data/symbol";
+import { TWELVEDATA_SYMBOLS } from "../data/pairs";
 import { pousserToast } from "../store/toasts";
 import { raisonUnusableIndicateur } from "../lib/indicatorUsability";
 import { supportedTimeframesFor } from "../data/adapters";
@@ -85,7 +86,6 @@ export interface Commande {
 export interface NavCommande {
   symbol?: string;
   timeframe?: Timeframe;
-  source?: ExchangeId;
 }
 
 // ─────────────────────────── Store UI de la palette ───────────────────────────
@@ -132,23 +132,8 @@ const ALIAS_TF: Record<string, Timeframe> = {
   "1MO": "1M", "3MO": "3M", "6MO": "6M", "12MO": "12M",
 };
 
-/** Alias de source (exchange) reconnus par la saisie. */
-const ALIAS_SOURCE: Record<string, ExchangeId> = {
-  BINANCE: "binance", BIN: "binance", BN: "binance",
-  KRAKEN: "kraken", KRK: "kraken", KR: "kraken",
-  COINBASE: "coinbase", COIN: "coinbase", CB: "coinbase",
-  MEXC: "mexc",
-  TWELVEDATA: "twelvedata", TRADFI: "twelvedata", TD: "twelvedata",
-};
-
-/** Libellé court des sources câblées (aperçu de commande de navigation). */
-const SOURCE_LABEL: Partial<Record<ExchangeId, string>> = {
-  binance: "Binance",
-  kraken: "Kraken",
-  coinbase: "Coinbase",
-  twelvedata: "TradFi",
-  mexc: "MEXC",
-};
+/** Les anciens qualificatifs sont tolérés, sans imposer de fournisseur. */
+const LEGACY_SOURCE_TOKENS = new Set(["BINANCE", "BIN", "BN", "KRAKEN", "KRK", "KR", "COINBASE", "CB", "MEXC", "TWELVEDATA", "TRADFI", "TD", "BYBIT", "OKX", "HYPERLIQUID"]);
 
 /**
  * Normalise un token en symbole exploitable :
@@ -157,18 +142,19 @@ const SOURCE_LABEL: Partial<Record<ExchangeId, string>> = {
  *  - déjà suffixé d'une cotation connue (BTCUSDT, ETHUSD…) : conservé ;
  *  - base crypto nue (BTC, SOL, 1INCH…) : complétée en …USDT.
  */
-function normaliserSymbole(token: string, source: ExchangeId | undefined): string {
+function normaliserSymbole(token: string): string {
   const s = token.toUpperCase();
   if (s.includes("/")) return s;
-  if (source === "twelvedata") return s;
+  if (TWELVEDATA_SYMBOLS.includes(s)) return s;
   if (QUOTE_ASSETS.some((q) => s.endsWith(q) && s.length > q.length)) return s;
-  // Base alphanumérique (préfixe numérique optionnel, ex. 1000PEPE, 1INCH) → …USDT.
-  if (/^[0-9]{0,4}[A-Z]{2,6}$/.test(s)) return `${s}USDT`;
+  // Alias crypto usuels seulement : un ticker d'action libre (IBM, PLTR, COIN)
+  // ne devient jamais une paire crypto par sa seule longueur.
+  if (["BTC", "ETH", "SOL", "BNB"].includes(s) || /^[0-9]{1,4}[A-Z]{2,6}$/.test(s)) return `${s}USDT`;
   return s;
 }
 
 /**
- * Parse une saisie libre en intention de navigation (symbole + TF + source), dans
+ * Parse une saisie libre en intention de navigation (actif + TF), dans
  * n'importe quel ordre : « SOL 4H », « 4H SOL BINANCE », « btcusdt ». Fonction PURE.
  * Renvoie null si rien d'exploitable n'est reconnu.
  */
@@ -184,33 +170,28 @@ export function parseNavigation(input: string): NavCommande | null {
       nav.timeframe = tf;
       continue;
     }
-    const src = ALIAS_SOURCE[tok];
-    if (nav.source === undefined && src !== undefined) {
-      nav.source = src;
-      continue;
-    }
+    if (LEGACY_SOURCE_TOKENS.has(tok) && (restes.length > 0 || ["BINANCE", "KRAKEN", "COINBASE", "TWELVEDATA", "TRADFI", "BYBIT", "OKX", "HYPERLIQUID", "MEXC"].includes(tok))) continue;
     restes.push(tok);
   }
 
   // Premier token non classé = symbole (les suivants sont ignorés).
   const brut = restes[0];
-  if (brut !== undefined) nav.symbol = normaliserSymbole(brut, nav.source);
+  if (brut !== undefined) nav.symbol = normaliserSymbole(brut);
 
-  if (nav.symbol === undefined && nav.timeframe === undefined && nav.source === undefined) {
+  if (nav.symbol === undefined && nav.timeframe === undefined) {
     return null;
   }
   return nav;
 }
 
 /**
- * Applique une intention de navigation au store marché (source → symbole → TF).
+ * Applique une intention de navigation au store marché (symbole → TF, source automatique).
  * Un changement de PAIRE bascule tout le terminal : toast annulable (revue v2 —
  * « DERIV » tapé dans ⌘K avait changé la paire globale silencieusement).
  */
 export function appliquerNavigation(nav: NavCommande): void {
   const m = marketStore.getState();
   const avant = { exchange: m.exchange, symbol: m.symbol, timeframe: m.timeframe };
-  if (nav.source !== undefined) m.setExchange(nav.source);
   if (nav.symbol !== undefined) m.setSymbol(nav.symbol);
   if (nav.timeframe !== undefined) {
     // Garde alignée sur le chemin clavier (hotkeys) : la source/symbole viennent d'être
@@ -240,7 +221,6 @@ export function commandeNavigation(nav: NavCommande): Commande {
   const parts: string[] = [];
   if (nav.symbol !== undefined) parts.push(nav.symbol);
   if (nav.timeframe !== undefined) parts.push(nav.timeframe);
-  if (nav.source !== undefined) parts.push(SOURCE_LABEL[nav.source] ?? nav.source);
   const cible = parts.join(" · ");
   const libelle = nav.symbol !== undefined ? `Changer la paire → ${cible}` : `Aller à ${cible}`;
   return {
@@ -248,7 +228,7 @@ export function commandeNavigation(nav: NavCommande): Commande {
     libelle,
     categorie: "navigation",
     motsCles: parts,
-    apercu: "Change le graphe (symbole / timeframe / source)",
+    apercu: "Change le graphe (actif / timeframe) · source automatique",
     action: () => appliquerNavigation(nav),
   };
 }

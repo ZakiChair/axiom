@@ -215,6 +215,18 @@ describe("hydrateStores — indicateurs persistés", () => {
 });
 
 describe("hydrateStores — marché (exchange/symbole/timeframe)", () => {
+  it.each(["BTCUSDT", "BTC-PERP"])("restaure le perp HL %s sans publication intermédiaire spot", (symbol) => {
+    localStorage.setItem(CHART_KEY, JSON.stringify({ exchange: "hyperliquid", symbol, timeframe: "1h", indicators: [] }));
+    const identites: unknown[] = [];
+    const stop = marketStore.subscribe((s) => identites.push({ exchange: s.exchange, symbol: s.symbol, timeframe: s.timeframe }));
+    try {
+      hydrateStores();
+      expect(identites).toEqual([{ exchange: "hyperliquid", symbol, timeframe: "1h" }]);
+    } finally {
+      stop();
+    }
+  });
+
   it("restaure exchange/symbole/timeframe valides", () => {
     localStorage.setItem(
       CHART_KEY,

@@ -109,8 +109,8 @@ export function NotesWindow() {
   };
 
   const voirSurChart = (symbole: string, source: ExchangeId) => {
-    marketStore.getState().setExchange(source);
-    marketStore.getState().setSymbol(symbole);
+    const m = marketStore.getState();
+    m.setMarket({ exchange: source, symbol: symbole, timeframe: m.timeframe });
   };
 
   return (

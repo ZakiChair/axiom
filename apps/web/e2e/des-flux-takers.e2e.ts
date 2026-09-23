@@ -244,7 +244,10 @@ test("DES : flux takers chargés au montage (4 appels), repliés par défaut, sa
   expect(Object.keys(archive.jours ?? {})).toContain("2026-09-15");
 
   // Source hors Binance : la branche Coinalyze bascule, la section reste en place.
-  await page.getByRole("combobox", { name: "Source" }).selectOption("bybit");
+  await page.evaluate(async () => {
+    const importer = new Function("return import('/src/store/market.ts')") as () => Promise<{ marketStore: { getState: () => { setMarket: (m: { exchange: "bybit"; symbol: string; timeframe: "1m" }) => void } } }>;
+    (await importer()).marketStore.getState().setMarket({ exchange: "bybit", symbol: "BTCUSDT", timeframe: "1m" });
+  });
   await expect(des).toContainText("Binance uniquement");
   await expect(section).toContainText("0.95");
   expect(appels).toHaveLength(4);

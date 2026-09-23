@@ -9,7 +9,7 @@
  */
 import type { ExchangeId } from "@axiom/types";
 import { fetchDeribitOptionChain, type OptionPoint } from "./deribit";
-import { splitSymbol } from "./symbol";
+import { basePerp, splitSymbol } from "./symbol";
 
 export const TTL_CHAINE_MS = 600_000;
 
@@ -62,6 +62,11 @@ const COTATIONS_DOLLAR = ["USDT", "USDC", "USD", "USDE", "DAI", "TUSD", "USDD"];
  */
 export function actifDeribit(exchange: ExchangeId, symbol: string): DeviseDeribit | null {
   if (exchange === "synthetic" || exchange === "twelvedata") return null;
+  // Les perps natifs HL sont valorisés en dollar ; conserver les gardes de cotation du spot.
+  if (exchange === "hyperliquid" && symbol.trim().toUpperCase().endsWith("-PERP")) {
+    const actif = basePerp(symbol);
+    return actif === "BTC" || actif === "ETH" ? actif : null;
+  }
   try {
     const { base, quote } = splitSymbol(symbol.trim().toUpperCase().replace("-", "/"), "Deribit");
     const devise = base === "XBT" ? "BTC" : base;

@@ -20,8 +20,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { watchlistStore } from "../store/watchlist";
-import { subscribeTickers, subscribeWatchlistBars } from "../data/ticker";
+import { subscribeTickers, subscribeWatchlistBars, isTickerSource, resolveTickerSource, resolveTickerMarket } from "../data/ticker";
 import type { TickerUpdate, WatchlistBars } from "../data/ticker";
+import { fetchMarketCatalog, subscribeMarketCatalog, type MarketCatalog } from "../data/marketRouting";
 import { SidebarSection } from "./SidebarSection";
 import { MenuDeroulant } from "./ui";
 import { formatCompact, formatPct, formatPrice, VALEUR_ABSENTE } from "../lib/format";
@@ -188,6 +189,7 @@ export function Watchlist() {
   const groups = useStore(watchlistStore, (s) => s.groups);
   const activeGroupId = useStore(watchlistStore, (s) => s.activeGroupId);
   const symbols = useStore(watchlistStore, (s) => s.symbols);
+  const sources = useStore(watchlistStore, (s) => s.sources);
   const add = useStore(watchlistStore, (s) => s.add);
   const remove = useStore(watchlistStore, (s) => s.remove);
   const move = useStore(watchlistStore, (s) => s.move);
@@ -196,10 +198,11 @@ export function Watchlist() {
   const removeGroup = useStore(watchlistStore, (s) => s.removeGroup);
 
   const currentSymbol = useStore(marketStore, (s) => s.symbol);
-  const setSymbol = useStore(marketStore, (s) => s.setSymbol);
-  const setExchange = useStore(marketStore, (s) => s.setExchange);
 
   const [draft, setDraft] = useState("");
+  const [catalog, setCatalog] = useState<MarketCatalog>();
+  const [resolutionAttempt, setResolutionAttempt] = useState(0);
+  const [unresolvedSymbols, setUnresolvedSymbols] = useState<string[]>([]);
   const [addingGroup, setAddingGroup] = useState(false);
   const [groupDraft, setGroupDraft] = useState("");
   const [visibleCols, setVisibleCols] = useState<VisibleCols>(DEFAULT_COLS);
@@ -250,6 +253,57 @@ export function Watchlist() {
   // (les souscriptions ne dépendent que du SET, pas de l'ordre d'affichage).
   const symbolsKey = useMemo(() => symbols.slice().sort().join(","), [symbols]);
 
+  const sourcesKey = symbols.map((symbol) => `${symbol}:${sources[symbol] ?? ""}`).sort().join(",");
+
+  useEffect(() => {
+    if (symbols.every((symbol) => sources[symbol] !== undefined && !unresolvedSymbols.includes(symbol))) return;
+    // Les prix peuvent revenir alors que le catalogue n'a pas changé.
+    const retry = setInterval(() => setResolutionAttempt((attempt) => attempt + 1), 30_000);
+    return () => clearInterval(retry);
+  }, [symbolsKey, sourcesKey, unresolvedSymbols]);
+
+  useEffect(() => {
+    let active = true;
+    const unsubscribe = subscribeMarketCatalog(setCatalog);
+    void fetchMarketCatalog().then((value) => { if (active) setCatalog(value); }).catch(() => {});
+    return () => { active = false; unsubscribe(); };
+  }, []);
+
+  // Un catalogue rétabli relance les prix absents. Une source n'est retenue qu'après
+  // confirmation d'un vrai prix, y compris quand les catalogues sont indisponibles.
+  useEffect(() => {
+    if (!catalog) return;
+    const controller = new AbortController();
+    void Promise.all(symbols.map(async (symbol) => {
+      try {
+        const initialSource = watchlistStore.getState().sources[symbol];
+        const before = marketStore.getState();
+        if (before.symbol === symbol && before.dataLoad.status === "ready") {
+          watchlistStore.getState().setSource(symbol, before.exchange);
+          return undefined;
+        }
+        const resolved = await resolveTickerMarket({ exchange: initialSource, symbol, timeframe: "1h" }, controller.signal);
+        if (controller.signal.aborted) return;
+        const market = marketStore.getState();
+        if (market.symbol === symbol && market.dataLoad.status === "ready") {
+          watchlistStore.getState().setSource(symbol, market.exchange);
+        } else if (watchlistStore.getState().sources[symbol] === initialSource && resolved) {
+          watchlistStore.getState().setSource(symbol, resolved.exchange);
+        } else if (!resolved) {
+          return symbol;
+        }
+        return undefined;
+      } catch { return symbol; }
+    })).then((unresolved) => {
+      if (!controller.signal.aborted) setUnresolvedSymbols(unresolved.filter((symbol): symbol is string => symbol !== undefined));
+    });
+    return () => controller.abort();
+  }, [symbolsKey, catalog, resolutionAttempt]);
+
+  useEffect(() => marketStore.subscribe((state) => {
+    if (state.dataLoad.status === "ready") watchlistStore.getState().setSource(state.symbol, state.exchange);
+  }), []);
+
   // Ordre d'affichage : liste stockée en mode manuel, sinon tri par instantané des valeurs.
   const displayOrder = useMemo(() => {
     if (!sort) return symbols;
@@ -271,6 +325,7 @@ export function Watchlist() {
   // Souscription ticker (prix / Δ%24h / volume) quand la liste de symboles change.
   useEffect(() => {
     const onTicker = ({ symbol, price, changePercent, quoteVolume }: TickerUpdate) => {
+      if (sources[symbol] !== watchlistStore.getState().sources[symbol]) return;
       const snap = snapOf(symbol);
       snap.price = price;
       snap.change24h = changePercent;
@@ -281,14 +336,22 @@ export function Watchlist() {
       if (row.change24h) writePctCell(row.change24h, changePercent);
       if (row.volume && quoteVolume !== undefined) row.volume.textContent = formatCompact(quoteVolume);
     };
-    return subscribeTickers(symbols, onTicker);
+    latest.current.clear();
+    for (const row of cells.current.values()) {
+      for (const key of ["price", "change24h", "volume", "change1h", "change7d"] as const) {
+        const cell = row[key]; if (cell) cell.textContent = "—";
+      }
+      row.spark?.getContext("2d")?.clearRect(0, 0, row.spark.width, row.spark.height);
+    }
+    return subscribeTickers(symbols.filter((symbol) => sources[symbol] !== undefined), onTicker);
     // Dép. sur le SET (symbolsKey), pas sur l'ordre : le réordonnancement ne reconnecte rien.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbolsKey]);
+  }, [symbolsKey, sourcesKey]);
 
   // Souscription statistiques enrichies (Δ%1h/7j + sparkline) au refresh lent (5 min).
   useEffect(() => {
     const onBars = ({ symbol, change1h, change7d, spark }: WatchlistBars) => {
+      if (sources[symbol] !== watchlistStore.getState().sources[symbol]) return;
       const snap = snapOf(symbol);
       snap.change1h = change1h ?? undefined;
       snap.change7d = change7d ?? undefined;
@@ -299,10 +362,10 @@ export function Watchlist() {
       if (row.change7d) writePctCell(row.change7d, change7d);
       if (row.spark) drawSparkline(row.spark, spark, readUpDownColors());
     };
-    return subscribeWatchlistBars(symbols, onBars);
+    return subscribeWatchlistBars(symbols.filter((symbol) => sources[symbol] !== undefined), onBars);
     // Dép. sur le SET (symbolsKey), pas sur l'ordre (cf. souscription ticker ci-dessus).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbolsKey]);
+  }, [symbolsKey, sourcesKey]);
 
   // Repaint depuis les dernières valeurs connues après tout re-render de structure (changement
   // de liste, d'onglet, de colonnes ou de tri) : évite le flash « — » d'une cellule qui vient
@@ -332,11 +395,12 @@ export function Watchlist() {
     setAddingGroup(false);
   };
 
-  /** Clic sur une ligne : change de symbole et restaure la source d'origine si explicite. */
+  /** La provenance d'un prix déjà confirmé est transmise atomiquement au graphe. */
   const selectSymbol = (sym: string) => {
-    const src = watchlistStore.getState().sources[sym];
-    if (src) setExchange(src);
-    setSymbol(sym);
+    const market = marketStore.getState();
+    const source = watchlistStore.getState().sources[sym];
+    if (source) market.setMarket({ exchange: source, symbol: sym, timeframe: market.timeframe });
+    else market.setSymbol(sym);
   };
 
   /** Cycle de tri d'une colonne : (inactif→desc→asc→manuel) ; symbole part en asc. */
@@ -527,6 +591,7 @@ export function Watchlist() {
               >
                 <span className={`whitespace-nowrap font-medium ${selected ? "text-text" : "text-text-dim"}`}>
                   {sym}
+                  {!isTickerSource(resolveTickerSource(sym, sources[sym])) && <span className="block text-[9px] font-normal text-text-dim" title={`Source : ${resolveTickerSource(sym, sources[sym])}`}>ticker indisponible</span>}
                 </span>
               </button>
               <span

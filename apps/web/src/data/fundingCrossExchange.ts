@@ -13,7 +13,7 @@
  * en échec n'empêche pas d'afficher les autres.
  */
 import { extUrl } from "./extapi";
-import { splitSymbol } from "./symbol";
+import { basePerp } from "./symbol";
 
 /** Un funding de venue, normalisé. */
 export interface FundingVenue {
@@ -35,15 +35,6 @@ export interface FundingVenue {
 export function annualiserFunding(rate: number, intervalHours: number): number {
   if (!Number.isFinite(rate) || !Number.isFinite(intervalHours) || intervalHours <= 0) return NaN;
   return rate * (24 / intervalHours) * 365 * 100;
-}
-
-/** Base d'un symbole chart (BTCUSDT → BTC), ou null si illisible. */
-function baseDe(symbol: string): string | null {
-  try {
-    return splitSymbol(symbol, "funding-x").base;
-  } catch {
-    return null;
-  }
 }
 
 // ─────────────────────────── Parsers PURS (rate brut par intervalle) ───────────────────────────
@@ -74,7 +65,7 @@ export function parseHyperliquidFunding(json: unknown, coin: string): number | n
   if (!Array.isArray(json) || json.length < 2) return null;
   const universe = (json[0] as { universe?: Array<{ name?: string }> })?.universe ?? [];
   const ctxs = json[1] as Array<{ funding?: unknown }>;
-  const idx = universe.findIndex((u) => u?.name === coin);
+  const idx = universe.findIndex((u) => u?.name?.toUpperCase() === coin.toUpperCase());
   if (idx < 0) return null;
   const v = Number(ctxs?.[idx]?.funding);
   return Number.isFinite(v) ? v : null;
@@ -201,7 +192,7 @@ export interface MatriceFunding {
  * matrice vide sans échec.
  */
 export async function fetchFundingMatrix(symbol: string): Promise<MatriceFunding> {
-  const base = baseDe(symbol);
+  const base = basePerp(symbol);
   if (base === null) return { venues: [], echecs: 0 };
   const résultats = await Promise.allSettled([
     fetchBinance(base),

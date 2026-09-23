@@ -50,6 +50,7 @@ import { fetchCoinMetrics } from "../data/onchain/coinmetrics";
 import { histFunding, histOiUsd } from "../data/referentiels";
 import { coinalyzeKeyStore } from "../store/coinalyze";
 import { getBgeometricsKey } from "../store/onchain";
+import { registerHyperliquidCoin } from "../data/symbol";
 
 const oiMock = vi.mocked(coinalyzeProvider.fetchOpenInterestHistory);
 const fundingMock = vi.mocked(coinalyzeProvider.fetchFundingRateHistory);
@@ -106,6 +107,20 @@ describe("AuxProvider.getAligned", () => {
   });
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("charge le MVRV de BTC pour le perp explicite BTC-PERP", async () => {
+    cmMock.mockImplementation(async (asset) => asset === "btc" ? {
+      series: { CapMVRVCur: { points: [{ time: 1000, value: 2.3 }] } },
+      ts: 1000,
+      perime: false,
+    } : null);
+    const p = new AuxProvider();
+    const req = { exchange: "hyperliquid", symbol: "BTC-PERP", timeframe: "1d", ids: ["mvrv"], candleTimes: [1500] } as const;
+    await new Promise<void>((resolve) => p.getAligned({ ...req, ids: [...req.ids], candleTimes: [...req.candleTimes] }, resolve));
+    expect(p.getAligned({ ...req, ids: [...req.ids], candleTimes: [...req.candleTimes] }, () => {})).toEqual({
+      status: "ready", aux: { mvrv: [2.3] },
+    });
   });
 
   it("1er appel → pending + déclenche le fetch sous-jacent", () => {
@@ -593,6 +608,16 @@ describe("AuxProvider — Lot 2 (liq flux, hashrate, BG, HL)", () => {
     expect(hlFundingMock).toHaveBeenCalledWith("ETH", expect.any(Number));
     const status = p.getAligned(req(["hlFunding"], "ETHUSDT", "1h"), () => {});
     expect(status.status).toBe("ready");
+  });
+
+  it("hlFunding : conserve la casse native kPEPE et son multiplicateur", async () => {
+    registerHyperliquidCoin("kPEPE");
+    hlFundingMock.mockImplementation(async (coin) => coin === "kPEPE" ? [{ time: 900, value: 0.00003 }] : []);
+    const p = new AuxProvider();
+    const r = req(["hlFunding"], "KPEPE-PERP", "1h");
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    const status = p.getAligned(r, () => {});
+    expect(status).toEqual({ status: "ready", aux: { hlFunding: [0.00003] } });
   });
 
   it("hlWhalesNet : 100×(l−s)/(l+s), somme nulle écartée, pas = max(5min, tf)", async () => {

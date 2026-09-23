@@ -20,6 +20,7 @@ import { healthStore } from "../store/health";
 import { IS_VERCEL } from "../lib/deployment";
 import { DAEMON_CAPABILITIES, type DaemonCapability } from "../../../../shared/daemon-capabilities";
 import { CLES_SNAPSHOT, CLES_TERMINAL, CLES_TRAVAIL_PERSONNEL, CLE_PERIMETRE_SNAPSHOT, remplacerClesLocales } from "./sauvegardeLocale";
+import { basePerp } from "./symbol";
 
 /** Source santé du lien daemon (affichée dans le panneau « santé des sources »). */
 const SOURCE_SANTE = "axiomd";
@@ -707,9 +708,11 @@ export interface LiqDaemon {
   usd: number;
 }
 
-/** URL du fil de liquidations d'un symbole (symbole URL-encodé). */
+/** Le collecteur par actif stocke les liquidations sous l’ancienne clé USDT. */
 function urlLiquidations(symbole: string): string {
-  return `${baseDaemon()}/liquidations/${encodeURIComponent(symbole)}`;
+  const base = symbole.trim().toUpperCase().endsWith("-PERP") ? basePerp(symbole) : null;
+  const cle = base === null ? symbole : `${base}USDT`;
+  return `${baseDaemon()}/liquidations/${encodeURIComponent(cle)}`;
 }
 
 /** Bornes optionnelles d'une lecture de liquidations. */

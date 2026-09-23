@@ -5,7 +5,8 @@
  * (États-Unis…) reçoit HTTP 451 sur le backfill REST. Le message générique
  * « La source n’a pas pu fournir l’historique demandé » + « Réessayer » ne lui laisse
  * aucune issue alors que Coinbase et Kraken restent accessibles (vérifié en production
- * sous un blocage simulé). Le message doit nommer la cause ET la parade (menu Source).
+ * sous un blocage simulé). Le routage étant automatique, le message nomme la cause sans
+ * proposer un sélecteur manuel supprimé.
  */
 import { describe, expect, it } from "vitest";
 import { dataLoadErrorMessage } from "./dataLoadErrorMessage";
@@ -25,12 +26,47 @@ describe("dataLoadErrorMessage", () => {
     expect(dataLoadErrorMessage(err)).toBe("CCData est injoignable ou bloqué par le navigateur.");
   });
 
-  it("HTTP 451 (région refusée) : nomme la cause, le menu Source et les sources vérifiées", () => {
+  it("HTTP 451 : explique le refus régional et l’absence de source compatible accessible", () => {
     const msg = dataLoadErrorMessage(new Error("Binance REST 451 Unavailable For Legal Reasons"));
     expect(msg).toContain("451");
-    expect(msg).toContain("« Source »");
-    expect(msg).toContain("Coinbase");
-    expect(msg).toContain("Kraken");
+    expect(msg).toContain("région");
+    expect(msg).toContain("compatible");
+    expect(msg).not.toMatch(/menu|changez|Coinbase|Kraken/i);
+  });
+
+  it.each([
+    "Twelve Data: **apikey** parameter is missing or invalid",
+    "Twelve Data: API key is invalid",
+    "Twelve Data: clé API absente",
+  ])("une clé Twelve Data inutilisable indique les Réglages : %s", (erreur) => {
+    const msg = dataLoadErrorMessage(new Error(erreur));
+    expect(msg).toContain("Twelve Data");
+    expect(msg).toContain("Réglages");
+    expect(msg).toContain("clé personnelle");
+  });
+
+  it.each([
+    "Twelve Data: This instrument is available starting with the Grow or Venture plan.",
+    "Twelve Data: This symbol is available starting with Grow or Venture plan. Upgrade API key=SECRET_SENTINEL at https://example.invalid/billing",
+  ])("explique l'accès Grow/Venture sans afficher le corps fournisseur : %s", (erreur) => {
+    expect(dataLoadErrorMessage(new Error(erreur))).toBe(
+      "Cet historique nécessite un abonnement Twelve Data Grow ou Venture.",
+    );
+  });
+
+  it.each([
+    "Twelve Data: This endpoint requires a paid subscription.",
+    "Twelve Data: A higher plan is required to access this symbol.",
+    "Twelve Data: abonnement requis pour cet actif.",
+  ])("explique un abonnement requis sans inventer son niveau : %s", (erreur) => {
+    expect(dataLoadErrorMessage(new Error(erreur))).toBe(
+      "Cet historique nécessite un abonnement Twelve Data incluant cet actif.",
+    );
+  });
+
+  it("ne transforme pas les autres erreurs ou une simple mention de plan en restriction d'abonnement", () => {
+    expect(dataLoadErrorMessage(new Error("Other source: available starting with the Grow or Venture plan."))).toBe(GENERIQUE);
+    expect(dataLoadErrorMessage(new Error("Twelve Data: unexpected response, plan=SECRET_SENTINEL"))).toBe(GENERIQUE);
   });
 
   it("HTTP 451 sans statusText (HTTP/2) ou sur exchangeInfo : même message", () => {

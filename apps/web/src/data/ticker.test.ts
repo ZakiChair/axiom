@@ -22,6 +22,7 @@ import {
 } from "./ticker";
 import { binanceAdapter } from "./binance";
 import { healthStore } from "../store/health";
+import { watchlistStore } from "../store/watchlist";
 
 describe("isTradfiSymbol", () => {
   it("classe tradfi les symboles du catalogue curé", () => {
@@ -50,6 +51,14 @@ describe("isTradfiSymbol", () => {
 });
 
 describe("resolveTickerSource", () => {
+  it("ne transforme pas un perp Hyperliquid en ticker spot Binance", () => {
+    expect(resolveTickerSource("BTC-PERP")).toBe("hyperliquid");
+    const grouped = groupTickerSymbolsBySource(["BTC-PERP", "RAREUSDT"], { RAREUSDT: "bybit" });
+    expect(grouped.binance).toEqual([]);
+    expect(grouped.hyperliquid).toEqual(["BTC-PERP"]);
+    expect(grouped.bybit).toEqual(["RAREUSDT"]);
+  });
+
   it("privilégie la source EXPLICITE du store si présente", () => {
     expect(resolveTickerSource("BTCUSD", "kraken")).toBe("kraken");
     expect(resolveTickerSource("SPY", "binance")).toBe("binance"); // explicite gagne sur l'inférence
@@ -68,12 +77,11 @@ describe("resolveTickerSource", () => {
 });
 
 describe("routage explicite d'un abonnement ticker", () => {
-  it("reconnaît exactement les cinq sources ticker câblées", () => {
-    for (const source of ["binance", "kraken", "coinbase", "mexc", "twelvedata"]) {
+  it("reconnaît les huit sources ticker câblées", () => {
+    for (const source of ["binance", "kraken", "coinbase", "mexc", "twelvedata", "okx", "bybit", "hyperliquid"]) {
       expect(isTickerSource(source)).toBe(true);
     }
     expect(isTickerSource("synthetic")).toBe(false);
-    expect(isTickerSource("bybit")).toBe(false);
   });
 
   it("préserve le routage historique watchlist par symbole sans source forcée", () => {
@@ -219,6 +227,10 @@ describe("construireUrlStreamTicker", () => {
 });
 
 describe("parseMessageTicker", () => {
+  it.each(["", "0", "-1", "NaN", "Infinity"])("rejette le prix Binance non exploitable %s", (price) => {
+    expect(parseMessageTicker(JSON.stringify({ data: { s: "BTCUSDT", c: price, P: "0", q: "10" } }))).toBeNull();
+  });
+
   it("extrait prix, variation 24 h et volume quote d'un message combiné", () => {
     const u = parseMessageTicker(
       JSON.stringify({ stream: "btcusdt@ticker", data: { s: "BTCUSDT", c: "42000.5", P: "-1.25", q: "123.5" } }),
@@ -304,6 +316,7 @@ describe("subscribeTickers — enregistrement au registre santé (panneau DATA)"
 describe("subscribeWatchlistBars — symboles de capitalisation exclus de Binance", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    watchlistStore.getState().setAll([]);
   });
 
   it("n'interroge PAS les klines Binance pour TOTAL/TOTAL2/TOTAL3", () => {
@@ -318,6 +331,7 @@ describe("subscribeWatchlistBars — symboles de capitalisation exclus de Binanc
   });
 
   it("continue d'interroger les symboles Binance réels du même lot", async () => {
+    watchlistStore.getState().setAll(["BTCUSDT", "TOTAL"], { BTCUSDT: "binance" });
     const klines = vi.spyOn(binanceAdapter, "fetchKlines").mockResolvedValue([]);
 
     const stop = subscribeWatchlistBars(["BTCUSDT", "TOTAL"], () => {});

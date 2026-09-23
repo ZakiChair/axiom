@@ -19,7 +19,8 @@ if [[ "${1:-}" == "--e2e" && "$#" == 1 ]]; then
     gate-g3-playbooks corrections-revue macro-globale dom-microstructure onchain-complements \
     revue-evenements qualite-fraicheur revue-outils-avances \
     revue-chain-rotation revue-macro-vintage revue-economie-chaines macro-dette-long-terme multivue \
-    niveaux-chart omon-lectures-options revue-cycle term-portage-tbill des-oi-perps-dex des-flux-takers chain-mineurs-cotes
+    niveaux-chart omon-lectures-options revue-cycle term-portage-tbill des-oi-perps-dex des-flux-takers chain-mineurs-cotes \
+    sources-automatiques
 elif [[ "$#" != 0 ]]; then
   echo "Usage : $0 [--e2e]" >&2
   exit 2

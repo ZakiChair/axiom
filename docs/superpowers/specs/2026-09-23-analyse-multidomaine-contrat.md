@@ -73,6 +73,17 @@ Une contradiction est une paire de lectures nommées dont les implications sur *
 
 Oracle : ETF BTC +100 M USD sur 7 j et netflow exchange +20 M USD sur 24 h → tension de flux à horizons différents, pas deux mesures incohérentes. Funding p95 et funding fortement positif → une seule famille de preuve. Régime indisponible + flux positif → pas « divergence ».
 
+Une règle de **divergence descriptive** compare la variation de part TVL d’une
+chaîne et le rendement de son token de référence explicite (Ethereum→ETH,
+Solana→SOL, Arbitrum→ARB ; Base sans comparaison). Défaut30jours, dates de début
+et de fin exactement appariées et closes. Signes opposés = divergence ; mêmes
+signes non nuls = concordance ; zéro à epsilon numérique1e−9 = neutre. Une
+absence, une valeur non finie, la péremption ou des dates différentes interdit
+le rapprochement. Les deux valeurs, unités et sources restent visibles. Ce lien
+chaîne/token ne fait pas des deux mesures une même proposition : aucune
+contradiction logique, causalité, entrée nette d’investisseurs ni signal validé
+n’est déduit de cette règle. La TVL en USD reste sensible aux prix.
+
 ## 6. SCEN : vraie régression multifactorielle
 
 ### 6.1 Échantillon et unités

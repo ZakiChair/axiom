@@ -12,6 +12,11 @@ export interface ZoneQuadrants { region: RegionMacro; points: PointQuadrant[]; r
 export interface ResultatQuadrants { regions: ZoneQuadrants[]; connuLe: string | null; calculeLe: number }
 export interface OptionsQuadrants { regions: readonly RegionMacro[]; connuLe?: string | null; maintenant?: number; signal?: AbortSignal; force?: boolean; attenteConcurrenceMs?: number }
 
+/** Le dernier mois commun avec ses deux axes calculés ; « stable » reste calculé. */
+export function dernierMoisCommunCalcule(zone: ZoneQuadrants): PointQuadrant | null {
+  return zone.points.findLast((point) => point.croissance.sens !== "inconnu" && point.inflation.sens !== "inconnu") ?? null;
+}
+
 const EPSILON_PP = 1e-9;
 const MOIS_MAX_MS = 86_400_000 * 35;
 const moisTexte = (time: number): string => new Date(time).toISOString().slice(0, 7);
@@ -127,14 +132,19 @@ export async function chargerQuadrants(options: OptionsQuadrants): Promise<Resul
 
 /** Projette la dernière période de chaque zone en preuve bornée pour BRIEF/EXPY. */
 export function lecturesQuadrants(resultat: ResultatQuadrants): LectureAnalyse[] {
-  return resultat.regions.flatMap(({ region, points }) => {
-    const point = points.at(-1);
+  return resultat.regions.flatMap((zone) => {
+    const { region, points } = zone;
+    const point = dernierMoisCommunCalcule(zone) ?? points.at(-1);
     if (!point) return [];
     const recups = [point.croissance.recupereLe, point.inflation.recupereLe].filter((date): date is number => date !== null && date > 0);
     const recupereLe = Math.max(...recups, 0);
     if (recupereLe <= 0) return [];
     const complet = point.quadrant !== null;
-    const limites = [point.croissance.motif, point.inflation.motif, recups.length < 2 ? "Date de récupération d'un axe inconnue." : null, resultat.connuLe ? `Vue ALFRED au ${resultat.connuLe}, sans heure de publication.` : "Historique courant révisable ; pas de disponibilité historique certifiée."].filter((x): x is string => x !== null);
+    const moisPlusRecents = points.filter((p) => p.finPeriode > point.finPeriode);
+    const limites = [point.croissance.motif, point.inflation.motif,
+      moisPlusRecents.length ? `Mois plus récents partiels : ${moisPlusRecents.map((p) => p.mois).join(", ")} ; dernier mois commun calculable ${point.mois}.` : null,
+      recups.length < 2 ? "Date de récupération d'un axe inconnue." : null,
+      resultat.connuLe ? `Vue ALFRED au ${resultat.connuLe}, sans heure de publication.` : "Historique courant révisable ; pas de disponibilité historique certifiée."].filter((x): x is string => x !== null);
     const debut = new Date(`${point.mois}-01T00:00:00Z`);
     debut.setUTCMonth(debut.getUTCMonth() - 3);
     const lecture: LectureAnalyse = {

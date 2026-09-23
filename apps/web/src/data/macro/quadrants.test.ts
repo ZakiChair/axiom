@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculerQuadrants, lecturesQuadrants } from "./quadrants";
+import { calculerQuadrants, dernierMoisCommunCalcule, lecturesQuadrants } from "./quadrants";
 import type { EtatSerie } from "../../store/macroSeries";
 
 const mois = (m: number): number => Date.UTC(2026, m - 1, 1);
@@ -8,6 +8,19 @@ function etat(valeurs: Array<[number, number]>, contexteConnuLe: string | null =
 }
 
 describe("quadrants macro à mois commun", () => {
+  it("retient juillet stable malgré CPI août seul, et signale août partiel sans revenir au dernier quadrant directionnel", () => {
+    const resultat = calculerQuadrants({
+      "production-aa-ez": etat([[3, 1], [4, 1], [5, 1], [6, 2], [7, 2]]),
+      "cpi-aa-ez": etat([[3, 3], [4, 3], [5, 3], [6, 2], [7, 3], [8, 4]]),
+    }, { regions: ["EZ"], maintenant: Date.UTC(2026, 8, 23) });
+    const zone = resultat.regions[0]!;
+    expect(zone.points.at(-1)?.mois).toBe("2026-08");
+    expect(dernierMoisCommunCalcule(zone)?.mois).toBe("2026-07");
+    expect(dernierMoisCommunCalcule(zone)?.inflation.sens).toBe("stable");
+    expect(dernierMoisCommunCalcule(zone)?.quadrant).toBeNull();
+    expect(lecturesQuadrants(resultat)[0]).toMatchObject({ id: "macro:EZ:2026-07:courant", observeLe: null });
+    expect(lecturesQuadrants(resultat)[0]?.limites.join(" ")).toMatch(/partiels.*2026-08/i);
+  });
   it("calcule M−M3 en points avec quatre mois consécutifs et sépare le contexte PIB", () => {
     const resultat = calculerQuadrants({
       "production-aa-us": etat([[4, 1], [5, 1.2], [6, 1.5], [7, 2]]),

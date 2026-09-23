@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { chargerQuadrants, lecturesQuadrants, type AxeQuadrant, type PointQuadrant, type ResultatQuadrants, type SensQuadrant } from "../../data/macro/quadrants";
+import { chargerQuadrants, dernierMoisCommunCalcule, lecturesQuadrants, type AxeQuadrant, type PointQuadrant, type ResultatQuadrants, type SensQuadrant } from "../../data/macro/quadrants";
 import type { RegionMacro } from "../../data/macro/catalogueMacro";
 import { remplacerLectures } from "../../store/analyseMultidomaine";
 import { Chargement, ErreurBloc, NoteSource, Vide } from "../ui";
@@ -34,12 +34,15 @@ export function QuadrantsMacroVue({ resultat, chargement, erreur }: { resultat: 
   return <section aria-label="Quadrants croissance et inflation" className="space-y-2">
     <p className="text-[11px] text-text-dim">Δ du rythme annuel entre M et M−3 (points de pourcentage) ; quatre mois consécutifs requis. Un Δ nul à ±10⁻⁹ pp est stable et ne donne pas de quadrant.</p>
     {resultat.regions.map((zone) => {
-      const dernier = zone.points.at(-1);
+      const dernier = dernierMoisCommunCalcule(zone) ?? zone.points.at(-1);
+      const partiels = dernier ? zone.points.filter((point) => point.finPeriode > dernier.finPeriode) : [];
       return <div key={zone.region} className="space-y-1">
         <h4 className="text-[11px] font-semibold text-text">{zone.region}</h4>
         {dernier ? <>
+          <p className="text-[10px] text-text-dim">{dernierMoisCommunCalcule(zone) ? "Dernier mois commun calculable" : "Aucun mois commun calculable"} : {dernier.mois}.</p>
           <ul><LigneQuadrant point={dernier} /></ul>
-          {zone.points.length > 1 && <details className="text-[10px] text-text-dim"><summary className="cursor-pointer">Historique et transitions · {zone.points.length} périodes</summary><ul className="mt-1 space-y-1">{zone.points.slice(0, -1).reverse().map((point) => <LigneQuadrant key={point.mois} point={point} />)}</ul></details>}
+          {partiels.length > 0 && <p className="text-[10px] text-warn">Mois plus récents partiels : {partiels.map((point) => point.mois).join(", ")} · axe manquant, non utilisé pour la synthèse.</p>}
+          {zone.points.length > 1 && <details className="text-[10px] text-text-dim"><summary className="cursor-pointer">Historique et transitions · {zone.points.length} périodes</summary><ul className="mt-1 space-y-1">{zone.points.filter((point) => point !== dernier).reverse().map((point) => <LigneQuadrant key={point.mois} point={point} />)}</ul></details>}
         </> : <p className="text-[11px] text-warn">Quadrant indéterminé · {zone.raison ?? "données indisponibles"}</p>}
       </div>;
     })}

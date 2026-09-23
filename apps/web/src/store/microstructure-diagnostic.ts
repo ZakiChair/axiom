@@ -22,6 +22,9 @@ import { fetchOpenInterestHist } from "../data/binanceFutures";
 import { binanceAdapter } from "../data/binance";
 import { souscrireDepth, type OrderBook } from "../data/depth";
 import { coutExecution } from "../data/depthExecution";
+import { StabiliteCarnet, cotationCarnetBinance, type VueStabiliteCarnet } from "../data/depthStability";
+import type { LectureAnalyse } from "../data/analyseMultidomaine";
+import { remplacerLectures } from "./analyseMultidomaine";
 import { healthStore } from "./health";
 import { isMarketDataReady, marketIdentity, marketStore } from "./market";
 import { enregistrerQualite } from "./qualiteMetriques";
@@ -84,6 +87,8 @@ export interface VueDiagnosticPartagee {
   diagnostic: DiagnosticPrixOiCvd | null;
   persistance: VuePersistanceDiagnostic;
   couts: CoutDiagnostic[];
+  stabilite: VueStabiliteCarnet | null;
+  cotation: string | null;
   provenance: {
     prix: string;
     oi: string;
@@ -96,6 +101,8 @@ export interface VueDiagnosticPartagee {
 export interface MicrostructureDiagnosticState {
   config: ConfigurationDiagnostic;
   vue: VueDiagnosticPartagee;
+  notionnelLiquidite: number;
+  setNotionnelLiquidite: (notionnel: number) => void;
   setConfig: (patch: Partial<ConfigurationDiagnostic>) => void;
   reset: () => void;
 }
@@ -136,6 +143,8 @@ function vueVide(symbole = "—", statut = "Diagnostic arrêté"): VueDiagnostic
     diagnostic: null,
     persistance: { code: null, confirme: false, persistanceMs: 0 },
     couts: [],
+    stabilite: null,
+    cotation: cotationCarnetBinance(symbole),
     provenance: {
       prix: "Binance spot · historique 5 min à la demande",
       oi: `Binance USDⓈ-M perp · sumOpenInterest (quantité ${actif}/contrats, pas oiUsd)`,
@@ -183,10 +192,26 @@ let generationCollecteur = 0;
 let recupereOiA: number | null = null;
 let recuperePrixCvdA: number | null = null;
 let derniereSignatureQualite = "";
+let stabilite: StabiliteCarnet | null = null;
+let generationDepth = 0;
+
+function nouvelleStabilite(now = Date.now()): void {
+  stabilite = new StabiliteCarnet(microstructureDiagnosticStore.getState().notionnelLiquidite, now);
+  remplacerLectures("liquidite", []);
+}
 
 export const microstructureDiagnosticStore = createStore<MicrostructureDiagnosticState>((set, get) => ({
   config: configInitiale,
   vue: vueVide(),
+  notionnelLiquidite: 10_000,
+  setNotionnelLiquidite: (brut) => {
+    if (!Number.isFinite(brut) || brut <= 0) return;
+    const borne = Math.min(10_000_000, Math.max(0.000001, brut));
+    const notionnel = Math.round(borne * 1_000_000) / 1_000_000;
+    if (notionnel === get().notionnelLiquidite) return;
+    set({ notionnelLiquidite: notionnel, vue: { ...get().vue, stabilite: null } });
+    nouvelleStabilite();
+  },
   setConfig: (patch) => {
     const config = normaliserConfig({ ...get().config, ...patch });
     try { if (typeof window !== "undefined") localStorage.setItem(STORAGE_KEY, JSON.stringify(config)); } catch { /* stockage optionnel */ }
@@ -212,6 +237,9 @@ export const microstructureDiagnosticStore = createStore<MicrostructureDiagnosti
     livre = null;
     livreRecuA = null;
     contexte = null;
+    generationDepth += 1;
+    stabilite = null;
+    remplacerLectures("liquidite", []);
     generationCollecteur += 1;
     set({ vue: vueVide(marketStore.getState().symbol, "Réinitialisé") });
   },
@@ -231,6 +259,8 @@ function contexteCourant(): ContexteDiagnostic {
 }
 
 function rebrancherDepth(suivant: ContexteDiagnostic): void {
+  generationDepth += 1;
+  const maGeneration = generationDepth;
   unsubDepth?.();
   unsubDepth = null;
   livre = null;
@@ -238,10 +268,16 @@ function rebrancherDepth(suivant: ContexteDiagnostic): void {
   if (utilisateurs === 0 || suivant.exchange !== "binance") return;
   unsubDepth = souscrireDepth(
     suivant.symbol,
-    (book) => { livre = book; livreRecuA = Date.now(); },
+    (book) => {
+      if (maGeneration !== generationDepth || contexte?.symbol !== suivant.symbol) return;
+      livre = book; livreRecuA = Date.now();
+    },
     () => {
+      if (maGeneration !== generationDepth) return;
       livre = null;
       livreRecuA = null;
+      nouvelleStabilite();
+      microstructureDiagnosticStore.setState((s) => ({ vue: { ...s.vue, stabilite: null } }));
       persistance.deconnecter();
       oiQuantite = [];
       bougiesSpot = [];
@@ -252,6 +288,48 @@ function rebrancherDepth(suivant: ContexteDiagnostic): void {
       dernierFetchPrixCvd = 0;
     },
   );
+}
+
+function publierLecturesLiquidite(vue: VueStabiliteCarnet, contexteActuel: ContexteDiagnostic, cotation: string, now: number, recuA: number | null): void {
+  const w = vue.fenetres[1];
+  const lectures: LectureAnalyse[] = (["achat", "vente"] as const).map((sens) => {
+    const cote = w[sens];
+    const valeur = cote.medianeBps;
+    const medianeDisponible = valeur !== null;
+    const courantDisponible = cote.courantBps !== null;
+    return {
+      id: `liquidite:${contexteActuel.symbol}:${vue.notionnelCotation}${cotation}:${sens}`,
+      domaine: "liquidite",
+      nature: "observation",
+      conclusion: `Médiane 1 min du coût L2 ${sens} pour ${vue.notionnelCotation} ${cotation}${medianeDisponible ? "" : " · en chauffe ou indisponible"}`,
+      tags: [{ cle: "liquidite", valeur: `mediane-1min:${sens}:${vue.notionnelCotation}${cotation}` }],
+      instrument: { symbol: contexteActuel.symbol, source: contexteActuel.exchange },
+      horizon: { depuis: now - w.dureeMs, jusqua: now },
+      unite: "bps",
+      valeur,
+      source: "Binance spot · carnet L2 reçu",
+      observeLe: null, // le flux spot reçu ne donne pas d'heure de marché certifiée
+      recupereLe: recuA ?? now,
+      validiteJusqua: recuA === null ? null : recuA + 5_000,
+      statut: !medianeDisponible ? courantDisponible ? "partiel" : "indisponible" : cote.couverture >= 0.7 ? "frais" : "partiel",
+      couverture: { presentes: cote.creneauxCouverts, attendues: w.attendus },
+      limites: [`Montant cible en ${cotation} ; aucune conversion de devise.`, "Carnet visible sans garantie d'exécution future ; hors frais.", ...(medianeDisponible ? [] : ["Médiane 1 min inconnue : moins de 20 créneaux complets, ou carnet absent, périmé, invalide ou insuffisant."])],
+      preuve: { fenetre: "DOM", reference: `stabilite:${contexteActuel.symbol}:${vue.notionnelCotation}${cotation}:${sens}:${now}` },
+    };
+  });
+  remplacerLectures("liquidite", lectures);
+}
+
+function publierCotationInconnue(suivant: ContexteDiagnostic, now: number): void {
+  remplacerLectures("liquidite", [{
+    id: `liquidite:${suivant.symbol}:cotation-inconnue`, domaine: "liquidite", nature: "observation",
+    conclusion: "Coût L2 indisponible : devise de cotation inconnue", tags: [{ cle: "liquidite", valeur: "cotation-inconnue" }],
+    instrument: { symbol: suivant.symbol, source: suivant.exchange }, horizon: { depuis: now, jusqua: now },
+    unite: null, valeur: null, source: "Binance spot · carnet L2 reçu", observeLe: null, recupereLe: now,
+    validiteJusqua: null, statut: "indisponible", couverture: null,
+    limites: ["Devise de cotation non résolue ; aucun coût calculé ni conversion supposée."],
+    preuve: { fenetre: "DOM", reference: `cotation-inconnue:${suivant.symbol}` },
+  }]);
 }
 
 async function chargerOi(suivant: ContexteDiagnostic, now: number): Promise<void> {
@@ -375,16 +453,31 @@ async function publier(): Promise<void> {
     dernierFetchOi = 0;
     dernierFetchPrixCvd = 0;
     generationCollecteur += 1;
+    if (identiteChangee) nouvelleStabilite(now);
     if (identiteChangee) rebrancherDepth(suivant);
   }
   if (suivant.exchange !== "binance") {
+    remplacerLectures("liquidite", []);
     publierQualiteIndisponible("Le diagnostic réel est disponible sur Binance uniquement.");
     microstructureDiagnosticStore.setState({ vue: vueVide(suivant.symbol, "Disponible sur Binance uniquement") });
     return;
   }
+  const cotation = cotationCarnetBinance(suivant.symbol);
+  if (cotation === null) {
+    stabilite = null;
+    publierCotationInconnue(suivant, now);
+    microstructureDiagnosticStore.setState({ vue: vueVide(suivant.symbol, "Devise de cotation indisponible") });
+    return;
+  }
+  // Le carnet a sa propre connexion ; une reconnexion du flux chart n'efface pas
+  // ses créneaux L2. Seuls l'identité et le reset de depth réarment cette série.
+  if (stabilite === null) nouvelleStabilite(now);
+  stabilite!.echantillonner(now, livre, livreRecuA);
+  const vueStabilite = stabilite!.vue(now);
+  publierLecturesLiquidite(vueStabilite, suivant, cotation, now, livreRecuA);
   if (!suivant.pret || !suivant.connecte) {
     publierQualiteIndisponible(suivant.connecte ? "Historique du marché maître en chargement." : "Flux Binance déconnecté.");
-    microstructureDiagnosticStore.setState({ vue: vueVide(suivant.symbol, suivant.connecte ? "Backfill en cours" : "Flux déconnecté · diagnostic réarmé") });
+    microstructureDiagnosticStore.setState({ vue: { ...vueVide(suivant.symbol, suivant.connecte ? "Backfill en cours" : "Flux déconnecté · diagnostic réarmé"), stabilite: vueStabilite } });
     return;
   }
   const config = microstructureDiagnosticStore.getState().config;
@@ -404,6 +497,7 @@ async function publier(): Promise<void> {
       diagnostic,
       persistance: confirmation,
       couts: calculerCoutsCarnet(livre, livreRecuA, now, 5_000),
+      stabilite: vueStabilite,
       majTs: now,
     },
   });
@@ -432,6 +526,9 @@ export function retenirDiagnosticMicrostructure(): () => void {
     unsubDepth = null;
     livre = null;
     livreRecuA = null;
+    generationDepth += 1;
+    stabilite = null;
+    remplacerLectures("liquidite", []);
     contexte = null;
     oiQuantite = [];
     bougiesSpot = [];

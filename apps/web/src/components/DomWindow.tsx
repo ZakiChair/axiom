@@ -43,6 +43,7 @@ import {
   type CoutDiagnostic,
 } from "../store/microstructure-diagnostic";
 import { EnTeteFenetre, Onglets, Vide } from "./ui";
+import { PanneauStabiliteCarnet } from "./dom/DepthStabilityPanel";
 
 /** Nombre MAX de niveaux affichés de chaque côté du mid (LADDER, fenêtre haute). */
 const LADDER_ROWS = 20;
@@ -828,6 +829,7 @@ export function DomWindow() {
       )}
 
       <PanneauDiagnosticMicrostructure />
+      {isBinance && <PanneauStabiliteCarnet />}
 
       {/* Corps : canvas (Binance) ou message d'indisponibilité. */}
       <div className="min-h-0 flex-1 overflow-auto">

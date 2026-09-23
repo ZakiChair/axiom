@@ -9,6 +9,7 @@ import {
 import { microstructureDiagnosticStore, retenirDiagnosticMicrostructure } from "./microstructure-diagnostic";
 import { healthStore } from "./health";
 import { marketStore } from "./market";
+import { lireLectures } from "./analyseMultidomaine";
 
 const transport = vi.hoisted(() => ({
   fetchOi: vi.fn(),
@@ -96,6 +97,101 @@ describe("fraîcheur du coût d'exécution", () => {
 });
 
 describe("collecteur à la demande", () => {
+  it("publie toujours la médiane 1 min, inconnue pendant la chauffe puis chiffrée", async () => {
+    transport.fetchOi.mockResolvedValue([]);
+    transport.fetchKlines.mockResolvedValue([]);
+    const release = retenirDiagnosticMicrostructure();
+    try {
+      const souscription = transport.souscrireDepth.mock.calls.at(-1) as unknown as [string, (livre: OrderBook) => void, () => void];
+      souscription[1]({ lastUpdateId: 1, bids: new Map([[99, 1_000]]), asks: new Map([[101, 1_000]]) });
+      await vi.advanceTimersByTimeAsync(1_000);
+      const premiere = lireLectures(Date.now()).find((l) => l.domaine === "liquidite" && l.id.includes("achat"));
+      expect(premiere?.valeur).toBeNull();
+      expect(premiere?.conclusion).toContain("Médiane");
+      for (let i = 2; i <= 20; i++) {
+        souscription[1]({ lastUpdateId: i, bids: new Map([[99, 1_000]]), asks: new Map([[101, 1_000]]) });
+        await vi.advanceTimersByTimeAsync(1_000);
+      }
+      const chauffeTerminee = lireLectures(Date.now()).find((l) => l.id === premiere?.id);
+      expect(chauffeTerminee?.valeur).toBe(100);
+      expect(chauffeTerminee?.conclusion).toContain("Médiane");
+    } finally {
+      release();
+    }
+  });
+
+  it("publie la vraie devise de cotation et refuse une identité inconnue", async () => {
+    transport.fetchOi.mockResolvedValue([]);
+    transport.fetchKlines.mockResolvedValue([]);
+    marchePrete("ETHBTC");
+    const release = retenirDiagnosticMicrostructure();
+    const souscription = transport.souscrireDepth.mock.calls.at(-1) as unknown as [string, (livre: OrderBook) => void, () => void];
+    souscription[1]({ lastUpdateId: 1, bids: new Map([[0.049, 100_000]]), asks: new Map([[0.051, 100_000]]) });
+    await vi.advanceTimersByTimeAsync(1_000);
+    const v = microstructureDiagnosticStore.getState().vue;
+    expect(v.cotation).toBe("BTC");
+    expect(lireLectures(Date.now()).find((l) => l.id.includes("achat"))?.conclusion).toContain(" BTC");
+
+    marchePrete("BTCXYZ");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(microstructureDiagnosticStore.getState().vue.cotation).toBeNull();
+    expect(microstructureDiagnosticStore.getState().vue.stabilite).toBeNull();
+    expect(lireLectures(Date.now()).find((l) => l.domaine === "liquidite")?.statut).toBe("indisponible");
+    release();
+  });
+
+  it("garde la lecture L2 quand seul le flux chart se reconnecte", async () => {
+    transport.fetchOi.mockResolvedValue([]);
+    transport.fetchKlines.mockResolvedValue([]);
+    const release = retenirDiagnosticMicrostructure();
+    const souscription = transport.souscrireDepth.mock.calls.at(-1) as unknown as [string, (livre: OrderBook) => void, () => void];
+    souscription[1]({ lastUpdateId: 1, bids: new Map([[99, 1_000]]), asks: new Map([[101, 1_000]]) });
+    healthStore.getState().setEtat("binance", "reconnecting");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(microstructureDiagnosticStore.getState().vue.stabilite?.fenetres[1].achat.observations).toBe(1);
+    release();
+  });
+
+  it("échantillonne le carnet partagé puis réarme sur montant et reset L2", async () => {
+    transport.fetchOi.mockResolvedValue([]);
+    transport.fetchKlines.mockResolvedValue([]);
+    const release = retenirDiagnosticMicrostructure();
+    const souscription = transport.souscrireDepth.mock.calls.at(-1) as unknown as [string, (livre: OrderBook) => void, () => void];
+    expect(souscription[0]).toBe("BTCUSDT");
+    souscription[1]({ lastUpdateId: 1, bids: new Map([[99, 1_000]]), asks: new Map([[101, 1_000]]) });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(microstructureDiagnosticStore.getState().vue.stabilite?.fenetres[1].achat.observations).toBe(1);
+    const preuveInitiale = lireLectures(Date.now()).find((l) => l.domaine === "liquidite" && l.instrument?.symbol === "BTCUSDT");
+    expect(preuveInitiale).toBeDefined();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const preuveRelue = lireLectures(Date.now()).find((l) => l.id === preuveInitiale?.id);
+    expect(preuveRelue?.recupereLe).toBe(preuveInitiale?.recupereLe);
+
+    microstructureDiagnosticStore.getState().setNotionnelLiquidite(50_000);
+    expect(microstructureDiagnosticStore.getState().vue.stabilite?.fenetres[1].achat.observations ?? 0).toBe(0);
+    souscription[2]();
+    expect(microstructureDiagnosticStore.getState().vue.stabilite).toBeNull();
+    release();
+  });
+
+  it("cesse d'attribuer l'ancien carnet au nouveau symbole", async () => {
+    transport.fetchOi.mockResolvedValue([]);
+    transport.fetchKlines.mockResolvedValue([]);
+    const release = retenirDiagnosticMicrostructure();
+    const ancienne = transport.souscrireDepth.mock.calls.at(-1) as unknown as [string, (livre: OrderBook) => void, () => void];
+    ancienne[1]({ lastUpdateId: 1, bids: new Map([[99, 1_000]]), asks: new Map([[101, 1_000]]) });
+    await vi.advanceTimersByTimeAsync(1_000);
+    marchePrete("ETHUSDT");
+    await vi.advanceTimersByTimeAsync(1_000);
+    const nouvelle = transport.souscrireDepth.mock.calls.at(-1) as unknown as [string, (livre: OrderBook) => void, () => void];
+    expect(nouvelle[0]).toBe("ETHUSDT");
+    expect(microstructureDiagnosticStore.getState().vue.stabilite?.fenetres[1].achat.observations ?? 0).toBe(0);
+    ancienne[1]({ lastUpdateId: 2, bids: new Map([[99, 1_000]]), asks: new Map([[101, 1_000]]) });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(microstructureDiagnosticStore.getState().vue.stabilite?.fenetres[1].achat.observations ?? 0).toBe(0);
+    release();
+  });
+
   it("ignore les réponses résolues après le dernier release", async () => {
     const oi = differee<never[]>();
     const klines = differee<never[]>();

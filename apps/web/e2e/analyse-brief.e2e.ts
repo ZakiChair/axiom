@@ -31,6 +31,7 @@ test("BRIEF actualise, conserve une référence, compare et réhydrate sans inve
   await page.keyboard.press("Enter");
   const section = page.getByRole("region", { name: "Analyse multidomaine" });
   await expect(section).toContainText("ethereum : divergence descriptive", { timeout: 20_000 });
+  await expect(section).toContainText(/\d+\/8 zones prêtes/);
   await expect(section).toContainText("Micro · coût L2");
   await expect(section).toContainText("Géopolitique · scénarios choisis");
   await expect(section).toContainText("Aucune lecture acquise dans ce domaine.");

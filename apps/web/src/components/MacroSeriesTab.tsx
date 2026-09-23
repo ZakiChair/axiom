@@ -1,5 +1,5 @@
 /** Évolution macro : une famille et une unité par graphique, sources et périodes explicites. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { INDICATEURS_MACRO, ORDRE_REGIONS, REGIONS_MACRO, seriesDeIndicateur, type DefinitionSerieMacro, type IndicateurMacro, type RegionMacro, type UniteMacro } from "../data/macro/catalogueMacro";
 import type { MacroSeries } from "../data/macro/types";
@@ -8,6 +8,8 @@ import { macroRatesViewStore, type HorizonMacro } from "../store/macroRatesView"
 import { contexteSourcesMacro, formatPeriodeMacro, formatValeurMacro, segmentsMacro, serieDansHorizon } from "./macroSeriesTab.util";
 import { BoutonBascule, Fraicheur, NoteSource, Segmente, Vide } from "./ui";
 import { TableTriable, type ColonneTable } from "./TableTriable";
+
+const QuadrantsMacro = lazy(() => import("./macro/QuadrantsMacro").then((module) => ({ default: module.QuadrantsMacro })));
 
 type CourbeMacro = { def: DefinitionSerieMacro; points: MacroSeries; couleur: string; tirets?: string };
 const HORIZONS: ReadonlyArray<{ id: HorizonMacro; label: string }> = [{ id: 1, label: "1 an" }, { id: 5, label: "5 ans" }, { id: 10, label: "10 ans" }];
@@ -79,6 +81,7 @@ function EvolutionMacro({ courbes, unite, label, horizon }: { courbes: CourbeMac
 }
 
 export function MacroSeriesTab({ refreshToken = 0 }: { refreshToken?: number }) {
+  const [quadrantsOuverts, setQuadrantsOuverts] = useState(false);
   const series = useStore(macroSeriesStore, (s) => s.series);
   const indicateur = useStore(macroRatesViewStore, (s) => s.indicateur);
   const regions = useStore(macroRatesViewStore, (s) => s.regions);
@@ -138,6 +141,12 @@ export function MacroSeriesTab({ refreshToken = 0 }: { refreshToken?: number }) 
           <TableTriable ariaLabel="Observations macro par zone" colonnes={colonnes} lignes={courbes} cle={c => c.def.id} />
         </div>
       </div>
+      <details onToggle={(event) => setQuadrantsOuverts(event.currentTarget.open)} className="rounded border border-border p-2">
+        <summary className="cursor-pointer text-[11px] font-medium text-text">Quadrants croissance et inflation</summary>
+        {quadrantsOuverts && <div className="mt-2"><Suspense fallback={<p role="status" className="text-[11px] text-text-dim">Chargement des quadrants…</p>}>
+          <QuadrantsMacro regions={regions} connuLe={connuLe} refreshToken={refreshToken} />
+        </Suspense></div>}
+      </details>
       <NoteSource>Dates = périodes observées, distinctes de la récupération. {contexteSourcesMacro(visibles, compatibleAlfred ? connuLe : null)} {connuLe && compatibleAlfred && "Cette réponse ne fournit pas l'heure ni une première publication authentifiée."} Cache isolé par millésime : 1 h pour les séries quotidiennes, 6 h pour les hebdomadaires, 24 h pour les mensuelles et trimestrielles. FRED nécessite une clé configurée. Les périmètres nationaux diffèrent ; aucune donnée n'est interpolée.</NoteSource>
     </div>
   );

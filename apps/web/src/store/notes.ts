@@ -107,11 +107,15 @@ export function tousLesTags(notes: Note[]): string[] {
 
 export interface NotesState {
   notes: Note[];
+  /** Échec de l'écriture locale ; les notes restent en mémoire tant que la page est ouverte. */
+  erreurSauvegarde: string | null;
   /** Crée une note (id généré, horodatée à maintenant). */
-  ajouter: (n: NouvelleNote) => void;
-  /** Édite le texte et/ou les tags d'une note existante. */
-  modifier: (id: string, patch: { texte?: string; tags?: string[] }) => void;
+  ajouter: (n: NouvelleNote) => { id: string; enregistre: boolean };
+  /** Édite une note existante, notamment une création restée en attente d'écriture. */
+  modifier: (id: string, patch: Partial<NouvelleNote>) => void;
   supprimer: (id: string) => void;
+  /** Réécrit l'état courant, sans rejouer la mutation. */
+  reessayerSauvegarde: () => boolean;
 }
 
 /** Identifiant unique (crypto.randomUUID si dispo, repli horodaté sinon). */
@@ -133,50 +137,55 @@ function lireInitial(): Note[] {
   }
 }
 
-/** Écriture tolérante (quota / mode privé => silencieux : persistance best-effort). */
-function sauvegarder(notes: Note[]): void {
+const ERREUR_SAUVEGARDE = "Non enregistré sur cet appareil. Réessayez la sauvegarde.";
+
+/** Le succès concerne localStorage uniquement ; le miroir daemon reste best-effort. */
+function sauvegarder(notes: Note[]): boolean {
   try {
     const valeur = JSON.stringify({ notes });
     localStorage.setItem(STORAGE_KEY, valeur);
-    miroiterTravailPersonnel(STORAGE_KEY, valeur);
+    try { miroiterTravailPersonnel(STORAGE_KEY, valeur); } catch { /* miroir facultatif */ }
+    return true;
   } catch {
-    /* ignore */
+    return false;
   }
 }
 
-export const notesStore = createStore<NotesState>((set) => ({
+export const notesStore = createStore<NotesState>((set, get) => ({
   notes: lireInitial(),
+  erreurSauvegarde: null,
 
-  ajouter: (n) =>
-    set((s) => ({
-      notes: [
-        ...s.notes,
-        {
-          id: genId(),
-          symbole: n.symbole.toUpperCase(),
-          source: n.source,
-          timestamp: Date.now(),
-          prix: n.prix,
-          texte: n.texte,
-          tags: n.tags ?? [],
-        },
-      ],
-    })),
+  ajouter: (n) => {
+    const id = genId();
+    set((s) => ({ notes: [...s.notes, {
+      id,
+      symbole: n.symbole.toUpperCase(),
+      source: n.source,
+      timestamp: Date.now(),
+      prix: n.prix,
+      texte: n.texte,
+      tags: n.tags ?? [],
+    }] }));
+    return { id, enregistre: get().erreurSauvegarde === null };
+  },
 
-  modifier: (id, patch) =>
-    set((s) => ({
-      notes: s.notes.map((n) =>
-        n.id === id
-          ? {
-              ...n,
-              texte: patch.texte ?? n.texte,
-              tags: patch.tags ?? n.tags,
-            }
-          : n
-      ),
-    })),
+  modifier: (id, patch) => {
+    if (!get().notes.some((n) => n.id === id)) return;
+    set((s) => ({ notes: s.notes.map((n) => n.id === id
+      ? { ...n, ...patch, symbole: patch.symbole?.toUpperCase() ?? n.symbole }
+      : n) }));
+  },
 
-  supprimer: (id) => set((s) => ({ notes: s.notes.filter((n) => n.id !== id) })),
+  supprimer: (id) => {
+    if (!get().notes.some((n) => n.id === id)) return;
+    set((s) => ({ notes: s.notes.filter((n) => n.id !== id) }));
+  },
+
+  reessayerSauvegarde: () => {
+    const ok = sauvegarder(get().notes);
+    set({ erreurSauvegarde: ok ? null : ERREUR_SAUVEGARDE });
+    return ok;
+  },
 }));
 
 // ─────────────────────────── Miroir daemon (dual-write) ───────────────────────────
@@ -195,8 +204,9 @@ function programmerSyncDaemon(notes: Note[]): void {
 // Persistance interne : sauvegarde à chaque changement + miroir daemon best-effort.
 notesStore.subscribe((state, prev) => {
   if (state.notes === prev.notes) return;
-  sauvegarder(state.notes);
-  programmerSyncDaemon(state.notes);
+  const ok = sauvegarder(state.notes);
+  notesStore.setState({ erreurSauvegarde: ok ? null : ERREUR_SAUVEGARDE });
+  if (ok) programmerSyncDaemon(state.notes);
 });
 
 // ─────────────────────────── Store UI du panneau (éphémère, NON persisté) ───────────────────────────
@@ -215,6 +225,8 @@ export interface NotesUiState {
   open: boolean;
   /** Brouillon en attente d'être seedé dans le formulaire (ou null). */
   brouillon: BrouillonNote | null;
+  /** Formulaire d'une création échouée, gardé en RAM même si la fenêtre est fermée. */
+  saisieEnAttente: { id: string; texte: string; tagsInput: string; ancre: { symbole: string; source: ExchangeId; prix?: number } | null } | null;
   openNotes: () => void;
   closeNotes: () => void;
   toggleNotes: () => void;
@@ -222,12 +234,14 @@ export interface NotesUiState {
   proposerNote: (b: BrouillonNote) => void;
   /** Consomme le brouillon une fois seedé par le formulaire (évite de le rejouer). */
   consommerBrouillon: () => void;
+  retenirSaisieEnAttente: (saisie: NotesUiState["saisieEnAttente"]) => void;
 }
 
 /** Ouverture du panneau Notes + brouillon post-mortem — VANILLA, éphémère. */
 export const notesUiStore = createStore<NotesUiState>((set) => ({
   open: false,
   brouillon: null,
+  saisieEnAttente: null,
   openNotes: () => windowManagerStore.getState().openWindow("notes"),
   closeNotes: () => windowManagerStore.getState().closeWindow("notes"),
   toggleNotes: () => windowManagerStore.getState().toggleWindow("notes"),
@@ -236,6 +250,7 @@ export const notesUiStore = createStore<NotesUiState>((set) => ({
     windowManagerStore.getState().openWindow("notes");
   },
   consommerBrouillon: () => set({ brouillon: null }),
+  retenirSaisieEnAttente: (saisieEnAttente) => set({ saisieEnAttente }),
 }));
 
 mirrorOpenState("notes", notesUiStore);

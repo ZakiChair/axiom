@@ -21,6 +21,8 @@ import {
   type Position,
 } from "../store/portfolio";
 import { alertsStore } from "../store/alerts";
+import { alerteActiveAuTemps } from "@axiom/alerts";
+import { useExpirationClock } from "../alerts/useExpirationClock";
 import { healthStore, type SanteSource } from "../store/health";
 import { degradedLevel } from "./HealthPanel";
 import { regimeStore } from "../store/regime";
@@ -49,15 +51,17 @@ function healthLevelSignature(sources: Record<string, SanteSource>): string {
 }
 
 /** Compte les alertes actives. PURE. */
-export function compterAlertesActives(defs: readonly { actif: boolean }[]): number {
+export function compterAlertesActives(defs: readonly { actif: boolean; expireTs?: number }[], maintenant = Date.now()): number {
   let n = 0;
-  for (const d of defs) if (d.actif) n += 1;
+  for (const d of defs) if (alerteActiveAuTemps(d, maintenant)) n += 1;
   return n;
 }
 
 export function SessionStrip() {
   const positions = useStore(portfolioStore, (s) => s.positions);
-  const nbAlertes = useStore(alertsStore, (s) => compterAlertesActives(s.defs));
+  const defs = useStore(alertsStore, (s) => s.defs);
+  const maintenant = useExpirationClock(defs);
+  const nbAlertes = compterAlertesActives(defs, maintenant);
   // Abonnement bas-fréquence : ne change que si le niveau de dégradation bascule.
   const healthSig = useStore(healthStore, (s) => healthLevelSignature(s.sources));
   const healthLevel = healthSig === "ok" ? null : (healthSig as "error" | "warn");

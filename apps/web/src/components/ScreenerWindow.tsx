@@ -446,6 +446,7 @@ export function ScreenerWindow() {
   const [tri, setTri] = useState<TriTable>({ colonne: "volumeUsd24h", dir: -1 });
   // Message discret du bouton « Alerte » (confirmation période / refus limite), auto-effacé.
   const [msgAlerte, setMsgAlerte] = useState<{ ton: "ok" | "limite"; texte: string } | null>(null);
+  const [dureeAlerteMs, setDureeAlerteMs] = useState(0);
 
   const busy = runState === "loading" || runState === "running";
 
@@ -463,9 +464,12 @@ export function ScreenerWindow() {
       tf,
       baseConditions,
       indicatorConditions,
+      ...(dureeAlerteMs > 0 ? { expireTs: Date.now() + dureeAlerteMs } : {}),
     });
     if (res === "limite") {
       setMsgAlerte({ ton: "limite", texte: "4 alertes de scan max" });
+    } else if (res === "invalide") {
+      setMsgAlerte({ ton: "limite", texte: "Échéance invalide" });
     } else {
       // Période identique à la dérivation du store (15 sans filtre indicateur, sinon 60).
       const periode = indicatorConditions.length === 0 ? 15 : 60;
@@ -755,6 +759,15 @@ export function ScreenerWindow() {
           {/* Alerte de scan : rescanne périodiquement le preset chargé, notifie les symboles
               ENTRANTS. Actif seulement sur un preset chargé et intact (édition manuelle → null). */}
           <div className="flex items-center gap-2">
+            <label className="text-[10px] text-text-dim">Durée du scan
+              <select value={dureeAlerteMs} onChange={(e) => setDureeAlerteMs(Number(e.target.value))}
+                aria-label="Durée de l'alerte de scan" className="ml-1 rounded border border-border bg-bg px-1 py-0.5 text-xs text-text">
+                <option value={0}>Sans échéance</option>
+                <option value={3_600_000}>1 h</option>
+                <option value={24 * 3_600_000}>24 h</option>
+                <option value={7 * 24 * 3_600_000}>7 jours</option>
+              </select>
+            </label>
             <Bouton
               onClick={creerAlerte}
               disabled={dernierPresetCharge === null}

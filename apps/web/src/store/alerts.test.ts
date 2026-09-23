@@ -75,6 +75,28 @@ describe("ajouter", () => {
     expect(d?.declenchements).toEqual([]);
     expect(typeof d?.id).toBe("string");
   });
+
+  it("conserve une échéance fournie et refuse un champ présent invalide", () => {
+    const expireTs = Date.now() + 60_000;
+    expect(alertsStore.getState().ajouter({ ...NOUVELLE, expireTs })).toBe(true);
+    expect(alertsStore.getState().defs[0]?.expireTs).toBe(expireTs);
+    expect(alertsStore.getState().ajouter({ ...NOUVELLE, expireTs: undefined })).toBe(false);
+    expect(alertsStore.getState().ajouter({ ...NOUVELLE, expireTs: Number.NaN })).toBe(false);
+    expect(alertsStore.getState().defs).toHaveLength(1);
+    const id = alertsStore.getState().defs[0]!.id;
+    alertsStore.getState().basculerActif(id);
+    alertsStore.getState().basculerActif(id);
+    expect(alertsStore.getState().defs[0]?.expireTs).toBe(expireTs);
+  });
+
+  it("la prolongation est explicite et ne réactive pas une alerte en pause", () => {
+    alertsStore.getState().ajouter(NOUVELLE);
+    const id = alertsStore.getState().defs[0]!.id;
+    alertsStore.getState().basculerActif(id);
+    expect(alertsStore.getState().prolonger(id, Date.now() + 60_000)).toBe(true);
+    expect(alertsStore.getState().defs[0]).toMatchObject({ actif: false, expireTs: expect.any(Number) });
+    expect(alertsStore.getState().prolonger(id, Date.now() - 1)).toBe(false);
+  });
 });
 
 describe("basculerActif / supprimer", () => {
@@ -181,6 +203,18 @@ describe("lireInitial — hydratation par élément (un item corrompu est écart
     expect(etat.journal).toHaveLength(1);
   });
 
+  it("écarte les échéances invalides au lieu de les restaurer comme permanentes", () => {
+    const base = { id: "a", symbol: "BTCUSDT", source: "binance", condition: { type: "prix-croise", niveau: 100, sens: "hausse" }, actif: true, declenchements: [] };
+    localStorage.setItem("axiom:alerts:v1", JSON.stringify({ defs: [
+      { ...base, id: "legacy" },
+      { ...base, id: "valide", expireTs: 1234 },
+      { ...base, id: "nul", expireTs: null },
+      { ...base, id: "texte", expireTs: "1234" },
+      { ...base, id: "zero", expireTs: 0 },
+    ], journal: [] }));
+    expect(lireInitial().defs.map((d) => d.id)).toEqual(["legacy", "valide"]);
+  });
+
   it("valide strictement métrique, comparateur et seuil d'une alerte flux importée", () => {
     localStorage.setItem(
       "axiom:alerts:v1",
@@ -224,6 +258,19 @@ describe("lireInitial — hydratation par élément (un item corrompu est écart
       ],
     }));
     expect(lireInitial().journal.map((d) => d.alertId)).toEqual(["ok"]);
+  });
+
+  it("conserve le signal mais retire une preuve importée composite malformée ou future", () => {
+    const base = { alertId: "a", ts: 2_000, valeur: 101, message: "signal" };
+    const origine = { ...base, symbol: "BTCUSDT", source: "binance", timeframe: "1h",
+      condition: { type: "prix-croise", niveau: 100, sens: "hausse" } };
+    localStorage.setItem("axiom:alerts:v1", JSON.stringify({ defs: [], journal: [
+      { ...base, preuve: { origine: { ...origine, condition: { type: "composite", conditions: null } }, contexte: {} } },
+      { ...base, alertId: "b", preuve: { origine: { ...origine, alertId: "b" }, contexte: { derniereBougie: { time: 3_000, open: 1, high: 1, low: 1, close: 1, volume: 1 } } } },
+    ] }));
+    const journal = lireInitial().journal;
+    expect(journal.map((d) => d.alertId)).toEqual(["a", "b"]);
+    expect(journal.every((d) => d.preuve === undefined)).toBe(true);
   });
 });
 

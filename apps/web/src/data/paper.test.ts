@@ -41,6 +41,8 @@ function ordre(p: Partial<OrdrePaper>): OrdrePaper {
   return {
     id: p.id ?? "o1",
     symbol: p.symbol ?? "BTCUSDT",
+    ...("source" in p ? { source: p.source } : {}),
+    ...("decisionIds" in p ? { decisionIds: p.decisionIds } : {}),
     direction: p.direction ?? "long",
     type: p.type ?? "market",
     prixLimite: "prixLimite" in p ? (p.prixLimite ?? null) : null,
@@ -228,6 +230,23 @@ describe("evaluerTick — ordre stop (déclenchement en cassure, puis market le 
 });
 
 describe("evaluerTick — fusion (renfort au prix moyen pondéré)", () => {
+  it("isole les venues et unit les dossiers lors d'un renfort, jusqu'au trade clôturé", () => {
+    const e = etat({ ordres: [
+      ordre({ id: "binance", source: "binance", decisionIds: ["dA"], sl: 90 }),
+      ordre({ id: "bybit", source: "bybit", decisionIds: ["dB"], sl: 80 }),
+    ] });
+    const surBinance = evaluerTick(e, "BTCUSDT", 100, 2_000, "binance");
+    expect(surBinance.ordres.map((o) => o.id)).toEqual(["bybit"]);
+    expect(surBinance.positions[0]).toMatchObject({ source: "binance", decisionIds: ["dA"], stopInitial: 90 });
+    const avecRenfort = evaluerTick({ ...surBinance, ordres: [ordre({ id: "renfort", source: "binance", decisionIds: ["dB", "dA"], sl: 85 }), ...surBinance.ordres] }, "BTCUSDT", 110, 3_000, "binance");
+    expect(avecRenfort.positions[0]).toMatchObject({ source: "binance", decisionIds: ["dA", "dB"], stopInitial: 90, sl: 85 });
+    const fermeture = evaluerTickDetaille(avecRenfort, "BTCUSDT", 85, 4_000, "binance");
+    expect(tradeJournalDepuisCloture(fermeture.clotures[0]!.position, fermeture.clotures[0]!.exec)).toMatchObject({
+      source: "binance", decisionIds: ["dA", "dB"], stopInitial: 90,
+    });
+    expect(fermeture.etat.ordres.map((o) => o.id)).toEqual(["bybit"]);
+    expect(evaluerTick(fermeture.etat, "BTCUSDT", 85, 5_000, "bybit").positions[0]?.source).toBe("bybit");
+  });
   it("market même symbole+direction qu'une position → renfort, prix moyen exact", () => {
     // Position 2@100 + fill 1@130 → taille 3, prix moyen = (2×100 + 1×130)/3 = 330/3 = 110.
     const e = etat({

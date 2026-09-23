@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AlertDef } from "@axiom/alerts";
 import type { Candle } from "@axiom/types";
 
-const { executerScreenerMock, subscribeTickersMock, daemonSupporteMock, detectDaemonMock, urlDaemonMock, chargerFluxMock } =
+const { executerScreenerMock, subscribeTickersMock, daemonSupporteMock, detectDaemonMock, urlDaemonMock, chargerFluxMock, chargerOnchainMock, coinalyzeFundingMock, coinalyzeHistoryMock } =
   vi.hoisted(() => ({
     executerScreenerMock: vi.fn(),
     subscribeTickersMock: vi.fn((..._args: unknown[]) => () => {}),
@@ -17,6 +17,9 @@ const { executerScreenerMock, subscribeTickersMock, daemonSupporteMock, detectDa
     detectDaemonMock: vi.fn(async () => false),
     urlDaemonMock: vi.fn((chemin: string) => chemin),
     chargerFluxMock: vi.fn(() => new Promise(() => {})),
+    chargerOnchainMock: vi.fn(() => new Promise(() => {})),
+    coinalyzeFundingMock: vi.fn(async () => ({ rate: 0 })),
+    coinalyzeHistoryMock: vi.fn(async () => []),
   }));
 vi.mock("../data/ticker", async (importOriginal) => {
   const original = await importOriginal<typeof import("../data/ticker")>();
@@ -31,8 +34,8 @@ vi.mock("../data/daemon", () => ({
 }));
 vi.mock("../data/coinalyze", () => ({
   coinalyzeProvider: {
-    fetchFundingRate: async () => ({ rate: 0 }),
-    fetchFundingRateHistory: async () => [],
+    fetchFundingRate: coinalyzeFundingMock,
+    fetchFundingRateHistory: coinalyzeHistoryMock,
   },
 }));
 vi.mock("../data/screenerRun", () => ({ executerScreener: executerScreenerMock }));
@@ -40,6 +43,7 @@ vi.mock("../data/onchain/fluxCapitaux", async (importOriginal) => {
   const original = await importOriginal<typeof import("../data/onchain/fluxCapitaux")>();
   return { ...original, chargerFluxCapitaux: chargerFluxMock };
 });
+vi.mock("./onchainMetriques", () => ({ chargerMetriquesOnchain: chargerOnchainMock }));
 vi.mock("../chart/liquidationMarkers", () => ({
   fluxLiqRetenu: () => false,
   liqEventsStore: { getState: () => ({ events: [] }), subscribe: () => () => {} },
@@ -74,7 +78,7 @@ let stop: (() => void) | null = null;
 beforeEach(() => {
   alertsStore.setState({ defs: [], journal: [] });
   marketStore.setState({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1m", candles: [] });
-  orderflowStore.setState({ enabled: false, cvdSpotPerp: false });
+  orderflowStore.setState({ enabled: false, cvdSpotPerp: false, alerteCvdDemandee: false });
   presetAlertsStore.setState({ alertes: [] });
   fluxCapitauxStore.setState({ donnees: null, chargement: false, erreur: null });
   subscribeTickersMock.mockClear();
@@ -86,6 +90,10 @@ beforeEach(() => {
   urlDaemonMock.mockImplementation((chemin: string) => chemin);
   executerScreenerMock.mockReset();
   executerScreenerMock.mockResolvedValue({ rows: [] });
+  chargerOnchainMock.mockReset();
+  chargerOnchainMock.mockImplementation(() => new Promise(() => {}));
+  coinalyzeFundingMock.mockClear();
+  coinalyzeHistoryMock.mockClear();
 });
 
 describe("alerte lente de flux sans panneau ouvert", () => {
@@ -467,6 +475,7 @@ describe("heartbeat v2 et notification navigateur", () => {
 afterEach(() => {
   stop?.();
   stop = null;
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -494,6 +503,10 @@ describe("creerRuntime — source clôture de bougie (variation-pct)", () => {
     });
     expect(alertsStore.getState().journal).toHaveLength(1);
     expect(alertsStore.getState().defs[0]?.arme).toBe(false);
+    expect(alertsStore.getState().journal[0]?.preuve).toMatchObject({
+      origine: { alertId: "a1", ts: expect.any(Number), symbol: "BTCUSDT", source: "binance", condition: DEF.condition },
+      contexte: { dernierPrix: 110, prixPrecedent: 100, derniereBougie: { time: tC, close: 110 } },
+    });
 
     // Bougie EN FORMATION à +100 % : PAS évaluée (la dernière clôturée est déjà traitée,
     // garde dernierTempsCloture) — aucun déclenchement supplémentaire.
@@ -600,7 +613,7 @@ describe("filtrage des defs de bougie par timeframe", () => {
   });
 });
 
-describe("pipeline CVD : rallumé sur changement de DEFS uniquement", () => {
+describe("pipeline CVD : demande d'alerte transitoire", () => {
   const DEF_CVD: AlertDef = {
     id: "cvd1",
     symbol: "BTCUSDT",
@@ -610,33 +623,179 @@ describe("pipeline CVD : rallumé sur changement de DEFS uniquement", () => {
     declenchements: [],
   };
 
-  it("un simple ajout au journal ne réactive PAS l'orderflow coupé par l'opérateur", () => {
+  it("une alerte demande le flux sans modifier les deux préférences utilisateur ; le journal ne les modifie pas", () => {
     alertsStore.setState({ defs: [DEF_CVD], journal: [] });
     stop = demarrerAlertes();
-    expect(orderflowStore.getState().enabled).toBe(true); // allumé au démarrage
+    expect(orderflowStore.getState()).toMatchObject({ enabled: false, cvdSpotPerp: false, alerteCvdDemandee: true });
 
-    // L'opérateur coupe le footprint / CVD S/P à la main.
-    orderflowStore.getState().setEnabled(false);
-    orderflowStore.getState().setCvdSpotPerp(false);
-
-    // Déclenchement d'une alerte SANS RAPPORT : le store émet sur le journal ET sur la
-    // transition d'armement (`appliquerMisesAJour` réalloue `defs`) — dans les deux cas
-    // l'ENSEMBLE des alertes CVD est inchangé, le pipeline ne doit PAS être ressuscité.
+    // Le journal et l'armement ne changent ni la demande ni l'intention UI.
     alertsStore.getState().ajouterJournal({ alertId: "autre", ts: Date.now(), valeur: 1, message: "m" });
     alertsStore.getState().appliquerMisesAJour([{ ...DEF_CVD, arme: false }]);
-
-    expect(orderflowStore.getState().enabled).toBe(false);
-    expect(orderflowStore.getState().cvdSpotPerp).toBe(false);
+    expect(orderflowStore.getState()).toMatchObject({ enabled: false, cvdSpotPerp: false, alerteCvdDemandee: true });
   });
 
-  it("une NOUVELLE alerte CVD rallume bien le pipeline (non-régression)", () => {
+  it("une seule des deux alertes expirée conserve la demande, le dernier retrait la libère", () => {
+    const now = Date.UTC(2026, 8, 23, 12);
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    alertsStore.setState({ defs: [{ ...DEF_CVD, expireTs: now + 1_000 }, { ...DEF_CVD, id: "cvd2", expireTs: now + 2_000 }], journal: [] });
+    stop = demarrerAlertes();
+    expect(orderflowStore.getState().alerteCvdDemandee).toBe(true);
+    alertsStore.setState({ defs: [{ ...DEF_CVD, expireTs: now }, { ...DEF_CVD, id: "cvd2", expireTs: now + 2_000 }] });
+    expect(orderflowStore.getState().alerteCvdDemandee).toBe(true);
+    alertsStore.setState({ defs: [{ ...DEF_CVD, expireTs: now }, { ...DEF_CVD, id: "cvd2", expireTs: now }] });
+    expect(orderflowStore.getState()).toMatchObject({ enabled: false, cvdSpotPerp: false, alerteCvdDemandee: false });
+  });
+
+  it("la préférence utilisateur peut être désactivée pendant l'alerte et reste désactivée à l'arrêt", () => {
+    orderflowStore.setState({ enabled: true, cvdSpotPerp: true });
     alertsStore.setState({ defs: [DEF_CVD], journal: [] });
     stop = demarrerAlertes();
     orderflowStore.getState().setEnabled(false);
     orderflowStore.getState().setCvdSpotPerp(false);
-    alertsStore.setState({ defs: [DEF_CVD, { ...DEF_CVD, id: "cvd2", symbol: "ETHUSDT" }] });
-    expect(orderflowStore.getState().enabled).toBe(true);
-    expect(orderflowStore.getState().cvdSpotPerp).toBe(true);
+    expect(orderflowStore.getState().alerteCvdDemandee).toBe(true);
+    stop(); stop = null;
+    expect(orderflowStore.getState()).toMatchObject({ enabled: false, cvdSpotPerp: false, alerteCvdDemandee: false });
+  });
+
+  it("libère sans tick la dernière demande à l'échéance exacte", async () => {
+    const now = Date.UTC(2026, 8, 23, 12);
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    alertsStore.setState({ defs: [{ ...DEF_CVD, expireTs: now + 1_000 }], journal: [] });
+    stop = demarrerAlertes();
+    expect(orderflowStore.getState().alerteCvdDemandee).toBe(true);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(orderflowStore.getState().alerteCvdDemandee).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(orderflowStore.getState().alerteCvdDemandee).toBe(false);
+  });
+});
+
+describe("acquisitions asynchrones et échéance", () => {
+  it("arrête le funding après le repli différé sans demander l'historique", async () => {
+    const now = Date.UTC(2026, 8, 23, 12);
+    const horloge = vi.spyOn(Date, "now").mockReturnValue(now);
+    let liberer!: (value: { rate: number }) => void;
+    coinalyzeFundingMock.mockImplementationOnce(() => new Promise((resolve) => { liberer = resolve; }));
+    const fetchMock = vi.fn(async () => Response.json({}));
+    vi.stubGlobal("fetch", fetchMock);
+    alertsStore.setState({ defs: [{
+      id: "funding-repli", symbol: "BTCUSDT", source: "binance",
+      condition: { type: "funding-extreme", seuilAbs: 0.001, sens: "long-crowded" },
+      actif: true, arme: true, declenchements: [], expireTs: now + 1_000,
+    }], journal: [] });
+    stop = demarrerAlertes();
+    await vi.waitFor(() => expect(coinalyzeFundingMock).toHaveBeenCalledTimes(1));
+    horloge.mockReturnValue(now + 1_000);
+    liberer({ rate: 0.002 });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(coinalyzeHistoryMock).not.toHaveBeenCalled();
+    expect(alertsStore.getState().journal).toHaveLength(0);
+  });
+
+  it("ne lance aucun nouvel I/O funding après retrait des deux symboles pendant premiumIndex BTC", async () => {
+    const now = Date.UTC(2026, 8, 23, 12);
+    const horloge = vi.spyOn(Date, "now").mockReturnValue(now);
+    let liberer!: (res: Response) => void;
+    const premier = new Promise<Response>((resolve) => { liberer = resolve; });
+    const appels: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      const u = String(url);
+      appels.push(u);
+      return u.includes("premiumIndex") && u.includes("BTCUSDT") ? premier
+        : Promise.resolve(u.includes("premiumIndex") ? Response.json({ lastFundingRate: "0.002" }) : Response.json([]));
+    }));
+    const def = (id: string, symbol: string): AlertDef => ({
+      id, symbol, source: "binance", condition: { type: "funding-extreme", seuilAbs: 0.001, sens: "long-crowded" },
+      actif: true, arme: true, declenchements: [], expireTs: now + 1_000,
+    });
+    alertsStore.setState({ defs: [def("btc", "BTCUSDT"), def("eth", "ETHUSDT")], journal: [] });
+    stop = demarrerAlertes();
+    expect(appels).toHaveLength(1);
+    expect(appels[0]).toContain("BTCUSDT");
+    horloge.mockReturnValue(now + 1_000);
+    alertsStore.setState({ defs: [] });
+    liberer(Response.json({ lastFundingRate: "0.002" }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(appels).toHaveLength(1);
+    expect(coinalyzeFundingMock).not.toHaveBeenCalled();
+    expect(coinalyzeHistoryMock).not.toHaveBeenCalled();
+    expect(alertsStore.getState().journal).toHaveLength(0);
+  });
+
+  it("journalise mais ne notifie pas si un abonné fait franchir l'échéance avant notifier", () => {
+    const now = Date.UTC(2026, 8, 23, 12);
+    const horloge = vi.spyOn(Date, "now").mockReturnValue(now);
+    const NotificationMock = vi.fn();
+    Object.defineProperty(NotificationMock, "permission", { value: "granted" });
+    vi.stubGlobal("Notification", NotificationMock);
+    vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
+    alertsStore.setState({ defs: [{
+      id: "prix-course", symbol: "BTCUSDT", source: "binance",
+      condition: { type: "prix-croise", niveau: 105, sens: "hausse" },
+      actif: true, arme: true, declenchements: [], expireTs: now + 1_000,
+    }], journal: [] });
+    stop = demarrerAlertes();
+    const onTick = subscribeTickersMock.mock.calls.find((args) => (args[2] as { source?: string })?.source === "binance")?.[1] as
+      (u: { symbol: string; price: number; changePercent: number }) => void;
+    onTick({ symbol: "BTCUSDT", price: 100, changePercent: 0 });
+    const arreterJournal = alertsStore.subscribe((state, precedent) => {
+      if (state.journal.length > precedent.journal.length) horloge.mockReturnValue(now + 1_000);
+    });
+    try {
+      onTick({ symbol: "BTCUSDT", price: 110, changePercent: 10 });
+      expect(alertsStore.getState().journal).toHaveLength(1);
+      expect(NotificationMock).not.toHaveBeenCalled();
+    } finally { arreterJournal(); }
+  });
+
+  it("un funding commencé avant expiration ne déclenche pas après prolongation du même ID", async () => {
+    const now = Date.UTC(2026, 8, 23, 12);
+    const horloge = vi.spyOn(Date, "now").mockReturnValue(now);
+    let liberer!: (res: Response) => void;
+    const premium = new Promise<Response>((resolve) => { liberer = resolve; });
+    const fetchMock = vi.fn((url: string) => String(url).includes("premiumIndex")
+      ? premium : Promise.resolve(Response.json([])));
+    vi.stubGlobal("fetch", fetchMock);
+    alertsStore.setState({ defs: [{
+      id: "funding-course", symbol: "BTCUSDT", source: "binance",
+      condition: { type: "funding-extreme", seuilAbs: 0.001, sens: "long-crowded" },
+      actif: true, arme: true, declenchements: [], expireTs: now + 1_000,
+    }], journal: [] });
+    stop = demarrerAlertes();
+    expect(fetchMock).toHaveBeenCalled();
+    horloge.mockReturnValue(now + 1_000);
+    expect(alertsStore.getState().prolonger("funding-course", now + 3_600_000)).toBe(true);
+    liberer(Response.json({ lastFundingRate: "0.002" }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(alertsStore.getState().journal).toHaveLength(0);
+  });
+
+  it("un chargement on-chain ancien est ignoré après expiration puis prolongation", async () => {
+    const now = Date.UTC(2026, 8, 23, 12);
+    const horloge = vi.spyOn(Date, "now").mockReturnValue(now);
+    let libererAncien!: (valeur: { "mvrv-z": number }) => void;
+    let libererNouveau!: (valeur: { "mvrv-z": number }) => void;
+    const ancien = new Promise<{ "mvrv-z": number }>((resolve) => { libererAncien = resolve; });
+    const nouveau = new Promise<{ "mvrv-z": number }>((resolve) => { libererNouveau = resolve; });
+    chargerOnchainMock.mockImplementationOnce(() => ancien).mockImplementationOnce(() => nouveau);
+    alertsStore.setState({ defs: [{
+      id: "onchain-course", symbol: "BTCUSDT", source: "binance",
+      condition: { type: "onchain-seuil", metrique: "mvrv-z", comparateur: ">=", valeur: 7 },
+      actif: true, arme: true, declenchements: [], expireTs: now + 1_000,
+    }], journal: [] });
+    stop = demarrerAlertes();
+    await vi.waitFor(() => expect(chargerOnchainMock).toHaveBeenCalledTimes(1));
+    horloge.mockReturnValue(now + 1_000);
+    expect(alertsStore.getState().prolonger("onchain-course", now + 3_600_000)).toBe(true);
+    await vi.waitFor(() => expect(chargerOnchainMock).toHaveBeenCalledTimes(2));
+    libererAncien({ "mvrv-z": 10 });
+    await Promise.resolve();
+    expect(alertsStore.getState().journal).toHaveLength(0);
+    libererNouveau({ "mvrv-z": 10 });
+    await vi.waitFor(() => expect(alertsStore.getState().journal.map((d) => d.alertId)).toEqual(["onchain-course"]));
   });
 });
 
@@ -652,6 +811,53 @@ describe("alertes de preset : pas de garde de visibilité, état de scan observa
     actif: true,
     creeTs: 1,
   };
+
+  it("revérifie chaque notification après le journal quand l'échéance tombe dans le lot", async () => {
+    const now = Date.UTC(2026, 8, 23, 12);
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const NotificationMock = vi.fn();
+    Object.defineProperty(NotificationMock, "permission", { value: "granted" });
+    vi.stubGlobal("Notification", NotificationMock);
+    vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "visible" }));
+    executerScreenerMock.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ symbol: "BTCUSDT" }, { symbol: "ETHUSDT" }] });
+    presetAlertsStore.setState({ alertes: [{ ...ALERTE, expireTs: now + 2 * 3_600_000 }] });
+    const arreterJournal = alertsStore.subscribe((state, precedent) => {
+      if (state.journal.length > precedent.journal.length) vi.setSystemTime(now + 2 * 3_600_000);
+    });
+    try {
+      stop = demarrerAlertes();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      expect(alertsStore.getState().journal).toHaveLength(1);
+      expect(NotificationMock).not.toHaveBeenCalled();
+    } finally { arreterJournal(); }
+  });
+
+  it("l'ancien rejet après expiration puis prolongation ne touche ni le nouveau scan ni son verrou", async () => {
+    const now = Date.UTC(2026, 8, 23, 12);
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    let rejeterAncien!: (raison: Error) => void;
+    let resoudreNouveau!: (valeur: { rows: Array<{ symbol: string }> }) => void;
+    const ancien = new Promise<{ rows: Array<{ symbol: string }> }>((_resolve, reject) => { rejeterAncien = reject; });
+    const nouveau = new Promise<{ rows: Array<{ symbol: string }> }>((resolve) => { resoudreNouveau = resolve; });
+    executerScreenerMock.mockImplementationOnce(() => ancien).mockImplementationOnce(() => nouveau);
+    presetAlertsStore.setState({ alertes: [{ ...ALERTE, expireTs: now + 1_000 }] });
+    stop = demarrerAlertes();
+    expect(executerScreenerMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(presetAlertsStore.getState().prolonger("p1", now + 2 * 3_600_000)).toBe("ok");
+    expect(executerScreenerMock).toHaveBeenCalledTimes(2);
+    rejeterAncien(new Error("ancien réseau"));
+    await Promise.resolve();
+    expect(presetAlertsStore.getState().alertes[0]?.derniereErreur).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(executerScreenerMock).toHaveBeenCalledTimes(2);
+    resoudreNouveau({ rows: [] });
+    await Promise.resolve();
+    expect(presetAlertsStore.getState().alertes[0]?.derniereErreur).toBeUndefined();
+  });
 
   it("scanne même onglet caché et publie l'horodatage du scan", async () => {
     vi.stubGlobal("document", Object.assign(new EventTarget(), { visibilityState: "hidden" }));

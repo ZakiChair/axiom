@@ -247,6 +247,35 @@ describe("raisonUnusableIndicateur", () => {
     ).toBeNull();
   });
 
+  it("l'intensité de liquidations exige clé, perp USDT et timeframe Coinalyze", () => {
+    coinalyzeKeyStore.setState({ hasKey: false });
+    expect(raisonUnusableIndicateur(def("liquidationsOi"), binanceBtc)).toBe("Nécessite une clé Coinalyze");
+    coinalyzeKeyStore.setState({ hasKey: true });
+    expect(raisonUnusableIndicateur(def("liquidationsOi"), { ...binanceBtc, symbol: "BTCUSD" }))
+      .toBe("Nécessite un symbole crypto USDT compatible");
+    expect(raisonUnusableIndicateur(def("liquidationsOi"), { ...binanceBtc, timeframe: "1w" }))
+      .toMatch(/intervalle Coinalyze/);
+    expect(raisonUnusableIndicateur(def("liquidationsOi"), { ...binanceBtc, timeframe: "1h" })).toBeNull();
+  });
+
+  it("dispersion historique exige un perp USDT compatible", () => {
+    expect(raisonUnusableIndicateur(def("fundingDispersion"), binanceBtc)).toBeNull();
+    expect(raisonUnusableIndicateur(def("fundingDispersion"), { ...binanceBtc, symbol: "BTC-PERP", exchange: "hyperliquid" })).toBeNull();
+    expect(raisonUnusableIndicateur(def("fundingDispersion"), { ...binanceBtc, symbol: "BTC-PERP", exchange: "synthetic" }))
+      .toMatch(/symbole/);
+    expect(raisonUnusableIndicateur(def("fundingDispersion"), { ...binanceBtc, symbol: "EUR/USD", exchange: "twelvedata" }))
+      .toBe("Nécessite un symbole de funding compatible (USDT ou perp Hyperliquid)");
+  });
+
+  it("corrélation et bêta baissiers signalent les pas sans référence exacte", () => {
+    for (const id of ["downsideCorrelation", "downsideBeta"] as const) {
+      for (const timeframe of ["1s", "5s", "15s", "3M", "6M", "12M"] as const) {
+        expect(raisonUnusableIndicateur(def(id), { ...binanceBtc, timeframe })).toMatch(/intervalle non couvert/i);
+      }
+      expect(raisonUnusableIndicateur(def(id), { ...binanceBtc, timeframe: "1h" })).toBeNull();
+    }
+  });
+
   it("hlWhalesNet exige le daemon axiomd", () => {
     daemonSupporteMock.mockReturnValue(false);
     expect(
@@ -259,8 +288,8 @@ describe("raisonUnusableIndicateur", () => {
     daemonSupporteMock.mockReturnValue(false);
   });
 
-  it("accepte les 210 définitions sans lever", () => {
-    expect(INDICATORS).toHaveLength(210);
+  it("accepte les 214 définitions sans lever", () => {
+    expect(INDICATORS).toHaveLength(214);
     for (const indicateur of INDICATORS) {
       expect(() => raisonUnusableIndicateur(indicateur, binanceBtc), indicateur.id).not.toThrow();
     }

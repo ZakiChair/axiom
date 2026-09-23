@@ -48,7 +48,7 @@
  *
  * Aucune modification de Chart.tsx : on lit `marketStore` en aval, sans le piloter.
  */
-import { evaluerAlertes, typesDeDef, type AlertDef, type ContexteAlerte, type Declenchement, type MetriqueOnchainAlerte } from "@axiom/alerts";
+import { alerteActiveAuTemps, evaluerAlertes, prochaineEcheanceAlerte, typesDeDef, type AlertDef, type ContexteAlerte, type Declenchement, type MetriqueOnchainAlerte } from "@axiom/alerts";
 import type { Unsubscribe } from "@axiom/types";
 import { marketStore } from "../store/market";
 import { fluxLiqRetenu, liqEventsStore } from "../chart/liquidationMarkers";
@@ -68,6 +68,7 @@ import { SCREENER_POSITION_CAP } from "../data/screener";
 import { extUrl } from "../data/extapi";
 import { AGE_MAX_FLUX_MS } from "../data/onchain/fluxCapitaux.contract";
 import { fluxCapitauxStore, garderFluxCapitauxPourAlertes } from "../store/fluxCapitaux";
+import { enrichirDeclenchement } from "../data/decisionDossier";
 
 /** Types de condition évalués sur la clôture de bougie (nécessitent les bougies). */
 const TYPES_BOUGIE = new Set(["variation-pct", "indicateur-seuil", "indicateur-croisement"]);
@@ -105,8 +106,15 @@ function appliquerResultat(lot: AlertDef[], ctx: ContexteAlerte): void {
   for (const d of res.declenchements) {
     // Une autre subscription synchrone peut supprimer ou désactiver la définition
     // pendant l'application des états. Ne pas notifier un ancien snapshot de defs.
-    if (!alertsStore.getState().defs.some((courante) => courante.id === d.alertId && courante.actif)) continue;
-    store.ajouterJournal(d);
+    const def = lot.find((candidate) => candidate.id === d.alertId);
+    if (!def) continue;
+    const encoreNotifiable = (): boolean => alertsStore.getState().defs.some((courante) =>
+      courante.id === d.alertId && courante.expireTs === def.expireTs && alerteActiveAuTemps(courante, Date.now()));
+    if (!encoreNotifiable()) continue;
+    store.ajouterJournal(enrichirDeclenchement(d, def, ctx));
+    // Le journal déclenche des abonnés synchrones ; l'échéance ou la génération
+    // peut changer entre l'archivage du signal et l'envoi externe.
+    if (!encoreNotifiable()) continue;
     notifier(d);
   }
 }
@@ -150,7 +158,7 @@ function creerRuntime(): Unsubscribe {
     const lot = alertsStore
       .getState()
       .defs.filter((d) => {
-        if (!d.actif || d.source !== source || d.symbol !== symbol || d.condition.type !== "composite") {
+        if (!alerteActiveAuTemps(d, Date.now()) || d.source !== source || d.symbol !== symbol || d.condition.type !== "composite") {
           return false;
         }
         const porteBougie = [...TYPES_BOUGIE].some((type) => defPorte(d, type));
@@ -184,7 +192,7 @@ function creerRuntime(): Unsubscribe {
       .getState()
       .defs.filter(
         (d) =>
-          d.actif &&
+          alerteActiveAuTemps(d, Date.now()) &&
           d.source === source &&
           d.symbol === symbol &&
           d.condition.type === "prix-croise",
@@ -208,7 +216,7 @@ function creerRuntime(): Unsubscribe {
   const resyncTicker = (): void => {
     const groupes = new Map<WatchlistSource, Set<string>>();
     for (const d of alertsStore.getState().defs) {
-      if (!d.actif || !defPorte(d, "prix-croise") || !isTickerSource(d.source)) continue;
+      if (!alerteActiveAuTemps(d, Date.now()) || !defPorte(d, "prix-croise") || !isTickerSource(d.source)) continue;
       const symbols = groupes.get(d.source) ?? new Set<string>();
       symbols.add(d.symbol);
       groupes.set(d.source, symbols);
@@ -269,7 +277,7 @@ function creerRuntime(): Unsubscribe {
       .getState()
       .defs.filter(
         (d) =>
-          d.actif &&
+          alerteActiveAuTemps(d, Date.now()) &&
           d.source === exchange &&
           d.symbol === symbol &&
           (TYPES_BOUGIE.has(d.condition.type) ||
@@ -306,7 +314,7 @@ function creerRuntime(): Unsubscribe {
       .getState()
       .defs.filter(
         (d) =>
-          d.actif &&
+          alerteActiveAuTemps(d, Date.now()) &&
           d.source === source &&
           d.symbol === symbol &&
           d.condition.type === "funding-extreme",
@@ -335,17 +343,32 @@ function creerRuntime(): Unsubscribe {
 
   const pollFunding = async (): Promise<void> => {
     const sourcesParSymbole = new Map<string, Set<AlertDef["source"]>>();
+    const signatureFunding = (source: AlertDef["source"], symbol: string): string =>
+      alertsStore.getState().defs
+        .filter((d) => alerteActiveAuTemps(d, Date.now()) && d.source === source && d.symbol === symbol && defPorte(d, "funding-extreme"))
+        .map((d) => `${d.id}:${d.expireTs ?? "permanent"}`)
+        .sort().join("|");
+    const depart = new Map<string, string>();
     for (const d of alertsStore.getState().defs) {
-      if (!d.actif || !defPorte(d, "funding-extreme")) continue;
+      if (!alerteActiveAuTemps(d, Date.now()) || !defPorte(d, "funding-extreme")) continue;
       const sources = sourcesParSymbole.get(d.symbol) ?? new Set<AlertDef["source"]>();
       sources.add(d.source);
       sourcesParSymbole.set(d.symbol, sources);
+      depart.set(cleMarche(d.source, d.symbol), signatureFunding(d.source, d.symbol));
     }
     for (const [symbol, sources] of sourcesParSymbole) {
-      const snap = await chargerFunding(symbol);
+      const encoreDemande = (): boolean => !arrete && [...sources].some((source) => {
+        const cle = cleMarche(source, symbol);
+        const signature = depart.get(cle);
+        return signature !== undefined && signature !== "" && signature === signatureFunding(source, symbol);
+      });
+      if (!encoreDemande()) continue;
+      const snap = await chargerFunding(symbol, encoreDemande);
       if (!snap) continue;
       for (const source of sources) {
-        cacheFunding.set(cleMarche(source, symbol), { ...snap, ts: Date.now() });
+        const cle = cleMarche(source, symbol);
+        if (arrete || !depart.get(cle) || depart.get(cle) !== signatureFunding(source, symbol)) continue;
+        cacheFunding.set(cle, { ...snap, ts: Date.now() });
         evaluerFundingSymbol(source, symbol);
       }
     }
@@ -355,7 +378,7 @@ function creerRuntime(): Unsubscribe {
   const resyncFunding = (): void => {
     const aDesFunding = alertsStore
       .getState()
-      .defs.some((d) => d.actif && defPorte(d, "funding-extreme"));
+      .defs.some((d) => alerteActiveAuTemps(d, Date.now()) && defPorte(d, "funding-extreme"));
     if (aDesFunding && fundingTimer === undefined) {
       void pollFunding();
       fundingTimer = setInterval(() => {
@@ -381,7 +404,7 @@ function creerRuntime(): Unsubscribe {
       .getState()
       .defs.filter(
         (d) =>
-          d.actif &&
+          alerteActiveAuTemps(d, Date.now()) &&
           d.source === exchange &&
           d.symbol === symbol &&
           d.condition.type === "liq-cascade",
@@ -412,7 +435,7 @@ function creerRuntime(): Unsubscribe {
   const resyncLiqCascade = (): void => {
     const aDesCascade = alertsStore
       .getState()
-      .defs.some((d) => d.actif && defPorte(d, "liq-cascade"));
+      .defs.some((d) => alerteActiveAuTemps(d, Date.now()) && defPorte(d, "liq-cascade"));
     if (aDesCascade && liqCascadeTimer === undefined) {
       evaluerLiqCascade();
       liqCascadeTimer = setInterval(evaluerLiqCascade, LIQ_CASCADE_POLL_MS);
@@ -431,7 +454,7 @@ function creerRuntime(): Unsubscribe {
       .getState()
       .defs.filter(
         (d) =>
-          d.actif &&
+          alerteActiveAuTemps(d, Date.now()) &&
           d.source === source &&
           d.symbol === symbol &&
           d.condition.type === "cvd-spot-perp-div",
@@ -456,32 +479,13 @@ function creerRuntime(): Unsubscribe {
     evaluerComposites(source, symbol);
   };
 
-  /** Active orderflow + CVD S/P si au moins une alerte CVD active (Binance). */
-  const assurerPipelineCvd = (): void => {
-    const aDesCvd = alertsStore
-      .getState()
-      .defs.some((d) => d.actif && defPorte(d, "cvd-spot-perp-div"));
-    if (!aDesCvd) return;
-    const of = orderflowStore.getState();
-    if (!of.enabled) of.setEnabled(true);
-    if (!of.cvdSpotPerp) of.setCvdSpotPerp(true);
-  };
-
-  // Rallumage du pipeline UNIQUEMENT quand l'ENSEMBLE des alertes CVD actives change
-  // (patron `resyncTicker`). Le store émet aussi sur le journal et sur chaque transition
-  // d'armement (`appliquerMisesAJour` réalloue `defs`) : sans cette clé, un déclenchement
-  // SANS RAPPORT ressusciterait l'orderflow que l'opérateur venait de couper.
-  let cleCvd = "";
+  // Demande éphémère distincte des deux toggles utilisateur persistés.
   const resyncCvd = (): void => {
-    const cle = alertsStore
+    const demandee = alertsStore
       .getState()
-      .defs.filter((d) => d.actif && defPorte(d, "cvd-spot-perp-div"))
-      .map((d) => d.id)
-      .sort()
-      .join(",");
-    if (cle === cleCvd) return; // ensemble inchangé → on ne touche pas à l'orderflow
-    cleCvd = cle;
-    assurerPipelineCvd();
+      .defs.some((d) => alerteActiveAuTemps(d, Date.now()) && defPorte(d, "cvd-spot-perp-div"));
+    const of = orderflowStore.getState();
+    if (of.alerteCvdDemandee !== demandee) of.setAlerteCvdDemandee(demandee);
   };
 
   const unsubCvd = cvdDivergenceStore.subscribe((s, prev) => {
@@ -500,7 +504,7 @@ function creerRuntime(): Unsubscribe {
     if (regime === null || regime.libelle === "indéterminé") return; // non évaluable
     const lot = alertsStore
       .getState()
-      .defs.filter((d) => d.actif && d.condition.type === "regime-seuil");
+      .defs.filter((d) => alerteActiveAuTemps(d, Date.now()) && d.condition.type === "regime-seuil");
     if (lot.length === 0) return;
     appliquerResultat(lot, {
       maintenant: Date.now(),
@@ -508,7 +512,7 @@ function creerRuntime(): Unsubscribe {
       regimeScore: regime.score,
     });
     for (const d of alertsStore.getState().defs) {
-      if (d.actif && d.condition.type === "composite") evaluerComposites(d.source, d.symbol);
+      if (alerteActiveAuTemps(d, Date.now()) && d.condition.type === "composite") evaluerComposites(d.source, d.symbol);
     }
   };
 
@@ -537,7 +541,7 @@ function creerRuntime(): Unsubscribe {
             metrique.qualite.cadenceMs === null) continue;
           // Relire à chaque métrique : une subscription synchrone peut supprimer,
           // désactiver ou ajouter une définition pendant l'application précédente.
-          const lot = alertsStore.getState().defs.filter((d) => d.actif && d.condition.type === "flux-capitaux-seuil" && d.condition.metrique === metrique.id);
+          const lot = alertsStore.getState().defs.filter((d) => alerteActiveAuTemps(d, Date.now()) && d.condition.type === "flux-capitaux-seuil" && d.condition.metrique === metrique.id);
           if (lot.length === 0) continue;
           const condition = lot[0]!.condition;
           if (condition.type !== "flux-capitaux-seuil") continue;
@@ -564,7 +568,7 @@ function creerRuntime(): Unsubscribe {
     }
   };
   const resyncFluxCapitaux = (): void => {
-    const active = alertsStore.getState().defs.some((d) => d.actif && d.condition.type === "flux-capitaux-seuil");
+    const active = alertsStore.getState().defs.some((d) => alerteActiveAuTemps(d, Date.now()) && d.condition.type === "flux-capitaux-seuil");
     garderFluxCapitauxPourAlertes(active);
     if (active) evaluerFluxCapitaux();
   };
@@ -583,16 +587,26 @@ function creerRuntime(): Unsubscribe {
   const dernierEnsemble = new Map<string, Set<string>>();
   /** Cooldown par alerte : symbole → ms epoch du dernier déclenchement. */
   const cooldownsPreset = new Map<string, Map<string, number>>();
-  /** Alertes dont un tick est en cours (anti-chevauchement). */
-  const ticksEnCours = new Set<string>();
+  /** Génération par ID : une échéance puis prolongation ne valide pas un ancien scan. */
+  const generationsPreset = new Map<string, number>();
+  const echeancesPreset = new Map<string, number | undefined>();
+  /** Un seul tick en cours PAR génération, sans verrou hérité d'une génération retirée. */
+  const ticksEnCours = new Map<string, number>();
+  let arrete = false;
 
   const tickPreset = async (id: string): Promise<void> => {
     // AUCUNE garde de visibilité : c'est la seule source d'alerte sans relais daemon —
     // la couper onglet caché laissait l'opérateur non couvert sans le savoir.
-    if (ticksEnCours.has(id)) return; // tick précédent encore en vol
+    const generation = generationsPreset.get(id);
+    if (generation === undefined || ticksEnCours.get(id) === generation) return;
     const alerte = presetAlertsStore.getState().alertes.find((a) => a.id === id);
-    if (!alerte || !alerte.actif) return; // retirée/désactivée entre-temps
-    ticksEnCours.add(id);
+    if (!alerte || !alerteActiveAuTemps(alerte, Date.now())) return;
+    const encoreValide = (): boolean => {
+      if (arrete || generationsPreset.get(id) !== generation) return false;
+      const courante = presetAlertsStore.getState().alertes.find((a) => a.id === id);
+      return courante !== undefined && alerteActiveAuTemps(courante, Date.now()) && courante.expireTs === alerte.expireTs;
+    };
+    ticksEnCours.set(id, generation);
     try {
       const res = await executerScreener(alerte.baseConditions, alerte.indicatorConditions, alerte.tf, {
         capIndicateurs: PRESET_CAP_INDICATEURS,
@@ -602,8 +616,7 @@ function creerRuntime(): Unsubscribe {
       // vol — `resyncPreset` a alors déjà purgé son état. Sans ce contrôle, la ligne
       // `dernierEnsemble.set` ci-dessous RESSUSCITERAIT sa baseline (et pourrait déclencher
       // pour une alerte disparue).
-      const encoreActive = presetAlertsStore.getState().alertes.find((a) => a.id === id);
-      if (!encoreActive || !encoreActive.actif) return;
+      if (!encoreValide()) return;
       presetAlertsStore.getState().marquerScan(id, Date.now()); // succès : erreur effacée
       const courant = res.rows.map((r) => r.symbol);
       const precedent = dernierEnsemble.get(id) ?? null;
@@ -614,6 +627,7 @@ function creerRuntime(): Unsubscribe {
       const nowMs = Date.now();
       const retenus = filtrerCooldown(entrants, cd, nowMs, PRESET_COOLDOWN_MS);
       for (const sym of retenus) {
+        if (!encoreValide()) return;
         cd.set(sym, nowMs);
         const d: Declenchement = {
           alertId: id,
@@ -622,35 +636,41 @@ function creerRuntime(): Unsubscribe {
           message: `EQS ${alerte.nom} : ${sym} entre dans le scan`,
         };
         alertsStore.getState().ajouterJournal(d);
+        if (!encoreValide()) return;
         notifier(d);
       }
       cooldownsPreset.set(id, cd);
     } catch (e) {
       // Scan best-effort : un échec réseau ne casse ni la baseline ni le timer, mais il
       // est PUBLIÉ (le panneau affichait une pastille verte après des heures d'échecs).
-      presetAlertsStore
+      if (encoreValide()) presetAlertsStore
         .getState()
         .marquerScan(id, Date.now(), e instanceof Error ? e.message : String(e));
     } finally {
-      ticksEnCours.delete(id);
+      if (ticksEnCours.get(id) === generation) ticksEnCours.delete(id);
     }
   };
 
   const resyncPreset = (): void => {
-    const actives = presetAlertsStore.getState().alertes.filter((a) => a.actif);
+    const actives = presetAlertsStore.getState().alertes.filter((a) => alerteActiveAuTemps(a, Date.now()));
     const idsActifs = new Set(actives.map((a) => a.id));
     // Alertes disparues/désactivées : on stoppe le timer et on purge leur état.
     for (const [id, timer] of timersPreset) {
-      if (idsActifs.has(id)) continue;
+      const courante = actives.find((a) => a.id === id);
+      if (idsActifs.has(id) && echeancesPreset.get(id) === courante?.expireTs) continue;
       clearInterval(timer);
       timersPreset.delete(id);
       dernierEnsemble.delete(id);
       cooldownsPreset.delete(id);
       ticksEnCours.delete(id);
+      echeancesPreset.delete(id);
+      generationsPreset.set(id, (generationsPreset.get(id) ?? 0) + 1);
     }
     // Nouvelles alertes actives : tick d'amorce immédiat (baseline) puis timer périodique.
     for (const a of actives) {
       if (timersPreset.has(a.id)) continue;
+      generationsPreset.set(a.id, (generationsPreset.get(a.id) ?? 0) + 1);
+      echeancesPreset.set(a.id, a.expireTs);
       void tickPreset(a.id);
       const periodeMs = a.periodeMin * 60_000;
       timersPreset.set(a.id, setInterval(() => void tickPreset(a.id), periodeMs));
@@ -662,60 +682,105 @@ function creerRuntime(): Unsubscribe {
   // bundle d'entrée sans alerte on-chain). Une métrique absente laisse sa condition non
   // évaluable (armement figé, aucun faux déclenchement). Condition GLOBALE : lot par TYPE.
   let onchainTimer: ReturnType<typeof setInterval> | undefined;
-  let onchainEnCours = false;
+  let onchainGeneration = 0;
+  let onchainEnCoursGeneration: number | null = null;
+  let onchainAbort: AbortController | null = null;
   let onchainCleRequises = "";
   let onchainDerniereEval = 0;
   const metriquesOnchainRequises = (): Set<MetriqueOnchainAlerte> => {
     const requises = new Set<MetriqueOnchainAlerte>();
     for (const d of alertsStore.getState().defs) {
-      if (d.actif && d.condition.type === "onchain-seuil") requises.add(d.condition.metrique);
+      if (alerteActiveAuTemps(d, Date.now()) && d.condition.type === "onchain-seuil") requises.add(d.condition.metrique);
     }
     return requises;
   };
   const evaluerOnchain = async (): Promise<void> => {
-    if (onchainEnCours) return;
+    if (arrete || onchainEnCoursGeneration !== null) return;
     const requises = metriquesOnchainRequises();
     if (requises.size === 0) return;
-    onchainEnCours = true;
+    const generation = onchainGeneration;
+    const controller = new AbortController();
+    onchainAbort = controller;
+    onchainEnCoursGeneration = generation;
     try {
       const { chargerMetriquesOnchain } = await import("./onchainMetriques");
-      const onchainMetriques = await chargerMetriquesOnchain(requises);
+      if (arrete || generation !== onchainGeneration) return;
+      const onchainMetriques = await chargerMetriquesOnchain(requises, controller.signal);
+      if (arrete || generation !== onchainGeneration) return;
       onchainDerniereEval = Date.now();
       // Relire le lot : une def a pu être retirée ou désactivée pendant le chargement.
-      const lot = alertsStore.getState().defs.filter((d) => d.actif && d.condition.type === "onchain-seuil");
+      const lot = alertsStore.getState().defs.filter((d) => alerteActiveAuTemps(d, Date.now()) && d.condition.type === "onchain-seuil");
       appliquerResultat(lot, { maintenant: Date.now(), dernierPrix: 0, onchainMetriques });
     } catch (err) {
-      console.error("[AXIOM] alertes on-chain : chargement des métriques échoué", err);
+      if (!arrete && generation === onchainGeneration && !controller.signal.aborted) {
+        console.error("[AXIOM] alertes on-chain : chargement des métriques échoué", err);
+      }
     } finally {
-      onchainEnCours = false;
+      if (generation === onchainGeneration) {
+        onchainEnCoursGeneration = null;
+        onchainAbort = null;
+      }
     }
   };
   const resyncOnchain = (): void => {
     const requises = metriquesOnchainRequises();
+    const cle = alertsStore.getState().defs
+      .filter((d) => alerteActiveAuTemps(d, Date.now()) && d.condition.type === "onchain-seuil")
+      .map((d) => `${d.id}:${d.expireTs ?? "permanent"}`)
+      .sort().join("|");
+    const definitionsChangees = cle !== onchainCleRequises;
+    if (definitionsChangees) {
+      onchainGeneration += 1;
+      onchainAbort?.abort();
+      onchainAbort = null;
+      onchainEnCoursGeneration = null;
+      onchainCleRequises = cle;
+    }
     if (requises.size === 0) {
       if (onchainTimer !== undefined) clearInterval(onchainTimer);
       onchainTimer = undefined;
-      onchainCleRequises = "";
       return;
     }
     if (onchainTimer === undefined) onchainTimer = setInterval(() => void evaluerOnchain(), ONCHAIN_POLL_MS);
-    const cle = [...requises].sort().join(",");
     // Évaluation immédiate seulement si l'ensemble des métriques change (nouvelle alerte)
     // ou si le dernier passage date : un déclenchement quelconque ne relance rien.
-    if (cle !== onchainCleRequises || Date.now() - onchainDerniereEval >= ONCHAIN_POLL_MS) {
-      onchainCleRequises = cle;
+    if (onchainEnCoursGeneration === null && (definitionsChangees || Date.now() - onchainDerniereEval >= ONCHAIN_POLL_MS)) {
       void evaluerOnchain();
     }
   };
 
+  // Une échéance doit libérer les flux même en l'absence de tick ou de mutation.
+  let echeanceTimer: ReturnType<typeof setTimeout> | undefined;
+  const reconcilier = (): void => {
+    resyncTicker();
+    resyncFunding();
+    resyncLiqCascade();
+    resyncPreset();
+    resyncCvd();
+    resyncFluxCapitaux();
+    resyncOnchain();
+    evaluerRegime();
+  };
+  const planifierEcheance = (): void => {
+    if (echeanceTimer !== undefined) clearTimeout(echeanceTimer);
+    echeanceTimer = undefined;
+    const now = Date.now();
+    const prochaine = prochaineEcheanceAlerte(
+      [...alertsStore.getState().defs, ...presetAlertsStore.getState().alertes], now,
+    );
+    if (prochaine === null) return;
+    echeanceTimer = setTimeout(() => {
+      echeanceTimer = undefined;
+      reconcilier();
+      planifierEcheance();
+    }, Math.min(2_147_483_647, Math.max(1, prochaine - now)));
+  };
+  const auRetourOnglet = (): void => { reconcilier(); planifierEcheance(); };
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", auRetourOnglet);
+
   // Démarrage : souscriptions + calibrage immédiat contre l'état courant.
-  resyncTicker();
-  resyncFunding();
-  resyncLiqCascade();
-  resyncPreset();
-  resyncCvd();
-  resyncFluxCapitaux();
-  resyncOnchain();
+  reconcilier();
+  planifierEcheance();
   // Calibrage CVD sur l'état déjà publié (si orderflow déjà actif).
   for (const sym of Object.keys(cvdDivergenceStore.getState().bySymbol)) {
     evaluerCvdSymbol(marketStore.getState().exchange, sym);
@@ -723,23 +788,22 @@ function creerRuntime(): Unsubscribe {
   evaluerRegime(); // calibrage régime sur le score déjà publié
   const unsubAlerts = alertsStore.subscribe((state, precedent) => {
     if (state.defs === precedent.defs) return;
-    resyncTicker(); // re-route si la liste des symboles change
-    resyncFunding();
-    resyncLiqCascade();
-    resyncCvd();
-    resyncFluxCapitaux();
-    resyncOnchain();
-    evaluerRegime(); // calibre une def régime nouvellement ajoutée
+    reconcilier(); // re-route et libère les besoins au changement de définitions
+    planifierEcheance();
   });
   const unsubMarket = marketStore.subscribe(onMarket);
   onMarket(); // calibrage initial des conditions bougie sur le backfill présent
 
   // Ajout/retrait/bascule d'une alerte de preset → re-cadre les timers de scan.
-  const unsubPreset = presetAlertsStore.subscribe(resyncPreset);
+  const unsubPreset = presetAlertsStore.subscribe(() => { resyncPreset(); planifierEcheance(); });
 
   const stopHeartbeat = demarrerHeartbeat();
 
   return () => {
+    arrete = true;
+    onchainGeneration += 1;
+    onchainAbort?.abort();
+    onchainAbort = null;
     unsubAlerts();
     unsubMarket();
     unsubTicker();
@@ -748,6 +812,9 @@ function creerRuntime(): Unsubscribe {
     unsubFluxCapitaux();
     garderFluxCapitauxPourAlertes(false);
     unsubPreset();
+    orderflowStore.getState().setAlerteCvdDemandee(false);
+    if (echeanceTimer !== undefined) clearTimeout(echeanceTimer);
+    if (typeof document !== "undefined") document.removeEventListener("visibilitychange", auRetourOnglet);
     stopHeartbeat();
     if (fundingTimer !== undefined) clearInterval(fundingTimer);
     if (liqCascadeTimer !== undefined) clearInterval(liqCascadeTimer);
@@ -757,6 +824,8 @@ function creerRuntime(): Unsubscribe {
     dernierEnsemble.clear();
     cooldownsPreset.clear();
     ticksEnCours.clear();
+    generationsPreset.clear();
+    echeancesPreset.clear();
   };
 }
 
@@ -765,8 +834,10 @@ function creerRuntime(): Unsubscribe {
  * depuis l'historique Coinalyze (best-effort : z omis si indisponible).
  */
 async function chargerFunding(
-  symbol: string
+  symbol: string,
+  encoreDemande: () => boolean
 ): Promise<{ rate: number; z?: number } | undefined> {
+  if (!encoreDemande()) return undefined;
   let rate: number | undefined;
 
   // 1) Snapshot Binance fapi (gratuit, fiable) — fraction lastFundingRate.
@@ -774,8 +845,10 @@ async function chargerFunding(
     const res = await fetch(
       extUrl("fapi.binance.com", `fapi/v1/premiumIndex?symbol=${encodeURIComponent(symbol)}`)
     );
+    if (!encoreDemande()) return undefined;
     if (res.ok) {
       const raw: unknown = await res.json();
+      if (!encoreDemande()) return undefined;
       const last =
         raw !== null && typeof raw === "object"
           ? Number((raw as { lastFundingRate?: unknown }).lastFundingRate)
@@ -787,9 +860,11 @@ async function chargerFunding(
   }
 
   // 2) Repli Coinalyze si premiumIndex a échoué.
+  if (!encoreDemande()) return undefined;
   if (rate === undefined) {
     try {
       const fr = await coinalyzeProvider.fetchFundingRate(symbol);
+      if (!encoreDemande()) return undefined;
       if (Number.isFinite(fr.rate)) rate = fr.rate;
     } catch {
       /* best-effort */
@@ -807,9 +882,11 @@ async function chargerFunding(
   let z: number | undefined;
   try {
     let rates = ((await histFunding(symbol)) ?? []).map((p) => p.v);
+    if (!encoreDemande()) return undefined;
     if (rates.length === 0) {
       const since = Date.now() - FUNDING_Z_WINDOW * 8 * 3_600_000;
       const hist = await coinalyzeProvider.fetchFundingRateHistory(symbol, "4hour", since);
+      if (!encoreDemande()) return undefined;
       // Filtre les taux finis AVANT la sélection par frontière (sinon un point non-fini
       // sur une frontière retenue élargirait silencieusement un trou à ~16 h).
       const finis = hist.filter((h) => Number.isFinite(h.rate));
@@ -829,6 +906,7 @@ async function chargerFunding(
     /* z optionnel */
   }
 
+  if (!encoreDemande()) return undefined;
   return { rate, z };
 }
 

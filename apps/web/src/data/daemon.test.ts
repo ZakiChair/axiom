@@ -53,6 +53,8 @@ describe("création de snapshot et travail personnel", () => {
     const { creerSnapshot } = await import("./daemon");
     localStorage.setItem("axiom:notes:v1", '{"notes":["récente"]}');
     localStorage.setItem("axiom:expy:v1", "[]");
+    localStorage.setItem("axiom:decisionDossiers:v1", '{"dossiers":["trace"]}');
+    localStorage.setItem("axiom:paper:v1", '{"positions":["simulation"]}');
     localStorage.setItem("axiom:api-key:fred", "personnelle");
     const kv = new Map<string, unknown>([["axiom:drawings:v1", "ancien dessin"]]);
     vi.stubGlobal("fetch", vi.fn(async (input, init) => {
@@ -61,6 +63,8 @@ describe("création de snapshot et travail personnel", () => {
       if (url.endsWith("/kv/snapshots")) {
         expect(kv.get("axiom:notes:v1")).toBe('{"notes":["récente"]}');
         expect(kv.get("axiom:expy:v1")).toBe("[]");
+        expect(kv.get("axiom:decisionDossiers:v1")).toBe('{"dossiers":["trace"]}');
+        expect(kv.get("axiom:paper:v1")).toBe('{"positions":["simulation"]}');
         expect(kv.has("axiom:drawings:v1")).toBe(false);
         expect(kv.has("axiom:api-key:fred")).toBe(false);
         expect(kv.get("@perimetre:v1")).toContain("axiom:notes:v1");
@@ -141,7 +145,7 @@ describe("restaurerSnapshot (client daemon)", () => {
   });
 
   it("restaure les séries d'indicateurs et tout le travail personnel sérialisé", async () => {
-    const cles = ["indicatorSets", "notes", "drawings", "expy", "portfolio", "alerts", "workspaces"];
+    const cles = ["indicatorSets", "notes", "drawings", "expy", "portfolio", "alerts", "workspaces", "paper", "backtest", "backtest:history", "decisionDossiers"];
     vi.stubGlobal("fetch", vi.fn()
       .mockResolvedValueOnce(jsonResponse(HEALTH_COMPLET))
       .mockResolvedValueOnce(jsonResponse({ entrees: cles.map((cle) => ({

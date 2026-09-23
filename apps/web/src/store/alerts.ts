@@ -15,9 +15,10 @@
  * de Phase 2) ; ce store n'est qu'un conteneur d'état + un journal.
  */
 import { createStore } from "zustand/vanilla";
-import { METRIQUES_ONCHAIN_ALERTE, validerComposite, type AlertDef, type Condition, type Declenchement, type SensCroisement } from "@axiom/alerts";
+import { echeanceAlerteValide, METRIQUES_ONCHAIN_ALERTE, validerComposite, type AlertDef, type Condition, type Declenchement, type SensCroisement } from "@axiom/alerts";
 import type { ExchangeId, Timeframe } from "@axiom/types";
 import { daemonPret, kvPut, miroiterTravailPersonnel } from "../data/daemon";
+import { projeterPreuveDeclenchement, type DeclenchementEnrichi } from "../data/decisionDossier";
 
 const STORAGE_KEY = "axiom:alerts:v1";
 /** Namespace + clé KV où les défs sont miroitées vers le daemon (Phase 2.E3). */
@@ -38,6 +39,7 @@ export interface NouvelleAlerte {
   /** TF d'évaluation des conditions de bougie (absent = def héritée, TF affiché). */
   timeframe?: Timeframe;
   message?: string;
+  expireTs?: number;
 }
 
 /**
@@ -75,18 +77,20 @@ export function arrondirNiveauAlerte(prix: number): number {
 export interface AlertsState {
   defs: AlertDef[];
   /** Journal des déclenchements (plus récent en tête). */
-  journal: Declenchement[];
+  journal: DeclenchementEnrichi[];
   /** Crée une alerte (id généré, active, non calibrée) et la persiste. */
-  ajouter: (a: NouvelleAlerte) => void;
+  ajouter: (a: NouvelleAlerte) => boolean;
   supprimer: (id: string) => void;
   basculerActif: (id: string) => void;
+  /** Prolongation explicite sans modifier l'état pause/actif. */
+  prolonger: (id: string, expireTs: number) => boolean;
   /**
    * Applique un LOT de defs mises à jour par le moteur (fusion PAR id) : remplace les
    * defs de même id, laisse les autres intactes, n'en ressuscite aucune supprimée.
    */
   appliquerMisesAJour: (defs: AlertDef[]) => void;
   /** Ajoute une entrée au journal (bornée). */
-  ajouterJournal: (d: Declenchement) => void;
+  ajouterJournal: (d: DeclenchementEnrichi) => void;
   viderJournal: () => void;
 }
 
@@ -100,7 +104,7 @@ function genId(): string {
 /** Forme persistée (sous-ensemble sérialisable de l'état). */
 interface Persiste {
   defs: AlertDef[];
-  journal: Declenchement[];
+  journal: DeclenchementEnrichi[];
 }
 
 /** Garde de forme d'une def persistée (patron `estTradeValide` d'expy.ts) : champs
@@ -113,6 +117,7 @@ function estAlertDefValide(v: unknown): v is AlertDef {
   if (typeof d.id !== "string" || d.id.length === 0) return false;
   if (typeof d.symbol !== "string" || typeof d.source !== "string") return false;
   if (typeof d.actif !== "boolean") return false;
+  if (!echeanceAlerteValide(d as Pick<AlertDef, "expireTs">)) return false;
   if (!d.condition || typeof d.condition !== "object") return false;
   const condition = d.condition as Record<string, unknown>;
   if (typeof condition.type !== "string") return false;
@@ -144,7 +149,7 @@ function estAlertDefValide(v: unknown): v is AlertDef {
 }
 
 /** Garde de forme d'une entrée de journal persistée. */
-function estDeclenchementValide(v: unknown): v is Declenchement {
+function estDeclenchementValide(v: unknown): v is DeclenchementEnrichi {
   if (typeof v !== "object" || v === null) return false;
   const d = v as Record<string, unknown>;
   const instantane = d.instantane;
@@ -178,7 +183,12 @@ export function lireInitial(): Persiste {
     const defsBrutes = Array.isArray(parsed.defs) ? parsed.defs : [];
     const journalBrut = Array.isArray(parsed.journal) ? parsed.journal : [];
     const defs = defsBrutes.filter(estAlertDefValide);
-    const journal = journalBrut.filter(estDeclenchementValide);
+    const journal = journalBrut.filter(estDeclenchementValide).map((d) => {
+      if (d.preuve === undefined) return d;
+      const preuve = projeterPreuveDeclenchement(d);
+      return preuve ? { ...d, preuve } : { alertId: d.alertId, ts: d.ts, valeur: d.valeur, message: d.message,
+        ...(d.instantane ? { instantane: d.instantane } : {}) };
+    });
     const ecartes = defsBrutes.length - defs.length + (journalBrut.length - journal.length);
     if (ecartes > 0) console.warn(`[AXIOM] alerts : ${ecartes} item(s) corrompu(s) écarté(s) à l'hydratation`);
     return { defs, journal };
@@ -206,7 +216,7 @@ export const alertsStore = createStore<AlertsState>((set, get) => ({
   journal: initial.journal,
 
   ajouter: (a) => {
-    if (a.condition.type === "composite" && !validerComposite(a.condition.conditions)) return;
+    if (!echeanceAlerteValide(a) || (a.condition.type === "composite" && !validerComposite(a.condition.conditions))) return false;
     set((s) => ({
       defs: [
         ...s.defs,
@@ -217,12 +227,14 @@ export const alertsStore = createStore<AlertsState>((set, get) => ({
           condition: a.condition,
           timeframe: a.timeframe,
           message: a.message,
+          ...(a.expireTs !== undefined ? { expireTs: a.expireTs } : {}),
           actif: true,
           // `arme` volontairement absent (undefined) : la 1re évaluation calibre le côté.
           declenchements: [],
         },
       ],
     }));
+    return true;
   },
 
   supprimer: (id) => set((s) => ({ defs: s.defs.filter((d) => d.id !== id) })),
@@ -231,6 +243,12 @@ export const alertsStore = createStore<AlertsState>((set, get) => ({
     set((s) => ({
       defs: s.defs.map((d) => (d.id === id ? { ...d, actif: !d.actif } : d)),
     })),
+
+  prolonger: (id, expireTs) => {
+    if (!Number.isFinite(expireTs) || expireTs <= Date.now() || !get().defs.some((d) => d.id === id)) return false;
+    set((s) => ({ defs: s.defs.map((d) => d.id === id ? { ...d, expireTs } : d) }));
+    return true;
+  },
 
   appliquerMisesAJour: (maj) =>
     set((s) => {

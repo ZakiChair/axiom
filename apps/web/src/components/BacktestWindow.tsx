@@ -12,7 +12,7 @@
  * pas d'intrabar » — la variante intrabar (case à cocher, défaut OFF) est nommée dans le
  * sous-titre et dans la note (cf. le contrat du moteur @axiom/backtest/engine.ts).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import type {
   Comparateur,
@@ -86,6 +86,9 @@ import {
 } from "./ui";
 import { TableTriable, trierLignes, type ColonneTable, type TriTable } from "./TableTriable";
 import { risqueStore } from "../store/risque";
+import { backtestHistoryStore } from "../store/backtestHistory";
+
+const BacktestHistory = lazy(() => import("./BacktestHistory").then((m) => ({ default: m.BacktestHistory })));
 
 const COMPARATEURS: Comparateur[] = [">", ">=", "<", "<="];
 
@@ -946,15 +949,16 @@ function TradesTable({ trades, symbol, tf }: { trades: TradeResultat[]; symbol: 
 function EnTeteResultat({ resultat }: { resultat: ResultatBacktest }) {
   const signature = useStore(backtestStore, (s) => s.signatureRun);
   const etat = useStore(backtestStore, (s) => s);
+  const configRun = etat.configRunResultat ?? configCourante(etat);
   const perime = runPerime(signature, configCourante(etat));
   const marquesActives = useStore(btMarksStore, (s) => s.actif);
-  const libellePlage = PLAGES.find((p) => p.id === etat.plage)?.label ?? etat.plage;
+  const libellePlage = PLAGES.find((p) => p.id === configRun.plage)?.label ?? configRun.plage;
   const tronques = tradesTronques(resultat.trades.length);
 
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
-        <TitreSection>{resumeRun(configCourante(etat), resultat.trades.length, libellePlage)}</TitreSection>
+        <TitreSection>{resumeRun(configRun, resultat.trades.length, libellePlage)}</TitreSection>
         <div className="ml-auto flex items-center gap-1.5">
           <BoutonBascule
             actif={marquesActives}
@@ -1149,6 +1153,8 @@ export function BacktestWindow() {
   const phase = useStore(backtestStore, (s) => s.phase);
   const progress = useStore(backtestStore, (s) => s.progress);
   const resultat = useStore(backtestStore, (s) => s.resultat);
+  const configRunResultat = useStore(backtestStore, (s) => s.configRunResultat);
+  const erreurHistorique = useStore(backtestHistoryStore, (s) => s.erreurSauvegarde);
   // Découpage walk-forward du run courant (pur, O(bougies + trades)) — partagé entre la
   // ligne de frontière de l'équité et la section « Tenue par moitié ».
   const partage = useMemo(() => (resultat === null ? null : partagerResultatMoities(resultat)), [resultat]);
@@ -1160,6 +1166,7 @@ export function BacktestWindow() {
   const cancel = useStore(backtestStore, (s) => s.cancel);
 
   const [presetName, setPresetName] = useState("");
+  const [historiqueOuvert, setHistoriqueOuvert] = useState(false);
   const busy = phase === "chargement" || phase === "calcul";
   const pctProgress =
     progress.cible > 0 ? Math.min(100, (progress.recuperees / progress.cible) * 100) : 0;
@@ -1538,9 +1545,16 @@ export function BacktestWindow() {
             <EquityCanvas resultat={resultat} frontiere={partage?.frontiere ?? null} />
             {partage !== null && <WalkForwardSection partage={partage} />}
             <MonteCarloSection resultat={resultat} busy={busy} />
-            <TradesTable trades={resultat.trades} symbol={symbol} tf={tf} />
+            <TradesTable trades={resultat.trades} symbol={configRunResultat?.symbol ?? symbol} tf={configRunResultat?.tf ?? tf} />
           </div>
         )}
+        <section className="space-y-2">
+          <button type="button" className={BTN_SECONDAIRE} aria-expanded={historiqueOuvert} onClick={() => setHistoriqueOuvert((v) => !v)}>
+            {historiqueOuvert ? "Fermer versions et historique" : "Ouvrir versions et historique"}
+          </button>
+          {erreurHistorique !== null && !historiqueOuvert && <div role="alert"><ErreurBloc>{erreurHistorique}</ErreurBloc></div>}
+          {historiqueOuvert && <Suspense fallback={<p className="text-xs text-text-dim">Chargement de l'historique…</p>}><BacktestHistory /></Suspense>}
+        </section>
       </div>
     </>
   );

@@ -20,11 +20,16 @@
  *  - les agrégats (statsExpy, equityR, repartition) ne portent que sur les trades FERMÉS
  *    à R non null.
  */
+import type { ExchangeId } from "@axiom/types";
 
 /** Un trade journalisé manuellement. `sortie`/`fermeTs` null tant que le trade est ouvert. */
 export interface TradeJournal {
   id: string;
   symbol: string;
+  /** Source verrouillée du PAPER moderne ; absente sur les imports historiques. */
+  source?: ExchangeId;
+  /** Dossiers qui ont motivé l'ordre et ses éventuels renforts. */
+  decisionIds?: string[];
   direction: "long" | "short";
   entree: number;
   stopInitial: number;

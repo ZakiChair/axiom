@@ -95,6 +95,7 @@ beforeEach(() => {
   // Réinitialisation des stores de session (état volatil désormais persisté).
   compareStore.getState().clear();
   orderflowStore.getState().setEnabled(false);
+  orderflowStore.getState().setAlerteCvdDemandee(false);
   refSymbolStore.getState().setRefSymbol(REF_SYMBOL_DEFAUT);
   volumeProfileStore.getState().setEnabled(false);
   revenueStore.getState().setEnabled(false);
@@ -487,6 +488,20 @@ describe("hydrateStores — état de session (toggles, comparaison, overlays, se
     expect(raw.niveauxOptions).toBe(true);
     expect(raw.bandesImplicites).toBe(true);
     expect(raw.prixRevientTresoreries).toBe(true);
+  });
+
+  it("la demande CVD des alertes ne persiste pas et ne modifie pas le toggle utilisateur", () => {
+    orderflowStore.getState().setEnabled(false);
+    orderflowStore.getState().setCvdSpotPerp(false);
+    orderflowStore.getState().setAlerteCvdDemandee(true);
+    saveSessionUi();
+    const raw = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null");
+    expect(raw.orderflow).toBe(false);
+    expect(raw).not.toHaveProperty("alerteCvdDemandee");
+    expect(raw).not.toHaveProperty("cvdSpotPerp");
+    orderflowStore.getState().setAlerteCvdDemandee(false);
+    hydrateStores();
+    expect(orderflowStore.getState()).toMatchObject({ enabled: false, cvdSpotPerp: false, alerteCvdDemandee: false });
   });
 });
 

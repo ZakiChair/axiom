@@ -11,7 +11,7 @@ Référence critique complète : `~/AXIOM-revue-critique-2026-06-26.md`.
 - **Cible** : terminal pour UN utilisateur (ses propres clés). PAS de multi-tenant, PAS d'auth réseau, PAS de SaaS. Crypto d'abord (spot + perp) ; tradfi/commodités en complément.
 - **Renderer-first** : le premier livrable à valeur est un graphe live à l'écran. **AUCUN backend réseau/multi-tenant (Docker/TimescaleDB/Redis interdits). Un daemon localhost mono-process (`apps/daemon`, Bun + SQLite, port 8787) est autorisé depuis la Phase 2 — proxy/cache/persistance/alertes UNIQUEMENT, jamais sur le chemin chaud du renderer (les WS de marché du front restent directs).** Le front parle directement aux WS publics des exchanges (mode mono-utilisateur assumé) et reste **100 % fonctionnel SANS daemon** (feature-detect `/health` + repli localStorage/proxy Vite). Déviation assumée vs roadmap E1 : les proxys Vite restent en dev (dev sans daemon), le daemon est le chemin de PROD + services additionnels.
 - **Chart** : **KLineChart** figé (pas de lightweight-charts, pas d'abstraction `IChartRenderer` « swap de moteur »). L'overlay orderflow se synchronise sur le viewport de KLineChart. Multi-chart 2×2 : un store par slot ; les overlays doivent être scellés au slot (voir plan 2026-08-24, Lot 3).
-- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**210 indicateurs** depuis le 2026-09-22, cf. « Revue et extension du 22 septembre 2026 »). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
+- **Indicateurs** : **TS pur**, package `@axiom/indicators` = source de vérité unique (**214 indicateurs** depuis le 2026-09-23, cf. « Quatre lots complémentaires du 23 septembre 2026 »). PAS de WASM, PAS de service Python. `pandas-ta-classic` peut servir d'oracle de référence en commentaire de test, mais AUCUNE dépendance runtime Python.
 - **Données dérivées (OI/funding/L-S/liquidations)** : **ACHETER** via un `IDerivedDataProvider` (Coinalyze **câblé**, M6 atteint) — NE PAS construire d'AggregationEngine multi-exchange. Trois couches de liquidations distinctes et étiquetées : heatmap *exécutée*, niveaux **EST.** (modèle levier), niveaux **HL réels** (Hyperliquid, non exhaustif). Depuis le 2026-09-21, la heatmap exécutée reçoit aussi une venue `hyperliquid` **PARTIELLE** (fills des makers suivis, couverture mesurée affichée — cf. « Corrections et extension demandées le 21 septembre 2026 »). Depuis le 2026-09-22, la couche HL réels est aussi une **heatmap temps × prix des instantanés** collectés par le daemon (opt-in, couverture mesurée en % de l'OI — cf. « Revue et extension du 22 septembre 2026 »).
 - **Trading** : **PAS d'exécution d'ordres** — aucune clé de trading. Le paper trading (`PAPER`) est une simulation locale (hors gate G100/K8). Ne rien implémenter qui touche à des clés de trading réelles.
 - **Sources** : **9 identifiants** (`EXCHANGE_IDS` dans `@axiom/types`) — Binance, Bybit, OKX, Hyperliquid, Coinbase, Kraken, Twelve Data, MEXC, synthetic. Ne pas en ajouter sans nécessité démontrée (non-objectif avant G100).
@@ -52,7 +52,7 @@ personnelles et la provenance historique conservent leur sens. Voir la
 
 ## État actuel (2026-09-04)
 - **Chart** live multi-exchange (spot + perp), multi-grille 1/2h/2v/2×2, orderflow/CVD/footprint, volume profile, fibo, dessins.
-- **210 indicateurs** TS purs dans `@axiom/indicators` (dont 30 stratégies étiquetées « non validé ») ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
+- **214 indicateurs** TS purs dans `@axiom/indicators` (dont 30 stratégies étiquetées « non validé ») ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
 - **39 fenêtres** à mnémonique (`WINDOW_REGISTRY`) — dont WHALES (mouvements baleines on-chain + positions top comptes Hyperliquid), ajoutée le 2026-08-25 sur décision utilisateur, et BPL (Bitcoin Power Law), ajoutée le 2026-09-01 avec les séries TOTAL/TOTAL2/TOTAL3 chartables (chantier CAP/BPL) : **écarts ASSUMÉS** au gel « aucune nouvelle fenêtre avant le verdict G100 » (§ ci-dessous).
 - **Daemon** `axiomd` : proxy+cache SQLite, KV/snapshots, candles, alertes (macOS + Telegram), replay dumps Binance, couches GDELT/UCDP, LIQHL Hyperliquid paresseux, collecteur whales (blocs confirmés blockchain.info + Etherscan stables, table `whale_moves`, rétention 30 j). Bind `127.0.0.1:8787`, whitelist `/extapi`, garde Host/Origin/DNS-rebinding.
 - **Vercel** : front + proxy serverless sans secret partagé, whitelist/MIME/DNS durcis. Les clés personnelles restent dans le navigateur. **Exception ACTÉE le 2026-09-14** (demande utilisateur, test communautaire) : une seule variable serveur, `BGEOMETRICS_API_KEY`, portée par `api/proxy.ts` vers bitcoin-data.com quand le client n'envoie aucune clé — clé gratuite et révocable, plafonds de l'offre gratuite (10 req/heure et 15 req/jour) partagés par les visiteurs, jamais exposée au navigateur ; toute autre clé reste personnelle (test structurel `apps/daemon/src/vercelProxy.test.ts`). Toute fonction strictement locale est marquée `UNUSABLE`, toute fenêtre partielle `PARTIAL` ; jamais de pane muet. La clé CryptoQuant (2026-09-16) relève de cette règle : personnelle, saisie dans les Réglages, repli `.env` pour le proxy Vite et le daemon `127.0.0.1` uniquement, JAMAIS de variable serveur sur Vercel (le test structurel continue d'exiger exactement une lecture d'environnement).
@@ -61,14 +61,14 @@ personnelles et la provenance historique conservent leur sens. Voir la
 
 ## Jalons historiques (atteints — ne pas rejouer, ne pas prendre comme périmètre actuel)
 - **M1 — Chart live** (`apps/web`) : Vite+React+TS+Tailwind ; client WS Binance + backfill REST ; rendu KLineChart live ; sélecteur symbole + timeframe ; crosshair. Store marché vanilla. **Atteint.**
-- **M2 — Moteur + 7 indicateurs** (`packages/indicators`) : `IndicatorDef`/`engine.ts` (calcul, helpers SMA/EMA/RMA dans `utils.ts`) ; SMA, EMA, RSI, MACD, Bollinger Bands, Volume, VWAP avec tests vs valeurs de référence (Wilder pour RSI). **Atteint et dépassé** (le catalogue est à 189).
+- **M2 — Moteur + 7 indicateurs** (`packages/indicators`) : `IndicatorDef`/`engine.ts` (calcul, helpers SMA/EMA/RMA dans `utils.ts`) ; SMA, EMA, RSI, MACD, Bollinger Bands, Volume, VWAP avec tests vs valeurs de référence (Wilder pour RSI). **Atteint et dépassé** (le catalogue est désormais à 214).
 - M3 watchlist+persistance locale, M4 spike sync WebGL, M5 CVD+footprint (aggTrade), M6 `IDerivedDataProvider`→Coinalyze : **tous atteints.**
 
 ## Anti-objectifs (NE PAS faire)
 - Ne pas créer de backend **réseau/multi-tenant**, de docker-compose, de schéma DB serveur (le daemon localhost mono-process de la Phase 2 est la SEULE exception, cf. Décisions verrouillées).
 - **Avant le verdict G100** : pas de nouvelle fenêtre, pas de nouveau fournisseur sans remplacement direct d'une source défaillante (exceptions ACTÉES : fournisseurs de capitalisation CMC/CCData, fournisseurs statistiques publics OCDE/Eurostat/ONS le 2026-09-06, et CryptoQuant BASIC le 2026-09-16 sur décision explicite du propriétaire — **sans source défaillante remplacée**, l'exception est nommée comme telle — cf. Décisions verrouillées), pas de migration React/Vite/Zustand/KLineChart majeure (plan 2026-08-24, §12).
 - Ne pas « améliorer » `@axiom/types` ni les configs racine.
-- Ne pas étendre le catalogue d'indicateurs sans nécessité démontrée (le contrat est à 200, pas « plus de 7 » — l'ancien jalon M2 est historique, cf. ci-dessus).
+- Ne pas étendre le catalogue d'indicateurs sans nécessité démontrée (le contrat est à 214, pas « plus de 7 » — l'ancien jalon M2 est historique, cf. ci-dessus).
 
 ### Garde-fous reportés de la roadmap (docs/research/03, §Anti-recommandations)
 Les anti-recommandations #2 (Docker/Redis/TimescaleDB), #3 (proxifier les WS via le daemon) et #6 (abstraction de moteur de chart) sont déjà couvertes ci-dessus et dans les Décisions verrouillées. Les 6 restantes, à respecter tout autant :
@@ -495,3 +495,68 @@ Validation finale : **7 283 tests** et typechecks/build verts (`pnpm check`), pa
 Chromium backtest réussi, quatre lots acceptés en revue indépendante. Budget initial
 **1 204 408 / 356 368 octets** (bruts/gzip), plafonds inchangés. Détails et limites :
 `docs/revue-2026-09-23-quatre-corrections.md`.
+
+## Quatre lots complémentaires du 23 septembre 2026
+
+Le propriétaire a précisé « Les quatre lots, avec les ajouts ». Le périmètre est
+décrit dans `docs/superpowers/specs/2026-09-23-quatre-lots-design.md` et exécuté par
+`docs/superpowers/plans/2026-09-23-quatre-lots.md`. Cette autorisation couvre les
+extensions ci-dessous dans les surfaces existantes : **214 indicateurs, 39 fenêtres,
+9 identifiants de marché**, aucune dépendance, infrastructure ou exécution réelle.
+Les changements utilisateur préexistants restent conservés et séparés dans les preuves.
+
+- **Durabilité locale** : NOTE et EXPY conservent une mutation et la saisie en mémoire
+  après un échec d'écriture, exposent l'erreur et un réessai idempotent. Réessayer ne
+  change ni le prix ni la date métier et ne crée pas de doublon. Le succès local est
+  distinct de l'acquittement d'un miroir daemon différé.
+- **BT** : le run calcule et archive une copie immuable de sa configuration de départ.
+  Versions nommées et historique synthétique sont limités chacun à 50 entrées, sans
+  éviction silencieuse. Pas d'OHLC, de courbe ni de liste d'exécutions persistés dans
+  cette archive. Profit factor infini encodé explicitement ; deltas uniquement sur
+  marchés/sources/intervalles/bornes identiques, différences de coûts et capital signalées.
+- **Dossiers** : preuve compacte capturée au signal, puis thèse, invalidation et revue
+  dans EXPY. Un ancien signal reste partiel. La préparation PAPER est un brouillon ;
+  les ordres exigent encore la validation utilisateur. Provenance explicite verrouillée
+  et prix isolés par source ; aucun mélange legacy/source explicite ni conversion
+  silencieuse d'instrument. Les liens `decisionIds` sont unis au renfort, puis conservés
+  à la clôture avec `stopInitial`. Limite de 100 dossiers sans éviction silencieuse.
+- **Indicateurs** : `liquidationsOi`, `downsideCorrelation`, `downsideBeta` et
+  `fundingDispersion`. Contrat financier et oracles :
+  `docs/superpowers/specs/2026-09-23-indicateurs-contrat.md`. Liquidations et OI sont
+  en USD sur le même perp Binance et le même intervalle Coinalyze, OI observé juste
+  avant le bucket. Les moments baissiers utilisent les rendements logarithmiques
+  exactement appariés et les seules baisses de la référence, sans combler les trous.
+  Les auxiliaires dédiés `oiDebutLiqUsd`, `refCloseStrict`, `fundingHistBinance`,
+  `fundingHistBybit`, `fundingHistOkx`, `fundingHistHl` sont autorisés dans `@axiom/types`.
+- **FUNDX** : historique demandé 7/30/90 jours, clients partagés chargés à la demande,
+  règlements réalisés et expiration causale des taux horaires. APR = taux horaire ×
+  24 × 365 × 100 ; dispersion population sur les quatre places fixes Binance, Bybit,
+  OKX et Hyperliquid. Une place inconnue rend σ/min/max inconnus ; couverture et trous
+  restent visibles. La période demandée n'est pas une promesse de rétention amont.
+- **Expiration** : date optionnelle commune au moteur, navigateur, daemon et scans.
+  À `now >= expireTs`, aucune évaluation ni demande exclusive de flux ; une demande
+  partagée reste active. Date invalide rejetée, pause/reprise sans renouvellement,
+  prolongation explicite. Les demandes CVD d'alertes restent transitoires, distinctes
+  des choix du graphique (`enabled` persisté, `cvdSpotPerp` conservé en session).
+  Contrat détaillé :
+  `docs/superpowers/specs/2026-09-23-expiration-contrat.md`.
+- **Usage** : favoris d'indicateurs, 12 récents maximum, recherche et disponibilité
+  combinables ; ajout effectif avant mise à jour des récents. DATA propose des actions
+  vérifiées pour chaque capacité (vue propriétaire, réglages, documentation fixe ou
+  rechargement existant) et affiche leur résultat. Les plafonds d'entrée web restent
+  **1 220 000 octets bruts / 360 000 gzip** ; charger les menus à l'ouverture.
+
+Clés personnelles nouvelles : `axiom:backtest:history:v1`,
+`axiom:decisionDossiers:v1`, `axiom:indicatorPreferences:v1`. Les historiques BT,
+dossiers et état PAPER sont inclus dans le périmètre de sauvegarde personnelle.
+Aucun credential n'y est ajouté. Les archives BT et dossiers locaux illisibles sont
+conservés pour export avant une écriture de remplacement, jamais effacés silencieusement.
+
+Validation finale de ces ajouts : **7 416 tests**, typage et build réussis (`pnpm check`),
+**127/127 parcours Chromium** réussis (`pnpm check:e2e`), dont 24 nouveaux. Les sept
+tâches et leurs interfaces sont acceptées en revue indépendante. Budget initial final :
+**1 206 551 / 357 464 octets** (bruts/gzip), plafonds inchangés. Aucune dépendance ni
+règle de proxy ajoutée ; changements préexistants conservés, aucun commit ou déploiement.
+Les tests navigateur utilisent des réponses simulées et ne valent pas verdict manuel
+G100. Le daemon utilisateur reste sur son processus initial ; redémarrage nécessaire
+pour charger le nouveau code serveur. Rapport : `docs/revue-2026-09-23-quatre-lots.md`.

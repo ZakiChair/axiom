@@ -105,14 +105,24 @@ export async function fetchBinanceFundingHourly(
         symbol, startTime: String(start), endTime: String(end), limit: String(PAGE_SIZE),
       })}`);
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      let timer: ReturnType<typeof setTimeout> | undefined;
       let raw: unknown;
       try {
-        const response = await fetchImpl(url, { signal: controller.signal });
-        if (!response.ok) return [];
-        raw = await response.json() as unknown;
+        raw = await Promise.race([
+          (async () => {
+            const response = await fetchImpl(url, { signal: controller.signal });
+            if (!response.ok) throw new Error(`Funding Binance HTTP ${response.status}`);
+            return response.json() as Promise<unknown>;
+          })(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              controller.abort();
+              reject(new Error("Délai historique funding Binance dépassé"));
+            }, TIMEOUT_MS);
+          }),
+        ]);
       } finally {
-        clearTimeout(timer);
+        if (timer !== undefined) clearTimeout(timer);
       }
       const parsed = parseBinanceFundingHistory(raw, symbol);
       if (parsed.length === 0) return normaliserFundingHoraire(rows);

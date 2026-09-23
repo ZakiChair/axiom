@@ -118,13 +118,13 @@ async function sauterOnboarding(page: Page): Promise<void> {
   });
 }
 
-/** Catalogue : « ＋ VWAP prix » puis « ＋ VWAP 1 prix » une fois l'instance posée. */
+/** Noms accessibles stables des boutons d'ajout du catalogue. */
 function boutonVwapCatalogue(page: Page) {
-  return page.getByRole("button", { name: /^＋\s*VWAP(\s+\d+)?\s+prix/ });
+  return page.getByRole("button", { name: "Ajouter VWAP", exact: true });
 }
 
 function boutonPivotStandardCatalogue(page: Page) {
-  return page.getByRole("button", { name: /^＋\s*Pivot Points Standard(\s+\d+)?\s+prix/ });
+  return page.getByRole("button", { name: "Ajouter Pivot Points Standard", exact: true });
 }
 
 test.beforeEach(async ({ page }) => {

@@ -942,7 +942,8 @@ export function ChartInstance({
     // buffer de CE slot (store injecté). Recréé au changement de focus/toggle, jamais par tick.
     let orderflow: OrderflowController | null = null;
     const ensureOrderflow = (): void => {
-      const want = chartLayoutStore.getState().focus === slot && orderflowStore.getState().enabled;
+      const { enabled, alerteCvdDemandee } = orderflowStore.getState();
+      const want = chartLayoutStore.getState().focus === slot && (enabled || alerteCvdDemandee);
       if (want && !orderflow) {
         orderflow = new OrderflowController(chart, container, canvas, symbol, store, replayAdapter);
         orderflow.setAxisType(priceScaleStore.getState().type);

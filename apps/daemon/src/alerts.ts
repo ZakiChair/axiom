@@ -31,7 +31,7 @@
  * il ne partage rien avec le chemin chaud du renderer (WS du front restent directs).
  */
 import type { Database } from "bun:sqlite";
-import { evaluerAlertes, estFrontOnly, typesDeDef, type AlertDef, type ContexteAlerte, type Declenchement } from "@axiom/alerts";
+import { alerteActiveAuTemps, echeanceAlerteValide, evaluerAlertes, estFrontOnly, prochaineEcheanceAlerte, typesDeDef, type AlertDef, type ContexteAlerte, type Declenchement } from "@axiom/alerts";
 import { entetesCors } from "./cors";
 import { getDb } from "./db";
 import {
@@ -40,6 +40,7 @@ import {
   creerFeed,
   zScoreFunding,
   type Feed,
+  type OptionsFeed,
 } from "./marketFeed";
 import { assurerTableLiquidations } from "./liquidations";
 import { notifierDeclenchement, notifierTelegram } from "./notify";
@@ -82,12 +83,50 @@ export const PERIODE_WHALE_MS = 30_000;
 export const FENETRE_WHALE_MS = 10 * 60_000;
 /** Borne du journal renvoyé par GET /alerts/journal. */
 const LIMITE_JOURNAL = 200;
+const MAX_TIMEOUT_MS = 2_147_483_647;
 /**
  * Rétention du journal des déclenchements (30 jours — même convention que les snapshots
  * KV et les liquidations). Le GET n'en montre que les 200 derniers : sans purge la table
  * croîtrait indéfiniment pour des lignes que plus rien ne lit.
  */
 export const RETENTION_JOURNAL_MS = 30 * 24 * 3_600_000;
+
+export interface HorlogeEcheance {
+  now: () => number;
+  setTimeout: (fn: () => void, delay: number) => unknown;
+  clearTimeout: (id: unknown) => void;
+}
+
+const HORLOGE_ECHEANCE_REELLE: HorlogeEcheance = {
+  now: () => Date.now(),
+  setTimeout: (fn, delay) => setTimeout(fn, delay),
+  clearTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>),
+};
+
+/** Réveille les sélecteurs à la prochaine échéance, même sans tick ni poll KV. */
+export function creerReveilEcheance(
+  lireDefs: () => readonly AlertDef[],
+  rafraichir: () => void,
+  horloge: HorlogeEcheance = HORLOGE_ECHEANCE_REELLE,
+): { synchroniser: () => void; arreter: () => void } {
+  let minuteur: unknown = null;
+  let arrete = false;
+  const synchroniser = (): void => {
+    if (minuteur !== null) horloge.clearTimeout(minuteur);
+    minuteur = null;
+    if (arrete) return;
+    const maintenant = horloge.now();
+    const prochaine = prochaineEcheanceAlerte(lireDefs(), maintenant);
+    if (prochaine === null) return;
+    const delai = Math.min(MAX_TIMEOUT_MS, Math.max(1, Math.ceil(prochaine - maintenant)));
+    minuteur = horloge.setTimeout(() => {
+      minuteur = null;
+      if (arrete) return;
+      try { rafraichir(); } finally { synchroniser(); }
+    }, delai);
+  };
+  return { synchroniser, arreter: () => { arrete = true; if (minuteur !== null) horloge.clearTimeout(minuteur); minuteur = null; } };
+}
 
 // ─────────────────────────── Fonctions PURES (testées) ───────────────────────────
 
@@ -114,13 +153,13 @@ export function fusionnerEtatArme(
  * évaluation. Les autres types (prix, funding, liq, whale) ne dépendent d'aucune bougie
  * et gardent leur symbole. Fonction PURE.
  */
-export function symbolesBinanceActifs(defs: readonly AlertDef[]): string[] {
+export function symbolesBinanceActifs(defs: readonly AlertDef[], maintenant = Date.now()): string[] {
   return [
     ...new Set(
       defs
         .filter(
           (d) =>
-            d.actif &&
+            alerteActiveAuTemps(d, maintenant) &&
             d.source === "binance" &&
             evaluableDaemon(d) &&
             (!TYPES_BOUGIE.has(d.condition.type) || evaluableSurBougie1m(d)),
@@ -134,25 +173,37 @@ export function symbolesBinanceActifs(defs: readonly AlertDef[]): string[] {
  * Symboles (majuscules) ayant au moins une alerte binance active de type
  * `funding-extreme`. Fonction PURE (testée).
  */
-export function symbolesFundingActifs(defs: readonly AlertDef[]): string[] {
+export function symbolesFundingActifs(defs: readonly AlertDef[], maintenant = Date.now()): string[] {
   return [
     ...new Set(
       defs
-        .filter((d) => d.actif && d.source === "binance" && typesDeDef(d).has("funding-extreme"))
+        .filter((d) => alerteActiveAuTemps(d, maintenant) && d.source === "binance" && typesDeDef(d).has("funding-extreme"))
         .map((d) => d.symbol.toUpperCase()),
     ),
   ].sort();
+}
+
+/** Une réponse async appartient aux mêmes alertes et échéances qu'au départ. */
+export function memeGenerationFunding(
+  avant: readonly AlertDef[], apres: readonly AlertDef[], symbol: string, depart: number, maintenant: number,
+): boolean {
+  const signature = (defs: readonly AlertDef[], ts: number): string => JSON.stringify(defs
+    .filter((d) => alerteActiveAuTemps(d, ts) && d.source === "binance"
+      && d.symbol.toUpperCase() === symbol.toUpperCase() && typesDeDef(d).has("funding-extreme"))
+    .map((d) => [d.id, d.expireTs ?? null]).sort(([a], [b]) => String(a).localeCompare(String(b))));
+  const initiale = signature(avant, depart);
+  return initiale !== "[]" && initiale === signature(apres, maintenant);
 }
 
 /**
  * Symboles (majuscules) ayant au moins une alerte binance active de type
  * `liq-cascade`. Fonction PURE (testée) — pattern `symbolesFundingActifs`.
  */
-export function symbolesLiqCascadeActifs(defs: readonly AlertDef[]): string[] {
+export function symbolesLiqCascadeActifs(defs: readonly AlertDef[], maintenant = Date.now()): string[] {
   return [
     ...new Set(
       defs
-        .filter((d) => d.actif && d.source === "binance" && typesDeDef(d).has("liq-cascade"))
+        .filter((d) => alerteActiveAuTemps(d, maintenant) && d.source === "binance" && typesDeDef(d).has("liq-cascade"))
         .map((d) => d.symbol.toUpperCase()),
     ),
   ].sort();
@@ -163,11 +214,11 @@ export function symbolesLiqCascadeActifs(defs: readonly AlertDef[]): string[] {
  * Convention @axiom/alerts : `symbol` = ACTIF (« BTC », « USDT »…), `source` =
  * "binance" (porteur neutre). Fonction PURE (testée) — pattern `symbolesLiqCascadeActifs`.
  */
-export function assetsWhaleFluxActifs(defs: readonly AlertDef[]): string[] {
+export function assetsWhaleFluxActifs(defs: readonly AlertDef[], maintenant = Date.now()): string[] {
   return [
     ...new Set(
       defs
-        .filter((d) => d.actif && d.source === "binance" && d.condition.type === "whale-flux")
+        .filter((d) => alerteActiveAuTemps(d, maintenant) && d.source === "binance" && d.condition.type === "whale-flux")
         .map((d) => d.symbol.toUpperCase()),
     ),
   ].sort();
@@ -215,7 +266,7 @@ export function evaluerTick(
 ): ReturnType<typeof evaluerAlertes> {
   const lot = defs.filter(
     (d) =>
-      d.actif &&
+      alerteActiveAuTemps(d, ctx.maintenant) &&
       d.source === "binance" &&
       d.symbol.toUpperCase() === symbol.toUpperCase() &&
       types.has(d.condition.type) &&
@@ -293,6 +344,7 @@ function estAlertDef(v: unknown): v is AlertDef {
     typeof o.symbol === "string" &&
     typeof o.source === "string" &&
     typeof o.actif === "boolean" &&
+    echeanceAlerteValide(o as Pick<AlertDef, "expireTs">) &&
     !!o.condition &&
     typeof o.condition === "object"
   );
@@ -439,7 +491,7 @@ export function sommeLiqUsdParMin(d: Database, symbole: string, maintenant: numb
  */
 export function evaluerLiqCascadeTick(maintenant: number = Date.now(), opts: OptionsEval = {}): void {
   const d = opts.db ?? getDb();
-  const symboles = symbolesLiqCascadeActifs(lireDefsKv(d));
+  const symboles = symbolesLiqCascadeActifs(lireDefsKv(d), maintenant);
   if (symboles.length === 0) return; // inerte : aucune alerte liq-cascade active
   // Le tick peut précéder la création de la table par la boucle d'ingestion (démarrage).
   assurerTableLiquidations(d);
@@ -460,7 +512,7 @@ export function evaluerLiqCascadeTick(maintenant: number = Date.now(), opts: Opt
  */
 export function evaluerWhaleFluxTick(maintenant: number = Date.now(), opts: OptionsEval = {}): void {
   const d = opts.db ?? getDb();
-  const assets = assetsWhaleFluxActifs(lireDefsKv(d));
+  const assets = assetsWhaleFluxActifs(lireDefsKv(d), maintenant);
   if (assets.length === 0) return; // inerte : aucune alerte whale-flux active
   for (const asset of assets) {
     const whaleMouvements = mouvementsRecents(d, asset, maintenant - FENETRE_WHALE_MS).map((m) => ({
@@ -484,13 +536,21 @@ const cacheFunding = new Map<string, { rate: number; z?: number; ts: number }>()
  * bougie, et poll le funding (~60 s) pour `funding-extreme`. Renvoie une fonction
  * d'arrêt. À appeler UNE fois depuis index.ts.
  */
-export function demarrerBoucleAlertes(): () => void {
-  assurerTablesAlertes(getDb());
+export function demarrerBoucleAlertes(deps: {
+  db?: Database;
+  creerFeed?: (options: OptionsFeed) => Feed;
+  chargerFundingRates?: typeof chargerFundingRates;
+  chargerHistoriqueFunding?: typeof chargerHistoriqueFunding;
+} = {}): () => void {
+  const db = deps.db ?? getDb();
+  assurerTablesAlertes(db);
+  let arrete = false;
 
-  feed = creerFeed({
+  feed = (deps.creerFeed ?? creerFeed)({
     onPrix: (symbol, prix, prixPrecedent) => {
+      if (arrete) return;
       try {
-        evaluerEtPersister(symbol, TYPES_PRIX, { maintenant: Date.now(), dernierPrix: prix, prixPrecedent });
+        evaluerEtPersister(symbol, TYPES_PRIX, { maintenant: Date.now(), dernierPrix: prix, prixPrecedent }, { db });
       } catch (err) {
         console.error("[axiomd] évaluation tick échouée :", err);
       }
@@ -498,6 +558,7 @@ export function demarrerBoucleAlertes(): () => void {
     // Bougies 1 MINUTE (@kline_1m) : les defs déclarant un autre timeframe sont
     // écartées par `evaluableSurBougie1m` (front-only plutôt que fausses).
     onBougieClose: (symbol, candles) => {
+      if (arrete) return;
       const derniere = candles[candles.length - 1];
       if (!derniere) return;
       const avant = candles[candles.length - 2];
@@ -508,7 +569,7 @@ export function demarrerBoucleAlertes(): () => void {
           dernierPrix: derniere.close,
           prixPrecedent: avant?.close,
           candles,
-        });
+        }, { db });
       } catch (err) {
         console.error("[axiomd] évaluation bougie échouée :", err);
       }
@@ -519,8 +580,8 @@ export function demarrerBoucleAlertes(): () => void {
           : {};
       let liqUsdParMin: number | undefined;
       try {
-        assurerTableLiquidations(getDb());
-        liqUsdParMin = sommeLiqUsdParMin(getDb(), symbol, maintenant);
+        assurerTableLiquidations(db);
+        liqUsdParMin = sommeLiqUsdParMin(db, symbol, maintenant);
       } catch {
         /* table absente : sous-condition liq non évaluable */
       }
@@ -532,7 +593,7 @@ export function demarrerBoucleAlertes(): () => void {
           candles,
           ...funding,
           ...(liqUsdParMin !== undefined ? { liqUsdParMin } : {}),
-        });
+        }, { db });
       } catch (err) {
         console.error("[axiomd] évaluation composite échouée :", err);
       }
@@ -540,21 +601,29 @@ export function demarrerBoucleAlertes(): () => void {
   });
 
   const rafraichir = (): void => {
+    if (arrete) return;
     try {
-      const symboles = symbolesBinanceActifs(lireDefsKv(getDb()));
+      const symboles = symbolesBinanceActifs(lireDefsKv(db), Date.now());
       feed?.setSymboles(symboles);
     } catch (err) {
       console.error("[axiomd] rafraîchissement des symboles échoué :", err);
     }
   };
-  rafraichir();
-  const minuteur = setInterval(rafraichir, PERIODE_POLL_MS);
+  const reveilEcheance = creerReveilEcheance(() => lireDefsKv(db), rafraichir);
+  const pollDefs = (): void => { rafraichir(); reveilEcheance.synchroniser(); };
+  pollDefs();
+  const minuteur = setInterval(pollDefs, PERIODE_POLL_MS);
 
   // Poll funding : 1× premiumIndex (tous symboles) + z-score best-effort par symbole alerté.
   const pollFunding = async (): Promise<void> => {
+    if (arrete) return;
     let symboles: string[];
+    let defsDepart: AlertDef[];
+    let depart: number;
     try {
-      symboles = symbolesFundingActifs(lireDefsKv(getDb()));
+      depart = Date.now();
+      defsDepart = lireDefsKv(db);
+      symboles = symbolesFundingActifs(defsDepart, depart);
     } catch (err) {
       console.error("[axiomd] lecture defs funding échouée :", err);
       return;
@@ -563,19 +632,21 @@ export function demarrerBoucleAlertes(): () => void {
 
     let rates: Map<string, number>;
     try {
-      rates = await chargerFundingRates();
+      rates = await (deps.chargerFundingRates ?? chargerFundingRates)();
     } catch (err) {
       console.error("[axiomd] poll premiumIndex échoué :", err);
       return;
     }
 
+    if (arrete) return;
     for (const symbol of symboles) {
+      if (arrete || !memeGenerationFunding(defsDepart, lireDefsKv(db), symbol, depart, Date.now())) continue;
       const rate = rates.get(symbol);
       if (rate === undefined) continue;
       // Z-score optionnel (historique Binance) : échec → rate seul (seuilAbs suffit).
       let z: number | undefined;
       try {
-        const hist = await chargerHistoriqueFunding(symbol);
+        const hist = await (deps.chargerHistoriqueFunding ?? chargerHistoriqueFunding)(symbol);
         // Inclut le rate courant s'il n'est pas déjà le dernier point.
         const series =
           hist.length > 0 && hist[hist.length - 1] === rate ? hist : [...hist, rate];
@@ -583,6 +654,7 @@ export function demarrerBoucleAlertes(): () => void {
       } catch {
         /* z best-effort */
       }
+      if (arrete || !memeGenerationFunding(defsDepart, lireDefsKv(db), symbol, depart, Date.now())) continue;
       cacheFunding.set(symbol, { rate, z, ts: Date.now() });
       try {
         evaluerEtPersister(symbol, TYPES_FUNDING, {
@@ -590,7 +662,7 @@ export function demarrerBoucleAlertes(): () => void {
           dernierPrix: 0, // le moteur funding n'utilise pas le prix
           fundingRate: rate,
           fundingZScore: z,
-        });
+        }, { db });
       } catch (err) {
         console.error(`[axiomd] évaluation funding ${symbol} échouée :`, err);
       }
@@ -605,8 +677,9 @@ export function demarrerBoucleAlertes(): () => void {
   // Tick liq-cascade (10 s) : somme de la table `liquidations` (ingérée par liqFeed)
   // sur la dernière minute glissante — inerte sans def liq-cascade active.
   const tickLiq = (): void => {
+    if (arrete) return;
     try {
-      evaluerLiqCascadeTick();
+      evaluerLiqCascadeTick(Date.now(), { db });
     } catch (err) {
       console.error("[axiomd] évaluation liq-cascade échouée :", err);
     }
@@ -617,8 +690,9 @@ export function demarrerBoucleAlertes(): () => void {
   // Tick whale-flux (30 s) : mouvements de la table `whale_moves` (ingérée par whales.ts)
   // sur la fenêtre glissante de 10 min — inerte sans def whale-flux active.
   const tickWhale = (): void => {
+    if (arrete) return;
     try {
-      evaluerWhaleFluxTick();
+      evaluerWhaleFluxTick(Date.now(), { db });
     } catch (err) {
       console.error("[axiomd] évaluation whale-flux échouée :", err);
     }
@@ -627,10 +701,12 @@ export function demarrerBoucleAlertes(): () => void {
   const minuteurWhale = setInterval(tickWhale, PERIODE_WHALE_MS);
 
   return () => {
+    arrete = true;
     clearInterval(minuteur);
     clearInterval(minuteurFunding);
     clearInterval(minuteurLiq);
     clearInterval(minuteurWhale);
+    reveilEcheance.arreter();
     feed?.arreter();
     feed = null;
   };

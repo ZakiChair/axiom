@@ -55,6 +55,7 @@ import { coinalyzeKeyStore } from "../store/coinalyze";
 import { refSymbolStore } from "../store/refSymbol";
 import { getBgeometricsKey } from "../store/onchain";
 import { extUrl } from "../data/extapi";
+import { normaliserIdentiteFunding } from "../data/fundingIdentity";
 
 /** État renvoyé par `getAligned` pour l'ensemble des `ids` demandés. */
 export type AuxStatus =
@@ -82,10 +83,12 @@ interface AuxPoint {
 /** TTL du cache BRUT par série (ms). */
 const TTL_MS: Record<AuxSeriesId, number> = {
   oi: 60_000,
+  oiDebutLiqUsd: 60_000,
   funding: 60_000,
   mark: 60_000, // mark price perp (Binance fapi markPriceKlines)
   perpDelta: 60_000, // delta agresseur perp par bougie (Binance fapi klines)
   refClose: 60_000, // close du symbole de référence, fetch à l'interval du chart (câblage : Task 2)
+  refCloseStrict: 60_000,
   stablecoins: 60 * 60_000,
   nvt: 60 * 60_000,
   mvrv: 60 * 60_000,
@@ -128,6 +131,10 @@ const TTL_MS: Record<AuxSeriesId, number> = {
   // cadence proche temps réel, comme `funding`.
   hlFunding: 60_000,
   binanceFundingHourly: 60_000,
+  fundingHistBinance: 60_000,
+  fundingHistBybit: 60_000,
+  fundingHistOkx: 60_000,
+  fundingHistHl: 60_000,
   hlWhalesNet: 60_000,
 };
 /** Durée de mémorisation d'un échec de fetch (anti retry-tempête). */
@@ -396,7 +403,7 @@ async function fetchPerpDeltaHistory(
  * tous deux fetchés à l'interval du chart ; les autres séries de niveaux gardent leur
  * granularité brute fixe et l'ignorent.
  */
-async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): Promise<AuxPoint[]> {
+async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe, exchange: ExchangeId): Promise<AuxPoint[]> {
   const since = Date.now() - LOOKBACK_MS;
   switch (id) {
     case "oi": {
@@ -415,6 +422,18 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
       }
       const h = await histOiUsd(symbol);
       return toPoints((h ?? []).map((p) => ({ time: p.t, value: p.v })));
+    }
+    case "oiDebutLiqUsd": {
+      if (!coinalyzeKeyStore.getState().hasKey) return [];
+      const m = INTERVALLE_LIQ[timeframe];
+      if (m === undefined) return [];
+      // La clôture du bucket précédent devient l'OI connu à l'ouverture suivante.
+      // Appariement exact seulement : une lacune ne propage jamais le dernier OI.
+      const depuis = Math.max(since, Date.now() - (LIQ_POINTS_MAX + 1) * m.ms);
+      const h = await coinalyzeProvider.fetchOpenInterestHistory(symbol, m.interval, depuis);
+      const now = Date.now();
+      return toPoints(h.filter((p) => p.time + m.ms <= now)
+        .map((p) => ({ time: p.time + m.ms, value: p.oiUsd })));
     }
     case "funding": {
       if (coinalyzeKeyStore.getState().hasKey) {
@@ -442,7 +461,8 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
       if (interval === undefined) return [];
       return fetchPerpDeltaHistory(symbol, since, interval);
     }
-    case "refClose": {
+    case "refClose":
+    case "refCloseStrict": {
       // Close du symbole de RÉFÉRENCE (refSymbolStore) — jambe « croisée » des indicateurs
       // statistiques (corrélation/bêta/spread z-score vs référence). NIVEAU (≠ flux
       // perpDelta) : le LOCF d'`alignAux` le rééchantillonne sans le fausser. On le fetch
@@ -570,6 +590,20 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
       // rester présent pour interrompre l'alignement, sans passer par `toPoints`.
       return points.map((p) => ({ time: p.time, value: p.value ?? Number.NaN, validUntil: p.validUntil }));
     }
+    case "fundingHistBinance":
+    case "fundingHistBybit":
+    case "fundingHistOkx":
+    case "fundingHistHl": {
+      const venue = id === "fundingHistBinance" ? "binance"
+        : id === "fundingHistBybit" ? "bybit"
+          : id === "fundingHistOkx" ? "okx" : "hyperliquid";
+      const mod = await import("../data/fundingHistory");
+      const historique = await mod.chargerFundingVenue(venue, symbol, 90, fetch, exchange);
+      // Les erreurs restent propres à la venue : le moteur affiche des trous
+      // (0/4…3/4) et FUNDX expose l'erreur détaillée via ce même client.
+      if (historique.status === "error") return [];
+      return historique.points.map((p) => ({ time: p.time, value: p.value ?? Number.NaN, validUntil: p.validUntil }));
+    }
     case "hlWhalesNet": {
       // Positionnement net des gros comptes HL : 100 × (long − short) / (long + short)
       // par instantané du collecteur daemon (`/hl/liqheat`). ÉCHANTILLON du leaderboard,
@@ -678,12 +712,16 @@ export class AuxProvider {
       // `refSymbol` (lu UNE fois ici → cohérence clé/fetch). Changer de refSymbol produit
       // une clé différente → miss → refetch (l'ancienne entrée reste dans la Map jusqu'à ce
       // que ce refSymbol soit re-sélectionné, puis purgée-si-expirée). Niveaux : inchangés.
-      const fetchSymbol = id === "refClose" ? refSymbolStore.getState().refSymbol : req.symbol;
+      const fetchSymbol = id === "refClose" || id === "refCloseStrict" ? refSymbolStore.getState().refSymbol : req.symbol;
       // Séries dont le fetch dépend de l'intervalle du chart : `mark`/`refClose`
       // (appariement 1:1 par ouverture), `perpDelta`/`liqLongUsd`/`liqShortUsd`
       // (FLUX — un LOCF les fausserait), `hlWhalesNet` (le `pas` dépend du tf).
-      const key = CLE_AVEC_TF.has(id)
-        ? `${id}:${fetchSymbol}:${req.timeframe}`
+      const cacheId = id === "refCloseStrict" ? "refClose" : id;
+      const fundingBase = FUNDING_HIST_IDS.has(id) ? normaliserIdentiteFunding(req.exchange, req.symbol)?.base : undefined;
+      const key = FUNDING_HIST_IDS.has(id)
+        ? `${id}:${fundingBase ?? `${req.exchange}:${req.symbol}`}`
+        : CLE_AVEC_TF.has(id)
+        ? `${cacheId}:${fetchSymbol}:${req.timeframe}`
         : `${id}:${req.symbol}`;
       let entry = this.cache.get(key);
 
@@ -694,7 +732,7 @@ export class AuxProvider {
       }
 
       if (entry === undefined) {
-        this.startFetch(id, fetchSymbol, req.timeframe, key, onReady);
+        this.startFetch(id, fetchSymbol, req.timeframe, req.exchange, key, onReady);
         pending = true;
         continue;
       }
@@ -707,11 +745,11 @@ export class AuxProvider {
         errorMessage = entry.message;
         continue;
       }
-      if (id === "mark") {
+      if (id === "mark" || id === "refCloseStrict" || id === "oiDebutLiqUsd") {
         const parOuverture = new Map(entry.points.map((p) => [p.time, p.value]));
-        aux.mark = req.candleTimes.map((t) => parOuverture.get(t));
-      } else if (id === "binanceFundingHourly") {
-        aux.binanceFundingHourly = alignerFundingBinance(req.candleTimes, entry.points, req.timeframe);
+        aux[id] = req.candleTimes.map((t) => parOuverture.get(t));
+      } else if (id === "binanceFundingHourly" || id === "fundingHistBinance" || id === "fundingHistBybit" || id === "fundingHistOkx" || id === "fundingHistHl") {
+        aux[id] = alignerFundingBinance(req.candleTimes, entry.points, req.timeframe);
       } else {
         aux[id] = alignAux(req.candleTimes, entry.points, AUX_SUR_CLOTURE.has(id));
       }
@@ -727,12 +765,13 @@ export class AuxProvider {
     id: AuxSeriesId,
     symbol: string,
     timeframe: Timeframe,
+    exchange: ExchangeId,
     key: string,
     onReady: () => void
   ): void {
     const entry: Entry = { state: "pending", onReadys: [onReady] };
     this.cache.set(key, entry);
-    void rawFetch(id, symbol, timeframe).then(
+    void rawFetch(id, symbol, timeframe, exchange).then(
       (points) => {
         this.cache.set(key, { state: "ready", points, expires: Date.now() + TTL_MS[id] });
         for (const cb of entry.onReadys) cb();
@@ -755,9 +794,14 @@ const CLE_AVEC_TF: ReadonlySet<AuxSeriesId> = new Set<AuxSeriesId>([
   "mark",
   "perpDelta",
   "refClose",
+  "refCloseStrict",
+  "oiDebutLiqUsd",
   "liqLongUsd",
   "liqShortUsd",
   "hlWhalesNet",
+]);
+const FUNDING_HIST_IDS: ReadonlySet<AuxSeriesId> = new Set<AuxSeriesId>([
+  "fundingHistBinance", "fundingHistBybit", "fundingHistOkx", "fundingHistHl",
 ]);
 
 /** Singleton module : cache brut partagé entre tous les slots/graphes. */

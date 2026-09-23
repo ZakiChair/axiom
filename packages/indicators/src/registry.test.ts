@@ -17,8 +17,8 @@ const VALID_CATEGORIES = new Set<IndicatorCategory>([
 ]);
 
 describe("registry", () => {
-  it("câble exactement 210 indicateurs", () => {
-    expect(INDICATORS.length).toBe(210);
+  it("câble exactement 214 indicateurs", () => {
+    expect(INDICATORS.length).toBe(214);
   });
 
   it("n'a aucun id dupliqué", () => {

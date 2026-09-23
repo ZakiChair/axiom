@@ -131,4 +131,14 @@ describe("funding Binance historique", () => {
     await vi.advanceTimersByTimeAsync(8_100);
     expect(outcome).toEqual([]);
   });
+
+  it("rejette après 8 s même si le corps JSON ignore abort", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(100 * 24 * H);
+    const bodyBlocked = vi.fn(async () => ({ ok: true, json: () => new Promise<unknown>(() => {}) }) as Response);
+    let outcome: unknown = "pending";
+    void fetchBinanceFundingHourly("BTCUSDT", 0, bodyBlocked as typeof fetch).then((value) => { outcome = value; });
+    await vi.advanceTimersByTimeAsync(8_100);
+    expect(outcome).toEqual([]);
+  });
 });

@@ -2,7 +2,7 @@
  * Toolbar — sélection automatique du marché, symbole / timeframe, branchés sur le store marché vanilla.
  * Un changement re-déclenche backfill + souscription côté Chart (effet [exchange, symbol, tf]).
  */
-import { useState } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import { useStore } from "zustand";
 import type { ExchangeId, Timeframe } from "@axiom/types";
 import { marketStore } from "../store/market";
@@ -22,7 +22,6 @@ import {
   type DisponibiliteVercel,
   type WindowId,
 } from "../store/windowManager";
-import { FootprintSettingsPanel } from "./FootprintSettingsPanel";
 import { chartLayoutStore, type ChartLayoutMode } from "../store/chart-layout";
 import { workspacesStore, DEFAULT_WORKSPACE_ID } from "../store/workspaces";
 import { exporterSauvegarde, importerSauvegarde } from "../store/persist";
@@ -35,11 +34,86 @@ import { pousserToast } from "../store/toasts";
 import { settingsUiStore } from "../store/settings-ui";
 import { IS_VERCEL } from "../lib/deployment";
 import { raccourciPour, raccourciTimeframe } from "../commands/hotkeys";
-import { IndicatorMenu } from "./IndicatorMenu";
-import { StrategyMenu } from "./StrategyMenu";
+import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
+import { indicatorsStore } from "../store/indicators";
+import { macroOverlayStore } from "../store/macro-overlays";
+import { INDICATORS, getIndicator } from "@axiom/indicators";
 import { PairSearch } from "./PairSearch";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 import { Badge, CLASSES_CHAMP, LARGEUR_MNEMONIQUE, MenuDeroulant } from "./ui";
+
+const NB_INDICATEURS_ANALYSE = INDICATORS.filter((d) => d.category !== "strategy").length;
+const NB_STRATEGIES = INDICATORS.length - NB_INDICATEURS_ANALYSE;
+
+/** Un import ESM échoué peut rester rejeté dans le cache du document courant. */
+function ErreurChargement({ message }: { message: string }) {
+  return <span role="alert" className="ml-2 text-xs text-down">
+    {message}{" "}
+    <button type="button" onClick={() => window.location.reload()} className="underline hover:text-text">
+      Recharger l'application
+    </button>
+  </span>;
+}
+
+/** Le catalogue n'entre dans le bundle initial qu'à sa première ouverture. */
+function IndicateursLazy() {
+  const ouvert = useStore(indicatorMenuUiStore, (s) => s.open);
+  const actives = useStore(indicatorsStore, (s) => s.indicators);
+  const macros = useStore(macroOverlayStore, (s) => s.enabled);
+  const nActifs = actives.filter((i) => getIndicator(i.defId)?.category !== "strategy").length + macros.length;
+  const [Menu, setMenu] = useState<ComponentType | null>(null);
+  const [erreur, setErreur] = useState(false);
+  const enVol = useRef(false);
+  const conteneur = useRef<HTMLDivElement>(null);
+  const etaitOuvert = useRef(ouvert);
+  function charger() {
+    if (Menu !== null || enVol.current) return;
+    enVol.current = true;
+    setErreur(false);
+    void import("./IndicatorMenu").then((mod) => setMenu(() => mod.IndicatorMenu)).catch(() => setErreur(true))
+      .finally(() => { enVol.current = false; });
+  }
+  useEffect(() => { if (ouvert) charger(); }, [ouvert]);
+  useEffect(() => {
+    if (etaitOuvert.current && !ouvert) conteneur.current?.querySelector("button")?.focus();
+    etaitOuvert.current = ouvert;
+  }, [ouvert]);
+  if (Menu !== null) return <div ref={conteneur}><Menu /></div>;
+  return <div ref={conteneur} className="relative">
+    <button type="button" title={`${NB_INDICATEURS_ANALYSE} indicateurs + 3 mesures macro · ${nActifs} actif${nActifs > 1 ? "s" : ""}`}
+      className="rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+      aria-expanded={ouvert && !erreur} disabled={erreur}
+      onClick={() => { if (!ouvert) indicatorMenuUiStore.getState().basculer(); charger(); }}>
+      Indicateurs <span className="ml-1 text-[10px] opacity-70">{nActifs > 0 ? nActifs : NB_INDICATEURS_ANALYSE}</span>
+    </button>
+    {erreur && <ErreurChargement message="Chargement impossible." />}
+  </div>;
+}
+
+/** Le menu Stratégies et son éditeur n'importent pas le menu Indicateurs. */
+function StrategiesLazy() {
+  const actives = useStore(indicatorsStore, (s) => s.indicators);
+  const nActives = actives.filter((i) => getIndicator(i.defId)?.category === "strategy").length;
+  const [Menu, setMenu] = useState<ComponentType<{ initialOpen?: boolean }> | null>(null);
+  const [erreur, setErreur] = useState(false);
+  const enVol = useRef(false);
+  if (Menu !== null) return <Menu initialOpen />;
+  return <div className="relative">
+    <button type="button" title={`${NB_STRATEGIES} stratégies · ${nActives} active${nActives > 1 ? "s" : ""}`}
+      className="rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+      disabled={erreur}
+      onClick={() => {
+        if (enVol.current) return;
+        enVol.current = true;
+        setErreur(false);
+        void import("./StrategyMenu").then((mod) => setMenu(() => mod.StrategyMenu)).catch(() => setErreur(true))
+          .finally(() => { enVol.current = false; });
+      }}>
+      Stratégies <span className="ml-1 text-[10px] opacity-70">{nActives > 0 ? nActives : NB_STRATEGIES}</span>
+    </button>
+    {erreur && <ErreurChargement message="Chargement impossible." />}
+  </div>;
+}
 
 /**
  * Ouvre un sélecteur de fichier, valide et REMPLACE tout l'état `axiom:*` du terminal par
@@ -507,6 +581,31 @@ export function Toolbar() {
   const setPriceScale = useStore(priceScaleStore, (s) => s.setType);
 
   const [footprintPanelOpen, setFootprintPanelOpen] = useState(false);
+  const [FootprintPanel, setFootprintPanel] = useState<ComponentType<{ onClose: () => void }> | null>(null);
+  const [erreurFootprint, setErreurFootprint] = useState(false);
+  const chargementFootprint = useRef(false);
+  const declencheurFootprint = useRef<HTMLButtonElement>(null);
+  function fermerFootprint() {
+    setFootprintPanelOpen(false);
+    declencheurFootprint.current?.focus();
+  }
+  function basculerFootprint() {
+    if (erreurFootprint) return;
+    if (footprintPanelOpen) { fermerFootprint(); return; }
+    setFootprintPanelOpen(true);
+    if (FootprintPanel !== null || chargementFootprint.current) return;
+    chargementFootprint.current = true;
+    setErreurFootprint(false);
+    void import("./FootprintSettingsPanel").then((mod) => setFootprintPanel(() => mod.FootprintSettingsPanel))
+      .catch(() => { setFootprintPanelOpen(false); setErreurFootprint(true); })
+      .finally(() => { chargementFootprint.current = false; });
+  }
+  useEffect(() => {
+    if (!footprintPanelOpen) return;
+    const echap = (event: KeyboardEvent) => { if (event.key === "Escape") fermerFootprint(); };
+    document.addEventListener("keydown", echap);
+    return () => document.removeEventListener("keydown", echap);
+  }, [footprintPanelOpen]);
 
   const supportedTf = supportedTimeframesFor(exchange, symbol);
   const isBinance = exchange === "binance";
@@ -604,20 +703,27 @@ export function Toolbar() {
       <div className="mx-1 h-5 w-px bg-neutral-800" />
 
       {/* Panneau des indicateurs @axiom (activer/désactiver). */}
-      <IndicatorMenu />
+      <IndicateursLazy />
 
       {/* Panneau des stratégies (catégorie strategy — foyer exclusif). */}
-      <StrategyMenu />
+      <StrategiesLazy />
 
       {/* Orderflow (M5) : CVD + footprint, alimenté par le flux de trades de la
           source active. Footprint sur toutes les sources à flux de trades ; pane CVD
           créé UNIQUEMENT sur Binance (seule source au split buy/sell historique). */}
       <button
+        ref={declencheurFootprint}
         type="button"
         onClick={toggleOrderflow}
         onContextMenu={(e) => {
           e.preventDefault();
-          setFootprintPanelOpen((o) => !o);
+          basculerFootprint();
+        }}
+        onKeyDown={(e) => {
+          if ((e.shiftKey && e.key === "F10") || e.key === "ContextMenu") {
+            e.preventDefault();
+            basculerFootprint();
+          }
         }}
         aria-pressed={orderflowEnabled}
         disabled={noTradeStream}
@@ -639,6 +745,7 @@ export function Toolbar() {
       >
         Orderflow
       </button>
+      {erreurFootprint && <ErreurChargement message="Réglages Footprint indisponibles." />}
 
       {/* Profil de volume par zone de prix (VPVR) — toutes sources sauf synthétiques. */}
       <button
@@ -753,7 +860,7 @@ export function Toolbar() {
     </header>
 
     {/* Panneau de réglages footprint (cliquer droit sur Orderflow). */}
-    {footprintPanelOpen && <FootprintSettingsPanel onClose={() => setFootprintPanelOpen(false)} />}
+    {footprintPanelOpen && FootprintPanel && <FootprintPanel onClose={fermerFootprint} />}
     </>
   );
 }

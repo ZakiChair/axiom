@@ -9,12 +9,14 @@
  * Solde / Équity / PnL jour. Conventions du moteur (frais 0.05 %/côté, TP/SL au niveau,
  * SL prioritaire) documentées dans data/paper.ts — la fenêtre ne décide RIEN.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore } from "zustand";
-import { paperStore } from "../store/paper";
+import { clePrixPaper, paperStore, paperUiStore } from "../store/paper";
 import { paperOverlayStore } from "../chart/paperLignes";
 import { pnlLatent, FRAIS_TAKER, type ExecutionPaper, type OrdrePaper, type PositionPaper } from "../data/paper";
 import { marketStore } from "../store/market";
+import { EXCHANGE_IDS, type ExchangeId } from "@axiom/types";
+import { isTickerSource } from "../data/ticker";
 import { debutJourLocalMs } from "../store/portfolio";
 import { formatUsd, formatDec, VALEUR_ABSENTE } from "../lib/format";
 import {
@@ -26,6 +28,7 @@ import {
   Input,
   NoteSource,
   Segmente,
+  Select,
   TitreSection,
   type TonBadge,
 } from "./ui";
@@ -63,11 +66,11 @@ const LIBELLE_GENRE: Record<string, string> = {
 };
 
 /** Prix de conversion pour un symbole : derniers prix du moteur, sinon close du chart maître. */
-function prixConnu(symbol: string, derniersPrix: Record<string, number>): number | undefined {
-  const p = derniersPrix[symbol];
+function prixConnu(symbol: string, source: ExchangeId, derniersPrix: Record<string, number>): number | undefined {
+  const p = derniersPrix[clePrixPaper(symbol, source)];
   if (p !== undefined) return p;
   const m = marketStore.getState();
-  if (m.symbol === symbol) {
+  if (m.symbol === symbol && m.exchange === source) {
     const derniere = m.candles[m.candles.length - 1];
     if (derniere && Number.isFinite(derniere.close)) return derniere.close;
   }
@@ -80,6 +83,7 @@ type TypeOrdre = "market" | "limit" | "stop";
 
 interface FormOrdre {
   symbol: string;
+  source: ExchangeId;
   direction: "long" | "short";
   type: TypeOrdre;
   montantUsd: string;
@@ -89,8 +93,8 @@ interface FormOrdre {
   sl: string;
 }
 
-function formInitial(symbol: string): FormOrdre {
-  return { symbol, direction: "long", type: "market", montantUsd: "", prixLimite: "", prixStop: "", tp: "", sl: "" };
+function formInitial(symbol: string, source: ExchangeId): FormOrdre {
+  return { symbol, source, direction: "long", type: "market", montantUsd: "", prixLimite: "", prixStop: "", tp: "", sl: "" };
 }
 
 /** Nombre optionnel : champ vide → null, sinon fini > 0 requis (NaN → undefined = invalide). */
@@ -110,20 +114,27 @@ export function PaperWindow() {
   const executions = useStore(paperStore, (s) => s.executions);
   const derniersPrix = useStore(paperStore, (s) => s.derniersPrix);
   const symbolChart = useStore(marketStore, (s) => s.symbol);
+  const sourceChart = useStore(marketStore, (s) => s.exchange);
+  const brouillon = useStore(paperUiStore, (s) => s.brouillon);
   // Overlay des lignes d'ordres/positions sur le chart maître (toggle éphémère, défaut ON).
   const overlayActif = useStore(paperOverlayStore, (s) => s.actif);
 
-  const [form, setForm] = useState<FormOrdre>(() => formInitial(symbolChart));
+  const [form, setForm] = useState<FormOrdre>(() => formInitial(symbolChart, sourceChart));
   const [erreurForm, setErreurForm] = useState<string | null>(null);
   const [editSolde, setEditSolde] = useState<string | null>(null);
   const [editTpSl, setEditTpSl] = useState<{ id: string; tp: string; sl: string } | null>(null);
+
+  useEffect(() => {
+    if (brouillon !== null) setForm((f) => ({ ...f, symbol: brouillon.symbol, source: brouillon.source,
+      direction: brouillon.direction ?? f.direction }));
+  }, [brouillon]);
 
   // Équity = solde + Σ PnL latents aux derniers prix connus (positions sans prix → 0, comptées).
   const { equity, latentTotal, sansPrix } = useMemo(() => {
     let latent = 0;
     let inconnues = 0;
     for (const p of positions) {
-      const last = derniersPrix[p.symbol];
+      const last = derniersPrix[clePrixPaper(p.symbol, p.source)];
       if (last === undefined) inconnues++;
       else latent += pnlLatent(p, last);
     }
@@ -137,7 +148,7 @@ export function PaperWindow() {
   }, [executions]);
 
   // Conversion $ → unités au prix courant (affichée sous le champ).
-  const prixConversion = prixConnu(form.symbol.trim().toUpperCase(), derniersPrix);
+  const prixConversion = prixConnu(form.symbol.trim().toUpperCase(), form.source, derniersPrix);
   const montant = Number(form.montantUsd);
   const unites =
     prixConversion !== undefined && Number.isFinite(montant) && montant > 0
@@ -147,6 +158,7 @@ export function PaperWindow() {
   const placer = (): void => {
     const symbol = form.symbol.trim().toUpperCase();
     if (symbol === "") return setErreurForm("Symbole requis.");
+    if (!isTickerSource(form.source)) return setErreurForm("Source sans flux PAPER compatible : ordre refusé.");
     if (unites === undefined || prixConversion === undefined) {
       return setErreurForm(
         prixConversion === undefined
@@ -165,6 +177,8 @@ export function PaperWindow() {
     if (form.type === "stop" && prixStop === null) return setErreurForm("Prix de déclenchement requis.");
     paperStore.getState().placerOrdre({
       symbol,
+      source: form.source,
+      ...(brouillon !== null ? { decisionIds: [brouillon.decisionId] } : {}),
       direction: form.direction,
       type: form.type,
       prixLimite: form.type === "limit" ? prixLimite : null,
@@ -174,6 +188,7 @@ export function PaperWindow() {
       sl,
     });
     setErreurForm(null);
+    if (brouillon !== null) paperUiStore.getState().vider();
     setForm((f) => ({ ...f, montantUsd: "", prixLimite: "", prixStop: "", tp: "", sl: "" }));
   };
 
@@ -189,7 +204,7 @@ export function PaperWindow() {
   // Colonnes des 3 tables — triable: false partout (l'apport = en-têtes + gabarit unique,
   // pas le tri). Les `rendu` reprennent EXACTEMENT le JSX des cellules d'origine.
   const COLONNES_ORDRES: ColonneTable<OrdrePaper>[] = [
-    { id: "symbole", label: "Symbole", triable: false, rendu: (o) => <span className="font-medium">{o.symbol}</span> },
+    { id: "symbole", label: "Symbole", triable: false, rendu: (o) => <span className="font-medium">{o.symbol}{o.source ? ` · ${o.source}` : " · source historique"}{o.decisionIds?.length ? ` · ${o.decisionIds.length} dossier(s)` : ""}</span> },
     {
       id: "sens",
       label: "Sens",
@@ -236,7 +251,7 @@ export function PaperWindow() {
   ];
 
   const COLONNES_POSITIONS: ColonneTable<PositionPaper>[] = [
-    { id: "symbole", label: "Symbole", triable: false, rendu: (p) => <span className="font-medium">{p.symbol}</span> },
+    { id: "symbole", label: "Symbole", triable: false, rendu: (p) => <span className="font-medium">{p.symbol}{p.source ? ` · ${p.source}` : " · source historique"}{p.decisionIds?.length ? ` · ${p.decisionIds.length} dossier(s)` : ""}</span> },
     {
       id: "sens",
       label: "Sens",
@@ -261,7 +276,7 @@ export function PaperWindow() {
       label: "Dernier",
       triable: false,
       rendu: (p) => {
-        const last = derniersPrix[p.symbol];
+        const last = derniersPrix[clePrixPaper(p.symbol, p.source)];
         return <span className="text-text-dim">{last !== undefined ? formatUsd(last) : VALEUR_ABSENTE}</span>;
       },
     },
@@ -270,7 +285,7 @@ export function PaperWindow() {
       label: "PnL latent",
       triable: false,
       rendu: (p) => {
-        const last = derniersPrix[p.symbol];
+        const last = derniersPrix[clePrixPaper(p.symbol, p.source)];
         const pnl = last !== undefined ? pnlLatent(p, last) : null;
         return (
           <span className={`font-medium ${pnl !== null ? couleurMontant(pnl) : "text-text-dim"}`}>
@@ -328,7 +343,7 @@ export function PaperWindow() {
       align: "right",
       triable: false,
       rendu: (p) => {
-        const last = derniersPrix[p.symbol];
+        const last = derniersPrix[clePrixPaper(p.symbol, p.source)];
         return (
           <Bouton
             disabled={last === undefined}
@@ -360,7 +375,7 @@ export function PaperWindow() {
       id: "symbole",
       label: "Symbole",
       triable: false,
-      rendu: ({ exec: e }) => <span className="font-medium">{e.symbol}</span>,
+      rendu: ({ exec: e }) => <span className="font-medium">{e.symbol}{e.source ? ` · ${e.source}` : ""}</span>,
     },
     {
       id: "genre",
@@ -445,6 +460,10 @@ export function PaperWindow() {
 
         {/* Formulaire d'ordre */}
         <section className="rounded-md border border-border bg-bg p-3">
+          {brouillon !== null && <div className="mb-2 flex items-center justify-between gap-2 rounded border border-accent/40 px-2 py-1 text-[11px]">
+            <span>Brouillon du dossier {brouillon.decisionId} · {brouillon.symbol} / {brouillon.source}. Aucun ordre avant validation.</span>
+            <button type="button" className={BTN_SECONDAIRE} onClick={() => paperUiStore.getState().vider()}>Détacher</button>
+          </div>}
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             <label className="flex flex-col gap-1 text-[10px] text-text-dim">
               Symbole
@@ -452,8 +471,16 @@ export function PaperWindow() {
                 className="w-full"
                 value={form.symbol}
                 onChange={(e) => setForm((f) => ({ ...f, symbol: e.target.value }))}
+                disabled={brouillon !== null}
                 placeholder="BTCUSDT"
               />
+            </label>
+            <label className="flex flex-col gap-1 text-[10px] text-text-dim">
+              Source PAPER
+              <Select value={form.source} disabled={brouillon !== null} onChange={(e) => setForm((f) => ({ ...f, source: e.target.value as ExchangeId }))} aria-label="Source PAPER">
+                {!isTickerSource(form.source) && <option value={form.source}>{form.source} · incompatible</option>}
+                {EXCHANGE_IDS.filter(isTickerSource).map((source) => <option key={source} value={source}>{source}</option>)}
+              </Select>
             </label>
             <label className="flex flex-col gap-1 text-[10px] text-text-dim">
               Direction

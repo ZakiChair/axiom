@@ -21,7 +21,7 @@ import { indicatorsStore, formatInstanceLabel } from "../store/indicators";
 import { marketStore } from "../store/market";
 import { tfAtLeast } from "../chart/tfOrder";
 import { CLASSES_CHAMP, indexRoving } from "./ui";
-import { InstanceParamsEditor } from "./IndicatorMenu";
+import { InstanceParamsEditor } from "./InstanceParamsEditor";
 import { raisonUnusableIndicateur } from "../lib/indicatorUsability";
 
 /** Defs de catégorie strategy (catalogue du menu Stratégies). PURE. */
@@ -61,8 +61,8 @@ export function sectionsStrategies(defs: IndicatorDef[]): Array<[SectionStrategi
   return sections;
 }
 
-export function StrategyMenu() {
-  const [open, setOpen] = useState(false);
+export function StrategyMenu({ initialOpen = false }: { initialOpen?: boolean }) {
+  const [open, setOpen] = useState(initialOpen);
   const [query, setQuery] = useState("");
   // instanceId dont l'éditeur de params est déplié (un seul à la fois).
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -103,6 +103,7 @@ export function StrategyMenu() {
   // boutons d'ajout du catalogue ; Échap ferme le menu.
   const rechercheRef = useRef<HTMLInputElement | null>(null);
   const panneauRef = useRef<HTMLDivElement | null>(null);
+  const declencheurRef = useRef<HTMLButtonElement | null>(null);
 
   function itemsAjout(): HTMLButtonElement[] {
     return Array.from(
@@ -114,6 +115,7 @@ export function StrategyMenu() {
     if (e.key === "Escape") {
       e.preventDefault();
       setOpen(false);
+      declencheurRef.current?.focus();
       return;
     }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
@@ -130,6 +132,7 @@ export function StrategyMenu() {
   return (
     <div className="relative">
       <button
+        ref={declencheurRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         title={`${strategies.length} stratégies · ${activesStrategie.length} active${

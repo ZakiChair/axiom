@@ -347,6 +347,7 @@ test("CARDS : une ancienne provenance Binance erronée est réparée après reto
 test("USOIL : la suggestion ouvre le pétrole spot canonique, sans confusion avec crypto, action ou ETF", async ({ page }) => {
   await fixtures(page);
   await page.route("**/mexcapi/api/v3/exchangeInfo*", (route) => route.fulfill({ json: { symbols: [{ symbol: "USOILUSDT", status: "1", isSpotTradingAllowed: true }] } }));
+  await page.clock.install();
   await page.goto("/");
   await expect.poll(() => marche(page)).toMatchObject({ status: "ready" });
   const search = page.getByRole("combobox", { name: "Rechercher une paire", exact: true });
@@ -358,6 +359,8 @@ test("USOIL : la suggestion ouvre le pétrole spot canonique, sans confusion ave
   await search.press("Enter");
   await expect.poll(() => marche(page)).toMatchObject({ symbol: "WTI/USD", exchange: "twelvedata", status: "ready" });
   for (const symbol of ["WTI", "USO", "AAPL", "SPY", "EUR/USD"]) {
+    // Chart et cotations partagent le quota Twelve Data : simuler des navigations espacées.
+    await page.clock.fastForward(61_000);
     await choisir(page, symbol);
     await expect.poll(() => marche(page)).toMatchObject({ symbol, exchange: "twelvedata", status: "ready" });
   }

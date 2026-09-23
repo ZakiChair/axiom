@@ -101,4 +101,14 @@ describe("dessinerAnnotationsPane", () => {
     expect(ctx.ops).toContain("moveTo(40,4)");        // sommet du triangleHaut : y=10-6
     expect(ctx.ops).toContain("fillText(Div ▲,60,22)"); // label dessous : y=14+8
   });
+
+  it("label de couverture en haut du pane : coordonnée fixe sans conversion financière", () => {
+    const ctx = fauxCtx();
+    const convertirY = vi.fn(() => 110);
+    dessinerAnnotationsPane(ctx, { labels: [{ idx: 6, valeur: 0, texte: "0/4 venues", couleur: "--text-dim", cible: "pane", ancrageY: "haut-pane" }] },
+      "pane", { convertirX: AXES.convertirX, convertirY }, FENETRE);
+    expect(convertirY).not.toHaveBeenCalled();
+    expect(ctx.ops).toContain("fillText(0/4 venues,60,32)");
+    expect(ctx.textBaseline).toBe("top");
+  });
 });

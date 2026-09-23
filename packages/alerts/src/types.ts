@@ -220,6 +220,8 @@ export interface AlertDef {
   symbol: string;
   source: ExchangeId;
   condition: Condition;
+  /** Échéance optionnelle en ms epoch ; à égalité, l'alerte est expirée. */
+  expireTs?: number;
   /**
    * Timeframe sur lequel la définition doit être évaluée (conditions de bougie).
    * `undefined` = définitions HÉRITÉES : comportement actuel conservé (le front évalue

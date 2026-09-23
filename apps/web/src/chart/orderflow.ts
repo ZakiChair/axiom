@@ -462,7 +462,7 @@ export class OrderflowController {
    *  (pas de flux perp historique — on n'affiche pas de live perp sur des bougies rejouées). */
   private wantCvdSpotPerp(): boolean {
     return (
-      orderflowStore.getState().cvdSpotPerp &&
+      (orderflowStore.getState().cvdSpotPerp || orderflowStore.getState().alerteCvdDemandee) &&
       this.store.getState().exchange === "binance" &&
       this.replayAdapter === null
     );

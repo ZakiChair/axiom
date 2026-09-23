@@ -5,7 +5,7 @@
  *
  * Env Node : `localStorage` absent par défaut → mock mémoire (même patron que finnhub.test.ts).
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Timeframe } from "@axiom/types";
 import {
   diffEntrants,
@@ -108,7 +108,38 @@ describe("presetAlertsStore", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
+  it("persiste une échéance, rejette l'invalide et ne la renouvelle pas à la pause/reprise", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    expect(presetAlertsStore.getState().ajouter({ ...builder("x"), expireTs: 1_100 })).toBe("ok");
+    const id = presetAlertsStore.getState().alertes[0]!.id;
+    expect(lirePresetAlerts()[0]?.expireTs).toBe(1_100);
+    presetAlertsStore.getState().basculer(id);
+    presetAlertsStore.getState().basculer(id);
+    expect(presetAlertsStore.getState().alertes[0]?.expireTs).toBe(1_100);
+    expect(presetAlertsStore.getState().ajouter({ ...builder("bad"), expireTs: null } as unknown as DepuisBuilderAlerte)).toBe("invalide");
+    expect(presetAlertsStore.getState().alertes).toHaveLength(1);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([{ ...lirePresetAlerts()[0], expireTs: "demain" }]));
+    expect(lirePresetAlerts()).toEqual([]);
+  });
+
+  it("une expirée libère le quota ; prolonger refuse atomiquement si quatre autres scans tournent", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    presetAlertsStore.getState().ajouter({ ...builder("ancienne"), expireTs: 1_100 });
+    const id = presetAlertsStore.getState().alertes[0]!.id;
+    vi.setSystemTime(1_100);
+    for (let i = 0; i < 4; i++) expect(presetAlertsStore.getState().ajouter(builder(`n${i}`))).toBe("ok");
+    expect(presetAlertsStore.getState().prolonger(id, 2_000)).toBe("limite");
+    expect(presetAlertsStore.getState().alertes.find((a) => a.id === id)?.expireTs).toBe(1_100);
+    expect(presetAlertsStore.getState().prolonger(id, 1_100)).toBe("invalide");
+    presetAlertsStore.getState().basculer(id); // pause explicite
+    expect(presetAlertsStore.getState().prolonger(id, 2_000)).toBe("ok");
+    expect(presetAlertsStore.getState().alertes.find((a) => a.id === id)).toMatchObject({ actif: false, expireTs: 2_000 });
   });
 
   it("ajouter dérive periodeMin 15 sans filtre indicateur, 60 avec", () => {

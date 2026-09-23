@@ -6,7 +6,7 @@
  * Env Node : `localStorage` est absent par défaut → on installe un mock mémoire
  * (même patron que onboarding.test.ts / etherscan.test.ts).
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TradeJournal } from "../data/expy";
 import { chargerTrades, EXPY_STORAGE_KEY, expyStore } from "./expy";
 
@@ -49,11 +49,12 @@ let storage: Storage;
 beforeEach(() => {
   storage = installMockLocalStorage();
   // L'hydratation initiale a déjà eu lieu à l'import (localStorage absent) — on force l'état.
-  expyStore.setState({ trades: [] });
+  expyStore.setState({ trades: [], erreurSauvegarde: null });
 });
 
 afterEach(() => {
   delete (globalThis as { localStorage?: Storage }).localStorage;
+  vi.restoreAllMocks();
 });
 
 describe("ajouter", () => {
@@ -149,6 +150,17 @@ describe("chargerTrades (lecture tolérante)", () => {
 });
 
 describe("importer", () => {
+  it("accepte les anciens trades sans source et les liens valides, rejette une source corrompue", () => {
+    const payload = JSON.stringify([
+      trade({ id: "ancien" }),
+      { ...trade({ id: "lie" }), source: "bybit", decisionIds: ["d1", "d2"] },
+      { ...trade({ id: "source-invalide" }), source: "ailleurs", decisionIds: ["d3"] },
+      { ...trade({ id: "lien-invalide" }), decisionIds: [2] },
+    ]);
+    expect(expyStore.getState().importer(payload)).toEqual({ ajoutes: 2, ignores: 2 });
+    expect(expyStore.getState().trades[1]).toMatchObject({ source: "bybit", decisionIds: ["d1", "d2"] });
+    expect(chargerTrades()).toEqual(expyStore.getState().trades);
+  });
   it("JSON valide : ajoute toutes les lignes bien formées", () => {
     const payload = JSON.stringify([
       trade({ id: "i1", symbol: "AAA" }),
@@ -229,5 +241,44 @@ describe("exporter", () => {
   it("JSON lisible (pretty-print)", () => {
     expyStore.setState({ trades: [trade({ id: "p" })] });
     expect(expyStore.getState().exporter()).toContain("\n");
+  });
+});
+
+describe("échec d'écriture locale", () => {
+  it("création : conserve le trade et son id ; modifier puis réessayer ne duplique pas", () => {
+    const ecrire = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new DOMException("quota", "QuotaExceededError"); });
+    const resultat = expyStore.getState().ajouter({ ...trade({ symbol: "AVANT" }), note: "brouillon" });
+    expect(resultat.enregistre).toBe(false);
+    expect(expyStore.getState().trades.map((t) => t.id)).toEqual([resultat.id]);
+    expect(expyStore.getState().erreurSauvegarde).toMatch(/non enregistré/i);
+    expyStore.getState().modifier(resultat.id, { symbol: "APRES", note: "corrigé" });
+    ecrire.mockImplementation(() => undefined);
+    expect(expyStore.getState().reessayerSauvegarde()).toBe(true);
+    expect(expyStore.getState().trades).toHaveLength(1);
+    expect(expyStore.getState().trades[0]).toMatchObject({ id: resultat.id, symbol: "APRES", note: "corrigé" });
+    expect(expyStore.getState().erreurSauvegarde).toBeNull();
+  });
+
+  it("stockage absent : clôture et suppression restent en RAM, puis se réécrivent", () => {
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+    expyStore.setState({ trades: [trade({ id: "ouvert" }), trade({ id: "retirer" })] });
+    expyStore.getState().cloturer("ouvert", 115, 9000);
+    expyStore.getState().supprimer("retirer");
+    expect(expyStore.getState().trades).toMatchObject([{ id: "ouvert", sortie: 115, fermeTs: 9000 }]);
+    expect(expyStore.getState().reessayerSauvegarde()).toBe(false);
+    (globalThis as { localStorage?: Storage }).localStorage = storage;
+    expect(expyStore.getState().reessayerSauvegarde()).toBe(true);
+    expect(chargerTrades()).toEqual(expyStore.getState().trades);
+  });
+
+  it("import sous quota : fusion unique en mémoire, réessai écrit le même ensemble", () => {
+    const ecrire = vi.spyOn(storage, "setItem").mockImplementation(() => { throw new Error("quota"); });
+    const resultat = expyStore.getState().importer(JSON.stringify([trade({ id: "importe" })]));
+    expect(resultat).toEqual({ ajoutes: 1, ignores: 0 });
+    expect(expyStore.getState().erreurSauvegarde).toMatch(/non enregistré/i);
+    expect(expyStore.getState().trades).toHaveLength(1);
+    ecrire.mockRestore();
+    expect(expyStore.getState().reessayerSauvegarde()).toBe(true);
+    expect(chargerTrades().map((t) => t.id)).toEqual(["importe"]);
   });
 });

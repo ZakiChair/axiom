@@ -5,7 +5,8 @@
  * positions (null ignoré), long+short coexistent, conventions de couleur.
  */
 import { describe, expect, it } from "vitest";
-import { niveauxPaperLignes } from "./paperLignes";
+import { fournisseurPaperLignes, niveauxPaperLignes } from "./paperLignes";
+import { marketStore } from "../store/market";
 import type { EtatPaper, OrdrePaper, PositionPaper } from "../data/paper";
 
 function ordre(o: Partial<OrdrePaper>): OrdrePaper {
@@ -25,6 +26,21 @@ function etat(ordres: OrdrePaper[], positions: PositionPaper[]): EtatPaper {
 }
 
 describe("niveauxPaperLignes", () => {
+  it("filtre les niveaux source verrouillée, garde les lignes legacy et notifie un changement de venue", () => {
+    const e = etat([
+      ordre({ id: "bin", source: "binance", prixLimite: 95 }),
+      ordre({ id: "byb", source: "bybit", prixLimite: 105 }),
+      ordre({ id: "old", prixLimite: 100 }),
+    ], [position({ source: "bybit", tp: 120 })]);
+    expect(niveauxPaperLignes(e, "BTCUSDT", "binance").map((l) => l.price)).toEqual([95, 100]);
+    expect(niveauxPaperLignes(e, "BTCUSDT", "bybit").map((l) => l.price)).toEqual([105, 100, 120]);
+    marketStore.setState({ exchange: "binance", symbol: "BTCUSDT" });
+    let appels = 0;
+    const stop = fournisseurPaperLignes.subscribe(() => { appels++; });
+    marketStore.setState({ exchange: "bybit" });
+    expect(appels).toBe(1);
+    stop();
+  });
   it("n'inclut que le symbole courant (les autres symboles sont exclus)", () => {
     const e = etat(
       [ordre({ id: "a", symbol: "BTCUSDT", type: "limit", prixLimite: 100 }),

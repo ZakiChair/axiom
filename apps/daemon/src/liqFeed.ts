@@ -39,7 +39,7 @@
  */
 import type { Database } from "bun:sqlite";
 import type { AlertDef } from "@axiom/alerts";
-import { lireDefsKv, symbolesLiqCascadeActifs } from "./alerts";
+import { creerReveilEcheance, lireDefsKv, symbolesLiqCascadeActifs } from "./alerts";
 import { getDb } from "./db";
 import {
   creerFeedLiquidationsHl,
@@ -201,8 +201,8 @@ export function symbolesSurveilles(kvBrut: unknown): string[] {
  * poll du KV (≤60 s) — le tick daemon (alerts.ts) a alors des données à sommer.
  * Fonction PURE (testée).
  */
-export function fusionnerSymbolesLiq(kvBrut: unknown, defs: readonly AlertDef[]): string[] {
-  return [...new Set([...symbolesSurveilles(kvBrut), ...symbolesLiqCascadeActifs(defs)])].sort();
+export function fusionnerSymbolesLiq(kvBrut: unknown, defs: readonly AlertDef[], maintenant = Date.now()): string[] {
+  return [...new Set([...symbolesSurveilles(kvBrut), ...symbolesLiqCascadeActifs(defs, maintenant)])].sort();
 }
 
 // ─────────────────────────── Santé des collecteurs (modèle SanteWhales de whales.ts) ───────────────────────────
@@ -273,8 +273,8 @@ function lireKvLiqBrut(d: Database): unknown {
  * défaut inclus) ∪ symboles des alertes `liq-cascade` ACTIVES. Partagée entre
  * la boucle d'ingestion et le collecteur hlLiqHeat (mêmes coins → `coinHl`).
  */
-export function symbolesSurveillesLiq(d: Database): string[] {
-  return fusionnerSymbolesLiq(lireKvLiqBrut(d), lireDefsKv(d));
+export function symbolesSurveillesLiq(d: Database, maintenant = Date.now()): string[] {
+  return fusionnerSymbolesLiq(lireKvLiqBrut(d), lireDefsKv(d), maintenant);
 }
 
 // ─────────────────────────── Ingestion d'un message ───────────────────────────
@@ -557,8 +557,10 @@ export function demarrerBoucleLiquidations(): () => void {
       console.error("[axiomd] rafraîchissement des symboles liquidations échoué :", err);
     }
   };
-  rafraichir();
-  const minuteurKv = setInterval(rafraichir, PERIODE_POLL_KV_MS);
+  const reveilEcheance = creerReveilEcheance(() => lireDefsKv(getDb()), rafraichir);
+  const pollKv = (): void => { rafraichir(); reveilEcheance.synchroniser(); };
+  pollKv();
+  const minuteurKv = setInterval(pollKv, PERIODE_POLL_KV_MS);
 
   const purger = (): void => {
     try {
@@ -572,6 +574,7 @@ export function demarrerBoucleLiquidations(): () => void {
 
   return () => {
     clearInterval(minuteurKv);
+    reveilEcheance.arreter();
     clearInterval(minuteurPurge);
     feed.arreter();
     feedOkx.arreter();

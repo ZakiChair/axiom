@@ -4,6 +4,7 @@ import { tfAtLeast } from "../chart/tfOrder";
 import { coinalyzeKeyStore } from "../store/coinalyze";
 import { daemonSupporte } from "../data/daemon";
 import { basePerp } from "../data/symbol";
+import { normaliserIdentiteFunding } from "../data/fundingIdentity";
 
 export interface ContexteIndicateur {
   exchange: ExchangeId;
@@ -80,6 +81,17 @@ const AUX_PERP = new Set([
   "lsAccount",
   "lsTopTrader",
   "lsTaker",
+  "oiDebutLiqUsd",
+]);
+const AUX_FUNDING_HIST = new Set([
+  "fundingHistBinance",
+  "fundingHistBybit",
+  "fundingHistOkx",
+  "fundingHistHl",
+]);
+/** Pas servis par le fetch exact de référence (fapi/spot), sans modifier refClose legacy. */
+const REF_STRICT_TIMEFRAMES: ReadonlySet<Timeframe> = new Set<Timeframe>([
+  "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "3d", "1w", "1M",
 ]);
 
 const QUOTES = ["FDUSD", "USDT", "USDC", "BUSD", "USD", "EUR", "GBP", "BTC", "ETH"];
@@ -125,6 +137,9 @@ export function raisonUnusableIndicateur(
   if (def.aux?.includes("mark") && ["3M", "6M", "12M"].includes(timeframe)) {
     return "Mark perp indisponible pour cet intervalle";
   }
+  if (def.aux?.includes("refCloseStrict") && !REF_STRICT_TIMEFRAMES.has(timeframe)) {
+    return "Référence exacte : intervalle non couvert";
+  }
   const actif = actifDe(symbol);
   if (ONCHAIN_BTC.has(def.id) && actif !== "BTC") {
     return "Métrique on-chain disponible uniquement pour BTC";
@@ -135,10 +150,16 @@ export function raisonUnusableIndicateur(
   if (def.aux?.some((id) => AUX_PERP.has(id)) && !symboleUsdtCompatible(exchange, symbol)) {
     return "Nécessite un symbole crypto USDT compatible";
   }
+  if (def.aux?.some((id) => AUX_FUNDING_HIST.has(id)) && normaliserIdentiteFunding(exchange, symbol) === null) {
+    return "Nécessite un symbole de funding compatible (USDT ou perp Hyperliquid)";
+  }
   // Flux liquidations Coinalyze : `hasKey` reflète déjà le repli `.env` du proxy
   // local (même prédicat que `rawFetch("oi")` dans chart/auxProvider.ts).
-  if (def.id === "liqParBougie" && !coinalyzeKeyStore.getState().hasKey) {
+  if ((def.id === "liqParBougie" || def.id === "liquidationsOi") && !coinalyzeKeyStore.getState().hasKey) {
     return "Nécessite une clé Coinalyze";
+  }
+  if (def.id === "liquidationsOi" && !new Set(["1m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d"]).has(timeframe)) {
+    return "Nécessite un intervalle Coinalyze de 1m à 1d";
   }
   if (def.id === "hlWhalesNet" && !daemonSupporte("hl")) {
     return "Nécessite le daemon axiomd (collecte des niveaux HL)";

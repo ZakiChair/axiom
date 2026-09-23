@@ -209,6 +209,9 @@ export type AuxSeriesId =
   // Flux de liquidations exécutées par bougie (Coinalyze `liquidation-history`, USD,
   // à l'intervalle du chart — clé `id:symbole:tf` comme `perpDelta`).
   | "liqLongUsd" | "liqShortUsd"
+  // Contrats stricts du lot C : aucun report à travers un trou ou après expiration.
+  | "oiDebutLiqUsd" | "refCloseStrict"
+  | "fundingHistBinance" | "fundingHistBybit" | "fundingHistOkx" | "fundingHistHl"
   // Hashrate réseau BTC en H/s (mempool.space `/mining/hashrate/1y`, journalier).
   | "hashrate"
   // Métriques de cycle on-chain BTC (BGeometrics, journalier) : MVRV des cohortes
@@ -313,6 +316,8 @@ export interface LabelAnnotation {
   couleur: string;
   cible: CibleAnnotation;
   position?: "dessus" | "dessous";
+  /** Diagnostic dans un pane : placement fixe sous le bord haut, hors axe de valeur. */
+  ancrageY?: "valeur" | "haut-pane";
   info?: string;
 }
 

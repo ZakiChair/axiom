@@ -16,7 +16,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
-import { expyStore } from "../store/expy";
+import { expyStore, expyUiStore, type SaisieExpyEnAttente } from "../store/expy";
 import {
   statsExpy,
   equityR,
@@ -31,6 +31,8 @@ import { pousserToast } from "../store/toasts";
 import { lireTokenCanvas, rgbaTokenCanvas, POLICE_CANVAS } from "../lib/canvasTokens";
 import { formatDec } from "../lib/format";
 import { Badge, Bouton, EnTeteFenetre, Segmente, Vide, type TonBadge } from "./ui";
+import { DecisionDossiers } from "./DecisionDossiers";
+import { decisionDossiersStore } from "../store/decisionDossiers";
 
 // ─────────────────────────── Formatage ───────────────────────────
 
@@ -235,16 +237,7 @@ function dessinerHisto(canvas: HTMLCanvasElement, buckets: readonly { label: str
 // ─────────────────────────── Composant ───────────────────────────
 
 /** État du formulaire d'ajout (champs texte + direction). */
-interface FormEtat {
-  symbol: string;
-  direction: "long" | "short";
-  entree: string;
-  stop: string;
-  taille: string;
-  sortie: string;
-  tags: string;
-  note: string;
-}
+type FormEtat = SaisieExpyEnAttente["form"];
 
 const FORM_VIDE: FormEtat = {
   symbol: "",
@@ -258,11 +251,15 @@ const FORM_VIDE: FormEtat = {
 };
 
 export function ExpyWindow() {
+  const saisieRetenue = expyUiStore.getState().saisieEnAttente;
   const trades = useStore(expyStore, (s) => s.trades);
+  const dossiers = useStore(decisionDossiersStore, (s) => s.dossiers);
+  const erreurSauvegarde = useStore(expyStore, (s) => s.erreurSauvegarde);
   const activeSymbol = useStore(marketStore, (s) => s.symbol);
 
-  const [formOuvert, setFormOuvert] = useState(false);
-  const [form, setForm] = useState<FormEtat>(FORM_VIDE);
+  const [formOuvert, setFormOuvert] = useState(saisieRetenue !== null);
+  const [form, setForm] = useState<FormEtat>(saisieRetenue?.form ?? FORM_VIDE);
+  const [pendingId, setPendingId] = useState<string | null>(saisieRetenue?.id ?? null);
   const [erreurForm, setErreurForm] = useState<string | null>(null);
   const [closing, setClosing] = useState<{ id: string; prix: string } | null>(null);
   // Suppression armée (pattern PortfolioWindow / SettingsPanel.restaurer).
@@ -289,6 +286,10 @@ export function ExpyWindow() {
   );
 
   const aFermes = stats.n > 0;
+
+  useEffect(() => {
+    if (pendingId) expyUiStore.getState().retenirSaisieEnAttente({ id: pendingId, form });
+  }, [pendingId, form]);
 
   // Dessin équité — redessine sur nouvelle série et au redimensionnement.
   useEffect(() => {
@@ -323,6 +324,9 @@ export function ExpyWindow() {
   };
 
   const submitAdd = (): void => {
+    const creationEnAttente = pendingId
+      ? expyStore.getState().trades.find((t) => t.id === pendingId)
+      : undefined;
     const symbol = form.symbol.trim();
     const entree = Number(form.entree);
     const stop = Number(form.stop);
@@ -349,24 +353,36 @@ export function ExpyWindow() {
         return;
       }
       sortie = s;
-      fermeTs = Date.now();
+      fermeTs = creationEnAttente?.fermeTs ?? Date.now();
     }
     const tags = form.tags
       .split(",")
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
-    expyStore.getState().ajouter({
+    const nouveau = {
       symbol,
       direction: form.direction,
       entree,
       stopInitial: stop,
       taille,
       sortie,
-      ouvertTs: Date.now(),
+      ouvertTs: creationEnAttente?.ouvertTs ?? Date.now(),
       fermeTs,
       note: form.note.trim() || undefined,
       tags,
-    });
+    };
+    if (pendingId && expyStore.getState().trades.some((t) => t.id === pendingId)) {
+      expyStore.getState().modifier(pendingId, nouveau);
+    } else {
+      const resultat = expyStore.getState().ajouter(nouveau);
+      if (!resultat.enregistre) {
+        setPendingId(resultat.id);
+        expyUiStore.getState().retenirSaisieEnAttente({ id: resultat.id, form });
+      }
+    }
+    if (expyStore.getState().erreurSauvegarde !== null) return;
+    setPendingId(null);
+    expyUiStore.getState().retenirSaisieEnAttente(null);
     setForm(FORM_VIDE);
     setErreurForm(null);
     setFormOuvert(false);
@@ -381,8 +397,21 @@ export function ExpyWindow() {
   const confirmerCloture = (t: TradeJournal): void => {
     const sortie = Number(closing?.prix);
     if (!Number.isFinite(sortie) || sortie <= 0) return;
-    expyStore.getState().cloturer(t.id, sortie, Date.now());
-    setClosing(null);
+    expyStore.getState().cloturer(t.id, sortie, t.fermeTs ?? Date.now());
+    if (expyStore.getState().erreurSauvegarde === null) setClosing(null);
+  };
+
+  const reessayer = (): void => {
+    if (pendingId) {
+      // Le brouillon peut avoir été masqué : le réessai doit soumettre ses champs
+      // courants, et le rouvrir si une validation échoue.
+      if (!formOuvert) setFormOuvert(true);
+      submitAdd();
+    } else if (closing) {
+      const t = expyStore.getState().trades.find((trade) => trade.id === closing.id);
+      if (t) confirmerCloture(t);
+      else expyStore.getState().reessayerSauvegarde();
+    } else expyStore.getState().reessayerSauvegarde();
   };
 
   /** Export du journal (Blob JSON téléchargé `axiom-journal.json`). */
@@ -406,7 +435,9 @@ export function ExpyWindow() {
     reader.onload = () => {
       const txt = typeof reader.result === "string" ? reader.result : "";
       const { ajoutes, ignores } = expyStore.getState().importer(txt);
-      pousserToast(`Import : ${ajoutes} ajouté(s), ${ignores} ignoré(s)`);
+      if (expyStore.getState().erreurSauvegarde === null) {
+        pousserToast(`Import : ${ajoutes} ajouté(s), ${ignores} ignoré(s)`);
+      }
     };
     reader.readAsText(file);
     // Reset pour permettre de re-sélectionner le même fichier.
@@ -425,6 +456,13 @@ export function ExpyWindow() {
         tabIndex={-1}
         onChange={(e) => onFichier(e.target.files?.[0])}
       />
+
+      {erreurSauvegarde && (
+        <div role="alert" className="flex items-center justify-between gap-2 border-b border-down/40 px-4 py-2 text-[11px] text-down">
+          <span>{erreurSauvegarde} Le journal reste disponible ici tant que cette page est ouverte.</span>
+          <button type="button" onClick={reessayer} className="shrink-0 rounded border border-down/40 px-2 py-1">Réessayer</button>
+        </div>
+      )}
 
       <EnTeteFenetre
         mnemo="EXPY"
@@ -548,7 +586,7 @@ export function ExpyWindow() {
               onClick={submitAdd}
               className="shrink-0 rounded border border-border bg-surface px-3 py-1 text-[11px] text-text transition hover:text-accent"
             >
-              Ajouter
+              {pendingId ? "Mettre à jour et réessayer" : "Ajouter"}
             </button>
           </div>
           {erreurForm !== null && <p className="mt-1.5 text-[10px] text-down">{erreurForm}</p>}
@@ -592,11 +630,11 @@ export function ExpyWindow() {
                     <div className="flex items-center justify-between gap-2">
                       <button
                         type="button"
-                        onClick={() => navigateTo({ symbol: t.symbol, exchange: "binance", source: "expy" })}
+                        onClick={() => navigateTo({ symbol: t.symbol, exchange: t.source ?? "binance", source: "expy" })}
                         className="flex min-w-0 items-center gap-1.5 text-left"
                         title="Voir sur le chart"
                       >
-                        <span className="font-medium text-text">{t.symbol}</span>
+                        <span className="font-medium text-text">{t.symbol}{t.source ? ` · ${t.source}` : ""}</span>
                         <span
                           className={`rounded px-1 text-[9px] font-semibold uppercase ${
                             t.direction === "long" ? "text-up" : "text-down"
@@ -656,6 +694,9 @@ export function ExpyWindow() {
                         </button>
                       </span>
                     </div>
+                    {t.decisionIds && t.decisionIds.length > 0 && <p className="mt-1 text-[10px] text-text-dim">
+                      Dossiers : {t.decisionIds.map((id) => dossiers.some((d) => d.id === id) ? id : `${id} (supprimé/inconnu)`).join(", ")}
+                    </p>}
                     {/* Éditeur de clôture inline (prix chart prérempli si même symbole). */}
                     {closing?.id === t.id && (
                       <div className="mt-2 flex items-center gap-1.5 border-t border-border pt-2">
@@ -693,6 +734,7 @@ export function ExpyWindow() {
             </div>
           )}
         </section>
+        <DecisionDossiers />
       </div>
     </>
   );

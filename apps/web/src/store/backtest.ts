@@ -41,7 +41,9 @@ import {
 import type { CouvertureFundingBacktest, HistoriqueFundingBacktest } from "../data/backtestFunding";
 import type { WorkerRequest, WorkerResponse } from "../workers/backtest.worker";
 import { windowManagerStore, mirrorOpenState } from "./windowManager";
-import { signatureRun, type ConfigRun, type ModeFundingBacktest } from "./backtestSignature";
+import { copierConfigRun, signatureRun, type ConfigRun, type ModeFundingBacktest } from "./backtestSignature";
+import { backtestHistoryStore } from "./backtestHistory";
+import { VERSION_MOTEUR_BT } from "../data/backtestArchive";
 
 export { BACKTEST_TIMEFRAMES, SEUIL_PROFONDEUR_BT };
 
@@ -504,6 +506,7 @@ export interface BacktestState {
   setCapitalInitial: (v: number) => void;
   setModeFunding: (v: ModeFundingBacktest) => void;
   setIntrabar: (v: boolean) => void;
+  appliquerConfig: (config: ConfigRun) => void;
   addEntree: () => void;
   updateEntree: (index: number, cond: Condition) => void;
   removeEntree: (index: number) => void;
@@ -528,6 +531,7 @@ export interface BacktestState {
    * (cf. store/backtestSignature.ts).
    */
   signatureRun: string | null;
+  configRunResultat: ConfigRun | null;
   error: string | null;
   note: string | null;
   couvertureFunding: CouvertureFundingBacktest | null;
@@ -611,6 +615,10 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
   setCapitalInitial: (v) => set({ capitalInitial: v }),
   setModeFunding: (modeFunding) => set({ modeFunding }),
   setIntrabar: (v) => set({ intrabar: v }),
+  appliquerConfig: (source) => {
+    const config = copierConfigRun(source);
+    set({ ...config });
+  },
 
   addEntree: () => set((s) => ({ reglesEntree: [...s.reglesEntree, condEntreeDefaut()] })),
   updateEntree: (index, cond) =>
@@ -671,6 +679,7 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
   progress: { recuperees: 0, cible: 0 },
   resultat: null,
   signatureRun: null,
+  configRunResultat: null,
   error: null,
   note: null,
   couvertureFunding: null,
@@ -681,8 +690,8 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
     abort?.abort();
     terminateWorker();
     const runId = ++currentRunId;
-    const s = get();
-    const incompatibilite = raisonTimeframeBacktest([...s.reglesEntree, ...s.reglesSortie], s.tf);
+    const config = copierConfigRun(configCourante(get()));
+    const incompatibilite = raisonTimeframeBacktest([...config.reglesEntree, ...config.reglesSortie], config.tf);
     if (incompatibilite) {
       set({ phase: "error", error: incompatibilite, resultat: null, note: null });
       return;
@@ -714,22 +723,22 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
       if (runId !== currentRunId) return;
       // Les archives mensuelles constituent l'attestation des échéances. Une
       // fenêtre perp s'arrête donc avant le mois courant, encore non publié.
-      const jusqua = s.modeFunding === "binance-reel"
+      const jusqua = config.modeFunding === "binance-reel"
         ? bf.finFenetreFundingArchivee(maintenant)
         : maintenant;
-      const plage = PLAGES.find((p) => p.id === s.plage) ?? PLAGES[1]!;
+      const plage = PLAGES.find((p) => p.id === config.plage) ?? PLAGES[1]!;
       const depuis = jusqua - plage.ms;
 
       let candles: Candle[];
       try {
-        candles = s.modeFunding === "binance-reel"
-          ? await bf.accumulerKlinesPerpBinance(s.symbol, s.tf, depuis, jusqua, {
+        candles = config.modeFunding === "binance-reel"
+          ? await bf.accumulerKlinesPerpBinance(config.symbol, config.tf, depuis, jusqua, {
               signal: ctrl.signal,
               onProgress: (recuperees) => {
                 if (runId === currentRunId) set({ progress: { recuperees, cible: 0 } });
               },
             })
-          : await accumulerKlines(s.symbol, s.tf, depuis, jusqua, {
+          : await accumulerKlines(config.symbol, config.tf, depuis, jusqua, {
               signal: ctrl.signal,
               onProgress: (p) => {
                 if (runId === currentRunId) set({ progress: p });
@@ -753,19 +762,19 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
         return;
       }
 
-      const dureeBougie = dureeTimeframeMs(s.tf);
+      const dureeBougie = dureeTimeframeMs(config.tf);
       const derniere = candles.at(-1);
       const finDonneesMs = dureeBougie === null || derniere === undefined
         ? null
         : derniere.time + dureeBougie;
       let historiqueFunding: HistoriqueFundingBacktest | null = null;
-      if (s.modeFunding === "binance-reel") {
+      if (config.modeFunding === "binance-reel") {
         if (finDonneesMs === null) {
           set({ phase: "error", error: "Fin réelle des bougies indéterminable : funding non calculé." });
           return;
         }
         try {
-          historiqueFunding = await bf.fetchReglementsFundingBinance(s.symbol, candles[0]!.time, finDonneesMs, fetch, {
+          historiqueFunding = await bf.fetchReglementsFundingBinance(config.symbol, candles[0]!.time, finDonneesMs, fetch, {
             signal: ctrl.signal,
             maintenantMs: maintenant,
           });
@@ -783,7 +792,7 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
       if (runId !== currentRunId) return;
 
       const profondeurFaible = candles.length < SEUIL_PROFONDEUR_BT;
-      const noteBase = `${candles.length} bougies · ${s.symbol} ${s.tf} · ${s.modeFunding === "binance-reel" ? "Binance perp" : "Binance spot"}`;
+      const noteBase = `${candles.length} bougies · ${config.symbol} ${config.tf} · ${config.modeFunding === "binance-reel" ? "Binance perp" : "Binance spot"}`;
       set({
         phase: "calcul",
         nbBougiesChargees: candles.length,
@@ -803,10 +812,22 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
         if (runId !== currentRunId) return;
         const msg = event.data as WorkerResponse;
         if (msg.type === "result") {
+          backtestHistoryStore.getState().ajouterRun({
+            id: "", creeMs: Date.now(), schemaVersion: 1, moteurVersion: VERSION_MOTEUR_BT,
+            config, signature: signatureRun(config),
+            source: config.modeFunding === "binance-reel" ? "binance-perp" : "binance-spot",
+            fenetreDemandee: { debutMs: depuis, finMs: jusqua },
+            donnees: { premiereBougieMs: candles[0]!.time, derniereBougieMs: derniere!.time,
+              finDonneesMs, nbBougies: msg.resultat.nbBougies },
+            funding: { modele: historiqueFunding === null ? "aucun" : "perp-lineaire",
+              couverture: historiqueFunding?.couverture ?? null, total: msg.resultat.fundingTotal ?? null },
+            stats: msg.resultat.stats,
+          });
           set({
             phase: "done",
             resultat: msg.resultat,
-            signatureRun: signatureRun(configCourante(get())),
+            signatureRun: signatureRun(config),
+            configRunResultat: config,
           });
           terminateWorker();
         } else if (msg.type === "error") {
@@ -822,20 +843,20 @@ export const backtestStore = createStore<BacktestState>((set, get) => ({
       };
 
       const strat: StrategieDef = {
-        reglesEntree: s.reglesEntree,
-        reglesSortie: s.reglesSortie,
-        direction: s.direction,
-        tailleFixe: s.tailleFixe,
-        ...(s.stopAtr !== null ? { stopAtr: s.stopAtr } : s.stopPct !== null ? { stopPct: s.stopPct } : {}),
-        ...(s.targetPct !== null ? { targetPct: s.targetPct } : {}),
-        ...(s.risquePct !== null ? { risquePct: s.risquePct } : {}),
+        reglesEntree: config.reglesEntree,
+        reglesSortie: config.reglesSortie,
+        direction: config.direction,
+        tailleFixe: config.tailleFixe,
+        ...(config.stopAtr !== null ? { stopAtr: config.stopAtr } : config.stopPct !== null ? { stopPct: config.stopPct } : {}),
+        ...(config.targetPct !== null ? { targetPct: config.targetPct } : {}),
+        ...(config.risquePct !== null ? { risquePct: config.risquePct } : {}),
       };
       const params: ParamsBacktest = {
-        timeframe: s.tf,
-        fraisPct: s.fraisPct,
-        slippagePct: s.slippagePct,
-        capitalInitial: s.capitalInitial,
-        ...(s.intrabar ? { intrabar: true } : {}),
+        timeframe: config.tf,
+        fraisPct: config.fraisPct,
+        slippagePct: config.slippagePct,
+        capitalInitial: config.capitalInitial,
+        ...(config.intrabar ? { intrabar: true } : {}),
         ...(historiqueFunding !== null && finDonneesMs !== null ? {
           finDonneesMs,
           funding: { modele: "perp-lineaire" as const, reglements: historiqueFunding.reglements },

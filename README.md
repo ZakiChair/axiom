@@ -20,7 +20,7 @@ droits de l’opérateur ; certains historiques exigent une clé ou un abonnemen
 
 | | |
 |---|---|
-| **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations (exécutées, estimées, niveaux réels Hyperliquid), **210 indicateurs** testés |
+| **Lire le prix** | orderflow / CVD / footprint, profil de volume, heatmap de liquidations (exécutées, estimées, niveaux réels Hyperliquid), **214 indicateurs** testés |
 | **Lire le contexte** | **39 fenêtres** à mnémonique : calendrier éco, news, corrélations, on-chain, mouvements de baleines, treemap, options, COT, taux (dont 24 familles macro sur 8 zones) & liquidité Fed, saisonnalité, stablecoins, cycle halving… |
 | **Décider** | screener, playbooks 1-clic, alertes (dont composite ET), backtest en R (stop ATR / sizing risque), coût d’exécution L2 (DOM), stress-test, étude d’évènements, journal, paper trading |
 | **Ne pas décrocher** | alertes onglet fermé (macOS + Telegram optionnel), replay sur dumps officiels Binance, panneau de santé des sources |
@@ -38,7 +38,7 @@ Deux partis pris structurent le produit :
 1. **Le chemin chaud reste direct.** Le front parle **directement** aux WebSockets des exchanges ;
    le daemon `axiomd` ne prend en charge que le lent (APIs à quota, cache, persistance SQLite,
    alertes). L’UI reste utilisable **sans** daemon.
-2. **Les calculs sont du TypeScript pur et testés.** Les 210 indicateurs vivent dans
+2. **Les calculs sont du TypeScript pur et testés.** Les 214 indicateurs vivent dans
    `@axiom/indicators` — pas de WASM, pas de service Python — et sont couverts par des tests
    unitaires et structurels, dont **4 indicateurs comparés à un oracle `pandas-ta`** (ADX,
    SuperTrend, Ichimoku, PSAR ; `scripts/golden/`), des oracles analytiques ATR/RSI/Bollinger/RVOL
@@ -53,7 +53,7 @@ d’Electron.
 ```
 packages/
   types/         @axiom/types       — contrat de données partagé
-  indicators/    @axiom/indicators  — 210 indicateurs TS pur + golden tests
+  indicators/    @axiom/indicators  — 214 indicateurs TS pur + golden tests
   alerts/        @axiom/alerts      — moteur d’alertes pur (front + daemon)
   backtest/      @axiom/backtest    — moteur de backtest pur
 apps/
@@ -136,7 +136,7 @@ Finnhub, Etherscan v2, CoinDesk Data/CCData, CoinGecko et DefiLlama Pro) restent
 navigateur. OI et funding du graphe disposent d'un repli Binance sans
 clé ; NVT utilise directement les charts publics Blockchain.com.
 
-Le catalogue compte 210 indicateurs. Une entrée impossible pour la source, le symbole ou
+Le catalogue compte 214 indicateurs. Une entrée impossible pour la source, le symbole ou
 le timeframe courant est désactivée et marquée **UNUSABLE** au lieu de produire un pane vide.
 Les fonctions intrinsèquement locales sont également nommées : REPLAY et WHALES sont
 **UNUSABLE** sur Vercel ; l'historique LIQ et les couches GDELT/UCDP de GLOBE sont **PARTIAL**.
@@ -145,13 +145,48 @@ Les snapshots, LIQHL, les alertes baleines et les notifications onglet fermé n�
 
 ## Fonctionnalités (aperçu)
 
-- **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, 210 indicateurs
+- **Chart** : multi-grille (1 / 2h / 2v / 2×2), orderflow / CVD / footprint, volume profile, fibo, dessins, 214 indicateurs
 - **Terminal** : palette ⌘K, raccourcis, workspaces, fenêtres flottantes + snap + taskbar
 - **Sources** : Binance, Bybit, OKX, Coinbase, Kraken, MEXC, Deribit, Twelve Data, Coinalyze, FRED, etc.
 - **Panneaux** : 39 fenêtres — DES, FUNDX, LIQ, ECO, NEWS, CORR, CHAIN, MAP, PORT, NOTE, EQS, TERM, OMON, DOM, BT, REPLAY, RATE, COT, SEAG, VOL, FUND, BRIEF, GLOBE, STBL, SQZ, CBPREM, NETLIQ, DATA, DIST, EXPY, PAPER, MINE, WHALES, CYCLE, BPL, EVTS, SCEN, CAP, SECT
 - **Daemon** : proxy+cache, KV/candles SQLite, alertes (macOS + Telegram optionnel), replay dumps Binance, couches GDELT/UCDP, collecte des mouvements baleines (BTC + stables)
 
 [Bilan des ajouts, sources et vérifications du 7 septembre](docs/revue-2026-09-07.md).
+
+### Historique des décisions et nouveaux indicateurs
+
+Dans **BT**, « Versions et historique » enregistre la configuration complète d'un essai,
+archive les statistiques de chaque run réussi et compare deux résultats. Une version
+restaure les paramètres sans lancer de calcul. Les archives contiennent une synthèse :
+elles ne reconstituent pas les bougies, la courbe d'équité ou toutes les exécutions.
+Les écarts chiffrés ne sont comparés que pour le même marché, la même source, le même
+intervalle et les mêmes bornes de données.
+
+Le **journal des alertes** permet de créer un dossier de décision dans **EXPY** : preuve
+disponible au signal, thèse, invalidation et revue après le trade. « Préparer dans PAPER »
+ouvre un brouillon à valider ; la source et les références du dossier suivent ensuite la
+position jusqu'à sa clôture. Les anciens signaux restent explicitement partiels.
+Les erreurs de sauvegarde de NOTE et EXPY sont visibles et peuvent être réessayées en
+conservant la saisie en mémoire.
+
+Quatre indicateurs complètent le catalogue : **liquidations / OI**, **corrélation baissière**,
+**bêta baissier** et **dispersion du funding**. La corrélation et le bêta se mesurent sur les
+baisses de la référence, avec des prix exactement appariés. Dans **FUNDX → Historique**, les
+périodes demandées de 7, 30 ou 90 jours affichent la couverture réellement disponible et
+les trous. La dispersion utilise toujours Binance, Bybit, OKX et Hyperliquid : une place
+manquante rend le point incomplet, elle ne réduit pas artificiellement la dispersion.
+
+Dans le menu **Indicateurs**, l'étoile enregistre un favori. **Favoris**, **Récents** et
+**Utilisables ici** se combinent avec la recherche ; les 12 derniers indicateurs ajoutés
+restent accessibles après rechargement. Les motifs d'indisponibilité restent visibles
+lorsque le filtre de disponibilité est désactivé.
+
+Les alertes et scans proposent une **durée** à la création et une **prolongation de 24 h**.
+Une alerte expirée reste consultable et libère ses flux exclusifs ; la mettre en pause
+puis la reprendre ne renouvelle pas sa date. Dans **DATA**, chaque source propose les
+actions qu'elle prend en charge et affiche leur résultat.
+
+[Détail des quatre lots et de leurs vérifications](docs/revue-2026-09-23-quatre-lots.md).
 
 ### Fonction MACRO et nouveaux indicateurs
 

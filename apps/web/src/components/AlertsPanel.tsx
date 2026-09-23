@@ -17,6 +17,7 @@ import { useMemo, useState } from "react";
 import { useStore } from "zustand";
 import {
   decrireCondition,
+  alerteActiveAuTemps,
   conditionSupporteTimeframe,
   estFrontOnly,
   LIBELLES_METRIQUE_ONCHAIN,
@@ -31,8 +32,11 @@ import {
 import { INDICATORS, getIndicator, supportsIndicatorTimeframe } from "@axiom/indicators";
 import { marketStore } from "../store/market";
 import { alertsStore } from "../store/alerts";
+import { decisionDossiersStore } from "../store/decisionDossiers";
+import { windowManagerStore } from "../store/windowManager";
 import { presetAlertsStore, type AlertePreset } from "../store/presetAlerts";
 import { demanderPermissionNotifications } from "../alerts/runtime";
+import { useExpirationClock } from "../alerts/useExpirationClock";
 import { IS_VERCEL } from "../lib/deployment";
 import { formatHeure } from "../lib/format";
 import { navigateTo } from "../lib/navigation";
@@ -99,7 +103,8 @@ function etatArmement(arme: boolean | undefined): { texte: string; classe: strin
  * État du dernier scan d'une alerte de preset : pastille + libellé. Un échec avalé ne
  * doit PAS rester vert (le scan est front-only, sans relais daemon).
  */
-function etatScan(a: AlertePreset): { classePastille: string; classeTexte: string; texte: string } {
+function etatScan(a: AlertePreset, maintenant: number): { classePastille: string; classeTexte: string; texte: string } {
+  if (a.expireTs !== undefined && maintenant >= a.expireTs) return { classePastille: "text-warn", classeTexte: "text-warn", texte: "expirée" };
   if (!a.actif) return { classePastille: "text-text-dim", classeTexte: "text-text-dim", texte: "en pause" };
   if (a.derniereErreur !== undefined) {
     return {
@@ -121,7 +126,14 @@ export function AlertsPanel() {
   const tfCourant = useStore(marketStore, (s) => s.timeframe);
   // Alertes de scan (EQS) : liste réactive + message discret sur refus de reprise (limite).
   const alertesScan = useStore(presetAlertsStore, (s) => s.alertes);
+  const maintenant = useExpirationClock(defs, alertesScan);
   const [msgScan, setMsgScan] = useState<string | null>(null);
+
+  const prolongerScan = (a: AlertePreset) => {
+    const base = Math.max(Date.now(), a.expireTs ?? Date.now());
+    const res = presetAlertsStore.getState().prolonger(a.id, base + 24 * 3_600_000);
+    setMsgScan(res === "limite" ? "4 alertes de scan max" : res === "ok" ? "Alerte prolongée de 24 h" : "Échéance invalide");
+  };
 
   const basculerScan = (id: string) => {
     if (presetAlertsStore.getState().basculer(id) === "limite") {
@@ -133,6 +145,7 @@ export function AlertsPanel() {
   // Formulaire de création (état local React).
   const [symbol, setSymbol] = useState("");
   const [type, setType] = useState<TypeAlerte>("prix-croise");
+  const [dureeAlerteMs, setDureeAlerteMs] = useState(0);
   const [niveau, setNiveau] = useState("");
   const [sens, setSens] = useState<SensCroisement>("hausse");
   const [seuilPct, setSeuilPct] = useState("");
@@ -327,12 +340,14 @@ export function AlertsPanel() {
       type === "variation-pct" || type === "indicateur-seuil" || type === "indicateur-croisement"
         ? marketStore.getState().timeframe
         : undefined;
-    alertsStore.getState().ajouter({
+    const creee = alertsStore.getState().ajouter({
       symbol: cible.symbol,
       source: cible.source,
       condition,
       ...(tfDef !== undefined ? { timeframe: tfDef } : {}),
+      ...(dureeAlerteMs > 0 ? { expireTs: Date.now() + dureeAlerteMs } : {}),
     });
+    if (!creee) { setErreurForm("Échéance invalide."); return; }
     // Réinitialise les valeurs numériques (on garde type/sens/fenêtre pour un enchaînement rapide).
     setSymbol("");
     setNiveau("");
@@ -374,6 +389,7 @@ export function AlertsPanel() {
         )}
         {defs.map((d) => {
           const arm = etatArmement(d.arme);
+          const expiree = d.expireTs !== undefined && maintenant >= d.expireTs;
           const derniere = d.declenchements[d.declenchements.length - 1];
           const whaleUnusable = IS_VERCEL && d.condition.type === "whale-flux";
           const frontOnly = estFrontOnly(d);
@@ -387,7 +403,7 @@ export function AlertsPanel() {
                 type="button"
                 onClick={() => alertsStore.getState().basculerActif(d.id)}
                 title={d.actif ? "Désactiver" : "Activer"}
-                className={`shrink-0 text-[9px] leading-none ${d.actif ? "text-up" : "text-text-dim"}`}
+                className={`shrink-0 text-[9px] leading-none ${alerteActiveAuTemps(d, maintenant) ? "text-up" : "text-text-dim"}`}
               >
                 ●
               </button>
@@ -410,7 +426,7 @@ export function AlertsPanel() {
                         front-only
                       </Badge>
                     )}
-                    <span className={`text-[10px] ${arm.classe}`}>{arm.texte}</span>
+                    <span className={`text-[10px] ${expiree ? "text-warn" : arm.classe}`}>{expiree ? "expirée" : !d.actif ? "en pause" : arm.texte}</span>
                   </span>
                 </span>
                 <span className="flex items-baseline justify-between gap-2">
@@ -421,7 +437,17 @@ export function AlertsPanel() {
                     {formatHeure(derniere ?? 0)}
                   </span>
                 </span>
+                {d.expireTs !== undefined && (
+                  <span className="block text-[10px] tabular-nums text-text-dim">
+                    Échéance {new Date(d.expireTs).toLocaleString("fr-CH", { dateStyle: "short", timeStyle: "short" })}
+                  </span>
+                )}
               </button>
+              {d.expireTs !== undefined && (
+                <button type="button" onClick={() => alertsStore.getState().prolonger(d.id, Math.max(Date.now(), d.expireTs!) + 24 * 3_600_000)}
+                  aria-label={`Prolonger l'alerte ${d.symbol} de 24 h`} title="Prolonger de 24 h"
+                  className="shrink-0 text-[10px] text-text-dim hover:text-text">+24 h</button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -454,6 +480,16 @@ export function AlertsPanel() {
 
       {/* Formulaire de création */}
       <div className="space-y-1.5 border-t border-border p-2">
+        <label className="flex items-center gap-2 text-[10px] text-text-dim">
+          Durée
+          <select value={dureeAlerteMs} onChange={(e) => setDureeAlerteMs(Number(e.target.value))}
+            aria-label="Durée de l'alerte" className="rounded border border-border bg-bg px-1 py-0.5 text-xs text-text">
+            <option value={0}>Sans échéance</option>
+            <option value={3_600_000}>1 h</option>
+            <option value={24 * 3_600_000}>24 h</option>
+            <option value={7 * 24 * 3_600_000}>7 jours</option>
+          </select>
+        </label>
         <label className="flex items-center gap-1.5 px-0.5 text-[10px] text-text-dim">
           <input
             type="checkbox"
@@ -890,6 +926,7 @@ export function AlertsPanel() {
                 source: marketStore.getState().exchange,
                 condition: { type: "composite", conditions: [...composition] },
                 ...(aUneBougie ? { timeframe: marketStore.getState().timeframe } : {}),
+                ...(dureeAlerteMs > 0 ? { expireTs: Date.now() + dureeAlerteMs } : {}),
               });
               setComposition([]);
               setSymboleCompose(null);
@@ -923,7 +960,10 @@ export function AlertsPanel() {
             ) : (
               journal.map((d, i) => {
                 // La def peut avoir été supprimée depuis : sans cible, pas de navigation.
-                const cible = cibleAlerte(defs, d.alertId);
+                const preuve = d.preuve?.origine;
+                const cible = preuve?.symbol && preuve.source
+                  ? { symbol: preuve.symbol, source: preuve.source }
+                  : cibleAlerte(defs, d.alertId);
                 const contenu = (
                   <>
                     <span className="min-w-0 truncate text-text-dim">{d.message}{d.instantane ? ` · ${d.valeur.toLocaleString("fr-FR")} ${d.instantane.unite} · obs. ${new Date(d.instantane.observeLe).toISOString().slice(0, 10)} · ${d.instantane.source}` : ""}</span>
@@ -931,28 +971,18 @@ export function AlertsPanel() {
                   </>
                 );
                 const classes = "flex w-full items-baseline justify-between gap-2 py-0.5 text-left text-[11px]";
-                return cible === null ? (
-                  <div key={`${d.alertId}-${d.ts}-${i}`} className={classes}>
-                    {contenu}
-                  </div>
-                ) : (
-                  <button
-                    key={`${d.alertId}-${d.ts}-${i}`}
+                return <div key={`${d.alertId}-${d.ts}-${i}`} className="flex items-center gap-1">
+                  {cible === null ? <div className={`${classes} min-w-0 flex-1`}>{contenu}</div> : <button
                     type="button"
-                    onClick={() =>
-                      navigateTo({
-                        symbol: cible.symbol,
-                        exchange: cible.source,
-                        markTime: d.ts,
-                        source: "alerte",
-                      })
-                    }
+                    onClick={() => navigateTo({ symbol: cible.symbol, exchange: cible.source, markTime: d.ts, source: "alerte" })}
                     title="Marquer sur le chart"
-                    className={`${classes} transition hover:bg-bg`}
-                  >
-                    {contenu}
-                  </button>
-                );
+                    className={`${classes} min-w-0 flex-1 transition hover:bg-bg`}
+                  >{contenu}</button>}
+                  <button type="button" title="Créer un dossier de décision dans EXPY" className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-text-dim hover:text-text" onClick={() => {
+                    decisionDossiersStore.getState().creerDepuisJournal(d);
+                    windowManagerStore.getState().openWindow("expy");
+                  }}>Dossier</button>
+                </div>;
               })
             )}
           </div>
@@ -978,7 +1008,7 @@ export function AlertsPanel() {
                 type="button"
                 onClick={() => basculerScan(a.id)}
                 title={a.actif ? "Mettre en pause" : "Reprendre"}
-                className={`shrink-0 text-[9px] leading-none ${etatScan(a).classePastille}`}
+                  className={`shrink-0 text-[9px] leading-none ${etatScan(a, maintenant).classePastille}`}
               >
                 ●
               </button>
@@ -989,10 +1019,15 @@ export function AlertsPanel() {
                     toutes les {a.periodeMin} min
                   </span>
                 </div>
-                <div className={`truncate text-[10px] ${etatScan(a).classeTexte}`}>
-                  {etatScan(a).texte}
+                <div className={`truncate text-[10px] ${etatScan(a, maintenant).classeTexte}`}>
+                  {etatScan(a, maintenant).texte}
                 </div>
+                {a.expireTs !== undefined && <div className="text-[10px] tabular-nums text-text-dim">Échéance {new Date(a.expireTs).toLocaleString("fr-CH", { dateStyle: "short", timeStyle: "short" })}</div>}
               </div>
+              {a.expireTs !== undefined && (
+                <button type="button" onClick={() => prolongerScan(a)} aria-label={`Prolonger l'alerte de scan ${a.nom} de 24 h`}
+                  className="shrink-0 text-[10px] text-text-dim hover:text-text">+24 h</button>
+              )}
               <button
                 type="button"
                 onClick={() => presetAlertsStore.getState().retirer(a.id)}

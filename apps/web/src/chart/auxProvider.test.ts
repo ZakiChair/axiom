@@ -21,6 +21,7 @@ vi.mock("../data/onchain/bgeometrics", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../data/onchain/bgeometrics")>();
   return { ...actual, fetchBgeometricMetrique: vi.fn() };
 });
+
 vi.mock("../store/onchain", () => ({
   getBgeometricsKey: vi.fn(),
 }));
@@ -36,6 +37,9 @@ vi.mock("../data/hyperliquidFunding", () => ({
 }));
 vi.mock("../data/binanceFunding", () => ({
   fetchBinanceFundingHourly: vi.fn(),
+}));
+vi.mock("../data/fundingHistory", () => ({
+  chargerFundingVenue: vi.fn(),
 }));
 vi.mock("../data/daemon", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../data/daemon")>();
@@ -55,6 +59,9 @@ import { histFunding, histOiUsd } from "../data/referentiels";
 import { coinalyzeKeyStore } from "../store/coinalyze";
 import { getBgeometricsKey } from "../store/onchain";
 import { registerHyperliquidCoin } from "../data/symbol";
+import { chargerFundingVenue } from "../data/fundingHistory";
+import { binanceAdapter } from "../data/binance";
+import { refSymbolStore } from "../store/refSymbol";
 
 const oiMock = vi.mocked(coinalyzeProvider.fetchOpenInterestHistory);
 const fundingMock = vi.mocked(coinalyzeProvider.fetchFundingRateHistory);
@@ -69,6 +76,7 @@ const mempoolMock = vi.mocked(fetchHashrate);
 const hlFundingMock = vi.mocked(fetchHlFundingHistory);
 const binanceFundingMock = vi.mocked(fetchBinanceFundingHourly);
 const hlHeatMock = vi.mocked(hlLiqHeatGet);
+const strictFundingMock = vi.mocked(chargerFundingVenue);
 
 /** Point OpenInterest de test (seul `oiUsd` est lu par l'AuxProvider). */
 function oiPoint(time: number, oiUsd: number): OpenInterest {
@@ -784,5 +792,58 @@ describe("AuxProvider — Lot 2 (liq flux, hashrate, BG, HL)", () => {
     const r = req(["hlWhalesNet"]);
     await new Promise<void>((resolve) => p.getAligned(r, resolve));
     expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: { hlWhalesNet: [undefined] } });
+  });
+});
+
+describe("AuxProvider — séries strictes du lot C", () => {
+  const H = 3_600_000;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(5 * H);
+    coinalyzeKeyStore.setState({ hasKey: true });
+    refSymbolStore.getState().setRefSymbol("ETHUSDT");
+  });
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it("OI à l'ouverture : bucket adjacent seulement, aucun report à travers une lacune", async () => {
+    oiMock.mockResolvedValue([oiPoint(0, 10_000), oiPoint(2 * H, 20_000), oiPoint(4 * H, 30_000)]);
+    const p = new AuxProvider();
+    const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
+      ids: ["oiDebutLiqUsd" as const], candleTimes: [H, 2 * H, 3 * H, 4 * H, 5 * H] };
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: { oiDebutLiqUsd: [10_000, undefined, 20_000, undefined, 30_000] } });
+    expect(oiMock).toHaveBeenCalledWith("BTCUSDT", "1hour", expect.any(Number));
+  });
+
+  it("référence stricte partage le fetch brut mais refuse le LOCF de la référence historique", async () => {
+    const fetcher = vi.spyOn(binanceAdapter, "fetchKlines").mockResolvedValue([
+      { time: H, open: 100, high: 100, low: 100, close: 100, volume: 1 },
+      { time: 3 * H, open: 120, high: 120, low: 120, close: 120, volume: 1 },
+    ]);
+    const p = new AuxProvider();
+    const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
+      ids: ["refClose" as const, "refCloseStrict" as const], candleTimes: [H, 2 * H, 3 * H] };
+    await new Promise<void>((resolve) => { let restants = 2; p.getAligned(r, () => { if (--restants === 0) resolve(); }); });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledWith("ETHUSDT", "1h", { limit: 720 });
+    expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: {
+      refClose: [100, 100, 120], refCloseStrict: [100, undefined, 120],
+    } });
+  });
+
+  it("funding strict : expire à la borne exclusive et une venue en échec n'efface pas les autres", async () => {
+    strictFundingMock.mockImplementation(async (venue) => ({
+      venue, status: venue === "okx" ? "error" : "ok",
+      points: venue === "okx" ? [] : [{ time: H - 1, value: 0.0001, validUntil: 2 * H - 1 }],
+      requestedFrom: 0, effectiveFrom: H - 1, effectiveTo: H - 1,
+    }));
+    const p = new AuxProvider();
+    const r = { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
+      ids: ["fundingHistBybit" as const, "fundingHistOkx" as const], candleTimes: [0, H, 2 * H] };
+    await new Promise<void>((resolve) => { let restants = 2; p.getAligned(r, () => { if (--restants === 0) resolve(); }); });
+    expect(p.getAligned(r, () => {})).toEqual({ status: "ready", aux: {
+      fundingHistBybit: [0.0001, undefined, undefined], fundingHistOkx: [undefined, undefined, undefined],
+    } });
   });
 });

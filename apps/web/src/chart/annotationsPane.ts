@@ -39,6 +39,8 @@ export interface AxesPane {
 const DEMI_TRIANGLE = 6;
 /** Décalage vertical des labels par rapport au pivot (px). */
 const DECALAGE_LABEL = 8;
+/** Sous la rangée de légende et ses contrôles flottants du pane. */
+const HAUT_LABEL_PANE = 32;
 
 export function dessinerAnnotationsPane(
   ctx: CanvasRenderingContext2D,
@@ -107,12 +109,13 @@ export function dessinerAnnotationsPane(
     if (l.cible !== cible) continue;
     if (l.idx < fenetre.de || l.idx >= fenetre.a) continue;
     const x = axes.convertirX(l.idx);
-    const y = axes.convertirY(l.valeur);
+    const hautPane = cible === "pane" && l.ancrageY === "haut-pane";
+    const y = hautPane ? HAUT_LABEL_PANE : axes.convertirY(l.valeur);
     const dessous = l.position === "dessous";
     ctx.font = "10px sans-serif";
     ctx.textAlign = "center";
-    ctx.textBaseline = dessous ? "top" : "bottom";
+    ctx.textBaseline = hautPane || dessous ? "top" : "bottom";
     ctx.fillStyle = couleurAnnotation(l.couleur);
-    ctx.fillText(l.texte, x, dessous ? y + DECALAGE_LABEL : y - DECALAGE_LABEL);
+    ctx.fillText(l.texte, x, hautPane ? y : dessous ? y + DECALAGE_LABEL : y - DECALAGE_LABEL);
   }
 }

@@ -15,6 +15,8 @@ import {
   assetsWhaleFluxActifs,
   assurerTablesAlertes,
   chargerDefs,
+  creerReveilEcheance,
+  demarrerBoucleAlertes,
   doitNotifier,
   evaluerEtPersister,
   evaluerLiqCascadeTick,
@@ -24,6 +26,8 @@ import {
   evaluerWhaleFluxTick,
   FENETRE_LIQ_MS,
   fusionnerEtatArme,
+  lireDefsKv,
+  memeGenerationFunding,
   purgerJournalAlertes,
   RETENTION_JOURNAL_MS,
   SEUIL_HEARTBEAT_MS,
@@ -173,6 +177,60 @@ describe("symbolesBinanceActifs", () => {
   });
 });
 
+describe("échéance commune des sélecteurs daemon", () => {
+  test("libère Binance, funding, cascade et whales à la borne, sans retirer l'alerte sœur", () => {
+    const t = 1_000_000;
+    const prix = { ...alertePrix("p", "BTCUSDT", 100), expireTs: t };
+    const soeur = alertePrix("s", "BTCUSDT", 200);
+    const funding = { ...alerteFunding("f", "ETHUSDT"), expireTs: t };
+    const cascade = { ...alerteCascade("l", "SOLUSDT"), expireTs: t };
+    const whale = { ...alerteWhale("w", "DOGE"), expireTs: t };
+    expect(symbolesBinanceActifs([prix, funding, cascade, whale], t - 1)).toEqual(["BTCUSDT", "DOGE", "ETHUSDT", "SOLUSDT"]);
+    expect(symbolesBinanceActifs([prix, soeur, funding, cascade, whale], t)).toEqual(["BTCUSDT"]);
+    expect(symbolesFundingActifs([funding], t)).toEqual([]);
+    expect(symbolesLiqCascadeActifs([cascade], t)).toEqual([]);
+    expect(assetsWhaleFluxActifs([whale], t)).toEqual([]);
+  });
+
+  test("KV invalide ne transforme jamais une échéance en alerte permanente", () => {
+    const invalide = { ...alertePrix("m", "BTCUSDT", 100), expireTs: "demain" } as unknown as AlertDef;
+    const d = baseAvecAlerte(invalide);
+    expect(lireDefsKv(d)).toEqual([]);
+  });
+
+  test("réveil dédié libère sans tick, se réarme après prolongation et s'arrête proprement", () => {
+    let now = 1_000;
+    let defs: AlertDef[] = [{ ...alertePrix("a", "BTCUSDT", 100), expireTs: 1_100 }];
+    const timers = new Map<number, { at: number; fn: () => void }>();
+    let seq = 0;
+    const horloge = {
+      now: () => now,
+      setTimeout: (fn: () => void, delay: number) => { const id = ++seq; timers.set(id, { at: now + delay, fn }); return id; },
+      clearTimeout: (id: unknown) => { timers.delete(id as number); },
+    };
+    const appels: string[][] = [];
+    const reveil = creerReveilEcheance(() => defs, () => { appels.push(symbolesBinanceActifs(defs, now)); }, horloge);
+    reveil.synchroniser();
+    expect([...timers.values()][0]?.at).toBe(1_100);
+    defs = [{ ...defs[0]!, expireTs: 1_200 }];
+    reveil.synchroniser();
+    expect([...timers.values()][0]?.at).toBe(1_200);
+    now = 1_200;
+    for (const [id, t] of [...timers]) if (t.at <= now) { timers.delete(id); t.fn(); }
+    expect(appels).toEqual([[]]);
+    expect(timers.size).toBe(0);
+    reveil.arreter();
+    expect(timers.size).toBe(0);
+  });
+
+  test("un taux acquis avant expiration ne passe ni après la borne ni après prolongation du même ID", () => {
+    const initiale = { ...alerteFunding("f", "BTCUSDT"), expireTs: 1_100 };
+    expect(memeGenerationFunding([initiale], [initiale], "BTCUSDT", 1_000, 1_099)).toBe(true);
+    expect(memeGenerationFunding([initiale], [initiale], "BTCUSDT", 1_000, 1_100)).toBe(false);
+    expect(memeGenerationFunding([initiale], [{ ...initiale, expireTs: 1_500 }], "BTCUSDT", 1_000, 1_101)).toBe(false);
+  });
+});
+
 describe("symbolesFundingActifs", () => {
   test("ne retient que binance actives funding-extreme", () => {
     const defs: AlertDef[] = [
@@ -317,6 +375,47 @@ function baseAvecAlerte(def: AlertDef): Database {
   assurerTablesAlertes(d);
   return d;
 }
+
+describe("arrêt de la boucle pendant un funding en vol", () => {
+  test("après premiumIndex, l'arrêt interdit le nouvel appel d'historique et toute sortie", async () => {
+    const d = baseAvecAlerte(alerteFunding("f-stop", "BTCUSDT"));
+    const reponse = Promise.withResolvers<Map<string, number>>();
+    let appelsHistorique = 0;
+    const stop = demarrerBoucleAlertes({
+      db: d,
+      creerFeed: () => ({ setSymboles: () => {}, arreter: () => {} }),
+      chargerFundingRates: () => reponse.promise,
+      chargerHistoriqueFunding: async () => { appelsHistorique++; return []; },
+    });
+    stop();
+    reponse.resolve(new Map([["BTCUSDT", 0.002]]));
+    await Bun.sleep(0);
+    expect(appelsHistorique).toBe(0);
+    expect((d.query("SELECT COUNT(*) AS n FROM alertes_journal").get() as { n: number }).n).toBe(0);
+    expect(telegramAppels).toHaveLength(0);
+    d.close();
+  });
+
+  test("après l'historique, l'arrêt interdit journal, macOS et Telegram", async () => {
+    const d = baseAvecAlerte(alerteFunding("f-stop", "BTCUSDT"));
+    d.query("INSERT INTO alertes_etat (alertId, arme, majA) VALUES ('f-stop', 1, 1)").run();
+    const historique = Promise.withResolvers<number[]>();
+    const historiqueParti = Promise.withResolvers<void>();
+    const stop = demarrerBoucleAlertes({
+      db: d,
+      creerFeed: () => ({ setSymboles: () => {}, arreter: () => {} }),
+      chargerFundingRates: async () => new Map([["BTCUSDT", 0.002]]),
+      chargerHistoriqueFunding: () => { historiqueParti.resolve(); return historique.promise; },
+    });
+    await historiqueParti.promise;
+    stop();
+    historique.resolve([]);
+    await Bun.sleep(0);
+    expect((d.query("SELECT COUNT(*) AS n FROM alertes_journal").get() as { n: number }).n).toBe(0);
+    expect(telegramAppels).toHaveLength(0);
+    d.close();
+  });
+});
 
 describe("evaluerEtPersister (démarrage complet en base)", () => {
   test("calibre puis déclenche sur franchissement, journalise et notifie", () => {

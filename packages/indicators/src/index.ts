@@ -16,3 +16,4 @@ export * from "./registry";
 export * from "./timeframes";
 export { rvolSeasonal } from "./volume/rvolSeasonal";
 export { downsideVariance } from "./volatility/downsideVariance";
+export { calculerDispersionFunding } from "./derivatives/fundingDispersion";

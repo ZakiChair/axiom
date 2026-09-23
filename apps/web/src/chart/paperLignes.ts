@@ -18,7 +18,7 @@
  */
 import { createStore } from "zustand/vanilla";
 import type { StoreApi } from "zustand/vanilla";
-import type { Unsubscribe } from "@axiom/types";
+import type { ExchangeId, Unsubscribe } from "@axiom/types";
 import type { EtatPaper } from "../data/paper";
 import { paperStore } from "../store/paper";
 import { marketStore } from "../store/market";
@@ -39,11 +39,11 @@ function fmtTaille(n: number): string {
  *    « côté TP|SL taille », couleur TP=`--up` / SL=`--down`.
  * Les ordres/positions des AUTRES symboles sont ignorés. PURE.
  */
-export function niveauxPaperLignes(etat: EtatPaper, symbol: string): LigneNiveau[] {
+export function niveauxPaperLignes(etat: EtatPaper, symbol: string, source?: ExchangeId): LigneNiveau[] {
   const lignes: LigneNiveau[] = [];
 
   for (const o of etat.ordres) {
-    if (o.symbol !== symbol) continue;
+    if (o.symbol !== symbol || (o.source !== undefined && o.source !== source)) continue;
     const couleur = o.direction === "long" ? "--up" : "--down";
     const taille = fmtTaille(o.taille);
     if (o.type === "limit" && o.prixLimite !== null) {
@@ -55,7 +55,7 @@ export function niveauxPaperLignes(etat: EtatPaper, symbol: string): LigneNiveau
   }
 
   for (const p of etat.positions) {
-    if (p.symbol !== symbol) continue;
+    if (p.symbol !== symbol || (p.source !== undefined && p.source !== source)) continue;
     const taille = fmtTaille(p.taille);
     if (p.tp !== null) {
       lignes.push({ price: p.tp, label: `${p.direction} TP ${taille}`, couleur: "--up", emphase: "forte" });
@@ -90,7 +90,8 @@ export const paperOverlayStore: StoreApi<PaperOverlayState> = createStore<PaperO
  */
 export const fournisseurPaperLignes: FournisseurLignes = {
   getLignes(): LigneNiveau[] {
-    return niveauxPaperLignes(paperStore.getState(), marketStore.getState().symbol);
+    const marche = marketStore.getState();
+    return niveauxPaperLignes(paperStore.getState(), marche.symbol, marche.exchange);
   },
   subscribe(onChange: () => void): Unsubscribe {
     // Store paper : ne réagir qu'aux mutations ordres/positions (un tick ne change que
@@ -106,10 +107,12 @@ export const fournisseurPaperLignes: FournisseurLignes = {
     });
     // Marché : changement de symbole du maître (les lignes suivent le symbole affiché).
     let prevSymbol = marketStore.getState().symbol;
+    let prevSource = marketStore.getState().exchange;
     const unsubMarket = marketStore.subscribe(() => {
-      const symbol = marketStore.getState().symbol;
-      if (symbol !== prevSymbol) {
+      const { symbol, exchange } = marketStore.getState();
+      if (symbol !== prevSymbol || exchange !== prevSource) {
         prevSymbol = symbol;
+        prevSource = exchange;
         onChange();
       }
     });

@@ -34,15 +34,18 @@ function prixMarcheActif(): number | undefined {
 }
 
 export function NotesWindow() {
+  const saisieRetenue = notesUiStore.getState().saisieEnAttente;
   const brouillon = useStore(notesUiStore, (s) => s.brouillon);
   const notes = useStore(notesStore, (s) => s.notes);
+  const erreurSauvegarde = useStore(notesStore, (s) => s.erreurSauvegarde);
   const activeSymbol = useStore(marketStore, (s) => s.symbol);
   const activeExchange = useStore(marketStore, (s) => s.exchange);
 
   // Formulaire de création. `ancre` = contexte imposé par un post-mortem (sinon actif).
-  const [texte, setTexte] = useState("");
-  const [tagsInput, setTagsInput] = useState("");
-  const [ancre, setAncre] = useState<{ symbole: string; source: ExchangeId; prix?: number } | null>(null);
+  const [texte, setTexte] = useState(saisieRetenue?.texte ?? "");
+  const [tagsInput, setTagsInput] = useState(saisieRetenue?.tagsInput ?? "");
+  const [ancre, setAncre] = useState<{ symbole: string; source: ExchangeId; prix?: number } | null>(saisieRetenue?.ancre ?? null);
+  const [pendingId, setPendingId] = useState<string | null>(saisieRetenue?.id ?? null);
 
   // Filtres de la liste.
   const [query, setQuery] = useState("");
@@ -56,12 +59,16 @@ export function NotesWindow() {
 
   // Consomme un brouillon armé par le portefeuille (post-mortem) : seed du formulaire.
   useEffect(() => {
-    if (!brouillon) return;
+    if (!brouillon || pendingId !== null) return;
     setTexte(brouillon.texte);
     setTagsInput((brouillon.tags ?? []).join(" "));
     setAncre({ symbole: brouillon.symbole, source: brouillon.source, prix: brouillon.prix });
     notesUiStore.getState().consommerBrouillon();
-  }, [brouillon]);
+  }, [brouillon, pendingId]);
+
+  useEffect(() => {
+    if (pendingId) notesUiStore.getState().retenirSaisieEnAttente({ id: pendingId, texte, tagsInput, ancre });
+  }, [pendingId, texte, tagsInput, ancre]);
 
   const tagsDispo = useMemo(() => tousLesTags(notes), [notes]);
 
@@ -75,17 +82,31 @@ export function NotesWindow() {
   }, [notes, query, tagFilter, symbolFilterOnly, activeSymbol]);
 
   const ancreSymbole = ancre?.symbole ?? activeSymbol;
-  const ancrePrix = ancre?.prix ?? prixMarcheActif();
+  const ancrePrix = ancre ? ancre.prix : prixMarcheActif();
 
   const submit = () => {
     if (!texte.trim()) return;
-    notesStore.getState().ajouter({
+    const nouvelle = {
       symbole: ancre?.symbole ?? activeSymbol,
       source: ancre?.source ?? activeExchange,
-      prix: ancre?.prix ?? prixMarcheActif(),
+      prix: ancre ? ancre.prix : prixMarcheActif(),
       texte: texte.trim(),
       tags: parseTags(tagsInput),
-    });
+    };
+    if (pendingId && notesStore.getState().notes.some((n) => n.id === pendingId)) {
+      notesStore.getState().modifier(pendingId, nouvelle);
+    } else {
+      const resultat = notesStore.getState().ajouter(nouvelle);
+      if (!resultat.enregistre) {
+        setPendingId(resultat.id);
+        const ancreEchec = { symbole: nouvelle.symbole, source: nouvelle.source, prix: nouvelle.prix };
+        setAncre(ancreEchec);
+        notesUiStore.getState().retenirSaisieEnAttente({ id: resultat.id, texte, tagsInput, ancre: ancreEchec });
+      }
+    }
+    if (notesStore.getState().erreurSauvegarde !== null) return;
+    setPendingId(null);
+    notesUiStore.getState().retenirSaisieEnAttente(null);
     setTexte("");
     setTagsInput("");
     setAncre(null);
@@ -101,7 +122,13 @@ export function NotesWindow() {
     if (editingId) {
       notesStore.getState().modifier(editingId, { texte: editTexte.trim(), tags: parseTags(editTags) });
     }
-    setEditingId(null);
+    if (notesStore.getState().erreurSauvegarde === null) setEditingId(null);
+  };
+
+  const reessayer = () => {
+    if (pendingId) submit();
+    else if (editingId) saveEdit();
+    else notesStore.getState().reessayerSauvegarde();
   };
 
   const supprimer = (id: string) => {
@@ -117,6 +144,13 @@ export function NotesWindow() {
     <>
       {/* Croix de fermeture fournie par le chrome FloatingWindow — pas d'action ici. */}
       <EnTeteFenetre mnemo="NOTE" titre="Notes / journal" sousTitre="Annotations ancrées au marché" />
+
+      {erreurSauvegarde && (
+        <div role="alert" className="flex items-center justify-between gap-2 border-b border-down/40 px-4 py-2 text-[11px] text-down">
+          <span>{erreurSauvegarde} La saisie reste disponible ici tant que cette page est ouverte.</span>
+          <button type="button" onClick={reessayer} className="shrink-0 rounded border border-down/40 px-2 py-1">Réessayer</button>
+        </div>
+      )}
 
       {/* Création rapide */}
       <section className="shrink-0 border-b border-border px-4 py-3">
@@ -155,7 +189,7 @@ export function NotesWindow() {
             onClick={submit}
             className="shrink-0 rounded border border-border bg-bg px-3 py-1 text-[11px] text-text transition hover:text-accent"
           >
-            Enregistrer
+            {pendingId ? "Mettre à jour et réessayer" : "Enregistrer"}
           </button>
         </div>
       </section>

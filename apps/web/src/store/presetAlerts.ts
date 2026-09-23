@@ -14,6 +14,7 @@
  * runtime, testées unitairement ici (le run réseau, lui, n'est pas testé — convention repo).
  */
 import { createStore } from "zustand/vanilla";
+import { alerteActiveAuTemps, echeanceAlerteValide } from "@axiom/alerts";
 import type { Timeframe } from "@axiom/types";
 import type { BaseCondition, IndicatorCondition } from "../data/screener";
 
@@ -45,6 +46,8 @@ export interface AlertePreset {
    */
   periodeMin: 15 | 60;
   actif: boolean;
+  /** Échéance optionnelle en ms epoch ; à égalité le scan est expiré. */
+  expireTs?: number;
   /** ms epoch de création. */
   creeTs: number;
   /**
@@ -70,6 +73,7 @@ export interface DepuisBuilderAlerte {
   tf: Timeframe;
   baseConditions: BaseCondition[];
   indicatorConditions: IndicatorCondition[];
+  expireTs?: number;
 }
 
 export interface PresetAlertsState {
@@ -78,7 +82,7 @@ export interface PresetAlertsState {
    * Crée une alerte à partir du builder. Renvoie `"limite"` (sans rien créer) si
    * MAX_ALERTES_ACTIVES est déjà atteint, sinon `"ok"`. La nouvelle alerte est ACTIVE.
    */
-  ajouter: (b: DepuisBuilderAlerte) => "ok" | "limite";
+  ajouter: (b: DepuisBuilderAlerte) => "ok" | "limite" | "invalide";
   retirer: (id: string) => void;
   /**
    * Bascule l'état actif. La DÉSACTIVATION est toujours acceptée ; la RÉ-ACTIVATION
@@ -86,6 +90,8 @@ export interface PresetAlertsState {
    * — chaque active fait tourner un scan périodique, la garde tient donc aussi ici.
    */
   basculer: (id: string) => "ok" | "limite";
+  /** Prolonge explicitement ; le quota est contrôlé avant mutation. */
+  prolonger: (id: string, expireTs: number) => "ok" | "limite" | "invalide";
   /**
    * Publie l'issue d'un scan (champs de SESSION `dernierScanTs` / `derniereErreur`) :
    * appelé par le runtime au succès comme à l'échec. NON persisté.
@@ -114,6 +120,7 @@ function estAlertePresetValide(v: unknown): v is AlertePreset {
     Array.isArray(a.indicatorConditions) &&
     (a.periodeMin === 15 || a.periodeMin === 60) &&
     typeof a.actif === "boolean" &&
+    echeanceAlerteValide(a as Pick<AlertePreset, "expireTs">) &&
     typeof a.creeTs === "number"
   );
 }
@@ -153,7 +160,8 @@ export const presetAlertsStore = createStore<PresetAlertsState>((set, get) => ({
   alertes: lirePresetAlerts(),
 
   ajouter: (b) => {
-    const actives = get().alertes.filter((a) => a.actif).length;
+    if (!echeanceAlerteValide(b)) return "invalide";
+    const actives = get().alertes.filter((a) => alerteActiveAuTemps(a, Date.now())).length;
     if (actives >= MAX_ALERTES_ACTIVES) return "limite";
     const alerte: AlertePreset = {
       id: genId(),
@@ -165,6 +173,7 @@ export const presetAlertsStore = createStore<PresetAlertsState>((set, get) => ({
       indicatorConditions: b.indicatorConditions.map((c) => ({ ...c })),
       periodeMin: b.indicatorConditions.length === 0 ? 15 : 60,
       actif: true,
+      ...(b.expireTs !== undefined ? { expireTs: b.expireTs } : {}),
       creeTs: Date.now(),
     };
     const alertes = [...get().alertes, alerte];
@@ -184,10 +193,23 @@ export const presetAlertsStore = createStore<PresetAlertsState>((set, get) => ({
     if (cible === undefined) return "ok"; // rien à basculer
     // Ré-activation (inactive → active) : refuser au-delà de la limite d'actives.
     if (!cible.actif) {
-      const actives = get().alertes.filter((a) => a.actif).length;
-      if (actives >= MAX_ALERTES_ACTIVES) return "limite";
+      const actives = get().alertes.filter((a) => alerteActiveAuTemps(a, Date.now())).length;
+      if (alerteActiveAuTemps({ ...cible, actif: true }, Date.now()) && actives >= MAX_ALERTES_ACTIVES) return "limite";
     }
     const alertes = get().alertes.map((a) => (a.id === id ? { ...a, actif: !a.actif } : a));
+    ecrirePresetAlerts(alertes);
+    set({ alertes });
+    return "ok";
+  },
+
+  prolonger: (id, expireTs) => {
+    const maintenant = Date.now();
+    if (!Number.isFinite(expireTs) || expireTs <= maintenant) return "invalide";
+    const cible = get().alertes.find((a) => a.id === id);
+    if (!cible) return "invalide";
+    const autresActives = get().alertes.filter((a) => a.id !== id && alerteActiveAuTemps(a, maintenant)).length;
+    if (cible.actif && autresActives >= MAX_ALERTES_ACTIVES) return "limite";
+    const alertes = get().alertes.map((a) => a.id === id ? { ...a, expireTs } : a);
     ecrirePresetAlerts(alertes);
     set({ alertes });
     return "ok";

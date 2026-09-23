@@ -33,6 +33,28 @@ import type {
 /** Nombre max d'horodatages conservés par def (fenêtre glissante). */
 const MAX_DECLENCHEMENTS = 20;
 
+/** Une propriété présente doit être un timestamp positif fini ; l'absence legacy est valide. */
+export function echeanceAlerteValide(def: Pick<AlertDef, "expireTs">): boolean {
+  if (!Object.prototype.hasOwnProperty.call(def, "expireTs")) return true;
+  return typeof def.expireTs === "number" && Number.isFinite(def.expireTs) && def.expireTs > 0;
+}
+
+/** Prédicat commun front/daemon/moteur, avec borne exclusive à l'échéance. */
+export function alerteActiveAuTemps(def: Pick<AlertDef, "actif" | "expireTs">, maintenant: number): boolean {
+  return def.actif === true && Number.isFinite(maintenant) && echeanceAlerteValide(def)
+    && (def.expireTs === undefined || maintenant < def.expireTs);
+}
+
+/** Prochain réveil nécessaire pour libérer les ressources sans attendre un tick. */
+export function prochaineEcheanceAlerte(defs: readonly Pick<AlertDef, "actif" | "expireTs">[], maintenant: number): number | null {
+  let prochaine: number | null = null;
+  for (const def of defs) {
+    if (!alerteActiveAuTemps(def, maintenant) || def.expireTs === undefined) continue;
+    if (prochaine === null || def.expireTs < prochaine) prochaine = def.expireTs;
+  }
+  return prochaine;
+}
+
 /** Résultat interne d'évaluation d'une condition : null = non évaluable dans ce contexte. */
 interface EvalCondition {
   fire: boolean;
@@ -52,7 +74,7 @@ export function evaluerAlertes(defs: AlertDef[], ctx: ContexteAlerte): ResultatE
   let modifie = false;
 
   const out = defs.map((def) => {
-    if (!def.actif || !conditionSupporteTimeframe(def.condition, def.timeframe)) return def;
+    if (!alerteActiveAuTemps(def, ctx.maintenant) || !conditionSupporteTimeframe(def.condition, def.timeframe)) return def;
     const ev = evaluerUne(def, ctx);
     if (ev === null) return def; // condition non évaluable (données manquantes)
     if (!ev.fire && ev.arme === def.arme) return def; // aucun changement

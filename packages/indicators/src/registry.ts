@@ -113,6 +113,8 @@ import { corwinSchultz } from "./volatility/corwinSchultz";
 // — statistical —
 import { rollingCorrelation } from "./statistical/rollingCorrelation";
 import { betaRef } from "./statistical/betaRef";
+import { downsideCorrelation } from "./statistical/downsideCorrelation";
+import { downsideBeta } from "./statistical/downsideBeta";
 import { spreadZScore } from "./statistical/spreadZScore";
 import { cointegrationAdf } from "./statistical/cointegrationAdf";
 import { spreadHalfLife } from "./statistical/spreadHalfLife";
@@ -201,6 +203,8 @@ import { squeezePressureIndex } from "./derivatives/squeezePressureIndex";
 // — Lot 2 : on-chain/HL — flux liquidations Coinalyze, hashrate mempool.space,
 //   métriques de cycle BGeometrics, funding + positionnement Hyperliquid
 import { liqParBougie } from "./derivatives/liqParBougie";
+import { liquidationsOi } from "./derivatives/liquidationsOi";
+import { fundingDispersion } from "./derivatives/fundingDispersion";
 import { hashRibbons } from "./derivatives/hashRibbons";
 import { mvrvCohortes } from "./derivatives/mvrvCohortes";
 import { nrpl } from "./derivatives/nrpl";
@@ -351,6 +355,8 @@ export const INDICATORS: IndicatorDef[] = [
   // statistical (cross-asset vs symbole de référence)
   rollingCorrelation,
   betaRef,
+  downsideCorrelation,
+  downsideBeta,
   spreadZScore,
   cointegrationAdf,
   spreadHalfLife,
@@ -432,6 +438,8 @@ export const INDICATORS: IndicatorDef[] = [
   smartRetailSpread,
   squeezePressureIndex,
   liqParBougie,
+  liquidationsOi,
+  fundingDispersion,
   hashRibbons,
   mvrvCohortes,
   nrpl,

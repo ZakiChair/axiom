@@ -23,25 +23,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { INDICATORS, getIndicator } from "@axiom/indicators";
-import type { IndicatorCategory, IndicatorDef, IndicatorInput } from "@axiom/types";
+import type { IndicatorCategory, IndicatorDef } from "@axiom/types";
 import {
   indicatorsStore,
   formatInstanceLabel,
-  type ActiveIndicator,
 } from "../store/indicators";
+import { ajouterIndicateurAvecRecent, indicatorPreferencesStore } from "../store/indicatorPreferences";
 import { marketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
 import { OCN_PERIODS } from "../chart/openCloseNet.calc";
 import { macroOverlayStore } from "../store/macro-overlays";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
+import { coinalyzeKeyStore } from "../store/coinalyze";
 import { chartCapaciteStore, plafondPanesAtteint } from "../store/chartCapacite";
 import { correspondAlias, normaliser } from "./indicateurAlias";
 import { settingsUiStore } from "../store/settings-ui";
-import { tfAtLeast } from "../chart/tfOrder";
-import { CLASSES_CHAMP, indexRoving, Input, Onglets, Select } from "./ui";
+import { CLASSES_CHAMP, indexRoving, Onglets } from "./ui";
 import { MacroIndicators } from "./MacroIndicators";
 import { JeuxIndicateurs } from "./JeuxIndicateurs";
 import { raisonUnusableIndicateur } from "../lib/indicatorUsability";
+import { filtrerCatalogueIndicateurs } from "../lib/indicatorMenuFilters";
+import { InstanceParamsEditor } from "./InstanceParamsEditor";
 
 /** Catalogue du menu Indicateurs : TOUT sauf les stratégies (foyer exclusif — menu Stratégies). */
 export const INDICATEURS_ANALYSE = INDICATORS.filter((d) => d.category !== "strategy");
@@ -120,6 +122,8 @@ export const SOUS_GROUPES_DERIVES: Record<string, "perp" | "onchain" | "position
   squeezePressureIndex: "perp",
   // — Lot 2 : flux liquidations, hashrate, métriques de cycle BG, HL —
   liqParBougie: "perp",
+  liquidationsOi: "perp",
+  fundingDispersion: "perp",
   hashRibbons: "onchain",
   mvrvCohortes: "onchain",
   nrpl: "onchain",
@@ -143,7 +147,7 @@ const LIBELLES_SOUS_GROUPES_DERIVES: Record<"perp" | "onchain" | "positionnement
  * PURE (testée) — un def derivatives non classé retombe dans « Dérivés perp ».
  */
 export function groupesAffichage(
-  cat: IndicatorCategory,
+  cat: IndicatorCategory | "recent",
   defs: IndicatorDef[],
 ): Array<[string | null, IndicatorDef[]]> {
   if (cat !== "derivatives") return [[null, defs]];
@@ -172,94 +176,6 @@ function groupByCategory(defs: IndicatorDef[]): Array<[IndicatorCategory, Indica
   return ordered;
 }
 
-/**
- * Éditeur de params d'UNE instance : un contrôle par `input` de la définition
- * (nombre / booléen / choix). Chaque changement remplace le jeu de params complet
- * de l'instance (instanceId inchangé → override en place côté chart).
- */
-export function InstanceParamsEditor({
-  def,
-  instance,
-  onChange,
-}: {
-  def: IndicatorDef;
-  instance: ActiveIndicator;
-  onChange: (params: ActiveIndicator["params"]) => void;
-}) {
-  if (def.inputs.length === 0) {
-    return <div className="px-2 pb-2 text-[11px] text-neutral-500">Aucun paramètre.</div>;
-  }
-
-  const set = (key: string, value: number | boolean | string) =>
-    onChange({ ...instance.params, [key]: value });
-
-  const renderControl = (input: IndicatorInput) => {
-    const value = instance.params[input.key] ?? input.default;
-    // Choix explicite (select) ou source avec options : liste déroulante.
-    if ((input.type === "select" || input.type === "source") && input.options && input.options.length > 0) {
-      return (
-        <Select
-          value={String(value)}
-          onChange={(e) => set(input.key, e.target.value)}
-          className="w-24"
-        >
-          {input.options.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </Select>
-      );
-    }
-    if (input.type === "boolean") {
-      return (
-        <input
-          type="checkbox"
-          checked={Boolean(value)}
-          onChange={(e) => set(input.key, e.target.checked)}
-          className="accent-accent"
-        />
-      );
-    }
-    if (input.type === "number") {
-      return (
-        <Input
-          type="number"
-          value={typeof value === "number" ? value : Number(value)}
-          min={input.min}
-          max={input.max}
-          onChange={(e) => {
-            const n = e.target.valueAsNumber;
-            // On ignore une saisie non finie (champ vidé transitoirement).
-            if (Number.isFinite(n)) set(input.key, n);
-          }}
-          className="w-20"
-        />
-      );
-    }
-    // Repli (source sans options) : saisie texte libre.
-    return (
-      <Input
-        type="text"
-        value={String(value)}
-        onChange={(e) => set(input.key, e.target.value)}
-        className="w-24"
-      />
-    );
-  };
-
-  return (
-    <div className="flex flex-col gap-1.5 px-2 pb-2">
-      {def.inputs.map((input) => (
-        <label key={input.key} className="flex items-center justify-between gap-2 text-xs text-neutral-300">
-          <span className="truncate">{input.name}</span>
-          {renderControl(input)}
-        </label>
-      ))}
-    </div>
-  );
-}
-
 export function IndicatorMenu() {
   // Ouverture + onglet dans un store : la commande Launchpad « MACRO » ouvre le menu
   // directement sur l'onglet Macro (cf. store/indicator-menu-ui.ts).
@@ -271,6 +187,14 @@ export function IndicatorMenu() {
   const instanceCible = useStore(indicatorMenuUiStore, (s) => s.instanceCible);
   const cibleConsommee = useStore(indicatorMenuUiStore, (s) => s.cibleConsommee);
   const [query, setQuery] = useState("");
+  const [favorisSeulement, setFavorisSeulement] = useState(false);
+  const [recentsSeulement, setRecentsSeulement] = useState(false);
+  const [utilisablesSeulement, setUtilisablesSeulement] = useState(false);
+  const favoris = useStore(indicatorPreferencesStore, (s) => s.favoris);
+  const recents = useStore(indicatorPreferencesStore, (s) => s.recents);
+  const erreurPreferences = useStore(indicatorPreferencesStore, (s) => s.erreurSauvegarde);
+  const basculerFavori = useStore(indicatorPreferencesStore, (s) => s.basculerFavori);
+  const reessayerPreferences = useStore(indicatorPreferencesStore, (s) => s.reessayerSauvegarde);
   // Sections repliées (set d'ids de catégorie). Par défaut : tout ouvert.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // instanceId dont l'éditeur de params est déplié (un seul à la fois).
@@ -300,13 +224,13 @@ export function IndicatorMenu() {
   const exchange = useStore(marketStore, (s) => s.exchange);
   const symbol = useStore(marketStore, (s) => s.symbol);
   const timeframe = useStore(marketStore, (s) => s.timeframe);
+  const coinalyzeDisponible = useStore(coinalyzeKeyStore, (s) => s.hasKey);
   // OCN (overlay Open/Close Net) : épinglé en tête de la section Order Flow.
   // Pas un IndicatorDef (overlay canvas du contrôleur orderflow, cf. openCloseNet.ts).
   const ocnActif = useStore(orderflowStore, (s) => s.showOpenCloseNet);
   const setOcn = useStore(orderflowStore, (s) => s.setShowOpenCloseNet);
   const orderflowEnabled = useStore(orderflowStore, (s) => s.enabled);
   const setOrderflowEnabled = useStore(orderflowStore, (s) => s.setEnabled);
-  const add = useStore(indicatorsStore, (s) => s.add);
   const remove = useStore(indicatorsStore, (s) => s.remove);
   const duplicate = useStore(indicatorsStore, (s) => s.duplicate);
   const updateParams = useStore(indicatorsStore, (s) => s.updateParams);
@@ -328,27 +252,39 @@ export function IndicatorMenu() {
   // Requête normalisée (sans accents ni tirets) pour les alias français : le catalogue
   // est en sigles anglais, « moyenne mobile » ne matchait rien dans une app 100 % FR.
   const qNorm = normaliser(query);
+  const raisonIndisponibilite = (def: IndicatorDef): string | null => {
+    const raison = raisonUnusableIndicateur(def, { exchange, symbol, timeframe });
+    if (raison !== null) return raison;
+    if (def.pane !== "overlay" && plafondPanesAtteint(panesActifs, paneMaxCourant)) {
+      return `${paneMaxCourant} panes maximum à cette hauteur de fenêtre : fermez-en un, agrandissez la fenêtre, ou choisissez un indicateur qui se pose sur les prix`;
+    }
+    return null;
+  };
   const filtered = useMemo(() => {
-    if (!q) return INDICATEURS_ANALYSE;
-    return INDICATEURS_ANALYSE.filter((d) => {
-      if (d.name.toLowerCase().includes(q) || d.id.toLowerCase().includes(q)) return true;
-      // Recherche par libellé de catégorie (ex. « order », « dérivés »).
-      const catLabel = (CATEGORY_LABELS[d.category] ?? d.category).toLowerCase();
-      if (catLabel.includes(q) || d.category.toLowerCase().includes(q)) return true;
-      return correspondAlias(d.id, qNorm);
+    return filtrerCatalogueIndicateurs(INDICATEURS_ANALYSE, {
+      recherche: query, favorisSeulement, recentsSeulement, utilisablesSeulement, favoris, recents,
+      correspondRecherche: (d, recherche) => {
+        if (d.name.toLowerCase().includes(recherche) || d.id.toLowerCase().includes(recherche)) return true;
+        const catLabel = (CATEGORY_LABELS[d.category] ?? d.category).toLowerCase();
+        return catLabel.includes(recherche) || d.category.toLowerCase().includes(recherche) || correspondAlias(d.id, qNorm);
+      },
+      utilisable: (d) => raisonIndisponibilite(d) === null,
     });
-  }, [q, qNorm]);
+  }, [query, qNorm, favorisSeulement, recentsSeulement, utilisablesSeulement, favoris, recents, exchange, symbol, timeframe, panesActifs, paneMaxCourant, coinalyzeDisponible]);
 
   // L'OCN est une pseudo-entrée épinglée HORS registre : quand la recherche le
   // matche sans matcher aucun def orderflow, on garde la section visible.
-  const ocnMatch = !q || "open/close net ocn oi positions flux".includes(q);
+  const ocnMatch = (!q || "open/close net ocn oi positions flux".includes(q)) &&
+    !favorisSeulement && !recentsSeulement &&
+    (!utilisablesSeulement || (exchange === "binance" && OCN_PERIODS.has(timeframe)));
   const groups = useMemo(() => {
+    if (recentsSeulement) return filtered.length > 0 ? [["recent", filtered] as const] : [];
     const g = groupByCategory(filtered);
     if (q && ocnMatch && !g.some(([cat]) => cat === "orderflow")) {
       g.unshift(["orderflow", []]);
     }
     return g;
-  }, [filtered, ocnMatch, q]);
+  }, [filtered, ocnMatch, q, recentsSeulement]);
 
   const toggleSection = (cat: string) => {
     setCollapsed((prev) => {
@@ -541,9 +477,29 @@ export function IndicatorMenu() {
               autoFocus
               className={`${CLASSES_CHAMP} w-full`}
             />
+            <div className="mt-2 flex flex-wrap gap-1" aria-label="Filtres du catalogue">
+              {([
+                ["Favoris", favorisSeulement, setFavorisSeulement],
+                ["Récents", recentsSeulement, setRecentsSeulement],
+                ["Utilisables ici", utilisablesSeulement, setUtilisablesSeulement],
+              ] as const).map(([label, actif, changer]) => (
+                <button key={label} type="button" aria-pressed={actif} onClick={() => changer(!actif)}
+                  className={`rounded px-2 py-1 text-[11px] ${actif ? "bg-accent text-accent-ink" : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
             <p className="mt-1 px-0.5 text-[10px] text-text-dim">
               {filtered.length}/{INDICATEURS_ANALYSE.length} · Order Flow en tête du catalogue
             </p>
+            {erreurPreferences && (
+              <div className="mt-1 text-[11px] text-down" role="alert">
+                {erreurPreferences}{" "}
+                <button type="button" onClick={() => reessayerPreferences()} className="underline hover:text-text">
+                  Réessayer la sauvegarde
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Catalogue groupé scrollable — cliquer AJOUTE une instance. */}
@@ -556,7 +512,7 @@ export function IndicatorMenu() {
 
             {groups.map(([cat, defs]) => {
               // En recherche active, on ignore l'état replié (résultats toujours visibles).
-              const isCollapsed = q ? false : collapsed.has(cat);
+              const isCollapsed = q || favorisSeulement || recentsSeulement || utilisablesSeulement ? false : collapsed.has(cat);
               return (
                 <div key={cat} className="mb-1">
                   <button
@@ -564,7 +520,7 @@ export function IndicatorMenu() {
                     onClick={() => toggleSection(cat)}
                     className="flex w-full items-center justify-between rounded px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-text-dim hover:bg-neutral-800"
                   >
-                    <span>{CATEGORY_LABELS[cat] ?? cat}</span>
+                    <span>{cat === "recent" ? "Récents" : CATEGORY_LABELS[cat] ?? cat}</span>
                     <span className="flex items-center gap-1 text-neutral-600">
                       <span>{defs.length}</span>
                       <span>{isCollapsed ? "▸" : "▾"}</span>
@@ -627,58 +583,31 @@ export function IndicatorMenu() {
                         )}
                         {defsGroupe.map((def) => {
                       const count = countByDef.get(def.id) ?? 0;
-                      const raisonUnusable = raisonUnusableIndicateur(def, { exchange, symbol, timeframe });
-                      const disabledSynthetic = exchange === "synthetic" && def.id === "volume";
-                      // Grisage par TF minimal (Task 14) : def dérivé (OI/funding/NVT/MVRV…)
-                      // non pertinent en dessous de son `minTimeframe` (ex. données quotidiennes).
-                      const disabledTf =
-                        def.minTimeframe !== undefined && !tfAtLeast(timeframe, def.minTimeframe);
-                      // Plus de place en hauteur : au-delà du plafond, klinecharts prend
-                      // la hauteur du pane PRIX (aucun plancher côté bougies) et
-                      // l'indicateur ajouté rendrait 0 px sans le dire. On refuse en
-                      // amont, avec la sortie à faire.
-                      const disabledPlace =
-                        def.pane !== "overlay" && plafondPanesAtteint(panesActifs, paneMaxCourant);
-                      const disabled = raisonUnusable !== null || disabledSynthetic || disabledTf || disabledPlace;
-                      const title = raisonUnusable ?? (disabledSynthetic
-                        ? "Volume non défini sur une série synthétique"
-                        : disabledTf
-                          ? `Nécessite ≥ ${def.minTimeframe}`
-                          : disabledPlace
-                            ? `${paneMaxCourant} panes maximum à cette hauteur de fenêtre : fermez-en un, agrandissez la fenêtre, ou choisissez un indicateur qui se pose sur les prix`
-                            : "Ajouter une instance");
+                      const raisonUnusable = raisonIndisponibilite(def);
+                      const disabled = raisonUnusable !== null;
                       return (
-                        <button
-                          key={def.id}
-                          type="button"
-                          data-item-indicateur=""
-                          title={title}
-                          disabled={disabled}
-                          onClick={() => {
-                            if (!disabled) add(def.id);
-                          }}
-                          className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${
-                            disabled
-                              ? "cursor-not-allowed text-neutral-600"
-                              : "cursor-pointer text-neutral-200 hover:bg-neutral-800"
-                          }`}
-                        >
-                          <span className="text-accent">＋</span>
-                          <span className="flex-1 truncate">{def.name}</span>
-                          {raisonUnusable !== null && (
-                            <span className="shrink-0 rounded bg-down/15 px-1 text-[9px] tracking-wider text-down">
-                              UNUSABLE
-                            </span>
-                          )}
-                          {count > 0 && (
-                            <span className="rounded bg-accent/20 px-1 text-[10px] text-accent">
-                              {count}
-                            </span>
-                          )}
-                          <span className="text-[10px] uppercase text-neutral-500">
-                            {def.pane === "overlay" ? "prix" : "pane"}
-                          </span>
-                        </button>
+                        <div key={def.id} className="flex items-center gap-0.5">
+                          <button
+                            type="button" data-item-indicateur="" aria-label={`Ajouter ${def.name}`}
+                            title={raisonUnusable ?? "Ajouter une instance"} disabled={disabled}
+                            onClick={() => { if (!disabled) ajouterIndicateurAvecRecent(def.id); }}
+                            className={`flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${
+                              disabled ? "cursor-not-allowed text-neutral-600" : "cursor-pointer text-neutral-200 hover:bg-neutral-800"
+                            }`}
+                          >
+                            <span className="text-accent">＋</span>
+                            <span className="flex-1 truncate">{def.name}</span>
+                            {raisonUnusable !== null && <span className="shrink-0 rounded bg-down/15 px-1 text-[9px] tracking-wider text-down">UNUSABLE</span>}
+                            {count > 0 && <span className="rounded bg-accent/20 px-1 text-[10px] text-accent">{count}</span>}
+                            <span className="text-[10px] uppercase text-neutral-500">{def.pane === "overlay" ? "prix" : "pane"}</span>
+                          </button>
+                          <button type="button" aria-label={`${favoris.includes(def.id) ? "Retirer" : "Ajouter"} ${def.name} ${favoris.includes(def.id) ? "des" : "aux"} favoris`}
+                            aria-pressed={favoris.includes(def.id)} onClick={() => basculerFavori(def.id)}
+                            className={`rounded px-1.5 py-1 text-sm hover:bg-neutral-700 ${favoris.includes(def.id) ? "text-accent" : "text-neutral-500"}`}
+                            title={favoris.includes(def.id) ? "Retirer des favoris" : "Ajouter aux favoris"}>
+                            {favoris.includes(def.id) ? "★" : "☆"}
+                          </button>
+                        </div>
                       );
                         })}
                       </div>

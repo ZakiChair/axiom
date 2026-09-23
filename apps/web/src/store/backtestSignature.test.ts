@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ConfigRun } from "./backtestSignature";
-import { resumeRun, runPerime, signatureRun } from "./backtestSignature";
+import { copierConfigRun, resumeRun, runPerime, signatureRun } from "./backtestSignature";
 
 const base: ConfigRun = {
   symbol: "BTCUSDT",
@@ -29,6 +29,12 @@ const base: ConfigRun = {
 };
 
 describe("signatureRun", () => {
+  it("fige profondément la configuration au lancement malgré une édition de règle", () => {
+    const source = structuredClone(base);
+    const capture = copierConfigRun(source);
+    source.reglesEntree[0] = { type: "comparaison", gauche: { type: "prix", champ: "open" }, comparateur: "<", droite: { type: "constante", valeur: 10 } };
+    expect(signatureRun(capture)).toBe(signatureRun(base));
+  });
   it("est stable pour une configuration identique", () => {
     expect(signatureRun(base)).toBe(signatureRun({ ...base }));
   });

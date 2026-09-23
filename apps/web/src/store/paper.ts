@@ -26,7 +26,7 @@
  */
 import { createStore } from "zustand/vanilla";
 import type { StoreApi } from "zustand/vanilla";
-import type { Unsubscribe } from "@axiom/types";
+import { EXCHANGE_IDS, type ExchangeId, type Unsubscribe } from "@axiom/types";
 import {
   cloturerPosition,
   evaluerTickDetaille,
@@ -36,13 +36,18 @@ import {
   type PositionPaper,
   type ExecutionPaper,
 } from "../data/paper";
-import { subscribeTickers, type TickerUpdate } from "../data/ticker";
+import { isTickerSource, subscribeTickers, type TickerUpdate } from "../data/ticker";
 import { expyStore } from "./expy";
 
 /** Clé localStorage. Incluse d'office dans l'export/import de sauvegarde (préfixe axiom:). */
 export const PAPER_STORAGE_KEY = "axiom:paper:v1";
 /** Solde de départ par défaut du compte paper (aucune valeur spécifiée par la spec). */
 export const SOLDE_INITIAL = 100_000;
+
+/** Clé de prix distincte par venue ; les anciens ordres sans source gardent leur clé historique. */
+export function clePrixPaper(symbol: string, source?: ExchangeId): string {
+  return source === undefined ? symbol : `${source}|${symbol}`;
+}
 
 export interface PaperState extends EtatPaper {
   /** Dernier prix connu par symbole (alimenté par les ticks ; NON persisté). */
@@ -58,6 +63,28 @@ export interface PaperState extends EtatPaper {
   /** Redéfinit le solde (dépôt/retrait fictif, reset). */
   setSolde: (v: number) => void;
 }
+
+/** Brouillon explicitement validé dans PAPER ; sa préparation ne crée aucun ordre. */
+export interface BrouillonDecisionPaper {
+  decisionId: string;
+  symbol: string;
+  source: ExchangeId;
+  direction?: "long" | "short";
+}
+
+export const paperUiStore = createStore<{
+  brouillon: BrouillonDecisionPaper | null;
+  preparer: (brouillon: BrouillonDecisionPaper) => boolean;
+  vider: () => void;
+}>((set) => ({
+  brouillon: null,
+  preparer: (brouillon) => {
+    if (!isTickerSource(brouillon.source) || !brouillon.symbol.trim() || !brouillon.decisionId) return false;
+    set({ brouillon: { ...brouillon, symbol: brouillon.symbol.trim().toUpperCase() } });
+    return true;
+  },
+  vider: () => set({ brouillon: null }),
+}));
 
 /** Store paper trading. */
 export type PaperStore = StoreApi<PaperState>;
@@ -93,11 +120,14 @@ interface PaperPersiste {
 // (`o.symbol`) au démarrage du moteur (App.tsx) : il est écarté à la lecture.
 const estNombre = (x: unknown): boolean => typeof x === "number" && Number.isFinite(x);
 const estNombreOuNull = (x: unknown): boolean => x === null || estNombre(x);
+const sourceValide = (x: unknown): boolean => x === undefined || (typeof x === "string" && (EXCHANGE_IDS as readonly string[]).includes(x));
+const idsValides = (x: unknown): boolean => x === undefined || (Array.isArray(x) && x.every((id) => typeof id === "string" && id.length > 0));
 
 function estOrdreValide(v: unknown): v is OrdrePaper {
   if (typeof v !== "object" || v === null) return false;
   const o = v as Record<string, unknown>;
   if (typeof o.id !== "string" || typeof o.symbol !== "string") return false;
+  if (!sourceValide(o.source) || !idsValides(o.decisionIds)) return false;
   if (o.direction !== "long" && o.direction !== "short") return false;
   if (o.type !== "market" && o.type !== "limit" && o.type !== "stop") return false;
   if (!estNombreOuNull(o.prixLimite) || !estNombreOuNull(o.prixStop)) return false;
@@ -109,6 +139,7 @@ function estPositionValide(v: unknown): v is PositionPaper {
   if (typeof v !== "object" || v === null) return false;
   const p = v as Record<string, unknown>;
   if (typeof p.id !== "string" || typeof p.symbol !== "string") return false;
+  if (!sourceValide(p.source) || !idsValides(p.decisionIds)) return false;
   if (p.direction !== "long" && p.direction !== "short") return false;
   if (!estNombre(p.taille) || !estNombre(p.prixEntree) || !estNombre(p.ouvertTs)) return false;
   if (p.stopInitial !== undefined && !estNombreOuNull(p.stopInitial)) return false;
@@ -119,6 +150,7 @@ function estExecutionValide(v: unknown): v is ExecutionPaper {
   if (typeof v !== "object" || v === null) return false;
   const e = v as Record<string, unknown>;
   if (typeof e.symbol !== "string") return false;
+  if (!sourceValide(e.source) || !idsValides(e.decisionIds)) return false;
   if (e.direction !== "long" && e.direction !== "short") return false;
   if (!["ouverture", "renfort", "tp", "sl", "cloture-manuelle"].includes(e.genre as string)) return false;
   if (!estNombre(e.ts) || !estNombre(e.taille) || !estNombre(e.prix) || !estNombre(e.fraisUsd)) return false;
@@ -178,13 +210,14 @@ export const paperStore = createStore<PaperState>((set, get) => ({
   derniersPrix: {},
 
   placerOrdre: (o) => {
-    const ordre: OrdrePaper = { ...o, id: genOrdreId(), creeTs: Date.now() };
+    if (o.source !== undefined && !isTickerSource(o.source)) return;
+    const ordre: OrdrePaper = { ...o, ...(o.decisionIds?.length ? { decisionIds: [...new Set(o.decisionIds)] } : {}), id: genOrdreId(), creeTs: Date.now() };
     set((s) => ({ ordres: [...s.ordres, ordre] }));
     // Fill opportuniste immédiat si le prix du symbole est DÉJÀ connu (déjà souscrit) : un
     // market s'exécute sans attendre le prochain tick réseau. Sinon l'ordre dort jusqu'à ce
     // que le moteur souscrive le symbole et reçoive son premier tick.
-    const last = get().derniersPrix[o.symbol];
-    if (last !== undefined) appliquerTick(o.symbol, last, Date.now());
+    const last = get().derniersPrix[clePrixPaper(o.symbol, o.source)];
+    if (last !== undefined) appliquerTick(o.symbol, last, Date.now(), o.source);
   },
 
   annulerOrdre: (id) => set((s) => ({ ordres: s.ordres.filter((o) => o.id !== id) })),
@@ -198,7 +231,7 @@ export const paperStore = createStore<PaperState>((set, get) => ({
     const st = get();
     const p = st.positions.find((x) => x.id === positionId);
     if (!p) return; // id inconnu
-    const last = st.derniersPrix[p.symbol];
+    const last = st.derniersPrix[clePrixPaper(p.symbol, p.source)];
     if (last === undefined) return; // prix inconnu → no-op (message discret côté UI T3)
     const suivant = cloturerPosition(st, positionId, last, Date.now());
     // Pont EXPY : la clôture manuelle est un trade fermé (position AVANT retrait + exécution).
@@ -219,9 +252,9 @@ export const paperStore = createStore<PaperState>((set, get) => ({
  * Applique un tick sur le store : évalue (evaluerTickDetaille), alimente EXPY pour chaque
  * clôture tp/sl, puis met à jour l'état ET `derniersPrix`. Interne (hors API publique du store).
  */
-function appliquerTick(symbol: string, last: number, nowMs: number): void {
+function appliquerTick(symbol: string, last: number, nowMs: number, source?: ExchangeId): void {
   const st = paperStore.getState();
-  const { etat, clotures } = evaluerTickDetaille(st, symbol, last, nowMs);
+  const { etat, clotures } = evaluerTickDetaille(st, symbol, last, nowMs, source);
   // Pont EXPY : chaque clôture tp/sl (position AVANT retrait) → journal.
   for (const c of clotures) {
     expyStore.getState().ajouter(tradeJournalDepuisCloture(c.position, c.exec));
@@ -233,7 +266,7 @@ function appliquerTick(symbol: string, last: number, nowMs: number): void {
     ordres: etat.ordres,
     positions: etat.positions,
     executions: etat.executions,
-    derniersPrix: { ...st.derniersPrix, [symbol]: last },
+    derniersPrix: { ...st.derniersPrix, [clePrixPaper(symbol, source)]: last },
   });
 }
 
@@ -268,18 +301,29 @@ export function demarrerMoteurPaper(): Unsubscribe {
   let unsubTicker: Unsubscribe = () => {};
   let cleActive = "";
 
-  const onTick = (u: TickerUpdate): void => {
-    appliquerTick(u.symbol, u.price, Date.now());
-  };
-
   // (Re)souscription uniquement quand l'ENSEMBLE des symboles actifs change (comparaison de clé).
   const resync = (): void => {
-    const symbols = symbolesActifs(paperStore.getState());
-    const cle = symbols.join(",");
+    const groupes = new Map<ExchangeId | "legacy", Set<string>>();
+    const etat = paperStore.getState();
+    for (const item of [...etat.ordres, ...etat.positions]) {
+      if (item.source !== undefined && !isTickerSource(item.source)) continue;
+      const source = item.source ?? "legacy";
+      const symbols = groupes.get(source) ?? new Set<string>();
+      symbols.add(item.symbol);
+      groupes.set(source, symbols);
+    }
+    const groupesTries = [...groupes.entries()].map(([source, symbols]) => [source, [...symbols].sort()] as const)
+      .sort(([a], [b]) => a.localeCompare(b));
+    const cle = groupesTries.map(([source, symbols]) => `${source}:${symbols.join(",")}`).join(";");
     if (cle === cleActive) return;
     cleActive = cle;
     unsubTicker();
-    unsubTicker = symbols.length === 0 ? () => {} : subscribeTickers(symbols, onTick);
+    const unsubs = groupesTries.map(([source, symbols]) => {
+      const cible = source === "legacy" ? undefined : source;
+      const onTick = (u: TickerUpdate): void => appliquerTick(u.symbol, u.price, Date.now(), cible);
+      return cible === undefined ? subscribeTickers(symbols, onTick) : subscribeTickers(symbols, onTick, { source: cible });
+    });
+    unsubTicker = () => { for (const unsub of unsubs) unsub(); };
   };
 
   // Un tick ne modifiant que `derniersPrix` ne change ni les ordres ni les positions → on

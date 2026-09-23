@@ -126,6 +126,13 @@ describe("fusionnerSymbolesLiq", () => {
   it("aucune alerte liq-cascade → symboles KV seuls", () => {
     expect(fusionnerSymbolesLiq(["solusdt"], [])).toEqual(["SOLUSDT"]);
   });
+
+  it("une cascade expirée libère son symbole, mais garde celui du KV explicite", () => {
+    const def = { ...defCascade("DOGEUSDT"), expireTs: 1_000 };
+    expect(fusionnerSymbolesLiq(["BTCUSDT"], [def], 999)).toEqual(["BTCUSDT", "DOGEUSDT"]);
+    expect(fusionnerSymbolesLiq(["BTCUSDT"], [def], 1_000)).toEqual(["BTCUSDT"]);
+    expect(fusionnerSymbolesLiq(["DOGEUSDT"], [def], 1_000)).toEqual(["DOGEUSDT"]);
+  });
 });
 
 // Le mécanisme d'armement (`armerHeartbeatWs`) vit désormais dans wsLoop.ts (E.3 : les

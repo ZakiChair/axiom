@@ -30,10 +30,13 @@
  *  - executions bornées aux 50 dernières.
  */
 import type { TradeJournal } from "./expy";
+import type { ExchangeId } from "@axiom/types";
 
 export interface OrdrePaper {
   id: string;
   symbol: string;
+  source?: ExchangeId;
+  decisionIds?: string[];
   direction: "long" | "short";
   type: "market" | "limit" | "stop";
   prixLimite: number | null;
@@ -47,6 +50,8 @@ export interface OrdrePaper {
 export interface PositionPaper {
   id: string;
   symbol: string;
+  source?: ExchangeId;
+  decisionIds?: string[];
   direction: "long" | "short";
   taille: number;
   prixEntree: number;
@@ -61,6 +66,8 @@ export interface PositionPaper {
 export interface ExecutionPaper {
   ts: number;
   symbol: string;
+  source?: ExchangeId;
+  decisionIds?: string[];
   genre: "ouverture" | "renfort" | "tp" | "sl" | "cloture-manuelle";
   direction: "long" | "short";
   taille: number;
@@ -94,6 +101,8 @@ export function pnlLatent(p: PositionPaper, last: number): number {
 /** Un remplissage d'ordre résolu ce tick (avant fusion dans les positions). */
 interface Remplissage {
   ordreId: string;
+  source?: ExchangeId;
+  decisionIds?: string[];
   direction: "long" | "short";
   taille: number;
   prix: number;
@@ -112,11 +121,13 @@ function fusionner(
   f: Remplissage,
   nowMs: number,
 ): { positions: PositionPaper[]; genre: "ouverture" | "renfort" } {
-  const idx = positions.findIndex((p) => p.symbol === symbol && p.direction === f.direction);
+  const idx = positions.findIndex((p) => p.symbol === symbol && p.source === f.source && p.direction === f.direction);
   if (idx === -1) {
     const nouvelle: PositionPaper = {
       id: f.ordreId,
       symbol,
+      ...(f.source !== undefined ? { source: f.source } : {}),
+      ...(f.decisionIds?.length ? { decisionIds: [...new Set(f.decisionIds)] } : {}),
       direction: f.direction,
       taille: f.taille,
       prixEntree: f.prix,
@@ -137,6 +148,8 @@ function fusionner(
     // Le TP/SL de l'ordre écrase celui de la position s'il est non null, sinon on conserve.
     tp: f.tp !== null ? f.tp : existante.tp,
     sl: f.sl !== null ? f.sl : existante.sl,
+    ...((existante.decisionIds?.length || f.decisionIds?.length)
+      ? { decisionIds: [...new Set([...(existante.decisionIds ?? []), ...(f.decisionIds ?? [])])] } : {}),
   };
   const suivantes = positions.slice();
   suivantes[idx] = fusionnee;
@@ -168,9 +181,10 @@ export function evaluerTickDetaille(
   symbol: string,
   last: number,
   nowMs: number,
+  source?: ExchangeId,
 ): { etat: EtatPaper; clotures: ClotureTick[] } {
-  const aDesOrdres = etat.ordres.some((o) => o.symbol === symbol);
-  const aDesPositions = etat.positions.some((p) => p.symbol === symbol);
+  const aDesOrdres = etat.ordres.some((o) => o.symbol === symbol && o.source === source);
+  const aDesPositions = etat.positions.some((p) => p.symbol === symbol && p.source === source);
   // Perf : rien à faire sur ce symbole → même référence, aucune clôture.
   if (!aDesOrdres && !aDesPositions) return { etat, clotures: [] };
 
@@ -185,7 +199,7 @@ export function evaluerTickDetaille(
 
   // Étapes 1→3 : résolution des ordres du symbole. Les ordres des autres symboles passent tels quels.
   for (const o of etat.ordres) {
-    if (o.symbol !== symbol) {
+    if (o.symbol !== symbol || o.source !== source) {
       ordresRestants.push(o);
       continue;
     }
@@ -199,7 +213,7 @@ export function evaluerTickDetaille(
     }
     // Étape 2 : market rempli à `last`.
     if (type === "market") {
-      remplissagesMarket.push({ ordreId: o.id, direction: o.direction, taille: o.taille, prix: last, tp: o.tp, sl: o.sl });
+      remplissagesMarket.push({ ordreId: o.id, source: o.source, decisionIds: o.decisionIds, direction: o.direction, taille: o.taille, prix: last, tp: o.tp, sl: o.sl });
       continue;
     }
     // Étape 3 : limit rempli à la traversée, AU prix limite.
@@ -208,7 +222,7 @@ export function evaluerTickDetaille(
         o.prixLimite !== null &&
         (o.direction === "long" ? last <= o.prixLimite : last >= o.prixLimite);
       if (traverse) {
-        remplissagesLimit.push({ ordreId: o.id, direction: o.direction, taille: o.taille, prix: o.prixLimite as number, tp: o.tp, sl: o.sl });
+        remplissagesLimit.push({ ordreId: o.id, source: o.source, decisionIds: o.decisionIds, direction: o.direction, taille: o.taille, prix: o.prixLimite as number, tp: o.tp, sl: o.sl });
         continue;
       }
     }
@@ -225,6 +239,8 @@ export function evaluerTickDetaille(
     positions = maj;
     executions.push({
       ts: nowMs, symbol, genre, direction: f.direction,
+      ...(f.source !== undefined ? { source: f.source } : {}),
+      ...(f.decisionIds?.length ? { decisionIds: [...new Set(f.decisionIds)] } : {}),
       taille: f.taille, prix: f.prix, fraisUsd: fraisEntree, pnlUsd: null,
     });
   }
@@ -233,7 +249,7 @@ export function evaluerTickDetaille(
   const positionsRestantes: PositionPaper[] = [];
   const clotures: ClotureTick[] = [];
   for (const p of positions) {
-    if (p.symbol !== symbol) {
+    if (p.symbol !== symbol || p.source !== source) {
       positionsRestantes.push(p);
       continue;
     }
@@ -253,6 +269,8 @@ export function evaluerTickDetaille(
     solde += pnl;
     const exec: ExecutionPaper = {
       ts: nowMs, symbol, genre, direction: p.direction,
+      ...(p.source !== undefined ? { source: p.source } : {}),
+      ...(p.decisionIds?.length ? { decisionIds: [...p.decisionIds] } : {}),
       taille: p.taille, prix: prixSortie, fraisUsd: fraisSortie, pnlUsd: pnl,
     };
     executions.push(exec);
@@ -275,8 +293,8 @@ export function evaluerTickDetaille(
  * Raccourci historique : évalue un tick et ne renvoie que l'état résultant. Conserve la
  * signature et tous les invariants (dont « même référence si rien d'actif sur le symbole »).
  */
-export function evaluerTick(etat: EtatPaper, symbol: string, last: number, nowMs: number): EtatPaper {
-  return evaluerTickDetaille(etat, symbol, last, nowMs).etat;
+export function evaluerTick(etat: EtatPaper, symbol: string, last: number, nowMs: number, source?: ExchangeId): EtatPaper {
+  return evaluerTickDetaille(etat, symbol, last, nowMs, source).etat;
 }
 
 /**
@@ -292,6 +310,8 @@ export function cloturerPosition(etat: EtatPaper, positionId: string, prix: numb
   const pnl = brut - fraisSortie;
   const exec: ExecutionPaper = {
     ts: nowMs, symbol: p.symbol, genre: "cloture-manuelle", direction: p.direction,
+    ...(p.source !== undefined ? { source: p.source } : {}),
+    ...(p.decisionIds?.length ? { decisionIds: [...p.decisionIds] } : {}),
     taille: p.taille, prix, fraisUsd: fraisSortie, pnlUsd: pnl,
   };
 
@@ -311,6 +331,8 @@ export function cloturerPosition(etat: EtatPaper, positionId: string, prix: numb
 export function tradeJournalDepuisCloture(p: PositionPaper, exec: ExecutionPaper): Omit<TradeJournal, "id"> {
   return {
     symbol: p.symbol,
+    ...(p.source !== undefined ? { source: p.source } : {}),
+    ...(p.decisionIds?.length ? { decisionIds: [...p.decisionIds] } : {}),
     direction: p.direction,
     entree: p.prixEntree,
     stopInitial: p.stopInitial ?? p.prixEntree,

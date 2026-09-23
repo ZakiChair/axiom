@@ -7,7 +7,7 @@
  * Rendu par FloatingWindow (frame fournie par App.tsx) : ce composant rend le CONTENU.
  * Rafraîchissement périodique 60 s ; snapshot live (pas d'historique).
  */
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { etatMatrice, fetchFundingMatrix, fundingSpreadApr, type FundingVenue } from "../data/fundingCrossExchange";
@@ -16,6 +16,7 @@ import { TableTriable, type ColonneTable } from "./TableTriable";
 import { formatPct } from "../lib/format";
 
 const RAFRAICHISSEMENT_MS = 60_000;
+const FundingHistory = lazy(() => import("./FundingHistory").then((m) => ({ default: m.FundingHistory })));
 
 /** Classe de couleur selon le signe (funding > 0 = longs paient). */
 function couleurSigne(v: number): string {
@@ -66,10 +67,12 @@ function colonnesFunding(venues: readonly FundingVenue[]): ColonneTable<FundingV
 
 export function FundingMatrixWindow() {
   const symbol = useStore(marketStore, (s) => s.symbol);
+  const exchange = useStore(marketStore, (s) => s.exchange);
   const [venues, setVenues] = useState<FundingVenue[] | null>(null);
   const [chargement, setChargement] = useState(true);
   const [injoignable, setInjoignable] = useState(false);
   const [majTs, setMajTs] = useState<number | null>(null);
+  const [vue, setVue] = useState<"live" | "historique">("live");
 
   useEffect(() => {
     let annule = false;
@@ -118,6 +121,13 @@ export function FundingMatrixWindow() {
         }
       />
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
+        <nav aria-label="Vue du funding" className="flex gap-2">
+          <button type="button" aria-pressed={vue === "live"} onClick={() => setVue("live")}
+            className="rounded border border-border px-2 py-1 text-xs">Instantané live</button>
+          <button type="button" aria-pressed={vue === "historique"} onClick={() => setVue("historique")}
+            className="rounded border border-border px-2 py-1 text-xs">Historique 7/30/90 j</button>
+        </nav>
+        {vue === "historique" ? <Suspense fallback={<Chargement />}><FundingHistory symbol={symbol} exchange={exchange} /></Suspense> : <>
         {spread !== null && (
           <TuileStat
             disposition="inline"
@@ -150,6 +160,7 @@ export function FundingMatrixWindow() {
           Écart = APR max − APR min entre venues ; ≥ 10 points d'APR = tension de financement
           inter-venues (arbitrage/positionnement asymétrique). ● vert = APR max, ● rouge = APR min.
         </NoteSource>
+        </>}
       </div>
     </div>
   );

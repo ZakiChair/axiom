@@ -40,6 +40,19 @@ export interface ConfigRun {
   reglesSortie: Condition[];
 }
 
+/** Copie de lancement : les tableaux de règles et paramètres ATR ne partagent aucune référence avec le builder. */
+export function copierConfigRun(config: ConfigRun): ConfigRun {
+  return {
+    symbol: config.symbol, tf: config.tf, plage: config.plage, direction: config.direction,
+    tailleFixe: config.tailleFixe, stopPct: config.stopPct, targetPct: config.targetPct,
+    stopAtr: config.stopAtr === null ? null : { length: config.stopAtr.length, mult: config.stopAtr.mult },
+    risquePct: config.risquePct, fraisPct: config.fraisPct, slippagePct: config.slippagePct,
+    capitalInitial: config.capitalInitial, modeFunding: config.modeFunding, intrabar: config.intrabar,
+    reglesEntree: JSON.parse(JSON.stringify(config.reglesEntree)) as Condition[],
+    reglesSortie: JSON.parse(JSON.stringify(config.reglesSortie)) as Condition[],
+  };
+}
+
 /**
  * Signature stable et comparable d'une configuration. `JSON.stringify` suffit ici : les
  * champs sont sérialisables, l'ordre des clés est fixé par la construction de l'objet, et

@@ -44,6 +44,7 @@ import {
   type NiveauLiqHL,
 } from "./hyperliquid";
 import { symbolesSurveillesLiq } from "./liqFeed";
+import { creerReveilEcheance, lireDefsKv } from "./alerts";
 import type { HorlogeWs } from "./wsLoop";
 
 /** Cadence d'un instantané collecté (5 min). */
@@ -410,7 +411,6 @@ export function demarrerBoucleHlHeat(deps: DepsBoucleHlHeat = {}): () => void {
   const horloge = deps.horloge ?? HORLOGE_REELLE;
   assurerTableHlHeat(d);
 
-  let symboles: string[] = [];
   let minuteurInstantane: unknown = null;
   let enCours = false; // anti-chevauchement (un cycle peut dépasser la minute de poll)
 
@@ -418,7 +418,8 @@ export function demarrerBoucleHlHeat(deps: DepsBoucleHlHeat = {}): () => void {
     if (enCours) return;
     enCours = true;
     try {
-      await cycleInstantane(d, { fetchImpl, now: horloge.now(), symboles });
+      const now = horloge.now();
+      await cycleInstantane(d, { fetchImpl, now, symboles: symbolesSurveillesLiq(d, now) });
     } finally {
       enCours = false;
     }
@@ -428,7 +429,6 @@ export function demarrerBoucleHlHeat(deps: DepsBoucleHlHeat = {}): () => void {
     try {
       const actif = lireDrapeauCollecte(d);
       sante.actif = actif;
-      symboles = symbolesSurveillesLiq(d);
       if (actif && minuteurInstantane === null) {
         minuteurInstantane = horloge.setInterval(() => void cycle(), PERIODE_INSTANTANE_MS);
         void cycle(); // premier instantané immédiat au passage à actif
@@ -441,11 +441,14 @@ export function demarrerBoucleHlHeat(deps: DepsBoucleHlHeat = {}): () => void {
       console.error("[axiomd] poll du drapeau hl/heat échoué :", err);
     }
   };
-  poll();
-  const minuteurPoll = horloge.setInterval(poll, PERIODE_POLL_DRAPEAU_MS);
+  const reveilEcheance = creerReveilEcheance(() => lireDefsKv(d), poll, horloge);
+  const pollEtPlanifier = (): void => { poll(); reveilEcheance.synchroniser(); };
+  pollEtPlanifier();
+  const minuteurPoll = horloge.setInterval(pollEtPlanifier, PERIODE_POLL_DRAPEAU_MS);
 
   return () => {
     horloge.clearInterval(minuteurPoll);
+    reveilEcheance.arreter();
     if (minuteurInstantane !== null) horloge.clearInterval(minuteurInstantane);
     minuteurInstantane = null;
   };

@@ -9,6 +9,7 @@ import {
   assurerTableHlHeat,
   couvertureOi,
   cycleInstantane,
+  demarrerBoucleHlHeat,
   deserialiserNiveaux,
   lireDrapeauCollecte,
   parserOiParCoin,
@@ -22,6 +23,7 @@ import {
   sousEchantillonner,
   traiterHlHeat,
 } from "./hlLiqHeat";
+import type { HorlogeWs } from "./wsLoop";
 import {
   assurerTableKv,
   obtenirInstantane,
@@ -407,6 +409,33 @@ describe("acquisition HL → archive SQLite (sans instantané injecté)", () => 
     expect(archives()).toEqual([{ ts: T0, coin: "BTC", niveaux: "[[80000,0,90000]]", adresses: 1 }]);
     expect(santeHlHeat().dernierInstantaneTs).toBe(T0);
     expect(santeHlHeat().derniereErreur).toBeNull();
+  });
+
+  test("chaque cycle relit les symboles au départ, sans attendre le prochain poll KV", async () => {
+    d.query("INSERT INTO kv (namespace, cle, valeur, majA) VALUES ('hl', 'heat', ?, 1)").run(JSON.stringify({ actif: true }));
+    d.query("INSERT INTO kv (namespace, cle, valeur, majA) VALUES ('liq', 'symboles', ?, 1)").run(JSON.stringify(["BTCUSDT"]));
+    let maintenant = T0;
+    const intervalles = new Map<number, () => void>();
+    let prochainId = 0;
+    const horloge: HorlogeWs = {
+      now: () => maintenant,
+      setTimeout: () => ++prochainId,
+      clearTimeout: () => {},
+      setInterval: (fn, ms) => { intervalles.set(ms, fn); return ++prochainId; },
+      clearInterval: () => {},
+    };
+    const arreter = demarrerBoucleHlHeat({ d, fetchImpl: amont(() => compte()), horloge });
+    try {
+      await Bun.sleep(0);
+      expect(archives().map((l) => l.coin)).toEqual(["BTC"]);
+      d.query("UPDATE kv SET valeur = ? WHERE namespace = 'liq' AND cle = 'symboles'").run(JSON.stringify(["ETHUSDT"]));
+      maintenant += PERIODE_INSTANTANE_MS;
+      intervalles.get(PERIODE_INSTANTANE_MS)!();
+      await Bun.sleep(0);
+      expect(archives().filter((l) => l.ts === maintenant).map((l) => l.coin)).toEqual(["ETH"]);
+    } finally {
+      arreter();
+    }
   });
 });
 

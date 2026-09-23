@@ -3,7 +3,7 @@
  * distincts) + du conteneur (création / édition / suppression). Env node : `localStorage`
  * absent → la persistance interne est un no-op (try/catch), sans effet sur la logique.
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   notesStore,
   parseTags,
@@ -85,7 +85,10 @@ describe("tousLesTags", () => {
 });
 
 describe("notesStore", () => {
-  beforeEach(() => notesStore.setState({ notes: [] }));
+  beforeEach(() => notesStore.setState({ notes: [], erreurSauvegarde: null }));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
   const NOUVELLE: NouvelleNote = {
     symbole: "btcusdt",
@@ -122,5 +125,37 @@ describe("notesStore", () => {
     const id = notesStore.getState().notes[0]?.id ?? "";
     notesStore.getState().supprimer(id);
     expect(notesStore.getState().notes).toHaveLength(0);
+  });
+
+  it("quota à la création : conserve la note et son id, puis réessaie sans doublon", () => {
+    const ecrire = vi.fn<(key: string, value: string) => void>(() => { throw new DOMException("quota", "QuotaExceededError"); });
+    vi.stubGlobal("localStorage", { setItem: ecrire });
+    const resultat = notesStore.getState().ajouter(NOUVELLE);
+    expect(resultat.enregistre).toBe(false);
+    expect(notesStore.getState().erreurSauvegarde).toMatch(/non enregistré/i);
+    expect(notesStore.getState().notes.map((n) => n.id)).toEqual([resultat.id]);
+
+    ecrire.mockImplementation(() => undefined);
+    notesStore.getState().modifier(resultat.id, { texte: "corrigé après échec" });
+    expect(notesStore.getState().reessayerSauvegarde()).toBe(true);
+    expect(notesStore.getState().notes).toHaveLength(1);
+    expect(notesStore.getState().notes[0]?.texte).toBe("corrigé après échec");
+    expect(JSON.parse(ecrire.mock.calls.at(-1)?.[1] ?? "{}").notes[0].id).toBe(resultat.id);
+    expect(notesStore.getState().erreurSauvegarde).toBeNull();
+  });
+
+  it("stockage absent : édition et suppression restent en mémoire, erreur puis reprise", () => {
+    vi.stubGlobal("localStorage", undefined);
+    const resultat = notesStore.getState().ajouter(NOUVELLE);
+    notesStore.getState().modifier(resultat.id, { texte: "édité" });
+    expect(notesStore.getState().notes[0]?.texte).toBe("édité");
+    expect(notesStore.getState().reessayerSauvegarde()).toBe(false);
+    expect(notesStore.getState().erreurSauvegarde).toMatch(/non enregistré/i);
+    notesStore.getState().supprimer(resultat.id);
+    expect(notesStore.getState().notes).toHaveLength(0);
+    const ecrire = vi.fn<(key: string, value: string) => void>();
+    vi.stubGlobal("localStorage", { setItem: ecrire });
+    expect(notesStore.getState().reessayerSauvegarde()).toBe(true);
+    expect(JSON.parse(ecrire.mock.calls[0]?.[1] ?? "{}").notes).toEqual([]);
   });
 });

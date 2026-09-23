@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@axiom/types";
 import { computeIndicator, getIndicator } from "@axiom/indicators";
-import { estFrontOnly, evaluerAlertes, typesDeDef, validerComposite } from "./engine";
+import { alerteActiveAuTemps, echeanceAlerteValide, estFrontOnly, evaluerAlertes, prochaineEcheanceAlerte, typesDeDef, validerComposite } from "./engine";
 import type { AlertDef, Condition, ConditionSimple, ContexteAlerte } from "./types";
 
 /** Bougie plate (open=high=low=close) au temps `time`. */
@@ -625,6 +625,40 @@ describe("filtrage du lot", () => {
     const res = evaluerAlertes([inactive], ctxPrix(150));
     expect(res.defs[0]).toBe(inactive); // référence conservée
     expect(res.modifie).toBe(false);
+  });
+
+  it("coupe exactement à l'échéance, sans réarmer ni déclencher ; legacy reste actif", () => {
+    const condition = { type: "prix-croise", niveau: 100, sens: "hausse" } as const;
+    const alerte = def(condition, { arme: true, expireTs: 2_000 });
+    expect(alerteActiveAuTemps(alerte, 1_999)).toBe(true);
+    expect(alerteActiveAuTemps(alerte, 2_000)).toBe(false);
+    expect(alerteActiveAuTemps(alerte, 2_001)).toBe(false);
+    for (const maintenant of [2_000, 2_001]) {
+      const resultat = evaluerAlertes([alerte], { maintenant, dernierPrix: 110 });
+      expect(resultat).toMatchObject({ defs: [alerte], declenchements: [], modifie: false });
+      expect(resultat.defs[0]).toBe(alerte);
+    }
+    expect(evaluerAlertes([alerte], { maintenant: 1_999, dernierPrix: 110 }).declenchements).toHaveLength(1);
+    expect(alerteActiveAuTemps(def(condition), 2_001)).toBe(true);
+  });
+
+  it("rejette les échéances présentes invalides, sans les convertir en durée illimitée", () => {
+    const alerte = def({ type: "prix-croise", niveau: 100, sens: "hausse" }, { arme: true });
+    for (const expireTs of [null, "demain", 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const invalide = { ...alerte, expireTs } as unknown as AlertDef;
+      expect(echeanceAlerteValide(invalide)).toBe(false);
+      expect(alerteActiveAuTemps(invalide, 1)).toBe(false);
+      expect(evaluerAlertes([invalide], { maintenant: 1, dernierPrix: 110 }).declenchements).toEqual([]);
+    }
+  });
+
+  it("trouve le premier réveil futur parmi les alertes actives uniquement", () => {
+    const prix = { type: "prix-croise", niveau: 100, sens: "hausse" } as const;
+    expect(prochaineEcheanceAlerte([
+      def(prix, { expireTs: 2_000 }), def(prix, { expireTs: 1_500, actif: false }),
+      def(prix, { expireTs: 1_000 }), def(prix),
+    ], 1_000)).toBe(2_000);
+    expect(prochaineEcheanceAlerte([def(prix, { expireTs: 1_000 })], 1_000)).toBeNull();
   });
 });
 

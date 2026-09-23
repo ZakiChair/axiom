@@ -10,11 +10,18 @@
  * Le moteur temps réel (`subscribeTickers`) n'est PAS démarré ici (aucun réseau) : on injecte
  * les prix via `derniersPrix` et on exerce le chemin de fill opportuniste de `placerOrdre`.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+const { subscribeTickersMock } = vi.hoisted(() => ({ subscribeTickersMock: vi.fn((..._args: unknown[]) => () => {}) }));
+vi.mock("../data/ticker", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../data/ticker")>()), subscribeTickers: subscribeTickersMock,
+}));
 import {
   chargerPaper,
+  clePrixPaper,
+  demarrerMoteurPaper,
   PAPER_STORAGE_KEY,
   paperStore,
+  paperUiStore,
   SOLDE_INITIAL,
   symbolesActifs,
 } from "./paper";
@@ -43,6 +50,8 @@ function ordre(p: Partial<OrdrePaper>): OrdrePaper {
   return {
     id: p.id ?? "o1",
     symbol: p.symbol ?? "BTCUSDT",
+    ...("source" in p ? { source: p.source } : {}),
+    ...("decisionIds" in p ? { decisionIds: p.decisionIds } : {}),
     direction: p.direction ?? "long",
     type: p.type ?? "market",
     prixLimite: "prixLimite" in p ? (p.prixLimite ?? null) : null,
@@ -86,6 +95,7 @@ beforeEach(() => {
   resetPaper();
   expyStore.setState({ trades: [] });
   storage.clear(); // repart d'un localStorage propre (le reset ci-dessus a pu écrire)
+  subscribeTickersMock.mockClear();
 });
 
 afterEach(() => {
@@ -107,6 +117,34 @@ describe("symbolesActifs (ensemble des symboles à souscrire) — PURE", () => {
 
   it("vide quand aucun ordre ni position", () => {
     expect(symbolesActifs(etat({}))).toEqual([]);
+  });
+});
+
+describe("provenance PAPER", () => {
+  it("prépare un brouillon lié sans créer d'ordre", () => {
+    paperUiStore.getState().preparer({ decisionId: "d1", symbol: "BTCUSDT", source: "binance" });
+    expect(paperUiStore.getState().brouillon).toMatchObject({ decisionId: "d1", symbol: "BTCUSDT", source: "binance" });
+    expect(paperStore.getState().ordres).toHaveLength(0);
+  });
+  it("n'utilise jamais un prix Binance pour un ordre Bybit du même symbole", () => {
+    paperStore.setState({ derniersPrix: { [clePrixPaper("BTCUSDT", "binance")]: 100 } });
+    paperStore.getState().placerOrdre({ symbol: "BTCUSDT", source: "bybit", direction: "long", type: "market",
+      prixLimite: null, prixStop: null, taille: 1, tp: null, sl: 90, decisionIds: ["d1"] });
+    expect(paperStore.getState().ordres).toHaveLength(1);
+    expect(paperStore.getState().positions).toHaveLength(0);
+    paperStore.setState({ derniersPrix: { ...paperStore.getState().derniersPrix, [clePrixPaper("BTCUSDT", "bybit")]: 110 } });
+    paperStore.getState().placerOrdre({ symbol: "BTCUSDT", source: "bybit", direction: "long", type: "market",
+      prixLimite: null, prixStop: null, taille: 1, tp: null, sl: 90, decisionIds: ["d2"] });
+    expect(paperStore.getState().positions[0]).toMatchObject({ source: "bybit", decisionIds: ["d1", "d2"] });
+    expect(paperStore.getState().ordres).toHaveLength(0);
+  });
+
+  it("souscrit les sources séparément, sans routage automatique pour les ordres verrouillés", () => {
+    paperStore.setState({ ordres: [ordre({ id: "a", source: "binance" }), ordre({ id: "b", source: "bybit" })] });
+    const stop = demarrerMoteurPaper();
+    expect(subscribeTickersMock).toHaveBeenCalledWith(["BTCUSDT"], expect.any(Function), { source: "binance" });
+    expect(subscribeTickersMock).toHaveBeenCalledWith(["BTCUSDT"], expect.any(Function), { source: "bybit" });
+    stop();
   });
 });
 

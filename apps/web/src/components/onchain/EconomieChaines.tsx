@@ -6,6 +6,7 @@ import { formatPct, formatUsd } from "../../lib/format";
 import { Badge, Chargement, ErreurBloc, NoteSource, TitreSection, Vide } from "../ui";
 import { TableTriable, type ColonneTable } from "../TableTriable";
 import { CourbeOnchain, dateObservation } from "./HistoriqueCommun";
+import { RotationChaines } from "./RotationChaines";
 
 const SERIES: Array<{ id: MetriqueEconomie; label: string }> = [
   { id: "tvl", label: "TVL · stock" }, { id: "dex", label: "Volume DEX/j" },
@@ -27,6 +28,7 @@ type EtatVueEconomie = ReturnType<typeof economieChainesStore.getState>;
 
 export function VueEconomieChaines({ donnees, chargement, erreur, titre = true }: EtatVueEconomie & { titre?: boolean }) {
   const [horizon, setHorizon] = useState<Horizon>(30);
+  const [rotationOuverte, setRotationOuverte] = useState(false);
   if (!donnees && chargement) return <Chargement libelle="Économie des chaînes…" />;
   if (!donnees) return erreur ? <ErreurBloc>{erreur}</ErreurBloc> : <Vide>Économie des chaînes indisponible.</Vide>;
   const colonnes: ColonneTable<EconomieChaine>[] = [
@@ -69,6 +71,7 @@ export function VueEconomieChaines({ donnees, chargement, erreur, titre = true }
         return serie.serie.length > 1 ? <div key={`${chaine.id}-${id}`} className="rounded border border-border p-1.5"><p className="text-[9px] text-text-dim">{chaine.libelle} · {label}</p><CourbeOnchain points={serie.serie} label={`${chaine.libelle} · ${label}`} unite="USD" /></div> : null;
       }))}</div>
     </details>
+    <div><button type="button" aria-expanded={rotationOuverte} onClick={() => setRotationOuverte((value) => !value)} className="text-[10px] text-text-dim hover:text-accent">Rotation historique · cohorte fixe {rotationOuverte ? "▾" : "▸"}</button>{rotationOuverte && <div className="mt-2"><RotationChaines donnees={donnees} /></div>}</div>
     <NoteSource>DefiLlama public · cache 1 h · 3 appels simultanés maximum. TVL et stablecoins sont des stocks USD ; volumes DEX, frais et revenus sont des montants journaliers USD. Les séries restent distinctes. Les quantités natives sous-jacentes ne sont pas fournies ici ; la TVL USD n’est pas divisée par le prix de l’ETH.</NoteSource>
     {erreur && <ErreurBloc>{erreur}</ErreurBloc>}
   </section>;

@@ -591,7 +591,7 @@ export function GlobeWindow() {
         {/* Panneau détail au clic : absolute DANS ce conteneur relatif → ses events
             pointer/molette ciblent le panneau, jamais le canvas (pas de zoom parasite). */}
         {selection !== null ? (
-          <GlobeDetailPanel selection={selection} evenements={detailZone} onFermer={() => setSelection(null)} />
+          <GlobeDetailPanel selection={selection} evenements={detailZone} ingereLe={etatEvenements?.majA ?? null} onFermer={() => setSelection(null)} />
         ) : null}
         {indicesOuverts && <GlobeIndicesPanel onFermer={() => setIndicesOuverts(false)} />}
       </div>

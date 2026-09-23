@@ -3,17 +3,23 @@
  * la logique (sélection, fetch de zone) vit dans GlobeWindow. Glisse depuis la
  * droite DANS le corps de la fenêtre (adaptation du pattern SettingsPanel).
  */
+import { useEffect, useState } from "react";
 import { Chargement, Vide } from "./ui";
 import { lignesEvenement, sousTitreSelection, titreSelection, type SelectionGlobe } from "./globeDetail.util";
 import type { EvenementDetail } from "../data/globe/types";
 import { PortWatchHistoryPanel } from "./PortWatchHistoryPanel";
+import { TransmissionPanel } from "./globe/TransmissionPanel";
+import { dedupliquerEvenements, urlSure } from "../data/globe/transmission";
 
-export function GlobeDetailPanel({ selection, evenements, onFermer }: {
+export function GlobeDetailPanel({ selection, evenements, ingereLe, onFermer }: {
   selection: SelectionGlobe;
   /** Liste du détail de zone : "chargement", null (indisponible) ou les événements. */
   evenements: EvenementDetail[] | "chargement" | null;
+  ingereLe: number | null;
   onFermer: () => void;
 }) {
+  const [evenementChoisi, setEvenementChoisi] = useState<EvenementDetail | null>(null);
+  useEffect(() => { setEvenementChoisi(null); }, [selection, evenements]);
   const nowMs = Date.now();
   return (
     <div className="absolute right-0 top-0 z-10 flex h-full w-[min(280px,85%)] flex-col border-l border-border bg-surface">
@@ -35,15 +41,17 @@ export function GlobeDetailPanel({ selection, evenements, onFermer }: {
           <Vide>Aucun événement dans la fenêtre servie.</Vide>
         ) : (
           <ul className="space-y-2">
-            {evenements.map((evt, i) => {
+            {dedupliquerEvenements(evenements).map((evt, i) => {
               const l = lignesEvenement(evt, nowMs);
               return (
                 <li key={i} className="border-b border-border pb-1.5 text-[11px] last:border-b-0">
                   <div className="text-text">{l.entete}</div>
                   <div className="text-text-dim">{l.detail}</div>
-                  {evt.url !== null ? (
+                  {urlSure(evt.url) ? (
                     <a href={evt.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">source ↗</a>
                   ) : null}
+                  {urlSure(evt.url) && <button type="button" onClick={() => setEvenementChoisi(evt)} className="ml-2 text-accent underline">Analyser transmission</button>}
+                  {evenementChoisi === evt && <TransmissionPanel evenement={evt} ingereLe={ingereLe} />}
                 </li>
               );
             })}

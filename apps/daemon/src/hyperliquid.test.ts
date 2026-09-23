@@ -199,6 +199,23 @@ describe("arrêt sur 429 amont", () => {
 });
 
 describe("obtenirInstantane({ forcer })", () => {
+  for (const retard of [60_000, TTL_INSTANTANE_MS + 1]) {
+    test(`un scan forcé en panne refuse le cache antérieur (${retard} ms), conservé pour l'UI`, async () => {
+      reinitialiserHl();
+      const d = baseTest();
+      const ok = stubHl({ adresses: [A1], etats: { [A1]: etat([pos()]) } });
+      await obtenirInstantane(d, ok.fetchImpl, T0);
+      const ko = stubHl({ adresses: [A1], infoKo: [A1] });
+
+      expect(await obtenirInstantane(d, ko.fetchImpl, T0 + retard, { forcer: true })).toBeNull();
+      const lecture = await obtenirInstantane(d, ko.fetchImpl, T0 + retard);
+      expect(lecture?.ts).toBe(T0);
+      expect(lecture?.parCoin.get("BTC")?.[0]?.px).toBe(31342.31);
+      d.close();
+      reinitialiserHl();
+    });
+  }
+
   test("forcer ignore le cache frais mais rejoint une construction en vol", async () => {
     reinitialiserHl();
     const d = baseTest();

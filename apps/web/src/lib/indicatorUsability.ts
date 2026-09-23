@@ -74,6 +74,7 @@ const ONCHAIN_BTC = new Set([
 const AUX_PERP = new Set([
   "oi",
   "funding",
+  "binanceFundingHourly",
   "mark",
   "perpDelta",
   "lsAccount",

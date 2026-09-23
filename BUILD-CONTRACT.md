@@ -234,9 +234,12 @@ Indicateurs ajoutés (TS pur, `@axiom/indicators`, un fichier et un test par def
 Fonctions :
 
 - **BT — mode intrabar** (`params.intrabar`, case à cocher, défaut OFF) : stop et
-  objectif jugés sur le **high/low** des barres détenues, au niveau touché, ou à
-  l'OPEN si la barre ouvre au-delà (gap) ; **stop prioritaire** si les deux sont
+  objectif jugés sur toutes les barres détenues, **dernière barre comprise**.
+  Un niveau franchi à l'OPEN (gap) est exécuté à l'OPEN avant les touches high/low ;
+  sinon, exécution au niveau touché et **stop prioritaire** si les deux sont
   touchés dans la même barre (convention conservatrice, OHLC ne dit pas l'ordre).
+  Pour une sortie certaine à l'OPEN, MAE/MFE retiennent le prix exécuté (slippage
+  inclus) et excluent les extrêmes ultérieurs de la barre de sortie.
   Les sorties par RÈGLE gardent le modèle clôture → open+1. Défaut absent =
   résultats historiques reproductibles à l'identique ; `intrabar` entre dans la
   signature de run (résultat périmé si la case change).
@@ -414,6 +417,11 @@ rapport `docs/superpowers/progress/2026-09-22-heatmap-hl-indicateurs-onchain.md`
    trous d'historique = daemon éteint, visibles ; indisponible sans daemon (Vercel). Aucun
    AggregationEngine (une venue, ses positions telles quelles), aucune fenêtre, `EXCHANGE_IDS` à 9.
    La fenêtre WHALES, qui lit le même instantané, voit donc désormais « gros comptes ET gros tradeurs ».
+   Correction du 23 septembre : l'acquisition partagée ne contient aucun repli vers un ancien
+   instantané. Ce repli reste disponible pour l'affichage, avec sa date d'origine. Le collecteur
+   forcé n'archive rien en cas d'échec total ; les lignes et le dernier succès portent la date
+   d'observation `inst.ts`, jamais celle de la relecture. Zéro adresse observée reste un échec ;
+   des comptes observés sans positions sur un coin produisent un instantané vide valide.
 3. **Dix indicateurs** (TS pur, `@axiom/indicators`, un fichier et un test par def, catalogue 200 →
    210). Séries aux ajoutées à `AuxSeriesId` (`@axiom/types`, écart signalé comme aux lots précédents) :
    `liqLongUsd`, `liqShortUsd`, `hashrate`, `sthMvrv`, `lthMvrv`, `nrplUsd`, `vddMultiple`, `aviv`,
@@ -429,7 +437,7 @@ rapport `docs/superpowers/progress/2026-09-22-heatmap-hl-indicateurs-onchain.md`
    | `aviv` | AVIV (BGeometrics). BTC, ≥ 1d |
    | `offreEnProfit` | % de l'offre en profit = `100 × sp / (sp + sl)` (BGeometrics `supply-profit`/`supply-loss`, défs et cache partagés avec CHAIN). BTC, ≥ 1d |
    | `hlFunding` | Funding Hyperliquid annualisé (`fundingHistory`, horaire, appel direct, multi-actif HL) |
-   | `fundingSpreadHl` | Écart de funding HL − Binance en points de % annualisés (`(hl × 24 − binance × 3) × 365 × 100`) |
+   | `fundingSpreadHl` | Écart de funding HL − Binance en points de % annualisés (`(hl_h − binance_h) × 24 × 365 × 100`), cadence Binance observée dans l'historique — correction du 23 septembre ci-dessous |
    | `hlWhalesNet` | Positionnement net des gros comptes HL suivis, `100 × (L − S) / (L + S)` par instantané du collecteur. Daemon + collecte requis ; échantillon (couverture en légende HL) |
 
    Règles : les cinq séries BGeometrics nouvelles sont chargées à la demande (pose de l'indicateur),
@@ -449,3 +457,41 @@ en marge croisée très collatéralisés en sont absents) ; la couverture est me
 `hlWhalesNet` lit le même échantillon ; `liqParBougie` dépend de la profondeur d'historique que
 Coinalyze accorde à chaque intervalle (règle mesurée dans `auxProvider.ts`) ; le régime Hash Ribbons
 est une lecture descriptive, pas un signal validé.
+
+## Corrections de la revue du 23 septembre 2026
+
+Le propriétaire a autorisé la correction des quatre défauts vérifiés : dernière bougie du
+backtest, risque initial PAPER → EXPY, fraîcheur des instantanés Hyperliquid et cadence du
+spread de funding HL − Binance. Les changements préexistants du dépôt sont conservés.
+
+- **BT** : le mode intrabar traite aussi la dernière barre détenue, même si l'entrée vient
+  d'être exécutée à son ouverture. Les gaps sont traités avant les touches high/low ; MAE/MFE
+  n'intègrent pas les mouvements postérieurs à une sortie certaine à l'ouverture. Le mode
+  sans intrabar conserve son comportement ; l'ordre inconnu des touches intrabar reste une
+  convention de simulation, pas une reconstruction du flux de transactions.
+- **PAPER → EXPY** : `PositionPaper.stopInitial` est fixé lors de la première exécution,
+  persisté et conservé après déplacement/suppression du stop ou renfort. `null` signifie
+  absence de stop à l'ouverture ; un champ absent signifie ancienne position sans preuve.
+  Ces deux cas donnent un R indéfini à l'export, avec une note pour le cas historique.
+  Après renfort, le R du trade fusionné utilise le prix moyen et la taille totale avec ce
+  stop de référence ; il ne représente pas le R isolé de la première tranche. Aucun ancien
+  trade déjà exporté dans EXPY n'est réécrit.
+- **Hyperliquid** : l'archive exige une acquisition neuve ; le repli de cache est réservé
+  à l'affichage. La santé et les lignes utilisent la date originale de l'observation.
+  Aucun ancien instantané en base n'est supprimé ou corrigé rétroactivement.
+- **Écart de funding HL − Binance** : l'auxiliaire dédié `binanceFundingHourly` lit les
+  règlements Binance USDⓈ-M via le transport `extUrl` existant, dans un module chargé à
+  la demande. Cet ajout étroit à `AuxSeriesId` remplace la jambe `funding` mixte
+  Coinalyze/Binance pour cet indicateur seulement. Après deux intervalles précédents
+  concordants de 1, 2, 4 ou 8 h, le taux par règlement est ramené à l'heure. Une tolérance
+  de 60 s reconnaît les décalages d'horodatage sans déplacer l'instant de publication.
+  Cadence incertaine, taux invalide ou règlement spécial donnent une valeur inconnue ;
+  une valeur expire au prochain règlement attendu, sans report à travers le trou.
+  La dernière bougie en cours est lue au plus à l'instant présent. Aucun intervalle
+  actuel de `fundingInfo` n'est appliqué au passé. La mention **cadence observée** reste
+  visible : cette inférence n'est pas un historique certifié des changements de cadence.
+
+Validation finale : **7 283 tests** et typechecks/build verts (`pnpm check`), parcours
+Chromium backtest réussi, quatre lots acceptés en revue indépendante. Budget initial
+**1 204 408 / 356 368 octets** (bruts/gzip), plafonds inchangés. Détails et limites :
+`docs/revue-2026-09-23-quatre-corrections.md`.

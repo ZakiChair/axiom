@@ -473,6 +473,108 @@ describe("objectif évalué sur la clôture, jamais intrabar", () => {
 // ─────────────────────────── 4bis. Mode intrabar (high/low) ───────────────────────────
 
 describe("mode intrabar : stop et objectif sur le high/low des barres détenues", () => {
+  it.each([
+    { sens: "long", issue: "stop", amorce: [99, 101], derniere: [100, 120, 90, 110], prix: 95, pnl: -50 },
+    { sens: "long", issue: "target", amorce: [99, 101], derniere: [100, 120, 100, 100], prix: 110, pnl: 100 },
+    { sens: "short", issue: "stop", amorce: [101, 99], derniere: [100, 120, 80, 90], prix: 105, pnl: -50 },
+    { sens: "short", issue: "target", amorce: [101, 99], derniere: [100, 100, 80, 100], prix: 90, pnl: 100 },
+  ] as const)("$sens : $issue sur la dernière barre, dès l'entrée", ({ sens, issue, amorce, derniere, prix, pnl }) => {
+    const candles = [
+      barre(t(0), amorce[0], amorce[0]),
+      barre(t(1), amorce[1], amorce[1]),
+      bougie(t(2), derniere[0], derniere[1], derniere[2], derniere[3]),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, sens === "long" ? "hausse" : "baisse")],
+      reglesSortie: [], direction: sens, stopPct: 5, targetPct: 10, tailleFixe: 1000,
+    };
+    const trade = runBacktest(candles, strat, { ...SANS_FRICTION, intrabar: true }).trades[0]!;
+    expect(trade.raison).toBe(issue);
+    expect(trade.prixSortie).toBeCloseTo(prix, 8);
+    expect(trade.pnl).toBeCloseTo(pnl, 8);
+    expect(trade.tempsSortie).toBe(t(2));
+  });
+
+  it("évalue la dernière barre d'une position déjà détenue", () => {
+    const candles = [
+      barre(t(0), 99, 99), barre(t(1), 101, 101),
+      barre(t(2), 100, 100), bougie(t(3), 100, 120, 90, 110),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, "hausse")], reglesSortie: [],
+      direction: "long", stopPct: 5, targetPct: 10, tailleFixe: 1000,
+    };
+    const trade = runBacktest(candles, strat, { ...SANS_FRICTION, intrabar: true }).trades[0]!;
+    expect(trade.raison).toBe("stop");
+    expect(trade.prixSortie).toBe(95);
+    expect(trade.dureeBarres).toBe(1);
+  });
+
+  it("conserve fin-donnees quand la dernière barre ne touche aucun niveau et le mode OFF", () => {
+    const candles = [
+      barre(t(0), 99, 99), barre(t(1), 101, 101),
+      bougie(t(2), 100, 104, 97, 102),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, "hausse")], reglesSortie: [],
+      direction: "long", stopPct: 5, targetPct: 10, tailleFixe: 1000,
+    };
+    const intrabar = runBacktest(candles, strat, { ...SANS_FRICTION, intrabar: true }).trades[0]!;
+    expect(intrabar.raison).toBe("fin-donnees");
+    expect(intrabar.prixSortie).toBe(102);
+
+    const sansIntrabar = runBacktest([
+      ...candles.slice(0, 2), bougie(t(2), 100, 120, 90, 110),
+    ], strat, SANS_FRICTION).trades[0]!;
+    expect(sansIntrabar.raison).toBe("fin-donnees");
+    expect(sansIntrabar.prixSortie).toBe(110);
+  });
+
+  it.each([
+    { sens: "long", amorce: [99, 101], gap: [120, 125, 90, 100], prix: 120 },
+    { sens: "short", amorce: [101, 99], gap: [80, 110, 75, 100], prix: 80 },
+  ] as const)("$sens : l'objectif déjà franchi à l'open précède le stop touché ensuite", ({ sens, amorce, gap, prix }) => {
+    const candles = [
+      barre(t(0), amorce[0], amorce[0]), barre(t(1), amorce[1], amorce[1]),
+      barre(t(2), 100, 100), bougie(t(3), gap[0], gap[1], gap[2], gap[3]), barre(t(4), 100, 100),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, sens === "long" ? "hausse" : "baisse")],
+      reglesSortie: [], direction: sens, stopPct: 5, targetPct: 10, tailleFixe: 1000,
+    };
+    const trade = runBacktest(candles, strat, { ...SANS_FRICTION, intrabar: true }).trades[0]!;
+    expect(trade.raison).toBe("target");
+    expect(trade.prixSortie).toBe(prix);
+  });
+
+  it("sur la dernière barre, applique slippage, frais et seuls les funding échus avant la sortie à l'open", () => {
+    const candles = [
+      barre(t(0), 99, 99), barre(t(1), 101, 101),
+      barre(t(2), 100, 100), bougie(t(3), 120, 125, 90, 100),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, "hausse")], reglesSortie: [],
+      direction: "long", stopPct: 5, targetPct: 10, tailleFixe: 1000,
+    };
+    const r = runBacktest(candles, strat, {
+      capitalInitial: 10_000, fraisPct: 0.1, slippagePct: 1,
+      intrabar: true, timeframe: "1m", finDonneesMs: t(4),
+      funding: { modele: "perp-lineaire", reglements: [
+        { temps: t(2.5), taux: 0.01, mark: 100, tempsMark: t(2.5) },
+        { temps: t(4), taux: 0.01, mark: 100, tempsMark: t(4) },
+      ] },
+    });
+    const trade = r.trades[0]!;
+    expect(trade.raison).toBe("target");
+    expect(trade.prixEntree).toBe(101);
+    expect(trade.prixSortie).toBeCloseTo(118.8, 8);
+    expect(trade.frais).toBeCloseTo(2.1762376237623764, 8);
+    expect(trade.funding).toBeCloseTo(9.900990099009901, 8);
+    expect(trade.pnl).toBeCloseTo(164.16039603960394, 8);
+    expect(trade.instantSortieEffectif).toBe(t(3));
+    expect(r.fundingTotal).toBeCloseTo(9.900990099009901, 8);
+  });
+
   it("stoppe au NIVEAU sur un low qui se referme (même série qu'en mode clôture)", () => {
     // Identique au test « stop sur la clôture » : barre 3, low 90 < 95 mais close 98.
     // En mode clôture : stop seulement à la barre 4 (close 94) → sortie à 93 (barre 5).
@@ -1108,6 +1210,51 @@ describe("sizing en % de risque", () => {
 // ─────────────────────────── 12. Excursions MAE / MFE ───────────────────────────
 
 describe("excursions MAE / MFE", () => {
+  it.each([
+    { sens: "long" as const, issue: "target", amorce: [99, 101], gap: [120, 150, 50, 90], prix: 120, mae: 0, mfe: 20 },
+    { sens: "long" as const, issue: "stop", amorce: [99, 101], gap: [90, 150, 50, 90], prix: 90, mae: -10, mfe: 0 },
+    { sens: "short" as const, issue: "target", amorce: [101, 99], gap: [80, 150, 50, 90], prix: 80, mae: 0, mfe: 20 },
+    { sens: "short" as const, issue: "stop", amorce: [101, 99], gap: [110, 150, 50, 90], prix: 110, mae: -10, mfe: 0 },
+  ].flatMap((cas) => [true, false].map((derniere) => ({ ...cas, derniere }))))(
+    "$sens $issue en gap, dernière barre=$derniere : seule la sortie à l'open entre dans MAE/MFE",
+    ({ sens, issue, amorce, gap, prix, mae, mfe, derniere }) => {
+      const candles = [
+        barre(t(0), amorce[0]!, amorce[0]!), barre(t(1), amorce[1]!, amorce[1]!),
+        barre(t(2), 100, 100), bougie(t(3), gap[0]!, gap[1]!, gap[2]!, gap[3]!),
+        ...(!derniere ? [barre(t(4), 100, 100)] : []),
+      ];
+      const strat: StrategieDef = {
+        reglesEntree: [croiseClose(100, sens === "long" ? "hausse" : "baisse")],
+        reglesSortie: [], direction: sens, stopPct: 5, targetPct: 10, tailleFixe: 1000,
+      };
+      const trade = runBacktest(candles, strat, { ...SANS_FRICTION, intrabar: true }).trades[0]!;
+      expect(trade.raison).toBe(issue);
+      expect(trade.prixSortie).toBe(prix);
+      expect(trade.maePct).toBeCloseTo(mae, 9);
+      expect(trade.mfePct).toBeCloseTo(mfe, 9);
+    },
+  );
+
+  it.each([
+    { sens: "long" as const, amorce: [99, 101], prixEntree: 101, prixSortie: 99, mae: -200 / 101 },
+    { sens: "short" as const, amorce: [101, 99], prixEntree: 99, prixSortie: 101, mae: -200 / 99 },
+  ])("$sens : entrée et stop au même open avec slippage, aucun extrême postérieur", ({ sens, amorce, prixEntree, prixSortie, mae }) => {
+    const candles = [
+      barre(t(0), amorce[0]!, amorce[0]!), barre(t(1), amorce[1]!, amorce[1]!),
+      bougie(t(2), 100, 150, 50, 90),
+    ];
+    const strat: StrategieDef = {
+      reglesEntree: [croiseClose(100, sens === "long" ? "hausse" : "baisse")],
+      reglesSortie: [], direction: sens, stopPct: 0.5, tailleFixe: 1000,
+    };
+    const trade = runBacktest(candles, strat, { ...SANS_FRICTION, slippagePct: 1, intrabar: true }).trades[0]!;
+    expect(trade.raison).toBe("stop");
+    expect(trade.prixEntree).toBe(prixEntree);
+    expect(trade.prixSortie).toBe(prixSortie);
+    expect(trade.maePct).toBeCloseTo(mae, 9);
+    expect(trade.mfePct).toBe(0);
+  });
+
   const stratLong: StrategieDef = {
     direction: "long", tailleFixe: 100,
     reglesEntree: [compareClose(">", 100)],

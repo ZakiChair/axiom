@@ -75,6 +75,8 @@ export interface AuxRequest {
 interface AuxPoint {
   time: number;
   value: number;
+  /** Funding Binance : expiration exclusive de la cadence observée. */
+  validUntil?: number | undefined;
 }
 
 /** TTL du cache BRUT par série (ms). */
@@ -125,6 +127,7 @@ const TTL_MS: Record<AuxSeriesId, number> = {
   // Funding horaire Hyperliquid + positionnement net des gros comptes HL (daemon) —
   // cadence proche temps réel, comme `funding`.
   hlFunding: 60_000,
+  binanceFundingHourly: 60_000,
   hlWhalesNet: 60_000,
 };
 /** Durée de mémorisation d'un échec de fetch (anti retry-tempête). */
@@ -232,6 +235,44 @@ function toPoints(raw: AuxPoint[]): AuxPoint[] {
   return raw
     .filter((p) => Number.isFinite(p.time) && Number.isFinite(p.value))
     .sort((a, b) => a.time - b.time);
+}
+
+/** Pas de chart non couverts par le helper de durée du backtest. */
+const PAS_FIXES_HORS_BT: Partial<Record<Timeframe, number>> = {
+  "1s": 1_000, "5s": 5_000, "15s": 15_000, "3m": 180_000,
+};
+const MOIS_PAR_TIMEFRAME: Partial<Record<Timeframe, number>> = {
+  "1M": 1, "3M": 3, "6M": 6, "12M": 12,
+};
+
+/** Vraie clôture prévue en UTC, même si des bougies suivantes sont absentes. */
+function clotureTheoriqueFunding(t: number, timeframe: Timeframe): number | null {
+  const pasFixe = dureeTimeframeMs(timeframe) ?? PAS_FIXES_HORS_BT[timeframe];
+  if (pasFixe !== undefined && pasFixe !== null) return t + pasFixe;
+  const mois = MOIS_PAR_TIMEFRAME[timeframe];
+  if (mois === undefined) return null;
+  const d = new Date(t);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + mois, 1);
+}
+
+/** Alignement à la clôture du funding Binance, sans LOCF au-delà du prochain règlement attendu. */
+function alignerFundingBinance(candleTimes: number[], points: AuxPoint[], timeframe: Timeframe): Array<number | undefined> {
+  const out = new Array<number | undefined>(candleTimes.length).fill(undefined);
+  let j = 0;
+  let courant: AuxPoint | undefined;
+  for (let i = 0; i < candleTimes.length; i++) {
+    const t = candleTimes[i]!;
+    const prochain = candleTimes[i + 1];
+    const theorique = clotureTheoriqueFunding(t, timeframe);
+    if (theorique === null || !Number.isFinite(theorique)) continue;
+    const cloture = Math.min(theorique, prochain ?? Infinity);
+    const borne = prochain === undefined ? Math.min(cloture, Date.now()) : cloture;
+    while (j < points.length && points[j]!.time <= borne) courant = points[j++];
+    if (courant !== undefined && Number.isFinite(courant.value) && courant.validUntil !== undefined && borne < courant.validUntil) {
+      out[i] = courant.value;
+    }
+  }
+  return out;
 }
 
 /**
@@ -521,6 +562,14 @@ async function rawFetch(id: AuxSeriesId, symbol: string, timeframe: Timeframe): 
       const mod = await chargerHlFunding();
       return toPoints(await mod.fetchHlFundingHistory(hyperliquidCoin(`${coin}-PERP`), since));
     }
+    case "binanceFundingHourly": {
+      const sym = toFuturesSymbol(symbol);
+      const mod = await chargerBinanceFunding();
+      const points = await mod.fetchBinanceFundingHourly(sym, since);
+      // NaN interne = règlement connu dont le taux/cadence est inconnu ; le point doit
+      // rester présent pour interrompre l'alignement, sans passer par `toPoints`.
+      return points.map((p) => ({ time: p.time, value: p.value ?? Number.NaN, validUntil: p.validUntil }));
+    }
     case "hlWhalesNet": {
       // Positionnement net des gros comptes HL : 100 × (long − short) / (long + short)
       // par instantané du collecteur daemon (`/hl/liqheat`). ÉCHANTILLON du leaderboard,
@@ -597,6 +646,15 @@ function chargerHlFunding(): Promise<typeof import("../data/hyperliquidFunding")
   });
 }
 
+let clientBinanceFunding: Promise<typeof import("../data/binanceFunding")> | undefined;
+/** Funding historique Binance — paresseux : hors du chunk d'entrée. */
+function chargerBinanceFunding(): Promise<typeof import("../data/binanceFunding")> {
+  return clientBinanceFunding ??= import("../data/binanceFunding").catch((err) => {
+    clientBinanceFunding = undefined;
+    throw err;
+  });
+}
+
 export class AuxProvider {
   /** Cache brut partagé (singleton) : clé `${id}:${symbole}` → entrée. */
   private readonly cache = new Map<string, Entry>();
@@ -652,6 +710,8 @@ export class AuxProvider {
       if (id === "mark") {
         const parOuverture = new Map(entry.points.map((p) => [p.time, p.value]));
         aux.mark = req.candleTimes.map((t) => parOuverture.get(t));
+      } else if (id === "binanceFundingHourly") {
+        aux.binanceFundingHourly = alignerFundingBinance(req.candleTimes, entry.points, req.timeframe);
       } else {
         aux[id] = alignAux(req.candleTimes, entry.points, AUX_SUR_CLOTURE.has(id));
       }

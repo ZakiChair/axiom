@@ -20,6 +20,7 @@ import {
 } from "./paper";
 import { expyStore } from "./expy";
 import type { EtatPaper, OrdrePaper, PositionPaper } from "../data/paper";
+import { rMultiple } from "../data/expy";
 
 /** Mock localStorage en mémoire (env Node). */
 function installMockLocalStorage(): Storage {
@@ -62,6 +63,7 @@ function position(p: Partial<PositionPaper>): PositionPaper {
     prixEntree: p.prixEntree ?? 100,
     tp: "tp" in p ? (p.tp ?? null) : null,
     sl: "sl" in p ? (p.sl ?? null) : null,
+    ...("stopInitial" in p ? { stopInitial: p.stopInitial } : {}),
     ouvertTs: p.ouvertTs ?? 1_000,
   };
 }
@@ -163,7 +165,7 @@ describe("cloturer (au dernier prix connu) + pont EXPY", () => {
   it("clôture au dernier prix connu : position retirée, solde crédité, trade EXPY ajouté", () => {
     // Position 2@100, dernier prix 120 → brut (120−100)×2 = 40 ; frais 2×120×0.0005 = 0.12 ; pnl 39.88.
     paperStore.setState({
-      positions: [position({ id: "pC", direction: "long", taille: 2, prixEntree: 100, sl: 95 })],
+      positions: [position({ id: "pC", direction: "long", taille: 2, prixEntree: 100, sl: 95, stopInitial: 95 })],
       derniersPrix: { BTCUSDT: 120 },
     });
     paperStore.getState().cloturer("pC");
@@ -172,7 +174,7 @@ describe("cloturer (au dernier prix connu) + pont EXPY", () => {
     expect(positions).toHaveLength(0);
     expect(solde).toBeCloseTo(SOLDE_INITIAL + 39.88, 10);
 
-    // Pont EXPY : un trade fermé, tag paper, note cloture-manuelle, stopInitial = sl.
+    // Pont EXPY : un trade fermé, tag paper, note cloture-manuelle, stopInitial figé.
     const trades = expyStore.getState().trades;
     expect(trades).toHaveLength(1);
     expect(trades[0]!.tags).toEqual(["paper"]);
@@ -270,5 +272,85 @@ describe("persistance", () => {
     expect(relu.ordres.map((o) => o.id)).toEqual(["ok"]);
     expect(relu.positions).toEqual([]);
     expect(relu.executions).toEqual([]);
+  });
+});
+
+describe("stop initial persisté et journalisé", () => {
+  it("ouverture, déplacement, persistance et clôture manuelle gardent le risque d'origine", () => {
+    paperStore.setState({ derniersPrix: { BTCUSDT: 100 } });
+    paperStore.getState().placerOrdre({
+      symbol: "BTCUSDT", direction: "long", type: "market", prixLimite: null,
+      prixStop: null, taille: 1, tp: null, sl: 90,
+    });
+    const id = paperStore.getState().positions[0]!.id;
+    paperStore.getState().modifierTpSl(id, null, 95);
+    expect(chargerPaper().positions[0]!.stopInitial).toBe(90);
+    paperStore.getState().modifierTpSl(id, null, null);
+    expect(chargerPaper().positions[0]!.stopInitial).toBe(90);
+    paperStore.setState({ derniersPrix: { BTCUSDT: 110 } });
+    paperStore.getState().cloturer(id);
+    const trade = expyStore.getState().trades[0]!;
+    expect(trade.stopInitial).toBe(90);
+    expect(rMultiple(trade)).toBe(1);
+  });
+
+  it("la clôture automatique d'un short utilise le stop d'ouverture malgré le SL courant", () => {
+    paperStore.setState({ derniersPrix: { BTCUSDT: 100 } });
+    paperStore.getState().placerOrdre({
+      symbol: "BTCUSDT", direction: "short", type: "market", prixLimite: null,
+      prixStop: null, taille: 1, tp: 90, sl: 110,
+    });
+    const id = paperStore.getState().positions[0]!.id;
+    paperStore.getState().modifierTpSl(id, 95, 105);
+    paperStore.setState({ derniersPrix: { BTCUSDT: 90 } });
+    paperStore.getState().placerOrdre({
+      symbol: "BTCUSDT", direction: "long", type: "market", prixLimite: null,
+      prixStop: null, taille: 1, tp: null, sl: null,
+    });
+    const trade = expyStore.getState().trades[0]!;
+    expect(trade.note).toBe("tp");
+    expect(trade.sortie).toBe(95);
+    expect(trade.stopInitial).toBe(110);
+    expect(rMultiple(trade)).toBe(0.5);
+  });
+
+  it("sans stop initial, un SL ajouté ensuite laisse R indéfini", () => {
+    paperStore.setState({ derniersPrix: { BTCUSDT: 100 } });
+    paperStore.getState().placerOrdre({
+      symbol: "BTCUSDT", direction: "long", type: "market", prixLimite: null,
+      prixStop: null, taille: 1, tp: null, sl: null,
+    });
+    const id = paperStore.getState().positions[0]!.id;
+    paperStore.getState().modifierTpSl(id, null, 95);
+    paperStore.setState({ derniersPrix: { BTCUSDT: 110 } });
+    paperStore.getState().cloturer(id);
+    const trade = expyStore.getState().trades[0]!;
+    expect(chargerPaper().positions).toHaveLength(0);
+    expect(trade.stopInitial).toBe(100);
+    expect(rMultiple(trade)).toBeNull();
+  });
+
+  it("hydrate une ancienne position sans stopInitial sans inventer son risque", () => {
+    const ancienne = position({ id: "ancien", sl: 95 });
+    storage.setItem(PAPER_STORAGE_KEY, JSON.stringify({
+      solde: SOLDE_INITIAL, ordres: [], positions: [ancienne], executions: [],
+    }));
+    const relue = chargerPaper().positions[0]!;
+    expect(relue.sl).toBe(95);
+    expect(relue.stopInitial).toBeUndefined();
+    paperStore.setState({ positions: [relue], derniersPrix: { BTCUSDT: 110 } });
+    paperStore.getState().modifierTpSl("ancien", null, 100);
+    paperStore.getState().cloturer("ancien");
+    const trade = expyStore.getState().trades[0]!;
+    expect(trade.note).toContain("stop initial inconnu");
+    expect(rMultiple(trade)).toBeNull();
+  });
+
+  it("écarte une position persistée dont le stopInitial est mal formé", () => {
+    const invalide = { ...position({ id: "invalide", sl: 90 }), stopInitial: "90" };
+    storage.setItem(PAPER_STORAGE_KEY, JSON.stringify({
+      solde: SOLDE_INITIAL, ordres: [], positions: [invalide], executions: [],
+    }));
+    expect(chargerPaper().positions).toEqual([]);
   });
 });

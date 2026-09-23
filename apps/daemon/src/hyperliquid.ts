@@ -405,7 +405,7 @@ export async function construireInstantane(
 // ————— Cache mémoire de l'instantané (partagé par TOUS les coins) —————
 
 let cacheInstantane: InstantaneHL | null = null;
-/** Instantané en cours de construction : mutualisé pour éviter la rafale au démarrage à froid. */
+/** Acquisition neuve mutualisée ; JAMAIS un repli vers le cache destiné à l'UI. */
 let instantaneEnVol: Promise<InstantaneHL | null> | null = null;
 
 /** Réinitialise le cache mémoire (utilisé par les tests ; cf. reinitialiserTelegram de notify.ts). */
@@ -415,10 +415,10 @@ export function reinitialiserHl(): void {
 }
 
 /**
- * Instantané frais (< 5 min) ou reconstruit ; `null` si aucun pool n'est
- * disponible. `options.forcer` ignore le cache (un nouvel instantané est
- * construit) mais rejoint quand même une construction déjà en vol — utilisé par
- * le collecteur hlLiqHeat qui veut un point de données NEUF à chaque cycle.
+ * Instantané frais (< 5 min) ou reconstruit ; en panne, le cache antérieur reste
+ * disponible pour l'UI avec son horodatage d'origine. `options.forcer` exige une
+ * acquisition neuve (null en panne), mais rejoint une construction déjà en vol
+ * — utilisé par le collecteur hlLiqHeat, qui ne doit JAMAIS archiver le repli UI.
  */
 export function obtenirInstantane(
   d: Database,
@@ -441,25 +441,23 @@ export function obtenirInstantane(
     }
     return instantaneEnVol;
   }
-  const p = (async (): Promise<InstantaneHL | null> => {
+  const p: Promise<InstantaneHL | null> = (async (): Promise<InstantaneHL | null> => {
     const adresses = await chargerPool(d, fetchImpl, now);
     if (adresses.length === 0) return null;
     const inst = await construireInstantane(adresses, fetchImpl, now);
-    // Échec amont TOTAL (0 adresse scannée = les 150 POST ont échoué) : ne PAS cacher
-    // 5 min un instantané vide comme une donnée valide — on sert l'ancien cache (même
-    // périmé) s'il existe, sinon null (503) ; la requête suivante retente immédiatement.
-    if (inst.adressesScannees === 0) return cacheInstantane;
+    // Échec amont TOTAL : aucune observation neuve. Le repli UI est appliqué
+    // APRÈS cette promesse partagée, sinon un collecteur qui la rejoint recevrait
+    // l'ancien cache comme s'il venait d'être acquis.
+    if (inst.adressesScannees === 0) return null;
     cacheInstantane = inst;
     return inst;
-  })();
-  instantaneEnVol = p;
-  void p.then(
-    () => {},
-    () => {},
-  ).finally(() => {
+  })().finally(() => {
+    // Libérer AVANT de rendre le résultat : un appel forcé suivant ne doit pas
+    // rejoindre une promesse déjà terminée qui n'a pas encore été nettoyée.
     if (instantaneEnVol === p) instantaneEnVol = null;
   });
-  return p;
+  instantaneEnVol = p;
+  return options?.forcer === true ? p : p.then((inst) => inst ?? cacheInstantane);
 }
 
 /** Réponse JSON avec en-têtes CORS (même pattern que kv.ts/globe.ts). */

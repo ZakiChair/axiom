@@ -227,6 +227,15 @@ describe("raisonUnusableIndicateur", () => {
     }
   });
 
+  it("l'écart HL − Binance exige un symbole USDT qui identifie le perp Binance", () => {
+    const spread = def("fundingSpreadHl");
+    expect(raisonUnusableIndicateur(spread, binanceBtc)).toBeNull();
+    expect(raisonUnusableIndicateur(spread, { ...binanceBtc, symbol: "BTCUSD" }))
+      .toBe("Nécessite un symbole crypto USDT compatible");
+    expect(raisonUnusableIndicateur(spread, { ...binanceBtc, exchange: "synthetic" }))
+      .toBe("Nécessite un symbole crypto USDT compatible");
+  });
+
   it("liqParBougie exige une clé Coinalyze utilisable", () => {
     coinalyzeKeyStore.setState({ hasKey: false });
     expect(

@@ -22,6 +22,8 @@
  *        touché en premier). Impossible avec des niveaux bien formés ; documenté par sûreté.
  *  - FUSION : par symbol + direction. Un renfort recalcule le prix d'entrée moyen pondéré et
  *    additionne les tailles ; le TP/SL de l'ordre ÉCRASE celui de la position s'il est non null.
+ *    Pour EXPY, le stop initial de la première ouverture reste fixe ; le R du trade fusionné
+ *    utilise le prix moyen courant, et ne décrit donc pas le R isolé de la première tranche.
  *    Long et short d'un même symbole COEXISTENT (pas de netting — l'état porte un tableau).
  *  - PERF : `evaluerTick` sur un symbole sans ordre ni position actif retourne le MÊME objet
  *    (référence identique) — le moteur en dépend.
@@ -50,6 +52,8 @@ export interface PositionPaper {
   prixEntree: number;
   tp: number | null;
   sl: number | null;
+  /** Stop à la première ouverture ; null = aucun, absent = ancienne position sans preuve. */
+  stopInitial?: number | null;
   ouvertTs: number;
 }
 
@@ -118,6 +122,7 @@ function fusionner(
       prixEntree: f.prix,
       tp: f.tp,
       sl: f.sl,
+      stopInitial: f.sl,
       ouvertTs: nowMs,
     };
     return { positions: [...positions, nouvelle], genre: "ouverture" };
@@ -300,20 +305,22 @@ export function cloturerPosition(etat: EtatPaper, positionId: string, prix: numb
 
 /**
  * Construit un trade de journal (EXPY) à partir d'une position clôturée et de son exécution.
- * stopInitial = sl ?? prixEntree (si sl null, le risque sera 0 → R null en aval : documenté).
- * tag "paper", note = genre de l'exécution.
+ * Le stop initial figé sert au R. Une absence initiale ou une ancienne position sans preuve
+ * utilise l'entrée comme sentinelle (risque nul → R null). Le cas historique est noté.
  */
 export function tradeJournalDepuisCloture(p: PositionPaper, exec: ExecutionPaper): Omit<TradeJournal, "id"> {
   return {
     symbol: p.symbol,
     direction: p.direction,
     entree: p.prixEntree,
-    stopInitial: p.sl ?? p.prixEntree,
+    stopInitial: p.stopInitial ?? p.prixEntree,
     taille: p.taille,
     sortie: exec.prix,
     ouvertTs: p.ouvertTs,
     fermeTs: exec.ts,
-    note: exec.genre,
+    note: p.stopInitial === undefined
+      ? `${exec.genre} — stop initial inconnu (ancienne position)`
+      : exec.genre,
     tags: ["paper"],
   };
 }

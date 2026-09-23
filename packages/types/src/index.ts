@@ -218,6 +218,9 @@ export type AuxSeriesId =
   | "supplyProfit" | "supplyLoss"
   // Funding HORAIRE Hyperliquid (fraction, `fundingHistory` — appel direct API).
   | "hlFunding"
+  // Funding Binance par règlement, ramené à l'heure uniquement si la cadence
+  // OBSERVÉE dans l'historique est cohérente (sinon valeur absente).
+  | "binanceFundingHourly"
   // Positionnement net des gros comptes HL (%, −100…+100) depuis les instantanés de
   // niveaux collectés par le daemon (`/hl/liqheat`) — échantillon du leaderboard.
   | "hlWhalesNet";

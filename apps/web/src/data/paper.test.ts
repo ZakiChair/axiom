@@ -12,6 +12,7 @@
  *  - executions bornées aux 50 dernières ; solde négatif possible.
  */
 import { describe, expect, it } from "vitest";
+import { rMultiple } from "./expy";
 import {
   cloturerPosition,
   evaluerTick,
@@ -61,6 +62,7 @@ function position(p: Partial<PositionPaper>): PositionPaper {
     prixEntree: p.prixEntree ?? 100,
     tp: "tp" in p ? (p.tp ?? null) : null,
     sl: "sl" in p ? (p.sl ?? null) : null,
+    ...("stopInitial" in p ? { stopInitial: p.stopInitial } : {}),
     ouvertTs: p.ouvertTs ?? 1_000,
   };
 }
@@ -463,8 +465,8 @@ describe("pnlLatent", () => {
 });
 
 describe("tradeJournalDepuisCloture", () => {
-  it("mappe direction/entree/sortie/taille, stopInitial = sl, tag paper, note = genre", () => {
-    const p = position({ direction: "long", taille: 2, prixEntree: 100, sl: 95, ouvertTs: 1_000 });
+  it("mappe direction/entree/sortie/taille, stopInitial figé, tag paper, note = genre", () => {
+    const p = position({ direction: "long", taille: 2, prixEntree: 100, sl: 95, stopInitial: 95, ouvertTs: 1_000 });
     const ex: ExecutionPaper = {
       ts: 3_000, symbol: "BTCUSDT", genre: "tp", direction: "long",
       taille: 2, prix: 110, fraisUsd: 0.11, pnlUsd: 19.89,
@@ -476,15 +478,15 @@ describe("tradeJournalDepuisCloture", () => {
     expect(tj.entree).toBe(100);
     expect(tj.sortie).toBe(110);
     expect(tj.taille).toBe(2);
-    expect(tj.stopInitial).toBe(95); // p.sl
+    expect(tj.stopInitial).toBe(95);
     expect(tj.ouvertTs).toBe(1_000);
     expect(tj.fermeTs).toBe(3_000); // exec.ts
     expect(tj.tags).toEqual(["paper"]);
     expect(tj.note).toBe("tp"); // = genre
   });
 
-  it("sl null → stopInitial = prixEntree (R sera null en aval, documenté)", () => {
-    const p = position({ direction: "short", prixEntree: 100, sl: null });
+  it("stop absent à l'ouverture → stopInitial = prixEntree (R sera null en aval)", () => {
+    const p = position({ direction: "short", prixEntree: 100, sl: null, stopInitial: null });
     const ex: ExecutionPaper = {
       ts: 3_000, symbol: "BTCUSDT", genre: "cloture-manuelle", direction: "short",
       taille: 1, prix: 90, fraisUsd: 0.045, pnlUsd: 9.955,
@@ -492,5 +494,52 @@ describe("tradeJournalDepuisCloture", () => {
     const tj = tradeJournalDepuisCloture(p, ex);
     expect(tj.stopInitial).toBe(100); // prixEntree
     expect(tj.note).toBe("cloture-manuelle");
+  });
+});
+
+describe("risque initial PAPER vers EXPY", () => {
+  const execution = (direction: "long" | "short", prix: number): ExecutionPaper => ({
+    ts: 3_000, symbol: "BTCUSDT", genre: "cloture-manuelle", direction,
+    taille: 1, prix, fraisUsd: 0, pnlUsd: null,
+  });
+
+  it.each([
+    { direction: "long" as const, sl: 90, sortie: 110, attendu: 1 },
+    { direction: "short" as const, sl: 110, sortie: 90, attendu: 1 },
+  ])("garde le stop d'ouverture après un déplacement $direction", ({ direction, sl, sortie, attendu }) => {
+    const e = evaluerTick(etat({ ordres: [ordre({ direction, sl })] }), "BTCUSDT", 100, 1_000);
+    const p = { ...e.positions[0]!, sl: 95 };
+    const journal = tradeJournalDepuisCloture(p, execution(direction, sortie));
+    expect(p.stopInitial).toBe(sl);
+    expect(journal.stopInitial).toBe(sl);
+    expect(rMultiple({ ...journal, id: "t1" })).toBe(attendu);
+  });
+
+  it("conserve le risque initial après retrait du stop et renfort au prix moyen", () => {
+    const ouverte = evaluerTick(etat({ ordres: [ordre({ sl: 90, taille: 1 })] }), "BTCUSDT", 100, 1_000);
+    const retiree = { ...ouverte.positions[0]!, sl: null };
+    const renforcee = evaluerTick(etat({ positions: [retiree], ordres: [ordre({ taille: 1, sl: 95 })] }), "BTCUSDT", 120, 2_000);
+    const p = renforcee.positions[0]!;
+    expect(p.prixEntree).toBe(110);
+    expect(p.sl).toBe(95);
+    expect(p.stopInitial).toBe(90);
+    const journal = tradeJournalDepuisCloture(p, execution("long", 130));
+    expect(rMultiple({ ...journal, id: "t1" })).toBe(1);
+  });
+
+  it("sans stop à l'ouverture, l'ajout tardif d'un SL ne crée pas de risque historique", () => {
+    const ouverte = evaluerTick(etat({ ordres: [ordre({ sl: null })] }), "BTCUSDT", 100, 1_000);
+    const p = { ...ouverte.positions[0]!, sl: 95 };
+    const journal = tradeJournalDepuisCloture(p, execution("long", 110));
+    expect(p.stopInitial).toBeNull();
+    expect(rMultiple({ ...journal, id: "t1" })).toBeNull();
+  });
+
+  it("position ancienne sans preuve : ne déduit pas le stop initial du SL courant", () => {
+    const p = position({ sl: 95 });
+    const journal = tradeJournalDepuisCloture(p, execution("long", 110));
+    expect(journal.stopInitial).toBe(100);
+    expect(journal.note).toContain("stop initial inconnu");
+    expect(rMultiple({ ...journal, id: "t1" })).toBeNull();
   });
 });

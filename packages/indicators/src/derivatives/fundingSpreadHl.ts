@@ -5,21 +5,19 @@
  * portage entre les deux venues du même sous-jacent : un spread durablement positif
  * signale des longs plus chers sur Hyperliquid (positionnement spéculatif relatif).
  *
- * Conventions hétérogènes ramenées à l'ANNUALISÉ :
- *   HL      : taux HORAIRE  → × 24 × 365 × 100
- *   Binance : taux par règlement 8 h (convention de `fundingApr`, intervalH = 8)
- *             → × 3 × 365 × 100
- *   spread  = (hl × 24 − binance × 3) × 365 × 100
+ * Les deux jambes sont des taux HORAIRES : HL est horaire nativement ; Binance est
+ * normalisé depuis les règlements historiques selon leur cadence OBSERVÉE.
+ *   spread = (hlHourly − bnHourly) × 24 × 365 × 100
  * `undefined` si l'une des deux jambes manque (jamais de spread sur une jambe seule).
  */
 import type { IndicatorDef } from "@axiom/types";
 
 export const fundingSpreadHl: IndicatorDef = {
   id: "fundingSpreadHl",
-  name: "Écart de funding HL − Binance (pts % annualisés)",
+  name: "Écart funding HL − Binance (cadence observée, pts % annualisés)",
   category: "derivatives",
   pane: "separate",
-  aux: ["hlFunding", "funding"],
+  aux: ["hlFunding", "binanceFundingHourly"],
   precision: 2,
   inputs: [],
   outputs: [{ key: "spread", name: "Spread APR (pts %)", style: "line" }],
@@ -27,14 +25,14 @@ export const fundingSpreadHl: IndicatorDef = {
     const n = candles.length;
     const out: Array<number | undefined> = new Array(n).fill(undefined);
     const hl = ctx.aux?.hlFunding;
-    const bn = ctx.aux?.funding;
+    const bn = ctx.aux?.binanceFundingHourly;
     if (hl && bn) {
       for (let i = 0; i < n; i++) {
         const h = hl[i];
         const b = bn[i];
         if (h === undefined || b === undefined) continue;
         if (!Number.isFinite(h) || !Number.isFinite(b)) continue;
-        out[i] = (h * 24 - b * 3) * 365 * 100;
+        out[i] = (h - b) * 24 * 365 * 100;
       }
     }
     return { series: { spread: out } };

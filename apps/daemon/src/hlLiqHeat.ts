@@ -326,8 +326,12 @@ export async function cycleInstantane(d: Database, deps: DepsCycle): Promise<num
   assurerTableHlHeat(d);
   try {
     const inst = deps.instantane ?? (await obtenirInstantane(d, deps.fetchImpl, deps.now, { forcer: true }));
-    if (inst === null) {
-      sante.derniereErreur = "pool d'adresses Hyperliquid indisponible";
+    if (inst === null || inst.adressesScannees <= 0) {
+      sante.derniereErreur = "instantané de positions Hyperliquid indisponible";
+      return 0;
+    }
+    if (!Number.isSafeInteger(inst.ts) || inst.ts < 0 || inst.ts > deps.now) {
+      sante.derniereErreur = "horodatage de l'instantané Hyperliquid incohérent";
       return 0;
     }
     const oiParCoin = await chargerOi(deps.fetchImpl);
@@ -344,7 +348,9 @@ export async function cycleInstantane(d: Database, deps: DepsCycle): Promise<num
         const niveaux = inst.parCoin.get(coin) ?? [];
         const agg = agregerNiveaux(niveaux);
         ins.run(
-          deps.now,
+          // Une acquisition lancée par l'UI peut précéder le cycle qui la rejoint.
+          // Garder sa date, sans seuil d'âge qui rejetterait un scan lent mais neuf.
+          inst.ts,
           coin,
           serialiserNiveaux(niveaux),
           agg.longUsd,
@@ -362,7 +368,7 @@ export async function cycleInstantane(d: Database, deps: DepsCycle): Promise<num
       d.query("DELETE FROM hl_liq_instantanes WHERE ts < ?").run(deps.now - RETENTION_HL_HEAT_MS);
       dernierePurgeTs = deps.now;
     }
-    sante.dernierInstantaneTs = deps.now;
+    sante.dernierInstantaneTs = inst.ts;
     sante.derniereErreur = null;
     sante.coins = coins;
     sante.adresses = inst.adressesScannees;

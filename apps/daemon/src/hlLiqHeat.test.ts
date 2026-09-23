@@ -2,7 +2,7 @@
  * Tests du collecteur opt-in de la heatmap HL (hlLiqHeat.ts) : fonctions pures,
  * cycle d'instantané sur base :memory:, route /hl/liqheat sur base injectée.
  */
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
   agregerNiveaux,
@@ -22,7 +22,15 @@ import {
   sousEchantillonner,
   traiterHlHeat,
 } from "./hlLiqHeat";
-import { assurerTableKv, type InstantaneHL, type NiveauLiqHL } from "./hyperliquid";
+import {
+  assurerTableKv,
+  obtenirInstantane,
+  reinitialiserHl,
+  URL_INFO,
+  URL_LEADERBOARD,
+  type InstantaneHL,
+  type NiveauLiqHL,
+} from "./hyperliquid";
 
 const T0 = Date.UTC(2026, 8, 22, 12, 0, 0);
 const A1 = "0x1111111111111111111111111111111111111111";
@@ -240,6 +248,165 @@ describe("cycleInstantane (base :memory: + fetch factice)", () => {
     expect((d.query("SELECT COUNT(*) AS n FROM hl_liq_instantanes").get() as { n: number }).n).toBe(0);
     expect(santeHlHeat().derniereErreur).toContain("indisponible");
     reinitialiserHlHeat();
+  });
+
+  test("un instantané sans observation ou à date incohérente ne peut pas entrer dans l'archive", async () => {
+    for (const invalide of [
+      { ...inst, adressesScannees: 0 },
+      { ...inst, ts: Number.NaN },
+      { ...inst, ts: -1 },
+      { ...inst, ts: T0 + 1 },
+    ]) {
+      reinitialiserHlHeat();
+      const d = baseTest();
+      const n = await cycleInstantane(d, {
+        fetchImpl: fetchMeta, now: T0, symboles: ["BTCUSDT"], instantane: invalide,
+      });
+      expect(n).toBe(0);
+      expect((d.query("SELECT COUNT(*) AS n FROM hl_liq_instantanes").get() as { n: number }).n).toBe(0);
+      expect(santeHlHeat().dernierInstantaneTs).toBe(0);
+      expect(santeHlHeat().derniereErreur).not.toBeNull();
+      d.close();
+    }
+    reinitialiserHlHeat();
+  });
+});
+
+describe("acquisition HL → archive SQLite (sans instantané injecté)", () => {
+  let d: Database;
+
+  beforeEach(() => {
+    reinitialiserHl();
+    reinitialiserHlHeat();
+    d = baseTest();
+  });
+
+  afterEach(() => {
+    d.close();
+    reinitialiserHl();
+    reinitialiserHlHeat();
+  });
+
+  function compte(px: number | null = 80_000): Response {
+    return Response.json({
+      assetPositions: px === null ? [] : [{ position: {
+        coin: "BTC", szi: "1", liquidationPx: String(px), positionValue: "90000",
+        entryPx: "85000", leverage: { type: "cross", value: 3 },
+      } }],
+    });
+  }
+
+  /** Seul l'amont HTTP est simulé ; cache, acquisition, cycle et SQLite restent réels. */
+  function amont(repondreCompte: () => Response | Promise<Response>): typeof fetch {
+    return (async (entree: RequestInfo | URL, init?: RequestInit) => {
+      if (String(entree) === URL_LEADERBOARD) {
+        return Response.json({ leaderboardRows: [{ ethAddress: A1, accountValue: "100000" }] });
+      }
+      if (String(entree) !== URL_INFO) throw new Error(`URL inattendue : ${String(entree)}`);
+      const corps = JSON.parse(String(init?.body ?? "{}")) as { type?: string };
+      if (corps.type === "clearinghouseState") return repondreCompte();
+      if (corps.type === "metaAndAssetCtxs") {
+        return Response.json([
+          { universe: [{ name: "BTC" }, { name: "ETH" }] },
+          [{ openInterest: "10", markPx: "90000" }, { openInterest: "20", markPx: "3000" }],
+        ]);
+      }
+      throw new Error(`type inattendu : ${corps.type}`);
+    }) as typeof fetch;
+  }
+
+  function archives(): Array<{ ts: number; coin: string; niveaux: string; adresses: number }> {
+    return d.query("SELECT ts, coin, niveaux, adresses FROM hl_liq_instantanes ORDER BY ts, coin").all() as
+      Array<{ ts: number; coin: string; niveaux: string; adresses: number }>;
+  }
+
+  test("une panne après cache ne crée aucun point et conserve la date du dernier succès", async () => {
+    await cycleInstantane(d, { fetchImpl: amont(() => compte()), now: T0, symboles: ["BTCUSDT"] });
+    const n = await cycleInstantane(d, {
+      fetchImpl: amont(() => new Response("indisponible", { status: 503 })),
+      now: T0 + 600_000,
+      symboles: ["BTCUSDT"],
+    });
+
+    expect(n).toBe(0);
+    expect(archives()).toEqual([{ ts: T0, coin: "BTC", niveaux: "[[80000,0,90000]]", adresses: 1 }]);
+    expect(santeHlHeat().dernierInstantaneTs).toBe(T0);
+    expect(santeHlHeat().derniereErreur).toContain("indisponible");
+  });
+
+  test("la reprise après panne archive les nouvelles positions et efface l'erreur", async () => {
+    await cycleInstantane(d, { fetchImpl: amont(() => compte()), now: T0, symboles: ["BTCUSDT"] });
+    await cycleInstantane(d, {
+      fetchImpl: amont(() => new Response("indisponible", { status: 503 })),
+      now: T0 + 600_000,
+      symboles: ["BTCUSDT"],
+    });
+    const n = await cycleInstantane(d, {
+      fetchImpl: amont(() => compte(82_000)), now: T0 + 1_200_000, symboles: ["BTCUSDT"],
+    });
+
+    expect(n).toBe(1);
+    expect(archives()).toEqual([
+      { ts: T0, coin: "BTC", niveaux: "[[80000,0,90000]]", adresses: 1 },
+      { ts: T0 + 1_200_000, coin: "BTC", niveaux: "[[82000,0,90000]]", adresses: 1 },
+    ]);
+    expect(santeHlHeat().dernierInstantaneTs).toBe(T0 + 1_200_000);
+    expect(santeHlHeat().derniereErreur).toBeNull();
+  });
+
+  test("un compte interrogé sans positions reste une observation vide valide pour chaque coin", async () => {
+    const n = await cycleInstantane(d, {
+      fetchImpl: amont(() => compte(null)), now: T0, symboles: ["BTCUSDT", "ETHUSDT"],
+    });
+    expect(n).toBe(2);
+    expect(archives()).toEqual([
+      { ts: T0, coin: "BTC", niveaux: "[]", adresses: 1 },
+      { ts: T0, coin: "ETH", niveaux: "[]", adresses: 1 },
+    ]);
+    expect(santeHlHeat().derniereErreur).toBeNull();
+  });
+
+  test("un collecteur rejoignant une acquisition UI en panne ne reçoit pas son repli périmé", async () => {
+    await cycleInstantane(d, { fetchImpl: amont(() => compte()), now: T0, symboles: ["BTCUSDT"] });
+    const reponse = Promise.withResolvers<Response>();
+    const requetePartie = Promise.withResolvers<void>();
+    const fetchImpl = amont(() => {
+      requetePartie.resolve();
+      return reponse.promise;
+    });
+    const lectureUi = obtenirInstantane(d, fetchImpl, T0 + 600_000);
+    await requetePartie.promise;
+    const collecte = cycleInstantane(d, { fetchImpl, now: T0 + 600_001, symboles: ["BTCUSDT"] });
+    reponse.resolve(new Response("indisponible", { status: 503 }));
+
+    expect((await lectureUi)?.ts).toBe(T0);
+    expect(await collecte).toBe(0);
+    expect(archives().map((l) => l.ts)).toEqual([T0]);
+    expect(santeHlHeat().dernierInstantaneTs).toBe(T0);
+    expect(santeHlHeat().derniereErreur).toContain("indisponible");
+  });
+
+  test("un scan UI lent rejoint par le collecteur garde sa date d'observation, sans seuil d'âge", async () => {
+    const reponse = Promise.withResolvers<Response>();
+    const requetePartie = Promise.withResolvers<void>();
+    const fetchImpl = amont(() => {
+      requetePartie.resolve();
+      return reponse.promise;
+    });
+    const lectureUi = obtenirInstantane(d, fetchImpl, T0);
+    await requetePartie.promise;
+    // Horloges logiques séparées : le scan commencé par l'UI peut précéder largement
+    // le cycle qui le rejoint. Il est neuf, même si sa construction prend du temps.
+    const collecte = cycleInstantane(d, {
+      fetchImpl, now: T0 + 10 * PERIODE_INSTANTANE_MS, symboles: ["BTCUSDT"],
+    });
+    reponse.resolve(compte());
+
+    expect((await lectureUi)?.ts).toBe(T0);
+    expect(await collecte).toBe(1);
+    expect(archives()).toEqual([{ ts: T0, coin: "BTC", niveaux: "[[80000,0,90000]]", adresses: 1 }]);
+    expect(santeHlHeat().dernierInstantaneTs).toBe(T0);
+    expect(santeHlHeat().derniereErreur).toBeNull();
   });
 });
 

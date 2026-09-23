@@ -14,9 +14,9 @@
  *   3bis. `params.intrabar` (optionnel, défaut ABSENT = comportement 3) évalue stop et
  *      objectif sur le HIGH/LOW des barres DÉTENUES, au niveau touché — la barre
  *      d'entrée incluse (le fill d'entrée est à son open, donc antérieur au high/low).
- *      Convention conservatrice : si stop ET objectif sont touchés dans la même barre,
- *      le STOP est exécuté d'abord ; une barre qui ouvre au-delà du niveau (gap) remplit
- *      à l'OPEN, pas au niveau. Les sorties par RÈGLE gardent le modèle clôture → open+1.
+ *      Un niveau déjà franchi à l'OPEN (gap) est exécuté à l'OPEN ; pour les touches
+ *      ultérieures ambiguës dans la même barre, le STOP est prioritaire. Les sorties
+ *      par RÈGLE gardent le modèle clôture → open+1.
  *   4. Une seule position à la fois (pas de pyramidage). La position encore ouverte à la
  *      fin de la série est marquée au dernier close (raison "fin-donnees").
  *
@@ -304,7 +304,8 @@ export function calculerFundingTrade(
  * Excursions d'une position sur les barres DÉTENUES `[indexEntree, indexFinExclusif[`, en %
  * du prix d'entrée : MAE = pire mouvement adverse (≤ 0), MFE = meilleur mouvement favorable
  * (≥ 0), tous deux bornés à 0 (une position qui ne repasse jamais sous son entrée a une MAE
- * nulle). PURE.
+ * nulle). Si la sortie est certaine dès l'open, seule son prix de fill est connu pendant
+ * la détention sur cette barre : ses high/low ultérieurs sont exclus. PURE.
  */
 function excursions(
   sens: SensPosition,
@@ -312,12 +313,18 @@ function excursions(
   candles: Candle[],
   indexEntree: number,
   indexFinExclusif: number,
+  prixSortieALOuverture: number | null = null,
 ): { maePct: number; mfePct: number } {
   let plusHaut = -Infinity;
   let plusBas = Infinity;
   for (let j = indexEntree; j < indexFinExclusif; j++) {
     const b = candles[j];
     if (b === undefined) continue;
+    if (prixSortieALOuverture !== null && j === indexFinExclusif - 1) {
+      plusHaut = Math.max(plusHaut, prixSortieALOuverture);
+      plusBas = Math.min(plusBas, prixSortieALOuverture);
+      continue;
+    }
     if (b.high > plusHaut) plusHaut = b.high;
     if (b.low < plusBas) plusBas = b.low;
   }
@@ -334,6 +341,7 @@ function excursions(
  * long (inversé pour un short) ; frais = fraisPct sur le notionnel de CHAQUE côté.
  * `indexFinExclusif` borne les barres détenues pour les excursions : la barre de fill
  * d'une sortie ordinaire (`indexSortie`), ou `n` pour une sortie fin-donnees.
+ * Pour un niveau franchi à l'open, le fill remplace les high/low de la barre de sortie.
  */
 function cloturerTrade(
   pos: PositionOuverte,
@@ -346,6 +354,7 @@ function cloturerTrade(
   params: ParamsBacktest,
   candles: Candle[],
   indexFinExclusif: number,
+  prixSortieALOuverture: number | null = null,
 ): TradeResultat {
   const notionnelEntree = pos.quantite * pos.prixEntree; // ≈ strat.tailleFixe
   const notionnelSortie = pos.quantite * prixSortie;
@@ -386,7 +395,7 @@ function cloturerTrade(
     dureeMs: instantSortieEffectif - pos.tempsEntree,
     risqueInitial,
     r,
-    ...excursions(pos.sens, pos.prixEntree, candles, pos.indexEntree, indexFinExclusif),
+    ...excursions(pos.sens, pos.prixEntree, candles, pos.indexEntree, indexFinExclusif, prixSortieALOuverture),
   };
 }
 
@@ -438,30 +447,35 @@ function decisionSortie(
  *  - niveau touché → fill AU NIVEAU (un ordre stop devient market au toucher) ;
  *  - barre ouverte au-delà (gap) → fill à l'OPEN, jamais au niveau : un long stoppé
  *    sous son stop, un short stoppé au-dessus, un objectif atteint mieux que prévu ;
- *  - stop prioritaire si les deux niveaux sont touchés dans la même barre (conservateur :
- *    on ne peut pas savoir lequel est venu en premier avec des bougies OHLC).
+ *  - niveaux franchis à l'OPEN avant les touches high/low ; pour deux touches
+ *    ultérieures, stop prioritaire (OHLC ne révèle pas leur ordre).
  */
 function sortieIntrabar(
   pos: PositionOuverte,
   barre: Candle,
   strat: StrategieDef,
-): { raison: RaisonSortie; prix: number } | null {
+): { raison: RaisonSortie; prix: number; aOuverture: boolean } | null {
+  const seuilTarget = strat.targetPct !== undefined && strat.targetPct > 0
+    ? pos.prixEntree * (pos.sens === "long" ? 1 + strat.targetPct / 100 : 1 - strat.targetPct / 100)
+    : null;
+  if (pos.niveauStop !== null) {
+    const gapStop = pos.sens === "long" ? barre.open <= pos.niveauStop : barre.open >= pos.niveauStop;
+    if (gapStop) return { raison: "stop", prix: barre.open, aOuverture: true };
+  }
+  if (seuilTarget !== null) {
+    const gapTarget = pos.sens === "long" ? barre.open >= seuilTarget : barre.open <= seuilTarget;
+    if (gapTarget) return { raison: "target", prix: barre.open, aOuverture: true };
+  }
   if (pos.niveauStop !== null) {
     const touche = pos.sens === "long" ? barre.low <= pos.niveauStop : barre.high >= pos.niveauStop;
     if (touche) {
-      const prix = pos.sens === "long" ? Math.min(pos.niveauStop, barre.open) : Math.max(pos.niveauStop, barre.open);
-      return { raison: "stop", prix };
+      return { raison: "stop", prix: pos.niveauStop, aOuverture: false };
     }
   }
-  if (strat.targetPct !== undefined && strat.targetPct > 0) {
-    const seuil =
-      pos.sens === "long"
-        ? pos.prixEntree * (1 + strat.targetPct / 100)
-        : pos.prixEntree * (1 - strat.targetPct / 100);
-    const touche = pos.sens === "long" ? barre.high >= seuil : barre.low <= seuil;
+  if (seuilTarget !== null) {
+    const touche = pos.sens === "long" ? barre.high >= seuilTarget : barre.low <= seuilTarget;
     if (touche) {
-      const prix = pos.sens === "long" ? Math.max(seuil, barre.open) : Math.min(seuil, barre.open);
-      return { raison: "target", prix };
+      return { raison: "target", prix: seuilTarget, aOuverture: false };
     }
   }
   return null;
@@ -590,11 +604,10 @@ export function runBacktest(
         : null;
       if (intrabar !== null) {
         const prixSortie = fillSortie(intrabar.prix, pos.sens, params.slippagePct);
-        // Barre i = barre de fill : elle est DÉTENUE (excursions incluses, `i + 1`), et
-        // l'instant de sortie effectif reste borné à son open (aucun règlement de funding
-        // postérieur n'est imputé à la position).
+        // La barre i est détenue ; en gap à l'open ses high/low ultérieurs ne comptent
+        // pas, seul le fill connu compte. Le funding reste borné à cet open.
         trades.push(
-          cloturerTrade(pos, prixSortie, barreDecision.time, barreDecision.time, i, intrabar.raison, strat, params, candles, i + 1),
+          cloturerTrade(pos, prixSortie, barreDecision.time, barreDecision.time, i, intrabar.raison, strat, params, candles, i + 1, intrabar.aOuverture ? prixSortie : null),
         );
         pos = null;
       } else {
@@ -611,23 +624,28 @@ export function runBacktest(
     }
   }
 
-  // Position résiduelle : marquée au dernier close (aucun open suivant disponible).
+  // Aucun open suivant : évaluer encore les niveaux intrabar de la dernière barre
+  // détenue (y compris si l'entrée vient d'être remplie à son open).
   if (pos !== null && n > 0) {
     const derniere = candles[n - 1];
     if (derniere !== undefined) {
-      const prixSortie = fillSortie(derniere.close, pos.sens, params.slippagePct);
+      const intrabar = params.intrabar === true && pos.indexEntree <= n - 1
+        ? sortieIntrabar(pos, derniere, strat)
+        : null;
+      const prixSortie = fillSortie(intrabar?.prix ?? derniere.close, pos.sens, params.slippagePct);
       trades.push(
         cloturerTrade(
           pos,
           prixSortie,
           derniere.time,
-          params.finDonneesMs ?? derniere.time,
+          intrabar === null ? params.finDonneesMs ?? derniere.time : derniere.time,
           n - 1,
-          "fin-donnees",
+          intrabar?.raison ?? "fin-donnees",
           strat,
           params,
           candles,
           n,
+          intrabar?.aOuverture ? prixSortie : null,
         ),
       );
       pos = null;

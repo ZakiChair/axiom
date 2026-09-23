@@ -34,6 +34,9 @@ vi.mock("../data/onchain/mempool", () => ({
 vi.mock("../data/hyperliquidFunding", () => ({
   fetchHlFundingHistory: vi.fn(),
 }));
+vi.mock("../data/binanceFunding", () => ({
+  fetchBinanceFundingHourly: vi.fn(),
+}));
 vi.mock("../data/daemon", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../data/daemon")>();
   return { ...actual, hlLiqHeatGet: vi.fn() };
@@ -43,6 +46,7 @@ import { AuxProvider } from "./auxProvider";
 import { coinalyzeProvider, fetchLiquidationHistory } from "../data/coinalyze";
 import { fetchHashrate } from "../data/onchain/mempool";
 import { fetchHlFundingHistory } from "../data/hyperliquidFunding";
+import { fetchBinanceFundingHourly } from "../data/binanceFunding";
 import { hlLiqHeatGet } from "../data/daemon";
 import { stablecoinsSupplyProvider } from "../data/macro/stablecoins";
 import { fetchBgeometricMetrique } from "../data/onchain/bgeometrics";
@@ -63,6 +67,7 @@ const oiFallbackMock = vi.mocked(histOiUsd);
 const liqHistMock = vi.mocked(fetchLiquidationHistory);
 const mempoolMock = vi.mocked(fetchHashrate);
 const hlFundingMock = vi.mocked(fetchHlFundingHistory);
+const binanceFundingMock = vi.mocked(fetchBinanceFundingHourly);
 const hlHeatMock = vi.mocked(hlLiqHeatGet);
 
 /** Point OpenInterest de test (seul `oiUsd` est lu par l'AuxProvider). */
@@ -104,6 +109,7 @@ describe("AuxProvider.getAligned", () => {
     coinalyzeKeyStore.setState({ hasKey: true });
     oiFallbackMock.mockResolvedValue(null);
     fundingFallbackMock.mockResolvedValue(null);
+    binanceFundingMock.mockResolvedValue([]);
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -608,6 +614,145 @@ describe("AuxProvider — Lot 2 (liq flux, hashrate, BG, HL)", () => {
     expect(hlFundingMock).toHaveBeenCalledWith("ETH", expect.any(Number));
     const status = p.getAligned(req(["hlFunding"], "ETHUSDT", "1h"), () => {});
     expect(status.status).toBe("ready");
+  });
+
+  it("le spread utilise uniquement Binance et ne reporte aucun taux au-delà du règlement attendu", async () => {
+    const H = 3_600_000;
+    coinalyzeKeyStore.setState({ hasKey: true });
+    binanceFundingMock.mockResolvedValue([
+      { time: 2 * H + 4, value: 0.00001, validUntil: 3 * H + 4 },
+    ]);
+    const p = new AuxProvider();
+    const r = {
+      exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
+      ids: ["binanceFundingHourly" as const], candleTimes: [0, H, 2 * H, 3 * H, 4 * H],
+    };
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(p.getAligned(r, () => {})).toEqual({
+      status: "ready", aux: { binanceFundingHourly: [undefined, undefined, 0.00001, undefined, undefined] },
+    });
+    expect(binanceFundingMock).toHaveBeenCalledWith("BTCUSDT", expect.any(Number));
+    expect(fundingMock).not.toHaveBeenCalled();
+    expect(fundingFallbackMock).not.toHaveBeenCalled();
+  });
+
+  it("un règlement de type inconnu coupe immédiatement la série au lieu d'un LOCF", async () => {
+    const H = 3_600_000;
+    binanceFundingMock.mockResolvedValue([
+      { time: H, value: 0.00001, validUntil: 2 * H },
+      { time: H + 30_000, value: undefined, validUntil: undefined },
+    ]);
+    const p = new AuxProvider();
+    const r = {
+      exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
+      ids: ["binanceFundingHourly" as const], candleTimes: [0, H, 2 * H],
+    };
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(p.getAligned(r, () => {})).toEqual({
+      status: "ready", aux: { binanceFundingHourly: [0.00001, undefined, undefined] },
+    });
+  });
+
+  it("la dernière bougie live lit seulement jusqu'à maintenant, puis expire sans prochain règlement", async () => {
+    const H = 3_600_000;
+    vi.useFakeTimers();
+    try {
+      binanceFundingMock.mockResolvedValue([{ time: 16 * H, value: 0.00001, validUntil: 24 * H }]);
+      const r = {
+        exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "4h" as const,
+        ids: ["binanceFundingHourly" as const], candleTimes: [16 * H, 20 * H],
+      };
+      vi.setSystemTime(20.5 * H);
+      const live = new AuxProvider();
+      await new Promise<void>((resolve) => live.getAligned(r, resolve));
+      expect(live.getAligned(r, () => {})).toEqual({
+        status: "ready", aux: { binanceFundingHourly: [0.00001, 0.00001] },
+      });
+
+      vi.setSystemTime(24 * H);
+      const expire = new AuxProvider();
+      await new Promise<void>((resolve) => expire.getAligned(r, resolve));
+      expect(expire.getAligned(r, () => {})).toEqual({
+        status: "ready", aux: { binanceFundingHourly: [0.00001, undefined] },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("un trou de bougies ne lit pas un règlement publié après la vraie clôture", async () => {
+    const H = 3_600_000;
+    binanceFundingMock.mockResolvedValue([{ time: 2 * H, value: 0.00001, validUntil: 4 * H }]);
+    const p = new AuxProvider();
+    const r = {
+      exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const,
+      ids: ["binanceFundingHourly" as const], candleTimes: [0, 3 * H, 4 * H],
+    };
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(p.getAligned(r, () => {})).toEqual({
+      status: "ready", aux: { binanceFundingHourly: [undefined, undefined, undefined] },
+    });
+  });
+
+  it("borne aussi un trou sur l'intervalle 3m non couvert par le helper backtest", async () => {
+    const M = 60_000;
+    binanceFundingMock.mockResolvedValue([{ time: 6 * M, value: 0.00001, validUntil: 10 * M }]);
+    const p = new AuxProvider();
+    const r = {
+      exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "3m" as const,
+      ids: ["binanceFundingHourly" as const], candleTimes: [0, 9 * M, 12 * M],
+    };
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(p.getAligned(r, () => {})).toEqual({
+      status: "ready", aux: { binanceFundingHourly: [undefined, undefined, undefined] },
+    });
+  });
+
+  it.each([
+    {
+      nom: "1M avec juin manquant",
+      timeframe: "1M" as const,
+      candleTimes: [Date.UTC(2024, 4, 1), Date.UTC(2024, 6, 1), Date.UTC(2024, 7, 1)],
+      publication: Date.UTC(2024, 5, 15), expiration: Date.UTC(2024, 7, 1),
+    },
+    {
+      nom: "3M avec trimestre manquant",
+      timeframe: "3M" as const,
+      candleTimes: [Date.UTC(2024, 0, 1), Date.UTC(2024, 6, 1), Date.UTC(2024, 9, 1)],
+      publication: Date.UTC(2024, 4, 1), expiration: Date.UTC(2024, 8, 1),
+    },
+    {
+      nom: "février bissextile avec mars manquant",
+      timeframe: "1M" as const,
+      candleTimes: [Date.UTC(2024, 1, 1), Date.UTC(2024, 3, 1), Date.UTC(2024, 4, 1)],
+      publication: Date.UTC(2024, 2, 1) + 1, expiration: Date.UTC(2024, 4, 1),
+    },
+  ])("$nom : pas de lecture après la vraie clôture UTC", async ({ timeframe, candleTimes, publication, expiration }) => {
+    binanceFundingMock.mockResolvedValue([{ time: publication, value: 0.00001, validUntil: expiration }]);
+    const p = new AuxProvider();
+    const r = {
+      exchange: "binance" as const, symbol: "BTCUSDT", timeframe,
+      ids: ["binanceFundingHourly" as const], candleTimes,
+    };
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(p.getAligned(r, () => {})).toEqual({
+      status: "ready", aux: { binanceFundingHourly: [undefined, undefined, undefined] },
+    });
+  });
+
+  it("inclut un règlement exactement publié à la clôture de février bissextile", async () => {
+    const fevrier = Date.UTC(2024, 1, 1);
+    const mars = Date.UTC(2024, 2, 1);
+    binanceFundingMock.mockResolvedValue([{ time: mars, value: 0.00001, validUntil: Date.UTC(2024, 2, 2) }]);
+    const p = new AuxProvider();
+    const r = {
+      exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1M" as const,
+      ids: ["binanceFundingHourly" as const], candleTimes: [fevrier, mars],
+    };
+    await new Promise<void>((resolve) => p.getAligned(r, resolve));
+    expect(p.getAligned(r, () => {})).toEqual({
+      status: "ready", aux: { binanceFundingHourly: [0.00001, undefined] },
+    });
   });
 
   it("hlFunding : conserve la casse native kPEPE et son multiplicateur", async () => {

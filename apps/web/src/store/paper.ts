@@ -111,6 +111,7 @@ function estPositionValide(v: unknown): v is PositionPaper {
   if (typeof p.id !== "string" || typeof p.symbol !== "string") return false;
   if (p.direction !== "long" && p.direction !== "short") return false;
   if (!estNombre(p.taille) || !estNombre(p.prixEntree) || !estNombre(p.ouvertTs)) return false;
+  if (p.stopInitial !== undefined && !estNombreOuNull(p.stopInitial)) return false;
   return estNombreOuNull(p.tp) && estNombreOuNull(p.sl);
 }
 

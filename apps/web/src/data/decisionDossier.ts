@@ -1,6 +1,7 @@
 /** Preuve compacte d'une alerte au moment du déclenchement et dossier de décision. */
 import { METRIQUES_ONCHAIN_ALERTE, type AlertDef, type ContexteAlerte, type Declenchement } from "@axiom/alerts";
 import { EXCHANGE_IDS, type Candle, type ExchangeId, type Timeframe } from "@axiom/types";
+import { validerLectureAnalyse, type LectureAnalyse } from "./analyseMultidomaine";
 
 type ConditionAlerte = AlertDef["condition"];
 export type BougiePreuve = Pick<Candle, "time" | "open" | "high" | "low" | "close" | "volume">;
@@ -34,7 +35,10 @@ export interface OrigineDecision {
 export interface PreuveDeclenchement {
   origine: OrigineDecision;
   contexte: ContexteDecision;
+  analyse?: AnalyseAuSignal;
 }
+
+export interface AnalyseAuSignal { schemaVersion: 1; captureLe: number; lectures: LectureAnalyse[] }
 
 export type DeclenchementEnrichi = Declenchement & { preuve?: PreuveDeclenchement };
 
@@ -45,12 +49,14 @@ export interface DossierDecision {
   qualite: "complete" | "partielle";
   origine: OrigineDecision;
   contexte: ContexteDecision;
+  analyse?: AnalyseAuSignal;
   these: string;
   invalidation: string;
   revue: string;
 }
 
 const fini = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const dateValide = (v: unknown): v is number => fini(v) && Number.isFinite(new Date(v).getTime());
 const objet = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 const nonVide = (v: unknown): v is string => typeof v === "string" && v.length > 0;
 const parmi = (v: unknown, valeurs: readonly string[]): v is string => typeof v === "string" && valeurs.includes(v);
@@ -59,6 +65,27 @@ const TIMEFRAMES: readonly string[] = ["1s", "5s", "15s", "1m", "3m", "5m", "15m
 const COMPARATEURS = [">", ">=", "<", "<="];
 const SENS = ["hausse", "baisse", "les-deux"];
 const METRIQUES_FLUX = ["etf-btc-ratio", "etf-eth-ratio", "etf-sol-ratio", "stablecoins-variation-7j", "realized-cap-variation-30j", "realized-cap-variation-90j", "exchange-netflow"];
+
+/** Frontière commune du journal, du dossier et des cohortes ; aucune recapture tardive. */
+export function validerAnalyseAuSignal(brut: unknown, ts: number): AnalyseAuSignal | null {
+  if (!objet(brut) || !champs(brut, ["schemaVersion", "captureLe", "lectures"])
+    || Object.keys(brut).length !== 3 || brut.schemaVersion !== 1 || !dateValide(brut.captureLe) || brut.captureLe > ts
+    || !Array.isArray(brut.lectures) || brut.lectures.length > 50) return null;
+  const ids = new Set<string>();
+  for (const entree of brut.lectures) {
+    const lecture = validerLectureAnalyse(entree);
+    if (lecture === null || ids.has(lecture.id) || !dateValide(lecture.horizon.depuis)
+      || !dateValide(lecture.horizon.jusqua) || !dateValide(lecture.recupereLe)
+      || (lecture.observeLe !== null && !dateValide(lecture.observeLe))
+      || (lecture.validiteJusqua !== null && !dateValide(lecture.validiteJusqua))
+      || lecture.recupereLe > brut.captureLe || lecture.horizon.jusqua > brut.captureLe
+      || (lecture.observeLe !== null && lecture.observeLe > brut.captureLe)
+      || (lecture.validiteJusqua !== null && brut.captureLe >= lecture.validiteJusqua
+        && lecture.statut !== "perime" && lecture.statut !== "indisponible")) return null;
+    ids.add(lecture.id);
+  }
+  return structuredClone(brut) as unknown as AnalyseAuSignal;
+}
 
 /** Valide les formes lues depuis le stockage avant toute description ou archivage. */
 export function conditionDecisionValide(v: unknown): v is ConditionAlerte {
@@ -109,6 +136,8 @@ function contextePreuveValide(v: unknown, ts: number): v is ContexteDecision {
 export function projeterPreuveDeclenchement(d: DeclenchementEnrichi): PreuveDeclenchement | null {
   const p = d.preuve;
   if (!objet(p) || !objet(p.origine) || !contextePreuveValide(p.contexte, d.ts)) return null;
+  const analyse = p.analyse === undefined ? undefined : validerAnalyseAuSignal(p.analyse, d.ts);
+  if (p.analyse !== undefined && analyse === null) return null;
   const o = p.origine;
   if (o.alertId !== d.alertId || o.ts !== d.ts || o.valeur !== d.valeur || o.message !== d.message
     || !nonVide(o.symbol) || !parmi(o.source, EXCHANGE_IDS) || (o.timeframe !== null && !parmi(o.timeframe, TIMEFRAMES))
@@ -125,7 +154,7 @@ export function projeterPreuveDeclenchement(d: DeclenchementEnrichi): PreuveDecl
     ...(c.fluxCapitaux ? { fluxCapitaux: { ...c.fluxCapitaux } } : {}),
     ...(c.baleines ? { baleines: { ...c.baleines } } : {}),
     ...(c.derniereBougie ? { derniereBougie: { ...c.derniereBougie } } : {}),
-  } };
+  }, ...(analyse ? { analyse } : {}) };
 }
 
 /** Copie une seule bougie connue au temps du signal, sans garder la série OHLC. */
@@ -169,7 +198,8 @@ export function contexteDecision(ctx: ContexteAlerte, ts: number): ContexteDecis
 }
 
 /** Capture l'origine tant que la définition existe ; aucun lookup différé du marché. */
-export function enrichirDeclenchement(d: Declenchement, def: AlertDef, ctx: ContexteAlerte): DeclenchementEnrichi {
+export function enrichirDeclenchement(d: Declenchement, def: AlertDef, ctx: ContexteAlerte, lectures?: readonly LectureAnalyse[]): DeclenchementEnrichi {
+  const analyse = lectures === undefined ? undefined : validerAnalyseAuSignal({ schemaVersion: 1, captureLe: d.ts, lectures }, d.ts);
   return {
     ...d,
     preuve: {
@@ -177,6 +207,7 @@ export function enrichirDeclenchement(d: Declenchement, def: AlertDef, ctx: Cont
         timeframe: def.timeframe ?? null, condition: JSON.parse(JSON.stringify(def.condition)) as ConditionAlerte,
         valeur: d.valeur, message: d.message, ...(d.instantane ? { instantane: { ...d.instantane } } : {}) },
       contexte: contexteDecision(ctx, d.ts),
+      ...(analyse ? { analyse } : {}),
     },
   };
 }
@@ -191,6 +222,7 @@ export function creerDossierDepuisJournal(id: string, d: DeclenchementEnrichi, c
         condition: null, valeur: d.valeur, message: d.message,
         ...(d.instantane ? { instantane: { ...d.instantane } } : {}) },
     contexte: preuve ? JSON.parse(JSON.stringify(preuve.contexte)) as ContexteDecision : {},
+    ...(preuve?.analyse ? { analyse: structuredClone(preuve.analyse) } : {}),
     these: "", invalidation: "", revue: "",
   };
 }

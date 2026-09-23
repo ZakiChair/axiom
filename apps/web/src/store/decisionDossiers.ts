@@ -1,7 +1,7 @@
 import { createStore } from "zustand/vanilla";
 import { EXCHANGE_IDS } from "@axiom/types";
 import { miroiterTravailPersonnel } from "../data/daemon";
-import { conditionDecisionValide, creerDossierDepuisJournal, projeterPreuveDeclenchement, type DeclenchementEnrichi, type DossierDecision } from "../data/decisionDossier";
+import { conditionDecisionValide, creerDossierDepuisJournal, projeterPreuveDeclenchement, validerAnalyseAuSignal, type DeclenchementEnrichi, type DossierDecision } from "../data/decisionDossier";
 
 export const CLE_DOSSIERS_DECISION = "axiom:decisionDossiers:v1";
 export const MAX_DOSSIERS_DECISION = 100;
@@ -43,8 +43,9 @@ function dossierValide(v: unknown): v is DossierDecision {
     && (o.timeframe === null || (typeof o.timeframe === "string" && TIMEFRAMES.has(o.timeframe)))
     && (o.condition === null || conditionDecisionValide(o.condition))
     && Object.values(v.contexte).every((x) => x === null || fini(x) || typeof x === "string" || objet(x))
+    && (v.analyse === undefined || validerAnalyseAuSignal(v.analyse, o.ts as number) !== null)
     && (v.qualite !== "complete" || projeterPreuveDeclenchement({ alertId: o.alertId, ts: o.ts, valeur: o.valeur,
-      message: o.message, preuve: { origine: o, contexte: v.contexte } } as unknown as DeclenchementEnrichi) !== null);
+      message: o.message, preuve: { origine: o, contexte: v.contexte, ...(v.analyse === undefined ? {} : { analyse: v.analyse }) } } as unknown as DeclenchementEnrichi) !== null);
 }
 
 function serialiser(dossiers: DossierDecision[]): string {

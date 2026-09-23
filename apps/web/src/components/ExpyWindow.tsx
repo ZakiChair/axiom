@@ -33,6 +33,7 @@ import { formatDec } from "../lib/format";
 import { Badge, Bouton, EnTeteFenetre, Segmente, Vide, type TonBadge } from "./ui";
 import { DecisionDossiers } from "./DecisionDossiers";
 import { decisionDossiersStore } from "../store/decisionDossiers";
+import { ContexteResultats } from "./expy/ContexteResultats";
 
 // ─────────────────────────── Formatage ───────────────────────────
 
@@ -734,6 +735,7 @@ export function ExpyWindow() {
             </div>
           )}
         </section>
+        <ContexteResultats trades={trades} dossiers={dossiers} />
         <DecisionDossiers />
       </div>
     </>

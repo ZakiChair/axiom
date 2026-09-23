@@ -22,7 +22,8 @@ if [[ "${1:-}" == "--e2e" && "$#" == 1 ]]; then
     niveaux-chart omon-lectures-options revue-cycle term-portage-tbill des-oi-perps-dex des-flux-takers chain-mineurs-cotes \
     sources-automatiques \
     quatre-lots-sauvegardes quatre-lots-backtest quatre-lots-funding-indicateurs \
-    quatre-lots-decisions quatre-lots-alertes quatre-lots-indicateurs quatre-lots-data
+    quatre-lots-decisions quatre-lots-alertes quatre-lots-indicateurs quatre-lots-data \
+    analyse-liquidite analyse-macro analyse-chain-geo analyse-brief analyse-risque-carry analyse-expy
 elif [[ "$#" != 0 ]]; then
   echo "Usage : $0 [--e2e]" >&2
   exit 2

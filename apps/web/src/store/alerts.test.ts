@@ -267,9 +267,11 @@ describe("lireInitial — hydratation par élément (un item corrompu est écart
     localStorage.setItem("axiom:alerts:v1", JSON.stringify({ defs: [], journal: [
       { ...base, preuve: { origine: { ...origine, condition: { type: "composite", conditions: null } }, contexte: {} } },
       { ...base, alertId: "b", preuve: { origine: { ...origine, alertId: "b" }, contexte: { derniereBougie: { time: 3_000, open: 1, high: 1, low: 1, close: 1, volume: 1 } } } },
+      { ...base, alertId: "c", preuve: { origine: { ...origine, alertId: "c" }, contexte: {},
+        analyse: { schemaVersion: 1, captureLe: 2_001, lectures: [] } } },
     ] }));
     const journal = lireInitial().journal;
-    expect(journal.map((d) => d.alertId)).toEqual(["a", "b"]);
+    expect(journal.map((d) => d.alertId)).toEqual(["a", "b", "c"]);
     expect(journal.every((d) => d.preuve === undefined)).toBe(true);
   });
 });

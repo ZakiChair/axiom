@@ -58,6 +58,8 @@ import { marketStore } from "../store/market";
 import { orderflowStore } from "../store/orderflow";
 import { presetAlertsStore, type AlertePreset } from "../store/presetAlerts";
 import { fluxCapitauxStore } from "../store/fluxCapitaux";
+import { remplacerLectures } from "../store/analyseMultidomaine";
+import type { LectureAnalyse } from "../data/analyseMultidomaine";
 
 /** Bougie plate au prix donné (les champs OHLC égaux suffisent au moteur). */
 function bougie(time: number, close: number, closed: boolean): Candle {
@@ -97,6 +99,27 @@ beforeEach(() => {
 });
 
 describe("alerte lente de flux sans panneau ouvert", () => {
+  it("fige le registre avant les abonnés synchrones de l'alerte", () => {
+    const maintenant = Date.UTC(2026, 8, 9, 12);
+    vi.spyOn(Date, "now").mockReturnValue(maintenant);
+    const lecture: LectureAnalyse = { id: "us", domaine: "quadrant", nature: "observation", conclusion: "A",
+      tags: [{ cle: "quadrant", valeur: "A" }], instrument: null,
+      horizon: { depuis: maintenant - 1000, jusqua: maintenant - 1000 }, unite: null, valeur: null,
+      source: "FRED", observeLe: maintenant - 1000, recupereLe: maintenant - 1000,
+      validiteJusqua: maintenant + 1000, statut: "frais", couverture: null, limites: [],
+      preuve: { fenetre: "RATE", reference: "US" } };
+    remplacerLectures("quadrant", [lecture]);
+    alertsStore.setState({ defs: defsFlux(["stablecoins-variation-7j"]), journal: [] });
+    fluxCapitauxStore.setState({ donnees: { recupereLe: maintenant, metriques: metriquesFlux(["stablecoins-variation-7j"], 1, maintenant) } });
+    stop = demarrerAlertes();
+    const arreter = alertsStore.subscribe((state) => {
+      if (state.defs[0]?.arme === false) remplacerLectures("quadrant", [{ ...lecture, conclusion: "B", tags: [{ cle: "quadrant", valeur: "B" }] }]);
+    });
+    fluxCapitauxStore.setState({ donnees: { recupereLe: maintenant, metriques: metriquesFlux(["stablecoins-variation-7j"], 3, maintenant) } });
+    arreter();
+    expect(alertsStore.getState().journal[0]?.preuve?.analyse?.lectures[0]?.conclusion).toBe("A");
+    remplacerLectures("quadrant", []);
+  });
   const metriquesFlux = (ids: readonly ("stablecoins-variation-7j" | "realized-cap-variation-30j" | "realized-cap-variation-90j")[], valeur: number, maintenant: number) => ids.map((id) => ({
     id, libelle: id, valeur, unite: "%", periode: "jour", observeLe: maintenant, source: "source", alerte: true,
     qualite: { sourceId: id, sourceEffective: "source", observeLe: maintenant, recupereLe: maintenant, cadenceMs: 86_400_000,

@@ -69,6 +69,7 @@ import { extUrl } from "../data/extapi";
 import { AGE_MAX_FLUX_MS } from "../data/onchain/fluxCapitaux.contract";
 import { fluxCapitauxStore, garderFluxCapitauxPourAlertes } from "../store/fluxCapitaux";
 import { enrichirDeclenchement } from "../data/decisionDossier";
+import { capturerLectures } from "../store/analyseMultidomaine";
 
 /** Types de condition évalués sur la clôture de bougie (nécessitent les bougies). */
 const TYPES_BOUGIE = new Set(["variation-pct", "indicateur-seuil", "indicateur-croisement"]);
@@ -101,9 +102,11 @@ function appliquerResultat(lot: AlertDef[], ctx: ContexteAlerte): void {
   if (lot.length === 0) return;
   const res = evaluerAlertes(lot, ctx);
   if (!res.modifie) return;
+  // Les abonnés de l'écriture suivante sont synchrones et peuvent modifier le registre.
+  const captures = res.declenchements.map((d) => capturerLectures(d.ts));
   const store = alertsStore.getState();
   store.appliquerMisesAJour(res.defs); // fusion par id (n'écrase pas les defs hors lot)
-  for (const d of res.declenchements) {
+  for (const [index, d] of res.declenchements.entries()) {
     // Une autre subscription synchrone peut supprimer ou désactiver la définition
     // pendant l'application des états. Ne pas notifier un ancien snapshot de defs.
     const def = lot.find((candidate) => candidate.id === d.alertId);
@@ -111,7 +114,7 @@ function appliquerResultat(lot: AlertDef[], ctx: ContexteAlerte): void {
     const encoreNotifiable = (): boolean => alertsStore.getState().defs.some((courante) =>
       courante.id === d.alertId && courante.expireTs === def.expireTs && alerteActiveAuTemps(courante, Date.now()));
     if (!encoreNotifiable()) continue;
-    store.ajouterJournal(enrichirDeclenchement(d, def, ctx));
+    store.ajouterJournal(enrichirDeclenchement(d, def, ctx, captures[index]));
     // Le journal déclenche des abonnés synchrones ; l'échéance ou la génération
     // peut changer entre l'archivage du signal et l'envoi externe.
     if (!encoreNotifiable()) continue;

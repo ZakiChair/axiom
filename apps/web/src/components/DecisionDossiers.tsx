@@ -10,7 +10,7 @@ import { navigateTo } from "../lib/navigation";
 import { BTN_SECONDAIRE, ErreurBloc, NoteSource, TitreSection } from "./ui";
 
 function date(ms: number): string {
-  return new Date(ms).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return `${new Date(ms).toLocaleString("fr-FR", { timeZone: "UTC", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })} UTC`;
 }
 
 function decrireContexte(c: ContexteDecision): string[] {
@@ -56,6 +56,8 @@ function DossierLigne({ dossier }: { dossier: DossierDecision }) {
     </div>
     <p className="text-text-dim">Alerte {origine.alertId} · valeur {origine.valeur} · condition {origine.condition ? decrireCondition(origine.condition) : "inconnue"}</p>
     <p className="text-text-dim">Contexte connu au signal : {contexte.length ? contexte.join(" · ") : "aucune valeur archivée"}</p>
+    <p className="text-text-dim">Analyse au signal : {dossier.analyse ? `${date(dossier.analyse.captureLe)} · ${dossier.analyse.lectures.length} lecture(s) archivée(s)` : "aucune capture archivée (historique inconnu)"} · dossier créé le {date(dossier.creeMs)}</p>
+    {dossier.analyse?.lectures.map((lecture) => <p key={lecture.id} className="text-text-dim">{lecture.nature === "scenario-conditionnel" ? "Scénario conditionnel" : "Observation"} · {lecture.domaine} · {lecture.conclusion} · {lecture.statut} · source {lecture.source}{lecture.valeur === null ? "" : ` · ${lecture.valeur} ${lecture.unite ?? ""}`}</p>)}
     <div className="grid gap-2 md:grid-cols-3">
       {(["these", "invalidation", "revue"] as const).map((champ) => <label key={champ} className="flex flex-col gap-1 text-text-dim">
         {champ === "these" ? "Thèse" : champ === "invalidation" ? "Invalidation" : "Revue après trade"}

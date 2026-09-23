@@ -59,6 +59,19 @@ describe("dossiers de décision", () => {
     expect(recharge.getState().erreurSauvegarde).toMatch(/invalide/);
   });
 
+  it("rejette un bloc analyse futur même dans un dossier partiel et garde l'archive originale", () => {
+    const storage = stockage();
+    const store = creerStoreDossiersDecision(storage);
+    store.getState().creerDepuisJournal({ ...signal, preuve: undefined });
+    const ancien = JSON.parse(storage.getItem(CLE_DOSSIERS_DECISION)!).dossiers[0];
+    const corrompu = JSON.stringify({ schemaVersion: 1, dossiers: [{ ...ancien,
+      analyse: { schemaVersion: 1, captureLe: 1235, lectures: [] } }] });
+    storage.setItem(CLE_DOSSIERS_DECISION, corrompu);
+    const recharge = creerStoreDossiersDecision(storage);
+    expect(recharge.getState().dossiers).toHaveLength(0);
+    expect(recharge.getState().exporterOriginalJSON()).toBe(corrompu);
+  });
+
   it("écarte une source inventée ou une preuve future et garde le brut récupérable avant écriture", () => {
     const storage = stockage();
     const store = creerStoreDossiersDecision(storage);

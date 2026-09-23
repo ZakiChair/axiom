@@ -14,7 +14,8 @@
  *  - R null si le trade est ouvert (sortie ou fermeTs null), si le risque est 0, ou si une
  *    entrée est non finie : JAMAIS de NaN/Infinity en sortie ;
  *  - gagnant = R > 0, perdant = R < 0, breakeven = R = 0 (ni l'un ni l'autre : exclu du
- *    winRate et des moyennes gain/perte, mais compté dans n et l'expectancy) ;
+ *    numérateur du winRate ni moyennes gain/perte, mais compté dans le dénominateur
+ *    du winRate, n et l'expectancy) ;
  *  - moyPerte est SIGNÉE (moyenne des R perdants, donc ≤ 0) ;
  *  - profitFactor = ΣR+ / |ΣR−|, null si aucun perdant (ΣR− = 0) ;
  *  - les agrégats (statsExpy, equityR, repartition) ne portent que sur les trades FERMÉS

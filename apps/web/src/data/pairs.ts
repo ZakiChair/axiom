@@ -1,26 +1,32 @@
 /**
  * Liste des paires négociables par source, pour la barre de recherche.
  *
- * Chaque source expose son catalogue via REST public (CORS OK, déjà utilisé par les
- * adaptateurs). On NORMALISE tout au format d'ENTRÉE attendu par les adaptateurs
+ * Chaque source expose son catalogue via REST public (CORS direct, ou proxy /extapi
+ * comme les bougies de l'adaptateur quand l'hôte n'expose aucun CORS). On NORMALISE tout au format d'ENTRÉE attendu par les adaptateurs
  * (style Binance concaténé, ex. "BTCUSDT", "BTCUSD") : c'est ce format qui circule
  * partout (store marché, watchlist). Chaque adaptateur reconvertit ensuite vers son
  * propre format (Kraken "BTC/USD", Coinbase "BTC-USD").
  *
  * Cache mémoire par source : succès valables cinq minutes, requêtes simultanées
- * dédupliquées. Échecs et listes vides sont réessayables.
+ * dédupliquées. Un échec est mémorisé 30 s (une place muette ne recoûte pas 12 s à
+ * chaque ouverture) ; `force` passe outre. Les listes vides restent réessayables.
  *
  * Sources :
- *  - Binance  : GET /api/v3/exchangeInfo            -> symbols[].symbol (status "TRADING").
+ *  - Binance  : GET /api/v3/exchangeInfo (TRADING seul, sans permissionSets) -> symbols[].symbol.
  *  - Kraken   : GET /0/public/AssetPairs            -> result[].wsname "BASE/QUOTE" (status "online").
- *  - Coinbase : GET /api/v3/brokerage/market/products -> products[].product_id "BASE-QUOTE" (SPOT).
+ *  - Coinbase : GET /api/v3/brokerage/market/products (via /extapi) -> products[].product_id "BASE-QUOTE" (SPOT).
  */
 import type { ExchangeId } from "@axiom/types";
+import { extUrl } from "./extapi";
 import { registerHyperliquidCoin, splitSymbol } from "./symbol";
 
-const BINANCE_EXCHANGE_INFO = "https://api.binance.com/api/v3/exchangeInfo";
+// Mêmes 1 372 paires TRADING que la réponse complète (17,6 Mo décodés), pour 2,5 Mo.
+const BINANCE_EXCHANGE_INFO = "https://api.binance.com/api/v3/exchangeInfo?symbolStatus=TRADING&showPermissionSets=false";
 const KRAKEN_ASSET_PAIRS = "https://api.kraken.com/0/public/AssetPairs";
-const COINBASE_PRODUCTS = "https://api.coinbase.com/api/v3/brokerage/market/products";
+// api.coinbase.com n'expose aucun en-tête CORS : même route /extapi que les bougies
+// (coinbase.ts). api.exchange.coinbase.com ne liste pas les paires USDC Advanced Trade.
+const COINBASE_PRODUCTS_HOST = "api.coinbase.com";
+const COINBASE_PRODUCTS_PATH = "api/v3/brokerage/market/products";
 // MEXC : via le proxy (pas de CORS) ; inclut crypto + actions tokenisées (…X / …ON).
 const MEXC_EXCHANGE_INFO = "/mexcapi/api/v3/exchangeInfo";
 
@@ -32,27 +38,46 @@ const MEXC_EXCHANGE_INFO = "/mexcapi/api/v3/exchangeInfo";
 const KRAKEN_ASSET_ALIAS: Record<string, string> = { XBT: "BTC", XDG: "DOGE" };
 
 const CACHE_TTL_MS = 5 * 60_000;
+const ECHEC_TTL_MS = 30_000;
+/** Dernier succès par source : conservé même périmé, jamais effacé par un échec. */
 const cache = new Map<ExchangeId, { value: string[]; expires: number }>();
+/** Dernier échec, plus récent que le succès en cache ; levé au succès suivant. */
+const echecs = new Map<ExchangeId, { erreur: unknown; jusqua: number }>();
 const pendingPairs = new Map<ExchangeId, Promise<string[]>>();
 
-/** Le catalogue agrégé ne doit pas prolonger la durée de vie d'une source déjà en cache. */
+/**
+ * Le catalogue agrégé ne doit pas prolonger la durée de vie d'une source déjà en cache.
+ * Source en échec : fin de sa fenêtre d'échec (un ancien succès périmé ferait expirer
+ * l'agrégat aussitôt, donc un rafraîchissement à chaque lecture).
+ */
 export function pairsCacheExpiresAt(exchange: ExchangeId): number | undefined {
-  return cache.get(exchange)?.expires;
+  const echec = echecs.get(exchange);
+  if (echec) return echec.jusqua;
+  const cached = cache.get(exchange);
+  return cached && cached.expires > Date.now() ? cached.expires : undefined;
 }
 
 /**
  * Renvoie (et met en cache) la liste des symboles de la source, au format d'entrée
  * concaténé. `force` renouvelle un résultat terminé, sans doubler un appel en cours.
+ * Un échec récent est rejoué tel quel pendant 30 s ; l'ancien succès n'est pas resservi.
  */
 export function fetchPairs(exchange: ExchangeId, options: { force?: boolean } = {}): Promise<string[]> {
   const inFlight = pendingPairs.get(exchange);
   if (inFlight) return inFlight;
+  const now = Date.now();
+  const echec = echecs.get(exchange);
   const cached = cache.get(exchange);
-  if (!options.force && cached && cached.expires > Date.now()) return Promise.resolve(cached.value);
-  cache.delete(exchange);
+  if (!options.force && echec && echec.jusqua > now) return Promise.reject(echec.erreur);
+  if (!options.force && !echec && cached && cached.expires > now) return Promise.resolve(cached.value);
   const pending = loadPairs(exchange).then((value) => {
+    echecs.delete(exchange);
     if (value.length > 0) cache.set(exchange, { value, expires: Date.now() + CACHE_TTL_MS });
+    else if (cached) cached.expires = 0; // anomalie fournisseur : succès gardé, plus resservi
     return value;
+  }, (erreur: unknown) => {
+    echecs.set(exchange, { erreur, jusqua: Date.now() + ECHEC_TTL_MS });
+    throw erreur;
   }).finally(() => { pendingPairs.delete(exchange); });
   pendingPairs.set(exchange, pending);
   return pending;
@@ -175,7 +200,7 @@ async function loadKrakenPairs(): Promise<string[]> {
 }
 
 async function loadCoinbasePairs(): Promise<string[]> {
-  const res = await catalogueFetch(COINBASE_PRODUCTS);
+  const res = await catalogueFetch(extUrl(COINBASE_PRODUCTS_HOST, COINBASE_PRODUCTS_PATH));
   if (!res.ok) throw new Error(`Coinbase products ${res.status} ${res.statusText}`);
   const data = (await res.json()) as {
     products?: Array<{ product_id?: string; product_type?: string; trading_disabled?: boolean }>;

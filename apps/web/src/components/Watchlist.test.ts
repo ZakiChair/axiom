@@ -10,7 +10,7 @@ import { colonnesWatchlistPourLargeur, suivreProvenancesFavoris } from "./Watchl
 import * as routing from "../data/marketRouting";
 import * as ticker from "../data/ticker";
 import { marketStore } from "../store/market";
-import { watchlistStore } from "../store/watchlist";
+import { watchlistStore, type WatchlistSource } from "../store/watchlist";
 
 describe("lisibilité watchlist", () => {
   it("à 240 px (sidebar w-60) masque la sparkline et garde le Δ% 24h", () => {
@@ -32,13 +32,20 @@ const spot = (...entrees: Array<[ExchangeId, string]>): routing.MarketCatalog =>
   unavailableSources: [],
 });
 
-/** Réseau bouchonné : prix Binance 24 h et OKX par instrument ; `okxSansPrix` simule un prix absent. */
-function reseau(okxSansPrix = new Set<string>()) {
+/** Twelve Data sans l'abonnement requis (WTI/USD en clé gratuite) : aucun prix, jamais. */
+const abonnementRequis = () => ({ code: 403, status: "error", message: "/quote is available exclusively with grow or pro plans" });
+
+/**
+ * Réseau bouchonné : prix Binance 24 h, OKX par instrument et /quote Twelve Data ;
+ * `okxSansPrix` simule un prix OKX absent.
+ */
+function reseau(okxSansPrix = new Set<string>(), quoteTd: () => unknown = abonnementRequis) {
   const urls: string[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string) => {
     const url = String(input);
     urls.push(url);
     const params = new URL(url, "http://local").searchParams;
+    if (url.startsWith("/tdapi/quote?")) return reponse(quoteTd());
     if (url.startsWith("https://api.binance.com/api/v3/ticker/24hr")) {
       return reponse({ symbol: params.get("symbol"), lastPrice: "100", priceChangePercent: "1" });
     }
@@ -253,6 +260,71 @@ describe("provenances des favoris", () => {
     await vi.advanceTimersByTimeAsync(90_000);
     expect(urls).toHaveLength(2);
     expect(watchlistStore.getState().sources).toEqual({ LINKUSDT: "binance", CARDSUSDT: "okx" });
+  });
+
+  it("Twelve Data sans source : sondé au montage et aux changements de liste, jamais au réessai ni au catalogue", async () => {
+    vi.setSystemTime(new Date("2026-09-23T14:00:00Z")); // mercredi : forex ouvert
+    watchlistStore.getState().setAll(["WTI/USD", "CARDSUSDT"], { CARDSUSDT: "okx" });
+    const initial = spot(["okx", "CARDSUSDT"], ["binance", "ETHUSDT"]);
+    const { publier } = catalogue(initial);
+    // CARDS reste sans prix : le réessai crypto à 30 s tourne pendant tout le test.
+    const urls = reseau(new Set(["CARDS-USDT"]));
+    const quotes = () => urls.filter((url) => url.startsWith("/tdapi/quote?"));
+    stop = suivreProvenancesFavoris(new Map());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(quotes()).toEqual(["/tdapi/quote?symbol=WTI%2FUSD"]);
+    for (let i = 0; i < 3; i++) publier({ ...initial, instruments: [...initial.instruments] });
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(quotes()).toHaveLength(1);
+    expect(urls.filter((url) => url.includes("instId=CARDS-USDT")).length).toBeGreaterThan(100);
+    watchlistStore.getState().add("ETHUSDT");
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(quotes()).toHaveLength(2);
+    expect(watchlistStore.getState().sources).toEqual({ CARDSUSDT: "okx", ETHUSDT: "binance" });
+  });
+
+  it("une sonde Twelve Data en vol n'est pas doublée par un changement de liste", async () => {
+    vi.setSystemTime(new Date("2026-09-23T14:00:00Z"));
+    watchlistStore.getState().setAll(["WTI/USD"]);
+    catalogue(spot(["binance", "ETHUSDT"]));
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn((input: string) => {
+      urls.push(String(input));
+      // File Twelve Data sans annulation : une sonde abandonnée part quand même.
+      if (String(input).startsWith("/tdapi/")) return new Promise<Response>(() => {});
+      return Promise.resolve(reponse({ symbol: "ETHUSDT", lastPrice: "3000", priceChangePercent: "1" }));
+    }));
+    stop = suivreProvenancesFavoris(new Map());
+    await vi.advanceTimersByTimeAsync(0);
+    watchlistStore.getState().add("ETHUSDT");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(urls.sort()).toEqual(["/tdapi/quote?symbol=WTI%2FUSD", "https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT"]);
+  });
+
+  it("marché fermé (samedi) : aucune requête Twelve Data, ni au montage ni ensuite", async () => {
+    vi.setSystemTime(new Date("2026-09-26T12:00:00Z"));
+    watchlistStore.getState().setAll(["WTI/USD", "AAPL", "EUR/USD"]);
+    catalogue(spot());
+    const urls = reseau(new Set(), () => ({ close: "100", percent_change: "1" }));
+    stop = suivreProvenancesFavoris(new Map());
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(urls).toEqual([]);
+    expect(watchlistStore.getState().sources).toEqual({});
+  });
+
+  it("une source Twelve Data enregistrée n'est jamais sondée, remontage compris : les quotes la servent", async () => {
+    vi.setSystemTime(new Date("2026-09-23T14:00:00Z")); // mercredi, séance US ouverte
+    watchlistStore.getState().setAll(["SPY", "AAPL"], { SPY: "twelvedata", AAPL: "twelvedata" });
+    catalogue(spot());
+    const urls = reseau();
+    const session = new Map<string, WatchlistSource>();
+    stop = suivreProvenancesFavoris(session);
+    await vi.advanceTimersByTimeAsync(0);
+    stop();
+    stop = suivreProvenancesFavoris(session);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(urls).toEqual([]);
+    expect(watchlistStore.getState().sources).toEqual({ SPY: "twelvedata", AAPL: "twelvedata" });
   });
 
   it("un favori ajouté est sondé seul ; l'arrêt annule la sonde en vol", async () => {

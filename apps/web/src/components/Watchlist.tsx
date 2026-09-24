@@ -23,6 +23,7 @@ import { watchlistStore, type WatchlistSource } from "../store/watchlist";
 import { subscribeTickers, subscribeWatchlistBars, isTickerSource, resolveTickerSource, resolveTickerMarket } from "../data/ticker";
 import type { TickerUpdate, WatchlistBars } from "../data/ticker";
 import { fetchMarketCatalog, subscribeMarketCatalog, type MarketCatalog } from "../data/marketRouting";
+import { isTradfiMarketSymbol } from "../data/pairs";
 import { SidebarSection } from "./SidebarSection";
 import { MenuDeroulant } from "./ui";
 import { formatCompact, formatPct, formatPrice, VALEUR_ABSENTE } from "../lib/format";
@@ -177,14 +178,17 @@ const CONFIRMEES_SESSION = new Map<string, WatchlistSource>();
  * Provenances des favoris du groupe actif, hors React (testée à timers simulés). Une source
  * n'est retenue qu'après un vrai prix ou un graphe prêt, puis n'est plus sondée de la session
  * (`confirmees`, propre à la session par défaut ; les tests en passent une neuve) :
- *  - seuls les favoris sans source confirmée sont sondés, au catalogue reçu ou republié, à
+ *  - les favoris crypto sans source confirmée sont sondés au catalogue reçu ou republié, à
  *    chaque changement de liste ou de source (réhydratation) et toutes les 30 s tant qu'il en reste ;
  *  - les synthétiques et capitalisations, sans ticker dédié, restent sans prix de favoris :
  *    ni sondés, ni réessayés ;
  *  - un favori Binance que le catalogue Binance liste est confirmé sans sonde : un ticker Binance
  *    en panne ou lent ne le fait jamais glisser vers une place de repli ;
  *  - une place spot secondaire héritée est resondée Binance d'abord quand le catalogue Binance
- *    liste le même spot ; sans prix Binance, le favori garde sa place d'origine.
+ *    liste le même spot ; sans prix Binance, le favori garde sa place d'origine ;
+ *  - un actif TradFi n'est sondé qu'au montage et aux changements de liste (ou de source), et
+ *    jamais marché fermé ; une source Twelve Data enregistrée, seule candidate possible, ne l'est
+ *    jamais : ses quotes suivent déjà les heures de marché.
  * Les sondes routent sur le catalogue reçu : elles ne relancent pas le rafraîchissement commun.
  */
 export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () => void {
@@ -192,6 +196,8 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
   let passe: AbortController | undefined;
   let reessai: ReturnType<typeof setInterval> | undefined;
   let arrete = false;
+  const arret = new AbortController();
+  const tradfiEnVol = new Set<string>();
 
   const confirmer = (symbol: string, source: WatchlistSource) => {
     const avant = confirmees.get(symbol);
@@ -202,12 +208,23 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
     if (avant === undefined) confirmees.delete(symbol);
     else confirmees.set(symbol, avant);
   };
-  const aSonder = (): string[] => {
+  /** Sources déjà prouvées, qu'une sonde ne pourrait que perdre : Twelve Data, Binance listé. */
+  const confirmerSansSonde = (courant?: MarketCatalog) => {
+    const { symbols, sources } = watchlistStore.getState();
+    for (const symbol of symbols) {
+      const source = sources[symbol];
+      if (source === undefined || confirmees.get(symbol) === source) continue;
+      if (source === "twelvedata" || (source === "binance" && courant !== undefined && listeParBinance(courant, symbol))) confirmer(symbol, source);
+    }
+  };
+  /** `tradfi` : les sondes routées vers Twelve Data, tenues à part des sondes crypto. */
+  const aSonder = (tradfi: boolean): string[] => {
     const { symbols, sources } = watchlistStore.getState();
     return symbols.filter((symbol) => {
       const source = sources[symbol];
       if (!isTickerSource(resolveTickerSource(symbol, source))) return false;
-      return source === undefined || confirmees.get(symbol) !== source;
+      if (source !== undefined && confirmees.get(symbol) === source) return false;
+      return isTradfiMarketSymbol(symbol) === tradfi;
     });
   };
   const ajusterReessai = (actif: boolean) => {
@@ -215,42 +232,58 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
     if (!actif && reessai !== undefined) { clearInterval(reessai); reessai = undefined; }
   };
 
+  async function sonder(symbol: string, signal: AbortSignal, courant?: MarketCatalog): Promise<void> {
+    try {
+      const before = marketStore.getState();
+      if (before.symbol === symbol && before.dataLoad.status === "ready") return confirmer(symbol, before.exchange);
+      const initialSource = watchlistStore.getState().sources[symbol];
+      const versBinance = initialSource !== undefined && PLACES_SPOT_SECONDAIRES.has(initialSource)
+        && courant !== undefined && listeParBinance(courant, symbol);
+      // Binance d'abord, sinon la place d'origine : jamais une troisième place pour ce spot.
+      const routage = courant && versBinance ? {
+        instruments: courant.instruments.filter((i) => i.kind === "spot" && i.symbol === symbol && (i.exchange === "binance" || i.exchange === initialSource)),
+        unavailableSources: [],
+      } : courant;
+      const resolved = await resolveTickerMarket({ exchange: versBinance ? "binance" : initialSource, symbol, timeframe: "1h" }, signal, routage);
+      if (signal.aborted) return;
+      const market = marketStore.getState();
+      if (market.symbol === symbol && market.dataLoad.status === "ready") confirmer(symbol, market.exchange);
+      else if (resolved && watchlistStore.getState().sources[symbol] === initialSource) confirmer(symbol, resolved.exchange);
+    } catch { /* Sans prix confirmé : crypto réessayée au catalogue ou dans 30 s, TradFi à la liste. */ }
+  }
+
   function lancerPasse(): void {
     if (arrete || !catalog) return;
     const courant = catalog;
-    // Le catalogue Binance prouve déjà la source : une sonde ne pourrait que la perdre.
-    const { symbols, sources } = watchlistStore.getState();
-    for (const symbol of symbols) {
-      if (sources[symbol] === "binance" && confirmees.get(symbol) !== "binance" && listeParBinance(courant, symbol)) confirmer(symbol, "binance");
-    }
+    confirmerSansSonde(courant);
     passe?.abort();
     const controller = new AbortController();
     passe = controller;
-    const symboles = aSonder();
+    const symboles = aSonder(false);
     ajusterReessai(symboles.length > 0);
-    void Promise.all(symboles.map(async (symbol) => {
-      try {
-        const before = marketStore.getState();
-        if (before.symbol === symbol && before.dataLoad.status === "ready") return confirmer(symbol, before.exchange);
-        const initialSource = watchlistStore.getState().sources[symbol];
-        const versBinance = initialSource !== undefined && PLACES_SPOT_SECONDAIRES.has(initialSource) && listeParBinance(courant, symbol);
-        // Binance d'abord, sinon la place d'origine : jamais une troisième place pour ce spot.
-        const routage: MarketCatalog = versBinance ? {
-          instruments: courant.instruments.filter((i) => i.kind === "spot" && i.symbol === symbol && (i.exchange === "binance" || i.exchange === initialSource)),
-          unavailableSources: [],
-        } : courant;
-        const resolved = await resolveTickerMarket({ exchange: versBinance ? "binance" : initialSource, symbol, timeframe: "1h" }, controller.signal, routage);
-        if (controller.signal.aborted) return;
-        const market = marketStore.getState();
-        if (market.symbol === symbol && market.dataLoad.status === "ready") confirmer(symbol, market.exchange);
-        else if (resolved && watchlistStore.getState().sources[symbol] === initialSource) confirmer(symbol, resolved.exchange);
-      } catch { /* Sans prix confirmé : réessayé au prochain catalogue ou dans 30 s. */ }
-    })).then(() => { if (!controller.signal.aborted) ajusterReessai(aSonder().length > 0); });
+    void Promise.all(symboles.map((symbol) => sonder(symbol, controller.signal, courant)))
+      .then(() => { if (!controller.signal.aborted) ajusterReessai(aSonder(false).length > 0); });
+  }
+
+  /**
+   * Une sonde Twelve Data coûte un crédit (800/j) et un créneau 8/min partagé avec le graphe ;
+   * son routage ne lit aucun catalogue, qui ne la relance donc pas. Une sonde en vol n'est pas
+   * doublée : abandonnée, elle part quand même (file sans annulation de twelvedata.ts).
+   */
+  function sonderTradfi(): void {
+    if (arrete) return;
+    confirmerSansSonde(catalog);
+    for (const symbol of aSonder(true)) {
+      if (tradfiEnVol.has(symbol)) continue;
+      tradfiEnVol.add(symbol);
+      void sonder(symbol, arret.signal, catalog).finally(() => tradfiEnVol.delete(symbol));
+    }
   }
 
   const recevoir = (value: MarketCatalog) => { catalog = value; lancerPasse(); };
   const stopCatalogue = subscribeMarketCatalog(recevoir);
   void fetchMarketCatalog().then((value) => { if (value !== catalog) recevoir(value); }).catch(() => {});
+  sonderTradfi();
   const cleListe = (symbols: readonly string[]) => symbols.slice().sort().join(",");
   let liste = cleListe(watchlistStore.getState().symbols);
   const stopListe = watchlistStore.subscribe((state) => {
@@ -264,6 +297,7 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
     if (suivante === liste && !changee) return;
     liste = suivante;
     lancerPasse();
+    sonderTradfi();
   });
   // Tout chargement prêt confirme sa source (jamais resondée ensuite).
   const stopMarche = marketStore.subscribe((state) => {
@@ -273,6 +307,7 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
   return () => {
     arrete = true;
     passe?.abort();
+    arret.abort();
     ajusterReessai(false);
     stopCatalogue();
     stopListe();

@@ -453,7 +453,12 @@ async function fetchTickerSnapshots(source: WatchlistSource, symbols: string[], 
   if (source === "okx") return fetchOkxTickers(symbols, signal);
   if (source === "bybit") return fetchBybitTickers(symbols, signal);
   if (source === "hyperliquid") return fetchHyperliquidTickers(symbols, signal);
-  if (source === "twelvedata") return (await fetchQuotes(symbols)).filter((q) => positiveNumber(q.price) !== undefined);
+  if (source === "twelvedata") {
+    // Sonde seule (pollTradfiQuotes a son garde) : marché fermé, aucun crédit ni créneau 8/min.
+    const now = new Date();
+    const open = symbols.filter((symbol) => isMarketOpen(classifyTradfi(symbol), now));
+    return open.length === 0 ? [] : (await fetchQuotes(open)).filter((q) => positiveNumber(q.price) !== undefined);
+  }
   if (source !== "kraken" && source !== "mexc" && source !== "binance") return [];
   const settled = await Promise.all(symbols.map((symbol) => (
     source === "kraken" ? fetchKrakenTicker(symbol, signal) : fetchSpotTicker(symbol, signal, source === "binance" ? BINANCE_TICKER_URL : MEXC_TICKER_URL)

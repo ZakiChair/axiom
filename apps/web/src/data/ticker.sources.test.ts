@@ -192,6 +192,21 @@ describe("résolution vérifiée du ticker", () => {
     expect(await pending).toEqual({ exchange: "mexc", symbol: "CARDSUSDT", timeframe: "1h" });
   });
 
+  it("la sonde Twelve Data n'envoie rien marché fermé (un crédit et un créneau 8/min par appel)", async () => {
+    const fetcher = vi.fn(async () => response({ close: "200", percent_change: "1" }));
+    vi.stubGlobal("fetch", fetcher);
+    vi.setSystemTime(new Date("2026-09-26T15:00:00Z")); // samedi : bourse US fermée
+    const ferme = resolveTickerMarket({ symbol: "AAPL", timeframe: "1h" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await ferme).toBeUndefined();
+    expect(fetcher).not.toHaveBeenCalled();
+    vi.setSystemTime(new Date("2026-09-23T15:00:00Z")); // mercredi, séance ouverte
+    const ouvert = resolveTickerMarket({ symbol: "AAPL", timeframe: "1h" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await ouvert).toEqual({ exchange: "twelvedata", symbol: "AAPL", timeframe: "1h" });
+    expect(fetcher.mock.calls.map((call) => String((call as unknown as [string])[0]))).toEqual(["/tdapi/quote?symbol=AAPL"]);
+  });
+
   it("un abonnement sans provenance trouve OKX sans ouvrir de WebSocket Binance", async () => {
     vi.spyOn(routing, "resolveMarketCandidates").mockResolvedValue([{ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" }]);
     const ws = vi.fn();

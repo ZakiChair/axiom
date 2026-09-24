@@ -8,6 +8,26 @@ async function demarrer(page: import("@playwright/test").Page) {
 
 const INSTANT_CARRY = Date.UTC(2026, 8, 24, 12);
 
+/**
+ * Carnet perp daté `T`, puis « Actualiser les carnets » qui attend l'acquisition NOUVELLE.
+ * Le calcul de la première acquisition affiche déjà « Net conditionnel » : l'attendre après
+ * le clic peut aboutir avant que React ait écarté l'ancienne cotation, l'horloge avance alors
+ * pendant que l'actualisation est encore en vol et celle-ci est rejetée à la réception
+ * (« acquisitions non rapprochées ou carnet perp périmé »). Seul le carnet actualisé porte un
+ * VWAP de vente perp à 103 : tant qu'il n'est pas rendu, le test n'avance pas l'horloge.
+ */
+async function routerCarnetPerp(page: import("@playwright/test").Page, T: number) {
+  let actualise = false;
+  await page.route("**/fapi/v1/depth?*", (route) => route.fulfill({ json: actualise
+    ? { T, bids: [["103", "100"]], asks: [["104", "100"]] }
+    : { T, bids: [["101", "100"]], asks: [["102", "100"]] } }));
+  return async (carry: import("@playwright/test").Locator) => {
+    actualise = true;
+    await carry.getByRole("button", { name: "Actualiser les carnets" }).click();
+    await expect(carry).toContainText("vente perp VWAP 103.0000");
+  };
+}
+
 test("SCEN garde le mode simple et refuse un modèle multifacteur incomplet", async ({ page }) => {
   await demarrer(page);
   // Archive complète avant boot : survit à un rechargement Vite des modules optimisés.
@@ -45,7 +65,7 @@ test("FUNDX calcule le carry avec les deux carnets, puis bloque des cotations p�
   await page.clock.install({ time: new Date(INSTANT_CARRY - 60_000) });
   await demarrer(page);
   await page.route("**/api/v3/depth?*", (route) => route.fulfill({ json: { lastUpdateId: 1, bids: [["99", "100"]], asks: [["100", "100"]] } }));
-  await page.route("**/fapi/v1/depth?*", (route) => route.fulfill({ json: { T: INSTANT_CARRY, bids: [["101", "100"]], asks: [["102", "100"]] } }));
+  const actualiserCarnets = await routerCarnetPerp(page, INSTANT_CARRY);
   await page.route("**/fapi/v1/premiumIndex?*", (route) => route.fulfill({ json: { symbol: "BTCUSDT", time: INSTANT_CARRY, nextFundingTime: INSTANT_CARRY + 8 * 3_600_000, lastFundingRate: "0.0001" } }));
   await page.route("**/fapi/v1/fundingInfo*", (route) => route.fulfill({ json: [] }));
   await page.goto("/");
@@ -62,7 +82,7 @@ test("FUNDX calcule le carry avec les deux carnets, puis bloque des cotations p�
   await expect(carry).toContainText("UTC");
   await expect(carry).toContainText("Quantité couverte");
   for (const name of ["Frais achat spot (%)", "Frais vente perp (%)", "Frais vente spot (%)", "Frais rachat perp (%)", "Slippage spot sortie", "Slippage perp sortie"]) await carry.getByRole("spinbutton", { name }).fill("0");
-  await carry.getByRole("button", { name: "Actualiser les carnets" }).click();
+  await actualiserCarnets(carry);
   await expect(carry).toContainText("Net conditionnel");
   await expect(carry).toContainText("funding inversé");
   await expect(carry).toContainText("quatre frais");
@@ -77,7 +97,7 @@ test("FUNDX expire une source perp âgée avant la réception spot", async ({ pa
   await page.clock.install({ time: new Date(INSTANT_CARRY - 60_000) });
   await demarrer(page);
   await page.route("**/api/v3/depth?*", (route) => route.fulfill({ json: { lastUpdateId: 1, bids: [["99", "100"]], asks: [["100", "100"]] } }));
-  await page.route("**/fapi/v1/depth?*", (route) => route.fulfill({ json: { T: INSTANT_CARRY - 4_000, bids: [["101", "100"]], asks: [["102", "100"]] } }));
+  const actualiserCarnets = await routerCarnetPerp(page, INSTANT_CARRY - 4_000);
   await page.route("**/fapi/v1/premiumIndex?*", (route) => route.fulfill({ json: { symbol: "BTCUSDT", time: INSTANT_CARRY, nextFundingTime: INSTANT_CARRY + 8 * 3_600_000, lastFundingRate: "0.0001" } }));
   await page.route("**/fapi/v1/fundingInfo*", (route) => route.fulfill({ json: [] }));
   await page.goto("/");
@@ -90,7 +110,7 @@ test("FUNDX expire une source perp âgée avant la réception spot", async ({ pa
   const carry = fenetre.getByLabel("Carry net spot perp");
   await expect(carry).toContainText("Quantité couverte");
   for (const name of ["Frais achat spot (%)", "Frais vente perp (%)", "Frais vente spot (%)", "Frais rachat perp (%)", "Slippage spot sortie", "Slippage perp sortie"]) await carry.getByRole("spinbutton", { name }).fill("0");
-  await carry.getByRole("button", { name: "Actualiser les carnets" }).click();
+  await actualiserCarnets(carry);
   await expect(carry).toContainText("Net conditionnel");
   await page.clock.fastForward(2_000);
   expect(await page.evaluate(() => Date.now())).toBe(INSTANT_CARRY + 2_000);

@@ -48,3 +48,29 @@ export async function chargerAvecRepli(
     ? `Aucune source compatible ne fournit cet historique (${essayes.map((p) => p.exchange).join(", ")}).`
     : "Actif indisponible dans les catalogues chargés. Vérifiez le symbole ou réessayez.");
 }
+
+/**
+ * Backfill soumis à un quota (Twelve Data, 8 req/min) : attendre un créneau n'est pas
+ * une panne. Le chien de garde `garder` n'est armé qu'à l'obtention du créneau ;
+ * `couper` (démontage) comme un délai dépassé abandonnent la demande, qui sort alors
+ * de la file sans consommer de créneau, ou arrête le fetch déjà parti.
+ */
+export function chargerAuCreneau<T>(
+  lancer: (controle: { signal: AbortSignal; onCreneau: () => void }) => Promise<T>,
+  garder: (travail: Promise<T>) => { promesse: Promise<T>; annuler: () => void },
+): { promesse: Promise<T>; couper: () => void } {
+  const controleur = new AbortController();
+  let annulerGarde: (() => void) | undefined;
+  let signalerCreneau = (): void => {};
+  const creneau = new Promise<void>((resolve) => { signalerCreneau = resolve; });
+  const requete = lancer({ signal: controleur.signal, onCreneau: () => signalerCreneau() });
+  const promesse = Promise.race([requete, creneau.then(() => {
+    if (controleur.signal.aborted) return requete;
+    const garde = garder(requete);
+    annulerGarde = garde.annuler;
+    return garde.promesse;
+  })]);
+  const couper = (): void => { annulerGarde?.(); controleur.abort(); };
+  promesse.catch(couper);
+  return { promesse, couper };
+}

@@ -33,8 +33,9 @@ import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
 import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { getAdapter, supportedTimeframesFor } from "../data/adapters";
-import { resolveMarketCandidates } from "../data/marketRouting";
-import { chargerAvecRepli, type MarcheCharge } from "./routageMarche";
+import { resolveMarketCandidatesProgressifs } from "../data/marketRouting";
+import { fetchKlinesTwelveData } from "../data/twelvedata";
+import { chargerAuCreneau, chargerAvecRepli, type MarcheCharge } from "./routageMarche";
 import { prepareResyncApply } from "../data/resync";
 import { dataLoadErrorMessage } from "./dataLoadErrorMessage";
 import { adaptateurReplayActif } from "../data/replayFeed";
@@ -1094,6 +1095,20 @@ export function ChartInstance({
     const prepared = marchePrepareRef.current;
     marchePrepareRef.current = null;
     const chargerBougies = (identity: MarketIdentity) => {
+      // Twelve Data : demande prioritaire sur les cotations, annulable par le délai comme par
+      // le démontage (elle quitte alors la file du quota sans consommer de crédit). Le délai
+      // part à l'obtention du créneau ; une attente annoncée au-delà est refusée d'emblée.
+      if (!replayAdapter && identity.exchange === "twelvedata") {
+        const { promesse, couper } = chargerAuCreneau(
+          (controle) => fetchKlinesTwelveData(identity.symbol, identity.timeframe, { limit: 500 }, {
+            ...controle, priorite: "graphe", attenteMaxMs: BACKFILL_TIMEOUT_MS,
+          }),
+          (travail) => avecDelai(travail, BACKFILL_TIMEOUT_MS),
+        );
+        if (cancelled) couper();
+        else annulerDelaiBackfill = couper;
+        return promesse;
+      }
       const adapter = replayAdapter ?? getAdapter(identity.exchange);
       const { promesse, annuler } = avecDelai(
         adapter.fetchKlines(identity.symbol, identity.timeframe, { limit: 500 }),
@@ -1112,8 +1127,9 @@ export function ChartInstance({
           return { identity: requestedIdentity, candles };
         }
         if (prepared && sameMarketIdentity(prepared.identity, requestedIdentity)) return prepared;
-        const candidates = await resolveMarketCandidates(requestedIdentity);
-        return chargerAvecRepli(candidates, chargerBougies, () => {
+        // Catalogue source prioritaire seul à froid ; les autres places ne servent qu'au repli.
+        const candidats = await resolveMarketCandidatesProgressifs(requestedIdentity);
+        return chargerAvecRepli(candidats, chargerBougies, () => {
           const state = store.getState();
           return cancelled || state.dataLoad.requestId !== requestId ||
             !sameMarketIdentity(marketIdentity(state), requestedIdentity);

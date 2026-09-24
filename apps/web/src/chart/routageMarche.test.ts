@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Candle } from "@axiom/types";
-import { chargerAvecRepli } from "./routageMarche";
+import { chargerAuCreneau, chargerAvecRepli } from "./routageMarche";
 const identities = [
   { exchange: "binance" as const, symbol: "BTCUSDT", timeframe: "1h" as const },
   { exchange: "kraken" as const, symbol: "BTCUSDT", timeframe: "1h" as const },
@@ -79,5 +79,92 @@ describe("repli progressif : essais immédiats puis liste complète", () => {
     let stop = false;
     expect(await chargerAvecRepli({ immediats: [binance], complets }, async () => { stop = true; throw new Error("KO"); }, () => stop)).toBeNull();
     expect(complets).not.toHaveBeenCalled();
+  });
+});
+
+describe("backfill Twelve Data : chien de garde armé à l'obtention du créneau", () => {
+  const serie = { status: "ok", values: [{ datetime: "2026-01-02", open: "1", high: "2", low: "0.5", close: "1.5", volume: "10" }] };
+  let envois: Array<{ url: string; signal: AbortSignal | undefined }>;
+  let delaiReponse: number | null;
+  /** Même contrat que `avecDelai` de ChartInstance (réimplanté : module sans DOM). */
+  const garder = <T,>(travail: Promise<T>) => {
+    let handle: ReturnType<typeof setTimeout> | undefined;
+    const garde = new Promise<never>((_resolve, reject) => { handle = setTimeout(() => reject(new Error("Backfill : délai dépassé")), 20_000); });
+    const annuler = () => clearTimeout(handle);
+    return { promesse: Promise.race([travail, garde]).finally(annuler), annuler };
+  };
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-07-01T12:00:00Z"));
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
+    envois = [];
+    delaiReponse = 0;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      envois.push({ url: String(input), signal: init?.signal ?? undefined });
+      const reponse = { status: 200, statusText: "OK", json: async () => serie };
+      if (delaiReponse === null) return new Promise(() => {});
+      if (delaiReponse === 0) return Promise.resolve(reponse);
+      return new Promise((resolve) => setTimeout(() => resolve(reponse), delaiReponse!));
+    }));
+  });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+  async function preparer() {
+    const td = await import("../data/twelvedata");
+    await Promise.all(Array.from({ length: 8 }, (_, i) => td.fetchKlinesTwelveData(`PLEIN${i}`, "1d")));
+    const backfill = (symbol: string) => chargerAuCreneau(
+      (controle) => td.fetchKlinesTwelveData(symbol, "1d", { limit: 500 }, { ...controle, priorite: "graphe", attenteMaxMs: 20_000 }),
+      garder,
+    );
+    return { td, backfill };
+  }
+
+  it("15 s d'attente de créneau puis 10 s de réponse : le chien de garde de 20 s ne tue pas la demande", async () => {
+    const { backfill } = await preparer();
+    await vi.advanceTimersByTimeAsync(45_000);
+    delaiReponse = 10_000;
+    const { promesse } = backfill("AMZN");
+    let etat = "en attente";
+    promesse.then(() => { etat = "ok"; }, (e: Error) => { etat = e.message; });
+    await vi.advanceTimersByTimeAsync(24_999);
+    expect(etat).toBe("en attente");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(etat).toBe("ok");
+  });
+
+  it("le délai court à partir du créneau et abandonne alors le fetch en vol", async () => {
+    const { backfill } = await preparer();
+    await vi.advanceTimersByTimeAsync(45_000);
+    delaiReponse = null;
+    const { promesse } = backfill("META");
+    const rejet = expect(promesse).rejects.toThrow("délai dépassé");
+    // Créneau à +15 s, puis 20 s de chien de garde : 35 s au total, pas 20.
+    await vi.advanceTimersByTimeAsync(15_000 + 19_999);
+    expect(envois.at(-1)?.signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await rejet;
+    expect(envois.at(-1)?.url).toContain("META");
+    expect(envois.at(-1)?.signal?.aborted).toBe(true);
+  });
+
+  it("le démontage pendant l'attente retire la demande de la file : rien n'est envoyé", async () => {
+    const { backfill } = await preparer();
+    await vi.advanceTimersByTimeAsync(45_000);
+    const { promesse, couper } = backfill("NFLX");
+    await vi.advanceTimersByTimeAsync(5_000);
+    couper();
+    await expect(promesse).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(envois.filter(({ url }) => url.includes("NFLX"))).toHaveLength(0);
+  });
+
+  it("une attente de quota au-delà du raisonnable échoue d'emblée avec le prochain créneau", async () => {
+    const { backfill } = await preparer();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(backfill("TSLA").promesse).rejects.toThrow("Quota Twelve Data : prochain créneau dans 55 s");
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(envois.filter(({ url }) => url.includes("TSLA"))).toHaveLength(0);
   });
 });

@@ -302,6 +302,24 @@ describe("plafond journalier appliqué (acquireSlot)", () => {
     expect(state?.derniereErreur).toBe("quota journalier Twelve Data épuisé (800 crédits)");
   });
 
+  it("une cotation groupée qui dépasserait le plafond du jour est refusée entière, sans envoi", async () => {
+    const jour = utcDayKey(new Date());
+    const stockage = new Map<string, string>([
+      ["axiom:twelvedata:daily:v1", JSON.stringify({ jour, count: 799 })],
+    ]);
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => stockage.get(k) ?? null,
+      setItem: (k: string, v: string) => void stockage.set(k, v),
+    });
+    const f = vi.fn();
+    vi.stubGlobal("fetch", f);
+
+    // 799 + 8 crédits réservés d'un coup : 807, au-delà des 800 annoncés.
+    await expect(fetchQuotes(["QJ1", "QJ2", "QJ3", "QJ4", "QJ5", "QJ6", "QJ7", "QJ8"])).rejects.toThrow(/quota journalier/);
+    expect(f).not.toHaveBeenCalled();
+    expect(JSON.parse(stockage.get("axiom:twelvedata:daily:v1") ?? "{}")).toEqual({ jour, count: 799 });
+  });
+
   it("lève l'erreur quota au jour suivant lors du premier succès (reportQuota)", async () => {
     vi.useFakeTimers();
     const jour1 = new Date("2026-07-01T12:00:00Z");

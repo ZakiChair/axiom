@@ -227,8 +227,9 @@ function reportQuota(): void {
  * le backoff de pollLoop espace les tentatives. L'erreur est levée au jour suivant
  * lors du premier succès de reportQuota (minuit UTC passé, compteur reset).
  */
-function refusQuotaJour(): Error | undefined {
-  if (!quotaJourEpuise(lireDailyUsage(), new Date())) return undefined;
+function refusQuotaJour(poids = 1): Error | undefined {
+  // Une cotation groupée réserve ses crédits d'un coup : refusée entière si elle dépasse le plafond.
+  if (!quotaJourEpuise(lireDailyUsage(), new Date(), DAILY_LIMIT + 1 - poids)) return undefined;
   healthStore.getState().marquerErreur(HEALTH_SOURCE, MSG_QUOTA_JOUR);
   return new Error(`Twelve Data: ${MSG_QUOTA_JOUR} — reset à minuit UTC`);
 }
@@ -246,7 +247,7 @@ function servirFile(): void {
   for (;;) {
     const demande = file.find((d) => d.priorite() === "graphe") ?? file[0];
     if (!demande) return;
-    const refus = refusQuotaJour();
+    const refus = refusQuotaJour(demande.poids);
     const now = Date.now();
     purgerFenetre(now);
     // Créneaux à libérer avant que TOUS les crédits de la demande tiennent dans la fenêtre.
@@ -302,7 +303,7 @@ function acquireSlot(controle: ControleFile = {}, poids = 1): Promise<void> {
   const { signal } = controle;
   if (cleActive() === null && BASE_DIRECTE) return Promise.reject(new Error(MSG_CLE_REQUISE));
   if (signal?.aborted) return Promise.reject(signal.reason);
-  const refus = refusQuotaJour();
+  const refus = refusQuotaJour(poids);
   if (refus) return Promise.reject(refus);
   const priorite = (): PrioriteTwelveData => controle.priorite ?? "fond";
   if (controle.attenteMaxMs !== undefined) {

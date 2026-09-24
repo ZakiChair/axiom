@@ -51,13 +51,12 @@ import { commandes as hlLiqCommands } from "./data/hyperliquidLiq";
 // Contrôleur marqueurs éco (effet de bord) — indépendant du lazy-load de EcoWindow.
 import "./chart/ecoMarkers";
 import { commandes as domCommands } from "./store/dom-ui";
-import { commandes as backtestCommands } from "./store/backtest";
 import { commandes as replayCommands } from "./store/replay";
 import { chartLayoutStore, type ChartLayoutMode } from "./store/chart-layout";
 import { commandes as globeCommands } from "./store/globe-ui";
 import { commandesOnboarding, onboardingStore } from "./store/onboarding";
 import { commandesPlaybooks } from "./data/playbooks";
-import { windowPanelCommands } from "./commands/windowPanels";
+import { commandesBacktest, windowPanelCommands } from "./commands/windowPanels";
 import { enregistrerCommandes, paletteStore, type Commande } from "./commands/registry";
 import { useRaccourcisGlobaux, fullscreenStore } from "./commands/hotkeys";
 import { demarrerAlertes } from "./alerts/runtime";
@@ -122,7 +121,8 @@ enregistrerCommandes([
   ...commandesNiveauxOverlays,
   // Fenêtres Phase 4 (DOM/BT/REPLAY) + grille multi-chart.
   ...domCommands,
-  ...backtestCommands,
+  // BT : bascule directe, sans charger store/backtest (cf. commands/windowPanels.ts).
+  ...commandesBacktest,
   ...replayCommands,
   ...commandesGrille,
   // GLOBE + bandeau ticker.

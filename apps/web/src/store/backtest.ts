@@ -26,7 +26,6 @@ import type {
   StrategieDef,
 } from "@axiom/backtest";
 import { raisonTimeframeBacktest } from "@axiom/backtest";
-import type { Commande } from "../commands/registry";
 import { marketStore } from "./market";
 import {
   accumulerKlines,
@@ -936,21 +935,3 @@ export function importerDepuisChart(): void {
   const tf = m.timeframe;
   if (BACKTEST_TIMEFRAMES.includes(tf)) backtestStore.getState().setTf(tf);
 }
-
-// ─────────────────────────── Commande de palette (EXPORT pour l'intégrateur) ───────────────────────────
-
-/**
- * Commande BT pour la « command palette ». L'INTÉGRATEUR l'enregistre via
- * `enregistrerCommandes(commandes)` (cf. commands/registry.ts). Import de type seulement.
- */
-export const commandes: Commande[] = [
-  {
-    id: "panneau:backtest",
-    mnemonique: "BT",
-    libelle: "Backtest de stratégie",
-    categorie: "panneau",
-    motsCles: ["backtest", "bt", "strategie", "test", "equity", "backtesting", "regles"],
-    apercu: "Ouvre / ferme le backtest de stratégie",
-    action: () => backtestStore.getState().toggle(),
-  },
-];

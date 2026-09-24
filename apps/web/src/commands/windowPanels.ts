@@ -7,7 +7,8 @@
  * sans tirer le graphe de dépendances chart/canvas au démarrage.
  *
  * Les fenêtres dont le store est déjà dans `store/*.ts` (ECO, NEWS, DOM…) gardent
- * leurs commandes exportées depuis ces modules.
+ * leurs commandes exportées depuis ces modules — sauf BT (`commandesBacktest`, en fin de
+ * fichier), dont le store ne sert qu'une fois la fenêtre montée.
  */
 import type { Commande } from "./registry";
 import { cryptoquantUiStore, ENTREES_CQ, type CibleCq } from "../store/cryptoquantUi";
@@ -653,5 +654,24 @@ export const windowPanelCommands: Commande[] = [
     motsCles: ["fenetres", "windows", "fermer", "close", "tout fermer", "fermer toutes", "wclose"],
     apercu: "Ferme d'un coup toutes les fenêtres ouvertes (géométrie conservée)",
     action: () => windowManagerStore.getState().closeAll(),
+  },
+];
+
+/**
+ * BT — commande rapatriée de `store/backtest.ts` : ce store (≈ 6,7 Ko gzip avec ses
+ * dépendances) ne sert qu'une fois BacktestWindow montée (React.lazy) et reste hors du
+ * chargement initial (garde-fou : chargementInitial.test.ts). La bascule est exactement
+ * celle de `backtestStore.toggle()` ; l'état `open` du store se recale à son chargement
+ * (`mirrorOpenState`). Tableau à part pour garder sa place dans la palette (App.tsx).
+ */
+export const commandesBacktest: Commande[] = [
+  {
+    id: "panneau:backtest",
+    mnemonique: "BT",
+    libelle: "Backtest de stratégie",
+    categorie: "panneau",
+    motsCles: ["backtest", "bt", "strategie", "test", "equity", "backtesting", "regles"],
+    apercu: "Ouvre / ferme le backtest de stratégie",
+    action: basculer("backtest"),
   },
 ];

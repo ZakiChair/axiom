@@ -8,7 +8,8 @@
  * 39ᵉ fenêtre serait donc muette au ⌘K sans que rien ne le signale.
  *
  * Ce fichier ferme le trou : toute fenêtre du registre DOIT être ouvrable par une commande,
- * soit de `windowPanelCommands`, soit — liste explicite ci-dessous — d'un autre module.
+ * soit de `windowPanelCommands` (ou de `commandesBacktest`, même module), soit — liste explicite
+ * ci-dessous — d'un autre module.
  *
  * Méthode : les ids couverts sont obtenus en EXÉCUTANT chaque action contre un
  * `windowManagerStore` factice (et non en relisant le source) — un `basculer()` mal câblé
@@ -53,7 +54,7 @@ vi.mock("../store/windowManager", async (importOriginal) => {
 });
 
 import { WINDOW_REGISTRY } from "../store/windowManager";
-import { windowPanelCommands } from "./windowPanels";
+import { commandesBacktest, windowPanelCommands } from "./windowPanels";
 
 /**
  * Fenêtres dont la commande ⌘K vit AILLEURS que dans `windowPanels.ts` (leur store métier
@@ -75,14 +76,14 @@ const FENETRES_COMMANDEES_AILLEURS: Record<string, string> = {
   notes: "store/notes.ts — panneau:notes (NOTE), via toggleNotes()",
   screener: "store/screener.ts — panneau:screener (EQS), via toggle()",
   dom: "store/dom-ui.ts — panneau:dom (DOM), via toggleDom()",
-  backtest: "store/backtest.ts — panneau:backtest (BT), via toggle()",
   replay: "store/replay.ts — panneau:replay (REPLAY), toggleWindow direct",
   globe: "store/globe-ui.ts — panneau:globe (GLOBE), via toggleGlobe()",
 };
 
 describe("couverture ⌘K du registre de fenêtres", () => {
   // Une seule exécution des actions, partagée par les cas ci-dessous.
-  for (const cmd of windowPanelCommands) cmd.action();
+  // BT vit à part dans le même module (place conservée dans la palette, cf. App.tsx).
+  for (const cmd of [...windowPanelCommands, ...commandesBacktest]) cmd.action();
   const idsCouverts = new Set(fenetresBasculees);
   const idsRegistre = new Set<string>(WINDOW_REGISTRY.map((w) => w.id));
 

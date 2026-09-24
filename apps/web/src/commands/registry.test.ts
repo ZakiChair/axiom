@@ -77,11 +77,10 @@ import { commandes as whaleCommandes } from "../chart/whaleBubbles";
 import { commandes as depthHeatCommandes } from "../chart/depthHeat";
 import { commandesNiveauxOverlays } from "../chart/niveauxOverlays";
 import { commandes as domCommandes } from "../store/dom-ui";
-import { commandes as backtestCommandes } from "../store/backtest";
 import { commandes as replayCommandes } from "../store/replay";
 import { commandes as globeCommandes } from "../store/globe-ui";
 import { commandes as tickerCommandes } from "../store/tickerBand";
-import { windowPanelCommands } from "./windowPanels";
+import { commandesBacktest, windowPanelCommands } from "./windowPanels";
 import { commandesOnboarding } from "../store/onboarding";
 import { commandesPlaybooks } from "../data/playbooks";
 
@@ -106,7 +105,7 @@ const SOURCES_GREFFEES: Record<string, readonly Commande[]> = {
   "chart/depthHeat": depthHeatCommandes,
   "chart/niveauxOverlays": commandesNiveauxOverlays,
   "store/dom-ui": domCommandes,
-  "store/backtest": backtestCommandes,
+  "commands/windowPanels (BT)": commandesBacktest,
   "store/replay": replayCommandes,
   "store/globe-ui": globeCommandes,
   "store/tickerBand": tickerCommandes,

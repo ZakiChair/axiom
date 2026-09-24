@@ -661,9 +661,18 @@ de suite sur `1f9383a`. Le test FUNDX « expire une source perp âgée » attend
 désormais la cotation actualisée avant d'avancer l'horloge : il contenait une
 course préexistante (2 à 3 échecs sur 5 sur main). Revues indépendantes par lot,
 revue finale sous quatre angles et vérification factuelle de ces documents.
-Budget d'entrée final : **1 212 743 / 359 667 octets** (bruts/gzip), plafonds
-1 220 000 / 360 000 inchangés. **Marge de 333 octets gzip : le prochain lot qui
-touche le chemin d'entrée doit d'abord libérer des octets.** Déploiement : ne
+Budget d'entrée : la mesure gzip dépend de la version de zlib. Le Node 26 local
+(zlib 1.2.12) mesurait 359 667 octets gzip ; la CI (Node 22, zlib 1.3.x) et
+Node 24 mesuraient 361 075, donc un dépassement. Il est corrigé par `ebd74eb` :
+`App.tsx` importait tout `store/backtest` (archive, historique, signature ; 23,5 Ko
+bruts) pour la seule commande BT de la palette. Cette commande bascule désormais
+la fenêtre par le gestionnaire, et le store se charge avec `BacktestWindow`, déjà
+différée. Le garde-fou `src/chargementInitial.test.ts` interdit son retour dans le
+chemin initial. Budget final : **1 189 319 octets bruts ; 354 431 octets gzip en
+zlib 1.3.1 (référence CI), 353 099 en zlib 1.2.12**. Plafonds 1 220 000 / 360 000
+inchangés. **Toujours mesurer le budget avec un zlib 1.3.x** (par exemple Node 24 :
+`PATH=<node24>/bin:$PATH pnpm --filter @axiom/web build`) : le Node 26 local
+sous-estime d'environ 1,3 Ko. Déploiement : ne
 plus lancer `vercel build` dans le checkout principal. Il écrase
 `apps/web/dist`, que le daemon sert (bundle Vercel en local : Twelve Data en
 direct sans la clé `.env`, WHALES et Replay coupés). Déployer par build distant,

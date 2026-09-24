@@ -124,8 +124,12 @@ Autres effets visibles :
     déjà affiché avant l'actualisation, puis avançait l'horloge trop tôt.
   - Il attend désormais la cotation actualisée elle-même, avec la même assertion
     métier (15/15 en répétition).
-- **Budget d'entrée** : 1 212 743 / 359 667 octets (bruts/gzip), pour des
-  plafonds de 1 220 000 / 360 000, soit 333 octets de marge gzip.
+- **Budget d'entrée** : la première fusion a fait échouer la CI (361 075 > 360 000
+  octets gzip en zlib 1.3.x), alors que le Node 26 local mesurait 359 667 (zlib
+  1.2.12). Le correctif `ebd74eb` sort `store/backtest` du chargement initial.
+  Budget final : 1 189 319 octets bruts ; 354 431 octets gzip en zlib 1.3.1
+  (référence CI) et 353 099 en zlib 1.2.12, pour des plafonds de 1 220 000 /
+  360 000.
 - **Périmètre** : aucune dépendance, aucun hôte, aucune règle de proxy,
   `@axiom/types` inchangé.
 

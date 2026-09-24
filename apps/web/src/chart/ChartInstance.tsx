@@ -1216,6 +1216,23 @@ export function ChartInstance({
         revenue?.onCandles();
         macro?.onCandles();
 
+        // L'extension de session (ci-dessous) réapplique TOUT le buffer au graphe :
+        // pendant qu'elle tourne, la pagination au scroll est mise en attente pour ne
+        // pas préfixer des bougies que ce `applyNewData` va déjà contenir, et rien n'est
+        // recalculé : sur N+M bougies d'un graphe qui en affiche N, chaque barre lirait la
+        // valeur d'une bougie M barres plus ancienne.
+        let extensionSessionEnCours = false;
+
+        // Indicateurs et contrôleurs recalculés sur le buffer affiché.
+        const rafraichir = (buffer: Candle[]): void => {
+          indicators.recompute(indicatorsStore.getState().indicators, buffer, exchange);
+          orderflow?.onCandles();
+          compare?.onCandles();
+          volumeProfile?.onCandles();
+          revenue?.onCandles();
+          macro?.onCandles();
+        };
+
         // Une page d'historique ANTÉRIEURE à `avantTime`, préfixée au buffer du slot
         // (store + indicateurs + contrôleurs). Chemin PARTAGÉ par la pagination au
         // scroll et par l'extension de session ci-dessous. Rend les bougies ajoutées.
@@ -1231,19 +1248,9 @@ export function ChartInstance({
           }
           const merged = older.concat(store.getState().candles);
           store.getState().setCandles(merged);
-          indicators.recompute(indicatorsStore.getState().indicators, merged, exchange);
-          orderflow?.onCandles();
-          compare?.onCandles();
-          volumeProfile?.onCandles();
-          revenue?.onCandles();
-          macro?.onCandles();
+          if (!extensionSessionEnCours) rafraichir(merged);
           return older;
         };
-
-        // L'extension de session (ci-dessous) réapplique TOUT le buffer au graphe :
-        // pendant qu'elle tourne, la pagination au scroll est mise en attente pour ne
-        // pas préfixer des bougies que ce `applyNewData` va déjà contenir.
-        let extensionSessionEnCours = false;
 
         // Pagination historique (scroll gauche) — prépend au buffer + au graphe.
         chart.setLoadDataCallback((params) => {
@@ -1318,8 +1325,12 @@ export function ChartInstance({
             }
             if (cancelled || !isMarketDataReady(store.getState(), requestedIdentity, requestId)) return;
             const complet = store.getState().candles;
-            // Même chemin que le resync post-reconnexion : réapplication du buffer entier.
-            if (complet.length > avant) chart.applyNewData(complet.map(toKLineData));
+            // Même chemin que le resync post-reconnexion : réapplication du buffer entier,
+            // puis un seul recalcul, aligné sur les bougies affichées.
+            if (complet.length > avant) {
+              chart.applyNewData(complet.map(toKLineData));
+              rafraichir(complet);
+            }
           },
         });
 
@@ -1341,12 +1352,13 @@ export function ChartInstance({
             // Recalcul indicateurs intra-bougie, throttlé 500 ms (leading+trailing) : la
             // bougie en formation bouge, on veut le RSI/etc. à jour sans recalculer à
             // chaque tick WS. La clôture (branche ci-dessus) garde `recompute` direct.
-            indicators.recomputeThrottled(indicatorsStore.getState().indicators, store.getState().candles, exchange);
+            // Extension de session en cours : recalcul différé à sa réapplication finale.
+            if (!extensionSessionEnCours) indicators.recomputeThrottled(indicatorsStore.getState().indicators, store.getState().candles, exchange);
           }
 
           orderflow?.onTick();
 
-          if (candle.closed) {
+          if (candle.closed && !extensionSessionEnCours) {
             indicators.recompute(indicatorsStore.getState().indicators, store.getState().candles, exchange);
             compare?.onCandles();
             volumeProfile?.onCandles();

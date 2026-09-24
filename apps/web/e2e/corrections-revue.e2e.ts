@@ -201,6 +201,59 @@ test("VWAP puis pivots : veille entière, store réel, sans rechargement", async
   expect(navigations).toBe(navApresBoot);
 });
 
+test("extension de session : chaque barre garde sa valeur d'indicateur pendant les pages", async ({ page }) => {
+  // Volumes distincts par minute : une barre qui lirait la valeur d'une bougie plus ancienne se voit.
+  const tuple = (time: number) => {
+    const t = tupleBinance(time);
+    t[5] = String(100 + ((time / MINUTE) % 800));
+    return t;
+  };
+  let pages = 0;
+  await page.route("**/api.binance.com/api/v3/klines*", async (route) => {
+    const url = new URL(route.request().url());
+    const endRaw = url.searchParams.get("endTime");
+    const limit = Number(url.searchParams.get("limit") ?? LIMIT_INITIAL);
+    const lastOpen = endRaw === null ? PREMIER_INITIAL + (LIMIT_INITIAL - 1) * MINUTE : Math.floor(Number(endRaw) / MINUTE) * MINUTE;
+    const n = Math.max(0, Math.min(limit, Math.floor((lastOpen - VEILLE) / MINUTE) + 1));
+    // Pages 2 et suivantes retenues : l'extension reste en cours assez longtemps pour être lue.
+    if (endRaw !== null && ++pages >= 2) await new Promise((r) => setTimeout(r, 2_500));
+    await route.fulfill({ json: Array.from({ length: n }, (_, i) => tuple(lastOpen - (n - 1 - i) * MINUTE)) });
+  });
+  // Légendes dessinées sur canvas : titre puis valeur, relevés au dessin.
+  await page.addInitScript(() => {
+    const textes: string[] = [];
+    (window as unknown as { __textes: string[] }).__textes = textes;
+    const dessiner = CanvasRenderingContext2D.prototype.fillText;
+    CanvasRenderingContext2D.prototype.fillText = function (texte: string, ...reste: [number, number, number?]) {
+      textes.push(String(texte));
+      if (textes.length > 4_000) textes.splice(0, 2_000);
+      return dessiner.call(this, texte, ...reste);
+    };
+  });
+  const volumeAffiche = () => page.evaluate(() => {
+    const textes = (window as unknown as { __textes: string[] }).__textes;
+    const i = textes.lastIndexOf("Volume: ");
+    return i >= 0 ? textes[i + 1] : undefined;
+  });
+
+  await page.goto("/");
+  await attendreCompte(page, LIMIT_INITIAL);
+  await expect.poll(volumeAffiche, { timeout: 10_000 }).toBeDefined();
+  const avant = await volumeAffiche();
+
+  await page.getByRole("button", { name: /^Indicateurs/ }).click();
+  await page.getByPlaceholder(/CVD, RVOL/).fill("Pivot Points Standard");
+  await boutonPivotStandardCatalogue(page).click();
+  // Page 1 reçue, page 2 retenue : le buffer a grandi, le graphe attend la réapplication finale.
+  await expect.poll(async () => (await lireBougiesStore(page)).count, { timeout: 20_000 }).toBeGreaterThan(LIMIT_INITIAL);
+  await new Promise((r) => setTimeout(r, 500));
+  expect(await volumeAffiche()).toBe(avant);
+
+  await attendreCompte(page, TOTAL_PIVOTS);
+  await new Promise((r) => setTimeout(r, 500));
+  expect(await volumeAffiche()).toBe(avant);
+});
+
 test("limite Kraken visible (PARTIAL) après chargement", async ({ page }) => {
   await page.goto("/");
   await attendreCompte(page, LIMIT_INITIAL);

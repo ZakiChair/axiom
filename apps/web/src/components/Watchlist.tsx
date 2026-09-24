@@ -177,8 +177,10 @@ export interface SessionProvenances {
   confirmees: Map<string, WatchlistSource>;
   /** Actifs TradFi déjà sondés (un crédit Twelve Data chacun), resondés au changement de liste. */
   tradfiSondes: Set<string>;
+  /** Sondes Twelve Data en vol : un remontage ne les double pas. */
+  tradfiEnVol: Set<string>;
 }
-export const nouvelleSessionProvenances = (): SessionProvenances => ({ confirmees: new Map(), tradfiSondes: new Set() });
+export const nouvelleSessionProvenances = (): SessionProvenances => ({ confirmees: new Map(), tradfiSondes: new Set(), tradfiEnVol: new Set() });
 const SESSION_PROVENANCES = nouvelleSessionProvenances();
 
 /**
@@ -201,14 +203,12 @@ const SESSION_PROVENANCES = nouvelleSessionProvenances();
  * Les sondes routent sur le catalogue reçu : elles ne relancent pas le rafraîchissement commun.
  */
 export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => void {
-  const { confirmees, tradfiSondes } = session;
+  const { confirmees, tradfiSondes, tradfiEnVol } = session;
   let catalog: MarketCatalog | undefined;
   let passe: AbortController | undefined;
   let reessai: ReturnType<typeof setInterval> | undefined;
   let attente: ReturnType<typeof setInterval> | undefined;
   let arrete = false;
-  const arret = new AbortController();
-  const tradfiEnVol = new Set<string>();
 
   const confirmer = (symbol: string, source: WatchlistSource) => {
     const avant = confirmees.get(symbol);
@@ -257,7 +257,7 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
     if (!actif && attente !== undefined) { clearInterval(attente); attente = undefined; }
   };
 
-  async function sonder(symbol: string, signal: AbortSignal, courant?: MarketCatalog): Promise<void> {
+  async function sonder(symbol: string, signal?: AbortSignal, courant?: MarketCatalog): Promise<void> {
     try {
       const before = marketStore.getState();
       if (before.symbol === symbol && before.dataLoad.status === "ready") return confirmer(symbol, before.exchange);
@@ -271,7 +271,7 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
         unavailableSources: courant.unavailableSources.filter(garder),
       } : courant;
       const resolved = await resolveTickerMarket({ exchange: initialSource, symbol, timeframe: "1h" }, signal, routage);
-      if (signal.aborted) return;
+      if (signal?.aborted) return;
       const market = marketStore.getState();
       if (market.symbol === symbol && market.dataLoad.status === "ready") confirmer(symbol, market.exchange);
       else if (resolved && watchlistStore.getState().sources[symbol] === initialSource) confirmer(symbol, resolved.exchange);
@@ -293,8 +293,9 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
 
   /**
    * Une sonde Twelve Data coûte un crédit (800/j) et un créneau 8/min partagé avec le graphe ;
-   * son routage ne lit aucun catalogue, qui ne la relance donc pas. Une sonde en vol n'est pas
-   * doublée ; abandonnée en attente de créneau, elle quitte la file sans rien consommer.
+   * son routage ne lit aucun catalogue, qui ne la relance donc pas. Une sonde en vol appartient à
+   * la session, pas au montage : jamais doublée, même par un remontage, et sa réponse vaut pour la
+   * session. Abandonnée en attente de créneau (2,5 s), elle quitte la file sans rien consommer.
    */
   function sonderTradfi(): void {
     if (arrete) return;
@@ -305,9 +306,7 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
       if (tradfiEnVol.has(symbol) || tradfiSondes.has(symbol)) continue;
       if (!isMarketOpen(classifyTradfi(symbol), maintenant)) { enAttente = true; continue; }
       tradfiEnVol.add(symbol);
-      void sonder(symbol, arret.signal, catalog)
-        .then(() => { if (!arret.signal.aborted) tradfiSondes.add(symbol); })
-        .finally(() => tradfiEnVol.delete(symbol));
+      void sonder(symbol, undefined, catalog).then(() => { tradfiEnVol.delete(symbol); tradfiSondes.add(symbol); });
     }
     ajusterAttente(enAttente);
   }
@@ -337,7 +336,6 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
   return () => {
     arrete = true;
     passe?.abort();
-    arret.abort();
     ajusterReessai(false);
     ajusterAttente(false);
     stopCatalogue();

@@ -378,6 +378,32 @@ describe("provenances des favoris", () => {
     expect(quotes()).toHaveLength(2);
   });
 
+  it("un remontage pendant une sonde Twelve Data en vol ne la double pas ; sa réponse sert la session", async () => {
+    vi.setSystemTime(new Date("2026-10-07T14:00:00Z")); // mercredi, forex ouvert ; fenêtre 8/min neuve
+    watchlistStore.getState().setAll(["WTI/USD"]);
+    catalogue(spot(["binance", "ETHUSDT"]));
+    const urls: string[] = [];
+    let repondre = () => {};
+    vi.stubGlobal("fetch", vi.fn((input: string) => {
+      urls.push(String(input));
+      return new Promise<Response>((resolve) => { repondre = () => resolve(reponse({ close: "75", percent_change: "1" })); });
+    }));
+    const session = nouvelleSessionProvenances();
+    stop = suivreProvenancesFavoris(session);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(urls).toEqual(["/tdapi/quote?symbol=WTI%2FUSD"]);
+    // Sortie du plein écran : démontage puis remontage, la sonde est toujours en vol.
+    stop();
+    stop = suivreProvenancesFavoris(session);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(urls).toHaveLength(1);
+    repondre();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ "WTI/USD": "twelvedata" });
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(urls).toHaveLength(1);
+  });
+
   it("marché fermé (samedi) : aucune requête Twelve Data, ni au montage ni ensuite", async () => {
     vi.setSystemTime(new Date("2026-09-26T12:00:00Z"));
     watchlistStore.getState().setAll(["WTI/USD", "AAPL", "EUR/USD"]);

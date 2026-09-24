@@ -677,6 +677,21 @@ describe("file Twelve Data : priorités, abandon et fenêtre glissante", () => {
     expect(envois.some(({ url }) => url.includes("/quote"))).toBe(false);
   });
 
+  it("jambe Twelve Data d'un ratio, fenêtre pleine : refus immédiat « prochain créneau », rien d'envoyé ensuite", async () => {
+    const td = await import("./twelvedata");
+    const { getAdapter } = await import("./adapters");
+    const reseauTd = globalThis.fetch;
+    // Jambe Binance muette : seul le sort de la jambe Twelve Data décide du ratio.
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes("api.binance.com") ? new Promise<Response>(() => {}) : reseauTd(input, init)));
+    await td.fetchQuotes(["A", "B", "C", "D", "E", "F", "G", "H"]);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const ratio = getAdapter("synthetic").fetchKlines("binance:ETHUSDT|/|twelvedata:GLD", "1h", { limit: 500 });
+    await expect(ratio).rejects.toThrow(/^Quota Twelve Data : prochain créneau dans \d+ s$/);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(envois.filter(({ url }) => url.includes("GLD"))).toEqual([]);
+  });
+
   it("l'attente annoncée compte le poids des cotations en file", async () => {
     const td = await import("./twelvedata");
     await Promise.all(Array.from({ length: 4 }, (_, i) => td.fetchKlinesTwelveData(`PLEIN${i}`, "1d")));

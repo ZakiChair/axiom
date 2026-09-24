@@ -16,7 +16,7 @@ import { okxAdapter } from "./okx";
 import { hyperliquidAdapter } from "./hyperliquid";
 import { krakenAdapter } from "./kraken";
 import { coinbaseAdapter } from "./coinbase";
-import { twelveDataAdapter } from "./twelvedata";
+import { fetchKlinesTwelveData, twelveDataAdapter } from "./twelvedata";
 import { mexcAdapter } from "./mexc";
 import { capitalisationAdapter, TIMEFRAMES_CAPITALISATION } from "./mcapCandles";
 import { estSymboleCapitalisation } from "./mcap";
@@ -25,6 +25,17 @@ import {
   parseSyntheticSymbol,
   type SyntheticLegSource,
 } from "./synthetic";
+
+/**
+ * Jambe Twelve Data d'un synthétique (ratio ETH/GLD…) : comme le backfill TD direct, elle passe
+ * devant les cotations et, fenêtre 8/min pleine, est refusée d'emblée (« prochain créneau dans
+ * N s ») au lieu d'attendre en file le chien de garde du graphe (20 s, armé dès le départ pour un
+ * synthétique) puis de partir pour personne. 15 s : une jambe acceptée part avant ce délai.
+ */
+const jambeTwelveData: IExchangeAdapter = {
+  ...twelveDataAdapter,
+  fetchKlines: (symbol, tf, opts) => fetchKlinesTwelveData(symbol, tf, opts, { priorite: "graphe", attenteMaxMs: 15_000 }),
+};
 
 /** Adaptateurs câblés (crypto : Binance/Bybit/OKX/Hyperliquid/Kraken/Coinbase/MEXC ; tradfi : Twelve Data). */
 const ADAPTERS: Partial<Record<ExchangeId, IExchangeAdapter>> = {
@@ -37,7 +48,7 @@ const ADAPTERS: Partial<Record<ExchangeId, IExchangeAdapter>> = {
   twelvedata: twelveDataAdapter,
   mexc: mexcAdapter,
   synthetic: createSyntheticAdapter(
-    (ex) => ex === "mcap" ? capitalisationAdapter : getAdapter(ex),
+    (ex) => ex === "mcap" ? capitalisationAdapter : ex === "twelvedata" ? jambeTwelveData : getAdapter(ex),
     capitalisationAdapter,
   ),
 };

@@ -33,10 +33,24 @@ const BASE_DIRECTE = /^https?:\/\//.test(TWELVE_DATA_API_BASE);
 const MSG_CLE_REQUISE = "Twelve Data : clé Twelve Data requise — ajoutez votre clé personnelle dans les Réglages.";
 
 let apiKey: string | null = null;
+/** Posée par store/twelvedata (chargé avec les Réglages seulement) ; sinon relue une fois. */
+let clePosee = false;
+/** Même nom que dans store/twelvedata.ts. */
+const CLE_STOCKAGE = "axiom:twelvedata:key";
 
 export function setTwelveDataApiKey(key: string | null): void {
+  clePosee = true;
   const value = key?.trim() ?? "";
   apiKey = value.length > 0 ? value : null;
+}
+
+/** Clé enregistrée utilisable dès la première demande, sans attendre l'ouverture des Réglages. */
+function cleActive(): string | null {
+  if (!clePosee) {
+    try { setTwelveDataApiKey(localStorage.getItem(CLE_STOCKAGE)); }
+    catch { clePosee = true; /* stockage bloqué : sans clé personnelle */ }
+  }
+  return apiKey;
 }
 
 export function buildTwelveDataUrl(
@@ -99,6 +113,9 @@ export interface ControleTwelveData {
 }
 
 interface Demande { priorite: () => PrioriteTwelveData; accorder: () => void; refuser: (erreur: unknown) => void }
+/** Contrôle interne : une série partagée garde sa demande en file pour juger qui la rejoint. */
+interface ControleFile extends ControleTwelveData { enFile?: (demande: Demande) => void }
+const refusAttente = (attente: number): Error => new Error(`Quota Twelve Data : prochain créneau dans ${Math.ceil(attente / 1000)} s`);
 /** File FIFO explicite : la première demande « graphe » passe devant toute demande de fond. */
 const file: Demande[] = [];
 let minuteurFile: ReturnType<typeof setTimeout> | undefined;
@@ -239,12 +256,23 @@ function servirFile(): void {
   }
 }
 
-/** Attente estimée d'une NOUVELLE demande : fenêtre courante, puis demandes servies avant elle. */
-function attenteEstimeeMs(priorite: PrioriteTwelveData): number {
+const enGraphe = (d: Demande): boolean => d.priorite() === "graphe";
+
+/**
+ * Attente d'une NOUVELLE demande à cette priorité, ou de `demande` déjà en file si elle
+ * l'avait (promotion) : les « graphe » arrivées avant elle, puis, en fond, les « fond ».
+ */
+function attenteEstimeeMs(priorite: PrioriteTwelveData, demande?: Demande): number {
+  const avant = demande ? file.slice(0, Math.max(0, file.indexOf(demande))) : file;
+  return attenteApresMs(priorite === "graphe" ? avant.filter(enGraphe).length
+    : file.filter(enGraphe).length + avant.filter((d) => !enGraphe(d)).length);
+}
+
+/** Fenêtre courante, puis `devant` demandes servies avant celle-ci. */
+function attenteApresMs(devant: number): number {
   const now = Date.now();
   purgerFenetre(now);
   const occupes = [...requestTimes];
-  const devant = priorite === "graphe" ? file.filter((d) => d.priorite() === "graphe").length : file.length;
   let t = now;
   for (let i = 0; i <= devant; i++) {
     t = Math.max(t, (occupes[occupes.length - RATE_LIMIT] ?? -Infinity) + RATE_WINDOW_MS);
@@ -258,18 +286,16 @@ function attenteEstimeeMs(priorite: PrioriteTwelveData): number {
  * la demande ATTEND en file plutôt que de partir et se faire rejeter (429). Garantit
  * ≤ 8 req/min côté Twelve Data. La priorité est relue à chaque service (promotion).
  */
-function acquireSlot(controle: ControleTwelveData = {}): Promise<void> {
+function acquireSlot(controle: ControleFile = {}): Promise<void> {
   const { signal } = controle;
-  if (apiKey === null && BASE_DIRECTE) return Promise.reject(new Error(MSG_CLE_REQUISE));
+  if (cleActive() === null && BASE_DIRECTE) return Promise.reject(new Error(MSG_CLE_REQUISE));
   if (signal?.aborted) return Promise.reject(signal.reason);
   const refus = refusQuotaJour();
   if (refus) return Promise.reject(refus);
   const priorite = (): PrioriteTwelveData => controle.priorite ?? "fond";
   if (controle.attenteMaxMs !== undefined) {
     const attente = attenteEstimeeMs(priorite());
-    if (attente > controle.attenteMaxMs) {
-      return Promise.reject(new Error(`Quota Twelve Data : prochain créneau dans ${Math.ceil(attente / 1000)} s`));
-    }
+    if (attente > controle.attenteMaxMs) return Promise.reject(refusAttente(attente));
   }
   return new Promise<void>((resolve, reject) => {
     const quitter = (): void => {
@@ -284,6 +310,7 @@ function acquireSlot(controle: ControleTwelveData = {}): Promise<void> {
     };
     signal?.addEventListener("abort", quitter, { once: true });
     file.push(demande);
+    controle.enFile?.(demande);
     servirFile();
   });
 }
@@ -303,6 +330,8 @@ interface SeriePartagee {
   priorite: PrioriteTwelveData;
   creneau: boolean;
   surCreneau: Array<() => void>;
+  /** Sa demande dans la file du quota, tant que le créneau n'est pas obtenu. */
+  demande?: Demande;
 }
 /** Requêtes en vol par clé (dédup : le double-montage StrictMode = 1 seul appel). */
 const inflight = new Map<string, SeriePartagee>();
@@ -414,7 +443,7 @@ async function requestSeries(
   symbol: string,
   interval: string,
   outputsize: number,
-  controle: ControleTwelveData,
+  controle: ControleFile,
   endTime?: number,
 ): Promise<Candle[]> {
   await acquireSlot(controle);
@@ -454,7 +483,17 @@ function cachedSeries(
     return Promise.resolve(hit.data);
   }
   if (controle.signal?.aborted) return Promise.reject(controle.signal.reason);
-  const partagee = inflight.get(key) ?? lancerSerie(key, symbol, interval, outputsize, endTime, controle);
+  const enVol = inflight.get(key);
+  // Série encore en file : la limite d'attente de CET abonné vaut aussi (jugée comme s'il
+  // la promouvait). Refus pour lui seul, sans promotion ; même repli périmé qu'une série neuve.
+  if (enVol?.demande && !enVol.creneau && controle.attenteMaxMs !== undefined) {
+    const attente = attenteEstimeeMs(controle.priorite === "graphe" ? "graphe" : enVol.priorite, enVol.demande);
+    if (attente > controle.attenteMaxMs) {
+      const stale = seriesCache.get(key);
+      return stale ? Promise.resolve(stale.data) : Promise.reject(refusAttente(attente));
+    }
+  }
+  const partagee = enVol ?? lancerSerie(key, symbol, interval, outputsize, endTime, controle);
   if (controle.priorite === "graphe") partagee.priorite = "graphe";
   return abonner(key, partagee, controle);
 }
@@ -467,7 +506,7 @@ function lancerSerie(
   endTime: number | undefined,
   controle: ControleTwelveData,
 ): SeriePartagee {
-  const etat = { controleur: new AbortController(), abonnes: 0, priorite: controle.priorite ?? "fond", creneau: false, surCreneau: [] as Array<() => void> };
+  const etat: Omit<SeriePartagee, "promesse"> = { controleur: new AbortController(), abonnes: 0, priorite: controle.priorite ?? "fond", creneau: false, surCreneau: [] };
   const { signal } = etat.controleur;
   const promesse = (async () => {
     try {
@@ -475,7 +514,8 @@ function lancerSerie(
         signal,
         get priorite() { return etat.priorite; },
         ...(controle.attenteMaxMs !== undefined ? { attenteMaxMs: controle.attenteMaxMs } : {}),
-        onCreneau: () => { etat.creneau = true; for (const suite of etat.surCreneau.splice(0)) suite(); },
+        onCreneau: () => { etat.creneau = true; delete etat.demande; for (const suite of etat.surCreneau.splice(0)) suite(); },
+        enFile: (demande) => { etat.demande = demande; },
       }, endTime);
       seriesCache.delete(key);
       seriesCache.set(key, { at: Date.now(), data });

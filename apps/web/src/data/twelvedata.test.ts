@@ -665,6 +665,75 @@ describe("file Twelve Data : priorités, abandon et fenêtre glissante", () => {
     expect(depuisCache).toHaveBeenCalledTimes(1);
   });
 
+  it("le graphe qui rejoint une série encore en file garde sa limite d'attente, refusé seul et sans promotion", async () => {
+    const td = await import("./twelvedata");
+    await saturer(td);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const cotation = td.fetchQuotes(["SPY"]);
+    const fond = td.twelveDataAdapter.fetchKlines("XOM", "1d", { limit: 500 });
+    const onCreneau = vi.fn();
+    const graphe = td.fetchKlinesTwelveData("XOM", "1d", { limit: 500 }, { priorite: "graphe", attenteMaxMs: 20_000, onCreneau });
+    await expect(graphe).rejects.toThrow("Quota Twelve Data : prochain créneau dans 55 s");
+    // La série partagée n'est ni annulée ni promue : la cotation arrivée avant passe d'abord.
+    await vi.advanceTimersByTimeAsync(55_000);
+    expect((await fond).length).toBe(1);
+    await cotation;
+    expect(envois.slice(8).map(({ url }) => new URL(url, "http://localhost").searchParams.get("symbol"))).toEqual(["SPY", "XOM"]);
+    expect(onCreneau).not.toHaveBeenCalled();
+  });
+
+  it("refusé en rejoignant une série en file, le graphe reçoit sa version périmée comme une série neuve", async () => {
+    const td = await import("./twelvedata");
+    await td.fetchKlinesTwelveData("XOM", "1d", { limit: 500 });
+    await vi.advanceTimersByTimeAsync(61_000);
+    await Promise.all(Array.from({ length: 8 }, (_, i) => td.fetchKlinesTwelveData(`PLEIN${i}`, "1d")));
+    const fond = td.twelveDataAdapter.fetchKlines("XOM", "1d", { limit: 500 });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(await td.fetchKlinesTwelveData("XOM", "1d", { limit: 500 }, { priorite: "graphe", attenteMaxMs: 20_000 })).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await fond;
+    expect(envois.filter(({ url }) => url.includes("XOM"))).toHaveLength(2);
+  });
+
+  it("le graphe rejoint une série en file servie dans sa limite : accepté, créneau annoncé", async () => {
+    const td = await import("./twelvedata");
+    await saturer(td);
+    await vi.advanceTimersByTimeAsync(45_000);
+    const cotation = td.fetchQuotes(["SPY"]);
+    const fond = td.twelveDataAdapter.fetchKlines("XOM", "1d", { limit: 500 });
+    const onCreneau = vi.fn();
+    // Promue, la série passe devant la cotation : premier créneau libre, dans 15 s.
+    const graphe = td.fetchKlinesTwelveData("XOM", "1d", { limit: 500 }, { priorite: "graphe", attenteMaxMs: 20_000, onCreneau });
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(onCreneau).toHaveBeenCalledTimes(1);
+    expect(await graphe).toEqual(await fond);
+    await cotation;
+    expect(envois.slice(8).map(({ url }) => new URL(url, "http://localhost").searchParams.get("symbol"))).toEqual(["XOM", "SPY"]);
+  });
+
+  it("build Vercel : la clé enregistrée est relue sans attendre l'ouverture des Réglages", async () => {
+    vi.stubEnv("VITE_TWELVE_DATA_API_BASE", "https://api.twelvedata.com");
+    stockage.set("axiom:twelvedata:key", " enregistree ");
+    const td = await import("./twelvedata");
+    await td.fetchKlinesTwelveData("AAPL", "1d");
+    expect(envois[0]!.url).toMatch(/^https:\/\/api\.twelvedata\.com\/time_series\?.*apikey=enregistree/);
+  });
+
+  it("une clé effacée dans les Réglages n'est pas ressuscitée par cette relecture", async () => {
+    vi.stubEnv("VITE_TWELVE_DATA_API_BASE", "https://api.twelvedata.com");
+    stockage.set("axiom:twelvedata:key", "ancienne");
+    const td = await import("./twelvedata");
+    td.setTwelveDataApiKey(null);
+    await expect(td.fetchKlinesTwelveData("AAPL", "1d")).rejects.toThrow(/clé Twelve Data requise/);
+    expect(envois).toHaveLength(0);
+  });
+
+  it("les Réglages enregistrent la clé sous le nom relu par le module de données", async () => {
+    const { twelveDataKeyStore } = await import("../store/twelvedata");
+    twelveDataKeyStore.getState().setKey("abc");
+    expect(stockage.get("axiom:twelvedata:key")).toBe("abc");
+  });
+
   it("le sondage de la bougie courante quitte la file à l'arrêt, sans consommer de créneau", async () => {
     const td = await import("./twelvedata");
     const stop = td.twelveDataAdapter.subscribeKline("AAPL", "1m", () => {});

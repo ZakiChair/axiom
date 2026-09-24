@@ -85,7 +85,7 @@ export function majBadgeStatut(ligne: HTMLElement, statut: StatutIndicateur | nu
     badge.setAttribute("data-role", "statut-badge");
     const raison = document.createElement("span");
     raison.setAttribute("data-role", "statut-raison");
-    raison.className = "max-w-[220px] truncate text-text-dim";
+    raison.className = "max-w-[280px] truncate text-text-dim";
     conteneur.append(badge, raison);
     const libelle = ligne.querySelector<HTMLSpanElement>("[data-role=label]");
     if (libelle) libelle.after(conteneur);

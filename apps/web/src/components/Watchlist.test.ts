@@ -217,6 +217,53 @@ describe("provenances des favoris", () => {
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance" });
   });
 
+  it("panne passagère du catalogue Binance : les favoris confirmés sur OKX reviennent à Binance dans la même session", async () => {
+    watchlistStore.getState().setAll(["BTCUSDT", "VIRTUALUSDT", "CARDSUSDT"], { BTCUSDT: "okx", VIRTUALUSDT: "okx", CARDSUSDT: "okx" });
+    const panne = { ...spot(["okx", "BTCUSDT"], ["okx", "VIRTUALUSDT"], ["okx", "CARDSUSDT"]), unavailableSources: ["binance" as const] };
+    const { publier } = catalogue(panne);
+    const urls = reseau();
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "okx", VIRTUALUSDT: "okx", CARDSUSDT: "okx" });
+    // Catalogue partiel : relu à chaque réessai (son rafraîchissement republie un retour de Binance).
+    const lectures = vi.mocked(routing.fetchMarketCatalog).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(vi.mocked(routing.fetchMarketCatalog).mock.calls.length).toBeGreaterThan(lectures);
+    expect(urls).toHaveLength(3);
+    // Binance republié : BTC et VIRTUAL, qu'il liste, y reviennent ; CARDS, absent, reste sur OKX.
+    publier(spot(["binance", "BTCUSDT"], ["binance", "VIRTUALUSDT"], ["okx", "BTCUSDT"], ["okx", "VIRTUALUSDT"], ["okx", "CARDSUSDT"]));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance", VIRTUALUSDT: "binance", CARDSUSDT: "okx" });
+    expect(urls.slice(3).sort()).toEqual([
+      "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT",
+      "https://api.binance.com/api/v3/ticker/24hr?symbol=VIRTUALUSDT",
+    ]);
+    // Catalogue complet : plus aucune relecture ni sonde.
+    const apres = vi.mocked(routing.fetchMarketCatalog).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(vi.mocked(routing.fetchMarketCatalog).mock.calls.length).toBe(apres);
+    expect(urls).toHaveLength(5);
+  });
+
+  it("graphe prêt sur OKX pendant la panne du catalogue Binance : confirmation provisoire, levée au retour de Binance", async () => {
+    watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "okx" });
+    const { publier } = catalogue({ ...spot(["okx", "BTCUSDT"]), unavailableSources: ["binance"] });
+    const urls = reseau();
+    const session = nouvelleSessionProvenances();
+    stop = suivreProvenancesFavoris(session);
+    await vi.advanceTimersByTimeAsync(0);
+    graphePret("okx", "BTCUSDT");
+    marketStore.getState().setMarket({ exchange: "binance", symbol: "XRPUSDT", timeframe: "1h" });
+    // Remontage (plein écran) avant le retour de Binance : la confirmation reste provisoire.
+    stop();
+    stop = suivreProvenancesFavoris(session);
+    await vi.advanceTimersByTimeAsync(0);
+    publier(spot(["binance", "BTCUSDT"], ["okx", "BTCUSDT"]));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance" });
+    expect(urls.filter((url) => url.includes("binance"))).toEqual(["https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"]);
+  });
+
   it("échec OKX passager : CARDSUSDT(okx) n'est jamais sondé sur une troisième place et reste sur OKX", async () => {
     watchlistStore.getState().setAll(["CARDSUSDT"], { CARDSUSDT: "okx" });
     catalogue(spot(["kraken", "CARDSUSDT"], ["okx", "CARDSUSDT"]));

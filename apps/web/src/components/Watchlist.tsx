@@ -179,8 +179,10 @@ export interface SessionProvenances {
   tradfiSondes: Set<string>;
   /** Sondes Twelve Data en vol : un remontage ne les double pas. */
   tradfiEnVol: Set<string>;
+  /** Replis confirmés pendant une panne du catalogue Binance : resondés quand il les liste. */
+  provisoires: Set<string>;
 }
-export const nouvelleSessionProvenances = (): SessionProvenances => ({ confirmees: new Map(), tradfiSondes: new Set(), tradfiEnVol: new Set() });
+export const nouvelleSessionProvenances = (): SessionProvenances => ({ confirmees: new Map(), tradfiSondes: new Set(), tradfiEnVol: new Set(), provisoires: new Set() });
 const SESSION_PROVENANCES = nouvelleSessionProvenances();
 
 /**
@@ -197,13 +199,17 @@ const SESSION_PROVENANCES = nouvelleSessionProvenances();
  *    son catalogue manque) et sur elle-même, jamais sur une troisième place ; sans prix, le favori
  *    garde sa source, non confirmé, réessayé dans 30 s ou au catalogue. Seule une source que son
  *    catalogue chargé dément (actif absent) est resondée sur le catalogue complet ;
+ *  - une place confirmée hors Binance pendant une panne du catalogue Binance l'est à titre
+ *    provisoire : resondée (Binance d'abord) dès qu'un catalogue republié la liste chez Binance ;
+ *    un catalogue partiel est relu toutes les 30 s pour que ce retour soit publié ;
  *  - un actif TradFi sans source n'est sondé qu'une fois par changement de liste, jamais marché
  *    fermé : il attend alors l'ouverture de son marché. Une source Twelve Data enregistrée, seule
  *    candidate possible, ne l'est jamais : ses quotes suivent déjà les heures de marché.
- * Les sondes routent sur le catalogue reçu : elles ne relancent pas le rafraîchissement commun.
+ * Les sondes routent sur le catalogue reçu : elles ne relancent pas le rafraîchissement commun,
+ * que seule la relecture d'un catalogue partiel (au plus une par passe) déclenche.
  */
 export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => void {
-  const { confirmees, tradfiSondes, tradfiEnVol } = session;
+  const { confirmees, tradfiSondes, tradfiEnVol, provisoires } = session;
   let catalog: MarketCatalog | undefined;
   let passe: AbortController | undefined;
   let reessai: ReturnType<typeof setInterval> | undefined;
@@ -214,6 +220,8 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
     const avant = confirmees.get(symbol);
     // Notée avant l'écriture : la notification synchrone du store n'y voit pas un changement externe.
     confirmees.set(symbol, source);
+    if (source !== "binance" && catalog?.unavailableSources.includes("binance")) provisoires.add(symbol);
+    else provisoires.delete(symbol);
     watchlistStore.getState().setSource(symbol, source);
     if (watchlistStore.getState().sources[symbol] === source) return;
     if (avant === undefined) confirmees.delete(symbol);
@@ -278,17 +286,22 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
     } catch { /* Sans prix confirmé : crypto réessayée au catalogue ou dans 30 s, TradFi à la liste. */ }
   }
 
+  /** Réessai à 30 s : favoris sans prix confirmé, ou catalogue partiel à relire. */
+  const aReessayer = (courant: MarketCatalog) => aSonder(false).length > 0 || courant.unavailableSources.length > 0;
+
   function lancerPasse(): void {
     if (arrete || !catalog) return;
     const courant = catalog;
+    // Relecture du catalogue partiel : son rafraîchissement ne republie que s'il change.
+    if (courant.unavailableSources.length > 0) void fetchMarketCatalog().catch(() => {});
     confirmerSansSonde(courant);
     passe?.abort();
     const controller = new AbortController();
     passe = controller;
     const symboles = aSonder(false);
-    ajusterReessai(symboles.length > 0);
+    ajusterReessai(aReessayer(courant));
     void Promise.all(symboles.map((symbol) => sonder(symbol, controller.signal, courant)))
-      .then(() => { if (!controller.signal.aborted) ajusterReessai(aSonder(false).length > 0); });
+      .then(() => { if (!controller.signal.aborted) ajusterReessai(aReessayer(courant)); });
   }
 
   /**
@@ -313,7 +326,15 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
 
   // Démenties pendant le démontage (favori retiré puis rajouté) : oubliées avant la 1re passe.
   oublierDementies();
-  const recevoir = (value: MarketCatalog) => { catalog = value; lancerPasse(); };
+  const recevoir = (value: MarketCatalog) => {
+    // Catalogue Binance revenu : les replis provisoires qu'il liste sont resondés.
+    if (!value.unavailableSources.includes("binance")) {
+      for (const symbol of provisoires) if (listeParBinance(value, symbol)) confirmees.delete(symbol);
+      provisoires.clear();
+    }
+    catalog = value;
+    lancerPasse();
+  };
   const stopCatalogue = subscribeMarketCatalog(recevoir);
   void fetchMarketCatalog().then((value) => { if (value !== catalog) recevoir(value); }).catch(() => {});
   sonderTradfi();

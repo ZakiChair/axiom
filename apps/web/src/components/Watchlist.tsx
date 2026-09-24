@@ -168,10 +168,13 @@ function drawSparkline(
 const PLACES_SPOT_SECONDAIRES: ReadonlySet<string> = new Set<WatchlistSource>(["kraken", "coinbase", "bybit", "okx", "mexc"]);
 /** Un favori sans prix confirmé est réessayé : les prix peuvent revenir sans nouveau catalogue. */
 const REESSAI_PROVENANCE_MS = 30_000;
+/** Confirmations de la session : la watchlist démontée (plein écran) ne resonde rien à son retour. */
+const CONFIRMEES_SESSION = new Map<string, WatchlistSource>();
 
 /**
  * Provenances des favoris du groupe actif, hors React (testée à timers simulés). Une source
- * n'est retenue qu'après un vrai prix ou un graphe prêt, puis n'est plus sondée de la session :
+ * n'est retenue qu'après un vrai prix ou un graphe prêt, puis n'est plus sondée de la session
+ * (`confirmees`, propre à la session par défaut ; les tests en passent une neuve) :
  *  - seuls les favoris sans source confirmée sont sondés, au catalogue reçu ou republié, à
  *    chaque changement de liste et toutes les 30 s tant qu'il en reste ;
  *  - les synthétiques et capitalisations, sans ticker dédié, restent sans prix de favoris :
@@ -180,8 +183,7 @@ const REESSAI_PROVENANCE_MS = 30_000;
  *    liste le même spot ; sans prix Binance, le favori garde sa place d'origine.
  * Les sondes routent sur le catalogue reçu : elles ne relancent pas le rafraîchissement commun.
  */
-export function suivreProvenancesFavoris(): () => void {
-  const confirmees = new Map<string, WatchlistSource>();
+export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () => void {
   let catalog: MarketCatalog | undefined;
   let passe: AbortController | undefined;
   let reessai: ReturnType<typeof setInterval> | undefined;

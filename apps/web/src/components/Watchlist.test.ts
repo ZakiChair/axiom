@@ -93,7 +93,7 @@ describe("provenances des favoris", () => {
     catalogue(spot(["binance", "BTCUSDT"]));
     const urls = reseau();
     const sonde = vi.spyOn(ticker, "resolveTickerMarket");
-    stop = suivreProvenancesFavoris();
+    stop = suivreProvenancesFavoris(new Map());
     await vi.advanceTimersByTimeAsync(0);
     expect(sonde).toHaveBeenCalledTimes(1);
     expect(urls).toEqual(["https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"]);
@@ -109,7 +109,7 @@ describe("provenances des favoris", () => {
     const initial = spot(["binance", "BTCUSDT"], ["okx", "CARDSUSDT"]);
     const { publier } = catalogue(initial);
     const urls = reseau();
-    stop = suivreProvenancesFavoris();
+    stop = suivreProvenancesFavoris(new Map());
     await vi.advanceTimersByTimeAsync(0);
     expect(urls).toHaveLength(2);
     publier({ ...initial, instruments: [...initial.instruments] });
@@ -124,7 +124,7 @@ describe("provenances des favoris", () => {
     const { publier } = catalogue(initial);
     const sansPrix = new Set(["CARDS-USDT"]);
     const urls = reseau(sansPrix);
-    stop = suivreProvenancesFavoris();
+    stop = suivreProvenancesFavoris(new Map());
     await vi.advanceTimersByTimeAsync(0);
     const cards = () => urls.filter((url) => url.includes("instId=CARDS-USDT")).length;
     expect(cards()).toBe(1);
@@ -146,7 +146,7 @@ describe("provenances des favoris", () => {
     watchlistStore.getState().setAll(["BTCUSDT", "CARDSUSDT"], { BTCUSDT: "okx", CARDSUSDT: "okx" });
     catalogue(spot(["binance", "BTCUSDT"], ["okx", "BTCUSDT"], ["okx", "CARDSUSDT"]));
     const urls = reseau();
-    stop = suivreProvenancesFavoris();
+    stop = suivreProvenancesFavoris(new Map());
     await vi.advanceTimersByTimeAsync(0);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance", CARDSUSDT: "okx" });
     expect(urls.sort()).toEqual([
@@ -165,7 +165,7 @@ describe("provenances des favoris", () => {
       if (String(input).startsWith("https://www.okx.com/")) return reponse({ code: "0", data: [{ instType: "SPOT", instId: "BTC-USDT", last: "60000" }] });
       return new Response("{}", { status: 503 });
     }));
-    stop = suivreProvenancesFavoris();
+    stop = suivreProvenancesFavoris(new Map());
     await vi.advanceTimersByTimeAsync(0);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "okx" });
     expect(urls.some((url) => url.includes("kraken"))).toBe(false);
@@ -175,7 +175,7 @@ describe("provenances des favoris", () => {
     watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "okx" });
     catalogue(spot(["okx", "BTCUSDT"]));
     reseau();
-    stop = suivreProvenancesFavoris();
+    stop = suivreProvenancesFavoris(new Map());
     await vi.advanceTimersByTimeAsync(0);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "okx" });
   });
@@ -185,17 +185,35 @@ describe("provenances des favoris", () => {
     graphePret("bybit", "BTCUSDT");
     catalogue(spot(["binance", "BTCUSDT"], ["bybit", "BTCUSDT"]));
     const urls = reseau();
-    stop = suivreProvenancesFavoris();
+    stop = suivreProvenancesFavoris(new Map());
     await vi.advanceTimersByTimeAsync(90_000);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "bybit" });
     expect(urls).toEqual([]);
+  });
+
+  it("un remontage (sortie du plein écran) ne resonde aucun favori confirmé de la session", async () => {
+    watchlistStore.getState().setAll(["LINKUSDT", "CARDSUSDT"], { CARDSUSDT: "okx" });
+    catalogue(spot(["binance", "LINKUSDT"], ["okx", "CARDSUSDT"]));
+    const urls = reseau();
+    // Session par défaut, au niveau du module : celle que le composant garde d'un montage à l'autre.
+    stop = suivreProvenancesFavoris();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(urls.sort()).toEqual([
+      "https://api.binance.com/api/v3/ticker/24hr?symbol=LINKUSDT",
+      "https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT",
+    ]);
+    stop();
+    stop = suivreProvenancesFavoris();
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(urls).toHaveLength(2);
+    expect(watchlistStore.getState().sources).toEqual({ LINKUSDT: "binance", CARDSUSDT: "okx" });
   });
 
   it("un favori ajouté est sondé seul ; l'arrêt annule la sonde en vol", async () => {
     watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "binance" });
     catalogue(spot(["binance", "BTCUSDT"], ["binance", "ETHUSDT"], ["binance", "SOLUSDT"]));
     const urls = reseau();
-    stop = suivreProvenancesFavoris();
+    stop = suivreProvenancesFavoris(new Map());
     await vi.advanceTimersByTimeAsync(0);
     watchlistStore.getState().add("ETHUSDT");
     await vi.advanceTimersByTimeAsync(0);

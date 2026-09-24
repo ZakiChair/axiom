@@ -516,6 +516,13 @@ export interface ChartInstanceProps {
 export const BACKFILL_TIMEOUT_MS = 20_000;
 
 /**
+ * Chien de garde d'un essai de backfill. Un essai spéculatif (catalogue de sa place en panne,
+ * provenance restaurée comprise, qui garde alors la tête) est borné court : un hôte muet ne
+ * fait plus attendre 20 s la place confirmée suivante, à chaque ouverture.
+ */
+export const delaiEssaiMs = (identity: { speculative?: true }): number => identity.speculative ? 4_000 : BACKFILL_TIMEOUT_MS;
+
+/**
  * Borne l'attente de `travail` : rejette avec un message contenant « délai » si rien
  * n'arrive avant `ms`. Sans ce garde-fou, un `fetchKlines` qui ne répond jamais (réveil
  * de veille, TCP semi-ouvert) laisse le slot bloqué sur « Chargement des bougies… ».
@@ -1096,7 +1103,7 @@ export function ChartInstance({
     // persistée invalide qui ferait lever `getAdapter` devient un état d'erreur récupérable.
     const prepared = marchePrepareRef.current;
     marchePrepareRef.current = null;
-    const chargerBougies = (identity: MarketIdentity) => {
+    const chargerBougies = (identity: MarketIdentity & { speculative?: true }) => {
       // Twelve Data : demande prioritaire sur les cotations, annulable par le délai comme par
       // le démontage (elle quitte alors la file du quota sans consommer de crédit). Le délai
       // part à l'obtention du créneau ; une attente annoncée au-delà est refusée d'emblée.
@@ -1114,7 +1121,7 @@ export function ChartInstance({
       const adapter = replayAdapter ?? getAdapter(identity.exchange);
       const { promesse, annuler } = avecDelai(
         adapter.fetchKlines(identity.symbol, identity.timeframe, { limit: 500 }),
-        BACKFILL_TIMEOUT_MS,
+        delaiEssaiMs(identity),
       );
       if (cancelled) annuler();
       else annulerDelaiBackfill = annuler;

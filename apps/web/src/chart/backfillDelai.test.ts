@@ -77,7 +77,10 @@ vi.mock("klinecharts", () => ({
   LineType: { Solid: "solid", Dashed: "dashed" },
 }));
 
-import { avecDelai, BACKFILL_TIMEOUT_MS } from "./ChartInstance";
+import type { Candle } from "@axiom/types";
+import { avecDelai, BACKFILL_TIMEOUT_MS, delaiEssaiMs } from "./ChartInstance";
+import { chargerAvecRepli, type MarcheCharge } from "./routageMarche";
+import { resolveMarketCandidates, type MarketCatalog } from "../data/marketRouting";
 
 describe("avecDelai (chien de garde du backfill)", () => {
   beforeEach(() => {
@@ -139,5 +142,53 @@ describe("avecDelai (chien de garde du backfill)", () => {
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(rejete).toBe(false);
+  });
+});
+
+/**
+ * Provenance restaurée sur un hôte entièrement muet (catalogue ET bougies) : son catalogue a
+ * échoué, elle garde la tête en essai spéculatif. Rien ne mémorise l'échec de ses bougies :
+ * sans borne propre, chaque ouverture (et chaque clic de favori) attendait les 20 s du chien de
+ * garde avant la place confirmée suivante.
+ */
+describe("essai spéculatif d'une provenance restaurée (hôte muet)", () => {
+  const bougie: Candle = { time: 0, open: 1, high: 1, low: 1, close: 1, volume: 1 };
+  // CARDSUSDT enregistré sur OKX ; catalogue OKX en échec, MEXC cote l'actif.
+  const catalogue: MarketCatalog = { instruments: [{ exchange: "mexc", symbol: "CARDSUSDT", kind: "spot" }], unavailableSources: ["okx"] };
+
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  /** Ouverture comme le backfill du graphe : chaque essai sous son chien de garde. */
+  async function ouvrir(okxMuet: boolean): Promise<{ resultat: () => MarcheCharge | null | undefined; debut: number; fin: () => number | undefined }> {
+    const candidats = await resolveMarketCandidates({ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" }, catalogue);
+    expect(candidats.map((c) => `${c.exchange}${c.speculative ? "?" : ""}`)).toEqual(["okx?", "mexc"]);
+    const debut = Date.now();
+    let resultat: MarcheCharge | null | undefined;
+    let fin: number | undefined;
+    void chargerAvecRepli(candidats, (identity) => avecDelai(
+      identity.exchange === "okx" && okxMuet ? new Promise<Candle[]>(() => {}) : Promise.resolve([bougie]),
+      delaiEssaiMs(identity),
+    ).promesse, () => false).then((r) => { resultat = r; fin = Date.now(); });
+    return { resultat: () => resultat, debut, fin: () => fin };
+  }
+
+  it("hôte muet : la provenance est abandonnée à 4 s, la place confirmée s'ouvre aussitôt", async () => {
+    const { resultat, debut, fin } = await ouvrir(true);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(resultat()?.identity.exchange).toBe("mexc");
+    expect((fin() ?? Infinity) - debut).toBe(4_000);
+  });
+
+  it("catalogue seul muet : la provenance répond et reste la source", async () => {
+    const { resultat, debut, fin } = await ouvrir(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resultat()?.identity).toEqual({ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h", speculative: true });
+    expect(fin()).toBe(debut);
+  });
+
+  it("un candidat confirmé garde les 20 s du backfill", () => {
+    expect(delaiEssaiMs({})).toBe(BACKFILL_TIMEOUT_MS);
+    expect(delaiEssaiMs({ speculative: true })).toBe(4_000);
   });
 });

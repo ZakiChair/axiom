@@ -234,6 +234,52 @@ describe("renouvellement du catalogue partagé", () => {
     expect(await routing.fetchMarketCatalog()).toBe(published[1]);
   });
 
+  /** Catalogue sain ; une fois `nouveau`, Binance cote NEWUSDT et OKX met 3 s à répondre. */
+  const nouvelleCotation = () => {
+    const etat = { nouveau: false };
+    const base = sainsSauf(() => etat.nouveau
+      ? new Promise((resolve) => setTimeout(() => resolve(okx("BTC-USDT")), 3_000))
+      : Promise.resolve(okx("BTC-USDT")));
+    const fetch = vi.fn(async (url: string) => etat.nouveau && url.includes("api.binance.com")
+      ? response({ symbols: ["BTCUSDT", "NEWUSDT"].map((symbol) => ({ symbol, status: "TRADING" })) })
+      : base(url));
+    return { etat, fetch };
+  };
+
+  it("catalogue périmé sans l'actif : le chargement attend le rafraîchissement lent qui l'apporte", async () => {
+    const { etat, fetch } = nouvelleCotation();
+    vi.stubGlobal("fetch", fetch);
+    const routing = await import("./marketRouting");
+    const { chargerAvecRepli } = await import("../chart/routageMarche");
+    await routing.fetchMarketCatalog();
+    etat.nouveau = true;
+    await vi.advanceTimersByTimeAsync(300_000);
+    const candidats = await routing.resolveMarketCandidatesProgressifs({ symbol: "NEWUSDT", timeframe: "1h" });
+    expect(candidats.immediats).toEqual([]);
+    const bougie = { time: 0, open: 1, high: 1, low: 1, close: 1, volume: 1 };
+    let issue: unknown = "en attente";
+    chargerAvecRepli(candidats, async () => [bougie], () => false).then((value) => { issue = value; }, (error: Error) => { issue = error.message; });
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(issue).toBe("en attente");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(issue).toEqual({ identity: { exchange: "binance", symbol: "NEWUSDT", timeframe: "1h" }, candles: [bougie] });
+  });
+
+  it("résolution simple (ticker, SYN) : un actif absent du catalogue périmé attend son rafraîchissement", async () => {
+    const { etat, fetch } = nouvelleCotation();
+    vi.stubGlobal("fetch", fetch);
+    const routing = await import("./marketRouting");
+    await routing.fetchMarketCatalog();
+    etat.nouveau = true;
+    await vi.advanceTimersByTimeAsync(300_000);
+    let resolu: unknown;
+    void routing.resolveMarketCandidates({ symbol: "NEWUSDT", timeframe: "1h" }).then((value) => { resolu = value; });
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(resolu).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(resolu).toEqual([{ exchange: "binance", symbol: "NEWUSDT", timeframe: "1h" }]);
+  });
+
   it("force attend le réseau au lieu de servir le cache", async () => {
     let symbol = "BTC-USDT";
     vi.stubGlobal("fetch", sainsSauf(() => Promise.resolve(okx(symbol))));
@@ -394,7 +440,7 @@ describe("résolution progressive : la source prioritaire n'attend pas les autre
     expect(await liste).toEqual([{ exchange: "hyperliquid", symbol: "KPEPE-PERP", timeframe: "1h" }]);
   });
 
-  it("catalogue en cache, même expiré : liste complète immédiate, renvoyée telle quelle", async () => {
+  it("catalogue en cache, même expiré : liste complète immédiate ; les replis suivent son rafraîchissement", async () => {
     vi.stubGlobal("fetch", places({ okx: () => Promise.resolve(response({ code: "0", data: [{ instId: "BTC-USDT", instType: "SPOT", state: "live" }] })) }));
     const routing = await import("./marketRouting");
     const catalog = await routing.fetchMarketCatalog();
@@ -403,6 +449,7 @@ describe("résolution progressive : la source prioritaire n'attend pas les autre
     const { immediats, complets } = await routing.resolveMarketCandidatesProgressifs(identity);
     expect(immediats).toEqual(await routing.resolveMarketCandidates(identity, catalog));
     expect(immediats.map((c) => c.exchange).slice(0, 2)).toEqual(["binance", "okx"]);
+    // Rafraîchissement au contenu identique : même liste, recalculée sur le catalogue renouvelé.
     expect(await complets()).toEqual(immediats);
   });
 

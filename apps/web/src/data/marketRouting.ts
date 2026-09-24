@@ -181,13 +181,21 @@ function candidatsDepuisCatalogue(id: IdentitePreparee, loaded: MarketCatalog): 
   }));
 }
 
-/** Le catalogue optionnel permet les usages déjà chargés et les tests sans réseau. */
+/**
+ * Le catalogue optionnel permet les usages déjà chargés et les tests sans réseau.
+ * Catalogue périmé servi pendant son rafraîchissement : un actif qu'il ne confirme pas
+ * (nouvelle cotation) attend ce rafraîchissement au lieu d'être déclaré introuvable.
+ */
 export async function resolveMarketCandidates(
   identity: { exchange?: ExchangeId; symbol: string; timeframe: Timeframe },
   catalog?: MarketCatalog,
 ): Promise<ResolvedMarket[]> {
   const id = preparerIdentite(identity);
-  return candidatsDepuisCatalogue(id, catalog ?? (sansCatalogue(id) ? CATALOGUE_VIDE : await fetchMarketCatalog()));
+  if (catalog || sansCatalogue(id)) return candidatsDepuisCatalogue(id, catalog ?? CATALOGUE_VIDE);
+  const liste = candidatsDepuisCatalogue(id, await fetchMarketCatalog());
+  return pendingCatalog && !liste.some((candidat) => !candidat.speculative)
+    ? candidatsDepuisCatalogue(id, await pendingCatalog)
+    : liste;
 }
 
 /** Premiers essais disponibles tout de suite, liste complète habituelle à la demande. */
@@ -197,8 +205,9 @@ export interface CandidatsProgressifs {
 }
 
 /**
- * Chemin rapide du backfill. Catalogue en cache (même périmé) : liste complète habituelle.
- * À froid : les huit catalogues partent, mais seul celui de la source prioritaire
+ * Chemin rapide du backfill. Catalogue en cache (même périmé) : liste complète habituelle ;
+ * s'il est périmé, `complets` attend le rafraîchissement que sa lecture a lancé (un actif
+ * coté depuis, ou retiré, trouve ainsi son repli). À froid : les huit catalogues partent, mais seul celui de la source prioritaire
  * (Binance au comptant, Hyperliquid pour -PERP) est attendu ; s'il confirme symbole et
  * unité de temps, ce candidat — déjà premier de la liste complète — part sans attendre
  * les autres places. `complets` attend le catalogue entier pour les replis.
@@ -209,7 +218,11 @@ export async function resolveMarketCandidatesProgressifs(
   const id = preparerIdentite(identity);
   const deja = (liste: ResolvedMarket[]): CandidatsProgressifs => ({ immediats: liste, complets: () => Promise.resolve(liste) });
   if (sansCatalogue(id)) return deja(candidatsDepuisCatalogue(id, CATALOGUE_VIDE));
-  if (cachedCatalog) return deja(candidatsDepuisCatalogue(id, await fetchMarketCatalog()));
+  if (cachedCatalog) {
+    const liste = candidatsDepuisCatalogue(id, await fetchMarketCatalog());
+    if (!pendingCatalog) return deja(liste);
+    return { immediats: liste, complets: () => (pendingCatalog ?? fetchMarketCatalog()).then((loaded) => candidatsDepuisCatalogue(id, loaded)) };
+  }
   const complet = fetchMarketCatalog();
   const prioritaire: ExchangeId = id.kind === "perp" ? "hyperliquid" : "binance";
   // Requête partagée avec le catalogue en vol ; Hyperliquid y enregistre aussi sa casse (kPEPE).

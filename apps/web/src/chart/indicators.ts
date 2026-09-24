@@ -141,26 +141,12 @@ function publierStatut(chart: Chart, instanceId: string, statut: StatutIndicateu
 /**
  * Defs dont la légende et l'axe ABRÈGENT les grands nombres (`shouldFormatBigNumber`) :
  * le volume piégé est en unités de BASE, à 13 chiffres sur PEPE, et la largeur de l'axe Y
- * est le maximum sur TOUS les panes. Liste locale : `@axiom/types` est figé.
+ * est le maximum sur TOUS les panes. Liste locale : `@axiom/types` est figé. Le formateur
+ * reste celui de KLineChart (`customApi.formatBigNumber`, commun à tout le graphe et
+ * partagé avec CVD, OI, macro et revenus) : il n'abrège que `v > 1000`, donc les shorts
+ * piégés (négatifs) restent en toutes lettres.
  */
 const ABREGER_GRANDS_NOMBRES: ReadonlySet<string> = new Set(["trappedVolume"]);
-
-/**
- * `formatBigNumber` symétrique en signe. Le défaut de KLineChart 9.8.12 n'abrège que
- * `v > 1000` : les shorts piégés (négatifs) restaient à 13 chiffres. Mêmes seuils et même
- * arrondi que le défaut pour les positifs ; un zéro arrondi (« -0 », « -0.00 ») perd son
- * signe. Reçoit la valeur déjà passée par la précision (légende) ou le texte du tick (axe).
- */
-export function formatGrandNombre(valeur: string | number): string {
-  const v = +valeur;
-  if (!Number.isFinite(v)) return `${valeur}`;
-  const a = Math.abs(v);
-  const signe = v < 0 ? "-" : "";
-  if (a > 1_000_000_000) return `${signe}${+(a / 1_000_000_000).toFixed(3)}B`;
-  if (a > 1_000_000) return `${signe}${+(a / 1_000_000).toFixed(3)}M`;
-  if (a > 1_000) return `${signe}${+(a / 1_000).toFixed(3)}K`;
-  return v === 0 ? `${valeur}`.replace(/^-/, "") : `${valeur}`;
-}
 
 /** Id du pane prix (constante interne KLineChart, vérifiée dans le bundle). */
 const CANDLE_PANE_ID = "candle_pane";
@@ -394,9 +380,6 @@ export class ChartIndicators {
   /** Seul le graphe maître publie sa capacité en panes (cf. store/chartCapacite.ts). */
   private readonly estMaitre: boolean;
 
-  /** `formatGrandNombre` déjà installé sur ce graphe (cf. `ABREGER_GRANDS_NOMBRES`). */
-  private formatGrandsNombresInstalle = false;
-
   constructor(chart: Chart, estMaitre = false) {
     this.chart = chart;
     this.estMaitre = estMaitre;
@@ -604,13 +587,6 @@ export class ChartIndicators {
 
       // Nouvelle instance.
       ensureRegistered(def, name, inst.instanceId);
-      if (ABREGER_GRANDS_NOMBRES.has(def.id) && !this.formatGrandsNombresInstalle) {
-        // `customApi` est propre au graphe et fusionné (formatDate conservé) ; il ne sert
-        // qu'aux templates `shouldFormatBigNumber` — aucun autre dans l'app — et à la
-        // légende native des bougies, masquée (showRule None, ChartInstance).
-        this.chart.setCustomApi({ formatBigNumber: formatGrandNombre });
-        this.formatGrandsNombresInstalle = true;
-      }
       const { result, suffix, statut } = this.computeForInstance(def, inst, candles, exchange);
       const paneId = def.pane === "overlay" ? CANDLE_PANE_ID : axiomPaneId(inst.instanceId);
       const created = this.chart.createIndicator(

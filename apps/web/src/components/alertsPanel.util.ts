@@ -10,10 +10,12 @@ import type { ExchangeId, IndicatorDef } from "@axiom/types";
 /**
  * Indicateurs éligibles au croisement : calculables sur bougies seules (pas de série
  * aux, comme `indicateur-seuil`) ET exposant au moins DEUX sorties à croiser
- * (ex. MACD : macd × signal).
+ * (ex. MACD : macd × signal). Sauf le volume piégé, dont les sorties sont de signes
+ * opposés par construction (longs ≥ 0 ≥ shorts) : jamais de croisement réel, seulement
+ * de faux « hausse » à la sortie d'un état 0/0.
  */
 export const INDICATEURS_CROISEMENT: IndicatorDef[] = INDICATORS.filter(
-  (d) => (!d.aux || d.aux.length === 0) && d.outputs.length >= 2,
+  (d) => (!d.aux || d.aux.length === 0) && d.outputs.length >= 2 && d.id !== "trappedVolume",
 );
 
 /**

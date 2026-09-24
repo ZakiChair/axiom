@@ -30,6 +30,11 @@ describe("INDICATEURS_CROISEMENT", () => {
   it("contient MACD (cas d'usage de référence : macd × signal)", () => {
     expect(INDICATEURS_CROISEMENT.map((d) => d.id)).toContain("macd");
   });
+
+  it("exclut le volume piégé : longs ≥ 0 ≥ shorts par construction, aucun croisement réel", () => {
+    // « hausse » se déclenchait à tort à chaque sortie d'un état 0/0, « baisse » jamais.
+    expect(INDICATEURS_CROISEMENT.map((d) => d.id)).not.toContain("trappedVolume");
+  });
 });
 
 describe("construireConditionCroisement", () => {

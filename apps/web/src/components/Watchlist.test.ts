@@ -192,6 +192,64 @@ describe("provenances des favoris", () => {
     expect(urls).toEqual([]);
   });
 
+  it("catalogue Binance indisponible : un favori Binance n'est sondé que sur Binance, sa source ne change jamais", async () => {
+    watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "binance" });
+    const { publier } = catalogue({ ...spot(["kraken", "BTCUSDT"], ["okx", "BTCUSDT"]), unavailableSources: ["binance"] });
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      urls.push(String(input));
+      if (String(input).startsWith("https://api.kraken.com/")) return reponse({ error: [], result: { XBTUSDT: { c: ["60000"], o: "59000" } } });
+      if (String(input).startsWith("https://www.okx.com/")) return reponse({ code: "0", data: [{ instType: "SPOT", instId: "BTC-USDT", last: "60000" }] });
+      return new Response("{}", { status: 503 });
+    }));
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance" });
+    expect(urls).toEqual(["https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"]);
+    // Sans prix Binance : non confirmé, réessayé à 30 s, toujours sur Binance seul.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(urls).toEqual(Array(2).fill("https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"));
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance" });
+    // Le catalogue Binance revenu le liste : confirmé sans sonde.
+    publier(spot(["binance", "BTCUSDT"], ["kraken", "BTCUSDT"], ["okx", "BTCUSDT"]));
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(urls).toHaveLength(2);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance" });
+  });
+
+  it("échec OKX passager : CARDSUSDT(okx) n'est jamais sondé sur une troisième place et reste sur OKX", async () => {
+    watchlistStore.getState().setAll(["CARDSUSDT"], { CARDSUSDT: "okx" });
+    catalogue(spot(["kraken", "CARDSUSDT"], ["okx", "CARDSUSDT"]));
+    let okxPrix = false;
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      urls.push(String(input));
+      if (String(input).startsWith("https://api.kraken.com/")) return reponse({ error: [], result: { CARDSUSDT: { c: ["0.12"], o: "0.1" } } });
+      if (String(input).startsWith("https://www.okx.com/")) return reponse({ code: "0", data: okxPrix ? [{ instType: "SPOT", instId: "CARDS-USDT", last: "0.12" }] : [] });
+      return new Response("{}", { status: 503 });
+    }));
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ CARDSUSDT: "okx" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(urls).toEqual(Array(2).fill("https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT"));
+    okxPrix = true;
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(urls).toEqual(Array(3).fill("https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT"));
+    expect(watchlistStore.getState().sources).toEqual({ CARDSUSDT: "okx" });
+  });
+
+  it("provenance Binance démentie par son catalogue (CARDSUSDT absent) : réparée vers la place qui le liste", async () => {
+    watchlistStore.getState().setAll(["CARDSUSDT"], { CARDSUSDT: "binance" });
+    catalogue(spot(["binance", "BTCUSDT"], ["okx", "CARDSUSDT"]));
+    const urls = reseau();
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ CARDSUSDT: "okx" });
+    expect(urls).toEqual(["https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT"]);
+  });
+
   it("une source confirmée, changée hors de la watchlist sans changer la liste, est resondée", async () => {
     watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "binance" });
     catalogue(spot(["binance", "BTCUSDT"], ["okx", "BTCUSDT"]));

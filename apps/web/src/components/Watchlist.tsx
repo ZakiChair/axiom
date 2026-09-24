@@ -165,8 +165,6 @@ function drawSparkline(
   ctx.stroke();
 }
 
-/** Places spot secondaires : Binance, source de référence, les remplace pour un même spot listé. */
-const PLACES_SPOT_SECONDAIRES: ReadonlySet<string> = new Set<WatchlistSource>(["kraken", "coinbase", "bybit", "okx", "mexc"]);
 const listeParBinance = (catalog: MarketCatalog, symbol: string) =>
   catalog.instruments.some((i) => i.exchange === "binance" && i.kind === "spot" && i.symbol === symbol);
 /** Un favori sans prix confirmé est réessayé : les prix peuvent revenir sans nouveau catalogue. */
@@ -193,8 +191,10 @@ const SESSION_PROVENANCES = nouvelleSessionProvenances();
  *    ni sondés, ni réessayés ;
  *  - un favori Binance que le catalogue Binance liste est confirmé sans sonde : un ticker Binance
  *    en panne ou lent ne le fait jamais glisser vers une place de repli ;
- *  - une place spot secondaire héritée est resondée Binance d'abord quand le catalogue Binance
- *    liste le même spot ; sans prix Binance, le favori garde sa place d'origine ;
+ *  - toute autre source enregistrée n'est sondée que sur Binance (confirmé d'abord, spéculatif si
+ *    son catalogue manque) et sur elle-même, jamais sur une troisième place ; sans prix, le favori
+ *    garde sa source, non confirmé, réessayé dans 30 s ou au catalogue. Seule une source que son
+ *    catalogue chargé dément (actif absent) est resondée sur le catalogue complet ;
  *  - un actif TradFi sans source n'est sondé qu'une fois par changement de liste, jamais marché
  *    fermé : il attend alors l'ouverture de son marché. Une source Twelve Data enregistrée, seule
  *    candidate possible, ne l'est jamais : ses quotes suivent déjà les heures de marché.
@@ -262,14 +262,15 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
       const before = marketStore.getState();
       if (before.symbol === symbol && before.dataLoad.status === "ready") return confirmer(symbol, before.exchange);
       const initialSource = watchlistStore.getState().sources[symbol];
-      const versBinance = initialSource !== undefined && PLACES_SPOT_SECONDAIRES.has(initialSource)
-        && courant !== undefined && listeParBinance(courant, symbol);
-      // Binance d'abord, sinon la place d'origine : jamais une troisième place pour ce spot.
-      const routage = courant && versBinance ? {
-        instruments: courant.instruments.filter((i) => i.kind === "spot" && i.symbol === symbol && (i.exchange === "binance" || i.exchange === initialSource)),
-        unavailableSources: [],
+      // Source enregistrée que son catalogue ne dément pas : Binance (confirmé d'abord, spéculatif
+      // si son catalogue manque) puis elle, jamais une troisième place ; sans prix, elle reste.
+      const garder = (s: string) => s === "binance" || s === initialSource;
+      const routage = courant && initialSource && (courant.unavailableSources.includes(initialSource)
+        || courant.instruments.some((i) => i.exchange === initialSource && i.symbol === symbol)) ? {
+        instruments: courant.instruments.filter((i) => i.symbol === symbol && garder(i.exchange)),
+        unavailableSources: courant.unavailableSources.filter(garder),
       } : courant;
-      const resolved = await resolveTickerMarket({ exchange: versBinance ? "binance" : initialSource, symbol, timeframe: "1h" }, signal, routage);
+      const resolved = await resolveTickerMarket({ exchange: initialSource, symbol, timeframe: "1h" }, signal, routage);
       if (signal.aborted) return;
       const market = marketStore.getState();
       if (market.symbol === symbol && market.dataLoad.status === "ready") confirmer(symbol, market.exchange);

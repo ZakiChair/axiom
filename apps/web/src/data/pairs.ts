@@ -9,7 +9,8 @@
  *
  * Cache mémoire par source : succès valables cinq minutes, requêtes simultanées
  * dédupliquées. Un échec est mémorisé 30 s (une place muette ne recoûte pas 12 s à
- * chaque ouverture) ; `force` passe outre. Les listes vides restent réessayables.
+ * chaque ouverture) ; `force` passe outre. Pendant ce temps, le dernier succès reste
+ * servi, périmé, plutôt qu'un rejet. Les listes vides restent réessayables.
  *
  * Sources :
  *  - Binance  : GET /api/v3/exchangeInfo (TRADING seul, sans permissionSets) -> symbols[].symbol.
@@ -41,7 +42,7 @@ const CACHE_TTL_MS = 5 * 60_000;
 const ECHEC_TTL_MS = 30_000;
 /** Dernier succès par source : conservé même périmé, jamais effacé par un échec. */
 const cache = new Map<ExchangeId, { value: string[]; expires: number }>();
-/** Dernier échec, plus récent que le succès en cache ; levé au succès suivant. */
+/** Dernier échec, plus récent que le succès en cache (qu'il ne rend pas caduc) ; levé au succès suivant. */
 const echecs = new Map<ExchangeId, { erreur: unknown; jusqua: number }>();
 const pendingPairs = new Map<ExchangeId, Promise<string[]>>();
 
@@ -60,7 +61,8 @@ export function pairsCacheExpiresAt(exchange: ExchangeId): number | undefined {
 /**
  * Renvoie (et met en cache) la liste des symboles de la source, au format d'entrée
  * concaténé. `force` renouvelle un résultat terminé, sans doubler un appel en cours.
- * Un échec récent est rejoué tel quel pendant 30 s ; l'ancien succès n'est pas resservi.
+ * Échec (et fenêtre de 30 s qui suit, sans appel réseau) : le dernier succès, périmé,
+ * est resservi ; rejet seulement pour une source qui n'a jamais répondu.
  */
 export function fetchPairs(exchange: ExchangeId, options: { force?: boolean } = {}): Promise<string[]> {
   const inFlight = pendingPairs.get(exchange);
@@ -68,15 +70,17 @@ export function fetchPairs(exchange: ExchangeId, options: { force?: boolean } = 
   const now = Date.now();
   const echec = echecs.get(exchange);
   const cached = cache.get(exchange);
-  if (!options.force && echec && echec.jusqua > now) return Promise.reject(echec.erreur);
+  if (!options.force && echec && echec.jusqua > now) return cached ? Promise.resolve(cached.value) : Promise.reject(echec.erreur);
   if (!options.force && !echec && cached && cached.expires > now) return Promise.resolve(cached.value);
   const pending = loadPairs(exchange).then((value) => {
     echecs.delete(exchange);
     if (value.length > 0) cache.set(exchange, { value, expires: Date.now() + CACHE_TTL_MS });
-    else if (cached) cached.expires = 0; // anomalie fournisseur : succès gardé, plus resservi
+    else if (cached) cached.expires = 0; // anomalie fournisseur : succès gardé, plus servi comme frais
     return value;
   }, (erreur: unknown) => {
     echecs.set(exchange, { erreur, jusqua: Date.now() + ECHEC_TTL_MS });
+    const dernier = cache.get(exchange);
+    if (dernier) return dernier.value;
     throw erreur;
   }).finally(() => { pendingPairs.delete(exchange); });
   pendingPairs.set(exchange, pending);

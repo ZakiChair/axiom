@@ -119,19 +119,57 @@ it("force renouvelle les données terminées et déduplique le rafraîchissement
   expect(fetch).toHaveBeenCalledTimes(2);
 });
 
-it("un rafraîchissement échoué ne remet pas en circulation le précédent catalogue", async () => {
+it("un rafraîchissement échoué ressert le dernier succès pendant la fenêtre d'échec, puis réessaie", async () => {
   vi.useFakeTimers();
   const fetch = vi.fn().mockResolvedValueOnce(json(cardsOkx)).mockRejectedValueOnce(new Error("HTTP 503"))
     .mockResolvedValue(json({ code: "0", data: [{ instId: "BTC-USDT", instType: "SPOT", state: "live" }] }));
   vi.stubGlobal("fetch", fetch);
   const { fetchPairs } = await import("./pairs");
   await fetchPairs("okx");
-  await expect(fetchPairs("okx", { force: true })).rejects.toThrow("503");
-  // Pendant la fenêtre d'échec, ni CARDSUSDT (ancien succès) ni nouvel appel réseau.
-  await expect(fetchPairs("okx")).rejects.toThrow("503");
+  // Même forcé, l'échec rend le dernier succès (périmé) plutôt qu'un rejet ou une liste vide.
+  expect(await fetchPairs("okx", { force: true })).toEqual(["CARDSUSDT"]);
+  // Pendant la fenêtre d'échec : le dernier succès, sans nouvel appel réseau.
+  expect(await fetchPairs("okx")).toEqual(["CARDSUSDT"]);
   expect(fetch).toHaveBeenCalledTimes(2);
   await vi.advanceTimersByTimeAsync(30_000);
   expect(await fetchPairs("okx")).toEqual(["BTCUSDT"]);
+  expect(fetch).toHaveBeenCalledTimes(3);
+});
+
+it("échec passager du catalogue Binance : sa dernière liste reste servie et Binance garde la tête", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(0);
+  let panne = false;
+  const fetch = vi.fn(async (url: string) => {
+    if (url.includes("api.binance.com")) {
+      return panne ? { ok: false, status: 503, statusText: "Service Unavailable", json: async () => ({}) } : json({ symbols: [{ symbol: "BTCUSDT", status: "TRADING" }] });
+    }
+    if (url.includes("kraken")) return json({ result: { btc: { wsname: "BTC/USDT", status: "online" } } });
+    throw new Error("indisponible");
+  });
+  vi.stubGlobal("fetch", fetch);
+  const { fetchPairs, pairsCacheExpiresAt } = await import("./pairs");
+  const routing = await import("./marketRouting");
+  await routing.fetchMarketCatalog();
+  // Six minutes plus tard, le rafraîchissement de exchangeInfo reçoit une 503.
+  panne = true;
+  await vi.advanceTimersByTimeAsync(360_000);
+  await routing.fetchMarketCatalog();
+  await vi.advanceTimersByTimeAsync(0);
+  panne = false;
+  const appelsBinance = () => fetch.mock.calls.filter(([url]) => url.includes("api.binance.com")).length;
+  expect(appelsBinance()).toBe(2);
+  expect(await fetchPairs("binance")).toEqual(["BTCUSDT"]);
+  expect(pairsCacheExpiresAt("binance")).toBe(390_000);
+  const catalogue = await routing.fetchMarketCatalog();
+  expect(catalogue.unavailableSources).not.toContain("binance");
+  expect((await routing.resolveMarketCandidates({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h" })).map((c) => c.exchange))
+    .toEqual(["binance", "kraken", "coinbase", "bybit", "okx", "mexc"]);
+  expect(appelsBinance()).toBe(2);
+  // Fin de la fenêtre : nouvel essai réseau, sans marteler la place entre-temps.
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(await fetchPairs("binance")).toEqual(["BTCUSDT"]);
+  expect(appelsBinance()).toBe(3);
 });
 
 describe("échecs mémorisés par source", () => {
@@ -160,11 +198,11 @@ describe("échecs mémorisés par source", () => {
     await fetchPairs("okx");
     expect(pairsCacheExpiresAt("okx")).toBe(300_000);
     await vi.advanceTimersByTimeAsync(300_000);
-    await expect(fetchPairs("okx")).rejects.toThrow("503");
+    expect(await fetchPairs("okx")).toEqual(["CARDSUSDT"]);
     expect(pairsCacheExpiresAt("okx")).toBe(330_000);
   });
 
-  it("une liste vide après un échec lève la fenêtre sans resservir l'ancien succès", async () => {
+  it("une liste vide après un échec lève la fenêtre sans resservir l'ancien succès comme frais", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
     const fetch = vi.fn().mockResolvedValueOnce(json(cardsOkx)).mockRejectedValueOnce(new Error("HTTP 503"))
@@ -172,11 +210,21 @@ describe("échecs mémorisés par source", () => {
     vi.stubGlobal("fetch", fetch);
     const { fetchPairs, pairsCacheExpiresAt } = await import("./pairs");
     await fetchPairs("okx");
-    await expect(fetchPairs("okx", { force: true })).rejects.toThrow("503");
+    expect(await fetchPairs("okx", { force: true })).toEqual(["CARDSUSDT"]);
     expect(await fetchPairs("okx", { force: true })).toEqual([]);
-    // Ni fin de fenêtre passée (agrégat expiré en boucle), ni CARDSUSDT remis en circulation.
+    // Ni fin de fenêtre passée (agrégat expiré en boucle), ni CARDSUSDT servi comme réponse fraîche.
     expect(pairsCacheExpiresAt("okx")).toBeUndefined();
     expect(await fetchPairs("okx")).toEqual(["BTCUSDT"]);
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("un échec après une liste vide ressert la dernière liste non vide", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(json(cardsOkx)).mockResolvedValueOnce(json({ code: "0", data: [] }))
+      .mockRejectedValue(new Error("HTTP 503")));
+    const { fetchPairs } = await import("./pairs");
+    await fetchPairs("okx");
+    expect(await fetchPairs("okx", { force: true })).toEqual([]);
+    expect(await fetchPairs("okx")).toEqual(["CARDSUSDT"]);
   });
 });
 

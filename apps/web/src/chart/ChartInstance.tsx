@@ -62,7 +62,7 @@ import { chartLayoutStore, visibleSlotCount } from "../store/chart-layout";
 import { refSymbolStore } from "../store/refSymbol";
 import { ccdataKeyStore } from "../store/ccdata";
 import { getIndicator } from "@axiom/indicators";
-import { ChartIndicators, axiomPaneId } from "./indicators";
+import { ChartIndicators, axiomPaneId, formatGrandNombre } from "./indicators";
 import { instancePourY } from "./paneSousCurseur";
 import { estReglable } from "./legendeReglable";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
@@ -617,7 +617,8 @@ export function ChartInstance({
     const xhairCanvas = xhairCanvasRef.current;
     if (!container || !chartDom || !xhairCanvas) return;
 
-    const chart = init(chartDom);
+    // Grands nombres abrégés symétriquement en signe (volume piégé, CVD, OI, macro, revenus).
+    const chart = init(chartDom, { customApi: { formatBigNumber: formatGrandNombre } });
     if (!chart) return;
     // Le contrôleur de navigation n'alourdit pas le chargement initial en mono-vue.
     let viewportDisposed = false;

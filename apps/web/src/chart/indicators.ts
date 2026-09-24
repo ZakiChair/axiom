@@ -142,12 +142,28 @@ function publierStatut(chart: Chart, instanceId: string, statut: StatutIndicateu
 /**
  * Defs dont la légende et l'axe ABRÈGENT les grands nombres (`shouldFormatBigNumber`) :
  * le volume piégé est en unités de BASE, à 13 chiffres sur PEPE, et la largeur de l'axe Y
- * est le maximum sur TOUS les panes. Liste locale : `@axiom/types` est figé. Le formateur
- * reste celui de KLineChart (`customApi.formatBigNumber`, commun à tout le graphe et
- * partagé avec CVD, OI, macro et revenus) : il n'abrège que `v > 1000`, donc les shorts
- * piégés (négatifs) restent en toutes lettres.
+ * est le maximum sur TOUS les panes. Liste locale : `@axiom/types` est figé.
  */
 const ABREGER_GRANDS_NOMBRES: ReadonlySet<string> = new Set(["trappedVolume"]);
+
+/**
+ * `customApi.formatBigNumber` de chaque graphe (installé à `init`, commun à tous ses panes
+ * `shouldFormatBigNumber` : volume piégé, CVD, OI, macro, revenus). Le défaut de KLineChart
+ * 9.8.12 n'abrège que `v > 1000` : « 16.301B » à côté de « -67,795,267,738.99 », axe Y élargi
+ * de tout le graphe. Mêmes seuils et même arrondi que le défaut pour les positifs, symétrique en
+ * signe ; un zéro arrondi (« -0.00 ») perd son signe. Reçoit la valeur déjà passée par la
+ * précision (légende) ou la graduation brute (axe).
+ */
+export function formatGrandNombre(valeur: string | number): string {
+  const v = +valeur;
+  if (!Number.isFinite(v)) return `${valeur}`;
+  const a = Math.abs(v);
+  const signe = v < 0 ? "-" : "";
+  if (a > 1_000_000_000) return `${signe}${+(a / 1_000_000_000).toFixed(3)}B`;
+  if (a > 1_000_000) return `${signe}${+(a / 1_000_000).toFixed(3)}M`;
+  if (a > 1_000) return `${signe}${+(a / 1_000).toFixed(3)}K`;
+  return v === 0 ? `${valeur}`.replace(/^-/, "") : `${valeur}`;
+}
 
 /** Id du pane prix (constante interne KLineChart, vérifiée dans le bundle). */
 const CANDLE_PANE_ID = "candle_pane";

@@ -2,15 +2,14 @@
  * Abréviation des grands nombres du volume piégé (PEPE : « 5,316,729,014,174 » dans la
  * légende, axe Y élargi pour TOUS les panes). KLineChart 9.8 n'abrège que les templates
  * `shouldFormatBigNumber` : le pont pose l'option sur trappedVolume SEUL. Le formateur
- * (`customApi.formatBigNumber`) n'est PAS remplacé : il est commun à tout le graphe
- * (légende, axe, crosshair) et servirait aussi CVD, OI, macro et revenus, dont l'affichage
- * doit rester inchangé. Limite assumée : le défaut n'abrège que `v > 1000`, donc les
- * shorts piégés (négatifs) restent en toutes lettres.
+ * (`customApi.formatBigNumber`) est installé une fois à `init` (ChartInstance), jamais par le
+ * pont : l'affichage ne dépend pas de l'historique du graphe. Il sert aussi CVD, OI, macro et
+ * revenus, dont les négatifs sont désormais abrégés comme leurs positifs.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Chart } from "klinecharts";
 import type { ActiveIndicator } from "../store/indicators";
-import { ChartIndicators } from "./indicators";
+import { ChartIndicators, formatGrandNombre } from "./indicators";
 
 const { enregistres } = vi.hoisted(() => ({ enregistres: [] as Array<{ name: string; shouldFormatBigNumber?: boolean }> }));
 
@@ -56,5 +55,23 @@ describe("pont — abréviation réservée au volume piégé", () => {
     const template = enregistres.find((t) => t.name === "AXIOM_gn-rsi");
     expect(template).toBeDefined();
     expect(template?.shouldFormatBigNumber).toBeUndefined();
+  });
+});
+
+describe("formatGrandNombre — abréviation symétrique en signe (option A)", () => {
+  it("positifs : identique au défaut KLineChart 9.8.12", () => {
+    expect(formatGrandNombre("16301000000.00")).toBe("16.301B");
+    expect(formatGrandNombre(5739.1)).toBe("5.739K");
+    expect(formatGrandNombre("999.99")).toBe("999.99");
+  });
+  it("négatifs abrégés comme les positifs (légende et graduations)", () => {
+    expect(formatGrandNombre("-67795267738.99")).toBe("-67.795B");
+    expect(formatGrandNombre(-150_000_000_000)).toBe("-150B");
+    expect(formatGrandNombre("-5602.53")).toBe("-5.603K");
+  });
+  it("un zéro arrondi perd son signe, le reste passe tel quel", () => {
+    expect(formatGrandNombre("-0.00")).toBe("0.00");
+    expect(formatGrandNombre("-12.50")).toBe("-12.50");
+    expect(formatGrandNombre("--")).toBe("--");
   });
 });

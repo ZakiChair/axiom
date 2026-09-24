@@ -28,18 +28,35 @@ export interface ResolvedMarket {
 /** Binance conserve le split taker ; les autres places restent des replis du même spot. */
 const SOURCES: readonly ExchangeId[] = ["binance", "kraken", "coinbase", "bybit", "okx", "mexc", "twelvedata", "hyperliquid"];
 let pendingCatalog: Promise<MarketCatalog> | undefined;
-let cachedCatalog: { value: MarketCatalog; expires: number } | undefined;
+let cachedCatalog: { value: MarketCatalog; expires: number; signature: string } | undefined;
 const catalogListeners = new Set<(catalog: MarketCatalog) => void>();
 
-/** Abonnement aux rafraîchissements terminés ; une simple lecture du cache ne republie pas. */
+/** Abonnement aux changements de contenu ; lecture du cache ou rafraîchissement identique ne republient pas. */
 export function subscribeMarketCatalog(listener: (catalog: MarketCatalog) => void): () => void {
   catalogListeners.add(listener);
   return () => { catalogListeners.delete(listener); };
 }
 
+/** Contenu comparable : instruments par source (ordre du catalogue) et sources indisponibles. */
+function signatureCatalogue(catalog: MarketCatalog): string {
+  return `${catalog.unavailableSources.join()}|${catalog.instruments.map((p) => `${p.exchange}:${p.symbol}`).join()}`;
+}
+
+/**
+ * Catalogue commun, servi même expiré (stale-while-revalidate) : la lecture est immédiate
+ * et le rafraîchissement part en arrière-plan, une seule fois à la fois. Seule la toute
+ * première lecture attend le réseau ; `force` l'attend toujours.
+ */
 export function fetchMarketCatalog(options: { force?: boolean } = {}): Promise<MarketCatalog> {
+  if (!options.force && cachedCatalog) {
+    if (cachedCatalog.expires <= Date.now()) void rafraichirCatalogue(options);
+    return Promise.resolve(cachedCatalog.value);
+  }
+  return rafraichirCatalogue(options);
+}
+
+function rafraichirCatalogue(options: { force?: boolean }): Promise<MarketCatalog> {
   if (pendingCatalog) return pendingCatalog;
-  if (!options.force && cachedCatalog && cachedCatalog.expires > Date.now()) return Promise.resolve(cachedCatalog.value);
   pendingCatalog = Promise.allSettled(SOURCES.map((source) => fetchPairs(source, options))).then((results) => {
     const instruments: MarketCandidate[] = [];
     const unavailableSources: ExchangeId[] = [];
@@ -50,12 +67,16 @@ export function fetchMarketCatalog(options: { force?: boolean } = {}): Promise<M
       for (const symbol of new Set(result.value)) instruments.push({ exchange, symbol, kind });
     });
     for (const symbol of SYMBOLES_CAPITALISATION) instruments.push({ exchange: "synthetic", symbol, kind: "synthetic" });
-    const value = { instruments, unavailableSources };
+    const fresh = { instruments, unavailableSources };
     // Les échecs restent réessayables sans marteler une place bloquée à chaque slot/clic.
     const sourceExpirations = SOURCES.map(pairsCacheExpiresAt).filter((expires): expires is number => expires !== undefined);
     const expires = Math.min(Date.now() + (unavailableSources.length ? 30_000 : 5 * 60_000), ...sourceExpirations);
-    cachedCatalog = { value, expires };
-    for (const listener of [...catalogListeners]) {
+    // Contenu inchangé : même objet (aucune vue ne relance ses sondes), seule l'échéance avance.
+    const signature = signatureCatalogue(fresh);
+    const changed = cachedCatalog?.signature !== signature;
+    const value = changed || !cachedCatalog ? fresh : cachedCatalog.value;
+    cachedCatalog = { value, expires, signature };
+    if (changed) for (const listener of [...catalogListeners]) {
       try { listener(value); }
       catch { /* Une vue défaillante ne doit pas bloquer le catalogue des autres consommateurs. */ }
     }
@@ -95,22 +116,13 @@ function normalizeSpot(symbol: string): string {
   } catch { return symbol; }
 }
 
-/**
- * Instruments confirmés prioritaires, puis support du timeframe, provenance courante
- * et ordre du catalogue. Aucun passage spot/perp ni USD/USDT/USDC : même instrument.
- * Le catalogue optionnel permet les usages déjà chargés et les tests sans réseau.
- */
-export async function resolveMarketCandidates(
-  identity: { exchange?: ExchangeId; symbol: string; timeframe: Timeframe },
-  catalog?: MarketCatalog,
-): Promise<ResolvedMarket[]> {
+/** Identité normalisée une fois : casse, alias, migration `-PERP` et nature du marché. */
+interface IdentitePreparee { exchange?: ExchangeId; symbol: string; timeframe: Timeframe; kind: MarketCandidate["kind"] }
+
+function preparerIdentite(identity: { exchange?: ExchangeId; symbol: string; timeframe: Timeframe }): IdentitePreparee {
   let symbol = identity.symbol.trim();
   if (!symbol.includes("|")) symbol = symbol.toUpperCase();
-  if (estSymboleCapitalisation(symbol) || parseSyntheticSymbol(symbol)) {
-    const supported = supportedTimeframesFor("synthetic", symbol);
-    const timeframe = supported.includes(identity.timeframe) ? identity.timeframe : supported.includes("1h") ? "1h" : supported[0];
-    return timeframe ? [{ exchange: "synthetic", symbol, timeframe }] : [];
-  }
+  if (estSymboleCapitalisation(symbol) || parseSyntheticSymbol(symbol)) return { ...identity, symbol, kind: "synthetic" };
   if (identity.exchange === "hyperliquid" && !symbol.endsWith("-PERP") && !TWELVEDATA_SYMBOLS.includes(symbol)) {
     const base = basePerp(symbol) ?? (/^[A-Z0-9]{2,20}$/.test(symbol) ? symbol : null);
     if (base) symbol = `${base}-PERP`; // anciennes sessions : perp déjà explicitement identifié
@@ -118,12 +130,29 @@ export async function resolveMarketCandidates(
   // Une provenance TradFi restaurée porte déjà la nature du marché : son ticker
   // libre peut finir par une devise crypto sans désigner une paire (ex. GBTC).
   const kind = symbol.endsWith("-PERP") ? "perp" : identity.exchange === "twelvedata" || isTradfiMarketSymbol(symbol) ? "tradfi" : "spot";
-  if (kind === "spot") symbol = normalizeSpot(symbol);
-  // Catalogue TD volontairement curé : conserver les actions/forex en saisie libre.
+  return { ...identity, symbol: kind === "spot" ? normalizeSpot(symbol) : symbol, kind };
+}
+
+/** Synthétiques et TradFi (catalogue curé, saisie libre) se résolvent sans catalogue. */
+const sansCatalogue = (id: IdentitePreparee) => id.kind === "synthetic" || id.kind === "tradfi";
+const CATALOGUE_VIDE: MarketCatalog = { instruments: [], unavailableSources: [] };
+
+/**
+ * Instruments confirmés prioritaires, puis support du timeframe, Binance confirmé (seule
+ * place au split taker : une provenance héritée d'un autre actif ne l'évince pas),
+ * provenance courante entre les replis, et ordre du catalogue. Aucun passage spot/perp
+ * ni USD/USDT/USDC : même instrument.
+ */
+function candidatsDepuisCatalogue(id: IdentitePreparee, loaded: MarketCatalog): ResolvedMarket[] {
+  const { symbol, kind } = id;
+  if (kind === "synthetic") {
+    const supported = supportedTimeframesFor("synthetic", symbol);
+    const timeframe = supported.includes(id.timeframe) ? id.timeframe : supported.includes("1h") ? "1h" : supported[0];
+    return timeframe ? [{ exchange: "synthetic", symbol, timeframe }] : [];
+  }
   let candidates: Array<MarketCandidate & { speculative?: true }>;
   if (kind === "tradfi") candidates = [{ exchange: "twelvedata", symbol, kind }];
   else {
-    const loaded = catalog ?? await fetchMarketCatalog();
     candidates = loaded.instruments.filter((p) => p.kind === kind && p.symbol === symbol);
     // Une panne de catalogue ne prouve pas l'absence de l'actif. Toutes les sources
     // du même type peuvent encore être vérifiées, après les instruments confirmés.
@@ -134,17 +163,58 @@ export async function resolveMarketCandidates(
       }
     }
   }
-  const supportsRequestedTimeframe = (candidate: MarketCandidate) => supportedTimeframesFor(candidate.exchange, symbol).includes(identity.timeframe);
+  const supportsRequestedTimeframe = (candidate: MarketCandidate) => supportedTimeframesFor(candidate.exchange, symbol).includes(id.timeframe);
   candidates.sort((a, b) => Number(!!a.speculative) - Number(!!b.speculative)
     || Number(supportsRequestedTimeframe(b)) - Number(supportsRequestedTimeframe(a))
-    || Number(b.exchange === identity.exchange) - Number(a.exchange === identity.exchange)
+    || Number(b.exchange === "binance") - Number(a.exchange === "binance")
+    || Number(b.exchange === id.exchange) - Number(a.exchange === id.exchange)
     || SOURCES.indexOf(a.exchange) - SOURCES.indexOf(b.exchange));
   // Un timeframe propre à une place (ex. Binance 1s) ne doit pas éliminer les
   // autres sources : leur backfill peut réussir avec le repli 1h déjà supporté.
   return candidates.map((candidate) => ({
     exchange: candidate.exchange,
     symbol,
-    timeframe: supportsRequestedTimeframe(candidate) ? identity.timeframe : "1h",
+    timeframe: supportsRequestedTimeframe(candidate) ? id.timeframe : "1h",
     ...(candidate.speculative ? { speculative: true as const } : {}),
   }));
+}
+
+/** Le catalogue optionnel permet les usages déjà chargés et les tests sans réseau. */
+export async function resolveMarketCandidates(
+  identity: { exchange?: ExchangeId; symbol: string; timeframe: Timeframe },
+  catalog?: MarketCatalog,
+): Promise<ResolvedMarket[]> {
+  const id = preparerIdentite(identity);
+  return candidatsDepuisCatalogue(id, catalog ?? (sansCatalogue(id) ? CATALOGUE_VIDE : await fetchMarketCatalog()));
+}
+
+/** Premiers essais disponibles tout de suite, liste complète habituelle à la demande. */
+export interface CandidatsProgressifs {
+  immediats: ResolvedMarket[];
+  complets: () => Promise<ResolvedMarket[]>;
+}
+
+/**
+ * Chemin rapide du backfill. Catalogue en cache (même périmé) : liste complète habituelle.
+ * À froid : les huit catalogues partent, mais seul celui de la source prioritaire
+ * (Binance au comptant, Hyperliquid pour -PERP) est attendu ; s'il confirme symbole et
+ * unité de temps, ce candidat — déjà premier de la liste complète — part sans attendre
+ * les autres places. `complets` attend le catalogue entier pour les replis.
+ */
+export async function resolveMarketCandidatesProgressifs(
+  identity: { exchange?: ExchangeId; symbol: string; timeframe: Timeframe },
+): Promise<CandidatsProgressifs> {
+  const id = preparerIdentite(identity);
+  const deja = (liste: ResolvedMarket[]): CandidatsProgressifs => ({ immediats: liste, complets: () => Promise.resolve(liste) });
+  if (sansCatalogue(id)) return deja(candidatsDepuisCatalogue(id, CATALOGUE_VIDE));
+  if (cachedCatalog) return deja(candidatsDepuisCatalogue(id, await fetchMarketCatalog()));
+  const complet = fetchMarketCatalog();
+  const prioritaire: ExchangeId = id.kind === "perp" ? "hyperliquid" : "binance";
+  // Requête partagée avec le catalogue en vol ; Hyperliquid y enregistre aussi sa casse (kPEPE).
+  const paires = await fetchPairs(prioritaire).catch((): string[] => []);
+  const confirme = paires.includes(id.symbol) && supportedTimeframesFor(prioritaire, id.symbol).includes(id.timeframe);
+  return {
+    immediats: confirme ? [{ exchange: prioritaire, symbol: id.symbol, timeframe: id.timeframe }] : [],
+    complets: () => complet.then((loaded) => candidatsDepuisCatalogue(id, loaded)),
+  };
 }

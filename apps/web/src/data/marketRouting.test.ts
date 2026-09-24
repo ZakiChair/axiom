@@ -25,8 +25,9 @@ describe("routage automatique des actifs", () => {
     expect(await resolveMarketCandidates({ symbol: "BTCUSDT", timeframe: "1h" }, catalogue))
       .toEqual([{ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h" }, { exchange: "kraken", symbol: "BTCUSDT", timeframe: "1h" }]);
   });
-  it("garde un fournisseur valide et migre les anciens HL sans changer de marché", async () => {
-    expect((await resolveMarketCandidates({ exchange: "kraken", symbol: "BTCUSDT", timeframe: "1h" }, catalogue))[0]?.exchange).toBe("kraken");
+  it("Binance confirmé passe devant une provenance héritée, qui départage ensuite les replis ; anciens HL migrés", async () => {
+    expect(await resolveMarketCandidates({ exchange: "kraken", symbol: "BTCUSDT", timeframe: "1h" }, catalogue))
+      .toEqual([{ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h" }, { exchange: "kraken", symbol: "BTCUSDT", timeframe: "1h" }]);
     for (const symbol of ["BTC", "BTCUSDT"]) {
       expect(await resolveMarketCandidates({ exchange: "hyperliquid", symbol, timeframe: "1h" }, catalogue))
         .toEqual([{ exchange: "hyperliquid", symbol: "BTC-PERP", timeframe: "1h" }]);
@@ -44,6 +45,46 @@ describe("routage automatique des actifs", () => {
   it("une indisponibilité de catalogue permet de vérifier l'ancienne source par son backfill", async () => {
     expect(await resolveMarketCandidates({ exchange: "binance", symbol: "ETHUSDT", timeframe: "1h" }, { instruments: [], unavailableSources: ["binance"] }))
       .toEqual([{ exchange: "binance", symbol: "ETHUSDT", timeframe: "1h", speculative: true }]);
+  });
+});
+
+describe("Binance, source de référence du split taker, avant la provenance courante", () => {
+  const multi: MarketCatalog = { unavailableSources: [], instruments: [
+    { exchange: "okx", symbol: "BTCUSDT", kind: "spot" },
+    { exchange: "kraken", symbol: "BTCUSDT", kind: "spot" },
+    { exchange: "binance", symbol: "BTCUSDT", kind: "spot" },
+    { exchange: "binance", symbol: "AAVEUSDT", kind: "spot" },
+    { exchange: "okx", symbol: "AAVEUSDT", kind: "spot" },
+    { exchange: "okx", symbol: "CARDSUSDT", kind: "spot" },
+  ] };
+  const tf = "1M" as const;
+  it.each(["BTCUSDT", "AAVEUSDT"])("okx:%s collé à OKX repart de Binance, OKX reste le premier repli", async (symbol) => {
+    const order = (await resolveMarketCandidates({ exchange: "okx", symbol, timeframe: tf }, multi)).map((c) => c.exchange);
+    expect(order[0]).toBe("binance");
+    expect(order[1]).toBe("okx");
+  });
+  it("hors Binance, la provenance courante départage les replis avant l'ordre des sources", async () => {
+    const sansBinance: MarketCatalog = { ...multi, instruments: multi.instruments.filter((c) => c.exchange !== "binance") };
+    expect((await resolveMarketCandidates({ exchange: "okx", symbol: "BTCUSDT", timeframe: tf }, sansBinance)).map((c) => c.exchange))
+      .toEqual(["okx", "kraken"]);
+  });
+  it("CARDSUSDT, propre à OKX, reste chez OKX quelle que soit la provenance", async () => {
+    for (const exchange of ["binance", "okx"] as const) {
+      expect(await resolveMarketCandidates({ exchange, symbol: "CARDSUSDT", timeframe: "1h" }, multi))
+        .toEqual([{ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" }]);
+    }
+  });
+  it("aucune oscillation : Binance en échec reste un dernier essai, le repli retenu garde la tête jusqu'à son retour", async () => {
+    const binanceKo: MarketCatalog = { unavailableSources: ["binance"], instruments: multi.instruments.filter((c) => c.exchange !== "binance") };
+    const depuisBinance = await resolveMarketCandidates({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h" }, binanceKo);
+    expect(depuisBinance[0]?.exchange).toBe("kraken");
+    expect(depuisBinance.at(-1)).toEqual({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h", speculative: true });
+    // Provenance publiée après le repli : la même source reste en tête, Binance toujours en dernier.
+    const depuisRepli = await resolveMarketCandidates({ exchange: "kraken", symbol: "BTCUSDT", timeframe: "1h" }, binanceKo);
+    expect(depuisRepli[0]?.exchange).toBe("kraken");
+    expect(depuisRepli.at(-1)?.speculative).toBe(true);
+    // Catalogue Binance rétabli : retour en tête sans action de l'utilisateur.
+    expect((await resolveMarketCandidates({ exchange: "kraken", symbol: "BTCUSDT", timeframe: "1h" }, multi))[0]?.exchange).toBe("binance");
   });
 });
 
@@ -106,9 +147,13 @@ describe("renouvellement du catalogue partagé", () => {
     expect(published).toEqual([initial]);
     recovered = true;
     await vi.advanceTimersByTimeAsync(30_000);
-    const refreshed = await routing.fetchMarketCatalog();
+    // Lecture expirée : servie tout de suite, le rafraîchissement publie ensuite.
+    expect(await routing.fetchMarketCatalog()).toBe(initial);
+    await vi.advanceTimersByTimeAsync(0);
+    const refreshed = published[1]!;
     expect(routing.searchMarkets(refreshed, "CARDSUSDT")).toEqual([{ exchange: "okx", symbol: "CARDSUSDT", kind: "spot" }]);
     expect(published).toEqual([initial, refreshed]);
+    expect(await routing.fetchMarketCatalog()).toBe(refreshed);
     unsubscribe();
     await routing.fetchMarketCatalog({ force: true });
     expect(published).toHaveLength(2);
@@ -144,9 +189,78 @@ describe("renouvellement du catalogue partagé", () => {
     expect(initial.unavailableSources).toEqual([]);
     cards = true;
     await vi.advanceTimersByTimeAsync(300_000);
+    expect(await routing.fetchMarketCatalog()).toBe(initial);
+    await vi.advanceTimersByTimeAsync(0);
     const refreshed = await routing.fetchMarketCatalog();
     expect(routing.searchMarkets(refreshed, "CARDSUSDT")).toEqual([{ exchange: "okx", symbol: "CARDSUSDT", kind: "spot" }]);
   });
+  const sainsSauf = (okxResponse: () => Promise<unknown>) => vi.fn(async (url: string) => {
+    if (url.includes("okx")) return okxResponse();
+    if (url.includes("bybit")) return response({ retCode: 0, result: { list: [{ symbol: "BTCUSDT", status: "Trading" }] } });
+    if (url.includes("kraken")) return response({ result: { btc: { wsname: "BTC/USD", status: "online" } } });
+    if (url.includes("coinbase")) return response({ products: [{ product_id: "BTC-USD", product_type: "SPOT" }] });
+    if (url.includes("hyperliquid")) return response({ universe: [{ name: "BTC" }] });
+    return response({ symbols: [{ symbol: "BTCUSDT", status: url.includes("mexc") ? "1" : "TRADING", isSpotTradingAllowed: true }] });
+  });
+
+  it("un catalogue expiré est servi immédiatement et rafraîchi en arrière-plan, une seule requête en vol", async () => {
+    let cards = false;
+    const fetch = sainsSauf(() => cards
+      ? new Promise((resolve) => setTimeout(() => resolve(okx("CARDS-USDT")), 5_000))
+      : Promise.resolve(okx("BTC-USDT")));
+    vi.stubGlobal("fetch", fetch);
+    const routing = await import("./marketRouting");
+    const published: MarketCatalog[] = [];
+    routing.subscribeMarketCatalog((catalog) => published.push(catalog));
+    const initial = await routing.fetchMarketCatalog();
+    const okxCalls = () => fetch.mock.calls.filter(([url]) => String(url).includes("okx")).length;
+    cards = true;
+    await vi.advanceTimersByTimeAsync(300_000);
+    // OKX met 5 s à répondre : les lectures n'attendent pas et ne relancent rien.
+    expect(await routing.fetchMarketCatalog()).toBe(initial);
+    expect(await routing.fetchMarketCatalog()).toBe(initial);
+    expect(await routing.resolveMarketCandidates({ symbol: "BTCUSDT", timeframe: "1h" })).toContainEqual({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h" });
+    expect(okxCalls()).toBe(2);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(published).toHaveLength(2);
+    expect(routing.searchMarkets(published[1]!, "CARDSUSDT")).toEqual([{ exchange: "okx", symbol: "CARDSUSDT", kind: "spot" }]);
+    expect(await routing.fetchMarketCatalog()).toBe(published[1]);
+  });
+
+  it("force attend le réseau au lieu de servir le cache", async () => {
+    let symbol = "BTC-USDT";
+    vi.stubGlobal("fetch", sainsSauf(() => Promise.resolve(okx(symbol))));
+    const routing = await import("./marketRouting");
+    const initial = await routing.fetchMarketCatalog();
+    symbol = "CARDS-USDT";
+    const forced = await routing.fetchMarketCatalog({ force: true });
+    expect(forced).not.toBe(initial);
+    expect(routing.searchMarkets(forced, "CARDSUSDT")).toEqual([{ exchange: "okx", symbol: "CARDSUSDT", kind: "spot" }]);
+  });
+
+  it("un rafraîchissement au contenu identique ne republie pas et garde le même objet", async () => {
+    const fetch = vi.fn(async (url: string) => {
+      if (url.includes("okx")) return okx("CARDS-USDT");
+      throw new Error("indisponible");
+    });
+    vi.stubGlobal("fetch", fetch);
+    const routing = await import("./marketRouting");
+    const published: MarketCatalog[] = [];
+    routing.subscribeMarketCatalog((catalog) => published.push(catalog));
+    const initial = await routing.fetchMarketCatalog();
+    for (let tour = 0; tour < 3; tour++) {
+      await vi.advanceTimersByTimeAsync(31_000);
+      expect(await routing.fetchMarketCatalog()).toBe(initial);
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(published).toEqual([initial]);
+    // L'expiration a bien été renouvelée : une lecture immédiate ne relance aucun appel.
+    const calls = fetch.mock.calls.length;
+    expect(await routing.fetchMarketCatalog()).toBe(initial);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch.mock.calls.length).toBe(calls);
+  });
+
   it("un abonné défaillant n'empêche ni le catalogue ni les autres vues de se mettre à jour", async () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string) => {
       if (url.includes("okx")) return okx("CARDS-USDT");
@@ -212,5 +326,89 @@ describe("recherche du pétrole : identité spot, action et ETF distinctes", () 
   it.each(["USOIL", "WTI", "USO"])("ne réécrit jamais le symbole brut %s dans le résolveur", async (symbol) => {
     expect(await resolveMarketCandidates({ symbol, timeframe: "1h" }, oil))
       .toEqual([{ exchange: "twelvedata", symbol, timeframe: "1h" }]);
+  });
+});
+
+describe("résolution progressive : la source prioritaire n'attend pas les autres places", () => {
+  beforeEach(() => { vi.resetModules(); vi.useFakeTimers(); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+  const response = (value: unknown) => ({ ok: true, json: async () => value });
+  const muet = () => new Promise(() => {});
+  /** Binance et Hyperliquid répondent ; OKX ne répond jamais ; les autres échouent. */
+  const places = (options: { binance?: string[]; okx?: () => Promise<unknown>; hl?: string[] } = {}) => vi.fn((url: string) => {
+    if (url.includes("binance")) return Promise.resolve(response({ symbols: (options.binance ?? ["BTCUSDT"]).map((symbol) => ({ symbol, status: "TRADING" })) }));
+    if (url.includes("hyperliquid")) return Promise.resolve(response({ universe: (options.hl ?? ["BTC"]).map((name) => ({ name })) }));
+    if (url.includes("okx")) return options.okx ? options.okx() : muet();
+    return Promise.reject(new Error("indisponible"));
+  });
+
+  it.each(["binance", "okx"] as const)("à froid, %s:BTCUSDT part tout de suite sur Binance malgré une place muette", async (exchange) => {
+    vi.stubGlobal("fetch", places());
+    const routing = await import("./marketRouting");
+    let resolu: Awaited<ReturnType<typeof routing.resolveMarketCandidatesProgressifs>> | undefined;
+    void routing.resolveMarketCandidatesProgressifs({ exchange, symbol: "BTCUSDT", timeframe: "1h" }).then((value) => { resolu = value; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resolu?.immediats).toEqual([{ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h" }]);
+    let complets: unknown;
+    void resolu!.complets().then((value) => { complets = value; });
+    await vi.advanceTimersByTimeAsync(11_999);
+    expect(complets).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    // Liste complète habituelle : Binance d'abord, places sans catalogue en essais spéculatifs.
+    expect((complets as Array<{ exchange: string; speculative?: true }>)[0]).toEqual({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h" });
+    expect((complets as Array<{ exchange: string; speculative?: true }>).slice(1).every((c) => c.speculative)).toBe(true);
+  });
+
+  it("à froid, un actif absent de Binance attend le catalogue complet (CARDSUSDT chez OKX seul)", async () => {
+    vi.stubGlobal("fetch", places({ okx: () => new Promise((resolve) => setTimeout(() => resolve(response({ code: "0", data: [{ instId: "CARDS-USDT", instType: "SPOT", state: "live" }] })), 1_000)) }));
+    const routing = await import("./marketRouting");
+    const pending = routing.resolveMarketCandidatesProgressifs({ exchange: "binance", symbol: "CARDSUSDT", timeframe: "1h" });
+    await vi.advanceTimersByTimeAsync(0);
+    const { immediats, complets } = await pending;
+    expect(immediats).toEqual([]);
+    const liste = complets();
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect((await liste)[0]).toEqual({ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" });
+  });
+
+  it("à froid, le perp attend seulement Hyperliquid, garde sa casse native et vérifie l'unité de temps", async () => {
+    vi.stubGlobal("fetch", places({ hl: ["kPEPE"] }));
+    const routing = await import("./marketRouting");
+    const { hyperliquidCoin } = await import("./symbol");
+    const pending = routing.resolveMarketCandidatesProgressifs({ symbol: "KPEPE-PERP", timeframe: "1h" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect((await pending).immediats).toEqual([{ exchange: "hyperliquid", symbol: "KPEPE-PERP", timeframe: "1h" }]);
+    expect(hyperliquidCoin("KPEPE-PERP")).toBe("kPEPE");
+    // 6h n'existe pas chez Hyperliquid : pas de raccourci, la liste complète ajuste en 1h.
+    const sixHeures = await routing.resolveMarketCandidatesProgressifs({ symbol: "KPEPE-PERP", timeframe: "6h" });
+    expect(sixHeures.immediats).toEqual([]);
+    const liste = sixHeures.complets();
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(await liste).toEqual([{ exchange: "hyperliquid", symbol: "KPEPE-PERP", timeframe: "1h" }]);
+  });
+
+  it("catalogue en cache, même expiré : liste complète immédiate, renvoyée telle quelle", async () => {
+    vi.stubGlobal("fetch", places({ okx: () => Promise.resolve(response({ code: "0", data: [{ instId: "BTC-USDT", instType: "SPOT", state: "live" }] })) }));
+    const routing = await import("./marketRouting");
+    const catalog = await routing.fetchMarketCatalog();
+    await vi.advanceTimersByTimeAsync(300_000);
+    const identity = { exchange: "okx" as const, symbol: "BTCUSDT", timeframe: "1h" as const };
+    const { immediats, complets } = await routing.resolveMarketCandidatesProgressifs(identity);
+    expect(immediats).toEqual(await routing.resolveMarketCandidates(identity, catalog));
+    expect(immediats.map((c) => c.exchange).slice(0, 2)).toEqual(["binance", "okx"]);
+    expect(await complets()).toEqual(immediats);
+  });
+
+  it("synthétiques et TradFi restent résolus sans catalogue", async () => {
+    const fetch = vi.fn(muet);
+    vi.stubGlobal("fetch", fetch);
+    const routing = await import("./marketRouting");
+    for (const identity of [{ symbol: "AAPL", timeframe: "1d" as const }, { symbol: "TOTAL", timeframe: "1d" as const }]) {
+      const { immediats, complets } = await routing.resolveMarketCandidatesProgressifs(identity);
+      expect(immediats).toEqual(await routing.resolveMarketCandidates(identity, { instruments: [], unavailableSources: [] }));
+      expect(immediats).toHaveLength(1);
+      expect(await complets()).toEqual(immediats);
+    }
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

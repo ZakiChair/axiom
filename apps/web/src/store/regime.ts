@@ -17,7 +17,6 @@ import {
   histVolRealiseeAvecMeta,
   type HistoriqueReferentiel,
 } from "../data/referentiels";
-import { fetchWatchlistOvernight } from "../data/brief";
 import { fetchEtfFlows, type ActifEtf, type EtfResultat } from "../data/onchain/etf";
 import { getSoSoValueKey } from "./sosovalue";
 import { chargerEmetteurs } from "../data/macro/stablecoinsDetail";
@@ -182,7 +181,7 @@ export async function rafraichirRegime(): Promise<void> {
   const cleEtf = getSoSoValueKey();
   const actifsEtf: readonly ActifEtf[] = ["btc", "eth", "sol"];
   const [tickers, fg, funding, dvol, volReal, oi, etf, emetteurs, gamma] = await Promise.allSettled([
-    fetchWatchlistOvernight(["BTCUSDT", "ETHUSDT"]),
+    import("../data/brief").then(({ fetchWatchlistOvernight }) => fetchWatchlistOvernight(["BTCUSDT", "ETHUSDT"])),
     histFearGreedAvecMeta(),
     histFundingAvecMeta("BTCUSDT"),
     histDvolAvecMeta("BTC"),

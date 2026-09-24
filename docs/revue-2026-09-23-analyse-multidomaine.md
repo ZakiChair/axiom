@@ -56,6 +56,35 @@ Journaux de la session : `/tmp/axiom-analyse-final-check-3.log` et
 dans le répertoire local de preuves du chantier. Les changements sont prêts
 sur la branche locale ; cette livraison ne comprend pas de nouvelle publication.
 
+## Complément de livraison du 24 septembre
+
+Sur demande du propriétaire, `97fd9a0` a été fusionné dans `main`, poussé et
+publié automatiquement par Vercel. Les contrôles après fusion ont passé le
+typage, les tests et les 138 parcours navigateur. L'alias de production sert
+le build attendu ; le proxy FRED renvoie la réponse JSON de l'amont lorsque
+la clé personnelle manque.
+
+La CI Linux a toutefois mesuré 360 742 octets gzip pour l'entrée, dépassant
+le plafond de 360 000 : la marge du build local ne couvrait pas la différence
+de compression entre runtimes. Le correctif conserve le plafond et charge
+`data/brief` par import dynamique dans la branche déjà asynchrone du régime.
+Les autres acquisitions restent concurrentes, les erreurs restent isolées et
+la capture synchrone des alertes ne change pas. Revue indépendante favorable.
+
+Après correction : `pnpm check` vert avec 6 867 tests source, 92 tests ciblés
+verts ; entrée à 1 200 196 octets bruts / 355 155 gzip localement. Le même
+artefact contrôlé avec Node 22 mesure 356 542 gzip, soit 3 458 octets de marge.
+La CI distante et la publication du correctif sont suivies séparément jusqu'à
+leur résultat final, conservé avec les preuves locales de livraison.
+
+Les huit panneaux ont été ouverts sur la première publication : DOM atteint
+60/60 créneaux, CHAIN couvre les quatre chaînes, MACRO retient juillet comme
+dernier mois commun Eurostat, FUNDX calcule puis bloque le net à péremption,
+BRIEF publie ses lectures réelles progressivement. SCEN et EXPY montrent leurs
+états sans portefeuille ni historique. GLOBE explicite les couches dépendant
+du daemon local. Aucun ordre réel n'a été passé et aucune exception JavaScript
+n'a été observée pendant ces contrôles.
+
 ## Observations de revue
 
 La première revue indépendante de MACRO et DOM a reproduit quatre défauts :

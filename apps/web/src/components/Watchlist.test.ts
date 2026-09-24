@@ -247,6 +247,22 @@ describe("provenances des favoris", () => {
     expect(urls).toHaveLength(5);
   });
 
+  it("place hors Binance en échec durable, favoris confirmés : aucune relecture du catalogue après le démarrage", async () => {
+    // Bybit en 403 (ou MEXC sans proxy) : relire toutes les 30 s relançait Bybit et, à chaque fin de
+    // cache (5 min), retéléchargeait les ~7,5 Mo des catalogues sains, sans rien à rendre à Binance.
+    watchlistStore.getState().setAll(["BTCUSDT", "ETHUSDT"], { BTCUSDT: "binance", ETHUSDT: "binance" });
+    catalogue({ ...spot(["binance", "BTCUSDT"], ["binance", "ETHUSDT"]), unavailableSources: ["bybit"] });
+    const urls = reseau();
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(0);
+    const lectures = vi.mocked(routing.fetchMarketCatalog).mock.calls.length;
+    await vi.advanceTimersByTimeAsync(11 * 60_000);
+    expect(vi.mocked(routing.fetchMarketCatalog).mock.calls.length).toBe(lectures);
+    expect(lectures).toBe(1);
+    expect(urls).toEqual([]);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance", ETHUSDT: "binance" });
+  });
+
   it("graphe prêt sur OKX pendant la panne du catalogue Binance : confirmation provisoire, levée au retour de Binance", async () => {
     watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "okx" });
     const { publier } = catalogue({ ...spot(["okx", "BTCUSDT"]), unavailableSources: ["binance"] });

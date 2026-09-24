@@ -202,7 +202,7 @@ const SESSION_PROVENANCES = nouvelleSessionProvenances();
  *    sans elle : un ticker Binance d'une paire suspendue répond encore, à un prix figé ;
  *  - une place confirmée hors Binance pendant une panne du catalogue Binance l'est à titre
  *    provisoire : resondée (Binance d'abord) dès qu'un catalogue republié la liste chez Binance ;
- *    un catalogue partiel est relu toutes les 30 s pour que ce retour soit publié ;
+ *    tant qu'il en reste, le catalogue est relu toutes les 30 s pour que ce retour soit publié ;
  *  - un actif TradFi sans source n'est sondé qu'une fois par changement de liste, jamais marché
  *    fermé : il attend alors l'ouverture de son marché. Une source Twelve Data enregistrée, seule
  *    candidate possible, ne l'est jamais : ses quotes suivent déjà les heures de marché.
@@ -289,14 +289,19 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
     } catch { /* Sans prix confirmé : crypto réessayée au catalogue ou dans 30 s, TradFi à la liste. */ }
   }
 
+  /**
+   * Catalogue à relire : seulement pour rendre à Binance, revenu, ses replis provisoires. Une autre
+   * place en échec durable (Bybit en 403…) ne justifie pas de retélécharger les catalogues sains.
+   */
+  const aRelire = (courant: MarketCatalog) => courant.unavailableSources.includes("binance") && provisoires.size > 0;
   /** Réessai à 30 s : favoris sans prix confirmé, ou catalogue partiel à relire. */
-  const aReessayer = (courant: MarketCatalog) => aSonder(false).length > 0 || courant.unavailableSources.length > 0;
+  const aReessayer = (courant: MarketCatalog) => aSonder(false).length > 0 || aRelire(courant);
 
   function lancerPasse(): void {
     if (arrete || !catalog) return;
     const courant = catalog;
     // Relecture du catalogue partiel : son rafraîchissement ne republie que s'il change.
-    if (courant.unavailableSources.length > 0) void fetchMarketCatalog().catch(() => {});
+    if (aRelire(courant)) void fetchMarketCatalog().catch(() => {});
     confirmerSansSonde(courant);
     passe?.abort();
     const controller = new AbortController();

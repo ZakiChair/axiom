@@ -327,6 +327,21 @@ describe("provenances des favoris", () => {
     expect(watchlistStore.getState().sources).toEqual({ SPY: "twelvedata", AAPL: "twelvedata" });
   });
 
+  it("une confirmation démentie pendant le démontage est oubliée au remontage, sans sonde doublée", async () => {
+    // ETHUSDT, confirmé plus tôt dans la session, a été retiré puis rajouté : il n'a plus de source.
+    const session = new Map<string, WatchlistSource>([["ETHUSDT", "binance"]]);
+    watchlistStore.getState().setAll(["BTCUSDT", "ETHUSDT"]);
+    catalogue(spot(["binance", "BTCUSDT"], ["binance", "ETHUSDT"]));
+    const urls = reseau();
+    stop = suivreProvenancesFavoris(session);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(urls.sort()).toEqual([
+      "https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT",
+      "https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT",
+    ]);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance", ETHUSDT: "binance" });
+  });
+
   it("un favori ajouté est sondé seul ; l'arrêt annule la sonde en vol", async () => {
     watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "binance" });
     catalogue(spot(["binance", "BTCUSDT"], ["binance", "ETHUSDT"], ["binance", "SOLUSDT"]));

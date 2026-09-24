@@ -208,6 +208,16 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
     if (avant === undefined) confirmees.delete(symbol);
     else confirmees.set(symbol, avant);
   };
+  /** Oublie les confirmations que le store dément ; vrai si une source a changé ailleurs. */
+  const oublierDementies = (): boolean => {
+    const { symbols, sources } = watchlistStore.getState();
+    let dementie = false;
+    for (const symbol of symbols) {
+      const confirmee = confirmees.get(symbol);
+      if (confirmee !== undefined && sources[symbol] !== confirmee) { confirmees.delete(symbol); dementie = true; }
+    }
+    return dementie;
+  };
   /** Sources déjà prouvées, qu'une sonde ne pourrait que perdre : Twelve Data, Binance listé. */
   const confirmerSansSonde = (courant?: MarketCatalog) => {
     const { symbols, sources } = watchlistStore.getState();
@@ -280,6 +290,8 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
     }
   }
 
+  // Démenties pendant le démontage (favori retiré puis rajouté) : oubliées avant la 1re passe.
+  oublierDementies();
   const recevoir = (value: MarketCatalog) => { catalog = value; lancerPasse(); };
   const stopCatalogue = subscribeMarketCatalog(recevoir);
   void fetchMarketCatalog().then((value) => { if (value !== catalog) recevoir(value); }).catch(() => {});
@@ -289,12 +301,7 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
   const stopListe = watchlistStore.subscribe((state) => {
     const suivante = cleListe(state.symbols);
     // Une source confirmée changée ailleurs (réhydratation daemon, autre appareil) est resondée.
-    let changee = false;
-    for (const symbol of state.symbols) {
-      const confirmee = confirmees.get(symbol);
-      if (confirmee !== undefined && state.sources[symbol] !== confirmee) { confirmees.delete(symbol); changee = true; }
-    }
-    if (suivante === liste && !changee) return;
+    if (!oublierDementies() && suivante === liste) return;
     liste = suivante;
     lancerPasse();
     sonderTradfi();

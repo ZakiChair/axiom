@@ -549,7 +549,7 @@ function pollTradfiQuotes(symbols: string[], cb: (update: TickerUpdate) => void)
   if (symbols.length === 0) return () => {};
 
   return pollLoop(
-    async (_signal, isCancelled) => {
+    async (signal, isCancelled) => {
       const now = new Date();
       const open = symbols.filter((s) => isMarketOpen(classifyTradfi(s), now));
       if (open.length === 0) {
@@ -562,7 +562,8 @@ function pollTradfiQuotes(symbols: string[], cb: (update: TickerUpdate) => void)
         });
         return;
       }
-      const quotes = await fetchQuotes(open);
+      // Désabonné en attente de créneau (bandeau d'un actif quitté) : la cotation quitte la file.
+      const quotes = await fetchQuotes(open, { signal });
       if (isCancelled()) return;
       for (const q of quotes) cb(q); // { symbol, price, changePercent } — même forme que le ticker
       healthStore.getState().setEtat(TRADFI_HEALTH, "polling", {

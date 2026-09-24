@@ -95,6 +95,8 @@ export function pollLoop(
         healthStore.getState().setEtat(source, "polling", { dernierMessageTs: Date.now() });
       }
     } catch (err) {
+      // Arrêté pendant le cycle : l'abandon de sa requête (signal) n'est pas une panne de la source.
+      if (cancelled) return;
       consecutiveErrors += 1;
       nextAllowedTs = Date.now() + pollBackoffMs(consecutiveErrors, intervalMs);
       if (source) healthStore.getState().marquerErreur(source, errorMessage(err));

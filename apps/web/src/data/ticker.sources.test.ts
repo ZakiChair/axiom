@@ -5,6 +5,7 @@ import { okxAdapter } from "./okx";
 import { binanceAdapter } from "./binance";
 import { fetchQuotes } from "./twelvedata";
 import { watchlistStore } from "../store/watchlist";
+import { healthStore } from "../store/health";
 
 const response = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 const cards = { instType: "SPOT", instId: "CARDS-USDT", last: "0.18", open24h: "0.15", volCcy24h: "123.4", vol24h: "999" };
@@ -219,6 +220,21 @@ describe("résolution vérifiée du ticker", () => {
     expect(await sonde).toBeUndefined();
     await vi.advanceTimersByTimeAsync(120_000);
     expect(urls.filter((url) => url.includes("AAPL"))).toEqual([]);
+  });
+
+  it("un bandeau Twelve Data désabonné pendant l'attente de créneau retire sa cotation de la file, sans crédit ni erreur de santé", async () => {
+    vi.setSystemTime(new Date("2026-09-24T16:00:00Z")); // jeudi, séance ouverte, fenêtre 8/min neuve
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => { urls.push(String(input)); return response({ close: "200", percent_change: "1" }); }));
+    await fetchQuotes(["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"]);
+    const santeAvant = healthStore.getState().sources["twelvedata:quotes"];
+    // Bandeau (SymbolBanner) d'un graphe ouvert puis quitté avant le prochain créneau.
+    const stop = subscribeTickers(["MSFT"], vi.fn(), { source: "twelvedata" });
+    await vi.advanceTimersByTimeAsync(5_000);
+    stop();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(urls.filter((url) => url.includes("MSFT"))).toEqual([]);
+    expect(healthStore.getState().sources["twelvedata:quotes"]).toEqual(santeAvant);
   });
 
   it("un abonnement sans provenance trouve OKX sans ouvrir de WebSocket Binance", async () => {

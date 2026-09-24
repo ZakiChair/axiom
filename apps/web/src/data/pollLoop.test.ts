@@ -66,6 +66,22 @@ describe("pollLoop — cycle de vie", () => {
     unsub();
   });
 
+  it("l'abandon d'un cycle par l'arrêt (signal) n'est pas remonté comme une panne", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const onError = vi.fn();
+    const tick = (signal: AbortSignal) => new Promise<void>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+
+    const unsub = pollLoop(tick, 1000, { immediate: true, onError, source: "test:abandon" });
+    await vi.advanceTimersByTimeAsync(0);
+    unsub();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(onError).not.toHaveBeenCalled();
+  });
+
   it("backoff : après une erreur, un cycle est sauté jusqu'à l'expiration du délai", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);

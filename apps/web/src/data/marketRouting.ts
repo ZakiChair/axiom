@@ -166,7 +166,9 @@ function candidatsDepuisCatalogue(id: IdentitePreparee, loaded: MarketCatalog): 
   const supportsRequestedTimeframe = (candidate: MarketCandidate) => supportedTimeframesFor(candidate.exchange, symbol).includes(id.timeframe);
   candidates.sort((a, b) => Number(!!a.speculative) - Number(!!b.speculative)
     || Number(supportsRequestedTimeframe(b)) - Number(supportsRequestedTimeframe(a))
-    || Number(b.exchange === "binance") - Number(a.exchange === "binance")
+    // Binance non confirmé (catalogue en panne) reste un essai comme les autres : la
+    // provenance restaurée garde alors la tête, sans basculer ni perdre ses limites.
+    || Number(b.exchange === "binance" && !b.speculative) - Number(a.exchange === "binance" && !a.speculative)
     || Number(b.exchange === id.exchange) - Number(a.exchange === id.exchange)
     || SOURCES.indexOf(a.exchange) - SOURCES.indexOf(b.exchange));
   // Un timeframe propre à une place (ex. Binance 1s) ne doit pas éliminer les

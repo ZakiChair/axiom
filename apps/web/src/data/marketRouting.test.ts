@@ -86,6 +86,13 @@ describe("Binance, source de référence du split taker, avant la provenance cou
     // Catalogue Binance rétabli : retour en tête sans action de l'utilisateur.
     expect((await resolveMarketCandidates({ exchange: "kraken", symbol: "BTCUSDT", timeframe: "1h" }, multi))[0]?.exchange).toBe("binance");
   });
+  it("catalogues tous indisponibles : la provenance restaurée garde la tête, Binance non confirmé ne passe pas devant", async () => {
+    const horsLigne: MarketCatalog = { instruments: [], unavailableSources: ["binance", "kraken", "coinbase", "bybit", "okx", "mexc", "twelvedata", "hyperliquid"] };
+    for (const symbol of ["BTCUSDT", "BTCUSD"]) {
+      expect((await resolveMarketCandidates({ exchange: "kraken", symbol, timeframe: "1m" }, horsLigne)).map((c) => c.exchange))
+        .toEqual(["kraken", "binance", "coinbase", "bybit", "okx", "mexc"]);
+    }
+  });
 });
 
 describe("catalogue partiel et repli sur le même instrument", () => {

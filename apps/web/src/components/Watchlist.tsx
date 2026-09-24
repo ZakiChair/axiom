@@ -166,6 +166,8 @@ function drawSparkline(
 
 /** Places spot secondaires : Binance, source de référence, les remplace pour un même spot listé. */
 const PLACES_SPOT_SECONDAIRES: ReadonlySet<string> = new Set<WatchlistSource>(["kraken", "coinbase", "bybit", "okx", "mexc"]);
+const listeParBinance = (catalog: MarketCatalog, symbol: string) =>
+  catalog.instruments.some((i) => i.exchange === "binance" && i.kind === "spot" && i.symbol === symbol);
 /** Un favori sans prix confirmé est réessayé : les prix peuvent revenir sans nouveau catalogue. */
 const REESSAI_PROVENANCE_MS = 30_000;
 /** Confirmations de la session : la watchlist démontée (plein écran) ne resonde rien à son retour. */
@@ -179,6 +181,8 @@ const CONFIRMEES_SESSION = new Map<string, WatchlistSource>();
  *    chaque changement de liste et toutes les 30 s tant qu'il en reste ;
  *  - les synthétiques et capitalisations, sans ticker dédié, restent sans prix de favoris :
  *    ni sondés, ni réessayés ;
+ *  - un favori Binance que le catalogue Binance liste est confirmé sans sonde : un ticker Binance
+ *    en panne ou lent ne le fait jamais glisser vers une place de repli ;
  *  - une place spot secondaire héritée est resondée Binance d'abord quand le catalogue Binance
  *    liste le même spot ; sans prix Binance, le favori garde sa place d'origine.
  * Les sondes routent sur le catalogue reçu : elles ne relancent pas le rafraîchissement commun.
@@ -209,6 +213,11 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
   function lancerPasse(): void {
     if (arrete || !catalog) return;
     const courant = catalog;
+    // Le catalogue Binance prouve déjà la source : une sonde ne pourrait que la perdre.
+    const { symbols, sources } = watchlistStore.getState();
+    for (const symbol of symbols) {
+      if (sources[symbol] === "binance" && confirmees.get(symbol) !== "binance" && listeParBinance(courant, symbol)) confirmer(symbol, "binance");
+    }
     passe?.abort();
     const controller = new AbortController();
     passe = controller;
@@ -219,8 +228,7 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
         const before = marketStore.getState();
         if (before.symbol === symbol && before.dataLoad.status === "ready") return confirmer(symbol, before.exchange);
         const initialSource = watchlistStore.getState().sources[symbol];
-        const versBinance = initialSource !== undefined && PLACES_SPOT_SECONDAIRES.has(initialSource)
-          && courant.instruments.some((i) => i.exchange === "binance" && i.kind === "spot" && i.symbol === symbol);
+        const versBinance = initialSource !== undefined && PLACES_SPOT_SECONDAIRES.has(initialSource) && listeParBinance(courant, symbol);
         // Binance d'abord, sinon la place d'origine : jamais une troisième place pour ce spot.
         const routage: MarketCatalog = versBinance ? {
           instruments: courant.instruments.filter((i) => i.kind === "spot" && i.symbol === symbol && (i.exchange === "binance" || i.exchange === initialSource)),

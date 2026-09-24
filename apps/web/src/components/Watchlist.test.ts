@@ -289,27 +289,28 @@ describe("provenances des favoris", () => {
     expect(watchlistStore.getState().sources).toEqual({ CARDSUSDT: "okx" });
   });
 
-  it("provenance Binance démentie par son catalogue (CARDSUSDT absent) : son ticker d'abord, puis la place qui le liste", async () => {
+  it("provenance Binance démentie par son catalogue (CARDSUSDT absent) : réparée vers la place qui le liste", async () => {
     watchlistStore.getState().setAll(["CARDSUSDT"], { CARDSUSDT: "binance" });
     catalogue(spot(["binance", "BTCUSDT"], ["okx", "CARDSUSDT"]));
     const urls = reseau();
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(watchlistStore.getState().sources).toEqual({ CARDSUSDT: "okx" });
-    expect(urls).toEqual([
-      "https://api.binance.com/api/v3/ticker/24hr?symbol=CARDSUSDT",
-      "https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT",
-    ]);
+    expect(urls).toEqual(["https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT"]);
   });
 
-  it("paire Binance suspendue (absente de son catalogue, ticker vivant) : le favori reste sur Binance", async () => {
-    watchlistStore.getState().setAll(["ETHUSDT"], { ETHUSDT: "binance" });
-    catalogue(spot(["binance", "BTCUSDT"], ["bybit", "ETHUSDT"], ["okx", "ETHUSDT"]));
+  it("paire Binance suspendue (absente de son catalogue TRADING, ticker REST figé) : le favori passe sur la place qui la cote, sans sonde Binance", async () => {
+    // LRCUSDT réel (2026-09-24) : suspendue chez Binance, dont /ticker/24hr répond encore 200
+    // avec un prix figé (ici le bouchon Binance, qui cote tout symbole) ; OKX la cote en direct.
+    watchlistStore.getState().setAll(["LRCUSDT"], { LRCUSDT: "binance" });
+    catalogue(spot(["binance", "BTCUSDT"], ["okx", "LRCUSDT"]));
     const urls = reseau();
     stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
-    expect(watchlistStore.getState().sources).toEqual({ ETHUSDT: "binance" });
-    expect(urls).toEqual(["https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT"]);
+    expect(watchlistStore.getState().sources).toEqual({ LRCUSDT: "okx" });
+    expect(urls).toEqual(["https://www.okx.com/api/v5/market/ticker?instId=LRC-USDT"]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(urls.some((url) => url.includes("api.binance.com"))).toBe(false);
   });
 
   it("une source confirmée, changée hors de la watchlist sans changer la liste, est resondée", async () => {

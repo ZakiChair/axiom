@@ -176,8 +176,8 @@ const REESSAI_PROVENANCE_MS = 30_000;
  *    chaque changement de liste et toutes les 30 s tant qu'il en reste ;
  *  - les synthétiques et capitalisations, sans ticker dédié, restent sans prix de favoris :
  *    ni sondés, ni réessayés ;
- *  - une place spot secondaire héritée est resondée sans provenance quand le catalogue Binance
- *    liste le même spot : Binance passe alors en tête du routage (repli si son prix manque).
+ *  - une place spot secondaire héritée est resondée Binance d'abord quand le catalogue Binance
+ *    liste le même spot ; sans prix Binance, le favori garde sa place d'origine.
  * Les sondes routent sur le catalogue reçu : elles ne relancent pas le rafraîchissement commun.
  */
 export function suivreProvenancesFavoris(): () => void {
@@ -219,7 +219,12 @@ export function suivreProvenancesFavoris(): () => void {
         const initialSource = watchlistStore.getState().sources[symbol];
         const versBinance = initialSource !== undefined && PLACES_SPOT_SECONDAIRES.has(initialSource)
           && courant.instruments.some((i) => i.exchange === "binance" && i.kind === "spot" && i.symbol === symbol);
-        const resolved = await resolveTickerMarket({ exchange: versBinance ? undefined : initialSource, symbol, timeframe: "1h" }, controller.signal, courant);
+        // Binance d'abord, sinon la place d'origine : jamais une troisième place pour ce spot.
+        const routage: MarketCatalog = versBinance ? {
+          instruments: courant.instruments.filter((i) => i.kind === "spot" && i.symbol === symbol && (i.exchange === "binance" || i.exchange === initialSource)),
+          unavailableSources: [],
+        } : courant;
+        const resolved = await resolveTickerMarket({ exchange: versBinance ? "binance" : initialSource, symbol, timeframe: "1h" }, controller.signal, routage);
         if (controller.signal.aborted) return;
         const market = marketStore.getState();
         if (market.symbol === symbol && market.dataLoad.status === "ready") confirmer(symbol, market.exchange);

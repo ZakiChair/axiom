@@ -155,6 +155,22 @@ describe("provenances des favoris", () => {
     ]);
   });
 
+  it("sans prix Binance, okx:BTCUSDT garde sa place d'origine, jamais une troisième", async () => {
+    watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "okx" });
+    catalogue(spot(["binance", "BTCUSDT"], ["kraken", "BTCUSDT"], ["okx", "BTCUSDT"]));
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => {
+      urls.push(String(input));
+      if (String(input).startsWith("https://api.kraken.com/")) return reponse({ error: [], result: { XBTUSDT: { c: ["60000"], o: "59000" } } });
+      if (String(input).startsWith("https://www.okx.com/")) return reponse({ code: "0", data: [{ instType: "SPOT", instId: "BTC-USDT", last: "60000" }] });
+      return new Response("{}", { status: 503 });
+    }));
+    stop = suivreProvenancesFavoris();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "okx" });
+    expect(urls.some((url) => url.includes("kraken"))).toBe(false);
+  });
+
   it("sans Binance au catalogue, okx:BTCUSDT garde sa place", async () => {
     watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "okx" });
     catalogue(spot(["okx", "BTCUSDT"]));

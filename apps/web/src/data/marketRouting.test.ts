@@ -74,11 +74,24 @@ describe("Binance, source de référence du split taker, avant la provenance cou
         .toEqual([{ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" }]);
     }
   });
-  it("aucune oscillation : Binance en échec reste un dernier essai, le repli retenu garde la tête jusqu'à son retour", async () => {
+  it("catalogue Binance en panne : la provenance Binance restaurée garde la tête, jamais une troisième place d'abord", async () => {
+    const binanceKo: MarketCatalog = { unavailableSources: ["binance"], instruments: [
+      { exchange: "bybit", symbol: "ETHUSDT", kind: "spot" }, { exchange: "okx", symbol: "ETHUSDT", kind: "spot" },
+    ] };
+    expect(await resolveMarketCandidates({ exchange: "binance", symbol: "ETHUSDT", timeframe: "1h" }, binanceKo)).toEqual([
+      { exchange: "binance", symbol: "ETHUSDT", timeframe: "1h", speculative: true },
+      { exchange: "bybit", symbol: "ETHUSDT", timeframe: "1h" },
+      { exchange: "okx", symbol: "ETHUSDT", timeframe: "1h" },
+    ]);
+    // Une autre provenance confirmée reste en tête ; Binance non confirmé n'y passe pas.
+    expect((await resolveMarketCandidates({ exchange: "okx", symbol: "ETHUSDT", timeframe: "1h" }, binanceKo)).map((c) => c.exchange))
+      .toEqual(["okx", "bybit", "binance"]);
+  });
+  it("aucune oscillation : Binance en échec, le repli retenu garde la tête jusqu'au retour de son catalogue", async () => {
     const binanceKo: MarketCatalog = { unavailableSources: ["binance"], instruments: multi.instruments.filter((c) => c.exchange !== "binance") };
     const depuisBinance = await resolveMarketCandidates({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h" }, binanceKo);
-    expect(depuisBinance[0]?.exchange).toBe("kraken");
-    expect(depuisBinance.at(-1)).toEqual({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h", speculative: true });
+    expect(depuisBinance[0]).toEqual({ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h", speculative: true });
+    expect(depuisBinance[1]?.exchange).toBe("kraken");
     // Provenance publiée après le repli : la même source reste en tête, Binance toujours en dernier.
     const depuisRepli = await resolveMarketCandidates({ exchange: "kraken", symbol: "BTCUSDT", timeframe: "1h" }, binanceKo);
     expect(depuisRepli[0]?.exchange).toBe("kraken");
@@ -103,13 +116,16 @@ describe("catalogue partiel et repli sur le même instrument", () => {
       { exchange: "mexc", symbol: "CARDSUSDT", timeframe: "1h", speculative: true },
     ]);
   });
-  it("essaie les sources confirmées avant une provenance restaurée dont le catalogue manque", async () => {
+  it("une provenance restaurée dont le catalogue manque est essayée d'abord, puis les sources confirmées", async () => {
     const partial: MarketCatalog = { instruments: [{ exchange: "okx", symbol: "CARDSUSDT", kind: "spot" }], unavailableSources: ["binance", "mexc"] };
     expect(await resolveMarketCandidates({ exchange: "binance", symbol: "CARDSUSDT", timeframe: "1h" }, partial)).toEqual([
-      { exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" },
       { exchange: "binance", symbol: "CARDSUSDT", timeframe: "1h", speculative: true },
+      { exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" },
       { exchange: "mexc", symbol: "CARDSUSDT", timeframe: "1h", speculative: true },
     ]);
+    // Sans provenance, les sources confirmées passent devant tout essai spéculatif.
+    expect((await resolveMarketCandidates({ symbol: "CARDSUSDT", timeframe: "1h" }, partial)).map((c) => c.exchange))
+      .toEqual(["okx", "binance", "mexc"]);
   });
   it("ne remplace jamais le perp par le spot quand le catalogue Hyperliquid manque", async () => {
     const partial: MarketCatalog = { instruments: [{ exchange: "okx", symbol: "CARDSUSDT", kind: "spot" }], unavailableSources: ["binance", "hyperliquid"] };
@@ -123,13 +139,15 @@ describe("catalogue partiel et repli sur le même instrument", () => {
       instruments: [{ exchange: "okx", symbol: "CARDSUSDT", kind: "spot" }], unavailableSources: ["mexc"],
     })).toEqual([{ exchange: "mexc", symbol: "CARDSUSDC", timeframe: "1h", speculative: true }]);
   });
-  it("CARDS confirmé chez OKX reste prioritaire en 1h face à Binance spéculatif en 1s", async () => {
-    expect(await resolveMarketCandidates({ exchange: "binance", symbol: "CARDSUSDT", timeframe: "1s" }, {
-      instruments: [{ exchange: "okx", symbol: "CARDSUSDT", kind: "spot" }], unavailableSources: ["binance"],
-    })).toEqual([
+  it("CARDS confirmé chez OKX reste prioritaire en 1h face à Binance spéculatif en 1s hérité d'un autre actif", async () => {
+    const partiel: MarketCatalog = { instruments: [{ exchange: "okx", symbol: "CARDSUSDT", kind: "spot" }], unavailableSources: ["binance"] };
+    expect(await resolveMarketCandidates({ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1s" }, partiel)).toEqual([
       { exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" },
       { exchange: "binance", symbol: "CARDSUSDT", timeframe: "1s", speculative: true },
     ]);
+    // Provenance Binance restaurée : essayée d'abord dans son unité de temps, OKX 1h en repli.
+    expect((await resolveMarketCandidates({ exchange: "binance", symbol: "CARDSUSDT", timeframe: "1s" }, partiel)).map((c) => `${c.exchange}@${c.timeframe}`))
+      .toEqual(["binance@1s", "okx@1h"]);
   });
 });
 

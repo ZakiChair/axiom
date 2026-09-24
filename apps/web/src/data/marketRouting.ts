@@ -144,7 +144,7 @@ const sansCatalogue = (id: IdentitePreparee) => id.kind === "synthetic" || id.ki
 const CATALOGUE_VIDE: MarketCatalog = { instruments: [], unavailableSources: [] };
 
 /**
- * Instruments confirmés prioritaires, puis support du timeframe, Binance confirmé (seule
+ * Instruments confirmés (et provenance restaurée, même sans catalogue) prioritaires, puis support du timeframe, Binance confirmé (seule
  * place au split taker : une provenance héritée d'un autre actif ne l'évince pas),
  * provenance courante entre les replis, et ordre du catalogue. Aucun passage spot/perp
  * ni USD/USDT/USDC : même instrument.
@@ -170,7 +170,10 @@ function candidatsDepuisCatalogue(id: IdentitePreparee, loaded: MarketCatalog): 
     }
   }
   const supportsRequestedTimeframe = (candidate: MarketCandidate) => supportedTimeframesFor(candidate.exchange, symbol).includes(id.timeframe);
-  candidates.sort((a, b) => Number(!!a.speculative) - Number(!!b.speculative)
+  // Seule la provenance restaurée garde son rang sans catalogue : une panne de catalogue
+  // (Binance compris) ne la fait jamais passer derrière une troisième place confirmée.
+  const essai = (candidate: { exchange: ExchangeId; speculative?: true }) => Number(!!candidate.speculative && candidate.exchange !== id.exchange);
+  candidates.sort((a, b) => essai(a) - essai(b)
     || Number(supportsRequestedTimeframe(b)) - Number(supportsRequestedTimeframe(a))
     // Binance non confirmé (catalogue en panne) reste un essai comme les autres : la
     // provenance restaurée garde alors la tête, sans basculer ni perdre ses limites.

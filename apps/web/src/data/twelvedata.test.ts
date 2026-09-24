@@ -512,3 +512,191 @@ describe("twelveDataAdapter.fetchKlines — pagination par end_date", () => {
     expect(hors).toEqual([]);
   });
 });
+
+/**
+ * File du quota 8 req/60 s : deux priorités (graphe > cotations, barres, sondages) et
+ * abandon par AbortSignal. Module réimporté à chaque test : file et créneaux vierges.
+ */
+describe("file Twelve Data : priorités, abandon et fenêtre glissante", () => {
+  const serie = { status: "ok", values: [{ datetime: "2026-01-02", open: "1", high: "2", low: "0.5", close: "1.5", volume: "10" }] };
+  let stockage: Map<string, string>;
+  let envois: Array<{ at: number; url: string }>;
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-07-01T12:00:00Z"));
+    stockage = new Map();
+    vi.stubGlobal("localStorage", { getItem: (k: string) => stockage.get(k) ?? null, setItem: (k: string, v: string) => void stockage.set(k, v) });
+    envois = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      envois.push({ at: Date.now(), url });
+      const symbol = new URL(url, "http://localhost").searchParams.get("symbol") ?? "";
+      return { status: 200, statusText: "OK", json: async () => url.includes("/quote") ? { symbol, close: "100", percent_change: "1" } : serie };
+    }));
+  });
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  const credits = () => (JSON.parse(stockage.get("axiom:twelvedata:daily:v1") ?? "{\"count\":0}") as { count: number }).count;
+  /** Occupe les huit créneaux de la fenêtre courante. */
+  async function saturer(td: typeof import("./twelvedata")): Promise<void> {
+    await Promise.all(Array.from({ length: 8 }, (_, i) => td.fetchKlinesTwelveData(`PLEIN${i}`, "1d")));
+    expect(envois).toHaveLength(8);
+  }
+
+  it("une demande abandonnée sort de la file sans consommer de créneau ni de crédit", async () => {
+    const td = await import("./twelvedata");
+    await saturer(td);
+    const controleur = new AbortController();
+    const onCreneau = vi.fn();
+    const abandonnee = td.fetchKlinesTwelveData("AMZN", "1d", { limit: 500 }, { signal: controleur.signal, priorite: "graphe", onCreneau });
+    await vi.advanceTimersByTimeAsync(20_000);
+    controleur.abort();
+    await expect(abandonnee).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(envois).toHaveLength(8);
+    expect(credits()).toBe(8);
+    expect(onCreneau).not.toHaveBeenCalled();
+    // Le créneau libéré sert immédiatement la demande suivante.
+    await td.fetchKlinesTwelveData("META", "1d");
+    expect(envois).toHaveLength(9);
+    expect(credits()).toBe(9);
+  });
+
+  it("le backfill du graphe passe devant trois cotations déjà en file", async () => {
+    const td = await import("./twelvedata");
+    await saturer(td);
+    const quotes = ["SPY", "QQQ", "GLD"].map((symbol) => td.fetchQuotes([symbol]));
+    const graphe = td.fetchKlinesTwelveData("AAPL", "1d", { limit: 500 }, { priorite: "graphe" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await Promise.all([graphe, ...quotes]);
+    expect(envois.slice(8).map(({ url }) => new URL(url, "http://localhost").searchParams.get("symbol"))).toEqual(["AAPL", "SPY", "QQQ", "GLD"]);
+    expect(envois[8]!.url).toContain("/time_series");
+  });
+
+  it("ne dépasse jamais 8 requêtes sur une fenêtre glissante de 60 s", async () => {
+    const td = await import("./twelvedata");
+    const demandes: Array<Promise<unknown>> = [];
+    for (let i = 0; i < 26; i++) {
+      demandes.push(i % 3 === 0 ? td.fetchQuotes([`Q${i}`]) : td.fetchKlinesTwelveData(`S${i}`, "1h", {}, { priorite: i % 2 ? "graphe" : "fond" }));
+      await vi.advanceTimersByTimeAsync(3_700);
+    }
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    await Promise.all(demandes);
+    expect(envois).toHaveLength(26);
+    for (const { at } of envois) expect(envois.filter((e) => e.at > at - 60_000 && e.at <= at).length).toBeLessThanOrEqual(8);
+  });
+
+  it("une requête partagée n'est annulée que lorsque son dernier abonné l'abandonne", async () => {
+    const td = await import("./twelvedata");
+    await saturer(td);
+    const a = new AbortController();
+    const b = new AbortController();
+    const premier = td.fetchKlinesTwelveData("NVDA", "1d", {}, { signal: a.signal, priorite: "graphe" });
+    const second = td.fetchKlinesTwelveData("NVDA", "1d", {}, { signal: b.signal, priorite: "graphe" });
+    a.abort();
+    await expect(premier).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect((await second).length).toBe(1);
+    expect(envois.filter(({ url }) => url.includes("NVDA"))).toHaveLength(1);
+
+    // Fenêtre de nouveau pleine (NVDA + sept) : MSFT attend en file.
+    await Promise.all(Array.from({ length: 7 }, (_, i) => td.fetchKlinesTwelveData(`AUTRE${i}`, "1d")));
+    const c = new AbortController();
+    const d = new AbortController();
+    const troisieme = td.fetchKlinesTwelveData("MSFT", "1d", {}, { signal: c.signal });
+    const quatrieme = td.fetchKlinesTwelveData("MSFT", "1d", {}, { signal: d.signal });
+    c.abort();
+    await expect(troisieme).rejects.toMatchObject({ name: "AbortError" });
+    d.abort();
+    await expect(quatrieme).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(envois.filter(({ url }) => url.includes("MSFT"))).toHaveLength(0);
+    expect(credits()).toBe(16);
+  });
+
+  it("un signal déjà abandonné n'envoie rien et ne laisse aucun rejet non géré", async () => {
+    const td = await import("./twelvedata");
+    const nonGeres: unknown[] = [];
+    const surRejet = (raison: unknown) => { nonGeres.push(raison); };
+    process.on("unhandledRejection", surRejet);
+    try {
+      const controleur = new AbortController();
+      controleur.abort();
+      await expect(td.fetchKlinesTwelveData("DEJAABANDONNE", "1d", {}, { signal: controleur.signal })).rejects.toMatchObject({ name: "AbortError" });
+      vi.useRealTimers(); // les rejets non gérés sont signalés après une vraie macrotâche
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(nonGeres).toEqual([]);
+      expect(envois).toHaveLength(0);
+    } finally { process.off("unhandledRejection", surRejet); }
+  });
+
+  it("un abonné graphe promeut une requête de fond partagée devant les autres demandes de fond", async () => {
+    const td = await import("./twelvedata");
+    await saturer(td);
+    const fond = ["SPY", "QQQ"].map((symbol) => td.fetchQuotes([symbol]));
+    const partagee = td.twelveDataAdapter.fetchKlines("TSLA", "1d", { limit: 500 });
+    const graphe = td.fetchKlinesTwelveData("TSLA", "1d", { limit: 500 }, { priorite: "graphe" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await Promise.all([partagee, graphe, ...fond]);
+    expect(envois[8]!.url).toContain("TSLA");
+    expect(envois.filter(({ url }) => url.includes("TSLA"))).toHaveLength(1);
+  });
+
+  it("annonce l'obtention du créneau, et refuse d'emblée une attente de quota trop longue", async () => {
+    const td = await import("./twelvedata");
+    await saturer(td);
+    await vi.advanceTimersByTimeAsync(10_000);
+    const refus = td.fetchKlinesTwelveData("AMZN", "1d", {}, { priorite: "graphe", attenteMaxMs: 20_000 });
+    await expect(refus).rejects.toThrow("Quota Twelve Data : prochain créneau dans 50 s");
+    await vi.advanceTimersByTimeAsync(35_000);
+    const onCreneau = vi.fn();
+    const acceptee = td.fetchKlinesTwelveData("AMZN", "1d", {}, { priorite: "graphe", attenteMaxMs: 20_000, onCreneau });
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(onCreneau).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onCreneau).toHaveBeenCalledTimes(1);
+    await acceptee;
+    expect(envois.filter(({ url }) => url.includes("AMZN"))).toHaveLength(1);
+    // Servi par le cache : le créneau est réputé obtenu tout de suite.
+    const depuisCache = vi.fn();
+    await td.fetchKlinesTwelveData("AMZN", "1d", {}, { onCreneau: depuisCache });
+    expect(depuisCache).toHaveBeenCalledTimes(1);
+  });
+
+  it("le sondage de la bougie courante quitte la file à l'arrêt, sans consommer de créneau", async () => {
+    const td = await import("./twelvedata");
+    const stop = td.twelveDataAdapter.subscribeKline("AAPL", "1m", () => {});
+    await vi.advanceTimersByTimeAsync(30_000);
+    await saturer(td);
+    // Premier sondage à +60 s : la fenêtre est pleine jusqu'à +90 s, il attend en file.
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(envois).toHaveLength(8);
+    stop();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(envois).toHaveLength(8);
+    expect(credits()).toBe(8);
+  });
+
+  it("sans clé, en appel direct à api.twelvedata.com, échoue immédiatement sans requête (401 certaine)", async () => {
+    vi.stubEnv("VITE_TWELVE_DATA_API_BASE", "https://api.twelvedata.com");
+    const td = await import("./twelvedata");
+    const { dataLoadErrorMessage } = await import("../chart/dataLoadErrorMessage");
+    const erreur = await td.fetchKlinesTwelveData("AAPL", "1d").catch((e: unknown) => e);
+    expect(String(erreur)).toMatch(/clé Twelve Data requise/);
+    expect(dataLoadErrorMessage(erreur)).toBe("Twelve Data nécessite une clé personnelle valide. Vérifiez-la dans les Réglages.");
+    await expect(td.fetchQuotes(["SPY"])).rejects.toThrow(/clé Twelve Data requise/);
+    expect(envois).toHaveLength(0);
+    // Avec une clé personnelle, l'appel direct part normalement.
+    td.setTwelveDataApiKey("perso");
+    await td.fetchKlinesTwelveData("AAPL", "1d");
+    expect(envois[0]!.url).toMatch(/^https:\/\/api\.twelvedata\.com\/time_series\?.*apikey=perso/);
+  });
+
+  it("le proxy local /tdapi (clé .env injectée) n'est jamais bloqué sans clé personnelle", async () => {
+    const td = await import("./twelvedata");
+    await td.fetchKlinesTwelveData("AAPL", "1d");
+    expect(envois[0]!.url).toMatch(/^\/tdapi\/time_series\?/);
+  });
+});

@@ -15,6 +15,11 @@
  * LIMITES (plan gratuit) : 8 req/min, 800 req/jour ; pas de temps réel WS (polling,
  * données live-ish/différées) ; forex SANS volume (→ 0) ; indices/commodités servis par
  * leurs ETF (le prix suit le sous-jacent de près). La crypto reste sur les exchanges.
+ *
+ * FILE DU QUOTA : FIFO à deux priorités (le backfill du graphe passe devant cotations,
+ * barres de watchlist et sondages) ; une demande abandonnée (AbortSignal) sort de la
+ * file sans consommer ni créneau ni crédit. `fetchKlinesTwelveData` expose ce contrôle,
+ * que l'interface figée `fetchKlines` ne porte pas.
  */
 import type { Candle, IExchangeAdapter, Timeframe, Unsubscribe } from "@axiom/types";
 import { pollLoop } from "./pollLoop";
@@ -23,6 +28,9 @@ import { healthStore } from "../store/health";
 /** Base directe sur Vercel, proxifiée par /tdapi en local pour conserver le repli .env. */
 const TWELVE_DATA_API_BASE = import.meta.env.VITE_TWELVE_DATA_API_BASE || "/tdapi";
 const SERIES_URL = `${TWELVE_DATA_API_BASE}/time_series`;
+/** Base directe (build Vercel) : sans clé personnelle, la réponse serait une 401 certaine. */
+const BASE_DIRECTE = /^https?:\/\//.test(TWELVE_DATA_API_BASE);
+const MSG_CLE_REQUISE = "Twelve Data : clé Twelve Data requise — ajoutez votre clé personnelle dans les Réglages.";
 
 let apiKey: string | null = null;
 
@@ -74,11 +82,26 @@ const DAILY_KEY = "axiom:twelvedata:daily:v1";
 const MSG_QUOTA_JOUR = "quota journalier Twelve Data épuisé (800 crédits)";
 
 const requestTimes: number[] = [];
-let throttleChain: Promise<void> = Promise.resolve();
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/** Priorité dans la file : le backfill du graphe passe devant cotations, barres et sondages. */
+export type PrioriteTwelveData = "graphe" | "fond";
+
+/** Contrôle d'une demande Twelve Data (l'interface figée `fetchKlines` n'en porte aucun). */
+export interface ControleTwelveData {
+  /** Abandon : une demande encore en file en sort sans consommer ni créneau ni crédit. */
+  signal?: AbortSignal;
+  /** Défaut « fond ». */
+  priorite?: PrioriteTwelveData;
+  /** Attente de créneau estimée au-delà de laquelle la demande est refusée d'emblée. */
+  attenteMaxMs?: number;
+  /** Appelé à l'obtention du créneau, ou tout de suite pour une réponse en cache. */
+  onCreneau?: () => void;
 }
+
+interface Demande { priorite: () => PrioriteTwelveData; accorder: () => void; refuser: (erreur: unknown) => void }
+/** File FIFO explicite : la première demande « graphe » passe devant toute demande de fond. */
+const file: Demande[] = [];
+let minuteurFile: ReturnType<typeof setTimeout> | undefined;
 
 // ───────── Compteur JOURNALIER (~800 crédits/jour), reset à minuit UTC ─────────
 
@@ -177,43 +200,92 @@ function reportQuota(): void {
 }
 
 /**
- * Acquiert un créneau de débit (fenêtre glissante 8/60 s), acquisitions sérialisées.
- * Au-delà de 8 dans la fenêtre, la requête ATTEND la libération d'un créneau plutôt
- * que de partir et se faire rejeter (429). Garantit ≤ 8 req/min côté Twelve Data.
+ * Plafond JOURNALIER (~800 crédits) : jusqu'ici seulement AFFICHÉ. 3 symboles tradfi
+ * pollés à 60 s + le chart crevaient le plafond en cours de séance US, puis chaque
+ * appel échouait en silence jusqu'à minuit UTC. On refuse ICI, explicitement : le
+ * chart ressert son cache périmé (cachedSeries), la watchlist passe en erreur, et
+ * le backoff de pollLoop espace les tentatives. L'erreur est levée au jour suivant
+ * lors du premier succès de reportQuota (minuit UTC passé, compteur reset).
  */
-function acquireSlot(): Promise<void> {
-  const run = throttleChain.then(async () => {
-    // Plafond JOURNALIER (~800 crédits) : jusqu'ici seulement AFFICHÉ. 3 symboles tradfi
-    // pollés à 60 s + le chart crevaient le plafond en cours de séance US, puis chaque
-    // appel échouait en silence jusqu'à minuit UTC. On refuse ICI, explicitement : le
-    // chart ressert son cache périmé (cachedSeries), la watchlist passe en erreur, et
-    // le backoff de pollLoop espace les tentatives. L'erreur est levée au jour suivant
-    // lors du premier succès de reportQuota (minuit UTC passé, compteur reset).
-    if (quotaJourEpuise(lireDailyUsage(), new Date())) {
-      healthStore.getState().marquerErreur(HEALTH_SOURCE, MSG_QUOTA_JOUR);
-      throw new Error(`Twelve Data: ${MSG_QUOTA_JOUR} — reset à minuit UTC`);
-    }
-    for (;;) {
-      const now = Date.now();
-      while (requestTimes.length > 0) {
-        const oldest = requestTimes[0];
-        if (oldest === undefined || now - oldest < RATE_WINDOW_MS) break;
-        requestTimes.shift();
+function refusQuotaJour(): Error | undefined {
+  if (!quotaJourEpuise(lireDailyUsage(), new Date())) return undefined;
+  healthStore.getState().marquerErreur(HEALTH_SOURCE, MSG_QUOTA_JOUR);
+  return new Error(`Twelve Data: ${MSG_QUOTA_JOUR} — reset à minuit UTC`);
+}
+
+function purgerFenetre(now: number): void {
+  while (requestTimes.length > 0 && now - (requestTimes[0] ?? now) >= RATE_WINDOW_MS) requestTimes.shift();
+}
+
+/** Sert la file tant que la fenêtre a des créneaux ; sinon UN minuteur attend le plus ancien. */
+function servirFile(): void {
+  for (;;) {
+    const demande = file.find((d) => d.priorite() === "graphe") ?? file[0];
+    if (!demande) return;
+    const refus = refusQuotaJour();
+    const now = Date.now();
+    purgerFenetre(now);
+    if (!refus && requestTimes.length >= RATE_LIMIT) {
+      if (minuteurFile === undefined) {
+        minuteurFile = setTimeout(() => { minuteurFile = undefined; servirFile(); }, (requestTimes[0] ?? now) + RATE_WINDOW_MS - now);
       }
-      if (requestTimes.length < RATE_LIMIT) {
-        requestTimes.push(now);
-        reportQuota();
-        return;
-      }
-      const oldest = requestTimes[0];
-      await sleep(oldest === undefined ? RATE_WINDOW_MS : RATE_WINDOW_MS - (now - oldest));
+      return;
     }
+    file.splice(file.indexOf(demande), 1);
+    if (refus) { demande.refuser(refus); continue; }
+    requestTimes.push(now);
+    reportQuota();
+    demande.accorder();
+  }
+}
+
+/** Attente estimée d'une NOUVELLE demande : fenêtre courante, puis demandes servies avant elle. */
+function attenteEstimeeMs(priorite: PrioriteTwelveData): number {
+  const now = Date.now();
+  purgerFenetre(now);
+  const occupes = [...requestTimes];
+  const devant = priorite === "graphe" ? file.filter((d) => d.priorite() === "graphe").length : file.length;
+  let t = now;
+  for (let i = 0; i <= devant; i++) {
+    t = Math.max(t, (occupes[occupes.length - RATE_LIMIT] ?? -Infinity) + RATE_WINDOW_MS);
+    occupes.push(t);
+  }
+  return t - now;
+}
+
+/**
+ * Acquiert un créneau de débit (fenêtre glissante 8/60 s). Au-delà de 8 dans la fenêtre,
+ * la demande ATTEND en file plutôt que de partir et se faire rejeter (429). Garantit
+ * ≤ 8 req/min côté Twelve Data. La priorité est relue à chaque service (promotion).
+ */
+function acquireSlot(controle: ControleTwelveData = {}): Promise<void> {
+  const { signal } = controle;
+  if (apiKey === null && BASE_DIRECTE) return Promise.reject(new Error(MSG_CLE_REQUISE));
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  const refus = refusQuotaJour();
+  if (refus) return Promise.reject(refus);
+  const priorite = (): PrioriteTwelveData => controle.priorite ?? "fond";
+  if (controle.attenteMaxMs !== undefined) {
+    const attente = attenteEstimeeMs(priorite());
+    if (attente > controle.attenteMaxMs) {
+      return Promise.reject(new Error(`Quota Twelve Data : prochain créneau dans ${Math.ceil(attente / 1000)} s`));
+    }
+  }
+  return new Promise<void>((resolve, reject) => {
+    const quitter = (): void => {
+      const index = file.indexOf(demande);
+      if (index !== -1) file.splice(index, 1);
+      reject(signal?.reason);
+    };
+    const demande: Demande = {
+      priorite,
+      accorder: () => { signal?.removeEventListener("abort", quitter); controle.onCreneau?.(); resolve(); },
+      refuser: (erreur) => { signal?.removeEventListener("abort", quitter); reject(erreur); },
+    };
+    signal?.addEventListener("abort", quitter, { once: true });
+    file.push(demande);
+    servirFile();
   });
-  throttleChain = run.then(
-    () => undefined,
-    () => undefined
-  );
-  return run;
 }
 
 interface CacheEntry {
@@ -223,8 +295,17 @@ interface CacheEntry {
 /** Cache des séries par clé `symbol|interval|outputsize|endTime`. */
 const seriesCache = new Map<string, CacheEntry>();
 const MAX_SERIES_CACHE = 32;
+/** Requête commune à ses abonnés : annulée seulement au départ du dernier. */
+interface SeriePartagee {
+  promesse: Promise<Candle[]>;
+  controleur: AbortController;
+  abonnes: number;
+  priorite: PrioriteTwelveData;
+  creneau: boolean;
+  surCreneau: Array<() => void>;
+}
 /** Requêtes en vol par clé (dédup : le double-montage StrictMode = 1 seul appel). */
-const inflight = new Map<string, Promise<Candle[]>>();
+const inflight = new Map<string, SeriePartagee>();
 
 /** TF AXIOM → interval Twelve Data. Seuls ces TF sont déclarés supportés (adapters.ts). */
 const TF_MAP: Partial<Record<Timeframe, string>> = {
@@ -333,10 +414,11 @@ async function requestSeries(
   symbol: string,
   interval: string,
   outputsize: number,
-  signal?: AbortSignal,
+  controle: ControleTwelveData,
   endTime?: number,
 ): Promise<Candle[]> {
-  await acquireSlot();
+  await acquireSlot(controle);
+  controle.signal?.throwIfAborted(); // abandon entre l'obtention du créneau et l'envoi
   const params = new URLSearchParams({
     symbol, // URLSearchParams encode "/" de EUR/USD → %2F
     interval,
@@ -345,7 +427,7 @@ async function requestSeries(
     timezone: "UTC",
   });
   if (endTime !== undefined) params.set("end_date", formatEndDateUtc(endTime));
-  const res = await fetch(buildTwelveDataUrl(SERIES_URL, params, apiKey), { signal });
+  const res = await fetch(buildTwelveDataUrl(SERIES_URL, params, apiKey), { signal: controle.signal });
   // Twelve Data renvoie un corps JSON d'erreur même en non-2xx → on tente de le lire.
   const json = (await res.json().catch(() => null)) as TwelveDataResponse | null;
   if (json === null) throw new Error(`Twelve Data ${res.status} ${res.statusText}`);
@@ -355,24 +437,46 @@ async function requestSeries(
 /**
  * Série AVEC cache + dédup (pour le backfill). Revisiter un symbole/TF déjà chargé =
  * 0 appel (cache TTL). Deux demandes identiques concurrentes (double-montage StrictMode)
- * partagent UNE requête. Si le fetch échoue (quota/réseau), on ressert le cache PÉRIMÉ
- * s'il existe plutôt qu'un graphe vide.
+ * partagent UNE requête ; un abonné « graphe » la promeut. Si le fetch échoue (quota/réseau),
+ * on ressert le cache PÉRIMÉ s'il existe plutôt qu'un graphe vide — jamais après abandon.
  */
-async function cachedSeries(
+function cachedSeries(
   symbol: string,
   interval: string,
   outputsize: number,
-  endTime?: number,
+  endTime: number | undefined,
+  controle: ControleTwelveData,
 ): Promise<Candle[]> {
   const key = cleCacheTwelveData(symbol, interval, outputsize, endTime);
   const hit = seriesCache.get(key);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.data;
-  const flying = inflight.get(key);
-  if (flying) return flying;
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
+    controle.onCreneau?.();
+    return Promise.resolve(hit.data);
+  }
+  if (controle.signal?.aborted) return Promise.reject(controle.signal.reason);
+  const partagee = inflight.get(key) ?? lancerSerie(key, symbol, interval, outputsize, endTime, controle);
+  if (controle.priorite === "graphe") partagee.priorite = "graphe";
+  return abonner(key, partagee, controle);
+}
 
-  const p = (async () => {
+function lancerSerie(
+  key: string,
+  symbol: string,
+  interval: string,
+  outputsize: number,
+  endTime: number | undefined,
+  controle: ControleTwelveData,
+): SeriePartagee {
+  const etat = { controleur: new AbortController(), abonnes: 0, priorite: controle.priorite ?? "fond", creneau: false, surCreneau: [] as Array<() => void> };
+  const { signal } = etat.controleur;
+  const promesse = (async () => {
     try {
-      const data = await requestSeries(symbol, interval, outputsize, undefined, endTime);
+      const data = await requestSeries(symbol, interval, outputsize, {
+        signal,
+        get priorite() { return etat.priorite; },
+        ...(controle.attenteMaxMs !== undefined ? { attenteMaxMs: controle.attenteMaxMs } : {}),
+        onCreneau: () => { etat.creneau = true; for (const suite of etat.surCreneau.splice(0)) suite(); },
+      }, endTime);
       seriesCache.delete(key);
       seriesCache.set(key, { at: Date.now(), data });
       while (seriesCache.size > MAX_SERIES_CACHE) {
@@ -383,23 +487,65 @@ async function cachedSeries(
       return data;
     } catch (err) {
       const stale = seriesCache.get(key);
-      if (stale) return stale.data; // repli : données périmées plutôt que graphe vide
+      if (stale && !signal.aborted) return stale.data; // repli : données périmées plutôt que graphe vide
       throw err;
     } finally {
-      inflight.delete(key);
+      if (inflight.get(key)?.controleur === etat.controleur) inflight.delete(key);
     }
   })();
-  inflight.set(key, p);
-  return p;
+  const partagee: SeriePartagee = Object.assign(etat, { promesse });
+  inflight.set(key, partagee);
+  return partagee;
+}
+
+/** Chaque abonné peut abandonner seul ; la requête commune n'est annulée qu'au départ du dernier. */
+function abonner(key: string, partagee: SeriePartagee, controle: ControleTwelveData): Promise<Candle[]> {
+  const { signal, onCreneau } = controle;
+  partagee.abonnes += 1;
+  if (onCreneau) {
+    if (partagee.creneau) onCreneau();
+    else partagee.surCreneau.push(onCreneau);
+  }
+  if (!signal) return partagee.promesse;
+  return new Promise<Candle[]>((resolve, reject) => {
+    const quitter = (): void => {
+      reject(signal.reason);
+      const suite = onCreneau ? partagee.surCreneau.indexOf(onCreneau) : -1;
+      if (suite !== -1) partagee.surCreneau.splice(suite, 1);
+      partagee.abonnes -= 1;
+      if (partagee.abonnes > 0) return;
+      if (inflight.get(key) === partagee) inflight.delete(key);
+      partagee.controleur.abort();
+    };
+    if (signal.aborted) { quitter(); return; }
+    signal.addEventListener("abort", quitter, { once: true });
+    partagee.promesse.then(
+      (data) => { signal.removeEventListener("abort", quitter); resolve(data); },
+      (erreur: unknown) => { signal.removeEventListener("abort", quitter); reject(erreur); },
+    );
+  });
+}
+
+/**
+ * Klines Twelve Data annulables et priorisables (backfill du graphe). L'adaptateur, dont
+ * l'interface est figée, s'en sert sans contrôle : priorité de fond, jamais abandonné.
+ */
+export function fetchKlinesTwelveData(
+  symbol: string,
+  tf: Timeframe,
+  opts: { limit?: number; endTime?: number } = {},
+  controle: ControleTwelveData = {},
+): Promise<Candle[]> {
+  const interval = TF_MAP[tf] ?? "1day";
+  const outputsize = Math.min(opts.limit ?? 500, 5000);
+  return cachedSeries(symbol, interval, outputsize, opts.endTime, controle); // cache + dédup + repli périmé
 }
 
 export const twelveDataAdapter: IExchangeAdapter = {
   id: "twelvedata",
 
-  async fetchKlines(symbol, tf, opts) {
-    const interval = TF_MAP[tf] ?? "1day";
-    const outputsize = Math.min(opts?.limit ?? 500, 5000);
-    return cachedSeries(symbol, interval, outputsize, opts?.endTime); // cache + dédup + repli périmé
+  fetchKlines(symbol, tf, opts) {
+    return fetchKlinesTwelveData(symbol, tf, opts);
   },
 
   // Pas de WebSocket en gratuit → POLLING de la bougie courante (petit outputsize).
@@ -412,8 +558,9 @@ export const twelveDataAdapter: IExchangeAdapter = {
     let lastClosedTime: number | null = null;
 
     return pollLoop(async (signal, isCancelled) => {
-      // Polling = données fraîches → requête directe (limitée par le quota), sans cache.
-      const candles = await requestSeries(symbol, interval, 2, signal);
+      // Polling = données fraîches → requête directe (limitée par le quota), sans cache ;
+      // un sondage arrêté pendant son attente quitte la file sans consommer de créneau.
+      const candles = await requestSeries(symbol, interval, 2, { signal });
       if (isCancelled() || candles.length === 0) return;
       const prev = candles.length >= 2 ? candles[candles.length - 2] : undefined;
       if (prev && prev.closed && (lastClosedTime === null || prev.time > lastClosedTime)) {
@@ -474,13 +621,13 @@ export function parseQuotes(json: Record<string, unknown>, requested: string[]):
 /**
  * Récupère prix + variation pour plusieurs symboles tradfi en UN appel /quote groupé.
  * Coût Twelve Data = 1 crédit / symbole → on réserve N créneaux du rate-limiter partagé
- * (le quota 8/min reste respecté entre graphe et watchlist).
+ * (le quota 8/min reste respecté entre graphe et watchlist), en priorité de fond.
  */
-export async function fetchQuotes(symbols: string[]): Promise<TwelveDataQuote[]> {
+export async function fetchQuotes(symbols: string[], controle: ControleTwelveData = {}): Promise<TwelveDataQuote[]> {
   if (symbols.length === 0) return [];
-  for (let i = 0; i < symbols.length; i++) await acquireSlot();
+  for (let i = 0; i < symbols.length; i++) await acquireSlot(controle);
   const params = new URLSearchParams({ symbol: symbols.join(",") });
-  const res = await fetch(buildTwelveDataUrl(QUOTE_URL, params, apiKey));
+  const res = await fetch(buildTwelveDataUrl(QUOTE_URL, params, apiKey), { signal: controle.signal });
   const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
   if (json === null) throw new Error(`Twelve Data quote ${res.status} ${res.statusText}`);
   return parseQuotes(json, symbols);

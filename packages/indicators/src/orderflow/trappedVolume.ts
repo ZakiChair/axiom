@@ -30,14 +30,19 @@
  * vendeurs nets sous le prix → carburant de squeeze (support), émis NÉGATIF
  * (histogramme deux faces). Unités de BASE (BTC, PEPE…), pas des USD. Sur le comptant,
  * ce sont des acheteurs/vendeurs agressifs NETS, pas des positions à levier. Valeurs
- * ~40× plus basses que l'ancien calcul (BTCUSDT 15m, médiane ≈ 180 BTC contre 7 520) :
- * les seuils d'alerte sont à recalibrer. Le chemin du prix compte désormais : plus
- * informatif, PAS plus lisse (les sauts visuels restent du même ordre, voire plus).
+ * plus basses que l'ancien calcul d'un facteur qui croît avec le TF et varie selon le
+ * marché (médianes de L+|S|, horizon 96 : ~30× en 5m, ~45× en 15m — BTCUSDT ≈ 180 BTC
+ * contre 7 520 —, ~60 à 120× en 1h, ~200× en 4h et 1d) : les seuils d'alerte sont à
+ * recalibrer au cas par cas, jamais par un facteur unique. Le chemin du prix compte
+ * désormais : plus informatif, PAS plus lisse (les sauts visuels restent du même ordre,
+ * voire plus).
  *
  * Bords : undefined tant que i < length−1, si close_i n'est pas fini, ou si la fenêtre
  * n'a AUCUNE bougie à split valide (fenêtre équilibrée → 0/0). Une bougie sans split
- * mais à prix finis ne crée pas de lot mais LIBÈRE. Un trou (undefined) est sauté : la
- * clôture de référence reste le dernier close fini. Dépend du split taker (k[9] Binance).
+ * mais à prix finis ne crée pas de lot mais LIBÈRE. Une bougie à close non fini ne crée
+ * pas de lot, même splittée (la première libération d'un lot part de sa clôture), et ne
+ * compte pas comme split valide. Un trou (undefined) est sauté : la clôture de référence
+ * reste le dernier close fini. Dépend du split taker (k[9] Binance).
  *
  * La sortie à i ne dépend QUE de (i−length, i] (invariance par préfixe) : recalcul
  * complet, aucun état entre deux appels. Passe avant unique ; les lots d'âge ≥ length

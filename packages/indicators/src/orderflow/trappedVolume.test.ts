@@ -154,10 +154,10 @@ describe("trappedVolume — delta net sous l'eau, libéré au retour du prix", (
     expect(S[2]).toBe(0);
   });
 
-  it("close non fini : undefined à cette barre, mais elle libère ; la référence ne bouge pas", () => {
-    // b1 [95,111] clôture NaN (sans split) : retire (108, 111] → vivant [100,108] ; la
-    // référence reste 108. b2 [90,97] : retire (108, 97] = ∅ → 8 sur 10 au-dessus de 91,
-    // w = 1/3 → L = 40 × 0,8 / 3 = 10,667. b3 clôture NaN → undefined.
+  it("close non fini : undefined à cette barre, mais elle libère", () => {
+    // b1 [95,111] clôture NaN (sans split) : retire (108, 111] → vivant [100,108]. b2
+    // [90,97] : retire (108, 97] = ∅ (vide quelle que soit la référence, cf. test suivant)
+    // → 8 sur 10 au-dessus de 91, w = 1/3 → L = 40 × 0,8 / 3 = 10,667. b3 clôture NaN → undefined.
     const { L, S } = calc(
       [b(100, 110, 108, 60, 20), b(95, 111, Number.NaN), b(90, 97, 91, 10, 10), b(90, 96, Number.NaN, 10, 10)],
       3,
@@ -166,6 +166,60 @@ describe("trappedVolume — delta net sous l'eau, libéré au retour du prix", (
     expect(S[2]).toBe(0);
     expect(L[3]).toBeUndefined();
     expect(S[3]).toBeUndefined();
+  });
+
+  it("après un close non fini, la référence de libération reste le dernier close FINI", () => {
+    // b0 [100,110] clôture 108, δ = +40. b1 [95,105] clôture NaN : retire (108, 105] = ∅,
+    // la référence reste 108. b2 [90,109] : retire (108, 109] → vivant [100,108] ∪ [109,110],
+    // 9 sur 10 au-dessus de 91 ; w = 1/3 → L = 40 × 0,9 / 3 = 12. (Référence écrasée par
+    // le NaN : b2 ne libère rien → 40/3.)
+    const { L, S } = calc([b(100, 110, 108, 60, 20), b(95, 105, Number.NaN), b(90, 109, 91, 10, 10)], 3);
+    expect(L[2]).toBeCloseTo(12, 10);
+    expect(S[2]).toBe(0);
+  });
+
+  it("un lot n'est jamais libéré par SA PROPRE barre (libérations sur k = b+1..i)", () => {
+    // b0 δ = 0 → rien. b1 [95,110] clôture 96, δ = 30 − 10 = +20 → lot LONG, âge 0, w = 1 ;
+    // aucune barre postérieure → vivant [95,110], 14 sur 15 au-dessus de 96 :
+    // L = 20 × 14/15 = 18,667. Libéré par sa propre barre ((95, 110] depuis le close 95
+    // de b0), il vaudrait 0 — valeurs 4 à 7 fois trop basses sur les klines réelles.
+    const { L, S } = calc([b(90, 100, 95, 10, 10), b(95, 110, 96, 30, 10)], 2);
+    expect(L[1]).toBeCloseTo(20 * 14 / 15, 10);
+    expect(S[1]).toBe(0);
+  });
+
+  it("bougie-point : libération STRICTE côté clôture précédente (prevClose < e, e < prevClose)", () => {
+    // Long au point 105 (δ = +20). k=1 : high 106 atteint 105 mais 105 < 105 est faux → pas
+    // libéré (prevClose vaut e à k = b+1) ; k=2 : 100 < 105 ≤ 103 faux → vivant, 105 > 99
+    // → L = 20 × 1/3 = 6,667.
+    const long = calc([b(105, 105, 105, 30, 10), b(99, 106, 100, 10, 10), b(98, 103, 99, 10, 10)], 3);
+    expect(long.L[2]).toBeCloseTo(20 / 3, 10);
+    // Miroir : short au point 95 (δ = −20). k=1 : 94 ≤ 95 mais 95 < 95 faux ; k=2 : 97 ≤ 95
+    // faux → vivant, 95 < 101 → S = −20 × 1/3 = −6,667.
+    const court = calc([b(95, 95, 95, 10, 30), b(94, 101, 100, 10, 10), b(97, 102, 101, 10, 10)], 3);
+    expect(court.S[2]).toBeCloseTo(-20 / 3, 10);
+    expect(court.L[2]).toBe(0);
+  });
+
+  it("bougie-point au niveau exact du close courant : pas piégée (e > p_i, e < p_i stricts)", () => {
+    // Long au point 105 ; k=1 : 105 < 105 faux ; k=2 : 106 < 105 faux → vivant. À i=2 le
+    // close vaut 105 : 105 > 105 faux → L = 0 (un lot AU prix n'est pas sous l'eau).
+    const long = calc([b(105, 105, 105, 30, 10), b(104, 107, 106, 10, 10), b(104, 106, 105, 10, 10)], 3);
+    expect(long.L[2]).toBe(0);
+    // Miroir : short au point 95 ; k=1 : 95 < 95 faux ; k=2 : 95 < 94 faux → vivant ; close 95 → S = 0.
+    const court = calc([b(95, 95, 95, 10, 30), b(93, 96, 94, 10, 10), b(94, 96, 95, 10, 10)], 3);
+    expect(court.S[2]).toBe(0);
+  });
+
+  it("seule bougie splittée pile à i − length : hors fenêtre → undefined", () => {
+    // length 2. b0 δ = +20 sur [100,110]. i=1 : fenêtre (−1, 1] ∋ b0 → défini ; b1 retire
+    // (105, 110] → vivant [100,105], 1 sur 10 au-dessus de 104, w = 1/2 → L = 20 × 0,5 × 0,1 = 1.
+    // i=2 : fenêtre (0, 2] = {b1, b2}, aucun split → undefined (pas 0/0).
+    const { L, S } = calc([b(100, 110, 105, 30, 10), b(100, 110, 104), b(100, 110, 103)], 2);
+    expect(L[1]).toBeCloseTo(1, 10);
+    expect(S[1]).toBe(0);
+    expect(L[2]).toBeUndefined();
+    expect(S[2]).toBeUndefined();
   });
 
   it("le split compte : 50/50 → rien de piégé ; split permuté → autre résultat", () => {

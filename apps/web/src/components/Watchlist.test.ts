@@ -185,6 +185,38 @@ describe("provenances des favoris", () => {
     expect(urls).toEqual([]);
   });
 
+  it("une source confirmée, changée hors de la watchlist sans changer la liste, est resondée", async () => {
+    watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "binance" });
+    catalogue(spot(["binance", "BTCUSDT"], ["okx", "BTCUSDT"]));
+    const urls = reseau();
+    stop = suivreProvenancesFavoris(new Map());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(urls).toEqual([]);
+    // Ce que fait hydrateWatchlist() à la réconciliation daemon : un setState direct.
+    watchlistStore.setState({ sources: { BTCUSDT: "okx" } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance" });
+    expect(urls).toEqual(["https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"]);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(urls).toHaveLength(1);
+  });
+
+  it("une confirmation interne (graphe prêt sur un repli) ne relance pas les sondes en vol", async () => {
+    watchlistStore.getState().setAll(["BTCUSDT", "ETHUSDT"], { BTCUSDT: "binance" });
+    catalogue(spot(["binance", "BTCUSDT"], ["bybit", "BTCUSDT"], ["binance", "ETHUSDT"]));
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    stop = suivreProvenancesFavoris(new Map());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    graphePret("bybit", "BTCUSDT");
+    await vi.advanceTimersByTimeAsync(0);
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT");
+    expect(init.signal?.aborted).toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "bybit" });
+  });
+
   it("sans Binance au catalogue, okx:BTCUSDT garde sa place", async () => {
     watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "okx" });
     catalogue(spot(["okx", "BTCUSDT"]));

@@ -178,7 +178,7 @@ const CONFIRMEES_SESSION = new Map<string, WatchlistSource>();
  * n'est retenue qu'après un vrai prix ou un graphe prêt, puis n'est plus sondée de la session
  * (`confirmees`, propre à la session par défaut ; les tests en passent une neuve) :
  *  - seuls les favoris sans source confirmée sont sondés, au catalogue reçu ou republié, à
- *    chaque changement de liste et toutes les 30 s tant qu'il en reste ;
+ *    chaque changement de liste ou de source (réhydratation) et toutes les 30 s tant qu'il en reste ;
  *  - les synthétiques et capitalisations, sans ticker dédié, restent sans prix de favoris :
  *    ni sondés, ni réessayés ;
  *  - un favori Binance que le catalogue Binance liste est confirmé sans sonde : un ticker Binance
@@ -194,8 +194,13 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
   let arrete = false;
 
   const confirmer = (symbol: string, source: WatchlistSource) => {
+    const avant = confirmees.get(symbol);
+    // Notée avant l'écriture : la notification synchrone du store n'y voit pas un changement externe.
+    confirmees.set(symbol, source);
     watchlistStore.getState().setSource(symbol, source);
-    if (watchlistStore.getState().sources[symbol] === source) confirmees.set(symbol, source);
+    if (watchlistStore.getState().sources[symbol] === source) return;
+    if (avant === undefined) confirmees.delete(symbol);
+    else confirmees.set(symbol, avant);
   };
   const aSonder = (): string[] => {
     const { symbols, sources } = watchlistStore.getState();
@@ -250,7 +255,13 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
   let liste = cleListe(watchlistStore.getState().symbols);
   const stopListe = watchlistStore.subscribe((state) => {
     const suivante = cleListe(state.symbols);
-    if (suivante === liste) return;
+    // Une source confirmée changée ailleurs (réhydratation daemon, autre appareil) est resondée.
+    let changee = false;
+    for (const symbol of state.symbols) {
+      const confirmee = confirmees.get(symbol);
+      if (confirmee !== undefined && state.sources[symbol] !== confirmee) { confirmees.delete(symbol); changee = true; }
+    }
+    if (suivante === liste && !changee) return;
     liste = suivante;
     lancerPasse();
   });

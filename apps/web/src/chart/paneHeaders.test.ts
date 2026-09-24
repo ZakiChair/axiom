@@ -134,7 +134,7 @@ afterEach(() => {
 });
 
 describe("presentationStatut", () => {
-  it("UNUSABLE pour un contexte incompatible, « indisponible » pour un résultat vide", () => {
+  it("UNUSABLE pour un contexte incompatible, « indisponible » pour un résultat vide, « chargement » en attente d'aux", () => {
     expect(presentationStatut(null)).toBeNull();
     expect(presentationStatut({ etat: "unusable", raison: "Binance seulement" })).toEqual({
       badge: "UNUSABLE",
@@ -143,6 +143,11 @@ describe("presentationStatut", () => {
     expect(presentationStatut({ etat: "vide", raison: "Historique insuffisant : 74 bougies, horizon 96" })).toEqual({
       badge: "indisponible",
       raison: "Historique insuffisant : 74 bougies, horizon 96",
+    });
+    // Attente d'un aux : ni panne ni vide, un chargement (badge neutre).
+    expect(presentationStatut({ etat: "chargement", raison: "Chargement des données auxiliaires…" })).toEqual({
+      badge: "chargement",
+      raison: "Chargement des données auxiliaires…",
     });
   });
 });
@@ -175,6 +180,20 @@ describe("en-tête de pane séparé — badge de statut", () => {
 
     // Historique suffisant : plus de badge.
     indicators.recompute([piege], bougies(110), "binance");
+    expect(el.querySelector("[data-role=statut]")).toBeNull();
+  });
+
+  it("changement d'actif (dispose du contrôleur) : le badge de l'ancien actif disparaît", () => {
+    const { conteneur, indicators, enTetes } = monter();
+    indicatorsStore.setState({ indicators: [piege] });
+    enTetes.sync();
+    indicators.setMarket("BTCUSDT", "15m");
+    indicators.sync([piege], bougies(120), "okx");
+    const el = ligne(conteneur, "Volume piégé");
+    expect(el.querySelector("[data-role=statut-badge]")?.textContent).toBe("UNUSABLE");
+
+    // okx → binance : l'effet DONNÉES démonte la couche données avant de recharger.
+    indicators.dispose();
     expect(el.querySelector("[data-role=statut]")).toBeNull();
   });
 

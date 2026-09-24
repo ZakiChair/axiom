@@ -27,8 +27,8 @@
  * contrôleur qui retire/recrée les panes dans le nouvel ordre (cf. chart/indicators.ts
  * Task 4). `PaneHeaders` ne manipule donc jamais directement l'ordre des panes.
  *
- * Statut : un pane qui ne trace rien affiche POURQUOI (« UNUSABLE » ou « indisponible »
- * + raison, title complet) — le suffixe « (UNUSABLE) » du shortName KLineChart reste
+ * Statut : un pane qui ne trace rien affiche POURQUOI (« UNUSABLE », « indisponible » ou
+ * « chargement » + raison, title complet) — le suffixe « (UNUSABLE) » du shortName reste
  * invisible (légende native `showName: false`). La raison vient du canal de statuts du
  * graphe (`abonnerStatutsIndicateurs`), notifié à chaque CHANGEMENT de statut.
  */
@@ -59,10 +59,24 @@ interface EnTetePane {
   reglable: boolean;
 }
 
+/** Libellé court du badge, par état. */
+const BADGE_STATUT: Record<StatutIndicateur["etat"], string> = {
+  unusable: "UNUSABLE",
+  vide: "indisponible",
+  chargement: "chargement",
+};
+
+/** Couleur du badge : rouge = panne, ambre = rien à tracer, neutre = attente d'une source. */
+const COULEUR_STATUT: Record<StatutIndicateur["etat"], string> = {
+  unusable: "bg-down/15 text-down",
+  vide: "bg-warn/15 text-warn",
+  chargement: "bg-text-dim/15 text-text-dim",
+};
+
 /** Présentation PURE d'un statut d'indicateur : `null` = valeurs tracées, pas de badge. */
 export function presentationStatut(statut: StatutIndicateur | null): { badge: string; raison: string } | null {
   if (statut === null) return null;
-  return { badge: statut.etat === "unusable" ? "UNUSABLE" : "indisponible", raison: statut.raison };
+  return { badge: BADGE_STATUT[statut.etat], raison: statut.raison };
 }
 
 /**
@@ -97,9 +111,7 @@ export function majBadgeStatut(ligne: HTMLElement, statut: StatutIndicateur | nu
   const badge = conteneur.querySelector<HTMLSpanElement>("[data-role=statut-badge]");
   if (badge) {
     badge.textContent = vue.badge;
-    badge.className = `shrink-0 rounded px-1 text-[9px] tracking-wider ${
-      statut?.etat === "unusable" ? "bg-down/15 text-down" : "bg-warn/15 text-warn"
-    }`;
+    badge.className = `shrink-0 rounded px-1 text-[9px] tracking-wider ${statut ? COULEUR_STATUT[statut.etat] : ""}`;
   }
   const raison = conteneur.querySelector<HTMLSpanElement>("[data-role=statut-raison]");
   if (raison) raison.textContent = vue.raison;

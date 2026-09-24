@@ -14,7 +14,7 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Chart } from "klinecharts";
-import { ChartIndicators } from "./indicators";
+import { ChartIndicators, statutIndicateur } from "./indicators";
 import { auxProvider, type AuxStatus } from "./auxProvider";
 import type { ActiveIndicator } from "../store/indicators";
 import type { Candle, IndicatorResult } from "@axiom/types";
@@ -162,6 +162,8 @@ describe("ChartIndicators — pont aux-aware (Task 14)", () => {
     const [config] = chart.createIndicator.mock.calls[0]!;
     expect(config.extendData?.series.prixEntree).toEqual([undefined, undefined]);
     expect(config.shortName).toBe("Stratégie RSI réversion (14, 30, 70)");
+    // Ni UNUSABLE ni « indisponible » : une stratégie à plat n'a rien à signaler.
+    expect(statutIndicateur(chart as unknown as Chart, "strategy-1")).toBeNull();
   });
 
   it("le suffixe n'est PAS collant : un recompute() en ready après un pending revient à un shortName sans suffixe", () => {

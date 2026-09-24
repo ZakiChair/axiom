@@ -64,10 +64,12 @@ function seriesVides(def: IndicatorDef, n: number): IndicatorResult {
 /**
  * Statut d'affichage d'une instance quand RIEN n'est tracé (jamais de pane muet,
  * BUILD-CONTRACT) : « unusable » = contexte incompatible ou source en échec ;
- * « vide » = calcul légitime mais aucune valeur sur ce buffer. `null` = valeurs tracées.
+ * « vide » = calcul légitime mais aucune valeur sur ce buffer ; « chargement » = données
+ * auxiliaires attendues. `null` = valeurs tracées, ou rien à signaler (buffer en cours de
+ * chargement, stratégie overlay restée à plat).
  */
 export interface StatutIndicateur {
-  etat: "unusable" | "vide";
+  etat: "unusable" | "vide" | "chargement";
   raison: string;
 }
 
@@ -89,8 +91,7 @@ function raisonSansValeur(def: IndicatorDef, params: ActiveIndicator["params"], 
     }
   }
   if (horizon !== null && horizon > nbBougies) return `Historique insuffisant : ${nbBougies} bougies, horizon ${horizon}`;
-  // Une stratégie restée à plat n'a aucun prix d'entrée à tracer : résultat, pas panne.
-  return def.category === "strategy" ? "Aucun trade sur cet historique" : "Aucune valeur calculable sur cet historique";
+  return "Aucune valeur calculable sur cet historique";
 }
 
 /** Canal des statuts d'UN graphe : écrit par son `ChartIndicators`, lu par ses légendes DOM. */
@@ -426,6 +427,19 @@ export class ChartIndicators {
     candles: Candle[],
     exchange: ExchangeId
   ): { result: IndicatorResult; suffix: string; statut: StatutIndicateur | null } {
+    const calcul = this.calculerInstance(def, inst, candles, exchange);
+    // Buffer vide = backfill en cours (`startDataLoad` vide le buffer) : l'overlay de
+    // chargement du graphe parle déjà, « Historique insuffisant : 0 bougies » serait faux.
+    return candles.length === 0 && calcul.statut !== null ? { ...calcul, statut: null } : calcul;
+  }
+
+  /** Corps de `computeForInstance`, statut compris (hors cas du buffer vide). */
+  private calculerInstance(
+    def: IndicatorDef,
+    inst: ActiveIndicator,
+    candles: Candle[],
+    exchange: ExchangeId
+  ): { result: IndicatorResult; suffix: string; statut: StatutIndicateur | null } {
     const raison = this.timeframe === null
       ? null
       : raisonUnusableIndicateur(def, { exchange, symbol: this.symbol, timeframe: this.timeframe });
@@ -433,14 +447,17 @@ export class ChartIndicators {
       return { result: seriesVides(def, candles.length), suffix: " (UNUSABLE)", statut: { etat: "unusable", raison } };
     }
     // Aucune valeur finie, avec ou sans aux : raison explicite plutôt qu'un pane muet.
-    const verifier = (result: IndicatorResult, suffixSiVide: string) =>
-      sortieFinie(def, result)
-        ? { result, suffix: "", statut: null }
-        : {
-          result,
-          suffix: suffixSiVide,
-          statut: { etat: "vide" as const, raison: raisonSansValeur(def, inst.params, candles.length) },
-        };
+    // Sauf stratégie OVERLAY restée à plat : « aucun trade » est un résultat valide et le
+    // pane prix reste tracé (les « stratégies » de divergence, en pane séparé, gardent la raison).
+    const verifier = (result: IndicatorResult, suffixSiVide: string) => {
+      if (sortieFinie(def, result)) return { result, suffix: "", statut: null };
+      if (def.category === "strategy" && def.pane === "overlay") return { result, suffix: "", statut: null };
+      return {
+        result,
+        suffix: suffixSiVide,
+        statut: { etat: "vide" as const, raison: raisonSansValeur(def, inst.params, candles.length) },
+      };
+    };
     if (!def.aux || def.aux.length === 0) {
       return verifier(this.compute(def, inst.params, candles), "");
     }
@@ -460,7 +477,12 @@ export class ChartIndicators {
     }
     // `pending`/`error` : aux absent -> le def dégrade en séries all-undefined (garde Task 13).
     const result = computeIndicator(def, candles, inst.params);
-    if (status.status === "pending") return { result, suffix: " …", statut: null };
+    if (status.status === "pending") {
+      const statut = sortieFinie(def, result)
+        ? null
+        : { etat: "chargement" as const, raison: "Chargement des données auxiliaires…" };
+      return { result, suffix: " …", statut };
+    }
     return {
       result,
       suffix: " (UNUSABLE)",
@@ -737,10 +759,14 @@ export class ChartIndicators {
    * les annotations de l'ancien actif disparaissent, le recompute suivant les repose.
    * Le tooltip est une div singleton au niveau du document, jamais retirée par
    * `removeOverlay` : sans ce masquage elle resterait affichée après le démontage.
+   * Les statuts publiés sont effacés aussi : les instances (`active`) survivent au
+   * changement d'actif, et le badge de l'ancien actif restait affiché pendant le
+   * chargement du suivant — indéfiniment si ce chargement échouait.
    */
   dispose(): void {
     this.disposeThrottle();
     this.annotationsPrix.retirerTout();
     masquerTooltipAnnotation();
+    for (const instanceId of this.active.keys()) publierStatut(this.chart, instanceId, null);
   }
 }

@@ -26,13 +26,18 @@
  * qui déclenche `ChartIndicators.sync()` (abonné à `indicatorsStore`) — c'est CE
  * contrôleur qui retire/recrée les panes dans le nouvel ordre (cf. chart/indicators.ts
  * Task 4). `PaneHeaders` ne manipule donc jamais directement l'ordre des panes.
+ *
+ * Statut : un pane qui ne trace rien affiche POURQUOI (« UNUSABLE » ou « indisponible »
+ * + raison, title complet) — le suffixe « (UNUSABLE) » du shortName KLineChart reste
+ * invisible (légende native `showName: false`). La raison vient du canal de statuts du
+ * graphe (`abonnerStatutsIndicateurs`), notifié à chaque CHANGEMENT de statut.
  */
 import type { Chart } from "klinecharts";
 import { ActionType, DomPosition } from "klinecharts";
 import { getIndicator } from "@axiom/indicators";
 import { indicatorsStore, formatInstanceLabel } from "../store/indicators";
 import { indicatorMenuUiStore } from "../store/indicator-menu-ui";
-import { axiomPaneId } from "./indicators";
+import { abonnerStatutsIndicateurs, axiomPaneId, statutIndicateur, type StatutIndicateur } from "./indicators";
 import { estReglable } from "./legendeReglable";
 import {
   creerBoutonFermer,
@@ -52,6 +57,52 @@ interface EnTetePane {
   couleurIdx: number;
   /** Le ⚙ mène-t-il à un éditeur réel ? (cf. legendeReglable.ts) */
   reglable: boolean;
+}
+
+/** Présentation PURE d'un statut d'indicateur : `null` = valeurs tracées, pas de badge. */
+export function presentationStatut(statut: StatutIndicateur | null): { badge: string; raison: string } | null {
+  if (statut === null) return null;
+  return { badge: statut.etat === "unusable" ? "UNUSABLE" : "indisponible", raison: statut.raison };
+}
+
+/**
+ * Pose, met à jour ou retire le badge de statut d'une ligne de légende, juste après le
+ * libellé. Exportée : la légende des overlays (overlayLegend.ts) porte le même badge.
+ */
+export function majBadgeStatut(ligne: HTMLElement, statut: StatutIndicateur | null): void {
+  const existant = ligne.querySelector<HTMLSpanElement>("[data-role=statut]");
+  const vue = presentationStatut(statut);
+  if (vue === null) {
+    existant?.remove();
+    return;
+  }
+  let conteneur = existant;
+  if (conteneur === null) {
+    conteneur = document.createElement("span");
+    conteneur.setAttribute("data-role", "statut");
+    conteneur.className = "flex min-w-0 items-center gap-1";
+    const badge = document.createElement("span");
+    badge.setAttribute("data-role", "statut-badge");
+    const raison = document.createElement("span");
+    raison.setAttribute("data-role", "statut-raison");
+    raison.className = "max-w-[220px] truncate text-text-dim";
+    conteneur.append(badge, raison);
+    const libelle = ligne.querySelector<HTMLSpanElement>("[data-role=label]");
+    if (libelle) libelle.after(conteneur);
+    else ligne.append(conteneur);
+  }
+  // Texte court visible (le pane est vide, la place est libre) ; raison complète au survol.
+  conteneur.title = vue.raison;
+  conteneur.setAttribute("aria-label", `${vue.badge} : ${vue.raison}`);
+  const badge = conteneur.querySelector<HTMLSpanElement>("[data-role=statut-badge]");
+  if (badge) {
+    badge.textContent = vue.badge;
+    badge.className = `shrink-0 rounded px-1 text-[9px] tracking-wider ${
+      statut?.etat === "unusable" ? "bg-down/15 text-down" : "bg-warn/15 text-warn"
+    }`;
+  }
+  const raison = conteneur.querySelector<HTMLSpanElement>("[data-role=statut-raison]");
+  if (raison) raison.textContent = vue.raison;
 }
 
 /** Panes séparés (hors overlay) VOULUS, dans l'ordre courant du store. */
@@ -78,12 +129,20 @@ export class PaneHeaders {
   private draggingId: string | null = null;
   private readonly onPaneDrag = (): void => this.repositionnerTout();
   private readonly onDataReady = (): void => this.repositionnerTout();
+  private readonly desabonnerStatuts: () => void;
 
   constructor(chart: Chart, container: HTMLElement) {
     this.chart = chart;
     this.container = container;
     this.chart.subscribeAction(ActionType.OnPaneDrag, this.onPaneDrag);
     this.chart.subscribeAction(ActionType.OnDataReady, this.onDataReady);
+    // Statut republié par ChartIndicators à chaque recalcul, notifié seulement s'il change.
+    this.desabonnerStatuts = abonnerStatutsIndicateurs(chart, (instanceId) => {
+      const el = this.els.get(instanceId);
+      if (!el) return;
+      majBadgeStatut(el, statutIndicateur(this.chart, instanceId));
+      this.repositionnerTout(); // la largeur de l'en-tête a changé
+    });
   }
 
   /** Réconcilie les en-têtes avec la liste courante d'indicateurs à pane séparé. */
@@ -107,6 +166,7 @@ export class PaneHeaders {
         majLibelle(el, pane.label);
         majEtiquettes(el, pane.label);
       }
+      majBadgeStatut(el, statutIndicateur(this.chart, pane.instanceId));
     }
     this.repositionnerTout();
   }
@@ -198,6 +258,7 @@ export class PaneHeaders {
   dispose(): void {
     this.chart.unsubscribeAction(ActionType.OnPaneDrag, this.onPaneDrag);
     this.chart.unsubscribeAction(ActionType.OnDataReady, this.onDataReady);
+    this.desabonnerStatuts();
     for (const el of this.els.values()) el.remove();
     this.els.clear();
   }

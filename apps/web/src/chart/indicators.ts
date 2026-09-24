@@ -30,7 +30,7 @@
 import { registerIndicator, IndicatorSeries } from "klinecharts";
 import type { Chart, IndicatorFigure, IndicatorTooltipData, TooltipLegend } from "klinecharts";
 import type { Candle, ExchangeId, IndicatorDef, IndicatorResult, Timeframe } from "@axiom/types";
-import { computeIndicator, getIndicator } from "@axiom/indicators";
+import { computeIndicator, getIndicator, resolveParams } from "@axiom/indicators";
 import { couleurDeclaree, lireTokenCanvas, serieCanvas } from "../lib/canvasTokens";
 import { hauteursCorrigees, paneMax } from "./paneBudget";
 import { chartCapaciteStore } from "../store/chartCapacite";
@@ -52,6 +52,90 @@ function sortieFinie(def: IndicatorDef, result: IndicatorResult): boolean {
   return def.outputs.some((output) =>
     result.series[output.key]?.some((value) => typeof value === "number" && Number.isFinite(value)) === true
   );
+}
+
+/** Résultat sans aucun point tracé (même forme qu'un calcul : une série par sortie). */
+function seriesVides(def: IndicatorDef, n: number): IndicatorResult {
+  const series: IndicatorResult["series"] = {};
+  for (const output of def.outputs) series[output.key] = new Array<number | undefined>(n).fill(undefined);
+  return { series };
+}
+
+/**
+ * Statut d'affichage d'une instance quand RIEN n'est tracé (jamais de pane muet,
+ * BUILD-CONTRACT) : « unusable » = contexte incompatible ou source en échec ;
+ * « vide » = calcul légitime mais aucune valeur sur ce buffer. `null` = valeurs tracées.
+ */
+export interface StatutIndicateur {
+  etat: "unusable" | "vide";
+  raison: string;
+}
+
+/** Inputs qui fixent une profondeur d'historique (longueur, période, fenêtre, horizon). */
+const CLE_HORIZON = /length|period|window|fenetre|horizon/i;
+
+/**
+ * Raison d'un résultat sans valeur finie. « Historique insuffisant » quand un input de
+ * profondeur (résolu : défaut + clamp) dépasse le buffer — cas des TF mensuels, où
+ * Binance ne sert que 13 à 110 bougies pour un horizon de 96 —, sinon le constat brut.
+ */
+function raisonSansValeur(def: IndicatorDef, params: ActiveIndicator["params"], nbBougies: number): string {
+  const resolus = resolveParams(def, params);
+  let horizon: number | null = null;
+  for (const input of def.inputs) {
+    const v = resolus[input.key];
+    if (input.type === "number" && CLE_HORIZON.test(input.key) && typeof v === "number" && (horizon === null || v > horizon)) {
+      horizon = v;
+    }
+  }
+  if (horizon !== null && horizon > nbBougies) return `Historique insuffisant : ${nbBougies} bougies, horizon ${horizon}`;
+  // Une stratégie restée à plat n'a aucun prix d'entrée à tracer : résultat, pas panne.
+  return def.category === "strategy" ? "Aucun trade sur cet historique" : "Aucune valeur calculable sur cet historique";
+}
+
+/** Canal des statuts d'UN graphe : écrit par son `ChartIndicators`, lu par ses légendes DOM. */
+interface CanalStatuts {
+  statuts: Map<string, StatutIndicateur>;
+  ecouteurs: Set<(instanceId: string) => void>;
+}
+
+/**
+ * Indexé par l'objet `Chart` : les légendes (paneHeaders, overlayLegend) retrouvent le
+ * canal sans câblage supplémentaire, quel que soit l'ordre de construction. Aucune
+ * donnée haute fréquence : une notification par CHANGEMENT de statut, hors React.
+ */
+const canaux = new WeakMap<Chart, CanalStatuts>();
+
+function canal(chart: Chart): CanalStatuts {
+  let c = canaux.get(chart);
+  if (c === undefined) {
+    c = { statuts: new Map(), ecouteurs: new Set() };
+    canaux.set(chart, c);
+  }
+  return c;
+}
+
+/** Statut courant d'une instance sur ce graphe (`null` = valeurs tracées). */
+export function statutIndicateur(chart: Chart, instanceId: string): StatutIndicateur | null {
+  return canaux.get(chart)?.statuts.get(instanceId) ?? null;
+}
+
+/** Abonnement aux changements de statut de ce graphe ; renvoie le désabonnement. */
+export function abonnerStatutsIndicateurs(chart: Chart, ecouteur: (instanceId: string) => void): () => void {
+  const c = canal(chart);
+  c.ecouteurs.add(ecouteur);
+  return () => {
+    c.ecouteurs.delete(ecouteur);
+  };
+}
+
+function publierStatut(chart: Chart, instanceId: string, statut: StatutIndicateur | null): void {
+  const c = canal(chart);
+  const avant = c.statuts.get(instanceId) ?? null;
+  if (avant?.etat === statut?.etat && avant?.raison === statut?.raison) return;
+  if (statut === null) c.statuts.delete(instanceId);
+  else c.statuts.set(instanceId, statut);
+  for (const ecouteur of c.ecouteurs) ecouteur(instanceId);
 }
 
 /** Id du pane prix (constante interne KLineChart, vérifiée dans le bundle). */
@@ -317,30 +401,41 @@ export class ChartIndicators {
    *
    * Renvoie aussi le SUFFIXE de statut à ajouter au libellé du pane — même canal
    * que le nom normal (`shortName`, cf. `formatInstanceLabel`) : "" (ready/aux
-   * absent), " …" (pending), " (UNUSABLE)" (contexte impossible/error/vide).
+   * absent), " …" (pending), " (UNUSABLE)" (contexte impossible/error/vide). Ce
+   * suffixe reste INVISIBLE (légende native `showName: false`) : la raison lisible
+   * passe par le `statut`, publié sur le canal du graphe (cf. `statutIndicateur`).
+   *
+   * Contexte UNUSABLE : séries VIDES, aucun calcul. Tracer quand même dessinait des
+   * valeurs fausses sans avertissement (Coinbase : 1 à 2 barres sur une fenêtre partielle).
    */
   private computeForInstance(
     def: IndicatorDef,
     inst: ActiveIndicator,
     candles: Candle[],
     exchange: ExchangeId
-  ): { result: IndicatorResult; suffix: string } {
+  ): { result: IndicatorResult; suffix: string; statut: StatutIndicateur | null } {
     const raison = this.timeframe === null
       ? null
       : raisonUnusableIndicateur(def, { exchange, symbol: this.symbol, timeframe: this.timeframe });
     if (raison !== null) {
-      const result = def.aux && def.aux.length > 0
-        ? computeIndicator(def, candles, inst.params)
-        : this.compute(def, inst.params, candles);
-      return { result, suffix: " (UNUSABLE)" };
+      return { result: seriesVides(def, candles.length), suffix: " (UNUSABLE)", statut: { etat: "unusable", raison } };
     }
+    // Aucune valeur finie, avec ou sans aux : raison explicite plutôt qu'un pane muet.
+    const verifier = (result: IndicatorResult, suffixSiVide: string) =>
+      sortieFinie(def, result)
+        ? { result, suffix: "", statut: null }
+        : {
+          result,
+          suffix: suffixSiVide,
+          statut: { etat: "vide" as const, raison: raisonSansValeur(def, inst.params, candles.length) },
+        };
     if (!def.aux || def.aux.length === 0) {
-      return { result: this.compute(def, inst.params, candles), suffix: "" };
+      return verifier(this.compute(def, inst.params, candles), "");
     }
     if (this.timeframe === null) {
       // `setMarket` pas encore appelé : ne devrait pas arriver en pratique (l'effet
       // DONNÉES l'appelle avant tout sync/recompute) — dégradation gracieuse.
-      return { result: computeIndicator(def, candles, inst.params), suffix: "" };
+      return verifier(computeIndicator(def, candles, inst.params), "");
     }
     const candleTimes = candles.map((c) => c.time);
     const status = auxProvider.getAligned(
@@ -349,11 +444,16 @@ export class ChartIndicators {
     );
     if (status.status === "ready") {
       const result = computeIndicator(def, candles, inst.params, status.aux);
-      return { result, suffix: sortieFinie(def, result) ? "" : " (UNUSABLE)" };
+      return verifier(result, " (UNUSABLE)");
     }
     // `pending`/`error` : aux absent -> le def dégrade en séries all-undefined (garde Task 13).
     const result = computeIndicator(def, candles, inst.params);
-    return { result, suffix: status.status === "pending" ? " …" : " (UNUSABLE)" };
+    if (status.status === "pending") return { result, suffix: " …", statut: null };
+    return {
+      result,
+      suffix: " (UNUSABLE)",
+      statut: { etat: "unusable", raison: `Données auxiliaires indisponibles : ${status.message}` },
+    };
   }
 
   /**
@@ -372,12 +472,13 @@ export class ChartIndicators {
     if (!inst) return;
     const def = getIndicator(inst.defId);
     if (!def) return;
-    const { result, suffix } = this.computeForInstance(def, inst, candles, exchange);
+    const { result, suffix, statut } = this.computeForInstance(def, inst, candles, exchange);
     this.chart.overrideIndicator(
       { name: info.name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result },
       info.paneId
     );
     this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
+    publierStatut(this.chart, inst.instanceId, statut);
   }
 
   /** Restreint le cache aux clés de calcul encore référencées (borne mémoire). */
@@ -419,6 +520,7 @@ export class ChartIndicators {
         this.chart.removeIndicator(info.paneId, info.name);
         this.active.delete(instanceId);
         this.annotationsPrix.retirer(instanceId);
+        publierStatut(this.chart, instanceId, null);
       }
     }
 
@@ -460,19 +562,20 @@ export class ChartIndicators {
         if (existing.key === key && !forceRecompute) continue; // params inchangés : rien à faire.
         // Édition des params, OU backfill/changement d'actif forcé (instanceId
         // stable) : recalcul + override + libellé.
-        const { result, suffix } = this.computeForInstance(def, inst, candles, exchange);
+        const { result, suffix, statut } = this.computeForInstance(def, inst, candles, exchange);
         this.chart.overrideIndicator(
           { name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result },
           existing.paneId
         );
         existing.key = key;
         this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
+        publierStatut(this.chart, inst.instanceId, statut);
         continue;
       }
 
       // Nouvelle instance.
       ensureRegistered(def, name, inst.instanceId);
-      const { result, suffix } = this.computeForInstance(def, inst, candles, exchange);
+      const { result, suffix, statut } = this.computeForInstance(def, inst, candles, exchange);
       const paneId = def.pane === "overlay" ? CANDLE_PANE_ID : axiomPaneId(inst.instanceId);
       const created = this.chart.createIndicator(
         { name, shortName: `${formatInstanceLabel(def, inst.params)}${suffix}`, extendData: result },
@@ -481,6 +584,7 @@ export class ChartIndicators {
       );
       if (created) this.active.set(inst.instanceId, { paneId: created, name, key });
       if (created) this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
+      publierStatut(this.chart, inst.instanceId, statut);
     }
 
     this.pruneCache(new Set(effectiveInstances.map((i) => computeKey(i.defId, i.params))));
@@ -566,7 +670,7 @@ export class ChartIndicators {
       if (!info) continue;
       const def = getIndicator(inst.defId);
       if (!def) continue;
-      const { result, suffix } = this.computeForInstance(def, inst, candles, exchange);
+      const { result, suffix, statut } = this.computeForInstance(def, inst, candles, exchange);
       // Le libellé (shortName) est renvoyé pour les defs aux-aware, dont le suffixe
       // peut changer sans édition de params, ainsi que pour tout def contextuellement
       // UNUSABLE ; les autres gardent leur libellé déjà posé par `sync`.
@@ -575,6 +679,7 @@ export class ChartIndicators {
         : { name: info.name, extendData: result };
       this.chart.overrideIndicator(override, info.paneId);
       this.annotationsPrix.appliquer(inst.instanceId, def, result.annotations, candles);
+      publierStatut(this.chart, inst.instanceId, statut);
     }
   }
 

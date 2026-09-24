@@ -15,6 +15,9 @@
  * quitter le graphe. Avant, la ligne ne contenait QU'une croix ✕ : trois EMA actives
  * donnaient trois croix identiques, et cliquer la mauvaise retirait la mauvaise courbe
  * sans annulation possible (revue du 2026-08-01 § 3.2).
+ *
+ * Un overlay qui ne trace rien porte le même badge de statut que les en-têtes de panes
+ * (`majBadgeStatut`, raison lue sur le canal de statuts du graphe).
  */
 import type { Chart } from "klinecharts";
 import { ActionType, DomPosition } from "klinecharts";
@@ -31,6 +34,8 @@ import {
   majLibelle,
   majPastille,
 } from "./legendeControles";
+import { abonnerStatutsIndicateurs, statutIndicateur } from "./indicators";
+import { majBadgeStatut } from "./paneHeaders";
 
 const CANDLE_PANE_ID = "candle_pane";
 /** Espace vertical entre deux lignes empilées (px). */
@@ -66,12 +71,19 @@ export class OverlayLegend {
   private readonly els = new Map<string, HTMLDivElement>();
   private readonly onPaneDrag = (): void => this.repositionnerTout();
   private readonly onDataReady = (): void => this.repositionnerTout();
+  private readonly desabonnerStatuts: () => void;
 
   constructor(chart: Chart, container: HTMLElement) {
     this.chart = chart;
     this.container = container;
     this.chart.subscribeAction(ActionType.OnPaneDrag, this.onPaneDrag);
     this.chart.subscribeAction(ActionType.OnDataReady, this.onDataReady);
+    this.desabonnerStatuts = abonnerStatutsIndicateurs(chart, (instanceId) => {
+      const el = this.els.get(instanceId);
+      if (!el) return;
+      majBadgeStatut(el, statutIndicateur(this.chart, instanceId));
+      this.repositionnerTout(); // largeur et hauteur de la ligne ont pu changer
+    });
   }
 
   /** Réconcilie la légende avec la liste courante d'indicateurs overlay. */
@@ -95,6 +107,7 @@ export class OverlayLegend {
         majLibelle(el, entry.label);
         majEtiquettes(el, entry.label);
       }
+      majBadgeStatut(el, statutIndicateur(this.chart, entry.instanceId));
     }
     this.repositionnerTout();
   }
@@ -138,6 +151,7 @@ export class OverlayLegend {
   dispose(): void {
     this.chart.unsubscribeAction(ActionType.OnPaneDrag, this.onPaneDrag);
     this.chart.unsubscribeAction(ActionType.OnDataReady, this.onDataReady);
+    this.desabonnerStatuts();
     for (const el of this.els.values()) el.remove();
     this.els.clear();
   }

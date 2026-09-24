@@ -26,7 +26,9 @@ AXIOM sélectionne les sources disponibles pour chaque actif.
   Un favori enregistré ailleurs par héritage automatique (ex. `okx:BTCUSDT`) est
   ré-attribué à Binance après un vrai prix Binance ; un instrument absent de Binance
   (ex. `CARDSUSDT`) garde sa place, et un favori n'est jamais déplacé vers une
-  troisième place.
+  troisième place, sauf si le catalogue chargé de sa place ne liste plus
+  l'instrument (retrait, paire suspendue) : il est alors resondé sur les places
+  qui le cotent.
 - Les sources des deux jambes d'un ratio sont également déterminées automatiquement.
   Les séries calculées conservent leur encodage de provenance existant.
 - Les anciens favoris, sessions et graphiques secondaires passent par le même

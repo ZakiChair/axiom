@@ -16,9 +16,12 @@ toujours incohérents, corrige, merge et déploie. »
    sous deux angles, corrigé puis vérifié.
 3. **Intégration, puis revue finale** sous quatre angles : chargement, provenance,
    mathématiques du volume piégé, sécurité et conformité. Suivies de corrections
-   et d'une vérification indépendante.
-4. **Preuve au navigateur sur données réelles**, main contre branche, sans réseau
-   simulé.
+   et d'une vérification indépendante (six constats sur sept corrigés sur
+   `ef81574`). Le septième, les négatifs non abrégés, est corrigé ensuite
+   (`4ae03f8`) et revu séparément (approuvé). La documentation a été vérifiée
+   affirmation par affirmation.
+4. **Preuve au navigateur** (Chrome, API réelles, serveur Vite de dev ; pas le
+   bundle de prod), main contre branche.
 
 ## Chargement : causes et effets mesurés
 
@@ -28,15 +31,19 @@ toujours incohérents, corrige, merge et déploie. »
 | Catalogue et ticker Coinbase en direct, sans en-tête CORS | Coinbase toujours « indisponible », cache ramené à 30 s, 13 erreurs CORS en 6 min | `/extapi` (hôte déjà admis) |
 | exchangeInfo Binance complet | 17,6 Mo décodés | `symbolStatus=TRADING&showPermissionSets=false` : 2,5 Mo, mêmes 1 372 symboles |
 | File Twelve Data 8/60 s sérialisée, sans annulation | AMZN 20 022 ms et META 20 027 ms puis erreur, sans aucune requête partie ; requête orpheline envoyée à +60 s | FIFO à deux priorités, annulable ; délai armé au créneau ; message de quota ; crédits groupés réservés d'un coup |
-| Watchlist : TOTAL/TOTAL2/TOTAL3 jamais résolus, boucle de 30 s qui resondait tout | 15,1 requêtes/min en fond, dont la liste SPOT OKX entière (122 Ko gzip) par sonde | Synthétiques résolus sans prix, confirmations de session, sonde OKX `instId` |
+| Watchlist : TOTAL/TOTAL2/TOTAL3 jamais résolus, boucle de 30 s qui resondait tout | 15,1 requêtes/min en fond (sondes ticker et catalogue Coinbase toutes les 30 s) ; sur la watchlist du propriétaire, chaque sonde OKX téléchargeait la liste SPOT entière (122 Ko gzip) | Synthétiques résolus sans prix, confirmations de session, sonde OKX `instId` |
 
-Preuve au navigateur (Chrome, données réelles, main → branche) :
+Preuve au navigateur (Chrome, API réelles, serveur de dev, main → branche) :
 
 - **Démarrage à froid sur BTCUSDT** : 1 084 → 748 ms. Les bougies partent après
   le seul catalogue Binance.
-- **Ouverture après expiration du cache** : ETHUSDT 1M 994 → 257 ms, BTCUSDT 15m
-  975 → 300 ms, CARDSUSDT 698 → 392 ms.
-- **OKX muet** : BTCUSDT 12 507 → 814 ms, ETHUSDT rouvert 12 274 → 260 ms.
+- **Ouverture après expiration du cache** (simulée par `Date.now` + 6 min) :
+  ETHUSDT 1M 994 → 257 ms, BTCUSDT 15m 975 → 300 ms, CARDSUSDT 698 → 392 ms.
+  En inactivité réelle de 6 min, main ne bloquait pas (ETHUSDT 1M 270 contre
+  284 ms) : ses boucles de fond gardaient le catalogue chaud. Le gain porte donc
+  sur les ouvertures qui tombent sur un rafraîchissement.
+- **OKX muet** (simulé par surcharge de `fetch`, WebSocket non coupées) :
+  BTCUSDT 12 507 → 814 ms, ETHUSDT rouvert 12 274 → 260 ms.
 - **Trafic de fond** : 95 → 24 requêtes en 6 min 16 s.
 - **TradFi avec clé réelle** : inchangé (AAPL et EUR/USD vers 190 ms).
 
@@ -56,9 +63,10 @@ L'ancien calcul (Σ volume taker brut × part au-dessus du close, fenêtre dure 
 
 - corrélation 0,996 à 1,000 avec le même calcul fait sur un split 50/50 ou
   permuté ;
-- au plus bas 24 h, 98 à 100 % de tout le volume acheteur agressif déclaré
-  « piégé » ;
-- sur perp en 1h, L valait en médiane 130 à 220 % de l'OI Binance entier.
+- au plus bas 24 h, jusqu'à 100 % de tout le volume acheteur agressif déclaré
+  « piégé » (épisode du 20 septembre) ;
+- sur perp en 1h, L valait en médiane 130 à 220 % de l'OI Binance entier
+  (maxima 350 à 870 %).
 
 Le nouveau modèle (« C1 exact ») retient le delta agresseur NET de chaque bougie,
 réparti sur `[low, high]`. Une tranche est libérée quand le prix revient à son
@@ -87,12 +95,17 @@ Autres effets visibles :
   barre dessinée.
 - **Provenance** : okx:BTCUSDT s'ouvre sur Binance. Le favori est ré-attribué
   moins de 4 s après le démarrage.
-- **Grands nombres négatifs** : abrégés comme les positifs (PEPE).
+- **Grands nombres négatifs** : abrégés comme les positifs. C'est couvert par des
+  tests unitaires, mais pas observé au navigateur (correctif postérieur à la
+  session).
 
 À savoir :
 
-- Les valeurs sont environ 30 à 40 fois plus basses : les seuils d'alerte
-  existants sur `trappedLong` et `trappedShort` sont à recalibrer.
+- Les valeurs baissent d'un facteur qui croît avec l'unité de temps (médianes à
+  horizon 96 : ~30× en 5m, ~45× en 15m, 60-120× en 1h, ~200× en 4h et 1d ; 26 à
+  38× observés sur BTCUSDT 15m). Les seuils d'alerte existants sur `trappedLong`
+  et `trappedShort` sont à recalibrer au cas par cas, jamais par un facteur
+  unique.
 - L'histogramme n'est pas plus lisse : il dépend du chemin du prix.
 - Sur le comptant, il s'agit d'acheteurs et de vendeurs agressifs nets, pas de
   positions à levier.
@@ -104,8 +117,13 @@ Autres effets visibles :
 - **Typage** : `pnpm -r typecheck` vert.
 - **Tests unitaires** : `pnpm -r test` vert. Indicateurs 838, alertes 62, backtest
   114, daemon 695, web 5 301.
-- **Parcours navigateur** : `pnpm check:e2e` 139/139, réseau simulé, sans valeur
-  de verdict manuel G100.
+- **Parcours navigateur** : `pnpm check:e2e` 139/139 deux fois de suite sur
+  `1f9383a`, réseau simulé, sans valeur de verdict manuel G100.
+  - Le test FUNDX « expire une source perp âgée » contenait une course
+    préexistante : il échouait 2 à 3 fois sur 5 sur main. Il attendait un texte
+    déjà affiché avant l'actualisation, puis avançait l'horloge trop tôt.
+  - Il attend désormais la cotation actualisée elle-même, avec la même assertion
+    métier (15/15 en répétition).
 - **Budget d'entrée** : 1 212 743 / 359 667 octets (bruts/gzip), pour des
   plafonds de 1 220 000 / 360 000, soit 333 octets de marge gzip.
 - **Périmètre** : aucune dépendance, aucun hôte, aucune règle de proxy,

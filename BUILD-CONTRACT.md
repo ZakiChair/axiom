@@ -610,10 +610,13 @@ dépendance, aucun hôte ni fournisseur, aucune règle de proxy modifiée,
    (graphe devant cotations et polls), annulable, crédits d'une cotation groupée
    réservés d'un coup, délai du backfill armé à l'obtention du créneau, message
    « Quota Twelve Data : prochain créneau dans N s », refus immédiat sans clé en
-   appel direct (Vercel). Mesures réelles au navigateur, main → branche :
-   démarrage à froid 1 084 → 748 ms ; place muette 12,5 s → 0,8 s ; ouverture
-   après expiration du cache 698-994 → 257-510 ms. Limite assumée : une
-   provenance dont l'hôte est entièrement muet coûte 4 s avant le repli.
+   appel direct (Vercel). Mesures au navigateur (Chrome, API réelles, serveur
+   Vite de dev), main → branche : démarrage à froid 1 084 → 748 ms ; place muette
+   (simulée par surcharge de `fetch`) 12,5 s → 0,8 s ; ouverture après expiration
+   du cache (simulée par `Date.now` + 6 min) 698-994 → 257-510 ms. En inactivité
+   réelle de 6 min, main ne bloquait pas (270 contre 284 ms) : ses boucles de fond
+   gardaient le catalogue chaud. Limite assumée : une provenance dont l'hôte est
+   entièrement muet coûte 4 s avant le repli.
 2. **Watchlist.** Les synthétiques (TOTAL, TOTAL2, TOTAL3) et les ratios
    entretenaient une boucle de 30 s qui resondait tous les favoris. Ils sont
    désormais résolus sans prix ; les confirmations de source valent pour la
@@ -621,12 +624,13 @@ dépendance, aucun hôte ni fournisseur, aucune règle de proxy modifiée,
    Coinbase passe par `/extapi`. Trafic de fond mesuré : 15,1 → 3,8 requêtes/min.
 3. **Provenance.** Voir l'amendement de
    `docs/superpowers/specs/2026-09-23-sources-automatiques-design.md` : Binance
-   confirmé passe devant une provenance héritée au comptant. `store/market.ts`
+   confirmé passe devant une provenance enregistrée au comptant. `store/market.ts`
    (héritage de `setSymbol`) est inchangé : le routage tranche.
 4. **Volume piégé (`trappedVolume`) — nouveau modèle.** Le modèle du 21 septembre
    n'était qu'un miroir du profil de volume (corrélation 0,996-1,000 avec un split
-   50/50 ou permuté ; au plus bas 24 h, 98-100 % de tout le volume acheteur
-   déclaré piégé, jusqu'à 130-220 % de l'OI Binance en 1h). Il suit maintenant le
+   50/50 ou permuté ; au plus bas 24 h, jusqu'à 100 % de tout le volume acheteur
+   déclaré piégé ; en 1h, en médiane 130-220 % de l'OI Binance, maxima 350-870 %).
+   Il suit maintenant le
    delta agresseur NET par bougie (`buy − sell`), réparti sur `[low, high]`. Une
    tranche est libérée quand le prix revient à son niveau après être passée sous
    l'eau : `(close_{k−1}, high_k]` pour un long, `[low_k, close_{k−1})` pour un
@@ -634,19 +638,29 @@ dépendance, aucun hôte ni fournisseur, aucune règle de proxy modifiée,
    en une passe avant, invariante par préfixe. Il est vérifié par trois
    réimplémentations indépendantes (écart ≤ 1e-9). Id, clés
    `trappedLong`/`trappedShort`, couleurs et `length = 96` sont conservés. L'input
-   est renommé « Horizon (barres) » et passe en précision 2. Les valeurs sont
-   environ 30 à 40 fois plus basses : les **seuils d'alerte existants sur ces
-   clés sont à recalibrer**. Le croisement d'indicateur ne propose plus
+   est renommé « Horizon (barres) » ; l'indicateur passe en précision 2. Les
+   valeurs baissent d'un facteur qui croît avec l'unité de temps (médianes à
+   horizon 96 : ~30× en 5m, ~45× en 15m, 60-120× en 1h, ~200× en 4h et 1d) : les
+   **seuils d'alerte existants sur ces clés sont à recalibrer au cas par cas,
+   jamais par un facteur unique**. Le croisement d'indicateur ne propose plus
    `trappedVolume`, car longs et shorts sont de signes opposés. L'histogramme
    n'est pas plus lisse : il dépend du chemin du prix.
 5. **Panes sans valeur.** Un indicateur UNUSABLE n'est plus tracé. Son en-tête
    de pane (ou la légende d'overlay) affiche la raison. Un résultat sans valeur
    finie affiche « indisponible » avec sa cause, par exemple « Historique
-   insuffisant : 74 bougies, horizon 96 » en 1M. Aucun indicateur n'est recalculé
-   pendant l'extension de session. Les grands nombres négatifs sont abrégés comme
+   insuffisant : 74 bougies, horizon 96 » en 1M. Pendant l'extension de session,
+   aucun recalcul par page ni sur tick : un seul recalcul après sa réapplication
+   finale (un indicateur ajouté pendant l'extension reste calculé sur le buffer
+   étendu, comportement préexistant). Les grands nombres négatifs sont abrégés comme
    les positifs (formateur symétrique installé à `init`, qui sert aussi CVD, OI,
    macro et revenus).
 
+Validation : **7 010 tests** (indicateurs 838, alertes 62, backtest 114, daemon
+695, web 5 301), typage et build réussis ; **139/139 parcours Chromium** deux fois
+de suite sur `1f9383a`. Le test FUNDX « expire une source perp âgée » attend
+désormais la cotation actualisée avant d'avancer l'horloge : il contenait une
+course préexistante (2 à 3 échecs sur 5 sur main). Revues indépendantes par lot,
+revue finale sous quatre angles et vérification factuelle de ces documents.
 Budget d'entrée final : **1 212 743 / 359 667 octets** (bruts/gzip), plafonds
 1 220 000 / 360 000 inchangés. **Marge de 333 octets gzip : le prochain lot qui
 touche le chemin d'entrée doit d'abord libérer des octets.** Déploiement : ne

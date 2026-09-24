@@ -198,7 +198,8 @@ const SESSION_PROVENANCES = nouvelleSessionProvenances();
  *  - toute autre source enregistrée n'est sondée que sur Binance (confirmé d'abord, spéculatif si
  *    son catalogue manque) et sur elle-même, jamais sur une troisième place ; sans prix, le favori
  *    garde sa source, non confirmé, réessayé dans 30 s ou au catalogue. Seule une source que son
- *    catalogue chargé dément (actif absent) est resondée sur le catalogue complet ;
+ *    catalogue chargé dément (actif absent, paire suspendue) est sondée d'abord sur elle-même, puis
+ *    sur le catalogue complet ;
  *  - une place confirmée hors Binance pendant une panne du catalogue Binance l'est à titre
  *    provisoire : resondée (Binance d'abord) dès qu'un catalogue republié la liste chez Binance ;
  *    un catalogue partiel est relu toutes les 30 s pour que ce retour soit publié ;
@@ -273,11 +274,14 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
       // Source enregistrée que son catalogue ne dément pas : Binance (confirmé d'abord, spéculatif
       // si son catalogue manque) puis elle, jamais une troisième place ; sans prix, elle reste.
       const garder = (s: string) => s === "binance" || s === initialSource;
-      const routage = courant && initialSource && (courant.unavailableSources.includes(initialSource)
-        || courant.instruments.some((i) => i.exchange === initialSource && i.symbol === symbol)) ? {
-        instruments: courant.instruments.filter((i) => i.symbol === symbol && garder(i.exchange)),
-        unavailableSources: courant.unavailableSources.filter(garder),
-      } : courant;
+      const routage = !courant || !initialSource ? courant
+        : courant.unavailableSources.includes(initialSource) || courant.instruments.some((i) => i.exchange === initialSource && i.symbol === symbol) ? {
+          instruments: courant.instruments.filter((i) => i.symbol === symbol && garder(i.exchange)),
+          unavailableSources: courant.unavailableSources.filter(garder),
+        }
+        // Source démentie par son catalogue chargé (paire suspendue…) : son ticker d'abord, en
+        // provenance spéculative, puis le catalogue complet s'il ne répond pas.
+        : { ...courant, unavailableSources: [...courant.unavailableSources, initialSource] };
       const resolved = await resolveTickerMarket({ exchange: initialSource, symbol, timeframe: "1h" }, signal, routage);
       if (signal?.aborted) return;
       const market = marketStore.getState();

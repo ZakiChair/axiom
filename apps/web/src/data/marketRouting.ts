@@ -216,7 +216,8 @@ export interface CandidatsProgressifs {
 /**
  * Chemin rapide du backfill. Catalogue en cache (même périmé) : liste complète habituelle ;
  * s'il est périmé, `complets` attend le rafraîchissement que sa lecture a lancé (un actif
- * coté depuis, ou retiré, trouve ainsi son repli). À froid : les huit catalogues partent, mais seul celui de la source prioritaire
+ * coté depuis, ou retiré, trouve ainsi son repli) ; sans aucun instrument confirmé, rien ne part
+ * avant elle. À froid : les huit catalogues partent, mais seul celui de la source prioritaire
  * (Binance au comptant, Hyperliquid pour -PERP) est attendu ; s'il confirme symbole et
  * unité de temps, ce candidat — déjà premier de la liste complète — part sans attendre
  * les autres places. `complets` attend le catalogue entier pour les replis.
@@ -230,7 +231,9 @@ export async function resolveMarketCandidatesProgressifs(
   if (cachedCatalog) {
     const liste = candidatsDepuisCatalogue(id, await fetchMarketCatalog());
     if (!pendingCatalog) return deja(liste);
-    return { immediats: liste, complets: () => (pendingCatalog ?? fetchMarketCatalog()).then((loaded) => candidatsDepuisCatalogue(id, loaded)) };
+    // Copie périmée sans instrument confirmé (actif coté depuis) : attendre la liste fraîche
+    // plutôt que le chien de garde d'un essai spéculatif sur une place muette.
+    return { immediats: liste.some((c) => !c.speculative) ? liste : [], complets: () => (pendingCatalog ?? fetchMarketCatalog()).then((loaded) => candidatsDepuisCatalogue(id, loaded)) };
   }
   const complet = fetchMarketCatalog();
   const prioritaire: ExchangeId = id.kind === "perp" ? "hyperliquid" : "binance";

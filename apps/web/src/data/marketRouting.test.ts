@@ -283,6 +283,33 @@ describe("renouvellement du catalogue partagé", () => {
     expect(issue).toEqual({ identity: { exchange: "binance", symbol: "NEWUSDT", timeframe: "1h" }, candles: [bougie] });
   });
 
+  it("catalogue périmé sans l'actif, place muette : le graphe attend la liste fraîche sans essai spéculatif préalable", async () => {
+    // MEXC ne répond jamais (indisponible dès le premier tour) ; OKX cote NEWUSDT au second.
+    let nouveau = false;
+    const base = sainsSauf(() => Promise.resolve(okx(nouveau ? "NEW-USDT" : "BTC-USDT")));
+    vi.stubGlobal("fetch", vi.fn((url: string) => url.includes("mexc") ? new Promise(() => {}) : base(url)));
+    const routing = await import("./marketRouting");
+    const { chargerAvecRepli } = await import("../chart/routageMarche");
+    const initial = routing.fetchMarketCatalog();
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect((await initial).unavailableSources).toEqual(["mexc"]);
+    nouveau = true;
+    await vi.advanceTimersByTimeAsync(300_000);
+    const candidats = await routing.resolveMarketCandidatesProgressifs({ exchange: "okx", symbol: "NEWUSDT", timeframe: "1h" });
+    expect(candidats.immediats).toEqual([]);
+    const essais: string[] = [];
+    const bougie = { time: 0, open: 1, high: 1, low: 1, close: 1, volume: 1 };
+    let issue: unknown = "en attente";
+    void chargerAvecRepli(candidats, async ({ exchange }) => {
+      essais.push(exchange);
+      return exchange === "okx" ? [bougie] : new Promise<never>(() => {});
+    }, () => false).then((value) => { issue = value; });
+    // La liste fraîche arrive au délai du catalogue MEXC (12 s), puis OKX part directement.
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(issue).toEqual({ identity: { exchange: "okx", symbol: "NEWUSDT", timeframe: "1h" }, candles: [bougie] });
+    expect(essais).toEqual(["okx"]);
+  });
+
   it("résolution simple (ticker, SYN) : un actif absent du catalogue périmé attend son rafraîchissement", async () => {
     const { etat, fetch } = nouvelleCotation();
     vi.stubGlobal("fetch", fetch);

@@ -20,7 +20,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { marketStore } from "../store/market";
 import { watchlistStore, type WatchlistSource } from "../store/watchlist";
-import { subscribeTickers, subscribeWatchlistBars, isTickerSource, resolveTickerSource, resolveTickerMarket } from "../data/ticker";
+import { subscribeTickers, subscribeWatchlistBars, isTickerSource, resolveTickerSource, resolveTickerMarket, isMarketOpen, classifyTradfi } from "../data/ticker";
 import type { TickerUpdate, WatchlistBars } from "../data/ticker";
 import { fetchMarketCatalog, subscribeMarketCatalog, type MarketCatalog } from "../data/marketRouting";
 import { isTradfiMarketSymbol } from "../data/pairs";
@@ -171,13 +171,22 @@ const listeParBinance = (catalog: MarketCatalog, symbol: string) =>
   catalog.instruments.some((i) => i.exchange === "binance" && i.kind === "spot" && i.symbol === symbol);
 /** Un favori sans prix confirmé est réessayé : les prix peuvent revenir sans nouveau catalogue. */
 const REESSAI_PROVENANCE_MS = 30_000;
-/** Confirmations de la session : la watchlist démontée (plein écran) ne resonde rien à son retour. */
-const CONFIRMEES_SESSION = new Map<string, WatchlistSource>();
+/** Un actif TradFi sans source attend l'ouverture de son marché : vérifiée chaque minute, sans réseau. */
+const ATTENTE_OUVERTURE_TRADFI_MS = 60_000;
+
+/** Ce que retient la session : la watchlist démontée (plein écran) ne resonde rien à son retour. */
+export interface SessionProvenances {
+  confirmees: Map<string, WatchlistSource>;
+  /** Actifs TradFi déjà sondés (un crédit Twelve Data chacun), resondés au changement de liste. */
+  tradfiSondes: Set<string>;
+}
+export const nouvelleSessionProvenances = (): SessionProvenances => ({ confirmees: new Map(), tradfiSondes: new Set() });
+const SESSION_PROVENANCES = nouvelleSessionProvenances();
 
 /**
  * Provenances des favoris du groupe actif, hors React (testée à timers simulés). Une source
  * n'est retenue qu'après un vrai prix ou un graphe prêt, puis n'est plus sondée de la session
- * (`confirmees`, propre à la session par défaut ; les tests en passent une neuve) :
+ * (`session`, celle du module par défaut ; les tests en passent une neuve) :
  *  - les favoris crypto sans source confirmée sont sondés au catalogue reçu ou republié, à
  *    chaque changement de liste ou de source (réhydratation) et toutes les 30 s tant qu'il en reste ;
  *  - les synthétiques et capitalisations, sans ticker dédié, restent sans prix de favoris :
@@ -186,15 +195,17 @@ const CONFIRMEES_SESSION = new Map<string, WatchlistSource>();
  *    en panne ou lent ne le fait jamais glisser vers une place de repli ;
  *  - une place spot secondaire héritée est resondée Binance d'abord quand le catalogue Binance
  *    liste le même spot ; sans prix Binance, le favori garde sa place d'origine ;
- *  - un actif TradFi n'est sondé qu'au montage et aux changements de liste (ou de source), et
- *    jamais marché fermé ; une source Twelve Data enregistrée, seule candidate possible, ne l'est
- *    jamais : ses quotes suivent déjà les heures de marché.
+ *  - un actif TradFi sans source n'est sondé qu'une fois par changement de liste, jamais marché
+ *    fermé : il attend alors l'ouverture de son marché. Une source Twelve Data enregistrée, seule
+ *    candidate possible, ne l'est jamais : ses quotes suivent déjà les heures de marché.
  * Les sondes routent sur le catalogue reçu : elles ne relancent pas le rafraîchissement commun.
  */
-export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () => void {
+export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => void {
+  const { confirmees, tradfiSondes } = session;
   let catalog: MarketCatalog | undefined;
   let passe: AbortController | undefined;
   let reessai: ReturnType<typeof setInterval> | undefined;
+  let attente: ReturnType<typeof setInterval> | undefined;
   let arrete = false;
   const arret = new AbortController();
   const tradfiEnVol = new Set<string>();
@@ -241,6 +252,10 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
     if (actif && reessai === undefined) reessai = setInterval(lancerPasse, REESSAI_PROVENANCE_MS);
     if (!actif && reessai !== undefined) { clearInterval(reessai); reessai = undefined; }
   };
+  const ajusterAttente = (actif: boolean) => {
+    if (actif && attente === undefined) attente = setInterval(sonderTradfi, ATTENTE_OUVERTURE_TRADFI_MS);
+    if (!actif && attente !== undefined) { clearInterval(attente); attente = undefined; }
+  };
 
   async function sonder(symbol: string, signal: AbortSignal, courant?: MarketCatalog): Promise<void> {
     try {
@@ -283,11 +298,17 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
   function sonderTradfi(): void {
     if (arrete) return;
     confirmerSansSonde(catalog);
+    const maintenant = new Date();
+    let enAttente = false;
     for (const symbol of aSonder(true)) {
-      if (tradfiEnVol.has(symbol)) continue;
+      if (tradfiEnVol.has(symbol) || tradfiSondes.has(symbol)) continue;
+      if (!isMarketOpen(classifyTradfi(symbol), maintenant)) { enAttente = true; continue; }
       tradfiEnVol.add(symbol);
-      void sonder(symbol, arret.signal, catalog).finally(() => tradfiEnVol.delete(symbol));
+      void sonder(symbol, arret.signal, catalog)
+        .then(() => { if (!arret.signal.aborted) tradfiSondes.add(symbol); })
+        .finally(() => tradfiEnVol.delete(symbol));
     }
+    ajusterAttente(enAttente);
   }
 
   // Démenties pendant le démontage (favori retiré puis rajouté) : oubliées avant la 1re passe.
@@ -302,6 +323,7 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
     const suivante = cleListe(state.symbols);
     // Une source confirmée changée ailleurs (réhydratation daemon, autre appareil) est resondée.
     if (!oublierDementies() && suivante === liste) return;
+    if (suivante !== liste) tradfiSondes.clear();
     liste = suivante;
     lancerPasse();
     sonderTradfi();
@@ -316,6 +338,7 @@ export function suivreProvenancesFavoris(confirmees = CONFIRMEES_SESSION): () =>
     passe?.abort();
     arret.abort();
     ajusterReessai(false);
+    ajusterAttente(false);
     stopCatalogue();
     stopListe();
     stopMarche();

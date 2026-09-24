@@ -6,11 +6,11 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExchangeId } from "@axiom/types";
-import { colonnesWatchlistPourLargeur, suivreProvenancesFavoris } from "./Watchlist";
+import { colonnesWatchlistPourLargeur, nouvelleSessionProvenances, suivreProvenancesFavoris } from "./Watchlist";
 import * as routing from "../data/marketRouting";
 import * as ticker from "../data/ticker";
 import { marketStore } from "../store/market";
-import { watchlistStore, type WatchlistSource } from "../store/watchlist";
+import { watchlistStore } from "../store/watchlist";
 
 describe("lisibilité watchlist", () => {
   it("à 240 px (sidebar w-60) masque la sparkline et garde le Δ% 24h", () => {
@@ -39,13 +39,13 @@ const abonnementRequis = () => ({ code: 403, status: "error", message: "/quote i
  * Réseau bouchonné : prix Binance 24 h, OKX par instrument et /quote Twelve Data ;
  * `okxSansPrix` simule un prix OKX absent.
  */
-function reseau(okxSansPrix = new Set<string>(), quoteTd: () => unknown = abonnementRequis) {
+function reseau(okxSansPrix = new Set<string>(), quoteTd: (url: string) => unknown = abonnementRequis) {
   const urls: string[] = [];
   vi.stubGlobal("fetch", vi.fn(async (input: string) => {
     const url = String(input);
     urls.push(url);
     const params = new URL(url, "http://local").searchParams;
-    if (url.startsWith("/tdapi/quote?")) return reponse(quoteTd());
+    if (url.startsWith("/tdapi/quote?")) return reponse(quoteTd(url));
     if (url.startsWith("https://api.binance.com/api/v3/ticker/24hr")) {
       return reponse({ symbol: params.get("symbol"), lastPrice: "100", priceChangePercent: "1" });
     }
@@ -100,7 +100,7 @@ describe("provenances des favoris", () => {
     catalogue(spot(["binance", "BTCUSDT"], ["binance", "ETHUSDT"]));
     const urls = reseau();
     const sonde = vi.spyOn(ticker, "resolveTickerMarket");
-    stop = suivreProvenancesFavoris(new Map());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(sonde).toHaveBeenCalledTimes(1);
     expect(urls).toEqual(["https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT"]);
@@ -116,7 +116,7 @@ describe("provenances des favoris", () => {
     const initial = spot(["binance", "BTCUSDT"], ["okx", "CARDSUSDT"]);
     const { publier } = catalogue(initial);
     const urls = reseau();
-    stop = suivreProvenancesFavoris(new Map());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(urls).toEqual(["https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT"]);
     publier({ ...initial, instruments: [...initial.instruments] });
@@ -131,7 +131,7 @@ describe("provenances des favoris", () => {
     const { publier } = catalogue(initial);
     const sansPrix = new Set(["CARDS-USDT"]);
     const urls = reseau(sansPrix);
-    stop = suivreProvenancesFavoris(new Map());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     const cards = () => urls.filter((url) => url.includes("instId=CARDS-USDT")).length;
     expect(cards()).toBe(1);
@@ -152,7 +152,7 @@ describe("provenances des favoris", () => {
     watchlistStore.getState().setAll(["BTCUSDT", "CARDSUSDT"], { BTCUSDT: "okx", CARDSUSDT: "okx" });
     catalogue(spot(["binance", "BTCUSDT"], ["okx", "BTCUSDT"], ["okx", "CARDSUSDT"]));
     const urls = reseau();
-    stop = suivreProvenancesFavoris(new Map());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "binance", CARDSUSDT: "okx" });
     expect(urls.sort()).toEqual([
@@ -171,7 +171,7 @@ describe("provenances des favoris", () => {
       if (String(input).startsWith("https://www.okx.com/")) return reponse({ code: "0", data: [{ instType: "SPOT", instId: "BTC-USDT", last: "60000" }] });
       return new Response("{}", { status: 503 });
     }));
-    stop = suivreProvenancesFavoris(new Map());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "okx" });
     expect(urls.some((url) => url.includes("kraken"))).toBe(false);
@@ -186,7 +186,7 @@ describe("provenances des favoris", () => {
       if (String(input).startsWith("https://www.okx.com/")) return reponse({ code: "0", data: [{ instType: "SPOT", instId: "ETH-USDT", last: "3000" }] });
       return new Response("{}", { status: 503 });
     }));
-    stop = suivreProvenancesFavoris(new Map());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(90_000);
     expect(watchlistStore.getState().sources).toEqual({ ETHUSDT: "binance" });
     expect(urls).toEqual([]);
@@ -196,7 +196,7 @@ describe("provenances des favoris", () => {
     watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "binance" });
     catalogue(spot(["binance", "BTCUSDT"], ["okx", "BTCUSDT"]));
     const urls = reseau();
-    stop = suivreProvenancesFavoris(new Map());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(urls).toEqual([]);
     // Ce que fait hydrateWatchlist() à la réconciliation daemon : un setState direct.
@@ -212,7 +212,7 @@ describe("provenances des favoris", () => {
     watchlistStore.getState().setAll(["BTCUSDT", "ETHUSDT"], { BTCUSDT: "binance" });
     catalogue(spot(["binance", "BTCUSDT"], ["bybit", "BTCUSDT"], ["binance", "ETHUSDT"]));
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
-    stop = suivreProvenancesFavoris(new Map());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(fetch).toHaveBeenCalledTimes(1);
     graphePret("bybit", "BTCUSDT");
@@ -228,7 +228,7 @@ describe("provenances des favoris", () => {
     watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "okx" });
     catalogue(spot(["okx", "BTCUSDT"]));
     reseau();
-    stop = suivreProvenancesFavoris(new Map());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "okx" });
   });
@@ -238,7 +238,7 @@ describe("provenances des favoris", () => {
     graphePret("bybit", "BTCUSDT");
     catalogue(spot(["binance", "BTCUSDT"], ["bybit", "BTCUSDT"]));
     const urls = reseau();
-    stop = suivreProvenancesFavoris(new Map());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(90_000);
     expect(watchlistStore.getState().sources).toEqual({ BTCUSDT: "bybit" });
     expect(urls).toEqual([]);
@@ -270,7 +270,7 @@ describe("provenances des favoris", () => {
     // CARDS reste sans prix : le réessai crypto à 30 s tourne pendant tout le test.
     const urls = reseau(new Set(["CARDS-USDT"]));
     const quotes = () => urls.filter((url) => url.startsWith("/tdapi/quote?"));
-    stop = suivreProvenancesFavoris(new Map());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     expect(quotes()).toEqual(["/tdapi/quote?symbol=WTI%2FUSD"]);
     for (let i = 0; i < 3; i++) publier({ ...initial, instruments: [...initial.instruments] });
@@ -294,11 +294,30 @@ describe("provenances des favoris", () => {
       if (String(input).startsWith("/tdapi/")) return new Promise<Response>(() => {});
       return Promise.resolve(reponse({ symbol: "ETHUSDT", lastPrice: "3000", priceChangePercent: "1" }));
     }));
-    stop = suivreProvenancesFavoris(new Map());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     watchlistStore.getState().add("ETHUSDT");
     await vi.advanceTimersByTimeAsync(0);
     expect(urls.sort()).toEqual(["/tdapi/quote?symbol=WTI%2FUSD", "https://api.binance.com/api/v3/ticker/24hr?symbol=ETHUSDT"]);
+  });
+
+  it("un actif TradFi sans prix n'est pas resondé au remontage, mais l'est au changement de liste", async () => {
+    vi.setSystemTime(new Date("2026-09-23T14:00:00Z"));
+    watchlistStore.getState().setAll(["WTI/USD"]);
+    catalogue(spot(["binance", "ETHUSDT"]));
+    const urls = reseau();
+    const quotes = () => urls.filter((url) => url.startsWith("/tdapi/quote?"));
+    const session = nouvelleSessionProvenances();
+    stop = suivreProvenancesFavoris(session);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(quotes()).toHaveLength(1);
+    stop();
+    stop = suivreProvenancesFavoris(session);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(quotes()).toHaveLength(1);
+    watchlistStore.getState().add("ETHUSDT");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(quotes()).toHaveLength(2);
   });
 
   it("marché fermé (samedi) : aucune requête Twelve Data, ni au montage ni ensuite", async () => {
@@ -306,10 +325,29 @@ describe("provenances des favoris", () => {
     watchlistStore.getState().setAll(["WTI/USD", "AAPL", "EUR/USD"]);
     catalogue(spot());
     const urls = reseau(new Set(), () => ({ close: "100", percent_change: "1" }));
-    stop = suivreProvenancesFavoris(new Map());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     expect(urls).toEqual([]);
     expect(watchlistStore.getState().sources).toEqual({});
+  });
+
+  it("un actif TradFi ajouté marché fermé est sondé une seule fois, à l'ouverture de son marché", async () => {
+    vi.setSystemTime(new Date("2026-09-26T12:00:00Z")); // samedi
+    watchlistStore.getState().setAll(["AAPL", "WTI/USD"]);
+    catalogue(spot());
+    const urls = reseau(new Set(), (url) => url.includes("AAPL") ? { close: "230", percent_change: "1" } : abonnementRequis());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(urls).toEqual([]);
+    // Dimanche 23:00Z : le forex a rouvert (22:00Z), la bourse US reste fermée.
+    await vi.advanceTimersByTimeAsync(Date.parse("2026-09-27T23:00:00Z") - Date.now());
+    expect(urls).toEqual(["/tdapi/quote?symbol=WTI%2FUSD"]);
+    // Lundi 14:00Z : séance US ouverte depuis 13:20Z.
+    await vi.advanceTimersByTimeAsync(Date.parse("2026-09-28T14:00:00Z") - Date.now());
+    expect(urls).toEqual(["/tdapi/quote?symbol=WTI%2FUSD", "/tdapi/quote?symbol=AAPL"]);
+    expect(watchlistStore.getState().sources).toEqual({ AAPL: "twelvedata" });
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+    expect(urls).toHaveLength(2);
   });
 
   it("une source Twelve Data enregistrée n'est jamais sondée, remontage compris : les quotes la servent", async () => {
@@ -317,7 +355,7 @@ describe("provenances des favoris", () => {
     watchlistStore.getState().setAll(["SPY", "AAPL"], { SPY: "twelvedata", AAPL: "twelvedata" });
     catalogue(spot());
     const urls = reseau();
-    const session = new Map<string, WatchlistSource>();
+    const session = nouvelleSessionProvenances();
     stop = suivreProvenancesFavoris(session);
     await vi.advanceTimersByTimeAsync(0);
     stop();
@@ -329,7 +367,8 @@ describe("provenances des favoris", () => {
 
   it("une confirmation démentie pendant le démontage est oubliée au remontage, sans sonde doublée", async () => {
     // ETHUSDT, confirmé plus tôt dans la session, a été retiré puis rajouté : il n'a plus de source.
-    const session = new Map<string, WatchlistSource>([["ETHUSDT", "binance"]]);
+    const session = nouvelleSessionProvenances();
+    session.confirmees.set("ETHUSDT", "binance");
     watchlistStore.getState().setAll(["BTCUSDT", "ETHUSDT"]);
     catalogue(spot(["binance", "BTCUSDT"], ["binance", "ETHUSDT"]));
     const urls = reseau();
@@ -346,7 +385,7 @@ describe("provenances des favoris", () => {
     watchlistStore.getState().setAll(["BTCUSDT"], { BTCUSDT: "binance" });
     catalogue(spot(["binance", "BTCUSDT"], ["binance", "ETHUSDT"], ["binance", "SOLUSDT"]));
     const urls = reseau();
-    stop = suivreProvenancesFavoris(new Map());
+    stop = suivreProvenancesFavoris(nouvelleSessionProvenances());
     await vi.advanceTimersByTimeAsync(0);
     watchlistStore.getState().add("ETHUSDT");
     await vi.advanceTimersByTimeAsync(0);

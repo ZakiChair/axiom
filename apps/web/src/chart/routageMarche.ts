@@ -1,5 +1,6 @@
-import type { Candle } from "@axiom/types";
+import type { Candle, IExchangeAdapter, Timeframe } from "@axiom/types";
 import type { CandidatsProgressifs, ResolvedMarket } from "../data/marketRouting";
+import { fetchKlinesTwelveData, twelveDataAdapter } from "../data/twelvedata";
 
 export interface MarcheCharge { identity: ResolvedMarket; candles: Candle[] }
 
@@ -73,4 +74,21 @@ export function chargerAuCreneau<T>(
   const couper = (): void => { annulerGarde?.(); controleur.abort(); };
   promesse.catch(couper);
   return { promesse, couper };
+}
+
+/**
+ * Page d'historique plus ancienne (scroll, extension de session). L'adaptateur Twelve Data (hors
+ * rejeu) passe, comme le backfill, devant les cotations du quota 8/min ; `signal` (démontage)
+ * retire la demande de la file sans consommer de crédit, ou arrête le fetch déjà parti.
+ */
+export function chargerPageAncienne(
+  adapter: IExchangeAdapter,
+  symbol: string,
+  timeframe: Timeframe,
+  opts: { limit: number; endTime: number },
+  signal: AbortSignal,
+): Promise<Candle[]> {
+  return adapter === twelveDataAdapter
+    ? fetchKlinesTwelveData(symbol, timeframe, opts, { priorite: "graphe", signal })
+    : adapter.fetchKlines(symbol, timeframe, opts);
 }

@@ -160,6 +160,40 @@ describe("backfill Twelve Data : chien de garde armé à l'obtention du créneau
     expect(envois.filter(({ url }) => url.includes("NFLX"))).toHaveLength(0);
   });
 
+  it("pagination Twelve Data : devant les cotations en file, et retirée de la file par le démontage", async () => {
+    const td = await import("../data/twelvedata");
+    const { chargerPageAncienne } = await import("./routageMarche");
+    // Fenêtre 8/min pleine : un créneau à t0, sept à t0 + 10 s ; un seul se libère à t0 + 60 s.
+    await td.fetchKlinesTwelveData("PLEIN0", "1d");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await Promise.all(Array.from({ length: 7 }, (_, i) => td.fetchKlinesTwelveData(`PLEIN${i + 1}`, "1d")));
+    const cotation = td.fetchQuotes(["AAPL"]); // priorité de fond, en file la première
+    const opts = { limit: 300, endTime: Date.parse("2026-06-01T00:00:00Z") - 1 };
+    const page = chargerPageAncienne(td.twelveDataAdapter, "TSLA", "1d", opts, new AbortController().signal);
+    const demontage = new AbortController();
+    const coupee = chargerPageAncienne(td.twelveDataAdapter, "NFLX", "1d", opts, demontage.signal);
+    demontage.abort();
+    await expect(coupee).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(50_000);
+    expect(envois.slice(8).map(({ url }) => url)).toEqual([expect.stringMatching(/symbol=TSLA.*end_date=2026-05-31/)]);
+    expect(await page).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await cotation;
+    expect(envois.slice(9).map(({ url }) => url)).toEqual([expect.stringContaining("quote?symbol=AAPL")]);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(envois.filter(({ url }) => url.includes("NFLX"))).toHaveLength(0);
+  });
+
+  it("pagination hors Twelve Data (ou en rejeu) : l'adaptateur de la provenance, sans file du quota", async () => {
+    const { chargerPageAncienne } = await import("./routageMarche");
+    const bougie: Candle = { time: 1, open: 1, high: 1, low: 1, close: 1, volume: 1 };
+    const adapter = { id: "twelvedata" as const, fetchKlines: vi.fn(async () => [bougie]), subscribeKline: () => () => {}, subscribeTrades: () => () => {} };
+    const opts = { limit: 300, endTime: 999 };
+    expect(await chargerPageAncienne(adapter, "SPY", "1d", opts, new AbortController().signal)).toEqual([bougie]);
+    expect(adapter.fetchKlines).toHaveBeenCalledWith("SPY", "1d", opts);
+    expect(envois).toHaveLength(0);
+  });
+
   it("une attente de quota au-delà du raisonnable échoue d'emblée avec le prochain créneau", async () => {
     const { backfill } = await preparer();
     await vi.advanceTimersByTimeAsync(5_000);

@@ -35,7 +35,7 @@ import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { getAdapter, supportedTimeframesFor } from "../data/adapters";
 import { resolveMarketCandidatesProgressifs } from "../data/marketRouting";
 import { fetchKlinesTwelveData } from "../data/twelvedata";
-import { chargerAuCreneau, chargerAvecRepli, type MarcheCharge } from "./routageMarche";
+import { chargerAuCreneau, chargerAvecRepli, chargerPageAncienne, type MarcheCharge } from "./routageMarche";
 import { prepareResyncApply } from "../data/resync";
 import { dataLoadErrorMessage } from "./dataLoadErrorMessage";
 import { adaptateurReplayActif } from "../data/replayFeed";
@@ -1086,6 +1086,8 @@ export function ChartInstance({
     // Chien de garde du backfill : coupé par `teardownData` si le run d'effet s'arrête
     // pendant que la requête REST est encore en vol.
     let annulerDelaiBackfill: (() => void) | null = null;
+    // Pages d'historique Twelve Data (scroll, extension de session) : coupées au démontage.
+    const pagination = new AbortController();
     // En replay, ce slot lit le MOTEUR de rejeu (même surface IExchangeAdapter → tout le
     // pipeline live fonctionne inchangé) au lieu du flux WS de l'exchange ; sinon la source
     // du slot. Le footprint/CVD (OrderflowController) résout le même adaptateur de son côté.
@@ -1211,10 +1213,9 @@ export function ChartInstance({
         // (store + indicateurs + contrôleurs). Chemin PARTAGÉ par la pagination au
         // scroll et par l'extension de session ci-dessous. Rend les bougies ajoutées.
         const chargerPlusAncien = async (avantTime: number, limit: number): Promise<Candle[]> => {
-          const fetched = await adapter.fetchKlines(symbol, timeframe, {
-            limit,
-            endTime: avantTime - 1,
-          });
+          // Twelve Data : prioritaire sur les cotations et annulée au démontage, comme le backfill.
+          const fetched = await chargerPageAncienne(adapter, symbol, timeframe, { limit, endTime: avantTime - 1 }, pagination.signal)
+            .catch((err: unknown) => { if (cancelled) return []; throw err; });
           if (cancelled || !isMarketDataReady(store.getState(), requestedIdentity, requestId)) return [];
           const older = bougiesAvantBuffer(fetched, store.getState().candles, avantTime);
           if (older.length === 0) {
@@ -1389,6 +1390,7 @@ export function ChartInstance({
       if (cancelled) return;
       cancelled = true;
       annulerDelaiBackfill?.();
+      pagination.abort();
       indicators.dispose();
       unsubscribeIndicators();
       unsubscribeExtensionChaud?.();

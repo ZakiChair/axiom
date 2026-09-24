@@ -19,7 +19,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "zustand";
 import { marketStore } from "../store/market";
-import { watchlistStore } from "../store/watchlist";
+import { watchlistStore, type WatchlistSource } from "../store/watchlist";
 import { subscribeTickers, subscribeWatchlistBars, isTickerSource, resolveTickerSource, resolveTickerMarket } from "../data/ticker";
 import type { TickerUpdate, WatchlistBars } from "../data/ticker";
 import { fetchMarketCatalog, subscribeMarketCatalog, type MarketCatalog } from "../data/marketRouting";
@@ -164,6 +164,96 @@ function drawSparkline(
   ctx.stroke();
 }
 
+/** Places spot secondaires : Binance, source de référence, les remplace pour un même spot listé. */
+const PLACES_SPOT_SECONDAIRES: ReadonlySet<string> = new Set<WatchlistSource>(["kraken", "coinbase", "bybit", "okx", "mexc"]);
+/** Un favori sans prix confirmé est réessayé : les prix peuvent revenir sans nouveau catalogue. */
+const REESSAI_PROVENANCE_MS = 30_000;
+
+/**
+ * Provenances des favoris du groupe actif, hors React (testée à timers simulés). Une source
+ * n'est retenue qu'après un vrai prix ou un graphe prêt, puis n'est plus sondée de la session :
+ *  - seuls les favoris sans source confirmée sont sondés, au catalogue reçu ou republié, à
+ *    chaque changement de liste et toutes les 30 s tant qu'il en reste ;
+ *  - les synthétiques et capitalisations, sans ticker dédié, restent sans prix de favoris :
+ *    ni sondés, ni réessayés ;
+ *  - une place spot secondaire héritée est resondée sans provenance quand le catalogue Binance
+ *    liste le même spot : Binance passe alors en tête du routage (repli si son prix manque).
+ * Les sondes routent sur le catalogue reçu : elles ne relancent pas le rafraîchissement commun.
+ */
+export function suivreProvenancesFavoris(): () => void {
+  const confirmees = new Map<string, WatchlistSource>();
+  let catalog: MarketCatalog | undefined;
+  let passe: AbortController | undefined;
+  let reessai: ReturnType<typeof setInterval> | undefined;
+  let arrete = false;
+
+  const confirmer = (symbol: string, source: WatchlistSource) => {
+    watchlistStore.getState().setSource(symbol, source);
+    if (watchlistStore.getState().sources[symbol] === source) confirmees.set(symbol, source);
+  };
+  const aSonder = (): string[] => {
+    const { symbols, sources } = watchlistStore.getState();
+    return symbols.filter((symbol) => {
+      const source = sources[symbol];
+      if (!isTickerSource(resolveTickerSource(symbol, source))) return false;
+      return source === undefined || confirmees.get(symbol) !== source;
+    });
+  };
+  const ajusterReessai = (actif: boolean) => {
+    if (actif && reessai === undefined) reessai = setInterval(lancerPasse, REESSAI_PROVENANCE_MS);
+    if (!actif && reessai !== undefined) { clearInterval(reessai); reessai = undefined; }
+  };
+
+  function lancerPasse(): void {
+    if (arrete || !catalog) return;
+    const courant = catalog;
+    passe?.abort();
+    const controller = new AbortController();
+    passe = controller;
+    const symboles = aSonder();
+    ajusterReessai(symboles.length > 0);
+    void Promise.all(symboles.map(async (symbol) => {
+      try {
+        const before = marketStore.getState();
+        if (before.symbol === symbol && before.dataLoad.status === "ready") return confirmer(symbol, before.exchange);
+        const initialSource = watchlistStore.getState().sources[symbol];
+        const versBinance = initialSource !== undefined && PLACES_SPOT_SECONDAIRES.has(initialSource)
+          && courant.instruments.some((i) => i.exchange === "binance" && i.kind === "spot" && i.symbol === symbol);
+        const resolved = await resolveTickerMarket({ exchange: versBinance ? undefined : initialSource, symbol, timeframe: "1h" }, controller.signal, courant);
+        if (controller.signal.aborted) return;
+        const market = marketStore.getState();
+        if (market.symbol === symbol && market.dataLoad.status === "ready") confirmer(symbol, market.exchange);
+        else if (resolved && watchlistStore.getState().sources[symbol] === initialSource) confirmer(symbol, resolved.exchange);
+      } catch { /* Sans prix confirmé : réessayé au prochain catalogue ou dans 30 s. */ }
+    })).then(() => { if (!controller.signal.aborted) ajusterReessai(aSonder().length > 0); });
+  }
+
+  const recevoir = (value: MarketCatalog) => { catalog = value; lancerPasse(); };
+  const stopCatalogue = subscribeMarketCatalog(recevoir);
+  void fetchMarketCatalog().then((value) => { if (value !== catalog) recevoir(value); }).catch(() => {});
+  const cleListe = (symbols: readonly string[]) => symbols.slice().sort().join(",");
+  let liste = cleListe(watchlistStore.getState().symbols);
+  const stopListe = watchlistStore.subscribe((state) => {
+    const suivante = cleListe(state.symbols);
+    if (suivante === liste) return;
+    liste = suivante;
+    lancerPasse();
+  });
+  // Tout chargement prêt confirme sa source (jamais resondée ensuite).
+  const stopMarche = marketStore.subscribe((state) => {
+    if (state.dataLoad.status === "ready") confirmer(state.symbol, state.exchange);
+  });
+
+  return () => {
+    arrete = true;
+    passe?.abort();
+    ajusterReessai(false);
+    stopCatalogue();
+    stopListe();
+    stopMarche();
+  };
+}
+
 /** Enregistre/retire une cellule DOM dans la map (callback de ref). */
 function registerCell(
   map: Map<string, RowCells>,
@@ -200,9 +290,6 @@ export function Watchlist() {
   const currentSymbol = useStore(marketStore, (s) => s.symbol);
 
   const [draft, setDraft] = useState("");
-  const [catalog, setCatalog] = useState<MarketCatalog>();
-  const [resolutionAttempt, setResolutionAttempt] = useState(0);
-  const [unresolvedSymbols, setUnresolvedSymbols] = useState<string[]>([]);
   const [addingGroup, setAddingGroup] = useState(false);
   const [groupDraft, setGroupDraft] = useState("");
   const [visibleCols, setVisibleCols] = useState<VisibleCols>(DEFAULT_COLS);
@@ -255,54 +342,8 @@ export function Watchlist() {
 
   const sourcesKey = symbols.map((symbol) => `${symbol}:${sources[symbol] ?? ""}`).sort().join(",");
 
-  useEffect(() => {
-    if (symbols.every((symbol) => sources[symbol] !== undefined && !unresolvedSymbols.includes(symbol))) return;
-    // Les prix peuvent revenir alors que le catalogue n'a pas changé.
-    const retry = setInterval(() => setResolutionAttempt((attempt) => attempt + 1), 30_000);
-    return () => clearInterval(retry);
-  }, [symbolsKey, sourcesKey, unresolvedSymbols]);
-
-  useEffect(() => {
-    let active = true;
-    const unsubscribe = subscribeMarketCatalog(setCatalog);
-    void fetchMarketCatalog().then((value) => { if (active) setCatalog(value); }).catch(() => {});
-    return () => { active = false; unsubscribe(); };
-  }, []);
-
-  // Un catalogue rétabli relance les prix absents. Une source n'est retenue qu'après
-  // confirmation d'un vrai prix, y compris quand les catalogues sont indisponibles.
-  useEffect(() => {
-    if (!catalog) return;
-    const controller = new AbortController();
-    void Promise.all(symbols.map(async (symbol) => {
-      try {
-        const initialSource = watchlistStore.getState().sources[symbol];
-        const before = marketStore.getState();
-        if (before.symbol === symbol && before.dataLoad.status === "ready") {
-          watchlistStore.getState().setSource(symbol, before.exchange);
-          return undefined;
-        }
-        const resolved = await resolveTickerMarket({ exchange: initialSource, symbol, timeframe: "1h" }, controller.signal);
-        if (controller.signal.aborted) return;
-        const market = marketStore.getState();
-        if (market.symbol === symbol && market.dataLoad.status === "ready") {
-          watchlistStore.getState().setSource(symbol, market.exchange);
-        } else if (watchlistStore.getState().sources[symbol] === initialSource && resolved) {
-          watchlistStore.getState().setSource(symbol, resolved.exchange);
-        } else if (!resolved) {
-          return symbol;
-        }
-        return undefined;
-      } catch { return symbol; }
-    })).then((unresolved) => {
-      if (!controller.signal.aborted) setUnresolvedSymbols(unresolved.filter((symbol): symbol is string => symbol !== undefined));
-    });
-    return () => controller.abort();
-  }, [symbolsKey, catalog, resolutionAttempt]);
-
-  useEffect(() => marketStore.subscribe((state) => {
-    if (state.dataLoad.status === "ready") watchlistStore.getState().setSource(state.symbol, state.exchange);
-  }), []);
+  // Un catalogue rétabli relance les prix absents ; une source confirmée n'est plus sondée.
+  useEffect(() => suivreProvenancesFavoris(), []);
 
   // Ordre d'affichage : liste stockée en mode manuel, sinon tri par instantané des valeurs.
   const displayOrder = useMemo(() => {

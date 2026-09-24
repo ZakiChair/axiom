@@ -218,9 +218,9 @@ export interface CandidatsProgressifs {
  * s'il est périmé, `complets` attend le rafraîchissement que sa lecture a lancé (un actif
  * coté depuis, ou retiré, trouve ainsi son repli) ; sans aucun instrument confirmé, rien ne part
  * avant elle. À froid : les huit catalogues partent, mais seul celui de la source prioritaire
- * (Binance au comptant, Hyperliquid pour -PERP) est attendu ; s'il confirme symbole et
- * unité de temps, ce candidat — déjà premier de la liste complète — part sans attendre
- * les autres places. `complets` attend le catalogue entier pour les replis.
+ * (Binance au comptant, Hyperliquid pour -PERP), puis au comptant celui de la provenance, est
+ * attendu ; s'il confirme symbole et unité de temps, ce candidat — déjà premier de la liste
+ * complète — part sans attendre les autres places. `complets` attend le catalogue entier.
  */
 export async function resolveMarketCandidatesProgressifs(
   identity: { exchange?: ExchangeId; symbol: string; timeframe: Timeframe },
@@ -236,12 +236,17 @@ export async function resolveMarketCandidatesProgressifs(
     return { immediats: liste.some((c) => !c.speculative) ? liste : [], complets: () => (pendingCatalog ?? fetchMarketCatalog()).then((loaded) => candidatsDepuisCatalogue(id, loaded)) };
   }
   const complet = fetchMarketCatalog();
-  const prioritaire: ExchangeId = id.kind === "perp" ? "hyperliquid" : "binance";
-  // Requête partagée avec le catalogue en vol ; Hyperliquid y enregistre aussi sa casse (kPEPE).
-  const paires = await fetchPairs(prioritaire).catch((): string[] => []);
-  const confirme = paires.includes(id.symbol) && supportedTimeframesFor(prioritaire, id.symbol).includes(id.timeframe);
-  return {
-    immediats: confirme ? [{ exchange: prioritaire, symbol: id.symbol, timeframe: id.timeframe }] : [],
-    complets: () => complet.then((loaded) => candidatsDepuisCatalogue(id, loaded)),
-  };
+  const complets = () => complet.then((loaded) => candidatsDepuisCatalogue(id, loaded));
+  // Au comptant, la provenance (place spot hors Binance) ne sert que si Binance ne confirme pas :
+  // elle est alors déjà première de la liste complète.
+  const places: ExchangeId[] = [id.kind === "perp" ? "hyperliquid" : "binance"];
+  if (id.kind === "spot" && id.exchange && SOURCES.slice(1, 6).includes(id.exchange)) places.push(id.exchange);
+  for (const place of places) {
+    // Requête partagée avec le catalogue en vol ; Hyperliquid y enregistre aussi sa casse (kPEPE).
+    const paires = await fetchPairs(place).catch((): string[] => []);
+    if (paires.includes(id.symbol) && supportedTimeframesFor(place, id.symbol).includes(id.timeframe)) {
+      return { immediats: [{ exchange: place, symbol: id.symbol, timeframe: id.timeframe }], complets };
+    }
+  }
+  return { immediats: [], complets };
 }

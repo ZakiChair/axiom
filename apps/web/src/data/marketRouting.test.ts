@@ -494,6 +494,37 @@ describe("résolution progressive : la source prioritaire n'attend pas les autre
     expect((await liste)[0]).toEqual({ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" });
   });
 
+  it("à froid, un actif absent de Binance part sur sa provenance dès que son catalogue le confirme", async () => {
+    // OKX répond en 1 s ; MEXC se tait (délai du catalogue : 12 s) ; les autres échouent.
+    const reseau = places({ okx: () => new Promise((resolve) => setTimeout(() => resolve(response({ code: "0", data: [{ instId: "CARDS-USDT", instType: "SPOT", state: "live" }, { instId: "BTC-USDT", instType: "SPOT", state: "live" }] })), 1_000)) });
+    vi.stubGlobal("fetch", vi.fn((url: string) => url.includes("mexc") ? muet() : reseau(url)));
+    const routing = await import("./marketRouting");
+    type Progressifs = Awaited<ReturnType<typeof routing.resolveMarketCandidatesProgressifs>>;
+    let cards: Progressifs | undefined;
+    let btc: Progressifs | undefined;
+    void routing.resolveMarketCandidatesProgressifs({ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" }).then((value) => { cards = value; });
+    void routing.resolveMarketCandidatesProgressifs({ exchange: "okx", symbol: "BTCUSDT", timeframe: "1h" }).then((value) => { btc = value; });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(cards?.immediats).toEqual([{ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" }]);
+    // Binance qui liste l'actif garde la tête : la provenance n'est qu'un second recours.
+    expect(btc?.immediats).toEqual([{ exchange: "binance", symbol: "BTCUSDT", timeframe: "1h" }]);
+    // Déjà premier de la liste complète, que le catalogue MEXC retarde de 12 s.
+    let liste: unknown;
+    void cards!.complets().then((value) => { liste = value; });
+    await vi.advanceTimersByTimeAsync(10_999);
+    expect(liste).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect((liste as unknown[])[0]).toEqual(cards!.immediats[0]);
+  });
+
+  it("à froid, une provenance qui ne confirme pas l'actif n'offre aucun raccourci", async () => {
+    vi.stubGlobal("fetch", places({ okx: () => Promise.resolve(response({ code: "0", data: [{ instId: "BTC-USDT", instType: "SPOT", state: "live" }] })) }));
+    const routing = await import("./marketRouting");
+    const pending = routing.resolveMarketCandidatesProgressifs({ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect((await pending).immediats).toEqual([]);
+  });
+
   it("à froid, le perp attend seulement Hyperliquid, garde sa casse native et vérifie l'unité de temps", async () => {
     vi.stubGlobal("fetch", places({ hl: ["kPEPE"] }));
     const routing = await import("./marketRouting");

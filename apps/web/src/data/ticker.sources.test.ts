@@ -3,6 +3,7 @@ import { resolveTickerMarket, subscribeTickers, subscribeWatchlistBars } from ".
 import * as routing from "./marketRouting";
 import { okxAdapter } from "./okx";
 import { binanceAdapter } from "./binance";
+import { fetchQuotes } from "./twelvedata";
 import { watchlistStore } from "../store/watchlist";
 
 const response = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
@@ -205,6 +206,19 @@ describe("résolution vérifiée du ticker", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(await ouvert).toEqual({ exchange: "twelvedata", symbol: "AAPL", timeframe: "1h" });
     expect(fetcher.mock.calls.map((call) => String((call as unknown as [string])[0]))).toEqual(["/tdapi/quote?symbol=AAPL"]);
+  });
+
+  it("une sonde Twelve Data abandonnée (2,5 s) quitte la file du quota : ni créneau ni crédit", async () => {
+    vi.setSystemTime(new Date("2026-09-24T15:00:00Z")); // jeudi, séance ouverte, fenêtre 8/min neuve
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string) => { urls.push(String(input)); return response({}); }));
+    // Huit crédits déjà pris dans la fenêtre glissante de 60 s : la sonde attend un créneau.
+    await fetchQuotes(["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8"]);
+    const sonde = resolveTickerMarket({ symbol: "AAPL", timeframe: "1h" });
+    await vi.advanceTimersByTimeAsync(2_500);
+    expect(await sonde).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(urls.filter((url) => url.includes("AAPL"))).toEqual([]);
   });
 
   it("un abonnement sans provenance trouve OKX sans ouvrir de WebSocket Binance", async () => {

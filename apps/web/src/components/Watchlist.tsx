@@ -294,7 +294,7 @@ export function suivreProvenancesFavoris(session = SESSION_PROVENANCES): () => v
   /**
    * Une sonde Twelve Data coûte un crédit (800/j) et un créneau 8/min partagé avec le graphe ;
    * son routage ne lit aucun catalogue, qui ne la relance donc pas. Une sonde en vol n'est pas
-   * doublée : abandonnée, elle part quand même (file sans annulation de twelvedata.ts).
+   * doublée ; abandonnée en attente de créneau, elle quitte la file sans rien consommer.
    */
   function sonderTradfi(): void {
     if (arrete) return;

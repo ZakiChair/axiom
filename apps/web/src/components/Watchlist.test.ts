@@ -348,7 +348,7 @@ describe("provenances des favoris", () => {
     const urls: string[] = [];
     vi.stubGlobal("fetch", vi.fn((input: string) => {
       urls.push(String(input));
-      // File Twelve Data sans annulation : une sonde abandonnée part quand même.
+      // Réponse Twelve Data qui ne revient pas : la sonde reste en vol.
       if (String(input).startsWith("/tdapi/")) return new Promise<Response>(() => {});
       return Promise.resolve(reponse({ symbol: "ETHUSDT", lastPrice: "3000", priceChangePercent: "1" }));
     }));

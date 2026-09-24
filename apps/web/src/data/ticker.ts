@@ -455,9 +455,10 @@ async function fetchTickerSnapshots(source: WatchlistSource, symbols: string[], 
   if (source === "hyperliquid") return fetchHyperliquidTickers(symbols, signal);
   if (source === "twelvedata") {
     // Sonde seule (pollTradfiQuotes a son garde) : marché fermé, aucun crédit ni créneau 8/min.
+    // Abandonnée en attente de créneau, elle quitte la file du quota sans rien consommer.
     const now = new Date();
     const open = symbols.filter((symbol) => isMarketOpen(classifyTradfi(symbol), now));
-    return open.length === 0 ? [] : (await fetchQuotes(open)).filter((q) => positiveNumber(q.price) !== undefined);
+    return open.length === 0 ? [] : (await fetchQuotes(open, { signal })).filter((q) => positiveNumber(q.price) !== undefined);
   }
   if (source !== "kraken" && source !== "mexc" && source !== "binance") return [];
   const settled = await Promise.all(symbols.map((symbol) => (
@@ -466,7 +467,7 @@ async function fetchTickerSnapshots(source: WatchlistSource, symbols: string[], 
   return settled.filter((u): u is TickerUpdate => u !== null);
 }
 
-/** Borne aussi les APIs qui ne propagent pas encore AbortSignal (catalogue/quotes TD). */
+/** Borne aussi les APIs qui ne propagent pas encore AbortSignal (catalogue). */
 function bounded<T>(work: (signal: AbortSignal) => Promise<T>, timeoutMs: number, parent?: AbortSignal): Promise<T | undefined> {
   if (parent?.aborted) return Promise.resolve(undefined);
   return new Promise((resolve) => {

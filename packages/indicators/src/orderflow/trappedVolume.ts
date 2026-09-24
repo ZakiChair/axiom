@@ -46,7 +46,9 @@
  *
  * La sortie à i ne dépend QUE de (i−length, i] (invariance par préfixe) : recalcul
  * complet, aucun état entre deux appels. Passe avant unique ; les lots d'âge ≥ length
- * ou entièrement libérés sont élagués en place — coût ≈ n × lots vivants.
+ * ou entièrement libérés sont élagués en place — coût ≈ n × (lots vivants + leurs morceaux,
+ * chaque barre pouvant percer un trou dans chaque lot) : pire cas O(n·length²), jamais
+ * observé sur des klines réelles (≤ 30 ms à 20 000 barres, horizon 1 000).
  */
 
 import type { Candle, IndicatorDef } from "@axiom/types";

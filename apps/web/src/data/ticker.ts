@@ -4,7 +4,9 @@
  *  - binance    : WebSocket « combiné » temps réel (prix `c` + variation 24 h `P`) ;
  *  - kraken     : POLLING REST /0/public/Ticker (30 s), 1 requête par symbole ;
  *  - coinbase   : POLLING REST market/products GROUPÉ (30 s, via /extapi : l'API n'expose
- *    aucun en-tête CORS), 1 requête pour le lot ;
+ *    aucun en-tête CORS), 1 requête pour le lot. Le relais sert ce lot depuis son cache :
+ *    le prix affiché peut dater de 60 s sur Vercel (max-age=60) et de 120 s avec axiomd
+ *    (TTL /extapi par défaut), malgré le poll de 30 s ;
  *  - mexc       : POLLING REST /ticker/24hr (30 s, via proxy), 1 requête par symbole ;
  *  - okx/bybit  : POLLING REST ticker SPOT groupé (30 s) ; un instrument OKX seul (sonde,
  *    favori isolé) ne télécharge que son ticker ;

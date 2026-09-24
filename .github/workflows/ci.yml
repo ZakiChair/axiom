@@ -86,4 +86,4 @@ jobs:
         run: pnpm check:e2e
         env:
           AXIOM_E2E_PORT: 5239
-        timeout-minutes: 6
+        timeout-minutes: 9 # observé 312 s (24/09 matin) puis > 360 s le soir (139 tests)

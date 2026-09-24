@@ -84,6 +84,24 @@ describe("prix des sources existantes", () => {
     expect(cb.mock.calls[0]?.[0]).toEqual({ symbol: "CARDSUSDT", price: 0.18, changePercent: NaN, quoteVolume: undefined });
   });
 
+  it("Coinbase passe par le proxy /extapi (api.coinbase.com n'expose aucun en-tête CORS)", async () => {
+    const fetcher = vi.fn().mockResolvedValue(response({ products: [
+      { product_id: "BTC-USD", price: "60000", price_percentage_change_24h: "2.5" },
+      { product_id: "ETH-USDC", price: "3000", price_percentage_change_24h: "-1" },
+    ] }));
+    vi.stubGlobal("fetch", fetcher);
+    const cb = vi.fn();
+    const stop = subscribeTickers(["BTCUSD", "ETHUSDC"], cb, { source: "coinbase" });
+    await vi.advanceTimersByTimeAsync(0);
+    stop();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const url = String(fetcher.mock.calls[0]?.[0]);
+    expect(url.startsWith("/extapi/api.coinbase.com/api/v3/brokerage/market/products?")).toBe(true);
+    expect(new URLSearchParams(url.split("?")[1]).getAll("product_ids")).toEqual(["BTC-USD", "ETH-USDC"]);
+    expect(cb).toHaveBeenCalledWith({ symbol: "BTCUSD", price: 60000, changePercent: 2.5 });
+    expect(cb).toHaveBeenCalledWith({ symbol: "ETHUSDC", price: 3000, changePercent: -1 });
+  });
+
   it("ignore une réponse REST achevée après le désabonnement", async () => {
     let finish!: (r: Response) => void;
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; })));
@@ -106,6 +124,28 @@ describe("résolution vérifiée du ticker", () => {
       : response({ code: -1121, msg: "Invalid symbol" }));
     vi.stubGlobal("fetch", fetcher);
     expect(await resolveTickerMarket({ symbol: "CARDSUSDT", timeframe: "1h" })).toEqual({ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" });
+  });
+
+  it("la sonde OKX d'un symbole ne télécharge que son instrument, pas la liste SPOT entière", async () => {
+    vi.spyOn(routing, "resolveMarketCandidates").mockResolvedValue([{ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" }]);
+    const fetcher = vi.fn(async () => response({ code: "0", data: [cards] }));
+    vi.stubGlobal("fetch", fetcher);
+    expect(await resolveTickerMarket({ symbol: "CARDSUSDT", timeframe: "1h" })).toEqual({ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" });
+    expect(fetcher.mock.calls.map((call) => String((call as unknown as [string])[0]))).toEqual(["https://www.okx.com/api/v5/market/ticker?instId=CARDS-USDT"]);
+  });
+
+  it("un instrument OKX inconnu (code 51001, HTTP 200) n'est pas confirmé", async () => {
+    vi.spyOn(routing, "resolveMarketCandidates").mockResolvedValue([{ exchange: "okx", symbol: "NOPEUSDT", timeframe: "1h" }]);
+    vi.stubGlobal("fetch", vi.fn(async () => response({ code: "51001", data: [], msg: "Instrument ID doesn't exist." })));
+    expect(await resolveTickerMarket({ symbol: "NOPEUSDT", timeframe: "1h" })).toBeUndefined();
+  });
+
+  it("route les candidats sur le catalogue déjà publié par l'appelant", async () => {
+    const catalog: routing.MarketCatalog = { instruments: [{ exchange: "okx", symbol: "CARDSUSDT", kind: "spot" }], unavailableSources: [] };
+    const candidates = vi.spyOn(routing, "resolveMarketCandidates");
+    vi.stubGlobal("fetch", vi.fn(async () => response({ code: "0", data: [cards] })));
+    expect(await resolveTickerMarket({ symbol: "CARDSUSDT", timeframe: "1h" }, undefined, catalog)).toEqual({ exchange: "okx", symbol: "CARDSUSDT", timeframe: "1h" });
+    expect(candidates).toHaveBeenCalledWith({ symbol: "CARDSUSDT", timeframe: "1h" }, catalog);
   });
 
   it("n'attribue aucune source lorsque tous les prix sont absents", async () => {
@@ -150,6 +190,21 @@ describe("résolution vérifiée du ticker", () => {
     const pending = resolveTickerMarket({ symbol: "CARDSUSDT", timeframe: "1h" });
     await vi.advanceTimersByTimeAsync(30_000);
     expect(await pending).toEqual({ exchange: "mexc", symbol: "CARDSUSDT", timeframe: "1h" });
+  });
+
+  it("la sonde Twelve Data n'envoie rien marché fermé (un crédit et un créneau 8/min par appel)", async () => {
+    const fetcher = vi.fn(async () => response({ close: "200", percent_change: "1" }));
+    vi.stubGlobal("fetch", fetcher);
+    vi.setSystemTime(new Date("2026-09-26T15:00:00Z")); // samedi : bourse US fermée
+    const ferme = resolveTickerMarket({ symbol: "AAPL", timeframe: "1h" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await ferme).toBeUndefined();
+    expect(fetcher).not.toHaveBeenCalled();
+    vi.setSystemTime(new Date("2026-09-23T15:00:00Z")); // mercredi, séance ouverte
+    const ouvert = resolveTickerMarket({ symbol: "AAPL", timeframe: "1h" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await ouvert).toEqual({ exchange: "twelvedata", symbol: "AAPL", timeframe: "1h" });
+    expect(fetcher.mock.calls.map((call) => String((call as unknown as [string])[0]))).toEqual(["/tdapi/quote?symbol=AAPL"]);
   });
 
   it("un abonnement sans provenance trouve OKX sans ouvrir de WebSocket Binance", async () => {

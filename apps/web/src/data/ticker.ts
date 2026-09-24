@@ -3,9 +3,11 @@
  * (roadmap 0.4b). La source vient du store watchlist (explicite) ou est inférée :
  *  - binance    : WebSocket « combiné » temps réel (prix `c` + variation 24 h `P`) ;
  *  - kraken     : POLLING REST /0/public/Ticker (30 s), 1 requête par symbole ;
- *  - coinbase   : POLLING REST market/products GROUPÉ (30 s), 1 requête pour le lot ;
+ *  - coinbase   : POLLING REST market/products GROUPÉ (30 s, via /extapi : l'API n'expose
+ *    aucun en-tête CORS), 1 requête pour le lot ;
  *  - mexc       : POLLING REST /ticker/24hr (30 s, via proxy), 1 requête par symbole ;
- *  - okx/bybit  : POLLING REST ticker SPOT groupé (30 s) ;
+ *  - okx/bybit  : POLLING REST ticker SPOT groupé (30 s) ; un instrument OKX seul (sonde,
+ *    favori isolé) ne télécharge que son ticker ;
  *  - hyperliquid : contexte groupé + dernier trade public par coin (30 s) ;
  *  - twelvedata : POLLING /quote groupé (~60 s), GATÉ sur les heures de marché — inutile
  *    de brûler le quota (~800 crédits/j) la nuit / le week-end marché fermé (roadmap 0.4d).
@@ -20,7 +22,8 @@
 import type { Candle, ExchangeId, Timeframe, Unsubscribe } from "@axiom/types";
 import { fetchQuotes } from "./twelvedata";
 import { getAdapter } from "./adapters";
-import { resolveMarketCandidates, type ResolvedMarket } from "./marketRouting";
+import { resolveMarketCandidates, type MarketCatalog, type ResolvedMarket } from "./marketRouting";
+import { extUrl } from "./extapi";
 import { estSymboleCapitalisation } from "./mcap";
 import { TWELVEDATA_SYMBOLS } from "./pairs";
 import { pollLoop } from "./pollLoop";
@@ -244,10 +247,12 @@ function subscribeBinanceTickers(
 // ───────── Pollers ticker REST des exchanges crypto (Kraken / Coinbase / MEXC) ─────────
 
 const KRAKEN_TICKER_URL = "https://api.kraken.com/0/public/Ticker";
-const COINBASE_PRODUCTS_URL = "https://api.coinbase.com/api/v3/brokerage/market/products";
+const COINBASE_PRODUCTS_PATH = "api/v3/brokerage/market/products"; // via /extapi (cf. coinbase.ts)
 const MEXC_TICKER_URL = "/mexcapi/api/v3/ticker/24hr"; // via proxy (cf. vite.config.ts)
 const BINANCE_TICKER_URL = "https://api.binance.com/api/v3/ticker/24hr";
 const OKX_TICKERS_URL = "https://www.okx.com/api/v5/market/tickers?instType=SPOT";
+/** Ticker d'UN instrument (~240 o) : la liste SPOT entière pèse ~120 Ko gzip. */
+const OKX_TICKER_URL = "https://www.okx.com/api/v5/market/ticker";
 const BYBIT_TICKERS_URL = "https://api.bybit.com/v5/market/tickers?category=spot";
 const HL_INFO_URL = "https://api.hyperliquid.xyz/info";
 /** Bases dont l'altname REST Kraken diffère du ticker courant (Bitcoin=XBT, Dogecoin=XDG). */
@@ -286,7 +291,9 @@ async function fetchOkxTickers(symbols: string[], signal?: AbortSignal): Promise
     } catch { /* Symbole hors du marché spot. */ }
   }
   if (!byInstrument.size) return [];
-  const res = await fetch(OKX_TICKERS_URL, { signal });
+  // Un instrument inconnu répond code 51001 (HTTP 200) : écarté ci-dessous comme la liste.
+  const seul = byInstrument.size === 1 ? [...byInstrument.keys()][0] : undefined;
+  const res = await fetch(seul ? `${OKX_TICKER_URL}?${new URLSearchParams({ instId: seul })}` : OKX_TICKERS_URL, { signal });
   if (!res.ok) throw new Error(`OKX ticker ${res.status}`);
   const json = await res.json() as { code?: string; data?: Array<{ instId?: string; instType?: string; last?: string; open24h?: string; volCcy24h?: string }> };
   if (json?.code !== "0" || !Array.isArray(json.data)) return [];
@@ -398,7 +405,7 @@ async function fetchCoinbaseTickers(symbols: string[], signal?: AbortSignal): Pr
     }
   }
   if (byProduct.size === 0) return [];
-  const res = await fetch(`${COINBASE_PRODUCTS_URL}?${params}`, { signal });
+  const res = await fetch(extUrl("api.coinbase.com", `${COINBASE_PRODUCTS_PATH}?${params}`), { signal });
   if (!res.ok) throw new Error(`Coinbase products ${res.status} ${res.statusText}`);
   const data = (await res.json()) as {
     products?: Array<{ product_id?: string; price?: string; price_percentage_change_24h?: string }>;
@@ -446,7 +453,12 @@ async function fetchTickerSnapshots(source: WatchlistSource, symbols: string[], 
   if (source === "okx") return fetchOkxTickers(symbols, signal);
   if (source === "bybit") return fetchBybitTickers(symbols, signal);
   if (source === "hyperliquid") return fetchHyperliquidTickers(symbols, signal);
-  if (source === "twelvedata") return (await fetchQuotes(symbols)).filter((q) => positiveNumber(q.price) !== undefined);
+  if (source === "twelvedata") {
+    // Sonde seule (pollTradfiQuotes a son garde) : marché fermé, aucun crédit ni créneau 8/min.
+    const now = new Date();
+    const open = symbols.filter((symbol) => isMarketOpen(classifyTradfi(symbol), now));
+    return open.length === 0 ? [] : (await fetchQuotes(open)).filter((q) => positiveNumber(q.price) !== undefined);
+  }
   if (source !== "kraken" && source !== "mexc" && source !== "binance") return [];
   const settled = await Promise.all(symbols.map((symbol) => (
     source === "kraken" ? fetchKrakenTicker(symbol, signal) : fetchSpotTicker(symbol, signal, source === "binance" ? BINANCE_TICKER_URL : MEXC_TICKER_URL)
@@ -481,13 +493,16 @@ function bounded<T>(work: (signal: AbortSignal) => Promise<T>, timeoutMs: number
  * 2,5 s par sonde, 30 s au total : catalogue (12 s) + six places spot (15 s).
  * Aucun résultat après annulation ;
  * une source spéculative ne reste pas marquée ainsi une fois son prix réellement reçu.
+ * `catalog` : celui que l'appelant a déjà reçu ; la sonde ne relance alors pas le
+ * rafraîchissement commun (dont la republication relancerait les sondes de l'appelant).
  */
 export function resolveTickerMarket(
   identity: { exchange?: ExchangeId; symbol: string; timeframe: Timeframe },
   signal?: AbortSignal,
+  catalog?: MarketCatalog,
 ): Promise<ResolvedMarket | undefined> {
   return bounded(async (active) => {
-    const candidates = await resolveMarketCandidates(identity);
+    const candidates = await resolveMarketCandidates(identity, catalog);
     for (const candidate of candidates) {
       if (active.aborted) return undefined;
       if (!isTickerSource(candidate.exchange)) continue;

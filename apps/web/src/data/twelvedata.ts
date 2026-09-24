@@ -112,7 +112,8 @@ export interface ControleTwelveData {
   onCreneau?: () => void;
 }
 
-interface Demande { priorite: () => PrioriteTwelveData; accorder: () => void; refuser: (erreur: unknown) => void }
+/** `poids` : crédits de la requête (une cotation groupée en coûte un par symbole), réservés d'un coup. */
+interface Demande { priorite: () => PrioriteTwelveData; poids: number; accorder: () => void; refuser: (erreur: unknown) => void }
 /** Contrôle interne : une série partagée garde sa demande en file pour juger qui la rejoint. */
 interface ControleFile extends ControleTwelveData { enFile?: (demande: Demande) => void }
 const refusAttente = (attente: number): Error => new Error(`Quota Twelve Data : prochain créneau dans ${Math.ceil(attente / 1000)} s`);
@@ -242,16 +243,17 @@ function servirFile(): void {
     const refus = refusQuotaJour();
     const now = Date.now();
     purgerFenetre(now);
-    if (!refus && requestTimes.length >= RATE_LIMIT) {
+    // Créneaux à libérer avant que TOUS les crédits de la demande tiennent dans la fenêtre.
+    const exces = requestTimes.length + demande.poids - RATE_LIMIT;
+    if (!refus && exces > 0) {
       if (minuteurFile === undefined) {
-        minuteurFile = setTimeout(() => { minuteurFile = undefined; servirFile(); }, (requestTimes[0] ?? now) + RATE_WINDOW_MS - now);
+        minuteurFile = setTimeout(() => { minuteurFile = undefined; servirFile(); }, (requestTimes[exces - 1] ?? now) + RATE_WINDOW_MS - now);
       }
       return;
     }
     file.splice(file.indexOf(demande), 1);
     if (refus) { demande.refuser(refus); continue; }
-    requestTimes.push(now);
-    reportQuota();
+    for (let i = 0; i < demande.poids; i++) { requestTimes.push(now); reportQuota(); }
     demande.accorder();
   }
 }
@@ -259,34 +261,35 @@ function servirFile(): void {
 const enGraphe = (d: Demande): boolean => d.priorite() === "graphe";
 
 /**
- * Attente d'une NOUVELLE demande à cette priorité, ou de `demande` déjà en file si elle
- * l'avait (promotion) : les « graphe » arrivées avant elle, puis, en fond, les « fond ».
+ * Attente d'une NOUVELLE demande à cette priorité et de ce poids, ou de `demande` déjà en file
+ * si elle l'avait (promotion) : les « graphe » arrivées avant elle, puis, en fond, les « fond ».
  */
-function attenteEstimeeMs(priorite: PrioriteTwelveData, demande?: Demande): number {
+function attenteEstimeeMs(priorite: PrioriteTwelveData, demande?: Demande, poids = demande?.poids ?? 1): number {
   const avant = demande ? file.slice(0, Math.max(0, file.indexOf(demande))) : file;
-  return attenteApresMs(priorite === "graphe" ? avant.filter(enGraphe).length
-    : file.filter(enGraphe).length + avant.filter((d) => !enGraphe(d)).length);
+  const devant = priorite === "graphe" ? avant.filter(enGraphe) : [...file.filter(enGraphe), ...avant.filter((d) => !enGraphe(d))];
+  return attenteApresMs([...devant.map((d) => d.poids), poids]);
 }
 
-/** Fenêtre courante, puis `devant` demandes servies avant celle-ci. */
-function attenteApresMs(devant: number): number {
+/** Fenêtre courante, puis les demandes de ces poids servies dans l'ordre : départ de la dernière. */
+function attenteApresMs(poids: number[]): number {
   const now = Date.now();
   purgerFenetre(now);
   const occupes = [...requestTimes];
   let t = now;
-  for (let i = 0; i <= devant; i++) {
-    t = Math.max(t, (occupes[occupes.length - RATE_LIMIT] ?? -Infinity) + RATE_WINDOW_MS);
-    occupes.push(t);
+  for (const p of poids) {
+    t = Math.max(t, (occupes[occupes.length + p - 1 - RATE_LIMIT] ?? -Infinity) + RATE_WINDOW_MS);
+    for (let i = 0; i < p; i++) occupes.push(t);
   }
   return t - now;
 }
 
 /**
- * Acquiert un créneau de débit (fenêtre glissante 8/60 s). Au-delà de 8 dans la fenêtre,
- * la demande ATTEND en file plutôt que de partir et se faire rejeter (429). Garantit
- * ≤ 8 req/min côté Twelve Data. La priorité est relue à chaque service (promotion).
+ * Acquiert `poids` créneaux de débit d'un seul coup (fenêtre glissante 8/60 s, `poids` ≤ 8).
+ * Au-delà de 8 crédits dans la fenêtre, la demande ATTEND en file plutôt que de partir et se
+ * faire rejeter (429). Garantit ≤ 8 crédits envoyés par minute glissante côté Twelve Data.
+ * La priorité est relue à chaque service (promotion).
  */
-function acquireSlot(controle: ControleFile = {}): Promise<void> {
+function acquireSlot(controle: ControleFile = {}, poids = 1): Promise<void> {
   const { signal } = controle;
   if (cleActive() === null && BASE_DIRECTE) return Promise.reject(new Error(MSG_CLE_REQUISE));
   if (signal?.aborted) return Promise.reject(signal.reason);
@@ -294,7 +297,7 @@ function acquireSlot(controle: ControleFile = {}): Promise<void> {
   if (refus) return Promise.reject(refus);
   const priorite = (): PrioriteTwelveData => controle.priorite ?? "fond";
   if (controle.attenteMaxMs !== undefined) {
-    const attente = attenteEstimeeMs(priorite());
+    const attente = attenteEstimeeMs(priorite(), undefined, poids);
     if (attente > controle.attenteMaxMs) return Promise.reject(refusAttente(attente));
   }
   return new Promise<void>((resolve, reject) => {
@@ -305,6 +308,7 @@ function acquireSlot(controle: ControleFile = {}): Promise<void> {
     };
     const demande: Demande = {
       priorite,
+      poids,
       accorder: () => { signal?.removeEventListener("abort", quitter); controle.onCreneau?.(); resolve(); },
       refuser: (erreur) => { signal?.removeEventListener("abort", quitter); reject(erreur); },
     };
@@ -659,16 +663,21 @@ export function parseQuotes(json: Record<string, unknown>, requested: string[]):
 }
 
 /**
- * Récupère prix + variation pour plusieurs symboles tradfi en UN appel /quote groupé.
- * Coût Twelve Data = 1 crédit / symbole → on réserve N créneaux du rate-limiter partagé
- * (le quota 8/min reste respecté entre graphe et watchlist), en priorité de fond.
+ * Récupère prix + variation pour plusieurs symboles tradfi par appels /quote groupés.
+ * Coût Twelve Data = 1 crédit / symbole → chaque lot (8 symboles au plus, le débit du plan
+ * gratuit) réserve ses N créneaux du rate-limiter partagé D'UN SEUL COUP, en priorité de
+ * fond : le quota 8/min reste respecté entre graphe et watchlist, et une cotation abandonnée
+ * en file n'a consommé ni créneau ni crédit.
  */
 export async function fetchQuotes(symbols: string[], controle: ControleTwelveData = {}): Promise<TwelveDataQuote[]> {
-  if (symbols.length === 0) return [];
-  for (let i = 0; i < symbols.length; i++) await acquireSlot(controle);
-  const params = new URLSearchParams({ symbol: symbols.join(",") });
-  const res = await fetch(buildTwelveDataUrl(QUOTE_URL, params, apiKey), { signal: controle.signal });
-  const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-  if (json === null) throw new Error(`Twelve Data quote ${res.status} ${res.statusText}`);
-  return parseQuotes(json, symbols);
+  const out: TwelveDataQuote[] = [];
+  for (let i = 0; i < symbols.length; i += RATE_LIMIT) {
+    const lot = symbols.slice(i, i + RATE_LIMIT);
+    await acquireSlot(controle, lot.length);
+    const res = await fetch(buildTwelveDataUrl(QUOTE_URL, new URLSearchParams({ symbol: lot.join(",") }), apiKey), { signal: controle.signal });
+    const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    if (json === null) throw new Error(`Twelve Data quote ${res.status} ${res.statusText}`);
+    out.push(...parseQuotes(json, lot));
+  }
+  return out;
 }

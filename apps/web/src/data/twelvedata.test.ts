@@ -533,12 +533,17 @@ describe("file Twelve Data : priorités, abandon et fenêtre glissante", () => {
       const url = String(input);
       envois.push({ at: Date.now(), url });
       const symbol = new URL(url, "http://localhost").searchParams.get("symbol") ?? "";
-      return { status: 200, statusText: "OK", json: async () => url.includes("/quote") ? { symbol, close: "100", percent_change: "1" } : serie };
+      const quote = (s: string) => ({ symbol: s, close: "100", percent_change: "1" });
+      const json = !url.includes("/quote") ? serie : symbol.includes(",") ? Object.fromEntries(symbol.split(",").map((s) => [s, quote(s)])) : quote(symbol);
+      return { status: 200, statusText: "OK", json: async () => json };
     }));
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   const credits = () => (JSON.parse(stockage.get("axiom:twelvedata:daily:v1") ?? "{\"count\":0}") as { count: number }).count;
+  /** Crédits réellement envoyés : un par série, un par symbole d'une cotation. */
+  const creditsEnvoi = ({ url }: { url: string }) => url.includes("/quote") ? (new URL(url, "http://localhost").searchParams.get("symbol") ?? "").split(",").length : 1;
+  const maxCredits60s = () => Math.max(0, ...envois.map(({ at }) => envois.filter((e) => e.at > at - 60_000 && e.at <= at).reduce((n, e) => n + creditsEnvoi(e), 0)));
   /** Occupe les huit créneaux de la fenêtre courante. */
   async function saturer(td: typeof import("./twelvedata")): Promise<void> {
     await Promise.all(Array.from({ length: 8 }, (_, i) => td.fetchKlinesTwelveData(`PLEIN${i}`, "1d")));
@@ -586,6 +591,58 @@ describe("file Twelve Data : priorités, abandon et fenêtre glissante", () => {
     await Promise.all(demandes);
     expect(envois).toHaveLength(26);
     for (const { at } of envois) expect(envois.filter((e) => e.at > at - 60_000 && e.at <= at).length).toBeLessThanOrEqual(8);
+  });
+
+  it("une cotation groupée réserve ses crédits d'un seul coup : jamais plus de 8 crédits envoyés sur 60 s glissantes", async () => {
+    const td = await import("./twelvedata");
+    const demandes: Array<Promise<unknown>> = [];
+    for (const symbol of ["A", "B", "C", "D", "E", "F", "G"]) demandes.push(td.fetchQuotes([symbol]));
+    await vi.advanceTimersByTimeAsync(10_000);
+    demandes.push(td.fetchQuotes(["AAPL", "MSFT"]));
+    await vi.advanceTimersByTimeAsync(51_000);
+    for (const symbol of ["KO", "PEP", "XOM", "BA", "V", "MA"]) demandes.push(td.fetchQuotes([symbol]));
+    await vi.advanceTimersByTimeAsync(9_500);
+    demandes.push(td.fetchQuotes(["JPM"]));
+    await vi.advanceTimersByTimeAsync(120_000);
+    await Promise.all(demandes);
+    expect(envois.reduce((n, e) => n + creditsEnvoi(e), 0)).toBe(16);
+    expect(maxCredits60s()).toBeLessThanOrEqual(8);
+    expect(credits()).toBe(16);
+  });
+
+  it("au-delà de 8 symboles, la cotation part en lots d'au plus 8 crédits", async () => {
+    const td = await import("./twelvedata");
+    const symboles = Array.from({ length: 10 }, (_, i) => `T${i}`);
+    const cotation = td.fetchQuotes(symboles);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect((await cotation).map((q) => q.symbol)).toEqual(symboles);
+    expect(envois.map(creditsEnvoi)).toEqual([8, 2]);
+    expect(maxCredits60s()).toBeLessThanOrEqual(8);
+  });
+
+  it("une cotation groupée abandonnée en file ne consomme ni créneau ni crédit", async () => {
+    const td = await import("./twelvedata");
+    await Promise.all(Array.from({ length: 6 }, (_, i) => td.fetchKlinesTwelveData(`PLEIN${i}`, "1d")));
+    const controleur = new AbortController();
+    const cotation = td.fetchQuotes(["AAPL", "MSFT", "NVDA"], { signal: controleur.signal });
+    await vi.advanceTimersByTimeAsync(3_500);
+    controleur.abort();
+    await expect(cotation).rejects.toMatchObject({ name: "AbortError" });
+    expect(credits()).toBe(6);
+    // Les deux créneaux libres servent aussitôt le graphe.
+    await td.fetchKlinesTwelveData("AMZN", "1d", {}, { priorite: "graphe", attenteMaxMs: 20_000 });
+    expect(envois).toHaveLength(7);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(envois.some(({ url }) => url.includes("/quote"))).toBe(false);
+  });
+
+  it("l'attente annoncée compte le poids des cotations en file", async () => {
+    const td = await import("./twelvedata");
+    await Promise.all(Array.from({ length: 4 }, (_, i) => td.fetchKlinesTwelveData(`PLEIN${i}`, "1d")));
+    await vi.advanceTimersByTimeAsync(10_000);
+    // Quatre crédits libres, que la cotation de quatre symboles prend d'un coup.
+    void td.fetchQuotes(["A", "B", "C", "D"]);
+    await expect(td.fetchKlinesTwelveData("AMZN", "1d", {}, { attenteMaxMs: 20_000 })).rejects.toThrow("Quota Twelve Data : prochain créneau dans 50 s");
   });
 
   it("une requête partagée n'est annulée que lorsque son dernier abonné l'abandonne", async () => {

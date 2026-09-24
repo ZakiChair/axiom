@@ -26,6 +26,11 @@ describe("dataLoadErrorMessage", () => {
     expect(dataLoadErrorMessage(err)).toBe("CCData est injoignable ou bloqué par le navigateur.");
   });
 
+  it("quota Twelve Data : le prochain créneau annoncé par la file s'affiche tel quel, et lui seul", () => {
+    expect(dataLoadErrorMessage(new Error("Quota Twelve Data : prochain créneau dans 50 s"))).toBe("Quota Twelve Data : prochain créneau dans 50 s");
+    expect(dataLoadErrorMessage(new Error("Quota Twelve Data : prochain créneau dans 50 s <corps fournisseur arbitraire>"))).toBe(GENERIQUE);
+  });
+
   it("HTTP 451 : explique le refus régional et l’absence de source compatible accessible", () => {
     const msg = dataLoadErrorMessage(new Error("Binance REST 451 Unavailable For Legal Reasons"));
     expect(msg).toContain("451");

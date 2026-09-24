@@ -280,6 +280,31 @@ describe("renouvellement du catalogue partagé", () => {
     expect(resolu).toEqual([{ exchange: "binance", symbol: "NEWUSDT", timeframe: "1h" }]);
   });
 
+  it("force n'est pas absorbé par un rafraîchissement ordinaire qui rejoue les échecs mémorisés", async () => {
+    let retabli = false;
+    const base = sainsSauf(() => retabli ? Promise.resolve(okx("BTC-USDT"))
+      : new Promise((_resolve, reject) => setTimeout(() => reject(new Error("HTTP 503")), 10_000)));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (!url.includes("kraken")) return base(url);
+      if (!retabli) throw new Error("HTTP 503");
+      return new Promise((resolve) => setTimeout(() => resolve(response({ result: { btc: { wsname: "BTC/USD", status: "online" } } })), 1_000));
+    }));
+    const routing = await import("./marketRouting");
+    // Kraken échoue à t=0 (mémorisé jusqu'à 30 s), OKX à t=10 s (jusqu'à 40 s).
+    const initial = routing.fetchMarketCatalog();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect((await initial).unavailableSources).toEqual(["kraken", "okx"]);
+    retabli = true;
+    await vi.advanceTimersByTimeAsync(21_000);
+    // t=31 s : une lecture ordinaire lance le rafraîchissement de fond (OKX encore mémorisé)…
+    await routing.fetchMarketCatalog();
+    await vi.advanceTimersByTimeAsync(500);
+    // … puis l'événement « online » demande un rafraîchissement forcé.
+    const force = routing.fetchMarketCatalog({ force: true });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect((await force).unavailableSources).toEqual([]);
+  });
+
   it("force attend le réseau au lieu de servir le cache", async () => {
     let symbol = "BTC-USDT";
     vi.stubGlobal("fetch", sainsSauf(() => Promise.resolve(okx(symbol))));

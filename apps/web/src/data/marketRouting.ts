@@ -28,6 +28,8 @@ export interface ResolvedMarket {
 /** Binance conserve le split taker ; les autres places restent des replis du même spot. */
 const SOURCES: readonly ExchangeId[] = ["binance", "kraken", "coinbase", "bybit", "okx", "mexc", "twelvedata", "hyperliquid"];
 let pendingCatalog: Promise<MarketCatalog> | undefined;
+/** Le rafraîchissement en vol passe-t-il outre les échecs mémorisés par source (`force`) ? */
+let pendingForce = false;
 let cachedCatalog: { value: MarketCatalog; expires: number; signature: string } | undefined;
 const catalogListeners = new Set<(catalog: MarketCatalog) => void>();
 
@@ -56,7 +58,11 @@ export function fetchMarketCatalog(options: { force?: boolean } = {}): Promise<M
 }
 
 function rafraichirCatalogue(options: { force?: boolean }): Promise<MarketCatalog> {
-  if (pendingCatalog) return pendingCatalog;
+  if (pendingCatalog) {
+    // Un rafraîchissement ordinaire rejoue les échecs mémorisés : `force` le laisse finir puis réinterroge.
+    return options.force && !pendingForce ? pendingCatalog.then(() => rafraichirCatalogue(options)) : pendingCatalog;
+  }
+  pendingForce = options.force === true;
   pendingCatalog = Promise.allSettled(SOURCES.map((source) => fetchPairs(source, options))).then((results) => {
     const instruments: MarketCandidate[] = [];
     const unavailableSources: ExchangeId[] = [];

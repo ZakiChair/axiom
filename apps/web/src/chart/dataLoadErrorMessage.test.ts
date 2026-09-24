@@ -31,6 +31,11 @@ describe("dataLoadErrorMessage", () => {
     expect(dataLoadErrorMessage(new Error("Quota Twelve Data : prochain créneau dans 50 s <corps fournisseur arbitraire>"))).toBe(GENERIQUE);
   });
 
+  it("plafond journalier Twelve Data : la reprise à minuit UTC est annoncée", () => {
+    expect(dataLoadErrorMessage(new Error("Twelve Data: quota journalier Twelve Data épuisé (800 crédits) — reset à minuit UTC")))
+      .toBe("Quota journalier Twelve Data épuisé : reprise à minuit UTC.");
+  });
+
   it("HTTP 451 : explique le refus régional et l’absence de source compatible accessible", () => {
     const msg = dataLoadErrorMessage(new Error("Binance REST 451 Unavailable For Legal Reasons"));
     expect(msg).toContain("451");

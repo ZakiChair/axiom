@@ -4,7 +4,7 @@
  * Volontairement STABLE et sans détail technique (le détail reste dans la console et
  * le panneau Santé), SAUF quand l'opérateur peut agir lui-même : HTTP 451 = la source
  * refuse la région, Twelve Data signale une clé invalide ou un abonnement requis, ou
- * la file de son quota annonce le prochain créneau. La sélection
+ * la file de son quota annonce le prochain créneau (ou la reprise du plafond journalier). La sélection
  * de source est automatique ; aucune suggestion de changer manuellement de fournisseur.
  *
  * Fonction PURE — `ChartInstance.tsx` n'est pas testable sans stub DOM lourd.
@@ -16,6 +16,8 @@ export function dataLoadErrorMessage(error: unknown): string {
     // Ces messages fixes n'exposent ni clé, ni URL, ni corps fournisseur arbitraire.
     // Refus de la file du quota (texte fixe de data/twelvedata.ts) : le délai annoncé sert tel quel.
     if (/^Quota Twelve Data : prochain créneau dans \d+ s$/.test(error.message)) return error.message;
+    // Plafond journalier (texte fixe de data/twelvedata.ts) : « Réessayer » reste refusé jusqu'à minuit UTC.
+    if (error.message.includes("quota journalier Twelve Data épuisé")) return "Quota journalier Twelve Data épuisé : reprise à minuit UTC.";
     // Une restriction de plan peut aussi mentionner l'API key sans qu'elle soit invalide.
     if (/\bavailable\s+starting\s+with\s+(?:the\s+)?Grow\s+or\s+Venture\s+plan\b/i.test(error.message)) {
       return "Cet historique nécessite un abonnement Twelve Data Grow ou Venture.";

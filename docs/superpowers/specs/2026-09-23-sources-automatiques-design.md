@@ -19,6 +19,14 @@ AXIOM sélectionne les sources disponibles pour chaque actif.
   les résultats de recherche se renouvellent après le retour d'une source.
 - L'ajout direct aux favoris vérifie la source du prix ; cliquer sur un favori
   conserve cette provenance. OKX, Bybit et Hyperliquid ont leurs propres tickers.
+  *Amendement du 24 septembre 2026* : au comptant, Binance — seule place qui porte
+  le split taker — passe devant une provenance enregistrée dès que son catalogue
+  confirme le même instrument (même symbole, même devise). La provenance ne départage
+  plus que les replis ; elle garde la tête quand le catalogue Binance est indisponible.
+  Un favori enregistré ailleurs par héritage automatique (ex. `okx:BTCUSDT`) est
+  ré-attribué à Binance après un vrai prix Binance ; un instrument absent de Binance
+  (ex. `CARDSUSDT`) garde sa place, et un favori n'est jamais déplacé vers une
+  troisième place.
 - Les sources des deux jambes d'un ratio sont également déterminées automatiquement.
   Les séries calculées conservent leur encodage de provenance existant.
 - Les anciens favoris, sessions et graphiques secondaires passent par le même

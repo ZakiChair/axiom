@@ -584,3 +584,73 @@ capture au signal est synchrone et ne charge jamais rétrospectivement une donn�
 Les calculs descriptifs, données révisées, hypothèses de scénario et observations
 réellement disponibles demeurent identifiables. Les limites de bundle initial
 restent 1 220 000 octets bruts et 360 000 octets gzip.
+
+
+## Corrections demandées le 24 septembre 2026
+
+Le propriétaire a signalé que « certains actifs prennent énormément de temps à
+charger » et que les « longs et shorts piégés semblent toujours incohérents »
+(second signalement après le 21 septembre), puis demandé correction, fusion et
+déploiement. **39 fenêtres, 214 indicateurs, 9 identifiants de marché, aucune
+dépendance, aucun hôte ni fournisseur, aucune règle de proxy modifiée,
+`@axiom/types` inchangé.** Rapport : `docs/revue-2026-09-24-chargement-pieges.md`.
+
+1. **Chargement des actifs.** Causes mesurées : tout backfill crypto attendait
+   les huit catalogues (`Promise.allSettled`, jusqu'à 12 s si une place était
+   muette) sans servir le cache périmé ; le catalogue Coinbase partait en direct
+   sans CORS, donc toujours « indisponible », cache ramené à 30 s ; exchangeInfo
+   Binance complet (17,6 Mo) ; file Twelve Data 8/60 s sans annulation, où le
+   backfill abandonnait à 20 s une requête qui partait quand même plus tard.
+   Corrections : catalogue servi périmé et rafraîchi en fond, republication
+   seulement si son contenu change, échec d'une source mémorisé 30 s sans perdre
+   son dernier succès ; résolution progressive (à froid, seule la provenance ou
+   Binance est attendue) ; essai spéculatif borné à 4 s ; Coinbase par `/extapi`
+   (hôte déjà admis) ; exchangeInfo `symbolStatus=TRADING&showPermissionSets=false`
+   (mêmes 1 372 symboles, 2,5 Mo) ; file Twelve Data FIFO à deux priorités
+   (graphe devant cotations et polls), annulable, crédits d'une cotation groupée
+   réservés d'un coup, délai du backfill armé à l'obtention du créneau, message
+   « Quota Twelve Data : prochain créneau dans N s », refus immédiat sans clé en
+   appel direct (Vercel). Mesures réelles au navigateur, main → branche :
+   démarrage à froid 1 084 → 748 ms ; place muette 12,5 s → 0,8 s ; ouverture
+   après expiration du cache 698-994 → 257-510 ms. Limite assumée : une
+   provenance dont l'hôte est entièrement muet coûte 4 s avant le repli.
+2. **Watchlist.** Les synthétiques (TOTAL, TOTAL2, TOTAL3) et les ratios
+   entretenaient une boucle de 30 s qui resondait tous les favoris. Ils sont
+   désormais résolus sans prix ; les confirmations de source valent pour la
+   session ; la sonde OKX vise un seul instrument (`ticker?instId=`) ; le ticker
+   Coinbase passe par `/extapi`. Trafic de fond mesuré : 15,1 → 3,8 requêtes/min.
+3. **Provenance.** Voir l'amendement de
+   `docs/superpowers/specs/2026-09-23-sources-automatiques-design.md` : Binance
+   confirmé passe devant une provenance héritée au comptant. `store/market.ts`
+   (héritage de `setSymbol`) est inchangé : le routage tranche.
+4. **Volume piégé (`trappedVolume`) — nouveau modèle.** Le modèle du 21 septembre
+   n'était qu'un miroir du profil de volume (corrélation 0,996-1,000 avec un split
+   50/50 ou permuté ; au plus bas 24 h, 98-100 % de tout le volume acheteur
+   déclaré piégé, jusqu'à 130-220 % de l'OI Binance en 1h). Il suit maintenant le
+   delta agresseur NET par bougie (`buy − sell`), réparti sur `[low, high]`. Une
+   tranche est libérée quand le prix revient à son niveau après être passée sous
+   l'eau : `(close_{k−1}, high_k]` pour un long, `[low_k, close_{k−1})` pour un
+   short. Son poids vaut `1 − âge/length` sur `(i−length, i]`. Le calcul se fait
+   en une passe avant, invariante par préfixe. Il est vérifié par trois
+   réimplémentations indépendantes (écart ≤ 1e-9). Id, clés
+   `trappedLong`/`trappedShort`, couleurs et `length = 96` sont conservés. L'input
+   est renommé « Horizon (barres) » et passe en précision 2. Les valeurs sont
+   environ 30 à 40 fois plus basses : les **seuils d'alerte existants sur ces
+   clés sont à recalibrer**. Le croisement d'indicateur ne propose plus
+   `trappedVolume`, car longs et shorts sont de signes opposés. L'histogramme
+   n'est pas plus lisse : il dépend du chemin du prix.
+5. **Panes sans valeur.** Un indicateur UNUSABLE n'est plus tracé. Son en-tête
+   de pane (ou la légende d'overlay) affiche la raison. Un résultat sans valeur
+   finie affiche « indisponible » avec sa cause, par exemple « Historique
+   insuffisant : 74 bougies, horizon 96 » en 1M. Aucun indicateur n'est recalculé
+   pendant l'extension de session. Les grands nombres négatifs sont abrégés comme
+   les positifs (formateur symétrique installé à `init`, qui sert aussi CVD, OI,
+   macro et revenus).
+
+Budget d'entrée final : **1 212 743 / 359 667 octets** (bruts/gzip), plafonds
+1 220 000 / 360 000 inchangés. **Marge de 333 octets gzip : le prochain lot qui
+touche le chemin d'entrée doit d'abord libérer des octets.** Déploiement : ne
+plus lancer `vercel build` dans le checkout principal. Il écrase
+`apps/web/dist`, que le daemon sert (bundle Vercel en local : Twelve Data en
+direct sans la clé `.env`, WHALES et Replay coupés). Déployer par build distant,
+puis reconstruire `dist` par `pnpm --filter @axiom/web build`.

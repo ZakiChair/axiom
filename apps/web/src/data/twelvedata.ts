@@ -120,6 +120,8 @@ const refusAttente = (attente: number): Error => new Error(`Quota Twelve Data : 
 /** File FIFO explicite : la première demande « graphe » passe devant toute demande de fond. */
 const file: Demande[] = [];
 let minuteurFile: ReturnType<typeof setTimeout> | undefined;
+/** Échéance du minuteur armé : une demande servie plus tôt que la tête actuelle le rapproche. */
+let reveilFile = 0;
 
 // ───────── Compteur JOURNALIER (~800 crédits/jour), reset à minuit UTC ─────────
 
@@ -235,7 +237,11 @@ function purgerFenetre(now: number): void {
   while (requestTimes.length > 0 && now - (requestTimes[0] ?? now) >= RATE_WINDOW_MS) requestTimes.shift();
 }
 
-/** Sert la file tant que la fenêtre a des créneaux ; sinon UN minuteur attend le plus ancien. */
+/**
+ * Sert la file tant que la fenêtre a des créneaux ; sinon UN minuteur attend les créneaux de la
+ * tête, avancé si une demande plus légère (graphe d'un crédit derrière une cotation de 8) prend
+ * la tête ou si la tête quitte la file.
+ */
 function servirFile(): void {
   for (;;) {
     const demande = file.find((d) => d.priorite() === "graphe") ?? file[0];
@@ -246,8 +252,11 @@ function servirFile(): void {
     // Créneaux à libérer avant que TOUS les crédits de la demande tiennent dans la fenêtre.
     const exces = requestTimes.length + demande.poids - RATE_LIMIT;
     if (!refus && exces > 0) {
-      if (minuteurFile === undefined) {
-        minuteurFile = setTimeout(() => { minuteurFile = undefined; servirFile(); }, (requestTimes[exces - 1] ?? now) + RATE_WINDOW_MS - now);
+      const reveil = (requestTimes[exces - 1] ?? now) + RATE_WINDOW_MS;
+      if (minuteurFile === undefined || reveil < reveilFile) {
+        clearTimeout(minuteurFile);
+        reveilFile = reveil;
+        minuteurFile = setTimeout(() => { minuteurFile = undefined; servirFile(); }, reveil - now);
       }
       return;
     }
@@ -305,6 +314,7 @@ function acquireSlot(controle: ControleFile = {}, poids = 1): Promise<void> {
       const index = file.indexOf(demande);
       if (index !== -1) file.splice(index, 1);
       reject(signal?.reason);
+      servirFile();
     };
     const demande: Demande = {
       priorite,

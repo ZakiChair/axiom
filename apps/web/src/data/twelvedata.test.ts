@@ -636,6 +636,47 @@ describe("file Twelve Data : priorités, abandon et fenêtre glissante", () => {
     expect(envois.some(({ url }) => url.includes("/quote"))).toBe(false);
   });
 
+  /** Fenêtre à moitié renouvelée : 4 séries à 0 s, 4 à 30 s (premier créneau libre à 60 s). */
+  async function fenetreEtagee(td: typeof import("./twelvedata")): Promise<void> {
+    await Promise.all(Array.from({ length: 4 }, (_, i) => td.fetchKlinesTwelveData(`TOT${i}`, "1d")));
+    await vi.advanceTimersByTimeAsync(30_000);
+    await Promise.all(Array.from({ length: 4 }, (_, i) => td.fetchKlinesTwelveData(`TARD${i}`, "1d")));
+    await vi.advanceTimersByTimeAsync(1_000);
+  }
+  const departs = (symbole: string) => envois.filter(({ url }) => url.includes(`symbol=${symbole}`)).map(({ at }) => at - Date.parse("2026-07-01T12:00:00Z"));
+
+  it("le graphe arrivé derrière une cotation de 8 en tête part au premier créneau libre, pas au réveil de la cotation", async () => {
+    const td = await import("./twelvedata");
+    await fenetreEtagee(td);
+    // Cotation de 8 à 31 s : ses huit crédits tiennent à 90 s, le réveil est programmé pour elle.
+    const cotation = td.fetchQuotes(["A", "B", "C", "D", "E", "F", "G", "H"]);
+    await vi.advanceTimersByTimeAsync(14_000);
+    // Graphe à 45 s : attente annoncée 15 s (créneau à 60 s), donc accepté.
+    const graphe = td.fetchKlinesTwelveData("MSFT", "1d", { limit: 500 }, { priorite: "graphe", attenteMaxMs: 20_000 });
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(departs("MSFT")).toEqual([60_000]);
+    await vi.advanceTimersByTimeAsync(120_000);
+    await Promise.all([graphe, cotation]);
+    expect(maxCredits60s()).toBeLessThanOrEqual(8);
+  });
+
+  it("une cotation abandonnée en tête de file libère aussitôt la demande suivante au premier créneau", async () => {
+    const td = await import("./twelvedata");
+    await fenetreEtagee(td);
+    const controleur = new AbortController();
+    const cotation = td.fetchQuotes(["A", "B", "C", "D", "E", "F", "G", "H"], { signal: controleur.signal });
+    await vi.advanceTimersByTimeAsync(4_000);
+    const fond = td.fetchKlinesTwelveData("KO", "1d");
+    await vi.advanceTimersByTimeAsync(5_000);
+    controleur.abort();
+    await expect(cotation).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(departs("KO")).toEqual([60_000]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await fond;
+    expect(envois.some(({ url }) => url.includes("/quote"))).toBe(false);
+  });
+
   it("l'attente annoncée compte le poids des cotations en file", async () => {
     const td = await import("./twelvedata");
     await Promise.all(Array.from({ length: 4 }, (_, i) => td.fetchKlinesTwelveData(`PLEIN${i}`, "1d")));

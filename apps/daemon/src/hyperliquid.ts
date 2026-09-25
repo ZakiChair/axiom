@@ -8,14 +8,14 @@
  * seront liquidées.
  *
  * Deux amonts, deux cadences :
- *  - Pool d'adresses : GET stats-data.hyperliquid.xyz/Mainnet/leaderboard (34 Mo,
- *    ~2 s). Téléchargé AU PLUS 1×/6 h, PARESSEUSEMENT (au premier besoin, jamais
- *    au boot du daemon). Pool cible de TAILLE_POOL (~1 500) adresses : top
- *    N_VALEUR_POOL (500) par accountValue, complété par le classement volume
- *    hebdomadaire (cf. extrairePool), persisté dans la table `kv` (namespace « hl »,
- *    clé « pool ») AVEC ses paramètres : un pool construit avec d'autres paramètres
- *    n'est pas frais (retéléchargé). Amont KO → on réutilise le pool persisté même
- *    périmé ou d'anciens paramètres ; rien de persisté → 503 propre.
+ *  - Pool d'adresses : GET stats-data.hyperliquid.xyz/Mainnet/leaderboard (≈ 39 Mo,
+ *    ≈ 31 s mesurées le 2026-09-25 sur la liaison du poste). Téléchargé AU PLUS 1×/6 h,
+ *    PARESSEUSEMENT (au premier besoin, jamais au boot du daemon). Pool cible de
+ *    TAILLE_POOL (~1 500) adresses : top N_VALEUR_POOL (500) par accountValue, complété
+ *    par le classement volume hebdomadaire (cf. extrairePool), persisté dans la table
+ *    `kv` (namespace « hl », clé « pool ») AVEC ses paramètres : un pool construit avec
+ *    d'autres paramètres n'est pas frais (retéléchargé). Amont KO → on réutilise le pool
+ *    persisté même périmé ou d'anciens paramètres ; rien de persisté → 503 propre.
  *  - Instantané des positions : POST api.hyperliquid.xyz/info
  *    { type: "clearinghouseState", user } par adresse, CONCURRENCE (4) en vol, lots
  *    cadencés par un DÉBIT DE POIDS plafonné (cf. DEBIT_POIDS_MIN). UN SEUL
@@ -27,15 +27,22 @@
  * weight limit of 1200 per minute » PAR IP ; poids 2 pour « l2Book, allMids,
  * clearinghouseState, orderStatus, spotClearinghouseState, exchangeStatus », 20 pour
  * les autres requêtes info (dont metaAndAssetCtxs du collecteur), 60 pour userRole.
- * Budget : 1 500 adresses × 2 = 3 000 poids par scan ; à 900 poids/min alloués au
- * scan → ≈ 200 s (calculé, non mesuré) ; en moyenne sur le cycle de 5 min du
- * collecteur ≈ 600 poids/min ; ≈ 300 poids/min restent au navigateur, qui appelle
- * api.hyperliquid.xyz depuis la MÊME IP (funding, carnet…).
+ * Les séries `fundingHistory`, `recentTrades`… coûtent en plus 1 poids « per 20 items
+ * returned ». Budget : 1 500 adresses × 2 = 3 000 poids par scan ; à 750 poids/min
+ * alloués au scan → ≈ 240 s (calculé, non mesuré) ; en moyenne sur le cycle de 5 min du
+ * collecteur ≈ 600 poids/min ; 450 poids/min restent au navigateur, qui appelle
+ * api.hyperliquid.xyz depuis la MÊME IP — marge qui dépend des indicateurs HL actifs
+ * (cf. DEBIT_POIDS_MIN) ; un 429 tronque l'instantané.
  *
  * LECTURES : une lecture (/hl/liqlevels, /hl/positions) n'attend JAMAIS un scan
  * quand un cache existe, même périmé (servi tel quel, reconstruction en arrière-plan) ;
  * sans aucun cache elle attend au plus ATTENTE_FROID_MAX_MS puis répond 503
  * `{ enConstruction: true }` + Retry-After (le scan continue et remplit le cache).
+ * Premier scan après un démarrage : ≈ 4 min (≈ 4,5 si le leaderboard est à retélécharger).
+ * PANNE AMONT : un scan dont les premiers lots échouent tous est abandonné (quelques
+ * secondes) ; sans cache, l'échec est retenu et les lectures répondent le 503 « pool
+ * indisponible » (jamais « en construction » sans fin), avec un repli de
+ * REPLI_ECHEC_TOTAL_MS avant qu'une lecture relance un essai.
  *
  * PIÈGE amont (vérifié) : en marge croisée, `liquidationPx` peut être `null`
  * (compte bien collatéralisé) ou ABERRANT (short BNB de 12 $ « liquidable » à
@@ -63,7 +70,7 @@ export const URL_INFO = "https://api.hyperliquid.xyz/info";
 export const TAILLE_POOL = 1500;
 /** Part du pool prise au classement `accountValue` (les plus gros comptes). */
 export const N_VALEUR_POOL = 500;
-/** Fraîcheur du pool d'adresses : au plus un téléchargement des 34 Mo / 6 h. */
+/** Fraîcheur du pool d'adresses : au plus un téléchargement des ≈ 39 Mo / 6 h. */
 export const TTL_POOL_MS = 6 * 3_600_000;
 /** Fraîcheur de l'instantané des positions (tous coins confondus). */
 export const TTL_INSTANTANE_MS = 5 * 60_000;
@@ -75,16 +82,28 @@ export const CONCURRENCE = 4;
 /** Poids d'une requête `clearinghouseState` (doc officielle, cf. en-tête). */
 export const POIDS_CLEARINGHOUSE = 2;
 /**
- * Poids/min alloués au scan, SOUS le quota IP de 1 200 : la marge (~300/min) reste au
- * navigateur, qui interroge api.hyperliquid.xyz depuis la même IP.
+ * Poids/min alloués au scan, SOUS le quota IP de 1 200 : la marge (450/min) reste au
+ * navigateur, qui interroge api.hyperliquid.xyz depuis la même IP. Elle dépend des
+ * indicateurs HL actifs : chaque série `fundingHistory` 90 j (hlFunding, fundingHistHl ;
+ * TTL aux 60 s, pages de 500 à 20 + 25 poids) coûte ≈ 208 poids/min, le ticker HL
+ * 2 × (20 + 20 par symbole -PERP) par minute. Au-delà, un 429 tronque l'instantané.
  */
-export const DEBIT_POIDS_MIN = 900;
+export const DEBIT_POIDS_MIN = 750;
 /**
  * Écart minimal entre les DÉMARRAGES de deux lots : CONCURRENCE × POIDS × 60 000 / DÉBIT
- * = 533,3 ms, arrondi au-dessus (534) pour ne jamais dépasser le débit alloué.
- * 1 500 adresses = 375 lots → ≈ 200 s par scan.
+ * = 640 ms (arrondi au-dessus si la division ne tombe pas juste, pour ne jamais dépasser
+ * le débit alloué). 1 500 adresses = 375 lots → ≈ 240 s par scan (< 5 min du collecteur).
  */
 export const INTERVALLE_LOT_MS = Math.ceil((CONCURRENCE * POIDS_CLEARINGHOUSE * 60_000) / DEBIT_POIDS_MIN);
+/**
+ * Abandon précoce : si les LOTS_ECHEC_ABANDON PREMIERS lots échouent TOUS (aucune adresse
+ * n'a répondu, hors 429 qui a son propre arrêt), l'amont est en panne — inutile de cadencer
+ * 375 lots d'échecs (≈ 240 s, voire ≈ 62 min si chaque requête pend jusqu'à
+ * TIMEOUT_ETAT_MS). En DÉBUT de scan seulement : un incident passager au milieu d'un scan
+ * sain ne le tronque pas. `clearinghouseState` répond pour toute adresse valide (même
+ * vide) : 12 échecs d'affilée signent une panne, pas des comptes particuliers.
+ */
+export const LOTS_ECHEC_ABANDON = 3;
 /**
  * Attente maximale d'une lecture SANS AUCUN cache (premier scan après le boot) : au-delà,
  * 503 « en construction ». Bien sous l'idleTimeout de Bun.serve (index.ts).
@@ -92,9 +111,18 @@ export const INTERVALLE_LOT_MS = Math.ceil((CONCURRENCE * POIDS_CLEARINGHOUSE * 
 export const ATTENTE_FROID_MAX_MS = 15_000;
 /** Relance suggérée au client pendant la construction (en-tête Retry-After, secondes). */
 export const RELANCE_CONSTRUCTION_S = 30;
-/** Le leaderboard pèse 34 Mo : bornage large, seulement contre une réponse aberrante. */
+/**
+ * Après un échec TOTAL (aucun pool, ou 0 adresse scannée) sans aucun cache, une lecture
+ * non forcée répond le 503 « pool indisponible » SANS relancer d'essai pendant ce délai
+ * (compté depuis le lancement de l'essai raté). 2 min < 4 min du rafraîchissement du
+ * front en « erreur » : chaque rafraîchissement suivant relance un essai, sans rafale
+ * (bouton Réessayer, plusieurs vues). Le collecteur forcé n'est pas concerné.
+ */
+export const REPLI_ECHEC_TOTAL_MS = 2 * 60_000;
+/** Le leaderboard pèse ≈ 39 Mo : bornage large, seulement contre une réponse aberrante. */
 const TAILLE_MAX_LEADERBOARD = 80 * 1024 * 1024;
-const TIMEOUT_LEADERBOARD_MS = 60_000;
+/** ≈ 31 s mesurées le 2026-09-25 sur la liaison du poste (1,5 Mo/s) : marge ×4. */
+const TIMEOUT_LEADERBOARD_MS = 120_000;
 const TIMEOUT_ETAT_MS = 10_000;
 
 /** Un niveau de liquidation réel (les champs sont tous scalaires : contrat front). */
@@ -404,7 +432,7 @@ export async function chargerPool(
       signal: AbortSignal.timeout(TIMEOUT_LEADERBOARD_MS),
     });
     if (!res.ok) throw new Error(`leaderboard HTTP ${res.status}`);
-    // Pré-bornage sur l'en-tête avant lecture du corps (le corps NORMAL fait 34 Mo).
+    // Pré-bornage sur l'en-tête avant lecture du corps (le corps NORMAL fait ≈ 39 Mo).
     const cl = res.headers.get("content-length");
     if (cl !== null && Number(cl) > TAILLE_MAX_LEADERBOARD) throw new Error("leaderboard trop volumineux");
     const texte = await res.text();
@@ -455,7 +483,8 @@ async function etatCompte(addr: string, fetchImpl: typeof fetch): Promise<Result
  * attente après le dernier lot. Débit résultant ≤ DEBIT_POIDS_MIN poids/min.
  * Une adresse en échec est simplement ignorée et ne compte pas dans
  * `adressesScannees`. Un 429 amont interrompt le reste de l'instantané : les lots
- * non envoyés ne sont PAS lancés (les adresses restantes ne comptent pas).
+ * non envoyés ne sont PAS lancés (les adresses restantes ne comptent pas). Idem si
+ * les LOTS_ECHEC_ABANDON premiers lots échouent tous (amont en panne).
  */
 export async function construireInstantane(
   adresses: readonly string[],
@@ -469,6 +498,7 @@ export async function construireInstantane(
   const positions: PositionLiq[] = [];
   let adressesScannees = 0;
   let limite429 = false;
+  let abandon = false;
   for (let i = 0; i < adresses.length; i += CONCURRENCE) {
     const debutLot = horloge.now();
     const lot = adresses.slice(i, i + CONCURRENCE);
@@ -483,15 +513,22 @@ export async function construireInstantane(
       positions.push(...r.positions);
     }
     if (limite429) break; // quota atteint : on n'envoie plus les lots restants
+    const resteDesLots = i + CONCURRENCE < adresses.length;
+    // Amont en panne dès le début (réseau, 5xx, délais) : on n'envoie plus rien.
+    if (resteDesLots && adressesScannees === 0 && i / CONCURRENCE + 1 >= LOTS_ECHEC_ABANDON) {
+      abandon = true;
+      break;
+    }
     const reste = debutLot + intervalle - horloge.now();
-    if (i + CONCURRENCE < adresses.length && reste > 0) await attendre(horloge, reste);
+    if (resteDesLots && reste > 0) await attendre(horloge, reste);
   }
-  // Durée réelle du scan (≈ 200 s attendues pour 1 500 adresses) : une ligne de log
+  // Durée réelle du scan (≈ 240 s attendues pour 1 500 adresses) : une ligne de log
   // par instantané construit, pour vérifier la cadence en service.
   const dureeS = Math.max(0, (horloge.now() - debut) / 1000);
   console.log(
     `[axiomd] instantané HL : ${adressesScannees} adresses en ${dureeS.toFixed(1)} s` +
-      (limite429 ? " (interrompu sur 429)" : ""),
+      (limite429 ? " (interrompu sur 429)" : "") +
+      (abandon ? " (abandonné : amont en échec)" : ""),
   );
   return { ts: now, adressesScannees, parCoin: agregerParCoin(positions) };
 }
@@ -506,11 +543,25 @@ let instantaneEnVol: Promise<InstantaneHL | null> | null = null;
  * pas le cache à sa fin — une lecture servie « en arrière-plan » ne pollue pas la suite.
  */
 let generationCache = 0;
+/**
+ * Horodatage (logique : `now` de son lancement) de la dernière construction TERMINÉE en
+ * échec total (aucun pool, ou 0 adresse scannée), effacé au premier succès. Sans aucun
+ * cache, c'est la dernière issue connue : les lectures répondent « pool indisponible »,
+ * plus jamais « en construction » (le front passerait sinon d'un essai raté au suivant
+ * sans voir l'échec — scan en panne, ou leaderboard qui pend au-delà de 15 s).
+ */
+let echecTotalTs: number | null = null;
+
+/** Aucun cache ET le dernier scan terminé a échoué totalement. */
+function echecTotalSansCache(): boolean {
+  return cacheInstantane === null && echecTotalTs !== null;
+}
 
 /** Réinitialise le cache mémoire (utilisé par les tests ; cf. reinitialiserTelegram de notify.ts). */
 export function reinitialiserHl(): void {
   cacheInstantane = null;
   instantaneEnVol = null;
+  echecTotalTs = null;
   generationCache += 1;
 }
 
@@ -521,11 +572,16 @@ export function reinitialiserHl(): void {
  * — utilisé par le collecteur hlLiqHeat, qui ne doit JAMAIS archiver le repli UI.
  *
  * Lecture NON forcée : dès qu'un cache existe (même PÉRIMÉ), il est servi TOUT DE
- * SUITE — un scan de ~1 500 adresses dure ≈ 200 s, au-delà de l'idleTimeout de
+ * SUITE — un scan de ~1 500 adresses dure ≈ 240 s, au-delà de l'idleTimeout de
  * Bun.serve ; la construction (lancée si aucune n'est en vol) le remplace en
  * arrière-plan. Sans AUCUN cache, la promesse rendue est celle de la construction :
  * c'est traiterHl qui borne cette attente (ATTENTE_FROID_MAX_MS → 503 « en
  * construction »). `options.horloge`/`intervalleLotMs` ne servent qu'aux tests.
+ *
+ * Sans cache après un échec TOTAL (cf. echecTotalTs) : null tout de suite (503 « pool
+ * indisponible ») tant qu'une relance est en vol ou que REPLI_ECHEC_TOTAL_MS n'est pas
+ * écoulé — pas de scan relancé à chaque lecture contre un amont en panne ; ensuite, la
+ * lecture relance un essai (dont l'éventuel délai expiré répond encore « pool »).
  */
 export function obtenirInstantane(
   d: Database,
@@ -536,6 +592,14 @@ export function obtenirInstantane(
   const forcer = options?.forcer === true;
   if (!forcer && cacheInstantane !== null && now - cacheInstantane.ts < TTL_INSTANTANE_MS) {
     return Promise.resolve(cacheInstantane);
+  }
+  if (
+    !forcer &&
+    cacheInstantane === null &&
+    echecTotalTs !== null &&
+    (instantaneEnVol !== null || now - echecTotalTs < REPLI_ECHEC_TOTAL_MS)
+  ) {
+    return Promise.resolve(null);
   }
   // Une construction est déjà en vol : on s'y raccroche (deux fenêtres ouvrant BTC
   // et ETH en même temps ne doivent pas lancer 2 scans complets du pool). Sauf si un
@@ -551,14 +615,17 @@ export function obtenirInstantane(
   const generation = generationCache;
   const p: Promise<InstantaneHL | null> = (async (): Promise<InstantaneHL | null> => {
     const adresses = await chargerPool(d, fetchImpl, now);
-    if (adresses.length === 0) return null;
-    const inst = await construireInstantane(adresses, fetchImpl, now, options);
-    // Échec amont TOTAL : aucune observation neuve. Le repli UI est appliqué
-    // APRÈS cette promesse partagée, sinon un collecteur qui la rejoint recevrait
-    // l'ancien cache comme s'il venait d'être acquis.
-    if (inst.adressesScannees === 0) return null;
-    if (generation === generationCache) cacheInstantane = inst;
-    return inst;
+    const inst = adresses.length === 0 ? null : await construireInstantane(adresses, fetchImpl, now, options);
+    // Échec amont TOTAL (aucun pool, ou 0 adresse scannée) : aucune observation neuve.
+    // Le repli UI est appliqué APRÈS cette promesse partagée, sinon un collecteur qui la
+    // rejoint recevrait l'ancien cache comme s'il venait d'être acquis. L'échec est
+    // RETENU (cf. echecTotalTs) ; le premier succès l'efface.
+    const reussi = inst !== null && inst.adressesScannees > 0;
+    if (generation === generationCache) {
+      if (reussi) cacheInstantane = inst;
+      echecTotalTs = reussi ? null : now;
+    }
+    return reussi ? inst : null;
   })().finally(() => {
     // Libérer AVANT de rendre le résultat : un appel forcé suivant ne doit pas
     // rejoindre une promesse déjà terminée qui n'a pas encore été nettoyée.
@@ -606,9 +673,11 @@ export const MAX_POSITIONS = 100;
  * permettent aux tests d'injecter (convention globe.ts).
  *
  * Deux 503 DISTINCTS : « pool d'adresses indisponible » (amont KO sans pool persisté,
- * ou échec total du scan) et, sans aucun cache, scan non terminé après
- * ATTENTE_FROID_MAX_MS → `{ erreur, enConstruction: true }` + `Retry-After:
- * RELANCE_CONSTRUCTION_S` (le scan continue en arrière-plan et remplira le cache).
+ * ou échec total du scan — retenu tant qu'aucun scan n'a réussi, relance comprise) et,
+ * sans aucun cache ni échec connu, scan non terminé après ATTENTE_FROID_MAX_MS →
+ * `{ erreur, enConstruction: true }` + `Retry-After: RELANCE_CONSTRUCTION_S` (le scan
+ * continue en arrière-plan et remplira le cache) — donc seulement pendant le PREMIER
+ * scan depuis le démarrage.
  *
  * LIMITE ASSUMÉE de /positions : l'instantané ne retient que les positions à
  * `liquidationPx` exploitable (cf. parserEtatCompte) — les positions cross très
@@ -658,6 +727,9 @@ export async function traiterHl(
       options.horloge ?? HORLOGE_REELLE,
     );
     if (inst === DELAI_EXPIRE) {
+      // Relance après un échec total : la dernière issue connue reste l'échec — jamais
+      // « en construction », qui laisserait le front en attente d'un scan raté au suivant.
+      if (echecTotalSansCache()) return json({ erreur: "pool d'adresses Hyperliquid indisponible" }, req, 503);
       return json({ erreur: "instantané Hyperliquid en construction", enConstruction: true }, req, 503, {
         "retry-after": String(RELANCE_CONSTRUCTION_S),
       });

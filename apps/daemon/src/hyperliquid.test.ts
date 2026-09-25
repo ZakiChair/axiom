@@ -12,12 +12,14 @@ import {
   extrairePool,
   extraireTopAdresses,
   INTERVALLE_LOT_MS,
+  LOTS_ECHEC_ABANDON,
   N_VALEUR_POOL,
   obtenirInstantane,
   parserEtatCompte,
   POIDS_CLEARINGHOUSE,
   reinitialiserHl,
   RELANCE_CONSTRUCTION_S,
+  REPLI_ECHEC_TOTAL_MS,
   SEUIL_VALEUR_USD,
   TAILLE_POOL,
   traiterHl,
@@ -294,19 +296,20 @@ describe("arrêt sur 429 amont", () => {
 });
 
 describe("cadence du scan (débit de poids plafonné)", () => {
-  test("constantes : quota HL 1 200 poids/min/IP, clearinghouseState = 2, débit alloué 900/min", () => {
+  test("constantes : quota HL 1 200 poids/min/IP, clearinghouseState = 2, débit alloué 750/min", () => {
     expect(POIDS_CLEARINGHOUSE).toBe(2);
-    expect(DEBIT_POIDS_MIN).toBe(900);
+    expect(DEBIT_POIDS_MIN).toBe(750);
     expect(CONCURRENCE).toBe(4);
     expect(INTERVALLE_LOT_MS).toBe(Math.ceil((CONCURRENCE * POIDS_CLEARINGHOUSE * 60_000) / DEBIT_POIDS_MIN));
-    expect(INTERVALLE_LOT_MS).toBe(534);
-    // Débit effectif en pointe ≤ débit alloué < quota IP (marge laissée au navigateur).
+    expect(INTERVALLE_LOT_MS).toBe(640);
+    // Débit effectif en pointe ≤ débit alloué < quota IP ; la marge (450/min) couvre les
+    // séries HL du navigateur (fundingHistory paginé 90 j ≈ 208 poids par série et par min).
     const poidsParMinute = (CONCURRENCE * POIDS_CLEARINGHOUSE * 60_000) / INTERVALLE_LOT_MS;
     expect(poidsParMinute).toBeLessThanOrEqual(DEBIT_POIDS_MIN);
-    expect(DEBIT_POIDS_MIN).toBeLessThan(1200);
-    // Scan complet du pool cible ≈ 200 s : sous la période de 5 min du collecteur.
+    expect(1200 - DEBIT_POIDS_MIN).toBeGreaterThanOrEqual(2 * 208);
+    // Scan complet du pool cible ≈ 240 s : sous la période de 5 min du collecteur.
     const dureeScanMs = (Math.ceil(TAILLE_POOL / CONCURRENCE) - 1) * INTERVALLE_LOT_MS;
-    expect(dureeScanMs).toBeGreaterThan(190_000);
+    expect(dureeScanMs).toBeGreaterThan(230_000);
     expect(dureeScanMs).toBeLessThan(5 * 60_000);
   });
 
@@ -350,6 +353,58 @@ describe("cadence du scan (débit de poids plafonné)", () => {
     const adresses = Array.from({ length: 9 }, (_, i) => adresse(i + 1));
     await construireInstantane(adresses, fetchImpl, T0, { horloge, intervalleLotMs: 50 });
     expect(horloge.demandes).toEqual([50, 50]);
+  });
+});
+
+describe("abandon précoce : amont en panne dès le début du scan", () => {
+  test("les LOTS_ECHEC_ABANDON premiers lots tous en échec (réseau) → scan abandonné, pas 375 lots cadencés", async () => {
+    expect(LOTS_ECHEC_ABANDON).toBe(3);
+    const adresses = Array.from({ length: 40 }, (_, i) => adresse(i + 1));
+    const { fetchImpl, appels } = stubHl({ infoKo: adresses });
+    const horloge = horlogeFactice();
+    const inst = await construireInstantane(adresses, fetchImpl, T0, { horloge });
+    expect(inst.adressesScannees).toBe(0);
+    expect(appels).toHaveLength(LOTS_ECHEC_ABANDON * CONCURRENCE); // 12 requêtes, pas 40
+    // Attentes ENTRE les 3 lots seulement ; aucune avant un lot qui ne partira pas.
+    expect(horloge.demandes).toEqual([INTERVALLE_LOT_MS, INTERVALLE_LOT_MS]);
+  });
+
+  test("HTTP 5xx compte comme un échec (seul le 429 a son propre arrêt)", async () => {
+    const appels: string[] = [];
+    const fetchImpl = (async (_entree: RequestInfo | URL, init?: RequestInit) => {
+      appels.push((JSON.parse(String(init?.body ?? "{}")) as { user?: string }).user ?? "");
+      return new Response("panne", { status: 500 });
+    }) as typeof fetch;
+    const adresses = Array.from({ length: 40 }, (_, i) => adresse(i + 1));
+    const inst = await construireInstantane(adresses, fetchImpl, T0, { horloge: horlogeFactice() });
+    expect(inst.adressesScannees).toBe(0);
+    expect(appels).toHaveLength(LOTS_ECHEC_ABANDON * CONCURRENCE);
+  });
+
+  test("une seule adresse répondue dans les premiers lots : le scan va jusqu'au bout", async () => {
+    const adresses = Array.from({ length: 40 }, (_, i) => adresse(i + 1));
+    // Tout échoue SAUF la toute dernière adresse du 3e lot : pas de panne totale.
+    const { fetchImpl, appels } = stubHl({ infoKo: adresses.filter((_, i) => i !== 11) });
+    const inst = await construireInstantane(adresses, fetchImpl, T0, { horloge: horlogeFactice() });
+    expect(inst.adressesScannees).toBe(1);
+    expect(appels).toHaveLength(40);
+  });
+
+  test("seulement en DÉBUT de scan : des lots en échec après un succès ne l'interrompent pas", async () => {
+    const adresses = Array.from({ length: 40 }, (_, i) => adresse(i + 1));
+    // 1er lot OK, puis tout en échec (incident passager au milieu d'un scan sain).
+    const { fetchImpl, appels } = stubHl({ infoKo: adresses.slice(CONCURRENCE) });
+    const inst = await construireInstantane(adresses, fetchImpl, T0, { horloge: horlogeFactice() });
+    expect(inst.adressesScannees).toBe(CONCURRENCE);
+    expect(appels).toHaveLength(40);
+  });
+
+  test("pool plus court que LOTS_ECHEC_ABANDON lots : toutes les adresses sont tentées", async () => {
+    const adresses = Array.from({ length: 6 }, (_, i) => adresse(i + 1));
+    const { fetchImpl, appels } = stubHl({ infoKo: adresses });
+    const inst = await construireInstantane(adresses, fetchImpl, T0, { horloge: horlogeFactice() });
+    expect(inst.adressesScannees).toBe(0);
+    expect(appels).toHaveLength(6);
   });
 });
 
@@ -661,10 +716,14 @@ describe("GET /hl/liqlevels/:coin", () => {
     expect(corps.erreur).toContain("pool");
     expect(corps.enConstruction).toBeUndefined();
     expect(res.headers.get("retry-after")).toBeNull();
-    // Un 503 ne doit RIEN figer : la requête suivante retente l'amont.
+    // L'échec est retenu REPLI_ECHEC_TOTAL_MS (aucun nouveau téléchargement : 39 Mo)…
     const s = stubHl({ adresses: [A1], etats: { [A1]: etat([pos()]) } });
-    const res2 = await traiterHl(new Request(url), url, d, T0, s.fetchImpl);
-    expect(res2.status).toBe(200);
+    const res2 = await traiterHl(new Request(url), url, d, T0 + 1_000, s.fetchImpl);
+    expect(res2.status).toBe(503);
+    expect(s.appels).toEqual([]);
+    // … puis rien n'est figé : la requête suivante retente l'amont.
+    const res3 = await traiterHl(new Request(url), url, d, T0 + REPLI_ECHEC_TOTAL_MS, s.fetchImpl);
+    expect(res3.status).toBe(200);
     expect(s.appels).toContain("leaderboard");
   });
 
@@ -683,7 +742,7 @@ describe("GET /hl/liqlevels/:coin", () => {
     await traiterHl(new Request(url), url, d, T0, fetchImpl);
     const nb = s.appels.length;
     bloquer = true;
-    // Le scan d'un pool de ~1 500 adresses dure ≈ 200 s : une lecture ne l'attend JAMAIS
+    // Le scan d'un pool de ~1 500 adresses dure ≈ 240 s : une lecture ne l'attend JAMAIS
     // quand un cache (même périmé) existe — elle le sert et relance la construction.
     const res = await traiterHl(new Request(url), url, d, T0 + 6 * 60_000, fetchImpl);
     expect(res.status).toBe(200);
@@ -765,7 +824,7 @@ describe("GET /hl/liqlevels/:coin", () => {
 });
 
 describe("instantané entièrement vide (échec amont total)", () => {
-  test("0 adresse scannée : PAS de cache — 503 sans cache antérieur, retente immédiate, sinon stale servi", async () => {
+  test("0 adresse scannée : PAS de cache — 503 « pool », repli sans nouveau scan, relance après le repli, sinon stale servi", async () => {
     reinitialiserHl();
     const d = baseTest();
     const url = new URL("http://x/hl/liqlevels/BTC");
@@ -773,24 +832,38 @@ describe("instantané entièrement vide (échec amont total)", () => {
     const ko = stubHl({ adresses: [A1, A2], infoKo: [A1, A2] });
     const res = await traiterHl(new Request(url), url, d, T0, ko.fetchImpl);
     expect(res.status).toBe(503);
-    // 2) La requête SUIVANTE retente immédiatement (rien n'a été caché 5 min) et réussit.
+    expect(((await res.json()) as { erreur: string }).erreur).toContain("pool");
+    // 2) Pendant REPLI_ECHEC_TOTAL_MS, la lecture suivante répond le MÊME 503 « pool
+    //    indisponible » SANS relancer de scan (≠ main, qui retentait à chaque lecture : un
+    //    scan complet coûte désormais ≈ 240 s et 3 000 poids).
     const okStub = stubHl({ adresses: [A1], etats: { [A1]: etat([pos()]) } });
     const res2 = await traiterHl(new Request(url), url, d, T0 + 1_000, okStub.fetchImpl);
-    expect(res2.status).toBe(200);
-    const corps2 = (await res2.json()) as { ts: number; adressesScannees: number };
-    expect(corps2.adressesScannees).toBe(2); // pool persisté [A1,A2] ; A2 → etat([]) du stub
-    // 3) Cache expiré + échec amont total → l'ANCIEN instantané est servi (jamais le vide).
-    const res3 = await traiterHl(new Request(url), url, d, T0 + 1_000 + TTL_INSTANTANE_MS + 1, ko.fetchImpl);
+    expect(res2.status).toBe(503);
+    expect(await res2.json()).toEqual({ erreur: "pool d'adresses Hyperliquid indisponible" });
+    expect(okStub.appels).toEqual([]);
+    // 3) Repli écoulé : la lecture relance le scan et réussit.
+    const res3 = await traiterHl(new Request(url), url, d, T0 + REPLI_ECHEC_TOTAL_MS, okStub.fetchImpl);
     expect(res3.status).toBe(200);
-    const corps3 = (await res3.json()) as { ts: number };
-    expect(corps3.ts).toBe(T0 + 1_000); // instantané de l'étape 2, pas un vide reconstruit
+    const corps3 = (await res3.json()) as { ts: number; adressesScannees: number };
+    expect(corps3.adressesScannees).toBe(2); // pool persisté [A1,A2] ; A2 → etat([]) du stub
+    // 4) Cache expiré + échec amont total → l'ANCIEN instantané est servi (jamais le vide).
+    const res4 = await traiterHl(
+      new Request(url),
+      url,
+      d,
+      T0 + REPLI_ECHEC_TOTAL_MS + TTL_INSTANTANE_MS + 1,
+      ko.fetchImpl,
+    );
+    expect(res4.status).toBe(200);
+    const corps4 = (await res4.json()) as { ts: number };
+    expect(corps4.ts).toBe(T0 + REPLI_ECHEC_TOTAL_MS); // instantané de l'étape 3, pas un vide reconstruit
   });
 });
 
 describe("lecture à froid bornée (aucun cache) → 503 « en construction »", () => {
   /**
    * Amont dont les requêtes de compte restent EN VOL jusqu'à `verrou.resolve()` : simule
-   * le scan de ~200 s d'un pool de ~1 500 adresses sans aucun sommeil réel.
+   * le scan de ~240 s d'un pool de ~1 500 adresses sans aucun sommeil réel.
    */
   function amontLent(): { fetchImpl: typeof fetch; appels: string[]; verrou: { resolve: () => void } } {
     const s = stubHl({ adresses: [A1], etats: { [A1]: etat([pos()]) } });
@@ -903,5 +976,129 @@ describe("lecture à froid bornée (aucun cache) → 503 « en construction »",
     const ko = stubHl({ adresses: [A1], infoKo: [A1] });
     const res = await traiterHl(new Request(url), url, d, T0 + 1, ko.fetchImpl);
     expect(res.status).toBe(503);
+  });
+
+  // ——— Amont en panne au démarrage à froid : « en construction » ne doit pas durer sans fin ———
+
+  const POOL_INDISPONIBLE = { erreur: "pool d'adresses Hyperliquid indisponible" };
+
+  test("scan à froid en échec total : 503 enConstruction pendant le scan, puis 503 « pool » SANS nouveau scan", async () => {
+    reinitialiserHl();
+    const d = baseTest();
+    // Leaderboard OK ; chaque clearinghouseState reste en vol jusqu'au verrou, puis HTTP 500.
+    const s = stubHl({ adresses: [A1, A2] });
+    const verrou = Promise.withResolvers<void>();
+    const fetchImpl = (async (entree: RequestInfo | URL, init?: RequestInit) => {
+      if (String(entree) !== URL_INFO) return s.fetchImpl(entree, init);
+      s.appels.push("info");
+      await verrou.promise;
+      return new Response("panne", { status: 500 });
+    }) as typeof fetch;
+    const nbInfo = (): number => s.appels.filter((a) => a === "info").length;
+    const horloge = horlogeFactice();
+    const url = new URL("http://x/hl/liqlevels/BTC");
+
+    // 1) Premier scan depuis le boot, rien de connu : « en construction » (vrai à cet instant).
+    const res1 = await traiterHl(new Request(url), url, d, T0, fetchImpl, { horloge });
+    expect(res1.status).toBe(503);
+    expect(((await res1.json()) as { enConstruction?: boolean }).enConstruction).toBe(true);
+    // 2) Le scan se termine en échec total.
+    const fin = obtenirInstantane(d, fetchImpl, T0 + 30_000, { forcer: true }); // rejoint le scan
+    verrou.resolve();
+    expect(await fin).toBeNull();
+    const n = nbInfo();
+    // 3) Lectures suivantes (cadence front de 30 s) : 503 « pool indisponible » → le front
+    //    passe en « erreur » — et AUCUN nouveau scan n'est lancé pendant le repli.
+    for (const [i, vue] of (["liqlevels", "positions", "liqlevels"] as const).entries()) {
+      const u = new URL(`http://x/hl/${vue}/BTC`);
+      const res = await traiterHl(new Request(u), u, d, T0 + 45_000 + i * 30_000, fetchImpl, { horloge });
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual(POOL_INDISPONIBLE);
+      expect(res.headers.get("retry-after")).toBeNull();
+    }
+    expect(nbInfo()).toBe(n);
+  });
+
+  test("après le repli, un scan de relance LENT répond « pool » (dernière issue connue), jamais « en construction »", async () => {
+    reinitialiserHl();
+    const d = baseTest();
+    const url = new URL("http://x/hl/liqlevels/BTC");
+    // Échec total à T0 (pool [A1] persisté au passage).
+    const ko = stubHl({ adresses: [A1], infoKo: [A1] });
+    expect((await traiterHl(new Request(url), url, d, T0, ko.fetchImpl)).status).toBe(503);
+
+    // Repli écoulé : la lecture relance un scan qui dépasse le délai de 15 s…
+    const s = stubHl({ adresses: [A1], etats: { [A1]: etat([pos()]) } });
+    const verrou = Promise.withResolvers<void>();
+    let partis = 0; // requêtes de compte PARTIES (le stub ne journalise qu'à la réponse)
+    const fetchImpl = (async (entree: RequestInfo | URL, init?: RequestInit) => {
+      if (String(entree) === URL_INFO) {
+        partis += 1;
+        await verrou.promise;
+      }
+      return s.fetchImpl(entree, init);
+    }) as typeof fetch;
+    const res = await traiterHl(new Request(url), url, d, T0 + REPLI_ECHEC_TOTAL_MS, fetchImpl, {
+      horloge: horlogeFactice(),
+    });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual(POOL_INDISPONIBLE);
+    expect(partis).toBe(1); // la relance est bien partie…
+    expect(s.appels).toEqual([]); // … sur le pool persisté frais (aucun leaderboard)
+
+    // … une lecture concurrente répond TOUT DE SUITE (horloge figée : attendre la relance
+    // en vol la bloquerait indéfiniment) et ne lance pas de 2e scan.
+    const figee = horlogeFigee();
+    const resConcurrente = await traiterHl(new Request(url), url, d, T0 + REPLI_ECHEC_TOTAL_MS + 1, fetchImpl, {
+      horloge: figee,
+    });
+    expect(await resConcurrente.json()).toEqual(POOL_INDISPONIBLE);
+    expect(partis).toBe(1);
+
+    // La relance aboutit : le cache est rempli, l'échec oublié → 200.
+    const fin = obtenirInstantane(d, fetchImpl, T0 + REPLI_ECHEC_TOTAL_MS + 2, { forcer: true });
+    verrou.resolve();
+    expect((await fin)?.ts).toBe(T0 + REPLI_ECHEC_TOTAL_MS);
+    const res2 = await traiterHl(new Request(url), url, d, T0 + REPLI_ECHEC_TOTAL_MS + 3, fetchImpl);
+    expect(res2.status).toBe(200);
+  });
+
+  test("pendant le repli, le collecteur (forcer) relance quand même ; son succès efface l'échec", async () => {
+    reinitialiserHl();
+    const d = baseTest();
+    const url = new URL("http://x/hl/liqlevels/BTC");
+    const ko = stubHl({ adresses: [A1], infoKo: [A1] });
+    expect((await traiterHl(new Request(url), url, d, T0, ko.fetchImpl)).status).toBe(503);
+
+    const ok = stubHl({ adresses: [A1], etats: { [A1]: etat([pos()]) } });
+    const inst = await obtenirInstantane(d, ok.fetchImpl, T0 + 1_000, { forcer: true });
+    expect(inst?.adressesScannees).toBe(1);
+    expect(ok.appels).toEqual([`info:${A1}`]);
+    const res = await traiterHl(new Request(url), url, d, T0 + 2_000, ok.fetchImpl);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { ts: number }).ts).toBe(T0 + 1_000);
+  });
+
+  test("leaderboard qui PEND sans pool persisté : « en construction » au 1er essai, puis « pool » sans retéléchargement", async () => {
+    reinitialiserHl();
+    const d = baseTest();
+    const url = new URL("http://x/hl/liqlevels/BTC");
+    let telechargements = 0;
+    const verrou = Promise.withResolvers<void>();
+    const fetchImpl = (async (entree: RequestInfo | URL) => {
+      if (String(entree) !== URL_LEADERBOARD) throw new Error("aucun appel de compte attendu");
+      telechargements += 1;
+      await verrou.promise; // téléchargement bloqué au-delà du délai de 15 s…
+      throw new Error("délai du leaderboard dépassé"); // … puis abandonné
+    }) as unknown as typeof fetch;
+    const horloge = horlogeFactice();
+    const res1 = await traiterHl(new Request(url), url, d, T0, fetchImpl, { horloge });
+    expect(((await res1.json()) as { enConstruction?: boolean }).enConstruction).toBe(true);
+    const fin = obtenirInstantane(d, fetchImpl, T0 + 30_000, { forcer: true });
+    verrou.resolve();
+    expect(await fin).toBeNull();
+    const res2 = await traiterHl(new Request(url), url, d, T0 + 45_000, fetchImpl, { horloge });
+    expect(await res2.json()).toEqual(POOL_INDISPONIBLE);
+    expect(telechargements).toBe(1);
   });
 });

@@ -814,8 +814,9 @@ async function lireVueHl(vue: "liqlevels" | "positions", coin: string): Promise<
  * Lit les niveaux de liquidation RÉELS d'un coin (échantillon d'adresses du leaderboard
  * Hyperliquid) — charge utile BRUTE, dont la VALIDATION de forme vit dans
  * `data/hyperliquidLiq.ts` (pure et testée). Renvoie `null` si le daemon est absent / sans
- * capability / en erreur — la couche affiche alors « nécessite le daemon » ; le corps
- * « en construction » est relayé tel quel (cf. `lireVueHl`).
+ * capability / en erreur — sans capability `hl`, la couche passe alors au scan navigateur
+ * (repli local, le daemon re-sondé toutes les 60 s) ; avec, elle affiche « erreur » ; le
+ * corps « en construction » est relayé tel quel (cf. `lireVueHl`).
  */
 export async function hlLiqLevelsGet(coin: string): Promise<unknown | null> {
   return lireVueHl("liqlevels", coin);

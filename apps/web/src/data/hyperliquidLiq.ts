@@ -31,12 +31,15 @@
  * (data/hyperliquidLiqNavigateur.ts, hors chunk d'entrée) ; pool réduit servi par la fonction
  * Vercel `/hlpool`, sinon leaderboard direct. Le mode DAEMON ci-dessous est inchangé ; le store
  * dit la source (`source`) et la progression du premier scan navigateur (`progression`), que
- * la légende affiche. L'historique (heatmap HL) reste réservé au daemon.
+ * la légende affiche. L'historique (heatmap HL) reste réservé au daemon. En local, le repli
+ * n'est PAS définitif : le daemon est re-sondé toutes les 60 s (`SONDE_RETOUR_DAEMON_MS`) et,
+ * dès qu'il annonce de nouveau `hl` (redémarrage, lancement tardif), la couche lui revient et
+ * le scan de la page s'arrête — jamais deux scans durables sur la même IP.
  */
 import { createStore } from "zustand/vanilla";
 import type { StoreApi } from "zustand/vanilla";
 import type { Commande } from "../commands/registry";
-import { hlLiqLevelsGet, daemonSupporteHl, kvPut } from "./daemon";
+import { hlLiqLevelsGet, daemonSupporteHl, detectDaemon, kvPut } from "./daemon";
 import { basePerp } from "./symbol";
 import { IS_VERCEL } from "../lib/deployment";
 import { marketStore } from "../store/market";
@@ -148,8 +151,9 @@ export interface ProgressionHl {
 
 /**
  * Mode de la couche : Vercel → navigateur (aucun daemon joignable) ; local → daemon s'il
- * annonce la capability `hl`, sinon navigateur (repli). En local, la capability n'est connue
- * qu'APRÈS la sonde de `hlLiqLevelsGet` : le mode daemon est tenté d'abord. PURE.
+ * annonce la capability `hl`, sinon navigateur (repli, re-sondé : `SONDE_RETOUR_DAEMON_MS`).
+ * En local, la capability n'est connue qu'APRÈS la sonde de `hlLiqLevelsGet` : le mode daemon
+ * est tenté d'abord. PURE.
  */
 export function deciderModeHl(isVercel: boolean, capabilityHl: boolean): SourceHl {
   return isVercel || !capabilityHl ? "navigateur" : "daemon";
@@ -197,7 +201,14 @@ export const hlLiqStore: StoreApi<HlLiqState> = createStore<HlLiqState>((set, ge
 // ─────────────────────────── Singleton de fetch (4 min + changement de symbole) ───────────────────────────
 
 /** Rafraîchissement tant que la couche est active (le daemon cache déjà 5 min). */
-const REFRESH_MS = 4 * 60 * 1000;
+export const REFRESH_MS = 4 * 60 * 1000;
+/**
+ * Re-sonde du daemon pendant un repli navigateur LOCAL : dès qu'il annonce de nouveau `hl`
+ * (redémarré, ou lancé après la page), la couche lui revient et le scan de la page s'arrête —
+ * sinon deux scans à 750 poids/min se partageraient l'IP (quota 1 200). 60 s = fraîcheur de
+ * `detectDaemon`, déjà re-sondé toutes les 60 s par data/daemon.ts : aucune requête en plus.
+ */
+export const SONDE_RETOUR_DAEMON_MS = 60_000;
 /**
  * Relance tant que le daemon répond « en construction » : son premier scan du pool
  * (~1 500 adresses) dure ≈ 4 min (≈ 4,5 si le leaderboard est retéléchargé) ; aligné sur
@@ -313,10 +324,21 @@ function sync(): void {
 
 // ─────────────────────────── Mode navigateur (chunk paresseux) ───────────────────────────
 
-/** La couche active est servie par le scanner navigateur (jusqu'au prochain OFF). */
+/**
+ * La couche active est servie par le scanner navigateur : jusqu'au prochain OFF sur Vercel ;
+ * en local, jusqu'au retour du daemon (`sondeRetourTimer`) ou au prochain OFF.
+ */
 let modeNavigateur = false;
 let scannerNav: import("./hyperliquidLiqNavigateur").ScannerNavigateurHl | null = null;
 let chargementNav = false;
+let sondeRetourTimer: ReturnType<typeof setInterval> | null = null;
+
+/** Repli LOCAL : le daemon annonce-t-il de nouveau `hl` ? Si oui, la couche lui revient. */
+async function sonderRetourDaemon(): Promise<void> {
+  if (!modeNavigateur || !(await detectDaemon("hl")) || !modeNavigateur) return; // OFF pendant la sonde
+  arreterNavigateur();
+  sync(); // voie daemon : « chargement » (source « daemon »), fetch, refresh 4 min, drapeau hl/heat
+}
 
 /** Coupe le mode daemon (minuteurs) et confie la couche au scanner navigateur. */
 function passerEnNavigateur(coin: string | null): void {
@@ -327,6 +349,9 @@ function passerEnNavigateur(coin: string | null): void {
   annulerRelance();
   coinActif = null;
   modeNavigateur = true;
+  if (!IS_VERCEL && sondeRetourTimer === null) {
+    sondeRetourTimer = setInterval(() => void sonderRetourDaemon(), SONDE_RETOUR_DAEMON_MS);
+  }
   hlLiqStore.setState({ ...VIDE, etat: "chargement", source: "navigateur" });
   if (scannerNav !== null) {
     scannerNav.demarrer(coin);
@@ -351,6 +376,10 @@ function passerEnNavigateur(coin: string | null): void {
 
 function arreterNavigateur(): void {
   modeNavigateur = false;
+  if (sondeRetourTimer !== null) {
+    clearInterval(sondeRetourTimer);
+    sondeRetourTimer = null;
+  }
   scannerNav?.arreter();
 }
 

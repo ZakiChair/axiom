@@ -469,7 +469,10 @@ rapport `docs/superpowers/progress/2026-09-22-heatmap-hl-indicateurs-onchain.md`
    tous les 5 lots), une interruption (`signal`) et une pause avant chaque lot (`avantLot`), sans
    changer le comportement par défaut. `deciderModeHl` choisit la source : Vercel → navigateur ;
    en local → daemon s'il annonce la capability `hl`, sinon navigateur (repli). Le mode daemon
-   est inchangé. En mode navigateur, `data/hyperliquidLiqNavigateur.ts` est chargé par `import()`
+   est inchangé. Le repli local n'est pas définitif : le daemon est re-sondé toutes les 60 s et,
+   dès qu'il annonce de nouveau `hl` (redémarrage, lancement tardif), la couche lui revient et le
+   scan de la page s'arrête, pour ne pas partager l'IP à deux scans (relecture du 25 septembre).
+   En mode navigateur, `data/hyperliquidLiqNavigateur.ts` est chargé par `import()`
    hors du chunk d'entrée et exécute le même scan, à 750 poids/min : sur Vercel, le navigateur
    est seul sur son IP. Le pool est pris dans le stockage local (`axiom:hl:pool:v1`, mêmes
    paramètres, < 6 h), puis servi par `GET /hlpool`, puis tiré du leaderboard direct (≈ 39 Mo,

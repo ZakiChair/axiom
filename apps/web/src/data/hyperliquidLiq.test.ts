@@ -14,7 +14,9 @@ import {
   estEnConstructionHl,
   executerCommandeLiqHl,
   presentationCommandeLiqHl,
+  REFRESH_MS,
   RELANCE_CONSTRUCTION_MS,
+  SONDE_RETOUR_DAEMON_MS,
   type ReponseHlLiq,
 } from "./hyperliquidLiq";
 
@@ -171,6 +173,7 @@ describe("commande LIQHL (plus UNUSABLE sur Vercel : scan direct depuis le navig
 vi.mock("./daemon", () => ({
   hlLiqLevelsGet: vi.fn(() => new Promise(() => {})),
   daemonSupporteHl: vi.fn(() => true),
+  detectDaemon: vi.fn(async () => false),
   kvPut: async () => 1,
 }));
 
@@ -187,7 +190,7 @@ vi.mock("./hyperliquidLiqNavigateur", () => ({
 }));
 
 import { hlLiqStore, demarrerHyperliquidLiq } from "./hyperliquidLiq";
-import { daemonSupporteHl, hlLiqLevelsGet } from "./daemon";
+import { daemonSupporteHl, detectDaemon, hlLiqLevelsGet } from "./daemon";
 import { marketStore } from "../store/market";
 
 describe("sync — l'état transitoire dit la vérité", () => {
@@ -299,6 +302,99 @@ describe("sync — local SANS daemon : repli sur le scan navigateur", () => {
       lire.mockReset();
       lire.mockImplementation(() => new Promise(() => {}));
       hlLiqStore.getState().setActif(false);
+    }
+  });
+
+  it("daemon absent puis REVENU (`hl` annoncée) → la couche lui revient en moins de REFRESH_MS, scanner arrêté", async () => {
+    // Relecture du 25/09 : une seule sonde ratée (redémarrage d'axiomd) laissait la couche au
+    // navigateur jusqu'au OFF — scan de la page + collecteur du daemon sur la même IP.
+    vi.useFakeTimers();
+    const lire = vi.mocked(hlLiqLevelsGet);
+    const capa = vi.mocked(daemonSupporteHl);
+    const detecter = vi.mocked(detectDaemon);
+    try {
+      expect(SONDE_RETOUR_DAEMON_MS).toBeLessThan(REFRESH_MS);
+      lire.mockReset();
+      lire.mockResolvedValue(null);
+      capa.mockReturnValue(false);
+      detecter.mockReset();
+      detecter.mockResolvedValue(false);
+      nav.scanner.demarrer.mockClear();
+      nav.scanner.arreter.mockClear();
+      demarrerHyperliquidLiq();
+      hlLiqStore.getState().setActif(true);
+      await vi.waitFor(() => expect(nav.scanner.demarrer).toHaveBeenCalledOnce());
+      expect(hlLiqStore.getState().source).toBe("navigateur");
+
+      // Daemon toujours absent : la sonde tourne, la couche reste au navigateur.
+      await vi.advanceTimersByTimeAsync(3 * SONDE_RETOUR_DAEMON_MS);
+      expect(detecter).toHaveBeenCalledTimes(3);
+      expect(detecter).toHaveBeenLastCalledWith("hl");
+      expect(nav.scanner.arreter).not.toHaveBeenCalled();
+      expect(lire).toHaveBeenCalledOnce();
+
+      // Le daemon revient et annonce `hl` : prochaine sonde → voie daemon, scanner arrêté.
+      detecter.mockResolvedValue(true);
+      capa.mockReturnValue(true);
+      lire.mockResolvedValue(reponse());
+      await vi.advanceTimersByTimeAsync(SONDE_RETOUR_DAEMON_MS);
+      expect(nav.scanner.arreter).toHaveBeenCalledOnce();
+      expect(lire).toHaveBeenCalledTimes(2);
+      expect(hlLiqStore.getState()).toMatchObject({ etat: "ok", source: "daemon", progression: null, adressesScannees: 250 });
+      nav.publier?.({ etat: "ok", niveaux: [], ts: 1, adressesScannees: 7, progression: { faites: 7, total: 1500 } });
+      expect(hlLiqStore.getState().adressesScannees).toBe(250); // publication tardive du scanner ignorée
+
+      // Mode daemon rétabli tel quel : plus de sonde de retour, rafraîchissement 4 min.
+      detecter.mockClear();
+      await vi.advanceTimersByTimeAsync(REFRESH_MS);
+      expect(detecter).not.toHaveBeenCalled();
+      expect(lire).toHaveBeenCalledTimes(3);
+    } finally {
+      detecter.mockReset();
+      detecter.mockResolvedValue(false);
+      capa.mockReturnValue(true);
+      lire.mockReset();
+      lire.mockImplementation(() => new Promise(() => {}));
+      hlLiqStore.getState().setActif(false);
+      vi.useRealTimers();
+    }
+  });
+
+  it("repli local puis OFF (même pendant une sonde en vol) → sonde arrêtée, aucun retour au daemon", async () => {
+    vi.useFakeTimers();
+    const lire = vi.mocked(hlLiqLevelsGet);
+    const capa = vi.mocked(daemonSupporteHl);
+    const detecter = vi.mocked(detectDaemon);
+    try {
+      lire.mockReset();
+      lire.mockResolvedValue(null);
+      capa.mockReturnValue(false);
+      let repondre: (present: boolean) => void = () => {};
+      detecter.mockReset();
+      detecter.mockImplementation(() => new Promise<boolean>((r) => (repondre = r)));
+      nav.scanner.demarrer.mockClear();
+      nav.scanner.arreter.mockClear();
+      demarrerHyperliquidLiq();
+      hlLiqStore.getState().setActif(true);
+      await vi.waitFor(() => expect(nav.scanner.demarrer).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(SONDE_RETOUR_DAEMON_MS);
+      expect(detecter).toHaveBeenCalledOnce(); // sonde en vol…
+      hlLiqStore.getState().setActif(false); // … la couche passe à OFF…
+      capa.mockReturnValue(true);
+      repondre(true); // … puis le daemon répond présent : rien ne doit repartir.
+      await vi.advanceTimersByTimeAsync(10 * SONDE_RETOUR_DAEMON_MS);
+      expect(detecter).toHaveBeenCalledOnce();
+      expect(lire).toHaveBeenCalledOnce();
+      expect(nav.scanner.arreter).toHaveBeenCalledOnce(); // par le OFF seul : la sonde tardive ne fait rien
+      expect(hlLiqStore.getState()).toMatchObject({ actif: false, etat: "vide", source: "daemon" });
+    } finally {
+      detecter.mockReset();
+      detecter.mockResolvedValue(false);
+      capa.mockReturnValue(true);
+      lire.mockReset();
+      lire.mockImplementation(() => new Promise(() => {}));
+      hlLiqStore.getState().setActif(false);
+      vi.useRealTimers();
     }
   });
 

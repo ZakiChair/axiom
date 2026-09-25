@@ -2,7 +2,8 @@
  * Scanner NAVIGATEUR de la couche LIQHL — niveaux de liquidation RÉELS Hyperliquid sans le
  * daemon `axiomd` (extension du 25 septembre, décision du propriétaire « le déploiement n'est
  * toujours pas ok » : la couche doit vivre sur Vercel). Utilisé sur Vercel, et en local quand
- * le daemon n'annonce pas la capability `hl` (repli). Le mode daemon ne passe JAMAIS ici.
+ * le daemon n'annonce pas la capability `hl` (repli, jusqu'à son retour : data/hyperliquidLiq.ts
+ * le re-sonde toutes les 60 s puis ARRÊTE ce scanner). Le mode daemon ne passe JAMAIS ici.
  *
  * MODULE PARESSEUX : chargé uniquement par `import()` depuis data/hyperliquidLiq.ts (chunk
  * d'entrée) au passage en mode navigateur — ni ce code ni shared/hyperliquidScan.ts ne pèsent
@@ -19,7 +20,9 @@
  *       réduit dans le navigateur — légende « chargement du pool d'adresses… » ;
  *    4. amont en échec : pool stocké PÉRIMÉ (ou d'autres paramètres) plutôt que rien.
  *  - Scan : `construireInstantane` partagé, même cadence (750 poids/min : sur Vercel le
- *    navigateur est seul sur son IP ; en local sans daemon aussi), même arrêt sur 429, même
+ *    navigateur est seul sur son IP ; en local sans daemon aussi — un daemon qui revient
+ *    reprend la couche en ≤ ~2 min, seule fenêtre où deux scans se partagent l'IP), même
+ *    arrêt sur 429, même
  *    rejeu/abandon. UN instantané couvre tous les coins : changer de symbole republie depuis
  *    lui, sans nouveau scan.
  *  - Premier scan : progression publiée tous les 5 lots (≈ 3 s) — les barres apparaissent

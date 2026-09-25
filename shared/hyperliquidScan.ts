@@ -322,27 +322,68 @@ export function validerPoolHl(brut: unknown): PoolHL | null {
 }
 
 /**
+ * Lit un corps de réponse en texte UTF-8, BORNÉ en octets PENDANT la lecture : au-delà de
+ * `maxOctets`, le flux est coupé (`cancel` : connexion libérée) et la promesse rejetée —
+ * jamais tout le corps en mémoire avant de le refuser (transfert chunked sans
+ * content-length). Décodage morceau par morceau (`stream: true` : un caractère multi-octets
+ * coupé entre deux morceaux est recollé) : les OCTETS ne sont jamais tous retenus, seuls les
+ * morceaux de texte puis leur jonction (pic mesuré ≈ 400 Mo de RSS pour les ≈ 39 Mo, JSON.parse
+ * compris, contre ≈ 350 Mo avec `res.text()`). Même motif que `responseBody` de api/proxy.ts. Corps absent → rejet. L'interruption vient du
+ * `signal` passé à fetch, qui fait échouer la lecture en cours.
+ */
+async function lireTexteBorne(res: Response, maxOctets: number): Promise<string> {
+  if (res.body === null) throw new Error("leaderboard sans corps");
+  const lecteur = res.body.getReader();
+  const decodeur = new TextDecoder();
+  const morceaux: string[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await lecteur.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxOctets) {
+        await lecteur.cancel("leaderboard trop volumineux").catch(() => undefined);
+        throw new Error("leaderboard trop volumineux");
+      }
+      morceaux.push(decodeur.decode(value, { stream: true }));
+    }
+  } finally {
+    lecteur.releaseLock();
+  }
+  morceaux.push(decodeur.decode());
+  return morceaux.join("");
+}
+
+/**
  * Télécharge le leaderboard (≈ 39 Mo) et en extrait le pool aux paramètres courants.
- * Rejette (Error) sur HTTP ≠ 2xx, corps démesuré (content-length puis longueur lue),
- * JSON invalide ou pool vide — un pool vide ne doit JAMAIS remplacer un bon pool connu.
- * Le délai est porté par `signal` (l'appelant choisit : 120 s daemon/navigateur, sous le
- * maxDuration pour la fonction Vercel).
+ * Rejette (Error) sur HTTP ≠ 2xx, corps démesuré (content-length annoncé, puis octets
+ * COMPTÉS pendant la lecture et flux coupé au-delà : `lireTexteBorne`), corps absent, JSON
+ * invalide ou pool vide — un pool vide ne doit JAMAIS remplacer un bon pool connu. Le délai
+ * est porté par `signal` (l'appelant choisit : 120 s daemon/navigateur, sous le maxDuration
+ * pour la fonction Vercel) ; `maxOctets` (TAILLE_MAX_LEADERBOARD par défaut) sert aux tests.
  */
 export async function telechargerPool(
   fetchImpl: typeof fetch,
-  options: { signal?: AbortSignal; entetes?: Record<string, string> } = {},
+  options: { signal?: AbortSignal; entetes?: Record<string, string>; maxOctets?: number } = {},
 ): Promise<string[]> {
+  const maxOctets = options.maxOctets ?? TAILLE_MAX_LEADERBOARD;
   const res = await fetchImpl(URL_LEADERBOARD, {
     headers: { accept: "application/json", ...options.entetes },
     signal: options.signal,
   });
-  if (!res.ok) throw new Error(`leaderboard HTTP ${res.status}`);
-  // Pré-bornage sur l'en-tête avant lecture du corps (le corps NORMAL fait ≈ 39 Mo).
+  if (!res.ok) {
+    await res.body?.cancel().catch(() => undefined);
+    throw new Error(`leaderboard HTTP ${res.status}`);
+  }
+  // Pré-bornage sur l'en-tête avant lecture du corps (le corps NORMAL fait ≈ 39 Mo)…
   const cl = res.headers.get("content-length");
-  if (cl !== null && Number(cl) > TAILLE_MAX_LEADERBOARD) throw new Error("leaderboard trop volumineux");
-  const texte = await res.text();
-  if (texte.length > TAILLE_MAX_LEADERBOARD) throw new Error("leaderboard trop volumineux");
-  const adresses = extrairePool(JSON.parse(texte));
+  if (cl !== null && Number(cl) > maxOctets) {
+    await res.body?.cancel().catch(() => undefined);
+    throw new Error("leaderboard trop volumineux");
+  }
+  // … puis bornage PENDANT la lecture (en-tête absent ou mensonger).
+  const adresses = extrairePool(JSON.parse(await lireTexteBorne(res, maxOctets)));
   if (adresses.length === 0) throw new Error("leaderboard sans ligne exploitable");
   return adresses;
 }

@@ -461,7 +461,8 @@ rapport `docs/superpowers/progress/2026-09-22-heatmap-hl-indicateurs-onchain.md`
    déploiement n'est toujours pas ok » : il utilise la version Vercel et veut y voir les
    liquidations disponibles). La commande LIQHL n'est plus `UNUSABLE` sur Vercel. Le code du scan
    indépendant de Bun et de SQLite (types, constantes de pool et de cadence, `extrairePool`,
-   téléchargement borné du leaderboard, `parserEtatCompte`, `construireInstantane` avec rejeu,
+   téléchargement du leaderboard borné en octets pendant la lecture, même sans content-length,
+   `parserEtatCompte`, `construireInstantane` avec rejeu,
    arrêt sur 429 et abandon) passe dans `shared/hyperliquidScan.ts`. Ce module n'importe ni Bun,
    ni `node:*`, ni le DOM ; il est compilé par les tsconfig web et daemon, et le daemon le
    réexporte sans changer ses importeurs. Il ajoute au scan une progression (instantané partiel

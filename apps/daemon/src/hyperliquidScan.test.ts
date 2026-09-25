@@ -322,6 +322,44 @@ describe("telechargerPool — leaderboard borné → pool", () => {
       "leaderboard sans ligne exploitable",
     );
     await expect(telechargerPool(reponse(new Response("pas du json")))).rejects.toThrow();
+    await expect(telechargerPool(reponse(new Response(null)))).rejects.toThrow("leaderboard sans corps");
+  });
+
+  test("corps en flux SANS content-length au-delà du plafond → rejeté et coupé, jamais lu en entier", async () => {
+    // Transfert chunked aberrant : sans en-tête, seul le COMPTEUR d'octets borne la mémoire.
+    let tires = 0;
+    let annule = false;
+    const morceau = new Uint8Array(1024).fill(0x20); // 1 Kio d'espaces (JSON valide jusqu'ici)
+    const corps = new ReadableStream<Uint8Array>({
+      pull(ctrl) {
+        tires += 1;
+        if (tires > 1000) ctrl.close(); // ≈ 1 Mio si rien ne coupait la lecture
+        else ctrl.enqueue(morceau);
+      },
+      cancel() {
+        annule = true;
+      },
+    });
+    const fetchImpl = (async () => new Response(corps)) as unknown as typeof fetch;
+    await expect(telechargerPool(fetchImpl, { maxOctets: 4096 })).rejects.toThrow("leaderboard trop volumineux");
+    expect(tires).toBeLessThan(10); // 5 Kio lus au plus (+ lecture anticipée du flux), pas 1 Mio
+    expect(annule).toBe(true); // flux amont coupé (connexion libérée)
+  });
+
+  test("plafond compté en OCTETS (UTF-8) et JSON décodé morceau par morceau (caractère coupé entre deux morceaux)", async () => {
+    const json = new TextEncoder().encode(
+      JSON.stringify({ leaderboardRows: [{ ethAddress: adresse(1), accountValue: "1", displayName: "é€" }] }),
+    );
+    const corps = new ReadableStream<Uint8Array>({
+      start(ctrl) {
+        for (let i = 0; i < json.length; i += 3) ctrl.enqueue(json.slice(i, i + 3)); // coupe les multi-octets
+        ctrl.close();
+      },
+    });
+    const fetchImpl = (async () => new Response(corps)) as unknown as typeof fetch;
+    expect(await telechargerPool(fetchImpl, { maxOctets: json.length })).toEqual([adresse(1)]);
+    const trop = (async () => new Response(json)) as unknown as typeof fetch;
+    await expect(telechargerPool(trop, { maxOctets: json.length - 1 })).rejects.toThrow("leaderboard trop volumineux");
   });
 });
 

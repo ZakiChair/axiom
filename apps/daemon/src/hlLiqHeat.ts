@@ -8,7 +8,7 @@
  * UNE FOIS le drapeau KV `hl/heat` = { actif: true } posé par le front à
  * l'activation de la couche LIQHL (jamais remis à false par sa désactivation ;
  * la fenêtre LIQ porte le bouton « Collecte daemon »). Sans drapeau, le daemon
- * ne télécharge JAMAIS le leaderboard (34 Mo) ni n'interroge les ~500 comptes.
+ * ne télécharge JAMAIS le leaderboard (≈ 39 Mo) ni n'interroge les ~1 500 comptes.
  *
  * Chaque cycle : instantané FORCÉ des positions (hyperliquid.obtenirInstantane
  * { forcer: true } — le cache 5 min doit être ignoré pour produire un point

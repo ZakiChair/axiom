@@ -443,6 +443,16 @@ rapport `docs/superpowers/progress/2026-09-22-heatmap-hl-indicateurs-onchain.md`
    et n'en relancent un essai qu'au moins 2 min après l'échec. Le collecteur forcé attend
    toujours son point neuf et n'est pas soumis à ce repli. Cela reste un **échantillon** du
    leaderboard : l'interface annonce « N adresses », jamais « toutes » les liquidations.
+   Côté graphe, la fenêtre ±40 % du prix (+ plancher 10 k$) des barres LIQHL — seul filtre de
+   distance de toute la chaîne, qui écartait 55 % du notionnel BTC, 61 % ETH et 97 % SOL le
+   25 septembre — est supprimée : `filtrerNiveauxHl` ne garde plus que la validité (px et
+   montant finis, > 0). Les barres sont normalisées sur les clusters VISIBLES, et ce que l'axe Y
+   (calé sur les bougies) ne montre pas est résumé en repères de bord « ▲/▼ N niv. hors écran ·
+   total · max … @ prix » au lieu d'être jeté par le clip ; la légende porte les cumuls ↑/↓ de
+   tout l'échantillon. La heatmap HL normalise sur les buckets visibles et son rendu lissé est
+   borné à l'écran (≤ 4 096 lignes, repli rects sur exception) : les aberrations de marge croisée
+   (jusqu'à ~27 M$ sur BTC) ne blanchissent plus l'image ni n'arrêtent la boucle rAF. Sur une
+   paire cotée hors USD, la couche se tait et dit « cotation X ≠ USD, niveaux masqués ».
 3. **Dix indicateurs** (TS pur, `@axiom/indicators`, un fichier et un test par def, catalogue 200 →
    210). Séries aux ajoutées à `AuxSeriesId` (`@axiom/types`, écart signalé comme aux lots précédents) :
    `liqLongUsd`, `liqShortUsd`, `hashrate`, `sthMvrv`, `lthMvrv`, `nrplUsd`, `vddMultiple`, `aviv`,

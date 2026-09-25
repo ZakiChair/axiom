@@ -4,8 +4,8 @@
  * piloté par le drapeau KV `hl/heat`, instantané toutes les 5 min, rétention 14 j).
  *
  * ⚠️ HONNÊTETÉ DE LA SOURCE (garde-fou BUILD-CONTRACT) : ces niveaux sont RÉELS mais
- * ÉCHANTILLONNÉS — le daemon ne sonde que le TOP du leaderboard (~475 adresses : top 150
- * par accountValue ∪ top 350 par volume hebdo). Chaque instantané porte sa `couverture`
+ * ÉCHANTILLONNÉS — le daemon ne sonde que le TOP du leaderboard (~1 500 adresses : top 500
+ * par accountValue complété par le volume hebdo). Chaque instantané porte sa `couverture`
  * MESURÉE (≈ fraction de l'OI couverte, cf. `couvertureOi`), affichée en légende — à ne
  * JAMAIS présenter comme « toutes » les liquidations à venir.
  *

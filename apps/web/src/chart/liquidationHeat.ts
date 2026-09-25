@@ -42,7 +42,7 @@ import {
   type EtatHeat,
   type InstantaneHlHeat,
 } from "../data/hyperliquidHeat";
-import { basePerp } from "../data/symbol";
+import { basePerp, splitSymbol } from "../data/symbol";
 import type { Commande } from "../commands/registry";
 import { marketStore } from "../store/market";
 import { themeStore } from "../store/theme";
@@ -208,13 +208,19 @@ export function cumulsAutourSpot(
  * Dimensions de la grille VISIBLE pour le rendu offscreen basse résolution : nombre de
  * colonnes (`to − from`, une par bougie de la plage) et bornes [bucketMin, bucketMax] des
  * buckets réellement PRÉSENTS dans les cellules (le petit canvas ne couvre que cette bande
- * de prix, pas tout l'axe). Renvoie `null` si la plage est vide ou la grille sans cellule.
- * PURE.
+ * de prix, pas tout l'axe).
+ *
+ * `bornes` (optionnel) = buckets couverts par l'ÉCRAN (bornes INCLUSES) : la plage présente
+ * est INTERSECTÉE avec elle. Sans cela, une seule aberration lointaine (niveau HL à 27 M$
+ * sur BTC ≈ bucket 270 000) dimensionnait le canvas sur des centaines de milliers de lignes
+ * pour ne rien montrer de plus. Renvoie `null` si la plage est vide, la grille sans cellule
+ * ou l'intersection vide. PURE.
  */
 export function dimensionsGrilleVisible(
   grid: LiqGrid,
   from: number,
   to: number,
+  bornes?: { bucketMin: number; bucketMax: number },
 ): { colonnes: number; bucketMin: number; bucketMax: number } | null {
   const colonnes = to - from;
   if (colonnes < 1 || grid.cells.size === 0) return null;
@@ -224,7 +230,29 @@ export function dimensionsGrilleVisible(
     if (cell.bucketIdx < bucketMin) bucketMin = cell.bucketIdx;
     if (cell.bucketIdx > bucketMax) bucketMax = cell.bucketIdx;
   }
+  if (bornes !== undefined) {
+    bucketMin = Math.max(bucketMin, bornes.bucketMin);
+    bucketMax = Math.min(bucketMax, bornes.bucketMax);
+    if (bucketMin > bucketMax) return null;
+  }
   return { colonnes, bucketMin, bucketMax };
+}
+
+/**
+ * Max des totaux (long + short) des CELLULES dont le bucket ∈ [bucketMin, bucketMax]
+ * (bornes INCLUSES) — max par cellule, pas somme par bucket, comme `grid.maxUsd`. Sert à
+ * normaliser l'intensité de la heatmap HL sur ce qui est À L'ÉCRAN : un niveau lointain
+ * énorme n'écrase plus la rampe des cellules visibles. Aucune cellule dans la bande → 0.
+ * PURE.
+ */
+export function maxUsdBuckets(grid: LiqGrid, bucketMin: number, bucketMax: number): number {
+  let max = 0;
+  for (const cell of grid.cells.values()) {
+    if (cell.bucketIdx < bucketMin || cell.bucketIdx > bucketMax) continue;
+    const total = cell.longUsd + cell.shortUsd;
+    if (total > max) max = total;
+  }
+  return max;
 }
 
 /**
@@ -396,10 +424,6 @@ export function libelleLegendeEst(symbol: string, oiCharge: boolean, nbNiveauxAc
 
 // ───────────── Niveaux de liquidation RÉELS Hyperliquid (couche LIQHL) — fonctions PURES ─────────────
 
-/** Demi-largeur de la fenêtre d'affichage autour du dernier prix (fraction). */
-const HL_FENETRE_FRAC = 0.4;
-/** Plancher de notionnel d'un niveau HL affiché (USD). */
-const HL_PLANCHER_USD = 10_000;
 /** Largeur d'un bucket de clustering HL, en fraction du prix (0,25 %). */
 const HL_BUCKET_FRAC = 0.0025;
 
@@ -417,54 +441,79 @@ export interface ClusterHl {
   totalUsd: number;
   /** Side DOMINANT en USD du groupe (égalité → « long », arbitraire et sans enjeu). */
   side: "long" | "short";
+  /** Notionnel des positions LONGUES du groupe (liquidées SOUS le prix). */
+  longUsd: number;
+  /** Notionnel des positions COURTES du groupe (liquidées AU-DESSUS du prix). */
+  shortUsd: number;
   /** Nombre de niveaux regroupés. */
   n: number;
 }
 
+/** Cluster HL positionné à l'écran (y absolu du canvas, cf. toPx). */
+export interface ClusterHlPlace extends ClusterHl {
+  y: number;
+}
+
+/** Agrégat des clusters HL hors de la plage Y visible, d'un côté du pane. */
+export interface HorsEcranHl {
+  /** Somme des `n` des clusters (nombre de NIVEAUX, pas de clusters). */
+  nNiveaux: number;
+  totalUsd: number;
+  longUsd: number;
+  shortUsd: number;
+  /** `pxMoyenPondere` du cluster le plus proche du bord (auDessus : plus grand y ; enDessous : plus petit y). */
+  plusProchePx: number | null;
+  /** Cluster au plus gros `totalUsd`. */
+  plusGros: ClusterHl | null;
+}
+
 /**
- * Ne garde que les niveaux LISIBLES : dans ±`HL_FENETRE_FRAC` du dernier prix (bornes INCLUSES)
- * et d'au moins `HL_PLANCHER_USD`. Le daemon relaie l'API telle quelle et laisse passer les
- * aberrations de MARGE CROISÉE (un prix de liquidation à 53 M$ sur un short de 12 $ a été
- * observé) : c'est donc le FRONT qui borne, sinon l'échelle des barres est écrasée par une
- * seule valeur absurde. Prix invalide → `[]`. PURE.
+ * Filtre de VALIDITÉ seulement : garde les niveaux à `px` > 0 et fini, `valueUsd` > 0 et fini.
+ * Préserve le type d'entrée (mêmes objets). PURE.
+ *
+ * Plus AUCUNE fenêtre autour du prix ni plancher de notionnel. Mesure du 25/09/2026 sur le vrai
+ * daemon : l'ancienne fenêtre ±40 % (+ plancher 10 k$), seul filtre de distance de toute la
+ * chaîne, écartait 55 % du notionnel BTC, 61 % ETH et 97 % SOL (ex. un short BTC de 238 M$ à
+ * +57 %) — alors qu'aucun niveau n'était « du mauvais côté » et qu'au-delà de ×10 du prix les
+ * aberrations de marge croisée pèsent < 0,2 % du notionnel (max 27 M$ pour BTC à ~320×).
+ * Le risque qu'elle couvrait (une aberration qui écrase l'échelle des barres) est désormais
+ * traité au RENDU : le hors-écran est RÉSUMÉ en bord (`partitionnerClustersHl` +
+ * `libelleBordHl`) et la normalisation des barres est faite sur les clusters VISIBLES seulement.
  */
-export function filtrerNiveauxHl<T extends NiveauHlRendu>(niveaux: readonly T[], prix: number): T[] {
-  if (!(prix > 0) || !Number.isFinite(prix)) return [];
-  const ecartMax = prix * HL_FENETRE_FRAC;
+export function filtrerNiveauxHl<T extends NiveauHlRendu>(niveaux: readonly T[]): T[] {
   return niveaux.filter(
-    (n) =>
-      n.px > 0 &&
-      Number.isFinite(n.px) &&
-      Number.isFinite(n.valueUsd) &&
-      n.valueUsd >= HL_PLANCHER_USD &&
-      Math.abs(n.px - prix) <= ecartMax,
+    (n) => n.px > 0 && Number.isFinite(n.px) && n.valueUsd > 0 && Number.isFinite(n.valueUsd),
   );
 }
 
 /**
  * Regroupe les niveaux en buckets de `HL_BUCKET_FRAC` du prix (0,25 %) : sans cela, des
  * centaines de positions voisines donneraient autant de barres illisibles d'un pixel. Chaque
- * cluster porte le total USD, le prix moyen PONDÉRÉ par le notionnel, le side dominant en USD
- * et le nombre de niveaux. N'applique AUCUN filtre (composer avec `filtrerNiveauxHl`). Entrée
- * vide ou prix invalide → `[]`. PURE.
+ * cluster porte le total USD, son split long/short, le prix moyen PONDÉRÉ par le notionnel,
+ * le side dominant en USD et le nombre de niveaux. N'applique AUCUN filtre (composer avec
+ * `filtrerNiveauxHl`). Entrée vide ou prix invalide → `[]`. PURE.
  */
 export function clusteriserNiveauxHl(niveaux: readonly NiveauHlRendu[], prix: number): ClusterHl[] {
   if (!(prix > 0) || !Number.isFinite(prix)) return [];
   const taille = prix * HL_BUCKET_FRAC;
   if (!(taille > 0)) return [];
 
-  const parBucket = new Map<number, { sommePx: number; totalUsd: number; longUsd: number; n: number }>();
+  const parBucket = new Map<
+    number,
+    { sommePx: number; totalUsd: number; longUsd: number; shortUsd: number; n: number }
+  >();
   for (const n of niveaux) {
     if (!(n.px > 0) || !Number.isFinite(n.px) || !Number.isFinite(n.valueUsd)) continue;
     const idx = Math.floor(n.px / taille);
     let b = parBucket.get(idx);
     if (b === undefined) {
-      b = { sommePx: 0, totalUsd: 0, longUsd: 0, n: 0 };
+      b = { sommePx: 0, totalUsd: 0, longUsd: 0, shortUsd: 0, n: 0 };
       parBucket.set(idx, b);
     }
     b.sommePx += n.px * n.valueUsd;
     b.totalUsd += n.valueUsd;
     if (n.side === "long") b.longUsd += n.valueUsd;
+    else b.shortUsd += n.valueUsd;
     b.n += 1;
   }
 
@@ -474,18 +523,112 @@ export function clusteriserNiveauxHl(niveaux: readonly NiveauHlRendu[], prix: nu
     clusters.push({
       pxMoyenPondere: b.sommePx / b.totalUsd,
       totalUsd: b.totalUsd,
-      side: b.longUsd >= b.totalUsd - b.longUsd ? "long" : "short",
+      side: b.longUsd >= b.shortUsd ? "long" : "short",
+      longUsd: b.longUsd,
+      shortUsd: b.shortUsd,
       n: b.n,
     });
   }
   return clusters;
 }
 
+/** Agrégat hors écran vide (aucun cluster de ce côté). */
+function horsEcranVide(): HorsEcranHl {
+  return { nNiveaux: 0, totalUsd: 0, longUsd: 0, shortUsd: 0, plusProchePx: null, plusGros: null };
+}
+
+/**
+ * Sépare les clusters positionnés selon la plage Y VISIBLE du pane [haut, bas] (y absolus du
+ * canvas, y croît vers le BAS) : `haut ≤ y ≤ bas` (bornes INCLUSES) → visible ; `y < haut` →
+ * au-dessus ; `y > bas` → en dessous ; `y` non fini → ignoré PARTOUT (ni peint ni compté).
+ *
+ * Chaque côté hors écran est RÉSUMÉ (`HorsEcranHl`) : Σ n, notionnels total/long/short, prix du
+ * cluster le plus proche du bord (au-dessus : plus grand y ; en dessous : plus petit y) et plus
+ * gros cluster. C'est ce résumé que le contrôleur affiche en repère de bord, au lieu de laisser
+ * `ctx.clip()` jeter silencieusement ce que l'axe Y (calé sur les bougies) ne montre pas. Les
+ * visibles gardent l'ordre d'entrée. PURE.
+ */
+export function partitionnerClustersHl(
+  clusters: readonly ClusterHlPlace[],
+  haut: number,
+  bas: number,
+): { visibles: ClusterHlPlace[]; auDessus: HorsEcranHl; enDessous: HorsEcranHl } {
+  const visibles: ClusterHlPlace[] = [];
+  const auDessus = horsEcranVide();
+  const enDessous = horsEcranVide();
+  // y du cluster « le plus proche » retenu de chaque côté (pilote plusProchePx).
+  let yProcheDessus = -Infinity;
+  let yProcheDessous = Infinity;
+  for (const c of clusters) {
+    if (!Number.isFinite(c.y)) continue;
+    if (c.y >= haut && c.y <= bas) {
+      visibles.push(c);
+      continue;
+    }
+    const cote = c.y < haut ? auDessus : enDessous;
+    cote.nNiveaux += c.n;
+    cote.totalUsd += c.totalUsd;
+    cote.longUsd += c.longUsd;
+    cote.shortUsd += c.shortUsd;
+    if (cote.plusGros === null || c.totalUsd > cote.plusGros.totalUsd) cote.plusGros = c;
+    if (c.y < haut) {
+      if (c.y > yProcheDessus) {
+        yProcheDessus = c.y;
+        auDessus.plusProchePx = c.pxMoyenPondere;
+      }
+    } else if (c.y < yProcheDessous) {
+      yProcheDessous = c.y;
+      enDessous.plusProchePx = c.pxMoyenPondere;
+    }
+  }
+  return { visibles, auDessus, enDessous };
+}
+
+/**
+ * Libellé du repère de BORD des niveaux HL hors écran : « ▲ 46 niv. hors écran · $781.00M ·
+ * max $238.00M @ 132,743.00 » (▼ pour le bas). Montants via `formatUsd`, prix via `formatPrice`
+ * (conventions du dépôt). Le segment « max … @ … » est omis sans `plusGros`. `null` quand rien
+ * n'est hors écran de ce côté (aucun repère à peindre).
+ *
+ * ⚠️ HONNÊTETÉ : « niv. » compte des niveaux de l'ÉCHANTILLON du leaderboard — jamais « toutes
+ * les liquidations » (cf. l'en-tête de data/hyperliquidLiq.ts). PURE.
+ */
+export function libelleBordHl(h: HorsEcranHl, sens: "haut" | "bas"): string | null {
+  if (h.nNiveaux === 0) return null;
+  const fleche = sens === "haut" ? "▲" : "▼";
+  let libelle = `${fleche} ${h.nNiveaux} niv. hors écran · ${formatUsd(h.totalUsd)}`;
+  if (h.plusGros !== null) {
+    libelle += ` · max ${formatUsd(h.plusGros.totalUsd)} @ ${formatPrice(h.plusGros.pxMoyenPondere)}`;
+  }
+  return libelle;
+}
+
+/**
+ * Cumuls de notionnel HL de part et d'autre du `prix`, sur TOUS les niveaux VALIDES (même garde
+ * que `filtrerNiveauxHl` ; aucune fenêtre) : `px > prix` → au-dessus, sinon en dessous (même
+ * convention que `cumulsAutourSpot`). Prix invalide → zéros. PURE.
+ */
+export function cumulsHl(
+  niveaux: readonly NiveauHlRendu[],
+  prix: number,
+): { auDessus: number; enDessous: number } {
+  let auDessus = 0;
+  let enDessous = 0;
+  if (!(prix > 0) || !Number.isFinite(prix)) return { auDessus, enDessous };
+  for (const n of filtrerNiveauxHl(niveaux)) {
+    if (n.px > prix) auDessus += n.valueUsd;
+    else enDessous += n.valueUsd;
+  }
+  return { auDessus, enDessous };
+}
+
 /**
  * Libellé de la légende de la couche HL, RAISON COMPRISE (même exigence que `libelleLegendeEst` :
- * une couche active ne doit jamais être muette). L'état « ok » avec 0 cluster VISIBLE est un cas
- * à part : la source a répondu, c'est le bornage ±40 % du front qui vide l'écran — le dire évite
- * de faire soupçonner le daemon.
+ * une couche active ne doit jamais être muette). En état « ok », annonce la couverture
+ * (« N adresses · P positions ») puis, si fournis, les cumuls « ↑ X · ↓ Y » de TOUS les niveaux
+ * de l'échantillon (plus de fenêtre : le hors-écran est résumé en bord, cf. `libelleBordHl`).
+ * Une `raison` non nulle (cf. `raisonCotationHl`) PRIME sur l'état : la couche est alors muette
+ * à l'écran et la légende dit pourquoi.
  *
  * ⚠️ HONNÊTETÉ : « N adresses » annonce la COUVERTURE réelle (top du leaderboard), pas le carnet
  * entier — cf. l'en-tête de data/hyperliquidLiq.ts. PURE.
@@ -494,14 +637,113 @@ export function libelleLegendeHl(
   etat: EtatHl,
   adressesScannees: number,
   nbPositions: number,
-  nbClustersVisibles: number,
+  cumuls: { auDessus: number; enDessous: number } | null,
+  raison: string | null = null,
 ): string {
+  if (raison !== null) return `LIQ HL RÉELS — ${raison}`;
   if (etat === "sans-daemon") return "LIQ HL RÉELS — nécessite le daemon axiomd";
   if (etat === "chargement") return "LIQ HL RÉELS — chargement…";
   if (etat === "erreur") return "LIQ HL RÉELS — source indisponible";
   if (etat === "vide") return "LIQ HL RÉELS — aucun niveau pour ce symbole";
-  if (nbClustersVisibles === 0) return "LIQ HL RÉELS — aucun niveau dans ±40 %";
-  return `LIQ HL RÉELS — ${adressesScannees} adresses · ${nbPositions} positions`;
+  const base = `LIQ HL RÉELS — ${adressesScannees} adresses · ${nbPositions} positions`;
+  if (cumuls === null) return base;
+  return `${base} · ↑ ${formatUsd(cumuls.auDessus)} · ↓ ${formatUsd(cumuls.enDessous)}`;
+}
+
+/** Cotations assimilées au dollar : USD et stablecoins USD de `QUOTE_ASSETS` (data/symbol.ts). */
+const COTATIONS_USD: ReadonlySet<string> = new Set(["USD", "USDT", "USDC", "USDD", "TUSD", "USDE", "DAI"]);
+
+/**
+ * Raison de TAIRE la couche HL sur ce symbole, ou `null` quand ses niveaux sont affichables.
+ * Les niveaux Hyperliquid sont des prix en USD (perps USDC) ; le coin est la BASE du symbole
+ * (`basePerp`), donc sur ETHBTC le store sert les niveaux d'ETH en USD, à comparer à un prix en
+ * BTC. La fenêtre ±40 % masquait ce cas par accident ; sans elle, l'UI affichait « ▲ 79 niv. hors
+ * écran · $1.34B » et « ↑ $1.34B · ↓ $0.00 » (relecture du 25/09/2026). Une cotation hors USD
+ * (crypto ou fiat, EUR compris : ~8 % d'écart suffisent à fausser les niveaux) donne
+ * « cotation BTC ≠ USD, niveaux masqués ».
+ *
+ * Même normalisation que `basePerp` : suffixe « -PERP » (perp Hyperliquid, en USD) → `null` ;
+ * tiret Coinbase ramené au slash ; symbole synthétique ou cotation inconnue → `null`, car
+ * `basePerp` renonce alors déjà au fetch (état « vide », qui dit la chose honnêtement). PURE.
+ */
+export function raisonCotationHl(symbol: string): string | null {
+  const s = symbol.trim().toUpperCase();
+  if (s.length === 0 || s.includes("|") || s.endsWith("-PERP")) return null;
+  let cotation: string;
+  try {
+    cotation = splitSymbol(s.replace("-", "/"), "raisonCotationHl").quote;
+  } catch {
+    return null;
+  }
+  return COTATIONS_USD.has(cotation) ? null : `cotation ${cotation} ≠ USD, niveaux masqués`;
+}
+
+/** Hauteur (px CSS) des pilules HL — étiquettes de clusters et repères de bord. */
+const HL_PILULE_H = 14;
+/** Écart (px CSS) entre une pilule de repère HL et ses voisins (surcouche DOM, barre, étiquette). */
+const ECART_REPERE_PX = 2;
+
+/** Rectangle en px CSS du canvas (repère du conteneur du graphe). */
+export interface RectPx {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
+/**
+ * Plus petit `y ≥ yMin` où une pilule de hauteur `h` couvrant [x0, x1] ne recoupe AUCUN obstacle
+ * (écart `ecart` compris). Les obstacles sont les surcouches DOM ancrées en haut du conteneur
+ * (bandeau symbole, lignes de légende overlay, badges), qui passent AU-DESSUS du canvas : une
+ * pilule peinte dessous serait invisible. On descend sous chaque obstacle recoupé, dans l'ordre
+ * de leur bord haut, jusqu'à stabilité — une pile d'obstacles jointifs se franchit en entier.
+ * Chaque obstacle pousse au plus une fois (y ne fait que croître) : terminaison garantie.
+ * Coordonnée non finie → obstacle ignoré (comparaisons fausses). PURE.
+ */
+export function yLibreSousObstacles(
+  yMin: number,
+  h: number,
+  x0: number,
+  x1: number,
+  obstacles: readonly RectPx[],
+  ecart: number = ECART_REPERE_PX,
+): number {
+  const tries = [...obstacles].sort((a, b) => a.y0 - b.y0);
+  let y = yMin;
+  let deplace = true;
+  while (deplace) {
+    deplace = false;
+    for (const o of tries) {
+      if (o.x0 < x1 && o.x1 > x0 && o.y0 < y + h + ecart && o.y1 + ecart > y) {
+        y = o.y1 + ecart;
+        deplace = true;
+      }
+    }
+  }
+  return y;
+}
+
+/**
+ * Bande verticale [y0, y1] occupée par une pilule de repère HL dont le bord haut est à `yHaut`,
+ * écart compris. Sert deux fois : BORD de la zone des barres (tout cluster au-delà est RÉSUMÉ
+ * dans le repère au lieu d'être peint puis masqué par la pilule) et zone INTERDITE aux
+ * étiquettes quand la pilule est peinte (`filtrerHorsBandes`). PURE.
+ */
+export function bandeRepereHl(yHaut: number): [number, number] {
+  return [yHaut - ECART_REPERE_PX, yHaut + HL_PILULE_H + ECART_REPERE_PX];
+}
+
+/**
+ * Garde les items dont l'étiquette [y − demiHauteur, y + demiHauteur] ne recoupe aucune bande
+ * (un contact de bord passe). À appliquer AVANT de retenir les N plus gros : un cluster masqué par
+ * un repère ne doit pas voler une place d'étiquette. Préserve le type et l'ordre. PURE.
+ */
+export function filtrerHorsBandes<T extends { y: number }>(
+  items: readonly T[],
+  bandes: ReadonlyArray<readonly [number, number]>,
+  demiHauteur: number,
+): T[] {
+  return items.filter((it) => bandes.every(([b0, b1]) => it.y + demiHauteur <= b0 || it.y - demiHauteur >= b1));
 }
 
 // ───────────── Heatmap des instantanés HL (LIQHL) — fonctions PURES ─────────────
@@ -704,6 +946,10 @@ const FALLBACK_CELL_W = 6;
  *  (1 cellule = 1 pixel) upscalé avec interpolation — rendu continu, 1 seul drawImage par
  *  frame. Au-dessus (zoom serré), les rects précis restent : lecture cellule à cellule. */
 const SEUIL_LISSAGE_PX = 6;
+/** Garde DURE du rendu lissé : au-delà de ce nombre de LIGNES (buckets) du petit canvas, on
+ *  se replie sur les rects. Même borné à l'écran, un zoom vertical extrême ne doit jamais
+ *  réallouer un ImageData géant (createImageData lève → la boucle rAF mourait). */
+const MAX_LIGNES_LISSAGE = 4096;
 /**
  * Teinte RVB des niveaux ESTIMÉS, choisie PAR THÈME pour contraster avec la rampe
  * réelle (garde-fou « estimation ≠ donnée » — sur bloomberg la rampe est ambre,
@@ -728,8 +974,21 @@ const HL_BARRE_MAX_PX = 120;
 const HL_BARRE_H = 3;
 /** Opacité des barres HL (assez franches pour se lire, assez douces pour laisser voir le prix). */
 const HL_ALPHA = 0.75;
-/** Nombre de clusters HL étiquetés (les plus gros). */
+/** Nombre de clusters HL étiquetés (les plus gros VISIBLES). */
 const NB_LABELS_HL = 3;
+/**
+ * Marge haute MINIMALE (px CSS) des étiquettes canvas et du repère haut HL. Ce n'est PAS la
+ * hauteur réelle des surcouches DOM : sur le graphe maître, le bandeau SymbolBanner occupe
+ * top+8…top+44 (et plus s'il passe sur 2 lignes), et les lignes de la légende overlay s'empilent
+ * en haut à droite. Le repère haut HL les MESURE (`obstaclesDom` + `yLibreSousObstacles`).
+ */
+const BANDE_DOM_PX = 24;
+/** Message d'état de la heatmap RÉELLE, buffer vide : haut-droite du pane, à top + Y_MSG_ATTENTE_PX. */
+const MSG_ATTENTE_LIQ = "⋯ Heatmap liquidations active — en attente du flux live";
+const POLICE_MSG_ATTENTE = "10px ui-monospace, SFMono-Regular, monospace";
+const Y_MSG_ATTENTE_PX = 22;
+/** Hauteur de ligne (px) du message d'état (police 10 px, textBaseline « top »). */
+const H_MSG_ATTENTE_PX = 12;
 
 interface PixelXY {
   x?: number;
@@ -765,6 +1024,39 @@ interface OptionsCellules {
   alphaMin?: number;
   alphaMax?: number;
   sansFade?: boolean;
+  /** Maximum de normalisation de l'intensité (défaut : `grid.maxUsd`). La heatmap HL passe le
+   *  max des cellules VISIBLES (`maxUsdBuckets`) : un niveau lointain n'écrase plus la rampe. */
+  maxUsd?: number;
+  /** Buckets couverts par l'écran (bornes incluses, marge comprise) : le rendu LISSÉ n'alloue
+   *  que cette bande (cf. `dimensionsGrilleVisible`). Optimisation pure — rien de visible ne change. */
+  bornes?: { bucketMin: number; bucketMax: number };
+}
+
+/**
+ * Élargit d'UN bucket de chaque côté les buckets visibles passés au rendu lissé : l'upscale
+ * interpolé mélange chaque ligne avec sa voisine — sans cette marge, la ligne au bord de
+ * l'écran se mélangerait au vide au lieu de la cellule hors écran (rendu identique à la
+ * grille non bornée dans la zone visible). `null` → pas de bornes (grille entière, sous la
+ * garde MAX_LIGNES_LISSAGE).
+ */
+function avecMargeBucket(
+  b: { bucketMin: number; bucketMax: number } | null,
+): { bucketMin: number; bucketMax: number } | undefined {
+  return b === null ? undefined : { bucketMin: b.bucketMin - 1, bucketMax: b.bucketMax + 1 };
+}
+
+/** Disposition des barres HL d'une frame (cf. `disposerHl`), calculée AVANT la heatmap exécutée. */
+interface DispositionHl {
+  /** Clusters de tous les niveaux valides, positionnés (y absolu du canvas, fini). */
+  places: ClusterHlPlace[];
+  /** Ancre droite des barres ET des repères de bord (px). */
+  xAncre: number;
+  /** Bord haut de la pilule ▲, sous les surcouches DOM mesurées. */
+  yRepereHaut: number;
+  /** Bande de la pilule ▲ (`bandeRepereHl`) : son bord bas est le HAUT de la zone des barres. */
+  bandeHaut: [number, number];
+  /** Vrai si la pilule ▲ sera peinte (au moins un cluster au-dessus de la zone des barres). */
+  repereHaut: boolean;
 }
 
 /** Constantes de repli RVB pour les teintes up/down si le token du thème n'est pas parsable (#10b981 / #ef4444). */
@@ -818,7 +1110,9 @@ export class LiquidationHeatController {
   private grilleHlObsolete = true;
   private derniereGrilleHl: LiqGrid | null = null;
   private unsubHeat: (() => void) | null = null;
-  /** Suit la transition LIQHL → OFF : `arreterHeat` coupe alors le minuteur du store. */
+  /** Heatmap HL DEMANDÉE à la frame précédente (LIQHL actif ET cotation USD). Sa retombée
+   *  (LIQHL → OFF, ou passage sur une paire hors USD) appelle `arreterHeat`, qui coupe le
+   *  minuteur du store : aucun fetch inutile d'instantanés qu'on ne peindra pas. */
   private hlEtaitActif = false;
   /**
    * Cache SYMÉTRIQUE à la grille pour les niveaux ESTIMÉS (calcul O(pointsOI × bougies)) :
@@ -863,8 +1157,13 @@ export class LiquidationHeatController {
   private readonly unsubLiqEst: () => void;
   /** Idem pour la bascule des niveaux RÉELS Hyperliquid (LIQHL) — 3e couche indépendante. */
   private readonly unsubHl: () => void;
-  /** Nb de clusters HL réellement peints à la dernière frame (la légende en tire sa raison). */
-  private clustersHlVisibles = 0;
+  /**
+   * Bande de la pilule ▼ HL peinte à la frame PRÉCÉDENTE. Les étiquettes de la heatmap exécutée
+   * sont posées AVANT la pile de légendes qui fixe la position de ▼ : elles évitent donc la bande
+   * de la frame d'avant, et tout changement de cette bande relance une frame. Convergence en une
+   * frame : la pile ne dépend pas de ces étiquettes.
+   */
+  private bandeBasHlPrec: [number, number] | null = null;
 
   private readonly markDirty = (): void => {
     this.grilleObsolete = true;
@@ -1026,6 +1325,7 @@ export class LiquidationHeatController {
     // les instantanés (LIQHL OFF ou contrôleur arrêté).
     arreterHeat();
     this.hlEtaitActif = false;
+    this.bandeBasHlPrec = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.animeJusqua = 0;
@@ -1131,39 +1431,77 @@ export class LiquidationHeatController {
     const heatActif = liqMarksStore.getState().actif;
     const estActif = liqEstStore.getState().actif;
     const hlActif = hlLiqStore.getState().actif;
-    // Transition LIQHL → OFF : coupe le minuteur de rafraîchissement et vide le store.
-    if (!hlActif && this.hlEtaitActif) arreterHeat();
-    this.hlEtaitActif = hlActif;
-    if (hlActif) {
+    // Niveaux HL = prix en USD : sur une paire cotée hors USD (ETHBTC, BTCJPY…), la couche se
+    // tait à l'écran et la légende dit pourquoi (cf. raisonCotationHl).
+    const raisonHl = hlActif ? raisonCotationHl(marketStore.getState().symbol) : null;
+    const hlDessinable = hlActif && raisonHl === null;
+    // Retombée de la heatmap HL (LIQHL → OFF ou paire hors USD) : coupe le minuteur, vide le store.
+    if (!hlDessinable && this.hlEtaitActif) arreterHeat();
+    this.hlEtaitActif = hlDessinable;
+    if (hlDessinable) {
       // Alimente l'historique d'instantanés SANS bloquer le rendu (fetch incrémental).
       this.assurerHeatVue();
       // La heatmap des instantanés est peinte D'ABORD : les cellules exécutées (données
       // live) passent par-dessus — le flux récent prime la mesure historique.
       this.dessinerHeatmapHl(main, tokens, heatActif);
     }
-    if (heatActif) this.dessinerHeatmap(main, tokens);
+    // Disposition des barres HL AVANT la heatmap exécutée : ses étiquettes de clusters doivent
+    // éviter la pilule du repère haut HL, peinte plus tard (cf. disposerHl).
+    const dispoHl = hlDessinable ? this.disposerHl(main, heatActif) : null;
+    const bandesHl: Array<[number, number]> = [];
+    if (dispoHl?.repereHaut === true) bandesHl.push(dispoHl.bandeHaut);
+    if (dispoHl !== null && this.bandeBasHlPrec !== null) bandesHl.push(this.bandeBasHlPrec);
+    if (heatActif) this.dessinerHeatmap(main, tokens, bandesHl);
     if (estActif) this.dessinerNiveauxEstimes(main, tokens);
-    // Remis à zéro À CHAQUE frame : sans couche HL peinte, la légende ne doit pas réutiliser
-    // le compte de la frame précédente.
-    this.clustersHlVisibles = 0;
-    if (hlActif) this.dessinerNiveauxHl(main, tokens, heatActif);
     // Bloc de légendes UNIFIÉ en bas-droite (barre d'échelle USD, mini-légende profil, légende
     // EST) : dessiné une fois par frame APRÈS les couches (la grille est alors en cache), empilé
     // vers le haut au-dessus de l'axe temps — supprime les collisions avec les boutons de layout
     // DOM et la légende du Volume Profile (restée en haut à droite).
-    this.dessinerLegendes(main, tokens, heatActif, estActif, hlActif);
+    const sommetPile = this.dessinerLegendes(main, tokens, heatActif, estActif, hlActif, raisonHl);
+    // Barres HL APRÈS la pile : le repère BAS se pose au-dessus d'elle (hauteur variable selon
+    // les couches actives) et la zone des barres s'arrête à ce repère — aucune barre ni étiquette
+    // HL n'entre donc dans la pile, et les légendes (garde-fous non contournables) restent lisibles.
+    const bandeBas = dispoHl !== null ? this.dessinerNiveauxHl(main, tokens, dispoHl, sommetPile) : null;
+    const memeBande =
+      bandeBas === this.bandeBasHlPrec ||
+      (bandeBas !== null && this.bandeBasHlPrec !== null &&
+        bandeBas[0] === this.bandeBasHlPrec[0] && bandeBas[1] === this.bandeBasHlPrec[1]);
+    if (!memeBande) {
+      this.bandeBasHlPrec = bandeBas;
+      if (heatActif) this.dirty = true; // étiquettes exécutées posées contre une bande périmée
+    }
   }
 
   /**
    * Couche NIVEAUX RÉELS HYPERLIQUID (LIQHL) — barres horizontales PLEINES ancrées au bord
-   * droit, une par cluster de positions ouvertes dont le prix de liquidation tombe dans ±40 %
-   * du dernier prix (cf. `filtrerNiveauxHl` / `clusteriserNiveauxHl`, pures et testées).
+   * droit, une par cluster de positions ouvertes de l'échantillon (cf. `filtrerNiveauxHl` —
+   * validité seule, plus de fenêtre — / `clusteriserNiveauxHl`, pures et testées).
+   *
+   * Prix de référence = close de la DERNIÈRE bougie CHARGÉE (prix live), pas de la dernière
+   * visible : faire défiler l'historique ne change ni le bucketing ni l'ensemble des clusters.
+   *
+   * Hors écran RÉSUMÉ, pas jeté : l'axe Y de KLineChart se cale sur les bougies visibles et
+   * `convertToPixel` extrapole sans borne — un cluster hors de [top, top+height] était peint
+   * puis jeté par `ctx.clip()` sans aucun repère. `partitionnerClustersHl` sépare désormais
+   * visibles / au-dessus / en dessous : seuls les VISIBLES ont une barre et une étiquette, et
+   * chaque côté porte un repère de BORD (`libelleBordHl`).
+   *
+   * ZONE DES BARRES = entre les deux repères, pas le pane entier (`bandeRepereHl`) :
+   *  - repère HAUT posé par `disposerHl` SOUS les surcouches DOM MESURÉES (bandeau SymbolBanner
+   *    top+8…top+44 voire plus s'il passe sur 2 lignes, lignes de légende overlay, message
+   *    d'attente de la heatmap exécutée). L'ancienne hypothèse « bande DOM de 24 px » était
+   *    fausse : posé à top+24, le repère disparaissait sous le bandeau (z-10, au-dessus du canvas) ;
+   *  - repère BAS posé AU-DESSUS de la pile de légendes bas-droite (`sommetPile`).
+   * Un cluster au-dessus du bord bas de la pilule ▲ (hors écran, sous le bandeau ou sous la
+   * pilule elle-même) ou sous le bord haut de la pilule ▼ est RÉSUMÉ dans le repère, jamais peint
+   * puis masqué sans être compté. Les étiquettes évitent de même les bandes des pilules peintes.
    *
    * Distincte à l'œil des deux autres couches : la heatmap réelle peint des cellules
    * temps×prix, les niveaux ESTIMÉS des lignes POINTILLÉES pleine largeur — ici des barres
    * PLEINES adossées au bord droit, dont la LONGUEUR ∝ √(totalUsd) (la racine comprime les
    * cascades sans écraser les petits clusters, comme le log ailleurs), normalisée au plus gros
-   * cluster VISIBLE et plafonnée à `HL_BARRE_MAX_PX`.
+   * cluster VISIBLE (une aberration hors écran n'écrase donc plus l'échelle) et plafonnée à
+   * `HL_BARRE_MAX_PX`.
    *
    * Couleurs : longs liquidés (SOUS le prix, ventes forcées) → `--down` ; shorts (AU-DESSUS,
    * rachats forcés) → `--up` — même sémantique que le profil latéral et le tooltip.
@@ -1171,73 +1509,194 @@ export class LiquidationHeatController {
    * ANCRAGE : décalé vers l'intérieur de la largeur du Volume Profile s'il est actif ET de
    * celle des bandes du profil réel si la heatmap est active — sans quoi les trois histogrammes
    * du bord droit se peindraient les uns sur les autres.
+   *
+   * Renvoie la bande de la pilule ▼ si elle est peinte, sinon `null` (cf. `bandeBasHlPrec`).
    */
-  private dessinerNiveauxHl(main: Bounding, tokens: Tokens, heatActif: boolean): void {
-    const { niveaux } = hlLiqStore.getState();
-    if (niveaux.length === 0) return;
-
-    const candles = marketStore.getState().candles;
-    const range = this.chart.getVisibleRange();
-    const derniereVisible = candles[Math.min(candles.length, range.to) - 1];
-    if (derniereVisible === undefined) return;
-    const prix = derniereVisible.close;
-
-    const clusters = clusteriserNiveauxHl(filtrerNiveauxHl(niveaux, prix), prix);
-    if (clusters.length === 0) return;
-    this.clustersHlVisibles = clusters.length;
-
-    let maxUsd = 0;
-    for (const c of clusters) if (c.totalUsd > maxUsd) maxUsd = c.totalUsd;
-    if (!(maxUsd > 0)) return;
-    const racineMax = Math.sqrt(maxUsd);
-
+  private dessinerNiveauxHl(
+    main: Bounding,
+    tokens: Tokens,
+    dispo: DispositionHl,
+    sommetPile: number,
+  ): [number, number] | null {
+    const { places, xAncre, yRepereHaut, bandeHaut } = dispo;
     const ctx = this.ctx;
     const { left, top, width, height } = main;
+    // Repère BAS : pilule posée à ECART_REPERE_PX au-dessus du sommet de la pile de légendes.
+    const yRepereBas = sommetPile - ECART_REPERE_PX - HL_PILULE_H;
+    const bandeBas = bandeRepereHl(yRepereBas);
+    const { visibles, auDessus, enDessous } = partitionnerClustersHl(places, bandeHaut[1], bandeBas[0]);
+
+    // Racine de normalisation sur les VISIBLES seulement.
+    let maxUsd = 0;
+    for (const c of visibles) if (c.totalUsd > maxUsd) maxUsd = c.totalUsd;
+    if (maxUsd > 0) {
+      const racineMax = Math.sqrt(maxUsd);
+      const longueurMax = Math.min(HL_BARRE_MAX_PX, width * 0.25);
+      const largeur = (c: ClusterHl): number => Math.max(2, (Math.sqrt(c.totalUsd) / racineMax) * longueurMax);
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(left, top, width, height);
+      ctx.clip();
+      // Barres, du bord droit vers la gauche. `y` centré sur le prix moyen pondéré du cluster.
+      ctx.globalAlpha = HL_ALPHA;
+      for (const c of visibles) {
+        ctx.fillStyle = c.side === "long" ? tokens.down : tokens.up;
+        ctx.fillRect(xAncre - largeur(c), Math.round(c.y) - HL_BARRE_H / 2, largeur(c), HL_BARRE_H);
+      }
+      ctx.globalAlpha = 1;
+      ctx.restore();
+
+      // Étiquettes des NB_LABELS_HL plus gros clusters VISIBLES hors des bandes des repères
+      // PEINTS (filtre AVANT le slice : un gros cluster sous une pilule ne doit pas voler une
+      // place), à gauche de leur barre — même pilule et même ordre « prix · USD » que les labels
+      // du profil réel. Les visibles sont déjà sous les surcouches DOM (zone des barres).
+      ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      const bandes: Array<[number, number]> = [];
+      if (auDessus.nNiveaux > 0) bandes.push(bandeHaut);
+      if (enDessous.nNiveaux > 0) bandes.push(bandeBas);
+      const candidats = filtrerHorsBandes(visibles, bandes, HL_PILULE_H / 2)
+        .sort((a, b) => b.totalUsd - a.totalUsd)
+        .slice(0, NB_LABELS_HL)
+        .map((c) => ({ y: c.y, poids: c.totalUsd, px: c.pxMoyenPondere, w: largeur(c) }));
+      for (const item of dechevaucher(candidats, 14)) {
+        const label = `${formatPrice(item.px)} · ${formatUsd(item.poids)}`;
+        const droite = xAncre - item.w - 4;
+        const w = ctx.measureText(label).width;
+        ctx.fillStyle = tokens.surface;
+        ctx.globalAlpha = 0.96;
+        ctx.fillRect(droite - w - 6, item.y - HL_PILULE_H / 2, w + 6, HL_PILULE_H);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = tokens.border;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(droite - w - 6, item.y - HL_PILULE_H / 2, w + 6, HL_PILULE_H);
+        ctx.fillStyle = tokens.text;
+        ctx.fillText(label, droite - 3, item.y);
+      }
+    }
+
+    // Repères de bord (rien si le côté est vide), peints en DERNIER : au-dessus des barres.
+    this.dessinerRepereBordHl(auDessus, "haut", xAncre, yRepereHaut, tokens);
+    this.dessinerRepereBordHl(enDessous, "bas", xAncre, yRepereBas, tokens);
+    return enDessous.nNiveaux > 0 ? bandeBas : null;
+  }
+
+  /**
+   * Disposition des barres HL de la frame, calculée AVANT la heatmap exécutée (dont les
+   * étiquettes doivent éviter la pilule ▲) : clusters de TOUS les niveaux valides autour du
+   * prix LIVE (close de la DERNIÈRE bougie CHARGÉE), positionnés par `toPx` (y non fini écarté),
+   * ancre droite des barres, et position du repère HAUT.
+   *
+   * Repère haut : premier y ≥ top + BANDE_DOM_PX libre de toute surcouche DOM (`obstaclesDom`)
+   * et du message d'attente de la heatmap exécutée sur [left, xAncre] — toute la largeur à
+   * gauche de l'ancre, car la pilule y grandit vers la gauche avec son libellé (dont la longueur
+   * dépend de la partition, elle-même fonction de ce y : la largeur maximale casse la boucle).
+   * Plafonné au tiers haut du pane (surcouches pathologiques). `null` si rien à peindre.
+   */
+  private disposerHl(main: Bounding, heatActif: boolean): DispositionHl | null {
+    const { niveaux } = hlLiqStore.getState();
+    if (niveaux.length === 0) return null;
+    const candles = marketStore.getState().candles;
+    const derniere = candles[candles.length - 1];
+    if (derniere === undefined) return null;
+    const clusters = clusteriserNiveauxHl(filtrerNiveauxHl(niveaux), derniere.close);
+    if (clusters.length === 0) return null;
+
+    const { left, top, width, height } = main;
+    const places: ClusterHlPlace[] = [];
+    for (const c of clusters) {
+      const y = this.toPx({ value: c.pxMoyenPondere }).y;
+      if (y !== undefined && Number.isFinite(y)) places.push({ ...c, y });
+    }
     const vpActif = volumeProfileStore.getState().enabled;
     const xAncre =
       left + width - (vpActif ? width * VP_WIDTH_FRAC : 0) - (heatActif ? width * MAX_BAND_FRAC : 0);
-    const longueurMax = Math.min(HL_BARRE_MAX_PX, width * 0.25);
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(left, top, width, height);
-    ctx.clip();
-
-    // Barres, du bord droit vers la gauche. `y` centré sur le prix moyen pondéré du cluster.
-    const dessinees: Array<{ y: number; poids: number; px: number; total: number; w: number }> = [];
-    ctx.globalAlpha = HL_ALPHA;
-    for (const c of clusters) {
-      const y = this.toPx({ value: c.pxMoyenPondere }).y;
-      if (y === undefined || !Number.isFinite(y)) continue;
-      const w = Math.max(2, (Math.sqrt(c.totalUsd) / racineMax) * longueurMax);
-      ctx.fillStyle = c.side === "long" ? tokens.down : tokens.up;
-      ctx.fillRect(xAncre - w, Math.round(y) - HL_BARRE_H / 2, w, HL_BARRE_H);
-      dessinees.push({ y, poids: c.totalUsd, px: c.pxMoyenPondere, total: c.totalUsd, w });
+    const obstacles = this.obstaclesDom();
+    if (heatActif && liqEventsStore.getState().enAttente && this.grilleReelle() === null) {
+      obstacles.push(this.rectMessageAttente(main));
     }
-    ctx.globalAlpha = 1;
-    ctx.restore();
+    const yRepereHaut = Math.min(
+      yLibreSousObstacles(top + BANDE_DOM_PX, HL_PILULE_H, left, xAncre, obstacles),
+      top + height / 3,
+    );
+    const bandeHaut = bandeRepereHl(yRepereHaut);
+    return { places, xAncre, yRepereHaut, bandeHaut, repereHaut: places.some((c) => c.y < bandeHaut[1]) };
+  }
 
-    // Étiquettes des NB_LABELS_HL plus gros clusters, à gauche de leur barre — même pilule et
-    // même ordre « prix · USD » que les labels de clusters du profil réel (cohérence de lecture).
+  /**
+   * Surcouches DOM du conteneur, en px CSS du canvas : bandeau symbole (SymbolBanner), lignes de
+   * la légende overlay (OverlayLegend), badges REPLAY / orderflow… Elles passent AU-DESSUS du
+   * canvas (z-10/z-20) : une pilule peinte dessous serait invisible. Exclut les canvases et tout
+   * élément d'au moins la moitié de la hauteur (div du graphe, voile de chargement plein cadre).
+   * Lecture de layout seulement aux frames SALES (`render` est dirty-only), ~15 enfants.
+   */
+  private obstaclesDom(): RectPx[] {
+    const base = this.container.getBoundingClientRect();
+    const obstacles: RectPx[] = [];
+    for (const el of Array.from(this.container.children)) {
+      if (el instanceof HTMLCanvasElement) continue;
+      const r = el.getBoundingClientRect();
+      if (!(r.width > 0) || !(r.height > 0) || r.height >= base.height / 2) continue;
+      obstacles.push({
+        x0: r.left - base.left,
+        x1: r.right - base.left,
+        y0: r.top - base.top,
+        y1: r.bottom - base.top,
+      });
+    }
+    return obstacles;
+  }
+
+  /** Emprise du message d'attente de la heatmap exécutée (mêmes constantes que son tracé). */
+  private rectMessageAttente(main: Bounding): RectPx {
+    this.ctx.font = POLICE_MSG_ATTENTE;
+    const w = this.ctx.measureText(MSG_ATTENTE_LIQ).width;
+    const xRight = main.left + main.width;
+    const y0 = main.top + Y_MSG_ATTENTE_PX;
+    return { x0: xRight - 4 - w, x1: xRight - 4, y0, y1: y0 + H_MSG_ATTENTE_PX };
+  }
+
+  /**
+   * Repère de BORD des niveaux HL hors écran : pilule « ▲/▼ N niv. hors écran · total · max … @
+   * prix » (`libelleBordHl`, pure et testée) ancrée à DROITE sur `xDroite` (l'ancre des barres,
+   * −4 px comme le retrait des légendes), bord haut à `yHaut`. Même style que les étiquettes de
+   * clusters (fond `--surface`, bord `--border`, texte `--text`, 9 px mono) ; seul le TRIANGLE
+   * est teinté du côté dominant du hors-écran — `--up` si les shorts (rachats forcés) pèsent au
+   * moins autant que les longs, sinon `--down`. Rien si le côté est vide.
+   */
+  private dessinerRepereBordHl(
+    h: HorsEcranHl,
+    sens: "haut" | "bas",
+    xDroite: number,
+    yHaut: number,
+    tokens: Tokens,
+  ): void {
+    const label = libelleBordHl(h, sens);
+    if (label === null) return;
+    const ctx = this.ctx;
     ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
-    ctx.textAlign = "right";
+    ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    const tops = dessinees.sort((a, b) => b.poids - a.poids).slice(0, NB_LABELS_HL);
-    for (const item of dechevaucher(tops, 14)) {
-      if (item.y < top + 24 || item.y > top + height) continue;
-      const label = `${formatPrice(item.px)} · ${formatUsd(item.total)}`;
-      const droite = xAncre - item.w - 4;
-      const w = ctx.measureText(label).width;
-      ctx.fillStyle = tokens.surface;
-      ctx.globalAlpha = 0.96;
-      ctx.fillRect(droite - w - 6, item.y - 7, w + 6, 14);
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = tokens.border;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(droite - w - 6, item.y - 7, w + 6, 14);
-      ctx.fillStyle = tokens.text;
-      ctx.fillText(label, droite - 3, item.y);
-    }
+    const fleche = label.slice(0, 1); // « ▲ » / « ▼ » (un seul code unit BMP)
+    const reste = label.slice(1);
+    const wFleche = ctx.measureText(fleche).width;
+    const w = wFleche + ctx.measureText(reste).width;
+    const x0 = xDroite - 4 - (w + 6);
+    const yMilieu = yHaut + HL_PILULE_H / 2;
+    ctx.fillStyle = tokens.surface;
+    ctx.globalAlpha = 0.96;
+    ctx.fillRect(x0, yHaut, w + 6, HL_PILULE_H);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = tokens.border;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x0, yHaut, w + 6, HL_PILULE_H);
+    ctx.fillStyle = h.shortUsd >= h.longUsd ? tokens.up : tokens.down;
+    ctx.fillText(fleche, x0 + 3, yMilieu);
+    ctx.fillStyle = tokens.text;
+    ctx.fillText(reste, x0 + 3 + wFleche, yMilieu);
   }
 
   /**
@@ -1309,11 +1768,18 @@ export class LiquidationHeatController {
     ctx.clip();
 
     const now = Date.now();
+    // Normalisation de l'intensité sur les cellules des buckets VISIBLES (HL seulement) : un
+    // niveau lointain énorme (aberration de marge croisée) n'écrase plus la rampe de l'écran.
+    // Repli sur `grid.maxUsd` si rien n'est visible ou si l'écran n'est pas convertible.
+    const visibles = this.bucketsVisibles(main, grid.taille);
+    const maxVisible = visibles === null ? 0 : maxUsdBuckets(grid, visibles.bucketMin, visibles.bucketMax);
     const opts: OptionsCellules = {
       rampe: tokens.rampeHl,
       alphaMin: 0.15,
       alphaMax: 0.85,
       sansFade: true,
+      maxUsd: maxVisible > 0 ? maxVisible : grid.maxUsd,
+      bornes: avecMargeBucket(visibles),
     };
     const lissage = largeurRef < SEUIL_LISSAGE_PX;
     if (
@@ -1338,39 +1804,53 @@ export class LiquidationHeatController {
   }
 
   /**
+   * Grille RÉELLE de la plage visible, reconstruite SEULEMENT si obsolète (données/viewport/
+   * resize) : au survol, `onCrosshair` marque `dirty` sans marquer `grilleObsolete`, donc on
+   * réutilise la dernière grille rendue pour le hit-test au lieu de ré-agréger tout le buffer à
+   * chaque mousemove. Appelée aussi par `disposerHl` (le message d'attente, peint quand elle est
+   * nulle, est un obstacle du repère haut HL) — idempotente dans la frame.
+   */
+  private grilleReelle(): LiqGrid | null {
+    if (this.grilleObsolete) {
+      const candles = marketStore.getState().candles;
+      const range = this.chart.getVisibleRange();
+      const from = Math.max(0, range.from);
+      const to = Math.min(candles.length, range.to);
+      const facteur = liqMarksStore.getState().granularite;
+      this.derniereGrille =
+        to - from >= 1 ? construireGrille(liqEventsStore.getState().events, candles, from, to, facteur) : null;
+      this.grilleObsolete = false;
+    }
+    return this.derniereGrille;
+  }
+
+  /**
    * Couche HEATMAP RÉELLE : grille temps×prix (viridis log) + profil latéral long/short +
    * tooltip de survol, depuis les liquidations RÉELLEMENT exécutées (liqEventsStore).
+   * `bandesHl` : bandes verticales des pilules de repère HL qui seront peintes par-dessus —
+   * interdites aux étiquettes de clusters (cf. `dessinerLabelsClusters`).
    */
-  private dessinerHeatmap(main: Bounding, tokens: Tokens): void {
+  private dessinerHeatmap(main: Bounding, tokens: Tokens, bandesHl: ReadonlyArray<readonly [number, number]>): void {
     const ctx = this.ctx;
     const { left, top, width, height } = main;
     const xRight = left + width;
 
-    const { events, enAttente } = liqEventsStore.getState();
+    const { enAttente } = liqEventsStore.getState();
     const candles = marketStore.getState().candles;
     const range = this.chart.getVisibleRange();
     const from = Math.max(0, range.from);
     const to = Math.min(candles.length, range.to);
-
-    // Reconstruction de la grille SEULEMENT si obsolète (données/viewport/resize) : au survol,
-    // `onCrosshair` marque `dirty` sans marquer `grilleObsolete`, donc on réutilise la dernière
-    // grille rendue pour le hit-test au lieu de ré-agréger tout le buffer à chaque mousemove.
-    if (this.grilleObsolete) {
-      const facteur = liqMarksStore.getState().granularite;
-      this.derniereGrille = to - from >= 1 ? construireGrille(events, candles, from, to, facteur) : null;
-      this.grilleObsolete = false;
-    }
-    const grid = this.derniereGrille;
+    const grid = this.grilleReelle();
 
     // Buffer vide (heatmap actif mais aucune liquidation encore reçue) : indicateur « en
-    // attente » discret, en haut à droite SOUS les boutons de layout DOM (top+2..22).
+    // attente » discret, en haut à droite (top+22). Le repère haut HL le traite en obstacle.
     if (grid === null) {
       if (enAttente) {
         ctx.fillStyle = tokens.textDim;
-        ctx.font = "10px ui-monospace, SFMono-Regular, monospace";
+        ctx.font = POLICE_MSG_ATTENTE;
         ctx.textAlign = "right";
         ctx.textBaseline = "top";
-        ctx.fillText("⋯ Heatmap liquidations active — en attente du flux live", xRight - 4, top + 22);
+        ctx.fillText(MSG_ATTENTE_LIQ, xRight - 4, top + Y_MSG_ATTENTE_PX);
       }
       // Le flash de bande reste rendu même sans grille (clic feed juste après l'allumage) :
       // il matérialise le niveau de prix de la liquidation cliquée.
@@ -1400,7 +1880,15 @@ export class LiquidationHeatController {
     // les deux chemins de rendu, cohérence de l'animation).
     const now = Date.now();
     const lissage = prevW < SEUIL_LISSAGE_PX;
-    if (!lissage || !this.dessinerCellulesLissees(grid, candles, from, to, largeurs, colonneParTime, mode, tokens, now)) {
+    // Bornes de l'écran passées au SEUL rendu lissé (allocation du petit canvas limitée à la
+    // bande visible) — normalisation inchangée (`grid.maxUsd`) pour la heatmap exécutée.
+    const optsLissage: OptionsCellules = lissage
+      ? { bornes: avecMargeBucket(this.bucketsVisibles(main, grid.taille)) }
+      : {};
+    if (
+      !lissage ||
+      !this.dessinerCellulesLissees(grid, candles, from, to, largeurs, colonneParTime, mode, tokens, now, optsLissage)
+    ) {
       this.dessinerCellulesRects(grid, largeurs, mode, tokens, now);
     }
 
@@ -1455,8 +1943,9 @@ export class LiquidationHeatController {
 
       // Étiquettes des top clusters : pilule « prix · USD » à gauche de la barre, pour les
       // NB_LABELS_CLUSTER plus gros buckets (dé-chevauchement 14 px, le plus gros gagne, exclus
-      // sous la toolbar). Annonce du même coup la valeur USD du bucket max (le n°1).
-      this.dessinerLabelsClusters(profil, grid, maxProfil, xAncre, maxBandW, main, tokens);
+      // sous la toolbar et sous les pilules de repère HL). Annonce du même coup la valeur USD du
+      // bucket max (le n°1).
+      this.dessinerLabelsClusters(profil, grid, maxProfil, xAncre, maxBandW, main, tokens, bandesHl);
     }
 
     // Surbrillance de la cellule survolée (contour 1.5 px tokens.text) — tracée seulement quand
@@ -1484,6 +1973,29 @@ export class LiquidationHeatController {
 
     // Tooltip de survol : dessiné HORS clip (au-dessus de la heatmap), après restauration.
     if (hover !== null) this.dessinerTooltip(hover, grid, main, tokens);
+  }
+
+  /**
+   * Buckets de prix couverts par l'ÉCRAN (bornes incluses) pour une taille de bucket : prix
+   * aux pixels `top` et `top + height` convertis PAR L'API (`convertFromPixel`, `absolute` car
+   * `main.top` est absolu comme pour `toPx`) — jamais à la main : l'axe peut être log ou en
+   * pourcentage, voire inversé (d'où min/max). Un bas d'écran ≤ 0 (axe linéaire très dézoomé)
+   * est ramené à 0 : aucun niveau n'existe sous zéro. `null` si la conversion échoue.
+   */
+  private bucketsVisibles(main: Bounding, taille: number): { bucketMin: number; bucketMax: number } | null {
+    if (!(taille > 0)) return null;
+    const conv = this.chart.convertFromPixel([{ y: main.top }, { y: main.top + main.height }], {
+      paneId: CANDLE_PANE_ID,
+      absolute: true,
+    });
+    const points = Array.isArray(conv) ? conv : [conv];
+    const a = points[0]?.value;
+    const b = points[1]?.value;
+    if (a === undefined || b === undefined || !Number.isFinite(a) || !Number.isFinite(b)) return null;
+    const prixMax = Math.max(a, b);
+    if (!(prixMax > 0)) return null;
+    const prixMin = Math.max(0, Math.min(a, b));
+    return { bucketMin: bucketIndex(prixMin, taille), bucketMax: bucketIndex(prixMax, taille) };
   }
 
   /**
@@ -1550,6 +2062,7 @@ export class LiquidationHeatController {
     const footprintActif = orderflowStore.getState().enabled;
     const aMin = opts?.alphaMin ?? 0.15;
     const aMax = opts?.alphaMax ?? 0.55;
+    const maxUsd = opts?.maxUsd ?? grid.maxUsd;
     for (const cell of grid.cells.values()) {
       const col = largeurs.get(cell.candleTime);
       if (col === undefined) continue;
@@ -1558,7 +2071,7 @@ export class LiquidationHeatController {
       if (yTop === undefined || yBot === undefined || !Number.isFinite(yTop) || !Number.isFinite(yBot)) {
         continue;
       }
-      const t = intensiteLog(cell.longUsd + cell.shortUsd, grid.maxUsd);
+      const t = intensiteLog(cell.longUsd + cell.shortUsd, maxUsd);
       const y0 = Math.round(Math.min(yTop, yBot));
       const y1 = Math.round(Math.max(yTop, yBot));
       let rgb: [number, number, number];
@@ -1664,8 +2177,15 @@ export class LiquidationHeatController {
    * le bucket le plus HAUT en prix (bucketMax) occupe donc la ligne 0 (haut du petit canvas) :
    * ligne = bucketMax − bucketIdx.
    *
+   * BORNES : `opts.bornes` (buckets de l'écran + marge) limite le petit canvas à la bande
+   * visible — les cellules hors bande sont SAUTÉES (sinon leur ligne sortirait du tableau).
+   * Garde DURE : plus de `MAX_LIGNES_LISSAGE` lignes, ou `createImageData` / `putImageData` /
+   * `drawImage` qui lève → `false` (repli rects) : aucune exception ne doit sortir vers la
+   * boucle rAF (elle mourait sur un RangeError avec des niveaux HL à 27 M$).
+   * Intensité normalisée sur `opts.maxUsd` s'il est fourni (heatmap HL : max VISIBLE).
+   *
    * Renvoie `false` si le rendu lissé est impossible (bornes non convertibles, contexte 2D
-   * indisponible…) — l'appelant se replie alors sur les rects.
+   * indisponible, bande trop haute, allocation refusée…) — l'appelant se replie alors sur les rects.
    */
   private dessinerCellulesLissees(
     grid: LiqGrid,
@@ -1679,10 +2199,11 @@ export class LiquidationHeatController {
     now: number,
     opts?: OptionsCellules,
   ): boolean {
-    const dims = dimensionsGrilleVisible(grid, from, to);
+    const dims = dimensionsGrilleVisible(grid, from, to, opts?.bornes);
     if (dims === null) return false;
     const { colonnes, bucketMin, bucketMax } = dims;
     const nbBuckets = bucketMax - bucketMin + 1;
+    if (nbBuckets > MAX_LIGNES_LISSAGE) return false;
 
     // Rect cible ENGLOBANT : bords x des colonnes extrêmes (mêmes bords entiers partagés que
     // les rects) + y des bornes de prix [bucketMin, bucketMax+1] convertis par convertToPixel.
@@ -1707,61 +2228,72 @@ export class LiquidationHeatController {
     const off = this.offscreen;
     const offCtx = this.offscreenCtx;
     if (offCtx === null) return false;
-    if (off.width !== colonnes || off.height !== nbBuckets) {
-      off.width = colonnes;
-      off.height = nbBuckets;
-    }
 
-    // 1 cellule = 1 pixel. ImageData membre RÉUTILISÉE entre frames (évite une alloc par frame
-    // au survol) : recréée seulement si les dimensions changent, sinon vidée par `px.fill(0)`
-    // en tête de frame → les cellules vides restent transparentes sans clearRect préalable.
-    let img = this.imageDataLissage;
-    if (img === null || img.width !== colonnes || img.height !== nbBuckets) {
-      img = offCtx.createImageData(colonnes, nbBuckets);
-      this.imageDataLissage = img;
-    }
-    const px = img.data;
-    px.fill(0);
     // Atténuation ×0.5 si le footprint est actif : lue 1×/frame (l'atténuation est encodée
     // dans le canal alpha du pixel, pas au globalAlpha du blit — cf. attenuationFootprint).
     const footprintActif = orderflowStore.getState().enabled;
     const aMin = opts?.alphaMin ?? 0.15;
     const aMax = opts?.alphaMax ?? 0.55;
-    for (const cell of grid.cells.values()) {
-      const colonne = colonneParTime.get(cell.candleTime);
-      if (colonne === undefined) continue;
-      const ligne = bucketMax - cell.bucketIdx; // axe Y inversé (cf. docstring)
-      const t = intensiteLog(cell.longUsd + cell.shortUsd, grid.maxUsd);
-      let rgb: [number, number, number];
-      let alpha: number;
-      if (mode === "dominance") {
-        const d = desequilibre(cell.longUsd, cell.shortUsd);
-        rgb = d >= 0 ? tokens.upRgb : tokens.downRgb;
-        alpha = (aMin + (aMax - aMin) * t) * (0.35 + 0.65 * Math.abs(d));
-      } else {
-        rgb = couleurRampeArrets(t, opts?.rampe ?? tokens.rampe);
-        alpha = aMin + (aMax - aMin) * t;
+    const maxUsd = opts?.maxUsd ?? grid.maxUsd;
+    try {
+      if (off.width !== colonnes || off.height !== nbBuckets) {
+        off.width = colonnes;
+        off.height = nbBuckets;
       }
-      alpha = attenuationFootprint(alpha, footprintActif);
-      if (opts?.sansFade !== true) {
-        alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, this.dernierBumpTs, now);
-      }
-      const o = (ligne * colonnes + colonne) * 4;
-      px[o] = rgb[0];
-      px[o + 1] = rgb[1];
-      px[o + 2] = rgb[2];
-      px[o + 3] = Math.round(alpha * 255);
-    }
-    offCtx.putImageData(img, 0, 0);
 
-    // Upscale INTERPOLÉ vers le pane : un seul drawImage par frame. L'état du contexte
-    // (imageSmoothing…) est restauré par le ctx.restore() du clip de l'appelant.
-    const ctx = this.ctx;
-    const y0 = Math.round(Math.min(yHaut, yBas));
-    const y1 = Math.round(Math.max(yHaut, yBas));
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high"; // bicubique : c'est lui qui donne le rendu continu
-    ctx.drawImage(off, colPremiere.x0, y0, Math.max(1, colDerniere.x1 - colPremiere.x0), Math.max(1, y1 - y0));
+      // 1 cellule = 1 pixel. ImageData membre RÉUTILISÉE entre frames (évite une alloc par frame
+      // au survol) : recréée seulement si les dimensions changent, sinon vidée par `px.fill(0)`
+      // en tête de frame → les cellules vides restent transparentes sans clearRect préalable.
+      let img = this.imageDataLissage;
+      if (img === null || img.width !== colonnes || img.height !== nbBuckets) {
+        img = offCtx.createImageData(colonnes, nbBuckets);
+        this.imageDataLissage = img;
+      }
+      const px = img.data;
+      px.fill(0);
+      for (const cell of grid.cells.values()) {
+        // Hors de la bande allouée (bornes de l'écran) : sautée — sa ligne sortirait du tableau.
+        if (cell.bucketIdx < bucketMin || cell.bucketIdx > bucketMax) continue;
+        const colonne = colonneParTime.get(cell.candleTime);
+        if (colonne === undefined) continue;
+        const ligne = bucketMax - cell.bucketIdx; // axe Y inversé (cf. docstring)
+        const t = intensiteLog(cell.longUsd + cell.shortUsd, maxUsd);
+        let rgb: [number, number, number];
+        let alpha: number;
+        if (mode === "dominance") {
+          const d = desequilibre(cell.longUsd, cell.shortUsd);
+          rgb = d >= 0 ? tokens.upRgb : tokens.downRgb;
+          alpha = (aMin + (aMax - aMin) * t) * (0.35 + 0.65 * Math.abs(d));
+        } else {
+          rgb = couleurRampeArrets(t, opts?.rampe ?? tokens.rampe);
+          alpha = aMin + (aMax - aMin) * t;
+        }
+        alpha = attenuationFootprint(alpha, footprintActif);
+        if (opts?.sansFade !== true) {
+          alpha = alphaFadeIn(alpha, cell.dernierTime, this.tsDemarrage, this.dernierBumpTs, now);
+        }
+        const o = (ligne * colonnes + colonne) * 4;
+        px[o] = rgb[0];
+        px[o + 1] = rgb[1];
+        px[o + 2] = rgb[2];
+        px[o + 3] = Math.round(alpha * 255);
+      }
+      offCtx.putImageData(img, 0, 0);
+
+      // Upscale INTERPOLÉ vers le pane : un seul drawImage par frame. L'état du contexte
+      // (imageSmoothing…) est restauré par le ctx.restore() du clip de l'appelant.
+      const ctx = this.ctx;
+      const y0 = Math.round(Math.min(yHaut, yBas));
+      const y1 = Math.round(Math.max(yHaut, yBas));
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high"; // bicubique : c'est lui qui donne le rendu continu
+      ctx.drawImage(off, colPremiere.x0, y0, Math.max(1, colDerniere.x1 - colPremiere.x0), Math.max(1, y1 - y0));
+    } catch {
+      // Allocation refusée (RangeError) ou canvas inutilisable : on oublie l'ImageData (peut-être
+      // partielle) et on laisse l'appelant repeindre en rects — la boucle rAF survit.
+      this.imageDataLissage = null;
+      return false;
+    }
     return true;
   }
 
@@ -1770,7 +2302,8 @@ export class LiquidationHeatController {
    * bucket> · <total USD> » à gauche de la barre de chaque bucket (fond `--surface`, bord
    * `--border`, texte `--text` 9 px). On ne garde que les `NB_LABELS_CLUSTER` plus gros, on
    * les dé-chevauche verticalement (14 px, le plus gros gagne) et on exclut ceux qui passeraient
-   * sous la toolbar DOM (`y < top + 24`).
+   * sous la toolbar DOM (`y < top + 24`) ou sous une pilule de repère HL peinte ensuite par-dessus
+   * (`bandesHl`, filtre AVANT le slice : un cluster masqué ne vole pas une place d'étiquette).
    */
   private dessinerLabelsClusters(
     profil: Map<number, { longUsd: number; shortUsd: number }>,
@@ -1780,6 +2313,7 @@ export class LiquidationHeatController {
     maxBandW: number,
     main: Bounding,
     tokens: Tokens,
+    bandesHl: ReadonlyArray<readonly [number, number]>,
   ): void {
     const ctx = this.ctx;
     const { top } = main;
@@ -1793,7 +2327,9 @@ export class LiquidationHeatController {
       if (yTop === undefined || yBot === undefined || !Number.isFinite(yTop) || !Number.isFinite(yBot)) continue;
       candidats.push({ y: (yTop + yBot) / 2, poids: total, idx, total });
     }
-    const tops = candidats.sort((a, b) => b.poids - a.poids).slice(0, NB_LABELS_CLUSTER);
+    const tops = filtrerHorsBandes(candidats, bandesHl, 7)
+      .sort((a, b) => b.poids - a.poids)
+      .slice(0, NB_LABELS_CLUSTER);
     ctx.font = "9px ui-monospace, SFMono-Regular, monospace";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
@@ -2202,6 +2738,9 @@ export class LiquidationHeatController {
    *  (d) mini-CLLD : cumuls de liquidations « ↑ » (au-dessus du spot) / « ↓ » (en-dessous),
    *      réel (tokens.text) et « EST. » (teinte EST du thème) séparés — au SOMMET de la pile.
    * Emplacement jamais occupé par les boutons de layout ni la légende du Volume Profile.
+   *
+   * Renvoie le SOMMET de la pile (ligne de base de la prochaine ligne libre, y absolu) : le
+   * repère de bord BAS des niveaux HL hors écran s'y pose au-dessus (hauteur de pile variable).
    */
   private dessinerLegendes(
     main: Bounding,
@@ -2209,7 +2748,8 @@ export class LiquidationHeatController {
     heatActif: boolean,
     estActif: boolean,
     hlActif: boolean,
-  ): void {
+    raisonHl: string | null,
+  ): number {
     const ctx = this.ctx;
     const { left, top, width, height } = main;
     const xRight = left + width;
@@ -2319,21 +2859,30 @@ export class LiquidationHeatController {
     }
 
     // (c bis) légende LIQ HL RÉELS — dessinée dès que la couche est active, AVANT (d) : ce
-    // dernier peut retourner tôt (aucune bougie visible), ce qui escamoterait la légende.
+    // dernier peut sortir tôt (aucune bougie visible), ce qui escamoterait la légende.
+    // Cumuls ↑/↓ sur TOUS les niveaux valides de l'échantillon autour du prix LIVE (close de la
+    // dernière bougie CHARGÉE, même référence que les barres) — calculés ici, indépendamment de
+    // `dessinerNiveauxHl`.
     // ⚠️ « N adresses » = TOP du leaderboard Hyperliquid, PAS tout le carnet (cf. libelleLegendeHl).
+    // Paire cotée hors USD (`raisonHl`) : une seule ligne qui dit pourquoi la couche est muette
+    // — ni cumuls (niveaux USD contre un prix en BTC/JPY…), ni légende de heatmap HL.
     if (hlActif) {
       const hl = hlLiqStore.getState();
+      const candlesHl = marketStore.getState().candles;
+      const prixLive = candlesHl[candlesHl.length - 1]?.close;
+      const cumuls = raisonHl !== null || prixLive === undefined ? null : cumulsHl(hl.niveaux, prixLive);
       ctx.textAlign = "right";
       ctx.textBaseline = "bottom";
       ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
       ctx.fillStyle = tokens.textDim;
       ctx.fillText(
-        libelleLegendeHl(hl.etat, hl.adressesScannees, hl.niveaux.length, this.clustersHlVisibles),
+        libelleLegendeHl(hl.etat, hl.adressesScannees, hl.niveaux.length, cumuls, raisonHl),
         xRight - 4,
         yb,
       );
       yb -= 14;
-
+    }
+    if (hlActif && raisonHl === null) {
       // (c ter) légende HL HEATMAP (instantanés historiques) : nb d'instantanés, adresses
       // scannées, couverture MESURÉE de l'OI et trous de collecte (« daemon éteint ») —
       // l'échantillonnage du leaderboard n'est jamais présenté comme exhaustif.
@@ -2387,7 +2936,7 @@ export class LiquidationHeatController {
       const candles = marketStore.getState().candles;
       const range = this.chart.getVisibleRange();
       const derniereVisible = candles[Math.min(candles.length, range.to) - 1];
-      if (derniereVisible === undefined) return;
+      if (derniereVisible === undefined) return yb;
       const cumuls = cumulsAutourSpot(
         grid !== null ? profilParPrix(grid) : new Map(),
         grid?.taille ?? 0,
@@ -2417,6 +2966,7 @@ export class LiquidationHeatController {
       ligne("↓", reelAffiche ? cumuls.reelEnDessous : null, estActif ? cumuls.estEnDessous : null);
       ligne("↑", reelAffiche ? cumuls.reelAuDessus : null, estActif ? cumuls.estAuDessus : null);
     }
+    return yb;
   }
 }
 

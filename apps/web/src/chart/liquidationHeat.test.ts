@@ -51,7 +51,15 @@ import {
   libelleLegendeEst,
   filtrerNiveauxHl,
   clusteriserNiveauxHl,
+  partitionnerClustersHl,
+  libelleBordHl,
+  cumulsHl,
   libelleLegendeHl,
+  raisonCotationHl,
+  yLibreSousObstacles,
+  bandeRepereHl,
+  filtrerHorsBandes,
+  maxUsdBuckets,
   pasBougieMs,
   construireGrilleHl,
   compterTrous,
@@ -60,8 +68,13 @@ import {
   bullesDepuisGrille,
   liqFlashStore,
   flasherNiveau,
+  type ClusterHlPlace,
+  type HorsEcranHl,
   type LiqGrid,
 } from "./liquidationHeat";
+// Formateurs RÉELS (purs, sans DOM) : les libellés attendus sont construits avec eux plutôt
+// que recopiés à la main — le test suit la convention de format du dépôt.
+import { formatPrice, formatUsd } from "../lib/format";
 
 function candle(partial: Partial<Candle> & Pick<Candle, "time" | "close">): Candle {
   return { open: 0, high: 0, low: 0, volume: 0, ...partial };
@@ -194,6 +207,69 @@ describe("dimensionsGrilleVisible", () => {
   it("null si plage vide ou grille sans cellule", () => {
     expect(dimensionsGrilleVisible(grille([1]), 3, 3)).toBeNull(); // to − from < 1
     expect(dimensionsGrilleVisible(grille([]), 0, 2)).toBeNull(); // aucune cellule
+  });
+
+  it("bornes visibles : INTERSECTE la plage des buckets présents avec [bucketMin, bucketMax]", () => {
+    // Présents 5..9 ; seule la bande visible est allouée dans le petit canvas.
+    expect(dimensionsGrilleVisible(grille([9, 5, 7]), 0, 2, { bucketMin: 6, bucketMax: 20 })).toEqual({
+      colonnes: 2,
+      bucketMin: 6,
+      bucketMax: 9,
+    });
+    expect(dimensionsGrilleVisible(grille([9, 5, 7]), 0, 2, { bucketMin: 0, bucketMax: 8 })).toEqual({
+      colonnes: 2,
+      bucketMin: 5,
+      bucketMax: 8,
+    });
+    // Bornes incluses : une bande d'un seul bucket reste une intersection non vide.
+    expect(dimensionsGrilleVisible(grille([9, 5, 7]), 0, 2, { bucketMin: 9, bucketMax: 9 })).toEqual({
+      colonnes: 2,
+      bucketMin: 9,
+      bucketMax: 9,
+    });
+  });
+
+  it("bornes visibles : une aberration lointaine ne dimensionne plus le canvas", () => {
+    // BTC ~110 k (bucket 100 $) + un niveau à 27 M$ (bucket 270 000) : sans bornes, 268 901
+    // lignes ; avec les bornes de l'écran, seule la bande visible compte.
+    const d = dimensionsGrilleVisible(grille([1_100, 1_101, 270_000]), 0, 1, { bucketMin: 1_000, bucketMax: 1_200 });
+    expect(d).toEqual({ colonnes: 1, bucketMin: 1_100, bucketMax: 1_200 });
+  });
+
+  it("bornes visibles : intersection VIDE → null (repli rects, rien à peindre à l'écran)", () => {
+    expect(dimensionsGrilleVisible(grille([5, 9]), 0, 2, { bucketMin: 10, bucketMax: 20 })).toBeNull();
+    expect(dimensionsGrilleVisible(grille([5, 9]), 0, 2, { bucketMin: 0, bucketMax: 4 })).toBeNull();
+  });
+});
+
+describe("maxUsdBuckets — normalisation sur les buckets VISIBLES", () => {
+  /** Grille : [bucketIdx, bougie, total] → une cellule (total réparti long/short 50/50). */
+  function grille(cellules: Array<[number, number, number]>): LiqGrid {
+    const cells = new Map();
+    let maxUsd = 0;
+    for (const [idx, t, total] of cellules) {
+      cells.set(`${t}:${idx}`, { candleTime: t, bucketIdx: idx, longUsd: total / 2, shortUsd: total / 2, count: 1 });
+      maxUsd = Math.max(maxUsd, total);
+    }
+    return { cells, taille: 1, maxUsd };
+  }
+
+  it("max des totaux (long + short) des CELLULES dont le bucket ∈ [min, max] (bornes incluses)", () => {
+    const g = grille([
+      [10, 0, 100],
+      [12, 0, 300],
+      [12, 60, 250], // même bucket, autre bougie : max par CELLULE, pas somme par bucket
+      [20, 0, 9_000], // hors bande visible : n'écrase plus l'échelle
+    ]);
+    expect(maxUsdBuckets(g, 10, 12)).toBe(300);
+    expect(maxUsdBuckets(g, 12, 12)).toBe(300);
+    expect(maxUsdBuckets(g, 10, 10)).toBe(100);
+    expect(maxUsdBuckets(g, 10, 20)).toBe(9_000);
+  });
+
+  it("aucune cellule dans la bande (ou grille vide) → 0", () => {
+    expect(maxUsdBuckets(grille([[10, 0, 100]]), 11, 19)).toBe(0);
+    expect(maxUsdBuckets(grille([]), 0, 100)).toBe(0);
   });
 });
 
@@ -608,32 +684,48 @@ function nhl(px: number, side: "long" | "short", valueUsd: number) {
   return { px, side, valueUsd };
 }
 
-describe("filtrerNiveauxHl — bornage autour du prix + plancher de taille", () => {
-  it("écarte les niveaux hors de ±40 % du dernier prix", () => {
-    // Le daemon laisse passer les aberrations de marge croisée (liqPx à 53 M$ sur un
-    // short de 12 $) : c'est le FRONT qui borne autour du prix.
-    const prix = 60_000;
-    const out = filtrerNiveauxHl(
-      [
-        nhl(53_000_000, "short", 1_000_000), // aberration marge croisée
-        nhl(36_000, "long", 500_000), // −40 % pile → gardé (borne inclusive)
-        nhl(35_999, "long", 500_000), // juste sous la borne → écarté
-        nhl(84_000, "short", 500_000), // +40 % pile → gardé
-        nhl(84_001, "short", 500_000), // juste au-dessus → écarté
-      ],
-      prix,
-    );
-    expect(out.map((n) => n.px)).toEqual([36_000, 84_000]);
+describe("filtrerNiveauxHl — filtre de VALIDITÉ seulement (plus de fenêtre autour du prix)", () => {
+  it("garde TOUS les niveaux valides, quelle que soit leur distance au prix", () => {
+    // Mesure du 25/09/2026 : la fenêtre ±40 % écartait 55 % du notionnel BTC (ex. un short
+    // de 238 M$ à +57 %). Le hors-écran est désormais RÉSUMÉ en bord, pas jeté.
+    const out = filtrerNiveauxHl([
+      nhl(36_000, "long", 500_000),
+      nhl(132_743, "short", 238_000_000), // +57 % d'un prix à ~84 500
+      nhl(84_001, "short", 500_000),
+    ]);
+    expect(out.map((n) => n.px)).toEqual([36_000, 132_743, 84_001]);
   });
 
-  it("écarte les niveaux sous le plancher de 10 000 $", () => {
-    const out = filtrerNiveauxHl([nhl(59_000, "long", 9_999), nhl(61_000, "short", 10_000)], 60_000);
+  it("un niveau à 27 M$ (aberration de marge croisée, ~320× le prix) est CONSERVÉ", () => {
+    // Plus d'écrasement d'échelle : la normalisation se fait sur les clusters VISIBLES.
+    const out = filtrerNiveauxHl([nhl(27_000_000, "short", 50_000), nhl(59_000, "long", 1e6)]);
+    expect(out.map((n) => n.px)).toEqual([27_000_000, 59_000]);
+  });
+
+  it("plus de plancher de notionnel : un niveau de 9 999 $ est gardé", () => {
+    expect(filtrerNiveauxHl([nhl(59_000, "long", 9_999)]).map((n) => n.valueUsd)).toEqual([9_999]);
+  });
+
+  it("écarte px ≤ 0 ou non fini, et valueUsd ≤ 0 ou non fini", () => {
+    const out = filtrerNiveauxHl([
+      nhl(0, "long", 1e6),
+      nhl(-5, "long", 1e6),
+      nhl(Number.NaN, "long", 1e6),
+      nhl(Number.POSITIVE_INFINITY, "short", 1e6),
+      nhl(59_000, "long", 0),
+      nhl(59_000, "long", -1),
+      nhl(59_000, "long", Number.NaN),
+      nhl(59_000, "short", Number.POSITIVE_INFINITY),
+      nhl(61_000, "short", 2e6), // seul valide
+    ]);
     expect(out.map((n) => n.px)).toEqual([61_000]);
   });
 
-  it("écarte les valeurs non finies et un prix nul, et rend [] si le prix est invalide", () => {
-    expect(filtrerNiveauxHl([nhl(0, "long", 1e6), nhl(Number.NaN, "long", 1e6)], 60_000)).toEqual([]);
-    expect(filtrerNiveauxHl([nhl(59_000, "long", 1e6)], 0)).toEqual([]);
+  it("préserve le type d'entrée (champs supplémentaires conservés, mêmes objets)", () => {
+    const riche = { px: 59_000, side: "long" as const, valueUsd: 1e6, addr: "0xabc" };
+    const out = filtrerNiveauxHl([riche]);
+    expect(out[0]).toBe(riche);
+    expect(out[0]?.addr).toBe("0xabc");
   });
 });
 
@@ -663,35 +755,369 @@ describe("clusteriserNiveauxHl — regroupement par buckets de 0,25 % du prix", 
     expect(clusters[0]?.totalUsd).toBe(6e6);
   });
 
+  it("porte le split longUsd / shortUsd du cluster (le side reste le dominant)", () => {
+    const [mixte] = clusteriserNiveauxHl(
+      [nhl(59_000, "long", 1e6), nhl(59_050, "short", 5e6), nhl(59_020, "long", 2e6)],
+      60_000,
+    );
+    expect(mixte?.longUsd).toBe(3e6);
+    expect(mixte?.shortUsd).toBe(5e6);
+    expect(mixte?.totalUsd).toBe(8e6);
+    expect(mixte?.side).toBe("short");
+    // Cluster pur : l'autre côté vaut 0.
+    const [pur] = clusteriserNiveauxHl([nhl(61_000, "long", 4e6)], 60_000);
+    expect(pur?.longUsd).toBe(4e6);
+    expect(pur?.shortUsd).toBe(0);
+  });
+
   it("rend [] sur une entrée vide ou un prix invalide", () => {
     expect(clusteriserNiveauxHl([], 60_000)).toEqual([]);
     expect(clusteriserNiveauxHl([nhl(59_000, "long", 1e6)], 0)).toEqual([]);
   });
 });
 
-describe("libelleLegendeHl — la couche LIQHL nomme toujours son état", () => {
-  it("état ok avec des clusters → couverture annoncée (adresses · positions)", () => {
-    expect(libelleLegendeHl("ok", 250, 12, 5)).toBe("LIQ HL RÉELS — 250 adresses · 12 positions");
+/** Cluster HL positionné (y écran) pour les tests de partition — side = dominant en USD. */
+function chp(y: number, totalUsd: number, longUsd: number, shortUsd: number, n: number, px: number): ClusterHlPlace {
+  return { y, totalUsd, longUsd, shortUsd, n, pxMoyenPondere: px, side: longUsd >= shortUsd ? "long" : "short" };
+}
+
+describe("partitionnerClustersHl — visibles / hors écran au-dessus / en dessous", () => {
+  // Pane : haut = 100, bas = 500 (y absolus du canvas, y croît vers le BAS).
+  const haut = 100;
+  const bas = 500;
+
+  it("bornes INCLUSES : y = haut et y = bas sont visibles", () => {
+    const a = chp(100, 1e6, 0, 1e6, 1, 70_000);
+    const b = chp(500, 2e6, 2e6, 0, 1, 50_000);
+    const c = chp(300, 3e6, 3e6, 0, 1, 60_000);
+    const { visibles, auDessus, enDessous } = partitionnerClustersHl([a, b, c], haut, bas);
+    expect(visibles).toEqual([a, b, c]);
+    expect(auDessus.nNiveaux).toBe(0);
+    expect(enDessous.nNiveaux).toBe(0);
   });
 
-  it("état ok mais tout est hors fenêtre → dit POURQUOI l'écran est vide", () => {
-    expect(libelleLegendeHl("ok", 250, 12, 0)).toBe("LIQ HL RÉELS — aucun niveau dans ±40 %");
+  it("y < haut → au-dessus ; y > bas → en dessous", () => {
+    const dessus = chp(99.5, 1e6, 0, 1e6, 2, 90_000);
+    const dessous = chp(500.5, 1e6, 1e6, 0, 3, 40_000);
+    const vis = chp(250, 1e6, 1e6, 0, 1, 61_000);
+    const r = partitionnerClustersHl([dessus, dessous, vis], haut, bas);
+    expect(r.visibles).toEqual([vis]);
+    expect(r.auDessus.nNiveaux).toBe(2);
+    expect(r.enDessous.nNiveaux).toBe(3);
+  });
+
+  it("y non fini → ignoré PARTOUT (ni visible, ni compté hors écran)", () => {
+    const r = partitionnerClustersHl(
+      [
+        chp(Number.NaN, 5e6, 5e6, 0, 4, 1),
+        chp(Number.POSITIVE_INFINITY, 5e6, 0, 5e6, 4, 2),
+        chp(Number.NEGATIVE_INFINITY, 5e6, 0, 5e6, 4, 3),
+      ],
+      haut,
+      bas,
+    );
+    expect(r.visibles).toEqual([]);
+    expect(r.auDessus).toEqual({ nNiveaux: 0, totalUsd: 0, longUsd: 0, shortUsd: 0, plusProchePx: null, plusGros: null });
+    expect(r.enDessous).toEqual({ nNiveaux: 0, totalUsd: 0, longUsd: 0, shortUsd: 0, plusProchePx: null, plusGros: null });
+  });
+
+  it("agrège par côté : nNiveaux = Σ n, totalUsd, longUsd, shortUsd", () => {
+    const r = partitionnerClustersHl(
+      [
+        chp(50, 4e6, 1e6, 3e6, 3, 95_000),
+        chp(10, 6e6, 0, 6e6, 5, 120_000),
+        chp(600, 2e6, 2e6, 0, 2, 30_000),
+        chp(900, 1e6, 0.25e6, 0.75e6, 7, 10_000),
+      ],
+      haut,
+      bas,
+    );
+    expect(r.auDessus.nNiveaux).toBe(8);
+    expect(r.auDessus.totalUsd).toBe(10e6);
+    expect(r.auDessus.longUsd).toBe(1e6);
+    expect(r.auDessus.shortUsd).toBe(9e6);
+    expect(r.enDessous.nNiveaux).toBe(9);
+    expect(r.enDessous.totalUsd).toBe(3e6);
+    expect(r.enDessous.longUsd).toBe(2.25e6);
+    expect(r.enDessous.shortUsd).toBe(0.75e6);
+  });
+
+  it("plusProchePx : au-dessus = plus GRAND y (collé au bord haut), en dessous = plus PETIT y", () => {
+    const r = partitionnerClustersHl(
+      [
+        chp(10, 1e6, 0, 1e6, 1, 120_000), // loin au-dessus
+        chp(90, 1e6, 0, 1e6, 1, 95_000), // juste au-dessus du bord → le plus proche
+        chp(510, 1e6, 1e6, 0, 1, 45_000), // juste sous le bord → le plus proche
+        chp(900, 1e6, 1e6, 0, 1, 10_000), // loin en dessous
+      ],
+      haut,
+      bas,
+    );
+    expect(r.auDessus.plusProchePx).toBe(95_000);
+    expect(r.enDessous.plusProchePx).toBe(45_000);
+  });
+
+  it("plusGros : le cluster au plus gros totalUsd de chaque côté", () => {
+    const gros = chp(20, 238e6, 0, 238e6, 12, 132_743);
+    const r = partitionnerClustersHl(
+      [chp(90, 1e6, 0, 1e6, 1, 95_000), gros, chp(60, 5e6, 0, 5e6, 1, 100_000), chp(700, 3e6, 3e6, 0, 1, 20_000)],
+      haut,
+      bas,
+    );
+    expect(r.auDessus.plusGros?.totalUsd).toBe(238e6);
+    expect(r.auDessus.plusGros?.pxMoyenPondere).toBe(132_743);
+    expect(r.enDessous.plusGros?.pxMoyenPondere).toBe(20_000);
+  });
+
+  it("entrée vide → aucun visible, agrégats nuls", () => {
+    const r = partitionnerClustersHl([], haut, bas);
+    expect(r.visibles).toEqual([]);
+    expect(r.auDessus.plusGros).toBeNull();
+    expect(r.enDessous.plusProchePx).toBeNull();
+  });
+});
+
+describe("libelleBordHl — repère de bord des niveaux hors écran", () => {
+  const plein: HorsEcranHl = {
+    nNiveaux: 46,
+    totalUsd: 781e6,
+    longUsd: 12e6,
+    shortUsd: 769e6,
+    plusProchePx: 96_000,
+    plusGros: { pxMoyenPondere: 132_743, totalUsd: 238e6, longUsd: 0, shortUsd: 238e6, side: "short", n: 3 },
+  };
+
+  it("null quand rien n'est hors écran de ce côté", () => {
+    expect(libelleBordHl({ ...plein, nNiveaux: 0 }, "haut")).toBeNull();
+    expect(libelleBordHl({ ...plein, nNiveaux: 0 }, "bas")).toBeNull();
+  });
+
+  it("haut : ▲, nombre de niveaux, total et plus gros cluster « max … @ prix »", () => {
+    expect(libelleBordHl(plein, "haut")).toBe(
+      `▲ 46 niv. hors écran · ${formatUsd(781e6)} · max ${formatUsd(238e6)} @ ${formatPrice(132_743)}`,
+    );
+  });
+
+  it("bas : ▼ au lieu de ▲", () => {
+    expect(libelleBordHl(plein, "bas")).toBe(
+      `▼ 46 niv. hors écran · ${formatUsd(781e6)} · max ${formatUsd(238e6)} @ ${formatPrice(132_743)}`,
+    );
+  });
+
+  it("sans plusGros : le segment « max … @ … » est omis", () => {
+    expect(libelleBordHl({ ...plein, plusGros: null }, "haut")).toBe(`▲ 46 niv. hors écran · ${formatUsd(781e6)}`);
+  });
+});
+
+describe("cumulsHl — cumuls au-dessus / en dessous du prix sur TOUS les niveaux valides", () => {
+  it("px > prix → au-dessus, sinon en dessous (px = prix → en dessous, comme cumulsAutourSpot)", () => {
+    const r = cumulsHl(
+      [
+        nhl(61_000, "short", 3e6),
+        nhl(59_000, "long", 2e6),
+        nhl(60_000, "long", 1e6), // pile sur le prix → en dessous
+      ],
+      60_000,
+    );
+    expect(r).toEqual({ auDessus: 3e6, enDessous: 3e6 });
+  });
+
+  it("compte aussi les niveaux LOINTAINS (plus de fenêtre) — 27 M$ inclus", () => {
+    const r = cumulsHl([nhl(27_000_000, "short", 50_000), nhl(132_743, "short", 238e6), nhl(30_000, "long", 5e6)], 84_500);
+    expect(r).toEqual({ auDessus: 238_050_000, enDessous: 5e6 });
+  });
+
+  it("ignore les niveaux invalides (même garde que filtrerNiveauxHl)", () => {
+    const r = cumulsHl(
+      [
+        nhl(0, "long", 1e6),
+        nhl(Number.NaN, "long", 1e6),
+        nhl(61_000, "short", Number.NaN),
+        nhl(61_000, "short", -2),
+        nhl(61_000, "short", 7),
+      ],
+      60_000,
+    );
+    expect(r).toEqual({ auDessus: 7, enDessous: 0 });
+  });
+
+  it("prix invalide → zéros", () => {
+    const niveaux = [nhl(61_000, "short", 1e6)];
+    expect(cumulsHl(niveaux, 0)).toEqual({ auDessus: 0, enDessous: 0 });
+    expect(cumulsHl(niveaux, Number.NaN)).toEqual({ auDessus: 0, enDessous: 0 });
+    expect(cumulsHl(niveaux, -1)).toEqual({ auDessus: 0, enDessous: 0 });
+  });
+});
+
+describe("libelleLegendeHl — la couche LIQHL nomme toujours son état", () => {
+  it("état ok → couverture annoncée (adresses · positions) + cumuls ↑/↓", () => {
+    expect(libelleLegendeHl("ok", 475, 104, { auDessus: 1.1e9, enDessous: 322e6 })).toBe(
+      `LIQ HL RÉELS — 475 adresses · 104 positions · ↑ ${formatUsd(1.1e9)} · ↓ ${formatUsd(322e6)}`,
+    );
+  });
+
+  it("état ok sans cumuls (null) → segment omis", () => {
+    expect(libelleLegendeHl("ok", 250, 12, null)).toBe("LIQ HL RÉELS — 250 adresses · 12 positions");
+  });
+
+  it("⚠️ honnêteté : jamais « toutes les liquidations », toujours « N adresses »", () => {
+    const l = libelleLegendeHl("ok", 475, 104, { auDessus: 1, enDessous: 1 });
+    expect(l).toContain("475 adresses");
+    expect(l.toLowerCase()).not.toContain("toutes");
   });
 
   it("capability absente → « nécessite le daemon » (précédent REPLAY)", () => {
-    expect(libelleLegendeHl("sans-daemon", 0, 0, 0)).toBe("LIQ HL RÉELS — nécessite le daemon axiomd");
+    expect(libelleLegendeHl("sans-daemon", 0, 0, null)).toBe("LIQ HL RÉELS — nécessite le daemon axiomd");
   });
 
   it("coin non couvert par le leaderboard → « vide » explicite", () => {
-    expect(libelleLegendeHl("vide", 0, 0, 0)).toBe("LIQ HL RÉELS — aucun niveau pour ce symbole");
+    expect(libelleLegendeHl("vide", 0, 0, null)).toBe("LIQ HL RÉELS — aucun niveau pour ce symbole");
   });
 
   it("échec réseau / réponse illisible → erreur DOUCE", () => {
-    expect(libelleLegendeHl("erreur", 0, 0, 0)).toBe("LIQ HL RÉELS — source indisponible");
+    expect(libelleLegendeHl("erreur", 0, 0, null)).toBe("LIQ HL RÉELS — source indisponible");
   });
 
   it("fetch en vol → « chargement… » (et pas « aucun niveau », faux pendant le scan)", () => {
-    expect(libelleLegendeHl("chargement", 0, 0, 0)).toBe("LIQ HL RÉELS — chargement…");
+    expect(libelleLegendeHl("chargement", 0, 0, { auDessus: 5, enDessous: 5 })).toBe("LIQ HL RÉELS — chargement…");
+  });
+
+  it("cotation hors USD → la RAISON prime sur l'état et les cumuls (couche muette, jamais silencieuse)", () => {
+    // Relecture du 25/09/2026 : sur ETHBTC la légende affichait « ↑ $1.34B · ↓ $0.00 » —
+    // des niveaux USD comparés à un prix en BTC.
+    const raison = "cotation BTC ≠ USD, niveaux masqués";
+    expect(libelleLegendeHl("ok", 475, 79, { auDessus: 1.34e9, enDessous: 0 }, raison)).toBe(
+      "LIQ HL RÉELS — cotation BTC ≠ USD, niveaux masqués",
+    );
+    expect(libelleLegendeHl("chargement", 0, 0, null, raison)).toBe("LIQ HL RÉELS — cotation BTC ≠ USD, niveaux masqués");
+  });
+
+  it("raison null ou absente → libellé nominal inchangé", () => {
+    expect(libelleLegendeHl("ok", 250, 12, null, null)).toBe("LIQ HL RÉELS — 250 adresses · 12 positions");
+  });
+});
+
+describe("raisonCotationHl — niveaux HL en USD : la couche se tait hors cotation USD", () => {
+  it("cotation USD ou stablecoin USD (et perp Hyperliquid) → null : niveaux affichables", () => {
+    for (const s of [
+      "BTCUSDT",
+      "ETHUSDC",
+      "BTC-USD",
+      "XBT/USD",
+      "BTC/USDT",
+      "SOLUSD",
+      "BTCUSDE",
+      "ETHDAI",
+      "BTCTUSD",
+      "BTCUSDD",
+      "btcusdt",
+      "BTC-PERP",
+      "kPEPE-PERP",
+    ]) {
+      expect(raisonCotationHl(s), s).toBeNull();
+    }
+  });
+
+  it("cotation crypto ou fiat NON USD → raison nommant la cotation", () => {
+    expect(raisonCotationHl("ETHBTC")).toBe("cotation BTC ≠ USD, niveaux masqués");
+    expect(raisonCotationHl("SOLETH")).toBe("cotation ETH ≠ USD, niveaux masqués");
+    expect(raisonCotationHl("BTCJPY")).toBe("cotation JPY ≠ USD, niveaux masqués");
+    expect(raisonCotationHl("XBT/EUR")).toBe("cotation EUR ≠ USD, niveaux masqués");
+    expect(raisonCotationHl("ETH-BTC")).toBe("cotation BTC ≠ USD, niveaux masqués");
+    expect(raisonCotationHl("BTCEURC")).toBe("cotation EURC ≠ USD, niveaux masqués");
+  });
+
+  it("symbole inextricable (synthétique, cotation inconnue, vide) → null : basePerp renonce déjà au fetch", () => {
+    expect(raisonCotationHl("binance:BTCUSDT|/|binance:ETHUSDT")).toBeNull();
+    expect(raisonCotationHl("FOOBAR")).toBeNull();
+    expect(raisonCotationHl("")).toBeNull();
+  });
+
+  it("⚠️ honnêteté : la raison ne parle jamais de « toutes » les liquidations", () => {
+    expect(raisonCotationHl("ETHBTC")?.toLowerCase()).not.toContain("toutes");
+  });
+});
+
+describe("yLibreSousObstacles — le repère haut se pose SOUS les surcouches DOM", () => {
+  it("aucun obstacle → yMin", () => {
+    expect(yLibreSousObstacles(24, 14, 0, 1000, [])).toBe(24);
+  });
+
+  it("bandeau symbole (top+8…44, x 8…700) recouvrant la pilule → posée 2 px sous son bord bas", () => {
+    // Mesure Playwright de la relecture : le repère à top+24 disparaissait sous SymbolBanner (z-10).
+    expect(yLibreSousObstacles(24, 14, 440, 732, [{ x0: 8, x1: 700, y0: 8, y1: 44 }])).toBe(46);
+  });
+
+  it("obstacle sans recouvrement HORIZONTAL → ignoré", () => {
+    expect(yLibreSousObstacles(24, 14, 800, 1100, [{ x0: 8, x1: 700, y0: 8, y1: 44 }])).toBe(24);
+  });
+
+  it("obstacle au-dessus (écart compris) ou laissant passer la pilule en dessous → ignoré", () => {
+    expect(yLibreSousObstacles(24, 14, 0, 500, [{ x0: 0, x1: 500, y0: 0, y1: 22 }])).toBe(24); // 22 + 2 ≤ 24
+    expect(yLibreSousObstacles(24, 14, 0, 500, [{ x0: 0, x1: 500, y0: 40, y1: 60 }])).toBe(24); // 24 + 14 + 2 ≤ 40
+  });
+
+  it("obstacles EMPILÉS (lignes de légende overlay) → sous le dernier, quel que soit l'ordre d'entrée", () => {
+    const lignes = [
+      { x0: 900, x1: 1196, y0: 2, y1: 20 },
+      { x0: 900, x1: 1196, y0: 22, y1: 40 },
+      { x0: 900, x1: 1196, y0: 42, y1: 60 },
+    ];
+    expect(yLibreSousObstacles(24, 14, 0, 1200, lignes)).toBe(62);
+    expect(yLibreSousObstacles(24, 14, 0, 1200, [...lignes].reverse())).toBe(62);
+  });
+
+  it("bandeau passé sur 2 lignes (flex-wrap, pane étroit) → sous son vrai bord bas, pas sous une constante", () => {
+    expect(yLibreSousObstacles(24, 14, 0, 590, [{ x0: 8, x1: 582, y0: 8, y1: 74 }])).toBe(76);
+  });
+
+  it("coordonnée NaN dans un obstacle → ignoré (jamais de y NaN)", () => {
+    expect(yLibreSousObstacles(24, 14, 0, 500, [{ x0: Number.NaN, x1: 500, y0: 0, y1: 60 }])).toBe(24);
+  });
+});
+
+describe("bandeRepereHl + partition — la zone des barres s'arrête aux pilules des repères", () => {
+  it("bande = pilule (14 px) ± 2 px d'écart", () => {
+    expect(bandeRepereHl(46)).toEqual([44, 62]);
+  });
+
+  it("un cluster sous la pilule ▲ (ou sous le bandeau DOM) ou sous la pilule ▼ est RÉSUMÉ, pas peint puis masqué", () => {
+    // ▲ posé à 46 (sous le bandeau) ; pile de légendes au sommet 500 → ▼ posé à 500 − 2 − 14 = 484.
+    const haut = bandeRepereHl(46)[1]; // 62
+    const bas = bandeRepereHl(484)[0]; // 482
+    const sousBandeau = chp(30, 1e6, 0, 1e6, 1, 102_000);
+    const sousPiluleHaut = chp(50, 5e6, 0, 5e6, 2, 101_000);
+    const visible = chp(300, 3e6, 3e6, 0, 1, 60_000);
+    const sousPiluleBas = chp(490, 2e6, 2e6, 0, 4, 20_000);
+    const r = partitionnerClustersHl([sousBandeau, sousPiluleHaut, visible, sousPiluleBas], haut, bas);
+    expect(r.visibles).toEqual([visible]);
+    // Comptés dans les repères : ni peints sous une pilule, ni perdus.
+    expect(r.auDessus.nNiveaux).toBe(3);
+    expect(r.auDessus.totalUsd).toBe(6e6);
+    expect(r.enDessous.nNiveaux).toBe(4);
+  });
+});
+
+describe("filtrerHorsBandes — aucune étiquette sous une pilule de repère", () => {
+  it("sans bande → tout passe, ordre conservé", () => {
+    const items = [{ y: 3 }, { y: 1 }, { y: 2 }];
+    expect(filtrerHorsBandes(items, [], 7)).toEqual(items);
+  });
+
+  it("écarte les items dont [y − d, y + d] recoupe une bande ; un contact de bord passe", () => {
+    // Bande [44, 62], demi-hauteur 7 → interdit si y − 7 < 62 et y + 7 > 44, soit y ∈ ]37, 69[.
+    const items = [{ y: 30 }, { y: 37 }, { y: 38 }, { y: 51 }, { y: 68 }, { y: 69 }, { y: 100 }];
+    expect(filtrerHorsBandes(items, [[44, 62]], 7).map((i) => i.y)).toEqual([30, 37, 69, 100]);
+  });
+
+  it("plusieurs bandes (▲ en haut, ▼ en bas) : chacune exclut sa zone", () => {
+    const items = [{ y: 50 }, { y: 200 }, { y: 490 }];
+    expect(filtrerHorsBandes(items, [[44, 62], [482, 500]], 7).map((i) => i.y)).toEqual([200]);
+  });
+
+  it("préserve le type d'entrée (mêmes objets)", () => {
+    const riche = { y: 200, poids: 5, px: 60_000 };
+    expect(filtrerHorsBandes([riche], [[44, 62]], 7)[0]).toBe(riche);
   });
 });
 

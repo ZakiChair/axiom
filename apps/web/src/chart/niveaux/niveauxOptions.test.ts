@@ -187,7 +187,7 @@ describe("creerSourceNiveauxOptions", () => {
   });
 
   it("rafraîchit à chaque TTL ; échec : toast unique datant les lignes conservées ; désabonnement coupe tout", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ now: NOW });
     const c = chargeurFactice([{ chaine: CHAINE, recupereLe: NOW }, null, null, { chaine: CHAINE, recupereLe: NOW + 3 * TTL_CHAINE_MS }]);
     const toasts: string[] = [];
     const source = creerSourceNiveauxOptions({ exchange: "binance", symbol: "BTCUSDT" }, { charger: c.charger, toast: (t) => toasts.push(t) });
@@ -227,7 +227,7 @@ describe("creerSourceNiveauxOptions", () => {
     const sansSpot = CHAINE.map((p) => ({ ...p, underlying: NaN }));
     const c = chargeurFactice([null, { chaine: sansSpot, recupereLe: NOW }]);
     const toasts: string[] = [];
-    vi.useFakeTimers();
+    vi.useFakeTimers({ now: NOW });
     const source = creerSourceNiveauxOptions({ exchange: "binance", symbol: "BTCUSDT" }, { charger: c.charger, toast: (t) => toasts.push(t) });
     const unsub = source.subscribe(() => {});
     await flush();

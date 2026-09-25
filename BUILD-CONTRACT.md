@@ -55,7 +55,7 @@ personnelles et la provenance historique conservent leur sens. Voir la
 - **214 indicateurs** TS purs dans `@axiom/indicators` (dont 30 stratégies étiquetées « non validé ») ; **4 golden tests** pandas-ta (ADX, SuperTrend, Ichimoku, PSAR) — le reste est couvert par tests unitaires/structurels.
 - **39 fenêtres** à mnémonique (`WINDOW_REGISTRY`) — dont WHALES (mouvements baleines on-chain + positions top comptes Hyperliquid), ajoutée le 2026-08-25 sur décision utilisateur, et BPL (Bitcoin Power Law), ajoutée le 2026-09-01 avec les séries TOTAL/TOTAL2/TOTAL3 chartables (chantier CAP/BPL) : **écarts ASSUMÉS** au gel « aucune nouvelle fenêtre avant le verdict G100 » (§ ci-dessous).
 - **Daemon** `axiomd` : proxy+cache SQLite, KV/snapshots, candles, alertes (macOS + Telegram), replay dumps Binance, couches GDELT/UCDP, LIQHL Hyperliquid paresseux, collecteur whales (blocs confirmés blockchain.info + Etherscan stables, table `whale_moves`, rétention 30 j). Bind `127.0.0.1:8787`, whitelist `/extapi`, garde Host/Origin/DNS-rebinding.
-- **Vercel** : front + proxy serverless sans secret partagé, whitelist/MIME/DNS durcis. Les clés personnelles restent dans le navigateur. **Exception ACTÉE le 2026-09-14** (demande utilisateur, test communautaire) : une seule variable serveur, `BGEOMETRICS_API_KEY`, portée par `api/proxy.ts` vers bitcoin-data.com quand le client n'envoie aucune clé — clé gratuite et révocable, plafonds de l'offre gratuite (10 req/heure et 15 req/jour) partagés par les visiteurs, jamais exposée au navigateur ; toute autre clé reste personnelle (test structurel `apps/daemon/src/vercelProxy.test.ts`). Toute fonction strictement locale est marquée `UNUSABLE`, toute fenêtre partielle `PARTIAL` ; jamais de pane muet. La clé CryptoQuant (2026-09-16) relève de cette règle : personnelle, saisie dans les Réglages, repli `.env` pour le proxy Vite et le daemon `127.0.0.1` uniquement, JAMAIS de variable serveur sur Vercel (le test structurel continue d'exiger exactement une lecture d'environnement).
+- **Vercel** : front + proxy serverless sans secret partagé, whitelist/MIME/DNS durcis ; depuis le 2026-09-25, fonction `api/hlpool.ts` sans secret (pool réduit LIQHL, CDN 6 h). Les clés personnelles restent dans le navigateur. **Exception ACTÉE le 2026-09-14** (demande utilisateur, test communautaire) : une seule variable serveur, `BGEOMETRICS_API_KEY`, portée par `api/proxy.ts` vers bitcoin-data.com quand le client n'envoie aucune clé — clé gratuite et révocable, plafonds de l'offre gratuite (10 req/heure et 15 req/jour) partagés par les visiteurs, jamais exposée au navigateur ; toute autre clé reste personnelle (test structurel `apps/daemon/src/vercelProxy.test.ts`). Toute fonction strictement locale est marquée `UNUSABLE`, toute fenêtre partielle `PARTIAL` ; jamais de pane muet. La clé CryptoQuant (2026-09-16) relève de cette règle : personnelle, saisie dans les Réglages, repli `.env` pour le proxy Vite et le daemon `127.0.0.1` uniquement, JAMAIS de variable serveur sur Vercel (le test structurel continue d'exiger exactement une lecture d'environnement).
 - **Paper trading** (`PAPER`) : moteur de simulation locale présent, hors gate G100.
 - **Gate G100** : code-complete, e2e partiellement automatisés, **verdict manuel ouvert** (voir `docs/superpowers/plans/2026-07-22-gate-g100-qa.md` et plan d'action 2026-08-24). **Aucune nouvelle fenêtre ni fonctionnalité de surface avant le verdict** — des exceptions ACTÉES : le 2026-08-25 (fenêtre WHALES + alerte `whale-flux`, demande utilisateur explicite), le 2026-09-01 (fenêtre BPL + séries TOTAL/TOTAL2/TOTAL3 chartables, chantier CAP/BPL demandé par l'utilisateur) le 2026-09-02 (lot v2.7 « Décider » : alerte composite, backtest en R, coût d'exécution DOM — aucune fenêtre, aucun fournisseur, aucun indicateur, spec `docs/superpowers/specs/2026-09-02-lot-v27-decider-design.md`) et le 2026-09-04 (catalogue positionnement/orderflow et PLAY-POS, cf. Conventions), et le 2026-09-06 (onglet « Indicateurs » de la fenêtre RATE + trois fournisseurs statistiques publics sans clé — OCDE, Eurostat, ONS — au titre du remplacement des miroirs FRED internationaux démantelés ; spec `docs/superpowers/specs/2026-09-06-indicateurs-macro-mondiaux-design.md`), et le 2026-09-07 (fenêtre BPL : horizon de projection porté à +50 ans et navigation zoom/pan du graphe ; synchronisation des vues de la grille multi-chart — unités de temps, zoom/défilement, réticule — plan `docs/superpowers/plans/2026-09-07-synchronisation-multivue.md` ; demandes utilisateur explicites — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau), et le 2026-09-14 (fenêtre BT : section « Tenue par moitié » — découpage walk-forward de lecture du run exécuté, `partagerResultatMoities` dans `@axiom/backtest`, frontière tracée sur l'équité ; excursions MAE/MFE par trade calculées par le moteur sur les barres détenues, colonnes de la table et moyennes de la grille ; demande utilisateur « nouvelle fonction pertinente » — aucune fenêtre, aucun fournisseur, aucun indicateur nouveau ; puis, le même jour, lot ON-CHAIN sur demande utilisateur « nouvelle fonction pertinente on-chain » + « Go » : sections « Mineurs » (Hash Ribbons SMA 30/60 j, hashprice) et « Activité DEX » (volume DEX 24 h, part du volume total) et tuile « Thermocap multiple » dans la fenêtre CHAIN, alerte globale `onchain-seuil` front-only sur six métriques quotidiennes — aucune fenêtre, aucun fournisseur (hôtes déjà autorisés : mempool.space, blockchain.info, Coin Metrics community, DefiLlama, CoinGecko), aucun indicateur graphique nouveau ; enfin, le même jour, chantier « indicateurs gratuits vérifiés » sur « Go pour tous les lots » du propriétaire après recherche sondée — cf. section « Chantier autorisé le 14 septembre 2026 » — aucune fenêtre, aucun fournisseur, aucun hôte, aucun indicateur graphique nouveau), et le 2026-09-16 (fournisseur CryptoQuant BASIC à clé personnelle sur décision du propriétaire : section repliable « Flux takers toutes places » dans DES et sous-section « Production des mineurs cotés » dans la section Mineurs de CHAIN — aucune fenêtre, aucun indicateur graphique, aucune dépendance, aucun hôte `/extapi` ; route dédiée `/cqapi` ; spec `docs/superpowers/specs/2026-09-16-cryptoquant-takers-mineurs-design.md`) ; le gel reste la règle pour toute autre surface.
 
@@ -414,7 +414,8 @@ rapport `docs/superpowers/progress/2026-09-22-heatmap-hl-indicateurs-onchain.md`
    ≤ 2 pas, colonne vide au-delà), garde les barres du dernier instantané au bord droit, et affiche
    « HL HEATMAP (niveaux réels) — N instantanés · X adresses · couverture ≈ Y % OI · pas … · T trous =
    daemon éteint ». Règles d'honnêteté : ÉCHANTILLON du leaderboard jamais présenté comme exhaustif ;
-   trous d'historique = daemon éteint, visibles ; indisponible sans daemon (Vercel). Aucun
+   trous d'historique = daemon éteint, visibles ; historique indisponible sans daemon (Vercel :
+   niveaux courants seuls, scannés par le navigateur depuis le 25 septembre). Aucun
    AggregationEngine (une venue, ses positions telles quelles), aucune fenêtre, `EXCHANGE_IDS` à 9.
    La fenêtre WHALES, qui lit le même instantané, voit donc désormais « gros comptes ET gros tradeurs ».
    Correction du 23 septembre : l'acquisition partagée ne contient aucun repli vers un ancien
@@ -456,6 +457,43 @@ rapport `docs/superpowers/progress/2026-09-22-heatmap-hl-indicateurs-onchain.md`
    borné à l'écran (≤ 4 096 lignes, repli rects sur exception) : les aberrations de marge croisée
    (jusqu'à ~27 M$ sur BTC) ne blanchissent plus l'image ni n'arrêtent la boucle rAF. Sur une
    paire cotée hors USD, la couche se tait et dit « cotation X ≠ USD, niveaux masqués ».
+   Extension du 25 septembre, **mode navigateur sur Vercel** (décision du propriétaire, « le
+   déploiement n'est toujours pas ok » : il utilise la version Vercel et veut y voir les
+   liquidations disponibles). La commande LIQHL n'est plus `UNUSABLE` sur Vercel. Le code du scan
+   indépendant de Bun et de SQLite (types, constantes de pool et de cadence, `extrairePool`,
+   téléchargement borné du leaderboard, `parserEtatCompte`, `construireInstantane` avec rejeu,
+   arrêt sur 429 et abandon) passe dans `shared/hyperliquidScan.ts`. Ce module n'importe ni Bun,
+   ni `node:*`, ni le DOM ; il est compilé par les tsconfig web et daemon, et le daemon le
+   réexporte sans changer ses importeurs. Il ajoute au scan une progression (instantané partiel
+   tous les 5 lots), une interruption (`signal`) et une pause avant chaque lot (`avantLot`), sans
+   changer le comportement par défaut. `deciderModeHl` choisit la source : Vercel → navigateur ;
+   en local → daemon s'il annonce la capability `hl`, sinon navigateur (repli). Le mode daemon
+   est inchangé. En mode navigateur, `data/hyperliquidLiqNavigateur.ts` est chargé par `import()`
+   hors du chunk d'entrée et exécute le même scan, à 750 poids/min : sur Vercel, le navigateur
+   est seul sur son IP. Le pool est pris dans le stockage local (`axiom:hl:pool:v1`, mêmes
+   paramètres, < 6 h), puis servi par `GET /hlpool`, puis tiré du leaderboard direct (≈ 39 Mo,
+   légende « chargement du pool d'adresses… »). Faute d'amont, le pool stocké périmé sert de
+   repli. La fonction Vercel `api/hlpool.ts` (rewrite `/hlpool`) n'a **aucun secret ni aucune
+   lecture d'environnement** et ne lit aucun paramètre. Elle télécharge le leaderboard (délai
+   45 s, `maxDuration` 60 s) et répond le pool réduit `{ ts, nValeur, tailleCible, adresses }`
+   (≈ 65 Ko) avec `public, s-maxage=21600, stale-while-revalidate=86400` : le CDN le sert à tous
+   pendant 6 h. Elle refuse toute autre méthode que GET (405) ; un amont en échec donne 502
+   `no-store`, ou le pool d'instance périmé avec 10 min de cache. Elle n'appelle jamais
+   `api.hyperliquid.xyz/info` : les `clearinghouseState` partent de l'IP du visiteur. Un
+   instantané couvre tous les coins : changer de symbole ne relance aucun scan. Un scan
+   recommence toutes les 5 min tant que la couche est active, pas plus d'un à la fois. Le scan
+   se met en pause quand l'onglet est caché et s'arrête proprement au OFF. Après un échec total,
+   un nouvel essai part 2 min plus tard ; sans instantané complet à garder, la légende affiche
+   « source indisponible ». Pendant le premier scan, les barres apparaissent dès les premières
+   adresses. La légende affiche
+   alors « LIQ HL RÉELS (navigateur) — scan N/T adresses · P positions · ↑ … · ↓ … », puis
+   « N adresses · … » ; les rescans sont silencieux. La CSP Report-Only admet
+   `https://stats-data.hyperliquid.xyz` pour le repli direct. Le test structurel
+   `apps/daemon/src/vercelProxy.test.ts` couvre toutes les fonctions de `api/` et la forme de
+   `/hlpool`. L'historique (heatmap HL, collecteur `hlLiqHeat`) reste **réservé au daemon** : en
+   mode navigateur, aucun fetch `/hl/liqheat`, et la légende HL HEATMAP le dit au lieu d'afficher
+   « source indisponible ». Honnêteté inchangée : c'est un échantillon de ~1 500 adresses du
+   leaderboard, jamais « toutes » les liquidations.
 3. **Dix indicateurs** (TS pur, `@axiom/indicators`, un fichier et un test par def, catalogue 200 →
    210). Séries aux ajoutées à `AuxSeriesId` (`@axiom/types`, écart signalé comme aux lots précédents) :
    `liqLongUsd`, `liqShortUsd`, `hashrate`, `sthMvrv`, `lthMvrv`, `nrplUsd`, `vddMultiple`, `aviv`,

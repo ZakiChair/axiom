@@ -145,7 +145,8 @@ describe("commande LIQHL sur Vercel", () => {
 // ───────── États transitoires du singleton (fetch en vol → « chargement ») ─────────
 
 // Le fetch daemon est bloqué en vol : l'activation (ou le changement de coin) doit poser
-// « chargement » — jamais « vide », qui mentirait (« aucun niveau ») pendant le scan ~50 s.
+// « chargement » — jamais « vide », qui mentirait (« aucun niveau ») pendant la lecture (au
+// plus 15 s à froid, puis 503 « en construction »).
 vi.mock("./daemon", () => ({
   hlLiqLevelsGet: vi.fn(() => new Promise(() => {})),
   daemonSupporteHl: () => true,

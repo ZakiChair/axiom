@@ -345,8 +345,9 @@ function OngletPositions() {
       const brut = await hlPositionsGet(coin);
       if (generation.current !== gen) return; // réponse périmée (coin changé)
       if (estEnConstructionHl(brut)) {
-        // 503 « en construction » : premier scan du pool (~1 500 comptes, ≈ 3 min)
-        // après le démarrage du daemon — ni une erreur, ni une absence de daemon.
+        // 503 « en construction » : premier scan du pool (~1 500 comptes, ≈ 4 à 5 min)
+        // après le démarrage du daemon — ni une erreur, ni une absence de daemon. Un amont
+        // en panne répond l'autre 503 (« pool indisponible ») → « erreur » ci-dessous.
         setStatut("construction");
         return;
       }
@@ -401,11 +402,12 @@ function OngletPositions() {
           </Vide>
         ))}
       {statut === "construction" && (
-        <Chargement libelle="Instantané Hyperliquid en construction — premier scan du pool (~1 500 comptes, ≈ 3 min) ; nouvel essai toutes les 30 s…" />
+        <Chargement libelle="Instantané Hyperliquid en construction — premier scan du pool (~1 500 comptes, ≈ 4 à 5 min) ; nouvel essai toutes les 30 s…" />
       )}
       {statut === "erreur" && (
         <Vide>
-          Instantané indisponible — échec de la source Hyperliquid (leaderboard ou scan des comptes).
+          Instantané indisponible — échec de la source Hyperliquid (leaderboard ou scan des comptes). Le
+          daemon ne relance un essai qu'au moins 2 min après l'échec.
           <br />
           <button
             type="button"

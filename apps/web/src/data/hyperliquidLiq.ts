@@ -3,8 +3,9 @@
  * OUVERTES observées sur un ÉCHANTILLON d'adresses du leaderboard (pool daemon d'environ
  * 1 500 adresses : plus gros comptes + plus gros volumes de la semaine), servis par le daemon
  * `axiomd` (`GET /hl/liqlevels/:coin`, cache 5 min côté daemon, capability `hl`). Juste après
- * le démarrage du daemon, son premier scan (≈ 3 min) est signalé « en construction » (503) :
- * la couche reste « chargement » et relance toutes les ~30 s.
+ * le démarrage du daemon, son premier scan (≈ 4 à 5 min) est signalé « en construction » (503) :
+ * la couche reste « chargement » et relance toutes les ~30 s. Un amont en panne répond au
+ * contraire le 503 « pool indisponible » → état « erreur » (jamais « chargement » sans fin).
  *
  * ⚠️ HONNÊTETÉ DE LA SOURCE (garde-fou BUILD-CONTRACT) : ces niveaux sont RÉELS — ce sont de
  * vraies positions, pas un modèle — mais NON EXHAUSTIFS : c'est un échantillon du leaderboard,
@@ -162,7 +163,8 @@ export const hlLiqStore: StoreApi<HlLiqState> = createStore<HlLiqState>((set, ge
 const REFRESH_MS = 4 * 60 * 1000;
 /**
  * Relance tant que le daemon répond « en construction » : son premier scan du pool
- * (~1 500 adresses) dure ≈ 3 min ; aligné sur l'en-tête Retry-After (30 s) du daemon.
+ * (~1 500 adresses) dure ≈ 4 min (≈ 4,5 si le leaderboard est retéléchargé) ; aligné sur
+ * l'en-tête Retry-After (30 s) du daemon.
  */
 export const RELANCE_CONSTRUCTION_MS = 30_000;
 

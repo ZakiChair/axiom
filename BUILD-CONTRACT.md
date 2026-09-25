@@ -429,7 +429,7 @@ rapport `docs/superpowers/progress/2026-09-22-heatmap-hl-indicateurs-onchain.md`
    d'autres paramètres est retéléchargé, mais reste le repli si l'amont échoue). Cadence : quota
    officiel 1 200 poids/min/IP, `clearinghouseState` = 2, `fundingHistory` = 20 + 1 par tranche
    de 20 éléments ; le scan est plafonné à 750 poids/min → un lot de 4 au plus toutes les 640 ms,
-   ≈ 240 s par scan (calculé, non mesuré ; arrêt au premier 429 conservé). Les 450 poids/min
+   ≈ 240 s par scan (mesuré le 25/09 : 1 500 adresses en 240,9 s, aucun 429 ; arrêt au premier 429 conservé). Les 450 poids/min
    restants vont au navigateur (même IP) : une série `fundingHistory` 90 j en consomme ≈ 208 par
    minute, la marge dépend donc des indicateurs HL actifs. Une lecture `/hl/liqlevels` ou
    `/hl/positions` n'attend plus jamais un scan quand un cache existe, même périmé (servi, scan

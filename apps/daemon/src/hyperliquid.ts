@@ -29,10 +29,10 @@
  * les autres requêtes info (dont metaAndAssetCtxs du collecteur), 60 pour userRole.
  * Les séries `fundingHistory`, `recentTrades`… coûtent en plus 1 poids « per 20 items
  * returned ». Budget : 1 500 adresses × 2 = 3 000 poids par scan ; à 750 poids/min
- * alloués au scan → ≈ 240 s (calculé, non mesuré) ; en moyenne sur le cycle de 5 min du
- * collecteur ≈ 600 poids/min ; 450 poids/min restent au navigateur, qui appelle
- * api.hyperliquid.xyz depuis la MÊME IP — marge qui dépend des indicateurs HL actifs
- * (cf. DEBIT_POIDS_MIN) ; un 429 tronque l'instantané.
+ * alloués au scan → ≈ 240 s (mesuré le 2026-09-25 : 1 500 adresses en 240,9 s, aucun
+ * 429) ; en moyenne sur le cycle de 5 min du collecteur ≈ 600 poids/min ; 450 poids/min
+ * restent au navigateur, qui appelle api.hyperliquid.xyz depuis la MÊME IP — marge qui
+ * dépend des indicateurs HL actifs (cf. DEBIT_POIDS_MIN) ; un 429 tronque l'instantané.
  *
  * LECTURES : une lecture (/hl/liqlevels, /hl/positions) n'attend JAMAIS un scan
  * quand un cache existe, même périmé (servi tel quel, reconstruction en arrière-plan) ;

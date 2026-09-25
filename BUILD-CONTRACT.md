@@ -422,6 +422,20 @@ rapport `docs/superpowers/progress/2026-09-22-heatmap-hl-indicateurs-onchain.md`
    forcé n'archive rien en cas d'échec total ; les lignes et le dernier succès portent la date
    d'observation `inst.ts`, jamais celle de la relecture. Zéro adresse observée reste un échec ;
    des comptes observés sans positions sur un coin produisent un instantané vide valide.
+   Extension du 25 septembre (demande du propriétaire : « toutes les liquidations disponibles »,
+   précisée en « pool d'adresses scannées porté à ~1 500 ») : le pool devient **1 500 adresses
+   cibles** — top 500 `accountValue` complété par le classement volume hebdomadaire sans doublon
+   (`TAILLE_POOL`, `N_VALEUR_POOL`) ; le pool persisté `hl/pool` porte ses paramètres (un pool
+   d'autres paramètres est retéléchargé, mais reste le repli si l'amont échoue). Cadence : quota
+   officiel 1 200 poids/min/IP, `clearinghouseState` = 2 ; le scan est plafonné à 900 poids/min
+   (marge laissée au navigateur, même IP) → un lot de 4 au plus toutes les 534 ms, ≈ 200 s par
+   scan (calculé, non mesuré ; arrêt au premier 429 conservé). Une lecture `/hl/liqlevels` ou
+   `/hl/positions` n'attend plus jamais un scan quand un cache existe, même périmé (servi, scan
+   relancé en fond) ; sans aucun cache, elle attend au plus 15 s puis répond 503
+   `{ enConstruction: true }` + `Retry-After: 30` — la couche LIQHL reste « chargement » et la
+   fenêtre WHALES affiche « instantané en construction », toutes deux relancent toutes les 30 s.
+   Le collecteur forcé attend toujours son point neuf. Ce reste un **échantillon** du
+   leaderboard : l'interface annonce « N adresses », jamais « toutes » les liquidations.
 3. **Dix indicateurs** (TS pur, `@axiom/indicators`, un fichier et un test par def, catalogue 200 →
    210). Séries aux ajoutées à `AuxSeriesId` (`@axiom/types`, écart signalé comme aux lots précédents) :
    `liqLongUsd`, `liqShortUsd`, `hashrate`, `sthMvrv`, `lthMvrv`, `nrplUsd`, `vddMultiple`, `aviv`,

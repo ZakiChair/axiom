@@ -10,8 +10,10 @@ import { describe, it, expect, vi } from "vitest";
 import {
   mapperReponseHl,
   deciderEtatHl,
+  estEnConstructionHl,
   executerCommandeLiqHl,
   presentationCommandeLiqHl,
+  RELANCE_CONSTRUCTION_MS,
   type ReponseHlLiq,
 } from "./hyperliquidLiq";
 
@@ -88,6 +90,29 @@ describe("deciderEtatHl — état affiché de la couche", () => {
   });
 });
 
+describe("estEnConstructionHl — 503 « instantané en construction » du daemon", () => {
+  it("reconnaît le corps 503 { enConstruction: true } relayé brut par data/daemon.ts", () => {
+    expect(estEnConstructionHl({ erreur: "instantané Hyperliquid en construction", enConstruction: true })).toBe(true);
+  });
+
+  it("ne confond ni une réponse normale, ni un échec, ni un drapeau non strictement vrai", () => {
+    expect(estEnConstructionHl(reponse())).toBe(false);
+    expect(estEnConstructionHl(null)).toBe(false);
+    expect(estEnConstructionHl("en-construction")).toBe(false);
+    expect(estEnConstructionHl({ enConstruction: "true" })).toBe(false);
+    expect(estEnConstructionHl({ erreur: "pool d'adresses Hyperliquid indisponible" })).toBe(false);
+  });
+
+  it("le corps « en construction » n'est PAS une réponse de niveaux (mapper → null)", () => {
+    // D'où l'ordre dans rafraichir : tester la construction AVANT de mapper, sinon « erreur ».
+    expect(mapperReponseHl({ erreur: "instantané Hyperliquid en construction", enConstruction: true })).toBeNull();
+  });
+
+  it("relance courte : 30 s (Retry-After du daemon), bien sous le rafraîchissement de 4 min", () => {
+    expect(RELANCE_CONSTRUCTION_MS).toBe(30_000);
+  });
+});
+
 describe("commande LIQHL sur Vercel", () => {
   it("inclut UNUSABLE dans le libellé et l'aperçu", () => {
     const presentation = presentationCommandeLiqHl(true);
@@ -128,6 +153,7 @@ vi.mock("./daemon", () => ({
 }));
 
 import { hlLiqStore, demarrerHyperliquidLiq } from "./hyperliquidLiq";
+import { hlLiqLevelsGet } from "./daemon";
 
 describe("sync — l'état transitoire dit la vérité", () => {
   it("activation avec fetch en vol → etat « chargement », pas « vide »", () => {
@@ -135,5 +161,60 @@ describe("sync — l'état transitoire dit la vérité", () => {
     hlLiqStore.getState().setActif(true);
     expect(hlLiqStore.getState().etat).toBe("chargement");
     hlLiqStore.getState().setActif(false);
+  });
+});
+
+describe("sync — daemon « instantané en construction » (premier scan du pool)", () => {
+  const EN_CONSTRUCTION = { erreur: "instantané Hyperliquid en construction", enConstruction: true };
+
+  it("→ etat « chargement » (pas « erreur ») puis relance après ~30 s, au lieu des 4 min", async () => {
+    vi.useFakeTimers();
+    const lire = vi.mocked(hlLiqLevelsGet);
+    try {
+      lire.mockClear();
+      lire.mockResolvedValueOnce(EN_CONSTRUCTION).mockResolvedValueOnce(reponse());
+      demarrerHyperliquidLiq();
+      hlLiqStore.getState().setActif(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(lire).toHaveBeenCalledTimes(1);
+      expect(hlLiqStore.getState().etat).toBe("chargement");
+      expect(hlLiqStore.getState().niveaux).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(RELANCE_CONSTRUCTION_MS - 1);
+      expect(lire).toHaveBeenCalledTimes(1); // pas avant le délai
+      await vi.advanceTimersByTimeAsync(1);
+      expect(lire).toHaveBeenCalledTimes(2);
+      expect(hlLiqStore.getState().etat).toBe("ok");
+      expect(hlLiqStore.getState().niveaux).toHaveLength(1);
+      expect(hlLiqStore.getState().adressesScannees).toBe(250);
+    } finally {
+      hlLiqStore.getState().setActif(false);
+      vi.useRealTimers();
+    }
+  });
+
+  it("tant que le daemon construit : une relance toutes les ~30 s, arrêtée au OFF", async () => {
+    vi.useFakeTimers();
+    const lire = vi.mocked(hlLiqLevelsGet);
+    try {
+      lire.mockClear();
+      lire.mockResolvedValue(EN_CONSTRUCTION);
+      demarrerHyperliquidLiq();
+      hlLiqStore.getState().setActif(true);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(2 * RELANCE_CONSTRUCTION_MS);
+      expect(lire).toHaveBeenCalledTimes(3);
+      expect(hlLiqStore.getState().etat).toBe("chargement");
+
+      hlLiqStore.getState().setActif(false);
+      await vi.advanceTimersByTimeAsync(10 * RELANCE_CONSTRUCTION_MS);
+      expect(lire).toHaveBeenCalledTimes(3); // relance annulée avec la couche
+      expect(hlLiqStore.getState().etat).toBe("vide");
+    } finally {
+      lire.mockReset();
+      lire.mockImplementation(() => new Promise(() => {}));
+      hlLiqStore.getState().setActif(false);
+      vi.useRealTimers();
+    }
   });
 });

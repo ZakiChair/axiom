@@ -24,6 +24,14 @@
  * instantanés historiques (`hlLiqHeat.ts` côté daemon, heatmap LIQHL côté chart).
  * Aucune écriture au passage à OFF — la collecte reste un choix daemon persistant,
  * pilotable depuis la fenêtre LIQ (« Collecte daemon »).
+ *
+ * DEUX SOURCES (extension du 25 septembre, `deciderModeHl`) : sur Vercel, et en local quand le
+ * daemon n'annonce pas `hl`, la couche passe en mode NAVIGATEUR — le même scan (code partagé
+ * shared/hyperliquidScan.ts) tourne dans la page, chargé PARESSEUSEMENT
+ * (data/hyperliquidLiqNavigateur.ts, hors chunk d'entrée) ; pool réduit servi par la fonction
+ * Vercel `/hlpool`, sinon leaderboard direct. Le mode DAEMON ci-dessous est inchangé ; le store
+ * dit la source (`source`) et la progression du premier scan navigateur (`progression`), que
+ * la légende affiche. L'historique (heatmap HL) reste réservé au daemon.
  */
 import { createStore } from "zustand/vanilla";
 import type { StoreApi } from "zustand/vanilla";
@@ -129,6 +137,24 @@ export function deciderEtatHl(capabilityHl: boolean, reponse: ReponseHlLiq | nul
   return reponse.niveaux.length === 0 ? "vide" : "ok";
 }
 
+/** Qui produit les niveaux : le daemon `axiomd`, ou le scan direct de la page. */
+export type SourceHl = "daemon" | "navigateur";
+
+/** Avancement du PREMIER scan navigateur (adresses tentées / taille du pool). */
+export interface ProgressionHl {
+  faites: number;
+  total: number;
+}
+
+/**
+ * Mode de la couche : Vercel → navigateur (aucun daemon joignable) ; local → daemon s'il
+ * annonce la capability `hl`, sinon navigateur (repli). En local, la capability n'est connue
+ * qu'APRÈS la sonde de `hlLiqLevelsGet` : le mode daemon est tenté d'abord. PURE.
+ */
+export function deciderModeHl(isVercel: boolean, capabilityHl: boolean): SourceHl {
+  return isVercel || !capabilityHl ? "navigateur" : "daemon";
+}
+
 // ─────────────────────────── Store vanilla (bascule + données) ───────────────────────────
 
 export interface HlLiqState {
@@ -142,13 +168,24 @@ export interface HlLiqState {
    * ts}` : la légende affiche « N adresses · M positions », et N ne se déduit d'aucun autre champ.
    */
   adressesScannees: number;
+  /** Source des niveaux (légende « LIQ HL RÉELS (navigateur) »). */
+  source: SourceHl;
+  /** Premier scan navigateur en cours (null : daemon, pool en chargement, ou scan fini). */
+  progression: ProgressionHl | null;
   basculer: () => void;
   /** Force l'état ON/OFF (idempotent). */
   setActif: (actif: boolean) => void;
 }
 
 /** État « aucune donnée » — état initial ET remise à zéro au OFF / changement de symbole. */
-const VIDE = { etat: "vide" as EtatHl, niveaux: [] as NiveauHl[], ts: 0, adressesScannees: 0 };
+const VIDE = {
+  etat: "vide" as EtatHl,
+  niveaux: [] as NiveauHl[],
+  ts: 0,
+  adressesScannees: 0,
+  source: "daemon" as SourceHl,
+  progression: null as ProgressionHl | null,
+};
 
 export const hlLiqStore: StoreApi<HlLiqState> = createStore<HlLiqState>((set, get) => ({
   actif: false,
@@ -210,8 +247,13 @@ async function rafraichir(coin: string): Promise<void> {
     }, RELANCE_CONSTRUCTION_MS);
     return;
   }
-  const reponse = brut === null ? null : mapperReponseHl(brut);
   // Lu APRÈS l'appel : `hlLiqLevelsGet` a sondé /health, la capability est donc à jour.
+  // Daemon absent (ou sans `hl`) : repli sur le scan navigateur au lieu de « sans-daemon ».
+  if (brut === null && deciderModeHl(IS_VERCEL, daemonSupporteHl()) === "navigateur") {
+    if (coinActif === coin) passerEnNavigateur(coin);
+    return;
+  }
+  const reponse = brut === null ? null : mapperReponseHl(brut);
   const etat = deciderEtatHl(daemonSupporteHl(), reponse);
   if (coinActif !== coin) return; // symbole/état changé pendant l'attente → jeté
   hlLiqStore.setState({
@@ -233,6 +275,14 @@ function sync(): void {
   const actif = hlLiqStore.getState().actif;
   const coin = actif ? basePerp(marketStore.getState().symbol) : null;
 
+  if (!actif) arreterNavigateur();
+  else if (modeNavigateur) {
+    scannerNav?.definirCoin(coin); // un instantané couvre tous les coins : aucun scan relancé
+    return;
+  } else if (IS_VERCEL) {
+    passerEnNavigateur(coin);
+    return;
+  }
   if (!actif || coin === null) {
     if (refreshTimer !== null) {
       clearInterval(refreshTimer);
@@ -259,6 +309,49 @@ function sync(): void {
       }, REFRESH_MS);
     }
   }
+}
+
+// ─────────────────────────── Mode navigateur (chunk paresseux) ───────────────────────────
+
+/** La couche active est servie par le scanner navigateur (jusqu'au prochain OFF). */
+let modeNavigateur = false;
+let scannerNav: import("./hyperliquidLiqNavigateur").ScannerNavigateurHl | null = null;
+let chargementNav = false;
+
+/** Coupe le mode daemon (minuteurs) et confie la couche au scanner navigateur. */
+function passerEnNavigateur(coin: string | null): void {
+  if (refreshTimer !== null) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+  annulerRelance();
+  coinActif = null;
+  modeNavigateur = true;
+  hlLiqStore.setState({ ...VIDE, etat: "chargement", source: "navigateur" });
+  if (scannerNav !== null) {
+    scannerNav.demarrer(coin);
+    return;
+  }
+  if (chargementNav) return;
+  chargementNav = true;
+  import("./hyperliquidLiqNavigateur").then(
+    (m) => {
+      chargementNav = false;
+      scannerNav = m.scannerNavigateurHl((p) => {
+        if (modeNavigateur) hlLiqStore.setState({ ...p, source: "navigateur" });
+      });
+      if (modeNavigateur) scannerNav.demarrer(basePerp(marketStore.getState().symbol));
+    },
+    () => {
+      chargementNav = false; // chunk introuvable (déploiement remplacé) : erreur, pas d'attente sans fin
+      if (modeNavigateur) hlLiqStore.setState({ ...VIDE, etat: "erreur", source: "navigateur" });
+    },
+  );
+}
+
+function arreterNavigateur(): void {
+  modeNavigateur = false;
+  scannerNav?.arreter();
 }
 
 let controllerStarted = false;
@@ -291,27 +384,25 @@ export function demarrerHyperliquidLiq(): void {
 const LIBELLE_COMMANDE =
   "Niveaux de liquidation RÉELS Hyperliquid (top adresses) — activer / désactiver";
 const APERCU_COMMANDE =
-  "Superpose les prix de liquidation RÉELS des top positions Hyperliquid (nécessite le daemon)";
-const RAISON_VERCEL = "les niveaux LIQHL dépendent du daemon local axiomd, indisponible sur Vercel";
+  "Superpose les prix de liquidation RÉELS des top positions Hyperliquid (daemon axiomd, sinon scan direct depuis le navigateur)";
+const APERCU_VERCEL =
+  "Superpose les prix de liquidation RÉELS d'un échantillon de ~1 500 adresses du leaderboard Hyperliquid, scannées depuis le navigateur (≈ 4 min, barres dès les premières adresses) ; historique réservé au daemon";
+const TOAST_VERCEL =
+  "LIQHL — scan direct depuis le navigateur : échantillon de ~1 500 adresses Hyperliquid, ≈ 4 min ; historique réservé au daemon";
 
 export function presentationCommandeLiqHl(isVercel: boolean): { libelle: string; apercu: string } {
-  if (!isVercel) return { libelle: LIBELLE_COMMANDE, apercu: APERCU_COMMANDE };
-  return {
-    libelle: `UNUSABLE — ${LIBELLE_COMMANDE}`,
-    apercu: `UNUSABLE — ${RAISON_VERCEL}.`,
-  };
+  return { libelle: LIBELLE_COMMANDE, apercu: isVercel ? APERCU_VERCEL : APERCU_COMMANDE };
 }
 
+/** Bascule la couche ; sur Vercel, l'ACTIVATION annonce le scan navigateur (durée, échantillon). */
 export function executerCommandeLiqHl(
   isVercel: boolean,
   basculer: () => void,
   notifier: (message: string) => void,
+  estActif: () => boolean,
 ): void {
-  if (isVercel) {
-    notifier(`UNUSABLE — ${RAISON_VERCEL}.`);
-    return;
-  }
   basculer();
+  if (isVercel && estActif()) notifier(TOAST_VERCEL);
 }
 
 const presentationCommande = presentationCommandeLiqHl(IS_VERCEL);
@@ -322,13 +413,14 @@ export const commandes: Commande[] = [
     mnemonique: "LIQHL",
     libelle: presentationCommande.libelle,
     categorie: "action",
-    motsCles: ["liquidations", "reels", "hyperliquid", "hl", "liqhl", "niveaux", "leaderboard", "positions", "daemon"],
+    motsCles: ["liquidations", "reels", "hyperliquid", "hl", "liqhl", "niveaux", "leaderboard", "positions", "daemon", "navigateur"],
     apercu: presentationCommande.apercu,
     action: () =>
       executerCommandeLiqHl(
         IS_VERCEL,
         () => hlLiqStore.getState().basculer(),
         pousserToast,
+        () => hlLiqStore.getState().actif,
       ),
   },
 ];

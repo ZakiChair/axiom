@@ -10,6 +10,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   mapperReponseHl,
   deciderEtatHl,
+  deciderModeHl,
   estEnConstructionHl,
   executerCommandeLiqHl,
   presentationCommandeLiqHl,
@@ -113,30 +114,50 @@ describe("estEnConstructionHl — 503 « instantané en construction » du daemo
   });
 });
 
-describe("commande LIQHL sur Vercel", () => {
-  it("inclut UNUSABLE dans le libellé et l'aperçu", () => {
-    const presentation = presentationCommandeLiqHl(true);
-    expect(presentation.libelle).toContain("UNUSABLE");
-    expect(presentation.apercu).toContain("UNUSABLE");
-    expect(presentationCommandeLiqHl(false).libelle).not.toContain("UNUSABLE");
+describe("deciderModeHl — daemon ou scan navigateur", () => {
+  it("Vercel → navigateur, même si une capability était annoncée", () => {
+    expect(deciderModeHl(true, false)).toBe("navigateur");
+    expect(deciderModeHl(true, true)).toBe("navigateur");
+  });
+  it("local : daemon s'il annonce `hl`, sinon repli navigateur", () => {
+    expect(deciderModeHl(false, true)).toBe("daemon");
+    expect(deciderModeHl(false, false)).toBe("navigateur");
+  });
+});
+
+describe("commande LIQHL (plus UNUSABLE sur Vercel : scan direct depuis le navigateur)", () => {
+  it("libellé identique partout, sans UNUSABLE ; l'aperçu Vercel annonce l'échantillon et la limite", () => {
+    const vercel = presentationCommandeLiqHl(true);
+    const local = presentationCommandeLiqHl(false);
+    expect(vercel.libelle).toBe(local.libelle);
+    expect(`${vercel.libelle} ${vercel.apercu}`).not.toContain("UNUSABLE");
+    expect(vercel.apercu).toContain("navigateur");
+    expect(vercel.apercu).toContain("~1 500 adresses");
+    expect(vercel.apercu).toContain("historique réservé au daemon");
+    expect(vercel.apercu).not.toMatch(/toutes les liquidations/i); // honnêteté : un échantillon
+    expect(local.apercu).toContain("daemon axiomd");
   });
 
-  it("n'active pas la couche et explique la raison par toast", () => {
-    const basculer = vi.fn();
+  it("Vercel : active la couche et annonce le scan navigateur à l'activation seulement", () => {
+    let actif = false;
+    const basculer = vi.fn(() => {
+      actif = !actif;
+    });
     const notifier = vi.fn();
-    executerCommandeLiqHl(true, basculer, notifier);
-
-    expect(basculer).not.toHaveBeenCalled();
+    executerCommandeLiqHl(true, basculer, notifier, () => actif);
+    expect(basculer).toHaveBeenCalledOnce();
     expect(notifier).toHaveBeenCalledOnce();
-    expect(notifier.mock.calls[0]?.[0]).toContain("daemon local axiomd");
-    expect(notifier.mock.calls[0]?.[0]).toContain("Vercel");
+    expect(notifier.mock.calls[0]?.[0]).toContain("navigateur");
+    expect(notifier.mock.calls[0]?.[0]).toContain("≈ 4 min");
+    executerCommandeLiqHl(true, basculer, notifier, () => actif); // désactivation : silencieuse
+    expect(basculer).toHaveBeenCalledTimes(2);
+    expect(notifier).toHaveBeenCalledOnce();
   });
 
-  it("conserve la bascule locale sans toast", () => {
+  it("local : bascule sans toast", () => {
     const basculer = vi.fn();
     const notifier = vi.fn();
-    executerCommandeLiqHl(false, basculer, notifier);
-
+    executerCommandeLiqHl(false, basculer, notifier, () => true);
     expect(basculer).toHaveBeenCalledOnce();
     expect(notifier).not.toHaveBeenCalled();
   });
@@ -149,12 +170,25 @@ describe("commande LIQHL sur Vercel", () => {
 // plus 15 s à froid, puis 503 « en construction »).
 vi.mock("./daemon", () => ({
   hlLiqLevelsGet: vi.fn(() => new Promise(() => {})),
-  daemonSupporteHl: () => true,
+  daemonSupporteHl: vi.fn(() => true),
   kvPut: async () => 1,
 }));
 
+// Scanner navigateur factice (chunk paresseux) : capte la fonction de publication.
+const nav = vi.hoisted(() => ({
+  scanner: { demarrer: vi.fn(), definirCoin: vi.fn(), arreter: vi.fn(), attendreCycle: vi.fn(async () => {}) },
+  publier: null as null | ((p: unknown) => void),
+}));
+vi.mock("./hyperliquidLiqNavigateur", () => ({
+  scannerNavigateurHl: (publier: (p: unknown) => void) => {
+    nav.publier = publier;
+    return nav.scanner;
+  },
+}));
+
 import { hlLiqStore, demarrerHyperliquidLiq } from "./hyperliquidLiq";
-import { hlLiqLevelsGet } from "./daemon";
+import { daemonSupporteHl, hlLiqLevelsGet } from "./daemon";
+import { marketStore } from "../store/market";
 
 describe("sync — l'état transitoire dit la vérité", () => {
   it("activation avec fetch en vol → etat « chargement », pas « vide »", () => {
@@ -216,6 +250,73 @@ describe("sync — daemon « instantané en construction » (premier scan du poo
       lire.mockImplementation(() => new Promise(() => {}));
       hlLiqStore.getState().setActif(false);
       vi.useRealTimers();
+    }
+  });
+});
+
+describe("sync — local SANS daemon : repli sur le scan navigateur", () => {
+  it("daemon absent (null + capability `hl` absente) → scanner navigateur démarré, source « navigateur »", async () => {
+    const lire = vi.mocked(hlLiqLevelsGet);
+    const capa = vi.mocked(daemonSupporteHl);
+    try {
+      lire.mockReset();
+      lire.mockResolvedValue(null);
+      capa.mockReturnValue(false);
+      nav.scanner.demarrer.mockClear();
+      nav.scanner.definirCoin.mockClear();
+      nav.scanner.arreter.mockClear();
+      demarrerHyperliquidLiq();
+      hlLiqStore.getState().setActif(true);
+      await vi.waitFor(() => expect(nav.scanner.demarrer).toHaveBeenCalledOnce());
+      expect(lire).toHaveBeenCalledOnce(); // le daemon est tenté d'abord (mode daemon inchangé)
+      expect(hlLiqStore.getState().source).toBe("navigateur");
+      expect(hlLiqStore.getState().etat).toBe("chargement"); // jamais « nécessite le daemon »
+
+      // Publication du scanner → store (même forme que le mode daemon + progression).
+      nav.publier?.({ etat: "ok", niveaux: reponse().niveaux, ts: 42, adressesScannees: 40, progression: { faites: 40, total: 1500 } });
+      expect(hlLiqStore.getState()).toMatchObject({
+        etat: "ok",
+        ts: 42,
+        adressesScannees: 40,
+        source: "navigateur",
+        progression: { faites: 40, total: 1500 },
+      });
+
+      // Changement de symbole : republié par le scanner, AUCUN appel daemon ni nouveau scan.
+      marketStore.getState().setSymbol("ETHUSDT");
+      expect(nav.scanner.definirCoin).toHaveBeenLastCalledWith("ETH");
+      expect(nav.scanner.demarrer).toHaveBeenCalledOnce();
+      expect(lire).toHaveBeenCalledOnce();
+
+      // OFF : scanner arrêté, store remis à zéro (source daemon par défaut, sans progression).
+      hlLiqStore.getState().setActif(false);
+      expect(nav.scanner.arreter).toHaveBeenCalledOnce();
+      expect(hlLiqStore.getState()).toMatchObject({ etat: "vide", source: "daemon", progression: null, niveaux: [] });
+      nav.publier?.({ etat: "ok", niveaux: reponse().niveaux, ts: 43, adressesScannees: 1, progression: null });
+      expect(hlLiqStore.getState().etat).toBe("vide"); // publication tardive ignorée après OFF
+    } finally {
+      capa.mockReturnValue(true);
+      lire.mockReset();
+      lire.mockImplementation(() => new Promise(() => {}));
+      hlLiqStore.getState().setActif(false);
+    }
+  });
+
+  it("daemon présent mais réponse en échec (capability `hl` annoncée) → « erreur », PAS de repli", async () => {
+    const lire = vi.mocked(hlLiqLevelsGet);
+    try {
+      lire.mockReset();
+      lire.mockResolvedValue(null);
+      nav.scanner.demarrer.mockClear();
+      demarrerHyperliquidLiq();
+      hlLiqStore.getState().setActif(true);
+      await vi.waitFor(() => expect(hlLiqStore.getState().etat).toBe("erreur"));
+      expect(hlLiqStore.getState().source).toBe("daemon");
+      expect(nav.scanner.demarrer).not.toHaveBeenCalled();
+    } finally {
+      lire.mockReset();
+      lire.mockImplementation(() => new Promise(() => {}));
+      hlLiqStore.getState().setActif(false);
     }
   });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
   agregerParCoin,
@@ -22,6 +22,7 @@ import {
   REPLI_ECHEC_TOTAL_MS,
   SEUIL_VALEUR_USD,
   TAILLE_POOL,
+  TIMEOUT_LEADERBOARD_MS,
   traiterHl,
   TTL_INSTANTANE_MS,
   TTL_POOL_MS,
@@ -64,6 +65,28 @@ function horlogeFactice(): HorlogeScan & { demandes: number[]; avancer: (ms: num
       return demandes.length;
     },
     clearTimeout: () => {},
+  };
+}
+
+/**
+ * Horloge dont les minuteurs ne se déclenchent JAMAIS seuls (journalise pose et annulation)
+ * et dont `now()` ne bouge pas : un essai en échec y dure 0 ms → échec horodaté au `now`
+ * logique exact (bornes du repli déterministes, sans la durée réelle de quelques ms).
+ */
+function horlogeFigee(): HorlogeScan & { poses: number[]; annules: unknown[] } {
+  const poses: number[] = [];
+  const annules: unknown[] = [];
+  return {
+    poses,
+    annules,
+    now: () => 0,
+    setTimeout: (_fn, ms) => {
+      poses.push(ms);
+      return poses.length;
+    },
+    clearTimeout: (id) => {
+      annules.push(id);
+    },
   };
 }
 
@@ -357,16 +380,21 @@ describe("cadence du scan (débit de poids plafonné)", () => {
 });
 
 describe("abandon précoce : amont en panne dès le début du scan", () => {
-  test("les LOTS_ECHEC_ABANDON premiers lots tous en échec (réseau) → scan abandonné, pas 375 lots cadencés", async () => {
+  test("les LOTS_ECHEC_ABANDON premiers lots tous en échec (réseau), rejeu du 1er lot en échec aussi → scan abandonné, pas 375 lots cadencés", async () => {
     expect(LOTS_ECHEC_ABANDON).toBe(3);
     const adresses = Array.from({ length: 40 }, (_, i) => adresse(i + 1));
     const { fetchImpl, appels } = stubHl({ infoKo: adresses });
     const horloge = horlogeFactice();
     const inst = await construireInstantane(adresses, fetchImpl, T0, { horloge });
     expect(inst.adressesScannees).toBe(0);
-    expect(appels).toHaveLength(LOTS_ECHEC_ABANDON * CONCURRENCE); // 12 requêtes, pas 40
-    // Attentes ENTRE les 3 lots seulement ; aucune avant un lot qui ne partira pas.
-    expect(horloge.demandes).toEqual([INTERVALLE_LOT_MS, INTERVALLE_LOT_MS]);
+    // 12 requêtes des 3 lots + 4 du rejeu UNIQUE du 1er lot = 16, pas 40.
+    expect(appels).toHaveLength((LOTS_ECHEC_ABANDON + 1) * CONCURRENCE);
+    expect(appels.slice(LOTS_ECHEC_ABANDON * CONCURRENCE)).toEqual(
+      adresses.slice(0, CONCURRENCE).map((a) => `info:${a}`),
+    );
+    // Attentes ENTRE les 3 lots puis avant le rejeu (même cadence) ; aucune avant un lot
+    // qui ne partira pas.
+    expect(horloge.demandes).toEqual([INTERVALLE_LOT_MS, INTERVALLE_LOT_MS, INTERVALLE_LOT_MS]);
   });
 
   test("HTTP 5xx compte comme un échec (seul le 429 a son propre arrêt)", async () => {
@@ -378,7 +406,43 @@ describe("abandon précoce : amont en panne dès le début du scan", () => {
     const adresses = Array.from({ length: 40 }, (_, i) => adresse(i + 1));
     const inst = await construireInstantane(adresses, fetchImpl, T0, { horloge: horlogeFactice() });
     expect(inst.adressesScannees).toBe(0);
-    expect(appels).toHaveLength(LOTS_ECHEC_ABANDON * CONCURRENCE);
+    expect(appels).toHaveLength((LOTS_ECHEC_ABANDON + 1) * CONCURRENCE); // rejeu compris
+  });
+
+  test("coupure réseau BRÈVE au lancement (≈ 1,5 s : les 3 premiers lots) : le rejeu du 1er lot répond → scan poursuivi", async () => {
+    const adresses = Array.from({ length: 40 }, (_, i) => adresse(i + 1));
+    const horloge = horlogeFactice();
+    const appels: string[] = [];
+    const fetchImpl = (async (_entree: RequestInfo | URL, init?: RequestInit) => {
+      const user = (JSON.parse(String(init?.body ?? "{}")) as { user?: string }).user ?? "";
+      appels.push(user);
+      // Réveil machine / Wi-Fi : injoignable pendant 1,5 s (lots partis à 0, 640, 1 280 ms).
+      if (horloge.now() < 1_500) throw new Error("réseau injoignable");
+      return new Response(JSON.stringify(user === adresse(1) ? etat([pos()]) : etat([])));
+    }) as typeof fetch;
+    const inst = await construireInstantane(adresses, fetchImpl, T0, { horloge });
+    // 12 échecs + rejeu du 1er lot (4, réussis à 1 920 ms) + lots 4 à 10 (28) = 44 requêtes.
+    expect(appels).toHaveLength(12 + CONCURRENCE + 28);
+    expect(appels.slice(12, 12 + CONCURRENCE)).toEqual(adresses.slice(0, CONCURRENCE));
+    expect(appels.slice(12 + CONCURRENCE)).toEqual(adresses.slice(LOTS_ECHEC_ABANDON * CONCURRENCE));
+    // Lots 2 et 3 non comptés ; le 1er lot l'est par son rejeu (positions comprises).
+    expect(inst.adressesScannees).toBe(CONCURRENCE + 28);
+    expect(inst.parCoin.get("BTC")?.map((n) => n.addr)).toEqual([adresse(1)]);
+    // Le rejeu est un lot cadencé comme les autres : 10 départs après le 1er → 10 attentes.
+    expect(horloge.demandes).toEqual(Array.from({ length: 10 }, () => INTERVALLE_LOT_MS));
+  });
+
+  test("429 pendant le rejeu : arrêt sur quota inchangé (aucun lot de plus)", async () => {
+    const adresses = Array.from({ length: 40 }, (_, i) => adresse(i + 1));
+    let n = 0;
+    const fetchImpl = (async () => {
+      n += 1;
+      if (n <= LOTS_ECHEC_ABANDON * CONCURRENCE) throw new Error("réseau injoignable");
+      return new Response("quota", { status: 429 });
+    }) as unknown as typeof fetch;
+    const inst = await construireInstantane(adresses, fetchImpl, T0, { horloge: horlogeFactice() });
+    expect(n).toBe((LOTS_ECHEC_ABANDON + 1) * CONCURRENCE);
+    expect(inst.adressesScannees).toBe(0);
   });
 
   test("une seule adresse répondue dans les premiers lots : le scan va jusqu'au bout", async () => {
@@ -625,6 +689,23 @@ describe("chargerPool (kv namespace hl, TTL 6 h)", () => {
     const d = baseTest();
     expect(await chargerPool(d, stubHl({ leaderboardKo: true }).fetchImpl, T0)).toEqual([]);
   });
+
+  test("échec d'ÉCRITURE du pool (disque plein, verrou) : le pool téléchargé est quand même rendu", async () => {
+    const d = baseTest();
+    // Toute écriture dans kv lève (SQLite) ; lecture et CREATE IF NOT EXISTS restent possibles.
+    d.run("CREATE TRIGGER kv_ko BEFORE INSERT ON kv BEGIN SELECT RAISE(ABORT, 'disque plein'); END");
+    const erreurs = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const s = stubHl({ adresses: [A1, A2] });
+      // ≈ 39 Mo / ≈ 31 s de téléchargement : jamais jetés pour une persistance ratée.
+      expect(await chargerPool(d, s.fetchImpl, T0)).toEqual([A1, A2]);
+      expect(s.appels).toEqual(["leaderboard"]);
+      expect(erreurs).toHaveBeenCalledTimes(1);
+    } finally {
+      erreurs.mockRestore();
+    }
+    expect(d.query("SELECT valeur FROM kv WHERE namespace = 'hl' AND cle = 'pool'").get()).toBeNull();
+  });
 });
 
 describe("construireInstantane (concurrence bornée, échecs isolés)", () => {
@@ -709,7 +790,10 @@ describe("GET /hl/liqlevels/:coin", () => {
     reinitialiserHl();
     const d = baseTest();
     const url = new URL("http://x/hl/liqlevels/BTC");
-    const res = await traiterHl(new Request(url), url, d, T0, stubHl({ leaderboardKo: true }).fetchImpl);
+    // Horloge figée : l'essai raté dure 0 ms → le repli court depuis T0 exactement.
+    const res = await traiterHl(new Request(url), url, d, T0, stubHl({ leaderboardKo: true }).fetchImpl, {
+      horloge: horlogeFigee(),
+    });
     expect(res.status).toBe(503);
     // 503 « pool indisponible » : DISTINCT du 503 « en construction » (pas de relance courte).
     const corps = (await res.json()) as { erreur: string; enConstruction?: boolean };
@@ -830,7 +914,8 @@ describe("instantané entièrement vide (échec amont total)", () => {
     const url = new URL("http://x/hl/liqlevels/BTC");
     // 1) Toutes les adresses en échec, aucun cache antérieur → 503 (pas un 200 « 0 adresses »).
     const ko = stubHl({ adresses: [A1, A2], infoKo: [A1, A2] });
-    const res = await traiterHl(new Request(url), url, d, T0, ko.fetchImpl);
+    // Horloge figée : l'essai raté dure 0 ms → le repli court depuis T0 exactement.
+    const res = await traiterHl(new Request(url), url, d, T0, ko.fetchImpl, { horloge: horlogeFigee() });
     expect(res.status).toBe(503);
     expect(((await res.json()) as { erreur: string }).erreur).toContain("pool");
     // 2) Pendant REPLI_ECHEC_TOTAL_MS, la lecture suivante répond le MÊME 503 « pool
@@ -873,24 +958,6 @@ describe("lecture à froid bornée (aucun cache) → 503 « en construction »",
       return s.fetchImpl(entree, init);
     }) as typeof fetch;
     return { fetchImpl, appels: s.appels, verrou };
-  }
-
-  /** Horloge dont les minuteurs ne se déclenchent JAMAIS seuls (journalise pose et annulation). */
-  function horlogeFigee(): HorlogeScan & { poses: number[]; annules: unknown[] } {
-    const poses: number[] = [];
-    const annules: unknown[] = [];
-    return {
-      poses,
-      annules,
-      now: () => 0,
-      setTimeout: (_fn, ms) => {
-        poses.push(ms);
-        return poses.length;
-      },
-      clearTimeout: (id) => {
-        annules.push(id);
-      },
-    };
   }
 
   test("au-delà de ATTENTE_FROID_MAX_MS : 503 JSON enConstruction + Retry-After, puis 200 une fois le cache rempli", async () => {
@@ -1023,9 +1090,11 @@ describe("lecture à froid bornée (aucun cache) → 503 « en construction »",
     reinitialiserHl();
     const d = baseTest();
     const url = new URL("http://x/hl/liqlevels/BTC");
-    // Échec total à T0 (pool [A1] persisté au passage).
+    // Échec total à T0 (pool [A1] persisté au passage), essai de 0 ms (horloge figée).
     const ko = stubHl({ adresses: [A1], infoKo: [A1] });
-    expect((await traiterHl(new Request(url), url, d, T0, ko.fetchImpl)).status).toBe(503);
+    expect((await traiterHl(new Request(url), url, d, T0, ko.fetchImpl, { horloge: horlogeFigee() })).status).toBe(
+      503,
+    );
 
     // Repli écoulé : la lecture relance un scan qui dépasse le délai de 15 s…
     const s = stubHl({ adresses: [A1], etats: { [A1]: etat([pos()]) } });
@@ -1079,7 +1148,7 @@ describe("lecture à froid bornée (aucun cache) → 503 « en construction »",
     expect(((await res.json()) as { ts: number }).ts).toBe(T0 + 1_000);
   });
 
-  test("leaderboard qui PEND sans pool persisté : « en construction » au 1er essai, puis « pool » sans retéléchargement", async () => {
+  test("leaderboard qui PEND sans pool persisté : « en construction » au 1er essai, puis « pool » sans retéléchargement jusqu'à la FIN de l'essai + repli", async () => {
     reinitialiserHl();
     const d = baseTest();
     const url = new URL("http://x/hl/liqlevels/BTC");
@@ -1095,10 +1164,47 @@ describe("lecture à froid bornée (aucun cache) → 503 « en construction »",
     const res1 = await traiterHl(new Request(url), url, d, T0, fetchImpl, { horloge });
     expect(((await res1.json()) as { enConstruction?: boolean }).enConstruction).toBe(true);
     const fin = obtenirInstantane(d, fetchImpl, T0 + 30_000, { forcer: true });
+    // Le téléchargement pend jusqu'à son délai (l'horloge a déjà avancé des 15 s de la lecture).
+    horloge.avancer(TIMEOUT_LEADERBOARD_MS - ATTENTE_FROID_MAX_MS);
     verrou.resolve();
     expect(await fin).toBeNull();
-    const res2 = await traiterHl(new Request(url), url, d, T0 + 45_000, fetchImpl, { horloge });
-    expect(await res2.json()).toEqual(POOL_INDISPONIBLE);
+    // Échec horodaté à la FIN de l'essai (T0 + 120 s), pas à son lancement : la lecture
+    // suivante, déjà au-delà de « lancement + repli », ne relance PAS un téléchargement.
+    const finEssai = T0 + TIMEOUT_LEADERBOARD_MS;
+    for (const t of [finEssai + 15_000, finEssai + REPLI_ECHEC_TOTAL_MS - 1]) {
+      const res = await traiterHl(new Request(url), url, d, t, fetchImpl, { horloge });
+      expect(await res.json()).toEqual(POOL_INDISPONIBLE);
+    }
     expect(telechargements).toBe(1);
+  });
+
+  test("essai de 120 s (leaderboard qui pend jusqu'à son délai) : aucune relance avant FIN de l'essai + REPLI_ECHEC_TOTAL_MS", async () => {
+    expect(TIMEOUT_LEADERBOARD_MS).toBe(120_000);
+    reinitialiserHl();
+    const d = baseTest();
+    const horloge = horlogeFactice();
+    let telechargements = 0;
+    const fetchImpl = (async (entree: RequestInfo | URL) => {
+      if (String(entree) !== URL_LEADERBOARD) throw new Error("aucun appel de compte attendu");
+      telechargements += 1;
+      horloge.avancer(TIMEOUT_LEADERBOARD_MS); // le téléchargement pend jusqu'à son délai…
+      throw new Error("délai du leaderboard dépassé"); // … puis est abandonné
+    }) as unknown as typeof fetch;
+    // Lectures non forcées DIRECTES : aucun délai de lecture de 15 s sur l'horloge factice.
+    expect(await obtenirInstantane(d, fetchImpl, T0, { horloge })).toBeNull();
+    const finEssai = T0 + TIMEOUT_LEADERBOARD_MS;
+    // Horodaté au lancement, l'échec aurait vu son repli ENTIÈREMENT consommé par l'essai :
+    // la lecture suivante relançait aussitôt ≈ 39 Mo de téléchargement.
+    for (const t of [finEssai + 1_000, finEssai + REPLI_ECHEC_TOTAL_MS - 1]) {
+      expect(await obtenirInstantane(d, fetchImpl, t, { horloge })).toBeNull();
+    }
+    const url = new URL("http://x/hl/liqlevels/BTC");
+    const res = await traiterHl(new Request(url), url, d, finEssai + 30_000, fetchImpl);
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual(POOL_INDISPONIBLE);
+    expect(telechargements).toBe(1);
+    // Fin de l'essai + repli : la lecture relance un essai.
+    expect(await obtenirInstantane(d, fetchImpl, finEssai + REPLI_ECHEC_TOTAL_MS, { horloge })).toBeNull();
+    expect(telechargements).toBe(2);
   });
 });

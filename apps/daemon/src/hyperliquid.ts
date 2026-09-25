@@ -39,10 +39,11 @@
  * sans aucun cache elle attend au plus ATTENTE_FROID_MAX_MS puis répond 503
  * `{ enConstruction: true }` + Retry-After (le scan continue et remplit le cache).
  * Premier scan après un démarrage : ≈ 4 min (≈ 4,5 si le leaderboard est à retélécharger).
- * PANNE AMONT : un scan dont les premiers lots échouent tous est abandonné (quelques
- * secondes) ; sans cache, l'échec est retenu et les lectures répondent le 503 « pool
- * indisponible » (jamais « en construction » sans fin), avec un repli de
- * REPLI_ECHEC_TOTAL_MS avant qu'une lecture relance un essai.
+ * PANNE AMONT : un scan dont les premiers lots échouent tous — premier lot rejoué UNE fois
+ * compris (coupure brève au lancement) — est abandonné (quelques secondes) ; sans cache,
+ * l'échec est retenu et les lectures répondent le 503 « pool indisponible » (jamais « en
+ * construction » sans fin), avec un repli de REPLI_ECHEC_TOTAL_MS, compté depuis la FIN
+ * de l'essai raté, avant qu'une lecture relance un essai.
  *
  * PIÈGE amont (vérifié) : en marge croisée, `liquidationPx` peut être `null`
  * (compte bien collatéralisé) ou ABERRANT (short BNB de 12 $ « liquidable » à
@@ -101,7 +102,13 @@ export const INTERVALLE_LOT_MS = Math.ceil((CONCURRENCE * POIDS_CLEARINGHOUSE * 
  * 375 lots d'échecs (≈ 240 s, voire ≈ 62 min si chaque requête pend jusqu'à
  * TIMEOUT_ETAT_MS). En DÉBUT de scan seulement : un incident passager au milieu d'un scan
  * sain ne le tronque pas. `clearinghouseState` répond pour toute adresse valide (même
- * vide) : 12 échecs d'affilée signent une panne, pas des comptes particuliers.
+ * vide) : 12 échecs d'affilée — 16 avec le rejeu du 1er lot — signent une panne, pas des
+ * comptes particuliers.
+ * AVANT d'abandonner, le PREMIER lot est rejoué UNE fois, à la cadence (un intervalle de
+ * lot, 8 poids) : une coupure d'≈ 1-2 s au lancement (réveil machine, Wi-Fi, rafale de
+ * 502) couvre les 3 lots (partis à 0, 640, 1 280 ms) sans signer une panne. Une adresse
+ * répond au rejeu → scan poursuivi (les adresses des lots 2 et 3 ne comptent simplement
+ * pas) ; aucune → abandon.
  */
 export const LOTS_ECHEC_ABANDON = 3;
 /**
@@ -113,16 +120,17 @@ export const ATTENTE_FROID_MAX_MS = 15_000;
 export const RELANCE_CONSTRUCTION_S = 30;
 /**
  * Après un échec TOTAL (aucun pool, ou 0 adresse scannée) sans aucun cache, une lecture
- * non forcée répond le 503 « pool indisponible » SANS relancer d'essai pendant ce délai
- * (compté depuis le lancement de l'essai raté). 2 min < 4 min du rafraîchissement du
- * front en « erreur » : chaque rafraîchissement suivant relance un essai, sans rafale
- * (bouton Réessayer, plusieurs vues). Le collecteur forcé n'est pas concerné.
+ * non forcée répond le 503 « pool indisponible » SANS relancer d'essai pendant ce délai,
+ * compté depuis la FIN de l'essai raté (cf. echecTotalTs : un essai de 120 s ne consomme
+ * pas le repli). 2 min < 4 min du rafraîchissement du front en « erreur » : chaque
+ * rafraîchissement suivant relance un essai, sans rafale (bouton Réessayer, plusieurs
+ * vues). Le collecteur forcé n'est pas concerné.
  */
 export const REPLI_ECHEC_TOTAL_MS = 2 * 60_000;
 /** Le leaderboard pèse ≈ 39 Mo : bornage large, seulement contre une réponse aberrante. */
 const TAILLE_MAX_LEADERBOARD = 80 * 1024 * 1024;
 /** ≈ 31 s mesurées le 2026-09-25 sur la liaison du poste (1,5 Mo/s) : marge ×4. */
-const TIMEOUT_LEADERBOARD_MS = 120_000;
+export const TIMEOUT_LEADERBOARD_MS = 120_000;
 const TIMEOUT_ETAT_MS = 10_000;
 
 /** Un niveau de liquidation réel (les champs sont tous scalaires : contrat front). */
@@ -417,6 +425,9 @@ function poolFrais(p: PoolPersiste, now: number): boolean {
  * paramètres, moins de 6 h) ; sinon retélécharge le leaderboard. Amont KO → repli
  * sur le pool persisté MÊME PÉRIMÉ ou construit avec d'autres paramètres (ancien
  * format compris) ; aucun pool disponible → tableau vide (l'appelant répond 503).
+ * Échec de PERSISTANCE (SQLite : disque plein, verrou) → journalisé, et le pool
+ * fraîchement téléchargé est quand même rendu (≈ 39 Mo / ≈ 31 s jamais jetés : sans
+ * pool persisté, ce serait sinon un échec total retenu).
  */
 export async function chargerPool(
   d: Database,
@@ -426,6 +437,7 @@ export async function chargerPool(
   assurerTableKv(d);
   const persiste = lirePool(d);
   if (persiste !== null && poolFrais(persiste, now)) return persiste.adresses;
+  let adresses: string[];
   try {
     const res = await fetchImpl(URL_LEADERBOARD, {
       headers: entetesAmont(),
@@ -437,14 +449,20 @@ export async function chargerPool(
     if (cl !== null && Number(cl) > TAILLE_MAX_LEADERBOARD) throw new Error("leaderboard trop volumineux");
     const texte = await res.text();
     if (texte.length > TAILLE_MAX_LEADERBOARD) throw new Error("leaderboard trop volumineux");
-    const adresses = extrairePool(JSON.parse(texte));
+    adresses = extrairePool(JSON.parse(texte));
     // Réponse vide/inattendue : ne JAMAIS écraser un bon pool persisté.
     if (adresses.length === 0) throw new Error("leaderboard sans ligne exploitable");
-    ecrirePool(d, adresses, now);
-    return adresses;
   } catch {
     return persiste?.adresses ?? [];
   }
+  // Persistance ISOLÉE : son échec ne fait pas retomber sur le repli (voire sur rien).
+  try {
+    ecrirePool(d, adresses, now);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(`[axiomd] pool HL non persisté (servi quand même) : ${detail}`);
+  }
+  return adresses;
 }
 
 /** Résultat d'un `clearinghouseState` : positions, échec isolé, ou limite de quota. */
@@ -484,7 +502,8 @@ async function etatCompte(addr: string, fetchImpl: typeof fetch): Promise<Result
  * Une adresse en échec est simplement ignorée et ne compte pas dans
  * `adressesScannees`. Un 429 amont interrompt le reste de l'instantané : les lots
  * non envoyés ne sont PAS lancés (les adresses restantes ne comptent pas). Idem si
- * les LOTS_ECHEC_ABANDON premiers lots échouent tous (amont en panne).
+ * les LOTS_ECHEC_ABANDON premiers lots échouent tous ET que le rejeu unique du premier
+ * lot (un lot cadencé comme les autres) échoue aussi (amont en panne).
  */
 export async function construireInstantane(
   adresses: readonly string[],
@@ -499,9 +518,9 @@ export async function construireInstantane(
   let adressesScannees = 0;
   let limite429 = false;
   let abandon = false;
-  for (let i = 0; i < adresses.length; i += CONCURRENCE) {
-    const debutLot = horloge.now();
-    const lot = adresses.slice(i, i + CONCURRENCE);
+  let rejeu = false;
+  /** Envoie un lot et intègre ses réponses (échecs ignorés, 429 signalé). */
+  const scannerLot = async (lot: readonly string[]): Promise<void> => {
     const resultats = await Promise.all(lot.map((a) => etatCompte(a, fetchImpl)));
     for (const r of resultats) {
       if (r.limite) {
@@ -512,12 +531,26 @@ export async function construireInstantane(
       adressesScannees += 1;
       positions.push(...r.positions);
     }
+  };
+  for (let i = 0; i < adresses.length; i += CONCURRENCE) {
+    let debutLot = horloge.now();
+    await scannerLot(adresses.slice(i, i + CONCURRENCE));
     if (limite429) break; // quota atteint : on n'envoie plus les lots restants
     const resteDesLots = i + CONCURRENCE < adresses.length;
-    // Amont en panne dès le début (réseau, 5xx, délais) : on n'envoie plus rien.
-    if (resteDesLots && adressesScannees === 0 && i / CONCURRENCE + 1 >= LOTS_ECHEC_ABANDON) {
-      abandon = true;
-      break;
+    // Premiers lots tous en échec (réseau, 5xx, délais) : panne, ou coupure brève au
+    // lancement ? Le premier lot est rejoué UNE fois, à la cadence (cf. LOTS_ECHEC_ABANDON).
+    if (!rejeu && resteDesLots && adressesScannees === 0 && i / CONCURRENCE + 1 >= LOTS_ECHEC_ABANDON) {
+      rejeu = true;
+      const avantRejeu = debutLot + intervalle - horloge.now();
+      if (avantRejeu > 0) await attendre(horloge, avantRejeu);
+      debutLot = horloge.now(); // le lot suivant se cadence sur le DÉMARRAGE du rejeu
+      await scannerLot(adresses.slice(0, CONCURRENCE));
+      if (limite429) break;
+      // Toujours aucune réponse : amont en panne, on n'envoie plus rien.
+      if (adressesScannees === 0) {
+        abandon = true;
+        break;
+      }
     }
     const reste = debutLot + intervalle - horloge.now();
     if (resteDesLots && reste > 0) await attendre(horloge, reste);
@@ -527,6 +560,7 @@ export async function construireInstantane(
   const dureeS = Math.max(0, (horloge.now() - debut) / 1000);
   console.log(
     `[axiomd] instantané HL : ${adressesScannees} adresses en ${dureeS.toFixed(1)} s` +
+      (rejeu ? " (1er lot rejoué)" : "") +
       (limite429 ? " (interrompu sur 429)" : "") +
       (abandon ? " (abandonné : amont en échec)" : ""),
   );
@@ -544,11 +578,15 @@ let instantaneEnVol: Promise<InstantaneHL | null> | null = null;
  */
 let generationCache = 0;
 /**
- * Horodatage (logique : `now` de son lancement) de la dernière construction TERMINÉE en
- * échec total (aucun pool, ou 0 adresse scannée), effacé au premier succès. Sans aucun
- * cache, c'est la dernière issue connue : les lectures répondent « pool indisponible »,
- * plus jamais « en construction » (le front passerait sinon d'un essai raté au suivant
- * sans voir l'échec — scan en panne, ou leaderboard qui pend au-delà de 15 s).
+ * Horodatage de FIN (logique : `now` du lancement + durée réelle de l'essai, mesurée sur
+ * l'horloge injectable) de la dernière construction TERMINÉE en échec total (aucun pool,
+ * ou 0 adresse scannée), effacé au premier succès. Horodaté au lancement, un essai long
+ * (leaderboard qui pend jusqu'à TIMEOUT_LEADERBOARD_MS = 120 s, requêtes de compte qui
+ * pendent) consommerait tout REPLI_ECHEC_TOTAL_MS et la lecture suivante relancerait
+ * aussitôt ≈ 39 Mo de téléchargement. Sans aucun cache, c'est la dernière issue connue :
+ * les lectures répondent « pool indisponible », plus jamais « en construction » (le front
+ * passerait sinon d'un essai raté au suivant sans voir l'échec — scan en panne, ou
+ * leaderboard qui pend au-delà de 15 s).
  */
 let echecTotalTs: number | null = null;
 
@@ -580,8 +618,9 @@ export function reinitialiserHl(): void {
  *
  * Sans cache après un échec TOTAL (cf. echecTotalTs) : null tout de suite (503 « pool
  * indisponible ») tant qu'une relance est en vol ou que REPLI_ECHEC_TOTAL_MS n'est pas
- * écoulé — pas de scan relancé à chaque lecture contre un amont en panne ; ensuite, la
- * lecture relance un essai (dont l'éventuel délai expiré répond encore « pool »).
+ * écoulé depuis la FIN de l'essai raté — pas de scan relancé à chaque lecture contre un
+ * amont en panne ; ensuite, la lecture relance un essai (dont l'éventuel délai expiré
+ * répond encore « pool »).
  */
 export function obtenirInstantane(
   d: Database,
@@ -613,17 +652,20 @@ export function obtenirInstantane(
     return instantaneEnVol;
   }
   const generation = generationCache;
+  const horloge = options?.horloge ?? HORLOGE_REELLE;
   const p: Promise<InstantaneHL | null> = (async (): Promise<InstantaneHL | null> => {
+    const debutEssai = horloge.now(); // horloge (réelle en service) : durée de l'essai, cf. dureeS du scan
     const adresses = await chargerPool(d, fetchImpl, now);
     const inst = adresses.length === 0 ? null : await construireInstantane(adresses, fetchImpl, now, options);
     // Échec amont TOTAL (aucun pool, ou 0 adresse scannée) : aucune observation neuve.
     // Le repli UI est appliqué APRÈS cette promesse partagée, sinon un collecteur qui la
     // rejoint recevrait l'ancien cache comme s'il venait d'être acquis. L'échec est
-    // RETENU (cf. echecTotalTs) ; le premier succès l'efface.
+    // RETENU (cf. echecTotalTs) à sa FIN, en temps logique : `now` + durée réelle de
+    // l'essai ; le premier succès l'efface.
     const reussi = inst !== null && inst.adressesScannees > 0;
     if (generation === generationCache) {
       if (reussi) cacheInstantane = inst;
-      echecTotalTs = reussi ? null : now;
+      echecTotalTs = reussi ? null : now + Math.max(0, horloge.now() - debutEssai);
     }
     return reussi ? inst : null;
   })().finally(() => {

@@ -437,10 +437,13 @@ rapport `docs/superpowers/progress/2026-09-22-heatmap-hl-indicateurs-onchain.md`
    `{ enConstruction: true }` + `Retry-After: 30` — la couche LIQHL reste « chargement » et la
    fenêtre WHALES affiche « instantané en construction », toutes deux relancent toutes les 30 s
    (premier scan ≈ 4 min, ≈ 4,5 avec le téléchargement du leaderboard de ≈ 39 Mo). Amont en
-   panne : un scan dont les 3 premiers lots échouent tous est abandonné ; sans cache, un échec
-   total (pool vide ou zéro adresse) est retenu jusqu'au premier succès, les lectures répondent
-   le 503 « pool indisponible » (état « erreur » côté front, jamais « en construction » sans fin)
-   et n'en relancent un essai qu'au moins 2 min après l'échec. Le collecteur forcé attend
+   panne : si les 3 premiers lots échouent tous, le 1er lot est rejoué une fois (une coupure
+   d'une seconde au lancement ne jette pas un scan sain) puis, s'il échoue encore, le scan est
+   abandonné ; sans cache, un échec total (pool vide ou zéro adresse) est retenu jusqu'au premier
+   succès, les lectures répondent le 503 « pool indisponible » (état « erreur » côté front,
+   jamais « en construction » sans fin) et n'en relancent un essai qu'au moins 2 min après la
+   FIN de l'essai raté. Un pool téléchargé reste utilisé même si sa persistance SQLite échoue.
+   Le collecteur forcé attend
    toujours son point neuf et n'est pas soumis à ce repli. Cela reste un **échantillon** du
    leaderboard : l'interface annonce « N adresses », jamais « toutes » les liquidations.
    Côté graphe, la fenêtre ±40 % du prix (+ plancher 10 k$) des barres LIQHL — seul filtre de

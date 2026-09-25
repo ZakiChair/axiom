@@ -55,6 +55,10 @@ import {
   libelleBordHl,
   cumulsHl,
   libelleLegendeHl,
+  raisonCotationHl,
+  yLibreSousObstacles,
+  bandeRepereHl,
+  filtrerHorsBandes,
   maxUsdBuckets,
   pasBougieMs,
   construireGrilleHl,
@@ -976,6 +980,144 @@ describe("libelleLegendeHl — la couche LIQHL nomme toujours son état", () => 
 
   it("fetch en vol → « chargement… » (et pas « aucun niveau », faux pendant le scan)", () => {
     expect(libelleLegendeHl("chargement", 0, 0, { auDessus: 5, enDessous: 5 })).toBe("LIQ HL RÉELS — chargement…");
+  });
+
+  it("cotation hors USD → la RAISON prime sur l'état et les cumuls (couche muette, jamais silencieuse)", () => {
+    // Relecture du 25/09/2026 : sur ETHBTC la légende affichait « ↑ $1.34B · ↓ $0.00 » —
+    // des niveaux USD comparés à un prix en BTC.
+    const raison = "cotation BTC ≠ USD, niveaux masqués";
+    expect(libelleLegendeHl("ok", 475, 79, { auDessus: 1.34e9, enDessous: 0 }, raison)).toBe(
+      "LIQ HL RÉELS — cotation BTC ≠ USD, niveaux masqués",
+    );
+    expect(libelleLegendeHl("chargement", 0, 0, null, raison)).toBe("LIQ HL RÉELS — cotation BTC ≠ USD, niveaux masqués");
+  });
+
+  it("raison null ou absente → libellé nominal inchangé", () => {
+    expect(libelleLegendeHl("ok", 250, 12, null, null)).toBe("LIQ HL RÉELS — 250 adresses · 12 positions");
+  });
+});
+
+describe("raisonCotationHl — niveaux HL en USD : la couche se tait hors cotation USD", () => {
+  it("cotation USD ou stablecoin USD (et perp Hyperliquid) → null : niveaux affichables", () => {
+    for (const s of [
+      "BTCUSDT",
+      "ETHUSDC",
+      "BTC-USD",
+      "XBT/USD",
+      "BTC/USDT",
+      "SOLUSD",
+      "BTCUSDE",
+      "ETHDAI",
+      "BTCTUSD",
+      "BTCUSDD",
+      "btcusdt",
+      "BTC-PERP",
+      "kPEPE-PERP",
+    ]) {
+      expect(raisonCotationHl(s), s).toBeNull();
+    }
+  });
+
+  it("cotation crypto ou fiat NON USD → raison nommant la cotation", () => {
+    expect(raisonCotationHl("ETHBTC")).toBe("cotation BTC ≠ USD, niveaux masqués");
+    expect(raisonCotationHl("SOLETH")).toBe("cotation ETH ≠ USD, niveaux masqués");
+    expect(raisonCotationHl("BTCJPY")).toBe("cotation JPY ≠ USD, niveaux masqués");
+    expect(raisonCotationHl("XBT/EUR")).toBe("cotation EUR ≠ USD, niveaux masqués");
+    expect(raisonCotationHl("ETH-BTC")).toBe("cotation BTC ≠ USD, niveaux masqués");
+    expect(raisonCotationHl("BTCEURC")).toBe("cotation EURC ≠ USD, niveaux masqués");
+  });
+
+  it("symbole inextricable (synthétique, cotation inconnue, vide) → null : basePerp renonce déjà au fetch", () => {
+    expect(raisonCotationHl("binance:BTCUSDT|/|binance:ETHUSDT")).toBeNull();
+    expect(raisonCotationHl("FOOBAR")).toBeNull();
+    expect(raisonCotationHl("")).toBeNull();
+  });
+
+  it("⚠️ honnêteté : la raison ne parle jamais de « toutes » les liquidations", () => {
+    expect(raisonCotationHl("ETHBTC")?.toLowerCase()).not.toContain("toutes");
+  });
+});
+
+describe("yLibreSousObstacles — le repère haut se pose SOUS les surcouches DOM", () => {
+  it("aucun obstacle → yMin", () => {
+    expect(yLibreSousObstacles(24, 14, 0, 1000, [])).toBe(24);
+  });
+
+  it("bandeau symbole (top+8…44, x 8…700) recouvrant la pilule → posée 2 px sous son bord bas", () => {
+    // Mesure Playwright de la relecture : le repère à top+24 disparaissait sous SymbolBanner (z-10).
+    expect(yLibreSousObstacles(24, 14, 440, 732, [{ x0: 8, x1: 700, y0: 8, y1: 44 }])).toBe(46);
+  });
+
+  it("obstacle sans recouvrement HORIZONTAL → ignoré", () => {
+    expect(yLibreSousObstacles(24, 14, 800, 1100, [{ x0: 8, x1: 700, y0: 8, y1: 44 }])).toBe(24);
+  });
+
+  it("obstacle au-dessus (écart compris) ou laissant passer la pilule en dessous → ignoré", () => {
+    expect(yLibreSousObstacles(24, 14, 0, 500, [{ x0: 0, x1: 500, y0: 0, y1: 22 }])).toBe(24); // 22 + 2 ≤ 24
+    expect(yLibreSousObstacles(24, 14, 0, 500, [{ x0: 0, x1: 500, y0: 40, y1: 60 }])).toBe(24); // 24 + 14 + 2 ≤ 40
+  });
+
+  it("obstacles EMPILÉS (lignes de légende overlay) → sous le dernier, quel que soit l'ordre d'entrée", () => {
+    const lignes = [
+      { x0: 900, x1: 1196, y0: 2, y1: 20 },
+      { x0: 900, x1: 1196, y0: 22, y1: 40 },
+      { x0: 900, x1: 1196, y0: 42, y1: 60 },
+    ];
+    expect(yLibreSousObstacles(24, 14, 0, 1200, lignes)).toBe(62);
+    expect(yLibreSousObstacles(24, 14, 0, 1200, [...lignes].reverse())).toBe(62);
+  });
+
+  it("bandeau passé sur 2 lignes (flex-wrap, pane étroit) → sous son vrai bord bas, pas sous une constante", () => {
+    expect(yLibreSousObstacles(24, 14, 0, 590, [{ x0: 8, x1: 582, y0: 8, y1: 74 }])).toBe(76);
+  });
+
+  it("coordonnée NaN dans un obstacle → ignoré (jamais de y NaN)", () => {
+    expect(yLibreSousObstacles(24, 14, 0, 500, [{ x0: Number.NaN, x1: 500, y0: 0, y1: 60 }])).toBe(24);
+  });
+});
+
+describe("bandeRepereHl + partition — la zone des barres s'arrête aux pilules des repères", () => {
+  it("bande = pilule (14 px) ± 2 px d'écart", () => {
+    expect(bandeRepereHl(46)).toEqual([44, 62]);
+  });
+
+  it("un cluster sous la pilule ▲ (ou sous le bandeau DOM) ou sous la pilule ▼ est RÉSUMÉ, pas peint puis masqué", () => {
+    // ▲ posé à 46 (sous le bandeau) ; pile de légendes au sommet 500 → ▼ posé à 500 − 2 − 14 = 484.
+    const haut = bandeRepereHl(46)[1]; // 62
+    const bas = bandeRepereHl(484)[0]; // 482
+    const sousBandeau = chp(30, 1e6, 0, 1e6, 1, 102_000);
+    const sousPiluleHaut = chp(50, 5e6, 0, 5e6, 2, 101_000);
+    const visible = chp(300, 3e6, 3e6, 0, 1, 60_000);
+    const sousPiluleBas = chp(490, 2e6, 2e6, 0, 4, 20_000);
+    const r = partitionnerClustersHl([sousBandeau, sousPiluleHaut, visible, sousPiluleBas], haut, bas);
+    expect(r.visibles).toEqual([visible]);
+    // Comptés dans les repères : ni peints sous une pilule, ni perdus.
+    expect(r.auDessus.nNiveaux).toBe(3);
+    expect(r.auDessus.totalUsd).toBe(6e6);
+    expect(r.enDessous.nNiveaux).toBe(4);
+  });
+});
+
+describe("filtrerHorsBandes — aucune étiquette sous une pilule de repère", () => {
+  it("sans bande → tout passe, ordre conservé", () => {
+    const items = [{ y: 3 }, { y: 1 }, { y: 2 }];
+    expect(filtrerHorsBandes(items, [], 7)).toEqual(items);
+  });
+
+  it("écarte les items dont [y − d, y + d] recoupe une bande ; un contact de bord passe", () => {
+    // Bande [44, 62], demi-hauteur 7 → interdit si y − 7 < 62 et y + 7 > 44, soit y ∈ ]37, 69[.
+    const items = [{ y: 30 }, { y: 37 }, { y: 38 }, { y: 51 }, { y: 68 }, { y: 69 }, { y: 100 }];
+    expect(filtrerHorsBandes(items, [[44, 62]], 7).map((i) => i.y)).toEqual([30, 37, 69, 100]);
+  });
+
+  it("plusieurs bandes (▲ en haut, ▼ en bas) : chacune exclut sa zone", () => {
+    const items = [{ y: 50 }, { y: 200 }, { y: 490 }];
+    expect(filtrerHorsBandes(items, [[44, 62], [482, 500]], 7).map((i) => i.y)).toEqual([200]);
+  });
+
+  it("préserve le type d'entrée (mêmes objets)", () => {
+    const riche = { y: 200, poids: 5, px: 60_000 };
+    expect(filtrerHorsBandes([riche], [[44, 62]], 7)[0]).toBe(riche);
   });
 });
 

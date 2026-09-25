@@ -1,5 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import { readdirSync } from "node:fs";
 import proxyFunction, { publicIpAddress } from "../../../api/proxy";
+import hlPoolFunction, {
+  CACHE_HLPOOL,
+  CACHE_HLPOOL_REPLI,
+  config as configHlPool,
+  creerGestionnaireHlPool,
+  TIMEOUT_HLPOOL_AMONT_MS,
+} from "../../../api/hlpool";
+import { N_VALEUR_POOL, TAILLE_POOL, TTL_POOL_MS, URL_LEADERBOARD } from "../../../shared/hyperliquidScan";
 import {
   planProxyRequest,
   proxyCacheControl,
@@ -46,7 +55,7 @@ describe("proxy Vercel", () => {
     expect(policySource).toContain('env["BGEOMETRICS_API_KEY"]');
   });
 
-  test("place les onze rewrites avant le fallback SPA", async () => {
+  test("place les onze rewrites du proxy et celui de /hlpool avant le fallback SPA", async () => {
     const config = (await Bun.file(new URL("../../../vercel.json", import.meta.url)).json()) as {
       rewrites: Array<{ source: string; destination: string }>;
     };
@@ -64,8 +73,13 @@ describe("proxy Vercel", () => {
       "/cqapi/:path*",
     ];
     const fallbackIndex = config.rewrites.findIndex((rewrite) => rewrite.destination === "/index.html");
-    const proxyRewrites = config.rewrites.slice(0, fallbackIndex);
+    const avantFallback = config.rewrites.slice(0, fallbackIndex);
+    // Exception UNIQUE à « tout rewrite passe par /api/proxy » : le pool LIQHL réduit
+    // (fonction dédiée, sans paramètre ni secret — cf. describe « fonction Vercel /hlpool »).
+    const hlPool = avantFallback.filter((rewrite) => rewrite.destination === "/api/hlpool");
+    const proxyRewrites = avantFallback.filter((rewrite) => rewrite.destination !== "/api/hlpool");
     expect(fallbackIndex).toBeGreaterThan(0);
+    expect(hlPool).toEqual([{ source: "/hlpool", destination: "/api/hlpool" }]);
     expect(required.every((source) => proxyRewrites.some((rewrite) => rewrite.source === source))).toBe(true);
     expect(required.every((source) => proxyRewrites.some((rewrite) => rewrite.source === `${source}/`))).toBe(true);
     expect(proxyRewrites.every((rewrite) => rewrite.destination.startsWith("/api/proxy?"))).toBe(true);
@@ -449,5 +463,147 @@ describe("route CryptoQuant /cqapi (licence personnelle, liste fermée)", () => 
         envServeur,
       ).upstreamHeaders.has("authorization"),
     ).toBe(false);
+  });
+});
+
+describe("fonction Vercel /hlpool (pool LIQHL réduit, extension du 25 septembre)", () => {
+  const racineApi = new URL("../../../api/", import.meta.url);
+  const adresse = (i: number): string => `0x${i.toString(16).padStart(40, "0")}`;
+  const T0 = Date.UTC(2026, 8, 25, 12, 0, 0);
+  /** Leaderboard minimal (n lignes, accountValue décroissant). */
+  const leaderboard = (n: number): string =>
+    JSON.stringify({
+      leaderboardRows: Array.from({ length: n }, (_, i) => ({ ethAddress: adresse(i + 1), accountValue: String(1000 - i) })),
+    });
+  const get = (): Request => new Request("https://axiom.test/api/hlpool");
+
+  test("aucune fonction de api/ ne lit l'environnement, hors l'exception BGeometrics de _policy.ts", async () => {
+    const fichiers = readdirSync(racineApi).filter((f) => f.endsWith(".ts"));
+    expect(fichiers).toContain("hlpool.ts");
+    for (const fichier of fichiers) {
+      const source = await Bun.file(new URL(fichier, racineApi)).text();
+      const sansRepliBg = source.replace(/env: ProxyEnv = process\.env/g, "");
+      expect(sansRepliBg).not.toMatch(/\b(?:process|Bun|Deno)\.env\b/);
+      if (fichier !== "_policy.ts") expect(source).not.toMatch(/\benv\[/);
+    }
+  });
+
+  test("fonction Web Standard sans secret : GET seul, import partagé tracé par le bundler", async () => {
+    expect(typeof hlPoolFunction.fetch).toBe("function");
+    const source = await Bun.file(new URL("hlpool.ts", racineApi)).text();
+    expect(source).toContain("export default { fetch:");
+    expect(source).toContain('from "../shared/hyperliquidScan.js"'); // convention de api/proxy.ts
+    expect(source).not.toMatch(/authorization|api[_-]?key/i);
+  });
+
+  test("délai amont sous maxDuration, avec marge pour le parse et la réponse", () => {
+    expect(configHlPool.maxDuration).toBe(60);
+    expect(TIMEOUT_HLPOOL_AMONT_MS).toBeLessThanOrEqual(configHlPool.maxDuration * 1000 - 10_000);
+    expect(CACHE_HLPOOL).toBe("public, s-maxage=21600, stale-while-revalidate=86400");
+  });
+
+  test("GET → 200 { ts, nValeur, tailleCible, adresses }, cache CDN 6 h ; relu en mémoire ensuite", async () => {
+    const appels: Array<{ url: string; signal: AbortSignal | null | undefined }> = [];
+    const fetchImpl = (async (entree: RequestInfo | URL, init?: RequestInit) => {
+      appels.push({ url: String(entree), signal: init?.signal });
+      return new Response(leaderboard(3));
+    }) as typeof fetch;
+    const traiter = creerGestionnaireHlPool(fetchImpl, () => T0);
+    const res = await traiter(get());
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    expect(res.headers.get("cache-control")).toBe(CACHE_HLPOOL);
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await res.json()).toEqual({
+      ts: T0,
+      nValeur: N_VALEUR_POOL,
+      tailleCible: TAILLE_POOL,
+      adresses: [adresse(1), adresse(2), adresse(3)],
+    });
+    expect(appels).toHaveLength(1);
+    expect(appels[0]?.url).toBe(URL_LEADERBOARD);
+    expect(appels[0]?.signal).toBeInstanceOf(AbortSignal);
+    // Même instance (fluid compute) : une requête qui contourne le CDN (query string) ne
+    // retélécharge PAS les ≈ 39 Mo tant que le pool en mémoire a moins de 6 h.
+    const res2 = await traiter(new Request("https://axiom.test/api/hlpool?contournement=1"));
+    expect(res2.status).toBe(200);
+    expect(appels).toHaveLength(1);
+  });
+
+  test("requêtes simultanées : UN seul téléchargement amont en vol", async () => {
+    let appels = 0;
+    let liberer: () => void = () => {};
+    const bloque = new Promise<void>((r) => (liberer = r));
+    const fetchImpl = (async () => {
+      appels += 1;
+      await bloque;
+      return new Response(leaderboard(2));
+    }) as unknown as typeof fetch;
+    const traiter = creerGestionnaireHlPool(fetchImpl, () => T0);
+    const r1 = traiter(get());
+    const r2 = traiter(get());
+    liberer();
+    expect((await r1).status).toBe(200);
+    expect((await r2).status).toBe(200);
+    expect(appels).toBe(1);
+  });
+
+  test("méthode ≠ GET → 405 Allow: GET, sans appel amont", async () => {
+    let appels = 0;
+    const fetchImpl = (async () => {
+      appels += 1;
+      return new Response(leaderboard(1));
+    }) as unknown as typeof fetch;
+    const traiter = creerGestionnaireHlPool(fetchImpl, () => T0);
+    for (const method of ["POST", "HEAD", "PUT", "OPTIONS"]) {
+      const res = await traiter(new Request("https://axiom.test/api/hlpool", { method }));
+      expect(res.status).toBe(405);
+      expect(res.headers.get("allow")).toBe("GET");
+      expect(res.headers.get("cache-control")).toBe("no-store");
+    }
+    expect(appels).toBe(0);
+  });
+
+  test("amont en échec (HTTP, réseau, pool vide) sans pool en mémoire → 502 JSON, jamais de cache long", async () => {
+    for (const fetchImpl of [
+      (async () => new Response("panne", { status: 500 })) as unknown as typeof fetch,
+      (async () => {
+        throw new Error("réseau");
+      }) as unknown as typeof fetch,
+      (async () => new Response(JSON.stringify({ leaderboardRows: [] }))) as unknown as typeof fetch,
+    ]) {
+      const res = await creerGestionnaireHlPool(fetchImpl, () => T0)(get());
+      expect(res.status).toBe(502);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      expect(res.headers.get("content-type")).toContain("application/json");
+      expect(((await res.json()) as { erreur?: unknown }).erreur).toBeString();
+    }
+  });
+
+  test("amont en échec avec un pool en mémoire PÉRIMÉ → servi, cache court (repli comme le daemon)", async () => {
+    let now = T0;
+    let panne = false;
+    const fetchImpl = (async () => {
+      if (panne) throw new Error("réseau");
+      return new Response(leaderboard(2));
+    }) as unknown as typeof fetch;
+    const traiter = creerGestionnaireHlPool(fetchImpl, () => now);
+    expect((await traiter(get())).status).toBe(200);
+    now = T0 + TTL_POOL_MS + 1;
+    panne = true;
+    const res = await traiter(get());
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe(CACHE_HLPOOL_REPLI);
+    expect(((await res.json()) as { ts: number }).ts).toBe(T0);
+  });
+
+  test("CSP (Report-Only) : connect-src autorise l'API info ET le leaderboard (repli direct)", async () => {
+    const config = (await Bun.file(new URL("../../../vercel.json", import.meta.url)).json()) as {
+      headers: Array<{ headers: Array<{ key: string; value: string }> }>;
+    };
+    const csp = config.headers.flatMap((h) => h.headers).find((h) => h.key === "Content-Security-Policy-Report-Only");
+    const connect = csp?.value.split(";").map((d) => d.trim()).find((d) => d.startsWith("connect-src")) ?? "";
+    expect(connect.split(/\s+/)).toContain("https://api.hyperliquid.xyz");
+    expect(connect.split(/\s+/)).toContain("https://stats-data.hyperliquid.xyz");
   });
 });

@@ -998,6 +998,55 @@ describe("libelleLegendeHl — la couche LIQHL nomme toujours son état", () => 
   });
 });
 
+describe("libelleLegendeHl — source « navigateur » (scan direct, Vercel ou local sans daemon)", () => {
+  const cumuls = { auDessus: 1.1e9, enDessous: 322e6 };
+  const suffixe = ` · ↑ ${formatUsd(1.1e9)} · ↓ ${formatUsd(322e6)}`;
+
+  it("scan en cours : progression « scan N/T adresses », positions partielles et cumuls", () => {
+    expect(libelleLegendeHl("ok", 398, 120, cumuls, null, "navigateur", { faites: 400, total: 1500 })).toBe(
+      `LIQ HL RÉELS (navigateur) — scan 400/1500 adresses · 120 positions${suffixe}`,
+    );
+  });
+
+  it("scan fini : « N adresses » RÉPONDUES, comme en mode daemon", () => {
+    expect(libelleLegendeHl("ok", 1500, 3100, cumuls, null, "navigateur", null)).toBe(
+      `LIQ HL RÉELS (navigateur) — 1500 adresses · 3100 positions${suffixe}`,
+    );
+  });
+
+  it("chargement : pool d'adresses d'abord, puis scan sans niveau encore pour ce coin", () => {
+    expect(libelleLegendeHl("chargement", 0, 0, null, null, "navigateur", null)).toBe(
+      "LIQ HL RÉELS (navigateur) — chargement du pool d'adresses…",
+    );
+    expect(libelleLegendeHl("chargement", 12, 0, null, null, "navigateur", { faites: 20, total: 1500 })).toBe(
+      "LIQ HL RÉELS (navigateur) — scan 20/1500 adresses…",
+    );
+  });
+
+  it("vide, erreur et raison de cotation portent aussi la source", () => {
+    expect(libelleLegendeHl("vide", 1500, 0, null, null, "navigateur")).toBe(
+      "LIQ HL RÉELS (navigateur) — aucun niveau pour ce symbole",
+    );
+    expect(libelleLegendeHl("erreur", 0, 0, null, null, "navigateur")).toBe("LIQ HL RÉELS (navigateur) — source indisponible");
+    expect(libelleLegendeHl("ok", 1, 1, null, "cotation BTC ≠ USD, niveaux masqués", "navigateur")).toBe(
+      "LIQ HL RÉELS (navigateur) — cotation BTC ≠ USD, niveaux masqués",
+    );
+  });
+
+  it("⚠️ honnêteté : échantillon annoncé, jamais « toutes »", () => {
+    const l = libelleLegendeHl("ok", 1500, 3100, cumuls, null, "navigateur", null);
+    expect(l).toContain("1500 adresses");
+    expect(l.toLowerCase()).not.toContain("toutes");
+  });
+
+  it("source daemon explicite → libellés strictement inchangés (progression ignorée)", () => {
+    expect(libelleLegendeHl("ok", 250, 12, null, null, "daemon", { faites: 1, total: 2 })).toBe(
+      "LIQ HL RÉELS — 250 adresses · 12 positions",
+    );
+    expect(libelleLegendeHl("chargement", 0, 0, null, null, "daemon", null)).toBe("LIQ HL RÉELS — chargement…");
+  });
+});
+
 describe("raisonCotationHl — niveaux HL en USD : la couche se tait hors cotation USD", () => {
   it("cotation USD ou stablecoin USD (et perp Hyperliquid) → null : niveaux affichables", () => {
     for (const s of [
@@ -1376,5 +1425,16 @@ describe("libelleLegendeHlHeat — légende raison comprise", () => {
   it("« couverture en mesure » quand l'OI est inconnue, et trous signalés", () => {
     expect(libelleLegendeHlHeat("ok", 5, 474, null, 300_000, 0, true)).toContain("couverture en mesure");
     expect(libelleLegendeHlHeat("ok", 5, 474, 0.2, 300_000, 2, true)).toContain("2 trous = daemon éteint");
+  });
+
+  it("LIQHL en mode navigateur : l'historique est réservé au daemon (jamais « source indisponible »)", () => {
+    for (const etat of ["sans-daemon", "erreur", "vide", "ok"] as const) {
+      const l = libelleLegendeHlHeat(etat, 0, 0, null, 300_000, 0, false, null, "navigateur");
+      expect(l).toBe("HL HEATMAP — historique réservé au daemon axiomd (scan navigateur : instantané courant seul)");
+    }
+    // Source daemon (défaut) : inchangé.
+    expect(libelleLegendeHlHeat("erreur", 0, 0, null, 300_000, 0, false, null, "daemon")).toBe(
+      "HL HEATMAP — source indisponible",
+    );
   });
 });

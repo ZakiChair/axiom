@@ -34,7 +34,7 @@ import {
   type NiveauEstime,
   type NiveauConsomme,
 } from "./liquidationEstimates";
-import { hlLiqStore, type EtatHl } from "../data/hyperliquidLiq";
+import { hlLiqStore, type EtatHl, type ProgressionHl, type SourceHl } from "../data/hyperliquidLiq";
 import {
   assurerHeat,
   arreterHeat,
@@ -632,6 +632,11 @@ export function cumulsHl(
  * Une `raison` non nulle (cf. `raisonCotationHl`) PRIME sur l'état : la couche est alors muette
  * à l'écran et la légende dit pourquoi.
  *
+ * Source « navigateur » (scan direct, Vercel ou local sans daemon) : « LIQ HL RÉELS
+ * (navigateur) », puis « chargement du pool d'adresses… », « scan N/T adresses · P positions »
+ * pendant le PREMIER scan (niveaux partiels déjà peints) et « N adresses · P positions » une
+ * fois fini. Source « daemon » (défaut) : libellés historiques inchangés, progression ignorée.
+ *
  * ⚠️ HONNÊTETÉ : « N adresses » annonce la COUVERTURE réelle (top du leaderboard), pas le carnet
  * entier — cf. l'en-tête de data/hyperliquidLiq.ts. PURE.
  */
@@ -641,13 +646,21 @@ export function libelleLegendeHl(
   nbPositions: number,
   cumuls: { auDessus: number; enDessous: number } | null,
   raison: string | null = null,
+  source: SourceHl = "daemon",
+  progression: ProgressionHl | null = null,
 ): string {
-  if (raison !== null) return `LIQ HL RÉELS — ${raison}`;
-  if (etat === "sans-daemon") return "LIQ HL RÉELS — nécessite le daemon axiomd";
-  if (etat === "chargement") return "LIQ HL RÉELS — chargement…";
-  if (etat === "erreur") return "LIQ HL RÉELS — source indisponible";
-  if (etat === "vide") return "LIQ HL RÉELS — aucun niveau pour ce symbole";
-  const base = `LIQ HL RÉELS — ${adressesScannees} adresses · ${nbPositions} positions`;
+  const nav = source === "navigateur";
+  const titre = nav ? "LIQ HL RÉELS (navigateur)" : "LIQ HL RÉELS";
+  const scan = nav && progression !== null ? `scan ${progression.faites}/${progression.total} adresses` : null;
+  if (raison !== null) return `${titre} — ${raison}`;
+  if (etat === "sans-daemon") return `${titre} — nécessite le daemon axiomd`;
+  if (etat === "chargement") {
+    if (!nav) return "LIQ HL RÉELS — chargement…";
+    return `${titre} — ${scan ?? "chargement du pool d'adresses"}…`;
+  }
+  if (etat === "erreur") return `${titre} — source indisponible`;
+  if (etat === "vide") return `${titre} — aucun niveau pour ce symbole`;
+  const base = `${titre} — ${scan ?? `${adressesScannees} adresses`} · ${nbPositions} positions`;
   if (cumuls === null) return base;
   return `${base} · ↑ ${formatUsd(cumuls.auDessus)} · ↓ ${formatUsd(cumuls.enDessous)}`;
 }
@@ -888,7 +901,9 @@ export function compterTrous(
  * Libellé de la légende HL HEATMAP, RAISON COMPRISE (même exigence que `libelleLegendeHl`).
  * ⚠️ HONNÊTETÉ : « couverture ≈ Y % OI » annonce la part MESURÉE de l'open interest
  * couverte par l'échantillon du leaderboard — jamais le carnet entier ; « T trous =
- * daemon éteint » signale les interruptions de collecte au lieu de les masquer. PURE.
+ * daemon éteint » signale les interruptions de collecte au lieu de les masquer. LIQHL en
+ * mode NAVIGATEUR (`sourceHl`) : l'historique n'existe que via le collecteur du daemon — la
+ * légende le dit, quel que soit l'état du store (jamais « source indisponible »). PURE.
  */
 export function libelleLegendeHlHeat(
   etat: EtatHeat,
@@ -899,7 +914,11 @@ export function libelleLegendeHlHeat(
   trous: number,
   collecteActive: boolean,
   premierTs: number | null = null,
+  sourceHl: SourceHl = "daemon",
 ): string {
+  if (sourceHl === "navigateur") {
+    return "HL HEATMAP — historique réservé au daemon axiomd (scan navigateur : instantané courant seul)";
+  }
   if (etat === "sans-daemon") return "HL HEATMAP — nécessite le daemon axiomd";
   if (etat === "erreur") return "HL HEATMAP — source indisponible";
   if (etat === "inactif") return "HL HEATMAP — collecte daemon arrêtée — reprendre dans LIQ";
@@ -1129,8 +1148,8 @@ export class LiquidationHeatController {
   private grilleHlObsolete = true;
   private derniereGrilleHl: LiqGrid | null = null;
   private unsubHeat: (() => void) | null = null;
-  /** Heatmap HL DEMANDÉE à la frame précédente (LIQHL actif ET cotation USD). Sa retombée
-   *  (LIQHL → OFF, ou passage sur une paire hors USD) appelle `arreterHeat`, qui coupe le
+  /** Heatmap HL DEMANDÉE à la frame précédente (LIQHL actif, cotation USD ET source daemon).
+   *  Sa retombée (LIQHL → OFF, paire hors USD, mode navigateur) appelle `arreterHeat`, qui coupe le
    *  minuteur du store : aucun fetch inutile d'instantanés qu'on ne peindra pas. */
   private hlEtaitActif = false;
   /**
@@ -1464,10 +1483,14 @@ export class LiquidationHeatController {
     // tait à l'écran et la légende dit pourquoi (cf. raisonCotationHl).
     const raisonHl = hlActif ? raisonCotationHl(marketStore.getState().symbol) : null;
     const hlDessinable = hlActif && raisonHl === null;
-    // Retombée de la heatmap HL (LIQHL → OFF ou paire hors USD) : coupe le minuteur, vide le store.
-    if (!hlDessinable && this.hlEtaitActif) arreterHeat();
-    this.hlEtaitActif = hlDessinable;
-    if (hlDessinable) {
+    // Historique d'instantanés : collecteur du DAEMON seulement — en mode navigateur (Vercel,
+    // local sans daemon), aucun fetch /hl/liqheat ni heatmap ; la légende dit pourquoi.
+    const heatHlDemande = hlDessinable && hlLiqStore.getState().source === "daemon";
+    // Retombée de la heatmap HL (LIQHL → OFF, paire hors USD, passage en mode navigateur) :
+    // coupe le minuteur, vide le store.
+    if (!heatHlDemande && this.hlEtaitActif) arreterHeat();
+    this.hlEtaitActif = heatHlDemande;
+    if (heatHlDemande) {
       // Alimente l'historique d'instantanés SANS bloquer le rendu (fetch incrémental).
       this.assurerHeatVue();
       // La heatmap des instantanés est peinte D'ABORD : les cellules exécutées (données
@@ -2936,7 +2959,7 @@ export class LiquidationHeatController {
       const prixLive = candlesHl[candlesHl.length - 1]?.close;
       const cumuls = raisonHl !== null || prixLive === undefined ? null : cumulsHl(hl.niveaux, prixLive);
       ecrireADroite(
-        libelleLegendeHl(hl.etat, hl.adressesScannees, hl.niveaux.length, cumuls, raisonHl),
+        libelleLegendeHl(hl.etat, hl.adressesScannees, hl.niveaux.length, cumuls, raisonHl, hl.source, hl.progression),
         tokens.textDim,
       );
       yb -= 14;
@@ -2976,6 +2999,7 @@ export class LiquidationHeatController {
           trous,
           heat.collecte?.actif ?? false,
           heat.collecte?.premierTs ?? null,
+          hlLiqStore.getState().source,
         ),
         `rgba(${ambre[0]},${ambre[1]},${ambre[2]},0.95)`,
       );

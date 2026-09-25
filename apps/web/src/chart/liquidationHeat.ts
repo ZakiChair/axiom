@@ -546,7 +546,9 @@ function horsEcranVide(): HorsEcranHl {
  * cluster le plus proche du bord (au-dessus : plus grand y ; en dessous : plus petit y) et plus
  * gros cluster. C'est ce résumé que le contrôleur affiche en repère de bord, au lieu de laisser
  * `ctx.clip()` jeter silencieusement ce que l'axe Y (calé sur les bougies) ne montre pas. Les
- * visibles gardent l'ordre d'entrée. PURE.
+ * visibles gardent l'ordre d'entrée. Bornes INVERSÉES (`haut > bas`, pane court, cf.
+ * `yRepereBasHl`) : aucun visible, et chaque y fini va d'UN seul côté (`y < haut` → au-dessus,
+ * sinon en dessous) — jamais compté deux fois. PURE.
  */
 export function partitionnerClustersHl(
   clusters: readonly ClusterHlPlace[],
@@ -731,6 +733,19 @@ export function yLibreSousObstacles(
  */
 export function bandeRepereHl(yHaut: number): [number, number] {
   return [yHaut - ECART_REPERE_PX, yHaut + HL_PILULE_H + ECART_REPERE_PX];
+}
+
+/**
+ * Bord haut de la pilule ▼ (repère BAS des niveaux HL hors écran) : ECART_REPERE_PX au-dessus
+ * du sommet de la pile de légendes bas-droite (`sommetPile`), MAIS jamais plus haut que juste
+ * sous la pilule ▲ (`yRepereHaut` + HL_PILULE_H + ECART_REPERE_PX). Sans ce plancher, un pane
+ * court (< ~190 px avec plusieurs légendes) posait ▼ PAR-DESSUS ▲ et inversait la zone des
+ * barres [bandeHaut[1], bandeBas[0]]. Plancher atteint → bornes inversées : aucun cluster
+ * visible, tous RÉSUMÉS dans les repères, chacun d'un seul côté (cf. `partitionnerClustersHl`).
+ * ▼ peut alors mordre sur le sommet de la pile : moindre mal qu'un repère illisible. PURE.
+ */
+export function yRepereBasHl(sommetPile: number, yRepereHaut: number): number {
+  return Math.max(sommetPile - ECART_REPERE_PX - HL_PILULE_H, yRepereHaut + HL_PILULE_H + ECART_REPERE_PX);
 }
 
 /**
@@ -1168,6 +1183,14 @@ export class LiquidationHeatController {
    * frame : la pile ne dépend pas de ces étiquettes.
    */
   private bandeBasHlPrec: [number, number] | null = null;
+  /**
+   * Tooltip de survol de la frame, MÉMORISÉ par `dessinerHeatmapHl` / `dessinerHeatmap` et peint
+   * en DERNIER par `render` (puis remis à null à chaque frame). Peint sur place, il passait SOUS
+   * la pile de légendes, dont chaque ligne pose un fond `--surface` à 82 % (cfaba0a), sous les
+   * niveaux estimés et sous les barres/repères HL. Un seul emplacement : la heatmap exécutée,
+   * dessinée après la heatmap HL, écrase le tooltip HL — le tooltip réel garde la priorité.
+   */
+  private tooltipDiffere: (() => void) | null = null;
 
   private readonly markDirty = (): void => {
     this.grilleObsolete = true;
@@ -1330,6 +1353,7 @@ export class LiquidationHeatController {
     arreterHeat();
     this.hlEtaitActif = false;
     this.bandeBasHlPrec = null;
+    this.tooltipDiffere = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.animeJusqua = 0;
@@ -1389,6 +1413,7 @@ export class LiquidationHeatController {
   private render(): void {
     if (!this.running) return;
     this.dirty = false; // consommé : la prochaine frame ne refera rien tant que rien ne change.
+    this.tooltipDiffere = null; // reposé par les couches de cette frame, peint en fin de render.
     const ctx = this.ctx;
 
     const dpr = Math.max(1, window.devicePixelRatio || 1);
@@ -1465,6 +1490,8 @@ export class LiquidationHeatController {
     // Barres HL APRÈS la pile : le repère BAS se pose au-dessus d'elle (hauteur variable selon
     // les couches actives) et la zone des barres s'arrête à ce repère — aucune barre ni étiquette
     // HL n'entre donc dans la pile, et les légendes (garde-fous non contournables) restent lisibles.
+    // Seule exception, pane très court (cf. yRepereBasHl) : ▼ est alors posé juste sous ▲ pour ne
+    // jamais le recouvrir, et peut mordre sur le haut de la pile — compromis assumé, rare.
     const bandeBas = dispoHl !== null ? this.dessinerNiveauxHl(main, tokens, dispoHl, sommetPile) : null;
     const memeBande =
       bandeBas === this.bandeBasHlPrec ||
@@ -1474,6 +1501,20 @@ export class LiquidationHeatController {
       this.bandeBasHlPrec = bandeBas;
       if (heatActif) this.dirty = true; // étiquettes exécutées posées contre une bande périmée
     }
+    // Tooltip de survol en DERNIER, au-dessus de TOUT (légendes et leurs fonds, niveaux estimés,
+    // barres et repères HL) : contenu et position inchangés, seul l'ordre de peinture change.
+    this.peindreTooltipDiffere();
+  }
+
+  /**
+   * Peint puis oublie le tooltip mémorisé de la frame (cf. `tooltipDiffere`). Méthode plutôt
+   * qu'appel en ligne : TS garde `this.tooltipDiffere` rétréci à `null` après sa remise à zéro
+   * en tête de `render` (les appels de méthode n'invalident pas ce rétrécissement).
+   */
+  private peindreTooltipDiffere(): void {
+    const tooltip = this.tooltipDiffere;
+    this.tooltipDiffere = null;
+    tooltip?.();
   }
 
   /**
@@ -1495,7 +1536,9 @@ export class LiquidationHeatController {
    *    top+8…top+44 voire plus s'il passe sur 2 lignes, lignes de légende overlay, message
    *    d'attente de la heatmap exécutée). L'ancienne hypothèse « bande DOM de 24 px » était
    *    fausse : posé à top+24, le repère disparaissait sous le bandeau (z-10, au-dessus du canvas) ;
-   *  - repère BAS posé AU-DESSUS de la pile de légendes bas-droite (`sommetPile`).
+   *  - repère BAS posé AU-DESSUS de la pile de légendes bas-droite (`sommetPile`), avec un
+   *    plancher juste sous ▲ (`yRepereBasHl`) : dans un pane court, les bornes s'inversent,
+   *    aucune barre n'est peinte et tout est résumé dans les deux repères, sans double compte.
    * Un cluster au-dessus du bord bas de la pilule ▲ (hors écran, sous le bandeau ou sous la
    * pilule elle-même) ou sous le bord haut de la pilule ▼ est RÉSUMÉ dans le repère, jamais peint
    * puis masqué sans être compté. Les étiquettes évitent de même les bandes des pilules peintes.
@@ -1525,8 +1568,9 @@ export class LiquidationHeatController {
     const { places, xAncre, yRepereHaut, bandeHaut } = dispo;
     const ctx = this.ctx;
     const { left, top, width, height } = main;
-    // Repère BAS : pilule posée à ECART_REPERE_PX au-dessus du sommet de la pile de légendes.
-    const yRepereBas = sommetPile - ECART_REPERE_PX - HL_PILULE_H;
+    // Repère BAS : pilule posée à ECART_REPERE_PX au-dessus du sommet de la pile de légendes,
+    // jamais au-dessus de ▲ (pane court : plancher juste sous ▲, cf. `yRepereBasHl`).
+    const yRepereBas = yRepereBasHl(sommetPile, yRepereHaut);
     const bandeBas = bandeRepereHl(yRepereBas);
     const { visibles, auDessus, enDessous } = partitionnerClustersHl(places, bandeHaut[1], bandeBas[0]);
 
@@ -1736,7 +1780,7 @@ export class LiquidationHeatController {
    * identiques à la grille exécutée + chaque publication de `hlHeatStore`).
    *
    * Tooltip : seulement si AUCUNE cellule exécutée n'est sous le curseur (le tooltip
-   * réel de `dessinerHeatmap` garde la priorité).
+   * réel de `dessinerHeatmap` garde la priorité) ; mémorisé et peint en fin de `render`.
    */
   private dessinerHeatmapHl(main: Bounding, tokens: Tokens, heatActif: boolean): void {
     const instantanes = hlHeatStore.getState().instantanes;
@@ -1797,13 +1841,15 @@ export class LiquidationHeatController {
     ctx.restore();
 
     // Tooltip HL hors clip : seulement si aucune cellule EXÉCUTÉE n'est sous le curseur.
+    // MÉMORISÉ, peint en fin de `render` (cf. `tooltipDiffere`) — sinon la pile de légendes,
+    // peinte après, l'effaçait là où ils se croisent.
     const survolReel =
       heatActif && this.derniereGrille !== null
         ? this.cellSurvolee(this.derniereGrille, candles)
         : null;
     if (survolReel === null) {
       const survolHl = this.cellSurvolee(grid, candles);
-      if (survolHl !== null) this.dessinerTooltipHl(survolHl, grid, main, tokens);
+      if (survolHl !== null) this.tooltipDiffere = () => this.dessinerTooltipHl(survolHl, grid, main, tokens);
     }
   }
 
@@ -1975,8 +2021,9 @@ export class LiquidationHeatController {
     // Flash de bande (clic feed LIQ) : AU-DESSUS des cellules et du profil, SOUS le tooltip.
     this.dessinerFlash(main);
 
-    // Tooltip de survol : dessiné HORS clip (au-dessus de la heatmap), après restauration.
-    if (hover !== null) this.dessinerTooltip(hover, grid, main, tokens);
+    // Tooltip de survol : MÉMORISÉ et peint HORS clip en fin de `render` (cf. `tooltipDiffere`),
+    // au-dessus des légendes. Écrase un tooltip HL mémorisé : le tooltip réel reste prioritaire.
+    if (hover !== null) this.tooltipDiffere = () => this.dessinerTooltip(hover, grid, main, tokens);
   }
 
   /**

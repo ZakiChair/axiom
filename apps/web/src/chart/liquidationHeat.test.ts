@@ -58,6 +58,7 @@ import {
   raisonCotationHl,
   yLibreSousObstacles,
   bandeRepereHl,
+  yRepereBasHl,
   filtrerHorsBandes,
   maxUsdBuckets,
   pasBougieMs,
@@ -1095,6 +1096,56 @@ describe("bandeRepereHl + partition — la zone des barres s'arrête aux pilules
     expect(r.auDessus.nNiveaux).toBe(3);
     expect(r.auDessus.totalUsd).toBe(6e6);
     expect(r.enDessous.nNiveaux).toBe(4);
+  });
+});
+
+describe("yRepereBasHl — le repère ▼ ne remonte jamais sur le repère ▲ (pane court)", () => {
+  it("cas normal : ▼ posé à 2 px au-dessus du sommet de la pile de légendes", () => {
+    // Sommet de pile 500 → 500 − 2 − 14 = 484, bien sous ▲ (46).
+    expect(yRepereBasHl(500, 46)).toBe(484);
+  });
+
+  it("pane court : ▼ tomberait au-dessus de ▲ → posé juste sous ▲ (46 + 14 + 2)", () => {
+    // Pile haute : sommet 60 → 60 − 16 = 44, soit AU-DESSUS du ▲ posé à 46 (recouvrement).
+    expect(yRepereBasHl(60, 46)).toBe(62);
+    // Pile encore plus haute (sommet au-dessus du pane) : même plancher.
+    expect(yRepereBasHl(-20, 46)).toBe(62);
+  });
+
+  it("frontière exacte : les deux formules coïncident (pas de décalage d'un pixel)", () => {
+    expect(yRepereBasHl(78, 46)).toBe(62);
+    expect(yRepereBasHl(79, 46)).toBe(63);
+  });
+
+  it("les deux pilules ne se recouvrent jamais : ▼ commence après la fin de ▲ + écart", () => {
+    for (const sommet of [-100, 0, 40, 60, 78, 79, 120, 500]) {
+      expect(yRepereBasHl(sommet, 46)).toBeGreaterThanOrEqual(46 + 14 + 2);
+    }
+  });
+
+  it("bornes INVERSÉES (plancher atteint) : aucun visible, chaque cluster compté UNE seule fois", () => {
+    // ▲ à 46 → haut = 62 ; ▼ plafonné à 62 → bas = bandeRepereHl(62)[0] = 60 < haut.
+    const haut = bandeRepereHl(46)[1];
+    const bas = bandeRepereHl(yRepereBasHl(60, 46))[0];
+    expect(haut).toBe(62);
+    expect(bas).toBe(60);
+    const clusters = [
+      chp(10, 1e6, 0, 1e6, 3, 110_000), // hors écran en haut
+      chp(61, 2e6, 0, 2e6, 5, 101_000), // DANS l'intervalle inversé ]bas, haut[
+      chp(60, 4e6, 4e6, 0, 11, 100_500), // pile sur bas
+      chp(62, 3e6, 3e6, 0, 2, 100_000), // pile sur haut
+      chp(63, 5e6, 5e6, 0, 7, 99_000),
+      chp(300, 8e6, 8e6, 0, 13, 60_000),
+    ];
+    const r = partitionnerClustersHl(clusters, haut, bas);
+    expect(r.visibles).toEqual([]);
+    const totalN = clusters.reduce((s, c) => s + c.n, 0);
+    const totalUsd = clusters.reduce((s, c) => s + c.totalUsd, 0);
+    expect(r.auDessus.nNiveaux + r.enDessous.nNiveaux).toBe(totalN);
+    expect(r.auDessus.totalUsd + r.enDessous.totalUsd).toBe(totalUsd);
+    // Répartition : y < haut → au-dessus (10, 61, 60) ; sinon en dessous (62, 63, 300).
+    expect(r.auDessus.nNiveaux).toBe(3 + 5 + 11);
+    expect(r.enDessous.nNiveaux).toBe(2 + 7 + 13);
   });
 });
 

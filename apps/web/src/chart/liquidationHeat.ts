@@ -989,6 +989,10 @@ const POLICE_MSG_ATTENTE = "10px ui-monospace, SFMono-Regular, monospace";
 const Y_MSG_ATTENTE_PX = 22;
 /** Hauteur de ligne (px) du message d'état (police 10 px, textBaseline « top »). */
 const H_MSG_ATTENTE_PX = 12;
+/** Hauteur (px) du fond d'une ligne de la pile de légendes bas-droite (police 11 px, pas de 14 px). */
+const H_LIGNE_LEGENDE = 13;
+/** Opacité du fond `--surface` des lignes de légende : lisible sur les heatmaps, laisse deviner le dessous. */
+const FOND_LEGENDE_ALPHA = 0.82;
 
 interface PixelXY {
   x?: number;
@@ -2755,6 +2759,29 @@ export class LiquidationHeatController {
     const xRight = left + width;
     const grid = heatActif ? this.derniereGrille : null;
     let yb = top + height - 4; // bord bas du bloc, juste au-dessus de l'axe temps
+    ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
+
+    // Fond translucide `--surface` sous chaque ligne de la pile : elle est peinte PAR-DESSUS les
+    // heatmaps (cellules ambre HL, rampe des exécutées) et le texte nu s'y noyait — constaté le
+    // 25/09/2026 avec LIQHL actif, la ligne des cumuls ↑/↓ devenait illisible. `xGauche`/`largeur`
+    // = emprise horizontale du texte de la ligne dont `yb` est le bas.
+    const fond = (xGauche: number, largeur: number): void => {
+      const style = ctx.fillStyle;
+      ctx.fillStyle = tokens.surface;
+      ctx.globalAlpha = FOND_LEGENDE_ALPHA;
+      ctx.fillRect(xGauche - 2, yb - H_LIGNE_LEGENDE, largeur + 4, H_LIGNE_LEGENDE + 1);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = style;
+    };
+    // Ligne alignée à droite (bord `xRight − 4`, ligne de base basse `yb`) posée sur son fond.
+    const ecrireADroite = (texte: string, couleur: string): void => {
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      const w = ctx.measureText(texte).width;
+      fond(xRight - 4 - w, w);
+      ctx.fillStyle = couleur;
+      ctx.fillText(texte, xRight - 4, yb);
+    };
 
     // (a) + (b) : uniquement quand la heatmap est active ET a produit une grille (des liquidations).
     if (grid !== null) {
@@ -2773,6 +2800,8 @@ export class LiquidationHeatController {
       const barRight = xRight - 4 - wMax - 4;
       const barLeft = barRight - barW;
       const barTop = yb - barH;
+      const gaucheLigne = barLeft - 4 - ctx.measureText(dominance ? "longs" : "0").width;
+      fond(gaucheLigne, xRight - 4 - gaucheLigne);
       for (let i = 0; i < 24; i++) {
         if (dominance) {
           const d = (2 * i) / 23 - 1; // cran → deseq ∈ [-1, +1] (longs → shorts)
@@ -2792,12 +2821,7 @@ export class LiquidationHeatController {
       // historique approximé (jours sans événement réel, cf. joursSansEvenements).
       const joursApprox = joursApproxDansEvenements(liqEventsStore.getState().events);
       const suffixeApprox = joursApprox > 0 ? ` · Coinalyze ≈ sur ${joursApprox} j` : "";
-      ctx.fillStyle = tokens.textDim;
-      ctx.fillText(
-        `Liq heatmap (exécutées) · ${dominance ? "dominance" : "log"}${suffixeApprox}`,
-        xRight - 4,
-        yb,
-      );
+      ecrireADroite(`Liq heatmap (exécutées) · ${dominance ? "dominance" : "log"}${suffixeApprox}`, tokens.textDim);
       yb -= 14;
 
       // (b) mini-légende profil « ▮ shorts ▮ longs » (shorts = --up, longs = --down).
@@ -2811,6 +2835,7 @@ export class LiquidationHeatController {
       const totalW = sq + gap + wSh + gap2 + sq + gap + wLo;
       let x = xRight - 4 - totalW;
       const ymid = yb - 6;
+      fond(x, totalW);
       ctx.globalAlpha = 0.85;
       ctx.fillStyle = tokens.up;
       ctx.fillRect(x, ymid - sq / 2, sq, sq);
@@ -2830,10 +2855,7 @@ export class LiquidationHeatController {
 
       // (b bis) mini-légende des bulles de clusters — quand la couche est active.
       if (liqMarksStore.getState().bulles) {
-        ctx.textAlign = "right";
-        ctx.textBaseline = "bottom";
-        ctx.fillStyle = tokens.textDim;
-        ctx.fillText("● bulles = clusters ≥ P70 · rayon ∝ √USD", xRight - 4, yb);
+        ecrireADroite("● bulles = clusters ≥ P70 · rayon ∝ √USD", tokens.textDim);
         yb -= 14;
       }
     }
@@ -2842,18 +2864,13 @@ export class LiquidationHeatController {
     // AVEC la raison quand la couche est vide (cf. libelleLegendeEst) : ON-mais-vide ne doit
     // jamais être indistinguable de OFF.
     if (estActif) {
-      ctx.textAlign = "right";
-      ctx.textBaseline = "bottom";
-      ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
-      ctx.fillStyle = `rgba(${tokens.estRgb.join(",")},0.95)`;
-      ctx.fillText(
+      ecrireADroite(
         libelleLegendeEst(
           marketStore.getState().symbol,
           oiHistStore.getState().hist.length > 0,
           (this.derniersNiveaux ?? []).length,
         ),
-        xRight - 4,
-        yb,
+        `rgba(${tokens.estRgb.join(",")},0.95)`,
       );
       yb -= 14;
     }
@@ -2871,14 +2888,9 @@ export class LiquidationHeatController {
       const candlesHl = marketStore.getState().candles;
       const prixLive = candlesHl[candlesHl.length - 1]?.close;
       const cumuls = raisonHl !== null || prixLive === undefined ? null : cumulsHl(hl.niveaux, prixLive);
-      ctx.textAlign = "right";
-      ctx.textBaseline = "bottom";
-      ctx.font = "11px ui-monospace, SFMono-Regular, monospace";
-      ctx.fillStyle = tokens.textDim;
-      ctx.fillText(
+      ecrireADroite(
         libelleLegendeHl(hl.etat, hl.adressesScannees, hl.niveaux.length, cumuls, raisonHl),
-        xRight - 4,
-        yb,
+        tokens.textDim,
       );
       yb -= 14;
     }
@@ -2907,8 +2919,7 @@ export class LiquidationHeatController {
             )
           : 0;
       const ambre = couleurRampeArrets(0.65, tokens.rampeHl);
-      ctx.fillStyle = `rgba(${ambre[0]},${ambre[1]},${ambre[2]},0.95)`;
-      ctx.fillText(
+      ecrireADroite(
         libelleLegendeHlHeat(
           heat.etat,
           heat.instantanes.length,
@@ -2919,8 +2930,7 @@ export class LiquidationHeatController {
           heat.collecte?.actif ?? false,
           heat.collecte?.premierTs ?? null,
         ),
-        xRight - 4,
-        yb,
+        `rgba(${ambre[0]},${ambre[1]},${ambre[2]},0.95)`,
       );
       yb -= 14;
     }
@@ -2953,7 +2963,9 @@ export class LiquidationHeatController {
         if (est !== null) gauche += reel !== null ? " · " : " ";
         const droite = est !== null ? `EST. ${formatUsd(est)}` : "";
         const wGauche = ctx.measureText(gauche).width;
-        const x = xRight - 4 - wGauche - ctx.measureText(droite).width;
+        const wDroite = ctx.measureText(droite).width;
+        const x = xRight - 4 - wGauche - wDroite;
+        fond(x, wGauche + wDroite);
         ctx.fillStyle = tokens.text;
         ctx.fillText(gauche, x, yb);
         if (droite !== "") {
